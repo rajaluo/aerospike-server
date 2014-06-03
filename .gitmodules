@@ -1,0 +1,18 @@
+[submodule "modules/common"]
+	path = modules/common
+	url = git@github.com:citrusleaf/aerospike-common.git
+[submodule "modules/mod-lua"]
+	path = modules/mod-lua
+	url = git@github.com:citrusleaf/aerospike-mod-lua.git
+[submodule "modules/jansson"]
+	path = modules/jansson
+	url = git@github.com:aerospike/jansson.git
+[submodule "modules/asmalloc"]
+	path = modules/asmalloc
+	url = git@github.com:citrusleaf/asmalloc.git
+[submodule "modules/jemalloc"]
+	path = modules/jemalloc
+	url = git@github.com:citrusleaf/jemalloc.git
+[submodule "modules/lua-core"]
+	path = modules/lua-core
+	url = git@github.com:citrusleaf/aerospike-lua-core.git
