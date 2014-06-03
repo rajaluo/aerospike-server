@@ -122,8 +122,8 @@ typedef enum {
  * TODO: Optimize it is a huge structure will cause cache invalidation
  * 320 bytes
  */
-#define SINDEX_BINS_SETUP(skey_bin, size)         \
-	as_sindex_bin skey_bin[(size)];                    \
+#define SINDEX_BINS_SETUP(skey_bin, size)                   \
+	as_sindex_bin skey_bin[(size)];                          \
 	memset (&(skey_bin), 0, sizeof(as_sindex_bin) * (size)); \
 	for (int id = 0; id < (size); id++) skey_bin[id].id = -1; 
 
@@ -137,15 +137,15 @@ typedef enum {
 typedef struct as_sindex_bin_s {
 	uint32_t          id;
 	as_particle_type  type; // this type is citrusleaf type
-	uint32_t          valsz;
+	//uint32_t          valsz;
 	union {
-		char    *str; // sz is strlen
+		//char    *str; // sz is strlen
 		char    *blob;
 		int64_t  i64;
 	} u;
 	cf_digest         digest;
 	byte              flag;
-	char              stackstr[SINDEX_STRONSTACK_VALSZ];
+	//char              stackstr[SINDEX_STRONSTACK_VALSZ];
 } as_sindex_bin;
 
 /* 

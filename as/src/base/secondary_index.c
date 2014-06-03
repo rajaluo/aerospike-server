@@ -506,9 +506,10 @@ as_sindex__skey_from_rd(as_sindex_metadata *imd, as_sindex_key *skey,
 			}
 			// Populate digest value in skey so Aerospike Index B-tree hashing for
 			// string works
-			if (skey->b[i].type == AS_PARTICLE_TYPE_STRING) {
-				cf_digest_compute(skey->b[i].u.str, skey->b[i].valsz, &skey->b[i].digest);
-			}
+            // Digest is computed from as_sindex_sbin_from_bin.
+			//if (skey->b[i].type == AS_PARTICLE_TYPE_STRING) {
+			//	cf_digest_compute(skey->b[i].u.str, skey->b[i].valsz, &skey->b[i].digest);
+			//}
 		} else if (!b) {
 			SITRACE(imd->si, DML, debug, "No bin for %s", imd->bnames[i]);
 			ret = AS_SINDEX_ERR_BIN_NOTFOUND;
@@ -536,11 +537,11 @@ as_sindex__skey_from_sbin(as_sindex_key *skey, int idx, as_sindex_bin *sbin)
 	GTRACE(CALLSTACK, debug, "as_sindex__skey_from_sbin");
 	skey->b[idx].id     = sbin->id;
 	skey->b[idx].type   = sbin->type;
-	skey->b[idx].valsz  = sbin->valsz;
+	//skey->b[idx].valsz  = sbin->valsz;
 	skey->b[idx].u.i64  = sbin->u.i64;
-	skey->b[idx].u.str  = sbin->u.str;
+	//skey->b[idx].u.str  = sbin->u.str;
 	if (sbin->type == AS_PARTICLE_TYPE_STRING) {
-		cf_digest_compute(sbin->u.str, sbin->valsz, &skey->b[idx].digest);
+		memcpy(&skey->b[idx].digest, &sbin->digest, AS_DIGEST_KEY_SZ);
 	}
 	skey->b[idx].flag   = 0;
 	return AS_SINDEX_OK;
@@ -612,13 +613,13 @@ int
 as_sindex__skey_release(as_sindex_key *skey)
 {
 	if (!skey) return AS_SINDEX_ERR_PARAM;
-	else {
+	/*else {
 		for (int i = 0; i < skey->num_binval; i++) {
 			if (skey->b[i].flag & SINDEX_FLAG_BIN_DOFREE) {
 				cf_free(skey->b[i].u.str);
 			}
 		}
-	}
+	}*/
 	return AS_SINDEX_OK;
 }
 
@@ -2112,7 +2113,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 					"Can only handle 8 byte numerics right now %ld", startl);
 				goto Cleanup;
 			}
-			start->valsz  = startl;
+			//start->valsz  = startl;
 			start->u.i64  = __cpu_to_be64(*((uint64_t *)data));
 			data         += sizeof(uint64_t);
 
@@ -2124,7 +2125,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 						"can only handle 8 byte numerics right now %ld", endl);
 				goto Cleanup;
 			}
-			end->valsz  = endl;
+			//end->valsz  = endl;
 			end->u.i64  = __cpu_to_be64(*((uint64_t *)data));
 			data       += sizeof(uint64_t);
 			if (start->u.i64 > end->u.i64) {
@@ -2142,29 +2143,29 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			// get start point
 			uint32_t startl    = ntohl(*((uint32_t *)data));
 			data              += sizeof(uint32_t);
-			start->valsz       = startl;
-			start->u.str       = (char *)data;
+			//start->valsz       = startl;
+			char* start_binval       = (char *)data;
 			data              += startl;
 			srange->isrange    = FALSE;
 
-			if ((start->valsz <= 0) || (start->valsz >= AS_SINDEX_MAX_STRING_KSIZE)) {
-				cf_warning(AS_SINDEX, "Out of bound query key size %ld", start->valsz);
+			if ((startl <= 0) || (startl >= AS_SINDEX_MAX_STRING_KSIZE)) {
+				cf_warning(AS_SINDEX, "Out of bound query key size %ld", startl);
 				goto Cleanup;
 			}
 			// get end point
 			uint32_t endl      = ntohl(*((uint32_t *)data));
 			data              += sizeof(uint32_t);
-			end->valsz         = endl;
-			end->u.str         = (char *)data;
-			if (strncmp(start->u.str, end->u.str, start->valsz)) {
+			//end->valsz         = endl;
+			char * end_binval        = (char *)data;
+			if (strncmp(start_binval, end_binval, startl)) {
 				cf_warning(AS_SINDEX,
                            "Only Equality Query Supported in Strings %s-%s",
-                           start->u.str, end->u.str);
+                           start_binval, end_binval);
 				goto Cleanup;
 			}
-            cf_digest_compute(start->u.str, start->valsz, &(start->digest));
+            cf_digest_compute(start_binval, startl, &(start->digest));
 			GTRACE(QUERY, debug, "Range is equal %s ,%s",
-                               start->u.str, end->u.str);
+                               start_binval, end_binval);
 		} else {
 			cf_warning(AS_SINDEX, "Only handle String and Numeric type");
 			goto Cleanup;
@@ -2222,14 +2223,14 @@ as_sindex_sbin_from_op(as_msg_op *op, as_sindex_bin *sbin, int binid)
 	sbin->flag &= ~SINDEX_FLAG_BIN_ISVALID;
 
 	if (op->particle_type == AS_PARTICLE_TYPE_STRING) {
-		sbin->u.str = (char *)as_msg_op_get_value_p(op);
-		sbin->valsz = as_msg_op_get_value_sz(op);
+		char * binval = (char *)as_msg_op_get_value_p(op);
+		uint32_t valsz = as_msg_op_get_value_sz(op);
 		sbin->flag |= SINDEX_FLAG_BIN_ISVALID;
-		cf_digest_compute(sbin->u.str, sbin->valsz, &sbin->digest);
+		cf_digest_compute(binval, valsz, &sbin->digest);
 	} else if (op->particle_type == AS_PARTICLE_TYPE_INTEGER) {
 		sbin->u.i64 = __cpu_to_be64(
 						*(uint64_t *)as_msg_op_get_value_p(op));
-		sbin->valsz = sizeof(uint64_t);
+		//sbin->valsz = sizeof(uint64_t);
 		sbin->flag |= SINDEX_FLAG_BIN_ISVALID;
 	} else {
 		cf_warning(AS_SINDEX, "Invalid particle type in op");
@@ -2277,21 +2278,22 @@ as_sindex_sbin_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex_
 		sbin->id    = b->id;
 		sbin->type  = as_bin_get_particle_type(b);
 		sbin->flag &= ~SINDEX_FLAG_BIN_ISVALID;
-		as_particle_tobuf(b, 0, &sbin->valsz);
+        uint32_t valsz;
+		as_particle_tobuf(b, 0, &valsz);
 
 		// when copying from record the new copy is made. because
 		// inserts happens after the tree has done the stuff
 		switch(as_bin_get_particle_type(b)) {
 			case AS_PARTICLE_TYPE_INTEGER:  {
 				sbin->flag &= ~SINDEX_FLAG_BIN_DOFREE;
-				as_particle_tobuf(b, (byte *)&sbin->u.i64, &sbin->valsz);
+				as_particle_tobuf(b, (byte *)&sbin->u.i64, &valsz);
 				uint64_t val    = __cpu_to_be64(sbin->u.i64);
 				sbin->u.i64     = val;
 				sbin->flag     |= SINDEX_FLAG_BIN_ISVALID;
 				return AS_SINDEX_OK;
 			}
 			case AS_PARTICLE_TYPE_STRING: {
-				if (sbin->valsz < SINDEX_STRONSTACK_VALSZ) {
+				/*if (sbin->valsz < SINDEX_STRONSTACK_VALSZ) {
 					sbin->u.str       = sbin->stackstr;
 					sbin->stackstr[0] = '\0';
 				}
@@ -2300,9 +2302,12 @@ as_sindex_sbin_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex_
 					sbin->flag   |= SINDEX_FLAG_BIN_DOFREE;
 				}
 				as_particle_tobuf(b, (byte *)sbin->u.str, &sbin->valsz);
-				sbin->u.str[sbin->valsz] = '\0';
+				sbin->u.str[sbin->valsz] = '\0'; */
+               
 				sbin->flag |= SINDEX_FLAG_BIN_ISVALID;
-				cf_digest_compute(sbin->u.str, sbin->valsz, &sbin->digest);
+                byte* bin_val;
+                as_particle_p_get( b, &bin_val, &valsz);
+				cf_digest_compute(bin_val, valsz, &sbin->digest);
 				return AS_SINDEX_OK;
 			}
 			// No index stuff for the non integer non string bins
@@ -2344,10 +2349,10 @@ as_sindex_sbin_free(as_sindex_bin *sbin)
 {
 	if (sbin->flag & SINDEX_FLAG_BIN_ISVALID) {
 		sbin->flag &= ~SINDEX_FLAG_BIN_ISVALID;
-		if (sbin->flag & SINDEX_FLAG_BIN_DOFREE) {
+		/*if (sbin->flag & SINDEX_FLAG_BIN_DOFREE) {
 			cf_free(sbin->u.str);
 			sbin->flag &= ~SINDEX_FLAG_BIN_DOFREE;
-		}
+		}*/
 	}
 	return AS_SINDEX_OK;
 }
@@ -2482,12 +2487,12 @@ as_sindex_sbin_match(as_sindex_bin *b1, as_sindex_bin *b2)
 	if (!b1 || !b2)                                         return false;
 	if (b1->id    != b2->id)                                return false;
 	if (b1->type  != b2->type)                              return false;
-	if (b1->valsz != b1->valsz)                             return false;
+	//if (b1->valsz != b1->valsz)                             return false;
 
 	if ((b1->type == AS_PARTICLE_TYPE_INTEGER)
 			&& (b1->u.i64 != b2->u.i64))                    return false;
 	if ((b1->type == AS_PARTICLE_TYPE_STRING)
-			&& (strncmp(b1->u.str, b2->u.str, b1->valsz)))  return false;
+			&& (memcmp(&b1->digest, &b2->digest, AS_DIGEST_KEY_SZ)))  return false;
 
 	return true;
 }

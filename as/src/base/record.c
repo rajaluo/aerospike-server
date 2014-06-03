@@ -510,13 +510,13 @@ as_record_unpickle_merge(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t s
 	}
 
 	int sindex_ret = AS_SINDEX_OK;
-	SINDEX_BINS_SETUP(newbin, newbins);
 	int newbin_cnt = 0;
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
 
 	if (has_sindex) {
 		SINDEX_GRLOCK();
 	}
+	SINDEX_BINS_SETUP(newbin, (newbins<rd->ns->sindex_cnt) ? newbins : rd->ns->sindex_cnt);
 
 	for (uint16_t i = 0; i < newbins; i++) {
 		if (buf >= buf_lim) {
@@ -614,8 +614,6 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		cf_detail(AS_RECORD, "Oldbin = %d, New Bin %d", old_n_bins, newbins);
 	}
 
-	SINDEX_BINS_SETUP(oldbin, old_n_bins);
-	SINDEX_BINS_SETUP(newbin, newbins);
 	int32_t  delta_bins   = (int32_t)(newbins - rd->n_bins);
 	uint16_t new_size     = (uint16_t)((int32_t)rd->n_bins + delta_bins);
 	bool     has_sindex   = as_sindex_ns_has_sindex(rd->ns);
@@ -628,6 +626,8 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	if (has_sindex) {
 		SINDEX_GRLOCK();
 	}
+	SINDEX_BINS_SETUP(oldbin, (old_n_bins < ns->sindex_cnt) ? old_n_bins : ns->sindex_cnt);
+	SINDEX_BINS_SETUP(newbin, (newbins < ns->sindex_cnt) ? newbins : ns->sindex_cnt);
 
 	if ((delta_bins < 0 ) && has_sindex) {
 		sindex_ret = as_sindex_sbin_from_rd(rd, new_size, old_n_bins, oldbin, &del_success);
@@ -775,7 +775,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 // AS RECORD VINFO
 //
 //
-// This function gets the mask of a particular vinfo from the partition's vinfoset.
+// This function gets the mask of a particular vinfo from the partition's vinfoset
 // Many other functions here are deferred time, this on is in the main data path
 // of every transaction and should be considered carefully.
 //
