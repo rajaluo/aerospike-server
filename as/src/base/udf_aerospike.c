@@ -531,8 +531,6 @@ udf_aerospike__storage_commit(udf_record *urecord)
 	}
 	udf_storage_record_open(urecord);
 
-	// Set updated flag to true
-	urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
 	if (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) {
 		cf_detail(AS_UDF, "Subrecord has updates %d", urecord->flag);
 	}
@@ -670,6 +668,13 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			cf_debug(AS_UDF, "REGULAR as_val_destroy()");
 		}
 	}
+	// Set updated flag to true
+	urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
+
+	// Clean up cache and start from 0 update again. All the changes
+	// made here will if flush from write buffer to storage goes
+	// then will never be backed out.
+	udf_record_cache_free(urecord);
 	return rc;
 
 Rollback:
@@ -704,6 +709,11 @@ Rollback:
 	if (has_sindex) {
 		SINDEX_GUNLOCK();
 	}
+
+	// Clean up cache and start from 0 update again. All the changes
+	// made here will if flush from write buffer to storage goes
+	// then will never be backed out.
+	udf_record_cache_free(urecord);
 	return -1;
 }
 
@@ -759,7 +769,7 @@ udf_aerospike__execute_updates(udf_record * urecord)
 		}
 	}
 
-
+#if 0
 	// Commit to storage if apply was successful if not nothing would
 	// have made it
 	if (!rc) {
@@ -771,11 +781,8 @@ udf_aerospike__execute_updates(udf_record * urecord)
 		// commit to the storage
 		udf_aerospike__storage_commit(urecord);
 	}
+#endif
 
-	// Clean up cache and start from 0 update again. All the changes
-	// made here will if flush from write buffer to storage goes
-	// then will never be backed out.
-	udf_record_cache_free(urecord);
 	return rc;
 }
 
