@@ -91,6 +91,7 @@ typedef struct udf_record_s {
 #define UDF_RECORD_FLAG_STORAGE_OPEN	0x0010
 #define UDF_RECORD_FLAG_HAS_UPDATES		0x0020
 #define UDF_RECORD_FLAG_PREEXISTS		0x0040
+#define UDF_RECORD_FLAG_ISVALID		    0x0080
 
 extern const as_rec_hooks udf_record_hooks;
 
@@ -102,7 +103,6 @@ extern int      udf_record_open         (udf_record *);
 extern int      udf_storage_record_open (udf_record *);
 extern void     udf_record_close        (udf_record *, bool);
 extern int      udf_storage_record_close(udf_record *);
-extern int      udf_storage_record_destroy(udf_record *);
 extern void     udf_record_init         (udf_record *);
 extern void     udf_record_cleanup      (udf_record *, bool);
 extern as_val * udf_record_storage_get  (const udf_record *, const char *);

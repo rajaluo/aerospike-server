@@ -124,7 +124,6 @@ udf_storage_record_open(udf_record *urecord)
  *
  * Callers:
  * 		udf_record_close
- * 		udf_aerospike__storage_commit
  *
  *  Side effect:
  *  	flag will be reset
@@ -182,47 +181,6 @@ udf_storage_record_close(udf_record *urecord)
 }
 
 /*
- * Function: Destroy storage record if it open and also set flags
- *
- * Parameters:
- * 		urec    : UDF record
- *
- * Return value : 0 in case of success
- * 				: 1 if storage record is not open
- *              : -1 if inuse bin is not 0
- *
- * Callers:
- * 		udf_aerospike__storage_commit
- *
- *  Side effect:
- *  	flag will be reset
- *  	bins will be closed
- *  	Reference to record on the storage is lost
- */
-int
-udf_storage_record_destroy(udf_record *urecord)
-{
-	if (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN) {
-		as_index_ref   *r_ref = urecord->r_ref;
-		as_storage_rd  *rd    = urecord->rd;
-		if (r_ref) {
-			if (as_bin_inuse_has(rd)) {
-				return -1;
-			} else {
-				as_storage_record_destroy(rd->ns, r_ref->r);
-				return 0;
-			}
-		} else {
-			return -2;
-			// What to do . should never happen.
-		}
-	} else {
-		return 1;
-	}
-}
-
-
-/*
  * Function: Open storage record for passed in udf record
  *           also set up flag like exists / read et al.
  *           Does as_record_get as well if it is not done yet.
@@ -234,6 +192,7 @@ udf_storage_record_destroy(udf_record *urecord)
  *  	 0 in case record is successfully read
  * 		-1 in case record is not found
  * 		-2 in case record is found but has expired
+ * 		-3 in case of system violation
  *
  * Callers:
  * 		query_agg_istream_read
@@ -243,6 +202,15 @@ int
 udf_record_open(udf_record * urecord)
 {
 	cf_detail_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: Opening record key:");
+	if (!(urecord->flag & UDF_RECORD_FLAG_ISVALID)) {
+		if (!(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD)) {
+			cf_warning(AS_UDF, "Trying to Open Invalid Record ");
+		} else {
+			cf_warning(AS_UDF, "Trying to Open Invalid SubRecord ");
+		}
+		return -3;
+	}
+
 	if (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN) {
 		cf_detail(AS_UDF, "Record already open");
 		return 0;
@@ -354,7 +322,7 @@ udf_record_init(udf_record *urecord)
 	urecord->lrecord            = NULL;
 
 	// Init flag
-	urecord->flag               = 0;
+	urecord->flag               = UDF_RECORD_FLAG_ISVALID;
 	urecord->flag              |= UDF_RECORD_FLAG_ALLOW_UPDATES;
 
 	urecord->pickled_buf        = NULL;

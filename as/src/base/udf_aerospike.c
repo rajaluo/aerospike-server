@@ -45,6 +45,7 @@
 
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/ldt.h"
 #include "base/secondary_index.h"
 #include "base/thr_rw_internal.h"
 #include "base/transaction.h"
@@ -471,75 +472,6 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 
 
 /*
- * Internal function: udf_aerospike_storage_commit
- *
- * Parameters:
- * 		rec -- udf_record to be committed
- *
- * Return value:
- * 		None
- *
- * Description:
- * 		This function first flushes all the commits to the storage
- * 		by call as_storage_record_close and then reopens it for the next
- * 		sets of updates. The generation and ttl and memory accounting is
- * 		done in the later part of the code.
- *
- * 		Special Notes:
- * 		This code incurs 2 I/O cost, so UDF doing frequent updates will be slow
- * 		and the developers should be recommended against it
- *
- * 		Synchronization : object lock acquired by the transaction thread executing UDF.
- * 		Partition reservation takes place just before the transaction starts executing
- * 		( look for as_partition_reserve_udf in thr_tsvc.c )
- *
- * 		Callers:
- * 		udf_aerospike__execute_updates
- * 		In this function, if applying the set of udf updates atomically was successful,
- * 		udf_aerospike__storage_commit is called.
- */
-void
-udf_aerospike__storage_commit(udf_record *urecord)
-{
-	as_transaction 	* tr 	= urecord->tr;
-	as_index_ref   	* r_ref	= urecord->r_ref;
-	as_storage_rd  	* rd	= urecord->rd;
-
-	cf_detail(AS_UDF, "Record successfully updated: starting memory bytes = %d",
-			  urecord->starting_memory_bytes);
-	write_local_post_processing(tr, rd->ns, NULL /*as_partition_reservation*/,
-								NULL /*pickled_buf*/,
-								NULL /*pickled_sz*/,
-								NULL /*pickled_void_time*/,
-								NULL /*p_pickled_rec_props*/,
-								true,
-								NULL /*write_local_generation*/,
-								r_ref->r, rd, urecord->starting_memory_bytes);
-
-	if (as_bin_inuse_has(urecord->rd)) {
-		// Close it so it gets flushed to the storage. Make sure enough
-		// checks are done upfront so if this call succeed, write to
-		// the disk should succeed.
-		udf_storage_record_close(urecord);
-	} else {
-		// if there are no bins then delete record from storage and
-		// open a new one
-		udf_storage_record_destroy(urecord);
-		// open up new storage
-		as_storage_record_create(urecord->tr->rsv.ns, urecord->r_ref->r,
-			urecord->rd, &urecord->tr->keyd);
-	}
-	udf_storage_record_open(urecord);
-
-	if (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) {
-		cf_detail(AS_UDF, "Subrecord has updates %d", urecord->flag);
-	}
-	cf_detail(AS_UDF, "Record successfully updated: ending memory bytes = %d",
-		urecord->starting_memory_bytes);
-	return;
-}
-
-/*
  * Internal function: udf_aerospike__apply_update_atomic
  *
  * Parameters:
@@ -671,6 +603,14 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	// Set updated flag to true
 	urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
 
+	// Commit successful do miscellaneous task
+	// 1. Set the index flags
+		
+	// Before committing to storage set the rec_type_bits ..
+	cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
+		*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
+	as_index_set_flags(rd->r, urecord->ldt_rectype_bits);
+
 	// Clean up cache and start from 0 update again. All the changes
 	// made here will if flush from write buffer to storage goes
 	// then will never be backed out.
@@ -710,10 +650,7 @@ Rollback:
 		SINDEX_GUNLOCK();
 	}
 
-	// Clean up cache and start from 0 update again. All the changes
-	// made here will if flush from write buffer to storage goes
-	// then will never be backed out.
-	udf_record_cache_free(urecord);
+	// Do not clean up the cache in case of failure
 	return -1;
 }
 
@@ -768,21 +705,6 @@ udf_aerospike__execute_updates(udf_record * urecord)
 			as_bin_allocate_bin_space(r_ref->r, rd, delta_bins);
 		}
 	}
-
-#if 0
-	// Commit to storage if apply was successful if not nothing would
-	// have made it
-	if (!rc) {
-		// Before committing to storage set the rec_type_bits ..
-		cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
-				*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
-		as_index_set_flags(r_ref->r, urecord->ldt_rectype_bits);
-
-		// commit to the storage
-		udf_aerospike__storage_commit(urecord);
-	}
-#endif
-
 	return rc;
 }
 
