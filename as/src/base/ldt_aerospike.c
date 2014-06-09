@@ -766,9 +766,9 @@ ldt_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 		cf_debug(AS_LDT, "<%s> ZERO return(%d) from as_aero_rec_update()", meth, ret );
 	} else if (ret == -1) {
 		// execution error return as it is
-		cf_warning(AS_LDT, "<%s> Exec Error(%d) from as_aero_rec_update()", meth, ret );
+		cf_debug(AS_LDT, "<%s> Exec Error(%d) from as_aero_rec_update()", meth, ret );
 	} else if (ret == -2) {
-		cf_warning(AS_LDT, "<%s> WEIRD return(%d) from as_aero_rec_update()", meth, ret );
+		cf_warning(AS_LDT, "<%s> Unexpected return(%d) from as_aero_rec_update()", meth, ret );
 		// Record is not open. Unexpected.  Should not reach here.
 	}
 	return ret;

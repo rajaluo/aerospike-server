@@ -105,7 +105,7 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 
 	if ( !b ) {
 		//Can't get bin
-		cf_warning(AS_UDF, "as_bin_get failed");
+		cf_debug(AS_UDF, "Bin Not found %s", bname);
 		return -1;
 	} else if (blen > (AS_ID_BIN_SZ - 1 ) || !as_bin_name_within_quota(rd->ns, (byte *)bname, blen)) {
 		// Can't read bin
@@ -568,11 +568,9 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 					cf_detail(AS_UDF, "execute update: position %d deletes bin %s", i, k);
 					urecord->updates[i].oldvalue = udf_record_storage_get(urecord, k);
 					urecord->updates[i].washidden = udf_record_bin_ishidden(urecord, k);
-					rc = udf_aerospike_delbin(urecord, k);
-					if (rc) {
-						failindex = i;
-						goto Rollback;
-					}
+					// Only case delete fails if bin is not found that is 
+					// as good as delete. Ignore return code !!
+					udf_aerospike_delbin(urecord, k);
 				}
 				else {
 					// otherwise, it is a set
@@ -690,7 +688,6 @@ udf_aerospike__execute_updates(udf_record * urecord)
 	// fail updates in case update is not allowed. Queries and scans do not
 	// not allow updates. Updates will never be true .. just being paranoid
 	if (!(urecord->flag & UDF_RECORD_FLAG_ALLOW_UPDATES)) {
-		// TODO: set the error message
 		cf_warning(AS_UDF, "Udf: execute updates: allow updates false; FAIL");
 		return -1;
 	}
