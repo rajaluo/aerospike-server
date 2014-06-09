@@ -186,12 +186,12 @@ as_sindex__destroy_fn(void *param)
 }
 
 void
-as_sindex_update_defrag_stat(as_sindex *si, uint32_t r, uint64_t starttime)
+as_sindex_update_defrag_stat(as_sindex *si, uint32_t r, uint64_t start_time_ms)
 {
 	cf_atomic64_add(&si->stats.n_deletes,        r);
 	cf_atomic64_add(&si->stats.n_objects,        -r);
 	cf_atomic64_add(&si->stats.n_defrag_records, r);
-	cf_atomic64_add(&si->stats.defrag_time, cf_getus() - starttime);
+	cf_atomic64_add(&si->stats.defrag_time, cf_getms() - start_time_ms);
 }
 
 /*
@@ -373,24 +373,31 @@ as_sindex__defrag_fn(void *udata)
 			defrag_list.sz      = 0;
 			defrag_list.uselock = false;
 
-			SINDEX_RLOCK(&pimd->slock)
-			s_time_per_iter     = cf_getms();
-			int  ret            = ai_btree_build_defrag_list(si->imd, pimd, &i_col, &n_offset, limit, &processed, &found, &defrag_list);
-			sindex_gc_hist_insert_data_point(AS_SINDEX_GC_PIMD_RLOCK, s_time_per_iter);			
-			SINDEX_UNLOCK(&pimd->slock);
-			int listsize        = defrag_list.sz;
+			int ret = 0;
+			int limit_per_iteration = limit > 100 ? 100 : limit;
+			for (int i=0; i<limit; i+=limit_per_iteration) {
+				SINDEX_RLOCK(&pimd->slock)
+				s_time_per_iter     = cf_getms();
+				ret  = ai_btree_build_defrag_list(si->imd, pimd, &i_col, &n_offset, limit_per_iteration, &processed, &found, &defrag_list);	
+				sindex_gc_hist_insert_data_point(AS_SINDEX_GC_PIMD_RLOCK, s_time_per_iter);
+				SINDEX_UNLOCK(&pimd->slock);
+				if (ret != AS_SINDEX_CONTINUE) {
+					break;
+				}
+			}
 
 			g_config.sindex_gc_list_creation_time    += (cf_getms() - start_time);
 			g_config.sindex_gc_objects_validated     += processed;
 			g_config.sindex_gc_garbage_found         += found;
+			int listsize        = defrag_list.sz;
+
 			// Run Defrag..
 			uint64_t deleted = 0;
 			start_time = cf_getms();
 			if ( (ret != AS_SINDEX_ERR ) && (listsize > 0) ) {
 				ulong    wl_lim     = 10;
-				uint64_t start_time = cf_getus();
+				uint64_t start_time = cf_getms();
 				bool     more       = 1;
-				deleted             = 0;
 				while (more) {
 					SINDEX_WLOCK(&pimd->slock);
 					s_time_per_iter = cf_getms();
