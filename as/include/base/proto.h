@@ -105,7 +105,9 @@ struct as_file_handle_s;
  */
 
 #define PROTO_VERSION					2
+
 #define PROTO_TYPE_INFO					1 // ascii-format message for determining server info
+#define PROTO_TYPE_SECURITY				2
 #define PROTO_TYPE_AS_MSG				3
 #define PROTO_TYPE_AS_MSG_COMPRESSED	4
 #define PROTO_TYPE_MAX					5 // if you see 5, it's illegal

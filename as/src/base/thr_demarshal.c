@@ -592,6 +592,13 @@ thr_demarshal(void *arg)
 						as_proto_swap(&(tr.msgp->proto));
 					}
 
+					// Security protocol transactions.
+					if (tr.msgp->proto.type == PROTO_TYPE_SECURITY) {
+						// TODO - handle security transaction.
+						cf_atomic_int_incr(&g_config.proto_transactions);
+						goto NextEvent;
+					}
+
 					// Fast path for info protocol requests.
 					if ((tr.msgp->proto.type == PROTO_TYPE_INFO) && g_config.info_fastpath_enabled) {
 						cf_debug(AS_DEMARSHAL, "[Sending Info request via fast path.]");
