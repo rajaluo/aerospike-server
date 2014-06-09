@@ -285,6 +285,14 @@ typedef struct as_config_s {
 	cf_atomic_int	sindex_data_memory_used;  // Maximum memory for secondary index trees
 	uint32_t		sindex_populator_scan_priority;
 	cf_atomic_int   sindex_gc_timedout;
+	uint64_t        sindex_gc_inactivity_dur;     // sindex gc thread slept for this much time
+	uint64_t        sindex_gc_activity_dur;       // sindex gc thread worked for this much time
+	uint64_t        sindex_gc_list_creation_time; // sindex gc thread spent this much time on list creation phase
+	uint64_t        sindex_gc_list_deletion_time; // sindex gc thread spent this much time on list deletion phase
+	uint64_t        sindex_gc_garbage_found;      // Amount of garbage found during list creation phase
+	uint64_t        sindex_gc_garbage_cleaned;    // Amount of garbage deleted during list deletion phase
+	uint64_t        sindex_gc_objects_validated;  // sindex gc thread has validated this much objects of sindex tree
+	bool            sindex_gc_enable_histogram;
 
 	cf_atomic64	query_reqs;
 	cf_atomic64	query_fail;

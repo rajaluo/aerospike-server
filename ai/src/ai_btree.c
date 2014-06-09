@@ -37,6 +37,7 @@
 #include "bt_iterator.h"
 #include "bt_output.h"
 #include "find.h"
+#include "base/thr_sindex.h"
 
 #include <citrusleaf/alloc.h>
 #include <citrusleaf/cf_clock.h>
@@ -975,7 +976,7 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, as_sindex_ke
  *
  */
 static long
-build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *acol, bt *nbtr, long nofst, long *limit, cf_ll *apk2d)
+build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *acol, bt *nbtr, long nofst, long *limit, uint64_t * tot_found, cf_ll *apk2d)
 {
 	int error = -1;
 	btEntry *nbe;
@@ -990,11 +991,14 @@ build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *acol, bt *nbtr, long nofst
 	uint64_t stime = cf_getus();
 	long found = 0;
 	long processed = 0;
-
+	uint64_t s_time = 0;
 	while ((nbe = btRangeNext(nbi, 1))) {
 		ai_obj *akey = nbe->key;
 		// STEP 2: if this PK is to be deleted then add it to PKtoDeleteList
+		s_time = cf_getms();
 		int ret = as_sindex_can_defrag_record(ns, (cf_digest *) (&akey->y));
+		sindex_gc_hist_insert_data_point(AS_SINDEX_GC_VALIDATE_OBJ, s_time);
+
 		if (ret == AS_SINDEX_GC_SKIP_ITERATION) {
 			*limit = 0;
 			break;
@@ -1020,20 +1024,23 @@ build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *acol, bt *nbtr, long nofst
 	}
 	btReleaseRangeIterator(nbi);
 	cf_detail(AS_SINDEX, "Total lookup %ld found %ld time %d microseconds", processed, found, cf_getus() - stime);
-
+	*tot_found += found; 
 	return processed;
 }
 
 static long
-build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr, long nofst, long *limit, cf_ll *apk2d)
+build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr, long nofst, long *limit, uint64_t * tot_found, cf_ll *apk2d)
 {
 	int error = -1;
 	long found = 0;
 	long processed = 0;
 	uint64_t stime = cf_getus();
-
+	uint64_t s_time = 0;
 	for (int i = nofst; i < arr->used; i++) {
+		s_time = cf_getms();
 		int ret = as_sindex_can_defrag_record(ns, (cf_digest *) &arr->data[i * CF_DIGEST_KEY_SZ]);
+		sindex_gc_hist_insert_data_point(AS_SINDEX_GC_VALIDATE_OBJ, s_time);
+
 		if (ret == AS_SINDEX_GC_SKIP_ITERATION) {
 			*limit = 0;
 			break;
@@ -1058,7 +1065,7 @@ build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr, long nof
 		}
 	}
 	cf_detail(AS_SINDEX, "Total lookup %ld found %ld time %d microseconds", processed, found, cf_getus() - stime);
-
+	*tot_found += found; 
 	return processed;
 }
 
@@ -1075,7 +1082,7 @@ build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr, long nof
  */
 int
 ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, ai_obj *icol,
-						   long *nofst, long limit, cf_ll *apk2d)
+						   long *nofst, long limit, uint64_t * tot_processed, uint64_t * tot_found, cf_ll *apk2d)
 {
 	int ret = AS_SINDEX_ERR;
 
@@ -1122,9 +1129,9 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, a
 			break;
 		}
 		if (anbtr->is_btree) {
-			processed = build_defrag_list_from_nbtr(ns, acol, anbtr->u.nbtr, *nofst, &limit, apk2d);
+			processed = build_defrag_list_from_nbtr(ns, acol, anbtr->u.nbtr, *nofst, &limit, tot_found, apk2d);
 		} else {
-			processed = build_defrag_list_from_arr(ns, acol, anbtr->u.arr, *nofst, &limit, apk2d);
+			processed = build_defrag_list_from_arr(ns, acol, anbtr->u.arr, *nofst, &limit, tot_found, apk2d);
 		}
 
 		if (processed < 0) {    // error .. abort everything.
@@ -1132,6 +1139,7 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, a
 			ret = AS_SINDEX_ERR;
 			break;
 		}
+		*tot_processed += processed;
 		// This tree may have some more digest to defrag
 		if (limit == 0) {
 			*nofst = *nofst + processed;
@@ -1169,13 +1177,17 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 	as_namespace *ns = imd->si->ns;
 	// STEP 3: go thru the PKtoDeleteList and delete the keys
 	ulong bb = pimd->ibtr->msize + pimd->ibtr->nsize;
+	uint64_t s_time = 0;
 	while (apk2d->sz) {
 		ll_ai_obj_dig_element * node = (ll_ai_obj_dig_element * )apk2d->head;
 		ai_obj_digest_t *a           = node->a;
 
 		// check before deleting. The digest may re-appear after the list
 		// creation and before deletion from the secondary index
+		s_time = cf_getms();
 		int ret = as_sindex_can_defrag_record(ns, &a->dig);
+		sindex_gc_hist_insert_data_point(AS_SINDEX_GC_VALIDATE_OBJ, s_time);
+
 		if (ret == AS_SINDEX_GC_SKIP_ITERATION) {
 			break;
 		} else if (ret == AS_SINDEX_GC_OK) {
@@ -1185,9 +1197,11 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 
 			cf_detail(AS_SINDEX, "Defragged %lu %ld", acol->l, *((uint64_t *)&apk.y));
 
+			s_time = cf_getms();
 			if (reduced_iRem(pimd->ibtr, acol, &apk) == AS_SINDEX_OK) {
 				success++;
 			}
+			sindex_gc_hist_insert_data_point(AS_SINDEX_GC_DELETE_OBJ, s_time);
 		}
 
 		cf_ll_delete(apk2d, (cf_ll_element*)node);
@@ -1198,7 +1212,7 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 	}
 	ulong ab = pimd->ibtr->msize + pimd->ibtr->nsize;
 	as_sindex_release_data_memory(imd, (bb - ab));
-	*deleted = success;
+	*deleted += success;
 	return apk2d->sz ? true : false;
 }
 

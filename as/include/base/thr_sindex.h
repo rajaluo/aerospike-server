@@ -30,6 +30,16 @@
 #include <stdbool.h>
 
 #include "queue.h"
+#include "ai_obj.h"
+#include "hist.h"
+
+typedef enum {
+	AS_SINDEX_GC_VALIDATE_OBJ = 1,
+	AS_SINDEX_GC_DELETE_OBJ   = 2,
+	AS_SINDEX_GC_PIMD_RLOCK   = 3,
+	AS_SINDEX_GC_PIMD_WLOCK   = 4 
+} sindex_gc_hist;
+
 
 extern pthread_rwlock_t sindex_rwlock;
 extern cf_queue *g_sindex_populate_q;
@@ -37,4 +47,6 @@ extern cf_queue *g_sindex_destroy_q;
 extern cf_queue *g_sindex_populateall_done_q;
 extern bool      g_sindex_boot_done;
 
-int as_sindex_thr_init();
+void as_sindex_thr_init();
+void as_sindex_gc_histogram_dumpall();
+void sindex_gc_hist_insert_data_point(sindex_gc_hist hist, uint64_t start_time);
