@@ -131,7 +131,6 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 			}
 		}
 		as_bin_destroy(rd, i);
-		rd->write_to_device = true;
 	} else {
 		cf_warning(AS_UDF, "deleting non-existing bin %s ignored", bname);
 	}
@@ -433,8 +432,6 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 		return ret;
 	}
 
-	rd->write_to_device = true;
-
 	// Update sindex if required
 	if (has_sindex) {
 		if (as_sindex_sbin_from_bin(rd->ns,
@@ -470,6 +467,27 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 	return ret;
 } // end udf_aerospike_setbin()
 
+/*
+ * Check and validate parameter before performing operation
+ *
+ * return:
+ *      UDF_ERR * in case of failure
+ *      0 in case of success
+ */
+static int
+udf_aerospike_param_check(const as_aerospike *as, const as_rec *rec, char *fname, int lineno)
+{
+	if (!as) {
+		cf_debug(AS_UDF, "Invalid Paramters: aerospike=%p", as);
+		return UDF_ERR_INTERNAL_PARAMETER;
+	}
+
+	int ret = udf_record_param_check(rec, UDF_BIN_NONAME, fname, lineno);
+	if (ret) {
+		return ret;
+	}
+	return 0;
+}
 
 /*
  * Internal function: udf_aerospike__apply_update_atomic
@@ -598,12 +616,13 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			cf_debug(AS_UDF, "REGULAR as_val_destroy()");
 		}
 	}
+	// Commit successful do miscellaneous task
 	// Set updated flag to true
 	urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
 
-	// Commit successful do miscellaneous task
-	// 1. Set the index flags
-		
+	// Set up record to be flushed to storage
+	urecord->rd->write_to_device = true;
+
 	// Before committing to storage set the rec_type_bits ..
 	cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
 		*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
@@ -760,15 +779,12 @@ udf_aerospike_get_current_time(const as_aerospike * as)
 static int
 udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 {
-	if (!as || !rec) {
-		cf_warning(AS_UDF, " Invalid Paramters: as=%p, record=%p", as, rec);
-		return 2;
+	int ret = udf_aerospike_param_check(as, rec, __FILE__, __LINE__);
+	if (ret) {
+		return ret;
 	}
 
 	udf_record * urecord  = (udf_record *) as_rec_source(rec);
-	if (!urecord) {
-		return 2;
-	}
 
 	// make sure record isn't already successfully read
 	if (urecord->flag & UDF_RECORD_FLAG_OPEN) {
@@ -878,9 +894,9 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 static int
 udf_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 {
-	if (!as || !rec) {
-		cf_warning(AS_UDF, "Invalid Paramters: as=%p, record=%p", as, rec);
-		return 2;
+	int ret = udf_aerospike_param_check(as, rec, __FILE__, __LINE__);
+	if (ret) {
+		return ret;
 	}
 
 	udf_record * urecord = (udf_record *) as_rec_source(rec);
@@ -910,9 +926,9 @@ udf_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 static int
 udf_aerospike_rec_exists(const as_aerospike * as, const as_rec * rec)
 {
-	if (!as || !rec) {
-		cf_warning(AS_UDF, "Invalid Paramters: as=%p, record=%p", as, rec);
-		return 2;
+	int ret = udf_aerospike_param_check(as, rec, __FILE__, __LINE__);
+	if (ret) {
+		return ret;
 	}
 
 	udf_record * urecord = (udf_record *) as_rec_source(rec);
@@ -936,9 +952,9 @@ udf_aerospike_rec_exists(const as_aerospike * as, const as_rec * rec)
 static int
 udf_aerospike_rec_remove(const as_aerospike * as, const as_rec * rec)
 {
-	if (!as || !rec) {
-		cf_warning(AS_UDF, "Invalid Paramters: as=%p, record=%p", as, rec);
-		return 2;
+	int ret = udf_aerospike_param_check(as, rec, __FILE__, __LINE__);
+	if (ret) {
+		return ret;
 	}
 	udf_record * urecord = (udf_record *) as_rec_source(rec);
 
