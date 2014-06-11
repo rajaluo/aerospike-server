@@ -40,7 +40,6 @@ typedef enum {
 	AS_SINDEX_GC_PIMD_WLOCK   = 4 
 } sindex_gc_hist;
 
-
 extern pthread_rwlock_t sindex_rwlock;
 extern cf_queue *g_sindex_populate_q;
 extern cf_queue *g_sindex_destroy_q;

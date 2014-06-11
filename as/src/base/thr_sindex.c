@@ -369,7 +369,7 @@ as_sindex__defrag_fn(void *udata)
 			// Create Defrag List
 			start_time         = cf_getms();
 			cf_ll defrag_list;
-			cf_ll_init(&defrag_list, &ll_ai_obj_dig_destroy_fn, false);
+			cf_ll_init(&defrag_list, &ll_sindex_gc_destroy_fn, false);
 			defrag_list.sz      = 0;
 			defrag_list.uselock = false;
 
@@ -410,7 +410,7 @@ as_sindex__defrag_fn(void *udata)
 			}
 
 			// Release list
-			cf_ll_reduce(&defrag_list, true /*forward*/, ll_ai_obj_dig_reduce_fn, NULL);
+			cf_ll_reduce(&defrag_list, true /*forward*/, ll_sindex_gc_reduce_fn, NULL);
 			if ((ret == AS_SINDEX_DONE) || (ret == AS_SINDEX_ERR)) {
 				RELEASE_ITERATORS(icol)
 				p_index++;
