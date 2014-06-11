@@ -100,6 +100,9 @@ udf_storage_record_open(udf_record *urecord)
 	if (tr->rsv.ns->storage_data_in_memory) {
 		urecord->starting_memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 	}
+
+	as_storage_record_get_key(rd);
+
 	urecord->flag   |= UDF_RECORD_FLAG_STORAGE_OPEN;
 
 	urecord->ldt_rectype_bits = as_ldt_record_get_rectype_bits(r);
@@ -135,11 +138,6 @@ udf_storage_record_close(udf_record *urecord)
 	if (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN) {
 		as_index_ref   *r_ref = urecord->r_ref;
 		as_storage_rd  *rd    = urecord->rd;
-
-		// TODO - would be nice to not do any rec_props preparation if we only
-		// opened for read, but because of sizing for stack allocation we must.
-		// However, it appears that ALLOW_UPDATES is always set.
-		as_storage_record_get_key(rd);
 
 		// In case allow update is not set .. the record has been opened for
 		// the aggregation. Do not do any rec property update.

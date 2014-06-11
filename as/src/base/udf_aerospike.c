@@ -851,6 +851,13 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	rd->bins       = as_bin_get_all(r, rd, urecord->stack_bins);
 	urecord->flag |= UDF_RECORD_FLAG_STORAGE_OPEN;
 
+	// If the message has a key, apply it to the record.
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_KEY);
+	if (f) {
+		rd->key_size = as_msg_field_get_value_sz(f);
+		rd->key = f->data;
+	}
+
 	cf_detail(AS_UDF, "Storage Open %p %x %"PRIx64"", urecord, urecord->flag, *(uint64_t *)&tr->keyd);
 	cf_detail(AS_UDF, "udf_aerospike_rec_create: Record created %d", urecord->flag);
 
