@@ -44,6 +44,7 @@
 #include "base/cfg.h"
 #include "base/packet_compression.h"
 #include "base/proto.h"
+#include "base/security.h"
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
@@ -331,6 +332,7 @@ thr_demarshal(void *arg)
 				fd_h->proto = 0;
 				fd_h->proto_unread = 0;
 				fd_h->fh_info = 0;
+				fd_h->security_filter = as_security_filter_create();
 
 				// Insert into the global table so the reaper can manage it. Do
 				// this before queueing it up for demarshal threads - once
@@ -594,7 +596,7 @@ thr_demarshal(void *arg)
 
 					// Security protocol transactions.
 					if (tr.msgp->proto.type == PROTO_TYPE_SECURITY) {
-						// TODO - handle security transaction.
+						as_security_transact(&tr);
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
 					}

@@ -69,6 +69,27 @@ struct as_file_handle_s;
 #define AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD 18
 #define AS_PROTO_RESULT_FAIL_KEY_MISMATCH 19
 
+// Security result codes. Must be <= 255, to fit in one byte. Defined here to
+// ensure no overlap with other result codes.
+#define AS_SEC_RESULT_OK_MORE			50	// OK, but not the last message
+	// Security message errors.
+#define AS_SEC_ERR_NOT_SUPPORTED		51	// security features not supported
+#define AS_SEC_ERR_SCHEME				52	// security scheme not supported
+#define AS_SEC_ERR_COMMAND				53	// unrecognized command
+#define AS_SEC_ERR_FIELD				54	// can't parse field
+#define AS_SEC_ERR_STATE				55	// e.g. unexpected command
+	// Security procedure errors.
+#define AS_SEC_ERR_USER					60	// no user or unknown user
+#define AS_SEC_ERR_USER_EXISTS			61	// user already exists
+#define AS_SEC_ERR_PASSWORD				62	// no password or bad password
+#define AS_SEC_ERR_CREDENTIAL			63	// no credential or bad credential
+	// ... room for more ...
+#define AS_SEC_ERR_ROLE					70	// no role(s) or unknown role(s)
+#define AS_SEC_ERR_PRIVILEGE			71	// no privileges or unknown privileges
+	// Permission errors.
+#define AS_SEC_ERR_NOT_AUTHENTICATED	80	// socket not authenticated
+#define AS_SEC_ERR_VIOLATION			81	// role/privilege violation
+
 #define AS_PROTO_RESULT_FAIL_UDF_EXECUTION     100
 
 // Secondary Index Query Failure Codes 200 - 230
