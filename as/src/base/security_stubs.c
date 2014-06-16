@@ -1,7 +1,7 @@
 /*
  * security_stubs.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2014 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -42,9 +42,15 @@
 // Public API.
 //
 
+// Security is an enterprise feature - here, do nothing.
+void
+as_security_init()
+{
+}
+
 // Security is an enterprise feature - here, allow all operations.
 uint8_t
-as_security_allowed(as_sec_priv operation, const as_file_handle* fd_h)
+as_security_check(as_sec_priv operation, const as_file_handle* fd_h)
 {
 	return AS_PROTO_RESULT_OK;
 }

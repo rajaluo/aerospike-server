@@ -1,7 +1,7 @@
 /*
  * security.h
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2014 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -32,7 +32,7 @@
 
 // Security privileges.
 typedef enum {
-	// Data operations.
+	// Data transactions.
 	PRIV_READ			= 0x0001,
 	PRIV_SCAN			= 0x0002,
 	PRIV_QUERY			= 0x0004,
@@ -40,17 +40,20 @@ typedef enum {
 	PRIV_UDF_APPLY		= 0x0010,
 	PRIV_UDF_SCAN		= 0x0020,
 	PRIV_UDF_QUERY		= 0x0040,
-	PRIV_INDEX_MANAGE	= 0x0080,
-	PRIV_UDF_MANAGE		= 0x0100,
-	// ... 7 unused bits ...
+	// ... 9 unused bits ...
 
-	// Deployment management operations.
-	PRIV_GET_STATS		= 0x00010000,
-	PRIV_GET_CONFIG		= 0x00020000,
-	PRIV_SET_CONFIG		= 0x00040000,
+	// Data transactions' system metadata management.
+	PRIV_INDEX_MANAGE	= 0x00010000,
+	PRIV_UDF_MANAGE		= 0x00020000,
+	// ... 6 unused bits ...
+
+	// Deployment operations management.
+	PRIV_SET_CONFIG		= 0x01000000,
+	PRIV_LOGGING_CTRL	= 0x02000000,
+	PRIV_SERVICE_CTRL	= 0x04000000,
 
 	// Database users and permissions management.
-	PRIV_USER_ADMIN		= 0x10000000
+	PRIV_USER_ADMIN		= 0x100000000000
 } as_sec_priv;
 
 // Current security message version.
@@ -73,7 +76,8 @@ typedef struct as_sec_msg_s {
 // Public API.
 //
 
-uint8_t as_security_allowed(as_sec_priv operation, const as_file_handle* fd_h);
+void as_security_init();
+uint8_t as_security_check(as_sec_priv operation, const as_file_handle* fd_h);
 void* as_security_filter_create();
 void as_security_filter_destroy(void* pv_filter);
 void as_security_refresh(as_file_handle* fd_h);
