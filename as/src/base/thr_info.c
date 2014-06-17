@@ -3672,6 +3672,18 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 // and sends a reply
 //
 
+// Error strings for security check results.
+static const char*
+sec_err_str(uint8_t result) {
+	switch (result) {
+	case AS_SEC_ERR_NOT_AUTHENTICATED:
+		return "security error - not authenticated";
+	case AS_SEC_ERR_VIOLATION:
+		return "security error - role violation";
+	default:
+		return "unexpected security error";
+	}
+}
 
 static pthread_mutex_t		g_info_lock = PTHREAD_MUTEX_INITIALIZER;
 info_static		*static_head = 0;
@@ -3685,8 +3697,16 @@ info_command	*command_head = 0;
 //
 
 int
-info_all(cf_dyn_buf *db)
+info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 {
+	uint8_t auth_result = as_security_check(PRIV_NONE, fd_h);
+
+	if (auth_result != AS_PROTO_RESULT_OK) {
+		cf_dyn_buf_append_string(db, sec_err_str(auth_result));
+		cf_dyn_buf_append_char(db, EOL);
+		return 0;
+	}
+
 	info_static *s = static_head;
 	while (s) {
 		if (s->def == true) {
@@ -3712,19 +3732,6 @@ info_all(cf_dyn_buf *db)
 	return(0);
 }
 
-// Only bother with the security check results.
-static const char*
-sec_err_str(uint8_t result) {
-	switch (result) {
-	case AS_SEC_ERR_NOT_AUTHENTICATED:
-		return "security error - not authenticated";
-	case AS_SEC_ERR_VIOLATION:
-		return "security error - role violation";
-	default:
-		return "unexpected security error";
-	}
-}
-
 //
 // Parse the input buffer. It contains a list of keys that should be spit back.
 // Do the parse, call the necessary function collecting the information in question
@@ -3733,6 +3740,14 @@ sec_err_str(uint8_t result) {
 int
 info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 {
+	uint8_t auth_result = as_security_check(PRIV_NONE, fd_h);
+
+	if (auth_result != AS_PROTO_RESULT_OK) {
+		cf_dyn_buf_append_string(db, sec_err_str(auth_result));
+		cf_dyn_buf_append_char(db, EOL);
+		return 0;
+	}
+
 	// For each incoming name
 	char	*c = buf;
 	char	*tok = c;
@@ -3751,16 +3766,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 					// return exact command string received from client
 					cf_dyn_buf_append_string( db, name);
 					cf_dyn_buf_append_char( db, SEP );
-
-					uint8_t result = as_security_check(PRIV_NONE, fd_h);
-
-					if (result == AS_PROTO_RESULT_OK) {
-						cf_dyn_buf_append_buf( db, (uint8_t *) s->value, s->value_sz);
-					}
-					else {
-						cf_dyn_buf_append_string(db, sec_err_str(result));
-					}
-
+					cf_dyn_buf_append_buf( db, (uint8_t *) s->value, s->value_sz);
 					cf_dyn_buf_append_char( db, EOL );
 					handled = true;
 					break;
@@ -3776,16 +3782,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 						// return exact command string received from client
 						cf_dyn_buf_append_string( db, d->name);
 						cf_dyn_buf_append_char(db, SEP );
-
-						uint8_t result = as_security_check(PRIV_NONE, fd_h);
-
-						if (result == AS_PROTO_RESULT_OK) {
-							d->value_fn(d->name, db);
-						}
-						else {
-							cf_dyn_buf_append_string(db, sec_err_str(result));
-						}
-
+						d->value_fn(d->name, db);
 						cf_dyn_buf_append_char(db, EOL);
 						handled = true;
 						break;
@@ -3811,16 +3808,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 							cf_dyn_buf_append_char( db, TREE_SEP);
 							cf_dyn_buf_append_string( db, branch);
 							cf_dyn_buf_append_char(db, SEP );
-
-							uint8_t result = as_security_check(PRIV_NONE, fd_h);
-
-							if (result == AS_PROTO_RESULT_OK) {
-								t->tree_fn(t->name, branch, db);
-							}
-							else {
-								cf_dyn_buf_append_string(db, sec_err_str(result));
-							}
-
+							t->tree_fn(t->name, branch, db);
 							cf_dyn_buf_append_char(db, EOL);
 							handled = true;
 							break;
@@ -3867,8 +3855,10 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 				}
 				cmd = cmd->next;
 			}
-			if (!cmd)
+
+			if (!cmd) {
 				cf_info(AS_INFO, "received command %s, not registered", name);
+			}
 
 			tok = c + 1;
 		}
@@ -3889,7 +3879,7 @@ as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp)
 
 	// Either we'e doing all, or doing some
 	if (req_buf_len == 0) {
-		info_all( rsp );
+		info_all(NULL, rsp);
 	}
 	else {
 		info_some((char *)req_buf, (char *)(req_buf + req_buf_len), NULL, rsp);
@@ -3936,7 +3926,7 @@ thr_info_fn(void *gcc_is_ass)
 
 		// Either we'e doing all, or doing some
 		if (pr->sz == 0) {
-			info_all( &db );
+			info_all(tr->proto_fd_h, &db);
 		}
 		else {
 			info_some((char *)pr->data, (char *)pr->data + pr->sz, tr->proto_fd_h, &db);
