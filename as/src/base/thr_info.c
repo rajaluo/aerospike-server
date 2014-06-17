@@ -3733,13 +3733,6 @@ sec_err_str(uint8_t result) {
 int
 info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 {
-	if (! fd_h) {
-		// For now, this just means it's a telnet connection.
-		cf_dyn_buf_append_string(db, sec_err_str(AS_SEC_ERR_NOT_AUTHENTICATED));
-		cf_dyn_buf_append_char(db, EOL);
-		return 0;
-	}
-
 	// For each incoming name
 	char	*c = buf;
 	char	*tok = c;
