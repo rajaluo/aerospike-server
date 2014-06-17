@@ -39,6 +39,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
+#include "base/security.h"
 #include "base/thr_batch.h"
 #include "base/thr_info.h"
 #include "base/thr_proxy.h"
@@ -289,6 +290,24 @@ transaction_check_msg(as_transaction *tr)
 }
 
 
+static inline bool
+security_check(uint64_t check_privs, as_transaction *tr)
+{
+	uint8_t result = as_security_check(check_privs, tr->proto_fd_h);
+
+	if (result != AS_PROTO_RESULT_OK) {
+		as_msg_send_error(tr->proto_fd_h, (uint32_t)result);
+		tr->proto_fd_h = 0;
+		MICROBENCHMARK_HIST_INSERT_P(error_hist);
+		// TODO - error statistics.
+
+		return false;
+	}
+
+	return true;
+}
+
+
 // Handle the transaction, including proxy to another node if necessary.
 void
 process_transaction(as_transaction *tr)
@@ -341,6 +360,11 @@ process_transaction(as_transaction *tr)
 		goto Cleanup;
 	}
 
+	// First, check that the socket is authenticated.
+	if (tr->proto_fd_h && ! security_check(PRIV_NONE, tr)) {
+		goto Cleanup;
+	}
+
 	// If this key digest hasn't been computed yet, prepare the transaction -
 	// side effect, swaps the bytes (cases where transaction is requeued, the
 	// transation may have already been preprocessed...) If the message hasn't
@@ -350,7 +374,7 @@ process_transaction(as_transaction *tr)
 			// transaction_prepare() return values:
 			// 0:  OK
 			// -1: General error.
-			// -2: Request received with no key (scan).
+			// -2: Request received with no key (scan or query).
 			// -3: Request received with digest array (batch).
 			if (rv == -2) {
 				// Has no key or digest, which means it's a either table scan or
