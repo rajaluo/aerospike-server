@@ -50,7 +50,7 @@ as_security_init()
 
 // Security is an enterprise feature - here, allow all operations.
 uint8_t
-as_security_check(as_sec_priv operation, const as_file_handle* fd_h)
+as_security_check(uint64_t check_privs, const as_file_handle* fd_h)
 {
 	return AS_PROTO_RESULT_OK;
 }

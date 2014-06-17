@@ -32,6 +32,8 @@
 
 // Security privileges.
 typedef enum {
+	PRIV_NONE			= 0,
+
 	// Data transactions.
 	PRIV_READ			= 0x0001,
 	PRIV_SCAN			= 0x0002,
@@ -77,7 +79,7 @@ typedef struct as_sec_msg_s {
 //
 
 void as_security_init();
-uint8_t as_security_check(as_sec_priv operation, const as_file_handle* fd_h);
+uint8_t as_security_check(uint64_t check_privs, const as_file_handle* fd_h);
 void* as_security_filter_create();
 void as_security_filter_destroy(void* pv_filter);
 void as_security_refresh(as_file_handle* fd_h);
