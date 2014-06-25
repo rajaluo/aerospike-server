@@ -438,7 +438,14 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op)
 	// TODO: optimize not to allocate buffer if it is single
 	// node cluster. No remote to send data to
 	if (urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) {
-		*urecord_op  = UDF_OPTYPE_WRITE;
+        // The delete can happen after an aerospike:update
+        // or aerospike:create in a single lua function invocation.
+        // In that case, it's effectively a NO_OP in the master
+        if (!(urecord->flag & UDF_RECORD_FLAG_OPEN)){
+            *urecord_op  = UDF_OPTYPE_NONE;
+        } else {
+            *urecord_op  = UDF_OPTYPE_WRITE;
+        }
 	} else if ((urecord->flag & UDF_RECORD_FLAG_PREEXISTS)
 			   && !(urecord->flag & UDF_RECORD_FLAG_OPEN)) {
 		*urecord_op  = UDF_OPTYPE_DELETE;
