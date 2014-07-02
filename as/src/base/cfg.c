@@ -1006,7 +1006,7 @@ cfg_find_tok(const char* tok, const cfg_opt opts[], int num_opts)
 }
 
 xdr_cfg_case_id
-xdr_cfg_find_tok(const char* tok, const xdr_cfg_opt opts[], int num_opts)
+as_xdr_cfg_find_tok(const char* tok, const xdr_cfg_opt opts[], int num_opts)
 {
 	for (int i = 0; i < num_opts; i++) {
 		if (strcmp(tok, opts[i].tok) == 0) {
@@ -2491,7 +2491,7 @@ as_config_init(const char *config_file)
 		// Parse xdr context items.
 		//
 		case XDR:
-			switch(xdr_cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
+			switch(as_xdr_cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
 			case XDR_CASE_ENABLE_XDR:
 				c->xdr_cfg.xdr_global_enabled = cfg_bool(&line);
 				if (c->xdr_cfg.xdr_global_enabled && ! c->xdr_cfg.xdr_supported) {
@@ -2535,7 +2535,7 @@ as_config_init(const char *config_file)
 			// This is a hack to avoid defining a new array for the datacenter
 			// subsection. The server is not interested in the details. It just
 			// wants the subsection to end. So just check for the closing brace.
-			switch(xdr_cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
+			switch(as_xdr_cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
 			case XDR_CASE_CONTEXT_END:
 				cfg_end_context(&state);
 				break;

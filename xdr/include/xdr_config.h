@@ -102,8 +102,9 @@ typedef enum {
 	XDR_CASE_DC_INT_EXT_IPMAP,
 	XDR_CASE_XDR_INFO_TIMEOUT,
 	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
-	XDR_CASE_XDR_SHIP_DELAY
-
+	XDR_CASE_XDR_SHIP_DELAY,
+	XDR_CASE_XDR_SHIP_THREADS,
+	XDR_CASE_XDR_SHIP_SLAB_SIZE
 } xdr_cfg_case_id;
 
 /* Configuration parser token plus case-identifier pair. The server (cfg.c)
@@ -139,10 +140,12 @@ typedef struct xdr_lastship_s {
 	uint64_t	time[DC_MAX_NUM];
 } xdr_lastship_s;
 
+// Reply from server for xdr read request.
 typedef enum {
-	XDR_MODE_BATCH_GET = 0,
-	XDR_MODE_SINGLE_RECORD_GET = 1
-} xdr_mode;
+	XDR_READ_OK = 0,
+	XDR_READ_FORWARD = 1,
+	XDR_READ_ERROR = 2
+} xdr_read_rv;
 
 // Config option in case the configuration value is changed
 typedef struct xdr_new_config_s {
@@ -150,8 +153,9 @@ typedef struct xdr_new_config_s {
 	int		xdr_max_recs_inflight;
 	int		xdr_read_batch_size;
 	int		xdr_threads;
-	xdr_mode 	xdr_read_mode;
-	int     	xdr_read_threads;	// configured number of threads
+	int     	xdr_read_threads;   // Configured number of threads
+	int		xdr_ship_threads;   // Coinfigured number of shipper threads·
+	int		xdr_ship_slab_size; // Coinfigured size of shipper thread slab size·
 } xdr_new_config;
 
 //Config option which is maintained both by the server and the XDR module
@@ -180,6 +184,8 @@ typedef struct xdr_config {
 	int	xdr_write_batch_size;
 	int	xdr_max_recs_inflight;
 	int	xdr_read_batch_size;
+	int	xdr_ship_slab_size;     // Maximum number of records, on receival of which, xdr start shipping.
+	int	xdr_ship_threads;       // Number threads which will read from server and ship records.
 	int	xdr_timeout;
 	int	xdr_nw_timeout;
 	int	xdr_threads;

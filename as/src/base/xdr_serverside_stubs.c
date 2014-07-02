@@ -68,3 +68,28 @@ void xdr_clmap_update(int changetype, cf_node succession[], int listsize)
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, bool is_delete, uint16_t set_id)
 {
 }
+
+int as_xdr_start(const char *config_file, bool isresume, bool isfailover)
+{
+	return -1;
+}
+
+int as_xdr_stop()
+{
+	return -1;
+}
+
+int xdr_send_disabled()
+{
+	return -1;
+}
+
+int as_open_namedpipe()
+{
+	return -1;
+}
+
+int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr)
+{
+	return 0;
+}

@@ -84,6 +84,9 @@
 #define STR_ITYPE_OBJECT   "object"
 #define STR_BINTYPE        "bintype"
 
+// Configuration file name
+extern char *g_config_file;
+
 extern int as_nsup_queue_get_size();
 
 // Use the following macro to enforce locking around Info requests at run-time.
@@ -3231,46 +3234,50 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		context_len = sizeof(context);
 		if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-
-				// If this is for a fresh start, we better close the existing pipe
-				// and reopen as it can be in a broken state.
+				// Read input values.
+				bool isresume = false;
+				bool isfailover = false;
+				#define LEN_TEMP_CONFIG_FILE 256
+				char temp_config_file[LEN_TEMP_CONFIG_FILE] = {'\0'};
+				int len_temp_config_file = LEN_TEMP_CONFIG_FILE;
+				if (0 == as_info_parameter_get(params, "config-file", temp_config_file, &len_temp_config_file)) {
+					cf_detail(AS_INFO, "Configuration file : %s", temp_config_file);
+				}
 				context_len = sizeof(context);
-				if (0 == as_info_parameter_get(params, "freshstart", context, &context_len)) {
-					cf_info(AS_INFO, "Closing the digest pipe for a fresh start");
-					close(g_config.xdr_cfg.xdr_digestpipe_fd);
-					g_config.xdr_cfg.xdr_digestpipe_fd = -1;
-				}
-
-				// Create the named pipe if it is not already open
-				// Note below that we do not close named pipe when xdr is disabled.
-				if (g_config.xdr_cfg.xdr_digestpipe_fd == -1) {
-
-					if (xdr_create_named_pipe(&(g_config.xdr_cfg)) != 0) {
-						goto Error;
-					}
-
-					// We need to send the namespace info
-					if (xdr_send_nsinfo() != 0) {
-						goto Error;
-					}
-
-					if (xdr_send_nodemap() != 0) {
-						goto Error;
+				if (0 == as_info_parameter_get(params, "resume", context, &context_len)) {
+					if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
+						isresume = true;
 					}
 				}
+				context_len = sizeof(context);
+				if (0 == as_info_parameter_get(params, "failover", context, &context_len)) {
+					if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
+						isfailover = true;
+					}
+				}
+				if (g_config.xdr_cfg.xdr_global_enabled) {
+					cf_info(AS_XDR, "XDR is already running.");
+				}
 
-				// Everything set.
-				cf_info(AS_INFO, "Changing value of enable-xdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_global_enabled], context);
-				g_config.xdr_cfg.xdr_global_enabled = true;
-
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of enable-xdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_global_enabled], context);
-				g_config.xdr_cfg.xdr_global_enabled = false;
-				/* Closing the named pipe is not really necessary. Moreover, this
-				 * will allow us to have additional functionality where XDR on server
-				 * can be temporarily disabled.
-				 */
+				// Start XDR module.
+				if (as_xdr_start((temp_config_file[0] != '\0')?temp_config_file:g_config_file, isresume, isfailover)) {
+					g_config.xdr_cfg.xdr_global_enabled = false;
+					goto Error;
+				}
+			}
+			else if (strncmp(context, "false", 5)==0 || strncmp(context, "no", 2)==0) {
+				if (as_xdr_stop()) {
+					g_config.xdr_cfg.xdr_global_enabled = true;
+					goto Error;
+				}
 			} else {
+				goto Error;
+			}
+		}
+		// This message should be sent by XDR only.
+		// It is to open server side end of namedpipe.
+		else if (0 == as_info_parameter_get(params, "open-namedpipe", context, &context_len)) {
+			if (as_open_namedpipe()) {
 				goto Error;
 			}
 		}

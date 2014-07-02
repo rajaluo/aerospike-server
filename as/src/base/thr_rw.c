@@ -241,6 +241,9 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	UREQ_DATA_RESET(&wr->udata);
 	tr->microbenchmark_time = wr->microbenchmark_time;
 
+	// Data from XDR, in case this transaction is for XDR.
+	tr->from_xdr = wr->from_xdr;
+
 #if 0
 	if (wr->is_read) {
 		MICROBENCHMARK_HIST_INSERT_AND_RESET(rt_resolve_wait_hist);
@@ -1143,6 +1146,9 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			tr->rsv.ns->name, tr->rsv.p->partition_id, g_config.self_node, is_read );
 
 	wr->keyd = tr->keyd;
+
+	// Incase this transaction for XDR, from_xdr is data given by XDR.
+	wr->from_xdr = tr->from_xdr;
 
 	// Fetching the write_request out of the hash table
 	global_keyd gk;
@@ -5151,6 +5157,10 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 				generation, void_time, ops, response_bins, n_bins, ns, tr->trid,
 				setname);
 		tr->proxy_msg = 0;
+	} else if ((tr->flag & AS_TRANSACTION_FLAG_XDR_READ) && tr->from_xdr) {
+		// It is a read for XDR.
+		// Send data back to XDR.
+		xdr_internal_read_response(ns, tr->result_code, generation, void_time, response_bins, n_bins, setname, tr->from_xdr);
 	} else {
 		// In this case, this is a call from write_process() above.
 		// create the response message (this is a new malloc that will be handed off to fabric (see end of write_process())

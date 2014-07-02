@@ -146,6 +146,8 @@ const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
 pthread_mutex_t g_NONSTOP;
 bool g_startup_complete = false;
 
+// Configuration file, with which server has started.
+char *g_config_file = NULL;
 
 //==========================================================
 // Forward declarations.
@@ -276,7 +278,7 @@ main(int argc, char **argv)
 					aerospike_build_id);
 			return 1;
 		case 'f':
-			config_file = cf_strdup(optarg);
+			g_config_file = cf_strdup(optarg);
 			cf_assert(config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
 			break;
 		case 'd':
@@ -295,10 +297,14 @@ main(int argc, char **argv)
 		}
 	}
 
+	if (!g_config_file) {
+		g_config_file = cf_strdup(DEFAULT_CONFIG_FILE);
+	}
+
 	// Set all fields in the global runtime configuration instance. This parses
 	// the configuration file, and creates as_namespace objects. (Return value
 	// is a shortcut pointer to the global runtime configuration instance.)
-	as_config *c = as_config_init(config_file);
+	as_config *c = as_config_init(g_config_file);
 
 #ifdef USE_ASM
 	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
@@ -356,12 +362,8 @@ main(int argc, char **argv)
 			aerospike_build_type, aerospike_build_id);
 
 	// Includes echoing the configuration file to log.
-	as_config_post_process(c, config_file);
+	as_config_post_process(c, g_config_file);
 
-	// If we allocated a non-default config file name, free it.
-	if (config_file != DEFAULT_CONFIG_FILE) {
-		cf_free((void*)config_file);
-	}
 
 	// Write the pid file, if specified.
 	write_pidfile(c->pidfile);
@@ -425,6 +427,15 @@ main(int argc, char **argv)
 	as_nsup_start();			// may send delete transactions to other nodes
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
+
+	// Start XDR if enabled in configuration file.
+	if (c->xdr_cfg.xdr_global_enabled == true) {
+		// Default start method --noresume --nofailover.
+		if (as_xdr_start(g_config_file, false, false)) {
+			cf_warning(AS_AS, "Cannot start XDR");
+		}
+	}
+
 	info_debug_ticker_start();	// only after everything else is started
 
 	// Log a service-ready message.
