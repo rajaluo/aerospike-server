@@ -54,6 +54,7 @@
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
+#include "base/security_config.h"
 #include "fabric/migrate.h"
 
 
@@ -195,6 +196,10 @@ cfg_set_defaults()
 	// in the config file in order to change to the new mode.
 	c->cluster_mode = CL_MODE_NO_TOPOLOGY;
 
+	// TODO - security set default config API?
+	c->sec_cfg.privilege_refresh_period = 60 * 5; // refresh socket privileges every 5 minutes
+	c->sec_cfg.syslog_local = AS_SYSLOG_NONE;
+
 	// TODO - not sure why these are in configuration - just to be global?
 	cf_atomic_int_set(&c->migrate_num_incoming, 0);
 	cf_atomic_int_set(&c->migrate_num_incoming_accepted, 0);
@@ -230,6 +235,7 @@ typedef enum {
 	// Recent (non-2.x) functionality:
 	CASE_MOD_LUA_BEGIN,
 	CASE_CLUSTER_BEGIN,
+	CASE_SECURITY_BEGIN,
 
 	// Service options:
 	// Normally visible, in canonical configuration file order:
@@ -525,6 +531,25 @@ typedef enum {
 	CASE_CLUSTER_GROUP_NODE_ID,
 	CASE_CLUSTER_GROUP_GROUP_ATTR,
 
+	// Security options:
+	CASE_SECURITY_ENABLE_SECURITY,
+	CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD,
+	CASE_SECURITY_LOG_BEGIN,
+	CASE_SECURITY_SYSLOG_BEGIN,
+
+	// Security (Aerospike) log options:
+	CASE_SECURITY_LOG_REPORT_AUTHENTICATION,
+	CASE_SECURITY_LOG_REPORT_SYS_ADMIN,
+	CASE_SECURITY_LOG_REPORT_USER_ADMIN,
+	CASE_SECURITY_LOG_REPORT_VIOLATION,
+
+	// Security syslog options:
+	CASE_SECURITY_SYSLOG_LOCAL,
+	CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION,
+	CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN,
+	CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN,
+	CASE_SECURITY_SYSLOG_REPORT_VIOLATION
+
 } cfg_case_id;
 
 
@@ -546,7 +571,8 @@ const cfg_opt GLOBAL_OPTS[] = {
 		{ "namespace",						CASE_NAMESPACE_BEGIN },
 		{ "xdr",							CASE_XDR_BEGIN },
 		{ "mod-lua",						CASE_MOD_LUA_BEGIN },
-		{ "cluster",						CASE_CLUSTER_BEGIN }
+		{ "cluster",						CASE_CLUSTER_BEGIN },
+		{ "security",						CASE_SECURITY_BEGIN }
 };
 
 const cfg_opt SERVICE_OPTS[] = {
@@ -858,6 +884,31 @@ const cfg_opt CLUSTER_GROUP_OPTS[] = {
 		{ "}",								CASE_CONTEXT_END }
 };
 
+const cfg_opt SECURITY_OPTS[] = {
+		{ "enable-security",				CASE_SECURITY_ENABLE_SECURITY },
+		{ "privilege-refresh-period",		CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD },
+		{ "log",							CASE_SECURITY_LOG_BEGIN },
+		{ "syslog",							CASE_SECURITY_SYSLOG_BEGIN },
+		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt SECURITY_LOG_OPTS[] = {
+		{ "report-authentication",			CASE_SECURITY_LOG_REPORT_AUTHENTICATION },
+		{ "report-sys-admin",				CASE_SECURITY_LOG_REPORT_SYS_ADMIN },
+		{ "report-user-admin",				CASE_SECURITY_LOG_REPORT_USER_ADMIN },
+		{ "report-violation",				CASE_SECURITY_LOG_REPORT_VIOLATION },
+		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt SECURITY_SYSLOG_OPTS[] = {
+		{ "local",							CASE_SECURITY_SYSLOG_LOCAL },
+		{ "report-authentication",			CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION },
+		{ "report-sys-admin",				CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN },
+		{ "report-user-admin",				CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN },
+		{ "report-violation",				CASE_SECURITY_SYSLOG_REPORT_VIOLATION },
+		{ "}",								CASE_CONTEXT_END }
+};
+
 const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_PAXOS_PROTOCOL_OPTS			= sizeof(SERVICE_PAXOS_PROTOCOL_OPTS) / sizeof(cfg_opt);
@@ -884,6 +935,9 @@ const int NUM_NAMESPACE_SINDEX_OPTS					= sizeof(NAMESPACE_SINDEX_OPTS) / sizeof
 const int NUM_MOD_LUA_OPTS							= sizeof(MOD_LUA_OPTS) / sizeof(cfg_opt);
 const int NUM_CLUSTER_OPTS							= sizeof(CLUSTER_OPTS) / sizeof(cfg_opt);
 const int NUM_CLUSTER_GROUP_OPTS					= sizeof(CLUSTER_GROUP_OPTS) / sizeof(cfg_opt);
+const int NUM_SECURITY_OPTS							= sizeof(SECURITY_OPTS) / sizeof(cfg_opt);
+const int NUM_SECURITY_LOG_OPTS						= sizeof(SECURITY_LOG_OPTS) / sizeof(cfg_opt);
+const int NUM_SECURITY_SYSLOG_OPTS					= sizeof(SECURITY_SYSLOG_OPTS) / sizeof(cfg_opt);
 
 
 //==========================================================
@@ -926,6 +980,7 @@ typedef enum {
 	XDR, XDR_DATACENTER,
 	MOD_LUA,
 	CLUSTER, CLUSTER_GROUP,
+	SECURITY, SECURITY_LOG, SECURITY_SYSLOG,
 	// Must be last, use for sanity-checking:
 	PARSER_STATE_MAX_PLUS_1
 } as_config_parser_state;
@@ -939,7 +994,8 @@ const char* CFG_PARSER_STATES[] = {
 		"NAMESPACE", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_STORAGE_KV", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX",
 		"XDR", "XDR_DATACENTER",
 		"MOD_LUA",
-		"CLUSTER", "CLUSTER_GROUP"
+		"CLUSTER", "CLUSTER_GROUP",
+		"SECURITY", "SECURITY_LOG", "SECURITY_SYSLOG"
 };
 
 typedef struct cfg_parser_state_s {
@@ -1525,6 +1581,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_CLUSTER_BEGIN:
 				cfg_begin_context(&state, CLUSTER);
+				break;
+			case CASE_SECURITY_BEGIN:
+				cfg_begin_context(&state, SECURITY);
 				break;
 			case CASE_NOT_FOUND:
 			default:
@@ -2625,6 +2684,90 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_CONTEXT_END:
 				cluster_group_id = 0; // clear the group ID
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//==================================================
+		// Parse security context items.
+		//
+		case SECURITY:
+			switch(cfg_find_tok(line.name_tok, SECURITY_OPTS, NUM_SECURITY_OPTS)) {
+			case CASE_SECURITY_ENABLE_SECURITY:
+				c->sec_cfg.security_enabled = cfg_bool(&line);
+				break;
+			case CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD:
+				c->sec_cfg.privilege_refresh_period = cfg_u32(&line, 10, 60 * 60 * 24);
+				break;
+			case CASE_SECURITY_LOG_BEGIN:
+				cfg_begin_context(&state, SECURITY_LOG);
+				break;
+			case CASE_SECURITY_SYSLOG_BEGIN:
+				cfg_begin_context(&state, SECURITY_SYSLOG);
+				break;
+			case CASE_CONTEXT_END:
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse security::log context items.
+		//
+		case SECURITY_LOG:
+			switch(cfg_find_tok(line.name_tok, SECURITY_LOG_OPTS, NUM_SECURITY_LOG_OPTS)) {
+			case CASE_SECURITY_LOG_REPORT_AUTHENTICATION:
+				c->sec_cfg.report.authentication |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
+				break;
+			case CASE_SECURITY_LOG_REPORT_SYS_ADMIN:
+				c->sec_cfg.report.sys_admin |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
+				break;
+			case CASE_SECURITY_LOG_REPORT_USER_ADMIN:
+				c->sec_cfg.report.user_admin |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
+				break;
+			case CASE_SECURITY_LOG_REPORT_VIOLATION:
+				c->sec_cfg.report.violation |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
+				break;
+			case CASE_CONTEXT_END:
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse security::syslog context items.
+		//
+		case SECURITY_SYSLOG:
+			switch(cfg_find_tok(line.name_tok, SECURITY_SYSLOG_OPTS, NUM_SECURITY_SYSLOG_OPTS)) {
+			case CASE_SECURITY_SYSLOG_LOCAL:
+				c->sec_cfg.syslog_local = (as_sec_syslog_local)cfg_int(&line, AS_SYSLOG_MIN, AS_SYSLOG_MAX);
+				break;
+			case CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION:
+				c->sec_cfg.report.authentication |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
+				break;
+			case CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN:
+				c->sec_cfg.report.sys_admin |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
+				break;
+			case CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN:
+				c->sec_cfg.report.user_admin |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
+				break;
+			case CASE_SECURITY_SYSLOG_REPORT_VIOLATION:
+				c->sec_cfg.report.violation |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
+				break;
+			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:

@@ -122,9 +122,9 @@ typedef enum {
  * TODO: Optimize it is a huge structure will cause cache invalidation
  * 320 bytes
  */
-#define SINDEX_BINS_SETUP(skey_bin, size)         \
-	as_sindex_bin skey_bin[(size)];                    \
-	memset (&(skey_bin), 0, sizeof(as_sindex_bin) * (size)); \
+#define SINDEX_BINS_SETUP(skey_bin, size)                   \
+	as_sindex_bin skey_bin[(size)];                         \
+	memset (&(skey_bin), 0, sizeof(as_sindex_bin) * (size));\
 	for (int id = 0; id < (size); id++) skey_bin[id].id = -1; 
 
 /*
@@ -132,20 +132,17 @@ typedef enum {
  * bin_id lists the bin id being touched. 
  */
 #define SINDEX_FLAG_BIN_ISVALID    0x01
-#define SINDEX_FLAG_BIN_DOFREE     0x02
 #define SINDEX_STRONSTACK_VALSZ    256
 typedef struct as_sindex_bin_s {
 	uint32_t          id;
 	as_particle_type  type; // this type is citrusleaf type
-	uint32_t          valsz;
+	// Union is to support sindex for other datatypes in future.
+	// Currently sindex is supported for only int64 and string.
 	union {
-		char    *str; // sz is strlen
-		char    *blob;
 		int64_t  i64;
 	} u;
 	cf_digest         digest;
 	byte              flag;
-	char              stackstr[SINDEX_STRONSTACK_VALSZ];
 } as_sindex_bin;
 
 /* 
@@ -222,11 +219,11 @@ typedef struct as_sindex_stat_s {
 
 	cf_atomic64        n_writes;
 	cf_atomic64        write_errs;
-	histogram *        _write_hist;
+	histogram *        _write_hist;         // Histogram to track time spend writing to the sindex
 
 	cf_atomic64        n_deletes;
 	cf_atomic64        delete_errs;
-	histogram *        _delete_hist;
+	histogram *        _delete_hist;        // Histogram to track time spend deleting from sindex
 
 	// Background thread stats
 	cf_atomic64        loadtime;
@@ -236,9 +233,9 @@ typedef struct as_sindex_stat_s {
 	cf_atomic64        defrag_time;
 	
 	// Query Stats
-	histogram *       _query_hist;    // histogram that tracks batch performance
-	histogram *       _query_ai_hist; // histgram for getting list of FK
-	histogram *       _query_cl_hist; // histogram for looking up records using FK
+	histogram *       _query_hist;            // Histogram to track query latency
+	histogram *       _query_batch_lookup;    // Histogram to track latency of batch request from sindex tree.
+	histogram *       _query_batch_io;        // Histogram to track time spend doing I/O per batch
 	//	--aggregation stats
 	cf_atomic64        n_aggregation;
 	cf_atomic64        agg_response_size;
@@ -250,8 +247,8 @@ typedef struct as_sindex_stat_s {
 	cf_atomic64        lookup_num_records;
 	cf_atomic64        lookup_errs;
 
-	histogram *       _query_rcnt_hist;
-	histogram *       _query_diff_hist;
+	histogram *       _query_rcnt_hist;       // Histogram to track record counts from queries
+	histogram *       _query_diff_hist;       // Histogram to track the false positives found by queries
 } as_sindex_stat;
 
 /*
@@ -520,16 +517,32 @@ do {                                            \
 	if (ret) cf_warning(AS_SINDEX, "UNLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
 } while(0);
 
-#define SINDEX_HIST_INSERT_DATA_POINT(si, type, start_time)        \
-do {                                                               \
-	if (si->enable_histogram)                                      \
-		if (si->stats._ ##type) histogram_insert_data_point(si->stats._ ##type, start_time); \
+#define SINDEX_HIST_INSERT_DATA_POINT(si, type, start_time_ms)                          \
+do {                                                                                    \
+	if (si->enable_histogram && start_time_ms != 0) {                                   \
+		if (si->stats._ ##type) {                                                       \
+			histogram_insert_data_point(si->stats._ ##type, start_time_ms);             \
+		}                                                                               \
+	}                                                                                   \
 } while(0);
 
-#define SINDEX_HIST_INSERT_DELTA(si, type, delta_time)        \
-do {                                                               \
-	if (si->enable_histogram)                                      \
-		if (si->stats._ ##type) histogram_insert_delta(si->stats._ ##type, delta_time); \
+#define SINDEX_HIST_INSERT_DATA_POINT_US(si, type, start_time_us)                       \
+do {                                                                                    \
+	if (si->enable_histogram && start_time_us != 0) {                                   \
+		if (si->stats._ ##type) {                                                       \
+			histogram_insert_delta(si->stats._ ##type, cf_getus() - start_time_us);     \
+		}                                                                               \
+	}                                                                                   \
+} while(0);
+
+
+#define SINDEX_HIST_INSERT_DELTA(si, type, delta)                                       \
+do {                                                                                    \
+	if (si->enable_histogram) {                                                         \
+		if (si->stats._ ##type) {                                                       \
+			histogram_insert_delta(si->stats._ ##type, delta);                          \
+		}                                                                               \
+	}                                                                                   \
 } while(0);
 
 // Opaque type definition.
@@ -572,3 +585,4 @@ extern int as_sindex_smd_merge_cb(char *module, as_smd_item_list_t **item_list_o
 extern int as_sindex_smd_can_accept_cb(char* module, as_smd_item_t *item, 
 									   void *udata);
 extern uint64_t as_sindex_get_ns_memory_used(as_namespace *ns);
+extern void as_query_histogram_dumpall();
