@@ -2154,7 +2154,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 void
 info_network_info_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, ";service-address=");
+	cf_dyn_buf_append_string(db, "service-address=");
 	cf_dyn_buf_append_string(db, g_config.socket.addr);
 	cf_dyn_buf_append_string(db, ";service-port=");
 	cf_dyn_buf_append_int(db, g_config.socket.port);
@@ -2194,10 +2194,13 @@ void
 info_network_heartbeat_config_get(cf_dyn_buf *db)
 {
 	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
-		cf_dyn_buf_append_string(db, ";heartbeat-mode=multicast");
+		cf_dyn_buf_append_string(db, "heartbeat-mode=multicast");
 	}
 	else if (g_config.hb_mode == AS_HB_MODE_MESH) {
-		cf_dyn_buf_append_string(db, ";heartbeat-mode=mesh");
+		cf_dyn_buf_append_string(db, "heartbeat-mode=mesh");
+	}
+	else {
+		cf_dyn_buf_append_string(db, "heartbeat-mode=UNKNOWN");
 	}
 
 	if (g_config.hb_tx_addr) {
@@ -2224,7 +2227,7 @@ info_network_heartbeat_config_get(cf_dyn_buf *db)
 void
 info_security_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, ";enable-security=");
+	cf_dyn_buf_append_string(db, "enable-security=");
 	cf_dyn_buf_append_string(db, g_config.sec_cfg.security_enabled ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";privilege-refresh-period=");
 	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.privilege_refresh_period);
@@ -2243,7 +2246,7 @@ info_security_config_get(cf_dyn_buf *db)
 void
 info_xdr_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, ";xdr-delete-shipping-enabled=");
+	cf_dyn_buf_append_string(db, "xdr-delete-shipping-enabled=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_delete_shipping_enabled ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";xdr-nsup-deletes-enabled=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_nsup_deletes_enabled ? "true" : "false");
@@ -2305,9 +2308,13 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	// We come here when context is not mentioned.
 	// In that case we want to print everything.
 	info_service_config_get(db);
+	cf_dyn_buf_append_char(db, ';');
 	info_network_info_config_get(db);
+	cf_dyn_buf_append_char(db, ';');
 	info_network_heartbeat_config_get(db);
+	cf_dyn_buf_append_char(db, ';');
 	info_security_config_get(db);
+	cf_dyn_buf_append_char(db, ';');
 	info_xdr_config_get(db);
 
 	// Add the current histogram tracking settings.
@@ -3764,15 +3771,34 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 //
 
 // Error strings for security check results.
-static const char*
-sec_err_str(uint8_t result) {
+static void
+append_sec_err_str(cf_dyn_buf *db, uint32_t result, as_sec_priv cmd_priv) {
 	switch (result) {
 	case AS_SEC_ERR_NOT_AUTHENTICATED:
-		return "security error - not authenticated";
+		cf_dyn_buf_append_string(db, "ERROR:");
+		cf_dyn_buf_append_uint32(db, result);
+		cf_dyn_buf_append_string(db, ":not authenticated");
+		return;
 	case AS_SEC_ERR_ROLE_VIOLATION:
-		return "security error - role violation";
+		switch (cmd_priv) {
+		case PRIV_INDEX_MANAGE:
+			INFO_COMMAND_SINDEX_FAILCODE(result, "role violation");
+			return;
+		case PRIV_UDF_MANAGE:
+			cf_dyn_buf_append_string(db, "error=role_violation");
+			return;
+		default:
+			break;
+		}
+		cf_dyn_buf_append_string(db, "ERROR:");
+		cf_dyn_buf_append_uint32(db, result);
+		cf_dyn_buf_append_string(db, ":role violation");
+		return;
 	default:
-		return "unexpected security error";
+		cf_dyn_buf_append_string(db, "ERROR:");
+		cf_dyn_buf_append_uint32(db, result);
+		cf_dyn_buf_append_string(db, ":unexpected security error");
+		return;
 	}
 }
 
@@ -3794,7 +3820,7 @@ info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 
 	if (auth_result != AS_PROTO_RESULT_OK) {
 		as_security_log(fd_h, auth_result, PRIV_NONE, "info-all request", NULL);
-		cf_dyn_buf_append_string(db, sec_err_str(auth_result));
+		append_sec_err_str(db, auth_result, PRIV_NONE);
 		cf_dyn_buf_append_char(db, EOL);
 		return 0;
 	}
@@ -3837,7 +3863,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 	if (auth_result != AS_PROTO_RESULT_OK) {
 		// TODO - log null-terminated buf as detail?
 		as_security_log(fd_h, auth_result, PRIV_NONE, "info request", NULL);
-		cf_dyn_buf_append_string(db, sec_err_str(auth_result));
+		append_sec_err_str(db, auth_result, PRIV_NONE);
 		cf_dyn_buf_append_char(db, EOL);
 		return 0;
 	}
@@ -3943,7 +3969,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 						cmd->command_fn(cmd->name, param, db);
 					}
 					else {
-						cf_dyn_buf_append_string(db, sec_err_str(result));
+						append_sec_err_str(db, result, cmd->required_priv);
 					}
 
 					cf_dyn_buf_append_char( db, EOL );
@@ -4471,7 +4497,6 @@ info_debug_ticker_fn(void *gcc_is_ass)
 
 				total_ns_memory_inuse += ns_memory_inuse;
 				as_sindex_histogram_dumpall(ns);
-				as_sindex_gc_histogram_dumpall();
 			}
 
 			as_partition_states ps;
@@ -4495,6 +4520,7 @@ info_debug_ticker_fn(void *gcc_is_ass)
 				cf_hist_track_dump(g_config.q_rcnt_hist);
 
 			as_query_histogram_dumpall();
+			as_sindex_gc_histogram_dumpall();
 
 			if (g_config.microbenchmarks) {
 				if (g_config.rt_cleanup_hist)
