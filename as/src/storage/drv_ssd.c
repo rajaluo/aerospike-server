@@ -3171,9 +3171,13 @@ ssd_load_device_sweep(drv_ssds *ssds, drv_ssd *ssd)
 						cf_warning(AS_DRV_SSD, "should never free 0 blocks, check logic");
 					}
 
-					ssd_block_free(ssd, BYTES_TO_RBLOCKS(free_range_start),
-							BYTES_TO_RBLOCKS(free_size), FREE_TO_TAIL,
-							"load devices");
+					// Do space accounting for each LOAD_BUF in the parent sweep
+					// itself
+					if (!ssd->sub_sweep) {
+						ssd_block_free(ssd, BYTES_TO_RBLOCKS(free_range_start),
+								BYTES_TO_RBLOCKS(free_size), FREE_TO_TAIL,
+								"load devices");
+					}
 
 					free_state = ST_ALLOC;
 					free_range_start = 0;
@@ -3209,7 +3213,7 @@ Finished:
 		fd = -1;
 	}
 
-	if (free_state == ST_FREE && (ssd->sub_sweep || ! ssd->has_ldt)) {
+	if (free_state == ST_FREE && (!ssd->sub_sweep)) {
 		// Handle everything at the end of the device.
 		if (free_range_start < ssd->file_size) {
 			cf_info(AS_DRV_SSD, "finished: marking blocks free: block %"PRIu64" nblocks %"PRIu64,
