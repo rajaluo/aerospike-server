@@ -2170,6 +2170,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 	as_index_tree *tree = rsv->tree;
+	bool is_subrec  = false;
 
 	if (rsv->ns->ldt_enabled) {
 		if ((info & RW_INFO_LDT_SUBREC)
@@ -2178,10 +2179,11 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 					"LDT Subrecord Replication Request Received %"PRIx64"\n",
 					*(uint64_t *)keyd);
 			tree = rsv->sub_tree;
+			is_subrec = true;
 		}
 	}
 
-	int rv = as_record_get_create(tree, keyd, &r_ref, rsv->ns);
+	int rv = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
 	as_index *r = r_ref.r;
 
 	if (rv == 1) {
@@ -3238,7 +3240,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 	else {
-		int rv = as_record_get_create(tree, &tr->keyd, &r_ref, ns);
+		int rv = as_record_get_create(tree, &tr->keyd, &r_ref, ns, false);
 
 		if (rv < 0) {
 			write_local_failed(tr, 0, record_created, tree, 0, AS_PROTO_RESULT_FAIL_UNKNOWN);

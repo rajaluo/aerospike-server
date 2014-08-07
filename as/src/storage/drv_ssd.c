@@ -2697,7 +2697,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	// Get/create the record from/in the appropriate index tree.
 	int rv = as_record_get_create(
 			is_ldt_sub ? p_partition->sub_vp : p_partition->vp,
-					&block->keyd, &r_ref, ns);
+					&block->keyd, &r_ref, ns, is_ldt_sub);
 
 	if (rv < 0) {
 		cf_warning(AS_DRV_SSD, "record-add as_record_get_create() failed");

@@ -698,6 +698,8 @@ udf_record_get(const as_rec * rec, const char * name)
 	value = udf_record_storage_get(urecord, name);
 
 	// We have a value, so we will cache it.
+	// DO NOT remove this. We need to cache copy to makes sure ref count 
+	// gets decremented post handing this as_val over to the lua world
 	if ( urecord && value ) {
 		udf_record_cache_set(urecord, name, value, false);
 	}

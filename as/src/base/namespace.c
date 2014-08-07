@@ -392,9 +392,10 @@ void as_namespace_eval_write_state(as_namespace *ns, bool *lwm_breached, bool *h
 	// compute memory size of namespace
 	// compute index size - index is always stored in memory
 	uint64_t index_sz = cf_atomic_int_get(ns->n_objects) * as_index_size_get(ns);
+	uint64_t sub_index_sz = cf_atomic_int_get(ns->n_objects_sub) * as_index_size_get(ns);
 	uint64_t sindex_sz = as_sindex_get_ns_memory_used(ns);
 	uint64_t data_in_memory_sz = cf_atomic_int_get(ns->n_bytes_memory);
-	uint64_t memory_sz = index_sz + data_in_memory_sz + sindex_sz;
+	uint64_t memory_sz = index_sz + sub_index_sz + data_in_memory_sz + sindex_sz;
 
 	// check if low water mark is breached
 	if (chk_memory && (memory_sz > mem_lwm)) {

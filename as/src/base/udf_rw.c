@@ -297,7 +297,7 @@ send_result(as_result * res, udf_call * call, void *udata)
 		as_string * s   = as_string_fromval(v);
 		char *      rs  = (char *) as_string_tostring(s);
 
-		cf_warning(AS_UDF, "FAILURE when calling %s %s %s", call->filename, call->function, rs);
+		cf_debug(AS_UDF, "FAILURE when calling %s %s %s", call->filename, call->function, rs);
 		send_failure(call, AS_PARTICLE_TYPE_STRING, rs, as_string_len(s));
 	}
 }

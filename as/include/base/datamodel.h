@@ -473,7 +473,7 @@ as_partition_vinfo_different(as_partition_vinfo *v1, as_partition_vinfo *v2) {
 
 /* Record function declarations */
 // special - get_create returns 1 if created, 0 if just gotten, -1 if fail
-extern int as_record_get_create(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
+extern int as_record_get_create(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns, bool);
 extern int as_record_get(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
 extern int as_record_exists(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
 // initialize as_record
@@ -918,6 +918,7 @@ struct as_namespace_s {
 
 	/* very interesting counters */
 	cf_atomic_int	n_objects;
+	cf_atomic_int	n_objects_sub;
 	cf_atomic_int	n_bytes_memory;
 	cf_atomic_int	n_absent_partitions;
 	cf_atomic_int	n_actual_partitions;

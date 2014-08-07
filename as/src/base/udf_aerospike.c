@@ -574,6 +574,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	if (has_sindex) {
 		SINDEX_GRLOCK();
 	}
+	bool is_record_dirty = false;
 
 	// In second iteration apply updates.
 	for(int i = 0; i < urecord->nupdates; i++ ) {
@@ -608,6 +609,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 				}
 			}
 		}
+		is_record_dirty = true;
 	}
 	
 	if (has_sindex) {
@@ -801,13 +803,15 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	as_index_ref   *r_ref = urecord->r_ref;
 	as_storage_rd  *rd    = urecord->rd;
 	as_index_tree  *tree  = tr->rsv.tree;
+	bool is_subrec        = false;
 
 	if (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) {
 		tree      = tr->rsv.sub_tree;
+		is_subrec = true;
 	}
 
 	// make sure we got the record as a create
-	int rv = as_record_get_create(tree, &tr->keyd, r_ref, tr->rsv.ns);
+	int rv = as_record_get_create(tree, &tr->keyd, r_ref, tr->rsv.ns, is_subrec);
 	cf_detail_digest(AS_UDF, &tr->keyd, "Creating %sRecord",
 			(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "Sub" : "");
 

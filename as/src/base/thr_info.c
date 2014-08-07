@@ -268,6 +268,7 @@ int
 info_get_utilization(cf_dyn_buf *db)
 {
 	uint64_t	total_number_objects    = 0;
+	uint64_t	total_number_objects_sub= 0;
 	uint64_t	used_disk_size          = 0;
 	uint64_t	total_disk_size         = 0;
 	uint64_t	total_memory_size       = 0;
@@ -282,10 +283,11 @@ info_get_utilization(cf_dyn_buf *db)
 		as_namespace *ns = g_config.namespace[i];
 
 		total_number_objects    += ns->n_objects;
+		total_number_objects_sub += ns->n_objects_sub;
 		total_disk_size         += ns->ssd_size;
 		total_memory_size       += ns->memory_size;
 		used_data_memory        += ns->n_bytes_memory;
-		used_pindex_memory      += as_index_size_get(ns) * ns->n_objects;
+		used_pindex_memory      += as_index_size_get(ns) * (ns->n_objects + ns->n_objects_sub);
 		used_sindex_memory      += cf_atomic_int_get(ns->sindex_data_memory_used);
 
 		uint64_t inuse_disk_bytes = 0;
@@ -303,6 +305,7 @@ info_get_utilization(cf_dyn_buf *db)
 
 
 	info_append_uint64("", "objects",                  total_number_objects, db);
+	info_append_uint64("", "sub-records",              total_number_objects_sub, db);
 	info_append_uint64("", "total-bytes-disk",         total_disk_size,      db);
 	info_append_uint64("", "used-bytes-disk",          used_disk_size,       db);
 	info_append_uint64("", "free-pct-disk",            disk_free_pct,        db);

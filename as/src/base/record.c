@@ -127,7 +127,7 @@ void as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
  * 1 if successful but CREATE
  */
 int
-as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns)
+as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns, bool is_subrec)
 {
 	// Only create the in-memory index tree when not using KV store.
 	int rv = (as_storage_has_index(ns) ?
@@ -140,7 +140,11 @@ as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, 
 		as_record_initialize(r_ref, ns);
 
 		// this is decremented by the destructor here, so best tracked on the constructor
-		cf_atomic_int_add( &ns->n_objects, 1);
+		if (is_subrec) {
+			cf_atomic_int_add( &ns->n_objects_sub, 1);
+		} else {
+			cf_atomic_int_add( &ns->n_objects, 1);
+		}
 
 		cf_detail(AS_RECORD, "record get_create: digest %"PRIx64" new record %p", *(uint64_t *)keyd, r_ref->r);
 		return(1);
@@ -207,7 +211,12 @@ as_record_destroy(as_record *r, as_namespace *ns)
 	// release from set
 	as_namespace_release_set_id(ns, as_index_get_set_id(r));
 
-	cf_atomic_int_sub(&ns->n_objects, 1);
+	// TODO: LDT what if flag is not set ??
+	if (as_ldt_record_is_sub(r)) {
+		cf_atomic_int_sub(&ns->n_objects_sub, 1);
+	} else {
+		cf_atomic_int_sub(&ns->n_objects, 1);
+	}
 
 	/* Destroy the storage and then free the memory-resident parts */
 	as_storage_record_destroy(ns, r);
@@ -1069,7 +1078,7 @@ as_record_merge(as_partition_reservation *rsv, cf_digest *keyd, uint16_t n_compo
 		}
 	}
 
-	int rv = as_record_get_create(tree, keyd, &r_ref, rsv->ns);
+	int rv = as_record_get_create(tree, keyd, &r_ref, rsv->ns, false);
 	if (rv == -1) {
 		cf_debug(AS_RECORD, "record merge: could not get-create record");
 		return(-1);
@@ -1428,6 +1437,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 	as_index_ref r_ref;
 	r_ref.skip_lock     = false;
 	as_index_tree *tree = rsv->tree;
+	bool is_subrec      = false;
 
 
 	// If the incoming component is the SUBRECORD it should have come as
@@ -1453,6 +1463,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 					return(-1);
 				}
 				tree = rsv->sub_tree;
+				is_subrec = true;
 				cf_assert((n_components == 1) && COMPONENT_IS_MIG(&components[0]),
 						AS_RW, CF_CRITICAL,
 						"LDT_COMPONENT: Subrecord Component for Non Migration Case received %"PRIx64"", *((uint64_t *)keyd));
@@ -1499,7 +1510,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 			if (has_local_copy) {
 				as_storage_record_open(rsv->ns, r_ref.r, &rd, keyd);
 			} else {
-				if (-1 == as_record_get_create(tree, keyd, &r_ref, rsv->ns)) {
+				if (-1 == as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec)) {
 					cf_debug(AS_RECORD, "record merge: could not get-create record");
 					return(-1);
 				}
