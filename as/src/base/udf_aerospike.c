@@ -608,8 +608,8 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 					}
 				}
 			}
+			is_record_dirty = true;
 		}
-		is_record_dirty = true;
 	}
 	
 	if (has_sindex) {
@@ -626,7 +626,8 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 
 	// If there were updates do miscellaneous successful commit
 	// tasks
-	if (is_record_dirty) {
+	if (is_record_dirty 
+			|| (urecord->flag & UDF_RECORD_FLAG_METADATA_UPDATED)) {
 		// Set updated flag to true
 		urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
 	
