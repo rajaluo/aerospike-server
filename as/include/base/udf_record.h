@@ -63,7 +63,8 @@ typedef struct udf_record_s {
 	as_bin				stack_bins[256];
 
 	// UDF CHANGE CACHE
-	udf_record_bin		updates[UDF_RECORD_BIN_ULIMIT]; // stores modified bins. internal to udf module
+	udf_record_bin		updates[UDF_RECORD_BIN_ULIMIT]; // stores cache bin value
+                                                        // if ditry is set modified bins. internal to udf module
 	uint32_t			nupdates; // reset after every cache free, incremented in every cache set
 
 	// RUNTIME ACCOUNTING

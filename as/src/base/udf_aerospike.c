@@ -623,17 +623,21 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			cf_debug(AS_UDF, "REGULAR as_val_destroy()");
 		}
 	}
-	// Commit successful do miscellaneous task
-	// Set updated flag to true
-	urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
 
-	// Set up record to be flushed to storage
-	urecord->rd->write_to_device = true;
+	// If there were updates do miscellaneous successful commit
+	// tasks
+	if (is_record_dirty) {
+		// Set updated flag to true
+		urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
+	
+		// Set up record to be flushed to storage
+		urecord->rd->write_to_device = true;
 
-	// Before committing to storage set the rec_type_bits ..
-	cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
-		*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
-	as_index_set_flags(rd->r, urecord->ldt_rectype_bits);
+		// Before committing to storage set the rec_type_bits ..
+		cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
+			*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
+		as_index_set_flags(rd->r, urecord->ldt_rectype_bits);
+	}
 
 	// Clean up cache and start from 0 update again. All the changes
 	// made here will if flush from write buffer to storage goes
