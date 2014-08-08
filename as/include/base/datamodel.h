@@ -675,7 +675,10 @@ struct as_partition_s {
 	struct as_index_tree_s *sub_vp;
 	as_partition_id partition_id;
 	uint p_repl_factor;
-	uint64_t last_outgoing_ldt_version;
+
+	// Track ldt version in transit currently
+	uint64_t current_outgoing_ldt_version;
+	uint64_t current_incoming_ldt_version;
 };
 
 #define AS_PARTITION_HAS_DATA(p)  ((p)->vp->elements || (p)->sub_vp->elements)

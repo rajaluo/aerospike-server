@@ -1085,12 +1085,19 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	as_namespace *ns        = linfo->ns;
 	as_partition *p         = &ns->partitions[as_partition_getid(r->key)];
 
-	// If record is migrating avoid sub tree GC in general. But it is too big
-	// a window ... We can actually migrate when the partition is sending out
-	// data ...fix it !!!
-	if ((p->rxstate == AS_PARTITION_MIG_RX_STATE_RECORD)
-			|| (p->rxstate == AS_PARTITION_MIG_RX_STATE_SUBRECORD)) {
-		cf_detail(AS_LDT, " Skipping Defrag Partition Mig State is RECV_SUBRECORD");
+	// Subrecord Version
+	cf_digest subrec_digest = r->key;
+	uint64_t subrec_version = 0;
+	subrec_version          = as_ldt_subdigest_getversion(&subrec_digest);
+	cf_info(AS_LDT, "SUBRECVERSION OUT OF SUBREC_DIGEST %ld", subrec_version);
+
+	// If there is incoming migration and subrecord is of incoming migration, then
+	// skip it. The parent may not have made it yet so garbage collecting this would
+	// be problem.
+	if (((p->rxstate == AS_PARTITION_MIG_RX_STATE_RECORD)
+			|| (p->rxstate == AS_PARTITION_MIG_RX_STATE_SUBRECORD)) &&
+			(p->current_incoming_ldt_version == subrec_version)) {
+		cf_detail(AS_LDT, " Skipping Defrag Partition Mig State is %d %ld == %ld ", p->rxstate, p->current_incoming_ldt_version, subrec_version);
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -1118,7 +1125,6 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	// and version in there ... and do not do IO. Potential excessive I/O.
 	as_storage_rd rd;
 	int rv                  = as_storage_record_open(ns, r, &rd, &r->key);
-	cf_digest subrec_digest = rd.keyd;
 	if (0 != rv) {
 		cf_warning(AS_UDF, "LDT_SUB_GC Could not open record %"PRIx64"!! rv=%d", *(uint64_t *)&rd.keyd, rv);
 		as_record_done(r_ref, ns);
@@ -1131,10 +1137,6 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	}
 	rd.bins                 = as_bin_get_all(r, &rd, stack_bins);
 
-	// Subrecord Version
-	uint64_t subrec_version = 0;
-	subrec_version          = as_ldt_subdigest_getversion(&subrec_digest);
-	cf_detail(AS_LDT, "SUBRECVERSION OUT OF SUBREC_DIGEST %ld", subrec_version);
 
 	// ESR digest with matching Version
 	cf_digest esr_digest;
@@ -1232,8 +1234,7 @@ as_ldt_merge_component_is_candidate(as_partition_reservation *rsv, as_record_mer
 		as_record_done(&r_ref, rsv->ns);
 		return true;
 	} else {
-		cf_debug_digest(AS_LDT,&r->key, "Local Parent Wins ... ignoring incoming:");
-//		PRINTD(&r->key);
+		cf_debug_digest(AS_LDT, &r->key, "Local Parent Wins, ignoring incoming: %ld <= %ld generation for", c->pgeneration, r->generation);
 		as_record_done(&r_ref, rsv->ns);
 		return false;
 	}

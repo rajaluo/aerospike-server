@@ -599,7 +599,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 		is_parent = true;
 	}
 
-	uint64_t new_version = mig->rsv.p->last_outgoing_ldt_version;
+	uint64_t new_version = mig->rsv.p->current_outgoing_ldt_version;
 	if (is_parent) {
 		uint64_t old_version = 0;
 		if (as_ldt_parent_storage_get_version(rd, &old_version)) {
@@ -607,7 +607,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 		}
 		if (new_version) {
 			cf_detail(AS_MIGRATE, "LDT_MIGRATION Parent Setting New Version %ld from %ld %"PRIx64"",
-					  new_version, old_version, *(uint64_t *)&pr->key);
+					  new_version, old_version);
 			pr->version = new_version;
 		} else {
 			cf_detail(AS_MIGRATE, "LDT_MIGRATION Parent Keeping Old Version %ld intact %"PRIx64"",
@@ -617,7 +617,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 	} else if (is_subrec) {
 		uint64_t old_version = as_ldt_subdigest_getversion(&pr->key);
 		if (new_version) {
-			cf_detail(AS_MIGRATE, "LDT_MIGRATION Subrecord Setting New Version %ld from %ld %"PRIx64"",
+			cf_detail_digest(AS_MIGRATE, &pr->key, "LDT_MIGRATION Subrecord Setting New Version %ld from %ld %"PRIx64"",
 					  new_version, old_version, *(uint64_t *)&pr->key);
 			as_ldt_subdigest_setversion(&pr->key, new_version);
 			pr->version = new_version;
@@ -682,8 +682,9 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 		cf_crash(AS_MIGRATE, "Invalid Component Type Dummy received by migration");
 	} else {
 		mc->rsv.p->rxstate = AS_PARTITION_MIG_RX_STATE_RECORD;
-		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Started Receiving Record Migration !! %s:%d:%d:%d",
-				  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming version %ld Started Receiving Record Migration !! %s:%d:%d:%d",
+				  mc->rsv.p->current_incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
+				  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
 	}
 }
 
@@ -1541,9 +1542,12 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				// This node is going to accept migration. When migration starts
 				// it is subrecord migration
 				mc->rsv.p->rxstate = AS_PARTITION_MIG_RX_STATE_SUBRECORD;
-				cf_detail(AS_MIGRATE, "LDT_MIGRATION: Started Receiving SubRecord Migration !! %s:%d:%d:%d",
-						  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
-
+				msg_get_uint64(m, MIG_FIELD_TYPE, &mc->rsv.p->current_incoming_ldt_version);
+				cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
+						  mc->rsv.p->current_incoming_ldt_version,
+						  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, 
+						  mc->rsv.p->sub_vp->elements);
+					
 				// If I'm receiving migrates, then I should be batching messages
 //				cf_debug(AS_MIGRATE, "migrate_start: set fabric to high-throughtput %"PRIx64,id);
 
@@ -1662,8 +1666,9 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 
 					// This node is done with receiving migration. reset rxstate
 					mc->rsv.p->rxstate = AS_PARTITION_MIG_RX_STATE_NONE;
-					cf_detail(AS_MIGRATE, "LDT_MIGRATION: Finished Receiving Migration !! %s:%d:%d:%d",
-							  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+					cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld Finished Receiving Migration !! %s:%d:%d:%d",
+							  mc->rsv.p->current_incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+					mc->rsv.p->current_incoming_ldt_version = 0;
 
 					if (g_event_cb) {
 						cf_debug(AS_MIGRATE, "recv migrate %s msg: mig %d, {%s:%d} from node %"PRIx64, cancel_migrate ? "cancel" : "done", mig_id, mc->rsv.ns->name, mc->rsv.pid, id);
@@ -1742,8 +1747,9 @@ migrate_rx_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void *udat
 
 		// This node is done with migration receive. reset rxstate
 		mci->rsv.p->rxstate = AS_PARTITION_MIG_RX_STATE_NONE;
-		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Finished Receiving Migration !! %s:%d:%d:%d",
-				  mci->rsv.ns->name, mci->rsv.p->partition_id, mci->rsv.p->vp->elements, mci->rsv.p->sub_vp->elements);
+		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld Finished Receiving Migration !! %s:%d:%d:%d",
+				  mci->rsv.p->current_incoming_ldt_version, mci->rsv.ns->name, mci->rsv.p->partition_id, mci->rsv.p->vp->elements, mci->rsv.p->sub_vp->elements);
+		mci->rsv.p->current_incoming_ldt_version = 0;
 
 		return(RCHASH_REDUCE_DELETE);
 	} else if ((g_config.migrate_rx_lifetime_ms > 0) && mci->done_recv && (cf_getms() > (mci->done_recv_ms + g_config.migrate_rx_lifetime_ms))) {
@@ -1899,6 +1905,7 @@ migrate_start_send(migration *mig)
 		msg_set_buf(start_m, MIG_FIELD_NAMESPACE, (byte *) mig->rsv.ns->name, strlen(mig->rsv.ns->name), MSG_SET_COPY);
 		msg_set_uint32(start_m, MIG_FIELD_PARTITION, mig->rsv.pid);
 		msg_set_uint32(start_m, MIG_FIELD_TYPE, mig->mig_type);
+		msg_set_uint64(start_m, MIG_FIELD_VERSION, mig->rsv.p->current_outgoing_ldt_version);
 
 		mig->start_m = start_m;
 		for (uint i = 0; i < mig->dst_nodes_sz; i++)
@@ -2485,6 +2492,7 @@ CompletedMigrate:
 FinishedMigrate:
 
 		mig->rsv.p->txstate = AS_PARTITION_MIG_TX_STATE_NONE;
+		mig->rsv.p->current_outgoing_ldt_version = 0;
 		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Finished Sending Migration !! %s:%d:%d:%d",
 				  mig->rsv.ns->name, mig->rsv.p->partition_id, mig->rsv.p->vp->elements, mig->rsv.p->sub_vp->elements);
 
@@ -2615,19 +2623,20 @@ as_migrate(cf_node *dst_node, uint dst_sz, as_namespace *ns, as_partition_id par
 	*/
 	if (mig->rsv.ns->ldt_enabled) {
 		if (g_config.self_node != mig->rsv.p->replica[0]) {
-			mig->rsv.p->last_outgoing_ldt_version = as_ldt_generate_version();
+			mig->rsv.p->current_outgoing_ldt_version = as_ldt_generate_version();
 			if (AS_PARTITION_HAS_DATA(mig->rsv.p))
 				cf_detail(AS_PARTITION, "LDT_MIGRATION Generated new Version @ start of migration %d:%ld",
-						  mig->rsv.p->partition_id, mig->rsv.p->last_outgoing_ldt_version);
+						  mig->rsv.p->partition_id, mig->rsv.p->current_outgoing_ldt_version);
 		} else {
-			mig->rsv.p->last_outgoing_ldt_version = 0;
+			mig->rsv.p->current_outgoing_ldt_version = 0;
 		}
 		mig->rsv.p->txstate = AS_PARTITION_MIG_TX_STATE_SUBRECORD;
-		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Started Sending SubRecord Migration !! %s:%d:%d:%d",
-				  mig->rsv.ns->name, mig->rsv.p->partition_id, mig->rsv.p->vp->elements, mig->rsv.p->sub_vp->elements);
+		cf_detail(AS_MIGRATE, "LDT_MIGRATION: OutGoing Version %ld Started Sending SubRecord Migration !! %s:%d:%d:%d",
+				  mig->rsv.p->current_outgoing_ldt_version, mig->rsv.ns->name, mig->rsv.p->partition_id, 
+				  mig->rsv.p->vp->elements, mig->rsv.p->sub_vp->elements);
 	} else {
 		mig->rsv.p->txstate = AS_PARTITION_MIG_TX_STATE_RECORD;
-		mig->rsv.p->last_outgoing_ldt_version = 0;
+		mig->rsv.p->current_outgoing_ldt_version = 0;
 	}
 
 	if (0 != cf_queue_priority_push(g_migrate_q, &mig, CF_QUEUE_PRIORITY_HIGH))

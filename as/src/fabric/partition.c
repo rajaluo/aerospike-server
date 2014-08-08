@@ -440,7 +440,7 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 	memset(&p->vinfoset, 0, sizeof(p->vinfoset));
 	memset(p->old_sl, 0, sizeof(p->old_sl));
 	p->p_repl_factor = ns->replication_factor;
-	p->last_outgoing_ldt_version = 0;
+	p->current_outgoing_ldt_version = 0;
 
 	p->cluster_key = 0;
 
@@ -588,7 +588,7 @@ void set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
 
 	p->rxstate     = AS_PARTITION_MIG_RX_STATE_NONE;
 	p->txstate     = AS_PARTITION_MIG_TX_STATE_NONE;
-	p->last_outgoing_ldt_version = 0;
+	p->current_outgoing_ldt_version = 0;
 	clear_partition_version_in_storage(ns, pid, flush);
 	memset(vinfo, 0, sizeof(as_partition_vinfo));
 
@@ -1791,7 +1791,9 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_char(db, m_tx_state_c);           // migration tx state
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint64(db, p->last_outgoing_ldt_version); // Current migrate out version ...
+			cf_dyn_buf_append_uint64(db, p->current_outgoing_ldt_version); // Current migrate out version ...
+			cf_dyn_buf_append_char(db, ':');
+			cf_dyn_buf_append_uint64(db, p->current_incoming_ldt_version); // Current migrate out version ...
 			// no meaning if migration is finished
 			cf_dyn_buf_append_char(db, ';');
 		}
@@ -3202,7 +3204,8 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 
 			p->origin      = 0;
 			p->target      = 0;
-			p->last_outgoing_ldt_version = 0;
+			p->current_outgoing_ldt_version = 0;
+			p->current_incoming_ldt_version = 0;
 
 			/*
 			 * We are going to redo all the migrations that have not been completed based
