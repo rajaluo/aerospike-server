@@ -1089,7 +1089,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	cf_digest subrec_digest = r->key;
 	uint64_t subrec_version = 0;
 	subrec_version          = as_ldt_subdigest_getversion(&subrec_digest);
-	cf_info(AS_LDT, "SUBRECVERSION OUT OF SUBREC_DIGEST %ld", subrec_version);
+	cf_detail(AS_LDT, "SUBRECVERSION OUT OF SUBREC_DIGEST %ld", subrec_version);
 
 	// If there is incoming migration and subrecord is of incoming migration, then
 	// skip it. The parent may not have made it yet so garbage collecting this would
