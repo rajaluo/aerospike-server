@@ -113,3 +113,9 @@ void as_migrate_dump(bool verbose);
 as_migrate_cb_return as_partition_migrate_rx(as_migrate_state s,
 		as_namespace *ns, as_partition_id pid, as_index_tree *tree,
 		cf_node source_node, void *udata);
+
+/*
+ * Check and return if passed in version is found in migration incoming ldt version hash
+ */
+int
+as_migrate_is_incoming_version(uint64_t version, uint64_t *found_version);

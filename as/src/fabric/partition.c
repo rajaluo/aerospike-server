@@ -1792,8 +1792,6 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 			cf_dyn_buf_append_char(db, m_tx_state_c);           // migration tx state
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->current_outgoing_ldt_version); // Current migrate out version ...
-			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint64(db, p->current_incoming_ldt_version); // Current migrate out version ...
 			// no meaning if migration is finished
 			cf_dyn_buf_append_char(db, ';');
 		}
@@ -3205,7 +3203,6 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 			p->origin      = 0;
 			p->target      = 0;
 			p->current_outgoing_ldt_version = 0;
-			p->current_incoming_ldt_version = 0;
 
 			/*
 			 * We are going to redo all the migrations that have not been completed based

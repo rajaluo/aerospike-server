@@ -211,6 +211,7 @@
 #include <base/write_request.h>
 #include "base/thr_proxy.h"
 #include "base/udf_rw.h"
+#include <fabric/migrate.h>
 
 #include <aerospike/as_types.h>
 #include <aerospike/as_msgpack.h>
@@ -283,6 +284,8 @@
 // Define the Property Map Bin Name for Sub Records
 #define SUBREC_PROP_BIN          "SR_PROP_BIN"
 #define LDT_VERSION_SZ           6
+
+extern shash *g_migrate_incoming_ldt_version_hash;
 
 /*
  * Used by migration to generate version at the beginning of partition
@@ -1096,8 +1099,8 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	// be problem.
 	if (((p->rxstate == AS_PARTITION_MIG_RX_STATE_RECORD)
 			|| (p->rxstate == AS_PARTITION_MIG_RX_STATE_SUBRECORD)) &&
-			(p->current_incoming_ldt_version == subrec_version)) {
-		cf_detail(AS_LDT, " Skipping Defrag Partition Mig State is %d %ld == %ld ", p->rxstate, p->current_incoming_ldt_version, subrec_version);
+			(0 == as_migrate_is_incoming_version(subrec_version, NULL))) {
+		cf_detail(AS_LDT, " Skipping Defrag Partition Mig State is %d %ld ", p->rxstate, subrec_version);
 		as_record_done(r_ref, ns);
 		return;
 	}
