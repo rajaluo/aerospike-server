@@ -956,7 +956,7 @@ struct as_namespace_s {
 	struct as_sindex_s	*sindex;  // array with AS_MAX_SINDEX meta data
 	uint64_t			sindex_data_max_memory;
 	cf_atomic_int		sindex_data_memory_used;
-	shash				*sindex_set_binid_hash;
+	shash				*sindex_property_hash;  // set_binid_type
 	shash				*sindex_iname_hash;
 
 	// Current state of threshold breaches.
@@ -1005,6 +1005,7 @@ struct as_namespace_s {
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator
 
+#define AS_SINDEX_PROP_KEY_SIZE ( AS_SET_NAME_MAX_SIZE + 20) // setname_binid_typeid
 #define INVALID_SET_ID 0
 #define AS_NAMESPACE_SET_THRESHOLD_EXCEEDED -2
 
