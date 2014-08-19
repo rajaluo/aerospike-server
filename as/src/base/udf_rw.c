@@ -491,6 +491,10 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 			as_storage_record_set_rec_props(rd, rec_props_data);
 		}
 
+		if (as_ldt_record_is_parent(r_ref->r)) {
+			as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, NULL);
+		}
+
 		write_local_post_processing(tr, tr->rsv.ns, NULL, &urecord->pickled_buf,
 			&urecord->pickled_sz, &urecord->pickled_void_time,
 			&urecord->pickled_rec_props, true/*increment_generation*/,
@@ -621,11 +625,12 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	int  ret              = 0;
 
 	udf_rw_post_processing(h_urecord, &urecord_op, set_id);
+	wr->pickled_ldt_version = lrecord->version;
 
 	if (urecord_op == UDF_OPTYPE_DELETE) {
 		wr->pickled_buf      = NULL;
 		wr->pickled_sz       = 0;
-		wr->pickled_void_time      = 0;
+		wr->pickled_void_time   = 0;
 		as_rec_props_clear(&wr->pickled_rec_props);
 		wr->ldt_rectype_bits = h_urecord->ldt_rectype_bits;
 		*lrecord_op  = UDF_OPTYPE_DELETE;
@@ -926,8 +931,8 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		// the property map bin is there. If not there the record is normal
 		// record
 		int rv = as_ldt_parent_storage_get_version(&rd, &lrecord.version);
-		cf_detail(AS_LDT, "LDT_VERSION Read Version From Storage %p:%ld rv=%d",
-				  *(uint64_t *)&urecord.keyd, lrecord.version, rv);
+		cf_detail_digest(AS_LDT, &urecord.keyd, "LDT_VERSION Read Version From Storage %ld rv=%d",
+				  lrecord.version, rv);
 	} else {
 		urecord.flag   &= ~(UDF_RECORD_FLAG_OPEN
 							| UDF_RECORD_FLAG_STORAGE_OPEN

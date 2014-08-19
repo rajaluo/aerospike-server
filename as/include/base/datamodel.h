@@ -622,12 +622,6 @@ typedef uint8_t as_partition_state;
 #define AS_PARTITION_MIG_TX_STATE_RECORD 2
 typedef uint8_t as_partition_mig_tx_state;
 
-#define AS_PARTITION_MIG_RX_STATE_NONE 0
-#define AS_PARTITION_MIG_RX_STATE_INIT 1
-#define AS_PARTITION_MIG_RX_STATE_SUBRECORD 2
-#define AS_PARTITION_MIG_RX_STATE_RECORD 3
-typedef uint8_t as_partition_mig_rx_state;
-
 /* as_partition_getid
  * A brief utility function to derive the partition ID from a digest */
 static inline as_partition_id
@@ -651,7 +645,6 @@ struct as_partition_s {
 	 * target: an actual master that we're migrating to */
 	cf_node origin, target;
 	as_partition_state state;  // used to be consistency
-	as_partition_mig_rx_state rxstate;
 	as_partition_mig_tx_state txstate;
 	int pending_writes;  // one thread polls on this going to 0
 	int pending_migrate_tx, pending_migrate_rx;

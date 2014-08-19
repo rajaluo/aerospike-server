@@ -39,6 +39,7 @@
 #include "aerospike/as_val.h"
 
 #include "fault.h"
+#include "base/ldt.h"
 
 
 /*********************************************************************
@@ -56,7 +57,7 @@ ldt_record_init(ldt_record *lrecord)
 	lrecord->as      = &g_as_aerospike;
 
 	// No versioning right now !!!
-	lrecord->version = 0;
+	lrecord->version = as_ldt_generate_version();
 	for(int i = 0; i < MAX_LDT_CHUNKS; i++) {
 		lrecord->chunk[i].slot = -1;
 	}

@@ -95,8 +95,6 @@
 #define TSCAN_FIELD_REC_PROPS   7
 #define TSCAN_FIELD_JOB_ID      8
 
-#define TSCAN_OP_SPROC_UPDATE   1
-
 // States a scan job can be in
 #define AS_SCAN_JOB_ABORTED 	0x00000001
 #define AS_SCAN_JOB_DONE		0x00000002
@@ -1789,7 +1787,7 @@ scan_udf_commit_prole( cf_node node, msg *m)
 	as_partition_reservation rsv;
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, 0);
 	cf_atomic_int_incr(&g_config.scan_tree_count);
-	int rsp = write_local_pickled(keyd, &rsv, pickled_buf, pickled_sz, &rec_props, generation, record_ttl, node, 0);
+	int rsp = write_local_pickled(keyd, &rsv, pickled_buf, pickled_sz, &rec_props, generation, record_ttl, node, 0, NULL);
 	if (rsp != 0 ) {
 		cf_warning(AS_SCAN, "writing pickled failed %d for digest %"PRIx64, rsp, *(uint64_t *) keyd);
 	}
@@ -1803,27 +1801,6 @@ scan_udf_commit_prole( cf_node node, msg *m)
 Out:
 	as_fabric_msg_put(m);
 	return(rv);
-}
-
-int
-tscan_fabric_msg_receiver(cf_node node, msg *m, void *udata)
-{
-	uint32_t op = 99999;
-	msg_get_uint32(m, TSCAN_FIELD_OP, &op);
-
-	switch (op) {
-
-		case TSCAN_OP_SPROC_UPDATE:
-		{
-			// @TODO need to grab prole job and update status.
-			// cf_atomic_int_incr(&g_config.write_prole);
-
-			scan_udf_commit_prole(node, m);
-			break;
-		}
-
-	}
-	return(0);
 }
 
 static cf_atomic32   init_counter = 0;
@@ -1862,7 +1839,6 @@ as_tscan_init()
 		cf_crash(AS_SCAN, "can't create scan job thread ");
 	}
 
-	as_fabric_register_msg_fn(M_TYPE_TSCAN, tscan_mt, sizeof(tscan_mt), tscan_fabric_msg_receiver, 0 /* udata */);
 	cf_info(AS_SCAN, "started %d threads", MAX_SCAN_THREADS);
 }
 

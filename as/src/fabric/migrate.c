@@ -304,6 +304,11 @@ static cf_atomic32   g_migrate_id;
 
 static shash *g_migrate_incoming_ldt_version_hash;
 
+typedef struct migrate_recv_ldt_version_t {
+	uint64_t        incoming_ldt_version;
+	as_partition_id pid;
+} __attribute__((__packed__)) migrate_recv_ldt_version;
+
 // a per-pusher transaction id
 static cf_atomic32   g_migrate_trans_id;
 
@@ -394,8 +399,10 @@ typedef struct migrate_recv_control_t {
 	uint64_t cluster_key;
 	cf_node source_node;
 	as_migrate_type mig_type;
-	as_partition_vinfoset vinfoset;
-	uint64_t    incoming_ldt_version;
+	as_partition_mig_rx_state rxstate;
+	as_partition_vinfoset    vinfoset;
+	uint64_t                 incoming_ldt_version;
+	as_partition_id          pid;
 } migrate_recv_control;
 
 void as_migrate_print_cluster_key(const char *message)
@@ -444,14 +451,17 @@ void
 migrate_recv_control_destroy(void *parm)
 {
 	migrate_recv_control *mc = (migrate_recv_control *) parm;
+
+	migrate_recv_ldt_version mc_l;
+	mc_l.incoming_ldt_version = mc->incoming_ldt_version;
+	mc_l.pid                  = mc->pid;
+
 	if (mc->rsv.p) {
 		as_partition_release(&mc->rsv);
 		cf_atomic_int_decr(&g_config.migrx_tree_count);
 	}
 
-	if (mc->incoming_ldt_version) {
-		shash_delete(g_migrate_incoming_ldt_version_hash, (void *)&mc->incoming_ldt_version);
-	}
+	shash_delete(g_migrate_incoming_ldt_version_hash, &mc_l);
 
 	cf_atomic_int_decr(&g_config.migrate_rx_object_count);
 }
@@ -688,14 +698,14 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 	PRINTD(&c->edigest);
 
 	if (COMPONENT_IS_LDT_SUB(c)) {
-		cf_assert(((mc->rsv.p->rxstate == AS_PARTITION_MIG_RX_STATE_SUBRECORD)
-				   || (mc->rsv.p->rxstate == AS_PARTITION_MIG_RX_STATE_INIT)),
+		cf_assert(((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD)
+				   || (mc->rxstate == AS_MIGRATE_RX_STATE_INIT)),
 				  AS_PARTITION, CF_CRITICAL,
-				  "Unexpected Partition Migration State %d:%d", mc->rsv.p->rxstate, mc->rsv.p->partition_id);
+				  "Unexpected Partition Migration State %d:%d", mc->rxstate, mc->rsv.p->partition_id);
 	} else if (COMPONENT_IS_LDT_DUMMY(c)) {
 		cf_crash(AS_MIGRATE, "Invalid Component Type Dummy received by migration");
 	} else {
-		mc->rsv.p->rxstate = AS_PARTITION_MIG_RX_STATE_RECORD;
+		mc->rxstate = AS_MIGRATE_RX_STATE_RECORD;
 		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming version %ld Started Receiving Record Migration !! %s:%d:%d:%d",
 				  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
 				  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
@@ -1558,14 +1568,22 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 
 				// This node is going to accept migration. When migration starts
 				// it is subrecord migration
-				mc->rsv.p->rxstate = AS_PARTITION_MIG_RX_STATE_SUBRECORD;
+				mc->rxstate = AS_MIGRATE_RX_STATE_SUBRECORD;
 				msg_get_uint64(m, MIG_FIELD_TYPE, &mc->incoming_ldt_version);
 
-				shash_put(g_migrate_incoming_ldt_version_hash, (void *)&mc->incoming_ldt_version, (void *)&mc->incoming_ldt_version); 
-				cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
-						  mc->incoming_ldt_version,
-						  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, 
-						  mc->rsv.p->sub_vp->elements);
+				mc->pid                   = mc->rsv.p->partition_id;
+				migrate_recv_ldt_version mc_l;
+				mc_l.incoming_ldt_version = mc->incoming_ldt_version;
+				mc_l.pid                  = mc->pid;
+
+				mc->rxstate = AS_MIGRATE_RX_STATE_INIT;
+				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, mc); 
+				if (mc->rsv.p->sub_vp->elements > 0) {
+					cf_info(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
+							  mc->incoming_ldt_version,
+							  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, 
+							  mc->rsv.p->sub_vp->elements);
+				}
 					
 				// If I'm receiving migrates, then I should be batching messages
 //				cf_debug(AS_MIGRATE, "migrate_start: set fabric to high-throughtput %"PRIx64,id);
@@ -1684,10 +1702,8 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 					}
 
 					// This node is done with receiving migration. reset rxstate
-					mc->rsv.p->rxstate = AS_PARTITION_MIG_RX_STATE_NONE;
 					cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld Finished Receiving Migration !! %s:%d:%d:%d",
 							  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
-					mc->incoming_ldt_version = 0;
 
 					if (g_event_cb) {
 						cf_debug(AS_MIGRATE, "recv migrate %s msg: mig %d, {%s:%d} from node %"PRIx64, cancel_migrate ? "cancel" : "done", mig_id, mc->rsv.ns->name, mc->rsv.pid, id);
@@ -1765,7 +1781,6 @@ migrate_rx_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void *udat
 		}
 
 		// This node is done with migration receive. reset rxstate
-		mci->rsv.p->rxstate = AS_PARTITION_MIG_RX_STATE_NONE;
 		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld Finished Receiving Migration !! %s:%d:%d:%d",
 				  mci->incoming_ldt_version, mci->rsv.ns->name, mci->rsv.p->partition_id, mci->rsv.p->vp->elements, mci->rsv.p->sub_vp->elements);
 
@@ -2707,19 +2722,29 @@ as_migrate_init()
 	g_migrate_id = 1;
 
 	// binid to simatch lookup
-	if (SHASH_OK != shash_create(&g_migrate_incoming_ldt_version_hash, migrate_ldt_version_hashfn, 8, 64, 64, SHASH_CR_MT_MANYLOCK)) {
+	if (SHASH_OK != shash_create(&g_migrate_incoming_ldt_version_hash, migrate_ldt_version_hashfn, sizeof(migrate_recv_ldt_version), 64, 64, SHASH_CR_MT_MANYLOCK)) {
 		cf_crash(AS_AS, "Couldn't incoming ldt migrate hash");
 	}
 }
 
-int
-as_migrate_is_incoming_version(uint64_t version, uint64_t *found_version)
+// Searches for the passed in migrate version is current incoming migration
+// hash and check the incoming migration rx state. If rx state matches 
+// subrecord return true otherwise false
+bool
+as_migrate_is_incoming_subrecord(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id)
 {
-	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, (void *)&version, (void *)found_version)) {
-		return 0;
-	} else {
-		return -1;
-	};
+	migrate_recv_control *mc  = NULL;
+	migrate_recv_ldt_version mc_l;
+	mc_l.incoming_ldt_version = version;
+	mc_l.pid                  = partition_id;
+	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc, (void *)mc)) {
+		if (mc && ((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD)
+				|| (mc->rxstate == AS_MIGRATE_RX_STATE_INIT))) {
+			return true;
+		}
+	}
+	cf_detail_digest(AS_MIGRATE, subrec_digest, "%s incoming migrate for partition %d of version %ld with state %d", mc ? " " : "NO", partition_id, version, mc ? mc->rxstate : 0); 
+	return false;
 }
 
 /*

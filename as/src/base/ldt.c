@@ -1092,15 +1092,13 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	cf_digest subrec_digest = r->key;
 	uint64_t subrec_version = 0;
 	subrec_version          = as_ldt_subdigest_getversion(&subrec_digest);
-	cf_detail(AS_LDT, "SUBRECVERSION OUT OF SUBREC_DIGEST %ld", subrec_version);
+	cf_detail(AS_LDT, "LDT_SUB_GC Sub Record Version %ld", subrec_version);
 
 	// If there is incoming migration and subrecord is of incoming migration, then
 	// skip it. The parent may not have made it yet so garbage collecting this would
 	// be problem.
-	if (((p->rxstate == AS_PARTITION_MIG_RX_STATE_RECORD)
-			|| (p->rxstate == AS_PARTITION_MIG_RX_STATE_SUBRECORD)) &&
-			(0 == as_migrate_is_incoming_version(subrec_version, NULL))) {
-		cf_detail(AS_LDT, " Skipping Defrag Partition Mig State is %d %ld ", p->rxstate, subrec_version);
+	if (true == as_migrate_is_incoming_subrecord(&subrec_digest, subrec_version, p->partition_id)) {
+		cf_detail(AS_LDT, " LDT_SUB_GC Skipping Defrag for version %ld ", subrec_version);
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -1111,7 +1109,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	//	}
 
 	if (!as_ldt_record_is_sub(r)) {
-		cf_warning(AS_LDT, "LDT_Defrag: Missing Index bits !!");
+		cf_warning(AS_LDT, "LDT_SUB_GC: Missing Index bits !!");
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -1187,8 +1185,8 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		if (ns->storage_data_in_memory) {
 			cf_atomic_int_sub(&p->n_bytes_memory, starting_memory_bytes);
 		}
-		cf_detail(AS_LDT, "LDT_SUB_GC Expiry of the SubRecord type=%d version=%ld partition state is %d:%d",
-				type, subrec_version, p->rxstate, p->txstate);
+		cf_detail(AS_LDT, "LDT_SUB_GC Expiry of the SubRecord type=%d version=%ld for partition %d with state is %d",
+				type, subrec_version, p->partition_id, p->txstate);
 		cf_detail_digest(AS_LDT, &subrec_digest, "Sub-Rec Digest: ");
 		cf_detail_digest(AS_LDT, &esr_digest, "ESR Digest: ");
 		cf_detail_digest(AS_LDT, &parent_digest, "Parent Digest: ");

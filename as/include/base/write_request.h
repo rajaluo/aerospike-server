@@ -94,6 +94,7 @@ typedef struct write_request_s {
 	size_t               pickled_sz;
 	uint32_t             pickled_void_time;
 	as_rec_props         pickled_rec_props;
+	uint64_t             pickled_ldt_version;
 
 	cf_atomic32          trans_complete; // make sure transaction gets processed only once
 	cf_atomic32          dupl_trans_complete; // if 0, we are in 'dup' phase (and use atomic to only-once

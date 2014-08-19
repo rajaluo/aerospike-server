@@ -543,16 +543,22 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (0 == as_record_get(rsv.tree, &block->keyd, &r_ref, ns) ||
-			(ns->ldt_enabled &&
-					0 == as_record_get(rsv.sub_tree, &block->keyd, &r_ref, ns))) {
+	int ret = as_record_get(rsv.tree, &block->keyd, &r_ref, ns);
+	bool is_subrec = false;
+
+	if (ret && ns->ldt_enabled) {
+		ret = as_record_get(rsv.sub_tree, &block->keyd, &r_ref, ns);
+		is_subrec = true;
+	}
+
+	if (0 == ret) {
 		as_index *r = r_ref.r;
 
 		if (r->storage_key.ssd.file_id == ssd->file_id &&
 				r->storage_key.ssd.rblock_id == rblock_id) {
 			if (r->generation != block->generation) {
-				cf_warning(AS_DRV_SSD, "defrag: block points here but generation different (%d:%d), surprising",
-						r->generation, block->generation);
+				cf_warning_digest(AS_DRV_SSD, &block->keyd, "defrag: block points here but generation different (%d:%d), surprising is_subrec=%s",
+						r->generation, block->generation, is_subrec ? "TRUE" : "FALSE");
 			}
 
 			if (r->storage_key.ssd.n_rblocks != n_rblocks) {

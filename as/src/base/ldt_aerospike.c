@@ -183,6 +183,7 @@ ldt_record_pickle(ldt_record *lrecord,
 							&h_urecord->pickled_buf,
 							h_urecord->pickled_sz,
 							h_urecord->pickled_void_time,
+							0, // Not Used
 							&h_urecord->pickled_rec_props,
 							RW_OP_WRITE,
 							h_urecord->ldt_rectype_bits, true);
@@ -218,6 +219,7 @@ ldt_record_pickle(ldt_record *lrecord,
 								&c_urecord->pickled_buf,
 								c_urecord->pickled_sz,
 								c_urecord->pickled_void_time,
+								0, // Not Used
 								&c_urecord->pickled_rec_props,
 								RW_OP_WRITE,
 								c_urecord->ldt_rectype_bits, true);
@@ -563,7 +565,7 @@ ldt_crec_create(ldt_record *lrecord)
 		return NULL;
 	}
 
-	cf_debug_digest(AS_LDT, &(lchunk->c_urecord.keyd), "Crec Create:Ptr(%p) Digest: ", lchunk->c_urec_p);
+	cf_detail_digest(AS_LDT, &(lchunk->c_urecord.keyd), "Crec Create:Ptr(%p) Digest: version %ld", lchunk->c_urec_p, lrecord->version);
 
 	as_val_reserve(lchunk->c_urec_p);
 	return lchunk->c_urec_p;
@@ -626,7 +628,7 @@ ldt_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	// lrecord->version for quick reference.
 	udf_record   * h_urecord = (udf_record *)as_rec_source(h_urec);
 	rv = as_ldt_parent_storage_get_version(h_urecord->rd, &lrecord->version);
-	cf_detail(AS_LDT, "LDT_VERSION At Create %"PRIx64":%ld rv=%d", *(uint64_t *)&h_urecord->keyd, lrecord->version, rv);
+	cf_detail_digest(AS_LDT, &h_urecord->keyd, "LDT_VERSION At Create %ld rv=%d", lrecord->version, rv);
 	return 0;
 }
 
