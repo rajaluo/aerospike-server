@@ -689,7 +689,7 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 	msg_get_uint64(m, MIG_FIELD_VERSION, &c->version);
 	msg_get_uint32(m, MIG_FIELD_PGENERATION, &c->pgeneration);
 	msg_get_uint32(m, MIG_FIELD_PVOID_TIME, &c->pvoid_time);
-	cf_info(AS_MIGRATE, "LDT_MIGRATION: Incoming %s version=%ld flag=%d",
+	cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming %s version=%ld flag=%d",
 			  (info & MIG_INFO_LDT_SUBREC) ? "MIG_INFO_LDT_SUBREC"
 			  : ((info & MIG_INFO_LDT_ESR) ? "MIG_INFO_LDT_ESR"
 				 : "MIG_INFO_LDT_REC"), c->version, c->flag);

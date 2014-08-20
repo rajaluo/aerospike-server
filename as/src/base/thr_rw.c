@@ -2320,14 +2320,21 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 			// Should bail out way earlier than this
 			goto Out;
 		} else { 
+			int ret = as_ldt_parent_storage_get_version(&rd, &linfo->ldt_prole_version);
 			// No incoming migration from the source node.
 			if (linfo->replication_partition_version_match) {
-				// Master and prole partition version matches
-				if (0 == as_ldt_parent_storage_get_version(&rd, &linfo->ldt_prole_version)) {
+				if (ret == 0) {
+					linfo->ldt_prole_version_set = true;
+				}
+			} else {
+				// Possibly incoming / future incoming migration
+				// from the source node
+				if (ret == 0) {
 					linfo->ldt_prole_version_set = true;
 				} else {
 					// Parent record does not exist !!
-					// Bail out
+					// Bail out and wait for parent to come through
+					// migration route.
 					goto Out;
 				}
 			}
