@@ -281,7 +281,7 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 		as_fabric_msg_put(m);
 	}
 
-	cf_atomic_int_incr(&g_config.proxy_initiate);
+	cf_atomic_int_incr(&g_config.ldt_proxy_initiate);
 
 	return 0;
 }
@@ -825,7 +825,11 @@ Retry:
 			return 0;
 		}
 
-		cf_atomic_int_incr(&g_config.proxy_retry);
+		if (pr->wr) {
+			cf_atomic_int_incr(&g_config.ldt_proxy_retry);
+		} else {
+			cf_atomic_int_incr(&g_config.proxy_retry);
+		}
 
 		int rv = as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_PRIORITY_MEDIUM);
 		// TODO: make sure the retransmit op does not apply more than once?

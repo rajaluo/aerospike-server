@@ -317,7 +317,70 @@ is_udf(cl_msg *msgp)
 	return as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME) != NULL;
 }
 
-
+				
+int
+as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
+{
+	if (-2 == rv) {
+		cf_debug_digest(AS_TSVC, &(tr->keyd), "write re-attempt: ");
+		as_partition_release(&tr->rsv);
+		cf_atomic_int_decr(&g_config.rw_tree_count);
+		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(error_hist);
+		thr_tsvc_enqueue(tr);
+		*free_msgp = false;
+	} else if (-3 == rv) {
+		cf_debug(AS_TSVC,
+				"write in progress on key - delay and reattempt");
+		as_partition_release(&tr->rsv);
+		cf_atomic_int_decr(&g_config.rw_tree_count);
+		MICROBENCHMARK_HIST_INSERT_P(error_hist);
+		as_fabric_msg_put(tr->proxy_msg);
+	} else {
+		cf_debug(AS_TSVC,
+				"write start failed: rv %d proto result %d", rv,
+				tr->result_code);
+		as_partition_release(&tr->rsv);
+		cf_atomic_int_decr(&g_config.rw_tree_count);
+		if (tr->result_code == 0) {
+			cf_warning(AS_TSVC,
+					"   warning: failure should have set protocol result code");
+			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
+		if (tr->proto_fd_h) {
+			if (0 != as_msg_send_reply(tr->proto_fd_h,
+						tr->result_code, 0, 0, 0, 0, 0, 0, 0, tr->trid, NULL))
+			{
+				cf_info(AS_TSVC,
+						"tsvc read: can't send error msg, fd %d",
+						tr->proto_fd_h->fd);
+			}
+			tr->proto_fd_h = 0;
+			// histogram_insert_data_point(g_config.rt_hist, tr->start_time);
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+			cf_atomic_int_incr(&g_config.err_tsvc_requests);
+		}
+		else if (tr->proxy_msg) {
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
+				cf_detail_digest(AS_RW, &(tr->keyd),
+						"SHIPPED_OP :: Sending ship op reply, rc %d to (%"PRIx64") ::",
+						tr->result_code, tr->proxy_node);
+			}
+			else {
+				cf_detail(AS_RW,
+						"sending proxy reply, rc %d to %"PRIx64"",
+						tr->result_code, tr->proxy_node);
+			}
+			as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
+					tr->result_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+		} else {
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+		}
+		return -1;
+	}
+	return 0;
+}
+	
 // Handle the transaction, including proxy to another node if necessary.
 void
 process_transaction(as_transaction *tr)
@@ -340,7 +403,7 @@ process_transaction(as_transaction *tr)
 	uint64_t node_cluster_key = 0;
 
 	int rv;
-	int free_msgp = true;
+	bool free_msgp = true;
 	as_namespace *ns = 0;
 
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(q_wait_hist);
@@ -710,77 +773,15 @@ process_transaction(as_transaction *tr)
 			// -2 :: "try again"
 			// -3 :: "duplicate proxy request, drop"
 			if (0 != rv) {
-				if (-2 == rv) {
-					cf_debug_digest(AS_TSVC, &(tr->keyd), "write re-attempt: ");
-					as_partition_release(&tr->rsv);
-					cf_atomic_int_decr(&g_config.rw_tree_count);
-					MICROBENCHMARK_HIST_INSERT_AND_RESET_P(error_hist);
-					thr_tsvc_enqueue(tr);
-					free_msgp = false;
-				} else if (-3 == rv) {
-					cf_debug(AS_TSVC,
-							"write in progress on key - delay and reattempt");
-					as_partition_release(&tr->rsv);
-					cf_atomic_int_decr(&g_config.rw_tree_count);
-					MICROBENCHMARK_HIST_INSERT_P(error_hist);
-					as_fabric_msg_put(tr->proxy_msg);
-					if (free_msgp == true) {
-						cf_free(msgp);
-						free_msgp = false;
-					}
-				} else {
-					cf_debug(AS_TSVC,
-							"write start failed: rv %d proto result %d", rv,
-							tr->result_code);
-					as_partition_release(&tr->rsv);
-					cf_atomic_int_decr(&g_config.rw_tree_count);
-					if (tr->result_code == 0) {
-						cf_warning(AS_TSVC,
-								"   warning: failure should have set protocol result code");
-						tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-					}
-					if (tr->proto_fd_h) {
-						if (0 != as_msg_send_reply(tr->proto_fd_h,
-								tr->result_code, 0, 0, 0, 0, 0, 0, 0, tr->trid, NULL))
-						{
-							cf_info(AS_TSVC,
-									"tsvc read: can't send error msg, fd %d",
-									tr->proto_fd_h->fd);
-						}
-						tr->proto_fd_h = 0;
-						// histogram_insert_data_point(g_config.rt_hist, tr->start_time);
-						MICROBENCHMARK_HIST_INSERT_P(error_hist);
-						cf_atomic_int_incr(&g_config.err_tsvc_requests);
-					}
-					else if (tr->proxy_msg) {
-						MICROBENCHMARK_HIST_INSERT_P(error_hist);
-						if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-							cf_detail_digest(AS_RW, &(tr->keyd),
-									"SHIPPED_OP :: Sending ship op reply, rc %d to (%"PRIx64") ::",
-									tr->result_code, tr->proxy_node);
-						}
-						else {
-							cf_detail(AS_RW,
-									"sending proxy reply, rc %d to %"PRIx64"",
-									tr->result_code, tr->proxy_node);
-						}
-						as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
-								tr->result_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
-					} else {
-						MICROBENCHMARK_HIST_INSERT_P(error_hist);
-					}
-					if (free_msgp == true) {
-						cf_free(msgp);
-						free_msgp = false;
-					}
-					goto Cleanup;
-				}
+				rv = as_rw_process_result(rv, tr, &free_msgp); 
 			}
 			if (free_msgp == true) {
 				cf_free(msgp);
 				free_msgp = false;
 			}
-
+			if (rv) {
+				goto Cleanup;
+			}
 		} else {
 			// rv != 0 or cluster keys DO NOT MATCH.
 			//

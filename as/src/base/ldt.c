@@ -531,6 +531,11 @@ as_ldt_digest_randomizer(as_namespace *ns, cf_digest *dig)
  *     the same node all the time which is kind of difficult. Other options
  *     is all the ops go to all the nodes. And no replication happens and let
  *     the record come in the normal course of replication.
+ *
+ * Note: Invariant of the problems it is ok to perform retries of shipop etc.
+ *       duplicate data is deemed lesser of evil that no data. Also the effect
+ *       is the DS specific. For timeseries any retry will result in the unique
+ *       key contraint in LLIST or in case of LSET or LMAP the op may be idempotent
  */
 int
 as_ldt_shipop(write_request *wr, cf_node dest_node)

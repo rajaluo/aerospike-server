@@ -895,10 +895,6 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	// to avoid attempting any garbage collection. For ldt_record clean up
 	// and post processing has to be in process context under transactional
 	// protection.
-#if 0
-	as_rec          lrec;
-	as_rec_init(&lrec, &lrecord, &ldt_record_hooks);
-#endif
 	as_rec  *lrec = as_rec_new(&lrecord, &ldt_record_hooks);
 
 	// Link lrecord and urecord
