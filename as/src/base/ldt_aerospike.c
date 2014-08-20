@@ -183,7 +183,6 @@ ldt_record_pickle(ldt_record *lrecord,
 							&h_urecord->pickled_buf,
 							h_urecord->pickled_sz,
 							h_urecord->pickled_void_time,
-							0, // Not Used
 							&h_urecord->pickled_rec_props,
 							RW_OP_WRITE,
 							h_urecord->ldt_rectype_bits, true);
@@ -219,7 +218,6 @@ ldt_record_pickle(ldt_record *lrecord,
 								&c_urecord->pickled_buf,
 								c_urecord->pickled_sz,
 								c_urecord->pickled_void_time,
-								0, // Not Used
 								&c_urecord->pickled_rec_props,
 								RW_OP_WRITE,
 								c_urecord->ldt_rectype_bits, true);

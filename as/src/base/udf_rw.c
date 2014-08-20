@@ -502,7 +502,7 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 		}
 
 		if (as_ldt_record_is_parent(r_ref->r)) {
-			as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, NULL);
+			as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, &urecord->cur_particle_data);
 		}
 
 		write_local_post_processing(tr, tr->rsv.ns, NULL, &urecord->pickled_buf,
@@ -635,7 +635,8 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	int  ret              = 0;
 
 	udf_rw_post_processing(h_urecord, &urecord_op, set_id);
-	wr->pickled_ldt_version = lrecord->version;
+	// In case required 
+	// wr->pickled_ldt_version = lrecord->version;
 
 	if (urecord_op == UDF_OPTYPE_DELETE) {
 		wr->pickled_buf      = NULL;

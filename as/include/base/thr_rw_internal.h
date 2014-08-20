@@ -169,7 +169,6 @@ rw_msg_setup(
 	uint8_t ** p_pickled_buf,
 	size_t pickled_sz,
 	uint32_t pickled_void_time,
-	uint64_t pickled_ldt_version,
 	as_rec_props * p_pickled_rec_props,
 	int op,
 	uint16_t ldt_rectype_bits,

@@ -480,7 +480,6 @@ rw_msg_setup_infobits(msg *m, as_transaction *tr, int ldt_rectype_bits, bool has
 int
 rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		uint8_t ** p_pickled_buf, size_t pickled_sz, uint32_t pickled_void_time,
-		uint64_t pickled_ldt_version,
 		as_rec_props * p_pickled_rec_props, int op, uint16_t ldt_rectype_bits,
 		bool has_udf)
 {
@@ -511,8 +510,9 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 			// consolidated. In those cases version at the source node is replicated 
 			msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t *)&tr->rsv.p->version_info, sizeof(as_partition_vinfo), MSG_SET_COPY);
 			cf_detail_digest(AS_RW, keyd,
-					"MULTI_OP : Set Up Replication Message for the LDT version %ld", pickled_ldt_version);
-			msg_set_uint64(m, RW_FIELD_LDT_VERSION, pickled_ldt_version); 
+					"MULTI_OP : Set Up Replication Message for the LDT current outgoing "
+					" migrate version %ld", tr->rsv.p->current_outgoing_ldt_version);
+			msg_set_uint64(m, RW_FIELD_LDT_VERSION, tr->rsv.p->current_outgoing_ldt_version); 
 		}
 
 		if (*p_pickled_buf) {
@@ -557,8 +557,8 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		// consolidated. In those cases version at the source node is replicated 
 		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t *)&tr->rsv.p->version_info, sizeof(as_partition_vinfo), MSG_SET_COPY);
 		cf_detail_digest(AS_RW, keyd,
-				"MULTI_OP : Set Up Replication Message for the LDT version %ld", pickled_ldt_version);
-		msg_set_uint64(m, RW_FIELD_LDT_VERSION, pickled_ldt_version); 
+				"MULTI_OP : Set Up Replication Message for the LDT version %ld", tr->rsv.p->current_outgoing_ldt_version);
+		msg_set_uint64(m, RW_FIELD_LDT_VERSION, tr->rsv.p->current_outgoing_ldt_version);
 		msg_set_uint32(m, RW_FIELD_INFO, RW_INFO_LDT);
 		msg_set_unset(m, RW_FIELD_AS_MSG);
 		msg_set_unset(m, RW_FIELD_RECORD);
@@ -603,7 +603,7 @@ write_request_setup(write_request *wr, as_transaction *tr, int optype)
 	}
 
 	rw_msg_setup(wr->dest_msg, tr, &wr->keyd, &wr->pickled_buf, wr->pickled_sz,
-			wr->pickled_void_time, wr->pickled_ldt_version, &wr->pickled_rec_props, optype,
+			wr->pickled_void_time, &wr->pickled_rec_props, optype,
 			wr->ldt_rectype_bits, wr->has_udf);
 
 	if (wr->shipped_op) {
@@ -2204,6 +2204,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	r_ref.skip_lock = false;
 	as_index_tree *tree = rsv->tree;
 	bool is_subrec  = false;
+	bool is_ldt_parent = false;
 
 	if (rsv->ns->ldt_enabled) {
 		if ((info & RW_INFO_LDT_SUBREC)
@@ -2213,24 +2214,24 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 					*(uint64_t *)keyd);
 			tree = rsv->sub_tree;
 			is_subrec = true;
-		}
+		} else if (info & RW_INFO_LDT_REC) {
+			is_ldt_parent = true;
+		} 
 	}
 
-	if (linfo) {
-		if (linfo->replication_partition_version_match) {
-			if (is_subrec) { 
-				if  (linfo->ldt_prole_version_set) {
-					// ldt_version should be set
-					as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);	
-					cf_detail_digest(AS_RW, keyd, "Set Prole Version %ld", linfo->ldt_prole_version);
-				} else {
-					cf_warning(AS_RW, "Is sub rec and LDT prole version not set %d %d %d",linfo->ldt_prole_version, linfo->ldt_prole_version_set);
-				}
+	if (linfo->replication_partition_version_match) {
+		if (is_subrec) { 
+			if  (linfo->ldt_prole_version_set) {
+				// ldt_version should be set
+				as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);	
+				cf_detail_digest(AS_RW, keyd, "Set Prole Version %ld", linfo->ldt_prole_version);
+			} else {
+				cf_detail_digest(AS_RW, keyd, "No Parent record setting source version for subrecord");
 			}
-		} else {
-			if (is_subrec) {
-				cf_detail_digest(AS_RW, keyd, "Set Source Version %ld", as_ldt_subdigest_getversion(keyd));
-			}
+		}
+	} else {
+		if (is_subrec) {
+			cf_detail_digest(AS_RW, keyd, "Set Source Version %ld", as_ldt_subdigest_getversion(keyd));
 		}
 	}
 
@@ -2250,7 +2251,6 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	}
 
 	bool has_sindex = (info & RW_INFO_SINDEX_TOUCHED) != 0;
-	bool is_ldt_parent = as_ldt_record_is_parent(rd.r);
 
 	rd.ignore_record_on_device = ! has_sindex && ! is_ldt_parent;
 
@@ -2269,17 +2269,39 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	uint8_t stack_particles[stack_particles_sz];
 	uint8_t *p_stack_particles = stack_particles;
 
-	if (linfo) {
-		if (is_ldt_parent && linfo->replication_partition_version_match && linfo->ldt_prole_version) {
-			as_ldt_parent_storage_get_version(&rd, &linfo->ldt_prole_version);	
-			linfo->ldt_prole_version_set = true;
+	if (is_ldt_parent) {
+		if (as_migrate_is_incoming_subrecord(&rd.keyd, linfo->ldt_source_version, rsv->p->partition_id)) {	
+			cf_info_digest(AS_RW, keyd, "LDT_PROLE: Skip Write of Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
+				rsv->p->partition_id, 
+				linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
+				linfo->ldt_source_version, linfo->ldt_prole_version); 
+
+			// Should bail out way earlier than this
+			goto Out;
+		} else { 
+			// No incoming migration from the source node.
+			if (linfo->replication_partition_version_match) {
+				// Master and prole partition version matches
+				if (0 == as_ldt_parent_storage_get_version(&rd, &linfo->ldt_prole_version)) {
+					linfo->ldt_prole_version_set = true;
+				} else {
+					// Parent record does not exist !!
+					// Bail out
+					goto Out;
+				}
+			}
+			cf_info_digest(AS_RW, keyd, "LDT_PROLE: Write Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
+				rsv->p->partition_id, 
+				linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
+				linfo->ldt_source_version, linfo->ldt_prole_version); 
 		}
 	}
-
-	if (is_ldt_parent && linfo && as_migrate_is_incoming_subrecord(&rd.keyd, linfo->ldt_source_version, rsv->p->partition_id)) {	
-		// Should bail out way earlier than this
-		goto Out;
-	} 
+	else if (is_subrec) {
+		cf_detail_digest(AS_RW, keyd, "LDT_PROLE: Write SubRecord in Partition %d with %ld version [source:%ld prole:%ld]", 
+			rsv->p->partition_id, 
+			linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
+			linfo->ldt_source_version, linfo->ldt_prole_version); 
+	}
 
 	if (rv != 1 && rd.ns->storage_data_in_memory) {
 		memory_bytes = as_storage_record_get_n_bytes_memory(&rd);
@@ -2307,7 +2329,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 		}
 	}
 
-	if (is_ldt_parent && linfo && linfo->replication_partition_version_match) {
+	if (is_ldt_parent && linfo->replication_partition_version_match) {
 		as_ldt_parent_storage_set_version(&rd, linfo->ldt_prole_version, &p_stack_particles); 
 	} 
 
@@ -2615,7 +2637,7 @@ write_process(cf_node node, msg *m, bool respond)
 					rsv.pid, rsv.p->state, generation);
 
 			int rsp = write_local_pickled(keyd, &rsv, pickled_buf, pickled_sz,
-					&rec_props, generation, void_time, node, info, NULL);
+					&rec_props, generation, void_time, node, info, &linfo);
 			if (rsp != 0) {
 				cf_info_digest(AS_RW, keyd, "[NOTICE] writing pickled failed(%d):", rsp );
 				result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
