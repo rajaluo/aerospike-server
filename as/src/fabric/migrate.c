@@ -706,9 +706,11 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 		cf_crash(AS_MIGRATE, "Invalid Component Type Dummy received by migration");
 	} else {
 		mc->rxstate = AS_MIGRATE_RX_STATE_RECORD;
-		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming version %ld Started Receiving Record Migration !! %s:%d:%d:%d",
-				  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
-				  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+	//	if (mc->rsv.p->sub_vp->elements) {
+			cf_info(AS_MIGRATE, "LDT_MIGRATION: Incoming version %ld Started Receiving Record Migration !! %s:%d:%d:%d",
+					  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
+					  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+	//	}
 	}
 }
 
@@ -1560,23 +1562,24 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 			migrate_recv_control_index mc_i;
 			mc_i.source_node = id;
 			mc_i.mig_id = mig_id;
+
+			// This node is going to accept migration. When migration starts
+			// it is subrecord migration
+			mc->rxstate = AS_MIGRATE_RX_STATE_SUBRECORD;
+			msg_get_uint64(m, MIG_FIELD_VERSION, &mc->incoming_ldt_version);
+			mc->pid     = mc->rsv.p->partition_id;
+
+
 			if (RCHASH_OK == rchash_put_unique(g_migrate_recv_control_hash, &mc_i, sizeof(mc_i), mc)) {
 
 				cf_debug(AS_MIGRATE, "{%s:%d} recv migrate start msg: src %"PRIx64" id %d m %p: recv control size %d", mc->rsv.ns->name, mc->rsv.pid, id, mig_id, m, rchash_get_size(g_migrate_recv_control_hash) );
 
 				cf_atomic_int_incr( &g_config.migrate_progress_recv );
 
-				// This node is going to accept migration. When migration starts
-				// it is subrecord migration
-				mc->rxstate = AS_MIGRATE_RX_STATE_SUBRECORD;
-				msg_get_uint64(m, MIG_FIELD_TYPE, &mc->incoming_ldt_version);
-
-				mc->pid                   = mc->rsv.p->partition_id;
 				migrate_recv_ldt_version mc_l;
 				mc_l.incoming_ldt_version = mc->incoming_ldt_version;
 				mc_l.pid                  = mc->pid;
 
-				mc->rxstate = AS_MIGRATE_RX_STATE_INIT;
 				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, mc); 
 				if (mc->rsv.p->sub_vp->elements > 0) {
 					cf_info(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
@@ -1938,6 +1941,7 @@ migrate_start_send(migration *mig)
 		msg_set_buf(start_m, MIG_FIELD_NAMESPACE, (byte *) mig->rsv.ns->name, strlen(mig->rsv.ns->name), MSG_SET_COPY);
 		msg_set_uint32(start_m, MIG_FIELD_PARTITION, mig->rsv.pid);
 		msg_set_uint32(start_m, MIG_FIELD_TYPE, mig->mig_type);
+		cf_detail(AS_MIGRATE, "Version at mig start %ld for partition-id:%d", mig->rsv.p->current_outgoing_ldt_version, mig->rsv.pid);
 		msg_set_uint64(start_m, MIG_FIELD_VERSION, mig->rsv.p->current_outgoing_ldt_version);
 		msg_set_buf(start_m, MIG_FIELD_VINFOSET, (byte *) &mig->rsv.p->version_info, sizeof(as_partition_vinfo), MSG_SET_COPY);
 
@@ -2656,14 +2660,10 @@ as_migrate(cf_node *dst_node, uint dst_sz, as_namespace *ns, as_partition_id par
 	 * No new version if data is migrating out of master
 	*/
 	if (mig->rsv.ns->ldt_enabled) {
-		if (g_config.self_node != mig->rsv.p->replica[0]) {
-			mig->rsv.p->current_outgoing_ldt_version = as_ldt_generate_version();
-			if (AS_PARTITION_HAS_DATA(mig->rsv.p))
-				cf_detail(AS_PARTITION, "LDT_MIGRATION Generated new Version @ start of migration %d:%ld",
-						  mig->rsv.p->partition_id, mig->rsv.p->current_outgoing_ldt_version);
-		} else {
-			mig->rsv.p->current_outgoing_ldt_version = 0;
-		}
+		mig->rsv.p->current_outgoing_ldt_version = as_ldt_generate_version();
+		if (AS_PARTITION_HAS_DATA(mig->rsv.p))
+			cf_detail(AS_PARTITION, "LDT_MIGRATION Generated new Version @ start of migration %d:%ld",
+				  mig->rsv.p->partition_id, mig->rsv.p->current_outgoing_ldt_version);
 		mig->rsv.p->txstate = AS_PARTITION_MIG_TX_STATE_SUBRECORD;
 		cf_detail(AS_MIGRATE, "LDT_MIGRATION: OutGoing Version %ld Started Sending SubRecord Migration !! %s:%d:%d:%d",
 				  mig->rsv.p->current_outgoing_ldt_version, mig->rsv.ns->name, mig->rsv.p->partition_id, 
