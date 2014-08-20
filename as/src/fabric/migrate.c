@@ -689,7 +689,7 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 	msg_get_uint64(m, MIG_FIELD_VERSION, &c->version);
 	msg_get_uint32(m, MIG_FIELD_PGENERATION, &c->pgeneration);
 	msg_get_uint32(m, MIG_FIELD_PVOID_TIME, &c->pvoid_time);
-	cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming %s version=%ld flag=%d",
+	cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming %s version=%ld flag=%d",
 			  (info & MIG_INFO_LDT_SUBREC) ? "MIG_INFO_LDT_SUBREC"
 			  : ((info & MIG_INFO_LDT_ESR) ? "MIG_INFO_LDT_ESR"
 				 : "MIG_INFO_LDT_REC"), c->version, c->flag);
@@ -698,19 +698,16 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 	PRINTD(&c->edigest);
 
 	if (COMPONENT_IS_LDT_SUB(c)) {
-		cf_assert(((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD)
-				   || (mc->rxstate == AS_MIGRATE_RX_STATE_INIT)),
+		cf_assert((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD),
 				  AS_PARTITION, CF_CRITICAL,
 				  "Unexpected Partition Migration State %d:%d", mc->rxstate, mc->rsv.p->partition_id);
 	} else if (COMPONENT_IS_LDT_DUMMY(c)) {
 		cf_crash(AS_MIGRATE, "Invalid Component Type Dummy received by migration");
 	} else {
 		mc->rxstate = AS_MIGRATE_RX_STATE_RECORD;
-	//	if (mc->rsv.p->sub_vp->elements) {
-			cf_info(AS_MIGRATE, "LDT_MIGRATION: Incoming version %ld Started Receiving Record Migration !! %s:%d:%d:%d",
-					  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
-					  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
-	//	}
+		cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming version %ld Started Receiving Record Migration !! %s:%d:%d:%d",
+			  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
+			  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
 	}
 }
 
@@ -2738,8 +2735,25 @@ as_migrate_is_incoming_subrecord(cf_digest *subrec_digest, uint64_t version, as_
 	mc_l.incoming_ldt_version = version;
 	mc_l.pid                  = partition_id;
 	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc, (void *)mc)) {
-		if (mc && ((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD)
-				|| (mc->rxstate == AS_MIGRATE_RX_STATE_INIT))) {
+		if (mc && (mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD)) {
+			return true;
+		}
+	}
+	cf_detail_digest(AS_MIGRATE, subrec_digest, "%s incoming migrate for partition %d of version %ld with state %d", mc ? " " : "NO", partition_id, version, mc ? mc->rxstate : 0); 
+	return false;
+}
+// Searches for the passed in migrate version is current incoming migration
+// hash and check the incoming migration rx state. If rx state matches 
+// record return true otherwise false
+bool
+as_migrate_is_incoming_record(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id)
+{
+	migrate_recv_control *mc  = NULL;
+	migrate_recv_ldt_version mc_l;
+	mc_l.incoming_ldt_version = version;
+	mc_l.pid                  = partition_id;
+	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc, (void *)mc)) {
+		if (mc && (mc->rxstate == AS_MIGRATE_RX_STATE_RECORD)) {
 			return true;
 		}
 	}

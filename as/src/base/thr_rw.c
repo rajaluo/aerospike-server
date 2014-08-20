@@ -2223,6 +2223,103 @@ int rw_dup_init() {
 	return (0);
 }
 
+int
+as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
+			ldt_prole_info *linfo, uint32_t info)
+{
+	if (rsv->ns->ldt_enabled) {
+		bool is_subrec = ((info & RW_INFO_LDT_SUBREC) || (info & RW_INFO_LDT_ESR));
+		int type = 0;
+
+		if (linfo->replication_partition_version_match) {
+			if (is_subrec) { 
+				if (linfo->ldt_prole_version_set) {
+					// ldt_version should be set
+					as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);	
+					cf_detail_digest(AS_RW, keyd, "Set Prole Version %ld", linfo->ldt_prole_version);
+					type = 1;
+				} else {
+					cf_detail_digest(AS_RW, keyd, "No Parent record setting source version for subrecord");
+					type = 2;
+				}
+			}
+		} 
+
+		if (is_subrec) {
+			cf_detail_digest(AS_RW, keyd, "Has %d type Version %ld for %s", type, as_ldt_subdigest_getversion(keyd), (info & RW_INFO_LDT_ESR) ? "esr" : "subrec");
+		}
+	}
+	return 0;
+}
+
+// If the replication request is coming from partition version which
+// is different then
+// - For LDT parent record 
+//
+//    - Skip replication unless there is incoming migration from replication source 
+//      node and replication is in the RECORD mode.
+//
+//    - If not migrating it will either be happening in future in that case replicating
+//      parent before subrec is order violation or would have been already migrated
+//      in this case replication partition would match.
+//
+// - For LDT subrec replicate with source ldt version. This could be optimized for
+//   certain cases where migration is expected to start in future ... But for now
+//   just writing it.
+//
+// Note that the replication can only come from the winning node (it could either be
+// master/designate master or non-master node). So we need not track all the incoming 
+// migration states only current would do. If the data is coming from the node which 
+// is _NOT_ migrating it is ok to overwrite the parent record without generation check.
+int
+as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rsv,
+			ldt_prole_info *linfo, uint32_t info, as_storage_rd *rd, char *fname, int lineno)
+{
+	if (rsv->ns->ldt_enabled) {
+		bool is_ldt_parent = (info & RW_INFO_LDT_REC);
+
+		if (linfo->replication_partition_version_match) {
+			if (is_ldt_parent) {
+				linfo->ldt_prole_version = 0;
+				// If parent record does not exist. In that case for source version itself
+				// is used @ prole
+				int rv = -1;	
+				if (rd) {
+					rv = as_ldt_parent_storage_get_version(rd, &linfo->ldt_prole_version);
+					if (0 == rv) {
+						linfo->ldt_prole_version_set = true;
+					}
+				}
+				if (rv)
+					cf_detail(AS_RW, "prole version not set becaue %p==NULL or %d != 0", rd, rv);	
+			}
+		} else { 
+			if (is_ldt_parent) {
+				if (!as_migrate_is_incoming_record(&rd->keyd, linfo->ldt_source_version, rsv->p->partition_id)) {	
+					cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Skip Write of Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
+							fname, lineno, rsv->p->partition_id, 
+							linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
+							linfo->ldt_source_version, linfo->ldt_prole_version); 
+
+					// Should bail out way earlier than this
+					goto Out;
+				}
+				cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
+						fname, lineno, rsv->p->partition_id, 
+						linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
+						linfo->ldt_source_version, linfo->ldt_prole_version); 
+			} else { 
+				cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write SubRecord in Partition %d with %ld version [source:%ld prole:%ld]", 
+					fname, lineno, rsv->p->partition_id, 
+					linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
+					linfo->ldt_source_version, linfo->ldt_prole_version); 
+			}
+		}
+	}
+	return 0;
+Out:
+	return -1;
+}
 //
 // Case where you get a pickled value that must overwrite
 // whatever was there, instead of a write local
@@ -2260,22 +2357,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 		} 
 	}
 
-	if (linfo->replication_partition_version_match) {
-		if (is_subrec) { 
-			if  (linfo->ldt_prole_version_set) {
-				// ldt_version should be set
-				as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);	
-				cf_detail_digest(AS_RW, keyd, "Set Prole Version %ld", linfo->ldt_prole_version);
-			} else {
-				cf_detail_digest(AS_RW, keyd, "No Parent record setting source version for subrecord");
-			}
-		}
-	} else {
-		if (is_subrec) {
-			cf_detail_digest(AS_RW, keyd, "Set Source Version %ld", as_ldt_subdigest_getversion(keyd));
-		}
-	}
-
+	as_ldt_set_prole_subrec_version(keyd, rsv, linfo, info);
 	int rv = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
 	as_index *r = r_ref.r;
 
@@ -2310,45 +2392,9 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	uint8_t stack_particles[stack_particles_sz];
 	uint8_t *p_stack_particles = stack_particles;
 
-	if (is_ldt_parent) {
-		if (as_migrate_is_incoming_subrecord(&rd.keyd, linfo->ldt_source_version, rsv->p->partition_id)) {	
-			cf_info_digest(AS_RW, keyd, "LDT_PROLE: Skip Write of Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
-				rsv->p->partition_id, 
-				linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
-				linfo->ldt_source_version, linfo->ldt_prole_version); 
-
-			// Should bail out way earlier than this
-			goto Out;
-		} else { 
-			int ret = as_ldt_parent_storage_get_version(&rd, &linfo->ldt_prole_version);
-			// No incoming migration from the source node.
-			if (linfo->replication_partition_version_match) {
-				if (ret == 0) {
-					linfo->ldt_prole_version_set = true;
-				}
-			} else {
-				// Possibly incoming / future incoming migration
-				// from the source node
-				if (ret == 0) {
-					linfo->ldt_prole_version_set = true;
-				} else {
-					// Parent record does not exist !!
-					// Bail out and wait for parent to come through
-					// migration route.
-					goto Out;
-				}
-			}
-			cf_detail_digest(AS_RW, keyd, "LDT_PROLE: Write Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
-				rsv->p->partition_id, 
-				linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
-				linfo->ldt_source_version, linfo->ldt_prole_version); 
-		}
-	}
-	else if (is_subrec) {
-		cf_detail_digest(AS_RW, keyd, "LDT_PROLE: Write SubRecord in Partition %d with %ld version [source:%ld prole:%ld]", 
-			rsv->p->partition_id, 
-			linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
-			linfo->ldt_source_version, linfo->ldt_prole_version); 
+	// Check is duplication in case code is coming from multi op
+	if (as_ldt_check_and_get_prole_version(keyd, rsv, linfo, info, &rd, __FILE__, __LINE__)) {
+		goto Out;
 	}
 
 	if (rv != 1 && rd.ns->storage_data_in_memory) {
@@ -2377,7 +2423,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 		}
 	}
 
-	if (is_ldt_parent && linfo->replication_partition_version_match) {
+	if (is_ldt_parent && linfo->replication_partition_version_match && linfo->ldt_prole_version_set) {
 		as_ldt_parent_storage_set_version(&rd, linfo->ldt_prole_version, &p_stack_particles); 
 	} 
 
@@ -2418,6 +2464,10 @@ Out:
 
 int as_rw_get_ldt_info(ldt_prole_info *linfo, msg *m, as_partition_reservation *rsv) 
 {
+	linfo->ldt_source_version = 0;
+	linfo->ldt_prole_version_set = false;
+	linfo->replication_partition_version_match = true;
+
 	int not_found = 0;
 	as_partition_vinfo *source_partition_version = NULL;
 	size_t vinfo_sz = 0;
@@ -2425,16 +2475,15 @@ int as_rw_get_ldt_info(ldt_prole_info *linfo, msg *m, as_partition_reservation *
 			&vinfo_sz, MSG_GET_DIRECT)) {
 		not_found++;
 		cf_detail(AS_RW, "MULTI_OP: Message Without Partition Version");
-		linfo->replication_partition_version_match = true;
 	} else {
 		linfo->replication_partition_version_match = (memcmp(source_partition_version, &rsv->p->version_info, sizeof(as_partition_vinfo)) == 0);
 	}
-	linfo->ldt_prole_version_set = false;
 
 	if (0 != msg_get_uint64(m, RW_FIELD_LDT_VERSION, &linfo->ldt_source_version)) {
 		not_found++;
-		cf_detail(AS_RW, "MULTI_OP: Message Without LDT source version Field");
+		cf_info(AS_RW, "MULTI_OP: Message Without LDT source version Field");
 	}
+	cf_detail(AS_RW, "MULTI_OP: LDT Info [%ld %d %d]", linfo->ldt_source_version, linfo->ldt_prole_version_set, linfo->replication_partition_version_match);
 	return not_found;
 }
 
@@ -2558,11 +2607,8 @@ write_process(cf_node node, msg *m, bool respond)
 			uint32_t info = 0;
 			msg_get_uint32(m, RW_FIELD_INFO, &info);
 
-			if ((ns->ldt_enabled)
-					&& (info & RW_INFO_LDT_REC)
-					&& as_migrate_is_incoming_subrecord(keyd, linfo.ldt_prole_version, tr.rsv.p->partition_id)) {	
+			if (as_ldt_check_and_get_prole_version(keyd, &tr.rsv, &linfo, info, NULL, __FILE__, __LINE__)) {
 				result_code = AS_PROTO_RESULT_OK;
-				cf_detail(AS_RW, "MULTI_OP: LDT Record Replication Skipped.. Partition in MIG_RECV_SUBRECORD state");
 				as_partition_release(&tr.rsv); // returns reservation a few lines up
 				cf_atomic_int_decr(&g_config.wprocess_tree_count);
 				goto Out;
@@ -4750,35 +4796,8 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp,
 
 	as_namespace *ns = rsvp->ns;
 
-	// TODO: check for RW_INFO_LDT and only take that write
-	// operation if the partition is in the migrate state where
-	// it can take such changes. if migration has not given to
-	// this node LDT_REC DO NOT perform write.
-	if (ns->ldt_enabled) {
-		if ((info & RW_INFO_LDT_SUBREC)
-				|| (info & RW_INFO_LDT_ESR)) {
-			cf_detail(AS_RW,
-					" MULTI_OP: LDT Subrecord Replication Request Received Sent %"PRIx64" rv=%d",
-					*(uint64_t * )keyd);
-		} else if (info & RW_INFO_LDT_REC) {
-			cf_detail(AS_RW,
-					"MULTI_OP: LDT Record Replication Request Received %"PRIx64" rv=%d",
-					*(uint64_t * )keyd);
-
-			// Note that the replication can only come from the winning node. So we need not
-			// track all the incoming migration states only current would do. If the data is
-			// coming from the node which is _NOT_ migrating it is ok to overwrite the parent
-			// record without generation check.
-			//
-			// TODO: What is effect of running without duplicate resolution on LDT. It is probably
-			// better not to be very aggressive rebalancing data ... And need better algorithm for
-			// the triggerring migration.
-			if (as_migrate_is_incoming_subrecord(keyd, linfo->ldt_source_version, rsvp->p->partition_id)) {
-				result_code = AS_PROTO_RESULT_OK;
-				cf_info(AS_RW, "MULTI_OP: LDT Record Replication Skipped.. Partition in Subrecord migration stage");
-				goto Out;
-			}
-		}
+	if (as_ldt_check_and_get_prole_version(keyd, rsvp, linfo, info, NULL, __FILE__, __LINE__)) {
+		goto Out;
 	}
 
 	// Two ways to tell a prole to write something -
@@ -5730,6 +5749,7 @@ rw_multi_process(cf_node node, msg *m)
 	cf_detail(AS_RW, "MULTI_OP: Received multi op");
 	uint32_t result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 	int ret = 0;
+	bool reserved = false;
 
 	cf_digest *keyd;
 	size_t sz = 0;
@@ -5776,6 +5796,7 @@ rw_multi_process(cf_node node, msg *m)
 	as_partition_reservation rsv;
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, 0);
 	cf_atomic_int_incr(&g_config.wprocess_tree_count);
+	reserved = true;
 
 	// Raj (TODO) bailing out like this may be problem
 	ldt_prole_info linfo;
@@ -5841,8 +5862,12 @@ Out:
 		cf_warning(AS_RW,
 				"MULTI_OP: Internal Error ... Multi Op Message Corrupted ");
 		as_fabric_msg_put(m);
+	}
+
+	if (reserved) {
 		as_partition_release(&rsv);
 		cf_atomic_int_decr(&g_config.wprocess_tree_count);
+		reserved = false;
 	}
 
 	msg_set_unset(m, RW_FIELD_AS_MSG);

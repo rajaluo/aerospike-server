@@ -1181,14 +1181,15 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	// c) Check if the version matches that of parent/esr ??? (if not the version is invalid)
 	bool delete = false;
 	char type   = 0;
+	rv = 0;
 
-	if (as_record_exists(p->sub_vp, &esr_digest, ns)) {
+	if ((rv = as_record_exists(p->sub_vp, &esr_digest, ns))) {
 		delete = true;
 		type   = 1;
-	} else if (as_record_exists(p->vp, &parent_digest, ns)) {
+	} else if ((rv = as_record_exists(p->vp, &parent_digest, ns))) {
 		delete = true;
 		type   = 2;
-	} else if (!as_ldt_version_match(subrec_version, p->vp, &parent_digest, ns)) {
+	} else if (! (rv = as_ldt_version_match(subrec_version, p->vp, &parent_digest, ns))) {
 		delete = true;
 		type   = 3;
 		linfo->num_version_mismatch_gc++;
@@ -1200,8 +1201,8 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		if (ns->storage_data_in_memory) {
 			cf_atomic_int_sub(&p->n_bytes_memory, starting_memory_bytes);
 		}
-		cf_detail(AS_LDT, "LDT_SUB_GC Expiry of the SubRecord type=%d version=%ld for partition %d with state is %d",
-				type, subrec_version, p->partition_id, p->txstate);
+		cf_detail(AS_LDT, "LDT_SUB_GC Expiry of the SubRecord type=%d version=%ld for partition %d with state is %d rv=%d",
+				type, subrec_version, p->partition_id, p->txstate, rv);
 		cf_detail_digest(AS_LDT, &subrec_digest, "Sub-Rec Digest: ");
 		cf_detail_digest(AS_LDT, &esr_digest, "ESR Digest: ");
 		cf_detail_digest(AS_LDT, &parent_digest, "Parent Digest: ");

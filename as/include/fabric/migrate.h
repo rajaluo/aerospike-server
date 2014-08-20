@@ -66,7 +66,6 @@ typedef enum as_migrate_type_e {
 	AS_MIGRATE_TYPE_OVERWRITE = 1
 } as_migrate_type;
 
-#define AS_MIGRATE_RX_STATE_INIT 0
 #define AS_MIGRATE_RX_STATE_SUBRECORD 1
 #define AS_MIGRATE_RX_STATE_RECORD 2
 typedef uint8_t as_partition_mig_rx_state;
@@ -100,6 +99,8 @@ int as_migrate_set_num_xmit_threads(int n_threads);
 
 bool
 as_migrate_is_incoming_subrecord(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id);
+bool
+as_migrate_is_incoming_record(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id);
 // migrate a tree to a node
 // and find out when it's done
 int as_migrate(cf_node *dst, uint dst_sz,
