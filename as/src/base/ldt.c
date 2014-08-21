@@ -92,110 +92,178 @@
  *
  *  Major Changes:
  *
- *  - Partition structure will have its own tree from which the LDT subrecord
- *    will be hanging. This is to make sure LDT record and LDT subrecord
- *    has different search space. This is avoid digest collision between two
- *    spaces.
+ *   LDT is different from other data type in following ways which makes life little
+ *   more fun !!! :)
  *
- *  - The LDT subrecord has its own digest to identify it. Following logic is used to
- *    make sure that in entire life of server no two subrecord digest which is
- *    generated repeat.  [See ldt_aerospike.c for randomizer function ]
+ *    1. They spread over multiple record, so making sure entire LDT change moves when 
+ *       doing and migrations and replication. This could span multiple to-fro trip between 
+ *       nodes.
+ *    2. LDT are generally huge sized we need to minimize moving them as much as possible.
+ *    3. Generally operation in the LDT are _NOT_ idempotent (unless user can enforce by 
+ *       himself e.g unique key in Llist) ...
  *
- *      - 12 bits of partition distinguishing bits and hence LDT_SUB for record
- *        in two different partition are in different space. This also means the
- *        when LDT_SUB digest is generated on two different nodes they can never
- *        collide as at any point of time the write to record in a given partition
- *        happens only on one node.
+ * Things to know
  *
- *      - 2 bytes for lock has [2-3] for same lock
+ * - LDT data is organized as, parent records and subrecords (connected to form entire large data). 
+ *   Partition structure will have its own tree from which the LDT subrecord will be hanging. This 
+ *   is to make sure LDT record and LDT subrecord has different search space. This is avoid digest 
+ *   collision between two spaces.
  *
- *      - 3 random bytes to make sure of uniqueness. At a given clock time on
- *        multiple node. [4-6]. The see for this random number if picked from
- *        the digest itself to make it thread safe for a digest.
+ * - LDT Version:
+ *   Each LDT has version in it which is different from the what is in the partition. This version 
+ *   is per LDT, which gets regenerated every time LDT data is migrated from a partition version to 
+ *   another partition version. (signifying something changed in the record). 
  *
- *      - 1 byte to for the storage distribution ... [7]. We want to make sure
- *        LDT subrecord falls on the same device as the LDT record
+ *   This version is embedded in the child sub record. So child subrecord digest look list <SUBD:version> 
+ *   (where last 8 bytes is version). What it means is at any point in time same subrecord can exist 
+ *   as different digest in the Aerospike but the one which version matching parent's version is valid 
+ *   one, others are cleaned up by the background GC task. 
  *
- *      - 6 bytes are based on system clock [8-14]
+ * - The LDT subrecord has its own digest to identify it. Following logic is used to make sure that 
+ *   in entire life of server no two subrecord digest which is generated repeat.  
+ *   [See ldt_aerospike.c for randomizer function ]
  *
- *      - 6 bytes of version which is generated at partition version creation
+ *   - 12 bits of partition distinguishing bits and hence LDT_SUB for record in two different partition 
+ *     are in different space. This also means the when LDT_SUB digest is generated on two different 
+ *     nodes they can never collide as at any point of time the write to record in a given partition
+ *     happens only on one node.
  *
+ *   - 2 bytes for lock has [2-3] for same lock
  *
- *  - Every time partition migrates in it will generate a new version for the given
- *    LDT. This is to make sure that all the incoming subrecord will have new digest
- *    so the subrecord never collide and create new copies. When the parent record
- *    of the winner LDT moves in it will have the partition version stamped in it.
- *    All the subrecord will be lazily / aggressively cleaned up from the system.
- *    [ See migrate.c for the detail code for this ]
+ *   - 3 random bytes to make sure of uniqueness. At a given clock time on multiple node. [4-6]. The 
+ *     seed for this random number if picked from the digest itself to make it thread safe for a digest.
  *
- *  - Read/Write: Because LDT are huge size we cannot ship get op (duplicate
- *    resolution) for entire record. So for the records with LDT bins the request
- *    is send to all the duplicates [writes/UDF] as well, with the protection at
- *    the initiating node (master if it is sync / origin [acting master node] in
- *    case of proxy). In case op is read the result is returned back to the
- *    originating node along with the generation and winner result is sent back
- *    to the client. In case of write after applying UDF then normal replication
- *    is triggered to send result to replica set along with generation. And the
- *    winner generation wins. Need better solution. Also it is necessary to make
- *    sure that the ops have order what it means is when the op is send it gets
- *    executed unless cluster view has changed. [ ldt.c / proxy.c / thr_rw.c to
- *    see the shipped op logic ]
+ *   - 1 byte to for the storage distribution ... [7]. We want to make sure LDT subrecord falls on the 
+ *     same device as the LDT record
+ *
+ *   - 6 bytes are based on system clock [8-14]
+ *
+ *   - 6 bytes of version which is generated at partition version creation
+ *
+ * - Read/Write: Because LDT are huge size we cannot ship get op (duplicate resolution) for entire 
+ *   record. So for the records with LDT bins the request is send to all the duplicates [writes/UDF] 
+ *   as well, with the protection at the initiating node (master if it is sync / origin [acting 
+ *   master node] in case of proxy). In case op is read the result is returned back to the originating 
+ *   node along with the generation and winner result is sent back to the client. In case of write 
+ *   after applying UDF then normal replication is triggered to send result to replica set along with 
+ *   generation. And the winner generation wins. Need better solution. Also it is necessary to make
+ *   sure that the ops have order what it means is when the op is send it gets executed unless cluster 
+ *   view has changed. 
+ *   [ ldt.c / proxy.c / thr_rw.c to see the shipped op logic ]
  *
  *    NB: See code for the details of locking and protection mechanism. And
  *        ACID semantics
  *    NB: See the code comments for the details of reducing the network bandwidth.
  *
- *  - Replication: Replication at both at the time of the duplicates/migration
- *    and at the normal runtime would pack entire changes done to LDT into one
- *    packet and send it over to the replica set. This is to make sure the
- *    Atomic semantics becomes less dependent on the network "finickiness". And
- *    make sure entire thing makes to replica [We still not solved the case
- *    where entire thing either makes to the storage or none makes it. But
- *    that cane be independent additional change]
+ *   Algorithm
+ *   =========
+ *   -- If there are no duplicates; perform LDT UDF execution and replicate
+ *   -- If there are duplicates; find the winning node i.e node with winning LDT record based on parent 
+ *      generation + ttl out of all the duplicate versions (it could be master / primary version / 
+ *      zombie). Ship the operation to that node using proxy subsystem. 
+ *   -- Apply LDT UDF on the winning node and replicate to (master / replica / qnode)
+ * 
  *
- *  - Migration: At the source of migrations the migration runs reduce on the
- *    primary and creates the list of the subrecord which is part of it. Then
- *    it walk through the subrecord and ships the entire list. Along with the
- *    sub record it sends generation of the parent LDT record and also the
- *    partition version. And in the end ships the LDT record.
+ * - Replication: Replication at both at the time of the duplicates/migration and at the normal runtime 
+ *   would pack entire changes done to LDT into one packet and send it over to the replica set. This 
+ *   is to make sure the Atomic semantics becomes less dependent on the network "finickiness". And
+ *   make sure entire thing makes to replica [We still not solved the case where entire thing either 
+ *   makes to the storage or none makes it. But that is independent additional change]
  *
- *    At the target of the migration. All the incoming migrating subrecord
- *    is accepted and inserted into the migrate subrecord tree. The sub record
- *    is not accepted if incoming generation cannot win. [OPTIMIZATION: If
- *    the first subrecord (which is sent along with generation) fails to win
- *    then the entire LDT shipping is aborted to save the network band width]
- *    When finally the parent LDT is received then reduce function is run so
- *    in single context all the subrecord are moved from migrate tree to the
- *    main tree.
+ *   Algorithm
+ *   =========
+ *   Replicating data from Partition X -> Partition Y write subrecord with version as in destination 
+ *   node. And when doing so for Partition X-> Partition Y then write subrecord with version as in source node.
  *
- *    Sub record also has the partition version hidden bin. This is needed
- *    to make sure both version can coexist on the storage. So the cold restart
- *    can handle it. See cold restart logic for more detail of its usage.
+ *   -- After write is applied pack up parent and all the modified sub record in single message along with 
+ *      -- The source partition's current version 
+ *      -- The source current outgoing migration LDT version.
+ *      and send it to master (in case write happens on non-master node) replicas and qnode.
+ *   -- At the destination on receiving the replication request check source partition version and destination 
+ *      partition version. 
+ *      - If the replication request is coming from partition version which is different then
+ *        - For LDT parent record 
+ *        - Skip replication unless there is incoming migration from replication source node and replication 
+ *          is in the RECORD mode.
+ *        - If not migrating it will either be happening in future in that case replicating parent before subrec 
+ *          is order violation or would have been already migrated in this case replication partition would match.
+ *      - For LDT subrec replicate with source ldt version. This could be optimized for certain cases where 
+ *        migration is expected to start in future ... But for now just writing it.
  *
- *  - Expiry / Eviction : Nsup threads only runs on the LDT record tree. If
- *    the parent record is deleted then all the existence subrecord are deleted
- *    from the sub record tree. See the logic the version cleaned and delete
- *    thread logic for sub record tree for details of how subrecord gets cleaned
- *    up. (NOTE: NSup refers to the Namespace Supervisor thread, which takes
- *    care of record expiration and eviction.)
  *
- *  - Warm restart : Both the record and subrecord are tree are allocated from
- *    arena shared memory .. attaching at the boot time simply bring back the
- *    entire state of system as it was when the node went down.
+ * - Migration: At the source of migrations the migration runs reduce in two phase
+ *     Phase 1: Reduce the subrecord tree 
+ *     Phase 2: Reduce record tree and send all the parent records. 
  *
- *  - Subrecord Version clean / delete: A background thread walk through the
- *    sub record main tree and keep checking if the existence record is present
- *    for the LDT subrecord ... if it exists then it checks to see if the LDT
- *    parent record version matches. If it does not match the version of LDT
- *    subrecord is cleaned up. If it matches the version is retained. In case
- *    existence sub record is missing the subrecord is cleaned up from the
- *    sub record tree.
+ *   When migrating data from one partition version to another unless entire record is moved existing 
+ *   subrecord cannot be overwritten at the destination... this could cause data corruption if the 
+ *   parent never makes it. So whenever the subrecord is moved from one partition version to another 
+ *   new version for the subrecord is introduced ...
+ 
+ *   Every time partition migrates in it will generate a new version for the given LDT. This is to make
+ *   sure that all the incoming subrecord will have new digest so the subrecord never collide and create 
+ *   new copies. When the parent record of the winner LDT moves in it will have the partition version 
+ *   stamped in it. All the subrecord will be lazily / aggressively cleaned up from the system.
+ *    [ See migrate.c for the detail code for this ]
  *
- *    NB: When the bin is deletes the ESR record is simply deleted from the
- *    sub record tree. And LDT subrecords are lazily cleaned up.
+ *   Algorithm
+ *   =========
+ *   - While migrating,  all subrecord should make it to the destination node before the parent node makes it
+ *   - While there is incoming or outgoing migration writes / read from the record should not fail.
+ *   - Migration from Partition X -> Partition Y creates new version of subrecord. System needs to be 
+ *     protected it from being GC. 
  *
- *    See the details in code in case two different ESR show up for two
- *    different versions of LDT.
+ *   Migration Source
+ *   - Generate migration LDT version number (only done once per outgoing migration at the start of migration and
+ *     is used by all LDT in that migration cycle) and send over to the node along with MIG_START message and node name.
+ *   - Set partition state to MIG_SUBRECORD_TX and Reduce sub record tree and send sub record along with
+ *     - Sub record generation
+ *     - Current migration ldt version
+ *     - Parent record generation and ttl
+ *   - Set partition state to MIG_RECORD_TX and Reduce parent record tree and send parent record with
+ *     - Current migration version
+ *     - Parent record generation and ttl.
+ *   - When migration finishes or aborts, Set partition MIG_NONE_TX.
+ *   - Restart from step one after new partition migration.
+ *
+ *   Migration Destination
+ *   - On receiving MIG_START request create mig object and track node wise current incoming version number.
+ *   - Move partition rx_state to MIG_SUBRECORD_RX.
+ *   - On receiving incoming SUB_RECORD migrate, check if the parent has winning generation if yes write the sub 
+ *     record with current incoming ldt version. If not drop the incoming.
+ *   - If this is first RECORD then move partition to state MIG_RECORD_RX.
+ *   - On receiving incoming RECORD, check for the winner generation if yes then write the Parent record with 
+ *     new version. If not drop the incoming.
+ *   - When migration finishes or aborts remove entry node->current incoming ldt version entry from tracking DS
+ *     and move partition to MIG_RECORD_NONE_TX state.
+ *     
+ * - Expiry / Eviction : Nsup threads only runs on the LDT record tree. If the parent record is deleted then 
+ *   all the existence subrecord are deleted from the sub record tree. See the logic the version cleaned and 
+ *   delete thread logic for sub record tree for details of how subrecord gets cleaned up. (NOTE: NSup refers 
+ *   to the Namespace Supervisor thread, which takes care of record expiration and eviction.)
+ *
+ *  - Warm restart : Both the record and subrecord are tree are allocated from arena shared memory .. attaching 
+ *    at the boot time simply bring back the entire state of system as it was when the node went down.
+ *
+ *  - Subrecord Version clean / delete: A background thread walk through the sub record main tree and keep 
+ *    checking if the existence record is present for the LDT subrecord ... if it exists then it checks to see 
+ *    if the LDT parent record version matches. If it does not match the version of LDT subrecord is cleaned up. 
+ *    If it matches the version is retained. In case existence sub record is missing the subrecord is cleaned 
+ *    up from the sub record tree.
+ *
+ *    NB: When the bin is deletes the ESR record is simply deleted from the sub record tree. And LDT subrecords 
+ *    are lazily cleaned up.
+ *
+ *    See the details in code in case two different ESR show up for two different versions of LDT.
+ *
+ *    Algorithm
+ *    =========
+ *    - Reduce sub record tree and check for
+ *      - If parent is around
+ *      - if ESR is around
+ *      - if parent version matches sub record version.
+ *    - Skip all the above check if the current partition state is SUBRECORD_RX or RECORD_RX and tracking 
+ *      DS has entry for the incoming ldt version entry.
  *
  *  - Defrag : Defrag when walking through storage looks up key in both record
  *    tree and sub record tree. If not found the record is candidate for defrag.
