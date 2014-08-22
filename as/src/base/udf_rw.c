@@ -78,7 +78,7 @@ make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint sp_sz,
 			  const char *key, size_t klen, int  vtype,  void *val, size_t vlen)
 {
 	uint        sz          = 0;
-	int         tsz         = sz + vlen + as_particle_get_base_size(vtype);
+	uint        tsz         = sz + vlen + as_particle_get_base_size(vtype);
 	uint8_t *   v           = NULL;
 	int64_t     swapped_int = 0;
 	uint8_t     *sp_p = *sp_pp;
@@ -220,6 +220,7 @@ send_success(udf_call *call, int vtype, void *val, size_t vlen)
 void
 send_result(as_result * res, udf_call * call, void *udata)
 {
+	udata = udata;
 	as_val * v = res->value;
 	if ( res->is_success ) {
 
@@ -662,7 +663,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 
 		if (is_ldt) {
 			// Create the multiop pickled buf for thr_rw.c
-			ret = ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz, &wr->pickled_void_time);
+			ret = as_ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz, &wr->pickled_void_time);
 			FOR_EACH_SUBRECORD(i, lrecord) {
 				udf_record *c_urecord = &lrecord->chunk[i].c_urecord;
 				// Cleanup in case pickle code bailed out	

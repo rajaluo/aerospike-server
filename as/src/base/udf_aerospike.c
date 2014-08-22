@@ -185,7 +185,7 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
  * 		TODO make sure anything goes into setbin only if the bin value is
  * 		          changed
  */
-static const int
+static int
 udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * val, bool is_hidden)
 {
 	if (bname == NULL || bname[0] == 0 ) {
@@ -555,7 +555,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	// successfully generally.
 
 	// In first iteration, just calculate how many new bins need to be created
-	for(int i = 0; i < urecord->nupdates; i++ ) {
+	for(uint i = 0; i < urecord->nupdates; i++ ) {
 		if ( urecord->updates[i].dirty ) {
 			char *      k = urecord->updates[i].name;
 			if ( k != NULL ) {
@@ -584,7 +584,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	bool is_record_dirty = false;
 
 	// In second iteration apply updates.
-	for(int i = 0; i < urecord->nupdates; i++ ) {
+	for(uint i = 0; i < urecord->nupdates; i++ ) {
 		if ( urecord->updates[i].dirty && rc == 0) {
 
 			char *      k = urecord->updates[i].name;
@@ -623,7 +623,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		SINDEX_GUNLOCK();
 	}
 
-	for(int i = 0; i < urecord->nupdates; i++ ) {
+	for(uint i = 0; i < urecord->nupdates; i++ ) {
 		if ((urecord->updates[i].dirty)
 				&& (urecord->updates[i].oldvalue)) {
 			as_val_destroy(urecord->updates[i].oldvalue);
@@ -765,6 +765,7 @@ udf_aerospike_destroy(as_aerospike * as)
 static cf_clock
 udf_aerospike_get_current_time(const as_aerospike * as)
 {
+	as = as;
 	return cf_clock_getabsolute();
 }
 
@@ -1007,6 +1008,7 @@ udf_aerospike_rec_remove(const as_aerospike * as, const as_rec * rec)
 static int
 udf_aerospike_log(const as_aerospike * a, const char * file, const int line, const int lvl, const char * msg)
 {
+	a = a;
 	cf_fault_event(AS_UDF, lvl, file, NULL, line, (char *) msg);
 	return 0;
 }

@@ -1120,7 +1120,3 @@ uint32_t as_mem_check();
 extern void as_paxos_set_cluster_key(uint64_t cluster_key);
 // Get the cluster key
 extern uint64_t as_paxos_get_cluster_key();
-/* PRINT */
-extern int printd(cf_digest *d, char *fname, int lineno);
-
-#define PRINTD(d) printd((d), __FILE__, __LINE__);

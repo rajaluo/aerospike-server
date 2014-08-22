@@ -553,8 +553,7 @@ as_ldt_fill_mig_msg(migration *mig, msg *m, pickled_record *pr, bool is_subrecor
 			msg_set_uint32(m, MIG_FIELD_PGENERATION, r_ref.r->generation);
 			as_record_done(&r_ref, mig->rsv.ns);
 		} else {
-			PRINTD(&pr->pkey);
-			cf_detail(AS_LDT, "No parent found that would mean this is stale version ... skip rv = %d", rv);
+			cf_detail_digest(AS_LDT, &pr->pkey, "No parent found that would mean this is stale version ... skip rv = %d", rv);
 			return -1;
 		}
 
@@ -583,9 +582,6 @@ as_ldt_fill_mig_msg(migration *mig, msg *m, pickled_record *pr, bool is_subrecor
 			  as_ldt_precord_is_esr(pr) ? "ESR"
 			  : (as_ldt_precord_is_subrec(pr) ? "SUB"
 				 : ((as_ldt_precord_is_parent(pr)) ? "LDT" : "")), pr->version, info);
-	PRINTD(&pr->key);
-	PRINTD(&pr->ekey);
-	PRINTD(&pr->pkey);
 	return 0;
 }
 
@@ -693,9 +689,6 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 			  (info & MIG_INFO_LDT_SUBREC) ? "MIG_INFO_LDT_SUBREC"
 			  : ((info & MIG_INFO_LDT_ESR) ? "MIG_INFO_LDT_ESR"
 				 : "MIG_INFO_LDT_REC"), c->version, c->flag);
-	PRINTD(digest);
-	PRINTD(&c->pdigest);
-	PRINTD(&c->edigest);
 
 	if (COMPONENT_IS_LDT_SUB(c)) {
 		cf_assert((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD),

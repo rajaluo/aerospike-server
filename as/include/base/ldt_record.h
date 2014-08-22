@@ -85,7 +85,6 @@ extern const as_rec_hooks ldt_record_hooks;
 
 //extern int ldt_record_init(ldt_record *lr, as_namespace *ns, cf_digest *keyd);
 extern int   ldt_record_init   (ldt_record *lrecord);
-extern int   ldt_record_pickle (ldt_record *lrecord, uint8_t **pickled_buf, size_t *pickled_sz, uint32_t *pickled_void_time);
 
 // TODO this must change with the MAX_LDT_CHUNKS!!!
 

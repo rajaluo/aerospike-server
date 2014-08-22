@@ -187,7 +187,7 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 
 	tr->msgp = 0;
 
-	cf_debug(AS_PROXY, "proxy_divert: fab_msg %p digest %"PRIx64" dst %"PRIx64, m, *(uint64_t *)&tr->keyd, dst);
+	cf_debug_digest(AS_PROXY, &tr->keyd, "proxy_divert: fab_msg %p dst %"PRIx64, m, dst);
 
 	// Fill out a retransmit structure, insert into the retransmit hash.
 	msg_incr_ref(m);
@@ -251,9 +251,8 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 	info |= PROXY_INFO_SHIPPED_OP;
 	msg_set_uint32(m, PROXY_FIELD_INFO, info);
 
-	cf_detail(AS_PROXY, "SHIPPED_OP %s->WINNER msg %p [Digest %"PRIx64"] Proxy Sent to %"PRIx64" %p",
+	cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP %s->WINNER msg %p [Digest %"PRIx64"] Proxy Sent to %"PRIx64" %p",
 			wr->proxy_msg ? "NONORIG" : "ORIG", m, *(uint64_t *)&wr->keyd, dst, wr);
-	PRINTD(&wr->keyd);
 
 	// Fill out a retransmit structure, insert into the retransmit hash.
 	msg_incr_ref(m);
@@ -355,23 +354,18 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 		// Remember that "digest" gets printed at the end of cf_detail_digest().
 		cf_detail_digest(AS_PROXY, &(wr->keyd), "SHIPPED_OP NON-ORIG :: Got Op Response(%p) :", wr);
 		cf_detail_digest(AS_PROXY, &(wr->keyd), "SHIPPED_OP NON-ORIG :: Forwarding Response. : ");
-		PRINTD(&wr->keyd);
 		if (0 != (rv = as_fabric_send(wr->proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM))) {
-			cf_detail(AS_PROXY, "SHIPPED_OP NONORIG [Digest %"PRIx64"] Failed Forwarding Response",
-					  *(uint64_t *)&wr->keyd, rv);
+			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP NONORIG Failed Forwarding Response");
 			as_fabric_msg_put(m);
 		}
 		*free_msg = false;
 	}
 	// Case 2: Originating node.
 	else {
-		cf_detail(AS_PROXY, "SHIPPED_OP ORIG [Digest %"PRIx64"] Got Op Response", *(uint64_t *)&wr->keyd);
-		PRINTD(&wr->keyd);
+		cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Got Op Response");
 		if (wr->proto_fd_h) {
 			if (!wr->proto_fd_h->fd) {
-				cf_warning(AS_PROXY, "SHIPPED_OP ORIG [Digest %"PRIx64"] Missing fd in proto_fd ",
-						*(uint64_t*)&wr->keyd);
-				PRINTD(&wr->keyd);
+				cf_warning_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing fd in proto_fd ");
 			}
 			else {
 				as_proto *proto;
@@ -403,15 +397,10 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 						break;
 					}
 				}
-				cf_detail(AS_PROXY, "SHIPPED_OP ORIG [Digest %"PRIx64"] Response Sent to Client",
-						*(uint64_t *)&wr->keyd);
-				PRINTD(&wr->keyd);
+				cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Response Sent to Client");
 			}
 		} else {
-			cf_warning(AS_PROXY, "SHIPPED_OP ORIG [Digest %"PRIx64"] Missing proto_fd ",
-					*(uint64_t*)&wr->keyd);
-			PRINTD(&wr->keyd);
-
+			cf_warning_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing proto_fd ");
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
 			if (udf_rw_needcomplete(&tr)) {
@@ -500,10 +489,9 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			msg_get_uint32(m, PROXY_FIELD_INFO, &info);
 			if (info & PROXY_INFO_SHIPPED_OP) {
 				tr.flag |= AS_TRANSACTION_FLAG_SHIPPED_OP;
-				cf_detail(AS_PROXY, "SHIPPED_OP WINNER [Digest %"PRIx64"] Operation Received", *(uint64_t *)&tr.keyd);
-				PRINTD(&tr.keyd);
+				cf_detail_digest(AS_PROXY, &tr.keyd, "SHIPPED_OP WINNER Operation Received");
 			} else {
-				cf_detail(AS_PROXY, "Received Proxy Request digest %"PRIx64"", *(uint64_t *)&tr.keyd);
+				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest");
 			}
 
 			MICROBENCHMARK_RESET();
@@ -788,8 +776,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 
 			// TODO: make sure the op is not applied twice?
 			if (pr->wr) {
-				cf_detail(AS_PROXY, "SHIPPED_OP [Digest %"PRIx64"] Proxy Retransmit Timeout ...",
-						*(uint64_t *)&pr->wr->keyd);
+				cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit Timeout ...");
 			}
 
 			if (pr->fab_msg) {
@@ -834,7 +821,7 @@ Retry:
 		int rv = as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_PRIORITY_MEDIUM);
 		// TODO: make sure the retransmit op does not apply more than once?
 		if (pr->wr) {
-			cf_detail(AS_PROXY, "SHIPPED_OP [Digest %"PRIx64"] Proxy Retransmit", *(uint64_t *)&pr->wr->keyd);
+			cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit");
 		}
 
 		if (rv == 0) {
@@ -857,7 +844,7 @@ Retry:
 				}
 				WR_RELEASE(pr->wr);
 				as_fabric_msg_put(pr->fab_msg);
-				cf_detail(AS_PROXY, "SHIPPED_OP [Digest %"PRIx64"] Proxy Fail .. Aborting...", *(uint64_t *)&pr->wr->keyd);
+				cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Fail .. Aborting...");
 				return -2;
 			}
 

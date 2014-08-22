@@ -81,209 +81,18 @@ ldt_aerospike_init(as_aerospike * as)
 	return as_aerospike_init(as, NULL, &ldt_aerospike_hooks);
 }
 
-/* PRINT DIGEST:
- * This has capability is now in the new cf_{info|debug|detail}_digest() calls.
- * printd() will eventually be replaced.
- */
 int
-printd(cf_digest *d, char *fname, int lineno)
+ldt_chunk_print(ldt_record *lrecord, int slot)
 {
-	const char hex_chars[] = "0123456789ABCDEF";
-	cf_detail(AS_LDT, "[%s:%d] ptnid = %d, Lkbits [%3d:%3d], %c%c%c%c%c%c%c%c|%c%c%c%c%c%c"
-			  "%c%c%c%c%c%c%c%c%c%c%c%c%c%c|%c%c%c%c%c%c%c%c%c%c%c%c",
-			  fname, lineno,
-			  as_partition_getid(*d), d->digest[2], d->digest[3],
-			  hex_chars[d->digest[0] >> 4], hex_chars[d->digest[0] & 0xf],
-			  hex_chars[d->digest[1] >> 4], hex_chars[d->digest[1] & 0xf],
-			  hex_chars[d->digest[2] >> 4], hex_chars[d->digest[2] & 0xf],
-			  hex_chars[d->digest[3] >> 4], hex_chars[d->digest[3] & 0xf],
-			  hex_chars[d->digest[4] >> 4], hex_chars[d->digest[4] & 0xf],
-			  hex_chars[d->digest[5] >> 4], hex_chars[d->digest[5] & 0xf],
-			  hex_chars[d->digest[6] >> 4], hex_chars[d->digest[6] & 0xf],
-			  hex_chars[d->digest[7] >> 4], hex_chars[d->digest[7] & 0xf],
-			  hex_chars[d->digest[8] >> 4], hex_chars[d->digest[8] & 0xf],
-			  hex_chars[d->digest[9] >> 4], hex_chars[d->digest[9] & 0xf],
-			  hex_chars[d->digest[10] >> 4], hex_chars[d->digest[10] & 0xf],
-			  hex_chars[d->digest[11] >> 4], hex_chars[d->digest[11] & 0xf],
-			  hex_chars[d->digest[12] >> 4], hex_chars[d->digest[12] & 0xf],
-			  hex_chars[d->digest[13] >> 4], hex_chars[d->digest[13] & 0xf],
-			  hex_chars[d->digest[14] >> 4], hex_chars[d->digest[14] & 0xf],
-			  hex_chars[d->digest[15] >> 4], hex_chars[d->digest[15] & 0xf],
-			  hex_chars[d->digest[16] >> 4], hex_chars[d->digest[16] & 0xf],
-			  hex_chars[d->digest[17] >> 4], hex_chars[d->digest[17] & 0xf],
-			  hex_chars[d->digest[18] >> 4], hex_chars[d->digest[18] & 0xf],
-			  hex_chars[d->digest[19] >> 4], hex_chars[d->digest[19] & 0xf]);
+	ldt_chunk  *lchunk    = &lrecord->chunk[slot];
+	udf_record *c_urecord = &lrecord->chunk[slot].c_urecord;
+
+	cf_detail(AS_LDT, "LSO CHUNK: slot = %d lchunk [%p,%p,%p,%p] ", slot,
+				lchunk->c_urecord, &lchunk->tr, &lchunk->rd, &lchunk->r_ref);
+	cf_detail(AS_LDT, "LSO CHUNK: slot = %d urecord   [%p,%p,%p,%p] ", slot,
+				c_urecord, c_urecord->tr, c_urecord->rd, c_urecord->r_ref);
 	return 0;
 }
-
-/*
- * Main routine to replicate the chunks of LDT objects. The LDT directory rec
- * is not replicated using this function. This function is called for each chunk
- * that got updated as part of the single LDT operation. Note that in a single
- * LDT operation, there can be only few chunks that change. i.e chunks in one
- * path of the tree structure.
- *
- * Assumption:
- * 1. All records should have been closed.
- * 2. Pickled buf for all the record and subrecord which needs shipping should have
- * 	  been filled.
- *
- * Function:
- *
- * 1. Walk through each sub record and use its pickled buf to create
- *    RW_OP_WRITE. Pack it in the buffer and push it into the RW_MULTI_OP
- *    packet.
- * 2. This function packs entire pickled buf into the message that is one extra
- *    allocation into the multi-op over the fabric. The message hangs from the
- *    wr for the parent record for the retransmit
- */
-int
-ldt_record_pickle(ldt_record *lrecord,
-				  uint8_t               ** pickled_buf,
-				  size_t                 * pickled_sz,
-				  uint32_t               * pickled_void_time)
-{
-	cf_detail(AS_LDT, "Enter: MULTI_OP: Packing LDT record");
-
-	udf_record *h_urecord  = as_rec_source(lrecord->h_urec);
-	as_transaction   *h_tr = h_urecord->tr;
-
-	// Do an early check if we need to replicate to other nodes. In cases like
-	// single-replica or single-node we don't need to do any replication.
-	cf_node dest_nodes_tmp[AS_CLUSTER_SZ];
-	memset(dest_nodes_tmp, 0, sizeof(dest_nodes_tmp));
-	int listsz = as_partition_getreplica_readall(h_tr->rsv.ns, h_tr->rsv.pid, dest_nodes_tmp);
-	if (listsz == 0) {
-		return 0;
-	}
-
-	bool is_delete       = (h_urecord->pickled_buf) ? false : true;
-	int  ret             = 0;
-	int  ops             = 0;
-	// TODO: change hard coded 7 to meaningful constant.
-	msg *m[7];
-	memset(m, 0, 7 * sizeof(msg *));
-
-
-	if (is_delete) {
-		*pickled_buf = 0;
-		*pickled_sz  = 0;
-	} else {
-		size_t sz     = 0;
-		size_t buflen = 0;
-
-		m[ops] = as_fabric_msg_get(M_TYPE_RW);
-		if (!m[ops]) {
-			ret = -3;
-			goto Out;
-		}
-		if (!is_delete && h_urecord->pickled_buf) {
-			cf_detail(AS_LDT, "MULTI_OP: Packing LDT Head Record");
-			rw_msg_setup(m[ops], h_tr, &h_tr->keyd,
-							&h_urecord->pickled_buf,
-							h_urecord->pickled_sz,
-							h_urecord->pickled_void_time,
-							&h_urecord->pickled_rec_props,
-							RW_OP_WRITE,
-							h_urecord->ldt_rectype_bits, true);
-			buflen = 0;
-			msg_fillbuf(m[ops], NULL, &buflen);
-			sz += buflen;
-			ops++;
-		}
-
-		// This macro is a for-loop thru the SR list and a test for valid SR entry
-		FOR_EACH_SUBRECORD(i, lrecord) {
-			udf_record *c_urecord = &lrecord->chunk[i].c_urecord;
-			is_delete             = (c_urecord->pickled_buf) ? false : true;
-			as_transaction *c_tr  = c_urecord->tr;
-
-			if ( ((!c_urecord->pickled_buf) || (c_urecord->pickled_sz <= 0)) && !is_delete ) {
-				cf_warning(AS_RW, "Got an empty pickled buf while trying to "
-						" replicate record with digest %"PRIx64" %p, %d, %d",
-						(uint64_t *)&c_tr->keyd, pickled_buf, pickled_sz, is_delete);
-				ret = -2;
-				goto Out;
-			}
-
-			// if pickled_buf is there then it is a write operation
-			if (!is_delete && c_urecord->pickled_buf) {
-				cf_detail(AS_LDT, "MULTI_OP: Packing LDT SUB Record");
-				m[ops] = as_fabric_msg_get(M_TYPE_RW);
-				if (!m[ops]) {
-					ret = -3;
-					goto Out;
-				}
-				rw_msg_setup(m[ops], c_tr, &c_tr->keyd,
-								&c_urecord->pickled_buf,
-								c_urecord->pickled_sz,
-								c_urecord->pickled_void_time,
-								&c_urecord->pickled_rec_props,
-								RW_OP_WRITE,
-								c_urecord->ldt_rectype_bits, true);
-				buflen = 0;
-				msg_fillbuf(m[ops], NULL, &buflen);
-				sz += buflen;
-				ops++;
-			}
-		}
-
-		if (sz) {
-			uint8_t *buf = cf_malloc(sz);
-			if (!buf) {
-				pickled_sz   = 0;
-				*pickled_buf = NULL;
-				ret          = -1;
-				goto Out;
-			}
-			*pickled_buf = buf;
-			*pickled_sz  = sz;
-			int rsz = sz;
-			sz = 0;
-
-			for (int i = 0; i < ops; i++) {
-				sz = rsz - sz;
-				ret = msg_fillbuf(m[i], buf, &sz);
-				buf += sz;
-			}
-			*pickled_void_time = 0;
-		}
-	}
-Out:
-
-	if (ret) {
-		cf_detail(AS_LDT, "MULTI_OP Packing failed with ret = %d", ret);
-		if (*pickled_buf) {
-			cf_free(*pickled_buf);
-			*pickled_buf = NULL;
-			*pickled_sz  = 0;
-			*pickled_void_time = 0;
-		}
-	}
-
-	for (int i = 0; i < ops; i++) {
-		if(m[i]) {
-			as_fabric_msg_put(m[i]);
-		}
-	}
-	// TODO: Check value of ret and do the needed cleanup
-	return ret;
-}
-
-
-//int
-//ldt_chunk_print(ldt_record *lrecord, int slot)
-//{
-//	// It is just a stub fill the proper values in
-//	ldt_chunk  *lchunk    = &lrecord->chunk[slot];
-//	udf_record *c_urecord = &lrecord->chunk[slot].c_urecord;
-//
-//	cf_detail(AS_LDT, "LSO CHUNK: slot = %d lchunk [%p,%p,%p,%p] ", slot,
-//				lchunk->c_urecord, &lchunk->tr, &lchunk->rd, &lchunk->r_ref);
-//	cf_detail(AS_LDT, "LSO CHUNK: slot = %d urecord   [%p,%p,%p,%p] ", slot,
-//				c_urecord, c_urecord->tr, c_urecord->rd, c_urecord->r_ref);
-//	return 0;
-//}
 
 /*
  * Internal Function: Search if the digest is already opened.
@@ -539,7 +348,7 @@ ldt_crec_create(ldt_record *lrecord)
 	udf_record *h_urecord = (udf_record *) as_rec_source(lrecord->h_urec);
 	cf_digest keyd        = h_urecord->r_ref->r->key;
 	cf_detail(AS_LDT, "ldt_aerospike_crec_create %"PRIx64"", *(uint64_t *)&keyd);
-	as_ldt_digest_randomizer(h_urecord->tr->rsv.ns, &keyd);
+	as_ldt_digest_randomizer(&keyd);
 	as_ldt_subdigest_setversion(&keyd, lrecord->version);
 
 	// Setup Chunk
@@ -776,7 +585,7 @@ ldt_aerospike_crec_open(const as_aerospike * as, const as_rec *rec, const char *
 		// This basically means the record is not found.
 		// Do we need to propagate error message rv
 		// back somehow
-		cf_detail(AS_LDT, "Failed to open Sub Record rv=%d", rv);
+		cf_info(AS_LDT, "Failed to open Sub Record rv=%d %d", rv, lrecord->version);
 		return NULL;
 	} else {
 		as_val_reserve(lrecord->chunk[slot].c_urec_p);
@@ -865,6 +674,7 @@ static int
 ldt_aerospike_log(const as_aerospike * a, const char * file,
 				  const int line, const int lvl, const char * msg)
 {
+	a = a;
 	// Logging for Lua Files (UDFs) should be labeled as "UDF", not "LDT".
 	// If we want to distinguish between LDT and general UDF calls, then we
 	// need to create a separate context for LDT.
@@ -888,6 +698,7 @@ ldt_aerospike_destroy(as_aerospike * as)
 static cf_clock
 ldt_aerospike_get_current_time(const as_aerospike * as)
 {
+	as = as;
 	// Does anyone really know what time it is?
 	return cf_clock_getabsolute();
 
