@@ -1579,7 +1579,7 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 
 				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, mc); 
 				if (mc->rsv.p->sub_vp->elements > 0) {
-					cf_info(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
+					cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
 							  mc->incoming_ldt_version,
 							  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, 
 							  mc->rsv.p->sub_vp->elements);

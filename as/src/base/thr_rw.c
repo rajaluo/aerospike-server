@@ -2223,34 +2223,7 @@ int rw_dup_init() {
 	return (0);
 }
 
-int
-as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
-			ldt_prole_info *linfo, uint32_t info)
-{
-	if (rsv->ns->ldt_enabled) {
-		bool is_subrec = ((info & RW_INFO_LDT_SUBREC) || (info & RW_INFO_LDT_ESR));
-		int type = 0;
 
-		if (linfo->replication_partition_version_match) {
-			if (is_subrec) { 
-				if (linfo->ldt_prole_version_set) {
-					// ldt_version should be set
-					as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);	
-					cf_detail_digest(AS_RW, keyd, "Set Prole Version %ld", linfo->ldt_prole_version);
-					type = 1;
-				} else {
-					cf_detail_digest(AS_RW, keyd, "No Parent record setting source version for subrecord");
-					type = 2;
-				}
-			}
-		} 
-
-		if (is_subrec) {
-			cf_detail_digest(AS_RW, keyd, "Has %d type Version %ld for %s", type, as_ldt_subdigest_getversion(keyd), (info & RW_INFO_LDT_ESR) ? "esr" : "subrec");
-		}
-	}
-	return 0;
-}
 
 // If the replication request is coming from partition version which
 // is different then
@@ -2320,6 +2293,35 @@ as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rs
 Out:
 	return -1;
 }
+
+int
+as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
+			ldt_prole_info *linfo, uint32_t info)
+{
+	if (rsv->ns->ldt_enabled) {
+		bool is_subrec = ((info & RW_INFO_LDT_SUBREC) || (info & RW_INFO_LDT_ESR));
+		int type = 0;
+
+		if (linfo->replication_partition_version_match) {
+			if (is_subrec) { 
+				if (linfo->ldt_prole_version_set) {
+					// ldt_version should be set
+					as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);	
+					cf_detail_digest(AS_RW, keyd, "Set Prole Version %ld", linfo->ldt_prole_version);
+					type = 1;
+				} else {
+					cf_detail_digest(AS_RW, keyd, "No Parent record setting source version for subrecord");
+					type = 2;
+				}
+			}
+		} 
+
+		if (is_subrec) {
+			cf_detail_digest(AS_RW, keyd, "Has %d type Version %ld for %s", type, as_ldt_subdigest_getversion(keyd), (info & RW_INFO_LDT_ESR) ? "esr" : "subrec");
+		}
+	}
+	return 0;
+}
 //
 // Case where you get a pickled value that must overwrite
 // whatever was there, instead of a write local
@@ -2336,13 +2338,12 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	}
 
 	as_storage_rd rd;
-	uint64_t memory_bytes = 0;
-
 	as_index_ref r_ref;
-	r_ref.skip_lock = false;
-	as_index_tree *tree = rsv->tree;
-	bool is_subrec  = false;
-	bool is_ldt_parent = false;
+	uint64_t memory_bytes = 0;
+	r_ref.skip_lock       = false;
+	as_index_tree *tree   = rsv->tree;
+	bool is_subrec        = false;
+	bool is_ldt_parent    = false;
 
 	if (rsv->ns->ldt_enabled) {
 		if ((info & RW_INFO_LDT_SUBREC)
@@ -2357,8 +2358,10 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 		} 
 	}
 
+	// Set the version in subrec digest if need be.
 	as_ldt_set_prole_subrec_version(keyd, rsv, linfo, info);
-	int rv = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
+
+	int rv      = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
 	as_index *r = r_ref.r;
 
 	if (rv < 0) {
@@ -2423,6 +2426,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 		}
 	}
 
+	// Set the ldt prole version if there be need
 	if (is_ldt_parent && linfo->replication_partition_version_match && linfo->ldt_prole_version_set) {
 		as_ldt_parent_storage_set_version(&rd, linfo->ldt_prole_version, &p_stack_particles); 
 	} 
