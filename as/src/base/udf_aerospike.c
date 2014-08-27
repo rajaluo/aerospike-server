@@ -242,7 +242,8 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 	uint32_t pbytes = 0;
 	int ret = 0;
 	if (!rd->ns->storage_data_in_memory && !urecord->particle_data) {
-		urecord->particle_data = cf_malloc(rd->ns->storage_write_block_size);
+		// 256 as upper bound on the LDT control bin, we may write version below
+		urecord->particle_data = cf_malloc(rd->ns->storage_write_block_size + 256);
 		urecord->cur_particle_data = urecord->particle_data;
 		urecord->end_particle_data = urecord->particle_data + rd->ns->storage_write_block_size;
 	}

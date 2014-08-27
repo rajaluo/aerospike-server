@@ -2388,7 +2388,8 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	rd.bins = as_bin_get_all(r, &rd, stack_bins);
 
 	uint32_t stack_particles_sz = rd.ns->storage_data_in_memory ? 0 : as_record_buf_get_stack_particles_sz(pickled_buf);
-	uint8_t stack_particles[stack_particles_sz];
+	// 256 as upper bound on the LDT control bin, we may write version below
+	uint8_t stack_particles[stack_particles_sz + 256]; 
 	uint8_t *p_stack_particles = stack_particles;
 
 	// Check is duplication in case code is coming from multi op

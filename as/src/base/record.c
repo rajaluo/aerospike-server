@@ -1306,10 +1306,8 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 		stack_particles_sz = as_record_buf_get_stack_particles_sz(c->record_buf);
 	}
 
-	// Overallocate because we are going to write version below... in case it is parent
-	// record ... max 256k we do not anyways have pickled record with storage on disk
-	// > 128k .. No worry about overflowing stack
-	uint8_t stack_particles[2 * stack_particles_sz]; // stack allocate space for new particles when data on device
+	// 256 as upper bound on the LDT control bin, we may write version below
+	uint8_t stack_particles[stack_particles_sz + 256]; // stack allocate space for new particles when data on device
 	uint8_t *p_stack_particles = stack_particles;
 
 	as_record_set_properties(rd, &c->rec_props);
