@@ -353,8 +353,6 @@
 #define SUBREC_PROP_BIN          "SR_PROP_BIN"
 #define LDT_VERSION_SZ           6
 
-extern shash *g_migrate_incoming_ldt_version_hash;
-
 /*
  * Used by migration to generate version at the beginning of partition
  * migration... based on the MAC address and current clock time....
@@ -512,7 +510,7 @@ as_ldt_subrec_storage_validate(as_storage_rd *rd, char *op)
  *
  */
 void
-as_ldt_digest_randomizer(as_namespace *ns, cf_digest *dig)
+as_ldt_digest_randomizer(cf_digest *dig)
 {
 	// 4 Bytes Randomizer. srand() and rand() used to make things node safe and
 	// thread safe
@@ -955,8 +953,6 @@ as_ldt_subrec_storage_get_digest(as_storage_rd *rd, char digest_type, cf_digest 
 	}
 	cf_debug(AS_LDT, "Got a value from the bin: type(%d)", valp->type);
 
-//	const as_map * prop_map    = as_map_fromval(valp); // keep this step for debugging
-
 	// We must always retrieve typed values from as_val using the type specific
 	// accessor function -- which will return NULL if we guessed wrong on the
 	// type that we're extracting.
@@ -1091,10 +1087,6 @@ as_ldt_version_match(uint64_t subrec_version, as_index_tree *tree, cf_digest *ke
 		return false;
 	}
 
-	// TODO: this is inefficient for defrag. It will blow up number of I/O that
-	// is performed ...
-	// TODO: Need to make sure version info is in the index for storage
-	// on disk case
 	rv              = as_storage_record_open(ns, r, &rd, keyd);
 	if (0 != rv) {
 		cf_warning_digest(AS_UDF, keyd,
@@ -1156,12 +1148,11 @@ Cleanup:
  *
  * Parameter: None
  *
- * TODO: make sure this starts after the data is already loaded
- * from the disk
- *
  * TODO: Not needed once we have 128byte subrecord index record
  * need to be opened only in case of storage in memory case, for storage
  * acccounting
+ *
+ * TODO: IO efficiency track LDT_GC_IO
  */
 void
 as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
@@ -1186,10 +1177,9 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		return;
 	}
 
-	// TODO: Enable the check
-	//	if (r->void_time != 0) {
-	//		cf_warning(AS_LDT, "No void time should be set in subrecord !!! found %d", r->void_time);
-	//	}
+	if (r->void_time != 0) {
+		cf_warning(AS_LDT, "No void time should be set in subrecord !!! found %d", r->void_time);
+	}
 
 	if (!as_ldt_record_is_sub(r)) {
 		cf_warning(AS_LDT, "LDT_SUB_GC: Missing Index bits !!");
@@ -1202,11 +1192,8 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	// b) ESR DIGEST
 	// c) VERSION
 	// d) For in-memory case memory usage
-	//
-	//
-	// TODO: Needs Improvement.
-	// Once subrecord tree is 128byte push all the info about parent and esr
-	// and version in there ... and do not do IO. Potential excessive I/O.
+	
+	// LDT_GC_IO: SUBRECORD
 	as_storage_rd rd;
 	int rv                  = as_storage_record_open(ns, r, &rd, &r->key);
 	if (0 != rv) {
@@ -1220,7 +1207,6 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		rd.n_bins = sizeof(stack_bins) / sizeof(as_bin);
 	}
 	rd.bins                 = as_bin_get_all(r, &rd, stack_bins);
-
 
 	// ESR digest with matching Version
 	cf_digest esr_digest;
@@ -1258,6 +1244,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		delete = true;
 		type   = 2;
 	} else if (! (rv = as_ldt_version_match(subrec_version, p->vp, &parent_digest, ns))) {
+		// LDT_GC_IO: Parent IO
 		delete = true;
 		type   = 3;
 		linfo->num_version_mismatch_gc++;
@@ -1339,3 +1326,158 @@ as_ldt_merge_component_is_candidate(as_partition_reservation *rsv, as_record_mer
 	if (parent_version == c->version) { /* do something */ }
 #endif
 }
+
+/*
+ * Main routine to replicate the chunks of LDT objects. The LDT directory rec
+ * is not replicated using this function. This function is called for each chunk
+ * that got updated as part of the single LDT operation. Note that in a single
+ * LDT operation, there can be only few chunks that change. i.e chunks in one
+ * path of the tree structure.
+ *
+ * Assumption:
+ * 1. All records should have been closed.
+ * 2. Pickled buf for all the record and subrecord which needs shipping should have
+ * 	  been filled.
+ *
+ * Function:
+ *
+ * 1. Walk through each sub record and use its pickled buf to create
+ *    RW_OP_WRITE. Pack it in the buffer and push it into the RW_MULTI_OP
+ *    packet.
+ * 2. This function packs entire pickled buf into the message that is one extra
+ *    allocation into the multi-op over the fabric. The message hangs from the
+ *    wr for the parent record for the retransmit
+ */
+int
+as_ldt_record_pickle(ldt_record *lrecord,
+				  uint8_t               ** pickled_buf,
+				  size_t                 * pickled_sz,
+				  uint32_t               * pickled_void_time)
+{
+	cf_detail(AS_LDT, "Enter: MULTI_OP: Packing LDT record");
+
+	udf_record *h_urecord  = as_rec_source(lrecord->h_urec);
+	as_transaction   *h_tr = h_urecord->tr;
+
+	// Do an early check if we need to replicate to other nodes. In cases like
+	// single-replica or single-node we don't need to do any replication.
+	cf_node dest_nodes_tmp[AS_CLUSTER_SZ];
+	memset(dest_nodes_tmp, 0, sizeof(dest_nodes_tmp));
+	int listsz = as_partition_getreplica_readall(h_tr->rsv.ns, h_tr->rsv.pid, dest_nodes_tmp);
+	if (listsz == 0) {
+		return 0;
+	}
+
+	bool is_delete       = (h_urecord->pickled_buf) ? false : true;
+	int  ret             = 0;
+	int  ops             = 0;
+	// TODO: change hard coded 7 to meaningful constant.
+	msg *m[7];
+	memset(m, 0, 7 * sizeof(msg *));
+
+
+	if (is_delete) {
+		*pickled_buf = 0;
+		*pickled_sz  = 0;
+	} else {
+		size_t sz     = 0;
+		size_t buflen = 0;
+
+		m[ops] = as_fabric_msg_get(M_TYPE_RW);
+		if (!m[ops]) {
+			ret = -3;
+			goto Out;
+		}
+		if (!is_delete && h_urecord->pickled_buf) {
+			cf_detail(AS_LDT, "MULTI_OP: Packing LDT Head Record");
+			rw_msg_setup(m[ops], h_tr, &h_tr->keyd,
+							&h_urecord->pickled_buf,
+							h_urecord->pickled_sz,
+							h_urecord->pickled_void_time,
+							&h_urecord->pickled_rec_props,
+							RW_OP_WRITE,
+							h_urecord->ldt_rectype_bits, true);
+			buflen = 0;
+			msg_fillbuf(m[ops], NULL, &buflen);
+			sz += buflen;
+			ops++;
+		}
+
+		// This macro is a for-loop thru the SR list and a test for valid SR entry
+		FOR_EACH_SUBRECORD(i, lrecord) {
+			udf_record *c_urecord = &lrecord->chunk[i].c_urecord;
+			is_delete             = (c_urecord->pickled_buf) ? false : true;
+			as_transaction *c_tr  = c_urecord->tr;
+
+			if ( ((!c_urecord->pickled_buf) || (c_urecord->pickled_sz <= 0)) && !is_delete ) {
+				cf_warning(AS_RW, "Got an empty pickled buf while trying to "
+						" replicate record with digest %"PRIx64" %p, %d, %d",
+						(uint64_t *)&c_tr->keyd, pickled_buf, pickled_sz, is_delete);
+				ret = -2;
+				goto Out;
+			}
+
+			// if pickled_buf is there then it is a write operation
+			if (!is_delete && c_urecord->pickled_buf) {
+				cf_detail(AS_LDT, "MULTI_OP: Packing LDT SUB Record");
+				m[ops] = as_fabric_msg_get(M_TYPE_RW);
+				if (!m[ops]) {
+					ret = -3;
+					goto Out;
+				}
+				rw_msg_setup(m[ops], c_tr, &c_tr->keyd,
+								&c_urecord->pickled_buf,
+								c_urecord->pickled_sz,
+								c_urecord->pickled_void_time,
+								&c_urecord->pickled_rec_props,
+								RW_OP_WRITE,
+								c_urecord->ldt_rectype_bits, true);
+				buflen = 0;
+				msg_fillbuf(m[ops], NULL, &buflen);
+				sz += buflen;
+				ops++;
+			}
+		}
+
+		if (sz) {
+			uint8_t *buf = cf_malloc(sz);
+			if (!buf) {
+				pickled_sz   = 0;
+				*pickled_buf = NULL;
+				ret          = -1;
+				goto Out;
+			}
+			*pickled_buf = buf;
+			*pickled_sz  = sz;
+			int rsz = sz;
+			sz = 0;
+
+			for (int i = 0; i < ops; i++) {
+				sz = rsz - sz;
+				ret = msg_fillbuf(m[i], buf, &sz);
+				buf += sz;
+			}
+			*pickled_void_time = 0;
+		}
+	}
+Out:
+
+	if (ret) {
+		cf_detail(AS_LDT, "MULTI_OP Packing failed with ret = %d", ret);
+		if (*pickled_buf) {
+			cf_free(*pickled_buf);
+			*pickled_buf = NULL;
+			*pickled_sz  = 0;
+			*pickled_void_time = 0;
+		}
+	}
+
+	for (int i = 0; i < ops; i++) {
+		if(m[i]) {
+			as_fabric_msg_put(m[i]);
+		}
+	}
+	// TODO: Check value of ret and do the needed cleanup
+	return ret;
+}
+

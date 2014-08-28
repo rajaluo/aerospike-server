@@ -79,10 +79,11 @@ extern int      as_ldt_subrec_storage_get_pdigest (as_storage_rd *rd, cf_digest 
 extern int      as_ldt_subrec_storage_get_edigest (as_storage_rd *rd, cf_digest *keyd);
 extern void     as_ldt_subrec_storage_validate    (as_storage_rd *rd, char *op);
 
-extern void     as_ldt_digest_randomizer   (as_namespace *ns, cf_digest *dig);
+extern void     as_ldt_digest_randomizer           (cf_digest *dig);
 extern bool     as_ldt_merge_component_is_candidate(as_partition_reservation *rsv, as_record_merge_component *c);
 
 extern void     as_ldt_record_set_rectype_bits    (as_record *r, const as_rec_props *props);
+extern int      as_ldt_record_pickle              (ldt_record *lrecord, uint8_t **pickled_buf, size_t *pickled_sz, uint32_t *pickled_void_time);
 
 // Version related functions
 extern uint64_t as_ldt_generate_version();

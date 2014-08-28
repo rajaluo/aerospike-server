@@ -1440,9 +1440,8 @@ int
 finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 {
 	if (wr->shipped_op) {
-		cf_detail(AS_RW, "SHIPPED_OP WINNER [Digest %"PRIx64"] Replication Done",
+		cf_detail_digest(AS_RW, &wr->keyd, "SHIPPED_OP WINNER [Digest %"PRIx64"] Replication Done",
 				*(uint64_t *)&wr->keyd);
-		PRINTD(&wr->keyd);
 	}
 
 	if (as_ldt_flag_has_parent(wr->ldt_rectype_bits)) {
@@ -1651,24 +1650,21 @@ finish_rw_process_dup_ack(write_request *wr)
 				cf_warning(AS_LDT, "Unexpected winner @ index %d.. resorting to 0", winner_idx);
 				winner_idx = 0;
 			}
-			cf_detail(AS_RW,
-					"SHIPPED_OP %s [Digest %"PRIx64"] Shipping %s op to %"PRIx64"",
-					wr->proxy_msg ? "NONORIG" : "ORIG", *(uint64_t *)&wr->keyd,
+			cf_detail_digest(AS_RW, &wr->keyd,
+					"SHIPPED_OP %s Shipping %s op to %"PRIx64"",
+					wr->proxy_msg ? "NONORIG" : "ORIG",
 					wr->is_read ? "Read" : "Write",
 					wr->dest_nodes[winner_idx]);
-			PRINTD(&wr->keyd);
 			as_ldt_shipop(wr, wr->dest_nodes[winner_idx]);
 			return false;
 		}
 	} else {
-		cf_detail(AS_RW,
-				"SHIPPED_OP %s=WINNER [Digest %"PRIx64"] locally apply %s op after "
+		cf_detail_digest(AS_RW, &wr->keyd,
+				"SHIPPED_OP %s=WINNER locally apply %s op after "
 				"flatten @ %"PRIx64"",
 				wr->proxy_msg ? "NONORIG" : "ORIG",
-				*(uint64_t *)&wr->keyd,
 				wr->is_read ? "Read" : "Write",
 				g_config.self_node);
-		PRINTD(&wr->keyd);
 	}
 
 	// move to next phase after duplicate merge
@@ -2392,7 +2388,8 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	rd.bins = as_bin_get_all(r, &rd, stack_bins);
 
 	uint32_t stack_particles_sz = rd.ns->storage_data_in_memory ? 0 : as_record_buf_get_stack_particles_sz(pickled_buf);
-	uint8_t stack_particles[stack_particles_sz];
+	// 256 as upper bound on the LDT control bin, we may write version below
+	uint8_t stack_particles[stack_particles_sz + 256]; 
 	uint8_t *p_stack_particles = stack_particles;
 
 	// Check is duplication in case code is coming from multi op

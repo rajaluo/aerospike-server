@@ -199,7 +199,7 @@ udf_record_open(udf_record * urecord)
 {
 	cf_debug_digest(AS_UDF, &urecord->tr->keyd, "[ENTER] Opening record key:");
 	if (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN) {
-		cf_detail(AS_UDF, "Record already open");
+		cf_info(AS_UDF, "Record already open");
 		return 0;
 	}
 	as_transaction *tr    = urecord->tr;
@@ -231,7 +231,7 @@ udf_record_open(udf_record * urecord)
 			udf_storage_record_open(urecord);
 		}
 	} else {
-		cf_detail(AS_UDF, "udf_record_open: rec_get returned with %d", rec_rv);
+		cf_info_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: rec_get returned with %d", rec_rv);
 	}
 	return rec_rv;
 } // end udf_re
@@ -439,7 +439,7 @@ udf_record_cache_free(udf_record * urecord)
 {
 	cf_debug(AS_UDF, "[ENTER] NumUpdates(%d) ", urecord->nupdates );
 
-	for (int i = 0; i < urecord->nupdates; i ++ ) {
+	for (uint i = 0; i < urecord->nupdates; i ++ ) {
 		udf_record_bin * bin = &urecord->updates[i];
 		if ( bin->name[0] != '\0' && bin->value != NULL ) {
 			bin->name[0] = '\0';

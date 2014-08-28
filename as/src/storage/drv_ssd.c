@@ -1741,19 +1741,8 @@ as_storage_record_overhead_size(as_storage_rd *rd)
 
 
 uint32_t
-ssd_write_calculate_size(as_record *r, as_storage_rd *rd)
+as_storage_record_size(as_storage_rd *rd)
 {
-	// Note - this function is the only place where rounding size (up to a
-	// multiple of RBLOCK_SIZE) is really necessary.
-
-	// TODO - use when we're confident duplicate bins were the only issue:
-#ifdef HANDLE_DUPLICATE_BINS
-	// If we already know the flat size, just need to round it.
-	if (rd->flat_size != 0) {
-		return BYTES_TO_RBLOCK_BYTES(rd->flat_size);
-	}
-#endif
-
 	// Start with the record storage overhead, including vinfo and rec-props.
 	uint32_t write_size = as_storage_record_overhead_size(rd);
 
@@ -1784,6 +1773,26 @@ ssd_write_calculate_size(as_record *r, as_storage_rd *rd)
 		write_size += sizeof(drv_ssd_bin) + (uint32_t)particle_flat_sz;
 	}
 
+	return write_size;
+}
+
+
+uint32_t
+ssd_write_calculate_size(as_record *r, as_storage_rd *rd)
+{
+	// Note - this function is the only place where rounding size (up to a
+	// multiple of RBLOCK_SIZE) is really necessary.
+
+	// TODO - use when we're confident duplicate bins were the only issue:
+#ifdef HANDLE_DUPLICATE_BINS
+	// If we already know the flat size, just need to round it.
+	if (rd->flat_size != 0) {
+		return BYTES_TO_RBLOCK_BYTES(rd->flat_size);
+	}
+#endif
+
+	uint32_t write_size = as_storage_record_size(rd);
+
 	// TODO - remove when we're confident duplicate bins were the only issue:
 	if (rd->flat_size != 0 && rd->flat_size != write_size) {
 		cf_warning(AS_DRV_SSD, "flat_size %u != write_size %u - duplicate bins?",
@@ -1798,53 +1807,42 @@ int
 ssd_write_bins(as_record *r, as_storage_rd *rd)
 {
 	uint32_t write_size = ssd_write_calculate_size(r, rd);
+	drv_ssd *ssd = rd->u.ssd.ssd;
 
-	if (write_size == 0) {
+	if (write_size == 0 || write_size > ssd->write_block_size) {
+		cf_warning(AS_DRV_SSD, "write: rejecting %"PRIx64" write size: %u",
+				*(uint64_t*)&rd->keyd, write_size);
 		return -1;
 	}
 
-	// Pickle vinfo, if any.
-	uint8_t vinfo_buf[AS_PARTITION_VINFOSET_PICKLE_MAX];
-	size_t vinfo_buf_length = 0;
+	// Reserve the portion of the current swb where this record will be written.
+	pthread_mutex_lock(&ssd->LOCK);
 
-	if (rd->ns->allow_versions) {
-		vinfo_buf_length = AS_PARTITION_VINFOSET_PICKLE_MAX;
+	ssd_write_buf *swb = ssd->current_swb;
 
-		as_partition_id pid = as_partition_getid(rd->keyd);
-		as_partition_vinfoset *vinfoset = &rd->ns->partitions[pid].vinfoset;
+	if (! swb) {
+		swb = swb_get(ssd);
+		ssd->current_swb = swb;
 
-		if (0 != as_partition_vinfoset_mask_pickle(vinfoset,
-				as_index_vinfo_mask_get(r, true), vinfo_buf,
-				&vinfo_buf_length)) {
-			cf_crash(AS_DRV_SSD, "unable to pickle vinfoset");
-		}
-	}
-
-	drv_ssd *ssd = rd->u.ssd.ssd;
-
-	if (! ssd->current_swb) {
-		ssd->current_swb = swb_get(ssd);
-
-		if (! ssd->current_swb) {
+		if (! swb) {
+			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
+			pthread_mutex_unlock(&ssd->LOCK);
 			return -1;
 		}
 	}
-
-	ssd_write_buf *swb = ssd->current_swb;
 
 	// Check if there's enough space in current buffer -if not, free and zero
 	// any remaining unused space, enqueue it to be flushed to device, and grab
 	// a new buffer.
 	if (write_size > ssd->write_block_size - swb->pos) {
-		if (write_size > ssd->write_block_size) {
-			cf_warning(AS_DRV_SSD, "write: rejecting %"PRIx64" write size: %d",
-					*(uint64_t*)&rd->keyd, write_size);
-			return -1;
-		}
-
 		if (ssd->write_block_size != swb->pos) {
 			// Clean the end of the buffer before pushing to write queue.
 			memset(&swb->buf[swb->pos], 0, ssd->write_block_size - swb->pos);
+		}
+
+		// Wait for all writers to finish.
+		while (cf_atomic32_get(ssd->n_writers) != 0) {
+			;
 		}
 
 		// Enqueue the buffer, to be flushed to device.
@@ -1854,25 +1852,53 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 		// Get the new buffer.
 		swb = swb_get(ssd);
 		ssd->current_swb = swb;
+
+		if (! swb) {
+			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
+			pthread_mutex_unlock(&ssd->LOCK);
+			return -1;
+		}
 	}
 
-	if (! ssd->current_swb) {
-		return -1;
-	}
+	// There's enough space - save the position where this record will be
+	// written, and advance swb->pos for the next writer.
+	uint32_t swb_pos = swb->pos;
+
+	swb->pos += write_size;
+	cf_atomic32_incr(&ssd->n_writers);
+
+	pthread_mutex_unlock(&ssd->LOCK);
+	// May now write this record concurrently with others in this swb.
 
 	// Flatten data into the block.
 
-	uint8_t *buf = &swb->buf[swb->pos];
+	uint8_t *buf = &swb->buf[swb_pos];
 	uint8_t *buf_start = buf;
 
 	drv_ssd_block *block = (drv_ssd_block*)buf;
 
 	buf += sizeof(drv_ssd_block);
 
-	// Write pickled vinfo, if any.
-	if (vinfo_buf_length != 0) {
-		memcpy(buf, vinfo_buf, vinfo_buf_length);
-		buf += vinfo_buf_length;
+	// Pickle and write vinfo, if any.
+	size_t vinfo_buf_length = 0;
+
+	if (rd->ns->allow_versions) {
+		uint8_t vinfo_buf[AS_PARTITION_VINFOSET_PICKLE_MAX];
+		as_partition_id pid = as_partition_getid(rd->keyd);
+		as_partition_vinfoset *vinfoset = &rd->ns->partitions[pid].vinfoset;
+
+		vinfo_buf_length = AS_PARTITION_VINFOSET_PICKLE_MAX;
+
+		if (0 != as_partition_vinfoset_mask_pickle(vinfoset,
+				as_index_vinfo_mask_get(r, true), vinfo_buf,
+				&vinfo_buf_length)) {
+			cf_crash(AS_DRV_SSD, "unable to pickle vinfoset");
+		}
+
+		if (vinfo_buf_length != 0) {
+			memcpy(buf, vinfo_buf, vinfo_buf_length);
+			buf += vinfo_buf_length;
+		}
 	}
 
 	// Properties list goes just before bins.
@@ -1885,7 +1911,8 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 	uint32_t write_nbins = 0;
 
 	if (0 == rd->bins) {
-		cf_warning(AS_DRV_SSD, "write bins: no bin array to write from, aborting.");
+		cf_warning(AS_DRV_SSD, "write bins: no bins array");
+		cf_atomic32_decr(&ssd->n_writers);
 		return -1;
 	}
 
@@ -1945,16 +1972,6 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 	block->vinfo_offset = 0;
 	block->vinfo_length = vinfo_buf_length;
 
-	r->storage_key.ssd.file_id = ssd->file_id;
-	r->storage_key.ssd.rblock_id = BYTES_TO_RBLOCKS(WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id) + swb->pos);
-	r->storage_key.ssd.n_rblocks = BYTES_TO_RBLOCKS(write_size);
-
-	swb->pos += write_size;
-
-	cf_atomic64_add(&ssd->inuse_size, (int64_t)write_size);
-	cf_atomic32_add(&ssd->alloc_table->wblock_state[swb->wblock_id].inuse_sz, (int32_t)write_size);
-
-	// It would be nicer to do this outside the lock.
 	if (ssd->use_signature) {
 		cf_signature_compute(((uint8_t*)block) + SIGNATURE_OFFSET,
 				block->length, &block->sig);
@@ -1962,6 +1979,16 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 	else {
 		block->sig = 0;
 	}
+
+	r->storage_key.ssd.file_id = ssd->file_id;
+	r->storage_key.ssd.rblock_id = BYTES_TO_RBLOCKS(WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id) + swb_pos);
+	r->storage_key.ssd.n_rblocks = BYTES_TO_RBLOCKS(write_size);
+
+	cf_atomic64_add(&ssd->inuse_size, (int64_t)write_size);
+	cf_atomic32_add(&ssd->alloc_table->wblock_state[swb->wblock_id].inuse_sz, (int32_t)write_size);
+
+	// We are finished writing to the buffer.
+	cf_atomic32_decr(&ssd->n_writers);
 
 	return 0;
 }
@@ -1994,11 +2021,7 @@ ssd_write(as_record *r, as_storage_rd *rd)
 		return -1;
 	}
 
-	pthread_mutex_lock(&ssd->LOCK);
-
 	int rv = ssd_write_bins(r, rd);
-
-	pthread_mutex_unlock(&ssd->LOCK);
 
 	if (rv == 0 && old_ssd) {
 		ssd_block_free(old_ssd, old_rblock_id, old_n_rblocks, "ssd-write");
@@ -4008,19 +4031,12 @@ as_storage_record_can_fit_ssd(as_storage_rd *rd)
 }
 
 
-// Currently record overhead is: size of drv_ssd_block (64 bytes) + max set name
-// size (64 bytes) + size of its as_rec_prop_field (8 bytes?) = 136 bytes. But
-// let's leave some room for more rec-props... Like key and LDT info...
-#define RECORD_STORAGE_OVERHEAD 512
-
-// TODO - pointless since we really need to look at all the bins - deprecate?
 bool
-as_storage_bin_can_fit_ssd(as_namespace *ns, uint32_t bin_data_size)
+as_storage_record_size_and_check_ssd(as_storage_rd *rd)
 {
-	uint32_t overhead = RECORD_STORAGE_OVERHEAD + sizeof(drv_ssd_bin);
+	rd->flat_size = as_storage_record_size(rd);
 
-	return ns->storage_write_block_size >= overhead &&
-			bin_data_size <= ns->storage_write_block_size - overhead;
+	return rd->ns->storage_write_block_size >= rd->flat_size;
 }
 
 
@@ -4108,7 +4124,7 @@ as_storage_has_space_ssd(as_namespace *ns)
 	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
-		if (cf_queue_sz(ssds->ssds[i].swb_free_q) <
+		if (cf_queue_sz(ssds->ssds[i].free_wblock_q) <
 				ns->storage_min_free_wblocks) {
 			return false;
 		}
