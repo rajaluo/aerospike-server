@@ -2580,8 +2580,13 @@ write_process(cf_node node, msg *m, bool respond)
 		as_partition_reserve_migrate(ns, as_partition_getid(tr.keyd), &tr.rsv, 0);
 		cf_atomic_int_incr(&g_config.wprocess_tree_count);
 
+		// check here if this is prole delete caused by nsup
+		// If yes we need to tell XDR NOT to ship the delete
+		uint32_t info = 0;
+		msg_get_uint32(m, RW_FIELD_INFO, &info);
+
 		ldt_prole_info linfo;
-		if (as_rw_get_ldt_info(&linfo, m, &tr.rsv)) {
+		if ((info & RW_INFO_LDT) && as_rw_get_ldt_info(&linfo, m, &tr.rsv)) {
 			goto Out;
 		}
 
@@ -2603,11 +2608,7 @@ write_process(cf_node node, msg *m, bool respond)
 			cf_debug_digest(AS_RW, keyd, "[PROLE write]: SingleBin(%d) generation(%d):",
 					ns->single_bin, generation );
 
-			// check here if this is prole delete caused by nsup
-			// If yes we need to tell XDR NOT to ship the delete
-			uint32_t info = 0;
-			msg_get_uint32(m, RW_FIELD_INFO, &info);
-
+			
 			if (as_ldt_check_and_get_prole_version(keyd, &tr.rsv, &linfo, info, NULL, __FILE__, __LINE__)) {
 				result_code = AS_PROTO_RESULT_OK;
 				as_partition_release(&tr.rsv); // returns reservation a few lines up
@@ -2710,7 +2711,7 @@ write_process(cf_node node, msg *m, bool respond)
 		cf_atomic_int_incr(&g_config.wprocess_tree_count);
 
 		ldt_prole_info linfo;
-		if (as_rw_get_ldt_info(&linfo, m, &rsv)) {
+		if ((info & RW_INFO_LDT) && as_rw_get_ldt_info(&linfo, m, &rsv)) {
 			goto Out;
 		}
 

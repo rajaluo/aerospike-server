@@ -231,7 +231,7 @@ udf_record_open(udf_record * urecord)
 			udf_storage_record_open(urecord);
 		}
 	} else {
-		cf_info_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: rec_get returned with %d", rec_rv);
+		cf_detail_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: rec_get returned with %d", rec_rv);
 	}
 	return rec_rv;
 } // end udf_re
@@ -928,8 +928,7 @@ udf_record_gen(const as_rec * rec)
 static bool
 udf_record_destroy(as_rec *rec)
 {
-	int ret = udf_record_param_check(rec, UDF_BIN_NONAME, __FILE__, __LINE__);
-	if (ret) {
+	if (!rec) {
 		return false;
 	}
 
