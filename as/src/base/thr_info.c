@@ -415,6 +415,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_proxy_success);
 	cf_dyn_buf_append_string(db, ";stat_proxy_errs=");
 	APPEND_STAT_COUNTER(db, g_config.stat_proxy_errs);
+	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
+	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
 
 	cf_dyn_buf_append_string(db,   ";stat_cluster_key_trans_to_proxy_retry=");
 	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_trans_to_proxy_retry);
