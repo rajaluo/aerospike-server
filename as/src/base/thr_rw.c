@@ -101,6 +101,8 @@ static cf_atomic32 g_rw_tid = 0;
 static rchash *g_write_hash = 0;
 static pthread_t g_rw_retransmit_th;
 
+extern as_xdr_state g_as_xdr_state;
+
 // HELPER
 void print_digest(u_char *d) {
 	printf("0x");
@@ -827,9 +829,9 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			// We cannot do this check inside write_local() because that function is used for replica
 			// writes as well. We do not want to stop the writes on replica if the master write succeeded.
 			if ((g_config.xdr_cfg.xdr_global_enabled == true)
-					&& (g_config.xdr_cfg.xdr_digestpipe_fd == -1)
-					&& (tr->rsv.ns && tr->rsv.ns->enable_xdr == true)
-					&& (g_config.xdr_cfg.xdr_stop_writes_noxdr == true)) {
+			 && (g_as_xdr_state != XDR_UP)
+			 && (tr->rsv.ns && tr->rsv.ns->enable_xdr == true)
+			 && (g_config.xdr_cfg.xdr_stop_writes_noxdr == true)) {
 				tr->result_code = AS_PROTO_RESULT_FAIL_NOXDR;
 				cf_atomic_int_incr(&g_config.err_write_fail_noxdr);
 				cf_debug(AS_RW,

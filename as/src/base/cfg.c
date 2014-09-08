@@ -2633,6 +2633,9 @@ as_config_init(const char *config_file)
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
+			case XDR_CASE_NAMEDPIPE_PATH_OLD:
+				cfg_deprecated_name_tok(&line);
+				cf_warning(AS_AS, "Use 'xdr-namedpipe-path'");
 			case XDR_CASE_NAMEDPIPE_PATH:
 				c->xdr_cfg.xdr_digestpipe_path = cfg_strdup(&line);
 				break;
@@ -2655,10 +2658,10 @@ as_config_init(const char *config_file)
 				cfg_end_context(&state);
 				break;
 			case XDR_CASE_NOT_FOUND:
-			default:
 				// We do not use a default case here. Any other config option is
 				// specific to the XDR module and the server is not interested
 				// in it.
+			default:
 				break;
 			}
 			break;

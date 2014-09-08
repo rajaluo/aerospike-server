@@ -341,7 +341,7 @@ main(int argc, char **argv)
 	// with specified filtering. If console sink is specified in configuration,
 	// 'cf_' log output will continue going to stderr, but filtering will switch
 	// from NO_SINKS_LIMIT to that specified in console sink configuration.
-	if (0 != cf_fault_sink_activate_all_held()) {
+	if (0 != cf_fault_sink_activate_asd_held()) {
 		// Specifics of failure are logged in cf_fault_sink_activate_all_held().
 		cf_crash_nostack(AS_AS, "can't open log sink(s)");
 	}
@@ -430,13 +430,7 @@ main(int argc, char **argv)
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
 
-	// Start XDR if enabled in configuration file.
-	if (c->xdr_cfg.xdr_global_enabled == true) {
-		// Default start method --noresume --nofailover.
-		if (as_xdr_start(g_config_file, false, false)) {
-			cf_warning(AS_AS, "Cannot start XDR");
-		}
-	}
+	as_xdr_start(g_config_file, NULL, true, true, 0 /*Call is at the start of server*/);
 
 	info_debug_ticker_start();	// only after everything else is started
 

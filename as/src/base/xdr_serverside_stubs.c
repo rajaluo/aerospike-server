@@ -22,6 +22,8 @@
 
 #include "base/xdr_serverside.h"
 
+as_xdr_state g_as_xdr_state = XDR_DOWN;
+
 int as_xdr_init()
 {
 	return -1;
@@ -69,7 +71,12 @@ void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_no
 {
 }
 
-int as_xdr_start(const char *config_file, bool isresume, bool isfailover)
+int as_xdr_start(const char *config_file, const char *error_file, bool isresume, bool isfailover, int caller)
+{
+	return -1;
+}
+
+int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db)
 {
 	return -1;
 }
@@ -92,4 +99,8 @@ int as_open_namedpipe()
 int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr)
 {
 	return 0;
+}
+
+void xdr_sig_handler(int signum)
+{
 }

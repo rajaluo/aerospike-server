@@ -179,6 +179,33 @@ cf_fault_sink_add(char *path)
 	return(s);
 }
 
+/* cf_fault_sink_remove
+ * Unregister an sink for faults */
+int
+cf_fault_sink_remove(char *path)
+{
+	for (int index = 0; index < num_held_fault_sinks; index++) {
+		cf_fault_sink *s = &cf_fault_sinks[index];
+
+		if (0 == strncmp(s->path, path, strlen(path))) {
+			if (s->fd <= 2) {
+				cf_warning(CF_MISC, "Can't close %s", s->path);
+				return -1;
+			}
+			if (-1 == close(s->fd)) {
+				cf_warning(CF_MISC, "Can't close %s:%s", s->path, cf_strerror(errno));
+				return -1;
+			}
+			s->fd = -1;
+			cf_fault_sinks_inuse--;
+			cf_free(s->path);
+			s->path = NULL;
+			num_held_fault_sinks--;
+		}
+	}
+	return 0;
+}
+
 
 /* cf_fault_sink_hold
  * Register but don't activate a sink for faults - return sink object pointer on
@@ -187,26 +214,39 @@ cf_fault_sink_add(char *path)
 cf_fault_sink *
 cf_fault_sink_hold(char *path)
 {
+	bool found;
+	cf_fault_sink *s = NULL;
+
 	if (num_held_fault_sinks >= CF_FAULT_SINKS_MAX) {
 		cf_warning(CF_MISC, "too many fault sinks");
 		return NULL;
 	}
 
-	cf_fault_sink *s = &cf_fault_sinks[num_held_fault_sinks];
+	found = false;
+	for (int index = 0; index < num_held_fault_sinks; index++) {
+		s = &cf_fault_sinks[index];
 
-	s->path = cf_strdup(path);
-
-	if (! s->path) {
-		cf_warning(CF_MISC, "failed allocation for sink path");
-		return NULL;
+		if (0 == strncmp(s->path, path, strlen(path))) {
+			found = true;
+			break;
+		}
 	}
 
-	// If a context is not added, its runtime default will be CF_INFO.
-	for (int i = 0; i < CF_FAULT_CONTEXT_UNDEF; i++) {
-		s->limit[i] = CF_INFO;
-	}
+	if (!found) {
+		s = &cf_fault_sinks[num_held_fault_sinks];
+		s->path = cf_strdup(path);
 
-	num_held_fault_sinks++;
+		if (! s->path) {
+			cf_warning(CF_MISC, "failed allocation for sink path");
+			return NULL;
+		}
+
+		// If a context is not added, its runtime default will be CF_INFO.
+		for (int i = 0; i < CF_FAULT_CONTEXT_UNDEF; i++) {
+			s->limit[i] = CF_INFO;
+		}
+		num_held_fault_sinks++;
+	}
 
 	return s;
 }
@@ -240,6 +280,79 @@ fault_filter_adjust(cf_fault_sink *s, cf_fault_context ctx)
 	}
 }
 
+/* cf_fault_sink_activate_xdr_held
+ * Activate sink for xdr which is on hold - return 0 on success, -1 on failure. Only use
+ * once at startup, after parsing config file. On failure there's no cleanup,
+ * assumes caller will stop the process. */
+int
+cf_fault_sink_activate_xdr_held(char *path)
+{
+	for (int i = 0; i < num_held_fault_sinks; i++) {
+		cf_fault_sink *s = &cf_fault_sinks[i];
+
+		// "Activate" the sink.
+		if (0 == strncmp(s->path, path, strlen(path))) {
+			if (-1 == (s->fd = open(s->path, O_WRONLY|O_CREAT|O_APPEND|O_NONBLOCK, S_IRUSR|S_IWUSR))) {
+				cf_warning(CF_MISC, "can't open %s: %s", s->path, cf_strerror(errno));
+				return -1;
+			}
+			cf_fault_sinks_inuse++;
+			// This limit is the one specified in configuration file.
+			// We do not need log for other context in XDR log file.
+			// We are effectively disableing log for all other contexts.
+			int tmp_limit = s->limit[AS_XDR];
+			for (int j = 0; j < CF_FAULT_CONTEXT_UNDEF; j++) {
+				s->limit[j] = CF_CRITICAL;
+			}
+			s->limit[AS_XDR] = tmp_limit; 
+		}
+	}
+
+	return 0;
+}
+
+/* cf_fault_sink_activate_asd_held
+ * Activate all asd sinks on hold - return 0 on success, -1 on failure. Only use
+ * once at startup, after parsing config file. On failure there's no cleanup,
+ * assumes caller will stop the process. */
+int
+cf_fault_sink_activate_asd_held()
+{
+	for (int i = 0; i < num_held_fault_sinks; i++) {
+		if (cf_fault_sinks_inuse >= CF_FAULT_SINKS_MAX) {
+			// In case this isn't first sink, force logging as if no sinks:
+			cf_fault_sinks_inuse = 0;
+			cf_warning(CF_MISC, "too many fault sinks");
+			return -1;
+		}
+
+		cf_fault_sink *s = &cf_fault_sinks[i];
+
+		// "Activate" the sink.
+		if (0 == strncmp(s->path, "stderr", 6)) {
+			s->fd = 2;
+		}
+		else if (-1 == (s->fd = open(s->path, O_WRONLY|O_CREAT|O_APPEND|O_NONBLOCK, S_IRUSR|S_IWUSR))) {
+			// In case this isn't first sink, force logging as if no sinks:
+			cf_fault_sinks_inuse = 0;
+			cf_warning(CF_MISC, "can't open %s: %s", s->path, cf_strerror(errno));
+			return -1;
+		}
+
+		// Do not need logs for XDR in this log file.
+		// Only need critical XDR log messages.
+		s->limit[AS_XDR] = CF_CRITICAL;
+
+		cf_fault_sinks_inuse++;
+
+		// Adjust the fault filter to the runtime levels.
+		for (int j = 0; j < CF_FAULT_CONTEXT_UNDEF; j++) {
+			fault_filter_adjust(s, (cf_fault_context)j);
+		}
+	}
+
+	return 0;
+}
 
 /* cf_fault_sink_activate_all_held
  * Activate all sinks on hold - return 0 on success, -1 on failure. Only use

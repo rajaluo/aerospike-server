@@ -49,6 +49,8 @@ as_sig_handle_term(int sig_num)
 {
 	cf_warning(AS_AS, "SIGTERM received, shutting down");
 
+	xdr_sig_handler(sig_num);
+
 	if (g_old_term_handler) {
 		g_old_term_handler(sig_num);
 	}
@@ -68,6 +70,8 @@ as_sig_handle_abort(int sig_num)
 {
 	cf_warning(AS_AS, "SIGABRT received, aborting %s build %s",
 			aerospike_build_type, aerospike_build_id);
+
+	xdr_sig_handler(sig_num);
 
 	void *bt[MAX_BACKTRACE_DEPTH];
 	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
@@ -93,6 +97,8 @@ as_sig_handle_fpe(int sig_num)
 	cf_warning(AS_AS, "SIGFPE received, aborting %s build %s",
 			aerospike_build_type, aerospike_build_id);
 
+	xdr_sig_handler(sig_num);
+
 	void *bt[MAX_BACKTRACE_DEPTH];
 	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
 	char **strings = backtrace_symbols(bt, sz);
@@ -116,6 +122,8 @@ void
 as_sig_handle_int(int sig_num)
 {
 	cf_warning(AS_AS, "SIGINT received, shutting down");
+
+	xdr_sig_handler(sig_num);	
 
 	if (g_old_int_handler) {
 		g_old_int_handler(sig_num);
@@ -149,6 +157,8 @@ as_sig_handle_segv(int sig_num)
 	cf_warning(AS_AS, "SIGSEGV received, aborting %s build %s",
 			aerospike_build_type, aerospike_build_id);
 
+	xdr_sig_handler(sig_num);
+
 	void *bt[MAX_BACKTRACE_DEPTH];
 	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
 	char **strings = backtrace_symbols(bt, sz);
@@ -168,6 +178,50 @@ as_sig_handle_segv(int sig_num)
 	_exit(-1);
 }
 
+sighandler_t g_old_bus_handler = 0;
+void
+as_sig_handle_bus(int sig_num)
+{
+	cf_warning(AS_AS, "SIGBUS received, aborting %s build %s",
+			aerospike_build_type, aerospike_build_id);
+
+	xdr_sig_handler(sig_num);
+
+	void *bt[MAX_BACKTRACE_DEPTH];
+	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
+	char **strings = backtrace_symbols(bt, sz);
+
+	for (int i = 0; i < sz; i++) {
+		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
+	}
+
+	// This must literally be the direct clib "free()", because "strings" is
+	// allocated by "backtrace_symbols()".
+	free(strings);
+}
+
+sighandler_t g_old_pipe_handler = 0;
+void
+as_sig_handle_pipe(int sig_num)
+{
+	cf_warning(AS_AS, "SIGPIPE received, aborting %s build %s",
+			aerospike_build_type, aerospike_build_id);
+
+	xdr_sig_handler(sig_num);
+
+	void *bt[MAX_BACKTRACE_DEPTH];
+	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
+	char **strings = backtrace_symbols(bt, sz);
+
+	for (int i = 0; i < sz; i++) {
+		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
+	}
+
+	// This must literally be the direct clib "free()", because "strings" is
+	// allocated by "backtrace_symbols()".
+	free(strings);
+}
+
 void
 as_signal_setup() {
 	g_old_int_handler = signal(SIGINT , as_sig_handle_int);
@@ -176,6 +230,8 @@ as_signal_setup() {
 	g_old_abort_handler = signal(SIGABRT , as_sig_handle_abort);
 	g_old_hup_handler = signal(SIGHUP, as_sig_handle_hup);
 	g_old_segv_handler = signal(SIGSEGV, as_sig_handle_segv);
+	g_old_bus_handler = signal(SIGBUS , as_sig_handle_bus);
+	g_old_pipe_handler = signal(SIGPIPE , as_sig_handle_pipe);
 
 	// Block SIGPIPE signal when there is some error while writing to pipe. The
 	// write() call will return with a normal error which we can handle.

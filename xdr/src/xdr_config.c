@@ -59,27 +59,24 @@ const xdr_cfg_opt XDR_NS_STORAGE_OPTS[] = {
 const xdr_cfg_opt XDR_OPTS[] = {
 		{ "{",								XDR_CASE_CONTEXT_BEGIN },
 		{ "enable-xdr",						XDR_CASE_ENABLE_XDR },
-		{ "namedpipe-path",					XDR_CASE_NAMEDPIPE_PATH },
+		{ "namedpipe-path",					XDR_CASE_NAMEDPIPE_PATH_OLD }, // Deprecated
 		{ "xdr-namedpipe-path",				XDR_CASE_NAMEDPIPE_PATH }, // dup entry
-		{ "digestlog-path",					XDR_CASE_DIGESTLOG_PATH },
+		{ "digestlog-path",					XDR_CASE_DIGESTLOG_PATH_OLD }, // Deprecated
 		{ "xdr-digestlog-path",				XDR_CASE_DIGESTLOG_PATH }, // dup entry
-		{ "errorlog-path",					XDR_CASE_ERRORLOG_PATH },
+		{ "errorlog-path",					XDR_CASE_ERRORLOG_PATH_OLD }, // Deprecated
 		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH }, // dup entry
-		{ "local-node-port",				XDR_CASE_LOCAL_NODE_PORT },
-		{ "info-port",						XDR_CASE_INFO_PORT },
+		{ "info-port",						XDR_CASE_INFO_PORT_OLD }, // Deprecated
 		{ "xdr-info-port",					XDR_CASE_INFO_PORT }, // dup entry
 		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
-		{ "batch-size",						XDR_CASE_MAX_RECS_INFLIGHT },
+		{ "batch-size",						XDR_CASE_MAX_RECS_INFLIGHT_OLD }, // Deprecated
 		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT }, // dup entry
-		{ "digestlog-overwrite",			XDR_CASE_DIGESTLOG_OVERWRITE },
-		{ "digestlog-persist",				XDR_CASE_DIGESTLOG_PERSIST },
+		{ "digestlog-overwrite",			XDR_CASE_DIGESTLOG_OVERWRITE }, // not exposed
+		{ "digestlog-persist",				XDR_CASE_DIGESTLOG_PERSIST }, // not exposed
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
-		{ "threads",						XDR_CASE_THREADS },
+		{ "threads",						XDR_CASE_THREADS_OLD }, // Deprecated
 		{ "xdr-threads",					XDR_CASE_THREADS }, // dup entry
 		{ "timeout",						XDR_CASE_TIMEOUT }, // not exposed to users
 		{ "stop-writes-noxdr",				XDR_CASE_STOP_WRITES_NOXDR },
-		{ "xdr-batch-num-retry",			XDR_CASE_XDR_BATCH_NUM_RETRY },
-		{ "xdr-batch-retry-sleep",			XDR_CASE_XDR_BATCH_RETRY_SLEEP },
 		{ "xdr-delete-shipping-enabled",	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
 		{ "xdr-hotkey-maxskip",				XDR_CASE_XDR_HOTKEY_MAXSKIP },
@@ -92,10 +89,8 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },
 		{ "xdr-check-data-before-delete",	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE },
 		{ "xdr-pidfile",					XDR_CASE_XDR_PIDFILE },
-		{ "xdr-read-threads",				XDR_CASE_XDR_READ_THREAD_COUNT},
-		{ "xdr-read-mode",					XDR_CASE_XDR_READ_MODE},
-		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS},
-		{ "xdr-ship-slab-size",				XDR_CASE_XDR_SHIP_SLAB_SIZE},
+		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS}, // xdr in asd
+		{ "xdr-ship-slab-size",				XDR_CASE_XDR_SHIP_SLAB_SIZE}, // xdr in asd
 		{ "xdr-do-version-check",			XDR_CASE_XDR_DO_VERSION_CHECK},
 		{ "}",								XDR_CASE_CONTEXT_END }
 };

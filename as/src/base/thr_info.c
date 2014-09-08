@@ -2324,7 +2324,7 @@ info_xdr_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_delete_shipping_enabled ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";xdr-nsup-deletes-enabled=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_nsup_deletes_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";enable-xdr=");
+	cf_dyn_buf_append_string(db, ";enable-xdr-logging=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";stop-writes-noxdr=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
@@ -3411,54 +3411,15 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		context_len = sizeof(context);
 		if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				// Read input values.
-				bool isresume = false;
-				bool isfailover = false;
-				#define LEN_TEMP_CONFIG_FILE 256
-				char temp_config_file[LEN_TEMP_CONFIG_FILE] = {'\0'};
-				int len_temp_config_file = LEN_TEMP_CONFIG_FILE;
-				if (0 == as_info_parameter_get(params, "config-file", temp_config_file, &len_temp_config_file)) {
-					cf_detail(AS_INFO, "Configuration file : %s", temp_config_file);
-				}
-				context_len = sizeof(context);
-				if (0 == as_info_parameter_get(params, "resume", context, &context_len)) {
-					if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
-						isresume = true;
-					}
-				}
-				context_len = sizeof(context);
-				if (0 == as_info_parameter_get(params, "failover", context, &context_len)) {
-					if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
-						isfailover = true;
-					}
-				}
-				if (g_config.xdr_cfg.xdr_global_enabled) {
-					cf_info(AS_XDR, "XDR is already running.");
-				}
-
-				// Start XDR module.
-				if (as_xdr_start((temp_config_file[0] != '\0')?temp_config_file:g_config_file, isresume, isfailover)) {
-					g_config.xdr_cfg.xdr_global_enabled = false;
-					goto Error;
-				}
-			}
-			else if (strncmp(context, "false", 5)==0 || strncmp(context, "no", 2)==0) {
-				if (as_xdr_stop()) {
-					g_config.xdr_cfg.xdr_global_enabled = true;
-					goto Error;
-				}
+				cf_info(AS_INFO, "Enabling XDR digest logging");
+				g_config.xdr_cfg.xdr_global_enabled = true;
+			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Disabling XDR digest logging");
+				g_config.xdr_cfg.xdr_global_enabled = false;
 			} else {
 				goto Error;
 			}
-		}
-		// This message should be sent by XDR only.
-		// It is to open server side end of namedpipe.
-		else if (0 == as_info_parameter_get(params, "open-namedpipe", context, &context_len)) {
-			if (as_open_namedpipe()) {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
+		} else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
 			uint64_t val[DC_MAX_NUM];
 			char * tmp_val;
 			char *  delim = {","};
@@ -6785,7 +6746,7 @@ as_info_init()
 	as_info_set_command("tip-clear", info_command_tip_clear, PRIV_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
 	as_info_set_command("undun", info_command_undun, PRIV_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
 	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PRIV_NONE);      // Get the min XDR lastshipinfo.
-
+	as_info_set_command("xdr-command", as_info_command_xdr, PRIV_SERVICE_CTRL);		  // Command to XDR module.
 	// SINDEX
 	as_info_set_dynamic("sindex", info_get_sindexes, false);
 	as_info_set_tree("sindex", info_get_tree_sindexes);

@@ -154,9 +154,12 @@ typedef enum {
 extern int cf_fault_sink_addcontext(cf_fault_sink *s, char *context, char *severity);
 extern int cf_fault_sink_setcontext(cf_fault_sink *s, char *context, char *severity);
 extern cf_fault_sink *cf_fault_sink_add(char *path);
+extern int cf_fault_sink_remove(char *path);
 
 extern cf_fault_sink *cf_fault_sink_hold(char *path);
 extern int cf_fault_sink_activate_all_held();
+extern int cf_fault_sink_activate_xdr_held();
+int cf_fault_sink_activate_asd_held();
 extern int cf_fault_sink_get_fd_list(int *fds);
 
 extern int cf_fault_sink_strlist(cf_dyn_buf *db); // pack all contexts into a string - using ids
