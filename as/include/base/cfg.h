@@ -64,7 +64,7 @@ typedef struct as_config_s {
 
 	/* Global service configuration */
 	uid_t				uid;
-	gid_t				 gid;
+	gid_t				gid;
 	char				*pidfile;
 	bool				run_as_daemon;
 
@@ -83,10 +83,13 @@ typedef struct as_config_s {
 	char 				*hb_init_addr;
 	int					hb_port;
 	int					hb_init_port;
+	char				*hb_mesh_seed_addrs[AS_CLUSTER_SZ];
+	int					hb_mesh_seed_ports[AS_CLUSTER_SZ];
 	char				*hb_tx_addr;
 	uint32_t			hb_interval;
 	uint32_t			hb_timeout;
 	unsigned char		hb_mcast_ttl;
+	uint32_t			hb_mesh_rw_retry_timeout;
 
 	uint64_t			start_ms; // filled with the start time of the server
 
@@ -231,7 +234,6 @@ typedef struct as_config_s {
 
 	/* tuning parameter for how often to run nsup to evict data in a namespace */
 	uint32_t			nsup_period;
-	uint32_t			nsup_auto_hwm_pct; // where auto-hwm kicks in: ie, 10 pct free
 	uint32_t			nsup_queue_hwm; // tsvc queue hwm check
 	uint32_t			nsup_queue_lwm; // tsvc queue lwm check
 	uint32_t			nsup_queue_escape; // tsvc queue lwm check
@@ -260,11 +262,6 @@ typedef struct as_config_s {
 	cf_atomic_int		migrate_num_incoming;
 	// For debouncing re-tansmitted migrate start messages:
 	int					migrate_rx_lifetime_ms;
-
-	uint32_t			defrag_queue_hwm; // write queue hwm check
-	uint32_t			defrag_queue_lwm; // write queue lwm check
-	uint32_t			defrag_queue_escape; // write queue wait limit
-	uint32_t			defrag_queue_priority; // ms to wait per loop (0 ok)
 
 	uint32_t			fb_health_msg_per_burst; // health probe paxos messages per "burst"
 	uint32_t			fb_health_msg_timeout; // milliseconds after which to give up on health probe message
@@ -570,10 +567,7 @@ typedef struct as_config_s {
 	cf_atomic_int		err_sync_copy_null_master;
 
 	cf_atomic_int		err_storage_queue_full;
-	cf_atomic_int		stat_storage_startup_load;
-
 	cf_atomic_int		err_storage_defrag_corrupt_record;
-	cf_atomic_int		stat_storage_defrag_wait;
 
 	cf_atomic_int		err_write_fail_unknown;
 	cf_atomic_int		err_write_fail_key_exists;

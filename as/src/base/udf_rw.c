@@ -275,12 +275,22 @@ send_result(as_result * res, udf_call * call, void *udata)
 					as_serializer s;
 					as_msgpack_init(&s);
 
-					as_serializer_serialize(&s, v, &buf);
+					int res = as_serializer_serialize(&s, v, &buf);
 
-					send_success(call, to_particle_type(as_val_type(v)), buf.data, buf.size);
-					// Not needed stack allocated - unless serialize has internal state
-					// as_serializer_destroy(&s);
-					as_buffer_destroy(&buf);
+					if (res != 0) {
+						const char * error = "Serialization failure";
+						cf_warning(AS_UDF, "%s (%d)", (char *)error, res);
+						as_buffer_destroy(&buf);
+						send_failure(call, AS_PARTICLE_TYPE_STRING, (char *)error, strlen(error));
+					}
+					else {
+						cf_detail_binary(AS_UDF, buf.data, buf.size, CF_DISPLAY_HEX_COLUMNS, "serialized %d bytes: ", buf.size);
+						send_success(call, to_particle_type(as_val_type(v)), buf.data, buf.size);
+						// Not needed stack allocated - unless serialize has internal state
+						// as_serializer_destroy(&s);
+						as_buffer_destroy(&buf);
+					}
+
 					break;
 				}
 				default:
@@ -496,13 +506,21 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 			&urecord->pickled_rec_props, true/*increment_generation*/,
 			NULL, r_ref->r, rd, urecord->starting_memory_bytes);
 
-		// Now ok to accommodate a new stored key.
+		// Now ok to accommodate a new stored key...
 		if (! as_index_is_flag_set(r_ref->r, AS_INDEX_FLAG_KEY_STORED) && rd->key) {
 			if (rd->ns->storage_data_in_memory) {
 				as_record_allocate_key(r_ref->r, rd->key, rd->key_size);
 			}
 
 			as_index_set_flags(r_ref->r, AS_INDEX_FLAG_KEY_STORED);
+		}
+		// ... or drop a stored key.
+		else if (as_index_is_flag_set(r_ref->r, AS_INDEX_FLAG_KEY_STORED) && ! rd->key) {
+			if (rd->ns->storage_data_in_memory) {
+				as_record_remove_key(r_ref->r);
+			}
+
+			as_index_clear_flags(r_ref->r, AS_INDEX_FLAG_KEY_STORED);
 		}
 	}
 
@@ -610,6 +628,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	*lrecord_op           = UDF_OPTYPE_READ;
 	udf_record *h_urecord = as_rec_source(lrecord->h_urec);
 	bool is_ldt           = false;
+	int  ret              = 0;
 
 	udf_rw_post_processing(h_urecord, &urecord_op, set_id);
 
@@ -637,10 +656,13 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 
 		if (is_ldt) {
 			// Create the multiop pickled buf for thr_rw.c
-			ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz, &wr->pickled_void_time);
+			ret = ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz, &wr->pickled_void_time);
 			FOR_EACH_SUBRECORD(i, lrecord) {
 				udf_record *c_urecord = &lrecord->chunk[i].c_urecord;
-				udf_record_cleanup(c_urecord, false);
+				// Cleanup in case pickle code bailed out	
+				// 1. either because this single node run no replica
+				// 2. failed to pack stuff up.
+				udf_record_cleanup(c_urecord, true);
 			}
 		} else {
 			// Normal UDF case simply pass on pickled buf created for the record
@@ -652,8 +674,15 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 			udf_record_cleanup(h_urecord, false);
 		}
 	}
-	udf_record_cleanup(h_urecord, false);
+	udf_record_cleanup(h_urecord, true);
+	if (ret) {
+		cf_warning(AS_LDT, "Pickeling failed with %d", ret);
+		return false;
+	
+	} else {
 	return true;
+
+	}
 }
 
 /*
@@ -871,6 +900,9 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	urecord.lrecord            = &lrecord;
 	urecord.keyd               = tr->keyd;
 
+	// Set id for XDR shipping.
+	uint32_t set_id = INVALID_SET_ID;
+
 	// Step 2: Setup Storage Record
 	int rec_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, tr->rsv.ns);
 	if (!rec_rv) {
@@ -898,13 +930,9 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		}
 		else {
 			// If the message has a key, apply it to the record.
-			as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
-			if (f) {
-				rd.key_size = as_msg_field_get_value_sz(f);
-				rd.key = f->data;
-			}
+			get_msg_key(m, &rd);
+			urecord.flag |= UDF_RECORD_FLAG_METADATA_UPDATED;
 		}
-
 
 		// While opening parent record read the record from the disk. Property
 		// map is created from LUA world. The version can only be get in case
@@ -913,16 +941,17 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		int rv = as_ldt_parent_storage_get_version(&rd, &lrecord.version);
 		cf_detail(AS_LDT, "LDT_VERSION Read Version From Storage %p:%ld rv=%d",
 				  *(uint64_t *)&urecord.keyd, lrecord.version, rv);
+
+		// Save the set-ID for XDR.
+		// In case of deletion, this information will not be available later.
+		// This information will be used only in case of xdr deletion ship.
+		set_id = as_index_get_set_id(urecord.r_ref->r);
 	} else {
 		urecord.flag   &= ~(UDF_RECORD_FLAG_OPEN
 							| UDF_RECORD_FLAG_STORAGE_OPEN
 							| UDF_RECORD_FLAG_PREEXISTS);
 	}
 
-	// Save the set-ID for XDR.
-	// In case of deletion, this information will not be available later.
-	// This information will be used only in case of xdr deletion ship.
-	uint16_t set_id = as_index_get_set_id(urecord.r_ref->r);
 
 	// entry point for all SMD-UDF's(LDT) calls, not called for other UDF's.
 	// At this point, we wont know if its a regular record or a LDT UDF.
@@ -940,7 +969,11 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 
 	if (ret_value == 0) {
 
-		udf_rw_finish(&lrecord, wr, op, set_id);
+		if (udf_rw_finish(&lrecord, wr, op, set_id) == false) {
+			// replication did not happen what to do now ??
+			cf_warning(AS_UDF, "Investigate udf_rw_finish() result");
+		}
+
 		if (UDF_OP_IS_READ(*op)) {
 			send_result(res, call, NULL);
 			as_result_destroy(res);
@@ -1134,8 +1167,13 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 				as_serializer s;
 				as_msgpack_init(&s);
 
-				as_serializer_serialize(&s, (as_val*)v, &asbuf);
+				int res = as_serializer_serialize(&s, (as_val*)v, &asbuf);
 
+				if (res != 0) {
+					cf_warning(AS_UDF, "List serialization failure (%d)", res);
+					as_buffer_destroy(&asbuf);
+					break;
+				}
 				*size = asbuf.size;
 				if (buf) {
 					memcpy(buf, asbuf.data, asbuf.size);
@@ -1158,8 +1196,13 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 				as_string as_str;
 				as_string_init( &as_str, "INT LDT BIN NAME", false );
 
-				as_serializer_serialize(&s, (as_val*) &as_str, &asbuf);
+				int res = as_serializer_serialize(&s, (as_val*) &as_str, &asbuf);
 
+				if (res != 0) {
+					cf_warning(AS_UDF, "LDT serialization failure (%d)", res);
+					as_buffer_destroy(&asbuf);
+					break;
+				}
 				*size = asbuf.size;
 				if (buf) {
 					memcpy(buf, asbuf.data, asbuf.size);

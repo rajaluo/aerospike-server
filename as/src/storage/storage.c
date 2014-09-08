@@ -91,8 +91,7 @@ as_storage_init()
 		void *_t;
 
 		while (CF_QUEUE_OK != cf_queue_pop(complete_q, &_t, 2000)) {
-			cf_info(AS_STORAGE, "waiting for storage: %"PRIu64" objects, %"PRIu64" scanned",
-					thr_info_get_object_count(), g_config.stat_storage_startup_load);
+			as_storage_cold_start_ticker_ssd();
 		}
 	}
 
@@ -261,6 +260,7 @@ static const as_storage_record_open_fn as_storage_record_open_table[AS_STORAGE_E
 	as_storage_record_open_ssd,
 	as_storage_record_open_kv,
 };
+
 int
 as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd)
 {
@@ -299,6 +299,7 @@ static const as_storage_record_close_fn as_storage_record_close_table[AS_STORAGE
 	as_storage_record_close_ssd,
 	as_storage_record_close_kv
 };
+
 void
 as_storage_record_close(as_record *r, as_storage_rd *rd)
 {
@@ -380,9 +381,9 @@ as_storage_particle_read_all(as_storage_rd *rd)
 typedef bool (*as_storage_record_can_fit_fn)(as_storage_rd *rd);
 static const as_storage_record_can_fit_fn as_storage_record_can_fit_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
-	as_storage_record_can_fit_memory,
+	0, // no limit if no persistent storage - flat size is irrelevant
 	as_storage_record_can_fit_ssd,
-	as_storage_record_can_fit_kv
+	0
 };
 
 bool
@@ -396,22 +397,22 @@ as_storage_record_can_fit(as_storage_rd *rd)
 }
 
 //--------------------------------------
-// as_storage_bin_can_fit
+// as_storage_record_size_and_check
 //
 
-typedef bool (*as_storage_bin_can_fit_fn)(as_namespace *ns, uint32_t bin_data_size);
-static const as_storage_bin_can_fit_fn as_storage_bin_can_fit_table[AS_STORAGE_ENGINE_TYPES] = {
+typedef bool (*as_storage_record_size_and_check_fn)(as_storage_rd *rd);
+static const as_storage_record_size_and_check_fn as_storage_record_size_and_check_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
-	as_storage_bin_can_fit_memory,
-	as_storage_bin_can_fit_ssd,
-	as_storage_bin_can_fit_kv
+	0, // no limit if no persistent storage - flat size is irrelevant
+	as_storage_record_size_and_check_ssd,
+	0
 };
 
 bool
-as_storage_bin_can_fit(as_namespace *ns, uint32_t bin_data_size)
+as_storage_record_size_and_check(as_storage_rd *rd)
 {
-	if (as_storage_bin_can_fit_table[ns->storage_type]) {
-		return as_storage_bin_can_fit_table[ns->storage_type](ns, bin_data_size);
+	if (as_storage_record_size_and_check_table[rd->ns->storage_type]) {
+		return as_storage_record_size_and_check_table[rd->ns->storage_type](rd);
 	}
 
 	return true;
@@ -432,11 +433,6 @@ static const as_storage_wait_for_defrag_fn as_storage_wait_for_defrag_table[AS_S
 void
 as_storage_wait_for_defrag()
 {
-	uint32_t saved_defrag_priority = g_config.defrag_queue_priority;
-
-	// At this point nothing else is going on - defrag at absolute maximum rate.
-	g_config.defrag_queue_priority = 0;
-
 	for (uint32_t i = 0; i < g_config.namespaces; i++) {
 		as_namespace *ns = g_config.namespace[i];
 
@@ -444,9 +440,6 @@ as_storage_wait_for_defrag()
 			as_storage_wait_for_defrag_table[ns->storage_type](ns);
 		}
 	}
-
-	// Restore configured value.
-	g_config.defrag_queue_priority = saved_defrag_priority;
 }
 
 //--------------------------------------

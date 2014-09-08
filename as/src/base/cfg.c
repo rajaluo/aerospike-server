@@ -70,6 +70,7 @@ as_config g_config;
 // Forward declarations.
 //
 
+void cfg_add_mesh_seed_addr_port(char* addr, int port);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name);
@@ -101,10 +102,6 @@ cfg_set_defaults()
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
 	c->batch_priority = 200; // # of rows between a quick context switch?
 	c->n_batch_threads = 4;
-	c->defrag_queue_escape = 10; // don't wait longer than this
-	c->defrag_queue_hwm = 500; // enter waiting if write queue backs up to this
-	c->defrag_queue_lwm = 1; // continue waiting until it clears to this
-	c->defrag_queue_priority = 1; // sleep this many milliseconds between defragging consecutive wblocks
 	c->n_fabric_workers = 16;
 	c->fb_health_bad_pct = 0; // percent of successful messages in a burst at/below which node is deemed bad
 	c->fb_health_good_pct = 50; // percent of successful messages in a burst at/above which node is deemed ok
@@ -123,7 +120,6 @@ cfg_set_defaults()
 	c->migrate_xmit_lwm = 5; // because the monitor the queue depth
 	c->migrate_xmit_priority = 40; // # of rows between a quick context switch? not a great way to tune
 	c->migrate_xmit_sleep = 500; // # of rows between a quick context switch? not a great way to tune
-	c->nsup_auto_hwm_pct = 15;  // where auto-hwm kicks in
 	c->nsup_period = 120; // run nsup once every 2 minutes
 	c->nsup_queue_escape = 10; // continue waiting until this limit is reached
 	c->nsup_queue_hwm = 500; // enter waiting if tsvc backs up
@@ -160,6 +156,7 @@ cfg_set_defaults()
 	c->hb_mode = AS_HB_MODE_UNDEF; // must supply heartbeat mode in the configuration file
 	c->hb_interval = 150;
 	c->hb_timeout = 10;
+	c->hb_mesh_rw_retry_timeout = 500;
 	c->hb_protocol = AS_HB_PROTOCOL_V2; // default to the latest heartbeat protocol version
 
 	// Network info defaults.
@@ -255,10 +252,6 @@ typedef enum {
 	CASE_SERVICE_BATCH_MAX_REQUESTS,
 	CASE_SERVICE_BATCH_PRIORITY,
 	CASE_SERVICE_BATCH_THREADS,
-	CASE_SERVICE_DEFRAG_QUEUE_ESCAPE,
-	CASE_SERVICE_DEFRAG_QUEUE_HWM,
-	CASE_SERVICE_DEFRAG_QUEUE_LWM,
-	CASE_SERVICE_DEFRAG_QUEUE_PRIORITY,
 	CASE_SERVICE_FABRIC_WORKERS,
 	CASE_SERVICE_FB_HEALTH_BAD_PCT,
 	CASE_SERVICE_FB_HEALTH_GOOD_PCT,
@@ -280,7 +273,6 @@ typedef enum {
 	CASE_SERVICE_MIGRATE_PRIORITY, // renamed
 	CASE_SERVICE_MIGRATE_XMIT_PRIORITY,
 	CASE_SERVICE_MIGRATE_XMIT_SLEEP,
-	CASE_SERVICE_NSUP_AUTO_HWM_PCT,
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_NSUP_QUEUE_HWM,
 	CASE_SERVICE_NSUP_QUEUE_LWM,
@@ -321,7 +313,12 @@ typedef enum {
 	// Deprecated:
 	CASE_SERVICE_BATCH_RETRANSMIT,
 	CASE_SERVICE_CLIB_LIBRARY,
+	CASE_SERVICE_DEFRAG_QUEUE_ESCAPE,
+	CASE_SERVICE_DEFRAG_QUEUE_HWM,
+	CASE_SERVICE_DEFRAG_QUEUE_LWM,
+	CASE_SERVICE_DEFRAG_QUEUE_PRIORITY,
 	CASE_SERVICE_NSUP_AUTO_HWM,
+	CASE_SERVICE_NSUP_AUTO_HWM_PCT,
 	CASE_SERVICE_NSUP_MAX_DELETES,
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
@@ -383,13 +380,15 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_MODE,
 	CASE_NETWORK_HEARTBEAT_ADDRESS,
 	CASE_NETWORK_HEARTBEAT_PORT,
-	CASE_NETWORK_HEARTBEAT_MESHINIT_ADDRESS,
-	CASE_NETWORK_HEARTBEAT_MESHINIT_PORT,
+	CASE_NETWORK_HEARTBEAT_MESH_ADDRESS,
+	CASE_NETWORK_HEARTBEAT_MESH_PORT,
+	CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT,
 	CASE_NETWORK_HEARTBEAT_INTERVAL,
 	CASE_NETWORK_HEARTBEAT_TIMEOUT,
 	// Normally hidden:
 	CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS,
 	CASE_NETWORK_HEARTBEAT_MCAST_TTL,
+	CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL,
 
 	// Network heartbeat mode options (value tokens):
@@ -434,7 +433,6 @@ typedef enum {
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
 	CASE_NAMESPACE_HIGH_WATER_PCT,
-	CASE_NAMESPACE_LOW_WATER_PCT,
 	CASE_NAMESPACE_MAX_TTL,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
 	CASE_NAMESPACE_SET_BEGIN,
@@ -447,6 +445,7 @@ typedef enum {
 	// Deprecated:
 	CASE_NAMESPACE_DEMO_READ_MULTIPLIER,
 	CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER,
+	CASE_NAMESPACE_LOW_WATER_PCT,
 
 	// Namespace conflict-resolution-policy options (value tokens):
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION,
@@ -469,10 +468,12 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY,
 	// Normally hidden:
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT,
-	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS,
-	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD,
+	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM,
 	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
+	CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC,
+	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS,
+	CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC,
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
@@ -480,6 +481,8 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_SMOOTHING_PERIOD,
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS,
 	// Deprecated:
+	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS,
+	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD,
 	CASE_NAMESPACE_STORAGE_DEVICE_LOAD_AT_STARTUP,
 	CASE_NAMESPACE_STORAGE_DEVICE_PERSIST,
 	CASE_NAMESPACE_STORAGE_DEVICE_READONLY,
@@ -590,10 +593,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
 		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
-		{ "defrag-queue-escape",			CASE_SERVICE_DEFRAG_QUEUE_ESCAPE },
-		{ "defrag-queue-hwm",				CASE_SERVICE_DEFRAG_QUEUE_HWM },
-		{ "defrag-queue-lwm",				CASE_SERVICE_DEFRAG_QUEUE_LWM },
-		{ "defrag-queue-priority",			CASE_SERVICE_DEFRAG_QUEUE_PRIORITY },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
 		{ "fb-health-bad-pct",				CASE_SERVICE_FB_HEALTH_BAD_PCT },
 		{ "fb-health-good-pct",				CASE_SERVICE_FB_HEALTH_GOOD_PCT },
@@ -615,7 +614,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "migrate-priority",				CASE_SERVICE_MIGRATE_PRIORITY },
 		{ "migrate-xmit-priority",			CASE_SERVICE_MIGRATE_XMIT_PRIORITY },
 		{ "migrate-xmit-sleep",				CASE_SERVICE_MIGRATE_XMIT_SLEEP },
-		{ "nsup-auto-hwm-pct",				CASE_SERVICE_NSUP_AUTO_HWM_PCT },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "nsup-queue-escape",				CASE_SERVICE_NSUP_QUEUE_ESCAPE },
 		{ "nsup-queue-hwm",					CASE_SERVICE_NSUP_QUEUE_HWM },
@@ -654,7 +652,12 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
 		{ "batch-retransmit",				CASE_SERVICE_BATCH_RETRANSMIT },
 		{ "clib-library",					CASE_SERVICE_CLIB_LIBRARY },
+		{ "defrag-queue-escape",			CASE_SERVICE_DEFRAG_QUEUE_ESCAPE },
+		{ "defrag-queue-hwm",				CASE_SERVICE_DEFRAG_QUEUE_HWM },
+		{ "defrag-queue-lwm",				CASE_SERVICE_DEFRAG_QUEUE_LWM },
+		{ "defrag-queue-priority",			CASE_SERVICE_DEFRAG_QUEUE_PRIORITY },
 		{ "nsup-auto-hwm",					CASE_SERVICE_NSUP_AUTO_HWM },
+		{ "nsup-auto-hwm-pct",				CASE_SERVICE_NSUP_AUTO_HWM_PCT },
 		{ "nsup-max-deletes",				CASE_SERVICE_NSUP_MAX_DELETES },
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
@@ -720,12 +723,14 @@ const cfg_opt NETWORK_HEARTBEAT_OPTS[] = {
 		{ "mode",							CASE_NETWORK_HEARTBEAT_MODE },
 		{ "address",						CASE_NETWORK_HEARTBEAT_ADDRESS },
 		{ "port",							CASE_NETWORK_HEARTBEAT_PORT },
-		{ "mesh-address",					CASE_NETWORK_HEARTBEAT_MESHINIT_ADDRESS },
-		{ "mesh-port",						CASE_NETWORK_HEARTBEAT_MESHINIT_PORT },
+		{ "mesh-address",					CASE_NETWORK_HEARTBEAT_MESH_ADDRESS },
+		{ "mesh-port",						CASE_NETWORK_HEARTBEAT_MESH_PORT },
+		{ "mesh-seed-address-port",			CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT },
 		{ "interval",						CASE_NETWORK_HEARTBEAT_INTERVAL },
 		{ "timeout",						CASE_NETWORK_HEARTBEAT_TIMEOUT },
 		{ "interface-address",				CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS },
 		{ "mcast-ttl",						CASE_NETWORK_HEARTBEAT_MCAST_TTL },
+		{ "mesh-rw-retry-timeout",			CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT },
 		{ "protocol",						CASE_NETWORK_HEARTBEAT_PROTOCOL },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -772,7 +777,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
 		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
-		{ "low-water-pct",					CASE_NAMESPACE_LOW_WATER_PCT },
 		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
@@ -783,6 +787,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "sindex",							CASE_NAMESPACE_SINDEX_BEGIN },
 		{ "demo-read-multiplier",			CASE_NAMESPACE_DEMO_READ_MULTIPLIER },
 		{ "demo-write-multiplier",			CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER },
+		{ "low-water-pct",					CASE_NAMESPACE_LOW_WATER_PCT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -807,16 +812,20 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "memory-all",						CASE_NAMESPACE_STORAGE_DEVICE_MEMORY_ALL },
 		{ "data-in-memory",					CASE_NAMESPACE_STORAGE_DEVICE_DATA_IN_MEMORY },
 		{ "defrag-lwm-pct",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT },
-		{ "defrag-max-blocks",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS },
-		{ "defrag-period",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD },
+		{ "defrag-sleep",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP },
 		{ "defrag-startup-minimum",			CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM },
 		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
+		{ "enable-osync",					CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC },
+		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS },
+		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
 		{ "signature",						CASE_NAMESPACE_STORAGE_DEVICE_SIGNATURE },
 		{ "write-smoothing-period",			CASE_NAMESPACE_STORAGE_DEVICE_WRITE_SMOOTHING_PERIOD },
 		{ "write-threads",					CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS },
+		{ "defrag-max-blocks",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS },
+		{ "defrag-period",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD },
 		{ "load-at-startup",				CASE_NAMESPACE_STORAGE_DEVICE_LOAD_AT_STARTUP },
 		{ "persist",						CASE_NAMESPACE_STORAGE_DEVICE_PERSIST },
 		{ "readonly",						CASE_NAMESPACE_STORAGE_DEVICE_READONLY },
@@ -1237,21 +1246,33 @@ cfg_bool_no_value_is_true(const cfg_line* p_line)
 }
 
 int64_t
-cfg_i64_no_checks(const cfg_line* p_line)
+cfg_i64_anyval_no_checks(const cfg_line* p_line, char* val_tok)
 {
-	if (*p_line->val_tok_1 == '\0') {
+	if (*val_tok == '\0') {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must specify an integer value",
 				p_line->num, p_line->name_tok);
 	}
 
 	int64_t value;
 
-	if (0 != cf_str_atoi_64(p_line->val_tok_1, &value)) {
+	if (0 != cf_str_atoi_64(val_tok, &value)) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must be a number, not %s",
-				p_line->num, p_line->name_tok, p_line->val_tok_1);
+				p_line->num, p_line->name_tok, val_tok);
 	}
 
 	return value;
+}
+
+int64_t
+cfg_i64_no_checks(const cfg_line* p_line)
+{
+	return cfg_i64_anyval_no_checks(p_line, p_line->val_tok_1);
+}
+
+int64_t
+cfg_i64_val2_no_checks(const cfg_line* p_line)
+{
+	return cfg_i64_anyval_no_checks(p_line, p_line->val_tok_2);
 }
 
 int64_t
@@ -1293,22 +1314,60 @@ cfg_int(const cfg_line* p_line, int min, int max)
 	return value;
 }
 
-uint64_t
-cfg_u64_no_checks(const cfg_line* p_line)
+int
+cfg_int_val2_no_checks(const cfg_line* p_line)
 {
-	if (*p_line->val_tok_1 == '\0') {
+	int64_t value = cfg_i64_val2_no_checks(p_line);
+
+	if (value < INT_MIN || value > INT_MAX) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s %ld overflows int",
+				p_line->num, p_line->name_tok, value);
+	}
+
+	return (int)value;
+}
+
+int
+cfg_int_val2(const cfg_line* p_line, int min, int max)
+{
+	int value = cfg_int_val2_no_checks(p_line);
+
+	if (value < min || value > max) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %d and <= %d, not %d",
+				p_line->num, p_line->name_tok, min, max, value);
+	}
+
+	return value;
+}
+
+uint64_t
+cfg_u64_anyval_no_checks(const cfg_line* p_line, char* val_tok)
+{
+	if (*val_tok == '\0') {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must specify an unsigned integer value",
 				p_line->num, p_line->name_tok);
 	}
 
 	uint64_t value;
 
-	if (0 != cf_str_atoi_u64(p_line->val_tok_1, &value)) {
+	if (0 != cf_str_atoi_u64(val_tok, &value)) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must be an unsigned number, not %s",
-				p_line->num, p_line->name_tok, p_line->val_tok_1);
+				p_line->num, p_line->name_tok, val_tok);
 	}
 
 	return value;
+}
+
+uint64_t
+cfg_u64_no_checks(const cfg_line* p_line)
+{
+	return cfg_u64_anyval_no_checks(p_line, p_line->val_tok_1);
+}
+
+uint64_t
+cfg_u64_val2_no_checks(const cfg_line* p_line)
+{
+	return cfg_u64_anyval_no_checks(p_line, p_line->val_tok_2);
 }
 
 uint64_t
@@ -1462,16 +1521,28 @@ cfg_seconds(const cfg_line* p_line)
 	return value;
 }
 
+// Minimum & maximum port numbers:
+const int CFG_MIN_PORT = 1024;
+const int CFG_MAX_PORT = USHRT_MAX;
+
+int
+cfg_port(const cfg_line* p_line)
+{
+	return cfg_int(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
+}
+
+int
+cfg_port_val2(const cfg_line* p_line)
+{
+	return cfg_int_val2(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
+}
+
 //------------------------------------------------
 // Constants used in parsing.
 //
 
 // Token delimiter characters:
 const char CFG_WHITESPACE[] = " \t\n\r\f\v";
-
-// Minimum & maximum port numbers:
-const int CFG_MIN_PORT = 1024;
-const int CFG_MAX_PORT = USHRT_MAX;
 
 
 //==========================================================
@@ -1657,18 +1728,6 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_BATCH_THREADS:
 				c->n_batch_threads = cfg_int(&line, 1, MAX_BATCH_THREADS);
 				break;
-			case CASE_SERVICE_DEFRAG_QUEUE_ESCAPE:
-				c->defrag_queue_escape = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_DEFRAG_QUEUE_HWM:
-				c->defrag_queue_hwm = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_DEFRAG_QUEUE_LWM:
-				c->defrag_queue_lwm = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_DEFRAG_QUEUE_PRIORITY:
-				c->defrag_queue_priority = cfg_u32_no_checks(&line);
-				break;
 			case CASE_SERVICE_FABRIC_WORKERS:
 				c->n_fabric_workers = cfg_int(&line, 1, MAX_FABRIC_WORKERS);
 				break;
@@ -1732,9 +1791,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_MIGRATE_XMIT_SLEEP:
 				c->migrate_xmit_sleep = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_NSUP_AUTO_HWM_PCT:
-				c->nsup_auto_hwm_pct = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_NSUP_PERIOD:
 				c->nsup_period = cfg_u32_no_checks(&line);
@@ -1889,7 +1945,12 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_BATCH_RETRANSMIT:
 			case CASE_SERVICE_CLIB_LIBRARY:
+			case CASE_SERVICE_DEFRAG_QUEUE_ESCAPE:
+			case CASE_SERVICE_DEFRAG_QUEUE_HWM:
+			case CASE_SERVICE_DEFRAG_QUEUE_LWM:
+			case CASE_SERVICE_DEFRAG_QUEUE_PRIORITY:
 			case CASE_SERVICE_NSUP_AUTO_HWM:
+			case CASE_SERVICE_NSUP_AUTO_HWM_PCT:
 			case CASE_SERVICE_NSUP_MAX_DELETES:
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
@@ -2026,7 +2087,7 @@ as_config_init(const char *config_file)
 				c->socket.addr = strcmp(line.val_tok_1, "any") == 0 ? cf_strdup("0.0.0.0") : cfg_strdup(&line);
 				break;
 			case CASE_NETWORK_SERVICE_PORT:
-				c->socket.port = cfg_int(&line, CFG_MIN_PORT, CFG_MAX_PORT);
+				c->socket.port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS:
 				cfg_renamed_name_tok(&line, "access-address");
@@ -2075,11 +2136,14 @@ as_config_init(const char *config_file)
 			case CASE_NETWORK_HEARTBEAT_PORT:
 				c->hb_port = cfg_int_no_checks(&line);
 				break;
-			case CASE_NETWORK_HEARTBEAT_MESHINIT_ADDRESS:
+			case CASE_NETWORK_HEARTBEAT_MESH_ADDRESS:
 				c->hb_init_addr = cfg_strdup(&line);
 				break;
-			case CASE_NETWORK_HEARTBEAT_MESHINIT_PORT:
-				c->hb_init_port = cfg_int(&line, CFG_MIN_PORT, CFG_MAX_PORT);
+			case CASE_NETWORK_HEARTBEAT_MESH_PORT:
+				c->hb_init_port = cfg_port(&line);
+				break;
+			case CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT:
+				cfg_add_mesh_seed_addr_port(cfg_strdup(&line), cfg_port_val2(&line));
 				break;
 			case CASE_NETWORK_HEARTBEAT_INTERVAL:
 				c->hb_interval = cfg_u32_no_checks(&line);
@@ -2092,6 +2156,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NETWORK_HEARTBEAT_MCAST_TTL:
 				c->hb_mcast_ttl = cfg_u8_no_checks(&line);
+				break;
+			case CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT:
+				c->hb_mesh_rw_retry_timeout = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PROTOCOL:
 				switch(cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_PROTOCOL_OPTS, NUM_NETWORK_HEARTBEAT_PROTOCOL_OPTS)) {
@@ -2111,6 +2178,9 @@ as_config_init(const char *config_file)
 				}
 				break;
 			case CASE_CONTEXT_END:
+				if (c->hb_init_addr && c->hb_mesh_seed_addrs[0]) {
+					cf_crash_nostack(AS_CFG, "can't use both mesh-address and mesh-seed-address-port");
+				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -2129,7 +2199,7 @@ as_config_init(const char *config_file)
 				cfg_future_name_tok(&line); // TODO - deprecate?
 				break;
 			case CASE_NETWORK_FABRIC_PORT:
-				c->fabric_port = cfg_int(&line, CFG_MIN_PORT, CFG_MAX_PORT);
+				c->fabric_port = cfg_port(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -2150,7 +2220,7 @@ as_config_init(const char *config_file)
 				cfg_future_name_tok(&line); // TODO - deprecate?
 				break;
 			case CASE_NETWORK_INFO_PORT:
-				c->info_port = cfg_int(&line, CFG_MIN_PORT, CFG_MAX_PORT);
+				c->info_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_INFO_ENABLE_FASTPATH:
 				c->info_fastpath_enabled = cfg_bool(&line);
@@ -2257,9 +2327,6 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_HIGH_WATER_PCT:
 				ns->hwm_memory = ns->hwm_disk = (float)cfg_pct_fraction(&line);
 				break;
-			case CASE_NAMESPACE_LOW_WATER_PCT:
-				ns->lwm = (float)cfg_pct_fraction(&line);
-				break;
 			case CASE_NAMESPACE_MAX_TTL:
 				ns->max_ttl = cfg_seconds(&line);
 				break;
@@ -2294,6 +2361,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER:
 				ns->demo_write_multiplier = cfg_int_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_LOW_WATER_PCT:
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
 				if (ns->allow_versions && ns->single_bin) {
@@ -2362,17 +2432,23 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_LWM_PCT:
 				ns->storage_defrag_lwm_pct = cfg_u32_no_checks(&line);
 				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS:
-				ns->storage_defrag_max_blocks = cfg_u32_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD:
-				ns->storage_defrag_period = cfg_u32_no_checks(&line);
+			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP:
+				ns->storage_defrag_sleep = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM:
 				ns->storage_defrag_startup_minimum = cfg_int(&line, 1, 99);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT:
 				ns->storage_disable_odirect = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC:
+				ns->storage_enable_osync = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS:
+				ns->storage_flush_max_us = cfg_u64_no_checks(&line) * 1000;
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC:
+				ns->storage_fsync_max_us = cfg_u64_no_checks(&line) * 1000000;
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE:
 				ns->storage_max_write_cache = cfg_u64_no_checks(&line);
@@ -2392,6 +2468,8 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS:
 				ns->storage_write_threads = cfg_u32_no_checks(&line);
 				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS:
+			case CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD:
 			case CASE_NAMESPACE_STORAGE_DEVICE_LOAD_AT_STARTUP:
 			case CASE_NAMESPACE_STORAGE_DEVICE_PERSIST:
 			case CASE_NAMESPACE_STORAGE_DEVICE_READONLY:
@@ -2906,6 +2984,24 @@ as_config_post_process(as_config *c, const char *config_file)
 //==========================================================
 // Item-specific parsing utilities.
 //
+
+void
+cfg_add_mesh_seed_addr_port(char* addr, int port)
+{
+	int i;
+
+	for (i = 0; i < AS_CLUSTER_SZ; i++) {
+		if (g_config.hb_mesh_seed_addrs[i] == NULL) {
+			g_config.hb_mesh_seed_addrs[i] = addr;
+			g_config.hb_mesh_seed_ports[i] = port;
+			break;
+		}
+	}
+
+	if (i == AS_CLUSTER_SZ) {
+		cf_crash_nostack(AS_CFG, "can't configure more than %d mesh-seed-address-port entries", AS_CLUSTER_SZ);
+	}
+}
 
 as_set*
 cfg_add_set(as_namespace* ns)

@@ -75,8 +75,9 @@ typedef enum {
 // For sizing the storage API "v-tables".
 #define AS_STORAGE_ENGINE_TYPES 4
 
-// For invalidating the ssd.file_id bits in as_index.
-#define STORAGE_INVALID_FILE_ID 0x3F // 6 bits
+// For invalidating the ssd.file_id and ssd.rblock_id bits in as_index.
+#define STORAGE_INVALID_FILE_ID	0x3F // 6 bits
+#define STORAGE_INVALID_RBLOCK	0x3FFFFffff // 34 bits
 
 // Forward declarations.
 struct drv_ssd_s;
@@ -157,9 +158,7 @@ extern uint16_t as_storage_record_get_n_bins(as_storage_rd *rd);
 extern int as_storage_record_read(as_storage_rd *rd);
 extern int as_storage_particle_read_all(as_storage_rd *rd);
 extern bool as_storage_record_can_fit(as_storage_rd *rd);
-
-// TODO - this method is pointless - improve or deprecate?
-extern bool as_storage_bin_can_fit(as_namespace *ns, uint32_t bin_data_size);
+extern bool as_storage_record_size_and_check(as_storage_rd *rd);
 
 // Storage capacity monitoring.
 extern void as_storage_wait_for_defrag();
@@ -201,10 +200,6 @@ extern int as_storage_namespace_init_memory(as_namespace *ns, cf_queue *complete
 extern int as_storage_namespace_destroy_memory(as_namespace *ns);
 extern int as_storage_namespace_attributes_get_memory(as_namespace *ns, as_storage_attributes *attr);
 
-extern bool as_storage_record_can_fit_memory(as_storage_rd *rd);
-
-extern bool as_storage_bin_can_fit_memory(as_namespace *ns, uint32_t bin_data_size);
-
 extern int as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes);
 
 
@@ -213,6 +208,7 @@ extern int as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_
 //
 
 extern int as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_cold_start_ticker_ssd(); // called directly by as_storage_init()
 extern int as_storage_namespace_destroy_ssd(as_namespace *ns);
 extern int as_storage_namespace_attributes_get_ssd(as_namespace *ns, as_storage_attributes *attr);
 
@@ -227,8 +223,7 @@ extern int as_storage_record_read_ssd(as_storage_rd *rd);
 extern int as_storage_particle_read_all_ssd(as_storage_rd *rd);
 extern int as_storage_particle_read_and_size_all_ssd(as_storage_rd *rd); // called directly by as_bin_get_and_size_all()
 extern bool as_storage_record_can_fit_ssd(as_storage_rd *rd);
-
-extern bool as_storage_bin_can_fit_ssd(as_namespace *ns, uint32_t bin_data_size);
+extern bool as_storage_record_size_and_check_ssd(as_storage_rd *rd);
 
 extern void as_storage_wait_for_defrag_ssd(as_namespace *ns);
 extern bool as_storage_overloaded_ssd(as_namespace *ns);
@@ -262,10 +257,6 @@ extern int as_storage_record_exists_kv(as_namespace *ns, cf_digest *keyd);
 extern int as_storage_record_create_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
 extern int as_storage_record_open_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
 extern void as_storage_record_close_kv(as_record *r, as_storage_rd *rd);
-
-extern bool as_storage_record_can_fit_kv(as_storage_rd *rd);
-
-extern bool as_storage_bin_can_fit_kv(as_namespace *ns, uint32_t bin_data_size);
 
 extern uint16_t as_storage_record_get_n_bins_kv(as_storage_rd *rd);
 extern int as_storage_record_read_kv(as_storage_rd *rd);
