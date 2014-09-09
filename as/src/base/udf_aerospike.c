@@ -555,6 +555,8 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		SINDEX_GRLOCK();
 	}
 	bool is_record_dirty = false;
+	bool is_record_flag_dirty = false;
+	uint8_t index_flags = as_index_get_flags(rd->r);
 
 	// In second iteration apply updates.
 	for(uint i = 0; i < urecord->nupdates; i++ ) {
@@ -592,11 +594,23 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		}
 	}
 
+	if (!as_index_is_flag_set(rd->r, urecord->ldt_rectype_bits)) {
+		// Before committing to storage set the rec_type_bits ..
+		cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
+				*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
+		as_index_set_flags(rd->r, urecord->ldt_rectype_bits);
+		is_record_flag_dirty = true;
+	}
+
 	{
 		size_t  rec_props_data_size = as_storage_record_rec_props_size(rd);
 		uint8_t rec_props_data[rec_props_data_size];
 		if (rec_props_data_size > 0) {
 			as_storage_record_set_rec_props(rd, rec_props_data);
+		}
+
+		if (as_ldt_record_is_parent(rd->r)) {
+			as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, &urecord->cur_particle_data);
 		}
 
 		if (! as_storage_record_size_and_check(rd)) {
@@ -620,17 +634,13 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	// If there were updates do miscellaneous successful commit
 	// tasks
 	if (is_record_dirty 
+			|| is_record_flag_dirty
 			|| (urecord->flag & UDF_RECORD_FLAG_METADATA_UPDATED)) {
 		// Set updated flag to true
 		urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
 	
 		// Set up record to be flushed to storage
 		urecord->rd->write_to_device = true;
-
-		// Before committing to storage set the rec_type_bits ..
-		cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
-			*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
-		as_index_set_flags(rd->r, urecord->ldt_rectype_bits);
 	}
 
 	// Clean up cache and start from 0 update again. All the changes
@@ -668,6 +678,13 @@ Rollback:
 			}
 		}
 	}
+
+	if (is_record_flag_dirty) {
+		// set the flag for the record back to original
+		as_index_clear_flags(rd->r, urecord->ldt_rectype_bits);
+		as_index_set_flags(rd->r, index_flags);
+	}
+
 	if (has_sindex) {
 		SINDEX_GUNLOCK();
 	}

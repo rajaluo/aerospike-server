@@ -502,10 +502,6 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 			as_storage_record_set_rec_props(rd, rec_props_data);
 		}
 
-		if (as_ldt_record_is_parent(r_ref->r)) {
-			as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, &urecord->cur_particle_data);
-		}
-
 		write_local_post_processing(tr, tr->rsv.ns, NULL, &urecord->pickled_buf,
 			&urecord->pickled_sz, &urecord->pickled_void_time,
 			&urecord->pickled_rec_props, true/*increment_generation*/,
@@ -653,6 +649,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		}
 
 		FOR_EACH_SUBRECORD(i, lrecord) {
+			urecord_op = UDF_OPTYPE_READ;
 			is_ldt = true;
 			udf_record *c_urecord = &lrecord->chunk[i].c_urecord;
 			udf_rw_post_processing(c_urecord, &urecord_op, set_id);
