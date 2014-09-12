@@ -3409,7 +3409,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "xdr-digest-logging", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Enabling XDR digest logging");
 				g_config.xdr_cfg.xdr_global_enabled = true;
