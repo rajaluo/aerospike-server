@@ -1475,6 +1475,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 						AS_RW, CF_CRITICAL,
 						"LDT_COMPONENT: Subrecord Component for Non Migration Case received %"PRIx64"", *((uint64_t *)keyd));
 				cf_detail(AS_RECORD, "LDT_MERGE merge component is LDT_SUB %d", components[0].flag);
+				*winner_idx = 0;
 			} else {
 				cf_detail(AS_RECORD, "LDT_MERGE merge component is NON LDT_SUB %d", components[0].flag);
 			}
@@ -1490,7 +1491,17 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 		has_local_copy  = true;
 		r               = r_ref.r;
 	}
-	*winner_idx = as_record_component_winner(rsv, n_components, components, r);
+	// DO NOT check for subrecord generation. The winning generation of the 
+	// parent wins. Even if the child subrecord is exactly same we create copy
+	// because parent generation does not match. This is needed because generation
+	// does not signify anything. 
+	//
+	// Optimization: We could do checksum and avoid I/O but incoming migrates if
+	// parent generation does not match will create new version on the storage 
+	// which conflict with this optimization.
+	if (!is_subrec) {
+		*winner_idx = as_record_component_winner(rsv, n_components, components, r);
+	}
 
 	// Case 1:
 	// In case the winning component is remote and is dummy (ofcourse flatten
