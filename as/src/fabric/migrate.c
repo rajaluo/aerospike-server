@@ -685,10 +685,6 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 	msg_get_uint64(m, MIG_FIELD_VERSION, &c->version);
 	msg_get_uint32(m, MIG_FIELD_PGENERATION, &c->pgeneration);
 	msg_get_uint32(m, MIG_FIELD_PVOID_TIME, &c->pvoid_time);
-	cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming %s version=%ld flag=%d",
-			  (info & MIG_INFO_LDT_SUBREC) ? "MIG_INFO_LDT_SUBREC"
-			  : ((info & MIG_INFO_LDT_ESR) ? "MIG_INFO_LDT_ESR"
-				 : "MIG_INFO_LDT_REC"), c->version, c->flag);
 
 	if (COMPONENT_IS_LDT_SUB(c)) {
 		cf_assert((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD),
@@ -702,6 +698,10 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 			  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
 			  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
 	}
+	cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming %s version=%ld flag=%d subrec=%d state=%d",
+			  (info & MIG_INFO_LDT_SUBREC) ? "MIG_INFO_LDT_SUBREC"
+			  : ((info & MIG_INFO_LDT_ESR) ? "MIG_INFO_LDT_ESR"
+				 : "MIG_INFO_LDT_REC"), c->version, c->flag, COMPONENT_IS_LDT_SUB(c), mc->rxstate);
 }
 
 // Since this is used as the destructor function for the rchash,
@@ -1570,13 +1570,11 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				mc_l.incoming_ldt_version = mc->incoming_ldt_version;
 				mc_l.pid                  = mc->pid;
 
-				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, mc); 
-				if (mc->rsv.p->sub_vp->elements > 0) {
-					cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
-							  mc->incoming_ldt_version,
-							  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, 
-							  mc->rsv.p->sub_vp->elements);
-				}
+				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, (void *)mc); 
+				cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
+						  mc->incoming_ldt_version,
+						  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, 
+						  mc->rsv.p->sub_vp->elements);
 					
 				// If I'm receiving migrates, then I should be batching messages
 //				cf_debug(AS_MIGRATE, "migrate_start: set fabric to high-throughtput %"PRIx64,id);
@@ -2712,7 +2710,7 @@ as_migrate_init()
 	g_migrate_id = 1;
 
 	// binid to simatch lookup
-	if (SHASH_OK != shash_create(&g_migrate_incoming_ldt_version_hash, migrate_ldt_version_hashfn, sizeof(migrate_recv_ldt_version), 64, 64, SHASH_CR_MT_MANYLOCK)) {
+	if (SHASH_OK != shash_create(&g_migrate_incoming_ldt_version_hash, migrate_ldt_version_hashfn, sizeof(migrate_recv_ldt_version), 64, sizeof(void *), SHASH_CR_MT_MANYLOCK)) {
 		cf_crash(AS_AS, "Couldn't incoming ldt migrate hash");
 	}
 }
@@ -2721,32 +2719,14 @@ as_migrate_init()
 // hash and check the incoming migration rx state. If rx state matches 
 // subrecord return true otherwise false
 bool
-as_migrate_is_incoming_subrecord(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id)
+as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id, int state)
 {
 	migrate_recv_control *mc  = NULL;
 	migrate_recv_ldt_version mc_l;
 	mc_l.incoming_ldt_version = version;
 	mc_l.pid                  = partition_id;
-	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc, (void *)mc)) {
-		if (mc && (mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD)) {
-			return true;
-		}
-	}
-	cf_detail_digest(AS_MIGRATE, subrec_digest, "%s incoming migrate for partition %d of version %ld with state %d", mc ? " " : "NO", partition_id, version, mc ? mc->rxstate : 0); 
-	return false;
-}
-// Searches for the passed in migrate version is current incoming migration
-// hash and check the incoming migration rx state. If rx state matches 
-// record return true otherwise false
-bool
-as_migrate_is_incoming_record(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id)
-{
-	migrate_recv_control *mc  = NULL;
-	migrate_recv_ldt_version mc_l;
-	mc_l.incoming_ldt_version = version;
-	mc_l.pid                  = partition_id;
-	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc, (void *)mc)) {
-		if (mc && (mc->rxstate == AS_MIGRATE_RX_STATE_RECORD)) {
+	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc_l, (void *)mc)) {
+		if (mc && (mc->rxstate == state)) {
 			return true;
 		}
 	}

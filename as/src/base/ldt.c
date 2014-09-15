@@ -1171,7 +1171,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	// If there is incoming migration and subrecord is of incoming migration, then
 	// skip it. The parent may not have made it yet so garbage collecting this would
 	// be problem.
-	if (true == as_migrate_is_incoming_subrecord(&subrec_digest, subrec_version, p->partition_id)) {
+	if (true == as_migrate_is_incoming(&subrec_digest, subrec_version, p->partition_id, 0)) {
 		cf_detail(AS_LDT, " LDT_SUB_GC Skipping Defrag for version %ld ", subrec_version);
 		as_record_done(r_ref, ns);
 		return;
@@ -1256,7 +1256,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		if (ns->storage_data_in_memory) {
 			cf_atomic_int_sub(&p->n_bytes_memory, starting_memory_bytes);
 		}
-		cf_detail(AS_LDT, "LDT_SUB_GC Expiry of the SubRecord type=%d version=%ld for partition %d with state is %d rv=%d",
+		cf_detail_digest(AS_LDT, &subrec_digest, "LDT_SUB_GC Expiry of the SubRecord type=%d version=%ld for partition %d with state is %d rv=%d",
 				type, subrec_version, p->partition_id, p->txstate, rv);
 		cf_detail_digest(AS_LDT, &subrec_digest, "Sub-Rec Digest: ");
 		cf_detail_digest(AS_LDT, &esr_digest, "ESR Digest: ");
@@ -1371,9 +1371,10 @@ as_ldt_record_pickle(ldt_record *lrecord,
 	bool is_delete       = (h_urecord->pickled_buf) ? false : true;
 	int  ret             = 0;
 	int  ops             = 0;
-	// TODO: change hard coded 7 to meaningful constant.
-	msg *m[7];
-	memset(m, 0, 7 * sizeof(msg *));
+	// TODO: Change this hard coded value to a number based on number of 
+	//       record which has changed
+	msg *m[MAX_LDT_CHUNKS + 1];
+	memset(m, 0, (MAX_LDT_CHUNKS + 1) * sizeof(msg *));
 
 
 	if (is_delete) {

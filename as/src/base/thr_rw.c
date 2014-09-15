@@ -2264,7 +2264,7 @@ as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rs
 			}
 		} else { 
 			if (is_ldt_parent) {
-				if (!as_migrate_is_incoming_record(&rd->keyd, linfo->ldt_source_version, rsv->p->partition_id)) {	
+				if (!as_migrate_is_incoming(&rd->keyd, linfo->ldt_source_version, rsv->p->partition_id, AS_MIGRATE_RX_STATE_RECORD)) {	
 					cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Skip Write of Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
 							fname, lineno, rsv->p->partition_id, 
 							linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,

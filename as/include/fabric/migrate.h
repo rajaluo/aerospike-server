@@ -98,9 +98,8 @@ void as_migrate_init();
 int as_migrate_set_num_xmit_threads(int n_threads);
 
 bool
-as_migrate_is_incoming_subrecord(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id);
-bool
-as_migrate_is_incoming_record(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id);
+as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id, int state);
+
 // migrate a tree to a node
 // and find out when it's done
 int as_migrate(cf_node *dst, uint dst_sz,
