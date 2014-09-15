@@ -67,15 +67,14 @@ typedef struct ldt_chunk_s {
 
 /*
  * This structure represents an open record that contains an LDT Object.
- * "ldt_chunk" represents an opened sub (limit is currently 6 (20) ).
- * NOTE: Entire thing is deliberately stack allocated to make it efficient
+ * "ldt_chunk" represents an opened sub 
  */
-#define MAX_LDT_CHUNKS 20 /* TODO: Make this dynamic */
+#define LDT_SLOT_CHUNK_SIZE 10 
 struct ldt_record_s {
 	as_rec             * h_urec;
-	ldt_chunk            chunk[MAX_LDT_CHUNKS]; // If used wisely won't need more than
-	// this at a time. The structure is pretty
-	// big redo it.
+	int                  max_chunks;
+	int                  num_slots_used;
+	ldt_chunk          * chunk; 
 	as_aerospike       * as;       // To operate on ldt_record_chunk
 	uint64_t             version;  // this is version key used to open/close/search
 	// for the sub_record digest
@@ -86,7 +85,5 @@ extern const as_rec_hooks ldt_record_hooks;
 //extern int ldt_record_init(ldt_record *lr, as_namespace *ns, cf_digest *keyd);
 extern int   ldt_record_init   (ldt_record *lrecord);
 
-// TODO this must change with the MAX_LDT_CHUNKS!!!
-
 #define FOR_EACH_SUBRECORD(i, lrecord) \
-	for (int i = 0; (i < MAX_LDT_CHUNKS); i++)  if ((lrecord)->chunk[i].slot != -1)
+	for (int i = 0; (i < lrecord->max_chunks); i++)  if ((lrecord)->chunk[i].slot != -1)

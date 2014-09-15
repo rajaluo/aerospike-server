@@ -56,8 +56,6 @@
 #include "base/udf_record.h"
 #include "fabric/fabric.h"
 
-static int s_max_open_subrecs = MAX_LDT_CHUNKS; // defined in ldt_record.h
-
 /* GLOBALS */
 as_aerospike g_ldt_aerospike; // Only instantiation is enough
 
@@ -148,9 +146,35 @@ int
 ldt_crec_find_freeslot(ldt_record *lrecord)
 {
 	int slot = -1;
-	for (int i = 0; i < s_max_open_subrecs; i++) {
-		if (lrecord->chunk[i].slot == -1)
+	if (lrecord->num_slots_used == lrecord->max_chunks) {
+		int new_size    = lrecord->max_chunks + LDT_SLOT_CHUNK_SIZE;
+		void *old_chunk = lrecord->chunk;
+
+		lrecord->chunk = cf_realloc(lrecord->chunk, sizeof(ldt_chunk) * new_size);
+		
+		if (lrecord->chunk == NULL) {
+			lrecord->chunk = old_chunk;
+			goto out;
+		}
+
+		for (int i = lrecord->max_chunks; i < new_size; i++) {
+			lrecord->chunk[i].slot = -1;
+		}
+
+		cf_detail(AS_LDT, "Bumping up chunks from %d to %d", lrecord->max_chunks, new_size);
+		lrecord->max_chunks = new_size;
+	}
+
+	for (int i = 0; i < lrecord->max_chunks; i++) {
+		if (lrecord->chunk[i].slot == -1) {
+			lrecord->num_slots_used++;
 			return i;
+		}
+	}
+
+out:
+	if (slot == -1) {
+		cf_warning(AS_LDT, "ldt_crec_create: Cannot open more than (%d) records in a single UDF", lrecord->max_chunks);
 	}
 	return slot;
 }
@@ -188,10 +212,14 @@ ldt_chunk_init(ldt_chunk *lchunk, ldt_record *lrecord)
 	lchunk->c_urec_p = as_rec_new(c_urecord, &udf_record_hooks);
 }
 
-void ldt_chunk_destroy(ldt_chunk *lchunk)
+void ldt_chunk_destroy(ldt_record *lrecord, int slot)
 {
-	as_rec_destroy(lchunk->c_urec_p);
-	lchunk->slot = -1;
+	ldt_chunk *lchunk = &lrecord->chunk[slot];
+	if (lchunk->slot != -1) {
+		as_rec_destroy(lchunk->c_urec_p);
+		lchunk->slot = -1;
+		lrecord->num_slots_used--;
+	}
 }
 
 /*
@@ -302,7 +330,7 @@ ldt_crec_open(ldt_record *lrecord, cf_digest *keyd, int *slotp)
 	slot     = ldt_crec_find_freeslot(lrecord);
 	if (slot == -1) {
 		cf_warning(AS_LDT, "Cannot open more than (%d) records in a single UDF",
-				s_max_open_subrecs);
+				lrecord->max_chunks);
 		return -2;
 	}
 	cf_detail(AS_LDT, "ldt_crec_open popped slot %d", slot);
@@ -316,7 +344,7 @@ ldt_crec_open(ldt_record *lrecord, cf_digest *keyd, int *slotp)
 	int rv = udf_record_open((udf_record *)as_rec_source(lchunk->c_urec_p));
 	if (rv) {
 		// Open the slot for reuse
-		ldt_chunk_destroy(&lrecord->chunk[slot]);
+		ldt_chunk_destroy(lrecord, slot);
 		return -3;
 	}
 	*slotp = slot;
@@ -354,7 +382,6 @@ ldt_crec_create(ldt_record *lrecord)
 	// Setup Chunk
 	int slot     = ldt_crec_find_freeslot(lrecord);
 	if (slot == -1) {
-		cf_warning(AS_LDT, "ldt_crec_create: Cannot open more than (%d) records in a single UDF", s_max_open_subrecs);
 		return NULL;
 	}
 	cf_detail(AS_LDT, "ldt_crec_create: Popped slot %d", slot);
@@ -367,7 +394,7 @@ ldt_crec_create(ldt_record *lrecord)
 	int rv = as_aerospike_rec_create(lrecord->as, lchunk->c_urec_p);
 	if (rv < 0) {
 		// Mark Slot as free
-		ldt_chunk_destroy(&lrecord->chunk[slot]);
+		ldt_chunk_destroy(lrecord, slot);
 		cf_warning(AS_LDT, "ldt_crec_create: Record Create Failed rv=%d ... ", rv);
 		return NULL;
 	}
@@ -397,8 +424,11 @@ ldt_record_destroy(as_rec * rec)
 	// of record happens after UDF has executed.
 	// TODO: validate chunk handling here.
 	FOR_EACH_SUBRECORD(i, lrecord) {
-		ldt_chunk_destroy(&lrecord->chunk[i]);
+		ldt_chunk_destroy(lrecord, i);
 	}
+
+	// Free up allocated chunks
+	cf_free(lrecord->chunk);
 	// Dir destroy should release partition reservation and
 	// namespace reservation.
 	as_rec_destroy(h_urec);
@@ -537,7 +567,7 @@ ldt_aerospike_crec_close(const as_aerospike * as, const as_rec *crec_p)
 		return -1;
 	}
 	int slot              = -1;
-	for (int i = 0; i < s_max_open_subrecs; i++) {
+	for (int i = 0; i < lrecord->max_chunks; i++) {
 		if (lrecord->chunk[i].c_urec_p == crec_p) {
 			slot = i;
 		}
@@ -553,7 +583,7 @@ ldt_aerospike_crec_close(const as_aerospike * as, const as_rec *crec_p)
 	}
 	udf_record_close(c_urecord, false);
 	udf_record_cache_free(c_urecord);
-	ldt_chunk_destroy(&lrecord->chunk[slot]);
+	ldt_chunk_destroy(lrecord, slot);
 	c_urecord->flag &= ~UDF_RECORD_FLAG_ISVALID;
 	return 0;
 }
@@ -585,7 +615,7 @@ ldt_aerospike_crec_open(const as_aerospike * as, const as_rec *rec, const char *
 		// This basically means the record is not found.
 		// Do we need to propagate error message rv
 		// back somehow
-		cf_info(AS_LDT, "Failed to open Sub Record rv=%d %d", rv, lrecord->version);
+		cf_info_digest(AS_LDT, &keyd, "Failed to open Sub Record rv=%d %ld", rv, lrecord->version);
 		return NULL;
 	} else {
 		as_val_reserve(lrecord->chunk[slot].c_urec_p);
@@ -665,7 +695,7 @@ ldt_aerospike_rec_remove(const as_aerospike * as, const as_rec * rec)
 
 	FOR_EACH_SUBRECORD(i, lrecord) {
 		as_aerospike_rec_remove(las, lrecord->chunk[i].c_urec_p);
-		ldt_chunk_destroy(&lrecord->chunk[i]);
+		ldt_chunk_destroy(lrecord, i);
 	}
 	return as_aerospike_rec_remove(las, h_urec);
 }

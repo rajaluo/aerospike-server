@@ -58,7 +58,14 @@ ldt_record_init(ldt_record *lrecord)
 
 	// No versioning right now !!!
 	lrecord->version = as_ldt_generate_version();
-	for(int i = 0; i < MAX_LDT_CHUNKS; i++) {
+	lrecord->chunk   = cf_malloc(sizeof(ldt_chunk) * LDT_SLOT_CHUNK_SIZE);
+	if (lrecord->chunk == NULL) {
+		return -1;
+	}
+	lrecord->max_chunks     = LDT_SLOT_CHUNK_SIZE;
+	lrecord->num_slots_used = 0;
+	
+	for(int i = 0; i < lrecord->max_chunks; i++) {
 		lrecord->chunk[i].slot = -1;
 	}
 	return 0;

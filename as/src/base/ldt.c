@@ -1373,8 +1373,8 @@ as_ldt_record_pickle(ldt_record *lrecord,
 	int  ops             = 0;
 	// TODO: Change this hard coded value to a number based on number of 
 	//       record which has changed
-	msg *m[MAX_LDT_CHUNKS + 1];
-	memset(m, 0, (MAX_LDT_CHUNKS + 1) * sizeof(msg *));
+	msg *m[lrecord->num_slots_used + 1];
+	memset(m, 0, (lrecord->num_slots_used + 1) * sizeof(msg *));
 
 
 	if (is_delete) {
