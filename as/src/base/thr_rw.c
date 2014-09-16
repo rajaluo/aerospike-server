@@ -3800,7 +3800,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			}
 		}
 
-		if (as_bin_is_hidden(bin)) {
+		if (bin && as_bin_is_hidden(bin)) {
 			cf_debug(AS_RW, "returning FAIL BIN IS HIDDEN. Cannot Manipulate Directly. digest %"PRIx64"", *(uint64_t*)&tr->keyd);
 			write_local_failed(tr, &r_ref, record_created, tree, &rd, AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE);
 			return -1;
