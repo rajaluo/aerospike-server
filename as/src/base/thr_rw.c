@@ -493,7 +493,7 @@ rw_msg_setup_ldt_fields(msg *m, as_transaction *tr, cf_digest *keyd, uint16_t ld
 	msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t *)&tr->rsv.p->version_info, sizeof(as_partition_vinfo), MSG_SET_COPY);
 	cf_detail_digest(AS_RW, keyd,
 			"MULTI_OP : Set Up Replication Message for the LDT current outgoing "
-			" migrate version %ld", tr->rsv.p->current_outgoing_ldt_version);
+			" migrate version %ld for partition %d", tr->rsv.p->current_outgoing_ldt_version, tr->rsv.p->partition_id);
 	msg_set_uint64(m, RW_FIELD_LDT_VERSION, tr->rsv.p->current_outgoing_ldt_version); 
 }
 
@@ -2242,48 +2242,48 @@ int rw_dup_init() {
 // is _NOT_ migrating it is ok to overwrite the parent record without generation check.
 int
 as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rsv,
-			ldt_prole_info *linfo, uint32_t info, as_storage_rd *rd, char *fname, int lineno)
+			ldt_prole_info *linfo, uint32_t info, as_storage_rd *rd, bool is_create, char *fname, int lineno)
 {
 	if (rsv->ns->ldt_enabled) {
 		bool is_ldt_parent = (info & RW_INFO_LDT_REC);
 
-		if (linfo->replication_partition_version_match) {
-			if (is_ldt_parent) {
+		if (is_ldt_parent) {
+			if (linfo->replication_partition_version_match) {
 				linfo->ldt_prole_version = 0;
 				// If parent record does not exist. In that case for source version itself
 				// is used @ prole
 				int rv = -1;	
-				if (rd) {
+				if (rd && !is_create) {
 					rv = as_ldt_parent_storage_get_version(rd, &linfo->ldt_prole_version);
 					if (0 == rv) {
 						linfo->ldt_prole_version_set = true;
 					}
 				}
-				if (rv)
-					cf_detail(AS_RW, "prole version not set becaue %p==NULL or %d != 0", rd, rv);	
-			}
-		} else { 
-			if (is_ldt_parent) {
-				if (!as_migrate_is_incoming(&rd->keyd, linfo->ldt_source_version, rsv->p->partition_id, AS_MIGRATE_RX_STATE_RECORD)) {	
-					cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Skip Write of Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
+				if (rv) {
+					linfo->ldt_prole_version_set = false;
+					cf_detail(AS_RW, "prole version not set because %p==NULL or %d != 0", rd, rv);	
+				}
+			} else { 
+				if (as_migrate_is_incoming(keyd, linfo->ldt_source_version, rsv->p->partition_id, AS_MIGRATE_RX_STATE_RECORD)) {	
+					cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
 							fname, lineno, rsv->p->partition_id, 
 							linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
 							linfo->ldt_source_version, linfo->ldt_prole_version); 
+				} else {
+					cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Skip Write of Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
+						fname, lineno, rsv->p->partition_id, 
+						linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
+						linfo->ldt_source_version, linfo->ldt_prole_version); 
 
 					// Should bail out way earlier than this
 					goto Out;
 				}
-				cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
-						fname, lineno, rsv->p->partition_id, 
-						linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
-						linfo->ldt_source_version, linfo->ldt_prole_version); 
-			} else { 
-				cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write SubRecord in Partition %d with %ld version [source:%ld prole:%ld]", 
-					fname, lineno, rsv->p->partition_id, 
-					linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
-					linfo->ldt_source_version, linfo->ldt_prole_version); 
-			}
-		}
+			} 
+			cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write %sRecord in Partition %d with %s Partition Version [create:%d source mig:%ld prole:%ld]", 
+					fname, lineno, (is_ldt_parent) ? "" : "Sub", rsv->p->partition_id, 
+					linfo->replication_partition_version_match ? "Matching" : "Non Matching",
+					is_create, linfo->ldt_source_version, linfo->ldt_prole_version); 
+		} 
 	}
 	return 0;
 Out:
@@ -2393,7 +2393,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	uint8_t *p_stack_particles = stack_particles;
 
 	// Check is duplication in case code is coming from multi op
-	if (as_ldt_check_and_get_prole_version(keyd, rsv, linfo, info, &rd, __FILE__, __LINE__)) {
+	if (as_ldt_check_and_get_prole_version(keyd, rsv, linfo, info, &rd, (rv == 1) ? true : false, __FILE__, __LINE__)) {
 		goto Out;
 	}
 
@@ -2467,7 +2467,7 @@ int as_rw_get_ldt_info(ldt_prole_info *linfo, msg *m, as_partition_reservation *
 {
 	linfo->ldt_source_version = 0;
 	linfo->ldt_prole_version_set = false;
-	linfo->replication_partition_version_match = true;
+	linfo->replication_partition_version_match = false;
 
 	int not_found = 0;
 	as_partition_vinfo *source_partition_version = NULL;
@@ -2477,7 +2477,25 @@ int as_rw_get_ldt_info(ldt_prole_info *linfo, msg *m, as_partition_reservation *
 		not_found++;
 		cf_detail(AS_RW, "MULTI_OP: Message Without Partition Version");
 	} else {
-		linfo->replication_partition_version_match = (memcmp(source_partition_version, &rsv->p->version_info, sizeof(as_partition_vinfo)) == 0);
+		linfo->replication_partition_version_match = as_partition_vinfo_same(source_partition_version, &rsv->p->version_info);
+/*
+		cf_info(AS_RW, "MULTI_OP: Version matches");
+		cf_info(AS_RW, "%ld %d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d", source_partition_version->iid,
+				source_partition_version->vtp[0], source_partition_version->vtp[1],	source_partition_version->vtp[2],	
+				source_partition_version->vtp[3], source_partition_version->vtp[4],	source_partition_version->vtp[5],	
+				source_partition_version->vtp[6], source_partition_version->vtp[7],	source_partition_version->vtp[8],	
+				source_partition_version->vtp[9], source_partition_version->vtp[10],	source_partition_version->vtp[11],	
+				source_partition_version->vtp[12], source_partition_version->vtp[13],	source_partition_version->vtp[14],	
+				source_partition_version->vtp[15]);
+
+		cf_info(AS_RW, "%ld %d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d", rsv->p->version_info.iid,
+				rsv->p->version_info.vtp[0], rsv->p->version_info.vtp[1],	rsv->p->version_info.vtp[2],	
+				rsv->p->version_info.vtp[3], rsv->p->version_info.vtp[4],	rsv->p->version_info.vtp[5],	
+				rsv->p->version_info.vtp[6], rsv->p->version_info.vtp[7],	rsv->p->version_info.vtp[8],	
+				rsv->p->version_info.vtp[9], rsv->p->version_info.vtp[10],	rsv->p->version_info.vtp[11],	
+				rsv->p->version_info.vtp[12], rsv->p->version_info.vtp[13],	rsv->p->version_info.vtp[14],	
+				rsv->p->version_info.vtp[15]);
+*/
 	}
 
 	if (0 != msg_get_uint64(m, RW_FIELD_LDT_VERSION, &linfo->ldt_source_version)) {
@@ -2609,7 +2627,7 @@ write_process(cf_node node, msg *m, bool respond)
 					ns->single_bin, generation );
 
 			
-			if (as_ldt_check_and_get_prole_version(keyd, &tr.rsv, &linfo, info, NULL, __FILE__, __LINE__)) {
+			if (as_ldt_check_and_get_prole_version(keyd, &tr.rsv, &linfo, info, NULL, false, __FILE__, __LINE__)) {
 				result_code = AS_PROTO_RESULT_OK;
 				as_partition_release(&tr.rsv); // returns reservation a few lines up
 				cf_atomic_int_decr(&g_config.wprocess_tree_count);
@@ -4810,7 +4828,7 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp,
 
 	as_namespace *ns = rsvp->ns;
 
-	if (as_ldt_check_and_get_prole_version(keyd, rsvp, linfo, info, NULL, __FILE__, __LINE__)) {
+	if (as_ldt_check_and_get_prole_version(keyd, rsvp, linfo, info, NULL, false, __FILE__, __LINE__)) {
 		goto Out;
 	}
 

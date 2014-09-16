@@ -1987,6 +1987,8 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 		cf_atomic_int_incr(&g_config.partition_generation);
 	}
 
+	p->current_outgoing_ldt_version = 0;
+
 	if (0 != pthread_mutex_unlock(&p->lock))
 		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
 

@@ -322,7 +322,8 @@ ldt_crec_open(ldt_record *lrecord, cf_digest *keyd, int *slotp)
 	// 1. Search in opened record
 	int slot = ldt_crec_find_digest(lrecord, keyd);
 	if (slot != -1) {
-		cf_info(AS_LDT, "ldt_aerospike_rec_open : Found already open");
+		cf_detail(AS_LDT, "ldt_aerospike_rec_open : Found already open");
+		*slotp = slot;
 		return 0;
 	}
 

@@ -690,6 +690,9 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 		cf_assert((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD),
 				  AS_PARTITION, CF_CRITICAL,
 				  "Unexpected Partition Migration State %d:%d", mc->rxstate, mc->rsv.p->partition_id);
+		cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming version %ld Started Receiving Sub Record Migration !! %s:%d:%d:%d",
+			  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
+			  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
 	} else if (COMPONENT_IS_LDT_DUMMY(c)) {
 		cf_crash(AS_MIGRATE, "Invalid Component Type Dummy received by migration");
 	} else {
@@ -2730,7 +2733,7 @@ as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_
 			return true;
 		}
 	}
-	cf_detail_digest(AS_MIGRATE, subrec_digest, "%s incoming migrate for partition %d of version %ld with state %d", mc ? " " : "NO", partition_id, version, mc ? mc->rxstate : 0); 
+	cf_detail(AS_MIGRATE, "%s incoming migrate for partition %d of version %ld with state %d", mc ? " " : "NO", partition_id, version, mc ? mc->rxstate : 0); 
 	return false;
 }
 
