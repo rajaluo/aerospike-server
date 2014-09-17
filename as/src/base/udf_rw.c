@@ -648,10 +648,10 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 			*lrecord_op = UDF_OPTYPE_WRITE;
 		}
 
-		FOR_EACH_SUBRECORD(i, lrecord) {
+		FOR_EACH_SUBRECORD(i, j, lrecord) {
 			urecord_op = UDF_OPTYPE_READ;
 			is_ldt = true;
-			udf_record *c_urecord = &lrecord->chunk[i].c_urecord;
+			udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 			udf_rw_post_processing(c_urecord, &urecord_op, set_id);
 			if (urecord_op == UDF_OPTYPE_WRITE) {
 				*lrecord_op = UDF_OPTYPE_LDT_WRITE;
@@ -661,8 +661,8 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		if (is_ldt) {
 			// Create the multiop pickled buf for thr_rw.c
 			ret = as_ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz, &wr->pickled_void_time);
-			FOR_EACH_SUBRECORD(i, lrecord) {
-				udf_record *c_urecord = &lrecord->chunk[i].c_urecord;
+			FOR_EACH_SUBRECORD(i, j, lrecord) {
+				udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 				// Cleanup in case pickle code bailed out	
 				// 1. either because this single node run no replica
 				// 2. failed to pack stuff up.

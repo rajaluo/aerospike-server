@@ -56,18 +56,11 @@ ldt_record_init(ldt_record *lrecord)
 	lrecord->h_urec  = 0;
 	lrecord->as      = &g_as_aerospike;
 
-	// No versioning right now !!!
-	lrecord->version = as_ldt_generate_version();
-	lrecord->chunk   = cf_malloc(sizeof(ldt_chunk) * LDT_SLOT_CHUNK_SIZE);
-	if (lrecord->chunk == NULL) {
+	if (ldt_crec_create_chunk(lrecord)) {
 		return -1;
 	}
-	lrecord->max_chunks     = LDT_SLOT_CHUNK_SIZE;
+	lrecord->max_chunks     = 1;
 	lrecord->num_slots_used = 0;
-	
-	for(int i = 0; i < lrecord->max_chunks; i++) {
-		lrecord->chunk[i].slot = -1;
-	}
 	return 0;
 }
 

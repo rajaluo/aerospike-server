@@ -1178,7 +1178,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	}
 
 	if (r->void_time != 0) {
-		cf_warning(AS_LDT, "No void time should be set in subrecord !!! found %d", r->void_time);
+		cf_detail(AS_LDT, "No void time should be set in subrecord !!! found %d", r->void_time);
 	}
 
 	if (!as_ldt_record_is_sub(r)) {
@@ -1405,8 +1405,8 @@ as_ldt_record_pickle(ldt_record *lrecord,
 		}
 
 		// This macro is a for-loop thru the SR list and a test for valid SR entry
-		FOR_EACH_SUBRECORD(i, lrecord) {
-			udf_record *c_urecord = &lrecord->chunk[i].c_urecord;
+		FOR_EACH_SUBRECORD(i, j, lrecord) {
+			udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 			is_delete             = (c_urecord->pickled_buf) ? false : true;
 			as_transaction *c_tr  = c_urecord->tr;
 
