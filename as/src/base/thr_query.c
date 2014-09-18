@@ -1387,6 +1387,7 @@ as_query__process_udfreq(as_query_request *qudf)
 
 			// Fill the structure needed by internal transaction create
 			tr_create_data d;
+			memset(&d, 0, sizeof(tr_create_data));
 			d.digest   = dt->digs[i];
 			d.ns       = qtr->ns;
 			d.call     = &(qtr->call);
@@ -2182,7 +2183,7 @@ as_query(as_transaction *tr)
 	}
 	as_namespace *ns = as_namespace_get_bymsgfield(nsfp);
 	if (!ns) {
-		cf_debug(AS_QUERY, "Query with unavailable namespace %s", nsfp->data);
+		cf_debug(AS_QUERY, "Query with unavailable namespace");
 		tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
 		rv = AS_QUERY_ERR;
 		goto Cleanup;
