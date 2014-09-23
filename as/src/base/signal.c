@@ -39,6 +39,8 @@ extern bool g_startup_complete;
 extern const char aerospike_build_type[];
 extern const char aerospike_build_id[];
 
+extern void xdr_sig_handler(int signum);
+
 #define MAX_BACKTRACE_DEPTH 50
 
 
