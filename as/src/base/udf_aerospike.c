@@ -146,11 +146,80 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 
 	return 0;
 }
-
+/*
+ * Internal function: udf__aerospike_get_particle_buf
+ *
+ * Parameters:
+ * 		r 		-- udf_record_bin for which particle buf is requested
+ * 		type    -- bin type
+ * 		pbytes  -- current space required
+ *
+ * Return value:
+ * 		NULL on failure
+ * 		valid buf pointer success
+ *
+ * Description:
+ * 		The function find space on preallocated particle_data for requested size.
+ * 		In case it is found it tries to allocate space for bin independently. 
+ * 		Return back the pointer to the offset on preallocated particle_data or newly
+ * 		allocated space.
+ *
+ * 		Return NULL if both fails
+ *
+ *      Note: ubin->particle_buf will be set if new per bin memory is allocated.
+ *
+ * 		Callers:
+ * 		udf_aerospike_setbin
+ */
+uint8_t *
+udf__aerospike_get_particle_buf(udf_record *urecord, udf_record_bin *ubin, uint8_t type, int pbytes)
+{
+	int alloc_size = 0;
+	switch(type) {
+		case AS_LIST:
+		case AS_BYTES:
+		case AS_MAP:
+		case AS_STRING: {
+			alloc_size = urecord->rd->ns->storage_write_block_size;
+			break;
+		}
+		case AS_BOOLEAN:
+		case AS_INTEGER: {
+			alloc_size = pbytes;	
+			break;
+		}
+		default: {
+			cf_warning (AS_UDF, "udf__aerospike_get_particle_buf: Unknown Particle Type");	
+			break;
+		}	
+	}
+	
+	uint8_t *buf = NULL;
+	if (ubin->particle_buf) {
+		buf = ubin->particle_buf;
+	} else {
+		if ((urecord->cur_particle_data + pbytes) < urecord->end_particle_data) {
+			buf = urecord->cur_particle_data;
+			urecord->cur_particle_data += pbytes;
+		} else if (alloc_size) {
+			// If there is no space in preallocated buffer then go
+			// ahead and allocate space per bin. This may happen
+			// if user keeps doing lot of execute update exhausting
+			// the buffer. After this point the record size check will
+			// trip instead of at the code when bin value is set.
+			ubin->particle_buf = cf_malloc(alloc_size);
+			if (ubin->particle_buf) {
+				buf = ubin->particle_buf;
+			}
+		}
+	}
+	return buf;
+}
 /*
  * Internal function: udf_aerospike_setbin
  *
  * Parameters:
+ *      offset  -- offset of udf bin in updates array 
  * 		r 		-- udf_record to be manipulated
  * 		bname 	-- name of the bin to be deleted
  *		val		-- value to be updated with
@@ -186,7 +255,7 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
  * 		          changed
  */
 static int
-udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * val, bool is_hidden)
+udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const as_val * val, bool is_hidden)
 {
 	if (bname == NULL || bname[0] == 0 ) {
 		cf_warning(AS_UDF, "no bin name supplied");
@@ -263,16 +332,15 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 				as_particle_frombuf(b, AS_PARTICLE_TYPE_STRING, s, l, NULL, true);
 			} else {
 				pbytes = l + as_particle_get_base_size(AS_PARTICLE_TYPE_STRING);
-				if ((urecord->cur_particle_data + pbytes) < urecord->end_particle_data) {
+				uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], type, pbytes);
+				if (particle_buf) {
 					as_particle_frombuf(b, AS_PARTICLE_TYPE_STRING, s, l,
-										urecord->cur_particle_data,
+										particle_buf,
 										rd->ns->storage_data_in_memory);
-					urecord->cur_particle_data += pbytes;
 				} else {
-					cf_warning(AS_UDF, "string: bin data size too big: pbytes %d"
-								" pdata %p cur_part+pbytes %p pend %p", pbytes,
-								urecord->particle_data, urecord->cur_particle_data + pbytes,
-								urecord->end_particle_data);
+					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [String: bin %s "
+										"data size too big: pbytes %d]... Fail",
+										bname, pbytes);
 					ret = -1;
 					break;
 				}
@@ -288,15 +356,14 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 				as_particle_frombuf(b, AS_PARTICLE_TYPE_BLOB, s, l, NULL, true);
 			} else {
 				pbytes = l + as_particle_get_base_size(AS_PARTICLE_TYPE_BLOB);
-				if ((urecord->cur_particle_data + pbytes) < urecord->end_particle_data) {
-					as_particle_frombuf(b, AS_PARTICLE_TYPE_BLOB, s, l, urecord->cur_particle_data,
+				uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], type, pbytes);
+				if (particle_buf) {
+					as_particle_frombuf(b, AS_PARTICLE_TYPE_BLOB, s, l, particle_buf,
 										rd->ns->storage_data_in_memory);
-					urecord->cur_particle_data += pbytes;
 				} else {
-					cf_warning(AS_UDF, "bytes: bin data size too big pbytes %d"
-								" pdata %p cur_part+pbytes %p pend %p", pbytes,
-								urecord->particle_data, urecord->cur_particle_data + pbytes,
-								urecord->end_particle_data);
+					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Bytes: bin %s "
+										"data size too big: pbytes %d]... Fail",
+										bname, pbytes);
 					ret = -1;
 					break;
 				}
@@ -312,16 +379,16 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 				as_particle_frombuf(b, AS_PARTICLE_TYPE_INTEGER, (uint8_t *) &i, 8, NULL, true);
 			} else {
 				pbytes = 8 + as_particle_get_base_size(AS_PARTICLE_TYPE_INTEGER);
-				if ((urecord->cur_particle_data + pbytes) < urecord->end_particle_data) {
+				uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], type, pbytes);
+				if (particle_buf) {
 					as_particle_frombuf(b, AS_PARTICLE_TYPE_INTEGER,
 										(uint8_t *) &i, 8,
-										urecord->cur_particle_data,
+										particle_buf,
 										rd->ns->storage_data_in_memory);
-					urecord->cur_particle_data += pbytes;
 				} else {
-					cf_warning(AS_UDF, "bool: bin data size too big: pbytes %d %p %p %p",
-								pbytes, urecord->particle_data, urecord->cur_particle_data,
-								urecord->end_particle_data);
+					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Bool: bin %s "
+										"data size too big: pbytes %d]... Fail",
+										bname, pbytes);
 					ret = -1;
 					break;
 				}
@@ -337,15 +404,15 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 				as_particle_frombuf(b, AS_PARTICLE_TYPE_INTEGER, (uint8_t *) &j, 8, NULL, true);
 			} else {
 				pbytes = 8 + as_particle_get_base_size(AS_PARTICLE_TYPE_INTEGER);
-				if ((urecord->cur_particle_data + pbytes) < urecord->end_particle_data) {
+				uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], type, pbytes);
+				if (particle_buf) {
 					as_particle_frombuf(b, AS_PARTICLE_TYPE_INTEGER,
-										(uint8_t *) &j, 8, urecord->cur_particle_data,
+										(uint8_t *) &j, 8, particle_buf,
 										rd->ns->storage_data_in_memory);
-					urecord->cur_particle_data += pbytes;
 				} else {
-					cf_warning(AS_UDF, "int: bin data size too big: pbytes %d %p %p %p",
-								pbytes, urecord->particle_data, urecord->cur_particle_data,
-								urecord->end_particle_data);
+					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Integer: bin %s "
+										"data size too big: pbytes %d]... Fail",
+										bname, pbytes);
 					ret = -1;
 					break;
 				}
@@ -384,14 +451,14 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 			}
 			else {
 				pbytes = buf.size + as_particle_get_base_size(ptype);
-				if ((urecord->cur_particle_data + pbytes) < urecord->end_particle_data) {
+				uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], type, pbytes);
+				if (particle_buf) {
 					as_particle_frombuf(b, ptype, (uint8_t *) buf.data, buf.size,
-										urecord->cur_particle_data,	rd->ns->storage_data_in_memory);
-					urecord->cur_particle_data += pbytes;
+										particle_buf, rd->ns->storage_data_in_memory);
 				} else {
-					cf_warning(AS_UDF, "map-list: bin data size too big: pbytes %d %p %p %p",
-								pbytes, urecord->particle_data, urecord->cur_particle_data,
-								urecord->end_particle_data);
+					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Map-List: bin %s "
+										"data size too big: pbytes %d]... Fail",
+										bname, pbytes);
 					rsp = -1;
 				}
 			}
@@ -583,9 +650,9 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 					cf_detail(AS_UDF, "execute update: position %d sets bin %s", i, k);
 					urecord->updates[i].oldvalue = udf_record_storage_get(urecord, k);
 					urecord->updates[i].washidden = udf_record_bin_ishidden(urecord, k);
-					rc = udf_aerospike_setbin(urecord, k, v, h);
+					rc = udf_aerospike_setbin(urecord, i, k, v, h);
 					if (rc) {
-						failmax = i + 1;
+						failmax = i;
 						goto Rollback;
 					}
 				}
@@ -666,7 +733,7 @@ Rollback:
 				else {
 					// otherwise, it is a set
 					cf_detail(AS_UDF, "execute rollback: position %d sets bin %s", i, k);
-					rc = udf_aerospike_setbin(urecord, k, v, h);
+					rc = udf_aerospike_setbin(urecord, i, k, v, h);
 					if (rc) {
 						cf_warning(AS_UDF, "Rollback failed .. not good ... !!");
 					}

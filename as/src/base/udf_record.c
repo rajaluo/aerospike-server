@@ -320,6 +320,9 @@ udf_record_init(udf_record *urecord)
 
 	urecord->ldt_rectype_bits   = 0;
 	urecord->keyd               = cf_digest_zero;
+	for (uint i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
+		urecord->updates[i].particle_buf = NULL;
+	}
 }
 
 /*
@@ -450,6 +453,13 @@ udf_record_cache_free(udf_record * urecord)
 			bin->name[0] = '\0';
 			as_val_destroy(bin->oldvalue);
 			bin->oldvalue = NULL;
+		}
+	}
+
+	for (uint i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
+		if (urecord->updates[i].particle_buf) {
+			cf_free(urecord->updates[i].particle_buf);
+			urecord->updates[i].particle_buf = NULL;
 		}
 	}
 	urecord->nupdates = 0;

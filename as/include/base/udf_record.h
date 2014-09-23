@@ -50,6 +50,7 @@ typedef struct udf_record_bin_s {
 	bool				dirty;
 	bool				ishidden;
 	bool				washidden;
+	void                *particle_buf;
 } udf_record_bin;
 
 typedef struct udf_record_s {
