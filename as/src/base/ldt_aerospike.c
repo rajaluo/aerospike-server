@@ -260,7 +260,7 @@ ldt_crec_find_freeslot(ldt_record *lrecord, char *func)
 		}
 	}
 Out:
-	cf_warning(AS_LDT, "%s: Cannot open more than (%d) records in a single UDF",
+	cf_warning(AS_LDT, "%s: Allocation Error [Cannot open more than (%d) Sub-Records in a single UDF]... Fail",
 				func, lrecord->num_slots_used);
 	return NULL;
 }
@@ -494,7 +494,7 @@ ldt_crec_create(ldt_record *lrecord)
 	if (rv < 0) {
 		// Free the slot for reuse
 		ldt_slot_destroy(lslotp, lrecord);
-		cf_warning(AS_LDT, "ldt_crec_create: Record Create Failed rv=%d ... ", rv);
+		cf_warning(AS_LDT, "ldt_crec_create: LDT Sub-Record Create Error [rv=%d]... Fail", rv);
 		return NULL;
 	}
 
@@ -509,7 +509,7 @@ ldt_record_destroy(as_rec * rec)
 {
 	static const char * meth = "ldt_record_destroy()";
 	if (!rec) {
-		cf_warning(AS_UDF, "%s Invalid Paramters: record=%p", meth, rec);
+		cf_warning(AS_UDF, "%s: Invalid Parameters [record=%p]... Fail", meth, rec);
 		return false;
 	}
 
@@ -545,7 +545,7 @@ ldt_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 {
 	static char * meth = "ldt_aerospike_rec_create()";
 	if (!as || !rec) {
-		cf_warning(AS_LDT, "%s Invalid Paramters: as=%p, record=%p", meth, as, rec);
+		cf_warning(AS_LDT, "%s: Invalid Parameters [as=%p, record=%p]... Fail", meth, as, rec);
 		return 2;
 	}
 	ldt_record *lrecord  = (ldt_record *)as_rec_source(rec);
@@ -573,7 +573,7 @@ ldt_aerospike_crec_create(const as_aerospike * as, const as_rec *rec)
 {
 	static char * meth = "ldt_aerospike_crec_create()";
 	if (!as || !rec) {
-		cf_warning(AS_LDT, "%s Invalid Paramters: as=%p, record=%p", meth, as, rec);
+		cf_warning(AS_LDT, "%s: Invalid Parameters [as=%p, record=%p]... Fail", meth, as, rec);
 		return NULL;
 	}
 	ldt_record *lrecord = (ldt_record *)as_rec_source(rec);
@@ -581,7 +581,7 @@ ldt_aerospike_crec_create(const as_aerospike * as, const as_rec *rec)
 		return NULL;
 	}
 	if (!udf_record_ldt_enabled(lrecord->h_urec)) {
-		cf_warning(AS_LDT, "Large Object Not Enabled");
+		cf_warning(AS_LDT, "Large Object Not Enabled !!... Fail");
 		return NULL;
 	}
 	cf_detail(AS_LDT, "ldt_aerospike_crec_create");
@@ -592,22 +592,22 @@ static int
 ldt_aerospike_crec_remove(const as_aerospike * as, const as_rec * crec)
 {
 	if (!as || !crec) {
-		cf_warning(AS_LDT, "Invalid Paramters: as=%p, record=%p", as, crec);
+		cf_warning(AS_LDT, "ldt_aerospike_crec_remove: Invalid Parameters [as=%p, record=%p]... Fail", as, crec);
 		return 2;
 	}
 	if (!udf_record_ldt_enabled(crec)) {
-		cf_warning(AS_LDT, "Large Object Not Enabled");
+		cf_warning(AS_LDT, "Large Object Not Enabled... Fail");
 		return -3;
 	}
 
 	udf_record   * c_urecord = (udf_record *)as_rec_source(crec);
 	if (!c_urecord) {
-		cf_warning(AS_LDT, "subrecord_update: Internal Error !! Malformed Sub Record !!... Fail");
+		cf_warning(AS_LDT, "ldt_aerospike_crec_remove: Internal Error [Malformed Sub Record]... Fail");
 		return -1;
 	}
 	ldt_record   * lrecord  = (ldt_record *)c_urecord->lrecord;
 	if (!lrecord) {
-		cf_warning(AS_LDT, "subrecord_update: Internal Error !! Invalid Head Record Reference in Sub Record !!... Fail");
+		cf_warning(AS_LDT, "ldt_aerospike_crec_remove: Internal Error [Invalid Head Record Reference in Sub Record]... Fail");
 		return -1;
 	}
 	as_aerospike * las  = lrecord->as;
@@ -620,22 +620,22 @@ ldt_aerospike_crec_update(const as_aerospike * as, const as_rec *crec)
 {
 	cf_detail(AS_LDT, "[ENTER] as(%p) subrec(%p)", as, crec );
 	if (!as || !crec) {
-		cf_warning(AS_LDT, "Invalid Paramters: as=%p, record=%p subrecord=%p", as, crec);
+		cf_warning(AS_LDT, "ldt_aerospike_crec_update: Invalid Parameters [as=%p, record=%p subrecord=%p]... Fail", as, crec);
 		return 2;
 	}
 	if (!udf_record_ldt_enabled(crec)) {
-		cf_warning(AS_LDT, "Large Object Not Enabled");
+		cf_warning(AS_LDT, "Large Object Not Enabled... Fail");
 		return 3;
 	}
 
 	udf_record   * c_urecord = (udf_record *)as_rec_source(crec);
 	if (!c_urecord) {
-		cf_warning(AS_LDT, "subrecord_update: Internal Error !! Malformed Sub Record !!... Fail");
+		cf_warning(AS_LDT, "ldt_aerospike_crec_update: Internal Error [Malformed Sub Record]... Fail!!");
 		return -1;
 	}
 	ldt_record   * lrecord  = (ldt_record *)c_urecord->lrecord;
 	if (!lrecord) {
-		cf_warning(AS_LDT, "subrecord_update: Internal Error !! Invalid Head Record Reference in Sub Record !!... Fail");
+		cf_warning(AS_LDT, "ldt_aerospike_crec_update: Internal Error [Invalid Head Record Reference in Sub Record]... Fail!!");
 		return -1;
 	}
 	as_aerospike * las  = lrecord->as;
@@ -648,8 +648,7 @@ ldt_aerospike_crec_close(const as_aerospike * as, const as_rec *crec_p)
 {
 	cf_detail(AS_LDT, "[ENTER] as(%p) subrec(%p)", as, crec_p );
 	if (!as || !crec_p) {
-		cf_warning(AS_LDT, " %s Invalid Paramters: as=%p, subrecord=%p",
-				"ldt_aerospike_crec_close", as, crec_p);
+		cf_warning(AS_LDT, "ldt_aerospike_crec_close: Invalid Parameters [as=%p, subrecord=%p]... Fail", as, crec_p);
 		return 2;
 	}
 
@@ -657,18 +656,18 @@ ldt_aerospike_crec_close(const as_aerospike * as, const as_rec *crec_p)
 	// it. Other wise it is a group commit
 	udf_record *c_urecord = (udf_record *)as_rec_source(crec_p);
 	if (!c_urecord) {
-		cf_warning(AS_LDT, "subrecord_close: Internal Error !! Malformed Sub Record !!... Fail");
+		cf_warning(AS_LDT, "ldt_aerospike_crec_close: Internal Error [Malformed Sub Record]... Fail");
 		return -1;
 	}
 	ldt_record  *lrecord  = (ldt_record *)c_urecord->lrecord;
 	if (!lrecord) {
-		cf_warning(AS_LDT, "subrecord_close: Internal Error !! Invalid Head Record Reference in Sub Record !!... Fail");
+		cf_warning(AS_LDT, "ldt_aerospike_crec_close: Internal Error [Invalid Head Record Reference in Sub Record]... Fail");
 		return -1;
 	}
 
 	ldt_slot *lslotp   = ldt_crec_find_by_urec(lrecord, crec_p);
 	if (!lslotp) {
-		cf_warning(AS_LDT, "subrecord_close called for the record which is not open");
+		cf_warning(AS_LDT, "ldt_aerospike_crec_close: Invalid Operation [Sub Record close called for the record which is not open]... Fail");
 		return -1;
 	}
 	cf_detail(AS_LDT, "ldt_aerospike_crec_close");
@@ -688,7 +687,7 @@ ldt_aerospike_crec_open(const as_aerospike * as, const as_rec *rec, const char *
 {
 	static char * meth = "ldt_aerospike_crec_open()";
 	if (!as || !rec || !bdig) {
-		cf_warning(AS_LDT, "%s Invalid Paramters: as=%p, record=%p digest=%p", meth, as, rec, bdig);
+		cf_warning(AS_LDT, "ldt_aerospike_crec_open: Invalid Parameters [as=%p, record=%p digest=%p]... Fail", meth, as, rec, bdig);
 		return NULL;
 	}
 	cf_digest keyd;
@@ -700,7 +699,7 @@ ldt_aerospike_crec_open(const as_aerospike * as, const as_rec *rec, const char *
 		return NULL;
 	}
 	if (!udf_record_ldt_enabled(lrecord->h_urec)) {
-		cf_warning(AS_LDT, "Large Object Not Enabled");
+		cf_warning(AS_LDT, "Large Object Not Enabled... Fail");
 		return NULL;
 	}
 	as_ldt_subdigest_setversion(&keyd, lrecord->version);
@@ -723,7 +722,7 @@ ldt_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 {
 	static const char * meth = "ldt_aerospike_rec_update()";
 	if (!as || !rec) {
-		cf_warning(AS_LDT, "%s Invalid Paramters: as=%p, record=%p", meth, as, rec);
+		cf_warning(AS_LDT, "%s: Invalid Parameters [as=%p, record=%p]... Fail", meth, as, rec);
 		return 2;
 	}
 	cf_detail(AS_LDT, "[ENTER]<%s> as(%p) rec(%p)", meth, as, rec );
@@ -741,8 +740,8 @@ ldt_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 		// execution error return as it is
 		cf_debug(AS_LDT, "<%s> Exec Error(%d) from as_aero_rec_update()", meth, ret );
 	} else if (ret == -2) {
-		cf_warning(AS_LDT, "<%s> Unexpected return(%d) from as_aero_rec_update()", meth, ret );
 		// Record is not open. Unexpected.  Should not reach here.
+		cf_warning(AS_LDT, "%s: Internal Error [Sub Record update which is not open rv(%d)]... Fail", meth, ret );
 	}
 	return ret;
 }
@@ -752,7 +751,7 @@ ldt_aerospike_rec_exists(const as_aerospike * as, const as_rec * rec)
 {
 	static const char * meth = "ldt_aerospike_rec_exists()";
 	if (!as || !rec) {
-		cf_warning(AS_LDT, "%s Invalid Paramters: as=%p, record=%p", meth, as, rec);
+		cf_warning(AS_LDT, "%s Invalid Parameters: as=%p, record=%p", meth, as, rec);
 		return 2;
 	}
 	ldt_record *lrecord = (ldt_record *)as_rec_source(rec);
@@ -776,7 +775,7 @@ ldt_aerospike_rec_remove(const as_aerospike * as, const as_rec * rec)
 {
 	static const char * meth = "ldt_aerospike_rec_remove()";
 	if (!as || !rec) {
-		cf_warning(AS_LDT, "%s Invalid Paramters: as=%p, record=%p", meth, as, rec);
+		cf_warning(AS_LDT, "%s: Invalid Parameters [as=%p, record=%p]... Fail", meth, as, rec);
 		return 2;
 	}
 	// Delete needs propagation

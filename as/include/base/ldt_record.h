@@ -53,7 +53,7 @@
  * of open subs, should the situation require it.
  */
 
-/* A Large Data Type (LDT) "Chunk" refers to a single record that is a
+/* A Large Data Type (LDT) "Slot" refers to a single record that is a
  * child to an Aerospike "Top Record".
  */
 typedef struct ldt_slot_s {
@@ -66,7 +66,7 @@ typedef struct ldt_slot_s {
 
 /*
  * This structure represents an open record that contains an LDT Object.
- * "ldt_chunk" represents an opened sub 
+ * "ldt_chunk" represents LDT_SLOT_CHUNK_SIZE number of slots 
  */
 #define LDT_SLOT_CHUNK_SIZE 10 
 typedef struct ldt_slot_chunk_s {
@@ -81,16 +81,14 @@ struct ldt_record_s {
 	ldt_slot_chunk     * chunk;
 	as_aerospike       * as;       // To operate on ldt_record_chunk
 	uint64_t             version;  // this is version key used to open/close/search
-	// for the sub_record digest
+	                               // for the sub_record digest
 };
 
-extern const as_rec_hooks ldt_record_hooks;
-
-//extern int ldt_record_init(ldt_record *lr, as_namespace *ns, cf_digest *keyd);
-extern int   ldt_record_init   (ldt_record *lrecord);
-
-#define FOR_EACH_SUBRECORD(i, j, lrecord) \
+#define FOR_EACH_SUBRECORD(i, j, lrecord)           \
 	for (int i = 0; i < lrecord->max_chunks; i++)   \
-    for (int j = 0; j < LDT_SLOT_CHUNK_SIZE && lrecord->chunk[i].slot_inuse[j]; j++)
+    for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++)   \
+	if (lrecord->chunk[i].slot_inuse[j]) 
 
-extern int ldt_crec_create_chunk(ldt_record *lrecord);
+extern const as_rec_hooks ldt_record_hooks;
+extern int   ldt_record_init   (ldt_record *lrecord);
+extern int   ldt_crec_create_chunk(ldt_record *lrecord);
