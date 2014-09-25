@@ -14,7 +14,7 @@ BASE_HEADERS += proto.h rec_props.h secondary_index.h security.h security_config
 BASE_HEADERS += thr_info.h thr_proxy.h thr_scan.h thr_tsvc.h thr_write.h
 BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h udf_logger.h
 BASE_HEADERS += udf_memtracker.h udf_record.h udf_rw.h udf_timer.h
-BASE_HEADERS += write_request.h xdr_serverside.h
+BASE_HEADERS += write_request.h xdr_serverside.h as_aggr.h
 
 BASE_SOURCES += as.c asm.c bin.c cfg.c cluster_config.c index.c
 BASE_SOURCES += ldt.c ldt_record.c ldt_aerospike.c monitor.c namespace.c packet_compression.c
@@ -22,7 +22,7 @@ BASE_SOURCES += particle.c proto.c rec_props.c record.c signal.c secondary_index
 BASE_SOURCES += thr_batch.c thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.c thr_proxy.c
 BASE_SOURCES += thr_query.c thr_rw.c thr_sindex.c thr_tscan.c thr_tsvc.c transaction.c
 BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c udf_logger.c
-BASE_SOURCES += udf_memtracker.c udf_record.c udf_rw.c udf_timer.c
+BASE_SOURCES += udf_memtracker.c udf_record.c udf_rw.c udf_timer.c as_aggr.c
 ifneq ($(USE_XDR),1)
   BASE_SOURCES += xdr_serverside_stubs.c
 endif

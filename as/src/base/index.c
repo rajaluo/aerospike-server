@@ -828,18 +828,6 @@ as_index_tree_size(as_index_tree *tree)
 	return(sz);
 }
 
-typedef struct {
-	as_index 		*r;
-	cf_arenax_handle r_h;
-} as_index_value;
-
-typedef struct {
-	uint alloc_sz;
-	uint pos;
-	as_index_value indexes[];
-} as_index_value_array;
-
-
 /*
 ** call a function on all the nodes in the tree
 */
@@ -875,13 +863,13 @@ as_index_reduce_traverse( as_index_tree *tree, cf_arenax_handle r_h, cf_arenax_h
 void
 as_index_reduce(as_index_tree* tree, as_index_reduce_fn cb, void* udata)
 {
-	as_index_reduce_partial(tree, AS_REDUCE_ALL, cb, udata);
+	as_index_reduce_partial(tree, AS_REDUCE_ALL, cb, NULL, udata);
 }
 
 /* Make a callback for a specified number of elements in the tree.
  */
 void
-as_index_reduce_partial(as_index_tree* tree, uint32_t sample_count, as_index_reduce_fn cb, void* udata)
+as_index_reduce_partial(as_index_tree* tree, uint32_t sample_count, as_index_reduce_fn cb, as_index_bulk_reduce_fn bulk_cb, void* udata)
 {
 	pthread_mutex_lock(&tree->lock);
 
@@ -929,19 +917,23 @@ as_index_reduce_partial(as_index_tree* tree, uint32_t sample_count, as_index_red
 
 	pthread_mutex_unlock(&tree->lock);
 
-	for (uint i = 0; i < v_a->pos; i++) {
-		as_index_ref r_ref;
+	if ( cb ) {
+		for (uint i = 0; i < v_a->pos; i++) {
+			as_index_ref r_ref;
 
-		r_ref.skip_lock = false;
-		r_ref.r = v_a->indexes[i].r;
-		r_ref.r_h = v_a->indexes[i].r_h;
+			r_ref.skip_lock = false;
+			r_ref.r = v_a->indexes[i].r;
+			r_ref.r_h = v_a->indexes[i].r_h;
 
-		olock_vlock(g_config.record_locks, &(r_ref.r->key), &(r_ref.olock));
-		cf_detail(AS_INDEX, "reduce partial - RECORD LOCK ACQUIRED: %p", r_ref);
-		cf_atomic_int_incr(&g_config.global_record_lock_count);
+			olock_vlock(g_config.record_locks, &(r_ref.r->key), &(r_ref.olock));
+			cf_detail(AS_INDEX, "reduce partial - RECORD LOCK ACQUIRED: %p", r_ref);
+			cf_atomic_int_incr(&g_config.global_record_lock_count);
 
-		// Callback MUST call as_record_done() to unlock and release record.
-		cb(&r_ref, udata);
+			// Callback MUST call as_record_done() to unlock and release record.
+			cb(&r_ref, udata);
+		}
+	} else {
+		bulk_cb(v_a,udata); 
 	}
 
 	if (v_a != (as_index_value_array*)buf) {

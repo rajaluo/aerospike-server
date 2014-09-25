@@ -349,8 +349,21 @@ extern int as_index_size_get(as_namespace *ns);
 // it and it contains, internally, code to not block the tree lock - so you can
 // spend as much time in the reduce function as you want.
 typedef void (*as_index_reduce_fn) (as_index_ref *value, void *udata);
+
+typedef struct {
+	as_index 		*r;
+	cf_arenax_handle r_h;
+} as_index_value;
+
+typedef struct as_index_value_array_s{
+	uint alloc_sz;
+	uint pos;
+	as_index_value indexes[];
+} as_index_value_array;
+
+typedef void (*as_index_bulk_reduce_fn) (struct as_index_value_array_s * i_arr, void *udata);
 extern void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-extern void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+extern void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, as_index_bulk_reduce_fn bulk_cb, void *udata);
 
 // as_index_reduce_sync() doesn't take a reference, and holds the tree lock.
 typedef void (*as_index_reduce_sync_fn) (as_index *value, void *udata);
