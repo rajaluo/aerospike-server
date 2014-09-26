@@ -1573,7 +1573,7 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				mc_l.incoming_ldt_version = mc->incoming_ldt_version;
 				mc_l.pid                  = mc->pid;
 
-				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, (void *)mc); 
+				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, (void *)&mc); 
 				cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
 						  mc->incoming_ldt_version,
 						  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, 
@@ -2713,7 +2713,7 @@ as_migrate_init()
 	g_migrate_id = 1;
 
 	// binid to simatch lookup
-	if (SHASH_OK != shash_create(&g_migrate_incoming_ldt_version_hash, migrate_ldt_version_hashfn, sizeof(migrate_recv_ldt_version), 64, sizeof(void *), SHASH_CR_MT_MANYLOCK)) {
+	if (SHASH_OK != shash_create(&g_migrate_incoming_ldt_version_hash, migrate_ldt_version_hashfn, sizeof(migrate_recv_ldt_version), sizeof(void *), 64, SHASH_CR_MT_MANYLOCK)) {
 		cf_crash(AS_AS, "Couldn't incoming ldt migrate hash");
 	}
 }
@@ -2728,7 +2728,7 @@ as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_
 	migrate_recv_ldt_version mc_l;
 	mc_l.incoming_ldt_version = version;
 	mc_l.pid                  = partition_id;
-	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc_l, (void *)mc)) {
+	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc_l, &mc)) {
 		if (mc && (mc->rxstate == state)) {
 			return true;
 		}
