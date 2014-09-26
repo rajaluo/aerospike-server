@@ -321,7 +321,7 @@ void ldt_chunk_destroy(ldt_record *lrecord, ldt_slot_chunk *lchunk)
 
 void ldt_slot_destroy(ldt_slot *lslotp, ldt_record *lrecord)
 {
-	as_rec_destroy(lslotp->c_urec_p);
+	udf_record_destroy(lslotp->c_urec_p);
 	lrecord->num_slots_used--;
 }
 
@@ -530,7 +530,7 @@ ldt_record_destroy(as_rec * rec)
 	cf_free(lrecord->chunk);
 	// Dir destroy should release partition reservation and
 	// namespace reservation.
-	as_rec_destroy(h_urec);
+	udf_record_destroy(h_urec);
 	return true;
 }
 

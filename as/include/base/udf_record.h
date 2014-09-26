@@ -117,6 +117,7 @@ extern bool     udf_record_ldt_enabled  (const as_rec * rec);
 #define UDF_ERR_RECORD_NOT_VALID     3
 #define UDF_ERR_PARAMETER            4
 extern int      udf_record_param_check(const as_rec *rec, const char *bname, char *fname, int lineno);
+extern bool     udf_record_destroy(as_rec *rec);
 
 //------------------------------------------------
 // Note that the main interface routines do NOT get declared here.

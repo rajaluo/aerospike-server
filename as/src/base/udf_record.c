@@ -941,7 +941,7 @@ udf_record_gen(const as_rec * rec)
 	}
 }
 
-static bool
+bool
 udf_record_destroy(as_rec *rec)
 {
 	if (!rec) {
@@ -1040,7 +1040,7 @@ const as_rec_hooks udf_record_hooks = {
 	.remove		= udf_record_remove,
 	.ttl		= udf_record_ttl,
 	.gen		= udf_record_gen,
-	.destroy	= udf_record_destroy,
+	.destroy	= NULL, //udf_record_destroy,
 	.digest		= udf_record_digest,
 	.set_flags	= udf_record_set_flags,	// @LDT:: added for control over LDT Bins from Lua
 	.set_type	= udf_record_set_type,	// @LDT:: added for control over Rec Types from Lua
