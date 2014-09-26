@@ -2648,7 +2648,7 @@ as_config_init(const char *config_file)
 				c->xdr_cfg.xdr_forward_xdrwrites = cfg_bool(&line);
 				break;
 			case XDR_CASE_XDR_DELETE_SHIPPING_ENABLED:
-				c->xdr_cfg.xdr_delete_shipping_enabled = cfg_bool(&line);
+				c->xdr_cfg.enable_xdr_delete_shipping = cfg_bool(&line);
 				break;
 			case XDR_CASE_XDR_NSUP_DELETES_ENABLED:
 				c->xdr_cfg.xdr_nsup_deletes_enabled = cfg_bool(&line);

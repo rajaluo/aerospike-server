@@ -77,11 +77,11 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-threads",					XDR_CASE_THREADS }, // dup entry
 		{ "timeout",						XDR_CASE_TIMEOUT }, // not exposed to users
 		{ "stop-writes-noxdr",				XDR_CASE_STOP_WRITES_NOXDR },
-		{ "xdr-delete-shipping-enabled",	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
+		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
 		{ "xdr-hotkey-maxskip",				XDR_CASE_XDR_HOTKEY_MAXSKIP },
 		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
-		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
+		{ "enable-xdr-shipping",			XDR_CASE_XDR_SHIPPING_ENABLED },
 		{ "xdr-info-timeout",				XDR_CASE_XDR_INFO_TIMEOUT },
 		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
 		{ "xdr-write-batch-size",			XDR_CASE_XDR_WRITE_BATCH_SIZE },
@@ -153,8 +153,8 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_new_cfg.xdr_threads = c->xdr_threads;
 	c->xdr_new_cfg.xdr_ship_threads = c->xdr_ship_threads;
 	c->xdr_new_cfg.xdr_ship_slab_size = c->xdr_ship_slab_size;
-	c->xdr_shipping_enabled = true;
-	c->xdr_delete_shipping_enabled = true;
+	c->enable_xdr_shipping = true;
+	c->enable_xdr_delete_shipping = true;
 	c->xdr_check_data_before_delete = false;
 	c->xdr_hotkey_maxskip = 5;
 	c->xdr_batch_num_retry = 0;

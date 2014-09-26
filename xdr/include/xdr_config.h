@@ -204,8 +204,8 @@ typedef struct xdr_config {
 	int xdr_internal_shipping_delay;
 	int	xdr_flag;
 	xdr_new_config xdr_new_cfg;
-	bool	xdr_shipping_enabled;
-	bool	xdr_delete_shipping_enabled;
+	bool	enable_xdr_shipping;
+	bool	enable_xdr_delete_shipping;
 	bool	xdr_nsup_deletes_enabled;
 	int 	xdr_hotkey_maxskip;
 	int 	xdr_batch_retry_sleep;
