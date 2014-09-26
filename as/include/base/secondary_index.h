@@ -311,14 +311,14 @@ typedef struct as_sindex_query_context_s {
 	uint64_t         n_bdigs;
 		
 	// Physical Tree offset
-	bool             first;		// If new tree
+	bool             new_ibtr;		  // If new tree
 	int              pimd_idx;
 
 	// IBTR offset
-	bool             last;      // If nbtr was finished
-								// next iteration starts
-								// from key next to bkey
-	struct ai_obj   *bkey;      // offset in ibtr
+	bool             nbtr_done;       // If nbtr was finished
+								      // next iteration starts
+							          // from key next to bkey
+	struct ai_obj   *bkey;     	      // offset in ibtr
 
 	// NBTR offset
 	cf_digest        bdig;
@@ -578,3 +578,6 @@ extern int as_sindex_smd_can_accept_cb(char* module, as_smd_item_t *item,
 									   void *udata);
 extern uint64_t as_sindex_get_ns_memory_used(as_namespace *ns);
 extern void as_query_histogram_dumpall();
+extern void as_sindex_set_binid_has_sindex(as_namespace *ns, int binid);
+extern void as_sindex_reset_binid_has_sindex(as_namespace *ns, int binid);
+extern bool as_sindex_binid_has_sindex(as_namespace *ns, int binid);
