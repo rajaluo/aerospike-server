@@ -613,13 +613,6 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, true, set_id);
 		}
 	}
-
-	// Replication happens when the main record replicates
-	if (urecord->particle_data) {
-		cf_free(urecord->particle_data);
-		urecord->particle_data = 0;
-	}
-	udf_record_cache_free(urecord);
 }
 
 /*

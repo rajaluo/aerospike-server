@@ -174,6 +174,11 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 uint8_t *
 udf__aerospike_get_particle_buf(udf_record *urecord, udf_record_bin *ubin, uint8_t type, int pbytes)
 {
+	if (pbytes > urecord->rd->ns->storage_write_block_size) {
+		cf_warning(AS_UDF, "udf__aerospike_get_particle_buf: Invalid Operation [Bin %s data too big size=%d]... Fail", ubin->name, pbytes);
+		return NULL;
+	}
+	
 	int alloc_size = 0;
 	switch(type) {
 		case AS_LIST:
@@ -336,7 +341,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 				if (particle_buf) {
 					as_particle_frombuf(b, AS_PARTICLE_TYPE_STRING, s, l,
 										particle_buf,
-										rd->ns->storage_data_in_memory);
+										false);
 				} else {
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [String: bin %s "
 										"data size too big: pbytes %d]... Fail",
@@ -357,8 +362,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 				pbytes = l + as_particle_get_base_size(AS_PARTICLE_TYPE_BLOB);
 				uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], type, pbytes);
 				if (particle_buf) {
-					as_particle_frombuf(b, AS_PARTICLE_TYPE_BLOB, s, l, particle_buf,
-										rd->ns->storage_data_in_memory);
+					as_particle_frombuf(b, AS_PARTICLE_TYPE_BLOB, s, l, particle_buf, false);
 				} else {
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Bytes: bin %s "
 										"data size too big: pbytes %d]... Fail",
@@ -382,8 +386,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 				if (particle_buf) {
 					as_particle_frombuf(b, AS_PARTICLE_TYPE_INTEGER,
 										(uint8_t *) &i, 8,
-										particle_buf,
-										rd->ns->storage_data_in_memory);
+										particle_buf, false);
 				} else {
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Bool: bin %s "
 										"data size too big: pbytes %d]... Fail",
@@ -407,7 +410,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 				if (particle_buf) {
 					as_particle_frombuf(b, AS_PARTICLE_TYPE_INTEGER,
 										(uint8_t *) &j, 8, particle_buf,
-										rd->ns->storage_data_in_memory);
+										false);
 				} else {
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Integer: bin %s "
 										"data size too big: pbytes %d]... Fail",
@@ -453,7 +456,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 				uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], type, pbytes);
 				if (particle_buf) {
 					as_particle_frombuf(b, ptype, (uint8_t *) buf.data, buf.size,
-										particle_buf, rd->ns->storage_data_in_memory);
+										particle_buf, false);
 				} else {
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Map-List: bin %s "
 										"data size too big: pbytes %d]... Fail",
@@ -708,10 +711,16 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		urecord->rd->write_to_device = true;
 	}
 
-	// Clean up cache and start from 0 update again. All the changes
-	// made here will if flush from write buffer to storage goes
-	// then will never be backed out.
-	udf_record_cache_free(urecord);
+	// Clean up oldvalue cache and reset dirty. All the changes made 
+	// here has made to the particle buffer. Nothing will now be backed out.
+	for (uint i = 0; i < urecord->nupdates; i++) {
+		udf_record_bin * bin = &urecord->updates[i];
+		if (bin->oldvalue != NULL ) {
+			as_val_destroy(bin->oldvalue);
+			bin->oldvalue = NULL;
+		}
+		bin->dirty    = false;
+	}
 	return rc;
 
 Rollback:

@@ -277,6 +277,12 @@ udf_record_close(udf_record *urecord, bool release_rsv)
 		as_partition_release(&tr->rsv);
 		cf_atomic_int_decr(&g_config.dup_tree_count);
 	}
+
+	// Replication happens when the main record replicates
+	if (urecord->particle_data) {
+		cf_free(urecord->particle_data);
+		urecord->particle_data = 0;
+	}
 	udf_record_cache_free(urecord);
 }
 
