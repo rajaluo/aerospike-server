@@ -658,16 +658,15 @@ as_ldt_get_from_map(const as_map *prop_map, char prop_type, void *value)
 	// Create the key field to access the map.  We're starting with a single char,
 	// so we have to turn that into a string, and then that string into an as_val,
 	// which is an as_string.
+	char key_buffer[2];
+	sprintf(key_buffer, "%c", prop_type);
+	as_string key_val;
+	as_string_init(&key_val, key_buffer, false);
 	switch(prop_type) {
 		case PM_EsrDigest:
 		case PM_ParentDigest:
 		case PM_SelfDigest:
 		{
-			char key_buffer[2];
-			key_buffer[0]           = prop_type;
-			key_buffer[1]           = 0;
-			as_string key_val;
-			as_string_init(&key_val, key_buffer, false);
 			as_bytes * digest_bytes = (as_bytes *) as_map_get( (const as_map *)prop_map, (as_val *)&key_val);
 			if (!digest_bytes) {
 				cf_warning(AS_LDT, "Could not find %c type info in property map",
@@ -686,11 +685,6 @@ as_ldt_get_from_map(const as_map *prop_map, char prop_type, void *value)
 		}
 		case RPM_Version:
 		{
-			char key_buffer[2];
-			key_buffer[0]           = prop_type;
-			key_buffer[1]           = 0;
-			as_string key_val;
-			as_string_init(&key_val, key_buffer, false);
 			as_integer *int_valp    = (as_integer *)as_map_get((const as_map *)prop_map, (as_val *)&key_val);
 			if (!int_valp) {
 				cf_warning(AS_LDT, "Failed to get version %c", prop_type);
@@ -744,8 +738,7 @@ as_ldt_set_in_map(as_map *prop_map, char prop_type, void *value)
 		{
 			uint64_t ldt_version = *(uint64_t *)value;
 			char key_buffer[2];
-			key_buffer[0]           = prop_type;
-			key_buffer[1]           = 0;
+			sprintf(key_buffer, "%c", prop_type);
 			as_string *key_val =  as_string_new_strdup(key_buffer);
 			as_integer *int_val = as_integer_new(ldt_version);
 			if (int_val) {

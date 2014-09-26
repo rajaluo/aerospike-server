@@ -204,7 +204,7 @@ as_ldt_string_todigest(const char *bdig, cf_digest *keyd)
 	// start at 1 and at every byte shift three positions
 	int j = 0;
 	for (int i = 0; ; i++) {
-		char val[2];
+		char val[3];
 		val[0] = bdig[i++];
 		val[1] = bdig[i++];
 		val[2] = '\0';
