@@ -488,6 +488,39 @@ udf_call_destroy(udf_call * call)
 	call->arglist = NULL;
 }
 
+/*
+ * Looks at the flags set in udf_record and determines if it is
+ * read / write or delete operation
+ */
+void 
+udf_rw_getop(udf_record *urecord, udf_optype *urecord_op)
+{ 
+	if (urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) {
+		// Check if the record is not deleted after an update
+		if ( urecord->flag & UDF_RECORD_FLAG_OPEN) {
+			*urecord_op = UDF_OPTYPE_WRITE;
+		} 
+		else {
+			// If the record has updates and it is not open, 
+			// and if it pre-existed it's an update followed by a delete.
+			if ( urecord->flag & UDF_RECORD_FLAG_PREEXISTS) {
+				*urecord_op = UDF_OPTYPE_DELETE;
+			} 
+			// If the record did not pre-exist and is updated
+			// and it is not open, then it is create followed by
+			// delete essentially no_op.
+			else {
+				*urecord_op = UDF_OPTYPE_NONE;
+			}
+		}
+	} else if ((urecord->flag & UDF_RECORD_FLAG_PREEXISTS)
+			   && !(urecord->flag & UDF_RECORD_FLAG_OPEN)) {
+		*urecord_op  = UDF_OPTYPE_DELETE;
+	} else {
+		*urecord_op  = UDF_OPTYPE_READ;
+	}
+}
+
 /* Internal Function: Does the post processing for the UDF record after the
  *					  UDF execution. Does the following:
  *		1. Record is closed
@@ -515,35 +548,11 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 	as_rec_props_clear(&urecord->pickled_rec_props);
 	bool udf_xdr_ship_op = false;
 
-	// TODO: optimize not to allocate buffer if it is single
-	// node cluster. No remote to send data to
-	// Check if UDF has updates.
-	if (urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) {
-		// Check if the record is not deleted after an update
-		if ( urecord->flag & UDF_RECORD_FLAG_OPEN) {
-			*urecord_op = UDF_OPTYPE_WRITE;
-			udf_xdr_ship_op = true;
-		} 
-		else {
-			// If the record has updates and it is not open, 
-			// and if it pre-existed it's an update followed by a delete.
-			if ( urecord->flag & UDF_RECORD_FLAG_PREEXISTS) {
-				*urecord_op = UDF_OPTYPE_DELETE;
-				udf_xdr_ship_op = true;
-			} 
-			// If the record did not pre-exist and is updated
-			// and it is not open, then it is create followed by
-			// delete essentially no_op.
-			else {
-				*urecord_op = UDF_OPTYPE_NONE;
-			}
-		}
-	} else if ((urecord->flag & UDF_RECORD_FLAG_PREEXISTS)
-			   && !(urecord->flag & UDF_RECORD_FLAG_OPEN)) {
-		*urecord_op  = UDF_OPTYPE_DELETE;
+	udf_rw_getop(urecord, urecord_op);
+	
+	if (UDF_OP_IS_DELETE(*urecord_op)
+			|| UDF_OP_IS_WRITE(*urecord_op)) {
 		udf_xdr_ship_op = true;
-	} else {
-		*urecord_op  = UDF_OPTYPE_READ;
 	}
 
 	cf_detail(AS_UDF, "FINISH working with LDT Record %p %p %p %p %d", &urecord,
@@ -562,7 +571,7 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 		*urecord_op                    = UDF_OPTYPE_DELETE;
 		udf_xdr_ship_op = true;
 	} else if (*urecord_op == UDF_OPTYPE_WRITE)	{
-		cf_detail(AS_UDF, "Committing Changes %"PRIx64" n_bins %d", rd->keyd, as_bin_get_n_bins(r_ref->r, rd));
+		cf_detail_digest(AS_UDF, &rd->keyd, "Committing Changes n_bins %d", as_bin_get_n_bins(r_ref->r, rd));
 
 		size_t  rec_props_data_size = as_storage_record_rec_props_size(rd);
 		uint8_t rec_props_data[rec_props_data_size];
@@ -692,7 +701,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	bool is_ldt           = false;
 	int  ret              = 0;
 
-	udf_rw_post_processing(h_urecord, &urecord_op, set_id);
+	udf_rw_getop(h_urecord, &urecord_op);
 	// In case required 
 	// wr->pickled_ldt_version = lrecord->version;
 
@@ -718,6 +727,10 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 				*lrecord_op = UDF_OPTYPE_LDT_WRITE;
 			}
 		}
+
+		// Process the parent record in the end .. this is to make sure
+		// the lock is held till the end. 
+		udf_rw_post_processing(h_urecord, &urecord_op, set_id);
 
 		if (is_ldt) {
 			// Create the multiop pickled buf for thr_rw.c
