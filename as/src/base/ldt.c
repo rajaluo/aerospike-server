@@ -1201,12 +1201,15 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	}
 	rd.bins                 = as_bin_get_all(r, &rd, stack_bins);
 
-	// ESR digest with matching Version
+	bool check_esr          = false;
 	cf_digest esr_digest;
-	if (as_ldt_subrec_storage_get_edigest(&rd, &esr_digest)) {
-		goto Cleanup;
+	if (!as_ldt_record_is_esr(r)) {
+		// ESR digest with matching Version
+		if (as_ldt_subrec_storage_get_edigest(&rd, &esr_digest)) {
+			goto Cleanup;
+		}
+		as_ldt_subdigest_setversion(&esr_digest, subrec_version);
 	}
-	as_ldt_subdigest_setversion(&esr_digest, subrec_version);
 
 	// Parent Version
 	cf_digest parent_digest;
@@ -1230,7 +1233,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	char type   = 0;
 	rv = 0;
 
-	if ((rv = as_record_exists(p->sub_vp, &esr_digest, ns))) {
+	if (check_esr && (rv = as_record_exists(p->sub_vp, &esr_digest, ns))) {
 		delete = true;
 		type   = 1;
 	} else if ((rv = as_record_exists(p->vp, &parent_digest, ns))) {

@@ -2729,11 +2729,19 @@ as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_
 	mc_l.incoming_ldt_version = version;
 	mc_l.pid                  = partition_id;
 	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc_l, &mc)) {
-		if (mc && (mc->rxstate == state)) {
-			return true;
+		if (mc) {
+			if (state) {
+				if (mc->rxstate == state) {
+					return true;
+				} else {
+					return false;
+				}	
+			} else {
+				return true;
+			}
 		}
 	}
-	cf_detail(AS_MIGRATE, "%s incoming migrate for partition %d of version %ld with state %d", mc ? " " : "NO", partition_id, version, mc ? mc->rxstate : 0); 
+	cf_detail_digest(AS_MIGRATE, subrec_digest, "%s incoming migrate for partition %d of version %ld with state %d", mc ? " " : "NO", partition_id, version, mc ? mc->rxstate : 0); 
 	return false;
 }
 

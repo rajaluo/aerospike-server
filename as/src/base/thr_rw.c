@@ -2279,11 +2279,11 @@ as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rs
 					goto Out;
 				}
 			} 
-			cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write %sRecord in Partition %d with %s Partition Version [create:%d source mig:%ld prole:%ld]", 
-					fname, lineno, (is_ldt_parent) ? "" : "Sub", rsv->p->partition_id, 
-					linfo->replication_partition_version_match ? "Matching" : "Non Matching",
-					is_create, linfo->ldt_source_version, linfo->ldt_prole_version); 
-		} 
+		}
+		cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write %s %sRecord in Partition %d with %s Partition Version [create:%d source mig:%ld prole:%ld]", 
+				fname, lineno, (info & RW_INFO_LDT_ESR) ? "ESR" : "",  (is_ldt_parent) ? "" : "Sub", rsv->p->partition_id, 
+				linfo->replication_partition_version_match ? "Matching" : "Non Matching",
+				is_create, linfo->ldt_source_version, linfo->ldt_prole_version); 
 	}
 	return 0;
 Out:

@@ -709,7 +709,7 @@ ldt_aerospike_crec_open(const as_aerospike * as, const as_rec *rec, const char *
 		// This basically means the record is not found.
 		// Do we need to propagate error message rv
 		// back somehow
-		cf_info_digest(AS_LDT, &keyd, "Failed to open Sub Record rv=%d %ld", rv, lrecord->version);
+		cf_info_digest(AS_LDT, &keyd, "%s Failed to open Sub Record rv=%d %ld", bdig, rv, lrecord->version);
 		return NULL;
 	} else {
 		as_val_reserve(lslotp->c_urec_p);

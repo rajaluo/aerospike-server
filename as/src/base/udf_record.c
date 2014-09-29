@@ -231,7 +231,8 @@ udf_record_open(udf_record * urecord)
 			udf_storage_record_open(urecord);
 		}
 	} else {
-		cf_detail_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: rec_get returned with %d", rec_rv);
+		cf_detail_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: %s rec_get returned with %d", 
+				(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "sub" : "", rec_rv);
 	}
 	return rec_rv;
 } // end udf_re
