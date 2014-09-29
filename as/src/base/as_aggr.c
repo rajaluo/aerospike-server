@@ -249,14 +249,22 @@ as_aggr_call_init(as_aggr_call * call, as_transaction * txn, void *caller, as_ag
 	// Check if type is aggregation
 	as_msg_field *  op = NULL;
 	op = as_msg_field_get(&txn->msgp->msg, AS_MSG_FIELD_TYPE_UDF_OP);
-	if (!op) return AS_AGGR_ERR;
+	if (!op) {
+		cf_detail(AS_QUERY, "not a aggregation 1");
+		return AS_AGGR_ERR;
+	}
 	byte optype;
 	memcpy(&optype, (byte *)op->data, sizeof(optype));
 	if(!is_scan) {
-		if (optype != AS_QUERY_UDF_OP_AGGREGATE) return AS_AGGR_ERR;
+		if (optype != AS_QUERY_UDF_OP_AGGREGATE) {
+			cf_detail(AS_QUERY, "not a aggregation 2");
+			return AS_AGGR_ERR;
 		}
-	else {
-		if (optype != AS_SCAN_UDF_OP_AGGREGATE) return AS_AGGR_ERR;
+	} else {
+		if (optype != AS_SCAN_UDF_OP_AGGREGATE) {
+			cf_detail(AS_QUERY, "not a aggregation 3");
+			return AS_AGGR_ERR;
+		}
 	}
 
 

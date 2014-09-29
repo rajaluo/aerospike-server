@@ -129,7 +129,7 @@
 #include <base/as_aggr.h>
 
 // parameter read off from a transaction
-#define UDF_MAX_STRING_SZ 128
+//#define UDF_MAX_STRING_SZ 128
 
 extern cf_vector * as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp);
 extern int as_query__queue(as_query_transaction *qtr);
@@ -164,6 +164,7 @@ typedef enum {
 	AS_QUERY_MRJ    = 3
 } as_query_type;
 
+#if 0
 typedef struct query_agg_call_s {
 	bool                   active;
 	as_transaction *       tr;
@@ -172,6 +173,7 @@ typedef struct query_agg_call_s {
 	char                   function[UDF_MAX_STRING_SZ];
 	as_msg_field *         arglist;
 } query_agg_call;
+#endif
 
 struct as_query_transaction_s {
 
@@ -328,10 +330,10 @@ void                 as_query__transaction_done(as_query_transaction *qtr);
 int                  as_qtr__release(as_query_transaction *qtr, char *fname, int lineno);
 int                  as_qtr__reserve(as_query_transaction *qtr, char *fname, int lineno);
 
-int                  as_query__agg_call_init   (query_agg_call *,
-							as_transaction *, as_query_transaction *);
-void                 as_query__agg_call_destroy(query_agg_call *);
-int                  as_query__agg(query_agg_call *, cf_ll *recl, void *udata, as_result* res);
+//int                  as_query__agg_call_init   (query_agg_call *,
+//							as_transaction *, as_query_transaction *);
+//void                 as_query__agg_call_destroy(query_agg_call *);
+//int                  as_query__agg(query_agg_call *, cf_ll *recl, void *udata, as_result* res);
 
 #define AS_QUERY_INCREMENT_ERR_COUNT(qtr)   \
 	if(qtr->job_type == AS_QUERY_AGG) {    \
@@ -998,7 +1000,6 @@ as_query__add_fin(as_query_transaction *qtr)
 	return 0;
 }
 
-
 /*
  * Sends the actual proto response to the requesting client
  *
@@ -1127,7 +1128,6 @@ Cleanup:
 
 	return ret;
 }
-
 
 /*
  * Validate record based on its content and query make sure it indeed should
