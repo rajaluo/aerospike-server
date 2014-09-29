@@ -776,11 +776,11 @@ as_ldt_set_in_map(as_map *prop_map, char prop_type, void *value)
  * 			rd:          Record to set version into.
  * 			ldt_version: 5 LSB as version for 8 passed in bytes
  *
- * Returns: 0 in case of success
- *          o/w failure
+ * Returns: <0 in case of failure
+ * 			>0  number of bytes copied in case of success
  */
 int
-as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8_t **pp_stack_particles)
+as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8_t *pp_stack_particles)
 {
 	// No op when version is disabled
 	if (!rd->ns->ldt_enabled)
@@ -789,12 +789,12 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	as_bin * binp           = as_bin_get(rd, (byte *)REC_LDT_CTRL_BIN, strlen(REC_LDT_CTRL_BIN));
 	int rv                  = 0;
 	if (!binp) {
-		cf_debug(AS_LDT, "Control bin not found");
+		cf_debug(AS_LDT, "as_ldt_parent_storage_set_version: [LDT Control bin not found]");
 		return -1;
 	}
 	as_val * valp           = as_val_frombin( binp );
 	if (!valp) {
-		cf_debug(AS_LDT, "Control bin not found");
+		cf_debug(AS_LDT, "as_ldt_parent_storage_set_version : [LDT Control bin Deserialization error]... Fail");
 		return -2;
 	}
 
@@ -803,7 +803,7 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	// type that we're extracting.
 	as_map * prop_map        = as_map_fromval(valp);
 	if( !prop_map ) {
-		cf_warning(AS_LDT, "Control bin is not of type MAP");
+		cf_warning(AS_LDT, "as_ldt_parent_storage_set_version: [LDT Control bin is not of type MAP]... Fail");
 		as_val_destroy(valp);
 		return -2;
 	}
@@ -842,21 +842,21 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	}
 #endif
 
+	uint8_t pbytes = 0;
 	if (rd->ns->storage_data_in_memory) {
 		as_particle_frombuf(binp, AS_PARTICLE_TYPE_HIDDEN_MAP, (uint8_t *) buf.data, buf.size, NULL, true);
 	}
 	else {
-		uint8_t pbytes = buf.size + as_particle_get_base_size(AS_PARTICLE_TYPE_HIDDEN_MAP);
+		pbytes = buf.size + as_particle_get_base_size(AS_PARTICLE_TYPE_HIDDEN_MAP);
 		as_particle_frombuf(binp, AS_PARTICLE_TYPE_HIDDEN_MAP, (uint8_t *) buf.data,
-					buf.size, *pp_stack_particles, rd->ns->storage_data_in_memory);
-		*pp_stack_particles += pbytes;
+					buf.size, pp_stack_particles, rd->ns->storage_data_in_memory);
 	}
 	as_serializer_destroy(&s);
 	as_buffer_destroy(&buf);
 	as_val_destroy(valp);
 
 	rd->write_to_device = true;
-	return rv;
+	return pbytes;
 }
 
 /*

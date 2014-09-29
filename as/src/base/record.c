@@ -1337,9 +1337,11 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 			cf_warning(AS_RECORD, "Could not get the version in the parent record");
 		}
 		if (old_version != c->version) {
-			if (as_ldt_parent_storage_set_version(rd, c->version, &p_stack_particles)) {
-				cf_warning(AS_LDT, "LDT_MERGE Failed to write version in %"PRIx64" rv=%d", &rd->keyd, c->version);
+			int pbytes = as_ldt_parent_storage_set_version(rd, c->version, p_stack_particles);
+			if (pbytes < 0) {
+				cf_warning_digest(AS_LDT, &rd->keyd, "LDT_MERGE Failed to write version in rv=%d", pbytes);
 			} else {
+				p_stack_particles += pbytes;			
 #if 0
 				uint64_t check_version = 0;
 				if (as_ldt_parent_storage_get_version(rd, &check_version)) {

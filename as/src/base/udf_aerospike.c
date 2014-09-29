@@ -203,6 +203,8 @@ udf__aerospike_get_particle_buf(udf_record *urecord, udf_record_bin *ubin, uint8
 	if (ubin->particle_buf) {
 		buf = ubin->particle_buf;
 	} else {
+		// Disable dynamic shifting from the flat allocater to dynamic
+		// allocation.
 		if ((urecord->cur_particle_data + pbytes) < urecord->end_particle_data) {
 			buf = urecord->cur_particle_data;
 			urecord->cur_particle_data += pbytes;
@@ -315,12 +317,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	// set to be 1 wblock size now @TODO!
 	uint32_t pbytes = 0;
 	int ret = 0;
-	if (!rd->ns->storage_data_in_memory && !urecord->particle_data) {
-		// 256 as upper bound on the LDT control bin, we may write version below
-		urecord->particle_data = cf_malloc(rd->ns->storage_write_block_size + 256);
-		urecord->cur_particle_data = urecord->particle_data;
-		urecord->end_particle_data = urecord->particle_data + rd->ns->storage_write_block_size;
-	}
 
 	cf_detail(AS_UDF, "udf_setbin: bin %s type %d ", bname, type );
 
@@ -618,6 +614,14 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		as_bin_allocate_bin_space(urecord->r_ref->r, rd, delta_bins);
 	}
 
+	if (!rd->ns->storage_data_in_memory && !urecord->particle_data) {
+		// 256 as upper bound on the LDT control bin, we may write version below
+		// leave it at the end for its use
+		urecord->particle_data = cf_malloc(rd->ns->storage_write_block_size + 256);
+		urecord->cur_particle_data = urecord->particle_data;
+		urecord->end_particle_data = urecord->particle_data + rd->ns->storage_write_block_size;
+	}
+
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns); 
 	if (has_sindex) {
 		SINDEX_GRLOCK();
@@ -628,13 +632,13 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 
 	// In second iteration apply updates.
 	for(uint i = 0; i < urecord->nupdates; i++ ) {
+		urecord->updates[i].oldvalue  = NULL;
+		urecord->updates[i].washidden = false;
 		if ( urecord->updates[i].dirty && rc == 0) {
 
 			char *      k = urecord->updates[i].name;
 			as_val *    v = urecord->updates[i].value;
 			bool        h = urecord->updates[i].ishidden;
-			urecord->updates[i].oldvalue  = NULL;
-			urecord->updates[i].washidden = false;
 
 			if ( k != NULL ) {
 				if ( v == NULL || v->type == AS_NIL ) {
@@ -678,7 +682,12 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		}
 
 		if (as_ldt_record_is_parent(rd->r)) {
-			as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, &urecord->cur_particle_data);
+			int rv = as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, urecord->end_particle_data);
+			if (rv < 0) {
+				cf_warning(AS_LDT, "udf_aerospike__apply_update_atomic: Internal Error "
+							" [Failed to set the version on storage rv=%d]... Fail",rv);
+				goto Rollback;
+			}
 		}
 
 		if (! as_storage_record_size_and_check(rd)) {
@@ -689,14 +698,6 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 
 	if (has_sindex) {
 		SINDEX_GUNLOCK();
-	}
-
-	for(uint i = 0; i < urecord->nupdates; i++ ) {
-		if ((urecord->updates[i].dirty)
-				&& (urecord->updates[i].oldvalue)) {
-			as_val_destroy(urecord->updates[i].oldvalue);
-			cf_debug(AS_UDF, "REGULAR as_val_destroy()");
-		}
 	}
 
 	// If there were updates do miscellaneous successful commit
