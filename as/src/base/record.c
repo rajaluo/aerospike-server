@@ -1288,7 +1288,7 @@ as_record_merge(as_partition_reservation *rsv, cf_digest *keyd, uint16_t n_compo
 
 int
 as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
-		as_index_ref *r_ref, as_record_merge_component *c)
+		as_index_ref *r_ref, as_record_merge_component *c, bool *delete_record)
 {
 	as_index *r = r_ref->r;
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
@@ -1368,6 +1368,10 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 	}
 	if (n_bins_check == 0) cf_info(AS_RECORD, "merge: extra check: after write, no bins. peculiar.");
 #endif
+
+	if (!as_bin_inuse_has(rd)) {
+		*delete_record = true;
+	}
 
 	if (rd->ns->storage_data_in_memory) {
 		uint64_t end_memory_bytes = as_storage_record_get_n_bytes_memory(rd);
@@ -1550,15 +1554,13 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 
 			if (COMPONENT_IS_LDT(c)) {
 				cf_detail(AS_RECORD, "Flatten Record Remote LDT Winner @ %d", *winner_idx);
-				rv = as_ldt_flatten_component(rsv, &rd, &r_ref, c);
+				rv = as_ldt_flatten_component(rsv, &rd, &r_ref, c, &delete_record);
 			} else {
 				cf_detail(AS_RECORD, "Flatten Record Remote NON-LDT Winner @ %d", *winner_idx);
-				rv = as_record_flatten_component(rsv, &rd, &r_ref, c);
+				rv = as_record_flatten_component(rsv, &rd, &r_ref, c, &delete_record);
 			}
 			has_local_copy = true;
-			if (!as_bin_inuse_has(&rd)) {
-				delete_record = true;
-			}
+			
 		}
 	} else {
 		cf_assert(has_local_copy, AS_RECORD, CF_CRITICAL,

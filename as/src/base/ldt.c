@@ -613,10 +613,10 @@ as_ldt_shipop(write_request *wr, cf_node dest_node)
 }
 
 extern int as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
-									   as_index_ref *r_ref, as_record_merge_component *c);
+									   as_index_ref *r_ref, as_record_merge_component *c, bool *delete_record);
 int
 as_ldt_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
-					as_index_ref *r_ref, as_record_merge_component *c)
+					as_index_ref *r_ref, as_record_merge_component *c, bool *delete_record)
 {
 
 	// Setup index flags
@@ -631,7 +631,7 @@ as_ldt_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 	}
 
 	// default to normal record flattening
-	return as_record_flatten_component(rsv, rd, r_ref, c);
+	return as_record_flatten_component(rsv, rd, r_ref, c, delete_record);
 }
 
 /*
