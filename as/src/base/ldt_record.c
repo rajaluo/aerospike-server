@@ -61,6 +61,7 @@ ldt_record_init(ldt_record *lrecord)
 	}
 	lrecord->max_chunks     = 1;
 	lrecord->num_slots_used = 0;
+	lrecord->version        = as_ldt_generate_version();
 	return 0;
 }
 

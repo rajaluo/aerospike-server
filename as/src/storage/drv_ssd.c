@@ -1728,9 +1728,12 @@ as_storage_record_size(as_storage_rd *rd)
 
 		size_t particle_flat_sz;
 
-		if (0 != as_particle_get_flat_size(bin, &particle_flat_sz)) {
+		int rv = as_particle_get_flat_size(bin, &particle_flat_sz);
+
+		if (rv) {
 			// Should never get here.
-			cf_warning(AS_DRV_SSD, "on write, can't get particle flat size");
+			cf_warning(AS_DRV_SSD, "on write, can't get particle flat size rv=%d, bname=%s",
+				rv, bin ? as_bin_get_name_from_id(rd->ns, bin->id):"Null Bin");
 			return 0;
 		}
 

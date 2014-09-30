@@ -564,6 +564,9 @@ ldt_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	// lrecord->version for quick reference.
 	udf_record   * h_urecord = (udf_record *)as_rec_source(h_urec);
 	rv = as_ldt_parent_storage_get_version(h_urecord->rd, &lrecord->version);
+	if (rv) {
+		lrecord->version         = as_ldt_generate_version();
+	}
 	cf_detail_digest(AS_LDT, &h_urecord->keyd, "LDT_VERSION At Create %ld rv=%d", lrecord->version, rv);
 	return 0;
 }

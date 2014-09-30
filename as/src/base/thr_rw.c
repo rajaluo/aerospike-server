@@ -464,6 +464,7 @@ rw_msg_setup_infobits(msg *m, as_transaction *tr, int ldt_rectype_bits, bool has
 					"MULTI_OP : Set Up Replication Message for the LDT Record %"PRIx64"",
 					*(uint64_t*)&tr->keyd);
 			info |= RW_INFO_LDT_REC;
+			info |= RW_INFO_LDT;
 		}
 	}
 
@@ -2355,7 +2356,9 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	}
 
 	// Set the version in subrec digest if need be.
-	as_ldt_set_prole_subrec_version(keyd, rsv, linfo, info);
+	if (info & RW_INFO_LDT) {
+		as_ldt_set_prole_subrec_version(keyd, rsv, linfo, info);
+	}
 
 	int rv      = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
 	as_index *r = r_ref.r;
@@ -5046,11 +5049,10 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 		}
 
 		pthread_mutex_lock(&wr->lock);
-		if (wr->udata.req_cb) {
+		if (udf_rw_needcomplete_wr(wr)) {
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
 			udf_rw_complete(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT, __FILE__, __LINE__);
-			UREQ_DATA_RESET(&tr.udata);
 			if (tr.proto_fd_h) {
 				AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
 			}

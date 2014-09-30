@@ -814,10 +814,12 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 		as_val_destroy(valp);
 		return -3;
 	}
-	// as_val_tostring() values must always be captured and freed.
-	char * valstr =  as_val_tostring(valp);
-	cf_detail(AS_LDT, "After property map set result %s", valstr );
-	cf_free(valstr);
+	if ( DEBUG ) {
+		// as_val_tostring() values must always be captured and freed.
+		char * valstr =  as_val_tostring(valp);
+		cf_detail(AS_LDT, "After property map set result %s", valstr );
+		cf_free(valstr);
+	}
 
 	// Abstract it out in some API .. bad duplication here  ...
 	as_buffer buf;
@@ -884,19 +886,25 @@ as_ldt_parent_storage_get_version(as_storage_rd *rd, uint64_t *ldt_version)
 	int       rv            = 0;
 	if (!binp) {
 		if (as_ldt_record_is_parent(rd->r)) {
-			cf_warning(AS_LDT, "Control bin not found LDT parent record");
+			cf_warning_digest(AS_LDT, &rd->keyd, "Control bin not found LDT parent record");
 		} else {
 			cf_detail(AS_LDT, "Control bin not found");
 		}
 		rv                      = -1;
 	} else {
 		const as_val * valp           = as_val_frombin( binp );
+		if (!valp) {
+			cf_warning(AS_LDT, "Property Bin %s Corrupted", REC_LDT_CTRL_BIN);
+			return -2;
+		}
+
 		// We must always retrieve typed values from as_val using the type specific
 		// accessor function -- which will return NULL if we guessed wrong on the
 		// type that we're extracting.
 		const as_map * prop_map        = as_map_fromval(valp);
 		if( !prop_map ) {
 			cf_warning(AS_LDT, "Control bin is not of type MAP");
+			as_val_destroy(valp);
 			return -2;
 		}
 

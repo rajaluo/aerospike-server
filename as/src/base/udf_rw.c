@@ -1012,7 +1012,11 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		// map is created from LUA world. The version can only be get in case
 		// the property map bin is there. If not there the record is normal
 		// record
-		int rv = as_ldt_parent_storage_get_version(&rd, &lrecord.version);
+		uint64_t lversion;
+		int rv = as_ldt_parent_storage_get_version(&rd, &lversion);
+		if (rv == 0) {
+			lrecord.version = lversion;
+		}
 		cf_detail_digest(AS_LDT, &urecord.keyd, "LDT_VERSION Read Version From Storage %ld rv=%d",
 				  lrecord.version, rv);
 
