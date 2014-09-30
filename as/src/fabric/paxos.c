@@ -363,6 +363,10 @@ as_paxos_sync_msg_apply(msg *m)
 	 * any pending transactions */
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		p->alive[i] = (0 != p->succession[i]) ? true : false;
+		if (p->alive[i]) {
+			cf_debug(AS_PAXOS, "setting succession[%d] = %"PRIx64" to alive", i, p->succession[i]);
+			as_hb_set_is_node_dunned(p->succession[i], false, "Paxos SYNC Apply");
+		}
 	}
 
 	memset(p->pending, 0, sizeof(p->pending));
@@ -1500,7 +1504,7 @@ as_paxos_transaction_apply(cf_node from_id)
 			p->gen.sequence = t->gen.sequence;
 			p->gen.proposal = t->gen.proposal;
 			n_xact++;
-			cf_debug(AS_PAXOS, "Non-principal retiring transaction 0x%x", t);
+			cf_debug(AS_PAXOS, "Non-principal retiring transaction 0x%x (nc %d) from %"PRIx64, t, t->c.n_change, from_id);
 			as_paxos_transaction_retire(t);
 		}
 
@@ -1769,6 +1773,48 @@ as_paxos_msg_unwrap(msg *m, as_paxos_transaction *t)
 	return(c);
 }
 
+/* as_paxos_send_to_sl
+ * Send a msg to the proposed succession list. */
+static int
+as_paxos_send_to_sl(msg *px_msg, int priority)
+{
+	int rv = 0;
+	as_node_list nl;
+	as_paxos *p = g_config.paxos;
+
+	nl.sz = 1;
+	nl.nodes[0] = g_config.self_node;
+	nl.alloc_sz = MAX_NODES_LIST;
+
+	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+		if ((p->alive[i] && (g_config.self_node != p->succession[i]))) {
+			nl.nodes[(nl.sz)++] = p->succession[i];
+		}
+	}
+
+	if (nl.sz == 1) {
+		return as_fabric_send(nl.nodes[0], px_msg, priority);
+	}
+
+	// careful with the ref count here: need to increment before every
+	// send except the last
+	for (int i = 0; i < nl.sz ; i++) {
+		if (i != nl.sz - 1) {
+			msg_incr_ref(px_msg);
+		}
+		if ((rv = as_fabric_send(nl.nodes[i], px_msg, priority))) {
+			goto Cleanup;
+		}
+	}
+
+	return rv;
+
+Cleanup:
+	as_fabric_msg_put(px_msg);
+
+	return rv;
+}
+
 /* as_paxos_spark
  * Begin a Paxos state change */
 void
@@ -1831,8 +1877,11 @@ as_paxos_spark(as_paxos_change *c)
 		return;
 	}
 
-	if (0 != as_fabric_send_list(NULL, 0, m, AS_FABRIC_PRIORITY_HIGH))
+	int rv;
+	if ((rv = as_paxos_send_to_sl(m, AS_FABRIC_PRIORITY_HIGH))) {
+		cf_warning(AS_PAXOS, "sending to sl failed: rv %d", rv);
 		as_fabric_msg_put(m);
+	}
 }
 
 /* as_paxos_msgq_push
@@ -2142,6 +2191,14 @@ as_paxos_retransmit_check()
 	return (as_paxos_msgq_push(g_config.self_node, m, NULL));
 }
 
+/* as_paxos_dun_hold
+ * Set whether automatic dunning of all nodes in other clusters should persist. */
+void
+as_paxos_dun_hold(bool is_dunned)
+{
+	g_config.paxos->dun_other_clusters = is_dunned;
+}
+
 #define NODE_IS_MISSING 0
 #define NODE_IS_NOT_MISSING -1
 
@@ -2212,6 +2269,17 @@ as_paxos_process_retransmit_check()
 		cf_debug(AS_PAXOS, "Cluster Integrity Check: %d, %"PRIx64"", i, succ_list_index[i]);
 		if (succ_list_index[i] == (cf_node) 0) {
 			break; // we are done
+		}
+
+		if (p->succession[0] != succ_list[i][0]) {
+			if (as_hb_get_is_node_dunned(succ_list_index[i])) {
+				cf_debug(AS_PAXOS, "[Skipping integrity check vs. dunned node %"PRIx64" in other cluster w/ principal %"PRIx64"]", succ_list_index[i], succ_list[i][0]);
+				continue;
+			} else if (p->dun_other_clusters) {
+				cf_warning(AS_PAXOS, "Dunning node %"PRIx64" in other cluster (w/ principal %"PRIx64")", succ_list_index[i], succ_list[i][0]);
+				as_hb_set_is_node_dunned(succ_list_index[i], true, "Paxos Integrity Check");
+				continue;
+			}
 		}
 
 		char sbuf[(AS_CLUSTER_SZ * 17) + 27];
@@ -2513,6 +2581,7 @@ as_paxos_thr(void *arg)
 					if (t.gen.proposal < s->gen.proposal) {
 						/* Reject: the proposal number is less than latest
 						 * one we've received */
+						cf_debug(AS_PAXOS, "rejecting older Paxos command gen:  %d vs. %d", t.gen.proposal, s->gen.proposal);
 						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, NACK));
 					} else {
 						/* Accept: if the proposal number is newer, update
@@ -2570,8 +2639,11 @@ as_paxos_thr(void *arg)
 					case AS_PAXOS_TRANSACTION_VOTE_QUORUM:
 						cf_debug(AS_PAXOS, "received ACCEPT vote from %"PRIx64" and reached quorum", qm->id);
 						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, ACK));
-						if (0 != as_fabric_send_list(NULL, 0, reply, AS_FABRIC_PRIORITY_HIGH))
+						int rv;
+						if ((rv = as_paxos_send_to_sl(reply, AS_FABRIC_PRIORITY_HIGH))) {
+							cf_warning(AS_PAXOS, "sending to sl failed: rv %d", rv);
 							as_fabric_msg_put(reply);
+						}
 						as_paxos_transaction_vote_reset(s);
 						break;
 				}
