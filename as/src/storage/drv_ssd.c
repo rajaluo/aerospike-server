@@ -3383,7 +3383,7 @@ ssd_load_devices_fn(void *udata)
 	cf_free(ldd);
 	ldd = 0;
 
-	cf_info(AS_DRV_SSD, "load device start: device %s", ssd->name);
+	cf_info(AS_DRV_SSD, "device %s: reading device to load index", ssd->name);
 
 #ifdef USE_JEM
 	int tid = syscall(SYS_gettid);
@@ -3397,11 +3397,11 @@ ssd_load_devices_fn(void *udata)
 	ssd->sub_sweep	= false;
 	ssd->has_ldt	= false;
 
-	cf_detail(AS_DRV_SSD, "LDT_LOAD Performing Primary Sweep");
 	ssd_load_device_sweep(ssds, ssd);
 
 	if (ssds->ns->ldt_enabled && ssd->has_ldt) {
-		cf_detail(AS_DRV_SSD, "LDT_LOAD Performing Secondary Sweep");
+		cf_info(AS_DRV_SSD, "device %s: reading device again to load subrecords",
+				ssd->name);
 		ssd->sub_sweep = true;
 		ssd_load_device_sweep(ssds, ssd);
 	}
