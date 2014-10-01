@@ -319,10 +319,15 @@ void ldt_chunk_destroy(ldt_record *lrecord, ldt_slot_chunk *lchunk)
 	lchunk->slots         = NULL;
 }
 
+/**
+ * Remove the slot entry, but decrement the count only if the destroy() op
+ * was successful.
+ */
 void ldt_slot_destroy(ldt_slot *lslotp, ldt_record *lrecord)
 {
-	udf_record_destroy(lslotp->c_urec_p);
-	lrecord->num_slots_used--;
+	if (udf_record_destroy(lslotp->c_urec_p)){
+		lrecord->num_slots_used--;
+	}
 }
 
 /*
