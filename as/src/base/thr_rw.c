@@ -2737,12 +2737,12 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 
 	// Check if XDR needs to ship this delete
 
-	if (g_config.xdr_cfg.enable_xdr_delete_shipping == true) {
+	if (g_config.xdr_cfg.xdr_enable_delete_shipping == true) {
 		// Do not ship delete if it is result of eviction/migrations etc.
 		// unless we have config setting of shipping these type of deletes.
 		// Ship the deletes coming from application directly.
 		if ((tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE)
-				&& (g_config.xdr_cfg.xdr_nsup_deletes_enabled == false)) {
+		&& (g_config.xdr_cfg.xdr_enable_nsup_delete_shipping == false)) {
 			cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
 			cf_detail(AS_RW, "write delete: Got delete from nsup.");
 		} else {

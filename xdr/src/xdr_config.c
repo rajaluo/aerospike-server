@@ -80,7 +80,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
 		{ "xdr-hotkey-maxskip",				XDR_CASE_XDR_HOTKEY_MAXSKIP },
-		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
+		{ "enable-xdr-nsup-delete-shipping",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
 		{ "enable-xdr-shipping",			XDR_CASE_XDR_SHIPPING_ENABLED },
 		{ "xdr-info-timeout",				XDR_CASE_XDR_INFO_TIMEOUT },
 		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
@@ -143,7 +143,7 @@ void xdr_config_defaults(xdr_config *c)
 								// asd side connection times out at 15 seconds
 	c->xdr_threads = 3;		//Number of receiver threads to spawn
 	c->xdr_forward_xdrwrites = false;	//If the writes due to xdr should be forwarded
-	c->xdr_nsup_deletes_enabled = false;		// Shall XDR ship deletes of evictions or expiration
+	c->xdr_enable_nsup_delete_shipping = false;		// Shall XDR ship deletes of evictions or expiration
 	c->xdr_stop_writes_noxdr = false;	//If the normal writes should be stopped if there is no xdr
 	c->xdr_internal_shipping_delay = 0; //Default sleep between shipping each batch is 0 second
 	c->xdr_flag = 0;
@@ -153,8 +153,8 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_new_cfg.xdr_threads = c->xdr_threads;
 	c->xdr_new_cfg.xdr_ship_threads = c->xdr_ship_threads;
 	c->xdr_new_cfg.xdr_ship_slab_size = c->xdr_ship_slab_size;
-	c->enable_xdr_shipping = true;
-	c->enable_xdr_delete_shipping = true;
+	c->xdr_enable_shipping = true;
+	c->xdr_enable_delete_shipping = true;
 	c->xdr_check_data_before_delete = false;
 	c->xdr_hotkey_maxskip = 5;
 	c->xdr_batch_num_retry = 0;

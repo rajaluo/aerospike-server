@@ -201,12 +201,12 @@ typedef struct xdr_config {
 	int	xdr_threads;
 	int	xdr_forward_xdrwrites;
 	int	xdr_stop_writes_noxdr;
-	int xdr_internal_shipping_delay;
+	int 	xdr_internal_shipping_delay;
 	int	xdr_flag;
 	xdr_new_config xdr_new_cfg;
-	bool	enable_xdr_shipping;
-	bool	enable_xdr_delete_shipping;
-	bool	xdr_nsup_deletes_enabled;
+	bool	xdr_enable_shipping;
+	bool	xdr_enable_delete_shipping;
+	bool	xdr_enable_nsup_delete_shipping;
 	int 	xdr_hotkey_maxskip;
 	int 	xdr_batch_retry_sleep;
 	int 	xdr_batch_num_retry;
