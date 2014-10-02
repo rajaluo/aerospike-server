@@ -233,8 +233,7 @@ dump_partition_state()
 			}
 			for (int j = 0; j < AS_PARTITIONS; j++) {
 				int bytes = sprintf((char *) (printbuf + pos), " %"PRIx64"", parts[j].iid);
-				if (bytes <= 0)
-				{
+				if (bytes <= 0) {
 					cf_debug(AS_PAXOS, "printing error. Bailing ...");
 					return;
 				}
@@ -1022,8 +1021,7 @@ as_paxos_set_partition_sync_state(cf_node n)
 	as_paxos *p = g_config.paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
-		if ((n == p->succession[i]) && p->alive[i])
-		{
+		if ((n == p->succession[i]) && p->alive[i]) {
 			p->partition_sync_state[i] = true;
 			return(true);
 		}
@@ -1040,8 +1038,7 @@ as_paxos_get_succession_index(cf_node n)
 	as_paxos *p = g_config.paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
-		if ((n == p->succession[i]) && p->alive[i])
-		{
+		if ((n == p->succession[i]) && p->alive[i]) {
 			return(i);
 		}
 	}
@@ -1526,14 +1523,12 @@ as_paxos_transaction_apply(cf_node from_id)
 		/* Update the generation count */
 		p->gen.sequence = t->gen.sequence;
 		p->gen.proposal = t->gen.proposal;
-		for (int i = 0; i < t->c.n_change; i++)
-		{
+		for (int i = 0; i < t->c.n_change; i++) {
 			switch(t->c.type[i]) {
 				case AS_PAXOS_CHANGE_NOOP:
 					break;
 				case AS_PAXOS_CHANGE_SUCCESSION_ADD:
-					if (g_config.self_node == t->c.id[i])
-					{
+					if (g_config.self_node == t->c.id[i]) {
 						cf_warning(AS_PAXOS, "Found self %"PRIx64" on the succession list!", g_config.self_node);
 					}
 					cf_debug(AS_PAXOS, "inserting node %"PRIx64"", t->c.id[i]);
@@ -2517,8 +2512,7 @@ as_paxos_thr(void *arg)
 		 * Refuse transactions with changes initiated by a principal that is not the current principal
 		 * If the principal node is set to 0, let this through. This will be the case for sync messages
 		 */
-		if ((t.c.p_node != 0) && (t.c.p_node != principal))
-		{
+		if ((t.c.p_node != 0) && (t.c.p_node != principal)) {
 			/*
 			 * Check if this new principal out ranks our own principal - could have just arrived
 			 * Since it is possible we have not yet removed failed nodes for our state
@@ -2532,8 +2526,7 @@ as_paxos_thr(void *arg)
 			/*
 			 * reject transaction if a node from the succession list is sending this to us and we are the principal
 			 */
-			if ((true == as_paxos_succession_ismember(qm->id)) && (principal == self))
-			{
+			if ((true == as_paxos_succession_ismember(qm->id)) && (principal == self)) {
 				cf_debug(AS_PAXOS, "Ignoring transaction from node %"PRIx64" in succession list", qm->id);
 				goto cleanup;
 			}
@@ -2544,8 +2537,7 @@ as_paxos_thr(void *arg)
 		// Ignore this transaction. The principal will not bother since our vote will not be needed for this vote
 		// We are only getting this message because the principal is sending to all nodes known by fabric
 		if ((t.c.p_node == principal) && (self != principal)) {
-			for (int i = 0; i < t.c.n_change; i++)
-			{
+			for (int i = 0; i < t.c.n_change; i++) {
 				switch(t.c.type[i]) {
 					case AS_PAXOS_CHANGE_NOOP:
 						break;
