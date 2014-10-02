@@ -76,8 +76,8 @@ typedef struct ldt_slot_chunk_s {
 
 struct ldt_record_s {
 	as_rec             * h_urec;
-	int                  max_chunks;
-	int                  num_slots_used;
+	uint64_t             max_chunks;
+	uint64_t             num_slots_used;
 	ldt_slot_chunk     * chunk;
 	as_aerospike       * as;       // To operate on ldt_record_chunk
 	uint64_t             version;  // this is version key used to open/close/search

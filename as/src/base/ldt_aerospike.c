@@ -194,7 +194,7 @@ ldt_crec_create_chunk(ldt_record *lrecord)
 int
 ldt_crec_expand_chunk(ldt_record *lrecord) 
 {
-	int   new_size  = lrecord->max_chunks + 1;
+	uint64_t   new_size  = lrecord->max_chunks + 1;
 	void *old_chunk = lrecord->chunk;
 
 	lrecord->chunk = cf_realloc(lrecord->chunk, sizeof(ldt_slot_chunk) * new_size);
@@ -217,7 +217,7 @@ ldt_crec_expand_chunk(ldt_record *lrecord)
 		}
 	}
 
-	cf_detail(AS_LDT, "Bumping up chunks from %d to %d", lrecord->max_chunks, new_size);
+	cf_detail(AS_LDT, "Bumping up chunks from %"PRIu64" to %"PRIu64"", lrecord->max_chunks, new_size);
 	lrecord->max_chunks = new_size;
 	return 0;
 }
@@ -254,13 +254,13 @@ ldt_crec_find_freeslot(ldt_record *lrecord, char *func)
 			if (!chunk->slot_inuse[j]) {
 				lrecord->num_slots_used++;
 				chunk->slot_inuse[j] = true;
-				cf_detail(AS_LDT, "%s Popped slot %p %d", func, &chunk->slots[j], lrecord->num_slots_used);
+				cf_detail(AS_LDT, "%s Popped slot %p %"PRIu64"", func, &chunk->slots[j], lrecord->num_slots_used);
 				return &chunk->slots[j];		
 			} 
 		}
 	}
 Out:
-	cf_warning(AS_LDT, "%s: Allocation Error [Cannot open more than (%d) Sub-Records in a single UDF]... Fail",
+	cf_warning(AS_LDT, "%s: Allocation Error [Cannot open more than (%"PRIu64") Sub-Records in a single UDF]... Fail",
 				func, lrecord->num_slots_used);
 	return NULL;
 }
