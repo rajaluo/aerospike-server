@@ -2233,9 +2233,11 @@ int rw_dup_init() {
 //      parent before subrec is order violation or would have been already migrated
 //      in this case replication partition would match.
 //
-// - For LDT subrec replicate with source ldt version. This could be optimized for
-//   certain cases where migration is expected to start in future ... But for now
-//   just writing it.
+// - For LDT Subrec
+//    - If Vs == Vd then write subrecord with the ldt version on the destination. 
+//    - if Vs != Vd then write the subrecord with the version at the source. 
+//
+//  Look in function as_ldt_set_prole_subrec_version
 //
 // Note that the replication can only come from the winning node (it could either be
 // master/designate master or non-master node). So we need not track all the incoming 
@@ -2298,9 +2300,8 @@ as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
 	if (rsv->ns->ldt_enabled) {
 		bool is_subrec = ((info & RW_INFO_LDT_SUBREC) || (info & RW_INFO_LDT_ESR));
 		int type = 0;
-
-		if (linfo->replication_partition_version_match) {
-			if (is_subrec) { 
+		if (is_subrec) { 
+			if (linfo->replication_partition_version_match) {
 				if (linfo->ldt_prole_version_set) {
 					// ldt_version should be set
 					as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);	
@@ -2311,9 +2312,6 @@ as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
 					type = 2;
 				}
 			}
-		} 
-
-		if (is_subrec) {
 			cf_detail_digest(AS_RW, keyd, "Has %d type Version %ld for %s", type, as_ldt_subdigest_getversion(keyd), (info & RW_INFO_LDT_ESR) ? "esr" : "subrec");
 		}
 	}
@@ -2341,6 +2339,8 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	as_index_tree *tree   = rsv->tree;
 	bool is_subrec        = false;
 	bool is_ldt_parent    = false;
+	bool is_create        = false;
+	bool do_destroy       = false;
 
 	if (rsv->ns->ldt_enabled) {
 		if ((info & RW_INFO_LDT_SUBREC)
@@ -2356,9 +2356,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	}
 
 	// Set the version in subrec digest if need be.
-	if (info & RW_INFO_LDT) {
-		as_ldt_set_prole_subrec_version(keyd, rsv, linfo, info);
-	}
+	as_ldt_set_prole_subrec_version(keyd, rsv, linfo, info);
 
 	int rv      = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
 	as_index *r = r_ref.r;
@@ -2370,6 +2368,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 
 	if (rv == 1) {
 		as_storage_record_create(rsv->ns, r, &rd, keyd);
+		is_create = true;
 	}
 	else {
 		as_storage_record_open(rsv->ns, r, &rd, keyd);
@@ -2396,7 +2395,8 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	uint8_t *p_stack_particles = stack_particles;
 
 	// Check is duplication in case code is coming from multi op
-	if (as_ldt_check_and_get_prole_version(keyd, rsv, linfo, info, &rd, (rv == 1) ? true : false, __FILE__, __LINE__)) {
+	if (as_ldt_check_and_get_prole_version(keyd, rsv, linfo, info, &rd, is_create, __FILE__, __LINE__)) {
+		do_destroy = true;	
 		goto Out;
 	}
 
@@ -2410,6 +2410,8 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 			*(uint64_t *)&rd.keyd, as_ldt_record_get_rectype_bits(r));
 
 	if (0 != (rv = as_record_unpickle_replace(r, &rd, pickled_buf, pickled_sz, &p_stack_particles, has_sindex))) {
+		do_destroy = true;	
+		goto Out;
 		// Is there any clean up that must be done here???
 	}
 
@@ -2438,6 +2440,9 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	} 
 
 Out:
+	if (is_create && do_destroy) {
+		as_index_delete(tree, keyd);
+	}
 
 	as_storage_record_close(r, &rd);
 

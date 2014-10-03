@@ -400,7 +400,9 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 				cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Response Sent to Client");
 			}
 		} else {
-			cf_warning_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing proto_fd ");
+			// this may be NULL if the request has already timedout and the wr proto_fd_h
+			// will be cleaned up by then
+			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing proto_fd ");
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
 			if (udf_rw_needcomplete(&tr)) {

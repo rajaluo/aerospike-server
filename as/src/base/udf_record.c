@@ -318,6 +318,7 @@ udf_record_init(udf_record *urecord)
 	// Init flag
 	urecord->flag               = UDF_RECORD_FLAG_ISVALID;
 	urecord->flag              |= UDF_RECORD_FLAG_ALLOW_UPDATES;
+	urecord->flag              |= UDF_RECORD_FLAG_ALLOW_DESTROY;
 
 	urecord->pickled_buf        = NULL;
 	urecord->pickled_sz         = 0;

@@ -600,17 +600,13 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 	bool is_subrec = false;
 	bool is_parent = false;
 	if (as_ldt_precord_is_subrec(pr)) {
-		int rv = as_ldt_subrec_storage_get_edigest(rd, &pr->ekey);
+		int rv = as_ldt_subrec_storage_get_digests(rd, &pr->ekey, &pr->pkey);
 		if (rv) {
-			cf_warning(AS_MIGRATE, "LDT_MIGRATION Could Not find ESR key in subrec rv=%d", rv);
-		}
-		rv = as_ldt_subrec_storage_get_pdigest(rd, &pr->pkey);
-		if (rv) {
-			cf_warning(AS_MIGRATE, "LDT_MIGRATION Could Not find PARENT key in subrec rv=%d", rv);
+			cf_warning(AS_MIGRATE, "LDT_MIGRATION Could Not find Parent or ESR key in subrec rv=%d", rv);
 		}
 		is_subrec = true;
 	} else if (as_ldt_precord_is_esr(pr)) {
-		int rv = as_ldt_subrec_storage_get_pdigest(rd, &pr->pkey);
+		int rv = as_ldt_subrec_storage_get_digests(rd, NULL, &pr->pkey);
 		if (rv) {
 			cf_detail(AS_MIGRATE, "LDT_MIGRATION Could find PARENT key in subrec rv=%d", rv);
 		}
@@ -1573,7 +1569,7 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				mc_l.incoming_ldt_version = mc->incoming_ldt_version;
 				mc_l.pid                  = mc->pid;
 
-				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, (void **)&mc); 
+				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, &mc); 
 				cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
 						  mc->incoming_ldt_version,
 						  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, 
@@ -2724,11 +2720,11 @@ as_migrate_init()
 bool
 as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id, int state)
 {
-	migrate_recv_control *mc  = NULL;
+	migrate_recv_control *mc = NULL;
 	migrate_recv_ldt_version mc_l;
 	mc_l.incoming_ldt_version = version;
 	mc_l.pid                  = partition_id;
-	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc_l, (void **)&mc)) {
+	if (SHASH_OK == shash_get(g_migrate_incoming_ldt_version_hash, &mc_l, &mc)) {
 		if (mc) {
 			if (state) {
 				if (mc->rxstate == state) {
@@ -2741,7 +2737,6 @@ as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_
 			}
 		}
 	}
-	cf_detail_digest(AS_MIGRATE, subrec_digest, "%s incoming migrate for partition %d of version %ld with state %d", mc ? " " : "NO", partition_id, version, mc ? mc->rxstate : 0); 
 	return false;
 }
 

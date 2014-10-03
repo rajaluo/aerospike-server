@@ -437,16 +437,13 @@ void
 as_ldt_subrec_storage_validate(as_storage_rd *rd, char *op)
 {
 	if (!as_ldt_record_is_sub(rd->r)) {
-		cf_warning(AS_LDT, "LDT_INDEXBITS SUBREC bit not set in SUBREC index");
+		cf_warning(AS_LDT, "as_ldt_subrec_storage_validate %s: LDT_INDEXBITS SUBREC bit not set in SUBREC index", op);
 	}
 
 	cf_digest esr_digest;
-	if (as_ldt_subrec_storage_get_edigest(rd, &esr_digest)) {
-		cf_detail(AS_LDT, "Cannot get esr digest");
-	}
 	cf_digest parent_digest;
-	if (as_ldt_subrec_storage_get_pdigest(rd, &parent_digest)) {
-		cf_detail(AS_LDT, "Cannot get parent digest");
+	if (as_ldt_subrec_storage_get_digests(rd, &esr_digest, &parent_digest)) {
+		cf_warning(AS_LDT, "as_ldt_subrec_storage_validate %s Parent or ESR digest not set in subrecord", op);
 	}
 
 	as_partition_id  esr_pid    = as_partition_getid(esr_digest);
@@ -934,10 +931,10 @@ as_ldt_parent_storage_get_version(as_storage_rd *rd, uint64_t *ldt_version)
  *          o/w failure
  */
 int
-as_ldt_subrec_storage_get_digest(as_storage_rd *rd, char digest_type, cf_digest *keyd)
+as_ldt_subrec_storage_get_digests(as_storage_rd *rd, cf_digest *edigest, cf_digest *pdigest)
 {
-	if (!rd || !keyd) {
-		cf_warning(AS_LDT, "Invalid Paramter [%p %p]", rd, keyd);
+	if (!rd) {
+		cf_warning(AS_LDT, "Invalid Paramter [%p]", rd);
 		return -1;
 	}
 
@@ -963,40 +960,24 @@ as_ldt_subrec_storage_get_digest(as_storage_rd *rd, char digest_type, cf_digest 
 		return -2;
 	}
 
-	// when using as_val_tostring(), always place in a temp var and
-	// then free it after use.
-	char * valstr = as_val_tostring( valp );
-	cf_debug(AS_LDT, "Map %s", valstr );
-	cf_free(valstr);
-
-	if (as_ldt_get_from_map(prop_map, digest_type, keyd)) {
-		as_val_destroy(valp);
-		cf_warning(AS_LDT, "Property Bin %s Corrupted cannot get %c digest",
-				SUBREC_PROP_BIN, digest_type);
-		return -3;
+	if ( DEBUG ) {
+		// when using as_val_tostring(), always place in a temp var and
+		// then free it after use.
+		char * valstr = as_val_tostring( valp );
+		cf_debug(AS_LDT, "Map %s", valstr );
+		cf_free(valstr);
+	}
+	int rv  = 0;
+	if ((edigest && as_ldt_get_from_map(prop_map, PM_EsrDigest, edigest)) 
+			|| (pdigest && as_ldt_get_from_map(prop_map, PM_ParentDigest, pdigest))) {
+		cf_warning(AS_LDT, "as_ldt_subrec_storage_get_digests: Property Bin %s Corrupted "
+				" [Cannot get esr or parent digest]... Fail", SUBREC_PROP_BIN);
+		rv = -3;
 	}
 	as_val_destroy(valp);
-	return 0;
+	return rv;
 }
 
-
-/*
- * Return the digest of the sub record's parent.
- */
-int
-as_ldt_subrec_storage_get_pdigest(as_storage_rd *rd, cf_digest *keyd)
-{
-	return as_ldt_subrec_storage_get_digest(rd, PM_ParentDigest, keyd);
-}
-
-/*
- * Return the digest of the sub record's Existence Sub Record.
- */
-int
-as_ldt_subrec_storage_get_edigest(as_storage_rd *rd, cf_digest *keyd)
-{
-	return as_ldt_subrec_storage_get_digest(rd, PM_EsrDigest, keyd);
-}
 
 inline void
 as_ldt_record_set_rectype_bits(as_index *r, const as_rec_props *props)
@@ -1163,17 +1144,9 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	as_namespace *ns        = linfo->ns;
 	as_partition *p         = &ns->partitions[as_partition_getid(r->key)];
 
-	// Subrecord Version
-	cf_digest subrec_digest = r->key;
-	uint64_t subrec_version = 0;
-	subrec_version          = as_ldt_subdigest_getversion(&subrec_digest);
-	cf_detail(AS_LDT, "LDT_SUB_GC Sub Record Version %ld", subrec_version);
-
-	// If there is incoming migration and subrecord is of incoming migration, then
-	// skip it. The parent may not have made it yet so garbage collecting this would
-	// be problem.
-	if (true == as_migrate_is_incoming(&subrec_digest, subrec_version, p->partition_id, 0)) {
-		cf_detail(AS_LDT, " LDT_SUB_GC Skipping Defrag for version %ld ", subrec_version);
+	// Miscellaneous Checks
+	if (!as_ldt_record_is_sub(r)) {
+		cf_warning(AS_LDT, "LDT_SUB_GC: Missing Index bits !!");
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -1182,8 +1155,16 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		cf_detail(AS_LDT, "No void time should be set in subrecord !!! found %d", r->void_time);
 	}
 
-	if (!as_ldt_record_is_sub(r)) {
-		cf_warning(AS_LDT, "LDT_SUB_GC: Missing Index bits !!");
+	// Subrecord Version
+	cf_digest subrec_digest = r->key;
+	uint64_t subrec_version = as_ldt_subdigest_getversion(&subrec_digest);
+	cf_detail(AS_LDT, "LDT_SUB_GC Sub Record Version %ld", subrec_version);
+
+	// If there is incoming migration and subrecord is of incoming migration, then
+	// skip it. The parent may not have made it yet so garbage collecting this would
+	// be problem.
+	if (true == as_migrate_is_incoming(&subrec_digest, subrec_version, p->partition_id, 0)) {
+		cf_detail(AS_LDT, " LDT_SUB_GC Skipping Defrag for version %ld ", subrec_version);
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -1203,26 +1184,22 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		return;
 	}
 	rd.n_bins               = as_bin_get_n_bins(r, &rd);
-	as_bin stack_bins[rd.n_bins];
-	if ( ! ns->storage_data_in_memory && ! ns->single_bin ) {
-		rd.n_bins = sizeof(stack_bins) / sizeof(as_bin);
-	}
+	as_bin stack_bins[(!ns->storage_data_in_memory) ? rd.n_bins : 0];
 	rd.bins                 = as_bin_get_all(r, &rd, stack_bins);
 
-	bool check_esr          = false;
+	// Read Parent and ESR digest 
 	cf_digest esr_digest;
+	cf_digest parent_digest;
+	if (as_ldt_subrec_storage_get_digests(&rd, &esr_digest, &parent_digest)) {
+		goto Cleanup;
+	}
+	
+	// Do not check esr of esr.
+	bool check_esr          = false;
 	if (!as_ldt_record_is_esr(r)) {
 		// ESR digest with matching Version
-		if (as_ldt_subrec_storage_get_edigest(&rd, &esr_digest)) {
-			goto Cleanup;
-		}
 		as_ldt_subdigest_setversion(&esr_digest, subrec_version);
-	}
-
-	// Parent Version
-	cf_digest parent_digest;
-	if (as_ldt_subrec_storage_get_pdigest(&rd, &parent_digest)) {
-		goto Cleanup;
+		check_esr = true;
 	}
 
 	uint64_t starting_memory_bytes = 0;
@@ -1303,17 +1280,19 @@ as_ldt_merge_component_is_candidate(as_partition_reservation *rsv, as_record_mer
 		return true;
 	}
 	as_index *r  = r_ref.r;
+	bool rv = false;
 
 	// If component has higher generation ttl then it is merge candidate
 	if (c->pgeneration > r->generation
 			|| (c->pgeneration == r->generation && c->pvoid_time > r->void_time)) {
 		as_record_done(&r_ref, rsv->ns);
-		return true;
+		rv = true;
 	} else {
-		cf_debug_digest(AS_LDT, &r->key, "Local Parent Wins, ignoring incoming: %ld <= %ld generation for", c->pgeneration, r->generation);
+		rv = false;
 		as_record_done(&r_ref, rsv->ns);
-		return false;
 	}
+	cf_detail_digest(AS_LDT, &r->key, "Local Parent vs incoming [%d %d] void_time [%ld %ld]", r->generation, c->pgeneration, r->void_time, c->pvoid_time);
+	return rv;
 
 #if 0
 	// We have version as well want to do something smart ???

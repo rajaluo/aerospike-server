@@ -75,8 +75,7 @@ extern int      as_ldt_shipop              (write_request *wr, cf_node dest_node
 
 extern int      as_ldt_parent_storage_set_version (as_storage_rd *rd, uint64_t, uint8_t *);
 extern int      as_ldt_parent_storage_get_version (as_storage_rd *rd, uint64_t *);
-extern int      as_ldt_subrec_storage_get_pdigest (as_storage_rd *rd, cf_digest *keyd);
-extern int      as_ldt_subrec_storage_get_edigest (as_storage_rd *rd, cf_digest *keyd);
+extern int      as_ldt_subrec_storage_get_digests (as_storage_rd *rd, cf_digest *edigest, cf_digest *pdigest);
 extern void     as_ldt_subrec_storage_validate    (as_storage_rd *rd, char *op);
 
 extern void     as_ldt_digest_randomizer           (cf_digest *dig);

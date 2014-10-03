@@ -200,12 +200,14 @@ ldt_crec_expand_chunk(ldt_record *lrecord)
 	lrecord->chunk = cf_realloc(lrecord->chunk, sizeof(ldt_slot_chunk) * new_size);
 		
 	if (lrecord->chunk == NULL) {
+		cf_warning(AS_LDT, "ldt_crec_expand_chunk: Allocation Error !! [Chunk cannot be allocated ]... Fail");
 		lrecord->chunk = old_chunk;
 		return -1;
 	}
 
 	lrecord->chunk[lrecord->max_chunks].slots = ldt_crec_create_slot();
 	if (lrecord->chunk[lrecord->max_chunks].slots == NULL) {
+		cf_warning(AS_LDT, "ldt_crec_expand_chunk: Allocation Error !! [Slot cannot be allocated ]... Fail");
 		cf_free(lrecord->chunk);
 		lrecord->chunk = old_chunk;
 		return -1;

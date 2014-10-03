@@ -902,13 +902,16 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	}
 
 	// make sure we got the record as a create
+	bool is_create = true;
 	int rv = as_record_get_create(tree, &tr->keyd, r_ref, tr->rsv.ns, is_subrec);
 	cf_detail_digest(AS_UDF, &tr->keyd, "Creating %sRecord",
 			(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "Sub" : "");
 
 	// rv 0 means record exists, 1 means create, < 0 means fail
 	// TODO: Verify correct result codes.
-	if (rv == 0) {
+	if (rv == 1) {
+		is_create = true;
+	} else if (rv == 0) {
 		cf_warning(AS_UDF, "udf_aerospike_rec_create: Record Already Exists 2");
 		as_record_done(r_ref, tr->rsv.ns);
 		return 1;
@@ -918,12 +921,15 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	}
 
 	// Associates the set name with the storage rec and index
-	if(tr->msgp) {
+	if (tr->msgp) {
 		// Set the set name to index and close record if the setting the set name
 		// is not successful
 		int rv_set = as_record_set_set_from_msg(r_ref->r, tr->rsv.ns, &tr->msgp->msg);
 		if (rv_set != 0) {
 			cf_warning(AS_UDF, "udf_aerospike_rec_create: Failed to set setname");
+			if (is_create) {
+				as_index_delete(tree, &tr->keyd);
+			}
 			as_record_done(r_ref, tr->rsv.ns);
 			return 4;
 		}
@@ -956,7 +962,7 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	cf_detail(AS_UDF, "udf_aerospike_rec_create: Record created %d", urecord->flag);
 
 	int rc         = udf_aerospike__execute_updates(urecord);
-	if(rc) {
+	if (rc) {
 		//  Creating the udf record failed, destroy the as_record
 		if (!as_bin_inuse_has(urecord->rd)) {
 			udf_aerospike_rec_remove(as, rec);

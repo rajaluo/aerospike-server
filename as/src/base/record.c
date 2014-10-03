@@ -1336,6 +1336,10 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 		if (as_ldt_parent_storage_get_version(rd, &old_version)) {
 			cf_warning(AS_RECORD, "Could not get the version in the parent record");
 		}
+		cf_detail_digest(AS_MIGRATE, &rd->keyd, "LDT_MIGRATION Parent digest %"PRIx64" compared to ver [%ld %ld] "
+				"gen [%d %d] void_time [%d %d]", old_version, c->version,
+				r->generation, c->generation, r->void_time, c->void_time);
+
 		if (old_version != c->version) {
 			int pbytes = as_ldt_parent_storage_set_version(rd, c->version, p_stack_particles);
 			if (pbytes < 0) {
@@ -1347,9 +1351,6 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 				if (as_ldt_parent_storage_get_version(rd, &check_version)) {
 					cf_detail(AS_MIGRATE, "Not able to find version in parent record");
 				}
-				cf_info(AS_MIGRATE, "LDT_MIGRATION Parent digest %"PRIx64" changed from->to ver [%ld %ld %ld] "
-						"gen [%d %d] void_time [%d %d]", *(uint64_t *)&keyd, old_version, c->version, check_version,
-						r->generation, c->generation, r->void_time, c->void_time);
 #endif
 			}
 		}
@@ -1474,7 +1475,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 
 			if (COMPONENT_IS_LDT_SUB(&components[0])) {
 				if (as_ldt_merge_component_is_candidate(rsv, &components[0]) == false) {
-					cf_detail(AS_LDT, "LDT subrec is not a merge candidate");
+					cf_detail_digest(AS_LDT, keyd, "LDT subrec is not a merge candidate");
 					return 0;
 				}
 
@@ -1491,7 +1492,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 				cf_detail(AS_RECORD, "LDT_MERGE merge component is LDT_SUB %d", components[0].flag);
 				*winner_idx = 0;
 			} else {
-				cf_detail(AS_RECORD, "LDT_MERGE merge component is NON LDT_SUB %d", components[0].flag);
+				cf_detail_digest(AS_RECORD, keyd, "LDT_MERGE merge component is NON LDT_SUB %d", components[0].flag);
 			}
 		}
 	}
@@ -1550,7 +1551,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 				as_storage_record_create(rsv->ns, r_ref.r, &rd, keyd);
 			}
 
-			cf_detail(AS_RECORD, "Local (%d:%d) Remote (%d:%d)", r->generation, r->void_time, c->generation, c->void_time);
+			cf_detail_digest(AS_RECORD, keyd, "Local (%d:%d) Remote (%d:%d)", r->generation, r->void_time, c->generation, c->void_time);
 
 			if (COMPONENT_IS_LDT(c)) {
 				cf_detail(AS_RECORD, "Flatten Record Remote LDT Winner @ %d", *winner_idx);
@@ -1565,7 +1566,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 	} else {
 		cf_assert(has_local_copy, AS_RECORD, CF_CRITICAL,
 				"Local Copy Won when there is no local copy");
-		cf_detail(AS_LDT, "Local Copy Win %d %d rv=%d", r->generation, r->void_time, rv);
+		cf_detail_digest(AS_LDT, keyd, "Local Copy Win [%d %d] %d winner_idx=%d", r->generation, components[0].generation, r->void_time, winner_idx);
 	}
 
 	// our reservation must still be valid here. Check it.
