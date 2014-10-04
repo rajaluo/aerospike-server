@@ -776,8 +776,16 @@ udf_record_set_flags(const as_rec * rec, const char * name, uint8_t flags)
 	return 0;
 }
 
+/**
+ * Set the Record Type bits for a record. Typically, this is how we show that
+ * a record is of type LDT (which requires special handling). This function
+ * allows us to either SET the record type (the "bits" parm is positive), or
+ * UNSET the record type (the "bits" parm is negative).  When we want to
+ * turn an "LDT Record" back into a "Normal Record", then we UNSET the LDT
+ * flag (with a negative bits value).
+ */
 static int
-udf_record_set_type(const as_rec * rec,  uint8_t  ldt_rectype_bits)
+udf_record_set_type(const as_rec * rec,  int8_t ldt_rectype_bits)
 {
 	if (!rec || !ldt_rectype_bits) {
 		cf_warning(AS_UDF, "Invalid Paramters: record=%p rec_type_bits=%d", rec, ldt_rectype_bits);

@@ -113,8 +113,12 @@ ldt_record_set_flags(const as_rec * rec, const char * name,  uint8_t  flags)
 	return as_rec_set_flags(h_urec, name, flags);
 }
 
+/**
+ * Set the record type.  If "rec_type" is negative, then we "unset" the rec_type,
+ * which is needed before we delete a record that no longer contains any LDTs.
+ */
 static int
-ldt_record_set_type(const as_rec * rec,  uint8_t rec_type )
+ldt_record_set_type(const as_rec * rec,  int8_t rec_type )
 {
 	static const char * meth = "ldt_record_set_type()";
 	if (!rec) {

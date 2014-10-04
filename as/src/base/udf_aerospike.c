@@ -628,7 +628,8 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	}
 	bool is_record_dirty = false;
 	bool is_record_flag_dirty = false;
-	uint8_t index_flags = as_index_get_flags(rd->r);
+	uint8_t old_index_flags = as_index_get_flags(rd->r);
+	uint8_t new_index_flags = 0;
 
 	// In second iteration apply updates.
 	for(uint i = 0; i < urecord->nupdates; i++ ) {
@@ -666,12 +667,21 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		}
 	}
 
-	if (!as_index_is_flag_set(rd->r, urecord->ldt_rectype_bits)) {
-		// Before committing to storage set the rec_type_bits ..
-		cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
-				*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
-		as_index_set_flags(rd->r, urecord->ldt_rectype_bits);
-		is_record_flag_dirty = true;
+	if (urecord->ldt_rectype_bits) {
+		if (urecord->ldt_rectype_bits < 0) {
+			// ldt_rectype_bits is negative in case we want to reset the bits 
+			uint8_t rectype_bits = urecord->ldt_rectype_bits * -1; 
+			new_index_flags = old_index_flags & ~rectype_bits;
+		} else { 
+			new_index_flags = old_index_flags | urecord->ldt_rectype_bits;  
+		} 
+	
+		if (new_index_flags != old_index_flags) {
+			as_index_clear_flags(rd->r, old_index_flags);
+			as_index_set_flags(rd->r, new_index_flags);
+			is_record_flag_dirty = true;
+			cf_detail_digest(AS_RW, &urecord->tr->keyd, "Setting index flags from %d to %d new flag %d", old_index_flags, new_index_flags, as_index_get_flags(rd->r));
+		}
 	}
 
 	{
@@ -681,6 +691,14 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			as_storage_record_set_rec_props(rd, rec_props_data);
 		}
 
+		if (! as_storage_record_size_and_check(rd)) {
+			failmax = (int)urecord->nupdates;
+			goto Rollback;
+		}
+
+		// Version is set in the end after record size check. Setting version won't change the size of
+		// the record. And if it were before size check then this setting of version as well needs to
+		// be backed out.
 		if (as_ldt_record_is_parent(rd->r)) {
 			int rv = as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, urecord->end_particle_data);
 			if (rv < 0) {
@@ -688,11 +706,6 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 							" [Failed to set the version on storage rv=%d]... Fail",rv);
 				goto Rollback;
 			}
-		}
-
-		if (! as_storage_record_size_and_check(rd)) {
-			failmax = (int)urecord->nupdates;
-			goto Rollback;
 		}
 	}
 
@@ -755,9 +768,9 @@ Rollback:
 	}
 
 	if (is_record_flag_dirty) {
-		// set the flag for the record back to original
-		as_index_clear_flags(rd->r, urecord->ldt_rectype_bits);
-		as_index_set_flags(rd->r, index_flags);
+		as_index_clear_flags(rd->r, new_index_flags);
+		as_index_set_flags(rd->r, old_index_flags);
+		is_record_flag_dirty = false;
 	}
 
 	if (has_sindex) {
@@ -1011,7 +1024,7 @@ udf_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 	// make sure record exists and is already opened up
 	if (!urecord || !(urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN)
 			|| !(urecord->flag & UDF_RECORD_FLAG_OPEN) ) {
-		cf_warning(AS_UDF, "Record not found to be open while updating %d", urecord->flag);
+		cf_warning(AS_UDF, "Record not found to be open while updating urecord flag=%d", urecord->flag);
 		return -2;
 	}
 	cf_detail_digest(AS_UDF, &urecord->rd->r->key, "Executing Updates");

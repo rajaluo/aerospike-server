@@ -78,7 +78,7 @@ typedef struct udf_record_s {
 	// INTERNAL UTILITY
 	ldt_record 			*lrecord; // Parent lrecord
 	uint16_t			flag;
-	uint8_t				ldt_rectype_bits; // ESR  / LDT / PARENT LDT
+	int8_t				ldt_rectype_bits; // ESR  / LDT / PARENT LDT / NOTHING
 
 	// FABRIC MESSAGE
 	uint8_t				*pickled_buf;
@@ -122,4 +122,4 @@ extern bool     udf_record_destroy(as_rec *rec);
 //------------------------------------------------
 // Note that the main interface routines do NOT get declared here.
 // extern int      udf_record_set_flags(const as_rec *, const char *, uint8_t);
-// extern int      udf_record_set_type(const as_rec *,  uint8_t);
+// extern int      udf_record_set_type(const as_rec *,  int8_t);

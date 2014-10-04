@@ -506,7 +506,7 @@ extern void as_record_set_properties(as_storage_rd *rd, const as_rec_props *rec_
 extern int as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m);
 
 // Set in component if it is dummy (no data). This in
-// conjuction with LDT_REC is used to determine if merge
+// conjunction with LDT_REC is used to determine if merge
 // can be done or not. If this flag is not set then it is
 // normal record
 #define AS_COMPONENT_FLAG_LDT_DUMMY       0x01
@@ -545,7 +545,7 @@ extern int as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m)
 		|| COMPONENT_IS_LDT_SUB((c))
 
 typedef struct {
-	as_partition_vinfoset   vinfoset; // entire descripton of versions
+	as_partition_vinfoset   vinfoset; // entire description of versions
 	uint8_t					*record_buf;
 	size_t					record_buf_sz;
 	uint32_t				generation;
