@@ -116,7 +116,7 @@ ldt_crec_find_by_digest(ldt_record *lrecord, cf_digest *keyd)
 	for (int i = 0; i < lrecord->max_chunks; i++) {
 		ldt_slot_chunk *lchunk = &lrecord->chunk[i];
 		for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
-			if (lchunk->slot_inuse[j] && !memcmp(&lchunk->slots[j].rd.keyd, keyd, 20)) {
+			if (lchunk->slots[j].inuse && !memcmp(&lchunk->slots[j].rd.keyd, keyd, 20)) {
 				return &lchunk->slots[j];
 			}
 		}
@@ -130,7 +130,7 @@ ldt_crec_find_by_urec(ldt_record *lrecord, const as_rec *c_urec_p)
 	for (int i = 0; i < lrecord->max_chunks; i++) {
 		ldt_slot_chunk *lchunk = &lrecord->chunk[i];
 		for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
-			if (lchunk->slot_inuse[j] && (lchunk->slots[j].c_urec_p == c_urec_p)) {
+			if (lchunk->slots[j].inuse && (lchunk->slots[j].c_urec_p == c_urec_p)) {
 				return &lchunk->slots[j];
 			}
 		}
@@ -185,7 +185,7 @@ ldt_crec_create_chunk(ldt_record *lrecord)
 	}
 
 	for(int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
-		lrecord->chunk[0].slot_inuse[j] = false;
+		lrecord->chunk[0].slots[j].inuse = false;
 	}
 
 	return 0; 
@@ -215,7 +215,7 @@ ldt_crec_expand_chunk(ldt_record *lrecord)
 
 	for (int i = lrecord->max_chunks; i < new_size; i++) { 
 		for(int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
-			lrecord->chunk[i].slot_inuse[j] = false;
+			lrecord->chunk[i].slots[j].inuse = false;
 		}
 	}
 
@@ -253,9 +253,9 @@ ldt_crec_find_freeslot(ldt_record *lrecord, char *func)
 	for (int i = 0; i < lrecord->max_chunks; i++) {
 		ldt_slot_chunk *chunk = &lrecord->chunk[i];
 		for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
-			if (!chunk->slot_inuse[j]) {
+			if (!chunk->slots[j].inuse) {
 				lrecord->num_slots_used++;
-				chunk->slot_inuse[j] = true;
+				chunk->slots[j].inuse = true;
 				cf_detail(AS_LDT, "%s Popped slot %p %"PRIu64"", func, &chunk->slots[j], lrecord->num_slots_used);
 				return &chunk->slots[j];		
 			} 
@@ -311,9 +311,8 @@ ldt_slot_init(ldt_slot *lslotp, ldt_record *lrecord, cf_digest *keyd)
 void ldt_chunk_destroy(ldt_record *lrecord, ldt_slot_chunk *lchunk)
 {
 	for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
-		if (lchunk->slot_inuse[j]) {
+		if (lchunk->slots[j].inuse) {
 			ldt_slot *lslotp      = &lchunk->slots[j]; 
-			lchunk->slot_inuse[j] = false;
 			ldt_slot_destroy(lslotp, lrecord);
 		}
 	}
@@ -327,9 +326,9 @@ void ldt_chunk_destroy(ldt_record *lrecord, ldt_slot_chunk *lchunk)
  */
 void ldt_slot_destroy(ldt_slot *lslotp, ldt_record *lrecord)
 {
-	if (udf_record_destroy(lslotp->c_urec_p)){
-		lrecord->num_slots_used--;
-	}
+	udf_record_destroy(lslotp->c_urec_p);
+	lrecord->num_slots_used--;
+	lslotp->inuse = false;
 }
 
 /*

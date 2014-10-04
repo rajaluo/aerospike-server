@@ -62,6 +62,7 @@ typedef struct ldt_slot_s {
 	as_transaction      tr;
 	as_storage_rd       rd;
 	as_index_ref        r_ref;
+	bool                inuse;
 } ldt_slot;
 
 /*
@@ -71,7 +72,6 @@ typedef struct ldt_slot_s {
 #define LDT_SLOT_CHUNK_SIZE 10 
 typedef struct ldt_slot_chunk_s {
 	ldt_slot      * slots;
-	bool            slot_inuse[LDT_SLOT_CHUNK_SIZE];
 } ldt_slot_chunk;
 
 struct ldt_record_s {
@@ -87,7 +87,7 @@ struct ldt_record_s {
 #define FOR_EACH_SUBRECORD(i, j, lrecord)           \
 	for (int i = 0; i < lrecord->max_chunks; i++)   \
     for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++)   \
-	if (lrecord->chunk[i].slot_inuse[j]) 
+	if (lrecord->chunk[i].slots[j].inuse) 
 
 extern const as_rec_hooks ldt_record_hooks;
 extern int   ldt_record_init   (ldt_record *lrecord);
