@@ -218,6 +218,7 @@ typedef struct xdr_config {
 	int     xdr_read_threads;
 	char	*xdr_read_mode_string;
 	bool	xdr_do_version_check;
+	bool 	xdr_write_create_or_replace;
 } xdr_config;
 
 // Prototypes

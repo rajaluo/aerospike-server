@@ -166,4 +166,5 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_read_threads = 1; // keep it 1 for backward compatibility as default mode is batch now
 	c->xdr_new_cfg.xdr_read_threads = c->xdr_read_threads;
 	c->xdr_do_version_check = false;
+	c->xdr_write_create_or_replace = true;
 }
