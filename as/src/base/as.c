@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syscall.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -309,6 +310,8 @@ main(int argc, char **argv)
 
 #ifdef USE_ASM
 	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
+
+	int initial_tid = syscall(SYS_gettid);
 #endif
 
 #ifdef MEM_COUNT
@@ -357,6 +360,16 @@ main(int argc, char **argv)
 
 		cf_process_daemonize(open_fds, num_open_fds);
 	}
+
+#ifdef USE_ASM
+	// Log the main thread's Linux Task ID (pre- and post-fork) to the console.
+	fprintf(stderr, "Initial main thread tid: %d\n", initial_tid);
+
+	if (! run_in_foreground && c->run_as_daemon) {
+		fprintf(stderr, "Post-daemonize main thread tid: %d\n",
+				syscall(SYS_gettid));
+	}
+#endif
 
 	// Log which build this is - should be the first line in the log file.
 	cf_info(AS_AS, "<><><><><><><><><><>  %s build %s  <><><><><><><><><><>",
