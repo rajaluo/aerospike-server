@@ -4853,6 +4853,9 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp,
 	as_namespace *ns = rsvp->ns;
 
 	if (as_ldt_check_and_get_prole_version(keyd, rsvp, linfo, info, NULL, false, __FILE__, __LINE__)) {
+		// If parent cannot be due to incoming migration it is ok
+		// continue and allow subrecords to be replicated
+		result_code = AS_PROTO_RESULT_OK;
 		goto Out;
 	}
 
