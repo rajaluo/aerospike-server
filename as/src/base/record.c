@@ -1022,6 +1022,10 @@ as_record_apply_properties(as_record *r, as_namespace *ns, const as_rec_props *p
 
 		as_index_clear_flags(r, AS_INDEX_FLAG_KEY_STORED);
 	}
+
+	if (ns->ldt_enabled) {
+		as_ldt_record_set_rectype_bits(r, p_rec_props);
+	}
 }
 
 void
@@ -1320,10 +1324,6 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 
 	as_record_set_properties(rd, &c->rec_props);
 	as_record_unpickle_replace(r, rd, c->record_buf, c->record_buf_sz, &p_stack_particles, has_sindex);
-
-	if (rd->ns->ldt_enabled) {
-		as_ldt_record_set_rectype_bits(r, &c->rec_props);
-	}
 
 	// Update the version in the parent. In case it is incoming migration
 	//

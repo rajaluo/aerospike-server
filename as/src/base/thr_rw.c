@@ -2405,7 +2405,6 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	}
 
 	as_record_set_properties(&rd, p_rec_props);
-	as_ldt_record_set_rectype_bits(r, p_rec_props);
 	cf_detail(AS_RW, "TO PINDEX FROM MASTER Digest=%"PRIx64" bits %d \n",
 			*(uint64_t *)&rd.keyd, as_ldt_record_get_rectype_bits(r));
 

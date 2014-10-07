@@ -2973,8 +2973,6 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		as_record_apply_properties(r, ns, &props);
 	}
 
-	as_ldt_record_set_rectype_bits(r, &props);
-
 	cf_detail(AS_RW, "TO INDEX FROM DISK	Digest=%"PRIx64" bits %d",
 			*(uint64_t*)&block->keyd.digest[8],
 			as_ldt_record_get_rectype_bits(r));
