@@ -1424,11 +1424,19 @@ to_particle_type(int from_as_type)
 	return AS_PARTICLE_TYPE_NULL;
 }
 
+static const cf_fault_severity as_level_map[5] = {
+	[AS_LOG_LEVEL_ERROR] = CF_WARNING,
+	[AS_LOG_LEVEL_WARN]	= CF_WARNING,
+	[AS_LOG_LEVEL_INFO]	= CF_INFO,
+	[AS_LOG_LEVEL_DEBUG] = CF_DEBUG,
+	[AS_LOG_LEVEL_TRACE] = CF_DETAIL
+};
+
 static bool
 as_udf_log_callback(as_log_level level, const char * func, const char * file, uint32_t line, const char * fmt, ...)
 {
 	extern cf_fault_severity cf_fault_filter[CF_FAULT_CONTEXT_UNDEF];
-	cf_fault_severity severity = (cf_fault_severity)level;
+	cf_fault_severity severity = as_level_map[level];
 
 	if (severity > cf_fault_filter[AS_UDF]) {
 		return true;
@@ -1438,8 +1446,9 @@ as_udf_log_callback(as_log_level level, const char * func, const char * file, ui
 	va_start(ap, fmt);
 	char message[1024] = { '\0' };
 	vsnprintf(message, 1024, fmt, ap);
-	cf_fault_event(AS_UDF, severity, file, NULL, line, message);
 	va_end(ap);
+
+	cf_fault_event(AS_UDF, severity, file, NULL, line, message);
 	return true;
 }
 
