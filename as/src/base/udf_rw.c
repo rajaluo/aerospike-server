@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "aerospike/as_buffer.h"
+#include "aerospike/as_log.h"
 #include "aerospike/as_module.h"
 #include "aerospike/as_msgpack.h"
 #include "aerospike/as_serializer.h"
@@ -61,7 +62,6 @@
 #include "base/udf_aerospike.h"
 #include "base/udf_arglist.h"
 #include "base/udf_cask.h"
-#include "base/udf_logger.h"
 #include "base/udf_memtracker.h"
 #include "base/udf_timer.h"
 #include "base/write_request.h"
@@ -286,7 +286,7 @@ send_result(as_result * res, udf_call * call, void *udata)
 {
 	// The following "no-op" line serves to quiet the compiler warning of an
 	// otherwise unused variable.
-	udata = udata;
+	(void)udata;
 	as_val * v = res->value;
 	if ( res->is_success ) {
 
@@ -555,7 +555,7 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 	// for LDT_SUBRECORD (only do it if requested by UDF). All the SUBRECORD of
 	// removed LDT_RECORD will be lazily cleaned up by defrag.
 	if (!(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD)
-			&& urecord->flag & UDF_RECORD_FLAG_OPEN
+			&& (urecord->flag & UDF_RECORD_FLAG_OPEN)
 			&& !as_bin_inuse_has(rd)) {
 		as_index_delete(tr->rsv.tree, &tr->keyd);
 		urecord->starting_memory_bytes = 0;
@@ -1424,6 +1424,25 @@ to_particle_type(int from_as_type)
 	return AS_PARTICLE_TYPE_NULL;
 }
 
+static bool
+as_udf_log_callback(as_log_level level, const char * func, const char * file, uint32_t line, const char * fmt, ...)
+{
+	extern cf_fault_severity cf_fault_filter[CF_FAULT_CONTEXT_UNDEF];
+	cf_fault_severity severity = (cf_fault_severity)level;
+
+	if (severity > cf_fault_filter[AS_UDF]) {
+		return true;
+	}
+
+	va_list ap;
+	va_start(ap, fmt);
+	char message[1024] = { '\0' };
+	vsnprintf(message, 1024, fmt, ap);
+	cf_fault_event(AS_UDF, severity, file, NULL, line, message);
+	va_end(ap);
+	return true;
+}
+
 void
 as_udf_init(void)
 {
@@ -1431,9 +1450,7 @@ as_udf_init(void)
 	as_module_configure(&mod_lua, &g_config.mod_lua);
 
 	// Setup logger for mod_lua.
-	if (! mod_lua.logger) {
-		mod_lua.logger = udf_logger_new(AS_UDF);
-	}
+	as_log_set_callback(as_udf_log_callback);
 
 	if (0 > udf_cask_init()) {
 		cf_crash(AS_UDF, "failed to initialize UDF cask");
