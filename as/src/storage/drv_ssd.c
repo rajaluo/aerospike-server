@@ -2779,7 +2779,6 @@ as_storage_write_header(drv_ssd *ssd, ssd_device_header *header)
 		return -1;
 	}
 
-	fsync(fd);
 	close(fd);
 	return 0;
 }
