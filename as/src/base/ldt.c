@@ -786,12 +786,12 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	as_bin * binp           = as_bin_get(rd, (byte *)REC_LDT_CTRL_BIN, strlen(REC_LDT_CTRL_BIN));
 	int rv                  = 0;
 	if (!binp) {
-		cf_debug(AS_LDT, "as_ldt_parent_storage_set_version: [LDT Control bin not found]");
+		cf_warning(AS_LDT, "as_ldt_parent_storage_set_version: [LDT Control bin not found]");
 		return -1;
 	}
 	as_val * valp           = as_val_frombin( binp );
 	if (!valp) {
-		cf_debug(AS_LDT, "as_ldt_parent_storage_set_version : [LDT Control bin Deserialization error]... Fail");
+		cf_warning(AS_LDT, "as_ldt_parent_storage_set_version : [LDT Control bin Deserialization error]... Fail");
 		return -2;
 	}
 
@@ -807,7 +807,7 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	rv = as_ldt_set_in_map(prop_map, RPM_Version, (void *)&ldt_version);
 
 	if (rv) {
-		cf_debug(AS_LDT, "Could not set map ");
+		cf_warning(AS_LDT, "as_ldt_parent_storage_set_version: [LDT Control bin version cannot be set rv=%d] ... Fail", rv);
 		as_val_destroy(valp);
 		return -3;
 	}
@@ -826,7 +826,7 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	int res = as_serializer_serialize(&s, valp, &buf);
 
 	if (res != 0) {
-		cf_warning(AS_LDT, "Map serialization failure (%d), res");
+		cf_warning(AS_LDT, "as_ldt_parent_storage_set_version: Map serialization failure (%d), res");
 		as_serializer_destroy(&s);
 		as_buffer_destroy(&buf);
 		as_val_destroy(valp);
@@ -1049,7 +1049,7 @@ as_ldt_flag_has_parent(uint16_t flag)
  * ESR record when opened in here is with skip_lock.
  */
 bool
-as_ldt_version_match(uint64_t subrec_version, as_index_tree *tree, cf_digest *keyd, as_namespace *ns)
+as_ldt_is_parent_and_version_match(uint64_t subrec_version, as_index_tree *tree, cf_digest *keyd, as_namespace *ns)
 {
 	int rv = 0;
 	as_storage_rd rd;
@@ -1064,7 +1064,7 @@ as_ldt_version_match(uint64_t subrec_version, as_index_tree *tree, cf_digest *ke
 
 	if (!as_ldt_record_is_parent(r)) {
 		// if parent is not a LDT parent version does not match
-		cf_warning(AS_LDT, "LDT_INDEXBIT Expected Parent Bits Not Found");
+		cf_detail(AS_LDT, "LDT_INDEXBIT Expected Parent Bits Not Found");
 		as_record_done(&r_ref, ns);
 		return false;
 	}
@@ -1224,7 +1224,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	} else if ((rv = as_record_exists(p->vp, &parent_digest, ns))) {
 		delete = true;
 		type   = 2;
-	} else if (! (rv = as_ldt_version_match(subrec_version, p->vp, &parent_digest, ns))) {
+	} else if (!as_ldt_is_parent_and_version_match(subrec_version, p->vp, &parent_digest, ns)) {
 		// LDT_GC_IO: Parent IO
 		delete = true;
 		type   = 3;
