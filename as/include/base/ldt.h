@@ -46,6 +46,7 @@
 #include "base/write_request.h"
 #include "storage/storage.h"
 
+#define LDT_SUB_GC_MAX_RATE         100000 // Do not allow more than 100,000 subrecord GC per second
 
 // Use these flags to designate various LDT bin types -- but they are all
 // HIDDEN BINS.

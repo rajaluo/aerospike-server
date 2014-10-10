@@ -55,6 +55,7 @@
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/security_config.h"
+#include "base/ldt.h"
 #include "fabric/migrate.h"
 
 
@@ -440,6 +441,7 @@ typedef enum {
 	CASE_NAMESPACE_STOP_WRITES_PCT,
 	// Recent (non-2.x) functionality:
 	CASE_NAMESPACE_LDT_ENABLED,
+	CASE_NAMESPACE_LDT_GC_RATE,
 	CASE_NAMESPACE_SI_BEGIN,
 	CASE_NAMESPACE_SINDEX_BEGIN,
 	// Deprecated:
@@ -784,6 +786,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
 		{ "ldt-enabled",					CASE_NAMESPACE_LDT_ENABLED },
+		{ "ldt-gc-rate",                    CASE_NAMESPACE_LDT_GC_RATE },
 		{ "si",								CASE_NAMESPACE_SI_BEGIN },
 		{ "sindex",							CASE_NAMESPACE_SINDEX_BEGIN },
 		{ "demo-read-multiplier",			CASE_NAMESPACE_DEMO_READ_MULTIPLIER },
@@ -2349,6 +2352,16 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_LDT_ENABLED:
 				ns->ldt_enabled = cfg_bool(&line);
 				break;
+			case CASE_NAMESPACE_LDT_GC_RATE:
+				{
+					uint64_t rate = cfg_u64_no_checks(&line);
+					if ((rate == 0) || (rate > LDT_SUB_GC_MAX_RATE)) {
+						// Do not allow rate as 0 or greater than max allowed
+					} else {
+						ns->ldt_gc_sleep_us = 1000 * 1000  * rate;
+					}
+					break;
+				}
 			case CASE_NAMESPACE_SI_BEGIN:
 				cfg_init_si_var(ns);
 				as_sindex_config_var_default(&si_cfg);

@@ -74,6 +74,7 @@
 #include "base/thr_scan.h"
 #include "base/monitor.h"
 #include "base/thr_sindex.h"
+#include "base/ldt.h"
 
 #define STR_NS             "ns"
 #define STR_SET            "set"
@@ -3271,6 +3272,19 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else {
 				goto Error;
 			}
+		}
+		else if (0 == as_info_parameter_get(params, "ldt-gc-rate", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			uint64_t rate = (uint64_t)val;
+
+			if ((rate == 0) || (rate > LDT_SUB_GC_MAX_RATE)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of ldt-gc-rate of ns %s from %lu to %d", ns->name, (1000 * 1000)/ns->ldt_gc_sleep_us , val);
+			// ldt_gc_sleep_us = ~ (1000 * 1000 / ldt_gc_rate). Given scheduling etc.
+			ns->ldt_gc_sleep_us = 1000 * 1000 / rate;
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {

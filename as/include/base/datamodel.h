@@ -867,6 +867,7 @@ struct as_namespace_s {
 	bool 						sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping.
 	bool 						disallow_null_setname;
 	bool                        ldt_enabled;
+	uint32_t					ldt_gc_sleep_us;
 
 	/* Storage engine configuration - and per storage engine variables -
 	** 'private' is managed by the storage engine in question */
