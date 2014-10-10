@@ -163,6 +163,7 @@ typedef struct {
 	uint8_t partition_done[AS_PARTITIONS];
 } scan_job_partitions_tracker;
 
+void  scan_job_release_and_destroy(tscan_job *job);
 int   tscan_send_fin_to_client(tscan_job *job, uint32_t result_code);
 int   tscan_enqueue_udfjob(tscan_job *job);
 int   tscan_start_job(tscan_job *job, as_transaction *tr, bool scan_disconnected_job);
@@ -203,7 +204,7 @@ as_tscan_udf_tr_complete( as_transaction *tr, int retcode )
 	cf_atomic64_set(&job->uit_total_run_time, cf_atomic64_add(&job->uit_total_run_time, processing_time));
 	cf_detail(AS_SCAN, "UDF: Internal transaction completed %d, remaining %d, processing_time for this transaction %d, total txn processing time %"PRIu64"",
 			completed, queued, processing_time, job->uit_total_run_time);
-	cf_rc_release(job);
+	scan_job_release_and_destroy(job);
 	return 0;
 }
 
@@ -260,10 +261,69 @@ tscan_job_create(uint64_t trid)
 }
 
 void
+scan_job_done(tscan_job *job)
+{
+	if (job->result == AS_PROTO_RESULT_OK) {
+		cf_atomic_int_incr(&g_config.tscan_succeeded);
+	}
+
+	job->end_time = cf_getms();
+
+	cf_info(AS_SCAN, "SCAN JOB DONE  [id =%"PRIu64": ns= %s set=%s scanned=%ld expired=%ld set_diff=%ld elapsed=%ld (ms)]",
+			job->tid, job->ns->name, as_namespace_get_set_name(job->ns, job->set_id),
+			job->n_obj_scanned, job->n_obj_expired, job->n_obj_set_diff, job->end_time - job->start_time);
+
+	// Print end of sindex ticker here:
+	if (SCAN_JOB_IS_POPULATOR(job)) {
+		char *si_name = "<all>";
+		uint64_t si_memory   = (uint64_t)cf_atomic_int_get(job->ns->sindex_data_memory_used);
+
+		if (job->si) {
+			si_memory   = cf_atomic64_get(job->si->data_memory_used);
+			si_name = job->si->imd->iname;
+		}
+
+		cf_info(AS_SCAN, " Sindex-ticker done: ns=%s si=%s si-mem-used=%"PRIu64""
+				" elapsed=%"PRIu64" ms",
+				job->ns->name, si_name,
+				si_memory, cf_getms() - job->start_time);
+
+		if (job->job_type == SCAN_JOB_TYPE_SINDEX_POPULATEALL) {
+			as_sindex_boot_populateall_done(job->ns);
+		}
+	}
+	else {
+		tscan_send_fin_to_client(job, job->result);
+	}
+}
+
+void
+scan_udf_job_done(tscan_job *job, int rsp)
+{
+	if (rsp == AS_PROTO_RESULT_OK) {
+		cf_atomic_int_incr(&g_config.tscan_succeeded);
+	}
+
+	job->end_time = cf_getms();
+
+	cf_info(AS_SCAN, "SCAN JOB DONE  [id =%"PRIu64": ns= %s set=%s scanned=%ld expired=%ld set_diff=%ld elapsed=%ld (ms)]",
+			job->tid, job->ns->name, as_namespace_get_set_name(job->ns, job->set_id),
+			job->n_obj_scanned, job->n_obj_expired, job->n_obj_set_diff, job->end_time - job->start_time);
+
+	cf_info(AS_SCAN, "SCAN UDF       [%s:%s]" , job->call.filename, job->call.function);
+	cf_info(AS_SCAN, "SCAN UDF STATS [scanned %"PRIu64 " expired %"PRIu64 " set_diff %"PRIu64 " succeeded %"PRIu64 " failed %"PRIu64 " updated %"PRIu64" ]",
+			cf_atomic_int_get(job->n_obj_scanned), cf_atomic_int_get(job->n_obj_expired), cf_atomic_int_get(job->n_obj_set_diff),
+			cf_atomic_int_get(job->n_obj_udf_success), cf_atomic_int_get(job->n_obj_udf_failed), cf_atomic_int_get(job->n_obj_udf_updated));
+}
+
+void
 tscan_job_destructor( void *udata )
 {
 	tscan_job *job = (tscan_job *)udata;
 
+	if (job->call.udf_type != AS_SCAN_UDF_OP_BACKGROUND) {
+		scan_job_done(job);
+	}
 	if (job->hasudf) {
 		udf_call_destroy(&job->call);
 		job->hasudf = false;
@@ -298,12 +358,21 @@ tscan_job_destructor( void *udata )
 		// @TODO clean job type specific allocation for storage-based scanning
 	}
 	pthread_mutex_destroy(&job->LOCK);
-	if (cf_rc_count(job) > 1) {
-		cf_warning(AS_SCAN, "likely leaking a scan_job %p %d", job, cf_rc_count(job));
+
+	if (cf_rc_count(job) != 0) {
+		cf_warning(AS_SCAN, "likely ref-count problem with scan_job %p", job);
 	}
-	cf_rc_releaseandfree(job);
 }
 
+// Note that an rchash_delete() also does exactly this.
+void
+scan_job_release_and_destroy(tscan_job *job)
+{
+	if (0 == cf_rc_release(job)) {
+		tscan_job_destructor(job);
+		cf_rc_free(job);
+	}
+}
 
 uint32_t
 tscan_job_tid_hash(void *value, uint32_t keylen)
@@ -369,7 +438,7 @@ as_tscan_sindex_populate(void *param)
 		cf_warning(AS_SCAN, "Failed to create Background index creation for index %s:%s:%s. Error = %d",
 				imd->ns_name, imd->set, imd->iname, hp_rc);
 		cf_warning(AS_SCAN, "not starting scan %d because rchash_put() failed with error %d", job->tid, hp_rc);
-		cf_rc_releaseandfree(job);
+		scan_job_release_and_destroy(job);
 		return -2;
 	}
 
@@ -419,7 +488,7 @@ as_tscan_sindex_populateall(void *param)
 	if (RCHASH_OK != (hp_rc = rchash_put_unique(g_scan_job_hash, &job->tid, sizeof(job->tid), job))) {
 		cf_warning(AS_SCAN, "Failed to create background scan job for namespace %s index population", ns->name);
 		cf_warning(AS_SCAN, "not starting scan %d because rchash_put() failed with error %d", job->tid, hp_rc);
-		cf_rc_releaseandfree(job);
+		scan_job_release_and_destroy(job);
 		return -2;
 	}
 
@@ -509,7 +578,9 @@ tscan_enqueue_udfjob(tscan_job *job)
 			if (CF_QUEUE_EMPTY != cf_queue_pop(g_scan_job_slotq, &slot, CF_QUEUE_FOREVER)) {
 				cf_detail(AS_SCAN, "UDF: Added new work item for job [%"PRIu64" %d %d] slot %d", job->tid, i, cycler, slot);
 				cf_queue_push(g_scan_partition_work_q_array[cycler++ % n_threads], &workitem);
-				if(count++ == (MAX_SCAN_UDF_WORKITEM_PER_ITERATION * n_threads)) break;
+				if (count++ == (MAX_SCAN_UDF_WORKITEM_PER_ITERATION * n_threads)) {
+					break;
+				}
 			}
 		}
 
@@ -608,9 +679,7 @@ tscan_start_udfjob(tscan_job *job, as_transaction *tr, bool disconnected)
 		cf_rc_release(job->fd_h);
 		job->fd_h           = 0;
 	}
-	// Reserve the copy in queue.
-	//cf_info(AS_SCAN, "UDF: Reserved %d", cf_rc_reserve(job));
-	cf_rc_reserve(job);
+
 	return cf_queue_push(g_scan_udf_job_q, &job);
 }
 
@@ -752,7 +821,7 @@ as_tscan(as_transaction *tr)
 			// Eventually we will support this -- but for now, it is a request of an
 			// unsupported feature (-5).
 			cf_info(AS_SCAN, "Only Background Scan UDF supported !!");
-			tscan_job_destructor(job);
+			scan_job_release_and_destroy(job);
 			return -5;
 		} else {
 			job->scan_type = SCAN_UDF_BG;
@@ -803,7 +872,7 @@ as_tscan(as_transaction *tr)
 	// Add job to global hash for tracking purposes.
 	if (RCHASH_OK != (hp_rc = rchash_put_unique(g_scan_job_hash, &job->tid, sizeof(job->tid), job))) {
 		cf_warning(AS_SCAN, "not starting scan %d because rchash_put() failed with error %d", job->tid, hp_rc);
-		tscan_job_destructor(job);
+		scan_job_release_and_destroy(job);
 		return -2;
 	}
 
@@ -881,7 +950,6 @@ as_internal_scan_udf_txn_setup(tr_create_data * d)
 	cf_atomic_int_incr(&job->uit_queued);
 	cf_detail(AS_SCAN, "UDF: [%d] internal transactions enqueued", job->uit_queued);
 
-	//cf_info(AS_SCAN, "UDF: Reserved %d", cf_rc_reserve(job));
 	cf_rc_reserve(job);
 
 	// Reset start time.
@@ -893,7 +961,6 @@ as_internal_scan_udf_txn_setup(tr_create_data * d)
 				"transaction.. ", tr.keyd, job->uit_queued);
 		cf_free(tr.msgp);
 		tr.msgp = 0;
-		// cf_info(AS_SCAN, "UDF: Released %d", cf_rc_release(job));
 		cf_rc_release(job);
 		cf_atomic_int_decr(&job->uit_queued);
 		return -1;
@@ -1188,48 +1255,6 @@ tscan_send_fin_to_client(tscan_job *job, uint32_t result_code)
 	return(0);
 }
 
-void
-tscan_job_done(tscan_job *job, int rsp)
-{
-	if (rsp == AS_PROTO_RESULT_OK) {
-		cf_atomic_int_incr(&g_config.tscan_succeeded);
-	}
-	job->end_time = cf_getms();
-	cf_info(AS_SCAN,     "SCAN JOB DONE  [id =%"PRIu64": ns= %s set=%s scanned=%ld expired=%ld set_diff=%ld elapsed=%ld (ms)]",
-			job->tid, job->ns->name, as_namespace_get_set_name(job->ns, job->set_id),
-			job->n_obj_scanned, job->n_obj_expired, job->n_obj_set_diff, job->end_time - job->start_time);
-	if (job->hasudf) {
-		cf_info(AS_SCAN, "SCAN UDF       [%s:%s]" , job->call.filename, job->call.function);
-		cf_info(AS_SCAN, "SCAN UDF STATS [scanned %"PRIu64 " expired %"PRIu64 " set_diff %"PRIu64 " succeeded %"PRIu64 " failed %"PRIu64 " updated %"PRIu64" ]",
-				cf_atomic_int_get(job->n_obj_scanned), cf_atomic_int_get(job->n_obj_expired), cf_atomic_int_get(job->n_obj_set_diff),
-				cf_atomic_int_get(job->n_obj_udf_success), cf_atomic_int_get(job->n_obj_udf_failed), cf_atomic_int_get(job->n_obj_udf_updated));
-	}
-
-	// Print end of sindex ticker here:
-	if (SCAN_JOB_IS_POPULATOR(job)) {
-		char *si_name = "<all>";
-		uint64_t si_memory   = (uint64_t)cf_atomic_int_get(job->ns->sindex_data_memory_used);
-
-		if (job->si) {
-			si_memory   = cf_atomic64_get(job->si->data_memory_used);
-			si_name = job->si->imd->iname;
-		}
-
-		cf_info(AS_SCAN, " Sindex-ticker done: ns=%s si=%s si-mem-used=%"PRIu64""
-				" elapsed=%"PRIu64" ms",
-				job->ns->name, si_name,
-				si_memory, cf_getms() - job->start_time);
-	}
-
-	if (job->job_type == SCAN_JOB_TYPE_SINDEX_POPULATEALL) {
-		as_sindex_boot_populateall_done(job->ns);
-	} else if (job->call.udf_type != AS_SCAN_UDF_OP_BACKGROUND) {
-		// Send a fin message to the client only in the case of non background jobs.
-		tscan_send_fin_to_client(job, rsp);
-	}
-}
-
-
 void *
 scan_udf_job_manager(void *q_to_wait_on)
 {
@@ -1261,14 +1286,14 @@ scan_udf_job_manager(void *q_to_wait_on)
 			if ( IS_SCAN_JOB_ABORTED(job) && !IS_SCAN_JOB_PENDING(job)) {
 				cf_atomic_int_incr(&g_config.tscan_aborted);
 				cf_info(AS_SCAN, "UDF: Transactions completed, User Aborting scan job %"PRIu64"", job->tid);
-				tscan_job_done(job, AS_PROTO_RESULT_FAIL_SCAN_ABORT);  // TODO: what is response code
+				scan_udf_job_done(job, AS_PROTO_RESULT_FAIL_SCAN_ABORT);  // TODO: what is response code
 			}
 			// If the scan job is pending, the job scan hash cannot be deleted as it is being persisted for
-			// a fixed amount of time to retrieve information on the job, so do not call tscan_job_done.
+			// a fixed amount of time to retrieve information on the job, so do not call scan_udf_job_done.
 			// That will be called only once after the job is done.
 			else if(!IS_SCAN_JOB_PENDING(job)) {
 				cf_info(AS_SCAN, "UDF: Transactions completed, finishing scan job %"PRIu64"", job->tid);
-				tscan_job_done(job, 0);
+				scan_udf_job_done(job, 0);
 			}
 
 			// If the job is around for less than 5 min,  set the pending job flag and queue again.
@@ -1295,9 +1320,6 @@ scan_udf_job_manager(void *q_to_wait_on)
 			// Destroy now and don't requeue.
 			// Using similar thinking as with default scan.
 			rchash_delete(g_scan_job_hash, &job->tid, sizeof(job->tid));
-			if (0 == cf_rc_release(job)) {
-				tscan_job_destructor(job);
-			}
 			goto NextElement;
 		}
 
@@ -1308,7 +1330,7 @@ scan_udf_job_manager(void *q_to_wait_on)
 			if (ptracker == NULL) {
 				// Release reference for the queue element.
 				cf_warning(AS_SCAN, "UDF: Could not allocate memory for tracker .. Aborting Scan UDF !!");
-				tscan_job_done(job, -2);  // TODO: What is the response code?
+				scan_udf_job_done(job, -2);  // TODO: What is the response code?
 				pthread_mutex_unlock(&job->LOCK);
 				rchash_delete(g_scan_job_hash, &job->tid, sizeof(job->tid));
 				goto NextElement;
@@ -1332,7 +1354,7 @@ scan_udf_job_manager(void *q_to_wait_on)
 		if (0 == rsp) {
 			if (0 != cf_queue_push(job_queue, &job)) {
 				cf_warning(AS_SCAN, "UDF: Transactions Aborted, Internal error .. failed queue push!!! %"PRIu64"", job->tid);
-				tscan_job_done(job, -2);  // TODO: what is the response code?
+				scan_udf_job_done(job, -2);  // TODO: what is the response code?
 				pthread_mutex_unlock(&job->LOCK);
 				rchash_delete(g_scan_job_hash, &job->tid, sizeof(job->tid));
 				goto NextElement;
@@ -1358,7 +1380,7 @@ as_tscan_set_priority(uint64_t trid, uint16_t priority) {
 	pthread_mutex_lock(&job->LOCK);
 	job->n_threads = priority;
 	pthread_mutex_unlock(&job->LOCK);
-	cf_rc_release(job);
+	scan_job_release_and_destroy(job);
 	return true;
 }
 
@@ -1374,9 +1396,7 @@ as_tscan_abort(uint64_t trid)
 	pthread_mutex_lock(&job->LOCK);
 	SCAN_JOB_ABORTED_ON(job);
 	pthread_mutex_unlock(&job->LOCK);
-	// Give the reference back.
-	//cf_info(AS_SCAN, "UDF: Released %d", cf_rc_release(job));
-	cf_rc_release(job);
+	scan_job_release_and_destroy(job);
 	return 0;
 }
 
@@ -1703,29 +1723,32 @@ WorkItemDone:
 							job->tid, job, job->fd_h, job->uit_queued);
 					SCAN_JOB_DONE_ON(job);
 				} else {
-					tscan_job_done(job, rsp);
 					clean_job = true;
 				}
 			}
 		}
 		pthread_mutex_unlock(&job->LOCK);
 
-		// Release the reference from the hash_get.
-		uint64_t val = cf_rc_release(job);
-		// cf_info(AS_SCAN, "UDF: Released %d", val);
 		if (job->hasudf) {
 			int i = 0;
 			cf_queue_push(g_scan_job_slotq, &i);
-		} else {
-			if (val == 0) {
-				tscan_job_destructor(job);
+		}
+
+		if (clean_job) {
+			// Note that we never get here for a UDF job - UDF jobs are removed
+			// from g_scan_job_hash only in scan_udf_job_manager().
+
+			// Note also that this call won't destroy and free the job, since
+			// we're still within the hash_get's reference.
+			if (RCHASH_OK == rchash_delete(g_scan_job_hash, &job->tid, sizeof(job->tid))) {
+				cf_debug(AS_SCAN, "scan job %d for '%s' - %s", job->tid, job->ns->name,
+						job_early_terminate ? "terminated early" : "completed");
 			}
 		}
 
-		// Hash entry won't be found in the hash anymore.
-		if (clean_job) {
-			rchash_delete(g_scan_job_hash, &job->tid, sizeof(job->tid));
-		}
+		// Release the reference from the hash_get.
+		scan_job_release_and_destroy(job);
+
 		cf_debug(AS_SCAN, "finished workitem");
 	} while(1);
 
@@ -1845,7 +1868,7 @@ as_tscan_get_jobstat(uint64_t trid)
 	stat            = cf_malloc(sizeof(as_mon_jobstat));
 	if (!stat) return NULL;
 	tscan_fill_jobstat(job, stat);
-	cf_rc_release(job);
+	scan_job_release_and_destroy(job);
 	return stat;
 }
 
