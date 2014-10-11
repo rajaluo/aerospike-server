@@ -1248,13 +1248,13 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	as_record_done(r_ref, ns);
 
 	// TODO: Have a better slow down strategy !!!
-	usleep(100);
+	usleep(ns->ldt_gc_sleep_us);
 	return;
 
 Cleanup:
 	as_storage_record_close(r, &rd);
 	as_record_done(r_ref, ns);
-	usleep(100);
+	usleep(ns->ldt_gc_sleep_us);
 }
 
 
