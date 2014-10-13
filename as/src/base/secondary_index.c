@@ -218,7 +218,7 @@ as_sindex__setname_match(as_sindex_metadata *imd, const char *setname)
 	if (!setname && imd->set)                                  goto Fail;
 	return true;
 Fail:
-	SITRACE(imd->si, META, debug, "Index Mismatch %s %s", imd->set, setname);
+	cf_debug(AS_SINDEX, "Index Mismatch %s %s", imd->set, setname);
 	return false;
 }
 
@@ -252,7 +252,7 @@ as_sindex__pre_op_assert(as_sindex *si, int op)
 	// Caller of DML should always reserves si, If the state of si is not DESTROY and
 	// if the count is 1 then caller did not reserve fail the assertion
 	int count = cf_rc_count(si->imd);
-	SITRACE(si, RESERVE, debug, "DML on index %s in %d state with reference count %d < 2", si->imd->iname, si->state, count);
+	cf_debug(AS_SINDEX, "DML on index %s in %d state with reference count %d < 2", si->imd->iname, si->state, count);
 	if ((count < 2) && (si->state != AS_SINDEX_DESTROY)) {
 		cf_warning(AS_SINDEX, "Secondary index is improperly ref counted ... cannot be used");
 		return ret;
@@ -403,18 +403,18 @@ as_sindex__get_simatches_by_sbin(as_namespace *ns, const char *set,
 								 int8_t *simatches, bool isw, int *matches)
 {
 	if (ns->single_bin) {
-		GTRACE(META, debug, "No Index On Namespace with Single Bin");
+		cf_debug(AS_SINDEX, "No Index On Namespace with Single Bin");
 		return AS_SINDEX_ERR_NOTFOUND; // No secondary index for single bin
 	}
 	if (!sbin) {
-		GTRACE(META, debug, "Null Sbin, No Index Matches");
+		cf_debug(AS_SINDEX, "Null Sbin, No Index Matches");
 		return AS_SINDEX_ERR_PARAM;
 	}
 	if (!num_bins) {
-		GTRACE(META, debug, "Zero Bins In Insert Request, No Index Matches");
+		cf_debug(AS_SINDEX, "Zero Bins In Insert Request, No Index Matches");
 		return AS_SINDEX_ERR_PARAM;
 	}
-	GTRACE(META, debug, "Searching for matching index for sbin");
+	cf_debug(AS_SINDEX, "Searching for matching index for sbin");
 
 	SINDEX_GRLOCK();
 	int nmatch = 0;
@@ -436,7 +436,7 @@ as_sindex__get_simatches_by_sbin(as_namespace *ns, const char *set,
 	SINDEX_GUNLOCK();
 
 	if (nmatch == 0) {
-		GTRACE(META, debug, "No Matching Index Found");
+		cf_debug(AS_SINDEX, "No Matching Index Found");
 		return AS_SINDEX_ERR_NOTFOUND;
 	} else {
 		*matches = nmatch;
@@ -517,16 +517,16 @@ as_sindex__skey_from_rd(as_sindex_metadata *imd, as_sindex_key *skey,
 			ret = as_sindex_sbin_from_bin(imd->si->ns, imd->set,
 											b, &skey->b[i]);
 			if (ret != AS_SINDEX_OK) {
-				SITRACE(imd->si, DML, debug, "Warning: Did not find matching index for %s", imd->bnames[i]);
+				cf_debug(AS_SINDEX, "Warning: Did not find matching index for %s", imd->bnames[i]);
 				cf_warning(AS_SINDEX, "Warning: Did not find matching index for %s", imd->bnames[i]);
 				ret = AS_SINDEX_ERR_NOTFOUND; goto Cleanup;
 			}
 		} else if (!b) {
-			SITRACE(imd->si, DML, debug, "No bin for %s", imd->bnames[i]);
+			cf_debug(AS_SINDEX, "No bin for %s", imd->bnames[i]);
 			ret = AS_SINDEX_ERR_BIN_NOTFOUND;
 			goto Cleanup;
 		} else {
-			SITRACE(imd->si, DML, debug, "%d != %d",
+			cf_debug(AS_SINDEX, "%d != %d",
 							as_bin_get_particle_type(b),
 							as_sindex_pktype_from_sktype(imd->btype[i]));
 			ret = AS_SINDEX_ERR_TYPE_MISMATCH;
@@ -545,7 +545,7 @@ Cleanup:
 int
 as_sindex__skey_from_sbin(as_sindex_key *skey, int idx, as_sindex_bin *sbin)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex__skey_from_sbin");
+	cf_debug(AS_SINDEX, "as_sindex__skey_from_sbin");
 	skey->b[idx].id     = sbin->id;
 	skey->b[idx].type   = sbin->type;
 	skey->b[idx].u.i64  = sbin->u.i64;
@@ -610,7 +610,7 @@ as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 		}
 		strncpy(bname, imd->bnames[i], bname_len);
 		imd->binid[i] = as_bin_get_or_assign_id(ns, bname);
-		SITRACE(imd->si, META, debug, " Assigned %d for %s %s", imd->binid[i], imd->bnames[i], bname);
+		cf_debug(AS_SINDEX, " Assigned %d for %s %s", imd->binid[i], imd->bnames[i], bname);
 	}
 	for (i = imd->num_bins; i < AS_SINDEX_BINMAX; i++) {
 		imd->binid[i] = -1;
@@ -651,7 +651,7 @@ as_sindex__op_by_skey(as_sindex   *si, as_sindex_key *skey,
 		ret       = ai_btree_delete(imd, pimd, skey,(void *)&rd->keyd);
 		SINDEX_UNLOCK(&pimd->slock);
 		if (ret != AS_SINDEX_OK) {
-			SITRACE(si, DML, debug, "AS_SINDEX_OP_DELETE: Fail %d", ret);
+			cf_debug(AS_SINDEX, "AS_SINDEX_OP_DELETE: Fail %d", ret);
 		}
 	} else if (op == AS_SINDEX_OP_INSERT) {
 		if (si->enable_histogram) {
@@ -661,14 +661,14 @@ as_sindex__op_by_skey(as_sindex   *si, as_sindex_key *skey,
 		ret       = ai_btree_put(imd, pimd, skey, (void *)&rd->keyd);
 		SINDEX_UNLOCK(&pimd->slock);
 		if (ret != AS_SINDEX_OK) {
-			SITRACE(si, DML, debug, "AS_SINDEX_OP_INSERT: Fail %d", ret);
+			cf_debug(AS_SINDEX, "AS_SINDEX_OP_INSERT: Fail %d", ret);
 		}
 	} else {
 		cf_warning(AS_SINDEX, "Unimplemented op %d on the index %s, skipped",
 				   op, imd->iname);
 	}
 	as_sindex__process_ret(si, ret, op, starttime, __LINE__);
-	SITRACE(si, DML, debug, " Secondary Index Op Finish------------- ");
+	cf_debug(AS_SINDEX, " Secondary Index Op Finish------------- ");
 	SINDEX_UNLOCK(&imd->slock);
 	as_sindex__skey_release(skey);
 	return AS_SINDEX_OK;
@@ -692,7 +692,7 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set,
 		return AS_SINDEX_ERR_PARAM;
 	}
 	if (numbins == 0) {
-		GTRACE(META, debug, "Insert of 0 bins. No-op");
+		cf_debug(AS_SINDEX, "Insert of 0 bins. No-op");
 		return AS_SINDEX_ERR_PARAM;
 	}
 
@@ -715,13 +715,13 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set,
 					   simatches[i]);
 			continue;
 		}
-		SITRACE(si, DML, debug, " Secondary Index Op Start------------- ");
+		cf_debug(AS_SINDEX, " Secondary Index Op Start------------- ");
 		// single column index special case
 		as_sindex_key skey; skey.num_binval = 0;
 		ret[i] = as_sindex__skey_from_sbin_rd(imd, numbins, sbin, rd, &skey);
 		// Record may not have all bins for the selected index
 		if (AS_SINDEX_OK != ret[i]) {
-			SITRACE(si, DML, debug, "No matching skey could be formed");
+			cf_debug(AS_SINDEX, "No matching skey could be formed");
 			continue;
 		}
         ret[i] = as_sindex__op_by_skey(si, &skey, rd, op);
@@ -962,7 +962,7 @@ as_sindex_reserve(as_sindex *si, char *fname, int lineno)
 {
 	if (si->imd) cf_rc_reserve(si->imd);
 	int count = cf_rc_count(si->imd);
-	SITRACE(si, RESERVE, debug, "Index %s in %d state Reserved to reference count %d < 2 at %s:%d", si->imd->iname, si->state, count, fname, lineno);
+	cf_debug(AS_SINDEX, "Index %s in %d state Reserved to reference count %d < 2 at %s:%d", si->imd->iname, si->state, count, fname, lineno);
 	return AS_SINDEX_OK;
 }
 
@@ -1009,7 +1009,7 @@ as_sindex_release(as_sindex *si, char *fname, int lineno)
 	}
 	else {
 		SINDEX_RLOCK(&si->imd->slock);
-		SITRACE(si, RESERVE, debug, "Index %s in %d state Released "
+		cf_debug(AS_SINDEX, "Index %s in %d state Released "
 					"to reference count %d < 2 at %s:%d",
 					si->imd->iname, si->state, val, fname, lineno);
 		// Display a warning when rc math is messed-up during sindex-delete
@@ -1825,7 +1825,7 @@ as_sindex_put_by_sbin(as_namespace *ns, const char *set,
 		int numbins, as_sindex_bin *sbin, as_storage_rd *rd)
 {
 	int ret;
-	GTRACE(CALLSTACK, debug, "Insert into secondary index for namespace %s",ns->name);
+	cf_debug(AS_SINDEX, "Insert into secondary index for namespace %s",ns->name);
 	ret = as_sindex__op_by_sbin(ns, set, numbins, sbin, rd,
 			AS_SINDEX_OP_INSERT);
 	// it is ok not to find index
@@ -1842,7 +1842,7 @@ as_sindex_delete_by_sbin(as_namespace *ns, const char *set,
 		as_storage_rd *rd)
 {
 	int ret;
-	GTRACE(CALLSTACK, debug, "as_sindex_delete_by_sbin");
+	cf_debug( AS_SINDEX, "as_sindex_delete_by_sbin");
 	ret = as_sindex__op_by_sbin(ns, set, numbins, sbin, rd,
 			AS_SINDEX_OP_DELETE);
 	// it is ok not to find index
@@ -1857,7 +1857,7 @@ as_sindex_update_by_sbin(as_namespace *ns, const char *set,
 					int nbins, as_sindex_bin *nsbin,
 					as_storage_rd *rd)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_update_by_sbin");
+	cf_debug(AS_SINDEX, "as_sindex_update_by_sbin");
 
 	// walk through the sbin and filter out duplicates if value matches.
 	
@@ -1882,7 +1882,7 @@ as_sindex_update_by_sbin(as_namespace *ns, const char *set,
 as_sindex *
 as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_from_range");
+	cf_debug(AS_SINDEX, "as_sindex_from_range");
 	if (ns->single_bin) return NULL;
 	as_sindex *si = as_sindex__lookup(ns, NULL, srange->start.id, set, 
 						as_sindex_sktype_from_pktype(srange->start.type), 
@@ -1929,12 +1929,12 @@ as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange)
 as_sindex *
 as_sindex_from_msg(as_namespace *ns, as_msg *msgp)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_from_msg");
+	cf_debug(AS_SINDEX, "as_sindex_from_msg");
 	as_msg_field *ifp  = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_INDEX_NAME);
 	as_msg_field *sfp  = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_SET);
 
 	if (!ifp) {
-		GTRACE(QUERY, debug, "Index name not found in the query request");
+		cf_debug(AS_SINDEX, "Index name not found in the query request");
 		return NULL;
 	}
 
@@ -1968,7 +1968,7 @@ as_sindex_from_msg(as_namespace *ns, as_msg *msgp)
 int
 as_sindex_range_free(as_sindex_range **range)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_range_free");
+	cf_debug(AS_SINDEX, "as_sindex_range_free");
 	as_sindex_range *sk = (*range);
 	as_sindex_sbin_freeall(&sk->start, sk->num_binval);
 	as_sindex_sbin_freeall(&sk->end, sk->num_binval);
@@ -2028,7 +2028,7 @@ as_sindex_assert_query(as_sindex *si, as_sindex_range *range)
 cf_vector *
 as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_binlist_from_msg");
+	cf_debug(AS_SINDEX, "as_sindex_binlist_from_msg");
 	as_msg_field *bfp = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_QUERY_BINLIST);
 	if (!bfp) {
 		return NULL;
@@ -2046,11 +2046,11 @@ as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp)
 		data     += binnamesz;
 	}
 
-	GTRACE(QUERY, debug, "Queried Bin List %d ", numbins);
+	cf_debug(AS_SINDEX, "Queried Bin List %d ", numbins);
 	for (int i = 0; i < cf_vector_size(binlist); i++) {
 		char binname[AS_ID_BIN_SZ];
 		cf_vector_get(binlist, i, (void*)&binname);
-		GTRACE(QUERY, debug,  " String Queried is |%s| \n", binname);
+		cf_debug(AS_SINDEX,  " String Queried is |%s| \n", binname);
 	}
 
 	return binlist;
@@ -2070,7 +2070,7 @@ as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp)
 int
 as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_range_from_msg");
+	cf_debug(AS_SINDEX, "as_sindex_range_from_msg");
 	srange->num_binval = 0;
 	// getting ranges
 	as_msg_field *rfp = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_INDEX_RANGE);
@@ -2146,7 +2146,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			} else {
 				srange->isrange = TRUE;
 			}
-			GTRACE(QUERY, debug, "Range is equal %d,%d",
+			cf_debug(AS_SINDEX, "Range is equal %d,%d",
 								start->u.i64, end->u.i64);
 		} else if (type == AS_PARTICLE_TYPE_STRING) {
 			// get start point
@@ -2170,7 +2170,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				goto Cleanup;
 			}
 			cf_digest_compute(start_binval, startl, &(start->digest));
-			GTRACE(QUERY, debug, "Range is equal %s ,%s",
+			cf_debug(AS_SINDEX, "Range is equal %s ,%s",
                                start_binval, end_binval);
 		} else {
 			cf_warning(AS_SINDEX, "Only handle String and Numeric type");
@@ -2202,7 +2202,7 @@ Cleanup:
 int
 as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **srange)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_rangep_from_msg");
+	cf_debug(AS_SINDEX, "as_sindex_rangep_from_msg");
 	*srange         = cf_malloc(sizeof(as_sindex_range));
 	if (!(*srange)) {
 		cf_warning(AS_SINDEX,
@@ -2222,7 +2222,7 @@ as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **sran
 int
 as_sindex_sbin_from_op(as_msg_op *op, as_sindex_bin *sbin, int binid)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_sbin_from_op");
+	cf_debug(AS_SINDEX, "as_sindex_sbin_from_op");
 	sbin->id    = binid;
 	sbin->type  = op->particle_type;
 
@@ -2260,9 +2260,9 @@ as_sindex_sbin_from_op(as_msg_op *op, as_sindex_bin *sbin, int binid)
 int
 as_sindex_sbin_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin *sbin)
 {
-	GTRACE(CALLSTACK, debug, "as_sindex_sbin_from_bin");
+	cf_debug(AS_SINDEX, "as_sindex_sbin_from_bin");
 	if (!b) {
-		GTRACE(META, debug, " Null Bin Passed, No sbin created");
+		cf_debug(AS_SINDEX, " Null Bin Passed, No sbin created");
 		return AS_SINDEX_ERR_BIN_NOTFOUND;
 	}
 	
@@ -2318,7 +2318,7 @@ as_sindex_sbin_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex_
 			}
 		}
 	} else {
-		GTRACE(META, debug, " Bin Not In Use");
+		cf_debug(AS_SINDEX, " Bin Not In Use");
 		return AS_SINDEX_ERR_PARAM;
 	}
 }
@@ -2337,7 +2337,7 @@ as_sindex_sbin_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, as
 	for (uint16_t i = from_bin; i < to_bin; i++) {
 		as_bin *b = &rd->bins[i];
 		if( as_sindex_sbin_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns), b, &delbin[count] ) != AS_SINDEX_OK) {
-			GTRACE(CALLER, debug, "Failed to get sbin ");
+			cf_debug(AS_SINDEX, "Failed to get sbin ");
 		} else {
 			count++;
 		}

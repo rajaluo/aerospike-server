@@ -3114,7 +3114,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 					}
 					else {
 						if (sindex_ret == AS_SINDEX_ERR_NOTFOUND) {
-							GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 						}
 					}
 				}
@@ -3140,7 +3140,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 				else {
 					check_update = false;
 					if (sindex_ret == AS_SINDEX_ERR_NOTFOUND) {
-						GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+						cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 					}
 				}
 

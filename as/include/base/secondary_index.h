@@ -324,37 +324,6 @@ typedef struct as_sindex_query_context_s {
 	cf_digest        bdig;
 } as_sindex_qctx;
 
-// Tracing Infrastruture 
-#define AS_SINDEX_TRACE_LOCK     0x01  // 1
-#define AS_SINDEX_TRACE_RESERVE  0x02  // 2
-#define AS_SINDEX_TRACE_META     0x04  // 4
-#define AS_SINDEX_TRACE_DML      0x08  // 8
-#define AS_SINDEX_TRACE_DEFRAG   0x10  // 16
-#define AS_SINDEX_TRACE_POPULATE 0x20  // 32
-#define AS_SINDEX_TRACE_DUMP     0x40  // 64
-#define AS_SINDEX_TRACE_QUERY    0x80  // 128
-
-#define AS_SINDEX_GTRACE_META      0x01  // 1  
-#define AS_SINDEX_GTRACE_DUMP      0x02  // 2
-#define AS_SINDEX_GTRACE_CALLSTACK 0x04  // 4
-#define AS_SINDEX_GTRACE_CALLER    0x08  // 8
-#define AS_SINDEX_GTRACE_QUERY     0x10  // 16 
-#define AS_SINDEX_GTRACE_UNUSED4   0x20  // 32
-#define AS_SINDEX_GTRACE_UNUSED5   0x40  // 64
-#define AS_SINDEX_GTRACE_UNUSED6   0x80  // 128
-
-#define GTRACE(mode, type, ...)   \
-	cf_ ##type(AS_SINDEX, __VA_ARGS__);        
-
-#define SITRACE(si, mode, type, ...)    \
-	cf_ ##type(AS_SINDEX, __VA_ARGS__);  
-
-/* Index iterator Abstraction */
-typedef struct as_sindex_iter_s {
-	void      *iter;
-	as_sindex *si;
-} as_sindex_iter;
-
 /*
  * The range structure used to define the lower and upper limit
  * along with the key types. 

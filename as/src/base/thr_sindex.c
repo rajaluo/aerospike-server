@@ -295,7 +295,7 @@ as_sindex_get_pimd_to_defrag(as_namespace *ns, int *si_index, int *p_index, as_s
 void *
 as_sindex__defrag_fn(void *udata)
 {
-	GTRACE(CALLSTACK, debug, "Secondary index defrag thread started !!");
+	cf_debug(AS_SINDEX, "Secondary index defrag thread started !!");
 	g_config.sindex_gc_enable_histogram = false;
 
 	char hist_name[64];

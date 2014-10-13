@@ -2706,12 +2706,12 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 				}
 				SINDEX_GUNLOCK();
 
-				GTRACE(CALLER, debug,
+				cf_debug(AS_SINDEX,
 						"Delete @ %s %d digest %ld", __FILE__, __LINE__, *(uint64_t *)&rd.keyd);
 				sindex_ret = as_sindex_delete_by_sbin(ns, set_name,
 						oldbin_cnt, oldbin, &rd);
 				if (sindex_ret != AS_SINDEX_OK)
-					GTRACE(CALLER, debug,
+					cf_debug(AS_SINDEX,
 							"Failed: %d", as_sindex_err_str(sindex_ret));
 				as_sindex_sbin_freeall(oldbin, oldbin_cnt);
 			}
@@ -3807,7 +3807,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 					oldbin_cnt++;
 				}
 				else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-					GTRACE(CALLER, debug, "failed to get sbin with error %d", sindex_ret);
+					cf_debug(AS_SINDEX, "failed to get sbin with error %d", sindex_ret);
 				}
 			}
 		}
@@ -3838,7 +3838,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 									&rd.bins[i], &oldbin[oldbin_cnt]);
 							if (sindex_ret == AS_SINDEX_OK) oldbin_cnt++;
 							else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-								GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+								cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 							}
 						}
 						as_bin_destroy(&rd, i);
@@ -3869,7 +3869,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 							oldbin_cnt++;
 						}
 						else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-							GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 						}
 					}
 					as_particle_frombuf(b, op->particle_type,
@@ -3889,7 +3889,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 						else {
 							check_update = false;
 							if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-								GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+								cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 							}
 						}
 					}
@@ -3958,7 +3958,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 								b, &newbin[newbin_cnt]);
 						if (sindex_ret == AS_SINDEX_OK)  newbin_cnt++;
 						else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-							GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 						}
 					}
 					rd.write_to_device = true;
@@ -3974,7 +3974,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 								b, &oldbin[oldbin_cnt]);
 						if (sindex_ret == AS_SINDEX_OK) oldbin_cnt++;
 						else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-							GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 						}
 					}
 					int modify_ret = as_particle_increment(b, AS_PARTICLE_TYPE_INTEGER, p_op_value, value_sz, op->op == AS_MSG_OP_MC_INCR);
@@ -3984,7 +3984,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 									b, &newbin[newbin_cnt]);
 							if(sindex_ret == AS_SINDEX_OK) newbin_cnt++;
 							else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-								GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+								cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 							}
 						}
 						rd.write_to_device = true;
@@ -4012,7 +4012,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 								b, &oldbin[oldbin_cnt]);
 						if (sindex_ret == AS_SINDEX_OK) oldbin_cnt++;
 						else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-							GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 						}
 					}
 
@@ -4030,7 +4030,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 									b, &newbin[newbin_cnt]);
 							if (sindex_ret == AS_SINDEX_OK) newbin_cnt++;
 							else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-								GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
+								cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
 							}
 						}
 					} else {
@@ -4085,14 +4085,14 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			}
 		}
 		// delete should precede insert
-		GTRACE(CALLER, debug, "Delete bin count = %d, Inserted bin count = %d at %s", oldbin_cnt, newbin_cnt, journal ? "prole" : "master");
+		cf_debug(AS_SINDEX, "Delete bin count = %d, Inserted bin count = %d at %s", oldbin_cnt, newbin_cnt, journal ? "prole" : "master");
 		if (oldbin_cnt) {
-			GTRACE(CALLER, debug, "Delete @ %s %d digest %ld", __FILE__, __LINE__, *(uint64_t*)&rd.keyd);
+			cf_debug(AS_SINDEX, "Delete @ %s %d digest %ld", __FILE__, __LINE__, *(uint64_t*)&rd.keyd);
 			sindex_ret = as_sindex_delete_by_sbin(ns, set_name, oldbin_cnt, oldbin, &rd);
 			as_sindex_sbin_freeall(oldbin, oldbin_cnt);
 		}
 		if (newbin_cnt) {
-			GTRACE(CALLER, debug, "Insert @ %s %d digest %ld", __FILE__, __LINE__, *(uint64_t*)&rd.keyd);
+			cf_debug(AS_SINDEX, "Insert @ %s %d digest %ld", __FILE__, __LINE__, *(uint64_t*)&rd.keyd);
 			sindex_ret = as_sindex_put_by_sbin(ns, set_name, newbin_cnt, newbin, &rd);
 			as_sindex_sbin_freeall(newbin, newbin_cnt);
 		}

@@ -647,7 +647,7 @@ ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx
 		pimd->imatch = find_partial_index(tmatch, ic);
 	}
 	if (pimd->imatch == -1) {
-		SITRACE(imd->si, META, debug, "Index%s: %s not found", imd->iname ? "" : "column-name", imd->iname ? iname : cname);
+		cf_debug(AS_SINDEX, "Index%s: %s not found", imd->iname ? "" : "column-name", imd->iname ? iname : cname);
 		goto END;
 	}
 
@@ -927,7 +927,7 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, as_sindex_key *
 		ret = AS_SINDEX_ERR_NO_MEMORY;
 		goto END;
 	}
-	SITRACE(imd->si, DML, debug, "ai__btree_insert(N): %s key: %d val %lu", imd->iname, skey->b[0].u.i64, uk);
+	cf_debug(AS_SINDEX, "ai__btree_insert(N): %s key: %d val %lu", imd->iname, skey->b[0].u.i64, uk);
 
 END:
 
@@ -942,7 +942,7 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, as_sindex_ke
 	uint64_t bv = skey->b[0].u.i64;
 
 	if (!pimd->ibtr) {
-		SITRACE(imd->si, DML, debug, "AI_BTREE_FAIL: Delete failed no ibtr %d %lu", bv, uk);
+		cf_debug(AS_SINDEX, "AI_BTREE_FAIL: Delete failed no ibtr %d %lu", bv, uk);
 		return AS_SINDEX_KEY_NOTFOUND;
 	}
 	ai_obj ncol;
@@ -959,7 +959,7 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, as_sindex_ke
 	ret = reduced_iRem(pimd->ibtr, &ncol, &apk);
 	ulong ab = pimd->ibtr->msize + pimd->ibtr->nsize;
 	as_sindex_release_data_memory(imd, (bb - ab));
-	SITRACE(imd->si, DML, debug, "ai__btree_delete(N): key: %d - %lu", bv, uk);
+	cf_debug(AS_SINDEX, "ai__btree_delete(N): key: %d - %lu", bv, uk);
 	return ret;
 }
 
@@ -1284,7 +1284,7 @@ ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
 			goto END;
 		}
 		// Add (cmatch+1) always non-zero
-		SITRACE(imd->si, META, debug, "Added Mapping [BINNAME=%s: BINID=%d: COLID%d] [IMATCH=%d: SIMATCH=%d: INAME=%s]",
+		cf_debug(AS_SINDEX, "Added Mapping [BINNAME=%s: BINID=%d: COLID%d] [IMATCH=%d: SIMATCH=%d: INAME=%s]",
 				imd->bnames[0], imd->binid[0], rt->col_count, Num_indx - 1, simatch, imd->iname);
 	}
 
@@ -1300,7 +1300,7 @@ ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
 	}
 
 	*bimatch = match_partial_index_name(iname);
-	GTRACE(META, debug, "cr8SecIndex: iname: %s bname: %s type: %d ns: %s set: %s tmatch: %d bimatch: %d",
+	cf_debug(AS_SINDEX, "cr8SecIndex: iname: %s bname: %s type: %d ns: %s set: %s tmatch: %d bimatch: %d",
 		   imd->iname, imd->bnames[0], imd->btype[0], imd->ns_name, imd->set, tmatch, *bimatch);
 
 	ret = AS_SINDEX_OK;
