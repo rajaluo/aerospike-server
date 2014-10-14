@@ -552,7 +552,6 @@ as_sindex__skey_from_sbin(as_sindex_key *skey, int idx, as_sindex_bin *sbin)
 	if (sbin->type == AS_PARTICLE_TYPE_STRING) {
 		memcpy(&skey->b[idx].digest, &sbin->digest, AS_DIGEST_KEY_SZ);
 	}
-	skey->b[idx].flag   = 0;
 	return AS_SINDEX_OK;
 }
 
@@ -2233,12 +2232,10 @@ as_sindex_sbin_from_op(as_msg_op *op, as_sindex_bin *sbin, int binid)
 			cf_warning( AS_SINDEX, " sindex key size out of bounds %d ", valsz);
 			return AS_SINDEX_ERR_PARAM;
 		}
-		sbin->flag |= SINDEX_FLAG_BIN_ISVALID;
 		cf_digest_compute(binval, valsz, &sbin->digest);
 	} else if (op->particle_type == AS_PARTICLE_TYPE_INTEGER) {
 		sbin->u.i64 = __cpu_to_be64(
 						*(uint64_t *)as_msg_op_get_value_p(op));
-		sbin->flag |= SINDEX_FLAG_BIN_ISVALID;
 	} else {
 		cf_warning(AS_SINDEX, "Invalid particle type in op");
 		return AS_SINDEX_ERR_PARAM;
@@ -2285,7 +2282,6 @@ as_sindex_sbin_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex_
 		}
 
 		sbin->id    = b->id;
-		sbin->flag &= ~SINDEX_FLAG_BIN_ISVALID;
 		uint32_t valsz;
 		as_particle_tobuf(b, 0, &valsz);
 		if ( valsz < 0 || valsz > AS_SINDEX_MAX_STRING_KSIZE) {
@@ -2299,11 +2295,9 @@ as_sindex_sbin_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex_
 				as_particle_tobuf(b, (byte *)&sbin->u.i64, &valsz);
 				uint64_t val    = __cpu_to_be64(sbin->u.i64);
 				sbin->u.i64     = val;
-				sbin->flag     |= SINDEX_FLAG_BIN_ISVALID;
 				return AS_SINDEX_OK;
 			}
 			case AS_PARTICLE_TYPE_STRING: {
-				sbin->flag |= SINDEX_FLAG_BIN_ISVALID;
 				byte* bin_val;
 				as_particle_p_get( b, &bin_val, &valsz);
 				// compute the digest for string type index and store 
@@ -2349,9 +2343,6 @@ as_sindex_sbin_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, as
 int
 as_sindex_sbin_free(as_sindex_bin *sbin)
 {
-	if (sbin->flag & SINDEX_FLAG_BIN_ISVALID) {
-		sbin->flag &= ~SINDEX_FLAG_BIN_ISVALID;
-	}
     return AS_SINDEX_OK;
 }
 
