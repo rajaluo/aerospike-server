@@ -2667,16 +2667,21 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 	// careful with the ref count here: need to increment before every
 	// send except the last
 	int rv = 0;
-	for (int i = 0; i < nodes_sz ; i++) {
-		if (i != nodes_sz - 1) {
+	int index = 0;
+	for (int index = 0; index < nodes_sz ; index++) {
+		if (index != nodes_sz - 1) {
 			msg_incr_ref(m);
 		}
-		rv = as_fabric_send(nodes[i], m, priority);
-		if (0 != rv) goto Cleanup;
+		rv = as_fabric_send(nodes[index], m, priority);
+		if (0 != rv) {
+			goto Cleanup;
+		}
 	}
 	return(0);
 Cleanup:
-	as_fabric_msg_put(m);
+	if (index != nodes_sz - 1) { // It is not last node in the list.
+		as_fabric_msg_put(m);
+	}
 	return(rv);
 }
 
