@@ -86,9 +86,6 @@
 #define STR_ITYPE_OBJECT   "object"
 #define STR_BINTYPE        "bintype"
 
-// Configuration file name
-extern char *g_config_file;
-
 extern int as_nsup_queue_get_size();
 
 // Use the following macro to enforce locking around Info requests at run-time.

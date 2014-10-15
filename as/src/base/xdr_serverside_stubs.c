@@ -71,9 +71,8 @@ void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_no
 {
 }
 
-int as_xdr_start(const char *config_file, const char *error_file, bool isresume, bool isfailover, int caller)
+void as_xdr_start()
 {
-	return -1;
 }
 
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db)

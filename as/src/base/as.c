@@ -137,8 +137,6 @@ const char USAGE[] =
 		"[--instance <0-15>]\n"
 		;
 
-const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
-
 
 //==========================================================
 // Globals.
@@ -148,8 +146,6 @@ const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
 pthread_mutex_t g_NONSTOP;
 bool g_startup_complete = false;
 
-// Configuration file, with which server has started.
-char *g_config_file = NULL;
 
 //==========================================================
 // Forward declarations.
@@ -262,7 +258,6 @@ main(int argc, char **argv)
 
 	int i;
 	int cmd_optidx;
-	const char *config_file = DEFAULT_CONFIG_FILE;
 	bool run_in_foreground = false;
 	bool cold_start_cmd = false;
 	uint32_t instance = 0;
@@ -281,7 +276,7 @@ main(int argc, char **argv)
 			return 1;
 		case 'f':
 			g_config_file = cf_strdup(optarg);
-			cf_assert(config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
+			cf_assert(g_config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
 			break;
 		case 'd':
 			run_in_foreground = true;
@@ -299,14 +294,10 @@ main(int argc, char **argv)
 		}
 	}
 
-	if (!g_config_file) {
-		g_config_file = cf_strdup(DEFAULT_CONFIG_FILE);
-	}
-
 	// Set all fields in the global runtime configuration instance. This parses
 	// the configuration file, and creates as_namespace objects. (Return value
 	// is a shortcut pointer to the global runtime configuration instance.)
-	as_config *c = as_config_init(g_config_file);
+	as_config *c = as_config_init();
 
 #ifdef USE_ASM
 	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
@@ -376,8 +367,7 @@ main(int argc, char **argv)
 			aerospike_build_type, aerospike_build_id);
 
 	// Includes echoing the configuration file to log.
-	as_config_post_process(c, g_config_file);
-
+	as_config_post_process();
 
 	// Write the pid file, if specified.
 	write_pidfile(c->pidfile);
@@ -442,8 +432,7 @@ main(int argc, char **argv)
 	as_nsup_start();			// may send delete transactions to other nodes
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
-
-	as_xdr_start(g_config_file, NULL, true, true, 0 /*Call is at the start of server*/);
+	as_xdr_start();				// XDR may now start
 
 	info_debug_ticker_start();	// only after everything else is started
 

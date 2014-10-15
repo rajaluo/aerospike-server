@@ -30,10 +30,10 @@
 #include "xdr_config.h"
 
 typedef enum xdr_state_e {
-        XDR_COMING_UP,
-        XDR_UP,
-        XDR_GOING_DOWN,
-        XDR_DOWN
+	XDR_COMING_UP,
+	XDR_UP,
+	XDR_GOING_DOWN,
+	XDR_DOWN
 } as_xdr_state; 
 
 int as_xdr_supported();
@@ -47,7 +47,7 @@ int xdr_send_clust_state_change(cf_node node, int8_t change);
 uint64_t xdr_min_lastshipinfo();
 void xdr_clmap_update(int changetype, cf_node succession[], int listsize);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, bool is_delete, uint16_t set_id);
-int as_xdr_start(const char *config_file, const char *error_file, bool isresume, bool isfailover, int caller);
+void as_xdr_start();
 int as_open_namedpipe();
 int as_xdr_stop();
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
