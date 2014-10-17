@@ -1009,6 +1009,9 @@ struct as_namespace_s {
 	cf_atomic_int	ldt_update_reqs;
 
 	cf_atomic_int	ldt_errs;
+
+	cf_atomic_int   ldt_gc_io;
+	cf_atomic_int   ldt_gc_cnt;
 };
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator
