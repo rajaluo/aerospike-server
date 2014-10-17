@@ -269,14 +269,13 @@ main(int argc, char **argv)
 	while (-1 != (i = getopt_long(argc, argv, "", cmd_opts, &cmd_optidx))) {
 		switch (i) {
 		case 'h':
-			// fprintf() since we don't want cf_fault's prefix.
-			fprintf(stderr, "%s\n", HELP);
-			return 1;
+			// printf() since we want stdout and don't want cf_fault's prefix.
+			printf("%s\n", HELP);
+			return 0;
 		case 'v':
-			// fprintf() since we don't want cf_fault's prefix.
-			fprintf(stderr, "%s build %s\n", aerospike_build_type,
-					aerospike_build_id);
-			return 1;
+			// printf() since we want stdout and don't want cf_fault's prefix.
+			printf("%s build %s\n", aerospike_build_type, aerospike_build_id);
+			return 0;
 		case 'f':
 			config_file = cf_strdup(optarg);
 			cf_assert(config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
