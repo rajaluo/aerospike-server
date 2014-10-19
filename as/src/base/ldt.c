@@ -1092,8 +1092,8 @@ as_ldt_is_parent_and_version_match(uint64_t subrec_version, as_index_tree *tree,
 		goto Cleanup;
 	}
 
-	cf_detail(AS_LDT, "LDT_SUB_GC Subrec and parent version check %"PRIx64" %ld != %ld %p",
-			  *(uint64_t *)keyd, parent_version, subrec_version, rd.r);
+	cf_detail_digest(AS_LDT, keyd, "LDT_SUB_GC Subrec and parent version check %ld != %ld %p",
+			  parent_version, subrec_version, rd.r);
 	if (parent_version == subrec_version) {
 		rv = 0;
 	} else {

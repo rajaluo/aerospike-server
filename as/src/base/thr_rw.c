@@ -2427,16 +2427,26 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 		}
 	}
 
+	uint64_t version_to_set = 0;
 	// Set the ldt prole version if there be need
-	if (is_ldt_parent && linfo->replication_partition_version_match && linfo->ldt_prole_version_set) {
-		int pbytes = as_ldt_parent_storage_set_version(&rd, linfo->ldt_prole_version, p_stack_particles, __FILE__, __LINE__);
+	if (is_ldt_parent) {
+		if (linfo->replication_partition_version_match && linfo->ldt_prole_version_set) {
+			version_to_set = linfo->ldt_prole_version;
+		} else if (!linfo->replication_partition_version_match) {
+			version_to_set = linfo->ldt_source_version;
+		}	
+	}
+	
+	if (version_to_set) {	
+		int pbytes = as_ldt_parent_storage_set_version(&rd, version_to_set, p_stack_particles, __FILE__, __LINE__);
 		if (pbytes < 0) {
 			cf_warning(AS_LDT, "write_local_pickled: LDT Parent storage version set failed %d", pbytes);	
 			// Todo Rollback
 		} else {
 			p_stack_particles += pbytes;
 		}
-	} 
+		cf_detail_digest(AS_LDT, keyd, "Wrote the destination version %d %d %ld", linfo->replication_partition_version_match, linfo->ldt_prole_version_set, linfo->ldt_prole_version);
+	}
 
 Out:
 	if (is_create && do_destroy) {
