@@ -777,7 +777,7 @@ as_ldt_set_in_map(as_map *prop_map, char prop_type, void *value)
  * 			>0  number of bytes copied in case of success
  */
 int
-as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8_t *pp_stack_particles)
+as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8_t *pp_stack_particles, char *fname, int lineno)
 {
 	// No op when version is disabled
 	if (!rd->ns->ldt_enabled)
@@ -786,7 +786,7 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	as_bin * binp           = as_bin_get(rd, (byte *)REC_LDT_CTRL_BIN, strlen(REC_LDT_CTRL_BIN));
 	int rv                  = 0;
 	if (!binp) {
-		cf_warning(AS_LDT, "as_ldt_parent_storage_set_version: [LDT Control bin not found]");
+		cf_warning_digest(AS_LDT, &rd->keyd, "as_ldt_parent_storage_set_version: [LDT Control bin not found %s %d]", fname, lineno);
 		return -1;
 	}
 	as_val * valp           = as_val_frombin( binp );
@@ -872,7 +872,7 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
  * Parameter: vinfo (out) gets populated with the version information
  */
 int
-as_ldt_parent_storage_get_version(as_storage_rd *rd, uint64_t *ldt_version)
+as_ldt_parent_storage_get_version(as_storage_rd *rd, uint64_t *ldt_version, bool no_fail, char *fname, int lineno)
 {
 	// No op when version is disabled
 	if (!rd->ns->ldt_enabled)
@@ -883,7 +883,9 @@ as_ldt_parent_storage_get_version(as_storage_rd *rd, uint64_t *ldt_version)
 	int       rv            = 0;
 	if (!binp) {
 		if (as_ldt_record_is_parent(rd->r)) {
-			cf_warning_digest(AS_LDT, &rd->keyd, "Control bin not found LDT parent record");
+			if (no_fail) {
+				cf_warning_digest(AS_LDT, &rd->keyd, "Control bin not found LDT parent record %s %d", fname, lineno);
+			}
 		} else {
 			cf_detail(AS_LDT, "Control bin not found");
 		}
@@ -891,7 +893,9 @@ as_ldt_parent_storage_get_version(as_storage_rd *rd, uint64_t *ldt_version)
 	} else {
 		const as_val * valp           = as_val_frombin( binp );
 		if (!valp) {
-			cf_warning(AS_LDT, "Property Bin %s Corrupted", REC_LDT_CTRL_BIN);
+			if (no_fail) {
+				cf_warning(AS_LDT, "Property Bin %s Corrupted", REC_LDT_CTRL_BIN);
+			}
 			return -2;
 		}
 
@@ -1081,7 +1085,7 @@ as_ldt_is_parent_and_version_match(uint64_t subrec_version, as_index_tree *tree,
 	rd.bins = as_bin_get_all(r, &rd, stack_bins);
 
 	uint64_t parent_version = 0;
-	rv = as_ldt_parent_storage_get_version(&rd, &parent_version);
+	rv = as_ldt_parent_storage_get_version(&rd, &parent_version, false, __FILE__, __LINE__);
 	if (0 != rv) {
 		cf_detail(AS_LDT, "LDT_SUB_GC Something wrong could not get LDT parent version rv = %d", rv);
 		goto Cleanup;

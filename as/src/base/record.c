@@ -1024,6 +1024,7 @@ as_record_apply_properties(as_record *r, as_namespace *ns, const as_rec_props *p
 	}
 
 	if (ns->ldt_enabled) {
+		as_index_clear_flags(r, AS_INDEX_FLAG_SPECIAL_BINS | AS_INDEX_FLAG_CHILD_REC | AS_INDEX_FLAG_CHILD_ESR);
 		as_ldt_record_set_rectype_bits(r, p_rec_props);
 	}
 }
@@ -1323,36 +1324,24 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 	uint8_t *p_stack_particles = stack_particles;
 
 	as_record_set_properties(rd, &c->rec_props);
-	as_record_unpickle_replace(r, rd, c->record_buf, c->record_buf_sz, &p_stack_particles, has_sindex);
+	int rv = as_record_unpickle_replace(r, rd, c->record_buf, c->record_buf_sz, &p_stack_particles, has_sindex);
+	if (0 != rv) {
+		cf_warning_digest(AS_LDT, &rd->keyd, "Unpickled replace failed rv=%d",rv);
+		as_storage_record_close(r, rd);
+		return rv;
+    }
 
 	// Update the version in the parent. In case it is incoming migration
 	//
 	// Should it be done only in case of migration ?? for LDT currently
 	// flatten gets called only for migration .. because there is no duplicate
 	// resolution .. there is only winner resolution
-	if (COMPONENT_IS_MIG(c) && COMPONENT_IS_LDT_PARENT(c)) {
-
-		uint64_t old_version = 0;
-		if (as_ldt_parent_storage_get_version(rd, &old_version)) {
-			cf_warning(AS_RECORD, "Could not get the version in the parent record");
-		}
-		cf_detail_digest(AS_MIGRATE, &rd->keyd, "LDT_MIGRATION Parent digest %"PRIx64" compared to ver [%ld %ld] "
-				"gen [%d %d] void_time [%d %d]", old_version, c->version,
-				r->generation, c->generation, r->void_time, c->void_time);
-
-		if (old_version != c->version) {
-			int pbytes = as_ldt_parent_storage_set_version(rd, c->version, p_stack_particles);
-			if (pbytes < 0) {
-				cf_warning_digest(AS_LDT, &rd->keyd, "LDT_MERGE Failed to write version in rv=%d", pbytes);
-			} else {
-				p_stack_particles += pbytes;			
-#if 0
-				uint64_t check_version = 0;
-				if (as_ldt_parent_storage_get_version(rd, &check_version)) {
-					cf_detail(AS_MIGRATE, "Not able to find version in parent record");
-				}
-#endif
-			}
+	if (COMPONENT_IS_MIG(c) && as_ldt_record_is_parent(rd->r)) {
+		int pbytes = as_ldt_parent_storage_set_version(rd, c->version, p_stack_particles, __FILE__, __LINE__);
+		if (pbytes < 0) {
+			cf_warning_digest(AS_LDT, &rd->keyd, "LDT_MERGE Failed to write version in rv=%d", pbytes);
+		} else {
+			p_stack_particles += pbytes;			
 		}
 	}
 
@@ -1553,15 +1542,14 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 
 			cf_detail_digest(AS_RECORD, keyd, "Local (%d:%d) Remote (%d:%d)", r->generation, r->void_time, c->generation, c->void_time);
 
-			if (COMPONENT_IS_LDT(c)) {
-				cf_detail(AS_RECORD, "Flatten Record Remote LDT Winner @ %d", *winner_idx);
-				rv = as_ldt_flatten_component(rsv, &rd, &r_ref, c, &delete_record);
-			} else {
-				cf_detail(AS_RECORD, "Flatten Record Remote NON-LDT Winner @ %d", *winner_idx);
-				rv = as_record_flatten_component(rsv, &rd, &r_ref, c, &delete_record);
+			cf_detail(AS_RECORD, "Flatten Record Remote LDT Winner @ %d", *winner_idx);
+			rv = as_record_flatten_component(rsv, &rd, &r_ref, c, &delete_record);
+			// unpickle flatten failed... if this was newly created
+			// destroy and remove it
+			if (rv && !has_local_copy) {
+				as_index_delete(rsv->tree, keyd);
 			}
 			has_local_copy = true;
-			
 		}
 	} else {
 		cf_assert(has_local_copy, AS_RECORD, CF_CRITICAL,

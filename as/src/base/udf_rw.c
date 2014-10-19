@@ -756,10 +756,8 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	if (ret) {
 		cf_warning(AS_LDT, "Pickeling failed with %d", ret);
 		return false;
-	
 	} else {
-	return true;
-
+		return true;
 	}
 }
 
@@ -1013,7 +1011,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		// the property map bin is there. If not there the record is normal
 		// record
 		uint64_t lversion;
-		int rv = as_ldt_parent_storage_get_version(&rd, &lversion);
+		int rv = as_ldt_parent_storage_get_version(&rd, &lversion, false,__FILE__, __LINE__);
 		if (rv == 0) {
 			lrecord.version = lversion;
 		}

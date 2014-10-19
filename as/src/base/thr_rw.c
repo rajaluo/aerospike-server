@@ -2257,7 +2257,7 @@ as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rs
 				// is used @ prole
 				int rv = -1;	
 				if (rd && !is_create) {
-					rv = as_ldt_parent_storage_get_version(rd, &linfo->ldt_prole_version);
+					rv = as_ldt_parent_storage_get_version(rd, &linfo->ldt_prole_version, true ,__FILE__, __LINE__);
 					if (0 == rv) {
 						linfo->ldt_prole_version_set = true;
 					}
@@ -2429,7 +2429,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 
 	// Set the ldt prole version if there be need
 	if (is_ldt_parent && linfo->replication_partition_version_match && linfo->ldt_prole_version_set) {
-		int pbytes = as_ldt_parent_storage_set_version(&rd, linfo->ldt_prole_version, p_stack_particles); 
+		int pbytes = as_ldt_parent_storage_set_version(&rd, linfo->ldt_prole_version, p_stack_particles, __FILE__, __LINE__);
 		if (pbytes < 0) {
 			cf_warning(AS_LDT, "write_local_pickled: LDT Parent storage version set failed %d", pbytes);	
 			// Todo Rollback
