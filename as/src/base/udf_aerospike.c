@@ -700,7 +700,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		// the record. And if it were before size check then this setting of version as well needs to
 		// be backed out.
 		if (as_ldt_record_is_parent(rd->r)) {
-			int rv = as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, urecord->end_particle_data);
+			int rv = as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, urecord->end_particle_data, __FILE__, __LINE__);
 			if (rv < 0) {
 				cf_warning(AS_LDT, "udf_aerospike__apply_update_atomic: Internal Error "
 							" [Failed to set the version on storage rv=%d]... Fail",rv);

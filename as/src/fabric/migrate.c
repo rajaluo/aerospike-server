@@ -618,7 +618,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 	uint64_t new_version = mig->rsv.p->current_outgoing_ldt_version;
 	if (is_parent) {
 		uint64_t old_version = 0;
-		if (as_ldt_parent_storage_get_version(rd, &old_version)) {
+		if (as_ldt_parent_storage_get_version(rd, &old_version, true,__FILE__, __LINE__)) {
 			cf_detail(AS_MIGRATE, "LDT_MIGRATION could not find version in parent record");
 		}
 		if (new_version) {

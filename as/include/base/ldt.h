@@ -74,8 +74,8 @@ extern bool     as_ldt_flag_has_esr        (uint16_t flag);
 extern void     as_ldt_sub_gc_fn           (as_index_ref *r_ref, void *udata);
 extern int      as_ldt_shipop              (write_request *wr, cf_node dest_node);
 
-extern int      as_ldt_parent_storage_set_version (as_storage_rd *rd, uint64_t, uint8_t *);
-extern int      as_ldt_parent_storage_get_version (as_storage_rd *rd, uint64_t *);
+extern int      as_ldt_parent_storage_set_version (as_storage_rd *rd, uint64_t, uint8_t *, char *fname, int lineno);
+extern int      as_ldt_parent_storage_get_version (as_storage_rd *rd, uint64_t *, bool, char *fname, int lineno);
 extern int      as_ldt_subrec_storage_get_digests (as_storage_rd *rd, cf_digest *edigest, cf_digest *pdigest);
 extern void     as_ldt_subrec_storage_validate    (as_storage_rd *rd, char *op);
 
