@@ -174,6 +174,24 @@ ssd_fd_put(drv_ssd *ssd, int fd)
 	cf_queue_push(ssd->fd_q, (void*)&fd);
 }
 
+void
+as_storage_match(as_storage_rd *rd, as_record *r, char *msg) 
+{
+	uint16_t ldt_rectype_bits = 0;
+	uint16_t *ldt_rectype_bits_p = &ldt_rectype_bits;
+	if (rd->rec_props.p_data) { 
+		if (as_rec_props_get_value(&rd->rec_props, CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+					(uint8_t**)&ldt_rectype_bits_p) == 0) {
+		}
+	}
+
+	if ( ((as_index_get_flags(r) ^ *ldt_rectype_bits_p)
+			& (AS_INDEX_FLAG_SPECIAL_BINS | AS_INDEX_FLAG_CHILD_REC | AS_INDEX_FLAG_CHILD_ESR)) 
+		 != 0) {
+		cf_warning_digest(AS_LDT, &rd->keyd, "Storage and disk mismatch %d %d at %s", as_index_get_flags(r), ldt_rectype_bits_p, msg);
+		PRNSTACK();
+	}
+}
 
 // Decide which device a record belongs on.
 static inline int
@@ -2970,6 +2988,9 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	if (props.size != 0) {
 		// Do this early since set-id is needed for the secondary index update.
 		as_record_apply_properties(r, ns, &props);
+	} else {
+		// reset all property related flags
+		as_index_clear_flags(r, AS_INDEX_ALL_FLAGS);	
 	}
 
 	cf_detail(AS_RW, "TO INDEX FROM DISK	Digest=%"PRIx64" bits %d",
@@ -3182,6 +3203,20 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			cf_atomic_int_add(&p_partition->n_bytes_memory, delta_bytes);
 		}
 
+#if 0
+		if (as_ldt_record_is_parent(r)) {
+			uint64_t parent_version = 0;
+			int rv = as_ldt_parent_storage_get_version(&rd, &parent_version, false, __FILE__, __LINE__);
+			if (0 != rv) {
+				cf_warning_digest(AS_LDT, &rd.keyd, "At record open no control bin for parent");
+				PRNSTACK();
+			}
+		}
+
+		rd.rec_props.p_data = props.p_data;
+		rd.rec_props.size = props.size;
+		as_storage_match(&rd, r, "Opening");
+#endif
 		as_storage_record_close(r, &rd);
 	}
 
@@ -4159,6 +4194,17 @@ as_storage_record_close_ssd(as_record *r, as_storage_rd *rd)
 {
 	// All record writes come through here!
 	if (rd->write_to_device && as_bin_inuse_has(rd)) {
+#if 0
+		if (as_ldt_record_is_parent(r)) {
+			uint64_t parent_version = 0;
+			int rv = as_ldt_parent_storage_get_version(rd, &parent_version, false, __FILE__, __LINE__);
+			if (0 != rv) {
+				cf_warning_digest(AS_LDT, &rd->keyd, "At record close no control bin for parent");
+				PRNSTACK();
+			}
+		}
+		as_storage_match(rd, r, "closing");
+#endif
 		ssd_write(r, rd);
 	}
 

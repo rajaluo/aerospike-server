@@ -1038,6 +1038,9 @@ as_record_set_properties(as_storage_rd *rd, const as_rec_props *p_rec_props)
 
 		// Apply the metadata in rec-props to the record.
 		as_record_apply_properties(rd->r, rd->ns, p_rec_props);
+	} else {
+		// reset all property related flags
+		as_index_clear_flags(rd->r, AS_INDEX_ALL_FLAGS);	
 	}
 }
 
