@@ -2320,11 +2320,11 @@ info_security_config_get(cf_dyn_buf *db)
 void
 info_xdr_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "xdr-enable-delete-shipping=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_enable_delete_shipping ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-enable-nsup-delete-shipping=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_enable_nsup_delete_shipping ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-enable-logging=");
+	cf_dyn_buf_append_string(db, "enable-xdr-delete-shipping=");
+	cf_dyn_buf_append_string(db, g_config.xdr_cfg.enable_xdr_delete_shipping ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";xdr-nsup-deletes-enabled=");
+	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_nsup_deletes_enabled ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";enable-xdr-logging=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";stop-writes-noxdr=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
@@ -3409,7 +3409,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "enable-xdr-digest-logging", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "xdr-digest-logging", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Enabling XDR digest logging");
 				g_config.xdr_cfg.xdr_global_enabled = true;
@@ -3480,30 +3480,42 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "xdr-enable-delete-shipping", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "enable-xdr-delete-shipping", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-enable-delete-shipping from %s to %s", bool_val[g_config.xdr_cfg.xdr_enable_delete_shipping], context);
-				g_config.xdr_cfg.xdr_enable_delete_shipping = true;
+				cf_info(AS_INFO, "Changing value of enable-xdr-delete-shipping from %s to %s", bool_val[g_config.xdr_cfg.enable_xdr_delete_shipping], context);
+				g_config.xdr_cfg.enable_xdr_delete_shipping = true;
 			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-enable-delete-shipping from %s to %s", bool_val[g_config.xdr_cfg.xdr_enable_delete_shipping], context);
-				g_config.xdr_cfg.xdr_enable_delete_shipping = false;
+				cf_info(AS_INFO, "Changing value of enable-xdr-delete-shipping from %s to %s", bool_val[g_config.xdr_cfg.enable_xdr_delete_shipping], context);
+				g_config.xdr_cfg.enable_xdr_delete_shipping = false;
 			} else {
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "xdr-enable-nsup-delete-shipping", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "xdr-nsup-deletes-enabled", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-enable-nsup-delete-shipping from %s to %s", bool_val[g_config.xdr_cfg.xdr_enable_nsup_delete_shipping], context);
-				g_config.xdr_cfg.xdr_enable_nsup_delete_shipping = true;
+				cf_info(AS_INFO, "Changing value of xdr-nsup-deletes-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_nsup_deletes_enabled], context);
+				g_config.xdr_cfg.xdr_nsup_deletes_enabled = true;
 			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-enable-nsup-delete-shipping from %s to %s", bool_val[g_config.xdr_cfg.xdr_enable_nsup_delete_shipping], context);
-				g_config.xdr_cfg.xdr_enable_nsup_delete_shipping = false;
+				cf_info(AS_INFO, "Changing value of xdr-nsup-deletes-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_nsup_deletes_enabled], context);
+				g_config.xdr_cfg.xdr_nsup_deletes_enabled = false;
 			} else {
 				goto Error;
 			}
-		}
-		else
+		} else  if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
+			if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
+				g_config.xdr_cfg.xdr_global_enabled = true;
+				as_xdr_set_shipping(true);
+				cf_info(AS_XDR, "XDR Service is Enabled");	
+			} else if (strncmp(context, "false", 5)==0 || strncmp(context, "no", 2)==0) {
+				g_config.xdr_cfg.xdr_global_enabled = false;
+				as_xdr_set_shipping(false);
+				cf_info(AS_XDR, "XDR Service is Disabled");	
+			} else {
+				goto Error;
+			}
+        	} else {
 			goto Error;
+		}
 	}
 	else
 		goto Error;

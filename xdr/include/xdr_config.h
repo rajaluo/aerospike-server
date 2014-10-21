@@ -87,8 +87,6 @@ typedef enum {
 	XDR_CASE_DATACENTER_BEGIN,
 	XDR_CASE_MAX_RECS_INFLIGHT_OLD,
 	XDR_CASE_MAX_RECS_INFLIGHT,
-	XDR_CASE_DIGESTLOG_OVERWRITE,
-	XDR_CASE_DIGESTLOG_PERSIST,
 	XDR_CASE_FORWARD_XDR_WRITES,
 	XDR_CASE_THREADS_OLD,
 	XDR_CASE_THREADS,
@@ -163,7 +161,6 @@ typedef struct xdr_new_config_s {
 	int		xdr_max_recs_inflight;
 	int		xdr_read_batch_size;
 	int		xdr_threads;
-	int     	xdr_read_threads;   // Configured number of threads
 	int		xdr_ship_threads;   // Coinfigured number of shipper threads·
 	int		xdr_ship_slab_size; // Coinfigured size of shipper thread slab size·
 } xdr_new_config;
@@ -204,9 +201,9 @@ typedef struct xdr_config {
 	int 	xdr_internal_shipping_delay;
 	int	xdr_flag;
 	xdr_new_config xdr_new_cfg;
-	bool	xdr_enable_shipping;
-	bool	xdr_enable_delete_shipping;
-	bool	xdr_enable_nsup_delete_shipping;
+	bool	enable_xdr_shipping;
+	bool	enable_xdr_delete_shipping;
+	bool	xdr_nsup_deletes_enabled;
 	int 	xdr_hotkey_maxskip;
 	int 	xdr_batch_retry_sleep;
 	int 	xdr_batch_num_retry;
@@ -215,10 +212,8 @@ typedef struct xdr_config {
 	int		xdr_info_request_timeout_ms;
 	int     xdr_compression_threshold;
 	char	*xdr_pidfile;
-	int     xdr_read_threads;
 	char	*xdr_read_mode_string;
 	bool	xdr_do_version_check;
-	bool 	xdr_write_create_or_replace;
 } xdr_config;
 
 // Prototypes

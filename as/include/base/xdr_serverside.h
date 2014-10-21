@@ -52,3 +52,4 @@ int as_open_namedpipe();
 int as_xdr_stop();
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
 int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr);
+int as_xdr_set_shipping(bool shipping_status);

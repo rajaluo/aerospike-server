@@ -86,6 +86,11 @@ int as_xdr_stop()
 	return -1;
 }
 
+int as_xdr_set_shipping(bool shipping_status)
+{
+	return 0;
+}
+
 int xdr_send_disabled()
 {
 	return -1;

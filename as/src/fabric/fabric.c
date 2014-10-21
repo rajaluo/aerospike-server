@@ -2668,7 +2668,7 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 	// send except the last
 	int rv = 0;
 	int index = 0;
-	for (int index = 0; index < nodes_sz ; index++) {
+	for (index = 0; index < nodes_sz ; index++) {
 		if (index != nodes_sz - 1) {
 			msg_incr_ref(m);
 		}

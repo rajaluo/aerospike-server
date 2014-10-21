@@ -305,6 +305,7 @@ cf_fault_sink_activate_xdr_held(char *path)
 				s->limit[j] = CF_CRITICAL;
 			}
 			s->limit[AS_XDR] = tmp_limit; 
+			s->limit[CF_RBUFFER] = tmp_limit; 
 		}
 	}
 
@@ -342,6 +343,7 @@ cf_fault_sink_activate_asd_held()
 		// Do not need logs for XDR in this log file.
 		// Only need critical XDR log messages.
 		s->limit[AS_XDR] = CF_CRITICAL;
+		s->limit[CF_RBUFFER] = CF_CRITICAL;
 
 		cf_fault_sinks_inuse++;
 
