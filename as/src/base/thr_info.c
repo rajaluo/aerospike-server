@@ -86,9 +86,6 @@
 #define STR_ITYPE_OBJECT   "object"
 #define STR_BINTYPE        "bintype"
 
-// Configuration file name
-extern char *g_config_file;
-
 extern int as_nsup_queue_get_size();
 
 // Use the following macro to enforce locking around Info requests at run-time.
@@ -535,6 +532,11 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";info_queue=");
 	cf_dyn_buf_append_int(db, as_info_queue_get_size());
 
+	cf_dyn_buf_append_string(db, ";delete_queue=");
+	APPEND_STAT_COUNTER(db, as_nsup_queue_get_size());
+
+	cf_dyn_buf_append_string(db, ";proxy_in_progress=");
+	APPEND_STAT_COUNTER(db, as_proxy_inprogress());
 	cf_dyn_buf_append_string(db, ";proxy_initiate=");
 	APPEND_STAT_COUNTER(db, g_config.proxy_initiate);
 	cf_dyn_buf_append_string(db, ";proxy_action=");
@@ -2070,6 +2072,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_uint64(db, g_config.query_rec_count_bound);
 	cf_dyn_buf_append_string(db, ";query-threshold=");
 	cf_dyn_buf_append_uint64(db, g_config.query_threshold);
+	cf_dyn_buf_append_string(db, ";query-untracked-time=");
+	cf_dyn_buf_append_uint64(db, g_config.query_untracked_time/1000); // Show it in micro seconds
 
 	return(0);
 }
@@ -2836,24 +2840,37 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "query-buf-size", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-buf-size = %"PRIu64"", val);
-			if (val < 1024)
+			if (val < 1024) {
 				goto Error;
+			}
 			cf_info(AS_INFO, "Changing value of query-buf-size from %"PRIu64" to %"PRIu64"", g_config.query_buf_size, val);
 			g_config.query_buf_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-threshold", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-threshold = %"PRIu64"", val);
-			if (val <= 0)
+			if (val <= 0) {
 				goto Error;
+			}
 			cf_info(AS_INFO, "Changing value of query-threshold from %"PRIu64" to %"PRIu64"", g_config.query_threshold, val);
 			g_config.query_threshold = val;
+		}
+		else if (0 == as_info_parameter_get(params, "query-untracked-time", context, &context_len)) {
+			uint64_t val = atoll(context);
+			cf_debug(AS_INFO, "query-untracked-time = %"PRIu64" micro seconds", val);
+			if (val < 0) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of query-untracked-time from %"PRIu64" micro seconds to %"PRIu64" micro seconds", 
+						g_config.query_untracked_time/1000, val);
+			g_config.query_untracked_time = val * 1000;
 		}
 		else if (0 == as_info_parameter_get(params, "query-rec-count-bound", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-rec-count-bound = %"PRIu64"", val);
-			if (val <= 0)
+			if (val <= 0) {
 				goto Error;
+			}
 			cf_info(AS_INFO, "Changing value of query-rec-count-bound from %"PRIu64" to %"PRIu64" ", g_config.query_rec_count_bound, val);
 			g_config.query_rec_count_bound = val;
 		}
@@ -2869,8 +2886,9 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "sindex-data-max-memory", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "sindex-data-max-memory = %"PRIu64"", val);
-			if (val > g_config.sindex_data_max_memory)
+			if (val > g_config.sindex_data_max_memory) {
 				g_config.sindex_data_max_memory = val;
+			}
 			if (val < (g_config.sindex_data_max_memory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
 				goto Error;
 			}
