@@ -195,9 +195,13 @@ int
 ldt_crec_expand_chunk(ldt_record *lrecord) 
 {
 	uint64_t   new_size  = lrecord->max_chunks + 1;
-	void *old_chunk = lrecord->chunk;
+	void *old_chunk      = lrecord->chunk;
 
-	lrecord->chunk = cf_realloc(lrecord->chunk, sizeof(ldt_slot_chunk) * new_size);
+	if (lrecord->max_chunks) {
+		lrecord->chunk = cf_realloc(lrecord->chunk, sizeof(ldt_slot_chunk) * new_size);
+	} else {
+		lrecord->chunk = cf_malloc(sizeof(ldt_slot_chunk) * new_size);
+	}
 		
 	if (lrecord->chunk == NULL) {
 		cf_warning(AS_LDT, "ldt_crec_expand_chunk: Allocation Error !! [Chunk cannot be allocated ]... Fail");
@@ -549,8 +553,10 @@ ldt_record_destroy(as_rec * rec)
 		ldt_chunk_destroy(lrecord, lchunk);
 	}
 
-	// Free up allocated chunks
-	cf_free(lrecord->chunk);
+	if (lrecord->max_chunks) {
+		// Free up allocated chunks
+		cf_free(lrecord->chunk);
+	}
 	// Dir destroy should release partition reservation and
 	// namespace reservation.
 	udf_record_destroy(h_urec);
