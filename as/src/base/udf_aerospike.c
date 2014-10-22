@@ -934,6 +934,7 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	} else if (rv == 0) {
 		cf_warning(AS_UDF, "udf_aerospike_rec_create: Record Already Exists 2");
 		as_record_done(r_ref, tr->rsv.ns);
+		// DO NOT change it has special meaning for caller
 		return 1;
 	} else if (rv < 0) {
 		cf_warning(AS_UDF, "udf_aerospike_rec_create: Record Open Failed with rv=%d", rv);
