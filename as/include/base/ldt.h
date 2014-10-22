@@ -153,21 +153,8 @@ as_ldt_record_is_esr(as_record *r)
 static inline uint16_t
 as_ldt_record_get_rectype_bits(as_record *r)
 {
-	// TODO: may be optimized
-	uint16_t flag = 0;
-	if (as_index_is_flag_set(r, AS_INDEX_FLAG_CHILD_ESR))
-		flag |= AS_INDEX_FLAG_CHILD_ESR;
-	if (as_index_is_flag_set(r, AS_INDEX_FLAG_CHILD_REC))
-		flag |= AS_INDEX_FLAG_CHILD_REC;
-	if (as_index_is_flag_set(r, AS_INDEX_FLAG_SPECIAL_BINS))
-		flag |= AS_INDEX_FLAG_SPECIAL_BINS;
-
-	cf_detail(AS_LDT, "Property field has Parent=%d ESR=%d REC=%d",
-			flag & AS_INDEX_FLAG_SPECIAL_BINS,
-			flag & AS_INDEX_FLAG_CHILD_ESR,
-			flag & AS_INDEX_FLAG_CHILD_REC);
-
-	return flag;
+	return (as_index_get_flags(r) & 
+		(AS_INDEX_FLAG_CHILD_ESR | AS_INDEX_FLAG_CHILD_REC | AS_INDEX_FLAG_SPECIAL_BINS));
 }
 
 static inline int

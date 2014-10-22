@@ -685,6 +685,13 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	}
 
 	{
+		// This is _NOT_ for writing to the storage but for simply performing sizing
+		// calculation. If we know the upper bounds of size of rec_props.. we could 
+		// avoid this work and check with that much correction ... 
+		//
+		// See
+		//  - udf_rw_post_processing for building rec_props for replication
+		//  - udf_record_close for building rec_props for writing it to storage
 		size_t  rec_props_data_size = as_storage_record_rec_props_size(rd);
 		uint8_t rec_props_data[rec_props_data_size];
 		if (rec_props_data_size > 0) {

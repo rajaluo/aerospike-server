@@ -1014,6 +1014,8 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		int rv = as_ldt_parent_storage_get_version(&rd, &lversion, false,__FILE__, __LINE__);
 		if (rv == 0) {
 			lrecord.version = lversion;
+		} else {
+			lrecord.version = as_ldt_generate_version();
 		}
 		cf_detail_digest(AS_LDT, &urecord.keyd, "LDT_VERSION Read Version From Storage %ld rv=%d",
 				  lrecord.version, rv);

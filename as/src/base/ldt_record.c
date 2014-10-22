@@ -53,15 +53,11 @@ int
 ldt_record_init(ldt_record *lrecord)
 {
 	// h_urec is setup in udf_rw.c which point to the main record
-	lrecord->h_urec  = 0;
-	lrecord->as      = &g_as_aerospike;
-
-	if (ldt_crec_create_chunk(lrecord)) {
-		return -1;
-	}
-	lrecord->max_chunks     = 1;
+	lrecord->h_urec         = 0;
+	lrecord->as             = &g_as_aerospike;
+	lrecord->max_chunks     = 0;
 	lrecord->num_slots_used = 0;
-	lrecord->version        = as_ldt_generate_version();
+	lrecord->version        = 0;
 	return 0;
 }
 
