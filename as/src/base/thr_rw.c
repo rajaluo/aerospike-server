@@ -883,7 +883,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		if (rv != 0) {
 			if ((rv == -2) && (tr->proto_fd_h == 0) && (tr->proxy_msg == 0)) {
 				cf_crash(AS_RW,
-						"Cant retry a write if all data has been stripped out");
+						"Can't retry a write if all data has been stripped out");
 			}
 
 			// If first time, the caller will free msgp and the partition or retry request
