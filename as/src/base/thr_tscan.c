@@ -556,8 +556,11 @@ tscan_enqueue_udfjob(tscan_job *job)
 	if (job->job_type == SCAN_JOB_TYPE_PARTITION) {
 
 		if (job->cur_partition_id >= AS_PARTITIONS) {
-			// This is a code path that should never happen.
-			cf_warning(AS_SCAN, "UDF: partition id %d unexpected", job->cur_partition_id);
+			// This is a code path that should never happen may happen immediately
+			// after the last job is queued
+			if (job->cur_partition_id > (AS_PARTITIONS + 1)) {
+				cf_warning(AS_SCAN, "UDF: partition id %d unexpected for job %d", job->cur_partition_id, job->tid);
+			}
 			pthread_mutex_unlock(&job->LOCK);
 			// This is set to 0 so that the correct higher level cleanup can happen.
 			// However, this code path should never be reached!

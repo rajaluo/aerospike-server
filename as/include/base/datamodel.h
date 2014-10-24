@@ -1012,6 +1012,7 @@ struct as_namespace_s {
 
 	cf_atomic_int   ldt_gc_io;
 	cf_atomic_int   ldt_gc_cnt;
+	cf_atomic_int	ldt_randomizer_retry;
 };
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator

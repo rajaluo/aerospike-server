@@ -787,19 +787,29 @@ process_transaction(as_transaction *tr)
 			//
 			// Make sure that if it is shipped op it is not further redirected.
 			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-				cf_warning(AS_RW,
-						"Redirecting the shipped op is not supported fail the operation %d",
-						rv);
-			}
+		
+				int ret_code = 0;
+				if (!cluster_keys_match) {
+					ret_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+				} else {
+					cf_warning(AS_RW,
+							"Failing the shipped op due to reservation error %d",
+							rv);
+					ret_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+				}
 
-			// Divert the transaction into the proxy system; in this case, no
-			// reservation was obtained. Pass the cluster key along. Note that
-			// if we landed here because of a CLUSTER KEY MISMATCH,
-			// (transaction CK != Partition CK), then it is probably the case
-			// that we have to forward this request by proxy, since the
-			// partition for this transaction has probably moved and is no
-			// longer appropriate for this node.
-			if (tr->proto_fd_h) {
+				as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
+						ret_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+
+			} else if (tr->proto_fd_h) {
+				// Divert the transaction into the proxy system; in this case, no
+				// reservation was obtained. Pass the cluster key along. Note that
+				// if we landed here because of a CLUSTER KEY MISMATCH,
+				// (transaction CK != Partition CK), then it is probably the case
+				// that we have to forward this request by proxy, since the
+				// partition for this transaction has probably moved and is no
+				// longer appropriate for this node.
+
 				// Proxy divert - reroute client message. Note that
 				// as_proxy_divert() consumes the msgp.
 				cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")", dest);

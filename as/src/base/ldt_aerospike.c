@@ -195,9 +195,13 @@ int
 ldt_crec_expand_chunk(ldt_record *lrecord) 
 {
 	uint64_t   new_size  = lrecord->max_chunks + 1;
-	void *old_chunk = lrecord->chunk;
+	void *old_chunk      = lrecord->chunk;
 
-	lrecord->chunk = cf_realloc(lrecord->chunk, sizeof(ldt_slot_chunk) * new_size);
+	if (lrecord->max_chunks) {
+		lrecord->chunk = cf_realloc(lrecord->chunk, sizeof(ldt_slot_chunk) * new_size);
+	} else {
+		lrecord->chunk = cf_malloc(sizeof(ldt_slot_chunk) * new_size);
+	}
 		
 	if (lrecord->chunk == NULL) {
 		cf_warning(AS_LDT, "ldt_crec_expand_chunk: Allocation Error !! [Chunk cannot be allocated ]... Fail");
@@ -471,12 +475,14 @@ ldt_crec_open(ldt_record *lrecord, cf_digest *keyd, ldt_slot **lslotp)
  * Callers:
  *		ldt_aerospike_crec_create
  */
+#define LDT_SUBRECORD_RANDOMIZER_MAX_RETRIES 2
 as_rec *
 ldt_crec_create(ldt_record *lrecord)
 {
 	// Generate Key Digest
 	udf_record *h_urecord = (udf_record *) as_rec_source(lrecord->h_urec);
 	cf_digest keyd        = h_urecord->r_ref->r->key;
+	as_namespace *ns      = h_urecord->tr->rsv.ns;
 	cf_detail(AS_LDT, "ldt_aerospike_crec_create %"PRIx64"", *(uint64_t *)&keyd);
 	as_ldt_digest_randomizer(&keyd);
 	as_ldt_subdigest_setversion(&keyd, lrecord->version);
@@ -493,6 +499,8 @@ ldt_crec_create(ldt_record *lrecord)
 	if (!lslotp) {
 		return NULL;
 	}
+	int retry_cnt = 0;
+retry:
 	ldt_slot_init(lslotp, lrecord, &keyd);
 
 	// Create Record
@@ -502,6 +510,19 @@ ldt_crec_create(ldt_record *lrecord)
 		ldt_slot_destroy(lslotp, lrecord);
 		cf_warning(AS_LDT, "ldt_crec_create: LDT Sub-Record Create Error [rv=%d]... Fail", rv);
 		return NULL;
+	} else if (rv == 1) {
+		if (retry_cnt > LDT_SUBRECORD_RANDOMIZER_MAX_RETRIES) {
+			// hit total number of retry
+			ldt_slot_destroy(lslotp, lrecord);
+			cf_warning(AS_LDT, "ldt_crec_create: LDT Sub-Record Create Error [Cannot find unique digest]... Fail", rv);
+			return NULL;
+		}
+		// re-randomize and retry
+		as_ldt_digest_randomizer(&keyd);
+		as_ldt_subdigest_setversion(&keyd, lrecord->version);
+		cf_atomic64_incr(&ns->ldt_randomizer_retry);		
+		retry_cnt++;
+		goto retry;
 	}
 
 Out:
@@ -532,8 +553,10 @@ ldt_record_destroy(as_rec * rec)
 		ldt_chunk_destroy(lrecord, lchunk);
 	}
 
-	// Free up allocated chunks
-	cf_free(lrecord->chunk);
+	if (lrecord->max_chunks) {
+		// Free up allocated chunks
+		cf_free(lrecord->chunk);
+	}
 	// Dir destroy should release partition reservation and
 	// namespace reservation.
 	udf_record_destroy(h_urec);
