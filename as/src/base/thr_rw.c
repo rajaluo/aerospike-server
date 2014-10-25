@@ -891,12 +891,12 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 					} else if (UDF_OP_IS_READ(op)) {
 						// return early if the record was not updated
 						udf_call_destroy(call);
+						cf_free(call);
+						call = NULL;
 						if (udf_rw_needcomplete(tr)) {
 							udf_rw_complete(tr, tr->result_code, __FILE__,
 									__LINE__);
 						}
-						udf_call_destroy(call);
-						cf_free(call);
 						rw_cleanup(wr, tr, first_time, false, __LINE__);
 
 						*delete = true;
@@ -3713,13 +3713,6 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		memory_bytes = as_storage_record_get_n_bytes_memory(&rd);
 	}
 
-	// Assemble record properties from index information.
-	size_t rec_props_data_size = as_storage_record_rec_props_size(&rd);
-	uint8_t rec_props_data[rec_props_data_size];
-
-	if (rec_props_data_size > 0) {
-		as_storage_record_set_rec_props(&rd, rec_props_data);
-	}
 
 	// If generation-dup and conflict, set the merge bit so the write will get
 	// merged here and on replicas.
@@ -4317,6 +4310,24 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		if (delta_bins) {
 			as_bin_allocate_bin_space(r, &rd, delta_bins);
 		}
+	}
+
+	// LDT: Make sure the control bin is around .. if it not then reset the 
+	// LDT parent flag in the index...
+	if (as_ldt_record_is_parent(r_ref.r)) {
+		uint64_t parent_version = 0;
+		int rv = as_ldt_parent_storage_get_version(&rd, &parent_version, false, __FILE__, __LINE__);
+		if (0 != rv) {
+			as_index_clear_flags(r_ref.r, AS_INDEX_FLAG_SPECIAL_BINS);
+		}
+	}
+
+	// Assemble record properties from index information.
+	size_t rec_props_data_size = as_storage_record_rec_props_size(&rd);
+	uint8_t rec_props_data[rec_props_data_size];
+
+	if (rec_props_data_size > 0) {
+		as_storage_record_set_rec_props(&rd, rec_props_data);
 	}
 
 	write_local_post_processing(tr, ns, NULL, pickled_buf, pickled_sz,
