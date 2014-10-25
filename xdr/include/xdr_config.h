@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include "fault.h"
 #include "util.h"
 
 //Length definitions. This should be in sync with the server definitions.
@@ -186,6 +187,7 @@ typedef struct xdr_config {
 	bool	xdr_digestlog_persist;
 	uint8_t xdr_num_digestlog_paths;
 	char	*xdr_errorlog_path;
+	cf_fault_severity xdr_errorlog_level;
 	int	xdr_digestpipe_fd;
 	int	xdr_local_port;
 	int	xdr_write_batch_size;

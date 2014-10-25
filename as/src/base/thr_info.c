@@ -48,6 +48,7 @@
 
 #include "cf_str.h"
 #include "dynbuf.h"
+#include "fault.h"
 #include "jem.h"
 #include "meminfo.h"
 #include "queue.h"
@@ -3546,67 +3547,89 @@ Error:
 	return(0);
 }
 
-//
-// log-set:log=id;context=foo;level=bar
-// ie:
-//   log-set:log=0;context=rw;level=debug
 
-
+// e.g.
+// log-set:id=0;fabric=debug;scan=debug"
+// log-set:rw=warning"
+// log-set:id=0;any=info;batch=debug"
 int
 info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "log-set command received: params %s", params);
 
+	cf_fault_sink *s = NULL;
 	char id_str[50];
 	int  id_str_len = sizeof(id_str);
-	int  id = -1;
-	bool found_id = true;
-	cf_fault_sink *s = 0;
 
-	if (0 != as_info_parameter_get(params, "id", id_str, &id_str_len)) {
-		if (0 != as_info_parameter_get(params, "log", id_str, &id_str_len)) {
-			cf_debug(AS_INFO, "log set command: no log id to be set - doing all");
-			found_id = false;
-		}
-	}
-	if (found_id == true) {
-		if (0 != cf_str_atoi(id_str, &id) ) {
-			cf_info(AS_INFO, "log set command: id must be an integer, is: %s", id_str);
+	// Check whether a sink is specified.
+	if (0 == as_info_parameter_get(params, "id", id_str, &id_str_len) ||
+			0 == as_info_parameter_get(params, "log", id_str, &id_str_len)) {
+		int id;
+
+		if (0 != cf_str_atoi(id_str, &id)) {
+			cf_info(AS_INFO, "log-set command: invalid sink id '%s'", id_str);
 			cf_dyn_buf_append_string(db, "error-id-not-integer");
-			return(0);
+			return 0;
 		}
+
 		s = cf_fault_sink_get_id(id);
-		if (!s) {
-			cf_info(AS_INFO, "log set command: sink id %d invalid", id);
+
+		if (! s) {
+			cf_info(AS_INFO, "log-set command: invalid sink id %d", id);
 			cf_dyn_buf_append_string(db, "error-bad-id");
-			return(0);
+			return 0;
 		}
 	}
+	else {
+		cf_debug(AS_INFO, "log-set command: sink id not specified - doing all");
+	}
 
-	// now, loop through all context strings. If we find a known context string,
-	// do the set
+	// It's possible to have multiple context=level pairs.
+	int contexts_set = 0;
+	char level_str[50];
+	int  level_str_len = sizeof(level_str);
+
+	// Check for context "any". It only makes sense if it's done first.
+	if (0 == as_info_parameter_get(params, "any", level_str, &level_str_len)) {
+		if (0 != cf_fault_sink_set_severity(s, CF_FAULT_CONTEXT_ANY, cf_fault_sink_severity(level_str))) {
+			cf_info(AS_INFO, "log-set command: set severity failed: context 'any' level '%s'", level_str);
+			cf_dyn_buf_append_string(db, "error-invalid-level");
+			return 0;
+		}
+
+		contexts_set++;
+	}
+
+	// Loop through all context strings. If we find a known one, do the set.
 	for (int c_id = 0; c_id < CF_FAULT_CONTEXT_UNDEF; c_id++) {
-
-		char level_str[50];
-		int  level_str_len = sizeof(level_str);
 		char *context = cf_fault_context_strings[c_id];
+
+		level_str_len = sizeof(level_str);
+
 		if (0 != as_info_parameter_get(params, context, level_str, &level_str_len)) {
 			continue;
 		}
-		for (uint i = 0; level_str[i]; i++) level_str[i] = toupper(level_str[i]);
 
-		if (0 != cf_fault_sink_addcontext(s, context, level_str)) {
-			cf_info(AS_INFO, "log set command: addcontext failed: context %s level %s", context, level_str);
-			cf_dyn_buf_append_string(db, "error-invalid-context-or-level");
-			return(0);
+		if (0 != cf_fault_sink_set_severity(s, c_id, cf_fault_sink_severity(level_str))) {
+			cf_info(AS_INFO, "log-set command: set severity failed: context '%s' level '%s'", context, level_str);
+			cf_dyn_buf_append_string(db, "error-invalid-level");
+			return 0;
 		}
+
+		contexts_set++;
 	}
 
-	cf_info(AS_INFO, "log-set command executed: params %s", params);
+	if (contexts_set != 0) {
+		// Note - we don't flag invalid contexts if there is any valid context.
+		cf_info(AS_INFO, "log-set command: set %d context(s): params %s", contexts_set, params);
+		cf_dyn_buf_append_string(db, "ok");
+	}
+	else {
+		cf_info(AS_INFO, "log-set command: no valid context: params %s", params);
+		cf_dyn_buf_append_string(db, "error-no-valid-context");
+	}
 
-	cf_dyn_buf_append_string(db, "ok");
-
-	return(0);
+	return 0;
 }
 
 
