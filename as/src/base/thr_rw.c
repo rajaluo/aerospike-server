@@ -3713,6 +3713,13 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		memory_bytes = as_storage_record_get_n_bytes_memory(&rd);
 	}
 
+	// Assemble record properties from index information.
+	size_t rec_props_data_size = as_storage_record_rec_props_size(&rd);
+	uint8_t rec_props_data[rec_props_data_size];
+
+	if (rec_props_data_size > 0) {
+		as_storage_record_set_rec_props(&rd, rec_props_data);
+	}
 
 	// If generation-dup and conflict, set the merge bit so the write will get
 	// merged here and on replicas.
@@ -4319,16 +4326,14 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		int rv = as_ldt_parent_storage_get_version(&rd, &parent_version, false, __FILE__, __LINE__);
 		if (0 != rv) {
 			as_index_clear_flags(r_ref.r, AS_INDEX_FLAG_SPECIAL_BINS);
+			// Set rec_props to remove ldt_rectype_bits if necessary.
+			// Note that this does no need resize of array. Size if at all
+			// should decrease.
+			as_storage_record_set_rec_props(&rd, rec_props_data);
 		}
 	}
 
-	// Assemble record properties from index information.
-	size_t rec_props_data_size = as_storage_record_rec_props_size(&rd);
-	uint8_t rec_props_data[rec_props_data_size];
-
-	if (rec_props_data_size > 0) {
-		as_storage_record_set_rec_props(&rd, rec_props_data);
-	}
+	
 
 	write_local_post_processing(tr, ns, NULL, pickled_buf, pickled_sz,
 			pickled_void_time, p_pickled_rec_props, increment_generation, wlg,
