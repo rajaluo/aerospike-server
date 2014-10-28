@@ -1962,14 +1962,10 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";batch-priority=");
 	cf_dyn_buf_append_int(db, g_config.batch_priority);
 
+	cf_dyn_buf_append_string(db, ";nsup-delete-sleep=");
+	cf_dyn_buf_append_int(db, g_config.nsup_delete_sleep);
 	cf_dyn_buf_append_string(db, ";nsup-period=");
 	cf_dyn_buf_append_int(db, g_config.nsup_period);
-	cf_dyn_buf_append_string(db, ";nsup-queue-hwm=");
-	cf_dyn_buf_append_int(db, g_config.nsup_queue_hwm);
-	cf_dyn_buf_append_string(db, ";nsup-queue-lwm=");
-	cf_dyn_buf_append_int(db, g_config.nsup_queue_lwm);
-	cf_dyn_buf_append_string(db, ";nsup-queue-escape=");
-	cf_dyn_buf_append_int(db, g_config.nsup_queue_escape);
 	cf_dyn_buf_append_string(db, ";nsup-startup-evict=");
 	cf_dyn_buf_append_string(db, g_config.nsup_startup_evict ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";paxos-retransmit-period=");
@@ -2570,29 +2566,17 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of proto-fd-idle-ms from %d to %d ", g_config.proto_fd_idle_ms, val);
 			g_config.proto_fd_idle_ms = val;
 		}
+		else if (0 == as_info_parameter_get(params, "nsup-delete-sleep", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val))
+				goto Error;
+			cf_info(AS_INFO, "Changing value of nsup-delete-sleep from %d to %d ", g_config.nsup_delete_sleep, val);
+			g_config.nsup_delete_sleep = val;
+		}
 		else if (0 == as_info_parameter_get(params, "nsup-period", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
 			cf_info(AS_INFO, "Changing value of nsup-period from %d to %d ", g_config.nsup_period, val);
 			g_config.nsup_period = val;
-		}
-		else if (0 == as_info_parameter_get(params, "nsup-queue-hwm", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of nsup-queue-hwm from %d to %d ", g_config.nsup_queue_hwm, val);
-			g_config.nsup_queue_hwm = val;
-		}
-		else if (0 == as_info_parameter_get(params, "nsup-queue-lwm", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of nsup-queue-lwm from %d to %d ", g_config.nsup_queue_lwm, val);
-			g_config.nsup_queue_lwm = val;
-		}
-		else if (0 == as_info_parameter_get(params, "nsup-queue-escape", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of nsup-queue-escape from %d to %d ", g_config.nsup_queue_escape, val);
-			g_config.nsup_queue_escape = val;
 		}
 		else if (0 == as_info_parameter_get(params, "paxos-retransmit-period", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))

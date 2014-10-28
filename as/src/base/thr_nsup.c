@@ -514,9 +514,6 @@ as_nsup_queue_get_size()
 	return g_p_nsup_delete_q ? cf_queue_sz(g_p_nsup_delete_q) : 0;
 }
 
-// Make sure delete queue doesn't overwhelm tsvc.
-#define DELETE_Q_THROTTLE_SLEEP_us	1000 // 1 millisecond
-
 // Make sure a huge nsup deletion wave won't blow delete queue up.
 #define DELETE_Q_SAFETY_THRESHOLD	10000
 #define DELETE_Q_SAFETY_SLEEP_us	1000 // 1 millisecond
@@ -600,17 +597,8 @@ run_nsup_delete(void* pv_data)
 		}
 
 		// Throttle - don't overwhelm tsvc queue.
-		int num_sleeps = 0;
-
-		if (as_write_inprogress() > g_config.nsup_queue_hwm) {
-			while (as_write_inprogress() > g_config.nsup_queue_lwm) {
-				if (num_sleeps++ >= g_config.nsup_queue_escape) {
-					cf_debug(AS_NSUP, "{%s} nsup wait maxed", q_item.ns->name);
-					break;
-				}
-
-				usleep(DELETE_Q_THROTTLE_SLEEP_us);
-			}
+		if (g_config.nsup_delete_sleep != 0) {
+			usleep(g_config.nsup_delete_sleep);
 		}
 	}
 
