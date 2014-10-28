@@ -35,6 +35,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <aerospike/as_log.h>
 #include <citrusleaf/alloc.h>
 #include <citrusleaf/cf_b64.h>
 
@@ -124,6 +125,18 @@ cf_context_at_severity(const cf_fault_context context, const cf_fault_severity s
 	return (severity <= cf_fault_filter[context]);
 }
 
+static inline void
+cf_fault_set_severity(const cf_fault_context context, const cf_fault_severity severity)
+{
+	cf_fault_filter[context] = severity;
+
+	// UDF logging relies on the common as_log facility.
+	// Set as_log_level whenever AS_UDF severity changes.
+	if (context == AS_UDF && severity < CF_FAULT_SEVERITY_UNDEF) {
+		as_log_set_level((as_log_level)severity);
+	}
+}
+
 /* cf_strerror
  * Some platforms return the errno in the string if the errno's value is
  * unknown: this is traditionally done with a static buffer.  Unfortunately,
@@ -139,7 +152,6 @@ cf_strerror(const int err)
 	return("Unknown error");
 }
 
-
 /* cf_fault_init
  * This code MUST be the first thing executed by main(). */
 void
@@ -148,7 +160,7 @@ cf_fault_init()
 	// Initialize the fault filter.
 	for (int j = 0; j < CF_FAULT_CONTEXT_UNDEF; j++) {
 		// We start with no sinks, so let's be in-sync with that.
-		cf_fault_filter[j] = NO_SINKS_LIMIT;
+		cf_fault_set_severity(j, NO_SINKS_LIMIT);
 	}
 }
 
@@ -223,7 +235,7 @@ fault_filter_adjust(cf_fault_sink *s, cf_fault_context ctx)
 
 	// Fault filter must allow logs at a less critical severity.
 	if (s->limit[ctx] > cf_fault_filter[ctx]) {
-		cf_fault_filter[ctx] = s->limit[ctx];
+		cf_fault_set_severity(ctx, s->limit[ctx]);
 	}
 	// Fault filter might be able to become stricter - check all sinks.
 	else if (s->limit[ctx] < cf_fault_filter[ctx]) {
@@ -237,7 +249,7 @@ fault_filter_adjust(cf_fault_sink *s, cf_fault_context ctx)
 			}
 		}
 
-		cf_fault_filter[ctx] = severity;
+		cf_fault_set_severity(ctx, severity);
 	}
 }
 
@@ -374,7 +386,8 @@ cf_fault_sink_setcontext(cf_fault_sink *s, char *context, char *severity)
 		return(-1);
 
 	s->limit[ctx] = sev;
-	cf_fault_filter[ctx] = s->limit[ctx];
+	cf_fault_set_severity(ctx, s->limit[ctx]);
+
 	return(0);
 }
 
