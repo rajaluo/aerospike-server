@@ -5452,27 +5452,79 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	}
 
 	// LDT operational statistics
-	cf_dyn_buf_append_string(db, ";ldt_reads=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_read_reqs));
-	cf_dyn_buf_append_string(db, ";ldt_read_success=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_read_success));
-	cf_dyn_buf_append_string(db, ";ldt_deletes=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_delete_reqs));
-	cf_dyn_buf_append_string(db, ";ldt_delete_success=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_delete_success));
-	cf_dyn_buf_append_string(db, ";ldt_writes=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_write_reqs));
-	cf_dyn_buf_append_string(db, ";ldt_write_success=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_write_success));
-	cf_dyn_buf_append_string(db, ";ldt_updates=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_update_reqs));
-	cf_dyn_buf_append_string(db, ";ldt_errors=");
-	cf_dyn_buf_append_uint32(db, ns->ldt_errs);
+	//
+	// print only if LDT is enabled
+	if (ns->ldt_enabled) {	
+		cf_dyn_buf_append_string(db, ";ldt_reads=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_reqs));
+		cf_dyn_buf_append_string(db, ";ldt_read_success=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_success));
+		cf_dyn_buf_append_string(db, ";ldt_deletes=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_reqs));
+		cf_dyn_buf_append_string(db, ";ldt_delete_success=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_success));
+		cf_dyn_buf_append_string(db, ";ldt_writes=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_reqs));
+		cf_dyn_buf_append_string(db, ";ldt_write_success=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_success));
+		cf_dyn_buf_append_string(db, ";ldt_updates=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_update_reqs));
 
-	cf_dyn_buf_append_string(db, ";ldt_gc_io=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_gc_io));
-	cf_dyn_buf_append_string(db, ";ldt_gc_cnt=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_gc_cnt));
+		cf_dyn_buf_append_string(db, ";ldt_gc_io=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_io));
+		cf_dyn_buf_append_string(db, ";ldt_gc_cnt=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_cnt));
+
+		cf_dyn_buf_append_string(db, ";ldt_errors=");
+		cf_dyn_buf_append_uint32(db, ns->lstats.ldt_errs);
+
+		cf_dyn_buf_append_string(db, ";ldt_err_toprec_notfound=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_not_found));
+		cf_dyn_buf_append_string(db, ";ldt_err_item_notfound=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_item_not_found));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_internal=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_internal));
+		cf_dyn_buf_append_string(db, ";ldt_err_unique_key_violation=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unique_key_violation));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_insert_fail=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_insert_fail));
+		cf_dyn_buf_append_string(db, ";ldt_err_delete_fail=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_delete_fail));
+		cf_dyn_buf_append_string(db, ";ldt_err_search_fail=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_search_fail));
+		cf_dyn_buf_append_string(db, ";ldt_err_version_mismatch=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_version_mismatch));
+
+
+		cf_dyn_buf_append_string(db, ";ldt_err_capacity_exceeded=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_capacity_exceeded));
+		cf_dyn_buf_append_string(db, ";ldt_err_param=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_param));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_op_bintype_mismatch=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_op_bintype_mismatch));
+		cf_dyn_buf_append_string(db, ";ldt_err_too_many_open_subrec=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_too_many_open_subrec));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_subrec_not_found=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_not_found));
+		cf_dyn_buf_append_string(db, ";ldt_err_bin_does_not_exist=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_does_not_exist));
+		cf_dyn_buf_append_string(db, ";ldt_err_bin_exits=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_exits));
+		cf_dyn_buf_append_string(db, ";ldt_err_bin_damaged=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_damaged));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_toprec_internal=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_internal));
+		cf_dyn_buf_append_string(db, ";ldt_err_subrec_internal=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_internal));
+		cf_dyn_buf_append_string(db, ";ldt_err_transform_internal=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_transform_internal));
+	}
+
 
 	// if storage, lots of information about the storage
 	//

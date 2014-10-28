@@ -56,6 +56,49 @@
 
 extern cf_clock cf_clock_getabsoluteus();
 
+#define ERR_TOP_REC_NOT_FOUND   2
+#define ERR_NOT_FOUND           125
+#define ERR_INTERNAL             1400
+#define ERR_UNIQUE_KEY           1402
+#define ERR_INSERT               1403
+#define ERR_SEARCH               1404
+#define ERR_DELETE               1405
+#define ERR_VERSION              1406
+
+#define ERR_CAPACITY_EXCEEDED    1408
+#define ERR_INPUT_PARM           1409
+
+#define ERR_TYPE_MISMATCH        1410
+#define ERR_NULL_BIN_NAME        1411
+#define ERR_BIN_NAME_NOT_STRING  1412
+#define ERR_BIN_NAME_TOO_LONG    1413
+#define ERR_TOO_MANY_OPEN_SUBRECS 1414
+#define ERR_SUB_REC_NOT_FOUND    1416
+#define ERR_BIN_DOES_NOT_EXIST   1417
+#define ERR_BIN_ALREADY_EXISTS   1418
+#define ERR_BIN_DAMAGED          1419
+
+#define ERR_SUBREC_POOL_DAMAGED  1420
+#define ERR_SUBREC_DAMAGED       1421
+#define ERR_SUBREC_OPEN          1422
+#define ERR_SUBREC_UPDATE        1423
+#define ERR_SUBREC_CREATE        1424
+#define ERR_SUBREC_DELETE        1425
+#define ERR_SUBREC_CLOSE         1426
+#define ERR_TOPREC_UPDATE        1427
+#define ERR_TOPREC_CREATE        1428
+
+#define ERR_FILTER_BAD           1430
+#define ERR_FILTER_NOT_FOUND     1431
+#define ERR_KEY_FUN_BAD          1432
+#define ERR_KEY_FUN_NOT_FOUND    1433
+#define ERR_TRANS_FUN_BAD        1434
+#define ERR_TRANS_FUN_NOT_FOUND  1435
+#define ERR_UNTRANS_FUN_BAD      1436
+#define ERR_UNTRANS_FUN_NOT_FOUND 1437
+#define ERR_USER_MODULE_BAD       1438
+#define ERR_USER_MODULE_NOT_FOUND 1439
+
 typedef struct ldt_sub_gc_info_s {
 	as_namespace	*ns;
 	uint32_t		num_gc;

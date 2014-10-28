@@ -831,6 +831,52 @@ typedef enum {
  * A namespace container */
 typedef int32_t as_namespace_id; // signed to denote -1 bad namespace id
 
+typedef struct ns_ldt_stats_s {
+
+	/* LDT Operational Statistics */
+	cf_atomic_int	ldt_write_reqs;
+	cf_atomic_int	ldt_write_success;
+
+	cf_atomic_int	ldt_read_reqs;
+	cf_atomic_int	ldt_read_success;
+
+	cf_atomic_int	ldt_delete_reqs;
+	cf_atomic_int	ldt_delete_success;
+
+	cf_atomic_int	ldt_update_reqs;
+
+	cf_atomic_int	ldt_errs;
+	cf_atomic_int	ldt_err_toprec_not_found;
+	cf_atomic_int	ldt_err_item_not_found;
+	cf_atomic_int	ldt_err_internal;
+	cf_atomic_int	ldt_err_unique_key_violation;
+
+	cf_atomic_int	ldt_err_insert_fail;
+	cf_atomic_int	ldt_err_search_fail;
+	cf_atomic_int	ldt_err_delete_fail;
+	cf_atomic_int	ldt_err_version_mismatch;
+
+	cf_atomic_int	ldt_err_capacity_exceeded;
+	cf_atomic_int	ldt_err_param;
+
+	cf_atomic_int	ldt_err_op_bintype_mismatch;
+	cf_atomic_int	ldt_err_too_many_open_subrec;
+	cf_atomic_int	ldt_err_subrec_not_found;
+
+	cf_atomic_int	ldt_err_bin_does_not_exist;
+	cf_atomic_int	ldt_err_bin_exits;
+	cf_atomic_int	ldt_err_bin_damaged;
+
+	cf_atomic_int	ldt_err_subrec_internal;
+	cf_atomic_int	ldt_err_toprec_internal;
+	cf_atomic_int	ldt_err_transform_internal;
+
+	cf_atomic_int   ldt_gc_io;
+	cf_atomic_int   ldt_gc_cnt;
+	cf_atomic_int	ldt_randomizer_retry;
+
+} ns_ldt_stats;
+
 struct as_namespace_s {
 	/* Namespaces are internally assigned monotonic identifiers, but these
 	 * are not portable across node boundaries; to identify a namespace
@@ -996,23 +1042,7 @@ struct as_namespace_s {
 
 	as_partition partitions[AS_PARTITIONS];
 
-	/* LDT Operational Statistics */
-	cf_atomic_int	ldt_write_reqs;
-	cf_atomic_int	ldt_write_success;
-
-	cf_atomic_int	ldt_read_reqs;
-	cf_atomic_int	ldt_read_success;
-
-	cf_atomic_int	ldt_delete_reqs;
-	cf_atomic_int	ldt_delete_success;
-
-	cf_atomic_int	ldt_update_reqs;
-
-	cf_atomic_int	ldt_errs;
-
-	cf_atomic_int   ldt_gc_io;
-	cf_atomic_int   ldt_gc_cnt;
-	cf_atomic_int	ldt_randomizer_retry;
+	ns_ldt_stats        lstats;
 };
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator

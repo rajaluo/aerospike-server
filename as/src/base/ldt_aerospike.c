@@ -520,7 +520,7 @@ retry:
 		// re-randomize and retry
 		as_ldt_digest_randomizer(&keyd);
 		as_ldt_subdigest_setversion(&keyd, lrecord->version);
-		cf_atomic64_incr(&ns->ldt_randomizer_retry);		
+		cf_atomic64_incr(&ns->lstats.ldt_randomizer_retry);		
 		retry_cnt++;
 		goto retry;
 	}
