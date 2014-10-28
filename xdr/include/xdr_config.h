@@ -207,8 +207,6 @@ typedef struct xdr_config {
 	bool	enable_xdr_delete_shipping;
 	bool	xdr_nsup_deletes_enabled;
 	int 	xdr_hotkey_maxskip;
-	int 	xdr_batch_retry_sleep;
-	int 	xdr_batch_num_retry;
 	bool	xdr_fwd_with_gencheck;
 	bool	xdr_check_data_before_delete;
 	int		xdr_info_request_timeout_ms;
