@@ -22,7 +22,7 @@
 
 #include "base/xdr_serverside.h"
 
-as_xdr_state g_as_xdr_state = XDR_DOWN;
+xdr_state g_xdr_state = XDR_DOWN;
 
 int as_xdr_init()
 {
