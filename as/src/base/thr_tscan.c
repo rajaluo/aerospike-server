@@ -127,6 +127,9 @@
 //#define SEQ_SCAN 0
 //#define PRL_SCAN 0
 
+// TODO - eventually, we'll do better than this hard-wired value.
+const size_t INITIAL_BUFBUILDER_SIZE = 8 * 1024 * 1024;
+
 msg_template tscan_mt[] = {
 	{ TSCAN_FIELD_OP,       M_FT_UINT32 }, // operation
 	{ TSCAN_FIELD_NAMESPACE, M_FT_BUF },
@@ -1039,7 +1042,7 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 	// If there is no udf call associated, go through the normal process.
 	if (u->nobindata) {
 		if (! *bb_r) {
-			*bb_r = cf_buf_builder_create();
+			*bb_r = cf_buf_builder_create_size(INITIAL_BUFBUILDER_SIZE);
 			cf_atomic_int_add(&u->pjob->mem_buf, (*bb_r)->alloc_sz);
 		}
 
@@ -1120,7 +1123,7 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 			}
 		} else {
 			if (! *bb_r) {
-				*bb_r = cf_buf_builder_create();
+				*bb_r = cf_buf_builder_create_size(INITIAL_BUFBUILDER_SIZE);
 				cf_atomic_int_add(&u->pjob->mem_buf, (*bb_r)->alloc_sz);
 			}
 			size_t old_allocsz = (*bb_r)->alloc_sz;
@@ -1617,7 +1620,7 @@ tscan_partition_thr(void *q_to_wait_on)
 
 
 		if (job->fd_h) {
-			u.bb         = cf_buf_builder_create();
+			u.bb = cf_buf_builder_create_size(INITIAL_BUFBUILDER_SIZE);
 			if (u.bb == NULL) {
 				cf_info(AS_SCAN, "scan_partition: could not create buf builder: %d {%s:%d}", workitem.tid, job->ns->name, workitem.pid);
 				as_partition_release(&rsv);
