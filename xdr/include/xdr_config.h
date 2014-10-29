@@ -149,12 +149,6 @@ typedef struct xdr_lastship_s {
 	uint64_t	time[DC_MAX_NUM];
 } xdr_lastship_s;
 
-// Reply from server for xdr read request.
-typedef enum {
-	XDR_READ_OK = 0,
-	XDR_READ_FORWARD = 1,
-	XDR_READ_ERROR = 2
-} xdr_read_rv;
 
 // Config option in case the configuration value is changed
 typedef struct xdr_new_config_s {
