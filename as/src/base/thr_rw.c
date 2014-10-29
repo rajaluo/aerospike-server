@@ -5020,12 +5020,21 @@ write_msg_fn(cf_node id, msg *m, void *udata)
 		break;
 
 	case RW_OP_MULTI:
-
+	{
+		uint64_t start_ns = 0;
+		if (g_config.ldt_benchmarks) {
+			start_ns = cf_getns();
+		}
 		cf_detail(AS_RW, "MULTI_OP: Received Multi Op Request");
 		rw_multi_process(id, m);
 		cf_detail(AS_RW, "MULTI_OP: Processed Multi Op Request");
+		
+		if (g_config.ldt_benchmarks && start_ns) {
+			histogram_insert_data_point(g_config.ldt_multiop_prole_hist, start_ns);
+		}
 
 		break;
+	}
 
 	case RW_OP_MULTI_ACK:
 

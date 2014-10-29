@@ -105,6 +105,10 @@ udf_storage_record_open(udf_record *urecord)
 
 	urecord->flag   |= UDF_RECORD_FLAG_STORAGE_OPEN;
 
+	if (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) {
+		urecord->lrecord->subrec_io++;
+	}
+
 	urecord->ldt_rectype_bits = as_ldt_record_get_rectype_bits(r);
 	cf_detail(AS_RW, "TO URECORD FROM INDEX Digest=%"PRIx64" bits %d %p",
 			  *(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);

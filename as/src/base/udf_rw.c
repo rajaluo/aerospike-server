@@ -822,6 +822,7 @@ udf_rw_update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success)
 bool
 udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint16_t set_id)
 {
+	int subrec_count = 0;
 	// LDT: Commit all the changes being done to the all records.
 	// TODO: remove limit of 6 (note -- it's temporarily up to 20)
 	udf_optype urecord_op = UDF_OPTYPE_READ;
@@ -850,6 +851,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		FOR_EACH_SUBRECORD(i, j, lrecord) {
 			urecord_op = UDF_OPTYPE_READ;
 			is_ldt = true;
+			subrec_count++;
 			udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 			udf_rw_post_processing(c_urecord, &urecord_op, set_id);
 			if (urecord_op == UDF_OPTYPE_WRITE) {
@@ -882,6 +884,9 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		}
 	}
 	udf_record_cleanup(h_urecord, true);
+	if (is_ldt) {
+		histogram_insert_raw(g_config.ldt_update_record_cnt_hist, subrec_count);
+	}
 	if (ret) {
 		cf_warning(AS_LDT, "Pickeling failed with %d", ret);
 		return false;
@@ -1173,6 +1178,8 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	as_namespace *  ns   = tr->rsv.ns;
 	// Capture the success of the Lua call to use below
 	bool success = res->is_success;
+
+	histogram_insert_raw(g_config.ldt_io_record_cnt_hist, lrecord.subrec_io);
 
 	if (ret_value == 0) {
 

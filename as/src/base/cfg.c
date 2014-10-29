@@ -132,6 +132,7 @@ cfg_set_defaults()
 	c->scan_priority = 200; // # of rows between a quick context switch?
 	c->scan_sleep = 1; // amount of time scan thread will sleep between two context switch
 	c->storage_benchmarks = false;
+	c->ldt_benchmarks = false;
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_pending_limit = 20;
@@ -285,6 +286,7 @@ typedef enum {
 	CASE_SERVICE_SCAN_PRIORITY,
 	CASE_SERVICE_SNUB_NODES,
 	CASE_SERVICE_STORAGE_BENCHMARKS,
+	CASE_SERVICE_LDT_BENCHMARKS,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
@@ -630,6 +632,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-priority",					CASE_SERVICE_SCAN_PRIORITY },
 		{ "snub-nodes",						CASE_SERVICE_SNUB_NODES },
 		{ "storage-benchmarks",				CASE_SERVICE_STORAGE_BENCHMARKS },
+		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-duplicate-threads",	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
@@ -1868,6 +1871,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_STORAGE_BENCHMARKS:
 				c->storage_benchmarks = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_LDT_BENCHMARKS:
+				c->ldt_benchmarks = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
@@ -3170,6 +3176,10 @@ cfg_create_all_histograms()
 	create_and_check_hist(&c->write_sindex_hist, "write_sindex");
 	create_and_check_hist(&c->defrag_storage_close_hist, "defrag_storage_close");
 	create_and_check_hist(&c->prole_fabric_send_hist, "prole_fabric_send");
+
+	create_and_check_hist(&c->ldt_multiop_prole_hist,"ldt_multiop_prole");
+	create_and_check_hist(&c->ldt_update_record_cnt_hist,"ldt_rec_update_count");
+	create_and_check_hist(&c->ldt_io_record_cnt_hist,"ldt_rec_io_count");
 
 #ifdef HISTOGRAM_OBJECT_LATENCY
 	create_and_check_hist(&c->read0_hist, "read_0bucket");

@@ -182,6 +182,9 @@ typedef struct as_config_s {
 
 	// whether to collect storage benchmarks
 	bool				storage_benchmarks;
+	
+	// whether to collect ldt benchmarks
+	bool				ldt_benchmarks;
 
 	// whether memory accounting is enabled
 	bool				memory_accounting;
@@ -468,6 +471,12 @@ typedef struct as_config_s {
 	histogram *			read9_hist;
 #endif
 
+	// LDT related histogram
+	histogram *			ldt_multiop_prole_hist;   // histogram that tracks LDT multi op replication performance (in fabric)
+	histogram *			ldt_update_record_cnt_hist; // histogram that tracks number of records touched (write/update)
+                                             // by LDT UDF execluding parent record
+	histogram *			ldt_io_record_cnt_hist; // histogram that tracks number of records opened (write/update)
+                                             // by LDT UDF execluding parent record
 	cf_atomic_int		stat_read_reqs;
 	cf_atomic_int		stat_read_reqs_xdr;
 	cf_atomic_int		stat_read_success;

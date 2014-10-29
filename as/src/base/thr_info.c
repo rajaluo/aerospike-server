@@ -126,6 +126,7 @@ static int as_info_queue_get_size(void);
 int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
 int info_get_objects(char *name, cf_dyn_buf *db);
 void clear_microbenchmark_histograms();
+void clear_ldt_histograms();
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
@@ -1950,6 +1951,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_config.microbenchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";storage-benchmarks=");
 	cf_dyn_buf_append_string(db, g_config.storage_benchmarks ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";ldt-benchmarks=");
+	cf_dyn_buf_append_string(db, g_config.ldt_benchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";scan-priority=");
 	cf_dyn_buf_append_int(db, g_config.scan_priority);
 	cf_dyn_buf_append_string(db, ";scan-sleep=");
@@ -2526,6 +2529,19 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of storage-benchmarks from %s to %s", bool_val[g_config.storage_benchmarks], context);
 				g_config.storage_benchmarks = false;
+			}
+			else
+				goto Error;
+		}
+		else if (0 == as_info_parameter_get(params, "ldt-benchmarks", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				clear_ldt_histograms();
+				cf_info(AS_INFO, "Changing value of ldt-benchmarks from %s to %s", bool_val[g_config.ldt_benchmarks], context);
+				g_config.ldt_benchmarks = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of ldt-benchmarks from %s to %s", bool_val[g_config.ldt_benchmarks], context);
+				g_config.ldt_benchmarks = false;
 			}
 			else
 				goto Error;
@@ -4663,6 +4679,11 @@ info_debug_ticker_fn(void *gcc_is_ass)
 				as_storage_ticker_stats();
 			}
 
+			if (g_config.ldt_benchmarks) {
+				histogram_dump(g_config.ldt_multiop_prole_hist);
+				histogram_dump(g_config.ldt_update_record_cnt_hist);
+				histogram_dump(g_config.ldt_io_record_cnt_hist);
+			}
 #ifdef HISTOGRAM_OBJECT_LATENCY
 			if (g_config.read0_hist)
 				histogram_dump(g_config.read0_hist);
@@ -5800,6 +5821,14 @@ info_get_service(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_service_str );
 
 	return(0);
+}
+
+void
+clear_ldt_histograms()
+{
+	histogram_clear(g_config.ldt_multiop_prole_hist);
+	histogram_clear(g_config.ldt_update_record_cnt_hist);
+	histogram_clear(g_config.ldt_io_record_cnt_hist);
 }
 
 void
