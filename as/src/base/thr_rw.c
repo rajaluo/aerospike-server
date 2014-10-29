@@ -891,12 +891,12 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 					} else if (UDF_OP_IS_READ(op)) {
 						// return early if the record was not updated
 						udf_call_destroy(call);
+						cf_free(call);
+						call = NULL;
 						if (udf_rw_needcomplete(tr)) {
 							udf_rw_complete(tr, tr->result_code, __FILE__,
 									__LINE__);
 						}
-						udf_call_destroy(call);
-						cf_free(call);
 						rw_cleanup(wr, tr, first_time, false, __LINE__);
 
 						*delete = true;
@@ -4319,6 +4319,27 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 
+	// LDT: Make sure the control bin is around .. if it not then reset the 
+	// LDT parent flag in the index...
+	if (as_ldt_record_is_parent(r_ref.r)) {
+		uint64_t parent_version = 0;
+		int rv = as_ldt_parent_storage_get_version(&rd, &parent_version, false, __FILE__, __LINE__);
+		if (0 != rv) {
+			as_index_clear_flags(r_ref.r, AS_INDEX_FLAG_SPECIAL_BINS);
+			// Set rec_props to remove ldt_rectype_bits if necessary.
+			// Note that this does no need resize of array. Size if at all
+			// should decrease.
+			as_storage_record_set_rec_props(&rd, rec_props_data);
+
+			// Calculate flat size again... this is resetting of flagso
+			// should _NOT_ use memory so does not need the check for 
+			// overuse
+			as_storage_record_size_and_check(&rd);
+		}
+	}
+
+	
+
 	write_local_post_processing(tr, ns, NULL, pickled_buf, pickled_sz,
 			pickled_void_time, p_pickled_rec_props, increment_generation, wlg,
 			r, &rd, memory_bytes);
@@ -5004,12 +5025,21 @@ write_msg_fn(cf_node id, msg *m, void *udata)
 		break;
 
 	case RW_OP_MULTI:
-
+	{
+		uint64_t start_ns = 0;
+		if (g_config.ldt_benchmarks) {
+			start_ns = cf_getns();
+		}
 		cf_detail(AS_RW, "MULTI_OP: Received Multi Op Request");
 		rw_multi_process(id, m);
 		cf_detail(AS_RW, "MULTI_OP: Processed Multi Op Request");
+		
+		if (g_config.ldt_benchmarks && start_ns) {
+			histogram_insert_data_point(g_config.ldt_multiop_prole_hist, start_ns);
+		}
 
 		break;
+	}
 
 	case RW_OP_MULTI_ACK:
 

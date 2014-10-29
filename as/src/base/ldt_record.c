@@ -58,6 +58,7 @@ ldt_record_init(ldt_record *lrecord)
 	lrecord->max_chunks     = 0;
 	lrecord->num_slots_used = 0;
 	lrecord->version        = 0;
+	lrecord->subrec_io      = 0; 
 	return 0;
 }
 

@@ -82,6 +82,8 @@ struct ldt_record_s {
 	as_aerospike       * as;       // To operate on ldt_record_chunk
 	uint64_t             version;  // this is version key used to open/close/search
 	                               // for the sub_record digest
+	// stats
+	int                 subrec_io; 
 };
 
 #define FOR_EACH_SUBRECORD(i, j, lrecord)           \

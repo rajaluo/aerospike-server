@@ -698,14 +698,11 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			as_storage_record_set_rec_props(rd, rec_props_data);
 		}
 
-		if (! as_storage_record_size_and_check(rd)) {
-			failmax = (int)urecord->nupdates;
-			goto Rollback;
-		}
-
 		// Version is set in the end after record size check. Setting version won't change the size of
 		// the record. And if it were before size check then this setting of version as well needs to
 		// be backed out.
+		// TODO: Add backout logic would work till very first create call of LDT end up crossing over
+		// record boundary
 		if (as_ldt_record_is_parent(rd->r)) {
 			int rv = as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, urecord->end_particle_data, __FILE__, __LINE__);
 			if (rv < 0) {
@@ -713,6 +710,11 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 							" [Failed to set the version on storage rv=%d]... Fail",rv);
 				goto Rollback;
 			}
+		}
+
+		if (! as_storage_record_size_and_check(rd)) {
+			failmax = (int)urecord->nupdates;
+			goto Rollback;
 		}
 	}
 

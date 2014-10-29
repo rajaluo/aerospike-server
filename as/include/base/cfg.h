@@ -182,6 +182,9 @@ typedef struct as_config_s {
 
 	// whether to collect storage benchmarks
 	bool				storage_benchmarks;
+	
+	// whether to collect ldt benchmarks
+	bool				ldt_benchmarks;
 
 	// whether memory accounting is enabled
 	bool				memory_accounting;
@@ -232,11 +235,9 @@ typedef struct as_config_s {
 	// number of records between an enforced context switch - thus 1 is very low priority, 1000000 would be very high
 	uint32_t			batch_priority;
 
-	/* tuning parameter for how often to run nsup to evict data in a namespace */
+	// nsup (expiration and eviction) tuning parameters
+	uint32_t			nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
 	uint32_t			nsup_period;
-	uint32_t			nsup_queue_hwm; // tsvc queue hwm check
-	uint32_t			nsup_queue_lwm; // tsvc queue lwm check
-	uint32_t			nsup_queue_escape; // tsvc queue lwm check
 	bool				nsup_startup_evict;
 
 	/* tuning parameter for how often to run retransmit checks for paxos */
@@ -470,6 +471,12 @@ typedef struct as_config_s {
 	histogram *			read9_hist;
 #endif
 
+	// LDT related histogram
+	histogram *			ldt_multiop_prole_hist;   // histogram that tracks LDT multi op replication performance (in fabric)
+	histogram *			ldt_update_record_cnt_hist; // histogram that tracks number of records touched (write/update)
+                                             // by LDT UDF execluding parent record
+	histogram *			ldt_io_record_cnt_hist; // histogram that tracks number of records opened (write/update)
+                                             // by LDT UDF execluding parent record
 	cf_atomic_int		stat_read_reqs;
 	cf_atomic_int		stat_read_reqs_xdr;
 	cf_atomic_int		stat_read_success;

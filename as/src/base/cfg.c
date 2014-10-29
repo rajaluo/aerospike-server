@@ -122,9 +122,6 @@ cfg_set_defaults()
 	c->migrate_xmit_priority = 40; // # of rows between a quick context switch? not a great way to tune
 	c->migrate_xmit_sleep = 500; // # of rows between a quick context switch? not a great way to tune
 	c->nsup_period = 120; // run nsup once every 2 minutes
-	c->nsup_queue_escape = 10; // continue waiting until this limit is reached
-	c->nsup_queue_hwm = 500; // enter waiting if tsvc backs up
-	c->nsup_queue_lwm = 1; // continue waiting until this limit is reached
 	c->nsup_startup_evict = true;
 	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // default the maximum cluster size to a "reasonable" value
 	c->paxos_protocol = AS_PAXOS_PROTOCOL_V3; // default to 3.0 "sindex" paxos protocol version
@@ -135,6 +132,7 @@ cfg_set_defaults()
 	c->scan_priority = 200; // # of rows between a quick context switch?
 	c->scan_sleep = 1; // amount of time scan thread will sleep between two context switch
 	c->storage_benchmarks = false;
+	c->ldt_benchmarks = false;
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_pending_limit = 20;
@@ -274,10 +272,8 @@ typedef enum {
 	CASE_SERVICE_MIGRATE_PRIORITY, // renamed
 	CASE_SERVICE_MIGRATE_XMIT_PRIORITY,
 	CASE_SERVICE_MIGRATE_XMIT_SLEEP,
+	CASE_SERVICE_NSUP_DELETE_SLEEP,
 	CASE_SERVICE_NSUP_PERIOD,
-	CASE_SERVICE_NSUP_QUEUE_HWM,
-	CASE_SERVICE_NSUP_QUEUE_LWM,
-	CASE_SERVICE_NSUP_QUEUE_ESCAPE,
 	CASE_SERVICE_NSUP_STARTUP_EVICT,
 	CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE,
 	CASE_SERVICE_PAXOS_PROTOCOL,
@@ -290,6 +286,7 @@ typedef enum {
 	CASE_SERVICE_SCAN_PRIORITY,
 	CASE_SERVICE_SNUB_NODES,
 	CASE_SERVICE_STORAGE_BENCHMARKS,
+	CASE_SERVICE_LDT_BENCHMARKS,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
@@ -321,6 +318,9 @@ typedef enum {
 	CASE_SERVICE_NSUP_AUTO_HWM,
 	CASE_SERVICE_NSUP_AUTO_HWM_PCT,
 	CASE_SERVICE_NSUP_MAX_DELETES,
+	CASE_SERVICE_NSUP_QUEUE_HWM,
+	CASE_SERVICE_NSUP_QUEUE_LWM,
+	CASE_SERVICE_NSUP_QUEUE_ESCAPE,
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
 	CASE_SERVICE_NSUP_THREADS,
@@ -617,10 +617,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "migrate-priority",				CASE_SERVICE_MIGRATE_PRIORITY },
 		{ "migrate-xmit-priority",			CASE_SERVICE_MIGRATE_XMIT_PRIORITY },
 		{ "migrate-xmit-sleep",				CASE_SERVICE_MIGRATE_XMIT_SLEEP },
+		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
-		{ "nsup-queue-escape",				CASE_SERVICE_NSUP_QUEUE_ESCAPE },
-		{ "nsup-queue-hwm",					CASE_SERVICE_NSUP_QUEUE_HWM },
-		{ "nsup-queue-lwm",					CASE_SERVICE_NSUP_QUEUE_LWM },
 		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
 		{ "paxos-max-cluster-size",			CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE },
 		{ "paxos-protocol",					CASE_SERVICE_PAXOS_PROTOCOL },
@@ -634,6 +632,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-priority",					CASE_SERVICE_SCAN_PRIORITY },
 		{ "snub-nodes",						CASE_SERVICE_SNUB_NODES },
 		{ "storage-benchmarks",				CASE_SERVICE_STORAGE_BENCHMARKS },
+		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-duplicate-threads",	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
@@ -662,6 +661,9 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-auto-hwm",					CASE_SERVICE_NSUP_AUTO_HWM },
 		{ "nsup-auto-hwm-pct",				CASE_SERVICE_NSUP_AUTO_HWM_PCT },
 		{ "nsup-max-deletes",				CASE_SERVICE_NSUP_MAX_DELETES },
+		{ "nsup-queue-escape",				CASE_SERVICE_NSUP_QUEUE_ESCAPE },
+		{ "nsup-queue-hwm",					CASE_SERVICE_NSUP_QUEUE_HWM },
+		{ "nsup-queue-lwm",					CASE_SERVICE_NSUP_QUEUE_LWM },
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
 		{ "nsup-threads",					CASE_SERVICE_NSUP_THREADS },
@@ -1797,17 +1799,11 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_MIGRATE_XMIT_SLEEP:
 				c->migrate_xmit_sleep = cfg_u32_no_checks(&line);
 				break;
+			case CASE_SERVICE_NSUP_DELETE_SLEEP:
+				c->nsup_delete_sleep = cfg_u32_no_checks(&line);
+				break;
 			case CASE_SERVICE_NSUP_PERIOD:
 				c->nsup_period = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_NSUP_QUEUE_ESCAPE:
-				c->nsup_queue_escape = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_NSUP_QUEUE_HWM:
-				c->nsup_queue_hwm = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_NSUP_QUEUE_LWM:
-				c->nsup_queue_lwm = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_NSUP_STARTUP_EVICT:
 				c->nsup_startup_evict = cfg_bool(&line);
@@ -1875,6 +1871,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_STORAGE_BENCHMARKS:
 				c->storage_benchmarks = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_LDT_BENCHMARKS:
+				c->ldt_benchmarks = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
@@ -1957,6 +1956,9 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_NSUP_AUTO_HWM:
 			case CASE_SERVICE_NSUP_AUTO_HWM_PCT:
 			case CASE_SERVICE_NSUP_MAX_DELETES:
+			case CASE_SERVICE_NSUP_QUEUE_ESCAPE:
+			case CASE_SERVICE_NSUP_QUEUE_HWM:
+			case CASE_SERVICE_NSUP_QUEUE_LWM:
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
 			case CASE_SERVICE_NSUP_THREADS:
@@ -3174,6 +3176,10 @@ cfg_create_all_histograms()
 	create_and_check_hist(&c->write_sindex_hist, "write_sindex");
 	create_and_check_hist(&c->defrag_storage_close_hist, "defrag_storage_close");
 	create_and_check_hist(&c->prole_fabric_send_hist, "prole_fabric_send");
+
+	create_and_check_hist(&c->ldt_multiop_prole_hist,"ldt_multiop_prole");
+	create_and_check_hist(&c->ldt_update_record_cnt_hist,"ldt_rec_update_count");
+	create_and_check_hist(&c->ldt_io_record_cnt_hist,"ldt_rec_io_count");
 
 #ifdef HISTOGRAM_OBJECT_LATENCY
 	create_and_check_hist(&c->read0_hist, "read_0bucket");

@@ -209,6 +209,149 @@ send_cdt_failure(udf_call *call, int vtype, void *val, size_t vlen)
 	return send_response(call, "FAILURE", 7, vtype, val, vlen);
 }
 
+int
+udf_rw_get_ldt_error(void *val, size_t vlen) 
+{
+	// We need to do a quick look to see if this is an LDT error string.  If it
+	// is, then we'll look deeper.  We start looking after the first space.
+	char * charptr;
+	char * valptr = (char *) val;
+	long   error_code;
+
+	// Start with the space, if it exists, as the marker for where we start
+	// looking for the LDT error contents.
+	if ((charptr = strchr((const char *) val, ' ')) != NULL) {
+		// We must be at least 10 chars from the end, so if we're less than that
+		// we are obviously not looking at an LDT error.
+		if (&charptr[9] < &valptr[vlen]) {
+			if (memcmp(&charptr[5], ":LDT-", 5) == 0) {
+				error_code = strtol(&charptr[1], NULL, 10);
+				cf_debug(AS_UDF, "LDT Error: Code(%ld) String(%s)",
+						error_code, (char *) val);
+				return error_code;
+			}
+		}
+	}
+	return 0;
+}
+
+// Parses the error message coming from lua world. This parsing matches the error
+// codes in ldt_error.lua.
+//
+// Currently this parsing happens at
+// 1. Lua world
+// 2. Server world (This funtion and associated #define)
+// 3. All the clients.
+//
+// TODO: Should probably be part of common. Or some sort of error database so
+// this can scale.
+void 
+udf_rw_update_ldt_err_stats(as_namespace *ns, as_result *res)
+{
+	if (!ns->ldt_enabled || !res) {
+		return;
+	}
+
+	if (res->is_success) {
+		return;
+	}
+
+	as_string * s   = as_string_fromval(res->value);
+	char *      rs  = (char *) as_string_tostring(s);
+
+    if ( res->value ) {
+		long code = udf_rw_get_ldt_error(rs, as_string_len(s));
+		switch (code) {
+			case ERR_TOP_REC_NOT_FOUND: 
+				cf_atomic_int_incr(&ns->lstats.ldt_err_toprec_not_found);
+				break;
+			case ERR_NOT_FOUND:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_item_not_found);
+				break;
+			case ERR_INTERNAL:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_internal);
+				break;
+			case ERR_UNIQUE_KEY:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_unique_key_violation);
+				break;
+			case ERR_INSERT:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_insert_fail);
+				break;
+			case ERR_SEARCH:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_search_fail);
+				break;
+			case ERR_DELETE:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_delete_fail);
+				break;
+			case ERR_VERSION:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_version_mismatch);
+				break;
+
+			case ERR_CAPACITY_EXCEEDED:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_capacity_exceeded);
+				break;
+			case ERR_INPUT_PARM:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_param);
+				break;
+
+			case ERR_TYPE_MISMATCH:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_op_bintype_mismatch);
+				break;
+
+			case ERR_NULL_BIN_NAME:
+			case ERR_BIN_NAME_NOT_STRING:
+			case ERR_BIN_NAME_TOO_LONG:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_param);
+				break;
+
+			case ERR_TOO_MANY_OPEN_SUBRECS:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_too_many_open_subrec);
+				break;
+			case ERR_SUB_REC_NOT_FOUND:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_subrec_not_found);
+				break;
+			case ERR_BIN_DOES_NOT_EXIST:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_bin_does_not_exist);
+				break;
+			case ERR_BIN_ALREADY_EXISTS:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_bin_exits);
+				break;
+			case ERR_BIN_DAMAGED:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_bin_damaged);
+				break;
+
+			case ERR_SUBREC_POOL_DAMAGED:
+			case ERR_SUBREC_DAMAGED:
+			case ERR_SUBREC_OPEN:
+			case ERR_SUBREC_UPDATE:
+			case ERR_SUBREC_CREATE:
+			case ERR_SUBREC_DELETE:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_subrec_internal);
+				break;
+
+			case ERR_SUBREC_CLOSE:
+			case ERR_TOPREC_UPDATE:
+			case ERR_TOPREC_CREATE:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_toprec_internal);
+				break;
+			
+
+			case ERR_FILTER_BAD:
+			case ERR_FILTER_NOT_FOUND:
+			case ERR_KEY_FUN_BAD:
+			case ERR_KEY_FUN_NOT_FOUND:
+			case ERR_TRANS_FUN_BAD:
+			case ERR_TRANS_FUN_NOT_FOUND:
+			case ERR_UNTRANS_FUN_BAD:
+			case ERR_UNTRANS_FUN_NOT_FOUND:
+			case ERR_USER_MODULE_BAD:
+			case ERR_USER_MODULE_NOT_FOUND:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_transform_internal);
+		}
+    }
+	return;
+}
+
 /**
  * Send failure notification of general UDF execution, but check for special
  * LDT errors and return specific Wire Protocol error codes for these cases:
@@ -234,33 +377,19 @@ send_cdt_failure(udf_call *call, int vtype, void *val, size_t vlen)
 static inline int
 send_udf_failure(udf_call *call, int vtype, void *val, size_t vlen)
 {
-	// We need to do a quick look to see if this is an LDT error string.  If it
-	// is, then we'll look deeper.  We start looking after the first space.
-	char * charptr;
-	char * valptr = (char *) val;
-	long error_code;
+	long error_code = udf_rw_get_ldt_error(val, vlen);
 
-	// Start with the space, if it exists, as the marker for where we start
-	// looking for the LDT error contents.
-	if ((charptr = strchr((const char *) val, ' ')) != NULL) {
-		// We must be at least 10 chars from the end, so if we're less than that
-		// we are obviously not looking at an LDT error.
-		if (&charptr[9] < &valptr[vlen]) {
-			if (memcmp(&charptr[5], ":LDT-", 5) == 0) {
-				error_code = strtol(&charptr[1], NULL, 10);
-				if (error_code == AS_PROTO_RESULT_FAIL_NOTFOUND ||
-					error_code == AS_PROTO_RESULT_FAIL_COLLECTION_ITEM_NOT_FOUND)
-				{
-					call->transaction->result_code = error_code;
-					cf_debug(AS_UDF, "LDT Error: Code(%ld) String(%s)",
-							error_code, (char *) val);
-					// Send an "empty" response, with no failure bin.
-					as_transaction *    tr          = call->transaction;
-					single_transaction_response(tr, tr->rsv.ns, NULL/*ops*/,
-							NULL /*bin*/, 0 /*nbins*/, 0, 0, NULL, NULL);
-					return 0;
-				}
-			}
+	if (error_code) {
+
+		if (error_code == AS_PROTO_RESULT_FAIL_NOTFOUND ||
+			error_code == AS_PROTO_RESULT_FAIL_COLLECTION_ITEM_NOT_FOUND) {
+
+			call->transaction->result_code = error_code;
+			// Send an "empty" response, with no failure bin.
+			as_transaction *    tr          = call->transaction;
+			single_transaction_response(tr, tr->rsv.ns, NULL/*ops*/,
+					NULL /*bin*/, 0 /*nbins*/, 0, 0, NULL, NULL);
+			return 0;
 		}
 	}
 
@@ -639,17 +768,17 @@ void
 udf_rw_update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success)
 {
 	if (UDF_OP_IS_LDT(op)) {
-		if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->ldt_read_reqs);
-		else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->ldt_delete_reqs);
-		else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->ldt_write_reqs);
+		if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->lstats.ldt_read_reqs);
+		else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->lstats.ldt_delete_reqs);
+		else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->lstats.ldt_write_reqs);
 
 		if (ret == 0) {
 			if (is_success) {
-				if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->ldt_read_success);
-				else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->ldt_delete_success);
-				else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->ldt_write_success);
+				if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->lstats.ldt_read_success);
+				else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->lstats.ldt_delete_success);
+				else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->lstats.ldt_write_success);
 			} else {
-				cf_atomic_int_incr(&ns->ldt_errs);
+				cf_atomic_int_incr(&ns->lstats.ldt_errs);
 			}
 		} else {
 			cf_atomic_int_incr(&g_config.udf_lua_errs);
@@ -693,6 +822,7 @@ udf_rw_update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success)
 bool
 udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint16_t set_id)
 {
+	int subrec_count = 0;
 	// LDT: Commit all the changes being done to the all records.
 	// TODO: remove limit of 6 (note -- it's temporarily up to 20)
 	udf_optype urecord_op = UDF_OPTYPE_READ;
@@ -721,6 +851,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		FOR_EACH_SUBRECORD(i, j, lrecord) {
 			urecord_op = UDF_OPTYPE_READ;
 			is_ldt = true;
+			subrec_count++;
 			udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 			udf_rw_post_processing(c_urecord, &urecord_op, set_id);
 			if (urecord_op == UDF_OPTYPE_WRITE) {
@@ -753,6 +884,9 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		}
 	}
 	udf_record_cleanup(h_urecord, true);
+	if (is_ldt) {
+		histogram_insert_raw(g_config.ldt_update_record_cnt_hist, subrec_count);
+	}
 	if (ret) {
 		cf_warning(AS_LDT, "Pickeling failed with %d", ret);
 		return false;
@@ -1045,12 +1179,16 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	// Capture the success of the Lua call to use below
 	bool success = res->is_success;
 
+	histogram_insert_raw(g_config.ldt_io_record_cnt_hist, lrecord.subrec_io);
+
 	if (ret_value == 0) {
 
 		if (udf_rw_finish(&lrecord, wr, op, set_id) == false) {
 			// replication did not happen what to do now ??
 			cf_warning(AS_UDF, "Investigate udf_rw_finish() result");
 		}
+
+		udf_rw_update_ldt_err_stats(ns, res);
 
 		if (UDF_OP_IS_READ(*op)) {
 			send_result(res, call, NULL);

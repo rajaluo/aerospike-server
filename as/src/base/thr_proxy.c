@@ -532,7 +532,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 					}
 
 #ifdef DEBUG_VERBOSE
-					cf_debug(AS_PROXY, "prxy: sending proto response: ptr %p sz %"PRIu64" %d", proto, proto_sz, pr.fd);
+					cf_debug(AS_PROXY, "proxy: sending proto response: ptr %p sz %"PRIu64" %d", proto, proto_sz, pr.fd);
 					for (size_t _i = 0; _i < proto_sz; _i++) {
 						fprintf(stderr, " %x", ((byte *)proto)[_i]);
 						if (_i % 16 == 15) {
