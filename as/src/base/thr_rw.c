@@ -4330,6 +4330,11 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			// Note that this does no need resize of array. Size if at all
 			// should decrease.
 			as_storage_record_set_rec_props(&rd, rec_props_data);
+
+			// Calculate flat size again... this is resetting of flagso
+			// should _NOT_ use memory so does not need the check for 
+			// overuse
+			as_storage_record_size_and_check(&rd);
 		}
 	}
 
