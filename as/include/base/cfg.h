@@ -232,11 +232,9 @@ typedef struct as_config_s {
 	// number of records between an enforced context switch - thus 1 is very low priority, 1000000 would be very high
 	uint32_t			batch_priority;
 
-	/* tuning parameter for how often to run nsup to evict data in a namespace */
+	// nsup (expiration and eviction) tuning parameters
+	uint32_t			nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
 	uint32_t			nsup_period;
-	uint32_t			nsup_queue_hwm; // tsvc queue hwm check
-	uint32_t			nsup_queue_lwm; // tsvc queue lwm check
-	uint32_t			nsup_queue_escape; // tsvc queue lwm check
 	bool				nsup_startup_evict;
 
 	/* tuning parameter for how often to run retransmit checks for paxos */

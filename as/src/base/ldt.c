@@ -1080,7 +1080,7 @@ as_ldt_is_parent_and_version_match(uint64_t subrec_version, as_index_tree *tree,
 		as_record_done(&r_ref, ns);
 		return false;
 	}
-	cf_atomic_int_incr(&ns->ldt_gc_io);
+	cf_atomic_int_incr(&ns->lstats.ldt_gc_io);
 	rd.n_bins = as_bin_get_n_bins(r, &rd);
 	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 	rd.bins = as_bin_get_all(r, &rd, stack_bins);
@@ -1188,7 +1188,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		as_record_done(r_ref, ns);
 		return;
 	}
-	cf_atomic_int_incr(&ns->ldt_gc_io);
+	cf_atomic_int_incr(&ns->lstats.ldt_gc_io);
 	rd.n_bins               = as_bin_get_n_bins(r, &rd);
 	as_bin stack_bins[(!ns->storage_data_in_memory) ? rd.n_bins : 0];
 	rd.bins                 = as_bin_get_all(r, &rd, stack_bins);
@@ -1249,7 +1249,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		cf_detail_digest(AS_LDT, &esr_digest, "ESR Digest: ");
 		cf_detail_digest(AS_LDT, &parent_digest, "Parent Digest: ");
 		as_index_delete(p->sub_vp, &subrec_digest);
-		cf_atomic_int_incr(&ns->ldt_gc_cnt);
+		cf_atomic_int_incr(&ns->lstats.ldt_gc_cnt);
 		linfo->num_gc++;
 	}
 	as_record_done(r_ref, ns);
