@@ -412,7 +412,8 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 		}
 	}
 
-	WR_RELEASE(wr);
+	WR_RELEASE(pr->wr);
+	pr->wr = NULL;
 	return 0;
 }
 
@@ -776,9 +777,16 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 			cf_debug(AS_PROXY, "proxy_retransmit: too old request %d ms: terminating (dest %"PRIx64" {%s:%d}",
 					(p_now->now_ns - pr->start_time) / 1000000, pr->dest, pr->ns->name, pr->pid);
 
-			// TODO: make sure the op is not applied twice?
 			if (pr->wr) {
 				cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit Timeout ...");
+				cf_atomic_int_incr(&g_config.ldt_proxy_timeout);
+				as_transaction tr;
+				write_request_init_tr(&tr, pr->wr);
+				if (udf_rw_needcomplete(&tr)) {
+					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
+				}
+				WR_RELEASE(pr->wr);
+				pr->wr            = NULL;
 			}
 
 			if (pr->fab_msg) {
@@ -815,16 +823,14 @@ Retry:
 		}
 
 		if (pr->wr) {
-			cf_atomic_int_incr(&g_config.ldt_proxy_retry);
-		} else {
-			cf_atomic_int_incr(&g_config.proxy_retry);
+			cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit... NOOP");
+			as_fabric_msg_put(pr->fab_msg);
+			return 0;
 		}
 
+		cf_atomic_int_incr(&g_config.proxy_retry);
+
 		int rv = as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_PRIORITY_MEDIUM);
-		// TODO: make sure the retransmit op does not apply more than once?
-		if (pr->wr) {
-			cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit");
-		}
 
 		if (rv == 0) {
 			return 0;
@@ -837,18 +843,6 @@ Retry:
 			return -1;
 		}
 		else if (rv == -3) {
-
-			if (pr->wr) {
-				as_transaction tr;
-				write_request_init_tr(&tr, pr->wr);
-				if (udf_rw_needcomplete(&tr)) {
-					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
-				}
-				WR_RELEASE(pr->wr);
-				as_fabric_msg_put(pr->fab_msg);
-				cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Fail .. Aborting...");
-				return -2;
-			}
 
 			// The node I'm proxying to is no longer up. Find another node.
 			// (Easier to just send to the master and not pay attention to
