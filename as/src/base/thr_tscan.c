@@ -574,25 +574,31 @@ tscan_enqueue_udfjob(tscan_job *job)
 		pthread_mutex_unlock(&job->LOCK);
 
 		int cycler = rand() % n_threads;
-		int i      = 0;
-		int count  = 0;
-		for (i = job->cur_partition_id; i < AS_PARTITIONS; i++) {
-			scan_job_workitem workitem;
-			workitem.tid = job->tid;
-			workitem.pid = i;
-			byte slot;
-			if (CF_QUEUE_EMPTY != cf_queue_pop(g_scan_job_slotq, &slot, CF_QUEUE_FOREVER)) {
-				cf_detail(AS_SCAN, "UDF: Added new work item for job [%"PRIu64" %d %d] slot %d", job->tid, i, cycler, slot);
-				cf_queue_push(g_scan_partition_work_q_array[cycler++ % n_threads], &workitem);
-				if (count++ == (MAX_SCAN_UDF_WORKITEM_PER_ITERATION * n_threads)) {
-					break;
-				}
-			}
+		uint32_t limit = job->cur_partition_id + (MAX_SCAN_UDF_WORKITEM_PER_ITERATION * n_threads);
+
+		if (limit > AS_PARTITIONS) {
+			limit = AS_PARTITIONS;
 		}
 
-		cf_detail(AS_SCAN, "UDF: Iteration over for job %"PRIu64" @ %d ", job->tid, i);
-		// Move partition id to the next partition which needs processing.
-		job->cur_partition_id = i + 1;
+		while (job->cur_partition_id < limit) {
+			scan_job_workitem workitem;
+			workitem.tid = job->tid;
+			workitem.pid = job->cur_partition_id;
+			byte slot;
+
+			if (CF_QUEUE_OK != cf_queue_pop(g_scan_job_slotq, &slot, CF_QUEUE_FOREVER)) {
+				// This is a code path that should never happen.
+				cf_warning(AS_SCAN, "UDF scan job slot queue pop failed");
+				break;
+			}
+
+			cf_detail(AS_SCAN, "UDF: Adding new work item for job [%"PRIu64" %u %d] slot %d", job->tid, workitem.pid, cycler, slot);
+			cf_queue_push(g_scan_partition_work_q_array[cycler++ % n_threads], &workitem);
+
+			job->cur_partition_id++;
+		}
+
+		cf_detail(AS_SCAN, "UDF: Iteration over for job %"PRIu64" next pid %u ", job->tid, job->cur_partition_id);
 
 		// Debug only, check how many of the queues have workitems.
 		for (int i = 0; i < MAX_SCAN_THREADS; i++) {
