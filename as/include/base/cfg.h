@@ -358,7 +358,7 @@ typedef struct as_config_s {
 	cf_atomic_int		ldt_proxy_initiate; // initiated
 	cf_atomic_int		proxy_action;   // did it
 	cf_atomic_int		proxy_retry;    // retried it
-	cf_atomic_int		ldt_proxy_retry;    // retried it
+	cf_atomic_int		ldt_proxy_timeout;    // retried it
 	cf_atomic_int		proxy_retry_q_full;
 	cf_atomic_int		proxy_unproxy;
 	cf_atomic_int		proxy_retry_same_dest;
