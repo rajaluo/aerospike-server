@@ -1136,6 +1136,7 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 	as_sindex_bin *end   = &qtr->srange->end;
 
 	//TODO: Make it more general to support sindex over multiple bins
+	
 	as_bin * b = as_bin_get(rd, (uint8_t *)qtr->si->imd->bnames[0],
 							strlen(qtr->si->imd->bnames[0]));
 
@@ -1147,7 +1148,9 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 		return false;
 	}
 	uint8_t type = as_bin_get_particle_type(b);
-
+	if (type == AS_PARTICLE_TYPE_MAP || type == AS_PARTICLE_TYPE_LIST) {
+		return true;
+	}
 	// Little paranoid matching all the types
 	if ((type != as_sindex_pktype_from_sktype(qtr->si->imd->btype[0]))
 			|| (type != start->type)

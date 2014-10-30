@@ -3054,11 +3054,11 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		 * 		Inesert all the sbins of newbin array from secondary index trees
 		 */
 
-		bool has_sindex = as_sindex_ns_has_sindex(ns);
-		int sindex_ret = AS_SINDEX_OK;
-		int oldbin_cnt = 0;
-		int newbin_cnt = 0;
+		bool has_sindex   = as_sindex_ns_has_sindex(ns);
+		int oldbin_cnt    = 0;
+		int newbin_cnt    = 0;
 		bool check_update = false;
+		int sindex_found  = 0;
 
 		if (has_sindex) {
 			SINDEX_GRLOCK();
@@ -3076,45 +3076,23 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 
 			if (delta_bins) {
 				uint16_t new_size = (uint16_t)block->n_bins;
-				uint16_t del_success = 0;
-
 				if ((delta_bins < 0) && has_sindex) {
-					sindex_ret = as_sindex_sbin_from_rd(&rd, new_size,
-							old_n_bins, oldbin, &del_success);
-
-					if (sindex_ret == AS_SINDEX_OK) {
-						cf_detail(AS_DRV_SSD, "Expected sbin deletes : %d Actual sbin deletes: %d",
-								-1 * delta_bins, del_success);
-					}
-					else {
-						cf_warning(AS_DRV_SSD, "sbin delete failed: %s",
-								as_sindex_err_str(sindex_ret));
-					}
+					oldbin_cnt += as_sindex_sbins_from_rd(&rd, new_size, old_n_bins, oldbin);
 				}
-
-				oldbin_cnt += del_success;
 				as_bin_allocate_bin_space(r, &rd, delta_bins);
 			}
 		}
-
+		const char * set_name = as_index_get_set_name(r, ns);
 		for (uint16_t i = 0; i < block->n_bins; i++) {
 			as_bin* b;
 			check_update = false;
 			if (i < old_n_bins) {
 				b = &rd.bins[i];
-				if (has_sindex) {
-					sindex_ret = as_sindex_sbin_from_bin(ns,
-							as_index_get_set_name(r, ns), &rd.bins[i],
-							&oldbin[oldbin_cnt]);
-
-					if (sindex_ret == AS_SINDEX_OK) {
-						oldbin_cnt++;
+				if (has_sindex) {	
+					sindex_found = as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &oldbin[oldbin_cnt]);
+					if (sindex_found > 0) {
+						oldbin_cnt  += sindex_found;
 						check_update = true;
-					}
-					else {
-						if (sindex_ret == AS_SINDEX_ERR_NOTFOUND) {
-							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-						}
 					}
 				}
 				as_bin_set_version(b, ssd_bin->version, ns->single_bin);
@@ -3129,18 +3107,13 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			ssd_bin = (drv_ssd_bin*)(block_head + ssd_bin->next);
 
 			if (has_sindex) {
-				sindex_ret = as_sindex_sbin_from_bin(ns,
-						as_index_get_set_name(r, ns), &rd.bins[i],
-						&newbin[newbin_cnt]);
+				sindex_found = as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &newbin[newbin_cnt]);
 
-				if (sindex_ret == AS_SINDEX_OK) {
-					newbin_cnt++;
+				if (sindex_found > 0) {
+					newbin_cnt += sindex_found;
 				}
 				else {
 					check_update = false;
-					if (sindex_ret == AS_SINDEX_ERR_NOTFOUND) {
-						cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-					}
 				}
 
 				// If values are updated, then check if both the values are the

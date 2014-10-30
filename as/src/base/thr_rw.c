@@ -2699,10 +2699,7 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 				int sindex_bins = (ns->sindex_cnt < rd.n_bins) ? ns->sindex_cnt : rd.n_bins;
 				SINDEX_BINS_SETUP(oldbin, sindex_bins); 
 				for (int i = 0; i < rd.n_bins; i++) {
-					sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-							&rd.bins[i], &oldbin[oldbin_cnt]);
-					if (AS_SINDEX_OK == sindex_ret)
-						oldbin_cnt++;
+					oldbin_cnt += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &oldbin[oldbin_cnt]);
 				}
 				SINDEX_GUNLOCK();
 
@@ -3779,9 +3776,10 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	i = 0;
 
 	uint16_t max_oldbins = as_bin_inuse_count(&rd);
-	int sindex_ret = AS_SINDEX_OK;
-	int oldbin_cnt = 0;
-	int newbin_cnt = 0;
+	int sindex_ret       = AS_SINDEX_OK;
+	int oldbin_cnt       = 0;
+	int newbin_cnt       = 0;
+	int sindex_found     = 0;
 
 	if (has_sindex) {
 		SINDEX_GRLOCK();
@@ -3799,16 +3797,8 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			for (uint16_t i = 0; i < rd.n_bins; i++) {
 				if (! as_bin_inuse(&rd.bins[i])) {
 					break;
-				}
-
-				sindex_ret = as_sindex_sbin_from_bin(ns, set_name, &rd.bins[i], &oldbin[oldbin_cnt]);
-
-				if (sindex_ret == AS_SINDEX_OK) {
-					oldbin_cnt++;
-				}
-				else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-					cf_debug(AS_SINDEX, "failed to get sbin with error %d", sindex_ret);
-				}
+				}	
+				oldbin_cnt += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &oldbin[oldbin_cnt]);
 			}
 		}
 
@@ -3834,12 +3824,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 					int32_t i = as_bin_get_index(&rd, op->name, op->name_sz);
 					if (i != -1) {
 						if (has_sindex) {
-							sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-									&rd.bins[i], &oldbin[oldbin_cnt]);
-							if (sindex_ret == AS_SINDEX_OK) oldbin_cnt++;
-							else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-								cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-							}
+							oldbin_cnt += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &oldbin[oldbin_cnt]);
 						}
 						as_bin_destroy(&rd, i);
 						rd.write_to_device = true;
@@ -3862,14 +3847,10 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 					uint32_t value_sz = as_msg_op_get_value_sz(op);
 					bool check_update = false;
 					if (has_sindex && !is_create) {
-						sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-								b, &oldbin[oldbin_cnt]);
-						if (sindex_ret == AS_SINDEX_OK) {
+						sindex_found     = as_sindex_sbins_from_bin(ns, set_name, b, &oldbin[oldbin_cnt]);
+						if (sindex_found > 0) {
 							check_update = true;
-							oldbin_cnt++;
-						}
-						else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
+							oldbin_cnt  += sindex_found;
 						}
 					}
 					as_particle_frombuf(b, op->particle_type,
@@ -3881,16 +3862,12 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 						p_stack_particles += as_particle_get_base_size(op->particle_type) + value_sz;
 					}
 					if (has_sindex) {
-						sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-								b, &newbin[newbin_cnt]);
-						if (sindex_ret == AS_SINDEX_OK) {
-							newbin_cnt++;
+						sindex_found     = as_sindex_sbins_from_bin(ns, set_name, b, &newbin[newbin_cnt]);
+						if (sindex_found > 0) {
+							newbin_cnt  += sindex_found;
 						}
 						else {
 							check_update = false;
-							if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-								cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-							}
 						}
 					}
 
@@ -3954,12 +3931,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 						p_stack_particles += as_particle_get_base_size(particle_type) + value_sz;
 					}
 					if (has_sindex) {
-						sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-								b, &newbin[newbin_cnt]);
-						if (sindex_ret == AS_SINDEX_OK)  newbin_cnt++;
-						else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-						}
+						newbin_cnt += as_sindex_sbins_from_bin(ns, set_name, b, &newbin[newbin_cnt]);
 					}
 					rd.write_to_device = true;
 				}
@@ -3970,22 +3942,12 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 				case AS_MSG_OP_INCR:
 				{
 					if (has_sindex) {
-						sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-								b, &oldbin[oldbin_cnt]);
-						if (sindex_ret == AS_SINDEX_OK) oldbin_cnt++;
-						else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-						}
+						oldbin_cnt += as_sindex_sbins_from_bin(ns, set_name, b, &oldbin[oldbin_cnt]);
 					}
 					int modify_ret = as_particle_increment(b, AS_PARTICLE_TYPE_INTEGER, p_op_value, value_sz, op->op == AS_MSG_OP_MC_INCR);
 					if (modify_ret == 0) {
 						if (has_sindex) {
-							sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-									b, &newbin[newbin_cnt]);
-							if(sindex_ret == AS_SINDEX_OK) newbin_cnt++;
-							else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-								cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-							}
+							newbin_cnt += as_sindex_sbins_from_bin(ns, set_name, b, &newbin[newbin_cnt]);
 						}
 						rd.write_to_device = true;
 					}
@@ -4008,12 +3970,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 					}
 
 					if (has_sindex) {
-						sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-								b, &oldbin[oldbin_cnt]);
-						if (sindex_ret == AS_SINDEX_OK) oldbin_cnt++;
-						else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-							cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-						}
+						oldbin_cnt += as_sindex_sbins_from_bin(ns, set_name, b, &oldbin[oldbin_cnt]);
 					}
 
 					// Append or prepend the data
@@ -4026,12 +3983,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 							p_stack_particles += as_particle_get_size_in_memory(b, b->particle);
 						}
 						if (has_sindex) {
-							sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
-									b, &newbin[newbin_cnt]);
-							if (sindex_ret == AS_SINDEX_OK) newbin_cnt++;
-							else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-								cf_debug(AS_SINDEX, "Failed to get sbin with error %d", sindex_ret);
-							}
+							newbin_cnt += as_sindex_sbins_from_bin(ns, set_name, b, &newbin[newbin_cnt]);
 						}
 					} else {
 						// operation failed set to invalid

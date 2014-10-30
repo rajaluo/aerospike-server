@@ -136,10 +136,14 @@ typedef struct as_sindex_bin_s {
 	as_particle_type  type; // this type is citrusleaf type
 	// Union is to support sindex for other datatypes in future.
 	// Currently sindex is supported for only int64 and string.
+	int num_values; // Should it be int ?
 	union {
 		int64_t  i64;
 	} u;
 	cf_digest         digest;
+	// If num_values becomes > 1 we need this.
+	// This can happen in case of CDTs.
+	cf_ll values;
 } as_sindex_bin;
 
 /* 
@@ -399,9 +403,8 @@ extern int as_sindex_imd_free(as_sindex_metadata *imd);
 //TODO return values is actually enum. 
 // Methods for creating secondary index bin array
 extern int  as_sindex_sbin_from_op(as_msg_op *op, as_sindex_bin *skey_data, int binid);
-extern int  as_sindex_sbin_from_bin(as_namespace *ns, const char *set, as_bin *bin, as_sindex_bin *skey_data);
-extern int  as_sindex_sbin_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, 
-										as_sindex_bin delbin[], uint16_t * del_success);
+extern int  as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, as_sindex_bin delbin[]);
+extern int  as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *bin, as_sindex_bin *skey_data);
 extern bool as_sindex_sbin_match(as_sindex_bin *b1, as_sindex_bin *b2);
 extern int  as_sindex_sbin_free(as_sindex_bin *sbin);
 extern int  as_sindex_sbin_freeall(as_sindex_bin *sbin, int numval);

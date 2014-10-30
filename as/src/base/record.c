@@ -578,21 +578,19 @@ as_record_unpickle_merge(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t s
 			if (vmap[version] == -1)
 				vmap[version] = as_record_unused_version_get(rd);
 			as_bin *b = as_bin_create(r, rd, name, name_sz, vmap[version]);
-
 			as_particle_frombuf(b, type, buf, d_sz, *stack_particles, ns->storage_data_in_memory);
+
 			if (has_sindex) {
-				// Only insert
-				sindex_ret = as_sindex_sbin_from_bin(ns,
-								as_index_get_set_name(rd->r, ns),
-								b, &newbin[newbin_cnt]);
-				if (AS_SINDEX_OK == sindex_ret) newbin_cnt++;
+				newbin_cnt += as_sindex_sbins_from_bin(ns, as_index_get_set_name(rd->r, ns), b, &newbin[newbin_cnt]);
 			}
-			if (! ns->storage_data_in_memory && type != AS_PARTICLE_TYPE_INTEGER)
+
+			if (! ns->storage_data_in_memory && type != AS_PARTICLE_TYPE_INTEGER) {
 				*stack_particles += as_particle_get_base_size(type) + d_sz;
-
+			}
 			rd->write_to_device = true;
-
-			if (record_written) *record_written = true;
+			if (record_written) {
+				*record_written = true;
+			}
 			break;
 		}
 
@@ -639,7 +637,6 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	int      oldbin_cnt   = 0;
 	int      newbin_cnt   = 0;
 	bool     check_update = false;
-	uint16_t del_success  = 0;
 
 	if (has_sindex) {
 		SINDEX_GRLOCK();
@@ -652,14 +649,8 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	SINDEX_BINS_SETUP(newbin, sindex_new_bins);
 
 	if ((delta_bins < 0) && has_sindex) {
-		sindex_ret = as_sindex_sbin_from_rd(rd, newbins, old_n_bins, oldbin, &del_success);
-		if (sindex_ret == AS_SINDEX_OK) {
-			cf_detail(AS_RECORD, "Expected sbin deletes : %d  Actual sbin deletes: %d", -1 * delta_bins, del_success);
-		} else {
-			cf_warning(AS_RECORD, "sbin delete failed: %s", as_sindex_err_str(sindex_ret));
-		}
+		 oldbin_cnt += as_sindex_sbins_from_rd(rd, newbins, old_n_bins, oldbin);
 	}
-	oldbin_cnt += del_success;
 
 	if (ns->storage_data_in_memory && ! ns->single_bin) {
 		if (delta_bins) {
@@ -687,26 +678,20 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 			break;
 		}
 
-		byte name_sz = *buf++;
-		byte *name = buf;
-		buf += name_sz;
-		uint8_t version = *buf++;
-
+		byte name_sz     = *buf++;
+		byte *name       = buf;
+		buf             += name_sz;
+		uint8_t version  = *buf++;
+		int sindex_found = 0;
 		as_bin *b;
 		if (i < old_n_bins) {
 			b = &rd->bins[i];
 			if (has_sindex) {
-				// delete also
-				sindex_ret = as_sindex_sbin_from_bin(ns, set_name, b,
-						&oldbin[oldbin_cnt]);
-				if (sindex_ret == AS_SINDEX_OK) {
-					check_update = true;
-					oldbin_cnt++;
-				} else {
-					if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-						cf_detail(AS_RECORD, "Failed to get sbin with error %d", sindex_ret);
-					}
-				}
+				sindex_found      = as_sindex_sbins_from_bin(ns, set_name, b, &oldbin[oldbin_cnt]);
+				if (sindex_found != 0) {
+					check_update  = true;
+					oldbin_cnt   += sindex_found;
+				} 
 			}
 			as_bin_set_version(b, version, ns->single_bin);
 			as_bin_set_id_from_name_buf(ns, b, name, name_sz);
@@ -716,23 +701,19 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		}
 
 		as_particle_type type = *buf++;
-		uint32_t d_sz = *(uint32_t *) buf;
-		buf += 4;
-		d_sz = ntohl(d_sz);
+		uint32_t d_sz         = *(uint32_t *) buf;
+		buf                  += 4;
+		d_sz                  = ntohl(d_sz);
 
 		as_particle_frombuf(b, type, buf, d_sz, *stack_particles, ns->storage_data_in_memory);
 
 		if (has_sindex) {
-			// insert
-			sindex_ret = as_sindex_sbin_from_bin(ns, set_name, b,
-					&newbin[newbin_cnt]);
-			if (sindex_ret == AS_SINDEX_OK) {
-				newbin_cnt++;
-			} else {
-				check_update = false;
-				if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
-					cf_detail(AS_RECORD, "Failed to get sbin with error %d", sindex_ret);
-				}
+			sindex_found      = as_sindex_sbins_from_bin(ns, set_name, b, &newbin[newbin_cnt]);
+			if (sindex_found != 0) {
+				newbin_cnt   += sindex_found;
+			} 
+			else {
+				check_update  = false;
 			}
 		}
 
