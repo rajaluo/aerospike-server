@@ -204,6 +204,9 @@ write_request_create(void) {
 	wr->trans_complete = 0;
 	wr->shipped_op     = false;
 
+	// Data from XDR, in case it is initiated by XDR
+	wr->from_xdr = NULL;
+
 	wr->dest_sz = 0;
 	UREQ_DATA_INIT(&wr->udata);
 	memset((void *) & (wr->dup_msg[0]), 0, sizeof(wr->dup_msg));
@@ -246,6 +249,9 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 
 	// Data from XDR, in case this transaction is for XDR.
 	tr->from_xdr = wr->from_xdr;
+	if (tr->from_xdr) {
+		tr->flag |= AS_TRANSACTION_FLAG_XDR_READ;
+	}
 
 #if 0
 	if (wr->is_read) {
