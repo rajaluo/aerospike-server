@@ -846,6 +846,7 @@ typedef struct ns_ldt_stats_s {
 	cf_atomic_int	ldt_update_reqs;
 
 	cf_atomic_int	ldt_errs;
+	cf_atomic_int   ldt_err_unknown;
 	cf_atomic_int	ldt_err_toprec_not_found;
 	cf_atomic_int	ldt_err_item_not_found;
 	cf_atomic_int	ldt_err_internal;
