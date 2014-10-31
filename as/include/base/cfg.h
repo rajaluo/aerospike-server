@@ -477,6 +477,8 @@ typedef struct as_config_s {
                                              // by LDT UDF execluding parent record
 	histogram *			ldt_io_record_cnt_hist; // histogram that tracks number of records opened (write/update)
                                              // by LDT UDF execluding parent record
+	histogram * 		ldt_hist;            // histogram that tracks ldt performance
+
 	cf_atomic_int		stat_read_reqs;
 	cf_atomic_int		stat_read_reqs_xdr;
 	cf_atomic_int		stat_read_success;

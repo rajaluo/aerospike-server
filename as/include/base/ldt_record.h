@@ -74,6 +74,10 @@ typedef struct ldt_slot_chunk_s {
 	ldt_slot      * slots;
 } ldt_slot_chunk;
 
+// Can add more context. LDT needs to be set this to 1 to indicate
+// to server side of the context. This gets set in ldt_record
+#define UDF_CONTEXT_LDT   0x0001
+
 struct ldt_record_s {
 	as_rec             * h_urec;
 	uint64_t             max_chunks;
@@ -84,6 +88,7 @@ struct ldt_record_s {
 	                               // for the sub_record digest
 	// stats
 	int                 subrec_io; 
+	uint32_t            udf_context;
 };
 
 #define FOR_EACH_SUBRECORD(i, j, lrecord)           \

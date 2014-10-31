@@ -59,6 +59,8 @@ ldt_record_init(ldt_record *lrecord)
 	lrecord->num_slots_used = 0;
 	lrecord->version        = 0;
 	lrecord->subrec_io      = 0; 
+	// Default is normal UDF
+	lrecord->udf_context    = 0;
 	return 0;
 }
 

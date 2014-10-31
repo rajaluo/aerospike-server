@@ -830,7 +830,11 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	// LDT: Commit all the changes being done to the all records.
 	// TODO: remove limit of 6 (note -- it's temporarily up to 20)
 	udf_optype urecord_op = UDF_OPTYPE_READ;
-	*lrecord_op           = UDF_OPTYPE_READ;
+	if (lrecord->udf_context == UDF_CONTEXT_LDT) {
+		*lrecord_op           = UDF_OPTYPE_LDT_READ;
+	} else {
+		*lrecord_op           = UDF_OPTYPE_READ;
+	}
 	udf_record *h_urecord = as_rec_source(lrecord->h_urec);
 	bool is_ldt           = false;
 	int  ret              = 0;
@@ -849,7 +853,11 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	} else {
 
 		if (urecord_op == UDF_OPTYPE_WRITE) {
-			*lrecord_op = UDF_OPTYPE_WRITE;
+			if (lrecord->udf_context == UDF_CONTEXT_LDT) {
+				*lrecord_op = UDF_OPTYPE_LDT_WRITE;
+			} else {
+				*lrecord_op = UDF_OPTYPE_WRITE;
+			}
 		}
 
 		FOR_EACH_SUBRECORD(i, j, lrecord) {
@@ -858,9 +866,6 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 			subrec_count++;
 			udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 			udf_rw_post_processing(c_urecord, &urecord_op, set_id);
-			if (urecord_op == UDF_OPTYPE_WRITE) {
-				*lrecord_op = UDF_OPTYPE_LDT_WRITE;
-			}
 		}
 
 		// Process the parent record in the end .. this is to make sure
@@ -888,9 +893,13 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		}
 	}
 	udf_record_cleanup(h_urecord, true);
-	if (is_ldt) {
-		histogram_insert_raw(g_config.ldt_update_record_cnt_hist, subrec_count);
+	if (lrecord->udf_context == UDF_CONTEXT_LDT) {
+		// When showing in histogram the record which touch 0 subrecord and 1 subrecord 
+		// will show up in same bucket. +1 for record as well. So all the request which 
+		// touch subrecord as well show up in 2nd bucket
+		histogram_insert_raw(g_config.ldt_update_record_cnt_hist, subrec_count + 1);
 	}
+
 	if (ret) {
 		cf_warning(AS_LDT, "Pickeling failed with %d", ret);
 		return false;
@@ -1004,6 +1013,12 @@ udf_apply_record(udf_call * call, as_rec *rec, as_result *res)
 	int ret_value = as_module_apply_record(&mod_lua, &ctx,
 			call->filename, call->function, rec, &arglist, res);
 	cf_hist_track_insert_data_point(g_config.ut_hist, now);
+	if (g_config.ldt_benchmarks) {
+		ldt_record *lrecord = (ldt_record *)as_rec_source(rec);
+		if (lrecord->udf_context == UDF_CONTEXT_LDT) {
+			histogram_insert_data_point(g_config.ldt_hist, now);
+		}
+	}
 	udf_memtracker_cleanup();
 	udf_timer_cleanup();
 	as_list_destroy(&arglist);
@@ -1183,9 +1198,13 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	// Capture the success of the Lua call to use below
 	bool success = res->is_success;
 
-	histogram_insert_raw(g_config.ldt_io_record_cnt_hist, lrecord.subrec_io);
+	
 
 	if (ret_value == 0) {
+
+		if (lrecord.udf_context == UDF_CONTEXT_LDT) {
+			histogram_insert_raw(g_config.ldt_io_record_cnt_hist, lrecord.subrec_io + 1);
+		}
 
 		if (udf_rw_finish(&lrecord, wr, op, set_id) == false) {
 			// replication did not happen what to do now ??
