@@ -83,7 +83,9 @@
 #define STR_TYPE_NUMERIC   "numeric"
 #define STR_TYPE_STRING    "string"
 #define STR_ITYPE          "indextype"
-#define STR_ITYPE_OBJECT   "object"
+#define STR_ITYPE_LIST     "list"
+#define STR_ITYPE_MAP      "map"
+#define STR_ITYPE_INVMAP   "invmap"
 #define STR_BINTYPE        "bintype"
 
 extern int as_nsup_queue_get_size();
@@ -5897,9 +5899,8 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		return 0;
 	}
 
-	// ONLY FOR CREATE AFTER THIS POINT
-
-	// INDEXTYPE INDEXTYPE INDEXTYPE
+	// Get the index type. 
+	// It could be list, map, invmap, or by default none.
 	char indextype_str[128];
 	memset(indextype_str, 0, 128);
 	int  indtype_len = sizeof(indextype_str);
@@ -5908,135 +5909,114 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		imd->itype = AS_SINDEX_ITYPE_DEFAULT;
 	}
 	else {
-		if (strncmp(indextype_str, STR_ITYPE_OBJECT, 6) == 0) {
-			imd->itype = AS_SINDEX_ITYPE_OBJECT;
-		} else if (strncmp(indextype_str, "default", 8) == 0) {
-			imd->itype = AS_SINDEX_ITYPE_DEFAULT;
+		if (strncmp(indextype_str, STR_ITYPE_LIST, 4) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_LIST;
+		} else if (strncmp(indextype_str, STR_ITYPE_MAP, 3) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_MAP;
+		} else if (strncmp(indextype_str, STR_ITYPE_INVMAP, 6) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_INVMAP;
 		} else {
 			cf_warning(AS_INFO, "Failed to create secondary index : invalid type of index"
 					" for sindex creation %s ", indexname_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid type must be [functional, userland, default]");
+					"Invalid type must be [none, list, map, invmap]");
 			return AS_SINDEX_ERR_PARAM;
 		}
 	}
 
-	if (imd->itype == AS_SINDEX_ITYPE_OBJECT) { //printf("OBJECT INDEX\n");
-		cf_info(AS_INFO, "Falied to create secondary index : Unsupported Index Type "
-				"(AS_SINDEX_ITYPE_OBJECT) for sindex creation %s", indexname_str);
+	// Gather indexdata	
+	char indexdata_str[1024];
+	int  indexdata_len = sizeof(indexdata_str);
+	if (as_info_parameter_get(params, STR_INDEXDATA, indexdata_str,
+				&indexdata_len)) {
+		cf_warning(AS_INFO, "Failed to create secondary index : invalid indexdata for"
+				" sindex creation %s %s", indexname_str, indexdata_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Unsupported Index Type");
+				"Invalid indexdata");
 		return AS_SINDEX_ERR_PARAM;
+	}
+	// Read indexdata
+	cf_vector *str_v = cf_vector_create(sizeof(void *), 10, VECTOR_FLAG_INITZERO);
+	cf_str_split(",", indexdata_str, str_v);
+	if (0 != (cf_vector_size(str_v) % 2) || AS_SINDEX_BINMAX < (cf_vector_size(str_v) / 2)) {
+		cf_warning(AS_INFO, "Failed to create secondary index : number of bins more than"
+				"  %d for sindex creation %s", AS_SINDEX_BINMAX, indexname_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+				"invalid indexdata");
+		cf_vector_destroy(str_v);
+		return AS_SINDEX_ERR_PARAM;
+	}
 
-		// TODO: Object Indexes
-		imd->num_bins = 1;
-		char btype_str[1024];
-		int  btype_len = sizeof(btype_str);
-		if (as_info_parameter_get(params, STR_BINTYPE, btype_str, &btype_len)) {
-			cf_warning(AS_INFO, "Failed to create secondary index : invalid bintype for "
-					"secondary index creation %s ", indexname_str);
+	// Bin data
+	// TODO: Remove the half cooked multi-col index support from server.
+	int bincount = 0;
+	for (int i = 0; i < (cf_vector_size(str_v) / 2); i++) {
+		// Not more than AS_SINDEX_BINMAX are allowed
+		if (bincount >= AS_SINDEX_BINMAX) {
+			cf_warning(AS_INFO, "Failed to create secondary index: More bins are specified "
+					"than %d for sindex creation %s ", AS_SINDEX_BINMAX, indexname_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid bintype");
-			return AS_SINDEX_ERR_PARAM;
-		}
-		if        (strncasecmp(btype_str, "string", 6) == 0) {
-			imd->btype[0] = AS_SINDEX_KTYPE_DIGEST;
-		} else if (strncasecmp(btype_str, "numeric", 7) == 0) {
-			imd->btype[0] = AS_SINDEX_KTYPE_LONG;
-		} else {
-			cf_warning(AS_INFO, "Failed to create secondary index: bin type (%s) "
-					"not supported for sindex creation %s", btype_str, indexname_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid bintype");
-			return AS_SINDEX_ERR_PARAM;
-		}
-		char obj_cname[1024];
-		sprintf(obj_cname, "INDEX:%s", imd->iname);
-		imd->bnames[0] = cf_strdup(obj_cname);
-		imd->oindx     = 1;
-	} else {
-
-		// BINNAME / TYPE ... BINNAME / TYPE .. BINNAME / TYPE
-		char indexdata_str[1024];
-		int  indexdata_len = sizeof(indexdata_str);
-		if (as_info_parameter_get(params, STR_INDEXDATA, indexdata_str,
-					&indexdata_len)) {
-			cf_warning(AS_INFO, "Failed to create secondary index : invalid indexdata for"
-					" sindex creation %s", indexname_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid indexdata");
-			return AS_SINDEX_ERR_PARAM;
-		}
-		cf_vector *str_v = cf_vector_create(sizeof(void *), 10,
-				VECTOR_FLAG_INITZERO);
-		cf_str_split(",", indexdata_str, str_v);
-		if (0 != (cf_vector_size(str_v) % 2) ||
-				AS_SINDEX_BINMAX < (cf_vector_size(str_v) / 2)) {
-			cf_warning(AS_INFO, "Failed to create secondary index : number of bins more than"
-					"  %d for sindex creation %s", AS_SINDEX_BINMAX, indexname_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"invalid indexdata");
+					"More bins specified than allowed");
 			cf_vector_destroy(str_v);
 			return AS_SINDEX_ERR_PARAM;
 		}
 
-		int bincount = 0;
-		for (int i = 0; i < (cf_vector_size(str_v) / 2); i++) {
-			if (bincount >= AS_SINDEX_BINMAX) {
-				cf_warning(AS_INFO, "Failed to create secondary index: More bins are specified "
-						"than %d for sindex creation %s ", AS_SINDEX_BINMAX, indexname_str);
-				INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-						"More bins specified than allowed");
-				cf_vector_destroy(str_v);
-				return AS_SINDEX_ERR_PARAM;
-			}
-
-			char *bname_str;
-			cf_vector_get(str_v, i * 2, &bname_str);
-			imd->bnames[i] = cf_strdup(bname_str);
-
-			char *type_str = NULL;
-			cf_vector_get(str_v, i * 2 + 1, &type_str);
-
-			if (!type_str) {
-				cf_warning(AS_INFO, "Failed to create secondary index: bin type must be specified"
-						" for sindex creation %s ", indexname_str);
-				INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-						"Invalid type must be [numeric,string]");
-				cf_vector_destroy(str_v);
-				return AS_SINDEX_ERR_PARAM;
-			}
-			else if        (strncasecmp(type_str, "string", 6) == 0) {
-				imd->btype[i] = AS_SINDEX_KTYPE_DIGEST;
-			} else if (strncasecmp(type_str, "numeric", 7) == 0) {
-				imd->btype[i] = AS_SINDEX_KTYPE_LONG;
-			} else {
-				cf_warning(AS_INFO, "Failed to create secondary index : invalid bin type %s "
-						"for sindex creation %s", type_str, indexname_str);
-				INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-						"Invalid type must be [numeric,string]");
-				cf_vector_destroy(str_v);
-				return AS_SINDEX_ERR_PARAM;
-			}
-			bincount++;
+		char *path_str;
+		cf_vector_get(str_v, i * 2, &path_str);
+		imd->path_str = cf_strdup(path_str);
+		cf_info(AS_SINDEX, "path %s", imd->path_str);
+		// Extract the path and bin
+		if (as_sindex_extract_bin_path(imd, path_str)) {
+			cf_warning(AS_INFO, "Failed to create secondary index: Path_str is not valid- %s", path_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid path");
+			return AS_SINDEX_ERR_PARAM;
 		}
-		imd->num_bins = bincount;
 
-		for (int i = 0; i < AS_SINDEX_BINMAX; i++) {
-			if (imd->bnames[i] &&
-					(strlen(imd->bnames[i]) >= BIN_NAME_MAX_SZ)) {
-				cf_warning(AS_INFO, "Failed to create secondary creation: Bin Name %s longer "
-						"than allowed (%d) for sindex creation %s", imd->bnames[i],
-						BIN_NAME_MAX_SZ, indexname_str);
-				INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-						"Bin Name too long");
-				return AS_SINDEX_ERR_PARAM;
-			}
+		if (!imd->bnames[i]) {
+			cf_warning(AS_INFO, "Failed to create secondary index: bin name must be specified for sindex creation");
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid bin name");
+			cf_vector_destroy(str_v);
+			return AS_SINDEX_ERR_PARAM;
 		}
-		cf_vector_destroy(str_v);
+
+		// Extract data type to index
+		char *type_str = NULL;
+		cf_vector_get(str_v, i * 2 + 1, &type_str);
+
+		if (!type_str) {
+			cf_warning(AS_INFO, "Failed to create secondary index: bin type must be specified"
+					" for sindex creation %s ", indexname_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type must be [numeric,string]");
+			cf_vector_destroy(str_v);
+			return AS_SINDEX_ERR_PARAM;
+		}
+		else if (strncasecmp(type_str, "string", 6) == 0) {
+			imd->btype[i] = AS_SINDEX_KTYPE_DIGEST;
+		} else if (strncasecmp(type_str, "numeric", 7) == 0) {
+			imd->btype[i] = AS_SINDEX_KTYPE_LONG;
+		} else {
+			cf_warning(AS_INFO, "Failed to create secondary index : invalid bin type %s "
+					"for sindex creation %s", type_str, indexname_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+					"Invalid type must be [numeric,string]");
+			cf_vector_destroy(str_v);
+			return AS_SINDEX_ERR_PARAM;
+		}
+		bincount++;
 	}
-	return AS_SINDEX_OK;
 
+	imd->num_bins = bincount;
+	for (int i = 0; i < imd->num_bins; i++) {
+		if (imd->bnames[i] && (strlen(imd->bnames[i]) >= BIN_NAME_MAX_SZ)) {
+			cf_warning(AS_INFO, "Failed to create secondary creation: Bin Name %s longer "
+					"than allowed (%d) for sindex creation %s", imd->bnames[i],
+					BIN_NAME_MAX_SZ, indexname_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Bin Name too long");
+			return AS_SINDEX_ERR_PARAM;
+		}
+	}
+	cf_vector_destroy(str_v);
+	return AS_SINDEX_OK;
 }
 
 // called for asinfo command to create a new sindex

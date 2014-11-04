@@ -115,7 +115,9 @@ as_particle_type as_sindex_pktype_from_sktype(as_sindex_ktype t);
 
 typedef enum {
 	AS_SINDEX_ITYPE_DEFAULT     = 0,
-	AS_SINDEX_ITYPE_OBJECT      = 1
+	AS_SINDEX_ITYPE_LIST        = 1,
+	AS_SINDEX_ITYPE_MAP         = 2,
+	AS_SINDEX_ITYPE_INVMAP      = 3
 } as_sindex_type;
 
 /*
@@ -208,6 +210,7 @@ typedef struct as_sindex_metadata_s {
 	int 				  post_op;
 	as_sindex_path        path[AS_SINDEX_MAX_PATH_LENGTH];
 	int                   path_length;
+	char                * path_str;
 } as_sindex_metadata;
 
 /*
@@ -451,6 +454,7 @@ extern int                  as_sindex_set_config(as_namespace *ns, as_sindex_met
 extern void                 as_sindex_gconfig_default(struct as_config_s *c);
 extern int                  as_sindex__op_by_skey(as_sindex   *si, as_sindex_key *skey, as_storage_rd *rd, as_sindex_op op);
 extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
+extern as_sindex_status     as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str);
 
 
 // SINDEX LOCK MACROS

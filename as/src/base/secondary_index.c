@@ -370,7 +370,8 @@ as_sindex__dup_meta(as_sindex_metadata *imd, as_sindex_metadata **qimd,
 	qimdp->itype    = imd->itype;
 	qimdp->nprts    = imd->nprts;
 	qimdp->mfd_slot = imd->mfd_slot;
-
+	qimdp->path_str = imd->path_str;
+	memcpy(qimdp->path, imd->path, AS_SINDEX_MAX_PATH_LENGTH*sizeof(as_sindex_path));
 	qimdp->num_bins = imd->num_bins;
 	for (int i = 0; i < imd->num_bins; i++) {
 		qimdp->bnames[i] = cf_strdup(imd->bnames[i]);
@@ -1633,6 +1634,8 @@ as_sindex_describe_str(as_namespace *ns, as_sindex_metadata *imd, cf_dyn_buf *db
 		else {
 			cf_dyn_buf_append_string(db, ";state=D");
 		}
+		cf_dyn_buf_append_string(db, ";path_str=");
+		cf_dyn_buf_append_string(db, si->imd->path_str);
 		SINDEX_UNLOCK(&si->imd->slock)
 		AS_SINDEX_RELEASE(si);
 		return AS_SINDEX_OK;
@@ -1743,6 +1746,10 @@ as_sindex_ns_has_sindex(as_namespace *ns)
 	return (ns->sindex_cnt > 0);
 }
 
+char *sindex_decorator_defs[] =
+{	"NONE", "LIST", "MAP", "INVMAP"
+};
+
 /*
  * Client API to list all the indexes in a namespace, returns list of imd with
  * index information, Caller should free it up
@@ -1769,7 +1776,10 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 				if (i) cf_dyn_buf_append_string(db, ",");
 				cf_dyn_buf_append_buf(db, (uint8_t *)si.imd->bnames[i], strlen(si.imd->bnames[i]));
 				cf_dyn_buf_append_string(db, ":type=");
-				cf_dyn_buf_append_string(db, Col_type_defs[as_sindex_pktype_from_sktype(si.imd->btype[i])]);
+				cf_dyn_buf_append_string(db, sindex_decorator_defs[as_sindex_pktype_from_sktype(si.imd->btype[i])]);
+				cf_dyn_buf_append_string(db, ":decorator=");
+				cf_dyn_buf_append_string(db, sindex_decorator_defs[si.imd->itype]);
+
 			}
 			cf_dyn_buf_append_string(db, ":sync_state=");
 			if (si.desync_cnt > 0) {
@@ -1797,6 +1807,9 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 			else {
 				cf_dyn_buf_append_string(db, ":state=D;");
 			}
+			cf_dyn_buf_append_string(db, ":path=");
+			cf_dyn_buf_append_string(db, si.imd->path_str);
+			
 			SINDEX_UNLOCK(&si.imd->slock);
 			AS_SINDEX_RELEASE(&si);
 		}
@@ -3284,7 +3297,7 @@ as_sindex_binid_has_sindex(as_namespace *ns, int binid)
  * path[0].type = AS_PARTICLE_TYPE_LIST . path[0].value.index  = 0
 */
 as_sindex_status
-as_sindex_build_value_path(as_sindex_metadata * imd, char * path_str)
+as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str)
 {
 	int    path_len    = strlen(path_str);
 	int    start       = 0;
@@ -3293,8 +3306,11 @@ as_sindex_build_value_path(as_sindex_metadata * imd, char * path_str)
 	// Iterate through the path_str and search for character (., [, ])
 	// which leads to sublevels in maps and lists
 	while (end < path_len) {		
-		if (path_str[end] == '.' || path_str[end] == '[' || path_str[end] == ']') {
+		if (path_str[end] == '.' || path_str[end] == '[' || path_str[end] == ']') {	
 			if (imd->path[path_length].type == AS_PARTICLE_TYPE_NULL) {
+				if (path_length == 0) {
+					imd->bnames[0] = cf_strndup(path_str+start, end-start);
+				}
 				if (path_str[end] == '.') {
 					imd->path[path_length].type = AS_PARTICLE_TYPE_MAP;
 				}
@@ -3305,11 +3321,12 @@ as_sindex_build_value_path(as_sindex_metadata * imd, char * path_str)
 			else if (imd->path[path_length].type == AS_PARTICLE_TYPE_MAP) {
 				char int_str[20];
 				if (path_str[start] == '\'' && path_str[end-1] == '\'' && (end > start)) {
-					imd->path[path_length].value.key_str  = strndup(path_str+start + 1, (end-start-1));
+					imd->path[path_length].value.key_str  = cf_strndup(path_str+start + 1, (end-start-1));
 					imd->path[path_length].key_type = AS_PARTICLE_TYPE_STRING;
 				}
 				else {
-					strncpy(path_str + start, int_str, end-start);
+					strncpy(int_str, path_str + start, end-start);
+					int_str[end-start] = '\0';
 					if (cf_str_atoi_64(int_str, (int64_t *)&(imd->path[path_length].value.key_int)) != 0 ) {
 						goto Cleanup;
 					}
@@ -3326,8 +3343,9 @@ as_sindex_build_value_path(as_sindex_metadata * imd, char * path_str)
 			else if (imd->path[path_length].type == AS_PARTICLE_TYPE_LIST) {
 				// assign index
 				char int_str[10];
-				strncpy(path_str + start, int_str, end-start);
-				if (cf_str_atoi(int_str, &(imd->path[path_length].value.index)) != 0 ) {
+				strncpy(int_str, path_str + start, end-start);
+				int_str[end-start] = '\0';
+				if (cf_str_atoi(int_str, &(imd->path[path_length].value.index))) {
 					goto Cleanup;
 				}
 				path_length++;
@@ -3340,6 +3358,50 @@ as_sindex_build_value_path(as_sindex_metadata * imd, char * path_str)
 		end++;
 	}
 
+	// Use the remainder string
+	if (path_length == 0) {
+		imd->bnames[0] = cf_strndup(path_str+start, end-start);
+	}
+	else if (imd->path[path_length].type == AS_PARTICLE_TYPE_MAP) {
+		char int_str[20];
+		if (path_str[start] == '\'' && path_str[end-1] == '\'' && (end > start)) {
+			imd->path[path_length].value.key_str  = cf_strndup(path_str+start + 1, (end-start-1));
+			imd->path[path_length].key_type = AS_PARTICLE_TYPE_STRING;
+		}
+		else {
+			strncpy(int_str, path_str + start, end-start);
+			int_str[end-start] = '\0';
+			if (cf_str_atoi_64(int_str, (int64_t *)&(imd->path[path_length].value.key_int)) != 0 ) {
+				goto Cleanup;
+			}
+			imd->path[path_length].key_type = AS_PARTICLE_TYPE_INTEGER;	
+		}
+		path_length++;
+		if (path_str[end] == '.') {
+			imd->path[path_length].type = AS_PARTICLE_TYPE_MAP;
+		}
+		else {
+			imd->path[path_length].type = AS_PARTICLE_TYPE_LIST;
+		}
+	}
+/*
+ * for debugging
+	cf_info(AS_SINDEX, "After parsing : bin name: %s", imd->bnames[0]);
+	for (int i=0; i<path_length; i++) {
+		if(imd->path[i].type == AS_PARTICLE_TYPE_MAP ) {
+			if (imd->path[i].key_type == AS_PARTICLE_TYPE_INTEGER) {
+				cf_info(AS_SINDEX, "map key_int %d", imd->path[i].value.key_int);
+			}
+			else {
+				cf_info(AS_SINDEX, "map key_str %s", imd->path[i].value.key_str);
+			}
+		}
+		else{
+			cf_info(AS_SINDEX, "list index %d", imd->path[i].value.index);
+		}
+	}
+*/
+	imd->path_length = path_length;
 	return AS_SINDEX_OK;
 
 	Cleanup:
