@@ -259,7 +259,7 @@ udf_rw_update_ldt_err_stats(as_namespace *ns, as_result *res)
 	as_string * s   = as_string_fromval(res->value);
 	char *      rs  = (char *) as_string_tostring(s);
 
-    if ( res->value ) {
+    if ( s ) {
 		long code = udf_rw_get_ldt_error(rs, as_string_len(s));
 		switch (code) {
 			case ERR_TOP_REC_NOT_FOUND: 
@@ -347,8 +347,12 @@ udf_rw_update_ldt_err_stats(as_namespace *ns, as_result *res)
 			case ERR_USER_MODULE_BAD:
 			case ERR_USER_MODULE_NOT_FOUND:
 				cf_atomic_int_incr(&ns->lstats.ldt_err_transform_internal);
+			default:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_unknown);
 		}
-    }
+    } else {
+		cf_atomic_int_incr(&ns->lstats.ldt_err_unknown);
+	}
 	return;
 }
 

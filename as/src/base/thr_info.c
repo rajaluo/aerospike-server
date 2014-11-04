@@ -5544,6 +5544,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_internal));
 		cf_dyn_buf_append_string(db, ";ldt_err_transform_internal=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_transform_internal));
+		cf_dyn_buf_append_string(db, ";ldt_err_unknown=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unknown));
 	}
 
 
