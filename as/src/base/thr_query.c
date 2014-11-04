@@ -980,7 +980,7 @@ as_query__add_fin(as_query_transaction *qtr)
 	// set up the header
 	uint8_t *buf      = b;
 	as_msg *msgp      = (as_msg *) buf;
-	msgp->header_sz    = sizeof(as_msg);
+	msgp->header_sz   = sizeof(as_msg);
 	msgp->info1       = 0;
 	msgp->info2       = 0;
 	msgp->info3       = AS_MSG_INFO3_LAST;

@@ -2143,6 +2143,11 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";total-bytes-memory=");
 	cf_dyn_buf_append_uint64(db, ns->memory_size);
 
+	cf_dyn_buf_append_string(db, ";read-consistency-level-override=");
+	cf_dyn_buf_append_string(db, NS_READ_CONSISTENCY_LEVEL_NAME());
+
+	cf_dyn_buf_append_string(db, ";write-commit-level-override=");
+	cf_dyn_buf_append_string(db, NS_WRITE_COMMIT_LEVEL_NAME());
 
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
@@ -3389,6 +3394,46 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 
 			if (ret_val) {
 				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "read-consistency-level-override", context, &context_len)) {
+			char *original_value = NS_READ_CONSISTENCY_LEVEL_NAME();
+			if (strcmp(context, "all") == 0) {
+				ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ALL;
+				ns->read_consistency_level_override = true;
+			}
+			else if (strcmp(context, "off") == 0) {
+				ns->read_consistency_level_override = false;
+			}
+			else if (strcmp(context, "one") == 0) {
+				ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE;
+				ns->read_consistency_level_override = true;
+			}
+			else {
+				goto Error;
+			}
+			if (strcmp(original_value, context)) {
+				cf_info(AS_INFO, "Changing value of read-consistency-level-override of ns %s from %s to %s", ns->name, original_value, context);
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "write-commit-level-override", context, &context_len)) {
+			char *original_value = NS_WRITE_COMMIT_LEVEL_NAME();
+			if (strcmp(context, "all") == 0) {
+				ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL;
+				ns->write_commit_level_override = true;
+			}
+			else if (strcmp(context, "master") == 0) {
+				ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_MASTER;
+				ns->write_commit_level_override = true;
+			}
+			else if (strcmp(context, "off") == 0) {
+				ns->write_commit_level_override = false;
+			}
+			else {
+				goto Error;
+			}
+			if (strcmp(original_value, context)) {
+				cf_info(AS_INFO, "Changing value of write-commit-level-override of ns %s from %s to %s", ns->name, original_value, context);
 			}
 		}
 		else {
