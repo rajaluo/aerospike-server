@@ -57,6 +57,7 @@
 #include "aerospike/as_pair.h"
 
 #include "ai_btree.h"
+#include "cf_str.h"
 
 #define SINDEX_CRASH(str, ...) \
 	cf_crash(AS_SINDEX, "SINDEX_ASSERT: "str, ##__VA_ARGS__);
@@ -3269,4 +3270,155 @@ as_sindex_binid_has_sindex(as_namespace *ns, int binid)
 	int index      = binid / 32;
 	uint32_t temp  = ns->binid_has_sindex[index];
 	return (temp & (1 << (binid % 32))) ? true : false;
+}
+
+/*
+ * This function parses the path_str and populate array of path structure in 
+ * imd.
+ * Each element of the path is the way to reach the the next path.
+ * For e.g 
+ * bin.k1[1][0]
+ * array of the path structure would be like - 
+ * path[0].type = AS_PARTICLE_TYPE_MAP . path[0].value.key_str = k1
+ * path[0].type = AS_PARTICLE_TYPE_LIST . path[0].value.index  = 1 
+ * path[0].type = AS_PARTICLE_TYPE_LIST . path[0].value.index  = 0
+*/
+as_sindex_status
+as_sindex_build_value_path(as_sindex_metadata * imd, char * path_str)
+{
+	int    path_len    = strlen(path_str);
+	int    start       = 0;
+	int    end         = 0;
+	int    path_length = 0; 
+	// Iterate through the path_str and search for character (., [, ])
+	// which leads to sublevels in maps and lists
+	while (end < path_len) {		
+		if (path_str[end] == '.' || path_str[end] == '[' || path_str[end] == ']') {
+			if (imd->path[path_length].type == AS_PARTICLE_TYPE_NULL) {
+				if (path_str[end] == '.') {
+					imd->path[path_length].type = AS_PARTICLE_TYPE_MAP;
+				}
+				else {
+					imd->path[path_length].type = AS_PARTICLE_TYPE_LIST;
+				}
+			}
+			else if (imd->path[path_length].type == AS_PARTICLE_TYPE_MAP) {
+				char int_str[20];
+				if (path_str[start] == '\'' && path_str[end-1] == '\'' && (end > start)) {
+					imd->path[path_length].value.key_str  = strndup(path_str+start + 1, (end-start-1));
+					imd->path[path_length].key_type = AS_PARTICLE_TYPE_STRING;
+				}
+				else {
+					strncpy(path_str + start, int_str, end-start);
+					if (cf_str_atoi_64(int_str, (int64_t *)&(imd->path[path_length].value.key_int)) != 0 ) {
+						goto Cleanup;
+					}
+					imd->path[path_length].key_type = AS_PARTICLE_TYPE_INTEGER;	
+				}
+				path_length++;
+				if (path_str[end] == '.') {
+					imd->path[path_length].type = AS_PARTICLE_TYPE_MAP;
+				}
+				else {
+					imd->path[path_length].type = AS_PARTICLE_TYPE_LIST;
+				}
+			}
+			else if (imd->path[path_length].type == AS_PARTICLE_TYPE_LIST) {
+				// assign index
+				char int_str[10];
+				strncpy(path_str + start, int_str, end-start);
+				if (cf_str_atoi(int_str, &(imd->path[path_length].value.index)) != 0 ) {
+					goto Cleanup;
+				}
+				path_length++;
+			}
+			else {
+				goto Cleanup;
+			}
+			start = end + 1;
+		}
+		end++;
+	}
+
+	return AS_SINDEX_OK;
+
+	Cleanup:
+	return AS_SINDEX_ERR;
+}
+
+as_sindex_status
+as_sindex_destroy_value_path(as_sindex_metadata * imd)
+{
+	for (int i=0; i<imd->path_length; i++) {
+		if (imd->path[i].type == AS_PARTICLE_TYPE_MAP && 
+				imd->path[i].key_type == AS_PARTICLE_TYPE_STRING) {
+			cf_free(imd->path[i].value.key_str);
+		}
+	}
+	return AS_SINDEX_OK;
+}
+
+/*
+ * This function checks the existence of path stored in the sindex metadata
+ * in a bin
+ */
+bool
+as_sindex_value_path_exists(as_sindex_metadata * imd, as_val * v)
+{
+	if (!v) {
+		return false;
+	}
+	if (imd->path_length == 0) {
+		return true;
+	}
+	as_sindex_path *path = imd->path;
+	as_val * val = v;
+	for (int i=0; i<imd->path_length; i++) {
+		switch(val->type) {
+			case AS_STRING:
+			case AS_INTEGER:
+				return false;
+			case AS_LIST: {
+				if (path[i].type != AS_PARTICLE_TYPE_LIST) {
+					return false;
+				}
+				int index = path[i].value.index;
+				as_arraylist* list  = (as_arraylist*) as_list_fromval(v);
+				as_arraylist_iterator it;
+				as_arraylist_iterator_init( &it, list);
+				int j = 0;
+				while( as_arraylist_iterator_has_next( &it) && j!=index) {
+					val = (as_val*) as_arraylist_iterator_next( &it);
+					j++;
+				}
+				if (j != index ) {
+					return false;
+				}
+				break;
+			}
+			case AS_MAP: {
+				as_map * map = as_map_fromval(val);
+				as_val * key;
+				as_val * value;
+				if (path[i].key_type == AS_PARTICLE_TYPE_STRING) {
+					key = (as_val *)as_string_new(path[i].value.key_str, false);
+				}
+				else if (path[i].key_type == AS_PARTICLE_TYPE_INTEGER) {
+					key = (as_val *)as_integer_new(path[i].value.key_int);
+				}
+				else {
+					cf_warning(AS_SINDEX, "Possible false data in sindex metadata");
+					return false;
+				}
+				value = as_map_get(map, key);
+				if ( !value ) {
+					return false;
+				}
+				break;
+			}
+			default:
+				return false;
+		}
+	}
+	return true;
 }

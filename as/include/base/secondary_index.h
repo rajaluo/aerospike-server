@@ -52,7 +52,7 @@
 #define SINDEX_SMD_VALUE_SIZE      (AS_SMD_MAJORITY_CONSENSUS_KEYSIZE)
 #define NUM_SINDEX_PARTITIONS      32
 #define SINDEX_MODULE              "sindex_module"
-
+#define AS_SINDEX_MAX_PATH_LENGTH  10
 /* 
  * Return status codes for index object functions.
  *
@@ -172,6 +172,17 @@ typedef struct as_sindex_physical_metadata_s {
 	struct btree       *ibtr;    // Aerospike Index pointer
 } as_sindex_pmetadata;
 
+
+typedef struct as_sindex_path_s {
+	as_particle_type type;
+	union {
+		int      index;     // For index of lists.
+		char   * key_str;   // For string type keys in maps.
+		uint64_t key_int;   // For integer type keys in maps.
+	} value;
+	as_particle_type key_type;  // This could be either string or integer type
+} as_sindex_path;
+
 typedef struct as_sindex_metadata_s {
 	// Run Time Data
 	pthread_rwlock_t      slock;
@@ -195,6 +206,8 @@ typedef struct as_sindex_metadata_s {
 	uint8_t               oindx;
 	uint32_t              flag;
 	int 				  post_op;
+	as_sindex_path        path[AS_SINDEX_MAX_PATH_LENGTH];
+	int                   path_length;
 } as_sindex_metadata;
 
 /*
