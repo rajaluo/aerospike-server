@@ -554,7 +554,7 @@ create_cname(char *bin_name, int bin_type)
 
 static char *
 create_cname_from_imd(const as_sindex_metadata *imd) {
-	return create_cname(imd->bnames[0], imd->btype[0]);
+	return create_cname(imd->path_str, imd->btype[0]);
 }
 
 static char *

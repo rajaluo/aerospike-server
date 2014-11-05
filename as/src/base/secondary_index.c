@@ -114,7 +114,224 @@ int as_sindex_err_to_clienterr(int err, char *fname, int lineno) {
 	}
 }
 
-/// LOOKUP
+typedef struct sindex_set_binid_hash_ele_s {
+	cf_ll_element ele;
+	int           simatch;
+} sindex_set_binid_hash_ele;
+
+void
+as_sindex__set_binid_hash_destroy(cf_ll_element * ele) {
+	cf_free((sindex_set_binid_hash_ele * ) ele);
+}
+
+/*
+ * Should happen under SINDEX_GRLOCK
+ */
+as_sindex_status
+as_sindex__put_in_set_binid_hash(as_namespace * ns, char * set, int binid, int chosen_id)
+{
+	// Create fixed size key for hash
+	// Get the linked list from the hash
+	// If linked list does not exist then make one and put it in the hash
+	// Append the chosen id in the linked list
+
+	if (chosen_id == -1) {
+		return AS_SINDEX_ERR;
+	}
+	cf_ll * si_ll = NULL;
+	// Create fixed size key for hash
+	char si_prop[AS_SINDEX_PROP_KEY_SIZE];
+	memset(si_prop, 0, AS_SINDEX_PROP_KEY_SIZE);
+
+	if (set == NULL ) {
+		sprintf(si_prop, "_%d", binid);
+	}
+	else {
+		sprintf(si_prop, "%s_%d", set, binid);
+	}
+
+	// Get the linked list from the hash
+	int rv      = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)si_ll);
+
+	// If linked list does not exist then make one and put it in the hash
+	if (rv && rv != SHASH_ERR_NOTFOUND) {
+		cf_debug(AS_SINDEX, "shash get failed with error %d", rv);
+		return AS_SINDEX_ERR;
+	};
+	if (rv == SHASH_ERR_NOTFOUND) {
+		si_ll = cf_malloc(sizeof(cf_ll));
+		cf_ll_init(si_ll, as_sindex__set_binid_hash_destroy, false);
+		if (SHASH_OK != shash_put(ns->sindex_set_binid_hash, (void *)si_prop, (void *)si_ll)) {
+			cf_warning(AS_SINDEX, "shash put failed for key %s", si_prop);
+			return AS_SINDEX_ERR;
+		}
+	}
+	if (!si_ll) {
+		return AS_SINDEX_ERR;
+	}
+
+	// Append the chosen id in the linked list
+	sindex_set_binid_hash_ele * ele = cf_malloc(sizeof(sindex_set_binid_hash_ele));
+	ele->simatch                   = chosen_id;
+	cf_ll_append(si_ll, (cf_ll_element*)ele);
+	return AS_SINDEX_OK;
+}
+
+/*
+ * Should happen under SINDEX_GRLOCK
+ */
+as_sindex_status
+as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * imd)
+{
+	// Make a key
+	// Get the sindex list corresponding to key
+	// If the list does not exist, return does not exist
+	// If the list exist 
+	// 		match the path and type of incoming si to the existing sindexes in the list
+	// 		If any element matches
+	// 			Delete from the list
+	// 			If the list size becomes 0
+	// 				Delete the entry from the hash
+	// 		If none of the element matches, return does not exist.
+	//
+
+	// Make a key
+	char si_prop[AS_SINDEX_PROP_KEY_SIZE];
+	memset(si_prop, 0, AS_SINDEX_PROP_KEY_SIZE);
+	if (imd->set == NULL ) {
+		sprintf(si_prop, "_%d", imd->binid[0]);
+	}
+	else {
+		sprintf(si_prop, "%s_%d", imd->set, imd->binid[0]);
+	}
+
+	// Get the sindex list corresponding to key
+	cf_ll * si_ll = NULL;
+	int rv        = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)si_ll);
+
+	// If the list does not exist, return does not exist
+	if (rv && rv != SHASH_ERR_NOTFOUND) {
+		cf_debug(AS_SINDEX, "shash get failed with error %d", rv);
+		return AS_SINDEX_ERR_NOTFOUND;
+	};
+	if (rv == SHASH_ERR_NOTFOUND) {
+		return AS_SINDEX_ERR_NOTFOUND;
+	}
+
+	// If the list exist 
+	// 		match the path and type of incoming si to the existing sindexes in the list	
+	bool    to_delete                   = false;
+	int     simatch                     = -1;
+	cf_ll_element * ele                 = NULL;
+	sindex_set_binid_hash_ele * prop_ele = NULL;
+	if (si_ll) {
+		ele = cf_ll_get_head(si_ll);
+		while (ele && ele->next) {
+			prop_ele = ( sindex_set_binid_hash_ele * ) ele;
+			as_sindex * si = &(ns->sindex[prop_ele->simatch]);
+			if (strcmp(si->imd->path_str, imd->path_str) == 0 && 
+				si->imd->btype[0] == imd->btype[0] && si->imd->itype == imd->itype) {
+				to_delete = true;
+				simatch  = prop_ele->simatch;
+				break;
+			}
+			ele = ele->next;
+		}
+	}
+	else {
+		return AS_SINDEX_ERR_NOTFOUND;
+	}
+
+	// 		If any element matches
+	// 			Delete from the list
+	if (to_delete && ele) {
+		cf_ll_delete(si_ll, ele);
+	}
+
+	// 			If the list size becomes 0
+	// 				Delete the entry from the hash
+	if (cf_ll_size(si_ll) == 0) {
+		rv = shash_delete(ns->sindex_set_binid_hash, si_prop);
+		if (rv) {
+			cf_debug(AS_SINDEX, "shash_delete fails with error %d", rv);
+		}
+	}
+
+	// 		If none of the element matches, return does not exist.
+	if (!to_delete) {
+		return AS_SINDEX_ERR_NOTFOUND;
+	}
+	
+	return AS_SINDEX_OK;
+}
+
+/*
+ * Should happen under SINDEX_GRLOCK
+ */
+int
+as_sindex__simatch_by_set_binid(as_namespace *ns, char * set, int binid, as_sindex_ktype type, as_sindex_type itype, char * path)
+{
+	// Make the fixed key 
+	// get the list corresponding to the list from the hash
+	// if list does not exist return -1
+	// If list exist
+	// 		Iterate through all the elements in the list and match the path and type
+	// 		If matches 
+	// 			return the simatch
+	// 	If none of the si matches
+	// 		return -1
+
+	// Make the fixed key 
+	char si_prop[AS_SINDEX_PROP_KEY_SIZE];
+	memset(si_prop, 0, AS_SINDEX_PROP_KEY_SIZE);
+	if (!set) {
+		sprintf(si_prop, "_%d", binid);
+	}
+	else {
+		sprintf(si_prop, "%s_%d", set, binid);
+	}
+
+	// get the list corresponding to the list from the hash
+	cf_ll * si_ll = NULL;
+	int rv        = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)si_ll);
+
+	// if list does not exist return -1
+	if (rv && rv != SHASH_ERR_NOTFOUND) {
+		cf_debug(AS_SINDEX, "shash get failed with error %d", rv);
+		return -1;
+	};
+	if (rv == SHASH_ERR_NOTFOUND) {
+		return -1;
+	}
+
+	// If list exist
+	// 		Iterate through all the elements in the list and match the path and type
+	int     simatch   = -1;
+	sindex_set_binid_hash_ele * prop_ele = NULL;
+	cf_ll_element * ele = NULL;
+	if (si_ll) {
+		ele = cf_ll_get_head(si_ll);
+		while (ele && ele->next) {
+			as_sindex * si = &(ns->sindex[prop_ele->simatch]);
+			if (strcmp(si->imd->path_str, path) == 0 && 
+				si->imd->btype[0] == type && si->imd->itype == itype) {
+				simatch  = prop_ele->simatch;
+				break;
+			}
+			ele = ele->next;
+		}
+	}
+	else {
+		return -1;
+	}
+
+	// 		If matches 
+	// 			return the simatch
+	// 	If none of the si matches
+	// 		return -1
+	return simatch;
+}
+
 int
 as_sindex__simatch_by_property(as_namespace *ns, char * set, int binid, as_sindex_ktype type)
 {
@@ -136,6 +353,7 @@ as_sindex__simatch_by_property(as_namespace *ns, char * set, int binid, as_sinde
 	
 	return simatch;
 }
+
 int
 as_sindex__simatch_by_iname(as_namespace *ns, char *idx_name)
 {
@@ -370,7 +588,7 @@ as_sindex__dup_meta(as_sindex_metadata *imd, as_sindex_metadata **qimd,
 	qimdp->itype    = imd->itype;
 	qimdp->nprts    = imd->nprts;
 	qimdp->mfd_slot = imd->mfd_slot;
-	qimdp->path_str = imd->path_str;
+	qimdp->path_str = cf_strdup(imd->path_str);
 	memcpy(qimdp->path, imd->path, AS_SINDEX_MAX_PATH_LENGTH*sizeof(as_sindex_path));
 	qimdp->num_bins = imd->num_bins;
 	for (int i = 0; i < imd->num_bins; i++) {
@@ -439,7 +657,6 @@ as_sindex__get_simatches_by_sbin(as_namespace *ns, const char *set,
 			simatches[nmatch]  = si->simatch;
 			nmatch++;
 		}
-	
 	}
 	SINDEX_GUNLOCK();
 
@@ -1776,11 +1993,13 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 				if (i) cf_dyn_buf_append_string(db, ",");
 				cf_dyn_buf_append_buf(db, (uint8_t *)si.imd->bnames[i], strlen(si.imd->bnames[i]));
 				cf_dyn_buf_append_string(db, ":type=");
-				cf_dyn_buf_append_string(db, sindex_decorator_defs[as_sindex_pktype_from_sktype(si.imd->btype[i])]);
+				cf_dyn_buf_append_string(db, Col_type_defs[as_sindex_pktype_from_sktype(si.imd->btype[i])]);
 				cf_dyn_buf_append_string(db, ":decorator=");
 				cf_dyn_buf_append_string(db, sindex_decorator_defs[si.imd->itype]);
 
 			}
+			cf_dyn_buf_append_string(db, ":path=");
+			cf_dyn_buf_append_string(db, si.imd->path_str);
 			cf_dyn_buf_append_string(db, ":sync_state=");
 			if (si.desync_cnt > 0) {
 				cf_dyn_buf_append_string(db, "needsync");
@@ -1807,9 +2026,6 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 			else {
 				cf_dyn_buf_append_string(db, ":state=D;");
 			}
-			cf_dyn_buf_append_string(db, ":path=");
-			cf_dyn_buf_append_string(db, si.imd->path_str);
-			
 			SINDEX_UNLOCK(&si.imd->slock);
 			AS_SINDEX_RELEASE(&si);
 		}
@@ -3328,6 +3544,7 @@ as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str)
 					strncpy(int_str, path_str + start, end-start);
 					int_str[end-start] = '\0';
 					if (cf_str_atoi_64(int_str, (int64_t *)&(imd->path[path_length].value.key_int)) != 0 ) {
+						cf_warning(AS_SINDEX, "Not a valid number %s", int_str);
 						goto Cleanup;
 					}
 					imd->path[path_length].key_type = AS_PARTICLE_TYPE_INTEGER;	
@@ -3346,6 +3563,7 @@ as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str)
 				strncpy(int_str, path_str + start, end-start);
 				int_str[end-start] = '\0';
 				if (cf_str_atoi(int_str, &(imd->path[path_length].value.index))) {
+					cf_warning(AS_SINDEX, "Not a valid number %s", int_str);	
 					goto Cleanup;
 				}
 				path_length++;
@@ -3364,6 +3582,7 @@ as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str)
 	}
 	else if (imd->path[path_length].type == AS_PARTICLE_TYPE_MAP) {
 		char int_str[20];
+		cf_info(AS_SINDEX, "path_str %s start %d end %d path_len %d", path_str, start, end, path_len);
 		if (path_str[start] == '\'' && path_str[end-1] == '\'' && (end > start)) {
 			imd->path[path_length].value.key_str  = cf_strndup(path_str+start + 1, (end-start-1));
 			imd->path[path_length].key_type = AS_PARTICLE_TYPE_STRING;
@@ -3372,6 +3591,7 @@ as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str)
 			strncpy(int_str, path_str + start, end-start);
 			int_str[end-start] = '\0';
 			if (cf_str_atoi_64(int_str, (int64_t *)&(imd->path[path_length].value.key_int)) != 0 ) {
+				cf_warning(AS_SINDEX, "Not a valid number %s", int_str);		
 				goto Cleanup;
 			}
 			imd->path[path_length].key_type = AS_PARTICLE_TYPE_INTEGER;	
