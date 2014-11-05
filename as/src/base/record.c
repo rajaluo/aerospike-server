@@ -152,7 +152,7 @@ as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, 
 
 		// this is decremented by the destructor here, so best tracked on the constructor
 		if (is_subrec) {
-			cf_atomic_int_incr(&ns->n_objects_sub);
+			cf_atomic_int_incr(&ns->n_sub_objects);
 		}
 		else {
 			cf_atomic_int_incr(&ns->n_objects);
@@ -220,7 +220,7 @@ as_record_destroy(as_record *r, as_namespace *ns)
 
 	// TODO: LDT what if flag is not set ??
 	if (as_ldt_record_is_sub(r)) {
-		cf_atomic_int_decr(&ns->n_objects_sub);
+		cf_atomic_int_decr(&ns->n_sub_objects);
 	}
 	else {
 		cf_atomic_int_decr(&ns->n_objects);

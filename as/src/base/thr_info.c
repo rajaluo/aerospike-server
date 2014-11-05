@@ -285,11 +285,11 @@ info_get_utilization(cf_dyn_buf *db)
 		as_namespace *ns = g_config.namespace[i];
 
 		total_number_objects    += ns->n_objects;
-		total_number_objects_sub += ns->n_objects_sub;
+		total_number_objects_sub += ns->n_sub_objects;
 		total_disk_size         += ns->ssd_size;
 		total_memory_size       += ns->memory_size;
 		used_data_memory        += ns->n_bytes_memory;
-		used_pindex_memory      += as_index_size_get(ns) * (ns->n_objects + ns->n_objects_sub);
+		used_pindex_memory      += as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
 		used_sindex_memory      += cf_atomic_int_get(ns->sindex_data_memory_used);
 
 		uint64_t inuse_disk_bytes = 0;
@@ -4551,11 +4551,12 @@ info_debug_ticker_fn(void *gcc_is_ass)
 					(swapping == true) ? "SWAPPING!" : ""
 					);
 
-			cf_info(AS_INFO, " migrates in progress ( %d , %d ) ::: ClusterSize %zd ::: objects %"PRIu64,
+			cf_info(AS_INFO, " migrates in progress ( %d , %d ) ::: ClusterSize %zd ::: objects %"PRIu64" ::: sub_objects %"PRIu64,
 					cf_atomic32_get(g_config.migrate_progress_send),
 					cf_atomic32_get(g_config.migrate_progress_recv),
 					g_config.paxos->cluster_size,  // add real cluster size when srini has it
-					thr_info_get_object_count()
+					thr_info_get_object_count(),
+					thr_info_get_subobject_count()
 					);
 			cf_info(AS_INFO, " rec refs %"PRIu64" ::: rec locks %"PRIu64" ::: trees %"PRIu64" ::: wr reqs %"PRIu64" ::: mig tx %"PRIu64" ::: mig rx %"PRIu64"",
 					cf_atomic_int_get(g_config.global_record_ref_count),
@@ -4597,6 +4598,24 @@ info_debug_ticker_fn(void *gcc_is_ass)
 					cf_atomic_int_get(g_config.ssdw_tree_count),
 					cf_atomic_int_get(g_config.rw_tree_count)
 					);
+
+			uint64_t cnt = 0;
+			uint64_t io  = 0;
+			uint64_t gc  = 0;
+			uint64_t no_esr = 0;
+			uint64_t no_parent = 0;
+			uint64_t version_mismatch = 0;
+			for (int i = 0; i < g_config.namespaces; i++) {
+				as_namespace *ns = g_config.namespace[i];
+				cnt += cf_atomic_int_get(ns->lstats.ldt_gc_processed);
+				io += cf_atomic_int_get(ns->lstats.ldt_gc_io);
+				gc += cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
+				no_esr += cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
+				no_parent += cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
+				version_mismatch += cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
+			}
+			cf_info(AS_INFO, "   ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+					cnt, io, gc, no_esr, no_parent, version_mismatch);
 
 			// namespace disk and memory size
 			total_ns_memory_inuse = 0;
@@ -5465,6 +5484,19 @@ thr_info_get_object_count()
 
 	return objects;
 }
+
+uint64_t
+thr_info_get_subobject_count()
+{
+	uint64_t sub_objects = 0;
+
+	for (uint i = 0; i < g_config.namespaces; i++) {
+		sub_objects += g_config.namespace[i]->n_sub_objects;
+	}
+
+	return sub_objects;
+}
+
 
 void
 info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)

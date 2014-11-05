@@ -959,6 +959,7 @@ as_internal_scan_udf_txn_setup(tr_create_data * d)
 	tr.udata.req_cb    = as_tscan_udf_tr_complete;
 	tr.udata.req_udata = d->udata;
 	tr.udata.req_type  = UDF_SCAN_REQUEST;
+	tr.flag            |= AS_TRANSACTION_FLAG_INTERNAL;
 
 	cf_atomic_int_incr(&job->uit_queued);
 	cf_detail(AS_SCAN, "UDF: [%d] internal transactions enqueued", job->uit_queued);

@@ -1332,9 +1332,10 @@ as_internal_query_udf_txn_setup(tr_create_data * d)
 		return -1;
 	}
 
-	tr.udata.req_cb    = as_query_udf_tr_complete;
-	tr.udata.req_udata = d->udata;
-	tr.udata.req_type = UDF_QUERY_REQUEST;
+	tr.udata.req_cb     = as_query_udf_tr_complete;
+	tr.udata.req_udata  = d->udata;
+	tr.udata.req_type   = UDF_QUERY_REQUEST;
+	tr.flag            |= AS_TRANSACTION_FLAG_INTERNAL;
 
 	cf_atomic_int_incr(&qtr->uit_queued);
 	cf_detail(AS_QUERY, "UDF: [%d] internal transactions enqueued", qtr->uit_queued);

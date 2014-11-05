@@ -885,6 +885,11 @@ typedef struct ns_ldt_stats_s {
 
 	cf_atomic_int   ldt_gc_io;
 	cf_atomic_int   ldt_gc_cnt;
+	cf_atomic_int   ldt_gc_no_esr_cnt;
+	cf_atomic_int   ldt_gc_no_parent_cnt;
+	cf_atomic_int   ldt_gc_parent_version_mismatch_cnt;
+	cf_atomic_int   ldt_gc_processed;
+
 	cf_atomic_int	ldt_randomizer_retry;
 
 } ns_ldt_stats;
@@ -1000,7 +1005,7 @@ struct as_namespace_s {
 
 	/* very interesting counters */
 	cf_atomic_int	n_objects;
-	cf_atomic_int	n_objects_sub;
+	cf_atomic_int	n_sub_objects;
 	cf_atomic_int	n_bytes_memory;
 	cf_atomic_int	n_absent_partitions;
 	cf_atomic_int	n_actual_partitions;

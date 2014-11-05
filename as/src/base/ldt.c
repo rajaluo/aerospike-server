@@ -1141,6 +1141,9 @@ Cleanup:
  *
  * TODO: IO efficiency track LDT_GC_IO
  */
+#define LDT_SUB_GC_NO_ESR                      1
+#define LDT_SUB_GC_NO_PARENT                   2
+#define LDT_SUB_GC_PARENT_VERSION_MISMATCH     3
 void
 as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 {
@@ -1155,6 +1158,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		as_record_done(r_ref, ns);
 		return;
 	}
+	cf_atomic_int_incr(&ns->lstats.ldt_gc_processed);
 
 	if (r->void_time != 0) {
 		cf_detail(AS_LDT, "No void time should be set in subrecord !!! found %d", r->void_time);
@@ -1226,14 +1230,14 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 
 	if (check_esr && (rv = as_record_exists(p->sub_vp, &esr_digest, ns))) {
 		delete = true;
-		type   = 1;
+		type   = LDT_SUB_GC_NO_ESR;
 	} else if ((rv = as_record_exists(p->vp, &parent_digest, ns))) {
 		delete = true;
-		type   = 2;
+		type   = LDT_SUB_GC_NO_PARENT;
 	} else if (!as_ldt_is_parent_and_version_match(subrec_version, p->vp, &parent_digest, ns)) {
 		// LDT_GC_IO: Parent IO
 		delete = true;
-		type   = 3;
+		type   = LDT_SUB_GC_PARENT_VERSION_MISMATCH;
 		linfo->num_version_mismatch_gc++;
 	} else {
 		cf_detail(AS_LDT, "LDT_SUB_GC Found both parent and ESR record !!");
@@ -1249,6 +1253,19 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		cf_detail_digest(AS_LDT, &esr_digest, "ESR Digest: ");
 		cf_detail_digest(AS_LDT, &parent_digest, "Parent Digest: ");
 		as_index_delete(p->sub_vp, &subrec_digest);
+		switch (type) {
+			case LDT_SUB_GC_NO_ESR: 
+				cf_atomic_int_incr(&ns->lstats.ldt_gc_no_esr_cnt);
+				break;
+			case LDT_SUB_GC_NO_PARENT: 
+				cf_atomic_int_incr(&ns->lstats.ldt_gc_no_parent_cnt);
+				break;
+			case LDT_SUB_GC_PARENT_VERSION_MISMATCH: 
+				cf_atomic_int_incr(&ns->lstats.ldt_gc_parent_version_mismatch_cnt);
+				break;
+			default:
+				break;
+		}
 		cf_atomic_int_incr(&ns->lstats.ldt_gc_cnt);
 		linfo->num_gc++;
 	}
