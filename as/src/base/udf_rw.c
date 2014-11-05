@@ -823,6 +823,7 @@ udf_rw_update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success)
  *
  *  Returns: true always
  */
+extern uint32_t as_storage_record_size(as_storage_rd *rd);
 bool
 udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint16_t set_id)
 {
@@ -838,6 +839,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	udf_record *h_urecord = as_rec_source(lrecord->h_urec);
 	bool is_ldt           = false;
 	int  ret              = 0;
+	uint32_t total_flat_size = 0; 
 
 	udf_rw_getop(h_urecord, &urecord_op);
 	// In case required 
@@ -865,11 +867,23 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 			is_ldt = true;
 			subrec_count++;
 			udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
+			if (g_config.ldt_benchmarks 
+					&& c_urecord->tr->rsv.ns
+					&& NAMESPACE_HAS_PERSISTENCE(c_urecord->tr->rsv.ns)
+					&& c_urecord->rd) {
+				total_flat_size += as_storage_record_size(c_urecord->rd);
+			}
 			udf_rw_post_processing(c_urecord, &urecord_op, set_id);
 		}
 
 		// Process the parent record in the end .. this is to make sure
 		// the lock is held till the end. 
+		if (g_config.ldt_benchmarks 
+			&& h_urecord->tr->rsv.ns
+			&& NAMESPACE_HAS_PERSISTENCE(h_urecord->tr->rsv.ns)
+			&& h_urecord->rd) {
+			total_flat_size += as_storage_record_size(h_urecord->rd);
+		}
 		udf_rw_post_processing(h_urecord, &urecord_op, set_id);
 
 		if (is_ldt) {
@@ -898,6 +912,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		// will show up in same bucket. +1 for record as well. So all the request which 
 		// touch subrecord as well show up in 2nd bucket
 		histogram_insert_raw(g_config.ldt_update_record_cnt_hist, subrec_count + 1);
+		histogram_insert_raw(g_config.ldt_io_bytes_hist, total_flat_size);
 	}
 
 	if (ret) {

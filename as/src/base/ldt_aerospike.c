@@ -865,6 +865,31 @@ ldt_aerospike_get_current_time(const as_aerospike * as)
 
 } // end ldt_aerospike_get_current_time()
 
+/**
+ * Provide hook from Lua to set execution context
+ */
+static int
+ldt_aerospike_set_context(const as_aerospike * as, const as_rec *rec, const uint32_t context)
+{
+	as = as;
+	static const char * meth = "ldt_aerospike_set_context()";
+	if (!as || !rec) {
+		cf_warning(AS_LDT, "%s: Invalid Parameters [as=%p, record=%p]... Fail", meth, as, rec);
+		return 2;
+	}
+	// Delete needs propagation
+	ldt_record *lrecord = (ldt_record *)as_rec_source(rec);
+	if (!lrecord) {
+		return 2;
+	}
+
+	cf_detail(AS_LDT, "ldt_aerospike_set_context from %d to %d", lrecord->udf_context, lrecord->udf_context | context);
+	lrecord->udf_context |= context;
+
+	return 0;
+} // end ldt_aerospike_get_current_time()
+
+
 const as_aerospike_hooks ldt_aerospike_hooks = {
 	.rec_create       = ldt_aerospike_rec_create,
 	.rec_update       = ldt_aerospike_rec_update,
@@ -873,6 +898,7 @@ const as_aerospike_hooks ldt_aerospike_hooks = {
 	.log              = ldt_aerospike_log,
 	.destroy          = ldt_aerospike_destroy,
 	.get_current_time = ldt_aerospike_get_current_time,
+	.set_context      = ldt_aerospike_set_context,
 	.remove_subrec    = ldt_aerospike_crec_remove,
 	.create_subrec    = ldt_aerospike_crec_create,
 	.close_subrec     = ldt_aerospike_crec_close,

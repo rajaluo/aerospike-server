@@ -3180,6 +3180,7 @@ cfg_create_all_histograms()
 	create_and_check_hist(&c->ldt_multiop_prole_hist,"ldt_multiop_prole");
 	create_and_check_hist(&c->ldt_update_record_cnt_hist,"ldt_rec_update_count");
 	create_and_check_hist(&c->ldt_io_record_cnt_hist,"ldt_rec_io_count");
+	create_and_check_hist(&c->ldt_io_bytes_hist,"ldt_rec_bytes");
 	create_and_check_hist(&c->ldt_hist,"ldt");
 
 #ifdef HISTOGRAM_OBJECT_LATENCY

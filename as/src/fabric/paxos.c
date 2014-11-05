@@ -2910,7 +2910,7 @@ as_paxos_init()
 			/* Initialize every partition's iid and vtp values */
 			as_namespace *ns = g_config.namespace[i];
 
-			if (ns->storage_type != AS_STORAGE_ENGINE_MEMORY) { // skip loop if no persistent storage
+			if (NAMESPACE_HAS_PERSISTENCE(ns)) { // skip loop if no persistent storage
 				for (int j = 0; j < AS_PARTITIONS; j++) {
 					as_partition_vinfo vinfo;
 					size_t vinfo_len = sizeof(vinfo);
