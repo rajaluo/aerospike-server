@@ -436,14 +436,17 @@ typedef enum {
 	CASE_NAMESPACE_HIGH_WATER_PCT,
 	CASE_NAMESPACE_MAX_TTL,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
+	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
 	CASE_NAMESPACE_SET_BEGIN,
 	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
+	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
 	// Recent (non-2.x) functionality:
 	CASE_NAMESPACE_LDT_ENABLED,
 	CASE_NAMESPACE_LDT_GC_RATE,
 	CASE_NAMESPACE_SI_BEGIN,
 	CASE_NAMESPACE_SINDEX_BEGIN,
+
 	// Deprecated:
 	CASE_NAMESPACE_DEMO_READ_MULTIPLIER,
 	CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER,
@@ -452,6 +455,16 @@ typedef enum {
 	// Namespace conflict-resolution-policy options (value tokens):
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_TTL,
+
+	// Namespace read consistency level options:
+	CASE_NAMESPACE_READ_CONSISTENCY_ALL,
+	CASE_NAMESPACE_READ_CONSISTENCY_OFF,
+	CASE_NAMESPACE_READ_CONSISTENCY_ONE,
+
+	// Namespace write commit level options:
+	CASE_NAMESPACE_WRITE_COMMIT_ALL,
+	CASE_NAMESPACE_WRITE_COMMIT_MASTER,
+	CASE_NAMESPACE_WRITE_COMMIT_OFF,
 
 	// Namespace storage-engine options (value tokens):
 	CASE_NAMESPACE_STORAGE_MEMORY,
@@ -784,9 +797,11 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
 		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
+		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
+		{ "write-commit-level-override",    CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
 		{ "ldt-enabled",					CASE_NAMESPACE_LDT_ENABLED },
 		{ "ldt-gc-rate",                    CASE_NAMESPACE_LDT_GC_RATE },
 		{ "si",								CASE_NAMESPACE_SI_BEGIN },
@@ -800,6 +815,18 @@ const cfg_opt NAMESPACE_OPTS[] = {
 const cfg_opt NAMESPACE_CONFLICT_RESOLUTION_OPTS[] = {
 		{ "generation",						CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION },
 		{ "ttl",							CASE_NAMESPACE_CONFLICT_RESOLUTION_TTL }
+};
+
+const cfg_opt NAMESPACE_READ_CONSISTENCY_OPTS[] = {
+		{ "all",							CASE_NAMESPACE_READ_CONSISTENCY_ALL },
+		{ "off",							CASE_NAMESPACE_READ_CONSISTENCY_OFF },
+		{ "one",							CASE_NAMESPACE_READ_CONSISTENCY_ONE }
+};
+
+const cfg_opt NAMESPACE_WRITE_COMMIT_OPTS[] = {
+		{ "all",							CASE_NAMESPACE_WRITE_COMMIT_ALL },
+		{ "master",							CASE_NAMESPACE_WRITE_COMMIT_MASTER },
+		{ "off",							CASE_NAMESPACE_WRITE_COMMIT_OFF }
 };
 
 const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
@@ -941,6 +968,8 @@ const int NUM_NETWORK_FABRIC_OPTS					= sizeof(NETWORK_FABRIC_OPTS) / sizeof(cfg
 const int NUM_NETWORK_INFO_OPTS						= sizeof(NETWORK_INFO_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_OPTS						= sizeof(NAMESPACE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_CONFLICT_RESOLUTION_OPTS	= sizeof(NAMESPACE_CONFLICT_RESOLUTION_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_READ_CONSISTENCY_OPTS		= sizeof(NAMESPACE_READ_CONSISTENCY_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_WRITE_COMMIT_OPTS			= sizeof(NAMESPACE_WRITE_COMMIT_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_OPTS				= sizeof(NAMESPACE_STORAGE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_KV_OPTS				= sizeof(NAMESPACE_STORAGE_KV_OPTS) / sizeof(cfg_opt);
@@ -2340,6 +2369,25 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_OBJ_SIZE_HIST_MAX:
 				ns->obj_size_hist_max = cfg_obj_size_hist_max(cfg_u32_no_checks(&line));
 				break;
+			case CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE:
+				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_READ_CONSISTENCY_OPTS, NUM_NAMESPACE_READ_CONSISTENCY_OPTS)) {
+				case CASE_NAMESPACE_READ_CONSISTENCY_ALL:
+					ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ALL;
+					ns->read_consistency_level_override = true;
+					break;
+				case CASE_NAMESPACE_READ_CONSISTENCY_OFF:
+					ns->read_consistency_level_override = false;
+					break;
+				case CASE_NAMESPACE_READ_CONSISTENCY_ONE:
+					ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE;
+					ns->read_consistency_level_override = true;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
 			case CASE_NAMESPACE_SET_BEGIN:
 				p_set = cfg_add_set(ns);
 				cfg_strcpy(&line, p_set->name, AS_SET_NAME_MAX_SIZE);
@@ -2350,6 +2398,25 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_STOP_WRITES_PCT:
 				ns->stop_writes_pct = (float)cfg_pct_fraction(&line);
+				break;
+			case CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE:
+				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_WRITE_COMMIT_OPTS, NUM_NAMESPACE_WRITE_COMMIT_OPTS)) {
+				case CASE_NAMESPACE_WRITE_COMMIT_ALL:
+					ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL;
+					ns->write_commit_level_override = true;
+					break;
+				case CASE_NAMESPACE_WRITE_COMMIT_MASTER:
+					ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_MASTER;
+					ns->write_commit_level_override = true;
+					break;
+				case CASE_NAMESPACE_WRITE_COMMIT_OFF:
+					ns->write_commit_level_override = false;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
 				break;
 			case CASE_NAMESPACE_LDT_ENABLED:
 				ns->ldt_enabled = cfg_bool(&line);
