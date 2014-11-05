@@ -166,7 +166,6 @@ typedef struct udf_request_data {
 #define AS_TRANSACTION_FLAG_LDT_SUB         0x0008
 // Set if this transaction has touched secondary index
 #define AS_TRANSACTION_FLAG_SINDEX_TOUCHED  0x0010
-#define AS_TRANSACTION_FLAG_XDR_READ        0x0020
 
 /* as_transaction
  * The basic unit of work

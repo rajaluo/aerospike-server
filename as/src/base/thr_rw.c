@@ -205,7 +205,7 @@ write_request_create(void) {
 	wr->shipped_op     = false;
 
 	// Data from XDR, in case it is initiated by XDR
-	wr->from_xdr = NULL;
+	wr->from_xdr = 0;
 
 	wr->dest_sz = 0;
 	UREQ_DATA_INIT(&wr->udata);
@@ -249,9 +249,6 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 
 	// Data from XDR, in case this transaction is for XDR.
 	tr->from_xdr = wr->from_xdr;
-	if (tr->from_xdr) {
-		tr->flag |= AS_TRANSACTION_FLAG_XDR_READ;
-	}
 
 #if 0
 	if (wr->is_read) {
@@ -1237,6 +1234,8 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			e->tr.proxy_msg = tr->proxy_msg;
 			tr->proxy_msg = 0;
 			e->tr.keyd = tr->keyd;
+			e->tr.from_xdr = tr->from_xdr;
+			tr->from_xdr = 0;
 			AS_PARTITION_RESERVATION_INIT(e->tr.rsv);
 			e->tr.result_code = AS_PROTO_RESULT_OK;
 			e->tr.msgp = tr->msgp;
@@ -5204,7 +5203,7 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 				generation, void_time, ops, response_bins, n_bins, ns, tr->trid,
 				setname);
 		tr->proxy_msg = 0;
-	} else if ((tr->flag & AS_TRANSACTION_FLAG_XDR_READ) && tr->from_xdr) {
+	} else if (tr->from_xdr) {
 		// It is a read for XDR.
 		// Send data back to XDR.
 		xdr_internal_read_response(ns, tr->result_code, generation, void_time, response_bins, n_bins, setname, tr->from_xdr);

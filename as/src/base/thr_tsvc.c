@@ -821,7 +821,7 @@ process_transaction(as_transaction *tr)
 				cf_debug_digest(AS_PROXY, &(tr->keyd),
 						"proxy REDIRECT (wr) to(%"PRIx64") :", dest);
 				as_proxy_send_redirect(tr->proxy_node, tr->proxy_msg, dest);
-			} else if (tr->flag & AS_TRANSACTION_FLAG_XDR_READ && tr->from_xdr) {
+			} else if (tr->from_xdr) {
 				// It is a read request from XDR.
 				// As proxy is required for it, XDR should relog it at current owner and replicas.
 				// Send "AS_PROTO_RESULT_FAIL_UNKNOWN" back to XDR.
