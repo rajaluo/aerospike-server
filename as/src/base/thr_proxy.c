@@ -280,6 +280,7 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 		as_fabric_msg_put(m);
 	}
 
+	wr->shipped_op_initiator = true;
 	cf_atomic_int_incr(&g_config.ldt_proxy_initiate);
 
 	return 0;
@@ -403,12 +404,17 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 			// this may be NULL if the request has already timedout and the wr proto_fd_h
 			// will be cleaned up by then
 			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing proto_fd ");
-			as_transaction tr;
-			write_request_init_tr(&tr, wr);
-			if (udf_rw_needcomplete(&tr)) {
+			
+			pthread_mutex_lock(&wr->lock);
+			if (udf_rw_needcomplete_wr(wr)) {
+				as_transaction tr;
+				write_request_init_tr(&tr, wr);
 				udf_rw_complete(&tr, 0, __FILE__, __LINE__);
-				UREQ_DATA_RESET(&tr.udata);
+				if (tr.proto_fd_h) {
+					AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
+				}
 			}
+			pthread_mutex_unlock(&wr->lock);
 		}
 	}
 
@@ -780,11 +786,16 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 			if (pr->wr) {
 				cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit Timeout ...");
 				cf_atomic_int_incr(&g_config.ldt_proxy_timeout);
-				as_transaction tr;
-				write_request_init_tr(&tr, pr->wr);
-				if (udf_rw_needcomplete(&tr)) {
+				pthread_mutex_lock(&pr->wr->lock);
+				if (udf_rw_needcomplete_wr(pr->wr)) {
+					as_transaction tr;
+					write_request_init_tr(&tr, pr->wr);
 					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
+					if (tr.proto_fd_h) {
+						AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
+					}
 				}
+				pthread_mutex_unlock(&pr->wr->lock);
 				WR_RELEASE(pr->wr);
 				pr->wr            = NULL;
 			}

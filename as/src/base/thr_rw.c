@@ -203,6 +203,7 @@ write_request_create(void) {
 	// initialize atomic integers
 	wr->trans_complete = 0;
 	wr->shipped_op     = false;
+	wr->shipped_op_initiator = false;
 
 	wr->dest_sz = 0;
 	UREQ_DATA_INIT(&wr->udata);
@@ -276,8 +277,10 @@ void write_request_destructor(void *object) {
 		as_fabric_msg_put(wr->dest_msg);
 	if (wr->proxy_msg)
 		as_fabric_msg_put(wr->proxy_msg);
-	if (wr->msgp)
+	if (wr->msgp) {
 		cf_free(wr->msgp);
+		wr->msgp = 0;
+	}
 	if (wr->pickled_buf)
 		cf_free(wr->pickled_buf);
 	if (wr->pickled_rec_props.p_data)
@@ -5138,7 +5141,12 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 
 		WR_TRACK_INFO(wr, "rw_retransmit_reduce_fn: retransmitting ");
 		send_messages(wr);
-		finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK);
+		// No such ack processing for the shipped_op initiator. The request
+		// will get processed when the response for the shipped operation is
+		// finished
+		if (!wr->shipped_op_initiator) {
+			finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK);
+		}
 		pthread_mutex_unlock(&wr->lock);
 
 		if (finished == true) {

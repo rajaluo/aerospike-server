@@ -72,16 +72,25 @@ ifeq ($(DOPROFILE),1)
   LIBRARIES += -pg -fprofile-arcs -lgcov
 endif
 
-ifeq ($(LD_LUA),static)
-  # Find and add the static Lua library.
-  AS_LIBRARIES += $(or \
-	$(wildcard /usr/local/lib/liblua.a), \
-	$(wildcard /usr/lib64/liblua$(LUA_SUFFIX).a), \
-	$(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
-	$(wildcard /usr/lib/liblua.a), \
-	$(error Cannot find "liblua.a"))
+# Add either the LuaJIT or Lua library
+ifeq ($(USE_LUAJIT),1)
+  ifeq ($(LD_LUAJIT),static)
+    AS_LIBRARIES += $(LUAJIT)/src/libluajit.a
+  else
+    LIBRARIES += -L$(LUAJIT)/src -lluajit
+  endif
 else
-  LIBRARIES += -llua$(LUA_SUFFIX)
+  ifeq ($(LD_LUA),static)
+    # Find and add the static Lua library.
+    AS_LIBRARIES += $(or \
+      $(wildcard /usr/local/lib/liblua.a), \
+      $(wildcard /usr/lib64/liblua$(LUA_SUFFIX).a), \
+      $(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
+      $(wildcard /usr/lib/liblua.a), \
+      $(error Cannot find "liblua.a"))
+  else
+    LIBRARIES += -llua$(LUA_SUFFIX)
+  endif
 endif
 
 ifeq ($(LD_JANSSON),static)
