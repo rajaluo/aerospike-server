@@ -342,6 +342,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [String: bin %s "
 										"data size too big: pbytes %d]... Fail",
 										bname, pbytes);
+					ret = -4;
 					break;
 				}
 			}
@@ -363,7 +364,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Bytes: bin %s "
 										"data size too big: pbytes %d]... Fail",
 										bname, pbytes);
-					ret = -1;
+					ret = -4;
 					break;
 				}
 			}
@@ -387,7 +388,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Bool: bin %s "
 										"data size too big: pbytes %d]... Fail",
 										bname, pbytes);
-					ret = -1;
+					ret = -4;
 					break;
 				}
 			}
@@ -411,7 +412,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Integer: bin %s "
 										"data size too big: pbytes %d]... Fail",
 										bname, pbytes);
-					ret = -1;
+					ret = -4;
 					break;
 				}
 			}
@@ -428,7 +429,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 			as_buffer_init(&buf);
 			as_serializer s;
 			as_msgpack_init(&s);
-			int rsp = 0;
 			int res = as_serializer_serialize(&s, (as_val *) val, &buf);
 
 			if (res != 0) {
@@ -439,7 +439,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 				break;
 			}
 			uint8_t ptype;
-			if(is_hidden) {
+			if (is_hidden) {
 				ptype = as_particle_type_convert_to_hidden(to_particle_type(type));
 			} else {
 				ptype = to_particle_type(type);
@@ -457,14 +457,11 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 					cf_warning(AS_UDF, "udf_aerospike_setbin: Allocation Error [Map-List: bin %s "
 										"data size too big: pbytes %d]... Fail",
 										bname, pbytes);
+					ret = -4;
 				}
 			}
 			as_serializer_destroy(&s);
 			as_buffer_destroy(&buf);
-			if (rsp) {
-				ret = rsp;
-				break;
-			}
 			break;
 		}
 		default: {
