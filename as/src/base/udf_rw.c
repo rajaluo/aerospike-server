@@ -769,9 +769,9 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
  *  Returns: nothing
 */
 void
-udf_rw_update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success)
+udf_rw_update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success, bool is_ldt)
 {
-	if (UDF_OP_IS_LDT(op)) {
+	if (is_ldt) {
 		if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->lstats.ldt_read_reqs);
 		else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->lstats.ldt_delete_reqs);
 		else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->lstats.ldt_write_reqs);
@@ -831,11 +831,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	// LDT: Commit all the changes being done to the all records.
 	// TODO: remove limit of 6 (note -- it's temporarily up to 20)
 	udf_optype urecord_op = UDF_OPTYPE_READ;
-	if (lrecord->udf_context == UDF_CONTEXT_LDT) {
-		*lrecord_op           = UDF_OPTYPE_LDT_READ;
-	} else {
-		*lrecord_op           = UDF_OPTYPE_READ;
-	}
+	*lrecord_op           = UDF_OPTYPE_READ;
 	udf_record *h_urecord = as_rec_source(lrecord->h_urec);
 	bool is_ldt           = false;
 	int  ret              = 0;
@@ -855,11 +851,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	} else {
 
 		if (urecord_op == UDF_OPTYPE_WRITE) {
-			if (lrecord->udf_context == UDF_CONTEXT_LDT) {
-				*lrecord_op = UDF_OPTYPE_LDT_WRITE;
-			} else {
-				*lrecord_op = UDF_OPTYPE_WRITE;
-			}
+			*lrecord_op = UDF_OPTYPE_WRITE;
 		}
 
 		FOR_EACH_SUBRECORD(i, j, lrecord) {
@@ -907,7 +899,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		}
 	}
 	udf_record_cleanup(h_urecord, true);
-	if (lrecord->udf_context == UDF_CONTEXT_LDT) {
+	if (lrecord->udf_context & UDF_CONTEXT_LDT) {
 		// When showing in histogram the record which touch 0 subrecord and 1 subrecord 
 		// will show up in same bucket. +1 for record as well. So all the request which 
 		// touch subrecord as well show up in 2nd bucket
@@ -1030,7 +1022,7 @@ udf_apply_record(udf_call * call, as_rec *rec, as_result *res)
 	cf_hist_track_insert_data_point(g_config.ut_hist, now);
 	if (g_config.ldt_benchmarks) {
 		ldt_record *lrecord = (ldt_record *)as_rec_source(rec);
-		if (lrecord->udf_context == UDF_CONTEXT_LDT) {
+		if (lrecord->udf_context & UDF_CONTEXT_LDT) {
 			histogram_insert_data_point(g_config.ldt_hist, now);
 		}
 	}
@@ -1217,7 +1209,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 
 	if (ret_value == 0) {
 
-		if (lrecord.udf_context == UDF_CONTEXT_LDT) {
+		if (lrecord.udf_context & UDF_CONTEXT_LDT) {
 			histogram_insert_raw(g_config.ldt_io_record_cnt_hist, lrecord.subrec_io + 1);
 		}
 
@@ -1253,7 +1245,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		as_result_destroy(res);
 	}
 
-	udf_rw_update_stats(ns, *op, ret_value, success);
+	udf_rw_update_stats(ns, *op, ret_value, success, (lrecord.udf_context & UDF_CONTEXT_LDT));
 
 	// free everything we created - the rec destroy with ldt_record hooks
 	// destroys the ldt components and the attached "base_rec"
