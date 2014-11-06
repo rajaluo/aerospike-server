@@ -783,6 +783,12 @@ Rollback:
 		SINDEX_GUNLOCK();
 	}
 
+	// Reset the flat size in case the stuff is backedout !!! it should not
+	// fail in the backout code ...
+	if (! as_storage_record_size_and_check(rd)) {
+		cf_warning(AS_LDT, "Does not fit even after rollback... it is trouble");
+	}
+
 	// Do not clean up the cache in case of failure
 	return -1;
 }
