@@ -151,7 +151,7 @@ as_sindex__put_in_set_binid_hash(as_namespace * ns, char * set, int binid, int c
 	}
 
 	// Get the linked list from the hash
-	int rv      = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)si_ll);
+	int rv      = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&si_ll);
 
 	// If linked list does not exist then make one and put it in the hash
 	if (rv && rv != SHASH_ERR_NOTFOUND) {
@@ -161,7 +161,7 @@ as_sindex__put_in_set_binid_hash(as_namespace * ns, char * set, int binid, int c
 	if (rv == SHASH_ERR_NOTFOUND) {
 		si_ll = cf_malloc(sizeof(cf_ll));
 		cf_ll_init(si_ll, as_sindex__set_binid_hash_destroy, false);
-		if (SHASH_OK != shash_put(ns->sindex_set_binid_hash, (void *)si_prop, (void *)si_ll)) {
+		if (SHASH_OK != shash_put(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&si_ll)) {
 			cf_warning(AS_SINDEX, "shash put failed for key %s", si_prop);
 			return AS_SINDEX_ERR;
 		}
@@ -207,7 +207,7 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 
 	// Get the sindex list corresponding to key
 	cf_ll * si_ll = NULL;
-	int rv        = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)si_ll);
+	int rv        = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&si_ll);
 
 	// If the list does not exist, return does not exist
 	if (rv && rv != SHASH_ERR_NOTFOUND) {
@@ -293,7 +293,7 @@ as_sindex__simatch_by_set_binid(as_namespace *ns, char * set, int binid, as_sind
 
 	// get the list corresponding to the list from the hash
 	cf_ll * si_ll = NULL;
-	int rv        = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)si_ll);
+	int rv        = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&si_ll);
 
 	// if list does not exist return -1
 	if (rv && rv != SHASH_ERR_NOTFOUND) {
@@ -312,6 +312,7 @@ as_sindex__simatch_by_set_binid(as_namespace *ns, char * set, int binid, as_sind
 	if (si_ll) {
 		ele = cf_ll_get_head(si_ll);
 		while (ele && ele->next) {
+			prop_ele = ( sindex_set_binid_hash_ele * ) ele;
 			as_sindex * si = &(ns->sindex[prop_ele->simatch]);
 			if (strcmp(si->imd->path_str, path) == 0 && 
 				si->imd->btype[0] == type && si->imd->itype == itype) {
@@ -426,6 +427,70 @@ as_sindex__lookup(as_namespace *ns, char *iname, int binid, char *set, as_sindex
 	return si;
 }
 
+as_sindex *
+as_sindex__lookup_lockfree_new(as_namespace *ns, char *iname, int binid, char *set, 
+								as_sindex_ktype type, as_sindex_type itype, char * path, char flag)
+{
+
+	// If iname is not null then search in iname hash and store the simatch
+	// Else then 
+	// 		Check the possible existence of sindex over bin in the bit array
+	//		If no possibility return NULL
+	//		Search in the set_binid hash using setname, binid, itype and binid
+	//		If found store simatch
+	//		If not found return NULL
+	//			Get the sindex corresponding to the simatch.
+	// 			Apply the flags applied by caller.
+	//          Validate the simatch
+	
+	int simatch   = -1;
+	as_sindex *si = NULL;
+	// If iname is not null then search in iname hash and store the simatch
+	if (iname) {
+		simatch   = as_sindex__simatch_by_iname(ns, iname);
+	}
+	// Else then 
+	// 		Check the possible existence of sindex over bin in the bit array
+	else {
+		if (!as_sindex_binid_has_sindex(ns,  binid) ) {	
+	//		If no possibility return NULL
+			goto END;
+		}
+	//		Search in the set_binid hash using setname, binid, itype and binid
+	//		If found store simatch
+		simatch   = as_sindex__simatch_by_set_binid(ns, set, binid, type, itype, path);
+	}
+	//		If not found return NULL
+	// 			Get the sindex corresponding to the simatch.
+	if (simatch != -1) {
+		si      = &ns->sindex[simatch];
+	// 			Apply the flags applied by caller.
+		if ((flag & AS_SINDEX_LOOKUP_FLAG_ISACTIVE)
+			&& !as_sindex_isactive(si)) {
+			si = NULL;
+			goto END;
+		}
+	//          Validate the simatch
+		if (simatch != si->simatch) {
+			cf_warning(AS_SINDEX, "Inconsistent simatch reference between simatch stored in" 
+									"si and simatch stored in hash");
+		}
+		if (!(flag & AS_SINDEX_LOOKUP_FLAG_NORESERVE))
+			AS_SINDEX_RESERVE(si);
+	}
+END:
+	return si;
+}
+
+as_sindex *
+as_sindex__lookup_new(as_namespace *ns, char *iname, int binid, char *set, as_sindex_ktype type, 
+						as_sindex_type itype, char * path, char flag)
+{
+	SINDEX_GRLOCK();
+	as_sindex *si = as_sindex__lookup_lockfree_new(ns, iname, binid, set, type, itype, path, flag);
+	SINDEX_GUNLOCK();
+	return si;
+}
 /*
  *	Arguments
  *		imd     - To match the setname of sindex metadata.
@@ -1129,6 +1194,13 @@ as_sindex_init(as_namespace *ns)
 		cf_crash(AS_AS, "Couldn't create sindex binid hash");
 	}
 
+	// binid to simatch lookup
+	if (SHASH_OK != shash_create(&ns->sindex_set_binid_hash,
+						as_sindex__set_binid_hash_fn, AS_SINDEX_PROP_KEY_SIZE, sizeof(cf_ll *),
+						AS_SINDEX_MAX, 0)) {
+		cf_crash(AS_AS, "Couldn't create sindex binid hash");
+	}
+
 	// iname to simatch lookup
 	if (SHASH_OK != shash_create(&ns->sindex_iname_hash,
 						as_sindex__iname_hash_fn, AS_ID_INAME_SZ, sizeof(uint32_t),
@@ -1384,6 +1456,14 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR;
 	}
+	
+	int rv = as_sindex__put_in_set_binid_hash(ns, imd->set, imd->binid[0], chosen_id);
+	if (rv) {
+		cf_warning(AS_SINDEX, "Put in set_binid hash fails with error %d", rv);
+		SINDEX_GUNLOCK();
+		return AS_SINDEX_ERR;
+	}
+
 	cf_detail(AS_SINDEX, "Put binid simatch %d->%d", imd->binid[0], chosen_id);
 
 	char iname[AS_ID_INAME_SZ]; memset(iname, 0, AS_ID_INAME_SZ);
@@ -1391,6 +1471,11 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 	if (SHASH_OK != shash_put(ns->sindex_iname_hash, (void *)iname, (void *)&chosen_id)) {
 		cf_warning(AS_SINDEX, "Internal error ... Duplicate element found sindex iname hash [%s %s]",
 						imd->iname, as_bin_get_name_from_id(ns, imd->binid[0]));
+		
+		rv = as_sindex__delete_from_set_binid_hash(ns, imd);
+		if (rv) {
+			cf_warning(AS_SINDEX, "Delete from set_binid hash fails with error %d", rv);
+		}
 		shash_delete(ns->sindex_property_hash, (void *)si_prop);
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR;
@@ -1470,6 +1555,10 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		//       such dummy si structures and retry alc_btree_create.
 		shash_delete(ns->sindex_property_hash, (void *)si_prop);
 		shash_delete(ns->sindex_iname_hash, (void *)iname);
+		rv = as_sindex__delete_from_set_binid_hash(ns, imd);
+		if (rv) {
+			cf_warning(AS_SINDEX, "Delete from set_binid hash fails with error %d", rv);
+		}
 		as_sindex_imd_free(qimd);
 		cf_debug(AS_SINDEX, "Create index %s failed ret = %d",
 				imd->iname, ret);
@@ -3168,7 +3257,7 @@ as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd)
 		int16_t binid = as_bin_get_id(ns, imd->bnames[0]);
 		if (binid != -1)
 		{
-			int simatch = as_sindex__simatch_by_property(ns, imd->set, binid, imd->btype[0]);
+			int simatch = as_sindex__simatch_by_set_binid(ns, imd->set, binid, imd->btype[0], imd->itype, imd->path_str);
 			if (simatch != -1) {
 				cf_info(AS_SINDEX," The bin %s is already indexed @ %d",imd->bnames[0], simatch);
 				ret = AS_SINDEX_ERR_FOUND;

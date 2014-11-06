@@ -154,9 +154,13 @@ as_sindex__destroy_fn(void *param)
 		as_sindex *si;
 		cf_queue_pop(g_sindex_destroy_q, &si, CF_QUEUE_FOREVER);
 
-		SINDEX_GWLOCK();
+		SINDEX_GWLOCK();	
 		cf_assert((si->state == AS_SINDEX_DESTROY),
 				AS_SINDEX, CF_CRITICAL, " Invalid state %d at cleanup expected %d for %p and %s", si->state, AS_SINDEX_DESTROY, si, (si) ? ((si->imd) ? si->imd->iname : NULL) : NULL);
+		int rv = as_sindex__delete_from_set_binid_hash(si->ns, si->imd);
+		if (rv) {
+			cf_warning(AS_SINDEX, "Delete from set_binid hash fails with error %d", rv);
+		}
 		SINDEX_WLOCK(&si->imd->slock);
 		ai_btree_destroy(si->imd);
 		// Free entire usage counter for this index after the destroy
@@ -174,15 +178,7 @@ as_sindex__destroy_fn(void *param)
 		snprintf(iname, strlen(imd->iname) + 1, "%s", imd->iname);
 		shash_delete(si->ns->sindex_iname_hash, (void *)iname);
 
-		char si_prop[AS_SINDEX_PROP_KEY_SIZE];
-		memset(si_prop, 0, AS_SINDEX_PROP_KEY_SIZE);
-		if (imd->set == NULL) {
-			sprintf(si_prop, "_%d_%d", imd->binid[0], imd->btype[0]);
-		}
-		else {
-			sprintf(si_prop, "%s_%d_%d", imd->set, imd->binid[0], imd->btype[0]);
-		}
-		shash_delete(si->ns->sindex_property_hash, (void *)si_prop);
+		
 		si->ns      = NULL;
 		si->simatch = -1;
 

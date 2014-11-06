@@ -455,6 +455,7 @@ extern void                 as_sindex_gconfig_default(struct as_config_s *c);
 extern int                  as_sindex__op_by_skey(as_sindex   *si, as_sindex_key *skey, as_storage_rd *rd, as_sindex_op op);
 extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
 extern as_sindex_status     as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str);
+extern as_sindex_status     as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * imd);
 
 
 // SINDEX LOCK MACROS
