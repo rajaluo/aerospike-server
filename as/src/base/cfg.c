@@ -3237,9 +3237,9 @@ cfg_create_all_histograms()
 	create_and_check_hist(&c->prole_fabric_send_hist, "prole_fabric_send", HIST_MILLISECONDS);
 
 	create_and_check_hist(&c->ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&c->ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
 	create_and_check_hist(&c->ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);
-	create_and_check_hist(&c->ldt_io_bytes_hist, "ldt_rec_bytes", HIST_RAW);
+	create_and_check_hist(&c->ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
+	create_and_check_hist(&c->ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_RAW);
 	create_and_check_hist(&c->ldt_hist, "ldt", HIST_MILLISECONDS);
 
 #ifdef HISTOGRAM_OBJECT_LATENCY

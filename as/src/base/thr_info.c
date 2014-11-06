@@ -4747,7 +4747,7 @@ info_debug_ticker_fn(void *gcc_is_ass)
 				histogram_dump(g_config.ldt_multiop_prole_hist);
 				histogram_dump(g_config.ldt_update_record_cnt_hist);
 				histogram_dump(g_config.ldt_io_record_cnt_hist);
-				histogram_dump(g_config.ldt_io_bytes_hist);
+				histogram_dump(g_config.ldt_update_io_bytes_hist);
 				histogram_dump(g_config.ldt_hist);
 			}
 #ifdef HISTOGRAM_OBJECT_LATENCY
@@ -5910,7 +5910,7 @@ clear_ldt_histograms()
 	histogram_clear(g_config.ldt_multiop_prole_hist);
 	histogram_clear(g_config.ldt_update_record_cnt_hist);
 	histogram_clear(g_config.ldt_io_record_cnt_hist);
-	histogram_clear(g_config.ldt_io_bytes_hist);
+	histogram_clear(g_config.ldt_update_io_bytes_hist);
 	histogram_clear(g_config.ldt_hist);
 }
 

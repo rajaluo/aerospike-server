@@ -899,12 +899,12 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		}
 	}
 	udf_record_cleanup(h_urecord, true);
-	if (lrecord->udf_context & UDF_CONTEXT_LDT) {
+	if (UDF_OP_IS_WRITE(*lrecord_op) && (lrecord->udf_context & UDF_CONTEXT_LDT)) {
 		// When showing in histogram the record which touch 0 subrecord and 1 subrecord 
 		// will show up in same bucket. +1 for record as well. So all the request which 
 		// touch subrecord as well show up in 2nd bucket
+		histogram_insert_raw(g_config.ldt_update_io_bytes_hist, total_flat_size);
 		histogram_insert_raw(g_config.ldt_update_record_cnt_hist, subrec_count + 1);
-		histogram_insert_raw(g_config.ldt_io_bytes_hist, total_flat_size);
 	}
 
 	if (ret) {
@@ -1204,8 +1204,6 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	as_namespace *  ns   = tr->rsv.ns;
 	// Capture the success of the Lua call to use below
 	bool success = res->is_success;
-
-	
 
 	if (ret_value == 0) {
 
