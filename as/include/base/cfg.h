@@ -143,7 +143,7 @@ typedef struct as_config_s {
 	cf_socket_cfg		socket;
 
 	char				*external_address; // hostname that clients will connect on
-
+	bool				is_external_address_virtual;
 	char				*network_interface_name; // network_interface_name to use on this machine for generating the IP addresses
 
 	/* Whether or not a socket can be reused (SO_REUSEADDR) */
