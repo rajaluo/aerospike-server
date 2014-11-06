@@ -765,6 +765,11 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		buf += d_sz;
 	}
 
+	if (buf > buf_lim) {
+		cf_warning(AS_RECORD, "unpickle record ran beyond input: %p > %p (diff: %lu) newbins: %d", buf, buf_lim, buf - buf_lim, newbins);
+		ret = -5;
+	}
+
 	if (has_sindex) {
 		SINDEX_GUNLOCK();
 	}
@@ -787,13 +792,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 				}
 			}
 		}
-
 		rd->write_to_device = true;
-
-		if (buf > buf_lim) {
-			cf_warning(AS_RECORD, "unpickle record ran beyond input: %p > %p (diff: %lu) newbins: %d", buf, buf_lim, buf - buf_lim, newbins);
-			ret = -5;
-		}
 	}
 
 	if (has_sindex) {
