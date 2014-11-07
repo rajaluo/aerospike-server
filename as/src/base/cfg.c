@@ -2120,6 +2120,7 @@ as_config_init(const char *config_file)
 				// Intentional fall-through.
 			case CASE_NETWORK_SERVICE_ACCESS_ADDRESS:
 				c->external_address = cfg_strdup(&line);
+				c->is_external_address_virtual = (strcmp(line.val_tok_2, "virtual") == 0 ? true : false);
 				break;
 			case CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME:
 				c->network_interface_name = cfg_strdup(&line);
