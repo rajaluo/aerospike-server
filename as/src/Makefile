@@ -12,7 +12,7 @@ BASE_HEADERS += asm.h cfg.h cluster_config.h datamodel.h feature.h index.h
 BASE_HEADERS += ldt.h ldt_aerospike.h ldt_record.h monitor.h packet_compression.h
 BASE_HEADERS += proto.h rec_props.h secondary_index.h security.h security_config.h system_metadata.h
 BASE_HEADERS += thr_batch.h thr_info.h thr_proxy.h thr_rw_internal.h thr_scan.h thr_sindex.h
-BASE_HEADERS += thr_tsvc.h thr_write.h transaction.h
+BASE_HEADERS += thr_tsvc.h thr_write.h transaction.h transaction_policy.h
 BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h
 BASE_HEADERS += udf_memtracker.h udf_record.h udf_rw.h udf_timer.h
 BASE_HEADERS += write_request.h xdr_serverside.h as_aggr.h
@@ -72,16 +72,25 @@ ifeq ($(DOPROFILE),1)
   LIBRARIES += -pg -fprofile-arcs -lgcov
 endif
 
-ifeq ($(LD_LUA),static)
-  # Find and add the static Lua library.
-  AS_LIBRARIES += $(or \
-	$(wildcard /usr/local/lib/liblua.a), \
-	$(wildcard /usr/lib64/liblua$(LUA_SUFFIX).a), \
-	$(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
-	$(wildcard /usr/lib/liblua.a), \
-	$(error Cannot find "liblua.a"))
+# Add either the LuaJIT or Lua library
+ifeq ($(USE_LUAJIT),1)
+  ifeq ($(LD_LUAJIT),static)
+    AS_LIBRARIES += $(LUAJIT)/src/libluajit.a
+  else
+    LIBRARIES += -L$(LUAJIT)/src -lluajit
+  endif
 else
-  LIBRARIES += -llua$(LUA_SUFFIX)
+  ifeq ($(LD_LUA),static)
+    # Find and add the static Lua library.
+    AS_LIBRARIES += $(or \
+      $(wildcard /usr/local/lib/liblua.a), \
+      $(wildcard /usr/lib64/liblua$(LUA_SUFFIX).a), \
+      $(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
+      $(wildcard /usr/lib/liblua.a), \
+      $(error Cannot find "liblua.a"))
+  else
+    LIBRARIES += -llua$(LUA_SUFFIX)
+  endif
 endif
 
 ifeq ($(LD_JANSSON),static)
