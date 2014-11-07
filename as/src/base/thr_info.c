@@ -4978,7 +4978,7 @@ info_interfaces_static_fn(void *gcc_is_ass)
 	build_service_list(ifaddr, ifaddr_sz, &temp_service_db);
 
 	char * service_str = cf_dyn_buf_strdup(&temp_service_db);
-	if ( g_config.is_external_address_virtual == false && strstr(service_str, g_config.external_address) == NULL) {
+	if (! g_config.is_external_address_virtual && strstr(service_str, g_config.external_address) == NULL) {
 		cf_crash(AS_INFO, "external address:%s is not matching with any of service addresses:%s",
 				g_config.external_address, service_str);
 	}
