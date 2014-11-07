@@ -430,8 +430,8 @@ main(int argc, char **argv)
 	as_paxos_start();			// blocks until cluster membership is obtained
 	as_nsup_start();			// may send delete transactions to other nodes
 	as_demarshal_start();		// server will now receive client transactions
-	as_info_port_start();		// server will now receive info transactions
 	as_xdr_start();				// XDR may now start
+	as_info_port_start();		// server will now receive info transactions
 
 	info_debug_ticker_start();	// only after everything else is started
 
