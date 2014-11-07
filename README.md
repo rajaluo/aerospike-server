@@ -49,7 +49,7 @@ The Lua 5.1 language is required for User Defined Function (UDF) support.
 
 ### Submodules
 
-The Aerospike Database Server build depends upon 6 submodules:
+The Aerospike Database Server build depends upon 7 submodules:
 
 | Submodule | Description |
 |---------- | ----------- |
@@ -58,6 +58,7 @@ The Aerospike Database Server build depends upon 6 submodules:
 | jansson   | C library for encoding, decoding and manipulating JSON data |
 | jemalloc  | The JEMalloc Memory Allocator |
 | lua-core  | The Aerospike Core Lua Source Files |
+| luajit    | The LuaJIT (Just-In-Time-Compiler for Lua) |
 | mod-lua   | The Aerospike Lua Interface |
 
 After the initial cloning of the `aerospike-server` repo., the

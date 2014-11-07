@@ -129,6 +129,9 @@
 //#define SEQ_SCAN 0
 //#define PRL_SCAN 0
 
+// TODO - eventually, we'll do better than this hard-wired value.
+const size_t INITIAL_BUFBUILDER_SIZE = 8 * 1024 * 1024;
+
 msg_template tscan_mt[] = {
 	{ TSCAN_FIELD_OP,       M_FT_UINT32 }, // operation
 	{ TSCAN_FIELD_NAMESPACE, M_FT_BUF },
@@ -571,25 +574,31 @@ tscan_enqueue_udfjob(tscan_job *job)
 		pthread_mutex_unlock(&job->LOCK);
 
 		int cycler = rand() % n_threads;
-		int i      = 0;
-		int count  = 0;
-		for (i = job->cur_partition_id; i < AS_PARTITIONS; i++) {
-			scan_job_workitem workitem;
-			workitem.tid = job->tid;
-			workitem.pid = i;
-			byte slot;
-			if (CF_QUEUE_EMPTY != cf_queue_pop(g_scan_job_slotq, &slot, CF_QUEUE_FOREVER)) {
-				cf_detail(AS_SCAN, "UDF: Added new work item for job [%"PRIu64" %d %d] slot %d", job->tid, i, cycler, slot);
-				cf_queue_push(g_scan_partition_work_q_array[cycler++ % n_threads], &workitem);
-				if (count++ == (MAX_SCAN_UDF_WORKITEM_PER_ITERATION * n_threads)) {
-					break;
-				}
-			}
+		uint32_t limit = job->cur_partition_id + (MAX_SCAN_UDF_WORKITEM_PER_ITERATION * n_threads);
+
+		if (limit > AS_PARTITIONS) {
+			limit = AS_PARTITIONS;
 		}
 
-		cf_detail(AS_SCAN, "UDF: Iteration over for job %"PRIu64" @ %d ", job->tid, i);
-		// Move partition id to the next partition which needs processing.
-		job->cur_partition_id = i + 1;
+		while (job->cur_partition_id < limit) {
+			scan_job_workitem workitem;
+			workitem.tid = job->tid;
+			workitem.pid = job->cur_partition_id;
+			byte slot;
+
+			if (CF_QUEUE_OK != cf_queue_pop(g_scan_job_slotq, &slot, CF_QUEUE_FOREVER)) {
+				// This is a code path that should never happen.
+				cf_warning(AS_SCAN, "UDF scan job slot queue pop failed");
+				break;
+			}
+
+			cf_detail(AS_SCAN, "UDF: Adding new work item for job [%"PRIu64" %u %d] slot %d", job->tid, workitem.pid, cycler, slot);
+			cf_queue_push(g_scan_partition_work_q_array[cycler++ % n_threads], &workitem);
+
+			job->cur_partition_id++;
+		}
+
+		cf_detail(AS_SCAN, "UDF: Iteration over for job %"PRIu64" next pid %u ", job->tid, job->cur_partition_id);
 
 		// Debug only, check how many of the queues have workitems.
 		for (int i = 0; i < MAX_SCAN_THREADS; i++) {
@@ -1038,7 +1047,7 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 	// If there is no udf call associated, go through the normal process.
 	if (u->nobindata) {
 		if (! *bb_r) {
-			*bb_r = cf_buf_builder_create();
+			*bb_r = cf_buf_builder_create_size(INITIAL_BUFBUILDER_SIZE);
 			cf_atomic_int_add(&u->pjob->mem_buf, (*bb_r)->alloc_sz);
 		}
 
@@ -1119,7 +1128,7 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 			}
 		} else {
 			if (! *bb_r) {
-				*bb_r = cf_buf_builder_create();
+				*bb_r = cf_buf_builder_create_size(INITIAL_BUFBUILDER_SIZE);
 				cf_atomic_int_add(&u->pjob->mem_buf, (*bb_r)->alloc_sz);
 			}
 			size_t old_allocsz = (*bb_r)->alloc_sz;
@@ -1616,7 +1625,7 @@ tscan_partition_thr(void *q_to_wait_on)
 
 
 		if (job->fd_h) {
-			u.bb         = cf_buf_builder_create();
+			u.bb = cf_buf_builder_create_size(INITIAL_BUFBUILDER_SIZE);
 			if (u.bb == NULL) {
 				cf_info(AS_SCAN, "scan_partition: could not create buf builder: %d {%s:%d}", workitem.tid, job->ns->name, workitem.pid);
 				as_partition_release(&rsv);
