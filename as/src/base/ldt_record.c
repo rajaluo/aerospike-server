@@ -213,6 +213,40 @@ ldt_record_gen(const as_rec * rec)
 	return as_rec_gen(h_urec);
 }
 
+static as_val *
+ldt_record_key(const as_rec * rec)
+{
+	static const char * meth = "ldt_record_key()";
+	if (!rec) {
+		cf_warning(AS_UDF, "%s Invalid Parameters: record=%p", meth, rec);
+		return 0;
+	}
+	ldt_record *lrecord  = (ldt_record *)as_rec_source(rec);
+	if (!lrecord) {
+		return 0;
+	}
+	const as_rec *h_urec = lrecord->h_urec;
+
+	return as_rec_key(h_urec);
+}
+
+static const char *
+ldt_record_setname(const as_rec * rec)
+{
+	static const char * meth = "ldt_record_setname()";
+	if (!rec) {
+		cf_warning(AS_UDF, "%s Invalid Parameters: record=%p", meth, rec);
+		return 0;
+	}
+	ldt_record *lrecord  = (ldt_record *)as_rec_source(rec);
+	if (!lrecord) {
+		return 0;
+	}
+	const as_rec *h_urec = lrecord->h_urec;
+
+	return as_rec_setname(h_urec);
+}
+
 static as_bytes *
 ldt_record_digest(const as_rec * rec)
 {
@@ -255,6 +289,8 @@ const as_rec_hooks ldt_record_hooks = {
 	.remove		= ldt_record_remove,
 	.ttl		= ldt_record_ttl,
 	.gen		= ldt_record_gen,
+	.key		= ldt_record_key,
+	.setname	= ldt_record_setname,
 	.destroy	= NULL,
 	.digest		= ldt_record_digest,
 	.set_flags	= ldt_record_set_flags,
