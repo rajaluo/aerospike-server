@@ -116,7 +116,19 @@ typedef struct as_index_s {
 // Accessor functions for bits in as_index.
 //
 
-int as_index_get_size(as_namespace *ns);
+// Size in bytes of as_index including variable part, if any.
+extern int as_index_size_get(as_namespace *ns);
+
+// Clear the record portion of as_index - excluding variable part, for speed.
+// Note - relies on current layout and size of as_index!
+static inline
+void as_index_clear_record_info(as_index *index) {
+	uint64_t *p_clear = (uint64_t*)&index->void_time;
+
+	*p_clear++	= 0;
+	*p_clear++	= 0;
+	*p_clear	= 0;
+}
 
 
 //------------------------------------------------
@@ -341,9 +353,6 @@ extern int as_index_tree_release(as_index_tree *tree, void *destructor_udata);
 
 // Number of elements in the tree.
 extern uint32_t as_index_tree_size(as_index_tree *tree);
-
-// Size in bytes of as_index including variable part, if any.
-extern int as_index_size_get(as_namespace *ns);
 
 // These reduce functions give a reference count of the value: you must release
 // it and it contains, internally, code to not block the tree lock - so you can
