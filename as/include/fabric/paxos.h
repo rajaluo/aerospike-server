@@ -238,6 +238,8 @@ typedef struct as_paxos_t {
 	size_t cluster_size;
 
 	bool cluster_has_integrity;    // Is true when there is no cluster integrity fault.
+
+	bool dun_other_clusters;       // Do we automatically dun nodes in other clusters?
 } as_paxos;
 
 /* as_paxos_petition_type
@@ -272,6 +274,9 @@ bool as_paxos_get_cluster_integrity(as_paxos *p);
 
 // Set the Paxos cluster integrity state.
 void as_paxos_set_cluster_integrity(as_paxos *p, bool state);
+
+// Set whether automatic dunning of all nodes in other clusters should persist.
+void as_paxos_dun_hold(bool is_dunned);
 
 /* Paxos Info. command functions. */
 
