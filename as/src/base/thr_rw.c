@@ -3176,8 +3176,6 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	// Shortcut pointers & flags.
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
-	bool has_sindex = as_sindex_ns_has_sindex(ns);
-
 	bool must_not_create =
 			(m->info3 & AS_MSG_INFO3_UPDATE_ONLY) ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) ||
@@ -3187,15 +3185,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY);
 
-	bool must_fetch_data = has_sindex || ! (ns->single_bin || record_level_replace);
-
-	bool replace_deletes_bins = record_level_replace &&
-			// Single-bin will do the right thing.
-			! ns->single_bin &&
-			// For data-in-memory, or if there's a sindex, rd.bins will contain
-			// all previous bins - on replacing, it's easiest to purge them all
-			// and add new ones fresh.
-			(ns->storage_data_in_memory || has_sindex);
+	bool must_fetch_data = false;
 
 	// Loop over ops to check and modify flags.
 	as_msg_op *op = 0;
@@ -3283,6 +3273,27 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			cf_atomic_int_add(&ns->n_objects, 1);
 			record_created = true;
 		}
+	}
+
+	
+	// Information about ns having sindex should be stored 
+	// after taking object lock on the record
+	// if done otherwise, this record has the potential to 
+	// not get indexed in the new sindex created.
+	bool has_sindex = as_sindex_ns_has_sindex(ns);
+
+	bool replace_deletes_bins = record_level_replace &&
+			// Single-bin will do the right thing.
+			! ns->single_bin &&
+			// For data-in-memory, or if there's a sindex, rd.bins will contain
+			// all previous bins - on replacing, it's easiest to purge them all
+			// and add new ones fresh.
+			(ns->storage_data_in_memory || has_sindex);
+
+	// If must_fetch_data has already been set to true, 
+	// then we do not need to change it,
+	if (!must_fetch_data) {
+		must_fetch_data = has_sindex || ! (ns->single_bin || record_level_replace);
 	}
 
 	// Enforce record-level create-only existence policy.
