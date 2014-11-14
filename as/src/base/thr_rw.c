@@ -71,6 +71,34 @@
 #include "storage/storage.h"
 
 
+// Per-Transaction Consistency Guarantees:
+//   The client-request consistency guarantee level is respected
+//   unless the corresponding server's namespace override is enabled.
+
+// Extract the read consistency level from an as_msg.
+// [Note:  Not a strict check:  Both bits == 0 means the default, anything else means the alternative.]
+#define PROTO_CONSISTENCY_LEVEL(asmsg)									\
+	((!(asmsg.info1 & AS_MSG_INFO1_CONSISTENCY_LEVEL_B0)				\
+	  && !(asmsg.info1 & AS_MSG_INFO1_CONSISTENCY_LEVEL_B1))			\
+	 ? AS_POLICY_CONSISTENCY_LEVEL_ONE : AS_POLICY_CONSISTENCY_LEVEL_ALL)
+
+// Extract the write commit level from an as_msg.
+// [Note:  Not a strict check:  Both bits == 0 means the default, anything else means the alternative.]
+#define PROTO_COMMIT_LEVEL(asmsg)										\
+	((!(asmsg.info3 & AS_MSG_INFO3_COMMIT_LEVEL_B0)						\
+	  && !(asmsg.info3 & AS_MSG_INFO3_COMMIT_LEVEL_B1))					\
+	 ? AS_POLICY_COMMIT_LEVEL_ALL : AS_POLICY_COMMIT_LEVEL_MASTER)
+
+// Determine the read consistency level for this transaction based upon the server's namespace and client policy settings.
+#define TRANSACTION_CONSISTENCY_LEVEL(tr)								\
+	(tr->rsv.ns->read_consistency_level_override						\
+	 ? tr->rsv.ns->read_consistency_level : PROTO_CONSISTENCY_LEVEL(tr->msgp->msg))
+
+// Determine the write commit level for this transaction based upon the server's namespace and client policy settings.
+#define TRANSACTION_COMMIT_LEVEL(tr)									\
+	(tr->rsv.ns->write_commit_level_override							\
+	 ? tr->rsv.ns->write_commit_level : PROTO_COMMIT_LEVEL(tr->msgp->msg))
+
 msg_template rw_mt[] =
 {
 	{ RW_FIELD_OP, M_FT_UINT32 },
@@ -93,7 +121,6 @@ msg_template rw_mt[] =
 // #define DEBUG 1
 // Specific Flag to dump the MSG
 // #define DEBUG_MSG 1
-// #define VERIFY_BREAK 1
 // #define TRACK_WR 1
 // #define EXTRA_CHECKS 1
 static cf_atomic32 init_counter = 0;
@@ -193,6 +220,12 @@ write_request_create(void) {
 	// Set the initial limit on wr lifetime to guarantee finite life-span.
 	// (Will be reset relative to the transaction end time if/when the wr goes ready.)
 	cf_atomic64_set(&(wr->end_time), cf_getns() + g_config.transaction_max_ns);
+
+	// Initialize with the default consistency guarantee levels.
+	// (These will be re-set later according to combining the server's namespace
+	//   and the client transaction policy settings.)
+	wr->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE;
+	wr->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL;
 
 	// initialize waiting transaction queue
 	wr->wait_queue_head = NULL;
@@ -333,39 +366,6 @@ int rw_dump_reduce(void *key, uint32_t keylen, void *data, void *udata) {
 	write_request *wr = data;
 	rw_request_dump(wr, "");
 	return (0);
-}
-
-//
-// If this was a verify request, and it failed, direct over here
-// so we can print out whatever information we're trying to verify
-// and halt the server or whatever.
-//
-// Considered having the verify steps different, but... still might. better
-// to have the processing in the main line so you're verifying the actual running code
-
-#include <signal.h>
-
-void verify_fail(char *msg, as_transaction *tr, as_record *r, int bin_count) {
-	cf_warning(AS_TSVC, "read verify failed: reason %s digest %"PRIx64"",
-			msg, *(uint64_t*)&tr->keyd);
-
-#ifdef VERIFY_BREAK
-	// more and more diagnostic info to go here
-	raise(SIGINT);
-#endif
-
-}
-
-//
-// Verification function only called when the client requests verification.
-// The 'op' is the network format coming in from the client, the 'bin' is the local storage
-// Return true if the data matches in every way.
-// Allowed to be a little expensive, should be as quick as possible though
-//
-
-bool compare_particle_data(as_bin *bin, as_msg_op *op) {
-
-	return (true);
 }
 
 /*
@@ -632,7 +632,7 @@ int rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 		cf_hist_track_insert_data_point(g_config.rt_hist, tr->start_time);
 	} else {
 		// Update Write Stats. Don't count Deletes or UDF calls.
-		if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->has_udf) {
+		if (! tr->proxy_msg && (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->has_udf) {
 			cf_hist_track_insert_data_point(g_config.wt_hist, tr->start_time);
 		}
 	}
@@ -735,7 +735,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	//    strong read consistency, then make sure that we do not go through
 	//    duplicate processing
 	if ((wr->is_read == true)
-			&& (g_config.transaction_repeatable_read == false)) {
+		&& (g_config.transaction_repeatable_read == false)
+		&& (wr->read_consistency_level == AS_POLICY_CONSISTENCY_LEVEL_ONE)) {
 
 		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_internal_hist);
 		as_index_ref r_ref;
@@ -802,8 +803,9 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	else {
 		// Short circuit for reads, after duplicate resolution record will
 		// already be open.
-		if ((wr->is_read == true) && (g_config.transaction_repeatable_read == true))
-		{
+		if ((wr->is_read == true)
+			&& ((g_config.transaction_repeatable_read == true)
+				|| (wr->read_consistency_level == AS_POLICY_CONSISTENCY_LEVEL_ALL))) {
 			MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_internal_hist);
 			WR_TRACK_INFO(wr, "internal_rw_start: Short Circuit for Read After Duplicate Resolution");
 			rw_complete(tr, NULL, 0);
@@ -891,7 +893,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		if (rv != 0) {
 			if ((rv == -2) && (tr->proto_fd_h == 0) && (tr->proxy_msg == 0)) {
 				cf_crash(AS_RW,
-						"Cant retry a write if all data has been stripped out");
+						"Can't retry a write if all data has been stripped out");
 			}
 
 			// If first time, the caller will free msgp and the partition or retry request
@@ -1010,11 +1012,13 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	} // if - we're in operation phase
 
 	// if we wanted to fast-path response to client (must check we are not in duplicate resolution case)
-	if ((g_config.respond_client_on_master_completion
-			|| g_config.replication_fire_and_forget) && (tr->rsv.n_dupl == 0)) {
+	bool client_requested_fast_path = (TRANSACTION_COMMIT_LEVEL(tr) == AS_POLICY_COMMIT_LEVEL_MASTER);
+
+	if ((g_config.respond_client_on_master_completion || g_config.replication_fire_and_forget || client_requested_fast_path)
+		&& (tr->rsv.n_dupl == 0)) {
 
 		wr->respond_client_on_master_completion =
-				g_config.respond_client_on_master_completion;
+			g_config.respond_client_on_master_completion || client_requested_fast_path;
 
 		// start the replication, make sure real replication doesn't happen
 		if (g_config.replication_fire_and_forget) {
@@ -1045,7 +1049,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			return (0);
 		} else {
 			// Do not call rw_cleanup. Only response has been sent
-			// in rw_complete. Replication et. all still needs to
+			// in rw_complete. Replication, et al., still needs to
 			// happen.
 		}
 	}
@@ -1153,18 +1157,23 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 	wr->dupl_trans_complete = (tr->rsv.n_dupl > 0) ? 0 : 1;
 
 	cf_debug_digest(AS_RW, &(tr->keyd), "[PROCESS KEY] {%s:%u} Self(%"PRIx64") Read(%d):",
-			tr->rsv.ns->name, tr->rsv.p->partition_id, g_config.self_node, is_read );
+			tr->rsv. ns->name, tr->rsv.p->partition_id, g_config.self_node, is_read );
 
 	wr->keyd = tr->keyd;
 
 	// Incase this transaction for XDR, from_xdr is data given by XDR.
 	wr->from_xdr = tr->from_xdr;
 
+	// Transaction Consistency Guarantees:
+	//   Use the client's requested guarantee level for this transaction
+	//   unless the corresponding server's namespace override is enabled.
+	wr->read_consistency_level = TRANSACTION_CONSISTENCY_LEVEL(tr);
+	wr->write_commit_level = TRANSACTION_COMMIT_LEVEL(tr);
+
 	// Fetching the write_request out of the hash table
 	global_keyd gk;
 	gk.ns_id = tr->rsv.ns->id;
 	gk.keyd = tr->keyd;
-
 
 	cf_rc_reserve(wr); // need to keep an extra reference count in case it inserts
 	rv = rchash_put_unique(g_write_hash, &gk, sizeof(gk), wr);
@@ -1355,10 +1364,10 @@ int as_read_start(as_transaction *tr) {
 	//
 	// Just read the data and send it back ...
 	//
-	if ( (g_config.transaction_repeatable_read == false)
-			&& tr->rsv.n_dupl == 0
-			&& (tr->msgp->msg.info1 & AS_MSG_INFO1_READ)) {
-
+	if ((g_config.transaction_repeatable_read == false)
+		&& (tr->rsv.n_dupl == 0)
+		&& (tr->msgp->msg.info1 & AS_MSG_INFO1_READ)
+		&& (TRANSACTION_CONSISTENCY_LEVEL(tr) == AS_POLICY_CONSISTENCY_LEVEL_ONE)) {
 		cf_atomic_int_incr(&g_config.stat_read_reqs);
 		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
 			cf_atomic_int_incr(&g_config.stat_read_reqs_xdr);
@@ -1369,7 +1378,10 @@ int as_read_start(as_transaction *tr) {
 		// This code does task of rw_cleanup ... like releasing
 		// reservation cleaning up msgp etc ...
 		// (Todo) consolidate duplicate code
-		cf_hist_track_insert_data_point(g_config.rt_hist, tr->start_time);
+		if (! tr->proxy_node) {
+			cf_hist_track_insert_data_point(g_config.rt_hist, tr->start_time);
+		}
+
 		as_partition_release(&tr->rsv);
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 		if (tr->msgp) {
@@ -2382,9 +2394,9 @@ write_process(cf_node node, msg *m, bool respond)
 		as_partition_reserve_migrate(ns, as_partition_getid(tr.keyd), &tr.rsv, 0);
 		cf_atomic_int_incr(&g_config.wprocess_tree_count);
 
-		if( tr.rsv.state == AS_PARTITION_STATE_ABSENT ||
+		if (tr.rsv.state == AS_PARTITION_STATE_ABSENT ||
 			tr.rsv.state == AS_PARTITION_STATE_LIFESUPPORT ||
-			tr.rsv.state == AS_PARTITION_STATE_WAIT )
+			tr.rsv.state == AS_PARTITION_STATE_WAIT)
 		{
 			cf_debug_digest(AS_RW, keyd, "[PROLE STATE MISMATCH:1] TID(0) Partition PID(%u) State is Absent or other(%u). Return to Sender.",
 					tr.rsv.pid, tr.rsv.state );
@@ -2514,9 +2526,9 @@ write_process(cf_node node, msg *m, bool respond)
 		// See if we're being asked to write into an ABSENT PROLE PARTITION.
 		// If so, then DO NOT WRITE.  Instead, return an error so that the
 		// Master will retry with the correct node.
-		if( rsv.state == AS_PARTITION_STATE_ABSENT ||
+		if (rsv.state == AS_PARTITION_STATE_ABSENT ||
 			rsv.state == AS_PARTITION_STATE_LIFESUPPORT ||
-			rsv.state == AS_PARTITION_STATE_WAIT )
+			rsv.state == AS_PARTITION_STATE_WAIT)
 		{
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 			cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
@@ -2596,15 +2608,6 @@ Out:
 	}
 
 	return (0);
-}
-
-#include <signal.h>
-
-void thr_write_verify_fail(char *msg, as_transaction *tr) {
-	cf_warning(AS_RW, "write verify fail: %s", msg);
-#ifdef VERIFY_BREAK
-	raise(SIGINT);
-#endif
 }
 
 bool
@@ -3995,7 +3998,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 						if (has_sindex) {
 							sindex_ret = as_sindex_sbin_from_bin(ns, set_name,
 									b, &newbin[newbin_cnt]);
-							if(sindex_ret == AS_SINDEX_OK) newbin_cnt++;
+							if (sindex_ret == AS_SINDEX_OK) newbin_cnt++;
 							else if (sindex_ret != AS_SINDEX_ERR_NOTFOUND) {
 								GTRACE(CALLER, debug, "Failed to get sbin with error %d", sindex_ret);
 							}
@@ -5322,9 +5325,8 @@ thr_tsvc_read(as_transaction *tr, as_record_lock *rl, int record_get_rv)
 				cf_info(AS_RW, "as_record_get failure %d - will retry", rv);
 				return (-1);
 			} else if (-1 == rv) {
-				if (m->info1 & AS_MSG_INFO1_VERIFY) verify_fail("not found", tr, 0, -1);
 				cf_debug_digest(AS_RW, &(tr->keyd), "[REC NOT FOUND:4]<%s>PID(%u) Pstate(%d):",
-						"thr_tsvc_read()", tr->rsv.pid, tr->rsv.p->state );
+								"thr_tsvc_read()", tr->rsv.pid, tr->rsv.p->state);
 				tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
 			} else { /*0*/
 				r = r_ref->r;
@@ -5335,10 +5337,9 @@ thr_tsvc_read(as_transaction *tr, as_record_lock *rl, int record_get_rv)
 
 		// check to see this isn't an expired record waiting to die
 		if (r && r->void_time && r->void_time < as_record_void_time_get()) {
-			if (m->info1 & AS_MSG_INFO1_VERIFY) verify_fail("found but expired", tr, r, -1);
 			cf_debug_digest(AS_RW, &(tr->keyd),
-					"[REC NOT FOUND AND EXPIRED] PartID(%u): expired record still in system, no read",
-					tr->rsv.pid );
+							"[REC NOT FOUND AND EXPIRED] PartID(%u): expired record still in system, no read",
+							tr->rsv.pid);
 			tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
 			as_storage_record_close(r, rd);
 			as_record_done(r_ref, ns);
@@ -5388,10 +5389,9 @@ thr_tsvc_read(as_transaction *tr, as_record_lock *rl, int record_get_rv)
 			rd->bins = as_bin_get_all(r, rd, stack_bins);
 
 			if (!as_bin_inuse_has(rd)) {
-				if (m->info1 & AS_MSG_INFO1_VERIFY) verify_fail("found but no bins", tr, r, -1);
 				cf_warning(AS_RW, "as_record_get: expired record still in system, no read: n_bins(%d)", rd->n_bins);
 				cf_debug_digest(AS_RW, &(tr->keyd), "[REC NOT FOUND:5] PID(%u) Pstate(%d):",
-						tr->rsv.pid, tr->rsv.p->state );
+								tr->rsv.pid, tr->rsv.p->state);
 				tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
 				as_storage_record_close(r, rd);
 				as_record_done(r_ref, ns);
@@ -5427,43 +5427,10 @@ thr_tsvc_read(as_transaction *tr, as_record_lock *rl, int record_get_rv)
 				while ((op = as_msg_op_iterate(m, op, &n))) {
 					if (op->op == AS_MSG_OP_READ) {
 						ops[n_bins] = op;
-						response_bins[n_bins] = as_bin_get(rd, op->name,
-								op->name_sz);
-						// this might be the case where they asked for a bin that has never been stored,
-						// which is legal and reasonable
-						if (response_bins[n_bins] == 0) {
-							if (m->info1 & AS_MSG_INFO1_VERIFY)
-								verify_fail("bin not found", tr, r, n_bins);
-						} else { // bin was found
-							// check cases, if asked to verify on this transaction
-							if (m->info1 & AS_MSG_INFO1_VERIFY) {
-								// this is the case where the bin name was found, but there's no particle there.
-								if ((!as_bin_is_integer(response_bins[n_bins]))
-										&& (response_bins[n_bins]->particle == 0)) {
-									verify_fail("bin particle null", tr, r,
-											n_bins);
-								} else {
-									if (!as_bin_inuse(response_bins[n_bins])) {
-										verify_fail("unexpected null", tr, r,
-												n_bins);
-									}
-									// verify the data against what was passed in
-									else {
-										if (!compare_particle_data(
-													response_bins[n_bins], op)) {
-											verify_fail("data fail", tr, r,
-													n_bins);
-										}
-									}
-								}
-							} // is verify
-
-						} // bin found
+						response_bins[n_bins] = as_bin_get(rd, op->name, op->name_sz);
 						n_bins++;
 					}
-
 				}
-
 			}
 
 			MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_storage_read_hist);

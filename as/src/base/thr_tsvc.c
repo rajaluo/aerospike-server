@@ -431,10 +431,11 @@ process_transaction(as_transaction *tr)
 					if (rr != 0) {
 						cf_info(AS_TSVC, "Scan failed with error %d", rr);
 						as_msg_send_error(tr->proto_fd_h,
-								 rr == -4 ? AS_PROTO_RESULT_FAIL_NOTFOUND :
+								 rr == -1 ? AS_PROTO_RESULT_FAIL_NAMESPACE :
 								(rr == -3 ? AS_PROTO_RESULT_FAIL_UNAVAILABLE :
+								(rr == -4 ? AS_PROTO_RESULT_FAIL_NOTFOUND :
 								(rr == -5 ? AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE :
-											AS_PROTO_RESULT_FAIL_UNKNOWN)));
+											AS_PROTO_RESULT_FAIL_UNKNOWN))));
 					}
 				}
 				if (rr != 0) {

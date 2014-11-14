@@ -799,6 +799,7 @@ as_hb_set_are_nodes_dunned(char *nodes_str, int nodes_str_len, bool is_dunned)
 
 	if (!strcmp(nodes_str, "all")) {
 		all_nodes = true;
+		as_paxos_dun_hold(is_dunned);
 	} else {
 		if (as_hb_nodes_str_to_cf_nodes(nodes_str, nodes_str_len, nodes, &num_nodes)) {
 			cf_warning(AS_HB, "%sdun command: failed to parse node list string (\"%s\") to nodes", (is_dunned ? "" : "un"), nodes_str);
@@ -2294,7 +2295,11 @@ as_hb_monitor_reduce(void *key, void *data, void *udata)
 		if (slists_match) // This is the normal case - print with debug level
 			cf_debug(AS_HB, "HB node %"PRIx64" in %s cluster - succession lists match", id, same_diff);
 		else { // this is ths case where a node is just going to join a cluster or two clusters are merging
-			cf_info(AS_HB, "HB node %"PRIx64" in %s cluster - succession lists don't match", id, same_diff);
+			if (! p->dunned) {
+				cf_info(AS_HB, "HB node %"PRIx64" in %s cluster - succession lists don't match", id, same_diff);
+			} else {
+				cf_info(AS_HB, "[Ignoring succession list mismatch with dunned node %"PRIx64" in %s cluster]", id, same_diff);
+			}
 		}
 	}
 

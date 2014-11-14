@@ -31,7 +31,7 @@ rm $fn
 if [ "$has_argparse" = "0" ]
 then
 	echo Installing python-argparse
-	rpm -ivh python-argparse-1.2.1-2.el6.noarch.rpm
+	rpm -Uvh python-argparse-1.2.1-2.el6.noarch.rpm
 fi
 
 #---------------
@@ -42,8 +42,8 @@ echo Installing tools
 # Use default arguments if none passed in.
 if [ $# -eq 0 ]
 then
-	echo rpm -ivh aerospike-tools-*.rpm
-	rpm -ivh aerospike-tools-*.rpm
+	echo rpm -Uvh aerospike-tools-*.rpm
+	rpm -Uvh aerospike-tools-*.rpm
 else
 	echo rpm "$@" aerospike-tools-*.rpm
 	rpm "$@" aerospike-tools-*.rpm
@@ -57,7 +57,7 @@ echo Installing server
 # Use default arguments if none passed in.
 if [ $# -eq 0 ]
 then
-	echo rpm -ivh aerospike-server-*.rpm
+	echo rpm -Uvh aerospike-server-*.rpm
 	rpm -ivh aerospike-server-*.rpm
 else
 	echo rpm "$@" aerospike-server-*.rpm

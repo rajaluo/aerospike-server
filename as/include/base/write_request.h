@@ -37,6 +37,7 @@
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/transaction.h"
+#include "base/transaction_policy.h"
 
 
 // Need a key digest that's unique over all namespaces.
@@ -103,6 +104,10 @@ typedef struct write_request_s {
 	// If set, this transaction should respond back to client after write on master.
 	bool                 respond_client_on_master_completion;
 	bool                 replication_fire_and_forget;
+
+	// Transaction consistency guarantees:
+	as_policy_consistency_level   read_consistency_level;
+	as_policy_commit_level        write_commit_level;
 
 	cf_digest            keyd;
 	// udf request data

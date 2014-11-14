@@ -230,15 +230,13 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *key, as_index_ref *ind
 	n->parent_h = s_h;
 
 	// Make sure we can detect that the record isn't initialized.
-	n->storage_key.ssd.rblock_id = 0;
+	as_index_clear_record_info(n);
 
 	// bookkeeping the index
 	index_ref->r = n;
 	index_ref->r_h = n_h;
 	as_index_reserve(n);
 	cf_atomic_int_add(&g_config.global_record_ref_count, 2);
-
-	// INSERT INITIALIZER FOR AS_RECORD part of the index
 
 	/* Insert the node */
 	if ((s == tree->root) || (0 < cf_digest_compare(&n->key, &s->key)))
