@@ -241,7 +241,7 @@ Cleanup:
  *
  */
 int
-as_aggr_call_init(as_aggr_call * call, as_transaction * txn, void *caller, as_aggr_caller_intf * caller_intf, as_stream_hooks * istream_hooks, as_stream_hooks * ostream_hooks, as_namespace *ns, bool is_scan) //no need to worry about namespace as it's inside g_config 
+as_aggr_call_init(as_aggr_call * call, as_transaction * txn, void *caller,const as_aggr_caller_intf * caller_intf, const as_stream_hooks * istream_hooks, const as_stream_hooks * ostream_hooks, as_namespace *ns, bool is_scan) //no need to worry about namespace as it's inside g_config 
 {
 	if ((!caller) || (!txn) || (!call)) return -1;
 

@@ -855,7 +855,7 @@ tscan_binlist_from_op(as_namespace *ns, as_msg *msgp)
 }
 
 extern int
-as_aggr_call_init(as_aggr_call * call, as_transaction * txn, void *caller, as_aggr_caller_intf * caller_intf, as_stream_hooks * istream_hooks, as_stream_hooks * ostream_hooks, as_namespace *ns, bool is_scan);
+as_aggr_call_init(as_aggr_call * call, as_transaction * txn, void *caller,const as_aggr_caller_intf * caller_intf,const as_stream_hooks * istream_hooks,const as_stream_hooks * ostream_hooks, as_namespace *ns, bool is_scan);
 
 
 // Start the scan of the system.
@@ -1159,7 +1159,8 @@ tscan_add_digest_list(cf_ll * recl, cf_digest * digest, int * dnum )
 	}
 	memcpy(&dt->digs[dt->num], digest, CF_DIGEST_KEY_SZ);
 	dt->num++;
-	*dnum = *dnum + 1;
+	if(dnum)
+		*dnum = *dnum + 1;
 	return 0;
 }
 
@@ -1200,7 +1201,28 @@ tscan_add_aggr_result(char *res, tscan_task_data * task, bool success)
 
 extern int as_aggr__process(as_aggr_call * ap_call, cf_ll * ap_recl, void * udata, as_result * ap_res);
 
+typedef struct tscan_aggr_tr_udata {
+cf_ll *recl;
+tscan_task_data *task;
+} tscan_aggr_tr_udata_t;
 
+void
+tscan_aggr_tree_reduce_fn(as_index *r, void *udata)
+{
+	tscan_aggr_tr_udata_t * d_ptr = (tscan_aggr_tr_udata_t *)(udata);
+	// If this is a valid set, check against the set of the record.
+	if (d_ptr->task->set_id != INVALID_SET_ID) {
+		if (as_index_get_set_id(r) != d_ptr->task->set_id) {
+			cf_detail(AS_SCAN, "Set mismatch %s %s",
+					as_namespace_get_set_name(d_ptr->task->ns, d_ptr->task->set_id),
+					as_namespace_get_set_name(d_ptr->task->ns, as_index_get_set_id(r)));
+			if (d_ptr->task->si) cf_atomic64_decr(&d_ptr->task->si->stats.recs_pending);
+			cf_atomic_int_incr(&(d_ptr->task->pjob->n_obj_set_diff));
+			return;
+		}
+	}
+	tscan_add_digest_list (d_ptr->recl, &(r->key),NULL);
+}
 
 struct as_index_value_array_s;
 void
@@ -1970,7 +1992,53 @@ tscan_partition_thr(void *q_to_wait_on)
 		// This function calls an index-reduce on all the nodes of the tree, its left and right
 		// and for each one of those index entries, call the cb-function : tscan_tree_reduce.
 		if ( u.aggr_call ) {
-			as_index_reduce_partial(rsv.tree, sample_obj_cnt, NULL, tscan_aggr_tree_reduce, (void *)&u);
+
+			cf_ll * recl = cf_malloc(sizeof(cf_ll));
+			cf_ll_init(recl, tscan_ll_recl_destroy_fn, false /*no lock*/);
+			if (!recl) {
+				//	qtr->result_code = AS_SINDEX_ERR_NO_MEMORY;
+				//	qctx->n_bdigs        = 0;
+				//	ret = AS_QUERY_ERR;
+				//	goto batchout;
+				cf_warning(AS_SCAN, "unable to create digest list : out of memory error" );
+				job_early_terminate = true;
+				//job->result = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+			} else {
+
+				tscan_aggr_tr_udata_t tree_reduce_udata = {
+					.recl = recl,
+					.task = &u 
+				};
+				as_index_reduce_sync(rsv.tree, tscan_aggr_tree_reduce_fn, (void *)&tree_reduce_udata);
+				//as_index_reduce_partial(rsv.tree, sample_obj_cnt, NULL, tscan_aggr_tree_reduce, (void *)&u);
+
+				as_result   *res    = as_result_new();
+				int ret                 = as_aggr__process(u.aggr_call, recl, &u, res);
+				if (ret != 0) {
+					char *rs = as_module_err_string(ret);
+					if (res->value != NULL) {
+						as_string * lua_s   = as_string_fromval(res->value);
+						char *      lua_err  = (char *) as_string_tostring(lua_s);
+						if (lua_err != NULL) {
+							int l_rs_len = strlen(rs);
+							rs = cf_realloc(rs,l_rs_len + strlen(lua_err) + 4);
+							sprintf(&rs[l_rs_len]," : %s",lua_err);
+						}
+					}
+					tscan_add_aggr_result(rs, &u, false);
+					cf_free(rs);
+					job_early_terminate = true;
+					//job->result = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+				}
+				as_result_destroy(res);
+				tscan_recl_cleanup(recl);
+
+				if (recl) {       
+					cf_ll_reduce(recl, true /*forward*/, tscan_ll_recl_reduce_fn, NULL);
+					if (recl ) cf_free(recl);
+					recl = NULL;
+				}
+			}
 		} else {
 			as_index_reduce_partial(rsv.tree, sample_obj_cnt, tscan_tree_reduce, NULL, (void *)&u);
 		}
