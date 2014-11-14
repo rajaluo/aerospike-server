@@ -363,7 +363,7 @@ typedef struct as_index_value_array_s{
 
 typedef void (*as_index_bulk_reduce_fn) (struct as_index_value_array_s * i_arr, void *udata);
 extern void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-extern void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, as_index_bulk_reduce_fn bulk_cb, void *udata);
+extern void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
 
 // as_index_reduce_sync() doesn't take a reference, and holds the tree lock.
 typedef void (*as_index_reduce_sync_fn) (as_index *value, void *udata);

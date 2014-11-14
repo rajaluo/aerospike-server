@@ -1224,63 +1224,6 @@ tscan_aggr_tree_reduce_fn(as_index *r, void *udata)
 	tscan_add_digest_list (d_ptr->recl, &(r->key),NULL);
 }
 
-struct as_index_value_array_s;
-void
-tscan_aggr_tree_reduce(struct as_index_value_array_s * i_arr, void *udata)
-{
-	tscan_task_data *u = (tscan_task_data *) udata;
-	cf_ll * recl = cf_malloc(sizeof(cf_ll));
-	cf_ll_init(recl, tscan_ll_recl_destroy_fn, false /*no lock*/);
-	if (!recl) {
-		//	qtr->result_code = AS_SINDEX_ERR_NO_MEMORY;
-		//	qctx->n_bdigs        = 0;
-		//	ret = AS_QUERY_ERR;
-		//	goto batchout;
-		cf_warning(AS_SCAN, "tscan_aggr_tree_reduce out of memory" );
-	}
-
-	int dig_num = 0;
-	for (uint i = 0; i < i_arr->pos; i++) {
-		// If this is a valid set, check against the set of the record.
-		if (u->set_id != INVALID_SET_ID) {
-			if (as_index_get_set_id(i_arr->indexes[i].r) != u->set_id) {
-				cf_detail(AS_SCAN, "Set mismatch %s %s",
-						as_namespace_get_set_name(u->ns, u->set_id),
-						as_namespace_get_set_name(u->ns, as_index_get_set_id(i_arr->indexes[i].r)));
-				if (u->si) cf_atomic64_decr(&u->si->stats.recs_pending);
-				cf_atomic_int_incr(&(u->pjob->n_obj_set_diff));
-				continue;
-			}
-		}
-
-		tscan_add_digest_list ( recl, &(i_arr->indexes[i].r->key), &dig_num );
-	}
-	as_result   *res    = as_result_new();
-	int ret                 = as_aggr__process(((tscan_task_data *)udata)->aggr_call, recl, udata, res);
-	if (ret != 0) {
-		char *rs = as_module_err_string(ret);
-		if (res->value != NULL) {
-			as_string * lua_s   = as_string_fromval(res->value);
-			char *      lua_err  = (char *) as_string_tostring(lua_s);
-			if (lua_err != NULL) {
-				int l_rs_len = strlen(rs);
-				rs = cf_realloc(rs,l_rs_len + strlen(lua_err) + 4);
-				sprintf(&rs[l_rs_len]," : %s",lua_err);
-			}
-		}
-		tscan_add_aggr_result(rs, (tscan_task_data *)(udata), false);
-		cf_free(rs);
-	}
-	as_result_destroy(res);
-	tscan_recl_cleanup(recl);
-
-	if (recl) {       
-		cf_ll_reduce(recl, true /*forward*/, tscan_ll_recl_reduce_fn, NULL);
-		if (recl ) cf_free(recl);
-		recl = NULL;
-	}
-}
-
 
 //
 // Reduce a tree, build a response.
@@ -2010,7 +1953,6 @@ tscan_partition_thr(void *q_to_wait_on)
 					.task = &u 
 				};
 				as_index_reduce_sync(rsv.tree, tscan_aggr_tree_reduce_fn, (void *)&tree_reduce_udata);
-				//as_index_reduce_partial(rsv.tree, sample_obj_cnt, NULL, tscan_aggr_tree_reduce, (void *)&u);
 
 				as_result   *res    = as_result_new();
 				int ret                 = as_aggr__process(u.aggr_call, recl, &u, res);
@@ -2040,7 +1982,7 @@ tscan_partition_thr(void *q_to_wait_on)
 				}
 			}
 		} else {
-			as_index_reduce_partial(rsv.tree, sample_obj_cnt, tscan_tree_reduce, NULL, (void *)&u);
+			as_index_reduce_partial(rsv.tree, sample_obj_cnt, tscan_tree_reduce, (void *)&u);
 		}
 		//     as_partition_release(&rsv);
 		as_partition_release(&rsv);
