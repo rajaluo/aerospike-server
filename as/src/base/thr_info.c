@@ -2084,12 +2084,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		return -1;
 	}
 
-	cf_dyn_buf_append_string(db, "sets-enable-xdr=");
-	if (ns->sets_enable_xdr)
-		cf_dyn_buf_append_string(db, "true");
-	else
-		cf_dyn_buf_append_string(db, "false");
-
 	cf_dyn_buf_append_string(db, ";memory-size=");
 	cf_dyn_buf_append_uint64(db, ns->memory_size);
 
@@ -2136,6 +2130,12 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";enable-xdr=");
 	cf_dyn_buf_append_string(db, ns->enable_xdr ? "true" : "false");
+
+	cf_dyn_buf_append_string(db, "sets-enable-xdr=");
+	cf_dyn_buf_append_string(db, ns->sets_enable_xdr ? "true" : "false");
+
+	cf_dyn_buf_append_string(db, "forward-xdr-writes=");
+	cf_dyn_buf_append_string(db, ns->ns_forward_xdr_writes ? "true" : "false");
 
 	cf_dyn_buf_append_string(db, ";disallow-null-setname=");
 	cf_dyn_buf_append_string(db, ns->disallow_null_setname ? "true" : "false");
@@ -3305,6 +3305,19 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of sets-enable-xdr of ns %s from %s to %s", ns->name, bool_val[ns->sets_enable_xdr], context);
 				ns->sets_enable_xdr = false;
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "forward-xdr-writes", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of sets-enable-xdr of ns %s from %s to %s", ns->name, bool_val[ns->ns_forward_xdr_writes], context);
+				ns->ns_forward_xdr_writes = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of sets-enable-xdr of ns %s from %s to %s", ns->name, bool_val[ns->ns_forward_xdr_writes], context);
+				ns->ns_forward_xdr_writes = false;
 			}
 			else {
 				goto Error;
