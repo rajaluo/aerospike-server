@@ -269,14 +269,13 @@ main(int argc, char **argv)
 	while (-1 != (i = getopt_long(argc, argv, "", cmd_opts, &cmd_optidx))) {
 		switch (i) {
 		case 'h':
-			// fprintf() since we don't want cf_fault's prefix.
-			fprintf(stderr, "%s\n", HELP);
-			return 1;
+			// printf() since we want stdout and don't want cf_fault's prefix.
+			printf("%s\n", HELP);
+			return 0;
 		case 'v':
-			// fprintf() since we don't want cf_fault's prefix.
-			fprintf(stderr, "%s build %s\n", aerospike_build_type,
-					aerospike_build_id);
-			return 1;
+			// printf() since we want stdout and don't want cf_fault's prefix.
+			printf("%s build %s\n", aerospike_build_type, aerospike_build_id);
+			return 0;
 		case 'f':
 			config_file = cf_strdup(optarg);
 			cf_assert(config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
@@ -305,7 +304,7 @@ main(int argc, char **argv)
 #ifdef USE_ASM
 	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
 
-	int initial_tid = syscall(SYS_gettid);
+	long initial_tid = syscall(SYS_gettid);
 #endif
 
 #ifdef MEM_COUNT
@@ -357,10 +356,10 @@ main(int argc, char **argv)
 
 #ifdef USE_ASM
 	// Log the main thread's Linux Task ID (pre- and post-fork) to the console.
-	fprintf(stderr, "Initial main thread tid: %d\n", initial_tid);
+	fprintf(stderr, "Initial main thread tid: %lu\n", initial_tid);
 
 	if (! run_in_foreground && c->run_as_daemon) {
-		fprintf(stderr, "Post-daemonize main thread tid: %d\n",
+		fprintf(stderr, "Post-daemonize main thread tid: %lu\n",
 				syscall(SYS_gettid));
 	}
 #endif

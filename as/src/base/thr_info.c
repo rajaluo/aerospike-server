@@ -534,6 +534,11 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";info_queue=");
 	cf_dyn_buf_append_int(db, as_info_queue_get_size());
 
+	cf_dyn_buf_append_string(db, ";delete_queue=");
+	APPEND_STAT_COUNTER(db, as_nsup_queue_get_size());
+
+	cf_dyn_buf_append_string(db, ";proxy_in_progress=");
+	APPEND_STAT_COUNTER(db, as_proxy_inprogress());
 	cf_dyn_buf_append_string(db, ";proxy_initiate=");
 	APPEND_STAT_COUNTER(db, g_config.proxy_initiate);
 	cf_dyn_buf_append_string(db, ";proxy_action=");
@@ -1953,14 +1958,10 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";batch-priority=");
 	cf_dyn_buf_append_int(db, g_config.batch_priority);
 
+	cf_dyn_buf_append_string(db, ";nsup-delete-sleep=");
+	cf_dyn_buf_append_int(db, g_config.nsup_delete_sleep);
 	cf_dyn_buf_append_string(db, ";nsup-period=");
 	cf_dyn_buf_append_int(db, g_config.nsup_period);
-	cf_dyn_buf_append_string(db, ";nsup-queue-hwm=");
-	cf_dyn_buf_append_int(db, g_config.nsup_queue_hwm);
-	cf_dyn_buf_append_string(db, ";nsup-queue-lwm=");
-	cf_dyn_buf_append_int(db, g_config.nsup_queue_lwm);
-	cf_dyn_buf_append_string(db, ";nsup-queue-escape=");
-	cf_dyn_buf_append_int(db, g_config.nsup_queue_escape);
 	cf_dyn_buf_append_string(db, ";nsup-startup-evict=");
 	cf_dyn_buf_append_string(db, g_config.nsup_startup_evict ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";paxos-retransmit-period=");
@@ -2144,6 +2145,11 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";total-bytes-memory=");
 	cf_dyn_buf_append_uint64(db, ns->memory_size);
 
+	cf_dyn_buf_append_string(db, ";read-consistency-level-override=");
+	cf_dyn_buf_append_string(db, NS_READ_CONSISTENCY_LEVEL_NAME());
+
+	cf_dyn_buf_append_string(db, ";write-commit-level-override=");
+	cf_dyn_buf_append_string(db, NS_WRITE_COMMIT_LEVEL_NAME());
 
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
@@ -2561,29 +2567,17 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of proto-fd-idle-ms from %d to %d ", g_config.proto_fd_idle_ms, val);
 			g_config.proto_fd_idle_ms = val;
 		}
+		else if (0 == as_info_parameter_get(params, "nsup-delete-sleep", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val))
+				goto Error;
+			cf_info(AS_INFO, "Changing value of nsup-delete-sleep from %d to %d ", g_config.nsup_delete_sleep, val);
+			g_config.nsup_delete_sleep = val;
+		}
 		else if (0 == as_info_parameter_get(params, "nsup-period", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
 			cf_info(AS_INFO, "Changing value of nsup-period from %d to %d ", g_config.nsup_period, val);
 			g_config.nsup_period = val;
-		}
-		else if (0 == as_info_parameter_get(params, "nsup-queue-hwm", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of nsup-queue-hwm from %d to %d ", g_config.nsup_queue_hwm, val);
-			g_config.nsup_queue_hwm = val;
-		}
-		else if (0 == as_info_parameter_get(params, "nsup-queue-lwm", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of nsup-queue-lwm from %d to %d ", g_config.nsup_queue_lwm, val);
-			g_config.nsup_queue_lwm = val;
-		}
-		else if (0 == as_info_parameter_get(params, "nsup-queue-escape", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of nsup-queue-escape from %d to %d ", g_config.nsup_queue_escape, val);
-			g_config.nsup_queue_escape = val;
 		}
 		else if (0 == as_info_parameter_get(params, "paxos-retransmit-period", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
@@ -3180,12 +3174,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of memory-size of ns %s from %d to %d ", ns->name, ns->memory_size, val);
 			ns->memory_size = val;
 		}
-		else if (0 == as_info_parameter_get(params, "high-water-pct", context, &context_len)) {
-			cf_info(AS_INFO, "Changing value of high-water-pct disk of ns %s from %1.3f to %1.3f ", ns->name, ns->hwm_disk, atof(context) / (float)100);
-			ns->hwm_disk = atof(context) / (float)100;
-			cf_info(AS_INFO, "Changing value of high-water-pct memory of ns %s from %1.3f to %1.3f ", ns->name, ns->hwm_memory, atof(context) / (float)100);
-			ns->hwm_memory = atof(context) / (float)100;
-		}
 		else if (0 == as_info_parameter_get(params, "high-water-disk-pct", context, &context_len)) {
 			cf_info(AS_INFO, "Changing value of high-water-disk-pct of ns %s from %1.3f to %1.3f ", ns->name, ns->hwm_disk, atof(context) / (float)100);
 			ns->hwm_disk = atof(context) / (float)100;
@@ -3402,6 +3390,46 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 
 			if (ret_val) {
 				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "read-consistency-level-override", context, &context_len)) {
+			char *original_value = NS_READ_CONSISTENCY_LEVEL_NAME();
+			if (strcmp(context, "all") == 0) {
+				ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ALL;
+				ns->read_consistency_level_override = true;
+			}
+			else if (strcmp(context, "off") == 0) {
+				ns->read_consistency_level_override = false;
+			}
+			else if (strcmp(context, "one") == 0) {
+				ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE;
+				ns->read_consistency_level_override = true;
+			}
+			else {
+				goto Error;
+			}
+			if (strcmp(original_value, context)) {
+				cf_info(AS_INFO, "Changing value of read-consistency-level-override of ns %s from %s to %s", ns->name, original_value, context);
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "write-commit-level-override", context, &context_len)) {
+			char *original_value = NS_WRITE_COMMIT_LEVEL_NAME();
+			if (strcmp(context, "all") == 0) {
+				ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL;
+				ns->write_commit_level_override = true;
+			}
+			else if (strcmp(context, "master") == 0) {
+				ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_MASTER;
+				ns->write_commit_level_override = true;
+			}
+			else if (strcmp(context, "off") == 0) {
+				ns->write_commit_level_override = false;
+			}
+			else {
+				goto Error;
+			}
+			if (strcmp(original_value, context)) {
+				cf_info(AS_INFO, "Changing value of write-commit-level-override of ns %s from %s to %s", ns->name, original_value, context);
 			}
 		}
 		else {
@@ -4946,7 +4974,7 @@ info_interfaces_static_fn(void *gcc_is_ass)
 	build_service_list(ifaddr, ifaddr_sz, &temp_service_db);
 
 	char * service_str = cf_dyn_buf_strdup(&temp_service_db);
-	if ( strstr(service_str, g_config.external_address) == NULL) {
+	if (! g_config.is_external_address_virtual && strstr(service_str, g_config.external_address) == NULL) {
 		cf_crash(AS_INFO, "external address:%s is not matching with any of service addresses:%s",
 				g_config.external_address, service_str);
 	}

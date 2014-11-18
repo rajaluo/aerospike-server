@@ -48,12 +48,15 @@
 include make_in/Makefile.vars
 
 .PHONY: all server
-all server:	targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile
+all server:	targetdirs version $(JANSSON)/Makefile $(JEMALLOC)/Makefile $(LUAJIT)/src/luaconf.h
 ifeq ($(USE_ASM),1)
 	$(MAKE) -C $(ASMALLOC) jem SRCDIR=src
 endif
 ifeq ($(USE_JEM),1)
 	$(MAKE) -C $(JEMALLOC)
+endif
+ifeq ($(USE_LUAJIT),1)
+	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so
 endif
 	$(MAKE) -C $(JANSSON)
 	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)"
@@ -101,6 +104,9 @@ cleanmodules:
 	if [ -e "$(JEMALLOC)/Makefile" ]; then \
 		$(MAKE) -C $(JEMALLOC) clean; \
 		$(MAKE) -C $(JEMALLOC) distclean; \
+	fi;
+	if [ -e "$(LUAJIT)/Makefile" ]; then \
+		$(MAKE) -C $(LUAJIT) clean; \
 	fi;
 	$(MAKE) -C $(ASMALLOC) cleanest cleanest.jem
 	$(MAKE) -C $(COMMON) clean
@@ -164,6 +170,9 @@ $(JEMALLOC)/configure:
 
 $(JEMALLOC)/Makefile: $(JEMALLOC)/configure
 	cd $(JEMALLOC) && ./configure
+
+$(LUAJIT)/src/luaconf.h: $(LUAJIT)/src/luaconf.h.orig
+	ln -s $(notdir $<) $@
 
 .PHONY: source
 source:

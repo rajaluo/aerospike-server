@@ -8,11 +8,12 @@ ifeq ($(USE_EE),1)
   include $(EEREPO)/as/make_in/Makefile.vars
 endif
 
-BASE_HEADERS += as.h asm.h cfg.h cluster_config.h datamodel.h feature.h index.h
+BASE_HEADERS += asm.h cfg.h cluster_config.h datamodel.h feature.h index.h
 BASE_HEADERS += ldt.h ldt_aerospike.h ldt_record.h monitor.h packet_compression.h
 BASE_HEADERS += proto.h rec_props.h secondary_index.h security.h security_config.h system_metadata.h
-BASE_HEADERS += thr_info.h thr_proxy.h thr_scan.h thr_tsvc.h thr_write.h
-BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h udf_logger.h
+BASE_HEADERS += thr_batch.h thr_info.h thr_proxy.h thr_rw_internal.h thr_scan.h thr_sindex.h
+BASE_HEADERS += thr_tsvc.h thr_write.h transaction.h transaction_policy.h
+BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h
 BASE_HEADERS += udf_memtracker.h udf_record.h udf_rw.h udf_timer.h
 BASE_HEADERS += write_request.h xdr_serverside.h
 
@@ -21,7 +22,7 @@ BASE_SOURCES += ldt.c ldt_record.c ldt_aerospike.c monitor.c namespace.c packet_
 BASE_SOURCES += particle.c proto.c rec_props.c record.c signal.c secondary_index.c system_metadata.c
 BASE_SOURCES += thr_batch.c thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.c thr_proxy.c
 BASE_SOURCES += thr_query.c thr_rw.c thr_sindex.c thr_tscan.c thr_tsvc.c transaction.c
-BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c udf_logger.c
+BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
 BASE_SOURCES += udf_memtracker.c udf_record.c udf_rw.c udf_timer.c
 ifneq ($(USE_XDR),1)
   BASE_SOURCES += xdr_serverside_stubs.c
@@ -33,7 +34,7 @@ ifneq ($(USE_SEC),1)
   BASE_SOURCES += security_stubs.c
 endif
 
-FABRIC_HEADERS += hb.h fabric.h fb_health.h paxos.h
+FABRIC_HEADERS += hb.h fabric.h fb_health.h migrate.h paxos.h
 FABRIC_SOURCES += hb.c fabric.c fb_health.c migrate.c partition.c paxos.c
 
 STORAGE_HEADERS += storage.h drv_ssd.h
@@ -71,16 +72,25 @@ ifeq ($(DOPROFILE),1)
   LIBRARIES += -pg -fprofile-arcs -lgcov
 endif
 
-ifeq ($(LD_LUA),static)
-  # Find and add the static Lua library.
-  AS_LIBRARIES += $(or \
-	$(wildcard /usr/local/lib/liblua.a), \
-	$(wildcard /usr/lib64/liblua$(LUA_SUFFIX).a), \
-	$(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
-	$(wildcard /usr/lib/liblua.a), \
-	$(error Cannot find "liblua.a"))
+# Add either the LuaJIT or Lua library
+ifeq ($(USE_LUAJIT),1)
+  ifeq ($(LD_LUAJIT),static)
+    AS_LIBRARIES += $(LUAJIT)/src/libluajit.a
+  else
+    LIBRARIES += -L$(LUAJIT)/src -lluajit
+  endif
 else
-  LIBRARIES += -llua$(LUA_SUFFIX)
+  ifeq ($(LD_LUA),static)
+    # Find and add the static Lua library.
+    AS_LIBRARIES += $(or \
+      $(wildcard /usr/local/lib/liblua.a), \
+      $(wildcard /usr/lib64/liblua$(LUA_SUFFIX).a), \
+      $(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
+      $(wildcard /usr/lib/liblua.a), \
+      $(error Cannot find "liblua.a"))
+  else
+    LIBRARIES += -llua$(LUA_SUFFIX)
+  endif
 endif
 
 ifeq ($(LD_JANSSON),static)

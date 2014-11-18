@@ -47,6 +47,7 @@
 
 #include "base/proto.h"
 #include "base/rec_props.h"
+#include "base/transaction_policy.h"
 
 
 /* AS_CLUSTER_SZ, AS_CLUSTER_SZ_MASK[P,N]
@@ -831,6 +832,16 @@ typedef enum {
 #define AS_SET_MAX_COUNT 0x3FF	// ID's 10 bits worth minus 1 (ID 0 means no set)
 #define AS_BINID_HAS_SINDEX_SIZE  MAX_BIN_NAMES / ( sizeof(uint32_t) * CHAR_BIT )
 
+#define  NS_READ_CONSISTENCY_LEVEL_NAME()								\
+	(ns->read_consistency_level_override ?								\
+	 (AS_POLICY_CONSISTENCY_LEVEL_ALL == ns->read_consistency_level ? "all" : "one") \
+	 : "off")
+
+#define NS_WRITE_COMMIT_LEVEL_NAME()									\
+	(ns->write_commit_level_override ?									\
+	 (AS_POLICY_COMMIT_LEVEL_ALL == ns->write_commit_level ? "all" : "master") \
+	 : "off")
+
 /* as_namespace[_id]
  * A namespace container */
 typedef int32_t as_namespace_id; // signed to denote -1 bad namespace id
@@ -871,6 +882,20 @@ struct as_namespace_s {
 	bool 						sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping.
 	bool 						disallow_null_setname;
 	bool                        ldt_enabled;
+
+	/* The server default read consistency level for this namespace. */
+	as_policy_consistency_level read_consistency_level;
+
+	/* Should the optional client-supplied, per-transaction read consistency level
+	   be overriden by the server default on this namespace? */
+	bool read_consistency_level_override;
+
+	/* The server default write commit level for this namespace. */
+	as_policy_commit_level write_commit_level;
+
+	/* Should the optional client-supplied, per-transaction write commit level
+	   be overriden by the server default on this namespace? */
+	bool write_commit_level_override;
 
 	/* Storage engine configuration - and per storage engine variables -
 	** 'private' is managed by the storage engine in question */
@@ -958,7 +983,6 @@ struct as_namespace_s {
 	// Temporary structure to hold si config values until smd-bootup is done.
 	// shash entry for si name comparison btwn cfg and smd data
 	shash *sindex_cfg_var_hash;
-
 
 	// SINDEX
 	int					sindex_cnt;

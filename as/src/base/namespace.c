@@ -124,6 +124,12 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->single_bin = false;
 	ns->stop_writes_pct = 0.9; // stop writes when 90% of either memory or disk is used
 
+	// Set default server policies which are used only when the corresponding override is true:
+	ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE;
+	ns->read_consistency_level_override = false;
+	ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL;
+	ns->write_commit_level_override = false;
+
 	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 	ns->storage_data_in_memory = true;
 	// Note - default true is consistent with AS_STORAGE_ENGINE_MEMORY, but

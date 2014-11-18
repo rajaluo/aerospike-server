@@ -16,3 +16,6 @@
 [submodule "modules/lua-core"]
 	path = modules/lua-core
 	url = git@github.com:citrusleaf/aerospike-lua-core.git
+[submodule "modules/luajit"]
+	path = modules/luajit
+	url = git@github.com:citrusleaf/luajit.git
