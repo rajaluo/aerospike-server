@@ -433,7 +433,6 @@ typedef enum {
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
-	CASE_NAMESPACE_HIGH_WATER_PCT,
 	CASE_NAMESPACE_LDT_ENABLED,
 	CASE_NAMESPACE_LDT_GC_RATE,
 	CASE_NAMESPACE_MAX_TTL,
@@ -445,10 +444,10 @@ typedef enum {
 	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
-
 	// Deprecated:
 	CASE_NAMESPACE_DEMO_READ_MULTIPLIER,
 	CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER,
+	CASE_NAMESPACE_HIGH_WATER_PCT,
 	CASE_NAMESPACE_LOW_WATER_PCT,
 
 	// Namespace conflict-resolution-policy options (value tokens):
@@ -793,7 +792,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
-		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
 		{ "ldt-enabled",					CASE_NAMESPACE_LDT_ENABLED },
 		{ "ldt-gc-rate",                    CASE_NAMESPACE_LDT_GC_RATE },
 		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
@@ -807,6 +805,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "write-commit-level-override",    CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
 		{ "demo-read-multiplier",			CASE_NAMESPACE_DEMO_READ_MULTIPLIER },
 		{ "demo-write-multiplier",			CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER },
+		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
 		{ "low-water-pct",					CASE_NAMESPACE_LOW_WATER_PCT },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -2129,6 +2128,7 @@ as_config_init(const char *config_file)
 				// Intentional fall-through.
 			case CASE_NETWORK_SERVICE_ACCESS_ADDRESS:
 				c->external_address = cfg_strdup(&line);
+				c->is_external_address_virtual = strcmp(line.val_tok_2, "virtual") == 0;
 				break;
 			case CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME:
 				c->network_interface_name = cfg_strdup(&line);
@@ -2359,9 +2359,6 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
 				ns->hwm_memory = (float)cfg_pct_fraction(&line);
 				break;
-			case CASE_NAMESPACE_HIGH_WATER_PCT:
-				ns->hwm_memory = ns->hwm_disk = (float)cfg_pct_fraction(&line);
-				break;
 			case CASE_NAMESPACE_LDT_ENABLED:
 				ns->ldt_enabled = cfg_bool(&line);
 				break;
@@ -2438,6 +2435,7 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER:
 				ns->demo_write_multiplier = cfg_int_no_checks(&line);
 				break;
+			case CASE_NAMESPACE_HIGH_WATER_PCT:
 			case CASE_NAMESPACE_LOW_WATER_PCT:
 				cfg_deprecated_name_tok(&line);
 				break;

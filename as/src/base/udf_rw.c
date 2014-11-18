@@ -42,6 +42,7 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "fault.h"
@@ -1502,7 +1503,7 @@ as_val_frombin(as_bin *bb)
 			int64_t     i = 0;
 			uint32_t    sz = 8;
 			as_particle_tobuf(bb, (uint8_t *) &i, &sz);
-			i = __cpu_to_be64(i);
+			i = cf_swap_from_be64(i);
 			value = (as_val *) as_integer_new(i);
 			break;
 		}

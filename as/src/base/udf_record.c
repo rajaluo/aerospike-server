@@ -33,6 +33,7 @@
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 
 #include "fault.h"
@@ -955,7 +956,90 @@ udf_record_gen(const as_rec * rec)
 	}
 }
 
-bool
+// Local utility.
+static as_val *
+as_val_from_flat_key(uint8_t * flat_key, uint32_t size)
+{
+	uint8_t type = *flat_key;
+	uint8_t * key = flat_key + 1;
+
+	switch ( type ) {
+		case AS_PARTICLE_TYPE_INTEGER:
+			// TODO - verify size is (1 + 8) ???
+			// Flat integer keys are in big-endian order.
+			return (as_val *) as_integer_new(cf_swap_from_be64(*(int64_t *)key));
+		case AS_PARTICLE_TYPE_STRING:
+		{
+			// Key length is size - 1, then +1 for null-termination.
+			char * buf = cf_malloc(size);
+			if (! buf) {
+				return NULL;
+			}
+
+			uint32_t len = size - 1;
+			memcpy(buf, key, len);
+			buf[len] = '\0';
+
+			return (as_val *) as_string_new(buf, true);
+		}
+		case AS_PARTICLE_TYPE_BLOB:
+		{
+			uint32_t blob_size = size - 1;
+			uint8_t *buf = cf_malloc(blob_size);
+			if (! buf) {
+				return NULL;
+			}
+
+			memcpy(buf, key, blob_size);
+
+			return (as_val *) as_bytes_new_wrap(buf, blob_size, true);
+		}
+		default:
+			return NULL;
+	}
+}
+
+static as_val *
+udf_record_key(const as_rec * rec)
+{
+	int ret = udf_record_param_check(rec, UDF_BIN_NONAME, __FILE__, __LINE__);
+	if (ret) {
+		return NULL;
+	}
+
+	udf_record * urecord = (udf_record *) as_rec_source(rec);
+	if (urecord && (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN)) {
+		if (urecord->rd->key) {
+			return as_val_from_flat_key(urecord->rd->key, urecord->rd->key_size);
+		}
+		// TODO - perhaps look for the key in the message.
+		return NULL;
+	}
+	else {
+		cf_warning(AS_UDF, "Error in getting key: no record found");
+		return NULL;
+	}
+}
+
+static const char *
+udf_record_setname(const as_rec * rec)
+{
+	int ret = udf_record_param_check(rec, UDF_BIN_NONAME, __FILE__, __LINE__);
+	if (ret) {
+		return NULL;
+	}
+
+	udf_record * urecord = (udf_record *) as_rec_source(rec);
+	if (urecord && (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN)) {
+		return as_index_get_set_name(urecord->r_ref->r, urecord->rd->ns);
+	}
+	else {
+		cf_warning(AS_UDF, "Error in getting set name: no record found");
+		return NULL;
+	}
+}
+
+static bool
 udf_record_destroy(as_rec *rec)
 {
 	if (!rec) {
@@ -1054,7 +1138,9 @@ const as_rec_hooks udf_record_hooks = {
 	.remove		= udf_record_remove,
 	.ttl		= udf_record_ttl,
 	.gen		= udf_record_gen,
-	.destroy	= NULL, //udf_record_destroy,
+	.key		= udf_record_key,
+	.setname	= udf_record_setname,
+	.destroy	= udf_record_destroy,
 	.digest		= udf_record_digest,
 	.set_flags	= udf_record_set_flags,	// @LDT:: added for control over LDT Bins from Lua
 	.set_type	= udf_record_set_type,	// @LDT:: added for control over Rec Types from Lua

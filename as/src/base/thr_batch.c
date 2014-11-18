@@ -66,6 +66,7 @@ typedef struct {
 	as_namespace* ns;
 	as_file_handle* fd_h;
 	batch_digests* digests;
+	cf_vector* binlist;
 	bool get_data;
 } batch_transaction;
 
@@ -134,7 +135,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 							rd.n_bins = as_bin_inuse_count(&rd);
 						}
 
-						as_msg_make_response_bufbuilder(r, (get_data ? &rd : NULL), bb_r, !get_data, (get_data ? NULL : ns->name), true, false, NULL);
+						as_msg_make_response_bufbuilder(r, (get_data ? &rd : NULL), bb_r, !get_data, (get_data ? NULL : ns->name), true, false, btr->binlist);
 
 						if (get_data) {
 							as_storage_record_close(r, &rd);
@@ -246,10 +247,17 @@ batch_transaction_done(batch_transaction* btr)
 {
 	if (btr->fd_h) {
 		AS_RELEASE_FILE_HANDLE(btr->fd_h);
+		btr->fd_h = 0;
 	}
 
 	if (btr->digests) {
 		cf_free(btr->digests);
+		btr->digests = 0;
+	}
+
+	if (btr->binlist) {
+		cf_vector_destroy(btr->binlist);
+		btr->binlist = 0;
 	}
 }
 
@@ -340,6 +348,28 @@ as_batch_init()
 	}
 }
 
+// Create bin name list from message.
+static cf_vector*
+as_binlist_from_op(as_msg* msg)
+{
+	if (msg->n_ops == 0) {
+		return 0;
+	}
+
+	cf_vector* binlist = cf_vector_create(AS_ID_BIN_SZ, 5, 0);
+	as_msg_op* op = 0;
+	int n = 0;
+	int len;
+	char name[AS_ID_BIN_SZ];
+
+	while ((op = as_msg_op_iterate(msg, op, &n))) {
+		len = (op->name_sz <= AS_ID_BIN_SZ - 1)? op->name_sz : AS_ID_BIN_SZ - 1;
+		memcpy(name, op->name, len);
+		name[len] = 0;
+		cf_vector_append(binlist, name);
+	}
+	return binlist;
+}
 
 // Put batch request on a separate batch queue.
 int
@@ -395,6 +425,7 @@ as_batch(as_transaction* tr)
 		digest_field_data += sizeof(cf_digest);
 	}
 
+	btr.binlist = as_binlist_from_op(msg);
 	btr.fd_h = tr->proto_fd_h;
 	tr->proto_fd_h = 0;
 	btr.fd_h->last_used = cf_getms();
