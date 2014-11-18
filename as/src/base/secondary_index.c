@@ -55,6 +55,10 @@
 #include "aerospike/as_hashmap.h"
 #include "aerospike/as_hashmap_iterator.h"
 #include "aerospike/as_pair.h"
+#include "aerospike/as_buffer.h"
+#include "aerospike/as_serializer.h"
+#include <aerospike/as_msgpack.h>
+
 
 #include "ai_btree.h"
 #include "cf_str.h"
@@ -138,7 +142,7 @@ as_sindex__put_in_set_binid_hash(as_namespace * ns, char * set, int binid, int c
 	if (chosen_id == -1) {
 		return AS_SINDEX_ERR;
 	}
-	cf_ll * si_ll = NULL;
+	cf_ll * simatch_ll = NULL;
 	// Create fixed size key for hash
 	char si_prop[AS_SINDEX_PROP_KEY_SIZE];
 	memset(si_prop, 0, AS_SINDEX_PROP_KEY_SIZE);
@@ -151,7 +155,7 @@ as_sindex__put_in_set_binid_hash(as_namespace * ns, char * set, int binid, int c
 	}
 
 	// Get the linked list from the hash
-	int rv      = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&si_ll);
+	int rv      = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&simatch_ll);
 
 	// If linked list does not exist then make one and put it in the hash
 	if (rv && rv != SHASH_ERR_NOTFOUND) {
@@ -159,21 +163,21 @@ as_sindex__put_in_set_binid_hash(as_namespace * ns, char * set, int binid, int c
 		return AS_SINDEX_ERR;
 	};
 	if (rv == SHASH_ERR_NOTFOUND) {
-		si_ll = cf_malloc(sizeof(cf_ll));
-		cf_ll_init(si_ll, as_sindex__set_binid_hash_destroy, false);
-		if (SHASH_OK != shash_put(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&si_ll)) {
+		simatch_ll = cf_malloc(sizeof(cf_ll));
+		cf_ll_init(simatch_ll, as_sindex__set_binid_hash_destroy, false);
+		if (SHASH_OK != shash_put(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&simatch_ll)) {
 			cf_warning(AS_SINDEX, "shash put failed for key %s", si_prop);
 			return AS_SINDEX_ERR;
 		}
 	}
-	if (!si_ll) {
+	if (!simatch_ll) {
 		return AS_SINDEX_ERR;
 	}
 
 	// Append the chosen id in the linked list
 	sindex_set_binid_hash_ele * ele = cf_malloc(sizeof(sindex_set_binid_hash_ele));
-	ele->simatch                   = chosen_id;
-	cf_ll_append(si_ll, (cf_ll_element*)ele);
+	ele->simatch                    = chosen_id;
+	cf_ll_append(simatch_ll, (cf_ll_element*)ele);
 	return AS_SINDEX_OK;
 }
 
@@ -206,8 +210,8 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 	}
 
 	// Get the sindex list corresponding to key
-	cf_ll * si_ll = NULL;
-	int rv        = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&si_ll);
+	cf_ll * simatch_ll = NULL;
+	int rv             = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&simatch_ll);
 
 	// If the list does not exist, return does not exist
 	if (rv && rv != SHASH_ERR_NOTFOUND) {
@@ -220,19 +224,19 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 
 	// If the list exist 
 	// 		match the path and type of incoming si to the existing sindexes in the list	
-	bool    to_delete                   = false;
-	int     simatch                     = -1;
-	cf_ll_element * ele                 = NULL;
+	bool    to_delete                    = false;
+	int     simatch                      = -1;
+	cf_ll_element * ele                  = NULL;
 	sindex_set_binid_hash_ele * prop_ele = NULL;
-	if (si_ll) {
-		ele = cf_ll_get_head(si_ll);
-		while (ele && ele->next) {
-			prop_ele = ( sindex_set_binid_hash_ele * ) ele;
+	if (simatch_ll) {
+		ele = cf_ll_get_head(simatch_ll);
+		while (ele) {
+			prop_ele       = ( sindex_set_binid_hash_ele * ) ele;
 			as_sindex * si = &(ns->sindex[prop_ele->simatch]);
 			if (strcmp(si->imd->path_str, imd->path_str) == 0 && 
 				si->imd->btype[0] == imd->btype[0] && si->imd->itype == imd->itype) {
-				to_delete = true;
-				simatch  = prop_ele->simatch;
+				to_delete  = true;
+				simatch    = prop_ele->simatch;
 				break;
 			}
 			ele = ele->next;
@@ -245,12 +249,12 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 	// 		If any element matches
 	// 			Delete from the list
 	if (to_delete && ele) {
-		cf_ll_delete(si_ll, ele);
+		cf_ll_delete(simatch_ll, ele);
 	}
 
 	// 			If the list size becomes 0
 	// 				Delete the entry from the hash
-	if (cf_ll_size(si_ll) == 0) {
+	if (cf_ll_size(simatch_ll) == 0) {
 		rv = shash_delete(ns->sindex_set_binid_hash, si_prop);
 		if (rv) {
 			cf_debug(AS_SINDEX, "shash_delete fails with error %d", rv);
@@ -292,8 +296,8 @@ as_sindex__simatch_by_set_binid(as_namespace *ns, char * set, int binid, as_sind
 	}
 
 	// get the list corresponding to the list from the hash
-	cf_ll * si_ll = NULL;
-	int rv        = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&si_ll);
+	cf_ll * simatch_ll = NULL;
+	int rv             = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&simatch_ll);
 
 	// if list does not exist return -1
 	if (rv && rv != SHASH_ERR_NOTFOUND) {
@@ -306,12 +310,12 @@ as_sindex__simatch_by_set_binid(as_namespace *ns, char * set, int binid, as_sind
 
 	// If list exist
 	// 		Iterate through all the elements in the list and match the path and type
-	int     simatch   = -1;
+	int     simatch                      = -1;
 	sindex_set_binid_hash_ele * prop_ele = NULL;
-	cf_ll_element * ele = NULL;
-	if (si_ll) {
-		ele = cf_ll_get_head(si_ll);
-		while (ele && ele->next) {
+	cf_ll_element * ele                  = NULL;
+	if (simatch_ll) {
+		ele = cf_ll_get_head(simatch_ll);
+		while (ele) {
 			prop_ele = ( sindex_set_binid_hash_ele * ) ele;
 			as_sindex * si = &(ns->sindex[prop_ele->simatch]);
 			if (strcmp(si->imd->path_str, path) == 0 && 
@@ -331,6 +335,38 @@ as_sindex__simatch_by_set_binid(as_namespace *ns, char * set, int binid, as_sind
 	// 	If none of the si matches
 	// 		return -1
 	return simatch;
+}
+
+cf_ll *
+as_sindex__simatch_list_by_set_binid(as_namespace * ns, const char *set, int binid)
+{
+	// Make the fixed key (set_binid)
+	// Look for the key in set_binid_hash
+	// If found return the value (list of simatches)
+	// Else return NULL
+
+	// Make the fixed key (set_binid)
+	char si_prop[AS_SINDEX_PROP_KEY_SIZE];
+	memset(si_prop, 0, AS_SINDEX_PROP_KEY_SIZE);
+	if (!set) {
+		sprintf(si_prop, "_%d", binid);
+	}
+	else {
+		sprintf(si_prop, "%s_%d", set, binid);
+	}
+
+	// Look for the key in set_binid_hash
+	cf_ll * simatch_ll = NULL;
+	int rv             = shash_get(ns->sindex_set_binid_hash, (void *)si_prop, (void *)&simatch_ll);
+	
+	// If not found return NULL
+	if (rv || !simatch_ll) {
+		cf_debug(AS_SINDEX, "shash get failed with error %d", rv);
+		return NULL;
+	};
+
+	// Else return simatch_ll
+	return simatch_ll;
 }
 
 int
@@ -839,14 +875,29 @@ as_sindex__skey_from_sbins(as_sindex_metadata *imd, int numbins, as_sindex_bin *
 {
 	int ret = AS_SINDEX_OK;
 	if (imd->num_bins == 1) { // if not compound bins will have bin value
-		for (int i = 0; i < numbins; i++) {
-			as_sindex__skey_from_sbin(skey, i, &sbin[i]);
+		int i;
+		// loop is O(N). hash-table is O(1) but probably overkill?
+		for (i = 0; i < numbins; i++) {
+			if ((sbin[i].id == imd->binid[0]) &&
+					(sbin[i].type ==
+					 as_sindex_pktype_from_sktype(imd->btype[0]))) break;
 		}
-		skey->num_binval = imd->num_bins;
+		if (i < numbins) {
+			as_sindex__skey_from_sbin(skey, 0, &sbin[i]);
+		} else {
+			ret = AS_SINDEX_ERR_NOTFOUND;
+			goto Cleanup;
+		}
 	} else {
 		// Multi col-index is not supported
 		ret = AS_SINDEX_ERR_NOTFOUND;
 	}
+	// Set it in end .. when everything is set
+	skey->num_binval = imd->num_bins;
+	return ret;
+
+Cleanup:
+	as_sindex__skey_release(skey);
 	return ret;
 }
 
@@ -2526,42 +2577,41 @@ as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **sran
 	return AS_SINDEX_OK;
 }
 
-// NOt being used
-/*int
-as_sindex_sbin_from_op(as_msg_op *op, as_sindex_bin *sbin, int binid)
+as_sindex_status
+as_sindex_add_sbin_value_in_heap(as_sindex_bin_new * sbin, void * data, uint8_t data_sz)
 {
-	cf_debug(AS_SINDEX, "as_sindex_sbin_from_op");
-	sbin->id    = binid;
-	sbin->type  = op->particle_type;
-
-	if (op->particle_type == AS_PARTICLE_TYPE_STRING) {
-		char * binval = (char *)as_msg_op_get_value_p(op);
-		uint32_t valsz = as_msg_op_get_value_sz(op);
-		if ( valsz < 0 || valsz > AS_SINDEX_MAX_STRING_KSIZE) {
-			cf_warning( AS_SINDEX, " sindex key size out of bounds %d ", valsz);
-			return AS_SINDEX_ERR_PARAM;
-		}
-		cf_digest_compute(binval, valsz, &sbin->digest);
-	} else if (op->particle_type == AS_PARTICLE_TYPE_INTEGER) {
-		sbin->u.i64 = __cpu_to_be64(
-						*(uint64_t *)as_msg_op_get_value_p(op));
-	} else {
-		cf_warning(AS_SINDEX, "Invalid particle type in op");
-		return AS_SINDEX_ERR_PARAM;
-	}
-
+	// If to_free = false, this means this is the first 
+	// time we are storing value for this sbin to heap
+	// Check if there is need to copy the existing data from stack_buf
+	// If to_free == false
+	// 		init_store(num_values)
+	// 		If num_values != 0
+	//			Copy the existing data from stack to heap
+	//			reduce the used stack_buf size
+	// 		to_free = true;
+	// 	Else
+	// 		If (num_values == heap_capacity) 
+	// 			extend the allocation and capacity
+	// 		Copy the value to the appropriate position.
 	return AS_SINDEX_OK;
 }
-*/
+
 as_sindex_status
-as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
+as_sindex_add_integer_to_sbin(as_sindex_bin_new * sbin, uint64_t val, as_sindex_op op, sbin_value_pool stack_buf)
 {
+	// If this is the first value coming to the sbin
+	// 		Set the op.
+	// 		assign the value to the local variable of struct.
+	// Else
+	// 		Check if the op is same as that of set one.
+	// 		If to_free is true or stack_buf is full
+	// 			add value to the heap
+	// 		else 
+	// 			add the value to end of stack buf
 	if (sbin->num_values == 0 ) {
-		sbin->u.i64 = val;
+		sbin->value.int_val = val;
 	}
 	else if (sbin->num_values > 0) {
-		// Append to the list 
-	
 	}
 	else {
 		cf_warning(AS_SINDEX, "numvalues is coming as negative. Possible memory corruption in sbin.");
@@ -2571,10 +2621,20 @@ as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
 }
 
 as_sindex_status
-as_sindex_add_string_to_sbin(as_sindex_bin * sbin, char * val)
+as_sindex_add_string_to_sbin(as_sindex_bin_new * sbin, char * val, as_sindex_op op)
 {
+	// If this is the first value coming to the sbin
+	// 		Set the op.
+	// 		assign the value to the local variable of struct.
+	// Else
+	// 		Check if the op is same as that of set one.
+	// 		If to_free is true or stack_buf is full
+	// 			add value to the heap
+	// 			to_free = true
+	// 		else 
+	// 			add the value to end of stack buf
 	if (sbin->num_values == 0 ) {
-		cf_digest_compute(val, strlen(val) + 1, &sbin->digest);
+		cf_digest_compute(val, strlen(val) + 1, &sbin->value.str_val);
 	}
 	else if (sbin->num_values > 0) {
 		// Append to the list
@@ -2586,6 +2646,363 @@ as_sindex_add_string_to_sbin(as_sindex_bin * sbin, char * val)
 	return AS_SINDEX_OK;
 }
 
+as_sindex_status
+as_sindex_add_digest_to_sbin(as_sindex_bin_new * sbin, cf_digest val, as_sindex_op op)
+{
+	// If this is the first value coming to the sbin
+	// 		Set the op.
+	// 		assign the value to the local variable of struct.
+	// Else
+	// 		Check if the op is same as that of set one.
+	// 		If to_free is true or stack_buf is full
+	// 			add value to the heap
+	// 			to_free = true
+	// 		else 
+	// 			add the value to end of stack buf
+	
+	return AS_SINDEX_OK;
+}
+
+as_sindex_status
+as_sindex_add_asval_to_default_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin)
+{
+	// If as_val type == AS_STRING and type == AS_PARTICLE_TYPE_STRING
+	// Get the string from val and add string to sbin
+	// return AS_SINDEX_OK
+	// else if as_val type == AS_INTEGER and type == AS_PARTICLE_TYPE_INTEGER
+	// Get the integer from val and add integer to sbin
+	// return AS_SINDEX_OK
+	// else return AS_SINDEX_ERR;
+	return AS_SINDEX_OK;
+}
+
+as_sindex_status
+as_sindex_add_asval_to_list_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin)
+{
+	// If val type is not AS_LIST 
+	// 		return AS_SINDEX_ERR
+	// Else iterate through all values of list 
+	// 		If type == AS_PARTICLE_TYPE_STRING
+	// 			add all string type values to the sbin
+	// 		If type == AS_PARTICLE_TYPE_INTEGER
+	// 			add all integer type values to the sbin
+	//
+	// If nothing is added return AS_SINDEX_NOTFOUND
+	// Else return AS_SINDEX_OK
+	return AS_SINDEX_OK;
+}
+
+as_sindex_status	
+as_sindex_add_asval_to_map_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin)
+{
+	// If val type is not AS_MAP
+	// 		return AS_SINDEX_ERR
+	// Else iterate through all keys of map
+	// 		If type == AS_PARTICLE_TYPE_STRING
+	// 			add all string type keys to the sbin
+	// 		If type == AS_PARTICLE_TYPE_INTEGER
+	// 			add all integer type keys to the sbin
+	//
+	// If nothing is added return AS_SINDEX_NOTFOUND
+	// Else return AS_SINDEX_OK
+	return AS_SINDEX_OK;
+}
+
+as_sindex_status
+as_sindex_add_asval_to_invmap_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin)
+{
+	// If val type is not AS_MAP
+	// 		return AS_SINDEX_ERR
+	// Else iterate through all values of all keys of the map
+	// 		If type == AS_PARTICLE_TYPE_STRING
+	// 			add all string type values to the sbin
+	// 		If type == AS_PARTICLE_TYPE_INTEGER
+	// 			add all integer type values to the sbin
+	//
+	// If nothing is added return AS_SINDEX_NOTFOUND
+	// Else return AS_SINDEX_OK
+	return AS_SINDEX_OK;
+}
+
+typedef as_sindex_status (*as_sindex_add_asval_to_itype_sindex_fn)
+						(as_val *val, as_particle_type type, as_sindex_bin_new * sbin);
+static const as_sindex_add_asval_to_itype_sindex_fn 
+			 as_sindex_add_asval_to_itype_sindex[AS_SINDEX_ITYPES] = {
+	as_sindex_add_asval_to_default_sindex,
+	as_sindex_add_asval_to_list_sindex,
+	as_sindex_add_asval_to_map_sindex,
+	as_sindex_add_asval_to_invmap_sindex
+};
+
+int
+as_sindex_add_diff_asval_to_default_sindex(as_val * old_val, as_val *new_val, 
+								as_particle_type type, as_sindex_bin_new * sbin)
+{
+	// If old_val and new_val null return 0
+	// If type == AS_PARTICLE_TYPE_STRING
+	// 		If new_val exist and new_val type == AS_STRING
+	//			Get the value from new_val
+	//		If old_val exist and old_val type == AS_STRING
+	//			Get the value from old_val
+	// 		Compare the two values. and add to respective sbins
+	// If type == AS_PARTICLE_TYPE_INTEGER
+	// 		If new_val exist and new_val type == AS_INTEGER
+	//			Get the value from new_val
+	//		If old_val exist and old_val type == AS_INTEGER
+	//			Get the value from old_val
+	// 		Compare the two values. and add to respective sbins
+	// return the number of sbins found.
+	return 0;
+}
+
+int
+as_sindex_add_diff_asval_to_list_sindex(as_val * old_val, as_val *new_val, 
+								as_particle_type type, as_sindex_bin_new * sbin)
+{
+	// TODO
+	// If old_val and new_val are null
+	// 		return 0
+	// If old_val and new_val types are not LIST
+	// 		return 0
+	// If old_val is null 
+	// Else if new_val is null
+	// Else 
+	// 		If type == AS_PARTICLE_TYPE_STRING
+	// 			Add all the string type values from old_val to old_hash
+	// 			Add all the string type values from new_val to new_hash
+	//
+	//
+	// If nothing is added return AS_SINDEX_NOTFOUND
+	// Else return AS_SINDEX_OK
+	return 0;
+}
+
+int
+as_sindex_add_diff_asval_to_map_sindex(as_val * old_val, as_val * new_val, 
+								as_particle_type type, as_sindex_bin_new * sbin)
+{
+	// TODO
+	// If old_val type is not AS_MAP
+	// 		return 0
+	// Else iterate through all keys of map old_val
+	// 		If type == AS_PARTICLE_TYPE_STRIN
+	// 			add all string type keys to the sbin
+	// 		If type == AS_PARTICLE_TYPE_INTEGER
+	// 			add all integer type keys to the sbin
+	//
+	// If nothing is added return AS_SINDEX_NOTFOUND
+	// Else return AS_SINDEX_OK
+	return 0;
+}
+
+int
+as_sindex_add_diff_asval_to_invmap_sindex(as_val * old_val, as_val * new_val, 
+								as_particle_type type, as_sindex_bin_new * sbin)
+{
+	// TODO
+	// If val type is not AS_MAP
+	// 		return AS_SINDEX_ERR
+	// Else iterate through all values of all keys of the map
+	// 		If type == AS_PARTICLE_TYPE_STRING
+	// 			add all string type values to the sbin
+	// 		If type == AS_PARTICLE_TYPE_INTEGER
+	// 			add all integer type values to the sbin
+	//
+	// If nothing is added return AS_SINDEX_NOTFOUND
+	// Else return AS_SINDEX_OK
+	return 0;
+}
+
+typedef int (*as_sindex_add_diff_asval_to_itype_sindex_fn)
+			(as_val * old_val, as_val * new_val, as_particle_type type, as_sindex_bin_new * sbin);
+			static const as_sindex_add_diff_asval_to_itype_sindex_fn 
+			as_sindex_add_diff_asval_to_itype_sindex[AS_SINDEX_ITYPES] = {
+	as_sindex_add_diff_asval_to_default_sindex,
+	as_sindex_add_diff_asval_to_list_sindex,
+	as_sindex_add_diff_asval_to_map_sindex,
+	as_sindex_add_diff_asval_to_invmap_sindex
+};
+
+as_val * as_val_frombuf(byte *buf, uint32_t sz)
+{
+	as_val * v = NULL;
+	as_buffer     asbuf;
+	as_buffer_init(&asbuf);
+	as_serializer s;
+	as_msgpack_init(&s);
+
+	asbuf.data = buf;
+	asbuf.capacity = sz;
+	asbuf.size = sz;
+
+	as_serializer_deserialize(&s, &asbuf, &v);
+	as_serializer_destroy(&s);
+	return v;
+}
+
+
+// Returns the number of sindex found
+int
+as_sindex_sbins_from_bin_new(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin_new * start_sbin, 
+							sbin_value_pool stack_buf, as_sindex_op op)
+{
+	// Check the sindex bit array.
+	// If there is not sindex present on this bin return 0
+	// Get the simatch_ll from set_binid_hash
+	// If simatch_ll is NULL return 0
+	// Iterate through simatch_ll
+	// 		If path_length == 0
+	// 			If itype == AS_SINDEX_ITYPE_DEFAULT and bin_type == STRING OR INTEGER
+	// 				Add the value to the sbin.
+	//			If itype == AS_SINDEX_ITYPE_MAP or AS_SINDEX_ITYPE_INVMAP and type = MAP
+	//	 			Deserialize the bin if have not deserialized it yet.
+	//				Extract as_val from path within the bin
+	//				Add them to the sbin.
+	// 			If itype == AS_SINDEX_ITYPE_LIST and type = LIST
+	//	 			Deserialize the bin if have not deserialized it yet.
+	//				Extract as_val from path within the bin.
+	//				Add the values to the sbin.
+	// 		Else if path_length > 0 and type == MAP or LIST 
+	// 			Deserialize the bin if have not deserialized it yet.
+	//			Extract as_val from path within the bin.
+	//			Add the values to the sbin.
+	// Return the number of sbins found.
+
+	int sindex_found = 0;
+	if (!b) {
+		cf_warning(AS_SINDEX, "Null Bin Passed, No sbin created");
+		return sindex_found;
+	}
+	if (!ns) {
+		cf_warning(AS_SINDEX, "NULL Namespace Passed");
+		return sindex_found;
+	}
+	if (!as_bin_inuse(b)) {
+		return sindex_found;
+	}
+
+	// Check the sindex bit array.
+	// If there is not sindex present on this bin return 0
+	if (!as_sindex_binid_has_sindex(ns, b->id) ) {
+		return sindex_found;
+	}
+
+	// Get the simatch_ll from set_binid_hash
+	cf_ll * simatch_ll = NULL;
+	simatch_ll         = as_sindex__simatch_list_by_set_binid(ns, set, b->id);
+
+	// If simatch_ll is NULL return 0
+	if (simatch_ll) {
+		return sindex_found;
+	}
+
+	// Iterate through simatch_ll
+	cf_ll_element             * ele    = cf_ll_get_head(simatch_ll);
+	sindex_set_binid_hash_ele * si_ele = NULL;
+	int                        simatch = -1;
+	as_sindex                 * si     = NULL;
+	as_sindex_metadata        * imd    = NULL;
+	as_particle_type        bin_type   = as_bin_get_particle_type(b);
+	bool                  deserialized = false;
+	as_sindex_bin_new           * sbin = start_sbin ;
+	uint32_t  valsz  = 0;
+	as_val * cdt_val = NULL;
+	while (ele) {
+		si_ele  = (sindex_set_binid_hash_ele *) ele;
+		simatch = si_ele->simatch;
+		si      = &ns->sindex[simatch];
+		imd     = si->imd;
+		sbin    = start_sbin + sindex_found;
+	// 		If path_length == 0
+		if (imd->path_length == 0) {
+	// 			If itype == AS_SINDEX_ITYPE_DEFAULT and bin_type == STRING OR INTEGER
+	// 				Add the value to the sbin.
+			if (imd->itype == AS_SINDEX_ITYPE_DEFAULT) {
+				if (bin_type == AS_PARTICLE_TYPE_INTEGER) {
+					as_particle_tobuf(b, (byte *)&sbin->value.int_val, &valsz);
+					uint64_t int_val    = __cpu_to_be64(sbin->value.int_val);
+					if (as_sindex_add_integer_to_sbin(sbin, int_val, op, stack_buf) == AS_SINDEX_OK) {
+						sindex_found++;
+					}
+				}	
+				else if (bin_type == AS_PARTICLE_TYPE_STRING) {
+					byte* bin_val;
+					as_particle_tobuf(b, 0, &valsz);
+					if ( valsz < 0 || valsz > AS_SINDEX_MAX_STRING_KSIZE) {
+						cf_warning( AS_SINDEX, "sindex key size out of bounds %d ", valsz);
+					}
+					else {
+						as_particle_p_get( b, &bin_val, &valsz);
+						if (as_sindex_add_string_to_sbin(sbin, (char *)bin_val, op) == AS_SINDEX_OK) {
+							sindex_found++;
+						}
+					}
+				}
+			}
+	//			If itype == AS_SINDEX_ITYPE_MAP or AS_SINDEX_ITYPE_INVMAP and type = MAP
+	//	 			Deserialize the bin if have not deserialized it yet.
+	//				Extract as_val from path within the bin
+	//				Add them to the sbin.
+			else if (imd->itype == AS_SINDEX_ITYPE_MAP || AS_SINDEX_ITYPE_INVMAP) {
+				if (bin_type == AS_PARTICLE_TYPE_MAP) {
+					if (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST) {
+						if (! deserialized) {
+							cdt_val   = as_val_frombin(b);
+						}
+						as_val * res_val   = as_sindex_extract_val_from_path(imd, cdt_val);
+						if (!res_val) {
+							continue;
+						}
+						if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin) == AS_SINDEX_OK) {
+							sindex_found++;
+						}
+					}
+				}
+	// 			If itype == AS_SINDEX_ITYPE_LIST and type = LIST
+	//	 			Deserialize the bin if have not deserialized it yet.
+	//				Extract as_val from path within the bin.
+	//				Add the values to the sbin.
+				else if (imd->itype == AS_SINDEX_ITYPE_LIST) {
+					if (bin_type == AS_PARTICLE_TYPE_LIST) {
+						if (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST) {
+							if (! deserialized) {
+								cdt_val   = as_val_frombin(b);
+							}
+							as_val * res_val   = as_sindex_extract_val_from_path(imd, cdt_val);
+							if (!res_val) {
+								continue;
+							}
+							if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin) == AS_SINDEX_OK) {
+								sindex_found++;
+							}
+						}
+					}
+				}
+			}
+		}
+	// 		Else if path_length > 0 and type == MAP or LIST 
+	// 			Deserialize the bin if have not deserialized it yet.
+	//			Extract as_val from path within the bin.
+	//			Add the values to the sbin.
+		else if (imd->path_length > 0) {
+			if (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST) {
+				if (! deserialized) {
+					cdt_val   = as_val_frombin(b);
+				}
+				as_val * res_val   = as_sindex_extract_val_from_path(imd, cdt_val);
+				if (!res_val) {
+					continue;
+				}
+				if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin) == AS_SINDEX_OK) {
+					sindex_found++;
+				}
+			}
+		}
+		ele     = ele->next;
+	}
+	// Return the number of sbin found.
+	return sindex_found;
+}
 
 /*
  * Info received from bin should be actually cleaned up using free later
@@ -2635,7 +3052,6 @@ as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex
 		}
 
 		sbin->id    = b->id;
-		sbin->num_values = 0;
 		uint32_t valsz;
 /*		as_particle_tobuf(b, 0, &valsz);
 		if ( valsz < 0 || valsz > AS_SINDEX_MAX_STRING_KSIZE) {
@@ -2674,92 +3090,6 @@ as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex
 				sindex_found++;
 				goto END;
 			}
-			case AS_PARTICLE_TYPE_LIST: {
-				// Open the list
-				// if type of element is string 
-				// 		add string value to the sbin
-				// else if type of the element is integer
-				// 		add integer value to the sbin
-				as_val * val_list   = as_val_frombin(b);
-				as_arraylist* list  = (as_arraylist*) as_list_fromval( val_list );
-				as_arraylist_iterator it;
-				as_arraylist_iterator_init( &it, list);
-				while( as_arraylist_iterator_has_next( &it)) {
-					as_val* list_element   = (as_val*) as_arraylist_iterator_next( &it);
-					//add_base types to the sbin. This should be a function.
-					switch(list_element->type) {
-						case AS_INTEGER: {
-							if (!long_type_sindex) {
-								break;
-							}
-							sbin->type   = AS_PARTICLE_TYPE_INTEGER;
-							as_integer * int_val = as_integer_fromval( list_element );
-							uint64_t val = as_integer_get( int_val);
-							// add this value to sbin
-							if (as_sindex_add_integer_to_sbin(sbin, val) == AS_SINDEX_OK) {
-								sindex_found++;
-							}
-							break;
-						}
-						case AS_STRING: {
-							if (!string_type_sindex) {
-								break;
-							}
-							sbin->type = AS_PARTICLE_TYPE_STRING;	
-							as_string * str_val = as_string_fromval( list_element );
-							char * val = as_string_get( str_val);
-							// add this value to sbin
-							if (as_sindex_add_string_to_sbin(sbin, val) == AS_SINDEX_OK) {
-								sindex_found++;
-							}
-							break;
-						}
-						default:
-							break;
-					}
-				}
-				goto END;
-			}
-			case AS_PARTICLE_TYPE_MAP: {
-				as_val * val_map     = as_val_frombin(b);
-				as_hashmap* map      = (as_hashmap*) as_map_fromval(val_map);
-				as_hashmap_iterator it;
-				as_hashmap_iterator_init( &it, map);
-				while( as_hashmap_iterator_has_next( &it )) {
-					as_pair* pair    = (as_pair*) as_hashmap_iterator_next( &it);
-					as_val * key     = as_pair_1(pair);
-					//	as_val * val     = as_pair_2(pair);
-					switch(key->type) {
-						case AS_INTEGER: {
-							if (!long_type_sindex) {
-								break;
-							}
-							as_integer * int_val = as_integer_fromval( key );
-							uint64_t val = as_integer_get( int_val);
-							 // add this value to sbin
-							if (as_sindex_add_integer_to_sbin(sbin, val) == AS_SINDEX_OK ) {
-								sindex_found++;
-							}
-							break;
-						}
-						case AS_STRING: {
-							if (!string_type_sindex) {
-								break;
-							}
-							as_string * str_val = as_string_fromval( key );
-							char * val = as_string_get( str_val);
-							// add this value to sbin
-							if (as_sindex_add_string_to_sbin(sbin, val) == AS_SINDEX_OK) {
-								sindex_found++;
-							}
-							break;
-						}
-						default :
-							break;
-					}
-				}
-				goto END;
-			}
 			// No index stuff for the non integer non string bins
 			default: {
 				goto END;
@@ -2770,6 +3100,224 @@ as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex
 	}
 
 	END:
+	return sindex_found;
+}
+
+int
+as_sindex_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, as_sindex_bin_new * sbin, 
+				sbin_value_pool stack_buf, byte * buf, uint32_t buf_sz, as_sindex_op op)
+{
+	return 0;
+}
+
+int
+as_sindex_diff_sbins_from_bin(as_bin * existing_bin, as_bin * incoming_bin, sbin_value_pool stack_buf)
+{
+	// If id, set and type of bins are not same, then get the sbins from both bins and send them back.
+	// Get the simatch_ll from set_binid_hash
+	// If simatch_ll is NULL return 0
+	// Iterate through simatch_ll
+	// 		If path_length == 0 and itype == AS_SINDEX_ITYPE_DEFAULT and existing bin_type == imd->btype[0] == incoming_bin type
+	// 			Compare the basic value of both bins
+	//			If it changes add to a sbin.
+	// 		If path_length != 0 and bintype == AS_PARTICLE_TYPE_MAP or AS_PARTICLE_TYPE_LIST
+	// 			Deserialize the existing_bin and incoming_bin if have not seserialized it yet.
+	//			Extract as_val existing_v and incoming_v from path within the bin
+	//			If (existing_v && incoming_v ) then 
+	//				Compare the values in both vals and add them to the sbin.
+	//			else if (existing_v)
+	//				add to the sbin
+	//			else if (incoming_v)
+	//				add to the sbin
+	// Return the number of sbins found.
+	return 0;
+}
+
+int
+as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, byte * buf, uint32_t buf_sz,
+		as_particle_type type, as_sindex_bin_new * sbin, sbin_value_pool stack_buf)
+{
+	// Check if this bin has alteast one sindex over it.
+	// If buf is null return the sbins from the bin.
+	// If type of bins are not same, then get the sbins from both bins and msgop and send them back.
+	// Get the simatch_ll from set_binid_hash
+	// If simatch_ll is NULL return 0
+	// Iterate through simatch_ll
+	// 		If path_length == 0
+	// 			If itype == AS_SINDEX_ITYPE_DEFAULT and bin_type == STRING OR INTEGER
+	// 				Compare the basic value of both bin and msgop
+	//				If it changes add to a sbin.
+	//			If itype == AS_SINDEX_ITYPE_MAP or AS_SINDEX_ITYPE_INVMAP and type = MAP
+	//	 			Deserialize the existing_bin and incoming_bin if have not deserialized it yet.
+	//				Extract as_val from path within the bin and buf
+	//				Compare the values in both vals and add them to the sbin.
+	// 			If itype == AS_SINDEX_ITYPE_LIST and type = LIST
+	//	 			Deserialize the existing_bin and incoming_bin if have not deserialized it yet.
+	//				Extract as_val from path within the bin and buf
+	//				Compare the values in both vals and add them to the sbin.
+	// 		Else if path_length > 0 and type == MAP or LIST 
+	// 			Deserialize the existing_bin and incoming_bin if have not deserialized it yet.
+	//			Extract as_val from path within the bin and buf
+	//			Compare the values in both vals and add them to the sbin.
+	// Return the number of sbins found.
+
+	int sindex_found = 0;
+
+	// Do preliminary checks
+	if (!b) {
+		cf_warning(AS_SINDEX, "Null Bin Passed, No sbin created");
+		return sindex_found;
+	}
+	if (!ns) {
+		cf_warning(AS_SINDEX, "NULL Namespace Passed");
+		return sindex_found;
+	}
+	if (!as_bin_inuse(b)) {
+		return sindex_found;
+	}
+
+	// Check if this bin has alteast one sindex over it.
+	if (!as_sindex_binid_has_sindex(ns, b->id) ) {
+		 return sindex_found;
+	}
+
+	// If buf is null return the sbins from the bin.
+	if (!buf) {
+		sindex_found += as_sindex_sbins_from_bin_new(ns, set, b, sbin + sindex_found, stack_buf, AS_SINDEX_OP_DELETE);
+		return sindex_found;	
+	}
+
+	// If type of bins are not same, then both cannot have values in the same index.
+	// Get the sbins from both bins and buf and send them back.
+	if (type != as_bin_get_particle_type(b)) {
+		sindex_found += as_sindex_sbins_from_bin_new(ns, set, b, sbin + sindex_found, stack_buf, AS_SINDEX_OP_DELETE);
+		sindex_found += as_sindex_sbins_from_buf(ns, set, b, sbin + sindex_found, stack_buf, buf, buf_sz, AS_SINDEX_OP_INSERT);
+		return sindex_found;
+	}
+
+	// Get the simatch_ll from set_binid_hash
+	cf_ll * simatch_ll = NULL;
+	simatch_ll         = as_sindex__simatch_list_by_set_binid(ns, set, b->id);
+
+	// If simatch_ll is NULL return 0
+	if (simatch_ll) {
+		return sindex_found;
+	}
+
+	// Iterate through simatch_ll
+	cf_ll_element             * ele    = cf_ll_get_head(simatch_ll);
+	sindex_set_binid_hash_ele * si_ele = NULL;
+	int                        simatch = -1;
+	as_sindex                 * si     = NULL;
+	as_sindex_metadata        * imd    = NULL;
+	as_particle_type        bin_type   = as_bin_get_particle_type(b);
+	uint32_t                  valsz   = 0;
+	as_val * buf_val                   = NULL;
+	as_val * bin_val                   = NULL;
+	bool                  deserialized = false;
+	
+	while (ele) {
+		si_ele  = (sindex_set_binid_hash_ele *) ele;
+		simatch = si_ele->simatch;
+		si      = &ns->sindex[simatch];
+		imd     = si->imd;
+	// 		If path_length == 0
+		if (imd->path_length == 0 ) {
+	// 			If itype == AS_SINDEX_ITYPE_DEFAULT and bin_type == STRING OR INTEGER
+	// 				Compare the basic value of both bin and msgop
+	//				If it changes add to a sbin.
+			if (imd->itype == AS_SINDEX_ITYPE_DEFAULT ) {
+				if (type == AS_PARTICLE_TYPE_INTEGER) {
+					uint64_t buf_int = *(uint64_t *)buf;
+					uint64_t bin_int = 0;
+					as_particle_tobuf(b, (byte *)&bin_int, &valsz);
+					bin_int    = __cpu_to_be64(bin_int);
+					if (buf_int != bin_int) {
+						if (as_sindex_add_integer_to_sbin(sbin + sindex_found, 
+									bin_int, AS_SINDEX_OP_DELETE, stack_buf) == AS_SINDEX_OK) {
+							sindex_found++;
+						}
+						if (as_sindex_add_integer_to_sbin(sbin + sindex_found, 
+									buf_int, AS_SINDEX_OP_INSERT, stack_buf) == AS_SINDEX_OK) {
+							sindex_found++;
+						}
+					}
+				}
+				else if (type == AS_PARTICLE_TYPE_STRING) {
+					byte* bin_str;
+					cf_digest bin_dig, buf_dig;
+					as_particle_tobuf(b, 0, &valsz);
+					if ( valsz < 0 || valsz > AS_SINDEX_MAX_STRING_KSIZE) {
+						cf_warning( AS_SINDEX, "sindex key size out of bounds %d ", valsz);
+						continue;
+					}
+					as_particle_p_get( b, &bin_str, &valsz);
+
+					cf_digest_compute(bin_str, valsz, &bin_dig);
+					cf_digest_compute(buf, buf_sz, &buf_dig);
+					if (memcmp(&buf_dig, &bin_dig, sizeof(cf_digest))) {
+						if (as_sindex_add_digest_to_sbin(sbin + sindex_found, bin_dig, AS_SINDEX_OP_DELETE) == AS_SINDEX_OK) {
+							sindex_found++;
+							sbin++;
+						}
+						if (as_sindex_add_digest_to_sbin(sbin + sindex_found, buf_dig, AS_SINDEX_OP_INSERT) == AS_SINDEX_OK) {
+							sindex_found++;
+							sbin++;
+						}
+					}
+				}
+			}
+	//			If itype == AS_SINDEX_ITYPE_MAP or AS_SINDEX_ITYPE_INVMAP and type = MAP
+	//	 			Deserialize the existing_bin and incoming_bin if have not deserialized it yet.
+	//				Extract as_val from path within the bin and buf
+	//				Compare the values in both vals and add them to the sbin.
+			else if (imd->itype == AS_SINDEX_ITYPE_MAP || imd->itype == AS_SINDEX_ITYPE_INVMAP) {
+				if (bin_type == AS_PARTICLE_TYPE_MAP) {
+					if (!deserialized) {
+						buf_val   = as_val_frombuf(buf, buf_sz);
+						bin_val   = as_val_frombin(b);
+					}
+					as_val * path_binval   = as_sindex_extract_val_from_path(imd, bin_val);
+					as_val * path_bufval   = as_sindex_extract_val_from_path(imd, buf_val);
+					sindex_found += as_sindex_add_diff_asval_to_itype_sindex[imd->itype](path_binval, 
+													path_bufval, imd->btype[0], sbin + sindex_found);
+				}
+			}
+
+	// 			If itype == AS_SINDEX_ITYPE_LIST and type = LIST
+	//	 			Deserialize the existing_bin and incoming_bin if have not deserialized it yet.
+	//				Extract as_val from path within the bin and buf
+	//				Compare the values in both vals and add them to the sbin.
+			else if (imd->itype == AS_SINDEX_ITYPE_LIST) {
+				if (bin_type == AS_PARTICLE_TYPE_LIST) {
+					if (!deserialized) {
+						buf_val   = as_val_frombuf(buf, buf_sz);
+						bin_val   = as_val_frombin(b);
+					}
+					as_val * path_binval   = as_sindex_extract_val_from_path(imd, bin_val);
+					as_val * path_bufval   = as_sindex_extract_val_from_path(imd, buf_val);
+					sindex_found += as_sindex_add_diff_asval_to_itype_sindex[imd->itype](path_binval, 
+													path_bufval, imd->btype[0], sbin + sindex_found);
+				}
+			}
+		}
+
+	// 		Else if path_length > 0 and type == MAP or LIST 
+	// 			Deserialize the existing_bin and incoming_bin if have not deserialized it yet.
+	//			Extract as_val from path within the bin and buf
+	//			Compare the values in both vals and add them to the sbin.	
+		else if (imd->path_length > 0 && (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST)) {
+			if (!deserialized) {
+				buf_val   = as_val_frombuf(buf, buf_sz);
+				bin_val   = as_val_frombin(b);
+			}
+			as_val * path_binval   = as_sindex_extract_val_from_path(imd, bin_val);
+			as_val * path_bufval   = as_sindex_extract_val_from_path(imd, buf_val);	
+			sindex_found += as_sindex_add_diff_asval_to_itype_sindex[imd->itype](path_binval, 
+													path_bufval, imd->btype[0], sbin + sindex_found);
+		}
+		ele     = ele->next;
+	}
 	return sindex_found;
 }
 
@@ -2796,7 +3344,7 @@ as_sindex_sbin_free(as_sindex_bin *sbin)
 int
 as_sindex_sbin_freeall(as_sindex_bin *sbin, int numbins)
 {
-	for (int i = 0; i < numbins; i++)  as_sindex_sbin_free(&sbin[i]);
+//	for (int i = 0; i < numbins; i++)  as_sindex_sbin_free(&sbin[i]);
 	return AS_SINDEX_OK;
 }
 
@@ -3733,25 +4281,30 @@ as_sindex_destroy_value_path(as_sindex_metadata * imd)
  * This function checks the existence of path stored in the sindex metadata
  * in a bin
  */
-bool
-as_sindex_value_path_exists(as_sindex_metadata * imd, as_val * v)
+as_val *
+as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v)
 {
 	if (!v) {
-		return false;
+		return NULL;
 	}
+
+	as_val * val = v;
 	if (imd->path_length == 0) {
-		return true;
+		goto END;
 	}
 	as_sindex_path *path = imd->path;
-	as_val * val = v;
 	for (int i=0; i<imd->path_length; i++) {
 		switch(val->type) {
 			case AS_STRING:
 			case AS_INTEGER:
-				return false;
+				if (i == imd->path_length-1 ) {
+					goto END;
+				} else {
+					return NULL;
+				}
 			case AS_LIST: {
 				if (path[i].type != AS_PARTICLE_TYPE_LIST) {
-					return false;
+					return NULL;
 				}
 				int index = path[i].value.index;
 				as_arraylist* list  = (as_arraylist*) as_list_fromval(v);
@@ -3763,14 +4316,13 @@ as_sindex_value_path_exists(as_sindex_metadata * imd, as_val * v)
 					j++;
 				}
 				if (j != index ) {
-					return false;
+					return NULL;
 				}
 				break;
 			}
 			case AS_MAP: {
 				as_map * map = as_map_fromval(val);
 				as_val * key;
-				as_val * value;
 				if (path[i].key_type == AS_PARTICLE_TYPE_STRING) {
 					key = (as_val *)as_string_new(path[i].value.key_str, false);
 				}
@@ -3779,17 +4331,37 @@ as_sindex_value_path_exists(as_sindex_metadata * imd, as_val * v)
 				}
 				else {
 					cf_warning(AS_SINDEX, "Possible false data in sindex metadata");
-					return false;
+					return NULL;
 				}
-				value = as_map_get(map, key);
-				if ( !value ) {
-					return false;
+				val = as_map_get(map, key);
+				if ( !val ) {
+					return NULL;
 				}
 				break;
 			}
 			default:
-				return false;
+				return NULL;
 		}
 	}
-	return true;
+
+END:
+	if (imd->itype == AS_SINDEX_ITYPE_DEFAULT) {
+		if (val->type == AS_INTEGER && imd->btype[0] == AS_PARTICLE_TYPE_INTEGER) {
+			return val;
+		}
+		else if (v->type == AS_STRING && imd->btype[0] == AS_PARTICLE_TYPE_STRING) {
+			return val;
+		}
+	}
+	else if (imd->itype == AS_SINDEX_ITYPE_MAP || imd->itype == AS_SINDEX_ITYPE_LIST) {
+		if (val->type == AS_MAP) {
+			return val;
+		}
+	}
+	else if (imd->itype == AS_SINDEX_ITYPE_LIST) {
+		if (val->type == AS_LIST) {
+			return val;
+		}
+	}
+	return NULL;
 }

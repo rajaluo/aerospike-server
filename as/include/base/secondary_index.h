@@ -120,32 +120,53 @@ typedef enum {
 	AS_SINDEX_ITYPE_INVMAP      = 3
 } as_sindex_type;
 
-/*
- * TODO: Optimize it is a huge structure will cause cache invalidation
- * 320 bytes
- */
-#define SINDEX_BINS_SETUP(skey_bin, size)                   \
-	as_sindex_bin skey_bin[(size)];                         \
-	memset (&(skey_bin), 0, sizeof(as_sindex_bin) * (size));\
-	for (int id = 0; id < (size); id++) skey_bin[id].id = -1; 
+#define AS_SINDEX_ITYPES 4
+
+typedef struct sbin_value_pool_s{
+	uint32_t used_sz;
+	uint8_t  *value;
+} sbin_value_pool;
+
+
+#define AS_SINDEX_VALUESZ_ON_STACK 16 * 1000
+#define SINDEX_BINS_SETUP_NEW(skey_bin, size, value_pool)              \
+	as_sindex_bin_new skey_bin[(size)];                                \
+	for (int id = 0; id < (size); id++) skey_bin[id].simatch = -1; \
+	sbin_value_pool value_pool;                                    \
+	value_pool.value   = alloca(AS_SINDEX_VALUESZ_ON_STACK);       \
+	value_pool.used_sz = 0;
 
 /*
  * Used as structure to call into secondary indexes sindex_* interface
- * bin_id lists the bin id being touched. 
  */
+typedef struct as_sindex_bin_new_s {
+	union {                       // We use this if we need to store only one value inside sbin.
+		int64_t       int_val;    // Accessing this is much faster than accessing any other value on the stack.
+		cf_digest     str_val;
+	} value;
+	uint64_t          num_values; 
+	void            * values;     // If there are more than 1 value in the sbin, we use this to point to them.
+	as_particle_type  type;       // the type of data which is going to get indexed. (STRING or INTEGER)
+	as_sindex_op      op;         // Should we delete or insert this values from/into the secodary index tree.
+	bool              to_free;    // If the values are malloced.
+	int               simatch;    // simatch of the si this bin is pointing to.
+	uint32_t          heap_capacity;
+} as_sindex_bin_new;
+
+#define SINDEX_BINS_SETUP(skey_bin, size)                   \
+    as_sindex_bin skey_bin[(size)];                         \
+	memset (&(skey_bin), 0, sizeof(as_sindex_bin) * (size));\
+	for (int id = 0; id < (size); id++) skey_bin[id].id = -1; 
+
 typedef struct as_sindex_bin_s {
 	uint32_t          id;
 	as_particle_type  type; // this type is citrusleaf type
 	// Union is to support sindex for other datatypes in future.
 	// Currently sindex is supported for only int64 and string.
-	int num_values; // Should it be int ?
 	union {
 		int64_t  i64;
 	} u;
 	cf_digest         digest;
-	// If num_values becomes > 1 we need this.
-	// This can happen in case of CDTs.
-	cf_ll values;
 } as_sindex_bin;
 
 /* 
@@ -456,7 +477,7 @@ extern int                  as_sindex__op_by_skey(as_sindex   *si, as_sindex_key
 extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
 extern as_sindex_status     as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str);
 extern as_sindex_status     as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * imd);
-
+extern as_val             * as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v);
 
 // SINDEX LOCK MACROS
 extern pthread_rwlock_t g_sindex_rwlock;
