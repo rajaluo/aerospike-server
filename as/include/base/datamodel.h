@@ -780,7 +780,8 @@ extern void as_partition_getreplica_write_node(as_namespace *ns, cf_node *node_a
 typedef struct as_master_prole_stats_s {
 	uint64_t n_master_records;
 	uint64_t n_prole_records;
-	// Add sub-record counts if/when we get interested.
+	uint64_t n_master_sub_records;
+	uint64_t n_prole_sub_records;
 } as_master_prole_stats;
 
 extern void as_partition_get_master_prole_stats(as_namespace* ns, as_master_prole_stats* p_stats);

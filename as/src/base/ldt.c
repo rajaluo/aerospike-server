@@ -1238,7 +1238,6 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		// LDT_GC_IO: Parent IO
 		delete = true;
 		type   = LDT_SUB_GC_PARENT_VERSION_MISMATCH;
-		linfo->num_version_mismatch_gc++;
 	} else {
 		cf_detail(AS_LDT, "LDT_SUB_GC Found both parent and ESR record !!");
 	}

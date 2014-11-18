@@ -5512,8 +5512,11 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// what everyone wants to know: the number of objects and size
 	info_append_uint64("", "objects",  ns->n_objects, db);
+	info_append_uint64("", "sub-objects",  ns->n_sub_objects, db);
 	info_append_uint64("", "master-objects", mp.n_master_records, db);
+	info_append_uint64("", "master-sub-objects", mp.n_master_sub_records, db);
 	info_append_uint64("", "prole-objects", mp.n_prole_records, db);
+	info_append_uint64("", "prole-sub-objects", mp.n_prole_sub_records, db);
 	info_append_uint64("", "expired-objects",  ns->n_expired_objects, db);
 	info_append_uint64("", "evicted-objects",  ns->n_evicted_objects, db);
 	info_append_uint64("", "set-deleted-objects", ns->n_deleted_set_objects, db);

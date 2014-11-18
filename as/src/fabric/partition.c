@@ -1804,6 +1804,8 @@ as_partition_get_master_prole_stats(as_namespace* ns, as_master_prole_stats* p_s
 {
 	p_stats->n_master_records = 0;
 	p_stats->n_prole_records = 0;
+	p_stats->n_master_sub_records = 0;
+	p_stats->n_prole_sub_records = 0;
 
 	as_partition_reservation rsv;
 	uint32_t num_records;
@@ -1819,6 +1821,7 @@ as_partition_get_master_prole_stats(as_namespace* ns, as_master_prole_stats* p_s
 
 			num_records = rsv.p->vp->elements;
 			p_stats->n_master_records += num_records;
+			p_stats->n_master_sub_records += rsv.p->sub_vp->elements;
 
 			as_partition_release(&rsv);
 			cf_atomic_int_decr(&g_config.nsup_tree_count);
@@ -1830,6 +1833,7 @@ as_partition_get_master_prole_stats(as_namespace* ns, as_master_prole_stats* p_s
 
 			num_records = rsv.p->vp->elements;
 			p_stats->n_prole_records += num_records;
+			p_stats->n_prole_sub_records += rsv.p->sub_vp->elements;
 
 			as_partition_release(&rsv);
 			cf_atomic_int_decr(&g_config.nsup_tree_count);

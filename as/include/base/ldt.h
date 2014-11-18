@@ -102,7 +102,6 @@ extern cf_clock cf_clock_getabsoluteus();
 typedef struct ldt_sub_gc_info_s {
 	as_namespace	*ns;
 	uint32_t		num_gc;
-	uint32_t		num_version_mismatch_gc;
 } ldt_sub_gc_info;
 
 
