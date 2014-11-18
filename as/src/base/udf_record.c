@@ -1039,7 +1039,7 @@ udf_record_setname(const as_rec * rec)
 	}
 }
 
-static bool
+bool
 udf_record_destroy(as_rec *rec)
 {
 	if (!rec) {
