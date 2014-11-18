@@ -3172,12 +3172,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of memory-size of ns %s from %d to %d ", ns->name, ns->memory_size, val);
 			ns->memory_size = val;
 		}
-		else if (0 == as_info_parameter_get(params, "high-water-pct", context, &context_len)) {
-			cf_info(AS_INFO, "Changing value of high-water-pct disk of ns %s from %1.3f to %1.3f ", ns->name, ns->hwm_disk, atof(context) / (float)100);
-			ns->hwm_disk = atof(context) / (float)100;
-			cf_info(AS_INFO, "Changing value of high-water-pct memory of ns %s from %1.3f to %1.3f ", ns->name, ns->hwm_memory, atof(context) / (float)100);
-			ns->hwm_memory = atof(context) / (float)100;
-		}
 		else if (0 == as_info_parameter_get(params, "high-water-disk-pct", context, &context_len)) {
 			cf_info(AS_INFO, "Changing value of high-water-disk-pct of ns %s from %1.3f to %1.3f ", ns->name, ns->hwm_disk, atof(context) / (float)100);
 			ns->hwm_disk = atof(context) / (float)100;

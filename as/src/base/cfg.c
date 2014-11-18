@@ -430,7 +430,6 @@ typedef enum {
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
-	CASE_NAMESPACE_HIGH_WATER_PCT,
 	CASE_NAMESPACE_LDT_ENABLED,
 	CASE_NAMESPACE_MAX_TTL,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
@@ -441,10 +440,10 @@ typedef enum {
 	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
-
 	// Deprecated:
 	CASE_NAMESPACE_DEMO_READ_MULTIPLIER,
 	CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER,
+	CASE_NAMESPACE_HIGH_WATER_PCT,
 	CASE_NAMESPACE_LOW_WATER_PCT,
 
 	// Namespace conflict-resolution-policy options (value tokens):
@@ -788,7 +787,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
-		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
 		{ "ldt-enabled",					CASE_NAMESPACE_LDT_ENABLED },
 		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
@@ -801,6 +799,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "write-commit-level-override",    CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
 		{ "demo-read-multiplier",			CASE_NAMESPACE_DEMO_READ_MULTIPLIER },
 		{ "demo-write-multiplier",			CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER },
+		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
 		{ "low-water-pct",					CASE_NAMESPACE_LOW_WATER_PCT },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -2351,9 +2350,6 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
 				ns->hwm_memory = (float)cfg_pct_fraction(&line);
 				break;
-			case CASE_NAMESPACE_HIGH_WATER_PCT:
-				ns->hwm_memory = ns->hwm_disk = (float)cfg_pct_fraction(&line);
-				break;
 			case CASE_NAMESPACE_LDT_ENABLED:
 				ns->ldt_enabled = cfg_bool(&line);
 				break;
@@ -2427,6 +2423,7 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER:
 				ns->demo_write_multiplier = cfg_int_no_checks(&line);
 				break;
+			case CASE_NAMESPACE_HIGH_WATER_PCT:
 			case CASE_NAMESPACE_LOW_WATER_PCT:
 				cfg_deprecated_name_tok(&line);
 				break;
