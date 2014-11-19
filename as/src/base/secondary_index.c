@@ -2578,13 +2578,13 @@ as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **sran
 }
 
 as_sindex_status
-as_sindex_add_sbin_value_in_heap(as_sindex_bin_new * sbin, void * data, uint8_t data_sz)
+as_sindex_add_sbin_value_in_heap(as_sindex_bin_new * sbin, void * val, sbin_value_pool * stack_buf)
 {
+	// Get the size of the data we are going to store
 	// If to_free = false, this means this is the first 
 	// time we are storing value for this sbin to heap
 	// Check if there is need to copy the existing data from stack_buf
-	// If to_free == false
-	// 		init_store(num_values)
+	// 		init_storage(num_values)
 	// 		If num_values != 0
 	//			Copy the existing data from stack to heap
 	//			reduce the used stack_buf size
@@ -2592,12 +2592,99 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin_new * sbin, void * data, uint8_t 
 	// 	Else
 	// 		If (num_values == heap_capacity) 
 	// 			extend the allocation and capacity
-	// 		Copy the value to the appropriate position.
+	// 	Copy the value to the appropriate position.
+
+	uint32_t   size = 0;
+	bool    to_copy = false;
+	uint8_t    data_sz = 0;
+	void * tmp_value = NULL;
+
+	// Get the size of the data we are going to store
+	if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+		data_sz = sizeof(uint64_t);
+	}
+	else if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+		data_sz = sizeof(cf_digest);
+	}
+	else {
+		cf_warning(AS_SINDEX, "Bad type of data to index %d", sbin->type);
+		return AS_SINDEX_ERR;
+	}
+
+	// If to_free = false, this means this is the first 
+	// time we are storing value for this sbin to heap
+	// Check if there is need to copy the existing data from stack_buf
+	if (!sbin->to_free) {
+		if (sbin->num_values == 0) {
+			size = 2;
+		}
+		else if (sbin->num_values > 0) {
+			to_copy = true;
+			size = 2 * sbin->num_values;
+			tmp_value = sbin->values;
+		}
+		else {
+			return AS_SINDEX_ERR;
+		}
+
+		sbin->values  = cf_malloc(data_sz * size);
+		if (!sbin->values) {
+			cf_warning(AS_SINDEX, "malloc failed");
+			return AS_SINDEX_ERR;
+		}
+		sbin->to_free = true;
+		sbin->heap_capacity = size;
+
+	//			Copy the existing data from stack to heap
+	//			reduce the used stack_buf size
+		if (to_copy) {
+			if (!memcpy(sbin->values, tmp_value, data_sz * sbin->num_values)) {
+				cf_warning(AS_SINDEX, "memcpy failed");
+				return AS_SINDEX_ERR;
+			}
+			stack_buf->used_sz -= (sbin->num_values * data_sz);
+		}
+	}
+	else
+	{
+	// 	Else
+	// 		If (num_values == heap_capacity) 
+	// 			extend the allocation and capacity
+		if (sbin->heap_capacity ==  sbin->num_values) {
+			sbin->heap_capacity = 2 * sbin->heap_capacity;
+			sbin->values = cf_realloc(sbin->values, sbin->heap_capacity * data_sz);
+			if (!sbin->values) {
+				cf_warning(AS_SINDEX, "Realloc failed for size %d", sbin->heap_capacity * data_sz);
+				sbin->heap_capacity = sbin->heap_capacity / 2;
+				return AS_SINDEX_ERR;
+			}
+		}
+	}
+	
+	// 	Copy the value to the appropriate position.
+	if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+		if (!memcpy((void *)((uint64_t *)sbin->values + sbin->num_values), (void *)val, data_sz)) {
+			cf_warning(AS_SINDEX, "memcpy failed");
+			return AS_SINDEX_ERR;
+		}
+	}
+	else if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+		if (!memcpy((void *)((cf_digest *)sbin->values + sbin->num_values), (void *)val, data_sz)) {
+			cf_warning(AS_SINDEX, "memcpy failed");
+			return AS_SINDEX_ERR;
+		}
+	}
+	else {
+		cf_warning(AS_SINDEX, "Bad type of data to index %d", sbin->type);
+		return AS_SINDEX_ERR;
+	}
+
+	sbin->num_values++;
 	return AS_SINDEX_OK;
 }
 
 as_sindex_status
-as_sindex_add_integer_to_sbin(as_sindex_bin_new * sbin, uint64_t val, as_sindex_op op, sbin_value_pool stack_buf)
+as_sindex_add_integer_to_sbin(as_sindex_bin_new * sbin, uint64_t val, as_sindex_op op, sbin_value_pool * stack_buf)
 {
 	// If this is the first value coming to the sbin
 	// 		Set the op.
@@ -2607,11 +2694,44 @@ as_sindex_add_integer_to_sbin(as_sindex_bin_new * sbin, uint64_t val, as_sindex_
 	// 		If to_free is true or stack_buf is full
 	// 			add value to the heap
 	// 		else 
+	// 			If needed copy the values stored in sbin to stack_buf
 	// 			add the value to end of stack buf
+	
+	// If this is the first value coming to the sbin
+	// 		Set the op.
+	// 		assign the value to the local variable of struct.
 	if (sbin->num_values == 0 ) {
+		sbin->op = op;
 		sbin->value.int_val = val;
 	}
 	else if (sbin->num_values > 0) {
+	
+	// Else
+	// 		Check if the op is same as that of set one.
+		if (op != sbin->op) {
+			cf_warning(AS_SINDEX, "Op set in sbin %d and coming from write %d are not same.", sbin->op, op);
+			return AS_SINDEX_ERR;
+		}
+	// 		If to_free is true or stack_buf is full
+	// 			add value to the heap
+		if (sbin->to_free || (stack_buf->used_sz + sizeof(uint64_t)) > AS_SINDEX_VALUESZ_ON_STACK ) {
+			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)&val, stack_buf)) {
+				cf_warning(AS_SINDEX, "Adding value in sbin failed.");
+				return AS_SINDEX_ERR;
+			}
+		}
+		else {
+	// 		else 
+	//			If needed copy the values stored in sbin to stack_buf
+			if (sbin->num_values == 1) {
+				sbin->values = stack_buf->value + stack_buf->used_sz;
+				(* (uint64_t *)sbin->values ) = sbin->value.int_val;
+			}
+
+	// 			add the value to end of stack buf
+			*((uint64_t *)sbin->values + sbin->num_values) = val;
+			sbin->num_values++;
+		}
 	}
 	else {
 		cf_warning(AS_SINDEX, "numvalues is coming as negative. Possible memory corruption in sbin.");
@@ -2621,7 +2741,7 @@ as_sindex_add_integer_to_sbin(as_sindex_bin_new * sbin, uint64_t val, as_sindex_
 }
 
 as_sindex_status
-as_sindex_add_string_to_sbin(as_sindex_bin_new * sbin, char * val, as_sindex_op op)
+as_sindex_add_digest_to_sbin(as_sindex_bin_new * sbin, cf_digest val_dig, as_sindex_op op, sbin_value_pool * stack_buf)
 {
 	// If this is the first value coming to the sbin
 	// 		Set the op.
@@ -2630,37 +2750,68 @@ as_sindex_add_string_to_sbin(as_sindex_bin_new * sbin, char * val, as_sindex_op 
 	// 		Check if the op is same as that of set one.
 	// 		If to_free is true or stack_buf is full
 	// 			add value to the heap
-	// 			to_free = true
 	// 		else 
+	// 			If needed copy the values stored in sbin to stack_buf
 	// 			add the value to end of stack buf
+
+	// If this is the first value coming to the sbin
+	// 		Set the op.
+	// 		assign the value to the local variable of struct.	
 	if (sbin->num_values == 0 ) {
-		cf_digest_compute(val, strlen(val) + 1, &sbin->value.str_val);
+		sbin->op = op;
+		sbin->value.str_val = val_dig;
 	}
 	else if (sbin->num_values > 0) {
-		// Append to the list
+	
+	// Else
+	// 		Check if the op is same as that of set one.
+		if (op != sbin->op) {
+			cf_warning(AS_SINDEX, "Op set in sbin %d and coming from write %d are not same.", sbin->op, op);
+			return AS_SINDEX_ERR;
+		}
+	// 		If to_free is true or stack_buf is full
+	// 			add value to the heap
+		if (sbin->to_free || (stack_buf->used_sz + sizeof(cf_digest)) > AS_SINDEX_VALUESZ_ON_STACK ) {
+			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)&val_dig, stack_buf)) {
+				cf_warning(AS_SINDEX, "Adding value in sbin failed.");
+				return AS_SINDEX_ERR;
+			}
+		}
+		else {
+	// 		else 
+	//			If needed copy the values stored in sbin to stack_buf
+			if (sbin->num_values == 1) {
+				sbin->values = stack_buf->value + stack_buf->used_sz;
+				if (!memcpy(sbin->values, (void *)&sbin->value.str_val, sizeof(cf_digest))) {
+					cf_warning(AS_SINDEX, "Memcpy failed");
+					return AS_SINDEX_ERR;
+				}
+			}
+
+	// 			add the value to end of stack buf
+			if (!memcpy((void *)((cf_digest *)sbin->values + sbin->num_values), (void *)&val_dig, sizeof(cf_digest))) {
+				cf_warning(AS_SINDEX, "Memcpy failed");
+				return AS_SINDEX_ERR;
+			}
+			sbin->num_values++;
+		}
 	}
 	else {
 		cf_warning(AS_SINDEX, "numvalues is coming as negative. Possible memory corruption in sbin.");
 		return AS_SINDEX_ERR;
 	}
 	return AS_SINDEX_OK;
+
+	return AS_SINDEX_OK;
 }
 
 as_sindex_status
-as_sindex_add_digest_to_sbin(as_sindex_bin_new * sbin, cf_digest val, as_sindex_op op)
+as_sindex_add_string_to_sbin(as_sindex_bin_new * sbin, char * val, as_sindex_op op, sbin_value_pool * stack_buf)
 {
-	// If this is the first value coming to the sbin
-	// 		Set the op.
-	// 		assign the value to the local variable of struct.
-	// Else
-	// 		Check if the op is same as that of set one.
-	// 		If to_free is true or stack_buf is full
-	// 			add value to the heap
-	// 			to_free = true
-	// 		else 
-	// 			add the value to end of stack buf
-	
-	return AS_SINDEX_OK;
+	// Calculate digest and cal add_digest_to_sbin	
+	cf_digest val_dig;
+	cf_digest_compute(val, strlen(val) + 1, &val_dig);
+	return as_sindex_add_digest_to_sbin(sbin, val_dig, op, stack_buf);
 }
 
 as_sindex_status
@@ -2844,7 +2995,7 @@ as_val * as_val_frombuf(byte *buf, uint32_t sz)
 // Returns the number of sindex found
 int
 as_sindex_sbins_from_bin_new(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin_new * start_sbin, 
-							sbin_value_pool stack_buf, as_sindex_op op)
+							sbin_value_pool * stack_buf, as_sindex_op op)
 {
 	// Check the sindex bit array.
 	// If there is not sindex present on this bin return 0
@@ -2933,7 +3084,7 @@ as_sindex_sbins_from_bin_new(as_namespace *ns, const char *set, as_bin *b, as_si
 					}
 					else {
 						as_particle_p_get( b, &bin_val, &valsz);
-						if (as_sindex_add_string_to_sbin(sbin, (char *)bin_val, op) == AS_SINDEX_OK) {
+						if (as_sindex_add_string_to_sbin(sbin, (char *)bin_val, op, stack_buf) == AS_SINDEX_OK) {
 							sindex_found++;
 						}
 					}
@@ -3105,13 +3256,13 @@ as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex
 
 int
 as_sindex_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, as_sindex_bin_new * sbin, 
-				sbin_value_pool stack_buf, byte * buf, uint32_t buf_sz, as_sindex_op op)
+				sbin_value_pool * stack_buf, byte * buf, uint32_t buf_sz, as_sindex_op op)
 {
 	return 0;
 }
 
 int
-as_sindex_diff_sbins_from_bin(as_bin * existing_bin, as_bin * incoming_bin, sbin_value_pool stack_buf)
+as_sindex_diff_sbins_from_bin(as_bin * existing_bin, as_bin * incoming_bin, sbin_value_pool * stack_buf)
 {
 	// If id, set and type of bins are not same, then get the sbins from both bins and send them back.
 	// Get the simatch_ll from set_binid_hash
@@ -3135,7 +3286,7 @@ as_sindex_diff_sbins_from_bin(as_bin * existing_bin, as_bin * incoming_bin, sbin
 
 int
 as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, byte * buf, uint32_t buf_sz,
-		as_particle_type type, as_sindex_bin_new * sbin, sbin_value_pool stack_buf)
+		as_particle_type type, as_sindex_bin_new * sbin, sbin_value_pool * stack_buf)
 {
 	// Check if this bin has alteast one sindex over it.
 	// If buf is null return the sbins from the bin.
@@ -3256,11 +3407,11 @@ as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, b
 					cf_digest_compute(bin_str, valsz, &bin_dig);
 					cf_digest_compute(buf, buf_sz, &buf_dig);
 					if (memcmp(&buf_dig, &bin_dig, sizeof(cf_digest))) {
-						if (as_sindex_add_digest_to_sbin(sbin + sindex_found, bin_dig, AS_SINDEX_OP_DELETE) == AS_SINDEX_OK) {
+						if (as_sindex_add_digest_to_sbin(sbin + sindex_found, bin_dig, AS_SINDEX_OP_DELETE, stack_buf) == AS_SINDEX_OK) {
 							sindex_found++;
 							sbin++;
 						}
-						if (as_sindex_add_digest_to_sbin(sbin + sindex_found, buf_dig, AS_SINDEX_OP_INSERT) == AS_SINDEX_OK) {
+						if (as_sindex_add_digest_to_sbin(sbin + sindex_found, buf_dig, AS_SINDEX_OP_INSERT, stack_buf) == AS_SINDEX_OK) {
 							sindex_found++;
 							sbin++;
 						}
