@@ -3547,6 +3547,10 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 
 			xdr_broadcast_lastshipinfo(val);
 		}
+		else if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
+			cf_node nodeid = atoll(context);
+			xdr_handle_failednodeprocessingdone(nodeid);
+		}
 		else if (0 == as_info_parameter_get(params, "stop-writes-noxdr", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of stop-writes-noxdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_stop_writes_noxdr], context);
