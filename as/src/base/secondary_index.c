@@ -2808,6 +2808,9 @@ as_sindex_add_digest_to_sbin(as_sindex_bin_new * sbin, cf_digest val_dig, as_sin
 as_sindex_status
 as_sindex_add_string_to_sbin(as_sindex_bin_new * sbin, char * val, as_sindex_op op, sbin_value_pool * stack_buf)
 {
+	if (!val) {
+		return AS_SINDEX_ERR;
+	}
 	// Calculate digest and cal add_digest_to_sbin	
 	cf_digest val_dig;
 	cf_digest_compute(val, strlen(val) + 1, &val_dig);
@@ -2815,7 +2818,8 @@ as_sindex_add_string_to_sbin(as_sindex_bin_new * sbin, char * val, as_sindex_op 
 }
 
 as_sindex_status
-as_sindex_add_asval_to_default_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin)
+as_sindex_add_asval_to_default_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin, 
+									as_sindex_op op, sbin_value_pool * stack_buf)
 {
 	// If as_val type == AS_STRING and type == AS_PARTICLE_TYPE_STRING
 	// Get the string from val and add string to sbin
@@ -2824,11 +2828,63 @@ as_sindex_add_asval_to_default_sindex(as_val *val, as_particle_type type, as_sin
 	// Get the integer from val and add integer to sbin
 	// return AS_SINDEX_OK
 	// else return AS_SINDEX_ERR;
+	
+	// If as_val type == AS_STRING and type == AS_PARTICLE_TYPE_STRING
+	if (val->type == AS_STRING && type == AS_PARTICLE_TYPE_STRING) {
+
+	// Get the string from val and add string to sbin
+	// return AS_SINDEX_OK
+		as_string *s = as_string_fromval(val);
+		if (!s) {
+			return AS_SINDEX_ERR;
+		}
+		char * str_val = as_string_get(s);
+		return as_sindex_add_string_to_sbin(sbin, str_val, op, stack_buf);
+	}
+	// else if as_val type == AS_INTEGER and type == AS_PARTICLE_TYPE_INTEGER
+	else if (val->type == AS_INTEGER && type == AS_PARTICLE_TYPE_INTEGER ) {
+
+	// Get the integer from val and add integer to sbin
+	// return AS_SINDEX_OK	
+		as_integer *i = as_integer_fromval(val);
+		if (!i) {
+			return AS_SINDEX_ERR;
+		}
+		uint64_t int_val = (uint64_t)as_integer_get(i);
+		return as_sindex_add_integer_to_sbin(sbin, int_val, op, stack_buf);
+	}
+	// else return AS_SINDEX_ERR;
+	else {
+		cf_warning(AS_SINDEX, "val_type %d and sindex type %d does not match", val->type, type);
+		return AS_SINDEX_ERR;
+	}
 	return AS_SINDEX_OK;
 }
 
+typedef struct as_sindex_cdt_sbin_s {
+	as_particle_type    type;
+	as_sindex_bin_new * sbin;
+	as_sindex_op        op;
+	sbin_value_pool   * stack_buf;
+} as_sindex_cdt_sbin;
+
+static bool as_sindex_add_listvalues_foreach(as_val * element, void * udata)
+{
+	// If type == AS_PARTICLE_TYPE_STRING
+	// 		add all string type keys to the sbin
+	// If type == AS_PARTICLE_TYPE_INTEGER
+	// 		add all integer type keys to the sbin
+
+	as_sindex_cdt_sbin * sbin_data = (as_sindex_cdt_sbin *)udata;
+	as_sindex_add_asval_to_default_sindex((as_val *)element, sbin_data->type, sbin_data->sbin, 
+											sbin_data->op, sbin_data->stack_buf);	
+
+	return true;
+}
+
 as_sindex_status
-as_sindex_add_asval_to_list_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin)
+as_sindex_add_asval_to_list_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin, 
+									as_sindex_op op, sbin_value_pool * stack_buf)
 {
 	// If val type is not AS_LIST 
 	// 		return AS_SINDEX_ERR
@@ -2837,14 +2893,56 @@ as_sindex_add_asval_to_list_sindex(as_val *val, as_particle_type type, as_sindex
 	// 			add all string type values to the sbin
 	// 		If type == AS_PARTICLE_TYPE_INTEGER
 	// 			add all integer type values to the sbin
-	//
-	// If nothing is added return AS_SINDEX_NOTFOUND
-	// Else return AS_SINDEX_OK
-	return AS_SINDEX_OK;
+	
+	// If val type is not AS_LIST
+	// 		return AS_SINDEX_ERR
+	if (val->type != AS_LIST) {
+		return AS_SINDEX_ERR;
+	}
+	// Else iterate through all elements of map
+	as_list * list               = as_list_fromval(val);
+	as_sindex_cdt_sbin sbin_data;
+	sbin_data.type              = type;
+	sbin_data.op                = op;
+	sbin_data.stack_buf         = stack_buf;
+	sbin_data.sbin              = sbin;
+	if (as_list_foreach(list, as_sindex_add_listvalues_foreach, &sbin_data)) {
+		return AS_SINDEX_OK;
+	}
+	return AS_SINDEX_ERR;
+}
+
+static bool as_sindex_add_mapkeys_foreach(const as_val * key, const as_val * val, void * udata)
+{
+	// If type == AS_PARTICLE_TYPE_STRING
+	// 		add all string type keys to the sbin
+	// If type == AS_PARTICLE_TYPE_INTEGER
+	// 		add all integer type keys to the sbin
+
+	as_sindex_cdt_sbin * sbin_data = (as_sindex_cdt_sbin *)udata;
+	as_sindex_add_asval_to_default_sindex((as_val *)key, sbin_data->type, sbin_data->sbin, 
+											sbin_data->op, sbin_data->stack_buf);	
+
+	return true;
+}
+
+static bool as_sindex_add_mapvalues_foreach(const as_val * key, const as_val * val, void * udata)
+{
+	// If type == AS_PARTICLE_TYPE_STRING
+	// 		add all string type keys to the sbin
+	// If type == AS_PARTICLE_TYPE_INTEGER
+	// 		add all integer type keys to the sbin
+
+	as_sindex_cdt_sbin * sbin_data = (as_sindex_cdt_sbin *)udata;
+	as_sindex_add_asval_to_default_sindex((as_val *)val, sbin_data->type, sbin_data->sbin, 
+											sbin_data->op, sbin_data->stack_buf);	
+
+	return true;
 }
 
 as_sindex_status	
-as_sindex_add_asval_to_map_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin)
+as_sindex_add_asval_to_map_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin, 
+									as_sindex_op op, sbin_value_pool * stack_buf)
 {
 	// If val type is not AS_MAP
 	// 		return AS_SINDEX_ERR
@@ -2853,14 +2951,28 @@ as_sindex_add_asval_to_map_sindex(as_val *val, as_particle_type type, as_sindex_
 	// 			add all string type keys to the sbin
 	// 		If type == AS_PARTICLE_TYPE_INTEGER
 	// 			add all integer type keys to the sbin
-	//
-	// If nothing is added return AS_SINDEX_NOTFOUND
-	// Else return AS_SINDEX_OK
-	return AS_SINDEX_OK;
+
+	// If val type is not AS_MAP
+	// 		return AS_SINDEX_ERR
+	if (val->type != AS_MAP) {
+		return AS_SINDEX_ERR;
+	}
+	// Else iterate through all keys of map
+	as_map * map                   = as_map_fromval(val);
+	as_sindex_cdt_sbin sbin_data;
+	sbin_data.type                 = type;
+	sbin_data.op                   = op;
+	sbin_data.stack_buf            = stack_buf;
+	sbin_data.sbin                 = sbin;
+	if (as_map_foreach(map, as_sindex_add_mapkeys_foreach, &sbin_data)) {
+		return AS_SINDEX_OK;
+	}
+	return AS_SINDEX_ERR;
 }
 
 as_sindex_status
-as_sindex_add_asval_to_invmap_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin)
+as_sindex_add_asval_to_invmap_sindex(as_val *val, as_particle_type type, as_sindex_bin_new * sbin, 
+									as_sindex_op op, sbin_value_pool * stack_buf)
 {
 	// If val type is not AS_MAP
 	// 		return AS_SINDEX_ERR
@@ -2869,14 +2981,27 @@ as_sindex_add_asval_to_invmap_sindex(as_val *val, as_particle_type type, as_sind
 	// 			add all string type values to the sbin
 	// 		If type == AS_PARTICLE_TYPE_INTEGER
 	// 			add all integer type values to the sbin
-	//
-	// If nothing is added return AS_SINDEX_NOTFOUND
-	// Else return AS_SINDEX_OK
-	return AS_SINDEX_OK;
+	
+	// If val type is not AS_MAP
+	// 		return AS_SINDEX_ERR
+	if (val->type != AS_MAP) {
+		return AS_SINDEX_ERR;
+	}
+	// Else iterate through all keys, values of map
+	as_map * map                  = as_map_fromval(val);
+	as_sindex_cdt_sbin sbin_data;
+	sbin_data.type                = type;
+	sbin_data.op                  = op;
+	sbin_data.stack_buf           = stack_buf;
+	sbin_data.sbin                = sbin;
+	if (as_map_foreach(map, as_sindex_add_mapvalues_foreach, &sbin_data)) {
+		return AS_SINDEX_OK;
+	}
+	return AS_SINDEX_ERR;
 }
 
 typedef as_sindex_status (*as_sindex_add_asval_to_itype_sindex_fn)
-						(as_val *val, as_particle_type type, as_sindex_bin_new * sbin);
+(as_val *val, as_particle_type type, as_sindex_bin_new * sbin, as_sindex_op op, sbin_value_pool * stack_buf);
 static const as_sindex_add_asval_to_itype_sindex_fn 
 			 as_sindex_add_asval_to_itype_sindex[AS_SINDEX_ITYPES] = {
 	as_sindex_add_asval_to_default_sindex,
@@ -3104,7 +3229,7 @@ as_sindex_sbins_from_bin_new(as_namespace *ns, const char *set, as_bin *b, as_si
 						if (!res_val) {
 							continue;
 						}
-						if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin) == AS_SINDEX_OK) {
+						if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin, op, stack_buf) == AS_SINDEX_OK) {
 							sindex_found++;
 						}
 					}
@@ -3123,7 +3248,7 @@ as_sindex_sbins_from_bin_new(as_namespace *ns, const char *set, as_bin *b, as_si
 							if (!res_val) {
 								continue;
 							}
-							if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin) == AS_SINDEX_OK) {
+							if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin, op, stack_buf) == AS_SINDEX_OK) {
 								sindex_found++;
 							}
 						}
@@ -3144,7 +3269,7 @@ as_sindex_sbins_from_bin_new(as_namespace *ns, const char *set, as_bin *b, as_si
 				if (!res_val) {
 					continue;
 				}
-				if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin) == AS_SINDEX_OK) {
+				if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, imd->btype[0], sbin, op, stack_buf) == AS_SINDEX_OK) {
 					sindex_found++;
 				}
 			}
