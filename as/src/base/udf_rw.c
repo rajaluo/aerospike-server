@@ -908,6 +908,16 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 		histogram_insert_raw(g_config.ldt_update_record_cnt_hist, subrec_count + 1);
 	}
 
+	if (is_ldt) {
+		if (UDF_OP_IS_WRITE(*lrecord_op)) {
+			*lrecord_op = UDF_OPTYPE_LDT_WRITE;
+		} else if (UDF_OP_IS_DELETE(*lrecord_op)) {
+			*lrecord_op = UDF_OPTYPE_LDT_DELETE;
+		} else if (UDF_OP_IS_READ(*lrecord_op)) {
+			*lrecord_op = UDF_OPTYPE_LDT_READ;
+		}
+	}
+
 	if (ret) {
 		cf_warning(AS_LDT, "Pickeling failed with %d", ret);
 		return false;
