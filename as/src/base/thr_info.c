@@ -1915,8 +1915,6 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.transaction_pending_limit);
 	cf_dyn_buf_append_string(db, ";migrate-threads=");
 	cf_dyn_buf_append_int(db, g_config.n_migrate_threads);
-	cf_dyn_buf_append_string(db, ";migrate-priority=");
-	cf_dyn_buf_append_int(db, g_config.migrate_xmit_priority);
 	cf_dyn_buf_append_string(db, ";migrate-xmit-priority=");
 	cf_dyn_buf_append_int(db, g_config.migrate_xmit_priority);
 	cf_dyn_buf_append_string(db, ";migrate-xmit-sleep=");
@@ -2438,13 +2436,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		goto Error;
 	if (strcmp(context, "service") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "migrate-priority", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of migrate-priority from %d to %d ", g_config.migrate_xmit_priority, val);
-			g_config.migrate_xmit_priority = val;
-		}
-		else if (0 == as_info_parameter_get(params, "migrate-xmit-priority", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "migrate-xmit-priority", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
 			cf_info(AS_INFO, "Changing value of migrate-xmit-priority from %d to %d ", g_config.migrate_xmit_priority, val);
