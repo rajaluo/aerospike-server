@@ -169,9 +169,7 @@ as_sig_handle_segv(int sig_num)
 		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
 	}
 
-	// This must literally be the direct clib "free()", because "strings" is
-	// allocated by "backtrace_symbols()".
-	free(strings);
+	fflush(NULL);
 
 	xdr_sig_handler(sig_num);
 
@@ -199,9 +197,7 @@ as_sig_handle_bus(int sig_num)
 		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
 	}
 
-	// This must literally be the direct clib "free()", because "strings" is
-	// allocated by "backtrace_symbols()".
-	free(strings);
+	fflush(NULL);
 }
 
 

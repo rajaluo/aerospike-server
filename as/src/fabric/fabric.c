@@ -397,6 +397,7 @@ fne_create(cf_node node)
 		cf_info(AS_FABRIC, " received second notification of already extant node: %"PRIx64, node);
 		cf_queue_destroy(fne->xmit_buffer_queue);
 		cf_queue_priority_destroy(fne->xmit_msg_queue);
+		shash_destroy(fne->connected_fb_hash);
 		cf_rc_releaseandfree( fne );
 		return fne;
 	}
@@ -1139,9 +1140,7 @@ Next:
 		if (RCHASH_OK != rv) {
 			// This happens sometimes. I might get a connection request before I get a ping
 			// stating that anything exists. So make, then try again
-			fne = fne_create(node);
-
-			cf_debug(AS_FABRIC, "created an FNE %p for node %p the weird way from incoming fabric msg!", fne, node);
+			fne_create(node);
 
 			rv = rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne );
 			if (RCHASH_OK != rv) {
@@ -1149,6 +1148,7 @@ Next:
 				cf_debug(AS_FABRIC, "fabric_process_read_msg: cf_node unknown, can't create new endpoint descriptor odd %d", rv);
 				return false;
 			}
+			cf_debug(AS_FABRIC, "created an FNE %p for node %p the weird way from incoming fabric msg!", fne, node);
 		}
 
 		fabric_buffer_associate(fb, fne);
@@ -1446,7 +1446,7 @@ fabric_worker_fn(void *argv)
 							}
 						}
 						else {
-							cf_debug(AS_FABRIC, "worker %d received unknown notification on queue", worker_id, wqe.type);
+							cf_warning(AS_FABRIC, "worker %d received unknown notification on queue", worker_id, wqe.type);
 						}
 					}
 				}
@@ -1703,11 +1703,11 @@ fabric_node_disconnect(cf_node node)
 
 		};
 
-		// DEBUG - it should be GONE
-		if (RCHASH_OK == rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne)) {
-			cf_info(AS_FABRIC, "fabric disconnecting: deleted from hash, but still there SUPER FAIL");
-			fne_release(fne);
-		}
+		//// DEBUG - it should be GONE
+		//if (RCHASH_OK == rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne)) {
+		//	fflush(NULL);
+		//	fne_release(fne);
+		//}
 
 		// drain the queues
 		int rv;
@@ -1770,11 +1770,11 @@ fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 
 				// create corresponding fabric node element - add it to the hash table
 				if (RCHASH_OK != rchash_get(g_fabric_node_element_hash, &(events[i].nodeid), sizeof(cf_node), (void **) &fne)) {
-					fne = fne_create(events[i].nodeid);
-					cf_debug(AS_FABRIC, "fhe(): created an FNE %p for node %p from HB_NODE_ARRIVE", fne, events[i].nodeid);
+					fne_create(events[i].nodeid);
+					cf_debug(AS_FABRIC, "fne(): created an FNE for node %p from HB_NODE_ARRIVE", events[i].nodeid);
 				} else {
-					cf_debug(AS_FABRIC, "fhe(): found an already-existing FNE %p for node %p from HB_NODE_ARRIVE", fne, events[i].nodeid);
-					cf_debug(AS_FABRIC, "fhe(): need to let go of it ~~ before fne_release(%p) count:%d", fne, cf_rc_count(fne));
+					cf_debug(AS_FABRIC, "fne(): found an already-existing FNE %p for node %p from HB_NODE_ARRIVE", fne, events[i].nodeid);
+					cf_debug(AS_FABRIC, "fne(): need to let go of it ~~ before fne_release(%p) count:%d", fne, cf_rc_count(fne));
 					fne_release(fne);
 				}
 				cf_info(AS_FABRIC, "fabric: node %"PRIx64" arrived", events[i].nodeid);
@@ -2295,7 +2295,10 @@ as_fabric_transact_reply(msg *m, void *transact_data) {
 	// TODO: make sure it's in the outbound hash?
 
 	// send the response for the first time
-	as_fabric_send(ftr->node, m, AS_FABRIC_PRIORITY_MEDIUM);
+	int rv = 0;
+	if ((rv = as_fabric_send(ftr->node, m, AS_FABRIC_PRIORITY_MEDIUM)) != 0) {
+		as_fabric_msg_put(m);
+	}
 
 	return(0);
 }
@@ -2577,7 +2580,7 @@ ll_ftx_reduce_fn(cf_ll_element *le, void *udata)
 			}
 		}
 		// Decrement ref count, incremented by rchash_get
-		cf_rc_release(ftx);
+		fabric_transact_xmit_release(ftx);
 	}
 	// Remove it from link list
 	return (CF_LL_REDUCE_DELETE);
@@ -2693,7 +2696,10 @@ fb_hash_dump_reduce_fn(void *key, void *data, void *udata)
 
 	int count = cf_rc_count(fb);
 
-	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %p: %s); fd: %d ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), fb->fd, fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
+	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p; fd: %d ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fd, fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
+	if (fb->fne) {
+		cf_info(AS_FABRIC, "\tfne: %p (node %p: %s)", fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"));
+	}
 
 	*item_num += 1;
 
