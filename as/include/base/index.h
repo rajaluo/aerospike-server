@@ -190,6 +190,11 @@ bool as_index_is_flag_set(const as_index* index, as_index_flag flag) {
 }
 
 static inline
+uint8_t as_index_get_flags(const as_index* index) {
+	return ((as_index_flag_bits*)&index->flex_bits_2)->flag_bits;
+}
+
+static inline
 void as_index_set_flags(as_index* index, as_index_flag flags) {
 	((as_index_flag_bits*)&index->flex_bits_2)->flag_bits |= flags;
 }
