@@ -94,6 +94,8 @@ revision of each submodule is first manually installed in the appropriate
 
 	$ make cleanall -- Delete all existing build products, including built packages.
 
+	$ make cleangit -- Delete all files untracked by Git.  (Use with caution!)
+
 	$ make strip    -- Build "strip(1)"ed versions of the server executables.
 
 ### Advanced Build Options
