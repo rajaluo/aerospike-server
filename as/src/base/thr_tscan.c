@@ -58,28 +58,6 @@
 #include "base/udf_rw.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
-#include "ai_btree.h"
-#include "base/udf_record.h"
-#include "base/udf_memtracker.h"
-
-#include <aerospike/as_list.h>
-#include <aerospike/as_stream.h>
-#include <aerospike/as_rec.h>
-#include <aerospike/as_val.h>
-#include <aerospike/mod_lua.h>
-#include <aerospike/as_buffer.h>
-#include <aerospike/as_serializer.h>
-#include <aerospike/as_msgpack.h>
-#include <aerospike/as_string.h>
-#include <aerospike/as_integer.h>
-#include <aerospike/as_map.h>
-#include <aerospike/as_list.h>
-
-#include <citrusleaf/cf_ll.h>
-
-
-#include "base/as_aggr.h"
-
 
 
 #define SCAN_JOB_TYPE_PARTITION 1   // scans by iterating through partitions
@@ -898,7 +876,6 @@ as_tscan(as_transaction *tr)
 		set_name[set_name_len] = '\0';
 
 		set_id = as_namespace_get_set_id(ns, set_name);
-		cf_warning(AS_SCAN, "Sumit setname:%s set_id:%u",set_name,set_id);
 
 		// A non-empty set name that isn't found should not trigger a scan
 		// of the whole namespace.
@@ -1031,10 +1008,10 @@ as_tscan(as_transaction *tr)
 	// tr->proto_fd_h remains valid so caller can send error msg to client).
 	int rsp = 0;
 	if (job->hasudf) {
-		rsp = tscan_start_udfjob(job, tr, scan_disconnected_job); //Sumit check here
+		rsp = tscan_start_udfjob(job, tr, scan_disconnected_job);
 
 	} else {
-		rsp = tscan_start_job(job, tr, scan_disconnected_job); ////Sumit check here
+		rsp = tscan_start_job(job, tr, scan_disconnected_job);
 
 	}
 
@@ -1135,9 +1112,6 @@ extern dig_arr_t * getDigestArray(void);
 int
 tscan_add_digest_list(cf_ll * recl, cf_digest * digest, int * dnum )
 {
-	//if (!as_sindex_partition_isactive(imd->si->ns, dig)) {
-	//	return 0;
-	//}
 	cf_ll_element *ele = recl->tail;
 	bool create = !ele;
 	dig_arr_t *dt;
@@ -1211,7 +1185,7 @@ tscan_aggr_tree_reduce_fn(as_index *r, void *udata)
 {
 	tscan_aggr_tr_udata_t * d_ptr = (tscan_aggr_tr_udata_t *)(udata);
 	// If this is a valid set, check against the set of the record.
-	if (d_ptr->task->set_id != INVALID_SET_ID) {
+	if (d_ptr->task->set_id != INVALID_SET_ID) { //
 		if (as_index_get_set_id(r) != d_ptr->task->set_id) {
 			cf_detail(AS_SCAN, "Set mismatch %s %s",
 					as_namespace_get_set_name(d_ptr->task->ns, d_ptr->task->set_id),
@@ -1939,10 +1913,6 @@ tscan_partition_thr(void *q_to_wait_on)
 			cf_ll * recl = cf_malloc(sizeof(cf_ll));
 			cf_ll_init(recl, tscan_ll_recl_destroy_fn, false /*no lock*/);
 			if (!recl) {
-				//	qtr->result_code = AS_SINDEX_ERR_NO_MEMORY;
-				//	qctx->n_bdigs        = 0;
-				//	ret = AS_QUERY_ERR;
-				//	goto batchout;
 				cf_warning(AS_SCAN, "unable to create digest list : out of memory error" );
 				job_early_terminate = true;
 				//job->result = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
@@ -1955,7 +1925,7 @@ tscan_partition_thr(void *q_to_wait_on)
 				as_index_reduce_sync(rsv.tree, tscan_aggr_tree_reduce_fn, (void *)&tree_reduce_udata);
 
 				as_result   *res    = as_result_new();
-				int ret                 = as_aggr__process(u.aggr_call, recl, &u, res);
+				int ret             = as_aggr__process(u.aggr_call, recl, &u, res);
 				if (ret != 0) {
 					char *rs = as_module_err_string(ret);
 					if (res->value != NULL) {

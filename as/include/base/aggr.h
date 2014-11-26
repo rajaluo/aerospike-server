@@ -2,23 +2,25 @@
 #pragma once
 
 #include "ai_btree.h"
-#include "base/udf_record.h"
+
 #include "base/udf_memtracker.h"
+#include "base/udf_record.h"
+#include "base/udf_rw.h"
 
-#include <aerospike/as_list.h>
-#include <aerospike/as_stream.h>
-#include <aerospike/as_rec.h>
-#include <aerospike/as_val.h>
-#include <aerospike/mod_lua.h>
-#include <aerospike/as_buffer.h>
-#include <aerospike/as_serializer.h>
-#include <aerospike/as_msgpack.h>
-#include <aerospike/as_string.h>
-#include <aerospike/as_integer.h>
-#include <aerospike/as_map.h>
-#include <aerospike/as_list.h>
+#include "aerospike/as_list.h"
+#include "aerospike/as_stream.h"
+#include "aerospike/as_rec.h"
+#include "aerospike/as_val.h"
+#include "aerospike/mod_lua.h"
+#include "aerospike/as_buffer.h"
+#include "aerospike/as_serializer.h"
+#include "aerospike/as_msgpack.h"
+#include "aerospike/as_string.h"
+#include "aerospike/as_integer.h"
+#include "aerospike/as_map.h"
+#include "aerospike/as_list.h"
 
-#include <citrusleaf/cf_ll.h>
+#include "citrusleaf/cf_ll.h"
 
 typedef enum as_aggr_caller_type
 {
@@ -66,12 +68,14 @@ typedef struct as_aggr_call_s {
 	char                   function[UDF_MAX_STRING_SZ];
 	as_msg_field           * arglist;
 	void                   * caller;
-	as_aggr_caller_intf    * caller_intf;
-	as_stream_hooks        * istream_hooks;
-	as_stream_hooks        * ostream_hooks;
+	const as_aggr_caller_intf    * caller_intf;
+	const as_stream_hooks        * istream_hooks;
+	const as_stream_hooks        * ostream_hooks;
 } as_aggr_call;
 
 as_val * as_aggr_istream_read(const as_stream *s); 
+int as_aggr_call_init(as_aggr_call * call, as_transaction * txn, void *caller,const as_aggr_caller_intf * caller_intf, const as_stream_hooks * istream_hooks, const as_stream_hooks * ostream_hooks, as_namespace *ns, bool is_scan); 
+
 /*
 typedef struct as_aggr_call_s {
 	bool                   active;

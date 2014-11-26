@@ -35,13 +35,13 @@
 
 #include "dynbuf.h"
 
+#include "base/aggr.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/udf_rw.h"
 
-#include "base/as_aggr.h"
 
 // Scan udf types.
 // Client can send either background or client udf (response for every udf).
@@ -120,7 +120,6 @@ typedef struct {
 	cf_vector *         binlist;
 	udf_call *          call;                       // read copy @TODO should be ref counted
 	as_aggr_call *      aggr_call;                       // read copy @TODO should be ref counted
-
 } tscan_task_data;
 
 /* Function declarations */

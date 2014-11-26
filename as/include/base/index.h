@@ -370,7 +370,6 @@ typedef struct as_index_value_array_s{
 	as_index_value indexes[];
 } as_index_value_array;
 
-typedef void (*as_index_bulk_reduce_fn) (struct as_index_value_array_s * i_arr, void *udata);
 extern void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
 extern void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
 

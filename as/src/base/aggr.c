@@ -1,4 +1,7 @@
 
+
+#include <base/as_aggr.h>
+
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -10,42 +13,13 @@
 #include <string.h>
 #include <strings.h>
 
-#include "ai.h"
-#include "ai_btree.h"
-#include "bt.h"
-#include "bt_iterator.h"
-
-#include "base/datamodel.h"
-#include "base/secondary_index.h"
-#include "base/thr_tsvc.h"
-#include "base/transaction.h"
-#include "base/udf_rw.h"
-#include "base/udf_record.h"
-#include "base/udf_memtracker.h"
-#include "fabric/fabric.h"
-
-#include <aerospike/as_list.h>
-#include <aerospike/as_stream.h>
-#include <aerospike/as_rec.h>
-#include <aerospike/as_val.h>
-#include <aerospike/mod_lua.h>
-#include <aerospike/as_buffer.h>
-#include <aerospike/as_serializer.h>
-#include <aerospike/as_msgpack.h>
-#include <aerospike/as_string.h>
-#include <aerospike/as_integer.h>
-#include <aerospike/as_map.h>
-#include <aerospike/as_list.h>
-
-#include <citrusleaf/cf_ll.h>
-#include <base/as_aggr.h>
-#include <base/thr_scan.h>
-
+#include "base/thr_scan.h"
 
 extern const as_list_hooks udf_arglist_hooks;
 
-
-static int as_aggr_aerospike_log(const as_aerospike * a, const char * file, const int line, const int lvl, const char * msg) {
+static int
+as_aggr_aerospike_log(const as_aerospike * a, const char * file, const int line, const int lvl, const char * msg)
+{
 	cf_fault_event(AS_AGGR, lvl, file, NULL, line, (char *) msg);
 	return 0;
 }
@@ -62,7 +36,7 @@ static const as_aerospike_hooks as_aggr_aerospike_hooks = {
     .log              = as_aggr_aerospike_log,
     .get_current_time = NULL,
     .destroy          = NULL
-};  
+};
 
 /**
  * Get a value for a bin of with the given key.
@@ -165,7 +139,7 @@ as_aggr__process(as_aggr_call * ap_call, cf_ll * ap_recl, void * udata, as_resul
 		cf_warning (AS_AGGR, "Could not set up iterator .. possibly out of memory .. Aborting Query !!");
 		ap_call->caller_intf->set_error(ap_call->caller) ; //caller set error
 		cf_debug(AS_AGGR, "AGGR caller %p Aborted at %s:%d", ap_call->caller, __FILE__, __LINE__);
-		ret              = AS_AGGR_ERR;//AS_QUERY_ERR;
+		ret = AS_AGGR_ERR;//AS_QUERY_ERR;
 		goto Cleanup;
 	}
 
@@ -223,9 +197,6 @@ Cleanup:
 	}
 	return ret;
 }
-
-
-
 
 /*
  * Function as_aggr_call_init
@@ -309,6 +280,9 @@ as_aggr_call_destroy(as_aggr_call * call)
 	call->arglist = NULL;
 	call->caller     = NULL;
 }
+
+//declaration 
+extern bool as_query_aggr_match_record(query_record * qrecord);
 
 // only operates on the record as_val in the stream points to
 // and updates the references ... this function has to acquire

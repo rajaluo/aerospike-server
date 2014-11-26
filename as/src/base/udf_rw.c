@@ -161,15 +161,17 @@ send_response(udf_call *call, const char *key, size_t klen, int vtype, void *val
 
 	if (call->udf_type == AS_SCAN_UDF_OP_BACKGROUND) {
 		// If we are doing a background UDF scan, do not send any result back
-		cf_detail(AS_UDF, "UDF: Background transaction, send no result back. "
-				  "Parent job id [%"PRIu64"]", ((tscan_job*)(tr->udata.req_udata))->tid);
-		if(strncmp(key, "FAILURE", 8) == 0)  {
-			cf_atomic_int_incr(&((tscan_job*)(tr->udata.req_udata))->n_obj_udf_failed);
-		} else if(strncmp(key, "SUCCESS", 8) == 0) {
-			cf_atomic_int_incr(&((tscan_job*)(tr->udata.req_udata))->n_obj_udf_success);
+		if (tr->udata.req_type == UDF_SCAN_REQUEST) {
+			cf_detail(AS_UDF, "UDF: Background transaction, send no result back. "
+					"Parent job id [%"PRIu64"]", ((tscan_job*)(tr->udata.req_udata))->tid);
+			if (strncmp(key, "FAILURE", 8) == 0) {
+				cf_atomic_int_incr(&((tscan_job*)(tr->udata.req_udata))->n_obj_udf_failed);
+			} else if (strncmp(key, "SUCCESS", 8) == 0) {
+				cf_atomic_int_incr(&((tscan_job*)(tr->udata.req_udata))->n_obj_udf_success);
+			}
 		}
 		return 0;
-	} else if(call->udf_type == AS_SCAN_UDF_OP_UDF) {
+	} else if (call->udf_type == AS_SCAN_UDF_OP_UDF) {
 		// Do not release fd now, scan will do it at the end of all internal
 		// 	udf transactions
 		cf_detail(AS_UDF, "UDF: Internal udf transaction, do not release fd");
@@ -1056,7 +1058,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		}
 
 		// TODO this is not the right place for counter, put it at proper place
-		if(tr->udata.req_udata) {
+		if(tr->udata.req_udata && tr->udata.req_type == UDF_SCAN_REQUEST) {
 			cf_atomic_int_add(&((tscan_job*)(tr->udata.req_udata))->n_obj_udf_updated, (*op == UDF_OPTYPE_WRITE));
 		}
 

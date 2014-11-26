@@ -103,6 +103,7 @@
 #include "bt.h"
 #include "bt_iterator.h"
 
+#include <base/aggr.h>
 #include "base/datamodel.h"
 #include "base/secondary_index.h"
 #include "base/thr_tsvc.h"
@@ -126,10 +127,8 @@
 #include <aerospike/as_list.h>
 
 #include <citrusleaf/cf_ll.h>
-#include <base/as_aggr.h>
 
 // parameter read off from a transaction
-//#define UDF_MAX_STRING_SZ 128
 
 extern cf_vector * as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp);
 extern int as_query__queue(as_query_transaction *qtr);
@@ -164,17 +163,6 @@ typedef enum {
 	AS_QUERY_MRJ    = 3
 } as_query_type;
 
-#if 0
-typedef struct query_agg_call_s {
-	bool                   active;
-	as_transaction *       tr;
-	as_query_transaction * qtr;
-	char                   filename[UDF_MAX_STRING_SZ];
-	char                   function[UDF_MAX_STRING_SZ];
-	as_msg_field *         arglist;
-} query_agg_call;
-#endif
-
 struct as_query_transaction_s {
 
 	// PROPERTIES
@@ -193,7 +181,6 @@ struct as_query_transaction_s {
 	cf_vector       * binlist;
 	udf_call          call;     // Record UDF Details
 	as_aggr_call      agg_call; // Stream UDF Details 
-	//query_agg_call    agg_call; // Stream UDF Details
 	as_sindex_qctx    qctx;     // Secondary Index details
 
 	// OUTPUT
@@ -329,11 +316,6 @@ int                  as_query__add_response(void *qtr,
 void                 as_query__transaction_done(as_query_transaction *qtr);
 int                  as_qtr__release(as_query_transaction *qtr, char *fname, int lineno);
 int                  as_qtr__reserve(as_query_transaction *qtr, char *fname, int lineno);
-
-//int                  as_query__agg_call_init   (query_agg_call *,
-//							as_transaction *, as_query_transaction *);
-//void                 as_query__agg_call_destroy(query_agg_call *);
-//int                  as_query__agg(query_agg_call *, cf_ll *recl, void *udata, as_result* res);
 
 #define AS_QUERY_INCREMENT_ERR_COUNT(qtr)   \
 	if(qtr->job_type == AS_QUERY_AGG) {    \
@@ -1100,7 +1082,6 @@ as_query__process_aggreq(as_query_request *qagg)
 	if (QTR_FAILED(qtr))    goto Cleanup;
 	as_result   *res    = as_result_new();
 	ret                 = as_aggr__process(&qtr->agg_call, qagg->recl, NULL, res);
-	//ret                 = as_query__agg(&qtr->agg_call, qagg->recl, NULL, res);
 
 	if (ret != 0) {
         char *rs = as_module_err_string(ret);
@@ -2166,22 +2147,6 @@ as_query__queue(as_query_transaction *qtr)
 
 #define as_query__udf_call_init udf_call_init
 
-/*
- *	Arguments -
- *		tr - transaction coming from the client.
- *
- *	Returns -
- *		AS_QUERY_OK  - on success.
- *		AS_QUERY_ERR - on failure. That means the query was not even started.
- *
- * 	Notes -
- * 		Allocates and reserves the qtr if query_in_transaction_thr
- * 		is set to false or data is in not in memory.
- * 		Has the responsibility to free tr->msgp.
- * 		Either call as_query__transaction_done or Cleanup to free the msgp
- */
-
-
 /**
  * Initialize a new query_agg_call.
  * This populates the query_agg_call from information in the current transaction.
@@ -2191,7 +2156,41 @@ as_query__queue(as_query_transaction *qtr)
  * @return a new udf_call
  */
 
+as_stream_status
+query_agg_ostream_write(const as_stream *s, as_val *v)
+{
+	as_query_transaction *qtr = as_stream_source(s);
+	if (!v) {
+		return AS_STREAM_OK;
+	}
+	if (as_query__add_val_response((void *)qtr, v, true)) {
+		return AS_STREAM_ERR;
+	}
+	as_val_destroy(v);
+	return AS_STREAM_OK;
+}
 
+const as_stream_hooks query_agg_istream_hooks = {
+	.destroy  = NULL,
+	.read     = as_aggr_istream_read,
+	.write    = NULL
+};
+
+const as_stream_hooks query_agg_ostream_hooks = {
+	.destroy  = NULL,
+	.read     = NULL,
+	.write    = query_agg_ostream_write
+};
+
+void as_query__set_error (void * caller )
+{
+	((as_query_transaction *)caller)->err = true;
+}
+
+as_aggr_caller_type as_query__get_type ( )
+{
+	return AS_AGGR_QUERY;
+}
 
 bool
 as_query__mem_op(mem_tracker *mt, uint32_t num_bytes, memtracker_op op)
@@ -2233,48 +2232,27 @@ END:
 	return ret;
 }
 
-as_stream_status
-query_agg_ostream_write(const as_stream *s, as_val *v)
-{
-	as_query_transaction *qtr = as_stream_source(s);
-	if (!v) {
-		return AS_STREAM_OK;
-	}
-	if (as_query__add_val_response((void *)qtr, v, true)) {
-		return AS_STREAM_ERR;
-	}
-	as_val_destroy(v);
-	return AS_STREAM_OK;
-}
-
-const as_stream_hooks query_agg_istream_hooks = {
-	.destroy  = NULL,
-	.read     = as_aggr_istream_read,
-	.write    = NULL
-};
-
-const as_stream_hooks query_agg_ostream_hooks = {
-	.destroy  = NULL,
-	.read     = NULL,
-	.write    = query_agg_ostream_write
-};
-
-void as_query__set_error (void * caller )
-{
-	((as_query_transaction *)caller)->err = true;
-}
-
-as_aggr_caller_type as_query__get_type ( )
-{
-	return AS_AGGR_QUERY;
-}
-
 const as_aggr_caller_intf as_query_aggr_caller_qintf = {
 	.set_error = as_query__set_error,
 	.mem_op = as_query__mem_op,
 	.get_type = as_query__get_type
 };
 
+
+/*
+ *	Arguments -
+ *		tr - transaction coming from the client.
+ *
+ *	Returns -
+ *		AS_QUERY_OK  - on success.
+ *		AS_QUERY_ERR - on failure. That means the query was not even started.
+ *
+ * 	Notes -
+ * 		Allocates and reserves the qtr if query_in_transaction_thr
+ * 		is set to false or data is in not in memory.
+ * 		Has the responsibility to free tr->msgp.
+ * 		Either call as_query__transaction_done or Cleanup to free the msgp
+ */
 
 int
 as_query(as_transaction *tr)
