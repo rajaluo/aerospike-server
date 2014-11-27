@@ -2483,12 +2483,14 @@ Out:
 	uint16_t set_id = as_index_get_set_id(r);
 	as_record_done(&r_ref, rsv->ns);
 
-	// Do not do XDR write if
-	// 1. If the write is a migration write
-	// 2. If the write is the XDR write and forwarding is not enabled.
+	// Do XDR write if
+	// 1. If the write is not a migration write and
+	// 2. If the write is a non-XDR write or 
+	// 3. If the write is a XDR write and forwarding is enabled (either globally or for namespace).
 	if ((info & RW_INFO_MIGRATION) != RW_INFO_MIGRATION) {
-		if (((info & RW_INFO_XDR) != RW_INFO_XDR)
-				|| (g_config.xdr_cfg.xdr_forward_xdrwrites == true)) {
+		if (   ((info & RW_INFO_XDR) != RW_INFO_XDR)
+			|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
+				|| (rsv->ns->ns_forward_xdr_writes == true))) {
 			xdr_write(rsv->ns, *keyd, r->generation, masternode, false, set_id);
 		}
 	}
@@ -3003,8 +3005,9 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 			// If this delete is a result of XDR shipping, dont write it to the digest pipe
 			// unless the user configured the server to forward the XDR writes. If this is
 			// a normal delete issued by application, write it to the digest pipe.
-			if ((m && !(m->info1 & AS_MSG_INFO1_XDR))
-					|| (g_config.xdr_cfg.xdr_forward_xdrwrites == true)) {
+			if (   (m && !(m->info1 & AS_MSG_INFO1_XDR))
+				|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
+					|| (ns->ns_forward_xdr_writes == true))) {
 				cf_debug(AS_RW, "write delete: Got delete from user.");
 				xdr_write(ns, tr->keyd, tr->generation, masternode, true, set_id);
 			}
@@ -4418,11 +4421,13 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	uint16_t set_id = as_index_get_set_id(r_ref.r);
 	as_record_done(&r_ref, ns);
 
-	//If this write is a result of XDR shipping, dont write it to the digest pipe
-	//unless the user configured the server to forward the XDR writes. If this is
-	//a normal write, write it to the digest pipe.
-	if (!(m->info1 & AS_MSG_INFO1_XDR)
-			|| (g_config.xdr_cfg.xdr_forward_xdrwrites == true)) {
+	// Do XDR write if
+	// 1. If the write is not a migration write and
+	// 2. If the write is a non-XDR write or 
+	// 3. If the write is a XDR write and forwarding is enabled (either globally or for namespace).
+	if (   !(m->info1 & AS_MSG_INFO1_XDR)
+		|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
+			|| (ns->ns_forward_xdr_writes == true))) {
 		xdr_write(ns, tr->keyd, r->generation, masternode, false, set_id);
 	} else {
 		cf_detail(AS_RW,

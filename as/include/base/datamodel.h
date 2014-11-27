@@ -926,11 +926,14 @@ struct as_namespace_s {
 	bool						allow_versions;	// allow consistancy errors to create duplicate versions
 	bool						single_bin;		// restrict the namespace to objects with exactly one bin
 	bool						data_in_index;	// with single-bin, allows warm restart for data-in-memory (with storage-engine device)
-	bool						enable_xdr;
-	bool 						sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping.
 	bool 						disallow_null_setname;
 	bool                        ldt_enabled;
 	uint32_t					ldt_gc_sleep_us;
+
+	/* XDR */
+	bool						enable_xdr;
+	bool 						sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping.
+	bool 						ns_forward_xdr_writes; // namespace-level flag to enable forwarding of xdr writes
 
 	/* The server default read consistency level for this namespace. */
 	as_policy_consistency_level read_consistency_level;
