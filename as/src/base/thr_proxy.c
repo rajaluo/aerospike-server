@@ -245,6 +245,7 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void *) wr->msgp, as_proto_size_get(&wr->msgp->proto), MSG_SET_HANDOFF_MALLOC);
 	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, as_paxos_get_cluster_key());
 	msg_set_uint32(m, PROXY_FIELD_TIMEOUT_MS, wr->msgp->msg.transaction_ttl);
+	wr->msgp = 0;
 
 	// If it is shipped op.
 	uint32_t info = 0;
