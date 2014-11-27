@@ -289,6 +289,8 @@ typedef struct migration_t {
 	void				*udata;
 
 	uint64_t cluster_key;
+
+	as_partition_mig_tx_state txstate;
 } migration;
 
 /*
@@ -456,7 +458,13 @@ migrate_recv_control_destroy(void *parm)
 	mc_l.incoming_ldt_version = mc->incoming_ldt_version;
 	mc_l.pid                  = mc->pid;
 
+	
+
 	if (mc->rsv.p) {
+		if (mc->rsv.p->partition_id == 1715) {
+			cf_info(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld Finished Receiving Migration !! %s:%d:%d:%d",
+				  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+		}
 		as_partition_release(&mc->rsv);
 		cf_atomic_int_decr(&g_config.migrx_tree_count);
 	}
@@ -544,6 +552,11 @@ as_ldt_fill_mig_msg(migration *mig, msg *m, pickled_record *pr, bool is_subrecor
 		return 0;
 	}
 
+	if (!is_subrecord) {
+		cf_assert((mig->txstate == AS_PARTITION_MIG_TX_STATE_RECORD),
+				  AS_PARTITION, CF_CRITICAL,
+				  "Unexpected Partition Migration State at Source %d:%d", mig->txstate, mig->rsv.p->partition_id);
+	}
 	msg_set_uint64(m, MIG_FIELD_VERSION, pr->version);
 	uint32_t info = 0;
 	if (is_subrecord) {
@@ -588,8 +601,10 @@ as_ldt_fill_mig_msg(migration *mig, msg *m, pickled_record *pr, bool is_subrecor
 int
 as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 {
-	if (!pr || !rd)
+	if (!pr || !rd) {
+		cf_warning(AS_MIGRATE, "Internal Migration error pr or rd unexpectedly NULL");
 		return -1;
+	}
 	pr->pkey       = cf_digest_zero;
 	pr->ekey       = cf_digest_zero;
 	pr->version    = 0;
@@ -611,8 +626,14 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 			cf_detail(AS_MIGRATE, "LDT_MIGRATION Could find PARENT key in subrec rv=%d", rv);
 		}
 		is_subrec = true;
-	} else if (as_ldt_precord_is_parent(pr)) {
-		is_parent = true;
+	} else {
+		// When tree is being reduced for the record the state should already be STATE_RECORD
+		cf_assert((mig->txstate == AS_PARTITION_MIG_TX_STATE_RECORD),
+				  AS_PARTITION, CF_CRITICAL,
+				  "Unexpected Partition Migration State at Source %d:%d", mig->txstate, mig->rsv.p->partition_id);
+		if (as_ldt_precord_is_parent(pr)) {
+			is_parent = true;
+		}
 	}
 
 	uint64_t new_version = mig->rsv.p->current_outgoing_ldt_version;
@@ -631,6 +652,10 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 			pr->version = old_version;
 		}
 	} else if (is_subrec) {
+		cf_assert((mig->txstate == AS_PARTITION_MIG_TX_STATE_SUBRECORD),
+				  AS_PARTITION, CF_CRITICAL,
+				  "Unexpected Partition Migration State at Source %d:%d", mig->txstate, mig->rsv.p->partition_id);
+
 		uint64_t old_version = as_ldt_subdigest_getversion(&pr->key);
 		if (new_version) {
 			cf_detail_digest(AS_MIGRATE, &pr->key, "LDT_MIGRATION Subrecord Setting New Version %ld from %ld %"PRIx64"",
@@ -683,12 +708,12 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 	msg_get_uint32(m, MIG_FIELD_PVOID_TIME, &c->pvoid_time);
 
 	if (COMPONENT_IS_LDT_SUB(c)) {
-		cf_assert((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD),
-				  AS_PARTITION, CF_CRITICAL,
-				  "Unexpected Partition Migration State %d:%d", mc->rxstate, mc->rsv.p->partition_id);
 		cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming version %ld Started Receiving Sub Record Migration !! %s:%d:%d:%d",
 			  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
 			  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+		cf_assert((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD),
+				  AS_PARTITION, CF_CRITICAL,
+				  "Unexpected Partition Migration State %d:%d", mc->rxstate, mc->rsv.p->partition_id);
 	} else if (COMPONENT_IS_LDT_DUMMY(c)) {
 		cf_crash(AS_MIGRATE, "Invalid Component Type Dummy received by migration");
 	} else {
@@ -1822,7 +1847,7 @@ migrate_tree_reduce(as_index_ref *r_ref, void *udata)
 	if (mig->pickled_array == 0) {
 		// find the size, and malloc the pickled_array
 		// size is not guarenteed to be correct now, because this
-		if (mig->rsv.p->txstate & AS_PARTITION_MIG_TX_STATE_SUBRECORD) {
+		if (mig->txstate & AS_PARTITION_MIG_TX_STATE_SUBRECORD) {
 			mig->pickled_alloc = mig->rsv.sub_tree->elements + 20;
 		} else {
 			mig->pickled_alloc = mig->rsv.tree->elements + 20;
@@ -1832,8 +1857,8 @@ migrate_tree_reduce(as_index_ref *r_ref, void *udata)
 		mig->pickled_size = 0;
 	}
 	if (mig->pickled_size >= mig->pickled_alloc) {
-		cf_info(AS_MIGRATE, "tuning parameter: rcrb-reduce hit pickled array limit: alloc %d size %d growing",
-				mig->pickled_alloc, mig->pickled_size);
+		cf_info(AS_MIGRATE, "Tuning parameter: rcrb-reduce hit pickled array limit: id %d pid %d alloc %d size %d growing",
+				mig->id, mig->rsv.pid, mig->pickled_alloc, mig->pickled_size);
 		mig->pickled_alloc += 100;
 		mig->pickled_array = cf_realloc(mig->pickled_array, mig->pickled_alloc * sizeof(pickled_record) );
 		cf_assert(mig->pickled_array, AS_MIGRATE, CF_CRITICAL, "malloc");
@@ -2457,7 +2482,10 @@ migrate_xmit_fn(void *arg)
 			}
 		}
 
-		mig->rsv.p->txstate = AS_PARTITION_MIG_TX_STATE_RECORD;
+		if (shash_get_size( mig->retransmit_hash ) > 0) {
+			cf_warning(AS_MIGRATE, "Unexpected Retransmit hash size");
+		}
+		mig->txstate = AS_PARTITION_MIG_TX_STATE_RECORD;
 		if (AS_PARTITION_HAS_DATA(mig->rsv.p)) {
 			cf_detail(AS_MIGRATE, "LDT_MIGRATION: Started Sending Record Migration !! %s:%d:%d:%d",
 					  mig->rsv.ns->name, mig->rsv.p->partition_id, mig->rsv.p->vp->elements, mig->rsv.p->sub_vp->elements);
@@ -2516,7 +2544,7 @@ CompletedMigrate:
 
 FinishedMigrate:
 
-		mig->rsv.p->txstate = AS_PARTITION_MIG_TX_STATE_NONE;
+		mig->txstate = AS_PARTITION_MIG_TX_STATE_NONE;
 		mig->rsv.p->current_outgoing_ldt_version = 0;
 		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Finished Sending Migration !! %s:%d:%d:%d",
 				  mig->rsv.ns->name, mig->rsv.p->partition_id, mig->rsv.p->vp->elements, mig->rsv.p->sub_vp->elements);
@@ -2651,12 +2679,12 @@ as_migrate(cf_node *dst_node, uint dst_sz, as_namespace *ns, as_partition_id par
 		if (AS_PARTITION_HAS_DATA(mig->rsv.p))
 			cf_detail(AS_PARTITION, "LDT_MIGRATION Generated new Version @ start of migration %d:%ld",
 				  mig->rsv.p->partition_id, mig->rsv.p->current_outgoing_ldt_version);
-		mig->rsv.p->txstate = AS_PARTITION_MIG_TX_STATE_SUBRECORD;
+		mig->txstate = AS_PARTITION_MIG_TX_STATE_SUBRECORD;
 		cf_detail(AS_MIGRATE, "LDT_MIGRATION: OutGoing Version %ld Started Sending SubRecord Migration !! %s:%d:%d:%d",
 				  mig->rsv.p->current_outgoing_ldt_version, mig->rsv.ns->name, mig->rsv.p->partition_id, 
 				  mig->rsv.p->vp->elements, mig->rsv.p->sub_vp->elements);
 	} else {
-		mig->rsv.p->txstate = AS_PARTITION_MIG_TX_STATE_RECORD;
+		mig->txstate = AS_PARTITION_MIG_TX_STATE_RECORD;
 		mig->rsv.p->current_outgoing_ldt_version = 0;
 	}
 

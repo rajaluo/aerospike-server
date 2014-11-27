@@ -422,7 +422,6 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 	p->origin = 0;
 	p->target = 0;
 	p->state = AS_PARTITION_STATE_ABSENT;
-	p->txstate = AS_PARTITION_MIG_TX_STATE_NONE;
 	p->pending_writes = 0;
 	p->pending_migrate_tx = 0;
 	p->pending_migrate_rx = 0;
@@ -585,7 +584,6 @@ void set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
 		as_index_tree_release(sub_t, ns);
 	}
 
-	p->txstate     = AS_PARTITION_MIG_TX_STATE_NONE;
 	p->current_outgoing_ldt_version = 0;
 	clear_partition_version_in_storage(ns, pid, flush);
 	memset(vinfo, 0, sizeof(as_partition_vinfo));
@@ -1734,7 +1732,6 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 
 			as_partition *p = &ns->partitions[j];
 			char state_c = as_partition_getstate_str(p->state);
-			char m_tx_state_c = as_partition_gettxmigstate_str(p->txstate);
 
 			// find myself in the replica list
 			int replica_idx;
@@ -1766,8 +1763,6 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 			cf_dyn_buf_append_uint64(db, (uint64_t) p->vp->elements);      // Records
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, (uint64_t) p->sub_vp->elements);  // Subrecords
-			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_char(db, m_tx_state_c);           // migration tx state
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->current_outgoing_ldt_version); // Current migrate out version ...
 			// no meaning if migration is finished
@@ -3196,7 +3191,6 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 			 */
 			p->pending_migrate_tx = 0;
 			p->pending_migrate_rx = 0;
-			p->txstate = AS_PARTITION_MIG_TX_STATE_NONE;
 			memset(p->replica_tx_onsync, 0, sizeof(p->replica_tx_onsync));
 
 			/* Reinitialize duplication list */

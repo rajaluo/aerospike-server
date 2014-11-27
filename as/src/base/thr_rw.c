@@ -2326,6 +2326,9 @@ as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
 					cf_detail_digest(AS_RW, keyd, "No Parent record setting source version for subrecord");
 					type = 2;
 				}
+			} else {
+				// ldt_version should be set as source
+				as_ldt_subdigest_setversion(keyd, linfo->ldt_source_version);
 			}
 			cf_detail_digest(AS_RW, keyd, "Has %d type Version %ld for %s", type, as_ldt_subdigest_getversion(keyd), (info & RW_INFO_LDT_ESR) ? "esr" : "subrec");
 		}

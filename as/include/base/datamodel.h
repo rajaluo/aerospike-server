@@ -647,7 +647,6 @@ struct as_partition_s {
 	 * target: an actual master that we're migrating to */
 	cf_node origin, target;
 	as_partition_state state;  // used to be consistency
-	as_partition_mig_tx_state txstate;
 	int pending_writes;  // one thread polls on this going to 0
 	int pending_migrate_tx, pending_migrate_rx;
 	bool replica_tx_onsync[AS_CLUSTER_SZ];
