@@ -365,6 +365,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 	// Case 2: Originating node.
 	else {
 		cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Got Op Response");
+		pthread_mutex_lock(&wr->lock);
 		if (wr->proto_fd_h) {
 			if (!wr->proto_fd_h->fd) {
 				cf_warning_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing fd in proto_fd ");
@@ -401,22 +402,26 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 				}
 				cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Response Sent to Client");
 			}
+			wr->proto_fd_h->t_inprogress = false;
+			AS_RELEASE_FILE_HANDLE(wr->proto_fd_h);
+			wr->proto_fd_h = 0;
 		} else {
 			// this may be NULL if the request has already timedout and the wr proto_fd_h
 			// will be cleaned up by then
 			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing proto_fd ");
 			
-			pthread_mutex_lock(&wr->lock);
 			if (udf_rw_needcomplete_wr(wr)) {
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
 				udf_rw_complete(&tr, 0, __FILE__, __LINE__);
 				if (tr.proto_fd_h) {
+					tr.proto_fd_h->t_inprogress = false;
 					AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
+					tr.proto_fd_h = 0;
 				}
 			}
-			pthread_mutex_unlock(&wr->lock);
 		}
+		pthread_mutex_unlock(&wr->lock);
 	}
 
 	WR_RELEASE(pr->wr);
