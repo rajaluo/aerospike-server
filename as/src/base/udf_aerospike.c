@@ -239,11 +239,6 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 	// set to be 1 wblock size now @TODO!
 	uint32_t pbytes = 0;
 	int ret = 0;
-	if (!rd->ns->storage_data_in_memory && !urecord->particle_data) {
-		urecord->particle_data = cf_malloc(rd->ns->storage_write_block_size);
-		urecord->cur_particle_data = urecord->particle_data;
-		urecord->end_particle_data = urecord->particle_data + rd->ns->storage_write_block_size;
-	}
 
 	cf_detail(AS_UDF, "udf_setbin: bin %s type %d ", bname, type );
 
@@ -506,7 +501,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	// successfully generally.
 
 	// In first iteration, just calculate how many new bins need to be created
-	for(int i = 0; i < urecord->nupdates; i++ ) {
+	for(uint i = 0; i < urecord->nupdates; i++ ) {
 		if ( urecord->updates[i].dirty ) {
 			char *      k = urecord->updates[i].name;
 			if ( k != NULL ) {
@@ -528,20 +523,32 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		as_bin_allocate_bin_space(urecord->r_ref->r, rd, delta_bins);
 	}
 
+	if (!rd->ns->storage_data_in_memory && !urecord->particle_data) {
+		// 256 as upper bound on the LDT control bin, we may write version below
+		// leave it at the end for its use
+		urecord->particle_data = cf_malloc(rd->ns->storage_write_block_size + 256);
+		urecord->cur_particle_data = urecord->particle_data;
+		urecord->end_particle_data = urecord->particle_data + rd->ns->storage_write_block_size;
+	}
+
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns); 
 	if (has_sindex) {
 		SINDEX_GRLOCK();
 	}
+	bool is_record_dirty = false;
+	bool is_record_flag_dirty = false;
+	uint8_t old_index_flags = as_index_get_flags(rd->r);
+	uint8_t new_index_flags = 0;
 
 	// In second iteration apply updates.
-	for(int i = 0; i < urecord->nupdates; i++ ) {
+	for(uint i = 0; i < urecord->nupdates; i++ ) {
+		urecord->updates[i].oldvalue  = NULL;
+		urecord->updates[i].washidden = false;
 		if ( urecord->updates[i].dirty && rc == 0) {
 
 			char *      k = urecord->updates[i].name;
 			as_val *    v = urecord->updates[i].value;
 			bool        h = urecord->updates[i].ishidden;
-			urecord->updates[i].oldvalue  = NULL;
-			urecord->updates[i].washidden = false;
 
 			if ( k != NULL ) {
 				if ( v == NULL || v->type == AS_NIL ) {
@@ -560,11 +567,29 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 					urecord->updates[i].washidden = udf_record_bin_ishidden(urecord, k);
 					rc = udf_aerospike_setbin(urecord, k, v, h);
 					if (rc) {
-						failmax = i + 1;
+						failmax = i;
 						goto Rollback;
 					}
 				}
 			}
+			is_record_dirty = true;
+		}
+	}
+
+	if (urecord->ldt_rectype_bits) {
+		if (urecord->ldt_rectype_bits < 0) {
+			// ldt_rectype_bits is negative in case we want to reset the bits 
+			uint8_t rectype_bits = urecord->ldt_rectype_bits * -1; 
+			new_index_flags = old_index_flags & ~rectype_bits;
+		} else { 
+			new_index_flags = old_index_flags | urecord->ldt_rectype_bits;  
+		} 
+	
+		if (new_index_flags != old_index_flags) {
+			as_index_clear_flags(rd->r, old_index_flags);
+			as_index_set_flags(rd->r, new_index_flags);
+			is_record_flag_dirty = true;
+			cf_detail_digest(AS_RW, &urecord->tr->keyd, "Setting index flags from %d to %d new flag %d", old_index_flags, new_index_flags, as_index_get_flags(rd->r));
 		}
 	}
 
@@ -573,6 +598,20 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		uint8_t rec_props_data[rec_props_data_size];
 		if (rec_props_data_size > 0) {
 			as_storage_record_set_rec_props(rd, rec_props_data);
+		}
+
+		// Version is set in the end after record size check. Setting version won't change the size of
+		// the record. And if it were before size check then this setting of version as well needs to
+		// be backed out.
+		// TODO: Add backout logic would work till very first create call of LDT end up crossing over
+		// record boundary
+		if (as_ldt_record_is_parent(rd->r)) {
+			int rv = as_ldt_parent_storage_set_version(rd, urecord->lrecord->version, urecord->end_particle_data);
+			if (rv < 0) {
+				cf_warning(AS_LDT, "udf_aerospike__apply_update_atomic: Internal Error "
+							" [Failed to set the version on storage rv=%d]... Fail",rv);
+				goto Rollback;
+			}
 		}
 
 		if (! as_storage_record_size_and_check(rd)) {
@@ -585,29 +624,28 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		SINDEX_GUNLOCK();
 	}
 
-	for(int i = 0; i < urecord->nupdates; i++ ) {
-		if ((urecord->updates[i].dirty)
-				&& (urecord->updates[i].oldvalue)) {
-			as_val_destroy(urecord->updates[i].oldvalue);
-			cf_debug(AS_UDF, "REGULAR as_val_destroy()");
-		}
+	// If there were updates do miscellaneous successful commit
+	// tasks
+	if (is_record_dirty 
+			|| is_record_flag_dirty
+			|| (urecord->flag & UDF_RECORD_FLAG_METADATA_UPDATED)) {
+		// Set updated flag to true
+		urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
+	
+		// Set up record to be flushed to storage
+		urecord->rd->write_to_device = true;
 	}
-	// Commit successful do miscellaneous task
-	// Set updated flag to true
-	urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
 
-	// Set up record to be flushed to storage
-	urecord->rd->write_to_device = true;
-
-	// Before committing to storage set the rec_type_bits ..
-	cf_detail(AS_RW, "TO INDEX              Digest=%"PRIx64" bits %d %p",
-		*(uint64_t *)&urecord->tr->keyd.digest[8], urecord->ldt_rectype_bits, urecord);
-	as_index_set_flags(rd->r, urecord->ldt_rectype_bits);
-
-	// Clean up cache and start from 0 update again. All the changes
-	// made here will if flush from write buffer to storage goes
-	// then will never be backed out.
-	udf_record_cache_free(urecord);
+	// Clean up oldvalue cache and reset dirty. All the changes made 
+	// here has made to the particle buffer. Nothing will now be backed out.
+	for (uint i = 0; i < urecord->nupdates; i++) {
+		udf_record_bin * bin = &urecord->updates[i];
+		if (bin->oldvalue != NULL ) {
+			as_val_destroy(bin->oldvalue);
+			bin->oldvalue = NULL;
+		}
+		bin->dirty    = false;
+	}
 	return rc;
 
 Rollback:
@@ -639,8 +677,21 @@ Rollback:
 			}
 		}
 	}
+
+	if (is_record_flag_dirty) {
+		as_index_clear_flags(rd->r, new_index_flags);
+		as_index_set_flags(rd->r, old_index_flags);
+		is_record_flag_dirty = false;
+	}
+
 	if (has_sindex) {
 		SINDEX_GUNLOCK();
+	}
+
+	// Reset the flat size in case the stuff is backedout !!! it should not
+	// fail in the backout code ...
+	if (! as_storage_record_size_and_check(rd)) {
+		cf_warning(AS_LDT, "Does not fit even after rollback... it is trouble");
 	}
 
 	// Do not clean up the cache in case of failure

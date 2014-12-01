@@ -1240,10 +1240,8 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 		stack_particles_sz = as_record_buf_get_stack_particles_sz(c->record_buf);
 	}
 
-	// Overallocate because we are going to write version below... in case it is parent
-	// record ... max 256k we do not anyways have pickled record with storage on disk
-	// > 128k .. No worry about overflowing stack
-	uint8_t stack_particles[2 * stack_particles_sz]; // stack allocate space for new particles when data on device
+	// 256 as upper bound on the LDT control bin, we may write version below
+	uint8_t stack_particles[stack_particles_sz + 256]; // stack allocate space for new particles when data on device
 	uint8_t *p_stack_particles = stack_particles;
 
 	as_record_set_properties(rd, &c->rec_props);
@@ -1259,25 +1257,11 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 	// flatten gets called only for migration .. because there is no duplicate
 	// resolution .. there is only winner resolution
 	if (COMPONENT_IS_MIG(c) && COMPONENT_IS_LDT_PARENT(c)) {
-
-		uint64_t old_version = 0;
-		if (as_ldt_parent_storage_get_version(rd, &old_version)) {
-			cf_warning(AS_RECORD, "Could not get the version in the parent record");
-		}
-		if (old_version != c->version) {
-			if (as_ldt_parent_storage_set_version(rd, c->version, &p_stack_particles)) {
-				cf_warning(AS_LDT, "LDT_MERGE Failed to write version in %"PRIx64" rv=%d", &rd->keyd, c->version);
-			} else {
-#if 0
-				uint64_t check_version = 0;
-				if (as_ldt_parent_storage_get_version(rd, &check_version)) {
-					cf_detail(AS_MIGRATE, "Not able to find version in parent record");
-				}
-				cf_info(AS_MIGRATE, "LDT_MIGRATION Parent digest %"PRIx64" changed from->to ver [%ld %ld %ld] "
-						"gen [%d %d] void_time [%d %d]", *(uint64_t *)&keyd, old_version, c->version, check_version,
-						r->generation, c->generation, r->void_time, c->void_time);
-#endif
-			}
+		int pbytes = as_ldt_parent_storage_set_version(rd, c->version, p_stack_particles);
+		if (pbytes < 0) {
+			cf_warning_digest(AS_LDT, &rd->keyd, "LDT_MERGE Failed to write version in rv=%d", pbytes);
+		} else {
+			p_stack_particles += pbytes;			
 		}
 	}
 
