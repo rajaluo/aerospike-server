@@ -129,12 +129,15 @@ typedef struct sbin_value_pool_s{
 
 
 #define AS_SINDEX_VALUESZ_ON_STACK 16 * 1000
-#define SINDEX_BINS_SETUP_NEW(skey_bin, size, value_pool)              \
-	as_sindex_bin_new skey_bin[(size)];                                \
-	for (int id = 0; id < (size); id++) skey_bin[id].simatch = -1; \
+#define SINDEX_BINS_SETUP_NEW(skey_bin, size)                      \
 	sbin_value_pool value_pool;                                    \
 	value_pool.value   = alloca(AS_SINDEX_VALUESZ_ON_STACK);       \
-	value_pool.used_sz = 0;
+	value_pool.used_sz = 0;                    \
+	as_sindex_bin_new skey_bin[(size)];                            \
+	for (int id = 0; id < (size); id++) {         \
+			skey_bin[id].simatch = -1;         \
+			skey_bin[id].stack_buf = &value_pool; \
+	}
 
 /*
  * Used as structure to call into secondary indexes sindex_* interface
@@ -150,6 +153,7 @@ typedef struct as_sindex_bin_new_s {
 	as_sindex_op      op;         // Should we delete or insert this values from/into the secodary index tree.
 	bool              to_free;    // If the values are malloced.
 	int               simatch;    // simatch of the si this bin is pointing to.
+	sbin_value_pool * stack_buf;
 	uint32_t          heap_capacity;
 } as_sindex_bin_new;
 
@@ -440,11 +444,11 @@ extern int as_sindex_imd_free(as_sindex_metadata *imd);
 //TODO return values is actually enum. 
 // Methods for creating secondary index bin array
 extern int  as_sindex_sbin_from_op(as_msg_op *op, as_sindex_bin *skey_data, int binid);
-extern int  as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, as_sindex_bin delbin[]);
+extern int  as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, as_sindex_bin_new delbin[], as_sindex_op op);
 extern int  as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *bin, as_sindex_bin *skey_data);
 extern bool as_sindex_sbin_match(as_sindex_bin *b1, as_sindex_bin *b2);
-extern int  as_sindex_sbin_free(as_sindex_bin *sbin);
-extern int  as_sindex_sbin_freeall(as_sindex_bin *sbin, int numval);
+extern int  as_sindex_sbin_free(as_sindex_bin_new *sbin);
+extern int  as_sindex_sbin_freeall(as_sindex_bin_new *sbin, int numval);
 
 extern int  as_sindex_range_free(as_sindex_range **srange);
 extern int  as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **srange);
@@ -478,7 +482,14 @@ extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
 extern as_sindex_status     as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str);
 extern as_sindex_status     as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * imd);
 extern as_val             * as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v);
-
+extern int                  as_sindex_sbins_from_bin_new(as_namespace *ns, const char *set, as_bin *b, 
+								as_sindex_bin_new * start_sbin, as_sindex_op op);
+extern int                  as_sindex_sbins_from_buf(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin_new * start_sbin, 
+								byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_op op);
+extern int                  as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sindex_bin_new *start_sbin, 
+								int num_sbins, cf_digest * pkey);
+extern int                  as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, 
+								byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_bin_new * start_sbin);
 // SINDEX LOCK MACROS
 extern pthread_rwlock_t g_sindex_rwlock;
 #define SINDEX_GRLOCK()         \

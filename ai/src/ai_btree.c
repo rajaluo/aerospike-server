@@ -604,6 +604,20 @@ ai_btree_key_hash(as_sindex_metadata *imd, as_sindex_bin *b)
 }
 
 int
+ai_btree_key_hash_new(as_sindex_metadata *imd, void *skey)
+{
+	uint64_t u;
+
+	if (C_IS_Y(imd->dtype)) {
+		char *x = (char *) ((cf_digest *)skey); // x += 4;
+		u = ((* (uint128 *) x) % imd->nprts);
+	} else {
+		u = ((*(uint64_t*)skey) % imd->nprts);
+	}
+
+	return (int) u;
+}
+int
 ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx)
 {
 	if (!Num_tbls) {
@@ -894,23 +908,22 @@ ai_btree_query(as_sindex_metadata *imd, as_sindex_range *srange, as_sindex_qctx 
 }
 
 int
-ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, as_sindex_key *skey, void *value)
+ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_digest *value)
 {
 	int ret = AS_SINDEX_OK;
-	uint64_t uk = *(uint64_t *)value;
-	cf_digest *keyd = (cf_digest *)value;
 
 	ai_obj ncol;
 	if (C_IS_Y(imd->dtype)) {
-		init_ai_objFromDigest(&ncol, &skey->b[0].digest);
+		init_ai_objFromDigest(&ncol, (cf_digest*)skey);
 	}
 	else {
-		init_ai_objLong(&ncol, skey->b[0].u.i64);
+		init_ai_objLong(&ncol, *(ulong *)skey);
 	}
-	ai_obj apk;
-	init_ai_objFromDigest(&apk, keyd);
 
-	cf_detail(AS_SINDEX, "Insert: %ld %ld %ld", *(uint64_t *) &ncol.y, *(uint64_t *) &skey->b[0].digest, *((uint64_t *) &apk.y));
+	ai_obj apk;
+	init_ai_objFromDigest(&apk, value);
+
+//	cf_detail(AS_SINDEX, "Insert: %ld %ld %ld", *(uint64_t *) &ncol.y, *(uint64_t *) &skey->b[0].digest, *((uint64_t *) &apk.y));
 
 	ulong bb = pimd->ibtr->msize + pimd->ibtr->nsize;
 	ret = reduced_iAdd(pimd->ibtr, &ncol, &apk, COL_TYPE_U160);
@@ -927,7 +940,7 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, as_sindex_key *
 		ret = AS_SINDEX_ERR_NO_MEMORY;
 		goto END;
 	}
-	cf_debug(AS_SINDEX, "ai__btree_insert(N): %s key: %d val %lu", imd->iname, skey->b[0].u.i64, uk);
+//	cf_debug(AS_SINDEX, "ai__btree_insert(N): %s key: %d val %lu", imd->iname, skey->b[0].u.i64, uk);
 
 END:
 
@@ -935,31 +948,29 @@ END:
 }
 
 int
-ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, as_sindex_key *skey, void *val)
+ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void * skey, cf_digest * value)
 {
 	int ret = AS_SINDEX_OK;
-	uint64_t uk = * (uint64_t *) val;
-	uint64_t bv = skey->b[0].u.i64;
 
 	if (!pimd->ibtr) {
-		cf_debug(AS_SINDEX, "AI_BTREE_FAIL: Delete failed no ibtr %d %lu", bv, uk);
 		return AS_SINDEX_KEY_NOTFOUND;
 	}
+
 	ai_obj ncol;
 	if (C_IS_Y(imd->dtype)) {
-		init_ai_objFromDigest(&ncol, &skey->b[0].digest);
+		init_ai_objFromDigest(&ncol, (cf_digest *)skey);
 	}
 	else {
-		init_ai_objLong(&ncol, skey->b[0].u.i64);
+		init_ai_objLong(&ncol, *(ulong *)skey);
 	}
 
 	ai_obj apk;
-	init_ai_objFromDigest(&apk, (cf_digest *)val);
+	init_ai_objFromDigest(&apk, value);
 	ulong bb = pimd->ibtr->msize + pimd->ibtr->nsize;
 	ret = reduced_iRem(pimd->ibtr, &ncol, &apk);
 	ulong ab = pimd->ibtr->msize + pimd->ibtr->nsize;
 	as_sindex_release_data_memory(imd, (bb - ab));
-	cf_debug(AS_SINDEX, "ai__btree_delete(N): key: %d - %lu", bv, uk);
+	
 	return ret;
 }
 

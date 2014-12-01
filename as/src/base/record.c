@@ -532,15 +532,14 @@ as_record_unpickle_merge(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t s
 	}
 
 	int sindex_ret = AS_SINDEX_OK;
-	int newbin_cnt = 0;
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
 
 	if (has_sindex) {
 		SINDEX_GRLOCK();
 	}
    
-	int sindex_bins =  (newbins < rd->ns->sindex_cnt) ? newbins : rd->ns->sindex_cnt; 
-	SINDEX_BINS_SETUP(newbin, sindex_bins);
+	SINDEX_BINS_SETUP_NEW(sbins, ns->sindex_cnt);
+	int sindex_found = 0;
 
 	for (uint16_t i = 0; i < newbins; i++) {
 		if (buf >= buf_lim) {
@@ -581,7 +580,8 @@ as_record_unpickle_merge(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t s
 			as_particle_frombuf(b, type, buf, d_sz, *stack_particles, ns->storage_data_in_memory);
 
 			if (has_sindex) {
-				newbin_cnt += as_sindex_sbins_from_bin(ns, as_index_get_set_name(rd->r, ns), b, &newbin[newbin_cnt]);
+				sindex_found += as_sindex_sbins_from_bin_new(ns, as_index_get_set_name(rd->r, ns), 
+													b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);	
 			}
 
 			if (! ns->storage_data_in_memory && type != AS_PARTICLE_TYPE_INTEGER) {
@@ -598,13 +598,13 @@ as_record_unpickle_merge(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t s
 	}
 
 	if (has_sindex) {
-		SINDEX_GUNLOCK();
-		if (newbin_cnt) {
+		if (sindex_found) {
 			cf_detail(AS_RECORD, "Sindex Insert @ %s %d", __FILE__, __LINE__);
-			as_sindex_put_by_sbin(ns, as_index_get_set_name(rd->r, ns), newbin_cnt, newbin, rd);
+			as_sindex_update_by_sbin(ns, as_index_get_set_name(rd->r, ns), sbins, sindex_found, &rd->keyd);
 			if (sindex_ret != AS_SINDEX_OK) cf_warning(AS_RECORD, "Failed: %s", as_sindex_err_str(sindex_ret));
-			as_sindex_sbin_freeall(newbin, newbin_cnt);
+			as_sindex_sbin_freeall(sbins, sindex_found);
 		}
+		SINDEX_GUNLOCK();
 	}
 	if (buf > buf_lim) {
 		cf_crash(AS_RECORD, "as_record_unpickle_merge: bad format, last bin of %u", newbins);
@@ -634,22 +634,17 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 
 	int32_t  delta_bins   = (int32_t)newbins - (int32_t)old_n_bins;
 	int      sindex_ret   = AS_SINDEX_OK;
-	int      oldbin_cnt   = 0;
-	int      newbin_cnt   = 0;
-	bool     check_update = false;
+	int      sindex_found = 0;
 
 	if (has_sindex) {
 		SINDEX_GRLOCK();
 	}
-    int sindex_old_bins = (old_n_bins < ns->sindex_cnt) ? old_n_bins : ns->sindex_cnt;
-    int sindex_new_bins = ( newbins < ns->sindex_cnt) ? newbins : ns->sindex_cnt;
 	
 	// To read the algorithm of upating sindex in bins check notes in ssd_record_add function.
-	SINDEX_BINS_SETUP(oldbin, sindex_old_bins);
-	SINDEX_BINS_SETUP(newbin, sindex_new_bins);
+	SINDEX_BINS_SETUP_NEW(sbins, 2 * ns->sindex_cnt);
 
 	if ((delta_bins < 0) && has_sindex) {
-		 oldbin_cnt += as_sindex_sbins_from_rd(rd, newbins, old_n_bins, oldbin);
+		 sindex_found += as_sindex_sbins_from_rd(rd, newbins, old_n_bins, &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 	}
 
 	if (ns->storage_data_in_memory && ! ns->single_bin) {
@@ -671,7 +666,6 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 
 	int ret = 0;
 	for (uint16_t i = 0; i < newbins; i++) {
-		check_update = false;
 		if (buf >= buf_lim) {
 			cf_warning(AS_RECORD, "as_record_unpickle_replace: bad format: on bin %d of %d, %p >= %p (diff: %lu) newbins: %d", i, newbins, buf, buf_lim, buf - buf_lim, newbins);
 			ret = -3;
@@ -682,16 +676,11 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		byte *name       = buf;
 		buf             += name_sz;
 		uint8_t version  = *buf++;
-		int sindex_found = 0;
 		as_bin *b;
 		if (i < old_n_bins) {
 			b = &rd->bins[i];
 			if (has_sindex) {
-				sindex_found      = as_sindex_sbins_from_bin(ns, set_name, b, &oldbin[oldbin_cnt]);
-				if (sindex_found != 0) {
-					check_update  = true;
-					oldbin_cnt   += sindex_found;
-				} 
+				sindex_found      += as_sindex_sbins_from_bin_new(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 			}
 			as_bin_set_version(b, version, ns->single_bin);
 			as_bin_set_id_from_name_buf(ns, b, name, name_sz);
@@ -708,25 +697,9 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		as_particle_frombuf(b, type, buf, d_sz, *stack_particles, ns->storage_data_in_memory);
 
 		if (has_sindex) {
-			sindex_found      = as_sindex_sbins_from_bin(ns, set_name, b, &newbin[newbin_cnt]);
-			if (sindex_found != 0) {
-				newbin_cnt   += sindex_found;
-			} 
-			else {
-				check_update  = false;
-			}
+			sindex_found      += as_sindex_sbins_from_bin_new(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);
 		}
 
-		//  if the values is updated; then check if both the values are same
-		//  if they are make it a no-op
-		if (check_update && newbin_cnt > 0 && oldbin_cnt > 0) {
-			if (as_sindex_sbin_match(&newbin[newbin_cnt - 1], &oldbin[oldbin_cnt - 1])) {
-				as_sindex_sbin_free(&newbin[newbin_cnt - 1]);
-				as_sindex_sbin_free(&oldbin[oldbin_cnt - 1]);
-				oldbin_cnt--;
-				newbin_cnt--;
-			}
-		}
 
 		if (! ns->storage_data_in_memory && type != AS_PARTICLE_TYPE_INTEGER) {
 			*stack_particles += as_particle_get_base_size(type) + d_sz;
@@ -735,26 +708,11 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		buf += d_sz;
 	}
 
-	if (has_sindex) {
-		SINDEX_GUNLOCK();
-	}
-
 	if (ret == 0) {
-		if (has_sindex) {
-			if (oldbin_cnt) {
-				cf_detail(AS_RECORD, "Sindex Delete @ %s %d", __FILE__, __LINE__);
-				sindex_ret = as_sindex_delete_by_sbin(ns, set_name, oldbin_cnt, oldbin, rd);
-				if (sindex_ret != AS_SINDEX_OK) {
-					cf_warning(AS_RECORD, "Failed: %s", as_sindex_err_str(sindex_ret));
-				}
-			}
-
-			if (newbin_cnt) {
-				cf_detail(AS_RECORD, "Sindex Insert @ %s %d", __FILE__, __LINE__);
-				sindex_ret = as_sindex_put_by_sbin(ns, set_name, newbin_cnt, newbin, rd);
-				if (sindex_ret != AS_SINDEX_OK) {
-					cf_warning(AS_RECORD, "Failed: %s", as_sindex_err_str(sindex_ret));
-				}
+		if (has_sindex && sindex_found) {
+			sindex_ret = as_sindex_update_by_sbin(ns, set_name, sbins, sindex_found, &rd->keyd);
+			if (sindex_ret != AS_SINDEX_OK) {
+				cf_warning(AS_RECORD, "Failed: %s", as_sindex_err_str(sindex_ret));
 			}
 		}
 
@@ -765,14 +723,12 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 			ret = -5;
 		}
 	}
-
 	if (has_sindex) {
-		if (oldbin_cnt) {
-			as_sindex_sbin_freeall(oldbin, oldbin_cnt);
-		}
-		if (newbin_cnt) {
-			as_sindex_sbin_freeall(newbin, newbin_cnt);
-		}
+		SINDEX_GUNLOCK();
+	}
+
+	if (has_sindex && sindex_found) {
+		as_sindex_sbin_freeall(sbins, sindex_found);
 	}
 
 	return ret;

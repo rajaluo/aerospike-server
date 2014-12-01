@@ -3055,21 +3055,12 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		 */
 
 		bool has_sindex   = as_sindex_ns_has_sindex(ns);
-		int oldbin_cnt    = 0;
-		int newbin_cnt    = 0;
-		bool check_update = false;
 		int sindex_found  = 0;
 
 		if (has_sindex) {
 			SINDEX_GRLOCK();
 		}
-
-		int sindex_old_bins = (ns->sindex_cnt < rd.n_bins) ?
-				ns->sindex_cnt : rd.n_bins;
-		int sindex_new_bins = (ns->sindex_cnt < block->n_bins) ?
-				ns->sindex_cnt : block->n_bins;
-		SINDEX_BINS_SETUP(oldbin, sindex_old_bins);
-		SINDEX_BINS_SETUP(newbin, sindex_new_bins);
+		SINDEX_BINS_SETUP_NEW(sbins, 2 * ns->sindex_cnt);
 
 		if (! rd.ns->single_bin) {
 			int32_t delta_bins = (int32_t)block->n_bins - (int32_t)rd.n_bins;
@@ -3077,7 +3068,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			if (delta_bins) {
 				uint16_t new_size = (uint16_t)block->n_bins;
 				if ((delta_bins < 0) && has_sindex) {
-					oldbin_cnt += as_sindex_sbins_from_rd(&rd, new_size, old_n_bins, oldbin);
+					sindex_found += as_sindex_sbins_from_rd(&rd, new_size, old_n_bins, sbins, AS_SINDEX_OP_DELETE);
 				}
 				as_bin_allocate_bin_space(r, &rd, delta_bins);
 			}
@@ -3085,15 +3076,10 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		const char * set_name = as_index_get_set_name(r, ns);
 		for (uint16_t i = 0; i < block->n_bins; i++) {
 			as_bin* b;
-			check_update = false;
 			if (i < old_n_bins) {
 				b = &rd.bins[i];
 				if (has_sindex) {	
-					sindex_found = as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &oldbin[oldbin_cnt]);
-					if (sindex_found > 0) {
-						oldbin_cnt  += sindex_found;
-						check_update = true;
-					}
+					sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, &rd.bins[i], &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 				}
 				as_bin_set_version(b, ssd_bin->version, ns->single_bin);
 				as_bin_set_id_from_name(ns, b, ssd_bin->name);
@@ -3107,37 +3093,17 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			ssd_bin = (drv_ssd_bin*)(block_head + ssd_bin->next);
 
 			if (has_sindex) {
-				sindex_found = as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &newbin[newbin_cnt]);
-
-				if (sindex_found > 0) {
-					newbin_cnt += sindex_found;
-				}
-				else {
-					check_update = false;
-				}
-
-				// If values are updated, then check if both the values are the
-				// same. If so, make it a no-op.
-				if (check_update && newbin_cnt > 0 && oldbin_cnt > 0) {
-					if (as_sindex_sbin_match(&newbin[newbin_cnt - 1], &oldbin[oldbin_cnt - 1])) {
-						as_sindex_sbin_free(&newbin[newbin_cnt - 1]);
-						as_sindex_sbin_free(&oldbin[oldbin_cnt - 1]);
-						oldbin_cnt--;
-						newbin_cnt--;
-					}
-				}
+				sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, &rd.bins[i], &sbins[sindex_found], AS_SINDEX_OP_INSERT);
 			}
 		}
 
 		if (has_sindex) {
-			SINDEX_GUNLOCK();
 			// Delete should precede insert.
-			as_sindex_delete_by_sbin(ns, as_index_get_set_name(r, ns),
-					oldbin_cnt, oldbin, &rd);
-			as_sindex_put_by_sbin(ns, as_index_get_set_name(r, ns),
-					newbin_cnt, newbin, &rd);
-			as_sindex_sbin_freeall(oldbin, oldbin_cnt);
-			as_sindex_sbin_freeall(newbin, newbin_cnt);
+			if (sindex_found > 0) {
+				as_sindex_update_by_sbin(ns, as_index_get_set_name(r, ns), sbins, sindex_found, &rd.keyd);
+				as_sindex_sbin_freeall(sbins, sindex_found);
+			}
+			SINDEX_GUNLOCK();
 		}
 
 		uint64_t end_bytes_memory = as_storage_record_get_n_bytes_memory(&rd);
