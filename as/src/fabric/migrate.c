@@ -458,13 +458,7 @@ migrate_recv_control_destroy(void *parm)
 	mc_l.incoming_ldt_version = mc->incoming_ldt_version;
 	mc_l.pid                  = mc->pid;
 
-	
-
 	if (mc->rsv.p) {
-		if (mc->rsv.p->partition_id == 1715) {
-			cf_info(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld Finished Receiving Migration !! %s:%d:%d:%d",
-				  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
-		}
 		as_partition_release(&mc->rsv);
 		cf_atomic_int_decr(&g_config.migrx_tree_count);
 	}
@@ -671,7 +665,12 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, migration *mig)
 	return 0;
 }
 
-void
+// Extracts ldt related infrom the migration messages
+// return <0 in case of some sort of failure
+// returns 0 for success
+//
+// side effect component will be filled up
+int
 as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, msg *m, cf_digest *digest)
 {
 	uint32_t info   = 0;
@@ -682,7 +681,7 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 	c->pgeneration  = 0;
 	c->pvoid_time   = 0;
 	if (mc->rsv.ns->ldt_enabled == false) {
-		return;
+		return 0;
 	}
 
 	if (0 == msg_get_uint32(m, MIG_FIELD_INFO, &info)) {
@@ -711,21 +710,32 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 		cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming version %ld Started Receiving Sub Record Migration !! %s:%d:%d:%d",
 			  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
 			  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
-		cf_assert((mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD),
-				  AS_PARTITION, CF_CRITICAL,
-				  "Unexpected Partition Migration State %d:%d", mc->rxstate, mc->rsv.p->partition_id);
+		if (mc->rxstate == AS_MIGRATE_RX_STATE_RECORD) {
+			cf_debug(AS_PARTITION, "Unexpected Partition Migration State %d:%d", mc->rxstate, mc->rsv.p->partition_id);
+			return -1;
+			// Consider a case where source sends sub record migration request multiple
+			// times and moves on to record migration. In that case it is possible to 
+			// receieve the subrecord out of order. There is no way to control .. we make
+			// sure at the source that record migration does not start before all the sub
+			// record migration have finished.
+			//
+			// So we simply ignore this
+		}
 	} else if (COMPONENT_IS_LDT_DUMMY(c)) {
 		cf_crash(AS_MIGRATE, "Invalid Component Type Dummy received by migration");
 	} else {
-		mc->rxstate = AS_MIGRATE_RX_STATE_RECORD;
-		cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming version %ld Started Receiving Record Migration !! %s:%d:%d:%d",
-			  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
-			  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+		if (mc->rxstate == AS_MIGRATE_RX_STATE_SUBRECORD) {
+			mc->rxstate = AS_MIGRATE_RX_STATE_RECORD;
+			cf_debug_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming version %ld Started Receiving Record Migration !! %s:%d:%d:%d",
+				  mc->incoming_ldt_version, mc->rsv.ns->name, mc->rsv.p->partition_id, 
+			  	mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
+		}
 	}
 	cf_detail_digest(AS_MIGRATE, digest, "LDT_MIGRATION: Incoming %s version=%ld flag=%d subrec=%d state=%d",
 			  (info & MIG_INFO_LDT_SUBREC) ? "MIG_INFO_LDT_SUBREC"
 			  : ((info & MIG_INFO_LDT_ESR) ? "MIG_INFO_LDT_ESR"
 				 : "MIG_INFO_LDT_REC"), c->version, c->flag, COMPONENT_IS_LDT_SUB(c), mc->rxstate);
+	return 0;
 }
 
 // Since this is used as the destructor function for the rchash,
@@ -1370,7 +1380,12 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				c.generation    = generation;
 				c.void_time     = void_time;
 				c.rec_props     = rec_props;
-				as_ldt_get_migrate_info(mc, &c, m, key);
+
+				if (as_ldt_get_migrate_info(mc, &c, m, key)) {
+					cf_debug_digest(AS_MIGRATE, &key, "LDT_MIGRATE: sub record received Out Of Order");
+					migrate_recv_control_release(mc);
+					goto Done;
+				}
 
 				// Default it to local node winner
 				int winner_idx  = -1;
