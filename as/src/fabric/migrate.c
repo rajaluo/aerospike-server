@@ -712,14 +712,13 @@ as_ldt_get_migrate_info(migrate_recv_control *mc, as_record_merge_component *c, 
 			  mc->rsv.p->vp->elements, mc->rsv.p->sub_vp->elements);
 		if (mc->rxstate == AS_MIGRATE_RX_STATE_RECORD) {
 			cf_debug(AS_PARTITION, "Unexpected Partition Migration State %d:%d", mc->rxstate, mc->rsv.p->partition_id);
-			return -1;
 			// Consider a case where source sends sub record migration request multiple
 			// times and moves on to record migration. In that case it is possible to 
 			// receieve the subrecord out of order. There is no way to control .. we make
 			// sure at the source that record migration does not start before all the sub
 			// record migration have finished.
 			//
-			// So we simply ignore this
+			// So we simply continue this should be noop
 		}
 	} else if (COMPONENT_IS_LDT_DUMMY(c)) {
 		cf_crash(AS_MIGRATE, "Invalid Component Type Dummy received by migration");
