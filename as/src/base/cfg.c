@@ -421,6 +421,7 @@ typedef enum {
 	CASE_NAMESPACE_ENABLE_XDR,
 	CASE_NAMESPACE_SETS_ENABLE_XDR,
 	CASE_NAMESPACE_XDR_REMOTE_DATACENTER,
+	CASE_NAMESPACE_FORWARD_XDR_WRITES,
 	// Normally hidden:
 	CASE_NAMESPACE_ALLOW_VERSIONS,
 	CASE_NAMESPACE_COLD_START_EVICT_TTL,
@@ -779,6 +780,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "enable-xdr",						CASE_NAMESPACE_ENABLE_XDR },
 		{ "sets-enable-xdr",				CASE_NAMESPACE_SETS_ENABLE_XDR },
 		{ "xdr-remote-datacenter",			CASE_NAMESPACE_XDR_REMOTE_DATACENTER },
+		{ "ns-forward-xdr-writes",			CASE_NAMESPACE_FORWARD_XDR_WRITES },
 		{ "allow-versions",					CASE_NAMESPACE_ALLOW_VERSIONS },
 		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
@@ -2311,6 +2313,15 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_SETS_ENABLE_XDR:
 				ns->sets_enable_xdr = cfg_bool(&line);
+				if (ns->sets_enable_xdr && ! c->xdr_cfg.xdr_supported) {
+					cfg_not_supported(&line, "XDR");
+				}
+				break;
+			case CASE_NAMESPACE_FORWARD_XDR_WRITES:
+				ns->ns_forward_xdr_writes = cfg_bool(&line);
+				if (ns->ns_forward_xdr_writes && ! c->xdr_cfg.xdr_supported) {
+					cfg_not_supported(&line, "XDR");
+				}
 				break;
 			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
 				// The server isn't interested in this, but the XDR module is!

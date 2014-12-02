@@ -68,3 +68,7 @@ void xdr_clmap_update(int changetype, cf_node succession[], int listsize)
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, bool is_delete, uint16_t set_id)
 {
 }
+
+void xdr_handle_failednodeprocessingdone(cf_node nodeid)
+{
+}
