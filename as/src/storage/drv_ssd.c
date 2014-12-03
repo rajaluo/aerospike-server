@@ -3060,7 +3060,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		if (has_sindex) {
 			SINDEX_GRLOCK();
 		}
-		SINDEX_BINS_SETUP_NEW(sbins, 2 * ns->sindex_cnt);
+		SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
 
 		if (! rd.ns->single_bin) {
 			int32_t delta_bins = (int32_t)block->n_bins - (int32_t)rd.n_bins;
@@ -3079,7 +3079,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			if (i < old_n_bins) {
 				b = &rd.bins[i];
 				if (has_sindex) {	
-					sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, &rd.bins[i], &sbins[sindex_found], AS_SINDEX_OP_DELETE);
+					sindex_found += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 				}
 				as_bin_set_version(b, ssd_bin->version, ns->single_bin);
 				as_bin_set_id_from_name(ns, b, ssd_bin->name);
@@ -3093,17 +3093,17 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			ssd_bin = (drv_ssd_bin*)(block_head + ssd_bin->next);
 
 			if (has_sindex) {
-				sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, &rd.bins[i], &sbins[sindex_found], AS_SINDEX_OP_INSERT);
+				sindex_found += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &sbins[sindex_found], AS_SINDEX_OP_INSERT);
 			}
 		}
 
 		if (has_sindex) {
+			SINDEX_GUNLOCK();
 			// Delete should precede insert.
 			if (sindex_found > 0) {
 				as_sindex_update_by_sbin(ns, as_index_get_set_name(r, ns), sbins, sindex_found, &rd.keyd);
 				as_sindex_sbin_freeall(sbins, sindex_found);
 			}
-			SINDEX_GUNLOCK();
 		}
 
 		uint64_t end_bytes_memory = as_storage_record_get_n_bytes_memory(&rd);

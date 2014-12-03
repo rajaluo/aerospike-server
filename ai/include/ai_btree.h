@@ -87,9 +87,9 @@ int ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pim
 
 bool ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *apk2d, ulong n2del, ulong *deleted);
 
-int ai_btree_key_hash(as_sindex_metadata *imd, as_sindex_bin *sbin);
+int ai_btree_key_hash_from_sbin(as_sindex_metadata *imd, as_sindex_bin_data *sbin);
 
-int ai_btree_key_hash_new(as_sindex_metadata *imd, void *skey);
+int ai_btree_key_hash(as_sindex_metadata *imd, void *skey);
 
 int ai_post_index_creation_setup_pmetadata(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int simatch, int idx);
 

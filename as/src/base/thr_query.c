@@ -1132,11 +1132,10 @@ bool
 as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 {
 	// TODO: Add counters and make sure it is not a performance hit
-	as_sindex_bin *start = &qtr->srange->start;
-	as_sindex_bin *end   = &qtr->srange->end;
+	as_sindex_bin_data *start = &qtr->srange->start;
+	as_sindex_bin_data *end   = &qtr->srange->end;
 
-	//TODO: Make it more general to support sindex over multiple bins
-	
+	//TODO: Make it more general to support sindex over multiple bins	
 	as_bin * b = as_bin_get(rd, (uint8_t *)qtr->si->imd->bnames[0],
 							strlen(qtr->si->imd->bnames[0]));
 
@@ -1586,7 +1585,7 @@ as_query__generator_get_nextbatch(as_query_transaction *qtr)
 
 	if (qctx->pimd_idx == -1) {
 		if (!qtr->srange->isrange) {
-			qctx->pimd_idx   = ai_btree_key_hash(si->imd, &qtr->srange->start);
+			qctx->pimd_idx   = ai_btree_key_hash_from_sbin(si->imd, &qtr->srange->start);
 		} else {
 			qctx->pimd_idx   = 0;
 		}

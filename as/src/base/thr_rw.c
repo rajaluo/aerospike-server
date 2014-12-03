@@ -2700,10 +2700,10 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 				const char* set_name = as_index_get_set_name(r, ns);
 
 				SINDEX_GRLOCK();
-				SINDEX_BINS_SETUP_NEW(sbins, ns->sindex_cnt);
+				SINDEX_BINS_SETUP(sbins, ns->sindex_cnt);
 				int sindex_found = 0;
 				for (int i = 0; i < rd.n_bins; i++) {
-					sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, &rd.bins[i], &sbins[sindex_found], AS_SINDEX_OP_DELETE);
+					sindex_found += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 				}
 				SINDEX_GUNLOCK();
 
@@ -2711,11 +2711,11 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 						"Delete @ %s %d digest %ld", __FILE__, __LINE__, *(uint64_t *)&rd.keyd);
 				if (sindex_found) {
 					sindex_ret = as_sindex_update_by_sbin(ns, set_name, sbins, sindex_found, &rd.keyd);
+					as_sindex_sbin_freeall(sbins, sindex_found);
 				}
 				if (sindex_ret != AS_SINDEX_OK)
 					cf_debug(AS_SINDEX,
 							"Failed: %d", as_sindex_err_str(sindex_ret));
-				as_sindex_sbin_freeall(sbins, sindex_found);
 			}
 		}
 
@@ -3792,7 +3792,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 
 	// Maximum number of sindexes which can be changed in one transaction
 	// is 2 * ns->sindex_cnt
-	SINDEX_BINS_SETUP_NEW(sbins, 2 * ns->sindex_cnt);
+	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
 	// If existing bins are loaded in rd.bins, it's easiest for record-level
 	// replace to delete them all and add new ones fresh.
 	if (replace_deletes_bins) {
@@ -3803,8 +3803,8 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 				if (! as_bin_inuse(&rd.bins[i])) {
 					break;
 				}	
-				sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, &rd.bins[i], 
-									&sbins[sindex_found], AS_SINDEX_OP_DELETE);
+				sindex_found += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], 
+						&sbins[sindex_found], AS_SINDEX_OP_DELETE);
 			}
 		}
 
@@ -3830,7 +3830,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 					int32_t i = as_bin_get_index(&rd, op->name, op->name_sz);
 					if (i != -1) {
 						if (has_sindex) {
-							sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, &rd.bins[i], 
+							sindex_found += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], 
 									&sbins[sindex_found], AS_SINDEX_OP_DELETE);
 						}
 						as_bin_destroy(&rd, i);
@@ -3921,7 +3921,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 						p_stack_particles += as_particle_get_base_size(particle_type) + value_sz;
 					}
 					if (has_sindex) {
-						sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);
+						sindex_found += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);
 					}
 					rd.write_to_device = true;
 				}
@@ -3933,12 +3933,12 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 				{
 					int sindex_found_yet = sindex_found;
 					if (has_sindex) {
-						sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_DELETE);
+						sindex_found += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 					}
 					int modify_ret = as_particle_increment(b, AS_PARTICLE_TYPE_INTEGER, p_op_value, value_sz, op->op == AS_MSG_OP_MC_INCR);
 					if (modify_ret == 0) {
 						if (has_sindex) {
-							sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);
+							sindex_found += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);
 						}
 						rd.write_to_device = true;
 					}
@@ -3962,7 +3962,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 
 					int sindex_found_yet = sindex_found;
 					if (has_sindex) {
-						sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_DELETE);
+						sindex_found += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 					}
 
 					// Append or prepend the data
@@ -3975,7 +3975,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 							p_stack_particles += as_particle_get_size_in_memory(b, b->particle);
 						}
 						if (has_sindex) {
-							sindex_found += as_sindex_sbins_from_bin_new(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);
+							sindex_found += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);
 						}
 					} else {
 						// operation failed set to invalid

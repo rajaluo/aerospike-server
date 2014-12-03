@@ -154,7 +154,7 @@ as_sindex__destroy_fn(void *param)
 		as_sindex *si;
 		cf_queue_pop(g_sindex_destroy_q, &si, CF_QUEUE_FOREVER);
 
-		SINDEX_GWLOCK();	
+		SINDEX_GWLOCK();
 		cf_assert((si->state == AS_SINDEX_DESTROY),
 				AS_SINDEX, CF_CRITICAL, " Invalid state %d at cleanup expected %d for %p and %s", si->state, AS_SINDEX_DESTROY, si, (si) ? ((si->imd) ? si->imd->iname : NULL) : NULL);
 		int rv = as_sindex__delete_from_set_binid_hash(si->ns, si->imd);

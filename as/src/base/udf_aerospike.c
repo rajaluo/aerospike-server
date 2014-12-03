@@ -118,12 +118,13 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 		return -1;
 	}
 
-	SINDEX_BINS_SETUP_NEW(sbins, rd->ns->sindex_cnt);
+	SINDEX_BINS_SETUP(sbins, rd->ns->sindex_cnt);
 	int sindex_found  = 0;
-
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
 	if (has_sindex) {
-		sindex_found += as_sindex_sbins_from_bin_new(rd->ns, as_index_get_set_name(rd->r, rd->ns), b, sbins, AS_SINDEX_OP_DELETE);
+		SINDEX_GRLOCK();
+		sindex_found += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns), b, sbins, AS_SINDEX_OP_DELETE);
+		SINDEX_GUNLOCK();
 	}
 
 	int32_t i = as_bin_get_index(rd, (byte *)bname, blen);
@@ -205,10 +206,12 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 	as_transaction *tr      = urecord->tr;
 	as_index_ref  * index   = urecord->r_ref;
 
-	SINDEX_BINS_SETUP_NEW(sbins, 2 * rd->ns->sindex_cnt);
+	SINDEX_BINS_SETUP(sbins, 2 * rd->ns->sindex_cnt);
 	int sindex_found = 0;
 	bool has_sindex          = as_sindex_ns_has_sindex(rd->ns);
-
+	if (has_sindex) {
+		SINDEX_GRLOCK();
+	}
 	as_bin * b = as_bin_get(rd, (byte *)bname, blen);
 
 	if ( !b && (blen > (AS_ID_BIN_SZ - 1 )
@@ -228,7 +231,7 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 	}
 	else {
 		if (has_sindex ) {
-			sindex_found += as_sindex_sbins_from_bin_new(rd->ns, as_index_get_set_name(rd->r, rd->ns), 
+			sindex_found += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns), 
 								b, &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 		}
 	}
@@ -412,9 +415,9 @@ udf_aerospike_setbin(udf_record * urecord, const char * bname, const as_val * va
 	
 	// Update sindex if required
 	if (has_sindex) {
-		sindex_found += as_sindex_sbins_from_bin_new(rd->ns, as_index_get_set_name(rd->r, rd->ns),
+		sindex_found += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns),
 								b, &sbins[sindex_found], AS_SINDEX_OP_INSERT);
-	
+		SINDEX_GUNLOCK();
 		if (sindex_found > 0) {
 			tr->flag |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 			as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sindex_found, &rd->keyd);	

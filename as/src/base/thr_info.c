@@ -5954,7 +5954,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 			imd->itype = AS_SINDEX_ITYPE_INVMAP;
 		} else {
 			cf_warning(AS_INFO, "Failed to create secondary index : invalid type of index"
-					" for sindex creation %s ", indexname_str);
+					" for sindex creation %s %s", indexname_str, indextype_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
 					"Invalid type must be [none, list, map, invmap]");
 			return AS_SINDEX_ERR_PARAM;

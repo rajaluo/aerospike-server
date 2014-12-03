@@ -129,11 +129,11 @@ typedef struct sbin_value_pool_s{
 
 
 #define AS_SINDEX_VALUESZ_ON_STACK 16 * 1000
-#define SINDEX_BINS_SETUP_NEW(skey_bin, size)                      \
+#define SINDEX_BINS_SETUP(skey_bin, size)                      \
 	sbin_value_pool value_pool;                                    \
 	value_pool.value   = alloca(AS_SINDEX_VALUESZ_ON_STACK);       \
 	value_pool.used_sz = 0;                    \
-	as_sindex_bin_new skey_bin[(size)];                            \
+	as_sindex_bin skey_bin[(size)];                            \
 	for (int id = 0; id < (size); id++) {         \
 			skey_bin[id].simatch = -1;         \
 			skey_bin[id].stack_buf = &value_pool; \
@@ -142,7 +142,7 @@ typedef struct sbin_value_pool_s{
 /*
  * Used as structure to call into secondary indexes sindex_* interface
  */
-typedef struct as_sindex_bin_new_s {
+typedef struct as_sindex_bin_s {
 	union {                       // We use this if we need to store only one value inside sbin.
 		int64_t       int_val;    // Accessing this is much faster than accessing any other value on the stack.
 		cf_digest     str_val;
@@ -155,14 +155,9 @@ typedef struct as_sindex_bin_new_s {
 	int               simatch;    // simatch of the si this bin is pointing to.
 	sbin_value_pool * stack_buf;
 	uint32_t          heap_capacity;
-} as_sindex_bin_new;
+} as_sindex_bin;
 
-#define SINDEX_BINS_SETUP(skey_bin, size)                   \
-    as_sindex_bin skey_bin[(size)];                         \
-	memset (&(skey_bin), 0, sizeof(as_sindex_bin) * (size));\
-	for (int id = 0; id < (size); id++) skey_bin[id].id = -1; 
-
-typedef struct as_sindex_bin_s {
+typedef struct as_sindex_bin_data_s {
 	uint32_t          id;
 	as_particle_type  type; // this type is citrusleaf type
 	// Union is to support sindex for other datatypes in future.
@@ -171,7 +166,7 @@ typedef struct as_sindex_bin_s {
 		int64_t  i64;
 	} u;
 	cf_digest         digest;
-} as_sindex_bin;
+} as_sindex_bin_data;
 
 /* 
  * Configuration parameter and control variable for secondary indexes
@@ -366,17 +361,13 @@ typedef struct as_sindex_query_context_s {
  *  [startl, endl]
  */
 typedef struct as_sindex_range_s {
-	byte           num_binval;
-	bool           isrange;
-	as_sindex_bin  start;
-	as_sindex_bin  end;
+	byte                num_binval;
+	bool                isrange;
+	as_sindex_bin_data  start;
+	as_sindex_bin_data  end;
+	as_sindex_type      itype;
+	char                bin_path[BIN_NAME_MAX_SZ];
 } as_sindex_range;
-
-typedef struct as_sindex_key_s {
-	byte          num_binval;
-	as_sindex_bin b[AS_SINDEX_BINMAX];
-} as_sindex_key;
-
 
 // Opaque type definition.
 struct as_config_s;
@@ -407,7 +398,6 @@ extern int as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd);
 extern int as_sindex_update(as_sindex_metadata *imd);
 extern void as_sindex_destroy_pmetadata(as_sindex *si);
 extern int as_sindex_ns_has_sindex(as_namespace *ns);
-extern int as_sindex_bin_has_sindex(as_namespace *ns, as_bin *b);
 
 // Info functions
 extern int as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db);
@@ -415,16 +405,10 @@ extern int as_sindex_describe_str(as_namespace *ns, as_sindex_metadata *imd, cf_
 extern int as_sindex_stats_str(as_namespace *ns, as_sindex_metadata *imd, cf_dyn_buf *db);
 
 /* DML */
-extern int as_sindex_put(as_sindex *si, as_sindex_key *key, void *val);
 extern int as_sindex_put_rd(as_sindex *si, as_storage_rd *rd);
 extern int as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd);
-extern int as_sindex_put_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_bin *bins, as_storage_rd *rd);
 
 extern int as_sindex_query(as_sindex *si, as_sindex_range *range, as_sindex_qctx *qctx);
-
-extern int as_sindex_delete(as_sindex *si, as_sindex_key *key, void *val);
-extern int as_sindex_delete_rd(as_sindex *si, as_storage_rd *rd);
-extern int as_sindex_delete_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_bin *bins, as_storage_rd *rd);
 
 // Index Metadata Lookup
 extern as_sindex *  as_sindex_from_msg(as_namespace *ns, as_msg *msgp); 
@@ -443,12 +427,10 @@ extern int as_sindex_imd_free(as_sindex_metadata *imd);
 
 //TODO return values is actually enum. 
 // Methods for creating secondary index bin array
-extern int  as_sindex_sbin_from_op(as_msg_op *op, as_sindex_bin *skey_data, int binid);
-extern int  as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, as_sindex_bin_new delbin[], as_sindex_op op);
-extern int  as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *bin, as_sindex_bin *skey_data);
-extern bool as_sindex_sbin_match(as_sindex_bin *b1, as_sindex_bin *b2);
-extern int  as_sindex_sbin_free(as_sindex_bin_new *sbin);
-extern int  as_sindex_sbin_freeall(as_sindex_bin_new *sbin, int numval);
+extern int  as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, as_sindex_bin sbins[], as_sindex_op op);
+//extern bool as_sindex_sbin_match(as_sindex_bin *b1, as_sindex_bin *b2);
+extern int  as_sindex_sbin_free(as_sindex_bin *sbin);
+extern int  as_sindex_sbin_freeall(as_sindex_bin *sbin, int numval);
 
 extern int  as_sindex_range_free(as_sindex_range **srange);
 extern int  as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **srange);
@@ -477,19 +459,18 @@ extern bool                 as_sindex_release_data_memory(as_sindex_metadata *im
 extern int                  as_sindex_histogram_dumpall(as_namespace *ns);
 extern int                  as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params);
 extern void                 as_sindex_gconfig_default(struct as_config_s *c);
-extern int                  as_sindex__op_by_skey(as_sindex   *si, as_sindex_key *skey, as_storage_rd *rd, as_sindex_op op);
 extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
 extern as_sindex_status     as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str);
 extern as_sindex_status     as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * imd);
 extern as_val             * as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v);
-extern int                  as_sindex_sbins_from_bin_new(as_namespace *ns, const char *set, as_bin *b, 
-								as_sindex_bin_new * start_sbin, as_sindex_op op);
-extern int                  as_sindex_sbins_from_buf(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin_new * start_sbin, 
+extern int                  as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, 
+								as_sindex_bin * start_sbin, as_sindex_op op);
+extern int                  as_sindex_sbins_from_buf(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin * start_sbin, 
 								byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_op op);
-extern int                  as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sindex_bin_new *start_sbin, 
+extern int                  as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sindex_bin *start_sbin, 
 								int num_sbins, cf_digest * pkey);
 extern int                  as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, 
-								byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_bin_new * start_sbin);
+								byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_bin * start_sbin);
 // SINDEX LOCK MACROS
 extern pthread_rwlock_t g_sindex_rwlock;
 #define SINDEX_GRLOCK()         \

@@ -541,7 +541,7 @@ create_tname_from_imd(const as_sindex_metadata *imd)
 }
 
 static char *
-create_cname(char *bin_name, int bin_type)
+create_cname(char *bin_path, int bin_type)
 {
 	char bin_type_str[NAME_STR_LEN];
 
@@ -549,7 +549,7 @@ create_cname(char *bin_name, int bin_type)
 		return NULL;
 	}
 
-	return str_concat(bin_name, '_', bin_type_str);
+	return str_concat(bin_path, '_', bin_type_str);
 }
 
 static char *
@@ -589,7 +589,7 @@ ai_set_simatch_by_name(char *ns, char *iname, int *imatch, int *simatch)
 }
 
 int
-ai_btree_key_hash(as_sindex_metadata *imd, as_sindex_bin *b)
+ai_btree_key_hash_from_sbin(as_sindex_metadata *imd, as_sindex_bin_data *b)
 {
 	uint64_t u;
 
@@ -604,7 +604,7 @@ ai_btree_key_hash(as_sindex_metadata *imd, as_sindex_bin *b)
 }
 
 int
-ai_btree_key_hash_new(as_sindex_metadata *imd, void *skey)
+ai_btree_key_hash(as_sindex_metadata *imd, void *skey)
 {
 	uint64_t u;
 
