@@ -1,19 +1,54 @@
+/*
+ * aggr.c
+ *
+ * Copyright (C) 2014 Aerospike, Inc.
+ *
+ * Portions may be licensed to Aerospike, Inc. under one or more contributor
+ * license agreements.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option) any
+ * later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/
+ */
 
+#include "base/aggr.h"
 
-#include <base/as_aggr.h>
-
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <assert.h>
-#include <errno.h>
-#include <pthread.h>
-#include <stdio.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
 #include <string.h>
-#include <strings.h>
 
+#include "aerospike/as_aerospike.h"
+#include "aerospike/as_list.h"
+#include "aerospike/as_module.h"
+#include "aerospike/as_rec.h"
+#include "aerospike/as_result.h"
+#include "aerospike/as_stream.h"
+#include "aerospike/as_udf_context.h"
+#include "aerospike/as_val.h"
+#include "aerospike/mod_lua.h"
+#include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_ll.h"
+
+#include "fault.h"
+
+#include "base/datamodel.h"
+#include "base/proto.h"
 #include "base/thr_scan.h"
+#include "base/transaction.h"
+#include "base/udf_memtracker.h"
+#include "base/udf_record.h"
+#include "storage/storage.h"
+
 
 extern const as_list_hooks udf_arglist_hooks;
 
@@ -24,18 +59,17 @@ as_aggr_aerospike_log(const as_aerospike * a, const char * file, const int line,
 	return 0;
 }
 
-        
 static const as_aerospike_hooks as_aggr_aerospike_hooks = {
-    .open_subrec      = NULL,
-    .close_subrec     = NULL,
-    .update_subrec    = NULL,
-    .create_subrec    = NULL,
-    .rec_update       = NULL,
-    .rec_remove       = NULL,
-    .rec_exists       = NULL,
-    .log              = as_aggr_aerospike_log,
-    .get_current_time = NULL,
-    .destroy          = NULL
+	.open_subrec      = NULL,
+	.close_subrec     = NULL,
+	.update_subrec    = NULL,
+	.create_subrec    = NULL,
+	.rec_update       = NULL,
+	.rec_remove       = NULL,
+	.rec_exists       = NULL,
+	.log              = as_aggr_aerospike_log,
+	.get_current_time = NULL,
+	.destroy          = NULL
 };
 
 /**
@@ -94,7 +128,7 @@ extern const as_rec_hooks udf_record_hooks;
 int 
 as_aggr__process(as_aggr_call * ap_call, cf_ll * ap_recl, void * udata, as_result * ap_res)
 {
-        // input stream
+	// input stream
 	int ret           = AS_QUERY_OK;
 	as_index_ref    lr_ref;
 	lr_ref.skip_lock   = false;
@@ -180,7 +214,7 @@ as_aggr__process(as_aggr_call * ap_call, cf_ll * ap_recl, void * udata, as_resul
 	udf_memtracker_cleanup();
 
 	if (ret) {
-        ap_call->caller_intf->set_error(ap_call->caller);
+		ap_call->caller_intf->set_error(ap_call->caller);
 	}
 
 	as_list_destroy(&l_arglist);

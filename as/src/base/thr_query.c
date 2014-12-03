@@ -87,46 +87,45 @@
  *  thread or queue up to the I/O worker thread (done generally in case of data on ssd)
  *
  */
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+
+#include "aerospike/as_buffer.h"
+#include "aerospike/as_integer.h"
+#include "aerospike/as_list.h"
+#include "aerospike/as_map.h"
+#include "aerospike/as_msgpack.h"
+#include "aerospike/as_serializer.h"
+#include "aerospike/as_stream.h"
+#include "aerospike/as_string.h"
+#include "aerospike/as_rec.h"
+#include "aerospike/as_val.h"
+#include "aerospike/mod_lua.h"
+#include "citrusleaf/cf_ll.h"
 
 #include "ai.h"
 #include "ai_btree.h"
 #include "bt.h"
 #include "bt_iterator.h"
 
-#include <base/aggr.h>
+#include "base/aggr.h"
 #include "base/datamodel.h"
 #include "base/secondary_index.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "base/udf_memtracker.h"
 #include "base/udf_rw.h"
 #include "base/udf_record.h"
-#include "base/udf_memtracker.h"
 #include "fabric/fabric.h"
-
-#include <aerospike/as_list.h>
-#include <aerospike/as_stream.h>
-#include <aerospike/as_rec.h>
-#include <aerospike/as_val.h>
-#include <aerospike/mod_lua.h>
-#include <aerospike/as_buffer.h>
-#include <aerospike/as_serializer.h>
-#include <aerospike/as_msgpack.h>
-#include <aerospike/as_string.h>
-#include <aerospike/as_integer.h>
-#include <aerospike/as_map.h>
-#include <aerospike/as_list.h>
-
-#include <citrusleaf/cf_ll.h>
 
 // parameter read off from a transaction
 
@@ -1200,7 +1199,7 @@ bool
 as_query_aggr_match_record(query_record * qrecord)
 {
 	as_query_transaction * qtr = qrecord->caller; 
-	qtr->read_success += 1;
+	qtr->read_success++;
 	return as_query_record_matches(qtr, qrecord->urecord->rd); 
 }
 
@@ -2392,8 +2391,8 @@ as_query(as_transaction *tr)
 	qtr->querying_ai_time_ns = 0;
 	qtr->waiting_time_ns     = 0;
 
-	if (as_aggr_call_init(&qtr->agg_call, tr, qtr, &as_query_aggr_caller_qintf, &query_agg_istream_hooks, &query_agg_ostream_hooks, ns, false) == AS_QUERY_OK) {
-
+	if (as_aggr_call_init(&qtr->agg_call, tr, qtr, &as_query_aggr_caller_qintf,
+			&query_agg_istream_hooks, &query_agg_ostream_hooks, ns, false) == AS_QUERY_OK) {
 		// There is no io call back, record is worked on from inside stream
 		// interface
 		qtr->req_cb    = NULL;

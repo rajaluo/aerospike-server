@@ -30,8 +30,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <citrusleaf/cf_atomic.h>
-#include <citrusleaf/cf_vector.h>
+#include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_vector.h"
 
 #include "dynbuf.h"
 
@@ -49,7 +49,7 @@ typedef enum as_scan_udf_op {
 	AS_SCAN_UDF_NONE,
 	AS_SCAN_UDF_OP_AGGREGATE,
 	AS_SCAN_UDF_OP_BACKGROUND,
-	AS_SCAN_UDF_OP_UDF,
+	AS_SCAN_UDF_OP_UDF
 } as_scan_udf_op;
 
 typedef enum as_scan_state_logged {
@@ -84,7 +84,7 @@ typedef struct {
 	// Scan UDF specific fields
 	bool                hasudf;              		// Has record UDF
 	udf_call            call;                		// udf_call if there is UDF
-	as_aggr_call        agg_call;                           // Stream UDF Details
+	as_aggr_call        agg_call;                   // Stream UDF Details
 	cf_atomic_int       uit_queued;    				// Throttling: max in flight scan
 	uint8_t             scan_type;                  //scan type (normal,background,foreground,sindex)
 	// UDF transaction per job
@@ -119,7 +119,7 @@ typedef struct {
 	as_sindex *         si;
 	cf_vector *         binlist;
 	udf_call *          call;                       // read copy @TODO should be ref counted
-	as_aggr_call *      aggr_call;                       // read copy @TODO should be ref counted
+	as_aggr_call *      aggr_call;                  // read copy @TODO should be ref counted
 } tscan_task_data;
 
 /* Function declarations */

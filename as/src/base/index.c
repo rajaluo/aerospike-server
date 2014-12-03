@@ -826,6 +826,18 @@ as_index_tree_size(as_index_tree *tree)
 	return(sz);
 }
 
+typedef struct {
+	as_index 		*r;
+	cf_arenax_handle r_h;
+} as_index_value;
+
+typedef struct {
+	uint alloc_sz;
+	uint pos;
+	as_index_value indexes[];
+} as_index_value_array;
+
+
 /*
 ** call a function on all the nodes in the tree
 */

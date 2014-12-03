@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 
+#include "aerospike/as_module.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
@@ -184,17 +185,17 @@ void  dump_digest(cf_digest *dd) {
 
 const char *scan_type_array[] = {"NORMAL", "BACKGROUND_UDF", "FOREGROUND_UDF", "SINDEX_POPULATOR", "UNKNOWN"};
 const size_t scan_type_array_max = (sizeof(scan_type_array) / sizeof(const char *)) - 1;
-//Aggregation integration
 
 
-int tscan_add_val_response(tscan_task_data * task, const as_val * val, bool success)
+int
+tscan_add_val_response(tscan_task_data * task, const as_val * val, bool success)
 {
-	uint32_t msg_sz        = 0;
+	uint32_t msg_sz = 0;
 	as_val_tobuf(val, NULL, &msg_sz);
 	if (0 == msg_sz) {
 		cf_warning(AS_PROTO, "particle to buf: could not copy data!");
 	}
-	int ret = as_msg_make_val_response_bufbuilder(val, &task->bb, msg_sz, success); //Error handling
+	int ret = as_msg_make_val_response_bufbuilder(val, &task->bb, msg_sz, success); // error handling
 	if (ret != 0) {
 		cf_warning(AS_SCAN, "Weird there is space but still the packing failed "
 				"available = %d msg size = %d",
@@ -218,17 +219,16 @@ tscan_agg_ostream_write(const as_stream *s, as_val *v)
 }
 
 const as_stream_hooks tscan_agg_istream_hooks = {
-        .destroy  = NULL,
-        .read     = as_aggr_istream_read,
-        .write    = NULL
+		.destroy  = NULL,
+		.read     = as_aggr_istream_read,
+		.write    = NULL
 };
 
 const as_stream_hooks tscan_agg_ostream_hooks = {
-        .destroy  = NULL,
-        .read     = NULL,
-        .write    = tscan_agg_ostream_write
+		.destroy  = NULL,
+		.read     = NULL,
+		.write    = tscan_agg_ostream_write
 };
-
 
 bool
 tscan_mem_op(mem_tracker *mt, uint32_t num_bytes, memtracker_op op)
@@ -271,12 +271,13 @@ END:
 	return ret;
 }
 
-void tscan_set_error (void * caller )
+void
+tscan_set_error(void * caller)
 {
-
 }
 
-as_aggr_caller_type tscan_get_type ( )
+as_aggr_caller_type
+tscan_get_type()
 {
 	return AS_AGGR_SCAN;
 }
@@ -286,8 +287,6 @@ const as_aggr_caller_intf scan_aggr_caller_qintf = {
 	.mem_op = tscan_mem_op,
 	.get_type = tscan_get_type
 };
-
-
 
 
 const char *
@@ -832,9 +831,11 @@ tscan_binlist_from_op(as_namespace *ns, as_msg *msgp)
 	return binlist;
 }
 
-extern int
-as_aggr_call_init(as_aggr_call * call, as_transaction * txn, void *caller,const as_aggr_caller_intf * caller_intf,const as_stream_hooks * istream_hooks,const as_stream_hooks * ostream_hooks, as_namespace *ns, bool is_scan);
 
+extern int
+as_aggr_call_init(as_aggr_call *call, as_transaction *txn, void *caller,
+		const as_aggr_caller_intf *caller_intf, const as_stream_hooks *istream_hooks,
+		const as_stream_hooks *ostream_hooks, as_namespace *ns, bool is_scan);
 
 // Start the scan of the system.
 //
@@ -934,14 +935,16 @@ as_tscan(as_transaction *tr)
 
 	// Have a pointer to msgp to free it later.
 	job->msgp = tr->msgp;
-	if (as_aggr_call_init(&job->agg_call, tr, job, &scan_aggr_caller_qintf, &tscan_agg_istream_hooks, &tscan_agg_ostream_hooks, ns, true) == 0) {
+	if (as_aggr_call_init(&job->agg_call, tr, job, &scan_aggr_caller_qintf,
+			&tscan_agg_istream_hooks, &tscan_agg_ostream_hooks, ns, true) == 0) {
 		job->hasudf = false;
-		job->scan_type = SCAN_AGGR; //SCAN_NORMAL
+		job->scan_type = SCAN_AGGR;
 	}
-	else if (udf_call_init(&job->call, tr)) { //Sumit Check here
+	else if (udf_call_init(&job->call, tr)) {
 		job->hasudf = false;
 		job->scan_type = SCAN_NORMAL;
-	} else {
+	}
+	else {
 		job->hasudf = true;
 		if (job->call.udf_type != AS_SCAN_UDF_OP_BACKGROUND) {
 			// Eventually we will support this -- but for now, it is a request of an
@@ -1009,10 +1012,8 @@ as_tscan(as_transaction *tr)
 	int rsp = 0;
 	if (job->hasudf) {
 		rsp = tscan_start_udfjob(job, tr, scan_disconnected_job);
-
 	} else {
 		rsp = tscan_start_job(job, tr, scan_disconnected_job);
-
 	}
 
 	if (rsp < 0) {
@@ -1096,33 +1097,34 @@ as_internal_scan_udf_txn_setup(tr_create_data * d)
 	return 0;
 }
 
-void            
-tscan_ll_recl_destroy_fn(cf_ll_element *ele) 
-{               
-        ll_recl_element * node = (ll_recl_element *) ele;
-        if (node) {     
-                if (node->dig_arr)
-                        cf_free(node->dig_arr);
-                cf_free(node);
-        }       
-}       
+void
+tscan_ll_recl_destroy_fn(cf_ll_element *ele)
+{
+	ll_recl_element * node = (ll_recl_element *) ele;
+	if (node) {
+		if (node->dig_arr) {
+			cf_free(node->dig_arr);
+		}
+		cf_free(node);
+	}
+}
 
 extern dig_arr_t * getDigestArray(void);
 
 int
-tscan_add_digest_list(cf_ll * recl, cf_digest * digest, int * dnum )
+tscan_add_digest_list(cf_ll * recl, cf_digest * digest, int * dnum)
 {
 	cf_ll_element *ele = recl->tail;
-	bool create = !ele;
+	bool create = ele == NULL;
 	dig_arr_t *dt;
 	if (!create) {
 		dt = ((ll_recl_element*)ele)->dig_arr;
-		if (dt->num == 51) { //NUM digest per arr
-			create = 1;
+		if (dt->num == 51) { // NUM_DIGS_PER_ARR
+			create = true;
 		}
 	}
 	if (create) {
-		dt = getDigestArray(); //Sumit: verify this
+		dt = getDigestArray();
 		if (!dt) {
 			return -1;
 		}
@@ -1133,13 +1135,15 @@ tscan_add_digest_list(cf_ll * recl, cf_digest * digest, int * dnum )
 	}
 	memcpy(&dt->digs[dt->num], digest, CF_DIGEST_KEY_SZ);
 	dt->num++;
-	if(dnum)
+	if (dnum) {
 		*dnum = *dnum + 1;
+	}
 	return 0;
 }
 
 void
-tscan_recl_cleanup(cf_ll *recl) {
+tscan_recl_cleanup(cf_ll *recl)
+{
 	if (recl) {
 		cf_ll_iterator * iter = NULL;
 		iter                  = cf_ll_getIterator(recl, true /*forward*/);
@@ -1159,11 +1163,11 @@ tscan_recl_cleanup(cf_ll *recl) {
 	}
 }
 
-int     
+int
 tscan_ll_recl_reduce_fn(cf_ll_element *ele, void *udata)
-{       
-        return CF_LL_REDUCE_DELETE;
-}       
+{
+	return CF_LL_REDUCE_DELETE;
+}
 
 void
 tscan_add_aggr_result(char *res, tscan_task_data * task, bool success)
@@ -1176,8 +1180,8 @@ tscan_add_aggr_result(char *res, tscan_task_data * task, bool success)
 extern int as_aggr__process(as_aggr_call * ap_call, cf_ll * ap_recl, void * udata, as_result * ap_res);
 
 typedef struct tscan_aggr_tr_udata {
-cf_ll *recl;
-tscan_task_data *task;
+	cf_ll *recl;
+	tscan_task_data *task;
 } tscan_aggr_tr_udata_t;
 
 void
@@ -1185,17 +1189,19 @@ tscan_aggr_tree_reduce_fn(as_index *r, void *udata)
 {
 	tscan_aggr_tr_udata_t * d_ptr = (tscan_aggr_tr_udata_t *)(udata);
 	// If this is a valid set, check against the set of the record.
-	if (d_ptr->task->set_id != INVALID_SET_ID) { //
+	if (d_ptr->task->set_id != INVALID_SET_ID) {
 		if (as_index_get_set_id(r) != d_ptr->task->set_id) {
 			cf_detail(AS_SCAN, "Set mismatch %s %s",
 					as_namespace_get_set_name(d_ptr->task->ns, d_ptr->task->set_id),
 					as_namespace_get_set_name(d_ptr->task->ns, as_index_get_set_id(r)));
-			if (d_ptr->task->si) cf_atomic64_decr(&d_ptr->task->si->stats.recs_pending);
+			if (d_ptr->task->si) {
+				cf_atomic64_decr(&d_ptr->task->si->stats.recs_pending);
+			}
 			cf_atomic_int_incr(&(d_ptr->task->pjob->n_obj_set_diff));
 			return;
 		}
 	}
-	tscan_add_digest_list (d_ptr->recl, &(r->key),NULL);
+	tscan_add_digest_list (d_ptr->recl, &(r->key), NULL);
 }
 
 
@@ -1871,14 +1877,13 @@ tscan_partition_thr(void *q_to_wait_on)
 			cf_detail(AS_SCAN, "UDF: Scan job %"PRIu64" has udf", job->tid);
 			u.call = &job->call;
 			u.aggr_call = NULL;
-		} else if ( job->scan_type == SCAN_AGGR ) {
+		} else if (job->scan_type == SCAN_AGGR) {
 			u.call = NULL;
 			u.aggr_call = &job->agg_call;
 		} else {
 			u.call = NULL;
 			u.aggr_call = NULL;
 		}
-
 
 		// Skip if index is gone.
 		if (SCAN_JOB_IS_POPULATOR(u.pjob)) {
@@ -1909,19 +1914,20 @@ tscan_partition_thr(void *q_to_wait_on)
 		// This function calls an index-reduce on all the nodes of the tree, its left and right
 		// and for each one of those index entries, call the cb-function : tscan_tree_reduce.
 		if ( u.aggr_call ) {
-
 			cf_ll * recl = cf_malloc(sizeof(cf_ll));
-			cf_ll_init(recl, tscan_ll_recl_destroy_fn, false /*no lock*/);
+
 			if (!recl) {
-				cf_warning(AS_SCAN, "unable to create digest list : out of memory error" );
+				cf_warning(AS_SCAN, "unable to create digest list: out of memory");
 				job_early_terminate = true;
-				//job->result = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
-			} else {
+			}
+			else {
+				cf_ll_init(recl, tscan_ll_recl_destroy_fn, false /*no lock*/);
 
 				tscan_aggr_tr_udata_t tree_reduce_udata = {
 					.recl = recl,
 					.task = &u 
 				};
+
 				as_index_reduce_sync(rsv.tree, tscan_aggr_tree_reduce_fn, (void *)&tree_reduce_udata);
 
 				as_result   *res    = as_result_new();
@@ -1930,31 +1936,28 @@ tscan_partition_thr(void *q_to_wait_on)
 					char *rs = as_module_err_string(ret);
 					if (res->value != NULL) {
 						as_string * lua_s   = as_string_fromval(res->value);
-						char *      lua_err  = (char *) as_string_tostring(lua_s);
+						char *      lua_err = (char *) as_string_tostring(lua_s);
 						if (lua_err != NULL) {
 							int l_rs_len = strlen(rs);
-							rs = cf_realloc(rs,l_rs_len + strlen(lua_err) + 4);
-							sprintf(&rs[l_rs_len]," : %s",lua_err);
+							rs = cf_realloc(rs, l_rs_len + strlen(lua_err) + 4);
+							sprintf(&rs[l_rs_len], " : %s", lua_err);
 						}
 					}
 					tscan_add_aggr_result(rs, &u, false);
 					cf_free(rs);
 					job_early_terminate = true;
-					//job->result = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 				}
+
 				as_result_destroy(res);
 				tscan_recl_cleanup(recl);
-
-				if (recl) {       
-					cf_ll_reduce(recl, true /*forward*/, tscan_ll_recl_reduce_fn, NULL);
-					if (recl ) cf_free(recl);
-					recl = NULL;
-				}
+				cf_ll_reduce(recl, true /*forward*/, tscan_ll_recl_reduce_fn, NULL);
+				cf_free(recl);
 			}
-		} else {
+		}
+		else {
 			as_index_reduce_partial(rsv.tree, sample_obj_cnt, tscan_tree_reduce, (void *)&u);
 		}
-		//     as_partition_release(&rsv);
+
 		as_partition_release(&rsv);
 		cf_atomic_int_decr(&g_config.scan_tree_count);
 
