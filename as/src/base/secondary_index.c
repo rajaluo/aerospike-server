@@ -2930,19 +2930,19 @@ as_sindex_add_diff_asval_to_list_sindex(as_val * old_val, as_val *new_val, as_si
 
 			//		Iterate through all the values in the old and check if it exist or not in the new hash
 			//		If it does not exist add it to the sbin with OP DELETE
-			new_sbin_hash.sbin = sbin;
 			as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, simatch);
-			as_list_foreach(old_list, as_sindex_compare_list_hash, &new_sbin_hash);
+			old_sbin_hash.sbin      = sbin;
+			as_list_foreach(new_list, as_sindex_compare_list_hash, &old_sbin_hash);
 			if (sbin->num_values) {
 				*found     += 1;
 				sbin        = sbin + 1;
-				as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, simatch);
 			}
 
 			//		Iterate through all the values in the old and check if it exist or not in the old hash 
 			//		If it does not exist add it to the sbin with OP INSERT
-			old_sbin_hash.sbin = sbin;
-			as_list_foreach(old_list, as_sindex_compare_list_hash, &old_sbin_hash);
+			as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, simatch);
+			new_sbin_hash.sbin      = sbin;
+			as_list_foreach(old_list, as_sindex_compare_list_hash, &new_sbin_hash);
 			if (sbin->num_values) {
 				*found     += 1;
 			}
@@ -2954,15 +2954,15 @@ as_sindex_add_diff_asval_to_list_sindex(as_val * old_val, as_val *new_val, as_si
 	}
 
 	// Else add them separately to the sbins
-	sbin->op = AS_SINDEX_OP_DELETE;
+	as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, simatch);
 	if (as_sindex_add_asval_to_list_sindex(old_val, sbin) == AS_SINDEX_OK) {
 		if (sbin->num_values) {
 			*found     += 1;
 			sbin        = sbin + *found;
-			as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, simatch);
 		}
 	}
 
+	as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, simatch);
 	if (as_sindex_add_asval_to_list_sindex(new_val, sbin) == AS_SINDEX_OK) {
 		if (sbin->num_values) {
 			*found += 1;	
@@ -3078,19 +3078,19 @@ as_sindex_add_diff_asval_to_map_sindex(as_val * old_val, as_val * new_val, as_si
 	
 	//		Iterate through all the values in the old and check if it exist or not in the new hash
 	//		If it does not exist add it to the sbin with OP DELETE
-			new_sbin_hash.sbin = sbin;
 			as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, simatch);
-			as_map_foreach(old_map, as_sindex_compare_mapkeys_hash, &new_sbin_hash);
+			old_sbin_hash.sbin = sbin;
+			as_map_foreach(new_map, as_sindex_compare_mapkeys_hash, &old_sbin_hash);
 			if (sbin->num_values) {
 				*found     += 1;
 				sbin        = sbin + 1;
-				as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, simatch);
 			}
 
 	//		Iterate through all the values in the old and check if it exist or not in the old hash 
 	//		If it does not exist add it to the sbin with OP INSERT
-			old_sbin_hash.sbin = sbin;
-			as_map_foreach(old_map, as_sindex_compare_mapkeys_hash, &old_sbin_hash);
+			as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, simatch);
+			new_sbin_hash.sbin = sbin;
+			as_map_foreach(old_map, as_sindex_compare_mapkeys_hash, &new_sbin_hash);
 			if (sbin->num_values) {
 				*found     += 1;
 			}
@@ -3228,19 +3228,19 @@ as_sindex_add_diff_asval_to_invmap_sindex(as_val * old_val, as_val * new_val, as
 	
 	//		Iterate through all the values in the old and check if it exist or not in the new hash
 	//		If it does not exist add it to the sbin with OP DELETE
-			new_sbin_hash.sbin = sbin;
 			as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, simatch);
-			as_map_foreach(old_map, as_sindex_compare_mapvalues_hash, &new_sbin_hash);
+			old_sbin_hash.sbin = sbin;
+			as_map_foreach(new_map, as_sindex_compare_mapvalues_hash, &old_sbin_hash);
 			if (sbin->num_values) {
 				*found     += 1;
 				sbin        = sbin + 1;
-				as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, simatch);
 			}
 
 	//		Iterate through all the values in the old and check if it exist or not in the old hash 
 	//		If it does not exist add it to the sbin with OP INSERT
-			old_sbin_hash.sbin = sbin;
-			as_map_foreach(old_map, as_sindex_compare_mapvalues_hash, &old_sbin_hash);
+			as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, simatch);
+			new_sbin_hash.sbin = sbin;
+			as_map_foreach(old_map, as_sindex_compare_mapvalues_hash, &new_sbin_hash);
 			if (sbin->num_values) {
 				*found     += 1;
 			}
@@ -3374,68 +3374,12 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 				}
 			}
 		}
-		//			If itype == AS_SINDEX_ITYPE_MAP or AS_SINDEX_ITYPE_INVMAP and type = MAP
-		//	 			Deserialize the bin if have not deserialized it yet.
-		//				Extract as_val from path within the bin
-		//				Add them to the sbin.
-		else if (imd->itype == AS_SINDEX_ITYPE_MAP || AS_SINDEX_ITYPE_INVMAP) {
-			if (bin_type == AS_PARTICLE_TYPE_MAP) {
-				if (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST) {
-					if (! deserialized) {
-						if (from_buf) {
-							cdt_val =  as_val_frombuf(buf, buf_sz);
-						}
-						else {
-							cdt_val   = as_val_frombin(b);
-						}
-						deserialized = true;
-					}
-					as_val * res_val   = as_sindex_extract_val_from_path(imd, cdt_val);
-					if (!res_val) {
-						goto END;
-					}
-					if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, sbin) == AS_SINDEX_OK) {
-						if (sbin->num_values) {
-							sindex_found++;
-						}
-					}
-				}
-			}
-			// 			If itype == AS_SINDEX_ITYPE_LIST and type = LIST
-			//	 			Deserialize the bin if have not deserialized it yet.
-			//				Extract as_val from path within the bin.
-			//				Add the values to the sbin.
-			else if (imd->itype == AS_SINDEX_ITYPE_LIST) {
-				if (bin_type == AS_PARTICLE_TYPE_LIST) {
-					if (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST) {
-						if (! deserialized) {
-							if (from_buf) {
-								cdt_val =  as_val_frombuf(buf, buf_sz);
-							}
-							else {
-								cdt_val   = as_val_frombin(b);
-							}
-							deserialized = true;
-						}
-						as_val * res_val   = as_sindex_extract_val_from_path(imd, cdt_val);
-						if (!res_val) {
-							goto END;
-						}
-						if (as_sindex_add_asval_to_itype_sindex[imd->itype](res_val, sbin) == AS_SINDEX_OK) {
-							if (sbin->num_values) {
-								sindex_found++;
-							}
-						}
-					}
-				}
-			}
-		}
 	}
 	// 		Else if path_length > 0 and type == MAP or LIST 
 	// 			Deserialize the bin if have not deserialized it yet.
 	//			Extract as_val from path within the bin.
 	//			Add the values to the sbin.
-	else if (imd->path_length > 0) {
+	if (sindex_found == 0) {
 		if (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST) {
 			if (! deserialized) {
 				if (from_buf) {
@@ -3444,6 +3388,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 				else {
 					cdt_val   = as_val_frombin(b);
 				}
+				deserialized = true;
 			}
 			as_val * res_val   = as_sindex_extract_val_from_path(imd, cdt_val);
 			if (!res_val) {
