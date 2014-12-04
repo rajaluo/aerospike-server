@@ -284,6 +284,159 @@
 #define SUBREC_PROP_BIN          "SR_PROP_BIN"
 #define LDT_VERSION_SZ           6
 
+
+//------------------------------------------------------------------------------
+// Does a UDF package and op name correspond to one of our internal LDT UDFs?
+//
+
+const char * LDT_UDF_PACKAGE_NAMES[] = {
+		"llist",
+		"lmap",
+		"lset",
+		"lstack"
+};
+
+const uint32_t NUM_LDT_UDF_PACKAGE_NAMES =
+		sizeof(LDT_UDF_PACKAGE_NAMES) / sizeof(const char*);
+
+typedef struct ldt_op_props_s {
+	const char *	op_name;
+	int				op_type;
+} ldt_op_props;
+
+const ldt_op_props LLIST_OP_PROPS[] = {
+		{ "add",			LDT_WRITE_OP },
+		{ "add_all",		LDT_WRITE_OP },
+		{ "destroy",		LDT_WRITE_OP },
+		{ "filter",			LDT_READ_OP },
+		{ "find",			LDT_READ_OP },
+		{ "get_capacity",	LDT_READ_OP },
+		{ "ldt_exists",		LDT_READ_OP },
+		{ "range",			LDT_READ_OP },
+		{ "remove",			LDT_WRITE_OP },
+		{ "scan",			LDT_READ_OP },
+		{ "set_capacity",	LDT_WRITE_OP },
+		{ "size",			LDT_READ_OP }
+};
+
+const ldt_op_props LMAP_OP_PROPS[] = {
+		{ "destroy",		LDT_WRITE_OP },
+		{ "filter",			LDT_READ_OP },
+		{ "get",			LDT_READ_OP },
+		{ "get_capacity",	LDT_READ_OP },
+		{ "ldt_exists",		LDT_READ_OP },
+		{ "put",			LDT_WRITE_OP },
+		{ "put_all",		LDT_WRITE_OP },
+		{ "remove",			LDT_WRITE_OP },
+		{ "scan",			LDT_READ_OP },
+		{ "set_capacity",	LDT_WRITE_OP },
+		{ "size",			LDT_READ_OP }
+};
+
+const ldt_op_props LSET_OP_PROPS[] = {
+		{ "add",			LDT_WRITE_OP },
+		{ "add_all",		LDT_WRITE_OP },
+		{ "destroy",		LDT_WRITE_OP },
+		{ "exists",			LDT_READ_OP },
+		{ "filter",			LDT_READ_OP },
+		{ "get",			LDT_READ_OP },
+		{ "get_capacity",	LDT_READ_OP },
+		{ "ldt_exists",		LDT_READ_OP },
+		{ "remove",			LDT_WRITE_OP },
+		{ "scan",			LDT_READ_OP },
+		{ "set_capacity",	LDT_WRITE_OP },
+		{ "size",			LDT_READ_OP }
+};
+
+const ldt_op_props LSTACK_OP_PROPS[] = {
+		{ "destroy",		LDT_WRITE_OP },
+		{ "filter",			LDT_READ_OP },
+		{ "get_capacity",	LDT_READ_OP },
+		{ "ldt_exists",		LDT_READ_OP },
+		{ "one",			LDT_READ_OP },
+		{ "peek",			LDT_READ_OP },
+		{ "push",			LDT_WRITE_OP },
+		{ "push_all",		LDT_WRITE_OP },
+		{ "same",			LDT_READ_OP },
+		{ "set_capacity",	LDT_WRITE_OP },
+		{ "size",			LDT_READ_OP }
+};
+
+// Order MUST match LDT_UDF_PACKAGE_NAMES:
+const ldt_op_props * OP_LOOKUPS[] = {
+		LLIST_OP_PROPS,
+		LMAP_OP_PROPS,
+		LSET_OP_PROPS,
+		LSTACK_OP_PROPS
+};
+
+// Order MUST match LDT_UDF_PACKAGE_NAMES:
+const uint32_t OP_PROPS_COUNTS[] = {
+		sizeof(LLIST_OP_PROPS)	/ sizeof(ldt_op_props),
+		sizeof(LMAP_OP_PROPS)	/ sizeof(ldt_op_props),
+		sizeof(LSET_OP_PROPS)	/ sizeof(ldt_op_props),
+		sizeof(LSTACK_OP_PROPS)	/ sizeof(ldt_op_props)
+};
+
+static int
+lookup_op_type(const ldt_op_props * op_props, uint32_t max, const char *op_name)
+{
+	for (uint32_t i = 0; i < max; i++) {
+		if (strcmp(op_props[i].op_name, op_name) == 0) {
+			return op_props[i].op_type;
+		}
+	}
+
+	return -1;
+}
+
+/*
+ * Public function to ask whether specified UDF package name corresponds to any
+ * of our internal LDT packages.
+ *
+ * Return values:
+ *   -1 - not an internal package
+ * >= 0 - index of an internal package
+ */
+int
+as_ldt_package_index(const char *package_name)
+{
+	if (*package_name != 'l') {
+		return -1;
+	}
+
+	for (uint32_t i = 0; i < NUM_LDT_UDF_PACKAGE_NAMES; i++) {
+		if (strcmp(package_name, LDT_UDF_PACKAGE_NAMES[i]) == 0) {
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+/*
+ * Public function to ask op type of specified internal LDT UDF op name.
+ *
+ * Return values:
+ * -1 - op name does not correspond to a known op
+ *  0 - op is a read
+ *  1 - op is a write
+ */
+int
+as_ldt_op_type(int package_index, const char *op_name)
+{
+	if (package_index < 0) {
+		return -1;
+	}
+
+	return lookup_op_type(OP_LOOKUPS[package_index],
+			OP_PROPS_COUNTS[package_index], op_name);
+}
+
+//
+//------------------------------------------------------------------------------
+
+
 /*
  * Used by migration to generate version at the beginning of partition
  * migration... based on the MAC address and current clock time....
@@ -584,16 +737,15 @@ as_ldt_get_from_map(const as_map *prop_map, char prop_type, void *value)
 	// Create the key field to access the map.  We're starting with a single char,
 	// so we have to turn that into a string, and then that string into an as_val,
 	// which is an as_string.
+	char key_buffer[2];
+	sprintf(key_buffer, "%c", prop_type);
+	as_string key_val;
+	as_string_init(&key_val, key_buffer, false);
 	switch(prop_type) {
 		case PM_EsrDigest:
 		case PM_ParentDigest:
 		case PM_SelfDigest:
 		{
-			char key_buffer[2];
-			key_buffer[0]           = prop_type;
-			key_buffer[1]           = 0;
-			as_string key_val;
-			as_string_init(&key_val, key_buffer, false);
 			as_bytes * digest_bytes = (as_bytes *) as_map_get( (const as_map *)prop_map, (as_val *)&key_val);
 			if (!digest_bytes) {
 				cf_warning(AS_LDT, "Could not find %c type info in property map",
@@ -612,11 +764,6 @@ as_ldt_get_from_map(const as_map *prop_map, char prop_type, void *value)
 		}
 		case RPM_Version:
 		{
-			char key_buffer[2];
-			key_buffer[0]           = prop_type;
-			key_buffer[1]           = 0;
-			as_string key_val;
-			as_string_init(&key_val, key_buffer, false);
 			as_integer *int_valp    = (as_integer *)as_map_get((const as_map *)prop_map, (as_val *)&key_val);
 			if (!int_valp) {
 				cf_warning(AS_LDT, "Failed to get version %c", prop_type);
@@ -670,8 +817,7 @@ as_ldt_set_in_map(as_map *prop_map, char prop_type, void *value)
 		{
 			uint64_t ldt_version = *(uint64_t *)value;
 			char key_buffer[2];
-			key_buffer[0]           = prop_type;
-			key_buffer[1]           = 0;
+			sprintf(key_buffer, "%c", prop_type);
 			as_string *key_val =  as_string_new_strdup(key_buffer);
 			as_integer *int_val = as_integer_new(ldt_version);
 			if (int_val) {
@@ -713,7 +859,7 @@ as_ldt_set_in_map(as_map *prop_map, char prop_type, void *value)
  *          o/w failure
  */
 int
-as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8_t **pp_stack_particles)
+as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8_t *pp_stack_particles)
 {
 	// No op when version is disabled
 	if (!rd->ns->ldt_enabled)
@@ -775,21 +921,21 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	}
 #endif
 
+	uint8_t pbytes = 0;
 	if (rd->ns->storage_data_in_memory) {
 		as_particle_frombuf(binp, AS_PARTICLE_TYPE_HIDDEN_MAP, (uint8_t *) buf.data, buf.size, NULL, true);
 	}
 	else {
-		uint8_t pbytes = buf.size + as_particle_get_base_size(AS_PARTICLE_TYPE_HIDDEN_MAP);
+		pbytes = buf.size + as_particle_get_base_size(AS_PARTICLE_TYPE_HIDDEN_MAP);
 		as_particle_frombuf(binp, AS_PARTICLE_TYPE_HIDDEN_MAP, (uint8_t *) buf.data,
-					buf.size, *pp_stack_particles, rd->ns->storage_data_in_memory);
-		*pp_stack_particles += pbytes;
+					buf.size, pp_stack_particles, rd->ns->storage_data_in_memory);
 	}
 	as_serializer_destroy(&s);
 	as_buffer_destroy(&buf);
 	as_val_destroy(valp);
 
 	rd->write_to_device = true;
-	return rv;
+	return pbytes;
 }
 
 /*

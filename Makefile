@@ -7,6 +7,7 @@
 #   make clean        - Remove build products, excluding built packages.
 #   make cleanpkg     - Remove built packages.
 #   make cleanall     - Remove all build products, including built packages.
+#   make cleangit     - Remove all files untracked by Git.  (Use with caution!)
 #   make strip        - Build stripped versions of the server executables.
 #
 # Packaging Targets:
@@ -96,20 +97,20 @@ clean:	cleanmodules cleandist
 	$(RM) -rf $(TARGET_DIR)
 
 .PHONY: cleanmodules
-cleanmodules: 
+cleanmodules:
+	$(MAKE) -C $(ASMALLOC) cleanest cleanest.jem
+	$(MAKE) -C $(COMMON) clean
 	if [ -e "$(JANSSON)/Makefile" ]; then \
 		$(MAKE) -C $(JANSSON) clean; \
 		$(MAKE) -C $(JANSSON) distclean; \
-	fi;
+	fi
 	if [ -e "$(JEMALLOC)/Makefile" ]; then \
 		$(MAKE) -C $(JEMALLOC) clean; \
 		$(MAKE) -C $(JEMALLOC) distclean; \
-	fi;
+	fi
 	if [ -e "$(LUAJIT)/Makefile" ]; then \
 		$(MAKE) -C $(LUAJIT) clean; \
-	fi;
-	$(MAKE) -C $(ASMALLOC) cleanest cleanest.jem
-	$(MAKE) -C $(COMMON) clean
+	fi
 	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) LUA_CORE=$(LUA_CORE) clean
 
 .PHONY: cleandist
@@ -122,6 +123,19 @@ cleanall: clean cleanpkg
 .PHONY: cleanpkg
 cleanpkg:
 	$(RM) pkg/packages/*
+
+GIT_CLEAN = git clean -fdx
+
+.PHONY: cleangit
+cleangit:
+	cd $(ASMALLOC); $(GIT_CLEAN)
+	cd $(COMMON); $(GIT_CLEAN)
+	cd $(JANSSON); $(GIT_CLEAN)
+	cd $(JEMALLOC); $(GIT_CLEAN)
+	cd $(LUA_CORE); $(GIT_CLEAN)
+	cd $(LUAJIT); $(GIT_CLEAN)
+	cd $(MOD_LUA); $(GIT_CLEAN)
+	$(GIT_CLEAN)
 
 .PHONY: rpm deb tar
 rpm deb tar:

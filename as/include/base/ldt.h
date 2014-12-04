@@ -62,6 +62,12 @@ typedef struct ldt_sub_gc_info_s {
 } ldt_sub_gc_info;
 
 
+#define LDT_READ_OP		0
+#define LDT_WRITE_OP	1
+
+extern int		as_ldt_package_index(const char *package_name);
+extern int		as_ldt_op_type(int package_index, const char *op_name);
+
 extern int      as_ldt_flatten_component   (as_partition_reservation *rsv, as_storage_rd *rd, as_index_ref *r_ref, as_record_merge_component *c);
 
 extern bool     as_ldt_set_flag            (uint16_t flag);
@@ -73,7 +79,7 @@ extern bool     as_ldt_flag_has_esr        (uint16_t flag);
 extern void     as_ldt_sub_gc_fn           (as_index_ref *r_ref, void *udata);
 extern int      as_ldt_shipop              (write_request *wr, cf_node dest_node);
 
-extern int      as_ldt_parent_storage_set_version (as_storage_rd *rd, uint64_t, uint8_t **);
+extern int      as_ldt_parent_storage_set_version (as_storage_rd *rd, uint64_t, uint8_t *);
 extern int      as_ldt_parent_storage_get_version (as_storage_rd *rd, uint64_t *);
 extern int      as_ldt_subrec_storage_get_pdigest (as_storage_rd *rd, cf_digest *keyd);
 extern int      as_ldt_subrec_storage_get_edigest (as_storage_rd *rd, cf_digest *keyd);

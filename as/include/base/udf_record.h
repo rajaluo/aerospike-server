@@ -76,7 +76,7 @@ typedef struct udf_record_s {
 	// INTERNAL UTILITY
 	ldt_record 			*lrecord; // Parent lrecord
 	uint16_t			flag;
-	uint8_t				ldt_rectype_bits; // ESR  / LDT / PARENT LDT
+	int8_t				ldt_rectype_bits; // ESR  / LDT / PARENT LDT
 
 	// FABRIC MESSAGE
 	uint8_t				*pickled_buf;
