@@ -3179,6 +3179,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	// Shortcut pointers & flags.
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
+
 	bool must_not_create =
 			(m->info3 & AS_MSG_INFO3_UPDATE_ONLY) ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) ||
@@ -3278,11 +3279,8 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 
-	
-	// Information about ns having sindex should be stored 
-	// after taking object lock on the record
-	// if done otherwise, this record has the potential to 
-	// not get indexed in the new sindex created.
+	// Must be after acquiring olock to ensure record gets indexed in any sindex
+	// currently being created.
 	bool has_sindex = as_sindex_ns_has_sindex(ns);
 
 	bool replace_deletes_bins = record_level_replace &&
@@ -3293,9 +3291,8 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			// and add new ones fresh.
 			(ns->storage_data_in_memory || has_sindex);
 
-	// If must_fetch_data has already been set to true, 
-	// then we do not need to change it,
-	if (!must_fetch_data) {
+	// If it's not touch or modify, determine if we must read existing record.
+	if (! must_fetch_data) {
 		must_fetch_data = has_sindex || ! (ns->single_bin || record_level_replace);
 	}
 
