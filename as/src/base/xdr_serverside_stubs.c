@@ -108,3 +108,7 @@ int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, 
 void xdr_sig_handler(int signum)
 {
 }
+
+void xdr_handle_failednodeprocessingdone(cf_node nodeid)
+{
+}

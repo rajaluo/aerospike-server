@@ -840,11 +840,17 @@ int
 as_query__add_val_response(void *void_qtr, const as_val *val, bool success)
 {
 	as_query_transaction *qtr = (as_query_transaction *)void_qtr;
+	if( !qtr || qtr->abort )
+	{
+		cf_debug(AS_QUERY, "Query is in abort state");
+		return AS_QUERY_ERR;
+	}
 	uint32_t msg_sz        = 0;
 	as_val_tobuf(val, NULL, &msg_sz);
 	if (0 == msg_sz) {
 		cf_warning(AS_PROTO, "particle to buf: could not copy data!");
 	}
+
 
 	int ret = 0;
 
@@ -2725,6 +2731,8 @@ query_agg_ostream_write(const as_stream *s, as_val *v)
 		return AS_STREAM_OK;
 	}
 	if (as_query__add_val_response((void *)qtr, v, true)) {
+		as_val_destroy(v);
+		qtr->abort = true;
 		return AS_STREAM_ERR;
 	}
 	as_val_destroy(v);

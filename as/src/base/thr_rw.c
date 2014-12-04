@@ -2282,12 +2282,14 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	uint16_t set_id = as_index_get_set_id(r);
 	as_record_done(&r_ref, rsv->ns);
 
-	// Do not do XDR write if
-	// 1. If the write is a migration write
-	// 2. If the write is the XDR write and forwarding is not enabled.
+	// Do XDR write if
+	// 1. If the write is not a migration write and
+	// 2. If the write is a non-XDR write or 
+	// 3. If the write is a XDR write and forwarding is enabled (either globally or for namespace).
 	if ((info & RW_INFO_MIGRATION) != RW_INFO_MIGRATION) {
-		if (((info & RW_INFO_XDR) != RW_INFO_XDR)
-				|| (g_config.xdr_cfg.xdr_forward_xdrwrites == true)) {
+		if (   ((info & RW_INFO_XDR) != RW_INFO_XDR)
+			|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
+				|| (rsv->ns->ns_forward_xdr_writes == true))) {
 			xdr_write(rsv->ns, *keyd, r->generation, masternode, false, set_id);
 		}
 	}
@@ -2758,8 +2760,9 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 			// If this delete is a result of XDR shipping, dont write it to the digest pipe
 			// unless the user configured the server to forward the XDR writes. If this is
 			// a normal delete issued by application, write it to the digest pipe.
-			if ((m && !(m->info1 & AS_MSG_INFO1_XDR))
-					|| (g_config.xdr_cfg.xdr_forward_xdrwrites == true)) {
+			if (   (m && !(m->info1 & AS_MSG_INFO1_XDR))
+				|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
+					|| (ns->ns_forward_xdr_writes == true))) {
 				cf_debug(AS_RW, "write delete: Got delete from user.");
 				xdr_write(ns, tr->keyd, tr->generation, masternode, true, set_id);
 			}
@@ -3189,7 +3192,6 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	// Shortcut pointers & flags.
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
-	bool has_sindex = as_sindex_ns_has_sindex(ns);
 
 	bool must_not_create =
 			(m->info3 & AS_MSG_INFO3_UPDATE_ONLY) ||
@@ -3200,15 +3202,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) ||
 			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY);
 
-	bool must_fetch_data = has_sindex || ! (ns->single_bin || record_level_replace);
-
-	bool replace_deletes_bins = record_level_replace &&
-			// Single-bin will do the right thing.
-			! ns->single_bin &&
-			// For data-in-memory, or if there's a sindex, rd.bins will contain
-			// all previous bins - on replacing, it's easiest to purge them all
-			// and add new ones fresh.
-			(ns->storage_data_in_memory || has_sindex);
+	bool must_fetch_data = false;
 
 	// Loop over ops to check and modify flags.
 	as_msg_op *op = 0;
@@ -3296,6 +3290,23 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			cf_atomic_int_add(&ns->n_objects, 1);
 			record_created = true;
 		}
+	}
+
+	// Must be after acquiring olock to ensure record gets indexed in any sindex
+	// currently being created.
+	bool has_sindex = as_sindex_ns_has_sindex(ns);
+
+	bool replace_deletes_bins = record_level_replace &&
+			// Single-bin will do the right thing.
+			! ns->single_bin &&
+			// For data-in-memory, or if there's a sindex, rd.bins will contain
+			// all previous bins - on replacing, it's easiest to purge them all
+			// and add new ones fresh.
+			(ns->storage_data_in_memory || has_sindex);
+
+	// If it's not touch or modify, determine if we must read existing record.
+	if (! must_fetch_data) {
+		must_fetch_data = has_sindex || ! (ns->single_bin || record_level_replace);
 	}
 
 	// Enforce record-level create-only existence policy.
@@ -4146,11 +4157,13 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	uint16_t set_id = as_index_get_set_id(r_ref.r);
 	as_record_done(&r_ref, ns);
 
-	//If this write is a result of XDR shipping, dont write it to the digest pipe
-	//unless the user configured the server to forward the XDR writes. If this is
-	//a normal write, write it to the digest pipe.
-	if (!(m->info1 & AS_MSG_INFO1_XDR)
-			|| (g_config.xdr_cfg.xdr_forward_xdrwrites == true)) {
+	// Do XDR write if
+	// 1. If the write is not a migration write and
+	// 2. If the write is a non-XDR write or 
+	// 3. If the write is a XDR write and forwarding is enabled (either globally or for namespace).
+	if (   !(m->info1 & AS_MSG_INFO1_XDR)
+		|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
+			|| (ns->ns_forward_xdr_writes == true))) {
 		xdr_write(ns, tr->keyd, r->generation, masternode, false, set_id);
 	} else {
 		cf_detail(AS_RW,
