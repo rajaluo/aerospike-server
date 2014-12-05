@@ -27,10 +27,10 @@
 
 #pragma once
 
-#include <pthread.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "base/datamodel.h"
+#include "base/monitor.h"
+#include "base/proto.h"
+#include "base/system_metadata.h"
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
@@ -38,11 +38,10 @@
 
 #include "dynbuf.h"
 #include "hist.h"
-
-#include "base/datamodel.h"
-#include "base/monitor.h"
-#include "base/proto.h"
-#include "base/system_metadata.h"
+#include <pthread.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include "storage/storage.h"
 
 
@@ -110,6 +109,14 @@ typedef enum {
 	AS_SINDEX_KTYPE_FLOAT  = 4, //Particle type INT
 	AS_SINDEX_KTYPE_DIGEST = 10
 } as_sindex_ktype;
+
+
+typedef enum {
+	AS_SINDEX_KEY_TYPE_NULL,
+	AS_SINDEX_KEY_TYPE_LONG,
+	AS_SINDEX_KEY_TYPE_DIGEST
+} as_sindex_key_type;
+#define AS_SINDEX_KEY_TYPES 4
 
 as_particle_type as_sindex_pktype_from_sktype(as_sindex_ktype t);
 
@@ -414,7 +421,9 @@ extern int as_sindex_query(as_sindex *si, as_sindex_range *range, as_sindex_qctx
 extern as_sindex *  as_sindex_from_msg(as_namespace *ns, as_msg *msgp); 
 extern bool         as_sindex_partition_isactive(as_namespace *ns, cf_digest *digest);
 extern as_sindex *  as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange);
-
+extern as_sindex_status     as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str);
+extern int as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
+		bool is_create, bool *is_smd_op);
 /* Misc */
 extern int as_sindex_reserve(as_sindex *si, char *fname, int lineno);
 extern int as_sindex_release(as_sindex *si, char *fname, int lineno);
@@ -427,7 +436,13 @@ extern int as_sindex_imd_free(as_sindex_metadata *imd);
 
 //TODO return values is actually enum. 
 // Methods for creating secondary index bin array
+// Return number of sbins made.
 extern int  as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, as_sindex_bin sbins[], as_sindex_op op);
+extern int  as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin * start_sbin, as_sindex_op op);
+extern int  as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_bin * start_sbin);
+extern int  as_sindex_sbins_from_buf(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin * start_sbin, byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_op op);
+
+extern int  as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sindex_bin *start_sbin, int num_sbins, cf_digest * pkey);
 //extern bool as_sindex_sbin_match(as_sindex_bin *b1, as_sindex_bin *b2);
 extern int  as_sindex_sbin_free(as_sindex_bin *sbin);
 extern int  as_sindex_sbin_freeall(as_sindex_bin *sbin, int numval);
@@ -439,38 +454,25 @@ extern int  as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_r
 extern int  as_sindex_populate_done(as_sindex *si);
 extern int  as_sindex_boot_populateall_done(as_namespace *ns);
 extern int  as_sindex_boot_populateall();
-extern int                  as_sindex_remove_partition(as_namespace *ns, int partition_id, int batchsize);
 extern const char         * as_sindex_err_str(int err_code);
 extern int                  as_sindex_err_to_clienterr(int err, char *fname, int lineno);
-extern as_sindex_gc_status  as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd);
 extern bool                 as_sindex_isactive(as_sindex *si);
-extern uint64_t             as_sindex_memsize(as_namespace *ns, char *set, char *iname);
 extern int                  as_sindex_assert_query(as_sindex *si, as_sindex_range *srange);
 extern int                  as_sindex_histogram_enable(as_namespace *ns, as_sindex_metadata *imd, bool enable);
-extern int                  as_sindex_trace_op(as_namespace *ns, as_sindex_metadata *imd, int trace);
 extern int                  as_sindex_reinit(char *name, char *params, cf_dyn_buf *db);
 extern int                  as_sindex_repair(as_namespace *ns, as_sindex_metadata *imd);
 extern int                  as_sindex_get_err(int op_code, char *filename, int lineno);
-extern void                 as_sindex_set_binid_has_sindex(as_namespace *ns, int binid);
-extern void                 as_sindex_reset_binid_has_sindex(as_namespace *ns, int binid);
-extern bool                 as_sindex_binid_has_sindex(as_namespace *ns, int binid);
-extern bool                 as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes);
-extern bool                 as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes);
 extern int                  as_sindex_histogram_dumpall(as_namespace *ns);
 extern int                  as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params);
 extern void                 as_sindex_gconfig_default(struct as_config_s *c);
 extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
-extern as_sindex_status     as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str);
 extern as_sindex_status     as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * imd);
-extern as_val             * as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v);
-extern int                  as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, 
-								as_sindex_bin * start_sbin, as_sindex_op op);
-extern int                  as_sindex_sbins_from_buf(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin * start_sbin, 
-								byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_op op);
-extern int                  as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sindex_bin *start_sbin, 
-								int num_sbins, cf_digest * pkey);
-extern int                  as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, 
-								byte * buf, uint32_t buf_sz, as_particle_type type, as_sindex_bin * start_sbin);
+
+// Internal.h
+extern as_sindex_gc_status  as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd);
+extern bool                 as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes);
+extern bool                 as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes);
+
 // SINDEX LOCK MACROS
 extern pthread_rwlock_t g_sindex_rwlock;
 #define SINDEX_GRLOCK()         \
