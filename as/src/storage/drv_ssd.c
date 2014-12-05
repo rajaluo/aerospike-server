@@ -991,8 +991,8 @@ ssd_wblock_init(drv_ssd *ssd)
 {
 	uint32_t n_wblocks = ssd->file_size / ssd->write_block_size;
 
-	cf_info(AS_DRV_SSD, " number of wblocks in allocator: %d wblock %d",
-			n_wblocks, ssd->write_block_size);
+	cf_info(AS_DRV_SSD, "%s has %u wblocks of size %u", ssd->name, n_wblocks,
+			ssd->write_block_size);
 
 	ssd_alloc_table *at = cf_malloc(sizeof(ssd_alloc_table) + (n_wblocks * sizeof(ssd_wblock_state)));
 
@@ -1114,8 +1114,8 @@ as_storage_record_read_ssd(as_storage_rd *rd)
 		cf_atomic32_incr(&rd->ns->n_reads_from_device);
 
 		uint64_t record_end_offset = record_offset + record_size;
-		uint64_t read_offset = BYTES_DOWN_TO_SYS_RBLOCK_BYTES(record_offset);
-		uint64_t read_end_offset = BYTES_UP_TO_SYS_RBLOCK_BYTES(record_end_offset);
+		uint64_t read_offset = BYTES_DOWN_TO_IO_MIN(ssd, record_offset);
+		uint64_t read_end_offset = BYTES_UP_TO_IO_MIN(ssd, record_end_offset);
 		size_t read_size = read_end_offset - read_offset;
 		uint64_t record_buf_indent = record_offset - read_offset;
 
@@ -2575,7 +2575,7 @@ as_storage_read_header(drv_ssd *ssd, as_namespace *ns,
 		return -1;
 	}
 
-	size_t peek_size = BYTES_UP_TO_SYS_RBLOCK_BYTES(sizeof(ssd_device_header));
+	size_t peek_size = BYTES_UP_TO_IO_MIN(ssd, sizeof(ssd_device_header));
 	ssd_device_header *header = cf_valloc(peek_size);
 
 	if (! header) {
@@ -3486,6 +3486,7 @@ first_used_device(ssd_device_header *headers[], int n_ssds)
 	return -1;
 }
 
+
 bool
 ssd_load_devices(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 {
@@ -3744,6 +3745,34 @@ check_file_size(off_t file_size, const char *tag)
 }
 
 
+static uint64_t
+find_io_min_size(int fd, const char *ssd_name)
+{
+	off_t off = lseek(fd, 0, SEEK_SET);
+
+	if (off != 0) {
+		cf_crash(AS_DRV_SSD, "%s: seek error %s", ssd_name, cf_strerror(errno));
+	}
+
+	uint8_t *buf = cf_valloc(HI_IO_MIN_SIZE);
+	size_t read_sz = LO_IO_MIN_SIZE;
+
+	while (read_sz <= HI_IO_MIN_SIZE) {
+		if (read(fd, (void*)buf, read_sz) == (ssize_t)read_sz) {
+			cf_free(buf);
+			return read_sz;
+		}
+
+		read_sz <<= 1; // LO_IO_MIN_SIZE and HI_IO_MIN_SIZE are powers of 2
+	}
+
+	cf_crash(AS_DRV_SSD, "%s: read failed at all sizes from %u to %u bytes",
+			ssd_name, LO_IO_MIN_SIZE, HI_IO_MIN_SIZE);
+
+	return 0;
+}
+
+
 int
 ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 {
@@ -3790,6 +3819,7 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 		ioctl(fd, BLKGETSIZE64, &size); // gets the number of bytes
 
 		ssd->file_size = check_file_size((off_t)size, "usable device");
+		ssd->io_min_size = find_io_min_size(fd, ssd->name);
 
 		if (ns->cold_start && ns->storage_cold_start_empty) {
 			if (! as_storage_empty_header(fd, ssd->name)) {
@@ -3805,8 +3835,8 @@ ssd_init_devices(as_namespace *ns, drv_ssds **ssds_p)
 
 		ns->ssd_size += ssd->file_size; // increment total storage size
 
-		cf_info(AS_DRV_SSD, "Opened device %s bytes %"PRIu64, ssd->name,
-				ssd->file_size);
+		cf_info(AS_DRV_SSD, "opened device %s: usable size %lu, io-min-size %lu",
+				ssd->name, ssd->file_size, ssd->io_min_size);
 
 		if (ns->storage_scheduler_mode) {
 			// Set scheduler mode specified in config file.
@@ -3874,6 +3904,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 		}
 
 		ssd->file_size = check_file_size(ns->storage_filesize, "file");
+		ssd->io_min_size = LO_IO_MIN_SIZE;
 
 		// Truncate will grow or shrink the file to the correct size.
 		if (0 != ftruncate(fd, ssd->file_size)) {
@@ -3886,7 +3917,7 @@ ssd_init_files(as_namespace *ns, drv_ssds **ssds_p)
 
 		ns->ssd_size += ssd->file_size; // increment total storage size
 
-		cf_info(AS_DRV_SSD, "Opened file %s bytes %"PRIu64, ssd->name,
+		cf_info(AS_DRV_SSD, "opened file %s: usable size %lu", ssd->name,
 				ssd->file_size);
 	}
 
@@ -4395,8 +4426,7 @@ as_storage_save_evict_void_time_ssd(as_namespace *ns, uint32_t evict_void_time)
 
 		lseek(fd, 0, SEEK_SET);
 
-		size_t peek_size =
-				BYTES_UP_TO_SYS_RBLOCK_BYTES(sizeof(ssd_device_header));
+		size_t peek_size = BYTES_UP_TO_IO_MIN(ssd, sizeof(ssd_device_header));
 		ssize_t sz = write(fd, (void*)ssds->header, peek_size);
 
 		if (sz != peek_size) {
