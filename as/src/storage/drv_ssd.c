@@ -791,15 +791,44 @@ run_defrag(void *pv_data)
 		cf_crash(AS_DRV_SSD, "device %s: defrag valloc failed", ssd->name);
 	}
 
-	while (CF_QUEUE_OK ==
-			cf_queue_pop(ssd->defrag_wblock_q, &wblock_id, CF_QUEUE_FOREVER)) {
+	while (true) {
+		uint32_t q_min = ssd->ns->storage_defrag_queue_min;
+
+		if (q_min != 0) {
+			if (cf_queue_sz(ssd->defrag_wblock_q) > q_min) {
+				if (CF_QUEUE_OK !=
+						cf_queue_pop(ssd->defrag_wblock_q, &wblock_id,
+								CF_QUEUE_NOWAIT)) {
+					// Should never get here!
+					break;
+				}
+			}
+			else {
+				usleep(1000 * 50);
+				continue;
+			}
+		}
+		else {
+			if (CF_QUEUE_OK !=
+					cf_queue_pop(ssd->defrag_wblock_q, &wblock_id,
+							CF_QUEUE_FOREVER)) {
+				// Should never get here!
+				break;
+			}
+		}
 
 		ssd_defrag_wblock(ssd, wblock_id, read_buf);
-		usleep(ssd->ns->storage_defrag_sleep);
+
+		uint32_t sleep_us = ssd->ns->storage_defrag_sleep;
+
+		if (sleep_us != 0) {
+			usleep(sleep_us);
+		}
 	}
 
 	// Although we ever expect to get here...
 	cf_free(read_buf);
+	cf_warning(AS_DRV_SSD, "device %s: quit defrag - queue error", ssd->name);
 
 	return NULL;
 }
