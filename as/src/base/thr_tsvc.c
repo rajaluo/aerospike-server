@@ -38,6 +38,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/ldt.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/thr_batch.h"
@@ -317,7 +318,6 @@ is_udf(cl_msg *msgp)
 	return as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME) != NULL;
 }
 
-				
 int
 as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 {
@@ -381,6 +381,54 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 	return 0;
 }
 	
+static as_sec_priv
+write_op_priv(cl_msg *msgp)
+{
+	as_msg_field *f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
+
+	if (! f || as_msg_field_get_value_sz(f) == 0) {
+		// It's not a UDF - so it must be a regular write.
+		return PRIV_WRITE;
+	}
+
+	// It's a UDF apply of some sort.
+
+	size_t len = as_msg_field_get_value_sz(f);
+	char filename[len + 1];
+	memcpy((void*)filename, (const void*)f->data, len);
+	filename[len] = 0;
+
+	int package_index = as_ldt_package_index(filename);
+
+	if (package_index < 0) {
+		// It's not an internal LDT UDF - so it's a regular UDF.
+		return PRIV_UDF_APPLY;
+	}
+
+	// It's an internal LDT UDF - determine whether it's a read or write.
+
+	f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
+
+	if (! f || as_msg_field_get_value_sz(f) == 0) {
+		cf_warning(AS_TSVC, "msg has udf filename %s but no function", filename);
+		return PRIV_NONE; // a msg error - will fail further along
+	}
+
+	len = as_msg_field_get_value_sz(f);
+	char funcname[len + 1];
+	memcpy((void*)funcname, (const void*)f->data, len);
+	funcname[len] = 0;
+
+	int op_type = as_ldt_op_type(package_index, funcname);
+
+	if (op_type < 0) {
+		cf_warning(AS_TSVC, "%s not a recognized op in %s", funcname, filename);
+		return PRIV_WRITE; // are ldt_op_props in ldt.c up to date?
+	}
+
+	return op_type == LDT_READ_OP ? PRIV_READ : PRIV_WRITE;
+}
+
 // Handle the transaction, including proxy to another node if necessary.
 void
 process_transaction(as_transaction *tr)
@@ -618,11 +666,9 @@ process_transaction(as_transaction *tr)
 			if (tr->udata.req_udata) {
 				free_msgp = false;
 			}
-			else if (tr->proto_fd_h && ! security_check(tr,
-					is_udf(msgp) ? PRIV_UDF_APPLY : PRIV_WRITE)) {
+			else if (tr->proto_fd_h && ! security_check(tr, write_op_priv(msgp))) {
 				goto Cleanup;
 			}
-
 
 			// If the transaction is "shipped proxy op" to the winner node then
 			// just do the migrate reservation.

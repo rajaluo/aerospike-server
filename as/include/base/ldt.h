@@ -105,6 +105,12 @@ typedef struct ldt_sub_gc_info_s {
 } ldt_sub_gc_info;
 
 
+#define LDT_READ_OP		0
+#define LDT_WRITE_OP	1
+
+extern int		as_ldt_package_index(const char *package_name);
+extern int		as_ldt_op_type(int package_index, const char *op_name);
+
 extern int      as_ldt_flatten_component   (as_partition_reservation *rsv, as_storage_rd *rd, as_index_ref *r_ref, as_record_merge_component *c, bool *);
 
 extern bool     as_ldt_set_flag            (uint16_t flag);
