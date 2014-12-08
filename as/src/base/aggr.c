@@ -374,7 +374,6 @@ as_aggr_istream_read(const as_stream *s)
 					return NULL;
 				}
 				dt                             = ((ll_recl_element*)ele)->dig_arr;
-				((ll_recl_element*)ele)->dig_arr = NULL;
 			}
 			aggr_istream->dtoffset = 0;
 			aggr_istream->dt       = dt;
