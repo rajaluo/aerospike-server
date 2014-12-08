@@ -1718,6 +1718,11 @@ finish_rw_process_dup_ack(write_request *wr)
 bool
 finish_rw_process_ack(write_request *wr, uint32_t result_code)
 {
+	for (uint32_t node_id = 0; node_id < wr->dest_sz; node_id++) {
+		if (wr->dest_complete[node_id] == false) {
+			return false;
+		}
+	}
 	// Figure out the ack is coming for which request type.
 	//   - If dupl_trans_complete is 0 then it is duplicate resolution ack
 	//   - Else is it prole ack
@@ -1902,7 +1907,7 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 
 	// 2. Now check to see if all are complete. If not wait for all messages 
 	// to arrive 
-	uint node_id;
+	uint32_t node_id;
 	for (node_id = 0; node_id < wr->dest_sz; node_id++) {
 		if (wr->tid != tid) {
 			cf_debug(AS_RW, "rw process ack: retransmit after we moved on");
@@ -1944,14 +1949,6 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 		goto Out;
 	}
 
-	for (node_id = 0; node_id < wr->dest_sz; node_id++) {
-		if (wr->dest_complete[node_id] == false) {
-			// more responses expected
-			pthread_mutex_unlock(&wr->lock);
-			goto Out;
-		}
-	}
-	
 	// 3. We now know this node's write/read is complete. Finish processing
 	WR_TRACK_INFO(wr, "finish_rw_process_ack: entering");
 	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK);
@@ -2270,7 +2267,7 @@ as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rs
 				linfo->ldt_prole_version = 0;
 				// If parent record does not exist. In that case for source version itself
 				// is used @ prole
-				int rv = -1;	
+				int rv = -1;
 				if (rd && !is_create) {
 					rv = as_ldt_parent_storage_get_version(rd, &linfo->ldt_prole_version, true ,__FILE__, __LINE__);
 					if (0 == rv) {
@@ -2279,10 +2276,10 @@ as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rs
 				}
 				if (rv) {
 					linfo->ldt_prole_version_set = false;
-					cf_detail(AS_RW, "prole version not set because %p==NULL or %d != 0", rd, rv);	
+					cf_detail(AS_RW, "prole version not set because %p==NULL or %d != 0", rd, rv);
 				}
 			} else { 
-				if (as_migrate_is_incoming(keyd, linfo->ldt_source_version, rsv->p->partition_id, AS_MIGRATE_RX_STATE_RECORD)) {	
+				if (as_migrate_is_incoming(keyd, linfo->ldt_source_version, rsv->p->partition_id, AS_MIGRATE_RX_STATE_RECORD)) {
 					cf_detail_digest(AS_RW, keyd, "MULTI_OP(%s:%d): Write Parent Record in Partition %d with version with %ld version [source:%ld prole:%ld]", 
 							fname, lineno, rsv->p->partition_id, 
 							linfo->replication_partition_version_match ? linfo->ldt_prole_version:linfo->ldt_source_version,
@@ -2310,7 +2307,7 @@ Out:
 
 int
 as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
-			ldt_prole_info *linfo, uint32_t info)
+			const ldt_prole_info *linfo, uint32_t info)
 {
 	if (rsv->ns->ldt_enabled) {
 		bool is_subrec = ((info & RW_INFO_LDT_SUBREC) || (info & RW_INFO_LDT_ESR));
@@ -2319,7 +2316,7 @@ as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
 			if (linfo->replication_partition_version_match) {
 				if (linfo->ldt_prole_version_set) {
 					// ldt_version should be set
-					as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);	
+					as_ldt_subdigest_setversion(keyd, linfo->ldt_prole_version);
 					cf_detail_digest(AS_RW, keyd, "Set Prole Version %ld", linfo->ldt_prole_version);
 					type = 1;
 				} else {
@@ -2414,7 +2411,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 
 	// Check is duplication in case code is coming from multi op
 	if (as_ldt_check_and_get_prole_version(keyd, rsv, linfo, info, &rd, is_create, __FILE__, __LINE__)) {
-		do_destroy = true;	
+		do_destroy = true;
 		goto Out;
 	}
 
@@ -2422,12 +2419,13 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 		memory_bytes = as_storage_record_get_n_bytes_memory(&rd);
 	}
 
-	as_record_set_properties(&rd, p_rec_props);
+	// Blindly overwrite property as in incoming record
+	as_record_overwrite_properties(&rd, p_rec_props);
 	cf_detail(AS_RW, "TO PINDEX FROM MASTER Digest=%"PRIx64" bits %d \n",
 			*(uint64_t *)&rd.keyd, as_ldt_record_get_rectype_bits(r));
 
 	if (0 != (rv = as_record_unpickle_replace(r, &rd, pickled_buf, pickled_sz, &p_stack_particles, has_sindex))) {
-		do_destroy = true;	
+		do_destroy = true;
 		goto Out;
 		// Is there any clean up that must be done here???
 	}
@@ -2452,13 +2450,13 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 			version_to_set = linfo->ldt_prole_version;
 		} else if (!linfo->replication_partition_version_match) {
 			version_to_set = linfo->ldt_source_version;
-		}	
+		}
 	}
-	
-	if (version_to_set) {	
+
+	if (version_to_set) {
 		int pbytes = as_ldt_parent_storage_set_version(&rd, version_to_set, p_stack_particles, __FILE__, __LINE__);
 		if (pbytes < 0) {
-			cf_warning(AS_LDT, "write_local_pickled: LDT Parent storage version set failed %d", pbytes);	
+			cf_warning(AS_LDT, "write_local_pickled: LDT Parent storage version set failed %d", pbytes);
 			// Todo Rollback
 		} else {
 			p_stack_particles += pbytes;
@@ -2524,19 +2522,19 @@ int as_rw_get_ldt_info(ldt_prole_info *linfo, msg *m, as_partition_reservation *
 /*
 		cf_info(AS_RW, "MULTI_OP: Version matches");
 		cf_info(AS_RW, "%ld %d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d", source_partition_version->iid,
-				source_partition_version->vtp[0], source_partition_version->vtp[1],	source_partition_version->vtp[2],	
-				source_partition_version->vtp[3], source_partition_version->vtp[4],	source_partition_version->vtp[5],	
-				source_partition_version->vtp[6], source_partition_version->vtp[7],	source_partition_version->vtp[8],	
-				source_partition_version->vtp[9], source_partition_version->vtp[10],	source_partition_version->vtp[11],	
-				source_partition_version->vtp[12], source_partition_version->vtp[13],	source_partition_version->vtp[14],	
+				source_partition_version->vtp[0], source_partition_version->vtp[1],	source_partition_version->vtp[2],
+				source_partition_version->vtp[3], source_partition_version->vtp[4],	source_partition_version->vtp[5],
+				source_partition_version->vtp[6], source_partition_version->vtp[7],	source_partition_version->vtp[8],
+				source_partition_version->vtp[9], source_partition_version->vtp[10],	source_partition_version->vtp[11],
+				source_partition_version->vtp[12], source_partition_version->vtp[13],	source_partition_version->vtp[14],
 				source_partition_version->vtp[15]);
 
 		cf_info(AS_RW, "%ld %d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d", rsv->p->version_info.iid,
-				rsv->p->version_info.vtp[0], rsv->p->version_info.vtp[1],	rsv->p->version_info.vtp[2],	
-				rsv->p->version_info.vtp[3], rsv->p->version_info.vtp[4],	rsv->p->version_info.vtp[5],	
-				rsv->p->version_info.vtp[6], rsv->p->version_info.vtp[7],	rsv->p->version_info.vtp[8],	
-				rsv->p->version_info.vtp[9], rsv->p->version_info.vtp[10],	rsv->p->version_info.vtp[11],	
-				rsv->p->version_info.vtp[12], rsv->p->version_info.vtp[13],	rsv->p->version_info.vtp[14],	
+				rsv->p->version_info.vtp[0], rsv->p->version_info.vtp[1],	rsv->p->version_info.vtp[2],
+				rsv->p->version_info.vtp[3], rsv->p->version_info.vtp[4],	rsv->p->version_info.vtp[5],
+				rsv->p->version_info.vtp[6], rsv->p->version_info.vtp[7],	rsv->p->version_info.vtp[8],
+				rsv->p->version_info.vtp[9], rsv->p->version_info.vtp[10],	rsv->p->version_info.vtp[11],
+				rsv->p->version_info.vtp[12], rsv->p->version_info.vtp[13],	rsv->p->version_info.vtp[14],
 				rsv->p->version_info.vtp[15]);
 */
 	}
@@ -2669,7 +2667,7 @@ write_process(cf_node node, msg *m, bool respond)
 			cf_debug_digest(AS_RW, keyd, "[PROLE write]: SingleBin(%d) generation(%d):",
 					ns->single_bin, generation );
 
-			
+
 			if (as_ldt_check_and_get_prole_version(keyd, &tr.rsv, &linfo, info, NULL, false, __FILE__, __LINE__)) {
 				result_code = AS_PROTO_RESULT_OK;
 				as_partition_release(&tr.rsv); // returns reservation a few lines up
@@ -3815,6 +3813,12 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		uint32_t idx;
 		as_bin *bin = as_bin_get_and_reserve_name(&rd, op->name, op->name_sz, &reserved, &idx);
 
+		if (bin && as_bin_is_hidden(bin)) {
+			cf_debug(AS_RW, "returning FAIL BIN IS HIDDEN. Cannot Manipulate Directly. digest %"PRIx64"", *(uint64_t*)&tr->keyd);
+			write_local_failed(tr, &r_ref, record_created, tree, &rd, AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE);
+			return -1;
+		}
+
 		if (! reserved) {
 			cf_warning(AS_RW, "write_local: could not reserve bin name");
 			write_local_failed(tr, &r_ref, record_created, tree, &rd, AS_PROTO_RESULT_FAIL_BIN_NAME);
@@ -3851,12 +3855,6 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 				write_local_failed(tr, &r_ref, record_created, tree, &rd, AS_PROTO_RESULT_FAIL_BIN_EXISTS);
 				return -1;
 			}
-		}
-
-		if (bin && as_bin_is_hidden(bin)) {
-			cf_debug(AS_RW, "returning FAIL BIN IS HIDDEN. Cannot Manipulate Directly. digest %"PRIx64"", *(uint64_t*)&tr->keyd);
-			write_local_failed(tr, &r_ref, record_created, tree, &rd, AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE);
-			return -1;
 		}
 
 		if (m->info3 & AS_MSG_INFO3_BIN_REPLACE_ONLY) {
@@ -4339,8 +4337,13 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 
-	// LDT: Make sure the control bin is around .. if it not then reset the 
-	// LDT parent flag in the index...
+	// LDT: In case there is REPLACE flag set which destroy LDT bin by directly,
+	// we will have index flag inconsistent with storage. Make sure the control 
+	// bin is around .. if it is not then reset the LDT parent flag in the index...
+	// Note: LDT parent flag governs code flow in lot of places this is
+	// cost to be paid for storing a information in two different places
+	// in index and in storage (to optimize use cases and to avoid I/O to
+	// fetch this info)
 	if (as_ldt_record_is_parent(r_ref.r)) {
 		uint64_t parent_version = 0;
 		int rv = as_ldt_parent_storage_get_version(&rd, &parent_version, false, __FILE__, __LINE__);
@@ -4358,7 +4361,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 
-	
+
 
 	write_local_post_processing(tr, ns, NULL, pickled_buf, pickled_sz,
 			pickled_void_time, p_pickled_rec_props, increment_generation, wlg,
@@ -4374,9 +4377,9 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	//			 packet.
 
 	uint64_t start_ns = 0;
-	
+
 	if (has_sindex) {
-	
+
 		if (oldbin_cnt || newbin_cnt) {
 			tr->flag |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 			if (g_config.microbenchmarks) {
@@ -4400,7 +4403,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 
-	
+
 
 	if (g_config.microbenchmarks) {
 		start_ns = cf_getns();
@@ -5055,7 +5058,7 @@ write_msg_fn(cf_node id, msg *m, void *udata)
 		cf_detail(AS_RW, "MULTI_OP: Received Multi Op Request");
 		rw_multi_process(id, m);
 		cf_detail(AS_RW, "MULTI_OP: Processed Multi Op Request");
-		
+
 		if (g_config.ldt_benchmarks && start_ns) {
 			histogram_insert_data_point(g_config.ldt_multiop_prole_hist, start_ns);
 		}

@@ -3014,7 +3014,9 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	cf_atomic_int_setmax(&p_partition->max_void_time, r->void_time);
 	cf_atomic_int_setmax(&ns->max_void_time, r->void_time);
 
-	if (props.size != 0) {
+	// Given that new record has won. This property update simply overwrite
+	// if record property is not set for new then reset all index flags. 
+	if (props.size != 0 && props.p_data) {
 		// Do this early since set-id is needed for the secondary index update.
 		as_record_apply_properties(r, ns, &props);
 	} else {

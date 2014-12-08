@@ -75,11 +75,11 @@ extern udf_call *as_query_get_udf_call(void *ptr);
  *                    used to send result after the UDF execution.
  */
 static bool
-make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint sp_sz,
+make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
 			  const char *key, size_t klen, int  vtype,  void *val, size_t vlen)
 {
-	uint        sz          = 0;
-	uint        tsz         = sz + vlen + as_particle_get_base_size(vtype);
+	uint32_t        sz          = 0;
+	uint32_t        tsz         = sz + vlen + as_particle_get_base_size(vtype);
 	uint8_t *   v           = NULL;
 	int64_t     swapped_int = 0;
 	uint8_t     *sp_p = *sp_pp;
@@ -148,9 +148,9 @@ send_response(udf_call *call, const char *key, size_t klen, int vtype, void *val
 	as_transaction *    tr          = call->transaction;
 	as_namespace *      ns          = tr->rsv.ns;
 	uint32_t            generation  = tr->generation;
-	uint                sp_sz       = 1024 * 16;
+	uint32_t            sp_sz       = 1024 * 16;
 	uint32_t            void_time   = 0;
-	uint                written_sz  = 0;
+	uint32_t            written_sz  = 0;
 	bool                keep_fd     = false;
 	as_bin              stack_bin;
 	as_bin            * bin         = &stack_bin;
@@ -335,7 +335,7 @@ udf_rw_update_ldt_err_stats(as_namespace *ns, as_result *res)
 			case ERR_TOPREC_CREATE:
 				cf_atomic_int_incr(&ns->lstats.ldt_err_toprec_internal);
 				break;
-			
+
 
 			case ERR_FILTER_BAD:
 			case ERR_FILTER_NOT_FOUND:
@@ -683,7 +683,7 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 	bool udf_xdr_ship_op = false;
 
 	udf_rw_getop(urecord, urecord_op);
-	
+
 	if (UDF_OP_IS_DELETE(*urecord_op)
 			|| UDF_OP_IS_WRITE(*urecord_op)) {
 		udf_xdr_ship_op = true;
@@ -884,7 +884,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 			ret = as_ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz, &wr->pickled_void_time);
 			FOR_EACH_SUBRECORD(i, j, lrecord) {
 				udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
-				// Cleanup in case pickle code bailed out	
+				// Cleanup in case pickle code bailed out
 				// 1. either because this single node run no replica
 				// 2. failed to pack stuff up.
 				udf_record_cleanup(c_urecord, true);

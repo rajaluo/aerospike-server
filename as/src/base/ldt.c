@@ -275,11 +275,11 @@
 #include <base/ldt.h>
 #include <base/ldt_record.h>
 #include <fabric/fabric.h>
+#include <fabric/migrate.h>
 #include <base/thr_rw_internal.h>
 #include <base/write_request.h>
 #include "base/thr_proxy.h"
 #include "base/udf_rw.h"
-#include <fabric/migrate.h>
 
 #include <aerospike/as_types.h>
 #include <aerospike/as_msgpack.h>
@@ -385,7 +385,8 @@ const ldt_op_props LLIST_OP_PROPS[] = {
 		{ "remove",			LDT_WRITE_OP },
 		{ "scan",			LDT_READ_OP },
 		{ "set_capacity",	LDT_WRITE_OP },
-		{ "size",			LDT_READ_OP }
+		{ "size",			LDT_READ_OP },
+		{ "config",			LDT_READ_OP }
 };
 
 const ldt_op_props LMAP_OP_PROPS[] = {
@@ -399,7 +400,8 @@ const ldt_op_props LMAP_OP_PROPS[] = {
 		{ "remove",			LDT_WRITE_OP },
 		{ "scan",			LDT_READ_OP },
 		{ "set_capacity",	LDT_WRITE_OP },
-		{ "size",			LDT_READ_OP }
+		{ "size",			LDT_READ_OP },
+		{ "config",			LDT_READ_OP }
 };
 
 const ldt_op_props LSET_OP_PROPS[] = {
@@ -414,7 +416,8 @@ const ldt_op_props LSET_OP_PROPS[] = {
 		{ "remove",			LDT_WRITE_OP },
 		{ "scan",			LDT_READ_OP },
 		{ "set_capacity",	LDT_WRITE_OP },
-		{ "size",			LDT_READ_OP }
+		{ "size",			LDT_READ_OP },
+		{ "config",			LDT_READ_OP }
 };
 
 const ldt_op_props LSTACK_OP_PROPS[] = {
@@ -428,7 +431,8 @@ const ldt_op_props LSTACK_OP_PROPS[] = {
 		{ "push_all",		LDT_WRITE_OP },
 		{ "same",			LDT_READ_OP },
 		{ "set_capacity",	LDT_WRITE_OP },
-		{ "size",			LDT_READ_OP }
+		{ "size",			LDT_READ_OP },
+		{ "config",			LDT_READ_OP }
 };
 
 // Order MUST match LDT_UDF_PACKAGE_NAMES:
@@ -1336,7 +1340,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	// b) ESR DIGEST
 	// c) VERSION
 	// d) For in-memory case memory usage
-	
+
 	// LDT_GC_IO: SUBRECORD
 	as_storage_rd rd;
 	int rv                  = as_storage_record_open(ns, r, &rd, &r->key);
@@ -1356,7 +1360,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	if (as_ldt_subrec_storage_get_digests(&rd, &esr_digest, &parent_digest)) {
 		goto Cleanup;
 	}
-	
+
 	// Do not check esr of esr.
 	bool check_esr          = false;
 	if (!as_ldt_record_is_esr(r)) {

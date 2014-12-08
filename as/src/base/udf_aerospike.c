@@ -178,7 +178,7 @@ udf__aerospike_get_particle_buf(udf_record *urecord, udf_record_bin *ubin, uint8
 		cf_warning(AS_UDF, "udf__aerospike_get_particle_buf: Invalid Operation [Bin %s data too big size=%d]... Fail", ubin->name, pbytes);
 		return NULL;
 	}
-	
+
 	int alloc_size = 0;
 	switch(type) {
 		case AS_LIST:
@@ -190,15 +190,15 @@ udf__aerospike_get_particle_buf(udf_record *urecord, udf_record_bin *ubin, uint8
 		}
 		case AS_BOOLEAN:
 		case AS_INTEGER: {
-			alloc_size = pbytes;	
+			alloc_size = pbytes;
 			break;
 		}
 		default: {
-			cf_warning (AS_UDF, "udf__aerospike_get_particle_buf: Unknown Particle Type");	
+			cf_warning (AS_UDF, "udf__aerospike_get_particle_buf: Unknown Particle Type");
 			break;
-		}	
+		}
 	}
-	
+
 	uint8_t *buf = NULL;
 	if (ubin->particle_buf) {
 		buf = ubin->particle_buf;
@@ -589,7 +589,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	// successfully generally.
 
 	// In first iteration, just calculate how many new bins need to be created
-	for(uint i = 0; i < urecord->nupdates; i++ ) {
+	for(uint32_t i = 0; i < urecord->nupdates; i++ ) {
 		if ( urecord->updates[i].dirty ) {
 			char *      k = urecord->updates[i].name;
 			if ( k != NULL ) {
@@ -629,7 +629,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	uint8_t new_index_flags = 0;
 
 	// In second iteration apply updates.
-	for(uint i = 0; i < urecord->nupdates; i++ ) {
+	for(uint32_t i = 0; i < urecord->nupdates; i++ ) {
 		urecord->updates[i].oldvalue  = NULL;
 		urecord->updates[i].washidden = false;
 		if ( urecord->updates[i].dirty && rc == 0) {
@@ -672,7 +672,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		} else { 
 			new_index_flags = old_index_flags | urecord->ldt_rectype_bits;  
 		} 
-	
+
 		if (new_index_flags != old_index_flags) {
 			as_index_clear_flags(rd->r, old_index_flags);
 			as_index_set_flags(rd->r, new_index_flags);
@@ -726,14 +726,14 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			|| (urecord->flag & UDF_RECORD_FLAG_METADATA_UPDATED)) {
 		// Set updated flag to true
 		urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
-	
+
 		// Set up record to be flushed to storage
 		urecord->rd->write_to_device = true;
 	}
 
 	// Clean up oldvalue cache and reset dirty. All the changes made 
 	// here has made to the particle buffer. Nothing will now be backed out.
-	for (uint i = 0; i < urecord->nupdates; i++) {
+	for (uint32_t i = 0; i < urecord->nupdates; i++) {
 		udf_record_bin * bin = &urecord->updates[i];
 		if (bin->oldvalue != NULL ) {
 			as_val_destroy(bin->oldvalue);
@@ -927,7 +927,7 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	}
 
 	// make sure we got the record as a create
-	bool is_create = true;
+	bool is_create = false;
 	int rv = as_record_get_create(tree, &tr->keyd, r_ref, tr->rsv.ns, is_subrec);
 	cf_detail_digest(AS_UDF, &tr->keyd, "Creating %sRecord",
 			(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "Sub" : "");

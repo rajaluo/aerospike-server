@@ -333,7 +333,7 @@ udf_record_init(udf_record *urecord)
 
 	urecord->ldt_rectype_bits   = 0;
 	urecord->keyd               = cf_digest_zero;
-	for (uint i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
+	for (uint32_t i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
 		urecord->updates[i].particle_buf = NULL;
 	}
 }
@@ -455,7 +455,7 @@ udf_record_cache_free(udf_record * urecord)
 {
 	cf_debug(AS_UDF, "[ENTER] NumUpdates(%d) ", urecord->nupdates );
 
-	for (uint i = 0; i < urecord->nupdates; i ++ ) {
+	for (uint32_t i = 0; i < urecord->nupdates; i ++ ) {
 		udf_record_bin * bin = &urecord->updates[i];
 		if ( bin->name[0] != '\0' && bin->value != NULL ) {
 			bin->name[0] = '\0';
@@ -469,7 +469,7 @@ udf_record_cache_free(udf_record * urecord)
 		}
 	}
 
-	for (uint i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
+	for (uint32_t i = 0; i < UDF_RECORD_BIN_ULIMIT; i++) {
 		if (urecord->updates[i].particle_buf) {
 			cf_free(urecord->updates[i].particle_buf);
 			urecord->updates[i].particle_buf = NULL;

@@ -3280,7 +3280,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of ldt-gc-rate of ns %s from %lu to %d", ns->name, (1000 * 1000)/ns->ldt_gc_sleep_us , val);
-			// ldt_gc_sleep_us = ~ (1000 * 1000 / ldt_gc_rate). Given scheduling etc.
 			ns->ldt_gc_sleep_us = 1000 * 1000 / rate;
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
@@ -4610,25 +4609,7 @@ info_debug_ticker_fn(void *gcc_is_ass)
 					cf_atomic_int_get(g_config.rw_tree_count)
 					);
 
-			uint64_t cnt = 0;
-			uint64_t io  = 0;
-			uint64_t gc  = 0;
-			uint64_t no_esr = 0;
-			uint64_t no_parent = 0;
-			uint64_t version_mismatch = 0;
-			for (int i = 0; i < g_config.namespaces; i++) {
-				as_namespace *ns = g_config.namespace[i];
-				cnt += cf_atomic_int_get(ns->lstats.ldt_gc_processed);
-				io += cf_atomic_int_get(ns->lstats.ldt_gc_io);
-				gc += cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
-				no_esr += cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
-				no_parent += cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
-				version_mismatch += cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-			}
-			cf_info(AS_INFO, "   ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
-					cnt, io, gc, no_esr, no_parent, version_mismatch);
-
-			// namespace disk and memory size
+			// namespace disk and memory size and ldt gc stats
 			total_ns_memory_inuse = 0;
 			for (int i = 0; i < g_config.namespaces; i++) {
 				as_namespace *ns = g_config.namespace[i];
@@ -4643,6 +4624,16 @@ info_debug_ticker_fn(void *gcc_is_ass)
 							ns->name, inuse_disk_bytes, ns_memory_inuse,
 							ns->sindex_data_memory_used,
 							available_pct);
+					if (ns->ldt_enabled) {
+						uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
+						uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
+						uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
+						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
+						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
+						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
+						cf_info(AS_INFO, "namespace %s: ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
+					}
 				}
 				else {
 					uint32_t n_reads_from_cache = cf_atomic32_get(ns->n_reads_from_cache);
@@ -4658,6 +4649,16 @@ info_debug_ticker_fn(void *gcc_is_ass)
 							ns->sindex_data_memory_used,
 							available_pct,
 							ns->cache_read_pct);
+					if (ns->ldt_enabled) {
+						uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
+						uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
+						uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
+						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
+						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
+						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
+						cf_info(AS_INFO, "namespace %s: ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
+					}
 				}
 
 				total_ns_memory_inuse += ns_memory_inuse;

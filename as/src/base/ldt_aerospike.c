@@ -202,7 +202,7 @@ ldt_crec_expand_chunk(ldt_record *lrecord)
 	} else {
 		lrecord->chunk = cf_malloc(sizeof(ldt_slot_chunk) * new_size);
 	}
-		
+
 	if (lrecord->chunk == NULL) {
 		cf_warning(AS_LDT, "ldt_crec_expand_chunk: Allocation Error !! [Chunk cannot be allocated ]... Fail");
 		lrecord->chunk = old_chunk;
@@ -261,7 +261,7 @@ ldt_crec_find_freeslot(ldt_record *lrecord, char *func)
 				lrecord->num_slots_used++;
 				chunk->slots[j].inuse = true;
 				cf_detail(AS_LDT, "%s Popped slot %p %"PRIu64"", func, &chunk->slots[j], lrecord->num_slots_used);
-				return &chunk->slots[j];		
+				return &chunk->slots[j];
 			} 
 		}
 	}
@@ -520,7 +520,7 @@ retry:
 		// re-randomize and retry
 		as_ldt_digest_randomizer(&keyd);
 		as_ldt_subdigest_setversion(&keyd, lrecord->version);
-		cf_atomic64_incr(&ns->lstats.ldt_randomizer_retry);		
+		cf_atomic64_incr(&ns->lstats.ldt_randomizer_retry);
 		retry_cnt++;
 		goto retry;
 	}

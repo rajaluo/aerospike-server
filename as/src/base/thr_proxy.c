@@ -409,7 +409,11 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 			// this may be NULL if the request has already timedout and the wr proto_fd_h
 			// will be cleaned up by then
 			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing proto_fd ");
-			
+
+			// Note: This may be needed if this is node where internal scan or query
+			// UDF is initiated where it happens so that there is migration is going 
+			// on and the request get routed to the remote node which is winning node
+			// This request may need the req_cb to be called.
 			if (udf_rw_needcomplete_wr(wr)) {
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
@@ -793,6 +797,10 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 				cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit Timeout ...");
 				cf_atomic_int_incr(&g_config.ldt_proxy_timeout);
 				pthread_mutex_lock(&pr->wr->lock);
+				// Note: This may be needed if this is node where internal scan or query
+				// UDF is initiated where it happens so that there is migration is going 
+				// on and the request get routed to the remote node which is winning node
+				// This request may need the req_cb to be called.
 				if (udf_rw_needcomplete_wr(pr->wr)) {
 					as_transaction tr;
 					write_request_init_tr(&tr, pr->wr);
