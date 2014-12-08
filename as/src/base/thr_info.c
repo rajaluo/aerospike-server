@@ -2126,6 +2126,9 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";single-bin=");
 	cf_dyn_buf_append_string(db, ns->single_bin ? "true" : "false");
 
+	cf_dyn_buf_append_string(db, ";ldt-enabled=");
+	cf_dyn_buf_append_string(db, ns->ldt_enabled ? "true" : "false");
+
 	cf_dyn_buf_append_string(db, ";enable-xdr=");
 	cf_dyn_buf_append_string(db, ns->enable_xdr ? "true" : "false");
 
@@ -5560,8 +5563,6 @@ info_get_tree_namespace(char *name, char *subtree, cf_dyn_buf *db)
 
 	info_get_namespace_info(ns, db);
 	cf_dyn_buf_append_string(db, ";");
-	char param[1024];
-	sprintf(param, ";id=%s", ns->name);
 	info_namespace_config_get(ns->name, db);
 
 Done:
