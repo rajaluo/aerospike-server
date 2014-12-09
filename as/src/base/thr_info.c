@@ -2082,7 +2082,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		return -1;
 	}
 
-	cf_dyn_buf_append_string(db, ";memory-size=");
+	cf_dyn_buf_append_string(db, "memory-size=");
 	cf_dyn_buf_append_uint64(db, ns->memory_size);
 
 	cf_dyn_buf_append_string(db, ";high-water-disk-pct=");
@@ -2132,10 +2132,10 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";enable-xdr=");
 	cf_dyn_buf_append_string(db, ns->enable_xdr ? "true" : "false");
 
-	cf_dyn_buf_append_string(db, "sets-enable-xdr=");
+	cf_dyn_buf_append_string(db, ";sets-enable-xdr=");
 	cf_dyn_buf_append_string(db, ns->sets_enable_xdr ? "true" : "false");
 
-	cf_dyn_buf_append_string(db, "forward-xdr-writes=");
+	cf_dyn_buf_append_string(db, ";ns-forward-xdr-writes=");
 	cf_dyn_buf_append_string(db, ns->ns_forward_xdr_writes ? "true" : "false");
 
 	cf_dyn_buf_append_string(db, ";disallow-null-setname=");
