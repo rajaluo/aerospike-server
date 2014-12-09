@@ -2170,6 +2170,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 	cf_debug(AS_SINDEX, "as_sindex_range_from_msg");
 	srange->num_binval = 0;
 	// getting ranges
+	as_msg_field *itype_fp  = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_INDEX_TYPE);
 	as_msg_field *rfp = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_INDEX_RANGE);
 	if (!rfp) {
 		cf_warning(AS_SINDEX, "Required Index Range Not Found");
@@ -2184,7 +2185,12 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		return AS_SINDEX_ERR_PARAM;
 	}
 	memset(srange, 0, sizeof(as_sindex_range));
-
+	if (itype_fp) {
+		srange->itype = *itype_fp->data;
+	}
+	else {
+		srange->itype = AS_SINDEX_ITYPE_DEFAULT;	
+	}
 	for (int i = 0; i < numrange; i++) {
 		as_sindex_bin_data *start = &(srange->start);
 		as_sindex_bin_data *end   = &(srange->end);
@@ -2275,7 +2281,6 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		}
 		srange->num_binval = numrange;
 		// TODO : This should come from client through wire protocol.
-		srange->itype      = AS_SINDEX_ITYPE_DEFAULT;
 		strncpy(srange->bin_path, binname, blen+1);
 	}
 	return AS_SINDEX_OK;

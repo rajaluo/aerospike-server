@@ -121,10 +121,10 @@ typedef enum {
 as_particle_type as_sindex_pktype_from_sktype(as_sindex_ktype t);
 
 typedef enum {
-	AS_SINDEX_ITYPE_DEFAULT     = 0,
-	AS_SINDEX_ITYPE_LIST        = 1,
-	AS_SINDEX_ITYPE_MAP         = 2,
-	AS_SINDEX_ITYPE_INVMAP      = 3
+	AS_SINDEX_ITYPE_DEFAULT,
+	AS_SINDEX_ITYPE_LIST,
+	AS_SINDEX_ITYPE_MAP,
+	AS_SINDEX_ITYPE_INVMAP
 } as_sindex_type;
 
 #define AS_SINDEX_ITYPES 4
