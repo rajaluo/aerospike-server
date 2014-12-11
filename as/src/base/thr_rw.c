@@ -5493,13 +5493,24 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 	} else {
 		// In this case, this is a call from write_process() above.
 		// create the response message (this is a new malloc that will be handed off to fabric (see end of write_process())
-		size_t msg_sz = 0;
-		tr->msgp = as_msg_make_response_msg(tr->result_code, generation,
-				void_time, ops, response_bins, n_bins, ns, (cl_msg *) NULL,
-				&msg_sz, tr->trid, setname);
-		cf_debug(AS_RW,
-				"{%s:%d} thr_tsvc_read returns response message for duplicate read  0x%x digest %"PRIx64"",
-				ns->name, tr->rsv.pid, tr->msgp, *(uint64_t *)&tr->keyd);
+		// Can we even get here from write_process()? Or is this dead code?
+		if (! tr->msgp) {
+			size_t msg_sz = 0;
+			tr->msgp = as_msg_make_response_msg(tr->result_code, generation,
+					void_time, ops, response_bins, n_bins, ns, (cl_msg *) NULL,
+					&msg_sz, tr->trid, setname);
+			// TODO - if it turns out this is normal, demote to debug:
+			cf_warning_digest(AS_RW, &tr->keyd,
+					"{%s} thr_tsvc_read returns response message for duplicate read %p ",
+					ns->name, tr->msgp);
+		}
+		else {
+			// We can get here if a timeout in rw_retransmit_reduce_fn() zeros
+			// the proto_fd_h out from under a live finish_rw_process_ack()...
+			cf_warning_digest(AS_RW, &tr->keyd,
+					"{%s} prevented overwrite and leak of tr->msgp %p ",
+					ns->name, tr->msgp);
+		}
 	}
 }
 

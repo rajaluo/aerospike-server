@@ -1944,8 +1944,8 @@ migrate_tree_reduce(as_index_ref *r_ref, void *udata)
 
 
 //
-// This will reduce the tree, create all the messages, call send on all
-// them bad bitches, and set up the retransmit structures
+// This will reduce the tree, create all the messages, call send on each migrate message,
+// and set up the retransmit structures
 //
 // Have to insert into the migration hash first, because responses will start flowing back
 // as we're reducing
