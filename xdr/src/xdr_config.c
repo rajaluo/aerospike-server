@@ -79,7 +79,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
 		{ "xdr-hotkey-maxskip",				XDR_CASE_XDR_HOTKEY_MAXSKIP },
 		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
-		{ "enable-xdr-shipping",			XDR_CASE_XDR_SHIPPING_ENABLED },
+		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
 		{ "xdr-info-timeout",				XDR_CASE_XDR_INFO_TIMEOUT },
 		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
 		{ "xdr-write-batch-size",			XDR_CASE_XDR_WRITE_BATCH_SIZE },
@@ -152,8 +152,8 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_new_cfg.xdr_threads = c->xdr_threads;
 	c->xdr_new_cfg.xdr_ship_threads = c->xdr_ship_threads;
 	c->xdr_new_cfg.xdr_ship_slab_size = c->xdr_ship_slab_size;
-	c->enable_xdr_shipping = true;
-	c->enable_xdr_delete_shipping = true;
+	c->xdr_shipping_enabled = true;
+	c->xdr_delete_shipping_enabled = true;
 	c->xdr_check_data_before_delete = false;
 	c->xdr_hotkey_maxskip = 5;
 	c->xdr_fwd_with_gencheck = false;

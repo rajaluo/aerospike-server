@@ -2747,7 +2747,7 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 
 	// Check if XDR needs to ship this delete
 
-	if (g_config.xdr_cfg.enable_xdr_delete_shipping == true) {
+	if (g_config.xdr_cfg.xdr_delete_shipping_enabled == true) {
 		// Do not ship delete if it is result of eviction/migrations etc.
 		// unless we have config setting of shipping these type of deletes.
 		// Ship the deletes coming from application directly.
