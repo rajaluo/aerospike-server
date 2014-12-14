@@ -5592,6 +5592,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_io));
 		cf_dyn_buf_append_string(db, ";ldt_gc_cnt=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_cnt));
+		cf_dyn_buf_append_string(db, ";ldt_randomizer_retry=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_randomizer_retry));
 
 		cf_dyn_buf_append_string(db, ";ldt_errors=");
 		cf_dyn_buf_append_uint32(db, ns->lstats.ldt_errs);
