@@ -673,8 +673,8 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 	if (first_time) {
 		if ((wr->msgp != NULL) || wr->rsv_valid) {
 			cf_warning_digest(AS_RW, &wr->keyd,
-					"{%s:%d} rw_cleanup: illegal state write-request set in first call for %s-request n-dupl %u dupl-nodes[0] %lx [%p %p %d] ",
-					tr->rsv.ns->name, tr->rsv.pid, wr->is_read ? "read" : "write",
+					"{%s:%d} rw_cleanup @ %d: illegal state write-request set in first call for %s-request n-dupl %u dupl-nodes[0] %lx [%p %p %d] ",
+					tr->rsv.ns->name, tr->rsv.pid, line, wr->is_read ? "read" : "write",
 					(uint32_t)tr->rsv.n_dupl, tr->rsv.dupl_nodes[0],
 					wr->msgp, tr->msgp, wr->rsv_valid);
 		}
@@ -692,8 +692,8 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 	} else {
 		if ((wr->msgp != tr->msgp) || !wr->rsv_valid) {
 			cf_warning_digest(AS_RW, &wr->keyd,
-					"{%s:%d} rw_cleanup: illegal state write-request set in second call for %s-request n-dupl %u dupl-nodes[0] %lx [%p %p %d] ",
-					tr->rsv.ns->name, tr->rsv.pid, wr->is_read ? "read" : "write",
+					"{%s:%d} rw_cleanup @ %d: illegal state write-request set in second call for %s-request n-dupl %u dupl-nodes[0] %lx [%p %p %d] ",
+					tr->rsv.ns->name, tr->rsv.pid, line, wr->is_read ? "read" : "write",
 					(uint32_t)tr->rsv.n_dupl, tr->rsv.dupl_nodes[0],
 					wr->msgp, tr->msgp, wr->rsv_valid);
 		}
@@ -2377,7 +2377,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	as_index *r = r_ref.r;
 
 	if (rv < 0) {
-		cf_warning_digest(AS_RW, keyd, "{%s} write_local_pickled: fail as_record_get_create() ", rsv->ns->name);
+		cf_warning_digest(AS_RW, keyd, "{%s} write_local_pickled: fail as_record_get_create() rv = %d", rsv->ns->name, rv);
 		return -1;
 	}
 

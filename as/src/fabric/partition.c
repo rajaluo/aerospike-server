@@ -2862,6 +2862,7 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 			if (memcmp(&ns->partitions[j].version_info, &paxos->c_partition_vinfo[i][self_index][j], sizeof(as_partition_vinfo)) != 0)	{
 				found_error = true;
 				print_partition_versions(ns->name, j, &ns->partitions[j].version_info, "Global", &paxos->c_partition_vinfo[i][self_index][j], "Local");
+				break;
 			}
 	}
 	if (true == found_error) {
