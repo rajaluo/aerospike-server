@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <execinfo.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -101,7 +102,8 @@ typedef enum {
 	AS_LDT = 54,
 	CF_JEM = 55,
 	AS_SECURITY = 56,
-	CF_FAULT_CONTEXT_UNDEF = 57
+	AS_AGGR = 57,
+	CF_FAULT_CONTEXT_UNDEF = 58
 } cf_fault_context;
 
 extern char *cf_fault_context_strings[];
@@ -210,6 +212,23 @@ extern void cf_fault_event_nostack(const cf_fault_context,
 // The "regular" version.
 #define cf_assert(a, context, severity, __msg, ...) \
 	((void)((a) ? (void)0 : cf_fault_event((context), (severity), __FILENAME__, __func__, __LINE__, (__msg), ##__VA_ARGS__)))
+
+#define MAX_BACKTRACE_DEPTH 50
+
+
+// This must literally be the direct clib "free()", because "strings" is
+// allocated by "backtrace_symbols()".
+#define PRNSTACK() \
+do { \
+	void *bt[MAX_BACKTRACE_DEPTH];                \
+	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);  \
+	char **strings = backtrace_symbols(bt, sz);   \
+	for (int i = 0; i < sz; i++) {                \
+		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);\
+	} \
+	free(strings); \
+} while (0);
+
 
 // The "regular" versions.
 // Note that we use the function name ONLY in crash(), debug() and detail(),

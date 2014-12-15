@@ -103,7 +103,8 @@ char *cf_fault_context_strings[] = {
 	"ldt",         // 54
 	"cf:jem",      // 55
 	"security",    // 56
-	NULL           // 57
+	"aggr",        // 57
+	NULL           // 58
 };
 
 static const char *cf_fault_severity_strings[] = { "CRITICAL", "WARNING", "INFO", "DEBUG", "DETAIL", NULL };

@@ -43,7 +43,6 @@ extern void xdr_sig_handler(int signum);
 
 #define MAX_BACKTRACE_DEPTH 50
 
-
 // We get here on normal shutdown.
 sighandler_t g_old_term_handler = 0;
 void
@@ -76,17 +75,7 @@ as_sig_handle_abort(int sig_num)
 
 	xdr_sig_handler(sig_num);
 
-	void *bt[MAX_BACKTRACE_DEPTH];
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
-	char **strings = backtrace_symbols(bt, sz);
-
-	for (int i = 0; i < sz; i++) {
-		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
-	}
-
-	// This must literally be the direct clib "free()", because "strings" is
-	// allocated by "backtrace_symbols()".
-	free(strings);
+	PRNSTACK();
 
 	if (g_old_abort_handler) {
 		g_old_abort_handler(sig_num);
@@ -102,17 +91,7 @@ as_sig_handle_fpe(int sig_num)
 
 	xdr_sig_handler(sig_num);
 
-	void *bt[MAX_BACKTRACE_DEPTH];
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
-	char **strings = backtrace_symbols(bt, sz);
-
-	for (int i = 0; i < sz; i++) {
-		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
-	}
-
-	// This must literally be the direct clib "free()", because "strings" is
-	// allocated by "backtrace_symbols()".
-	free(strings);
+	PRNSTACK();
 
 	if (g_old_fpe_handler) {
 		g_old_fpe_handler(sig_num);
@@ -161,15 +140,7 @@ as_sig_handle_segv(int sig_num)
 	cf_warning(AS_AS, "SIGSEGV received, aborting %s build %s",
 			aerospike_build_type, aerospike_build_id);
 
-	void *bt[MAX_BACKTRACE_DEPTH];
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
-	char **strings = backtrace_symbols(bt, sz);
-
-	for (int i = 0; i < sz; i++) {
-		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
-	}
-
-	fflush(NULL);
+	PRNSTACK();
 
 	xdr_sig_handler(sig_num);
 
