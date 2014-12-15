@@ -1176,18 +1176,18 @@ as_particle_get_flat_size(as_bin *b, size_t *flat_size)
 	uint8_t type = as_bin_get_particle_type(b);
 
 	if (type == AS_PARTICLE_TYPE_NULL)
-		return (-1);
+		return (-2);
 
 #ifdef EXTRA_CHECKS
 	// check the incoming type
 	if (type < AS_PARTICLE_TYPE_NULL || type >= AS_PARTICLE_TYPE_MAX) {
 		cf_info(AS_PARTICLE, "particle set: bad particle type %d, error", (int)type);
-		return(-1);
+		return(-3);
 	}
 #endif
 
 	uint32_t size = g_particle_get_flat_table[type](p);
-	if (size == 0)	return(-1);
+	if (size == 0)	return(-4);
 	*flat_size = size;
 	return(0);
 }

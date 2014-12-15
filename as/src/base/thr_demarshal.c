@@ -654,6 +654,7 @@ NextEvent_FD_Cleanup:
 				// If we allocated memory for the incoming message, free it.
 				if (proto_p) {
 					cf_free(proto_p);
+					fd_h->proto = 0;
 				}
 				// If fd has extra reference for transaction, release it.
 				if (has_extra_ref) {

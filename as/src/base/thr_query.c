@@ -202,7 +202,7 @@ struct as_query_transaction_s {
 	uint64_t          waiting_time_ns;          // Time spent waiting by query in query_queue
 	uint64_t          querying_ai_time_ns;      // Time spent by query to run lookup secondary index trees.
 	uint64_t          queued_time_ns;
-	
+
 	// PRIORITY PARAMETERS
 	uint32_t          yield_count;              // Number of loops
 	cf_atomic32       qreq_in_flight;
@@ -375,7 +375,7 @@ as_query__update_stats(as_query_transaction *qtr)
 
 	QUERY_HIST_INSERT_DATA_POINT(query_prepare_batch_hist, qtr->querying_ai_time_ns);
 	QUERY_HIST_INSERT_DATA_POINT(query_prepare_batch_q_wait_hist, qtr->waiting_time_ns);
-	
+
 	uint64_t query_stop_time = cf_getns();
 	uint64_t elapsed_us = (query_stop_time - qtr->start_time) / 1000;
 	cf_detail(AS_QUERY,
@@ -728,13 +728,13 @@ as_query__transaction_done(as_query_transaction *qtr)
 	if (qtr->fd_h) {
 		as_query__add_fin(qtr);
 		uint64_t time_ns        = 0;
-		
+
 		if (g_config.query_enable_histogram) {
 			time_ns = cf_getns();
 		}
 
 		int brv = as_query__send_response(qtr);
-		
+
 		QUERY_HIST_INSERT_DATA_POINT(query_net_io_hist, time_ns);
 
 		if (brv != AS_QUERY_OK) {
@@ -929,7 +929,7 @@ as_query__add_response(void *void_qtr, as_index_ref *r_ref, as_storage_rd *rd)
 		}
 
 		QUERY_HIST_INSERT_DATA_POINT(query_net_io_hist, time_ns);
-	
+
 		// if sent successfully mark the used_sz as 0, and reuse
 		// the buffer
 		bb_r->used_sz = 0;
@@ -1334,9 +1334,10 @@ as_internal_query_udf_txn_setup(tr_create_data * d)
 		return -1;
 	}
 
-	tr.udata.req_cb    = as_query_udf_tr_complete;
-	tr.udata.req_udata = d->udata;
-	tr.udata.req_type = UDF_QUERY_REQUEST;
+	tr.udata.req_cb     = as_query_udf_tr_complete;
+	tr.udata.req_udata  = d->udata;
+	tr.udata.req_type   = UDF_QUERY_REQUEST;
+	tr.flag            |= AS_TRANSACTION_FLAG_INTERNAL;
 
 	cf_atomic_int_incr(&qtr->uit_queued);
 	cf_detail(AS_QUERY, "UDF: [%d] internal transactions enqueued", qtr->uit_queued);
@@ -1426,22 +1427,22 @@ Cleanup:
 int
 as_query__process_ioreq(as_query_request *qio)
 {
-	as_query_transaction *qtr = qio->qtr;	
+	as_query_transaction *qtr = qio->qtr;
 	if (!qtr) {
 		return AS_QUERY_ERR;
 	}
 
 	int ret               = AS_QUERY_ERR;
 	QUERY_HIST_INSERT_DATA_POINT(query_batch_io_q_wait_hist, qtr->queued_time_ns);
-	
+
 	cf_ll_element * ele   = NULL;
 	cf_ll_iterator * iter = NULL;
-	
+
 	cf_detail(AS_QUERY, "Performing IO");
 	uint64_t time_ns      = 0;
 	if (g_config.query_enable_histogram || qtr->si->enable_histogram) {
 		time_ns = cf_getns();
-	}	
+	}
 	iter                  = cf_ll_getIterator(qio->recl, true /*forward*/);
 	if (!iter) {
 		qtr->err          = true;
@@ -1720,12 +1721,12 @@ as_query__generator(as_query_transaction *qtr)
 		}
 		qtr->inited               = true;
 	}
-	
+
 	uint64_t time_ns              = 0;
 	if (qtr->si->enable_histogram) {
 		time_ns                   = cf_getns();
 	}
-	
+
 	while (true) {
 		// Step 1: Check for timeout
 		as_query__check_timeout(qtr);
@@ -1799,7 +1800,7 @@ as_query__generator(as_query_transaction *qtr)
 		if (qtr->si->enable_histogram) {
 			time_ns = cf_getns();
 		}
-	
+
 		// Step 4: Prepare Query Request either to process inline or for
 		//         queueing up for offline processing
 		if (qtr->short_running || AS_QUERY_PROCESS_INLINE(qtr)) {
@@ -1960,7 +1961,7 @@ as_query_init()
 	if (pthread_attr_setdetachstate(&g_query_th_attr, PTHREAD_CREATE_DETACHED)) {
 		cf_crash(AS_SINDEX, "failed to set the query thread attributes to the detached state");
 	}
-	
+
 	max = g_config.query_threads;
 	for (int i = 0; i < max; i += 2) {
 		if (pthread_create(&g_query_threads[i], &g_query_th_attr,
@@ -2118,8 +2119,8 @@ as_query_reinit(int set_size, int *actual_size)
 int
 as_query__queue(as_query_transaction *qtr)
 {
-	uint limit  = 0;
-	uint size   = 0;
+	uint64_t limit  = 0;
+	uint64_t size   = 0;
 	cf_queue    * q;
 	cf_atomic64 * queue_full_err;
 	if (qtr->short_running) {

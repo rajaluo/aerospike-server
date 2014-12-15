@@ -39,9 +39,6 @@ extern bool g_startup_complete;
 extern const char aerospike_build_type[];
 extern const char aerospike_build_id[];
 
-#define MAX_BACKTRACE_DEPTH 50
-
-
 // We get here on normal shutdown.
 sighandler_t g_old_term_handler = 0;
 void
@@ -69,17 +66,7 @@ as_sig_handle_abort(int sig_num)
 	cf_warning(AS_AS, "SIGABRT received, aborting %s build %s",
 			aerospike_build_type, aerospike_build_id);
 
-	void *bt[MAX_BACKTRACE_DEPTH];
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
-	char **strings = backtrace_symbols(bt, sz);
-
-	for (int i = 0; i < sz; i++) {
-		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
-	}
-
-	// This must literally be the direct clib "free()", because "strings" is
-	// allocated by "backtrace_symbols()".
-	free(strings);
+	PRNSTACK();
 
 	if (g_old_abort_handler) {
 		g_old_abort_handler(sig_num);
@@ -93,17 +80,7 @@ as_sig_handle_fpe(int sig_num)
 	cf_warning(AS_AS, "SIGFPE received, aborting %s build %s",
 			aerospike_build_type, aerospike_build_id);
 
-	void *bt[MAX_BACKTRACE_DEPTH];
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
-	char **strings = backtrace_symbols(bt, sz);
-
-	for (int i = 0; i < sz; i++) {
-		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
-	}
-
-	// This must literally be the direct clib "free()", because "strings" is
-	// allocated by "backtrace_symbols()".
-	free(strings);
+	PRNSTACK();
 
 	if (g_old_fpe_handler) {
 		g_old_fpe_handler(sig_num);
@@ -149,17 +126,7 @@ as_sig_handle_segv(int sig_num)
 	cf_warning(AS_AS, "SIGSEGV received, aborting %s build %s",
 			aerospike_build_type, aerospike_build_id);
 
-	void *bt[MAX_BACKTRACE_DEPTH];
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);
-	char **strings = backtrace_symbols(bt, sz);
-
-	for (int i = 0; i < sz; i++) {
-		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);
-	}
-
-	// This must literally be the direct clib "free()", because "strings" is
-	// allocated by "backtrace_symbols()".
-	free(strings);
+	PRNSTACK();
 
 	if (g_old_segv_handler) {
 		g_old_segv_handler (sig_num);

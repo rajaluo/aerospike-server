@@ -121,6 +121,8 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->hwm_disk = 0.5; // default high water mark for eviction is 50%
 	ns->hwm_memory = 0.6; // default high water mark for eviction is 60%
 	ns->ldt_enabled = false; // By default ldt is not enabled
+	ns->ldt_gc_sleep_us = 500; // Default is sleep for .5Ms. This translates to constant 2k Subrecord
+							   // GC per second.
 	ns->obj_size_hist_max = OBJ_SIZE_HIST_NUM_BUCKETS;
 	ns->single_bin = false;
 	ns->stop_writes_pct = 0.9; // stop writes when 90% of either memory or disk is used
@@ -398,9 +400,10 @@ as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_w
 	// compute memory size of namespace
 	// compute index size - index is always stored in memory
 	uint64_t index_sz = cf_atomic_int_get(ns->n_objects) * as_index_size_get(ns);
+	uint64_t sub_index_sz = cf_atomic_int_get(ns->n_sub_objects) * as_index_size_get(ns);
 	uint64_t sindex_sz = as_sindex_get_ns_memory_used(ns);
 	uint64_t data_in_memory_sz = cf_atomic_int_get(ns->n_bytes_memory);
-	uint64_t memory_sz = index_sz + data_in_memory_sz + sindex_sz;
+	uint64_t memory_sz = index_sz + sub_index_sz + data_in_memory_sz + sindex_sz;
 
 	// Possible reasons for eviction or stopping writes.
 	// (We don't use all combinations, but in case we change our minds...)
