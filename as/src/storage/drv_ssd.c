@@ -174,24 +174,6 @@ ssd_fd_put(drv_ssd *ssd, int fd)
 	cf_queue_push(ssd->fd_q, (void*)&fd);
 }
 
-void
-as_storage_match(as_storage_rd *rd, as_record *r, char *msg) 
-{
-	uint16_t ldt_rectype_bits = 0;
-	uint16_t *ldt_rectype_bits_p = &ldt_rectype_bits;
-	if (rd->rec_props.p_data) { 
-		if (as_rec_props_get_value(&rd->rec_props, CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
-					(uint8_t**)&ldt_rectype_bits_p) == 0) {
-		}
-	}
-
-	if ( ((as_index_get_flags(r) ^ *ldt_rectype_bits_p)
-			& (AS_INDEX_FLAG_SPECIAL_BINS | AS_INDEX_FLAG_CHILD_REC | AS_INDEX_FLAG_CHILD_ESR)) 
-		 != 0) {
-		cf_warning_digest(AS_LDT, &rd->keyd, "Storage and disk mismatch %d %d at %s", as_index_get_flags(r), ldt_rectype_bits_p, msg);
-		PRNSTACK();
-	}
-}
 
 // Decide which device a record belongs on.
 static inline int
@@ -556,27 +538,29 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	int ret = as_record_get(rsv.tree, &block->keyd, &r_ref, ns);
+	bool found = 0 == as_record_get(rsv.tree, &block->keyd, &r_ref, ns);
 	bool is_subrec = false;
 
-	if (ret && ns->ldt_enabled) {
-		ret = as_record_get(rsv.sub_tree, &block->keyd, &r_ref, ns);
+	if (ns->ldt_enabled && ! found) {
+		found = 0 == as_record_get(rsv.sub_tree, &block->keyd, &r_ref, ns);
 		is_subrec = true;
 	}
 
-	if (0 == ret) {
+	if (found) {
 		as_index *r = r_ref.r;
 
 		if (r->storage_key.ssd.file_id == ssd->file_id &&
 				r->storage_key.ssd.rblock_id == rblock_id) {
 			if (r->generation != block->generation) {
-				cf_warning_digest(AS_DRV_SSD, &r->key, "device %s defrag: rblock_id %lu generation mismatch (%u:%u), is_subrec=%s",
-						ssd->name, rblock_id, r->generation, block->generation, is_subrec ? "TRUE" : "FALSE");
+				cf_warning_digest(AS_DRV_SSD, &r->key, "device %s defrag: rblock_id %lu generation mismatch (%u:%u)%s ",
+						ssd->name, rblock_id, r->generation, block->generation,
+						is_subrec ? " subrec" : "");
 			}
 
 			if (r->storage_key.ssd.n_rblocks != n_rblocks) {
-				cf_warning_digest(AS_DRV_SSD, &r->key, "device %s defrag: rblock_id %lu n_blocks mismatch (%u:%u) ",
-						ssd->name, rblock_id, r->storage_key.ssd.n_rblocks, n_rblocks);
+				cf_warning_digest(AS_DRV_SSD, &r->key, "device %s defrag: rblock_id %lu n_blocks mismatch (%u:%u)%s ",
+						ssd->name, rblock_id, r->storage_key.ssd.n_rblocks,
+						n_rblocks, is_subrec ? " subrec" : "");
 			}
 
 			as_storage_rd rd;
@@ -1774,13 +1758,12 @@ as_storage_record_size(as_storage_rd *rd)
 		}
 
 		size_t particle_flat_sz;
-
 		int rv = as_particle_get_flat_size(bin, &particle_flat_sz);
 
-		if (rv) {
+		if (rv != 0) {
 			// Should never get here.
-			cf_warning(AS_DRV_SSD, "on write, can't get particle flat size rv=%d, bname=%s",
-				rv, bin ? as_bin_get_name_from_id(rd->ns, bin->id):"Null Bin");
+			cf_warning(AS_DRV_SSD, "can't get particle flat size for bin %s, rv %d",
+					as_bin_get_name_from_id(rd->ns, bin->id), rv);
 			return 0;
 		}
 
@@ -3014,14 +2997,12 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	cf_atomic_int_setmax(&p_partition->max_void_time, r->void_time);
 	cf_atomic_int_setmax(&ns->max_void_time, r->void_time);
 
-	// Given that new record has won. This property update simply overwrite
-	// if record property is not set for new then reset all index flags. 
-	if (props.size != 0 && props.p_data) {
+	if (props.size != 0) {
 		// Do this early since set-id is needed for the secondary index update.
 		as_record_apply_properties(r, ns, &props);
-	} else {
-		// reset all property related flags
-		as_index_clear_flags(r, AS_INDEX_ALL_FLAGS);	
+	}
+	else {
+		as_record_clear_properties(r, ns);
 	}
 
 	cf_detail(AS_RW, "TO INDEX FROM DISK	Digest=%"PRIx64" bits %d",
@@ -3234,20 +3215,6 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			cf_atomic_int_add(&p_partition->n_bytes_memory, delta_bytes);
 		}
 
-#if 0
-		if (as_ldt_record_is_parent(r)) {
-			uint64_t parent_version = 0;
-			int rv = as_ldt_parent_storage_get_version(&rd, &parent_version, false, __FILE__, __LINE__);
-			if (0 != rv) {
-				cf_warning_digest(AS_LDT, &rd.keyd, "At record open no control bin for parent");
-				PRNSTACK();
-			}
-		}
-
-		rd.rec_props.p_data = props.p_data;
-		rd.rec_props.size = props.size;
-		as_storage_match(&rd, r, "Opening");
-#endif
 		as_storage_record_close(r, &rd);
 	}
 
@@ -4256,17 +4223,6 @@ as_storage_record_close_ssd(as_record *r, as_storage_rd *rd)
 {
 	// All record writes come through here!
 	if (rd->write_to_device && as_bin_inuse_has(rd)) {
-#if 0
-		if (as_ldt_record_is_parent(r)) {
-			uint64_t parent_version = 0;
-			int rv = as_ldt_parent_storage_get_version(rd, &parent_version, false, __FILE__, __LINE__);
-			if (0 != rv) {
-				cf_warning_digest(AS_LDT, &rd->keyd, "At record close no control bin for parent");
-				PRNSTACK();
-			}
-		}
-		as_storage_match(rd, r, "closing");
-#endif
 		ssd_write(r, rd);
 	}
 
