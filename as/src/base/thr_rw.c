@@ -3858,7 +3858,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 									as_msg_op_get_value_p(op), value_sz, op->particle_type, &sbins[sindex_found]);
 						}
 						else {
-							sindex_found += as_sindex_sbins_from_buf(ns, set_name, &rd.bins[i], &sbins[sindex_found], 
+							sindex_found += as_sindex_sbins_from_buf(ns, set_name, b, &sbins[sindex_found], 
 										as_msg_op_get_value_p(op), value_sz, op->particle_type, AS_SINDEX_OP_INSERT);
 						}
 					}

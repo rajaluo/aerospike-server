@@ -75,18 +75,18 @@
 #include "base/monitor.h"
 #include "base/thr_sindex.h"
 
-#define STR_NS             "ns"
-#define STR_SET            "set"
-#define STR_INDEXNAME      "indexname"
-#define STR_NUMBIN         "numbins"
-#define STR_INDEXDATA      "indexdata"
-#define STR_TYPE_NUMERIC   "numeric"
-#define STR_TYPE_STRING    "string"
-#define STR_ITYPE          "indextype"
-#define STR_ITYPE_LIST     "list"
-#define STR_ITYPE_MAP      "map"
-#define STR_ITYPE_INVMAP   "invmap"
-#define STR_BINTYPE        "bintype"
+#define STR_NS              "ns"
+#define STR_SET             "set"
+#define STR_INDEXNAME       "indexname"
+#define STR_NUMBIN          "numbins"
+#define STR_INDEXDATA       "indexdata"
+#define STR_TYPE_NUMERIC    "numeric"
+#define STR_TYPE_STRING     "string"
+#define STR_ITYPE           "indextype"
+#define STR_ITYPE_LIST      "LIST"
+#define STR_ITYPE_MAPKEYS   "MAPKEYS"
+#define STR_ITYPE_MAPVALUES "MAPVALUES"
+#define STR_BINTYPE         "bintype"
 
 extern int as_nsup_queue_get_size();
 
@@ -5946,12 +5946,12 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		imd->itype = AS_SINDEX_ITYPE_DEFAULT;
 	}
 	else {
-		if (strncmp(indextype_str, STR_ITYPE_LIST, 4) == 0) {
+		if (strncasecmp(indextype_str, STR_ITYPE_LIST, 4) == 0) {
 			imd->itype = AS_SINDEX_ITYPE_LIST;
-		} else if (strncmp(indextype_str, STR_ITYPE_MAP, 3) == 0) {
-			imd->itype = AS_SINDEX_ITYPE_MAP;
-		} else if (strncmp(indextype_str, STR_ITYPE_INVMAP, 6) == 0) {
-			imd->itype = AS_SINDEX_ITYPE_INVMAP;
+		} else if (strncasecmp(indextype_str, STR_ITYPE_MAPKEYS, 7) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_MAPKEYS;
+		} else if (strncasecmp(indextype_str, STR_ITYPE_MAPVALUES, 9) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_MAPVALUES;
 		} else {
 			cf_warning(AS_INFO, "Failed to create secondary index : invalid type of index"
 					" for sindex creation %s %s", indexname_str, indextype_str);

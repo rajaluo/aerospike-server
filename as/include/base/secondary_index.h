@@ -51,7 +51,9 @@
 #define SINDEX_SMD_VALUE_SIZE      (AS_SMD_MAJORITY_CONSENSUS_KEYSIZE)
 #define NUM_SINDEX_PARTITIONS      32
 #define SINDEX_MODULE              "sindex_module"
-#define AS_SINDEX_MAX_PATH_LENGTH  10
+#define AS_SINDEX_MAX_PATH_LENGTH  256
+#define AS_SINDEX_MAX_DEPTH        10
+#define AS_SINDEX_TYPE_STR_SIZE    20
 /* 
  * Return status codes for index object functions.
  *
@@ -123,8 +125,8 @@ as_particle_type as_sindex_pktype_from_sktype(as_sindex_ktype t);
 typedef enum {
 	AS_SINDEX_ITYPE_DEFAULT,
 	AS_SINDEX_ITYPE_LIST,
-	AS_SINDEX_ITYPE_MAP,
-	AS_SINDEX_ITYPE_INVMAP
+	AS_SINDEX_ITYPE_MAPKEYS,
+	AS_SINDEX_ITYPE_MAPVALUES
 } as_sindex_type;
 
 #define AS_SINDEX_ITYPES 4
@@ -235,7 +237,7 @@ typedef struct as_sindex_metadata_s {
 	uint8_t               oindx;
 	uint32_t              flag;
 	int 				  post_op;
-	as_sindex_path        path[AS_SINDEX_MAX_PATH_LENGTH];
+	as_sindex_path        path[AS_SINDEX_MAX_DEPTH];
 	int                   path_length;
 	char                * path_str;
 } as_sindex_metadata;

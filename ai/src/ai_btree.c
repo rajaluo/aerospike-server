@@ -541,20 +541,19 @@ create_tname_from_imd(const as_sindex_metadata *imd)
 }
 
 static char *
-create_cname(char *bin_path, int bin_type)
+create_cname(char *bin_path, int bin_type, int index_type)
 {
-	char bin_type_str[NAME_STR_LEN];
+	char type_str[2 * AS_SINDEX_TYPE_STR_SIZE];
 
-	if (0 > snprintf(bin_type_str, sizeof(bin_type_str), "%d", bin_type)) {
+	if (0 > snprintf(type_str, sizeof(type_str), "%d_%d", bin_type, index_type)) {
 		return NULL;
 	}
-
-	return str_concat(bin_path, '_', bin_type_str);
+	return str_concat(bin_path, '_', type_str);
 }
 
 static char *
 create_cname_from_imd(const as_sindex_metadata *imd) {
-	return create_cname(imd->path_str, imd->btype[0]);
+	return create_cname(imd->path_str, imd->btype[0], imd->itype);
 }
 
 static char *
@@ -617,6 +616,7 @@ ai_btree_key_hash(as_sindex_metadata *imd, void *skey)
 
 	return (int) u;
 }
+
 int
 ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx)
 {
@@ -923,7 +923,6 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_
 	ai_obj apk;
 	init_ai_objFromDigest(&apk, value);
 
-//	cf_detail(AS_SINDEX, "Insert: %ld %ld %ld", *(uint64_t *) &ncol.y, *(uint64_t *) &skey->b[0].digest, *((uint64_t *) &apk.y));
 
 	ulong bb = pimd->ibtr->msize + pimd->ibtr->nsize;
 	ret = reduced_iAdd(pimd->ibtr, &ncol, &apk, COL_TYPE_U160);
@@ -940,7 +939,6 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_
 		ret = AS_SINDEX_ERR_NO_MEMORY;
 		goto END;
 	}
-//	cf_debug(AS_SINDEX, "ai__btree_insert(N): %s key: %d val %lu", imd->iname, skey->b[0].u.i64, uk);
 
 END:
 
@@ -970,7 +968,6 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void * skey,
 	ret = reduced_iRem(pimd->ibtr, &ncol, &apk);
 	ulong ab = pimd->ibtr->msize + pimd->ibtr->nsize;
 	as_sindex_release_data_memory(imd, (bb - ab));
-	
 	return ret;
 }
 
