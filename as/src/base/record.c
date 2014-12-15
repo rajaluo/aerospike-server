@@ -1536,7 +1536,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 			// In case the winning component is remote and is dummy (ofcourse flatten
 			// is called under reply to duplicate resolution request) return -2. Caller
 			// would ship operation to the winning node!!
-			if (COMPONENT_IS_DUP(c)) {
+			if (COMPONENT_IS_MIG(c)) {
 				cf_warning(AS_RECORD, "DUMMY LDT Component in Non Duplicate Resolution Code");
 				rv = -1;
 			} else {
