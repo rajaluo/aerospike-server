@@ -38,6 +38,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/ldt.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/thr_batch.h"
@@ -317,6 +318,116 @@ is_udf(cl_msg *msgp)
 	return as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME) != NULL;
 }
 
+int
+as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
+{
+	if (-2 == rv) {
+		cf_debug_digest(AS_TSVC, &(tr->keyd), "write re-attempt: ");
+		as_partition_release(&tr->rsv);
+		cf_atomic_int_decr(&g_config.rw_tree_count);
+		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(error_hist);
+		thr_tsvc_enqueue(tr);
+		*free_msgp = false;
+	} else if (-3 == rv) {
+		cf_debug(AS_TSVC,
+				"write in progress on key - delay and reattempt");
+		as_partition_release(&tr->rsv);
+		cf_atomic_int_decr(&g_config.rw_tree_count);
+		MICROBENCHMARK_HIST_INSERT_P(error_hist);
+		as_fabric_msg_put(tr->proxy_msg);
+	} else {
+		cf_debug(AS_TSVC,
+				"write start failed: rv %d proto result %d", rv,
+				tr->result_code);
+		as_partition_release(&tr->rsv);
+		cf_atomic_int_decr(&g_config.rw_tree_count);
+		if (tr->result_code == 0) {
+			cf_warning(AS_TSVC,
+					"   warning: failure should have set protocol result code");
+			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
+		if (tr->proto_fd_h) {
+			if (0 != as_msg_send_reply(tr->proto_fd_h,
+						tr->result_code, 0, 0, 0, 0, 0, 0, 0, tr->trid, NULL))
+			{
+				cf_info(AS_TSVC,
+						"tsvc read: can't send error msg, fd %d",
+						tr->proto_fd_h->fd);
+			}
+			tr->proto_fd_h = 0;
+			// histogram_insert_data_point(g_config.rt_hist, tr->start_time);
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+			cf_atomic_int_incr(&g_config.err_tsvc_requests);
+		}
+		else if (tr->proxy_msg) {
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
+				cf_detail_digest(AS_RW, &(tr->keyd),
+						"SHIPPED_OP :: Sending ship op reply, rc %d to (%"PRIx64") ::",
+						tr->result_code, tr->proxy_node);
+			}
+			else {
+				cf_detail(AS_RW,
+						"sending proxy reply, rc %d to %"PRIx64"",
+						tr->result_code, tr->proxy_node);
+			}
+			as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
+					tr->result_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+		} else {
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+		}
+		return -1;
+	}
+	return 0;
+}
+	
+static as_sec_priv
+write_op_priv(cl_msg *msgp)
+{
+	as_msg_field *f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
+
+	if (! f || as_msg_field_get_value_sz(f) == 0) {
+		// It's not a UDF - so it must be a regular write.
+		return PRIV_WRITE;
+	}
+
+	// It's a UDF apply of some sort.
+
+	size_t len = as_msg_field_get_value_sz(f);
+	char filename[len + 1];
+	memcpy((void*)filename, (const void*)f->data, len);
+	filename[len] = 0;
+
+	int package_index = as_ldt_package_index(filename);
+
+	if (package_index < 0) {
+		// It's not an internal LDT UDF - so it's a regular UDF.
+		return PRIV_UDF_APPLY;
+	}
+
+	// It's an internal LDT UDF - determine whether it's a read or write.
+
+	f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
+
+	if (! f || as_msg_field_get_value_sz(f) == 0) {
+		cf_warning(AS_TSVC, "msg has udf filename %s but no function", filename);
+		return PRIV_NONE; // a msg error - will fail further along
+	}
+
+	len = as_msg_field_get_value_sz(f);
+	char funcname[len + 1];
+	memcpy((void*)funcname, (const void*)f->data, len);
+	funcname[len] = 0;
+
+	int op_type = as_ldt_op_type(package_index, funcname);
+
+	if (op_type < 0) {
+		cf_warning(AS_TSVC, "%s not a recognized op in %s", funcname, filename);
+		return PRIV_WRITE; // are ldt_op_props in ldt.c up to date?
+	}
+
+	return op_type == LDT_READ_OP ? PRIV_READ : PRIV_WRITE;
+}
 
 // Handle the transaction, including proxy to another node if necessary.
 void
@@ -340,7 +451,7 @@ process_transaction(as_transaction *tr)
 	uint64_t node_cluster_key = 0;
 
 	int rv;
-	int free_msgp = true;
+	bool free_msgp = true;
 	as_namespace *ns = 0;
 
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(q_wait_hist);
@@ -555,11 +666,9 @@ process_transaction(as_transaction *tr)
 			if (tr->udata.req_udata) {
 				free_msgp = false;
 			}
-			else if (tr->proto_fd_h && ! security_check(tr,
-					is_udf(msgp) ? PRIV_UDF_APPLY : PRIV_WRITE)) {
+			else if (tr->proto_fd_h && ! security_check(tr, write_op_priv(msgp))) {
 				goto Cleanup;
 			}
-
 
 			// If the transaction is "shipped proxy op" to the winner node then
 			// just do the migrate reservation.
@@ -711,95 +820,43 @@ process_transaction(as_transaction *tr)
 			// -2 :: "try again"
 			// -3 :: "duplicate proxy request, drop"
 			if (0 != rv) {
-				if (-2 == rv) {
-					cf_debug_digest(AS_TSVC, &(tr->keyd), "write re-attempt: ");
-					as_partition_release(&tr->rsv);
-					cf_atomic_int_decr(&g_config.rw_tree_count);
-					MICROBENCHMARK_HIST_INSERT_AND_RESET_P(error_hist);
-					thr_tsvc_enqueue(tr);
-					free_msgp = false;
-				} else if (-3 == rv) {
-					cf_debug(AS_TSVC,
-							"write in progress on key - delay and reattempt");
-					as_partition_release(&tr->rsv);
-					cf_atomic_int_decr(&g_config.rw_tree_count);
-					MICROBENCHMARK_HIST_INSERT_P(error_hist);
-					as_fabric_msg_put(tr->proxy_msg);
-					if (free_msgp == true) {
-						cf_free(msgp);
-						free_msgp = false;
-					}
-				} else {
-					cf_debug(AS_TSVC,
-							"write start failed: rv %d proto result %d", rv,
-							tr->result_code);
-					as_partition_release(&tr->rsv);
-					cf_atomic_int_decr(&g_config.rw_tree_count);
-					if (tr->result_code == 0) {
-						cf_warning(AS_TSVC,
-								"   warning: failure should have set protocol result code");
-						tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-					}
-					if (tr->proto_fd_h) {
-						if (0 != as_msg_send_reply(tr->proto_fd_h,
-								tr->result_code, 0, 0, 0, 0, 0, 0, 0, tr->trid, NULL))
-						{
-							cf_info(AS_TSVC,
-									"tsvc read: can't send error msg, fd %d",
-									tr->proto_fd_h->fd);
-						}
-						tr->proto_fd_h = 0;
-						// histogram_insert_data_point(g_config.rt_hist, tr->start_time);
-						MICROBENCHMARK_HIST_INSERT_P(error_hist);
-						cf_atomic_int_incr(&g_config.err_tsvc_requests);
-					}
-					else if (tr->proxy_msg) {
-						MICROBENCHMARK_HIST_INSERT_P(error_hist);
-						if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-							cf_detail_digest(AS_RW, &(tr->keyd),
-									"SHIPPED_OP :: Sending ship op reply, rc %d to (%"PRIx64") ::",
-									tr->result_code, tr->proxy_node);
-						}
-						else {
-							cf_detail(AS_RW,
-									"sending proxy reply, rc %d to %"PRIx64"",
-									tr->result_code, tr->proxy_node);
-						}
-						as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
-								tr->result_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
-					} else {
-						MICROBENCHMARK_HIST_INSERT_P(error_hist);
-					}
-					if (free_msgp == true) {
-						cf_free(msgp);
-						free_msgp = false;
-					}
-					goto Cleanup;
-				}
+				rv = as_rw_process_result(rv, tr, &free_msgp); 
 			}
 			if (free_msgp == true) {
 				cf_free(msgp);
 				free_msgp = false;
 			}
-
+			if (rv) {
+				goto Cleanup;
+			}
 		} else {
 			// rv != 0 or cluster keys DO NOT MATCH.
 			//
 			// Make sure that if it is shipped op it is not further redirected.
 			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-				cf_warning(AS_RW,
-						"Redirecting the shipped op is not supported fail the operation %d",
-						rv);
-			}
+		
+				int ret_code = 0;
+				if (!cluster_keys_match) {
+					ret_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+				} else {
+					cf_warning(AS_RW,
+							"Failing the shipped op due to reservation error %d",
+							rv);
+					ret_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+				}
 
-			// Divert the transaction into the proxy system; in this case, no
-			// reservation was obtained. Pass the cluster key along. Note that
-			// if we landed here because of a CLUSTER KEY MISMATCH,
-			// (transaction CK != Partition CK), then it is probably the case
-			// that we have to forward this request by proxy, since the
-			// partition for this transaction has probably moved and is no
-			// longer appropriate for this node.
-			if (tr->proto_fd_h) {
+				as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
+						ret_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+
+			} else if (tr->proto_fd_h) {
+				// Divert the transaction into the proxy system; in this case, no
+				// reservation was obtained. Pass the cluster key along. Note that
+				// if we landed here because of a CLUSTER KEY MISMATCH,
+				// (transaction CK != Partition CK), then it is probably the case
+				// that we have to forward this request by proxy, since the
+				// partition for this transaction has probably moved and is no
+				// longer appropriate for this node.
+
 				// Proxy divert - reroute client message. Note that
 				// as_proxy_divert() consumes the msgp.
 				cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")", dest);

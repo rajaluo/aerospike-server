@@ -74,6 +74,7 @@
 #include "base/thr_scan.h"
 #include "base/monitor.h"
 #include "base/thr_sindex.h"
+#include "base/ldt.h"
 
 #define STR_NS              "ns"
 #define STR_SET             "set"
@@ -127,6 +128,7 @@ static int as_info_queue_get_size(void);
 int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
 int info_get_objects(char *name, cf_dyn_buf *db);
 void clear_microbenchmark_histograms();
+void clear_ldt_histograms();
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
@@ -270,6 +272,7 @@ int
 info_get_utilization(cf_dyn_buf *db)
 {
 	uint64_t	total_number_objects    = 0;
+	uint64_t	total_number_objects_sub= 0;
 	uint64_t	used_disk_size          = 0;
 	uint64_t	total_disk_size         = 0;
 	uint64_t	total_memory_size       = 0;
@@ -284,10 +287,11 @@ info_get_utilization(cf_dyn_buf *db)
 		as_namespace *ns = g_config.namespace[i];
 
 		total_number_objects    += ns->n_objects;
+		total_number_objects_sub += ns->n_sub_objects;
 		total_disk_size         += ns->ssd_size;
 		total_memory_size       += ns->memory_size;
 		used_data_memory        += ns->n_bytes_memory;
-		used_pindex_memory      += as_index_size_get(ns) * ns->n_objects;
+		used_pindex_memory      += as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
 		used_sindex_memory      += cf_atomic_int_get(ns->sindex_data_memory_used);
 
 		uint64_t inuse_disk_bytes = 0;
@@ -305,6 +309,7 @@ info_get_utilization(cf_dyn_buf *db)
 
 
 	info_append_uint64("", "objects",                  total_number_objects, db);
+	info_append_uint64("", "sub-records",              total_number_objects_sub, db);
 	info_append_uint64("", "total-bytes-disk",         total_disk_size,      db);
 	info_append_uint64("", "used-bytes-disk",          used_disk_size,       db);
 	info_append_uint64("", "free-pct-disk",            disk_free_pct,        db);
@@ -414,6 +419,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_proxy_success);
 	cf_dyn_buf_append_string(db, ";stat_proxy_errs=");
 	APPEND_STAT_COUNTER(db, g_config.stat_proxy_errs);
+	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
+	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
 
 	cf_dyn_buf_append_string(db,   ";stat_cluster_key_trans_to_proxy_retry=");
 	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_trans_to_proxy_retry);
@@ -1944,6 +1951,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_config.microbenchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";storage-benchmarks=");
 	cf_dyn_buf_append_string(db, g_config.storage_benchmarks ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";ldt-benchmarks=");
+	cf_dyn_buf_append_string(db, g_config.ldt_benchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";scan-priority=");
 	cf_dyn_buf_append_int(db, g_config.scan_priority);
 	cf_dyn_buf_append_string(db, ";scan-sleep=");
@@ -2084,7 +2093,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		return -1;
 	}
 
-	cf_dyn_buf_append_string(db, ";memory-size=");
+	cf_dyn_buf_append_string(db, "memory-size=");
 	cf_dyn_buf_append_uint64(db, ns->memory_size);
 
 	cf_dyn_buf_append_string(db, ";high-water-disk-pct=");
@@ -2128,13 +2137,16 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";single-bin=");
 	cf_dyn_buf_append_string(db, ns->single_bin ? "true" : "false");
 
+	cf_dyn_buf_append_string(db, ";ldt-enabled=");
+	cf_dyn_buf_append_string(db, ns->ldt_enabled ? "true" : "false");
+
 	cf_dyn_buf_append_string(db, ";enable-xdr=");
 	cf_dyn_buf_append_string(db, ns->enable_xdr ? "true" : "false");
 
-	cf_dyn_buf_append_string(db, "sets-enable-xdr=");
+	cf_dyn_buf_append_string(db, ";sets-enable-xdr=");
 	cf_dyn_buf_append_string(db, ns->sets_enable_xdr ? "true" : "false");
 
-	cf_dyn_buf_append_string(db, "forward-xdr-writes=");
+	cf_dyn_buf_append_string(db, ";ns-forward-xdr-writes=");
 	cf_dyn_buf_append_string(db, ns->ns_forward_xdr_writes ? "true" : "false");
 
 	cf_dyn_buf_append_string(db, ";disallow-null-setname=");
@@ -2154,6 +2166,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 		info_append_uint64("", "total-bytes-disk", ns->ssd_size, db);
 		info_append_uint64("", "defrag-lwm-pct", ns->storage_defrag_lwm_pct, db);
+		info_append_uint64("", "defrag-queue-min", ns->storage_defrag_queue_min, db);
 		info_append_uint64("", "defrag-sleep", ns->storage_defrag_sleep, db);
 		info_append_uint64("", "defrag-startup-minimum", ns->storage_defrag_startup_minimum, db);
 		info_append_uint64("", "flush-max-ms", ns->storage_flush_max_us / 1000, db);
@@ -2519,6 +2532,19 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of storage-benchmarks from %s to %s", bool_val[g_config.storage_benchmarks], context);
 				g_config.storage_benchmarks = false;
+			}
+			else
+				goto Error;
+		}
+		else if (0 == as_info_parameter_get(params, "ldt-benchmarks", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				clear_ldt_histograms();
+				cf_info(AS_INFO, "Changing value of ldt-benchmarks from %s to %s", bool_val[g_config.ldt_benchmarks], context);
+				g_config.ldt_benchmarks = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of ldt-benchmarks from %s to %s", bool_val[g_config.ldt_benchmarks], context);
+				g_config.ldt_benchmarks = false;
 			}
 			else
 				goto Error;
@@ -3249,6 +3275,18 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
+		else if (0 == as_info_parameter_get(params, "ldt-gc-rate", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			uint64_t rate = (uint64_t)val;
+
+			if ((rate == 0) || (rate > LDT_SUB_GC_MAX_RATE)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of ldt-gc-rate of ns %s from %lu to %d", ns->name, (1000 * 1000)/ns->ldt_gc_sleep_us , val);
+			ns->ldt_gc_sleep_us = 1000 * 1000 / rate;
+		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
@@ -3256,6 +3294,13 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of defrag-lwm-pct of ns %s from %d to %d ", ns->name, ns->storage_defrag_lwm_pct, val);
 			ns->storage_defrag_lwm_pct = val;
 			ns->defrag_lwm_size = (ns->storage_write_block_size * ns->storage_defrag_lwm_pct) / 100;
+		}
+		else if (0 == as_info_parameter_get(params, "defrag-queue-min", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of defrag-queue-min of ns %s from %u to %d", ns->name, ns->storage_defrag_queue_min, val);
+			ns->storage_defrag_queue_min = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-sleep", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
@@ -4521,11 +4566,12 @@ info_debug_ticker_fn(void *gcc_is_ass)
 					(swapping == true) ? "SWAPPING!" : ""
 					);
 
-			cf_info(AS_INFO, " migrates in progress ( %d , %d ) ::: ClusterSize %zd ::: objects %"PRIu64,
+			cf_info(AS_INFO, " migrates in progress ( %d , %d ) ::: ClusterSize %zd ::: objects %"PRIu64" ::: sub_objects %"PRIu64,
 					cf_atomic32_get(g_config.migrate_progress_send),
 					cf_atomic32_get(g_config.migrate_progress_recv),
 					g_config.paxos->cluster_size,  // add real cluster size when srini has it
-					thr_info_get_object_count()
+					thr_info_get_object_count(),
+					thr_info_get_subobject_count()
 					);
 			cf_info(AS_INFO, " rec refs %"PRIu64" ::: rec locks %"PRIu64" ::: trees %"PRIu64" ::: wr reqs %"PRIu64" ::: mig tx %"PRIu64" ::: mig rx %"PRIu64"",
 					cf_atomic_int_get(g_config.global_record_ref_count),
@@ -4568,7 +4614,7 @@ info_debug_ticker_fn(void *gcc_is_ass)
 					cf_atomic_int_get(g_config.rw_tree_count)
 					);
 
-			// namespace disk and memory size
+			// namespace disk and memory size and ldt gc stats
 			total_ns_memory_inuse = 0;
 			for (int i = 0; i < g_config.namespaces; i++) {
 				as_namespace *ns = g_config.namespace[i];
@@ -4583,6 +4629,16 @@ info_debug_ticker_fn(void *gcc_is_ass)
 							ns->name, inuse_disk_bytes, ns_memory_inuse,
 							ns->sindex_data_memory_used,
 							available_pct);
+					if (ns->ldt_enabled) {
+						uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
+						uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
+						uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
+						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
+						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
+						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
+						cf_info(AS_INFO, "namespace %s: ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
+					}
 				}
 				else {
 					uint32_t n_reads_from_cache = cf_atomic32_get(ns->n_reads_from_cache);
@@ -4598,6 +4654,16 @@ info_debug_ticker_fn(void *gcc_is_ass)
 							ns->sindex_data_memory_used,
 							available_pct,
 							ns->cache_read_pct);
+					if (ns->ldt_enabled) {
+						uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
+						uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
+						uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
+						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
+						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
+						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
+						cf_info(AS_INFO, "namespace %s: ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
+					}
 				}
 
 				total_ns_memory_inuse += ns_memory_inuse;
@@ -4694,6 +4760,13 @@ info_debug_ticker_fn(void *gcc_is_ass)
 				as_storage_ticker_stats();
 			}
 
+			if (g_config.ldt_benchmarks) {
+				histogram_dump(g_config.ldt_multiop_prole_hist);
+				histogram_dump(g_config.ldt_update_record_cnt_hist);
+				histogram_dump(g_config.ldt_io_record_cnt_hist);
+				histogram_dump(g_config.ldt_update_io_bytes_hist);
+				histogram_dump(g_config.ldt_hist);
+			}
 #ifdef HISTOGRAM_OBJECT_LATENCY
 			if (g_config.read0_hist)
 				histogram_dump(g_config.read0_hist);
@@ -5429,6 +5502,19 @@ thr_info_get_object_count()
 	return objects;
 }
 
+uint64_t
+thr_info_get_subobject_count()
+{
+	uint64_t sub_objects = 0;
+
+	for (uint i = 0; i < g_config.namespaces; i++) {
+		sub_objects += g_config.namespace[i]->n_sub_objects;
+	}
+
+	return sub_objects;
+}
+
+
 void
 info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 {
@@ -5443,8 +5529,11 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// what everyone wants to know: the number of objects and size
 	info_append_uint64("", "objects",  ns->n_objects, db);
+	info_append_uint64("", "sub-objects",  ns->n_sub_objects, db);
 	info_append_uint64("", "master-objects", mp.n_master_records, db);
+	info_append_uint64("", "master-sub-objects", mp.n_master_sub_records, db);
 	info_append_uint64("", "prole-objects", mp.n_prole_records, db);
+	info_append_uint64("", "prole-sub-objects", mp.n_prole_sub_records, db);
 	info_append_uint64("", "expired-objects",  ns->n_expired_objects, db);
 	info_append_uint64("", "evicted-objects",  ns->n_evicted_objects, db);
 	info_append_uint64("", "set-deleted-objects", ns->n_deleted_set_objects, db);
@@ -5483,22 +5572,83 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	}
 
 	// LDT operational statistics
-	cf_dyn_buf_append_string(db, ";ldt_reads=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_read_reqs));
-	cf_dyn_buf_append_string(db, ";ldt_read_success=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_read_success));
-	cf_dyn_buf_append_string(db, ";ldt_deletes=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_delete_reqs));
-	cf_dyn_buf_append_string(db, ";ldt_delete_success=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_delete_success));
-	cf_dyn_buf_append_string(db, ";ldt_writes=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_write_reqs));
-	cf_dyn_buf_append_string(db, ";ldt_write_success=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_write_success));
-	cf_dyn_buf_append_string(db, ";ldt_updates=");
-	cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->ldt_update_reqs));
-	cf_dyn_buf_append_string(db, ";ldt_errors=");
-	cf_dyn_buf_append_uint32(db, ns->ldt_errs);
+	//
+	// print only if LDT is enabled
+	if (ns->ldt_enabled) {	
+		cf_dyn_buf_append_string(db, ";ldt_reads=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_reqs));
+		cf_dyn_buf_append_string(db, ";ldt_read_success=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_success));
+		cf_dyn_buf_append_string(db, ";ldt_deletes=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_reqs));
+		cf_dyn_buf_append_string(db, ";ldt_delete_success=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_success));
+		cf_dyn_buf_append_string(db, ";ldt_writes=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_reqs));
+		cf_dyn_buf_append_string(db, ";ldt_write_success=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_success));
+		cf_dyn_buf_append_string(db, ";ldt_updates=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_update_reqs));
+
+		cf_dyn_buf_append_string(db, ";ldt_gc_io=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_io));
+		cf_dyn_buf_append_string(db, ";ldt_gc_cnt=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_cnt));
+		cf_dyn_buf_append_string(db, ";ldt_randomizer_retry=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_randomizer_retry));
+
+		cf_dyn_buf_append_string(db, ";ldt_errors=");
+		cf_dyn_buf_append_uint32(db, ns->lstats.ldt_errs);
+
+		cf_dyn_buf_append_string(db, ";ldt_err_toprec_notfound=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_not_found));
+		cf_dyn_buf_append_string(db, ";ldt_err_item_notfound=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_item_not_found));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_internal=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_internal));
+		cf_dyn_buf_append_string(db, ";ldt_err_unique_key_violation=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unique_key_violation));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_insert_fail=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_insert_fail));
+		cf_dyn_buf_append_string(db, ";ldt_err_delete_fail=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_delete_fail));
+		cf_dyn_buf_append_string(db, ";ldt_err_search_fail=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_search_fail));
+		cf_dyn_buf_append_string(db, ";ldt_err_version_mismatch=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_version_mismatch));
+
+
+		cf_dyn_buf_append_string(db, ";ldt_err_capacity_exceeded=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_capacity_exceeded));
+		cf_dyn_buf_append_string(db, ";ldt_err_param=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_param));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_op_bintype_mismatch=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_op_bintype_mismatch));
+		cf_dyn_buf_append_string(db, ";ldt_err_too_many_open_subrec=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_too_many_open_subrec));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_subrec_not_found=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_not_found));
+		cf_dyn_buf_append_string(db, ";ldt_err_bin_does_not_exist=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_does_not_exist));
+		cf_dyn_buf_append_string(db, ";ldt_err_bin_exits=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_exits));
+		cf_dyn_buf_append_string(db, ";ldt_err_bin_damaged=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_damaged));
+
+		cf_dyn_buf_append_string(db, ";ldt_err_toprec_internal=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_internal));
+		cf_dyn_buf_append_string(db, ";ldt_err_subrec_internal=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_internal));
+		cf_dyn_buf_append_string(db, ";ldt_err_transform_internal=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_transform_internal));
+		cf_dyn_buf_append_string(db, ";ldt_err_unknown=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unknown));
+	}
+
 
 	// if storage, lots of information about the storage
 	//
@@ -5554,8 +5704,6 @@ info_get_tree_namespace(char *name, char *subtree, cf_dyn_buf *db)
 
 	info_get_namespace_info(ns, db);
 	cf_dyn_buf_append_string(db, ";");
-	char param[1024];
-	sprintf(param, ";id=%s", ns->name);
 	info_namespace_config_get(ns->name, db);
 
 Done:
@@ -5774,6 +5922,16 @@ info_get_service(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_service_str );
 
 	return(0);
+}
+
+void
+clear_ldt_histograms()
+{
+	histogram_clear(g_config.ldt_multiop_prole_hist);
+	histogram_clear(g_config.ldt_update_record_cnt_hist);
+	histogram_clear(g_config.ldt_io_record_cnt_hist);
+	histogram_clear(g_config.ldt_update_io_bytes_hist);
+	histogram_clear(g_config.ldt_hist);
 }
 
 void
