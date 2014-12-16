@@ -760,12 +760,13 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 	//		Release the imd lock.
 	//		Release the SI.
 
+	as_sindex_status retval = AS_SINDEX_OK;
 	if (!ns || !start_sbin) {
 		return AS_SINDEX_ERR;	
 	}
 
-	// If numbins == 0 return AS_SINDEX_OK
-	if (numbins == 0 ) {
+	// If numbins != 1 return AS_SINDEX_OK
+	if (numbins != 1 ) {
 		return AS_SINDEX_OK;
 	}
 
@@ -784,7 +785,6 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 			continue;
 		}
 		si = &ns->sindex[simatch];
-		AS_SINDEX_RESERVE(si);
 		imd =  si->imd;
 		op = sbin->op;
 	// 		Take the read lock on imd
@@ -815,7 +815,8 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 				}
 			}
 			else {
-				return AS_SINDEX_ERR;
+				retval = AS_SINDEX_ERR;
+				goto Cleanup;
 			}
 	//			Get the related pimd	
 			pimd = &imd->pimd[ai_btree_key_hash(imd, skey)];
@@ -844,10 +845,12 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 
 	//		Release the imd lock.
 	//		Release the SI.
-		SINDEX_UNLOCK(&imd->slock);
-		AS_SINDEX_RELEASE(si);
+	
 	}
-	return AS_SINDEX_OK;
+	Cleanup:
+	SINDEX_UNLOCK(&imd->slock);
+	AS_SINDEX_RELEASE(si);
+	return retval;
 }
 
 void
@@ -1482,8 +1485,8 @@ as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd)
 	for (int i=0; i<cnt; i++) {
 		as_sindex *si = sindex_arr[i];
 		as_sindex_put_rd(si, rd);
-		AS_SINDEX_RELEASE(si);
 	}
+	// Sindex release is done after sindex tree is updated
 	return ret;
 }
 
@@ -1495,6 +1498,7 @@ int
 as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 {
 	int ret = -1;
+
 	as_sindex_metadata *imd = si->imd;
 	// Validate Set name. Other function do this check while
 	// performing searching for simatch.
@@ -2359,10 +2363,10 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 	sbin_value_pool * stack_buf = sbin->stack_buf;
 
 	// Get the size of the data we are going to store
-	if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+	if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
 		data_sz = sizeof(uint64_t);
 	}
-	else if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+	else if (sbin->type == AS_PARTICLE_TYPE_STRING) {
 		data_sz = sizeof(cf_digest);
 	}
 	else {
@@ -2478,11 +2482,13 @@ as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
 			if (sbin->num_values == 1) {
 				sbin->values = stack_buf->value + stack_buf->used_sz;
 				(* (uint64_t *)sbin->values ) = sbin->value.int_val;
+				stack_buf->used_sz += sizeof(uint64_t);
 			}
 
 	// 			add the value to end of stack buf
 			*((uint64_t *)sbin->values + sbin->num_values) = val;
 			sbin->num_values++;
+			stack_buf->used_sz += sizeof(uint64_t);
 		}
 	}
 	else {
@@ -2531,6 +2537,7 @@ as_sindex_add_digest_to_sbin(as_sindex_bin * sbin, cf_digest val_dig)
 					cf_warning(AS_SINDEX, "Memcpy failed");
 					return AS_SINDEX_ERR;
 				}
+				stack_buf->used_sz += sizeof(cf_digest);
 			}
 
 	// 			add the value to end of stack buf
@@ -2539,6 +2546,7 @@ as_sindex_add_digest_to_sbin(as_sindex_bin * sbin, cf_digest val_dig)
 				return AS_SINDEX_ERR;
 			}
 			sbin->num_values++;
+			stack_buf->used_sz += sizeof(cf_digest);
 		}
 	}
 	else {
@@ -2670,7 +2678,9 @@ as_sindex_add_asval_to_map_sindex(as_val *val, as_sindex_bin * sbin)
 {
 	// If val type is not AS_MAP
 	// 		return AS_SINDEX_ERR
+	// 		Defensive check. Should not happen.
 	if (val->type != AS_MAP) {
+		cf_warning(AS_SINDEX, "Unexpected wrong type %d", val->type);
 		return AS_SINDEX_ERR;
 	}
 
@@ -3437,9 +3447,9 @@ as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, as_bin *b, as_si
 		cf_warning(AS_SINDEX, "NULL Namespace Passed");
 		return sindex_found;
 	}
-//	if (!as_bin_inuse(b)) {
-//		return sindex_found;
-//	}
+	if (!from_buf && !as_bin_inuse(b)) {
+		return sindex_found;
+	}
 
 	// Check the sindex bit array.
 	// If there is not sindex present on this bin return 0
@@ -3462,12 +3472,21 @@ as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, as_bin *b, as_si
 	int                        simatch = -1;
 	as_sindex                 * si     = NULL;
 	as_val                   * cdt_val = NULL;
+	int                   sbins_in_si  = 0;
 	while (ele) {
 		si_ele                = (sindex_set_binid_hash_ele *) ele;
 		simatch               = si_ele->simatch;
-		si                    = &ns->sindex[simatch];	
+		si                    = &ns->sindex[simatch];
+		AS_SINDEX_RESERVE(si);   
 		as_sindex_init_sbin(&start_sbin[sindex_found], op,  as_sindex_pktype_from_sktype(si->imd->btype[0]), simatch);
-		sindex_found          += as_sindex_sbin_from_sindex(si, b, &start_sbin[sindex_found], &cdt_val, buf, buf_sz, type, from_buf);
+		sbins_in_si          = as_sindex_sbin_from_sindex(si, b, &start_sbin[sindex_found], &cdt_val, buf, buf_sz, type, from_buf);
+		if (sbins_in_si) {
+			sindex_found += sbins_in_si;
+			// AS_SINDEX_RELEASE will happen after sindex tree has been updated
+		}
+		else {
+			AS_SINDEX_RELEASE(si);
+		}
 		ele                   = ele->next;
 	}
 	// Return the number of sbin found.
@@ -3680,12 +3699,20 @@ as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, b
 	as_val * bin_val                   = NULL;
 	bool                  deserialized = false;
 	as_sindex_bin             * sbin   = NULL;
+	int                    sbins_in_si = 0;
 	while (ele) {
 		si_ele        = (sindex_set_binid_hash_ele *) ele;
 		simatch       = si_ele->simatch;
 		si            = &ns->sindex[simatch];
 		sbin          = start_sbin + sindex_found;
-		sindex_found += as_sindex_diff_sbins_from_sindex(si, b, buf, buf_sz, type, sbin, &bin_val, &buf_val, &deserialized);
+		AS_SINDEX_RESERVE(si);
+		sbins_in_si  = as_sindex_diff_sbins_from_sindex(si, b, buf, buf_sz, type, sbin, &bin_val, &buf_val, &deserialized);
+		if (sbins_in_si) {
+			sindex_found += sbins_in_si;
+		}
+		else {
+			AS_SINDEX_RELEASE(si);
+		}
 		ele           = ele->next;
 	}
 	return sindex_found;
