@@ -364,7 +364,7 @@ static int newIndex(char *iname, int tmatch, icol_t *ic, uchar cnstr, uchar dtyp
 		ci_t *ci;
 		// Put the cname into col dict
 		char tmp_cname[CDICT_HASH_KEY_SIZE];
-		memset(&tmp_cname, 0, CDICT_HASH_KEY_SIZE);
+		memset(tmp_cname, 0, CDICT_HASH_KEY_SIZE);
 		memcpy(tmp_cname, rt->col[ri->icol->cmatch].name, strlen(rt->col[ri->icol->cmatch].name));
 		if(SHASH_OK != shash_get(rt->cdict, tmp_cname, (void**)&ci)) {
 			cf_warning(AS_SINDEX, "shash get failed on %s", rt->col[ri->icol->cmatch].name);
@@ -462,7 +462,7 @@ static int newTable(cf_ll *ctypes, cf_ll *cnames, int ccount, char *tname)
 		// Put the cname into col dict
 		
 		char tmp_cname[CDICT_HASH_KEY_SIZE];
-		memset(&tmp_cname, 0, CDICT_HASH_KEY_SIZE);
+		memset(tmp_cname, 0, CDICT_HASH_KEY_SIZE);
 		memcpy(tmp_cname, cname, strlen(cname));
 		if (SHASH_OK != shash_put_unique(rt->cdict, tmp_cname, (void**)&ci)) {
 			cf_warning(AS_SINDEX, "shash put unique failed for columne table. key - %s", cname);
@@ -638,7 +638,7 @@ int ai_add_column(char *tname, char *cname, int col_type)
 
 	// Put the cname into col dict
 	char tmp_cname[CDICT_HASH_KEY_SIZE];
-	memset(&tmp_cname, 0, CDICT_HASH_KEY_SIZE);
+	memset(tmp_cname, 0, CDICT_HASH_KEY_SIZE);
 	memcpy(tmp_cname, cname, strlen(cname));
 	if (SHASH_OK != shash_put_unique(rt->cdict, tmp_cname, (void**)&ci)) {
 		cf_warning(AS_SINDEX, "shash put unique failed for coumn table. key - %s", cname);
@@ -679,7 +679,7 @@ int ai_drop_column(char *tname, char *cname)
 	rt->col_count = new_col_count;
 
 	char tmp_cname[CDICT_HASH_KEY_SIZE];	
-	memset(&tmp_cname, 0, CDICT_HASH_KEY_SIZE);
+	memset(tmp_cname, 0, CDICT_HASH_KEY_SIZE);
 	memcpy(tmp_cname, cname, strlen(cname));
 	if(SHASH_OK != shash_delete(rt->cdict, tmp_cname) ) {
 		cf_warning(AS_SINDEX, "Deletion from Aerospike Column Table failed. %s", cname);

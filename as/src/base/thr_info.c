@@ -6095,7 +6095,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	}
 
 	// Get the index type. 
-	// It could be list, map, invmap, or by default none.
+	// It could be list, mapkeys, mapvalues, or by default none.
 	char indextype_str[128];
 	memset(indextype_str, 0, 128);
 	int  indtype_len = sizeof(indextype_str);
@@ -6114,7 +6114,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 			cf_warning(AS_INFO, "Failed to create secondary index : invalid type of index"
 					" for sindex creation %s %s", indexname_str, indextype_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid type must be [none, list, map, invmap]");
+					"Invalid type must be [none, list, mapkeys, mapvalues]");
 			return AS_SINDEX_ERR_PARAM;
 		}
 	}

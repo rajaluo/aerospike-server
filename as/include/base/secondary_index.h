@@ -114,19 +114,19 @@ typedef enum {
 
 
 typedef enum {
-	AS_SINDEX_KEY_TYPE_NULL,
-	AS_SINDEX_KEY_TYPE_LONG,
-	AS_SINDEX_KEY_TYPE_DIGEST
+	AS_SINDEX_KEY_TYPE_LONG   = 0,
+	AS_SINDEX_KEY_TYPE_DIGEST = 1,
+	AS_SINDEX_KEY_TYPE_MAX    = 2
 } as_sindex_key_type;
-#define AS_SINDEX_KEY_TYPES 4
 
 as_particle_type as_sindex_pktype_from_sktype(as_sindex_ktype t);
 
 typedef enum {
-	AS_SINDEX_ITYPE_DEFAULT,
-	AS_SINDEX_ITYPE_LIST,
-	AS_SINDEX_ITYPE_MAPKEYS,
-	AS_SINDEX_ITYPE_MAPVALUES
+	AS_SINDEX_ITYPE_DEFAULT   = 0,
+	AS_SINDEX_ITYPE_LIST      = 1,
+	AS_SINDEX_ITYPE_MAPKEYS   = 2,
+	AS_SINDEX_ITYPE_MAPVALUES = 3,
+	AS_SINDEX_ITYPE_MAX       = 4
 } as_sindex_type;
 
 #define AS_SINDEX_ITYPES 4
@@ -375,7 +375,7 @@ typedef struct as_sindex_range_s {
 	as_sindex_bin_data  start;
 	as_sindex_bin_data  end;
 	as_sindex_type      itype;
-	char                bin_path[BIN_NAME_MAX_SZ];
+	char                bin_path[AS_SINDEX_MAX_PATH_LENGTH];
 } as_sindex_range;
 
 // Opaque type definition.
@@ -469,6 +469,8 @@ extern int                  as_sindex_set_config(as_namespace *ns, as_sindex_met
 extern void                 as_sindex_gconfig_default(struct as_config_s *c);
 extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
 extern as_sindex_status     as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * imd);
+extern as_val             * as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v);
+
 
 // Internal.h
 extern as_sindex_gc_status  as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd);

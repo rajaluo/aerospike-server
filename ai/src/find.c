@@ -98,7 +98,7 @@ static int _find_index(int tmatch, icol_t *ic, bool prtl)
 		ci_t *ci = NULL;
 
 		char tmp_cname[CDICT_HASH_KEY_SIZE];
-		memset(&tmp_cname, 0, CDICT_HASH_KEY_SIZE);
+		memset(tmp_cname, 0, CDICT_HASH_KEY_SIZE);
 		memcpy(tmp_cname, rt->col[ic->cmatch].name, strlen(rt->col[ic->cmatch].name));
 		if(SHASH_OK != shash_get(rt->cdict, tmp_cname, (void **) &ci)) {
 			cf_debug(AS_SINDEX, "shash get failed on %s", rt->col[ic->cmatch].name);
@@ -222,7 +222,7 @@ int find_table(char *tname)
 icol_t *find_column(int tmatch, char *cname)
 {
 	char tmp_cname[CDICT_HASH_KEY_SIZE];	
-	memset(&tmp_cname, 0, CDICT_HASH_KEY_SIZE);
+	memset(tmp_cname, 0, CDICT_HASH_KEY_SIZE);
 	memcpy(tmp_cname, cname, strlen(cname));
 
 	r_tbl_t *rt = &Tbl[tmatch];
