@@ -53,7 +53,7 @@
 
 #define MAX_TRANSACTION_QUEUES 128
 #define MAX_DEMARSHAL_THREADS  256	// maximum number of demarshal worker threads
-#define MAX_FABRIC_WORKERS 64		// maximum fabric worker threads
+#define MAX_FABRIC_WORKERS 128		// maximum fabric worker threads
 #define MAX_BATCH_THREADS 16		// maximum batch worker threads
 
 struct as_namespace_s;
