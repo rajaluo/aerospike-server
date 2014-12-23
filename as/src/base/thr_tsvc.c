@@ -292,13 +292,13 @@ transaction_check_msg(as_transaction *tr)
 
 
 static inline bool
-security_check(as_transaction *tr, as_sec_priv priv)
+security_check(as_transaction *tr, as_sec_perm perm)
 {
-	uint8_t result = as_security_check(tr->proto_fd_h, priv);
+	uint8_t result = as_security_check(tr->proto_fd_h, perm);
 
 	if (result != AS_PROTO_RESULT_OK) {
 		// For now we don't log successful data operations.
-		as_security_log(tr->proto_fd_h, result, priv, NULL, NULL);
+		as_security_log(tr->proto_fd_h, result, perm, NULL, NULL);
 
 		as_msg_send_error(tr->proto_fd_h, (uint32_t)result);
 		tr->proto_fd_h = 0;
@@ -380,15 +380,15 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 	}
 	return 0;
 }
-	
-static as_sec_priv
-write_op_priv(cl_msg *msgp)
+
+static as_sec_perm
+write_op_perm(cl_msg *msgp)
 {
 	as_msg_field *f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {
 		// It's not a UDF - so it must be a regular write.
-		return PRIV_WRITE;
+		return PERM_WRITE;
 	}
 
 	// It's a UDF apply of some sort.
@@ -402,7 +402,7 @@ write_op_priv(cl_msg *msgp)
 
 	if (package_index < 0) {
 		// It's not an internal LDT UDF - so it's a regular UDF.
-		return PRIV_UDF_APPLY;
+		return PERM_UDF_APPLY;
 	}
 
 	// It's an internal LDT UDF - determine whether it's a read or write.
@@ -411,7 +411,7 @@ write_op_priv(cl_msg *msgp)
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {
 		cf_warning(AS_TSVC, "msg has udf filename %s but no function", filename);
-		return PRIV_NONE; // a msg error - will fail further along
+		return PERM_NONE; // a msg error - will fail further along
 	}
 
 	len = as_msg_field_get_value_sz(f);
@@ -423,10 +423,10 @@ write_op_priv(cl_msg *msgp)
 
 	if (op_type < 0) {
 		cf_warning(AS_TSVC, "%s not a recognized op in %s", funcname, filename);
-		return PRIV_WRITE; // are ldt_op_props in ldt.c up to date?
+		return PERM_WRITE; // are ldt_op_props in ldt.c up to date?
 	}
 
-	return op_type == LDT_READ_OP ? PRIV_READ : PRIV_WRITE;
+	return op_type == LDT_READ_OP ? PERM_READ : PERM_WRITE;
 }
 
 // Handle the transaction, including proxy to another node if necessary.
@@ -482,7 +482,7 @@ process_transaction(as_transaction *tr)
 	}
 
 	// First, check that the socket is authenticated.
-	if (tr->proto_fd_h && ! security_check(tr, PRIV_NONE)) {
+	if (tr->proto_fd_h && ! security_check(tr, PERM_NONE)) {
 		goto Cleanup;
 	}
 
@@ -508,7 +508,7 @@ process_transaction(as_transaction *tr)
 					cf_detail(AS_TSVC, "Received Query Request(%"PRIx64")", tr->trid);
 					cf_atomic64_incr(&g_config.query_reqs);
 					if (! security_check(tr,
-							is_udf(msgp) ? PRIV_UDF_QUERY : PRIV_QUERY)) {
+							is_udf(msgp) ? PERM_UDF_QUERY : PERM_QUERY)) {
 						goto Cleanup;
 					}
 					// Responsibility of query layer to free the msgp.
@@ -526,7 +526,7 @@ process_transaction(as_transaction *tr)
 					// for now, do not free msgp for all the cases. Should take
 					// care of it inside as_tscan.
 					if (! security_check(tr,
-							is_udf(msgp) ? PRIV_UDF_SCAN : PRIV_SCAN)) {
+							is_udf(msgp) ? PERM_UDF_SCAN : PERM_SCAN)) {
 						goto Cleanup;
 					}
 					free_msgp = false;
@@ -553,7 +553,7 @@ process_transaction(as_transaction *tr)
 				}
 			} else if (rv == -3) {
 				// Has digest array, is batch - msgp gets freed through cleanup.
-				if (! security_check(tr, PRIV_READ)) {
+				if (! security_check(tr, PERM_READ)) {
 					goto Cleanup;
 				}
 				if (0 != as_batch(tr)) {
@@ -666,7 +666,7 @@ process_transaction(as_transaction *tr)
 			if (tr->udata.req_udata) {
 				free_msgp = false;
 			}
-			else if (tr->proto_fd_h && ! security_check(tr, write_op_priv(msgp))) {
+			else if (tr->proto_fd_h && ! security_check(tr, write_op_perm(msgp))) {
 				goto Cleanup;
 			}
 
@@ -697,7 +697,7 @@ process_transaction(as_transaction *tr)
 		}
 		else {  // <><><> READ Transaction <><><>
 
-			if (tr->proto_fd_h && ! security_check(tr, PRIV_READ)) {
+			if (tr->proto_fd_h && ! security_check(tr, PERM_READ)) {
 				goto Cleanup;
 			}
 
