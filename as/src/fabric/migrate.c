@@ -1829,11 +1829,11 @@ migrate_rx_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void *udat
 // that are in progress during the
 
 void *
-migrate_rx_reaper_fn(void *gcc_is_ass)
+migrate_rx_reaper_fn(void *unused)
 {
 	do {
 
-		rchash_reduce_delete(g_migrate_recv_control_hash, migrate_rx_reaper_reduce_fn, 0);
+		rchash_reduce(g_migrate_recv_control_hash, migrate_rx_reaper_reduce_fn, 0);
 
 		sleep(1);
 

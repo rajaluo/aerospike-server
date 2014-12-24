@@ -2420,7 +2420,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	}
 
 	// Blindly overwrite property as in incoming record
-	as_record_overwrite_properties(&rd, p_rec_props);
+	as_record_set_properties(&rd, p_rec_props);
 	cf_detail(AS_RW, "TO PINDEX FROM MASTER Digest=%"PRIx64" bits %d \n",
 			*(uint64_t *)&rd.keyd, as_ldt_record_get_rectype_bits(r));
 
@@ -5114,7 +5114,7 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 } // end rw_retransmit_reduce_fn()
 
 void *
-rw_retransmit_fn(void *gcc_is_ass)
+rw_retransmit_fn(void *unused)
 {
 	while (1) {
 
@@ -5124,7 +5124,7 @@ rw_retransmit_fn(void *gcc_is_ass)
 		now.now_ns = cf_getns();
 		now.now_ms = now.now_ns / 1000000;
 
-		rchash_reduce_delete(g_write_hash, rw_retransmit_reduce_fn, &now);
+		rchash_reduce(g_write_hash, rw_retransmit_reduce_fn, &now);
 
 #ifdef DEBUG
 		// SUPER DEBUG --- catching some kind of leak of rchash

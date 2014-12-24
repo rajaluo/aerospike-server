@@ -6981,6 +6981,7 @@ as_info_init()
 	as_info_set_command("udf-put", udf_cask_info_put, PRIV_UDF_MANAGE);
 	as_info_set_command("udf-get", udf_cask_info_get, PRIV_NONE);
 	as_info_set_command("udf-remove", udf_cask_info_remove, PRIV_UDF_MANAGE);
+	as_info_set_command("udf-clear-cache", udf_cask_info_clear_cache, PRIV_UDF_MANAGE);
 
 	// JOBS
 	as_info_set_command("jobs", info_command_mon_cmd, PRIV_SERVICE_CTRL);  // Manipulate the multi-key lookup monitoring infrastructure.

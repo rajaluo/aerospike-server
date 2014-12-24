@@ -966,22 +966,40 @@ as_record_apply_properties(as_record *r, as_namespace *ns, const as_rec_props *p
 	}
 }
 
-/*
- * Note: This function is to be used to overwrite property based on passed in
- * record property. All older information is cleared at this point
- */ 
 void
-as_record_overwrite_properties(as_storage_rd *rd, const as_rec_props *p_rec_props)
+as_record_clear_properties(as_record *r, as_namespace *ns)
+{
+	// If we didn't get a set-id, assume the existing record isn't in a set - if
+	// it was, we wouldn't change that anyway, so don't even check.
+
+	// If a key was stored, and we didn't get one, remove the key.
+	if (as_index_is_flag_set(r, AS_INDEX_FLAG_KEY_STORED)) {
+		if (ns->storage_data_in_memory) {
+			as_record_remove_key(r);
+		}
+
+		as_index_clear_flags(r, AS_INDEX_FLAG_KEY_STORED);
+	}
+
+	if (ns->ldt_enabled) {
+		as_index_clear_flags(r, AS_INDEX_FLAG_SPECIAL_BINS | AS_INDEX_FLAG_CHILD_REC | AS_INDEX_FLAG_CHILD_ESR);
+	}
+}
+
+void
+as_record_set_properties(as_storage_rd *rd, const as_rec_props *p_rec_props)
 {
 	if (p_rec_props->p_data && p_rec_props->size != 0) {
 		// Copy rec-props into rd so the metadata gets written to device.
 		rd->rec_props = *p_rec_props;
 
-		// Apply the metadata in rec-props to the record.
+		// Apply the metadata in rec-props to the as_record.
 		as_record_apply_properties(rd->r, rd->ns, p_rec_props);
-	} else {
-		// reset all property related flags
-		as_index_clear_flags(rd->r, AS_INDEX_ALL_FLAGS);	
+	}
+	// It's possible to get empty rec-props.
+	else {
+		// Clear the rec-props related metadata in the as_record.
+		as_record_clear_properties(rd->r, rd->ns);
 	}
 }
 
@@ -1097,7 +1115,7 @@ as_record_merge(as_partition_reservation *rsv, cf_digest *keyd, uint16_t n_compo
 
 		// Overwrite properties upfront before pickling. Code downstream uses it to update
 		// secondary index.
-		as_record_overwrite_properties(&rd, &c->rec_props);
+		as_record_set_properties(&rd, &c->rec_props);
 		//
 		// If the incoming vinfo set is empty, then simply compare the values of the incoming record with the existing record
 		//
@@ -1268,7 +1286,7 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 	uint8_t *p_stack_particles = stack_particles;
 
 	// Cleanup old info and put new info
-	as_record_overwrite_properties(rd, &c->rec_props);
+	as_record_set_properties(rd, &c->rec_props);
 	int rv = as_record_unpickle_replace(r, rd, c->record_buf, c->record_buf_sz, &p_stack_particles, has_sindex);
 	if (0 != rv) {
 		cf_warning_digest(AS_LDT, &rd->keyd, "Unpickled replace failed rv=%d",rv);
