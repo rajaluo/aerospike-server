@@ -76,7 +76,7 @@ void as_sindex_init_sbin(as_sindex_bin * sbin, as_sindex_op op, as_particle_type
 void                 as_sindex_set_binid_has_sindex(as_namespace *ns, int binid);
 void                 as_sindex_reset_binid_has_sindex(as_namespace *ns, int binid);
 bool                 as_sindex_binid_has_sindex(as_namespace *ns, int binid);
-as_sindex_status     as_sindex_extract_bin_from_path(char * path_str, char **bin);
+as_sindex_status     as_sindex_extract_bin_from_path(char * path_str, char *bin);
 // Translation from sindex error code to string
 const char *as_sindex_err_str(int op_code) {
 	switch(op_code) {
@@ -1500,44 +1500,47 @@ as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd)
 int
 as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 {
-	int ret = -1;
-
 	as_sindex_metadata *imd = si->imd;
 	// Validate Set name. Other function do this check while
 	// performing searching for simatch.
 	const char *setname = NULL;
 	if (as_index_has_set(rd->r)) {
 		setname = as_index_get_set_name(rd->r, si->ns);
-	} 
-	
+	}
+
 	SINDEX_RLOCK(&imd->slock);
 	if (!as_sindex__setname_match(imd, setname)) {
 		SINDEX_UNLOCK(&imd->slock);
-		return AS_SINDEX_OK;
+		goto Cleanup;
 	}
 	SINDEX_UNLOCK(&imd->slock);
-	
+
 	// collect sbins
 	SINDEX_GRLOCK();
-	SINDEX_BINS_SETUP(sbins, rd->ns->sindex_cnt);
-	
+	SINDEX_BINS_SETUP(sbins, 1);
+
 	int sindex_found = 0;
 	for (int i = 0; i < imd->num_bins; i++) {
 		as_bin *b = as_bin_get(rd, (uint8_t *)imd->bnames[i],
-										strlen(imd->bnames[i]));
+				strlen(imd->bnames[i]));
 		as_val * cdt_val = NULL;
 		if (b) {
 			as_sindex_init_sbin(&sbins[sindex_found], AS_SINDEX_OP_INSERT, as_sindex_pktype_from_sktype(si->imd->btype[i]), si->simatch);
 			sindex_found += as_sindex_sbin_from_sindex(si, b, &sbins[sindex_found], &cdt_val, NULL, 0, 0, false);
+			// Only one sbin should be created here.
 		}
 	}
 	SINDEX_GUNLOCK();
-	
+
 	if (sindex_found) {
 		as_sindex_update_by_sbin(rd->ns, setname, sbins, sindex_found, &rd->keyd);	
 		as_sindex_sbin_freeall(sbins, sindex_found);
+		return AS_SINDEX_OK;
 	}
-	return ret;
+
+Cleanup:
+	AS_SINDEX_RELEASE(si);
+	return AS_SINDEX_OK;
 }
 
 /*
@@ -2209,9 +2212,9 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		strncpy(srange->bin_path, (char *)data, bin_path_len);
 		srange->bin_path[bin_path_len] = '\0';
 
-		char *binname = alloca(BIN_NAME_MAX_SZ);
+		char binname[BIN_NAME_MAX_SZ];
 		memset(binname, 0, BIN_NAME_MAX_SZ);
-		if (as_sindex_extract_bin_from_path(srange->bin_path, &binname) == AS_SINDEX_OK) {
+		if (as_sindex_extract_bin_from_path(srange->bin_path, binname) == AS_SINDEX_OK) {
 			int16_t id = as_bin_get_id(ns, binname);
 			if (id != -1) {
 				start->id   = id;
@@ -3539,8 +3542,9 @@ as_sindex_diff_sbins_from_sindex(as_sindex * si, as_bin * b, byte * buf, uint32_
 		if (imd->itype == AS_SINDEX_ITYPE_DEFAULT ) {
 			if (type == AS_PARTICLE_TYPE_INTEGER) {
 				found = true;
-				uint64_t buf_int = *(uint64_t *)buf;
+				uint64_t buf_int = __be64_to_cpup((void*)buf);
 				uint64_t bin_int = 0;
+				as_particle_tobuf(b, 0, &valsz);
 				as_particle_tobuf(b, (byte *)&bin_int, &valsz);
 				bin_int    = __cpu_to_be64(bin_int);
 				if (buf_int != bin_int) {
@@ -4545,6 +4549,10 @@ as_sindex_binid_has_sindex(as_namespace *ns, int binid)
 as_sindex_status
 as_sindex_add_mapkey_in_path(as_sindex_metadata * imd, char * path_str, int start, int end)
 {
+	if (end < start) {
+		return AS_SINDEX_ERR;
+	}
+
 	int path_length = imd->path_length;
 	char int_str[20];
 	if (path_str[start] == '\'' && path_str[end] == '\'') {
@@ -4553,7 +4561,7 @@ as_sindex_add_mapkey_in_path(as_sindex_metadata * imd, char * path_str, int star
 			return AS_SINDEX_ERR;
 		}
 		imd->path[path_length-1].value.key_str  = cf_strndup(path_str+start+1, (end-start-1));
-		imd->path[path_length-1].key_type = AS_PARTICLE_TYPE_STRING;
+		imd->path[path_length-1].mapkey_type = AS_PARTICLE_TYPE_STRING;
 	}
 	else {
 		strncpy(int_str, path_str+start, end-start+1);
@@ -4562,10 +4570,10 @@ as_sindex_add_mapkey_in_path(as_sindex_metadata * imd, char * path_str, int star
 		imd->path[path_length-1].value.key_int = strtol(int_str, &str_part, 10);
 		if (str_part == int_str || (*str_part != '\0')) {
 			imd->path[path_length-1].value.key_str  = cf_strndup(int_str, strlen(int_str)+1);
-			imd->path[path_length-1].key_type = AS_PARTICLE_TYPE_STRING;
+			imd->path[path_length-1].mapkey_type = AS_PARTICLE_TYPE_STRING;
 		}
 		else {	
-			imd->path[path_length-1].key_type = AS_PARTICLE_TYPE_INTEGER;	
+			imd->path[path_length-1].mapkey_type = AS_PARTICLE_TYPE_INTEGER;	
 		}
 	}
 	return AS_SINDEX_OK;
@@ -4574,6 +4582,9 @@ as_sindex_add_mapkey_in_path(as_sindex_metadata * imd, char * path_str, int star
 as_sindex_status
 as_sindex_add_listelement_in_path(as_sindex_metadata * imd, char * path_str, int start, int end)
 {
+	if (end < start) {
+		return AS_SINDEX_ERR;
+	}
 	int path_length = imd->path_length;
 	char int_str[10];
 	strncpy(int_str, path_str+start, end-start+1);
@@ -4680,9 +4691,9 @@ as_sindex_parse_subpath(as_sindex_metadata * imd, char * path_str, int start, in
  * For e.g 
  * bin.k1[1][0]
  * array of the path structure would be like - 
- * path[0].type = AS_PARTICLE_TYPE_MAP . path[0].value.key_str = k1
- * path[0].type = AS_PARTICLE_TYPE_LIST . path[0].value.index  = 1 
- * path[0].type = AS_PARTICLE_TYPE_LIST . path[0].value.index  = 0
+ * path[0].type = AS_PARTICLE_TYPE_MAP . path[0].value.key_str = k1  path[0].value.ke
+ * path[1].type = AS_PARTICLE_TYPE_LIST . path[1].value.index  = 1 
+ * path[2].type = AS_PARTICLE_TYPE_LIST . path[2].value.index  = 0
 */
 as_sindex_status
 as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str)
@@ -4736,7 +4747,7 @@ as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str)
 }
 
 as_sindex_status
-as_sindex_extract_bin_from_path(char * path_str, char **bin)
+as_sindex_extract_bin_from_path(char * path_str, char *bin)
 {
 	int    path_len    = strlen(path_str);
 	int    end         = 0;
@@ -4750,7 +4761,7 @@ as_sindex_extract_bin_from_path(char * path_str, char **bin)
 	}
 	
 	if (end > 0 && end <= BIN_NAME_MAX_SZ) {
-		strncpy(*bin, path_str, end);
+		strncpy(bin, path_str, end);
 		bin[end] = '\0';
 	}
 	else {
@@ -4765,7 +4776,7 @@ as_sindex_destroy_value_path(as_sindex_metadata * imd)
 {
 	for (int i=0; i<imd->path_length; i++) {
 		if (imd->path[i].type == AS_PARTICLE_TYPE_MAP && 
-				imd->path[i].key_type == AS_PARTICLE_TYPE_STRING) {
+				imd->path[i].mapkey_type == AS_PARTICLE_TYPE_STRING) {
 			cf_free(imd->path[i].value.key_str);
 		}
 	}
@@ -4819,10 +4830,10 @@ as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v)
 				}
 				as_map * map = as_map_fromval(val);
 				as_val * key;
-				if (path[i].key_type == AS_PARTICLE_TYPE_STRING) {
+				if (path[i].mapkey_type == AS_PARTICLE_TYPE_STRING) {
 					key = (as_val *)as_string_new(path[i].value.key_str, false);
 				}
-				else if (path[i].key_type == AS_PARTICLE_TYPE_INTEGER) {
+				else if (path[i].mapkey_type == AS_PARTICLE_TYPE_INTEGER) {
 					key = (as_val *)as_integer_new(path[i].value.key_int);
 				}
 				else {

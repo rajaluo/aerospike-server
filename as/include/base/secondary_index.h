@@ -150,10 +150,12 @@ typedef struct sbin_value_pool_s{
 
 /*
  * Used as structure to call into secondary indexes sindex_* interface
+ * TODO: as_sindex_bin is not appropriate name for this structure.
+ * maybe as_sindex_transaction 
  */
 typedef struct as_sindex_bin_s {
-	union {                       // We use this if we need to store only one value inside sbin.
-		int64_t       int_val;    // Accessing this is much faster than accessing any other value on the stack.
+	union {                       // we use this if we need to store only one value inside sbin.
+		int64_t       int_val;    // accessing this is much faster than accessing any other value on the stack.
 		cf_digest     str_val;
 	} value;
 	uint64_t          num_values; 
@@ -166,6 +168,8 @@ typedef struct as_sindex_bin_s {
 	uint32_t          heap_capacity;
 } as_sindex_bin;
 
+// TODO: Reorganise this structure.
+// No need of union.
 typedef struct as_sindex_bin_data_s {
 	uint32_t          id;
 	as_particle_type  type; // this type is citrusleaf type
@@ -205,13 +209,13 @@ typedef struct as_sindex_physical_metadata_s {
 
 
 typedef struct as_sindex_path_s {
-	as_particle_type type;
+	as_particle_type type;  // MAP/LIST
 	union {
 		int      index;     // For index of lists.
 		char   * key_str;   // For string type keys in maps.
 		uint64_t key_int;   // For integer type keys in maps.
 	} value;
-	as_particle_type key_type;  // This could be either string or integer type
+	as_particle_type mapkey_type;  // This could be either string or integer type
 } as_sindex_path;
 
 typedef struct as_sindex_metadata_s {
