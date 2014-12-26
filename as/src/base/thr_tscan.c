@@ -210,6 +210,7 @@ tscan_agg_ostream_write(const as_stream *s, as_val *v)
 		return AS_STREAM_OK;
 	}
 	if (tscan_add_val_response(task, v, true)) {
+		as_val_destroy(v);
 		return AS_STREAM_ERR;
 	}
 	as_val_destroy(v);
