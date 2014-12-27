@@ -5672,7 +5672,6 @@ thr_tsvc_read(as_transaction *tr, as_record_lock *rl, int record_get_rv)
 				bin_count = m->n_ops;
 		}
 
-		cf_assert(bin_count < 4095, AS_RW, CF_CRITICAL, "input");
 		as_msg_op *ops[bin_count];
 		as_bin stack_bins[(r && !ns->storage_data_in_memory) ? rd->n_bins : 0];
 
