@@ -400,7 +400,7 @@ as_sindex__dup_meta(as_sindex_metadata *imd, as_sindex_metadata **qimd,
 int
 as_sindex__get_simatches_by_sbin(as_namespace *ns, const char *set,
 								 as_sindex_bin *sbin, int num_bins,
-								 int8_t *simatches, bool isw, int *matches)
+								 int *simatches, bool isw, int *matches)
 {
 	if (ns->single_bin) {
 		GTRACE(META, debug, "No Index On Namespace with Single Bin");
@@ -697,7 +697,7 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set,
 	}
 
 	// Maximum matches are equal to number of bins
-	int8_t simatches[numbins];
+	int simatches[numbins];
 	int num_matches = 0;
 	if (as_sindex__get_simatches_by_sbin(ns, set, sbin,
 				numbins, simatches, (op != AS_SINDEX_OP_READ), &num_matches) != AS_SINDEX_OK) {
