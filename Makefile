@@ -177,13 +177,13 @@ $(JANSSON)/configure:
 	cd $(JANSSON) && autoreconf -i
 
 $(JANSSON)/Makefile: $(JANSSON)/configure
-	cd $(JANSSON) && ./configure
+	cd $(JANSSON) && ./configure $(JANSSON_CONFIG_OPT)
 
 $(JEMALLOC)/configure:
 	cd $(JEMALLOC) && autoconf
 
 $(JEMALLOC)/Makefile: $(JEMALLOC)/configure
-	cd $(JEMALLOC) && ./configure
+	cd $(JEMALLOC) && ./configure $(JEM_CONFIG_OPT)
 
 $(LUAJIT)/src/luaconf.h: $(LUAJIT)/src/luaconf.h.orig
 	ln -s $(notdir $<) $@
