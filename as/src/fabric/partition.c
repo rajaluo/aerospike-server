@@ -330,7 +330,7 @@ bool increase_partition_version_tree_path(as_partition_vinfo *vinfo, cf_node fsn
 
 /*
  * Set the version of the partition to the new value but only if the old one matches
- * This function is only called from as_partition_balance, so do not flush
+ * This function is only called from as_partition_balance_new, so do not flush to storage
  */
 void set_new_partition_version(as_partition_vinfo *dest, as_partition_vinfo *old, as_partition_vinfo *new, as_namespace *ns, size_t pid) {
 
@@ -540,7 +540,7 @@ int set_partition_desync(as_partition *p, as_partition_vinfo *vinfo, as_namespac
 	int retval = -1;
 	if (true == g_allow_migrations)
 	{
-		// Always set flush flag as this is never called from as_partition_balance
+		// Always set flush flag as this is never called from as_partition_balance_new
 		set_partition_desync_lockfree(p, vinfo, ns, pid, true);
 		retval = 0;
 	}
@@ -3031,7 +3031,7 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 	int *hv_slindex_ptr   = cf_malloc(hv_slindex_ptr_sz);
 
 	if ((hv_slindex_ptr == NULL) || (hv_ptr == NULL))
-		cf_crash(AS_PARTITION, "as_partition_balance: couldn't allocate partition state tables: %s", cf_strerror(errno));
+		cf_crash(AS_PARTITION, "as_partition_balance_new: couldn't allocate partition state tables: %s", cf_strerror(errno));
 
 	memset(hv_ptr, 0, hv_ptr_sz);
 	memset(hv_slindex_ptr, 0, hv_slindex_ptr_sz);
