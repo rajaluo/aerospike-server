@@ -962,6 +962,9 @@ as_sindex_reserve(as_sindex *si, char *fname, int lineno)
 {
 	if (si->imd) cf_rc_reserve(si->imd);
 	int count = cf_rc_count(si->imd);
+	if (!as_sindex_isactive(si)) {
+		cf_warning(AS_SINDEX, "Reserving an inactive sindex %s at %s:%d", si->imd->iname, fname, lineno);
+	}
 	SITRACE(si, RESERVE, debug, "Index %s in %d state Reserved to reference count %d < 2 at %s:%d", si->imd->iname, si->state, count, fname, lineno);
 	return AS_SINDEX_OK;
 }
@@ -1014,7 +1017,7 @@ as_sindex_release(as_sindex *si, char *fname, int lineno)
 					si->imd->iname, si->state, val, fname, lineno);
 		// Display a warning when rc math is messed-up during sindex-delete
 		if(si->state == AS_SINDEX_DESTROY){
-			cf_warning(AS_SINDEX,"Returning from a sindex destroy op for: %s with reference count %"PRIu64"", si->imd->iname, val);
+			cf_debug(AS_SINDEX,"Returning from a sindex destroy op for: %s with reference count %"PRIu64"", si->imd->iname, val);
 		}
 		SINDEX_UNLOCK(&si->imd->slock);
 	}
