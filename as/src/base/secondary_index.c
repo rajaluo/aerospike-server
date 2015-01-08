@@ -3475,7 +3475,7 @@ as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, as_bin *b, as_si
 	}
 
 	// Get the simatch_ll from set_binid_hash
-	cf_ll * simatch_ll;
+	cf_ll * simatch_ll  = NULL;
 	as_sindex__simatch_list_by_set_binid(ns, set, b->id, &simatch_ll);
 
 	// If simatch_ll is NULL return 0
@@ -4206,6 +4206,11 @@ as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd)
 	SINDEX_GRLOCK();
 
 	int ret     = AS_SINDEX_OK;
+	if (ns->sindex_cnt >= AS_SINDEX_MAX) {
+		ret = AS_SINDEX_ERR_MAXCOUNT;
+		goto END;
+	}
+
 	int simatch = as_sindex__simatch_by_iname(ns, imd->iname);
 
 	if (simatch != -1) {
@@ -4402,14 +4407,14 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				}
 				// Pessimistic --Checking again. This check was already done by the paxos master.
 				int retval = as_sindex_create_check_params(ns, &imd);
-				if (retval == AS_SINDEX_ERR_FOUND) {
+				if (retval != AS_SINDEX_OK) {
 						// Two possible cases for reaching here
 						// 1. It is possible that secondary index is not active hence defn check
 						//    fails but params check pick up sindex in destroy state as well.
 						// 2. SMD thread is single threaded ... not sure how can above definition
 						//    check fail but params check pass. But just in case it does bail out
 						//    destroy and recreate (Accept the final version). think !!!!
-						cf_detail(AS_SINDEX, "IndexName Already exists. Dropping the index due to cluster state change");
+						cf_detail(AS_SINDEX, "Index creation failed. Error %d Dropping the index due to cluster state change", retval);
 						imd.post_op = 1;
 						as_sindex_destroy(ns, &imd);
 				}

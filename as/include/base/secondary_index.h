@@ -65,6 +65,7 @@
  * Positive are < 10 are something which are internal
  */
 typedef enum {
+	AS_SINDEX_ERR_MAXCOUNT         = -16,
 	AS_SINDEX_ERR_SET_MISMATCH     = -15,
 	AS_SINDEX_ERR_UNKNOWN_KEYTYPE  = -14,
 	AS_SINDEX_ERR_BIN_NOTFOUND     = -13,

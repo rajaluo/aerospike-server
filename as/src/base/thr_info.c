@@ -84,6 +84,7 @@
 #define STR_TYPE_NUMERIC    "numeric"
 #define STR_TYPE_STRING     "string"
 #define STR_ITYPE           "indextype"
+#define STR_ITYPE_DEFAULT   "DEFAULT"
 #define STR_ITYPE_LIST      "LIST"
 #define STR_ITYPE_MAPKEYS   "MAPKEYS"
 #define STR_ITYPE_MAPVALUES "MAPVALUES"
@@ -6104,13 +6105,19 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		imd->itype = AS_SINDEX_ITYPE_DEFAULT;
 	}
 	else {
-		if (strncasecmp(indextype_str, STR_ITYPE_LIST, 4) == 0) {
+		if (strncasecmp(indextype_str, STR_ITYPE_DEFAULT, 7) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_DEFAULT;
+		}
+		else if (strncasecmp(indextype_str, STR_ITYPE_LIST, 4) == 0) {
 			imd->itype = AS_SINDEX_ITYPE_LIST;
-		} else if (strncasecmp(indextype_str, STR_ITYPE_MAPKEYS, 7) == 0) {
+		}
+		else if (strncasecmp(indextype_str, STR_ITYPE_MAPKEYS, 7) == 0) {
 			imd->itype = AS_SINDEX_ITYPE_MAPKEYS;
-		} else if (strncasecmp(indextype_str, STR_ITYPE_MAPVALUES, 9) == 0) {
+		}
+		else if (strncasecmp(indextype_str, STR_ITYPE_MAPVALUES, 9) == 0) {
 			imd->itype = AS_SINDEX_ITYPE_MAPVALUES;
-		} else {
+		}
+		else {
 			cf_warning(AS_INFO, "Failed to create secondary index : invalid type of index"
 					" for sindex creation %s %s", indexname_str, indextype_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
@@ -6250,28 +6257,23 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_FOUND,
 				"Index with the same name already exists or this bin has already been indexed.");
 		goto ERR;
-	} else if(res == AS_SINDEX_ERR_PARAM) {
+	} 
+	else if (res == AS_SINDEX_ERR_PARAM) {
 		cf_info(AS_INFO, "Index-name is too long, should be a max of: %d.", AS_ID_INAME_SZ - 1);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_NAME_MAXLEN,
 				"Index-name is too long.");
 		goto ERR;
 	}
-
-	// Check for max si's on the system : best-effort checking
-	// There is a hole here because we don't acquire a global lock for this check,
-	// but this is for the clean-case.
-	int i;
-	for (i = 0; i < AS_SINDEX_MAX; i++) {
-		// There is a valid new si slot that can be created.
-		if (ns->sindex[i].state == AS_SINDEX_INACTIVE) {
-			break;
-		}
-	}
-
-	if (i == AS_SINDEX_MAX) {
-		cf_info(AS_INFO, "System already has %d indexes and is maxed-out, cannot create new index", AS_SINDEX_MAX);
+	else if (res == AS_SINDEX_ERR_MAXCOUNT) {
+		cf_info(AS_INFO, "More than %d index are not allowed per namespace.", AS_SINDEX_MAX);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_MAXCOUNT,
-				"System already has maximum number of indexes, cannot create new index");
+				"Reached maximum number of sindex allowed");
+		goto ERR;
+
+	}
+	else if (res != AS_SINDEX_OK) {
+		cf_info(AS_INFO, "Index creation failed. Error %d", res);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_GENERIC,"");
 		goto ERR;
 	}
 
