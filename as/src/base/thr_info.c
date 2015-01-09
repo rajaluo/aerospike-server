@@ -2126,7 +2126,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		cf_dyn_buf_append_string(db, "ttl");
 	}
 	else {
-		cf_dyn_buf_append_string(db, ";undefined");
+		cf_dyn_buf_append_string(db, "undefined");
 	}
 
 	cf_dyn_buf_append_string(db, ";allow_versions=");
