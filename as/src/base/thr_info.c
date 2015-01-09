@@ -3961,7 +3961,7 @@ info_command	*command_head = 0;
 int
 info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 {
-	uint8_t auth_result = as_security_check(fd_h, PERM_NONE);
+	uint8_t auth_result = as_security_check(fd_h, 0, 0, PERM_NONE);
 
 	if (auth_result != AS_PROTO_RESULT_OK) {
 		as_security_log(fd_h, auth_result, PERM_NONE, "info-all request", NULL);
@@ -4003,7 +4003,7 @@ info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 int
 info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 {
-	uint8_t auth_result = as_security_check(fd_h, PERM_NONE);
+	uint8_t auth_result = as_security_check(fd_h, 0, 0, PERM_NONE);
 
 	if (auth_result != AS_PROTO_RESULT_OK) {
 		// TODO - log null-terminated buf as detail?
@@ -4106,7 +4106,7 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 					cf_dyn_buf_append_string( db, param);
 					cf_dyn_buf_append_char( db, SEP );
 
-					uint8_t result = as_security_check(fd_h, cmd->required_perm);
+					uint8_t result = as_security_check(fd_h, 0, 0, cmd->required_perm);
 
 					as_security_log(fd_h, result, cmd->required_perm, name, param);
 

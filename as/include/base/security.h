@@ -79,7 +79,8 @@ typedef struct as_sec_msg_s {
 //
 
 void as_security_init();
-uint8_t as_security_check(const as_file_handle* fd_h, as_sec_perm perm);
+uint8_t as_security_check(const as_file_handle* fd_h, int32_t ns_id,
+		uint16_t set_id, as_sec_perm perm);
 void* as_security_filter_create();
 void as_security_filter_destroy(void* pv_filter);
 void as_security_log(const as_file_handle* fd_h, uint8_t result,

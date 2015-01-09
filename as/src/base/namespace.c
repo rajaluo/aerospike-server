@@ -502,6 +502,64 @@ uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name)
 			(uint16_t)(idx + 1) : INVALID_SET_ID;
 }
 
+// At the moment this is only used by the enterprise build security feature.
+uint16_t as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
+{
+	if (! set_name) {
+		// Should be impossible.
+		cf_warning(AS_NAMESPACE, "null set name");
+		return INVALID_SET_ID;
+	}
+
+	uint32_t idx;
+	cf_vmapx_err result = cf_vmapx_get_index(ns->p_sets_vmap, set_name, &idx);
+
+	if (result == CF_VMAPX_OK) {
+		return (uint16_t)(idx + 1);
+	}
+
+	if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
+		as_set set;
+
+		memset(&set, 0, sizeof(set));
+
+		// Check name length just once, here at insertion. (Other vmap calls are
+		// safe if name is too long - they return CF_VMAPX_ERR_NAME_NOT_FOUND.)
+		strncpy(set.name, set_name, AS_SET_NAME_MAX_SIZE);
+
+		if (set.name[AS_SET_NAME_MAX_SIZE - 1]) {
+			set.name[AS_SET_NAME_MAX_SIZE - 1] = 0;
+
+			cf_warning(AS_NAMESPACE, "set name %s... too long", set.name);
+			return INVALID_SET_ID;
+		}
+
+		set.num_elements = 0; // *not* adding an element
+		result = cf_vmapx_put_unique(ns->p_sets_vmap, &set, &idx);
+
+		if (result == CF_VMAPX_ERR_NAME_EXISTS) {
+			return (uint16_t)(idx + 1);
+		}
+
+		if (result == CF_VMAPX_ERR_FULL) {
+			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s", set.name);
+			return INVALID_SET_ID;
+		}
+
+		if (result != CF_VMAPX_OK) {
+			// Currently, remaining errors are all some form of out-of-memory.
+			cf_warning(AS_NAMESPACE, "error %d, can't add %s", result, set.name);
+			return INVALID_SET_ID;
+		}
+
+		return (uint16_t)(idx + 1);
+	}
+
+	// Should be impossible.
+	cf_warning(AS_NAMESPACE, "unexpected error %d", result);
+	return INVALID_SET_ID;
+}
+
 int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool check_threshold)
 {
 	if (! set_name) {

@@ -291,10 +291,64 @@ transaction_check_msg(as_transaction *tr)
 }
 
 
-static inline bool
-security_check(as_transaction *tr, as_sec_perm perm)
+static as_namespace*
+get_ns(as_msg *m)
 {
-	uint8_t result = as_security_check(tr->proto_fd_h, perm);
+	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
+
+	if (! f || as_msg_field_get_value_sz(f) == 0) {
+		return NULL;
+	}
+
+	return as_namespace_get_bymsgfield(f);
+}
+
+
+static uint16_t
+get_set_id(as_namespace *ns, as_msg *m)
+{
+	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
+
+	if (! f || as_msg_field_get_value_sz(f) == 0) {
+		return INVALID_SET_ID;
+	}
+
+	size_t msg_set_name_len = as_msg_field_get_value_sz(f);
+	char msg_set_name[msg_set_name_len + 1];
+
+	memcpy((void*)msg_set_name, (const void*)f->data, msg_set_name_len);
+	msg_set_name[msg_set_name_len] = 0;
+
+	return as_namespace_get_set_id(ns, msg_set_name);
+}
+
+
+static bool
+security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm)
+{
+	// Avoid processing if not enterprise build with security enabled.
+	if (! g_config.sec_cfg.security_enabled) {
+		return true;
+	}
+
+	int32_t ns_id = 0;
+	uint16_t set_id = INVALID_SET_ID;
+
+	if (m) {
+		if (! ns) {
+			ns = get_ns(m);
+		}
+
+		if (! ns) {
+			// Don't let security be the first to bark at a bad namespace.
+			return true;
+		}
+
+		ns_id = ns->id;
+		set_id = get_set_id(ns, m);
+	}
+
+	uint8_t result = as_security_check(tr->proto_fd_h, ns_id, set_id, perm);
 
 	if (result != AS_PROTO_RESULT_OK) {
 		// For now we don't log successful data operations.
@@ -482,7 +536,7 @@ process_transaction(as_transaction *tr)
 	}
 
 	// First, check that the socket is authenticated.
-	if (tr->proto_fd_h && ! security_check(tr, PERM_NONE)) {
+	if (tr->proto_fd_h && ! security_check(tr, NULL, NULL, PERM_NONE)) {
 		goto Cleanup;
 	}
 
@@ -507,7 +561,7 @@ process_transaction(as_transaction *tr)
 						AS_MSG_FIELD_TYPE_INDEX_RANGE) != NULL) {
 					cf_detail(AS_TSVC, "Received Query Request(%"PRIx64")", tr->trid);
 					cf_atomic64_incr(&g_config.query_reqs);
-					if (! security_check(tr,
+					if (! security_check(tr, &msgp->msg, ns,
 							is_udf(msgp) ? PERM_UDF_QUERY : PERM_QUERY)) {
 						goto Cleanup;
 					}
@@ -525,7 +579,7 @@ process_transaction(as_transaction *tr)
 					// We got a scan, it might be for udfs, no need to know now,
 					// for now, do not free msgp for all the cases. Should take
 					// care of it inside as_tscan.
-					if (! security_check(tr,
+					if (! security_check(tr, &msgp->msg, ns,
 							is_udf(msgp) ? PERM_UDF_SCAN : PERM_SCAN)) {
 						goto Cleanup;
 					}
@@ -553,7 +607,7 @@ process_transaction(as_transaction *tr)
 				}
 			} else if (rv == -3) {
 				// Has digest array, is batch - msgp gets freed through cleanup.
-				if (! security_check(tr, PERM_READ)) {
+				if (! security_check(tr, &msgp->msg, ns, PERM_READ)) {
 					goto Cleanup;
 				}
 				if (0 != as_batch(tr)) {
@@ -666,7 +720,7 @@ process_transaction(as_transaction *tr)
 			if (tr->udata.req_udata) {
 				free_msgp = false;
 			}
-			else if (tr->proto_fd_h && ! security_check(tr, write_op_perm(msgp))) {
+			else if (tr->proto_fd_h && ! security_check(tr, &msgp->msg, ns, write_op_perm(msgp))) {
 				goto Cleanup;
 			}
 
@@ -697,7 +751,7 @@ process_transaction(as_transaction *tr)
 		}
 		else {  // <><><> READ Transaction <><><>
 
-			if (tr->proto_fd_h && ! security_check(tr, PERM_READ)) {
+			if (tr->proto_fd_h && ! security_check(tr, &msgp->msg, ns, PERM_READ)) {
 				goto Cleanup;
 			}
 
