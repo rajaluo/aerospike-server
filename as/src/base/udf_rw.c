@@ -655,6 +655,19 @@ udf_rw_getop(udf_record *urecord, udf_optype *urecord_op)
 	} else {
 		*urecord_op  = UDF_OPTYPE_READ;
 	}
+
+	// If there exists a record reference but no bin of the record is in use,
+	// delete the record. remove from the tree. Only LDT_RECORD here not needed
+	// for LDT_SUBRECORD (only do it if requested by UDF). All the SUBRECORD of
+	// removed LDT_RECORD will be lazily cleaned up by defrag.
+	if (!(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD)
+			&& (urecord->flag & UDF_RECORD_FLAG_OPEN)
+			&& !as_bin_inuse_has(urecord->rd)) {
+		as_transaction *tr = urecord->tr;
+		as_index_delete(tr->rsv.tree, &tr->keyd);
+		urecord->starting_memory_bytes = 0;
+		*urecord_op                    = UDF_OPTYPE_DELETE;
+	}
 }
 
 /* Internal Function: Does the post processing for the UDF record after the
@@ -695,18 +708,7 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 			urecord->tr, urecord->r_ref, urecord->rd,
 			(urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN));
 
-	// If there exists a record reference but no bin of the record is in use,
-	// delete the record. remove from the tree. Only LDT_RECORD here not needed
-	// for LDT_SUBRECORD (only do it if requested by UDF). All the SUBRECORD of
-	// removed LDT_RECORD will be lazily cleaned up by defrag.
-	if (!(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD)
-			&& (urecord->flag & UDF_RECORD_FLAG_OPEN)
-			&& !as_bin_inuse_has(rd)) {
-		as_index_delete(tr->rsv.tree, &tr->keyd);
-		urecord->starting_memory_bytes = 0;
-		*urecord_op                    = UDF_OPTYPE_DELETE;
-		udf_xdr_ship_op = true;
-	} else if (*urecord_op == UDF_OPTYPE_WRITE)	{
+	if (*urecord_op == UDF_OPTYPE_WRITE)	{
 		cf_detail_digest(AS_UDF, &rd->keyd, "Committing Changes n_bins %d", as_bin_get_n_bins(r_ref->r, rd));
 
 		size_t  rec_props_data_size = as_storage_record_rec_props_size(rd);
