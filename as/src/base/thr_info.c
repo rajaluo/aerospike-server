@@ -2015,6 +2015,11 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.prole_extra_ttl);
 	cf_dyn_buf_append_string(db, ";max-msgs-per-type=");
 	cf_dyn_buf_append_int(db, g_config.max_msgs_per_type);
+	cf_dyn_buf_append_string(db, ";service-threads=");
+	cf_dyn_buf_append_int(db, g_config.n_service_threads);
+	cf_dyn_buf_append_string(db, ";fabric-workers=");
+	cf_dyn_buf_append_int(db, g_config.n_fabric_workers);
+
 	if (g_config.pidfile) {
 		cf_dyn_buf_append_string(db, ";pidfile=");
 		cf_dyn_buf_append_string(db, g_config.pidfile);
