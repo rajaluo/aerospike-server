@@ -45,6 +45,7 @@ const xdr_cfg_opt XDR_NS_OPTS[] = {
 		{ "default-ttl",					XDR_CASE_NS_DEFAULT_TTL },
 		{ "max-ttl",						XDR_CASE_NS_MAX_TTL },
 		{ "storage-engine",					XDR_CASE_NS_STORAGE_ENGINE_BEGIN },
+		{ "set",							XDR_CASE_NS_SET_BEGIN },
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -54,6 +55,11 @@ const xdr_cfg_opt XDR_NS_STORAGE_OPTS[] = {
 		{ "device",							XDR_CASE_NS_STORAGE_DEVICE },
 		{ "kv",								XDR_CASE_NS_STORAGE_KV },
 		{ "}",								XDR_CASE_CONTEXT_END }
+};
+
+const xdr_cfg_opt XDR_NS_SET_OPTS[] = {
+		{ "}",								XDR_CASE_CONTEXT_END }	// only thing that is of interest for
+																	// XDR to skip over the set subsection
 };
 
 const xdr_cfg_opt XDR_OPTS[] = {
@@ -110,6 +116,7 @@ const int NUM_XDR_GLOBAL_OPTS		= sizeof(XDR_GLOBAL_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_SERVICE_OPTS		= sizeof(XDR_SERVICE_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_NS_OPTS			= sizeof(XDR_NS_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_NS_STORAGE_OPTS	= sizeof(XDR_NS_STORAGE_OPTS) / sizeof(xdr_cfg_opt);
+const int NUM_XDR_NS_SET_OPTS		= sizeof(XDR_NS_SET_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_OPTS				= sizeof(XDR_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_DC_OPTS			= sizeof(XDR_DC_OPTS) / sizeof(xdr_cfg_opt);
 
