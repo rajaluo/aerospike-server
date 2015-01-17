@@ -41,11 +41,18 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 
 The Lua 5.1 language is required for User Defined Function (UDF) support.
 
-* The CentOS 6 Lua packages to install are:  `lua`, `lua-devel`, and
+* By default, Aerospike builds with Lua 5.1 support provided by the LuaJIT submodule.
+
+* Alternatively, it is possible to build with standard Lua 5.1 provided
+by the build environment.  In that case:
+
+	* The CentOS 6 Lua packages to install are:  `lua`, `lua-devel`, and
 `lua-static`.
 
-* The Debian 6/7 and Ubuntu 10/12/14 Lua packages to install are:
+	* The Debian 6/7 and Ubuntu 10/12/14 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
+
+	* Build by passing the `USE_LUAJIT=0` option to `make`.
 
 ### Submodules
 
