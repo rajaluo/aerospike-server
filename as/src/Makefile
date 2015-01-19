@@ -48,18 +48,24 @@ SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCE
 
 SERVER = $(BIN_DIR)/asd
 
-INCLUDES += $(INCLUDE_DIR:%=-I%) -I$(XDR_INCLUDE_DIR) -I$(KV_INCLUDE_DIR)
-INCLUDES += -I/usr/local/include
+INCLUDES += $(INCLUDE_DIR:%=-I%) -I$(XDR_INCLUDE_DIR)
+ifeq ($(USE_KV),1)
+  INCLUDES += -I$(KV_INCLUDE_DIR)
+endif
 INCLUDES += -I$(CF)/include
 INCLUDES += -I$(AI)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
 
-INCLUDE_LUA_5_1 = /usr/include/lua5.1
-ifneq ($(wildcard $(INCLUDE_LUA_5_1)),)
-  INCLUDES += -I$(INCLUDE_LUA_5_1)
-  LUA_SUFFIX = 5.1
+ifeq ($(USE_LUAJIT),1)
+  INCLUDES += -I$(LUAJIT)/src
+else
+  INCLUDE_LUA_5_1 = /usr/include/lua5.1
+  ifneq ($(wildcard $(INCLUDE_LUA_5_1)),)
+    INCLUDES += -I$(INCLUDE_LUA_5_1)
+    LUA_SUFFIX = 5.1
+  endif
 endif
 
 AS_LIBRARIES += $(LIBRARY_DIR)/libcf.a
