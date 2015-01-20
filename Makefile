@@ -57,7 +57,7 @@ ifeq ($(USE_JEM),1)
 	$(MAKE) -C $(JEMALLOC)
 endif
 ifeq ($(USE_LUAJIT),1)
-	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so
+	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so CCDEBUG=-g
 endif
 	$(MAKE) -C $(JANSSON)
 	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)"
