@@ -107,6 +107,30 @@ query_record_bin_names(const as_rec * rec, as_rec_bin_names_callback callback, v
 	return as_rec_bin_names(urec, callback, context);
 }
 
+static as_bytes *
+query_record_digest(const as_rec * rec)
+{
+	query_record * qrecord = (query_record *) rec->data;
+	as_rec       * urec    = qrecord->urec;
+	return as_rec_digest(urec);
+}
+
+static as_val *
+query_record_key(const as_rec * rec)
+{
+	query_record * qrecord = (query_record *) rec->data;
+	as_rec       * urec    = qrecord->urec;
+	return as_rec_key(urec);
+}
+
+static const char *
+query_record_setname(const as_rec * rec)
+{
+	query_record * qrecord = (query_record *) rec->data;
+	as_rec       * urec    = qrecord->urec;
+	return as_rec_setname(urec);
+}
+
 // Not write operation allowed on the query_record
 const as_rec_hooks query_record_hooks = {
 	.get        = query_record_get,
@@ -115,7 +139,10 @@ const as_rec_hooks query_record_hooks = {
 	.ttl        = query_record_ttl,
 	.gen        = query_record_gen,
 	.bin_names  = query_record_bin_names,
-	.destroy    = NULL
+	.destroy    = NULL,
+	.digest     = query_record_digest,
+	.key        = query_record_key,
+	.setname    = query_record_setname
 };
 
 
@@ -387,6 +414,7 @@ as_aggr_istream_read(const as_stream *s)
 		AS_PARTITION_RESERVATION_INIT(tr->rsv);
 		tr->rsv.ns   = ns;
 		tr->keyd     = dt->digs[aggr_istream->dtoffset];
+		qrecord->urecord->keyd = tr->keyd;
 		cf_detail(AS_QUERY, "Open Record (%p,%d %"PRIu64", %"PRIu64")", aggr_istream->dt, aggr_istream->dtoffset);
 
 		if (0 != as_partition_reserve_qnode(ns, as_partition_getid(tr->keyd), &tr->rsv)) {
