@@ -440,7 +440,7 @@ write_op_perm(cl_msg *msgp)
 {
 	// Avoid processing if not enterprise build with security enabled.
 	if (! g_config.sec_cfg.security_enabled) {
-		return PRIV_NONE;
+		return PERM_NONE;
 	}
 
 	as_msg_field *f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
