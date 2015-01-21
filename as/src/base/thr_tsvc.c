@@ -438,6 +438,11 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 static as_sec_perm
 write_op_perm(cl_msg *msgp)
 {
+	// Avoid processing if not enterprise build with security enabled.
+	if (! g_config.sec_cfg.security_enabled) {
+		return PRIV_NONE;
+	}
+
 	as_msg_field *f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {

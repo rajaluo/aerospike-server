@@ -376,20 +376,26 @@ typedef struct ldt_op_props_s {
 const ldt_op_props LLIST_OP_PROPS[] = {
 		{ "add",			LDT_WRITE_OP },
 		{ "add_all",		LDT_WRITE_OP },
-		{ "destroy",		LDT_WRITE_OP },
+		{ "config",			LDT_READ_OP },
+		{ "destroy",		LDT_WRITE_OP },		
+		{ "exists",			LDT_READ_OP },
 		{ "filter",			LDT_READ_OP },
 		{ "find",			LDT_READ_OP },
 		{ "get_capacity",	LDT_READ_OP },
 		{ "ldt_exists",		LDT_READ_OP },
 		{ "range",			LDT_READ_OP },
 		{ "remove",			LDT_WRITE_OP },
+		{ "remove_all",		LDT_WRITE_OP },
+		{ "remove_range",	LDT_WRITE_OP },
 		{ "scan",			LDT_READ_OP },
 		{ "set_capacity",	LDT_WRITE_OP },
 		{ "size",			LDT_READ_OP },
-		{ "config",			LDT_READ_OP }
+		{ "update",			LDT_WRITE_OP },
+		{ "update_all",		LDT_WRITE_OP }
 };
 
 const ldt_op_props LMAP_OP_PROPS[] = {
+		{ "config",			LDT_READ_OP },
 		{ "destroy",		LDT_WRITE_OP },
 		{ "filter",			LDT_READ_OP },
 		{ "get",			LDT_READ_OP },
@@ -400,13 +406,13 @@ const ldt_op_props LMAP_OP_PROPS[] = {
 		{ "remove",			LDT_WRITE_OP },
 		{ "scan",			LDT_READ_OP },
 		{ "set_capacity",	LDT_WRITE_OP },
-		{ "size",			LDT_READ_OP },
-		{ "config",			LDT_READ_OP }
+		{ "size",			LDT_READ_OP }
 };
 
 const ldt_op_props LSET_OP_PROPS[] = {
 		{ "add",			LDT_WRITE_OP },
 		{ "add_all",		LDT_WRITE_OP },
+		{ "config",			LDT_READ_OP },
 		{ "destroy",		LDT_WRITE_OP },
 		{ "exists",			LDT_READ_OP },
 		{ "filter",			LDT_READ_OP },
@@ -416,11 +422,11 @@ const ldt_op_props LSET_OP_PROPS[] = {
 		{ "remove",			LDT_WRITE_OP },
 		{ "scan",			LDT_READ_OP },
 		{ "set_capacity",	LDT_WRITE_OP },
-		{ "size",			LDT_READ_OP },
-		{ "config",			LDT_READ_OP }
+		{ "size",			LDT_READ_OP }
 };
 
 const ldt_op_props LSTACK_OP_PROPS[] = {
+		{ "config",			LDT_READ_OP },
 		{ "destroy",		LDT_WRITE_OP },
 		{ "filter",			LDT_READ_OP },
 		{ "get_capacity",	LDT_READ_OP },
@@ -431,8 +437,7 @@ const ldt_op_props LSTACK_OP_PROPS[] = {
 		{ "push_all",		LDT_WRITE_OP },
 		{ "same",			LDT_READ_OP },
 		{ "set_capacity",	LDT_WRITE_OP },
-		{ "size",			LDT_READ_OP },
-		{ "config",			LDT_READ_OP }
+		{ "size",			LDT_READ_OP }
 };
 
 // Order MUST match LDT_UDF_PACKAGE_NAMES:
