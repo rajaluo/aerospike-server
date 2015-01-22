@@ -197,7 +197,7 @@ struct as_query_transaction_s {
 												// being touched.
 	uint32_t          n_digests;                // Digests picked by SIK
 												// including record read
-	uint64_t          net_io_bytes;
+	cf_atomic32       net_io_bytes;
 	uint64_t          read_success;
 	uint64_t          waiting_time_ns;          // Time spent waiting by query in query_queue
 	uint64_t          querying_ai_time_ns;      // Time spent by query to run lookup secondary index trees.
@@ -206,20 +206,27 @@ struct as_query_transaction_s {
 	// PRIORITY PARAMETERS
 	uint32_t          yield_count;              // Number of loops
 	cf_atomic32       qreq_in_flight;
+	cf_atomic32       outstanding_net_io;
+	cf_atomic32       push_seq_number;
+	cf_atomic32       pop_seq_number;
 	uint32_t          priority;
 
 	// INTERNAL
-	as_query_ioreq_cb   req_cb;                 // Call back for the io threads
+	as_query_ioreq_cb req_cb;                 // Call back for the io threads
 	uint32_t          buf_reserved;             // for memory tracking
 	cf_buf_builder  * bb_r;
 	pthread_mutex_t   buf_mutex;
 	cf_atomic_int	  udf_runtime_memory_used;  // Currently reserved
 												// udf runtime memory
+	struct ai_obj     bkey;
+	
+	// Following are single threaded access put it in single byte
 	bool              is_malloc;
 	bool			  inited;
-	struct ai_obj     bkey;
 	bool              short_running;
 	bool              track;
+	bool              has_send_fin;
+	bool              blocking;
 
 	// Record UDF Management
 	cf_atomic_int       uit_queued;    				// Throttling: max in flight scan
@@ -307,7 +314,6 @@ int                   as_query__process_request(as_query_request *qreqp);
 
 // Client Response Functions
 int                  as_query__add_fin(as_query_transaction *qtr);
-int                  as_query__send_response(as_query_transaction *qtr);
 int                  as_query__add_response(void *qtr,
 							as_index_ref *r_ref, as_storage_rd *rd);
 
@@ -315,6 +321,8 @@ int                  as_query__add_response(void *qtr,
 void                 as_query__transaction_done(as_query_transaction *qtr);
 int                  as_qtr__release(as_query_transaction *qtr, char *fname, int lineno);
 int                  as_qtr__reserve(as_query_transaction *qtr, char *fname, int lineno);
+int                  as_query__netio(as_query_transaction *qtr, bool final);
+int                  as_query__netio_wait(as_query_transaction *qtr);
 
 #define AS_QUERY_INCREMENT_ERR_COUNT(qtr)   \
 	if(qtr->job_type == AS_QUERY_AGG) {    \
@@ -614,6 +622,7 @@ as_query__bb_poolrequest()
 		cf_warning(AS_QUERY, "Failed to find response buffer in the pool%d", rv);
 		return NULL;
 	}
+    cf_buf_builder_reserve(&bb_r, 8, NULL);
 	return bb_r;
 };
 
@@ -724,27 +733,7 @@ as_query__transaction_done(as_query_transaction *qtr)
 		cf_warning(AS_QUERY, "QUEUED UDF not equal to zero when query transaction is done");
 	}
 
-	// Send out the final data back
-	if (qtr->fd_h) {
-		as_query__add_fin(qtr);
-		uint64_t time_ns        = 0;
-
-		if (g_config.query_enable_histogram) {
-			time_ns = cf_getns();
-		}
-
-		int brv = as_query__send_response(qtr);
-
-		QUERY_HIST_INSERT_DATA_POINT(query_net_io_hist, time_ns);
-
-		if (brv != AS_QUERY_OK) {
-			cf_detail( AS_QUERY,
-					"query request: Not sending the fin packet as the connection is closed");
-		}
-	} else {
-		cf_debug( AS_QUERY,
-				"query request: Not sending the fin packet as the connection is closed");
-	}
+	
 	as_query__update_stats(qtr);
 
 	// deleting it from the global hash.
@@ -769,7 +758,18 @@ as_query__transaction_done(as_query_transaction *qtr)
 	if (do_free) cf_rc_free(qtr);
 }
 
-
+int
+as_qtr__send_fin(as_query_transaction *qtr) {
+	// Send out the final data back
+	if (qtr->fd_h) {
+		as_query__add_fin(qtr);
+		as_query__netio(qtr, true);
+	} else {
+		cf_debug( AS_QUERY,
+				"query request: Not sending the fin packet as the connection is closed");
+	}
+	return AS_QUERY_OK;
+}
 /*
  * Function as_qtr__release
  *
@@ -784,11 +784,26 @@ int
 as_qtr__release(as_query_transaction *qtr, char *fname, int lineno)
 {
 	if (qtr) {
-		int val = cf_rc_release(qtr);
+		int val = cf_rc_count(qtr);
+		if (val > 1) {
+			cf_rc_release(qtr);
+		} else {
+			if (qtr->has_send_fin) {
+				cf_rc_release(qtr);
+				cf_detail(AS_QUERY, "Free qtr ref count is zero");
+				as_query__transaction_done(qtr);
+			} else {
+				qtr->has_send_fin = true;
+				as_qtr__send_fin(qtr);
+                // Above call should call this as_qtr__release again. Remove
+                // code below then 
+				//cf_rc_release(qtr);
+				//cf_detail(AS_QUERY, "Free qtr ref count is zero");
+			//	as_query__transaction_done(qtr);
+			}
+		}
 		cf_detail(AS_QUERY, "Released qtr [%s:%d] %p %d ", fname, lineno, qtr, val);
 		if (val == 0) {
-			cf_detail(AS_QUERY, "Free qtr ref count is zero");
-			as_query__transaction_done(qtr);
 		}
 	}
 	return AS_QUERY_OK;
@@ -848,25 +863,7 @@ as_query__add_val_response(void *void_qtr, const as_val *val, bool success)
 		return AS_QUERY_ERR;
 	}
 	if (msg_sz > (bb_r->alloc_sz - bb_r->used_sz)) {
-		uint64_t time_ns        = 0;
-
-		if (g_config.query_enable_histogram) {
-			time_ns = cf_getns();
-		}
-
-		int ret     = as_query__send_response(qtr);
-		if (ret != AS_QUERY_OK) {
-			pthread_mutex_unlock(&qtr->buf_mutex);
-			return ret;
-		}
-
-		QUERY_HIST_INSERT_DATA_POINT(query_net_io_hist, time_ns);
-
-		// if sent successfully mark the used_sz as 0, and reuse
-		// the buffer
-		bb_r->used_sz = 0;
-		qtr->buf_reserved = 0;
-		cf_detail(AS_QUERY, "Streamed Out");
+		as_query__netio(qtr, false);
 	}
 	qtr->buf_reserved += msg_sz;
 	ret = as_msg_make_val_response_bufbuilder(val, &qtr->bb_r, msg_sz, success);
@@ -916,25 +913,7 @@ as_query__add_response(void *void_qtr, as_index_ref *r_ref, as_storage_rd *rd)
 		return AS_QUERY_ERR;
 	}
 	if (msg_sz > (bb_r->alloc_sz - bb_r->used_sz)) {
-		uint64_t time_ns        = 0;
-
-		if (g_config.query_enable_histogram) {
-			time_ns = cf_getns();
-		}
-
-		int ret     = as_query__send_response(qtr);
-		if (ret != AS_QUERY_OK) {
-			pthread_mutex_unlock(&qtr->buf_mutex);
-			return ret;
-		}
-
-		QUERY_HIST_INSERT_DATA_POINT(query_net_io_hist, time_ns);
-
-		// if sent successfully mark the used_sz as 0, and reuse
-		// the buffer
-		bb_r->used_sz = 0;
-		qtr->buf_reserved = 0;
-		cf_detail(AS_QUERY, "Streamed Out");
+		as_query__netio(qtr, false);
 	}
 	qtr->buf_reserved += msg_sz;
 
@@ -961,6 +940,7 @@ as_query__add_result(char *res, as_query_transaction *qtr, bool success)
 int
 as_query__add_fin(as_query_transaction *qtr)
 {
+	cf_detail(AS_QUERY, "Adding fin %p", qtr);
 	uint8_t *b;
 	// in case of aborted query, the bb_r is already released
 	if (qtr->bb_r == NULL) {
@@ -987,60 +967,6 @@ as_query__add_fin(as_query_transaction *qtr)
 	return 0;
 }
 
-/*
- * Sends the actual proto response to the requesting client
- *
- * Returns -
- *		AS_QUERY_OK  - On success
- *		AS_QUERY_ERR - On failure
- */
-int
-as_query__send_response(as_query_transaction *qtr)
-{
-	if (!qtr)       return AS_QUERY_ERR;
-	if (!qtr->bb_r) return AS_QUERY_ERR;
-	uint8_t *buf  = qtr->bb_r->buf;
-	int      len  = qtr->bb_r->used_sz;
-	as_proto proto;
-	proto.version = PROTO_VERSION;
-	proto.type    = PROTO_TYPE_AS_MSG;
-	proto.sz      = len;
-	as_proto_swap(&proto);
-
-	if (qtr->fd_h == 0) return AS_QUERY_ERR;
-
-	int pos = 0, rv;
-	while (pos < 8) {
-		rv = send(qtr->fd_h->fd, ((uint8_t *) &proto) + pos, 8 - pos , MSG_NOSIGNAL | MSG_MORE);
-		if (rv <= 0) {
-			if (errno != EAGAIN) {
-				cf_debug( AS_QUERY, "query send response error returned %d errno %d fd %d", rv, errno, qtr->fd_h->fd);
-				as_query__release_fd(qtr);
-				return AS_QUERY_ERR;
-			}
-		}
-		else {
-			pos += rv;
-		}
-	};
-	pos = 0;
-	while (pos < len) {
-		rv = send(qtr->fd_h->fd, buf + pos, len - pos, MSG_NOSIGNAL );
-		if (rv <= 0) {
-			if (errno != EAGAIN) {
-				cf_debug( AS_QUERY, "query send response error returned %d errno %d fd %d", rv, errno, qtr->fd_h->fd);
-				as_query__release_fd(qtr);
-				return AS_QUERY_ERR;
-			}
-		}
-		else {
-			pos += rv;
-		}
-	}
-	qtr->net_io_bytes += ( len + 8 );
-	return AS_QUERY_OK;
-}
-
 #define as_query__check_timeout(qtr) \
 do {                                 \
 	if ((qtr)                        \
@@ -1053,6 +979,115 @@ do {                                 \
     } \
 } while(0);
 
+bool
+as_query_netio_start_cb(void *udata, int seq) 
+{
+	as_netio *io               = (as_netio *)udata;
+	as_query_transaction *qtr  = (as_query_transaction *)io->data;
+	if (seq <= cf_atomic32_get(qtr->pop_seq_number)) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+int
+as_query_netio_finish_cb(void *data, int retcode)
+{
+	as_netio *io               = (as_netio *)data;
+	as_query_transaction *qtr  = (as_query_transaction *)io->data;
+	if (qtr) {
+		// If send success make stat is updated
+		if (retcode == AS_NETIO_OK) {
+			cf_atomic32_incr(&qtr->pop_seq_number);
+			cf_detail(AS_QUERY, "Finished sequence number %p->%d", qtr, io->seq);
+			cf_atomic32_add(&qtr->net_io_bytes, io->bb_r->used_sz + 8);
+		}
+
+		// If timed out override the decision
+		as_query__check_timeout(qtr);
+		if (QTR_FAILED(qtr)) {
+			retcode = AS_NETIO_ERR;
+		}
+
+		// Release io guys reference.
+		if ((retcode == AS_NETIO_OK) || (retcode == AS_NETIO_ERR)) {
+			cf_atomic32_decr(&qtr->outstanding_net_io);
+			as_qtr__release(qtr, __FILE__, __LINE__);
+		} else {
+			// Carry forward the reference to next queuing
+		}
+	}
+    cf_detail(AS_QUERY, "Finished query with retCode %d", retcode);
+	return retcode;
+}
+
+#define MAX_OUTSTANDING_IO_REQ 2
+int
+as_query__netio_wait(as_query_transaction *qtr) {
+	if (cf_atomic32_get(qtr->outstanding_net_io) > MAX_OUTSTANDING_IO_REQ) {
+		as_query__check_timeout(qtr);
+		if (QTR_FAILED(qtr))  return AS_QUERY_ERR;
+	}
+	return AS_QUERY_OK;
+}
+
+
+/*
+ * Returns AS_NETIO_OK always 
+ */
+int 
+as_query__netio(as_query_transaction *qtr, bool final) 
+{
+	uint64_t time_ns        = 0;
+	if (g_config.query_enable_histogram) {
+		time_ns = cf_getns();
+	}
+
+	as_netio        io;
+
+	io.finish_cb = as_query_netio_finish_cb;
+	io.start_cb  = as_query_netio_start_cb;
+
+	// If it were final request called would come back with last ref
+	// count no need to refcount it 
+	if (!final) {
+		as_qtr__reserve(qtr, __FILE__, __LINE__);
+	}
+	io.data        = qtr;
+
+	io.bb_r        = qtr->bb_r;
+	qtr->bb_r      = NULL;
+
+	cf_rc_reserve(qtr->fd_h);
+	io.fd_h        = qtr->fd_h;
+
+	io.offset      = 0;
+
+	cf_atomic32_incr(&qtr->outstanding_net_io);
+	io.seq         = cf_atomic32_incr(&qtr->push_seq_number);
+	int ret = as_netio_send(&io, NULL, qtr->blocking);
+	if (final) {
+		// All cleanup would hvae been done
+		// qtr by the callback
+		// fd_h by qtr_done and netio_send
+		// bb_r by netio_send
+	}
+	else {
+		if (ret != AS_NETIO_CONTINUE) {
+			// Reuse if successful
+			qtr->bb_r    = io.bb_r;
+			qtr->bb_r->used_sz = 0;
+			qtr->buf_reserved = 0;
+			cf_buf_builder_reserve(&qtr->bb_r, 8, NULL);
+			cf_detail(AS_QUERY, "Streamed Out");
+			cf_rc_release(io.fd_h);
+		} else {
+			qtr->bb_r         = as_query__bb_poolrequest();
+		}
+	}
+	return ret;
+}
 
 void
 as_query__recl_cleanup(cf_ll *recl) {
@@ -1734,11 +1769,11 @@ as_query__generator(as_query_transaction *qtr)
 			goto Cleanup;
 		}
 
-		// If any query run from more than g_config.query_untracked_time
+		// If any query run from more than g_config.query_untracked_time_ns
 		// 		we are going to track it
 		// else no.
 		if (!qtr->track) {
-			if ((cf_getns() - qtr->start_time) > g_config.query_untracked_time) {
+			if ((cf_getns() - qtr->start_time) > g_config.query_untracked_time_ns) {
 				qtr->track = true;
 				int ret = as_query__put_qtr(qtr);
 				if (ret != 0 && ret != AS_QUERY_CONTINUE) {
@@ -1749,6 +1784,17 @@ as_query__generator(as_query_transaction *qtr)
 					qtr->track     = false;
 					goto Cleanup;
 				}
+			}
+		}
+		// Step 3: Client is slow requeue
+		if (as_query__netio_wait(qtr) != AS_QUERY_OK) {
+			if (as_query__queue(qtr) != 0) {
+				cf_warning(AS_QUERY, "Long running transaction Queueing Error... continue!!");
+				qtr->err = true;
+				goto Cleanup;
+			} else {
+				cf_detail(AS_QUERY, "Query Queued Into Long running thread pool");
+				return;
 			}
 		}
 
@@ -2391,6 +2437,11 @@ as_query(as_transaction *tr)
 	qtr->queued_time_ns      = 0;   
 	qtr->querying_ai_time_ns = 0;
 	qtr->waiting_time_ns     = 0;
+	qtr->has_send_fin        = false;
+	qtr->outstanding_net_io  = 0;
+	qtr->push_seq_number     = 0;
+	qtr->pop_seq_number      = 1;
+	qtr->blocking            = false;
 
 	if (as_aggr_call_init(&qtr->agg_call, tr, qtr, &as_query_aggr_caller_qintf,
 			&query_agg_istream_hooks, &query_agg_ostream_hooks, ns, false) == AS_QUERY_OK) {
@@ -2699,7 +2750,7 @@ as_query_gconfig_default(as_config *c)
 										// no reason for choosing 10
 	c->query_rec_count_bound     = UINT_MAX; // Unlimited
 	c->query_req_in_query_thread = 0;
-	c->query_untracked_time      = AS_QUERY_UNTRACKED_TIME;
+	c->query_untracked_time_ns   = AS_QUERY_UNTRACKED_TIME;
 
 	// Aggregation
 	c->udf_runtime_max_memory    = ULONG_MAX;
@@ -2809,3 +2860,5 @@ as_query_get_udf_call(void *ptr)
 	as_query_transaction *qtr = (as_query_transaction *)ptr;
 	return &qtr->call;
 }
+
+

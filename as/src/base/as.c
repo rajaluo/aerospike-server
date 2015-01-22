@@ -406,6 +406,7 @@ main(int argc, char **argv)
 
 	cf_info(AS_AS, "initializing services...");
 
+	as_netio_init();
 	as_tsvc_init();				// all transaction handling
 	as_hb_init();				// inter-node heartbeat
 	as_fabric_init();			// inter-node communications

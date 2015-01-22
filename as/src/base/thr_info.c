@@ -1935,6 +1935,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.n_proto_fd_max);
 	cf_dyn_buf_append_string(db, ";proto-fd-idle-ms=");
 	cf_dyn_buf_append_int(db, g_config.proto_fd_idle_ms);
+	cf_dyn_buf_append_string(db, ";proto-slow-netio-sleep-ms=");
+	cf_dyn_buf_append_int(db, g_config.proto_slow_netio_sleep_ms);
 	cf_dyn_buf_append_string(db, ";transaction-retry-ms=");
 	cf_dyn_buf_append_int(db, g_config.transaction_retry_ms);
 	cf_dyn_buf_append_string(db, ";transaction-max-ms=");
@@ -2081,7 +2083,7 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";query-threshold=");
 	cf_dyn_buf_append_uint64(db, g_config.query_threshold);
 	cf_dyn_buf_append_string(db, ";query-untracked-time=");
-	cf_dyn_buf_append_uint64(db, g_config.query_untracked_time/1000); // Show it in micro seconds
+	cf_dyn_buf_append_uint64(db, g_config.query_untracked_time_ns/1000); // Show it in micro seconds
 
 	return(0);
 }
@@ -2588,6 +2590,12 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of proto-fd-idle-ms from %d to %d ", g_config.proto_fd_idle_ms, val);
 			g_config.proto_fd_idle_ms = val;
 		}
+		else if (0 == as_info_parameter_get(params, "proto-slow-netio-sleep-ms", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val))
+				goto Error;
+			cf_info(AS_INFO, "Changing value of proto-slow-netio-sleep-ms from %d to %d ", g_config.proto_slow_netio_sleep_ms, val);
+			g_config.proto_slow_netio_sleep_ms = val;
+		}
 		else if (0 == as_info_parameter_get(params, "nsup-delete-sleep", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
@@ -2874,8 +2882,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of query-untracked-time from %"PRIu64" micro seconds to %"PRIu64" micro seconds", 
-						g_config.query_untracked_time/1000, val);
-			g_config.query_untracked_time = val * 1000;
+						g_config.query_untracked_time_ns/1000, val);
+			g_config.query_untracked_time_ns = val * 1000;
 		}
 		else if (0 == as_info_parameter_get(params, "query-rec-count-bound", context, &context_len)) {
 			uint64_t val = atoll(context);
