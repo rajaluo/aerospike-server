@@ -362,6 +362,11 @@ security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm
 		return false;
 	}
 
+	if (m) {
+		// TODO - what detail?
+		as_security_log_data_op(tr->proto_fd_h, ns_id, set_id, perm);
+	}
+
 	return true;
 }
 
