@@ -2197,7 +2197,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		srange->itype = *itype_fp->data;
 	}
 	else {
-		srange->itype = AS_SINDEX_ITYPE_DEFAULT;	
+		srange->itype = AS_SINDEX_ITYPE_DEFAULT;
 	}
 	for (int i = 0; i < numrange; i++) {
 		as_sindex_bin_data *start = &(srange->start);
@@ -4560,26 +4560,16 @@ as_sindex_add_mapkey_in_path(as_sindex_metadata * imd, char * path_str, int star
 
 	int path_length = imd->path_length;
 	char int_str[20];
-	if (path_str[start] == '\'' && path_str[end] == '\'') {
-		if(end - start <= 1) {
-			cf_warning(AS_SINDEX, "Null string as key of the map.");
-			return AS_SINDEX_ERR;
-		}
-		imd->path[path_length-1].value.key_str  = cf_strndup(path_str+start+1, (end-start-1));
+	strncpy(int_str, path_str+start, end-start+1);
+	int_str[end-start+1] = '\0';
+	char * str_part;
+	imd->path[path_length-1].value.key_int = strtol(int_str, &str_part, 10);
+	if (str_part == int_str || (*str_part != '\0')) {
+		imd->path[path_length-1].value.key_str  = cf_strndup(int_str, strlen(int_str)+1);
 		imd->path[path_length-1].mapkey_type = AS_PARTICLE_TYPE_STRING;
 	}
 	else {
-		strncpy(int_str, path_str+start, end-start+1);
-		int_str[end-start+1] = '\0';
-		char * str_part;
-		imd->path[path_length-1].value.key_int = strtol(int_str, &str_part, 10);
-		if (str_part == int_str || (*str_part != '\0')) {
-			imd->path[path_length-1].value.key_str  = cf_strndup(int_str, strlen(int_str)+1);
-			imd->path[path_length-1].mapkey_type = AS_PARTICLE_TYPE_STRING;
-		}
-		else {	
-			imd->path[path_length-1].mapkey_type = AS_PARTICLE_TYPE_INTEGER;	
-		}
+		imd->path[path_length-1].mapkey_type = AS_PARTICLE_TYPE_INTEGER;	
 	}
 	return AS_SINDEX_OK;
 }

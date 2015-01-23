@@ -122,6 +122,8 @@ typedef enum {
 
 as_particle_type as_sindex_pktype_from_sktype(as_sindex_ktype t);
 
+
+// Do not change the order of this enum
 typedef enum {
 	AS_SINDEX_ITYPE_DEFAULT   = 0,
 	AS_SINDEX_ITYPE_LIST      = 1,

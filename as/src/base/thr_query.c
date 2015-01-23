@@ -915,7 +915,7 @@ as_query__add_response(void *void_qtr, as_index_ref *r_ref, as_storage_rd *rd)
 		pthread_mutex_unlock(&qtr->buf_mutex);
 		return AS_QUERY_ERR;
 	}
-	if (msg_sz > (bb_r->alloc_sz - bb_r->used_sz)) {
+	if (msg_sz > (bb_r->alloc_sz - bb_r->used_sz) && bb_r->used_sz != 0) {
 		uint64_t time_ns        = 0;
 
 		if (g_config.query_enable_histogram) {
@@ -1237,11 +1237,6 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 		return false;
 	}
 	uint8_t type = as_bin_get_particle_type(b);
-	if (type == AS_PARTICLE_TYPE_MAP || type == AS_PARTICLE_TYPE_LIST) {
-		// extract the val from bin 
-		//
-		return true;
-	}
 
 	// If the bin is of type cdt, we need to see if anyone of the value within cdt
 	// matches the query.
