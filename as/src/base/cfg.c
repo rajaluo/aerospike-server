@@ -2884,6 +2884,7 @@ as_config_init(const char *config_file)
 				cfg_begin_context(&state, SECURITY_SYSLOG);
 				break;
 			case CASE_CONTEXT_END:
+				as_security_config_check();
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
