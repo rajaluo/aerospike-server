@@ -2328,6 +2328,8 @@ info_security_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.privilege_refresh_period);
 	cf_dyn_buf_append_string(db, ";report-authentication-sinks=");
 	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.authentication);
+	cf_dyn_buf_append_string(db, ";report-data-op-sinks=");
+	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.data_op);
 	cf_dyn_buf_append_string(db, ";report-sys-admin-sinks=");
 	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.sys_admin);
 	cf_dyn_buf_append_string(db, ";report-user-admin-sinks=");

@@ -80,7 +80,7 @@ as_security_log(const as_file_handle* fd_h, uint8_t result, as_sec_perm perm,
 // Security is an enterprise feature - here, do nothing.
 void
 as_security_log_data_op(const as_file_handle* fd_h, int32_t ns_id,
-		uint16_t set_id, as_sec_perm perm)
+		uint16_t set_id, as_sec_perm perm, const char* detail)
 {
 }
 

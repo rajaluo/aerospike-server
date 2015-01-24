@@ -333,6 +333,7 @@ security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm
 
 	int32_t ns_id = 0;
 	uint16_t set_id = INVALID_SET_ID;
+	char detail[2048];
 
 	if (m) {
 		if (! ns) {
@@ -346,13 +347,14 @@ security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm
 
 		ns_id = ns->id;
 		set_id = get_set_id(ns, m);
+
+		sprintf(detail, "{%s|%s}", ns->name, set_id == 0 ? "" : as_namespace_get_set_name(ns, set_id));
 	}
 
 	uint8_t result = as_security_check(tr->proto_fd_h, ns_id, set_id, perm);
 
 	if (result != AS_PROTO_RESULT_OK) {
-		// For now we don't log successful data operations.
-		as_security_log(tr->proto_fd_h, result, perm, NULL, NULL);
+		as_security_log(tr->proto_fd_h, result, perm, NULL, m ? detail : NULL);
 
 		as_msg_send_error(tr->proto_fd_h, (uint32_t)result);
 		tr->proto_fd_h = 0;
@@ -364,7 +366,7 @@ security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm
 
 	if (m) {
 		// TODO - what detail?
-		as_security_log_data_op(tr->proto_fd_h, ns_id, set_id, perm);
+		as_security_log_data_op(tr->proto_fd_h, ns_id, set_id, perm, detail);
 	}
 
 	return true;
