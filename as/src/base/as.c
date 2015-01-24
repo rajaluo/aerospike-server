@@ -390,7 +390,6 @@ main(int argc, char **argv)
 	// nodes or clients yet.)
 
 	as_smd_init();				// System Metadata first - others depend on it
-	as_security_init();			// security features
 	ai_init();					// before as_storage_init() populates indexes
 	as_sindex_thr_init();		// defrag secondary index (ok during population)
 
@@ -406,6 +405,7 @@ main(int argc, char **argv)
 
 	cf_info(AS_AS, "initializing services...");
 
+	as_security_init();			// security features
 	as_tsvc_init();				// all transaction handling
 	as_hb_init();				// inter-node heartbeat
 	as_fabric_init();			// inter-node communications
