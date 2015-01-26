@@ -305,7 +305,7 @@ get_ns(as_msg *m)
 
 
 static uint16_t
-get_set_id(as_namespace *ns, as_msg *m)
+get_set(as_namespace *ns, as_msg *m, char* msg_set_name)
 {
 	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
 
@@ -314,10 +314,19 @@ get_set_id(as_namespace *ns, as_msg *m)
 	}
 
 	size_t msg_set_name_len = as_msg_field_get_value_sz(f);
-	char msg_set_name[msg_set_name_len + 1];
+
+	if (msg_set_name_len >= AS_SET_NAME_MAX_SIZE) {
+		cf_warning(AS_TSVC, "security check - set name too long");
+		msg_set_name_len = AS_SET_NAME_MAX_SIZE - 1;
+	}
 
 	memcpy((void*)msg_set_name, (const void*)f->data, msg_set_name_len);
 	msg_set_name[msg_set_name_len] = 0;
+
+	// Note: we don't assign an ID if this is the first transaction in this set.
+	// We'll return 0, and the security check will only pass with namespace or
+	// global scoped permissions. (If a set-scoped permission was granted, it
+	// would have assigned this set's ID.)
 
 	return as_namespace_get_set_id(ns, msg_set_name);
 }
@@ -346,9 +355,13 @@ security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm
 		}
 
 		ns_id = ns->id;
-		set_id = get_set_id(ns, m);
 
-		sprintf(detail, "{%s|%s}", ns->name, set_id == 0 ? "" : as_namespace_get_set_name(ns, set_id));
+		char msg_set_name[AS_SET_NAME_MAX_SIZE];
+
+		*msg_set_name = 0;
+		set_id = get_set(ns, m, msg_set_name);
+
+		sprintf(detail, "{%s|%s}", ns->name, msg_set_name);
 	}
 
 	uint8_t result = as_security_check(tr->proto_fd_h, ns_id, set_id, perm);
