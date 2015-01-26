@@ -2015,6 +2015,11 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.prole_extra_ttl);
 	cf_dyn_buf_append_string(db, ";max-msgs-per-type=");
 	cf_dyn_buf_append_int(db, g_config.max_msgs_per_type);
+	cf_dyn_buf_append_string(db, ";service-threads=");
+	cf_dyn_buf_append_int(db, g_config.n_service_threads);
+	cf_dyn_buf_append_string(db, ";fabric-workers=");
+	cf_dyn_buf_append_int(db, g_config.n_fabric_workers);
+
 	if (g_config.pidfile) {
 		cf_dyn_buf_append_string(db, ";pidfile=");
 		cf_dyn_buf_append_string(db, g_config.pidfile);
@@ -2126,7 +2131,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		cf_dyn_buf_append_string(db, "ttl");
 	}
 	else {
-		cf_dyn_buf_append_string(db, ";undefined");
+		cf_dyn_buf_append_string(db, "undefined");
 	}
 
 	cf_dyn_buf_append_string(db, ";allow_versions=");
@@ -5536,6 +5541,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "evicted-objects",  ns->n_evicted_objects, db);
 	info_append_uint64("", "set-deleted-objects", ns->n_deleted_set_objects, db);
 	info_append_uint64("", "set-evicted-objects", ns->n_evicted_set_objects, db);
+	info_append_uint64("", "nsup-cycle-duration", (uint64_t)ns->nsup_cycle_duration, db);
+	info_append_uint64("", "nsup-cycle-sleep-pct", (uint64_t)ns->nsup_cycle_sleep_pct, db);
 
 	// total used memory =  data memory + primary index memory + secondary index memory
 	data_memory   = ns->n_bytes_memory;
@@ -5573,77 +5580,77 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	//
 	// print only if LDT is enabled
 	if (ns->ldt_enabled) {	
-		cf_dyn_buf_append_string(db, ";ldt_reads=");
+		cf_dyn_buf_append_string(db, ";ldt-reads=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_reqs));
-		cf_dyn_buf_append_string(db, ";ldt_read_success=");
+		cf_dyn_buf_append_string(db, ";ldt-read-success=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_success));
-		cf_dyn_buf_append_string(db, ";ldt_deletes=");
+		cf_dyn_buf_append_string(db, ";ldt-deletes=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_reqs));
-		cf_dyn_buf_append_string(db, ";ldt_delete_success=");
+		cf_dyn_buf_append_string(db, ";ldt-delete-success=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_success));
-		cf_dyn_buf_append_string(db, ";ldt_writes=");
+		cf_dyn_buf_append_string(db, ";ldt-writes=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_reqs));
-		cf_dyn_buf_append_string(db, ";ldt_write_success=");
+		cf_dyn_buf_append_string(db, ";ldt-write-success=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_success));
-		cf_dyn_buf_append_string(db, ";ldt_updates=");
+		cf_dyn_buf_append_string(db, ";ldt-updates=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_update_reqs));
 
-		cf_dyn_buf_append_string(db, ";ldt_gc_io=");
+		cf_dyn_buf_append_string(db, ";ldt-gc-io=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_io));
-		cf_dyn_buf_append_string(db, ";ldt_gc_cnt=");
+		cf_dyn_buf_append_string(db, ";ldt-gc-cnt=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_cnt));
-		cf_dyn_buf_append_string(db, ";ldt_randomizer_retry=");
+		cf_dyn_buf_append_string(db, ";ldt-randomizer-retry=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_randomizer_retry));
 
-		cf_dyn_buf_append_string(db, ";ldt_errors=");
+		cf_dyn_buf_append_string(db, ";ldt-errors=");
 		cf_dyn_buf_append_uint32(db, ns->lstats.ldt_errs);
 
-		cf_dyn_buf_append_string(db, ";ldt_err_toprec_notfound=");
+		cf_dyn_buf_append_string(db, ";ldt-err-toprec-notfound=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_not_found));
-		cf_dyn_buf_append_string(db, ";ldt_err_item_notfound=");
+		cf_dyn_buf_append_string(db, ";ldt-err-item-notfound=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_item_not_found));
 
-		cf_dyn_buf_append_string(db, ";ldt_err_internal=");
+		cf_dyn_buf_append_string(db, ";ldt-err-internal=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_internal));
-		cf_dyn_buf_append_string(db, ";ldt_err_unique_key_violation=");
+		cf_dyn_buf_append_string(db, ";ldt-err-unique-key-violation=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unique_key_violation));
 
-		cf_dyn_buf_append_string(db, ";ldt_err_insert_fail=");
+		cf_dyn_buf_append_string(db, ";ldt-err-insert-fail=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_insert_fail));
-		cf_dyn_buf_append_string(db, ";ldt_err_delete_fail=");
+		cf_dyn_buf_append_string(db, ";ldt-err-delete-fail=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_delete_fail));
-		cf_dyn_buf_append_string(db, ";ldt_err_search_fail=");
+		cf_dyn_buf_append_string(db, ";ldt-err-search-fail=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_search_fail));
-		cf_dyn_buf_append_string(db, ";ldt_err_version_mismatch=");
+		cf_dyn_buf_append_string(db, ";ldt-err-version-mismatch=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_version_mismatch));
 
 
-		cf_dyn_buf_append_string(db, ";ldt_err_capacity_exceeded=");
+		cf_dyn_buf_append_string(db, ";ldt-err-capacity-exceeded=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_capacity_exceeded));
-		cf_dyn_buf_append_string(db, ";ldt_err_param=");
+		cf_dyn_buf_append_string(db, ";ldt-err-param=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_param));
 
-		cf_dyn_buf_append_string(db, ";ldt_err_op_bintype_mismatch=");
+		cf_dyn_buf_append_string(db, ";ldt-err-op-bintype-mismatch=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_op_bintype_mismatch));
-		cf_dyn_buf_append_string(db, ";ldt_err_too_many_open_subrec=");
+		cf_dyn_buf_append_string(db, ";ldt-err-too-many-open-subrec=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_too_many_open_subrec));
 
-		cf_dyn_buf_append_string(db, ";ldt_err_subrec_not_found=");
+		cf_dyn_buf_append_string(db, ";ldt-err-subrec-not-found=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_not_found));
-		cf_dyn_buf_append_string(db, ";ldt_err_bin_does_not_exist=");
+		cf_dyn_buf_append_string(db, ";ldt-err-bin-does-not-exist=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_does_not_exist));
-		cf_dyn_buf_append_string(db, ";ldt_err_bin_exits=");
+		cf_dyn_buf_append_string(db, ";ldt-err-bin-exits=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_exits));
-		cf_dyn_buf_append_string(db, ";ldt_err_bin_damaged=");
+		cf_dyn_buf_append_string(db, ";ldt-err-bin-damaged=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_damaged));
 
-		cf_dyn_buf_append_string(db, ";ldt_err_toprec_internal=");
+		cf_dyn_buf_append_string(db, ";ldt-err-toprec-internal=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_internal));
-		cf_dyn_buf_append_string(db, ";ldt_err_subrec_internal=");
+		cf_dyn_buf_append_string(db, ";ldt-err-subrec-internal=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_internal));
-		cf_dyn_buf_append_string(db, ";ldt_err_transform_internal=");
+		cf_dyn_buf_append_string(db, ";ldt-err-transform-internal=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_transform_internal));
-		cf_dyn_buf_append_string(db, ";ldt_err_unknown=");
+		cf_dyn_buf_append_string(db, ";ldt-err-unknown=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unknown));
 	}
 

@@ -518,6 +518,11 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 				}
 				msg_sz += psz;
 			}
+
+			// Don't return an empty record.
+			if (list_bins == 0) {
+				return 0;
+			}
 		}
 		else {
 			msg_sz += sizeof(as_msg_op) * in_use_bins; // the bin headers

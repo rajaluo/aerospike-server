@@ -883,6 +883,11 @@ ldt_aerospike_set_context(const as_aerospike * as, const as_rec *rec, const uint
 		return 2;
 	}
 
+	udf_record *h_urecord = (udf_record *)as_rec_source(lrecord->h_urec);
+    if (h_urecord->tr->rsv.ns->ldt_enabled == false) {
+		return -1;
+	}
+	
 	cf_detail(AS_LDT, "ldt_aerospike_set_context from %d to %d", lrecord->udf_context, lrecord->udf_context | context);
 	lrecord->udf_context |= context;
 
