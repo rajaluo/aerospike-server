@@ -5544,6 +5544,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "evicted-objects",  ns->n_evicted_objects, db);
 	info_append_uint64("", "set-deleted-objects", ns->n_deleted_set_objects, db);
 	info_append_uint64("", "set-evicted-objects", ns->n_evicted_set_objects, db);
+	info_append_uint64("", "nsup-cycle-duration", (uint64_t)ns->nsup_cycle_duration, db);
+	info_append_uint64("", "nsup-cycle-sleep-pct", (uint64_t)ns->nsup_cycle_sleep_pct, db);
 
 	// total used memory =  data memory + primary index memory + secondary index memory
 	data_memory   = ns->n_bytes_memory;

@@ -1025,6 +1025,9 @@ struct as_namespace_s {
 	// Number of 0-void-time objects. TODO - should be atomic.
 	uint64_t non_expirable_objects;
 
+	uint32_t	nsup_cycle_duration; // seconds taken for most recent nsup cycle
+	uint32_t	nsup_cycle_sleep_pct; // fraction of most recent nsup cycle that was spent sleeping
+
 	// Pointer to bin name vmap in persistent memory.
 	cf_vmapx		*p_bin_name_vmap;
 
