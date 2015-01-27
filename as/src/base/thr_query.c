@@ -1157,7 +1157,7 @@ bool as_query_match_string_fromval(as_query_transaction * qtr, as_val *v)
 
 	char * str_val = as_string_get(as_string_fromval(v));
 	cf_digest str_digest;
-	cf_digest_compute(str_val, strlen(str_val) + 1, &str_digest);
+	cf_digest_compute(str_val, strlen(str_val), &str_digest);
 
 	if (memcmp(&str_digest, &start->digest, AS_DIGEST_KEY_SZ)) {
 		cf_detail(AS_QUERY, "as_query_record_validation: "
@@ -1301,6 +1301,7 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 				return false;
 			}
 			from_cdt = true;
+			break;
 		}
 		case AS_PARTICLE_TYPE_LIST : {
 			as_val * v = as_val_frombin(b);
@@ -1309,6 +1310,7 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 				return false;
 			}
 			from_cdt = true;
+			break;
 		}
 		default: {
 			break;
@@ -1340,7 +1342,7 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 				as_map * map = as_map_fromval(res_val);
 				return !as_map_foreach(map, as_query_match_mapkeys_foreach, qtr);
 			}
-			else if (qtr->si->imd->itype != AS_SINDEX_ITYPE_MAPVALUES){
+			else if (qtr->si->imd->itype == AS_SINDEX_ITYPE_MAPVALUES){
 				as_map * map = as_map_fromval(res_val);
 				return !as_map_foreach(map, as_query_match_mapvalues_foreach, qtr);
 			}
