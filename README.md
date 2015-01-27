@@ -10,7 +10,6 @@ Aerospike is a distributed, scalable NoSQL database. It is architected with thre
 
 For more information on Aerospike, please visit: [http://aerospike.com](http://aerospike.com)
 
-
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
@@ -39,9 +38,11 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 
 #### Lua 5.1
 
-The Lua 5.1 language is required for User Defined Function (UDF) support.
+The [Lua](http://www.lua.org) 5.1 language is required for User Defined
+Function (UDF) support.
 
-* By default, Aerospike builds with Lua 5.1 support provided by the LuaJIT submodule.
+* By default, Aerospike builds with Lua 5.1 support provided by the
+[LuaJIT](http://luajit.org) submodule.
 
 * Alternatively, it is possible to build with standard Lua 5.1 provided
 by the build environment.  In that case:
@@ -65,7 +66,7 @@ The Aerospike Database Server build depends upon 7 submodules:
 | jansson   | C library for encoding, decoding and manipulating JSON data |
 | jemalloc  | The JEMalloc Memory Allocator |
 | lua-core  | The Aerospike Core Lua Source Files |
-| luajit    | The LuaJIT (Just-In-Time-Compiler for Lua) |
+| luajit    | The LuaJIT (Just-In-Time Compiler for Lua) |
 | mod-lua   | The Aerospike Lua Interface |
 
 After the initial cloning of the `aerospike-server` repo., the
