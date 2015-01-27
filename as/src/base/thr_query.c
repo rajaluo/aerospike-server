@@ -622,7 +622,6 @@ as_query__bb_poolrequest()
 		cf_warning(AS_QUERY, "Failed to find response buffer in the pool%d", rv);
 		return NULL;
 	}
-    cf_buf_builder_reserve(&bb_r, 8, NULL);
 	return bb_r;
 };
 
@@ -795,11 +794,7 @@ as_qtr__release(as_query_transaction *qtr, char *fname, int lineno)
 			} else {
 				qtr->has_send_fin = true;
 				as_qtr__send_fin(qtr);
-                // Above call should call this as_qtr__release again. Remove
-                // code below then 
-				//cf_rc_release(qtr);
-				//cf_detail(AS_QUERY, "Free qtr ref count is zero");
-			//	as_query__transaction_done(qtr);
+                // Above call should call this as_qtr__release again. 
 			}
 		}
 		cf_detail(AS_QUERY, "Released qtr [%s:%d] %p %d ", fname, lineno, qtr, val);
@@ -1067,24 +1062,24 @@ as_query__netio(as_query_transaction *qtr, bool final)
 	cf_atomic32_incr(&qtr->outstanding_net_io);
 	io.seq         = cf_atomic32_incr(&qtr->push_seq_number);
 	int ret = as_netio_send(&io, NULL, qtr->blocking);
-	if (final) {
-		// All cleanup would hvae been done
-		// qtr by the callback
-		// fd_h by qtr_done and netio_send
-		// bb_r by netio_send
-	}
-	else {
-		if (ret != AS_NETIO_CONTINUE) {
-			// Reuse if successful
-			qtr->bb_r    = io.bb_r;
-			qtr->bb_r->used_sz = 0;
-			qtr->buf_reserved = 0;
-			cf_buf_builder_reserve(&qtr->bb_r, 8, NULL);
-			cf_detail(AS_QUERY, "Streamed Out");
-			cf_rc_release(io.fd_h);
+	if (ret != AS_NETIO_CONTINUE) {
+		cf_detail(AS_QUERY, "Streamed Out");
+		if (final) {
+			// QTR IS INVALID IN case of final
+			as_query__bb_poolrelease(io.bb_r);
 		} else {
-			qtr->bb_r         = as_query__bb_poolrequest();
+			// Reuse if not final
+			qtr->bb_r          = io.bb_r;
+			qtr->bb_r->used_sz = 0;
+			qtr->buf_reserved  = 0;
+			cf_buf_builder_reserve(&qtr->bb_r, 8, NULL);
 		}
+		AS_RELEASE_FILE_HANDLE(io.fd_h);
+	} else {
+		// Create new buffer if current one is queue
+		// for IO thread
+		qtr->bb_r         = as_query__bb_poolrequest();
+   		cf_buf_builder_reserve(&qtr->bb_r, 8, NULL);
 	}
 	return ret;
 }
@@ -1748,6 +1743,7 @@ as_query__generator(as_query_transaction *qtr)
 		qtr->qctx.pimd_idx        = -1;
 		qtr->priority             = g_config.query_priority;
 		qtr->bb_r                 = as_query__bb_poolrequest();
+    	cf_buf_builder_reserve(&qtr->bb_r, 8, NULL);
 		qtr->loop                 = 0;
 
 		// Check if bufbuilder request was successful
