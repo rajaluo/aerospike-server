@@ -44,6 +44,7 @@
 #include "base/asm.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/json_init.h"
 #include "base/monitor.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
@@ -257,6 +258,9 @@ main(int argc, char **argv)
 
 	// Setup signal handlers.
 	as_signal_setup();
+
+	// Initialize the Jansson JSON API.
+	as_json_init();
 
 	int i;
 	int cmd_optidx;

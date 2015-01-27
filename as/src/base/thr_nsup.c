@@ -94,7 +94,7 @@ void_time_to_ttl(uint32_t void_time, uint32_t now)
 // for convenient comparison to run-time eviction.
 //
 
-#define NUM_EVICT_THREADS 16
+#define NUM_EVICT_THREADS 24
 #define EVAL_WRITE_STATE_FREQUENCY 1024
 
 
