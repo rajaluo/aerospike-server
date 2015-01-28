@@ -1149,3 +1149,21 @@ const as_rec_hooks udf_record_hooks = {
 	.bin_names	= udf_record_bin_names,
 	.numbins	= NULL,
 };
+
+const as_rec_hooks udf_subrecord_hooks = {
+	.get		= udf_record_get,
+	.set		= udf_record_set,
+	.remove		= udf_record_remove,
+	.ttl		= udf_record_ttl,
+	.gen		= udf_record_gen,
+	.key		= udf_record_key,
+	.setname	= udf_record_setname,
+	.destroy	= NULL,
+	.digest		= udf_record_digest,
+	.set_flags	= udf_record_set_flags,	// @LDT:: added for control over LDT Bins from Lua
+	.set_type	= udf_record_set_type,	// @LDT:: added for control over Rec Types from Lua
+	.set_ttl	= udf_record_set_ttl,
+	.drop_key	= udf_record_drop_key,
+	.bin_names	= udf_record_bin_names,
+	.numbins	= NULL,
+};

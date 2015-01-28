@@ -882,7 +882,12 @@ typedef struct ns_ldt_stats_s {
 
 	cf_atomic_int	ldt_err_subrec_internal;
 	cf_atomic_int	ldt_err_toprec_internal;
-	cf_atomic_int	ldt_err_transform_internal;
+	cf_atomic_int   ldt_err_filter;
+	cf_atomic_int	ldt_err_key;
+	cf_atomic_int	ldt_err_createspec;
+	cf_atomic_int	ldt_err_usermodule;
+	cf_atomic_int	ldt_err_input_too_large;
+	cf_atomic_int	ldt_err_ldt_not_enabled;
 
 	cf_atomic_int   ldt_gc_io;
 	cf_atomic_int   ldt_gc_cnt;
