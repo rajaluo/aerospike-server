@@ -66,9 +66,9 @@ register_signal_handler(int sig_num, sighandler_t handler)
 }
 
 static inline void
-reraise_signal(int sig_num, sighandler_t old_handler)
+reraise_signal(int sig_num, sighandler_t handler)
 {
-	if (signal(sig_num, SIG_DFL) != old_handler) {
+	if (signal(sig_num, SIG_DFL) != handler) {
 		cf_warning(AS_AS, "could not register default signal handler for %d",
 				sig_num);
 		_exit(-1);
