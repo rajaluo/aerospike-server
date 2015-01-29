@@ -3052,16 +3052,19 @@ write_local_failed(as_transaction* tr, as_index_ref* r_ref,
 		cf_atomic_int_incr(&g_config.err_write_fail_incompatible_type);
 		break;
 	case AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG:
-		cf_atomic_int_incr(&g_config.err_write_fail_parameter);
+		cf_atomic_int_incr(&g_config.err_write_fail_record_too_big);
 		break;
 	case AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND:
-		cf_atomic_int_incr(&g_config.err_write_fail_not_found);
+		cf_atomic_int_incr(&g_config.err_write_fail_bin_not_found);
 		break;
 	case AS_PROTO_RESULT_FAIL_KEY_MISMATCH:
 		cf_atomic_int_incr(&g_config.err_write_fail_key_mismatch);
 		break;
 	case AS_PROTO_RESULT_FAIL_BIN_NAME:
-		cf_atomic_int_incr(&g_config.err_write_fail_parameter);
+		cf_atomic_int_incr(&g_config.err_write_fail_bin_name);
+		break;
+	case AS_PROTO_RESULT_FAIL_FORBIDDEN:
+		cf_atomic_int_incr(&g_config.err_write_fail_forbidden);
 		break;
 	case AS_PROTO_RESULT_FAIL_UNKNOWN:
 	default:
@@ -3608,8 +3611,8 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 			return -1;
 		}
 		else if (rv_set == AS_NAMESPACE_SET_THRESHOLD_EXCEEDED) {
-			cf_debug(AS_RW, "write_local: set threshold exceeded");
-			write_local_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE);
+			cf_debug(AS_RW, "write_local: set threshold exceeded or clearing set");
+			write_local_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_FORBIDDEN);
 			return -1;
 		}
 	}

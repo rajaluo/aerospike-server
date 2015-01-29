@@ -706,6 +706,14 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_not_found);
 	cf_dyn_buf_append_string(db, ";err_write_fail_key_mismatch=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_key_mismatch);
+	cf_dyn_buf_append_string(db, ";err_write_fail_record_too_big=");
+	APPEND_STAT_COUNTER(db, g_config.err_write_fail_record_too_big);
+	cf_dyn_buf_append_string(db, ";err_write_fail_bin_name=");
+	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_name);
+	cf_dyn_buf_append_string(db, ";err_write_fail_bin_not_found=");
+	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_not_found);
+	cf_dyn_buf_append_string(db, ";err_write_fail_forbidden=");
+	APPEND_STAT_COUNTER(db, g_config.err_write_fail_forbidden);
 	cf_dyn_buf_append_string(db, ";stat_duplicate_operation=");
 	APPEND_STAT_COUNTER(db, g_config.stat_duplicate_operation);
 	cf_dyn_buf_append_string(db, ";uptime=");
