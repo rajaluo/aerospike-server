@@ -815,10 +815,13 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 			linear_histogram_get_info(ns->evict_hist, db);
 			cf_dyn_buf_append_char(db, ';');
 		} else if (strcmp(hist_name, "objsz") == 0) {
-			cf_dyn_buf_append_string(db, "objsz=");
-			linear_histogram_get_info(ns->obj_size_hist, db);
-			cf_dyn_buf_append_char(db, ';');
-
+			if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+				cf_dyn_buf_append_string(db, "objsz=");
+				linear_histogram_get_info(ns->obj_size_hist, db);
+				cf_dyn_buf_append_char(db, ';');
+			} else {
+				cf_dyn_buf_append_string(db, "hist-not-applicable");
+			}
 		} else {
 			cf_dyn_buf_append_string(db, "error-unknown-hist-name");
 		}
