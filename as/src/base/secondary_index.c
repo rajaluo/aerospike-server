@@ -38,6 +38,52 @@
  *
  */
 
+/* Code flow --
+ *
+ * DDLs
+ *
+ * as_sindex_create --> ai_btree_create
+ *
+ * as_sindex_destroy --> Releases the si and change the state to AS_SINDEX_DESTROY
+ *
+ * BOOT INDEX 
+ * 
+ * as_sindex_boot_populateall --> If fast restart or data in memory and load at start up --> as_tscan_sindex_populateall
+ *
+ * SBIN creation
+ *
+ * as_sindex_sbins_from_rd  --> (For every bin in the record) as_sindex_sbins_from_bin
+ *
+ * as_sindex_sbins_from_bin -->  as_sindex_sbins_from_bin_buf
+ *
+ * as_sindex_sbins_from_buf --> as_sindex_sbins_from_bin_buf
+ *
+ * as_sindex_sbins_from_bin_buf --> (For every macthing sindex) --> as_sindex_sbin_from_sindex
+ * 
+ * as_sindex_sbin_from_sindex --> (If bin value macthes with sindex defn) --> as_sindex_add_asval_to_itype_sindex
+ *
+ * as_sindex_diff_sbins_from_buf --> ( For every macthing sindex) --> as_sindex_diff_sbins_from_sindex
+ *
+ * as_sindex_diff_sbins_from_sindex --> (If bin and buf matches with sindex defn) --> as_sindex_add_diff_asval_to_itype_sindex
+ *                                  |
+ *                                  --> Else --> as_sindex_add_asval_to_itype_sindex
+ *
+ * SBIN updates
+ * 
+ * as_sindex_update_by_sbin --> For every sbin --> as_sindex__op_by_sbin
+ *
+ * as_sindex__op_by_sbin --> If op == AS_SINDEX_OP_INSERT --> ai_btree_put
+ *                       |
+ *                       --> If op == AS_SINDEX_OP_DELETE --> ai_btree_delete
+ *
+ * DMLs using RECORD
+ *
+ * as_sindex_put_rd --> For each bin in the record --> as_sindex_sbin_from_sindex
+ *
+ * as_sindex_putall_rd --> For each sindex --> as_sindex_put_rd
+ *
+ */
+ 
 #include "aerospike/as_arraylist.h"
 #include "aerospike/as_arraylist_iterator.h"
 #include "aerospike/as_buffer.h"
