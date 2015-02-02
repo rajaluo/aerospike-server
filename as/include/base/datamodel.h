@@ -1025,6 +1025,9 @@ struct as_namespace_s {
 	// Number of 0-void-time objects. TODO - should be atomic.
 	uint64_t non_expirable_objects;
 
+	uint32_t	nsup_cycle_duration; // seconds taken for most recent nsup cycle
+	uint32_t	nsup_cycle_sleep_pct; // fraction of most recent nsup cycle that was spent sleeping
+
 	// Pointer to bin name vmap in persistent memory.
 	cf_vmapx		*p_bin_name_vmap;
 
@@ -1165,7 +1168,8 @@ extern void as_namespace_bless(as_namespace *ns);
 extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool check_threshold);
 extern as_set * as_namespace_init_set(as_namespace *ns, const char *set_name);
 extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);
-extern uint16_t    as_namespace_get_set_id(  as_namespace *ns, const char *set_name);
+extern uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name);
+extern uint16_t as_namespace_get_create_set_id(as_namespace *ns, const char *set_name);
 extern void as_namespace_get_set_info(as_namespace *ns, const char *set_name, cf_dyn_buf *db);
 extern void as_namespace_release_set_id(as_namespace *ns, uint16_t set_id);
 extern void as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns);

@@ -116,7 +116,7 @@ int as_info_set_dynamic(char *name, as_info_get_value_fn gv_fn, bool def);
 int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
 
 // For commands - you will be called with the parameters.
-int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_priv required_priv);
+int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
 // Acceptable timediffs in XDR lastship times.
 // (Print warning only if time went back by at least 5 minutes.)
@@ -194,7 +194,7 @@ typedef struct info_command_s {
 	struct info_command_s *next;
 	char *name;
 	as_info_command_fn 		command_fn;
-	as_sec_priv				required_priv; // required security privilege
+	as_sec_perm				required_perm; // required security permission
 } info_command;
 
 typedef struct info_tree_s {
@@ -704,6 +704,14 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_not_found);
 	cf_dyn_buf_append_string(db, ";err_write_fail_key_mismatch=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_key_mismatch);
+	cf_dyn_buf_append_string(db, ";err_write_fail_record_too_big=");
+	APPEND_STAT_COUNTER(db, g_config.err_write_fail_record_too_big);
+	cf_dyn_buf_append_string(db, ";err_write_fail_bin_name=");
+	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_name);
+	cf_dyn_buf_append_string(db, ";err_write_fail_bin_not_found=");
+	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_not_found);
+	cf_dyn_buf_append_string(db, ";err_write_fail_forbidden=");
+	APPEND_STAT_COUNTER(db, g_config.err_write_fail_forbidden);
 	cf_dyn_buf_append_string(db, ";stat_duplicate_operation=");
 	APPEND_STAT_COUNTER(db, g_config.stat_duplicate_operation);
 	cf_dyn_buf_append_string(db, ";uptime=");
@@ -2016,6 +2024,11 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.prole_extra_ttl);
 	cf_dyn_buf_append_string(db, ";max-msgs-per-type=");
 	cf_dyn_buf_append_int(db, g_config.max_msgs_per_type);
+	cf_dyn_buf_append_string(db, ";service-threads=");
+	cf_dyn_buf_append_int(db, g_config.n_service_threads);
+	cf_dyn_buf_append_string(db, ";fabric-workers=");
+	cf_dyn_buf_append_int(db, g_config.n_fabric_workers);
+
 	if (g_config.pidfile) {
 		cf_dyn_buf_append_string(db, ";pidfile=");
 		cf_dyn_buf_append_string(db, g_config.pidfile);
@@ -2127,7 +2140,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		cf_dyn_buf_append_string(db, "ttl");
 	}
 	else {
-		cf_dyn_buf_append_string(db, ";undefined");
+		cf_dyn_buf_append_string(db, "undefined");
 	}
 
 	cf_dyn_buf_append_string(db, ";allow_versions=");
@@ -2324,6 +2337,8 @@ info_security_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.privilege_refresh_period);
 	cf_dyn_buf_append_string(db, ";report-authentication-sinks=");
 	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.authentication);
+	cf_dyn_buf_append_string(db, ";report-data-op-sinks=");
+	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.data_op);
 	cf_dyn_buf_append_string(db, ";report-sys-admin-sinks=");
 	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.sys_admin);
 	cf_dyn_buf_append_string(db, ";report-user-admin-sinks=");
@@ -3917,7 +3932,7 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 
 // Error strings for security check results.
 static void
-append_sec_err_str(cf_dyn_buf *db, uint32_t result, as_sec_priv cmd_priv) {
+append_sec_err_str(cf_dyn_buf *db, uint32_t result, as_sec_perm cmd_perm) {
 	switch (result) {
 	case AS_SEC_ERR_NOT_AUTHENTICATED:
 		cf_dyn_buf_append_string(db, "ERROR:");
@@ -3925,11 +3940,11 @@ append_sec_err_str(cf_dyn_buf *db, uint32_t result, as_sec_priv cmd_priv) {
 		cf_dyn_buf_append_string(db, ":not authenticated");
 		return;
 	case AS_SEC_ERR_ROLE_VIOLATION:
-		switch (cmd_priv) {
-		case PRIV_INDEX_MANAGE:
+		switch (cmd_perm) {
+		case PERM_INDEX_MANAGE:
 			INFO_COMMAND_SINDEX_FAILCODE(result, "role violation");
 			return;
-		case PRIV_UDF_MANAGE:
+		case PERM_UDF_MANAGE:
 			cf_dyn_buf_append_string(db, "error=role_violation");
 			return;
 		default:
@@ -3961,11 +3976,11 @@ info_command	*command_head = 0;
 int
 info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 {
-	uint8_t auth_result = as_security_check(fd_h, PRIV_NONE);
+	uint8_t auth_result = as_security_check(fd_h, 0, 0, PERM_NONE);
 
 	if (auth_result != AS_PROTO_RESULT_OK) {
-		as_security_log(fd_h, auth_result, PRIV_NONE, "info-all request", NULL);
-		append_sec_err_str(db, auth_result, PRIV_NONE);
+		as_security_log(fd_h, auth_result, PERM_NONE, "info-all request", NULL);
+		append_sec_err_str(db, auth_result, PERM_NONE);
 		cf_dyn_buf_append_char(db, EOL);
 		return 0;
 	}
@@ -4003,12 +4018,12 @@ info_all(const as_file_handle* fd_h, cf_dyn_buf *db)
 int
 info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 {
-	uint8_t auth_result = as_security_check(fd_h, PRIV_NONE);
+	uint8_t auth_result = as_security_check(fd_h, 0, 0, PERM_NONE);
 
 	if (auth_result != AS_PROTO_RESULT_OK) {
 		// TODO - log null-terminated buf as detail?
-		as_security_log(fd_h, auth_result, PRIV_NONE, "info request", NULL);
-		append_sec_err_str(db, auth_result, PRIV_NONE);
+		as_security_log(fd_h, auth_result, PERM_NONE, "info request", NULL);
+		append_sec_err_str(db, auth_result, PERM_NONE);
 		cf_dyn_buf_append_char(db, EOL);
 		return 0;
 	}
@@ -4106,15 +4121,15 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 					cf_dyn_buf_append_string( db, param);
 					cf_dyn_buf_append_char( db, SEP );
 
-					uint8_t result = as_security_check(fd_h, cmd->required_priv);
+					uint8_t result = as_security_check(fd_h, 0, 0, cmd->required_perm);
 
-					as_security_log(fd_h, result, cmd->required_priv, name, param);
+					as_security_log(fd_h, result, cmd->required_perm, name, param);
 
 					if (result == AS_PROTO_RESULT_OK) {
 						cmd->command_fn(cmd->name, param, db);
 					}
 					else {
-						append_sec_err_str(db, result, cmd->required_priv);
+						append_sec_err_str(db, result, cmd->required_perm);
 					}
 
 					cf_dyn_buf_append_char( db, EOL );
@@ -4374,7 +4389,7 @@ Cleanup:
 // This function only does the registration!
 
 int
-as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_priv required_priv)
+as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm)
 {
 	int rv = -1;
 	pthread_mutex_lock(&g_info_lock);
@@ -4398,7 +4413,7 @@ as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_priv requi
 			goto Cleanup;
 		}
 		e->command_fn = command_fn;
-		e->required_priv = required_priv;
+		e->required_perm = required_perm;
 		e->next = command_head;
 		command_head = e;
 	}
@@ -5536,6 +5551,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "evicted-objects",  ns->n_evicted_objects, db);
 	info_append_uint64("", "set-deleted-objects", ns->n_deleted_set_objects, db);
 	info_append_uint64("", "set-evicted-objects", ns->n_evicted_set_objects, db);
+	info_append_uint64("", "nsup-cycle-duration", (uint64_t)ns->nsup_cycle_duration, db);
+	info_append_uint64("", "nsup-cycle-sleep-pct", (uint64_t)ns->nsup_cycle_sleep_pct, db);
 
 	// total used memory =  data memory + primary index memory + secondary index memory
 	data_memory   = ns->n_bytes_memory;
@@ -6952,74 +6969,75 @@ as_info_init()
 	as_info_set_tree("sets", info_get_tree_sets);           // Returns set statistics for all or a particular set.
 
 	// Define commands
-	as_info_set_command("alloc-info", info_command_alloc_info, PRIV_NONE);                    // Lookup a memory allocation by program location.
-	as_info_set_command("asm", info_command_asm, PRIV_SERVICE_CTRL);                          // Control the operation of the ASMalloc library.
-	as_info_set_command("config-get", info_command_config_get, PRIV_NONE);                    // Returns running config for specified context.
-	as_info_set_command("config-set", info_command_config_set, PRIV_SET_CONFIG);              // Set a configuration parameter at run time, configuration parameter must be dynamic.
-	as_info_set_command("dump-fabric", info_command_dump_fabric, PRIV_LOGGING_CTRL);          // Print debug information about fabric to the log file.
-	as_info_set_command("dump-hb", info_command_dump_hb, PRIV_LOGGING_CTRL);                  // Print debug information about heartbeat state to the log file.
-	as_info_set_command("dump-migrates", info_command_dump_migrates, PRIV_LOGGING_CTRL);      // Print debug information about migration.
-	as_info_set_command("dump-msgs", info_command_dump_msgs, PRIV_LOGGING_CTRL);              // Print debug information about existing 'msg' objects and queues to the log file.
-	as_info_set_command("dump-paxos", info_command_dump_paxos, PRIV_LOGGING_CTRL);            // Print debug information about Paxos state to the log file.
-	as_info_set_command("dump-ra", info_command_dump_ra, PRIV_LOGGING_CTRL);                  // Print debug information about Rack Aware state.
-	as_info_set_command("dump-smd", info_command_dump_smd, PRIV_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.
-	as_info_set_command("dump-wb", info_command_dump_wb, PRIV_LOGGING_CTRL);                  // Print debug information about Write Bocks (WB) to the log file.
-	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PRIV_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
-	as_info_set_command("dump-wr", info_command_dump_wr, PRIV_LOGGING_CTRL);                  // Print debug information about transaction hash table to the log file.
-	as_info_set_command("dun", info_command_dun, PRIV_SERVICE_CTRL);                          // Instruct this server to ignore another node.
-	as_info_set_command("get-config", info_command_config_get, PRIV_NONE);                    // Returns running config for all or a particular context.
-	as_info_set_command("get-sl", info_command_get_sl, PRIV_NONE);                            // Get the Paxos succession list.
-	as_info_set_command("hist-dump", info_command_hist_dump, PRIV_NONE);                      // Returns a histogram snapshot for a particular histogram.
-	as_info_set_command("hist-track-start", info_command_hist_track, PRIV_SERVICE_CTRL);      // Start or Restart histogram tracking.
-	as_info_set_command("hist-track-stop", info_command_hist_track, PRIV_SERVICE_CTRL);       // Stop histogram tracking.
-	as_info_set_command("jem-stats", info_command_jem_stats, PRIV_LOGGING_CTRL);              // Print JEMalloc statistics to the log file.
-	as_info_set_command("latency", info_command_hist_track, PRIV_NONE);                       // Returns latency and throughput information.
-	as_info_set_command("log-set", info_command_log_set, PRIV_LOGGING_CTRL);                  // Set values in the log system.
-	as_info_set_command("mem", info_command_mem, PRIV_NONE);                                  // Report on memory usage.
-	as_info_set_command("mstats", info_command_mstats, PRIV_LOGGING_CTRL);                    // Dump GLibC-level memory stats.
-	as_info_set_command("mtrace", info_command_mtrace, PRIV_SERVICE_CTRL);                    // Control GLibC-level memory tracing.
-	as_info_set_command("set-config", info_command_config_set, PRIV_SET_CONFIG);              // Set config values.
-	as_info_set_command("set-log", info_command_log_set, PRIV_LOGGING_CTRL);                  // Set values in the log system.
-	as_info_set_command("set-sl", info_command_set_sl, PRIV_SERVICE_CTRL);                    // Set the Paxos succession list.
-	as_info_set_command("show-devices", info_command_show_devices, PRIV_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
-	as_info_set_command("smd", info_command_smd_cmd, PRIV_SERVICE_CTRL);                      // Manipulate the System Metadata.
-	as_info_set_command("snub", info_command_snub, PRIV_SERVICE_CTRL);                        // Ignore heartbeats from a node for a specified amount of time.
-	as_info_set_command("throughput", info_command_hist_track, PRIV_NONE);                    // Returns throughput info.
-	as_info_set_command("tip", info_command_tip, PRIV_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
-	as_info_set_command("tip-clear", info_command_tip_clear, PRIV_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
-	as_info_set_command("undun", info_command_undun, PRIV_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
-	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PRIV_NONE);      // Get the min XDR lastshipinfo.
-	as_info_set_command("xdr-command", as_info_command_xdr, PRIV_SERVICE_CTRL);		  // Command to XDR module.
+	as_info_set_command("alloc-info", info_command_alloc_info, PERM_NONE);                    // Lookup a memory allocation by program location.
+	as_info_set_command("asm", info_command_asm, PERM_SERVICE_CTRL);                          // Control the operation of the ASMalloc library.
+	as_info_set_command("config-get", info_command_config_get, PERM_NONE);                    // Returns running config for specified context.
+	as_info_set_command("config-set", info_command_config_set, PERM_SET_CONFIG);              // Set a configuration parameter at run time, configuration parameter must be dynamic.
+	as_info_set_command("dump-fabric", info_command_dump_fabric, PERM_LOGGING_CTRL);          // Print debug information about fabric to the log file.
+	as_info_set_command("dump-hb", info_command_dump_hb, PERM_LOGGING_CTRL);                  // Print debug information about heartbeat state to the log file.
+	as_info_set_command("dump-migrates", info_command_dump_migrates, PERM_LOGGING_CTRL);      // Print debug information about migration.
+	as_info_set_command("dump-msgs", info_command_dump_msgs, PERM_LOGGING_CTRL);              // Print debug information about existing 'msg' objects and queues to the log file.
+	as_info_set_command("dump-paxos", info_command_dump_paxos, PERM_LOGGING_CTRL);            // Print debug information about Paxos state to the log file.
+	as_info_set_command("dump-ra", info_command_dump_ra, PERM_LOGGING_CTRL);                  // Print debug information about Rack Aware state.
+	as_info_set_command("dump-smd", info_command_dump_smd, PERM_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.
+	as_info_set_command("dump-wb", info_command_dump_wb, PERM_LOGGING_CTRL);                  // Print debug information about Write Bocks (WB) to the log file.
+	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
+	as_info_set_command("dump-wr", info_command_dump_wr, PERM_LOGGING_CTRL);                  // Print debug information about transaction hash table to the log file.
+	as_info_set_command("dun", info_command_dun, PERM_SERVICE_CTRL);                          // Instruct this server to ignore another node.
+	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
+	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
+	as_info_set_command("hist-dump", info_command_hist_dump, PERM_NONE);                      // Returns a histogram snapshot for a particular histogram.
+	as_info_set_command("hist-track-start", info_command_hist_track, PERM_SERVICE_CTRL);      // Start or Restart histogram tracking.
+	as_info_set_command("hist-track-stop", info_command_hist_track, PERM_SERVICE_CTRL);       // Stop histogram tracking.
+	as_info_set_command("jem-stats", info_command_jem_stats, PERM_LOGGING_CTRL);              // Print JEMalloc statistics to the log file.
+	as_info_set_command("latency", info_command_hist_track, PERM_NONE);                       // Returns latency and throughput information.
+	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
+	as_info_set_command("mem", info_command_mem, PERM_NONE);                                  // Report on memory usage.
+	as_info_set_command("mstats", info_command_mstats, PERM_LOGGING_CTRL);                    // Dump GLibC-level memory stats.
+	as_info_set_command("mtrace", info_command_mtrace, PERM_SERVICE_CTRL);                    // Control GLibC-level memory tracing.
+	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
+	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
+	as_info_set_command("set-sl", info_command_set_sl, PERM_SERVICE_CTRL);                    // Set the Paxos succession list.
+	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
+	as_info_set_command("smd", info_command_smd_cmd, PERM_SERVICE_CTRL);                      // Manipulate the System Metadata.
+	as_info_set_command("snub", info_command_snub, PERM_SERVICE_CTRL);                        // Ignore heartbeats from a node for a specified amount of time.
+	as_info_set_command("throughput", info_command_hist_track, PERM_NONE);                    // Returns throughput info.
+	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
+	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
+	as_info_set_command("undun", info_command_undun, PERM_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
+	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PERM_NONE);      // Get the min XDR lastshipinfo.
+	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);		  // Command to XDR module.
+
 	// SINDEX
 	as_info_set_dynamic("sindex", info_get_sindexes, false);
 	as_info_set_tree("sindex", info_get_tree_sindexes);
-	as_info_set_command("sindex-create", info_command_sindex_create, PRIV_INDEX_MANAGE);  // Create a secondary index.
-	as_info_set_command("sindex-delete", info_command_sindex_delete, PRIV_INDEX_MANAGE);  // Delete a secondary index.
+	as_info_set_command("sindex-create", info_command_sindex_create, PERM_INDEX_MANAGE);  // Create a secondary index.
+	as_info_set_command("sindex-delete", info_command_sindex_delete, PERM_INDEX_MANAGE);  // Delete a secondary index.
 
 	// UDF
 	as_info_set_dynamic("udf-list", udf_cask_info_list, false);
-	as_info_set_command("udf-put", udf_cask_info_put, PRIV_UDF_MANAGE);
-	as_info_set_command("udf-get", udf_cask_info_get, PRIV_NONE);
-	as_info_set_command("udf-remove", udf_cask_info_remove, PRIV_UDF_MANAGE);
-	as_info_set_command("udf-clear-cache", udf_cask_info_clear_cache, PRIV_UDF_MANAGE);
+	as_info_set_command("udf-put", udf_cask_info_put, PERM_UDF_MANAGE);
+	as_info_set_command("udf-get", udf_cask_info_get, PERM_NONE);
+	as_info_set_command("udf-remove", udf_cask_info_remove, PERM_UDF_MANAGE);
+	as_info_set_command("udf-clear-cache", udf_cask_info_clear_cache, PERM_UDF_MANAGE);
 
 	// JOBS
-	as_info_set_command("jobs", info_command_mon_cmd, PRIV_SERVICE_CTRL);  // Manipulate the multi-key lookup monitoring infrastructure.
+	as_info_set_command("jobs", info_command_mon_cmd, PERM_SERVICE_CTRL);  // Manipulate the multi-key lookup monitoring infrastructure.
 
 	// Undocumented Secondary Index Command
-	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PRIV_SERVICE_CTRL);
-	as_info_set_command("sindex-repair", info_command_sindex_repair, PRIV_SERVICE_CTRL);
-	as_info_set_command("sindex-dump", info_command_sindex_dump, PRIV_SERVICE_CTRL);  // Dumps to a file, not log.
-	as_info_set_command("sindex-qnodemap", info_command_sindex_qnodemap, PRIV_NONE);
+	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
+	as_info_set_command("sindex-repair", info_command_sindex_repair, PERM_SERVICE_CTRL);
+	as_info_set_command("sindex-dump", info_command_sindex_dump, PERM_SERVICE_CTRL);  // Dumps to a file, not log.
+	as_info_set_command("sindex-qnodemap", info_command_sindex_qnodemap, PERM_NONE);
 
 	as_info_set_dynamic("query-list", as_query_list, false);
-	as_info_set_command("query-kill", info_command_query_kill, PRIV_SERVICE_CTRL);
+	as_info_set_command("query-kill", info_command_query_kill, PERM_SERVICE_CTRL);
 	as_info_set_dynamic("query-stat", as_query_stat, false);
-	as_info_set_command("scan-abort", info_command_abort_scan, PRIV_SERVICE_CTRL);  // Abort a tscan with a given id.
+	as_info_set_command("scan-abort", info_command_abort_scan, PERM_SERVICE_CTRL);  // Abort a tscan with a given id.
 	as_info_set_dynamic("scan-list", as_tscan_list, false);                         // List job ids of all scans.
-	as_info_set_command("sindex-describe", info_command_sindex_describe, PRIV_NONE);
-	as_info_set_command("sindex-stat", info_command_sindex_stat, PRIV_NONE);
-	as_info_set_command("sindex-list", info_command_sindex_list, PRIV_NONE);
+	as_info_set_command("sindex-describe", info_command_sindex_describe, PERM_NONE);
+	as_info_set_command("sindex-stat", info_command_sindex_stat, PERM_NONE);
+	as_info_set_command("sindex-list", info_command_sindex_list, PERM_NONE);
 
 	// Spin up the Info threads *after* all static and dynamic Info commands have been added
 	// so we can guarantee that the static and dynamic lists will never again be changed.

@@ -594,6 +594,10 @@ typedef struct as_config_s {
 	cf_atomic_int		err_write_fail_incompatible_type;
 	cf_atomic_int		err_write_fail_prole_delete;
 	cf_atomic_int		err_write_fail_key_mismatch;
+	cf_atomic_int		err_write_fail_record_too_big;
+	cf_atomic_int		err_write_fail_bin_name;
+	cf_atomic_int		err_write_fail_bin_not_found;
+	cf_atomic_int		err_write_fail_forbidden;
 
 	cf_atomic_int		stat_duplicate_operation;
 

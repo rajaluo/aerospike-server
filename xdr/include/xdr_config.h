@@ -68,6 +68,7 @@ typedef enum {
 	XDR_CASE_NS_DEFAULT_TTL,
 	XDR_CASE_NS_MAX_TTL,
 	XDR_CASE_NS_STORAGE_ENGINE_BEGIN,
+	XDR_CASE_NS_SET_BEGIN,
 
 	// Namespace storage options:
 	XDR_CASE_NS_STORAGE_MEMORY,
@@ -97,6 +98,7 @@ typedef enum {
 	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE,
 	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
 	XDR_CASE_XDR_FORWARD_WITH_GENCHECK,
+	XDR_CASE_XDR_CONFLICT_DIGESTDUMP,
 	XDR_CASE_XDR_HOTKEY_MAXSKIP,
 	XDR_CASE_XDR_SHIPPING_ENABLED,
 	XDR_CASE_XDR_PIDFILE,
@@ -130,6 +132,7 @@ extern const xdr_cfg_opt XDR_OPTS[];
 extern const xdr_cfg_opt XDR_DC_OPTS[];
 extern const xdr_cfg_opt XDR_NS_OPTS[];
 extern const xdr_cfg_opt XDR_NS_STORAGE_OPTS[];
+extern const xdr_cfg_opt XDR_NS_SET_OPTS[];
 
 /* The various xdr_cfg_opt array counts. The server (cfg.c) needs to see these.
  */
@@ -139,6 +142,7 @@ extern const int NUM_XDR_OPTS;
 extern const int NUM_XDR_DC_OPTS;
 extern const int NUM_XDR_NS_OPTS;
 extern const int NUM_XDR_NS_STORAGE_OPTS;
+extern const int NUM_XDR_NS_SET_OPTS;
 
 // Some static knobs shared between XDR and asd
 #define XDR_TIME_ADJUST	300000 // 5 min (ms) time value. Base macro for XDR(for LST adjustment in failure cases) and asd (as parameter for printing warrnings).
@@ -202,6 +206,8 @@ typedef struct xdr_config {
 	bool	xdr_nsup_deletes_enabled;
 	int 	xdr_hotkey_maxskip;
 	bool	xdr_fwd_with_gencheck;
+	char	*xdr_conflict_digestdump_filepath;
+	FILE	*xdr_conflict_digestdump_file;
 	bool	xdr_check_data_before_delete;
 	int		xdr_info_request_timeout_ms;
 	int     xdr_compression_threshold;

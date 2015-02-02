@@ -26,6 +26,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include "dynbuf.h"
 
 /* SYNOPSIS
@@ -215,20 +216,18 @@ extern void cf_fault_event_nostack(const cf_fault_context,
 
 #define MAX_BACKTRACE_DEPTH 50
 
-
 // This must literally be the direct clib "free()", because "strings" is
 // allocated by "backtrace_symbols()".
-#define PRNSTACK() \
+#define PRINT_STACK() \
 do { \
-	void *bt[MAX_BACKTRACE_DEPTH];                \
-	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH);  \
-	char **strings = backtrace_symbols(bt, sz);   \
-	for (int i = 0; i < sz; i++) {                \
-		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]);\
+	void *bt[MAX_BACKTRACE_DEPTH]; \
+	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH); \
+	char **strings = backtrace_symbols(bt, sz); \
+	for (int i = 0; i < sz; i++) { \
+		cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]); \
 	} \
 	free(strings); \
 } while (0);
-
 
 // The "regular" versions.
 // Note that we use the function name ONLY in crash(), debug() and detail(),
@@ -252,27 +251,27 @@ do { \
 // in either Hex format or Base64 format.
 #define cf_crash_binary(context, ptr, len, DT, __msg, ...) \
 	(cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __func__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__))
-#define cf_warning_binary(context, ptr, len, DT, __msg, ...)\
+#define cf_warning_binary(context, ptr, len, DT, __msg, ...) \
 	(cf_fault_event2((context), CF_WARNING, __FILENAME__, NULL, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__))
-#define cf_info_binary(context, ptr, len, DT, __msg, ...)\
+#define cf_info_binary(context, ptr, len, DT, __msg, ...) \
 	(cf_fault_event2((context), CF_INFO, __FILENAME__, NULL, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__))
 #define cf_debug_binary(context, ptr, len, DT, __msg, ...) \
 	(cf_fault_event2((context), CF_DEBUG, __FILENAME__, __func__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__))
-#define cf_detail_binary(context, ptr, len, DT, __msg, ...)\
+#define cf_detail_binary(context, ptr, len, DT, __msg, ...) \
 	(cf_fault_event2((context), CF_DETAIL, __FILENAME__, __func__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__))
 
 // This set of log calls specifically handles DIGEST values.
 // Note that we use the function name ONLY in crash(), debug() and detail(),
 // as this information is relevant mostly to the Aerospike software engineers.
-#define cf_crash_digest(context, ptr,__msg, ...)\
+#define cf_crash_digest(context, ptr,__msg, ...) \
 	(cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __func__,__LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__))
-#define cf_warning_digest(context, ptr, __msg, ...)\
+#define cf_warning_digest(context, ptr, __msg, ...) \
 	(cf_fault_event2((context), CF_WARNING, __FILENAME__, NULL,__LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__))
-#define cf_info_digest(context, ptr, __msg, ...)\
+#define cf_info_digest(context, ptr, __msg, ...) \
 	(cf_fault_event2((context), CF_INFO, __FILENAME__, NULL,__LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__))
 #define cf_debug_digest(context, ptr, __msg, ...) \
 	(cf_fault_event2((context), CF_DEBUG, __FILENAME__, __func__,__LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__))
-#define cf_detail_digest(context, ptr, __msg, ...)\
+#define cf_detail_digest(context, ptr, __msg, ...) \
 	(cf_fault_event2((context), CF_DETAIL, __FILENAME__, __func__,__LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__))
 
 

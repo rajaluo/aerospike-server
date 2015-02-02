@@ -44,6 +44,7 @@
 #include "base/asm.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/json_init.h"
 #include "base/monitor.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
@@ -256,6 +257,9 @@ main(int argc, char **argv)
 	// Setup signal handlers.
 	as_signal_setup();
 
+	// Initialize the Jansson JSON API.
+	as_json_init();
+
 	int i;
 	int cmd_optidx;
 	bool run_in_foreground = false;
@@ -382,7 +386,6 @@ main(int argc, char **argv)
 	// nodes or clients yet.)
 
 	as_smd_init();				// System Metadata first - others depend on it
-	as_security_init();			// security features
 	ai_init();					// before as_storage_init() populates indexes
 	as_sindex_thr_init();		// defrag secondary index (ok during population)
 
@@ -398,6 +401,7 @@ main(int argc, char **argv)
 
 	cf_info(AS_AS, "initializing services...");
 
+	as_security_init();			// security features
 	as_tsvc_init();				// all transaction handling
 	as_hb_init();				// inter-node heartbeat
 	as_fabric_init();			// inter-node communications
@@ -429,8 +433,8 @@ main(int argc, char **argv)
 	as_hb_start();				// start inter-node heatbeat
 	as_paxos_start();			// blocks until cluster membership is obtained
 	as_nsup_start();			// may send delete transactions to other nodes
-	as_demarshal_start();		// server will now receive client transactions
 	as_xdr_start();				// XDR may now start
+	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
 
 	info_debug_ticker_start();	// only after everything else is started

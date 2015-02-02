@@ -57,12 +57,12 @@ ifeq ($(USE_JEM),1)
 	$(MAKE) -C $(JEMALLOC)
 endif
 ifeq ($(USE_LUAJIT),1)
-	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so
+	$(MAKE) -C $(LUAJIT) Q= TARGET_SONAME=libluajit.so CCDEBUG=-g
 endif
 	$(MAKE) -C $(JANSSON)
 	$(MAKE) -C $(COMMON) CF=$(CF) EXT_CFLAGS="$(EXT_CFLAGS)"
 	$(MAKE) -C $(CF)
-	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) LUA_CORE=$(LUA_CORE) EXT_CFLAGS="$(EXT_CFLAGS)"
+	$(MAKE) -C $(MOD_LUA) CF=$(CF) COMMON=$(COMMON) LUA_CORE=$(LUA_CORE) EXT_CFLAGS="$(EXT_CFLAGS)" USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT)
 	$(MAKE) -C xdr
 	$(MAKE) -C ai
 	$(MAKE) -C as
@@ -111,7 +111,7 @@ cleanmodules:
 	if [ -e "$(LUAJIT)/Makefile" ]; then \
 		$(MAKE) -C $(LUAJIT) clean; \
 	fi
-	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) LUA_CORE=$(LUA_CORE) clean
+	$(MAKE) -C $(MOD_LUA) COMMON=$(COMMON) LUA_CORE=$(LUA_CORE) USE_LUAJIT=$(USE_LUAJIT) LUAJIT=$(LUAJIT) clean
 
 .PHONY: cleandist
 cleandist:
