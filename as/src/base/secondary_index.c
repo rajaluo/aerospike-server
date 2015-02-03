@@ -2906,7 +2906,12 @@ static bool as_sindex_list_to_hash(as_val * element, void * udata)
 		if (element->type == AS_STRING) {
 			char * str_val = as_string_get(as_string_fromval(element));
 			bool value     = true;
-			if (shash_put(h, str_val, &value) != SHASH_OK) {
+
+			// Compute the digest as a fix sized key of the hash.
+			cf_digest str_val_dig;
+			cf_digest_compute(str_val, strlen(str_val), &str_val_dig);
+			
+			if (shash_put(h, &str_val_dig, &value) != SHASH_OK) {
 				cf_debug(AS_SINDEX, "shash put failed");
 				return false;
 			}
@@ -2938,8 +2943,12 @@ static bool as_sindex_compare_list_hash(as_val * element, void * udata)
 		if (element->type == AS_STRING) {
 			char * str_val = as_string_get(as_string_fromval(element));
 			bool value;
-			if (shash_get(h, str_val, &value) != SHASH_OK) {
-				as_sindex_add_string_to_sbin(list_comp_add->sbin, str_val);
+			// Compute the digest as a fix sized key of the hash.
+			cf_digest str_val_dig;
+			cf_digest_compute(str_val, strlen(str_val), &str_val_dig);
+
+			if (shash_get(h, &str_val_dig, &value) != SHASH_OK) {
+				as_sindex_add_digest_to_sbin(list_comp_add->sbin, str_val_dig);
 			}
 		}
 	}
@@ -3052,7 +3061,11 @@ static bool as_sindex_mapkeys_to_hash(const as_val * key, const as_val * val, vo
 		if (key->type == AS_STRING) {
 			char * str_val = as_string_get(as_string_fromval(key));
 			bool value = true;
-			if (shash_put(h, str_val, &value) != SHASH_OK) {
+			// Compute the digest as a fix sized key of the hash.
+			cf_digest str_val_dig;
+			cf_digest_compute(str_val, strlen(str_val), &str_val_dig);
+			
+			if (shash_put(h, &str_val_dig, &value) != SHASH_OK) {
 				cf_debug(AS_SINDEX, "shash put failed");
 				return false;
 			}
@@ -3084,8 +3097,12 @@ static bool as_sindex_compare_mapkeys_hash(const as_val * key, const as_val * va
 		if (key->type == AS_STRING) {
 			char * str_val = as_string_get(as_string_fromval(key));
 			bool value;
-			if (shash_get(h, str_val, &value) != SHASH_OK) {
-				as_sindex_add_string_to_sbin(map_comp_add->sbin, str_val);
+			// Compute the digest as a fix sized key of the hash.
+			cf_digest str_val_dig;
+			cf_digest_compute(str_val, strlen(str_val), &str_val_dig);
+
+			if (shash_get(h, &str_val_dig, &value) != SHASH_OK) {
+				as_sindex_add_digest_to_sbin(map_comp_add->sbin, str_val_dig);
 			}
 		}
 	}
@@ -3201,7 +3218,11 @@ static bool as_sindex_mapvalues_to_hash(const as_val * key, const as_val * value
 		if (value->type == AS_STRING) {
 			char * str_val = as_string_get(as_string_fromval(value));
 			bool value = true;
-			if (shash_put(h, str_val, &value) != SHASH_OK) {
+			// Compute the digest as a fix sized key of the hash.
+			cf_digest str_val_dig;
+			cf_digest_compute(str_val, strlen(str_val), &str_val_dig);
+			
+			if (shash_put(h, &str_val_dig, &value) != SHASH_OK) {
 				cf_debug(AS_SINDEX, "shash put failed");
 				return false;
 			}
@@ -3233,8 +3254,12 @@ static bool as_sindex_compare_mapvalues_hash(const as_val * key, const as_val * 
 		if (value->type == AS_STRING) {
 			char * str_val = as_string_get(as_string_fromval(value));
 			bool value;
-			if (shash_get(h, str_val, &value) != SHASH_OK) {
-				as_sindex_add_string_to_sbin(map_comp_add->sbin, str_val);
+			// Compute the digest as a fix sized key of the hash.
+			cf_digest str_val_dig;
+			cf_digest_compute(str_val, strlen(str_val), &str_val_dig);
+
+			if (shash_get(h, &str_val_dig, &value) != SHASH_OK) {
+				as_sindex_add_digest_to_sbin(map_comp_add->sbin, str_val_dig);
 			}
 		}
 	}
