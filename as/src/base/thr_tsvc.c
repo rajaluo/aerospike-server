@@ -32,7 +32,6 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
-#include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
 #include "queue.h"
@@ -40,7 +39,6 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
-#include "base/ldt.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/thr_batch.h"
@@ -293,184 +291,12 @@ transaction_check_msg(as_transaction *tr)
 }
 
 
-static as_namespace*
-get_msg_ns(as_msg *m)
-{
-	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
-
-	if (! f || as_msg_field_get_value_sz(f) == 0) {
-		return NULL;
-	}
-
-	return as_namespace_get_bymsgfield(f);
-}
-
-
-static uint16_t
-get_msg_set(as_namespace *ns, as_msg *m, char* msg_set_name)
-{
-	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
-
-	if (! f || as_msg_field_get_value_sz(f) == 0) {
-		return INVALID_SET_ID;
-	}
-
-	size_t msg_set_name_len = as_msg_field_get_value_sz(f);
-
-	if (msg_set_name_len >= AS_SET_NAME_MAX_SIZE) {
-		cf_warning(AS_TSVC, "security check - set name too long");
-		msg_set_name_len = AS_SET_NAME_MAX_SIZE - 1;
-	}
-
-	memcpy((void*)msg_set_name, (const void*)f->data, msg_set_name_len);
-	msg_set_name[msg_set_name_len] = 0;
-
-	// Note: we don't assign an ID if this is the first transaction in this set.
-	// We'll return 0, and the security check will only pass with namespace or
-	// global scoped permissions. (If a set-scoped permission was granted, it
-	// would have assigned this set's ID.)
-
-	return as_namespace_get_set_id(ns, msg_set_name);
-}
-
-#define MAX_KEY_STR_LEN (64 - 1)
-
-static void
-to_hex_str(const uint8_t* from_bytes, uint32_t num_bytes, char* to_str)
-{
-	const uint8_t* p_end = from_bytes + num_bytes;
-
-	while (from_bytes < p_end) {
-		to_str += sprintf(to_str, "%02x", *from_bytes++);
-	}
-
-	*to_str = 0;
-}
-
-static bool
-get_msg_key_str(as_msg *m, char* key_str)
-{
-	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
-
-	if (! f) {
-		return false;
-	}
-
-	size_t flat_key_size = as_msg_field_get_value_sz(f);
-	uint8_t* flat_key = f->data;
-	uint8_t type = *flat_key;
-	uint8_t* key = flat_key + 1;
-
-	switch (type) {
-		case AS_PARTICLE_TYPE_INTEGER:
-			// Flat integer keys are in big-endian order.
-			sprintf(key_str, "I|%lu", (uint64_t)cf_swap_from_be64(*(uint64_t*)key));
-			return true;
-		case AS_PARTICLE_TYPE_STRING:
-		{
-			*key_str++ = 'S';
-			*key_str++ = '|';
-
-			uint32_t len = flat_key_size - 1;
-
-			if (len > MAX_KEY_STR_LEN - 2) {
-				len = MAX_KEY_STR_LEN - 2;
-			}
-
-			memcpy(key_str, key, len);
-			key_str[len] = 0;
-
-			return true;
-		}
-		case AS_PARTICLE_TYPE_BLOB:
-			*key_str++ = 'B';
-			break;
-		default:
-			*key_str++ = '?';
-			break;
-	}
-
-	*key_str++ = '|';
-
-	uint32_t key_size = flat_key_size - 1;
-
-	if (key_size > (MAX_KEY_STR_LEN - 2) / 2) {
-		key_size = (MAX_KEY_STR_LEN - 2) / 2;
-	}
-
-	to_hex_str(key, key_size, key_str);
-
-	return true;
-}
-
-
-static bool
-security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm)
-{
-	// Avoid processing if not enterprise build with security enabled.
-	if (! g_config.sec_cfg.security_enabled) {
-		return true;
-	}
-
-	int32_t ns_id = 0;
-	uint16_t set_id = INVALID_SET_ID;
-	char detail[2048];
-
-	if (m) {
-		if (! ns) {
-			ns = get_msg_ns(m);
-		}
-
-		if (! ns) {
-			// Don't let security be the first to bark at a bad namespace.
-			return true;
-		}
-
-		ns_id = ns->id;
-
-		char msg_set_name[AS_SET_NAME_MAX_SIZE];
-
-		*msg_set_name = 0;
-		set_id = get_msg_set(ns, m, msg_set_name);
-
-		char msg_key_str[MAX_KEY_STR_LEN];
-
-		if (! get_msg_key_str(m, msg_key_str)) {
-			msg_key_str[0] = 'D';
-			msg_key_str[1] = '|';
-			to_hex_str((const uint8_t*)&tr->keyd, sizeof(cf_digest), msg_key_str + 2);
-		}
-
-		sprintf(detail, "{%s|%s} {%s}", ns->name, msg_set_name, msg_key_str);
-	}
-
-	uint8_t result = as_security_check(tr->proto_fd_h, ns_id, set_id, perm);
-
-	if (result != AS_PROTO_RESULT_OK) {
-		as_security_log(tr->proto_fd_h, result, perm, NULL, m ? detail : NULL);
-
-		as_msg_send_error(tr->proto_fd_h, (uint32_t)result);
-		tr->proto_fd_h = 0;
-		MICROBENCHMARK_HIST_INSERT_P(error_hist);
-		// TODO - error statistics.
-
-		return false;
-	}
-
-	if (m) {
-		// TODO - what detail?
-		as_security_log_data_op(tr->proto_fd_h, ns_id, set_id, perm, detail);
-	}
-
-	return true;
-}
-
-
 static inline bool
 is_udf(cl_msg *msgp)
 {
 	return as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME) != NULL;
 }
+
 
 int
 as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
@@ -535,58 +361,6 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 	return 0;
 }
 
-static as_sec_perm
-write_op_perm(cl_msg *msgp)
-{
-	// Avoid processing if not enterprise build with security enabled.
-	if (! g_config.sec_cfg.security_enabled) {
-		return PERM_NONE;
-	}
-
-	as_msg_field *f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
-
-	if (! f || as_msg_field_get_value_sz(f) == 0) {
-		// It's not a UDF - so it must be a regular write.
-		return PERM_WRITE;
-	}
-
-	// It's a UDF apply of some sort.
-
-	size_t len = as_msg_field_get_value_sz(f);
-	char filename[len + 1];
-	memcpy((void*)filename, (const void*)f->data, len);
-	filename[len] = 0;
-
-	int package_index = as_ldt_package_index(filename);
-
-	if (package_index < 0) {
-		// It's not an internal LDT UDF - so it's a regular UDF.
-		return PERM_UDF_APPLY;
-	}
-
-	// It's an internal LDT UDF - determine whether it's a read or write.
-
-	f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
-
-	if (! f || as_msg_field_get_value_sz(f) == 0) {
-		cf_warning(AS_TSVC, "msg has udf filename %s but no function", filename);
-		return PERM_NONE; // a msg error - will fail further along
-	}
-
-	len = as_msg_field_get_value_sz(f);
-	char funcname[len + 1];
-	memcpy((void*)funcname, (const void*)f->data, len);
-	funcname[len] = 0;
-
-	int op_type = as_ldt_op_type(package_index, funcname);
-
-	if (op_type < 0) {
-		cf_warning(AS_TSVC, "%s not a recognized op in %s", funcname, filename);
-		return PERM_WRITE; // are ldt_op_props in ldt.c up to date?
-	}
-
-	return op_type == LDT_READ_OP ? PERM_READ : PERM_WRITE;
-}
 
 // Handle the transaction, including proxy to another node if necessary.
 void
@@ -641,8 +415,19 @@ process_transaction(as_transaction *tr)
 	}
 
 	// First, check that the socket is authenticated.
-	if (tr->proto_fd_h && ! security_check(tr, NULL, NULL, PERM_NONE)) {
-		goto Cleanup;
+	if (tr->proto_fd_h) {
+		uint8_t result = as_security_check(tr->proto_fd_h, PERM_NONE);
+
+		if (result != AS_PROTO_RESULT_OK) {
+			as_security_log(tr->proto_fd_h, result, PERM_NONE, NULL, NULL);
+
+			as_msg_send_error(tr->proto_fd_h, (uint32_t)result);
+			tr->proto_fd_h = 0;
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+			// TODO - error statistics.
+
+			goto Cleanup;
+		}
 	}
 
 	// If this key digest hasn't been computed yet, prepare the transaction -
@@ -666,7 +451,7 @@ process_transaction(as_transaction *tr)
 						AS_MSG_FIELD_TYPE_INDEX_RANGE) != NULL) {
 					cf_detail(AS_TSVC, "Received Query Request(%"PRIx64")", tr->trid);
 					cf_atomic64_incr(&g_config.query_reqs);
-					if (! security_check(tr, &msgp->msg, ns,
+					if (! as_security_check_data_op(tr, &msgp->msg, ns,
 							is_udf(msgp) ? PERM_UDF_QUERY : PERM_QUERY)) {
 						goto Cleanup;
 					}
@@ -684,7 +469,7 @@ process_transaction(as_transaction *tr)
 					// We got a scan, it might be for udfs, no need to know now,
 					// for now, do not free msgp for all the cases. Should take
 					// care of it inside as_tscan.
-					if (! security_check(tr, &msgp->msg, ns,
+					if (! as_security_check_data_op(tr, &msgp->msg, ns,
 							is_udf(msgp) ? PERM_UDF_SCAN : PERM_SCAN)) {
 						goto Cleanup;
 					}
@@ -712,7 +497,7 @@ process_transaction(as_transaction *tr)
 				}
 			} else if (rv == -3) {
 				// Has digest array, is batch - msgp gets freed through cleanup.
-				if (! security_check(tr, &msgp->msg, ns, PERM_READ)) {
+				if (! as_security_check_data_op(tr, &msgp->msg, ns, PERM_READ)) {
 					goto Cleanup;
 				}
 				if (0 != as_batch(tr)) {
@@ -825,7 +610,7 @@ process_transaction(as_transaction *tr)
 			if (tr->udata.req_udata) {
 				free_msgp = false;
 			}
-			else if (tr->proto_fd_h && ! security_check(tr, &msgp->msg, ns, write_op_perm(msgp))) {
+			else if (tr->proto_fd_h && ! as_security_check_data_op(tr, &msgp->msg, ns, PERM_WRITE)) {
 				goto Cleanup;
 			}
 
@@ -856,7 +641,7 @@ process_transaction(as_transaction *tr)
 		}
 		else {  // <><><> READ Transaction <><><>
 
-			if (tr->proto_fd_h && ! security_check(tr, &msgp->msg, ns, PERM_READ)) {
+			if (tr->proto_fd_h && ! as_security_check_data_op(tr, &msgp->msg, ns, PERM_READ)) {
 				goto Cleanup;
 			}
 
