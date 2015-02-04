@@ -185,9 +185,7 @@ as_msg_make_response_msg( uint32_t result_code, uint32_t generation, uint32_t vo
 			if (as_bin_is_hidden(bins[i])) {
 				psz = 0;
 			} else {
-				bool tojson = (as_bin_get_particle_type(bins[i]) ==
-							   AS_PARTICLE_TYPE_LUA_BLOB);
-				_as_particle_tobuf(bins[i], 0, &psz, tojson); // get size
+				_as_particle_tobuf(bins[i], 0, &psz, false); // get size
 			}
 			msg_sz += psz;
 		}
@@ -320,9 +318,7 @@ as_msg_make_response_msg( uint32_t result_code, uint32_t generation, uint32_t vo
 				op->particle_type = AS_PARTICLE_TYPE_NULL;
 				psz = 0; // packet of size NULL
 			} else {
-				bool tojson = (as_bin_get_particle_type(bins[i]) ==
-							   AS_PARTICLE_TYPE_LUA_BLOB);
-				if (0 != _as_particle_tobuf(bins[i], buf, &psz, tojson)) {
+				if (0 != _as_particle_tobuf(bins[i], buf, &psz, false)) {
 					cf_warning(AS_PROTO, "particle to buf: could not copy data!");
 				}
 			}
