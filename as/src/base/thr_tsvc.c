@@ -26,11 +26,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
 #include "queue.h"
@@ -292,7 +294,7 @@ transaction_check_msg(as_transaction *tr)
 
 
 static as_namespace*
-get_ns(as_msg *m)
+get_msg_ns(as_msg *m)
 {
 	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
 
@@ -305,7 +307,7 @@ get_ns(as_msg *m)
 
 
 static uint16_t
-get_set(as_namespace *ns, as_msg *m, char* msg_set_name)
+get_msg_set(as_namespace *ns, as_msg *m, char* msg_set_name)
 {
 	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
 
@@ -331,6 +333,76 @@ get_set(as_namespace *ns, as_msg *m, char* msg_set_name)
 	return as_namespace_get_set_id(ns, msg_set_name);
 }
 
+#define MAX_KEY_STR_LEN (64 - 1)
+
+static void
+to_hex_str(const uint8_t* from_bytes, uint32_t num_bytes, char* to_str)
+{
+	const uint8_t* p_end = from_bytes + num_bytes;
+
+	while (from_bytes < p_end) {
+		to_str += sprintf(to_str, "%02x", *from_bytes++);
+	}
+
+	*to_str = 0;
+}
+
+static bool
+get_msg_key_str(as_msg *m, char* key_str)
+{
+	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
+
+	if (! f) {
+		return false;
+	}
+
+	size_t flat_key_size = as_msg_field_get_value_sz(f);
+	uint8_t* flat_key = f->data;
+	uint8_t type = *flat_key;
+	uint8_t* key = flat_key + 1;
+
+	switch (type) {
+		case AS_PARTICLE_TYPE_INTEGER:
+			// Flat integer keys are in big-endian order.
+			sprintf(key_str, "I|%lu", (uint64_t)cf_swap_from_be64(*(uint64_t*)key));
+			return true;
+		case AS_PARTICLE_TYPE_STRING:
+		{
+			*key_str++ = 'S';
+			*key_str++ = '|';
+
+			uint32_t len = flat_key_size - 1;
+
+			if (len > MAX_KEY_STR_LEN - 2) {
+				len = MAX_KEY_STR_LEN - 2;
+			}
+
+			memcpy(key_str, key, len);
+			key_str[len] = 0;
+
+			return true;
+		}
+		case AS_PARTICLE_TYPE_BLOB:
+			*key_str++ = 'B';
+			break;
+		default:
+			*key_str++ = '?';
+			break;
+	}
+
+	*key_str++ = '|';
+
+	uint32_t key_size = flat_key_size - 1;
+
+	if (key_size > (MAX_KEY_STR_LEN - 2) / 2) {
+		key_size = (MAX_KEY_STR_LEN - 2) / 2;
+	}
+
+	to_hex_str(key, key_size, key_str);
+
+	return true;
+}
+
 
 static bool
 security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm)
@@ -346,7 +418,7 @@ security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm
 
 	if (m) {
 		if (! ns) {
-			ns = get_ns(m);
+			ns = get_msg_ns(m);
 		}
 
 		if (! ns) {
@@ -359,9 +431,17 @@ security_check(as_transaction *tr, as_msg *m, as_namespace *ns, as_sec_perm perm
 		char msg_set_name[AS_SET_NAME_MAX_SIZE];
 
 		*msg_set_name = 0;
-		set_id = get_set(ns, m, msg_set_name);
+		set_id = get_msg_set(ns, m, msg_set_name);
 
-		sprintf(detail, "{%s|%s}", ns->name, msg_set_name);
+		char msg_key_str[MAX_KEY_STR_LEN];
+
+		if (! get_msg_key_str(m, msg_key_str)) {
+			msg_key_str[0] = 'D';
+			msg_key_str[1] = '|';
+			to_hex_str((const uint8_t*)&tr->keyd, sizeof(cf_digest), msg_key_str + 2);
+		}
+
+		sprintf(detail, "{%s|%s} {%s}", ns->name, msg_set_name, msg_key_str);
 	}
 
 	uint8_t result = as_security_check(tr->proto_fd_h, ns_id, set_id, perm);
