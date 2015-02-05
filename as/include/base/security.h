@@ -42,10 +42,11 @@ typedef enum {
 	PERM_SCAN			= 0x0002,
 	PERM_QUERY			= 0x0004,
 	PERM_WRITE			= 0x0008,
-	PERM_UDF_APPLY		= 0x0010,
-	PERM_UDF_SCAN		= 0x0020,
-	PERM_UDF_QUERY		= 0x0040,
-	// ... 9 unused bits ...
+	PERM_DELETE			= 0x0010,
+	PERM_UDF_APPLY		= 0x0020,
+	PERM_UDF_SCAN		= 0x0040,
+	PERM_UDF_QUERY		= 0x0080,
+	// ... 8 unused bits ...
 
 	// Data transactions' system metadata management.
 	PERM_INDEX_MANAGE	= 0x00010000,
