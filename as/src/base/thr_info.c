@@ -2659,7 +2659,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			g_config.migrate_xmit_lwm = val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || (0 >= val))
+			if (0 != cf_str_atoi(context, &val) || (0 > val))
 				goto Error;
 			cf_info(AS_INFO, "Changing value of migrate-max-num-incoming from %d to %d ", g_config.migrate_max_num_incoming, val);
 			g_config.migrate_max_num_incoming = val;
