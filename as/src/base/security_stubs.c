@@ -51,7 +51,14 @@ as_security_init()
 
 // Security is an enterprise feature - here, allow all operations.
 uint8_t
-as_security_check(const as_file_handle* fd_h, int32_t ns_id, uint16_t set_id,
+as_security_check(const as_file_handle* fd_h, as_sec_perm perm)
+{
+	return AS_PROTO_RESULT_OK;
+}
+
+// Security is an enterprise feature - here, allow all operations.
+bool
+as_security_check_data_op(as_transaction* tr, as_msg* m, as_namespace* ns,
 		as_sec_perm perm)
 {
 	return AS_PROTO_RESULT_OK;
@@ -74,13 +81,6 @@ as_security_filter_destroy(void* pv_filter)
 void
 as_security_log(const as_file_handle* fd_h, uint8_t result, as_sec_perm perm,
 		const char* action, const char* detail)
-{
-}
-
-// Security is an enterprise feature - here, do nothing.
-void
-as_security_log_data_op(const as_file_handle* fd_h, int32_t ns_id,
-		uint16_t set_id, as_sec_perm perm, const char* detail)
 {
 }
 
