@@ -181,12 +181,6 @@ typedef enum {
 	AS_PARTICLE_TYPE_RUBY_BLOB = 10,
 	AS_PARTICLE_TYPE_PHP_BLOB = 11,
 	AS_PARTICLE_TYPE_ERLANG_BLOB = 12,
-	AS_PARTICLE_TYPE_APPEND = 13,
-	AS_PARTICLE_TYPE_RTA_LIST = 14,
-	AS_PARTICLE_TYPE_RTA_DICT = 15,
-	AS_PARTICLE_TYPE_RTA_APPEND_DICT = 16,
-	AS_PARTICLE_TYPE_RTA_APPEND_LIST = 17,
-	AS_PARTICLE_TYPE_LUA_BLOB = 18,
 	AS_PARTICLE_TYPE_MAP = 19,
 	AS_PARTICLE_TYPE_LIST = 20,
 	AS_PARTICLE_TYPE_HIDDEN_LIST = 21,
@@ -1173,7 +1167,8 @@ extern void as_namespace_bless(as_namespace *ns);
 extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool check_threshold);
 extern as_set * as_namespace_init_set(as_namespace *ns, const char *set_name);
 extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);
-extern uint16_t    as_namespace_get_set_id(  as_namespace *ns, const char *set_name);
+extern uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name);
+extern uint16_t as_namespace_get_create_set_id(as_namespace *ns, const char *set_name);
 extern void as_namespace_get_set_info(as_namespace *ns, const char *set_name, cf_dyn_buf *db);
 extern void as_namespace_release_set_id(as_namespace *ns, uint16_t set_id);
 extern void as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns);
