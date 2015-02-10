@@ -33,3 +33,4 @@ This package contains all of the code for running the Aerospike server.
 %dir /var/log/aerospike
 %dir /var/run/aerospike
 /opt/aerospike
+%defattr(-,root,root)
