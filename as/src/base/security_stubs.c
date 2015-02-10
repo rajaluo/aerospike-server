@@ -61,7 +61,7 @@ bool
 as_security_check_data_op(as_transaction* tr, as_msg* m, as_namespace* ns,
 		as_sec_perm perm)
 {
-	return AS_PROTO_RESULT_OK;
+	return true;
 }
 
 // Security is an enterprise feature - here, there's no filter.
