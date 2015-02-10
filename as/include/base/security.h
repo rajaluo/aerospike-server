@@ -22,7 +22,10 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
+#include "base/datamodel.h"
+#include "base/proto.h"
 #include "base/transaction.h"
 
 
@@ -39,10 +42,11 @@ typedef enum {
 	PERM_SCAN			= 0x0002,
 	PERM_QUERY			= 0x0004,
 	PERM_WRITE			= 0x0008,
-	PERM_UDF_APPLY		= 0x0010,
-	PERM_UDF_SCAN		= 0x0020,
-	PERM_UDF_QUERY		= 0x0040,
-	// ... 9 unused bits ...
+	PERM_DELETE			= 0x0010,
+	PERM_UDF_APPLY		= 0x0020,
+	PERM_UDF_SCAN		= 0x0040,
+	PERM_UDF_QUERY		= 0x0080,
+	// ... 8 unused bits ...
 
 	// Data transactions' system metadata management.
 	PERM_INDEX_MANAGE	= 0x00010000,
@@ -79,13 +83,12 @@ typedef struct as_sec_msg_s {
 //
 
 void as_security_init();
-uint8_t as_security_check(const as_file_handle* fd_h, int32_t ns_id,
-		uint16_t set_id, as_sec_perm perm);
+uint8_t as_security_check(const as_file_handle* fd_h, as_sec_perm perm);
+bool as_security_check_data_op(as_transaction *tr, as_msg *m, as_namespace *ns,
+		as_sec_perm perm);
 void* as_security_filter_create();
 void as_security_filter_destroy(void* pv_filter);
 void as_security_log(const as_file_handle* fd_h, uint8_t result,
 		as_sec_perm perm, const char* action, const char* detail);
-void as_security_log_data_op(const as_file_handle* fd_h, int32_t ns_id,
-		uint16_t set_id, as_sec_perm perm, const char* detail);
 void as_security_refresh(as_file_handle* fd_h);
 void as_security_transact(as_transaction *tr);
