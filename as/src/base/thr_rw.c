@@ -761,9 +761,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		cf_crash(AS_RW, "Invalid transaction state");
 	}
 
-	if (wr->is_read == false) {
-		cf_atomic_int_incr(&g_config.write_master);
-	}
 
 	// 1. Short Circuit Read if a record is found locally, and we don't need
 	//    strong read consistency, then make sure that we do not go through
@@ -847,6 +844,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			as_rw_set_stat_counters(true, 0, tr);
 			*delete = true;
 			return (0);
+		} else {
+			cf_atomic_int_incr(&g_config.write_master);
 		}
 
 		udf_optype op = UDF_OPTYPE_NONE;
@@ -903,7 +902,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 									__LINE__);
 						}
 						rw_cleanup(wr, tr, first_time, false, __LINE__);
-
+						as_rw_set_stat_counters(true, rv, tr);
 						*delete = true;
 						return 0;
 					}
@@ -1672,6 +1671,8 @@ finish_rw_process_dup_ack(write_request *wr)
 					wr->is_read ? "Read" : "Write",
 					wr->dest_nodes[winner_idx]);
 			as_ldt_shipop(wr, wr->dest_nodes[winner_idx]);
+			// Assume OK for now with respect to stats
+			as_rw_set_stat_counters(true, 0, 0);
 			return false;
 		}
 	} else {
@@ -2557,7 +2558,6 @@ int as_rw_get_ldt_info(ldt_prole_info *linfo, msg *m, as_partition_reservation *
 int
 write_process(cf_node node, msg *m, bool respond)
 {
-	cf_atomic_int_incr(&g_config.write_prole);
 #ifdef DEBUG_MSG
 	msg_dump(m, "rw incoming");
 #endif
