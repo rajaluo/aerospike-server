@@ -222,6 +222,7 @@ void xdr_config_defaults(xdr_config *c);
 // XDR states
 typedef enum xdr_state_e {
 	XDR_COMING_UP,
+	XDR_DLOG_WRITER_UP,
 	XDR_UP,
 	XDR_GOING_DOWN,
 	XDR_DOWN
