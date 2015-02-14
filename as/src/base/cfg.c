@@ -2884,7 +2884,6 @@ as_config_init(const char *config_file)
 				cfg_begin_context(&state, SECURITY_SYSLOG);
 				break;
 			case CASE_CONTEXT_END:
-				as_security_config_check();
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -2967,6 +2966,13 @@ as_config_init(const char *config_file)
 	}
 
 	fclose(FD);
+
+	// Checks that need to wait until everything is parsed. Such checks can be
+	// done instead in as_config_post_process() - doing them here means failures
+	// show in the console like syntax errors, doing them later means failures
+	// show in the log file.
+
+	as_security_config_check();
 
 	return &g_config;
 }
