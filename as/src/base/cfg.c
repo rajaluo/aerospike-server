@@ -2967,10 +2967,12 @@ as_config_init(const char *config_file)
 
 	fclose(FD);
 
-	// Checks that need to wait until everything is parsed. Such checks can be
-	// done instead in as_config_post_process() - doing them here means failures
-	// show in the console like syntax errors, doing them later means failures
-	// show in the log file.
+	//--------------------------------------------
+	// Checks that must wait until everything is parsed. Alternatively, such
+	// checks can be done in as_config_post_process() - doing them here means
+	// failure logs show in the console, doing them in as_config_post_process()
+	// means failure logs show in the log file.
+	//
 
 	as_security_config_check();
 
