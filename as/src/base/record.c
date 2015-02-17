@@ -2002,9 +2002,8 @@ Error:
 	// if we've just received a fully illegal item, our best effort is to set up a vinfoset
 	// with 0 length, denoting an unknown partition set state.
 
-	memset(vinfoset, 0, sizeof(vinfoset));
+	memset(vinfoset, 0, sizeof(as_partition_vinfoset));
 	return(0);
-
 }
 
 

@@ -91,7 +91,8 @@ struct as_file_handle_s;
 #define AS_SEC_ERR_CREDENTIAL			65	// no credential or bad credential
 	// ... room for more ...
 #define AS_SEC_ERR_ROLE					70	// no role(s) or unknown role(s)
-#define AS_SEC_ERR_PRIVILEGE			71	// no privileges or unknown privileges
+#define AS_SEC_ERR_ROLE_EXISTS			71	// role already exists
+#define AS_SEC_ERR_PRIVILEGE			72	// no privileges or unknown privileges
 	// Permission errors.
 #define AS_SEC_ERR_NOT_AUTHENTICATED	80	// socket not authenticated
 #define AS_SEC_ERR_ROLE_VIOLATION		81	// role (privilege) violation
