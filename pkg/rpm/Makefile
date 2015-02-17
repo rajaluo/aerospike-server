@@ -64,9 +64,9 @@ package:
 ifeq ($(USE_ASM),1)
 	cat $(PKG)/rpm/asm-files >> $(PKG)/rpm/aerospike.spec
 endif
-#ifeq ($(USE_XDR),1)
-#	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
-#endif
+ifeq ($(USE_XDR),1)
+	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
+endif
 	cat $(PKG)/rpm/server-spec-scripts >> $(PKG)/rpm/aerospike.spec
 
 	sed -i 's/@RELEASE@/'$(OS)'/g' $(PKG)/rpm/aerospike.spec
