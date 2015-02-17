@@ -2897,7 +2897,6 @@ as_config_init()
 				cfg_begin_context(&state, SECURITY_SYSLOG);
 				break;
 			case CASE_CONTEXT_END:
-				as_security_config_check();
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -2980,6 +2979,15 @@ as_config_init()
 	}
 
 	fclose(FD);
+
+	//--------------------------------------------
+	// Checks that must wait until everything is parsed. Alternatively, such
+	// checks can be done in as_config_post_process() - doing them here means
+	// failure logs show in the console, doing them in as_config_post_process()
+	// means failure logs show in the log file.
+	//
+
+	as_security_config_check();
 
 	return &g_config;
 }
