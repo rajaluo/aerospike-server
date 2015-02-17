@@ -244,6 +244,7 @@ typedef struct as_sindex_stat_s {
 	cf_atomic64        n_writes;
 	cf_atomic64        write_errs;
 	histogram *        _write_hist;         // Histogram to track time spend writing to the sindex
+	histogram *        _si_prep_hist;
 
 	cf_atomic64        n_deletes;
 	cf_atomic64        delete_errs;

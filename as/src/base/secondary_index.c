@@ -92,6 +92,7 @@
 #include <aerospike/as_msgpack.h>
 #include "aerospike/as_pair.h"
 #include "aerospike/as_serializer.h"
+#include "aerospike/as_val.h"
 
 #include "ai_btree.h"
 #include "ai_globals.h"
@@ -936,6 +937,7 @@ as_sindex__stats_clear(as_sindex *si) {
 
 	si->enable_histogram = false;
 	histogram_clear(s->_write_hist);
+	histogram_clear(s->_si_prep_hist);
 	histogram_clear(s->_delete_hist);
 	histogram_clear(s->_query_hist);
 	histogram_clear(s->_query_batch_io);
@@ -1025,6 +1027,10 @@ as_sindex__setup_histogram(as_sindex *si)
 	sprintf(hist_name, "%s_write_us", si->imd->iname);
 	if (NULL == (si->stats._write_hist = histogram_create(hist_name, HIST_MICROSECONDS)))
 		cf_warning(AS_SINDEX, "couldn't create histogram for sindex write histogram");
+	
+	sprintf(hist_name, "%s_si_prep_us", si->imd->iname);
+	if (NULL == (si->stats._si_prep_hist = histogram_create(hist_name, HIST_MICROSECONDS)))
+		cf_warning(AS_SINDEX, "couldn't create histogram for sindex prepare histogram");
 
 	sprintf(hist_name, "%s_delete_us", si->imd->iname);
 	if (NULL == (si->stats._delete_hist = histogram_create(hist_name, HIST_MICROSECONDS)))
@@ -1056,6 +1062,7 @@ int
 as_sindex__destroy_histogram(as_sindex *si)
 {
 	if (si->stats._write_hist)            cf_free(si->stats._write_hist);
+	if (si->stats._si_prep_hist)          cf_free(si->stats._si_prep_hist);
 	if (si->stats._delete_hist)           cf_free(si->stats._delete_hist);
 	if (si->stats._query_hist)            cf_free(si->stats._query_hist);
 	if (si->stats._query_batch_lookup)    cf_free(si->stats._query_batch_lookup);
@@ -1574,6 +1581,10 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 			as_sindex_init_sbin(&sbins[sindex_found], AS_SINDEX_OP_INSERT, as_sindex_pktype_from_sktype(si->imd->btype[i]), si->simatch);
 			sindex_found += as_sindex_sbin_from_sindex(si, b, &sbins[sindex_found], &cdt_val, NULL, 0, 0, false);
 			// Only one sbin should be created here.
+		}
+		// FREE as_val
+		if (cdt_val) {
+			as_val_destroy(cdt_val);
 		}
 	}
 	SINDEX_GUNLOCK();
@@ -3567,15 +3578,22 @@ as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, as_bin *b, as_si
 		si                    = &ns->sindex[simatch];
 		AS_SINDEX_RESERVE(si);   
 		as_sindex_init_sbin(&start_sbin[sindex_found], op,  as_sindex_pktype_from_sktype(si->imd->btype[0]), simatch);
+		uint64_t s_time = cf_getns();
 		sbins_in_si          = as_sindex_sbin_from_sindex(si, b, &start_sbin[sindex_found], &cdt_val, buf, buf_sz, type, from_buf);
 		if (sbins_in_si > 0) {
 			sindex_found += sbins_in_si;
 			// AS_SINDEX_RELEASE will happen after sindex tree has been updated	
+			SINDEX_HIST_INSERT_DATA_POINT(si, si_prep_hist, s_time);
 		}
 		else {
 			AS_SINDEX_RELEASE(si);
 		}
 		ele                   = ele->next;
+	}
+
+	// FREE as_val
+	if (cdt_val) {
+		as_val_destroy(cdt_val);
 	}
 	// Return the number of sbin found.
 	return sindex_found;
@@ -3811,6 +3829,14 @@ as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, b
 		}
 		ele           = ele->next;
 	}
+	// FREE as_vals
+	if (buf_val) {
+		as_val_destroy(buf_val);
+	}
+	if (bin_val) {
+		as_val_destroy(bin_val);
+	}
+
 	return sindex_found;
 }
 
@@ -3937,6 +3963,8 @@ as_sindex_histogram_dumpall(as_namespace *ns)
 		as_sindex *si = &ns->sindex[i];
 		if (si->stats._write_hist)
 			histogram_dump(si->stats._write_hist);
+		if (si->stats._si_prep_hist)
+			histogram_dump(si->stats._si_prep_hist);
 		if (si->stats._delete_hist)
 			histogram_dump(si->stats._delete_hist);
 		if (si->stats._query_hist)
