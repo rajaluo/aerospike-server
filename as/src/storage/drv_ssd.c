@@ -4118,8 +4118,8 @@ as_storage_cold_start_ticker_ssd()
 				pos += sprintf(buf + pos, ", %s %u%%", ssd->name, pct);
 			}
 
-			cf_info(AS_DRV_SSD, "{%s} loaded %lu records, %lu subrecords:%s", ns->name,
-					ns->n_objects, ns->n_sub_objects, buf);
+			cf_info(AS_DRV_SSD, "{%s} loaded %lu records, %lu subrecords%s",
+					ns->name, ns->n_objects, ns->n_sub_objects, buf);
 		}
 	}
 }

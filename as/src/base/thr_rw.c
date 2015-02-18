@@ -713,10 +713,11 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 	return 0;
 }
 
-// When starting execution all the UDF are assumed to be write UDF
-// in case call is UDF read flip the stats to decrement write counters
-// and increment read counters
-void as_rw_update_stat(write_request *wr) 
+// When starting execution all UDFs are assumed to be writes. If it turns out a
+// UDF was a read, flip the stats - decrement write counters and increment read
+// counters.
+void
+as_rw_update_stat(write_request *wr)
 {
 	cf_atomic_int_decr(&g_config.write_master);
 	cf_atomic_int_decr(&g_config.stat_write_reqs);
@@ -904,8 +905,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						tr->msgp->msg.info2 &= ~AS_MSG_INFO2_WRITE;
 						is_delete = true;
 					} else if (UDF_OP_IS_READ(op)) {
-                    	// update stats to move from normal to uDF requests
-                    	as_rw_update_stat(wr);
+						// update stats to move from normal to uDF requests
+						as_rw_update_stat(wr);
 						// return early if the record was not updated
 						udf_call_destroy(call);
 						cf_free(call);
