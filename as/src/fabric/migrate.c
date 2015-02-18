@@ -137,6 +137,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include "citrusleaf/alloc.h"
@@ -2024,7 +2025,7 @@ get_most_urgent_migration_reduce_pop_fn(void *buf, void *udata)
 
 	// if all elements are mig = 0, we'll always return 0 and pop it later
 	if (0 == mig)
-		return(0);
+		return(-1);
 
 	// if migration size = 0 OR cluster key mismatch, process immediately
 	if (mig->rsv.tree->elements == 0 ||
@@ -2242,7 +2243,12 @@ migration_pop(migration **migp, migration_reduce_pop_arg *mrpa)
 		}
 	} else {
 		migration *mig = *migp;
-		cf_debug(AS_MIGRATE, "got smallest migrate, tree size = %"PRIu32", q sz = %d", mig->rsv.tree->elements, cf_queue_priority_sz(g_migrate_q));
+
+		if (!mig) {
+			cf_debug(AS_MIGRATE, "TID %d received the migrate xmit thread kill message", syscall(SYS_gettid));
+		} else {
+			cf_debug(AS_MIGRATE, "got smallest migrate, tree size = %"PRIu32", q sz = %d", mig->rsv.tree->elements, cf_queue_priority_sz(g_migrate_q));
+		}
 	}
 	return 0;
 }
@@ -2278,7 +2284,7 @@ migrate_xmit_fn(void *arg)
 		 * This is the case for intentionally stopping the migrate thread.
 		 */
 		if (mig == 0) {
-			cf_detail(AS_MIGRATE, "Migrate thread #%ld received termination request.", my_id);
+			cf_info(AS_MIGRATE, "Migrate thread #%ld (TID %d) received termination request.", my_id, syscall(SYS_gettid));
 			break; // signal of death
 		}
 
@@ -2802,7 +2808,7 @@ as_migrate_set_num_xmit_threads(int n_threads)
 	}
 
 	while (g_config.n_migrate_threads > n_threads) {
-		cf_detail(AS_MIGRATE, "Killing a migrate thread (delta: %d).", g_config.n_migrate_threads - n_threads);
+		cf_info(AS_MIGRATE, "Killing a migrate thread (delta: %d).", g_config.n_migrate_threads - n_threads);
 		if (0 > (rv = migrate_kill_xmit_thread())) {
 			cf_warning(AS_MIGRATE, "Failed to send migrate xmit thread kill message (rv %d)", rv);
 			return -1;
@@ -2811,7 +2817,7 @@ as_migrate_set_num_xmit_threads(int n_threads)
 	}
 
 	while (g_config.n_migrate_threads < n_threads) {
-		cf_detail(AS_MIGRATE, "Starting a migrate xmit thread (delta: %d).", n_threads - g_config.n_migrate_threads);
+		cf_info(AS_MIGRATE, "Starting a migrate xmit thread (delta: %d).", n_threads - g_config.n_migrate_threads);
 		long i = -1;
 		bool found_one = false;
 		while (++i < MAX_NUM_MIGRATE_XMIT_THREADS) {
