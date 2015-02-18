@@ -5933,8 +5933,13 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 int
 info_get_service(char *name, cf_dyn_buf *db)
 {
-
-	cf_dyn_buf_append_string(db, g_service_str );
+	pthread_mutex_lock(&g_service_lock);
+    if (g_service_str) {
+		cf_dyn_buf_append_string(db, g_service_str );
+	} else {
+		cf_dyn_buf_append_string(db, " ");
+	}
+	pthread_mutex_unlock(&g_service_lock);
 
 	return(0);
 }
