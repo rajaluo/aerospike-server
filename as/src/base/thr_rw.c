@@ -2942,7 +2942,7 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 	as_index *r = r_ref.r;
 
 	// Check generation requirement, if any.
-	if (! g_config.generation_disable &&
+	if (m && ! g_config.generation_disable &&
 			(((m->info2 & AS_MSG_INFO2_GENERATION) && m->generation != r->generation) ||
 			 ((m->info2 & AS_MSG_INFO2_GENERATION_GT) && m->generation <= r->generation))) {
 		as_record_done(&r_ref, ns);
