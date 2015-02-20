@@ -306,7 +306,7 @@ ldt_slot_init(ldt_slot *lslotp, ldt_record *lrecord, cf_digest *keyd)
 	c_urecord->rd           = &lslotp->rd;
 	c_urecord->r_ref        = &lslotp->r_ref;
 	lslotp->r_ref.skip_lock = true;
-	lslotp->c_urec_p = as_rec_new(c_urecord, &udf_record_hooks);
+	lslotp->c_urec_p = as_rec_new(c_urecord, &udf_subrecord_hooks);
 
 	ldt_slot_setup(lslotp, lrecord->h_urec, keyd);
 	//ldt_slot_print(lslotp);
@@ -330,9 +330,15 @@ void ldt_chunk_destroy(ldt_record *lrecord, ldt_slot_chunk *lchunk)
  */
 void ldt_slot_destroy(ldt_slot *lslotp, ldt_record *lrecord)
 {
-	udf_record_destroy(lslotp->c_urec_p);
-	lrecord->num_slots_used--;
-	lslotp->inuse = false;
+	if (lslotp->c_urec_p) {
+		udf_record_destroy(lslotp->c_urec_p);
+		as_rec_destroy(lslotp->c_urec_p);
+		lslotp->c_urec_p = NULL;
+		lrecord->num_slots_used--;
+		lslotp->inuse = false;
+	} else {
+		cf_warning(AS_LDT, "ldt_slot_destroy: Internal Error [Attempt to free invalid slot] ... Skipped");
+	}
 }
 
 /*
