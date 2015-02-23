@@ -939,7 +939,7 @@ as_query__add_response(void *void_qtr, as_index_ref *r_ref, as_storage_rd *rd)
 	qtr->buf_reserved += msg_sz;
 
 	ret = as_msg_make_response_bufbuilder(r, rd, &qtr->bb_r, false,
-			NULL, true, true, qtr->binlist);
+			NULL, true, true, true, qtr->binlist);
 	if (ret != 0) {
 		cf_warning(AS_QUERY, "Weird there is space but still the packing failed "
 				"available = %d msg size = %d",

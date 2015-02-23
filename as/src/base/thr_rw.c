@@ -720,6 +720,18 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 
 	return 0;
 }
+
+// When starting execution all UDFs are assumed to be writes. If it turns out a
+// UDF was a read, flip the stats - decrement write counters and increment read
+// counters.
+void
+as_rw_update_stat(write_request *wr)
+{
+	cf_atomic_int_decr(&g_config.write_master);
+	cf_atomic_int_decr(&g_config.stat_write_reqs);
+	cf_atomic_int_incr(&g_config.stat_read_reqs);
+}
+
 // Main entry point of triggering the local operations. Both read/write/UDF.
 //
 // Caller:
@@ -769,9 +781,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		cf_crash(AS_RW, "Invalid transaction state");
 	}
 
-	if (wr->is_read == false) {
-		cf_atomic_int_incr(&g_config.write_master);
-	}
 
 	// 1. Short Circuit Read if a record is found locally, and we don't need
 	//    strong read consistency, then make sure that we do not go through
@@ -855,6 +864,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			as_rw_set_stat_counters(true, 0, tr);
 			*delete = true;
 			return (0);
+		} else {
+			cf_atomic_int_incr(&g_config.write_master);
 		}
 
 		udf_optype op = UDF_OPTYPE_NONE;
@@ -902,6 +913,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						tr->msgp->msg.info2 &= ~AS_MSG_INFO2_WRITE;
 						is_delete = true;
 					} else if (UDF_OP_IS_READ(op)) {
+						// update stats to move from normal to uDF requests
+						as_rw_update_stat(wr);
 						// return early if the record was not updated
 						udf_call_destroy(call);
 						cf_free(call);
@@ -911,7 +924,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 									__LINE__);
 						}
 						rw_cleanup(wr, tr, first_time, false, __LINE__);
-
+						as_rw_set_stat_counters(true, rv, tr);
 						*delete = true;
 						return 0;
 					}
@@ -1685,6 +1698,8 @@ finish_rw_process_dup_ack(write_request *wr)
 					wr->is_read ? "Read" : "Write",
 					wr->dest_nodes[winner_idx]);
 			as_ldt_shipop(wr, wr->dest_nodes[winner_idx]);
+			// Assume OK for now with respect to stats
+			as_rw_set_stat_counters(true, 0, 0);
 			return false;
 		}
 	} else {
@@ -2570,7 +2585,6 @@ int as_rw_get_ldt_info(ldt_prole_info *linfo, msg *m, as_partition_reservation *
 int
 write_process(cf_node node, msg *m, bool respond)
 {
-	cf_atomic_int_incr(&g_config.write_prole);
 #ifdef DEBUG_MSG
 	msg_dump(m, "rw incoming");
 #endif
@@ -2939,6 +2953,16 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode)
 	}
 
 	as_index *r = r_ref.r;
+
+	// Check generation requirement, if any.
+	if (m && ! g_config.generation_disable &&
+			(((m->info2 & AS_MSG_INFO2_GENERATION) && m->generation != r->generation) ||
+			 ((m->info2 & AS_MSG_INFO2_GENERATION_GT) && m->generation <= r->generation))) {
+		as_record_done(&r_ref, ns);
+		tr->result_code = AS_PROTO_RESULT_FAIL_GENERATION;
+		return -1;
+	}
+
 	bool check_key = m && msg_has_key(m);
 
 	if (ns->storage_data_in_memory || check_key) {
