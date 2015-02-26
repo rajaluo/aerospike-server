@@ -322,6 +322,9 @@ typedef struct as_sindex_query_context_s {
 
 	// NBTR offset
 	cf_digest        bdig;
+
+	// Qnode map
+	bool             is_partition_qnode[AS_PARTITIONS];
 } as_sindex_qctx;
 
 // Tracing Infrastruture 
@@ -434,7 +437,6 @@ extern int as_sindex_delete_by_sbin(as_namespace *ns, const char *set, int numbi
 
 // Index Metadata Lookup
 extern as_sindex *  as_sindex_from_msg(as_namespace *ns, as_msg *msgp); 
-extern bool         as_sindex_partition_isactive(as_namespace *ns, cf_digest *digest);
 extern as_sindex *  as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange);
 
 /* Misc */

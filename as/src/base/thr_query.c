@@ -220,7 +220,7 @@ struct as_query_transaction_s {
 	struct ai_obj     bkey;
 	bool              short_running;
 	bool              track;
-
+	as_partition_reservation rsv[AS_PARTITIONS];
 	// Record UDF Management
 	cf_atomic_int       uit_queued;    				// Throttling: max in flight scan
 	cf_atomic_int       uit_completed; 				// Number of udf transactions successfully completed
@@ -724,6 +724,13 @@ as_query__transaction_done(as_query_transaction *qtr)
 		cf_warning(AS_QUERY, "QUEUED UDF not equal to zero when query transaction is done");
 	}
 
+	// Release all the qnodes
+	for (int i=0; i<AS_PARTITIONS; i++) {
+		if (qtr->qctx.is_partition_qnode[i]) {
+			as_partition_release(&qtr->rsv[i]);
+		}
+	}
+
 	// Send out the final data back
 	if (qtr->fd_h) {
 		as_query__add_fin(qtr);
@@ -1206,20 +1213,21 @@ as_query_aggr_match_record(query_record * qrecord)
 int
 as_query__io(as_query_transaction *qtr, cf_digest *dig)
 {
-	as_partition_reservation rsv;
 	as_namespace * ns = qtr->ns;
-	AS_PARTITION_RESERVATION_INIT(rsv);
 
 	// We make sure while making digest list that current node is a qnode
 	// Attempt the query reservation here as well. If this node is not a
 	// query node anymore then no need to return anything
-	if (0 != as_partition_reserve_qnode(ns, as_partition_getid(*dig), &rsv)) {
+	// Since we are reserving all the qnodes upfront, this is a defensive check
+	as_partition_id pid =  as_partition_getid(*dig);
+	if (!qtr->qctx.is_partition_qnode[pid]) {
+		cf_debug(AS_QUERY, "Getting digest in rec list which do not belong to qnode.");
 		return AS_QUERY_OK;
 	}
 	cf_atomic_int_incr(&g_config.dup_tree_count);
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
-	int rec_rv      = as_record_get(rsv.tree, dig, &r_ref, ns);
+	int rec_rv      = as_record_get(qtr->rsv[pid].tree, dig, &r_ref, ns);
 
 	if (rec_rv == 0) {
 		as_index *r = r_ref.r;
@@ -1252,7 +1260,6 @@ as_query__io(as_query_transaction *qtr, cf_digest *dig)
 		if(!as_query_record_matches(qtr, &rd)) {
 			as_storage_record_close(r, &rd);
 			as_record_done(&r_ref, ns);
-			as_partition_release(&rsv);
 			cf_atomic_int_decr(&g_config.dup_tree_count);
 			cf_atomic64_incr(&g_config.query_false_positives);
 			return AS_QUERY_OK;
@@ -1267,7 +1274,6 @@ as_query__io(as_query_transaction *qtr, cf_digest *dig)
 			qtr->abort       = true;
 			cf_debug(AS_QUERY, "Query %p Aborted at %s:%d", qtr, __FILE__, __LINE__);
 			qtr->result_code = AS_PROTO_RESULT_FAIL_QUERY_CBERROR;
-			as_partition_release(&rsv);
 			cf_atomic_int_decr(&g_config.dup_tree_count);
 			return AS_QUERY_ERR;
 		}
@@ -1283,7 +1289,6 @@ as_query__io(as_query_transaction *qtr, cf_digest *dig)
 		goto CLEANUP;
 	}
 CLEANUP :
-	as_partition_release(&rsv);
 	cf_atomic_int_decr(&g_config.dup_tree_count);
 	return AS_QUERY_OK;
 }
@@ -1717,8 +1722,14 @@ as_query__generator(as_query_transaction *qtr)
 
 		// Check if bufbuilder request was successful
 		if (!qtr->bb_r) {
+			cf_warning(AS_QUERY, "Buf builder request was unsunccessful.");
 			goto Cleanup;
 		}
+		// Populate all the paritions for which this node is a qnode.
+		if (qtr->short_running) {
+			as_partition_reserve_qnodes(qtr->ns, qtr->qctx.is_partition_qnode, qtr->rsv);
+		}
+
 		qtr->inited               = true;
 	}
 

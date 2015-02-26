@@ -2365,29 +2365,6 @@ as_sindex_sbin_freeall(as_sindex_bin *sbin, int numbins)
 	return AS_SINDEX_OK;
 }
 
-/*
- * Function to decide if current node has partition of the passed int digest
- * valid for returning result. Used by secondary index scan to filter out digest
- */
-bool
-as_sindex_partition_isactive(as_namespace *ns, cf_digest *digest)
-{
-	as_partition *p = NULL;
-	cf_assert(ns, AS_SINDEX, CF_CRITICAL, "invalid namespace");
-	int pid = as_partition_getid(*(digest));
-	p = &ns->partitions[pid];
-
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_SINDEX, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-
-	bool is_active = (p->qnode == g_config.self_node);
-
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_SINDEX, "couldn't release partition state lock: %s", cf_strerror(errno));
-
-	return is_active;
-}
-
 
 /* This find out of the record can be defragged 
  * AS_SINDEX_GC_ERROR if found and cannot defrag
