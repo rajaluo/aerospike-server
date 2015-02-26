@@ -3455,37 +3455,34 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 			uint64_t max_ptnsz    = 0;
 			p->qnode              = p->replica[0];
 
+			/*
+			 * QNODE CALCULATION - 
+			 * Iterate in the succession list from 0 to cluster size
+			 * 		Pick the first node with max partition size
+			 * 		Make it qnode.
+			 * 	
+			 * For non-qnode and non-master make qnode as master
+			 *
+			 * Order of preference
+			 * Largest Size
+			 * 		-- Master
+			 * 		-- Replica
+			 * 		-- Duplicate / Non-Replica [ZOMBIE]
+			 */
+			
 			for (int k = 0; k < cluster_size; k++) {
 				size_t n_index = HV_SLINDEX(j, k); // pick up the node offset
 				cf_node cur_node = HV(j, k);       // pick up the nodes
 				cf_debug(AS_PARTITION, "Node %d, has size %ld", k, paxos->c_partition_size[i][n_index][k]);
 
-				// Order of preference
-				// Largest Size
-				// -- Master
-				// -- Replica
-				// -- Duplicate / Non-Replica [ZOMBIE]
-
-				if (max_ptnsz < paxos->c_partition_size[i][n_index][j]) {
-					// Checking the existence of cur_node in dupl_nodes and replica list
-					// for debugging purposes.
-					// If size if greater pick the duplicate node
-					if (cf_contains64(dupl_nodes, n_dupl, cur_node)) {
-						max_ptnsz = paxos->c_partition_size[i][n_index][j];
-						p->qnode = cur_node;
-						cf_debug(AS_PARTITION, "Picked for pid %d from dupl list size %ld node %ld", p->partition_id,
-								 max_ptnsz, k);
-					}
-
-					// over ride it with replica
-					int my_index = find_in_replica_list(p, cur_node);
-					bool is_master_or_replica = (0 <= my_index) || (my_index < p->p_repl_factor);
-					if (is_master_or_replica) {
-						max_ptnsz = paxos->c_partition_size[i][n_index][j];
-						p->qnode = cur_node;
-						cf_debug(AS_PARTITION, "Picked for pid %d from replica list size %ld %ld", p->partition_id,
-								 max_ptnsz, k);
-					}
+				// Since we are iterating in the succession list, 
+				// equal partition size in different nodes will be taken care.
+				// Order of preferance will be maintained.
+				if (max_ptnsz < paxos->c_partition_size[i][n_index][j]) {	
+					p->qnode = cur_node;
+					max_ptnsz = paxos->c_partition_size[i][n_index][j];
+					cf_debug(AS_PARTITION, "Picked for pid %d size %ld node %"PRIx64" index in succession list %d", 
+								p->partition_id, max_ptnsz, cur_node, k);
 				}
 			}
 

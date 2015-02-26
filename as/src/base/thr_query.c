@@ -1726,9 +1726,7 @@ as_query__generator(as_query_transaction *qtr)
 			goto Cleanup;
 		}
 		// Populate all the paritions for which this node is a qnode.
-		if (qtr->short_running) {
-			as_partition_reserve_qnodes(qtr->ns, qtr->qctx.is_partition_qnode, qtr->rsv);
-		}
+		as_partition_reserve_qnodes(qtr->ns, qtr->qctx.is_partition_qnode, qtr->rsv);
 
 		qtr->inited               = true;
 	}
