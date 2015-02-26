@@ -559,6 +559,7 @@ typedef enum {
 
 	// Security (Aerospike) log options:
 	CASE_SECURITY_LOG_REPORT_AUTHENTICATION,
+	CASE_SECURITY_LOG_REPORT_DATA_OP,
 	CASE_SECURITY_LOG_REPORT_SYS_ADMIN,
 	CASE_SECURITY_LOG_REPORT_USER_ADMIN,
 	CASE_SECURITY_LOG_REPORT_VIOLATION,
@@ -566,6 +567,7 @@ typedef enum {
 	// Security syslog options:
 	CASE_SECURITY_SYSLOG_LOCAL,
 	CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION,
+	CASE_SECURITY_SYSLOG_REPORT_DATA_OP,
 	CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN,
 	CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN,
 	CASE_SECURITY_SYSLOG_REPORT_VIOLATION
@@ -940,6 +942,7 @@ const cfg_opt SECURITY_OPTS[] = {
 
 const cfg_opt SECURITY_LOG_OPTS[] = {
 		{ "report-authentication",			CASE_SECURITY_LOG_REPORT_AUTHENTICATION },
+		{ "report-data-op",					CASE_SECURITY_LOG_REPORT_DATA_OP },
 		{ "report-sys-admin",				CASE_SECURITY_LOG_REPORT_SYS_ADMIN },
 		{ "report-user-admin",				CASE_SECURITY_LOG_REPORT_USER_ADMIN },
 		{ "report-violation",				CASE_SECURITY_LOG_REPORT_VIOLATION },
@@ -949,6 +952,7 @@ const cfg_opt SECURITY_LOG_OPTS[] = {
 const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 		{ "local",							CASE_SECURITY_SYSLOG_LOCAL },
 		{ "report-authentication",			CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION },
+		{ "report-data-op",					CASE_SECURITY_SYSLOG_REPORT_DATA_OP },
 		{ "report-sys-admin",				CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN },
 		{ "report-user-admin",				CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN },
 		{ "report-violation",				CASE_SECURITY_SYSLOG_REPORT_VIOLATION },
@@ -2898,6 +2902,9 @@ as_config_init(const char *config_file)
 			case CASE_SECURITY_LOG_REPORT_AUTHENTICATION:
 				c->sec_cfg.report.authentication |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
 				break;
+			case CASE_SECURITY_LOG_REPORT_DATA_OP:
+				as_security_config_log_scope(AS_SEC_SINK_LOG, line.val_tok_1, line.val_tok_2);
+				break;
 			case CASE_SECURITY_LOG_REPORT_SYS_ADMIN:
 				c->sec_cfg.report.sys_admin |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
 				break;
@@ -2928,6 +2935,9 @@ as_config_init(const char *config_file)
 			case CASE_SECURITY_SYSLOG_REPORT_AUTHENTICATION:
 				c->sec_cfg.report.authentication |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
 				break;
+			case CASE_SECURITY_SYSLOG_REPORT_DATA_OP:
+				as_security_config_log_scope(AS_SEC_SINK_SYSLOG, line.val_tok_1, line.val_tok_2);
+				break;
 			case CASE_SECURITY_SYSLOG_REPORT_SYS_ADMIN:
 				c->sec_cfg.report.sys_admin |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
 				break;
@@ -2957,6 +2967,15 @@ as_config_init(const char *config_file)
 	}
 
 	fclose(FD);
+
+	//--------------------------------------------
+	// Checks that must wait until everything is parsed. Alternatively, such
+	// checks can be done in as_config_post_process() - doing them here means
+	// failure logs show in the console, doing them in as_config_post_process()
+	// means failure logs show in the log file.
+	//
+
+	as_security_config_check();
 
 	return &g_config;
 }

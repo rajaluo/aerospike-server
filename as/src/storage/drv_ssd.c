@@ -2954,7 +2954,9 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	r->void_time = block->void_time;
 	r->generation = block->generation;
 
-	if (r->void_time != 0) {
+	// No expiry for ldt_sub based on the TTL. LDT sub are expired based on the 
+	// parent record expiry. 
+	if (r->void_time != 0 && !is_ldt_sub) {
 		// The threshold may be ~ now, or it may be in the future if eviction
 		// has been happening.
 		uint32_t threshold_void_time =
@@ -2978,7 +2980,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		// improperly coded clients) or it's data the users don't want anymore
 		// (user decreased the max-ttl setting). No such check is needed for
 		// the subrecords ...
-		if (ns->max_ttl != 0 && ! is_ldt_sub) {
+		if (ns->max_ttl != 0) {
 			if (r->void_time > ns->cold_start_max_void_time) {
 				cf_debug(AS_DRV_SSD, "record-add deleting void-time %u > max %u",
 						r->void_time, ns->cold_start_max_void_time);
@@ -4116,8 +4118,8 @@ as_storage_cold_start_ticker_ssd()
 				pos += sprintf(buf + pos, ", %s %u%%", ssd->name, pct);
 			}
 
-			cf_info(AS_DRV_SSD, "{%s} loaded %lu records%s", ns->name,
-					ns->n_objects, buf);
+			cf_info(AS_DRV_SSD, "{%s} loaded %lu records, %lu subrecords%s",
+					ns->name, ns->n_objects, ns->n_sub_objects, buf);
 		}
 	}
 }
