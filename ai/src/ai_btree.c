@@ -670,7 +670,7 @@ END:
  *        -1 in case of failure
  */
 static int
-btree_addsinglerec(as_sindex_metadata *imd, cf_digest *dig, cf_ll *recl, uint64_t *n_bdigs, bool is_partition_qnode[AS_PARTITIONS])
+btree_addsinglerec(as_sindex_metadata *imd, cf_digest *dig, cf_ll *recl, uint64_t *n_bdigs, bool * is_partition_qnode)
 {
 	// The digests which belongs to one of the qnode are elligible to go into recl
 	as_partition_id pid =  as_partition_getid(*dig);
