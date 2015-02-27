@@ -510,7 +510,7 @@ extern as_sindex_gc_status  as_sindex_can_defrag_record(as_namespace *ns, cf_dig
 extern as_sindex_status     as_sindex_extract_bin_path(as_sindex_metadata * imd, char * path_str);
 int                         as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd);
 bool                        as_sindex_delete_checker(as_namespace *ns, as_sindex_metadata *imd);
-as_particle_type            as_sindex_pktype_from_sktype(as_sindex_ktype t);
+as_particle_type            as_sindex_pktype(as_sindex_metadata * imd);
 // **************************************************************************************************
 
 /*

@@ -616,20 +616,28 @@ as_sindex__post_op_assert(as_sindex *si, int op)
 }
 
 /*
- * Function as_sindex_pktype_from_sktype
- * 		Translation function from KTYPE to PARTICLE Type
+ * Function as_sindex_pktype
+ * 		Returns the type of particle indexed
  *
  * 	Returns -
  * 		On failure - AS_SINDEX_ERR_UNKNOWN_KEYTYPE
  */
 as_particle_type
-as_sindex_pktype_from_sktype(as_sindex_ktype t)
+as_sindex_pktype(as_sindex_metadata * imd)
 {
-	switch(t) {
-		case AS_SINDEX_KTYPE_LONG:    return AS_PARTICLE_TYPE_INTEGER;
-		case AS_SINDEX_KTYPE_FLOAT:   return AS_PARTICLE_TYPE_FLOAT;
-		case AS_SINDEX_KTYPE_DIGEST:  return AS_PARTICLE_TYPE_STRING;
-		default: cf_crash(AS_SINDEX, "Key type not known");
+	switch(imd->btype[0]) {
+		case AS_SINDEX_KTYPE_LONG: {
+			return AS_PARTICLE_TYPE_INTEGER;
+		}
+		case AS_SINDEX_KTYPE_FLOAT: {
+			return AS_PARTICLE_TYPE_FLOAT;
+		}
+		case AS_SINDEX_KTYPE_DIGEST: {
+			return AS_PARTICLE_TYPE_STRING;
+		}
+		default: {
+			cf_warning(AS_SINDEX, "UNKNOWN KEY TYPE FOUND. VERY BAD STATE");
+		}
 	}
 	return AS_SINDEX_ERR_UNKNOWN_KEYTYPE;
 }
@@ -1578,7 +1586,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 				strlen(imd->bnames[i]));
 		as_val * cdt_val = NULL;
 		if (b) {
-			as_sindex_init_sbin(&sbins[sindex_found], AS_SINDEX_OP_INSERT, as_sindex_pktype_from_sktype(si->imd->btype[i]), si->simatch);
+			as_sindex_init_sbin(&sbins[sindex_found], AS_SINDEX_OP_INSERT, as_sindex_pktype(si->imd), si->simatch);
 			sindex_found += as_sindex_sbin_from_sindex(si, b, &sbins[sindex_found], &cdt_val, NULL, 0, 0, false);
 			// Only one sbin should be created here.
 		}
@@ -1793,7 +1801,7 @@ as_sindex_describe_str(as_namespace *ns, as_sindex_metadata *imd, cf_dyn_buf *db
 	if (!ns)
 		return AS_SINDEX_ERR_PARAM;
 
-	as_sindex *si = as_sindex_lookup_by_iname(ns, imd->iname, 0);
+	as_sindex *si = as_sindex_lookup_by_iname(ns, imd->iname, AS_SINDEX_LOOKUP_FLAG_NORESERVE);
 	if ((si) && (si->imd)) {
 		SINDEX_RLOCK(&si->imd->slock)
 		as_sindex_metadata *imd = si->imd;
@@ -1811,7 +1819,7 @@ as_sindex_describe_str(as_namespace *ns, as_sindex_metadata *imd, cf_dyn_buf *db
 			cf_dyn_buf_append_buf(db, (uint8_t *)imd->bnames[i], strlen(imd->bnames[i]));
 			cf_dyn_buf_append_string(db, ":");
 			// HACKY
-			cf_dyn_buf_append_string(db, as_col_type_defs[as_sindex_pktype_from_sktype(imd->btype[i])]);
+			cf_dyn_buf_append_string(db, as_col_type_defs[as_sindex_pktype(imd)]);
 		}
 
 		// Index State
@@ -1974,7 +1982,7 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 				if (i) cf_dyn_buf_append_string(db, ",");
 				cf_dyn_buf_append_buf(db, (uint8_t *)si.imd->bnames[i], strlen(si.imd->bnames[i]));
 				cf_dyn_buf_append_string(db, ":type=");
-				cf_dyn_buf_append_string(db, Col_type_defs[as_sindex_pktype_from_sktype(si.imd->btype[i])]);
+				cf_dyn_buf_append_string(db, Col_type_defs[as_sindex_pktype(si.imd)]);
 				cf_dyn_buf_append_string(db, ":indextype=");
 				cf_dyn_buf_append_string(db, as_sindex_type_defs[si.imd->itype]);
 
@@ -2040,6 +2048,7 @@ as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sindex_bin *start
  * 		NULL - On failure
  * 		si   - On success.
  * Notes -
+ * 		Reserves the si if found in the srange
  * 		Releases the si if imd is null or bin type is mis matched.
  *
  */
@@ -2057,13 +2066,10 @@ as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange)
 		for (int i = 0; i < imd->num_bins; i++) {
 			if ((imd->binid[i] == srange->start.id)
 					&& (srange->start.type !=
-						as_sindex_pktype_from_sktype(imd->btype[i]))) {
+						as_sindex_pktype(imd))) {
 				cf_warning(AS_SINDEX, "Query and Index Bin Type Mismatch: "
-						"[binid %d : Index Bin type %d : "
-						"Query Bin Type %d]",
-						imd->binid[i],
-						as_sindex_pktype_from_sktype(imd->btype[i]),
-						srange->start.type );
+						"[binid %d : Index Bin type %d : Query Bin Type %d]",
+						imd->binid[i], as_sindex_pktype(imd), srange->start.type );
 				AS_SINDEX_RELEASE(si);
 				return NULL;
 			}
@@ -3406,7 +3412,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 					byte * buf, uint32_t buf_sz, as_particle_type type, bool from_buf)
 {
 	as_sindex_metadata * imd    = si->imd;
-	as_particle_type imd_btype  = as_sindex_pktype_from_sktype(imd->btype[0]);
+	as_particle_type imd_btype  = as_sindex_pktype(imd);
 	bool deserialized           = !(*cdt_asval) ? false : true;
 	as_val * cdt_val            = * cdt_asval;
 	uint32_t  valsz             = 0;
@@ -3576,8 +3582,12 @@ as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, as_bin *b, as_si
 		si_ele                = (sindex_set_binid_hash_ele *) ele;
 		simatch               = si_ele->simatch;
 		si                    = &ns->sindex[simatch];
+		if (!as_sindex_isactive(si)) {
+			ele = ele->next;
+			continue;
+		}
 		AS_SINDEX_RESERVE(si);   
-		as_sindex_init_sbin(&start_sbin[sindex_found], op,  as_sindex_pktype_from_sktype(si->imd->btype[0]), simatch);
+		as_sindex_init_sbin(&start_sbin[sindex_found], op,  as_sindex_pktype(si->imd), simatch);
 		uint64_t s_time = cf_getns();
 		sbins_in_si          = as_sindex_sbin_from_sindex(si, b, &start_sbin[sindex_found], &cdt_val, buf, buf_sz, type, from_buf);
 		if (sbins_in_si > 0) {
@@ -3618,7 +3628,7 @@ as_sindex_diff_sbins_from_sindex(as_sindex * si, as_bin * b, byte * buf, uint32_
 		as_sindex_bin * sbin, as_val ** bin_val, as_val ** buf_val, bool * deserialized)
 {
 	as_sindex_metadata * imd       = si->imd;
-	as_particle_type   imd_btype = as_sindex_pktype_from_sktype(imd->btype[0]);
+	as_particle_type   imd_btype = as_sindex_pktype(imd);
 	int sindex_found = 0;
 	bool found = false;
 	int simatch = si->simatch;
@@ -3815,6 +3825,10 @@ as_sindex_diff_sbins_from_buf(as_namespace * ns, const char * set, as_bin * b, b
 		simatch       = si_ele->simatch;
 		si            = &ns->sindex[simatch];
 		sbin          = start_sbin + sindex_found;
+		if (!as_sindex_isactive(si)) {
+			ele = ele->next;
+			continue;
+		}
 		AS_SINDEX_RESERVE(si);
 		sbins_in_si  = as_sindex_diff_sbins_from_sindex(si, b, buf, buf_sz, type, sbin, &bin_val, &buf_val, &deserialized);
 		if (sbins_in_si > 0) {
@@ -3988,7 +4002,7 @@ as_sindex_histogram_enable(as_namespace *ns, as_sindex_metadata *imd, bool enabl
 	if (!ns)
 		return AS_SINDEX_ERR_PARAM;
 
-	as_sindex *si = as_sindex_lookup_by_iname(ns, imd->iname, 0);
+	as_sindex *si = as_sindex_lookup_by_iname(ns, imd->iname, AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
 	if (!si) {
 		return AS_SINDEX_ERR_NOTFOUND;
 	}
@@ -4890,7 +4904,7 @@ as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v)
 
 	as_val * val = v;
 	
-	as_particle_type imd_btype = as_sindex_pktype_from_sktype(imd->btype[0]);
+	as_particle_type imd_btype = as_sindex_pktype(imd);
 	if (imd->path_length == 0) {
 		goto END;
 	}
