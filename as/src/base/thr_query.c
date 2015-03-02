@@ -316,6 +316,9 @@ int                  as_query__add_response(void *qtr,
 void                 as_query__transaction_done(as_query_transaction *qtr);
 int                  as_qtr__release(as_query_transaction *qtr, char *fname, int lineno);
 int                  as_qtr__reserve(as_query_transaction *qtr, char *fname, int lineno);
+as_partition_reservation *  as_query_reserve_qnode(as_namespace * ns, as_query_transaction * qtr, 
+										as_partition_id pid, as_partition_reservation * rsv);
+void                 as_query_release_qnode(as_query_transaction * qtr, as_partition_reservation * rsv);
 
 #define AS_QUERY_INCREMENT_ERR_COUNT(qtr)   \
 	if(qtr->job_type == AS_QUERY_AGG) {    \
@@ -730,6 +733,7 @@ as_query__transaction_done(as_query_transaction *qtr)
 		for (int i=0; i<AS_PARTITIONS; i++) {
 			if (qtr->qctx.is_partition_qnode[i]) {
 				as_partition_release(&qtr->rsv[i]);
+				cf_atomic_int_decr(&g_config.dup_tree_count);
 			}
 		}
 	}
@@ -1217,42 +1221,22 @@ int
 as_query__io(as_query_transaction *qtr, cf_digest *dig)
 {
 	as_namespace * ns = qtr->ns;
-	as_partition_reservation rsv;
-	
-	if (!qtr->qctx.qnodes_reserved) {
-		AS_PARTITION_RESERVATION_INIT(rsv);
-	}
+	as_partition_reservation rsv_stack;
+	as_partition_reservation * rsv = &rsv_stack;
 
 	// We make sure while making digest list that current node is a qnode
 	// Attempt the query reservation here as well. If this node is not a
 	// query node anymore then no need to return anything
 	// Since we are reserving all the qnodes upfront, this is a defensive check
 	as_partition_id pid =  as_partition_getid(*dig);
-	if (qtr->qctx.qnodes_reserved) {
-		if (!qtr->qctx.is_partition_qnode[pid]) {
-			cf_debug(AS_QUERY, "Getting digest in rec list which do not belong to qnode.");
-			return AS_QUERY_OK;
-		}
-	}
-	else {
-		// get the qnode reservation per record
-		// Good for unique sindex queries.
-		if (0 != as_partition_reserve_qnode(ns, pid, &rsv)) {
-			cf_debug(AS_QUERY, "Getting digest in rec list which do not belong to qnode.");	
-			return AS_QUERY_OK;
-		}
+	rsv = as_query_reserve_qnode(ns, qtr, pid, rsv);
+	if (!rsv) {
+		return AS_QUERY_OK;
 	}
 
-	cf_atomic_int_incr(&g_config.dup_tree_count);
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
-	int rec_rv      = 0;
-	if (qtr->qctx.qnodes_reserved) {
-		rec_rv      = as_record_get(qtr->rsv[pid].tree, dig, &r_ref, ns);
-	}
-	else {
-		rec_rv      = as_record_get(rsv.tree, dig, &r_ref, ns);
-	}
+	int rec_rv      = as_record_get(rsv->tree, dig, &r_ref, ns);
 
 	if (rec_rv == 0) {
 		as_index *r = r_ref.r;
@@ -1285,10 +1269,7 @@ as_query__io(as_query_transaction *qtr, cf_digest *dig)
 		if(!as_query_record_matches(qtr, &rd)) {
 			as_storage_record_close(r, &rd);
 			as_record_done(&r_ref, ns);
-			if (!qtr->qctx.qnodes_reserved) {
-				as_partition_release(&rsv);
-			}
-			cf_atomic_int_decr(&g_config.dup_tree_count);
+			as_query_release_qnode(qtr, rsv);
 			cf_atomic64_incr(&g_config.query_false_positives);
 			return AS_QUERY_OK;
 		}
@@ -1302,10 +1283,7 @@ as_query__io(as_query_transaction *qtr, cf_digest *dig)
 			qtr->abort       = true;
 			cf_debug(AS_QUERY, "Query %p Aborted at %s:%d", qtr, __FILE__, __LINE__);
 			qtr->result_code = AS_PROTO_RESULT_FAIL_QUERY_CBERROR;
-			if (!qtr->qctx.qnodes_reserved) {
-				as_partition_release(&rsv);
-			}
-			cf_atomic_int_decr(&g_config.dup_tree_count);
+			as_query_release_qnode(qtr, rsv);
 			return AS_QUERY_ERR;
 		}
 		as_storage_record_close(r, &rd);
@@ -1320,10 +1298,7 @@ as_query__io(as_query_transaction *qtr, cf_digest *dig)
 		goto CLEANUP;
 	}
 CLEANUP :
-	if (!qtr->qctx.qnodes_reserved) {
-		as_partition_release(&rsv);
-	}
-	cf_atomic_int_decr(&g_config.dup_tree_count);
+	as_query_release_qnode(qtr, rsv);
 	return AS_QUERY_OK;
 }
 
@@ -2855,4 +2830,44 @@ as_query_get_udf_call(void *ptr)
 {
 	as_query_transaction *qtr = (as_query_transaction *)ptr;
 	return &qtr->call;
+}
+
+/*
+ * Returns NULL if partition with is 'pid' is not qnode
+ * Else 
+ * 		if all the qnodes are reserved upfront returns the rsv used for reserving the partition
+ * 		else reserves the partition and returns rsv
+ */
+
+as_partition_reservation *
+as_query_reserve_qnode(as_namespace * ns, as_query_transaction * qtr, as_partition_id  pid, as_partition_reservation * rsv)
+{
+	if (qtr->qctx.qnodes_reserved) {
+		if (!qtr->qctx.is_partition_qnode[pid]) {
+			cf_debug(AS_QUERY, "Getting digest in rec list which do not belong to qnode.");
+			return NULL;
+		}
+		return &qtr->rsv[pid];
+	}
+	else {
+		// get the qnode reservation per record
+		// Good for unique sindex queries.
+		as_partition_reservation tmp_rsv = *rsv;
+
+		AS_PARTITION_RESERVATION_INIT(tmp_rsv);
+		if (0 != as_partition_reserve_qnode(ns, pid, rsv)) {
+			return NULL;
+		}
+		cf_atomic_int_incr(&g_config.dup_tree_count);
+	}
+	return rsv;
+}
+
+void
+as_query_release_qnode(as_query_transaction * qtr, as_partition_reservation * rsv)
+{
+	if (!qtr->qctx.qnodes_reserved) {
+		as_partition_release(rsv);
+		cf_atomic_int_decr(&g_config.dup_tree_count);
+	}
 }

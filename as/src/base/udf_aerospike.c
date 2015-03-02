@@ -1108,7 +1108,7 @@ udf_aerospike_rec_remove(const as_aerospike * as, const as_rec * rec)
 
 	// Close the storage record associates with this UDF record
 	// do not release the reservation yet !!
-	udf_record_close(urecord, false);
+	udf_record_close(urecord);
 	return 0;
 }
 
