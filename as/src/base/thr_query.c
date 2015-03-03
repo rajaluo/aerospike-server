@@ -871,9 +871,11 @@ as_query__add_val_response(void *void_qtr, const as_val *val, bool success)
 		pthread_mutex_unlock(&qtr->buf_mutex);
 		return AS_QUERY_ERR;
 	}
-	if (msg_sz > (bb_r->alloc_sz - bb_r->used_sz)) {
+
+	if (msg_sz > (bb_r->alloc_sz - bb_r->used_sz) && bb_r->used_sz != 0) {
 		as_query__netio(qtr, false);
 	}
+
 	qtr->buf_reserved += msg_sz;
 	ret = as_msg_make_val_response_bufbuilder(val, &qtr->bb_r, msg_sz, success);
 	if (ret != 0) {
@@ -921,7 +923,8 @@ as_query__add_response(void *void_qtr, as_index_ref *r_ref, as_storage_rd *rd)
 		pthread_mutex_unlock(&qtr->buf_mutex);
 		return AS_QUERY_ERR;
 	}
-	if (msg_sz > (bb_r->alloc_sz - bb_r->used_sz)) {
+	
+	if (msg_sz > (bb_r->alloc_sz - bb_r->used_sz) && bb_r->used_sz != 0) {
 		as_query__netio(qtr, false);
 	}
 	qtr->buf_reserved += msg_sz;
@@ -1159,6 +1162,102 @@ Cleanup:
 	return ret;
 }
 
+
+bool as_query_match_integer_fromval(as_query_transaction * qtr, as_val *v)
+{
+	as_sindex_bin_data *start = &qtr->srange->start;
+	as_sindex_bin_data *end   = &qtr->srange->end;
+
+	if ((AS_PARTICLE_TYPE_INTEGER != as_sindex_pktype(qtr->si->imd))
+			|| (AS_PARTICLE_TYPE_INTEGER != start->type)
+			|| (AS_PARTICLE_TYPE_INTEGER != end->type)) {
+		cf_debug(AS_QUERY, "as_query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
+				AS_PARTICLE_TYPE_INTEGER, start->type, end->type, as_sindex_pktype(qtr->si->imd),
+				qtr->si->imd->bnames[0], qtr->si->imd->iname);
+		return false;
+	}
+	as_integer * i = as_integer_fromval(v);
+	int64_t value  = as_integer_get(i);
+	if ((value >= start->u.i64) && (value <= end->u.i64)) {
+		return true;
+	} else {
+		cf_detail(AS_QUERY, "as_query_record_matches: "
+				"Integer mismatch %ld not in %ld - %ld", value, start->u.i64, end->u.i64);
+		return false;
+	}
+	return false;
+}
+
+bool as_query_match_string_fromval(as_query_transaction * qtr, as_val *v)
+{
+	as_sindex_bin_data *start = &qtr->srange->start;
+	as_sindex_bin_data *end   = &qtr->srange->end;
+
+	if ((AS_PARTICLE_TYPE_STRING != as_sindex_pktype(qtr->si->imd))
+			|| (AS_PARTICLE_TYPE_STRING != start->type)
+			|| (AS_PARTICLE_TYPE_STRING != end->type)) {
+		cf_debug(AS_QUERY, "as_query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
+				AS_PARTICLE_TYPE_STRING, start->type, end->type, as_sindex_pktype(qtr->si->imd),
+				qtr->si->imd->bnames[0], qtr->si->imd->iname);
+		return false;
+	}
+
+	char * str_val = as_string_get(as_string_fromval(v));
+	cf_digest str_digest;
+	cf_digest_compute(str_val, strlen(str_val), &str_digest);
+
+	if (memcmp(&str_digest, &start->digest, AS_DIGEST_KEY_SZ)) {
+		cf_detail(AS_QUERY, "as_query_record_validation: "
+				" String mismatch |%s|  of size %d", str_val, strlen(str_val)+1);
+		return false;
+	} else {
+		return true;
+	}
+	return false;
+}
+
+
+// If the value matches foreach should stop iterating the 
+bool as_query_match_mapkeys_foreach(const as_val * key, const as_val * val, void * udata)
+{
+	as_query_transaction * qtr = (as_query_transaction *)udata;	
+	if (key->type == AS_STRING) {
+		// If matches return false
+		return !as_query_match_string_fromval(qtr, (as_val *)key);
+	}
+	else if (key->type == AS_INTEGER) {
+		// If matches return false
+		return !as_query_match_integer_fromval(qtr,(as_val *) key);
+	}
+	return true;
+}
+static bool as_query_match_mapvalues_foreach(const as_val * key, const as_val * val, void * udata)
+{
+	as_query_transaction * qtr = (as_query_transaction *)udata;	
+	if (val->type == AS_STRING) {
+		// If matches return false
+		return !as_query_match_string_fromval(qtr, (as_val *)val);
+	}
+	else if (val->type == AS_INTEGER) {
+		// If matches return false
+		return !as_query_match_integer_fromval(qtr, (as_val *)val);
+	}
+	return true;
+
+}
+static bool as_query_match_listele_foreach(as_val * val, void * udata)
+{
+	as_query_transaction * qtr = (as_query_transaction *)udata;	
+	if (val->type == AS_STRING) {
+		// If matches return false
+		return !as_query_match_string_fromval(qtr, val);
+	}
+	else if (val->type == AS_INTEGER) {
+		// If matches return false
+		return !as_query_match_integer_fromval(qtr, val);
+	}
+	return true;
+}
 /*
  * Validate record based on its content and query make sure it indeed should
  * be selected. Secondary index does lazy delete for the entries for the record
@@ -1170,10 +1269,10 @@ bool
 as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 {
 	// TODO: Add counters and make sure it is not a performance hit
-	as_sindex_bin *start = &qtr->srange->start;
-	as_sindex_bin *end   = &qtr->srange->end;
+	as_sindex_bin_data *start = &qtr->srange->start;
+	as_sindex_bin_data *end   = &qtr->srange->end;
 
-	//TODO: Make it more general to support sindex over multiple bins
+	//TODO: Make it more general to support sindex over multiple bins	
 	as_bin * b = as_bin_get(rd, (uint8_t *)qtr->si->imd->bnames[0],
 							strlen(qtr->si->imd->bnames[0]));
 
@@ -1186,20 +1285,22 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 	}
 	uint8_t type = as_bin_get_particle_type(b);
 
-	// Little paranoid matching all the types
-	if ((type != as_sindex_pktype_from_sktype(qtr->si->imd->btype[0]))
-			|| (type != start->type)
-			|| (type != end->type)) {
-		cf_debug(AS_QUERY, "as_query_record_matches: "
-				"Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
-				type, start->type, end->type,
-				as_sindex_pktype_from_sktype(qtr->si->imd->btype[0]),
-				qtr->si->imd->bnames[0], qtr->si->imd->iname);
-		return false;
-	}
-
+	// If the bin is of type cdt, we need to see if anyone of the value within cdt
+	// matches the query.
+	// This can be performance hit for big list and maps.
+	as_val * res_val = NULL;
+	bool from_cdt    = false;
 	switch (type) {
 		case AS_PARTICLE_TYPE_INTEGER : {
+			if ((type != as_sindex_pktype(qtr->si->imd))
+			|| (type != start->type)
+			|| (type != end->type)) {
+				cf_debug(AS_QUERY, "as_query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
+					type, start->type, end->type, as_sindex_pktype(qtr->si->imd),
+					qtr->si->imd->bnames[0], qtr->si->imd->iname);
+				return false;
+			}
+
 			int64_t   i = 0;
 			uint32_t sz = 8;
 			as_particle_tobuf(b, (uint8_t *) &i, &sz);
@@ -1215,6 +1316,15 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 			break;
 		}
 		case AS_PARTICLE_TYPE_STRING : {
+			if ((type != as_sindex_pktype(qtr->si->imd))
+			|| (type != start->type)
+			|| (type != end->type)) {
+				cf_debug(AS_QUERY, "as_query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
+					type, start->type, end->type, as_sindex_pktype(qtr->si->imd),
+					qtr->si->imd->bnames[0], qtr->si->imd->iname);
+				return false;
+			}
+
 			uint32_t psz = 32;
 			as_particle_tobuf(b, NULL, &psz);
 			char buf[psz + 1];
@@ -1231,11 +1341,71 @@ as_query_record_matches(as_query_transaction *qtr, as_storage_rd *rd)
 			}
 			break;
 		}
+		case AS_PARTICLE_TYPE_MAP : {
+			as_val * v = as_val_frombin(b);
+			res_val = as_sindex_extract_val_from_path(qtr->si->imd, v);	
+			if (!res_val) {
+				return false;
+			}
+			from_cdt = true;
+			break;
+		}
+		case AS_PARTICLE_TYPE_LIST : {
+			as_val * v = as_val_frombin(b);
+			res_val = as_sindex_extract_val_from_path(qtr->si->imd, v);	
+			if (!res_val) {
+				return false;
+			}
+			from_cdt = true;
+			break;
+		}
 		default: {
-			goto END;
+			break;
 		}
 	}
-END:
+	
+	if (from_cdt) {
+		if (res_val->type == AS_INTEGER) {
+			// Defensive check.
+			if (qtr->si->imd->itype == AS_SINDEX_ITYPE_DEFAULT) {
+				return as_query_match_integer_fromval(qtr, res_val);
+			}
+			else {
+				return false;
+			}
+		}
+		else if (res_val->type == AS_STRING) {
+			// Defensive check.
+			if (qtr->si->imd->itype == AS_SINDEX_ITYPE_DEFAULT) {
+				return as_query_match_string_fromval(qtr, res_val);
+			}
+			else {
+				return false;
+			}
+		}
+		else if (res_val->type == AS_MAP) {
+			// Defensive check.
+			if (qtr->si->imd->itype == AS_SINDEX_ITYPE_MAPKEYS) {
+				as_map * map = as_map_fromval(res_val);
+				return !as_map_foreach(map, as_query_match_mapkeys_foreach, qtr);
+			}
+			else if (qtr->si->imd->itype == AS_SINDEX_ITYPE_MAPVALUES){
+				as_map * map = as_map_fromval(res_val);
+				return !as_map_foreach(map, as_query_match_mapvalues_foreach, qtr);
+			}
+			return false;
+		}
+		else if (res_val->type == AS_LIST) {
+			// Defensive check
+			if (qtr->si->imd->itype == AS_SINDEX_ITYPE_LIST) {
+				as_list * list = as_list_fromval(res_val);
+				return !as_list_foreach(list, as_query_match_listele_foreach, qtr);
+			}
+			else {
+				return false;
+			}
+		}
+	}
 	return false;
 }
 
@@ -1630,7 +1800,7 @@ as_query__generator_get_nextbatch(as_query_transaction *qtr)
 
 	if (qctx->pimd_idx == -1) {
 		if (!qtr->srange->isrange) {
-			qctx->pimd_idx   = ai_btree_key_hash(si->imd, &qtr->srange->start);
+			qctx->pimd_idx   = ai_btree_key_hash_from_sbin(si->imd, &qtr->srange->start);
 		} else {
 			qctx->pimd_idx   = 0;
 		}

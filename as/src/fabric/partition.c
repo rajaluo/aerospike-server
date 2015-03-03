@@ -1232,9 +1232,10 @@ as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_r
 
 	bool is_qnode  = false;
 	if (p->qnode) {
-		n = p->qnode;
+		n = p->qnode; //	    is_qnode = (n == self);
 	} else {
 		// is_read is always true in case of queries
+		// TODO this is not needed
 		n = find_sync_copy(ns, pid, p, true);
 	}
 	is_qnode = (n == self);
