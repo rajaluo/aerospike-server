@@ -114,7 +114,7 @@ typedef struct as_config_s {
 	uint32_t			query_bufpool_size;
 	uint32_t			query_short_q_max_size;
 	uint32_t			query_long_q_max_size;
-	uint32_t			query_untracked_time;
+	uint32_t			query_untracked_time_ns;
 
 	int					n_transaction_queues;
 	int					n_transaction_threads_per_queue;
@@ -129,6 +129,9 @@ typedef struct as_config_s {
 
 	/* after this many milliseconds, connections are aborted unless transaction is in progress */
 	int					proto_fd_idle_ms;
+
+	/* sleep this many millisecond before retrying for all the blocked query */
+	int					proto_slow_netio_sleep_ms;
 
 	/* The TCP port for the fabric */
 	int					fabric_port;
