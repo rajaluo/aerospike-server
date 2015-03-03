@@ -79,16 +79,18 @@ cf_sockaddr_setport(cf_sockaddr *so, unsigned short port)
 int
 cf_socket_set_nonblocking(int s)
 {
-	int flags;
+	int flags = 0;
 
-	if (-1 == (flags = fcntl(s, F_GETFL, 0)))
-		flags = 0;
+	if (-1 == (flags = fcntl(s, F_GETFL, 0))) {
+		cf_warning(CF_SOCKET, "fcntl(): failed to get socket %d flags - %s", s, cf_strerror(errno));
+		return(-1);
+	}
 	if (-1 == fcntl(s, F_SETFL, flags | O_NONBLOCK)) {
-		cf_crash(CF_SOCKET, "fcntl(): %s", cf_strerror(errno));
-		return(0);
+		cf_warning(CF_SOCKET, "fcntl(): failed to set socket %d O_NONBLOCK flag - %s", s, cf_strerror(errno));
+		return(-1);
 	}
 
-	return(1);
+	return(0);
 }
 
 void
@@ -286,14 +288,19 @@ cf_socket_init_client(cf_socket_cfg *s, int timeout)
 
 	memset(&s->saddr,0,sizeof(s->saddr));
 	s->saddr.sin_family = AF_INET;
-	if (0 >= inet_pton(AF_INET, s->addr, &s->saddr.sin_addr.s_addr)) {
+	int rv = inet_pton(AF_INET, s->addr, &s->saddr.sin_addr.s_addr);
+	if (rv < 0) {
 		cf_warning(CF_SOCKET, "inet_pton: %s", cf_strerror(errno));
 		close(s->sock);
 		return(errno);
+	} else if (rv == 0) {
+		cf_warning(CF_SOCKET, "inet_pton: invalid ip %s", s->addr);
+		close(s->sock);
+		return(-1);
 	}
 	s->saddr.sin_port = htons(s->port);
 
-	int rv = connect(s->sock, (struct sockaddr *)&s->saddr, sizeof(s->saddr));
+	rv = connect(s->sock, (struct sockaddr *)&s->saddr, sizeof(s->saddr));
 	cf_debug(CF_SOCKET, "connect: rv %d errno %s",rv,cf_strerror(errno));
 
 	if (rv < 0) {

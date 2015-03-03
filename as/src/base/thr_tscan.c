@@ -1284,11 +1284,11 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 		if (as_index_is_flag_set(r, AS_INDEX_FLAG_KEY_STORED)) {
 			as_storage_rd rd;
 			as_storage_record_open(u->ns, r, &rd, &r->key);
-			as_msg_make_response_bufbuilder(r, &rd, bb_r, true, NULL, true, true, u->binlist);
+			as_msg_make_response_bufbuilder(r, &rd, bb_r, true, NULL, true, true, true, u->binlist);
 			as_storage_record_close(r, &rd);
 		}
 		else {
-			as_msg_make_response_bufbuilder(r, NULL, bb_r, true, u->ns->name, true, false, u->binlist);
+			as_msg_make_response_bufbuilder(r, NULL, bb_r, true, u->ns->name, true, false, true, u->binlist);
 		}
 
 		if ((*bb_r)->alloc_sz > old_allocsz) {
@@ -1363,7 +1363,7 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 				cf_atomic_int_add(&u->pjob->mem_buf, (*bb_r)->alloc_sz);
 			}
 			size_t old_allocsz = (*bb_r)->alloc_sz;
-			as_msg_make_response_bufbuilder(r, &rd, bb_r, false, NULL, true, true, u->binlist);
+			as_msg_make_response_bufbuilder(r, &rd, bb_r, false, NULL, true, true, true, u->binlist);
 			if ((*bb_r)->alloc_sz > old_allocsz) {
 				cf_atomic_int_add(&u->pjob->mem_buf, (*bb_r)->alloc_sz - old_allocsz);
 			}

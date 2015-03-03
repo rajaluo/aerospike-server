@@ -426,7 +426,7 @@ size_t as_msg_response_msgsize(as_record *r, as_storage_rd *rd, bool nobindata,
 
 int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 		cf_buf_builder **bb_r, bool nobindata, char *nsname, bool use_sets,
-		bool include_key, cf_vector *binlist)
+		bool include_key, bool skip_empty_records, cf_vector *binlist)
 {
 	// Sanity checks. Either rd should be there or nobindata and nsname should be present.
 	if (!(rd || (nobindata && nsname))) {
@@ -516,7 +516,7 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 			}
 
 			// Don't return an empty record.
-			if (list_bins == 0) {
+			if (skip_empty_records && list_bins == 0) {
 				return 0;
 			}
 		}

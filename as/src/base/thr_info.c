@@ -5078,7 +5078,7 @@ info_interfaces_static_fn(void *gcc_is_ass)
 	}
 
 	cf_dyn_buf_free(&temp_service_db);
-	free(service_str);
+	cf_free(service_str);
 
 	// For valid external-address specify the same in service-list 
 	cf_dyn_buf_define(service_db);
@@ -5936,8 +5936,9 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 int
 info_get_service(char *name, cf_dyn_buf *db)
 {
-
-	cf_dyn_buf_append_string(db, g_service_str );
+	pthread_mutex_lock(&g_service_lock);
+	cf_dyn_buf_append_string(db, g_service_str ? g_service_str : " ");
+	pthread_mutex_unlock(&g_service_lock);
 
 	return(0);
 }
