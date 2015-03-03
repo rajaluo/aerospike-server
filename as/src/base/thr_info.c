@@ -3079,14 +3079,14 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "reserve-qnodes-upfront", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "pre-reserve-qnodes", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) { 
 				cf_info(AS_INFO, "Changing value of reserve-qnodes-upfront to %s", context);
-				g_config.qnodes_reserved_upfront = true;
+				g_config.qnodes_pre_reserved = true;
 			}    
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) { 
 				cf_info(AS_INFO, "Changing value of reserve-qnodes-upfront to %s", context);
-				g_config.qnodes_reserved_upfront = false;
+				g_config.qnodes_pre_reserved = false;
 			}    
 			else {
 				goto Error;

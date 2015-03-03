@@ -729,7 +729,7 @@ as_query__transaction_done(as_query_transaction *qtr)
 	}
 
 	// Release all the qnodes
-	if (qtr->qctx.qnodes_reserved) {
+	if (qtr->qctx.qnodes_pre_reserved) {
 		for (int i=0; i<AS_PARTITIONS; i++) {
 			if (qtr->qctx.is_partition_qnode[i]) {
 				as_partition_release(&qtr->rsv[i]);
@@ -1719,16 +1719,16 @@ as_query__generator(as_query_transaction *qtr)
 		qtr->qctx.bkey = &qtr->bkey;
 		init_ai_obj(qtr->qctx.bkey);
 		bzero(&qtr->qctx.bdig, sizeof(cf_digest));
-		qtr->result_code          = AS_PROTO_RESULT_OK;
+		qtr->result_code              = AS_PROTO_RESULT_OK;
 		// start with the threshold value
-		qtr->qctx.bsize           = g_config.query_threshold;
-		qtr->qctx.new_ibtr        = true;
-		qtr->qctx.nbtr_done       = false;
-		qtr->qctx.pimd_idx        = -1;
-		qtr->qctx.qnodes_reserved = g_config.qnodes_reserved_upfront;
-		qtr->priority             = g_config.query_priority;
-		qtr->bb_r                 = as_query__bb_poolrequest();
-		qtr->loop                 = 0;
+		qtr->qctx.bsize               = g_config.query_threshold;
+		qtr->qctx.new_ibtr            = true;
+		qtr->qctx.nbtr_done           = false;
+		qtr->qctx.pimd_idx            = -1;
+		qtr->qctx.qnodes_pre_reserved = g_config.qnodes_pre_reserved;
+		qtr->priority                 = g_config.query_priority;
+		qtr->bb_r                     = as_query__bb_poolrequest();
+		qtr->loop                     = 0;
 
 		// Check if bufbuilder request was successful
 		if (!qtr->bb_r) {
@@ -1736,8 +1736,8 @@ as_query__generator(as_query_transaction *qtr)
 			goto Cleanup;
 		}
 		// Populate all the paritions for which this node is a qnode.
-		if (qtr->qctx.qnodes_reserved) {
-			as_partition_reserve_qnodes(qtr->ns, qtr->qctx.is_partition_qnode, qtr->rsv);
+		if (qtr->qctx.qnodes_pre_reserved) {
+			as_partition_prereserve_qnodes(qtr->ns, qtr->qctx.is_partition_qnode, qtr->rsv);
 		}
 
 		qtr->inited               = true;
@@ -2023,8 +2023,8 @@ as_query_init()
 		cf_warning(AS_SINDEX, "couldn't create histogram for query net-i/o");
 	}
 
-	g_config.query_enable_histogram	 = false;
-	g_config.qnodes_reserved_upfront = true;
+	g_config.query_enable_histogram	= false;
+	g_config.qnodes_pre_reserved    = true;
 }
 
 /*
@@ -2842,7 +2842,7 @@ as_query_get_udf_call(void *ptr)
 as_partition_reservation *
 as_query_reserve_qnode(as_namespace * ns, as_query_transaction * qtr, as_partition_id  pid, as_partition_reservation * rsv)
 {
-	if (qtr->qctx.qnodes_reserved) {
+	if (qtr->qctx.qnodes_pre_reserved) {
 		if (!qtr->qctx.is_partition_qnode[pid]) {
 			cf_debug(AS_QUERY, "Getting digest in rec list which do not belong to qnode.");
 			return NULL;
@@ -2866,7 +2866,7 @@ as_query_reserve_qnode(as_namespace * ns, as_query_transaction * qtr, as_partiti
 void
 as_query_release_qnode(as_query_transaction * qtr, as_partition_reservation * rsv)
 {
-	if (!qtr->qctx.qnodes_reserved) {
+	if (!qtr->qctx.qnodes_pre_reserved) {
 		as_partition_release(rsv);
 		cf_atomic_int_decr(&g_config.dup_tree_count);
 	}

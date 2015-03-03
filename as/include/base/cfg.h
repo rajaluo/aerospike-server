@@ -300,7 +300,7 @@ typedef struct as_config_s {
 	histogram      *_sindex_gc_pimd_rlock_hist;   // HIstogram to track time spent under pimd rlock by sindex GC
 	histogram      *_sindex_gc_pimd_wlock_hist;   // Histogram to track time spent under pimd wlock by sindex GC
 
-	bool                qnodes_reserved_upfront;  // If true we will reserve all the qnodes upfront 
+	bool                qnodes_pre_reserved;      // If true we will reserve all the qnodes upfront 
 												  // before processing query. Default - TRUE
 	cf_atomic64			query_reqs;
 	cf_atomic64			query_fail;

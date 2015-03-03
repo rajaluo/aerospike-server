@@ -671,11 +671,11 @@ END:
  */
 static int
 btree_addsinglerec(as_sindex_metadata *imd, cf_digest *dig, cf_ll *recl, uint64_t *n_bdigs, 
-								bool * is_partition_qnode, bool qnodes_reserved)
+								bool * is_partition_qnode, bool qnodes_pre_reserved)
 {
 	// The digests which belongs to one of the qnode are elligible to go into recl
 	as_partition_id pid =  as_partition_getid(*dig);
-	if (qnodes_reserved) {
+	if (qnodes_pre_reserved) {
 		if (!is_partition_qnode[pid]) {
 			return 0;
 		}
@@ -741,7 +741,7 @@ add_recs_from_nbtr(as_sindex_metadata *imd, ai_obj *ikey, bt *nbtr, as_sindex_qc
 				continue;
 			}
 			if (btree_addsinglerec(imd, (cf_digest *)&akey->y, qctx->recl, &qctx->n_bdigs,
-									qctx->is_partition_qnode, qctx->qnodes_reserved)) {
+									qctx->is_partition_qnode, qctx->qnodes_pre_reserved)) {
 				ret = -1;
 				break;
 			}
@@ -767,7 +767,7 @@ add_recs_from_arr(as_sindex_metadata *imd, ai_obj *ikey, ai_arr *arr, as_sindex_
 
 	for (int i = 0; i < arr->used; i++) {
 		if (btree_addsinglerec(imd, (cf_digest *)&arr->data[i * CF_DIGEST_KEY_SZ], qctx->recl, 
-					&qctx->n_bdigs, qctx->is_partition_qnode, qctx->qnodes_reserved)) {
+					&qctx->n_bdigs, qctx->is_partition_qnode, qctx->qnodes_pre_reserved)) {
 			ret = -1;
 			break;
 		}

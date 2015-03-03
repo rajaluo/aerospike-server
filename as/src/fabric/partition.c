@@ -1259,7 +1259,7 @@ as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_r
 }
 
 void
-as_partition_reserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[])
+as_partition_prereserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[])
 {
 	/*
 	 * Iterate through all the partitions

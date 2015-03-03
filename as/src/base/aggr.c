@@ -1,4 +1,4 @@
-/*
+/* 
  * aggr.c
  *
  * Copyright (C) 2014 Aerospike, Inc.
@@ -186,6 +186,7 @@ as_aggr__process(as_aggr_call * ap_call, cf_ll * ap_recl, void * udata, as_resul
 		.caller        = ap_call->caller,
 		.urecord       = &l_urecord,
 		.read          = false,
+		.rsv           = NULL,
 	};
 	as_rec_init(&l_urec, &l_urecord, &udf_record_hooks);
 	as_rec                  l_qrec;
@@ -257,7 +258,7 @@ Cleanup:
 	}
 	if (l_qrecord.read) {
 		udf_record_close(l_qrecord.urecord);
-		as_query_release_qnode(l_qrecord.caller, &l_qrecord.urecord->tr->rsv);
+		as_query_release_qnode(l_qrecord.caller, l_qrecord.rsv);
 		l_qrecord.read       = false;
 	}
 	return ret;
@@ -384,7 +385,7 @@ as_aggr_istream_read(const as_stream *s)
 		// element in the stream it does it at its own risk. Record
 		// may have changed under the hood.
 		udf_record_close(qrecord->urecord);
-		as_query_release_qnode(qrecord->caller, &qrecord->urecord->tr->rsv);
+		as_query_release_qnode(qrecord->caller, qrecord->rsv);
 		qrecord->read = false;
 	}
 
@@ -422,20 +423,31 @@ as_aggr_istream_read(const as_stream *s)
 		tr->keyd     = dt->digs[aggr_istream->dtoffset];
 		qrecord->urecord->keyd = tr->keyd;
 		int pid = as_partition_getid(tr->keyd);
-		as_partition_reservation * rsv = as_query_reserve_qnode(ns, qrecord->caller, pid, &tr->rsv);
-		if (!rsv){
+		qrecord->rsv = as_query_reserve_qnode(ns, qrecord->caller, pid, &tr->rsv);
+		if (!qrecord->rsv){
 			aggr_istream->dtoffset++;
 			continue;
 		}
-		tr->rsv = *rsv;
-		tr->rsv.ns   = ns;
+
+		// copying only the necessary information in tr->rsv.
+		// This is done to save memcpy of dupl_nodes. That is not needed in this case
+		// It is needed by udf_record_open.
+		// Warning -  tr->rsv is not fully initialized
+		tr->rsv.ns          = ns;
+		tr->rsv.state       = qrecord->rsv->state;
+		tr->rsv.pid         = qrecord->rsv->pid;
+		tr->rsv.p           = qrecord->rsv->p;
+		tr->rsv.tree        = qrecord->rsv->tree;
+		tr->rsv.cluster_key = qrecord->rsv->cluster_key;
+		tr->rsv.sub_tree    = qrecord->rsv->sub_tree;
+
 		r_ref->skip_lock = false;
 		if (0 == udf_record_open(qrecord->urecord)) { //Sumit record open
 			qrecord->read = true;
 		}
 		if (!qrecord->read) {
 			cf_debug(AS_QUERY, "Failed to read record");
-			as_query_release_qnode(qrecord->caller, &tr->rsv);
+			as_query_release_qnode(qrecord->caller, qrecord->rsv);
 		} else {
 			if (aggr_istream->get_type() == AS_AGGR_QUERY) {
 				if (!as_query_aggr_match_record(qrecord)) {

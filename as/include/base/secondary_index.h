@@ -324,7 +324,7 @@ typedef struct as_sindex_query_context_s {
 	cf_digest        bdig;
 
 	// If true all qnodes will be reserved before processing the query
-	bool             qnodes_reserved; 
+	bool             qnodes_pre_reserved; 
 	// Qnode map
 	bool             is_partition_qnode[AS_PARTITIONS];
 } as_sindex_qctx;
