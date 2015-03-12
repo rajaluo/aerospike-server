@@ -1202,6 +1202,7 @@ tscan_aggr_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 				cf_atomic64_decr(&d_ptr->task->si->stats.recs_pending);
 			}
 			cf_atomic_int_incr(&(d_ptr->task->pjob->n_obj_set_diff));
+			as_record_done(r_ref, d_ptr->task->ns);
 			return;
 		}
 	}
