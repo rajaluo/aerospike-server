@@ -435,6 +435,18 @@ process_transaction(as_transaction *tr)
 	// transation may have already been preprocessed...) If the message hasn't
 	// been swizzled yet, swizzle it,
 	if (!tr->preprocessed) {
+		if (! as_partition_balance_is_init_resolved()) {
+            cf_warning(AS_TSVC, "partition initial balance unresolved");
+			if (tr->proto_fd_h) {
+				as_msg_send_reply(tr->proto_fd_h, AS_PROTO_RESULT_FAIL_UNAVAILABLE,
+									0, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+				tr->proto_fd_h = 0;
+				MICROBENCHMARK_HIST_INSERT_P(error_hist);
+				cf_atomic_int_incr(&g_config.err_tsvc_requests);
+			}
+			goto Cleanup;
+		}
+
 		if (0 != (rv = as_transaction_prepare(tr))) {
 			// transaction_prepare() return values:
 			// 0:  OK
