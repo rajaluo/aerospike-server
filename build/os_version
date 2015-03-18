@@ -31,6 +31,9 @@ then
     if [ "$ver" = "6." ]
     then
       setPlatform el6 centos6
+    elif [ "$ver" = "7." ]
+    then
+      setPlatform el7 centos7
     else
       ver=`cat /etc/redhat-release | awk '/Fedora/ {printf("%2s\n", $3)}'`
 
