@@ -3768,6 +3768,9 @@ as_partition_balance()
 		cf_queue_destroy(mq);
 	} // end for each namespace.
 
+	// All partitions now have replicas assigned, ok to allow transactions.
+	g_balance_init = BALANCE_INIT_RESOLVED;
+
 	cf_debug(AS_PARTITION, "[END]  REBALANCE WINDOW");
 
 	cf_info(AS_PAXOS, "global partition state: total %d lost %d unique %d duplicate %d", n_total, n_lost, n_unique, n_duplicate);
@@ -3856,8 +3859,6 @@ Out:
 		flush_to_storage(ns);
 	}
 
-	g_balance_init = BALANCE_INIT_RESOLVED;
-
 	as_partition_allow_migrations();
 
 	// free partition tables
@@ -3865,7 +3866,7 @@ Out:
 	cf_free(hv_slindex_ptr);
 
 	return;
-} // end as_partition_balance_new()
+} // end as_partition_balance()
 
 // Initially, every partition is either ABSENT, or a version was read from
 // storage and it is SYNC.
