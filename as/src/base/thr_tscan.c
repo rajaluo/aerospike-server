@@ -171,6 +171,7 @@ typedef struct {
 
 void  scan_job_release_and_destroy(tscan_job *job);
 int   tscan_send_fin_to_client(tscan_job *job, uint32_t result_code);
+int   tscan_send_response_to_client( tscan_job *job, uint8_t *buf, size_t len);
 int   tscan_enqueue_udfjob(tscan_job *job);
 int   tscan_start_job(tscan_job *job, as_transaction *tr, bool scan_disconnected_job);
 void  dump_digest(cf_digest *dd) {
