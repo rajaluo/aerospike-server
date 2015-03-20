@@ -3385,8 +3385,15 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of defrag-lwm-pct of ns %s from %d to %d ", ns->name, ns->storage_defrag_lwm_pct, val);
+
+			uint32_t old_val = ns->storage_defrag_lwm_pct;
+
 			ns->storage_defrag_lwm_pct = val;
 			ns->defrag_lwm_size = (ns->storage_write_block_size * ns->storage_defrag_lwm_pct) / 100;
+
+			if (ns->storage_defrag_lwm_pct > old_val) {
+				as_storage_defrag_sweep(ns);
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-queue-min", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
