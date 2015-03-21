@@ -330,10 +330,15 @@ void ldt_chunk_destroy(ldt_record *lrecord, ldt_slot_chunk *lchunk)
  */
 void ldt_slot_destroy(ldt_slot *lslotp, ldt_record *lrecord)
 {
-	udf_record_destroy(lslotp->c_urec_p);
-	as_val_destroy(lslotp->c_urec_p);
-	lrecord->num_slots_used--;
-	lslotp->inuse = false;
+	if (lslotp->c_urec_p) {
+		udf_record_destroy(lslotp->c_urec_p);
+		as_rec_destroy(lslotp->c_urec_p);
+		lslotp->c_urec_p = NULL;
+		lrecord->num_slots_used--;
+		lslotp->inuse = false;
+	} else {
+		cf_warning(AS_LDT, "ldt_slot_destroy: Internal Error [Attempt to free invalid slot] ... Skipped");
+	}
 }
 
 /*
@@ -708,7 +713,7 @@ ldt_aerospike_crec_close(const as_aerospike * as, const as_rec *crec_p)
 		cf_detail(AS_LDT, "Cannot close record with update ... it needs group commit");
 		return -2;
 	}
-	udf_record_close(c_urecord, false);
+	udf_record_close(c_urecord);
 	udf_record_cache_free(c_urecord);
 	ldt_slot_destroy(lslotp, lrecord);
 	c_urecord->flag &= ~UDF_RECORD_FLAG_ISVALID;
@@ -836,7 +841,7 @@ static int
 ldt_aerospike_log(const as_aerospike * a, const char * file,
 				  const int line, const int lvl, const char * msg)
 {
-	a = a;
+	(void)a;
 	// Logging for Lua Files (UDFs) should be labeled as "UDF", not "LDT".
 	// If we want to distinguish between LDT and general UDF calls, then we
 	// need to create a separate context for LDT.
@@ -860,7 +865,7 @@ ldt_aerospike_destroy(as_aerospike * as)
 static cf_clock
 ldt_aerospike_get_current_time(const as_aerospike * as)
 {
-	as = as;
+	(void)as;
 	// Does anyone really know what time it is?
 	return cf_clock_getabsolute();
 
@@ -872,7 +877,7 @@ ldt_aerospike_get_current_time(const as_aerospike * as)
 static int
 ldt_aerospike_set_context(const as_aerospike * as, const as_rec *rec, const uint32_t context)
 {
-	as = as;
+	(void)as;
 	static const char * meth = "ldt_aerospike_set_context()";
 	if (!as || !rec) {
 		cf_warning(AS_LDT, "%s: Invalid Parameters [as=%p, record=%p]... Fail", meth, as, rec);

@@ -744,6 +744,7 @@ extern cf_node as_partition_getreplica_write(as_namespace *ns, as_partition_id p
 
 // reserve_qnode - *consumes* the ns reservation if success
 extern int as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
+extern void as_partition_prereserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[]);
 // reserve_write - *consumes* the ns reservation if success
 extern int as_partition_reserve_write(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
 // reserve_migrate - *consumes* the ns reservation if success
@@ -770,6 +771,12 @@ extern void as_partition_getinfo_str(cf_dyn_buf *db);
 extern void as_partition_getstates(as_partition_states *ps);
 
 extern void as_partition_getreplica_write_node(as_namespace *ns, cf_node *node_a);
+
+extern void as_partition_balance();
+extern void as_partition_balance_init();
+extern void as_partition_balance_init_multi_node_cluster();
+extern void as_partition_balance_init_single_node_cluster();
+extern bool as_partition_balance_is_init_resolved();
 
 typedef struct as_master_prole_stats_s {
 	uint64_t n_master_records;
@@ -1046,7 +1053,7 @@ struct as_namespace_s {
 	struct as_sindex_s	*sindex;  // array with AS_MAX_SINDEX meta data
 	uint64_t			sindex_data_max_memory;
 	cf_atomic_int		sindex_data_memory_used;
-	shash				*sindex_property_hash;  // set_binid_type
+	shash               *sindex_set_binid_hash;
 	shash				*sindex_iname_hash;
 	uint32_t             binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
 

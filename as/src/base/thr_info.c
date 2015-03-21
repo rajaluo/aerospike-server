@@ -76,16 +76,19 @@
 #include "base/thr_sindex.h"
 #include "base/ldt.h"
 
-#define STR_NS             "ns"
-#define STR_SET            "set"
-#define STR_INDEXNAME      "indexname"
-#define STR_NUMBIN         "numbins"
-#define STR_INDEXDATA      "indexdata"
-#define STR_TYPE_NUMERIC   "numeric"
-#define STR_TYPE_STRING    "string"
-#define STR_ITYPE          "indextype"
-#define STR_ITYPE_OBJECT   "object"
-#define STR_BINTYPE        "bintype"
+#define STR_NS              "ns"
+#define STR_SET             "set"
+#define STR_INDEXNAME       "indexname"
+#define STR_NUMBIN          "numbins"
+#define STR_INDEXDATA       "indexdata"
+#define STR_TYPE_NUMERIC    "numeric"
+#define STR_TYPE_STRING     "string"
+#define STR_ITYPE           "indextype"
+#define STR_ITYPE_DEFAULT   "DEFAULT"
+#define STR_ITYPE_LIST      "LIST"
+#define STR_ITYPE_MAPKEYS   "MAPKEYS"
+#define STR_ITYPE_MAPVALUES "MAPVALUES"
+#define STR_BINTYPE         "bintype"
 
 extern int as_nsup_queue_get_size();
 
@@ -1592,6 +1595,60 @@ info_command_jem_stats(char *name, char *params, cf_dyn_buf *db)
 }
 
 int
+info_command_double_free(char *name, char *params, cf_dyn_buf *db)
+{
+	cf_debug(AS_INFO, "df command received: params %s", params);
+
+#ifdef USE_DF_DETECT
+	/*
+	 *  Purpose:         Do an intentional double "free()" to test Double "free()" Detection.
+	 *
+	 *  Command Format:  "df:"
+	 *
+	 *  This command operates in a 3-cycle to trigger a double "free()" condition:
+	 *
+	 *  - Executing this command the first time will dynamically allocate a small block of memory.
+	 *
+	 *  - Executing this command the second time will free the block.
+	 *
+	 *  - Executing it a third time will actually perform the double "free()" and should trigger
+	 *       the double "free()" detector, which will log an informative warning message.
+	 *
+	 *  - Executing it thereafter will repeat the 3-cycle, albeit using a different pseudo-random block size.
+	 *
+	 *  ***Warning***:  This command is provided *only* for testing abnormal situations.
+	 *                  Do not use it unless you are prepared for the potential consequences!
+	 */
+
+	static size_t block_sz = 1024, incr = 255, max = 2048;
+	static char *ptr = 0;
+	static int ctr = 0;
+
+	if (!ptr) {
+		cf_dyn_buf_append_string(db, "calling cf_""malloc(");
+		cf_dyn_buf_append_int(db, block_sz);
+		cf_dyn_buf_append_string(db, ")");
+		ptr = cf_malloc(block_sz);
+	} else {
+		cf_dyn_buf_append_string(db, "calling cf_""free(0x");
+		cf_dyn_buf_append_uint64_x(db, (uint64_t) ptr);
+		cf_dyn_buf_append_string(db, ")");
+		cf_free(ptr);
+		if (ctr++) {
+			ctr = 0;
+			ptr = 0;
+			block_sz = (block_sz + incr) % max;
+		}
+	}
+#else
+	cf_warning(AS_INFO, "Double \"free()\" Detection support is not compiled into build ~~ rebuild with \"USE_DF_DETECT=1\" to use");
+	cf_dyn_buf_append_string(db, "error");
+#endif
+
+	return 0;
+}
+
+int
 info_command_asm(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "asm command received: params %s", params);
@@ -1943,6 +2000,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.n_proto_fd_max);
 	cf_dyn_buf_append_string(db, ";proto-fd-idle-ms=");
 	cf_dyn_buf_append_int(db, g_config.proto_fd_idle_ms);
+	cf_dyn_buf_append_string(db, ";proto-slow-netio-sleep-ms=");
+	cf_dyn_buf_append_int(db, g_config.proto_slow_netio_sleep_ms);
 	cf_dyn_buf_append_string(db, ";transaction-retry-ms=");
 	cf_dyn_buf_append_int(db, g_config.transaction_retry_ms);
 	cf_dyn_buf_append_string(db, ";transaction-max-ms=");
@@ -2089,7 +2148,7 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";query-threshold=");
 	cf_dyn_buf_append_uint64(db, g_config.query_threshold);
 	cf_dyn_buf_append_string(db, ";query-untracked-time=");
-	cf_dyn_buf_append_uint64(db, g_config.query_untracked_time/1000); // Show it in micro seconds
+	cf_dyn_buf_append_uint64(db, g_config.query_untracked_time_ns/1000); // Show it in micro seconds
 
 	return(0);
 }
@@ -2351,12 +2410,14 @@ info_security_config_get(cf_dyn_buf *db)
 void
 info_xdr_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "xdr-delete-shipping-enabled=");
+	cf_dyn_buf_append_string(db, "enable-xdr=");
+	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";forward-xdr-writes=");
+	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_forward_xdrwrites ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";xdr-delete-shipping-enabled=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_delete_shipping_enabled ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";xdr-nsup-deletes-enabled=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_nsup_deletes_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";enable-xdr=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";stop-writes-noxdr=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
 }
@@ -2598,6 +2659,12 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of proto-fd-idle-ms from %d to %d ", g_config.proto_fd_idle_ms, val);
 			g_config.proto_fd_idle_ms = val;
 		}
+		else if (0 == as_info_parameter_get(params, "proto-slow-netio-sleep-ms", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val))
+				goto Error;
+			cf_info(AS_INFO, "Changing value of proto-slow-netio-sleep-ms from %d to %d ", g_config.proto_slow_netio_sleep_ms, val);
+			g_config.proto_slow_netio_sleep_ms = val;
+		}
 		else if (0 == as_info_parameter_get(params, "nsup-delete-sleep", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
@@ -2659,7 +2726,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			g_config.migrate_xmit_lwm = val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || (0 >= val))
+			if (0 != cf_str_atoi(context, &val) || (0 > val))
 				goto Error;
 			cf_info(AS_INFO, "Changing value of migrate-max-num-incoming from %d to %d ", g_config.migrate_max_num_incoming, val);
 			g_config.migrate_max_num_incoming = val;
@@ -2884,8 +2951,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of query-untracked-time from %"PRIu64" micro seconds to %"PRIu64" micro seconds", 
-						g_config.query_untracked_time/1000, val);
-			g_config.query_untracked_time = val * 1000;
+						g_config.query_untracked_time_ns/1000, val);
+			g_config.query_untracked_time_ns = val * 1000;
 		}
 		else if (0 == as_info_parameter_get(params, "query-rec-count-bound", context, &context_len)) {
 			uint64_t val = atoll(context);
@@ -3074,6 +3141,19 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) { 
 				cf_info(AS_INFO, "Changing value of query-enable-histogram to %s", context);
 				g_config.query_enable_histogram = false;
+			}    
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "pre-reserve-qnodes", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) { 
+				cf_info(AS_INFO, "Changing value of reserve-qnodes-upfront to %s", context);
+				g_config.qnodes_pre_reserved = true;
+			}    
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) { 
+				cf_info(AS_INFO, "Changing value of reserve-qnodes-upfront to %s", context);
+				g_config.qnodes_pre_reserved = false;
 			}    
 			else {
 				goto Error;
@@ -3362,7 +3442,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "forward-xdr-writes", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "ns-forward-xdr-writes", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of sets-enable-xdr of ns %s from %s to %s", ns->name, bool_val[ns->ns_forward_xdr_writes], context);
 				ns->ns_forward_xdr_writes = true;
@@ -5075,7 +5155,7 @@ info_interfaces_static_fn(void *gcc_is_ass)
 	}
 
 	cf_dyn_buf_free(&temp_service_db);
-	free(service_str);
+	cf_free(service_str);
 
 	// For valid external-address specify the same in service-list 
 	cf_dyn_buf_define(service_db);
@@ -5419,6 +5499,9 @@ info_get_services_reduce_fn(void *key, void *data, void *udata)
 int
 info_get_services(char *name, cf_dyn_buf *db)
 {
+	// If this node is contacted by clients before it sees other nodes, change
+	// its initial state to that of a single-node cluster.
+	as_partition_balance_init_single_node_cluster();
 
 	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) db);
 
@@ -5945,8 +6028,9 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 int
 info_get_service(char *name, cf_dyn_buf *db)
 {
-
-	cf_dyn_buf_append_string(db, g_service_str );
+	pthread_mutex_lock(&g_service_lock);
+	cf_dyn_buf_append_string(db, g_service_str ? g_service_str : " ");
+	pthread_mutex_unlock(&g_service_lock);
 
 	return(0);
 }
@@ -6121,9 +6205,8 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		return 0;
 	}
 
-	// ONLY FOR CREATE AFTER THIS POINT
-
-	// INDEXTYPE INDEXTYPE INDEXTYPE
+	// Get the index type. 
+	// It could be list, mapkeys, mapvalues, or by default none.
 	char indextype_str[128];
 	memset(indextype_str, 0, 128);
 	int  indtype_len = sizeof(indextype_str);
@@ -6132,135 +6215,120 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		imd->itype = AS_SINDEX_ITYPE_DEFAULT;
 	}
 	else {
-		if (strncmp(indextype_str, STR_ITYPE_OBJECT, 6) == 0) {
-			imd->itype = AS_SINDEX_ITYPE_OBJECT;
-		} else if (strncmp(indextype_str, "default", 8) == 0) {
+		if (strncasecmp(indextype_str, STR_ITYPE_DEFAULT, 7) == 0) {
 			imd->itype = AS_SINDEX_ITYPE_DEFAULT;
-		} else {
+		}
+		else if (strncasecmp(indextype_str, STR_ITYPE_LIST, 4) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_LIST;
+		}
+		else if (strncasecmp(indextype_str, STR_ITYPE_MAPKEYS, 7) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_MAPKEYS;
+		}
+		else if (strncasecmp(indextype_str, STR_ITYPE_MAPVALUES, 9) == 0) {
+			imd->itype = AS_SINDEX_ITYPE_MAPVALUES;
+		}
+		else {
 			cf_warning(AS_INFO, "Failed to create secondary index : invalid type of index"
-					" for sindex creation %s ", indexname_str);
+					" for sindex creation %s %s", indexname_str, indextype_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid type must be [functional, userland, default]");
+					"Invalid type must be [none, list, mapkeys, mapvalues]");
 			return AS_SINDEX_ERR_PARAM;
 		}
 	}
 
-	if (imd->itype == AS_SINDEX_ITYPE_OBJECT) { //printf("OBJECT INDEX\n");
-		cf_info(AS_INFO, "Falied to create secondary index : Unsupported Index Type "
-				"(AS_SINDEX_ITYPE_OBJECT) for sindex creation %s", indexname_str);
+	// Gather indexdata	
+	char indexdata_str[1024];
+	int  indexdata_len = sizeof(indexdata_str);
+	if (as_info_parameter_get(params, STR_INDEXDATA, indexdata_str,
+				&indexdata_len)) {
+		cf_warning(AS_INFO, "Failed to create secondary index : invalid indexdata for"
+				" sindex creation %s %s", indexname_str, indexdata_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Unsupported Index Type");
+				"Invalid indexdata");
 		return AS_SINDEX_ERR_PARAM;
+	}
+	// Read indexdata
+	cf_vector *str_v = cf_vector_create(sizeof(void *), 10, VECTOR_FLAG_INITZERO);
+	cf_str_split(",", indexdata_str, str_v);
+	if (0 != (cf_vector_size(str_v) % 2) || AS_SINDEX_BINMAX < (cf_vector_size(str_v) / 2)) {
+		cf_warning(AS_INFO, "Failed to create secondary index : number of bins more than"
+				"  %d for sindex creation %s", AS_SINDEX_BINMAX, indexname_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+				"invalid indexdata");
+		cf_vector_destroy(str_v);
+		return AS_SINDEX_ERR_PARAM;
+	}
 
-		// TODO: Object Indexes
-		imd->num_bins = 1;
-		char btype_str[1024];
-		int  btype_len = sizeof(btype_str);
-		if (as_info_parameter_get(params, STR_BINTYPE, btype_str, &btype_len)) {
-			cf_warning(AS_INFO, "Failed to create secondary index : invalid bintype for "
-					"secondary index creation %s ", indexname_str);
+	// Bin data
+	// TODO: Remove the half cooked multi-col index support from server.
+	int bincount = 0;
+	for (int i = 0; i < (cf_vector_size(str_v) / 2); i++) {
+		// Not more than AS_SINDEX_BINMAX are allowed
+		if (bincount >= AS_SINDEX_BINMAX) {
+			cf_warning(AS_INFO, "Failed to create secondary index: More bins are specified "
+					"than %d for sindex creation %s ", AS_SINDEX_BINMAX, indexname_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid bintype");
-			return AS_SINDEX_ERR_PARAM;
-		}
-		if        (strncasecmp(btype_str, "string", 6) == 0) {
-			imd->btype[0] = AS_SINDEX_KTYPE_DIGEST;
-		} else if (strncasecmp(btype_str, "numeric", 7) == 0) {
-			imd->btype[0] = AS_SINDEX_KTYPE_LONG;
-		} else {
-			cf_warning(AS_INFO, "Failed to create secondary index: bin type (%s) "
-					"not supported for sindex creation %s", btype_str, indexname_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid bintype");
-			return AS_SINDEX_ERR_PARAM;
-		}
-		char obj_cname[1024];
-		sprintf(obj_cname, "INDEX:%s", imd->iname);
-		imd->bnames[0] = cf_strdup(obj_cname);
-		imd->oindx     = 1;
-	} else {
-
-		// BINNAME / TYPE ... BINNAME / TYPE .. BINNAME / TYPE
-		char indexdata_str[1024];
-		int  indexdata_len = sizeof(indexdata_str);
-		if (as_info_parameter_get(params, STR_INDEXDATA, indexdata_str,
-					&indexdata_len)) {
-			cf_warning(AS_INFO, "Failed to create secondary index : invalid indexdata for"
-					" sindex creation %s", indexname_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid indexdata");
-			return AS_SINDEX_ERR_PARAM;
-		}
-		cf_vector *str_v = cf_vector_create(sizeof(void *), 10,
-				VECTOR_FLAG_INITZERO);
-		cf_str_split(",", indexdata_str, str_v);
-		if (0 != (cf_vector_size(str_v) % 2) ||
-				AS_SINDEX_BINMAX < (cf_vector_size(str_v) / 2)) {
-			cf_warning(AS_INFO, "Failed to create secondary index : number of bins more than"
-					"  %d for sindex creation %s", AS_SINDEX_BINMAX, indexname_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"invalid indexdata");
+					"More bins specified than allowed");
 			cf_vector_destroy(str_v);
 			return AS_SINDEX_ERR_PARAM;
 		}
 
-		int bincount = 0;
-		for (int i = 0; i < (cf_vector_size(str_v) / 2); i++) {
-			if (bincount >= AS_SINDEX_BINMAX) {
-				cf_warning(AS_INFO, "Failed to create secondary index: More bins are specified "
-						"than %d for sindex creation %s ", AS_SINDEX_BINMAX, indexname_str);
-				INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-						"More bins specified than allowed");
-				cf_vector_destroy(str_v);
-				return AS_SINDEX_ERR_PARAM;
-			}
-
-			char *bname_str;
-			cf_vector_get(str_v, i * 2, &bname_str);
-			imd->bnames[i] = cf_strdup(bname_str);
-
-			char *type_str = NULL;
-			cf_vector_get(str_v, i * 2 + 1, &type_str);
-
-			if (!type_str) {
-				cf_warning(AS_INFO, "Failed to create secondary index: bin type must be specified"
-						" for sindex creation %s ", indexname_str);
-				INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-						"Invalid type must be [numeric,string]");
-				cf_vector_destroy(str_v);
-				return AS_SINDEX_ERR_PARAM;
-			}
-			else if        (strncasecmp(type_str, "string", 6) == 0) {
-				imd->btype[i] = AS_SINDEX_KTYPE_DIGEST;
-			} else if (strncasecmp(type_str, "numeric", 7) == 0) {
-				imd->btype[i] = AS_SINDEX_KTYPE_LONG;
-			} else {
-				cf_warning(AS_INFO, "Failed to create secondary index : invalid bin type %s "
-						"for sindex creation %s", type_str, indexname_str);
-				INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-						"Invalid type must be [numeric,string]");
-				cf_vector_destroy(str_v);
-				return AS_SINDEX_ERR_PARAM;
-			}
-			bincount++;
+		char *path_str;
+		cf_vector_get(str_v, i * 2, &path_str);
+		imd->path_str = cf_strdup(path_str);
+		cf_info(AS_SINDEX, "path %s", imd->path_str);
+		// Extract the path and bin
+		if (as_sindex_extract_bin_path(imd, path_str)) {
+			cf_warning(AS_INFO, "Failed to create secondary index: Path_str is not valid- %s", path_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid path");
+			return AS_SINDEX_ERR_PARAM;
 		}
-		imd->num_bins = bincount;
 
-		for (int i = 0; i < AS_SINDEX_BINMAX; i++) {
-			if (imd->bnames[i] &&
-					(strlen(imd->bnames[i]) >= BIN_NAME_MAX_SZ)) {
-				cf_warning(AS_INFO, "Failed to create secondary creation: Bin Name %s longer "
-						"than allowed (%d) for sindex creation %s", imd->bnames[i],
-						BIN_NAME_MAX_SZ, indexname_str);
-				INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-						"Bin Name too long");
-				return AS_SINDEX_ERR_PARAM;
-			}
+		if (!imd->bnames[i]) {
+			cf_warning(AS_INFO, "Failed to create secondary index: bin name must be specified for sindex creation");
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid bin name");
+			cf_vector_destroy(str_v);
+			return AS_SINDEX_ERR_PARAM;
 		}
-		cf_vector_destroy(str_v);
+
+		// Extract data type to index
+		char *type_str = NULL;
+		cf_vector_get(str_v, i * 2 + 1, &type_str);
+
+		if (!type_str) {
+			cf_warning(AS_INFO, "Failed to create secondary index: bin type must be specified"
+					" for sindex creation %s ", indexname_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type must be [numeric,string]");
+			cf_vector_destroy(str_v);
+			return AS_SINDEX_ERR_PARAM;
+		}
+		else if (strncasecmp(type_str, "string", 6) == 0) {
+			imd->btype[i] = AS_SINDEX_KTYPE_DIGEST;
+		} else if (strncasecmp(type_str, "numeric", 7) == 0) {
+			imd->btype[i] = AS_SINDEX_KTYPE_LONG;
+		} else {
+			cf_warning(AS_INFO, "Failed to create secondary index : invalid bin type %s "
+					"for sindex creation %s", type_str, indexname_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
+					"Invalid type must be [numeric,string]");
+			cf_vector_destroy(str_v);
+			return AS_SINDEX_ERR_PARAM;
+		}
+		bincount++;
 	}
-	return AS_SINDEX_OK;
 
+	imd->num_bins = bincount;
+	for (int i = 0; i < imd->num_bins; i++) {
+		if (imd->bnames[i] && (strlen(imd->bnames[i]) >= BIN_NAME_MAX_SZ)) {
+			cf_warning(AS_INFO, "Failed to create secondary creation: Bin Name %s longer "
+					"than allowed (%d) for sindex creation %s", imd->bnames[i],
+					BIN_NAME_MAX_SZ, indexname_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Bin Name too long");
+			return AS_SINDEX_ERR_PARAM;
+		}
+	}
+	cf_vector_destroy(str_v);
+	return AS_SINDEX_OK;
 }
 
 // called for asinfo command to create a new sindex
@@ -6299,28 +6367,23 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_FOUND,
 				"Index with the same name already exists or this bin has already been indexed.");
 		goto ERR;
-	} else if(res == AS_SINDEX_ERR_PARAM) {
+	} 
+	else if (res == AS_SINDEX_ERR_PARAM) {
 		cf_info(AS_INFO, "Index-name is too long, should be a max of: %d.", AS_ID_INAME_SZ - 1);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_NAME_MAXLEN,
 				"Index-name is too long.");
 		goto ERR;
 	}
-
-	// Check for max si's on the system : best-effort checking
-	// There is a hole here because we don't acquire a global lock for this check,
-	// but this is for the clean-case.
-	int i;
-	for (i = 0; i < AS_SINDEX_MAX; i++) {
-		// There is a valid new si slot that can be created.
-		if (ns->sindex[i].state == AS_SINDEX_INACTIVE) {
-			break;
-		}
-	}
-
-	if (i == AS_SINDEX_MAX) {
-		cf_info(AS_INFO, "System already has %d indexes and is maxed-out, cannot create new index", AS_SINDEX_MAX);
+	else if (res == AS_SINDEX_ERR_MAXCOUNT) {
+		cf_info(AS_INFO, "More than %d index are not allowed per namespace.", AS_SINDEX_MAX);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_MAXCOUNT,
-				"System already has maximum number of indexes, cannot create new index");
+				"Reached maximum number of sindex allowed");
+		goto ERR;
+
+	}
+	else if (res != AS_SINDEX_OK) {
+		cf_info(AS_INFO, "Index creation failed. Error %d", res);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_GENERIC,"");
 		goto ERR;
 	}
 
@@ -6931,7 +6994,7 @@ as_info_init()
 	}
 
 	// All commands accepted by asinfo/telnet
-	as_info_set("help", "alloc-info;asm;build;bins;config-get;config-set;digests;"
+	as_info_set("help", "alloc-info;asm;build;bins;config-get;config-set;df;digests;"
 				"dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-smd;"
 				"dump-wb;dump-wb-summary;dump-wr;dun;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
@@ -6985,6 +7048,7 @@ as_info_init()
 	as_info_set_command("asm", info_command_asm, PERM_SERVICE_CTRL);                          // Control the operation of the ASMalloc library.
 	as_info_set_command("config-get", info_command_config_get, PERM_NONE);                    // Returns running config for specified context.
 	as_info_set_command("config-set", info_command_config_set, PERM_SET_CONFIG);              // Set a configuration parameter at run time, configuration parameter must be dynamic.
+	as_info_set_command("df", info_command_double_free, PERM_SERVICE_CTRL);                   // Do an intentional double "free()" to test Double "free()" Detection.
 	as_info_set_command("dump-fabric", info_command_dump_fabric, PERM_LOGGING_CTRL);          // Print debug information about fabric to the log file.
 	as_info_set_command("dump-hb", info_command_dump_hb, PERM_LOGGING_CTRL);                  // Print debug information about heartbeat state to the log file.
 	as_info_set_command("dump-migrates", info_command_dump_migrates, PERM_LOGGING_CTRL);      // Print debug information about migration.

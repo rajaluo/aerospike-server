@@ -228,7 +228,7 @@ udf_rw_get_ldt_error(void *val, size_t vlen)
 		// we are obviously not looking at an LDT error.
 		if (&charptr[9] < &valptr[vlen]) {
 			if (memcmp(&charptr[5], ":LDT-", 5) == 0) {
-				error_code = strtol(&charptr[1], NULL, 10);
+				error_code = strtol(&charptr[1], NULL, 0);
 				cf_debug(AS_UDF, "LDT Error: Code(%ld) String(%s)",
 						error_code, (char *) val);
 				return error_code;
@@ -758,7 +758,7 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 		set_id = as_index_get_set_id(r_ref->r);
 	}
 	// Close the record for all the cases
-	udf_record_close(urecord, false);
+	udf_record_close(urecord);
 
 	// Write to XDR pipe after closing the record, in order to release the record lock as
 	// early as possible.
@@ -803,25 +803,25 @@ udf_rw_update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success, b
 		} else {
 			cf_atomic_int_incr(&g_config.udf_lua_errs);
 		}
-	} else {
-		if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_reqs);
-		else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_reqs);
-		else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_reqs);
+	} 
 
-		if (ret == 0) {
-			if (is_success) {
-				if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_success);
-				else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_success);
-				else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_success);
-			} else {
-				if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_errs_other);
-				else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_errs_other);
-				else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_errs_other);
-			}
+	if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_reqs);
+	else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_reqs);
+	else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_reqs);
+
+	if (ret == 0) {
+		if (is_success) {
+			if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_success);
+			else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_success);
+			else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_success);
 		} else {
-            cf_info(AS_UDF,"lua error, ret:%d",ret);
-			cf_atomic_int_incr(&g_config.udf_lua_errs);
+			if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_errs_other);
+			else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_errs_other);
+			else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_errs_other);
 		}
+	} else {
+		cf_info(AS_UDF,"lua error, ret:%d",ret);
+		cf_atomic_int_incr(&g_config.udf_lua_errs);
 	}
 }
 
@@ -1174,7 +1174,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		// If both the record and the message have keys, check them.
 		if (rd.key) {
 			if (msg_has_key(m) && ! check_msg_key(m, &rd)) {
-				udf_record_close(&urecord, false);
+				udf_record_close(&urecord);
 				call->transaction->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
 				// Necessary to complete transaction, but error string would be
 				// ignored by client, so don't bother sending one.
@@ -1261,7 +1261,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		}
 
 	} else {
-		udf_record_close(&urecord, false);
+		udf_record_close(&urecord);
 		char *rs = as_module_err_string(ret_value);
 		call->transaction->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
 		send_response(call, "FAILURE", 7, AS_PARTICLE_TYPE_STRING, rs, strlen(rs));

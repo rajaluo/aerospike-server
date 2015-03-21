@@ -130,7 +130,8 @@
 //#define PRL_SCAN 0
 
 // TODO - eventually, we'll do better than this hard-wired value.
-const size_t INITIAL_BUFBUILDER_SIZE = 8 * 1024 * 1024;
+const size_t INITIAL_BUFBUILDER_SIZE = 2 * 1024 * 1024;
+const size_t SCAN_PROTO_LIMIT = 1024 * 1024;
 
 msg_template tscan_mt[] = {
 	{ TSCAN_FIELD_OP,       M_FT_UINT32 }, // operation
@@ -170,6 +171,7 @@ typedef struct {
 
 void  scan_job_release_and_destroy(tscan_job *job);
 int   tscan_send_fin_to_client(tscan_job *job, uint32_t result_code);
+int   tscan_send_response_to_client( tscan_job *job, uint8_t *buf, size_t len);
 int   tscan_enqueue_udfjob(tscan_job *job);
 int   tscan_start_job(tscan_job *job, as_transaction *tr, bool scan_disconnected_job);
 void  dump_digest(cf_digest *dd) {
@@ -1188,8 +1190,9 @@ typedef struct tscan_aggr_tr_udata {
 } tscan_aggr_tr_udata_t;
 
 void
-tscan_aggr_tree_reduce_fn(as_index *r, void *udata)
+tscan_aggr_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 {
+	as_index *r = r_ref->r;
 	tscan_aggr_tr_udata_t * d_ptr = (tscan_aggr_tr_udata_t *)(udata);
 	// If this is a valid set, check against the set of the record.
 	if (d_ptr->task->set_id != INVALID_SET_ID) {
@@ -1201,10 +1204,12 @@ tscan_aggr_tree_reduce_fn(as_index *r, void *udata)
 				cf_atomic64_decr(&d_ptr->task->si->stats.recs_pending);
 			}
 			cf_atomic_int_incr(&(d_ptr->task->pjob->n_obj_set_diff));
+			as_record_done(r_ref, d_ptr->task->ns);
 			return;
 		}
 	}
 	tscan_add_digest_list (d_ptr->recl, &(r->key), NULL);
+	as_record_done(r_ref, d_ptr->task->ns);
 }
 
 
@@ -1220,6 +1225,12 @@ void
 tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 {
 	tscan_task_data *u = (tscan_task_data *) udata;
+
+	if (*u->aborted) {
+		as_record_done(r_ref, u->ns);
+		return;
+	}
+
 	cf_buf_builder **bb_r = &(u->bb);
 
 	as_index *r = r_ref->r;
@@ -1284,11 +1295,11 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 		if (as_index_is_flag_set(r, AS_INDEX_FLAG_KEY_STORED)) {
 			as_storage_rd rd;
 			as_storage_record_open(u->ns, r, &rd, &r->key);
-			as_msg_make_response_bufbuilder(r, &rd, bb_r, true, NULL, true, true, u->binlist);
+			as_msg_make_response_bufbuilder(r, &rd, bb_r, true, NULL, true, true, true, u->binlist);
 			as_storage_record_close(r, &rd);
 		}
 		else {
-			as_msg_make_response_bufbuilder(r, NULL, bb_r, true, u->ns->name, true, false, u->binlist);
+			as_msg_make_response_bufbuilder(r, NULL, bb_r, true, u->ns->name, true, false, true, u->binlist);
 		}
 
 		if ((*bb_r)->alloc_sz > old_allocsz) {
@@ -1315,6 +1326,9 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 		if (SCAN_JOB_IS_POPULATOR(u->pjob)) {
 			if (u->si) {
 				cf_atomic64_decr(&u->si->stats.recs_pending);
+				SINDEX_GRLOCK();
+				AS_SINDEX_RESERVE(u->si);
+				SINDEX_GUNLOCK();
 				as_sindex_put_rd(u->si, &rd);
 			} else {
 				// No input si mentioned, so go ahead and populate all of the entries.
@@ -1360,7 +1374,7 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 				cf_atomic_int_add(&u->pjob->mem_buf, (*bb_r)->alloc_sz);
 			}
 			size_t old_allocsz = (*bb_r)->alloc_sz;
-			as_msg_make_response_bufbuilder(r, &rd, bb_r, false, NULL, true, true, u->binlist);
+			as_msg_make_response_bufbuilder(r, &rd, bb_r, false, NULL, true, true, true, u->binlist);
 			if ((*bb_r)->alloc_sz > old_allocsz) {
 				cf_atomic_int_add(&u->pjob->mem_buf, (*bb_r)->alloc_sz - old_allocsz);
 			}
@@ -1369,6 +1383,23 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 	}
 
 	as_record_done(r_ref, u->ns);
+
+	if (! SCAN_JOB_IS_POPULATOR(u->pjob)) {
+		// If we exceed the proto size limit, send accumulated data back to client
+		// and reset the buf-builder to start a new proto.
+		if ((*bb_r)->used_sz > SCAN_PROTO_LIMIT) {
+			pthread_mutex_lock(&u->pjob->LOCK);
+
+			if (0 != tscan_send_response_to_client(u->pjob, (*bb_r)->buf, (*bb_r)->used_sz)) {
+				*u->aborted = true;
+			}
+
+			pthread_mutex_unlock(&u->pjob->LOCK);
+
+			// Hack - didn't want to add a reset method to cf_buf_builder.
+			(*bb_r)->used_sz = 0;
+		}
+	}
 
 END:
 	u->yield_count++;
@@ -1875,6 +1906,7 @@ tscan_partition_thr(void *q_to_wait_on)
 		u.rsv         = &rsv;
 		u.job_id      = job->tid;
 		u.pjob        = job;
+		u.aborted     = &job_early_terminate;
 
 		if (job->hasudf) {
 			cf_detail(AS_SCAN, "UDF: Scan job %"PRIu64" has udf", job->tid);
@@ -1931,7 +1963,7 @@ tscan_partition_thr(void *q_to_wait_on)
 					.task = &u 
 				};
 
-				as_index_reduce_sync(rsv.tree, tscan_aggr_tree_reduce_fn, (void *)&tree_reduce_udata);
+				as_index_reduce(rsv.tree, tscan_aggr_tree_reduce_fn, (void *)&tree_reduce_udata);
 
 				as_result   *res    = as_result_new();
 				int ret             = as_aggr__process(u.aggr_call, recl, &u, res);

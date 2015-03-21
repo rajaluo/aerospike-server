@@ -192,6 +192,14 @@
 static pthread_mutex_t		g_migration_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool                 g_allow_migrations = false;
 
+static pthread_mutex_t g_balance_init_lock = PTHREAD_MUTEX_INITIALIZER;
+
+#define BALANCE_INIT_UNRESOLVED	0
+#define BALANCE_INIT_RESOLVING	1
+#define BALANCE_INIT_RESOLVED	2
+
+volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
+
 
 
 // return number of partitions found in storage
@@ -377,6 +385,10 @@ void as_partition_allow_migrations() {
 
 // Set flag to disallow migrations
 void as_partition_disallow_migrations() {
+
+	// If this node sees others before it is contacted by clients, make sure it
+	// never changes its initial state to that of a single-node cluster.
+	as_partition_balance_init_multi_node_cluster();
 
 	/* lock */
 	if (0 != pthread_mutex_lock(&g_migration_lock))
@@ -883,7 +895,7 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 		cf_debug(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Origin node is NULL for non-sync master", ns->name, pid);
 
 	for (int i = 0; i < p->p_repl_factor; i++) {
-		if (p->replica[i] == (cf_node) 0) {
+		if (p->replica[i] == (cf_node) 0 && as_partition_balance_is_init_resolved()) {
 			cf_debug(AS_PARTITION, "{%s:%d} Detected state error. Replica list contains null node at position %d", ns->name, pid, i);
 			cf_atomic_int_incr(&g_config.err_replica_null_node);
 		}
@@ -917,7 +929,7 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 	else
 		n = is_read ? get_random_replica(p) : p->replica[0];
 
-	if (n == 0) {
+	if (n == 0 && as_partition_balance_is_init_resolved()) {
 		cf_debug(AS_PARTITION, "{%s:%d} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64"", ns->name, pid, my_index, p->replica[0], p->replica[1]);
 		cf_atomic_int_incr(&g_config.err_sync_copy_null_node);
 		n = p->replica[0];
@@ -1232,9 +1244,10 @@ as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_r
 
 	bool is_qnode  = false;
 	if (p->qnode) {
-		n = p->qnode;
+		n = p->qnode; //	    is_qnode = (n == self);
 	} else {
 		// is_read is always true in case of queries
+		// TODO this is not needed
 		n = find_sync_copy(ns, pid, p, true);
 	}
 	is_qnode = (n == self);
@@ -1258,6 +1271,57 @@ as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_r
 	return ret;
 }
 
+void
+as_partition_prereserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[])
+{
+	/*
+	 * Iterate through all the partitions
+	 * If the node is qnode for the partition 
+	 * 		set the pid index in is_partition_qnode as true
+	 * 		reserve the parition suing rsv of index pid.
+	 * Else 
+	 * 		Set the pid index in is_partition_qnode as false
+	 */
+	as_partition * p = NULL;
+
+	// Iterate through all the partitions in the namespace
+	for (int i=0; i<AS_PARTITIONS; i++) {
+		p = &ns->partitions[i];
+		cf_node self = g_config.self_node;
+
+		if (0 != pthread_mutex_lock(&p->lock))
+			cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+
+		bool is_qnode  = false;
+		if (p->qnode) {
+			is_qnode = (p->qnode == self);
+		}
+
+		// If the node is qnode for the partition
+		if (is_qnode) {
+			// Set the pid index in is_parition_qnode as true.
+			// Reserve the partition.
+			
+			AS_PARTITION_RESERVATION_INIT(rsv[i]);
+			as_partition_reserve_lockfree(ns, i, &rsv[i]);
+			is_partition_qnode[i] = true;
+	
+			// Theoretically, any partition which is qnode whould either belong to sync or 
+			// zombie state. Its better to know if some other state is becoming qnode.
+			if (AS_PARTITION_STATE_SYNC != p->state && AS_PARTITION_STATE_ZOMBIE != p->state) {
+				cf_warning(AS_PARTITION, "Not expected - Partition is qnode and partition %d is in %d state", i, p->state);
+			}
+			cf_atomic_int_incr(&g_config.dup_tree_count);
+		}
+		else {
+			is_partition_qnode[i] = false;
+		}
+
+		if (0 != pthread_mutex_unlock(&p->lock))
+			cf_crash(AS_PARTITION, "couldn't unlock partition state lock: %s", cf_strerror(errno));
+
+	}
+}
 /* as_partition_reserve_write
  * Obtain a write reservation on a partition, or get the address of a
  * node who can.
@@ -2427,6 +2491,18 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						cf_debug(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state", ns->name, pid, source_node);
 						break; // out of switch
 					}
+					// Mark master as query node when migration from the
+					// query node to master is finished. mark this node
+					// to reject writes
+					// Position of this logic is crucial.
+					if (source_node == p->qnode) {
+						cf_debug(AS_PARTITION, "[%s:%d] Marking %"PRIx64" as qnode from %"PRIx64"", ns->name, p->partition_id, g_config.self_node, p->qnode);
+						if (g_config.self_node != p->replica[0]) {
+							cf_warning(AS_PARTITION, "[%s:%d] state corruption self %"PRIx64" should be master %"PRIx64"",
+									ns->name, p->partition_id, g_config.self_node, p->replica[0]);
+						}
+						p->qnode = g_config.self_node;
+					}
 
 					if (p->pending_migrate_rx > 0) {
 						cf_debug(AS_PARTITION, "{%s:%d} Received migrate from node %"PRIx64". Waiting for more", ns->name, pid);
@@ -2443,16 +2519,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 							partition_migrate_record_fill(&r, &p->replica[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
 							cf_queue_push(mq, &r);
 						}
-					}
-					// Mark master as query node when migration from the
-					// query node to master is finished. mark this node
-					// to reject writes
-					if (source_node == p->qnode) {
-						cf_debug(AS_PARTITION, "[%s:%d] Marking %"PRIx64" as qnode from %"PRIx64"", ns->name, p->partition_id, g_config.self_node, p->qnode);
-						if (g_config.self_node != p->replica[0])
-							cf_warning(AS_PARTITION, "[%s:%d] state corruption self %"PRIx64" should be master %"PRIx64"",
-									   ns->name, p->partition_id, g_config.self_node, p->replica[0]);
-						p->qnode = g_config.self_node;
 					}
 			}
 
@@ -2743,7 +2809,7 @@ bool as_partition_valid_cluster_topology( as_paxos *paxos_p ) {
 } // end as_partition_valid_cluster_topology()
 
 
-/* as_partition_balance_new:
+/* as_partition_balance:
  * Balance partitions, succession lists and replica lists after cluster changes.
  * As explained below, we create a new master/prole list for each partition.
  * We track several things:
@@ -2751,19 +2817,13 @@ bool as_partition_valid_cluster_topology( as_paxos *paxos_p ) {
  * (*) The PER PARTITION node list (master and prole list)
  */
 void
-as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxos *paxos)
+as_partition_balance()
 {
+	// Shortcut pointers.
+	as_paxos *paxos = g_config.paxos;
+	cf_node *succession = paxos->succession;
+	bool *alive = paxos->alive;
 	cf_node self = g_config.self_node;
-
-	/*
-	 * Note that this code is called during node initialization time from
-	 * as_paxos_init and at that time the global paxos config object is not
-	 * initialized and cannot be used to get the succession list.
-	 */
-	if (NULL == succession)
-		succession = g_config.paxos->succession;
-	if (NULL == alive)
-		alive = g_config.paxos->alive;
 
 	if ((NULL == succession) || (NULL == alive)) {
 		cf_warning(AS_PARTITION,
@@ -3124,6 +3184,10 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 		cf_queue *mq = NULL;
 		mq =  cf_queue_create(sizeof(partition_migrate_record), false);
 
+		int ns_pending_migrate_rx = 0;
+		int ns_pending_migrate_tx = 0;
+		int ns_pending_migrate_tx_later = 0;
+
 		for (int j = 0; j < AS_PARTITIONS; j++) {
 			as_partition *p = &ns->partitions[j];
 			partition_migrate_record pmr;
@@ -3403,35 +3467,34 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 			uint64_t max_ptnsz    = 0;
 			p->qnode              = p->replica[0];
 
+			/*
+			 * QNODE CALCULATION - 
+			 * Iterate in the succession list from 0 to cluster size
+			 * 		Pick the first node with max partition size
+			 * 		Make it qnode.
+			 * 	
+			 * For non-qnode and non-master make qnode as master
+			 *
+			 * Order of preference
+			 * Largest Size
+			 * 		-- Master
+			 * 		-- Replica
+			 * 		-- Duplicate / Non-Replica [ZOMBIE]
+			 */
+			
 			for (int k = 0; k < cluster_size; k++) {
 				size_t n_index = HV_SLINDEX(j, k); // pick up the node offset
 				cf_node cur_node = HV(j, k);       // pick up the nodes
 				cf_debug(AS_PARTITION, "Node %d, has size %ld", k, paxos->c_partition_size[i][n_index][k]);
 
-				// Order of preference
-				// Largest Size
-				// -- Master
-				// -- Replica
-				// -- Duplicate / Non-Replica [ZOMBIE]
-
-				if (max_ptnsz < paxos->c_partition_size[i][n_index][j]) {
-					// If size if greater pick the duplicate node
-					if (cf_contains64(dupl_nodes, n_dupl, cur_node)) {
-						max_ptnsz = paxos->c_partition_size[i][n_index][j];
-						p->qnode = cur_node;
-						cf_debug(AS_PARTITION, "Picked for pid %d from dupl list size %ld node %ld", p->partition_id,
-								 max_ptnsz, k);
-					}
-
-					// over ride it with replica
-					int my_index = find_in_replica_list(p, cur_node);
-					bool is_master_or_replica = (0 <= my_index) && (my_index < p->p_repl_factor);
-					if (is_master_or_replica) {
-						max_ptnsz = paxos->c_partition_size[i][n_index][j];
-						p->qnode = cur_node;
-						cf_debug(AS_PARTITION, "Picked for pid %d from replica list size %ld %ld", p->partition_id,
-								 max_ptnsz, k);
-					}
+				// Since we are iterating in the succession list, 
+				// equal partition size in different nodes will be taken care.
+				// Order of preferance will be maintained.
+				if (max_ptnsz < paxos->c_partition_size[i][n_index][j]) {	
+					p->qnode = cur_node;
+					max_ptnsz = paxos->c_partition_size[i][n_index][j];
+					cf_debug(AS_PARTITION, "Picked for pid %d size %ld node %"PRIx64" index in succession list %d", 
+								p->partition_id, max_ptnsz, cur_node, k);
 				}
 			}
 
@@ -3572,8 +3635,10 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 							 * Schedule a delayed migrate of this partition
 							 */
 							cf_debug(AS_PARTITION, "{%s:%d} Master case 6b: delay migrating to replica %"PRIx64, ns->name, j, HV(j, k));
-							if ((p->n_dupl > 0) || (false == is_sync[k]))
+							if ((p->n_dupl > 0) || (false == is_sync[k])) {
 								p->replica_tx_onsync[k] = true;
+								ns_pending_migrate_tx_later++;
+							}
 						}
 						break; // out of switch
 					}
@@ -3724,6 +3789,9 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 			cf_debug(AS_PARTITION, "[DEBUG] Partition PID(%u) gets new CK(%"PRIx64")",
 					 p->partition_id, p->cluster_key );
 
+			ns_pending_migrate_rx += p->pending_migrate_rx;
+			ns_pending_migrate_tx += p->pending_migrate_tx;
+
 			/* unlock */
 			if (0 != pthread_mutex_unlock(&p->lock))
 				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
@@ -3732,8 +3800,11 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 
 		for (int j = 0; j < AS_PARTITIONS; j++) {
 			as_partition *p = &ns->partitions[j];
-			cf_debug(AS_PARTITION, "QNODE FOR PID=%"PRIx64"", p->qnode);
+			cf_debug(AS_PARTITION, "QNODE FOR PID %d =%"PRIx64"", j, p->qnode);
 		}
+
+		cf_info(AS_PARTITION, "{%s} re-balanced, expect migrations: out %d, in %d, out-later %d",
+				ns->name, ns_pending_migrate_tx, ns_pending_migrate_rx, ns_pending_migrate_tx_later);
 
 		cf_atomic_int_incr(&g_config.partition_generation);
 
@@ -3749,6 +3820,9 @@ as_partition_balance_new(cf_node *succession, bool *alive, bool migrate, as_paxo
 
 		cf_queue_destroy(mq);
 	} // end for each namespace.
+
+	// All partitions now have replicas assigned, ok to allow transactions.
+	g_balance_init = BALANCE_INIT_RESOLVED;
 
 	cf_debug(AS_PARTITION, "[END]  REBALANCE WINDOW");
 
@@ -3845,4 +3919,135 @@ Out:
 	cf_free(hv_slindex_ptr);
 
 	return;
-} // end as_partition_balance_new()
+} // end as_partition_balance()
+
+// Initially, every partition is either ABSENT, or a version was read from
+// storage and it is SYNC.
+void
+as_partition_balance_init()
+{
+	g_config.paxos->cluster_size = 1;
+	as_paxos_set_cluster_integrity(g_config.paxos, true);
+
+	for (uint32_t i = 0; i < g_config.namespaces; i++) {
+		as_namespace *ns = g_config.namespace[i];
+
+		ns->replication_factor = 1;
+
+		uint32_t n_stored = 0;
+
+		for (uint32_t j = 0; j < AS_PARTITIONS; j++) {
+			as_partition *p = &ns->partitions[j];
+
+			p->p_repl_factor = 1;
+
+			if (! is_partition_null(&p->version_info)) {
+				memcpy(p->replica, &g_config.self_node, sizeof(cf_node));
+				p->qnode = g_config.self_node;
+				p->primary_version_info = p->version_info;
+				n_stored++;
+			}
+			else {
+				// Stores the vinfo length, even when the vinfo is zeroed.
+				clear_partition_version_in_storage(ns, j, false);
+			}
+
+			p->old_sl[0] = g_config.self_node;
+			p->cluster_key = as_paxos_get_cluster_key();
+		}
+
+		if (n_stored < AS_PARTITIONS) {
+			flush_to_storage(ns);
+		}
+
+		cf_info(AS_PARTITION, "{%s} %u partitions: found %u absent, %u stored",
+				ns->name, AS_PARTITIONS, AS_PARTITIONS - n_stored, n_stored);
+	}
+
+	cf_atomic_int_incr(&g_config.partition_generation);
+	as_partition_allow_migrations();
+}
+
+// If this node encounters other nodes before it is contacted by a client, any
+// initially ABSENT partitions participate in paxos and balancing as ABSENT.
+void
+as_partition_balance_init_multi_node_cluster()
+{
+	pthread_mutex_lock(&g_balance_init_lock);
+
+	if (g_balance_init == BALANCE_INIT_UNRESOLVED) {
+		g_balance_init = BALANCE_INIT_RESOLVING;
+
+		cf_info(AS_PARTITION, "node will operate in a multi-node cluster");
+	}
+
+	pthread_mutex_unlock(&g_balance_init_lock);
+}
+
+// If this node is contacted by a client before it encounters other nodes, all
+// initially ABSENT partitions are assigned a new version and converted to SYNC.
+void
+as_partition_balance_init_single_node_cluster()
+{
+	pthread_mutex_lock(&g_balance_init_lock);
+
+	if (g_balance_init != BALANCE_INIT_UNRESOLVED) {
+		pthread_mutex_unlock(&g_balance_init_lock);
+		return;
+	}
+
+	cf_info(AS_PARTITION, "node will operate as a single-node cluster");
+
+	as_partition_vinfo new_vinfo;
+
+	memset(&new_vinfo, 0, sizeof(new_vinfo));
+	generate_new_partition_version(&new_vinfo);
+
+	for (uint32_t i = 0; i < g_config.namespaces; i++) {
+		as_namespace *ns = g_config.namespace[i];
+
+		uint32_t n_promoted = 0;
+
+		for (uint32_t j = 0; j < AS_PARTITIONS; j++) {
+			as_partition *p = &ns->partitions[j];
+
+			if (is_partition_null(&p->version_info)) {
+				// For nsup, which is allowed to operate while we're doing this.
+				pthread_mutex_lock(&p->lock);
+
+				p->state = AS_PARTITION_STATE_SYNC;
+				memcpy(p->replica, &g_config.self_node, sizeof(cf_node));
+				p->qnode = g_config.self_node;
+
+				p->version_info = new_vinfo;
+				p->primary_version_info = new_vinfo;
+				g_config.paxos->c_partition_vinfo[i][0][j] = new_vinfo;
+				set_partition_version_in_storage(ns, j, &new_vinfo, false);
+
+				n_promoted++;
+
+				pthread_mutex_unlock(&p->lock);
+			}
+		}
+
+		if (n_promoted != 0) {
+			flush_to_storage(ns);
+		}
+
+		cf_info(AS_PARTITION, "{%s} %u absent partitions promoted to master",
+				ns->name, n_promoted);
+	}
+
+	// Don't do this twice.
+	g_balance_init = BALANCE_INIT_RESOLVED;
+
+	pthread_mutex_unlock(&g_balance_init_lock);
+}
+
+// Has the node resolved as operating either in a multi-node cluster or as a
+// single-node cluster?
+bool
+as_partition_balance_is_init_resolved()
+{
+	return g_balance_init == BALANCE_INIT_RESOLVED;
+}
