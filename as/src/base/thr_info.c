@@ -5499,10 +5499,6 @@ info_get_services_reduce_fn(void *key, void *data, void *udata)
 int
 info_get_services(char *name, cf_dyn_buf *db)
 {
-	// If this node is contacted by clients before it sees other nodes, change
-	// its initial state to that of a single-node cluster.
-	as_partition_balance_init_single_node_cluster();
-
 	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) db);
 
 	cf_dyn_buf_chomp(db);
