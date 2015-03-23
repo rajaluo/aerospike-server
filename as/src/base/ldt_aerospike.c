@@ -778,8 +778,9 @@ ldt_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 		// execution error return as it is
 		cf_debug(AS_LDT, "<%s> Exec Error(%d) from as_aero_rec_update()", meth, ret );
 	} else if (ret == -2) {
-		// Record is not open. Unexpected.  Should not reach here.
-		cf_warning(AS_LDT, "%s: Internal Error [Sub Record update which is not open rv(%d)]... Fail", meth, ret );
+		// Record is not open. Unexpected with LDT usage, though a UDF test case
+		// does come through here.
+		cf_warning(AS_LDT, "%s: Record does not exist or is not open, cannot update");
 	}
 	return ret;
 }

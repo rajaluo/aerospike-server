@@ -190,15 +190,14 @@
  */
 
 static pthread_mutex_t		g_migration_lock = PTHREAD_MUTEX_INITIALIZER;
-static bool                 g_allow_migrations = false;
+static bool					g_allow_migrations = true;
 
-static pthread_mutex_t g_balance_init_lock = PTHREAD_MUTEX_INITIALIZER;
+static volatile int g_multi_node = false;
 
 #define BALANCE_INIT_UNRESOLVED	0
-#define BALANCE_INIT_RESOLVING	1
-#define BALANCE_INIT_RESOLVED	2
+#define BALANCE_INIT_RESOLVED	1
 
-volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
+static volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
 
 
 
@@ -385,10 +384,6 @@ void as_partition_allow_migrations() {
 
 // Set flag to disallow migrations
 void as_partition_disallow_migrations() {
-
-	// If this node sees others before it is contacted by clients, make sure it
-	// never changes its initial state to that of a single-node cluster.
-	as_partition_balance_init_multi_node_cluster();
 
 	/* lock */
 	if (0 != pthread_mutex_lock(&g_migration_lock))
@@ -3806,8 +3801,6 @@ as_partition_balance()
 		cf_info(AS_PARTITION, "{%s} re-balanced, expect migrations: out %d, in %d, out-later %d",
 				ns->name, ns_pending_migrate_tx, ns_pending_migrate_rx, ns_pending_migrate_tx_later);
 
-		cf_atomic_int_incr(&g_config.partition_generation);
-
 		/* Run all the queued migrations: this happens after the release of
 		 * the state lock to ensure that writes have begun to flow to their
 		 * new homes */
@@ -3823,6 +3816,10 @@ as_partition_balance()
 
 	// All partitions now have replicas assigned, ok to allow transactions.
 	g_balance_init = BALANCE_INIT_RESOLVED;
+
+	// Note - if we decide this is the best place to first increment this
+	// counter, we could get rid of g_balance_init and just use this instead.
+	cf_atomic_int_incr(&g_config.partition_generation);
 
 	cf_debug(AS_PARTITION, "[END]  REBALANCE WINDOW");
 
@@ -3963,41 +3960,22 @@ as_partition_balance_init()
 		cf_info(AS_PARTITION, "{%s} %u partitions: found %u absent, %u stored",
 				ns->name, AS_PARTITIONS, AS_PARTITIONS - n_stored, n_stored);
 	}
-
-	cf_atomic_int_incr(&g_config.partition_generation);
-	as_partition_allow_migrations();
 }
 
-// If this node encounters other nodes before it is contacted by a client, any
-// initially ABSENT partitions participate in paxos and balancing as ABSENT.
+// If this node encounters other nodes at startup, prevent it from switching to
+// a single-node cluster - any initially ABSENT partitions participate in paxos
+// and balancing as ABSENT.
 void
 as_partition_balance_init_multi_node_cluster()
 {
-	pthread_mutex_lock(&g_balance_init_lock);
-
-	if (g_balance_init == BALANCE_INIT_UNRESOLVED) {
-		g_balance_init = BALANCE_INIT_RESOLVING;
-
-		cf_info(AS_PARTITION, "node will operate in a multi-node cluster");
-	}
-
-	pthread_mutex_unlock(&g_balance_init_lock);
+	g_multi_node = true;
 }
 
-// If this node is contacted by a client before it encounters other nodes, all
-// initially ABSENT partitions are assigned a new version and converted to SYNC.
+// If we do not encounter other nodes at startup, all initially ABSENT
+// partitions are assigned a new version and converted to SYNC.
 void
 as_partition_balance_init_single_node_cluster()
 {
-	pthread_mutex_lock(&g_balance_init_lock);
-
-	if (g_balance_init != BALANCE_INIT_UNRESOLVED) {
-		pthread_mutex_unlock(&g_balance_init_lock);
-		return;
-	}
-
-	cf_info(AS_PARTITION, "node will operate as a single-node cluster");
-
 	as_partition_vinfo new_vinfo;
 
 	memset(&new_vinfo, 0, sizeof(new_vinfo));
@@ -4038,10 +4016,10 @@ as_partition_balance_init_single_node_cluster()
 				ns->name, n_promoted);
 	}
 
-	// Don't do this twice.
+	// Ok to allow transactions.
 	g_balance_init = BALANCE_INIT_RESOLVED;
 
-	pthread_mutex_unlock(&g_balance_init_lock);
+	cf_atomic_int_incr(&g_config.partition_generation);
 }
 
 // Has the node resolved as operating either in a multi-node cluster or as a
@@ -4050,4 +4028,11 @@ bool
 as_partition_balance_is_init_resolved()
 {
 	return g_balance_init == BALANCE_INIT_RESOLVED;
+}
+
+// Has this node encountered other nodes?
+bool
+as_partition_balance_is_multi_node_cluster()
+{
+	return g_multi_node;
 }
