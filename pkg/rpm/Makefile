@@ -22,9 +22,9 @@ dist:
 	install -d $(BUILD_ROOT)/etc/aerospike
 ifeq ($(OS), el7)
 	install -d $(BUILD_ROOT)/usr/lib/systemd/system
-else
-	install -d $(BUILD_ROOT)/etc/init.d
 endif
+	install -d $(BUILD_ROOT)/etc/init.d
+
 	install -d $(BUILD_ROOT)/etc/logrotate.d
 	install -d $(BUILD_ROOT)/usr/bin
 	install -d $(BUILD_ROOT)/var/log/aerospike
