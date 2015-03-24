@@ -2875,6 +2875,18 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else
 				goto Error;
 		}
+		else if (0 == as_info_parameter_get(params, "non-master-sets-delete", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of non-master-sets-delete from %s to %s", bool_val[g_config.non_master_sets_delete], context);
+				g_config.non_master_sets_delete = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of non-master-sets-delete from %s to %s", bool_val[g_config.non_master_sets_delete], context);
+				g_config.non_master_sets_delete = false;
+			}
+			else
+				goto Error;
+		}
 		else if (0 == as_info_parameter_get(params, "prole-extra-ttl", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
