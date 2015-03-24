@@ -777,6 +777,7 @@ extern void as_partition_balance_init();
 extern void as_partition_balance_init_multi_node_cluster();
 extern void as_partition_balance_init_single_node_cluster();
 extern bool as_partition_balance_is_init_resolved();
+extern bool as_partition_balance_is_multi_node_cluster();
 
 typedef struct as_master_prole_stats_s {
 	uint64_t n_master_records;
