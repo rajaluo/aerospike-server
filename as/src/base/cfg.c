@@ -436,6 +436,7 @@ typedef enum {
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
 	CASE_NAMESPACE_LDT_ENABLED,
+	CASE_NAMESPACE_LDT_PAGESIZE,
 	CASE_NAMESPACE_LDT_GC_RATE,
 	CASE_NAMESPACE_MAX_TTL,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
@@ -799,6 +800,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
 		{ "ldt-enabled",					CASE_NAMESPACE_LDT_ENABLED },
+		{ "ldt-page-size",					CASE_NAMESPACE_LDT_PAGESIZE },
 		{ "ldt-gc-rate",                    CASE_NAMESPACE_LDT_GC_RATE },
 		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
@@ -2380,6 +2382,13 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_LDT_ENABLED:
 				ns->ldt_enabled = cfg_bool(&line);
 				break;
+			case CASE_NAMESPACE_LDT_PAGESIZE:
+				ns->ldt_page_size = cfg_u32_no_checks(&line);
+				if (ns->ldt_page_size > ns->storage_write_block_size) {
+					// 1Kb head room
+					ns->ldt_page_size = ns->storage_write_block_size - 1024;
+				}
+				break;
 			case CASE_NAMESPACE_LDT_GC_RATE:
 				ns->ldt_gc_sleep_us = cfg_u64(&line, 1, LDT_SUB_GC_MAX_RATE) * 1000000;
 				break;
@@ -2514,6 +2523,10 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_WRITE_BLOCK_SIZE:
 				ns->storage_write_block_size = cfg_u32_no_checks(&line);
+				if (ns->ldt_page_size > ns->storage_write_block_size) {
+					// 1Kb head room
+					ns->ldt_page_size = ns->storage_write_block_size - 1024;
+				}
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_MEMORY_ALL:
 				cfg_renamed_name_tok(&line, "data-in-memory");

@@ -2209,6 +2209,9 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";ldt-enabled=");
 	cf_dyn_buf_append_string(db, ns->ldt_enabled ? "true" : "false");
+	
+	cf_dyn_buf_append_string(db, ";ldt-page-size=");
+	cf_dyn_buf_append_uint64(db, ns->ldt_page_size);
 
 	cf_dyn_buf_append_string(db, ";enable-xdr=");
 	cf_dyn_buf_append_string(db, ns->enable_xdr ? "true" : "false");
@@ -3379,6 +3382,17 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else {
 				goto Error;
 			}
+		}
+		else if (0 == as_info_parameter_get(params, "ldt-page-size", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+	  		if (val > ns->storage_write_block_size) {
+				// 1Kb head room
+				val = ns->storage_write_block_size - 1024;
+			}
+			cf_info(AS_INFO, "Changing value of ldt-page-size of ns %s from %d to %d ", ns->name, ns->ldt_page_size, val);
+			ns->ldt_page_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "ldt-gc-rate", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
@@ -5756,8 +5770,20 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_internal));
 		cf_dyn_buf_append_string(db, ";ldt-err-subrec-internal=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_internal));
-		cf_dyn_buf_append_string(db, ";ldt-err-transform-internal=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_transform_internal));
+
+		cf_dyn_buf_append_string(db, ";ldt-err-filer=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_filter));
+		cf_dyn_buf_append_string(db, ";ldt-err-key=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_key));
+		cf_dyn_buf_append_string(db, ";ldt-err-createspec=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_createspec));
+		cf_dyn_buf_append_string(db, ";ldt-err-usermodule=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_usermodule));
+		cf_dyn_buf_append_string(db, ";ldt-err-input-too-large=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_input_too_large));
+		cf_dyn_buf_append_string(db, ";ldt-err-ldt-not-enabled=");
+		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_ldt_not_enabled));
+
 		cf_dyn_buf_append_string(db, ";ldt-err-unknown=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unknown));
 	}

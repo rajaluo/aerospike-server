@@ -884,7 +884,12 @@ typedef struct ns_ldt_stats_s {
 
 	cf_atomic_int	ldt_err_subrec_internal;
 	cf_atomic_int	ldt_err_toprec_internal;
-	cf_atomic_int	ldt_err_transform_internal;
+	cf_atomic_int   ldt_err_filter;
+	cf_atomic_int	ldt_err_key;
+	cf_atomic_int	ldt_err_createspec;
+	cf_atomic_int	ldt_err_usermodule;
+	cf_atomic_int	ldt_err_input_too_large;
+	cf_atomic_int	ldt_err_ldt_not_enabled;
 
 	cf_atomic_int   ldt_gc_io;
 	cf_atomic_int   ldt_gc_cnt;
@@ -931,6 +936,7 @@ struct as_namespace_s {
 	bool						data_in_index;	// with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	bool 						disallow_null_setname;
 	bool                        ldt_enabled;
+	uint32_t                    ldt_page_size;
 	uint32_t					ldt_gc_sleep_us;
 
 	/* XDR */
