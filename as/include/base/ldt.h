@@ -92,9 +92,9 @@ extern cf_clock cf_clock_getabsoluteus();
 #define ERR_FILTER_NOT_FOUND     1431
 #define ERR_KEY_BAD              1432
 #define ERR_KEY_FIELD_NOT_FOUND  1433
-#define ERR_INPUT_CREATESPEC     1438
 #define ERR_INPUT_USER_MODULE_NOT_FOUND 1439
-#define ERR_INPUT_TOO_LARGE      1440
+#define ERR_INPUT_CREATESPEC     1442
+#define ERR_INPUT_TOO_LARGE      1443
 #define ERR_NS_LDT_NOT_ENABLED   1500
 
 

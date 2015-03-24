@@ -936,6 +936,7 @@ struct as_namespace_s {
 	bool						data_in_index;	// with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	bool 						disallow_null_setname;
 	bool                        ldt_enabled;
+	uint32_t                    ldt_page_size;
 	uint32_t					ldt_gc_sleep_us;
 
 	/* XDR */

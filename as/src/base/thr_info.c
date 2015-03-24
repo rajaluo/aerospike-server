@@ -2209,6 +2209,9 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";ldt-enabled=");
 	cf_dyn_buf_append_string(db, ns->ldt_enabled ? "true" : "false");
+	
+	cf_dyn_buf_append_string(db, ";ldt-page-size=");
+	cf_dyn_buf_append_uint64(db, ns->ldt_page_size);
 
 	cf_dyn_buf_append_string(db, ";enable-xdr=");
 	cf_dyn_buf_append_string(db, ns->enable_xdr ? "true" : "false");
@@ -3379,6 +3382,17 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else {
 				goto Error;
 			}
+		}
+		else if (0 == as_info_parameter_get(params, "ldt-page-size", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+	  		if (val > ns->storage_write_block_size) {
+				// 1Kb head room
+				val = ns->storage_write_block_size - 1024;
+			}
+			cf_info(AS_INFO, "Changing value of ldt-page-size of ns %s from %d to %d ", ns->name, ns->ldt_page_size, val);
+			ns->ldt_page_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "ldt-gc-rate", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
