@@ -2482,10 +2482,14 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						}
 					}
 					else {
-						// has been investigated, not a big deal
-						cf_debug(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state", ns->name, pid, source_node);
-						break; // out of switch
+						// No duplicates - we get here e.g. if master & prole(s)
+						// are desync and there is a single partition version
+						// coming from a zombie to here - the desync master.
+						cf_debug(AS_PARTITION, "{%s:%d} migrate rx from node %"PRIx64" to master, no duplicates", ns->name, pid, source_node);
+
+						// Might now do migration(s) to prole(s) - don't break!
 					}
+
 					// Mark master as query node when migration from the
 					// query node to master is finished. mark this node
 					// to reject writes
