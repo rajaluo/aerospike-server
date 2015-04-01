@@ -437,7 +437,6 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 
 	p->n_dupl = 0;
 	memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-	memset(p->dupl_pvinfo, 0, sizeof(p->dupl_pvinfo));
 	p->reject_writes = false;
 	p->waiting_for_master = false;
 	memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
@@ -2021,7 +2020,6 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 		p->target = 0;
 		p->n_dupl = 0;
 		memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-		memset(p->dupl_pvinfo, 0, sizeof(p->dupl_pvinfo));
 	}
 
 	/*
@@ -2465,13 +2463,10 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						if (found) {
 							if (i == (p->n_dupl - 1)) { // delete last entry
 								p->dupl_nodes[i] = (cf_node)0;
-								memset(&p->dupl_pvinfo[i], 0, sizeof(as_partition_vinfo));
 							}
 							else { // copy last entry into deleted entry
 								p->dupl_nodes[i] = p->dupl_nodes[p->n_dupl - 1];
 								p->dupl_nodes[p->n_dupl - 1] = (cf_node)0;
-								memcpy(&p->dupl_pvinfo[i], &p->dupl_pvinfo[p->n_dupl - 1], sizeof(as_partition_vinfo));
-								memset(&p->dupl_pvinfo[p->n_dupl - 1], 0, sizeof(as_partition_vinfo));
 							}
 							p->pending_migrate_rx--; // one more migrate completed
 							p->n_dupl--; // reduce array size
@@ -3260,7 +3255,6 @@ as_partition_balance()
 			/* Reinitialize duplication list */
 			p->n_dupl = 0;
 			memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-			memset(p->dupl_pvinfo, 0, sizeof(p->dupl_pvinfo));
 			p->reject_writes = false;
 			p->waiting_for_master = false;
 			memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
@@ -3596,7 +3590,6 @@ as_partition_balance()
 						if (n_dupl > 0) {
 							p->n_dupl = n_dupl;
 							memcpy(p->dupl_nodes, dupl_nodes, sizeof(cf_node) * p->n_dupl);
-							memcpy(p->dupl_pvinfo, dupl_pvinfo, sizeof(dupl_pvinfo));
 							for (int k = 0; k < p->n_dupl; k++) {
 								p->pending_migrate_rx++;
 								cf_debug(AS_PARTITION, "{%s:%d} Master: expect data from duplicate partition in node %"PRIx64"", ns->name, j, p->dupl_nodes[k]);
@@ -3706,7 +3699,6 @@ as_partition_balance()
 							if (n_dupl > 0) {
 								p->n_dupl = n_dupl;
 								memcpy(p->dupl_nodes, dupl_nodes, sizeof(cf_node) * p->n_dupl);
-								memcpy(p->dupl_pvinfo, dupl_pvinfo, sizeof(dupl_pvinfo));
 							}
 							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)true);
 						} else // duplicate nodes reject writes, so no need to flush

@@ -648,7 +648,6 @@ struct as_partition_s {
 
 	size_t n_dupl;
 	cf_node  dupl_nodes[AS_CLUSTER_SZ];
-	as_partition_vinfo  dupl_pvinfo[AS_CLUSTER_SZ];
 	bool reject_writes;
 	bool waiting_for_master;
 	cf_node  qnode; 	// point to the node which serves the query at the moment
