@@ -5387,7 +5387,7 @@ as_write_init()
 	}
 
 	rchash_create(&g_write_hash, write_digest_hash, write_request_destructor,
-			sizeof(global_keyd), 16 * 1024, RCHASH_CR_MT_MANYLOCK);
+			sizeof(global_keyd), 32 * 1024, RCHASH_CR_MT_MANYLOCK);
 
 	pthread_create(&g_rw_retransmit_th, 0, rw_retransmit_fn, 0);
 
