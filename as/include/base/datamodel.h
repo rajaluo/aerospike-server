@@ -609,9 +609,8 @@ typedef uint16_t as_partition_id;
 #define AS_PARTITION_STATE_DESYNC  2
 #define AS_PARTITION_STATE_ZOMBIE  3
 #define AS_PARTITION_STATE_WAIT 4
-#define AS_PARTITION_STATE_LIFESUPPORT 5
-#define AS_PARTITION_STATE_ABSENT 6
-#define AS_PARTITION_STATE_JOURNAL_APPLY 7 // used in faked reservations
+#define AS_PARTITION_STATE_ABSENT 5
+#define AS_PARTITION_STATE_JOURNAL_APPLY 6 // used in faked reservations
 typedef uint8_t as_partition_state;
 
 #define AS_PARTITION_MIG_TX_STATE_NONE  0
@@ -722,7 +721,6 @@ typedef struct as_partition_states_s {
 	int		desync;
 	int		zombie;
 	int 	wait;
-	int		lifesupport;
 	int		absent;
 	int		undef;
 	int     n_objects;

@@ -762,9 +762,6 @@ as_partition_getstates(as_partition_states *ps)
 				case AS_PARTITION_STATE_WAIT:
 					ps->wait++;
 					break;
-				case AS_PARTITION_STATE_LIFESUPPORT:
-					ps->lifesupport++;
-					break;
 				case AS_PARTITION_STATE_ABSENT:
 					ps->absent++;
 					ns_absent_partitions++;
@@ -1754,8 +1751,6 @@ as_partition_getstate_str(int state)
 			return 'Z';
 		case AS_PARTITION_STATE_WAIT:
 			return 'W';
-		case AS_PARTITION_STATE_LIFESUPPORT:
-			return 'L';
 		case AS_PARTITION_STATE_ABSENT:
 			return 'A';
 		default:
@@ -2188,7 +2183,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 
 			switch (p->state) {
 				case AS_PARTITION_STATE_UNDEF:
-				case AS_PARTITION_STATE_LIFESUPPORT:
 				case AS_PARTITION_STATE_JOURNAL_APPLY: // should never happen - it's a dummy state
 					cf_debug(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, fail", ns->name, pid, p->state);
 					rv = AS_MIGRATE_CB_FAIL;
@@ -2371,7 +2365,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 
 			switch (p->state) {
 				case AS_PARTITION_STATE_UNDEF:
-				case AS_PARTITION_STATE_LIFESUPPORT:
 				case AS_PARTITION_STATE_JOURNAL_APPLY: // should never happen - it's a dummy state
 				case AS_PARTITION_STATE_WAIT:
 				case AS_PARTITION_STATE_ABSENT:
@@ -3769,9 +3762,6 @@ as_partition_balance()
 					cf_warning(AS_PARTITION, "Reached what should be unreachable area of the code!");
 					break;
 			}
-
-			if (AS_PARTITION_STATE_LIFESUPPORT == p->state)
-				cf_warning(AS_PARTITION, "{%s:%d} ERROR in STATE: becoming lifesupport replica", ns->name, j);
 
 			/* copy the new succession list over the old succession list */
 			memcpy(p->old_sl, &hv_ptr[j * g_config.paxos_max_cluster_size], sizeof(cf_node) * g_config.paxos_max_cluster_size);

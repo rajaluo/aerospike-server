@@ -2664,7 +2664,6 @@ write_process(cf_node node, msg *m, bool respond)
 		}
 
 		if( tr.rsv.state == AS_PARTITION_STATE_ABSENT ||
-			tr.rsv.state == AS_PARTITION_STATE_LIFESUPPORT ||
 			tr.rsv.state == AS_PARTITION_STATE_WAIT)
 		{
 			cf_debug_digest(AS_RW, keyd, "[PROLE STATE MISMATCH:1] TID(0) Partition PID(%u) State is Absent or other(%u). Return to Sender.",
@@ -2792,7 +2791,6 @@ write_process(cf_node node, msg *m, bool respond)
 		// If so, then DO NOT WRITE.  Instead, return an error so that the
 		// Master will retry with the correct node.
 		if (rsv.state == AS_PARTITION_STATE_ABSENT ||
-			rsv.state == AS_PARTITION_STATE_LIFESUPPORT ||
 			rsv.state == AS_PARTITION_STATE_WAIT)
 		{
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
