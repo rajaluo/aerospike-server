@@ -4075,8 +4075,6 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		cf_hist_track_get_info(g_config.q_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 	}
 
-	cf_info(AS_INFO, "hist track %s command executed: params %s", name, params);
-
 	return 0;
 }
 
