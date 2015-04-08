@@ -1612,22 +1612,6 @@ NextElement:
 	return (0);
 }
 
-bool
-as_tscan_set_priority(uint64_t trid, uint16_t priority) {
-	tscan_job * job = NULL;
-	if (RCHASH_OK != rchash_get(g_scan_job_hash, &trid, sizeof(trid), (void **) &job)) {
-		cf_info(AS_SCAN, "Scan job with transaction id [%"PRIu64"] does not exist anymore", trid);
-		return false;
-	}
-	// Priority maps to number of threads in a job internally.
-	cf_info(AS_SCAN, "UDF: Received priority change for job [%"PRIu64"], setting number of threads to [%d]", job->tid, priority);
-	pthread_mutex_lock(&job->LOCK);
-	job->n_threads = priority;
-	pthread_mutex_unlock(&job->LOCK);
-	scan_job_release_and_destroy(job);
-	return true;
-}
-
 int
 as_tscan_abort(uint64_t trid)
 {

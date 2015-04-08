@@ -6699,56 +6699,6 @@ int info_command_sindex_repair(char *name, char *params, cf_dyn_buf *db) {
 	return(0);
 }
 
-int info_command_set_scan_priority(char *name, char *params, cf_dyn_buf *db) {
-	// Transaction id
-	char id[100];
-	int  id_len = sizeof(id);
-
-	// Scan Priority
-	char sp[20];
-	int sp_len = sizeof(sp);
-
-	int priority = 0;
-	uint64_t trid;
-	if (0 == as_info_parameter_get(params, "id", id, &id_len)) {
-		trid = strtoull(id, NULL, 10);
-	} else {
-		cf_dyn_buf_append_string(db, "Scan job id not specified");
-		return 0;
-	}
-
-	// Priority low maps to 1 transaction thread
-	// medium, auto to 3
-	// high to 5
-	if( 0 == as_info_parameter_get(params, "value", sp, &sp_len)) {
-		if(strncmp(sp, "low", 4) == 0 || strncmp(sp, "LOW", 4) == 0) {
-			priority = 1;
-		}
-		else if(strncmp(sp, "medium", 7) == 0 || strncmp(sp, "MEDIUM", 7) == 0 ) {
-			priority = 3;
-		}
-		else if(strncmp(sp, "auto", 5) == 0 || strncmp(sp, "AUTO", 5) == 0) {
-			priority = 3;
-		}
-		else if(strncmp(sp, "high", 5) == 0 || strncmp(sp, "HIGH", 5) == 0) {
-			priority = 5;
-		}
-		else {
-			cf_dyn_buf_append_string(db, "Invalid priority, try again\n");
-			return 0;
-		}
-	}
-
-	if (!as_tscan_set_priority(trid, priority)) {
-		cf_dyn_buf_append_string(db, "Transaction Not Found");
-	}
-	else {
-		cf_dyn_buf_append_string(db, "Ok");
-	}
-
-	return 0;
-}
-
 int info_command_abort_scan(char *name, char *params, cf_dyn_buf *db) {
 	char context[100];
 	int  context_len = sizeof(context);
