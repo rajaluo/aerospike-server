@@ -1372,6 +1372,11 @@ tscan_tree_reduce(as_index_ref *r_ref, void *udata)
 			// Hack - didn't want to add a reset method to cf_buf_builder.
 			(*bb_r)->used_sz = 0;
 		}
+
+		if (IS_SCAN_JOB_ABORTED(u->pjob)) {
+			*u->aborted = true;
+			u->pjob->result = AS_PROTO_RESULT_FAIL_SCAN_ABORT;
+		}
 	}
 
 END:
