@@ -141,6 +141,23 @@ const char *as_sindex_err_str(int op_code) {
 }
 
 /*
+ * Function as_sindex_isactive
+ *
+ * Returns sindex state
+ */
+inline bool as_sindex_isactive(as_sindex *si)
+{
+	if ((!si) || (!si->imd)) return FALSE;
+	bool ret;
+	if (si->state == AS_SINDEX_ACTIVE) {
+		ret = TRUE;
+	} else {
+		ret = FALSE;
+	}
+	return ret;
+}
+
+/*
  * Notes-
  * 		Translation from sindex internal error code to generic client visible
  * 		Aerospike error code
@@ -1138,6 +1155,10 @@ as_sindex_shutdown(as_namespace *ns)
 int
 as_sindex_reserve(as_sindex *si, char *fname, int lineno)
 {
+	if (!as_sindex_isactive(si)) {
+		cf_warning(AS_SINDEX, "Trying to reserve sindex %s in a state other than active. State is %d", 
+							si->imd->iname, si->state);
+	}
 	if (si->imd) cf_rc_reserve(si->imd);
 	int count = cf_rc_count(si->imd);
 	cf_debug(AS_SINDEX, "Index %s in %d state Reserved to reference count %d < 2 at %s:%d", si->imd->iname, si->state, count, fname, lineno);
@@ -1192,7 +1213,8 @@ as_sindex_release(as_sindex *si, char *fname, int lineno)
 					si->imd->iname, si->state, val, fname, lineno);
 		// Display a warning when rc math is messed-up during sindex-delete
 		if(si->state == AS_SINDEX_DESTROY){
-			cf_debug(AS_SINDEX,"Returning from a sindex destroy op for: %s with reference count %"PRIu64"", si->imd->iname, val);
+			cf_info(AS_SINDEX,"Returning from a sindex destroy op for: %s with reference count %"PRIu64"", 
+								si->imd->iname, val);
 		}
 		SINDEX_UNLOCK(&si->imd->slock);
 	}
@@ -1965,10 +1987,12 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 {
 	SINDEX_GRLOCK();
 	for (int i = 0; i < AS_SINDEX_MAX; i++) {
-		if (&(ns->sindex[i]) && (ns->sindex[i].imd) && as_sindex_isactive(&ns->sindex[i])) {
+		if (&(ns->sindex[i]) && (ns->sindex[i].imd)) {
 			as_sindex si = ns->sindex[i];
-			AS_SINDEX_RESERVE(&si);
-			SINDEX_RLOCK(&si.imd->slock);
+			if (as_sindex_isactive(&si)) {
+				AS_SINDEX_RESERVE(&si);
+				SINDEX_RLOCK(&si.imd->slock);
+			}
 			cf_dyn_buf_append_string(db, "ns=");
 			cf_dyn_buf_append_string(db, ns->name);
 			cf_dyn_buf_append_string(db, ":set=");
@@ -2015,8 +2039,10 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 			else {
 				cf_dyn_buf_append_string(db, ":state=D;");
 			}
-			SINDEX_UNLOCK(&si.imd->slock);
-			AS_SINDEX_RELEASE(&si);
+			if (as_sindex_isactive(&si)) {
+				SINDEX_UNLOCK(&si.imd->slock);
+				AS_SINDEX_RELEASE(&si);
+			}
 		}
 	}
 	SINDEX_GUNLOCK();
@@ -3956,23 +3982,6 @@ as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 	as_partition_release(&rsv);
 	return rv;
 
-}
-
-/*
- * Function as_sindex_isactive
- *
- * Returns sindex state
- */
-inline bool as_sindex_isactive(as_sindex *si)
-{
-	if ((!si) || (!si->imd)) return FALSE;
-	bool ret;
-	if (si->state == AS_SINDEX_ACTIVE) {
-		ret = TRUE;
-	} else {
-		ret = FALSE;
-	}
-	return ret;
 }
 
 int
