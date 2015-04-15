@@ -1600,6 +1600,33 @@ as_partition_getreplica_master(as_namespace *ns, as_partition_id pid)
 	return(n);
 }
 
+void
+as_partition_get_replicas_all(as_namespace *ns, as_partition_id pid, bool *owned, int n_repl)
+{
+	for (int j = 0; j < n_repl; j++) {
+		owned[j] = false;
+	}
+
+	as_partition *p = &ns->partitions[pid];
+	cf_node self = g_config.self_node;
+
+	pthread_mutex_lock(&p->lock);
+
+	int my_index = find_in_replica_list(p, self); // -1 if node is not found
+	bool am_master = (my_index == 0 && p->state == AS_PARTITION_STATE_SYNC) || p->target != 0;
+
+	if (am_master) {
+		owned[0] = true;
+	}
+	// Check my_index < n_repl only because n_repl could be out-of-sync with
+	// (less than) partition's replica list count.
+	else if (my_index > 0 && p->origin == 0 && my_index < n_repl) {
+		owned[my_index] = true;
+	}
+
+	pthread_mutex_unlock(&p->lock);
+}
+
 /*
 ** as_partition_getreplica_write_str
 ** Reduce the entire set of write replicas I have into a particular dyn_buf
@@ -1724,6 +1751,53 @@ as_partition_getreplica_prole_str(cf_dyn_buf *db)
 
 		cf_b64_encode(prole_bitmap, BITMAP_SIZE, b64_bitmap);
 		cf_dyn_buf_append_buf(db, (uint8_t*)b64_bitmap, B64_BITMAP_SIZE);
+		cf_dyn_buf_append_char(db, ';');
+	}
+
+	if (db_sz != db->used_sz) {
+		cf_dyn_buf_chomp(db);
+	}
+}
+
+void
+as_partition_get_replicas_all_str(cf_dyn_buf *db)
+{
+	size_t db_sz = db->used_sz;
+
+	for (uint32_t i = 0; i < g_config.namespaces; i++) {
+		as_namespace *ns = g_config.namespace[i];
+
+		cf_dyn_buf_append_string(db, ns->name);
+		cf_dyn_buf_append_char(db, ':');
+
+		int n_repl = (int)ns->replication_factor;
+
+		cf_dyn_buf_append_int(db, n_repl);
+
+		uint8_t prole_bitmaps[n_repl][BITMAP_SIZE];
+
+		memset(prole_bitmaps, 0, sizeof(prole_bitmaps));
+
+		bool owned[n_repl];
+
+		for (uint32_t j = 0; j < AS_PARTITIONS; j++) {
+			as_partition_get_replicas_all(ns, (as_partition_id)j, owned, n_repl);
+
+			for (int n = 0; n < n_repl; n++) {
+				if (owned[n]) {
+					prole_bitmaps[n][j >> 3] |= (1 << (7 - (j & 7)));
+				}
+			}
+		}
+
+		char b64_bitmaps[n_repl][B64_BITMAP_SIZE];
+
+		for (int n = 0; n < n_repl; n++) {
+			cf_dyn_buf_append_char(db, ',');
+			cf_b64_encode(prole_bitmaps[n], BITMAP_SIZE, b64_bitmaps[n]);
+			cf_dyn_buf_append_buf(db, (uint8_t*)b64_bitmaps[n], B64_BITMAP_SIZE);
+		}
+
 		cf_dyn_buf_append_char(db, ';');
 	}
 
