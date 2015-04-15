@@ -1774,9 +1774,9 @@ as_partition_get_replicas_all_str(cf_dyn_buf *db)
 
 		cf_dyn_buf_append_int(db, n_repl);
 
-		uint8_t prole_bitmaps[n_repl][BITMAP_SIZE];
+		uint8_t repl_bitmaps[n_repl][BITMAP_SIZE];
 
-		memset(prole_bitmaps, 0, sizeof(prole_bitmaps));
+		memset(repl_bitmaps, 0, sizeof(repl_bitmaps));
 
 		bool owned[n_repl];
 
@@ -1785,7 +1785,7 @@ as_partition_get_replicas_all_str(cf_dyn_buf *db)
 
 			for (int n = 0; n < n_repl; n++) {
 				if (owned[n]) {
-					prole_bitmaps[n][j >> 3] |= (1 << (7 - (j & 7)));
+					repl_bitmaps[n][j >> 3] |= (1 << (7 - (j & 7)));
 				}
 			}
 		}
@@ -1794,7 +1794,7 @@ as_partition_get_replicas_all_str(cf_dyn_buf *db)
 
 		for (int n = 0; n < n_repl; n++) {
 			cf_dyn_buf_append_char(db, ',');
-			cf_b64_encode(prole_bitmaps[n], BITMAP_SIZE, b64_bitmaps[n]);
+			cf_b64_encode(repl_bitmaps[n], BITMAP_SIZE, b64_bitmaps[n]);
 			cf_dyn_buf_append_buf(db, (uint8_t*)b64_bitmaps[n], B64_BITMAP_SIZE);
 		}
 
