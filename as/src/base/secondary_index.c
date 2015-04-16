@@ -4431,7 +4431,9 @@ as_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 			{
 				char * key_dup = cf_strdup(item->key);
 				// Get ns name 
-				char * ns_tmpname    = strtok(key_dup, ":");
+				// Using strtok_r instead of strtok due to MT environment.
+				char * saveptr;
+				char * ns_tmpname    = strtok_r(key_dup, ":", &saveptr);
 				if (!ns_tmpname) {
 					cf_warning(AS_SINDEX, "Failed to extract namspace name from SMD delete item value");
 					retval = AS_SINDEX_ERR;
@@ -4443,7 +4445,7 @@ as_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 				}
 
 				// Get index name
-				char * i_tmpname      = strtok(NULL, ":");
+				char * i_tmpname      = strtok_r(NULL, ":", &saveptr);
 				if (!i_tmpname) {
 					cf_warning(AS_SINDEX, "Failed to extract index name from SMD delete item value");
 					retval = AS_SINDEX_ERR;
@@ -4578,10 +4580,13 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 			{
 				char * key_dup = cf_strdup(items->item[i]->key);
 				
+				char * saveptr;
+				// Using strtok_r instead of strtok due to MT environment.
 				// Get ns name 
-				char * ns_tmpname    = strtok(key_dup, ":");
+				char * ns_tmpname    = strtok_r(key_dup, ":", &saveptr);
 				if (!ns_tmpname) {
 					cf_warning(AS_SINDEX, "Failed to extract namspace name from SMD delete item value");
+					cf_free(key_dup);
 					break;
 				}
 				else {
@@ -4589,9 +4594,10 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				}
 
 				// Get index name
-				char * i_tmpname      = strtok(NULL, ":");
+				char * i_tmpname      = strtok_r(NULL, ":", &saveptr);
 				if (!i_tmpname) {
 					cf_warning(AS_SINDEX, "Failed to extract index name from SMD delete item value");
+					cf_free(key_dup);
 					break;
 				}
 				else {
@@ -4602,6 +4608,7 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				imd.iname   = cf_strdup(i_tmpname);
 				ns          = as_namespace_get_byname(imd.ns_name);
 				as_sindex_destroy(ns, &imd);
+				cf_free(key_dup);
 				break;
 			}
 		}
