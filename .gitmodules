@@ -7,6 +7,7 @@
 [submodule "modules/jansson"]
 	path = modules/jansson
 	url = git@github.com:aerospike/jansson.git
+        ignore = dirty
 [submodule "modules/asmalloc"]
 	path = modules/asmalloc
 	url = git@github.com:citrusleaf/asmalloc.git
