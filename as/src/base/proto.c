@@ -340,7 +340,7 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 
 Exit:
 
-	fd_h->t_inprogress = false;
+	// END_OF_TRANSACTION
 	AS_RELEASE_FILE_HANDLE(fd_h);
 
 	return rv;
@@ -792,7 +792,7 @@ Exit:
 	if ((uint8_t *)msgp != fb)
 		cf_free(msgp);
 
-	fd_h->t_inprogress = false;
+	// END_OF_TRANSACTION
 	AS_RELEASE_FILE_HANDLE(fd_h);
 
 	return(rv);

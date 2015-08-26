@@ -151,7 +151,7 @@ as_security_transact(as_transaction *tr)
 		}
 	}
 
-	tr->proto_fd_h->t_inprogress = false;
+	// END_OF_TRANSACTION
 	AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
 }
 

@@ -5494,7 +5494,7 @@ write_msg_fn(cf_node id, msg *m, void *udata)
 // Helper function used to clean up a tr or wr proto_fd_h in a number of places.
 static void release_proto_fd_h(as_file_handle *proto_fd_h) {
 	shutdown(proto_fd_h->fd, SHUT_RDWR);
-	proto_fd_h->inuse = false;
+	proto_fd_h->reap_me = true;
 	AS_RELEASE_FILE_HANDLE(proto_fd_h);
 }
 

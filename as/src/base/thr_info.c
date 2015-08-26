@@ -4514,7 +4514,7 @@ thr_info_fn(void *unused)
 		cf_free(tr->msgp);
 
 		if (tr->proto_fd_h)	{
-			tr->proto_fd_h->t_inprogress = false;
+			// END_OF_TRANSACTION
 			AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
 		}
 
