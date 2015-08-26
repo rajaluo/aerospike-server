@@ -45,6 +45,7 @@
 #include "base/scan.h"
 #include "base/security.h"
 #include "base/udf_rw.h"
+#include "base/thr_demarshal.h"
 
 /* as_transaction_prepare
  * Prepare a transaction that has just been received from the wire.
@@ -384,6 +385,10 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 void
 as_release_file_handle(as_file_handle *proto_fd_h)
 {
+	if (cf_rc_release(proto_fd_h) > 0) {
+		return;
+	}
+
 	close(proto_fd_h->fd);
 	proto_fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 	proto_fd_h->fd = -1;
@@ -405,5 +410,21 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 		proto_fd_h->security_filter = NULL;
 	}
 
+	cf_rc_free(proto_fd_h);
 	cf_atomic_int_incr(&g_config.proto_connections_closed);
+}
+
+void
+as_end_of_transaction(as_file_handle *proto_fd_h)
+{
+	thr_demarshal_resume(proto_fd_h);
+	as_release_file_handle(proto_fd_h);
+}
+
+void
+as_end_of_transaction_force_close(as_file_handle *proto_fd_h)
+{
+	thr_demarshal_resume(proto_fd_h);
+	shutdown(proto_fd_h->fd, SHUT_RDWR);
+	as_release_file_handle(proto_fd_h);
 }
