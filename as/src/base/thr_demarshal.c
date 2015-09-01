@@ -354,7 +354,6 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-
 			if (s->sock == events[i].data.fd) {
 
 				// Accept new connections on the service socket.
@@ -382,7 +381,7 @@ thr_demarshal(void *arg)
 					cf_crash(AS_DEMARSHAL, "inet_ntop(): %s (errno %d)", cf_strerror(errno), errno);
 				}
 
-				cf_detail(AS_DEMARSHAL, "new connection: %s", cpaddr);
+				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", cpaddr, csocket);
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_config.proto_connections_opened - g_config.proto_connections_closed;
@@ -559,8 +558,8 @@ thr_demarshal(void *arg)
 					if (PROTO_TYPE_AS_MSG == proto.type) {
 						size_t offset = sizeof(as_msg);
 						// Number of bytes to peek from the socket.
-						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
-//						size_t peek_sz = MIN(proto.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
+//						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
+						size_t peek_sz = MIN(proto.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
 						if (!(peeked_data_sz = cf_socket_recv(fd, peekbuf, peek_sz, 0))) {
 							cf_warning(AS_DEMARSHAL, "could not peek the as_msg header");
 							goto NextEvent_FD_Cleanup;
