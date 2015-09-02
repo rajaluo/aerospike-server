@@ -488,6 +488,8 @@ thr_demarshal(void *arg)
 					goto NextEvent;
 				}
 
+				cf_detail(AS_DEMARSHAL, "epoll connection event: fd %d, events 0x%x", fd_h->fd, events[i].events);
+
 				// Process data on an existing connection: this might be more
 				// activity on an already existing transaction, so we have some
 				// state to manage.
@@ -511,6 +513,8 @@ thr_demarshal(void *arg)
 						cf_info(AS_DEMARSHAL, "unable to get number of available bytes");
 						goto NextEvent_FD_Cleanup;
 					}
+
+					cf_detail(AS_DEMARSHAL, "%d byte(s) available", sz);
 
 					// If we don't have enough data to fill the message buffer,
 					// just wait and we'll come back to this one. However, we'll
@@ -561,9 +565,12 @@ thr_demarshal(void *arg)
 //						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
 						size_t peek_sz = MIN(proto.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
 						if (!(peeked_data_sz = cf_socket_recv(fd, peekbuf, peek_sz, 0))) {
-							cf_warning(AS_DEMARSHAL, "could not peek the as_msg header");
-							goto NextEvent_FD_Cleanup;
-						} else if (peeked_data_sz > min_as_msg_sz) {
+							// That's actually legitimate. The as_proto may have gone into one
+							// packet, the as_msg into the next one, which we haven't yet received.
+							// This just "never happened" without async.
+							cf_detail(AS_DEMARSHAL, "could not peek the as_msg header, expected %zu byte(s)", peek_sz);
+						}
+						if (peeked_data_sz > min_as_msg_sz) {
 //							cf_debug(AS_DEMARSHAL, "(Peeked %zu bytes.)", peeked_data_sz);
 							if (peeked_data_sz > proto.sz) {
 								char ip_port_str[64];
@@ -603,7 +610,7 @@ thr_demarshal(void *arg)
 	//									cf_debug(AS_DEMARSHAL, "Message field %d is not namespace (type %d) ~~ Reading next field", field_num, field->type);
 										field_num++;
 										offset += sizeof(as_msg_field) + value_sz;
-										if (offset >= peekbuf_sz) {
+										if (offset >= peeked_data_sz) {
 											break;
 										}
 									}
