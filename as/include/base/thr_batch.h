@@ -1,7 +1,7 @@
 /*
  * thr_batch.h
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,8 +24,7 @@
 
 #include "base/transaction.h"
 
-/* Function declarations */
-void as_batch_init();
-int as_batch(as_transaction* tr);
-int as_batch_queue_size();
-
+int as_batch_direct_init();
+int as_batch_direct_queue_task(as_transaction* tr);
+int as_batch_direct_queue_size();
+int as_batch_direct_threads_resize(uint32_t threads);

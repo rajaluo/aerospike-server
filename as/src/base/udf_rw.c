@@ -56,8 +56,8 @@
 #include "base/ldt_record.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
+#include "base/scan.h"
 #include "base/thr_rw_internal.h"
-#include "base/thr_scan.h"
 #include "base/thr_write.h"
 #include "base/transaction.h"
 #include "base/udf_aerospike.h"
@@ -76,13 +76,12 @@ extern udf_call *as_query_get_udf_call(void *ptr);
  */
 static bool
 make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
-			  const char *key, size_t klen, int  vtype,  void *val, size_t vlen)
+			  const char *key, int  vtype,  void *val, size_t vlen)
 {
 	uint8_t *   v           = NULL;
-	int64_t     unswapped_int = 0;
 	uint8_t     *sp_p = *sp_pp;
 
-	uint32_t tsz = as_particle_size_from_mem((as_particle_type)vtype, (uint8_t *)val, (uint32_t)vlen);
+	uint32_t tsz = val ? as_particle_size_from_mem((as_particle_type)vtype, (uint8_t *)val, (uint32_t)vlen) : 0;
 
 	if (tsz > sp_sz) {
 		sp_p = cf_malloc(tsz);
@@ -92,7 +91,7 @@ make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
 		}
 	}
 
-	as_bin_init(ns, bin, (byte *) key/*name*/, klen/*namelen*/, 0/*version*/);
+	as_bin_init(ns, bin, key/*name*/);
 
 	switch (vtype) {
 		case AS_PARTICLE_TYPE_NULL:
@@ -103,17 +102,24 @@ make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
 		case AS_PARTICLE_TYPE_INTEGER:
 		{
 			if (vlen != 8) {
-				cf_crash(AS_UDF, "unexpected int %d", vlen);
+				cf_crash(AS_UDF, "unexpected int size %d", vlen);
 			}
-            unswapped_int = * (int64_t *) val;
-			v = (uint8_t *) &unswapped_int;
+			v = (uint8_t *) val;
+			break;
+		}
+		case AS_PARTICLE_TYPE_FLOAT:
+		{
+			if (vlen != 8) {
+				cf_crash(AS_UDF, "unexpected double size %d", vlen);
+			}
+			v = (uint8_t *) val;
 			break;
 		}
 		case AS_PARTICLE_TYPE_BLOB:
 		case AS_PARTICLE_TYPE_STRING:
 		case AS_PARTICLE_TYPE_LIST:
 		case AS_PARTICLE_TYPE_MAP:
-			v = val;
+			v = (uint8_t *) val;
 			break;
 		default:
 		{
@@ -122,7 +128,9 @@ make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
 		}
 	}
 
-	as_bin_particle_stack_from_mem(bin, sp_p, vtype, v, vlen);
+	if (v) {
+		as_bin_particle_stack_from_mem(bin, sp_p, vtype, v, vlen);
+	}
 
 	*sp_pp = sp_p;
 	return 0;
@@ -143,14 +151,14 @@ make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
  * 					 be done by the scan thread after scan is finished
  */
 static int
-send_response(udf_call *call, const char *key, size_t klen, int vtype, void *val,
+send_response(udf_call *call, const char *key, int vtype, void *val,
 			  size_t vlen)
 {
 	as_transaction *    tr          = call->transaction;
 	as_namespace *      ns          = tr->rsv.ns;
 	uint32_t            generation  = tr->generation;
 	uint32_t            sp_sz       = 1024 * 16;
-	uint32_t            void_time   = 0;
+	uint32_t            void_time   = tr->void_time;
 	uint32_t            written_sz  = 0;
 	bool                keep_fd     = false;
 	as_bin              stack_bin;
@@ -162,15 +170,6 @@ send_response(udf_call *call, const char *key, size_t klen, int vtype, void *val
 
 	if (call->udf_type == AS_SCAN_UDF_OP_BACKGROUND) {
 		// If we are doing a background UDF scan, do not send any result back
-		if (tr->udata.req_type == UDF_SCAN_REQUEST) {
-			cf_detail(AS_UDF, "UDF: Background transaction, send no result back. "
-					"Parent job id [%"PRIu64"]", ((tscan_job*)(tr->udata.req_udata))->tid);
-			if (strncmp(key, "FAILURE", 8) == 0) {
-				cf_atomic_int_incr(&((tscan_job*)(tr->udata.req_udata))->n_obj_udf_failed);
-			} else if (strncmp(key, "SUCCESS", 8) == 0) {
-				cf_atomic_int_incr(&((tscan_job*)(tr->udata.req_udata))->n_obj_udf_success);
-			}
-		}
 		return 0;
 	} else if (call->udf_type == AS_SCAN_UDF_OP_UDF) {
 		// Do not release fd now, scan will do it at the end of all internal
@@ -179,7 +178,7 @@ send_response(udf_call *call, const char *key, size_t klen, int vtype, void *val
 		keep_fd = true;
 	}
 
-	if (0 != make_send_bin(ns, bin, &sp_p, sp_sz, key, klen, vtype, val, vlen)) {
+	if (0 != make_send_bin(ns, bin, &sp_p, sp_sz, key, vtype, val, vlen)) {
 		return(-1);
 	}
 
@@ -203,7 +202,7 @@ static inline int
 send_cdt_failure(udf_call *call, int vtype, void *val, size_t vlen)
 {
 	call->transaction->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
-	return send_response(call, "FAILURE", 7, vtype, val, vlen);
+	return send_response(call, "FAILURE", vtype, val, vlen);
 }
 
 int
@@ -408,13 +407,13 @@ send_udf_failure(udf_call *call, int vtype, void *val, size_t vlen)
 	cf_debug(AS_UDF, "Non-special LDT or General UDF Error(%s)", (char *) val);
 
 	call->transaction->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
-	return send_response(call, "FAILURE", 7, vtype, val, vlen);
+	return send_response(call, "FAILURE", vtype, val, vlen);
 }
 
 static inline int
 send_success(udf_call *call, int vtype, void *val, size_t vlen)
 {
-	return send_response(call, "SUCCESS", 7, vtype, val, vlen);
+	return send_response(call, "SUCCESS", vtype, val, vlen);
 }
 
 /*
@@ -456,6 +455,13 @@ send_result(as_result * res, udf_call * call, void *udata)
 					as_integer * i = as_integer_fromval(v);
 					int64_t ri = as_integer_toint(i);
 					send_success(call, AS_PARTICLE_TYPE_INTEGER, &ri, 8);
+					break;
+				}
+				case AS_DOUBLE:
+				{
+					as_double * x = as_double_fromval(v);
+					double rx = as_double_get(x);
+					send_success(call, AS_PARTICLE_TYPE_FLOAT, &rx, 8);
 					break;
 				}
 				case AS_STRING:
@@ -514,11 +520,19 @@ send_result(as_result * res, udf_call * call, void *udata)
 			send_success(call, AS_PARTICLE_TYPE_NULL, NULL, 0);
 		}
 	} else { // Else -- NOT success
-		as_string * s   = as_string_fromval(v);
-		char *      rs  = (char *) as_string_tostring(s);
+		if (as_val_type(v) == AS_STRING) {
+			as_string * s   = as_string_fromval(v);
+			char *      rs  = (char *) as_string_tostring(s);
 
-		cf_debug(AS_UDF, "FAILURE when calling %s %s %s", call->filename, call->function, rs);
-		send_udf_failure(call, AS_PARTICLE_TYPE_STRING, rs, as_string_len(s));
+			cf_debug(AS_UDF, "FAILURE when calling %s %s %s", call->filename, call->function, rs);
+			send_udf_failure(call, AS_PARTICLE_TYPE_STRING, rs, as_string_len(s));
+		} else {
+			char lua_err_str[1024];
+			size_t len = (size_t)sprintf(lua_err_str, "%s:0: in function %s() - error() argument type not handled", call->filename, call->function);
+
+			cf_debug(AS_UDF, "FAILURE when calling %s %s", call->filename, call->function);
+			send_udf_failure(call, AS_PARTICLE_TYPE_STRING, lua_err_str, len);
+		}
 	}
 }
 
@@ -549,7 +563,7 @@ udf_call_init(udf_call * call, as_transaction * tr)
 	if (tr->udata.req_udata) {
 		udf_call *ucall = NULL;
 		if (tr->udata.req_type == UDF_SCAN_REQUEST) {
-			ucall = &((tscan_job *)(tr->udata.req_udata))->call;
+			ucall = as_scan_get_udf_call(tr->udata.req_udata);
 		} else if (tr->udata.req_type == UDF_QUERY_REQUEST) {
 			ucall = as_query_get_udf_call(tr->udata.req_udata);
 		}
@@ -680,7 +694,7 @@ udf_rw_getop(udf_record *urecord, udf_optype *urecord_op)
  */
 void
 udf_rw_write_post_processing(as_transaction *tr, as_storage_rd *rd,
-		uint8_t **pickled_buf, size_t *pickled_sz, uint32_t *pickled_void_time,
+		uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, int64_t memory_bytes)
 {
 	update_metadata_in_index(tr, true, rd->r);
@@ -691,11 +705,11 @@ udf_rw_write_post_processing(as_transaction *tr, as_storage_rd *rd,
 
 	*pickled_buf = pickle.buf;
 	*pickled_sz = pickle.buf_size;
-	*pickled_void_time = pickle.void_time;
 	p_pickled_rec_props->p_data = pickle.rec_props_data;
 	p_pickled_rec_props->size = pickle.rec_props_size;
 
 	tr->generation = rd->r->generation;
+	tr->void_time = rd->r->void_time;
 
 	if (tr->rsv.ns->storage_data_in_memory) {
 		account_memory(tr, rd, memory_bytes);
@@ -725,7 +739,6 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 	// INIT
 	urecord->pickled_buf     = NULL;
 	urecord->pickled_sz      = 0;
-	urecord->pickled_void_time     = 0;
 	as_rec_props_clear(&urecord->pickled_rec_props);
 	bool udf_xdr_ship_op = false;
 
@@ -750,8 +763,8 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 		}
 
 		udf_rw_write_post_processing(tr, rd, &urecord->pickled_buf,
-			&urecord->pickled_sz, &urecord->pickled_void_time,
-			&urecord->pickled_rec_props, urecord->starting_memory_bytes);
+			&urecord->pickled_sz, &urecord->pickled_rec_props,
+			urecord->starting_memory_bytes);
 
 		// Now ok to accommodate a new stored key...
 		if (! as_index_is_flag_set(r_ref->r, AS_INDEX_FLAG_KEY_STORED) && rd->key) {
@@ -777,6 +790,7 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 		generation = r_ref->r->generation;
 		set_id = as_index_get_set_id(r_ref->r);
 	}
+	urecord->op = *urecord_op;
 	// Close the record for all the cases
 	udf_record_close(urecord);
 
@@ -880,9 +894,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 	if (urecord_op == UDF_OPTYPE_DELETE) {
 		wr->pickled_buf      = NULL;
 		wr->pickled_sz       = 0;
-		wr->pickled_void_time   = 0;
 		as_rec_props_clear(&wr->pickled_rec_props);
-		wr->ldt_rectype_bits = h_urecord->ldt_rectype_bits;
 		*lrecord_op  = UDF_OPTYPE_DELETE;
 	} else {
 
@@ -892,18 +904,19 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 
 		FOR_EACH_SUBRECORD(i, j, lrecord) {
 			urecord_op = UDF_OPTYPE_READ;
-			is_ldt = true;
-			subrec_count++;
 			udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
-			if (g_config.ldt_benchmarks) {
-				udf_rw_getop(c_urecord, &urecord_op);
-				if (UDF_OP_IS_WRITE(urecord_op)) {
+			udf_rw_getop(c_urecord, &urecord_op);
+
+			if (UDF_OP_IS_WRITE(urecord_op)) {
+				if (g_config.ldt_benchmarks) {
 					if (c_urecord->tr->rsv.ns
 						&& NAMESPACE_HAS_PERSISTENCE(c_urecord->tr->rsv.ns)
 						&& c_urecord->rd) {
 						total_flat_size += as_storage_record_size(c_urecord->rd);
 					}
 				}
+				is_ldt = true;
+				subrec_count++;
 			}
 			udf_rw_post_processing(c_urecord, &urecord_op, set_id);
 		}
@@ -924,7 +937,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 
 		if (is_ldt) {
 			// Create the multiop pickled buf for thr_rw.c
-			ret = as_ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz, &wr->pickled_void_time);
+			ret = as_ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz);
 			FOR_EACH_SUBRECORD(i, j, lrecord) {
 				udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 				// Cleanup in case pickle code bailed out
@@ -936,9 +949,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 			// Normal UDF case simply pass on pickled buf created for the record
 			wr->pickled_buf       = h_urecord->pickled_buf;
 			wr->pickled_sz        = h_urecord->pickled_sz;
-			wr->pickled_void_time = h_urecord->pickled_void_time;
 			wr->pickled_rec_props = h_urecord->pickled_rec_props;
-			wr->ldt_rectype_bits = h_urecord->ldt_rectype_bits;
 			udf_record_cleanup(h_urecord, false);
 		}
 	}
@@ -1193,11 +1204,27 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 
 	// Step 2: Setup Storage Record
 	int rec_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, tr->rsv.ns);
-	if (!rec_rv) {
+
+	if (rec_rv == 0 && as_record_is_expired(r_ref.r)) {
+		// If record is expired, pretend it was not found.
+		as_record_done(&r_ref, tr->rsv.ns);
+		rec_rv = -1;
+	}
+
+	if (rec_rv == 0) {
 		urecord.flag   |= UDF_RECORD_FLAG_OPEN;
 		urecord.flag   |= UDF_RECORD_FLAG_PREEXISTS;
 		cf_detail(AS_UDF, "Open %p %x %"PRIx64"", &urecord, urecord.flag, *(uint64_t *)&tr->keyd);
-		udf_storage_record_open(&urecord);
+		rec_rv = udf_storage_record_open(&urecord);
+
+		if (rec_rv == -1) {
+			udf_record_close(&urecord);
+			call->transaction->result_code = AS_PROTO_RESULT_FAIL_BIN_NAME; // overloaded... add bin_count error?
+			send_response(call, "FAILURE", AS_PARTICLE_TYPE_NULL, NULL, 0);
+			ldt_record_destroy(lrec);
+			as_rec_destroy(lrec);
+			return 0;
+		}
 
 		as_msg *m = &tr->msgp->msg;
 
@@ -1208,7 +1235,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 				call->transaction->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
 				// Necessary to complete transaction, but error string would be
 				// ignored by client, so don't bother sending one.
-				send_response(call, "FAILURE", 7, AS_PARTICLE_TYPE_NULL, NULL, 0);
+				send_response(call, "FAILURE", AS_PARTICLE_TYPE_NULL, NULL, 0);
 				// free everything we created - the rec destroy with ldt_record hooks
 				// destroys the ldt components and the attached "base_rec"
 				ldt_record_destroy(lrec);
@@ -1218,7 +1245,15 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		}
 		else {
 			// If the message has a key, apply it to the record.
-			get_msg_key(m, &rd);
+			if (! get_msg_key(m, &rd)) {
+				udf_record_close(&urecord);
+				call->transaction->result_code = AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+				send_response(call, "FAILURE", AS_PARTICLE_TYPE_NULL, NULL, 0);
+				ldt_record_destroy(lrec);
+				as_rec_destroy(lrec);
+				return 0;
+			}
+
 			urecord.flag |= UDF_RECORD_FLAG_METADATA_UPDATED;
 		}
 
@@ -1285,16 +1320,11 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 			udf_rw_addresponse(tr, udata);
 		}
 
-		// TODO this is not the right place for counter, put it at proper place
-		if(tr->udata.req_udata && tr->udata.req_type == UDF_SCAN_REQUEST) {
-			cf_atomic_int_add(&((tscan_job*)(tr->udata.req_udata))->n_obj_udf_updated, (*op == UDF_OPTYPE_WRITE));
-		}
-
 	} else {
 		udf_record_close(&urecord);
 		char *rs = as_module_err_string(ret_value);
 		call->transaction->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
-		send_response(call, "FAILURE", 7, AS_PARTICLE_TYPE_STRING, rs, strlen(rs));
+		send_response(call, "FAILURE", AS_PARTICLE_TYPE_STRING, rs, strlen(rs));
 		cf_free(rs);
 		as_result_destroy(res);
 	}
@@ -1448,6 +1478,16 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 				}
 				break;
 			}
+			case AS_DOUBLE:
+			{
+				*size = 8;
+				if (buf) {
+					double x = as_double_get(as_double_fromval(v));
+					uint64_t ri = __cpu_to_be64(*(uint64_t*)&x);
+					memcpy(buf, &ri, *size);
+				}
+				break;
+			}
 			case AS_STRING:
 			{
 				as_string * s = as_string_fromval(v);
@@ -1483,36 +1523,7 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 				as_buffer_destroy(&asbuf);
 				break;
 			}
-			// TODO: Resolve. Can we actually MAKE a value (the bin name) for
-			// an LDT value?  Users should never see a real LDT value.
-			case AS_LDT:
-			{
-				as_buffer asbuf;
-				as_buffer_init(&asbuf);
 
-				as_serializer s;
-				as_msgpack_init(&s);
-
-				as_string as_str;
-				as_string_init( &as_str, "INT LDT BIN NAME", false );
-
-				int res = as_serializer_serialize(&s, (as_val*) &as_str, &asbuf);
-
-				if (res != 0) {
-					cf_warning(AS_UDF, "LDT serialization failure (%d)", res);
-					as_buffer_destroy(&asbuf);
-					break;
-				}
-				*size = asbuf.size;
-				if (buf) {
-					memcpy(buf, asbuf.data, asbuf.size);
-				}
-				// not needed as it is stack allocated
-				// as_serializer_destroy(&s);
-				as_buffer_destroy(&asbuf);
-				break;
-
-			}
 			default:
 			{
 				cf_debug(AS_UDF, "SUCCESS: VAL TYPE UNDEFINED %d\n",
@@ -1558,6 +1569,13 @@ as_val_frombin(as_bin *bb)
 			int64_t     i = 0;
 			as_bin_particle_to_mem(bb, (uint8_t *) &i);
 			value = (as_val *) as_integer_new(i);
+			break;
+		}
+		case AS_PARTICLE_TYPE_FLOAT:
+		{
+			double x = 0;
+			as_bin_particle_to_mem(bb, (uint8_t *) &x);
+			value = (as_val *) as_double_new(x);
 			break;
 		}
 		case AS_PARTICLE_TYPE_STRING:
@@ -1629,6 +1647,9 @@ to_particle_type(int from_as_type)
 		case AS_BOOLEAN:
 		case AS_INTEGER:
 			return AS_PARTICLE_TYPE_INTEGER;
+			break;
+		case AS_DOUBLE:
+			return AS_PARTICLE_TYPE_FLOAT;
 			break;
 		case AS_STRING:
 			return AS_PARTICLE_TYPE_STRING;

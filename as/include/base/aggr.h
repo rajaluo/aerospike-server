@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 #include "aerospike/as_rec.h"
+#include "aerospike/as_result.h"
 #include "aerospike/as_stream.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_ll.h"
@@ -60,11 +61,11 @@ typedef struct query_record_s {
 } query_record;
 
 typedef struct as_aggr_istream_s {
-	cf_ll_iterator  *iter;
-	as_rec          *rec;
-	sindex_kv_arr   *skv_arr;
-	int              skv_offset;
-	as_namespace    *ns;
+	cf_ll_iterator     * iter;
+	as_rec             * rec;
+	as_index_keys_arr  * keys_arr;
+	int                  keys_arr_offset;
+	as_namespace       * ns;
 	as_aggr_caller_type (*get_type)();
 } as_aggr_istream;
 
@@ -90,3 +91,4 @@ as_val * as_aggr_istream_read(const as_stream *s);
 int as_aggr_call_init(as_aggr_call *call, as_transaction *txn, void *caller,
 		const as_aggr_caller_intf *caller_intf, const as_stream_hooks *istream_hooks,
 		const as_stream_hooks *ostream_hooks, as_namespace *ns, bool is_scan);
+int as_aggr_process(as_aggr_call * ap_call, cf_ll * ap_recl, void * udata, as_result * ap_res);

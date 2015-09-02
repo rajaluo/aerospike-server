@@ -54,7 +54,7 @@
 #define MAX_TRANSACTION_QUEUES 128
 #define MAX_DEMARSHAL_THREADS  256	// maximum number of demarshal worker threads
 #define MAX_FABRIC_WORKERS 128		// maximum fabric worker threads
-#define MAX_BATCH_THREADS 16		// maximum batch worker threads
+#define MAX_BATCH_THREADS 64		// maximum batch worker threads
 
 struct as_namespace_s;
 
@@ -96,25 +96,25 @@ typedef struct as_config_s {
 	/* tuning parameters */
 	int					n_migrate_threads;
 	int					n_info_threads;
+	int					n_batch_index_threads;
 	int					n_batch_threads;
 
 	/* Query tunables */
 	uint32_t			query_threads;
 	uint32_t			query_worker_threads;
 	uint32_t			query_priority;
-	uint32_t			query_sleep;
+	uint64_t			query_sleep_us;
 	uint32_t			query_bsize;
-	bool				query_job_tracking;
 	bool				query_in_transaction_thr;
 	uint64_t			query_buf_size;
 	uint32_t			query_threshold;
-	uint32_t			query_rec_count_bound;
+	uint64_t			query_rec_count_bound;
 	bool				query_req_in_query_thread;
 	uint32_t			query_req_max_inflight;
 	uint32_t			query_bufpool_size;
 	uint32_t			query_short_q_max_size;
 	uint32_t			query_long_q_max_size;
-	uint32_t			query_untracked_time_ns;
+	uint64_t			query_untracked_time_ms;
 
 	int					n_transaction_queues;
 	int					n_transaction_threads_per_queue;
@@ -235,14 +235,19 @@ typedef struct as_config_s {
 	/* enables node snubbing - this code caused a Paxos issue in the past */
 	bool				snub_nodes;
 
-	// number of records between an enforced context switch - thus 1 is very low priority, 1000000 would be very high
-	uint32_t			scan_priority;
-	// amount of time a thread will sleep after yielding scan_priority amount of data. (in microseconds)
-	uint32_t			scan_sleep;
+	uint32_t			scan_max_active;			// maximum number of active scans allowed
+	uint32_t			scan_max_done;				// maximum number of finished scans kept for monitoring
+	uint32_t			scan_max_udf_transactions;	// maximum number of active transactions per UDF background scan
+	uint32_t			scan_threads;				// size of scan thread pool
+
 	// maximum count of database requests in a single batch
 	uint32_t			batch_max_requests;
+	// maximum number of buffers allowed in a buffer queue at any one time.  Fail batch if full.
+	uint32_t			batch_max_buffers_per_queue;
+	// maximum number of buffers allowed in buffer pool at any one time.
+	uint32_t			batch_max_unused_buffers;
 	// number of records between an enforced context switch - thus 1 is very low priority, 1000000 would be very high
-	uint32_t			batch_priority;
+	uint32_t			batch_priority;  // Used by old batch functionality only.
 
 	// nsup (expiration and eviction) tuning parameters
 	uint32_t			nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
@@ -293,9 +298,9 @@ typedef struct as_config_s {
 	// all secondary index put together can take
 	// this is to protect cluster. This override the
 	// per namespace configured value
+	uint32_t		sindex_builder_threads;   // Secondary index builder thread pool size
 	uint64_t		sindex_data_max_memory;   // Maximum memory for secondary index trees
 	cf_atomic_int	sindex_data_memory_used;  // Maximum memory for secondary index trees
-	uint32_t		sindex_populator_scan_priority;
 	cf_atomic_int   sindex_gc_timedout;           // Number of time sindex gc iteration timed out waiting for partition lock
 	uint64_t        sindex_gc_inactivity_dur;     // Commulative sum of sindex GC thread inactivity.
 	uint64_t        sindex_gc_activity_dur;       // Commulative sum of sindex gc thread activity.
@@ -316,9 +321,8 @@ typedef struct as_config_s {
 	cf_atomic64			query_fail;
 	cf_atomic64			query_short_queue_full;
 	cf_atomic64			query_long_queue_full;
-	cf_atomic64			query_short_running;
-	cf_atomic64			query_long_running;
-	cf_atomic64			query_tracked;
+	cf_atomic64			query_short_reqs;
+	cf_atomic64			query_long_reqs;
 	cf_atomic64			query_false_positives;
 	bool				query_enable_histogram;
 
@@ -375,9 +379,12 @@ typedef struct as_config_s {
 	cf_atomic_int		proxy_unproxy;
 	cf_atomic_int		proxy_retry_same_dest;
 	cf_atomic_int		proxy_retry_new_dest;
-	cf_atomic_int		tscan_initiate;
-	cf_atomic_int		tscan_succeeded;
-	cf_atomic_int		tscan_aborted;
+	cf_atomic_int		basic_scans_succeeded;
+	cf_atomic_int		basic_scans_failed;
+	cf_atomic_int		aggr_scans_succeeded;
+	cf_atomic_int		aggr_scans_failed;
+	cf_atomic_int		udf_bg_scans_succeeded;
+	cf_atomic_int		udf_bg_scans_failed;
 	cf_atomic_int		write_master;
 	cf_atomic_int		write_prole;
 	cf_atomic_int		read_dup_prole;
@@ -420,6 +427,11 @@ typedef struct as_config_s {
 	cf_atomic_int		rw_tree_count;
 	cf_atomic_int		reaper_count;
 
+	cf_atomic_int		batch_index_initiate;
+	cf_atomic_int		batch_index_complete;
+	cf_atomic_int		batch_index_timeout;
+	cf_atomic_int		batch_index_errors;
+
 	cf_atomic_int		batch_initiate;
 	cf_atomic_int		batch_tree_count;
 	cf_atomic_int		batch_timeout;
@@ -458,7 +470,8 @@ typedef struct as_config_s {
 	histogram *			rt_resolve_wait_hist; // histogram that tracks the time the master waits for other nodes to complete duplicate resolution on reads
 	histogram *			wt_resolve_wait_hist; // histogram that tracks the time the master waits for other nodes to complete duplicate resolution on writes
 	histogram *			error_hist;  // histogram of error requests only
-	histogram *			batch_q_process_hist; // histogram of time spent processing batch messages in transaction q
+	histogram *			batch_index_reads_hist;        // New batch index protocol latency histogram.
+	histogram *			batch_q_process_hist; // Old batch direct protocol latency histogram.
 	histogram *			info_tr_q_process_hist;  // histogram of time spent processing info messages in transaction q
 	histogram *			info_q_wait_hist;  // histogram of time info transaction spends on info q
 	histogram *			info_post_lock_hist; // histogram of time spent processing the Info command under the mutex before sending the response on the network
@@ -579,6 +592,7 @@ typedef struct as_config_s {
 	cf_atomic_int		stat_nsup_deletes_not_shipped;
 
 	cf_atomic_int		err_tsvc_requests;
+	cf_atomic_int		err_tsvc_requests_timeout;
 	cf_atomic_int		err_out_of_space;
 	cf_atomic_int		err_duplicate_proxy_request;
 	cf_atomic_int		err_rw_request_not_found;
@@ -587,7 +601,6 @@ typedef struct as_config_s {
 
 	cf_atomic_int		err_replica_null_node;
 	cf_atomic_int		err_replica_non_null_node;
-	cf_atomic_int		err_sync_copy_null_node;
 	cf_atomic_int		err_sync_copy_null_master;
 
 	cf_atomic_int		err_storage_queue_full;

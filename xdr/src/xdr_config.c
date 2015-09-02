@@ -153,7 +153,8 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_nsup_deletes_enabled = false;		// Shall XDR ship deletes of evictions or expiration
 	c->xdr_stop_writes_noxdr = false;	//If the normal writes should be stopped if there is no xdr
 	c->xdr_internal_shipping_delay = 0; //Default sleep between shipping each batch is 0 second
-	c->xdr_flag = 0;
+	c->xdr_read_mode = XDR_MODE_BATCH_GET;
+	c->xdr_conf_change_flag = 0;
 	c->xdr_new_cfg.xdr_write_batch_size = c->xdr_write_batch_size;
 	c->xdr_new_cfg.xdr_max_recs_inflight = c->xdr_max_recs_inflight;
 	c->xdr_new_cfg.xdr_read_batch_size = c->xdr_read_batch_size;

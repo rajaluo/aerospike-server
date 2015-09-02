@@ -51,7 +51,7 @@
 #include "storage/storage.h"
 
 
-static cf_atomic32 namespace_id_counter = 0;
+static as_namespace_id g_namespace_id_counter = 0;
 
 // Create a new namespace and hook it up in the data structure
 
@@ -88,7 +88,7 @@ as_namespace_create(char *name, uint16_t replication_factor)
 
 	strncpy(ns->name, name, AS_ID_NAMESPACE_SZ - 1);
 	ns->name[AS_ID_NAMESPACE_SZ - 1] = '\0';
-	ns->id = cf_atomic32_incr(&namespace_id_counter);
+	ns->id = ++g_namespace_id_counter; // note that id is 1-based
 
 #ifdef USE_JEM
 	if (-1 == (ns->jem_arena = jem_create_arena())) {
@@ -115,7 +115,6 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->ns_forward_xdr_writes = false; // forwarding of xdr writes is disabled by default
 	ns->ns_allow_nonxdr_writes = true; // allow nonxdr writes by default
 	ns->ns_allow_xdr_writes = true; // allow xdr writes by default
-	ns->allow_versions = false;
 	ns->cold_start_evict_ttl = 0xFFFFffff; // unless this is specified via config file, use evict void-time saved in device header
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
 	ns->data_in_index = false;
@@ -156,13 +155,13 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->storage_post_write_queue = 256; // number of wblocks per device used as post-write cache
 	ns->storage_read_block_size = 64 * 1024; // size in bytes of read buffers to use with KV store devices
 	// [Note - current FusionIO maximum read buffer size is 1MB - 512B.]
-	ns->storage_write_smoothing_period = 0; // seconds of write data to use for smoothing (default 0 = off)
 	ns->storage_write_threads = 1;
 
 	// SINDEX
 	ns->sindex_data_max_memory = ULONG_MAX;
 	ns->sindex_data_memory_used = 0;
 	ns->sindex_cfg_var_hash = NULL;
+	ns->sindex_num_partitions = 32;
 
 	//
 	// END - Configuration defaults.

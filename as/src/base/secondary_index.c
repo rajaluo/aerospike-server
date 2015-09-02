@@ -48,7 +48,7 @@
  *
  * BOOT INDEX 
  * 
- * as_sindex_boot_populateall --> If fast restart or data in memory and load at start up --> as_tscan_sindex_populateall
+ * as_sindex_boot_populateall --> If fast restart or data in memory and load at start up --> as_sbld_build_all
  *
  * SBIN creation
  *
@@ -83,33 +83,43 @@
  * as_sindex_putall_rd --> For each sindex --> as_sindex_put_rd
  *
  */
- 
+
+#include "base/secondary_index.h"
+
+#include <errno.h>
+#include <limits.h>
+#include <string.h>
+
+#include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_clock.h"
 #include "aerospike/as_arraylist.h"
 #include "aerospike/as_arraylist_iterator.h"
 #include "aerospike/as_buffer.h"
 #include "aerospike/as_hashmap.h"
 #include "aerospike/as_hashmap_iterator.h"
-#include <aerospike/as_msgpack.h>
+#include "aerospike/as_msgpack.h"
 #include "aerospike/as_pair.h"
 #include "aerospike/as_serializer.h"
 #include "aerospike/as_val.h"
 
 #include "ai_btree.h"
 #include "ai_globals.h"
-
-#include "base/thr_scan.h"
-#include "base/secondary_index.h"
-#include "base/thr_sindex.h"
-#include "base/system_metadata.h"
-
 #include "bt_iterator.h"
 #include "cf_str.h"
-#include <errno.h>
-#include <limits.h>
-#include <string.h>
+#include "fault.h"
+
+#include "base/cfg.h"
+#include "base/index.h"
+#include "base/system_metadata.h"
+#include "base/thr_sindex.h"
+#include "base/udf_rw.h"
+
 
 #define SINDEX_CRASH(str, ...) \
 	cf_crash(AS_SINDEX, "SINDEX_ASSERT: "str, ##__VA_ARGS__);
+
+
+static cf_queue *g_q_index_keys_arr = NULL;
 
 // Internal Functions
 bool as_sindex__setname_match(as_sindex_metadata *imd, const char *setname);
@@ -291,7 +301,6 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 	// If the list exist 
 	// 		match the path and type of incoming si to the existing sindexes in the list	
 	bool    to_delete                    = false;
-	int     simatch                      = -1;
 	cf_ll_element * ele                  = NULL;
 	sindex_set_binid_hash_ele * prop_ele = NULL;
 	if (simatch_ll) {
@@ -302,7 +311,6 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 			if (strcmp(si->imd->path_str, imd->path_str) == 0 && 
 				si->imd->btype[0] == imd->btype[0] && si->imd->itype == imd->itype) {
 				to_delete  = true;
-				simatch    = prop_ele->simatch;
 				break;
 			}
 			ele = ele->next;
@@ -334,6 +342,47 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 	return AS_SINDEX_OK;
 }
 
+int
+as_index_keys_ll_reduce_fn(cf_ll_element *ele, void *udata)
+{
+	return CF_LL_REDUCE_DELETE;
+}
+
+void
+as_index_keys_ll_destroy_fn(cf_ll_element *ele)
+{
+	as_index_keys_ll_element * node = (as_index_keys_ll_element *) ele;
+	if (node) {
+		if (node->keys_arr) {
+			as_index_keys_release_arr_to_queue(node->keys_arr);
+			node->keys_arr = NULL;
+		}
+		cf_free(node);
+	}
+}
+
+as_index_keys_arr *
+as_index_get_keys_arr(void)
+{
+	as_index_keys_arr *keys_arr;
+	if (cf_queue_pop(g_q_index_keys_arr, &keys_arr, CF_QUEUE_NOWAIT) == CF_QUEUE_EMPTY) {
+		keys_arr = cf_malloc(sizeof(as_index_keys_arr));
+	}
+	keys_arr->num = 0;
+	return keys_arr;
+}
+
+void
+as_index_keys_release_arr_to_queue(as_index_keys_arr *v)
+{
+	as_index_keys_arr * keys_arr = (as_index_keys_arr *)v;
+	if (cf_queue_sz(g_q_index_keys_arr) < AS_INDEX_KEYS_ARRAY_QUEUE_HIGHWATER) {
+		cf_queue_push(g_q_index_keys_arr, &keys_arr);
+	} 
+	else {
+		cf_free(keys_arr);
+	}
+}
 /*
  * Should happen under SINDEX_GRLOCK if called directly.
  */
@@ -802,14 +851,11 @@ as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 	for (i = 0; i < imd->num_bins; i++) {
 		// Bin id should be around if not create it
 		char bname[AS_ID_BIN_SZ];
-		memset(bname, 0, AS_ID_BIN_SZ);
-		int bname_len = strlen(imd->bnames[i]);
-		if ( (bname_len > (AS_ID_BIN_SZ - 1 ))
-				|| !as_bin_name_within_quota(ns, (byte *)imd->bnames[i], bname_len)) {
+		strncpy(bname, imd->bnames[i], AS_ID_BIN_SZ);
+		if (bname[AS_ID_BIN_SZ - 1] != 0 || !as_bin_name_within_quota(ns, bname)) {
 			cf_warning(AS_SINDEX, "bin name %s too big. Bin not added", bname);
 			return -1;
 		}
-		strncpy(bname, imd->bnames[i], bname_len);
 		imd->binid[i] = as_bin_get_or_assign_id(ns, bname);
 		cf_debug(AS_SINDEX, " Assigned %d for %s %s", imd->binid[i], imd->bnames[i], bname);
 	}
@@ -974,9 +1020,9 @@ as_sindex__stats_clear(as_sindex *si) {
 void
 as_sindex_gconfig_default(as_config *c)
 {
+	c->sindex_builder_threads         = 4;
 	c->sindex_data_max_memory         = ULONG_MAX;
 	c->sindex_data_memory_used        = 0;
-	c->sindex_populator_scan_priority = 3;  // default priority = normal
 }
 void
 as_sindex__config_default(as_sindex *si)
@@ -1138,6 +1184,9 @@ as_sindex_init(as_namespace *ns)
 
 	// Init binid_has_sindex to zero
 	memset(ns->binid_has_sindex, 0, sizeof(uint32_t)*AS_BINID_HAS_SINDEX_SIZE);	
+	if (!g_q_index_keys_arr) {
+		g_q_index_keys_arr = cf_queue_create(sizeof(void *), true);
+	}
 	return AS_SINDEX_OK;
 }
 
@@ -1355,7 +1404,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		return AS_SINDEX_ERR;
 	}
 
-	imd->nprts  = NUM_SINDEX_PARTITIONS;
+	imd->nprts  = ns->sindex_num_partitions;
 	int id      = chosen_id;
 	si          = &ns->sindex[id];
 	as_sindex_metadata *qimd;
@@ -1604,8 +1653,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 
 	int sindex_found = 0;
 	for (int i = 0; i < imd->num_bins; i++) {
-		as_bin *b = as_bin_get(rd, (uint8_t *)imd->bnames[i],
-				strlen(imd->bnames[i]));
+		as_bin *b = as_bin_get(rd, imd->bnames[i]);
 		as_val * cdt_val = NULL;
 		if (b) {
 			as_sindex_init_sbin(&sbins[sindex_found], AS_SINDEX_OP_INSERT, as_sindex_pktype(si->imd), si->simatch);
@@ -1708,7 +1756,7 @@ as_sindex_stats_str(as_namespace *ns, as_sindex_metadata *imd, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "keys=");
 	cf_dyn_buf_append_uint64(db,  n_keys);
 	cf_dyn_buf_append_string(db, ";objects=");
-	cf_dyn_buf_append_int(   db,  si_objects);
+	cf_dyn_buf_append_uint64(db,  si_objects);
 	SINDEX_RLOCK(&si->imd->slock);
 	uint64_t i_size      = ai_btree_get_isize(si->imd);
 	uint64_t n_size      = ai_btree_get_nsize(si->imd);
@@ -1748,9 +1796,9 @@ as_sindex_stats_str(as_namespace *ns, as_sindex_metadata *imd, cf_dyn_buf *db)
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.delete_errs));
 	// defrag
 	cf_dyn_buf_append_string(db, ";stat_gc_recs=");
-	cf_dyn_buf_append_int(   db, cf_atomic64_get(si->stats.n_defrag_records));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.n_defrag_records));
 	cf_dyn_buf_append_string(db, ";stat_gc_time=");
-	cf_dyn_buf_append_int(   db, cf_atomic64_get(si->stats.defrag_time));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.defrag_time));
 
 	// Cache values
 	uint64_t agg        = cf_atomic64_get(si->stats.n_aggregation);
@@ -1884,16 +1932,13 @@ as_sindex_describe_str(as_namespace *ns, as_sindex_metadata *imd, cf_dyn_buf *db
 int
 as_sindex_boot_populateall()
 {
-	int ns_cnt            = 0;
-	int old_priority   = g_config.sindex_populator_scan_priority;
-	int old_g_priority = g_config.scan_priority;
-	int old_g_sleep    = g_config.scan_sleep;
+	// Initialize the secondary index builder. The thread pool is initialized
+	// with maximum threads to go full throttle, then down-sized to the
+	// configured number after the startup population job is done.
+	as_sbld_init();
 
-	// Go full throttle
-	g_config.scan_priority                  = UINT_MAX;
-	g_config.scan_sleep                     = 0;
-	g_config.sindex_populator_scan_priority = MAX_SCAN_THREADS; // use all of it
-	
+	int ns_cnt = 0;
+
 	// Trigger namespace scan to populate all secondary indexes
 	// mark all secondary index for a namespace as populated
 	for (int i = 0; i < g_config.namespaces; i++) {
@@ -1901,12 +1946,12 @@ as_sindex_boot_populateall()
 		if (!ns || (ns->sindex_cnt == 0)) {
 			continue;
 		}
-	
+
 		// If FAST START
 		// OR (Data not in memory AND load data at startup)
 		if (!ns->cold_start
 			|| (!ns->storage_data_in_memory)) {
-			as_tscan_sindex_populateall(ns);
+			as_sbld_build_all(ns);
 			cf_info(AS_SINDEX, "Queuing namespace %s for sindex population ", ns->name);
 		} else {
 			as_sindex_boot_populateall_done(ns);
@@ -1919,10 +1964,11 @@ as_sindex_boot_populateall()
 		cf_queue_pop(g_sindex_populateall_done_q, &ret, CF_QUEUE_FOREVER);
 		// TODO: Check for failure .. is generally fatal if it fails
 	}
-	g_config.scan_priority                  = old_g_priority;
-	g_config.scan_sleep                     = old_g_sleep;
-	g_config.sindex_populator_scan_priority = old_priority;
-	g_sindex_boot_done                      = true;
+
+	// Down-size builder thread pool to configured value.
+	as_sbld_resize_thread_pool(g_config.sindex_builder_threads);
+
+	g_sindex_boot_done = true;
 
 	// This above flag indicates that the basic sindex boot-up loader is done
 	// Go and destroy the sindex_cfg_var_hash here to prevent run-time
@@ -2308,8 +2354,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		strncpy(srange->bin_path, (char *)data, bin_path_len);
 		srange->bin_path[bin_path_len] = '\0';
 
-		char binname[BIN_NAME_MAX_SZ];
-		memset(binname, 0, BIN_NAME_MAX_SZ);
+		char binname[AS_ID_BIN_SZ];
 		if (as_sindex_extract_bin_from_path(srange->bin_path, binname) == AS_SINDEX_OK) {
 			int16_t id = as_bin_get_id(ns, binname);
 			if (id != -1) {
@@ -3901,16 +3946,9 @@ as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, a
 int
 as_sindex_sbin_free(as_sindex_bin *sbin)
 {
-	uint32_t datasz = 0;
 	if (sbin->to_free) {
-		if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
-			datasz = sizeof(uint64_t);
-		}
-		else  if (sbin->type == AS_PARTICLE_TYPE_STRING){
-			datasz = sizeof(cf_digest);
-		}
-		else {
-			cf_debug(AS_SINDEX, "sbin free got invalid dtaa type in sbin %d", sbin->type);
+		if (! (sbin->type == AS_PARTICLE_TYPE_INTEGER || sbin->type == AS_PARTICLE_TYPE_STRING)) {
+			cf_debug(AS_SINDEX, "sbin free got invalid data type in sbin %d", sbin->type);
 			return AS_SINDEX_ERR;
 		}
 		cf_free(sbin->values);
@@ -3942,16 +3980,11 @@ as_sindex_partition_isqnode(as_namespace *ns, cf_digest *digest)
 
 	int pid       = as_partition_getid(*(digest));
 	p             = &ns->partitions[pid];
-
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_SINDEX, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-
-	bool is_qnode = (p->qnode == g_config.self_node);
-
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_SINDEX, "couldn't release partition state lock: %s", cf_strerror(errno));
-
-	return is_qnode;
+	// NB: This is lockless check could result is false positives. Query
+	// does the reservation before reading which would make sure these 
+	// are filtered out. Only possible case this could happen is when 
+	// qnode information is changing
+	return (p->qnode == g_config.self_node);
 }
 
 
@@ -4924,8 +4957,8 @@ as_sindex_extract_bin_from_path(char * path_str, char *bin)
 	while (end < path_len && path_str[end] != '.' && path_str[end] != '[' && path_str[end] != ']') {
 		end++;
 	}
-	
-	if (end > 0 && end <= BIN_NAME_MAX_SZ) {
+
+	if (end > 0 && end < AS_ID_BIN_SZ) {
 		strncpy(bin, path_str, end);
 		bin[end] = '\0';
 	}
@@ -5006,6 +5039,9 @@ as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v)
 					return NULL;
 				}
 				val = as_map_get(map, key);
+				if (key) {
+					as_val_destroy(key);
+				}
 				if ( !val ) {
 					return NULL;
 				}

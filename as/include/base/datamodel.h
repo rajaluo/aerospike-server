@@ -36,6 +36,7 @@
 #include <string.h>
 
 #include <citrusleaf/cf_atomic.h>
+#include <citrusleaf/cf_clock.h>
 #include <citrusleaf/cf_digest.h>
 #include <citrusleaf/cf_shash.h>
 
@@ -100,7 +101,7 @@
 
 // [7] [9-13]  // 6 byte clock
 #define DIGEST_CLOCK_ZERO_BYTE      7
-#define DIGEST_CLOCK_START_BYTE     9 // upto 13  
+#define DIGEST_CLOCK_START_BYTE     9 // upto 13
 
 // [14-19]  // 6 byte version
 #define DIGEST_VERSION_START_POS   14 // upto 19
@@ -143,7 +144,7 @@ struct as_index_tree_s;
 #define AS_ID_NAMESPACE_SZ 32
 #define AS_ID_BIN_SZ 15 // size used in storage format
 #define AS_ID_INAME_SZ 256
-#define BIN_NAME_MAX_SZ ((AS_ID_BIN_SZ + 3) & ~3) // round up to multiple of 4
+#define VMAP_BIN_NAME_MAX_SZ ((AS_ID_BIN_SZ + 3) & ~3) // round up to multiple of 4
 #define MAX_BIN_NAMES 0x10000 // no need for more - numeric ID is 16 bits
 #define BIN_NAMES_QUOTA (MAX_BIN_NAMES / 2) // don't add more names than this via client transactions
 
@@ -197,16 +198,16 @@ typedef struct as_particle_s {
 	uint8_t		data[];
 } __attribute__ ((__packed__)) as_particle;
 
-// Bit Flag constants used for the particle state value (2 bits, 4 values)
+// Bit Flag constants used for the particle state value (4 bits, 16 values)
 #define AS_BIN_STATE_UNUSED			0
 #define AS_BIN_STATE_INUSE_INTEGER	1
 #define AS_BIN_STATE_INUSE_HIDDEN	2 // Denotes a server-side, hidden bin
 #define AS_BIN_STATE_INUSE_OTHER	3
+#define AS_BIN_STATE_INUSE_FLOAT	4
 
 typedef struct as_particle_iparticle_s {
-	uint8_t		version: 4;		// can only be used in multi bin
-	uint8_t		unused: 2;		// can only be used in multi bin
-	uint8_t		state: 2;		// IF 0: unused, IF 1: integer, IF 2: HIDDEN bin, IF 3: inuse, other bin type
+	uint8_t		version: 4;		// now unused - and can't be used in single-bin config
+	uint8_t		state: 4;		// see AS_BIN_STATE_...
 	uint8_t		data[];
 } __attribute__ ((__packed__)) as_particle_iparticle;
 
@@ -218,7 +219,7 @@ is_embedded_particle_type(as_particle_type type)
 	return type == AS_PARTICLE_TYPE_INTEGER || type == AS_PARTICLE_TYPE_FLOAT;
 }
 
-extern int32_t as_particle_size_from_client(const as_msg_op *op);
+extern int32_t as_particle_size_from_client(const as_msg_op *op); // TODO - will we ever need this?
 extern int32_t as_particle_size_from_pickled(uint8_t **p_pickled);
 extern uint32_t as_particle_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
 extern int32_t as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size); // TODO - will we ever need this?
@@ -234,17 +235,24 @@ extern uint32_t as_bin_particle_size(as_bin *b);
 extern uint32_t as_bin_particle_ptr(as_bin *b, uint8_t **p_value);
 
 // wire:
-extern int32_t as_bin_particle_size_modify_from_client(as_bin *b, const as_msg_op *op);
+extern int32_t as_bin_particle_size_modify_from_client(as_bin *b, const as_msg_op *op); // TODO - will we ever need this?
 extern int as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op);
 extern int as_bin_particle_stack_modify_from_client(as_bin *b, cf_dyn_buf *particles_db, const as_msg_op *op);
 extern int as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op);
 extern int as_bin_particle_stack_from_client(as_bin *b, cf_dyn_buf *particles_db, const as_msg_op *op);
 extern int as_bin_particle_replace_from_pickled(as_bin *b, uint8_t **p_pickled);
 extern int32_t as_bin_particle_stack_from_pickled(as_bin *b, uint8_t* stack, uint8_t **p_pickled);
+extern int as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled);
 extern uint32_t as_bin_particle_client_value_size(as_bin *b);
 extern uint32_t as_bin_particle_to_client(const as_bin *b, as_msg_op *op);
 extern uint32_t as_bin_particle_pickled_size(as_bin *b);
 extern uint32_t as_bin_particle_to_pickled(const as_bin *b, uint8_t *pickled);
+
+// Different for CDTs - the operations may return results, so we don't use the
+// normal APIs and particle table functions.
+extern int as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result);
+extern int as_bin_cdt_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *result);
+extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_dyn_buf *particles_db, as_msg_op *op, as_bin *result);
 
 // Different for LDTs - an LDT's as_list is expensive to generate, so we return
 // it from the sizing method, and cache it for later use by the packing method:
@@ -263,8 +271,6 @@ extern int as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, uin
 extern uint32_t as_bin_particle_flat_size(as_bin *b);
 extern uint32_t as_bin_particle_to_flat(const as_bin *b, uint8_t *flat);
 
-
-#define BIN_VERSION_MAX 15 // the largest number we can place in the version
 
 /* as_bin
  * A bin container - null name means unused */
@@ -323,7 +329,6 @@ static inline void
 as_bin_state_set(as_bin *b, uint8_t val)
 {
 	((as_particle_iparticle *)b)->state = val;
-	((as_particle_iparticle *)b)->unused = 0;
 }
 
 static inline void
@@ -337,6 +342,8 @@ as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 		((as_particle_iparticle *)b)->state = AS_BIN_STATE_INUSE_INTEGER;
 		break;
 	case AS_PARTICLE_TYPE_FLOAT:
+		((as_particle_iparticle *)b)->state = AS_BIN_STATE_INUSE_FLOAT;
+		break;
 	case AS_PARTICLE_TYPE_TIMESTAMP:
 		// TODO - unsupported
 		((as_particle_iparticle *)b)->state = AS_BIN_STATE_UNUSED;
@@ -349,8 +356,6 @@ as_bin_state_set_from_type(as_bin *b, as_particle_type type)
 		((as_particle_iparticle *)b)->state = AS_BIN_STATE_INUSE_OTHER;
 		break;
 	}
-
-	((as_particle_iparticle *)b)->unused = 0;
 }
 
 static inline bool
@@ -404,7 +409,8 @@ as_bin_set_all_empty(as_storage_rd *rd) {
 
 static inline bool
 as_bin_is_embedded_particle(const as_bin *b) {
-	return ((as_particle_iparticle *)b)->state == AS_BIN_STATE_INUSE_INTEGER;
+	return ((as_particle_iparticle *)b)->state == AS_BIN_STATE_INUSE_INTEGER ||
+			((as_particle_iparticle *)b)->state == AS_BIN_STATE_INUSE_FLOAT;
 }
 
 static inline as_particle *
@@ -412,62 +418,48 @@ as_bin_get_particle(as_bin *b) {
 	return as_bin_is_embedded_particle(b) ? &b->iparticle : b->particle;
 }
 
-/**
- * Quick test to show if this bin is one of the HIDDEN bins.
- */
 static inline bool
 as_bin_is_hidden(const as_bin *b) {
 	return  (((as_particle_iparticle *)b)->state) == AS_BIN_STATE_INUSE_HIDDEN;
 }
 
-/*
- * Return the type of the particle.  Integers are stored directly, but the other
- * bin types ("other" or "hidden") must follow an indirection to get the
- * actual type.
- */
+// "Embedded" types like integer are stored directly, but other bin types
+// ("other" or "hidden") must follow an indirection to get the actual type.
 static inline uint8_t
 as_bin_get_particle_type(const as_bin *b) {
 	switch (((as_particle_iparticle *)b)->state) {
 		case AS_BIN_STATE_INUSE_INTEGER:
-			return (AS_PARTICLE_TYPE_INTEGER);
+			return AS_PARTICLE_TYPE_INTEGER;
+		case AS_BIN_STATE_INUSE_FLOAT:
+			return AS_PARTICLE_TYPE_FLOAT;
 		case AS_BIN_STATE_INUSE_OTHER:
-			return (b->particle->metadata);
+			return b->particle->metadata;
 		case AS_BIN_STATE_INUSE_HIDDEN:
-			return (b->particle->metadata);
+			return b->particle->metadata;
 		default:
-			return (AS_PARTICLE_TYPE_NULL);
+			return AS_PARTICLE_TYPE_NULL;
 	}
 }
 
-static inline uint8_t
-as_bin_get_version(const as_bin *b, bool single_bin) {
-	return (single_bin ? 0 : ((as_particle_iparticle *)b)->version);
-}
-
-static inline void
-as_bin_set_version(as_bin *b, uint8_t version, bool single_bin) {
-	if (! single_bin) {
-		((as_particle_iparticle *)b)->version = version;
-	}
-}
-
-/* AS_INITIAL_BINS_PER_RECORD
- * How many bin slots to preallocate when we instantiate a new record */
-#define AS_INITIAL_BINS_PER_RECORD 1
 
 /* Bin function declarations */
 extern int16_t as_bin_get_id(as_namespace *ns, const char *name);
 extern uint16_t as_bin_get_or_assign_id(as_namespace *ns, const char *name);
 extern const char* as_bin_get_name_from_id(as_namespace *ns, uint16_t id);
-extern bool as_bin_name_within_quota(as_namespace *ns, byte *buf, size_t len);
+extern bool as_bin_name_within_quota(as_namespace *ns, const char *name);
 extern uint16_t as_bin_get_n_bins(as_record *r, as_storage_rd *rd);
 extern as_bin *as_bin_get_all(as_record *r, as_storage_rd *rd, as_bin *stack_bins);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
 extern void as_bin_get_all_p(as_storage_rd *rd, as_bin **bin_ptrs);
-extern as_bin *as_bin_create(as_record *r, as_storage_rd *rd, uint8_t *name, size_t namesz, uint version);
-extern as_bin *as_bin_get(as_storage_rd *rd, uint8_t *name, size_t namesz);
-extern int32_t as_bin_get_index(as_storage_rd *rd, uint8_t *name, size_t namesz);
-extern int as_bin_get_all_versions(as_storage_rd *rd, uint8_t *name, size_t namesz, as_bin **curr_bins);
+extern as_bin *as_bin_create(as_storage_rd *rd, const char *name);
+extern as_bin *as_bin_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
+extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
+extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
+extern as_bin *as_bin_get_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
+extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name);
+extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, byte *name, size_t namesz, bool create_only, bool replace_only, int *p_result);
+extern int32_t as_bin_get_index(as_storage_rd *rd, const char *name);
+extern int32_t as_bin_get_index_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
 extern void as_bin_allocate_bin_space(as_record *r, as_storage_rd *rd, int32_t delta);
 extern void as_bin_destroy(as_storage_rd *rd, uint16_t i);
 extern void as_bin_destroy_from(as_storage_rd *rd, uint16_t i);
@@ -475,7 +467,7 @@ extern void as_bin_destroy_all(as_storage_rd *rd);
 extern uint16_t as_bin_inuse_count(as_storage_rd *rd);
 extern void as_bin_all_dump(as_storage_rd *rd, char *msg);
 
-extern void as_bin_init(as_namespace *ns, as_bin *b, byte *name, size_t namesz, uint version);
+extern void as_bin_init(as_namespace *ns, as_bin *b, const char *name);
 
 #define AS_PARTITION_MAX_VERSION 16
 
@@ -486,43 +478,11 @@ struct as_partition_vinfo_s {
 	uint8_t vtp[AS_PARTITION_MAX_VERSION];      // vtp is the version string of the partition with the cluster's split-reforms
 };
 
-
-#define AS_PARTITION_VINFOSET_SIZE 32
-
-typedef struct as_partition_vinfoset_s {
-	uint				sz;
-	as_partition_vinfo 	vinfo_a[AS_PARTITION_VINFOSET_SIZE];
-} as_partition_vinfoset;
-
-typedef uint32_t as_partition_vinfo_mask;
-
-// vinfo related calls
-#define AS_PARTITION_VINFOSET_PICKLE_MAX ( 4 + ( AS_PARTITION_VINFOSET_SIZE * ( sizeof(as_partition_vinfo) + 1 ) ) )
-
-extern int as_partition_vinfoset_mask_pickle( as_partition_vinfoset *vinfoset, as_partition_vinfo_mask mask, uint8_t *buf, size_t *sz_r);
-extern int as_partition_vinfoset_mask_pickle_getsz( as_partition_vinfo_mask mask, size_t *sz_r);
-extern int as_partition_vinfoset_pickle( as_partition_vinfoset *vinfoset, uint8_t *buf, size_t *sz_r);
-extern as_partition_vinfo_mask as_partition_vinfoset_mask_unpickle( as_partition *p, uint8_t *buf, size_t buf_sz);
-extern int as_partition_vinfoset_unpickle( as_partition_vinfoset *vinfoset, uint8_t *buf, size_t buf_sz, char *msg);
-extern bool as_partition_vinfo_contains(as_partition_vinfo *v1, as_partition_vinfo *v2);
-extern bool as_partition_vinfoset_contains_vinfoset(as_partition_vinfoset *vs1, as_partition_vinfo_mask mask1, as_partition_vinfoset *vs2, as_partition_vinfo_mask mask2, bool debug );
-extern bool as_partition_vinfoset_superset_vinfoset(as_partition_vinfoset *vs1, as_partition_vinfo_mask mask1, as_partition_vinfoset *vs2);
-extern void as_partition_vinfo_dump(as_partition_vinfo *vinfo, char *msg);
-extern void as_partition_vinfoset_dump(as_partition_vinfoset *vinfoset, char *msg);
-extern void as_partition_vinfoset_mask_dump(as_partition_vinfoset *vinfoset, as_partition_vinfo_mask mask, char *msg);
-
 static inline bool
 as_partition_vinfo_same(as_partition_vinfo *v1, as_partition_vinfo *v2) {
 	if (v1->iid != v2->iid)		return (false);
 	if ( 0 != memcmp( v1->vtp, v2->vtp, AS_PARTITION_MAX_VERSION ) ) return (false);
 	return (true);
-}
-
-static inline bool
-as_partition_vinfo_different(as_partition_vinfo *v1, as_partition_vinfo *v2) {
-	if (v1->iid != v2->iid)	return (true);
-	if ( 0 != memcmp( v1->vtp, v2->vtp, AS_PARTITION_MAX_VERSION ) ) return (true);
-	return (false);
 }
 
 
@@ -547,7 +507,6 @@ extern int as_record_pickle(as_record *r, as_storage_rd *rd, uint8_t **buf_r, si
 extern int as_record_pickle_a_delete(byte **buf_r, size_t *len_r);
 extern uint32_t as_record_buf_get_stack_particles_sz(uint8_t *buf);
 extern int as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t bufsz, uint8_t **stack_particles, bool has_sindex);
-extern int as_record_unpickle_merge(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t bufsz, uint8_t **stack_particles, bool *record_written);
 extern int as_record_unused_version_get(as_storage_rd *rd);
 extern void as_record_apply_properties(as_record *r, as_namespace *ns, const as_rec_props *p_rec_props);
 extern void as_record_clear_properties(as_record *r, as_namespace *ns);
@@ -586,7 +545,7 @@ extern int as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m)
 	((c)->flag & AS_COMPONENT_FLAG_LDT_ESR)
 
 #define COMPONENT_IS_LDT_SUB(c) \
-	(((c)->flag & AS_COMPONENT_FLAG_LDT_ESR)        \
+	(((c)->flag & AS_COMPONENT_FLAG_LDT_ESR) \
 		|| ((c)->flag & AS_COMPONENT_FLAG_LDT_SUBREC))
 
 #define COMPONENT_IS_LDT(c) \
@@ -594,7 +553,6 @@ extern int as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m)
 		|| COMPONENT_IS_LDT_SUB((c))
 
 typedef struct {
-	as_partition_vinfoset   vinfoset; // entire description of versions
 	uint8_t					*record_buf;
 	size_t					record_buf_sz;
 	uint32_t				generation;
@@ -608,10 +566,6 @@ typedef struct {
 	uint64_t                version;
 } as_record_merge_component;
 
-extern int as_record_merge(as_partition_reservation *rsv, cf_digest *keyd,
-		uint16_t n_components, as_record_merge_component *components);
-
-
 extern int as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 		uint16_t n_components, as_record_merge_component *components, int *winner_idx);
 
@@ -619,16 +573,9 @@ extern int as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 extern int as_record_replace(as_partition_reservation *rsv, cf_digest *keyd,
 		uint16_t n_components, as_record_merge_component *components);
 
-
-// vinfo routines
-
-// get the mask, used for the in-memory representation
-extern as_partition_vinfo_mask as_record_vinfo_mask_get(as_partition *p, as_partition_vinfo *vinfo);
-extern as_partition_vinfo_mask as_record_vinfoset_mask_get( as_partition *p, as_partition_vinfoset *vinfoset, as_partition_vinfo_mask mask);
-extern bool as_record_vinfoset_mask_validate(as_partition_vinfoset *vinfoset, as_partition_vinfo_mask mask);
-
 // a simpler call that gives seconds in the right epoch
-extern uint32_t as_record_void_time_get();
+#define as_record_void_time_get() cf_clepoch_seconds()
+bool as_record_is_expired(as_record *r); // TODO - eventually inline
 
 
 /* as_partition_id
@@ -677,7 +624,7 @@ static inline as_partition_id
 as_partition_getid(cf_digest d)
 {
 	return( (as_partition_id) cf_digest_gethash( &d, AS_PARTITION_MASK ) );
-//     return((as_partition_id)((*(as_partition_id *)&d.digest[0]) & AS_PARTITION_MASK));
+//	return((as_partition_id)((*(as_partition_id *)&d.digest[0]) & AS_PARTITION_MASK));
 }
 
 
@@ -699,21 +646,19 @@ struct as_partition_s {
 	bool replica_tx_onsync[AS_CLUSTER_SZ];
 
 	size_t n_dupl;
-	cf_node  dupl_nodes[AS_CLUSTER_SZ];
+	cf_node dupl_nodes[AS_CLUSTER_SZ];
 	bool reject_writes;
 	bool waiting_for_master;
-	cf_node  qnode; 	// point to the node which serves the query at the moment
+	cf_node qnode; 	// point to the node which serves the query at the moment
 	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
 	as_partition_vinfo version_info;         // the version of my partition here and now
-	pthread_mutex_t        vinfoset_lock;
-	as_partition_vinfoset vinfoset;
 
 	cf_node old_sl[AS_CLUSTER_SZ];
 
 	uint64_t cluster_key;
 
 	// the number of bytes in the tree below
-	cf_atomic_int	n_bytes_memory; // memory bytes
+	cf_atomic_int n_bytes_memory; // memory bytes
 	// the maximum void time of all records in the tree below
 	cf_atomic_int max_void_time;
 
@@ -737,22 +682,22 @@ struct as_partition_s {
  *     unless you what you are doing
  */
 struct as_partition_reservation_s {
-	as_namespace          *ns;
-	bool                   is_write;
-	bool                   reject_writes;
-	as_partition_state     state;
-	uint8_t                n_dupl;
-	as_partition_id        pid;
-	uint8_t                spare[2];
+	as_namespace			*ns;
+	bool					is_write;
+	bool					reject_writes;
+	as_partition_state		state;
+	uint8_t					n_dupl;
+	as_partition_id			pid;
+	uint8_t					spare[2];
 	/************* 16 byte ******/
-	as_partition           *p;
-	struct as_index_tree_s *tree;
-	uint64_t                cluster_key;
-	as_partition_vinfo      vinfo;
+	as_partition			*p;
+	struct as_index_tree_s	*tree;
+	uint64_t				cluster_key;
+	as_partition_vinfo		vinfo;
 
 	/************* 64 byte *****/
-	struct as_index_tree_s *sub_tree;
-	cf_node                 dupl_nodes[AS_CLUSTER_SZ];
+	struct as_index_tree_s	*sub_tree;
+	cf_node					dupl_nodes[AS_CLUSTER_SZ];
 };
 
 
@@ -767,6 +712,18 @@ struct as_partition_reservation_s {
 	__rsv.reject_writes = false; \
 	__rsv.cluster_key = 0;
 
+#define AS_PARTITION_RESERVATION_INITP(__rsv)   \
+	__rsv->ns = NULL; \
+	__rsv->is_write = false; \
+	__rsv->pid = AS_PARTITION_ID_UNDEF; \
+	__rsv->p = 0; \
+	__rsv->state = AS_PARTITION_STATE_UNDEF; \
+	__rsv->tree = 0; \
+	__rsv->n_dupl = 0; \
+	__rsv->reject_writes = false; \
+	__rsv->cluster_key = 0;
+
+
 // This is a statistics function
 typedef struct as_partition_states_s {
 	int		sync_actual;
@@ -776,10 +733,10 @@ typedef struct as_partition_states_s {
 	int 	wait;
 	int		absent;
 	int		undef;
-	int     n_objects;
-	int     n_ref_count;
-	int     n_sub_objects;
-	int     n_sub_ref_count;
+	int		n_objects;
+	int		n_ref_count;
+	int		n_sub_objects;
+	int		n_sub_ref_count;
 } as_partition_states;
 
 /* Partition function declarations */
@@ -794,7 +751,7 @@ extern cf_node as_partition_getreplica_write(as_namespace *ns, as_partition_id p
 
 // reserve_qnode - *consumes* the ns reservation if success
 extern int as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
-extern void as_partition_prereserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[]);
+extern uint32_t as_partition_prereserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[]);
 // reserve_write - *consumes* the ns reservation if success
 extern int as_partition_reserve_write(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
 // reserve_migrate - *consumes* the ns reservation if success
@@ -856,6 +813,9 @@ void as_partition_map_dump();
 
 #define AS_SINDEX_BINMAX	4
 #define AS_SINDEX_MAX		256
+
+#define MIN_PARTITIONS_PER_INDEX 1
+#define MAX_PARTITIONS_PER_INDEX 256
 
 // as_sindex structure which hangs from the ns.
 #define AS_SINDEX_INACTIVE			1 // On init, pre-loading
@@ -982,7 +942,6 @@ struct as_namespace_s {
 	uint16_t					replication_factor;
 	uint16_t					cfg_replication_factor;
 	conflict_resolution_policy	conflict_resolution_policy;
-	bool						allow_versions;	// allow consistancy errors to create duplicate versions
 	bool						single_bin;		// restrict the namespace to objects with exactly one bin
 	bool						data_in_index;	// with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	bool 						disallow_null_setname;
@@ -1038,7 +997,6 @@ struct as_namespace_s {
 	uint64_t	storage_flush_max_us;
 	uint64_t	storage_fsync_max_us;
 	uint32_t	storage_min_avail_pct;
-	uint32_t	storage_write_smoothing_period;
 
 	// For data-not-in-memory, optionally cache swbs after writing to device.
 	cf_atomic32 storage_post_write_queue; // number of swbs/device held after writing to device
@@ -1046,9 +1004,6 @@ struct as_namespace_s {
 	cf_atomic32 n_reads_from_cache;
 	cf_atomic32 n_reads_from_device;
 	float cache_read_pct;
-
-	int demo_read_multiplier;
-	int demo_write_multiplier;
 
 	void *storage_private;
 
@@ -1067,7 +1022,6 @@ struct as_namespace_s {
 	int			storage_last_avail_pct; // most recently calculated available percent
 	int			storage_max_write_q; // storage_max_write_cache is converted to this
 	uint32_t	saved_defrag_sleep; // restore after defrag at startup is done
-	uint32_t	saved_write_smoothing_period; // restore after defrag at startup is done
 	uint32_t	defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
 
 	/* very interesting counters */
@@ -1111,7 +1065,8 @@ struct as_namespace_s {
 	cf_atomic_int		sindex_data_memory_used;
 	shash               *sindex_set_binid_hash;
 	shash				*sindex_iname_hash;
-	uint32_t             binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
+	uint32_t			binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
+	uint32_t			sindex_num_partitions;
 
 	// Current state of threshold breaches.
 	cf_atomic32		hwm_breached;
@@ -1191,7 +1146,7 @@ as_bin_set_id_from_name_buf(as_namespace *ns, as_bin *b, byte *buf, int len) {
 }
 
 static inline void
-as_bin_set_id_from_name(as_namespace *ns, as_bin *b, char *name) {
+as_bin_set_id_from_name(as_namespace *ns, as_bin *b, const char *name) {
 	if (! ns->single_bin) {
 		b->id = as_bin_get_or_assign_id(ns, name);
 	}

@@ -31,6 +31,7 @@
 #include "base/monitor.h"
 #include "base/proto.h"
 #include "base/system_metadata.h"
+#include "base/transaction.h"
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
@@ -52,13 +53,13 @@
 #define AS_SINDEX_MAX_STRING_KSIZE 2048
 #define SINDEX_SMD_KEY_SIZE        AS_ID_INAME_SZ + AS_ID_NAMESPACE_SZ 
 #define SINDEX_SMD_VALUE_SIZE      (AS_SMD_MAJORITY_CONSENSUS_KEYSIZE)
-#define NUM_SINDEX_PARTITIONS      32
 #define SINDEX_MODULE              "sindex_module"
 #define AS_SINDEX_MAX_PATH_LENGTH  256
 #define AS_SINDEX_MAX_DEPTH        10
 #define AS_SINDEX_TYPE_STR_SIZE    20
+#define AS_INDEX_KEYS_ARRAY_QUEUE_HIGHWATER  512
+#define AS_INDEX_KEYS_PER_ARR      51
 // **************************************************************************************************
-
 
 /* 
  * Return status codes for index object functions.
@@ -336,7 +337,7 @@ typedef struct as_sindex_metadata_s {
 	struct as_sindex_s  * si;
 	as_sindex_pmetadata * pimd;
 	unsigned char         dtype;   // Aerospike Index type
-	int                   binid[AS_SINDEX_BINMAX]; // Redundant info to aid search
+	uint32_t              binid[AS_SINDEX_BINMAX]; // Redundant info to aid search
 	byte                  mfd_slot; // slot on the persistent file
 
 	// Index Static Data (part persisted)
@@ -426,6 +427,25 @@ typedef struct as_sindex_range_s {
 	as_sindex_type      itype;
 	char                bin_path[AS_SINDEX_MAX_PATH_LENGTH];
 } as_sindex_range;
+
+/*
+ * sindex_keys  are used by Secondary index queries to validate the keys against
+ * the values of bins
+ * ALl the jobs which runs over these queries also uses them
+ * Like - Aggregation Query
+ */
+typedef struct as_index_keys_arr_s { 
+	uint32_t      num;
+	cf_digest     pindex_digs[AS_INDEX_KEYS_PER_ARR];	
+	as_sindex_key sindex_keys[AS_INDEX_KEYS_PER_ARR];
+} __attribute__ ((packed)) as_index_keys_arr;
+
+typedef struct as_index_keys_ll_element_s {
+	cf_ll_element       ele;
+	as_index_keys_arr * keys_arr;
+} as_index_keys_ll_element;
+
+
 // **************************************************************************************************
 
 
@@ -584,6 +604,8 @@ extern int         as_sindex_assert_query(as_sindex *si, as_sindex_range *srange
 extern as_sindex * as_sindex_from_msg(as_namespace *ns, as_msg *msgp); 
 extern as_sindex * as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange);
 extern bool        as_sindex_partition_isqnode(as_namespace *ns, cf_digest *digest);
+extern int         as_index_keys_reduce_fn(cf_ll_element *ele, void *udata);
+extern void        as_index_keys_destroy_fn(cf_ll_element *ele);
 // **************************************************************************************************
 
 
@@ -688,6 +710,7 @@ extern int  as_sindex_smd_merge_cb(char *module, as_smd_item_list_t **item_list_
  */
 // **************************************************************************************************
 extern void                 as_query_init();
+extern int                  as_query(as_transaction *tr);
 extern int                  as_query_reinit(int set_size, int *actual_size);
 extern int                  as_query_worker_reinit(int set_size, int *actual_size);
 extern int                  as_query_stat(char *name, cf_dyn_buf *db);
@@ -698,6 +721,10 @@ extern as_mon_jobstat     * as_query_get_jobstat(uint64_t trid);
 extern as_mon_jobstat     * as_query_get_jobstat_all(int * size);
 extern int                  as_query_set_priority(uint64_t trid, uint32_t priority);
 extern void                 as_query_histogram_dumpall();
+extern as_index_keys_arr  * as_index_get_keys_arr();
+extern void                 as_index_keys_release_arr_to_queue(as_index_keys_arr *v);
+extern int                  as_index_keys_ll_reduce_fn(cf_ll_element *ele, void *udata);
+extern void                 as_index_keys_ll_destroy_fn(cf_ll_element *ele);
 // **************************************************************************************************
 
 /*

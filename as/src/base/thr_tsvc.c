@@ -40,16 +40,16 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
+#include "base/scan.h"
+#include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/thr_batch.h"
 #include "base/thr_info.h"
 #include "base/thr_proxy.h"
-#include "base/thr_scan.h"
 #include "base/thr_write.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
-
 
 // These must all be OFF in production.
 // #define DEBUG 1
@@ -299,10 +299,7 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 
-		if (tr->proto_fd_h) {
-			as_transaction_error(tr, tr->result_code);
-		}
-		else if (tr->proxy_msg) {
+		if (tr->proxy_msg) {
 			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
 				cf_detail_digest(AS_RW, &(tr->keyd),
 						"SHIPPED_OP :: Sending ship op reply, rc %d to (%"PRIx64") ::",
@@ -315,6 +312,9 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 			}
 			as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
 					tr->result_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+		}
+		else {
+			as_transaction_error(tr, tr->result_code);
 		}
 		return -1;
 	}
@@ -413,7 +413,7 @@ process_transaction(as_transaction *tr)
 				// Has no key or digest, which means it's a either table scan or
 				// a secondary index query. If query options (i.e where clause)
 				// defined then go through as_query path otherwise default to
-				// as_tscan.
+				// as_scan.
 				int rr = 0;
 				if (as_msg_field_get(&msgp->msg,
 						AS_MSG_FIELD_TYPE_INDEX_RANGE) != NULL) {
@@ -436,37 +436,26 @@ process_transaction(as_transaction *tr)
 					cf_debug(AS_TSVC, "Received Scan Request: TrID(%"PRIx64")", tr->trid);
 					// We got a scan, it might be for udfs, no need to know now,
 					// for now, do not free msgp for all the cases. Should take
-					// care of it inside as_tscan.
+					// care of it inside as_scan.
 					if (! as_security_check_data_op(tr, &msgp->msg, ns,
 							is_udf(msgp) ? PERM_UDF_SCAN : PERM_SCAN)) {
 						goto Cleanup;
 					}
 					free_msgp = false;
-					rr = as_tscan(tr);   // <><><> S C A N <><><>
-					// Process the scan return codes:
-					// -1 :: bad parameters
-					// -2 :: internal errors
-					// -3 :: proper response, cluster in migration
-					// -4 :: set name is valid but set doesn't exist
-					// -5 :: unsupported feature (e.g. scans with UDF)
+					rr = as_scan(tr);   // <><><> S C A N <><><>
 					if (rr != 0) {
-						cf_info(AS_TSVC, "Scan failed with error %d", rr);
-						as_transaction_error(tr,
-								 rr == -1 ? AS_PROTO_RESULT_FAIL_NAMESPACE :
-								(rr == -3 ? AS_PROTO_RESULT_FAIL_UNAVAILABLE :
-								(rr == -4 ? AS_PROTO_RESULT_FAIL_NOTFOUND :
-								(rr == -5 ? AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE :
-											AS_PROTO_RESULT_FAIL_UNKNOWN))));
+						as_transaction_error(tr, rr);
 					}
+
 				}
 			} else if (rv == -3) {
 				// Has digest array, is batch - msgp gets freed through cleanup.
 				if (! as_security_check_data_op(tr, &msgp->msg, ns, PERM_READ)) {
 					goto Cleanup;
 				}
-				if (0 != as_batch(tr)) {
-					cf_info(AS_TSVC, "error from batch function");
-					as_transaction_error(tr, AS_PROTO_RESULT_FAIL_PARAMETER);
+				rv = as_batch_direct_queue_task(tr);
+				if (rv != 0) {
+					as_transaction_error(tr, rv);
 					cf_atomic_int_incr(&g_config.batch_errors);
 				}
 			} else if (rv == -4) {
@@ -646,16 +635,32 @@ process_transaction(as_transaction *tr)
 			// so that we can process the transaction.
 			node_cluster_key = as_paxos_get_cluster_key();
 			if (node_cluster_key != partition_cluster_key) {
-				// This transaction is NOT READY to be processed. We must set it
-				// aside until the proper cluster state is restored. We queue
-				// this transaction on the "slow queue" to give it time to rest
-				// while the cluster state becomes consistent again.
-				as_partition_release(&tr->rsv);
-				cf_atomic_int_decr(&g_config.rw_tree_count);
-				thr_tsvc_enqueue_slow(tr);
-				ns = NULL;
-				free_msgp = false;
-				goto Cleanup;
+				// First check if the user relaxed the guarantees that he is
+				// expecting from the read or the write. If yes, let the txn go.
+				if (   (msgp->msg.info2 & AS_MSG_INFO2_WRITE) 
+					&& (g_config.write_duplicate_resolution_disable == true)
+					&& (TRANSACTION_COMMIT_LEVEL(tr) == AS_POLICY_COMMIT_LEVEL_MASTER)) {
+
+					cf_detail(AS_TSVC, "Letting the write with mistmatched cluster key (%"PRIx64") and partition key (%"PRIx64")",
+								node_cluster_key, partition_cluster_key);
+				} else if (    (msgp->msg.info1 & AS_MSG_INFO1_READ) 
+							&& (g_config.transaction_repeatable_read == false)
+							&& (TRANSACTION_CONSISTENCY_LEVEL(tr) == AS_POLICY_CONSISTENCY_LEVEL_ONE)) {
+
+					cf_detail(AS_TSVC, "Letting the read with mistmatched cluster key (%"PRIx64") and partition key (%"PRIx64")",
+								node_cluster_key, partition_cluster_key);
+				} else {
+					// This transaction is NOT READY to be processed. We must set it
+					// aside until the proper cluster state is restored. We queue
+					// this transaction on the "slow queue" to give it time to rest
+					// while the cluster state becomes consistent again.
+					as_partition_release(&tr->rsv);
+					cf_atomic_int_decr(&g_config.rw_tree_count);
+					thr_tsvc_enqueue_slow(tr);
+					ns = NULL;
+					free_msgp = false;
+					goto Cleanup;
+				}
 			}
 
 			ns = 0; // got a reservation
@@ -690,7 +695,7 @@ process_transaction(as_transaction *tr)
 			// -2 :: "try again"
 			// -3 :: "duplicate proxy request, drop"
 			if (0 != rv) {
-				rv = as_rw_process_result(rv, tr, &free_msgp); 
+				rv = as_rw_process_result(rv, tr, &free_msgp);
 			}
 			if (free_msgp == true) {
 				cf_free(msgp);
@@ -700,11 +705,11 @@ process_transaction(as_transaction *tr)
 				goto Cleanup;
 			}
 		} else {
-			// rv != 0 or cluster keys DO NOT MATCH.
+			// rv != 0 (reservation failed) or cluster keys DO NOT MATCH.
 			//
 			// Make sure that if it is shipped op it is not further redirected.
 			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-		
+
 				int ret_code = 0;
 				if (!cluster_keys_match) {
 					ret_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
@@ -754,6 +759,11 @@ process_transaction(as_transaction *tr)
 				// XDR will relog digest on seeing this error.
 				xdr_internal_read_response(ns, AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, NULL, 0, NULL, tr->from_xdr);
 				free_msgp = true;
+			} else if (tr->udata.req_udata){
+				cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
+				if (udf_rw_needcomplete(tr)) {
+					udf_rw_complete(tr, cluster_keys_match ? AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH : AS_PROTO_RESULT_FAIL_UNKNOWN, __FILE__,__LINE__);
+				}
 			}
 			if (free_msgp == true) {
 				cf_free(msgp);
@@ -799,8 +809,8 @@ process_transaction(as_transaction *tr)
 	cf_detail(AS_TSVC, "message service complete tr %p", tr);
 
 Cleanup:
-
-	if (free_msgp) {
+	// Batch transactions should never free msgp.
+	if (free_msgp && !tr->batch_shared) {
 		cf_free(msgp);
 	}
 } // end process_transaction()

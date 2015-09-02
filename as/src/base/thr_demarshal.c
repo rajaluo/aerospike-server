@@ -42,6 +42,8 @@
 #include "queue.h"
 #include "socket.h"
 
+#include "base/as_stap.h"
+#include "base/batch.h"
 #include "base/cfg.h"
 #include "base/packet_compression.h"
 #include "base/proto.h"
@@ -53,7 +55,6 @@
 #ifdef USE_JEM
 #include "base/datamodel.h"
 #endif
-
 
 #define EPOLL_SZ	1024
 // Workaround for platforms that don't have EPOLLRDHUP yet.
@@ -243,6 +244,10 @@ thr_demarshal(void *arg)
 	int nevents, i, n, epoll_fd;
 	cf_clock last_fd_print = 0;
 
+#if defined(USE_SYSTEMTAP)
+	uint64_t nodeid = g_config.self_node;
+#endif
+
 	// Early stage aborts; these will cause faults in process scope.
 	cf_assert(arg, AS_DEMARSHAL, CF_CRITICAL, "invalid argument");
 	s = &g_config.socket;
@@ -346,7 +351,7 @@ thr_demarshal(void *arg)
 				uint32_t conns_open = g_config.proto_connections_opened - g_config.proto_connections_closed;
 				if (conns_open > g_config.n_proto_fd_max) {
 					if ((last_fd_print + 5000L) < cf_getms()) { // no more than 5 secs
-						cf_info(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
+						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
 						last_fd_print = cf_getms();
 					}
 					shutdown(csocket, SHUT_RDWR);
@@ -517,7 +522,6 @@ thr_demarshal(void *arg)
 					size_t peekbuf_sz = 2048; // (Arbitrary "large enough" size for peeking the fields of "most" AS_MSGs.)
 					uint8_t peekbuf[peekbuf_sz];
 					if (PROTO_TYPE_AS_MSG == proto.type) {
-						bool found = false;
 						size_t offset = sizeof(as_msg);
 						// Number of bytes to peek from the socket.
 						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
@@ -537,41 +541,48 @@ thr_demarshal(void *arg)
 								log_as_proto_and_peeked_data(&proto, peekbuf, peeked_data_sz);
 								goto NextEvent_FD_Cleanup;
 							}
-							uint16_t n_fields = ntohs(((as_msg *) peekbuf)->n_fields), field_num = 0;
-//							cf_debug(AS_DEMARSHAL, "Found %d AS_MSG fields", n_fields);
-							while (!found && (field_num < n_fields)) {
-								as_msg_field *field = (as_msg_field *) (&peekbuf[offset]);
-								uint32_t value_sz = ntohl(field->field_sz) - 1;
-//								cf_debug(AS_DEMARSHAL, "Field #%d offset: %lu", field_num, offset);
-//								cf_debug(AS_DEMARSHAL, "\tvalue_sz %u", value_sz);
-//								cf_debug(AS_DEMARSHAL, "\ttype %d", field->type);
-								if (AS_MSG_FIELD_TYPE_NAMESPACE == field->type) {
-									if (value_sz >= AS_ID_NAMESPACE_SZ) {
-										cf_warning(AS_DEMARSHAL, "namespace too long (%u) in as_msg", value_sz);
-										goto NextEvent_FD_Cleanup;
-									}
-									char ns[AS_ID_NAMESPACE_SZ];
-									found = true;
-									memcpy(ns, field->data, value_sz);
-									ns[value_sz] = '\0';
-//									cf_debug(AS_DEMARSHAL, "Found ns \"%s\" in field #%d.", ns, field_num);
-									jem_set_arena(as_namespace_get_jem_arena(ns));
-								} else {
-//									cf_debug(AS_DEMARSHAL, "Message field %d is not namespace (type %d) ~~ Reading next field", field_num, field->type);
-									field_num++;
-									offset += sizeof(as_msg_field) + value_sz;
-									if (offset >= peekbuf_sz) {
-										break;
+
+							if (((as_msg*)peekbuf)->info1 & AS_MSG_INFO1_BATCH) {
+								jem_set_arena(orig_arena);
+							} else {
+								uint16_t n_fields = ntohs(((as_msg *) peekbuf)->n_fields), field_num = 0;
+								bool found = false;
+	//							cf_debug(AS_DEMARSHAL, "Found %d AS_MSG fields", n_fields);
+								while (!found && (field_num < n_fields)) {
+									as_msg_field *field = (as_msg_field *) (&peekbuf[offset]);
+									uint32_t value_sz = ntohl(field->field_sz) - 1;
+	//								cf_debug(AS_DEMARSHAL, "Field #%d offset: %lu", field_num, offset);
+	//								cf_debug(AS_DEMARSHAL, "\tvalue_sz %u", value_sz);
+	//								cf_debug(AS_DEMARSHAL, "\ttype %d", field->type);
+									if (AS_MSG_FIELD_TYPE_NAMESPACE == field->type) {
+										if (value_sz >= AS_ID_NAMESPACE_SZ) {
+											cf_warning(AS_DEMARSHAL, "namespace too long (%u) in as_msg", value_sz);
+											goto NextEvent_FD_Cleanup;
+										}
+										char ns[AS_ID_NAMESPACE_SZ];
+										found = true;
+										memcpy(ns, field->data, value_sz);
+										ns[value_sz] = '\0';
+	//									cf_debug(AS_DEMARSHAL, "Found ns \"%s\" in field #%d.", ns, field_num);
+										jem_set_arena(as_namespace_get_jem_arena(ns));
+									} else {
+	//									cf_debug(AS_DEMARSHAL, "Message field %d is not namespace (type %d) ~~ Reading next field", field_num, field->type);
+										field_num++;
+										offset += sizeof(as_msg_field) + value_sz;
+										if (offset >= peekbuf_sz) {
+											break;
+										}
 									}
 								}
+								if (!found) {
+									cf_warning(AS_DEMARSHAL, "Can't get namespace from AS_MSG (peeked %zu bytes) ~~ Using default thr_demarshal arena.", peeked_data_sz);
+									jem_set_arena(orig_arena);
+								}
 							}
-						}
-						if (!found) {
-							cf_warning(AS_DEMARSHAL, "Can't get namespace from AS_MSG (peeked %zu bytes) ~~ Using default thr_demarshal arena.", peeked_data_sz);
+						} else {
 							jem_set_arena(orig_arena);
 						}
 					} else {
-//						cf_debug(AS_DEMARSHAL, "Non-AS_MSG ~~ Using default thr_demarshal arena.");
 						jem_set_arena(orig_arena);
 					}
 #endif
@@ -644,8 +655,9 @@ thr_demarshal(void *arg)
 						// Decompress it - allocate buffer to hold decompressed
 						// packet.
 						uint8_t *decompressed_buf = NULL;
+						size_t decompressed_buf_size = 0;
 						int rv = 0;
-						if ((rv = as_packet_decompression((uint8_t *)proto_p, &decompressed_buf, NULL))) {
+						if ((rv = as_packet_decompression((uint8_t *)proto_p, &decompressed_buf, &decompressed_buf_size))) {
 							cf_warning(AS_DEMARSHAL, "as_proto decompression failed! (rv %d)", rv);
 							cf_warning_binary(AS_DEMARSHAL, proto_p, sizeof(as_proto) + proto_p->sz, CF_DISPLAY_HEX_SPACED, "compressed proto_p");
 							goto NextEvent_FD_Cleanup;
@@ -655,9 +667,28 @@ thr_demarshal(void *arg)
 						// Free the compressed packet since we'll be using the
 						// decompressed packet from now on.
 						cf_free(proto_p);
+						proto_p = NULL;
 						// Get original packet.
 						tr.msgp = (cl_msg *)decompressed_buf;
 						as_proto_swap(&(tr.msgp->proto));
+
+						if (tr.msgp->proto.sz > PROTO_SIZE_MAX) {
+							cf_warning(AS_DEMARSHAL, "as_proto decompressed packet sz %lu > %lu (MAX) %d", tr.msgp->proto.sz, PROTO_SIZE_MAX, (tr.msgp->proto.sz > PROTO_SIZE_MAX));
+							cf_free(decompressed_buf);
+							goto NextEvent_FD_Cleanup;
+						}
+
+						if (tr.msgp->proto.sz != decompressed_buf_size - sizeof(as_proto)) {
+							cf_warning(AS_DEMARSHAL, "as_proto decompressed packet sz %lu != decompressed buffer size %lu", tr.msgp->proto.sz, decompressed_buf_size - sizeof(as_proto));
+							cf_free(decompressed_buf);
+							goto NextEvent_FD_Cleanup;
+						}
+
+						if (tr.msgp->proto.type == PROTO_TYPE_AS_MSG_COMPRESSED) {
+							cf_warning(AS_DEMARSHAL, "as_proto decompressed packet cannot contain another compressed packet.");
+							cf_free(decompressed_buf);
+							goto NextEvent_FD_Cleanup;
+						}
 					}
 
 					// Security protocol transactions.
@@ -672,6 +703,17 @@ thr_demarshal(void *arg)
 						cf_debug(AS_DEMARSHAL, "[Sending Info request via fast path.]");
 						if (as_info(&tr)) {
 							cf_warning(AS_DEMARSHAL, "Info request failed to be enqueued ~~ Freeing protocol buffer");
+							goto NextEvent_FD_Cleanup;
+						}
+						cf_atomic_int_incr(&g_config.proto_transactions);
+						goto NextEvent;
+					}
+
+					ASD_TRANS_DEMARSHAL(nodeid, (uint64_t) tr.msgp);
+
+					// Fast path for batch requests.
+					if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
+						if (as_batch_queue_task(&tr)) {
 							goto NextEvent_FD_Cleanup;
 						}
 						cf_atomic_int_incr(&g_config.proto_transactions);

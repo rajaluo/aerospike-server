@@ -97,10 +97,6 @@ extern bool as_cold_start_evict_if_needed(as_namespace* ns);
 #define SSD_BLOCK_MAGIC		0x037AF200
 #define SIGNATURE_OFFSET	offsetof(struct drv_ssd_block_s, keyd)
 
-// Write-smoothing constants.
-#define MIN_SECONDS_OF_WRITE_SMOOTHING_DATA		5
-#define NUM_ELEMS_IN_LBW_CATCH_UP_CALC			5
-
 #define DEFRAG_STARTUP_RESERVE	4
 #define DEFRAG_RUNTIME_RESERVE	4
 
@@ -128,8 +124,8 @@ typedef struct drv_ssd_block_s {
 	cf_clock		void_time;
 	uint32_t		bins_offset;	// offset to bins from data
 	uint32_t		n_bins;
-	uint32_t		vinfo_offset;
-	uint32_t		vinfo_length;
+	uint32_t		vinfo_offset;	// deprecated
+	uint32_t		vinfo_length;	// deprecated
 	uint8_t			data[];
 } __attribute__ ((__packed__)) drv_ssd_block;
 
@@ -139,7 +135,7 @@ typedef struct drv_ssd_block_s {
 //
 typedef struct drv_ssd_bin_s {
 	char		name[AS_ID_BIN_SZ];	// 15 aligns well
-	uint8_t		version;
+	uint8_t		version;			// now unused
 	uint32_t	offset;				// offset of bin data within block
 	uint32_t	len;				// size of bin data
 	uint32_t	next;				// location of next bin: block offset
@@ -485,7 +481,6 @@ log_bad_record(const char* ns_name, uint32_t n_bins, uint32_t block_bins,
 	cf_info(AS_DRV_SSD, "   bin %" PRIu32 " [of %" PRIu32 "]", (block_bins - n_bins) + 1, block_bins);
 
 	if (ssd_bin) {
-		cf_info(AS_DRV_SSD, "   ssd_bin->version = %" PRIu32, (uint32_t)ssd_bin->version);
 		cf_info(AS_DRV_SSD, "   ssd_bin->offset = %" PRIu32, ssd_bin->offset);
 		cf_info(AS_DRV_SSD, "   ssd_bin->len = %" PRIu32, ssd_bin->len);
 		cf_info(AS_DRV_SSD, "   ssd_bin->next = %" PRIu32, ssd_bin->next);
@@ -510,11 +505,6 @@ is_valid_record(const drv_ssd_block* block, const char* ns_name)
 	while (n_bins > 0) {
 		if (ssd_bin > ssd_bin_end) {
 			log_bad_record(ns_name, n_bins, block->n_bins, NULL, "bin ptr");
-			return false;
-		}
-
-		if (ssd_bin->version >= 16) {
-			log_bad_record(ns_name, n_bins, block->n_bins, ssd_bin, "version");
 			return false;
 		}
 
@@ -594,12 +584,6 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 
 			as_storage_rd rd;
 			as_storage_record_open(ns, r, &rd, &block->keyd);
-
-			as_index_vinfo_mask_set(r,
-					as_partition_vinfoset_mask_unpickle(rsv.p,
-							block->data + block->vinfo_offset,
-							block->vinfo_length),
-					ns->allow_versions);
 
 			rd.u.ssd.block = block;
 			rd.have_device_block = true;
@@ -1237,7 +1221,6 @@ as_storage_particle_read_all_ssd(as_storage_rd *rd)
 	drv_ssd_bin *ssd_bin = (drv_ssd_bin*)(block->data + block->bins_offset);
 
 	for (uint16_t i = 0; i < block->n_bins; i++) {
-		as_bin_set_version(&rd->bins[i], ssd_bin->version, rd->ns->single_bin);
 		as_bin_set_id_from_name(rd->ns, &rd->bins[i], ssd_bin->name);
 
 		int rv = as_bin_particle_cast_from_flat(&rd->bins[i],
@@ -1265,16 +1248,15 @@ as_storage_record_get_key_ssd(as_storage_rd *rd)
 	}
 
 	drv_ssd_block *block = rd->u.ssd.block;
-	uint32_t properties_offset = block->vinfo_offset + block->vinfo_length;
 	as_rec_props props;
 
-	props.size = block->bins_offset - properties_offset;
+	props.size = block->bins_offset;
 
 	if (props.size == 0) {
 		return false;
 	}
 
-	props.p_data = block->data + properties_offset;
+	props.p_data = block->data;
 
 	return as_rec_props_get_value(&props, CL_REC_PROPS_FIELD_KEY,
 			&rd->key_size, &rd->key) == 0;
@@ -1284,288 +1266,6 @@ as_storage_record_get_key_ssd(as_storage_rd *rd)
 //==========================================================
 // Record writing utilities.
 //
-
-//------------------------------------------------
-// Write-smoother.
-//
-
-typedef struct as_write_smoothing_arg_s {
-	drv_ssd *ssd;
-	as_namespace *ns;
-
-	int budget_usecs_for_this_second;
-
-	// lbw means large block writes
-	cf_queue *lbw_to_process_per_second_q;
-	int lbw_to_process_per_second_sum;
-	uint64_t last_lbw_request_cnt; // last value of ssd_write_buf_counter
-
-	int lbw_to_process_per_second_recent_max; // max from last 5 seconds
-	int lbw_catchup_calculation_cnt; // counter used to help calculate recent max
-
-	uint32_t last_smoothing_period;
-
-	uint64_t last_time_ms;
-	uint64_t last_second;
-} as_write_smoothing_arg;
-
-int
-as_write_smoothing_arg_initialize(as_write_smoothing_arg *awsa, drv_ssd *ssd)
-{
-	awsa->ssd = ssd;
-	awsa->ns = ssd->ns;
-
-	awsa->budget_usecs_for_this_second = 0;
-
-	// lbw means large block writes
-	awsa->lbw_to_process_per_second_q = cf_queue_create(sizeof(int), false);
-	awsa->lbw_to_process_per_second_sum = 0;
-	awsa->last_lbw_request_cnt = 0;
-
-	awsa->lbw_to_process_per_second_recent_max = 0;
-	awsa->lbw_catchup_calculation_cnt = 0;
-
-	awsa->last_smoothing_period = awsa->ns->storage_write_smoothing_period;
-
-	awsa->last_time_ms = cf_getms();
-	awsa->last_second = awsa->last_time_ms / 1000;
-
-	return 0;
-}
-
-void
-as_write_smoothing_arg_destroy(as_write_smoothing_arg *awsa)
-{
-	cf_queue_destroy(awsa->lbw_to_process_per_second_q);
-}
-
-void
-as_write_smoothing_arg_reset(as_write_smoothing_arg *awsa)
-{
-	cf_queue_delete_all(awsa->lbw_to_process_per_second_q);
-	awsa->lbw_to_process_per_second_sum = 0;
-
-	awsa->budget_usecs_for_this_second = 0;
-}
-
-// This function takes a queue (optionally with a max queue size), a pointer to
-// a sum of the elements in the q, and the new data point to push on the q.
-// This will "expire" the oldest q element if max_q_sz is hit, then will push
-// the new element and update the sum.
-//
-// This is very useful for updating a rolling N second average.
-void
-as_write_smoothing_push_to_queue_and_update_queue_sum(cf_queue *q, int max_q_sz,
-		int *p_sum, int new_data)
-{
-	if (max_q_sz != 0 && cf_queue_sz(q) == max_q_sz) {
-		int old_data;
-
-		if (0 != cf_queue_pop(q, &old_data, CF_QUEUE_NOWAIT)) {
-			// this should never happen
-			cf_assert(false, AS_DRV_SSD, CF_CRITICAL,
-				"could not pop element off queue");
-		}
-
-		*p_sum -= old_data;
-	}
-
-	*p_sum += new_data;
-
-	cf_queue_push(q, &new_data);
-}
-
-int
-as_write_smoothing_get_lbw_to_process_per_second_recent_max_reduce_fn(void *buf,
-		void *udata)
-{
-	as_write_smoothing_arg *awsa = (as_write_smoothing_arg*)udata;
-
-	if (awsa->lbw_catchup_calculation_cnt == NUM_ELEMS_IN_LBW_CATCH_UP_CALC) {
-		return -1;
-	}
-
-	int *p_lbw_to_process_per_second = (int*)buf;
-
-	if (*p_lbw_to_process_per_second >
-			awsa->lbw_to_process_per_second_recent_max) {
-		awsa->lbw_to_process_per_second_recent_max =
-			*p_lbw_to_process_per_second;
-	}
-
-	awsa->lbw_catchup_calculation_cnt++;
-
-	return 0;
-}
-
-// This function dictates when to sleep after large block writes.
-void
-as_write_smoothing_fn(as_write_smoothing_arg *awsa)
-{
-	// Write throttling algorithm - look at smoothing_period seconds back of
-	// data and slow writes accordingly.
-
-	uint32_t smoothing_period = awsa->ns->storage_write_smoothing_period;
-
-	if (smoothing_period != awsa->last_smoothing_period) {
-		// We've changed the smoothing period, so shorten the
-		// lbw_to_process_per_second_q if we need to.
-		while (cf_queue_sz(awsa->lbw_to_process_per_second_q) >
-				smoothing_period) {
-			int old_lbw_to_process_per_second_data;
-
-			if (0 != cf_queue_pop(awsa->lbw_to_process_per_second_q,
-					&old_lbw_to_process_per_second_data, CF_QUEUE_NOWAIT)) {
-				cf_assert(false, AS_DRV_SSD, CF_CRITICAL,
-					"could not pop smoothing_data element off queue");
-			}
-
-			awsa->lbw_to_process_per_second_sum -=
-				old_lbw_to_process_per_second_data;
-		}
-
-		if (awsa->last_smoothing_period == 0) {
-			awsa->last_lbw_request_cnt =
-				cf_atomic_int_get(awsa->ssd->ssd_write_buf_counter);
-		}
-
-		awsa->last_smoothing_period = smoothing_period;
-	}
-
-	if (smoothing_period == 0) {
-		return;
-	}
-
-	uint64_t cur_time_ms = cf_getms();
-	uint64_t cur_second = cur_time_ms / 1000;
-
-	if ((cur_time_ms - awsa->last_time_ms) > 1000) {
-		// It's been more than 1000 ms since our last write, so let's reset our
-		// rolling averages.
-		as_write_smoothing_arg_reset(awsa);
-	}
-
-	// Every *new* second, update the state of the world.
-	if (cur_second != awsa->last_second) {
-		uint64_t lbw_request_cnt =
-			cf_atomic_int_get(awsa->ssd->ssd_write_buf_counter);
-
-		int lbw_requests_this_second = (int)
-				(lbw_request_cnt - awsa->last_lbw_request_cnt);
-
-		awsa->last_lbw_request_cnt = lbw_request_cnt;
-
-		if (lbw_requests_this_second == 0) {
-			// We received no new lbw requests this second, so let's reset our
-			// rolling averages.
-			as_write_smoothing_arg_reset(awsa);
-		}
-		else {
-			as_write_smoothing_push_to_queue_and_update_queue_sum(
-					awsa->lbw_to_process_per_second_q, smoothing_period,
-					&(awsa->lbw_to_process_per_second_sum),
-					lbw_requests_this_second);
-
-			// Calculate lbw process per second *recent* max (last 5s) used when
-			// write q 80%+ full.
-			awsa->lbw_to_process_per_second_recent_max = 0;
-			awsa->lbw_catchup_calculation_cnt = 0;
-
-			cf_queue_reduce_reverse(awsa->lbw_to_process_per_second_q,
-					as_write_smoothing_get_lbw_to_process_per_second_recent_max_reduce_fn,
-					awsa);
-
-			int lbw_to_process_per_second_q_sz =
-					cf_queue_sz(awsa->lbw_to_process_per_second_q);
-
-			if (lbw_to_process_per_second_q_sz >=
-					MIN_SECONDS_OF_WRITE_SMOOTHING_DATA) {
-				int swb_write_q_sz = cf_queue_sz(awsa->ssd->swb_write_q);
-
-				int est_lbw_to_do =
-					((awsa->lbw_to_process_per_second_sum * smoothing_period) /
-						lbw_to_process_per_second_q_sz) + swb_write_q_sz;
-
-				if (est_lbw_to_do > 0) {
-					awsa->budget_usecs_for_this_second =
-						(smoothing_period * 1000 * 1000) *
-							awsa->ns->storage_write_threads / est_lbw_to_do;
-				}
-
-				cf_detail(AS_DRV_SSD, "budget usecs = %d, lbw_to_process_per_second_q_sz = %d, lbw_to_process_per_second_sum = %d, write_q_depth = %d",
-						awsa->budget_usecs_for_this_second,
-						lbw_to_process_per_second_q_sz,
-						awsa->lbw_to_process_per_second_sum, swb_write_q_sz);
-			}
-			else {
-				// Not enough seconds of data to set a budget.
-				awsa->budget_usecs_for_this_second = 0;
-			}
-		}
-	}
-
-	int swb_write_q_sz = cf_queue_sz(awsa->ssd->swb_write_q);
-	int max_write_q_sz = awsa->ns->storage_max_write_q;
-
-	// Set to 0 so I don't have to set to 0 in a bunch of special cases.
-	int budget_usecs = 0;
-
-	if (awsa->budget_usecs_for_this_second > 0) {
-		// If write q is 90%+ full, don't smooth this transaction.
-		if ((10 * swb_write_q_sz) < (9 * max_write_q_sz)) {
-			// If write q is 80%+ full, calculate new budget, which tries to
-			// offset the acceleration of write q growth.
-			if ((10 * swb_write_q_sz) > (8 * max_write_q_sz)) {
-				int est_lbw_to_do =
-					(awsa->lbw_to_process_per_second_recent_max *
-						smoothing_period) + swb_write_q_sz;
-
-				if (est_lbw_to_do > 0) {
-					budget_usecs = (smoothing_period * 1000 * 1000) *
-						awsa->ns->storage_write_threads / est_lbw_to_do;
-				}
-
-				if (awsa->budget_usecs_for_this_second < budget_usecs) {
-					budget_usecs = awsa->budget_usecs_for_this_second;
-				}
-
-				cf_detail(AS_DRV_SSD, "write_q > 80 pct | budget_usecs = %d, est_lbw_to_do = %d",
-					budget_usecs, est_lbw_to_do);
-			}
-			else {
-				// Standard case.
-				budget_usecs = awsa->budget_usecs_for_this_second;
-			}
-		}
-	}
-
-	cf_detail(AS_DRV_SSD, "budget_usecs = %d, trans time = %"PRIu64", sleep_usecs = %d",
-			budget_usecs, cur_time_ms - awsa->last_time_ms,
-			budget_usecs - (((int)(cur_time_ms - awsa->last_time_ms)) * 1000));
-
-	if (budget_usecs > 0) {
-		// Don't budget for less than 1 lbw/sec.
-		if (budget_usecs > 1000000) {
-			budget_usecs = 1000000;
-		}
-
-		int sleep_usecs = budget_usecs -
-			(((int)(cur_time_ms - awsa->last_time_ms)) * 1000);
-
-		if (sleep_usecs > 0) {
-			usleep(sleep_usecs);
-			cur_time_ms += (sleep_usecs / 1000); // estimate new cur_time_ms
-		}
-	}
-
-	awsa->last_time_ms = cur_time_ms;
-	awsa->last_second = cur_second;
-}
-
-//
-// END - Write-smoother.
-//------------------------------------------------
-
 
 void
 ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
@@ -1679,9 +1379,6 @@ ssd_write_worker(void *arg)
 {
 	drv_ssd *ssd = (drv_ssd*)arg;
 
-	as_write_smoothing_arg awsa;
-	as_write_smoothing_arg_initialize(&awsa, ssd);
-
 	while (ssd->running) {
 		ssd_write_buf *swb;
 
@@ -1703,11 +1400,7 @@ ssd_write_worker(void *arg)
 			// Transfer to post-write queue, or release swb, as appropriate.
 			ssd_post_write(ssd, swb);
 		}
-
-		as_write_smoothing_fn(&awsa);
 	} // infinite event loop waiting for block to write
-
-	as_write_smoothing_arg_destroy(&awsa);
 
 	return NULL;
 }
@@ -1770,17 +1463,8 @@ ssd_start_write_worker_threads(drv_ssds *ssds)
 uint32_t
 as_storage_record_overhead_size(as_storage_rd *rd)
 {
-	size_t size = 0;
-
-	// Start with pickled size of vinfo, if any.
-	if (rd->ns->allow_versions &&
-			0 != as_partition_vinfoset_mask_pickle_getsz(
-					as_index_vinfo_mask_get(rd->r, true), &size)) {
-		cf_crash(AS_DRV_SSD, "unable to pickle vinfoset");
-	}
-
-	// Add size of record header struct.
-	size += sizeof(drv_ssd_block);
+	// Start with size of record header struct.
+	size_t size = sizeof(drv_ssd_block);
 
 	// Add size of any record properties.
 	if (rd->rec_props.p_data) {
@@ -1874,7 +1558,7 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 
 		// Enqueue the buffer, to be flushed to device.
 		cf_queue_push(ssd->swb_write_q, &swb);
-		cf_atomic_int_incr(&ssd->ssd_write_buf_counter); // for write smoothing
+		cf_atomic_int_incr(&ssd->ssd_write_buf_counter);
 
 		// Get the new buffer.
 		swb = swb_get(ssd);
@@ -1906,28 +1590,6 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 
 	buf += sizeof(drv_ssd_block);
 
-	// Pickle and write vinfo, if any.
-	size_t vinfo_buf_length = 0;
-
-	if (rd->ns->allow_versions) {
-		uint8_t vinfo_buf[AS_PARTITION_VINFOSET_PICKLE_MAX];
-		as_partition_id pid = as_partition_getid(rd->keyd);
-		as_partition_vinfoset *vinfoset = &rd->ns->partitions[pid].vinfoset;
-
-		vinfo_buf_length = AS_PARTITION_VINFOSET_PICKLE_MAX;
-
-		if (0 != as_partition_vinfoset_mask_pickle(vinfoset,
-				as_index_vinfo_mask_get(r, true), vinfo_buf,
-				&vinfo_buf_length)) {
-			cf_crash(AS_DRV_SSD, "unable to pickle vinfoset");
-		}
-
-		if (vinfo_buf_length != 0) {
-			memcpy(buf, vinfo_buf, vinfo_buf_length);
-			buf += vinfo_buf_length;
-		}
-	}
-
 	// Properties list goes just before bins.
 	if (rd->rec_props.p_data) {
 		memcpy(buf, rd->rec_props.p_data, rd->rec_props.size);
@@ -1951,7 +1613,7 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 			ssd_bin = (drv_ssd_bin*)buf;
 			buf += sizeof(drv_ssd_bin);
 
-			ssd_bin->version = as_bin_get_version(bin, rd->ns->single_bin);
+			ssd_bin->version = 0;
 
 			if (! rd->ns->single_bin) {
 				strcpy(ssd_bin->name, as_bin_get_name_from_id(rd->ns, bin->id));
@@ -1978,10 +1640,10 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 	block->keyd = rd->keyd;
 	block->generation = r->generation;
 	block->void_time = r->void_time;
-	block->bins_offset = vinfo_buf_length + (rd->rec_props.p_data ? rd->rec_props.size : 0);
+	block->bins_offset = rd->rec_props.p_data ? rd->rec_props.size : 0;
 	block->n_bins = write_nbins;
-	block->vinfo_offset = 0;
-	block->vinfo_length = vinfo_buf_length;
+	block->vinfo_offset = 0; // deprecated
+	block->vinfo_length = 0; // deprecated
 
 	if (ssd->use_signature) {
 		cf_signature_compute(((uint8_t*)block) + SIGNATURE_OFFSET,
@@ -2958,11 +2620,10 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	r_ref.skip_lock = false;
 
 	// Read LDT rec-prop.
-	uint32_t properties_offset = block->vinfo_offset + block->vinfo_length;
 	as_rec_props props;
 
-	props.p_data = block->data + properties_offset;
-	props.size = block->bins_offset - properties_offset;
+	props.p_data = block->data;
+	props.size = block->bins_offset;
 
 	bool is_ldt_sub;
 	bool is_ldt_parent;
@@ -3088,11 +2749,6 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 
 	// If data is in memory, load bins and particles.
 	if (ns->storage_data_in_memory) {
-		as_index_vinfo_mask_set(r,
-				as_partition_vinfoset_mask_unpickle(p_partition,
-						block->data + block->vinfo_offset, block->vinfo_length),
-				ns->allow_versions);
-
 		uint8_t* block_head = (uint8_t*)block;
 		drv_ssd_bin* ssd_bin = (drv_ssd_bin*)(block->data + block->bins_offset);
 		as_storage_rd rd;
@@ -3198,12 +2854,11 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 				if (has_sindex) {	
 					sindex_found += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sindex_found], AS_SINDEX_OP_DELETE);
 				}
-				as_bin_set_version(b, ssd_bin->version, ns->single_bin);
 				as_bin_set_id_from_name(ns, b, ssd_bin->name);
 			}
 			else {
-				b = as_bin_create(r, &rd, (uint8_t*)ssd_bin->name,
-						strlen(ssd_bin->name), ssd_bin->version);
+				// TODO - what if this fails?
+				b = as_bin_create(&rd, ssd_bin->name);
 			}
 
 			// TODO - what if this fails?
@@ -3967,11 +3622,11 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 
 		ssd->shadow_name = ns->storage_shadows[i];
 
-		int fd = open(ssd->name, ssd->open_flag, S_IRUSR | S_IWUSR);
+		int fd = open(ssd->shadow_name, ssd->open_flag, S_IRUSR | S_IWUSR);
 
 		if (-1 == fd) {
 			cf_warning(AS_DRV_SSD, "unable to open shadow device %s: %s",
-					ssd->name, cf_strerror(errno));
+					ssd->shadow_name, cf_strerror(errno));
 			return -1;
 		}
 
@@ -3998,7 +3653,8 @@ ssd_init_shadows(as_namespace *ns, drv_ssds *ssds)
 
 		close(fd);
 
-		cf_info(AS_DRV_SSD, "shadow device %s is compatible with main device");
+		cf_info(AS_DRV_SSD, "shadow device %s is compatible with main device",
+				ssd->shadow_name);
 
 		if (ns->storage_scheduler_mode) {
 			// Set scheduler mode specified in config file.
@@ -4123,9 +3779,7 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 	// Allow defrag to go full speed during startup - restore the configured
 	// settings when startup is done.
 	ns->saved_defrag_sleep = ns->storage_defrag_sleep;
-	ns->saved_write_smoothing_period = ns->storage_write_smoothing_period;
 	ns->storage_defrag_sleep = 0;
-	ns->storage_write_smoothing_period = 0;
 
 	check_write_block_size(ns->storage_write_block_size);
 
@@ -4348,13 +4002,18 @@ as_storage_record_close_ssd(as_record *r, as_storage_rd *rd)
 {
 	int result = 0;
 
-	// All record writes come through here!
+	// All record writes come through here! (Note - can get here twice if
+	// ssd_write() fails - make sure second call will be a no-op.)
+
 	if (rd->write_to_device && as_bin_inuse_has(rd)) {
 		result = ssd_write(r, rd);
+		rd->write_to_device = false;
 	}
 
 	if (rd->u.ssd.must_free_block) {
 		cf_free(rd->u.ssd.must_free_block);
+		rd->u.ssd.must_free_block = NULL;
+		rd->u.ssd.block = NULL;
 	}
 
 	return result;
@@ -4404,7 +4063,6 @@ as_storage_wait_for_defrag_ssd(as_namespace *ns)
 
 	// Restore configured defrag throttling values.
 	ns->storage_defrag_sleep = ns->saved_defrag_sleep;
-	ns->storage_write_smoothing_period = ns->saved_write_smoothing_period;
 
 	// Set the "floor" for wblock usage. Must come after startup defrag so it
 	// doesn't prevent defrag from resurrecting a drive that hit the floor.
@@ -4698,8 +4356,6 @@ as_storage_histogram_clear_ssd(as_namespace *ns)
 void
 as_storage_shutdown_ssd(as_namespace *ns)
 {
-	ns->storage_write_smoothing_period = 0;
-
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
