@@ -329,11 +329,13 @@ as_transaction_create( as_transaction *tr, tr_create_data *  trc_data)
 	tr->incoming_cluster_key = 0;
 	// Using the scan job fd. Reservation of this fd takes place at the
 	// transaction service time, when the write_request is reserved.
-	if (call->udf_type == AS_SCAN_UDF_OP_BACKGROUND) {
+	if (call->def.type == AS_UDF_OP_BACKGROUND) {
 		tr->proto_fd_h = NULL;
-	} else {
+	} else if (call->def.type == AS_UDF_OP_FOREGROUND) {
 		cf_rc_reserve(d->fd_h);
 		tr->proto_fd_h = d->fd_h;
+	} else {
+		// TODO what do I do ....
 	}
 	tr->start_time   = now; // set transaction start time
 	tr->end_time     = 0;   // TODO: should it timeout as scan parent job

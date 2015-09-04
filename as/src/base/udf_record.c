@@ -301,7 +301,7 @@ udf_record_close(udf_record *urecord)
  * 		udf_rw_local   (parent record before calling UDF)
  */
 void
-udf_record_init(udf_record *urecord)
+udf_record_init(udf_record *urecord, bool allow_updates)
 {
 	urecord->tr                 = NULL;
 	urecord->r_ref              = NULL;
@@ -316,8 +316,10 @@ udf_record_init(udf_record *urecord)
 
 	// Init flag
 	urecord->flag               = UDF_RECORD_FLAG_ISVALID;
-	urecord->flag              |= UDF_RECORD_FLAG_ALLOW_UPDATES;
 
+	if (allow_updates) {
+		urecord->flag              |= UDF_RECORD_FLAG_ALLOW_UPDATES;
+	}
 	urecord->pickled_buf        = NULL;
 	urecord->pickled_sz         = 0;
 
@@ -1039,7 +1041,7 @@ udf_record_destroy(as_rec *rec)
 } 
 
 static as_bytes *
-udf_record_digest (const as_rec *rec)
+udf_record_digest(const as_rec *rec)
 {
 	int ret = udf_record_param_check(rec, UDF_BIN_NONAME, __FILE__, __LINE__);
 	if (ret) {
@@ -1128,7 +1130,7 @@ const as_rec_hooks udf_record_hooks = {
 	.gen		= udf_record_gen,
 	.key		= udf_record_key,
 	.setname	= udf_record_setname,
-	.destroy	= udf_record_destroy,
+	.destroy	= NULL,
 	.digest		= udf_record_digest,
 	.set_flags	= udf_record_set_flags,	// @LDT:: added for control over LDT Bins from Lua
 	.set_type	= udf_record_set_type,	// @LDT:: added for control over Rec Types from Lua

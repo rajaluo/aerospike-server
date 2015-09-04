@@ -221,6 +221,7 @@ extern uint16_t as_storage_record_get_n_bins_ssd(as_storage_rd *rd);
 extern int as_storage_record_read_ssd(as_storage_rd *rd);
 extern int as_storage_particle_read_all_ssd(as_storage_rd *rd);
 extern bool as_storage_record_size_and_check_ssd(as_storage_rd *rd);
+extern uint32_t as_storage_record_size(as_storage_rd *rd);
 
 extern void as_storage_wait_for_defrag_ssd(as_namespace *ns);
 extern bool as_storage_overloaded_ssd(as_namespace *ns);

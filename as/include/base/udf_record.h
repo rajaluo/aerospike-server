@@ -107,7 +107,7 @@ extern int      udf_record_open         (udf_record *);
 extern int      udf_storage_record_open (udf_record *);
 extern void     udf_record_close        (udf_record *);
 extern int      udf_storage_record_close(udf_record *);
-extern void     udf_record_init         (udf_record *);
+extern void     udf_record_init         (udf_record *, bool);
 extern void     udf_record_cleanup      (udf_record *, bool);
 extern as_val * udf_record_storage_get  (const udf_record *, const char *);
 extern bool     udf_record_bin_ishidden (const udf_record *urecord, const char *name);

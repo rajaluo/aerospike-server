@@ -301,7 +301,7 @@ ldt_slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 {
 	// It is just a stub fill the proper values in
 	udf_record *c_urecord   = &lslotp->c_urecord;
-	udf_record_init(c_urecord);
+	udf_record_init(c_urecord, true);
 	// note: crec cannot be destroyed from inside lua
 	c_urecord->flag        |= UDF_RECORD_FLAG_IS_SUBRECORD;
 	c_urecord->lrecord      = (void *)lrecord;
