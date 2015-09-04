@@ -160,8 +160,6 @@ typedef struct xdr_new_config_s {
 	int		xdr_max_recs_inflight;
 	int		xdr_read_batch_size;
 	int		xdr_threads;
-	int		xdr_ship_threads;   // Coinfigured number of shipper threads·
-	int		xdr_ship_slab_size; // Coinfigured size of shipper thread slab size·
 } xdr_new_config;
 
 //Config option which is maintained both by the server and the XDR module
