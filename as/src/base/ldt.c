@@ -1808,3 +1808,146 @@ as_llist_scan(as_namespace *ns, as_index_tree *sub_tree, as_storage_rd  *rd, as_
 	as_val_destroy(valp);
 	return (as_val *)result_list;
 }
+
+long
+ldt_get_error_code(void *val, size_t vlen) 
+{
+	if (!vlen)
+		return 0;
+
+	char * charptr;
+	char * valptr = (char *) val;
+	long   error_code;
+
+	// Error Format   "XXXX:LDT-<message>"
+	if ((charptr = strchr((const char *) val, ' ')) != NULL) {
+		if (&charptr[9] < &valptr[vlen]) {
+			if (memcmp(&charptr[5], ":LDT-", 5) == 0) {
+				error_code = strtol(&charptr[1], NULL, 10);
+				cf_debug(AS_UDF, "LDT Error: Code(%ld) String(%s)",
+						error_code, (char *) val);
+				return error_code;
+			}
+		}
+	}
+	return 0;
+}
+
+void 
+ldt_update_err_stats(as_namespace *ns, as_val *result_val)
+{
+	if (!ns->ldt_enabled || !result_val) {
+		return;
+	}
+
+	as_string * s   = as_string_fromval(result_val);
+	char *      rs  = (char *) as_string_tostring(s);
+
+    if ( s ) {
+		long code = ldt_get_error_code(rs, as_string_len(s));
+		switch (code) {
+			case ERR_TOP_REC_NOT_FOUND: 
+				cf_atomic_int_incr(&ns->lstats.ldt_err_toprec_not_found);
+				break;
+			case ERR_NOT_FOUND:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_item_not_found);
+				break;
+			case ERR_INTERNAL:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_internal);
+				break;
+			case ERR_UNIQUE_KEY:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_unique_key_violation);
+				break;
+			case ERR_INSERT:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_insert_fail);
+				break;
+			case ERR_SEARCH:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_search_fail);
+				break;
+			case ERR_DELETE:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_delete_fail);
+				break;
+			case ERR_VERSION:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_version_mismatch);
+				break;
+
+			case ERR_CAPACITY_EXCEEDED:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_capacity_exceeded);
+				break;
+			case ERR_INPUT_PARM:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_param);
+				break;
+
+			case ERR_TYPE_MISMATCH:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_op_bintype_mismatch);
+				break;
+
+			case ERR_NULL_BIN_NAME:
+			case ERR_BIN_NAME_NOT_STRING:
+			case ERR_BIN_NAME_TOO_LONG:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_param);
+				break;
+
+			case ERR_TOO_MANY_OPEN_SUBRECS:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_too_many_open_subrec);
+				break;
+			case ERR_SUB_REC_NOT_FOUND:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_subrec_not_found);
+				break;
+			case ERR_BIN_DOES_NOT_EXIST:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_bin_does_not_exist);
+				break;
+			case ERR_BIN_ALREADY_EXISTS:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_bin_exits);
+				break;
+			case ERR_BIN_DAMAGED:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_bin_damaged);
+				break;
+
+			case ERR_SUBREC_POOL_DAMAGED:
+			case ERR_SUBREC_DAMAGED:
+			case ERR_SUBREC_OPEN:
+			case ERR_SUBREC_UPDATE:
+			case ERR_SUBREC_CREATE:
+			case ERR_SUBREC_DELETE:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_subrec_internal);
+				break;
+
+			case ERR_SUBREC_CLOSE:
+			case ERR_TOPREC_UPDATE:
+			case ERR_TOPREC_CREATE:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_toprec_internal);
+				break;
+
+
+			case ERR_FILTER_BAD:
+			case ERR_FILTER_NOT_FOUND:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_filter);
+				break;
+			case ERR_KEY_BAD:
+			case ERR_KEY_FIELD_NOT_FOUND:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_key);
+				break;
+			case ERR_INPUT_CREATESPEC:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_createspec);
+				break;
+			case ERR_INPUT_USER_MODULE_NOT_FOUND:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_usermodule);
+				break;
+
+			case ERR_INPUT_TOO_LARGE:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_input_too_large);
+				break;
+			case ERR_NS_LDT_NOT_ENABLED:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_ldt_not_enabled);
+				break;
+			
+			default:
+				cf_atomic_int_incr(&ns->lstats.ldt_err_unknown);
+		}
+    } else {
+		cf_atomic_int_incr(&ns->lstats.ldt_err_unknown);
+	}
+	return;
+}
+

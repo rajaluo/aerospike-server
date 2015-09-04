@@ -425,7 +425,7 @@ main(int argc, char **argv)
 	as_proxy_init();			// do work on behalf of others
 	as_write_init();			// write service
 	as_query_init();			// query transaction handling
-	as_udf_init();				// apply user-defined functions
+	as_udf_rw_init();			// apply user-defined functions
 	as_scan_init();				// scan a namespace or set
 	as_batch_init();			// batch transaction handling
 	as_batch_direct_init();		// low priority transaction handling        

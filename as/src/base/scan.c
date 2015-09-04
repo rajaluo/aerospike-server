@@ -38,7 +38,6 @@
 #include <sys/socket.h>
 
 #include "aerospike/as_module.h"
-#include "aerospike/as_stream.h"
 #include "aerospike/as_string.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
@@ -316,12 +315,12 @@ get_scan_type(as_transaction* tr)
 	as_msg_field *udf_op_f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_UDF_OP);
 
-	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_SCAN_UDF_OP_AGGREGATE) {
+	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_UDF_OP_AGGREGATE) {
 		return SCAN_TYPE_AGGR;
 	}
 
 	if (tr->udata.req_udata || (udf_op_f &&
-			*udf_op_f->data == (uint8_t)AS_SCAN_UDF_OP_BACKGROUND)) {
+			*udf_op_f->data == (uint8_t)AS_UDF_OP_BACKGROUND)) {
 		return SCAN_TYPE_UDF_BG;
 	}
 
@@ -871,34 +870,38 @@ typedef struct aggr_scan_slice_s {
 	aggr_scan_job*		job;
 	cf_ll*				ll;
 	cf_buf_builder**	bb_r;
+	as_partition_reservation*	rsv;
 } aggr_scan_slice;
 
 void aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd);
-void aggr_scan_set_error(void* caller);
-bool aggr_scan_mem_op(mem_tracker* mt, uint32_t num_bytes, memtracker_op op);
-as_aggr_caller_type aggr_scan_get_type();
-as_stream_status aggr_scan_ostream_write(const as_stream* s, as_val* v);
 
-const as_aggr_caller_intf aggr_scan_caller_intf = {
-		.set_error	= aggr_scan_set_error,
-		.mem_op		= aggr_scan_mem_op,
-		.get_type	= aggr_scan_get_type
-};
 
-const as_stream_hooks aggr_scan_istream_hooks = {
-		.destroy	= NULL,
-		.read		= as_aggr_istream_read,
-		.write		= NULL
-};
 
-const as_stream_hooks aggr_scan_ostream_hooks = {
-		.destroy	= NULL,
-		.read		= NULL,
-		.write		= aggr_scan_ostream_write
-};
+as_stream_status aggr_scan_ostream_write(void *udata, as_val *val);
 
 void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val, bool success);
+as_partition_reservation * aggr_scan_ptn_reserve(void *udata, as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
+
+const as_aggr_hooks scan_aggr_hooks = {
+	.ostream_write = aggr_scan_ostream_write,
+	.set_error     = NULL,
+	.ptn_reserve   = aggr_scan_ptn_reserve,
+	.ptn_release   = NULL,
+	.pre_check     = NULL
+};
+
+int
+aggr_scan_init(as_aggr_call * call, as_msg *msg, aggr_scan_job *job)
+{
+	if (udf_rw_call_init_from_msg((udf_call *)call, msg))
+		return -1;
+	
+	call->def.type      = AS_AGGR_SCAN;
+	call->aggr_hooks    = &scan_aggr_hooks;
+
+	return 0;
+}
 
 //----------------------------------------------------------
 // aggr_scan_job public API.
@@ -925,11 +928,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	as_job_init(_job, &aggr_scan_job_vtable, &g_scan_manager, RSV_WRITE,
 			tr->trid, ns, set_id, options.priority);
 
-	job->msgp = tr->msgp;
-
-	if (as_aggr_call_init(&job->aggr_call, tr, job, &aggr_scan_caller_intf,
-			&aggr_scan_istream_hooks, &aggr_scan_ostream_hooks, ns,
-			true) != 0) {
+	if (aggr_scan_init(&job->aggr_call, &tr->msgp->msg, job) != 0) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
 		job->msgp = NULL;
 		as_job_destroy(_job);
@@ -977,13 +976,13 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 
 	cf_ll_init(&ll, as_index_keys_ll_destroy_fn, false);
 
-	aggr_scan_slice slice = { job, &ll, &bb };
+	aggr_scan_slice slice = { job, &ll, &bb, rsv };
 
 	as_index_reduce(tree, aggr_scan_job_reduce_cb, (void*)&slice);
 
 	if (cf_ll_size(&ll) != 0) {
 		as_result* res = as_result_new();
-		int ret = as_aggr_process(&job->aggr_call, &ll, (void*)&slice, res);
+		int ret = as_aggr_process(_job->ns, &job->aggr_call, &ll, (void*)&slice, res);
 
 		if (ret != 0) {
 			char* rs = as_module_err_string(ret);
@@ -1122,27 +1121,10 @@ aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd)
 	return true;
 }
 
-void
-aggr_scan_set_error(void* caller)
-{
-}
-
-bool
-aggr_scan_mem_op(mem_tracker* mt, uint32_t num_bytes, memtracker_op op)
-{
-	return mt && mt->udata;
-}
-
-as_aggr_caller_type
-aggr_scan_get_type()
-{
-	return AS_AGGR_SCAN;
-}
-
 as_stream_status
-aggr_scan_ostream_write(const as_stream* s, as_val* v)
+aggr_scan_ostream_write(void *udata, as_val* v)
 {
-	aggr_scan_slice* slice = (aggr_scan_slice*)as_stream_source(s);
+	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
 
 	if (v) {
 		aggr_scan_add_val_response(slice, v, true);
@@ -1150,6 +1132,13 @@ aggr_scan_ostream_write(const as_stream* s, as_val* v)
 	}
 
 	return AS_STREAM_OK;
+}
+
+as_partition_reservation *
+aggr_scan_ptn_reserve(void *udata, as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv)
+{
+	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
+	return slice->rsv;
 }
 
 void
@@ -1225,6 +1214,16 @@ as_scan_get_udf_call(void* req_udata)
 	return &job->call;
 }
 
+int
+udf_scan_init(udf_call *call, as_transaction *tr)
+{
+	if (udf_rw_call_init_from_msg(call, &tr->msgp->msg)) {
+		return -1;
+	}
+	call->tr = tr;
+	return 0;
+}
+
 //----------------------------------------------------------
 // udf_bg_scan_job public API.
 //
@@ -1255,7 +1254,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->n_successful_tr = 0;
 	job->n_failed_tr = 0;
 
-	if (udf_call_init(&job->call, tr) != 0) {
+	if (udf_scan_init(&job->call, tr) != 0) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed call init");
 		job->msgp = NULL;
 		as_job_destroy(_job);
@@ -1337,7 +1336,7 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 	char *extra = stat->jdata + strlen(stat->jdata);
 
 	sprintf(extra, ":udf-filename=%s:udf-function=%s:udf-active=%u:udf-success=%lu:udf-failed=%lu",
-			job->call.filename, job->call.function,
+			job->call.def.filename, job->call.def.function,
 			cf_atomic32_get(job->n_active_tr),
 			cf_atomic64_get(job->n_successful_tr),
 			cf_atomic64_get(job->n_failed_tr));

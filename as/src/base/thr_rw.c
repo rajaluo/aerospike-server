@@ -858,9 +858,15 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			} else {
 				// see if we have scripts to execute
 				udf_call *call = cf_malloc(sizeof(udf_call));
-				udf_call_init(call, tr);
+				int uret;
+				if (tr->udata.req_udata) {
+					uret = udf_rw_call_init_internal(call, tr);
+				} else {
+					uret = udf_rw_call_init_from_msg(call, &tr->msgp->msg);
+					call->tr = tr;
+				}
 
-				if (call->active) {
+				if (!uret) {
 					wr->has_udf = true;
 					if (tr->rsv.p->qnode != g_config.self_node) {
 						cf_detail(AS_RW, "Applying UDF at the non qnode");
@@ -875,7 +881,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						// update stats to move from normal to uDF requests
 						as_rw_update_stat(wr);
 						// return early if the record was not updated
-						udf_call_destroy(call);
+						udf_rw_call_destroy(call);
 						cf_free(call);
 						call = NULL;
 						if (udf_rw_needcomplete(tr)) {
