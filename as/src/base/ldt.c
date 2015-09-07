@@ -1346,11 +1346,6 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		check_esr = true;
 	}
 
-	uint64_t starting_memory_bytes = 0;
-	if (ns->storage_data_in_memory) {
-		starting_memory_bytes = as_storage_record_get_n_bytes_memory(&rd);
-	}
-
 	as_ldt_subrec_storage_validate(&rd, "Defragging");
 	as_storage_record_close(r, &rd);
 
@@ -1377,9 +1372,6 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	}
 
 	if (delete) {
-		if (ns->storage_data_in_memory) {
-			cf_atomic_int_sub(&p->n_bytes_memory, starting_memory_bytes);
-		}
 		cf_detail_digest(AS_LDT, &subrec_digest, "LDT_SUB_GC Expiry of the SubRecord type=%d version=%ld for partition %d rv=%d",
 				type, subrec_version, p->partition_id, rv);
 		cf_detail_digest(AS_LDT, &subrec_digest, "Sub-Rec Digest: ");

@@ -461,8 +461,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_evicted_objects);
 	cf_dyn_buf_append_string(db, ";stat_deleted_set_objects=");
 	APPEND_STAT_COUNTER(db, g_config.stat_deleted_set_objects);
-	cf_dyn_buf_append_string(db, ";stat_evicted_set_objects=");
-	APPEND_STAT_COUNTER(db, g_config.stat_evicted_set_objects);
 	cf_dyn_buf_append_string(db, ";stat_evicted_objects_time=");
 	APPEND_STAT_COUNTER(db, g_config.stat_evicted_objects_time);
 	cf_dyn_buf_append_string(db, ";stat_zero_bin_records=");
@@ -2561,7 +2559,6 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	cf_hist_track_get_settings(g_config.rt_hist, db);
 	cf_hist_track_get_settings(g_config.wt_hist, db);
 	cf_hist_track_get_settings(g_config.px_hist, db);
-	cf_hist_track_get_settings(g_config.wt_reply_hist, db);
 	cf_hist_track_get_settings(g_config.ut_hist, db);
 	cf_hist_track_get_settings(g_config.q_hist, db);
 	cf_hist_track_get_settings(g_config.q_rcnt_hist, db);
@@ -2584,6 +2581,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	int  context_len = sizeof(context);
 	int val;
 	char bool_val[2][6] = {"false", "true"};
+	bool print_command = true;
 
 	if (0 != as_info_parameter_get(params, "context", context, &context_len))
 		goto Error;
@@ -3347,17 +3345,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			as_set * p_set = as_namespace_init_set(ns, context);
 			cf_debug(AS_INFO, "set name is %s\n", p_set->name);
 			context_len = sizeof(context);
-			if (0 == as_info_parameter_get(params, "set-stop-write-count", context, &context_len)) {
-				uint64_t val = atoll(context);
-				cf_info(AS_INFO, "Changing value of set-stop-write-count of ns %s set %s to %"PRIu64, ns->name, p_set->name, val);
-				cf_atomic64_set(&p_set->stop_write_count, val);
-			}
-			else if (0 == as_info_parameter_get(params, "set-evict-hwm-count", context, &context_len)) {
-				uint64_t val = atoll(context);
-				cf_info(AS_INFO, "Changing value of set-evict-hwm-count of ns %s set %s to %"PRIu64, ns->name, p_set->name, val);
-				cf_atomic64_set(&p_set->evict_hwm_count, val);
-			}
-			else if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len)) {
+			if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len)) {
 				// TODO - make sure context is null-terminated.
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-enable-xdr of ns %s set %s to %s", ns->name, p_set->name, context);
@@ -3370,6 +3358,19 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				else if (strncmp(context, "use-default", 11) == 0) {
 					cf_info(AS_INFO, "Changing value of set-enable-xdr of ns %s set %s to %s", ns->name, p_set->name, context);
 					cf_atomic32_set(&p_set->enable_xdr, AS_SET_ENABLE_XDR_DEFAULT);
+				}
+				else {
+					goto Error;
+				}
+			}
+			else if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len)) {
+				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
+					cf_info(AS_INFO, "Changing value of set-disable-eviction of ns %s set %s to %s", ns->name, p_set->name, context);
+					DISABLE_SET_EVICTION(p_set, true);
+				}
+				else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
+					cf_info(AS_INFO, "Changing value of set-disable-eviction of ns %s set %s to %s", ns->name, p_set->name, context);
+					DISABLE_SET_EVICTION(p_set, false);
 				}
 				else {
 					goto Error;
@@ -3748,7 +3749,12 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			} else {
 				goto Error;
 			}
-		} else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
+		}
+		else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
+			// Dont print this command in logs as this happens every few seconds
+			// Ideally, this should not be done via config-set. 
+			print_command = false;
+
 			uint64_t val[DC_MAX_NUM];
 			char * tmp_val;
 			char *  delim = {","};
@@ -3788,6 +3794,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			xdr_broadcast_lastshipinfo(val);
 		}
 		else if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
+			print_command = false;
 			cf_node nodeid = atoll(context);
 			xdr_handle_failednodeprocessingdone(nodeid);
 		}
@@ -3857,7 +3864,9 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	else
 		goto Error;
 
-	cf_info(AS_INFO, "config-set command completed: params %s",params);
+	if (print_command) {
+		cf_info(AS_INFO, "config-set command completed: params %s",params);
+	}
 	cf_dyn_buf_append_string(db, "ok");
 	return(0);
 
@@ -4010,9 +4019,6 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == strcmp(value_str, "proxy")) {
 			hist_p = g_config.px_hist;
 		}
-		else if (0 == strcmp(value_str, "writes_reply")) {
-			hist_p = g_config.wt_reply_hist;
-		}
 		else if (0 == strcmp(value_str, "udf")) {
 			hist_p = g_config.ut_hist;
 		}
@@ -4034,7 +4040,6 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			cf_hist_track_stop(g_config.rt_hist);
 			cf_hist_track_stop(g_config.wt_hist);
 			cf_hist_track_stop(g_config.px_hist);
-			cf_hist_track_stop(g_config.wt_reply_hist);
 			cf_hist_track_stop(g_config.ut_hist);
 			cf_hist_track_stop(g_config.q_rcnt_hist);
 			cf_hist_track_stop(g_config.q_hist);
@@ -4100,7 +4105,6 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 				cf_hist_track_start(g_config.px_hist, back_sec, slice_sec, thresholds) &&
 				cf_hist_track_start(g_config.q_hist, back_sec, slice_sec, thresholds) &&
 				cf_hist_track_start(g_config.q_rcnt_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.wt_reply_hist, back_sec, slice_sec, thresholds) &&
 				cf_hist_track_start(g_config.ut_hist, back_sec, slice_sec, thresholds)) {
 
 				cf_dyn_buf_append_string(db, "ok");
@@ -4140,7 +4144,6 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		cf_hist_track_get_info(g_config.rt_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 		cf_hist_track_get_info(g_config.wt_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 		cf_hist_track_get_info(g_config.px_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-		cf_hist_track_get_info(g_config.wt_reply_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 		cf_hist_track_get_info(g_config.ut_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 		cf_hist_track_get_info(g_config.q_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 	}
@@ -4923,8 +4926,6 @@ info_debug_ticker_fn(void *unused)
 				cf_hist_track_dump(g_config.wt_hist);
 			if (g_config.px_hist)
 				cf_hist_track_dump(g_config.px_hist);
-			if (g_config.wt_reply_hist)
-				cf_hist_track_dump(g_config.wt_reply_hist);
 			if (g_config.ut_hist)
 				cf_hist_track_dump(g_config.ut_hist);
 			if (g_config.q_hist)
@@ -5764,7 +5765,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "expired-objects",  ns->n_expired_objects, db);
 	info_append_uint64("", "evicted-objects",  ns->n_evicted_objects, db);
 	info_append_uint64("", "set-deleted-objects", ns->n_deleted_set_objects, db);
-	info_append_uint64("", "set-evicted-objects", ns->n_evicted_set_objects, db);
 	info_append_uint64("", "nsup-cycle-duration", (uint64_t)ns->nsup_cycle_duration, db);
 	info_append_uint64("", "nsup-cycle-sleep-pct", (uint64_t)ns->nsup_cycle_sleep_pct, db);
 
@@ -6969,8 +6969,6 @@ int info_command_sindex_qnodemap(char *name, char *params, cf_dyn_buf *db)
 			if (g_config.self_node == p->qnode)
 				cf_dyn_buf_append_string(db, "Q");
 			cf_dyn_buf_append_string(db, ":");
-			cf_dyn_buf_append_uint64(db, (uint64_t) p->n_bytes_memory);
-			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, (uint64_t) p->vp->elements);
 			cf_dyn_buf_append_char(db, ';');
 		}
