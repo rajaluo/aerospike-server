@@ -162,7 +162,10 @@ as_batch_send_error(as_file_handle* fd_h, int result_code)
 	as_msg_swap_header(&m.msg);
 
 	int status = as_batch_send(fd_h->fd, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
-	AS_RELEASE_FILE_HANDLE(fd_h);
+
+	if (!status) {
+		as_end_of_transaction(fd_h);
+	}
 
 	if (result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
 		cf_atomic_int_incr(&g_config.batch_index_timeout);
