@@ -452,7 +452,7 @@ thr_demarshal(void *arg)
 				else {
 					// Place the client socket in the event queue.
 					memset(&ev, 0, sizeof(ev));
-					ev.events = EPOLLIN | EPOLLRDHUP ;
+					ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP ;
 					ev.data.ptr = fd_h;
 
 					// Round-robin pick up demarshal thread epoll_fd and add
