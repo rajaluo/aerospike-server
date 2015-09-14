@@ -165,6 +165,7 @@ as_batch_send_error(as_file_handle* fd_h, int result_code)
 
 	if (!status) {
 		as_end_of_transaction(fd_h);
+		fd_h = NULL;
 	}
 
 	if (result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
