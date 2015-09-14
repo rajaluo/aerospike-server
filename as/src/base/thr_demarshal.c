@@ -191,6 +191,7 @@ thr_demarshal_reaper_fn(void *arg)
 					g_file_handle_a[i] = 0;
 					cf_queue_push(g_freeslot, &i);
 					as_release_file_handle(fd_h);
+					fd_h = 0;
 				}
 				// Reap if past kill time.
 				else if ((0 != kill_ms) && (fd_h->last_used + kill_ms < now)) {
@@ -204,7 +205,8 @@ thr_demarshal_reaper_fn(void *arg)
 					cf_debug(AS_DEMARSHAL, "remove unused connection, fd %d", fd_h->fd);
 					g_file_handle_a[i] = 0;
 					cf_queue_push(g_freeslot, &i);
-					AS_RELEASE_FILE_HANDLE(fd_h);
+					as_release_file_handle(fd_h);
+					fd_h = 0;
 					cf_atomic_int_incr(&g_config.reaper_count);
 				}
 				else {
@@ -471,7 +473,7 @@ thr_demarshal(void *arg)
 						cf_info(AS_DEMARSHAL, "unable to add socket to event queue of demarshal thread %d %d", id, g_demarshal_args->num_threads);
 						pthread_mutex_lock(&g_file_handle_a_LOCK);
 						fd_h->reap_me = true;
-						AS_RELEASE_FILE_HANDLE(fd_h);
+						as_release_file_handle(fd_h);
 						fd_h = 0;
 						pthread_mutex_unlock(&g_file_handle_a_LOCK);
 					}
@@ -793,7 +795,7 @@ NextEvent_FD_Cleanup:
 				}
 				pthread_mutex_lock(&g_file_handle_a_LOCK);
 				fd_h->reap_me = true;
-				AS_RELEASE_FILE_HANDLE(fd_h);
+				as_release_file_handle(fd_h);
 				fd_h = 0;
 				pthread_mutex_unlock(&g_file_handle_a_LOCK);
 NextEvent:
