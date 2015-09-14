@@ -2074,7 +2074,7 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	}
 
 	if (tr->proto_fd_h != 0) {
-		AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+		as_end_of_transaction(tr->proto_fd_h);
 		tr->proto_fd_h = 0;
 	}
 }
