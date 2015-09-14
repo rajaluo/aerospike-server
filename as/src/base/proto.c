@@ -323,7 +323,8 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 			if (errno != EWOULDBLOCK) {
 				// Common when a client aborts.
 				cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zd pos %zd rv %d errno %d", fd_h->fd, msg_sz, pos, rv, errno);
-				shutdown(fd_h->fd, SHUT_RDWR);
+				as_end_of_transaction_force_close(fd_h);
+				fd_h = NULL;
 				rv = -1;
 				goto Exit;
 			}
@@ -332,17 +333,17 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 		}
 		else {
 			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", fd_h->fd, msg_sz, pos);
-			shutdown(fd_h->fd, SHUT_RDWR);
+			as_end_of_transaction_force_close(fd_h);
+			fd_h = NULL;
 			rv = -1;
 			goto Exit;
 		}
 	}
 
+	as_end_of_transaction(fd_h);
+	fd_h = NULL;
+
 Exit:
-
-	// END_OF_TRANSACTION
-	AS_RELEASE_FILE_HANDLE(fd_h);
-
 	return rv;
 }
 
