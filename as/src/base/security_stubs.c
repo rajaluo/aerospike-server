@@ -137,7 +137,8 @@ as_security_transact(as_transaction *tr)
 		}
 		else if (rv == 0) {
 			cf_warning(AS_SECURITY, "fd %d send returned 0", fd);
-			shutdown(fd, SHUT_RDWR);
+			as_end_of_transaction_force_close(tr->proto_fd_h);
+			tr->proto_fd_h = NULL;
 			break;
 		}
 		// rv < 0
@@ -146,13 +147,16 @@ as_security_transact(as_transaction *tr)
 		}
 		else {
 			cf_warning(AS_SECURITY, "fd %d send failed, errno %d", fd, errno);
-			shutdown(fd, SHUT_RDWR);
+			as_end_of_transaction_force_close(tr->proto_fd_h);
+			tr->proto_fd_h = NULL;
 			break;
 		}
 	}
 
-	// END_OF_TRANSACTION
-	AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+	if (tr->proto_fd_h != NULL) {
+		as_end_of_transaction(tr->proto_fd_h);
+		tr->proto_fd_h = NULL;
+	}
 }
 
 
