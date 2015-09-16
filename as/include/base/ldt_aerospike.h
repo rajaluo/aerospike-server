@@ -23,6 +23,7 @@
 #pragma once
 
 #include "base/feature.h" // turn new AS Features on/off
+#include "base/udf_record.h"
 #include <aerospike/as_aerospike.h>
 
 extern         as_aerospike g_ldt_aerospike;
@@ -31,4 +32,5 @@ extern const   as_aerospike_hooks ldt_aerospike_hooks;
 as_aerospike * ldt_aerospike_new();
 as_aerospike * ldt_aerospike_init(as_aerospike *);
 int            ldt_init(void);
-bool           ldt_record_destroy(as_rec *);
+bool           ldt_record_destroy(ldt_record *lrecord);
+bool           ldt_record_destroy(ldt_record *lrecord);

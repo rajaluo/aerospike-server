@@ -48,22 +48,6 @@
  * NB: Entire ldt_record is just a wrapper over the udf_record       *
  *     implementation                                                *
  ********************************************************************/
-extern as_aerospike g_as_aerospike;
-int
-ldt_record_init(ldt_record *lrecord)
-{
-	// h_urec is setup in udf_rw.c which point to the main record
-	lrecord->h_urec         = 0;
-	lrecord->as             = &g_as_aerospike;
-	lrecord->max_chunks     = 0;
-	lrecord->num_slots_used = 0;
-	lrecord->version        = 0;
-	lrecord->subrec_io      = 0; 
-	// Default is normal UDF
-	lrecord->udf_context    = 0;
-	return 0;
-}
-
 static as_val *
 ldt_record_get(const as_rec * rec, const char * name)
 {

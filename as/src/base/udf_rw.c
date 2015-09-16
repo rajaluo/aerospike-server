@@ -1082,7 +1082,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 Cleanup:
 	// free everything we created - the rec destroy with ldt_record hooks
 	// destroys the ldt components and the attached "base_rec"
-	ldt_record_destroy(lrec);
+	ldt_record_destroy(&lrecord);
 	as_rec_destroy(lrec);
 
 	return 0;
