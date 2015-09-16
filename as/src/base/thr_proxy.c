@@ -398,7 +398,8 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 							cf_debug(AS_PROTO, "protocol proxy write fail: fd %d "
 									"sz %d pos %d rv %d errno %d",
 									wr->proto_fd_h->fd, proto_sz, pos, rv, errno);
-							shutdown(wr->proto_fd_h->fd, SHUT_RDWR);
+							as_end_of_transaction_force_close(wr->proto_fd_h);
+							wr->proto_fd_h = 0;
 							break;
 						}
 						usleep(1); // yield
@@ -406,15 +407,17 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 					else {
 						cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ",
 								wr->proto_fd_h->fd, proto_sz, pos);
-						shutdown(wr->proto_fd_h->fd, SHUT_RDWR);
+						as_end_of_transaction_force_close(wr->proto_fd_h);
+						wr->proto_fd_h = 0;
 						break;
 					}
 				}
 				cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Response Sent to Client");
 			}
-			// END_OF_TRANSACTION
-			AS_RELEASE_FILE_HANDLE(wr->proto_fd_h);
-			wr->proto_fd_h = 0;
+			if (wr->proto_fd_h) {
+				as_end_of_transaction(wr->proto_fd_h);
+				wr->proto_fd_h = 0;
+			}
 		} else {
 			// this may be NULL if the request has already timedout and the wr proto_fd_h
 			// will be cleaned up by then
@@ -611,7 +614,8 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 								if (errno != EWOULDBLOCK) {
 									// Common message when a client aborts.
 									cf_debug(AS_PROTO, "protocol proxy write fail: fd %d sz %d pos %d rv %d errno %d", pr.fd_h->fd, proto_sz, pos, rv, errno);
-									shutdown(pr.fd_h->fd, SHUT_RDWR);
+									as_end_of_transaction_force_close(pr.fd_h);
+									pr.fd_h = 0;
 									as_proxy_set_stat_counters(-1);
 									goto SendFin;
 								}
@@ -619,7 +623,8 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 							}
 							else {
 								cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", pr.fd_h->fd, proto_sz, pos);
-								shutdown(pr.fd_h->fd, SHUT_RDWR);
+								as_end_of_transaction_force_close(pr.fd_h);
+								pr.fd_h = 0;
 								as_proxy_set_stat_counters(-1);
 								goto SendFin;
 							}
@@ -630,9 +635,10 @@ SendFin:
 
 						// Return the fabric message or the direct file descriptor -
 						// after write and complete.
-						// END_OF_TRANSACTION
-						AS_RELEASE_FILE_HANDLE(pr.fd_h);
-						pr.fd_h = 0;
+						if (pr.fd_h) {
+							as_end_of_transaction(pr.fd_h);
+							pr.fd_h = 0;
+						}
 					}
 					as_fabric_msg_put(pr.fab_msg);
 					pr.fab_msg = 0;
