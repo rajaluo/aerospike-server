@@ -703,44 +703,45 @@ query_update_stats(as_query_transaction *qtr)
 {
 	uint64_t rows = cf_atomic64_get(qtr->n_result_records);
 
-	if (qtr->state == AS_QTR_STATE_ABORT) {
-		if (qtr->job_type == QUERY_TYPE_AGGR) {
-			cf_atomic64_incr(&g_config.n_agg_abort);
-		}
-		else if(qtr->job_type == QUERY_TYPE_LOOKUP) {
-			cf_atomic64_incr(&g_config.n_lookup_abort);
-		}
-	}
-	else if (qtr->state == AS_QTR_STATE_ERR) {
-		if (qtr->job_type == QUERY_TYPE_AGGR) {
-			cf_atomic64_incr(&(qtr->si->stats.agg_errs));
-			cf_atomic64_incr(&g_config.n_agg_errs);
-		}    
-		else if (qtr->job_type == QUERY_TYPE_LOOKUP) 
-		{
-			cf_atomic64_incr(&(qtr->si->stats.lookup_errs)); 
-			cf_atomic64_incr(&g_config.n_lookup_errs); 
-		}
-	}
+	switch (qtr->job_type) {
+		case QUERY_TYPE_LOOKUP:
+			if (qtr->state == AS_QTR_STATE_ABORT) {
+				cf_atomic64_incr(&g_config.n_lookup_abort);
+			} else if (qtr->state == AS_QTR_STATE_ERR) {
+				cf_atomic64_incr(&(qtr->si->stats.lookup_errs)); 
+				cf_atomic64_incr(&g_config.n_lookup_errs); 
+			}
+			if (!qtr_failed(qtr))
+				cf_atomic64_incr(&g_config.n_lookup_success);
+			cf_atomic64_incr(&qtr->si->stats.n_lookup);
+			cf_atomic64_add(&qtr->si->stats.lookup_response_size, qtr->net_io_bytes);
+			cf_atomic64_add(&qtr->si->stats.lookup_num_records, rows);
+			cf_atomic64_add(&g_config.lookup_response_size, qtr->net_io_bytes);
+			cf_atomic64_add(&g_config.lookup_num_records, rows);
+			break;
+		
+		case QUERY_TYPE_AGGR:
+			if (qtr->state == AS_QTR_STATE_ABORT) {
+				cf_atomic64_incr(&g_config.n_agg_abort);
+			} else if (qtr->state == AS_QTR_STATE_ERR) {
+				cf_atomic64_incr(&(qtr->si->stats.agg_errs));
+				cf_atomic64_incr(&g_config.n_agg_errs);
+			}
+			if (!qtr_failed(qtr))
+				cf_atomic64_incr(&g_config.n_agg_success);
+			cf_atomic64_incr(&qtr->si->stats.n_aggregation);
+			cf_atomic64_add(&qtr->si->stats.agg_response_size, qtr->net_io_bytes);
+			cf_atomic64_add(&qtr->si->stats.agg_num_records, rows);
+			cf_atomic64_add(&g_config.agg_response_size, qtr->net_io_bytes);
+			cf_atomic64_add(&g_config.agg_num_records, rows);
+			break;
 
-	if( qtr->job_type == QUERY_TYPE_AGGR) {
-		if (!qtr_failed(qtr))
-			cf_atomic64_incr(&g_config.n_agg_success);
-		cf_atomic64_incr(&qtr->si->stats.n_aggregation);
-		cf_atomic64_add(&qtr->si->stats.agg_response_size, qtr->net_io_bytes);
-		cf_atomic64_add(&qtr->si->stats.agg_num_records, rows);
-		cf_atomic64_add(&g_config.agg_response_size, qtr->net_io_bytes);
-		cf_atomic64_add(&g_config.agg_num_records, rows);
-	}
-	else if( qtr->job_type == QUERY_TYPE_LOOKUP )
-	{
-		if (!qtr_failed(qtr))
-			cf_atomic64_incr(&g_config.n_lookup_success);
-		cf_atomic64_incr(&qtr->si->stats.n_lookup);
-		cf_atomic64_add(&qtr->si->stats.lookup_response_size, qtr->net_io_bytes);
-		cf_atomic64_add(&qtr->si->stats.lookup_num_records, rows);
-		cf_atomic64_add(&g_config.lookup_response_size, qtr->net_io_bytes);
-		cf_atomic64_add(&g_config.lookup_num_records, rows);
+		case QUERY_TYPE_UDF_BG:
+			break;
+		
+		default:
+			cf_crash(AS_QUERY, "Unknown Query Type !!");
+			break;
 	}
 
 	cf_hist_track_insert_data_point(g_config.q_hist, qtr->start_time);
@@ -819,6 +820,7 @@ query_release_fd(as_query_transaction *qtr)
 			shutdown(qtr->fd_h->fd, SHUT_RDWR);
 		}
 		qtr->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
+		qtr->fd_h->last_used = cf_getms();
 		AS_RELEASE_FILE_HANDLE(qtr->fd_h);
 		qtr->fd_h = NULL;
 	}
@@ -1233,6 +1235,16 @@ query_send_fin(as_query_transaction *qtr) {
 		query_netio(qtr);
 	}
 	return AS_QUERY_OK;
+}
+
+static void
+query_send_bg_udf_response(as_transaction *tr)
+{
+	cf_detail(AS_QUERY, "Send Fin for Background UDF");
+	as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK);
+	tr->proto_fd_h->last_used = cf_getms();
+	AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+	tr->proto_fd_h = NULL;
 }
 
 static bool
@@ -1987,14 +1999,19 @@ qwork_setup(query_work *qworkp, as_query_transaction *qtr)
 	qworkp->queued_time_ns    = cf_getns();
 	qtr->n_digests          += qtr->qctx.n_bdigs;
 	qtr->qctx.n_bdigs        = 0;
-	if (qtr->job_type == QUERY_TYPE_AGGR) {
-		qworkp->type          = QUERY_WORK_TYPE_AGG;
-	} else if (qtr->job_type == QUERY_TYPE_UDF_BG) {
-		qworkp->type          = QUERY_WORK_TYPE_UDF_BG;
-	} else if (qtr->job_type == QUERY_TYPE_LOOKUP) {
-		qworkp->type          = QUERY_WORK_TYPE_LOOKUP;
-	} else {
-		cf_crash(AS_QUERY, "Unknown Query Type !!");
+
+	switch (qtr->job_type) {
+		case QUERY_TYPE_LOOKUP:
+			qworkp->type          = QUERY_WORK_TYPE_LOOKUP;
+			break;
+		case QUERY_TYPE_AGGR:
+			qworkp->type          = QUERY_WORK_TYPE_AGG;
+			break;
+		case QUERY_TYPE_UDF_BG:
+			qworkp->type          = QUERY_WORK_TYPE_UDF_BG;
+			break;
+		default:
+			cf_crash(AS_QUERY, "Unknown Query Type !!");
 	}
 }
 
@@ -2599,6 +2616,50 @@ udf_query_init(udf_call *call, as_transaction *tr)
 	return 0;
 }
 
+static int
+query_setup_udf_call(as_query_transaction *qtr, as_transaction *tr)
+{
+	switch (qtr->job_type) {
+		case QUERY_TYPE_LOOKUP:
+			cf_atomic64_incr(&g_config.n_lookup);
+			break;
+		case QUERY_TYPE_AGGR:
+			if (aggr_query_init(&qtr->agg_call, &tr->msgp->msg, qtr) != AS_QUERY_OK) {
+				tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
+				return AS_QUERY_ERR;
+			}
+			cf_atomic64_incr(&g_config.n_aggregation);
+			break;
+		case QUERY_TYPE_UDF_BG:
+			if (udf_query_init(&qtr->call, tr) != AS_QUERY_OK) {
+				tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
+				return AS_QUERY_ERR;
+			} 
+			break;
+		default:
+			cf_crash(AS_QUERY, "Invalid QUERY TYPE %d !!!", qtr->job_type);	
+			break;
+	}
+	return AS_QUERY_OK;
+}
+
+static void
+query_setup_fd(as_query_transaction *qtr, as_transaction *tr)
+{
+	switch (qtr->job_type) {
+		case QUERY_TYPE_LOOKUP:
+		case QUERY_TYPE_AGGR:     
+			qtr->fd_h                = tr->proto_fd_h;
+			qtr->fd_h->fh_info      |= FH_INFO_DONOT_REAP;
+			break;
+		case QUERY_TYPE_UDF_BG:
+			qtr->fd_h  = NULL;
+			break;
+		default:
+			cf_crash(AS_QUERY, "Invalid QUERY TYPE %d !!!", qtr->job_type);	
+			break;
+	}
+}
 /*
  * Phase I query setup which happens just before query is queued for generator
  * Populates valid qtrp in case of success and NULL in case of failure. 
@@ -2733,37 +2794,16 @@ query_setup(as_transaction *tr, as_query_transaction **qtrp)
 
 	qtr->job_type = qtype;
 
-	switch (qtr->job_type) {
-		case QUERY_TYPE_LOOKUP:
-			cf_atomic64_incr(&g_config.n_lookup);
-			break;
-		case QUERY_TYPE_UDF_BG:
-			if (udf_query_init(&qtr->call, tr) != AS_QUERY_OK) {
-				tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
-				rv              = AS_QUERY_ERR;
-				cf_free(qtr);
-				goto Cleanup;
-			} 
-			break;
-		case QUERY_TYPE_AGGR:
-			if (aggr_query_init(&qtr->agg_call, &tr->msgp->msg, qtr) != AS_QUERY_OK) {
-				tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
-				rv              = AS_QUERY_ERR;
-				cf_free(qtr);
-				goto Cleanup;
-			}
-			cf_atomic64_incr(&g_config.n_aggregation);
-			break;
-		default:
-			cf_crash(AS_QUERY, "Invalid QUERY TYPE %d !!!", qtr->job_type);	
-			break;
+	if (query_setup_udf_call(qtr, tr)) {
+		rv = AS_QUERY_ERR;
+		cf_free(qtr);
+		goto Cleanup;
 	}
 
+	query_setup_fd(qtr, tr);
 
 	// Consume everything from tr rest will be picked up in init
 	qtr->trid                = tr->trid;
-	qtr->fd_h                = tr->proto_fd_h;
-	qtr->fd_h->fh_info      |= FH_INFO_DONOT_REAP;
 	qtr->ns                  = ns;
 	qtr->setname             = setname;
 	qtr->si                  = si;
@@ -2836,13 +2876,10 @@ as_query(as_transaction *tr)
 		return AS_QUERY_ERR;
 	}
 
-	if (qtr->job_type == QUERY_TYPE_UDF_BG) {
-		cf_info(AS_QUERY, "Send Fin for Background UDF");
-		as_msg_send_fin(qtr->fd_h->fd, AS_PROTO_RESULT_OK);
-		query_release_fd(qtr);
-	}
-
 	if (g_config.query_in_transaction_thr) {
+		if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+			query_send_bg_udf_response(tr);
+		}
 		query_generator(qtr);
 	} else {
 		if (query_qtr_enqueue(qtr, false)) {
@@ -2855,6 +2892,10 @@ as_query(as_transaction *tr)
 			qtr_release(qtr, __FILE__, __LINE__);
 			tr->result_code     = AS_PROTO_RESULT_FAIL_QUERY_QUEUEFULL;
 			return AS_QUERY_ERR;
+		}
+		// Respond after queuing is successfully.
+		if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+			query_send_bg_udf_response(tr);
 		}
 	}
 	// Reset msgp to NULL in tr to avoid double free. And it is successful queuing
