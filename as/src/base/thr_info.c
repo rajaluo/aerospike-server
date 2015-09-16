@@ -2198,8 +2198,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_uint64(db, g_config.query_threshold);
 	cf_dyn_buf_append_string(db, ";query-untracked-time-ms=");
 	cf_dyn_buf_append_uint64(db, g_config.query_untracked_time_ms); // Show it in ms seconds
-	cf_dyn_buf_append_string(db, ";pre-reserve-qnodes=");
-	cf_dyn_buf_append_string(db, (g_config.qnodes_pre_reserved) ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";query-pre-reserve-partitions=");
+	cf_dyn_buf_append_string(db, (g_config.partitions_pre_reserved) ? "true" : "false");
 
 	return(0);
 }
@@ -3263,14 +3263,14 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "query-pre-reserve-qnodes", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "query-pre-reserve-partitions", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of reserve-qnodes-upfront to %s", context);
-				g_config.qnodes_pre_reserved = true;
+				cf_info(AS_INFO, "Changing value of reserve-partitions-upfront to %s", context);
+				g_config.partitions_pre_reserved = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of reserve-qnodes-upfront to %s", context);
-				g_config.qnodes_pre_reserved = false;
+				cf_info(AS_INFO, "Changing value of reserve-partitions-upfront to %s", context);
+				g_config.partitions_pre_reserved = false;
 			}
 			else {
 				goto Error;
@@ -6812,56 +6812,6 @@ END:
 	return(0);
 }
 
-int info_command_sindex_qnodemap(char *name, char *params, cf_dyn_buf *db)
-{
-	int found = 0;
-
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
-
-		for (int j = 0; j < AS_PARTITIONS; j++) {
-			// ns name
-			cf_dyn_buf_append_string(db, ns->name);
-			cf_dyn_buf_append_string(db, ":");
-
-			as_partition *p = &ns->partitions[j];
-			// pid
-			cf_dyn_buf_append_int(db, j);
-			cf_dyn_buf_append_string(db, ":");
-			// size
-			cf_dyn_buf_append_uint32(db, p->vp ? p->vp->elements : 0);
-			cf_dyn_buf_append_string(db, ":");
-			// state
-			cf_dyn_buf_append_char(db, as_partition_getstate_str(p->state));
-			cf_dyn_buf_append_string(db, ":");
-			// Qnode
-			char qnode[128];
-			sprintf(qnode, "%"PRIX64"", p->qnode);
-			cf_dyn_buf_append_string(db, qnode);
-			cf_dyn_buf_append_string(db, ":");
-			// Current Node Type
-			if (g_config.self_node == p->replica[0])
-				cf_dyn_buf_append_string(db, "M");
-			else
-				cf_dyn_buf_append_string(db, "R");
-
-			if (g_config.self_node == p->qnode)
-				cf_dyn_buf_append_string(db, "Q");
-			cf_dyn_buf_append_string(db, ":");
-			cf_dyn_buf_append_uint64(db, (uint64_t) p->vp->elements);
-			cf_dyn_buf_append_char(db, ';');
-		}
-		found++;
-	}
-	if (found == 0) {
-		cf_dyn_buf_append_string(db, "Empty");
-	}
-	else {
-		cf_dyn_buf_chomp(db);
-	}
-	return(0);
-}
-
 int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 	bool listall = true;
 	char ns_str[128];
@@ -6966,7 +6916,7 @@ as_info_init()
 				"logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;"
 				"node;service;services;services-alumni;set-config;set-log;sets;set-sl;"
 				"show-devices;sindex;sindex-create;sindex-delete;"
-				"sindex-histogram;sindex-qnodemap;sindex-repair;"
+				"sindex-histogram;sindex-repair;"
 				"smd;snub;statistics;status;tip;tip-clear;undun;version;"
 				"xdr-min-lastshipinfo",
 				false);
@@ -7068,7 +7018,6 @@ as_info_init()
 	// Undocumented Secondary Index Command
 	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
 	as_info_set_command("sindex-repair", info_command_sindex_repair, PERM_SERVICE_CTRL);
-	as_info_set_command("sindex-qnodemap", info_command_sindex_qnodemap, PERM_NONE);
 
 	as_info_set_dynamic("query-list", as_query_list, false);
 	as_info_set_command("query-kill", info_command_query_kill, PERM_QUERY_MANAGE);

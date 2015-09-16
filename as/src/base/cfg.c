@@ -302,7 +302,7 @@ typedef enum {
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
 	CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD,
-	CASE_SERVICE_QUERY_PRE_RESERVE_QNODES,
+	CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS,
 	CASE_SERVICE_QUERY_PRIORITY,
 	CASE_SERVICE_QUERY_PRIORITY_SLEEP_US,
 	CASE_SERVICE_QUERY_THRESHOLD,
@@ -685,7 +685,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
 		{ "query-in-transaction-thread",	CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD },
-		{ "query-pre-reserve-qnodes", 		CASE_SERVICE_QUERY_PRE_RESERVE_QNODES },
+		{ "query-pre-reserve-partitions",   CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS },
 		{ "query-priority", 				CASE_SERVICE_QUERY_PRIORITY },
 		{ "query-priority-sleep-us", 		CASE_SERVICE_QUERY_PRIORITY_SLEEP_US },
 		{ "query-threshold", 				CASE_SERVICE_QUERY_THRESHOLD },
@@ -2003,8 +2003,8 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD:
 				c->query_in_transaction_thr = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_QUERY_PRE_RESERVE_QNODES:
-				c->qnodes_pre_reserved = cfg_bool(&line);
+			case CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS:
+				c->partitions_pre_reserved = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_QUERY_PRIORITY:
 				c->query_priority = cfg_int_no_checks(&line);

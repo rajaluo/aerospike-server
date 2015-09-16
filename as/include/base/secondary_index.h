@@ -407,10 +407,10 @@ typedef struct as_sindex_query_context_s {
 	// NBTR offset
 	cf_digest        bdig;
 
-	// If true all qnodes will be reserved before processing the query
-	bool             qnodes_pre_reserved; 
-	// Qnode map
-	bool             is_partition_qnode[AS_PARTITIONS];
+	// If true all query-able partitions will be reserved before processing the query
+	bool             partitions_pre_reserved; 
+	// Cache information about query-able partitions
+	bool             can_partition_query[AS_PARTITIONS];
 } as_sindex_qctx;
 
 /*
@@ -601,7 +601,6 @@ extern int         as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_s
 extern int         as_sindex_assert_query(as_sindex *si, as_sindex_range *srange);
 extern as_sindex * as_sindex_from_msg(as_namespace *ns, as_msg *msgp); 
 extern as_sindex * as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange);
-extern bool        as_sindex_partition_isqnode(as_namespace *ns, cf_digest *digest);
 extern int         as_index_keys_reduce_fn(cf_ll_element *ele, void *udata);
 extern void        as_index_keys_destroy_fn(cf_ll_element *ele);
 // **************************************************************************************************

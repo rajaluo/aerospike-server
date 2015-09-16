@@ -649,7 +649,6 @@ struct as_partition_s {
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
 	bool reject_writes;
 	bool waiting_for_master;
-	cf_node qnode; 	// point to the node which serves the query at the moment
 	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
 	as_partition_vinfo version_info;         // the version of my partition here and now
 
@@ -747,16 +746,16 @@ extern int as_partition_getreplica_readall(as_namespace *ns, as_partition_id p, 
 extern cf_node as_partition_getreplica_write(as_namespace *ns, as_partition_id p);
 #define as_partition_isconsistent(_n, _p) (SYNC == ((_n)->consistency[(_p)]))
 
-// reserve_qnode - *consumes* the ns reservation if success
-extern int as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
-extern uint32_t as_partition_prereserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[]);
-// reserve_write - *consumes* the ns reservation if success
+// reserve_query - 
+extern int as_partition_reserve_query(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
+extern int as_partition_prereserve_query(as_namespace * ns, bool can_partition_query[], as_partition_reservation rsv[]);
+// reserve_write - 
 extern int as_partition_reserve_write(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
-// reserve_migrate - *consumes* the ns reservation if success
+// reserve_migrate - 
 extern void as_partition_reserve_migrate(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node);
 extern int as_partition_reserve_migrate_timeout(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, int timeout_ms );
 
-// reserve_read - *consumes* the ns reservation if success
+// reserve_read - 
 extern int as_partition_reserve_read(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
 extern int as_partition_reserve_replica_list(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
 
@@ -802,7 +801,7 @@ extern bool as_partition_get_migration_flag(void);
 extern int  as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states);
 extern char as_partition_getstate_str(int state);
 extern bool as_partition_is_query_active(as_namespace *ns, size_t pid, as_partition *p);
-
+extern bool as_partition_is_master(as_namespace * ns, as_partition * p);
 // Print info. about the partition map to the log.
 void as_partition_map_dump();
 
