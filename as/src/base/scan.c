@@ -459,7 +459,7 @@ void conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h);
 void conn_scan_job_disown_fd(conn_scan_job* job);
 void conn_scan_job_finish(conn_scan_job* job);
 bool conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size);
-void conn_scan_job_reset_fd(conn_scan_job* job);
+void conn_scan_job_release_fd(conn_scan_job* job, bool force_close);
 void conn_scan_job_info(conn_scan_job* job, as_mon_jobstat* stat);
 
 //----------------------------------------------------------
@@ -497,16 +497,8 @@ conn_scan_job_finish(conn_scan_job* job)
 	if (job->fd_h) {
 		size_t size_sent = send_blocking_response_fin(job->fd_h->fd,
 				_job->abandoned);
-		conn_scan_job_reset_fd(job);
-
-		if (size_sent == 0) {
-			as_end_of_transaction_force_close(job->fd_h);
-		} else {
-			as_end_of_transaction(job->fd_h);
-			job->net_io_bytes += size_sent;
-		}
-
-		job->fd_h = NULL;
+		job->net_io_bytes += size_sent;
+		conn_scan_job_release_fd(job, size_sent == 0);
 	}
 
 	pthread_mutex_destroy(&job->fd_lock);
@@ -528,9 +520,7 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 	size_t size_sent = send_blocking_response_chunk(job->fd_h->fd, buf, size);
 
 	if (size_sent == 0) {
-		conn_scan_job_reset_fd(job);
-		as_end_of_transaction_force_close(job->fd_h);
-		job->fd_h = NULL;
+		conn_scan_job_release_fd(job, true);
 		pthread_mutex_unlock(&job->fd_lock);
 		as_job_manager_abandon_job(_job->mgr, _job,
 				AS_PROTO_RESULT_FAIL_UNKNOWN);
@@ -544,11 +534,17 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 }
 
 void
-conn_scan_job_reset_fd(conn_scan_job* job)
+conn_scan_job_release_fd(conn_scan_job* job, bool force_close)
 {
 	set_blocking(job->fd_h->fd, false);
 	job->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 	job->fd_h->last_used = cf_getms();
+	if (force_close) {
+		as_end_of_transaction_force_close(job->fd_h);
+	} else {
+		as_end_of_transaction(job->fd_h);
+	}
+	job->fd_h = NULL;
 }
 
 void
