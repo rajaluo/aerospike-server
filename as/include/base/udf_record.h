@@ -97,7 +97,6 @@ typedef struct udf_record_s {
 #define UDF_RECORD_FLAG_METADATA_UPDATED	0x0100   // Write/Update metadata done
 
 extern const as_rec_hooks udf_record_hooks;
-extern const as_rec_hooks udf_subrecord_hooks;
 
 //------------------------------------------------
 // Utility functions for all the wrapper as_record implementation
