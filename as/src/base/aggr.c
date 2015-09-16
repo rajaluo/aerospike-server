@@ -51,18 +51,18 @@
 // **************************************************************************************************
 typedef struct {
 	// Iteration
-	bool                    open; // rename it and structure
 	cf_ll_iterator        * iter;
 	as_index_keys_arr     * keys_arr;
 	int                     keys_arr_offset;
-	
+
 	// Record 
-	as_rec                * urec;
-	as_partition_reservation * rsv;
+	bool                       rec_open; // Record in stream open
+	as_rec                   * urec;     // UDF record cloak 
+	as_partition_reservation * rsv;      // Reservation Object
 	
 	// Module Data
-	as_aggr_call          * call;
-	void                  * udata;
+	as_aggr_call          * call;   // Aggregation info
+	void                  * udata;  // Execution context
 } aggr_obj;
 
 static as_partition_reservation *
@@ -132,7 +132,7 @@ aopen(aggr_obj *aobj, cf_digest digest)
 
 	r_ref->skip_lock    = false;
 	if (udf_record_open(urecord) == 0) { 
-		aobj->open   = true;
+		aobj->rec_open   = true;
 		return 0;
 	}
 	ptn_release(aobj);
@@ -148,10 +148,10 @@ aclose(aggr_obj *aobj)
 	// here to Lua. If Lua access it even after moving to next
 	// element in the stream it does it at its own risk. Record
 	// may have changed under the hood.
-	if (aobj->open) {
+	if (aobj->rec_open) {
 		udf_record_close(as_rec_source(aobj->urec));
 		ptn_release(aobj);
-		aobj->open = false;
+		aobj->rec_open = false;
 	}
 	return;
 }
@@ -224,7 +224,7 @@ istream_read(const as_stream *s)
 
 	// Iterate through stream to get next digest and
 	// populate record with it
-	while (!aobj->open) {
+	while (!aobj->rec_open) {
 		
 		if (get_next(aobj)) { 
 			return NULL;
@@ -308,7 +308,7 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 	udf_record urecord;
 	udf_record_init(&urecord, false);
 	urecord.tr      = &tr;
-	tr.rsv.ns       = ns;
+	tr.rsv.ns       = ns;      // Special Init does not change
 	urecord.r_ref   = &r_ref;
 	urecord.rd      = &rd;
 	as_rec   * urec = as_rec_new(&urecord, &udf_record_hooks);
@@ -320,7 +320,7 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 		.keys_arr_offset = 0,
 		.call            = ag_call,
 		.udata           = udata,
-		.open            = false,
+		.rec_open        = false,
 		.rsv             = &tr.rsv
 	};
 
