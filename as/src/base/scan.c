@@ -541,7 +541,8 @@ conn_scan_job_release_fd(conn_scan_job* job, bool force_close)
 	job->fd_h->last_used = cf_getms();
 	if (force_close) {
 		as_end_of_transaction_force_close(job->fd_h);
-	} else {
+	}
+	else {
 		as_end_of_transaction(job->fd_h);
 	}
 	job->fd_h = NULL;
