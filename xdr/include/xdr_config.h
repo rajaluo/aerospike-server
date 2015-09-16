@@ -98,7 +98,6 @@ typedef enum {
 	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE,
 	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
 	XDR_CASE_XDR_FORWARD_WITH_GENCHECK,
-	XDR_CASE_XDR_CONFLICT_DIGESTDUMP,
 	XDR_CASE_XDR_HOTKEY_MAXSKIP,
 	XDR_CASE_XDR_SHIPPING_ENABLED,
 	XDR_CASE_XDR_PIDFILE,
@@ -204,8 +203,6 @@ typedef struct xdr_config {
 	bool	xdr_nsup_deletes_enabled;
 	int 	xdr_hotkey_maxskip;
 	bool	xdr_fwd_with_gencheck;
-	char	*xdr_conflict_digestdump_filepath;
-	FILE	*xdr_conflict_digestdump_file;
 	bool	xdr_check_data_before_delete;
 	int		xdr_info_request_timeout_ms;
 	int     xdr_compression_threshold;
