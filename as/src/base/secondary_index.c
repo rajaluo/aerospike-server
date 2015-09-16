@@ -3631,29 +3631,6 @@ as_sindex_sbin_freeall(as_sindex_bin *sbin, int numbins)
 	return AS_SINDEX_OK;
 } 
 
-/*
- * Function to decide if current node has partition of the passed int digest
- * valid for returning result. Used by secondary index scan to filter out digest
- */
-bool
-as_sindex_partition_isqnode(as_namespace *ns, cf_digest *digest)
-{
-	as_partition *p = NULL;
-	if (!ns) {
-		cf_warning(AS_SINDEX, "Got null namespace. ABORT!");
-		return false;
-	}
-
-	int pid       = as_partition_getid(*(digest));
-	p             = &ns->partitions[pid];
-	// NB: This is lockless check could result is false positives. Query
-	// does the reservation before reading which would make sure these 
-	// are filtered out. Only possible case this could happen is when 
-	// qnode information is changing
-	return (p->qnode == g_config.self_node);
-}
-
-
 /* This find out of the record can be defragged 
  * AS_SINDEX_GC_ERROR if found and cannot defrag
  * AS_SINDEX_GC_OK if can defrag

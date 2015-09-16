@@ -161,7 +161,7 @@
  *   -- If there are duplicates; find the winning node i.e node with winning LDT record based on parent 
  *      generation + ttl out of all the duplicate versions (it could be master / primary version / 
  *      zombie). Ship the operation to that node using proxy subsystem. 
- *   -- Apply LDT UDF on the winning node and replicate to (master / replica / qnode)
+ *   -- Apply LDT UDF on the winning node and replicate to (master / replica )
  * 
  *
  * - Replication: Replication at both at the time of the duplicates/migration and at the normal runtime 
@@ -178,7 +178,7 @@
  *   -- After write is applied pack up parent and all the modified sub record in single message along with 
  *      -- The source partition's current version 
  *      -- The source current outgoing migration LDT version.
- *      and send it to master (in case write happens on non-master node) replicas and qnode.
+ *      and send it to master (in case write happens on non-master node) replicas.
  *   -- At the destination on receiving the replication request check source partition version and destination 
  *      partition version. 
  *      - If the replication request is coming from partition version which is different then

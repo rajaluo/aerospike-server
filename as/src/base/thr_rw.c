@@ -862,9 +862,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 				if (call->active) {
 					wr->has_udf = true;
-					if (tr->rsv.p->qnode != g_config.self_node) {
-						cf_detail(AS_RW, "Applying UDF at the non qnode");
-					}
 
 					rv = udf_rw_local(call, wr, &op);
 
@@ -945,8 +942,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 		/* Get the target replica set, which should exclude ourselves (but
 		 * do a sanity check just to be sure) */
-		// Also pick the qnode to ship data to, unless it is master
-		bool qnode_found = true;
 		cf_node nodes[AS_CLUSTER_SZ];
 		memset(nodes, 0, sizeof(nodes));
 		int node_sz = as_partition_getreplica_readall(tr->rsv.ns, tr->rsv.pid,
@@ -955,14 +950,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			if (nodes[i] == g_config.self_node)
 				cf_crash(AS_RW,
 						"target replica set contains ourselves");
-			if (nodes[i] == tr->rsv.p->qnode)
-				qnode_found = true;
 		}
 		// TODO: We could optimize by not sending writes to replicas that reject_writes
-		// if qnode not in replica list && not master. Add it to
-		// the list of node to ship writes to. Assert that current
-		// node is master node. Writes should never happen from non
-		// master node unless it is shipped op.
 
 		// TODO: We are allowing write to go to non-master node prole here.
 		// At non-master it will fail but it has already been written at master.
@@ -978,10 +967,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			//PRINT_STACK();
 		}
 
-		if ((!qnode_found) && (tr->rsv.p->qnode != tr->rsv.p->replica[0])) {
-			nodes[node_sz] = tr->rsv.p->qnode;
-			node_sz++;
-		}
 		/* Short circuit for one-replica writes */
 		if (0 == node_sz) {
 
