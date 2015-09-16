@@ -335,7 +335,9 @@ as_transaction_create( as_transaction *tr, tr_create_data *  trc_data)
 		cf_rc_reserve(d->fd_h);
 		tr->proto_fd_h = d->fd_h;
 	} else {
-		// TODO what do I do ....
+		cf_warning(AS_AS, "Uknonwn udf call type");  
+		cf_free(buf_r);
+		return -1;
 	}
 	tr->start_time   = now; // set transaction start time
 	tr->end_time     = 0;   // TODO: should it timeout as scan parent job
