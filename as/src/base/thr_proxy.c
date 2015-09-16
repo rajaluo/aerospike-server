@@ -431,11 +431,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
 				udf_rw_complete(&tr, 0, __FILE__, __LINE__);
-				if (tr.proto_fd_h) {
-					// END_OF_TRANSACTION
-					AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
-					tr.proto_fd_h = 0;
-				}
+				// XXX - make sure that this wasn't a bug, but really not required
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -594,11 +590,13 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 
 						if (msg_get_buf(pr.fab_msg, PROXY_FIELD_DIGEST, (byte **)&digest, &digest_sz, MSG_GET_DIRECT) == 0) {
 							as_batch_add_proxy_result(pr.batch_shared, pr.batch_index, digest, (cl_msg*)proto, proto_sz);
+							pr.fd_h = 0;
 							as_proxy_set_stat_counters(0);
 						}
 						else {
 							cf_warning(AS_PROXY, "Failed to find batch proxy digest %u", transaction_id);
 							as_batch_add_error(pr.batch_shared, pr.batch_index, AS_PROTO_RESULT_FAIL_UNKNOWN);
+							pr.fd_h = 0;
 							as_proxy_set_stat_counters(-1);
 						}
 						cf_hist_track_insert_data_point(g_config.px_hist, pr.start_time);
@@ -875,9 +873,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 					as_transaction tr;
 					write_request_init_tr(&tr, pr->wr);
 					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
-					if (tr.proto_fd_h) {
-						AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
-					}
+					// XXX - make sure that this wasn't a bug, but really not required
 				}
 				pthread_mutex_unlock(&pr->wr->lock);
 				WR_RELEASE(pr->wr);
@@ -896,11 +892,9 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 					as_batch_add_error(pr->batch_shared, pr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
 				}
 				else {
-					// END_OF_TRANSACTION
-					shutdown(pr->fd_h->fd, SHUT_RDWR);
-					AS_RELEASE_FILE_HANDLE(pr->fd_h);
-					pr->fd_h = 0;
+					as_end_of_transaction_force_close(pr->fd_h);
 				}
+				pr->fd_h = 0;
 			}
 
 			return SHASH_REDUCE_DELETE;
