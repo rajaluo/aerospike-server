@@ -1284,12 +1284,15 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	if (as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0) {
 		cf_warning(AS_SCAN, "udf-bg scan job error sending fin");
-		// Nothing more we can do here.
+		as_end_of_transaction_force_close(tr->proto_fd_h);
+		tr->proto_fd_h = NULL;
 	}
 
-	tr->proto_fd_h->last_used = cf_getms();
-	AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
-	tr->proto_fd_h = NULL;
+	if (tr->proto_fd_h != NULL) {
+		tr->proto_fd_h->last_used = cf_getms();
+		as_end_of_transaction(tr->proto_fd_h);
+		tr->proto_fd_h = NULL;
+	}
 
 	return AS_PROTO_RESULT_OK;
 }
