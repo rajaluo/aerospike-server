@@ -112,8 +112,6 @@ typedef struct as_file_handle_s {
 
 #define FH_INFO_DONOT_REAP	0x00000001	// this bit indicates that this file handle should not be reaped
 
-#define AS_RELEASE_FILE_HANDLE(proto_fd_h) as_end_of_transaction(proto_fd_h)
-
 // Helpers to release transaction file handles.
 void as_release_file_handle(as_file_handle *proto_fd_h);
 void as_end_of_transaction(as_file_handle *proto_fd_h);
