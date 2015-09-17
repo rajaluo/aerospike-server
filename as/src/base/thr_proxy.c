@@ -431,7 +431,6 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
 				udf_rw_complete(&tr, 0, __FILE__, __LINE__);
-				// XXX - make sure that this wasn't a bug, but really not required
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -871,7 +870,10 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 					as_transaction tr;
 					write_request_init_tr(&tr, pr->wr);
 					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
-					// XXX - make sure that this wasn't a bug, but really not required
+					if (tr.proto_fd_h) {
+						as_end_of_transaction(tr.proto_fd_h);
+						tr.proto_fd_h = NULL;
+					}
 				}
 				pthread_mutex_unlock(&pr->wr->lock);
 				WR_RELEASE(pr->wr);
