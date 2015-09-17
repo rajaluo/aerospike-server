@@ -417,7 +417,6 @@ thr_demarshal(void *arg)
 				fd_h->fd = csocket;
 
 				fd_h->last_used = cf_getms();
-				// END_OF_TRANSACTION
 				fd_h->reap_me = false;
 				fd_h->proto = 0;
 				fd_h->proto_unread = 0;
