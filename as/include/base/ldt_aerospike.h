@@ -1,7 +1,7 @@
 /*
  * ldt_aerospike.h
  *
- * Copyright (C) 2013-2014 Aerospike, Inc.
+ * Copyright (C) 2013-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -32,5 +32,5 @@ extern const   as_aerospike_hooks ldt_aerospike_hooks;
 as_aerospike * ldt_aerospike_new();
 as_aerospike * ldt_aerospike_init(as_aerospike *);
 int            ldt_init(void);
-bool           ldt_record_destroy(ldt_record *lrecord);
-bool           ldt_record_destroy(ldt_record *lrecord);
+void           ldt_record_init(ldt_record *lrecord);
+int            ldt_record_destroy(ldt_record *lrecord);
