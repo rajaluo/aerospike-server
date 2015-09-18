@@ -417,7 +417,7 @@ udf_rw_call_init_internal(udf_call * call, as_transaction * tr)
 int
 udf_rw_call_init_from_msg(udf_call * call, as_msg *msg)
 {
-	call->def.type = AS_UDF_NONE;
+	call->def.type = AS_UDF_OP_KVS;
 	as_msg_field *  filename = NULL;
 	as_msg_field *  function = NULL;
 	as_msg_field *  arglist =  NULL;
@@ -427,22 +427,23 @@ udf_rw_call_init_from_msg(udf_call * call, as_msg *msg)
 	op = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_OP);
 	if ( op ) {
 		memcpy(&call->def.type, (byte *)op->data, sizeof(as_udf_op));
+	}
 
-		filename = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
-		if ( filename ) {
-			function = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
-			if ( function ) {
-				arglist = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_ARGLIST);
-				if ( arglist ) {
-					as_msg_field_get_strncpy(filename, &call->def.filename[0], sizeof(call->def.filename));
-					as_msg_field_get_strncpy(function, &call->def.function[0], sizeof(call->def.function));
-					call->def.arglist = arglist;
-					return 0;
-				}
+	filename = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
+	if ( filename ) {
+		function = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
+		if ( function ) {
+			arglist = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_ARGLIST);
+			if ( arglist ) {
+				as_msg_field_get_strncpy(filename, &call->def.filename[0], sizeof(call->def.filename));
+				as_msg_field_get_strncpy(function, &call->def.function[0], sizeof(call->def.function));
+				call->def.arglist = arglist;
+				return 0;
 			}
 		}
 	}
 
+	call->tr = NULL;
 	call->def.filename[0] = 0;
 	call->def.function[0] = 0;
 	call->def.arglist = NULL;

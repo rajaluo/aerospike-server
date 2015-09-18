@@ -340,7 +340,7 @@ as_transaction_create_internal(as_transaction *tr, tr_create_data *  trc_data)
 	// Write the header in case the request gets proxied. Is it enough ??
 	buf = as_msg_write_header(buf, msg_sz, 0, d->msg_type, 0, 0, 0, 0, 2 /*n_fields*/, 0);
 	buf = as_msg_write_fields(buf, d->ns->name, ns_len, d->set, set_len, &(d->digest), 0, 0 , 0, 0);
-	
+
 	tr->msgp         = (cl_msg *) buf_r;
 
 	return 0;
