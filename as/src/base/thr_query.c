@@ -1,7 +1,7 @@
 /* 
  * thr_query.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -1703,12 +1703,12 @@ agg_ostream_write(void *udata, as_val *v)
 	if (!v) {
 		return AS_STREAM_OK;
 	}
+	int ret = AS_STREAM_OK;
 	if (query_add_val_response((void *)qtr, v, true)) {
-		as_val_destroy(v);
-		return AS_STREAM_ERR;
+		ret = AS_STREAM_ERR;
 	}
 	as_val_destroy(v);
-	return AS_STREAM_OK;
+	return ret;
 }
 
 static as_partition_reservation *
@@ -1729,17 +1729,18 @@ agg_set_error(void * udata, int err)
 	qtr_set_err((as_query_transaction *)udata, AS_PROTO_RESULT_FAIL_QUERY_CBERROR, __FILE__, __LINE__);
 }
 
+// true if matches
 static bool
 agg_record_matches(void *udata, udf_record *urecord, void *key_data)
 {
 	as_query_transaction * qtr = (as_query_transaction*)udata;
 	as_sindex_key *skey        = (void *)key_data;
 	qtr->n_read_success++;
-	if (query_record_matches(qtr, urecord->rd, skey)) {
+	if (query_record_matches(qtr, urecord->rd, skey) == false) {
 		cf_atomic64_incr(&g_config.query_false_positives); // PUT IT INSIDE PRE_CHECK
-		return true;
+		return false;
 	}
-	return false;
+	return true;
 }
 
 const as_aggr_hooks query_aggr_hooks = {
@@ -1762,7 +1763,7 @@ const as_aggr_hooks query_aggr_hooks = {
 // NB: Caller holds a write hash lock _BE_CAREFUL_ if you intend to take
 // lock inside this function
 int
-as_query_udf_finish_cb(as_transaction *tr, int retcode)
+query_udf_bg_tr_complete(as_transaction *tr, int retcode)
 {
 	as_query_transaction *qtr = (as_query_transaction *)tr->udata.req_udata;
 	if (!qtr) {
@@ -1780,48 +1781,34 @@ as_query_udf_finish_cb(as_transaction *tr, int retcode)
 // from inside generator. The generator could be scan job generating digest
 // or query generating digest.
 int
-query_udf_txn_setup(tr_create_data * d)
+query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 {
-	as_query_transaction *qtr = (as_query_transaction *)d->udata;
+	tr_create_data d;
 
-	// TODO: can qtr->priority be 0
-	while (qtr->n_udf_tr_queued >= (AS_QUERY_MAX_UDF_TRANSACTIONS * (qtr->priority / 10 + 1))) {
-		cf_debug(AS_QUERY, "UDF: scan transactions [%d] exceeded the maximum "
-				"configured limit", qtr->n_udf_tr_queued);
-
-		usleep(g_config.query_sleep_us);
-		query_check_timeout(qtr);
-		if (qtr_failed(qtr)) {
-			return AS_QUERY_ERR;
-		}
-	}
+	d.digest   = *keyd;
+	d.ns       = qtr->ns;
+	d.set[0]   = 0;   // What set ??
+	d.call     = &qtr->call;
+	d.msg_type = AS_MSG_INFO2_WRITE;
+	d.fd_h     = NULL;
+	d.trid     = 0;
 
 	as_transaction tr;
-	memset(&tr, 0, sizeof(as_transaction));
-	// Pass on the create meta-data structure to create an internal transaction.
-	if (as_transaction_create(&tr, d)) {
-		return AS_QUERY_ERR;
+
+	if (as_transaction_create_internal(&tr, &d)) {
+		qtr_set_err(qtr, AS_PROTO_RESULT_FAIL_QUERY_CBERROR, __FILE__, __LINE__);
+		return AS_QUERY_OK;
 	}
 
-	tr.udata.req_cb     = as_query_udf_finish_cb;
-	tr.udata.req_udata  = d->udata;
+	tr.udata.req_cb     = query_udf_bg_tr_complete;
+	tr.udata.req_udata  = qtr;
 	tr.udata.req_type   = UDF_QUERY_REQUEST;
-	tr.flag            |= AS_TRANSACTION_FLAG_INTERNAL;
-
-	cf_atomic32_incr(&qtr->n_udf_tr_queued);
-	cf_detail(AS_QUERY, "UDF: [%d] internal transactions enqueued", qtr->n_udf_tr_queued);
+	
 	qtr_reserve(qtr, __FILE__, __LINE__);
-	// Reset start time
-	tr.start_time = cf_getns();
-	if (0 != thr_tsvc_enqueue(&tr)) {
-		cf_warning(AS_QUERY, "UDF: Failed to queue transaction for digest %"PRIx64", "
-				"number of transactions enqueued [%d] .. dropping current "
-				"transaction.. ", tr.keyd, qtr->n_udf_tr_queued);
-		cf_free(tr.msgp);
-		tr.msgp = 0;
-		qtr_finish_work(qtr, &qtr->n_udf_tr_queued, __FILE__, __LINE__, true);
-		return AS_QUERY_ERR;
-	}
+	cf_atomic32_incr(&qtr->n_udf_tr_queued);
+	
+	thr_tsvc_enqueue(&tr);
+
 	return AS_QUERY_OK;
 }
 
@@ -1841,7 +1828,7 @@ query_process_udfreq(query_work *qudf)
 		goto Cleanup;
 	}
 
-	while((ele = cf_ll_getNext(iter))) {
+	while ((ele = cf_ll_getNext(iter))) {
 		as_index_keys_ll_element * node;
 		node                         = (as_index_keys_ll_element *) ele;
 		as_index_keys_arr * keys_arr  = node->keys_arr;
@@ -1849,30 +1836,23 @@ query_process_udfreq(query_work *qudf)
 			continue;
 		}
 		node->keys_arr   =  NULL;
-		cf_detail(AS_QUERY, "NUMBER OF DIGESTS = %d", keys_arr->num);
+
 		for (int i = 0; i < keys_arr->num; i++) {
-			cf_detail(AS_QUERY, "LOOOPING FOR NUMBER OF DIGESTS %d", i);
 
-			// Fill the structure needed by internal transaction create
-			tr_create_data d;
+			while (cf_atomic32_get(qtr->n_udf_tr_queued) >= (AS_QUERY_MAX_UDF_TRANSACTIONS * (qtr->priority / 10 + 1))) {
+				usleep(g_config.query_sleep_us);
+				query_check_timeout(qtr);
+				if (qtr_failed(qtr)) {
+					ret = AS_QUERY_ERR;
+					goto Cleanup;
+				}
+			}
 
-			d.digest   = keys_arr->pindex_digs[i];
-			d.ns       = qtr->ns;
-			d.set[0]   = 0;   // What set ??
-			d.call     = &qtr->call;
-			d.msg_type = AS_MSG_INFO2_WRITE;
-			// Needs to be set properly for FG
-			d.fd_h     = qtr->fd_h;
-			d.trid     = 0;
-			d.udata    = qtr;
-
-			// Setup the internal udf transaction. This includes creating an internal transaction
-			// and enqueuing it with throttling.
-			if (AS_QUERY_ERR == query_udf_txn_setup(&d)) {
+			if (AS_QUERY_ERR == query_udf_bg_tr_start(qtr, &keys_arr->pindex_digs[i])) {
 				as_index_keys_release_arr_to_queue(keys_arr);
 				ret = AS_QUERY_ERR;
 				goto Cleanup;
-			};
+			}
 		}
 		as_index_keys_release_arr_to_queue(keys_arr);
 	}
@@ -1972,7 +1952,7 @@ qwork_process(query_work *qworkp)
 		return AS_QUERY_ERR;
 	}
 	int ret = AS_QUERY_OK;
-	switch(qworkp->type) {
+	switch (qworkp->type) {
 		case QUERY_WORK_TYPE_LOOKUP:
 			ret = query_process_ioreq(qworkp);
 			break;
@@ -2600,7 +2580,6 @@ aggr_query_init(as_aggr_call * call, as_msg *msg, as_query_transaction *qtr)
 	if (udf_rw_call_init_from_msg((udf_call *)call, msg))
 		return AS_QUERY_ERR;
 	
-	call->def.type      = AS_AGGR_QUERY;
 	call->aggr_hooks    = &query_aggr_hooks;
 	return AS_QUERY_OK;
 }

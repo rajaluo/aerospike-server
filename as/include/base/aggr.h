@@ -1,7 +1,7 @@
 /*
  * aggr.h
  *
- * Copyright (C) 2014 Aerospike, Inc.
+ * Copyright (C) 2014-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -40,11 +40,6 @@
 #include "base/udf_record.h"
 #include "base/udf_rw.h"
 
-
-typedef enum {
-	AS_AGGR_SCAN,
-	AS_AGGR_QUERY,
-} as_aggr_type;
 
 typedef struct {
 	as_stream_status           (* ostream_write) (void *, as_val *);

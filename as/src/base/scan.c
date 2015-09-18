@@ -897,9 +897,7 @@ aggr_scan_init(as_aggr_call * call, as_msg *msg, aggr_scan_job *job)
 	if (udf_rw_call_init_from_msg((udf_call *)call, msg))
 		return -1;
 	
-	call->def.type      = AS_AGGR_SCAN;
 	call->aggr_hooks    = &scan_aggr_hooks;
-
 	return 0;
 }
 
@@ -1374,7 +1372,6 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	d.msg_type	= AS_MSG_INFO2_WRITE;
 	d.fd_h		= NULL;
 	d.trid		= 0;				// TODO - transfer trid ???
-	d.udata		= NULL;				// TODO - unused - why is it there ???
 
 	// Release record lock before enqueuing transaction.
 	as_record_done(r_ref, ns);
@@ -1387,7 +1384,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_transaction tr;
 
-	if (as_transaction_create(&tr, &d) != 0) {
+	if (as_transaction_create_internal(&tr, &d) != 0) {
 		as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
 		return;
 	}
@@ -1395,10 +1392,6 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	tr.udata.req_cb		= udf_bg_scan_tr_complete;
 	tr.udata.req_udata	= (void*)job;
 	tr.udata.req_type	= UDF_SCAN_REQUEST;
-
-	// TODO - should these be done in as_transaction_create() ???
-	tr.flag |= AS_TRANSACTION_FLAG_INTERNAL;
-	tr.microbenchmark_is_resolve = false;
 
 	cf_atomic64_incr(&_job->n_records_read);
 	cf_atomic32_incr(&job->n_active_tr);

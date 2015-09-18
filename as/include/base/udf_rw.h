@@ -1,7 +1,7 @@
 /*
  * udf_rw.h
  *
- * Copyright (C) 2013-2014 Aerospike, Inc.
+ * Copyright (C) 2013-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.

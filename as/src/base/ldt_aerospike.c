@@ -1,7 +1,7 @@
 /*
  * ldt_aerospike.c
  *
- * Copyright (C) 2013-2014 Aerospike, Inc.
+ * Copyright (C) 2013-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -524,7 +524,7 @@ crec_create(ldt_record *lrecord)
  */
 // **************************************************************************************************
 extern as_aerospike g_as_aerospike;
-int
+void
 ldt_record_init(ldt_record *lrecord)
 {
 	// h_urec is setup in udf_rw.c which point to the main record
@@ -536,20 +536,19 @@ ldt_record_init(ldt_record *lrecord)
 	lrecord->subrec_io      = 0; 
 	// Default is normal UDF
 	lrecord->udf_context    = 0;
-	return 0;
 }
 
-bool
+int
 ldt_record_destroy(ldt_record *lrecord)
 {
 	if (!lrecord) {
-		return false;
+		return -1;
 	}
 	as_rec *h_urec      = lrecord->h_urec;
 
 	// Note: destroy of udf_record today is no-op because all the closing
 	// of record happens after UDF has executed.
-	for (int i = 0; i < lrecord->max_chunks; i++) {
+	for (uint64_t i = 0; i < lrecord->max_chunks; i++) {
 		ldt_slot_chunk *lchunk = &lrecord->chunk[i];
 		chunk_destroy(lrecord, lchunk);
 	}
@@ -561,7 +560,7 @@ ldt_record_destroy(ldt_record *lrecord)
 	// Dir destroy should release partition reservation and
 	// namespace reservation.
 	udf_record_destroy(h_urec);
-	return true;
+	return 0;
 }
 // **************************************************************************************************
 

@@ -1,7 +1,7 @@
 /*
  * udf_rw.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -160,7 +160,6 @@ send_response(udf_call *call, const char *key, int vtype, void *val,
 	uint32_t            sp_sz       = 1024 * 16;
 	uint32_t            void_time   = tr->void_time;
 	uint32_t            written_sz  = 0;
-	bool                keep_fd     = false;
 	as_bin              stack_bin;
 	as_bin            * bin         = &stack_bin;
 
@@ -168,22 +167,14 @@ send_response(udf_call *call, const char *key, int vtype, void *val,
 	uint8_t             stack_particle_buf[sp_sz];
 	uint8_t *           sp_p        = stack_particle_buf;
 
-	if (call->def.type == AS_UDF_OP_BACKGROUND) {
-		// If we are doing a background UDF scan, do not send any result back
+	// TODO: Check at the wrong level of abstraction
+	if (!tr->proto_fd_h && !tr->proxy_msg) {
 		return 0;
-	} else if (call->def.type == AS_UDF_OP_FOREGROUND) {
-		// Do not release fd now, scan will do it at the end of all internal
-		// 	udf transactions
-		cf_detail(AS_UDF, "UDF: Internal udf transaction, do not release fd");
-		keep_fd = true;
 	}
 
 	if (0 != make_send_bin(ns, bin, &sp_p, sp_sz, key, vtype, val, vlen)) {
 		return(-1);
 	}
-
-	// this is going to release the file descriptor
-	if (keep_fd && tr->proto_fd_h) cf_rc_reserve(tr->proto_fd_h);
 
 	single_transaction_response(
 		tr, ns, NULL/*ops*/, &bin, 1,
@@ -193,7 +184,7 @@ send_response(udf_call *call, const char *key, int vtype, void *val,
 		cf_free(sp_p);
 	}
 	return 0;
-} // end send_response()
+} 
 
 /**
  * Send failure notification for CDT (list, map) serialization error.
@@ -434,23 +425,20 @@ udf_rw_call_init_from_msg(udf_call * call, as_msg *msg)
 	// Check the type of udf
 	as_msg_field *  op = NULL;
 	op = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_OP);
-	if (!op) {
-		call->def.type = 0;
-	} else {
+	if ( op ) {
 		memcpy(&call->def.type, (byte *)op->data, sizeof(as_udf_op));
-	}
 
-	filename = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
-	if ( filename ) {
-		function = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
-		if ( function ) {
-			arglist = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_ARGLIST);
-			if ( arglist ) {
-				as_msg_field_get_strncpy(filename, &call->def.filename[0], sizeof(call->def.filename));
-				as_msg_field_get_strncpy(function, &call->def.function[0], sizeof(call->def.function));
-				call->def.arglist = arglist;
-				cf_detail(AS_UDF, "UDF Request Unpacked %s %s", call->def.filename, call->def.function);
-				return 0;
+		filename = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
+		if ( filename ) {
+			function = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
+			if ( function ) {
+				arglist = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_ARGLIST);
+				if ( arglist ) {
+					as_msg_field_get_strncpy(filename, &call->def.filename[0], sizeof(call->def.filename));
+					as_msg_field_get_strncpy(function, &call->def.function[0], sizeof(call->def.function));
+					call->def.arglist = arglist;
+					return 0;
+				}
 			}
 		}
 	}
