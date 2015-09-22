@@ -3871,14 +3871,18 @@ as_partition_balance_is_multi_node_cluster()
 	return g_multi_node;
 }
 
-// Checking replica list od partition without taking a lock
+// A partition is queryable only when the node is master or origin
+// BEWARE. No partition lock is being taken here.
 // This is done to avoid a deadlock between sindex and apply journal
 bool
-as_partition_is_master(as_namespace * ns, as_partition * p)
+as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p)
 {
-	cf_node self = g_config.self_node;
+	cf_node self             = g_config.self_node;
+	bool is_sync             = (p->state == AS_PARTITION_STATE_SYNC);
+	bool migrating_to_master = (p->target != 0);
+	bool is_master           = (p->replica[0] == self);
 	
-	if (p->replica[0] == self) {	
+	if ((is_master && is_sync) || migrating_to_master) {
 		return true;
 	} else {
 		return false;

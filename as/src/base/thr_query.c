@@ -677,7 +677,7 @@ query_check_timeout(as_query_transaction *qtr)
  */
 // **************************************************************************************************
 static void
-query_post_release_partitions(as_query_transaction * qtr)
+query_release_prereserved_partitions(as_query_transaction * qtr)
 {
 	if (!qtr) {
 		cf_warning(AS_QUERY, "qtr is NULL");
@@ -792,7 +792,7 @@ query_run_teardown(as_query_transaction *qtr)
 	}
 
 	// Release all the partitions
-	query_post_release_partitions(qtr);
+	query_release_prereserved_partitions(qtr);
 
 
 	if (qtr->bb_r) {

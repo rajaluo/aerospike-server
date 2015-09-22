@@ -3265,11 +3265,11 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "query-pre-reserve-partitions", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of reserve-partitions-upfront to %s", context);
+				cf_info(AS_INFO, "Changing value of query-pre-reserve-partitions to %s", context);
 				g_config.partitions_pre_reserved = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of reserve-partitions-upfront to %s", context);
+				cf_info(AS_INFO, "Changing value of query-pre-reserve-partitions to %s", context);
 				g_config.partitions_pre_reserved = false;
 			}
 			else {
