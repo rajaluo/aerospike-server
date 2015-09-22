@@ -104,6 +104,7 @@ typedef struct as_file_handle_s {
 	int			fd;
 	int			epoll_fd;		// the file descriptor of our epoll instance
 	bool		reap_me;		// tells the reaper to come and get us
+	bool		trans_active;	// a transaction is running on this connection
 	uint32_t	fh_info;		// bitmap containing status info of this file handle
 	as_proto	*proto;
 	uint64_t	proto_unread;

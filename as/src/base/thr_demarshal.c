@@ -101,16 +101,15 @@ epoll_ctl_modify(as_file_handle *fd_h, uint32_t events)
 void
 thr_demarshal_pause(as_file_handle *fd_h)
 {
-	if (epoll_ctl_modify(fd_h, EPOLLRDHUP) < 0) {
-		cf_crash(AS_DEMARSHAL, "unable to pause socket FD %d on epoll instance FD %d: %d (%s)",
-				fd_h->fd, fd_h->epoll_fd, errno, cf_strerror(errno));
-	}
+	fd_h->trans_active = true;
 }
 
 void
 thr_demarshal_resume(as_file_handle *fd_h)
 {
-	if (epoll_ctl_modify(fd_h, EPOLLIN | EPOLLRDHUP) < 0) {
+	fd_h->trans_active = false;
+
+	if (epoll_ctl_modify(fd_h, EPOLLIN | EPOLLET | EPOLLRDHUP) < 0) {
 		if (errno == ENOENT) {
 			// happens, when we reached NextEvent_FD_Cleanup (e.g, because the
 			// client disconnected) while the transaction was still ongoing
@@ -418,6 +417,7 @@ thr_demarshal(void *arg)
 
 				fd_h->last_used = cf_getms();
 				fd_h->reap_me = false;
+				fd_h->trans_active = false;
 				fd_h->proto = 0;
 				fd_h->proto_unread = 0;
 				fd_h->fh_info = 0;
@@ -501,6 +501,10 @@ thr_demarshal(void *arg)
 					cf_detail(AS_DEMARSHAL, "proto socket: remote close: fd %d event %x", fd, events[i].events);
 					// no longer in use: out of epoll etc
 					goto NextEvent_FD_Cleanup;
+				}
+
+				if (fd_h->trans_active) {
+					goto NextEvent;
 				}
 
 				// If pointer is NULL, then we need to create a transaction and
