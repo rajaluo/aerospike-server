@@ -58,6 +58,7 @@ typedef struct {
 	// Record 
 	bool                       rec_open; // Record in stream open
 	as_rec                   * urec;     // UDF record cloak 
+	as_namespace             * ns;
 	as_partition_reservation * rsv;      // Reservation Object
 	
 	// Module Data
@@ -70,7 +71,7 @@ ptn_reserve(aggr_state *astate, as_partition_id pid, as_partition_reservation *r
 {
 	as_aggr_call *call = astate->call;
 	if (call && call->aggr_hooks && call->aggr_hooks->ptn_reserve) {
-		return call->aggr_hooks->ptn_reserve(astate->udata, rsv->ns, pid, rsv);
+		return call->aggr_hooks->ptn_reserve(astate->udata, astate->ns, pid, rsv);
 	} 
 	return NULL;
 }
@@ -122,6 +123,7 @@ aopen(aggr_state *astate, cf_digest digest)
 	
 	// NB: Partial Initialization due to heaviness. Not everything needed
 	// TODO: Make such initialization Commodity
+	tr->rsv.ns          = astate->rsv->ns;
 	tr->rsv.state       = astate->rsv->state;
 	tr->rsv.pid         = astate->rsv->pid;
 	tr->rsv.p           = astate->rsv->p;
@@ -175,38 +177,24 @@ acleanup(aggr_state *astate)
 cf_digest *
 get_next(aggr_state *astate)
 {
-	if (!astate->keys_arr) {
-		cf_ll_element * ele       = cf_ll_getNext(astate->iter);
+	astate->keys_arr_offset++;
+	if (!astate->keys_arr || (astate->keys_arr_offset == astate->keys_arr->num)) {
+
+		cf_ll_element * ele = cf_ll_getNext(astate->iter);
+		
+		// if NULL or number of element 0. No holes expected
 		if (!ele) {
+			return NULL;
+		} 
+
+		astate->keys_arr    = ((as_index_keys_ll_element*)ele)->keys_arr;
+		if (!astate->keys_arr || (astate->keys_arr->num < 1)) {
 			astate->keys_arr = NULL;
-			cf_detail(AS_AGGR, "No more digests found in agg stream");	
-		}
-		else {
-			astate->keys_arr = ((as_index_keys_ll_element*)ele)->keys_arr;
-		}
-		astate->keys_arr_offset  = 0;
-	} 
-	as_index_keys_arr  * keys_arr  = astate->keys_arr;
-
-	if (!keys_arr) {
-		cf_debug(AS_AGGR, "No digests found in agg stream");
-		return NULL;
-	}
-
-	if (keys_arr->num == astate->keys_arr_offset) {
-		cf_ll_element * ele  = cf_ll_getNext(astate->iter);
-		if (!ele) {
-			cf_detail(AS_AGGR, "No More Nodes for this Lua Call");
 			return NULL;
 		}
-		keys_arr              = ((as_index_keys_ll_element*)ele)->keys_arr;
-		astate->keys_arr_offset = 0;
-		astate->keys_arr        = keys_arr;
-		cf_detail(AS_AGGR, "Moving to next node of digest list");
-	} else {
-		astate->keys_arr_offset++;
-	}
 
+		astate->keys_arr_offset = 0;
+	} 
 	return &astate->keys_arr->pindex_digs[astate->keys_arr_offset];
 }
 
@@ -226,7 +214,7 @@ istream_read(const as_stream *s)
 	// populate record with it
 	while (!astate->rec_open) {
 		
-		if (get_next(astate)) { 
+		if (get_next(astate) == NULL) { 
 			return NULL;
 		}
 
@@ -308,7 +296,6 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 	udf_record urecord;
 	udf_record_init(&urecord, false);
 	urecord.tr      = &tr;
-	tr.rsv.ns       = ns;      // Special Init does not change
 	urecord.r_ref   = &r_ref;
 	urecord.rd      = &rd;
 	as_rec   * urec = as_rec_new(&urecord, &udf_record_hooks);
@@ -321,7 +308,8 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 		.call            = ag_call,
 		.udata           = udata,
 		.rec_open        = false,
-		.rsv             = &tr.rsv
+		.rsv             = &tr.rsv,
+		.ns              = ns
 	};
 
 	if (!astate.iter) {
