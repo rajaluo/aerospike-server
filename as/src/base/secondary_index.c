@@ -729,6 +729,25 @@ as_sindex_ktype_str(as_sindex_ktype type)
 	}
 }
 
+as_sindex_ktype
+as_sindex_ktype_from_string(char const * type_str)
+{
+	if (!type_str) {
+		cf_warning(AS_SINDEX, "missing secondary index key type");
+		return AS_SINDEX_KTYPE_NONE;
+	}
+	else if (strncasecmp(type_str, "string", 6) == 0) {
+		return AS_SINDEX_KTYPE_DIGEST;
+	}
+	else if (strncasecmp(type_str, "numeric", 7) == 0) {
+		return AS_SINDEX_KTYPE_LONG;
+	}
+	else {
+		cf_warning(AS_SINDEX, "UNRECOGNIZED KEY TYPE %s", type_str);
+		return AS_SINDEX_KTYPE_NONE;
+	}
+}
+
 as_sindex_key_type
 as_sindex_key_type_from_pktype(as_particle_type t)
 {
@@ -754,6 +773,7 @@ as_sindex_sktype_from_pktype(as_particle_type t)
 	}
 	return AS_SINDEX_KTYPE_NONE;
 }
+
 /*
  * Create duplicate copy of sindex metadata. New lock is created
  * used by index create by user at runtime or index creation at the boot time
@@ -1682,9 +1702,6 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 		as_sindex_update_by_sbin(rd->ns, setname, sbins, sbins_populated, &rd->keyd);	
 		as_sindex_sbin_freeall(sbins, sbins_populated);
 		return AS_SINDEX_OK;
-	}
-	else {
-		cf_warning(AS_SINDEX, "Number of sbins found for 1 sindex is not 1. It is %d", sbins_populated);
 	}
 
 Cleanup:
