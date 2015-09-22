@@ -696,7 +696,7 @@ btree_addsinglerec(as_sindex_metadata *imd, ai_obj * key, cf_digest *dig, cf_ll 
 		}
 	}
 	else {
-		if (!as_partition_is_master(ns, &ns->partitions[pid])) {
+		if (!as_partition_is_queryable_lockfree(ns, &ns->partitions[pid])) {
 			return 0;
 		} 
 	}

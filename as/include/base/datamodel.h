@@ -800,8 +800,7 @@ extern bool as_partition_get_migration_flag(void);
 // return number of partitions found in storage
 extern int  as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states);
 extern char as_partition_getstate_str(int state);
-extern bool as_partition_is_query_active(as_namespace *ns, size_t pid, as_partition *p);
-extern bool as_partition_is_master(as_namespace * ns, as_partition * p);
+extern bool as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p);
 // Print info. about the partition map to the log.
 void as_partition_map_dump();
 
