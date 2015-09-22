@@ -926,6 +926,8 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	as_job_init(_job, &aggr_scan_job_vtable, &g_scan_manager, RSV_WRITE,
 			tr->trid, ns, set_id, options.priority);
 
+	job->msgp = tr->msgp;
+
 	if (aggr_scan_init(&job->aggr_call, &tr->msgp->msg, job) != 0) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
 		job->msgp = NULL;
