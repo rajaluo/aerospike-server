@@ -477,7 +477,6 @@ extern  int as_sindex_init(as_namespace *ns);
  *
  * Do not use any "sindex" functions after calling this function, so free your indexes beforehand.
  */
-extern void as_sindex_shutdown(as_namespace *ns);
 extern int  as_sindex_reinit(char *name, char *params, cf_dyn_buf *db);
 // **************************************************************************************************
 
