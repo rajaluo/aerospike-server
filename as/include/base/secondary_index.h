@@ -73,12 +73,12 @@
  */
 // **************************************************************************************************
 typedef enum {
+	AS_SINDEX_ERR_INAME_MAXLEN     = -17,
 	AS_SINDEX_ERR_MAXCOUNT         = -16,
 	AS_SINDEX_ERR_SET_MISMATCH     = -15,
 	AS_SINDEX_ERR_UNKNOWN_KEYTYPE  = -14,
 	AS_SINDEX_ERR_BIN_NOTFOUND     = -13,
 	AS_SINDEX_ERR_TYPE_MISMATCH    = -11,
-	
 
 	// Needed when attemping index create
 	AS_SINDEX_ERR_FOUND            = -6,

@@ -116,8 +116,11 @@
 
 // ************************************************************************************************
 //                                        BINID HAS SINDEX
-// Set the binid'th bit of the bin_has_sindex array.
-// It is always called under SINDEX GWLOCK.
+// Maintains a bit array where binid'th bit represents the existence of atleast one index over the
+// bin with bin id as binid.
+// Set, reset should be called under SINDEX_GWLOCK
+// get should be called under SINDEX_GRLOCK
+
 void
 as_sindex_set_binid_has_sindex(as_namespace *ns, int binid)
 {
@@ -127,12 +130,9 @@ as_sindex_set_binid_has_sindex(as_namespace *ns, int binid)
 	ns->binid_has_sindex[index] = temp;
 }
 
-// Tries to reset the binid'th bit of bin_has_sindex array.
-// It is always called under SINDEX GWLOCK
 void
 as_sindex_reset_binid_has_sindex(as_namespace *ns, int binid)
 {
-	// Iterate over all sindex to check if any other bin with same id has sindex.
 	int i          = 0;
 	int j          = 0;
 	as_sindex * si = NULL;
@@ -156,10 +156,6 @@ as_sindex_reset_binid_has_sindex(as_namespace *ns, int binid)
 	ns->binid_has_sindex[index] = temp;
 }
 
-// Check the binid'th bit of bin_has_sindex array. 
-// 		If set, bin with bin-id as binid has atleast one sindex over it.
-// 		Else not.
-// It is always called under SINDEX GRLOCK
 bool
 as_sindex_binid_has_sindex(as_namespace *ns, int binid)
 {
@@ -171,17 +167,21 @@ as_sindex_binid_has_sindex(as_namespace *ns, int binid)
 // ************************************************************************************************
 // ************************************************************************************************
 //                                             UTILITY
-// Translation from sindex error code to string
+// Translation from sindex error code to string. In alphabetic order
 const char *as_sindex_err_str(int op_code) {
 	switch(op_code) {
-		case AS_SINDEX_ERR_FOUND:               return "INDEX FOUND";
-		case AS_SINDEX_ERR_NO_MEMORY:           return "NO MEMORY";
-		case AS_SINDEX_ERR_UNKNOWN_KEYTYPE:     return "UNKNOWN KEYTYPE";
-		case AS_SINDEX_ERR_BIN_NOTFOUND:        return "BIN NOT FOUND";
-		case AS_SINDEX_ERR_NOTFOUND:            return "NO INDEX";
-		case AS_SINDEX_ERR_PARAM:               return "ERR PARAM";
-		case AS_SINDEX_ERR_TYPE_MISMATCH:       return "KEY TYPE MISMATCH";
 		case AS_SINDEX_ERR:                     return "ERR GENERIC";
+		case AS_SINDEX_ERR_BIN_NOTFOUND:        return "BIN NOT FOUND";
+		case AS_SINDEX_ERR_FOUND:               return "INDEX FOUND";
+		case AS_SINDEX_ERR_INAME_MAXLEN:        return "INDEX NAME EXCEED MAX LIMIT";
+		case AS_SINDEX_ERR_MAXCOUNT:            return "INDEX COUNT EXCEEDS MAX LIMIT";
+		case AS_SINDEX_ERR_NOTFOUND:            return "NO INDEX";
+		case AS_SINDEX_ERR_NOT_READABLE:        return "INDEX NOT READABLE";
+		case AS_SINDEX_ERR_NO_MEMORY:           return "NO MEMORY";
+		case AS_SINDEX_ERR_PARAM:               return "ERR PARAM";
+		case AS_SINDEX_ERR_SET_MISMATCH:        return "SET MISMATCH";
+		case AS_SINDEX_ERR_TYPE_MISMATCH:       return "KEY TYPE MISMATCH";
+		case AS_SINDEX_ERR_UNKNOWN_KEYTYPE:     return "UNKNOWN KEYTYPE";
 		case AS_SINDEX_OK:                      return "OK";
 		default:                                return "Unknown Code";
 	}
@@ -189,7 +189,8 @@ const char *as_sindex_err_str(int op_code) {
 
 inline bool as_sindex_isactive(as_sindex *si)
 {
-	if ((!si) || (!si->imd)) {
+	if (!si) {
+		cf_warning(AS_SINDEX, "si is null in as_sindex_isactive");
 		return FALSE;
 	}
 	bool ret;
@@ -201,57 +202,50 @@ inline bool as_sindex_isactive(as_sindex *si)
 	return ret;
 }
 
-/*
- * Notes-
- * 		Translation from sindex internal error code to generic client visible
- * 		Aerospike error code
- */
+// Translation from sindex internal error code to generic client visible Aerospike error code 
 int as_sindex_err_to_clienterr(int err, char *fname, int lineno) {
 	switch(err) {
 		case AS_SINDEX_ERR_FOUND:        return AS_PROTO_RESULT_FAIL_INDEX_FOUND;
+		case AS_SINDEX_ERR_INAME_MAXLEN: return AS_PROTO_RESULT_FAIL_INDEX_NAME_MAXLEN;
+		case AS_SINDEX_ERR_MAXCOUNT:     return AS_PROTO_RESULT_FAIL_INDEX_MAXCOUNT;
 		case AS_SINDEX_ERR_NOTFOUND:     return AS_PROTO_RESULT_FAIL_INDEX_NOTFOUND;
+		case AS_SINDEX_ERR_NOT_READABLE: return AS_PROTO_RESULT_FAIL_INDEX_NOTREADABLE;
 		case AS_SINDEX_ERR_NO_MEMORY:    return AS_PROTO_RESULT_FAIL_INDEX_OOM;
 		case AS_SINDEX_ERR_PARAM:        return AS_PROTO_RESULT_FAIL_PARAMETER;
-		case AS_SINDEX_ERR_NOT_READABLE: return AS_PROTO_RESULT_FAIL_INDEX_NOTREADABLE;
 		case AS_SINDEX_OK:               return AS_PROTO_RESULT_OK;
 		
 		// Defensive internal error
-		case AS_SINDEX_ERR_SET_MISMATCH:
-		case AS_SINDEX_ERR_UNKNOWN_KEYTYPE:
-		case AS_SINDEX_ERR_BIN_NOTFOUND:
-		case AS_SINDEX_ERR_TYPE_MISMATCH:
 		case AS_SINDEX_ERR:
-		default: cf_warning(AS_SINDEX, "%s Error at %s,%d",
-							 as_sindex_err_str(err), fname, lineno);
+		case AS_SINDEX_ERR_BIN_NOTFOUND:
+		case AS_SINDEX_ERR_SET_MISMATCH:
+		case AS_SINDEX_ERR_TYPE_MISMATCH:
+		case AS_SINDEX_ERR_UNKNOWN_KEYTYPE:
+		default: cf_warning(AS_SINDEX, "%s %d Error at %s,%d",
+							 as_sindex_err_str(err), err, fname, lineno);
 											return AS_PROTO_RESULT_FAIL_INDEX_GENERIC;
 	}
 }
 
-/*
- *	Arguments
- *		imd     - To match the setname of sindex metadata.
- *		setname - set name to be matched
- *
- *	Returns
- * 		TRUE    - If setname given matches the one in imd
- * 		FALSE   - Otherwise
- */
 bool
 as_sindex__setname_match(as_sindex_metadata *imd, const char *setname)
 {
-	// If passed in setname does not match the one on imd
-	if (setname && ((!imd->set) || strcmp(imd->set, setname))) goto Fail;
-	if (!setname && imd->set)                                  goto Fail;
+	// NULL SET being a valid set, logic is a bit complex
+	if (setname && ((!imd->set) || strcmp(imd->set, setname))) {
+		goto Fail;
+	}
+	else if (!setname && imd->set) {
+		goto Fail;
+	}
 	return true;
 Fail:
 	cf_debug(AS_SINDEX, "Index Mismatch %s %s", imd->set, setname);
 	return false;
 }
 
-/* This find out of the record can be defragged 
- * AS_SINDEX_GC_ERROR if found and cannot defrag
+/* Returns
+ * AS_SINDEX_GC_ERROR if cannot defrag
  * AS_SINDEX_GC_OK if can defrag
- * AS_SINDEX_GC_SKIP_ITERATION if skip current gc iteration. (partition lock timed out)
+ * AS_SINDEX_GC_SKIP_ITERATION if partition lock timed out
  */  
 as_sindex_gc_status
 as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
@@ -259,8 +253,8 @@ as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 	as_partition_reservation rsv;
 	as_partition_id pid = as_partition_getid(*keyd);
 	
-	int timeout = 2; // 2 ms
-	if (as_partition_reserve_migrate_timeout(ns, pid, &rsv, 0, timeout) != 0 ) {
+	int timeout_ms = 2; 
+	if (as_partition_reserve_migrate_timeout(ns, pid, &rsv, 0, timeout_ms) != 0 ) {
 		cf_atomic_int_add(&g_config.sindex_gc_timedout, 1);
 		return AS_SINDEX_GC_SKIP_ITERATION;
 	}
