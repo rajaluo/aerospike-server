@@ -243,12 +243,7 @@ static void
 batch_transaction_done(batch_transaction* btr, bool force_close)
 {
 	if (btr->fd_h) {
-		if (force_close) {
-			as_end_of_transaction_force_close(btr->fd_h);
-		}
-		else {
-			as_end_of_transaction(btr->fd_h);
-		}
+		as_end_of_transaction(btr->fd_h, force_close);
 		btr->fd_h = 0;
 	}
 

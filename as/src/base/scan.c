@@ -539,12 +539,7 @@ conn_scan_job_release_fd(conn_scan_job* job, bool force_close)
 	set_blocking(job->fd_h->fd, false);
 	job->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 	job->fd_h->last_used = cf_getms();
-	if (force_close) {
-		as_end_of_transaction_force_close(job->fd_h);
-	}
-	else {
-		as_end_of_transaction(job->fd_h);
-	}
+	as_end_of_transaction(job->fd_h, force_close);
 	job->fd_h = NULL;
 }
 
@@ -1290,7 +1285,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	if (tr->proto_fd_h != NULL) {
 		tr->proto_fd_h->last_used = cf_getms();
-		as_end_of_transaction(tr->proto_fd_h);
+		as_end_of_transaction_ok(tr->proto_fd_h);
 		tr->proto_fd_h = NULL;
 	}
 

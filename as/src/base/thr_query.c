@@ -819,11 +819,7 @@ query_release_fd(as_query_transaction *qtr)
 {
 	if (qtr && qtr->fd_h) {
 		qtr->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
-		if (qtr_is_abort(qtr)) {
-			as_end_of_transaction_force_close(qtr->fd_h);
-		} else {
-			as_end_of_transaction(qtr->fd_h);
-		}
+		as_end_of_transaction(qtr->fd_h, qtr_is_abort(qtr));
 		qtr->fd_h = NULL;
 	}
 }
@@ -944,6 +940,9 @@ query_netio_finish_cb(void *data, int retcode)
 		}
 		QUERY_HIST_INSERT_DATA_POINT(query_net_io_hist, io->start_time);	
 
+		// Undo the increment from query_netio(). Cannot reach zero here: the
+		// increment owned by the transaction will only be undone after all netio
+		// is complete.
 		cf_rc_release(io->fd_h);
 		io->fd_h = NULL;
 		bb_poolrelease(io->bb_r);
@@ -2767,11 +2766,8 @@ as_query(as_transaction *tr)
 
 	if (rv == AS_QUERY_DONE) {
 		// Send FIN packet to client to ignore this.
-		if (as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0) {
-			as_end_of_transaction_force_close(tr->proto_fd_h);
-		} else {
-			as_end_of_transaction(tr->proto_fd_h);
-		}
+		bool force_close = as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0;
+		as_end_of_transaction(tr->proto_fd_h, force_close);
 		tr->proto_fd_h = NULL; // Paranoid
 		if (tr->msgp) {
 			cf_free(tr->msgp);

@@ -154,7 +154,7 @@ as_security_transact(as_transaction *tr)
 	}
 
 	if (tr->proto_fd_h != NULL) {
-		as_end_of_transaction(tr->proto_fd_h);
+		as_end_of_transaction_ok(tr->proto_fd_h);
 		tr->proto_fd_h = NULL;
 	}
 }

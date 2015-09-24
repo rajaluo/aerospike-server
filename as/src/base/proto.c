@@ -340,7 +340,7 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 		}
 	}
 
-	as_end_of_transaction(fd_h);
+	as_end_of_transaction_ok(fd_h);
 	fd_h = NULL;
 
 Exit:
@@ -791,7 +791,7 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 	// good for stats as a higher layer
 	if (written_sz) *written_sz = msg_sz;
 
-	as_end_of_transaction(fd_h);
+	as_end_of_transaction_ok(fd_h);
 	fd_h = NULL;
 
 Exit:

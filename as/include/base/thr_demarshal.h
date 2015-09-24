@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include <base/transaction.h>
+#include "base/transaction.h"
 
-void thr_demarshal_pause(as_file_handle *fd_h);
 void thr_demarshal_resume(as_file_handle *fd_h);

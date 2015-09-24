@@ -415,7 +415,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 				cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Response Sent to Client");
 			}
 			if (wr->proto_fd_h) {
-				as_end_of_transaction(wr->proto_fd_h);
+				as_end_of_transaction_ok(wr->proto_fd_h);
 				wr->proto_fd_h = 0;
 			}
 		} else {
@@ -631,7 +631,7 @@ SendFin:
 						// Return the fabric message or the direct file descriptor -
 						// after write and complete.
 						if (pr.fd_h) {
-							as_end_of_transaction(pr.fd_h);
+							as_end_of_transaction_ok(pr.fd_h);
 							pr.fd_h = 0;
 						}
 					}
@@ -871,7 +871,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 					write_request_init_tr(&tr, pr->wr);
 					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
 					if (tr.proto_fd_h) {
-						as_end_of_transaction(tr.proto_fd_h);
+						as_end_of_transaction_ok(tr.proto_fd_h);
 						tr.proto_fd_h = NULL;
 					}
 				}
