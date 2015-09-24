@@ -197,6 +197,10 @@ static volatile int g_multi_node = false;
 #define BALANCE_INIT_UNRESOLVED	0
 #define BALANCE_INIT_RESOLVED	1
 
+#define TX_FLAGS_NONE			((uint64_t) 0x0)
+#define TX_FLAGS_ACTING_MASTER	((uint64_t) 0x1)
+#define TX_FLAGS_REQUEST		((uint64_t) 0x2)
+
 static volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
 
 
@@ -1904,7 +1908,10 @@ void apply_write_journal(as_namespace *ns, size_t pid)
 as_migrate_cb_return
 as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pid, as_index_tree *tree, cf_node node, void *udata)
 {
-	bool flush = (bool)udata;
+	uint64_t flags = (uint64_t)udata;
+	uint64_t acting_master = flags & TX_FLAGS_ACTING_MASTER;
+	uint64_t migration_request = flags & TX_FLAGS_REQUEST;
+
 	as_partition *p = NULL;
 
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
@@ -1928,7 +1935,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 	/*
 	 *  Flush writes on the acting master now that it has completed filling the real master with data
 	 */
-	if (flush) {
+	if (acting_master) {
 		p->target = 0;
 		p->n_dupl = 0;
 		memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
@@ -1946,7 +1953,16 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
 		return(AS_MIGRATE_CB_FAIL);
 	}
+
 	p->pending_migrate_tx--;
+	if (!migration_request) {
+		int64_t migrates_tx_remaining = cf_atomic_int_decr(&ns->migrate_tx_partitions_remaining);
+		if (migrates_tx_remaining < 0){
+			cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) tx partitions schedule exceeded, possibly a race with prior migration",
+					   ns->name, pid, p->pending_migrate_tx, migrates_tx_remaining);
+		}
+	}
+
 	if (AS_PARTITION_STATE_ZOMBIE == p->state && 0 == p->pending_migrate_tx) {
 		cf_detail(AS_PARTITION, "{%s:%d} migration tx callback: moving to WAIT", ns->name, pid);
 		p->state = AS_PARTITION_STATE_WAIT;
@@ -1963,7 +1979,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 	/* Apply all the transactions. This will halt eventually because the
 	   node filling us will stop sending write requests to us. */
 	int counter = 0;
-	while (flush) {
+	while (acting_master) {
 		int i = p->pending_writes;  /* get a copy */
 		if (i == 0)
 			break;
@@ -2117,10 +2133,12 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 							rv = AS_MIGRATE_CB_FAIL;
 							break; // out of switch
 						}
+
 						p->waiting_for_master = false;
 						p->pending_migrate_tx++; // Send request to dupl node
-						partition_migrate_record_fill(&r, &p->replica[0], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+						partition_migrate_record_fill(&r, &p->replica[0], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_NONE);
 						cf_queue_push(mq, &r);
+
 						rv = AS_MIGRATE_CB_ALREADY_DONE;
 						cf_info(AS_PARTITION, "{%s:%d} Request for migration received from master. Migrate scheduled", ns->name, pid);
 						break;
@@ -2278,7 +2296,13 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						rv = AS_MIGRATE_CB_FAIL;
 						break; // out of switch
 					}
+
 					p->pending_migrate_rx--;
+					int64_t migrates_rx_remaining = cf_atomic_int_decr(&ns->migrate_rx_partitions_remaining);
+					if (migrates_rx_remaining < 0) {
+						cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) rx partitions schedule exceeded, possibly a race with prior migration",
+								ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
+					}
 					p->origin = 0;
 
 					// apply write journal
@@ -2314,7 +2338,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 					for (int i = 0; i < p->n_dupl; i++)
 					{
 						p->pending_migrate_tx++; // Send request to dupl node
-						partition_migrate_record_fill(&r, &p->dupl_nodes[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+						partition_migrate_record_fill(&r, &p->dupl_nodes[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_REQUEST);
 						cf_queue_push(mq, &r);
 					}
 
@@ -2359,8 +2383,14 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 								p->dupl_nodes[i] = p->dupl_nodes[p->n_dupl - 1];
 								p->dupl_nodes[p->n_dupl - 1] = (cf_node)0;
 							}
-							p->pending_migrate_rx--; // one more migrate completed
 							p->n_dupl--; // reduce array size
+
+							p->pending_migrate_rx--; // one more migrate completed
+							int64_t migrates_rx_remaining = cf_atomic_int_decr(&ns->migrate_rx_partitions_remaining);
+							if (migrates_rx_remaining < 0) {
+								cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld)  rx partitions schedule exceeded, possibly a race with prior migration",
+										ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
+							}
 						}
 						else {
 							cf_warning(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state", ns->name, pid, source_node);
@@ -2388,7 +2418,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						if (p->replica_tx_onsync[i] == true) {
 							p->replica_tx_onsync[i] = false;
 							p->pending_migrate_tx++;
-							partition_migrate_record_fill(&r, &p->replica[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+							partition_migrate_record_fill(&r, &p->replica[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_NONE);
 							cf_queue_push(mq, &r);
 						}
 					}
@@ -3051,6 +3081,21 @@ as_partition_balance()
 		if (NULL == ns)
 			continue;
 
+		// Acquire and release each partition lock to ensure threads holding
+		// a partition lock after this loop will be forced to check the latest
+		// cluster key.
+		for (int j = 0; j < AS_PARTITIONS; j++) {
+			as_partition *p = &ns->partitions[j];
+
+			pthread_mutex_lock(&p->lock);
+			pthread_mutex_unlock(&p->lock);
+		}
+
+		cf_atomic_int_set(&ns->migrate_tx_partitions_scheduled, 0);
+		cf_atomic_int_set(&ns->migrate_tx_partitions_remaining, 0);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_scheduled, 0);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_remaining, 0);
+
 		cf_queue *mq = NULL;
 		mq =  cf_queue_create(sizeof(partition_migrate_record), false);
 
@@ -3426,7 +3471,7 @@ as_partition_balance()
 									 */
 									cf_debug(AS_PARTITION, "{%s:%d} Master case 6b: migrating to replica %"PRIx64, ns->name, j, HV(j, k));
 									p->pending_migrate_tx++;
-									partition_migrate_record_fill(&pmr, &HV(j, k), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+									partition_migrate_record_fill(&pmr, &HV(j, k), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_NONE);
 									cf_queue_push(mq, &pmr);
 								}
 							break; // out of switch
@@ -3516,9 +3561,9 @@ as_partition_balance()
 								p->n_dupl = n_dupl;
 								memcpy(p->dupl_nodes, dupl_nodes, sizeof(cf_node) * p->n_dupl);
 							}
-							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)true);
+							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_ACTING_MASTER);
 						} else // duplicate nodes reject writes, so no need to flush
-							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_NONE);
 
 						cf_queue_push(mq, &pmr);
 					}
@@ -3590,6 +3635,14 @@ as_partition_balance()
 
 		cf_info(AS_PARTITION, "{%s} re-balanced, expect migrations: out %d, in %d, out-later %d",
 				ns->name, ns_pending_migrate_tx, ns_pending_migrate_rx, ns_pending_migrate_tx_later);
+
+		int ns_pending_migrate_tx_total = ns_pending_migrate_tx + ns_pending_migrate_tx_later;
+
+		cf_atomic_int_set(&ns->migrate_tx_partitions_scheduled, ns_pending_migrate_tx_total);
+		cf_atomic_int_set(&ns->migrate_tx_partitions_remaining, ns_pending_migrate_tx_total);
+
+		cf_atomic_int_set(&ns->migrate_rx_partitions_scheduled, ns_pending_migrate_rx);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_remaining, ns_pending_migrate_rx);
 
 		/* Run all the queued migrations: this happens after the release of
 		 * the state lock to ensure that writes have begun to flow to their
