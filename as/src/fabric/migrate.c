@@ -1519,7 +1519,6 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 			cancel_migrate = true;
 		case OPERATION_DONE:
 		{
-
 			// fetch migration id
 			uint32_t mig_id;
 			if (0 != msg_get_uint32(m, MIG_FIELD_MIG_ID, &mig_id)) {
@@ -2098,6 +2097,7 @@ migrate_xmit_fn(void *arg)
 		bool cancel = false;
 
 		migration_pop(&mig, &mrpa);
+
 		/*
 		 * This is the case for intentionally stopping the migrate thread.
 		 */
@@ -2105,6 +2105,8 @@ migrate_xmit_fn(void *arg)
 			cf_info(AS_MIGRATE, "Migrate thread #%ld (TID %d) received termination request.", my_id, syscall(SYS_gettid));
 			break; // signal of death
 		}
+
+		cf_atomic_int_incr(&g_config.migrate_progress_send);
 
 		if (mig->cluster_key != as_paxos_get_cluster_key()) {
 			migrate_send_finish(mig, AS_MIGRATE_STATE_ERROR, "cluster key mismatch");
@@ -2121,6 +2123,7 @@ migrate_xmit_fn(void *arg)
 				if (0 != cf_queue_priority_push(g_migrate_q, (void *) &mig, CF_QUEUE_PRIORITY_LOW)) {
 					cf_crash(AS_MIGRATE, "queue");
 				}
+				cf_atomic_int_decr(&g_config.migrate_progress_send);
 				usleep(1000); // 1 ms
 				goto NextMigrate; // no, really, go back to the queue.
 			case AS_PARTITION_STATE_SYNC:
@@ -2498,7 +2501,6 @@ as_migrate(cf_node *dst_node, uint dst_sz, as_namespace *ns, as_partition_id par
 
 //	cf_debug(AS_MIGRATE, "migration created: %p transaction hash %p",mig,mig->trans_hash);
 
-	cf_atomic_int_incr( &g_config.migrate_progress_send );
 	/*
 	 * Generate new LDT version before starting the migration for a record
 	 * This would mean that everytime a outgoing migration is triggerred it

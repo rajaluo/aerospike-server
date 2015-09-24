@@ -2295,6 +2295,16 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";write-commit-level-override=");
 	cf_dyn_buf_append_string(db, NS_WRITE_COMMIT_LEVEL_NAME());
 
+	cf_dyn_buf_append_string(db, ";migrate_tx_partitions_scheduled=");
+	APPEND_STAT_COUNTER(db, ns->migrate_tx_partitions_scheduled);
+	cf_dyn_buf_append_string(db, ";migrate_tx_partitions_remaining=");
+	APPEND_STAT_COUNTER(db, ns->migrate_tx_partitions_remaining);
+	cf_dyn_buf_append_string(db, ";migrate_rx_partitions_scheduled=");
+	APPEND_STAT_COUNTER(db, ns->migrate_rx_partitions_scheduled);
+	cf_dyn_buf_append_string(db, ";migrate_rx_partitions_remaining=");
+	APPEND_STAT_COUNTER(db, ns->migrate_rx_partitions_remaining);
+
+
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 
@@ -4839,13 +4849,12 @@ info_debug_ticker_fn(void *unused)
 					(swapping == true) ? "SWAPPING!" : ""
 					);
 
-			cf_info(AS_INFO, " migrates in progress ( %d , %d ) ::: ClusterSize %zd ::: objects %"PRIu64" ::: sub_objects %"PRIu64,
-					cf_atomic32_get(g_config.migrate_progress_send),
-					cf_atomic32_get(g_config.migrate_progress_recv),
+			cf_info(AS_INFO, " ClusterSize %zd ::: objects %"PRIu64" ::: sub_objects %"PRIu64,
 					g_config.paxos->cluster_size,  // add real cluster size when srini has it
 					thr_info_get_object_count(),
 					thr_info_get_subobject_count()
 					);
+
 			cf_info(AS_INFO, " rec refs %"PRIu64" ::: rec locks %"PRIu64" ::: trees %"PRIu64" ::: wr reqs %"PRIu64" ::: mig tx %"PRIu64" ::: mig rx %"PRIu64"",
 					cf_atomic_int_get(g_config.global_record_ref_count),
 					cf_atomic_int_get(g_config.global_record_lock_count),
@@ -4894,7 +4903,7 @@ info_debug_ticker_fn(void *unused)
 				as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
 				size_t ns_memory_inuse = ns->n_bytes_memory + (as_index_size_get(ns) * ns->n_objects);
 				if (ns->storage_data_in_memory) {
-					cf_info(AS_INFO, "namespace %s: disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
+					cf_info(AS_INFO, "{%s} disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
 							"sindex memory inuse: %"PRIu64" (bytes) "
 							"avail pct %d",
 							ns->name, inuse_disk_bytes, ns_memory_inuse,
@@ -4907,7 +4916,7 @@ info_debug_ticker_fn(void *unused)
 						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
 						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
 						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-						cf_info(AS_INFO, "namespace %s: ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+						cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
 								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
 					}
 				}
@@ -4918,7 +4927,7 @@ info_debug_ticker_fn(void *unused)
 					cf_atomic32_set(&ns->n_reads_from_cache, 0);
 					ns->cache_read_pct = (float)(100 * n_reads_from_cache) / (float)(n_total_reads == 0 ? 1 : n_total_reads);
 
-					cf_info(AS_INFO, "namespace %s: disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
+					cf_info(AS_INFO, "{%s} disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
 							"sindex memory inuse: %"PRIu64" (bytes) "
 							"avail pct %d cache-read pct %.2f",
 							ns->name, inuse_disk_bytes, ns_memory_inuse,
@@ -4932,13 +4941,34 @@ info_debug_ticker_fn(void *unused)
 						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
 						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
 						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-						cf_info(AS_INFO, "namespace %s: ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+						cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
 								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
 					}
 				}
 
 				total_ns_memory_inuse += ns_memory_inuse;
 				as_sindex_histogram_dumpall(ns);
+
+				int64_t scheduled_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_scheduled);
+				int64_t scheduled_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_scheduled);
+				int64_t remaining_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_remaining);
+				int64_t remaining_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_remaining);
+				int64_t scheduled_migrations = scheduled_rx_migrations + scheduled_tx_migrations;
+				int64_t remaining_migrations = remaining_rx_migrations + remaining_tx_migrations;
+				if (scheduled_migrations > 0 && remaining_migrations > 0) {
+					float migrations_pct_complete = (1 - (remaining_migrations / (float)scheduled_migrations)) * 100;
+
+					cf_info(AS_INFO, "{%s} migrations - remaining(%ld tx, %ld rx), active(%ld tx, %ld rx), %0.2f%% complete",
+							ns->name,
+							remaining_tx_migrations,
+							remaining_rx_migrations,
+							cf_atomic_int_get(g_config.migrate_progress_send),
+							cf_atomic_int_get(g_config.migrate_progress_recv),
+							migrations_pct_complete
+							);
+				} else {
+					cf_info(AS_INFO, "{%s} migrations - remaining(0 tx, 0 rx)", ns->name);
+				}
 			}
 
 			as_partition_states ps;
