@@ -163,8 +163,11 @@ as_batch_send_error(as_file_handle* fd_h, int result_code)
 
 	int status = as_batch_send(fd_h->fd, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
 
-	// no as_end_of_transaction[_force_close]() here - demarshal thread is
-	// responsible for releasing the connection in case of a non-zero status
+	// The Demarshal thread is responsible for releasing the connection in case
+	// of a non-zero status.
+	if (! status) {
+		as_end_of_transaction_ok(fd_h);
+	}
 
 	if (result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
 		cf_atomic_int_incr(&g_config.batch_index_timeout);
@@ -224,11 +227,7 @@ as_batch_send_final(as_batch_shared* shared)
 
 	int status = as_batch_send(shared->fd_h->fd, (uint8_t*) &m, sizeof(m), MSG_NOSIGNAL);
 
-	if (status) {
-		as_end_of_transaction_force_close(shared->fd_h);
-	} else {
-		as_end_of_transaction(shared->fd_h);
-	}
+	as_end_of_transaction(shared->fd_h, status != 0);
 	shared->fd_h = 0;
 
 	histogram_insert_data_point(g_config.batch_index_reads_hist, shared->start);

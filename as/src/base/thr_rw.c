@@ -296,7 +296,7 @@ void write_request_destructor(void *object) {
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 	}
 	if (wr->proto_fd_h) {
-		as_end_of_transaction(wr->proto_fd_h);
+		as_end_of_transaction_ok(wr->proto_fd_h);
 		wr->proto_fd_h = 0;
 	}
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -694,7 +694,7 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 					tr->proto_fd_h, line);
 			as_end_of_transaction_force_close(tr->proto_fd_h);
 		} else {
-			as_end_of_transaction(tr->proto_fd_h);
+			as_end_of_transaction_ok(tr->proto_fd_h);
 		}
 		tr->proto_fd_h = 0;
 	}
@@ -2075,7 +2075,7 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	}
 
 	if (tr->proto_fd_h != 0) {
-		as_end_of_transaction(tr->proto_fd_h);
+		as_end_of_transaction_ok(tr->proto_fd_h);
 		tr->proto_fd_h = 0;
 	}
 }
@@ -5526,7 +5526,7 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 			write_request_init_tr(&tr, wr);
 			udf_rw_complete(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT, __FILE__, __LINE__);
 			if (tr.proto_fd_h) {
-				as_end_of_transaction(tr.proto_fd_h);
+				as_end_of_transaction_ok(tr.proto_fd_h);
 				tr.proto_fd_h = 0;
 			}
 		} else {
