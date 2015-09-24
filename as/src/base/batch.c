@@ -163,7 +163,7 @@ as_batch_send_error(as_file_handle* fd_h, int result_code)
 
 	int status = as_batch_send(fd_h->fd, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
 
-	// The Demarshal thread is responsible for releasing the connection in case
+	// The demarshal thread is responsible for releasing the connection in case
 	// of a non-zero status.
 	if (! status) {
 		as_end_of_transaction_ok(fd_h);
