@@ -1951,3 +1951,25 @@ ldt_update_err_stats(as_namespace *ns, as_val *result_val)
 	return;
 }
 
+void
+as_ldt_get_property(as_rec_props *props, bool *is_ldt_parent,
+		bool *is_ldt_sub)
+{
+	uint16_t * ldt_rectype_bits;
+
+	*is_ldt_sub	= false;
+	*is_ldt_parent = false;
+
+	if (props->size != 0 &&
+			(as_rec_props_get_value(props, CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+					(uint8_t**)&ldt_rectype_bits) == 0)) {
+		if (as_ldt_flag_has_sub(*ldt_rectype_bits)) {
+			*is_ldt_sub = true;
+		}
+		else if (as_ldt_flag_has_parent(*ldt_rectype_bits)) {
+			*is_ldt_parent = true;
+		}
+	}
+
+	cf_detail(AS_LDT, "Parent=%d Subrec=%d", *is_ldt_parent, *is_ldt_sub);
+}
