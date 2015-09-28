@@ -517,8 +517,8 @@ extern int  as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sinde
  * DMLs USING RECORDS
  */
 // **************************************************************************************************
-extern int as_sindex_put_rd(as_sindex *si, as_storage_rd *rd);
-extern int as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd);
+int  as_sindex_put_rd(as_sindex *si, as_storage_rd *rd);
+void as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd);
 // **************************************************************************************************
 
 
