@@ -88,6 +88,7 @@ typedef as_migrate_cb_return (*as_migrate_callback) (
 	as_namespace *ns,
 	as_partition_id part_id,
 	as_index_tree *tree,
+	uint64_t orig_cluster_key,
 	cf_node source_node,
 	void *udata);
 
@@ -103,8 +104,9 @@ as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_
 // migrate a tree to a node
 // and find out when it's done
 int as_migrate(cf_node *dst, uint dst_sz,
-			   as_namespace *ns, as_partition_id partition, as_migrate_type mig_type,
-			   bool is_migrate_state_done, as_migrate_callback cb, void *udata);
+			as_namespace *ns, as_partition_id partition, as_migrate_type mig_type,
+			bool is_migrate_state_done, uint64_t orig_cluster_key,
+			as_migrate_callback cb, void *udata);
 
 // 0 if successfully found a migrate to cancel
 // -1 if failed for unknown reasons
@@ -118,7 +120,7 @@ void as_migrate_dump(bool verbose);
 
 as_migrate_cb_return as_partition_migrate_rx(as_migrate_state s,
 		as_namespace *ns, as_partition_id pid, as_index_tree *tree,
-		cf_node source_node, void *udata);
+		uint64_t orig_cluster_key, cf_node source_node, void *udata);
 
 /*
  * Check and return if passed in version is found in migration incoming ldt version hash
