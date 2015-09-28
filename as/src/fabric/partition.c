@@ -1906,7 +1906,9 @@ void apply_write_journal(as_namespace *ns, size_t pid)
  * the only state we're really interested in is "DONE"
  */
 as_migrate_cb_return
-as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pid, as_index_tree *tree, cf_node node, void *udata)
+as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
+						as_partition_id pid, as_index_tree *tree,
+						uint64_t orig_cluster_key, cf_node node, void *udata)
 {
 	uint64_t flags = (uint64_t)udata;
 	uint64_t acting_master = flags & TX_FLAGS_ACTING_MASTER;
@@ -1931,6 +1933,11 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 
 	if (0 != pthread_mutex_lock(&p->lock))
 		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+
+	if (orig_cluster_key != as_paxos_get_cluster_key()) {
+		pthread_mutex_unlock(&p->lock);
+		return AS_MIGRATE_CB_FAIL;
+	}
 
 	/*
 	 *  Flush writes on the acting master now that it has completed filling the real master with data
@@ -2000,6 +2007,10 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 	if (0 != pthread_mutex_lock(&p->lock))
 		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
 
+	if (orig_cluster_key != as_paxos_get_cluster_key()) {
+		pthread_mutex_unlock(&p->lock);
+		return AS_MIGRATE_CB_FAIL;
+	}
 
 	if (AS_PARTITION_STATE_WAIT == p->state) {
 
@@ -2060,7 +2071,9 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			 *
  */
 as_migrate_cb_return
-as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pid, as_index_tree *tree, cf_node source_node, void *udata)
+as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
+		as_partition_id pid, as_index_tree *tree, uint64_t orig_cluster_key,
+		cf_node source_node, void *udata)
 {
 	as_partition *p = NULL;
 	as_migrate_cb_return rv = AS_MIGRATE_CB_OK;
@@ -2092,6 +2105,11 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 
 			if (0 != pthread_mutex_lock(&p->lock))
 				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+
+			if (orig_cluster_key != as_paxos_get_cluster_key()) {
+				pthread_mutex_unlock(&p->lock);
+				return AS_MIGRATE_CB_FAIL;
+			}
 
 			cf_debug(AS_PARTITION, "{%s:%d} MIGRATE RECEIVE START, partition in state %d", ns->name, pid, p->state);
 
@@ -2253,7 +2271,9 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			partition_migrate_record pmr;
 			while (0 == cf_queue_pop(mq, &pmr, 0)) {
 				cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate (in rx) to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
-				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid, pmr.mig_type, false, pmr.cb, pmr.cb_data))
+				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
+									pmr.mig_type, false, orig_cluster_key,
+									pmr.cb, pmr.cb_data))
 					cf_crash(AS_PARTITION, "couldn't start migrate");
 			}
 
@@ -2265,6 +2285,12 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 
 			if (0 != pthread_mutex_lock(&p->lock))
 				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+
+			if (orig_cluster_key != as_paxos_get_cluster_key()) {
+				pthread_mutex_unlock(&p->lock);
+				return AS_MIGRATE_CB_FAIL;
+			}
+
 			cf_debug(AS_PARTITION, "{%s:%d} MIGRATE RECEIVE DONE, partition in state %d", ns->name, pid, p->state);
 
 			if (p->pending_migrate_rx == 0) {
@@ -2437,7 +2463,9 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			partition_migrate_record pmr;
 			while (0 == cf_queue_pop(mq, &pmr, 0)) {
 				cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate (in rx) to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
-				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid, pmr.mig_type, true, pmr.cb, pmr.cb_data))
+				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
+									pmr.mig_type, true, orig_cluster_key,
+									pmr.cb, pmr.cb_data))
 					cf_crash(AS_PARTITION, "couldn't start migrate");
 			}
 
@@ -3074,6 +3102,7 @@ as_partition_balance()
 	size_t n_duplicate = 0;
 
 	size_t n_total = g_config.namespaces * AS_PARTITIONS;
+	uint64_t orig_cluster_key = as_paxos_get_cluster_key();
 
 	for (int i = 0; i < g_config.namespaces; i++) {
 
@@ -3618,7 +3647,7 @@ as_partition_balance()
 
 			/* copy the new succession list over the old succession list */
 			memcpy(p->old_sl, &hv_ptr[j * g_config.paxos_max_cluster_size], sizeof(cf_node) * g_config.paxos_max_cluster_size);
-			p->cluster_key = as_paxos_get_cluster_key();
+			p->cluster_key = orig_cluster_key;
 
 			cf_debug(AS_PARTITION, "[DEBUG] Partition PID(%u) gets new CK(%"PRIx64")",
 					 p->partition_id, p->cluster_key );
@@ -3650,7 +3679,9 @@ as_partition_balance()
 		partition_migrate_record pmr;
 		while (0 == cf_queue_pop(mq, &pmr, 0)) {
 			cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
-			if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid, pmr.mig_type, false, pmr.cb, pmr.cb_data))
+			if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
+								pmr.mig_type, false, orig_cluster_key, pmr.cb,
+								pmr.cb_data))
 				cf_crash(AS_PARTITION, "couldn't start migrate");
 		}
 

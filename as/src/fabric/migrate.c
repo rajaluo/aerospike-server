@@ -1128,7 +1128,8 @@ migrate_send_finish(migration *mig, as_migrate_state state, char *reason)
 	// TODO: What if migration is pushed to multiple nodes .. passes only first one.
 	// currently only sent to one node in a migration record
 	if (mig->cb) {
-		(mig->cb) ( state, mig->rsv.ns, mig->rsv.pid, mig->rsv.tree, mig->dst_nodes[0], mig->udata);
+		(mig->cb) ( state, mig->rsv.ns, mig->rsv.pid, mig->rsv.tree,
+				mig->cluster_key, mig->dst_nodes[0], mig->udata);
 		mig->cb = NULL;
 		cf_atomic_int_decr( &g_config.migrate_progress_send );
 	}
@@ -1372,7 +1373,8 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 			//
 			as_migrate_cb_return rv = AS_MIGRATE_CB_OK;
 			if (g_event_cb) {
-				rv = (*g_event_cb) (AS_MIGRATE_STATE_START, ns, part_id, 0, mc->source_node, g_udata);
+				rv = (*g_event_cb) (AS_MIGRATE_STATE_START, ns, part_id, 0,
+						mc->cluster_key, mc->source_node, g_udata);
 			}
 			switch(rv) {
 				case AS_MIGRATE_CB_FAIL:
@@ -1568,7 +1570,9 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 
 						// TODO: should the callback be called with cancel in order to cleanup state (e.g., journals, etc.)
 						if (!cancel_migrate) {
-							(*g_event_cb) (AS_MIGRATE_STATE_DONE, mc->rsv.ns, mc->rsv.pid, mc->rsv.tree, mc->source_node, g_udata);
+							(*g_event_cb) (AS_MIGRATE_STATE_DONE, mc->rsv.ns,
+									mc->rsv.pid, mc->rsv.tree, mc->cluster_key,
+									mc->source_node, g_udata);
 						}
 					}
 
@@ -2424,7 +2428,10 @@ as_migrate_cancel(cf_node dst, as_namespace *ns, as_partition_id partition)
 */
 
 int
-as_migrate(cf_node *dst_node, uint dst_sz, as_namespace *ns, as_partition_id part_id, as_migrate_type mig_type, bool is_migrate_state_done, as_migrate_callback cb, void *udata)
+as_migrate(cf_node *dst_node, uint dst_sz, as_namespace *ns,
+		as_partition_id part_id, as_migrate_type mig_type,
+		bool is_migrate_state_done, uint64_t orig_cluster_key,
+		as_migrate_callback cb, void *udata)
 {
 
 	if (dst_sz < 1 || dst_sz >= g_config.paxos_max_cluster_size) {
@@ -2485,7 +2492,7 @@ as_migrate(cf_node *dst_node, uint dst_sz, as_namespace *ns, as_partition_id par
 	as_partition_reserve_migrate(ns, part_id, &mig->rsv, 0);
 	cf_atomic_int_incr(&g_config.migtx_tree_count);
 
-	mig->cluster_key = mig->rsv.cluster_key; // use the partition's cluster key for this variable
+	mig->cluster_key = orig_cluster_key;
 
 	// Do zombies first (priority == 2), then migrate_state == DONE (priority == 1)
 	// then the rest. If priority is tied, sort by smallest.
