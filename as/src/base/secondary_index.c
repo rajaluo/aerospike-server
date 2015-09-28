@@ -1384,7 +1384,6 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 		if (&(ns->sindex[i]) && (ns->sindex[i].imd)) {
 			as_sindex si = ns->sindex[i];
 			if (as_sindex_isactive(&si)) {
-				AS_SINDEX_RESERVE(&si);
 				SINDEX_RLOCK(&si.imd->slock);
 			}
 			cf_dyn_buf_append_string(db, "ns=");
@@ -1435,7 +1434,6 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 			}
 			if (as_sindex_isactive(&si)) {
 				SINDEX_UNLOCK(&si.imd->slock);
-				AS_SINDEX_RELEASE(&si);
 			}
 		}
 	}
@@ -1497,6 +1495,51 @@ as_sindex_release(as_sindex *si, char *fname, int lineno)
 	return AS_SINDEX_OK;
 }
 
+as_sindex_status
+as_sindex_populator_reserve_all(as_namespace * ns)
+{
+	if (!ns) {
+		cf_warning(AS_SINDEX, "namespace found NULL");
+		return AS_SINDEX_ERR;
+	}
+
+	int count = 0 ;
+	int valid = 0;
+	SINDEX_GRLOCK();
+	while (valid < ns->sindex_cnt && count < AS_SINDEX_MAX) {
+		as_sindex * si = &ns->sindex[count];
+		if (as_sindex_isactive(si)) {
+			AS_SINDEX_RESERVE(si);
+			valid++;
+		}
+		count++;
+	}
+	SINDEX_GUNLOCK();
+	return AS_SINDEX_OK;
+}
+
+as_sindex_status
+as_sindex_populator_release_all(as_namespace * ns)
+{
+	if (!ns) {
+		cf_warning(AS_SINDEX, "namespace found NULL");
+		return AS_SINDEX_ERR;
+	}
+
+	int count = 0 ;
+	int valid = 0;
+	SINDEX_GRLOCK();
+	while (valid < ns->sindex_cnt && count < AS_SINDEX_MAX) {
+		as_sindex * si = &ns->sindex[count];
+		if (as_sindex_isactive(si)) {
+			AS_SINDEX_RELEASE(si);
+			valid++;
+		}
+		count++;
+	}
+	SINDEX_GUNLOCK();
+	return AS_SINDEX_OK;
+}
 //                                    END - SI REFERENCE
 // ************************************************************************************************
 // ************************************************************************************************
@@ -1885,6 +1928,8 @@ as_sindex_boot_populateall()
 		// OR (Data not in memory AND load data at startup)
 		if (!ns->cold_start
 			|| (!ns->storage_data_in_memory)) {
+			// reserve all sindexes
+			as_sindex_populator_reserve_all(ns);
 			as_sbld_build_all(ns);
 			cf_info(AS_SINDEX, "Queuing namespace %s for sindex population ", ns->name);
 		} else {
@@ -1897,6 +1942,19 @@ as_sindex_boot_populateall()
 		// blocking call, wait till an item is popped out of Q :
 		cf_queue_pop(g_sindex_populateall_done_q, &ret, CF_QUEUE_FOREVER);
 		// TODO: Check for failure .. is generally fatal if it fails
+	}
+	
+	for (int i = 0; i < g_config.namespaces; i++) {
+		as_namespace *ns = g_config.namespace[i];
+		if (!ns || (ns->sindex_cnt == 0)) {
+			continue;
+		}
+
+		// If FAST START
+		// OR (Data not in memory AND load data at startup)
+		if (!ns->cold_start || (!ns->storage_data_in_memory)) {
+			as_sindex_populator_release_all(ns);
+		}
 	}
 
 	// Down-size builder thread pool to configured value.
@@ -2701,6 +2759,9 @@ as_sindex_query(as_sindex *si, as_sindex_range *srange, as_sindex_qctx *qctx)
 void
 as_sindex_init_sbin(as_sindex_bin * sbin, as_sindex_op op, as_particle_type type, as_sindex * si)
 {
+	if (si) {
+		AS_SINDEX_RESERVE(si);
+	}	
 	sbin->si              = si;
 	sbin->to_free         = false;
 	sbin->num_values      = 0;
@@ -3243,6 +3304,7 @@ as_sindex_add_diff_asval_to_default_sindex(as_val * old_val, as_val *new_val, as
 		return AS_SINDEX_ERR;
 	}
 
+	int sbins_made = 0;
 	// If both old val and new val have the same expected type
 	// Then compare the values and add it to the sbin accodingly.
 	if (old_val && new_val) {
@@ -3258,14 +3320,20 @@ as_sindex_add_diff_asval_to_default_sindex(as_val * old_val, as_val *new_val, as
 
 				if (strlen(old_str) != strlen(new_str)) {
 					if (memcmp(old_str, new_str, strlen(old_str) + 1)) {
-						sbin->op = AS_SINDEX_OP_DELETE;
-						if (as_sindex_add_string_to_sbin(sbin, old_str) == AS_SINDEX_OK) {
-							sbin++;
-							as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
-							*found += 1;
+						as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+						if (as_sindex_add_string_to_sbin(&sbin[sbins_made], old_str) == AS_SINDEX_OK) {
+							sbins_made++;
 						}
-						if (as_sindex_add_string_to_sbin(sbin, new_str) == AS_SINDEX_OK) {
-							*found += 1;
+						else {
+							as_sindex_sbin_free(&sbin[sbins_made]);
+						}
+
+						as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);	
+						if (as_sindex_add_string_to_sbin(&sbin[sbins_made], new_str) == AS_SINDEX_OK) {
+							sbins_made++;
+						}
+						else {
+							as_sindex_sbin_free(&sbin[sbins_made]);
 						}
 					}
 				}
@@ -3280,36 +3348,53 @@ as_sindex_add_diff_asval_to_default_sindex(as_val * old_val, as_val *new_val, as
 				uint64_t new_int = as_integer_get(new_i);
 
 				if (old_int != new_int) {
-					sbin->op = AS_SINDEX_OP_DELETE;
-					if (as_sindex_add_integer_to_sbin(sbin, old_int) == AS_SINDEX_OK) {
-						sbin++;
-						as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
-						*found += 1;
+					as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+					if (as_sindex_add_integer_to_sbin(&sbin[sbins_made], old_int) == AS_SINDEX_OK) {
+						sbins_made++;
 					}
+					else {
+						as_sindex_sbin_free(&sbin[sbins_made]);
+					}
+
+					as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);	
 					if (as_sindex_add_integer_to_sbin(sbin, new_int) == AS_SINDEX_OK) {
-						*found += 1;
-					} 
+						sbins_made++;
+					}
+					else {
+						as_sindex_sbin_free(&sbin[sbins_made]);
+					}
 				}
 			}
+			*found += sbins_made;
 			return AS_SINDEX_OK;
 		}
 	}
 
+	int ret = 0;
 	// Else add them separately to different bins if possible.
-	as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, si);
-	if (as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)](old_val, sbin) == AS_SINDEX_OK) {
-		if (sbin->num_values) {
-			*found     += 1;
-			sbin        = sbin + 1;
+	as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+	ret = as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)](old_val, &sbin[sbins_made]);
+	if (!ret) {
+		if (sbin[sbins_made].num_values) {
+			sbins_made++;
 		}
+	}
+	if (ret || !sbin[sbins_made].num_values) {
+		as_sindex_sbin_free(&sbin[sbins_made]);
 	}
 
-	as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
-	if (as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)](new_val, sbin) == AS_SINDEX_OK) {
-		if (sbin->num_values) {
-			*found += 1;	
+	as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);
+	ret = as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)](new_val, &sbin[sbins_made]);
+	if (!ret) {
+		if (sbin[sbins_made].num_values) {
+			sbins_made++;
 		}
 	}
+	if (ret || !sbin[sbins_made].num_values) {
+		as_sindex_sbin_free(&sbin[sbins_made]);
+	}
+
+	*found += sbins_made;
 	return AS_SINDEX_OK;
 }
 
@@ -3422,6 +3507,7 @@ as_sindex_add_diff_asval_to_list_sindex(as_val * old_val, as_val *new_val, as_si
 		return AS_SINDEX_ERR;
 	}
 	as_sindex * si = sbin->si;
+	int sbins_made = 0;
 	// If both old val and new val have the same expected type
 	if (old_val && new_val) {
 		if (old_val->type == AS_LIST && new_val->type == AS_LIST) {
@@ -3442,44 +3528,61 @@ as_sindex_add_diff_asval_to_list_sindex(as_val * old_val, as_val *new_val, as_si
 
 			//		Iterate through all the values in the old and check if it exist or not in the new hash
 			//		If it does not exist add it to the sbin with OP DELETE
-			as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
-			old_sbin_hash.sbin      = sbin;
+			as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);
+			old_sbin_hash.sbin      = &sbin[sbins_made];
 			as_list_foreach(new_list, as_sindex_compare_list_hash, &old_sbin_hash);
-			if (sbin->num_values) {
-				*found     += 1;
-				sbin        = sbin + 1;
+			if (sbin[sbins_made].num_values) {
+				sbins_made++;
+			}
+			else {
+				as_sindex_sbin_free(&sbin[sbins_made]);
 			}
 
 			//		Iterate through all the values in the old and check if it exist or not in the old hash 
 			//		If it does not exist add it to the sbin with OP INSERT
-			as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, si);
-			new_sbin_hash.sbin      = sbin;
+			as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+			new_sbin_hash.sbin      = &sbin[sbins_made];
 			as_list_foreach(old_list, as_sindex_compare_list_hash, &new_sbin_hash);
-			if (sbin->num_values) {
-				*found     += 1;
+			if (sbin[sbins_made].num_values) {
+				sbins_made++;
+			}
+			else {
+				as_sindex_sbin_free(&sbin[sbins_made]);
 			}
 
 			shash_destroy(old_sbin_hash.value_hash);
 			shash_destroy(new_sbin_hash.value_hash);
 		}
+		*found += sbins_made;
 		return AS_SINDEX_OK;
 	}
 
+	int ret = 0;
 	// Else add them separately to the sbins
-	as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, si);
-	if (as_sindex_add_asval_to_list_sindex(old_val, sbin) == AS_SINDEX_OK) {
-		if (sbin->num_values) {
-			*found     += 1;
-			sbin        = sbin + 1;
+	as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+	ret = as_sindex_add_asval_to_list_sindex(old_val, &sbin[sbins_made]);
+	if (!ret) {
+		if (sbin[sbins_made].num_values) {
+			sbins_made++;
 		}
+	}
+	if (ret || !sbin[sbins_made].num_values) {
+		as_sindex_sbin_free(&sbin[sbins_made]);
+	}
+	
+
+	as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);
+	ret = as_sindex_add_asval_to_list_sindex(new_val, &sbin[sbins_made]);
+	if (!ret) {	
+		if (sbin[sbins_made].num_values) {
+			sbins_made++;
+		}
+	}
+	if (ret || !sbin[sbins_made].num_values) {
+		as_sindex_sbin_free(&sbin[sbins_made]);
 	}
 
-	as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
-	if (as_sindex_add_asval_to_list_sindex(new_val, sbin) == AS_SINDEX_OK) {
-		if (sbin->num_values) {
-			*found += 1;	
-		}
-	}
+	*found += sbins_made;
 	return AS_SINDEX_OK;
 }
 
@@ -3577,6 +3680,7 @@ as_sindex_add_diff_asval_to_mapkeys_sindex(as_val * old_val, as_val * new_val, a
 		return AS_SINDEX_ERR;
 	}
 	as_sindex * si = sbin->si;
+	int sbins_made = 0;
 
 	// If both old val and new val have the same expected type
 	if (old_val && new_val) {
@@ -3598,45 +3702,60 @@ as_sindex_add_diff_asval_to_mapkeys_sindex(as_val * old_val, as_val * new_val, a
 	
 	//		Iterate through all the values in the old and check if it exist or not in the new hash
 	//		If it does not exist add it to the sbin with OP DELETE
-			as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
-			old_sbin_hash.sbin = sbin;
+			as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);
+			old_sbin_hash.sbin = &sbin[sbins_made];
 			as_map_foreach(new_map, as_sindex_compare_mapkeys_hash, &old_sbin_hash);
-			if (sbin->num_values) {
-				*found     += 1;
-				sbin        = sbin + 1;
+			if (sbin[sbins_made].num_values) {
+				sbins_made++;
+			}
+			else {
+				as_sindex_sbin_free(&sbin[sbins_made]);
 			}
 
 	//		Iterate through all the values in the old and check if it exist or not in the old hash 
 	//		If it does not exist add it to the sbin with OP INSERT
-			as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, si);
-			new_sbin_hash.sbin = sbin;
+			as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+			new_sbin_hash.sbin = &sbin[sbins_made];
 			as_map_foreach(old_map, as_sindex_compare_mapkeys_hash, &new_sbin_hash);
-			if (sbin->num_values) {
-				*found     += 1;
+			if (sbin[sbins_made].num_values) {
+				sbins_made++;
+			}
+			else {
+				as_sindex_sbin_free(&sbin[sbins_made]);
 			}
 
 			shash_destroy(old_sbin_hash.value_hash);
 			shash_destroy(new_sbin_hash.value_hash);
 		}
+		*found += sbins_made;
 		return AS_SINDEX_OK;
 	}
 
+	int ret = 0;
 	// Else add them separately to the sbins
-	sbin->op = AS_SINDEX_OP_DELETE;
-	if (as_sindex_add_asval_to_mapkeys_sindex(old_val, sbin) == AS_SINDEX_OK) {
-		if (sbin->num_values) {
-			*found     += 1;
-			sbin        = sbin + 1;
-			as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
+	as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+	ret = as_sindex_add_asval_to_mapkeys_sindex(old_val, &sbin[sbins_made]);
+	if (!ret) {
+		if (&sbin[sbins_made].num_values) {
+			sbins_made++;
 		}
 	}
-
-	if (as_sindex_add_asval_to_mapkeys_sindex(new_val, sbin) == AS_SINDEX_OK) {
-		if (sbin->num_values) {
-			*found += 1;	
-		}
+	if (ret || !&sbin[sbins_made].num_values) {
+		as_sindex_sbin_free(&sbin[sbins_made]);	
 	}
 
+	as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);
+	ret = as_sindex_add_asval_to_mapkeys_sindex(new_val, &sbin[sbins_made]);
+	if (!ret) {
+		if (&sbin[sbins_made].num_values) {
+			sbins_made++;
+		}
+	}
+	if (ret || !&sbin[sbins_made].num_values) {
+		as_sindex_sbin_free(&sbin[sbins_made]);
+	}
+
+	*found += sbins_made;
 	return AS_SINDEX_OK;
 }
 
@@ -3734,6 +3853,7 @@ as_sindex_add_diff_asval_to_mapvalues_sindex(as_val * old_val, as_val * new_val,
 		return AS_SINDEX_ERR;
 	}
 	as_sindex * si = sbin->si;
+	int sbins_made = 0;
 
 	// If both old val and new val have the same expected type
 	if (old_val && new_val) {
@@ -3755,44 +3875,54 @@ as_sindex_add_diff_asval_to_mapvalues_sindex(as_val * old_val, as_val * new_val,
 	
 	//		Iterate through all the values in the old and check if it exist or not in the new hash
 	//		If it does not exist add it to the sbin with OP DELETE
-			as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
-			old_sbin_hash.sbin = sbin;
+			as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);
+			old_sbin_hash.sbin = &sbin[sbins_made];
 			as_map_foreach(new_map, as_sindex_compare_mapvalues_hash, &old_sbin_hash);
-			if (sbin->num_values) {
-				*found     += 1;
-				sbin        = sbin + 1;
+			if (sbin[sbins_made].num_values) {
+				sbins_made++;
 			}
 
 	//		Iterate through all the values in the old and check if it exist or not in the old hash 
 	//		If it does not exist add it to the sbin with OP INSERT
-			as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, si);
-			new_sbin_hash.sbin = sbin;
+			as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+			new_sbin_hash.sbin = &sbin[sbins_made];
 			as_map_foreach(old_map, as_sindex_compare_mapvalues_hash, &new_sbin_hash);
-			if (sbin->num_values) {
-				*found     += 1;
+			if (sbin[sbins_made].num_values) {
+				sbins_made++;
 			}
 
 			shash_destroy(old_sbin_hash.value_hash);
 			shash_destroy(new_sbin_hash.value_hash);
 		}
+		*found += sbins_made;
 		return AS_SINDEX_OK;
 	}
 
+	int ret = 0;
 	// Else add them separately to the sbins
-	as_sindex_init_sbin(sbin, AS_SINDEX_OP_DELETE, type, si);
-	if (as_sindex_add_asval_to_mapvalues_sindex(old_val, sbin) == AS_SINDEX_OK) {
-		if (sbin->num_values) {
-			*found     += 1;
-			sbin        = sbin + 1;
+	as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_DELETE, type, si);
+	ret = as_sindex_add_asval_to_mapvalues_sindex(old_val, &sbin[sbins_made]);
+	if (!ret) {
+		if (&sbin[sbins_made].num_values) {
+			sbins_made++;
 		}
+	}
+	if (ret || !&sbin[sbins_made].num_values) {
+		as_sindex_sbin_free(&sbin[sbins_made]);	
 	}
 
-	as_sindex_init_sbin(sbin, AS_SINDEX_OP_INSERT, type, si);
-	if (as_sindex_add_asval_to_mapvalues_sindex(new_val, sbin) == AS_SINDEX_OK) {
-		if (sbin->num_values) {
-			*found += 1;	
+	as_sindex_init_sbin(&sbin[sbins_made], AS_SINDEX_OP_INSERT, type, si);
+	ret = as_sindex_add_asval_to_mapvalues_sindex(new_val, &sbin[sbins_made]);
+	if (!ret) {
+		if (&sbin[sbins_made].num_values) {
+			sbins_made++;
 		}
 	}
+	if (ret || !&sbin[sbins_made].num_values) {
+		as_sindex_sbin_free(&sbin[sbins_made]);
+	}
+
+	*found += sbins_made;
 	return AS_SINDEX_OK;
 }
 
@@ -3959,17 +4089,19 @@ as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, as_bin *b, as_si
 			ele = ele->next;
 			continue;
 		}
-		AS_SINDEX_RESERVE(si);   
 		as_sindex_init_sbin(&start_sbin[sindex_found], op,  as_sindex_pktype(si->imd), si);
 		uint64_t s_time = cf_getns();
 		sbins_in_si          = as_sindex_sbin_from_sindex(si, b, &start_sbin[sindex_found], &cdt_val);
-		if (sbins_in_si > 0) {
+		if (sbins_in_si == 1) {
 			sindex_found += sbins_in_si;
-			// AS_SINDEX_RELEASE will happen after sindex tree has been updated	
+			// sbin free will happen once sbin is updated in sindex tree
 			SINDEX_HIST_INSERT_DATA_POINT(si, si_prep_hist, s_time);
 		}
 		else {
-			AS_SINDEX_RELEASE(si);
+			as_sindex_sbin_free(&start_sbin[sindex_found]);
+			if (sbins_in_si) {
+				cf_warning(AS_SINDEX, "sbins found in si is neither 1 nor 0. It is %d", sbins_in_si);
+			}
 		}
 		ele                   = ele->next;
 	}
@@ -4055,37 +4187,36 @@ as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sindex_bin *start
 // ************************************************************************************************
 //                                      PUT RD IN SINDEX
 // Takes a record and tries to populate it in every sindex present in the namespace.
-int
+void
 as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd)
 {
-	as_sindex * sindex_arr[AS_SINDEX_MAX];
-	SINDEX_GRLOCK();
-	int ret = AS_SINDEX_OK;
 	int count = 0;
+	int valid = 0;
 
-	for (int i = 0; i < AS_SINDEX_MAX; i++) {
-		as_sindex *si = &ns->sindex[i];
-		if (!as_sindex_isactive(si)) {
-			continue;
+	while (count < AS_SINDEX_MAX && valid < ns->sindex_cnt) {
+		as_sindex *si = &ns->sindex[count];
+		if (!as_sindex_put_rd(si, rd)) {
+			valid++;
 		}
-		AS_SINDEX_RESERVE(si);
-		sindex_arr[count++] = si;
-		if (count == ns->sindex_cnt) {
-			break;
-		}
+		count++;
 	}
-	SINDEX_GUNLOCK();
-	for (int i = 0; i < count; i++) {
-		as_sindex *si = sindex_arr[i];
-		as_sindex_put_rd(si, rd);
-	}
-	
-	return ret;
 }
 
-int
+as_sindex_status
 as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 {
+	if (!si) {
+		cf_warning(AS_SINDEX, "SI is null in as_sindex_put_rd");
+		return AS_SINDEX_ERR;
+	}
+
+	// Proceed only if sindex is active
+	SINDEX_GRLOCK();
+	if (!as_sindex_isactive(si)) {
+		SINDEX_GUNLOCK();
+		return AS_SINDEX_ERR;
+	}
+
 	as_sindex_metadata *imd = si->imd;
 	// Validate Set name. Other function do this check while
 	// performing searching for simatch.
@@ -4097,38 +4228,51 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	SINDEX_RLOCK(&imd->slock);
 	if (!as_sindex__setname_match(imd, setname)) {
 		SINDEX_UNLOCK(&imd->slock);
-		goto Cleanup;
+		SINDEX_GRLOCK();
+		return AS_SINDEX_OK;
 	}
+
 	SINDEX_UNLOCK(&imd->slock);
+	SINDEX_GRLOCK();
 
 	// collect sbins
 	SINDEX_BINS_SETUP(sbins, 1);
-	SINDEX_GRLOCK();
 
 	int sbins_populated = 0;
 	for (int i = 0; i < imd->num_bins; i++) {
 		as_bin *b = as_bin_get(rd, imd->bnames[i]);
 		as_val * cdt_val = NULL;
+		int sbins_found  = 0;
+		
+		as_sindex_init_sbin(&sbins[sbins_populated], AS_SINDEX_OP_INSERT, 
+												as_sindex_pktype(si->imd), si);
+		
 		if (b) {
-			as_sindex_init_sbin(&sbins[sbins_populated], AS_SINDEX_OP_INSERT, as_sindex_pktype(si->imd), si);
-			sbins_populated += as_sindex_sbin_from_sindex(si, b, &sbins[sbins_populated], &cdt_val);
-			// Only one sbin should be created here.
+			sbins_found = as_sindex_sbin_from_sindex(si, b, &sbins[sbins_populated], &cdt_val);
 		}
-		// FREE as_val
+
+		if (sbins_found == 1) {
+			// sbin will freed after sindex update
+			sbins_populated += sbins_found;
+		}
+		else {	
+			as_sindex_sbin_free(&sbins[sbins_populated]);
+			if (sbins_found) {
+				cf_warning(AS_SINDEX, "Number of sbins found for 1 sindex is neither 1 nor 0. It is %d",
+								sbins_populated);	
+			}
+		}
+
 		if (cdt_val) {
 			as_val_destroy(cdt_val);
 		}
 	}
 
-	SINDEX_GUNLOCK();
-	if (sbins_populated == 1) {
+	if (sbins_populated) {
 		as_sindex_update_by_sbin(rd->ns, setname, sbins, sbins_populated, &rd->keyd);	
 		as_sindex_sbin_freeall(sbins, sbins_populated);
-		return AS_SINDEX_OK;
 	}
 
-Cleanup:
-	AS_SINDEX_RELEASE(si);
 	return AS_SINDEX_OK;
 }
 //                                    END - PUT RD IN SINDEX
