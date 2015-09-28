@@ -404,14 +404,18 @@ void as_rw_set_stat_counters(bool is_read, int rv, as_transaction *tr) {
 		} else
 			cf_atomic_int_incr(&g_config.stat_read_errs_other);
 	} else {
-		if (rv == 0)
-			cf_atomic_int_incr(&g_config.stat_write_success);
-		else {
-			cf_atomic_int_incr(&g_config.stat_write_errs);
-			if (result_code == AS_PROTO_RESULT_FAIL_NOTFOUND)
-				cf_atomic_int_incr(&g_config.stat_write_errs_notfound);
-			else
-				cf_atomic_int_incr(&g_config.stat_write_errs_other);
+		bool is_delete = (tr && tr->msgp &&
+				(tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0);
+		if (! is_delete) {
+			if (rv == 0)
+				cf_atomic_int_incr(&g_config.stat_write_success);
+			else {
+				cf_atomic_int_incr(&g_config.stat_write_errs);
+				if (result_code == AS_PROTO_RESULT_FAIL_NOTFOUND)
+					cf_atomic_int_incr(&g_config.stat_write_errs_notfound);
+				else
+					cf_atomic_int_incr(&g_config.stat_write_errs_other);
+			}
 		}
 	}
 }
@@ -842,8 +846,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			as_rw_set_stat_counters(true, 0, tr);
 			*delete = true;
 			return (0);
-		} else {
-			cf_atomic_int_incr(&g_config.write_master);
 		}
 
 		udf_optype op = UDF_OPTYPE_NONE;
@@ -860,6 +862,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 				cf_warning(AS_RW, "write_delete_local() completed with AS_MSG_INFO2_DELETE not set");
 			}
 		} else {
+			cf_atomic_int_incr(&g_config.write_master);
+
 			// If the XDR is enabled and if the user configured to stop the writes if there is no XDR
 			// and if the xdr digestpipe is not opened fail the writes with appropriate return value
 			// We cannot do this check inside write_local() because that function is used for replica
@@ -895,6 +899,10 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 					if (UDF_OP_IS_DELETE(op)) {
 						tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
 						is_delete = true;
+						// Counteract earlier increments -- don't count UDF
+						// deletes as writes.
+						cf_atomic_int_decr(&g_config.write_master);
+						cf_atomic_int_decr(&g_config.stat_write_reqs);
 					} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
 						// update stats to move from normal to uDF requests
 						as_rw_update_stat(wr);
@@ -1037,8 +1045,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 			WR_TRACK_INFO(wr, "internal_rw_start: Short Circuit for Single Replica Writes");
 			rw_complete(wr, tr, NULL);
-			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			as_rw_set_stat_counters(false, 0, tr);
+			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			*delete = true;
 			cf_detail(AS_RW, "FINISH UDF_%s %s:%d",
 					UDF_OP_IS_LDT(op) ? "LDT" : "RECORD", __FILE__, __LINE__);
@@ -1096,8 +1104,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 		// if fire and forget, we're done, get out
 		if (wr->replication_fire_and_forget) {
-			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			as_rw_set_stat_counters(wr->is_read, 0, tr);
+			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			*delete = true;
 			return (0);
 		} else {
@@ -1373,7 +1381,7 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
 			cf_atomic_int_incr(&g_config.stat_read_reqs_xdr);
 		}
-	} else {
+	} else if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
 		cf_atomic_int_incr(&g_config.stat_write_reqs);
 		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
 			cf_atomic_int_incr(&g_config.stat_write_reqs_xdr);
@@ -5164,7 +5172,7 @@ write_process_op(as_transaction *tr, cl_msg *msgp, cf_node node, as_generation g
 }
 
 int
-write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_respond)
+write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_respond, ldt_prole_info *linfo)
 {
 	uint32_t result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 	bool local_reserve = false;
@@ -5264,14 +5272,15 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 
 	as_namespace *ns = rsvp->ns;
 
-	ldt_prole_info linfo;
-
-	if ((info & RW_INFO_LDT) && as_rw_get_ldt_info(&linfo, m, rsvp)) {
-		cf_warning(AS_LDT, "Could not find ldt info at prole");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+	if (info & RW_INFO_LDT) {
+		memset(linfo, 1, sizeof(ldt_prole_info));
+		if  (as_rw_get_ldt_info(linfo, m, rsvp)) {
+			cf_warning(AS_LDT, "Could not find ldt info at prole");
+			return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
 	}
 
-	if (as_ldt_check_and_get_prole_version(keyd, rsvp, &linfo, info, NULL, false, __FILE__, __LINE__)) {
+	if (as_ldt_check_and_get_prole_version(keyd, rsvp, linfo, info, NULL, false, __FILE__, __LINE__)) {
 		// If parent cannot be due to incoming migration it is ok
 		// continue and allow subrecords to be replicated
 		result_code = AS_PROTO_RESULT_OK;
@@ -5279,7 +5288,7 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 	}
 
 	// Set the version in subrec digest if need be.
-	as_ldt_set_prole_subrec_version(keyd, rsvp, &linfo, info);
+	as_ldt_set_prole_subrec_version(keyd, rsvp, linfo, info);
 
 	if (info & RW_INFO_UDF_WRITE) {
 		cf_atomic_int_incr(&g_config.udf_replica_writes);
@@ -5320,7 +5329,7 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		result_code = write_process_op(&tr, msgp, node, generation);
 	} else {
 		rv = write_local_pickled(keyd, rsvp, pickled_buf, pickled_sz,
-				&rec_props, generation, void_time, node, info, &linfo);
+				&rec_props, generation, void_time, node, info, linfo);
 		if (rv == 0) {
 			result_code = AS_PROTO_RESULT_OK;
 		} else {
@@ -6266,6 +6275,8 @@ rw_multi_process(cf_node node, msg *m)
 				rsv.pid, rsv.state  );
 		goto Out;
 	}
+	ldt_prole_info linfo;
+	memset(&linfo, 1, sizeof(ldt_prole_info));
 
 	int offset = 0;
 	int count = 0;
@@ -6308,7 +6319,7 @@ rw_multi_process(cf_node node, msg *m)
 			cf_detail(AS_RW, "MULTI_OP: Received Sindex multi op");
 		} else {
 			cf_detail(AS_RW, "MULTI_OP: Received LDT multi op");
-			ret = write_process_new(node, op_msg, &rsv, false);
+			ret = write_process_new(node, op_msg, &rsv, false, &linfo);
 		}
 		if (ret) {
 			ret = -3;
