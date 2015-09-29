@@ -88,7 +88,7 @@ AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
 AS_LIBRARIES += $(LIBRARY_DIR)/libxdrconfig.a
 ifeq ($(USE_XDR),1)
 	AS_LIBRARIES += $(LIBRARY_DIR)/libxdr.a
-	AS_LIBRARIES += $(CLIENTREPO)/target/$(PLATFORM)/lib/libaerospike.a
+	AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
 endif
 
 ifeq ($(DOPROFILE),1)
