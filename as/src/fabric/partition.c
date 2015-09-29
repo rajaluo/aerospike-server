@@ -1182,7 +1182,6 @@ as_partition_reserve_replica_list(as_namespace *ns, as_partition_id pid, as_part
 		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
 
 	return ret;
-
 }
 /* as_partition_reserve_write
  * Obtain a write reservation on a partition, or get the address of a
@@ -3575,6 +3574,7 @@ as_partition_balance()
 					else if (cf_contains64(dupl_nodes, n_dupl, self) && (is_sync[0] == false)) {
 						cf_debug(AS_PARTITION, "{%s:%d} Replica will delay migrate until master %"PRIx64" is sync", ns->name, j, HV(j, 0));
 						p->waiting_for_master = true;
+						ns_pending_migrate_tx_later++;
 					}
 
 					/*
@@ -3584,7 +3584,6 @@ as_partition_balance()
 					if (cf_contains64(dupl_nodes, n_dupl, self) && (my_index_in_hvlist < p->p_repl_factor)) {
 						cf_debug(AS_PARTITION, "{%s:%d} Partition will reject writes during merge", ns->name, j);
 						p->reject_writes = true;
-						ns_pending_migrate_tx_later++;
 					}
 
 					/*
