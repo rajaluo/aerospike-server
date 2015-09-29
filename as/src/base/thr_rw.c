@@ -404,14 +404,18 @@ void as_rw_set_stat_counters(bool is_read, int rv, as_transaction *tr) {
 		} else
 			cf_atomic_int_incr(&g_config.stat_read_errs_other);
 	} else {
-		if (rv == 0)
-			cf_atomic_int_incr(&g_config.stat_write_success);
-		else {
-			cf_atomic_int_incr(&g_config.stat_write_errs);
-			if (result_code == AS_PROTO_RESULT_FAIL_NOTFOUND)
-				cf_atomic_int_incr(&g_config.stat_write_errs_notfound);
-			else
-				cf_atomic_int_incr(&g_config.stat_write_errs_other);
+		bool is_delete = (tr && tr->msgp &&
+				(tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0);
+		if (! is_delete) {
+			if (rv == 0)
+				cf_atomic_int_incr(&g_config.stat_write_success);
+			else {
+				cf_atomic_int_incr(&g_config.stat_write_errs);
+				if (result_code == AS_PROTO_RESULT_FAIL_NOTFOUND)
+					cf_atomic_int_incr(&g_config.stat_write_errs_notfound);
+				else
+					cf_atomic_int_incr(&g_config.stat_write_errs_other);
+			}
 		}
 	}
 }
@@ -493,26 +497,26 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 	msg_set_uint32(m, RW_FIELD_NS_ID, tr->rsv.ns->id);
 	msg_set_uint32(m, RW_FIELD_OP, op);
 
-	bool is_ldt_sub;
-	bool is_ldt_parent;
-
-	as_ldt_get_property(p_pickled_rec_props, &is_ldt_parent, &is_ldt_sub);
-
 	if (op == RW_OP_WRITE) {
 
 		msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
 		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
 
-		rw_msg_setup_infobits(m, tr, has_udf, is_ldt_sub, is_ldt_parent);
-
 		// Send this along with parent packet as well. This is required
 		// in case the LDT parent replication is done without MULTI_OP.
 		// Example touch of the some other bin in the LDT parent
-		if (!is_ldt_sub) {
+		if (!is_subrec) {
 			rw_msg_setup_ldt_fields(m, tr, keyd);
 		}
 
 		if (*p_pickled_buf) {
+
+			// Use info in property map for writes
+			bool is_ldt_sub;
+			bool is_ldt_parent;
+			as_ldt_get_property(p_pickled_rec_props, &is_ldt_parent, &is_ldt_sub);
+			rw_msg_setup_infobits(m, tr, has_udf, is_ldt_sub, is_ldt_parent);
+
 			msg_set_unset(m, RW_FIELD_AS_MSG);
 			msg_set_buf(m, RW_FIELD_RECORD, (void *) *p_pickled_buf, pickled_sz,
 					MSG_SET_HANDOFF_MALLOC);
@@ -524,15 +528,18 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 				as_rec_props_clear(p_pickled_rec_props);
 			}
 		} else { // deletes come here
+			cf_detail_digest(AS_RW, keyd, "Send delete to replica ");
+			msg_set_buf(m, RW_FIELD_AS_MSG, (void *) tr->msgp,
+					as_proto_size_get(&tr->msgp->proto), MSG_SET_COPY);
+			msg_set_unset(m, RW_FIELD_RECORD);
+
+			rw_msg_setup_infobits(m, tr, has_udf, is_subrec, false);
+
 			if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
 				uint32_t info = 0;
 				msg_get_uint32(m, RW_FIELD_INFO, &info);
 				cf_crash(AS_RW, "sending delete but DELETE msg flag not set - info 0x%x", info);
 			}
-			cf_detail_digest(AS_RW, keyd, "Send delete to replica ");
-			msg_set_buf(m, RW_FIELD_AS_MSG, (void *) tr->msgp,
-					as_proto_size_get(&tr->msgp->proto), MSG_SET_COPY);
-			msg_set_unset(m, RW_FIELD_RECORD);
 		}
 	} else if (op == RW_OP_DUP) {
 		msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP);
@@ -839,8 +846,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			as_rw_set_stat_counters(true, 0, tr);
 			*delete = true;
 			return (0);
-		} else {
-			cf_atomic_int_incr(&g_config.write_master);
 		}
 
 		udf_optype op = UDF_OPTYPE_NONE;
@@ -851,7 +856,14 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			cf_detail(AS_RW,
 					"write_delete_local for digest returns %d, %d digest %"PRIx64"",
 					rv, tr->result_code, *(uint64_t*)&tr->keyd);
+
+			// Temporary debugging clause...
+			if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
+				cf_warning(AS_RW, "write_delete_local() completed with AS_MSG_INFO2_DELETE not set");
+			}
 		} else {
+			cf_atomic_int_incr(&g_config.write_master);
+
 			// If the XDR is enabled and if the user configured to stop the writes if there is no XDR
 			// and if the xdr digestpipe is not opened fail the writes with appropriate return value
 			// We cannot do this check inside write_local() because that function is used for replica
@@ -878,6 +890,10 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 					if (UDF_OP_IS_DELETE(op)) {
 						tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
 						is_delete = true;
+						// Counteract earlier increments -- don't count UDF
+						// deletes as writes.
+						cf_atomic_int_decr(&g_config.write_master);
+						cf_atomic_int_decr(&g_config.stat_write_reqs);
 					} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
 						// update stats to move from normal to uDF requests
 						as_rw_update_stat(wr);
@@ -893,6 +909,11 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						as_rw_set_stat_counters(true, rv, tr);
 						*delete = true;
 						return 0;
+					} else {
+						// Temporary debugging clause...
+						if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->pickled_buf && ! UDF_OP_IS_LDT(op)) {
+							cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
+						}
 					}
 				} else {
 					wr->has_udf = false;
@@ -907,6 +928,11 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 							&wr->pickled_sz, &wr->pickled_rec_props,
 							&wr->response_db);
 					WR_TRACK_INFO(wr, "internal_rw_start: write local done ");
+
+					// Temporary debugging clause...
+					if (rv == 0 && ! wr->pickled_buf) {
+						cf_warning(AS_RW, "write_local() completed with no pickled buffer");
+					}
 				}
 				if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
 					cf_detail(AS_RW,
@@ -998,8 +1024,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 			WR_TRACK_INFO(wr, "internal_rw_start: Short Circuit for Single Replica Writes");
 			rw_complete(wr, tr, NULL);
-			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			as_rw_set_stat_counters(false, 0, tr);
+			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			*delete = true;
 			cf_detail(AS_RW, "FINISH UDF_%s %s:%d",
 					UDF_OP_IS_LDT(op) ? "LDT" : "RECORD", __FILE__, __LINE__);
@@ -1057,8 +1083,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 		// if fire and forget, we're done, get out
 		if (wr->replication_fire_and_forget) {
-			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			as_rw_set_stat_counters(wr->is_read, 0, tr);
+			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			*delete = true;
 			return (0);
 		} else {
@@ -1334,7 +1360,7 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
 			cf_atomic_int_incr(&g_config.stat_read_reqs_xdr);
 		}
-	} else {
+	} else if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
 		cf_atomic_int_incr(&g_config.stat_write_reqs);
 		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
 			cf_atomic_int_incr(&g_config.stat_write_reqs_xdr);
@@ -3292,12 +3318,14 @@ int write_local_preprocessing(as_transaction *tr, write_local_generation *wlg,
 	if (tr->rsv.reject_writes) {
 		cf_debug(AS_RW, "{%s:%d} write_local: partition rejects writes - writes will flow from master. digest %"PRIx64"",
 				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
-		return 0;
+		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		return -1;
 	}
 	else if (AS_PARTITION_STATE_DESYNC == tr->rsv.state) {
 		cf_debug(AS_RW, "{%s:%d} write_local: partition is desync - writes will flow from master. digest %"PRIx64"",
 				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
-		return 0;
+		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		return -1;
 	}
 
 	*is_done = false;
@@ -3754,7 +3782,7 @@ int
 write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 		as_msg_op **ops, as_bin *response_bins, uint32_t *p_n_response_bins,
 		as_bin *result_bins, uint32_t *p_n_result_bins,
-		cf_dyn_buf *particles_db,
+		cf_ll_buf *particles_llb,
 		as_bin *cleanup_bins, uint32_t *p_n_cleanup_bins)
 {
 	// Shortcut pointers.
@@ -3807,7 +3835,7 @@ write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 				}
 				else {
-					if ((result = as_bin_particle_stack_from_client(b, particles_db, op)) < 0) {
+					if ((result = as_bin_particle_stack_from_client(b, particles_llb, op)) < 0) {
 						cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_bin_particle_stack_from_client() ", ns->name);
 						return -result;
 					}
@@ -3838,7 +3866,7 @@ write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 				append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 			}
 			else {
-				if ((result = as_bin_particle_stack_modify_from_client(b, particles_db, op)) < 0) {
+				if ((result = as_bin_particle_stack_modify_from_client(b, particles_llb, op)) < 0) {
 					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_bin_particle_stack_modify_from_client() ", ns->name);
 					return -result;
 				}
@@ -3898,7 +3926,7 @@ write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 				append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 			}
 			else {
-				if ((result = as_bin_cdt_stack_modify_from_client(b, particles_db, op, &result_bin)) < 0) {
+				if ((result = as_bin_cdt_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
 					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_bin_cdt_alloc_modify_from_client() ", ns->name);
 					return -result;
 				}
@@ -3951,7 +3979,7 @@ write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 
 int
 write_local_bin_ops(as_transaction *tr, as_storage_rd *rd,
-		cf_dyn_buf *particles_db,
+		cf_ll_buf *particles_llb,
 		as_bin *cleanup_bins, uint32_t *p_n_cleanup_bins, cf_dyn_buf *db)
 {
 	// Shortcut pointers.
@@ -3969,7 +3997,7 @@ write_local_bin_ops(as_transaction *tr, as_storage_rd *rd,
 
 	int result = write_local_bin_ops_loop(tr, rd,
 			ops, response_bins, &n_response_bins, result_bins, &n_result_bins,
-			particles_db, cleanup_bins, p_n_cleanup_bins);
+			particles_llb, cleanup_bins, p_n_cleanup_bins);
 
 	if (result != 0) {
 		destroy_stack_bins(result_bins, n_result_bins);
@@ -4357,10 +4385,10 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 	// the new record bin to write.
 	//
 
-	cf_dyn_buf_define_size(particles_db, STACK_PARTICLES_SIZE);
+	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
 
-	if ((result = write_local_bin_ops(tr, rd, &particles_db, NULL, NULL, db)) != 0) {
-		cf_dyn_buf_free(&particles_db);
+	if ((result = write_local_bin_ops(tr, rd, &particles_llb, NULL, NULL, db)) != 0) {
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return result;
 	}
@@ -4370,7 +4398,7 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 
 	// Pickle before writing - bins may disappear on as_storage_record_close().
 	if (! pickle_all(rd, pickle)) {
-		cf_dyn_buf_free(&particles_db);
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
@@ -4388,7 +4416,7 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 	if (write_result < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
 		write_local_pickle_unwind(pickle);
-		cf_dyn_buf_free(&particles_db);
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return -write_result;
 	}
@@ -4407,7 +4435,7 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 	}
 
 	*is_delete = ! as_bin_inuse_has(rd);
-	cf_dyn_buf_free(&particles_db);
+	cf_ll_buf_free(&particles_llb);
 
 	return 0;
 }
@@ -4485,10 +4513,10 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 	// the new record bins to write.
 	//
 
-	cf_dyn_buf_define_size(particles_db, STACK_PARTICLES_SIZE);
+	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
 
-	if ((result = write_local_bin_ops(tr, rd, &particles_db, NULL, NULL, db)) != 0) {
-		cf_dyn_buf_free(&particles_db);
+	if ((result = write_local_bin_ops(tr, rd, &particles_llb, NULL, NULL, db)) != 0) {
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return result;
 	}
@@ -4503,7 +4531,7 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 
 	// Pickle before writing - bins may disappear on as_storage_record_close().
 	if (! pickle_all(rd, pickle)) {
-		cf_dyn_buf_free(&particles_db);
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
@@ -4519,7 +4547,7 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 	if ((result = as_storage_record_close(r, rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
 		write_local_pickle_unwind(pickle);
-		cf_dyn_buf_free(&particles_db);
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return -result;
 	}
@@ -4548,7 +4576,7 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 	}
 
 	*is_delete = ! as_bin_inuse_has(rd);
-	cf_dyn_buf_free(&particles_db);
+	cf_ll_buf_free(&particles_llb);
 
 	return 0;
 }
@@ -5123,7 +5151,7 @@ write_process_op(as_transaction *tr, cl_msg *msgp, cf_node node, as_generation g
 }
 
 int
-write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_respond)
+write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_respond, ldt_prole_info *linfo)
 {
 	uint32_t result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 	bool local_reserve = false;
@@ -5223,14 +5251,15 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 
 	as_namespace *ns = rsvp->ns;
 
-	ldt_prole_info linfo;
-
-	if ((info & RW_INFO_LDT) && as_rw_get_ldt_info(&linfo, m, rsvp)) {
-		cf_warning(AS_LDT, "Could not find ldt info at prole");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+	if (info & RW_INFO_LDT) {
+		memset(linfo, 1, sizeof(ldt_prole_info));
+		if  (as_rw_get_ldt_info(linfo, m, rsvp)) {
+			cf_warning(AS_LDT, "Could not find ldt info at prole");
+			return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
 	}
 
-	if (as_ldt_check_and_get_prole_version(keyd, rsvp, &linfo, info, NULL, false, __FILE__, __LINE__)) {
+	if (as_ldt_check_and_get_prole_version(keyd, rsvp, linfo, info, NULL, false, __FILE__, __LINE__)) {
 		// If parent cannot be due to incoming migration it is ok
 		// continue and allow subrecords to be replicated
 		result_code = AS_PROTO_RESULT_OK;
@@ -5238,7 +5267,7 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 	}
 
 	// Set the version in subrec digest if need be.
-	as_ldt_set_prole_subrec_version(keyd, rsvp, &linfo, info);
+	as_ldt_set_prole_subrec_version(keyd, rsvp, linfo, info);
 
 	if (info & RW_INFO_UDF_WRITE) {
 		cf_atomic_int_incr(&g_config.udf_replica_writes);
@@ -5279,7 +5308,7 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		result_code = write_process_op(&tr, msgp, node, generation);
 	} else {
 		rv = write_local_pickled(keyd, rsvp, pickled_buf, pickled_sz,
-				&rec_props, generation, void_time, node, info, &linfo);
+				&rec_props, generation, void_time, node, info, linfo);
 		if (rv == 0) {
 			result_code = AS_PROTO_RESULT_OK;
 		} else {
@@ -6225,6 +6254,8 @@ rw_multi_process(cf_node node, msg *m)
 				rsv.pid, rsv.state  );
 		goto Out;
 	}
+	ldt_prole_info linfo;
+	memset(&linfo, 1, sizeof(ldt_prole_info));
 
 	int offset = 0;
 	int count = 0;
@@ -6267,7 +6298,7 @@ rw_multi_process(cf_node node, msg *m)
 			cf_detail(AS_RW, "MULTI_OP: Received Sindex multi op");
 		} else {
 			cf_detail(AS_RW, "MULTI_OP: Received LDT multi op");
-			ret = write_process_new(node, op_msg, &rsv, false);
+			ret = write_process_new(node, op_msg, &rsv, false, &linfo);
 		}
 		if (ret) {
 			ret = -3;

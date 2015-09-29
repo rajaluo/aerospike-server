@@ -102,8 +102,6 @@ typedef int (*as_info_get_tree_fn) (char *name, char *subtree, cf_dyn_buf *db);
 typedef int (*as_info_get_value_fn) (char *name, cf_dyn_buf *db);
 typedef int (*as_info_command_fn) (char *name, char *parameters, cf_dyn_buf *db);
 
-void as_query_set_job_tracking(bool);
-
 // Sets a static value - set to 0 to remove a previous value.
 int as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool def);
 int as_info_set(const char *name, const char *value, bool def);
@@ -3342,7 +3340,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			as_set * p_set = as_namespace_init_set(ns, context);
 			cf_debug(AS_INFO, "set name is %s\n", p_set->name);
 			context_len = sizeof(context);
-			if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len)) {
+			if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len) ||
+					0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
 				// TODO - make sure context is null-terminated.
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-enable-xdr of ns %s set %s to %s", ns->name, p_set->name, context);
@@ -3360,7 +3359,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					goto Error;
 				}
 			}
-			else if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len)) {
+			else if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len) ||
+					0 == as_info_parameter_get(params, "disable-eviction", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-disable-eviction of ns %s set %s to %s", ns->name, p_set->name, context);
 					DISABLE_SET_EVICTION(p_set, true);
@@ -3373,7 +3373,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					goto Error;
 				}
 			}
-			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len)) {
+			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len) ||
+					0 == as_info_parameter_get(params, "delete", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-delete of ns %s set %s to %s", ns->name, p_set->name, context);
 					SET_DELETED_ON(p_set);
@@ -5610,29 +5611,31 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 // This dynamic function reduces the info_node_info hash and builds up the string of services
 //
 
+// Boolean flag to control printing a semicolon between service entries.
+static bool g_printed_a_service = false;
 
 int
 info_get_services_reduce_fn(void *key, void *data, void *udata)
 {
-
 	cf_dyn_buf *db = (cf_dyn_buf *) udata;
 	info_node_info *infop = (info_node_info *) data;
 
 	if (infop->service_addr) {
+		if (g_printed_a_service) {
+			cf_dyn_buf_append_char(db, ';');
+		}
 		cf_dyn_buf_append_string(db, infop->service_addr);
-		cf_dyn_buf_append_char(db, ';');
+		g_printed_a_service = true;
 	}
+
 	return(0);
 }
-
-
 
 int
 info_get_services(char *name, cf_dyn_buf *db)
 {
+	g_printed_a_service = false;
 	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) db);
-
-	cf_dyn_buf_chomp(db);
 
 	return(0);
 }
@@ -5640,10 +5643,28 @@ info_get_services(char *name, cf_dyn_buf *db)
 int
 info_get_services_alumni(char *name, cf_dyn_buf *db)
 {
-
+	g_printed_a_service = false;
 	shash_reduce(g_info_node_info_history_hash, info_get_services_reduce_fn, (void *) db);
 
-	cf_dyn_buf_chomp(db);
+	return(0);
+}
+
+//
+// This dynamic function removes nodes from g_info_node_info_history_hash that
+// aren't present in g_info_node_info_hash.
+//
+int
+history_purge_reduce_fn(void *key, void *data, void *udata)
+{
+	return SHASH_OK == shash_get(g_info_node_info_hash, key, NULL) ? SHASH_OK : SHASH_REDUCE_DELETE;
+}
+
+int
+info_services_alumni_reset(char *name, cf_dyn_buf *db)
+{
+	shash_reduce_delete(g_info_node_info_history_hash, history_purge_reduce_fn, NULL);
+	cf_info(AS_INFO, "services alumni list reset");
+	cf_dyn_buf_append_string(db, "ok");
 
 	return(0);
 }
@@ -6913,9 +6934,9 @@ as_info_init()
 				"dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-smd;"
 				"dump-wb;dump-wb-summary;dump-wr;dun;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
-				"logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;"
-				"node;service;services;services-alumni;set-config;set-log;sets;set-sl;"
-				"show-devices;sindex;sindex-create;sindex-delete;"
+				"logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
+				"service;services;services-alumni;services-alumni-reset;set-config;"
+				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
 				"smd;snub;statistics;status;tip;tip-clear;undun;version;"
 				"xdr-min-lastshipinfo",
@@ -6946,6 +6967,7 @@ as_info_init()
 	                                                                  // to listen on multiple interfaces (typically not advised).
 	as_info_set_dynamic("services",info_get_services, true);          // List of addresses of neighbor cluster nodes to advertise for Application to connect.
 	as_info_set_dynamic("services-alumni",info_get_services_alumni, true); // All neighbor addresses (services) this server has ever know about.
+	as_info_set_dynamic("services-alumni-reset",info_services_alumni_reset, false); // Reset the services alumni to equal services
 	as_info_set_dynamic("sets", info_get_sets, false);                // Returns set statistics for all or a particular set.
 	as_info_set_dynamic("statistics", info_get_stats, true);          // Returns system health and usage stats for this server.
 
