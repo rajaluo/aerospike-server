@@ -18,6 +18,7 @@ XDR_CONFIG_LIBRARY = $(LIBRARY_DIR)/libxdrconfig.a
 
 XDR_ALL_OBJECTS += $(XDR_CONFIG_OBJECTS)
 
+INCLUDES += -I$(AS)/include
 INCLUDES += -I$(CF)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += $(XDR_INCLUDES)
