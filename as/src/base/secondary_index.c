@@ -1925,7 +1925,7 @@ as_sindex_boot_populateall()
 		}
 
 		// If FAST START
-		// OR (Data not in memory AND load data at startup)
+		// OR (Data not in memory AND COLD START)
 		if (!ns->cold_start
 			|| (!ns->storage_data_in_memory)) {
 			// reserve all sindexes
@@ -1951,7 +1951,7 @@ as_sindex_boot_populateall()
 		}
 
 		// If FAST START
-		// OR (Data not in memory AND load data at startup)
+		// OR (Data not in memory AND COLD START)
 		if (!ns->cold_start || (!ns->storage_data_in_memory)) {
 			as_sindex_populator_release_all(ns);
 		}
@@ -4228,12 +4228,11 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	SINDEX_RLOCK(&imd->slock);
 	if (!as_sindex__setname_match(imd, setname)) {
 		SINDEX_UNLOCK(&imd->slock);
-		SINDEX_GRLOCK();
+		SINDEX_GUNLOCK();
 		return AS_SINDEX_OK;
 	}
 
 	SINDEX_UNLOCK(&imd->slock);
-	SINDEX_GRLOCK();
 
 	// collect sbins
 	SINDEX_BINS_SETUP(sbins, 1);
@@ -4241,15 +4240,17 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	int sbins_populated = 0;
 	for (int i = 0; i < imd->num_bins; i++) {
 		as_bin *b = as_bin_get(rd, imd->bnames[i]);
+		if (!b) {
+			SINDEX_GUNLOCK();
+			return AS_SINDEX_OK;
+		}
+
 		as_val * cdt_val = NULL;
 		int sbins_found  = 0;
-		
+
 		as_sindex_init_sbin(&sbins[sbins_populated], AS_SINDEX_OP_INSERT, 
 												as_sindex_pktype(si->imd), si);
-		
-		if (b) {
-			sbins_found = as_sindex_sbin_from_sindex(si, b, &sbins[sbins_populated], &cdt_val);
-		}
+		sbins_found = as_sindex_sbin_from_sindex(si, b, &sbins[sbins_populated], &cdt_val);
 
 		if (sbins_found == 1) {
 			// sbin will freed after sindex update
@@ -4267,6 +4268,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 			as_val_destroy(cdt_val);
 		}
 	}
+	SINDEX_GUNLOCK();
 
 	if (sbins_populated) {
 		as_sindex_update_by_sbin(rd->ns, setname, sbins, sbins_populated, &rd->keyd);	

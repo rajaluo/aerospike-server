@@ -149,7 +149,7 @@ as_sindex__populate_fn(void *param)
 	while(1) {
 		as_sindex *si;
 		cf_queue_pop(g_sindex_populate_q, &si, CF_QUEUE_FOREVER);
-		// should check flag under a lock
+		// TODO should check flag under a lock
 		// conflict with as_sindex_repair
 		if (si->flag & AS_SINDEX_FLAG_POPULATING) {
 			// Earlier job to populate index is still going on, push it back
