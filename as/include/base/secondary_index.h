@@ -73,12 +73,12 @@
  */
 // **************************************************************************************************
 typedef enum {
+	AS_SINDEX_ERR_INAME_MAXLEN     = -17,
 	AS_SINDEX_ERR_MAXCOUNT         = -16,
 	AS_SINDEX_ERR_SET_MISMATCH     = -15,
 	AS_SINDEX_ERR_UNKNOWN_KEYTYPE  = -14,
 	AS_SINDEX_ERR_BIN_NOTFOUND     = -13,
 	AS_SINDEX_ERR_TYPE_MISMATCH    = -11,
-	
 
 	// Needed when attemping index create
 	AS_SINDEX_ERR_FOUND            = -6,
@@ -477,7 +477,6 @@ extern  int as_sindex_init(as_namespace *ns);
  *
  * Do not use any "sindex" functions after calling this function, so free your indexes beforehand.
  */
-extern void as_sindex_shutdown(as_namespace *ns);
 extern int  as_sindex_reinit(char *name, char *params, cf_dyn_buf *db);
 // **************************************************************************************************
 
@@ -518,8 +517,8 @@ extern int  as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sinde
  * DMLs USING RECORDS
  */
 // **************************************************************************************************
-extern int as_sindex_put_rd(as_sindex *si, as_storage_rd *rd);
-extern int as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd);
+int  as_sindex_put_rd(as_sindex *si, as_storage_rd *rd);
+void as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd);
 // **************************************************************************************************
 
 
