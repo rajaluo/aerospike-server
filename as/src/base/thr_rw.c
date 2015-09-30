@@ -245,8 +245,8 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	tr->preprocessed = true;
 	tr->flag = 0;
 
-	tr->generation = 0;
-	tr->void_time = 0;
+	tr->generation = wr->generation;
+	tr->void_time = wr->void_time;
 	tr->microbenchmark_is_resolve = false;
 
 	if (wr->shipped_op)
@@ -944,9 +944,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			} // end, no XDR problems
 		} // end, else this is a write.
 
-		wr->generation = tr->generation;
-		wr->void_time = tr->void_time;
-
 		// from this function: -2 means retry, -1 means forever - like, gen mismatch or similar
 		if (rv != 0) {
 			if ((rv == -2) && (tr->proto_fd_h == 0) && (tr->proxy_msg == 0)) {
@@ -1108,6 +1105,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	wr->proxy_node = tr->proxy_node;
 	wr->proxy_msg  = tr->proxy_msg;
 	wr->shipped_op = (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) ? true : false;
+	wr->generation = tr->generation;
+	wr->void_time = tr->void_time;
 
 	UREQ_DATA_COPY(&wr->udata, &tr->udata);
 
@@ -1741,6 +1740,9 @@ finish_rw_process_ack(write_request *wr, uint32_t result_code, bool is_repl_writ
 		if (1 == cf_atomic32_incr(&wr->dupl_trans_complete)) {
 			return finish_rw_process_dup_ack(wr);
 		}
+		else {
+			cf_warning(AS_RW, "extra dupl response - should have been handled earlier");
+		}
 	}
 	else if (1 == cf_atomic32_incr(&wr->trans_complete)) {
 		return finish_rw_process_prole_ack(wr, result_code);
@@ -1915,6 +1917,12 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 
 	pthread_mutex_lock(&wr->lock);
 
+	if (wr->dupl_trans_complete != 0 && ! is_write) {
+		cf_debug(AS_RW, "rw process ack: ignoring extra dupl response after dupl phase is done");
+		pthread_mutex_unlock(&wr->lock);
+		goto Out;
+	}
+
 	// 2. Now check to see if all are complete. If not wait for all messages
 	// to arrive
 	uint32_t node_id;
@@ -1931,7 +1939,7 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 				if (is_write == false) { // duplicate-phase messages are arriving
 					wr->dup_result_code[node_id] = result_code;
 					if (wr->dup_msg[node_id] != 0) {
-						cf_debug(AS_RW,
+						cf_warning(AS_RW,
 								"{%s:%d} dup process ack: received duplicate response from node %"PRIx64"",
 								wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *)(&wr->keyd));
 					} else {
@@ -1942,16 +1950,17 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 								wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *)(&wr->keyd));
 					}
 				}
-			} else
+			} else {
 				cf_debug(AS_RW,
 						"{%s:%d} write process ack: Ignoring duplicate response for read result code %d",
 						wr->rsv.ns->name, wr->rsv.pid, result_code);
+			}
 			break;
 		}
 	}
 	// received a message from a node that was unexpected -
 	if (node_id == wr->dest_sz) {
-		cf_debug(AS_RW,
+		cf_warning(AS_RW,
 				"rw process ack: received ack from node %"PRIx64" not in transmit list, ignoring",
 				node);
 		pthread_mutex_unlock(&wr->lock);
@@ -1974,8 +1983,9 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	}
 
 Out:
-	if (m)
+	if (m) {
 		as_fabric_msg_put(m);
+	}
 
 	WR_TRACK_INFO(wr, "rw_process_ack: returning");
 	WR_RELEASE(wr);
@@ -2018,7 +2028,7 @@ write_complete(write_request *wr, as_transaction *tr)
 	}
 	else if (tr->proto_fd_h) {
 		if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
-				wr->generation, wr->void_time, NULL, NULL, 0, NULL, NULL,
+				tr->generation, tr->void_time, NULL, NULL, 0, NULL, NULL,
 				tr->trid, NULL)) {
 			cf_warning(AS_RW, "can't send reply to client, fd %d",
 					tr->proto_fd_h->fd);
@@ -2051,7 +2061,7 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	else {
 		read_local(tr, r_ref);
 
-		if (wr && (m->info1 & AS_MSG_INFO1_BATCH)) {
+		if (wr && wr->batch_shared) {
 			wr->msgp = NULL;
 		}
 	}
