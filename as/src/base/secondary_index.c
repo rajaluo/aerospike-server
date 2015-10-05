@@ -2525,7 +2525,9 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 				cf_warning(AS_SINDEX, "memcpy failed");
 				return AS_SINDEX_ERR;
 			}
-			stack_buf->used_sz -= (sbin->num_values * data_sz);
+			if (sbin->num_values != 1) {
+				stack_buf->used_sz -= (sbin->num_values * data_sz);
+			}
 		}
 	}
 	else
@@ -2567,9 +2569,9 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 }
 
 as_sindex_status
-as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
+as_sindex_add_value_to_sbin(as_sindex_bin * sbin, uint8_t * val, int data_sz)
 {
-	// If this is the first value coming to the sbin
+	// If this is the first value coming to the  sbin
 	// 		assign the value to the local variable of struct.
 	// Else
 	// 		If to_free is true or stack_buf is full
@@ -2577,38 +2579,56 @@ as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
 	// 		else 
 	// 			If needed copy the values stored in sbin to stack_buf
 	// 			add the value to end of stack buf
-	
+
 	sbin_value_pool * stack_buf = sbin->stack_buf;
-	// If this is the first value coming to the sbin
-	// 		assign the value to the local variable of struct.
 	if (sbin->num_values == 0 ) {
-		sbin->value.int_val = val;
+		if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+			sbin->value.str_val = *(cf_digest *)val;
+		}
+		else if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+			sbin->value.int_val = *(int64_t *)val;
+		}
 		sbin->num_values++;
 	}
-	else if (sbin->num_values > 0) {
-	
-	// Else
-	// 		If to_free is true or stack_buf is full
-	// 			add value to the heap
-		if (sbin->to_free || (stack_buf->used_sz + sizeof(uint64_t)) > AS_SINDEX_VALUESZ_ON_STACK ) {
-			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)&val)) {
+	else if (sbin->num_values == 1) {
+		if ((stack_buf->used_sz + data_sz + data_sz) > AS_SINDEX_VALUESZ_ON_STACK ) {
+			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)val)) {
 				cf_warning(AS_SINDEX, "Adding value in sbin failed.");
 				return AS_SINDEX_ERR;
 			}
 		}
 		else {
-	// 		else 
-	//			If needed copy the values stored in sbin to stack_buf
-			if (sbin->num_values == 1) {
-				sbin->values = stack_buf->value + stack_buf->used_sz;
-				(* (uint64_t *)sbin->values ) = sbin->value.int_val;
-				stack_buf->used_sz += sizeof(uint64_t);
-			}
+			// sbin->values gets initiated here
+			sbin->values = stack_buf->value + stack_buf->used_sz;
 
-	// 			add the value to end of stack buf
-			*((uint64_t *)sbin->values + sbin->num_values) = val;
+			if (!memcpy(sbin->values, (void *)&sbin->value, data_sz)) {
+				cf_warning(AS_SINDEX, "Memcpy failed");
+				return AS_SINDEX_ERR;
+			}
+			stack_buf->used_sz += data_sz;
+		
+			if (!memcpy((void *)((uint8_t *)sbin->values + data_sz * sbin->num_values), (void *)val, data_sz)) {
+				cf_warning(AS_SINDEX, "Memcpy failed");
+				return AS_SINDEX_ERR;
+			}
 			sbin->num_values++;
-			stack_buf->used_sz += sizeof(uint64_t);
+			stack_buf->used_sz += data_sz;
+		}
+	}
+	else if (sbin->num_values > 1) {	
+		if (sbin->to_free || (stack_buf->used_sz + data_sz ) > AS_SINDEX_VALUESZ_ON_STACK ) {
+			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)val)) {
+				cf_warning(AS_SINDEX, "Adding value in sbin failed.");
+				return AS_SINDEX_ERR;
+			}
+		}
+		else {
+			if (!memcpy((void *)((uint8_t *)sbin->values + data_sz * sbin->num_values), (void *)val, data_sz)) {
+				cf_warning(AS_SINDEX, "Memcpy failed");
+				return AS_SINDEX_ERR;
+			}
+			sbin->num_values++;
+			stack_buf->used_sz += data_sz;
 		}
 	}
 	else {
@@ -2619,61 +2639,15 @@ as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
 }
 
 as_sindex_status
+as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
+{
+	return as_sindex_add_value_to_sbin(sbin, (uint8_t * )&val, sizeof(uint64_t));
+}
+
+as_sindex_status
 as_sindex_add_digest_to_sbin(as_sindex_bin * sbin, cf_digest val_dig)
 {
-	// If this is the first value coming to the sbin
-	// 		assign the value to the local variable of struct.
-	// Else
-	// 		If to_free is true or stack_buf is full
-	// 			add value to the heap
-	// 		else 
-	// 			If needed copy the values stored in sbin to stack_buf
-	// 			add the value to end of stack buf
-
-	sbin_value_pool * stack_buf = sbin->stack_buf;
-	// If this is the first value coming to the sbin
-	// 		assign the value to the local variable of struct.	
-	if (sbin->num_values == 0 ) {
-		sbin->value.str_val = val_dig;
-		sbin->num_values++;
-	}
-	else if (sbin->num_values > 0) {
-	
-	// Else
-	// 		If to_free is true or stack_buf is full
-	// 			add value to the heap
-		if (sbin->to_free || (stack_buf->used_sz + sizeof(cf_digest)) > AS_SINDEX_VALUESZ_ON_STACK ) {
-			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)&val_dig)) {
-				cf_warning(AS_SINDEX, "Adding value in sbin failed.");
-				return AS_SINDEX_ERR;
-			}
-		}
-		else {
-	// 		else 
-	//			If needed copy the values stored in sbin to stack_buf
-			if (sbin->num_values == 1) {
-				sbin->values = stack_buf->value + stack_buf->used_sz;
-				if (!memcpy(sbin->values, (void *)&sbin->value.str_val, sizeof(cf_digest))) {
-					cf_warning(AS_SINDEX, "Memcpy failed");
-					return AS_SINDEX_ERR;
-				}
-				stack_buf->used_sz += sizeof(cf_digest);
-			}
-
-	// 			add the value to end of stack buf
-			if (!memcpy((void *)((cf_digest *)sbin->values + sbin->num_values), (void *)&val_dig, sizeof(cf_digest))) {
-				cf_warning(AS_SINDEX, "Memcpy failed");
-				return AS_SINDEX_ERR;
-			}
-			sbin->num_values++;
-			stack_buf->used_sz += sizeof(cf_digest);
-		}
-	}
-	else {
-		cf_warning(AS_SINDEX, "numvalues is coming as negative. Possible memory corruption in sbin.");
-		return AS_SINDEX_ERR;
-	}
-	return AS_SINDEX_OK;
+	return as_sindex_add_value_to_sbin(sbin, (uint8_t * )&val_dig, sizeof(cf_digest));
 }
 
 as_sindex_status
