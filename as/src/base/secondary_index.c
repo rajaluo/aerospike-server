@@ -2569,7 +2569,7 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 }
 
 as_sindex_status
-as_sindex_add_value_to_sbin(as_sindex_bin * sbin, uint8_t * val, int data_sz)
+as_sindex_add_value_to_sbin(as_sindex_bin * sbin, uint8_t * val)
 {
 	// If this is the first value coming to the  sbin
 	// 		assign the value to the local variable of struct.
@@ -2579,6 +2579,18 @@ as_sindex_add_value_to_sbin(as_sindex_bin * sbin, uint8_t * val, int data_sz)
 	// 		else 
 	// 			If needed copy the values stored in sbin to stack_buf
 	// 			add the value to end of stack buf
+
+	int data_sz = 0;
+	if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+		data_sz = sizeof(cf_digest);
+	}
+	else if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+		data_sz = sizeof(uint64_t);
+	}
+	else {
+		cf_warning(AS_SINDEX, "sbin type is invalid %d", sbin->type);
+		return AS_SINDEX_ERR;
+	}
 
 	sbin_value_pool * stack_buf = sbin->stack_buf;
 	if (sbin->num_values == 0 ) {
@@ -2641,13 +2653,13 @@ as_sindex_add_value_to_sbin(as_sindex_bin * sbin, uint8_t * val, int data_sz)
 as_sindex_status
 as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
 {
-	return as_sindex_add_value_to_sbin(sbin, (uint8_t * )&val, sizeof(uint64_t));
+	return as_sindex_add_value_to_sbin(sbin, (uint8_t * )&val);
 }
 
 as_sindex_status
 as_sindex_add_digest_to_sbin(as_sindex_bin * sbin, cf_digest val_dig)
 {
-	return as_sindex_add_value_to_sbin(sbin, (uint8_t * )&val_dig, sizeof(cf_digest));
+	return as_sindex_add_value_to_sbin(sbin, (uint8_t * )&val_dig);
 }
 
 as_sindex_status
