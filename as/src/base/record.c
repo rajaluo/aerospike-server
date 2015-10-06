@@ -459,9 +459,21 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	
 	// To read the algorithm of upating sindex in bins check notes in ssd_record_add function.
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
-
+	as_sindex * si_arr[2 * ns->sindex_cnt];
+	int si_arr_index = 0;
+	int si_cnt = 0;
+	const char* set_name = NULL;
+	set_name = as_index_get_set_name(rd->r, ns);
+	
+	// RESERVE SIs for old bins
+	// Cannot reserve SIs for new bins as we do not know the bin-id yet
+	for (int i=0; i<old_n_bins; i++) {
+		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd->bins[i].id, &si_arr[si_arr_index]);
+		si_arr_index += si_cnt;
+	}
+	
 	if ((delta_bins < 0) && has_sindex) {
-		 sbins_populated += as_sindex_sbins_from_rd(rd, newbins, old_n_bins, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
+		sbins_populated += as_sindex_sbins_from_rd(rd, newbins, old_n_bins, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 	}
 
 	if (ns->storage_data_in_memory && ! ns->single_bin) {
@@ -474,11 +486,6 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		// Either single-bin data-in-memory where we deleted the (only) bin, or
 		// data-not-in-memory where we read existing bins for sindex purposes.
 		as_bin_destroy_from(rd, newbins);
-	}
-
-	const char* set_name = NULL;
-	if (has_sindex) {
-		set_name = as_index_get_set_name(rd->r, ns);
 	}
 
 	int ret = 0;
@@ -514,6 +521,8 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		}
 
 		if (has_sindex) {
+			si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, b->id, &si_arr[si_arr_index]);
+			si_arr_index += si_cnt;
 			sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
 		}
 	}
@@ -536,9 +545,9 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		rd->write_to_device = true;
 	}
 
-
-	if (has_sindex && sbins_populated) {
+	if (has_sindex) {
 		as_sindex_sbin_freeall(sbins, sbins_populated);
+		as_sindex_release_arr(si_arr, si_arr_index);
 	}
 
 	return ret;
