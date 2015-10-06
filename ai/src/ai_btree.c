@@ -554,7 +554,7 @@ create_cname(char *bin_path, int bin_type, int index_type)
 
 static char *
 create_cname_from_imd(const as_sindex_metadata *imd) {
-	return create_cname(imd->path_str, imd->btype[0], imd->itype);
+	return create_cname(imd->path_str, imd->btype, imd->itype);
 }
 
 static char *
@@ -1285,11 +1285,6 @@ ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
 	char *iname = NULL, *cname = NULL, *tname = NULL;
 	int ret = AS_SINDEX_ERR, rv;
 
-	if (1 != imd->num_bins) {
-		cf_warning(AS_SINDEX, "Multi-bin indexes not supported");
-		return ret;
-	}
-
 	if (!(tname = create_tname_from_imd(imd))) {
 		return AS_SINDEX_ERR_NO_MEMORY;
 	}
@@ -1311,7 +1306,7 @@ ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
 	r_tbl_t *rt = &Tbl[tmatch];
 
 	// 1.) add entries in Aerospike Index's virtual TABLE
-	int col_type = imd->btype[0];
+	int col_type = imd->btype;
 	icol_t *ic = find_column(tmatch, cname);
 	if (!ic) { // COLUMN does not exist
 		if (0 > ai_add_column(tname, cname, col_type)) {
@@ -1319,7 +1314,7 @@ ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
 		}
 		// Add (cmatch+1) always non-zero
 		cf_debug(AS_SINDEX, "Added Mapping [BINNAME=%s: BINID=%d: COLID%d] [IMATCH=%d: SIMATCH=%d: INAME=%s]",
-				imd->bnames[0], imd->binid[0], rt->col_count, Num_indx - 1, simatch, imd->iname);
+				imd->bname, imd->binid, rt->col_count, Num_indx - 1, simatch, imd->iname);
 	}
 
 	//NOTE: COMMAND: CREATE PARTITIONED INDEX iname ON tname (cname) NUM = nprts
@@ -1335,7 +1330,7 @@ ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
 
 	*bimatch = match_partial_index_name(iname);
 	cf_debug(AS_SINDEX, "cr8SecIndex: iname: %s bname: %s type: %d ns: %s set: %s tmatch: %d bimatch: %d",
-		   imd->iname, imd->bnames[0], imd->btype[0], imd->ns_name, imd->set, tmatch, *bimatch);
+		   imd->iname, imd->bname, imd->btype, imd->ns_name, imd->set, tmatch, *bimatch);
 
 	ret = AS_SINDEX_OK;
 
@@ -1364,7 +1359,7 @@ ai_post_index_creation_setup_pmetadata(as_sindex_metadata *imd, as_sindex_pmetad
 	ri->done = true;
 	if (idx == 0) { // idx of 0 means fill these in
 		imd->dtype = ri->dtype;
-		imd->btype[0] = ri->dtype;
+		imd->btype = ri->dtype;
 	}
 	pimd->tmatch = ri->tmatch;
 	pimd->ibtr = ri->btr;
