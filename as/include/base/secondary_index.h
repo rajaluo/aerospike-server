@@ -542,6 +542,8 @@ bool                        as_sindex_delete_checker(as_namespace *ns, as_sindex
 as_particle_type            as_sindex_pktype(as_sindex_metadata * imd);
 extern const char         * as_sindex_ktype_str(as_sindex_ktype type);
 extern as_sindex_ktype      as_sindex_ktype_from_string(const char * type_str);
+int                         as_sindex_arr_lookup_by_set_binid_lockfree(as_namespace * ns, 
+							const char *set, int binid, as_sindex ** si_arr);
 // **************************************************************************************************
 
 /*
@@ -621,6 +623,7 @@ extern int  as_sindex_sbin_free(as_sindex_bin *sbin);
 extern int  as_sindex_sbin_freeall(as_sindex_bin *sbin, int numval);
 extern bool as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes);
 extern bool as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes);
+void        as_sindex_release_arr(as_sindex *si_arr[], int si_arr_sz);
 // **************************************************************************************************
 
 /*

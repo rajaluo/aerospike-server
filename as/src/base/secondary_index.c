@@ -854,6 +854,64 @@ as_sindex__simatch_by_set_binid(as_namespace *ns, char * set, int binid, as_sind
 	// 		return -1
 	return simatch;
 }
+
+// Populates the si_arr with all the sindexes which matches set and binid
+// Each sindex is reserved as well. Enough space is provided by caller in si_arr
+// Currently only 8 sindexes can be create on one combination of set and binid
+// i.e number_of_sindex_types * number_of_sindex_data_type (4 * 2)
+int
+as_sindex_arr_lookup_by_set_binid_lockfree(as_namespace * ns, const char *set, int binid, as_sindex ** si_arr)
+{
+	cf_ll * simatch_ll=NULL;
+	
+	int sindex_count = 0;
+	if (!as_sindex_binid_has_sindex(ns, binid) ) {
+		return sindex_count;
+	}
+
+	as_sindex__simatch_list_by_set_binid(ns, set, binid, &simatch_ll);
+	if (!simatch_ll) {
+		return sindex_count = 0;
+	}
+	
+	cf_ll_element             * ele    = cf_ll_get_head(simatch_ll);
+	sindex_set_binid_hash_ele * si_ele = NULL;
+	int                        simatch = -1;
+	as_sindex                 * si     = NULL;
+	while (ele) {
+		si_ele                         = (sindex_set_binid_hash_ele *) ele;
+		simatch                        = si_ele->simatch;
+		
+		if (simatch == -1) {
+			cf_warning(AS_SINDEX, "A matching simatch comes out to be -1.");
+			ele = ele->next;
+			continue;
+		}
+
+		si                             = &ns->sindex[simatch];
+		// Reserve only active sindexes.
+		// Do not break this rule
+		if (!as_sindex_isactive(si)) {
+			ele = ele->next;
+			continue;
+		}
+	
+		if (simatch != si->simatch) {
+			cf_warning(AS_SINDEX, "Inconsistent simatch reference between simatch stored in" 
+									"si and simatch stored in hash");
+			ele = ele->next;
+			continue;
+		}
+
+		AS_SINDEX_RESERVE(si);
+
+		si_arr[sindex_count] = si;
+		sindex_count++;
+		ele = ele->next;
+	}
+	return sindex_count;
+}
+
 int
 as_sindex__simatch_by_iname(as_namespace *ns, char *idx_name)
 {
@@ -1540,6 +1598,21 @@ as_sindex_populator_release_all(as_namespace * ns)
 	SINDEX_GUNLOCK();
 	return AS_SINDEX_OK;
 }
+
+// Complementary function of as_sindex_arr_lookup_by_set_binid
+void
+as_sindex_release_arr(as_sindex *si_arr[], int si_arr_sz)
+{
+	for (int i=0; i<si_arr_sz; i++) {
+		if (si_arr[i]) {
+			AS_SINDEX_RELEASE(si_arr[i]);
+		}
+		else {
+			cf_warning(AS_SINDEX, "SI is null");
+		}
+	}
+}
+	
 //                                    END - SI REFERENCE
 // ************************************************************************************************
 // ************************************************************************************************
@@ -2759,9 +2832,6 @@ as_sindex_query(as_sindex *si, as_sindex_range *srange, as_sindex_qctx *qctx)
 void
 as_sindex_init_sbin(as_sindex_bin * sbin, as_sindex_op op, as_particle_type type, as_sindex * si)
 {
-	if (si) {
-		AS_SINDEX_RESERVE(si);
-	}	
 	sbin->si              = si;
 	sbin->to_free         = false;
 	sbin->num_values      = 0;
@@ -2769,6 +2839,26 @@ as_sindex_init_sbin(as_sindex_bin * sbin, as_sindex_op op, as_particle_type type
 	sbin->heap_capacity   = 0;
 	sbin->type            = type;
 	sbin->values          = NULL;
+}
+
+int
+as_sindex_sbin_free(as_sindex_bin *sbin)
+{
+	if (sbin->to_free) {
+		if (sbin->values) {
+			cf_free(sbin->values);
+		}
+	}
+    return AS_SINDEX_OK;
+}
+
+int
+as_sindex_sbin_freeall(as_sindex_bin *sbin, int numbins)
+{
+	for (int i = 0; i < numbins; i++)  {
+		as_sindex_sbin_free(&sbin[i]);
+	}
+	return AS_SINDEX_OK;
 }
 
 as_sindex_status
@@ -4138,32 +4228,6 @@ as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, a
 		count      += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns), b, &sbins[count], op);
 	}
 	return count;
-}
-
-int
-as_sindex_sbin_free(as_sindex_bin *sbin)
-{
-	if (sbin->to_free) {
-		if (sbin->values) {
-			cf_free(sbin->values);
-		}
-	}
-	if (sbin->si) {
-		AS_SINDEX_RELEASE(sbin->si);
-	}
-	else {
-		cf_warning(AS_SINDEX, "SBIN FREE : si should not be null in sbin");
-	}
-    return AS_SINDEX_OK;
-}
-
-int
-as_sindex_sbin_freeall(as_sindex_bin *sbin, int numbins)
-{
-	for (int i = 0; i < numbins; i++)  {
-		as_sindex_sbin_free(&sbin[i]);
-	}
-	return AS_SINDEX_OK;
 }
 
 // Needs comments
