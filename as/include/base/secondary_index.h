@@ -276,18 +276,15 @@ typedef struct as_sindex_metadata_s {
 	struct as_sindex_s  * si;
 	as_sindex_pmetadata * pimd;
 	unsigned char         dtype;   // Aerospike Index type
-	uint32_t              binid[AS_SINDEX_BINMAX]; // Redundant info to aid search
-	byte                  mfd_slot; // slot on the persistent file
+	uint32_t              binid; // Redundant info to aid search
 
 	// Index Static Data (part persisted)
 	char                * ns_name;
 	char                * set;
 	char                * iname;
-	char                * bnames[AS_SINDEX_BINMAX];
-	as_sindex_ktype       btype[AS_SINDEX_BINMAX]; // Same as Aerospike Index type
+	char                * bname;
+	as_sindex_ktype       btype; // Same as Aerospike Index type
 	as_sindex_type        itype;
-	int                   num_bins;
-	uint8_t               oindx;
 	uint32_t              flag;
 	int 				  post_op;
 	as_sindex_path        path[AS_SINDEX_MAX_DEPTH];
