@@ -1289,7 +1289,7 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";gc-max-units=");
 	cf_dyn_buf_append_uint32(db, si->config.defrag_max_units);
 	cf_dyn_buf_append_string(db, ";data-max-memory=");
-	if (si->config.data_max_memory == ULONG_MAX) {
+	if (si->config.data_max_memory != ULONG_MAX) {
 		cf_dyn_buf_append_uint64(db, si->config.data_max_memory);
 	} else {
 		cf_dyn_buf_append_string(db, "ULONG_MAX");

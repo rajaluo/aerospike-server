@@ -2162,7 +2162,7 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";sindex-builder-threads=");
 	cf_dyn_buf_append_uint64(db, g_config.sindex_builder_threads);
 	cf_dyn_buf_append_string(db, ";sindex-data-max-memory=");
-	if (g_config.sindex_data_max_memory == ULONG_MAX) {
+	if (g_config.sindex_data_max_memory != ULONG_MAX) {
 		cf_dyn_buf_append_uint64(db, g_config.sindex_data_max_memory);
 	} else {
 		cf_dyn_buf_append_string(db, "ULONG_MAX");
