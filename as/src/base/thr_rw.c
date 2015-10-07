@@ -157,13 +157,7 @@ write_request_restart(wreq_tr_element *w)
 
 	MICROBENCHMARK_RESET_P();
 
-	if (0 != thr_tsvc_enqueue(tr)) {
-		cf_warning(AS_RW,
-				"WRITE REQUEST: FAILED queueing back request %"PRIx64"",
-				*(uint64_t*)&tr->keyd);
-		cf_free(tr->msgp);
-		tr->msgp = 0;
-	}
+	thr_tsvc_enqueue(tr);
 	cf_atomic_int_decr(&g_config.n_waiting_transactions);
 	cf_free(w);
 }
@@ -245,8 +239,8 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	tr->preprocessed = true;
 	tr->flag = 0;
 
-	tr->generation = 0;
-	tr->void_time = 0;
+	tr->generation = wr->generation;
+	tr->void_time = wr->void_time;
 	tr->microbenchmark_is_resolve = false;
 
 	if (wr->shipped_op)
@@ -754,8 +748,10 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	int rv             = 0;
 	bool is_delete     = (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE);
 
-	if ((wr->dupl_trans_complete == 0) && (tr->rsv.n_dupl > 0))
+	if ((wr->dupl_trans_complete == 0) && (tr->rsv.n_dupl > 0)) {
 		dupl_resolved = false;
+	}
+
 	if ((tr->rsv.n_dupl == 0) || !dupl_resolved) {
 		first_time = true;
 	} else {
@@ -1124,6 +1120,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	wr->proxy_node = tr->proxy_node;
 	wr->proxy_msg  = tr->proxy_msg;
 	wr->shipped_op = (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) ? true : false;
+	wr->generation = tr->generation;
+	wr->void_time = tr->void_time;
 
 	UREQ_DATA_COPY(&wr->udata, &tr->udata);
 
@@ -1742,38 +1740,48 @@ finish_rw_process_dup_ack(write_request *wr)
 //   true if it is
 //
 bool
-finish_rw_process_ack(write_request *wr, uint32_t result_code)
+finish_rw_process_ack(write_request *wr, uint32_t result_code, bool is_repl_write)
 {
 	for (uint32_t node_id = 0; node_id < wr->dest_sz; node_id++) {
-		if (wr->dest_complete[node_id] == false) {
+		if (! wr->dest_complete[node_id]) {
 			return false;
 		}
 	}
-	// Figure out the ack is coming for which request type.
-	//   - If dupl_trans_complete is 0 then it is duplicate resolution ack
-	//   - Else is it prole ack
-	//
-	// If so, use the atomic to make sure only one response does finish
-	// processing for duplicate resolution.
-	if (wr->dupl_trans_complete == 0) { // in duplicate phase
+
+	// Use the atomic flags to make sure only one response does finish
+	// processing for respective operation.
+
+	if (! is_repl_write) { // in duplicate phase
 		if (1 == cf_atomic32_incr(&wr->dupl_trans_complete)) {
 			return finish_rw_process_dup_ack(wr);
 		}
-	} else if (1 == cf_atomic32_incr(&wr->trans_complete)) {
+		else {
+			cf_warning(AS_RW, "extra dupl response - should have been handled earlier");
+		}
+	}
+	else if (1 == cf_atomic32_incr(&wr->trans_complete)) {
 		return finish_rw_process_prole_ack(wr, result_code);
 	}
-	return (false);
+
+	return false;
 }
 
 void
-rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk)
+rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk, bool is_repl_write)
 {
 	cf_debug(AS_RW,
 			"{%s:%d} rw_process_cluster_key_mismatch: CLUSTER KEY MISMATCH rsp %"PRIx64" %s",
 			wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
 	bool must_delete = false;
+
 	pthread_mutex_lock(&wr->lock);
-	if (wr->dupl_trans_complete == 0) {
+
+	if (wr->batch_shared && ! wr->msgp) {
+		pthread_mutex_unlock(&wr->lock);
+		return;
+	}
+
+	if (! is_repl_write) {
 		if (1 == cf_atomic32_incr(&wr->dupl_trans_complete)) {
 			cf_atomic32_incr(&wr->trans_complete);
 			// also complete the next transaction. we are bailing out
@@ -1782,16 +1790,12 @@ rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk)
 			write_request_init_tr(&tr, wr);
 			MICROBENCHMARK_RESET();
 
-			// In order to re-write the prole, we actually REDO the transaction
-			// by re-queuing it and doing it ALL over again.
 			cf_atomic_int_incr(&g_config.stat_cluster_key_err_ack_dup_trans_reenqueue);
 
 			cf_debug_digest(AS_RW, &(wr->keyd), "[RE-ENQUEUE JOB from CK ERR ACK:1] TrID(0) SelfNode(%"PRIx64")",
 					g_config.self_node );
-			if (0 != thr_tsvc_enqueue(&tr)) {
-				cf_warning(AS_RW, "queue rw_process_cluster_key_mismatch failure");
-				cf_free(wr->msgp);
-			}
+
+			thr_tsvc_enqueue(&tr);
 			wr->msgp = 0;
 			WR_TRACK_INFO(wr, "rw_process_cluster_key_mismatch: cluster key mismatch deleting - duplicate ");
 			must_delete = true;
@@ -1807,15 +1811,14 @@ rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk)
 		cf_debug_digest(AS_RW, &(wr->keyd), "[RE-ENQUEUE JOB from CK ERR ACK:2] TrID(0) SelfNode(%"PRIx64")",
 				g_config.self_node );
 
-		if (0 != thr_tsvc_enqueue(&tr)) {
-			cf_warning(AS_RW, "queue rw_process_cluster_key_mismatch failure");
-			cf_free(wr->msgp);
-		}
+		thr_tsvc_enqueue(&tr);
 		wr->msgp = 0; // NULL this out so that the write_destructor does not free this pointer.
 		WR_TRACK_INFO(wr, "rw_process_cluster_key_mismatch: cluster key mismatch deleting - final ");
 		must_delete = true;
 	}
+
 	pthread_mutex_unlock(&wr->lock);
+
 	if (must_delete) {
 		rchash_delete(g_write_hash, gk, sizeof(global_keyd));
 	}
@@ -1919,7 +1922,8 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	WR_TRACK_INFO(wr, "rw_process_ack: entering");
 
 	if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH) {
-		rw_process_cluster_key_mismatch(wr, &gk);
+		rw_process_cluster_key_mismatch(wr, &gk, is_write);
+		goto Out;
 	}
 	else if (result_code != AS_PROTO_RESULT_OK) {
 		cf_debug_digest(AS_RW, "{%s:%d} rw_process_ack: Processing unexpected response(%d):",
@@ -1930,6 +1934,17 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 			wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
 
 	pthread_mutex_lock(&wr->lock);
+
+	if (wr->dupl_trans_complete != 0 && ! is_write) {
+		cf_debug(AS_RW, "rw process ack: ignoring extra dupl response after dupl phase is done");
+		pthread_mutex_unlock(&wr->lock);
+		goto Out;
+	}
+
+	if (wr->batch_shared && ! wr->msgp) {
+		pthread_mutex_unlock(&wr->lock);
+		goto Out;
+	}
 
 	// 2. Now check to see if all are complete. If not wait for all messages
 	// to arrive
@@ -1947,7 +1962,7 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 				if (is_write == false) { // duplicate-phase messages are arriving
 					wr->dup_result_code[node_id] = result_code;
 					if (wr->dup_msg[node_id] != 0) {
-						cf_debug(AS_RW,
+						cf_warning(AS_RW,
 								"{%s:%d} dup process ack: received duplicate response from node %"PRIx64"",
 								wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *)(&wr->keyd));
 					} else {
@@ -1958,16 +1973,17 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 								wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *)(&wr->keyd));
 					}
 				}
-			} else
+			} else {
 				cf_debug(AS_RW,
 						"{%s:%d} write process ack: Ignoring duplicate response for read result code %d",
 						wr->rsv.ns->name, wr->rsv.pid, result_code);
+			}
 			break;
 		}
 	}
 	// received a message from a node that was unexpected -
 	if (node_id == wr->dest_sz) {
-		cf_debug(AS_RW,
+		cf_warning(AS_RW,
 				"rw process ack: received ack from node %"PRIx64" not in transmit list, ignoring",
 				node);
 		pthread_mutex_unlock(&wr->lock);
@@ -1977,7 +1993,12 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 
 	// 3. We now know this node's write/read is complete. Finish processing
 	WR_TRACK_INFO(wr, "finish_rw_process_ack: entering");
-	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK);
+	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK, is_write);
+
+	if (wr->batch_shared && finished) {
+		wr->msgp = NULL;
+	}
+
 	pthread_mutex_unlock(&wr->lock);
 
 	if (finished) {
@@ -1990,8 +2011,9 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	}
 
 Out:
-	if (m)
+	if (m) {
 		as_fabric_msg_put(m);
+	}
 
 	WR_TRACK_INFO(wr, "rw_process_ack: returning");
 	WR_RELEASE(wr);
@@ -2067,7 +2089,7 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	else {
 		read_local(tr, r_ref);
 
-		if (wr && (m->info1 & AS_MSG_INFO1_BATCH)) {
+		if (wr && wr->batch_shared) {
 			wr->msgp = NULL;
 		}
 	}
@@ -5531,7 +5553,10 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 			}
 		} else {
 			if (wr->batch_shared) {
-				as_batch_add_error(wr->batch_shared, wr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
+				if (wr->msgp) {
+					as_batch_add_error(wr->batch_shared, wr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
+					wr->msgp = NULL;
+				}
 			}
 			else {
 				if (wr->proto_fd_h) {
@@ -5551,46 +5576,18 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 	}
 
 	if (wr->xmit_ms < p_now->now_ms) {
-
-		bool finished = false;
-
 		pthread_mutex_lock(&wr->lock);
-		if (wr->rsv.n_dupl > 0)
-			cf_debug(AS_RW,
-					"{%s:%d} rw retransmit reduce fn: RETRANSMITTING %"PRIx64" %s",
-					wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
-		else
-			cf_debug(AS_RW,
-					"{%s:%d} rw retransmit reduce fn: RETRANSMITTING %"PRIx64" %s",
-					wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
+
+		cf_debug(AS_RW, "{%s:%d} rw retransmit reduce fn: RETRANSMITTING %"PRIx64" %s n-dupl %u",
+				wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE", wr->rsv.n_dupl);
 
 		wr->xmit_ms = p_now->now_ms + wr->retry_interval_ms;
 		wr->retry_interval_ms *= 2;
 
 		WR_TRACK_INFO(wr, "rw_retransmit_reduce_fn: retransmitting ");
 		send_messages(wr);
-		// No such ack processing for the shipped_op initiator. The request
-		// will get processed when the response for the shipped operation is
-		// finished
-		if (!wr->shipped_op_initiator) {
-			finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK);
-		} else {
-			cf_debug(AS_LDT, "Skipping process ack for LDT ship op initiator");
-		}
-		pthread_mutex_unlock(&wr->lock);
 
-		if (finished == true) {
-			if (wr->rsv.n_dupl > 0)
-				cf_debug(AS_RW,
-						"{%s:%d} rw retransmit reduce fn: DELETING request %"PRIx64" %s",
-						wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
-			else
-				cf_debug(AS_RW,
-						"{%s:%d} rw retransmit reduce fn: DELETING request %"PRIx64" %s",
-						wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
-			WR_TRACK_INFO(wr, "rw_retransmit_reduce_fn: deleting ");
-			return (RCHASH_REDUCE_DELETE);
-		}
+		pthread_mutex_unlock(&wr->lock);
 	}
 
 	return (0);
