@@ -1806,9 +1806,9 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 	
 	qtr_reserve(qtr, __FILE__, __LINE__);
 	cf_atomic32_incr(&qtr->n_udf_tr_queued);
-	
+	// Reset start time
+	tr.start_time = cf_getns();
 	thr_tsvc_enqueue(&tr);
-
 	return AS_QUERY_OK;
 }
 
