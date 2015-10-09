@@ -3684,6 +3684,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				ns->read_consistency_level_override = true;
 			}
 			else if (strcmp(context, "off") == 0) {
+				ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE; // restore default
 				ns->read_consistency_level_override = false;
 			}
 			else if (strcmp(context, "one") == 0) {
@@ -3708,6 +3709,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				ns->write_commit_level_override = true;
 			}
 			else if (strcmp(context, "off") == 0) {
+				ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL; // restore default
 				ns->write_commit_level_override = false;
 			}
 			else {
