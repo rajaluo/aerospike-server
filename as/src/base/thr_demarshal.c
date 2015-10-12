@@ -88,7 +88,7 @@ pthread_t		g_demarshal_reaper_th;
 void *thr_demarshal_reaper_fn(void *arg);
 static cf_queue *g_freeslot = 0;
 
-inline int
+int
 epoll_ctl_modify(as_file_handle *fd_h, uint32_t events)
 {
 	struct epoll_event ev;
@@ -110,7 +110,7 @@ thr_demarshal_resume(as_file_handle *fd_h)
 	fd_h->trans_active = false;
 
 	// Make the demarshal thread aware of pending connection data (if any).
-	// Writing to an FD's signal mask makes the epoll instance re-check for
+	// Writing to an FD's event mask makes the epoll instance re-check for
 	// data, even when edge-triggered. If there is data, the demarshal thread
 	// gets EPOLLIN for this FD.
 	if (epoll_ctl_modify(fd_h, EPOLLIN | EPOLLET | EPOLLRDHUP) < 0) {
