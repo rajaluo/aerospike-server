@@ -4499,7 +4499,7 @@ thr_info_fn(void *unused)
 				} else {
 					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", tr->proto_fd_h->fd, errno);
 				}
-				AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+				as_end_of_transaction_force_close(tr->proto_fd_h);
 				tr->proto_fd_h = 0;
 				break;
 			}
@@ -4513,9 +4513,9 @@ thr_info_fn(void *unused)
 
 		cf_free(tr->msgp);
 
-		if (tr->proto_fd_h)	{
-			tr->proto_fd_h->t_inprogress = false;
-			AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+		if (tr->proto_fd_h) {
+			as_end_of_transaction_ok(tr->proto_fd_h);
+			tr->proto_fd_h = 0;
 		}
 
 		MICROBENCHMARK_HIST_INSERT_P(info_fulfill_hist);
