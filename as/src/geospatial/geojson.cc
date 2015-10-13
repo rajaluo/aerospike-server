@@ -81,7 +81,9 @@ traverse_point(json_t * coord)
 	// cout << setprecision(15) << latval << ", " << lngval << endl;
 
 	S2LatLng latlng = S2LatLng::FromDegrees(latval, lngval).Normalized();
-	assert(latlng.is_valid());
+	if (! latlng.is_valid()) {
+		throwstream(runtime_error, "invalid latitude-longitude");
+	}
 	return latlng.ToPoint();
 }
 
@@ -110,9 +112,12 @@ traverse_loop(json_t * vertices)
 		}
 	}
 
-	assert(points.size() >= 4);
-
-	assert(points[0] == points[points.size()-1]);
+	if (points.size() < 4) {
+		throwstream(runtime_error, "loop contains less than 4 points");
+	}
+	if (points[0] != points[points.size()-1]) {
+		throwstream(runtime_error, "loop not closed");
+	}
 	points.pop_back();
 
 	auto_ptr<S2Loop> loop(new S2Loop(points));
