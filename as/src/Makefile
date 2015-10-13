@@ -50,14 +50,17 @@ endif
 FABRIC_HEADERS += hb.h fabric.h fb_health.h migrate.h paxos.h
 FABRIC_SOURCES += hb.c fabric.c fb_health.c migrate.c partition.c paxos.c
 
+GEOSPATIAL_HEADERS += geospatial.h
+GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
+
 STORAGE_HEADERS += storage.h drv_ssd.h
 STORAGE_SOURCES += storage.c drv_kv.c drv_memory.c drv_ssd.c
 ifneq ($(USE_WARM),1)
   STORAGE_SOURCES += drv_ssd_cold.c
 endif
 
-HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%)
-SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCES:%=storage/%)
+HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%) $(GEOSPATIAL_HEADERS:%=geospatial/%)
+SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCES:%=storage/%) $(GEOSPATIAL_SOURCES:%=geospatial/%)
 
 SERVER = $(BIN_DIR)/asd
 
@@ -70,6 +73,7 @@ INCLUDES += -I$(AI)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
+INCLUDES += -I$(S2)
 
 ifeq ($(USE_LUAJIT),1)
   INCLUDES += -I$(LUAJIT)/src
@@ -118,6 +122,9 @@ else
   LIBRARIES += -L$(JANSSON)/src/.libs -ljansson
 endif
 
+LIBRARIES += -L$(S2) -ls2 -ls2cellid -lgoogle-strings -lgoogle-base \
+			-lgoogle-util-coding -lgoogle-util-math -lstdc++
+
 LIBRARIES := $(AS_LIBRARIES) $(LIBRARIES)
 
 ifneq ($(PREPRO),1)
@@ -131,7 +138,8 @@ ifeq ($(USE_KV),1)
   CFLAGS += -DUSE_KV
 endif
 
-OBJECTS = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ) $(SYSTEMTAP_PROBES_O)
+OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ) $(SYSTEMTAP_PROBES_O)
+OBJECTS = $(OBJECTS.c:%.cc=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
 MEXP_SOURCES = $(SOURCES:%=$(MEXP_DIR)/%)
 PREPROS = $(OBJECTS:%=%$(PREPRO_SUFFIX))
@@ -153,6 +161,11 @@ ifneq ($(PREPRO),1)
 endif
 
 include $(DEPTH)/make_in/Makefile.targets
+
+# Ignore S2 induced warnings
+S2_WNO = -Wno-unused-local-typedefs -Wno-deprecated -Wno-sign-compare
+$(OBJECT_DIR)/geospatial/geojson.o: CXXFLAGS += $(S2_WNO)
+$(OBJECT_DIR)/geospatial/geospatial.o: CXXFLAGS += $(S2_WNO)
 
 ifeq ($(USE_SYSTEMTAP),1)
 $(SYSTEMTAP_PROBES_H):	$(SYSTEMTAP_PROBES_D)
