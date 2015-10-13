@@ -324,7 +324,6 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 				// Common when a client aborts.
 				cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zd pos %zd rv %d errno %d", fd_h->fd, msg_sz, pos, rv, errno);
 				as_end_of_transaction_force_close(fd_h);
-				fd_h = NULL;
 				rv = -1;
 				goto Exit;
 			}
@@ -334,14 +333,12 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 		else {
 			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", fd_h->fd, msg_sz, pos);
 			as_end_of_transaction_force_close(fd_h);
-			fd_h = NULL;
 			rv = -1;
 			goto Exit;
 		}
 	}
 
 	as_end_of_transaction_ok(fd_h);
-	fd_h = NULL;
 
 Exit:
 	return rv;
@@ -774,7 +771,6 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 				// common message when a client aborts
 				cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zd pos %zd rv %d errno %d", fd_h->fd, msg_sz, pos, rv, errno);
 				as_end_of_transaction_force_close(fd_h);
-				fd_h = NULL;
 				rv = -1;
 				goto Exit;
 			}
@@ -782,7 +778,6 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 		} else {
 			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", fd_h->fd, msg_sz, pos);
 			as_end_of_transaction_force_close(fd_h);
-			fd_h = NULL;
 			rv = -1;
 			goto Exit;
 		}
@@ -792,7 +787,6 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 	if (written_sz) *written_sz = msg_sz;
 
 	as_end_of_transaction_ok(fd_h);
-	fd_h = NULL;
 
 Exit:
 	if ((uint8_t *)msgp != fb)

@@ -44,8 +44,8 @@
 #include "base/proto.h"
 #include "base/scan.h"
 #include "base/security.h"
-#include "base/udf_rw.h"
 #include "base/thr_demarshal.h"
+#include "base/udf_rw.h"
 
 /* as_transaction_prepare
  * Prepare a transaction that has just been received from the wire.
@@ -385,7 +385,13 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 void
 as_release_file_handle(as_file_handle *proto_fd_h)
 {
-	if (cf_rc_release(proto_fd_h) > 0) {
+	int rc = cf_rc_release(proto_fd_h);
+
+	if (rc > 0) {
+		return;
+	}
+	else if (rc < 0) {
+		cf_warning(AS_PROTO, "release file handle: negative ref-count %d", rc);
 		return;
 	}
 
@@ -397,7 +403,7 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 		as_proto *p = proto_fd_h->proto;
 
 		if ((p->version != PROTO_VERSION) || (p->type >= PROTO_TYPE_MAX)) {
-			cf_info(AS_AS, "release file handle: bad proto buf, corruption");
+			cf_warning(AS_PROTO, "release file handle: bad proto buf, corruption");
 		}
 		else {
 			cf_free(proto_fd_h->proto);

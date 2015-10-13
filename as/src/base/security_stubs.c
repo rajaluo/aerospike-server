@@ -139,7 +139,7 @@ as_security_transact(as_transaction *tr)
 			cf_warning(AS_SECURITY, "fd %d send returned 0", fd);
 			as_end_of_transaction_force_close(tr->proto_fd_h);
 			tr->proto_fd_h = NULL;
-			break;
+			return;
 		}
 		// rv < 0
 		else if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -149,14 +149,12 @@ as_security_transact(as_transaction *tr)
 			cf_warning(AS_SECURITY, "fd %d send failed, errno %d", fd, errno);
 			as_end_of_transaction_force_close(tr->proto_fd_h);
 			tr->proto_fd_h = NULL;
-			break;
+			return;
 		}
 	}
 
-	if (tr->proto_fd_h != NULL) {
-		as_end_of_transaction_ok(tr->proto_fd_h);
-		tr->proto_fd_h = NULL;
-	}
+	as_end_of_transaction_ok(tr->proto_fd_h);
+	tr->proto_fd_h = NULL;
 }
 
 
