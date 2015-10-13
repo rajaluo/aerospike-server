@@ -181,6 +181,7 @@ udf__aerospike_get_particle_buf(udf_record *urecord, udf_record_bin *ubin, uint8
 	switch(type) {
 		case AS_LIST:
 		case AS_BYTES:
+		case AS_GEOJSON:
 		case AS_MAP:
 		case AS_STRING: {
 			alloc_size = urecord->rd->ns->storage_write_block_size;
@@ -332,7 +333,8 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 			}
 			break;
 		}
-		case AS_BYTES: {
+		case AS_BYTES:
+		case AS_GEOJSON: {
 			as_bytes *  v   = as_bytes_fromval(val);
 			uint8_t *   s   = as_bytes_get(v);
 			size_t      l   = as_bytes_size(v);
