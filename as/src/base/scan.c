@@ -497,6 +497,7 @@ conn_scan_job_finish(conn_scan_job* job)
 	if (job->fd_h) {
 		size_t size_sent = send_blocking_response_fin(job->fd_h->fd,
 				_job->abandoned);
+
 		job->net_io_bytes += size_sent;
 		conn_scan_job_release_fd(job, size_sent == 0);
 	}
@@ -1277,17 +1278,17 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	if (as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0) {
-		cf_warning(AS_SCAN, "udf-bg scan job error sending fin");
-		as_end_of_transaction_force_close(tr->proto_fd_h);
-		tr->proto_fd_h = NULL;
-	}
-
-	if (tr->proto_fd_h != NULL) {
+	if (as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) == 0) {
 		tr->proto_fd_h->last_used = cf_getms();
 		as_end_of_transaction_ok(tr->proto_fd_h);
-		tr->proto_fd_h = NULL;
 	}
+	else {
+		cf_warning(AS_SCAN, "udf-bg scan job error sending fin");
+		as_end_of_transaction_force_close(tr->proto_fd_h);
+		// No point returning an error - it can't be reported on this socket.
+	}
+
+	tr->proto_fd_h = NULL;
 
 	return AS_PROTO_RESULT_OK;
 }

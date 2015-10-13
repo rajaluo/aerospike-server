@@ -163,12 +163,7 @@ as_batch_send_error(as_file_handle* fd_h, int result_code)
 
 	int status = as_batch_send(fd_h->fd, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
 
-	// The demarshal thread is responsible for releasing the connection in case
-	// of a non-zero status.
-	if (! status) {
-		as_end_of_transaction_ok(fd_h);
-		fd_h = 0;
-	}
+	as_end_of_transaction(fd_h, status != 0);
 
 	if (result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
 		cf_atomic_int_incr(&g_config.batch_index_timeout);
