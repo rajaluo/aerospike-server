@@ -123,6 +123,7 @@
 #include "base/udf_rw.h"
 #include "base/udf_record.h"
 #include "fabric/fabric.h"
+#include "geospatial/geospatial.h"
 
 
 /*
@@ -603,7 +604,6 @@ qtr_set_err(as_query_transaction *qtr, int result_code, char *fname, int lineno)
 	qtr_unlock(qtr);
 }
 
-
 static void
 qtr_set_done(as_query_transaction *qtr, int result_code, char *fname, int lineno)
 {
@@ -674,15 +674,15 @@ query_check_timeout(as_query_transaction *qtr)
  */
 // **************************************************************************************************
 static void
-query_post_release_qnode(as_query_transaction * qtr)
+query_release_prereserved_partitions(as_query_transaction * qtr)
 {
 	if (!qtr) {
 		cf_warning(AS_QUERY, "qtr is NULL");
 		return;
 	}
-	if (qtr->qctx.qnodes_pre_reserved) {
+	if (qtr->qctx.partitions_pre_reserved) {
 		for (int i=0; i<AS_PARTITIONS; i++) {
-			if (qtr->qctx.is_partition_qnode[i]) {
+			if (qtr->qctx.can_partition_query[i]) {
 				as_partition_release(&qtr->rsv[i]);
 				cf_atomic_int_decr(&g_config.dup_tree_count);
 			}
@@ -789,8 +789,8 @@ query_run_teardown(as_query_transaction *qtr)
 		cf_atomic32_decr(&g_query_long_running);
 	}
 
-	// Release all the qnodes
-	query_post_release_qnode(qtr);
+	// Release all the partitions
+	query_release_prereserved_partitions(qtr);
 
 
 	if (qtr->bb_r) {
@@ -816,9 +816,6 @@ static void
 query_release_fd(as_query_transaction *qtr)
 {
 	if (qtr && qtr->fd_h) {
-		if (qtr_is_abort(qtr)) {
-			shutdown(qtr->fd_h->fd, SHUT_RDWR);
-		}
 		qtr->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 		qtr->fd_h->last_used = cf_getms();
 		AS_RELEASE_FILE_HANDLE(qtr->fd_h);
@@ -942,7 +939,11 @@ query_netio_finish_cb(void *data, int retcode)
 		}
 		QUERY_HIST_INSERT_DATA_POINT(query_net_io_hist, io->start_time);	
 
-		AS_RELEASE_FILE_HANDLE(io->fd_h);
+		// Undo the increment from query_netio(). Cannot reach zero here: the
+		// increment owned by the transaction will only be undone after all netio
+		// is complete.
+		cf_rc_release(io->fd_h);
+		io->fd_h = NULL;
 		bb_poolrelease(io->bb_r);
 
 		cf_atomic32_incr(&qtr->netio_pop_seq);
@@ -1001,29 +1002,30 @@ query_netio(as_query_transaction *qtr)
 
 
 /*
- * Qnode Reservation Abstraction
+ * Query Reservation Abstraction
  */
 // **************************************************************************************************
+// Returns NULL if partition with is 'pid' is not query-able Else 
+//      if all the partitions are reserved upfront returns the rsv used for reserving the partition
+//      else reserves the partition and returns rsv
 as_partition_reservation *
-query_reserve_qnode(as_namespace * ns, as_query_transaction * qtr, as_partition_id  pid, as_partition_reservation * rsv)
+query_reserve_partition(as_namespace * ns, as_query_transaction * qtr, as_partition_id  pid, as_partition_reservation * rsv)
 {
-	// qtr could be preserved in some cases (when its enabled in the config)
-	// If that is the case, just return the reservation ptr from the cached values
-	if (qtr->qctx.qnodes_pre_reserved) {
-		if (!qtr->qctx.is_partition_qnode[pid]) {
-			cf_debug(AS_QUERY, "Getting digest in rec list which do not belong to qnode.");
+	if (qtr->qctx.partitions_pre_reserved) {
+		if (!qtr->qctx.can_partition_query[pid]) {
+			cf_debug(AS_QUERY, "Getting digest in rec list which do not belong to query-able partition.");
 			return NULL;
 		}
 		return &qtr->rsv[pid];
 	}
 
-	// If its not preserved, reserve it and return 
+	// Works for scan aggregation
 	if (!rsv) {
-		cf_warning(AS_QUERY, "rsv is null while reserving qnode.");
+		cf_warning(AS_QUERY, "rsv is null while reserving partition.");
 		return NULL;
 	}
 	AS_PARTITION_RESERVATION_INITP(rsv);
-	if (0 != as_partition_reserve_qnode(ns, pid, rsv)) {
+	if (0 != as_partition_reserve_query(ns, pid, rsv)) {
 		return NULL;
 	}
 	cf_atomic_int_incr(&g_config.dup_tree_count);
@@ -1031,31 +1033,33 @@ query_reserve_qnode(as_namespace * ns, as_query_transaction * qtr, as_partition_
 }
 
 void
-query_release_qnode(as_query_transaction * qtr, as_partition_reservation * rsv)
+query_release_partition(as_query_transaction * qtr, as_partition_reservation * rsv)
 {
-	if (!qtr->qctx.qnodes_pre_reserved) {
+	if (!qtr->qctx.partitions_pre_reserved) {
 		as_partition_release(rsv);
 		cf_atomic_int_decr(&g_config.dup_tree_count);
 	}
 }
 
+// Pre reserves query-able partitions
 void
-as_query_pre_reserve_qnodes(as_query_transaction * qtr)
+as_query_pre_reserve_partitions(as_query_transaction * qtr)
 {
 	if (!qtr) {
 		cf_warning(AS_QUERY, "qtr is NULL");
 		return;	
 	}
-	if (qtr->qctx.qnodes_pre_reserved) {
+	if (qtr->qctx.partitions_pre_reserved) {
 		qtr->rsv = cf_malloc(sizeof(as_partition_reservation) * AS_PARTITIONS);
 		if (!qtr->rsv) {
 			cf_crash(AS_QUERY, "Allocation Error in Query Prereserve !!");
 		}
-		as_partition_prereserve_qnodes(qtr->ns, qtr->qctx.is_partition_qnode, qtr->rsv);
+		as_partition_prereserve_query(qtr->ns, qtr->qctx.can_partition_query, qtr->rsv);
 	} else {
 		qtr->rsv = NULL;
 	}
 }
+
 // **************************************************************************************************
 
 
@@ -1428,6 +1432,30 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			matches = true;
 			break;
 		}
+		case AS_PARTICLE_TYPE_GEOJSON : {
+			if ((type != as_sindex_pktype(qtr->si->imd))
+			|| (type != start->type)
+			|| (type != end->type)) {
+				cf_debug(AS_QUERY, "as_query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
+					type, start->type, end->type, as_sindex_pktype(qtr->si->imd),
+					qtr->si->imd->bnames[0], qtr->si->imd->iname);
+				return false;
+			}
+
+			bool iswithin =
+				! qtr->ns->geo2dsphere_within_strict ||
+				as_bin_particle_geojson_match(b,
+											  qtr->srange->cellid,
+											  qtr->srange->region);
+
+			// We either found a valid point or a false positive.
+			if (iswithin)
+				cf_atomic_int_incr(&g_config.geo_region_query_points);
+			else
+				cf_atomic_int_incr(&g_config.geo_region_query_falsepos);
+
+			return iswithin;
+		}
 		case AS_PARTICLE_TYPE_MAP : {
 			val     = as_val_frombin(b);
 			res_val = as_sindex_extract_val_from_path(qtr->si->imd, val);	
@@ -1523,12 +1551,12 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 	as_partition_reservation rsv_stack;
 	as_partition_reservation * rsv = &rsv_stack;
 
-	// We make sure while making digest list that current node is a qnode
-	// Attempt the query reservation here as well. If this node is not a
-	// query node anymore then no need to return anything
-	// Since we are reserving all the qnodes upfront, this is a defensive check
+	// We make sure while making digest list that current partition is query-able
+	// Attempt the query reservation here as well. If this partition is not
+	// query-able anymore then no need to return anything
+	// Since we are reserving all the partitions upfront, this is a defensive check
 	as_partition_id pid =  as_partition_getid(*dig);
-	rsv                 = query_reserve_qnode(ns, qtr, pid, rsv);
+	rsv                 = query_reserve_partition(ns, qtr, pid, rsv);
 	if (!rsv) {
 		return AS_QUERY_OK;
 	}
@@ -1569,7 +1597,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		if (!query_record_matches(qtr, &rd, skey)) {
 			as_storage_record_close(r, &rd);
 			as_record_done(&r_ref, ns);
-			query_release_qnode(qtr, rsv);
+			query_release_partition(qtr, rsv);
 			cf_atomic64_incr(&g_config.query_false_positives);
 			ASD_QUERY_IO_NOTMATCH(nodeid, qtr->trid);
 			return AS_QUERY_OK;
@@ -1580,7 +1608,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 			as_storage_record_close(r, &rd);
 			as_record_done(&r_ref, ns);
 			qtr_set_err(qtr, AS_PROTO_RESULT_FAIL_QUERY_CBERROR, __FILE__, __LINE__);
-			query_release_qnode(qtr, rsv);
+			query_release_partition(qtr, rsv);
 			ASD_QUERY_IO_ERROR(nodeid, qtr->trid);
 			return AS_QUERY_ERR;
 		}
@@ -1595,7 +1623,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 				*(uint64_t *)dig);
 	}
 CLEANUP :
-	query_release_qnode(qtr, rsv);
+	query_release_partition(qtr, rsv);
 
 	ASD_QUERY_IO_FINISHED(nodeid, qtr->trid);
 
@@ -1712,15 +1740,15 @@ agg_ostream_write(void *udata, as_val *v)
 }
 
 static as_partition_reservation *
-agg_reserve_qnode(void *udata, as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv)
+agg_reserve_partition(void *udata, as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv)
 {
-	return query_reserve_qnode(ns, (as_query_transaction *)udata, pid, rsv);
+	return query_reserve_partition(ns, (as_query_transaction *)udata, pid, rsv);
 }
 
 static void
-agg_release_qnode(void *udata, as_partition_reservation *rsv)
+agg_release_partition(void *udata, as_partition_reservation *rsv)
 {
-	query_release_qnode((as_query_transaction *)udata, rsv);
+	query_release_partition((as_query_transaction *)udata, rsv);
 }
 
 static void
@@ -1746,8 +1774,8 @@ agg_record_matches(void *udata, udf_record *urecord, void *key_data)
 const as_aggr_hooks query_aggr_hooks = {
 	.ostream_write = agg_ostream_write,
 	.set_error     = agg_set_error,
-	.ptn_reserve   = agg_reserve_qnode,
-	.ptn_release   = agg_release_qnode,
+	.ptn_reserve   = agg_reserve_partition,
+	.ptn_release   = agg_release_partition,
 	.pre_check     = agg_record_matches
 };
 // **************************************************************************************************
@@ -2081,15 +2109,16 @@ query_get_nextbatch(as_query_transaction *qtr)
 		time_ns = cf_getns();
 	}
 
+	as_sindex_range *srange	 = &qtr->srange[qctx->range_index];
+
 	if (qctx->pimd_idx == -1) {
-		if (!qtr->srange->isrange) {
-			qctx->pimd_idx   = ai_btree_key_hash_from_sbin(si->imd, &qtr->srange->start);
+		if (!srange->isrange) {
+			qctx->pimd_idx	 = ai_btree_key_hash_from_sbin(si->imd, &srange->start);
 		} else {
-			qctx->pimd_idx   = 0;
+			qctx->pimd_idx	 = 0;
 		}
 	}
 
-	as_sindex_range *srange  = qtr->srange;
 	if (!qctx->recl) {
 		qctx->recl = cf_malloc(sizeof(cf_ll));
 		if (!qctx->recl) {
@@ -2128,10 +2157,26 @@ query_get_nextbatch(as_query_transaction *qtr)
 		qctx->nbtr_done      = false;
 		qctx->pimd_idx++;
 		cf_detail(AS_QUERY, "All the Data finished moving to next tree %d", qctx->pimd_idx);
-		if (!srange->isrange || (qctx->pimd_idx == si->imd->nprts)) {
+		if (!srange->isrange) {
 			qtr->result_code = AS_PROTO_RESULT_OK;
 			ret              = AS_QUERY_DONE;
 			goto batchout;
+		}
+		if (qctx->pimd_idx == si->imd->nprts) {
+
+			// Geospatial queries need to search multiple ranges.  The
+			// srange object is a vector of MAX_REGION_CELLS elements.
+			// We iterate over ranges until we encounter an empty
+			// srange (num_binval == 0).
+			//
+			if (qctx->range_index == (MAX_REGION_CELLS - 1) ||
+				qtr->srange[qctx->range_index+1].num_binval == 0) {
+				qtr->result_code = AS_PROTO_RESULT_OK;
+				ret              = AS_QUERY_DONE;
+				goto batchout;
+			}
+			qctx->range_index++;
+			qctx->pimd_idx = -1;
 		}
 		ret = AS_QUERY_CONTINUE;
 		goto batchout;
@@ -2150,8 +2195,6 @@ query_run_setup(as_query_transaction *qtr)
 {
 
 #if defined(USE_SYSTEMTAP)
-	// We'll need to preserve some values on the stack for tracing
-	// becuase the qtr is gone before the done event.
 	uint64_t nodeid = g_config.self_node;
 #endif
 
@@ -2176,12 +2219,13 @@ query_run_setup(as_query_transaction *qtr)
 	qtr->qctx.pimd_idx            = -1;
 	qtr->qctx.recl                = NULL;
 	qtr->qctx.n_bdigs             = 0;
-	qtr->qctx.qnodes_pre_reserved = g_config.qnodes_pre_reserved;
+	qtr->qctx.range_index         = 0;
+	qtr->qctx.partitions_pre_reserved = g_config.partitions_pre_reserved;
 	qtr->qctx.bkey                = &qtr->bkey;
 	init_ai_obj(qtr->qctx.bkey);
 	bzero(&qtr->qctx.bdig, sizeof(cf_digest));
-	// Populate all the paritions for which this node is a qnode.
-	as_query_pre_reserve_qnodes(qtr);
+	// Populate all the paritions for which this partition is query-able
+	as_query_pre_reserve_partitions(qtr);
 
 	qtr->priority                 = g_config.query_priority;
 	qtr->bb_r                     = bb_poolrequest();
@@ -2191,6 +2235,8 @@ query_run_setup(as_query_transaction *qtr)
 	cf_atomic64_incr(&g_config.query_short_reqs);
 	cf_atomic32_incr(&g_query_short_running);
 
+	// This needs to be distant from the initialization of nodeid to
+	// workaround a lame systemtap/compiler interaction.
 	ASD_QUERY_INIT(nodeid, qtr->trid);
 
 	return AS_QUERY_OK;
@@ -2406,9 +2452,9 @@ static void
 query_generator(as_query_transaction *qtr)
 {
 #if defined(USE_SYSTEMTAP)
-    uint64_t nodeid = g_config.self_node;
-    uint64_t trid = qtr->trid;
-    size_t nrecs = 0;
+	uint64_t nodeid = g_config.self_node;
+	uint64_t trid = qtr->trid;
+	size_t nrecs = 0;
 #endif
 
 	// Query can get requeue for many different reason. Check if it is 
@@ -2839,8 +2885,8 @@ as_query(as_transaction *tr)
 
 	if (rv == AS_QUERY_DONE) {
 		// Send FIN packet to client to ignore this.
-		as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK);
-		AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+		bool force_close = as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0;
+		as_end_of_transaction(tr->proto_fd_h, force_close);
 		tr->proto_fd_h = NULL; // Paranoid
 		if (tr->msgp) {
 			cf_free(tr->msgp);
@@ -3221,7 +3267,7 @@ as_query_gconfig_default(as_config *c)
 	c->query_req_in_query_thread = 0;
 	c->query_untracked_time_ms   = AS_QUERY_UNTRACKED_TIME;
 
-	c->qnodes_pre_reserved       = false;
+	c->partitions_pre_reserved       = false;
 
 	// Aggregation
 	c->udf_runtime_max_memory    = ULONG_MAX;
@@ -3331,8 +3377,8 @@ as_query_init()
 		cf_warning(AS_SINDEX, "couldn't create histogram for query net-i/o");
 	}
 
-	g_config.query_enable_histogram	= false;
-	g_config.qnodes_pre_reserved    = false;
+	g_config.query_enable_histogram	 = false;
+	g_config.partitions_pre_reserved = false;
 }
 
 /*

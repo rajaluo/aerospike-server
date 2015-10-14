@@ -1137,115 +1137,6 @@ as_partition_reserve_migrate(as_namespace *ns, as_partition_id pid, as_partition
 
 }
 
-/* as_partition_reserve_qnode
- * Obtain a read reservation on qnode ... used by secondary index code to make sure * index is loaded on the qnode so queries can be served after scan quickly. Rather
- * than waiting till the migation finishes
- *
- * On success:  The provided as_partition_reservation * is filled in with the
- * 				appropriate reserved tree, namespace, etc and the pending write
- * 				count is incremented;
- * On failure:  The provided reservation is not touched or initialized
- *
- * In either case, the node is returned.
- */
-int
-as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv)
-{
-	as_partition *p = NULL;
-	int ret         = -1;
-
-	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
-	cf_assert(rsv, AS_PARTITION, CF_CRITICAL, "invalid reservation");
-	cf_assert((pid < AS_PARTITIONS), AS_PARTITION, CF_CRITICAL, "invalid partition");
-	p = &ns->partitions[pid];
-
-	cf_node self = g_config.self_node;
-	cf_node n;
-	// find location of node in replica list, returns -1 if node is not found
-
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-
-	bool is_qnode  = false;
-	if (p->qnode) {
-		n = p->qnode; //	    is_qnode = (n == self);
-	} else {
-		// is_read is always true in case of queries
-		// TODO this is not needed
-		n = find_sync_copy(ns, pid, p, true);
-	}
-	is_qnode = (n == self);
-
-	if (is_qnode) {
-		/* This should always be true (desyncs will be caught above in the
-		 * migration path checking) */
-		if (AS_PARTITION_STATE_SYNC == p->state || AS_PARTITION_STATE_ZOMBIE == p->state) {
-			as_partition_reserve_lockfree(ns, pid, rsv);
-			ret = 0;
-		}
-		else {
-			// This is just a safety net.
-			memset(rsv, 0, sizeof(*rsv));
-		}
-	}
-
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-
-	return ret;
-}
-
-uint32_t
-as_partition_prereserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[])
-{
-	/*
-	 * Iterate through all the partitions
-	 * If the node is qnode for the partition 
-	 * 		set the pid index in is_partition_qnode as true
-	 * 		reserve the parition suing rsv of index pid.
-	 * Else 
-	 * 		Set the pid index in is_partition_qnode as false
-	 */
-	as_partition  * p = NULL;
-	uint32_t reserved = 0;
-	// Iterate through all the partitions in the namespace
-	for (int i=0; i<AS_PARTITIONS; i++) {
-		p = &ns->partitions[i];
-		cf_node self = g_config.self_node;
-
-		if (0 != pthread_mutex_lock(&p->lock))
-			cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-
-		bool is_qnode  = false;
-		if (p->qnode) {
-			is_qnode = (p->qnode == self);
-		}
-
-		// If the node is qnode for the partition
-		if (is_qnode) {
-			// Set the pid index in is_parition_qnode as true.
-			// Reserve the partition.
-			
-			AS_PARTITION_RESERVATION_INIT(rsv[i]);
-			as_partition_reserve_lockfree(ns, i, &rsv[i]);
-			is_partition_qnode[i] = true;
-			reserved++;
-			// Theoretically, any partition which is qnode whould either belong to sync or 
-			// zombie state. Its better to know if some other state is becoming qnode.
-			if (AS_PARTITION_STATE_SYNC != p->state && AS_PARTITION_STATE_ZOMBIE != p->state) {
-				cf_debug(AS_PARTITION, "Not expected - Partition is qnode and partition %d is in %d state", i, p->state);
-			}
-			cf_atomic_int_incr(&g_config.dup_tree_count);
-		}
-		else {
-			is_partition_qnode[i] = false;
-		}
-
-		if (0 != pthread_mutex_unlock(&p->lock))
-			cf_crash(AS_PARTITION, "couldn't unlock partition state lock: %s", cf_strerror(errno));
-	}
-	return reserved;
-}
 /* as_partition_reserve_write
  * Obtain a write reservation on a partition, or get the address of a
  * node who can.
@@ -1268,6 +1159,37 @@ int
 as_partition_reserve_read(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key)
 {
 	return as_partition_reserve_read_write(ns, pid, rsv, node, true, cluster_key);
+}
+
+
+/* as_partition_reserve_query
+ * Reserve a partition for query
+ * return value 0 means the reservation was taken, -1 means not
+ */
+int
+as_partition_reserve_query(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv)
+{
+	return as_partition_reserve_write(ns, pid, rsv, NULL, NULL);
+}
+
+/* as_partition_prereserve_query
+ * Reserves all query-able partitions
+ * Returns the number of partitions reserved
+ */
+int
+as_partition_prereserve_query(as_namespace * ns, bool can_partition_query[], as_partition_reservation rsv[])
+{
+	int reserved = 0;
+	for (int i=0; i<AS_PARTITIONS; i++) {
+		if (as_partition_reserve_query(ns, i, &rsv[i])) {
+			can_partition_query[i] = false;	
+		}
+		else {
+			can_partition_query[i] = true;
+			reserved++;
+		}
+	}
+	return reserved;
 }
 
 /* as_partition_release_lockfree
@@ -2062,25 +1984,6 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 	if (0 != pthread_mutex_lock(&p->lock))
 		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
 
-	// Mark master as query node when migration from the
-	// current node to master is finished, In case current
-	// node is query node.
-	if (p->qnode == g_config.self_node) {
-		if (node == p->replica[0]) {
-			if (p->qnode == p->replica[0]) {
-				cf_warning(AS_PARTITION, "[%s:%d] Unexpected state qnode %"PRIx64" is doing transfer to self %"PRIx64"",
-						   ns->name, p->partition_id, p->qnode, p->replica[0]);
-			}
-			cf_debug(AS_PARTITION, "[%s:%d] Marking at the time of transfer %"PRIx64" as qnode from %"PRIx64"",
-					 ns->name, p->partition_id, p->replica[0], p->qnode);
-			p->qnode = p->replica[0];
-			p->reject_writes = true;
-		}
-		else {
-			cf_debug(AS_PARTITION, "[%s:%d] Master is the qnode not changing master= %"PRIx64" qnode = %"PRIx64" %"PRIx64"",
-					 ns->name, p->partition_id, p->replica[0], p->qnode, node);
-		}
-	}
 
 	if (AS_PARTITION_STATE_WAIT == p->state) {
 
@@ -2471,19 +2374,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						cf_debug(AS_PARTITION, "{%s:%d} migrate rx from node %"PRIx64" to master, no duplicates", ns->name, pid, source_node);
 
 						// Might now do migration(s) to prole(s) - don't break!
-					}
-
-					// Mark master as query node when migration from the
-					// query node to master is finished. mark this node
-					// to reject writes
-					// Position of this logic is crucial.
-					if (source_node == p->qnode) {
-						cf_debug(AS_PARTITION, "[%s:%d] Marking %"PRIx64" as qnode from %"PRIx64"", ns->name, p->partition_id, g_config.self_node, p->qnode);
-						if (g_config.self_node != p->replica[0]) {
-							cf_warning(AS_PARTITION, "[%s:%d] state corruption self %"PRIx64" should be master %"PRIx64"",
-									ns->name, p->partition_id, g_config.self_node, p->replica[0]);
-						}
-						p->qnode = g_config.self_node;
 					}
 
 					if (p->pending_migrate_rx > 0) {
@@ -3416,21 +3306,6 @@ as_partition_balance()
 				}
 			} // end lost
 
-			// Logic for searching the query node. Idea is pick up the node
-			// with the maximum number of objects. In case of conflict pick
-			// master (in case master is involved in the the conflict) or
-			// the first node with maximum objects wins.
-			// Search both in replica list and duplicate list. List may not
-			// be disjoint. First search in duplicate and then in replica so
-			// replica overrides duplicate. It is preferred that the replica
-			// is chosen as QNODE, reason being QNODE also needs to get all
-			// the writes at the time of migration it better be replica. If
-			// a node is QNODE clear the reject_writes from it if set. So it
-			// can accept write from master so queries served have latest
-			// data as well.
-			// NB: The code is locate here with purpose DO NOT move it around
-			//     unless you fully understand
-
 #if 0
 			// Should it default to master
 			int master_index_in_hvlist = 0;
@@ -3443,51 +3318,6 @@ as_partition_balance()
 			uint64_t max_ptnsz = 0;//paxos->c_partition_size[i][n_index][master_index_in_hvlist];
 			uint64_t master_ptnsz = 0;//paxos->c_partition_size[i][n_index][master_index_in_hvlist];
 #endif
-			uint64_t max_ptnsz    = 0;
-			p->qnode              = p->replica[0];
-
-			/*
-			 * QNODE CALCULATION - 
-			 * Iterate in the succession list from 0 to cluster size
-			 * 		Pick the first node with max partition size
-			 * 		Make it qnode.
-			 * 	
-			 * For non-qnode and non-master make qnode as master
-			 *
-			 * Order of preference
-			 * Largest Size
-			 * 		-- Master
-			 * 		-- Replica
-			 * 		-- Duplicate / Non-Replica [ZOMBIE]
-			 */
-			
-			for (int k = 0; k < cluster_size; k++) {
-				size_t n_index = HV_SLINDEX(j, k); // pick up the node offset
-				cf_node cur_node = HV(j, k);       // pick up the nodes
-				cf_debug(AS_PARTITION, "Node %d, has size %ld", k, paxos->c_partition_size[i][n_index][k]);
-
-				// Since we are iterating in the succession list, 
-				// equal partition size in different nodes will be taken care.
-				// Order of preferance will be maintained.
-				if (max_ptnsz < paxos->c_partition_size[i][n_index][j]) {	
-					p->qnode = cur_node;
-					max_ptnsz = paxos->c_partition_size[i][n_index][j];
-					cf_debug(AS_PARTITION, "Picked for pid %d size %ld node %"PRIx64" index in succession list %d", 
-								p->partition_id, max_ptnsz, cur_node, k);
-				}
-			}
-
-			// Make QNODE = Master for NON-QNODE and NON-MASTER Only QNODE
-			// itself and Master needs to know true identity of QNODE. Others
-			// need not. Also in the end of migration only Master and QNODE
-			// can switch identity. And after switching ultimately Master
-			// becomes QNODE so marking it upfront for other others is good.
-			if ((p->qnode != g_config.self_node) &&
-					(p->replica[0] != g_config.self_node)) {
-				cf_debug(AS_PARTITION, "Modified for pid %d, non-qnode from non-qnode %"PRIx64", to master %"PRIx64"", p->partition_id,
-						 p->qnode, p->replica[0]);
-				p->qnode = p->replica[0];
-			}
 
 			/*
 			 * compute which of the replicas is not sync
@@ -3710,22 +3540,6 @@ as_partition_balance()
 						p->reject_writes = true;
 					}
 
-					bool is_primary_version = (memcmp(&p->version_info, &p->primary_version_info, sizeof(as_partition_vinfo)) == 0);
-					/* Do not reject write at QNODE */
-					if (p->qnode == g_config.self_node) {
-						if (!cf_contains64(dupl_nodes, n_dupl, self) && !is_primary_version) {
-							cf_warning(AS_PARTITION, "{%s:%d} Qnode %"PRIx64" not in the duplicate list", ns->name, j, p->qnode);
-						}
-						if (p->qnode != p->replica[0]) {
-							if (p->reject_writes == true) {
-								cf_debug(AS_PARTITION, "{%s:%d} Partition not rejecting write during merge as it is "
-										 " Query node (qnode=%"PRIx64" self=%"PRIx64"", ns->name, j,
-										 p->qnode, g_config.self_node);
-							}
-							p->reject_writes = false;
-						}
-					}
-
 					/*
 					 * if this is a replica and there are duplicate partitions
 					 * then wait for migration from master.
@@ -3773,10 +3587,6 @@ as_partition_balance()
 
 		} // end for each partition
 
-		for (int j = 0; j < AS_PARTITIONS; j++) {
-			as_partition *p = &ns->partitions[j];
-			cf_debug(AS_PARTITION, "QNODE FOR PID %d =%"PRIx64"", j, p->qnode);
-		}
 
 		cf_info(AS_PARTITION, "{%s} re-balanced, expect migrations: out %d, in %d, out-later %d",
 				ns->name, ns_pending_migrate_tx, ns_pending_migrate_rx, ns_pending_migrate_tx_later);
@@ -3920,7 +3730,6 @@ as_partition_balance_init()
 
 			if (! is_partition_null(&p->version_info)) {
 				memcpy(p->replica, &g_config.self_node, sizeof(cf_node));
-				p->qnode = g_config.self_node;
 				p->primary_version_info = p->version_info;
 				n_stored++;
 			}
@@ -3975,7 +3784,6 @@ as_partition_balance_init_single_node_cluster()
 
 				p->state = AS_PARTITION_STATE_SYNC;
 				memcpy(p->replica, &g_config.self_node, sizeof(cf_node));
-				p->qnode = g_config.self_node;
 
 				p->version_info = new_vinfo;
 				p->primary_version_info = new_vinfo;
@@ -4015,4 +3823,22 @@ bool
 as_partition_balance_is_multi_node_cluster()
 {
 	return g_multi_node;
+}
+
+// A partition is queryable only when the node is master or origin
+// BEWARE. No partition lock is being taken here.
+// This is done to avoid a deadlock between sindex and apply journal
+bool
+as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p)
+{
+	cf_node self             = g_config.self_node;
+	bool is_sync             = (p->state == AS_PARTITION_STATE_SYNC);
+	bool migrating_to_master = (p->target != 0);
+	bool is_master           = (p->replica[0] == self);
+	
+	if ((is_master && is_sync) || migrating_to_master) {
+		return true;
+	} else {
+		return false;
+	}
 }

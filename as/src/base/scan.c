@@ -458,7 +458,7 @@ void conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h);
 void conn_scan_job_disown_fd(conn_scan_job* job);
 void conn_scan_job_finish(conn_scan_job* job);
 bool conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size);
-void conn_scan_job_release_fd(conn_scan_job* job);
+void conn_scan_job_release_fd(conn_scan_job* job, bool force_close);
 void conn_scan_job_info(conn_scan_job* job, as_mon_jobstat* stat);
 
 //----------------------------------------------------------
@@ -494,9 +494,11 @@ conn_scan_job_finish(conn_scan_job* job)
 	as_job* _job = (as_job*)job;
 
 	if (job->fd_h) {
-		job->net_io_bytes += send_blocking_response_fin(job->fd_h->fd,
+		size_t size_sent = send_blocking_response_fin(job->fd_h->fd,
 				_job->abandoned);
-		conn_scan_job_release_fd(job);
+
+		job->net_io_bytes += size_sent;
+		conn_scan_job_release_fd(job, size_sent == 0);
 	}
 
 	pthread_mutex_destroy(&job->fd_lock);
@@ -518,7 +520,7 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 	size_t size_sent = send_blocking_response_chunk(job->fd_h->fd, buf, size);
 
 	if (size_sent == 0) {
-		conn_scan_job_release_fd(job);
+		conn_scan_job_release_fd(job, true);
 		pthread_mutex_unlock(&job->fd_lock);
 		as_job_manager_abandon_job(_job->mgr, _job,
 				AS_PROTO_RESULT_FAIL_UNKNOWN);
@@ -532,12 +534,12 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 }
 
 void
-conn_scan_job_release_fd(conn_scan_job* job)
+conn_scan_job_release_fd(conn_scan_job* job, bool force_close)
 {
 	set_blocking(job->fd_h->fd, false);
 	job->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 	job->fd_h->last_used = cf_getms();
-	AS_RELEASE_FILE_HANDLE(job->fd_h);
+	as_end_of_transaction(job->fd_h, force_close);
 	job->fd_h = NULL;
 }
 
@@ -1275,13 +1277,16 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	if (as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0) {
+	if (as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) == 0) {
+		tr->proto_fd_h->last_used = cf_getms();
+		as_end_of_transaction_ok(tr->proto_fd_h);
+	}
+	else {
 		cf_warning(AS_SCAN, "udf-bg scan job error sending fin");
-		// Nothing more we can do here.
+		as_end_of_transaction_force_close(tr->proto_fd_h);
+		// No point returning an error - it can't be reported on this socket.
 	}
 
-	tr->proto_fd_h->last_used = cf_getms();
-	AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
 	tr->proto_fd_h = NULL;
 
 	return AS_PROTO_RESULT_OK;

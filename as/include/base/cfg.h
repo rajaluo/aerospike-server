@@ -315,8 +315,8 @@ typedef struct as_config_s {
 	histogram      *_sindex_gc_pimd_rlock_hist;   // HIstogram to track time spent under pimd rlock by sindex GC
 	histogram      *_sindex_gc_pimd_wlock_hist;   // Histogram to track time spent under pimd wlock by sindex GC
 
-	bool                qnodes_pre_reserved;      // If true we will reserve all the qnodes upfront 
-												  // before processing query. Default - TRUE
+	bool                partitions_pre_reserved;  // If true query will reserve all the partitions upfront 
+												  // before processing query. Default - FALSE
 	cf_atomic64			query_reqs;
 	cf_atomic64			query_fail;
 	cf_atomic64			query_short_queue_full;
@@ -345,6 +345,12 @@ typedef struct as_config_s {
 	uint64_t			udf_runtime_max_memory; // Maximum runtime memory allowed for per UDF
 	uint64_t			udf_runtime_max_gmemory; // maximum runtime memory alloed for all UDF
 	cf_atomic_int		udf_runtime_gmemory_used; // Current runtime memory reserve by per UDF - BUG if global should be 64?
+
+    // Geospatial stats
+	cf_atomic_int		geo_region_query_count;		// Number of region queries
+	cf_atomic_int		geo_region_query_cells;		// Number of cells used by region queries
+	cf_atomic_int		geo_region_query_points;	// Number of valid points found
+	cf_atomic_int		geo_region_query_falsepos;	// Number of false positives found
 
 	/*
 	** STATISTICS
