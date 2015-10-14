@@ -1,0 +1,45 @@
+#!/bin/sh
+# chkconfig: 2345 85 15
+# description: Starts and stops the Aerospike Telemetry Agent
+
+### BEGIN INIT INFO
+# Provides:		aerospike_telemetry
+# Required-Start:	$remote_fs $network
+# Required-Stop:	$remote_fs $network
+# Default-Start:	2 3 4 5
+# Deafult-Stop:		0 1 6
+# Short-Description:	Aerospike Telemetry Agent
+### END INIT INFO
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+DIR=/opt/aerospike/telemetry
+DAEMON=$DIR/telemetry.py
+CONFIG="/etc/aerospike/telemetry.conf"
+
+start() {
+	python $DAEMON $CONFIG start
+}
+
+stop() {
+	python $DAEMON $CONFIG stop
+}
+
+status() {
+	python $DAEMON $CONFIG status
+}
+
+restart() {
+	python $DAEMON $CONFIG restart
+}
+
+case "$1" in
+	start|stop|restart|status)
+		${1}
+		;;
+	*)
+		echo "Usage: $0 {start|stop|status|restart}"
+		exit 2
+		;;
+esac

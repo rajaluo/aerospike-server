@@ -23,3 +23,6 @@
 [submodule "modules/s2-geometry-library"]
 	path = modules/s2-geometry-library
 	url = git@github.com:citrusleaf/s2-geometry-library.git
+[submodule "telemetry"]
+	path = modules/telemetry
+	url = git@github.com:citrusleaf/aerospike-telemetry-agent.git
