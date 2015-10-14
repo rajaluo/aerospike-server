@@ -111,7 +111,8 @@ static inline int
 cf_compare_uint64ptr(const void *pa, const void *pb)
 {
     int r;
-    const uint64_t *a = pa, *b = pb;
+    const uint64_t *a = (uint64_t *) pa;
+    const uint64_t *b = (uint64_t *) pb;
 
     if (*a == *b)
         return(0);

@@ -127,6 +127,7 @@
 #include "base/udf_rw.h"
 #include "base/udf_record.h"
 #include "fabric/fabric.h"
+#include "geospatial/geospatial.h"
 
 
 /*
@@ -606,7 +607,6 @@ qtr_set_err(as_query_transaction *qtr, int result_code, char *fname, int lineno)
 	qtr_unlock(qtr);
 }
 
-
 static void
 qtr_set_done(as_query_transaction *qtr, int result_code, char *fname, int lineno)
 {
@@ -818,11 +818,8 @@ static void
 query_release_fd(as_query_transaction *qtr)
 {
 	if (qtr && qtr->fd_h) {
-		if (qtr_is_abort(qtr)) {
-			shutdown(qtr->fd_h->fd, SHUT_RDWR);
-		}
 		qtr->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
-		AS_RELEASE_FILE_HANDLE(qtr->fd_h);
+		as_end_of_transaction(qtr->fd_h, qtr_is_abort(qtr));
 		qtr->fd_h = NULL;
 	}
 }
@@ -943,7 +940,11 @@ query_netio_finish_cb(void *data, int retcode)
 		}
 		QUERY_HIST_INSERT_DATA_POINT(query_net_io_hist, io->start_time);	
 
-		AS_RELEASE_FILE_HANDLE(io->fd_h);
+		// Undo the increment from query_netio(). Cannot reach zero here: the
+		// increment owned by the transaction will only be undone after all netio
+		// is complete.
+		cf_rc_release(io->fd_h);
+		io->fd_h = NULL;
 		bb_poolrelease(io->bb_r);
 
 		cf_atomic32_incr(&qtr->netio_pop_seq);
@@ -1556,6 +1557,30 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			matches = true;
 			break;
 		}
+		case AS_PARTICLE_TYPE_GEOJSON : {
+			if ((type != as_sindex_pktype(qtr->si->imd))
+			|| (type != start->type)
+			|| (type != end->type)) {
+				cf_debug(AS_QUERY, "as_query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
+					type, start->type, end->type, as_sindex_pktype(qtr->si->imd),
+					qtr->si->imd->bnames[0], qtr->si->imd->iname);
+				return false;
+			}
+
+			bool iswithin =
+				! qtr->ns->geo2dsphere_within_strict ||
+				as_bin_particle_geojson_match(b,
+											  qtr->srange->cellid,
+											  qtr->srange->region);
+
+			// We either found a valid point or a false positive.
+			if (iswithin)
+				cf_atomic_int_incr(&g_config.geo_region_query_points);
+			else
+				cf_atomic_int_incr(&g_config.geo_region_query_falsepos);
+
+			return iswithin;
+		}
 		case AS_PARTICLE_TYPE_MAP : {
 			val     = as_val_frombin(b);
 			res_val = as_sindex_extract_val_from_path(qtr->si->imd, val);	
@@ -2069,15 +2094,16 @@ query_get_nextbatch(as_query_transaction *qtr)
 		time_ns = cf_getns();
 	}
 
+	as_sindex_range *srange	 = &qtr->srange[qctx->range_index];
+
 	if (qctx->pimd_idx == -1) {
-		if (!qtr->srange->isrange) {
-			qctx->pimd_idx   = ai_btree_key_hash_from_sbin(si->imd, &qtr->srange->start);
+		if (!srange->isrange) {
+			qctx->pimd_idx	 = ai_btree_key_hash_from_sbin(si->imd, &srange->start);
 		} else {
-			qctx->pimd_idx   = 0;
+			qctx->pimd_idx	 = 0;
 		}
 	}
 
-	as_sindex_range *srange  = qtr->srange;
 	if (!qctx->recl) {
 		qctx->recl = cf_malloc(sizeof(cf_ll));
 		if (!qctx->recl) {
@@ -2116,10 +2142,26 @@ query_get_nextbatch(as_query_transaction *qtr)
 		qctx->nbtr_done      = false;
 		qctx->pimd_idx++;
 		cf_detail(AS_QUERY, "All the Data finished moving to next tree %d", qctx->pimd_idx);
-		if (!srange->isrange || (qctx->pimd_idx == si->imd->nprts)) {
+		if (!srange->isrange) {
 			qtr->result_code = AS_PROTO_RESULT_OK;
 			ret              = AS_QUERY_DONE;
 			goto batchout;
+		}
+		if (qctx->pimd_idx == si->imd->nprts) {
+
+			// Geospatial queries need to search multiple ranges.  The
+			// srange object is a vector of MAX_REGION_CELLS elements.
+			// We iterate over ranges until we encounter an empty
+			// srange (num_binval == 0).
+			//
+			if (qctx->range_index == (MAX_REGION_CELLS - 1) ||
+				qtr->srange[qctx->range_index+1].num_binval == 0) {
+				qtr->result_code = AS_PROTO_RESULT_OK;
+				ret              = AS_QUERY_DONE;
+				goto batchout;
+			}
+			qctx->range_index++;
+			qctx->pimd_idx = -1;
 		}
 		ret = AS_QUERY_CONTINUE;
 		goto batchout;
@@ -2138,8 +2180,6 @@ query_run_setup(as_query_transaction *qtr)
 {
 
 #if defined(USE_SYSTEMTAP)
-	// We'll need to preserve some values on the stack for tracing
-	// becuase the qtr is gone before the done event.
 	uint64_t nodeid = g_config.self_node;
 #endif
 
@@ -2164,6 +2204,7 @@ query_run_setup(as_query_transaction *qtr)
 	qtr->qctx.pimd_idx            = -1;
 	qtr->qctx.recl                = NULL;
 	qtr->qctx.n_bdigs             = 0;
+	qtr->qctx.range_index         = 0;
 	qtr->qctx.partitions_pre_reserved = g_config.partitions_pre_reserved;
 	qtr->qctx.bkey                = &qtr->bkey;
 	init_ai_obj(qtr->qctx.bkey);
@@ -2179,6 +2220,8 @@ query_run_setup(as_query_transaction *qtr)
 	cf_atomic64_incr(&g_config.query_short_reqs);
 	cf_atomic32_incr(&g_query_short_running);
 
+	// This needs to be distant from the initialization of nodeid to
+	// workaround a lame systemtap/compiler interaction.
 	ASD_QUERY_INIT(nodeid, qtr->trid);
 
 	return AS_QUERY_OK;
@@ -2394,9 +2437,9 @@ static void
 query_generator(as_query_transaction *qtr)
 {
 #if defined(USE_SYSTEMTAP)
-    uint64_t nodeid = g_config.self_node;
-    uint64_t trid = qtr->trid;
-    size_t nrecs = 0;
+	uint64_t nodeid = g_config.self_node;
+	uint64_t trid = qtr->trid;
+	size_t nrecs = 0;
 #endif
 
 	// Query can get requeue for many different reason. Check if it is 
@@ -2723,8 +2766,8 @@ as_query(as_transaction *tr)
 
 	if (rv == AS_QUERY_DONE) {
 		// Send FIN packet to client to ignore this.
-		as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK);
-		AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+		bool force_close = as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0;
+		as_end_of_transaction(tr->proto_fd_h, force_close);
 		tr->proto_fd_h = NULL; // Paranoid
 		if (tr->msgp) {
 			cf_free(tr->msgp);

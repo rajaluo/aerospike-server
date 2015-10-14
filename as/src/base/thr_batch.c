@@ -240,10 +240,10 @@ batch_send_final(int fd, uint32_t result_code)
 
 // Release memory for batch transaction.
 static void
-batch_transaction_done(batch_transaction* btr)
+batch_transaction_done(batch_transaction* btr, bool force_close)
 {
 	if (btr->fd_h) {
-		AS_RELEASE_FILE_HANDLE(btr->fd_h);
+		as_end_of_transaction(btr->fd_h, force_close);
 		btr->fd_h = 0;
 	}
 
@@ -269,9 +269,10 @@ batch_process_request(batch_transaction* btr)
 	batch_build_response(btr, &bb);
 
 	int fd = btr->fd_h->fd;
+	int brv;
 
 	if (bb) {
-		int brv = batch_send_header(fd, bb->used_sz);
+		brv = batch_send_header(fd, bb->used_sz);
 
 		if (brv == 0) {
 			brv = batch_send(fd, bb->buf, bb->used_sz, MSG_NOSIGNAL | MSG_MORE);
@@ -284,10 +285,10 @@ batch_process_request(batch_transaction* btr)
 	}
 	else {
 		cf_info(AS_BATCH, " batch request: returned no local responses");
-		batch_send_final(fd, 0);
+		brv = batch_send_final(fd, 0);
 	}
 
-	batch_transaction_done(btr);
+	batch_transaction_done(btr, brv != 0);
 }
 
 // Process one queue's batch requests.
@@ -305,7 +306,7 @@ batch_worker(void* udata)
 					0, 0, 0, 0, 0, 0, 0, btr->trid, NULL);
 			btr->fd_h = 0;
 		}
-		batch_transaction_done(btr);
+		batch_transaction_done(btr, false);
 		return;
 	}
 	

@@ -1,7 +1,7 @@
 /*
  * ai_types.h
  *
- * Copyright (C) 2013-2014 Aerospike, Inc.
+ * Copyright (C) 2013-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -73,6 +73,7 @@ typedef struct uint160 {
 #define COL_TYPE_CNAME        9
 #define COL_TYPE_U160        10
 #define COL_TYPE_ERR         11
+#define COL_TYPE_GEOJSON     12
 
 #define C_IS_N(ctype)    (ctype == COL_TYPE_NONE)
 #define C_IS_I(ctype)    (ctype == COL_TYPE_INT)
@@ -86,6 +87,7 @@ typedef struct uint160 {
 #define C_IS_B(ctype)    (ctype == COL_TYPE_BOOL)
 #define C_IS_C(ctype)    (ctype == COL_TYPE_CNAME)
 #define C_IS_E(ctype)    (ctype == COL_TYPE_ERR)
+#define C_IS_G(ctype)    (ctype == COL_TYPE_GEOJSON)
 #define C_IS_NUM(ctype)  (C_IS_I(ctype) || C_IS_L(ctype) || C_IS_X(ctype))
 
 #define CONSTRAINT_NONE   0

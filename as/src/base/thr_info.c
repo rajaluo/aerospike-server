@@ -1,7 +1,7 @@
 /*
  * thr_info.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -479,6 +479,15 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_rw_pending_limit);
 	cf_dyn_buf_append_string(db, ";err_rw_cant_put_unique=");
 	APPEND_STAT_COUNTER(db, g_config.err_rw_cant_put_unique);
+
+	cf_dyn_buf_append_string(db, ";geo_region_query_count=");
+	APPEND_STAT_COUNTER(db, g_config.geo_region_query_count);
+	cf_dyn_buf_append_string(db, ";geo_region_query_cells=");
+	APPEND_STAT_COUNTER(db, g_config.geo_region_query_cells);
+	cf_dyn_buf_append_string(db, ";geo_region_query_points=");
+	APPEND_STAT_COUNTER(db, g_config.geo_region_query_points);
+	cf_dyn_buf_append_string(db, ";geo_region_query_falsepos=");
+	APPEND_STAT_COUNTER(db, g_config.geo_region_query_falsepos);
 
 	cf_dyn_buf_append_string(db, ";fabric_msgs_sent=");
 	APPEND_STAT_COUNTER(db, g_config.fabric_msgs_sent);
@@ -3719,6 +3728,23 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				cf_info(AS_INFO, "Changing value of write-commit-level-override of ns %s from %s to %s", ns->name, original_value, context);
 			}
 		}
+		else if (0 == as_info_parameter_get(params, "geo2dsphere-within-max-cells", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %s is not a number", ns->name, context);
+				goto Error;
+			}
+			if (val <= 0) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %u must be > 0", ns->name, val);
+				goto Error;
+			}
+			if ((uint32_t)val > (MAX_REGION_CELLS)) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %u must be <= %u", ns->name, val, MAX_REGION_CELLS);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of geo2dsphere-within-max-cells of ns %s from %d to %d ",
+					ns->name, ns->geo2dsphere_within_max_cells, val);
+			ns->geo2dsphere_within_max_cells = val;
+		}
 		else {
 			goto Error;
 		}
@@ -4473,7 +4499,7 @@ thr_info_fn(void *unused)
 				} else {
 					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", tr->proto_fd_h->fd, errno);
 				}
-				AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+				as_end_of_transaction_force_close(tr->proto_fd_h);
 				tr->proto_fd_h = 0;
 				break;
 			}
@@ -4487,9 +4513,9 @@ thr_info_fn(void *unused)
 
 		cf_free(tr->msgp);
 
-		if (tr->proto_fd_h)	{
-			tr->proto_fd_h->t_inprogress = false;
-			AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+		if (tr->proto_fd_h) {
+			as_end_of_transaction_ok(tr->proto_fd_h);
+			tr->proto_fd_h = 0;
 		}
 
 		MICROBENCHMARK_HIST_INSERT_P(info_fulfill_hist);
@@ -6436,7 +6462,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		if (!type_str) {
 			cf_warning(AS_INFO, "Failed to create secondary index: bin type must be specified"
 					" for sindex creation %s ", indexname_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type must be [numeric,string]");
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type must be [numeric,string,geo2dsphere]");
 			cf_vector_destroy(str_v);
 			return AS_SINDEX_ERR_PARAM;
 		}
@@ -6446,7 +6472,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 			cf_warning(AS_INFO, "Failed to create secondary index : invalid bin type %s "
 					"for sindex creation %s", type_str, indexname_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid type must be [numeric,string]");
+					"Invalid type must be [numeric,string,geo2dsphere]");
 			cf_vector_destroy(str_v);
 			return AS_SINDEX_ERR_PARAM;
 		}
@@ -6921,7 +6947,7 @@ as_info_init()
 	as_info_set("node", istr, true);                     // Node ID. Unique 15 character hex string for each node based on the mac address and port.
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
-	as_info_set("features", "float;batch-index;replicas-all;replicas-master;replicas-prole;udf", true);
+	as_info_set("features", "geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf", true);
 	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
 		sprintf(istr, "%s:%d", g_config.hb_addr, g_config.hb_port);
 		as_info_set("mcast", istr, false);               // Returns the multicast heartbeat address and port used by this server. Only available in multicast heartbeat mode.

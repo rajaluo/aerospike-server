@@ -25,6 +25,12 @@ GNU/Linux development tools and libraries installed in the build
 environment, including `autoconf`, `automake`, and `libtool`. In
 particular, the following libraries are needed:
 
+#### C++
+
+The geospatial indexing uses the S2 library which is compiled with C++.
+
+The relevant package on CentOS is `gcc-c++`.
+
 #### OpenSSL
 
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
@@ -57,7 +63,7 @@ by the build environment.  In that case:
 
 ### Submodules
 
-The Aerospike Database Server build depends upon 7 submodules:
+The Aerospike Database Server build depends upon 8 submodules:
 
 | Submodule | Description |
 |---------- | ----------- |
@@ -68,6 +74,7 @@ The Aerospike Database Server build depends upon 7 submodules:
 | lua-core  | The Aerospike Core Lua Source Files |
 | luajit    | The LuaJIT (Just-In-Time Compiler for Lua) |
 | mod-lua   | The Aerospike Lua Interface |
+| s2-geometry-library | The S2 Spherical Geometry Library |
 
 After the initial cloning of the `aerospike-server` repo., the
 submodules must be fetched for the first time using the following
@@ -181,3 +188,4 @@ Please refer to the full documentation on the Aerospike web site,
 `www.aerospike.com`, for more detailed information about configuring
 and running the Aerospike Database Server, as well as the about the
 Aerospike client API packages for popular programming languages.
+
