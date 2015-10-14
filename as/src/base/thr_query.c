@@ -816,9 +816,7 @@ static void
 query_release_fd(as_query_transaction *qtr)
 {
 	if (qtr && qtr->fd_h) {
-		qtr->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
-		qtr->fd_h->last_used = cf_getms();
-		AS_RELEASE_FILE_HANDLE(qtr->fd_h);
+		as_release_file_handle(qtr->fd_h);
 		qtr->fd_h = NULL;
 	}
 }
@@ -1246,9 +1244,9 @@ query_send_bg_udf_response(as_transaction *tr)
 {
 	cf_detail(AS_QUERY, "Send Fin for Background UDF");
 	as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK);
+	// Note: should be inside release file handle ?
 	tr->proto_fd_h->last_used = cf_getms();
-	AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
-	tr->proto_fd_h = NULL;
+	as_release_file_handle(tr->proto_fd_h);
 }
 
 static bool
