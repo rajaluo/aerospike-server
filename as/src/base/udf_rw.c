@@ -116,6 +116,7 @@ make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
 			break;
 		}
 		case AS_PARTICLE_TYPE_BLOB:
+		case AS_PARTICLE_TYPE_GEOJSON:
 		case AS_PARTICLE_TYPE_STRING:
 		case AS_PARTICLE_TYPE_LIST:
 		case AS_PARTICLE_TYPE_MAP:
@@ -474,6 +475,7 @@ send_result(as_result * res, udf_call * call, void *udata)
 					break;
 				}
 				case AS_BYTES:
+				case AS_GEOJSON:
 				{
 					as_bytes * b = as_bytes_fromval(v);
 					uint8_t * rs = as_bytes_get(b);
@@ -1518,6 +1520,11 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 				}
 				break;
 			}
+			case AS_GEOJSON:
+			{
+                as_val_geojson_to_client(v, buf, size);
+				break;
+			}
 			case AS_BYTES:
 			{
 				as_bytes * b = as_bytes_fromval(v);
@@ -1639,6 +1646,13 @@ as_val_frombin(as_bin *bb)
 			value = (as_val *) as_bytes_new_wrap(buf, psz, true);
 			break;
 		}
+		case AS_PARTICLE_TYPE_GEOJSON:
+        {
+            // NOTE - Move this function into particle.c when we
+            // convert this routine to as_bin_particle_to_asval.
+            //
+            return as_bin_particle_to_asval_geojson(bb);
+        }
 		case AS_PARTICLE_TYPE_MAP:
 		case AS_PARTICLE_TYPE_LIST:
 		{
@@ -1685,6 +1699,8 @@ to_particle_type(int from_as_type)
 			return AS_PARTICLE_TYPE_STRING;
 		case AS_BYTES:
 			return AS_PARTICLE_TYPE_BLOB;
+		case AS_GEOJSON:
+			return AS_PARTICLE_TYPE_GEOJSON;
 		case AS_LIST:
 			return AS_PARTICLE_TYPE_LIST;
 		case AS_MAP:

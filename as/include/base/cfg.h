@@ -346,6 +346,12 @@ typedef struct as_config_s {
 	uint64_t			udf_runtime_max_gmemory; // maximum runtime memory alloed for all UDF
 	cf_atomic_int		udf_runtime_gmemory_used; // Current runtime memory reserve by per UDF - BUG if global should be 64?
 
+    // Geospatial stats
+	cf_atomic_int		geo_region_query_count;		// Number of region queries
+	cf_atomic_int		geo_region_query_cells;		// Number of cells used by region queries
+	cf_atomic_int		geo_region_query_points;	// Number of valid points found
+	cf_atomic_int		geo_region_query_falsepos;	// Number of false positives found
+
 	/*
 	** STATISTICS
 	*/
