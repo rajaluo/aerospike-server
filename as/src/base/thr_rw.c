@@ -119,7 +119,6 @@ int write_local(as_transaction *tr, write_local_generation *wlg,
 				as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
 int write_journal(as_transaction *tr, write_local_generation *wlg); // only do write
 int write_delete_journal(as_transaction *tr, bool is_subrec);
-static void release_proto_fd_h(as_file_handle *proto_fd_h);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
 			   cf_node masternode, bool is_delete, uint16_t set_id);
 
@@ -296,8 +295,10 @@ void write_request_destructor(void *object) {
 		as_partition_release(&wr->rsv);
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 	}
-	if (wr->proto_fd_h)
-		AS_RELEASE_FILE_HANDLE(wr->proto_fd_h);
+	if (wr->proto_fd_h) {
+		as_end_of_transaction_ok(wr->proto_fd_h);
+		wr->proto_fd_h = 0;
+	}
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (wr->dup_msg[i])
 			as_fabric_msg_put(wr->dup_msg[i]);
@@ -691,9 +692,9 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 		if (release) {
 			cf_detail(AS_RW, "releasing proto_fd_h %d:%p",
 					tr->proto_fd_h, line);
-			release_proto_fd_h(tr->proto_fd_h);
+			as_end_of_transaction_force_close(tr->proto_fd_h);
 		} else {
-			AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+			as_end_of_transaction_ok(tr->proto_fd_h);
 		}
 		tr->proto_fd_h = 0;
 	}
@@ -886,9 +887,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 				if (!uret) {
 					wr->has_udf = true;
-					if (tr->rsv.p->qnode != g_config.self_node) {
-						cf_detail(AS_RW, "Applying UDF at the non qnode");
-					}
 
 					rv = udf_rw_local(call, wr, &op);
 
@@ -983,8 +981,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 		/* Get the target replica set, which should exclude ourselves (but
 		 * do a sanity check just to be sure) */
-		// Also pick the qnode to ship data to, unless it is master
-		bool qnode_found = true;
 		cf_node nodes[AS_CLUSTER_SZ];
 		memset(nodes, 0, sizeof(nodes));
 		int node_sz = as_partition_getreplica_readall(tr->rsv.ns, tr->rsv.pid,
@@ -993,14 +989,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			if (nodes[i] == g_config.self_node)
 				cf_crash(AS_RW,
 						"target replica set contains ourselves");
-			if (nodes[i] == tr->rsv.p->qnode)
-				qnode_found = true;
 		}
 		// TODO: We could optimize by not sending writes to replicas that reject_writes
-		// if qnode not in replica list && not master. Add it to
-		// the list of node to ship writes to. Assert that current
-		// node is master node. Writes should never happen from non
-		// master node unless it is shipped op.
 
 		// TODO: We are allowing write to go to non-master node prole here.
 		// At non-master it will fail but it has already been written at master.
@@ -1016,10 +1006,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			//PRINT_STACK();
 		}
 
-		if ((!qnode_found) && (tr->rsv.p->qnode != tr->rsv.p->replica[0])) {
-			nodes[node_sz] = tr->rsv.p->qnode;
-			node_sz++;
-		}
 		/* Short circuit for one-replica writes */
 		if (0 == node_sz) {
 
@@ -2095,7 +2081,7 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	}
 
 	if (tr->proto_fd_h != 0) {
-		AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+		as_end_of_transaction_ok(tr->proto_fd_h);
 		tr->proto_fd_h = 0;
 	}
 }
@@ -5512,13 +5498,6 @@ write_msg_fn(cf_node id, msg *m, void *udata)
 	return (0);
 } // end write_msg_fn()
 
-// Helper function used to clean up a tr or wr proto_fd_h in a number of places.
-static void release_proto_fd_h(as_file_handle *proto_fd_h) {
-	shutdown(proto_fd_h->fd, SHUT_RDWR);
-	proto_fd_h->inuse = false;
-	AS_RELEASE_FILE_HANDLE(proto_fd_h);
-}
-
 typedef struct now_times_s {
 	uint64_t now_ns;
 	uint64_t now_ms;
@@ -5553,7 +5532,8 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 			write_request_init_tr(&tr, wr);
 			udf_rw_complete(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT, __FILE__, __LINE__);
 			if (tr.proto_fd_h) {
-				AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
+				as_end_of_transaction_ok(tr.proto_fd_h);
+				tr.proto_fd_h = 0;
 			}
 		} else {
 			if (wr->batch_shared) {
@@ -5562,11 +5542,9 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 					wr->msgp = NULL;
 				}
 			}
-			else {
-				if (wr->proto_fd_h) {
-					release_proto_fd_h(wr->proto_fd_h);
-					wr->proto_fd_h = 0;
-				}
+			else if (wr->proto_fd_h) {
+				as_end_of_transaction_force_close(wr->proto_fd_h);
+				wr->proto_fd_h = 0;
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
