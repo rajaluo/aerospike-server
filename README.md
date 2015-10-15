@@ -5,7 +5,7 @@ Welcome to the Aerospike Database Server source code tree!
 Aerospike is a distributed, scalable NoSQL database. It is architected with three key objectives:
 
 - To create a high-performance, scalable platform that would meet the needs of today’s web-scale applications
-- To provide the robustness and reliability (ie, ACID) expected from traditional databases.
+- To provide the robustness and reliability (i.e., ACID) expected from traditional databases.
 - To provide operational efficiency (minimal manual involvement)
 
 For more information on Aerospike, please visit: [http://aerospike.com](http://aerospike.com)
@@ -27,9 +27,12 @@ particular, the following libraries are needed:
 
 #### C++
 
-The geospatial indexing uses the S2 library which is compiled with C++.
+The C++ compiler is required for the Aerospike geospatial indexing
+feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
-The relevant package on CentOS is `gcc-c++`.
+* The required CentOS 6/7 package to install is: `gcc-c++`.
+
+* The required Debian 6/7/8 and Ubuntu 10/12/14 package to install is: `g++`.
 
 #### OpenSSL
 
