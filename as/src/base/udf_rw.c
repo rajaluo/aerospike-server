@@ -1579,8 +1579,17 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 as_val *
 as_val_frombin(as_bin *bb)
 {
+	return as_val_from_bin_and_type(bb, AS_PARTICLE_TYPE_BAD);
+}
+
+as_val *
+as_val_from_bin_and_type(as_bin *bb, as_particle_type type)
+{
 	as_val *value = NULL;
-	uint8_t type = as_particle_type_convert(as_bin_get_particle_type(bb));
+
+	if (type == AS_PARTICLE_TYPE_BAD) {
+		type = as_particle_type_convert(as_bin_get_particle_type(bb));
+	}
 
 	switch ( type ) {
 		case AS_PARTICLE_TYPE_INTEGER:
