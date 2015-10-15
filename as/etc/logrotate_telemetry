@@ -6,6 +6,6 @@
     compress
     olddir /var/log/aerospike/
     postrotate
-        service aerospike_telemetry restart > /dev/null 2>&1 || true
+        service aerospike_telemetry try-restart > /dev/null 2>&1 || true
     endscript
 }

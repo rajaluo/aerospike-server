@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # chkconfig: 2345 85 15
 # description: Starts and stops the Aerospike Telemetry Agent
 
@@ -34,12 +34,16 @@ restart() {
 	python $DAEMON $CONFIG restart
 }
 
+try-restart() {
+	python $DAEMON $CONFIG try-restart
+}
+
 case "$1" in
-	start|stop|restart|status)
+	start|stop|status|restart|try-restart)
 		${1}
 		;;
 	*)
-		echo "Usage: $0 {start|stop|status|restart}"
+		echo "Usage: $0 {start|stop|status|restart|try-restart}"
 		exit 2
 		;;
 esac
