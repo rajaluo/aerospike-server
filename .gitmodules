@@ -23,6 +23,6 @@
 [submodule "modules/s2-geometry-library"]
 	path = modules/s2-geometry-library
 	url = https://github.com/aerospike/s2-geometry-library.git
-[submodule "telemetry"]
+[submodule "modules/telemetry"]
 	path = modules/telemetry
 	url = https://github.com/aerospike/aerospike-telemetry-agent.git
