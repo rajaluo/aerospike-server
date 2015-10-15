@@ -1,0 +1,6 @@
+g_as_log g_xdr_log
+as_config_init xdr_config_init
+as_bin_destroy xdr_bin_destroy
+as_bin_init xdr_bin_init
+as_record_destroy xdr_record_destroy
+as_record_get xdr_record_get
