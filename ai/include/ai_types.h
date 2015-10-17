@@ -53,9 +53,9 @@ typedef struct uint160 {
 /*
  *  Maximum length for table / column / index name strings.
  */
-#define NAME_STR_LEN               128
-
 #define INIT_MAX_NUM_TABLES        256
+// ALCHEMY CREATES 32 indexes per secondary index
+// So this threshold will be crossed just after first 8 index across namespaces
 #define INIT_MAX_NUM_INDICES       256
 
 #define MAX_JOIN_COLS              128
@@ -123,9 +123,13 @@ enum OP {NONE, EQ, NE, GT, GE, LT, LE, RQ, IN, LFUNC};
 		fprintf(fp, "DEBUG_U160: high: %llu mid: %llu low: %u", ubh, ubm, u); \
 	}
 
-#define CDICT_HASH_KEY_SIZE AS_SINDEX_MAX_PATH_LENGTH + 2*AS_SINDEX_TYPE_STR_SIZE
-#define TBLD_HASH_KEY_SIZE AS_ID_NAMESPACE_SZ + AS_SET_NAME_MAX_SIZE + 1
-#define INDD_HASH_KEY_SIZE TBLD_HASH_KEY_SIZE
+#define CDICT_HASH_KEY_SIZE AS_SINDEX_MAX_PATH_LENGTH + 1 \
+					+ AS_SINDEX_ITYPE_MAX_TO_STR_SZ + 1 + AS_SINDEX_KTYPE_MAX_TO_STR_SZ
+// +1 +1 for separators '_'
+#define INDD_HASH_KEY_SIZE AS_ID_NAMESPACE_SZ + 1 \
+						+ AS_ID_INAME_SZ + 1 + MAX_PARTITIONS_PER_INDEX_CHAR
+// +1 +1 for separators '.' and '_'
+#define TBLD_HASH_KEY_SIZE AS_ID_NAMESPACE_SZ + 1 + AS_SET_NAME_MAX_SIZE
 
 /***************** Opaque Forward Type Declarations *****************/
 

@@ -861,7 +861,7 @@ as_sindex_arr_lookup_by_set_binid_lockfree(as_namespace * ns, const char *set, i
 
 	as_sindex__simatch_list_by_set_binid(ns, set, binid, &simatch_ll);
 	if (!simatch_ll) {
-		return sindex_count = 0;
+		return sindex_count;
 	}
 	
 	cf_ll_element             * ele    = cf_ll_get_head(simatch_ll);
@@ -1116,7 +1116,6 @@ as_sindex_config_var_copy(as_sindex *to_si, as_sindex_config_var *from_si_cfg)
 	to_si->config.defrag_period    = from_si_cfg->defrag_period;
 	to_si->config.defrag_max_units = from_si_cfg->defrag_max_units;
 	to_si->config.data_max_memory  = from_si_cfg->data_max_memory;
-	to_si->trace_flag              = from_si_cfg->trace_flag;
 	to_si->enable_histogram        = from_si_cfg->enable_histogram;
 	to_si->config.flag             = from_si_cfg->ignore_not_sync_flag;
 }
@@ -1283,8 +1282,6 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 		cf_dyn_buf_append_string(db, "ULONG_MAX");
 	}
 
-	cf_dyn_buf_append_string(db, ";tracing=");
-	cf_dyn_buf_append_uint64(db, si->trace_flag);
 	cf_dyn_buf_append_string(db, ";histogram=");
 	cf_dyn_buf_append_string(db, si->enable_histogram ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";ignore-not-sync=");
@@ -1600,11 +1597,21 @@ as_sindex_release_arr(as_sindex *si_arr[], int si_arr_sz)
 // ************************************************************************************************
 // ************************************************************************************************
 //                                          SINDEX CREATE
+// simatch is index in sindex array
+// nptr is index of pimd in imd
 void
 as_sindex__create_pmeta(as_sindex *si, int simatch, int nptr)
 {
-	if (!si) return;
-	if (nptr == 0) return;
+	if (!si) {
+		cf_warning(AS_SINDEX, "SI is null");
+		return;
+	}
+
+	if (nptr == 0) {
+		cf_warning(AS_SINDEX, "nptr is 0");
+		return;
+	}
+
 	si->imd->pimd = cf_malloc(nptr * sizeof(as_sindex_pmetadata));
 	memset(si->imd->pimd, 0, nptr*sizeof(as_sindex_pmetadata));
 
@@ -1657,9 +1664,7 @@ as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd)
 	}
 
 	int simatch = as_sindex__simatch_by_iname(ns, imd->iname);
-
 	if (simatch != -1) {
-		cf_info(AS_SINDEX,"Index %s already exists", imd->iname);
 		ret = AS_SINDEX_ERR_FOUND;
 	} else {
 		int16_t binid = as_bin_get_id(ns, imd->bname);
@@ -1667,7 +1672,6 @@ as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd)
 		{
 			int simatch = as_sindex__simatch_by_set_binid(ns, imd->set, binid, imd->btype, imd->itype, imd->path_str);
 			if (simatch != -1) {
-				cf_info(AS_SINDEX," The bin %s is already indexed @ %d",imd->bname, simatch);
 				ret = AS_SINDEX_ERR_FOUND;
 				goto END;
 			}
@@ -1679,13 +1683,10 @@ END:
     return ret;
 }
 
-/*
- * Client API to create new secondary index
- */
 int
 as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 {
-	int ret = -1;
+	int ret = AS_SINDEX_ERR;
 	// Ideally there should be one lock per namespace, but because the
 	// Aerospike Index metadata is single global structure we need a overriding
 	// lock for that. NB if it becomes per namespace have a file lock
@@ -1695,18 +1696,18 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR_FOUND;
 	}
-	int i, chosen_id;
+	int chosen_id = AS_SINDEX_MAX;
 	as_sindex *si = NULL;
-	for (i = 0; i < AS_SINDEX_MAX; i++) {
+	for (int i = 0; i < AS_SINDEX_MAX; i++) {
 		if (ns->sindex[i].state == AS_SINDEX_INACTIVE) {
 			si = &ns->sindex[i];
-			chosen_id = i; break;
+			chosen_id = i;
+			break;
 		}
 	}
 
-	if (!si || (i == AS_SINDEX_MAX))  {
-		cf_warning(AS_SINDEX,
-				"Maxed out secondary index limit no more indexes allowed");
+	if (!si || (chosen_id == AS_SINDEX_MAX))  {
+		cf_warning(AS_SINDEX, "SINDEX CREATE : Maxed out secondary index limit no more indexes allowed");
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR;
 	}
@@ -1717,17 +1718,15 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 	as_sindex_metadata *qimd;
 
 	if (as_sindex__populate_binid(ns, imd)) {
+		cf_warning(AS_SINDEX, "SINDEX CREATE : Popluating bin id failed");
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR_PARAM;
 	}
 
-	// Reason for doing it upfront is to fail fast. Without doing
-	// whole bunch of Aerospike Index work
-
-	char si_prop[AS_SINDEX_PROP_KEY_SIZE];
-	memset(si_prop, 0, AS_SINDEX_PROP_KEY_SIZE);
-
-	if (imd->set == NULL ) {
+	char si_prop[AS_SINDEX_PROP_KEY_SIZE + 1];
+	int si_prop_len = sizeof(si_prop);
+	memset(si_prop, 0, si_prop_len);
+	if (!imd->set) {
 		// sindex can be over a NULL set
 		sprintf(si_prop, "_%d_%d", imd->binid, imd->btype);
 	}
@@ -1735,16 +1734,17 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		sprintf(si_prop, "%s_%d_%d", imd->set, imd->binid, imd->btype);
 	}
 
-	as_sindex_status rv = as_sindex__put_in_set_binid_hash(ns, imd->set, imd->binid, chosen_id);
+	as_sindex_status rv = as_sindex__put_in_set_binid_hash(ns, imd->set, imd->binid, id);
 	if (rv != AS_SINDEX_OK) {
-		cf_warning(AS_SINDEX, "Put in set_binid hash fails with error %d", rv);
+		cf_warning(AS_SINDEX, "SINDEX CREATE : Put in set_binid hash fails with error %d", rv);
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR;
 	}
 
 	cf_detail(AS_SINDEX, "Put binid simatch %d->%d", imd->binid, chosen_id);
 
-	char iname[AS_ID_INAME_SZ]; memset(iname, 0, AS_ID_INAME_SZ);
+	char iname[AS_ID_INAME_SZ];
+	memset(iname, 0, AS_ID_INAME_SZ);
 	snprintf(iname, strlen(imd->iname)+1, "%s", imd->iname);
 	if (SHASH_OK != shash_put(ns->sindex_iname_hash, (void *)iname, (void *)&chosen_id)) {
 		cf_warning(AS_SINDEX, "Internal error ... Duplicate element found sindex iname hash [%s %s]",
@@ -1770,7 +1770,6 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		si->imd->bimatch = bimatch;
 		si->state       = AS_SINDEX_ACTIVE;
 		as_sindex_set_binid_has_sindex(ns, si->imd->binid);
-		si->trace_flag  = 0;
 		si->desync_cnt  = 0;
 		si->flag        = AS_SINDEX_FLAG_WACTIVE;
 		si->new_imd     = NULL;
@@ -4501,8 +4500,9 @@ as_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 					goto ERROR;
 				}
 				ns     = as_namespace_get_byname(imd.ns_name);
+				// TODO : This has already been checked at info level
 				retval = as_sindex_create_check_params(ns, &imd);
-
+				// TODO : Change to warning
 				if(retval != AS_SINDEX_OK){
 					cf_info(AS_SINDEX, "Callback from paxos master for validation failed with error code %d", retval);
 					goto ERROR;
@@ -4637,6 +4637,7 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 					// Fail quietly for duplicate sindex requests
 					continue;
 				}
+				// TODO : What is the use of calling create_check_params after exists_by_defn_check
 				// Pessimistic --Checking again. This check was already done by the paxos master.
 				int retval = as_sindex_create_check_params(ns, &imd);
 				if (retval != AS_SINDEX_OK) {
@@ -4646,8 +4647,10 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 						// 2. SMD thread is single threaded ... not sure how can above definition
 						//    check fail but params check pass. But just in case it does bail out
 						//    destroy and recreate (Accept the final version). think !!!!
+						// TODO : warning or info
 						cf_detail(AS_SINDEX, "Index creation failed. Error %d Dropping the index due to cluster state change", retval);
 						imd.post_op = 1;
+						// TODO : why destroy?
 						as_sindex_destroy(ns, &imd);
 				}
 				else {

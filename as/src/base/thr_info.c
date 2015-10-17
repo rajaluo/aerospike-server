@@ -6217,117 +6217,85 @@ clear_microbenchmark_histograms()
 	histogram_clear(g_config.prole_fabric_send_hist);
 }
 
-// SINDEX
-// wire protocol examples:
+// SINDEX wire protocol examples:
 // 1.) NUMERIC:    sindex-create:ns=usermap;set=demo;indexname=um_age;indexdata=age,numeric
 // 2.) STRING:     sindex-create:ns=usermap;set=demo;indexname=um_state;indexdata=state,string
-// 3.) FUNCTIONAL: sindex-create:ns=usermap;set=demo;indexname=um_func;type=functional;indexdata=file,func,numeric;nfargs=1;fargs='arg1'
-// 4.) USERLAND:   sindex-create:ns=usermap;set=demo;indexname=um_userland;type=userland;indexdata=file,func,numeric;nfargs=1;fargs='arg1'
-//
-
 /*
- *  Description:  Parses the parameter passed to asinfo and fills up the imd
- *  			  with the parsed value
- *
- *  Usage: Gets invoked for info_command_sindex_create and destroy.
- *       : Also gets invoked from smd's accept-callback functions.
- *
  *  Parameters:
  *  	params --- string passed to asinfo call
  *  	imd    --  parses the params and fills this sindex struct.
  *
  *  Returns
- *  	0 if it successfully fills up imd
- *      otherwise AS_SINDEX_ERR_PARAM.
+ *  	AS_SINDEX_OK if it successfully fills up imd
+ *      AS_SINDEX_ERR_PARAM otherwise
  */
 int
 as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
 		bool is_create, bool *is_smd_op)
 {
 	if (!imd) {
-		cf_info(AS_INFO, "Failed to create secondary index : internal error");
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. internal error");
 		return AS_SINDEX_ERR_PARAM;
 	}
-
-	if (strlen(params) > SINDEX_SMD_VALUE_SIZE) {
-		cf_info(AS_INFO, "Index definition %s length longer than allowed(1024)", params);
-		return AS_SINDEX_ERR_PARAM;
-	}
-
-	// NAMESPACE NAMESPACE NAMESPACE
-	char ns_str[128];
-	int ns_len       = sizeof(ns_str);
 	imd->post_op     = 0;
 
 	char indexname_str[AS_ID_INAME_SZ];
 	int  indname_len  = sizeof(indexname_str);
 	int ret = as_info_parameter_get(params, STR_INDEXNAME, indexname_str, &indname_len);
-
 	if ( ret == -1 ) {
-		cf_warning(AS_INFO, "Failed to create secondary index : Indexname not specified"
-				" for secondary index creation");
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Indexname not specified");
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Index Name Not Specified");
 		return AS_SINDEX_ERR_PARAM;
 	}
-	if ( ret == -2 ) {
-		cf_warning(AS_INFO, "Failed to create secondary index : The indexname is longer than %d characters",
+	else if ( ret == -2 ) {
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. The indexname is longer than %d characters", 
 				AS_ID_INAME_SZ);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Indexname too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
 
+	char ns_str[AS_ID_NAMESPACE_SZ];
+	int ns_len       = sizeof(ns_str);
 	ret = as_info_parameter_get(params, STR_NS, ns_str, &ns_len);
-
 	if ( ret == -1 ) {
-		cf_warning(AS_INFO, "Failed to create secondary index : Namespace not specified"
-				" for sindex creation %s ", indexname_str);
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Namespace not specified for index %s ", indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Namespace Not Specified");
 		return AS_SINDEX_ERR_PARAM;
 	}
-	if (ret == -2 ) {
-		cf_warning(AS_INFO, "Failed to create secondary index: Namespace specified is longer"
-				" than %d characters for sindex creation %s ", 128, indexname_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid namespace for SINDEX creation ");
+	else if (ret == -2 ) {
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Name of the namespace is longer than %d characters"
+			" for index %s ", AS_ID_NAMESPACE_SZ, indexname_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Name of the namespace is too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
-
 	as_namespace *ns = as_namespace_get_byname(ns_str);
 	if (!ns) {
-		cf_warning(AS_INFO, "Failed to create secondary index: namespace %s not found "
-				"for secondary index creation %s", ns_str, indexname_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Namespace Not Found");
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. namespace %s not found for index %s", 
+				ns_str, indexname_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Namespace Not Found");
 		return AS_SINDEX_ERR_PARAM;
 	}
 	if (ns->single_bin) {
-		cf_warning(AS_INFO, "Failed to create secondary index: Secondary Index Not "
-				"Allowed on Single Bin Namespace %s", ns_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Single Bin Namespace");
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Secondary Index is not allowed on single bin "
+				"namespace %s for index %s", ns_str, indexname_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Single bin namespace");
 		return AS_SINDEX_ERR_PARAM;
 	}
-	imd->ns_name = cf_strdup(ns->name);
 
-
-	// SETNAME SETNAME SETNAME ... (Optional)
 	char set_str[AS_SET_NAME_MAX_SIZE];
 	int set_len  = sizeof(set_str);
-	int res = as_info_parameter_get(params, STR_SET, set_str, &set_len);
-	if (!res) {
+	ret = as_info_parameter_get(params, STR_SET, set_str, &set_len);
+	if (!ret) {
 		imd->set = cf_strdup(set_str);
-	} else if (res == -2) {
-		cf_warning(AS_INFO, "Failed to create secondary index : invalid setname"
-				"  for secondary index creation %s", indexname_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Invalid Set Name");
+	} else if (ret == -2) {
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Setname is longer than %d for index %s", 
+				AS_SET_NAME_MAX_SIZE, indexname_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Name of the set is too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
 
-	//set the indexname to imd
-	imd->iname      = cf_strdup(indexname_str);
-
 	char cluster_op[6];
-	int cluster_op_len = 6;
+	int cluster_op_len = sizeof(cluster_op);
 	if (as_info_parameter_get(params, "cluster_op", cluster_op, &cluster_op_len) != 0) {
 		*is_smd_op = true;
 	}
@@ -6337,19 +6305,23 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	else if (strcmp(cluster_op, "false") == 0) {
 		*is_smd_op = false;
 	}
-
 	if (is_create == false) {
 		return 0;
 	}
 
-	// Get the index type.
-	// It could be list, mapkeys, mapvalues, or by default none.
-	char indextype_str[128];
-	memset(indextype_str, 0, 128);
+	char indextype_str[AS_SINDEX_TYPE_STR_SIZE];
 	int  indtype_len = sizeof(indextype_str);
-	if (as_info_parameter_get(params, STR_ITYPE, indextype_str, &indtype_len)) {
-		// if not specified the index type is normal
+	ret = as_info_parameter_get(params, STR_ITYPE, indextype_str, &indtype_len);
+	if (ret == -1) {
+		// if not specified the index type is DEFAULT
 		imd->itype = AS_SINDEX_ITYPE_DEFAULT;
+	}
+	else if (ret == -2) {
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Indextype str  is longer than %d for index %s", 
+				AS_SINDEX_TYPE_STR_SIZE, indexname_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Indextype str is too long");
+		return AS_SINDEX_ERR_PARAM;
+	
 	}
 	else {
 		if (strncasecmp(indextype_str, STR_ITYPE_DEFAULT, 7) == 0) {
@@ -6365,65 +6337,52 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 			imd->itype = AS_SINDEX_ITYPE_MAPVALUES;
 		}
 		else {
-			cf_warning(AS_INFO, "Failed to create secondary index : invalid type of index"
-					" for sindex creation %s %s", indexname_str, indextype_str);
+			cf_warning(AS_INFO, "SINDEX CREATE : Failed. Invalid indextype %s for index %s", 
+					indextype_str, indexname_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid type must be [none, list, mapkeys, mapvalues]");
+					"Invalid type. Should be one of [DEFAULT, LIST, MAPKEYS, MAPVALUES]");
 			return AS_SINDEX_ERR_PARAM;
 		}
 	}
 
-	// Gather indexdata
-	char indexdata_str[1024];
+	// Indexdata = binpath,datatype
+	char indexdata_str[AS_SINDEXDATA_STR_SIZE];
 	int  indexdata_len = sizeof(indexdata_str);
-	if (as_info_parameter_get(params, STR_INDEXDATA, indexdata_str,
-				&indexdata_len)) {
-		cf_warning(AS_INFO, "Failed to create secondary index : invalid indexdata for"
-				" sindex creation %s %s", indexname_str, indexdata_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Invalid indexdata");
+	if (as_info_parameter_get(params, STR_INDEXDATA, indexdata_str, &indexdata_len)) {
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Invalid indexdata for index %s", 
+				indexname_str, indexdata_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid indexdata");
 		return AS_SINDEX_ERR_PARAM;
 	}
-	// Read indexdata
 	cf_vector *str_v = cf_vector_create(sizeof(void *), 10, VECTOR_FLAG_INITZERO);
 	cf_str_split(",", indexdata_str, str_v);
-	if (0 != (cf_vector_size(str_v) % 2) || AS_SINDEX_BINMAX < (cf_vector_size(str_v) / 2)) {
-		cf_warning(AS_INFO, "Failed to create secondary index : number of bins more than"
-				"  %d for sindex creation %s", AS_SINDEX_BINMAX, indexname_str);
+	if (2 != (cf_vector_size(str_v))) {
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Number of bins more than 1 for index %s", 
+				indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"invalid indexdata");
+				"Number of bins more than 1");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
-
-	// Bin data
 	char * path_str;
 	cf_vector_get(str_v, 0, &path_str);
-	imd->path_str = cf_strdup(path_str);
-	cf_debug(AS_SINDEX, "Bin path - %s", imd->path_str);
-
-	// Extract the path and bin
 	if (as_sindex_extract_bin_path(imd, path_str)) {
-		cf_warning(AS_INFO, "Failed to create secondary index: Path_str is not valid- %s", path_str);
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Path_str is not valid- %s", path_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid path");
 		return AS_SINDEX_ERR_PARAM;
 	}
-
 	if (!imd->bname) {
-		cf_warning(AS_INFO, "Failed to create secondary index: bin name must be specified for sindex creation");
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Invalid bin name");
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid bin name");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
-
-	// Extract data type to index
 	char *type_str = NULL;
 	cf_vector_get(str_v, 1, &type_str);
-
 	if (!type_str) {
-		cf_warning(AS_INFO, "Failed to create secondary index: bin type must be specified"
-				" for sindex creation %s ", indexname_str);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type must be [numeric,string]");
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Bin type is null for index %s ", indexname_str);
+		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type. Should be one"
+				" of [numeric,string]");
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -6432,27 +6391,32 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	} else if (strncasecmp(type_str, "numeric", 7) == 0) {
 		imd->btype = AS_SINDEX_KTYPE_LONG;
 	} else {
-		cf_warning(AS_INFO, "Failed to create secondary index : invalid bin type %s "
-				"for sindex creation %s", type_str, indexname_str);
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Invalid bin type %s for index %s", 
+				type_str, indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Invalid type must be [numeric,string]");
+				"Invalid type. Should be one of [numeric,string]");
 		cf_vector_destroy(str_v);
+		cf_free(imd->bname);
 		return AS_SINDEX_ERR_PARAM;
 	}
 
-	if (imd->bname && (strlen(imd->bname) >= AS_ID_BIN_SZ)) {
-		cf_warning(AS_INFO, "Failed to create secondary creation: Bin Name %s longer "
-					"than allowed (%d) for sindex creation %s", imd->bname,
-					AS_ID_BIN_SZ - 1, indexname_str);
+	if (imd->bname && strlen(imd->bname) >= AS_ID_BIN_SZ) {
+		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Bin Name %s longer than allowed %d for index %s", 
+				imd->bname, AS_ID_BIN_SZ, indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Bin Name too long");
+		cf_vector_destroy(str_v);	
+		cf_free(imd->bname);
 		return AS_SINDEX_ERR_PARAM;
 	}
 	
 	cf_vector_destroy(str_v);
+	
+	imd->ns_name = cf_strdup(ns->name);
+	imd->iname   = cf_strdup(indexname_str);
+	imd->path_str = cf_strdup(path_str);
 	return AS_SINDEX_OK;
 }
 
-// called for asinfo command to create a new sindex
 int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 {
 	as_sindex_metadata imd;
@@ -6463,75 +6427,48 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 	int res = as_info_parse_params_to_sindex_imd(params, &imd, db, true, &is_smd_op);
 
 	if (res != 0) {
-		cf_info(AS_INFO, "Create Index Failed");
 		goto ERR;
 	}
 
 	as_namespace *ns = as_namespace_get_byname(imd.ns_name);
-	if (!ns) {
-		cf_info(AS_INFO, "ns not found");
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Namespace Not Found");
-		goto ERR;
-	}
-
-	// Check SI subsystem for limits.
-	// Checks for:
-	// Index already exists
-	// bin already indexed (includes set-level checks also)
-	// Index name too-long
 	res = as_sindex_create_check_params(ns, &imd);
 
-	// Populate error message correctly:
 	if (res == AS_SINDEX_ERR_FOUND) {
-		cf_info(AS_INFO, "Index with the same index defn already exists or bin has already been indexed.");
+		cf_warning(AS_INFO, "SINDEX CREATE : Index with the same index defn already exists or bin has "
+				"already been indexed.");
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_FOUND,
 				"Index with the same name already exists or this bin has already been indexed.");
 		goto ERR;
 	}
-	else if (res == AS_SINDEX_ERR_PARAM) {
-		cf_info(AS_INFO, "Index-name is too long, should be a max of: %d.", AS_ID_INAME_SZ - 1);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_NAME_MAXLEN,
-				"Index-name is too long.");
-		goto ERR;
-	}
 	else if (res == AS_SINDEX_ERR_MAXCOUNT) {
-		cf_info(AS_INFO, "More than %d index are not allowed per namespace.", AS_SINDEX_MAX);
+		cf_warning(AS_INFO, "SINDEX CREATE : More than %d index are not allowed per namespace.", AS_SINDEX_MAX);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_MAXCOUNT,
 				"Reached maximum number of sindex allowed");
-		goto ERR;
-
-	}
-	else if (res != AS_SINDEX_OK) {
-		cf_info(AS_INFO, "Index creation failed. Error %d", res);
-		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_GENERIC,"");
 		goto ERR;
 	}
 
 	if (is_smd_op == true)
 	{
-		cf_info(AS_INFO, "Index creation request received for %s:%s via SMD", imd.ns_name, imd.iname);
+		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
 		char module[] = SINDEX_MODULE;
 		char key[SINDEX_SMD_KEY_SIZE];
 		sprintf(key, "%s:%s", imd.ns_name, imd.iname);
 		int resp      = as_smd_set_metadata(module, key, params);
 
 		if (resp != 0) {
-			cf_info(AS_INFO, "Queuing the index %s metadata to SMD failed with error %s",
+			cf_warning(AS_INFO, "SINDEX CREATE : Queuing the index %s metadata to SMD failed with error %s",
 					imd.iname, as_sindex_err_str(resp));
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					as_sindex_err_str(resp));
-
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, as_sindex_err_str(resp));
 			goto ERR;
 		}
 	}
 	else if (is_smd_op == false) {
+		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via info", imd.ns_name, imd.iname);	
 		int resp         = as_sindex_create(ns, &imd, true);
 		if (0 != resp) {
-			cf_info(AS_INFO, "Create Index %s failed with error %s",
-					imd.iname, as_sindex_err_str(resp));
-			INFO_COMMAND_SINDEX_FAILCODE(
-					as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
+			cf_warning(AS_INFO, "SINDEX CREATE : Failed with error %s for index %s",
+					as_sindex_err_str(resp), imd.iname);
+			INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 					as_sindex_err_str(resp));
 			goto ERR;
 		}
