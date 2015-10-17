@@ -163,6 +163,14 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->sindex_cfg_var_hash = NULL;
 	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_INDEX;
 
+    // Geospatial query within defaults
+    ns->geo2dsphere_within_strict = true;
+    ns->geo2dsphere_within_min_level = 1;
+    ns->geo2dsphere_within_max_level = 30;
+    ns->geo2dsphere_within_max_cells = 12;
+    ns->geo2dsphere_within_level_mod = 1;
+    ns->geo2dsphere_within_earth_radius_meters = 6371000;  // Wikipedia, mean
+
 	//
 	// END - Configuration defaults.
 	//--------------------------------------------

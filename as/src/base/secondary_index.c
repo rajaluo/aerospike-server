@@ -1,7 +1,7 @@
 /*
  * secondary_index.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -106,6 +106,7 @@
 #include "base/system_metadata.h"
 #include "base/thr_sindex.h"
 #include "base/udf_rw.h"
+#include "geospatial/geospatial.h"
 
 
 #define SINDEX_CRASH(str, ...) \
@@ -288,6 +289,9 @@ as_sindex_pktype(as_sindex_metadata * imd)
 		case AS_SINDEX_KTYPE_DIGEST: {
 			return AS_PARTICLE_TYPE_STRING;
 		}
+		case AS_SINDEX_KTYPE_GEO2DSPHERE: {
+			return AS_PARTICLE_TYPE_GEOJSON;
+		}
 		default: {
 			cf_warning(AS_SINDEX, "UNKNOWN KEY TYPE FOUND. VERY BAD STATE");
 		}
@@ -306,6 +310,7 @@ as_sindex_ktype_str(as_sindex_ktype type)
 	switch (type) {
 	case AS_SINDEX_KTYPE_LONG:      return "NUMERIC";
 	case AS_SINDEX_KTYPE_DIGEST:    return "STRING";
+	case AS_SINDEX_KTYPE_GEO2DSPHERE:  return "GEOJSON";
 	default:
 		cf_warning(AS_SINDEX, "UNSUPPORTED KEY TYPE %d", type);
 		return "??????";
@@ -325,6 +330,9 @@ as_sindex_ktype_from_string(char const * type_str)
 	else if (strncasecmp(type_str, "numeric", 7) == 0) {
 		return AS_SINDEX_KTYPE_LONG;
 	}
+	else if (strncasecmp(type_str, "geo2dsphere", 11) == 0) {
+		return AS_SINDEX_KTYPE_GEO2DSPHERE;
+	}
 	else {
 		cf_warning(AS_SINDEX, "UNRECOGNIZED KEY TYPE %s", type_str);
 		return AS_SINDEX_KTYPE_NONE;
@@ -337,6 +345,7 @@ as_sindex_key_type_from_pktype(as_particle_type t)
 	switch(t) {
 		case AS_PARTICLE_TYPE_INTEGER :     return AS_SINDEX_KEY_TYPE_LONG;
 		case AS_PARTICLE_TYPE_STRING  :     return AS_SINDEX_KEY_TYPE_DIGEST;
+		case AS_PARTICLE_TYPE_GEOJSON :     return AS_SINDEX_KEY_TYPE_GEO2DSPHERE;
 		default                       :     {
 			cf_warning(AS_SINDEX, "bad particle type %d", t);
 			return AS_SINDEX_KEY_TYPE_MAX;
@@ -352,6 +361,7 @@ as_sindex_sktype_from_pktype(as_particle_type t)
 		case AS_PARTICLE_TYPE_INTEGER :     return AS_SINDEX_KTYPE_LONG;
 		case AS_PARTICLE_TYPE_FLOAT   :     return AS_SINDEX_KTYPE_FLOAT;
 		case AS_PARTICLE_TYPE_STRING  :     return AS_SINDEX_KTYPE_DIGEST;
+		case AS_PARTICLE_TYPE_GEOJSON :     return AS_SINDEX_KTYPE_GEO2DSPHERE;
 		default                       :     return AS_SINDEX_KTYPE_NONE;
 	}
 	return AS_SINDEX_KTYPE_NONE;
@@ -2497,6 +2507,7 @@ as_sindex_range_free(as_sindex_range **range)
 {
 	cf_debug(AS_SINDEX, "as_sindex_range_free");
 	as_sindex_range *sk = (*range);
+	geo_region_destroy(sk->region);
 	cf_free(sk);
 	return AS_SINDEX_OK;
 }
@@ -2619,7 +2630,11 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 					"can't handle multiple ranges right now %d", rfp->data[0]);
 		return AS_SINDEX_ERR_PARAM;
 	}
-	memset(srange, 0, sizeof(as_sindex_range));
+	// NOTE - to support geospatial queries the srange object is actually a vector
+	// of MAX_REGION_CELLS elements.  Normal queries only use the first element.
+	// Geospatial queries use multiple elements.
+	//
+	memset(srange, 0, sizeof(as_sindex_range) * MAX_REGION_CELLS);
 	if (itype_fp) {
 		srange->itype = *itype_fp->data;
 	}
@@ -2716,9 +2731,104 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			}
 			cf_digest_compute(start_binval, startl, &(start->digest));
 			cf_debug(AS_SINDEX, "Range is equal %s ,%s",
-                               start_binval, end_binval);
+					 start_binval, end_binval);
+		} else if (type == AS_PARTICLE_TYPE_GEOJSON) {
+			// get start point
+			uint32_t startl = ntohl(*((uint32_t *)data));
+			data += sizeof(uint32_t);
+			char* start_binval = (char *)data;
+			data += startl;
+
+			if ((startl <= 0) || (startl >= AS_SINDEX_MAX_GEOJSON_KSIZE)) {
+				cf_warning(AS_SINDEX, "Out of bound query key size %ld", startl);
+				goto Cleanup;
+			}
+			uint32_t endl = ntohl(*((uint32_t *)data));
+			data += sizeof(uint32_t);
+			char * end_binval = (char *)data;
+			if (startl != endl && strncmp(start_binval, end_binval, startl)) {
+				cf_warning(AS_SINDEX,
+						   "Only Geospatial Query Supported on GeoJSON %s-%s",
+						   start_binval, end_binval);
+				goto Cleanup;
+			}
+
+			srange->cellid = 0;
+			srange->region = NULL;
+			if (!geo_parse(ns, start_binval, startl,
+						   &srange->cellid, &srange->region)) {
+				cf_warning(AS_GEO, "failed to parse query GeoJSON");
+				goto Cleanup;
+			}
+			
+			if (srange->cellid && srange->region) {
+				geo_region_destroy(srange->region);
+				cf_warning(AS_GEO, "query geo_parse: both point and region");
+				goto Cleanup;
+			}
+
+			if (!srange->cellid && !srange->region) {
+				cf_warning(AS_GEO, "query geo_parse: neither point nor region");
+				goto Cleanup;
+			}
+
+			if (srange->cellid) {
+				// REGIONS-CONTAINING-POINT QUERY
+				
+				uint64_t center[MAX_REGION_LEVELS];
+				int numcenters;
+				if (!geo_point_centers(ns, srange->cellid, MAX_REGION_LEVELS,
+									   center, &numcenters)) {
+					cf_warning(AS_GEO, "failed to center query point");
+					goto Cleanup;
+				}
+					
+				// Geospatial queries use multiple srange elements.	 Many
+				// of the fields are copied from the first cell because
+				// they were filled in above.
+				for (int ii = 0; ii < numcenters; ++ii) {
+					srange[ii].num_binval = 1;
+					srange[ii].isrange = TRUE;
+					srange[ii].start.id = srange[0].start.id;
+					srange[ii].start.type = srange[0].start.type;
+					srange[ii].start.u.i64 = center[ii];
+					srange[ii].end.id = srange[0].end.id;
+					srange[ii].end.type = srange[0].end.type;
+					srange[ii].end.u.i64 = center[ii];
+					srange[ii].itype = srange[0].itype;
+				}
+			} else {
+				// POINTS-INSIDE-REGION QUERY
+				
+				uint64_t cellmin[MAX_REGION_CELLS];
+				uint64_t cellmax[MAX_REGION_CELLS];
+				int numcells;
+				if (!geo_region_cover(ns, srange->region, MAX_REGION_CELLS,
+									  NULL, cellmin, cellmax, &numcells)) {
+					cf_warning(AS_GEO, "failed to cover query region");
+					goto Cleanup;
+				}
+
+				cf_atomic_int_incr(&g_config.geo_region_query_count);
+				cf_atomic_int_add(&g_config.geo_region_query_cells, numcells);
+
+				// Geospatial queries use multiple srange elements.	 Many
+				// of the fields are copied from the first cell because
+				// they were filled in above.
+				for (int ii = 0; ii < numcells; ++ii) {
+					srange[ii].num_binval = 1;
+					srange[ii].isrange = TRUE;
+					srange[ii].start.id = srange[0].start.id;
+					srange[ii].start.type = srange[0].start.type;
+					srange[ii].start.u.i64 = cellmin[ii];
+					srange[ii].end.id = srange[0].end.id;
+					srange[ii].end.type = srange[0].end.type;
+					srange[ii].end.u.i64 = cellmax[ii];
+					srange[ii].itype = srange[0].itype;
+				}
+			}
 		} else {
-			cf_warning(AS_SINDEX, "Only handle String and Numeric type");
+			cf_warning(AS_SINDEX, "Only handle String, Numeric and GeoJSON type");
 			goto Cleanup;
 		}
 		srange->num_binval = numrange;
@@ -2748,7 +2858,12 @@ int
 as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **srange)
 {
 	cf_debug(AS_SINDEX, "as_sindex_rangep_from_msg");
-	*srange         = cf_malloc(sizeof(as_sindex_range));
+
+	// NOTE - to support geospatial queries we allocate an array of
+	// MAX_REGION_CELLS length.	 Nongeospatial queries use only the
+	// first element.  Geospatial queries use one element per region
+	// cell, up to MAX_REGION_CELLS.
+	*srange         = cf_malloc(sizeof(as_sindex_range) * MAX_REGION_CELLS);
 	if (!(*srange)) {
 		cf_warning(AS_SINDEX,
                  "Could not Allocate memory for range key. Aborting Query ...");
@@ -2884,23 +2999,25 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 			}
 	//		Get a value from sbin
 			void * skey;
-			if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+			switch (sbin->type) {
+			case AS_PARTICLE_TYPE_INTEGER:
+			case AS_PARTICLE_TYPE_GEOJSON:
 				if (j==0) {
 					skey = (void *)&(sbin->value.int_val);
 				}
 				else {
 					skey = (void *)((uint64_t *)(sbin->values) + j);
 				}
-			}
-			else if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+				break;
+			case AS_PARTICLE_TYPE_STRING:
 				if (j==0) {
 					skey = (void *)&(sbin->value.str_val);
 				}
 				else {
 					skey = (void *)((cf_digest *)(sbin->values) + j);
 				}
-			}
-			else {
+				break;
+			default:
 				retval = AS_SINDEX_ERR;
 				goto Cleanup;
 			}
@@ -2967,7 +3084,8 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 	sbin_value_pool * stack_buf = sbin->stack_buf;
 
 	// Get the size of the data we are going to store
-	if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+	if (sbin->type == AS_PARTICLE_TYPE_INTEGER ||
+		sbin->type == AS_PARTICLE_TYPE_GEOJSON) {
 		data_sz = sizeof(uint64_t);
 	}
 	else if (sbin->type == AS_PARTICLE_TYPE_STRING) {
@@ -3015,7 +3133,9 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 				cf_warning(AS_SINDEX, "memcpy failed");
 				return AS_SINDEX_ERR;
 			}
-			stack_buf->used_sz -= (sbin->num_values * data_sz);
+			if (sbin->num_values != 1) {
+				stack_buf->used_sz -= (sbin->num_values * data_sz);
+			}
 		}
 	}
 	else
@@ -3035,7 +3155,8 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 	}
 	
 	// 	Copy the value to the appropriate position.
-	if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+	if (sbin->type == AS_PARTICLE_TYPE_INTEGER ||
+		sbin->type == AS_PARTICLE_TYPE_GEOJSON) {
 		if (!memcpy((void *)((uint64_t *)sbin->values + sbin->num_values), (void *)val, data_sz)) {
 			cf_warning(AS_SINDEX, "memcpy failed");
 			return AS_SINDEX_ERR;
@@ -3057,9 +3178,9 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 }
 
 as_sindex_status
-as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
+as_sindex_add_value_to_sbin(as_sindex_bin * sbin, uint8_t * val)
 {
-	// If this is the first value coming to the sbin
+	// If this is the first value coming to the  sbin
 	// 		assign the value to the local variable of struct.
 	// Else
 	// 		If to_free is true or stack_buf is full
@@ -3067,38 +3188,70 @@ as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
 	// 		else 
 	// 			If needed copy the values stored in sbin to stack_buf
 	// 			add the value to end of stack buf
-	
+
+	int data_sz = 0;
+	if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+		data_sz = sizeof(cf_digest);
+	}
+	else if (sbin->type == AS_PARTICLE_TYPE_INTEGER ||
+			 sbin->type == AS_PARTICLE_TYPE_GEOJSON) {
+		data_sz = sizeof(uint64_t);
+	}
+	else {
+		cf_warning(AS_SINDEX, "sbin type is invalid %d", sbin->type);
+		return AS_SINDEX_ERR;
+	}
+
 	sbin_value_pool * stack_buf = sbin->stack_buf;
-	// If this is the first value coming to the sbin
-	// 		assign the value to the local variable of struct.
 	if (sbin->num_values == 0 ) {
-		sbin->value.int_val = val;
+		if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+			sbin->value.str_val = *(cf_digest *)val;
+		}
+		else if (sbin->type == AS_PARTICLE_TYPE_INTEGER ||
+				 sbin->type == AS_PARTICLE_TYPE_GEOJSON) {
+			sbin->value.int_val = *(int64_t *)val;
+		}
 		sbin->num_values++;
 	}
-	else if (sbin->num_values > 0) {
-	
-	// Else
-	// 		If to_free is true or stack_buf is full
-	// 			add value to the heap
-		if (sbin->to_free || (stack_buf->used_sz + sizeof(uint64_t)) > AS_SINDEX_VALUESZ_ON_STACK ) {
-			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)&val)) {
+	else if (sbin->num_values == 1) {
+		if ((stack_buf->used_sz + data_sz + data_sz) > AS_SINDEX_VALUESZ_ON_STACK ) {
+			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)val)) {
 				cf_warning(AS_SINDEX, "Adding value in sbin failed.");
 				return AS_SINDEX_ERR;
 			}
 		}
 		else {
-	// 		else 
-	//			If needed copy the values stored in sbin to stack_buf
-			if (sbin->num_values == 1) {
-				sbin->values = stack_buf->value + stack_buf->used_sz;
-				(* (uint64_t *)sbin->values ) = sbin->value.int_val;
-				stack_buf->used_sz += sizeof(uint64_t);
-			}
+			// sbin->values gets initiated here
+			sbin->values = stack_buf->value + stack_buf->used_sz;
 
-	// 			add the value to end of stack buf
-			*((uint64_t *)sbin->values + sbin->num_values) = val;
+			if (!memcpy(sbin->values, (void *)&sbin->value, data_sz)) {
+				cf_warning(AS_SINDEX, "Memcpy failed");
+				return AS_SINDEX_ERR;
+			}
+			stack_buf->used_sz += data_sz;
+		
+			if (!memcpy((void *)((uint8_t *)sbin->values + data_sz * sbin->num_values), (void *)val, data_sz)) {
+				cf_warning(AS_SINDEX, "Memcpy failed");
+				return AS_SINDEX_ERR;
+			}
 			sbin->num_values++;
-			stack_buf->used_sz += sizeof(uint64_t);
+			stack_buf->used_sz += data_sz;
+		}
+	}
+	else if (sbin->num_values > 1) {	
+		if (sbin->to_free || (stack_buf->used_sz + data_sz ) > AS_SINDEX_VALUESZ_ON_STACK ) {
+			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)val)) {
+				cf_warning(AS_SINDEX, "Adding value in sbin failed.");
+				return AS_SINDEX_ERR;
+			}
+		}
+		else {
+			if (!memcpy((void *)((uint8_t *)sbin->values + data_sz * sbin->num_values), (void *)val, data_sz)) {
+				cf_warning(AS_SINDEX, "Memcpy failed");
+				return AS_SINDEX_ERR;
+			}
+			sbin->num_values++;
+			stack_buf->used_sz += data_sz;
 		}
 	}
 	else {
@@ -3109,61 +3262,15 @@ as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
 }
 
 as_sindex_status
+as_sindex_add_integer_to_sbin(as_sindex_bin * sbin, uint64_t val)
+{
+	return as_sindex_add_value_to_sbin(sbin, (uint8_t * )&val);
+}
+
+as_sindex_status
 as_sindex_add_digest_to_sbin(as_sindex_bin * sbin, cf_digest val_dig)
 {
-	// If this is the first value coming to the sbin
-	// 		assign the value to the local variable of struct.
-	// Else
-	// 		If to_free is true or stack_buf is full
-	// 			add value to the heap
-	// 		else 
-	// 			If needed copy the values stored in sbin to stack_buf
-	// 			add the value to end of stack buf
-
-	sbin_value_pool * stack_buf = sbin->stack_buf;
-	// If this is the first value coming to the sbin
-	// 		assign the value to the local variable of struct.	
-	if (sbin->num_values == 0 ) {
-		sbin->value.str_val = val_dig;
-		sbin->num_values++;
-	}
-	else if (sbin->num_values > 0) {
-	
-	// Else
-	// 		If to_free is true or stack_buf is full
-	// 			add value to the heap
-		if (sbin->to_free || (stack_buf->used_sz + sizeof(cf_digest)) > AS_SINDEX_VALUESZ_ON_STACK ) {
-			if (as_sindex_add_sbin_value_in_heap(sbin, (void *)&val_dig)) {
-				cf_warning(AS_SINDEX, "Adding value in sbin failed.");
-				return AS_SINDEX_ERR;
-			}
-		}
-		else {
-	// 		else 
-	//			If needed copy the values stored in sbin to stack_buf
-			if (sbin->num_values == 1) {
-				sbin->values = stack_buf->value + stack_buf->used_sz;
-				if (!memcpy(sbin->values, (void *)&sbin->value.str_val, sizeof(cf_digest))) {
-					cf_warning(AS_SINDEX, "Memcpy failed");
-					return AS_SINDEX_ERR;
-				}
-				stack_buf->used_sz += sizeof(cf_digest);
-			}
-
-	// 			add the value to end of stack buf
-			if (!memcpy((void *)((cf_digest *)sbin->values + sbin->num_values), (void *)&val_dig, sizeof(cf_digest))) {
-				cf_warning(AS_SINDEX, "Memcpy failed");
-				return AS_SINDEX_ERR;
-			}
-			sbin->num_values++;
-			stack_buf->used_sz += sizeof(cf_digest);
-		}
-	}
-	else {
-		cf_warning(AS_SINDEX, "numvalues is coming as negative. Possible memory corruption in sbin.");
-		return AS_SINDEX_ERR;
-	}
-	return AS_SINDEX_OK;
+	return as_sindex_add_value_to_sbin(sbin, (uint8_t * )&val_dig);
 }
 
 as_sindex_status
@@ -4056,6 +4163,23 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 							sindex_found++;
 						}
 					}
+				}
+			}
+			else if (bin_type == AS_PARTICLE_TYPE_GEOJSON) {
+				// GeoJSON is like AS_PARTICLE_TYPE_STRING when
+				// reading the value and AS_PARTICLE_TYPE_INTEGER for
+				// adding the result to the index.
+				found = true;
+				bool added = false;
+				uint64_t * cells;
+				size_t ncells = as_bin_particle_geojson_cellids(b, &cells);
+				for (size_t ndx = 0; ndx < ncells; ++ndx) {
+					if (as_sindex_add_integer_to_sbin(sbin, cells[ndx]) == AS_SINDEX_OK) {
+						added = true;
+					}
+				}
+				if (added && sbin->num_values) {
+					sindex_found++;
 				}
 			}
 		}
