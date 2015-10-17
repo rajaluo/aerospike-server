@@ -477,6 +477,7 @@ typedef enum {
 	CASE_NAMESPACE_SET_BEGIN,
 	CASE_NAMESPACE_SI_BEGIN,
 	CASE_NAMESPACE_SINDEX_BEGIN,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN,
 	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
@@ -571,6 +572,14 @@ typedef enum {
 	// Namespace sindex options:
 	CASE_NAMESPACE_SINDEX_DATA_MAX_MEMORY,
 	CASE_NAMESPACE_SINDEX_NUM_PARTITIONS,
+
+    // Namespace geo2dsphere within options:
+    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT,
+    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MIN_LEVEL,
+    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_LEVEL,
+    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_CELLS,
+    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_LEVEL_MOD,
+    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_EARTH_RADIUS_METERS,
 
 	// Mod-lua options:
 	CASE_MOD_LUA_CACHE_ENABLED,
@@ -861,6 +870,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
 		{ "si",								CASE_NAMESPACE_SI_BEGIN },
 		{ "sindex",							CASE_NAMESPACE_SINDEX_BEGIN },
+		{ "geo2dsphere-within",				CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN },
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
@@ -968,6 +978,16 @@ const cfg_opt NAMESPACE_SINDEX_OPTS[] = {
 		{ "}",								CASE_CONTEXT_END }
 };
 
+const cfg_opt NAMESPACE_GEO2DSPHERE_WITHIN_OPTS[] = {
+		{ "strict",							CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT },
+		{ "min-level",						CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MIN_LEVEL },
+		{ "max-level",						CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_LEVEL },
+		{ "max-cells",						CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_CELLS },
+		{ "level-mod",						CASE_NAMESPACE_GEO2DSPHERE_WITHIN_LEVEL_MOD },
+		{ "earth-radius-meters",			CASE_NAMESPACE_GEO2DSPHERE_WITHIN_EARTH_RADIUS_METERS },
+		{ "}",								CASE_CONTEXT_END }
+};
+
 const cfg_opt MOD_LUA_OPTS[] = {
 		{ "cache-enabled",					CASE_MOD_LUA_CACHE_ENABLED },
 		{ "system-path",					CASE_MOD_LUA_SYSTEM_PATH },
@@ -1041,6 +1061,7 @@ const int NUM_NAMESPACE_SET_OPTS					= sizeof(NAMESPACE_SET_OPTS) / sizeof(cfg_o
 const int NUM_NAMESPACE_SET_ENABLE_XDR_OPTS			= sizeof(NAMESPACE_SET_ENABLE_XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SI_OPTS						= sizeof(NAMESPACE_SI_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SINDEX_OPTS					= sizeof(NAMESPACE_SINDEX_OPTS) / sizeof(cfg_opt);
+const int NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS		= sizeof(NAMESPACE_GEO2DSPHERE_WITHIN_OPTS) / sizeof(cfg_opt);
 const int NUM_MOD_LUA_OPTS							= sizeof(MOD_LUA_OPTS) / sizeof(cfg_opt);
 const int NUM_CLUSTER_OPTS							= sizeof(CLUSTER_OPTS) / sizeof(cfg_opt);
 const int NUM_CLUSTER_GROUP_OPTS					= sizeof(CLUSTER_GROUP_OPTS) / sizeof(cfg_opt);
@@ -1085,7 +1106,7 @@ typedef enum {
 	SERVICE,
 	LOGGING, LOGGING_FILE, LOGGING_CONSOLE,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO,
-	NAMESPACE, NAMESPACE_STORAGE_DEVICE, NAMESPACE_STORAGE_KV, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX,
+	NAMESPACE, NAMESPACE_STORAGE_DEVICE, NAMESPACE_STORAGE_KV, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	XDR, XDR_DATACENTER,
 	MOD_LUA,
 	CLUSTER, CLUSTER_GROUP,
@@ -1100,7 +1121,7 @@ const char* CFG_PARSER_STATES[] = {
 		"SERVICE",
 		"LOGGING", "LOGGING_FILE", "LOGGING_CONSOLE",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO",
-		"NAMESPACE", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_STORAGE_KV", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX",
+		"NAMESPACE", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_STORAGE_KV", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"XDR", "XDR_DATACENTER",
 		"MOD_LUA",
 		"CLUSTER", "CLUSTER_GROUP",
@@ -2576,6 +2597,9 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_SINDEX_BEGIN:
 				cfg_begin_context(&state, NAMESPACE_SINDEX);
 				break;
+			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN:
+				cfg_begin_context(&state, NAMESPACE_GEO2DSPHERE_WITHIN);
+				break;
 			case CASE_NAMESPACE_SINGLE_BIN:
 				ns->single_bin = cfg_bool(&line);
 				break;
@@ -2845,6 +2869,39 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_SINDEX_NUM_PARTITIONS:
 				// FIXME - minimum should be 1, but currently crashes.
 				ns->sindex_num_partitions = cfg_u32(&line, MIN_PARTITIONS_PER_INDEX, MAX_PARTITIONS_PER_INDEX);
+				break;
+			case CASE_CONTEXT_END:
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse namespace::2dsphere-within context items.
+		//
+		case NAMESPACE_GEO2DSPHERE_WITHIN:
+			switch(cfg_find_tok(line.name_tok, NAMESPACE_GEO2DSPHERE_WITHIN_OPTS, NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS)) {
+			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT:
+				ns->geo2dsphere_within_strict = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MIN_LEVEL:
+				ns->geo2dsphere_within_min_level = cfg_u16(&line, 0, 30);
+				break;
+			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_LEVEL:
+				ns->geo2dsphere_within_max_level = cfg_u16(&line, 0, 30);
+				break;
+			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_CELLS:
+				ns->geo2dsphere_within_max_cells = cfg_u16(&line, 1, MAX_REGION_CELLS);
+				break;
+			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_LEVEL_MOD:
+				ns->geo2dsphere_within_level_mod = cfg_u16(&line, 1, 3);
+				break;
+			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_EARTH_RADIUS_METERS:
+				ns->geo2dsphere_within_earth_radius_meters = cfg_u32_no_checks(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);

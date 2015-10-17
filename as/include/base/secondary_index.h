@@ -1,7 +1,7 @@
 /*
  * secondary_index.h
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -51,6 +51,7 @@
  */
 // **************************************************************************************************
 #define AS_SINDEX_MAX_STRING_KSIZE 2048
+#define AS_SINDEX_MAX_GEOJSON_KSIZE (1024 * 1024)
 #define SINDEX_SMD_KEY_SIZE        AS_ID_INAME_SZ + AS_ID_NAMESPACE_SZ 
 #define SINDEX_SMD_VALUE_SIZE      (AS_SMD_MAJORITY_CONSENSUS_KEYSIZE)
 #define SINDEX_MODULE              "sindex_module"
@@ -132,14 +133,16 @@ typedef enum {
 	AS_SINDEX_KTYPE_NONE   = 0,
 	AS_SINDEX_KTYPE_LONG   = 2, //Particle type INT
 	AS_SINDEX_KTYPE_FLOAT  = 4, //Particle type INT
-	AS_SINDEX_KTYPE_DIGEST = 10
+	AS_SINDEX_KTYPE_DIGEST = 10,
+	AS_SINDEX_KTYPE_GEO2DSPHERE = 12
 } as_sindex_ktype;
 #define AS_SINDEX_KTYPE_MAX_TO_STR_SZ 3
 
 typedef enum {
 	AS_SINDEX_KEY_TYPE_LONG   = 0,
 	AS_SINDEX_KEY_TYPE_DIGEST = 1,
-	AS_SINDEX_KEY_TYPE_MAX    = 2
+	AS_SINDEX_KEY_TYPE_GEO2DSPHERE = 2,
+	AS_SINDEX_KEY_TYPE_MAX    = 3
 } as_sindex_key_type;
 // **************************************************************************************************
 
@@ -398,6 +401,8 @@ typedef struct as_sindex_query_context_s {
 	uint64_t         bsize;
 	cf_ll            *recl;
 	uint64_t         n_bdigs;
+
+    int              range_index;
 		
 	// Physical Tree offset
 	bool             new_ibtr;		  // If new tree
@@ -433,6 +438,8 @@ typedef struct as_sindex_range_s {
 	as_sindex_bin_data  end;
 	as_sindex_type      itype;
 	char                bin_path[AS_SINDEX_MAX_PATH_LENGTH];
+	uint64_t			cellid;	// target of regions-containing-point query
+	geo_region_t		region;	// target of points-in-region query
 } as_sindex_range;
 
 /*

@@ -185,7 +185,8 @@ typedef enum {
 	AS_PARTICLE_TYPE_LIST = 20,
 	AS_PARTICLE_TYPE_HIDDEN_LIST = 21,
 	AS_PARTICLE_TYPE_HIDDEN_MAP = 22, // hidden map/list - can only be manipulated by system UDF
-	AS_PARTICLE_TYPE_MAX = 23,
+	AS_PARTICLE_TYPE_GEOJSON = 23,
+	AS_PARTICLE_TYPE_MAX = 24,
 	AS_PARTICLE_TYPE_BAD = AS_PARTICLE_TYPE_MAX
 } as_particle_type;
 
@@ -833,7 +834,7 @@ typedef enum {
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF = 0,
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION = 1,
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL = 2
-} conflict_resolution_policy;
+} conflict_resolution_pol;
 
 #define AS_SET_MAX_COUNT 0x3FF	// ID's 10 bits worth minus 1 (ID 0 means no set)
 #define AS_BINID_HAS_SINDEX_SIZE  MAX_BIN_NAMES / ( sizeof(uint32_t) * CHAR_BIT )
@@ -937,7 +938,7 @@ struct as_namespace_s {
 	/* Replication management */
 	uint16_t					replication_factor;
 	uint16_t					cfg_replication_factor;
-	conflict_resolution_policy	conflict_resolution_policy;
+	conflict_resolution_pol		conflict_resolution_policy;
 	bool						single_bin;		// restrict the namespace to objects with exactly one bin
 	bool						data_in_index;	// with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	bool 						disallow_null_setname;
@@ -1061,6 +1062,14 @@ struct as_namespace_s {
 	shash				*sindex_iname_hash;
 	uint32_t			binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
 	uint32_t			sindex_num_partitions;
+
+	// Geospatial query within parameters.
+	bool			geo2dsphere_within_strict;
+	uint16_t		geo2dsphere_within_min_level;
+	uint16_t		geo2dsphere_within_max_level;
+	uint16_t		geo2dsphere_within_max_cells;
+	uint16_t		geo2dsphere_within_level_mod;
+	uint32_t		geo2dsphere_within_earth_radius_meters;
 
 	// Current state of threshold breaches.
 	cf_atomic32		hwm_breached;
@@ -1208,3 +1217,12 @@ uint32_t as_mem_check();
 extern void as_paxos_set_cluster_key(uint64_t cluster_key);
 // Get the cluster key
 extern uint64_t as_paxos_get_cluster_key();
+
+// GeoJSON specific stuff
+typedef void *	geo_region_t;
+extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
+extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
+extern as_val * as_bin_particle_to_asval_geojson(as_bin *b);
+extern void as_val_geojson_to_client(const as_val *v, uint8_t * buf, uint32_t *psize);
+#define MAX_REGION_CELLS		   32
+#define MAX_REGION_LEVELS		   30
