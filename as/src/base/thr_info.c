@@ -6277,7 +6277,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	}
 	else if ( ret == -2 ) {
 		cf_warning(AS_INFO, "SINDEX CREATE : Failed. The indexname is longer than %d characters", 
-				AS_ID_INAME_SZ);
+				AS_ID_INAME_SZ-1);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Indexname too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -6292,7 +6292,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	}
 	else if (ret == -2 ) {
 		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Name of the namespace is longer than %d characters"
-			" for index %s ", AS_ID_NAMESPACE_SZ, indexname_str);
+			" for index %s ", AS_ID_NAMESPACE_SZ-1, indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Name of the namespace is too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -6317,7 +6317,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		imd->set = cf_strdup(set_str);
 	} else if (ret == -2) {
 		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Setname is longer than %d for index %s", 
-				AS_SET_NAME_MAX_SIZE, indexname_str);
+				AS_SET_NAME_MAX_SIZE-1, indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Name of the set is too long");
 		return AS_SINDEX_ERR_PARAM;
 	}
@@ -6346,7 +6346,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	}
 	else if (ret == -2) {
 		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Indextype str  is longer than %d for index %s", 
-				AS_SINDEX_TYPE_STR_SIZE, indexname_str);
+				AS_SINDEX_TYPE_STR_SIZE-1, indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Indextype str is too long");
 		return AS_SINDEX_ERR_PARAM;
 	
@@ -6413,6 +6413,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type. Should be one"
 				" of [numeric,string,geo2dsphere]");
 		cf_vector_destroy(str_v);
+		cf_free(imd->bname);
 		return AS_SINDEX_ERR_PARAM;
 	}
 
@@ -6430,7 +6431,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 
 	if (imd->bname && strlen(imd->bname) >= AS_ID_BIN_SZ) {
 		cf_warning(AS_INFO, "SINDEX CREATE : Failed. Bin Name %s longer than allowed %d for index %s", 
-				imd->bname, AS_ID_BIN_SZ, indexname_str);
+				imd->bname, AS_ID_BIN_SZ-1, indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Bin Name too long");
 		cf_vector_destroy(str_v);	
 		cf_free(imd->bname);
