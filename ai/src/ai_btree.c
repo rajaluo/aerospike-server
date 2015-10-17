@@ -544,8 +544,9 @@ create_tname_from_imd(const as_sindex_metadata *imd)
 static char *
 create_cname(char *bin_path, int bin_type, int index_type)
 {
-	char type_str[2 * AS_SINDEX_TYPE_STR_SIZE];
-
+	int type_str_size = AS_SINDEX_KTYPE_MAX_TO_STR_SZ + 1 + AS_SINDEX_ITYPE_MAX_TO_STR_SZ;
+	char type_str[type_str_size];
+	bzero(type_str, type_str_size);
 	if (0 > snprintf(type_str, sizeof(type_str), "%d_%d", bin_type, index_type)) {
 		return NULL;
 	}
@@ -567,25 +568,6 @@ static char *
 get_iname_from_imd(const as_sindex_metadata *imd)
 {
 	return get_iname(imd->ns_name, imd->iname);
-}
-
-void
-ai_set_simatch_by_name(char *ns, char *iname, int *imatch, int *simatch)
-{
-	char *ai_iname = get_iname(ns, iname);
-
-	*simatch = -1;
-
-	AI_GRLOCK();
-
-	int im = match_index_name(ai_iname);
-	if (im != -1) {
-		*simatch = Index[im].simatch;
-	}
-
-	AI_UNLOCK();
-
-	*imatch = im;
 }
 
 int
@@ -625,14 +607,15 @@ ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx
 		return AS_SINDEX_ERR;
 	}
 
-	char *tname = NULL, *cname = NULL, *iname = NULL;
-	int ret = AS_SINDEX_OK;
+	char *tname = NULL;
+	char *cname = NULL;
+	char *iname = NULL;
 
 	if (!(tname = create_tname_from_imd(imd))) {
 		return AS_SINDEX_ERR_NO_MEMORY;
 	}
 
-	ret = AS_SINDEX_ERR;
+	int ret = AS_SINDEX_ERR;
 
 	AI_GRLOCK();
 
@@ -641,16 +624,17 @@ ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx
 		goto END;
 	}
 	if (imd->iname) {
+		// This is always true
 		if (!(iname = get_iname_from_imd(imd))) {
 			ret = AS_SINDEX_ERR_NO_MEMORY;
 			goto END;
 		}
-		char idx_str[NAME_STR_LEN];
-		snprintf(idx_str, sizeof(idx_str), "%d", idx);
-		char *piname = str_concat(iname, '.', idx_str);
+		
+		char piname[INDD_HASH_KEY_SIZE];
+		snprintf(piname, sizeof(piname), "%s.%d", iname, idx);	
 		pimd->imatch = match_partial_index_name(piname);
-		cf_free(piname);
 	} else {
+		// CAUTION : This will not work. Since ci->list is only populated for 0th pimd
 		if (!(cname = create_cname_from_imd(imd))) {
 			ret = AS_SINDEX_ERR_NO_MEMORY;
 			goto END;
@@ -660,9 +644,10 @@ ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx
 			goto END;
 		}
 		pimd->imatch = find_partial_index(tmatch, ic);
+		cf_free(ic);
 	}
 	if (pimd->imatch == -1) {
-		cf_debug(AS_SINDEX, "Index%s: %s not found", imd->iname ? "" : "column-name", imd->iname ? iname : cname);
+		cf_warning(AS_SINDEX, "Index %s not found for %dth pimd", imd->iname, idx);
 		goto END;
 	}
 
@@ -672,10 +657,15 @@ END:
 
 	AI_UNLOCK();
 
-	cf_free(tname);
-	cf_free(iname);
-	cf_free(cname);
-
+	if (tname) {
+		cf_free(tname);
+	}
+	if (iname) { 
+		cf_free(iname);
+	}
+	if (cname) {
+		cf_free(cname);
+	}
 	return ret;
 }
 
@@ -1290,11 +1280,16 @@ ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
 	}
 
 	if (!(cname = create_cname_from_imd(imd))) {
+		if (tname) {
+			cf_free(tname);
+		}
 		return AS_SINDEX_ERR_NO_MEMORY;
 	}
 
 	AI_GWLOCK();
 
+	// TODO : ai_create_table has this check. So this is redundant
+	// 3 shash_get can be reduced to 1 through ai_get_or_create_table func
 	int tmatch = find_table(tname);
 	if (tmatch == -1) {
 		if (0 > (rv = ai_create_table(tname))) {
@@ -1315,6 +1310,9 @@ ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
 		// Add (cmatch+1) always non-zero
 		cf_debug(AS_SINDEX, "Added Mapping [BINNAME=%s: BINID=%d: COLID%d] [IMATCH=%d: SIMATCH=%d: INAME=%s]",
 				imd->bname, imd->binid, rt->col_count, Num_indx - 1, simatch, imd->iname);
+	}
+	else {
+		cf_free(ic);
 	}
 
 	//NOTE: COMMAND: CREATE PARTITIONED INDEX iname ON tname (cname) NUM = nprts
@@ -1338,10 +1336,15 @@ END:
 
 	AI_UNLOCK();
 
-	cf_free(tname);
-	cf_free(cname);
-	cf_free(iname);
-
+	if (tname) {
+		cf_free(tname);
+	}
+	if (cname) {
+		cf_free(cname);
+	}
+	if (iname) {
+		cf_free(iname);
+	}
 	return ret;
 }
 

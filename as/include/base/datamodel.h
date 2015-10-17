@@ -806,11 +806,12 @@ void as_partition_map_dump();
 //#define NS_RWLOCK	 1   /* use a reader-writer lock */
 #define NS_RWLOCK    0   /* use a standard mutex */
 
-#define AS_SINDEX_BINMAX	4
 #define AS_SINDEX_MAX		256
 
 #define MIN_PARTITIONS_PER_INDEX 1
 #define MAX_PARTITIONS_PER_INDEX 256
+#define DEFAULT_PARTITIONS_PER_INDEX 32
+#define MAX_PARTITIONS_PER_INDEX_CHAR 3 // Number of characters in max paritions per index
 
 // as_sindex structure which hangs from the ns.
 #define AS_SINDEX_INACTIVE			1 // On init, pre-loading

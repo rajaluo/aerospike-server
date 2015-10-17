@@ -185,7 +185,7 @@ void ai_init()
 	Num_indx = 0;
 	Ind_HW = nindx;
 
-	if (SHASH_OK != shash_create(&IndD, as_sindex__dict_hash_fn, TBLD_HASH_KEY_SIZE,
+	if (SHASH_OK != shash_create(&IndD, as_sindex__dict_hash_fn, INDD_HASH_KEY_SIZE,
 								 sizeof(long), AS_SINDEX_MAX, 0)) {
 		cf_crash(AS_SINDEX, "Failed to allocate tables dictionary");
 	}
@@ -234,8 +234,8 @@ static void emptyIndex(int imatch, bool is_part)
 	}
 	r_tbl_t *rt = &Tbl[ri->tmatch];
 
-	char tmp_name[TBLD_HASH_KEY_SIZE];
-	memset(tmp_name, 0, TBLD_HASH_KEY_SIZE);
+	char tmp_name[INDD_HASH_KEY_SIZE];
+	memset(tmp_name, 0, INDD_HASH_KEY_SIZE);
 	memcpy(tmp_name, ri->name, strlen(ri->name));
 
 	if(SHASH_OK != shash_delete(IndD, tmp_name) ) {
@@ -314,9 +314,14 @@ static int newIndex(char *iname, int tmatch, icol_t *ic, uchar cnstr, uchar dtyp
 	if (cf_ll_size(DropI) == 0 && (Num_indx >= (int) Ind_HW)) {
 		Ind_HW++;
 		r_ind_t *indxs = cf_malloc(sizeof(r_ind_t) * Ind_HW);
+		// TODO OPTIMIZATION : bzero can be avoided
 		bzero(indxs, sizeof(r_ind_t) * Ind_HW);
+		// TODO OPTIMIZATION : Can copy the whole block in one go
 		for (int i = 0; i < Num_indx; i++) {
 			memcpy(&indxs[i], &Index[i], sizeof(r_ind_t)); // copy index metadata
+			if (Index[i].name) {
+				cf_free(Index[i].name);
+			}
 		}
 		cf_free(Index);
 		Index = indxs;
@@ -345,6 +350,7 @@ static int newIndex(char *iname, int tmatch, icol_t *ic, uchar cnstr, uchar dtyp
 	}
 	cloneIC(ri->icol, ic);
 	ri->cnstr = cnstr;
+	// dtype is always there
 	ri->dtype = (0 > ic->cmatch || dtype) ? dtype : rt->col[ic->cmatch].type;
 	ri->simatch = -1;
 	ri->nprts = nprts; // AEROSPIKE Variables
@@ -359,6 +365,8 @@ static int newIndex(char *iname, int tmatch, icol_t *ic, uchar cnstr, uchar dtyp
 	node        = cf_malloc(sizeof(ll_ai_match_element));
 	node->match = imatch;
 	cf_ll_append(rt->ilist, (cf_ll_element *) node);
+	// icol->match is positive only for 0th pimd
+	// Rest of them have negative
 	if (0 <= ri->icol->cmatch) {
 		rt->col[ri->icol->cmatch].imatch = imatch;
 		ci_t *ci;
@@ -384,17 +392,14 @@ static int newIndex(char *iname, int tmatch, icol_t *ic, uchar cnstr, uchar dtyp
 		node->match = imatch;
 		cf_ll_append(ci->ilist, (cf_ll_element *) node);
 
-	}
-
-	if (0 <= ri->icol->cmatch) {
 		rt->col[ri->icol->cmatch].indxd = 1;
 	}
 
 	ri->btr = createIndexBT(ri->dtype, imatch);
 
 	// Put the iname into index dict
-	char tmp_name[TBLD_HASH_KEY_SIZE];
-	memset(tmp_name, 0, TBLD_HASH_KEY_SIZE);
+	char tmp_name[INDD_HASH_KEY_SIZE];
+	memset(tmp_name, 0, INDD_HASH_KEY_SIZE);
 	memcpy(tmp_name, ri->name, strlen(ri->name));
 	long tmp_imatch = imatch + 1;
 	if (SHASH_OK != shash_put_unique(IndD, tmp_name, (void*) & (tmp_imatch))) {
@@ -420,6 +425,9 @@ static int newTable(cf_ll *ctypes, cf_ll *cnames, int ccount, char *tname)
 		bzero(tbls, sizeof(r_tbl_t) * Tbl_HW);
 		for (int i = 0; i < Num_tbls; i++) {
 			memcpy(&tbls[i], &Tbl[i], sizeof(r_tbl_t)); // copy table metadata
+			if (Tbl[i].name) {
+				cf_free(Tbl[i].name);
+			}
 		}
 		cf_free(Tbl);
 		Tbl = tbls;
@@ -484,7 +492,7 @@ static int newTable(cf_ll *ctypes, cf_ll *cnames, int ccount, char *tname)
 	}
 	/* BTREE implies an index on "tbl_pk_index" -> autogenerate */
 	char *pkname = rt->col[0].name;
-	char iname[NAME_STR_LEN];
+	char iname[INDD_HASH_KEY_SIZE];
 	snprintf(iname, sizeof(iname), "%s_%s_%s", rt->name, pkname, "index");
 	icol_t *pkic;
 	if (!(pkic = (icol_t *) cf_malloc(sizeof(icol_t)))) {
@@ -494,6 +502,7 @@ static int newTable(cf_ll *ctypes, cf_ll *cnames, int ccount, char *tname)
 	bzero(pkic, sizeof(icol_t));
 	pkic->fimatch = -1;
 	pkic->cmatch = 0;
+	// TODO : Check if it is necessary or not ?
 	newIndex(iname, tmatch, pkic, CONSTRAINT_NONE, 0, 0);
 
 	return 0;
@@ -549,6 +558,7 @@ int ai_create_table(char *tname)
  */
 int ai_create_index(char *iname, char *tname, char *cname, int col_type, int num_partitions)
 {
+	// TODO OPTIMIZATION : this is redundant. tmatch should be passed
 	int tmatch = find_table(tname);
 	if (-1 == tmatch) {
 		// Table does not exist.
@@ -569,6 +579,7 @@ int ai_create_index(char *iname, char *tname, char *cname, int col_type, int num
 
 	if ((MIN_PARTITIONS_PER_INDEX > num_partitions) || (MAX_PARTITIONS_PER_INDEX < num_partitions)) {
 		// Unacceptible number of partitions.
+		cf_warning(AS_SINDEX, "num_partition in imd is invalid %d", num_partitions);
 		return -1;
 	}
 
@@ -583,14 +594,19 @@ int ai_create_index(char *iname, char *tname, char *cname, int col_type, int num
 		int dtype = rt->col[ic->cmatch].type;
 		ic->cmatch = -1;
 		for (int i = 1; i < num_partitions; i++) {
-			char piname[NAME_STR_LEN];
+			char piname[INDD_HASH_KEY_SIZE];
 			snprintf(piname, sizeof(piname), "%s.%d", iname, i);
 			if (0 > newIndex(piname, tmatch, ic, cnstr, dtype, -1)) {
+				if (ic) {
+					cf_free(ic);
+				}
 				return -1;
 			}
 		}
 	}
-
+	if (ic) {
+		cf_free(ic);
+	}
 	return rv;
 }
 
@@ -612,6 +628,8 @@ int ai_add_column(char *tname, char *cname, int col_type)
 	if (!tcol) {
 		return -1;
 	}
+	// TODO OPTIMIZATION : This is not at all necessary.
+	// As all the fields of this structure are assigned below
 	bzero(tcol, sizeof(r_col_t) * new_col_count);
 
 	ci_t *ci = cf_malloc(sizeof(ci_t));
@@ -621,8 +639,12 @@ int ai_add_column(char *tname, char *cname, int col_type)
 	}
 	bzero(ci, sizeof(ci_t));
 
+	// TODO OPTIMIZATION: We can copy the whole block in one go. 
 	for (int i = 0; i < rt->col_count; i++) {
 		memcpy(&tcol[i], &rt->col[i], sizeof(r_col_t)); // copy column metadata
+		if (rt->col[i].name) {
+			cf_free(rt->col[i].name);
+		}
 	}
 
 	r_col_t *new_col = &tcol[rt->col_count];
@@ -636,6 +658,7 @@ int ai_add_column(char *tname, char *cname, int col_type)
 
 	ci->cmatch = new_col_count - 1;
 
+	// TODO : Is there need for r_col_t in r_tbl_t ?
 	// Put the cname into col dict
 	char tmp_cname[CDICT_HASH_KEY_SIZE];
 	memset(tmp_cname, 0, CDICT_HASH_KEY_SIZE);
@@ -756,7 +779,7 @@ int ai_drop_index(char *iname)
 
 	emptyIndex(imatch, 0);
 	for (int i = 1; i < nprts; i++) {
-		char piname[NAME_STR_LEN];
+		char piname[INDD_HASH_KEY_SIZE];
 		snprintf(piname, sizeof(piname), "%s.%d", iname, i);
 		int pimatch = match_partial_index_name(piname);
 		emptyIndex(pimatch, 1);
@@ -767,7 +790,7 @@ int ai_drop_index(char *iname)
 
 /*
  *  Shut Down the Aerospike Index Module.
- *  This is not thread safe
+ *  This is not safe in multi threaded environment
  */
 void ai_shutdown(void)
 {
@@ -776,6 +799,11 @@ void ai_shutdown(void)
 	}
 
 	if (Tbl) {
+		for (int i = 0; i < Num_tbls; i++) {
+			if (Tbl[i].name) {
+				cf_free(Tbl[i].name);
+			}
+		}
 		cf_free(Tbl);
 		Tbl = NULL;
 	}
@@ -793,6 +821,11 @@ void ai_shutdown(void)
 	}
 
 	if (Index) {
+		for (int i = 0; i < Num_indx; i++) {
+			if (Index[i].name) {
+				cf_free(Index[i].name);
+			}
+		}
 		cf_free(Index);
 		Index = NULL;
 	}
