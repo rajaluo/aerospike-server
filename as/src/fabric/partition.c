@@ -2158,7 +2158,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 						cf_queue_push(mq, &r);
 
 						rv = AS_MIGRATE_CB_ALREADY_DONE;
-						cf_info(AS_PARTITION, "{%s:%d} Request for migration received from master. Migrate scheduled", ns->name, pid);
+						cf_debug(AS_PARTITION, "{%s:%d} Request for migration received from master. Migrate scheduled", ns->name, pid);
 						break;
 					}
 					if (p->state == AS_PARTITION_STATE_ZOMBIE) {
@@ -2305,7 +2305,8 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			cf_queue *mq = NULL;
 			mq =  cf_queue_create(sizeof(partition_migrate_record), false);
 
-			switch (p->state) {
+			as_partition_state orig_p_state = p->state;
+			switch (orig_p_state) {
 				case AS_PARTITION_STATE_UNDEF:
 				case AS_PARTITION_STATE_JOURNAL_APPLY: // should never happen - it's a dummy state
 				case AS_PARTITION_STATE_WAIT:
@@ -2419,8 +2420,13 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 							}
 						}
 						else {
-							cf_warning(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state", ns->name, pid, source_node);
-							break; // out of switch
+							// This happens when DESYNC (empty) master becomes
+							// SYNC and there were duplicates. The first sync
+							// node is not a member of the dupl_nodes array.
+							if (orig_p_state != AS_PARTITION_STATE_DESYNC) {
+								cf_warning(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state", ns->name, pid, source_node);
+								break; // out of switch
+							}
 						}
 					}
 					else {
