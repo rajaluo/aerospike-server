@@ -590,9 +590,11 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			  rd->n_bins, as_bin_inuse_count(urecord->rd), free_bins, new_bins, delta_bins);
 
 	// Check bin usage limit.
-	if (inuse_bins + new_bins > UDF_RECORD_BIN_ULIMIT) {
-		cf_warning(AS_UDF, "bin limit of %d for UDF exceeded: %d bins in use, %d bins free, %d new bins needed",
-				(int)UDF_RECORD_BIN_ULIMIT, inuse_bins, free_bins, new_bins);
+	if ((inuse_bins + new_bins > UDF_RECORD_BIN_ULIMIT) ||
+			(urecord->flag & UDF_RECORD_FLAG_TOO_MANY_BINS)) {
+		cf_warning(AS_UDF, "bin limit of %d for UDF exceeded: %d bins in use, %d bins free, %s%d new bins needed",
+				(int)UDF_RECORD_BIN_ULIMIT, inuse_bins, free_bins,
+				(urecord->flag & UDF_RECORD_FLAG_TOO_MANY_BINS) ? ">" : "", new_bins);
 		goto Rollback;
 	}
 
