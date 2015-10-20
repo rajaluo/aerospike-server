@@ -359,8 +359,6 @@ thr_demarshal_set_buffer(int fd, int option, int size)
 int
 thr_demarshal_config_xdr(int fd)
 {
-	cf_warning(AS_DEMARSHAL, "XXX %d", fd);
-
 	int arg = 0;
 
 	if (setsockopt(fd, SOL_TCP, TCP_NODELAY, &arg, sizeof(arg)) < 0) {
@@ -857,7 +855,9 @@ thr_demarshal(void *arg)
 					}
 
 					// If it's an XDR connection and we haven't yet modified the connection settings, ...
-					if ((tr.msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0 && (fd_h->fh_info & FH_INFO_XDR) == 0) {
+					if (tr.msgp->proto.type == PROTO_TYPE_AS_MSG &&
+							(tr.msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0 &&
+							(fd_h->fh_info & FH_INFO_XDR) == 0) {
 						// ... modify them.
 						if (thr_demarshal_config_xdr(fd_h->fd) != 0) {
 							cf_warning(AS_DEMARSHAL, "Failed to configure XDR connection");
