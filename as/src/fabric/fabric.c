@@ -153,13 +153,14 @@ void as_fabric_dump();
 **   --------------------
 **
 **   High-performance, concurrent fabric message exchange is provided via worker threads handling a particular
-**   set of FBs.  (There is currently a maximum of 6 worker threads.)  Each worker thread has a Unix-domain
-**   notification ("note") socket that is used to send events to the worker thread.  The main work of receiving
-**   and sending fabric messages is handled by "fabric_worker_fn()", which does an "epoll_wait()" on the "note_fd"
-**   and all of the worker thread's attached FBs.  Events on the "note_fd" may be either "NEW_FABRIC_BUFFER" or
-**   "DELETE_FABRIC_BUFFER", received with a parameter that is the FB containing the FD to be listened to or
-**   else shutdown.  Events on the FBs FDs may be either readable, writable, or errors (which result in the
-**   particular fabric connection being closed.)
+**   set of FBs.  (There is a default of 16, and a maximum of 128, fabric worker threads.)  Each worker thread
+**   has an abstract Unix domain notification ("note") socket [Note:  This is a Linux-specific dependency!]
+**   that is used to send events to the worker thread.  The main work of receiving and sending fabric messages
+**   is handled by "fabric_worker_fn()", which does an "epoll_wait()" on the "note_fd" and all of the worker
+**   thread's attached FBs.  Events on the "note_fd" may be either "NEW_FABRIC_BUFFER" or "DELETE_FABRIC_BUFFER",
+**   received with a parameter that is the FB containing the FD to be listened to or else shutdown.  Events on
+**   the FBs FDs may be either readable, writable, or errors (which result in the particular fabric connection
+**   being closed.)
 **
 **   Debugging Utilities:
 **   --------------------
@@ -779,10 +780,17 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 		char *hbaddr_to_use = g_config.hb_addr;
 		// Checking the first byte is enough as '0' cannot be a valid IP address other than 0.0.0.0
 		if (*hbaddr_to_use == '0') {
-			cf_debug(AS_HB, "Sending %s as nodes IP to return heartbeat", g_config.node_ip);
+			cf_debug(AS_FABRIC, "Using address \"any\" for listening for heartbeats and a real IP address for receiving heartbeats");
 			hbaddr_to_use = g_config.node_ip;
 		}
-
+		// If the user specified an interface-address, however, we should instead
+		// send that address to the remote machine to send back heartbeats to us.
+		if (g_config.hb_tx_addr) {
+			cf_debug(AS_FABRIC, "Using \"interface-address\" for receiving heartbeats");
+			hbaddr_to_use = g_config.hb_tx_addr;
+		}
+		cf_debug(AS_FABRIC, "Sending %s as the IP address for receiving heartbeats", hbaddr_to_use);
+		
 		if (1 != inet_pton(AF_INET, hbaddr_to_use, &self))
 			cf_warning(AS_HB, "unable to call inet_pton: %s", cf_strerror(errno));
 		else {
@@ -1405,6 +1413,7 @@ fabric_worker_fn(void *argv)
 
 	// Connect to the notification socket
 	struct sockaddr_un note_so;
+	memset(&note_so, 0, sizeof(note_so));
 	int note_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (note_fd < 0) {
 		cf_debug(AS_FABRIC, "Could not create socket for notification thread");
@@ -1412,9 +1421,11 @@ fabric_worker_fn(void *argv)
 	}
 	note_so.sun_family = AF_UNIX;
 	strcpy(note_so.sun_path, fa->note_sockname);
-	int len = strlen(note_so.sun_path) + sizeof(note_so.sun_family);
+	int len = sizeof(note_so.sun_family) + strlen(note_so.sun_path) + 1;
+	// Use an abstract Unix domain socket [Note:  Linux-specific!] by setting the first path character to NUL.
+	note_so.sun_path[0] = '\0';
 	if (connect(note_fd, (struct sockaddr *) &note_so, len) == -1) {
-		cf_debug(AS_FABRIC, "could not connect to notification socket");
+		cf_crash(AS_FABRIC, "could not connect to notification socket");
 		return(0);
 	}
 	// Write the one byte that is my index
@@ -1959,15 +1970,18 @@ as_fabric_start()
 				 "could not create note server fd: %d %s", errno, cf_strerror(errno));
 	}
 	struct sockaddr_un ns_so;
+	memset(&ns_so, 0, sizeof(ns_so));
 	ns_so.sun_family = AF_UNIX;
-	snprintf(&fa->note_sockname[0], sizeof(ns_so.sun_path), "/tmp/wn-%d", getpid());
+	snprintf(&fa->note_sockname[0], sizeof(ns_so.sun_path), "@/tmp/wn-%d", getpid());
 	strcpy(ns_so.sun_path, fa->note_sockname);
-	unlink(ns_so.sun_path); // not sure why this is necessary
-	int ns_so_len = strlen(ns_so.sun_path) + sizeof(ns_so.sun_family) + 1;
+	int ns_so_len = sizeof(ns_so.sun_family) + strlen(ns_so.sun_path) + 1;
+	// Use an abstract Unix domain socket [Note:  Linux-specific!] by setting the first path character to NUL.
+	ns_so.sun_path[0] = '\0';
 	if (0 > bind(fa->note_server_fd, (struct sockaddr *)&ns_so, ns_so_len)) {
 		cf_crash(AS_FABRIC,
 				 "could not bind note server name %s: %d %s", ns_so.sun_path, errno, cf_strerror(errno));
 	}
+
 	if (0 > listen(fa->note_server_fd, 5)) {
 		cf_crash(AS_FABRIC, "listen: %s", cf_strerror(errno));
 	}

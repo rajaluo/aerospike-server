@@ -116,6 +116,7 @@ make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
 			break;
 		}
 		case AS_PARTICLE_TYPE_BLOB:
+		case AS_PARTICLE_TYPE_GEOJSON:
 		case AS_PARTICLE_TYPE_STRING:
 		case AS_PARTICLE_TYPE_LIST:
 		case AS_PARTICLE_TYPE_MAP:
@@ -474,6 +475,7 @@ send_result(as_result * res, udf_call * call, void *udata)
 					break;
 				}
 				case AS_BYTES:
+				case AS_GEOJSON:
 				{
 					as_bytes * b = as_bytes_fromval(v);
 					uint8_t * rs = as_bytes_get(b);
@@ -643,6 +645,18 @@ udf_call_destroy(udf_call * call)
 	call->arglist = NULL;
 }
 
+static inline bool
+udf_zero_bins_left(udf_record *urecord)
+{
+	if (!(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD)
+			&& (urecord->flag & UDF_RECORD_FLAG_OPEN)
+			&& !as_bin_inuse_has(urecord->rd)) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
 /*
  * Looks at the flags set in udf_record and determines if it is
  * read / write or delete operation
@@ -675,17 +689,8 @@ udf_rw_getop(udf_record *urecord, udf_optype *urecord_op)
 		*urecord_op  = UDF_OPTYPE_READ;
 	}
 
-	// If there exists a record reference but no bin of the record is in use,
-	// delete the record. remove from the tree. Only LDT_RECORD here not needed
-	// for LDT_SUBRECORD (only do it if requested by UDF). All the SUBRECORD of
-	// removed LDT_RECORD will be lazily cleaned up by defrag.
-	if (!(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD)
-			&& (urecord->flag & UDF_RECORD_FLAG_OPEN)
-			&& !as_bin_inuse_has(urecord->rd)) {
-		as_transaction *tr = urecord->tr;
-		as_index_delete(tr->rsv.tree, &tr->keyd);
-		urecord->starting_memory_bytes = 0;
-		*urecord_op                    = UDF_OPTYPE_DELETE;
+	if (udf_zero_bins_left(urecord)) {
+		*urecord_op  = UDF_OPTYPE_DELETE;
 	}
 }
 
@@ -751,7 +756,17 @@ udf_rw_post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set
 			urecord->tr, urecord->r_ref, urecord->rd,
 			(urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN));
 
-	if (*urecord_op == UDF_OPTYPE_WRITE)	{
+	// If there exists a record reference but no bin of the record is in use,
+	// delete the record. remove from the tree. Only LDT_RECORD here not needed
+	// for LDT_SUBRECORD (only do it if requested by UDF). All the SUBRECORD of
+	// removed LDT_RECORD will be lazily cleaned up by defrag.
+	if (udf_zero_bins_left(urecord)) {
+		as_transaction *tr = urecord->tr;
+		as_index_delete(tr->rsv.tree, &tr->keyd);
+		urecord->starting_memory_bytes = 0;
+		*urecord_op                    = UDF_OPTYPE_DELETE;
+	}
+	else if (*urecord_op == UDF_OPTYPE_WRITE)	{
 		cf_detail_digest(AS_UDF, &rd->keyd, "Committing Changes n_bins %d", as_bin_get_n_bins(r_ref->r, rd));
 
 		size_t  rec_props_data_size = as_storage_record_rec_props_size(rd);
@@ -876,36 +891,35 @@ bool
 udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint16_t set_id)
 {
 	int subrec_count = 0;
-	// LDT: Commit all the changes being done to the all records.
-	// TODO: remove limit of 6 (note -- it's temporarily up to 20)
-	udf_optype urecord_op = UDF_OPTYPE_READ;
+	udf_optype h_urecord_op = UDF_OPTYPE_READ;
 	*lrecord_op           = UDF_OPTYPE_READ;
 	udf_record *h_urecord = as_rec_source(lrecord->h_urec);
 	bool is_ldt           = false;
 	int  ret              = 0;
 	uint32_t total_flat_size = 0; 
 
-	udf_rw_getop(h_urecord, &urecord_op);
+	udf_rw_getop(h_urecord, &h_urecord_op);
 	// In case required 
 	// wr->pickled_ldt_version = lrecord->version;
 
-	if (urecord_op == UDF_OPTYPE_DELETE) {
+	if (h_urecord_op == UDF_OPTYPE_DELETE) {
+		udf_rw_post_processing(h_urecord, &h_urecord_op, set_id);
 		wr->pickled_buf      = NULL;
 		wr->pickled_sz       = 0;
 		as_rec_props_clear(&wr->pickled_rec_props);
 		*lrecord_op  = UDF_OPTYPE_DELETE;
 	} else {
 
-		if (urecord_op == UDF_OPTYPE_WRITE) {
+		if (h_urecord_op == UDF_OPTYPE_WRITE) {
 			*lrecord_op = UDF_OPTYPE_WRITE;
 		}
 
 		FOR_EACH_SUBRECORD(i, j, lrecord) {
-			urecord_op = UDF_OPTYPE_READ;
+			udf_optype c_urecord_op = UDF_OPTYPE_READ;
 			udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
-			udf_rw_getop(c_urecord, &urecord_op);
+			udf_rw_getop(c_urecord, &c_urecord_op);
 
-			if (UDF_OP_IS_WRITE(urecord_op)) {
+			if (UDF_OP_IS_WRITE(c_urecord_op)) {
 				if (g_config.ldt_benchmarks) {
 					if (c_urecord->tr->rsv.ns
 						&& NAMESPACE_HAS_PERSISTENCE(c_urecord->tr->rsv.ns)
@@ -916,14 +930,13 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 				is_ldt = true;
 				subrec_count++;
 			}
-			udf_rw_post_processing(c_urecord, &urecord_op, set_id);
+			udf_rw_post_processing(c_urecord, &c_urecord_op, set_id);
 		}
 
 		// Process the parent record in the end .. this is to make sure
 		// the lock is held till the end. 
 		if (g_config.ldt_benchmarks) {
-			udf_rw_getop(h_urecord, &urecord_op);
-			if (UDF_OP_IS_WRITE(urecord_op)) { 
+			if (UDF_OP_IS_WRITE(h_urecord_op)) { 
 				if (h_urecord->tr->rsv.ns
 					&& NAMESPACE_HAS_PERSISTENCE(h_urecord->tr->rsv.ns)
 					&& h_urecord->rd) {
@@ -931,7 +944,7 @@ udf_rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, u
 				}
 			}
 		}
-		udf_rw_post_processing(h_urecord, &urecord_op, set_id);
+		udf_rw_post_processing(h_urecord, &h_urecord_op, set_id);
 
 		if (is_ldt) {
 			// Create the multiop pickled buf for thr_rw.c
@@ -1507,6 +1520,11 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 				}
 				break;
 			}
+			case AS_GEOJSON:
+			{
+                as_val_geojson_to_client(v, buf, size);
+				break;
+			}
 			case AS_BYTES:
 			{
 				as_bytes * b = as_bytes_fromval(v);
@@ -1628,6 +1646,13 @@ as_val_frombin(as_bin *bb)
 			value = (as_val *) as_bytes_new_wrap(buf, psz, true);
 			break;
 		}
+		case AS_PARTICLE_TYPE_GEOJSON:
+        {
+            // NOTE - Move this function into particle.c when we
+            // convert this routine to as_bin_particle_to_asval.
+            //
+            return as_bin_particle_to_asval_geojson(bb);
+        }
 		case AS_PARTICLE_TYPE_MAP:
 		case AS_PARTICLE_TYPE_LIST:
 		{
@@ -1674,6 +1699,8 @@ to_particle_type(int from_as_type)
 			return AS_PARTICLE_TYPE_STRING;
 		case AS_BYTES:
 			return AS_PARTICLE_TYPE_BLOB;
+		case AS_GEOJSON:
+			return AS_PARTICLE_TYPE_GEOJSON;
 		case AS_LIST:
 			return AS_PARTICLE_TYPE_LIST;
 		case AS_MAP:

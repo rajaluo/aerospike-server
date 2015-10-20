@@ -20,6 +20,8 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#include "base/thr_demarshal.h"
+
 #include <errno.h>
 #include <pthread.h>
 #include <string.h>
@@ -86,6 +88,43 @@ pthread_t		g_demarshal_reaper_th;
 void *thr_demarshal_reaper_fn(void *arg);
 static cf_queue *g_freeslot = 0;
 
+int
+epoll_ctl_modify(as_file_handle *fd_h, uint32_t events)
+{
+	struct epoll_event ev;
+	memset(&ev, 0, sizeof ev);
+	ev.events = events;
+	ev.data.ptr = fd_h;
+	return epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_MOD, fd_h->fd, &ev);
+}
+
+void
+thr_demarshal_pause(as_file_handle *fd_h)
+{
+	fd_h->trans_active = true;
+}
+
+void
+thr_demarshal_resume(as_file_handle *fd_h)
+{
+	fd_h->trans_active = false;
+
+	// Make the demarshal thread aware of pending connection data (if any).
+	// Writing to an FD's event mask makes the epoll instance re-check for
+	// data, even when edge-triggered. If there is data, the demarshal thread
+	// gets EPOLLIN for this FD.
+	if (epoll_ctl_modify(fd_h, EPOLLIN | EPOLLET | EPOLLRDHUP) < 0) {
+		if (errno == ENOENT) {
+			// Happens, when we reached NextEvent_FD_Cleanup (e.g, because the
+			// client disconnected) while the transaction was still ongoing.
+			return;
+		}
+
+		cf_crash(AS_DEMARSHAL, "unable to resume socket FD %d on epoll instance FD %d: %d (%s)",
+				fd_h->fd, fd_h->epoll_fd, errno, cf_strerror(errno));
+	}
+}
+
 void
 demarshal_file_handle_init()
 {
@@ -149,11 +188,13 @@ thr_demarshal_reaper_fn(void *arg)
 					as_security_refresh(fd_h);
 				}
 
-				// Reap if not obviously in use.
-				if (fd_h->inuse == false) {
+				// Reap, if asked to.
+				if (fd_h->reap_me) {
+					cf_debug(AS_DEMARSHAL, "Reaping FD %d as requested", fd_h->fd);
 					g_file_handle_a[i] = 0;
 					cf_queue_push(g_freeslot, &i);
-					AS_RELEASE_FILE_HANDLE(fd_h);
+					as_release_file_handle(fd_h);
+					fd_h = 0;
 				}
 				// Reap if past kill time.
 				else if ((0 != kill_ms) && (fd_h->last_used + kill_ms < now)) {
@@ -167,7 +208,8 @@ thr_demarshal_reaper_fn(void *arg)
 					cf_debug(AS_DEMARSHAL, "remove unused connection, fd %d", fd_h->fd);
 					g_file_handle_a[i] = 0;
 					cf_queue_push(g_freeslot, &i);
-					AS_RELEASE_FILE_HANDLE(fd_h);
+					as_release_file_handle(fd_h);
+					fd_h = 0;
 					cf_atomic_int_incr(&g_config.reaper_count);
 				}
 				else {
@@ -317,7 +359,6 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-
 			if (s->sock == events[i].data.fd) {
 
 				// Accept new connections on the service socket.
@@ -345,7 +386,7 @@ thr_demarshal(void *arg)
 					cf_crash(AS_DEMARSHAL, "inet_ntop(): %s (errno %d)", cf_strerror(errno), errno);
 				}
 
-				cf_detail(AS_DEMARSHAL, "new connection: %s", cpaddr);
+				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", cpaddr, csocket);
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_config.proto_connections_opened - g_config.proto_connections_closed;
@@ -379,8 +420,8 @@ thr_demarshal(void *arg)
 				fd_h->fd = csocket;
 
 				fd_h->last_used = cf_getms();
-				fd_h->inuse = true;
-				fd_h->t_inprogress = false;
+				fd_h->reap_me = false;
+				fd_h->trans_active = false;
 				fd_h->proto = 0;
 				fd_h->proto_unread = 0;
 				fd_h->fh_info = 0;
@@ -429,11 +470,13 @@ thr_demarshal(void *arg)
 						}
 					}
 
-					if (0 > (n = epoll_ctl(g_demarshal_args->epoll_fd[id], EPOLL_CTL_ADD, csocket, &ev))) {
+					fd_h->epoll_fd = g_demarshal_args->epoll_fd[id];
+
+					if (0 > (n = epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_ADD, csocket, &ev))) {
 						cf_info(AS_DEMARSHAL, "unable to add socket to event queue of demarshal thread %d %d", id, g_demarshal_args->num_threads);
 						pthread_mutex_lock(&g_file_handle_a_LOCK);
-						fd_h->inuse = false;
-						AS_RELEASE_FILE_HANDLE(fd_h);
+						fd_h->reap_me = true;
+						as_release_file_handle(fd_h);
 						fd_h = 0;
 						pthread_mutex_unlock(&g_file_handle_a_LOCK);
 					}
@@ -450,6 +493,8 @@ thr_demarshal(void *arg)
 					goto NextEvent;
 				}
 
+				cf_detail(AS_DEMARSHAL, "epoll connection event: fd %d, events 0x%x", fd_h->fd, events[i].events);
+
 				// Process data on an existing connection: this might be more
 				// activity on an already existing transaction, so we have some
 				// state to manage.
@@ -462,15 +507,15 @@ thr_demarshal(void *arg)
 					goto NextEvent_FD_Cleanup;
 				}
 
+				if (fd_h->trans_active) {
+					goto NextEvent;
+				}
+
 				// If pointer is NULL, then we need to create a transaction and
 				// store it in the buffer.
 				if (fd_h->proto == NULL) {
 					as_proto proto;
 					int sz;
-
-					if (fd_h->t_inprogress) {
-						cf_debug(AS_DEMARSHAL, "receiving pipelined request");
-					}
 
 					/* Get the number of available bytes */
 					if (-1 == ioctl(fd, FIONREAD, &sz)) {
@@ -524,12 +569,15 @@ thr_demarshal(void *arg)
 					if (PROTO_TYPE_AS_MSG == proto.type) {
 						size_t offset = sizeof(as_msg);
 						// Number of bytes to peek from the socket.
-						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
-//						size_t peek_sz = MIN(proto.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
+//						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
+						size_t peek_sz = MIN(proto.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
 						if (!(peeked_data_sz = cf_socket_recv(fd, peekbuf, peek_sz, 0))) {
-							cf_warning(AS_DEMARSHAL, "could not peek the as_msg header");
-							goto NextEvent_FD_Cleanup;
-						} else if (peeked_data_sz > min_as_msg_sz) {
+							// That's actually legitimate. The as_proto may have gone into one
+							// packet, the as_msg into the next one, which we haven't yet received.
+							// This just "never happened" without async.
+							cf_detail(AS_DEMARSHAL, "could not peek the as_msg header, expected %zu byte(s)", peek_sz);
+						}
+						if (peeked_data_sz > min_as_msg_sz) {
 //							cf_debug(AS_DEMARSHAL, "(Peeked %zu bytes.)", peeked_data_sz);
 							if (peeked_data_sz > proto.sz) {
 								char ip_port_str[64];
@@ -569,7 +617,7 @@ thr_demarshal(void *arg)
 	//									cf_debug(AS_DEMARSHAL, "Message field %d is not namespace (type %d) ~~ Reading next field", field_num, field->type);
 										field_num++;
 										offset += sizeof(as_msg_field) + value_sz;
-										if (offset >= peekbuf_sz) {
+										if (offset >= peeked_data_sz) {
 											break;
 										}
 									}
@@ -631,7 +679,7 @@ thr_demarshal(void *arg)
 					// It's only really live if it's injecting a transaction.
 					fd_h->last_used = now_ms;
 
-					fd_h->t_inprogress = true; // disallow and/or detect pipelining
+					thr_demarshal_pause(fd_h); // pause reading while the transaction is in progress
 					fd_h->proto = 0;
 					fd_h->proto_unread = 0;
 
@@ -713,9 +761,7 @@ thr_demarshal(void *arg)
 
 					// Fast path for batch requests.
 					if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
-						if (as_batch_queue_task(&tr)) {
-							goto NextEvent_FD_Cleanup;
-						}
+						as_batch_queue_task(&tr);
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
 					}
@@ -748,10 +794,13 @@ NextEvent_FD_Cleanup:
 					cf_rc_release(fd_h);
 				}
 				// Remove the fd from the events list.
-				epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, 0);
+				if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, 0) < 0) {
+					cf_crash(AS_DEMARSHAL, "unable to remove socket FD %d from epoll instance FD %d: %d (%s)",
+							fd, epoll_fd, errno, cf_strerror(errno));
+				}
 				pthread_mutex_lock(&g_file_handle_a_LOCK);
-				fd_h->inuse = false;
-				AS_RELEASE_FILE_HANDLE(fd_h);
+				fd_h->reap_me = true;
+				as_release_file_handle(fd_h);
 				fd_h = 0;
 				pthread_mutex_unlock(&g_file_handle_a_LOCK);
 NextEvent:

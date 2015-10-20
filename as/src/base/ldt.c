@@ -161,7 +161,7 @@
  *   -- If there are duplicates; find the winning node i.e node with winning LDT record based on parent 
  *      generation + ttl out of all the duplicate versions (it could be master / primary version / 
  *      zombie). Ship the operation to that node using proxy subsystem. 
- *   -- Apply LDT UDF on the winning node and replicate to (master / replica / qnode)
+ *   -- Apply LDT UDF on the winning node and replicate to (master / replica )
  * 
  *
  * - Replication: Replication at both at the time of the duplicates/migration and at the normal runtime 
@@ -178,7 +178,7 @@
  *   -- After write is applied pack up parent and all the modified sub record in single message along with 
  *      -- The source partition's current version 
  *      -- The source current outgoing migration LDT version.
- *      and send it to master (in case write happens on non-master node) replicas and qnode.
+ *      and send it to master (in case write happens on non-master node) replicas.
  *   -- At the destination on receiving the replication request check source partition version and destination 
  *      partition version. 
  *      - If the replication request is coming from partition version which is different then
@@ -1432,8 +1432,10 @@ as_ldt_merge_component_is_candidate(as_partition_reservation *rsv, as_record_mer
 	bool rv = false;
 
 	// If component has higher generation ttl then it is merge candidate
-	if (c->pgeneration > r->generation
-			|| (c->pgeneration == r->generation && c->pvoid_time > r->void_time)) {
+	if (c->pgeneration > r->generation ||
+			(c->pgeneration == r->generation &&
+					(r->void_time != 0 && (c->pvoid_time == 0 ||
+							c->pvoid_time > r->void_time)))) {
 		as_record_done(&r_ref, rsv->ns);
 		rv = true;
 	} else {
@@ -1807,4 +1809,27 @@ as_llist_scan(as_namespace *ns, as_index_tree *sub_tree, as_storage_rd  *rd, as_
 
 	as_val_destroy(valp);
 	return (as_val *)result_list;
+}
+
+void
+as_ldt_get_property(as_rec_props *props, bool *is_ldt_parent,
+		bool *is_ldt_sub)
+{
+	uint16_t * ldt_rectype_bits;
+
+	*is_ldt_sub	= false;
+	*is_ldt_parent = false;
+
+	if (props->size != 0 &&
+			(as_rec_props_get_value(props, CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+					(uint8_t**)&ldt_rectype_bits) == 0)) {
+		if (as_ldt_flag_has_sub(*ldt_rectype_bits)) {
+			*is_ldt_sub = true;
+		}
+		else if (as_ldt_flag_has_parent(*ldt_rectype_bits)) {
+			*is_ldt_parent = true;
+		}
+	}
+
+	cf_detail(AS_LDT, "Parent=%d Subrec=%d", *is_ldt_parent, *is_ldt_sub);
 }

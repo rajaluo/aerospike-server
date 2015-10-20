@@ -44,6 +44,7 @@
 #include "base/proto.h"
 #include "base/scan.h"
 #include "base/security.h"
+#include "base/thr_demarshal.h"
 #include "base/udf_rw.h"
 
 /* as_transaction_prepare
@@ -385,6 +386,16 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 void
 as_release_file_handle(as_file_handle *proto_fd_h)
 {
+	int rc = cf_rc_release(proto_fd_h);
+
+	if (rc > 0) {
+		return;
+	}
+	else if (rc < 0) {
+		cf_warning(AS_PROTO, "release file handle: negative ref-count %d", rc);
+		return;
+	}
+
 	close(proto_fd_h->fd);
 	proto_fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 	proto_fd_h->fd = -1;
@@ -393,7 +404,7 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 		as_proto *p = proto_fd_h->proto;
 
 		if ((p->version != PROTO_VERSION) || (p->type >= PROTO_TYPE_MAX)) {
-			cf_info(AS_AS, "release file handle: bad proto buf, corruption");
+			cf_warning(AS_PROTO, "release file handle: bad proto buf, corruption");
 		}
 		else {
 			cf_free(proto_fd_h->proto);
@@ -406,5 +417,30 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 		proto_fd_h->security_filter = NULL;
 	}
 
+	cf_rc_free(proto_fd_h);
 	cf_atomic_int_incr(&g_config.proto_connections_closed);
+}
+
+void
+as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
+{
+	thr_demarshal_resume(proto_fd_h);
+
+	if (force_close) {
+		shutdown(proto_fd_h->fd, SHUT_RDWR);
+	}
+
+	as_release_file_handle(proto_fd_h);
+}
+
+void
+as_end_of_transaction_ok(as_file_handle *proto_fd_h)
+{
+	as_end_of_transaction(proto_fd_h, false);
+}
+
+void
+as_end_of_transaction_force_close(as_file_handle *proto_fd_h)
+{
+	as_end_of_transaction(proto_fd_h, true);
 }

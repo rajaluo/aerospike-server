@@ -121,7 +121,6 @@ int write_local(as_transaction *tr, write_local_generation *wlg,
 				as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
 int write_journal(as_transaction *tr, write_local_generation *wlg); // only do write
 int write_delete_journal(as_transaction *tr, bool is_subrec);
-static void release_proto_fd_h(as_file_handle *proto_fd_h);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
 			   cf_node masternode, bool is_delete, uint16_t set_id);
 
@@ -159,13 +158,7 @@ write_request_restart(wreq_tr_element *w)
 
 	MICROBENCHMARK_RESET_P();
 
-	if (0 != thr_tsvc_enqueue(tr)) {
-		cf_warning(AS_RW,
-				"WRITE REQUEST: FAILED queueing back request %"PRIx64"",
-				*(uint64_t*)&tr->keyd);
-		cf_free(tr->msgp);
-		tr->msgp = 0;
-	}
+	thr_tsvc_enqueue(tr);
 	cf_atomic_int_decr(&g_config.n_waiting_transactions);
 	cf_free(w);
 }
@@ -250,8 +243,8 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	tr->preprocessed = true;
 	tr->flag = 0;
 
-	tr->generation = 0;
-	tr->void_time = 0;
+	tr->generation = wr->generation;
+	tr->void_time = wr->void_time;
 	tr->microbenchmark_is_resolve = false;
 
 	if (wr->shipped_op)
@@ -310,8 +303,10 @@ void write_request_destructor(void *object) {
 		as_partition_release(&wr->rsv);
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 	}
-	if (wr->proto_fd_h)
-		AS_RELEASE_FILE_HANDLE(wr->proto_fd_h);
+	if (wr->proto_fd_h) {
+		as_end_of_transaction_ok(wr->proto_fd_h);
+		wr->proto_fd_h = 0;
+	}
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (wr->dup_msg[i])
 			as_fabric_msg_put(wr->dup_msg[i]);
@@ -412,20 +407,24 @@ void as_rw_set_stat_counters(bool is_read, int rv, as_transaction *tr) {
 		} else
 			cf_atomic_int_incr(&g_config.stat_read_errs_other);
 	} else {
-		if (rv == 0)
-			cf_atomic_int_incr(&g_config.stat_write_success);
-		else {
-			cf_atomic_int_incr(&g_config.stat_write_errs);
-			if (result_code == AS_PROTO_RESULT_FAIL_NOTFOUND)
-				cf_atomic_int_incr(&g_config.stat_write_errs_notfound);
-			else
-				cf_atomic_int_incr(&g_config.stat_write_errs_other);
+		bool is_delete = (tr && tr->msgp &&
+				(tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0);
+		if (! is_delete) {
+			if (rv == 0)
+				cf_atomic_int_incr(&g_config.stat_write_success);
+			else {
+				cf_atomic_int_incr(&g_config.stat_write_errs);
+				if (result_code == AS_PROTO_RESULT_FAIL_NOTFOUND)
+					cf_atomic_int_incr(&g_config.stat_write_errs_notfound);
+				else
+					cf_atomic_int_incr(&g_config.stat_write_errs_other);
+			}
 		}
 	}
 }
 
 int
-rw_msg_setup_infobits(msg *m, as_transaction *tr, bool has_udf, bool is_subrec)
+rw_msg_setup_infobits(msg *m, as_transaction *tr, bool has_udf, bool is_ldt_sub, bool is_ldt_parent)
 {
 	uint32_t info = 0;
 	if (tr->msgp && (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR))
@@ -438,17 +437,19 @@ rw_msg_setup_infobits(msg *m, as_transaction *tr, bool has_udf, bool is_subrec)
 
 	if (tr->rsv.ns->ldt_enabled) {
 		// Nothing is set means it is normal record
-		if (is_subrec) {
+		if (is_ldt_sub) {
 			cf_detail(AS_RW,
 					"MULTI_OP : Set Up Replication Message for the LDT Subrecord %"PRIx64"",
 					*(uint64_t*)&tr->keyd);
 			info |= RW_INFO_LDT_SUBREC;
 		}
 		else {
-			cf_detail(AS_RW,
-					"MULTI_OP : Set Up Replication Message for the LDT Record %"PRIx64"",
-					*(uint64_t*)&tr->keyd);
-			info |= RW_INFO_LDT_REC;
+			if (is_ldt_parent) {
+				cf_detail(AS_RW,
+						"MULTI_OP : Set Up Replication Message for the LDT Record %"PRIx64"",
+						*(uint64_t*)&tr->keyd);
+				info |= RW_INFO_LDT_PARENTREC;
+			}
 			info |= RW_INFO_LDT;
 		}
 	}
@@ -504,8 +505,6 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
 		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
 
-		rw_msg_setup_infobits(m, tr, has_udf, is_subrec);
-
 		// Send this along with parent packet as well. This is required
 		// in case the LDT parent replication is done without MULTI_OP.
 		// Example touch of the some other bin in the LDT parent
@@ -514,6 +513,13 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		}
 
 		if (*p_pickled_buf) {
+
+			// Use info in property map for writes
+			bool is_ldt_sub;
+			bool is_ldt_parent;
+			as_ldt_get_property(p_pickled_rec_props, &is_ldt_parent, &is_ldt_sub);
+			rw_msg_setup_infobits(m, tr, has_udf, is_ldt_sub, is_ldt_parent);
+
 			msg_set_unset(m, RW_FIELD_AS_MSG);
 			msg_set_buf(m, RW_FIELD_RECORD, (void *) *p_pickled_buf, pickled_sz,
 					MSG_SET_HANDOFF_MALLOC);
@@ -530,7 +536,13 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 					as_proto_size_get(&tr->msgp->proto), MSG_SET_COPY);
 			msg_set_unset(m, RW_FIELD_RECORD);
 
-			rw_msg_setup_infobits(m, tr, has_udf, is_subrec);
+			rw_msg_setup_infobits(m, tr, has_udf, is_subrec, false);
+
+			if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
+				uint32_t info = 0;
+				msg_get_uint32(m, RW_FIELD_INFO, &info);
+				cf_crash(AS_RW, "sending delete but DELETE msg flag not set - info 0x%x", info);
+			}
 		}
 	} else if (op == RW_OP_DUP) {
 		msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP);
@@ -688,9 +700,9 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 		if (release) {
 			cf_detail(AS_RW, "releasing proto_fd_h %d:%p",
 					tr->proto_fd_h, line);
-			release_proto_fd_h(tr->proto_fd_h);
+			as_end_of_transaction_force_close(tr->proto_fd_h);
 		} else {
-			AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+			as_end_of_transaction_ok(tr->proto_fd_h);
 		}
 		tr->proto_fd_h = 0;
 	}
@@ -745,8 +757,10 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	int rv             = 0;
 	bool is_delete     = (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE);
 
-	if ((wr->dupl_trans_complete == 0) && (tr->rsv.n_dupl > 0))
+	if ((wr->dupl_trans_complete == 0) && (tr->rsv.n_dupl > 0)) {
 		dupl_resolved = false;
+	}
+
 	if ((tr->rsv.n_dupl == 0) || !dupl_resolved) {
 		first_time = true;
 	} else {
@@ -837,8 +851,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			as_rw_set_stat_counters(true, 0, tr);
 			*delete = true;
 			return (0);
-		} else {
-			cf_atomic_int_incr(&g_config.write_master);
 		}
 
 		udf_optype op = UDF_OPTYPE_NONE;
@@ -849,7 +861,14 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			cf_detail(AS_RW,
 					"write_delete_local for digest returns %d, %d digest %"PRIx64"",
 					rv, tr->result_code, *(uint64_t*)&tr->keyd);
+
+			// Temporary debugging clause...
+			if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
+				cf_warning(AS_RW, "write_delete_local() completed with AS_MSG_INFO2_DELETE not set");
+			}
 		} else {
+			cf_atomic_int_incr(&g_config.write_master);
+
 			// If the XDR is enabled and if the user configured to stop the writes if there is no XDR
 			// and if the xdr digestpipe is not opened fail the writes with appropriate return value
 			// We cannot do this check inside write_local() because that function is used for replica
@@ -870,15 +889,16 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 				if (call->active) {
 					wr->has_udf = true;
-					if (tr->rsv.p->qnode != g_config.self_node) {
-						cf_detail(AS_RW, "Applying UDF at the non qnode");
-					}
 
 					rv = udf_rw_local(call, wr, &op);
 
 					if (UDF_OP_IS_DELETE(op)) {
 						tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
 						is_delete = true;
+						// Counteract earlier increments -- don't count UDF
+						// deletes as writes.
+						cf_atomic_int_decr(&g_config.write_master);
+						cf_atomic_int_decr(&g_config.stat_write_reqs);
 					} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
 						// update stats to move from normal to uDF requests
 						as_rw_update_stat(wr);
@@ -894,6 +914,11 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						as_rw_set_stat_counters(true, rv, tr);
 						*delete = true;
 						return 0;
+					} else {
+						// Temporary debugging clause...
+						if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->pickled_buf && ! UDF_OP_IS_LDT(op)) {
+							cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
+						}
 					}
 				} else {
 					wr->has_udf = false;
@@ -908,6 +933,11 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 							&wr->pickled_sz, &wr->pickled_rec_props,
 							&wr->response_db);
 					WR_TRACK_INFO(wr, "internal_rw_start: write local done ");
+
+					// Temporary debugging clause...
+					if (rv == 0 && ! wr->pickled_buf) {
+						cf_warning(AS_RW, "write_local() completed with no pickled buffer");
+					}
 				}
 				if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
 					cf_detail(AS_RW,
@@ -953,8 +983,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 		/* Get the target replica set, which should exclude ourselves (but
 		 * do a sanity check just to be sure) */
-		// Also pick the qnode to ship data to, unless it is master
-		bool qnode_found = true;
 		cf_node nodes[AS_CLUSTER_SZ];
 		memset(nodes, 0, sizeof(nodes));
 		int node_sz = as_partition_getreplica_readall(tr->rsv.ns, tr->rsv.pid,
@@ -963,14 +991,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			if (nodes[i] == g_config.self_node)
 				cf_crash(AS_RW,
 						"target replica set contains ourselves");
-			if (nodes[i] == tr->rsv.p->qnode)
-				qnode_found = true;
 		}
 		// TODO: We could optimize by not sending writes to replicas that reject_writes
-		// if qnode not in replica list && not master. Add it to
-		// the list of node to ship writes to. Assert that current
-		// node is master node. Writes should never happen from non
-		// master node unless it is shipped op.
 
 		// TODO: We are allowing write to go to non-master node prole here.
 		// At non-master it will fail but it has already been written at master.
@@ -986,10 +1008,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			//PRINT_STACK();
 		}
 
-		if ((!qnode_found) && (tr->rsv.p->qnode != tr->rsv.p->replica[0])) {
-			nodes[node_sz] = tr->rsv.p->qnode;
-			node_sz++;
-		}
 		/* Short circuit for one-replica writes */
 		if (0 == node_sz) {
 
@@ -1011,8 +1029,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 			WR_TRACK_INFO(wr, "internal_rw_start: Short Circuit for Single Replica Writes");
 			rw_complete(wr, tr, NULL);
-			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			as_rw_set_stat_counters(false, 0, tr);
+			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			*delete = true;
 			cf_detail(AS_RW, "FINISH UDF_%s %s:%d",
 					UDF_OP_IS_LDT(op) ? "LDT" : "RECORD", __FILE__, __LINE__);
@@ -1070,8 +1088,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 		// if fire and forget, we're done, get out
 		if (wr->replication_fire_and_forget) {
-			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			as_rw_set_stat_counters(wr->is_read, 0, tr);
+			rw_cleanup(wr, tr, first_time, false, __LINE__);
 			*delete = true;
 			return (0);
 		} else {
@@ -1090,6 +1108,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	wr->proxy_node = tr->proxy_node;
 	wr->proxy_msg  = tr->proxy_msg;
 	wr->shipped_op = (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) ? true : false;
+	wr->generation = tr->generation;
+	wr->void_time = tr->void_time;
 
 	UREQ_DATA_COPY(&wr->udata, &tr->udata);
 
@@ -1352,7 +1372,7 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
 			cf_atomic_int_incr(&g_config.stat_read_reqs_xdr);
 		}
-	} else {
+	} else if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
 		cf_atomic_int_incr(&g_config.stat_write_reqs);
 		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
 			cf_atomic_int_incr(&g_config.stat_write_reqs_xdr);
@@ -1453,7 +1473,7 @@ void rw_msg_get_ldt_dupinfo(as_record_merge_component *c, msg *m) {
 			cf_warning(AS_RW, "Subrec Component Not Expected for migrate");
 		}
 
-		if (info & RW_INFO_LDT_REC) {
+		if (info & RW_INFO_LDT_PARENTREC) {
 			c->flag |= AS_COMPONENT_FLAG_LDT_REC;
 		}
 
@@ -1713,38 +1733,48 @@ finish_rw_process_dup_ack(write_request *wr)
 //   true if it is
 //
 bool
-finish_rw_process_ack(write_request *wr, uint32_t result_code)
+finish_rw_process_ack(write_request *wr, uint32_t result_code, bool is_repl_write)
 {
 	for (uint32_t node_id = 0; node_id < wr->dest_sz; node_id++) {
-		if (wr->dest_complete[node_id] == false) {
+		if (! wr->dest_complete[node_id]) {
 			return false;
 		}
 	}
-	// Figure out the ack is coming for which request type.
-	//   - If dupl_trans_complete is 0 then it is duplicate resolution ack
-	//   - Else is it prole ack
-	//
-	// If so, use the atomic to make sure only one response does finish
-	// processing for duplicate resolution.
-	if (wr->dupl_trans_complete == 0) { // in duplicate phase
+
+	// Use the atomic flags to make sure only one response does finish
+	// processing for respective operation.
+
+	if (! is_repl_write) { // in duplicate phase
 		if (1 == cf_atomic32_incr(&wr->dupl_trans_complete)) {
 			return finish_rw_process_dup_ack(wr);
 		}
-	} else if (1 == cf_atomic32_incr(&wr->trans_complete)) {
+		else {
+			cf_warning(AS_RW, "extra dupl response - should have been handled earlier");
+		}
+	}
+	else if (1 == cf_atomic32_incr(&wr->trans_complete)) {
 		return finish_rw_process_prole_ack(wr, result_code);
 	}
-	return (false);
+
+	return false;
 }
 
 void
-rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk)
+rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk, bool is_repl_write)
 {
 	cf_debug(AS_RW,
 			"{%s:%d} rw_process_cluster_key_mismatch: CLUSTER KEY MISMATCH rsp %"PRIx64" %s",
 			wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
 	bool must_delete = false;
+
 	pthread_mutex_lock(&wr->lock);
-	if (wr->dupl_trans_complete == 0) {
+
+	if (wr->batch_shared && ! wr->msgp) {
+		pthread_mutex_unlock(&wr->lock);
+		return;
+	}
+
+	if (! is_repl_write) {
 		if (1 == cf_atomic32_incr(&wr->dupl_trans_complete)) {
 			cf_atomic32_incr(&wr->trans_complete);
 			// also complete the next transaction. we are bailing out
@@ -1753,16 +1783,12 @@ rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk)
 			write_request_init_tr(&tr, wr);
 			MICROBENCHMARK_RESET();
 
-			// In order to re-write the prole, we actually REDO the transaction
-			// by re-queuing it and doing it ALL over again.
 			cf_atomic_int_incr(&g_config.stat_cluster_key_err_ack_dup_trans_reenqueue);
 
 			cf_debug_digest(AS_RW, &(wr->keyd), "[RE-ENQUEUE JOB from CK ERR ACK:1] TrID(0) SelfNode(%"PRIx64")",
 					g_config.self_node );
-			if (0 != thr_tsvc_enqueue(&tr)) {
-				cf_warning(AS_RW, "queue rw_process_cluster_key_mismatch failure");
-				cf_free(wr->msgp);
-			}
+
+			thr_tsvc_enqueue(&tr);
 			wr->msgp = 0;
 			WR_TRACK_INFO(wr, "rw_process_cluster_key_mismatch: cluster key mismatch deleting - duplicate ");
 			must_delete = true;
@@ -1778,15 +1804,14 @@ rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk)
 		cf_debug_digest(AS_RW, &(wr->keyd), "[RE-ENQUEUE JOB from CK ERR ACK:2] TrID(0) SelfNode(%"PRIx64")",
 				g_config.self_node );
 
-		if (0 != thr_tsvc_enqueue(&tr)) {
-			cf_warning(AS_RW, "queue rw_process_cluster_key_mismatch failure");
-			cf_free(wr->msgp);
-		}
+		thr_tsvc_enqueue(&tr);
 		wr->msgp = 0; // NULL this out so that the write_destructor does not free this pointer.
 		WR_TRACK_INFO(wr, "rw_process_cluster_key_mismatch: cluster key mismatch deleting - final ");
 		must_delete = true;
 	}
+
 	pthread_mutex_unlock(&wr->lock);
+
 	if (must_delete) {
 		rchash_delete(g_write_hash, gk, sizeof(global_keyd));
 	}
@@ -1890,7 +1915,8 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	WR_TRACK_INFO(wr, "rw_process_ack: entering");
 
 	if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH) {
-		rw_process_cluster_key_mismatch(wr, &gk);
+		rw_process_cluster_key_mismatch(wr, &gk, is_write);
+		goto Out;
 	}
 	else if (result_code != AS_PROTO_RESULT_OK) {
 		cf_debug_digest(AS_RW, "{%s:%d} rw_process_ack: Processing unexpected response(%d):",
@@ -1901,6 +1927,17 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 			wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
 
 	pthread_mutex_lock(&wr->lock);
+
+	if (wr->dupl_trans_complete != 0 && ! is_write) {
+		cf_debug(AS_RW, "rw process ack: ignoring extra dupl response after dupl phase is done");
+		pthread_mutex_unlock(&wr->lock);
+		goto Out;
+	}
+
+	if (wr->batch_shared && ! wr->msgp) {
+		pthread_mutex_unlock(&wr->lock);
+		goto Out;
+	}
 
 	// 2. Now check to see if all are complete. If not wait for all messages
 	// to arrive
@@ -1918,7 +1955,7 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 				if (is_write == false) { // duplicate-phase messages are arriving
 					wr->dup_result_code[node_id] = result_code;
 					if (wr->dup_msg[node_id] != 0) {
-						cf_debug(AS_RW,
+						cf_warning(AS_RW,
 								"{%s:%d} dup process ack: received duplicate response from node %"PRIx64"",
 								wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *)(&wr->keyd));
 					} else {
@@ -1929,16 +1966,17 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 								wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *)(&wr->keyd));
 					}
 				}
-			} else
+			} else {
 				cf_debug(AS_RW,
 						"{%s:%d} write process ack: Ignoring duplicate response for read result code %d",
 						wr->rsv.ns->name, wr->rsv.pid, result_code);
+			}
 			break;
 		}
 	}
 	// received a message from a node that was unexpected -
 	if (node_id == wr->dest_sz) {
-		cf_debug(AS_RW,
+		cf_warning(AS_RW,
 				"rw process ack: received ack from node %"PRIx64" not in transmit list, ignoring",
 				node);
 		pthread_mutex_unlock(&wr->lock);
@@ -1948,7 +1986,12 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 
 	// 3. We now know this node's write/read is complete. Finish processing
 	WR_TRACK_INFO(wr, "finish_rw_process_ack: entering");
-	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK);
+	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK, is_write);
+
+	if (wr->batch_shared && finished) {
+		wr->msgp = NULL;
+	}
+
 	pthread_mutex_unlock(&wr->lock);
 
 	if (finished) {
@@ -1961,8 +2004,9 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	}
 
 Out:
-	if (m)
+	if (m) {
 		as_fabric_msg_put(m);
+	}
 
 	WR_TRACK_INFO(wr, "rw_process_ack: returning");
 	WR_RELEASE(wr);
@@ -2038,13 +2082,13 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	else {
 		read_local(tr, r_ref);
 
-		if (wr && (m->info1 & AS_MSG_INFO1_BATCH)) {
+		if (wr && wr->batch_shared) {
 			wr->msgp = NULL;
 		}
 	}
 
 	if (tr->proto_fd_h != 0) {
-		AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+		as_end_of_transaction_ok(tr->proto_fd_h);
 		tr->proto_fd_h = 0;
 	}
 }
@@ -2126,7 +2170,7 @@ rw_dup_prole(cf_node node, msg *m)
 	if (rsv.ns->ldt_enabled && as_ldt_record_is_parent(r)) {
 		// NB: We search only on main tree in the code here because
 		// duplicate resolution request is always for the LDT_REC.
-		info |= RW_INFO_LDT_REC;
+		info |= RW_INFO_LDT_PARENTREC;
 		info |= RW_INFO_LDT_DUMMY;
 		// If LDT record make it run on the winner node
 		cf_detail(AS_RW, "LDT_DUP: Duplicate Record IS LDT return LDT_DUMMY");
@@ -2310,7 +2354,7 @@ as_ldt_check_and_get_prole_version(cf_digest *keyd, as_partition_reservation *rs
 			ldt_prole_info *linfo, uint32_t info, as_storage_rd *rd, bool is_create, char *fname, int lineno)
 {
 	if (rsv->ns->ldt_enabled) {
-		bool is_ldt_parent = (info & RW_INFO_LDT_REC);
+		bool is_ldt_parent = (info & RW_INFO_LDT_PARENTREC);
 
 		if (is_ldt_parent) {
 			if (linfo->replication_partition_version_match) {
@@ -2418,7 +2462,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 					*(uint64_t *)keyd);
 			tree = rsv->sub_tree;
 			is_subrec = true;
-		} else if (info & RW_INFO_LDT_REC) {
+		} else if (info & RW_INFO_LDT_PARENTREC) {
 			is_ldt_parent = true;
 		}
 	}
@@ -2493,6 +2537,9 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 			version_to_set = linfo->ldt_prole_version;
 			set_version    = true;
 		} else if (!linfo->replication_partition_version_match) {
+			// TODO: Cannot come here without source version set if the 
+			// partition versin does not match. Check upfront should not
+			// allow parent record to be written. Fix the code organization
 			version_to_set = linfo->ldt_source_version;
 			set_version    = true;
 		}
@@ -2741,7 +2788,9 @@ write_process(cf_node node, msg *m, bool respond)
 			if (msgp->msg.info2 & AS_MSG_INFO2_DELETE) {
 				rv = write_delete_local(&tr, true, node, false);
 			} else {
-				cf_crash_digest(AS_RW, keyd, "replica write trying to use write_local()");
+				// Older version nodes can send messages that get here.
+				cf_warning_digest(AS_RW, keyd, "replica write trying to use write_local() - ignoring ");
+				tr.result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 			}
 
 			cf_debug_digest(AS_RW, keyd, "Local RW: rv %d result code(%d)",
@@ -3029,6 +3078,10 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode,
 	// Save the set-ID for XDR.
 	uint16_t set_id = as_index_get_set_id(r);
 
+	// Save the generation for XDR, and for ack to client. (This will also go to
+	// the prole if this is a master delete, but the prole will ignore it.)
+	tr->generation = r->generation;
+
 	as_index_delete(tree, &tr->keyd);
 	cf_atomic_int_incr(&g_config.stat_delete_success);
 	as_record_done(&r_ref, ns);
@@ -3307,12 +3360,14 @@ int write_local_preprocessing(as_transaction *tr, write_local_generation *wlg,
 	if (tr->rsv.reject_writes) {
 		cf_debug(AS_RW, "{%s:%d} write_local: partition rejects writes - writes will flow from master. digest %"PRIx64"",
 				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
-		return 0;
+		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		return -1;
 	}
 	else if (AS_PARTITION_STATE_DESYNC == tr->rsv.state) {
 		cf_debug(AS_RW, "{%s:%d} write_local: partition is desync - writes will flow from master. digest %"PRIx64"",
 				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
-		return 0;
+		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		return -1;
 	}
 
 	*is_done = false;
@@ -3769,7 +3824,7 @@ int
 write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 		as_msg_op **ops, as_bin *response_bins, uint32_t *p_n_response_bins,
 		as_bin *result_bins, uint32_t *p_n_result_bins,
-		cf_dyn_buf *particles_db,
+		cf_ll_buf *particles_llb,
 		as_bin *cleanup_bins, uint32_t *p_n_cleanup_bins)
 {
 	// Shortcut pointers.
@@ -3822,7 +3877,7 @@ write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 					append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 				}
 				else {
-					if ((result = as_bin_particle_stack_from_client(b, particles_db, op)) < 0) {
+					if ((result = as_bin_particle_stack_from_client(b, particles_llb, op)) < 0) {
 						cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_bin_particle_stack_from_client() ", ns->name);
 						return -result;
 					}
@@ -3853,7 +3908,7 @@ write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 				append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 			}
 			else {
-				if ((result = as_bin_particle_stack_modify_from_client(b, particles_db, op)) < 0) {
+				if ((result = as_bin_particle_stack_modify_from_client(b, particles_llb, op)) < 0) {
 					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_bin_particle_stack_modify_from_client() ", ns->name);
 					return -result;
 				}
@@ -3913,7 +3968,7 @@ write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 				append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 			}
 			else {
-				if ((result = as_bin_cdt_stack_modify_from_client(b, particles_db, op, &result_bin)) < 0) {
+				if ((result = as_bin_cdt_stack_modify_from_client(b, particles_llb, op, &result_bin)) < 0) {
 					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_bin_cdt_alloc_modify_from_client() ", ns->name);
 					return -result;
 				}
@@ -3966,7 +4021,7 @@ write_local_bin_ops_loop(as_transaction *tr, as_storage_rd *rd,
 
 int
 write_local_bin_ops(as_transaction *tr, as_storage_rd *rd,
-		cf_dyn_buf *particles_db,
+		cf_ll_buf *particles_llb,
 		as_bin *cleanup_bins, uint32_t *p_n_cleanup_bins, cf_dyn_buf *db)
 {
 	// Shortcut pointers.
@@ -3984,7 +4039,7 @@ write_local_bin_ops(as_transaction *tr, as_storage_rd *rd,
 
 	int result = write_local_bin_ops_loop(tr, rd,
 			ops, response_bins, &n_response_bins, result_bins, &n_result_bins,
-			particles_db, cleanup_bins, p_n_cleanup_bins);
+			particles_llb, cleanup_bins, p_n_cleanup_bins);
 
 	if (result != 0) {
 		destroy_stack_bins(result_bins, n_result_bins);
@@ -4372,10 +4427,10 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 	// the new record bin to write.
 	//
 
-	cf_dyn_buf_define_size(particles_db, STACK_PARTICLES_SIZE);
+	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
 
-	if ((result = write_local_bin_ops(tr, rd, &particles_db, NULL, NULL, db)) != 0) {
-		cf_dyn_buf_free(&particles_db);
+	if ((result = write_local_bin_ops(tr, rd, &particles_llb, NULL, NULL, db)) != 0) {
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return result;
 	}
@@ -4385,7 +4440,7 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 
 	// Pickle before writing - bins may disappear on as_storage_record_close().
 	if (! pickle_all(rd, pickle)) {
-		cf_dyn_buf_free(&particles_db);
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
@@ -4403,7 +4458,7 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 	if (write_result < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
 		write_local_pickle_unwind(pickle);
-		cf_dyn_buf_free(&particles_db);
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return -write_result;
 	}
@@ -4422,7 +4477,7 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 	}
 
 	*is_delete = ! as_bin_inuse_has(rd);
-	cf_dyn_buf_free(&particles_db);
+	cf_ll_buf_free(&particles_llb);
 
 	return 0;
 }
@@ -4500,10 +4555,10 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 	// the new record bins to write.
 	//
 
-	cf_dyn_buf_define_size(particles_db, STACK_PARTICLES_SIZE);
+	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
 
-	if ((result = write_local_bin_ops(tr, rd, &particles_db, NULL, NULL, db)) != 0) {
-		cf_dyn_buf_free(&particles_db);
+	if ((result = write_local_bin_ops(tr, rd, &particles_llb, NULL, NULL, db)) != 0) {
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return result;
 	}
@@ -4518,7 +4573,7 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 
 	// Pickle before writing - bins may disappear on as_storage_record_close().
 	if (! pickle_all(rd, pickle)) {
-		cf_dyn_buf_free(&particles_db);
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
@@ -4534,7 +4589,7 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 	if ((result = as_storage_record_close(r, rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
 		write_local_pickle_unwind(pickle);
-		cf_dyn_buf_free(&particles_db);
+		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		return -result;
 	}
@@ -4563,7 +4618,7 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 	}
 
 	*is_delete = ! as_bin_inuse_has(rd);
-	cf_dyn_buf_free(&particles_db);
+	cf_ll_buf_free(&particles_llb);
 
 	return 0;
 }
@@ -5115,7 +5170,9 @@ write_process_op(as_transaction *tr, cl_msg *msgp, cf_node node, as_generation g
 	if (msgp->msg.info2 & AS_MSG_INFO2_DELETE) {
 		rv = write_delete_local(tr, true, node, false);
 	} else {
-		cf_crash_digest(AS_RW, &tr->keyd, "replica write trying to use write_local()");
+		// Older version nodes can send messages that get here.
+		cf_warning_digest(AS_RW, &tr->keyd, "replica write trying to use write_local() - ignoring ");
+		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
 	if (rv == 0) {
@@ -5138,7 +5195,7 @@ write_process_op(as_transaction *tr, cl_msg *msgp, cf_node node, as_generation g
 }
 
 int
-write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_respond)
+write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_respond, ldt_prole_info *linfo)
 {
 	uint32_t result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 	bool local_reserve = false;
@@ -5238,14 +5295,15 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 
 	as_namespace *ns = rsvp->ns;
 
-	ldt_prole_info linfo;
-
-	if ((info & RW_INFO_LDT) && as_rw_get_ldt_info(&linfo, m, rsvp)) {
-		cf_warning(AS_LDT, "Could not find ldt info at prole");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+	if (info & RW_INFO_LDT) {
+		memset(linfo, 1, sizeof(ldt_prole_info));
+		if  (as_rw_get_ldt_info(linfo, m, rsvp)) {
+			cf_warning(AS_LDT, "Could not find ldt info at prole");
+			return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
 	}
 
-	if (as_ldt_check_and_get_prole_version(keyd, rsvp, &linfo, info, NULL, false, __FILE__, __LINE__)) {
+	if (as_ldt_check_and_get_prole_version(keyd, rsvp, linfo, info, NULL, false, __FILE__, __LINE__)) {
 		// If parent cannot be due to incoming migration it is ok
 		// continue and allow subrecords to be replicated
 		result_code = AS_PROTO_RESULT_OK;
@@ -5253,7 +5311,7 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 	}
 
 	// Set the version in subrec digest if need be.
-	as_ldt_set_prole_subrec_version(keyd, rsvp, &linfo, info);
+	as_ldt_set_prole_subrec_version(keyd, rsvp, linfo, info);
 
 	if (info & RW_INFO_UDF_WRITE) {
 		cf_atomic_int_incr(&g_config.udf_replica_writes);
@@ -5294,7 +5352,7 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		result_code = write_process_op(&tr, msgp, node, generation);
 	} else {
 		rv = write_local_pickled(keyd, rsvp, pickled_buf, pickled_sz,
-				&rec_props, generation, void_time, node, info, &linfo);
+				&rec_props, generation, void_time, node, info, linfo);
 		if (rv == 0) {
 			result_code = AS_PROTO_RESULT_OK;
 		} else {
@@ -5451,13 +5509,6 @@ write_msg_fn(cf_node id, msg *m, void *udata)
 	return (0);
 } // end write_msg_fn()
 
-// Helper function used to clean up a tr or wr proto_fd_h in a number of places.
-static void release_proto_fd_h(as_file_handle *proto_fd_h) {
-	shutdown(proto_fd_h->fd, SHUT_RDWR);
-	proto_fd_h->inuse = false;
-	AS_RELEASE_FILE_HANDLE(proto_fd_h);
-}
-
 typedef struct now_times_s {
 	uint64_t now_ns;
 	uint64_t now_ms;
@@ -5492,17 +5543,19 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 			write_request_init_tr(&tr, wr);
 			udf_rw_complete(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT, __FILE__, __LINE__);
 			if (tr.proto_fd_h) {
-				AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
+				as_end_of_transaction_ok(tr.proto_fd_h);
+				tr.proto_fd_h = 0;
 			}
 		} else {
 			if (wr->batch_shared) {
-				as_batch_add_error(wr->batch_shared, wr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
-			}
-			else {
-				if (wr->proto_fd_h) {
-					release_proto_fd_h(wr->proto_fd_h);
-					wr->proto_fd_h = 0;
+				if (wr->msgp) {
+					as_batch_add_error(wr->batch_shared, wr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
+					wr->msgp = NULL;
 				}
+			}
+			else if (wr->proto_fd_h) {
+				as_end_of_transaction_force_close(wr->proto_fd_h);
+				wr->proto_fd_h = 0;
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -5516,46 +5569,18 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 	}
 
 	if (wr->xmit_ms < p_now->now_ms) {
-
-		bool finished = false;
-
 		pthread_mutex_lock(&wr->lock);
-		if (wr->rsv.n_dupl > 0)
-			cf_debug(AS_RW,
-					"{%s:%d} rw retransmit reduce fn: RETRANSMITTING %"PRIx64" %s",
-					wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
-		else
-			cf_debug(AS_RW,
-					"{%s:%d} rw retransmit reduce fn: RETRANSMITTING %"PRIx64" %s",
-					wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
+
+		cf_debug(AS_RW, "{%s:%d} rw retransmit reduce fn: RETRANSMITTING %"PRIx64" %s n-dupl %u",
+				wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE", wr->rsv.n_dupl);
 
 		wr->xmit_ms = p_now->now_ms + wr->retry_interval_ms;
 		wr->retry_interval_ms *= 2;
 
 		WR_TRACK_INFO(wr, "rw_retransmit_reduce_fn: retransmitting ");
 		send_messages(wr);
-		// No such ack processing for the shipped_op initiator. The request
-		// will get processed when the response for the shipped operation is
-		// finished
-		if (!wr->shipped_op_initiator) {
-			finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK);
-		} else {
-			cf_debug(AS_LDT, "Skipping process ack for LDT ship op initiator");
-		}
-		pthread_mutex_unlock(&wr->lock);
 
-		if (finished == true) {
-			if (wr->rsv.n_dupl > 0)
-				cf_debug(AS_RW,
-						"{%s:%d} rw retransmit reduce fn: DELETING request %"PRIx64" %s",
-						wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
-			else
-				cf_debug(AS_RW,
-						"{%s:%d} rw retransmit reduce fn: DELETING request %"PRIx64" %s",
-						wr->rsv.ns->name, wr->rsv.pid, *(uint64_t *) & (wr->keyd), wr->is_read ? "READ" : "WRITE");
-			WR_TRACK_INFO(wr, "rw_retransmit_reduce_fn: deleting ");
-			return (RCHASH_REDUCE_DELETE);
-		}
+		pthread_mutex_unlock(&wr->lock);
 	}
 
 	return (0);
@@ -6244,6 +6269,8 @@ rw_multi_process(cf_node node, msg *m)
 				rsv.pid, rsv.state  );
 		goto Out;
 	}
+	ldt_prole_info linfo;
+	memset(&linfo, 1, sizeof(ldt_prole_info));
 
 	int offset = 0;
 	int count = 0;
@@ -6286,7 +6313,7 @@ rw_multi_process(cf_node node, msg *m)
 			cf_detail(AS_RW, "MULTI_OP: Received Sindex multi op");
 		} else {
 			cf_detail(AS_RW, "MULTI_OP: Received LDT multi op");
-			ret = write_process_new(node, op_msg, &rsv, false);
+			ret = write_process_new(node, op_msg, &rsv, false, &linfo);
 		}
 		if (ret) {
 			ret = -3;
