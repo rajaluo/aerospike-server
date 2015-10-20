@@ -23,16 +23,21 @@
 #include "base/thr_demarshal.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
-#include <sys/resource.h>
 #include <sys/param.h>	// for MIN()
+#include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -64,6 +69,9 @@
 #define EPOLLRDHUP EPOLLHUP
 #endif
 
+
+#define XDR_WRITE_BUFFER_SIZE (5 * 1024 * 1024)
+#define XDR_READ_BUFFER_SIZE (15 * 1024 * 1024)
 
 extern void *thr_demarshal(void *arg);
 
@@ -262,6 +270,115 @@ get_fd_ip_addr_and_port(int fd, char *ip_addr, size_t ip_addr_sz, int *port)
 	return retval;
 }
 
+int
+thr_demarshal_read_file(const char *path, char *buffer, size_t size)
+{
+	int res = -1;
+	int fd = open(path, O_RDONLY);
+
+	if (fd < 0) {
+		cf_warning(AS_DEMARSHAL, "Failed to open %s for reading.", path);
+		goto cleanup0;
+	}
+
+	size_t len = 0;
+
+	while (len < size - 1) {
+		ssize_t n = read(fd, buffer + len, size - len - 1);
+
+		if (n < 0) {
+			cf_warning(AS_DEMARSHAL, "Failed to read from %s", path);
+			goto cleanup1;
+		}
+
+		if (n == 0) {
+			buffer[len] = 0;
+			res = 0;
+			goto cleanup1;
+		}
+
+		len += n;
+	}
+
+	cf_warning(AS_DEMARSHAL, "%s is too large.", path);
+
+cleanup1:
+	close(fd);
+
+cleanup0:
+	return res;
+}
+
+int
+thr_demarshal_read_integer(const char *path, int *value)
+{
+	char buffer[21];
+
+	if (thr_demarshal_read_file(path, buffer, sizeof buffer) < 0) {
+		return -1;
+	}
+
+	char *end;
+	uint64_t x = strtoul(buffer, &end, 10);
+
+	if (*end != '\n' || x > INT_MAX) {
+		cf_warning(AS_DEMARSHAL, "Invalid integer value in %s.", path);
+		return -1;
+	}
+
+	*value = (int)x;
+	return 0;
+}
+
+int
+thr_demarshal_set_buffer(int fd, int option, int size)
+{
+	const char *proc = option == SO_RCVBUF ?
+			"/proc/sys/net/core/rmem_max" :
+			"/proc/sys/net/core/wmem_max";
+	int max = 0;
+
+	if (thr_demarshal_read_integer(proc, &max) < 0) {
+		cf_crash(AS_DEMARSHAL, "Failed to read %s.", proc);
+	}
+
+	if (max < size) {
+		cf_warning(AS_DEMARSHAL, "Buffer limit is %d, should be at least %d. Please set %s accordingly.",
+				max, size, proc);
+		return -1;
+	}
+
+	if (setsockopt(fd, SOL_SOCKET, option, &size, sizeof size) < 0) {
+		cf_crash(AS_DEMARSHAL, "Failed to set socket buffer for FD %d, size %d, error %d (%s)",
+				fd, size, errno, strerror(errno));
+	}
+
+	return 0;
+}
+
+int
+thr_demarshal_config_xdr(int fd)
+{
+	cf_warning(AS_DEMARSHAL, "XXX %d", fd);
+
+	int arg = 0;
+
+	if (setsockopt(fd, SOL_TCP, TCP_NODELAY, &arg, sizeof(arg)) < 0) {
+		cf_crash(AS_DEMARSHAL, "Failed to re-enable Nagle algorithm on FD %d, error %d (%s)",
+				fd, errno, strerror(errno));
+		return -1;
+	}
+
+	if (thr_demarshal_set_buffer(fd, SO_RCVBUF, XDR_READ_BUFFER_SIZE) < 0) {
+		return -1;
+	}
+
+	if (thr_demarshal_set_buffer(fd, SO_SNDBUF, XDR_WRITE_BUFFER_SIZE) < 0) {
+		return -1;
+	}
+
+	return 0;
+}
 
 // Log information about a suspicious incoming transaction.
 static void
@@ -737,6 +854,17 @@ thr_demarshal(void *arg)
 							cf_free(decompressed_buf);
 							goto NextEvent_FD_Cleanup;
 						}
+					}
+
+					// If it's an XDR connection and we haven't yet modified the connection settings, ...
+					if ((tr.msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0 && (fd_h->fh_info & FH_INFO_XDR) == 0) {
+						// ... modify them.
+						if (thr_demarshal_config_xdr(fd_h->fd) != 0) {
+							cf_warning(AS_DEMARSHAL, "Failed to configure XDR connection");
+							goto NextEvent_FD_Cleanup;
+						}
+
+						fd_h->fh_info |= FH_INFO_XDR;
 					}
 
 					// Security protocol transactions.
