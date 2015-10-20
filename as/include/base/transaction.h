@@ -112,6 +112,7 @@ typedef struct as_file_handle_s {
 } as_file_handle;
 
 #define FH_INFO_DONOT_REAP	0x00000001	// this bit indicates that this file handle should not be reaped
+#define FH_INFO_XDR			0x00000002	// the file handle belongs to an XDR connection
 
 // Helpers to release transaction file handles.
 void as_release_file_handle(as_file_handle *proto_fd_h);
