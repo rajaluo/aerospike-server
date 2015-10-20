@@ -5,7 +5,7 @@ Welcome to the Aerospike Database Server source code tree!
 Aerospike is a distributed, scalable NoSQL database. It is architected with three key objectives:
 
 - To create a high-performance, scalable platform that would meet the needs of today’s web-scale applications
-- To provide the robustness and reliability (ie, ACID) expected from traditional databases.
+- To provide the robustness and reliability (i.e., ACID) expected from traditional databases.
 - To provide operational efficiency (minimal manual involvement)
 
 For more information on Aerospike, please visit: [http://aerospike.com](http://aerospike.com)
@@ -25,6 +25,15 @@ GNU/Linux development tools and libraries installed in the build
 environment, including `autoconf`, `automake`, and `libtool`. In
 particular, the following libraries are needed:
 
+#### C++
+
+The C++ compiler is required for the Aerospike geospatial indexing
+feature and its dependency, Google's S2 Geometry Library (both written in C++.)
+
+* The required CentOS 6/7 package to install is: `gcc-c++`.
+
+* The required Debian 6/7/8 and Ubuntu 10/12/14 package to install is: `g++`.
+
 #### OpenSSL
 
 OpenSSL 0.9.8b or later is required for cryptographic hash functions
@@ -33,7 +42,7 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 * The CentOS 6/7 OpenSSL packages to install are:  `openssl`,
 `openssl-devel`, `openssl-static`.
 
-* The Debian 6/7 and Ubuntu 10/12/14 OpenSSL packages to install are:
+* The Debian 6/7/8 and Ubuntu 10/12/14 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
 
 #### Lua 5.1
@@ -50,14 +59,14 @@ by the build environment.  In that case:
 	* The CentOS 6/7 Lua packages to install are:  `lua`,
 `lua-devel`, and `lua-static`.
 
-	* The Debian 6/7 and Ubuntu 10/12/14 Lua packages to install are:
+	* The Debian 6/7/8 and Ubuntu 10/12/14 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
 
 ### Submodules
 
-The Aerospike Database Server build depends upon 7 submodules:
+The Aerospike Database Server build depends upon 8 submodules:
 
 | Submodule | Description |
 |---------- | ----------- |
@@ -68,6 +77,7 @@ The Aerospike Database Server build depends upon 7 submodules:
 | lua-core  | The Aerospike Core Lua Source Files |
 | luajit    | The LuaJIT (Just-In-Time Compiler for Lua) |
 | mod-lua   | The Aerospike Lua Interface |
+| s2-geometry-library | The S2 Spherical Geometry Library |
 
 After the initial cloning of the `aerospike-server` repo., the
 submodules must be fetched for the first time using the following
@@ -181,3 +191,4 @@ Please refer to the full documentation on the Aerospike web site,
 `www.aerospike.com`, for more detailed information about configuring
 and running the Aerospike Database Server, as well as the about the
 Aerospike client API packages for popular programming languages.
+

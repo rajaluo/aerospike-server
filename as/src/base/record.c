@@ -98,9 +98,11 @@ void as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
 		r->storage_key.ssd.rblock_id = STORAGE_INVALID_RBLOCK;
 		r->storage_key.ssd.n_rblocks = 0;
 	}
+#ifdef USE_KV
 	else if (AS_STORAGE_ENGINE_KV == ns->storage_type) {
 		r->storage_key.kv.file_id = STORAGE_INVALID_FILE_ID;
 	}
+#endif
 	else if (AS_STORAGE_ENGINE_MEMORY == ns->storage_type) {
 		// The storage_key struct shouldn't be used, but for now is accessed
 		// when making the (useless for memory-only) object size histogram.
@@ -124,10 +126,11 @@ void as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
 int
 as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns, bool is_subrec)
 {
-	// Only create the in-memory index tree when not using KV store.
-	int rv = (as_storage_has_index(ns) ?
-			as_index_ref_initialize(tree, keyd, r_ref, true, ns) :
-			as_index_get_insert_vlock(tree, keyd, r_ref));
+	int rv =
+#ifdef USE_KV
+			as_storage_has_index(ns) ? as_index_ref_initialize(tree, keyd, r_ref, true, ns) :
+#endif
+			as_index_get_insert_vlock(tree, keyd, r_ref);
 
 	if (rv == 0) {
 		cf_detail(AS_RECORD, "record get_create: digest %"PRIx64" found record %p", *(uint64_t *)keyd , r_ref->r);
@@ -230,12 +233,11 @@ as_record_destroy(as_record *r, as_namespace *ns)
 int
 as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns)
 {
-	// index search takes the refcount and releases the treelock, the opposite of the
-	// get_insert call above
-
-	int rv = (as_storage_has_index(ns)
-			  ? (!as_index_ref_initialize(tree, keyd, r_ref, false, ns) ? 0 : -1)
-			  : as_index_get_vlock(tree, keyd, r_ref));
+	int rv =
+#ifdef USE_KV
+			as_storage_has_index(ns) ? (! as_index_ref_initialize(tree, keyd, r_ref, false, ns) ? 0 : -1) :
+#endif
+			as_index_get_vlock(tree, keyd, r_ref);
 
 	if (rv == 0) {
 		cf_detail(AS_RECORD, "record get: digest %"PRIx64" found record %p", *(uint64_t *)keyd, r_ref->r);
@@ -261,12 +263,11 @@ as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_name
 int
 as_record_exists(as_index_tree *tree, cf_digest *keyd, as_namespace *ns)
 {
-	// index search takes the refcount and releases the treelock, the opposite of the
-	// get_insert call above
-
-	int rv = (as_storage_has_index(ns)
-			  ? -1
-			  : as_index_exists(tree, keyd));
+	int rv =
+#ifdef USE_KV
+			as_storage_has_index(ns) ? -1 :
+#endif
+			as_index_exists(tree, keyd);
 
 	if (rv == -1) {
 		cf_detail(AS_RECORD, "record get: digest %"PRIx64" not found", *(uint64_t *)keyd);
@@ -729,14 +730,17 @@ as_record_component_winner(as_partition_reservation *rsv, int n_components,
 		as_record_merge_component *c = &components[i];
 		switch (rsv->ns->conflict_resolution_policy) {
 			case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION:
-				if (c->generation > max_generation || (c->generation == max_generation && c->void_time > max_void_time)) {
+				if (c->generation > max_generation || (c->generation == max_generation &&
+						(max_void_time != 0 && (c->void_time == 0 || c->void_time > max_void_time)))) {
 					max_void_time  = c->void_time;
 					max_generation = c->generation;
 					winner_idx = (int32_t)i;
 				}
 				break;
 			case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL:
-				if (c->void_time > max_void_time || (c->void_time == max_void_time && c->generation > max_generation)) {
+				if ((max_void_time != 0 && (c->void_time == 0 ||
+						c->void_time > max_void_time)) || (c->void_time == max_void_time &&
+								c->generation > max_generation)) {
 					max_void_time = c->void_time;
 					max_generation = c->generation;
 					winner_idx = (int32_t)i;

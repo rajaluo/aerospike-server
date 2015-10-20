@@ -110,7 +110,8 @@ char *cf_fault_context_strings[] = {
 	"security",    // 56
 	"aggr",        // 57
 	"job",         // 58
-	NULL           // 59
+	"geo",         // 59
+	NULL           // 60
 };
 
 static const char *cf_fault_severity_strings[] = { "CRITICAL", "WARNING", "INFO", "DEBUG", "DETAIL", NULL };

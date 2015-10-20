@@ -185,7 +185,8 @@ typedef enum {
 	AS_PARTICLE_TYPE_LIST = 20,
 	AS_PARTICLE_TYPE_HIDDEN_LIST = 21,
 	AS_PARTICLE_TYPE_HIDDEN_MAP = 22, // hidden map/list - can only be manipulated by system UDF
-	AS_PARTICLE_TYPE_MAX = 23,
+	AS_PARTICLE_TYPE_GEOJSON = 23,
+	AS_PARTICLE_TYPE_MAX = 24,
 	AS_PARTICLE_TYPE_BAD = AS_PARTICLE_TYPE_MAX
 } as_particle_type;
 
@@ -238,9 +239,9 @@ extern uint32_t as_bin_particle_ptr(as_bin *b, uint8_t **p_value);
 // wire:
 extern int32_t as_bin_particle_size_modify_from_client(as_bin *b, const as_msg_op *op); // TODO - will we ever need this?
 extern int as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op);
-extern int as_bin_particle_stack_modify_from_client(as_bin *b, cf_dyn_buf *particles_db, const as_msg_op *op);
+extern int as_bin_particle_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op);
 extern int as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op);
-extern int as_bin_particle_stack_from_client(as_bin *b, cf_dyn_buf *particles_db, const as_msg_op *op);
+extern int as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb, const as_msg_op *op);
 extern int as_bin_particle_replace_from_pickled(as_bin *b, uint8_t **p_pickled);
 extern int32_t as_bin_particle_stack_from_pickled(as_bin *b, uint8_t* stack, uint8_t **p_pickled);
 extern int as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled);
@@ -253,7 +254,7 @@ extern uint32_t as_bin_particle_to_pickled(const as_bin *b, uint8_t *pickled);
 // normal APIs and particle table functions.
 extern int as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result);
 extern int as_bin_cdt_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *result);
-extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_dyn_buf *particles_db, as_msg_op *op, as_bin *result);
+extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *result);
 
 // Different for LDTs - an LDT's as_list is expensive to generate, so we return
 // it from the sizing method, and cache it for later use by the packing method:
@@ -649,7 +650,6 @@ struct as_partition_s {
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
 	bool reject_writes;
 	bool waiting_for_master;
-	cf_node qnode; 	// point to the node which serves the query at the moment
 	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
 	as_partition_vinfo version_info;         // the version of my partition here and now
 
@@ -747,18 +747,17 @@ extern int as_partition_getreplica_readall(as_namespace *ns, as_partition_id p, 
 extern cf_node as_partition_getreplica_write(as_namespace *ns, as_partition_id p);
 #define as_partition_isconsistent(_n, _p) (SYNC == ((_n)->consistency[(_p)]))
 
-// reserve_qnode - *consumes* the ns reservation if success
-extern int as_partition_reserve_qnode(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
-extern uint32_t as_partition_prereserve_qnodes(as_namespace * ns, bool is_partition_qnode[], as_partition_reservation rsv[]);
-// reserve_write - *consumes* the ns reservation if success
+// reserve_query - 
+extern int as_partition_reserve_query(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
+extern int as_partition_prereserve_query(as_namespace * ns, bool can_partition_query[], as_partition_reservation rsv[]);
+// reserve_write - 
 extern int as_partition_reserve_write(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
-// reserve_migrate - *consumes* the ns reservation if success
+// reserve_migrate - 
 extern void as_partition_reserve_migrate(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node);
 extern int as_partition_reserve_migrate_timeout(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, int timeout_ms );
 
-// reserve_read - *consumes* the ns reservation if success
+// reserve_read - 
 extern int as_partition_reserve_read(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
-extern int as_partition_reserve_replica_list(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
 
 // moves the reservation -
 extern void as_partition_reservation_move(as_partition_reservation *dst, as_partition_reservation *src);
@@ -801,8 +800,7 @@ extern bool as_partition_get_migration_flag(void);
 // return number of partitions found in storage
 extern int  as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states);
 extern char as_partition_getstate_str(int state);
-extern bool as_partition_is_query_active(as_namespace *ns, size_t pid, as_partition *p);
-
+extern bool as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p);
 // Print info. about the partition map to the log.
 void as_partition_map_dump();
 
@@ -835,7 +833,7 @@ typedef enum {
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF = 0,
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION = 1,
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL = 2
-} conflict_resolution_policy;
+} conflict_resolution_pol;
 
 #define AS_SET_MAX_COUNT 0x3FF	// ID's 10 bits worth minus 1 (ID 0 means no set)
 #define AS_BINID_HAS_SINDEX_SIZE  MAX_BIN_NAMES / ( sizeof(uint32_t) * CHAR_BIT )
@@ -939,7 +937,7 @@ struct as_namespace_s {
 	/* Replication management */
 	uint16_t					replication_factor;
 	uint16_t					cfg_replication_factor;
-	conflict_resolution_policy	conflict_resolution_policy;
+	conflict_resolution_pol		conflict_resolution_policy;
 	bool						single_bin;		// restrict the namespace to objects with exactly one bin
 	bool						data_in_index;	// with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	bool 						disallow_null_setname;
@@ -1063,6 +1061,14 @@ struct as_namespace_s {
 	shash				*sindex_iname_hash;
 	uint32_t			binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
 	uint32_t			sindex_num_partitions;
+
+	// Geospatial query within parameters.
+	bool			geo2dsphere_within_strict;
+	uint16_t		geo2dsphere_within_min_level;
+	uint16_t		geo2dsphere_within_max_level;
+	uint16_t		geo2dsphere_within_max_cells;
+	uint16_t		geo2dsphere_within_level_mod;
+	uint32_t		geo2dsphere_within_earth_radius_meters;
 
 	// Current state of threshold breaches.
 	cf_atomic32		hwm_breached;
@@ -1210,3 +1216,12 @@ uint32_t as_mem_check();
 extern void as_paxos_set_cluster_key(uint64_t cluster_key);
 // Get the cluster key
 extern uint64_t as_paxos_get_cluster_key();
+
+// GeoJSON specific stuff
+typedef void *	geo_region_t;
+extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
+extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
+extern as_val * as_bin_particle_to_asval_geojson(as_bin *b);
+extern void as_val_geojson_to_client(const as_val *v, uint8_t * buf, uint32_t *psize);
+#define MAX_REGION_CELLS		   32
+#define MAX_REGION_LEVELS		   30

@@ -105,7 +105,8 @@ typedef enum {
 	AS_SECURITY = 56,
 	AS_AGGR = 57,
 	AS_JOB = 58,
-	CF_FAULT_CONTEXT_UNDEF = 59
+	AS_GEO = 59,
+	CF_FAULT_CONTEXT_UNDEF = 60
 } cf_fault_context;
 
 extern char *cf_fault_context_strings[];

@@ -1,7 +1,7 @@
 /*
  * thr_info.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -102,8 +102,6 @@ extern bool g_shutdown_started;
 typedef int (*as_info_get_tree_fn) (char *name, char *subtree, cf_dyn_buf *db);
 typedef int (*as_info_get_value_fn) (char *name, cf_dyn_buf *db);
 typedef int (*as_info_command_fn) (char *name, char *parameters, cf_dyn_buf *db);
-
-void as_query_set_job_tracking(bool);
 
 // Sets a static value - set to 0 to remove a previous value.
 int as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool def);
@@ -482,6 +480,15 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_rw_pending_limit);
 	cf_dyn_buf_append_string(db, ";err_rw_cant_put_unique=");
 	APPEND_STAT_COUNTER(db, g_config.err_rw_cant_put_unique);
+
+	cf_dyn_buf_append_string(db, ";geo_region_query_count=");
+	APPEND_STAT_COUNTER(db, g_config.geo_region_query_count);
+	cf_dyn_buf_append_string(db, ";geo_region_query_cells=");
+	APPEND_STAT_COUNTER(db, g_config.geo_region_query_cells);
+	cf_dyn_buf_append_string(db, ";geo_region_query_points=");
+	APPEND_STAT_COUNTER(db, g_config.geo_region_query_points);
+	cf_dyn_buf_append_string(db, ";geo_region_query_falsepos=");
+	APPEND_STAT_COUNTER(db, g_config.geo_region_query_falsepos);
 
 	cf_dyn_buf_append_string(db, ";fabric_msgs_sent=");
 	APPEND_STAT_COUNTER(db, g_config.fabric_msgs_sent);
@@ -2199,8 +2206,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_uint64(db, g_config.query_threshold);
 	cf_dyn_buf_append_string(db, ";query-untracked-time-ms=");
 	cf_dyn_buf_append_uint64(db, g_config.query_untracked_time_ms); // Show it in ms seconds
-	cf_dyn_buf_append_string(db, ";pre-reserve-qnodes=");
-	cf_dyn_buf_append_string(db, (g_config.qnodes_pre_reserved) ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";query-pre-reserve-partitions=");
+	cf_dyn_buf_append_string(db, (g_config.partitions_pre_reserved) ? "true" : "false");
 
 	return(0);
 }
@@ -3266,14 +3273,14 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "query-pre-reserve-qnodes", context, &context_len)) {
+		else if (0 == as_info_parameter_get(params, "query-pre-reserve-partitions", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of reserve-qnodes-upfront to %s", context);
-				g_config.qnodes_pre_reserved = true;
+				cf_info(AS_INFO, "Changing value of query-pre-reserve-partitions to %s", context);
+				g_config.partitions_pre_reserved = true;
 			}
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of reserve-qnodes-upfront to %s", context);
-				g_config.qnodes_pre_reserved = false;
+				cf_info(AS_INFO, "Changing value of query-pre-reserve-partitions to %s", context);
+				g_config.partitions_pre_reserved = false;
 			}
 			else {
 				goto Error;
@@ -3345,7 +3352,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			as_set * p_set = as_namespace_init_set(ns, context);
 			cf_debug(AS_INFO, "set name is %s\n", p_set->name);
 			context_len = sizeof(context);
-			if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len)) {
+			if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len) ||
+					0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
 				// TODO - make sure context is null-terminated.
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-enable-xdr of ns %s set %s to %s", ns->name, p_set->name, context);
@@ -3363,7 +3371,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					goto Error;
 				}
 			}
-			else if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len)) {
+			else if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len) ||
+					0 == as_info_parameter_get(params, "disable-eviction", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-disable-eviction of ns %s set %s to %s", ns->name, p_set->name, context);
 					DISABLE_SET_EVICTION(p_set, true);
@@ -3376,7 +3385,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					goto Error;
 				}
 			}
-			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len)) {
+			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len) ||
+					0 == as_info_parameter_get(params, "delete", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-delete of ns %s set %s to %s", ns->name, p_set->name, context);
 					SET_DELETED_ON(p_set);
@@ -3686,6 +3696,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				ns->read_consistency_level_override = true;
 			}
 			else if (strcmp(context, "off") == 0) {
+				ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE; // restore default
 				ns->read_consistency_level_override = false;
 			}
 			else if (strcmp(context, "one") == 0) {
@@ -3710,6 +3721,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				ns->write_commit_level_override = true;
 			}
 			else if (strcmp(context, "off") == 0) {
+				ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL; // restore default
 				ns->write_commit_level_override = false;
 			}
 			else {
@@ -3718,6 +3730,23 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (strcmp(original_value, context)) {
 				cf_info(AS_INFO, "Changing value of write-commit-level-override of ns %s from %s to %s", ns->name, original_value, context);
 			}
+		}
+		else if (0 == as_info_parameter_get(params, "geo2dsphere-within-max-cells", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %s is not a number", ns->name, context);
+				goto Error;
+			}
+			if (val <= 0) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %u must be > 0", ns->name, val);
+				goto Error;
+			}
+			if ((uint32_t)val > (MAX_REGION_CELLS)) {
+				cf_warning(AS_INFO, "ns %s, geo2dsphere-within-max-cells %u must be <= %u", ns->name, val, MAX_REGION_CELLS);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of geo2dsphere-within-max-cells of ns %s from %d to %d ",
+					ns->name, ns->geo2dsphere_within_max_cells, val);
+			ns->geo2dsphere_within_max_cells = val;
 		}
 		else {
 			goto Error;
@@ -4473,7 +4502,7 @@ thr_info_fn(void *unused)
 				} else {
 					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", tr->proto_fd_h->fd, errno);
 				}
-				AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+				as_end_of_transaction_force_close(tr->proto_fd_h);
 				tr->proto_fd_h = 0;
 				break;
 			}
@@ -4487,9 +4516,9 @@ thr_info_fn(void *unused)
 
 		cf_free(tr->msgp);
 
-		if (tr->proto_fd_h)	{
-			tr->proto_fd_h->t_inprogress = false;
-			AS_RELEASE_FILE_HANDLE(tr->proto_fd_h);
+		if (tr->proto_fd_h) {
+			as_end_of_transaction_ok(tr->proto_fd_h);
+			tr->proto_fd_h = 0;
 		}
 
 		MICROBENCHMARK_HIST_INSERT_P(info_fulfill_hist);
@@ -5613,29 +5642,31 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 // This dynamic function reduces the info_node_info hash and builds up the string of services
 //
 
+// Boolean flag to control printing a semicolon between service entries.
+static bool g_printed_a_service = false;
 
 int
 info_get_services_reduce_fn(void *key, void *data, void *udata)
 {
-
 	cf_dyn_buf *db = (cf_dyn_buf *) udata;
 	info_node_info *infop = (info_node_info *) data;
 
 	if (infop->service_addr) {
+		if (g_printed_a_service) {
+			cf_dyn_buf_append_char(db, ';');
+		}
 		cf_dyn_buf_append_string(db, infop->service_addr);
-		cf_dyn_buf_append_char(db, ';');
+		g_printed_a_service = true;
 	}
+
 	return(0);
 }
-
-
 
 int
 info_get_services(char *name, cf_dyn_buf *db)
 {
+	g_printed_a_service = false;
 	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) db);
-
-	cf_dyn_buf_chomp(db);
 
 	return(0);
 }
@@ -5643,10 +5674,28 @@ info_get_services(char *name, cf_dyn_buf *db)
 int
 info_get_services_alumni(char *name, cf_dyn_buf *db)
 {
-
+	g_printed_a_service = false;
 	shash_reduce(g_info_node_info_history_hash, info_get_services_reduce_fn, (void *) db);
 
-	cf_dyn_buf_chomp(db);
+	return(0);
+}
+
+//
+// This dynamic function removes nodes from g_info_node_info_history_hash that
+// aren't present in g_info_node_info_hash.
+//
+int
+history_purge_reduce_fn(void *key, void *data, void *udata)
+{
+	return SHASH_OK == shash_get(g_info_node_info_hash, key, NULL) ? SHASH_OK : SHASH_REDUCE_DELETE;
+}
+
+int
+info_services_alumni_reset(char *name, cf_dyn_buf *db)
+{
+	shash_reduce_delete(g_info_node_info_history_hash, history_purge_reduce_fn, NULL);
+	cf_info(AS_INFO, "services alumni list reset");
+	cf_dyn_buf_append_string(db, "ok");
 
 	return(0);
 }
@@ -6416,22 +6465,22 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		if (!type_str) {
 			cf_warning(AS_INFO, "Failed to create secondary index: bin type must be specified"
 					" for sindex creation %s ", indexname_str);
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type must be [numeric,string]");
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid type must be [numeric,string,geo2dsphere]");
 			cf_vector_destroy(str_v);
 			return AS_SINDEX_ERR_PARAM;
 		}
-		else if (strncasecmp(type_str, "string", 6) == 0) {
-			imd->btype[i] = AS_SINDEX_KTYPE_DIGEST;
-		} else if (strncasecmp(type_str, "numeric", 7) == 0) {
-			imd->btype[i] = AS_SINDEX_KTYPE_LONG;
-		} else {
+
+		as_sindex_ktype ktype = as_sindex_ktype_from_string(type_str);
+		if (ktype == AS_SINDEX_KTYPE_NONE) {
 			cf_warning(AS_INFO, "Failed to create secondary index : invalid bin type %s "
 					"for sindex creation %s", type_str, indexname_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Invalid type must be [numeric,string]");
+					"Invalid type must be [numeric,string,geo2dsphere]");
 			cf_vector_destroy(str_v);
 			return AS_SINDEX_ERR_PARAM;
 		}
+
+		imd->btype[i] = ktype;
 		bincount++;
 	}
 
@@ -6815,56 +6864,6 @@ END:
 	return(0);
 }
 
-int info_command_sindex_qnodemap(char *name, char *params, cf_dyn_buf *db)
-{
-	int found = 0;
-
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
-
-		for (int j = 0; j < AS_PARTITIONS; j++) {
-			// ns name
-			cf_dyn_buf_append_string(db, ns->name);
-			cf_dyn_buf_append_string(db, ":");
-
-			as_partition *p = &ns->partitions[j];
-			// pid
-			cf_dyn_buf_append_int(db, j);
-			cf_dyn_buf_append_string(db, ":");
-			// size
-			cf_dyn_buf_append_uint32(db, p->vp ? p->vp->elements : 0);
-			cf_dyn_buf_append_string(db, ":");
-			// state
-			cf_dyn_buf_append_char(db, as_partition_getstate_str(p->state));
-			cf_dyn_buf_append_string(db, ":");
-			// Qnode
-			char qnode[128];
-			sprintf(qnode, "%"PRIX64"", p->qnode);
-			cf_dyn_buf_append_string(db, qnode);
-			cf_dyn_buf_append_string(db, ":");
-			// Current Node Type
-			if (g_config.self_node == p->replica[0])
-				cf_dyn_buf_append_string(db, "M");
-			else
-				cf_dyn_buf_append_string(db, "R");
-
-			if (g_config.self_node == p->qnode)
-				cf_dyn_buf_append_string(db, "Q");
-			cf_dyn_buf_append_string(db, ":");
-			cf_dyn_buf_append_uint64(db, (uint64_t) p->vp->elements);
-			cf_dyn_buf_append_char(db, ';');
-		}
-		found++;
-	}
-	if (found == 0) {
-		cf_dyn_buf_append_string(db, "Empty");
-	}
-	else {
-		cf_dyn_buf_chomp(db);
-	}
-	return(0);
-}
-
 int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 	bool listall = true;
 	char ns_str[128];
@@ -6951,7 +6950,7 @@ as_info_init()
 	as_info_set("node", istr, true);                     // Node ID. Unique 15 character hex string for each node based on the mac address and port.
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
-	as_info_set("features", "float;batch-index;replicas-all;replicas-master;replicas-prole;udf", true);
+	as_info_set("features", "geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf", true);
 	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
 		sprintf(istr, "%s:%d", g_config.hb_addr, g_config.hb_port);
 		as_info_set("mcast", istr, false);               // Returns the multicast heartbeat address and port used by this server. Only available in multicast heartbeat mode.
@@ -6966,10 +6965,10 @@ as_info_init()
 				"dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-smd;"
 				"dump-wb;dump-wb-summary;dump-wr;dun;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
-				"logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;"
-				"node;service;services;services-alumni;set-config;set-log;sets;set-sl;"
-				"show-devices;sindex;sindex-create;sindex-delete;"
-				"sindex-histogram;sindex-qnodemap;sindex-repair;"
+				"logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
+				"service;services;services-alumni;services-alumni-reset;set-config;"
+				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
+				"sindex-histogram;sindex-repair;"
 				"smd;snub;statistics;status;tip;tip-clear;undun;version;"
 				"xdr-min-lastshipinfo",
 				false);
@@ -6999,6 +6998,7 @@ as_info_init()
 	                                                                  // to listen on multiple interfaces (typically not advised).
 	as_info_set_dynamic("services",info_get_services, true);          // List of addresses of neighbor cluster nodes to advertise for Application to connect.
 	as_info_set_dynamic("services-alumni",info_get_services_alumni, true); // All neighbor addresses (services) this server has ever know about.
+	as_info_set_dynamic("services-alumni-reset",info_services_alumni_reset, false); // Reset the services alumni to equal services
 	as_info_set_dynamic("sets", info_get_sets, false);                // Returns set statistics for all or a particular set.
 	as_info_set_dynamic("statistics", info_get_stats, true);          // Returns system health and usage stats for this server.
 
@@ -7072,7 +7072,6 @@ as_info_init()
 	// Undocumented Secondary Index Command
 	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
 	as_info_set_command("sindex-repair", info_command_sindex_repair, PERM_SERVICE_CTRL);
-	as_info_set_command("sindex-qnodemap", info_command_sindex_qnodemap, PERM_NONE);
 
 	as_info_set_dynamic("query-list", as_query_list, false);
 	as_info_set_command("query-kill", info_command_query_kill, PERM_QUERY_MANAGE);

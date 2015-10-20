@@ -54,9 +54,9 @@
 
 
 extern const as_list_hooks udf_arglist_hooks;
-extern as_partition_reservation *  as_query_reserve_qnode(as_namespace * ns, 
+extern as_partition_reservation *  as_query_reserve_partition(as_namespace * ns, 
 						as_query_transaction * qtr, as_partition_id pid, as_partition_reservation * rsv);
-extern void as_query_release_qnode(as_query_transaction * qtr, as_partition_reservation * rsv);
+extern void as_query_release_partition(as_query_transaction * qtr, as_partition_reservation * rsv);
 
 static int
 as_aggr_aerospike_log(const as_aerospike * a, const char * file, const int line, const int lvl, const char * msg)
@@ -82,18 +82,18 @@ static const as_aerospike_hooks as_aggr_aerospike_hooks = {
  * Wrapper over query_release_node
  */
 void
-as_aggr_release_qnode(query_record * qrecord, as_aggr_caller_type agg_type)
+as_aggr_release_partition(query_record * qrecord, as_aggr_caller_type agg_type)
 {
 	if (!qrecord) {
-		cf_warning(AS_AGGR, "qrecord is null while releasing qnode");
+		cf_warning(AS_AGGR, "qrecord is null while releasing partition");
 		return;
 	}
 	if (agg_type == AS_AGGR_QUERY) {
-		as_query_release_qnode(qrecord->caller, qrecord->rsv);
+		as_query_release_partition(qrecord->caller, qrecord->rsv);
 	}
 	else if (agg_type == AS_AGGR_SCAN) {
 		if (!qrecord->rsv) {
-			cf_warning(AS_AGGR, "rsv is null while releasing qnode.");
+			cf_warning(AS_AGGR, "rsv is null while releasing partition.");
 			return;
 		}
 		as_partition_release(qrecord->rsv);
@@ -108,20 +108,20 @@ as_aggr_release_qnode(query_record * qrecord, as_aggr_caller_type agg_type)
  * Wrapper over query_reserve_node
  */
 as_partition_reservation *
-as_aggr_reserve_qnode(as_namespace * ns, query_record * qrecord, as_partition_id pid, as_aggr_caller_type agg_type)
+as_aggr_reserve_partition(as_namespace * ns, query_record * qrecord, as_partition_id pid, as_aggr_caller_type agg_type)
 {
 	if (!qrecord) {
-		cf_warning(AS_AGGR, "qrecord found as NULL while reserving qnode");
+		cf_warning(AS_AGGR, "qrecord found as NULL while reserving partition");
 		return NULL;
 	}
 
 	if (agg_type == AS_AGGR_QUERY) {
-		return as_query_reserve_qnode(ns, qrecord->caller, pid, qrecord->rsv);
+		return as_query_reserve_partition(ns, qrecord->caller, pid, qrecord->rsv);
 	}
 	else if (agg_type == AS_AGGR_SCAN) {
 		// NB: This is a short term fix. Before entire re-org shows. This is based
 		// on fact that we know only possibly way to get here with scan is with 
-		// write reservation. Just do the same instead of qnode
+		// write reservation.
 		if (0 != as_partition_reserve_write(ns, pid, qrecord->rsv, NULL, NULL)) {
 			qrecord->rsv   = NULL;
 			return NULL;
@@ -312,7 +312,7 @@ Cleanup:
 	}
 	if (l_qrecord.read) {
 		udf_record_close(l_qrecord.urecord);
-		as_aggr_release_qnode(&l_qrecord, l_aggr_istream.get_type());
+		as_aggr_release_partition(&l_qrecord, l_aggr_istream.get_type());
 		l_qrecord.read       = false;
 	}
 	return ret;
@@ -430,7 +430,7 @@ as_aggr_istream_read(const as_stream *s)
 		// element in the stream it does it at its own risk. Record
 		// may have changed under the hood.
 		udf_record_close(qrecord->urecord);
-		as_aggr_release_qnode(qrecord, aggr_istream->get_type());
+		as_aggr_release_partition(qrecord, aggr_istream->get_type());
 		qrecord->read = false;
 	}
 
@@ -493,7 +493,7 @@ as_aggr_istream_read(const as_stream *s)
 		as_transaction * tr    =  qrecord->urecord->tr;
 		AS_PARTITION_RESERVATION_INIT(tr->rsv);	
 		qrecord->rsv           = &tr->rsv;
-		qrecord->rsv           = as_aggr_reserve_qnode(ns, qrecord, pid, aggr_istream->get_type());
+		qrecord->rsv           = as_aggr_reserve_partition(ns, qrecord, pid, aggr_istream->get_type());
 		if (!qrecord->rsv){
 			cf_debug(AS_AGGR, "Reservation not done for partition %d", pid);
 			aggr_istream->keys_arr_offset++;
@@ -519,13 +519,13 @@ as_aggr_istream_read(const as_stream *s)
 		}
 		if (!qrecord->read) {
 			cf_debug(AS_AGGR, "Failed to read record");
-			as_aggr_release_qnode(qrecord, aggr_istream->get_type());
+			as_aggr_release_partition(qrecord, aggr_istream->get_type());
 		} else {
 			if (aggr_istream->get_type() == AS_AGGR_QUERY) {
 				if (!as_query_aggr_match_record(qrecord, &keys_arr->sindex_keys[aggr_istream->keys_arr_offset])) {
 					cf_debug(AS_AGGR, "Close Record with invalid selection (%p,%d)", aggr_istream->keys_arr, aggr_istream->keys_arr_offset);
 					udf_record_close(qrecord->urecord);
-					as_aggr_release_qnode(qrecord, aggr_istream->get_type());
+					as_aggr_release_partition(qrecord, aggr_istream->get_type());
 					qrecord->read = false;
 					cf_atomic64_incr(&g_config.query_false_positives);
 				} else {

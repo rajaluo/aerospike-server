@@ -398,7 +398,8 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 							cf_debug(AS_PROTO, "protocol proxy write fail: fd %d "
 									"sz %d pos %d rv %d errno %d",
 									wr->proto_fd_h->fd, proto_sz, pos, rv, errno);
-							shutdown(wr->proto_fd_h->fd, SHUT_RDWR);
+							as_end_of_transaction_force_close(wr->proto_fd_h);
+							wr->proto_fd_h = 0;
 							break;
 						}
 						usleep(1); // yield
@@ -406,15 +407,17 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 					else {
 						cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ",
 								wr->proto_fd_h->fd, proto_sz, pos);
-						shutdown(wr->proto_fd_h->fd, SHUT_RDWR);
+						as_end_of_transaction_force_close(wr->proto_fd_h);
+						wr->proto_fd_h = 0;
 						break;
 					}
 				}
 				cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Response Sent to Client");
 			}
-			wr->proto_fd_h->t_inprogress = false;
-			AS_RELEASE_FILE_HANDLE(wr->proto_fd_h);
-			wr->proto_fd_h = 0;
+			if (wr->proto_fd_h) {
+				as_end_of_transaction_ok(wr->proto_fd_h);
+				wr->proto_fd_h = 0;
+			}
 		} else {
 			// this may be NULL if the request has already timedout and the wr proto_fd_h
 			// will be cleaned up by then
@@ -428,11 +431,6 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
 				udf_rw_complete(&tr, 0, __FILE__, __LINE__);
-				if (tr.proto_fd_h) {
-					tr.proto_fd_h->t_inprogress = false;
-					AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
-					tr.proto_fd_h = 0;
-				}
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -532,10 +530,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 
 			MICROBENCHMARK_RESET();
 
-			if (0 != thr_tsvc_enqueue(&tr)) {
-				cf_warning(AS_PROXY, "tsvc enqueue failed ~~ dropping incoming proxy request message!");
-				as_fabric_msg_put(m);
-			}
+			thr_tsvc_enqueue(&tr);
 		}
 		break;
 
@@ -614,7 +609,8 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 								if (errno != EWOULDBLOCK) {
 									// Common message when a client aborts.
 									cf_debug(AS_PROTO, "protocol proxy write fail: fd %d sz %d pos %d rv %d errno %d", pr.fd_h->fd, proto_sz, pos, rv, errno);
-									shutdown(pr.fd_h->fd, SHUT_RDWR);
+									as_end_of_transaction_force_close(pr.fd_h);
+									pr.fd_h = 0;
 									as_proxy_set_stat_counters(-1);
 									goto SendFin;
 								}
@@ -622,7 +618,8 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 							}
 							else {
 								cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", pr.fd_h->fd, proto_sz, pos);
-								shutdown(pr.fd_h->fd, SHUT_RDWR);
+								as_end_of_transaction_force_close(pr.fd_h);
+								pr.fd_h = 0;
 								as_proxy_set_stat_counters(-1);
 								goto SendFin;
 							}
@@ -633,9 +630,10 @@ SendFin:
 
 						// Return the fabric message or the direct file descriptor -
 						// after write and complete.
-						pr.fd_h->t_inprogress = false;
-						AS_RELEASE_FILE_HANDLE(pr.fd_h);
-						pr.fd_h = 0;
+						if (pr.fd_h) {
+							as_end_of_transaction_ok(pr.fd_h);
+							pr.fd_h = 0;
+						}
 					}
 					as_fabric_msg_put(pr.fab_msg);
 					pr.fab_msg = 0;
@@ -702,13 +700,12 @@ SendFin:
 				tr.start_time = pr->start_time; // start time
 				tr.end_time   = pr->end_time;
 				tr.proto_fd_h = pr->fd_h;
+				tr.batch_shared = pr->batch_shared;
+				tr.batch_index = pr->batch_index;
 
 				MICROBENCHMARK_RESET();
 
-				if (0 != thr_tsvc_enqueue(&tr)) {
-					cf_warning(AS_PROXY, "queue");
-					cf_crash(AS_PROXY, "could not enqueue proxy redirect");
-				}
+				thr_tsvc_enqueue(&tr);
 
 				as_fabric_msg_put(pr->fab_msg);
 				shash_delete_lockfree(g_proxy_hash, &transaction_id);
@@ -874,7 +871,8 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 					write_request_init_tr(&tr, pr->wr);
 					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
 					if (tr.proto_fd_h) {
-						AS_RELEASE_FILE_HANDLE(tr.proto_fd_h);
+						as_end_of_transaction_ok(tr.proto_fd_h);
+						tr.proto_fd_h = NULL;
 					}
 				}
 				pthread_mutex_unlock(&pr->wr->lock);
@@ -894,9 +892,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 					as_batch_add_error(pr->batch_shared, pr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
 				}
 				else {
-					pr->fd_h->t_inprogress = false;
-					shutdown(pr->fd_h->fd, SHUT_RDWR);
-					AS_RELEASE_FILE_HANDLE(pr->fd_h);
+					as_end_of_transaction_force_close(pr->fd_h);
 					pr->fd_h = 0;
 				}
 			}
@@ -962,6 +958,8 @@ Retry:
 				// TODO - why not pr.start_time?
 				tr.end_time   = pr->end_time;
 				tr.proto_fd_h = pr->fd_h;
+				tr.batch_shared = pr->batch_shared;
+				tr.batch_index = pr->batch_index;
 
 				sz = 0;
 				msg_get_buf(pr->fab_msg, PROXY_FIELD_AS_PROTO, (byte **) & (tr.msgp), &sz, MSG_GET_COPY_MALLOC);
@@ -970,11 +968,7 @@ Retry:
 
 				MICROBENCHMARK_RESET();
 
-				if (0 != thr_tsvc_enqueue(&tr)) {
-					cf_warning(AS_PROXY, "queue");
-					// Hope the next time around has more luck.
-					return 0;
-				}
+				thr_tsvc_enqueue(&tr);
 
 				// Getting deleted - cleanup the proxy request.
 				as_fabric_msg_put(pr->fab_msg);
