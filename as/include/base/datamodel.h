@@ -669,7 +669,6 @@ struct as_partition_s {
 
 	size_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
-	bool reject_writes;
 	bool waiting_for_master;
 	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
 	as_partition_vinfo version_info;         // the version of my partition here and now
@@ -703,7 +702,6 @@ struct as_partition_s {
 struct as_partition_reservation_s {
 	as_namespace			*ns;
 	bool					is_write;
-	bool					reject_writes;
 	as_partition_state		state;
 	uint8_t					n_dupl;
 	as_partition_id			pid;
@@ -728,7 +726,6 @@ struct as_partition_reservation_s {
 	__rsv.state = AS_PARTITION_STATE_UNDEF; \
 	__rsv.tree = 0; \
 	__rsv.n_dupl = 0; \
-	__rsv.reject_writes = false; \
 	__rsv.cluster_key = 0;
 
 #define AS_PARTITION_RESERVATION_INITP(__rsv)   \
@@ -739,7 +736,6 @@ struct as_partition_reservation_s {
 	__rsv->state = AS_PARTITION_STATE_UNDEF; \
 	__rsv->tree = 0; \
 	__rsv->n_dupl = 0; \
-	__rsv->reject_writes = false; \
 	__rsv->cluster_key = 0;
 
 

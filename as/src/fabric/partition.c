@@ -426,7 +426,6 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 
 	p->n_dupl = 0;
 	memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-	p->reject_writes = false;
 	p->waiting_for_master = false;
 	memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 	memset(&p->version_info, 0, sizeof(p->version_info));
@@ -688,7 +687,6 @@ void
 as_partition_getstates(as_partition_states *ps)
 {
 	size_t active_partition_count = 0;
-	size_t reject_writes_partition_count = 0;
 
 	memset(ps, 0, sizeof(as_partition_states));
 
@@ -742,8 +740,6 @@ as_partition_getstates(as_partition_states *ps)
 
 			if ((p->pending_migrate_tx != 0) || (p->pending_migrate_rx != 0) || (p->origin != 0) || (p->n_dupl != 0))
 				active_partition_count++;
-			if (p->reject_writes)
-				reject_writes_partition_count++;
 
 			ps->n_objects += p->vp->elements;
 			ps->n_ref_count += cf_rc_count(p->vp);
@@ -757,7 +753,7 @@ as_partition_getstates(as_partition_states *ps)
 		cf_atomic_int_set(&ns->n_actual_partitions, ps->sync_actual);
 	}
 
-	cf_debug(AS_PARTITION, "partitions: migrating %d, rejecting writes %d.", active_partition_count, reject_writes_partition_count);
+	cf_debug(AS_PARTITION, "partitions: migrating %d.", active_partition_count);
 
 	return;
 }
@@ -900,7 +896,6 @@ as_partition_reservation_copy(as_partition_reservation *dst, as_partition_reserv
 	dst->sub_tree = src->sub_tree;
 	dst->n_dupl = src->n_dupl;
 	memcpy(dst->dupl_nodes, src->dupl_nodes, sizeof(cf_node) * dst->n_dupl);
-	dst->reject_writes = src->reject_writes;
 	dst->cluster_key = src->cluster_key;
 	memcpy(&dst->vinfo, &src->vinfo, sizeof(as_partition_vinfo));
 }
@@ -926,7 +921,6 @@ as_partition_reserve_update_state(as_partition_reservation *rsv)
 	rsv->state = rsv->p->state;
 	rsv->n_dupl = rsv->p->n_dupl;
 	memcpy(rsv->dupl_nodes, rsv->p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
-	rsv->reject_writes = rsv->p->reject_writes;
 	rsv->cluster_key = rsv->p->cluster_key;
 
 	if (!is_partition_null(&rsv->p->version_info))
@@ -995,7 +989,6 @@ as_partition_reserve_read_write(as_namespace *ns, as_partition_id pid,
 		rsv->state = p->state;
 		rsv->n_dupl = p->n_dupl;
 		memcpy(rsv->dupl_nodes, p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
-		rsv->reject_writes = p->reject_writes;
 		rsv->cluster_key = p->cluster_key;
 		// copy version info. this is guaranteed to not be null as the state is SYNC or ZOMBIE
 		memcpy(&rsv->vinfo, &p->version_info, sizeof(as_partition_vinfo));
@@ -1048,7 +1041,6 @@ as_partition_reserve_lockfree(as_namespace *ns, as_partition_id pid, as_partitio
 	rsv->state = p->state;
 	rsv->n_dupl = p->n_dupl;
 	memcpy(rsv->dupl_nodes, p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
-	rsv->reject_writes = p->reject_writes;
 	rsv->cluster_key = p->cluster_key;
 	if (!is_partition_null(&p->version_info))
 		memcpy(&rsv->vinfo, &p->version_info, sizeof(as_partition_vinfo));
@@ -1188,7 +1180,6 @@ as_partition_release_lockfree(as_partition_reservation *rsv)
 	rsv->ns = 0;
 	rsv->n_dupl = 0;
 	memset(rsv->dupl_nodes, 0, sizeof(rsv->dupl_nodes));
-	rsv->reject_writes = false;
 	rsv->cluster_key = 0;
 	memset(&rsv->vinfo, 0, sizeof(as_partition_vinfo));
 
@@ -1224,7 +1215,6 @@ as_partition_release(as_partition_reservation *rsv)
 	rsv->ns = 0;
 	memset(rsv->dupl_nodes, 0, sizeof(cf_node) * rsv->n_dupl);
 	rsv->n_dupl = 0;
-	rsv->reject_writes = false;
 	rsv->cluster_key = 0;
 	memset(&rsv->vinfo, 0, sizeof(as_partition_vinfo));
 
@@ -2109,13 +2099,15 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 						break;
 					}
 					/*
-					 * The node receiving a migrate can either be a master node or a replica node.
-					 * If it is the master node, then the node's origin must be null (only duplicate migrations allowed into master)
+					 * The node receiving a migrate can either be a master node
+					 *   or a replica node.
+					 * If it is the master node, then the node's origin must be
+					 *   null (only duplicate migrations allowed into master)
 					 * If it is a replica node, then it can be one of two cases:
-					 * 	Case 1: A duplicate node with reject_writes flag set to true.
-					 *		In this case, set reject_writes to be false and add a journal for storing writes.
-					 * 	Case 2: A sync replica of the primary partition version
-					 *		In this case, reject_writes setting should be already false. Add a journal for storing writes.
+					 *  Case 1: A duplicate node
+					 *    In this case, add a journal for storing writes.
+					 *  Case 2: A sync replica of the primary partition version
+					 *    In this case, add a journal for storing writes.
 					 */
 					if (g_config.self_node != p->replica[0]) {
 						bool is_replica = false;
@@ -2137,22 +2129,12 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 							break; // out of switch
 						}
 						if (p->origin != p->replica[0]) {
-							// this has been debugged as normally not a state corruption error - duplicate migrate START?
+							// this has been debugged as normally not a state
+							// corruption error - duplicate migrate START?
+							// TODO: Check if AER-4512 corrects this issue.
 							cf_debug(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC replica node receiving migrate request has origin set to non-master", ns->name, pid);
 							rv = AS_MIGRATE_CB_FAIL;
 							break; // out of switch
-						}
-						bool is_primary_version = (memcmp(&p->primary_version_info, &p->version_info, sizeof(as_partition_vinfo)) == 0);
-						if (p->reject_writes && is_primary_version) {
-							// this is a state corruption error
-							cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. During migrate receive start, duplicate partition contains primary version", ns->name, pid);
-							rv = AS_MIGRATE_CB_FAIL;
-							break; // out of switch
-						}
-
-						if (p->reject_writes) {// writes will be journaled, so unset reject_writes flag
-							p->reject_writes = false;
-							cf_debug(AS_PARTITION, "{%s:%d} Partition duplicate send complete. writes enabled again", ns->name, pid);
 						}
 
 						// Set the state to be DESYNC
@@ -3151,7 +3133,6 @@ as_partition_balance()
 			/* Reinitialize duplication list */
 			p->n_dupl = 0;
 			memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-			p->reject_writes = false;
 			p->waiting_for_master = false;
 			memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 
@@ -3549,15 +3530,6 @@ as_partition_balance()
 						cf_debug(AS_PARTITION, "{%s:%d} Replica will delay migrate until master %"PRIx64" is sync", ns->name, j, HV(j, 0));
 						p->waiting_for_master = true;
 						ns_pending_migrate_tx_later++;
-					}
-
-					/*
-					 * reject writes if this node contains a duplicate
-					 * version of this partition AND if it is also a replica
-					 */
-					if (cf_contains64(dupl_nodes, n_dupl, self) && (my_index_in_hvlist < p->p_repl_factor)) {
-						cf_debug(AS_PARTITION, "{%s:%d} Partition will reject writes during merge", ns->name, j);
-						p->reject_writes = true;
 					}
 
 					/*
