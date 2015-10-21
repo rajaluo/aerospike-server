@@ -267,6 +267,9 @@ extern uint32_t as_bin_particle_stack_from_mem(as_bin *b, uint8_t* stack, as_par
 extern uint32_t as_bin_particle_mem_size(as_bin *b);
 extern uint32_t as_bin_particle_to_mem(const as_bin *b, uint8_t *value);
 
+// as_val:
+extern as_val *as_bin_particle_to_asval(const as_bin *b);
+
 // flat:
 extern int as_bin_particle_cast_from_flat(as_bin *b, uint8_t *flat, uint32_t flat_size);
 extern int as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, uint32_t flat_size);

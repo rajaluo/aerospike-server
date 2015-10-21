@@ -26,6 +26,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_val.h"
+#include "aerospike/as_integer.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
@@ -62,6 +64,8 @@ const as_particle_vtable integer_vtable = {
 		integer_from_mem,
 		integer_mem_size,
 		integer_to_mem,
+
+		integer_to_asval,
 
 		integer_size_from_flat,
 		integer_cast_from_flat,
@@ -287,6 +291,16 @@ integer_to_mem(const as_particle *p, uint8_t *value)
 	*(uint64_t *)value = (uint64_t)p;
 
 	return sizeof(uint64_t);
+}
+
+//------------------------------------------------
+// Handle as_val translation.
+//
+
+as_val *
+integer_to_asval(const as_particle *p)
+{
+	return (as_val *)as_integer_new((uint64_t)p);
 }
 
 //------------------------------------------------

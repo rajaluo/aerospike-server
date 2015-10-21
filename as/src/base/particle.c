@@ -50,7 +50,10 @@
 
 extern const as_particle_vtable integer_vtable;
 extern const as_particle_vtable float_vtable;
+extern const as_particle_vtable string_vtable;
 extern const as_particle_vtable blob_vtable;
+extern const as_particle_vtable map_vtable;
+extern const as_particle_vtable list_vtable;
 extern const as_particle_vtable geojson_vtable;
 
 // Array of particle vtable pointers.
@@ -58,7 +61,7 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_NULL]			= NULL,
 		[AS_PARTICLE_TYPE_INTEGER]		= &integer_vtable,
 		[AS_PARTICLE_TYPE_FLOAT]		= &float_vtable,
-		[AS_PARTICLE_TYPE_STRING]		= &blob_vtable,
+		[AS_PARTICLE_TYPE_STRING]		= &string_vtable,
 		[AS_PARTICLE_TYPE_BLOB]			= &blob_vtable,
 		[AS_PARTICLE_TYPE_TIMESTAMP]	= &integer_vtable,
 		[AS_PARTICLE_TYPE_JAVA_BLOB]	= &blob_vtable,
@@ -67,10 +70,10 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_RUBY_BLOB]	= &blob_vtable,
 		[AS_PARTICLE_TYPE_PHP_BLOB]		= &blob_vtable,
 		[AS_PARTICLE_TYPE_ERLANG_BLOB]	= &blob_vtable,
-		[AS_PARTICLE_TYPE_MAP]			= &blob_vtable,
-		[AS_PARTICLE_TYPE_LIST]			= &blob_vtable,
-		[AS_PARTICLE_TYPE_HIDDEN_LIST]	= &blob_vtable,
-		[AS_PARTICLE_TYPE_HIDDEN_MAP]	= &blob_vtable,
+		[AS_PARTICLE_TYPE_MAP]			= &map_vtable,
+		[AS_PARTICLE_TYPE_LIST]			= &list_vtable,
+		[AS_PARTICLE_TYPE_HIDDEN_LIST]	= &list_vtable,
+		[AS_PARTICLE_TYPE_HIDDEN_MAP]	= &map_vtable,
 		[AS_PARTICLE_TYPE_GEOJSON]		= &geojson_vtable
 };
 
@@ -899,6 +902,19 @@ as_bin_particle_to_mem(const as_bin *b, uint8_t *value)
 	uint8_t type = as_bin_get_particle_type(b);
 
 	return particle_vtable[type]->to_mem_fn(b->particle, value);
+}
+
+//------------------------------------------------
+// Handle as_val translation.
+//
+
+as_val *
+as_bin_particle_to_asval(const as_bin *b)
+{
+	uint8_t type = as_bin_get_particle_type(b);
+
+	// Caller is responsible for freeing as_val returned here.
+	return particle_vtable[type]->to_asval_fn(b->particle);
 }
 
 //------------------------------------------------

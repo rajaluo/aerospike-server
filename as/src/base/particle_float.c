@@ -24,6 +24,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_double.h"
+#include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
@@ -45,6 +47,9 @@
 int float_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
 int float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
 int float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size);
+
+// Handle as_val translation.
+as_val *float_to_asval(const as_particle *p);
 
 
 //==========================================================
@@ -70,6 +75,8 @@ const as_particle_vtable float_vtable = {
 		integer_from_mem,
 		integer_mem_size,
 		integer_to_mem,
+
+		float_to_asval,
 
 		integer_size_from_flat,
 		integer_cast_from_flat,
@@ -138,4 +145,14 @@ float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const 
 	}
 
 	return integer_compare_from_wire(p, AS_PARTICLE_TYPE_INTEGER, wire_value, value_size);
+}
+
+//------------------------------------------------
+// Handle as_val translation.
+//
+
+as_val *
+float_to_asval(const as_particle *p)
+{
+	return (as_val *)as_double_new(*(double *)&p);
 }
