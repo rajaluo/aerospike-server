@@ -990,7 +990,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 				cf_crash(AS_RW,
 						"target replica set contains ourselves");
 		}
-		// TODO: We could optimize by not sending writes to replicas that reject_writes
 
 		// TODO: We are allowing write to go to non-master node prole here.
 		// At non-master it will fail but it has already been written at master.
@@ -3360,14 +3359,8 @@ int write_local_preprocessing(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 
-	if (tr->rsv.reject_writes) {
-		cf_debug(AS_RW, "{%s:%d} write_local: partition rejects writes - writes will flow from master. digest %"PRIx64"",
-				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
-		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
-		return -1;
-	}
-	else if (AS_PARTITION_STATE_DESYNC == tr->rsv.state) {
-		cf_debug(AS_RW, "{%s:%d} write_local: partition is desync - writes will flow from master. digest %"PRIx64"",
+	if (AS_PARTITION_STATE_DESYNC == tr->rsv.state) {
+		cf_crash(AS_RW, "{%s:%d} write_local: partition is desync - writes will flow from master. digest %"PRIx64"",
 				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
 		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		return -1;
