@@ -100,7 +100,7 @@ int as_open_namedpipe()
 	return -1;
 }
 
-int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr)
+int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, const uint8_t *key, uint32_t key_size, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr)
 {
 	return 0;
 }

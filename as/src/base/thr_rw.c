@@ -5854,9 +5854,9 @@ as_write_init()
 }
 
 void
-single_transaction_response(as_transaction *tr, as_namespace *ns,
-		as_msg_op **ops, as_bin **response_bins, uint16_t n_bins,
-		uint32_t generation, uint32_t void_time, uint *written_sz,
+single_transaction_response_with_key(as_transaction *tr, as_namespace *ns,
+		as_msg_op **ops, const uint8_t *key, uint32_t key_size, as_bin **response_bins,
+		uint16_t n_bins, uint32_t generation, uint32_t void_time, uint *written_sz,
 		char *setname)
 {
 
@@ -5893,7 +5893,8 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 	} else if (tr->from_xdr) {
 		// It is a read for XDR.
 		// Send data back to XDR.
-		xdr_internal_read_response(ns, tr->result_code, generation, void_time, response_bins, n_bins, setname, tr->from_xdr);
+		xdr_internal_read_response(ns, tr->result_code, generation, void_time, key, key_size,
+				response_bins, n_bins, setname, tr->from_xdr);
 	} else {
 		// In this case, this is a call from write_process() above.
 		// create the response message (this is a new malloc that will be handed off to fabric (see end of write_process())
@@ -5916,6 +5917,16 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 					ns->name, tr->msgp);
 		}
 	}
+}
+
+void
+single_transaction_response(as_transaction *tr, as_namespace *ns,
+		as_msg_op **ops, as_bin **response_bins, uint16_t n_bins,
+		uint32_t generation, uint32_t void_time, uint *written_sz,
+		char *setname)
+{
+	single_transaction_response_with_key(tr, ns, ops, NULL, 0, response_bins, n_bins,
+			generation, void_time, written_sz, setname);
 }
 
 // Compute length of the wait queue linked list on a wr.
@@ -6050,6 +6061,14 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 		return;
 	}
 
+	uint8_t *key = NULL;
+	uint32_t key_size = 0;
+
+	if (tr->from_xdr && as_storage_record_get_key(&rd)) {
+		key = rd.key;
+		key_size = rd.key_size;
+	}
+
 	if ((m->info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0) {
 		read_local_done(tr, r_ref, &rd, AS_PROTO_RESULT_OK);
 		return;
@@ -6139,8 +6158,9 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_storage_read_hist);
 
-	single_transaction_response(tr, ns, p_ops, response_bins, n_bins,
-			r->generation, r->void_time, &written_sz, (char *)set_name);
+	single_transaction_response_with_key(tr, ns, p_ops, key, key_size,
+			response_bins, n_bins, r->generation, r->void_time, &written_sz,
+			(char *)set_name);
 
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
 
