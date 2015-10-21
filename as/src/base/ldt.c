@@ -923,7 +923,7 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 		cf_warning_digest(AS_LDT, &rd->keyd, "as_ldt_parent_storage_set_version: [LDT Control bin not found %s %d]", fname, lineno);
 		return -1;
 	}
-	as_val * valp           = as_val_frombin( binp );
+	as_val * valp           = as_bin_particle_to_asval( binp );
 	if (!valp) {
 		cf_warning(AS_LDT, "as_ldt_parent_storage_set_version : [LDT Control bin Deserialization error]... Fail");
 		return -2;
@@ -1025,7 +1025,7 @@ as_ldt_parent_storage_get_version(as_storage_rd *rd, uint64_t *ldt_version, bool
 		}
 		rv                      = -1;
 	} else {
-		const as_val * valp           = as_val_frombin( binp );
+		const as_val * valp           = as_bin_particle_to_asval( binp );
 		if (!valp) {
 			if (no_fail) {
 				cf_warning(AS_LDT, "Property Bin %s Corrupted", REC_LDT_CTRL_BIN);
@@ -1082,7 +1082,7 @@ as_ldt_subrec_storage_get_digests(as_storage_rd *rd, cf_digest *edigest, cf_dige
 		return -1;
 	}
 
-	as_val * valp        = as_val_frombin(binp);
+	as_val * valp        = as_bin_particle_to_asval(binp);
 	if (!valp) {
 		cf_warning(AS_LDT, "Property Bin %s Corrupted", SUBREC_PROP_BIN);
 		return -2;
@@ -1631,7 +1631,7 @@ char *
 as_ldt_leaf_getNext(as_storage_rd *rd)
 {
 	as_bin * bb    = as_bin_get(rd, "LsrControlBin");
-	as_val * srMap = as_val_frombin(bb);
+	as_val * srMap = as_bin_particle_to_asval(bb);
 
 	char key_buffer[2]; as_string key;
 	as_ldt_get_key((char)LF_NextPage, &key, key_buffer);
@@ -1671,7 +1671,7 @@ as_list *
 as_ldt_leaf_scan(as_storage_rd *rd)
 {
 	as_bin * bb  = as_bin_get(rd, "LsrListBin");
-	as_list *sl  = (as_list *)as_val_frombin(bb); 
+	as_list *sl  = (as_list *)as_bin_particle_to_asval(bb);
 	return sl;
 }
 
@@ -1767,12 +1767,12 @@ as_bin_get_llist(as_namespace *ns, as_storage_rd *rd, as_index_tree *sub_tree, a
 as_val *
 as_llist_scan(as_namespace *ns, as_index_tree *sub_tree, as_storage_rd  *rd, as_bin *binp) 
 {
-	uint8_t type = as_particle_type_convert(as_bin_get_particle_type(binp));
-	if (type != AS_PARTICLE_TYPE_LIST) {
+	uint8_t type = as_bin_get_particle_type(binp);
+	if (! (type == AS_PARTICLE_TYPE_LIST || type == AS_PARTICLE_TYPE_HIDDEN_LIST)) {
 		return NULL;
 	}
 
-	as_val * valp  = as_val_frombin(binp);
+	as_val * valp  = as_bin_particle_to_asval(binp);
 	if (!valp) {
 		cf_warning(AS_LDT, "Property Bin %s Corrupted", SUBREC_PROP_BIN);
 		return NULL;

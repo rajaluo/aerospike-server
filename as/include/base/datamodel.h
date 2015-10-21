@@ -226,9 +226,7 @@ extern int32_t as_particle_size_from_pickled(uint8_t **p_pickled);
 extern uint32_t as_particle_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
 extern int32_t as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size); // TODO - will we ever need this?
 
-extern as_particle_type as_particle_type_convert(as_particle_type type);
 extern as_particle_type as_particle_type_convert_to_hidden(as_particle_type type);
-extern bool as_particle_type_hidden(as_particle_type type);
 
 // as_bin particle function declarations
 
@@ -1224,7 +1222,6 @@ extern uint64_t as_paxos_get_cluster_key();
 typedef void *	geo_region_t;
 extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
 extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
-extern as_val * as_bin_particle_to_asval_geojson(as_bin *b);
 extern void as_val_geojson_to_client(const as_val *v, uint8_t * buf, uint32_t *psize);
 #define MAX_REGION_CELLS		   32
 #define MAX_REGION_LEVELS		   30

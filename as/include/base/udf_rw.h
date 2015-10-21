@@ -86,7 +86,6 @@ void     udf_rw_complete(as_transaction *tr, int retcode, char *filename, int li
 int      udf_call_init(udf_call *, as_transaction *);
 void     udf_call_destroy(udf_call *);
 
-as_val  *as_val_frombin(as_bin *bb);
 void     as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size);
 int      to_particle_type(int from_as_type);
 

@@ -387,25 +387,6 @@ as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region)
 	return false;
 }
 
-as_val *
-as_bin_particle_to_asval_geojson(as_bin *b)
-{
-	geojson_mem *gp = (geojson_mem *)as_bin_get_particle(b);
-
-	size_t jsonsz;
-	char const *jsonptr = geojson_mem_jsonstr(gp, &jsonsz);
-	char *buf = cf_malloc(jsonsz + 1);
-
-	if (! buf) {
-		return NULL;
-	}
-
-	memcpy(buf, jsonptr, jsonsz);
-	buf[jsonsz] = '\0';
-
-	return (as_val *)as_geojson_new_wlen(buf, jsonsz, true);
-}
-
 void
 as_val_geojson_to_client(const as_val *v, uint8_t *buf, uint32_t *psize)
 {
@@ -433,6 +414,11 @@ as_val_geojson_to_client(const as_val *v, uint8_t *buf, uint32_t *psize)
 	p8 = (uint8_t *)p16;
 	memcpy(p8, as_geojson_get(pg), jsz);
 }
+
+
+//==========================================================
+// Local helpers.
+//
 
 static char const *
 geojson_mem_jsonstr(geojson_mem *p_geojson_mem, size_t *p_jsonsz)
