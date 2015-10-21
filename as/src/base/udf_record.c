@@ -637,7 +637,7 @@ udf_record_storage_get(const udf_record *urecord, const char *name)
 		return NULL;
 	}
 
-	return as_val_frombin(bb);
+	return as_bin_particle_to_asval(bb);
 }
 
 /*

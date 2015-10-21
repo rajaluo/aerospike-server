@@ -4130,7 +4130,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 	if (!found) {
 		if (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST) {
 			if (! cdt_val) {
-				cdt_val = as_val_frombin(b);
+				cdt_val = as_bin_particle_to_asval(b);
 			}
 			as_val * res_val   = as_sindex_extract_val_from_path(imd, cdt_val);
 			if (!res_val) {

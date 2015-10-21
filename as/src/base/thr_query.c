@@ -1582,7 +1582,7 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			return iswithin;
 		}
 		case AS_PARTICLE_TYPE_MAP : {
-			val     = as_val_frombin(b);
+			val     = as_bin_particle_to_asval(b);
 			res_val = as_sindex_extract_val_from_path(qtr->si->imd, val);	
 			if (!res_val) {
 				matches = false;
@@ -1592,7 +1592,7 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			break;
 		}
 		case AS_PARTICLE_TYPE_LIST : {
-			val     = as_val_frombin(b);
+			val     = as_bin_particle_to_asval(b);
 			res_val = as_sindex_extract_val_from_path(qtr->si->imd, val);	
 			if (!res_val) {
 				matches = false;

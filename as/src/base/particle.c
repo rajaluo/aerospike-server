@@ -157,19 +157,6 @@ as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size)
 }
 
 as_particle_type
-as_particle_type_convert(as_particle_type type)
-{
-	switch (type) {
-	case AS_PARTICLE_TYPE_HIDDEN_MAP:
-		return AS_PARTICLE_TYPE_MAP;
-	case AS_PARTICLE_TYPE_HIDDEN_LIST:
-		return AS_PARTICLE_TYPE_LIST;
-	default:
-		return type;
-	}
-}
-
-as_particle_type
 as_particle_type_convert_to_hidden(as_particle_type type)
 {
 	switch (type) {
@@ -180,13 +167,6 @@ as_particle_type_convert_to_hidden(as_particle_type type)
 	default:
 		return type;
 	}
-}
-
-bool
-as_particle_type_hidden(as_particle_type type)
-{
-	return	type == AS_PARTICLE_TYPE_HIDDEN_MAP ||
-			type == AS_PARTICLE_TYPE_HIDDEN_LIST;
 }
 
 
