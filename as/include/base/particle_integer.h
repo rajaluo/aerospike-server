@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "aerospike/as_val.h"
 #include "base/datamodel.h"
 
 // The INTEGER particle interface function declarations are in this header file
@@ -49,6 +50,9 @@ uint32_t integer_size_from_mem(as_particle_type type, const uint8_t *value, uint
 void integer_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
 uint32_t integer_mem_size(const as_particle *p);
 uint32_t integer_to_mem(const as_particle *p, uint8_t *value);
+
+// Handle as_val translation.
+as_val *integer_to_asval(const as_particle *p);
 
 // Handle on-device "flat" format.
 int32_t integer_size_from_flat(const uint8_t *flat, uint32_t flat_size);

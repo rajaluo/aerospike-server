@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "aerospike/as_val.h"
 #include "base/datamodel.h"
 
 //------------------------------------------------
@@ -50,6 +51,9 @@ typedef uint32_t (*as_particle_size_from_mem_fn) (as_particle_type type, const u
 typedef void (*as_particle_from_mem_fn) (as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
 typedef uint32_t (*as_particle_mem_size_fn) (const as_particle *p);
 typedef uint32_t (*as_particle_to_mem_fn) (const as_particle *p, uint8_t *value);
+
+// Handle as_val translation.
+typedef as_val *(*as_particle_to_asval_fn) (const as_particle *p);
 
 // Handle on-device "flat" format.
 typedef int32_t (*as_particle_size_from_flat_fn) (const uint8_t *flat, uint32_t flat_size);
@@ -81,6 +85,8 @@ typedef struct as_particle_vtable_s {
 	as_particle_from_mem_fn					from_mem_fn;
 	as_particle_mem_size_fn					mem_size_fn;
 	as_particle_to_mem_fn					to_mem_fn;
+
+	as_particle_to_asval_fn					to_asval_fn;
 
 	as_particle_size_from_flat_fn			size_from_flat_fn;
 	as_particle_cast_from_flat_fn			cast_from_flat_fn;

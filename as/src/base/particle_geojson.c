@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "aerospike/as_geojson.h"
+#include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
 
@@ -54,6 +55,9 @@ int32_t geojson_size_from_wire(const uint8_t *wire_value, uint32_t value_size);
 int geojson_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
 uint32_t geojson_to_wire(const as_particle *p, uint8_t *wire);
 
+// Handle as_val translation.
+as_val *geojson_to_asval(const as_particle *p);
+
 
 //==========================================================
 // GEOJSON particle interface - vtable.
@@ -78,6 +82,8 @@ const as_particle_vtable geojson_vtable = {
 		blob_from_mem,
 		blob_mem_size,
 		blob_to_mem,
+
+		geojson_to_asval,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -277,6 +283,29 @@ geojson_to_wire(const as_particle *p, uint8_t *wire)
 	}
 
 	return sz;
+}
+
+//------------------------------------------------
+// Handle as_val translation.
+//
+
+as_val *
+geojson_to_asval(const as_particle *p)
+{
+	geojson_mem *p_geojson_mem = (geojson_mem *)p;
+
+	size_t jsonsz;
+	char const *jsonptr = geojson_mem_jsonstr(p_geojson_mem, &jsonsz);
+	char *buf = cf_malloc(jsonsz + 1);
+
+	if (! buf) {
+		return NULL;
+	}
+
+	memcpy(buf, jsonptr, jsonsz);
+	buf[jsonsz] = '\0';
+
+	return (as_val *)as_geojson_new_wlen(buf, jsonsz, true);
 }
 
 

@@ -27,6 +27,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_bytes.h"
+#include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 
 #include "fault.h"
@@ -63,6 +65,8 @@ const as_particle_vtable blob_vtable = {
 		blob_from_mem,
 		blob_mem_size,
 		blob_to_mem,
+
+		blob_to_asval,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -259,6 +263,26 @@ blob_to_mem(const as_particle *p, uint8_t *value)
 	memcpy(value, p_blob_mem->data, p_blob_mem->sz);
 
 	return p_blob_mem->sz;
+}
+
+//------------------------------------------------
+// Handle as_val translation.
+//
+
+as_val *
+blob_to_asval(const as_particle *p)
+{
+	blob_mem *p_blob_mem = (blob_mem *)p;
+
+	uint8_t *value = cf_malloc(p_blob_mem->sz);
+
+	if (! value) {
+		return NULL;
+	}
+
+	memcpy(value, p_blob_mem->data, p_blob_mem->sz);
+
+	return (as_val *)as_bytes_new_wrap(value, p_blob_mem->sz, true);
 }
 
 //------------------------------------------------
