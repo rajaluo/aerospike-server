@@ -3824,7 +3824,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
 			// Dont print this command in logs as this happens every few seconds
-			// Ideally, this should not be done via config-set. 
+			// Ideally, this should not be done via config-set.
 			print_command = false;
 
 			uint64_t val[DC_MAX_NUM];
@@ -6682,7 +6682,7 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 	char ns_str[AS_ID_NAMESPACE_SZ];
 	int ns_len = sizeof(ns_str);
 	int ret    = 0;
-	
+
 	ret = as_info_parameter_get(params, "ns", ns_str, &ns_len);
 	if (ret) {
 		if (ret == -2) {
@@ -6694,11 +6694,11 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 		else {
 			cf_warning(AS_INFO, "%s : invalid namespace", sindex_cmd);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Namespace Not Specified");		
+				"Namespace Not Specified");
 		}
 		return -1;
 	}
-	
+
 	*ns = as_namespace_get_byname(ns_str);
 	if (!*ns) {
 		cf_warning(AS_INFO, "%s : namespace %s not found", sindex_cmd, ns_str);
@@ -6725,7 +6725,7 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 		return -1;
 	}
 
-	cf_info(AS_SINDEX, "%s : received request on index %s - namespace %s", 
+	cf_info(AS_SINDEX, "%s : received request on index %s - namespace %s",
 			sindex_cmd, index_name_str, ns_str);
 
 	*iname = cf_strdup(index_name_str);
@@ -6734,19 +6734,18 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 }
 
 int info_command_sindex_repair(char *name, char *params, cf_dyn_buf *db) {
-	
 	as_namespace *ns = NULL;
 	char * iname = NULL;
 	if (as_info_parse_ns_iname(params, &ns, &iname, db, "SINDEX REPAIR")) {
 		return 0;
 	}
-	
+
 	int resp = as_sindex_repair(ns, iname);
 	if (resp) {
 		cf_dyn_buf_append_string(db, "Sindex repair failed");
 		INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 			as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX REPAIR : for index %s - ns %s failed with error %d", 
+		cf_warning(AS_INFO, "SINDEX REPAIR : for index %s - ns %s failed with error %d",
 			iname, ns->name, resp);
 	}
 	else {
@@ -6824,14 +6823,14 @@ int info_command_sindex_stat(char *name, char *params, cf_dyn_buf *db) {
 	if (as_info_parse_ns_iname(params, &ns, &iname, db, "SINDEX STAT")) {
 		return 0;
 	}
-	
+
 	int resp = as_sindex_stats_str(ns, iname, db);
 	if (resp)  {
 		cf_dyn_buf_append_string(db, "Sindex stat failed");
 		INFO_COMMAND_SINDEX_FAILCODE(
 				as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 				as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX STAT : for index %s - ns %s failed with error %d", 
+		cf_warning(AS_INFO, "SINDEX STAT : for index %s - ns %s failed with error %d",
 			iname, ns->name, resp);
 	}
 
@@ -6869,7 +6868,7 @@ int info_command_sindex_histogram(char *name, char *params, cf_dyn_buf *db)
 	}
 	else {
 		cf_info(AS_INFO, "SINDEX HISTOGRAM : invalid OP");
-		cf_dyn_buf_append_string(db, "Invalid Op");	
+		cf_dyn_buf_append_string(db, "Invalid Op");
 		goto END;
 	}
 
@@ -6879,11 +6878,11 @@ int info_command_sindex_histogram(char *name, char *params, cf_dyn_buf *db)
 		INFO_COMMAND_SINDEX_FAILCODE(
 				as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 				as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s failed with error %d", 
+		cf_warning(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s failed with error %d",
 			iname, ns->name, resp);
 	} else {
 		cf_dyn_buf_append_string(db, "Ok");
-		cf_info(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s histogram is set as %s", 
+		cf_info(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s histogram is set as %s",
 			iname, ns->name, op);
 	}
 

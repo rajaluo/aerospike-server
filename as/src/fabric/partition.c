@@ -138,7 +138,7 @@
  *    the replica list.
  *
  * NB: Please note that write journalling and write rejection is
- *     primarly relevant only in the world where replication was delta
+ *     primarily relevant only in the world where replication was delta
  *     replication. But current (5/13) we do not do delta replication but we
  *     ship the entire record. So write_journal and write rejection in current
  *     world is not relevant. Revisit and fix comment
@@ -210,7 +210,7 @@ int
 as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states) {
 
 	if (!ns || !partition_states)
-		return (0);
+		return 0;
 
 	memset(partition_states, 0, sizeof(bool) * AS_PARTITIONS);
 
@@ -237,7 +237,7 @@ as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states) {
 			cf_debug(AS_PARTITION, "{%s:%d} Failed to get vinfo from storage ", ns->name, j);
 	} // end for
 
-	return (n_found);
+	return n_found;
 }
 
 // flush storage
@@ -318,8 +318,8 @@ bool increase_partition_version_tree_path(as_partition_vinfo *vinfo, cf_node fsn
 		}
 	}
 	if (!found) {
-		cf_detail(AS_PARTITION, "{%s:%d} can't find self in old succession list: Partition version will NOT change", n, pid);
-		return (false);
+		cf_detail(AS_PARTITION, "{%s:%d} can't find first sync in old succession list: Partition version will NOT change", n, pid);
+		return false;
 	}
 
 	int i;
@@ -367,10 +367,7 @@ void print_partition_versions(const char* n, size_t pid, as_partition_vinfo *par
 
 // Set flag to allow migrations
 void as_partition_allow_migrations() {
-
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&g_migration_lock);
 
 	cf_info(AS_PARTITION, "ALLOW MIGRATIONS");
 	g_allow_migrations = true;
@@ -379,45 +376,33 @@ void as_partition_allow_migrations() {
 	//   Reset number of active incoming migrations.
 	cf_atomic_int_set(&g_config.migrate_num_incoming, 0);
 
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&g_migration_lock);
 
 	return;
 }
 
 // Set flag to disallow migrations
 void as_partition_disallow_migrations() {
-
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&g_migration_lock);
 
 	cf_info(AS_PARTITION, "DISALLOW MIGRATIONS");
 	g_allow_migrations = false;
 
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&g_migration_lock);
 
 	return;
 }
 
 // get migration flag
 bool as_partition_get_migration_flag() {
-
 	bool flag;
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+
+	pthread_mutex_lock(&g_migration_lock);
 
 	flag = g_allow_migrations;
 
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-	return (flag);
-
+	pthread_mutex_unlock(&g_migration_lock);
+	return flag;
 }
 
 /* as_partition_reinit
@@ -540,9 +525,7 @@ void set_partition_desync_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
  * Set the state variable and clean out the version info
  */
 int set_partition_desync(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, size_t pid) {
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&g_migration_lock);
 
 	int retval = -1;
 	if (true == g_allow_migrations)
@@ -555,11 +538,9 @@ int set_partition_desync(as_partition *p, as_partition_vinfo *vinfo, as_namespac
 		cf_info(AS_PARTITION, "{%s:%d} MIGRATIONS DISALLOWED: State cannot be changed to ABSENT", p->partition_id, ns->name);
 	}
 
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&g_migration_lock);
 
-	return (retval);
+	return retval;
 }
 
 /*
@@ -607,9 +588,7 @@ void set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
  * Set the state variable and clean out the version info
  */
 int set_partition_absent(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, size_t pid) {
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&g_migration_lock);
 
 	int retval = -1;
 	if (true == g_allow_migrations)
@@ -618,11 +597,9 @@ int set_partition_absent(as_partition *p, as_partition_vinfo *vinfo, as_namespac
 		retval = 0;
 	}
 
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&g_migration_lock);
 
-	return (retval);
+	return retval;
 }
 
 /*
@@ -660,9 +637,7 @@ void set_partition_sync_lockfree(as_partition *p, size_t pid, as_namespace *ns, 
  * Set the state variables and initialize new version info
  */
 int set_partition_sync(as_partition *p, size_t pid, as_namespace *ns) {
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&g_migration_lock);
 
 	int retval = -1;
 	if (true == g_allow_migrations)
@@ -672,11 +647,9 @@ int set_partition_sync(as_partition *p, size_t pid, as_namespace *ns) {
 		retval = 0;
 	}
 
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&g_migration_lock);
 
-	return (retval);
+	return retval;
 }
 
 /*
@@ -699,8 +672,7 @@ as_partition_init(as_partition *p, as_namespace *ns, int pid)
 {
 	cf_assert(p, AS_PARTITION, CF_CRITICAL, "invalid partition");
 
-	if (0 != pthread_mutex_init(&p->lock, 0))
-		cf_crash(AS_PARTITION, "couldn't initialize partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_init(&p->lock, 0);
 
 	p->vp = (as_index_tree *) NULL;
 	p->sub_vp = (as_index_tree *) NULL;
@@ -727,8 +699,7 @@ as_partition_getstates(as_partition_states *ps)
 
 			as_partition *p = &ns->partitions[j];
 
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_lock(&p->lock);
 
 			switch (p->state)
 			{
@@ -779,8 +750,7 @@ as_partition_getstates(as_partition_states *ps)
 			ps->n_sub_objects += p->sub_vp->elements;
 			ps->n_sub_ref_count += cf_rc_count(p->sub_vp);
 
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
 		}
 
 		cf_atomic_int_set(&ns->n_absent_partitions, ns_absent_partitions);
@@ -804,7 +774,7 @@ int find_in_replica_list(as_partition *p, cf_node self) {
 			break;
 		}
 	}
-	return (my_index);
+	return my_index;
 }
 
 static
@@ -895,7 +865,7 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 
 	if ((is_master && is_sync) || migrating_to_master) {
 		n = self;
-	} 
+	}
 	else if (is_master && is_desync) {
 		n = p->origin;
 	}
@@ -907,7 +877,7 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 	}
 
 	if (n == 0 && as_partition_balance_is_init_resolved()) {
-		cf_debug(AS_PARTITION, "{%s:%d} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64"", 
+		cf_debug(AS_PARTITION, "{%s:%d} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64"",
 					ns->name, pid, my_index, p->replica[0], p->replica[1], p->origin);
 		cf_atomic_int_incr(&g_config.err_sync_copy_null_master);
 	}
@@ -951,8 +921,7 @@ as_partition_reserve_update_state(as_partition_reservation *rsv)
 {
 	cf_assert(rsv, AS_PARTITION, CF_CRITICAL, "invalid reservation");
 
-	if (0 != pthread_mutex_lock(&rsv->p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&rsv->p->lock);
 
 	rsv->state = rsv->p->state;
 	rsv->n_dupl = rsv->p->n_dupl;
@@ -965,8 +934,7 @@ as_partition_reserve_update_state(as_partition_reservation *rsv)
 	else
 		memcpy(&rsv->vinfo, &rsv->p->primary_version_info, sizeof(as_partition_vinfo));
 
-	if (0 != pthread_mutex_unlock(&rsv->p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&rsv->p->lock);
 
 	return;
 }
@@ -995,8 +963,7 @@ as_partition_reserve_read_write(as_namespace *ns, as_partition_id pid,
 
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	ck = p->cluster_key;
 	n = find_sync_copy(ns, pid, p, is_read);
@@ -1038,13 +1005,15 @@ as_partition_reserve_read_write(as_namespace *ns, as_partition_id pid,
 		memset(rsv, 0, sizeof(*rsv));
 
 finish:
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-	if (node)
+	pthread_mutex_unlock(&p->lock);
+
+	if (node) {
 		*node = n;
-	if (cluster_key)
+	}
+	if (cluster_key) {
 		*cluster_key = ck;
-	return(rv);
+	}
+	return rv;
 }
 
 
@@ -1103,12 +1072,10 @@ as_partition_reserve_migrate_timeout(as_namespace *ns, as_partition_id pid, as_p
 	cf_set_wait_timespec(timeout_ms, &tp);
 	if (0 != pthread_mutex_timedlock(&p->lock, &tp)) {
 		return -1;
-	}    
+	}
 	as_partition_reserve_lockfree(ns, pid, rsv);
 
-	if (0 != pthread_mutex_unlock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_unlock(&p->lock);
 
 	if (node) {
 		*node = g_config.self_node;
@@ -1129,16 +1096,15 @@ as_partition_reserve_migrate(as_namespace *ns, as_partition_id pid, as_partition
 	cf_assert((pid < AS_PARTITIONS), AS_PARTITION, CF_CRITICAL, "invalid partition");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	as_partition_reserve_lockfree(ns, pid, rsv);
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	if (node) *node = g_config.self_node;
-
+	if (node) {
+		*node = g_config.self_node;
+	}
 }
 
 /* as_partition_reserve_write
@@ -1186,7 +1152,7 @@ as_partition_prereserve_query(as_namespace * ns, bool can_partition_query[], as_
 	int reserved = 0;
 	for (int i=0; i<AS_PARTITIONS; i++) {
 		if (as_partition_reserve_query(ns, i, &rsv[i])) {
-			can_partition_query[i] = false;	
+			can_partition_query[i] = false;
 		}
 		else {
 			can_partition_query[i] = true;
@@ -1240,8 +1206,7 @@ as_partition_release(as_partition_reservation *rsv)
 	cf_assert(rsv->p, AS_PARTITION, CF_CRITICAL, "invalid reservation partition");
 	cf_assert(rsv->tree, AS_PARTITION, CF_CRITICAL, "invalid reservation tree");
 
-	if (0 != pthread_mutex_lock(&rsv->p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&rsv->p->lock);
 
 	as_index_tree_release(rsv->tree, rsv->ns);
 	as_index_tree_release(rsv->sub_tree, rsv->ns);
@@ -1250,8 +1215,7 @@ as_partition_release(as_partition_reservation *rsv)
 	if (rsv->is_write)
 		rsv->p->pending_writes--;
 
-	if (0 != pthread_mutex_unlock(&rsv->p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&rsv->p->lock);
 
 	// safety
 	rsv->tree = 0;
@@ -1275,16 +1239,14 @@ as_partition_bless(as_partition *p)
 {
 	cf_assert(p, AS_PARTITION, CF_CRITICAL, "invalid partition");
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	/* partition version info must be set outside this call */
 	p->state = AS_PARTITION_STATE_SYNC;
 	p->replica[0] = g_config.self_node;
 	cf_atomic_int_incr(&g_config.partition_generation);
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
 	return;
 }
@@ -1302,15 +1264,13 @@ as_partition_getreplica_next(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	n = p->origin;
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	return(n);
+	return n;
 }
 
 
@@ -1326,15 +1286,13 @@ as_partition_getreplica_read(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	n = find_sync_copy(ns, pid, p, true);
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	return(n);
+	return n;
 }
 
 /* as_partition_getreplica_prole
@@ -1350,9 +1308,7 @@ as_partition_getreplica_prole(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_lock(&p->lock);
 
 	// Check is this is a master node.
 	cf_node n = find_sync_copy(ns, pid, p, false);
@@ -1366,9 +1322,7 @@ as_partition_getreplica_prole(as_namespace *ns, as_partition_id pid)
 		n = find_sync_copy(ns, pid, p, true);
 	}
 
-	if (0 != pthread_mutex_unlock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_unlock(&p->lock);
 
 	return n;
 }
@@ -1386,8 +1340,7 @@ as_partition_getreplica_readall(as_namespace *ns, as_partition_id pid, cf_node *
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		/* Break at the end of the list */
@@ -1402,10 +1355,9 @@ as_partition_getreplica_readall(as_namespace *ns, as_partition_id pid, cf_node *
 		nv[c++] = p->replica[i];
 	}
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	return(c);
+	return c;
 }
 
 
@@ -1421,15 +1373,13 @@ as_partition_getreplica_write(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	n = find_sync_copy(ns, pid, p, false);
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	return(n);
+	return n;
 }
 
 /* as_partition_getreplica_master
@@ -1446,17 +1396,13 @@ as_partition_getreplica_master(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_lock(&p->lock);
 
 	n = find_sync_copy(ns, pid, p, false);
 
-	if (0 != pthread_mutex_unlock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_unlock(&p->lock);
 
-	return(n);
+	return n;
 }
 
 void
@@ -1928,11 +1874,10 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 			cf_debug(AS_PARTITION, "migration tx callback: migrate failed {%s:%d}", ns->name, pid);
 		else
 			cf_debug(AS_PARTITION, "migration tx callback: unknown notification %d {%s:%d}", (int) s, ns->name, pid);
-		return(AS_MIGRATE_CB_FAIL);
+		return AS_MIGRATE_CB_FAIL;
 	}
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	if (orig_cluster_key != as_paxos_get_cluster_key()) {
 		pthread_mutex_unlock(&p->lock);
@@ -1956,9 +1901,10 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 	if (p->pending_migrate_tx == 0)
 	{
 		cf_debug(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_tx?", ns->name, pid);
-		if (0 != pthread_mutex_unlock(&p->lock))
-			cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-		return(AS_MIGRATE_CB_FAIL);
+
+		pthread_mutex_unlock(&p->lock);
+
+		return AS_MIGRATE_CB_FAIL;
 	}
 
 	p->pending_migrate_tx--;
@@ -1981,8 +1927,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 
 	p->current_outgoing_ldt_version = 0;
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
 	/* Apply all the transactions. This will halt eventually because the
 	   node filling us will stop sending write requests to us. */
@@ -2005,8 +1950,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 		}
 	}
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	if (orig_cluster_key != as_paxos_get_cluster_key()) {
 		pthread_mutex_unlock(&p->lock);
@@ -2021,22 +1965,20 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 
 			cf_debug(AS_PARTITION, "{%s:%d} migrate rx aborted. Migrations are disallowed", ns->name, pid);
 
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
 
-			return(AS_MIGRATE_CB_FAIL);
+			return AS_MIGRATE_CB_FAIL;
 
 		}
 		cf_atomic_int_incr(&g_config.partition_generation);
 	}
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
 	cf_detail(AS_PARTITION, "pending writes done: {%s:%d}", ns->name, pid);
 	cf_debug(AS_PARTITION, "{%s:%d} MIGRATE TRANSMIT DONE", ns->name, pid);
 
-	return(AS_MIGRATE_CB_OK);
+	return AS_MIGRATE_CB_OK;
 }
 
 
@@ -2085,7 +2027,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 	// possible to get migrate requests before our paxos is up. Prevent that.
 	if ((g_config.paxos == 0) || (g_config.paxos->ready == false) || (g_allow_migrations == false)) {
 		cf_detail(AS_PARTITION, "{%s:%d} migrate rx, paxos unconfigured, try later", ns->name, pid);
-		return( AS_MIGRATE_CB_AGAIN );
+		return AS_MIGRATE_CB_AGAIN;
 	}
 
 	cf_queue *mq = NULL;
@@ -2098,14 +2040,13 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			if (num_incoming >= g_config.migrate_max_num_incoming) {
 				cf_atomic_int_incr(&g_config.migrate_num_incoming_refused);
 				cf_debug(AS_PARTITION, "too busy with %d incoming migrations ~~ waving off migrate request {%s:%d}", num_incoming, ns->name, pid);
-				return( AS_MIGRATE_CB_AGAIN );
+				return AS_MIGRATE_CB_AGAIN;
 			}
 
 			partition_migrate_record r;
 			mq =  cf_queue_create(sizeof(partition_migrate_record), false);
 
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_lock(&p->lock);
 
 			if (orig_cluster_key != as_paxos_get_cluster_key()) {
 				pthread_mutex_unlock(&p->lock);
@@ -2262,8 +2203,8 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 				if (CF_Q_SZ(mq) != 0) cf_detail(AS_PARTITION, "Migrate: Unexpected queue size != 0");
 			}
 
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
+
 			/*
 			 * Run all the queued migrations: this happens after the release of
 			 * the state lock to ensure that writes have begun to flow to their
@@ -2286,8 +2227,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 		{
 			cf_debug(AS_PARTITION, "{%s:%d} migrate rx completed ", ns->name, pid);
 
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_lock(&p->lock);
 
 			if (orig_cluster_key != as_paxos_get_cluster_key()) {
 				pthread_mutex_unlock(&p->lock);
@@ -2299,8 +2239,9 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			if (p->pending_migrate_rx == 0) {
 				cf_info(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_rx?", ns->name, pid);
 				rv = AS_MIGRATE_CB_FAIL;
-				if (0 != pthread_mutex_unlock(&p->lock))
-					cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+
+				pthread_mutex_unlock(&p->lock);
+
 				break; // out of switch
 			}
 			// Check if there are any final migrates to be done after merges and schedule these now.
@@ -2466,10 +2407,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 
 			cf_atomic_int_incr(&g_config.partition_generation);
 
-
-			/* unlock */
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
 
 			/* Run all the queued migrations: this happens after the release of
 				* the state lock to ensure that writes have begun to flow to their
@@ -2500,11 +2438,11 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			break;
 	}
 
-	if (mq)		cf_queue_destroy(mq);
+	if (mq) {
+		cf_queue_destroy(mq);
+	}
 
-	if (-1 == rv)
-		cf_info(AS_PARTITION, "returning -1 from migrate_rx");
-	return(rv);
+	return rv;
 }
 
 
@@ -3107,11 +3045,6 @@ as_partition_balance()
 		cf_warning(AS_PAXOS, "null partition ID generated");
 	}
 
-	/*
-	 * Classify partitions in two ways, those with the same IID/VTP values
-	 * those with same IID but different VTP, and those with different IID
-	 */
-
 	size_t n_lost = 0;
 	size_t n_unique = 0;
 	size_t n_recreate = 0;
@@ -3152,10 +3085,7 @@ as_partition_balance()
 			as_partition *p = &ns->partitions[j];
 			partition_migrate_record pmr;
 
-			/* lock */
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION,
-						 "couldn't acquire partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_lock(&p->lock);
 
 			// TODO - Need to handle case where a partition is DESYNC,
 			// has a version ID and has a journal.
@@ -3198,7 +3128,7 @@ as_partition_balance()
 				// Check and then update the HV and SLINDEX arrays appropriately.
 				as_partition_adjust_hv_and_slindex( p, hv_ptr, hv_slindex_ptr, j );
 			}
-			// So -- whether or not we udpated HV and SLINDEX, now we create
+			// So -- whether or not we updated HV and SLINDEX, now we create
 			// the the replica list for the current partition using the first
 			// "replication-factor" number of nodes from the HV array.
 			memset(p->replica, 0, g_config.paxos_max_cluster_size * sizeof(cf_node));
@@ -3523,7 +3453,7 @@ as_partition_balance()
 						}
 						/*
 						 * Either master is not sync or it is waiting for duplicate partition versions or both
-						 * Schedule delated migrates of merged data to replicas
+						 * Schedule delayed migrates of merged data to replicas
 						 * All replicas will be migrated to in case duplicate partitions exist
 						 * Only non-sync partitions will be migrated to in case there are no duplicate partitions
 						 */
@@ -3671,9 +3601,7 @@ as_partition_balance()
 			ns_pending_migrate_rx += p->pending_migrate_rx;
 			ns_pending_migrate_tx += p->pending_migrate_tx;
 
-			/* unlock */
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
 
 		} // end for each partition
 
@@ -3747,9 +3675,8 @@ as_partition_balance()
 						   "{%s:%d} State Error. Cannot find self in hash value list %"PRIx64"",
 						   ns->name, j, self);
 			}
-			/* lock */
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+
+			pthread_mutex_lock(&p->lock);
 
 			bool is_wait = (p->state == AS_PARTITION_STATE_WAIT);
 			bool is_zombie = (p->state == AS_PARTITION_STATE_ZOMBIE);
@@ -3783,8 +3710,8 @@ as_partition_balance()
 				}
 			}
 Out:
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
+
 		} // end for each partition
 		cf_atomic_int_incr(&g_config.partition_generation);
 	} // end for each namespace
@@ -3936,7 +3863,7 @@ as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p)
 	bool is_sync             = (p->state == AS_PARTITION_STATE_SYNC);
 	bool migrating_to_master = (p->target != 0);
 	bool is_master           = (p->replica[0] == self);
-	
+
 	if ((is_master && is_sync) || migrating_to_master) {
 		return true;
 	} else {
