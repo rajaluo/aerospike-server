@@ -2295,15 +2295,17 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";write-commit-level-override=");
 	cf_dyn_buf_append_string(db, NS_WRITE_COMMIT_LEVEL_NAME());
 
-	cf_dyn_buf_append_string(db, ";migrate_tx_partitions_scheduled=");
-	APPEND_STAT_COUNTER(db, ns->migrate_tx_partitions_scheduled);
-	cf_dyn_buf_append_string(db, ";migrate_tx_partitions_remaining=");
-	APPEND_STAT_COUNTER(db, ns->migrate_tx_partitions_remaining);
-	cf_dyn_buf_append_string(db, ";migrate_rx_partitions_scheduled=");
-	APPEND_STAT_COUNTER(db, ns->migrate_rx_partitions_scheduled);
-	cf_dyn_buf_append_string(db, ";migrate_rx_partitions_remaining=");
-	APPEND_STAT_COUNTER(db, ns->migrate_rx_partitions_remaining);
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-initial=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_initial);
 
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-remaining=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_remaining);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-initial=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_initial);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-remaining=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_remaining);
 
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
@@ -4949,16 +4951,17 @@ info_debug_ticker_fn(void *unused)
 				total_ns_memory_inuse += ns_memory_inuse;
 				as_sindex_histogram_dumpall(ns);
 
-				int64_t scheduled_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_scheduled);
-				int64_t scheduled_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_scheduled);
+				int64_t initial_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_initial);
+				int64_t initial_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_initial);
 				int64_t remaining_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_remaining);
 				int64_t remaining_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_remaining);
-				int64_t scheduled_migrations = scheduled_rx_migrations + scheduled_tx_migrations;
+				int64_t initial_migrations = initial_rx_migrations + initial_tx_migrations;
 				int64_t remaining_migrations = remaining_rx_migrations + remaining_tx_migrations;
-				if (scheduled_migrations > 0 && remaining_migrations > 0) {
-					float migrations_pct_complete = (1 - (remaining_migrations / (float)scheduled_migrations)) * 100;
 
-					cf_info(AS_INFO, "{%s} migrations - remaining(%ld tx, %ld rx), active(%ld tx, %ld rx), %0.2f%% complete",
+				if (initial_migrations > 0 && remaining_migrations > 0) {
+					float migrations_pct_complete = (1 - ((float)remaining_migrations / (float)initial_migrations)) * 100;
+
+					cf_info(AS_INFO, "{%s} migrations - remaining (%ld tx, %ld rx), active (%ld tx, %ld rx), %0.2f%% complete",
 							ns->name,
 							remaining_tx_migrations,
 							remaining_rx_migrations,
@@ -4967,7 +4970,7 @@ info_debug_ticker_fn(void *unused)
 							migrations_pct_complete
 							);
 				} else {
-					cf_info(AS_INFO, "{%s} migrations - remaining(0 tx, 0 rx)", ns->name);
+					cf_info(AS_INFO, "{%s} migrations - complete", ns->name);
 				}
 			}
 

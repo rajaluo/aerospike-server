@@ -1907,12 +1907,12 @@ void apply_write_journal(as_namespace *ns, size_t pid)
  */
 as_migrate_cb_return
 as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
-						as_partition_id pid, as_index_tree *tree,
-						uint64_t orig_cluster_key, cf_node node, void *udata)
+		as_partition_id pid, as_index_tree *tree, uint64_t orig_cluster_key,
+		cf_node node, void *udata)
 {
 	uint64_t flags = (uint64_t)udata;
-	uint64_t acting_master = flags & TX_FLAGS_ACTING_MASTER;
-	uint64_t migration_request = flags & TX_FLAGS_REQUEST;
+	bool acting_master = (flags & TX_FLAGS_ACTING_MASTER) != 0;
+	bool migration_request = (flags & TX_FLAGS_REQUEST) != 0;
 
 	as_partition *p = NULL;
 
@@ -1962,7 +1962,8 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 	}
 
 	p->pending_migrate_tx--;
-	if (!migration_request) {
+
+	if (! migration_request) {
 		int64_t migrates_tx_remaining = cf_atomic_int_decr(&ns->migrate_tx_partitions_remaining);
 		if (migrates_tx_remaining < 0){
 			cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) tx partitions schedule exceeded, possibly a race with prior migration",
@@ -2271,10 +2272,12 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			partition_migrate_record pmr;
 			while (0 == cf_queue_pop(mq, &pmr, 0)) {
 				cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate (in rx) to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
+
 				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
-									pmr.mig_type, false, orig_cluster_key,
-									pmr.cb, pmr.cb_data))
+						pmr.mig_type, false, orig_cluster_key, pmr.cb,
+						pmr.cb_data)) {
 					cf_crash(AS_PARTITION, "couldn't start migrate");
+				}
 			}
 
 			break;
@@ -2306,6 +2309,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			mq =  cf_queue_create(sizeof(partition_migrate_record), false);
 
 			as_partition_state orig_p_state = p->state;
+
 			switch (orig_p_state) {
 				case AS_PARTITION_STATE_UNDEF:
 				case AS_PARTITION_STATE_JOURNAL_APPLY: // should never happen - it's a dummy state
@@ -2325,11 +2329,13 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 					}
 
 					p->pending_migrate_rx--;
+
 					int64_t migrates_rx_remaining = cf_atomic_int_decr(&ns->migrate_rx_partitions_remaining);
 					if (migrates_rx_remaining < 0) {
 						cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) rx partitions schedule exceeded, possibly a race with prior migration",
 								ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
 					}
+
 					p->origin = 0;
 
 					// apply write journal
@@ -2410,9 +2416,10 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 								p->dupl_nodes[i] = p->dupl_nodes[p->n_dupl - 1];
 								p->dupl_nodes[p->n_dupl - 1] = (cf_node)0;
 							}
-							p->n_dupl--; // reduce array size
+							p->n_dupl--;
 
-							p->pending_migrate_rx--; // one more migrate completed
+							p->pending_migrate_rx--;
+
 							int64_t migrates_rx_remaining = cf_atomic_int_decr(&ns->migrate_rx_partitions_remaining);
 							if (migrates_rx_remaining < 0) {
 								cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld)  rx partitions schedule exceeded, possibly a race with prior migration",
@@ -2420,9 +2427,10 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 							}
 						}
 						else {
-							// This happens when DESYNC (empty) master becomes
+							// We get here when DESYNC (empty) master becomes
 							// SYNC and there were duplicates. The first sync
 							// node is not a member of the dupl_nodes array.
+
 							if (orig_p_state != AS_PARTITION_STATE_DESYNC) {
 								cf_warning(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state", ns->name, pid, source_node);
 								break; // out of switch
@@ -2469,10 +2477,12 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			partition_migrate_record pmr;
 			while (0 == cf_queue_pop(mq, &pmr, 0)) {
 				cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate (in rx) to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
+
 				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
-									pmr.mig_type, true, orig_cluster_key,
-									pmr.cb, pmr.cb_data))
+						pmr.mig_type, true, orig_cluster_key, pmr.cb,
+						pmr.cb_data)) {
 					cf_crash(AS_PARTITION, "couldn't start migrate");
+				}
 			}
 
 			cf_queue_destroy(mq);
@@ -3116,7 +3126,7 @@ as_partition_balance()
 		if (NULL == ns)
 			continue;
 
-		// Acquire and release each partition lock to ensure threads holding
+		// Acquire and release each partition lock to ensure threads acquiring
 		// a partition lock after this loop will be forced to check the latest
 		// cluster key.
 		for (int j = 0; j < AS_PARTITIONS; j++) {
@@ -3126,9 +3136,9 @@ as_partition_balance()
 			pthread_mutex_unlock(&p->lock);
 		}
 
-		cf_atomic_int_set(&ns->migrate_tx_partitions_scheduled, 0);
+		cf_atomic_int_set(&ns->migrate_tx_partitions_initial, 0);
 		cf_atomic_int_set(&ns->migrate_tx_partitions_remaining, 0);
-		cf_atomic_int_set(&ns->migrate_rx_partitions_scheduled, 0);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_initial, 0);
 		cf_atomic_int_set(&ns->migrate_rx_partitions_remaining, 0);
 
 		cf_queue *mq = NULL;
@@ -3667,16 +3677,15 @@ as_partition_balance()
 
 		} // end for each partition
 
-
-		cf_info(AS_PARTITION, "{%s} re-balanced, expect migrations: out %d, in %d, out-later %d",
-				ns->name, ns_pending_migrate_tx, ns_pending_migrate_rx, ns_pending_migrate_tx_later);
-
 		int ns_pending_migrate_tx_total = ns_pending_migrate_tx + ns_pending_migrate_tx_later;
 
-		cf_atomic_int_set(&ns->migrate_tx_partitions_scheduled, ns_pending_migrate_tx_total);
+		cf_info(AS_PARTITION, "{%s} re-balanced, expected migrations - (%d tx, %d rx)",
+				ns->name, ns_pending_migrate_tx_total, ns_pending_migrate_rx);
+
+		cf_atomic_int_set(&ns->migrate_tx_partitions_initial, ns_pending_migrate_tx_total);
 		cf_atomic_int_set(&ns->migrate_tx_partitions_remaining, ns_pending_migrate_tx_total);
 
-		cf_atomic_int_set(&ns->migrate_rx_partitions_scheduled, ns_pending_migrate_rx);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_initial, ns_pending_migrate_rx);
 		cf_atomic_int_set(&ns->migrate_rx_partitions_remaining, ns_pending_migrate_rx);
 
 		/* Run all the queued migrations: this happens after the release of
@@ -3685,10 +3694,12 @@ as_partition_balance()
 		partition_migrate_record pmr;
 		while (0 == cf_queue_pop(mq, &pmr, 0)) {
 			cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
+
 			if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
-								pmr.mig_type, false, orig_cluster_key, pmr.cb,
-								pmr.cb_data))
+					pmr.mig_type, false, orig_cluster_key, pmr.cb,
+					pmr.cb_data)) {
 				cf_crash(AS_PARTITION, "couldn't start migrate");
+			}
 		}
 
 		cf_queue_destroy(mq);

@@ -103,10 +103,10 @@ as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_
 
 // migrate a tree to a node
 // and find out when it's done
-int as_migrate(cf_node *dst, uint dst_sz,
-			as_namespace *ns, as_partition_id partition, as_migrate_type mig_type,
-			bool is_migrate_state_done, uint64_t orig_cluster_key,
-			as_migrate_callback cb, void *udata);
+int as_migrate(cf_node *dst, uint dst_sz, as_namespace *ns,
+		as_partition_id partition, as_migrate_type mig_type,
+		bool is_migrate_state_done, uint64_t orig_cluster_key,
+		as_migrate_callback cb, void *udata);
 
 // 0 if successfully found a migrate to cancel
 // -1 if failed for unknown reasons
