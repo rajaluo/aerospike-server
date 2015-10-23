@@ -32,7 +32,6 @@
 // Destructor, etc.
 void integer_destruct(as_particle *p);
 uint32_t integer_size(const as_particle *p);
-// Note - no 'ptr' function - it's irrelevant.
 
 // Handle "wire" format.
 int32_t integer_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
@@ -48,8 +47,6 @@ uint32_t integer_to_wire(const as_particle *p, uint8_t *wire);
 // Handle in-memory format.
 uint32_t integer_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
 void integer_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
-uint32_t integer_mem_size(const as_particle *p);
-uint32_t integer_to_mem(const as_particle *p, uint8_t *value);
 
 // Handle as_val translation.
 as_val *integer_to_asval(const as_particle *p);

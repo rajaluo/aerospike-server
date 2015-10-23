@@ -49,7 +49,6 @@
 const as_particle_vtable blob_vtable = {
 		blob_destruct,
 		blob_size,
-		blob_ptr,
 
 		blob_concat_size_from_wire,
 		blob_append_from_wire,
@@ -63,8 +62,6 @@ const as_particle_vtable blob_vtable = {
 
 		blob_size_from_mem,
 		blob_from_mem,
-		blob_mem_size,
-		blob_to_mem,
 
 		blob_to_asval,
 
@@ -111,16 +108,6 @@ uint32_t
 blob_size(const as_particle *p)
 {
 	return (uint32_t)(sizeof(blob_mem) + ((blob_mem *)p)->sz);
-}
-
-uint32_t
-blob_ptr(as_particle *p, uint8_t **p_value)
-{
-	blob_mem *p_blob_mem = (blob_mem *)p;
-
-	*p_value = p_blob_mem->data;
-
-	return p_blob_mem->sz;
 }
 
 //------------------------------------------------
@@ -245,24 +232,6 @@ blob_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_si
 	p_blob_mem->type = type;
 	p_blob_mem->sz = value_size;
 	memcpy(p_blob_mem->data, mem_value, p_blob_mem->sz);
-}
-
-uint32_t
-blob_mem_size(const as_particle *p)
-{
-	blob_mem *p_blob_mem = (blob_mem *)p;
-
-	return p_blob_mem->sz;
-}
-
-uint32_t
-blob_to_mem(const as_particle *p, uint8_t *value)
-{
-	blob_mem *p_blob_mem = (blob_mem *)p;
-
-	memcpy(value, p_blob_mem->data, p_blob_mem->sz);
-
-	return p_blob_mem->sz;
 }
 
 //------------------------------------------------

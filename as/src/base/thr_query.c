@@ -1519,8 +1519,7 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 				break;
 			}
 
-			int64_t   i = 0;
-			as_bin_particle_to_mem(b, (uint8_t *) &i);
+			int64_t i = as_bin_particle_integer_value(b);
 			if (skey->key.int_key != i) {
 				cf_debug(AS_QUERY, "query_record_matches: sindex key does "
 						"not matches bin value in record. bin value %ld skey value %ld", i, skey->key.int_key);
@@ -1541,12 +1540,10 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 				break;
 			}
 
-			uint32_t psz = as_bin_particle_mem_size(b);
-			char buf[psz + 1];
-			as_bin_particle_to_mem(b, (uint8_t *) buf);
-			buf[psz]     = '\0';
+			char * buf;
+			uint32_t psz = as_bin_particle_string_ptr(b, &buf);
 			cf_digest bin_digest;
-			cf_digest_compute( buf, psz, &bin_digest);
+			cf_digest_compute(buf, psz, &bin_digest);
 			if (memcmp(&skey->key.str_key, &bin_digest, AS_DIGEST_KEY_SZ)) {
 				cf_debug(AS_QUERY, "query_record_matches: sindex key does not matches bin value in record."
 				" skey %"PRIu64" value in bin %"PRIu64"", skey->key.str_key, bin_digest);

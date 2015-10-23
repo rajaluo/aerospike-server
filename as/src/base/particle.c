@@ -206,12 +206,6 @@ as_bin_particle_size(as_bin *b)
 	return particle_vtable[as_bin_get_particle_type(b)]->size_fn(b->particle);
 }
 
-uint32_t
-as_bin_particle_ptr(as_bin *b, uint8_t **p_value)
-{
-	return particle_vtable[as_bin_get_particle_type(b)]->ptr_fn(b->particle, p_value);
-}
-
 //------------------------------------------------
 // Handle "wire" format.
 //
@@ -866,22 +860,6 @@ as_bin_particle_stack_from_mem(as_bin *b, uint8_t* stack, as_particle_type type,
 	as_bin_state_set_from_type(b, type);
 
 	return mem_size;
-}
-
-uint32_t
-as_bin_particle_mem_size(as_bin *b)
-{
-	uint8_t type = as_bin_get_particle_type(b);
-
-	return particle_vtable[type]->mem_size_fn(b->particle);
-}
-
-uint32_t
-as_bin_particle_to_mem(const as_bin *b, uint8_t *value)
-{
-	uint8_t type = as_bin_get_particle_type(b);
-
-	return particle_vtable[type]->to_mem_fn(b->particle, value);
 }
 
 //------------------------------------------------

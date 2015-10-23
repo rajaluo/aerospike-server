@@ -46,7 +46,6 @@
 // Destructor, etc.
 void map_destruct(as_particle *p);
 uint32_t map_size(const as_particle *p);
-uint32_t map_ptr(as_particle *p, uint8_t **p_value);
 
 // Handle "wire" format.
 int32_t map_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
@@ -62,8 +61,6 @@ uint32_t map_to_wire(const as_particle *p, uint8_t *wire);
 // Handle in-memory format.
 uint32_t map_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
 void map_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
-uint32_t map_mem_size(const as_particle *p);
-uint32_t map_to_mem(const as_particle *p, uint8_t *value);
 
 // Handle as_val translation.
 as_val *map_to_asval(const as_particle *p);
@@ -84,7 +81,6 @@ uint32_t map_to_flat(const as_particle *p, uint8_t *flat);
 const as_particle_vtable map_vtable = {
 		blob_destruct,
 		blob_size,
-		blob_ptr,
 
 		map_concat_size_from_wire,
 		map_append_from_wire,
@@ -98,8 +94,6 @@ const as_particle_vtable map_vtable = {
 
 		blob_size_from_mem,
 		blob_from_mem,
-		blob_mem_size,
-		blob_to_mem,
 
 		map_to_asval,
 
@@ -145,13 +139,6 @@ map_destruct(as_particle *p)
 
 uint32_t
 map_size(const as_particle *p)
-{
-	// TODO
-	return 0;
-}
-
-uint32_t
-map_ptr(as_particle *p, uint8_t **p_value)
 {
 	// TODO
 	return 0;
@@ -239,20 +226,6 @@ void
 map_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp)
 {
 	// TODO
-}
-
-uint32_t
-map_mem_size(const as_particle *p)
-{
-	// TODO
-	return 0;
-}
-
-uint32_t
-map_to_mem(const as_particle *p, uint8_t *value)
-{
-	// TODO
-	return 0;
 }
 
 //------------------------------------------------

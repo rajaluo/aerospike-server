@@ -232,7 +232,6 @@ extern as_particle_type as_particle_type_convert_to_hidden(as_particle_type type
 
 extern void as_bin_particle_destroy(as_bin *b, bool free_particle);
 extern uint32_t as_bin_particle_size(as_bin *b);
-extern uint32_t as_bin_particle_ptr(as_bin *b, uint8_t **p_value);
 
 // wire:
 extern int32_t as_bin_particle_size_modify_from_client(as_bin *b, const as_msg_op *op); // TODO - will we ever need this?
@@ -262,8 +261,6 @@ extern uint32_t as_ldt_particle_to_client(const as_val *val, as_msg_op *op);
 // mem: TODO - replace with as_val family.
 extern int as_bin_particle_replace_from_mem(as_bin *b, as_particle_type type, const uint8_t *value, uint32_t value_size);
 extern uint32_t as_bin_particle_stack_from_mem(as_bin *b, uint8_t* stack, as_particle_type type, const uint8_t *value, uint32_t value_size);
-extern uint32_t as_bin_particle_mem_size(as_bin *b);
-extern uint32_t as_bin_particle_to_mem(const as_bin *b, uint8_t *value);
 
 // as_val:
 extern as_val *as_bin_particle_to_asval(const as_bin *b);
@@ -273,6 +270,22 @@ extern int as_bin_particle_cast_from_flat(as_bin *b, uint8_t *flat, uint32_t fla
 extern int as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, uint32_t flat_size);
 extern uint32_t as_bin_particle_flat_size(as_bin *b);
 extern uint32_t as_bin_particle_to_flat(const as_bin *b, uint8_t *flat);
+
+// odd as_bin particle functions for specific particle types
+
+// integer:
+extern int64_t as_bin_particle_integer_value(const as_bin *b);
+
+// string:
+extern uint32_t as_bin_particle_string_ptr(const as_bin *b, char **p_value);
+
+// geojson:
+typedef void * geo_region_t;
+#define MAX_REGION_CELLS    32
+#define MAX_REGION_LEVELS   30
+extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
+extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
+extern void as_val_geojson_to_client(const as_val *v, uint8_t * buf, uint32_t *psize); // TODO - replace with as_val family
 
 
 /* as_bin
@@ -1223,11 +1236,3 @@ uint32_t as_mem_check();
 extern void as_paxos_set_cluster_key(uint64_t cluster_key);
 // Get the cluster key
 extern uint64_t as_paxos_get_cluster_key();
-
-// GeoJSON specific stuff
-typedef void *	geo_region_t;
-extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
-extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
-extern void as_val_geojson_to_client(const as_val *v, uint8_t * buf, uint32_t *psize);
-#define MAX_REGION_CELLS		   32
-#define MAX_REGION_LEVELS		   30
