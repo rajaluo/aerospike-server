@@ -66,7 +66,6 @@ as_val *geojson_to_asval(const as_particle *p);
 const as_particle_vtable geojson_vtable = {
 		blob_destruct,
 		blob_size,
-		blob_ptr,
 
 		geojson_concat_size_from_wire,
 		geojson_append_from_wire,
@@ -80,8 +79,6 @@ const as_particle_vtable geojson_vtable = {
 
 		blob_size_from_mem,
 		blob_from_mem,
-		blob_mem_size,
-		blob_to_mem,
 
 		geojson_to_asval,
 

@@ -59,7 +59,6 @@ as_val *float_to_asval(const as_particle *p);
 const as_particle_vtable float_vtable = {
 		integer_destruct,
 		integer_size,
-		NULL,
 
 		integer_concat_size_from_wire,
 		integer_append_from_wire,
@@ -73,8 +72,6 @@ const as_particle_vtable float_vtable = {
 
 		integer_size_from_mem,
 		integer_from_mem,
-		integer_mem_size,
-		integer_to_mem,
 
 		float_to_asval,
 

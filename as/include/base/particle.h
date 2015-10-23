@@ -33,7 +33,6 @@
 // Destructor, etc.
 typedef void (*as_particle_destructor_fn) (as_particle *p);
 typedef uint32_t (*as_particle_size_fn) (const as_particle *p);
-typedef uint32_t (*as_particle_ptr_fn) (as_particle *p, uint8_t **p_value);
 
 // Handle "wire" format.
 typedef int32_t (*as_particle_concat_size_from_wire_fn) (as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
@@ -49,8 +48,6 @@ typedef uint32_t (*as_particle_to_wire_fn) (const as_particle *p, uint8_t *wire)
 // Handle in-memory format.
 typedef uint32_t (*as_particle_size_from_mem_fn) (as_particle_type type, const uint8_t *value, uint32_t value_size);
 typedef void (*as_particle_from_mem_fn) (as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
-typedef uint32_t (*as_particle_mem_size_fn) (const as_particle *p);
-typedef uint32_t (*as_particle_to_mem_fn) (const as_particle *p, uint8_t *value);
 
 // Handle as_val translation.
 typedef as_val *(*as_particle_to_asval_fn) (const as_particle *p);
@@ -69,7 +66,6 @@ typedef uint32_t (*as_particle_to_flat_fn) (const as_particle *p, uint8_t *flat)
 typedef struct as_particle_vtable_s {
 	as_particle_destructor_fn				destructor_fn;
 	as_particle_size_fn						size_fn;
-	as_particle_ptr_fn						ptr_fn;
 
 	as_particle_concat_size_from_wire_fn	concat_size_from_wire_fn;
 	as_particle_append_from_wire_fn			append_from_wire_fn;
@@ -83,8 +79,6 @@ typedef struct as_particle_vtable_s {
 
 	as_particle_size_from_mem_fn			size_from_mem_fn;
 	as_particle_from_mem_fn					from_mem_fn;
-	as_particle_mem_size_fn					mem_size_fn;
-	as_particle_to_mem_fn					to_mem_fn;
 
 	as_particle_to_asval_fn					to_asval_fn;
 

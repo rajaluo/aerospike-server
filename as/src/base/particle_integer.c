@@ -48,7 +48,6 @@
 const as_particle_vtable integer_vtable = {
 		integer_destruct,
 		integer_size,
-		NULL,
 
 		integer_concat_size_from_wire,
 		integer_append_from_wire,
@@ -62,8 +61,6 @@ const as_particle_vtable integer_vtable = {
 
 		integer_size_from_mem,
 		integer_from_mem,
-		integer_mem_size,
-		integer_to_mem,
 
 		integer_to_asval,
 
@@ -279,20 +276,6 @@ integer_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value
 	*pp = (as_particle *)i;
 }
 
-uint32_t
-integer_mem_size(const as_particle *p)
-{
-	return sizeof(uint64_t);
-}
-
-uint32_t
-integer_to_mem(const as_particle *p, uint8_t *value)
-{
-	*(uint64_t *)value = (uint64_t)p;
-
-	return sizeof(uint64_t);
-}
-
 //------------------------------------------------
 // Handle as_val translation.
 //
@@ -370,4 +353,16 @@ integer_to_flat(const as_particle *p, uint8_t *flat)
 	p_int_flat->i = (uint64_t)p;
 
 	return integer_flat_size(p);
+}
+
+
+//==========================================================
+// as_bin particle functions specific to INTEGER.
+//
+
+int64_t
+as_bin_particle_integer_value(const as_bin *b)
+{
+	// Caller must ensure this is called only for INTEGER particles.
+	return (int64_t)b->particle;
 }

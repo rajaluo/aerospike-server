@@ -52,7 +52,6 @@ as_val *string_to_asval(const as_particle *p);
 const as_particle_vtable string_vtable = {
 		blob_destruct,
 		blob_size,
-		blob_ptr,
 
 		blob_concat_size_from_wire,
 		blob_append_from_wire,
@@ -66,8 +65,6 @@ const as_particle_vtable string_vtable = {
 
 		blob_size_from_mem,
 		blob_from_mem,
-		blob_mem_size,
-		blob_to_mem,
 
 		string_to_asval,
 
@@ -118,4 +115,20 @@ string_to_asval(const as_particle *p)
 	value[p_string_mem->sz] = 0;
 
 	return (as_val *)as_string_new_wlen((char *)value, p_string_mem->sz, true);
+}
+
+
+//==========================================================
+// as_bin particle functions specific to STRING.
+//
+
+uint32_t
+as_bin_particle_string_ptr(const as_bin *b, char **p_value)
+{
+	// Caller must ensure this is called only for STRING particles.
+	string_mem *p_string_mem = (string_mem *)b->particle;
+
+	*p_value = (char *)p_string_mem->data;
+
+	return p_string_mem->sz;
 }
