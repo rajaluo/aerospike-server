@@ -550,6 +550,7 @@ create_cname(char *bin_path, int bin_type, int index_type)
 	if (0 > snprintf(type_str, sizeof(type_str), "%d_%d", bin_type, index_type)) {
 		return NULL;
 	}
+	// TODO : CHECK SIZE
 	return str_concat(bin_path, '_', type_str);
 }
 
@@ -647,7 +648,7 @@ ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx
 		cf_free(ic);
 	}
 	if (pimd->imatch == -1) {
-		cf_warning(AS_SINDEX, "Index %s not found for %dth pimd", imd->iname, idx);
+		cf_debug(AS_SINDEX, "Index %s not found for %dth pimd", imd->iname, idx);
 		goto END;
 	}
 

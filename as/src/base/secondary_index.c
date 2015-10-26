@@ -565,22 +565,23 @@ as_sindex__process_ret(as_sindex *si, int ret, as_sindex_op op,
 
 // Bin id should be around 
 // if not create it
+// TODO is it not needed
 int
 as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 {
-	char bname[AS_ID_BIN_SZ];
-	strncpy(bname, imd->bname, AS_ID_BIN_SZ);
-	if (bname[AS_ID_BIN_SZ - 1] != 0) {
-		cf_warning(AS_SINDEX, "bin name %s is too big.");
-		return AS_SINDEX_ERR;
-	}
-	else if(!as_bin_name_within_quota(ns, bname)) {
-		cf_warning(AS_SINDEX, "Bin not added. Quota is full", bname);
+	int len  = strlen(imd->bname);
+	if (len >= AS_ID_BIN_SZ) {
+		cf_warning(AS_SINDEX, "bin name %s of size %d too big. Max size allowed is %d", 
+							imd->bname, len, AS_ID_BIN_SZ-1);
 		return AS_SINDEX_ERR;
 	}
 
-	imd->binid = as_bin_get_or_assign_id(ns, bname);
-	
+	if(!as_bin_name_within_quota(ns, imd->bname)) {
+		cf_warning(AS_SINDEX, "Bin %s not added. Quota is full", imd->bname);
+		return AS_SINDEX_ERR;
+	}
+
+	imd->binid = as_bin_get_or_assign_id(ns, imd->bname);
 	cf_debug(AS_SINDEX, " Assigned %d for %s", imd->binid, imd->bname);
 	
 	return AS_SINDEX_OK;
@@ -905,8 +906,7 @@ as_sindex_arr_lookup_by_set_binid_lockfree(as_namespace * ns, const char *set, i
 
 		AS_SINDEX_RESERVE(si);
 
-		si_arr[sindex_count] = si;
-		sindex_count++;
+		si_arr[sindex_count++] = si;
 		ele = ele->next;
 	}
 	return sindex_count;
@@ -1039,6 +1039,7 @@ bool
 as_sindex_exists_by_defn(as_namespace* ns, as_sindex_metadata* imd)
 {
 	char *iname    = imd->iname;
+	// This will reserve the si
 	as_sindex * si = as_sindex_lookup_by_iname(ns, iname, AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
 	if(!si) {
 		return false;
@@ -1661,6 +1662,7 @@ as_sindex__create_pmeta(as_sindex *si, int simatch, int nptr)
  *
  * Synchronization:
  * 		This function does not explicitly acquire any lock.
+ * TODO : Check if exits_by_defn can be used instead of this
  */
 int
 as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd)
@@ -1733,7 +1735,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		return AS_SINDEX_ERR_PARAM;
 	}
 
-	char si_prop[AS_SINDEX_PROP_KEY_SIZE + 1];
+	char si_prop[AS_SINDEX_PROP_KEY_SIZE];
 	int si_prop_len = sizeof(si_prop);
 	memset(si_prop, 0, si_prop_len);
 	if (!imd->set) {
@@ -2427,9 +2429,10 @@ as_sindex *
 as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange)
 {
 	cf_debug(AS_SINDEX, "as_sindex_from_range");
-	// TODO : Track sindex behavior for single bin
-	if (ns->single_bin) return NULL;
-	
+	if (ns->single_bin) {
+		cf_warning(AS_SINDEX, "Secondary index query not allowed on single bin namespace %s", ns->name);
+		return NULL;
+	}
 	as_sindex *si = as_sindex_lookup_by_defns(ns, set, srange->start.id,  
 						as_sindex_sktype_from_pktype(srange->start.type), srange->itype, srange->bin_path, 
 						AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
@@ -2437,11 +2440,11 @@ as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange)
 		// Do the type check
 		as_sindex_metadata *imd = si->imd;
 		if ((imd->binid == srange->start.id) && (srange->start.type != as_sindex_pktype(imd))) {
-				cf_warning(AS_SINDEX, "Query and Index Bin Type Mismatch: "
-						"[binid %d : Index Bin type %d : Query Bin Type %d]",
-						imd->binid, as_sindex_pktype(imd), srange->start.type );
-				AS_SINDEX_RELEASE(si);
-				return NULL;
+			cf_warning(AS_SINDEX, "Query and Index Bin Type Mismatch: "
+					"[binid %d : Index Bin type %d : Query Bin Type %d]",
+					imd->binid, as_sindex_pktype(imd), srange->start.type );
+			AS_SINDEX_RELEASE(si);
+			return NULL;
 		}
 	}
 	return si;
@@ -4624,11 +4627,10 @@ as_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 					goto ERROR;
 				}
 				ns     = as_namespace_get_byname(imd.ns_name);
-				// TODO : This has already been checked at info level
 				retval = as_sindex_create_check_params(ns, &imd);
-				// TODO : Change to warning
+
 				if(retval != AS_SINDEX_OK){
-					cf_info(AS_SINDEX, "Callback from paxos master for validation failed with error code %d", retval);
+					cf_warning(AS_SINDEX, "Callback from paxos master for validation failed with error code %d", retval);
 					goto ERROR;
 				}
 				break;
@@ -4761,7 +4763,6 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 					// Fail quietly for duplicate sindex requests
 					continue;
 				}
-				// TODO : What is the use of calling create_check_params after exists_by_defn_check
 				// Pessimistic --Checking again. This check was already done by the paxos master.
 				int retval = as_sindex_create_check_params(ns, &imd);
 				if (retval != AS_SINDEX_OK) {
@@ -4771,10 +4772,8 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 						// 2. SMD thread is single threaded ... not sure how can above definition
 						//    check fail but params check pass. But just in case it does bail out
 						//    destroy and recreate (Accept the final version). think !!!!
-						// TODO : warning or info
-						cf_detail(AS_SINDEX, "Index creation failed. Error %d Dropping the index due to cluster state change", retval);
-						imd.post_op = 1;
-						// TODO : why destroy?
+						cf_warning(AS_SINDEX, "Index creation failed. Error %d Dropping the index due to cluster state change", retval);
+						imd.post_op = 1; // This will lead to sindex recreation
 						as_sindex_destroy(ns, &imd);
 				}
 				else {

@@ -319,9 +319,6 @@ static int newIndex(char *iname, int tmatch, icol_t *ic, uchar cnstr, uchar dtyp
 		// TODO OPTIMIZATION : Can copy the whole block in one go
 		for (int i = 0; i < Num_indx; i++) {
 			memcpy(&indxs[i], &Index[i], sizeof(r_ind_t)); // copy index metadata
-			if (Index[i].name) {
-				cf_free(Index[i].name);
-			}
 		}
 		cf_free(Index);
 		Index = indxs;
@@ -353,6 +350,7 @@ static int newIndex(char *iname, int tmatch, icol_t *ic, uchar cnstr, uchar dtyp
 	// dtype is always there
 	ri->dtype = (0 > ic->cmatch || dtype) ? dtype : rt->col[ic->cmatch].type;
 	ri->simatch = -1;
+	// Is it needed ?
 	ri->nprts = nprts; // AEROSPIKE Variables
 	if (!rt->ilist) {
 		if (!(rt->ilist = cf_malloc(sizeof(cf_ll)))) {
@@ -425,9 +423,6 @@ static int newTable(cf_ll *ctypes, cf_ll *cnames, int ccount, char *tname)
 		bzero(tbls, sizeof(r_tbl_t) * Tbl_HW);
 		for (int i = 0; i < Num_tbls; i++) {
 			memcpy(&tbls[i], &Tbl[i], sizeof(r_tbl_t)); // copy table metadata
-			if (Tbl[i].name) {
-				cf_free(Tbl[i].name);
-			}
 		}
 		cf_free(Tbl);
 		Tbl = tbls;
@@ -559,51 +554,58 @@ int ai_create_table(char *tname)
 int ai_create_index(char *iname, char *tname, char *cname, int col_type, int num_partitions)
 {
 	// TODO OPTIMIZATION : this is redundant. tmatch should be passed
+	int rv = -1;
+	icol_t *ic = NULL;
 	int tmatch = find_table(tname);
 	if (-1 == tmatch) {
 		// Table does not exist.
-		return -1;
+		goto END;
 	}
 	r_tbl_t *rt = &Tbl[tmatch];
 
-	icol_t *ic = find_column(tmatch, cname);
+	ic = find_column(tmatch, cname);
 	if (!ic) {
 		// Column does not exist.
-		return -1;
+		goto END;
+	}
+	if (0 > ic->cmatch) {
+		cf_crash(AS_SINDEX, "ic->cmatch (%d) is less than 0", ic->cmatch);
 	}
 
 	if (-1 != match_index_name(iname)) {
 		// Index already exists.
-		return -1;
+		goto END;
 	}
 
 	if ((MIN_PARTITIONS_PER_INDEX > num_partitions) || (MAX_PARTITIONS_PER_INDEX < num_partitions)) {
 		// Unacceptible number of partitions.
 		cf_warning(AS_SINDEX, "num_partition in imd is invalid %d", num_partitions);
-		return -1;
+		goto END;
 	}
 
 	// Actually create the index.
 	uchar cnstr = CONSTRAINT_NONE;
-	int rv = newIndex(iname, tmatch, ic, cnstr, col_type, num_partitions);
+	// Create new index for 0th pimd
+	rv = newIndex(iname, tmatch, ic, cnstr, col_type, num_partitions);
+	if (0 > rv) {
+		cf_warning(AS_SINDEX, "newIndex failed with error %d", rv);
+		goto END;
+	}
 
-	if (num_partitions > MIN_PARTITIONS_PER_INDEX) {
-		if (0 > ic->cmatch) {
-			cf_crash(AS_SINDEX, "ic->cmatch (%d) is less than 0", ic->cmatch);
-		}
-		int dtype = rt->col[ic->cmatch].type;
-		ic->cmatch = -1;
-		for (int i = 1; i < num_partitions; i++) {
-			char piname[INDD_HASH_KEY_SIZE];
-			snprintf(piname, sizeof(piname), "%s.%d", iname, i);
-			if (0 > newIndex(piname, tmatch, ic, cnstr, dtype, -1)) {
-				if (ic) {
-					cf_free(ic);
-				}
-				return -1;
-			}
+	// Rest of the pimd [1..31] should have icmatch as negative
+	// This makes sure there is only one coloumn per index in Tbl
+	// Though we can remove Tbl and col as a whole
+	ic->cmatch = -1;
+	for (int i = 1; i < num_partitions; i++) {
+		char piname[INDD_HASH_KEY_SIZE];
+		snprintf(piname, sizeof(piname), "%s.%d", iname, i);
+		if (0 > newIndex(piname, tmatch, ic, cnstr, col_type, -1)) {
+			rv = -1;
+			cf_warning(AS_SINDEX, "newIndex failed with error %d", rv);
+			goto END;
 		}
 	}
+END:
 	if (ic) {
 		cf_free(ic);
 	}
@@ -642,9 +644,6 @@ int ai_add_column(char *tname, char *cname, int col_type)
 	// TODO OPTIMIZATION: We can copy the whole block in one go. 
 	for (int i = 0; i < rt->col_count; i++) {
 		memcpy(&tcol[i], &rt->col[i], sizeof(r_col_t)); // copy column metadata
-		if (rt->col[i].name) {
-			cf_free(rt->col[i].name);
-		}
 	}
 
 	r_col_t *new_col = &tcol[rt->col_count];
@@ -786,61 +785,4 @@ int ai_drop_index(char *iname)
 	}
 
 	return 0;
-}
-
-/*
- *  Shut Down the Aerospike Index Module.
- *  This is not safe in multi threaded environment
- */
-void ai_shutdown(void)
-{
-	if (!g_ai_initialized) {
-		return;
-	}
-
-	if (Tbl) {
-		for (int i = 0; i < Num_tbls; i++) {
-			if (Tbl[i].name) {
-				cf_free(Tbl[i].name);
-			}
-		}
-		cf_free(Tbl);
-		Tbl = NULL;
-	}
-	Num_tbls = Tbl_HW = 0;
-
-	if (TblD) {
-		shash_destroy(TblD);
-		TblD = NULL;
-	}
-
-	if (DropT) {
-		cf_ll_reduce(DropT, true, ll_ai_reduce_fn, NULL);
-		cf_free(DropT);
-		DropT = NULL;
-	}
-
-	if (Index) {
-		for (int i = 0; i < Num_indx; i++) {
-			if (Index[i].name) {
-				cf_free(Index[i].name);
-			}
-		}
-		cf_free(Index);
-		Index = NULL;
-	}
-	Num_indx = Ind_HW = 0;
-
-	if (IndD) {
-		shash_destroy(IndD);
-		IndD = NULL;
-	}
-
-	if (DropI) {
-		cf_ll_reduce(DropI, true, ll_ai_reduce_fn, NULL);
-		cf_free(DropI);
-		DropI = NULL;
-	}
-
-	g_ai_initialized = false;
 }
