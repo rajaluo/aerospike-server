@@ -3608,7 +3608,7 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 	}
 
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
-	as_sindex * si_arr[ns->sindex_cnt];
+	as_sindex * si_arr[2 * ns->sindex_cnt];
 	int si_arr_index = 0;
 	int si_cnt = 0;
 
@@ -3692,6 +3692,7 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 
 	SINDEX_GUNLOCK();
 
+	bool ret_val = false;
 	if (sbins_populated) {
 		uint64_t start_ns = g_config.microbenchmarks ? cf_getns() : 0;
 
@@ -3701,13 +3702,10 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 		if (start_ns != 0) {
 			histogram_insert_data_point(g_config.write_sindex_hist, start_ns);
 		}
-
-		as_sindex_release_arr(si_arr, si_arr_index);
-		return true;
+		ret_val =  true;
 	}
-
 	as_sindex_release_arr(si_arr, si_arr_index);
-	return false;
+	return ret_val;
 }
 
 void

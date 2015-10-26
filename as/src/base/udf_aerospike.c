@@ -477,17 +477,16 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 
 	}
 
-	// If something fail bailout
-	if (ret) {
-		SINDEX_GUNLOCK();
-		if (sbins_populated > 0) {
-			as_sindex_sbin_freeall(sbins, sbins_populated);
-		}
-		return ret;
-	}
-	
 	// Update sindex if required
 	if (has_sindex) {
+		if (ret) {
+			SINDEX_GUNLOCK();
+			if (sbins_populated > 0) {
+				as_sindex_sbin_freeall(sbins, sbins_populated);
+			}
+			return ret;
+		}
+
 		si_cnt += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
 		si_arr_index += si_cnt;
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);

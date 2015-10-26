@@ -6256,6 +6256,7 @@ clear_microbenchmark_histograms()
  *  Returns
  *  	AS_SINDEX_OK if it successfully fills up imd
  *      AS_SINDEX_ERR_PARAM otherwise
+ *     TODO REVIEW  : send cmd as argument
  */
 int
 as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
@@ -6333,7 +6334,11 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	else if (strcmp(cluster_op, "false") == 0) {
 		*is_smd_op = false;
 	}
+	
+	// Delete only need parsing till here
 	if (is_create == false) {
+		imd->ns_name = cf_strdup(ns->name);
+		imd->iname   = cf_strdup(indexname_str);
 		return 0;
 	}
 
@@ -6373,7 +6378,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		}
 	}
 
-	// Indexdata = binpath,datatype
+	// Indexdata = binpath,keytype
 	char indexdata_str[AS_SINDEXDATA_STR_SIZE];
 	int  indexdata_len = sizeof(indexdata_str);
 	if (as_info_parameter_get(params, STR_INDEXDATA, indexdata_str, &indexdata_len)) {
@@ -6439,9 +6444,11 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	}
 	
 	cf_vector_destroy(str_v);
-	
-	imd->ns_name = cf_strdup(ns->name);
-	imd->iname   = cf_strdup(indexname_str);
+
+	if (is_create) {
+		imd->ns_name = cf_strdup(ns->name);
+		imd->iname   = cf_strdup(indexname_str);
+	}
 	imd->path_str = cf_strdup(path_str);
 	return AS_SINDEX_OK;
 }

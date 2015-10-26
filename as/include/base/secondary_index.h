@@ -58,7 +58,7 @@
 #define AS_SINDEX_MAX_PATH_LENGTH  256
 #define AS_SINDEX_MAX_DEPTH        10
 #define AS_SINDEX_TYPE_STR_SIZE    20 // LIST / MAPKEYS / MAPVALUES / DEFAULT(NONE)
-#define AS_SINDEXDATA_STR_SIZE     AS_SINDEX_MAX_PATH_LENGTH + 8 // binpath +  datatype (string/numeric)
+#define AS_SINDEXDATA_STR_SIZE     AS_SINDEX_MAX_PATH_LENGTH + 1 + 8 // binpath + separator (,) + keytype (string/numeric)
 #define AS_INDEX_KEYS_ARRAY_QUEUE_HIGHWATER  512
 #define AS_INDEX_KEYS_PER_ARR      51
 // **************************************************************************************************
@@ -258,7 +258,7 @@ typedef struct as_sindex_config_s {
 typedef struct as_sindex_physical_metadata_s {
 	// Static member. Does not need protection by lock
 	int                 tmatch;
-	int                 imatch;  // Aerospike Index Number
+	int                 imatch;  // slot in Index array (Alchemy)
 
 	pthread_rwlock_t    slock;
 	// Need protection by lock
@@ -296,7 +296,7 @@ typedef struct as_sindex_metadata_s {
 	as_sindex_path        path[AS_SINDEX_MAX_DEPTH];
 	int                   path_length;
 	char                * path_str;
-	int                   bimatch;
+	int                   bimatch; // imatch of 0th pimd
 	int                   tmatch;  // Aerospike Index to table(tmatch)
 	int                   nprts;   // Aerospike Index Number of Index partitions	
 } as_sindex_metadata;
@@ -319,7 +319,7 @@ typedef struct as_sindex_s {
 	struct as_sindex_metadata_s *imd;
 	struct as_sindex_metadata_s *new_imd;
 
-	// TODO shift to stat
+	// TODO shift to stats
 	cf_atomic_int                data_memory_used;
 
 	bool                         enable_histogram; // default false;
