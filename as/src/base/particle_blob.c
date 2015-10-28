@@ -60,9 +60,8 @@ const as_particle_vtable blob_vtable = {
 		blob_wire_size,
 		blob_to_wire,
 
-		blob_size_from_mem,
-		blob_from_mem,
-
+		blob_size_from_asval,
+		blob_from_asval,
 		blob_to_asval,
 
 		blob_size_from_flat,
@@ -215,28 +214,26 @@ blob_to_wire(const as_particle *p, uint8_t *wire)
 }
 
 //------------------------------------------------
-// Handle in-memory format.
+// Handle as_val translation.
 //
 
 uint32_t
-blob_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size)
+blob_size_from_asval(const as_val *val)
 {
-	return (uint32_t)sizeof(blob_mem) + value_size;
+	return (uint32_t)sizeof(blob_mem) + as_bytes_size(as_bytes_fromval(val));
 }
 
 void
-blob_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp)
+blob_from_asval(const as_val *val, as_particle **pp)
 {
 	blob_mem *p_blob_mem = (blob_mem *)*pp;
 
-	p_blob_mem->type = type;
-	p_blob_mem->sz = value_size;
-	memcpy(p_blob_mem->data, mem_value, p_blob_mem->sz);
-}
+	as_bytes *bytes = as_bytes_fromval(val);
 
-//------------------------------------------------
-// Handle as_val translation.
-//
+	p_blob_mem->type = AS_PARTICLE_TYPE_BLOB;
+	p_blob_mem->sz = as_bytes_size(bytes);
+	memcpy(p_blob_mem->data, as_bytes_get(bytes), p_blob_mem->sz);
+}
 
 as_val *
 blob_to_asval(const as_particle *p)

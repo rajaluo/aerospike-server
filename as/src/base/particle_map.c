@@ -58,11 +58,9 @@ int map_compare_from_wire(const as_particle *p, as_particle_type wire_type, cons
 uint32_t map_wire_size(const as_particle *p);
 uint32_t map_to_wire(const as_particle *p, uint8_t *wire);
 
-// Handle in-memory format.
-uint32_t map_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
-void map_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
-
 // Handle as_val translation.
+uint32_t map_size_from_asval(const as_val *val);
+void map_from_asval(const as_val *val, as_particle **pp);
 as_val *map_to_asval(const as_particle *p);
 
 // Handle on-device "flat" format.
@@ -92,9 +90,8 @@ const as_particle_vtable map_vtable = {
 		blob_wire_size,
 		blob_to_wire,
 
-		blob_size_from_mem,
-		blob_from_mem,
-
+		map_size_from_asval,
+		map_from_asval,
 		map_to_asval,
 
 		blob_size_from_flat,
@@ -212,25 +209,37 @@ map_to_wire(const as_particle *p, uint8_t *wire)
 }
 
 //------------------------------------------------
-// Handle in-memory format.
+// Handle as_val translation.
 //
 
 uint32_t
-map_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size)
+map_size_from_asval(const as_val *val)
 {
-	// TODO
-	return 0;
+	as_serializer s;
+	as_msgpack_init(&s);
+
+	uint32_t size = as_serializer_serialize_getsize(&s, (as_val *)val);
+
+	as_serializer_destroy(&s);
+
+	return (uint32_t)sizeof(map_mem) + size;
 }
 
 void
-map_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp)
+map_from_asval(const as_val *val, as_particle **pp)
 {
-	// TODO
-}
+	map_mem *p_map_mem = (map_mem *)*pp;
 
-//------------------------------------------------
-// Handle as_val translation.
-//
+	as_serializer s;
+	as_msgpack_init(&s);
+
+	uint32_t size = as_serializer_serialize_presized(&s, val, p_map_mem->data);
+
+	p_map_mem->type = AS_PARTICLE_TYPE_MAP;
+	p_map_mem->sz = size;
+
+	as_serializer_destroy(&s);
+}
 
 as_val *
 map_to_asval(const as_particle *p)
@@ -292,6 +301,23 @@ map_to_flat(const as_particle *p, uint8_t *flat)
 {
 	// TODO
 	return 0;
+}
+
+
+//==========================================================
+// as_bin particle functions specific to MAP.
+//
+
+void
+as_bin_particle_map_set_hidden(as_bin *b)
+{
+	// Caller must ensure this is called only for MAP particles.
+	map_mem *p_map_mem = (map_mem *)b->particle;
+
+	p_map_mem->type = AS_PARTICLE_TYPE_HIDDEN_MAP;
+
+	// Set the bin's iparticle metadata.
+	as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_HIDDEN_MAP);
 }
 
 

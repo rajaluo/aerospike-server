@@ -58,11 +58,9 @@ int list_compare_from_wire(const as_particle *p, as_particle_type wire_type, con
 uint32_t list_wire_size(const as_particle *p);
 uint32_t list_to_wire(const as_particle *p, uint8_t *wire);
 
-// Handle in-memory format.
-uint32_t list_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
-void list_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
-
 // Handle as_val translation.
+uint32_t list_size_from_asval(const as_val *val);
+void list_from_asval(const as_val *val, as_particle **pp);
 as_val *list_to_asval(const as_particle *p);
 
 // Handle on-device "flat" format.
@@ -92,9 +90,8 @@ const as_particle_vtable list_vtable = {
 		blob_wire_size,
 		blob_to_wire,
 
-		blob_size_from_mem,
-		blob_from_mem,
-
+		list_size_from_asval,
+		list_from_asval,
 		list_to_asval,
 
 		blob_size_from_flat,
@@ -212,25 +209,37 @@ list_to_wire(const as_particle *p, uint8_t *wire)
 }
 
 //------------------------------------------------
-// Handle in-memory format.
+// Handle as_val translation.
 //
 
 uint32_t
-list_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size)
+list_size_from_asval(const as_val *val)
 {
-	// TODO
-	return 0;
+	as_serializer s;
+	as_msgpack_init(&s);
+
+	uint32_t size = as_serializer_serialize_getsize(&s, (as_val *)val);
+
+	as_serializer_destroy(&s);
+
+	return (uint32_t)sizeof(list_mem) + size;
 }
 
 void
-list_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp)
+list_from_asval(const as_val *val, as_particle **pp)
 {
-	// TODO
-}
+	list_mem *p_list_mem = (list_mem *)*pp;
 
-//------------------------------------------------
-// Handle as_val translation.
-//
+	as_serializer s;
+	as_msgpack_init(&s);
+
+	uint32_t size = as_serializer_serialize_presized(&s, val, p_list_mem->data);
+
+	p_list_mem->type = AS_PARTICLE_TYPE_LIST;
+	p_list_mem->sz = size;
+
+	as_serializer_destroy(&s);
+}
 
 as_val *
 list_to_asval(const as_particle *p)
@@ -292,6 +301,23 @@ list_to_flat(const as_particle *p, uint8_t *flat)
 {
 	// TODO
 	return 0;
+}
+
+
+//==========================================================
+// as_bin particle functions specific to LIST.
+//
+
+void
+as_bin_particle_list_set_hidden(as_bin *b)
+{
+	// Caller must ensure this is called only for LIST particles.
+	list_mem *p_list_mem = (list_mem *)b->particle;
+
+	p_list_mem->type = AS_PARTICLE_TYPE_HIDDEN_LIST;
+
+	// Set the bin's iparticle metadata.
+	as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_HIDDEN_LIST);
 }
 
 

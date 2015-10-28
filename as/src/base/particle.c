@@ -116,6 +116,38 @@ safe_particle_type(uint8_t type)
 // Particle "class static" functions.
 //
 
+as_particle_type
+as_particle_type_from_asval(const as_val *val)
+{
+	as_val_t vtype = as_val_type(val);
+
+	switch (vtype) {
+	case AS_UNDEF: // if val was null - handle quietly
+	case AS_NIL:
+		return AS_PARTICLE_TYPE_NULL;
+	case AS_BOOLEAN:
+	case AS_INTEGER:
+		return AS_PARTICLE_TYPE_INTEGER;
+	case AS_DOUBLE:
+		return AS_PARTICLE_TYPE_FLOAT;
+	case AS_STRING:
+		return AS_PARTICLE_TYPE_STRING;
+	case AS_BYTES:
+		return AS_PARTICLE_TYPE_BLOB;
+	case AS_GEOJSON:
+		return AS_PARTICLE_TYPE_GEOJSON;
+	case AS_LIST:
+		return AS_PARTICLE_TYPE_LIST;
+	case AS_MAP:
+		return AS_PARTICLE_TYPE_MAP;
+	case AS_REC:
+	case AS_PAIR:
+	default:
+		cf_warning(AS_UDF, "no particle type for as_val_t %d", vtype);
+		return AS_PARTICLE_TYPE_NULL;
+	}
+}
+
 // TODO - will we ever need this?
 int32_t
 as_particle_size_from_client(const as_msg_op *op)
@@ -138,13 +170,21 @@ as_particle_size_from_pickled(uint8_t **p_pickled)
 
 	*p_pickled = (uint8_t *)value + value_size;
 
+	// TODO - safety-check type.
 	return particle_vtable[type]->size_from_wire_fn(value, value_size);
 }
 
 uint32_t
-as_particle_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size)
+as_particle_size_from_asval(const as_val *val)
 {
-	return particle_vtable[type]->size_from_mem_fn(type, value, value_size);
+	as_particle_type type = as_particle_type_from_asval(val);
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just skips unmanageable as_val types.
+		return 0;
+	}
+
+	return particle_vtable[type]->size_from_asval_fn(val);
 }
 
 // TODO - will we ever need this?
@@ -154,19 +194,6 @@ as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size)
 	uint8_t type = *flat;
 
 	return particle_vtable[type]->size_from_flat_fn(flat, flat_size);
-}
-
-as_particle_type
-as_particle_type_convert_to_hidden(as_particle_type type)
-{
-	switch (type) {
-	case AS_PARTICLE_TYPE_MAP:
-		return AS_PARTICLE_TYPE_HIDDEN_MAP;
-	case AS_PARTICLE_TYPE_LIST:
-		return AS_PARTICLE_TYPE_HIDDEN_LIST;
-	default:
-		return type;
-	}
 }
 
 
@@ -802,69 +829,77 @@ as_bin_particle_to_pickled(const as_bin *b, uint8_t *pickled)
 }
 
 //------------------------------------------------
-// Handle in-memory format.
+// Handle as_val translation.
 //
 
-// TODO - re-do to leave original intact on failure.
 int
-as_bin_particle_replace_from_mem(as_bin *b, as_particle_type type, const uint8_t *value, uint32_t value_size)
+as_bin_particle_replace_from_asval(as_bin *b, const as_val *val)
 {
 	uint8_t old_type = as_bin_get_particle_type(b);
-	uint32_t old_mem_size = as_bin_inuse(b) ? particle_vtable[old_type]->size_fn(b->particle) : 0;
+	as_particle_type new_type = as_particle_type_from_asval(val);
 
-	uint32_t new_mem_size = particle_vtable[type]->size_from_mem_fn(type, value, value_size);
-
-	if (new_mem_size != old_mem_size) {
-		if (as_bin_inuse(b)) {
-			// Destroy the old particle.
-			particle_vtable[old_type]->destructor_fn(b->particle);
-		}
-
-		b->particle = NULL;
+	if (new_type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just skips unmanageable as_val types.
+		return 0;
 	}
 
-	if (new_mem_size != 0 && ! b->particle) {
+	uint32_t new_mem_size = particle_vtable[new_type]->size_from_asval_fn(val);
+	// TODO - could this ever fail?
+
+	as_particle *old_particle = b->particle;
+
+	if (new_mem_size != 0) {
 		b->particle = cf_malloc(new_mem_size);
 
 		if (! b->particle) {
-			as_bin_set_empty(b);
-			return -1; // TODO - AS_PROTO error code seems inappropriate?
+			b->particle = old_particle;
+			return -1;
 		}
 	}
 
 	// Load the new particle into the bin.
-	particle_vtable[type]->from_mem_fn(type, value, value_size, &b->particle);
+	particle_vtable[new_type]->from_asval_fn(val, &b->particle);
+	// TODO - could this ever fail?
+
+	if (as_bin_inuse(b)) {
+		// Destroy the old particle.
+		particle_vtable[old_type]->destructor_fn(old_particle);
+	}
 
 	// Set the bin's iparticle metadata.
-	as_bin_state_set_from_type(b, type);
+	as_bin_state_set_from_type(b, new_type);
 
 	return 0;
 }
 
-uint32_t
-as_bin_particle_stack_from_mem(as_bin *b, uint8_t* stack, as_particle_type type, const uint8_t *value, uint32_t value_size)
+void
+as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val)
 {
 	// We assume that if we're using stack particles, the old particle is either
 	// nonexistent or also a stack particle - either way, don't destroy.
 
-	uint32_t mem_size = particle_vtable[type]->size_from_mem_fn(type, value, value_size);
+	as_particle_type type = as_particle_type_from_asval(val);
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just skips unmanageable as_val types.
+		return;
+	}
 
 	// Instead of allocating, we use the stack buffer provided. (Note that
 	// embedded types like integer will overwrite this with the value.)
 	b->particle = (as_particle *)stack;
 
 	// Load the new particle into the bin.
-	particle_vtable[type]->from_mem_fn(type, value, value_size, &b->particle);
+	particle_vtable[type]->from_asval_fn(val, &b->particle);
+	// TODO - could this ever fail?
 
 	// Set the bin's iparticle metadata.
 	as_bin_state_set_from_type(b, type);
 
-	return mem_size;
+	// TODO - we don't bother returning size written, since nothing yet needs
+	// it and it's very expensive for CDTs to do an extra size_from_asval_fn()
+	// call. Perhaps we could have from_asval_fn() return the size if needed?
 }
-
-//------------------------------------------------
-// Handle as_val translation.
-//
 
 as_val *
 as_bin_particle_to_asval(const as_bin *b)

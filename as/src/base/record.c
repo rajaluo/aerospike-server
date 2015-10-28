@@ -672,11 +672,9 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 	// flatten gets called only for migration .. because there is no duplicate
 	// resolution .. there is only winner resolution
 	if (COMPONENT_IS_MIG(c) && as_ldt_record_is_parent(rd->r)) {
-		int pbytes = as_ldt_parent_storage_set_version(rd, c->version, p_stack_particles, __FILE__, __LINE__);
-		if (pbytes < 0) {
-			cf_warning_digest(AS_LDT, &rd->keyd, "LDT_MERGE Failed to write version in rv=%d", pbytes);
-		} else {
-			p_stack_particles += pbytes;			
+		int ldt_rv = as_ldt_parent_storage_set_version(rd, c->version, p_stack_particles, __FILE__, __LINE__);
+		if (ldt_rv < 0) {
+			cf_warning_digest(AS_LDT, &rd->keyd, "LDT_MERGE Failed to write version in rv=%d", ldt_rv);
 		}
 	}
 

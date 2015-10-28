@@ -71,71 +71,6 @@ as_aerospike g_as_aerospike;
 
 extern udf_call *as_query_get_udf_call(void *ptr);
 
-/* Internal Function: Packs up passed in data into as_bin which is
- *                    used to send result after the UDF execution.
- */
-static bool
-make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
-			  const char *key, int  vtype,  void *val, size_t vlen)
-{
-	uint8_t *   v           = NULL;
-	uint8_t     *sp_p = *sp_pp;
-
-	uint32_t tsz = val ? as_particle_size_from_mem((as_particle_type)vtype, (uint8_t *)val, (uint32_t)vlen) : 0;
-
-	if (tsz > sp_sz) {
-		sp_p = cf_malloc(tsz);
-		if (!sp_p) {
-			cf_warning(AS_UDF, "data too much. malloc failed. going down. bin %s not sent back", key);
-			return(-1);
-		}
-	}
-
-	as_bin_init(ns, bin, key/*name*/);
-
-	switch (vtype) {
-		case AS_PARTICLE_TYPE_NULL:
-		{
-			v = NULL;
-			break;
-		}
-		case AS_PARTICLE_TYPE_INTEGER:
-		{
-			if (vlen != 8) {
-				cf_crash(AS_UDF, "unexpected int size %d", vlen);
-			}
-			v = (uint8_t *) val;
-			break;
-		}
-		case AS_PARTICLE_TYPE_FLOAT:
-		{
-			if (vlen != 8) {
-				cf_crash(AS_UDF, "unexpected double size %d", vlen);
-			}
-			v = (uint8_t *) val;
-			break;
-		}
-		case AS_PARTICLE_TYPE_BLOB:
-		case AS_PARTICLE_TYPE_GEOJSON:
-		case AS_PARTICLE_TYPE_STRING:
-		case AS_PARTICLE_TYPE_LIST:
-		case AS_PARTICLE_TYPE_MAP:
-			v = (uint8_t *) val;
-			break;
-		default:
-		{
-			cf_warning(AS_UDF, "unrecognized object type %d ignored", vtype);
-			return -1;
-		}
-	}
-
-	if (v) {
-		as_bin_particle_stack_from_mem(bin, sp_p, vtype, v, vlen);
-	}
-
-	*sp_pp = sp_p;
-	return 0;
-}
 
 /* Internal Function: Workhorse function to send response back to the client
  * 					  after UDF execution.
@@ -151,60 +86,57 @@ make_send_bin(as_namespace *ns, as_bin *bin, uint8_t **sp_pp, uint32_t sp_sz,
  * 					 If it is scan job ...do not cleanup the fd it will
  * 					 be done by the scan thread after scan is finished
  */
-static int
-send_response(udf_call *call, const char *key, int vtype, void *val,
-			  size_t vlen)
+int
+send_response(udf_call *call, const char *bin_name, const as_val *val)
 {
-	as_transaction *    tr          = call->transaction;
-	as_namespace *      ns          = tr->rsv.ns;
-	uint32_t            generation  = tr->generation;
-	uint32_t            sp_sz       = 1024 * 16;
-	uint32_t            void_time   = tr->void_time;
-	uint32_t            written_sz  = 0;
-	bool                keep_fd     = false;
-	as_bin              stack_bin;
-	as_bin            * bin         = &stack_bin;
-
-	// space for the stack particles
-	uint8_t             stack_particle_buf[sp_sz];
-	uint8_t *           sp_p        = stack_particle_buf;
-
 	if (call->udf_type == AS_SCAN_UDF_OP_BACKGROUND) {
-		// If we are doing a background UDF scan, do not send any result back
+		// If we are doing a background UDF scan, do not send any result back.
 		return 0;
-	} else if (call->udf_type == AS_SCAN_UDF_OP_UDF) {
-		// Do not release fd now, scan will do it at the end of all internal
-		// 	udf transactions
-		cf_detail(AS_UDF, "UDF: Internal udf transaction, do not release fd");
-		keep_fd = true;
 	}
 
-	if (0 != make_send_bin(ns, bin, &sp_p, sp_sz, key, vtype, val, vlen)) {
-		return(-1);
+	// Note - this function quietly handles a null val. The response call will
+	// be given a bin with a name but not 'in use', and it does the right thing.
+
+	as_bin stack_bin;
+	as_bin *bin = &stack_bin;
+
+	uint32_t particle_size = as_particle_size_from_asval(val);
+
+	static const size_t MAX_STACK_SIZE = 32 * 1024;
+	uint8_t stack_particle[particle_size > MAX_STACK_SIZE ? 0 : particle_size];
+	uint8_t *particle_buf = stack_particle;
+
+	if (particle_size > MAX_STACK_SIZE) {
+		particle_buf = (uint8_t *)cf_malloc(particle_size);
+
+		if (! particle_buf) {
+			cf_warning(AS_UDF, "failed alloc for particle size %u", particle_size);
+			return -1;
+		}
 	}
 
-	// this is going to release the file descriptor
-	if (keep_fd && tr->proto_fd_h) cf_rc_reserve(tr->proto_fd_h);
+	as_transaction *tr = call->transaction;
+	as_namespace *ns = tr->rsv.ns;
 
-	single_transaction_response(
-		tr, ns, NULL/*ops*/, &bin, 1,
-		generation, void_time, &written_sz, NULL);
+	as_bin_init(ns, bin, bin_name);
+	as_bin_particle_stack_from_asval(bin, particle_buf, val);
 
-	if (sp_p != stack_particle_buf) {
-		cf_free(sp_p);
+	// The response call is going to release the file descriptor - if this is a
+	// scan, we need a reservation to counter that.
+	if (call->udf_type == AS_SCAN_UDF_OP_UDF && tr->proto_fd_h) {
+		cf_rc_reserve(tr->proto_fd_h);
 	}
+
+	uint32_t written_sz;
+
+	single_transaction_response(tr, ns, NULL, &bin, 1, tr->generation, tr->void_time, &written_sz, NULL);
+
+	if (particle_buf != stack_particle) {
+		cf_free(particle_buf);
+	}
+
 	return 0;
 } // end send_response()
-
-/**
- * Send failure notification for CDT (list, map) serialization error.
- */
-static inline int
-send_cdt_failure(udf_call *call, int vtype, void *val, size_t vlen)
-{
-	call->transaction->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
-	return send_response(call, "FAILURE", vtype, val, vlen);
-}
 
 int
 udf_rw_get_ldt_error(void *val, size_t vlen) 
@@ -364,6 +296,26 @@ udf_rw_update_ldt_err_stats(as_namespace *ns, as_result *res)
 	return;
 }
 
+static inline int
+send_failure(udf_call *call, const as_val *val)
+{
+	return send_response(call, "FAILURE", val);
+}
+
+static inline int
+send_failure_str(udf_call *call, const char *err_str, size_t len)
+{
+	if (! err_str) {
+		// Better than sending an as_string with null value.
+		return send_failure(call, NULL);
+	}
+
+	as_string stack_s;
+	as_string_init_wlen(&stack_s, (char *)err_str, len, false);
+
+	return send_failure(call, as_string_toval(&stack_s));
+}
+
 /**
  * Send failure notification of general UDF execution, but check for special
  * LDT errors and return specific Wire Protocol error codes for these cases:
@@ -387,8 +339,10 @@ udf_rw_update_ldt_err_stats(as_namespace *ns, as_result *res)
  * (2)  "0125:LDT-Item Not Found"
  */
 static inline int
-send_udf_failure(udf_call *call, int vtype, void *val, size_t vlen)
+send_udf_failure(udf_call *call, const as_string *s)
 {
+	char *val = as_string_tostring(s);
+	size_t vlen = as_string_len((as_string *)s); // TODO - make as_string_len() take const
 	long error_code = udf_rw_get_ldt_error(val, vlen);
 
 	if (error_code) {
@@ -408,13 +362,14 @@ send_udf_failure(udf_call *call, int vtype, void *val, size_t vlen)
 	cf_debug(AS_UDF, "Non-special LDT or General UDF Error(%s)", (char *) val);
 
 	call->transaction->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
-	return send_response(call, "FAILURE", vtype, val, vlen);
+	return send_failure(call, as_string_toval(s));
 }
 
 static inline int
-send_success(udf_call *call, int vtype, void *val, size_t vlen)
+send_success(udf_call *call, const as_val *val)
 {
-	return send_response(call, "SUCCESS", vtype, val, vlen);
+	// TODO - could check result and switch to send_failure()?
+	return send_response(call, "SUCCESS", val);
 }
 
 /*
@@ -437,103 +392,19 @@ send_result(as_result * res, udf_call * call, void *udata)
 			cf_free(str);
 		}
 
-		if ( v != NULL ) {
-			switch( as_val_type(v) ) {
-				case AS_NIL:
-				{
-					send_success(call, AS_PARTICLE_TYPE_NULL, NULL, 0);
-					break;
-				}
-				case AS_BOOLEAN:
-				{
-					as_boolean * b = as_boolean_fromval(v);
-					int64_t bi = as_boolean_tobool(b) == true ? 1 : 0;
-					send_success(call, AS_PARTICLE_TYPE_INTEGER, &bi, 8);
-					break;
-				}
-				case AS_INTEGER:
-				{
-					as_integer * i = as_integer_fromval(v);
-					int64_t ri = as_integer_toint(i);
-					send_success(call, AS_PARTICLE_TYPE_INTEGER, &ri, 8);
-					break;
-				}
-				case AS_DOUBLE:
-				{
-					as_double * x = as_double_fromval(v);
-					double rx = as_double_get(x);
-					send_success(call, AS_PARTICLE_TYPE_FLOAT, &rx, 8);
-					break;
-				}
-				case AS_STRING:
-				{
-					// this looks bad but it just pulls the pointer
-					// out of the object
-					as_string * s = as_string_fromval(v);
-					char * rs = (char *) as_string_tostring(s);
-					send_success(call, AS_PARTICLE_TYPE_STRING, rs, as_string_len(s));
-					break;
-				}
-				case AS_BYTES:
-				case AS_GEOJSON:
-				{
-					as_bytes * b = as_bytes_fromval(v);
-					uint8_t * rs = as_bytes_get(b);
-					send_success(call, AS_PARTICLE_TYPE_BLOB, rs, as_bytes_size(b));
-					break;
-				}
-				case AS_MAP:
-				case AS_LIST:
-				{
-					as_buffer buf;
-					as_buffer_init(&buf);
+		send_success(call, v);
 
-					as_serializer s;
-					as_msgpack_init(&s);
-
-					int res = as_serializer_serialize(&s, v, &buf);
-
-					if (res != 0) {
-						const char * error = "Complex Data Type Serialization failure";
-						cf_warning(AS_UDF, "%s (%d)", (char *)error, res);
-						as_buffer_destroy(&buf);
-						send_cdt_failure(call, AS_PARTICLE_TYPE_STRING, (char *)error, strlen(error));
-					}
-					else {
-						// Do not use this until after cf_detail_binary() can accept larger buffers.
-						// cf_detail_binary(AS_UDF, buf.data, buf.size, CF_DISPLAY_HEX_COLUMNS, 
-						// "serialized %d bytes: ", buf.size);
-						send_success(call, to_particle_type(as_val_type(v)), buf.data, buf.size);
-						// Not needed stack allocated - unless serialize has internal state
-						// as_serializer_destroy(&s);
-						as_buffer_destroy(&buf);
-					}
-
-					break;
-				}
-				default:
-				{
-					cf_debug(AS_UDF, "SUCCESS: VAL TYPE UNDEFINED %d\n", as_val_type(v));
-					send_success(call, AS_PARTICLE_TYPE_STRING, NULL, 0);
-					break;
-				}
-			}
-		} else {
-			send_success(call, AS_PARTICLE_TYPE_NULL, NULL, 0);
-		}
 	} else { // Else -- NOT success
-		if (as_val_type(v) == AS_STRING) {
-			as_string * s   = as_string_fromval(v);
-			char *      rs  = (char *) as_string_tostring(s);
+		cf_debug(AS_UDF, "FAILURE when calling %s %s", call->filename, call->function);
 
-			cf_debug(AS_UDF, "FAILURE when calling %s %s %s", call->filename, call->function, rs);
-			send_udf_failure(call, AS_PARTICLE_TYPE_STRING, rs, as_string_len(s));
+		if (as_val_type(v) == AS_STRING) {
+			send_udf_failure(call, as_string_fromval(v));
 		} else {
 			char lua_err_str[1024];
 			size_t len = (size_t)sprintf(lua_err_str, "%s:0: in function %s() - error() argument type not handled", call->filename, call->function);
 
-			cf_debug(AS_UDF, "FAILURE when calling %s %s", call->filename, call->function);
-			send_udf_failure(call, AS_PARTICLE_TYPE_STRING, lua_err_str, len);
+			call->transaction->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
+			send_failure_str(call, lua_err_str, len);
 		}
 	}
 }
@@ -1231,7 +1102,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		if (rec_rv == -1) {
 			udf_record_close(&urecord);
 			call->transaction->result_code = AS_PROTO_RESULT_FAIL_BIN_NAME; // overloaded... add bin_count error?
-			send_response(call, "FAILURE", AS_PARTICLE_TYPE_NULL, NULL, 0);
+			send_failure(call, NULL);
 			ldt_record_destroy(lrec);
 			as_rec_destroy(lrec);
 			return 0;
@@ -1246,7 +1117,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 				call->transaction->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
 				// Necessary to complete transaction, but error string would be
 				// ignored by client, so don't bother sending one.
-				send_response(call, "FAILURE", AS_PARTICLE_TYPE_NULL, NULL, 0);
+				send_failure(call, NULL);
 				// free everything we created - the rec destroy with ldt_record hooks
 				// destroys the ldt components and the attached "base_rec"
 				ldt_record_destroy(lrec);
@@ -1259,7 +1130,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 			if (! get_msg_key(m, &rd)) {
 				udf_record_close(&urecord);
 				call->transaction->result_code = AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
-				send_response(call, "FAILURE", AS_PARTICLE_TYPE_NULL, NULL, 0);
+				send_failure(call, NULL);
 				ldt_record_destroy(lrec);
 				as_rec_destroy(lrec);
 				return 0;
@@ -1335,7 +1206,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		udf_record_close(&urecord);
 		char *rs = as_module_err_string(ret_value);
 		call->transaction->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
-		send_response(call, "FAILURE", AS_PARTICLE_TYPE_STRING, rs, strlen(rs));
+		send_failure_str(call, rs, strlen(rs));
 		cf_free(rs);
 		as_result_destroy(res);
 	}
@@ -1572,40 +1443,6 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 	else {
 		*size = 0;
 	}
-}
-
-int
-to_particle_type(int from_as_type)
-{
-	switch (from_as_type) {
-		case AS_NIL:
-			return AS_PARTICLE_TYPE_NULL;
-			break;
-		case AS_BOOLEAN:
-		case AS_INTEGER:
-			return AS_PARTICLE_TYPE_INTEGER;
-			break;
-		case AS_DOUBLE:
-			return AS_PARTICLE_TYPE_FLOAT;
-			break;
-		case AS_STRING:
-			return AS_PARTICLE_TYPE_STRING;
-		case AS_BYTES:
-			return AS_PARTICLE_TYPE_BLOB;
-		case AS_GEOJSON:
-			return AS_PARTICLE_TYPE_GEOJSON;
-		case AS_LIST:
-			return AS_PARTICLE_TYPE_LIST;
-		case AS_MAP:
-			return AS_PARTICLE_TYPE_MAP;
-		case AS_UNKNOWN:
-		case AS_REC:
-		case AS_PAIR:
-		default:
-			cf_warning(AS_UDF, "unmappable type %d", from_as_type);
-			break;
-	}
-	return AS_PARTICLE_TYPE_NULL;
 }
 
 static const cf_fault_severity as_level_map[5] = {

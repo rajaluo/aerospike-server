@@ -42,6 +42,8 @@
 // functions. Here are the differences...
 
 // Handle as_val translation.
+uint32_t string_size_from_asval(const as_val *val);
+void string_from_asval(const as_val *val, as_particle **pp);
 as_val *string_to_asval(const as_particle *p);
 
 
@@ -63,9 +65,8 @@ const as_particle_vtable string_vtable = {
 		blob_wire_size,
 		blob_to_wire,
 
-		blob_size_from_mem,
-		blob_from_mem,
-
+		string_size_from_asval,
+		string_from_asval,
 		string_to_asval,
 
 		blob_size_from_flat,
@@ -99,6 +100,24 @@ typedef struct string_mem_s {
 //------------------------------------------------
 // Handle as_val translation.
 //
+
+uint32_t
+string_size_from_asval(const as_val *val)
+{
+	return (uint32_t)(sizeof(string_mem) + as_string_len(as_string_fromval(val)));
+}
+
+void
+string_from_asval(const as_val *val, as_particle **pp)
+{
+	string_mem *p_string_mem = (string_mem *)*pp;
+
+	as_string *string = as_string_fromval(val);
+
+	p_string_mem->type = AS_PARTICLE_TYPE_STRING;
+	p_string_mem->sz = (uint32_t)as_string_len(string);
+	memcpy(p_string_mem->data, as_string_tostring(string), p_string_mem->sz);
+}
 
 as_val *
 string_to_asval(const as_particle *p)

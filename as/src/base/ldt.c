@@ -952,44 +952,22 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 		cf_free(valstr);
 	}
 
-	// Abstract it out in some API .. bad duplication here  ...
-	as_buffer buf;
-	as_buffer_init(&buf);
-	as_serializer s;
-	as_msgpack_init(&s);
-	int res = as_serializer_serialize(&s, valp, &buf);
-
-	if (res != 0) {
-		cf_warning(AS_LDT, "as_ldt_parent_storage_set_version: Map serialization failure (%d), res");
-		as_serializer_destroy(&s);
-		as_buffer_destroy(&buf);
-		as_val_destroy(valp);
-		return -4;
-	}
-
-#if 0
-	// Check not needed space is already there
-	if ( !as_storage_bin_can_fit(rd->ns, buf.size) ) {
-		cf_warning(AS_UDF, "map-list: bin size too big");
-		rsp = -1;
-	}
-#endif
-
-	int pbytes = 0;
 	if (rd->ns->storage_data_in_memory) {
-		as_bin_particle_replace_from_mem(binp, AS_PARTICLE_TYPE_HIDDEN_MAP, buf.data, buf.size);
+		as_bin_particle_replace_from_asval(binp, valp);
+		// TODO - check for failure?
 	}
 	else {
-		pbytes = (int)as_bin_particle_stack_from_mem(binp, pp_stack_particles, AS_PARTICLE_TYPE_HIDDEN_MAP, buf.data, buf.size);
+		as_bin_particle_stack_from_asval(binp, pp_stack_particles, valp);
 	}
-	as_serializer_destroy(&s);
-	as_buffer_destroy(&buf);
+
+	as_bin_particle_map_set_hidden(binp);
+
 	as_val_destroy(valp);
 	cf_debug(AS_LDT, "(%s:%d) Setting parent version to %ld %d", fname, lineno, ldt_version,rd->r->generation);
 	//PRINT_STACK();
 
 	rd->write_to_device = true;
-	return pbytes;
+	return 0;
 }
 
 /*
