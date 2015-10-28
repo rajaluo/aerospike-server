@@ -1409,26 +1409,15 @@ as_val_tobuf(const as_val *v, uint8_t *buf, uint32_t *size)
 			case AS_MAP:
 			case AS_LIST:
 			{
-				as_buffer asbuf;
-				as_buffer_init(&asbuf);
-
 				as_serializer s;
 				as_msgpack_init(&s);
-
-				int res = as_serializer_serialize(&s, (as_val*)v, &asbuf);
-
-				if (res != 0) {
-					cf_warning(AS_UDF, "List serialization failure (%d)", res);
-					as_buffer_destroy(&asbuf);
-					break;
-				}
-				*size = asbuf.size;
 				if (buf) {
-					memcpy(buf, asbuf.data, asbuf.size);
+					*size = as_serializer_serialize_presized(&s, (as_val*)v, buf);
 				}
-				// not needed as it is stack allocated
-				// as_serializer_destroy(&s);
-				as_buffer_destroy(&asbuf);
+				else {
+					*size = as_serializer_serialize_getsize(&s, (as_val*)v);
+				}
+				as_serializer_destroy(&s);
 				break;
 			}
 
