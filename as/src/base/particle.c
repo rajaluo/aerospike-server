@@ -1033,7 +1033,7 @@ as_ldt_particle_client_value_size(as_storage_rd *rd, as_bin *b, as_val **p_val)
 }
 
 uint32_t
-as_ldt_particle_to_client(const as_val *val, as_msg_op *op)
+as_ldt_particle_to_client(as_val *val, as_msg_op *op)
 {
 	if (! val) {
 		op->particle_type = AS_PARTICLE_TYPE_NULL;
@@ -1044,19 +1044,12 @@ as_ldt_particle_to_client(const as_val *val, as_msg_op *op)
 
 	uint8_t *value = (uint8_t *)op + sizeof(as_msg_op) + op->name_sz;
 
-	as_buffer abuf;
-	as_buffer_init(&abuf);
-
 	as_serializer s;
 	as_msgpack_init(&s);
-	as_serializer_serialize(&s, (as_val *)val, &abuf);
 
-	uint32_t added_size = abuf.size;
-
-	memcpy(value, abuf.data, abuf.size);
+	uint32_t added_size = as_serializer_serialize_presized(&s, val, value);
 
 	as_serializer_destroy(&s);
-	as_buffer_destroy(&abuf);
 	as_val_destroy(val);
 
 	op->op_sz += added_size;
