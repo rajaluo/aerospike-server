@@ -257,7 +257,7 @@ extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_l
 // Different for LDTs - an LDT's as_list is expensive to generate, so we return
 // it from the sizing method, and cache it for later use by the packing method:
 extern uint32_t as_ldt_particle_client_value_size(as_storage_rd *rd, as_bin *b, as_val **p_val);
-extern uint32_t as_ldt_particle_to_client(const as_val *val, as_msg_op *op);
+extern uint32_t as_ldt_particle_to_client(as_val *val, as_msg_op *op);
 
 // as_val:
 extern int as_bin_particle_replace_from_asval(as_bin *b, const as_val *val);
