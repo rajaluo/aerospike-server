@@ -35,6 +35,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <aerospike/as_val.h>
 #include <citrusleaf/cf_atomic.h>
 #include <citrusleaf/cf_clock.h>
 #include <citrusleaf/cf_digest.h>
@@ -221,12 +222,12 @@ is_embedded_particle_type(as_particle_type type)
 	return type == AS_PARTICLE_TYPE_INTEGER || type == AS_PARTICLE_TYPE_FLOAT;
 }
 
+extern as_particle_type as_particle_type_from_asval(const as_val *val);
+
 extern int32_t as_particle_size_from_client(const as_msg_op *op); // TODO - will we ever need this?
 extern int32_t as_particle_size_from_pickled(uint8_t **p_pickled);
-extern uint32_t as_particle_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
+extern uint32_t as_particle_size_from_asval(const as_val *val);
 extern int32_t as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size); // TODO - will we ever need this?
-
-extern as_particle_type as_particle_type_convert_to_hidden(as_particle_type type);
 
 // as_bin particle function declarations
 
@@ -258,11 +259,9 @@ extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_l
 extern uint32_t as_ldt_particle_client_value_size(as_storage_rd *rd, as_bin *b, as_val **p_val);
 extern uint32_t as_ldt_particle_to_client(const as_val *val, as_msg_op *op);
 
-// mem: TODO - replace with as_val family.
-extern int as_bin_particle_replace_from_mem(as_bin *b, as_particle_type type, const uint8_t *value, uint32_t value_size);
-extern uint32_t as_bin_particle_stack_from_mem(as_bin *b, uint8_t* stack, as_particle_type type, const uint8_t *value, uint32_t value_size);
-
 // as_val:
+extern int as_bin_particle_replace_from_asval(as_bin *b, const as_val *val);
+extern void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
 extern as_val *as_bin_particle_to_asval(const as_bin *b);
 
 // flat:
@@ -286,6 +285,12 @@ typedef void * geo_region_t;
 extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
 extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
 extern void as_val_geojson_to_client(const as_val *v, uint8_t * buf, uint32_t *psize); // TODO - replace with as_val family
+
+// list:
+extern void as_bin_particle_list_set_hidden(as_bin *b);
+
+// map:
+extern void as_bin_particle_map_set_hidden(as_bin *b);
 
 
 /* as_bin

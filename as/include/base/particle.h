@@ -45,11 +45,9 @@ typedef int (*as_particle_compare_from_wire_fn) (const as_particle *p, as_partic
 typedef uint32_t (*as_particle_wire_size_fn) (const as_particle *p);
 typedef uint32_t (*as_particle_to_wire_fn) (const as_particle *p, uint8_t *wire);
 
-// Handle in-memory format.
-typedef uint32_t (*as_particle_size_from_mem_fn) (as_particle_type type, const uint8_t *value, uint32_t value_size);
-typedef void (*as_particle_from_mem_fn) (as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
-
 // Handle as_val translation.
+typedef uint32_t (*as_particle_size_from_asval_fn) (const as_val *val);
+typedef void (*as_particle_from_asval_fn) (const as_val *val, as_particle **pp);
 typedef as_val *(*as_particle_to_asval_fn) (const as_particle *p);
 
 // Handle on-device "flat" format.
@@ -77,9 +75,8 @@ typedef struct as_particle_vtable_s {
 	as_particle_wire_size_fn				wire_size_fn;
 	as_particle_to_wire_fn					to_wire_fn;
 
-	as_particle_size_from_mem_fn			size_from_mem_fn;
-	as_particle_from_mem_fn					from_mem_fn;
-
+	as_particle_size_from_asval_fn			size_from_asval_fn;
+	as_particle_from_asval_fn				from_asval_fn;
 	as_particle_to_asval_fn					to_asval_fn;
 
 	as_particle_size_from_flat_fn			size_from_flat_fn;

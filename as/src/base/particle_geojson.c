@@ -56,6 +56,8 @@ int geojson_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uin
 uint32_t geojson_to_wire(const as_particle *p, uint8_t *wire);
 
 // Handle as_val translation.
+uint32_t geojson_size_from_asval(const as_val *val);
+void geojson_from_asval(const as_val *val, as_particle **pp);
 as_val *geojson_to_asval(const as_particle *p);
 
 
@@ -77,9 +79,8 @@ const as_particle_vtable geojson_vtable = {
 		blob_wire_size,
 		geojson_to_wire,
 
-		blob_size_from_mem,
-		blob_from_mem,
-
+		geojson_size_from_asval,
+		geojson_from_asval,
 		geojson_to_asval,
 
 		blob_size_from_flat,
@@ -286,6 +287,19 @@ geojson_to_wire(const as_particle *p, uint8_t *wire)
 // Handle as_val translation.
 //
 
+uint32_t
+geojson_size_from_asval(const as_val *val)
+{
+	// TODO
+	return 0;
+}
+
+void
+geojson_from_asval(const as_val *val, as_particle **pp)
+{
+	// TODO
+}
+
 as_val *
 geojson_to_asval(const as_particle *p)
 {
@@ -315,7 +329,7 @@ geojson_to_asval(const as_particle *p)
 size_t
 as_bin_particle_geojson_cellids(as_bin *b, uint64_t **ppcells)
 {
-	geojson_mem *gp = (geojson_mem *)as_bin_get_particle(b);
+	geojson_mem *gp = (geojson_mem *)b->particle;
 
 	*ppcells = (uint64_t *)gp->data;
 
@@ -325,7 +339,7 @@ as_bin_particle_geojson_cellids(as_bin *b, uint64_t **ppcells)
 bool
 as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region)
 {
-	geojson_mem *gp = (geojson_mem *)as_bin_get_particle(b);
+	geojson_mem *gp = (geojson_mem *)b->particle;
 
 	if (cellid != 0) {
 		// REGIONS-CONTAINING-POINT QUERY

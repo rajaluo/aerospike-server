@@ -26,8 +26,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "aerospike/as_val.h"
+#include "aerospike/as_boolean.h"
 #include "aerospike/as_integer.h"
+#include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
@@ -59,9 +60,8 @@ const as_particle_vtable integer_vtable = {
 		integer_wire_size,
 		integer_to_wire,
 
-		integer_size_from_mem,
-		integer_from_mem,
-
+		integer_size_from_asval,
+		integer_from_asval,
 		integer_to_asval,
 
 		integer_size_from_flat,
@@ -254,31 +254,39 @@ integer_to_wire(const as_particle *p, uint8_t *wire)
 }
 
 //------------------------------------------------
-// Handle in-memory format.
+// Handle as_val translation.
 //
 
 uint32_t
-integer_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size)
+integer_size_from_asval(const as_val *val)
 {
 	// Integer values live in the as_bin instead of a pointer.
 	return 0;
 }
 
 void
-integer_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp)
+integer_from_asval(const as_val *val, as_particle **pp)
 {
-	if (value_size != 8) {
-		cf_crash(AS_PARTICLE, "unexpected value size %u", value_size);
-	}
+	// Unfortunately AS_BOOLEANs (as well as AS_INTEGERs) become INTEGER
+	// particles, so we have to check the as_val type here.
 
-	uint64_t i = *(uint64_t *)mem_value;
+	as_val_t vtype = as_val_type(val);
+	int64_t i;
+
+	switch (vtype) {
+	case AS_INTEGER:
+		i = as_integer_get(as_integer_fromval(val));
+		break;
+	case AS_BOOLEAN:
+		i = (int64_t)as_boolean_get(as_boolean_fromval(val));
+		break;
+	default:
+		cf_crash(AS_PARTICLE, "unexpected as_val_t %d", vtype);
+		return;
+	}
 
 	*pp = (as_particle *)i;
 }
-
-//------------------------------------------------
-// Handle as_val translation.
-//
 
 as_val *
 integer_to_asval(const as_particle *p)

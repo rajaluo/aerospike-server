@@ -44,11 +44,9 @@ int blob_compare_from_wire(const as_particle *p, as_particle_type wire_type, con
 uint32_t blob_wire_size(const as_particle *p);
 uint32_t blob_to_wire(const as_particle *p, uint8_t *wire);
 
-// Handle in-memory format.
-uint32_t blob_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
-void blob_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
-
 // Handle as_val translation.
+uint32_t blob_size_from_asval(const as_val *val);
+void blob_from_asval(const as_val *val, as_particle **pp);
 as_val *blob_to_asval(const as_particle *p);
 
 // Handle on-device "flat" format.

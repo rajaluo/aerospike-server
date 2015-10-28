@@ -1081,7 +1081,7 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, in
 		memcpy(op->name, "FAILURE", op->name_sz);
 	}
 	op->op_sz         = 4 + op->name_sz;
-	op->particle_type = to_particle_type(as_val_type(val));
+	op->particle_type = (uint8_t)as_particle_type_from_asval(val);
 	op->version       = 0;
 	buf              += op->name_sz;
 

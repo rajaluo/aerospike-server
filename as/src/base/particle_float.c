@@ -49,6 +49,7 @@ int float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint3
 int float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size);
 
 // Handle as_val translation.
+void float_from_asval(const as_val *val, as_particle **pp);
 as_val *float_to_asval(const as_particle *p);
 
 
@@ -70,9 +71,8 @@ const as_particle_vtable float_vtable = {
 		integer_wire_size,
 		integer_to_wire,
 
-		integer_size_from_mem,
-		integer_from_mem,
-
+		integer_size_from_asval,
+		float_from_asval,
 		float_to_asval,
 
 		integer_size_from_flat,
@@ -147,6 +147,12 @@ float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const 
 //------------------------------------------------
 // Handle as_val translation.
 //
+
+void
+float_from_asval(const as_val *val, as_particle **pp)
+{
+	*(double *)pp = as_double_get(as_double_fromval(val));
+}
 
 as_val *
 float_to_asval(const as_particle *p)
