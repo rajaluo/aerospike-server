@@ -170,36 +170,16 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
  * 		udf_aerospike_setbin
  */
 uint8_t *
-udf__aerospike_get_particle_buf(udf_record *urecord, udf_record_bin *ubin, uint8_t type, int pbytes)
+udf__aerospike_get_particle_buf(udf_record *urecord, udf_record_bin *ubin, uint32_t pbytes)
 {
 	if (pbytes > urecord->rd->ns->storage_write_block_size) {
-		cf_warning(AS_UDF, "udf__aerospike_get_particle_buf: Invalid Operation [Bin %s data too big size=%d]... Fail", ubin->name, pbytes);
+		cf_warning(AS_UDF, "udf__aerospike_get_particle_buf: Invalid Operation [Bin %s data too big size=%u]... Fail", ubin->name, pbytes);
 		return NULL;
 	}
 
-	int alloc_size = 0;
-	switch(type) {
-		case AS_LIST:
-		case AS_BYTES:
-		case AS_GEOJSON:
-		case AS_MAP:
-		case AS_STRING: {
-			alloc_size = urecord->rd->ns->storage_write_block_size;
-			break;
-		}
-		case AS_BOOLEAN:
-		case AS_INTEGER:
-		case AS_DOUBLE: {
-			alloc_size = pbytes;
-			break;
-		}
-		default: {
-			cf_warning (AS_UDF, "udf__aerospike_get_particle_buf: Unknown Particle Type");
-			break;
-		}
-	}
-
+	uint32_t alloc_size = pbytes == 0 ? 0 : urecord->rd->ns->storage_write_block_size;
 	uint8_t *buf = NULL;
+
 	if (ubin->particle_buf) {
 		buf = ubin->particle_buf;
 	} else {
@@ -269,6 +249,11 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 		return -1;
 	}
 
+	if (as_particle_type_from_asval(val) == AS_PARTICLE_TYPE_NULL) {
+		cf_warning(AS_UDF, "udf_aerospike_setbin: [%s] called with unusable as_val", bname);
+		return -3;
+	}
+
 	uint8_t type = as_val_type(val);
 	if (is_hidden &&
 			((type != AS_MAP) && (type != AS_LIST))) {
@@ -282,9 +267,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	SINDEX_BINS_SETUP(sbins, 2 * rd->ns->sindex_cnt);
 	int sbins_populated = 0;
 	bool has_sindex          = as_sindex_ns_has_sindex(rd->ns);
-	if (has_sindex) {
-		SINDEX_GRLOCK();
-	}
 
 	as_bin * b = as_bin_get_or_create(rd, bname);
 
@@ -292,13 +274,12 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 		cf_warning(AS_UDF, "udf_aerospike_setbin: Internal Error [Bin %s not found.. Possibly ran out of bins]... Fail", bname);
 		return -1;
 	}
-	else {
-		if (has_sindex ) {
-			sbins_populated += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns), 
-								b, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
-		}
-	}
 
+	if (has_sindex ) {
+		SINDEX_GRLOCK();
+		sbins_populated += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns),
+							b, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
+	}
 
 	// we know we are doing an update now, make sure there is particle data,
 	// set to be 1 wblock size now @TODO!
@@ -307,12 +288,14 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	cf_detail(AS_UDF, "udf_setbin: bin %s type %d ", bname, type );
 
 	if (rd->ns->storage_data_in_memory) {
-		as_bin_particle_replace_from_asval(b, val);
-		// TODO - check for failure?
+		if (as_bin_particle_replace_from_asval(b, val) != 0) {
+			cf_warning(AS_UDF, "udf_aerospike_setbin: [%s] failed to replace particle", bname);
+			ret = -4;
+		}
 	}
 	else {
 		uint32_t size = as_particle_size_from_asval(val);
-		uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], type, size);
+		uint8_t *particle_buf = udf__aerospike_get_particle_buf(urecord, &urecord->updates[offset], size);
 
 		if (particle_buf) {
 			as_bin_particle_stack_from_asval(b, particle_buf, val);
