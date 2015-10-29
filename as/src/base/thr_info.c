@@ -2295,6 +2295,18 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";write-commit-level-override=");
 	cf_dyn_buf_append_string(db, NS_WRITE_COMMIT_LEVEL_NAME());
 
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-initial=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_initial);
+
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-remaining=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_remaining);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-initial=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_initial);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-remaining=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_remaining);
+
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 
@@ -3812,7 +3824,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
 			// Dont print this command in logs as this happens every few seconds
-			// Ideally, this should not be done via config-set. 
+			// Ideally, this should not be done via config-set.
 			print_command = false;
 
 			uint64_t val[DC_MAX_NUM];
@@ -4839,13 +4851,12 @@ info_debug_ticker_fn(void *unused)
 					(swapping == true) ? "SWAPPING!" : ""
 					);
 
-			cf_info(AS_INFO, " migrates in progress ( %d , %d ) ::: ClusterSize %zd ::: objects %"PRIu64" ::: sub_objects %"PRIu64,
-					cf_atomic32_get(g_config.migrate_progress_send),
-					cf_atomic32_get(g_config.migrate_progress_recv),
+			cf_info(AS_INFO, " ClusterSize %zd ::: objects %"PRIu64" ::: sub_objects %"PRIu64,
 					g_config.paxos->cluster_size,  // add real cluster size when srini has it
 					thr_info_get_object_count(),
 					thr_info_get_subobject_count()
 					);
+
 			cf_info(AS_INFO, " rec refs %"PRIu64" ::: rec locks %"PRIu64" ::: trees %"PRIu64" ::: wr reqs %"PRIu64" ::: mig tx %"PRIu64" ::: mig rx %"PRIu64"",
 					cf_atomic_int_get(g_config.global_record_ref_count),
 					cf_atomic_int_get(g_config.global_record_lock_count),
@@ -4894,7 +4905,7 @@ info_debug_ticker_fn(void *unused)
 				as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
 				size_t ns_memory_inuse = ns->n_bytes_memory + (as_index_size_get(ns) * ns->n_objects);
 				if (ns->storage_data_in_memory) {
-					cf_info(AS_INFO, "namespace %s: disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
+					cf_info(AS_INFO, "{%s} disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
 							"sindex memory inuse: %"PRIu64" (bytes) "
 							"avail pct %d",
 							ns->name, inuse_disk_bytes, ns_memory_inuse,
@@ -4907,7 +4918,7 @@ info_debug_ticker_fn(void *unused)
 						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
 						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
 						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-						cf_info(AS_INFO, "namespace %s: ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+						cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
 								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
 					}
 				}
@@ -4918,7 +4929,7 @@ info_debug_ticker_fn(void *unused)
 					cf_atomic32_set(&ns->n_reads_from_cache, 0);
 					ns->cache_read_pct = (float)(100 * n_reads_from_cache) / (float)(n_total_reads == 0 ? 1 : n_total_reads);
 
-					cf_info(AS_INFO, "namespace %s: disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
+					cf_info(AS_INFO, "{%s} disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
 							"sindex memory inuse: %"PRIu64" (bytes) "
 							"avail pct %d cache-read pct %.2f",
 							ns->name, inuse_disk_bytes, ns_memory_inuse,
@@ -4932,13 +4943,35 @@ info_debug_ticker_fn(void *unused)
 						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
 						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
 						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-						cf_info(AS_INFO, "namespace %s: ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+						cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
 								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
 					}
 				}
 
 				total_ns_memory_inuse += ns_memory_inuse;
 				as_sindex_histogram_dumpall(ns);
+
+				int64_t initial_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_initial);
+				int64_t initial_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_initial);
+				int64_t remaining_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_remaining);
+				int64_t remaining_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_remaining);
+				int64_t initial_migrations = initial_rx_migrations + initial_tx_migrations;
+				int64_t remaining_migrations = remaining_rx_migrations + remaining_tx_migrations;
+
+				if (initial_migrations > 0 && remaining_migrations > 0) {
+					float migrations_pct_complete = (1 - ((float)remaining_migrations / (float)initial_migrations)) * 100;
+
+					cf_info(AS_INFO, "{%s} migrations - remaining (%ld tx, %ld rx), active (%ld tx, %ld rx), %0.2f%% complete",
+							ns->name,
+							remaining_tx_migrations,
+							remaining_rx_migrations,
+							cf_atomic_int_get(g_config.migrate_progress_send),
+							cf_atomic_int_get(g_config.migrate_progress_recv),
+							migrations_pct_complete
+							);
+				} else {
+					cf_info(AS_INFO, "{%s} migrations - complete", ns->name);
+				}
 			}
 
 			as_partition_states ps;
@@ -6575,7 +6608,7 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 	char ns_str[AS_ID_NAMESPACE_SZ];
 	int ns_len = sizeof(ns_str);
 	int ret    = 0;
-	
+
 	ret = as_info_parameter_get(params, "ns", ns_str, &ns_len);
 	if (ret) {
 		if (ret == -2) {
@@ -6587,11 +6620,11 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 		else {
 			cf_warning(AS_INFO, "%s : invalid namespace", sindex_cmd);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-				"Namespace Not Specified");		
+				"Namespace Not Specified");
 		}
 		return -1;
 	}
-	
+
 	*ns = as_namespace_get_byname(ns_str);
 	if (!*ns) {
 		cf_warning(AS_INFO, "%s : namespace %s not found", sindex_cmd, ns_str);
@@ -6618,7 +6651,7 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 		return -1;
 	}
 
-	cf_info(AS_SINDEX, "%s : received request on index %s - namespace %s", 
+	cf_info(AS_SINDEX, "%s : received request on index %s - namespace %s",
 			sindex_cmd, index_name_str, ns_str);
 
 	*iname = cf_strdup(index_name_str);
@@ -6627,19 +6660,18 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 }
 
 int info_command_sindex_repair(char *name, char *params, cf_dyn_buf *db) {
-	
 	as_namespace *ns = NULL;
 	char * iname = NULL;
 	if (as_info_parse_ns_iname(params, &ns, &iname, db, "SINDEX REPAIR")) {
 		return 0;
 	}
-	
+
 	int resp = as_sindex_repair(ns, iname);
 	if (resp) {
 		cf_dyn_buf_append_string(db, "Sindex repair failed");
 		INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 			as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX REPAIR : for index %s - ns %s failed with error %d", 
+		cf_warning(AS_INFO, "SINDEX REPAIR : for index %s - ns %s failed with error %d",
 			iname, ns->name, resp);
 	}
 	else {
@@ -6717,14 +6749,14 @@ int info_command_sindex_stat(char *name, char *params, cf_dyn_buf *db) {
 	if (as_info_parse_ns_iname(params, &ns, &iname, db, "SINDEX STAT")) {
 		return 0;
 	}
-	
+
 	int resp = as_sindex_stats_str(ns, iname, db);
 	if (resp)  {
 		cf_dyn_buf_append_string(db, "Sindex stat failed");
 		INFO_COMMAND_SINDEX_FAILCODE(
 				as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 				as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX STAT : for index %s - ns %s failed with error %d", 
+		cf_warning(AS_INFO, "SINDEX STAT : for index %s - ns %s failed with error %d",
 			iname, ns->name, resp);
 	}
 
@@ -6762,7 +6794,7 @@ int info_command_sindex_histogram(char *name, char *params, cf_dyn_buf *db)
 	}
 	else {
 		cf_info(AS_INFO, "SINDEX HISTOGRAM : invalid OP");
-		cf_dyn_buf_append_string(db, "Invalid Op");	
+		cf_dyn_buf_append_string(db, "Invalid Op");
 		goto END;
 	}
 
@@ -6772,11 +6804,11 @@ int info_command_sindex_histogram(char *name, char *params, cf_dyn_buf *db)
 		INFO_COMMAND_SINDEX_FAILCODE(
 				as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 				as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s failed with error %d", 
+		cf_warning(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s failed with error %d",
 			iname, ns->name, resp);
 	} else {
 		cf_dyn_buf_append_string(db, "Ok");
-		cf_info(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s histogram is set as %s", 
+		cf_info(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s histogram is set as %s",
 			iname, ns->name, op);
 	}
 
@@ -6873,7 +6905,7 @@ as_info_init()
 	as_info_set("node", istr, true);                     // Node ID. Unique 15 character hex string for each node based on the mac address and port.
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
-	as_info_set("features", "geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf", true);
+	as_info_set("features", "pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf", true);
 	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
 		sprintf(istr, "%s:%d", g_config.hb_addr, g_config.hb_port);
 		as_info_set("mcast", istr, false);               // Returns the multicast heartbeat address and port used by this server. Only available in multicast heartbeat mode.
