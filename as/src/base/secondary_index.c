@@ -581,7 +581,10 @@ as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 		return AS_SINDEX_ERR;
 	}
 
-	imd->binid = as_bin_get_or_assign_id(ns, imd->bname);
+	// An extra strncpy to remove valgrind warning
+	char bname[AS_ID_BIN_SZ];
+	strncpy(bname, imd->bname, AS_ID_BIN_SZ);
+	imd->binid = as_bin_get_or_assign_id(ns, bname);
 	cf_debug(AS_SINDEX, " Assigned %d for %s", imd->binid, imd->bname);
 	
 	return AS_SINDEX_OK;
@@ -591,16 +594,40 @@ as_sindex__populate_binid(as_namespace *ns, as_sindex_metadata *imd)
 int
 as_sindex_imd_free(as_sindex_metadata *imd)
 {
-	if (!imd) return 1;
-	if (imd->ns_name)  cf_free(imd->ns_name);
-	if (imd->iname)    cf_free(imd->iname);
-	if (imd->set)      cf_free(imd->set);
-	if (imd->path_str) cf_free(imd->path_str);
-	if (imd->flag & IMD_FLAG_LOCKSET)           pthread_rwlock_destroy(&imd->slock);
+	if (!imd) {
+		cf_warning(AS_SINDEX, "imd is null in as_sindex_imd_free");
+		return AS_SINDEX_ERR;
+	}
+	
+	if (imd->ns_name) {
+		cf_free(imd->ns_name);
+		imd->ns_name = NULL;
+	}
+	
+	if (imd->iname) {
+		cf_free(imd->iname);
+		imd->iname = NULL;
+	}
+
+	if (imd->set) {
+		cf_free(imd->set);
+		imd->set = NULL;
+	}
+
+	if (imd->path_str) {
+		cf_free(imd->path_str);
+		imd->path_str = NULL;
+	}
+
+	if (imd->flag & IMD_FLAG_LOCKSET) {
+		pthread_rwlock_destroy(&imd->slock);
+	}
+
 	if (imd->bname) {
 		cf_free(imd->bname);
 		imd->bname = NULL;
 	}
+
 	return AS_SINDEX_OK;
 }
 //                                           END - UTILITY 
@@ -1899,6 +1926,8 @@ as_sindex_destroy_pmetadata(as_sindex *si)
 	si->imd->pimd = NULL;
 }
 
+// TODO : Will not harm if it reserves and releases the sindex
+// Keep it simple
 bool
 as_sindex_delete_checker(as_namespace *ns, as_sindex_metadata *imd)
 {
@@ -4582,7 +4611,6 @@ as_sindex_get_ns_memory_used(as_namespace *ns)
 
 // Global flag to signal that all secondary index SMD is restored.
 bool g_sindex_smd_restored = false;
-extern int as_info_parse_params_to_sindex_imd(char *, as_sindex_metadata *, cf_dyn_buf *, bool, bool*);
 /*
  * Description: This cb function is called by paxos master, before doing the
  *              In the case of AS_SMD_SET_ACTION
@@ -4623,7 +4651,7 @@ as_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 			{
 				params = item->value;
 				bool smd_op = false;
-				if (as_info_parse_params_to_sindex_imd(params, &imd, NULL, true, &smd_op)){
+				if (as_info_parse_params_to_sindex_imd(params, &imd, NULL, true, &smd_op, "SINDEX CREATE in SMD")){
 					goto ERROR;
 				}
 				ns     = as_namespace_get_byname(imd.ns_name);
@@ -4752,7 +4780,7 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 			case AS_SMD_ACTION_SET:
 			{
 				bool smd_op = false;
-				if (as_info_parse_params_to_sindex_imd(params, &imd, NULL, true, &smd_op)) {
+				if (as_info_parse_params_to_sindex_imd(params, &imd, NULL, true, &smd_op, "SINDEX CREATE in SMD")) {
 					cf_info(AS_SINDEX,"Parsing the index metadata for index creation failed");
 					break;
 				}

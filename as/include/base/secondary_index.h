@@ -568,7 +568,7 @@ extern int  as_sindex_repair(as_namespace *ns, char * iname);
 extern int  as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params);
 extern void as_sindex_gconfig_default(struct as_config_s *c);
 extern int  as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
-			bool is_create, bool *is_smd_op);
+			bool is_create, bool *is_smd_op, char * cmd);
 void        as_sindex_config_var_default(as_sindex_config_var *si_cfg);
 int         as_sindex_cfg_var_hash_reduce_fn(void *key, void *data, void *udata);
 void        as_sindex__config_default(as_sindex *si);
