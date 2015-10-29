@@ -1120,14 +1120,30 @@ as_sindex__stats_clear(as_sindex *si) {
 	s->lookup_errs          = 0;
 
 	si->enable_histogram = false;
-	histogram_clear(s->_write_hist);
-	histogram_clear(s->_si_prep_hist);
-	histogram_clear(s->_delete_hist);
-	histogram_clear(s->_query_hist);
-	histogram_clear(s->_query_batch_io);
-	histogram_clear(s->_query_batch_lookup);
-	histogram_clear(s->_query_rcnt_hist);
-	histogram_clear(s->_query_diff_hist);
+	if (s->_write_hist) {
+		histogram_clear(s->_write_hist);
+	}
+	if (s->_si_prep_hist) {
+		histogram_clear(s->_si_prep_hist);
+	}
+	if (s->_delete_hist) {
+		histogram_clear(s->_delete_hist);
+	}
+	if (s->_query_hist) {
+		histogram_clear(s->_query_hist);
+	}
+	if (s->_query_batch_io) {
+		histogram_clear(s->_query_batch_io);
+	}
+	if (s->_query_batch_lookup) {
+		histogram_clear(s->_query_batch_lookup);
+	}
+	if (s->_query_rcnt_hist) {
+		histogram_clear(s->_query_rcnt_hist);
+	}
+	if (s->_query_diff_hist) {
+		histogram_clear(s->_query_diff_hist);
+	}
 }
 
 void
