@@ -14,7 +14,6 @@ and reliable data storage with elastic server properties.
 %define _topdir pkg/dist
 %define __spec_install_post /usr/lib/rpm/brp-compress
 %package server-@EDITION@
-Requires: logrotate
 Summary: Aerospike server
 Group: Applications
 %description server-@EDITION@
