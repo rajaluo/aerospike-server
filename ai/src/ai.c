@@ -561,7 +561,6 @@ int ai_create_index(char *iname, char *tname, char *cname, int col_type, int num
 		// Table does not exist.
 		goto END;
 	}
-	r_tbl_t *rt = &Tbl[tmatch];
 
 	ic = find_column(tmatch, cname);
 	if (!ic) {
