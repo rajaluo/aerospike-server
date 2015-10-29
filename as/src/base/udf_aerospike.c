@@ -1151,7 +1151,7 @@ static int
 udf_aerospike_log(const as_aerospike * a, const char * file, const int line, const int lvl, const char * msg)
 {
 	(void)a;
-	cf_fault_event(AS_UDF, lvl, file, NULL, line, (char *) msg);
+	cf_fault_event(AS_UDF, lvl, file, NULL, line, "%s", (char *) msg);
 	return 0;
 }
 

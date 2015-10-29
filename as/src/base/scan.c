@@ -630,9 +630,9 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	// TODO - detect migrations more rigorously!
 	if (job->fail_on_cluster_change &&
-			cf_atomic_int_get(g_config.migrate_progress_send) != 0) {
+			(cf_atomic_int_get(ns->migrate_tx_partitions_remaining) != 0 ||
+			 cf_atomic_int_get(ns->migrate_rx_partitions_remaining) != 0)) {
 		// TODO - was AS_PROTO_RESULT_FAIL_UNAVAILABLE - ok?
 		cf_warning(AS_SCAN, "basic scan job not started - migration");
 		as_job_destroy(_job);
