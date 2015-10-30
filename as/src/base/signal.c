@@ -108,10 +108,20 @@ as_sig_handle_fpe(int sig_num)
 	reraise_signal(sig_num, as_sig_handle_fpe);
 }
 
+#include "base/cfg.h"
+
 // This signal is our cue to roll the log.
 void
 as_sig_handle_hup(int sig_num)
 {
+	extern as_config g_config;
+
+	if (g_config.new_style_daemon) {
+		cf_info(AS_AS, "SIGHUP received, \"new-style\" daemon: doing nothing");
+		// [Note:  Could re-load config. here, if possible....]
+		return;
+	}
+
 	cf_info(AS_AS, "SIGHUP received, rolling log");
 
 	cf_fault_sink_logroll();

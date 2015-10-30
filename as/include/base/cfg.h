@@ -67,6 +67,7 @@ typedef struct as_config_s {
 	gid_t				gid;
 	char				*pidfile;
 	bool				run_as_daemon;
+	bool				new_style_daemon;
 
 	/* A unique instance ID: Either HW inspired, or Cluster Group/Node ID */
 	cf_node				self_node;

@@ -80,6 +80,7 @@ const struct option cmd_opts[] = {
 		{ "version", no_argument, 0, 'v' },
 		{ "config-file", required_argument, 0, 'f' },
 		{ "foreground", no_argument, 0, 'd' },
+		{ "fgdaemon", no_argument, 0, 'F' },
 		{ "cold-start", no_argument, 0, 'c' },
 		{ "instance", required_argument, 0, 'n' },
 		{ 0, 0, 0, 0 }
@@ -114,6 +115,11 @@ const char HELP[] =
 		"in gdb. Alternatively, add 'run-as-daemon false' in the service context of the\n"
 		"Aerospike config file.\n"
 		"\n"
+		"--fgdaemon"
+		"\n"
+		"Specify that Aerospike is to be run as a \"new-style\" (foreground) daemon. This\n"
+		"is useful for running Aerospike under systemd or Docker.\n"
+		"\n"
 		"--cold-start"
 		"\n"
 		"(Enterprise edition only.) At startup, force the Aerospike server to read all\n"
@@ -135,6 +141,7 @@ const char USAGE[] =
 		"asd runtime command-line options:\n"
 		"[--config-file <file>] "
 		"[--foreground] "
+		"[--fgdaemon] "
 		"[--cold-start] "
 		"[--instance <0-15>]\n"
 		;
@@ -268,6 +275,7 @@ main(int argc, char **argv)
 	int cmd_optidx;
 	const char *config_file = DEFAULT_CONFIG_FILE;
 	bool run_in_foreground = false;
+	bool new_style_daemon = false;
 	bool cold_start_cmd = false;
 	uint32_t instance = 0;
 
@@ -285,6 +293,19 @@ main(int argc, char **argv)
 		case 'f':
 			config_file = cf_strdup(optarg);
 			cf_assert(config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
+			break;
+		case 'F':
+			// A "new-style" daemon(*) runs in the foreground and:
+			//  -- Does not set the user/group (even if specified in the config. file.)
+			//  -- Does not write a PID file (even if specified in the config. file.)
+			//  -- Does not write to a log file (even if specified in the config. file.)
+			//  -- Does enables the console log (even if not specified in the config. file.)
+			//  -- Does not rotate the (console) log upon receiving SIGHUP.
+			//       [But should instead re-load the config. file. ~~ Not currently supported.]
+			//
+			// (*) Reference:  http://0pointer.de/public/systemd-man/daemon.html#New-Style%20Daemons
+			new_style_daemon = true;
+			run_in_foreground = true;
 			break;
 		case 'd':
 			run_in_foreground = true;
@@ -307,6 +328,10 @@ main(int argc, char **argv)
 	// is a shortcut pointer to the global runtime configuration instance.)
 	as_config *c = as_config_init(config_file);
 
+	// (Need to have this available, but it can only be set on the command-line,
+	// not in the config. file.)
+	c->new_style_daemon = new_style_daemon;
+
 #ifdef USE_ASM
 	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
 
@@ -325,7 +350,7 @@ main(int argc, char **argv)
 	// point must be set up so that they are accessible without root privileges.
 	// If not, the process will self-terminate with (hopefully!) a log message
 	// indicating which resource is not set up properly.
-	if (0 != c->uid && 0 == geteuid()) {
+	if (! c->new_style_daemon && 0 != c->uid && 0 == geteuid()) {
 		// To see this log, change NO_SINKS_LIMIT in fault.c:
 		cf_info(AS_AS, "privsep to %d %d", c->uid, c->gid);
 		cf_process_privsep(c->uid, c->gid);
@@ -336,6 +361,11 @@ main(int argc, char **argv)
 	// or reopened below this line! (The configuration file is the only thing
 	// that must be opened above, in order to parse the user & group.)
 	//==========================================================================
+
+	// If a "new-style" daemon, only (and always) activate the console sink.
+	if (c->new_style_daemon) {
+		cf_fault_sink_unhold_all_but_console();
+	}
 
 	// Activate log sinks. Up to this point, 'cf_' log output goes to stderr,
 	// filtered according to NO_SINKS_LIMIT in fault.c. After this point, 'cf_'
@@ -383,7 +413,9 @@ main(int argc, char **argv)
 	}
 
 	// Write the pid file, if specified.
-	write_pidfile(c->pidfile);
+	if (! c->new_style_daemon) {
+		write_pidfile(c->pidfile);
+	}
 
 	// Check that required directories are set up properly.
 	validate_directory(c->work_directory, "work");
