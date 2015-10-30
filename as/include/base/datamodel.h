@@ -623,14 +623,12 @@ typedef uint16_t as_partition_id;
  *    SYNC: fully synchronized
  *    DESYNC: unsynchronized, but moving towards synchronization
  *    ZOMBIE: sync, but moving towards absent
- *    WAIT: waiting for pending writes to flush out
  *    ABSENT: empty
  */
 #define AS_PARTITION_STATE_UNDEF 0
 #define AS_PARTITION_STATE_SYNC  1
 #define AS_PARTITION_STATE_DESYNC  2
 #define AS_PARTITION_STATE_ZOMBIE  3
-#define AS_PARTITION_STATE_WAIT 4
 #define AS_PARTITION_STATE_ABSENT 5
 #define AS_PARTITION_STATE_JOURNAL_APPLY 6 // used in faked reservations
 typedef uint8_t as_partition_state;
@@ -663,7 +661,6 @@ struct as_partition_s {
 	 * target: an actual master that we're migrating to */
 	cf_node origin, target;
 	as_partition_state state;  // used to be consistency
-	int pending_writes;  // one thread polls on this going to 0
 	int pending_migrate_tx, pending_migrate_rx;
 	bool replica_tx_onsync[AS_CLUSTER_SZ];
 
@@ -745,7 +742,6 @@ typedef struct as_partition_states_s {
 	int		sync_replica;
 	int		desync;
 	int		zombie;
-	int 	wait;
 	int		absent;
 	int		undef;
 	int		n_objects;

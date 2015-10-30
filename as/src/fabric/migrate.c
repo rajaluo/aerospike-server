@@ -1339,7 +1339,7 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				cf_debug(AS_MIGRATE, "migrate start: cluster key mismatch can't start, mig %d", mig_id);
 				as_migrate_print2_cluster_key("START_ACK_FAIL", mc->cluster_key);
 				migrate_recv_control_release(mc);
-				msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_FAIL);
+				msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_EAGAIN);
 				if (0 == as_fabric_send(id, m, AS_FABRIC_PRIORITY_HIGH)) {
 					m = 0;
 				}
@@ -1423,7 +1423,7 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				cf_debug(AS_MIGRATE, "migrate start: cluster key mismatch in target partition can't start");
 				as_migrate_print2_cluster_key("START_ACK_FAIL", mc->cluster_key);
 				migrate_recv_control_release(mc);
-				msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_FAIL);
+				msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_EAGAIN);
 				if (0 == as_fabric_send(id, m, AS_FABRIC_PRIORITY_HIGH))     m = 0;
 				goto Done;
 			}
@@ -2136,7 +2136,6 @@ migrate_xmit_fn(void *arg)
 				goto NextMigrate; // no, really, go back to the queue.
 			case AS_PARTITION_STATE_SYNC:
 			case AS_PARTITION_STATE_ZOMBIE:
-			case AS_PARTITION_STATE_WAIT:
 				break;
 			case AS_PARTITION_STATE_ABSENT:
 			case AS_PARTITION_STATE_UNDEF:
@@ -2220,6 +2219,8 @@ migrate_xmit_fn(void *arg)
 						// it's hard to keep track of all the error states separately
 
 						// Migrate is done!
+                        // TODO: Check if the rest of the nodes are also already done... if not then WTF?
+						cf_warning(AS_MIGRATE, "ALREADY DONE! WTF state (%d) {%s:%d}", mig->rsv.state, mig->rsv.ns->name, (int)mig->rsv.pid);
 						goto CompletedMigrate;
 
 					case OPERATION_START_ACK_EAGAIN:
