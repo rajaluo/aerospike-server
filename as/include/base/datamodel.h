@@ -229,6 +229,9 @@ extern int32_t as_particle_size_from_pickled(uint8_t **p_pickled);
 extern uint32_t as_particle_size_from_asval(const as_val *val);
 extern int32_t as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size); // TODO - will we ever need this?
 
+extern uint32_t as_particle_asval_client_value_size(const as_val *val);
+extern uint32_t as_particle_asval_to_client(const as_val *val, as_msg_op *op);
+
 // as_bin particle function declarations
 
 extern void as_bin_particle_destroy(as_bin *b, bool free_particle);
@@ -243,9 +246,9 @@ extern int as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb
 extern int as_bin_particle_replace_from_pickled(as_bin *b, uint8_t **p_pickled);
 extern int32_t as_bin_particle_stack_from_pickled(as_bin *b, uint8_t* stack, uint8_t **p_pickled);
 extern int as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled);
-extern uint32_t as_bin_particle_client_value_size(as_bin *b);
+extern uint32_t as_bin_particle_client_value_size(const as_bin *b);
 extern uint32_t as_bin_particle_to_client(const as_bin *b, as_msg_op *op);
-extern uint32_t as_bin_particle_pickled_size(as_bin *b);
+extern uint32_t as_bin_particle_pickled_size(const as_bin *b);
 extern uint32_t as_bin_particle_to_pickled(const as_bin *b, uint8_t *pickled);
 
 // Different for CDTs - the operations may return results, so we don't use the
@@ -284,7 +287,6 @@ typedef void * geo_region_t;
 #define MAX_REGION_LEVELS   30
 extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
 extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
-extern void as_val_geojson_to_client(const as_val *v, uint8_t * buf, uint32_t *psize); // TODO - replace with as_val family
 
 // list:
 extern void as_bin_particle_list_set_hidden(as_bin *b);

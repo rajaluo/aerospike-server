@@ -62,6 +62,8 @@ uint32_t map_to_wire(const as_particle *p, uint8_t *wire);
 uint32_t map_size_from_asval(const as_val *val);
 void map_from_asval(const as_val *val, as_particle **pp);
 as_val *map_to_asval(const as_particle *p);
+uint32_t map_asval_wire_size(const as_val *val);
+uint32_t map_asval_to_wire(const as_val *val, uint8_t *wire);
 
 // Handle on-device "flat" format.
 int32_t map_size_from_flat(const uint8_t *flat, uint32_t flat_size);
@@ -93,6 +95,8 @@ const as_particle_vtable map_vtable = {
 		map_size_from_asval,
 		map_from_asval,
 		map_to_asval,
+		map_asval_wire_size,
+		map_asval_to_wire,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -262,6 +266,32 @@ map_to_asval(const as_particle *p)
 	as_serializer_destroy(&s);
 
 	return val;
+}
+
+uint32_t
+map_asval_wire_size(const as_val *val)
+{
+	as_serializer s;
+	as_msgpack_init(&s);
+
+	uint32_t size = as_serializer_serialize_getsize(&s, (as_val *)val);
+
+	as_serializer_destroy(&s);
+
+	return size;
+}
+
+uint32_t
+map_asval_to_wire(const as_val *val, uint8_t *wire)
+{
+	as_serializer s;
+	as_msgpack_init(&s);
+
+	uint32_t size = as_serializer_serialize_presized(&s, val, wire);
+
+	as_serializer_destroy(&s);
+
+	return size;
 }
 
 //------------------------------------------------

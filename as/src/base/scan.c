@@ -1158,9 +1158,8 @@ void
 aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
 		bool success)
 {
-	uint32_t size = 0;
+	uint32_t size = as_particle_asval_client_value_size(val);
 
-	as_val_tobuf(val, NULL, &size); // sizing only
 	as_msg_make_val_response_bufbuilder(val, slice->bb_r, size, success);
 
 	cf_buf_builder* bb = *slice->bb_r;

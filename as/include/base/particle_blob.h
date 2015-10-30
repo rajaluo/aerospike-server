@@ -48,6 +48,8 @@ uint32_t blob_to_wire(const as_particle *p, uint8_t *wire);
 uint32_t blob_size_from_asval(const as_val *val);
 void blob_from_asval(const as_val *val, as_particle **pp);
 as_val *blob_to_asval(const as_particle *p);
+uint32_t blob_asval_wire_size(const as_val *val);
+uint32_t blob_asval_to_wire(const as_val *val, uint8_t *wire);
 
 // Handle on-device "flat" format.
 int32_t blob_size_from_flat(const uint8_t *flat, uint32_t flat_size);
