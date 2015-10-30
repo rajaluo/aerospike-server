@@ -1,4 +1,3 @@
-Requires: logrotate
 %config(noreplace) /etc/logrotate.d/aerospike
 /etc/init.d/aerospike
 %dir /var/log/aerospike
