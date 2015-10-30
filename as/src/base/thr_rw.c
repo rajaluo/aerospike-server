@@ -2736,8 +2736,7 @@ write_process(cf_node node, msg *m, bool respond)
 			goto Out;
 		}
 
-		if( tr.rsv.state == AS_PARTITION_STATE_ABSENT ||
-			tr.rsv.state == AS_PARTITION_STATE_WAIT)
+		if( tr.rsv.state == AS_PARTITION_STATE_ABSENT)
 		{
 			cf_debug_digest(AS_RW, keyd, "[PROLE STATE MISMATCH:1] TID(0) Partition PID(%u) State is Absent or other(%u). Return to Sender.",
 					tr.rsv.pid, tr.rsv.state );
@@ -2844,8 +2843,7 @@ write_process(cf_node node, msg *m, bool respond)
 		// See if we're being asked to write into an ABSENT PROLE PARTITION.
 		// If so, then DO NOT WRITE.  Instead, return an error so that the
 		// Master will retry with the correct node.
-		if (rsv.state == AS_PARTITION_STATE_ABSENT ||
-			rsv.state == AS_PARTITION_STATE_WAIT)
+		if (rsv.state == AS_PARTITION_STATE_ABSENT)
 		{
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 			cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
@@ -6269,8 +6267,7 @@ rw_multi_process(cf_node node, msg *m)
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, 0);
 	cf_atomic_int_incr(&g_config.wprocess_tree_count);
 	reserved = true;
-	if (rsv.state == AS_PARTITION_STATE_ABSENT ||
-		rsv.state == AS_PARTITION_STATE_WAIT)
+	if (rsv.state == AS_PARTITION_STATE_ABSENT)
 	{
 		result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 		cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
