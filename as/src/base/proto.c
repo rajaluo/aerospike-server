@@ -429,7 +429,7 @@ size_t as_msg_response_msgsize(as_record *r, as_storage_rd *rd, bool nobindata,
 
 
 int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
-		cf_buf_builder **bb_r, bool nobindata, char *nsname, bool use_sets,
+		cf_buf_builder **bb_r, bool nobindata, char *nsname, bool ignore_ldt_data,
 		bool include_key, bool skip_empty_records, cf_vector *binlist)
 {
 	// Sanity checks. Either rd should be there or nobindata and nsname should be present.
@@ -443,7 +443,7 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 	const char *set_name     = NULL;
 	int         ns_len       = rd ? strlen(rd->ns->name) : strlen(nsname);
 
-	if (use_sets && as_index_get_set_id(r) != INVALID_SET_ID) {
+	if (as_index_get_set_id(r) != INVALID_SET_ID) {
 		as_namespace *ns = NULL;
 
 		if (rd) {
@@ -510,7 +510,12 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 				msg_sz += rd->ns->single_bin ? 0 : strlen(binname);
 
 				if (as_bin_is_hidden(p_bin)) {
-					msg_sz += (int)as_ldt_particle_client_value_size(rd, p_bin, &ldt_bin_vals[list_bins]);
+					if (ignore_ldt_data) {
+						ldt_bin_vals[list_bins] = NULL;
+					}
+					else {
+						msg_sz += (int)as_ldt_particle_client_value_size(rd, p_bin, &ldt_bin_vals[list_bins]);
+					}
 				}
 				else {
 					msg_sz += (int)as_bin_particle_client_value_size(p_bin);
@@ -533,7 +538,12 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 				msg_sz += rd->ns->single_bin ? 0 : strlen(as_bin_get_name_from_id(rd->ns, p_bin->id));
 
 				if (as_bin_is_hidden(p_bin)) {
-					msg_sz += (int)as_ldt_particle_client_value_size(rd, p_bin, &ldt_bin_vals[i]);
+					if (ignore_ldt_data) {
+						ldt_bin_vals[i] = NULL;
+					}
+					else {
+						msg_sz += (int)as_ldt_particle_client_value_size(rd, p_bin, &ldt_bin_vals[i]);
+					}
 				}
 				else {
 					msg_sz += (int)as_bin_particle_client_value_size(p_bin);
