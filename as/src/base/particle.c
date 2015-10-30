@@ -196,6 +196,39 @@ as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size)
 	return particle_vtable[type]->size_from_flat_fn(flat, flat_size);
 }
 
+uint32_t
+as_particle_asval_client_value_size(const as_val *val)
+{
+	as_particle_type type = as_particle_type_from_asval(val);
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just sends bin-op with NULL particle to client.
+		return 0;
+	}
+
+	return particle_vtable[type]->asval_wire_size_fn(val);
+}
+
+uint32_t
+as_particle_asval_to_client(const as_val *val, as_msg_op *op)
+{
+	as_particle_type type = as_particle_type_from_asval(val);
+
+	op->particle_type = type;
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just sends bin-op with NULL particle to client.
+		return 0;
+	}
+
+	uint8_t *value = (uint8_t *)op + sizeof(as_msg_op) + op->name_sz;
+	uint32_t added_size = particle_vtable[type]->asval_to_wire_fn(val, value);
+
+	op->op_sz += added_size;
+
+	return added_size;
+}
+
 
 //==========================================================
 // as_bin particle functions.
@@ -760,7 +793,7 @@ as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled)
 }
 
 uint32_t
-as_bin_particle_client_value_size(as_bin *b)
+as_bin_particle_client_value_size(const as_bin *b)
 {
 	if (! as_bin_inuse(b)) {
 		// UDF result bin (bin name "SUCCESS" or "FAILURE") will get here.
@@ -804,7 +837,7 @@ as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 }
 
 uint32_t
-as_bin_particle_pickled_size(as_bin *b)
+as_bin_particle_pickled_size(const as_bin *b)
 {
 	uint8_t type = as_bin_get_particle_type(b);
 

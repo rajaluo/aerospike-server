@@ -63,6 +63,8 @@ const as_particle_vtable blob_vtable = {
 		blob_size_from_asval,
 		blob_from_asval,
 		blob_to_asval,
+		blob_asval_wire_size,
+		blob_asval_to_wire,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -249,6 +251,23 @@ blob_to_asval(const as_particle *p)
 	memcpy(value, p_blob_mem->data, p_blob_mem->sz);
 
 	return (as_val *)as_bytes_new_wrap(value, p_blob_mem->sz, true);
+}
+
+uint32_t
+blob_asval_wire_size(const as_val *val)
+{
+	return as_bytes_size(as_bytes_fromval(val));
+}
+
+uint32_t
+blob_asval_to_wire(const as_val *val, uint8_t *wire)
+{
+	as_bytes *bytes = as_bytes_fromval(val);
+	uint32_t size = as_bytes_size(bytes);
+
+	memcpy(wire, as_bytes_get(bytes), size);
+
+	return size;
 }
 
 //------------------------------------------------

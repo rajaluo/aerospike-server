@@ -45,6 +45,8 @@
 uint32_t string_size_from_asval(const as_val *val);
 void string_from_asval(const as_val *val, as_particle **pp);
 as_val *string_to_asval(const as_particle *p);
+uint32_t string_asval_wire_size(const as_val *val);
+uint32_t string_asval_to_wire(const as_val *val, uint8_t *wire);
 
 
 //==========================================================
@@ -68,6 +70,8 @@ const as_particle_vtable string_vtable = {
 		string_size_from_asval,
 		string_from_asval,
 		string_to_asval,
+		string_asval_wire_size,
+		string_asval_to_wire,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -134,6 +138,23 @@ string_to_asval(const as_particle *p)
 	value[p_string_mem->sz] = 0;
 
 	return (as_val *)as_string_new_wlen((char *)value, p_string_mem->sz, true);
+}
+
+uint32_t
+string_asval_wire_size(const as_val *val)
+{
+	return as_string_len(as_string_fromval(val));
+}
+
+uint32_t
+string_asval_to_wire(const as_val *val, uint8_t *wire)
+{
+	as_string *string = as_string_fromval(val);
+	uint32_t size = (uint32_t)as_string_len(string);
+
+	memcpy(wire, as_string_tostring(string), size);
+
+	return size;
 }
 
 

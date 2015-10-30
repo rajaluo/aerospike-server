@@ -1148,8 +1148,8 @@ query_add_val_response(void *void_qtr, const as_val *val, bool success)
 	if (!qtr) {
 		return AS_QUERY_ERR;
 	}
-	uint32_t msg_sz        = 0;
-	as_val_tobuf(val, NULL, &msg_sz);
+
+	uint32_t msg_sz = as_particle_asval_client_value_size(val);
 	if (0 == msg_sz) {
 		cf_warning(AS_PROTO, "particle to buf: could not copy data!");
 	}

@@ -59,6 +59,8 @@ uint32_t geojson_to_wire(const as_particle *p, uint8_t *wire);
 uint32_t geojson_size_from_asval(const as_val *val);
 void geojson_from_asval(const as_val *val, as_particle **pp);
 as_val *geojson_to_asval(const as_particle *p);
+uint32_t geojson_asval_wire_size(const as_val *val);
+uint32_t geojson_asval_to_wire(const as_val *val, uint8_t *wire);
 
 
 //==========================================================
@@ -82,6 +84,8 @@ const as_particle_vtable geojson_vtable = {
 		geojson_size_from_asval,
 		geojson_from_asval,
 		geojson_to_asval,
+		geojson_asval_wire_size,
+		geojson_asval_to_wire,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -319,6 +323,43 @@ geojson_to_asval(const as_particle *p)
 	return (as_val *)as_geojson_new_wlen(buf, jsonsz, true);
 }
 
+uint32_t
+geojson_asval_wire_size(const as_val *val)
+{
+	as_geojson *pg = as_geojson_fromval(val);
+	size_t jsz = as_geojson_len(pg);
+
+	// We won't be writing any cellids ...
+	return (uint32_t)(
+		sizeof(uint8_t) +			// flags
+		sizeof(uint16_t) +			// ncells (always 0 here)
+		(0 * sizeof(uint64_t)) +	// cell array (none)
+		jsz);						// json string
+}
+
+uint32_t
+geojson_asval_to_wire(const as_val *val, uint8_t *wire)
+{
+	as_geojson *pg = as_geojson_fromval(val);
+	size_t jsz = as_geojson_len(pg);
+
+	uint8_t *p8 = wire;
+
+	*p8++ = 0;						// flags
+
+	uint16_t *p16 = (uint16_t *)p8;
+
+	*p16++ = cf_swap_to_be16(0);	// no cells on output to client
+	p8 = (uint8_t *)p16;
+	memcpy(p8, as_geojson_get(pg), jsz);
+
+	return (uint32_t)(
+		sizeof(uint8_t) +			// flags
+		sizeof(uint16_t) +			// ncells (always 0 here)
+		(0 * sizeof(uint64_t)) +	// cell array (none)
+		jsz);						// json string
+}
+
 
 //==========================================================
 // as_bin particle functions specific to GEOJSON.
@@ -396,34 +437,6 @@ as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region)
 	}
 
 	return false;
-}
-
-void
-as_val_geojson_to_client(const as_val *v, uint8_t *buf, uint32_t *psize)
-{
-	as_geojson *pg = as_geojson_fromval(v);
-	size_t jsz = as_geojson_len(pg);
-
-	// Compute the size; we won't be writing any cellids ...
-	*psize =
-		sizeof(uint8_t) +			// flags
-		sizeof(uint16_t) +			// ncells (always 0 here)
-		(0 * sizeof(uint64_t)) +	// cell array (none)
-		jsz;						// json string
-
-	if (! buf) {
-		return;
-	}
-
-	uint8_t *p8 = buf;
-
-	*p8++ = 0;						// flags
-
-	uint16_t *p16 = (uint16_t *)p8;
-
-	*p16++ = cf_swap_to_be16(0);	// no cells on output to client
-	p8 = (uint8_t *)p16;
-	memcpy(p8, as_geojson_get(pg), jsz);
 }
 
 

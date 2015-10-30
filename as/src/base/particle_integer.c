@@ -63,6 +63,8 @@ const as_particle_vtable integer_vtable = {
 		integer_size_from_asval,
 		integer_from_asval,
 		integer_to_asval,
+		integer_asval_wire_size,
+		integer_asval_to_wire,
 
 		integer_size_from_flat,
 		integer_cast_from_flat,
@@ -278,7 +280,7 @@ integer_from_asval(const as_val *val, as_particle **pp)
 		i = as_integer_get(as_integer_fromval(val));
 		break;
 	case AS_BOOLEAN:
-		i = (int64_t)as_boolean_get(as_boolean_fromval(val));
+		i = as_boolean_get(as_boolean_fromval(val)) ? 1 : 0;
 		break;
 	default:
 		cf_crash(AS_PARTICLE, "unexpected as_val_t %d", vtype);
@@ -292,6 +294,38 @@ as_val *
 integer_to_asval(const as_particle *p)
 {
 	return (as_val *)as_integer_new((uint64_t)p);
+}
+
+uint32_t
+integer_asval_wire_size(const as_val *val)
+{
+	return (uint32_t)sizeof(uint64_t);
+}
+
+uint32_t
+integer_asval_to_wire(const as_val *val, uint8_t *wire)
+{
+	// Unfortunately AS_BOOLEANs (as well as AS_INTEGERs) become INTEGER
+	// particles, so we have to check the as_val type here.
+
+	as_val_t vtype = as_val_type(val);
+	int64_t i;
+
+	switch (vtype) {
+	case AS_INTEGER:
+		i = as_integer_get(as_integer_fromval(val));
+		break;
+	case AS_BOOLEAN:
+		i = as_boolean_get(as_boolean_fromval(val)) ? 1 : 0;
+		break;
+	default:
+		cf_crash(AS_PARTICLE, "unexpected as_val_t %d", vtype);
+		return 0;
+	}
+
+	*(uint64_t *)wire = cf_swap_to_be64((uint64_t)i);
+
+	return (uint32_t)sizeof(uint64_t);
 }
 
 //------------------------------------------------
