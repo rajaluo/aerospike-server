@@ -232,6 +232,42 @@ cf_fault_sink_hold(char *path)
 }
 
 
+/* cf_fault_sink_unhold_but_console
+ */
+void
+cf_fault_sink_unhold_all_but_console()
+{
+	bool console_held = false;
+	int console_index = -1;
+
+	int orig_num_held = num_held_fault_sinks;
+	for (int i = 0; i < orig_num_held; i++) {
+		cf_fault_sink *s = &cf_fault_sinks[i];
+		if (!strcmp(s->path, "stderr")) {
+			console_held = true;
+			console_index = i;
+		} else {
+			cf_free(s->path);
+			s->path = NULL;
+			num_held_fault_sinks--;
+		}
+	}
+
+	if (! console_held) {
+		if (cf_fault_sink_hold("stderr") == NULL) {
+			cf_crash(CF_MISC, "can't add stderr as log sink");
+		}
+	} else if (console_index != 0) {
+		// Move the console sink down to the first position.
+		cf_fault_sinks[0].path = cf_fault_sinks[console_index].path;
+		for (int i = 0; i < CF_FAULT_CONTEXT_UNDEF; i++) {
+			cf_fault_sinks[0].limit[i] = cf_fault_sinks[console_index].limit[i];
+		}
+		cf_fault_sinks[console_index].path = NULL;
+	}
+}
+
+
 static void
 fault_filter_adjust(cf_fault_sink *s, cf_fault_context ctx)
 {
@@ -913,8 +949,7 @@ cf_fault_sink_logroll(void)
 	fprintf(stderr, "cf_fault: rolling log files\n");
 	for (int i = 0; i < cf_fault_sinks_inuse; i++) {
 		cf_fault_sink *s = &cf_fault_sinks[i];
-		if ((0 != strncmp(s->path,"stderr", 6)) && (s->fd > 2)) {
-
+		if ((0 != strncmp(s->path, "stderr", 6)) && (s->fd > 2)) {
 			int fd = s->fd;
 			s->fd = -1;
 			usleep(1);
@@ -922,9 +957,10 @@ cf_fault_sink_logroll(void)
 			// hopefully, the file has been relinked elsewhere - or you're OK losing it
 			unlink(s->path);
 			close(fd);
+
+			fd = open(s->path, O_WRONLY|O_CREAT|O_NONBLOCK|O_APPEND, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+			s->fd = fd;
 		}
-		int fd = open(s->path, O_WRONLY|O_CREAT|O_NONBLOCK|O_APPEND, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-		s->fd = fd;
 	}
 }
 
@@ -933,7 +969,6 @@ cf_fault_sink *cf_fault_sink_get_id(int id)
 {
 	if (id > cf_fault_sinks_inuse)	return(0);
 	return ( &cf_fault_sinks[id] );
-
 }
 
 int

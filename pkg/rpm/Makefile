@@ -43,12 +43,7 @@ endif
 	install -pm 755 $(DEPTH)/tools/citrus2aero/upgrade2to3 $(BUILD_ROOT)/usr/bin/asmigrate2to3
 	install -pm 755 $(DEPTH)/tools/fixownership/fixownership.py $(BUILD_ROOT)/usr/bin/asfixownership
 
-ifeq ($(USE_SYSTEMD),1)
-	install -pm 644 $(DEPTH)/as/etc/aerospike_systemd.conf $(BUILD_ROOT)/etc/aerospike/aerospike.conf
-else
 	install -pm 644 $(DEPTH)/as/etc/aerospike.conf $(BUILD_ROOT)/etc/aerospike
-endif
-
 	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd.conf $(BUILD_ROOT)/etc/aerospike
 	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh.conf $(BUILD_ROOT)/etc/aerospike
 
