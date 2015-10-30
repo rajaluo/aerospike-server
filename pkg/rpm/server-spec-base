@@ -18,8 +18,3 @@ Summary: Aerospike server
 Group: Applications
 %description server-@EDITION@
 This package contains all of the code for running the Aerospike server.
-%files server-@EDITION@
-%defattr(-,root,root)
-/usr/bin/asd
-/usr/bin/asmigrate2to3
-/usr/bin/asfixownership
