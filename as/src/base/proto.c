@@ -429,7 +429,7 @@ size_t as_msg_response_msgsize(as_record *r, as_storage_rd *rd, bool nobindata,
 
 
 int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
-		cf_buf_builder **bb_r, bool nobindata, char *nsname, bool use_sets,
+		cf_buf_builder **bb_r, bool nobindata, char *nsname, bool ignore_ldt_data,
 		bool include_key, bool skip_empty_records, cf_vector *binlist)
 {
 	// Sanity checks. Either rd should be there or nobindata and nsname should be present.
@@ -443,7 +443,7 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 	const char *set_name     = NULL;
 	int         ns_len       = rd ? strlen(rd->ns->name) : strlen(nsname);
 
-	if (use_sets && as_index_get_set_id(r) != INVALID_SET_ID) {
+	if (as_index_get_set_id(r) != INVALID_SET_ID) {
 		as_namespace *ns = NULL;
 
 		if (rd) {
@@ -510,7 +510,12 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 				msg_sz += rd->ns->single_bin ? 0 : strlen(binname);
 
 				if (as_bin_is_hidden(p_bin)) {
-					msg_sz += (int)as_ldt_particle_client_value_size(rd, p_bin, &ldt_bin_vals[list_bins]);
+					if (ignore_ldt_data) {
+						ldt_bin_vals[list_bins] = NULL;
+					}
+					else {
+						msg_sz += (int)as_ldt_particle_client_value_size(rd, p_bin, &ldt_bin_vals[list_bins]);
+					}
 				}
 				else {
 					msg_sz += (int)as_bin_particle_client_value_size(p_bin);
@@ -533,7 +538,12 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 				msg_sz += rd->ns->single_bin ? 0 : strlen(as_bin_get_name_from_id(rd->ns, p_bin->id));
 
 				if (as_bin_is_hidden(p_bin)) {
-					msg_sz += (int)as_ldt_particle_client_value_size(rd, p_bin, &ldt_bin_vals[i]);
+					if (ignore_ldt_data) {
+						ldt_bin_vals[i] = NULL;
+					}
+					else {
+						msg_sz += (int)as_ldt_particle_client_value_size(rd, p_bin, &ldt_bin_vals[i]);
+					}
 				}
 				else {
 					msg_sz += (int)as_bin_particle_client_value_size(p_bin);
@@ -1038,22 +1048,26 @@ uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 	return ( (uint8_t *) mf_tmp );
 }
 
+const char SUCCESS_BIN_NAME[] = "SUCCESS";
+const char FAILURE_BIN_NAME[] = "FAILURE";
+const int SUCCESS_BIN_NAME_LEN = (const int)sizeof(SUCCESS_BIN_NAME) - 1;
+const int FAILURE_BIN_NAME_LEN = (const int)sizeof(FAILURE_BIN_NAME) - 1;
+
 int
 as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, int val_sz, bool success)
 {
 	int msg_sz        = sizeof(as_msg);
 	msg_sz           += sizeof(as_msg_op) + val_sz;
 	if (success) {
-		msg_sz       += strlen("SUCCESS");  // fake bin name
+		msg_sz       += SUCCESS_BIN_NAME_LEN;  // fake bin name
 	} else {
-		msg_sz       += strlen("FAILURE");  // fake bin name
+		msg_sz       += FAILURE_BIN_NAME_LEN;  // fake bin name
 	}
 	uint8_t *b;
 	cf_buf_builder_reserve(bb_r, msg_sz, &b);
 
 	// set up the header
-	uint8_t *buf      = b;
-	as_msg *msgp      = (as_msg *) buf;
+	as_msg *msgp      = (as_msg *)b;
 
 	msgp->header_sz   = sizeof(as_msg);
 	msgp->info1       = 0;
@@ -1068,30 +1082,21 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, in
 	msgp->n_ops       = 1; // only 1 bin
 	as_msg_swap_header(msgp);
 
-	buf              += sizeof(as_msg);
-	as_msg_op *op     = (as_msg_op *)buf;
-	buf              += sizeof(as_msg_op);
+	as_msg_op *op     = (as_msg_op *)(b + sizeof(as_msg));
 
 	op->op            = AS_MSG_OP_READ;
 	if (success) {
-		op->name_sz       = strlen("SUCCESS");
-		memcpy(op->name, "SUCCESS", op->name_sz);
+		op->name_sz = SUCCESS_BIN_NAME_LEN;
+		memcpy(op->name, SUCCESS_BIN_NAME, op->name_sz);
 	} else {
-		op->name_sz       = strlen("FAILURE");
-		memcpy(op->name, "FAILURE", op->name_sz);
+		op->name_sz = FAILURE_BIN_NAME_LEN;
+		memcpy(op->name, FAILURE_BIN_NAME, op->name_sz);
 	}
 	op->op_sz         = 4 + op->name_sz;
-	op->particle_type = to_particle_type(as_val_type(val));
 	op->version       = 0;
-	buf              += op->name_sz;
 
-	uint32_t psz      = msg_sz - (buf - b); // size remaining in buffer, for safety
-	as_val_tobuf(val, buf, &psz);
-	if (psz == 0) {
-		cf_warning(AS_PROTO, "particle to buf: could not copy data!");
-	}
-	buf              += psz;
-	op->op_sz        += psz;
+	as_particle_asval_to_client(val, op);
+
 	as_msg_swap_op(op);
 	return(0);
 }

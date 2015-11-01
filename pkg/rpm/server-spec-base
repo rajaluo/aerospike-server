@@ -1,6 +1,6 @@
 Name: aerospike
 Version: @VERSION@
-Release: 1.@RELEASE@
+Release: 1%{?dist}
 Summary: The Aerospike Database
 License: Proprietary
 Group: Application

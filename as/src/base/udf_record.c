@@ -469,6 +469,7 @@ udf_record_cache_free(udf_record * urecord)
 		}
 	}
 	urecord->nupdates = 0;
+	urecord->flag &= ~UDF_RECORD_FLAG_TOO_MANY_BINS;
 }
 
 /**
@@ -507,15 +508,22 @@ udf_record_cache_set(udf_record * urecord, const char * name, as_val * value,
 	}
 
 	// If not modified, then we will add the bin to the cache
-	if ( !modified && urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
-		udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
-		strncpy(bin->name, name, AS_ID_BIN_SZ);
-		bin->value = (as_val *) value;
-		bin->dirty = dirty;
-		bin->ishidden = false;
-		urecord->nupdates++;
-		cf_detail(AS_UDF, "udf_record_set: %s not modified, add for %p:%p",
-				name, urecord, bin->value);
+	if ( ! modified ) {
+		if ( urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
+			udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
+			strncpy(bin->name, name, AS_ID_BIN_SZ);
+			bin->value = (as_val *) value;
+			bin->dirty = dirty;
+			bin->ishidden = false;
+			urecord->nupdates++;
+			cf_detail(AS_UDF, "udf_record_set: %s not modified, add for %p:%p",
+					name, urecord, bin->value);
+		}
+		else {
+			cf_warning(AS_UDF, "UDF bin limit (%d) exceeded (bin %s)",
+					UDF_RECORD_BIN_ULIMIT, name);
+			urecord->flag |= UDF_RECORD_FLAG_TOO_MANY_BINS;
+		}
 	}
 }
 
@@ -540,14 +548,21 @@ udf_record_cache_sethidden(udf_record * urecord, const char * name)
 	}
 
 	// If not modified, then we will add the bin to the cache
-	if ( !modified && urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
-		udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
-		strncpy(bin->name, name, AS_ID_BIN_SZ);
-		bin->ishidden = true;
-		bin->dirty    = true;
-		urecord->nupdates++;
-		cf_detail(AS_UDF, "udf_record_cache_sethidden: %s not modified, add for %p:%p",
-				name, urecord, bin->value);
+	if ( ! modified ) {
+		if ( urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
+			udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
+			strncpy(bin->name, name, AS_ID_BIN_SZ);
+			bin->ishidden = true;
+			bin->dirty    = true;
+			urecord->nupdates++;
+			cf_detail(AS_UDF, "udf_record_cache_sethidden: %s not modified, add for %p:%p",
+					name, urecord, bin->value);
+		}
+		else {
+			cf_warning(AS_UDF, "UDF bin limit (%d) exceeded (bin %s)",
+					UDF_RECORD_BIN_ULIMIT, name);
+			urecord->flag |= UDF_RECORD_FLAG_TOO_MANY_BINS;
+		}
 	}
 }
 
@@ -624,7 +639,7 @@ udf_record_storage_get(const udf_record *urecord, const char *name)
 		return NULL;
 	}
 
-	return as_val_frombin(bb);
+	return as_bin_particle_to_asval(bb);
 }
 
 /*
