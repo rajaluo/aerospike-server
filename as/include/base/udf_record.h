@@ -87,7 +87,7 @@ typedef struct udf_record_s {
 } udf_record;
 
 #define UDF_RECORD_FLAG_ALLOW_UPDATES		0x0001   // Write/Updates Allowed
-#define UDF_RECORD_FLAG_UNUSED		        0x0002   // UNUSED
+#define UDF_RECORD_FLAG_TOO_MANY_BINS		0x0002   // UDF exceeds the bin limit
 #define UDF_RECORD_FLAG_IS_SUBRECORD		0x0004   // Is udf_record for SubRecord
 #define UDF_RECORD_FLAG_OPEN				0x0008   // as_record_open done
 #define UDF_RECORD_FLAG_STORAGE_OPEN		0x0010   // as_storage_record_open done
