@@ -85,6 +85,8 @@ ptn_release(aggr_state *astate)
 	}
 }
 
+#if 0
+// In case we ever need this hook...
 static void
 set_error(aggr_state *astate, int err)
 {
@@ -93,6 +95,7 @@ set_error(aggr_state *astate, int err)
 		call->aggr_hooks->set_error(astate->udata, err);
 	}
 }
+#endif // 0
 
 static bool
 pre_check(aggr_state *astate, void *skey)

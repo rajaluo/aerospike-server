@@ -875,21 +875,17 @@ const as_job_vtable aggr_scan_job_vtable = {
 };
 
 typedef struct aggr_scan_slice_s {
-	aggr_scan_job*		job;
-	cf_ll*				ll;
-	cf_buf_builder**	bb_r;
+	aggr_scan_job*				job;
+	cf_ll*						ll;
+	cf_buf_builder**			bb_r;
 	as_partition_reservation*	rsv;
 } aggr_scan_slice;
 
+bool aggr_scan_init(as_aggr_call* call, as_msg* msg);
 void aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd);
-
-
-
-as_stream_status aggr_scan_ostream_write(void *udata, as_val *val);
-
-void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val, bool success);
-as_partition_reservation * aggr_scan_ptn_reserve(void *udata, as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
+as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns, as_partition_id pid, as_partition_reservation* rsv);
+as_stream_status aggr_scan_ostream_write(void* udata, as_val* val);
 
 const as_aggr_hooks scan_aggr_hooks = {
 	.ostream_write = aggr_scan_ostream_write,
@@ -899,15 +895,7 @@ const as_aggr_hooks scan_aggr_hooks = {
 	.pre_check     = NULL
 };
 
-int
-aggr_scan_init(as_aggr_call * call, as_msg *msg, aggr_scan_job *job)
-{
-	if (udf_rw_call_init_from_msg((udf_call *)call, msg))
-		return -1;
-	
-	call->aggr_hooks    = &scan_aggr_hooks;
-	return 0;
-}
+void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val, bool success);
 
 //----------------------------------------------------------
 // aggr_scan_job public API.
@@ -936,7 +924,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	job->msgp = tr->msgp;
 
-	if (aggr_scan_init(&job->aggr_call, &tr->msgp->msg, job) != 0) {
+	if (! aggr_scan_init(&job->aggr_call, &tr->msgp->msg)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
 		job->msgp = NULL;
 		as_job_destroy(_job);
@@ -1065,6 +1053,18 @@ aggr_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 // aggr_scan_job utilities.
 //
 
+bool
+aggr_scan_init(as_aggr_call* call, as_msg* msg)
+{
+	if (udf_rw_call_init_from_msg((udf_call*)call, msg) != 0) {
+		return false;
+	}
+
+	call->aggr_hooks = &scan_aggr_hooks;
+
+	return true;
+}
+
 void
 aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
@@ -1129,24 +1129,26 @@ aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd)
 	return true;
 }
 
-as_stream_status
-aggr_scan_ostream_write(void *udata, as_val* v)
+as_partition_reservation*
+aggr_scan_ptn_reserve(void* udata, as_namespace* ns, as_partition_id pid,
+		as_partition_reservation* rsv)
 {
 	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
 
-	if (v) {
-		aggr_scan_add_val_response(slice, v, true);
-		as_val_destroy(v);
+	return slice->rsv;
+}
+
+as_stream_status
+aggr_scan_ostream_write(void* udata, as_val* val)
+{
+	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
+
+	if (val) {
+		aggr_scan_add_val_response(slice, val, true);
+		as_val_destroy(val);
 	}
 
 	return AS_STREAM_OK;
-}
-
-as_partition_reservation *
-aggr_scan_ptn_reserve(void *udata, as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv)
-{
-	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
-	return slice->rsv;
 }
 
 void
@@ -1206,6 +1208,7 @@ const as_job_vtable udf_bg_scan_job_vtable = {
 		udf_bg_scan_job_info
 };
 
+bool udf_scan_init(udf_call* call, as_transaction* tr);
 void udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 int udf_bg_scan_tr_complete(as_transaction *tr, int retcode);
 
@@ -1219,16 +1222,6 @@ as_scan_get_udf_call(void* req_udata)
 	udf_bg_scan_job* job = (udf_bg_scan_job*)req_udata;
 
 	return &job->call;
-}
-
-int
-udf_scan_init(udf_call *call, as_transaction *tr)
-{
-	if (udf_rw_call_init_from_msg(call, &tr->msgp->msg)) {
-		return -1;
-	}
-	call->tr = tr;
-	return 0;
 }
 
 //----------------------------------------------------------
@@ -1261,7 +1254,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->n_successful_tr = 0;
 	job->n_failed_tr = 0;
 
-	if (udf_scan_init(&job->call, tr) != 0) {
+	if (! udf_scan_init(&job->call, tr)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed call init");
 		job->msgp = NULL;
 		as_job_destroy(_job);
@@ -1355,6 +1348,18 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 //----------------------------------------------------------
 // udf_bg_scan_job utilities.
 //
+
+bool
+udf_scan_init(udf_call* call, as_transaction* tr)
+{
+	if (udf_rw_call_init_from_msg(call, &tr->msgp->msg)) {
+		return false;
+	}
+
+	call->tr = tr;
+
+	return true;
+}
 
 void
 udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
