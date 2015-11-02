@@ -291,7 +291,7 @@ as_transaction_create_internal(as_transaction *tr, tr_create_data *  trc_data)
 
 	// Get Defensive 
 	memset(tr, 0, sizeof(as_transaction));
-	
+
 	if (d->fd_h) {
 		cf_warning(AS_PROTO, "Foreground Internal Transation .. Ignoring");
 		return -1;
@@ -304,7 +304,7 @@ as_transaction_create_internal(as_transaction *tr, tr_create_data *  trc_data)
 	tr->keyd         = d->digest;
 	tr->preprocessed = true;
 	tr->result_code  = AS_PROTO_RESULT_OK;
-	
+
 	AS_PARTITION_RESERVATION_INIT(tr->rsv);
 	UREQ_DATA_INIT(&tr->udata);
 

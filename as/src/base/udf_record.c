@@ -318,7 +318,7 @@ udf_record_init(udf_record *urecord, bool allow_updates)
 	urecord->flag               = UDF_RECORD_FLAG_ISVALID;
 
 	if (allow_updates) {
-		urecord->flag              |= UDF_RECORD_FLAG_ALLOW_UPDATES;
+		urecord->flag           |= UDF_RECORD_FLAG_ALLOW_UPDATES;
 	}
 	urecord->pickled_buf        = NULL;
 	urecord->pickled_sz         = 0;

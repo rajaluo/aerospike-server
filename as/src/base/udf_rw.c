@@ -66,7 +66,6 @@
 #include "base/udf_timer.h"
 #include "base/write_request.h"
 #include "base/xdr_serverside.h"
-#include "storage/storage.h"
 
 /*
  * Extern
@@ -119,9 +118,7 @@ send_response(udf_call *call, const char *bin_name, const as_val *val)
 	as_bin_init(ns, bin, bin_name);
 	as_bin_particle_stack_from_asval(bin, particle_buf, val);
 
-	uint32_t written_sz;
-
-	single_transaction_response(tr, ns, NULL, &bin, 1, tr->generation, tr->void_time, &written_sz, NULL);
+	single_transaction_response(tr, ns, NULL, &bin, 1, tr->generation, tr->void_time, NULL, NULL);
 
 	if (particle_buf != stack_particle) {
 		cf_free(particle_buf);
@@ -375,7 +372,7 @@ getop(udf_record *urecord, udf_optype *urecord_op)
  * Helper for post_processing().
  */
 static void
-write_post_processing(as_transaction *tr, as_storage_rd *rd,
+write_udf_post_processing(as_transaction *tr, as_storage_rd *rd,
 		uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, int64_t memory_bytes)
 {
@@ -452,7 +449,7 @@ post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set_id)
 			as_storage_record_set_rec_props(rd, rec_props_data);
 		}
 
-		write_post_processing(tr, rd, &urecord->pickled_buf,
+		write_udf_post_processing(tr, rd, &urecord->pickled_buf,
 			&urecord->pickled_sz, &urecord->pickled_rec_props,
 			urecord->starting_memory_bytes);
 
@@ -573,7 +570,6 @@ rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint1
 	udf_record *h_urecord = as_rec_source(lrecord->h_urec);
 	bool is_ldt           = false;
 	int  ret              = 0;
-	uint32_t total_flat_size = 0; 
 
 	getop(h_urecord, &h_urecord_op);
 
@@ -595,13 +591,6 @@ rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint1
 			getop(c_urecord, &c_urecord_op);
 
 			if (UDF_OP_IS_WRITE(c_urecord_op)) {
-				if (g_config.ldt_benchmarks) {
-					if (c_urecord->tr->rsv.ns
-						&& NAMESPACE_HAS_PERSISTENCE(c_urecord->tr->rsv.ns)
-						&& c_urecord->rd) {
-						total_flat_size += as_storage_record_size(c_urecord->rd);
-					}
-				}
 				is_ldt = true;
 				subrec_count++;
 			}
@@ -610,15 +599,6 @@ rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint1
 
 		// Process the parent record in the end .. this is to make sure
 		// the lock is held till the end. 
-		if (g_config.ldt_benchmarks) {
-			if (UDF_OP_IS_WRITE(h_urecord_op)) { 
-				if (h_urecord->tr->rsv.ns
-					&& NAMESPACE_HAS_PERSISTENCE(h_urecord->tr->rsv.ns)
-					&& h_urecord->rd) {
-					total_flat_size += as_storage_record_size(h_urecord->rd);
-				}
-			}
-		}
 		post_processing(h_urecord, &h_urecord_op, set_id);
 
 		if (is_ldt) {
@@ -644,7 +624,6 @@ rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint1
 		// When showing in histogram the record which touch 0 subrecord and 1 subrecord 
 		// will show up in same bucket. +1 for record as well. So all the request which 
 		// touch subrecord as well show up in 2nd bucket
-		histogram_insert_raw(g_config.ldt_update_io_bytes_hist, total_flat_size);
 		histogram_insert_raw(g_config.ldt_update_record_cnt_hist, subrec_count + 1);
 	}
 

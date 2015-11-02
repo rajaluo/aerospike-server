@@ -40,7 +40,7 @@
 // parameter read off from a transaction
 #define UDF_MAX_STRING_SZ 128
 
-typedef struct {
+typedef struct udf_def_s {
 	char			filename[UDF_MAX_STRING_SZ];
 	char			function[UDF_MAX_STRING_SZ];
 	as_msg_field  * arglist;
