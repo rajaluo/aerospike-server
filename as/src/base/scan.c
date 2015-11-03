@@ -111,6 +111,7 @@ int udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 typedef struct scan_options_s {
 	int			priority;
 	bool		fail_on_cluster_change;
+	bool		ignore_ldt_data;
 	uint32_t	sample_pct;
 } scan_options;
 
@@ -342,6 +343,8 @@ get_scan_options(as_msg* m, scan_options* options)
 		options->priority = AS_MSG_FIELD_SCAN_PRIORITY(f->data[0]);
 		options->fail_on_cluster_change =
 				(AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE & f->data[0]) != 0;
+		options->ignore_ldt_data =
+				(AS_MSG_FIELD_SCAN_IGNORE_LDT_DATA & f->data[0]) != 0;
 		options->sample_pct = f->data[1];
 	}
 
@@ -567,6 +570,7 @@ typedef struct basic_scan_job_s {
 	// Derived class data:
 	uint64_t		cluster_key;
 	bool			fail_on_cluster_change;
+	bool			ignore_ldt_data;
 	bool			no_bin_data;
 	uint32_t		sample_pct;
 	cf_vector*		bin_names;
@@ -607,7 +611,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
-	scan_options options = { 0, false, 100 };
+	scan_options options = { 0, false, false, 100 };
 
 	if (! get_scan_options(&tr->msgp->msg, &options)) {
 		cf_free(job);
@@ -621,6 +625,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	job->cluster_key = as_paxos_get_cluster_key();
 	job->fail_on_cluster_change = options.fail_on_cluster_change;
+	job->ignore_ldt_data = options.ignore_ldt_data;
 	job->no_bin_data = (tr->msgp->msg.info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0;
 	job->sample_pct = options.sample_pct;
 	job->bin_names = bin_names_from_op(&tr->msgp->msg, &result);
@@ -642,11 +647,12 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	// Take ownership of socket from transaction.
 	conn_scan_job_own_fd((conn_scan_job*)job, tr->proto_fd_h);
 
-	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} priority %u, sample-pct %u%s%s",
+	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} priority %u, sample-pct %u%s%s%s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
 			_job->priority, job->sample_pct,
 			job->no_bin_data ? ", metadata-only" : "",
-			job->fail_on_cluster_change ? ", fail-on-cluster-change" : "");
+			job->fail_on_cluster_change ? ", fail-on-cluster-change" : "",
+			job->ignore_ldt_data ? ", ignore-ldt-data" : "");
 
 	if ((result = as_job_manager_start_job(_job->mgr, _job)) != 0) {
 		cf_warning(AS_SCAN, "basic scan job %lu failed to start (%d)",
@@ -767,12 +773,12 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 			as_storage_record_open(ns, r, &rd, &r->key);
 			as_msg_make_response_bufbuilder(r, &rd, slice->bb_r, true, NULL,
-					true, true, true, NULL);
+					job->ignore_ldt_data, true, true, NULL);
 			as_storage_record_close(r, &rd);
 		}
 		else {
 			as_msg_make_response_bufbuilder(r, NULL, slice->bb_r, true,
-					ns->name, true, false, true, NULL);
+					ns->name, job->ignore_ldt_data, false, true, NULL);
 		}
 	}
 	else {
@@ -784,8 +790,8 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 
 		rd.bins = as_bin_get_all(r, &rd, stack_bins);
-		as_msg_make_response_bufbuilder(r, &rd, slice->bb_r, false, NULL, true,
-				true, true, job->bin_names);
+		as_msg_make_response_bufbuilder(r, &rd, slice->bb_r, false, NULL,
+				job->ignore_ldt_data, true, true, job->bin_names);
 		as_storage_record_close(r, &rd);
 	}
 
@@ -917,7 +923,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
-	scan_options options = { 0, false, 100 };
+	scan_options options = { 0, false, false, 100 };
 
 	if (! get_scan_options(&tr->msgp->msg, &options)) {
 		cf_free(job);
@@ -1158,9 +1164,8 @@ void
 aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
 		bool success)
 {
-	uint32_t size = 0;
+	uint32_t size = as_particle_asval_client_value_size(val);
 
-	as_val_tobuf(val, NULL, &size); // sizing only
 	as_msg_make_val_response_bufbuilder(val, slice->bb_r, size, success);
 
 	cf_buf_builder* bb = *slice->bb_r;
@@ -1242,7 +1247,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
-	scan_options options = { 0, false, 100 };
+	scan_options options = { 0, false, false, 100 };
 
 	if (! get_scan_options(&tr->msgp->msg, &options)) {
 		cf_free(job);

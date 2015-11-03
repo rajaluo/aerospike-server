@@ -26,6 +26,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_boolean.h"
+#include "aerospike/as_integer.h"
+#include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
@@ -46,7 +49,6 @@
 const as_particle_vtable integer_vtable = {
 		integer_destruct,
 		integer_size,
-		NULL,
 
 		integer_concat_size_from_wire,
 		integer_append_from_wire,
@@ -58,10 +60,11 @@ const as_particle_vtable integer_vtable = {
 		integer_wire_size,
 		integer_to_wire,
 
-		integer_size_from_mem,
-		integer_from_mem,
-		integer_mem_size,
-		integer_to_mem,
+		integer_size_from_asval,
+		integer_from_asval,
+		integer_to_asval,
+		integer_asval_wire_size,
+		integer_asval_to_wire,
 
 		integer_size_from_flat,
 		integer_cast_from_flat,
@@ -253,40 +256,76 @@ integer_to_wire(const as_particle *p, uint8_t *wire)
 }
 
 //------------------------------------------------
-// Handle in-memory format.
+// Handle as_val translation.
 //
 
 uint32_t
-integer_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size)
+integer_size_from_asval(const as_val *val)
 {
 	// Integer values live in the as_bin instead of a pointer.
 	return 0;
 }
 
 void
-integer_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp)
+integer_from_asval(const as_val *val, as_particle **pp)
 {
-	if (value_size != 8) {
-		cf_crash(AS_PARTICLE, "unexpected value size %u", value_size);
-	}
+	// Unfortunately AS_BOOLEANs (as well as AS_INTEGERs) become INTEGER
+	// particles, so we have to check the as_val type here.
 
-	uint64_t i = *(uint64_t *)mem_value;
+	as_val_t vtype = as_val_type(val);
+	int64_t i;
+
+	switch (vtype) {
+	case AS_INTEGER:
+		i = as_integer_get(as_integer_fromval(val));
+		break;
+	case AS_BOOLEAN:
+		i = as_boolean_get(as_boolean_fromval(val)) ? 1 : 0;
+		break;
+	default:
+		cf_crash(AS_PARTICLE, "unexpected as_val_t %d", vtype);
+		return;
+	}
 
 	*pp = (as_particle *)i;
 }
 
-uint32_t
-integer_mem_size(const as_particle *p)
+as_val *
+integer_to_asval(const as_particle *p)
 {
-	return sizeof(uint64_t);
+	return (as_val *)as_integer_new((uint64_t)p);
 }
 
 uint32_t
-integer_to_mem(const as_particle *p, uint8_t *value)
+integer_asval_wire_size(const as_val *val)
 {
-	*(uint64_t *)value = (uint64_t)p;
+	return (uint32_t)sizeof(uint64_t);
+}
 
-	return sizeof(uint64_t);
+uint32_t
+integer_asval_to_wire(const as_val *val, uint8_t *wire)
+{
+	// Unfortunately AS_BOOLEANs (as well as AS_INTEGERs) become INTEGER
+	// particles, so we have to check the as_val type here.
+
+	as_val_t vtype = as_val_type(val);
+	int64_t i;
+
+	switch (vtype) {
+	case AS_INTEGER:
+		i = as_integer_get(as_integer_fromval(val));
+		break;
+	case AS_BOOLEAN:
+		i = as_boolean_get(as_boolean_fromval(val)) ? 1 : 0;
+		break;
+	default:
+		cf_crash(AS_PARTICLE, "unexpected as_val_t %d", vtype);
+		return 0;
+	}
+
+	*(uint64_t *)wire = cf_swap_to_be64((uint64_t)i);
+
+	return (uint32_t)sizeof(uint64_t);
 }
 
 //------------------------------------------------
@@ -356,4 +395,16 @@ integer_to_flat(const as_particle *p, uint8_t *flat)
 	p_int_flat->i = (uint64_t)p;
 
 	return integer_flat_size(p);
+}
+
+
+//==========================================================
+// as_bin particle functions specific to INTEGER.
+//
+
+int64_t
+as_bin_particle_integer_value(const as_bin *b)
+{
+	// Caller must ensure this is called only for INTEGER particles.
+	return (int64_t)b->particle;
 }
