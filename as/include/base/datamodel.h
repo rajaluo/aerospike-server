@@ -35,6 +35,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <aerospike/as_val.h>
 #include <citrusleaf/cf_atomic.h>
 #include <citrusleaf/cf_clock.h>
 #include <citrusleaf/cf_digest.h>
@@ -221,20 +222,20 @@ is_embedded_particle_type(as_particle_type type)
 	return type == AS_PARTICLE_TYPE_INTEGER || type == AS_PARTICLE_TYPE_FLOAT;
 }
 
+extern as_particle_type as_particle_type_from_asval(const as_val *val);
+
 extern int32_t as_particle_size_from_client(const as_msg_op *op); // TODO - will we ever need this?
 extern int32_t as_particle_size_from_pickled(uint8_t **p_pickled);
-extern uint32_t as_particle_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
+extern uint32_t as_particle_size_from_asval(const as_val *val);
 extern int32_t as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size); // TODO - will we ever need this?
 
-extern as_particle_type as_particle_type_convert(as_particle_type type);
-extern as_particle_type as_particle_type_convert_to_hidden(as_particle_type type);
-extern bool as_particle_type_hidden(as_particle_type type);
+extern uint32_t as_particle_asval_client_value_size(const as_val *val);
+extern uint32_t as_particle_asval_to_client(const as_val *val, as_msg_op *op);
 
 // as_bin particle function declarations
 
 extern void as_bin_particle_destroy(as_bin *b, bool free_particle);
 extern uint32_t as_bin_particle_size(as_bin *b);
-extern uint32_t as_bin_particle_ptr(as_bin *b, uint8_t **p_value);
 
 // wire:
 extern int32_t as_bin_particle_size_modify_from_client(as_bin *b, const as_msg_op *op); // TODO - will we ever need this?
@@ -245,9 +246,9 @@ extern int as_bin_particle_stack_from_client(as_bin *b, cf_ll_buf *particles_llb
 extern int as_bin_particle_replace_from_pickled(as_bin *b, uint8_t **p_pickled);
 extern int32_t as_bin_particle_stack_from_pickled(as_bin *b, uint8_t* stack, uint8_t **p_pickled);
 extern int as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled);
-extern uint32_t as_bin_particle_client_value_size(as_bin *b);
+extern uint32_t as_bin_particle_client_value_size(const as_bin *b);
 extern uint32_t as_bin_particle_to_client(const as_bin *b, as_msg_op *op);
-extern uint32_t as_bin_particle_pickled_size(as_bin *b);
+extern uint32_t as_bin_particle_pickled_size(const as_bin *b);
 extern uint32_t as_bin_particle_to_pickled(const as_bin *b, uint8_t *pickled);
 
 // Different for CDTs - the operations may return results, so we don't use the
@@ -259,19 +260,39 @@ extern int as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_l
 // Different for LDTs - an LDT's as_list is expensive to generate, so we return
 // it from the sizing method, and cache it for later use by the packing method:
 extern uint32_t as_ldt_particle_client_value_size(as_storage_rd *rd, as_bin *b, as_val **p_val);
-extern uint32_t as_ldt_particle_to_client(const as_val *val, as_msg_op *op);
+extern uint32_t as_ldt_particle_to_client(as_val *val, as_msg_op *op);
 
-// mem: TODO - replace with as_val family.
-extern int as_bin_particle_replace_from_mem(as_bin *b, as_particle_type type, const uint8_t *value, uint32_t value_size);
-extern uint32_t as_bin_particle_stack_from_mem(as_bin *b, uint8_t* stack, as_particle_type type, const uint8_t *value, uint32_t value_size);
-extern uint32_t as_bin_particle_mem_size(as_bin *b);
-extern uint32_t as_bin_particle_to_mem(const as_bin *b, uint8_t *value);
+// as_val:
+extern int as_bin_particle_replace_from_asval(as_bin *b, const as_val *val);
+extern void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
+extern as_val *as_bin_particle_to_asval(const as_bin *b);
 
 // flat:
 extern int as_bin_particle_cast_from_flat(as_bin *b, uint8_t *flat, uint32_t flat_size);
 extern int as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, uint32_t flat_size);
 extern uint32_t as_bin_particle_flat_size(as_bin *b);
 extern uint32_t as_bin_particle_to_flat(const as_bin *b, uint8_t *flat);
+
+// odd as_bin particle functions for specific particle types
+
+// integer:
+extern int64_t as_bin_particle_integer_value(const as_bin *b);
+
+// string:
+extern uint32_t as_bin_particle_string_ptr(const as_bin *b, char **p_value);
+
+// geojson:
+typedef void * geo_region_t;
+#define MAX_REGION_CELLS    32
+#define MAX_REGION_LEVELS   30
+extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
+extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
+
+// list:
+extern void as_bin_particle_list_set_hidden(as_bin *b);
+
+// map:
+extern void as_bin_particle_map_set_hidden(as_bin *b);
 
 
 /* as_bin
@@ -807,11 +828,12 @@ void as_partition_map_dump();
 //#define NS_RWLOCK	 1   /* use a reader-writer lock */
 #define NS_RWLOCK    0   /* use a standard mutex */
 
-#define AS_SINDEX_BINMAX	4
 #define AS_SINDEX_MAX		256
 
 #define MIN_PARTITIONS_PER_INDEX 1
 #define MAX_PARTITIONS_PER_INDEX 256
+#define DEFAULT_PARTITIONS_PER_INDEX 32
+#define MAX_PARTITIONS_PER_INDEX_CHAR 3 // Number of characters in max paritions per index
 
 // as_sindex structure which hangs from the ns.
 #define AS_SINDEX_INACTIVE			1 // On init, pre-loading
@@ -1029,6 +1051,12 @@ struct as_namespace_s {
 	cf_atomic_int	n_evicted_objects;
 	cf_atomic_int	n_deleted_set_objects;
 
+	// migration counters
+	cf_atomic_int	migrate_tx_partitions_initial;
+	cf_atomic_int	migrate_tx_partitions_remaining;
+	cf_atomic_int	migrate_rx_partitions_initial;
+	cf_atomic_int	migrate_rx_partitions_remaining;
+
 	// the maximum void time of all records in the namespace
 	cf_atomic_int max_void_time;
 
@@ -1216,12 +1244,3 @@ uint32_t as_mem_check();
 extern void as_paxos_set_cluster_key(uint64_t cluster_key);
 // Get the cluster key
 extern uint64_t as_paxos_get_cluster_key();
-
-// GeoJSON specific stuff
-typedef void *	geo_region_t;
-extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
-extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
-extern as_val * as_bin_particle_to_asval_geojson(as_bin *b);
-extern void as_val_geojson_to_client(const as_val *v, uint8_t * buf, uint32_t *psize);
-#define MAX_REGION_CELLS		   32
-#define MAX_REGION_LEVELS		   30

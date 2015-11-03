@@ -576,7 +576,6 @@ typedef enum {
 	CASE_NAMESPACE_SI_GC_PERIOD,
 	CASE_NAMESPACE_SI_GC_MAX_UNITS,
 	CASE_NAMESPACE_SI_DATA_MAX_MEMORY,
-	CASE_NAMESPACE_SI_TRACING,
 	CASE_NAMESPACE_SI_HISTOGRAM,
 	CASE_NAMESPACE_SI_IGNORE_NOT_SYNC,
 
@@ -978,7 +977,6 @@ const cfg_opt NAMESPACE_SI_OPTS[] = {
 		{ "si-gc-period",					CASE_NAMESPACE_SI_GC_PERIOD },
 		{ "si-gc-max-units",				CASE_NAMESPACE_SI_GC_MAX_UNITS },
 		{ "si-data-max-memory",				CASE_NAMESPACE_SI_DATA_MAX_MEMORY },
-		{ "si-tracing",						CASE_NAMESPACE_SI_TRACING},
 		{ "si-histogram",					CASE_NAMESPACE_SI_HISTOGRAM },
 		{ "si-ignore-not-sync",				CASE_NAMESPACE_SI_IGNORE_NOT_SYNC },
 		{ "}",								CASE_CONTEXT_END }
@@ -2842,9 +2840,6 @@ as_config_init()
 				break;
 			case CASE_NAMESPACE_SI_DATA_MAX_MEMORY:
 				si_cfg.data_max_memory = cfg_u64_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_SI_TRACING:
-				si_cfg.trace_flag = cfg_u16_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SI_HISTOGRAM:
 				si_cfg.enable_histogram = cfg_bool(&line);

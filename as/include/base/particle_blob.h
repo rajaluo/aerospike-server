@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "aerospike/as_val.h"
 #include "base/datamodel.h"
 
 // The BLOB particle interface function declarations are in this header file
@@ -31,7 +32,6 @@
 // Destructor, etc.
 void blob_destruct(as_particle *p);
 uint32_t blob_size(const as_particle *p);
-uint32_t blob_ptr(as_particle *p, uint8_t **p_value);
 
 // Handle "wire" format.
 int32_t blob_concat_size_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
@@ -44,11 +44,12 @@ int blob_compare_from_wire(const as_particle *p, as_particle_type wire_type, con
 uint32_t blob_wire_size(const as_particle *p);
 uint32_t blob_to_wire(const as_particle *p, uint8_t *wire);
 
-// Handle in-memory format.
-uint32_t blob_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size);
-void blob_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp);
-uint32_t blob_mem_size(const as_particle *p);
-uint32_t blob_to_mem(const as_particle *p, uint8_t *value);
+// Handle as_val translation.
+uint32_t blob_size_from_asval(const as_val *val);
+void blob_from_asval(const as_val *val, as_particle **pp);
+as_val *blob_to_asval(const as_particle *p);
+uint32_t blob_asval_wire_size(const as_val *val);
+uint32_t blob_asval_to_wire(const as_val *val, uint8_t *wire);
 
 // Handle on-device "flat" format.
 int32_t blob_size_from_flat(const uint8_t *flat, uint32_t flat_size);
