@@ -1387,7 +1387,7 @@ query_match_integer_fromval(as_query_transaction * qtr, as_val *v, as_sindex_key
 			|| (AS_PARTICLE_TYPE_INTEGER != end->type)) {
 		cf_debug(AS_QUERY, "query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
 				AS_PARTICLE_TYPE_INTEGER, start->type, end->type, as_sindex_pktype(qtr->si->imd),
-				qtr->si->imd->bnames[0], qtr->si->imd->iname);
+				qtr->si->imd->bname, qtr->si->imd->iname);
 		return false;
 	}
 	as_integer * i = as_integer_fromval(v);
@@ -1412,7 +1412,7 @@ query_match_string_fromval(as_query_transaction * qtr, as_val *v, as_sindex_key 
 			|| (AS_PARTICLE_TYPE_STRING != end->type)) {
 		cf_debug(AS_QUERY, "query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
 				AS_PARTICLE_TYPE_STRING, start->type, end->type, as_sindex_pktype(qtr->si->imd),
-				qtr->si->imd->bnames[0], qtr->si->imd->iname);
+				qtr->si->imd->bname, qtr->si->imd->iname);
 		return false;
 	}
 
@@ -1489,11 +1489,11 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 	as_sindex_bin_data *end   = &qtr->srange->end;
 
 	//TODO: Make it more general to support sindex over multiple bins	
-	as_bin * b = as_bin_get_by_id(rd, qtr->si->imd->binid[0]);
+	as_bin * b = as_bin_get_by_id(rd, qtr->si->imd->binid);
 
 	if (!b) {
 		cf_debug(AS_QUERY , "as_query_record_validation: "
-				"Bin name %s not found ", qtr->si->imd->bnames[0]);
+				"Bin name %s not found ", qtr->si->imd->bname);
 		// Possible bin may not be there anymore classic case of
 		// bin delete.
 		return false;
@@ -1514,7 +1514,7 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			|| (type != end->type)) {
 				cf_debug(AS_QUERY, "query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
 					type, start->type, end->type, as_sindex_pktype(qtr->si->imd),
-					qtr->si->imd->bnames[0], qtr->si->imd->iname);
+					qtr->si->imd->bname, qtr->si->imd->iname);
 				matches = false;
 				break;
 			}
@@ -1535,7 +1535,7 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			|| (type != end->type)) {
 				cf_debug(AS_QUERY, "query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
 					type, start->type, end->type, as_sindex_pktype(qtr->si->imd),
-					qtr->si->imd->bnames[0], qtr->si->imd->iname);
+					qtr->si->imd->bname, qtr->si->imd->iname);
 				matches = false;
 				break;
 			}
@@ -1560,7 +1560,7 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			|| (type != end->type)) {
 				cf_debug(AS_QUERY, "as_query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
 					type, start->type, end->type, as_sindex_pktype(qtr->si->imd),
-					qtr->si->imd->bnames[0], qtr->si->imd->iname);
+					qtr->si->imd->bname, qtr->si->imd->iname);
 				return false;
 			}
 
