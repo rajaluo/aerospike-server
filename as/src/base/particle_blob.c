@@ -27,6 +27,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "aerospike/as_bytes.h"
+#include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 
 #include "fault.h"
@@ -47,7 +49,6 @@
 const as_particle_vtable blob_vtable = {
 		blob_destruct,
 		blob_size,
-		blob_ptr,
 
 		blob_concat_size_from_wire,
 		blob_append_from_wire,
@@ -59,10 +60,11 @@ const as_particle_vtable blob_vtable = {
 		blob_wire_size,
 		blob_to_wire,
 
-		blob_size_from_mem,
-		blob_from_mem,
-		blob_mem_size,
-		blob_to_mem,
+		blob_size_from_asval,
+		blob_from_asval,
+		blob_to_asval,
+		blob_asval_wire_size,
+		blob_asval_to_wire,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -107,16 +109,6 @@ uint32_t
 blob_size(const as_particle *p)
 {
 	return (uint32_t)(sizeof(blob_mem) + ((blob_mem *)p)->sz);
-}
-
-uint32_t
-blob_ptr(as_particle *p, uint8_t **p_value)
-{
-	blob_mem *p_blob_mem = (blob_mem *)p;
-
-	*p_value = p_blob_mem->data;
-
-	return p_blob_mem->sz;
 }
 
 //------------------------------------------------
@@ -224,41 +216,58 @@ blob_to_wire(const as_particle *p, uint8_t *wire)
 }
 
 //------------------------------------------------
-// Handle in-memory format.
+// Handle as_val translation.
 //
 
 uint32_t
-blob_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size)
+blob_size_from_asval(const as_val *val)
 {
-	return (uint32_t)sizeof(blob_mem) + value_size;
+	return (uint32_t)sizeof(blob_mem) + as_bytes_size(as_bytes_fromval(val));
 }
 
 void
-blob_from_mem(as_particle_type type, const uint8_t *mem_value, uint32_t value_size, as_particle **pp)
+blob_from_asval(const as_val *val, as_particle **pp)
 {
 	blob_mem *p_blob_mem = (blob_mem *)*pp;
 
-	p_blob_mem->type = type;
-	p_blob_mem->sz = value_size;
-	memcpy(p_blob_mem->data, mem_value, p_blob_mem->sz);
+	as_bytes *bytes = as_bytes_fromval(val);
+
+	p_blob_mem->type = AS_PARTICLE_TYPE_BLOB;
+	p_blob_mem->sz = as_bytes_size(bytes);
+	memcpy(p_blob_mem->data, as_bytes_get(bytes), p_blob_mem->sz);
 }
 
-uint32_t
-blob_mem_size(const as_particle *p)
+as_val *
+blob_to_asval(const as_particle *p)
 {
 	blob_mem *p_blob_mem = (blob_mem *)p;
 
-	return p_blob_mem->sz;
-}
+	uint8_t *value = cf_malloc(p_blob_mem->sz);
 
-uint32_t
-blob_to_mem(const as_particle *p, uint8_t *value)
-{
-	blob_mem *p_blob_mem = (blob_mem *)p;
+	if (! value) {
+		return NULL;
+	}
 
 	memcpy(value, p_blob_mem->data, p_blob_mem->sz);
 
-	return p_blob_mem->sz;
+	return (as_val *)as_bytes_new_wrap(value, p_blob_mem->sz, true);
+}
+
+uint32_t
+blob_asval_wire_size(const as_val *val)
+{
+	return as_bytes_size(as_bytes_fromval(val));
+}
+
+uint32_t
+blob_asval_to_wire(const as_val *val, uint8_t *wire)
+{
+	as_bytes *bytes = as_bytes_fromval(val);
+	uint32_t size = as_bytes_size(bytes);
+
+	memcpy(wire, as_bytes_get(bytes), size);
+
+	return size;
 }
 
 //------------------------------------------------

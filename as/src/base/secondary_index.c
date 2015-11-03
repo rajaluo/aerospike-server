@@ -4182,12 +4182,9 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 		if (imd->itype == AS_SINDEX_ITYPE_DEFAULT && bin_type == imd_btype) {
 			if (bin_type == AS_PARTICLE_TYPE_INTEGER) {
 				found = true;
-				uint64_t int_val = 0;
+				sbin->value.int_val = as_bin_particle_integer_value(b);
 
-				valsz = as_bin_particle_to_mem(b, (byte *)&sbin->value.int_val);
-				int_val = sbin->value.int_val;
-
-				if (as_sindex_add_integer_to_sbin(sbin, int_val) == AS_SINDEX_OK) {
+				if (as_sindex_add_integer_to_sbin(sbin, (uint64_t)sbin->value.int_val) == AS_SINDEX_OK) {
 					if (sbin->num_values) {
 						sindex_found++;
 					}
@@ -4195,15 +4192,14 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 			}	
 			else if (bin_type == AS_PARTICLE_TYPE_STRING) {
 				found = true;
-				byte* bin_val;
-				cf_digest buf_dig;
-				valsz = as_bin_particle_mem_size(b);
+				char* bin_val;
+				valsz = as_bin_particle_string_ptr(b, &bin_val);
 
 				if (valsz < 0 || valsz > AS_SINDEX_MAX_STRING_KSIZE) {
 					cf_warning( AS_SINDEX, "sindex key size out of bounds %d ", valsz);
 				}
 				else {
-					valsz = as_bin_particle_ptr(b, &bin_val);
+					cf_digest buf_dig;
 					cf_digest_compute(bin_val, valsz, &buf_dig);
 
 					if (as_sindex_add_digest_to_sbin(sbin, buf_dig) == AS_SINDEX_OK) {
@@ -4239,7 +4235,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 	if (!found) {
 		if (bin_type == AS_PARTICLE_TYPE_MAP || bin_type == AS_PARTICLE_TYPE_LIST) {
 			if (! cdt_val) {
-				cdt_val = as_val_frombin(b);
+				cdt_val = as_bin_particle_to_asval(b);
 			}
 			as_val * res_val   = as_sindex_extract_val_from_path(imd, cdt_val);
 			if (!res_val) {
