@@ -242,8 +242,8 @@ as_sindex_update_defrag_stat(as_sindex *si, uint64_t r, uint64_t start_time_ms)
  * 		Caller needs to release the ref count of sindex(si)
 */
 int
-get_pimd_and_reserve(as_namespace *ns, int *si_index, int *p_index, as_sindex_pmetadata** pimd,
-		as_sindex ** sindex, int *si_defraged)
+get_pimd_and_reserve_si(as_namespace *ns, int *si_index, int *p_index, as_sindex ** sindex, 
+		int *si_defraged)
 {
 	if (*p_index >= ns->sindex_num_partitions) {
 		// pimd reaches max limit. Switch to next si.
@@ -277,8 +277,6 @@ get_pimd_and_reserve(as_namespace *ns, int *si_index, int *p_index, as_sindex_pm
 
 	AS_SINDEX_RESERVE(si);
 	SINDEX_GUNLOCK();
-	as_sindex_metadata *  imd = si->imd;
-	*pimd                     = &imd->pimd[*p_index];
 	*sindex                   = si;
 	cf_detail(AS_SINDEX, "Defragging pimd %d of sindex %s on namespace %s and set %s",
 			*p_index, si->imd->iname, si->imd->ns_name, si->imd->set);
@@ -368,8 +366,8 @@ as_sindex__defrag_fn(void *udata)
 
 			// Get pimd to defrag..
 			as_sindex           * si;
-			as_sindex_pmetadata * pimd;
-			int retval     = get_pimd_and_reserve(ns, &si_index, &p_index, &pimd, &si, &sindex_defraged);
+			as_sindex_pmetadata * pimd = NULL;
+			int retval     = get_pimd_and_reserve_si(ns, &si_index, &p_index, &si, &sindex_defraged);
 			if (retval != 0) {
 				if (retval == -1) {
 					// To avoid cases in which a sindex is dropped in middle of defragging
@@ -381,7 +379,7 @@ as_sindex__defrag_fn(void *udata)
 				}
 			}
 
-			if (!pimd || !si) {
+			if (!si) {
 				break;
 			}
 			limit          = (long)si->config.defrag_max_units;
@@ -406,15 +404,17 @@ as_sindex__defrag_fn(void *udata)
 			start_time                  = cf_getms();
 			cf_ll defrag_list;
 			cf_ll_init(&defrag_list, &ll_sindex_gc_destroy_fn, false);
-
 			int ret = 0;
 			int limit_per_iteration = limit > 100 ? 100 : limit;
 			for (int i = 0; i < limit; i += limit_per_iteration) {
+				SINDEX_RLOCK(&si->imd->slock);
+				pimd = &si->imd->pimd[p_index];
 				SINDEX_RLOCK(&pimd->slock);
 				SET_TIME_FOR_SINDEX_GC_HIST(pimd_rlock_time_ns);
 				ret  = ai_btree_build_defrag_list(si->imd, pimd, &i_col, &n_offset, limit_per_iteration, &processed, &found, &defrag_list);	
 				SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_pimd_rlock_hist, pimd_rlock_time_ns);
 				SINDEX_UNLOCK(&pimd->slock);
+				SINDEX_UNLOCK(&si->imd->slock);
 				pimd_rlock_time_ns = 0;
 				if (ret != AS_SINDEX_CONTINUE) {
 					break;
@@ -434,14 +434,14 @@ as_sindex__defrag_fn(void *udata)
 				uint64_t pimd_wlock_time_ns = 0; 
 				bool     more               = true;
 				while (more) {
-					// TODO IMD RLOCK
-					// TODO pimd = imd->pimd[p_index]
+					SINDEX_WLOCK(&si->imd->slock);
+					pimd = &si->imd->pimd[p_index];
 					SINDEX_WLOCK(&pimd->slock);
 					SET_TIME_FOR_SINDEX_GC_HIST(pimd_wlock_time_ns);
 					more = ai_btree_defrag_list(si->imd, pimd, &defrag_list, wl_lim, &deleted);
 					SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_pimd_wlock_hist, pimd_wlock_time_ns);
 					SINDEX_UNLOCK(&pimd->slock);
-					// TODO IMD UNLOCK
+					SINDEX_UNLOCK(&si->imd->slock);
 					pimd_wlock_time_ns = 0;
 				}
 				cf_detail(AS_SINDEX, "Deleted %d units of attempted %d units from index %s", listsize, limit, si->imd->iname);
