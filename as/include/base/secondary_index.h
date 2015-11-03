@@ -553,6 +553,7 @@ extern const char         * as_sindex_ktype_str(as_sindex_ktype type);
 extern as_sindex_ktype      as_sindex_ktype_from_string(const char * type_str);
 int                         as_sindex_arr_lookup_by_set_binid_lockfree(as_namespace * ns, 
 							const char *set, int binid, as_sindex ** si_arr);
+as_sindex_status            as_sindex_drop_set(as_namespace * ns, char * set_name);
 // **************************************************************************************************
 
 /*

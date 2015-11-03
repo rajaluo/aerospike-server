@@ -1511,3 +1511,20 @@ ai_btree_get_nsize(as_sindex_metadata *imd)
 
 	return size;
 }
+
+as_sindex_status
+ai_btree_empty_pimd(as_sindex_pmetadata * pimd)
+{
+	if(!pimd->ibtr)	{
+		cf_warning(AS_SINDEX, "IBTR is null");
+		return AS_SINDEX_ERR;
+	}
+
+	ai_cleanup(pimd->ibtr);
+	
+	ai_destroy_index(pimd->imatch);
+	
+	r_ind_t *ri = &Index[pimd->imatch];
+	ri->btr = createIndexBT(ri->dtype, pimd->imatch);
+	return AS_SINDEX_OK;
+}
