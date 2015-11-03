@@ -939,6 +939,39 @@ as_sindex_arr_lookup_by_set_binid_lockfree(as_namespace * ns, const char *set, i
 	return sindex_count;
 }
 
+// Populates the si_arr with all the sindexes which matches setname
+// Each sindex is reserved as well. Enough space is provided by caller in si_arr
+int
+as_sindex_arr_lookup_by_setname_lockfree(as_namespace * ns, const char *setname, as_sindex ** si_arr)
+{
+	int sindex_count = 0;
+	as_sindex * si = NULL;
+
+	for (int i=0; i<AS_SINDEX_MAX; i++) {
+		if (i >= ns->sindex_cnt) {
+			break;
+		}
+		si = &ns->sindex[i];
+		// Reserve only active sindexes.
+		// Do not break this rule
+		if (!as_sindex_isactive(si)) {
+			continue;
+		}
+	
+		SINDEX_RLOCK(&si->imd->slock);
+		if (!as_sindex__setname_match(si->imd, setname)) {
+			SINDEX_UNLOCK(&si->imd->slock);
+			continue;
+		}
+		SINDEX_UNLOCK(&si->imd->slock);
+	
+		AS_SINDEX_RESERVE(si);
+
+		si_arr[sindex_count++] = si;
+	}
+
+	return sindex_count;
+}
 int
 as_sindex__simatch_by_iname(as_namespace *ns, char *idx_name)
 {
@@ -1980,6 +2013,47 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR_NOTFOUND;
 	}
+}
+
+as_sindex_status
+as_sindex_empty_index(as_sindex_metadata * imd)
+{
+	as_sindex_status ret = AS_SINDEX_OK;
+	as_sindex_pmetadata * pimd;
+	for (int i=0; i<imd->nprts; i++) {
+		pimd = &imd->pimd[i];
+		SINDEX_WLOCK(&imd->slock);
+		SINDEX_WLOCK(&pimd->slock);
+		if (ai_btree_empty_pimd(pimd)) {
+			ret = AS_SINDEX_ERR;
+			cf_debug(AS_SINDEX, "pimd [%s %d] is not emptied on set %s delete", imd->iname, i, 
+					imd->set);
+		}
+		SINDEX_UNLOCK(&pimd->slock);
+		SINDEX_UNLOCK(&imd->slock);
+	}
+
+	return ret;
+}
+
+as_sindex_status
+as_sindex_drop_set(as_namespace * ns, char * set_name)
+{
+	as_sindex_status ret = AS_SINDEX_OK;
+	
+	SINDEX_GRLOCK();
+	as_sindex * si_arr[ns->sindex_cnt];
+	int sindex_count = as_sindex_arr_lookup_by_setname_lockfree(ns, set_name, si_arr);
+
+	for (int i=0; i<sindex_count; i++) {
+		if (as_sindex_empty_index(si_arr[i]->imd)) {
+			ret = AS_SINDEX_ERR;
+			cf_warning(AS_SINDEX, "Sindex %s is not emptied on set delete %s", si_arr[i]->imd->iname, 
+					set_name);
+		}
+	}
+	SINDEX_GUNLOCK();
+	return ret;
 }
 //                                        END - SINDEX DELETE
 // ************************************************************************************************
