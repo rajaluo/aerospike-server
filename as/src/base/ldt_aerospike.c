@@ -89,16 +89,16 @@ ldt_aerospike_init(as_aerospike * as)
 
 /*
  * create_slot  : Creates slot and initializes variable
- * create_chunk : Creates chunk and initializes 
+ * create_chunk : Creates chunk and initializes
  * expand_chunk : Expands chunk by single unit
  *
- * Note: The idea of having a extra level indirection for chunk and slot instead 
- *       of single array is because the address values of tr/rd/r_ref extra is 
- *       stored and used. Realloc may end up moving these to different memory 
+ * Note: The idea of having a extra level indirection for chunk and slot instead
+ *       of single array is because the address values of tr/rd/r_ref extra is
+ *       stored and used. Realloc may end up moving these to different memory
  *       location, invalidating stored values.
  *
  * Return value:
- * 		Slot functions 
+ * 		Slot functions
  * 			valid slot pointer in case of success
  * 			NULL in case of failure
  * 		Chunk functions
@@ -106,7 +106,7 @@ ldt_aerospike_init(as_aerospike * as)
  * 			-1 in case of failure
  */
 ldt_slot *
-create_slot() 
+create_slot()
 {
 	ldt_slot   *slots = cf_malloc(sizeof(ldt_slot) * LDT_SLOT_CHUNK_SIZE);
 	if (!slots) {
@@ -115,8 +115,8 @@ create_slot()
 	return slots;
 }
 
-int 
-create_chunk(ldt_record *lrecord) 
+int
+create_chunk(ldt_record *lrecord)
 {
 	lrecord->chunk   = cf_malloc(sizeof(ldt_slot_chunk));
 	if (!lrecord->chunk) {
@@ -132,11 +132,11 @@ create_chunk(ldt_record *lrecord)
 		lrecord->chunk[0].slots[j].inuse = false;
 	}
 
-	return 0; 
+	return 0;
 }
 
 int
-expand_chunk(ldt_record *lrecord) 
+expand_chunk(ldt_record *lrecord)
 {
 	uint64_t   new_size  = lrecord->max_chunks + 1;
 	void *old_chunk      = lrecord->chunk;
@@ -161,7 +161,7 @@ expand_chunk(ldt_record *lrecord)
 		return -1;
 	}
 
-	for (int i = lrecord->max_chunks; i < new_size; i++) { 
+	for (int i = lrecord->max_chunks; i < new_size; i++) {
 		for(int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
 			lrecord->chunk[i].slots[j].inuse = false;
 		}
@@ -204,7 +204,7 @@ slot_lookup_by_digest(ldt_record *lrecord, cf_digest *keyd)
 	for (int i = 0; i < lrecord->max_chunks; i++) {
 		ldt_slot_chunk *lchunk = &lrecord->chunk[i];
 		for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
-			if (lchunk->slots[j].inuse && 
+			if (lchunk->slots[j].inuse &&
 				(0 == cf_digest_compare(&lchunk->slots[j].rd.keyd, keyd))) {
 				return &lchunk->slots[j];
 			}
@@ -262,7 +262,7 @@ slot_lookup_free(ldt_record *lrecord, char *func)
 				chunk->slots[j].inuse = true;
 				cf_detail(AS_LDT, "%s Popped slot %p %"PRIu64"", func, &chunk->slots[j], lrecord->num_slots_used);
 				return &chunk->slots[j];
-			} 
+			}
 		}
 	}
 Out:
@@ -279,13 +279,13 @@ Out:
 // **************************************************************************************************
 
 /*
- * Slot 
+ * Slot
  *    init:
  *    setup:
  *    destroy:
  */
 
-/* 	
+/*
  *  Sets up udf_record
  * 	Zeroes out stuff
  * 	Setups as_rec in the lchunk
@@ -389,7 +389,7 @@ chunk_destroy(ldt_record *lrecord, ldt_slot_chunk *lchunk)
 {
 	for (int j = 0; j < LDT_SLOT_CHUNK_SIZE; j++) {
 		if (lchunk->slots[j].inuse) {
-			ldt_slot *lslotp      = &lchunk->slots[j]; 
+			ldt_slot *lslotp      = &lchunk->slots[j];
 			slot_destroy(lslotp, lrecord);
 		}
 	}
@@ -496,7 +496,7 @@ crec_create(ldt_record *lrecord)
 		slot_setup_digest(lslotp, &keyd);
 
 		int rv = as_aerospike_rec_create(lrecord->as, lslotp->c_urec_p);
-		
+
 		// rv == 0 if successful
 		// rv == 1 if record is already found retry
 		// other wise failure
@@ -533,7 +533,7 @@ ldt_record_init(ldt_record *lrecord)
 	lrecord->max_chunks     = 0;
 	lrecord->num_slots_used = 0;
 	lrecord->version        = 0;
-	lrecord->subrec_io      = 0; 
+	lrecord->subrec_io      = 0;
 	// Default is normal UDF
 	lrecord->udf_context    = 0;
 }
@@ -864,7 +864,7 @@ ldt_aerospike_get_current_time(const as_aerospike * as)
 	// Does anyone really know what time it is?
 	return cf_clock_getabsolute();
 
-} 
+}
 
 /**
  * Provide hook from Lua to set execution context
@@ -888,12 +888,12 @@ ldt_aerospike_set_context(const as_aerospike * as, const as_rec *rec, const uint
     if (h_urecord->tr->rsv.ns->ldt_enabled == false) {
 		return -1;
 	}
-	
+
 	cf_detail(AS_LDT, "ldt_aerospike_set_context from %d to %d", lrecord->udf_context, lrecord->udf_context | context);
 	lrecord->udf_context |= context;
 
 	return 0;
-} 
+}
 
 /**
  * Provide hook from Lua to fetch server config settings
@@ -906,7 +906,7 @@ ldt_aerospike_get_config(const as_aerospike * as, const as_rec *rec, const char 
 		cf_warning(AS_LDT, "%s: Invalid Parameters [as=%p, record=%p]... Fail", meth, as, rec);
 		return 2;
 	}
-    
+
 	ldt_record *lrecord = (ldt_record *)as_rec_source(rec);
 	if (!lrecord) {
 		return 2;
@@ -925,7 +925,7 @@ ldt_aerospike_get_config(const as_aerospike * as, const as_rec *rec, const char 
 	}
     cf_detail(AS_LDT, "Returning %s = %d" ,name, val);
 	return val;
-} 
+}
 
 
 const as_aerospike_hooks ldt_aerospike_hooks = {

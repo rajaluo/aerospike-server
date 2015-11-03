@@ -1,4 +1,4 @@
-/* 
+/*
  * aggr.c
  *
  * Copyright (C) 2014-2015 Aerospike, Inc.
@@ -55,16 +55,16 @@ typedef struct {
 	as_index_keys_arr     * keys_arr;
 	int                     keys_arr_offset;
 
-	// Record 
+	// Record
 	bool                       rec_open; // Record in stream open
-	as_rec                   * urec;     // UDF record cloak 
+	as_rec                   * urec;     // UDF record cloak
 	as_namespace             * ns;
 	as_partition_reservation * rsv;      // Reservation Object
-	
+
 	// Module Data
 	as_aggr_call          * call;   // Aggregation info
 	void                  * udata;  // Execution context
-} aggr_state; 
+} aggr_state;
 
 static as_partition_reservation *
 ptn_reserve(aggr_state *astate, as_partition_id pid, as_partition_reservation *rsv)
@@ -72,7 +72,7 @@ ptn_reserve(aggr_state *astate, as_partition_id pid, as_partition_reservation *r
 	as_aggr_call *call = astate->call;
 	if (call && call->aggr_hooks && call->aggr_hooks->ptn_reserve) {
 		return call->aggr_hooks->ptn_reserve(astate->udata, astate->ns, pid, rsv);
-	} 
+	}
 	return NULL;
 }
 
@@ -81,7 +81,7 @@ ptn_release(aggr_state *astate)
 {
 	as_aggr_call  *call = astate->call;
 	if (call && call->aggr_hooks && call->aggr_hooks->ptn_release) {
-		call->aggr_hooks->ptn_release(astate->udata, astate->rsv);	
+		call->aggr_hooks->ptn_release(astate->udata, astate->rsv);
 	}
 }
 
@@ -103,27 +103,27 @@ pre_check(aggr_state *astate, void *skey)
 	as_aggr_call  *call = astate->call;
 	if (call && call->aggr_hooks && call->aggr_hooks->pre_check) {
 		return call->aggr_hooks->pre_check(astate->udata, as_rec_source(astate->urec), skey);
-	} 
+	}
 	return true; // if not defined pre_check succeeds
 }
 
 static int
-aopen(aggr_state *astate, cf_digest digest) 
+aopen(aggr_state *astate, cf_digest digest)
 {
 	udf_record   * urecord  = as_rec_source(astate->urec);
 	as_index_ref   * r_ref  = urecord->r_ref;
 	as_transaction * tr     = urecord->tr;
 
 	int pid                = as_partition_getid(digest);
-	urecord->keyd = digest; 
+	urecord->keyd = digest;
 
-	AS_PARTITION_RESERVATION_INIT(tr->rsv);	
+	AS_PARTITION_RESERVATION_INIT(tr->rsv);
 	astate->rsv        = ptn_reserve(astate, pid, &tr->rsv);
 	if (!astate->rsv) {
 		cf_debug(AS_AGGR, "Reservation not done for partition %d", pid);
-		return -1; 
+		return -1;
 	}
-	
+
 	// NB: Partial Initialization due to heaviness. Not everything needed
 	// TODO: Make such initialization Commodity
 	tr->rsv.ns          = astate->rsv->ns;
@@ -136,7 +136,7 @@ aopen(aggr_state *astate, cf_digest digest)
 	tr->keyd            = urecord->keyd;
 
 	r_ref->skip_lock    = false;
-	if (udf_record_open(urecord) == 0) { 
+	if (udf_record_open(urecord) == 0) {
 		astate->rec_open   = true;
 		return 0;
 	}
@@ -162,7 +162,7 @@ aclose(aggr_state *astate)
 }
 
 void
-acleanup(aggr_state *astate) 
+acleanup(aggr_state *astate)
 {
 	if (astate->iter) {
 		cf_ll_releaseIterator(astate->iter);
@@ -184,11 +184,11 @@ get_next(aggr_state *astate)
 	if (!astate->keys_arr || (astate->keys_arr_offset == astate->keys_arr->num)) {
 
 		cf_ll_element * ele = cf_ll_getNext(astate->iter);
-		
+
 		// if NULL or number of element 0. No holes expected
 		if (!ele) {
 			return NULL;
-		} 
+		}
 
 		astate->keys_arr    = ((as_index_keys_ll_element*)ele)->keys_arr;
 		if (!astate->keys_arr || (astate->keys_arr->num < 1)) {
@@ -197,7 +197,7 @@ get_next(aggr_state *astate)
 		}
 
 		astate->keys_arr_offset = 0;
-	} 
+	}
 	return &astate->keys_arr->pindex_digs[astate->keys_arr_offset];
 }
 
@@ -207,7 +207,7 @@ get_next(aggr_state *astate)
 // does something stupid the object lock is gonna get held for
 // a while ... there has to be timeout mechanism in here I think
 static as_val *
-istream_read(const as_stream *s) 
+istream_read(const as_stream *s)
 {
 	aggr_state *astate = as_stream_source(s);
 
@@ -216,8 +216,8 @@ istream_read(const as_stream *s)
 	// Iterate through stream to get next digest and
 	// populate record with it
 	while (!astate->rec_open) {
-		
-		if (get_next(astate) == NULL) { 
+
+		if (get_next(astate) == NULL) {
 			return NULL;
 		}
 
@@ -286,7 +286,7 @@ static const as_aerospike_hooks as_aggr_aerospike_hooks = {
 
 
 
-int 
+int
 as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void * udata, as_result * ap_res)
 {
 	as_index_ref    r_ref;
