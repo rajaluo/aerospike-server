@@ -215,15 +215,15 @@ as_paxos_dump_succession_list(char *msg, cf_node slist[], int index)
 	int list_size = ((g_config.paxos_max_cluster_size < AS_CLUSTER_SZ) ?
 					 g_config.paxos_max_cluster_size : AS_CLUSTER_SZ);
 	int i;
-	cf_debug(AS_PAXOS, "DUMP SUCCESSION LIST:(%s):Index:%d\n", msg, index);
+	cf_info(AS_PAXOS, "DUMP SUCCESSION LIST:(%s):Index:%d\n", msg, index);
 	for (i = 0; i < list_size; i++) {
 		if (slist[i] == (cf_node) 0) {
 			break; // print no more after first zero
 		} else {
-			cf_debug(AS_PAXOS, "(%d)[%lu] ", i, slist[i]);
+			cf_info(AS_PAXOS, "(%d)[%"PRIx64"] ", i, slist[i]);
 		}
 	} // end for each node position
-	cf_debug(AS_PAXOS, " END OF LIST");
+	cf_info(AS_PAXOS, " END OF LIST");
 } // end as_paxos_dump_succession_list()
 
 void
@@ -1295,6 +1295,7 @@ as_paxos_transaction_establish(as_paxos_transaction *s)
 	memcpy(t, s, sizeof(as_paxos_transaction));
 	t->retired = false;
 	t->confirmed = false;
+	t->establish_time = cf_getms();
 	memset(t->votes, 0, sizeof(t->votes));
 	as_paxos_current_update(t);
 
@@ -1548,14 +1549,14 @@ as_paxos_transaction_apply(cf_node from_id)
 					if (g_config.self_node == t->c.id[i]) {
 						cf_warning(AS_PAXOS, "Found self %"PRIx64" on the succession list!", g_config.self_node);
 					}
-					cf_debug(AS_PAXOS, "inserting node %"PRIx64"", t->c.id[i]);
+					cf_info(AS_PAXOS, "inserting node %"PRIx64"", t->c.id[i]);
 					n_xact++;
 					if (0 != as_paxos_succession_insert(t->c.id[i]))
 						cf_crash(AS_PAXOS, "succession list full");
 
 					break;
 				case AS_PAXOS_CHANGE_SUCCESSION_REMOVE:
-					cf_debug(AS_PAXOS, "removing failed node %"PRIx64"", t->c.id[i]);
+					cf_info(AS_PAXOS, "removing failed node %"PRIx64"", t->c.id[i]);
 					if (p->principal_pro_tempore == t->c.id[i]) {
 						cf_info(AS_PAXOS, "removed node %"PRIx64" is no longer principal pro tempore", t->c.id[i]);
 						p->principal_pro_tempore = 0;
@@ -2086,7 +2087,18 @@ as_paxos_process_heartbeat_event(msg *m)
 	int j = 0;
 
 	/*
-	 * First remove departed nodes. We need to do that to compute the new principal
+	 * Allow redundant events if fabric reset is one of the event.
+	 */
+	bool allow_redundant_events = false;
+	for (int i = 0; i < nevents; i++) {
+		if (events[i].evt == FABRIC_RESET) {
+			cf_info(AS_PAXOS, "Got reset event. Forcing paxos spark.");
+			allow_redundant_events = true;
+		}
+	}
+
+	/*
+	 * First remove departed nodes. We need to do that to compute the new principal.
 	 */
 	for (int i = 0; i < nevents; i++)
 		switch (events[i].evt) {
@@ -2102,7 +2114,7 @@ as_paxos_process_heartbeat_event(msg *m)
 					cf_info(AS_PAXOS, "departed node %"PRIx64" is no longer principal pro tempore", events[i].nodeid);
 					p->principal_pro_tempore = 0;
 				}
-				if (as_paxos_succession_ismember(events[i].nodeid)) {
+				if (as_paxos_succession_ismember(events[i].nodeid) || allow_redundant_events) {
 					c.type[j] = AS_PAXOS_CHANGE_SUCCESSION_REMOVE;
 					c.id[j] = events[i].nodeid;
 					cf_debug(AS_PAXOS, "Node departure %"PRIx64"", c.id[j]);
@@ -2114,6 +2126,8 @@ as_paxos_process_heartbeat_event(msg *m)
 						cf_debug(AS_PAXOS, "quorum visibility lost! Continuing anyway ...");
 					}
 				}
+				break;
+			case FABRIC_RESET:
 				break;
 			default:
 				cf_warning(AS_PAXOS, "unknown event type received in as_paxos_event() - aborting");
@@ -2135,7 +2149,7 @@ as_paxos_process_heartbeat_event(msg *m)
 				 * This means two clusters are merging - figure out who wins
 				 */
 
-				if (! as_paxos_succession_ismember(events[i].nodeid)) {
+				if (! as_paxos_succession_ismember(events[i].nodeid) || allow_redundant_events) {
 					cf_debug(AS_PAXOS, "Node arrival %"PRIx64" cluster principal %"PRIx64" pulse principal %"PRIx64"",
 							 events[i].nodeid, principal, events[i].p_node);
 
@@ -2165,6 +2179,8 @@ as_paxos_process_heartbeat_event(msg *m)
 			case FABRIC_NODE_DEPART:
 			case FABRIC_NODE_DUN:
 				/* Already processed in earlier loop */
+				break;
+			case FABRIC_RESET:
 				break;
 			default:
 				cf_warning(AS_PAXOS, "unknown event type received in as_paxos_event() - aborting");
@@ -2259,6 +2275,95 @@ as_paxos_retransmit_check()
 	}
 
 	return (as_paxos_msgq_push(g_config.self_node, m, NULL));
+}
+
+/**
+ * Monitor and correct the cluster for anomalies in succession list.
+ */
+void
+as_paxos_succession_check()
+{
+	if (g_config.paxos_recovery_policy !=
+		AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER) {
+		// User has not choosen reset master recovery mode.
+		return;
+	}
+
+	as_paxos *p = g_config.paxos;
+
+	// Events to trigger.
+	as_fabric_event_node corrective_events[AS_CLUSTER_SZ + 1];
+	int changes = as_hb_get_corrective_events(p->succession, corrective_events);
+	bool isIntegrityFault = !as_paxos_get_cluster_integrity(p);
+
+	cf_debug(AS_PAXOS, "Corrective changes %d. Integrity fault %s", changes,
+			 isIntegrityFault ? "true" : "false");
+
+	if (!changes && !isIntegrityFault) {
+		// There are no corrections required.
+		cf_debug(AS_PAXOS, "No succession list anomaly found. Ignoring.");
+		return;
+	}
+
+	// Check if a paxos call has been triggered in between now and the last
+	// check.
+	cf_clock now = cf_getms();
+
+	uint32_t wait_ms = g_config.hb_timeout * g_config.hb_interval * 2;
+	
+	for (int i = 0; i < AS_PAXOS_ALPHA; i++) {
+		if (p->pending[i].establish_time + wait_ms > now) {
+			// A paxos transaction has been started in between now and the last
+			// check. Give the paxos some more time to finish.
+			cf_info(AS_PAXOS,
+					"Paxos round running. Skipping succession list fix.");
+			return;
+		}
+	}
+
+	if (isIntegrityFault) {
+		// Add nodes in the current succession list to the changes list, to
+		// reform the cluster from scratch.
+		for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+			if (!p->succession[i]) {
+				continue;
+			}
+
+			bool found = false;
+			for (int j = 0; j < changes; j++) {
+				if (p->succession[i] == corrective_events[j].nodeid) {
+					// we already have accounted for this node in succession list, it is most likely an expired node.
+					found = true;
+					break;
+				}
+			}
+
+			if (!found) {
+				corrective_events[changes].evt = FABRIC_NODE_ARRIVE;
+				corrective_events[changes].nodeid = p->succession[i];
+				changes++;
+			}
+		}
+	}
+
+	for (int i = 0; i < changes; i++) {
+		if ((corrective_events[i].evt == FABRIC_NODE_ARRIVE ||
+			 corrective_events[i].evt == FABRIC_NODE_UNDUN) &&
+			corrective_events[i].nodeid > g_config.self_node) {
+			// The list of stable nodes has a higher id principal, Wait for him
+			// to correct this situation. If he does go away we will fix the
+			// cluster in the next round.
+			cf_info(AS_PAXOS, "Skipping paxos recovery: %" PRIx64
+							  " will handle the recovery",
+					corrective_events[i].nodeid);
+			return;
+		}
+	}
+
+	// Force a paxos spark with all events even if they are redundant.
+	corrective_events[changes++].evt = FABRIC_RESET;
+
+	as_paxos_event(changes, corrective_events, NULL);
 }
 
 /* as_paxos_dun_hold
@@ -2364,10 +2469,8 @@ as_paxos_process_retransmit_check()
 			cf_info(AS_PAXOS, "Cluster Integrity Check: Detected succession list discrepancy between node %"PRIx64" and self %"PRIx64"",
 					succ_list_index[i], g_config.self_node);
 
-#if 0
 			as_paxos_dump_succession_list("Paxos List", p->succession, i);
 			as_paxos_dump_succession_list("Node List", succ_list[i], i);
-#endif
 
 			if (g_config.auto_dun) {
 				as_hb_set_is_node_dunned(succ_list_index[i], true, "paxos");
@@ -2488,6 +2591,11 @@ as_paxos_process_retransmit_check()
 					}
 				}
 
+				break;
+			}
+
+			case AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER: {
+				// we will handle this in as_paxos_succession_check.
 				break;
 			}
 
@@ -3186,9 +3294,12 @@ as_paxos_sup_thr(void *arg)
 
 		struct timespec delay = { g_config.paxos_retransmit_period, 0 };
 		nanosleep(&delay, NULL);
+
 		// drop a retransmit check paxos message into the paxos message queue.
 		as_paxos_retransmit_check();
 
+		// monitor inconsistencies in succession list.
+		as_paxos_succession_check();
 	}
 
 	return(NULL);
@@ -3297,7 +3408,8 @@ as_paxos_dump(bool verbose)
  * The first element of the list will become the Paxos principal.
  * Returns 0 if successful, -1 otherwise.
  */
-int as_paxos_get_succession_list(cf_dyn_buf *db)
+int
+as_paxos_get_succession_list(cf_dyn_buf *db)
 {
 	as_paxos *p = g_config.paxos;
 	char hex_node_id[18];

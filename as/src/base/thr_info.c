@@ -2109,7 +2109,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";paxos-recovery-policy=");
 	cf_dyn_buf_append_string(db, (AS_PAXOS_RECOVERY_POLICY_MANUAL == g_config.paxos_recovery_policy ? "manual" :
 								  (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER == g_config.paxos_recovery_policy ? "auto-dun-master" :
-								   (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL == g_config.paxos_recovery_policy ? "auto-dun-all" : "undefined"))));
+								   (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL == g_config.paxos_recovery_policy ? "auto-dun-all" : 
+								     (AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined")))));
 	cf_dyn_buf_append_string(db, ";write-duplicate-resolution-disable=");
 	cf_dyn_buf_append_string(db, g_config.write_duplicate_resolution_disable ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";respond-client-on-master-completion=");
@@ -2841,7 +2842,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			paxos_recovery_policy_enum policy = (!strcmp(context, "manual") ? AS_PAXOS_RECOVERY_POLICY_MANUAL :
 												 (!strcmp(context, "auto-dun-master") ? AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER :
 												  (!strcmp(context, "auto-dun-all") ? AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL :
-												   AS_PAXOS_RECOVERY_POLICY_UNDEF)));
+												   (!strcmp(context, "auto-reset-master") ? AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER
+													: AS_PAXOS_RECOVERY_POLICY_UNDEF))));
 			if (AS_PAXOS_RECOVERY_POLICY_UNDEF == policy)
 				goto Error;
 			if (0 > as_paxos_set_recovery_policy(policy))

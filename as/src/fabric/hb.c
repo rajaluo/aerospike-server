@@ -237,6 +237,15 @@ typedef struct {
 } as_hb_monitor_reduce_udata;
 
 
+/**
+ *  Udata for finding nodes in the adjaceny list not in the input succession list.
+ */
+typedef struct {
+	int event_count;
+	as_fabric_event_node *events;
+	cf_node *succession_list;
+} as_hb_find_new_nodes_reduce_udata;
+
 //
 // Forward references
 //
@@ -2682,4 +2691,85 @@ as_hb_dump(bool verbose)
 		int count = 0;
 		shash_reduce(g_hb.adjacencies, as_hb_dump_adjacencies_entry, &count);
 	}
+}
+
+/**
+ * Check if a node is alive. Dunned nodes are considered dead.
+ */
+bool
+as_hb_is_alive(cf_node node)
+{
+	// consider nodes in adjacency list and not dunned as alive.
+	return !as_hb_get_is_node_dunned(node);
+}
+
+
+/** 
+ * Find nodes that have are not in a succession list, but part of the adjacency list.
+ */
+int as_hb_find_new_nodes_reduce(void *key, void *data, void *udata)
+{
+	as_hb_find_new_nodes_reduce_udata *u =
+		(as_hb_find_new_nodes_reduce_udata *)udata;
+	cf_node nodeid = *(cf_node *)key;
+
+	bool is_new_node = true;
+
+	// Get a list of expired nodes.
+	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+		if (u->succession_list[i] == nodeid) {
+			is_new_node = false;
+		}
+	}
+
+	if (is_new_node) {
+		u->events[u->event_count].evt = AS_HB_NODE_ARRIVE;
+		u->events[u->event_count].nodeid = nodeid;
+		cf_info(AS_HB, "Marking node add for paxos recovery: %" PRIx64 "",
+				u->events[u->event_count].nodeid);
+		u->event_count++;
+	}
+
+	return 0;
+}
+
+/**
+ * Generate events required to transform the input  succession list to a list that would be consistent with the heart beat adjacency list. This means nodes that are in the adjacency list but missing from the succession list will generate an NODE_ARRIVE event. Nodes in the succession list but missing from the adjacency list will generate a NODE_DEPART event.
+ * @param succession_list the succession list to correct. This should be large enough to hold g_config.paxos_max_cluster_size events.
+ * @param events the output events. This should be large enough to hold g_config.paxos_max_cluster_size events.
+ * @return the number of corrective events generated.
+ */
+int as_hb_get_corrective_events(cf_node *succession_list,
+								as_fabric_event_node *events)
+{
+	// current event count;
+	int event_count = 0;
+
+	// Mark expired nodes that are present in the succession list.
+	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+
+		if (succession_list[i] == 0) {
+			continue;
+		}
+
+		// Check if the node is alive.
+		if (!as_hb_is_alive(succession_list[i])) {
+			events[event_count].evt = AS_HB_NODE_DEPART;
+			events[event_count].nodeid = succession_list[i];
+			cf_info(AS_HB,
+					"Marking node removal for paxos recovery: %" PRIx64 "",
+					events[event_count].nodeid);
+			event_count++;
+		}
+	}
+
+	// Generate events for nodes that should be added to the succession list.
+	as_hb_find_new_nodes_reduce_udata udata;
+	memset(&udata, 0, sizeof(udata));
+	udata.event_count = event_count;
+	udata.events = events;
+	udata.succession_list = succession_list;
+	shash_reduce(g_hb.adjacencies, as_hb_find_new_nodes_reduce, &udata);
+
+	return udata.event_count;
 }

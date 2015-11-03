@@ -156,6 +156,10 @@ clean:
 	$(RM) $(DEPENDENCIES)
 	$(RM) $(MEXP_SOURCES) $(PREPROS)
 
+.PHONY: check-syntax
+check-syntax:
+	$(CC) -Wall -Wextra -pedantic -fsyntax-only $(CHK_SOURCES)
+
 $(SERVER): $(OBJECTS) $(AS_LIB_DEPS)
 ifneq ($(PREPRO),1)
   ifneq ($(MEXP_PHASE),1)
