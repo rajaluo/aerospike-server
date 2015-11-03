@@ -3045,7 +3045,18 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode,
 
 				SINDEX_GRLOCK();
 				SINDEX_BINS_SETUP(sbins, ns->sindex_cnt);
+				as_sindex * si_arr[ns->sindex_cnt];
+				int si_arr_index = 0;
+				int si_cnt = 0;
 				int sbins_populated = 0;
+
+				// RESERVE MATCHING SIs
+				for (int i=0; i<rd.n_bins; i++) {
+					si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd.bins[i].id,
+								&si_arr[si_arr_index]);
+					si_arr_index += si_cnt;
+				}
+
 				for (int i = 0; i < rd.n_bins; i++) {
 					sbins_populated += as_sindex_sbins_from_bin(ns, set_name, &rd.bins[i], &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 				}
@@ -3057,9 +3068,10 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode,
 					sindex_ret = as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated, &rd.keyd);
 					as_sindex_sbin_freeall(sbins, sbins_populated);
 				}
-				if (sindex_ret != AS_SINDEX_OK)
-					cf_debug(AS_SINDEX,
-							"Failed: %d", as_sindex_err_str(sindex_ret));
+				if (sindex_ret != AS_SINDEX_OK) {
+					cf_debug(AS_SINDEX, "Failed: %d", as_sindex_err_str(sindex_ret));
+				}
+				as_sindex_release_arr(si_arr, si_arr_index);
 			}
 		}
 
@@ -3599,11 +3611,29 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 		not_just_created[i_new] = false;
 	}
 
-	SINDEX_GRLOCK();
-
 	// Maximum number of sindexes which can be changed in one transaction is
 	// 2 * ns->sindex_cnt.
+
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
+	as_sindex *si_arr[2 * ns->sindex_cnt];
+	int si_arr_index = 0;
+	int si_cnt = 0;
+
+	SINDEX_GRLOCK();
+
+	// Reserve matching SIs.
+
+	for (int i = 0; i < n_old_bins; i++) {
+		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+				old_bins[i].id, &si_arr[si_arr_index]);
+		si_arr_index += si_cnt;
+	}
+
+	for (int i = 0; i < n_new_bins; i++) {
+		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+				new_bins[i].id, &si_arr[si_arr_index]);
+		si_arr_index += si_cnt;
+	}
 
 	// For every old bin, find the corresponding new bin (if any) and adjust the
 	// secondary index if the bin was modified. If no corresponding new bin is
@@ -3667,7 +3697,7 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 
 	SINDEX_GUNLOCK();
 
-	if (sbins_populated) {
+	if (sbins_populated != 0) {
 		uint64_t start_ns = g_config.microbenchmarks ? cf_getns() : 0;
 
 		as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated, keyd);
@@ -3676,11 +3706,11 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 		if (start_ns != 0) {
 			histogram_insert_data_point(g_config.write_sindex_hist, start_ns);
 		}
-
-		return true;
 	}
 
-	return false;
+	as_sindex_release_arr(si_arr, si_arr_index);
+
+	return sbins_populated != 0;
 }
 
 void
