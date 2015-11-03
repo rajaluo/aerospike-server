@@ -191,7 +191,7 @@ struct btree;
 typedef struct as_sindex_stat_s {
 	cf_atomic64        n_objects;
 	int                n_keys;
-	int                mem_used;
+	cf_atomic64        mem_used;
 
 	cf_atomic64        n_reads;
 	cf_atomic64        read_errs;
@@ -318,9 +318,6 @@ typedef struct as_sindex_s {
 	// Protected by si reference
 	struct as_sindex_metadata_s *imd;
 	struct as_sindex_metadata_s *new_imd;
-
-	// TODO shift to stats
-	cf_atomic_int                data_memory_used;
 
 	bool                         enable_histogram; // default false;
 	as_sindex_stat               stats;
@@ -633,8 +630,8 @@ extern int  as_sindex_release(as_sindex *si, char *fname, int lineno);
 extern int  as_sindex_imd_free(as_sindex_metadata *imd);
 extern int  as_sindex_sbin_free(as_sindex_bin *sbin);
 extern int  as_sindex_sbin_freeall(as_sindex_bin *sbin, int numval);
-extern bool as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes);
-extern bool as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes);
+bool as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes);
+bool as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes);
 void        as_sindex_release_arr(as_sindex *si_arr[], int si_arr_sz);
 // **************************************************************************************************
 

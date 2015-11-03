@@ -186,7 +186,7 @@ as_sindex__destroy_fn(void *param)
 		ai_btree_destroy(si->imd);
 		// Free entire usage counter for this index after the destroy
 		// code... alc code does not do it.
-		as_sindex_release_data_memory(si->imd, si->data_memory_used);
+		as_sindex_release_data_memory(si->imd, si->stats.mem_used);
 		as_sindex_destroy_pmetadata(si);
 		si->state = AS_SINDEX_INACTIVE;
 		si->flag  = 0;

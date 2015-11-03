@@ -2060,10 +2060,10 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_SINDEX_DATA_MAX_MEMORY:
 				config_val = cfg_u64_no_checks(&line);
-				if (config_val < c->sindex_data_memory_used) {
+				if (config_val <  cf_atomic64_get(c->sindex_data_memory_used)) {
 					cf_warning(AS_CFG, "sindex-data-max-memory must"
 							" be greater than existing used memory %ld (line %d)",
-							cf_atomic_int_get(c->sindex_data_memory_used), line_num);
+							cf_atomic64_get(c->sindex_data_memory_used), line_num);
 				}
 				else {
 					c->sindex_data_max_memory = config_val; // this is in addition to namespace memory
@@ -2857,10 +2857,10 @@ as_config_init(const char *config_file)
 			switch(cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
 			case CASE_NAMESPACE_SINDEX_DATA_MAX_MEMORY:
 				config_val = cfg_u64_no_checks(&line);
-				if (config_val < ns->sindex_data_memory_used) {
+				if (config_val < cf_atomic64_get(ns->sindex_data_memory_used)) {
 					cf_warning(AS_CFG, "sindex-data-max-memory must"
 							" be greater than existing used memory %ld (line %d)",
-							cf_atomic_int_get(ns->sindex_data_max_memory), line_num);
+							cf_atomic64_get(ns->sindex_data_memory_used), line_num);
 				}
 				else {
 					ns->sindex_data_max_memory = config_val; // this is in addition to namespace memory
