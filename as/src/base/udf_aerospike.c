@@ -277,9 +277,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	int si_arr_index = 0;
 	int si_cnt = 0;
 	bool has_sindex          = as_sindex_ns_has_sindex(rd->ns);
-	if (has_sindex) {
-		SINDEX_GRLOCK();
-	}
 	const char * set_name = as_index_get_set_name(rd->r, rd->ns);
 
 	as_bin * b = as_bin_get_or_create(rd, bname);
@@ -290,6 +287,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	}
 
 	if (has_sindex ) {
+		SINDEX_GRLOCK();
 		si_cnt += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
 		si_arr_index += si_cnt;
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
