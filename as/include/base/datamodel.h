@@ -623,14 +623,12 @@ typedef uint16_t as_partition_id;
  *    SYNC: fully synchronized
  *    DESYNC: unsynchronized, but moving towards synchronization
  *    ZOMBIE: sync, but moving towards absent
- *    WAIT: waiting for pending writes to flush out
  *    ABSENT: empty
  */
 #define AS_PARTITION_STATE_UNDEF 0
 #define AS_PARTITION_STATE_SYNC  1
 #define AS_PARTITION_STATE_DESYNC  2
 #define AS_PARTITION_STATE_ZOMBIE  3
-#define AS_PARTITION_STATE_WAIT 4
 #define AS_PARTITION_STATE_ABSENT 5
 #define AS_PARTITION_STATE_JOURNAL_APPLY 6 // used in faked reservations
 typedef uint8_t as_partition_state;
@@ -663,13 +661,11 @@ struct as_partition_s {
 	 * target: an actual master that we're migrating to */
 	cf_node origin, target;
 	as_partition_state state;  // used to be consistency
-	int pending_writes;  // one thread polls on this going to 0
 	int pending_migrate_tx, pending_migrate_rx;
 	bool replica_tx_onsync[AS_CLUSTER_SZ];
 
 	size_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
-	bool reject_writes;
 	bool waiting_for_master;
 	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
 	as_partition_vinfo version_info;         // the version of my partition here and now
@@ -703,7 +699,7 @@ struct as_partition_s {
 struct as_partition_reservation_s {
 	as_namespace			*ns;
 	bool					is_write;
-	bool					reject_writes;
+	uint8_t					unused;
 	as_partition_state		state;
 	uint8_t					n_dupl;
 	as_partition_id			pid;
@@ -728,7 +724,6 @@ struct as_partition_reservation_s {
 	__rsv.state = AS_PARTITION_STATE_UNDEF; \
 	__rsv.tree = 0; \
 	__rsv.n_dupl = 0; \
-	__rsv.reject_writes = false; \
 	__rsv.cluster_key = 0;
 
 #define AS_PARTITION_RESERVATION_INITP(__rsv)   \
@@ -739,7 +734,6 @@ struct as_partition_reservation_s {
 	__rsv->state = AS_PARTITION_STATE_UNDEF; \
 	__rsv->tree = 0; \
 	__rsv->n_dupl = 0; \
-	__rsv->reject_writes = false; \
 	__rsv->cluster_key = 0;
 
 
@@ -749,7 +743,6 @@ typedef struct as_partition_states_s {
 	int		sync_replica;
 	int		desync;
 	int		zombie;
-	int 	wait;
 	int		absent;
 	int		undef;
 	int		n_objects;
@@ -1150,12 +1143,20 @@ struct as_set_s {
 	char			name[AS_SET_NAME_MAX_SIZE];
 	cf_atomic64		num_elements;
 	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
-	cf_atomic64		unused1;
+	cf_atomic64		stop_writes_count;	// restrict number of records in a set
 	cf_atomic32		unused2;
 	cf_atomic32		deleted;			// empty a set (triggered via info command only)
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
 	cf_atomic32		enable_xdr;			// white-list (AS_SET_ENABLE_XDR_TRUE) or black-list (AS_SET_ENABLE_XDR_FALSE) a set for XDR replication
 };
+
+static inline bool
+as_set_stop_writes(as_set *p_set) {
+	uint64_t num_elements = cf_atomic64_get(p_set->num_elements);
+	uint64_t stop_writes_count = cf_atomic64_get(p_set->stop_writes_count);
+
+	return stop_writes_count != 0 && num_elements >= stop_writes_count;
+}
 
 // These bin functions must be below definition of struct as_namespace_s:
 
@@ -1207,7 +1208,7 @@ extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern as_namespace_id as_namespace_getid_bymsgfield(struct as_msg_field_s *fp);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);
 extern void as_namespace_bless(as_namespace *ns);
-extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool check_threshold);
+extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool apply_restrictions);
 extern as_set * as_namespace_init_set(as_namespace *ns, const char *set_name);
 extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);
 extern uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name);
