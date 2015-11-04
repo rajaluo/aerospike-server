@@ -116,6 +116,11 @@ void as_paxos_current_init(as_paxos *p);
 #define AS_PAXOS_AUTO_DUN_ALL_DELAY 5
 
 /*
+ * Maximum time, in millis, auto reset waits for a paxos transaction to finish.
+ */
+#define AS_PAXOS_AUTO_RESET_MAX_WAIT 5000
+
+/*
  * The migrate key changes once when a Paxos vote completes.
  * Every migration operation stores its key and sends it as part of its start
  * message. If a migrate message's key does not match its global key, the
@@ -2340,8 +2345,8 @@ void as_paxos_succession_check()
 	uint32_t wait_ms = g_config.hb_timeout * g_config.hb_interval * 2;
 
 	// Guard very high timeout vales.
-	if (wait_ms > 5000) {
-		wait_ms = 5000;
+	if (wait_ms > AS_PAXOS_AUTO_RESET_MAX_WAIT) {
+		wait_ms = AS_PAXOS_AUTO_RESET_MAX_WAIT;
 	}
 
 	for (int i = 0; i < AS_PAXOS_ALPHA; i++) {
