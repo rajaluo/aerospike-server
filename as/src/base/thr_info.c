@@ -3394,6 +3394,12 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					goto Error;
 				}
 			}
+			else if (0 == as_info_parameter_get(params, "set-stop-writes-count", context, &context_len) ||
+					0 == as_info_parameter_get(params, "stop-writes-count", context, &context_len)) {
+				uint64_t val = atoll(context);
+				cf_info(AS_INFO, "Changing value of set-stop-writes-count of ns %s set %s to %lu", ns->name, p_set->name, val);
+				cf_atomic64_set(&p_set->stop_writes_count, val);
+			}
 			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len) ||
 					0 == as_info_parameter_get(params, "delete", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {

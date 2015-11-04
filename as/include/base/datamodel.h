@@ -1150,12 +1150,20 @@ struct as_set_s {
 	char			name[AS_SET_NAME_MAX_SIZE];
 	cf_atomic64		num_elements;
 	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
-	cf_atomic64		unused1;
+	cf_atomic64		stop_writes_count;	// restrict number of records in a set
 	cf_atomic32		unused2;
 	cf_atomic32		deleted;			// empty a set (triggered via info command only)
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
 	cf_atomic32		enable_xdr;			// white-list (AS_SET_ENABLE_XDR_TRUE) or black-list (AS_SET_ENABLE_XDR_FALSE) a set for XDR replication
 };
+
+static inline bool
+as_set_stop_writes(as_set *p_set) {
+	uint64_t num_elements = cf_atomic64_get(p_set->num_elements);
+	uint64_t stop_writes_count = cf_atomic64_get(p_set->stop_writes_count);
+
+	return stop_writes_count != 0 && num_elements >= stop_writes_count;
+}
 
 // These bin functions must be below definition of struct as_namespace_s:
 
@@ -1207,7 +1215,7 @@ extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern as_namespace_id as_namespace_getid_bymsgfield(struct as_msg_field_s *fp);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);
 extern void as_namespace_bless(as_namespace *ns);
-extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool check_threshold);
+extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool apply_restrictions);
 extern as_set * as_namespace_init_set(as_namespace *ns, const char *set_name);
 extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);
 extern uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name);
