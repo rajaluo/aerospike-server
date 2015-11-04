@@ -1,7 +1,7 @@
 /*
  * udf_record.h
  *
- * Copyright (C) 2013-2014 Aerospike, Inc.
+ * Copyright (C) 2013-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -97,7 +97,6 @@ typedef struct udf_record_s {
 #define UDF_RECORD_FLAG_METADATA_UPDATED	0x0100   // Write/Update metadata done
 
 extern const as_rec_hooks udf_record_hooks;
-extern const as_rec_hooks udf_subrecord_hooks;
 
 //------------------------------------------------
 // Utility functions for all the wrapper as_record implementation
@@ -107,7 +106,7 @@ extern int      udf_record_open         (udf_record *);
 extern int      udf_storage_record_open (udf_record *);
 extern void     udf_record_close        (udf_record *);
 extern int      udf_storage_record_close(udf_record *);
-extern void     udf_record_init         (udf_record *);
+extern void     udf_record_init         (udf_record *, bool);
 extern void     udf_record_cleanup      (udf_record *, bool);
 extern as_val * udf_record_storage_get  (const udf_record *, const char *);
 extern bool     udf_record_bin_ishidden (const udf_record *urecord, const char *name);

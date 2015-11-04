@@ -35,8 +35,8 @@ cf_arenax_err
 cf_arenax_add_stage(cf_arenax* this)
 {
 	if (this->stage_count >= this->max_stages) {
-		cf_warning(CF_ARENAX, "could not allocate %lu-byte arena stage %u - reached maximum stage amount limit %u", 
-			this->stage_size, this->stage_count, this->max_stages);
+		cf_warning(CF_ARENAX, "can't allocate more than %u arena stages",
+				this->max_stages);
 		return CF_ARENAX_ERR_STAGE_CREATE;
 	}
 
