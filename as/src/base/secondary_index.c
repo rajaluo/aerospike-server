@@ -2015,14 +2015,29 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 	}
 }
 
+// On emptying a index
+// 		reset objects and keys
+// 		reset memory used 
+// 		add previous number of objects as deletes 
+void
+as_sindex_clear_stats_on_empty_index(as_sindex * si)
+{
+	as_sindex_release_data_memory(si->imd, si->stats.mem_used);	
+	as_sindex_reserve_data_memory(si->imd, ai_btree_get_isize(si->imd));
+
+	cf_atomic64_add(&si->stats.n_deletes, cf_atomic64_get(si->stats.n_objects));
+	cf_atomic64_set(&si->stats.n_keys, 0);
+	cf_atomic64_set(&si->stats.n_objects, 0);
+}
+
 as_sindex_status
 as_sindex_empty_index(as_sindex_metadata * imd)
 {
 	as_sindex_status ret = AS_SINDEX_OK;
 	as_sindex_pmetadata * pimd;
 	for (int i=0; i<imd->nprts; i++) {
-		pimd = &imd->pimd[i];
 		SINDEX_WLOCK(&imd->slock);
+		pimd = &imd->pimd[i];
 		SINDEX_WLOCK(&pimd->slock);
 		if (ai_btree_empty_pimd(pimd)) {
 			ret = AS_SINDEX_ERR;
@@ -2031,6 +2046,8 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 		}
 		SINDEX_UNLOCK(&pimd->slock);
 		SINDEX_UNLOCK(&imd->slock);
+
+		as_sindex_clear_stats_on_empty_index(imd->si);
 	}
 
 	return ret;
