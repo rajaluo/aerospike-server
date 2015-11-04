@@ -104,10 +104,17 @@ const char *as_hb_stats(bool verbose);
 void as_hb_dump(bool verbose);
 
 /**
- * Generate events required to transform the input  succession list to a list that would be consistent with the heart beat adjacency list. This means nodes that are in the adjacency list but missing from the succession list will generate an NODE_ARRIVE event. Nodes in the succession list but missing from the adjacency list will generate a NODE_DEPART event.
+ * Generate events required to transform the input  succession list to a list
+ * that would be consistent with the heart beat adjacency list. This means nodes
+ * that are in the adjacency list but missing from the succession list will
+ * generate an NODE_ARRIVE event. Nodes in the succession list but missing from
+ * the adjacency list will generate a NODE_DEPART event.
  *
- * @param succession_list the succession list to correct. This should be large enough to hold g_config.paxos_max_cluster_size events.
- * @param events the output events. This should be large enough to hold g_config.paxos_max_cluster_size events.
+ * @param succession_list the succession list to correct. This should be large
+ * enough to hold g_config.paxos_max_cluster_size events.
+ * @param events the output events. This should be large enough to hold
+ * g_config.paxos_max_cluster_size events.
  * @return the number of corrective events generated.
  */
-int as_hb_get_corrective_events(cf_node *succession_list, as_fabric_event_node *events);
+int as_hb_get_corrective_events(cf_node *succession_list,
+								as_fabric_event_node *events);

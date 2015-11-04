@@ -204,27 +204,56 @@ static char *as_paxos_cmd_name[] = {
 	"SET_SUCC_LIST"
 };
 
-/*
- * Show the results of the succession list.
- * Stop after the first ZERO entry, but go no longer than AS_CLUSTER_SZ.
+/**
+ * Log the succession list.
+ *
+ * @param msg the log record prefix. Cannot be NULL.
+ * @param slist the succession list to log.
  */
-void
-as_paxos_dump_succession_list(char *msg, cf_node slist[], int index)
+void as_paxos_log_succession_list(char *msg, cf_node slist[])
 {
-	// Use the smaller one
-	int list_size = ((g_config.paxos_max_cluster_size < AS_CLUSTER_SZ) ?
-					 g_config.paxos_max_cluster_size : AS_CLUSTER_SZ);
-	int i;
-	cf_info(AS_PAXOS, "DUMP SUCCESSION LIST:(%s):Index:%d\n", msg, index);
-	for (i = 0; i < list_size; i++) {
-		if (slist[i] == (cf_node) 0) {
-			break; // print no more after first zero
+	int list_size = ((g_config.paxos_max_cluster_size < AS_CLUSTER_SZ)
+						 ? g_config.paxos_max_cluster_size
+						 : AS_CLUSTER_SZ);
+
+	// Each byte of node id requires two bytes in hex, plus space for trailing
+	// comma
+	int print_buff_capacity = list_size * ((sizeof(cf_node) * 2) + 1);
+
+	// For closing and opening parens.
+	print_buff_capacity += 2;
+
+	// For the message and the space separator
+	print_buff_capacity += strnlen(msg, 100) + 1;
+
+	// For NULL terminator
+	print_buff_capacity += 1;
+
+	char buff[print_buff_capacity];
+
+	int used = 0;
+	used += snprintf(buff, print_buff_capacity, "%s [", msg);
+
+	for (int i = 0; i < list_size && used < print_buff_capacity; i++) {
+		if (slist[i] == (cf_node)0) {
+			// End of list.
+			break;
 		} else {
-			cf_info(AS_PAXOS, "(%d)[%"PRIx64"] ", i, slist[i]);
+			used += snprintf(buff + used, print_buff_capacity - used,
+							 "%" PRIx64 ",", slist[i]);
 		}
-	} // end for each node position
-	cf_info(AS_PAXOS, " END OF LIST");
-} // end as_paxos_dump_succession_list()
+	}
+
+	// Trim comma after the last node
+	if (used - 1 < print_buff_capacity) {
+		snprintf(buff + used - 1, print_buff_capacity - used, "]");
+	}
+
+	// Force terminate the buffer in case sprintf has overflown.
+	buff[print_buff_capacity - 1] = 0;
+
+	cf_info(AS_PAXOS, "%s", buff);
+}
 
 void
 dump_partition_state()
@@ -2280,8 +2309,7 @@ as_paxos_retransmit_check()
 /**
  * Monitor and correct the cluster for anomalies in succession list.
  */
-void
-as_paxos_succession_check()
+void as_paxos_succession_check()
 {
 	if (g_config.paxos_recovery_policy !=
 		AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER) {
@@ -2296,7 +2324,7 @@ as_paxos_succession_check()
 	int changes = as_hb_get_corrective_events(p->succession, corrective_events);
 	bool isIntegrityFault = !as_paxos_get_cluster_integrity(p);
 
-	cf_debug(AS_PAXOS, "Corrective changes %d. Integrity fault %s", changes,
+	cf_debug(AS_PAXOS, "Corrective changes: %d. Integrity fault: %s", changes,
 			 isIntegrityFault ? "true" : "false");
 
 	if (!changes && !isIntegrityFault) {
@@ -2310,11 +2338,18 @@ as_paxos_succession_check()
 	cf_clock now = cf_getms();
 
 	uint32_t wait_ms = g_config.hb_timeout * g_config.hb_interval * 2;
-	
+
+	// Guard very high timeout vales.
+	if (wait_ms > 5000) {
+		wait_ms = 5000;
+	}
+
 	for (int i = 0; i < AS_PAXOS_ALPHA; i++) {
 		if (p->pending[i].establish_time + wait_ms > now) {
 			// A paxos transaction has been started in between now and the last
-			// check. Give the paxos some more time to finish.
+			// check. Give the paxos some more time to finish. Its alright is
+			// the transaction has been applied. Give that transaction time. It
+			// might fix the cluster.
 			cf_info(AS_PAXOS,
 					"Paxos round running. Skipping succession list fix.");
 			return;
@@ -2332,7 +2367,8 @@ as_paxos_succession_check()
 			bool found = false;
 			for (int j = 0; j < changes; j++) {
 				if (p->succession[i] == corrective_events[j].nodeid) {
-					// we already have accounted for this node in succession list, it is most likely an expired node.
+					// We already have accounted for this node in succession
+					// list, it is most likely an expired node.
 					found = true;
 					break;
 				}
@@ -2346,6 +2382,8 @@ as_paxos_succession_check()
 		}
 	}
 
+	// In a steady state (n/w or node health), corrective_event should generate
+	// the ideal succession list.
 	for (int i = 0; i < changes; i++) {
 		if ((corrective_events[i].evt == FABRIC_NODE_ARRIVE ||
 			 corrective_events[i].evt == FABRIC_NODE_UNDUN) &&
@@ -2469,8 +2507,8 @@ as_paxos_process_retransmit_check()
 			cf_info(AS_PAXOS, "Cluster Integrity Check: Detected succession list discrepancy between node %"PRIx64" and self %"PRIx64"",
 					succ_list_index[i], g_config.self_node);
 
-			as_paxos_dump_succession_list("Paxos List", p->succession, i);
-			as_paxos_dump_succession_list("Node List", succ_list[i], i);
+			as_paxos_log_succession_list("Paxos List", p->succession);
+			as_paxos_log_succession_list("Node List", succ_list[i]);
 
 			if (g_config.auto_dun) {
 				as_hb_set_is_node_dunned(succ_list_index[i], true, "paxos");
