@@ -2324,14 +2324,14 @@ void as_paxos_succession_check()
 	int changes = as_hb_get_corrective_events(p->succession, corrective_events);
 	bool isIntegrityFault = !as_paxos_get_cluster_integrity(p);
 
-	cf_debug(AS_PAXOS, "Corrective changes: %d. Integrity fault: %s", changes,
-			 isIntegrityFault ? "true" : "false");
-
 	if (!changes && !isIntegrityFault) {
 		// There are no corrections required.
 		cf_debug(AS_PAXOS, "No succession list anomaly found. Ignoring.");
 		return;
 	}
+
+	cf_info(AS_PAXOS, "Corrective changes: %d. Integrity fault: %s", changes,
+			isIntegrityFault ? "true" : "false");
 
 	// Check if a paxos call has been triggered in between now and the last
 	// check.
@@ -2714,17 +2714,26 @@ as_paxos_thr(void *arg)
 //        if (0 != pthread_mutex_lock(&p->lock))
 //		    cf_fault(CF_FAULT_SCOPE_THREAD, CF_FAULT_SEVERITY_CRITICAL, "couldn't get Paxos lock: %s", cf_strerror(errno));
 
-		/* Only the principal will accept messages from nodes that aren't in
-		 * the succession, unless they're synchronization messages */
+		cf_node principal = as_paxos_succession_getprincipal();
+
+		/* Accept all messages from a new potential principal. This will enable
+		   hostile takeovers where this node needs to participate in the paxos
+		   for convergence. Else only the principal will accept messages from
+		   nodes that aren't in the succession, unless they're synchronization
+		   messages.
+
+		   The case to worry about would be if we accidently receive a confirm
+		   and or messages after confirm in the state transition. But in the
+		   current design that is hard to guard against.
+		 */
 		if (false == as_paxos_succession_ismember(qm->id)) {
 			cf_debug(AS_PAXOS, "got a message from a node not in the succession: %"PRIx64, qm->id);
-			if (!((self == as_paxos_succession_getprincipal()) || (AS_PAXOS_MSG_COMMAND_SYNC == c))) {
-				cf_debug(AS_PAXOS, "ignoring message from a node not in the succession: %"PRIx64" command %d", qm->id, c);
+			if (!((self == as_paxos_succession_getprincipal()) || (AS_PAXOS_MSG_COMMAND_SYNC == c || qm->id > principal))) {
+				cf_warning(AS_PAXOS, "ignoring message from a node not in the succession: %"PRIx64" command %d", qm->id, c);
 				goto cleanup;
 			}
 		}
 
-		cf_node principal = as_paxos_succession_getprincipal();
 		/*
 		 * Refuse transactions with changes initiated by a principal that is not the current principal
 		 * If the principal node is set to 0, let this through. This will be the case for sync messages
@@ -2760,8 +2769,11 @@ as_paxos_thr(void *arg)
 						break;
 					case AS_PAXOS_CHANGE_SUCCESSION_ADD:
 						if (self == t.c.id[i]) {
-							cf_info(AS_PAXOS, "Ignoring self(%"PRIx64") add from Principal %"PRIx64"", self, principal);
-							goto cleanup;
+							cf_info(AS_PAXOS, "Self(%"PRIx64") add from Principal %"PRIx64"", self, principal);
+							// Sounds draconian to skip the entire transaction
+							// on add. Breaks the cluster reset fix.
+							// Disabling this skip.
+							// goto cleanup;
 						}
 						break;
 					case AS_PAXOS_CHANGE_SUCCESSION_REMOVE:
