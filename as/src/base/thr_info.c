@@ -406,7 +406,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.udf_scan_rec_reqs);
 
 	cf_dyn_buf_append_string(db, ";udf_query_rec_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_scan_rec_reqs);
+	APPEND_STAT_COUNTER(db, g_config.udf_query_rec_reqs);
 
 	cf_dyn_buf_append_string(db, ";udf_replica_writes=");
 	APPEND_STAT_COUNTER(db, g_config.udf_replica_writes);
