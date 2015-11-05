@@ -2110,7 +2110,7 @@ as_fabric_send(cf_node node, msg *m, int priority )
 	do {
 		rv = cf_queue_pop(fne->xmit_buffer_queue, &fb, CF_QUEUE_NOWAIT);
 		if ((CF_QUEUE_OK == rv) && (fb->fd == -1 || fb->failed)) {
-			cf_warning(AS_FABRIC, "releasing fb: %p with fne: %p and fd: -1", fb, fb->fne);
+			cf_warning(AS_FABRIC, "releasing fb: %p with fne: %p and fd: %d (%s)", fb, fb->fne, fb->fd, fb->failed ? "Failed" : "Missing");
 			fabric_buffer_release(fb);
 			fb = 0;
 		}

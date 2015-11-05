@@ -2312,31 +2312,21 @@ as_paxos_retransmit_check()
 }
 
 /**
- * Monitor and correct the cluster for anomalies in succession list.
+ * Fix succession list errors by resetting the cluster at master / potential master nodes.
+ *
+ * @param cluster_integrity_fault true if the cluster has integrity fault.
+ * @param corrective_event_count the number of corrective events.
+ * @param corrective events the corrective events.
  */
-void as_paxos_succession_check()
+void as_paxos_auto_reset_master(bool cluster_integrity_fault,
+								int corrective_event_count,
+								as_fabric_event_node *corrective_events)
 {
-	if (g_config.paxos_recovery_policy !=
-		AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER) {
-		// User has not choosen reset master recovery mode.
-		return;
-	}
+
+	cf_info(AS_PAXOS, "Corrective changes: %d. Integrity fault: %s",
+			corrective_event_count, cluster_integrity_fault ? "true" : "false");
 
 	as_paxos *p = g_config.paxos;
-
-	// Events to trigger.
-	as_fabric_event_node corrective_events[AS_CLUSTER_SZ + 1];
-	int changes = as_hb_get_corrective_events(p->succession, corrective_events);
-	bool isIntegrityFault = !as_paxos_get_cluster_integrity(p);
-
-	if (!changes && !isIntegrityFault) {
-		// There are no corrections required.
-		cf_debug(AS_PAXOS, "No succession list anomaly found. Ignoring.");
-		return;
-	}
-
-	cf_info(AS_PAXOS, "Corrective changes: %d. Integrity fault: %s", changes,
-			isIntegrityFault ? "true" : "false");
 
 	// Check if a paxos call has been triggered in between now and the last
 	// check.
@@ -2361,7 +2351,7 @@ void as_paxos_succession_check()
 		}
 	}
 
-	if (isIntegrityFault) {
+	if (cluster_integrity_fault) {
 		// Add nodes in the current succession list to the changes list, to
 		// reform the cluster from scratch.
 		for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -2370,7 +2360,7 @@ void as_paxos_succession_check()
 			}
 
 			bool found = false;
-			for (int j = 0; j < changes; j++) {
+			for (int j = 0; j < corrective_event_count; j++) {
 				if (p->succession[i] == corrective_events[j].nodeid) {
 					// We already have accounted for this node in succession
 					// list, it is most likely an expired node.
@@ -2380,16 +2370,18 @@ void as_paxos_succession_check()
 			}
 
 			if (!found) {
-				corrective_events[changes].evt = FABRIC_NODE_ARRIVE;
-				corrective_events[changes].nodeid = p->succession[i];
-				changes++;
+				corrective_events[corrective_event_count].evt =
+					FABRIC_NODE_ARRIVE;
+				corrective_events[corrective_event_count].nodeid =
+					p->succession[i];
+				corrective_event_count++;
 			}
 		}
 	}
 
 	// In a steady state (n/w or node health), corrective_event should generate
 	// the ideal succession list.
-	for (int i = 0; i < changes; i++) {
+	for (int i = 0; i < corrective_event_count; i++) {
 		if ((corrective_events[i].evt == FABRIC_NODE_ARRIVE ||
 			 corrective_events[i].evt == FABRIC_NODE_UNDUN) &&
 			corrective_events[i].nodeid > g_config.self_node) {
@@ -2404,9 +2396,9 @@ void as_paxos_succession_check()
 	}
 
 	// Force a paxos spark with all events even if they are redundant.
-	corrective_events[changes++].evt = FABRIC_RESET;
+	corrective_events[corrective_event_count++].evt = FABRIC_RESET;
 
-	as_paxos_event(changes, corrective_events, NULL);
+	as_paxos_event(corrective_event_count, corrective_events, NULL);
 }
 
 /* as_paxos_dun_hold
@@ -2526,13 +2518,27 @@ as_paxos_process_retransmit_check()
 
 	cf_node p_node = as_paxos_succession_getprincipal();
 
-	if (cluster_integrity_fault) {
+	// check for succession list fault
+	as_fabric_event_node corrective_events[AS_CLUSTER_SZ + 1];
+	int corrective_event_count = as_hb_get_corrective_events(p->succession, corrective_events);	
+    bool succession_list_fault = corrective_event_count > 0;
+
+	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
+	
+	if (cluster_integrity_fault || succession_list_fault) {
+
 		char sbuf[(AS_CLUSTER_SZ * 17) + 99];
 
 		switch (g_config.paxos_recovery_policy) {
 
 			case AS_PAXOS_RECOVERY_POLICY_MANUAL:
 			{
+				if (!cluster_integrity_fault) {
+						cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
+						// only handles cluster integrity faults.
+						break;
+				}
+
 				if (are_nodes_not_dunned) {
 					snprintf(sbuf, 97, "CLUSTER INTEGRITY FAULT. [Phase 1 of 2] To fix, issue this command across all nodes:  dun:nodes=");
 				} else {
@@ -2560,6 +2566,12 @@ as_paxos_process_retransmit_check()
 
 			case AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER:
 			{
+				if (!cluster_integrity_fault) {
+					  cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
+					  // only handles cluster integrity faults.
+					  break;
+				}
+
 				static int delay = 0;
 				sbuf[0] = '\0';
 				for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -2598,6 +2610,12 @@ as_paxos_process_retransmit_check()
 
 			case AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL:
 			{
+				if (!cluster_integrity_fault) {
+					  cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
+					  // only handles cluster integrity faults.
+					  break;
+				}
+
 				static int delay = 0;
 				static cf_node principal = 0;
 				sbuf[0] = '\0';
@@ -2637,8 +2655,11 @@ as_paxos_process_retransmit_check()
 				break;
 			}
 
-			case AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER: {
-				// we will handle this in as_paxos_succession_check.
+			case AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER:
+			{
+				as_paxos_auto_reset_master(cluster_integrity_fault,
+										   corrective_event_count,
+										   corrective_events);
 				break;
 			}
 
@@ -2646,8 +2667,6 @@ as_paxos_process_retransmit_check()
 				cf_crash(AS_PAXOS, "unknown Paxos recovery policy %d", g_config.paxos_recovery_policy);
 		}
 	}
-
-	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
 
 	// If migration is enabled, we are already in a cluster, hence we are done.
 	if (as_partition_get_migration_flag() == true) {
@@ -3352,9 +3371,6 @@ as_paxos_sup_thr(void *arg)
 
 		// drop a retransmit check paxos message into the paxos message queue.
 		as_paxos_retransmit_check();
-
-		// monitor inconsistencies in succession list.
-		as_paxos_succession_check();
 	}
 
 	return(NULL);
