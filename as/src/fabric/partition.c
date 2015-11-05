@@ -189,8 +189,7 @@
  *
  */
 
-static pthread_mutex_t		g_migration_lock = PTHREAD_MUTEX_INITIALIZER;
-static bool					g_allow_migrations = true;
+static volatile uint64_t g_allow_migrations = 1;
 
 static volatile int g_multi_node = false;
 
@@ -366,43 +365,26 @@ void print_partition_versions(const char* n, size_t pid, as_partition_vinfo *par
 }
 
 // Set flag to allow migrations
-void as_partition_allow_migrations() {
-	pthread_mutex_lock(&g_migration_lock);
-
+void
+as_partition_allow_migrations()
+{
 	cf_info(AS_PARTITION, "ALLOW MIGRATIONS");
-	g_allow_migrations = true;
-
-	// For receiver-side migration flow-control:
-	//   Reset number of active incoming migrations.
-	cf_atomic_int_set(&g_config.migrate_num_incoming, 0);
-
-	pthread_mutex_unlock(&g_migration_lock);
-
-	return;
+	g_allow_migrations = 1;
 }
 
 // Set flag to disallow migrations
-void as_partition_disallow_migrations() {
-	pthread_mutex_lock(&g_migration_lock);
-
+void
+as_partition_disallow_migrations()
+{
 	cf_info(AS_PARTITION, "DISALLOW MIGRATIONS");
-	g_allow_migrations = false;
-
-	pthread_mutex_unlock(&g_migration_lock);
-
-	return;
+	g_allow_migrations = 0;
 }
 
 // get migration flag
-bool as_partition_get_migration_flag() {
-	bool flag;
-
-	pthread_mutex_lock(&g_migration_lock);
-
-	flag = g_allow_migrations;
-
-	pthread_mutex_unlock(&g_migration_lock);
-	return flag;
+bool
+as_partition_get_migration_flag()
+{
+	return g_allow_migrations == 1;
 }
 
 /* as_partition_reinit
@@ -518,30 +500,6 @@ void set_partition_desync_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
 }
 
 /*
- * Set a partition to be in the desync state
- * Should always be called within partition lock
- * Set the state variable and clean out the version info
- */
-int set_partition_desync(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, size_t pid) {
-	pthread_mutex_lock(&g_migration_lock);
-
-	int retval = -1;
-	if (true == g_allow_migrations)
-	{
-		// Always set flush flag as this is never called from as_partition_balance_new
-		set_partition_desync_lockfree(p, vinfo, ns, pid, true);
-		retval = 0;
-	}
-	else {
-		cf_info(AS_PARTITION, "{%s:%d} MIGRATIONS DISALLOWED: State cannot be changed to ABSENT", p->partition_id, ns->name);
-	}
-
-	pthread_mutex_unlock(&g_migration_lock);
-
-	return retval;
-}
-
-/*
  * Set a partition to be in the absent state
  * Should always be called within partition lock
  * Set the state variable and clean out the version info
@@ -585,19 +543,11 @@ void set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
  * Should always be called within partition lock
  * Set the state variable and clean out the version info
  */
-int set_partition_absent(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, size_t pid) {
-	pthread_mutex_lock(&g_migration_lock);
-
-	int retval = -1;
-	if (true == g_allow_migrations)
-	{
-		set_partition_absent_lockfree(p, vinfo, ns, pid, true);
-		retval = 0;
-	}
-
-	pthread_mutex_unlock(&g_migration_lock);
-
-	return retval;
+void
+set_partition_absent(as_partition *p, as_partition_vinfo *vinfo,
+		as_namespace *ns, size_t pid)
+{
+	set_partition_absent_lockfree(p, vinfo, ns, pid, true);
 }
 
 /*
@@ -634,20 +584,11 @@ void set_partition_sync_lockfree(as_partition *p, size_t pid, as_namespace *ns, 
  * Should always be called within partition lock
  * Set the state variables and initialize new version info
  */
-int set_partition_sync(as_partition *p, size_t pid, as_namespace *ns) {
-	pthread_mutex_lock(&g_migration_lock);
-
-	int retval = -1;
-	if (true == g_allow_migrations)
-	{
-		cf_detail(AS_PARTITION, "{%s:%d} Setting to SYNC", ns->name, pid);
-		set_partition_sync_lockfree(p, pid, ns, true);
-		retval = 0;
-	}
-
-	pthread_mutex_unlock(&g_migration_lock);
-
-	return retval;
+void
+set_partition_sync(as_partition *p, size_t pid, as_namespace *ns)
+{
+	cf_detail(AS_PARTITION, "{%s:%d} Setting to SYNC", ns->name, pid);
+	set_partition_sync_lockfree(p, pid, ns, true);
 }
 
 /*
@@ -1900,11 +1841,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 	if (AS_PARTITION_STATE_ZOMBIE == p->state && 0 == p->pending_migrate_tx) {
 		cf_detail(AS_PARTITION, "migration tx callback: moving to ABSENT {%s:%d}", ns->name, pid);
 
-		if (0 != set_partition_absent(p, &ns->partitions[pid].version_info, ns, pid)) {
-			cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. Migrations are disallowed", ns->name, pid);
-			pthread_mutex_unlock(&p->lock);
-			return AS_MIGRATE_CB_FAIL;
-		}
+		set_partition_absent(p, &ns->partitions[pid].version_info, ns, pid);
 		cf_atomic_int_incr(&g_config.partition_generation);
 	}
 
@@ -1959,7 +1896,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 	p = &ns->partitions[pid];
 
 	// possible to get migrate requests before our paxos is up. Prevent that.
-	if ((g_config.paxos == 0) || (g_config.paxos->ready == false) || (g_allow_migrations == false)) {
+	if ((g_config.paxos == 0) || (g_config.paxos->ready == false) || (g_allow_migrations == 0)) {
 		cf_detail(AS_PARTITION, "{%s:%d} migrate rx, paxos unconfigured, try later", ns->name, pid);
 		return AS_MIGRATE_CB_AGAIN;
 	}
@@ -2153,7 +2090,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 
 			if (orig_cluster_key != as_paxos_get_cluster_key()) {
 				pthread_mutex_unlock(&p->lock);
-				rv = AS_MIGRATE_CB_FAIL;
+				rv = AS_MIGRATE_CB_AGAIN;
 				break; // out of switch
 			}
 
@@ -2203,13 +2140,10 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 
 					// apply write journal
 					apply_write_journal(ns, pid);
-					if (0 != set_partition_sync(p, pid, ns)) {
-						cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. Migrations are disallowed", ns->name, pid);
-						rv = AS_MIGRATE_CB_AGAIN;
-						cf_atomic_int_incr(&g_config.partition_generation);
-						break; // out of switch
-					}
+
+					set_partition_sync(p, pid, ns);
 					cf_atomic_int_incr(&g_config.partition_generation);
+
 					cf_debug(AS_PARTITION, "{%s:%d} migrate completed, partition sync", ns->name, pid);
 					// if this is not a master, we are done
 					if (g_config.self_node != p->replica[0]) {
