@@ -2696,16 +2696,15 @@ as_hb_dump(bool verbose)
 /**
  * Check if a node is alive. Dunned nodes are considered dead.
  */
-bool
-as_hb_is_alive(cf_node node)
+bool as_hb_is_alive(cf_node node)
 {
 	// consider nodes in adjacency list and not dunned as alive.
 	return !as_hb_get_is_node_dunned(node);
 }
 
-
-/** 
- * Find nodes that have are not in a succession list, but part of the adjacency list.
+/**
+ * Find nodes that have are not in a succession list, but part of the adjacency
+ * list.
  */
 int as_hb_find_new_nodes_reduce(void *key, void *data, void *udata)
 {
@@ -2734,9 +2733,17 @@ int as_hb_find_new_nodes_reduce(void *key, void *data, void *udata)
 }
 
 /**
- * Generate events required to transform the input  succession list to a list that would be consistent with the heart beat adjacency list. This means nodes that are in the adjacency list but missing from the succession list will generate an NODE_ARRIVE event. Nodes in the succession list but missing from the adjacency list will generate a NODE_DEPART event.
- * @param succession_list the succession list to correct. This should be large enough to hold g_config.paxos_max_cluster_size events.
- * @param events the output events. This should be large enough to hold g_config.paxos_max_cluster_size events.
+ * Generate events required to transform the input  succession list to a list
+ * that would be consistent with the heart beat adjacency list. This means nodes
+ * that are in the adjacency list but missing from the succession list will
+ * generate an NODE_ARRIVE event. Nodes in the succession list but missing from
+ * the adjacency list will generate a NODE_DEPART event.
+ *
+ * @param succession_list the succession list to correct. This should be large
+ * enough to hold g_config.paxos_max_cluster_size events.
+ * @param events the output events. This should be large enough to hold
+ * g_config.paxos_max_cluster_size events.
+ *
  * @return the number of corrective events generated.
  */
 int as_hb_get_corrective_events(cf_node *succession_list,
@@ -2749,7 +2756,7 @@ int as_hb_get_corrective_events(cf_node *succession_list,
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 
 		if (succession_list[i] == 0) {
-			continue;
+			break;
 		}
 
 		// Check if the node is alive.
