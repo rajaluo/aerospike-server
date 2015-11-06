@@ -116,6 +116,11 @@ void as_paxos_current_init(as_paxos *p);
 #define AS_PAXOS_AUTO_DUN_ALL_DELAY 5
 
 /*
+ * Maximum time, in millis, auto reset waits for a paxos transaction to finish.
+ */
+#define AS_PAXOS_AUTO_RESET_MAX_WAIT 5000
+
+/*
  * The migrate key changes once when a Paxos vote completes.
  * Every migration operation stores its key and sends it as part of its start
  * message. If a migrate message's key does not match its global key, the
@@ -204,27 +209,56 @@ static char *as_paxos_cmd_name[] = {
 	"SET_SUCC_LIST"
 };
 
-/*
- * Show the results of the succession list.
- * Stop after the first ZERO entry, but go no longer than AS_CLUSTER_SZ.
+/**
+ * Log the succession list.
+ *
+ * @param msg the log record prefix. Cannot be NULL.
+ * @param slist the succession list to log.
  */
-void
-as_paxos_dump_succession_list(char *msg, cf_node slist[], int index)
+void as_paxos_log_succession_list(char *msg, cf_node slist[])
 {
-	// Use the smaller one
-	int list_size = ((g_config.paxos_max_cluster_size < AS_CLUSTER_SZ) ?
-					 g_config.paxos_max_cluster_size : AS_CLUSTER_SZ);
-	int i;
-	cf_info(AS_PAXOS, "DUMP SUCCESSION LIST:(%s):Index:%d\n", msg, index);
-	for (i = 0; i < list_size; i++) {
-		if (slist[i] == (cf_node) 0) {
-			break; // print no more after first zero
+	int list_size = ((g_config.paxos_max_cluster_size < AS_CLUSTER_SZ)
+						 ? g_config.paxos_max_cluster_size
+						 : AS_CLUSTER_SZ);
+
+	// Each byte of node id requires two bytes in hex, plus space for trailing
+	// comma
+	int print_buff_capacity = list_size * ((sizeof(cf_node) * 2) + 1);
+
+	// For closing and opening parens.
+	print_buff_capacity += 2;
+
+	// For the message and the space separator
+	print_buff_capacity += strnlen(msg, 100) + 1;
+
+	// For NULL terminator
+	print_buff_capacity += 1;
+
+	char buff[print_buff_capacity];
+
+	int used = 0;
+	used += snprintf(buff, print_buff_capacity, "%s [", msg);
+
+	for (int i = 0; i < list_size && used < print_buff_capacity; i++) {
+		if (slist[i] == (cf_node)0) {
+			// End of list.
+			break;
 		} else {
-			cf_info(AS_PAXOS, "(%d)[%"PRIx64"] ", i, slist[i]);
+			used += snprintf(buff + used, print_buff_capacity - used,
+							 "%" PRIx64 ",", slist[i]);
 		}
-	} // end for each node position
-	cf_info(AS_PAXOS, " END OF LIST");
-} // end as_paxos_dump_succession_list()
+	}
+
+	// Trim comma after the last node
+	if (used - 1 < print_buff_capacity) {
+		snprintf(buff + used - 1, print_buff_capacity - used, "]");
+	}
+
+	// Force terminate the buffer in case sprintf has overflown.
+	buff[print_buff_capacity - 1] = 0;
+
+	cf_info(AS_PAXOS, "%s", buff);
+}
 
 void
 dump_partition_state()
@@ -2278,50 +2312,46 @@ as_paxos_retransmit_check()
 }
 
 /**
- * Monitor and correct the cluster for anomalies in succession list.
+ * Fix succession list errors by resetting the cluster at master / potential master nodes.
+ *
+ * @param cluster_integrity_fault true if the cluster has integrity fault.
+ * @param corrective_event_count the number of corrective events.
+ * @param corrective events the corrective events.
  */
-void
-as_paxos_succession_check()
+void as_paxos_auto_reset_master(bool cluster_integrity_fault,
+								int corrective_event_count,
+								as_fabric_event_node *corrective_events)
 {
-	if (g_config.paxos_recovery_policy !=
-		AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER) {
-		// User has not choosen reset master recovery mode.
-		return;
-	}
+
+	cf_info(AS_PAXOS, "Corrective changes: %d. Integrity fault: %s",
+			corrective_event_count, cluster_integrity_fault ? "true" : "false");
 
 	as_paxos *p = g_config.paxos;
-
-	// Events to trigger.
-	as_fabric_event_node corrective_events[AS_CLUSTER_SZ + 1];
-	int changes = as_hb_get_corrective_events(p->succession, corrective_events);
-	bool isIntegrityFault = !as_paxos_get_cluster_integrity(p);
-
-	cf_debug(AS_PAXOS, "Corrective changes %d. Integrity fault %s", changes,
-			 isIntegrityFault ? "true" : "false");
-
-	if (!changes && !isIntegrityFault) {
-		// There are no corrections required.
-		cf_debug(AS_PAXOS, "No succession list anomaly found. Ignoring.");
-		return;
-	}
 
 	// Check if a paxos call has been triggered in between now and the last
 	// check.
 	cf_clock now = cf_getms();
 
 	uint32_t wait_ms = g_config.hb_timeout * g_config.hb_interval * 2;
-	
+
+	// Guard very high timeout vales.
+	if (wait_ms > AS_PAXOS_AUTO_RESET_MAX_WAIT) {
+		wait_ms = AS_PAXOS_AUTO_RESET_MAX_WAIT;
+	}
+
 	for (int i = 0; i < AS_PAXOS_ALPHA; i++) {
 		if (p->pending[i].establish_time + wait_ms > now) {
 			// A paxos transaction has been started in between now and the last
-			// check. Give the paxos some more time to finish.
+			// check. Give the paxos some more time to finish. Its alright is
+			// the transaction has been applied. Give that transaction time. It
+			// might fix the cluster.
 			cf_info(AS_PAXOS,
 					"Paxos round running. Skipping succession list fix.");
 			return;
 		}
 	}
 
-	if (isIntegrityFault) {
+	if (cluster_integrity_fault) {
 		// Add nodes in the current succession list to the changes list, to
 		// reform the cluster from scratch.
 		for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -2330,23 +2360,28 @@ as_paxos_succession_check()
 			}
 
 			bool found = false;
-			for (int j = 0; j < changes; j++) {
+			for (int j = 0; j < corrective_event_count; j++) {
 				if (p->succession[i] == corrective_events[j].nodeid) {
-					// we already have accounted for this node in succession list, it is most likely an expired node.
+					// We already have accounted for this node in succession
+					// list, it is most likely an expired node.
 					found = true;
 					break;
 				}
 			}
 
 			if (!found) {
-				corrective_events[changes].evt = FABRIC_NODE_ARRIVE;
-				corrective_events[changes].nodeid = p->succession[i];
-				changes++;
+				corrective_events[corrective_event_count].evt =
+					FABRIC_NODE_ARRIVE;
+				corrective_events[corrective_event_count].nodeid =
+					p->succession[i];
+				corrective_event_count++;
 			}
 		}
 	}
 
-	for (int i = 0; i < changes; i++) {
+	// In a steady state (n/w or node health), corrective_event should generate
+	// the ideal succession list.
+	for (int i = 0; i < corrective_event_count; i++) {
 		if ((corrective_events[i].evt == FABRIC_NODE_ARRIVE ||
 			 corrective_events[i].evt == FABRIC_NODE_UNDUN) &&
 			corrective_events[i].nodeid > g_config.self_node) {
@@ -2361,9 +2396,9 @@ as_paxos_succession_check()
 	}
 
 	// Force a paxos spark with all events even if they are redundant.
-	corrective_events[changes++].evt = FABRIC_RESET;
+	corrective_events[corrective_event_count++].evt = FABRIC_RESET;
 
-	as_paxos_event(changes, corrective_events, NULL);
+	as_paxos_event(corrective_event_count, corrective_events, NULL);
 }
 
 /* as_paxos_dun_hold
@@ -2469,8 +2504,8 @@ as_paxos_process_retransmit_check()
 			cf_info(AS_PAXOS, "Cluster Integrity Check: Detected succession list discrepancy between node %"PRIx64" and self %"PRIx64"",
 					succ_list_index[i], g_config.self_node);
 
-			as_paxos_dump_succession_list("Paxos List", p->succession, i);
-			as_paxos_dump_succession_list("Node List", succ_list[i], i);
+			as_paxos_log_succession_list("Paxos List", p->succession);
+			as_paxos_log_succession_list("Node List", succ_list[i]);
 
 			if (g_config.auto_dun) {
 				as_hb_set_is_node_dunned(succ_list_index[i], true, "paxos");
@@ -2483,13 +2518,27 @@ as_paxos_process_retransmit_check()
 
 	cf_node p_node = as_paxos_succession_getprincipal();
 
-	if (cluster_integrity_fault) {
+	// check for succession list fault
+	as_fabric_event_node corrective_events[AS_CLUSTER_SZ + 1];
+	int corrective_event_count = as_hb_get_corrective_events(p->succession, corrective_events);	
+    bool succession_list_fault = corrective_event_count > 0;
+
+	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
+	
+	if (cluster_integrity_fault || succession_list_fault) {
+
 		char sbuf[(AS_CLUSTER_SZ * 17) + 99];
 
 		switch (g_config.paxos_recovery_policy) {
 
 			case AS_PAXOS_RECOVERY_POLICY_MANUAL:
 			{
+				if (!cluster_integrity_fault) {
+						cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
+						// only handles cluster integrity faults.
+						break;
+				}
+
 				if (are_nodes_not_dunned) {
 					snprintf(sbuf, 97, "CLUSTER INTEGRITY FAULT. [Phase 1 of 2] To fix, issue this command across all nodes:  dun:nodes=");
 				} else {
@@ -2517,6 +2566,12 @@ as_paxos_process_retransmit_check()
 
 			case AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER:
 			{
+				if (!cluster_integrity_fault) {
+					  cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
+					  // only handles cluster integrity faults.
+					  break;
+				}
+
 				static int delay = 0;
 				sbuf[0] = '\0';
 				for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -2555,6 +2610,12 @@ as_paxos_process_retransmit_check()
 
 			case AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL:
 			{
+				if (!cluster_integrity_fault) {
+					  cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
+					  // only handles cluster integrity faults.
+					  break;
+				}
+
 				static int delay = 0;
 				static cf_node principal = 0;
 				sbuf[0] = '\0';
@@ -2594,8 +2655,11 @@ as_paxos_process_retransmit_check()
 				break;
 			}
 
-			case AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER: {
-				// we will handle this in as_paxos_succession_check.
+			case AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER:
+			{
+				as_paxos_auto_reset_master(cluster_integrity_fault,
+										   corrective_event_count,
+										   corrective_events);
 				break;
 			}
 
@@ -2603,8 +2667,6 @@ as_paxos_process_retransmit_check()
 				cf_crash(AS_PAXOS, "unknown Paxos recovery policy %d", g_config.paxos_recovery_policy);
 		}
 	}
-
-	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
 
 	// If migration is enabled, we are already in a cluster, hence we are done.
 	if (as_partition_get_migration_flag() == true) {
@@ -2676,17 +2738,26 @@ as_paxos_thr(void *arg)
 //        if (0 != pthread_mutex_lock(&p->lock))
 //		    cf_fault(CF_FAULT_SCOPE_THREAD, CF_FAULT_SEVERITY_CRITICAL, "couldn't get Paxos lock: %s", cf_strerror(errno));
 
-		/* Only the principal will accept messages from nodes that aren't in
-		 * the succession, unless they're synchronization messages */
+		cf_node principal = as_paxos_succession_getprincipal();
+
+		/* Accept all messages from a new potential principal. This will enable
+		   hostile takeovers where this node needs to participate in the paxos
+		   for convergence. Else only the principal will accept messages from
+		   nodes that aren't in the succession, unless they're synchronization
+		   messages.
+
+		   The case to worry about would be if we accidently receive a confirm
+		   and or messages after confirm in the state transition. But in the
+		   current design that is hard to guard against.
+		 */
 		if (false == as_paxos_succession_ismember(qm->id)) {
 			cf_debug(AS_PAXOS, "got a message from a node not in the succession: %"PRIx64, qm->id);
-			if (!((self == as_paxos_succession_getprincipal()) || (AS_PAXOS_MSG_COMMAND_SYNC == c))) {
-				cf_debug(AS_PAXOS, "ignoring message from a node not in the succession: %"PRIx64" command %d", qm->id, c);
+			if (!((self == principal) || (AS_PAXOS_MSG_COMMAND_SYNC == c || qm->id > principal))) {
+				cf_warning(AS_PAXOS, "ignoring message from a node not in the succession: %"PRIx64" command %d", qm->id, c);
 				goto cleanup;
 			}
 		}
 
-		cf_node principal = as_paxos_succession_getprincipal();
 		/*
 		 * Refuse transactions with changes initiated by a principal that is not the current principal
 		 * If the principal node is set to 0, let this through. This will be the case for sync messages
@@ -2722,8 +2793,11 @@ as_paxos_thr(void *arg)
 						break;
 					case AS_PAXOS_CHANGE_SUCCESSION_ADD:
 						if (self == t.c.id[i]) {
-							cf_info(AS_PAXOS, "Ignoring self(%"PRIx64") add from Principal %"PRIx64"", self, principal);
-							goto cleanup;
+							cf_info(AS_PAXOS, "Self(%"PRIx64") add from Principal %"PRIx64"", self, principal);
+							// Sounds draconian to skip the entire transaction
+							// on add. Breaks the cluster reset fix.
+							// Disabling this skip.
+							// goto cleanup;
 						}
 						break;
 					case AS_PAXOS_CHANGE_SUCCESSION_REMOVE:
@@ -3297,9 +3371,6 @@ as_paxos_sup_thr(void *arg)
 
 		// drop a retransmit check paxos message into the paxos message queue.
 		as_paxos_retransmit_check();
-
-		// monitor inconsistencies in succession list.
-		as_paxos_succession_check();
 	}
 
 	return(NULL);
