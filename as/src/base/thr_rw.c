@@ -2736,8 +2736,7 @@ write_process(cf_node node, msg *m, bool respond)
 			goto Out;
 		}
 
-		if( tr.rsv.state == AS_PARTITION_STATE_ABSENT)
-		{
+		if (tr.rsv.state == AS_PARTITION_STATE_ABSENT) {
 			cf_debug_digest(AS_RW, keyd, "[PROLE STATE MISMATCH:1] TID(0) Partition PID(%u) State is Absent or other(%u). Return to Sender.",
 					tr.rsv.pid, tr.rsv.state );
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
@@ -2747,8 +2746,8 @@ write_process(cf_node node, msg *m, bool respond)
 			cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
 			cf_debug_digest(AS_RW, keyd, "[CK MISMATCH] P PID(%u) State ABSENT or other(%u):",
 					tr.rsv.pid, tr.rsv.state );
-		} else
-		{
+		}
+		else {
 			cf_debug_digest(AS_RW, keyd, "[PROLE write]: SingleBin(%d) generation(%d):",
 					ns->single_bin, generation );
 
@@ -2843,15 +2842,14 @@ write_process(cf_node node, msg *m, bool respond)
 		// See if we're being asked to write into an ABSENT PROLE PARTITION.
 		// If so, then DO NOT WRITE.  Instead, return an error so that the
 		// Master will retry with the correct node.
-		if (rsv.state == AS_PARTITION_STATE_ABSENT)
-		{
+		if (rsv.state == AS_PARTITION_STATE_ABSENT) {
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 			cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
 			cf_debug_digest(AS_RW, keyd,
 					"[PROLE STATE MISMATCH:2] TID(0) P PID(%u) State:ABSENT or other(%u). Return to Sender. :",
 					rsv.pid, rsv.state  );
-
-		} else {
+		}
+		else {
 			cf_debug_digest(AS_RW, keyd, "Write Pickled: PID(%u) PState(%d) Gen(%d):",
 					rsv.pid, rsv.p->state, generation);
 
@@ -3357,6 +3355,7 @@ int write_local_preprocessing(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 
+	// TODO - when we're *sure* this never happens, remove:
 	if (AS_PARTITION_STATE_DESYNC == tr->rsv.state) {
 		cf_crash(AS_RW, "{%s:%d} write_local: partition is desync - writes will flow from master. digest %"PRIx64"",
 				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
@@ -6267,8 +6266,7 @@ rw_multi_process(cf_node node, msg *m)
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, 0);
 	cf_atomic_int_incr(&g_config.wprocess_tree_count);
 	reserved = true;
-	if (rsv.state == AS_PARTITION_STATE_ABSENT)
-	{
+	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
 		result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 		cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
 		cf_debug_digest(AS_RW, keyd,

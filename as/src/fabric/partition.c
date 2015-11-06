@@ -189,8 +189,8 @@
  *
  */
 
-static volatile uint64_t g_allow_migrations = 1;
-
+// Using int for 4-byte size, but maintaining bool semantics.
+static volatile int g_allow_migrations = true;
 static volatile int g_multi_node = false;
 
 #define BALANCE_INIT_UNRESOLVED	0
@@ -369,7 +369,7 @@ void
 as_partition_allow_migrations()
 {
 	cf_info(AS_PARTITION, "ALLOW MIGRATIONS");
-	g_allow_migrations = 1;
+	g_allow_migrations = true;
 }
 
 // Set flag to disallow migrations
@@ -377,14 +377,14 @@ void
 as_partition_disallow_migrations()
 {
 	cf_info(AS_PARTITION, "DISALLOW MIGRATIONS");
-	g_allow_migrations = 0;
+	g_allow_migrations = false;
 }
 
 // get migration flag
 bool
 as_partition_get_migration_flag()
 {
-	return g_allow_migrations == 1;
+	return g_allow_migrations;
 }
 
 /* as_partition_reinit
@@ -472,6 +472,7 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 
 /*
  * Set a partition to be in the desync state
+ * Should always be called within partition lock
  * Set the state variable and clean out the version info
  */
 void set_partition_desync_lockfree(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, size_t pid, bool flush) {
@@ -539,18 +540,6 @@ void set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
 }
 
 /*
- * Set a partition to be in the absent state
- * Should always be called within partition lock
- * Set the state variable and clean out the version info
- */
-void
-set_partition_absent(as_partition *p, as_partition_vinfo *vinfo,
-		as_namespace *ns, size_t pid)
-{
-	set_partition_absent_lockfree(p, vinfo, ns, pid, true);
-}
-
-/*
  * Set a partition to be in the sync state
  * Should always be called within partition lock
  * Set the state variables and initialize new version info
@@ -576,31 +565,6 @@ void set_partition_sync_lockfree(as_partition *p, size_t pid, as_namespace *ns, 
 	/*copy new partition version. it is always set to the the primary version*/
 	memcpy(&p->version_info, &p->primary_version_info, sizeof(as_partition_vinfo));
 	print_partition_version(ns, pid);
-	return;
-}
-
-/*
- * Set a partition to be in the sync state
- * Should always be called within partition lock
- * Set the state variables and initialize new version info
- */
-void
-set_partition_sync(as_partition *p, size_t pid, as_namespace *ns)
-{
-	cf_detail(AS_PARTITION, "{%s:%d} Setting to SYNC", ns->name, pid);
-	set_partition_sync_lockfree(p, pid, ns, true);
-}
-
-/*
- * Set a partition to be in the zombie state
- * Should always be called within partition lock
- * Set the state variables and initialize new version info
- */
-void set_partition_zombie(as_partition *p, as_namespace *ns, size_t pid) {
-	if ((NULL == p) || (NULL == ns)) /* params */
-		return;
-	p->state = AS_PARTITION_STATE_ZOMBIE;
-	cf_debug(AS_PARTITION, "{%s:%d} Setting to ZOMBIE", ns->name, pid);
 	return;
 }
 
@@ -1581,9 +1545,6 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 
 			as_partition *p = &ns->partitions[j];
 			char state_c = as_partition_getstate_str(p->state);
-			//if (state_c == 'Z' && p->waiting_for_master) {
-			//	state_c = 'X';
-			//}
 
 			// find myself in the replica list
 			int replica_idx;
@@ -1841,7 +1802,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 	if (AS_PARTITION_STATE_ZOMBIE == p->state && 0 == p->pending_migrate_tx) {
 		cf_detail(AS_PARTITION, "migration tx callback: moving to ABSENT {%s:%d}", ns->name, pid);
 
-		set_partition_absent(p, &ns->partitions[pid].version_info, ns, pid);
+		set_partition_absent_lockfree(p, &ns->partitions[pid].version_info, ns, pid, true);
 		cf_atomic_int_incr(&g_config.partition_generation);
 	}
 
@@ -1896,7 +1857,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 	p = &ns->partitions[pid];
 
 	// possible to get migrate requests before our paxos is up. Prevent that.
-	if ((g_config.paxos == 0) || (g_config.paxos->ready == false) || (g_allow_migrations == 0)) {
+	if ((g_config.paxos == 0) || (g_config.paxos->ready == false) || ! g_allow_migrations) {
 		cf_detail(AS_PARTITION, "{%s:%d} migrate rx, paxos unconfigured, try later", ns->name, pid);
 		return AS_MIGRATE_CB_AGAIN;
 	}
@@ -2141,7 +2102,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 					// apply write journal
 					apply_write_journal(ns, pid);
 
-					set_partition_sync(p, pid, ns);
+					set_partition_sync_lockfree(p, pid, ns, true);
 					cf_atomic_int_incr(&g_config.partition_generation);
 
 					cf_debug(AS_PARTITION, "{%s:%d} migrate completed, partition sync", ns->name, pid);
@@ -3071,8 +3032,8 @@ as_partition_balance()
 					  && (p->state != AS_PARTITION_STATE_ZOMBIE));
 				if (!ok)
 					cf_warning(AS_PARTITION,
-							"{	%s:%d} partition version is null but state is SYNC or ZOMBIE or WAIT %d %"PRIx64"",
-							ns->	name, j, p->state, self);
+							"{%s:%d} partition version is null but state is SYNC or ZOMBIE or WAIT %d %"PRIx64"",
+							ns->name, j, p->state, self);
 			} else {
 				ok = ((p->state == AS_PARTITION_STATE_SYNC)
 					  || (p->state == AS_PARTITION_STATE_ZOMBIE));
@@ -3163,7 +3124,6 @@ as_partition_balance()
 						cf_debug(AS_PARTITION, "{%s:%d} Creating lost partition %"PRIx64"", ns->name, j, self);
 					}
 					/* Copy version info to global state for use below */
-					// TODO: Don't copy this K times
 					memcpy(&paxos->c_partition_vinfo[i][n_index][j], &new_version_for_lost_partitions, sizeof(new_version_for_lost_partitions));
 					paxos->c_partition_size[i][n_index][j] = p->vp->elements;
 					paxos->c_partition_size[i][n_index][j] += p->sub_vp->elements;
@@ -3261,7 +3221,8 @@ as_partition_balance()
 							p->origin = HV(j, first_sync_node);
 							set_partition_desync_lockfree(p, &ns->partitions[j].version_info, ns, j, false);
 							cf_debug(AS_PARTITION, "{%s:%d} Master case 6c: being marked desync, expect data from %"PRIx64" and %d duplicate partitions", ns->name, j, HV(j, first_sync_node), n_dupl);
-						} else {
+						}
+						else {
 							p->state = AS_PARTITION_STATE_SYNC;
 						}
 						/*
@@ -3406,15 +3367,8 @@ as_partition_balance()
 							p->pending_migrate_rx++;
 							p->origin = HV(j, 0);
 							cf_debug(AS_PARTITION, "{%s:%d} Replica will wait for migration back from master %"PRIx64"", ns->name, j, HV(j, 0));
-							//if (my_index_in_hvlist == first_sync_node) {
-							// above if is wrong, should check if ptn version is same as primary version
-							p->state = AS_PARTITION_STATE_SYNC;
-							//} else {
-							//	set_partition_desync_lockfree(p, &ns->partitions[j].version_info, ns, j, false);
-							//}
-						} else {
-							p->state = AS_PARTITION_STATE_SYNC;
 						}
+						p->state = AS_PARTITION_STATE_SYNC;
 						break; // out of switch
 					}
 					/*
@@ -3423,7 +3377,7 @@ as_partition_balance()
 					 */
 					if (p->pending_migrate_tx || p->waiting_for_master) {
 						cf_debug(AS_PARTITION, "{%s:%d} Replica case 6b: becoming zombie replica", ns->name, j);
-						set_partition_zombie(p, ns, j);
+						p->state = AS_PARTITION_STATE_ZOMBIE;
 					}
 					else  { // throwing away duplicate partition
 						cf_debug(AS_PARTITION, "{%s:%d} Replica case 6: dropping replica", ns->name, j);
@@ -3490,9 +3444,6 @@ as_partition_balance()
 
 	as_partition_allow_migrations();
 
-	/* Run all the queued migrations: this happens after the release of
-	 * the state lock to ensure that writes have begun to flow to their
-	 * new homes */
 	partition_migrate_record pmr;
 	while (0 == cf_queue_pop(mq, &pmr, 0)) {
 		cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));

@@ -699,6 +699,7 @@ struct as_partition_s {
 struct as_partition_reservation_s {
 	as_namespace			*ns;
 	bool					is_write;
+	uint8_t					unused;
 	as_partition_state		state;
 	uint8_t					n_dupl;
 	as_partition_id			pid;
