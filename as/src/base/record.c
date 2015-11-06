@@ -462,15 +462,13 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
 	as_sindex * si_arr[2 * ns->sindex_cnt];
 	int si_arr_index = 0;
-	int si_cnt = 0;
 	const char* set_name = NULL;
 	set_name = as_index_get_set_name(rd->r, ns);
 	
 	// RESERVE SIs for old bins
 	// Cannot reserve SIs for new bins as we do not know the bin-id yet
 	for (int i=0; i<old_n_bins; i++) {
-		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd->bins[i].id, &si_arr[si_arr_index]);
-		si_arr_index += si_cnt;
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd->bins[i].id, &si_arr[si_arr_index]);
 	}
 	
 	if ((delta_bins < 0) && has_sindex) {
@@ -522,8 +520,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		}
 
 		if (has_sindex) {
-			si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, b->id, &si_arr[si_arr_index]);
-			si_arr_index += si_cnt;
+			si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, b->id, &si_arr[si_arr_index]);
 			sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
 		}
 	}
