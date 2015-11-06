@@ -584,7 +584,8 @@ static void
 qtr_set_abort(as_query_transaction *qtr, int result_code, char *fname, int lineno)
 {
 	qtr_lock(qtr);
-	if (qtr->state == AS_QTR_STATE_RUNNING) {
+	if (qtr->state == AS_QTR_STATE_RUNNING
+		|| qtr->state == AS_QTR_STATE_DONE) {
 		cf_debug(AS_QUERY, "Query %p Aborted at %s:%d", qtr, fname, lineno);
 		qtr->state       = AS_QTR_STATE_ABORT;
 		qtr->result_code = result_code;
@@ -816,7 +817,7 @@ static void
 query_release_fd(as_query_transaction *qtr)
 {
 	if (qtr && qtr->fd_h) {
-		as_release_file_handle(qtr->fd_h);
+		as_end_of_transaction(qtr->fd_h, qtr_is_abort(qtr));
 		qtr->fd_h = NULL;
 	}
 }
@@ -1238,10 +1239,11 @@ static void
 query_send_bg_udf_response(as_transaction *tr)
 {
 	cf_detail(AS_QUERY, "Send Fin for Background UDF");
-	as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK);
+	bool force_close = as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK);
 	// Note: should be inside release file handle ?
 	tr->proto_fd_h->last_used = cf_getms();
-	as_release_file_handle(tr->proto_fd_h);
+	as_end_of_transaction(tr->proto_fd_h, force_close);
+	tr->proto_fd_h = 0;
 }
 
 static bool
