@@ -133,6 +133,20 @@ void
 as_paxos_set_cluster_key(uint64_t cluster_key)
 {
 	g_cluster_key = cluster_key;
+
+	// Acquire and release each partition lock to ensure threads acquiring
+	// a partition lock after this loop will be forced to check the latest
+	// cluster key.
+	for (int i = 0; i < g_config.namespaces; i++) {
+		as_namespace *ns = g_config.namespace[i];
+
+		for (int j = 0; j < AS_PARTITIONS; j++) {
+			as_partition *p = &ns->partitions[j];
+
+			pthread_mutex_lock(&p->lock);
+			pthread_mutex_unlock(&p->lock);
+		}
+	}
 }
 
 // Get the cluster key

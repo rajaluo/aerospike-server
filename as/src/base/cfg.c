@@ -552,6 +552,7 @@ typedef enum {
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
 	CASE_NAMESPACE_SET_ENABLE_XDR,
+	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
 	// Deprecated:
 	CASE_NAMESPACE_SET_EVICT_HWM_COUNT,
 	CASE_NAMESPACE_SET_EVICT_HWM_PCT,
@@ -952,6 +953,7 @@ const cfg_opt NAMESPACE_STORAGE_KV_OPTS[] = {
 const cfg_opt NAMESPACE_SET_OPTS[] = {
 		{ "set-disable-eviction",			CASE_NAMESPACE_SET_DISABLE_EVICTION },
 		{ "set-enable-xdr",					CASE_NAMESPACE_SET_ENABLE_XDR },
+		{ "set-stop-writes-count",			CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
 		{ "set-evict-hwm-count",			CASE_NAMESPACE_SET_EVICT_HWM_COUNT },
 		{ "set-evict-hwm-pct",				CASE_NAMESPACE_SET_EVICT_HWM_PCT },
 		{ "set-stop-write-count",			CASE_NAMESPACE_SET_STOP_WRITE_COUNT },
@@ -2805,6 +2807,9 @@ as_config_init(const char *config_file)
 					cfg_unknown_val_tok_1(&line);
 					break;
 				}
+				break;
+			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
+				p_set->stop_writes_count = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SET_EVICT_HWM_COUNT:
 			case CASE_NAMESPACE_SET_EVICT_HWM_PCT:
