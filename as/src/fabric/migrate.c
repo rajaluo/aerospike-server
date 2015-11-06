@@ -2219,8 +2219,6 @@ migrate_xmit_fn(void *arg)
 						// it's hard to keep track of all the error states separately
 
 						// Migrate is done!
-                        // TODO: Check if the rest of the nodes are also already done... if not then WTF?
-						cf_warning(AS_MIGRATE, "ALREADY DONE! WTF state (%d) {%s:%d}", mig->rsv.state, mig->rsv.ns->name, (int)mig->rsv.pid);
 						goto CompletedMigrate;
 
 					case OPERATION_START_ACK_EAGAIN:
