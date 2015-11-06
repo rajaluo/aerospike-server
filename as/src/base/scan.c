@@ -38,7 +38,6 @@
 #include <sys/socket.h>
 
 #include "aerospike/as_module.h"
-#include "aerospike/as_stream.h"
 #include "aerospike/as_string.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
@@ -317,12 +316,12 @@ get_scan_type(as_transaction* tr)
 	as_msg_field *udf_op_f = as_msg_field_get(&tr->msgp->msg,
 			AS_MSG_FIELD_TYPE_UDF_OP);
 
-	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_SCAN_UDF_OP_AGGREGATE) {
+	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_UDF_OP_AGGREGATE) {
 		return SCAN_TYPE_AGGR;
 	}
 
 	if (tr->udata.req_udata || (udf_op_f &&
-			*udf_op_f->data == (uint8_t)AS_SCAN_UDF_OP_BACKGROUND)) {
+			*udf_op_f->data == (uint8_t)AS_UDF_OP_BACKGROUND)) {
 		return SCAN_TYPE_UDF_BG;
 	}
 
@@ -876,34 +875,24 @@ const as_job_vtable aggr_scan_job_vtable = {
 };
 
 typedef struct aggr_scan_slice_s {
-	aggr_scan_job*		job;
-	cf_ll*				ll;
-	cf_buf_builder**	bb_r;
+	aggr_scan_job*				job;
+	cf_ll*						ll;
+	cf_buf_builder**			bb_r;
+	as_partition_reservation*	rsv;
 } aggr_scan_slice;
 
+bool aggr_scan_init(as_aggr_call* call, as_msg* msg);
 void aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd);
-void aggr_scan_set_error(void* caller);
-bool aggr_scan_mem_op(mem_tracker* mt, uint32_t num_bytes, memtracker_op op);
-as_aggr_caller_type aggr_scan_get_type();
-as_stream_status aggr_scan_ostream_write(const as_stream* s, as_val* v);
+as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns, as_partition_id pid, as_partition_reservation* rsv);
+as_stream_status aggr_scan_ostream_write(void* udata, as_val* val);
 
-const as_aggr_caller_intf aggr_scan_caller_intf = {
-		.set_error	= aggr_scan_set_error,
-		.mem_op		= aggr_scan_mem_op,
-		.get_type	= aggr_scan_get_type
-};
-
-const as_stream_hooks aggr_scan_istream_hooks = {
-		.destroy	= NULL,
-		.read		= as_aggr_istream_read,
-		.write		= NULL
-};
-
-const as_stream_hooks aggr_scan_ostream_hooks = {
-		.destroy	= NULL,
-		.read		= NULL,
-		.write		= aggr_scan_ostream_write
+const as_aggr_hooks scan_aggr_hooks = {
+	.ostream_write = aggr_scan_ostream_write,
+	.set_error     = NULL,
+	.ptn_reserve   = aggr_scan_ptn_reserve,
+	.ptn_release   = NULL,
+	.pre_check     = NULL
 };
 
 void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val, bool success);
@@ -935,9 +924,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	job->msgp = tr->msgp;
 
-	if (as_aggr_call_init(&job->aggr_call, tr, job, &aggr_scan_caller_intf,
-			&aggr_scan_istream_hooks, &aggr_scan_ostream_hooks, ns,
-			true) != 0) {
+	if (! aggr_scan_init(&job->aggr_call, &tr->msgp->msg)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
 		job->msgp = NULL;
 		as_job_destroy(_job);
@@ -985,13 +972,13 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 
 	cf_ll_init(&ll, as_index_keys_ll_destroy_fn, false);
 
-	aggr_scan_slice slice = { job, &ll, &bb };
+	aggr_scan_slice slice = { job, &ll, &bb, rsv };
 
 	as_index_reduce(tree, aggr_scan_job_reduce_cb, (void*)&slice);
 
 	if (cf_ll_size(&ll) != 0) {
 		as_result* res = as_result_new();
-		int ret = as_aggr_process(&job->aggr_call, &ll, (void*)&slice, res);
+		int ret = as_aggr_process(_job->ns, &job->aggr_call, &ll, (void*)&slice, res);
 
 		if (ret != 0) {
 			char* rs = as_module_err_string(ret);
@@ -1066,6 +1053,18 @@ aggr_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 // aggr_scan_job utilities.
 //
 
+bool
+aggr_scan_init(as_aggr_call* call, as_msg* msg)
+{
+	if (udf_rw_call_init_from_msg((udf_call*)call, msg) != 0) {
+		return false;
+	}
+
+	call->aggr_hooks = &scan_aggr_hooks;
+
+	return true;
+}
+
 void
 aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 {
@@ -1130,31 +1129,23 @@ aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd)
 	return true;
 }
 
-void
-aggr_scan_set_error(void* caller)
+as_partition_reservation*
+aggr_scan_ptn_reserve(void* udata, as_namespace* ns, as_partition_id pid,
+		as_partition_reservation* rsv)
 {
-}
+	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
 
-bool
-aggr_scan_mem_op(mem_tracker* mt, uint32_t num_bytes, memtracker_op op)
-{
-	return mt && mt->udata;
-}
-
-as_aggr_caller_type
-aggr_scan_get_type()
-{
-	return AS_AGGR_SCAN;
+	return slice->rsv;
 }
 
 as_stream_status
-aggr_scan_ostream_write(const as_stream* s, as_val* v)
+aggr_scan_ostream_write(void* udata, as_val* val)
 {
-	aggr_scan_slice* slice = (aggr_scan_slice*)as_stream_source(s);
+	aggr_scan_slice* slice = (aggr_scan_slice*)udata;
 
-	if (v) {
-		aggr_scan_add_val_response(slice, v, true);
-		as_val_destroy(v);
+	if (val) {
+		aggr_scan_add_val_response(slice, val, true);
+		as_val_destroy(val);
 	}
 
 	return AS_STREAM_OK;
@@ -1217,6 +1208,7 @@ const as_job_vtable udf_bg_scan_job_vtable = {
 		udf_bg_scan_job_info
 };
 
+bool udf_scan_init(udf_call* call, as_transaction* tr);
 void udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 int udf_bg_scan_tr_complete(as_transaction *tr, int retcode);
 
@@ -1262,7 +1254,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->n_successful_tr = 0;
 	job->n_failed_tr = 0;
 
-	if (udf_call_init(&job->call, tr) != 0) {
+	if (! udf_scan_init(&job->call, tr)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed call init");
 		job->msgp = NULL;
 		as_job_destroy(_job);
@@ -1347,7 +1339,7 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 	char *extra = stat->jdata + strlen(stat->jdata);
 
 	sprintf(extra, ":udf-filename=%s:udf-function=%s:udf-active=%u:udf-success=%lu:udf-failed=%lu",
-			job->call.filename, job->call.function,
+			job->call.def.filename, job->call.def.function,
 			cf_atomic32_get(job->n_active_tr),
 			cf_atomic64_get(job->n_successful_tr),
 			cf_atomic64_get(job->n_failed_tr));
@@ -1356,6 +1348,18 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 //----------------------------------------------------------
 // udf_bg_scan_job utilities.
 //
+
+bool
+udf_scan_init(udf_call* call, as_transaction* tr)
+{
+	if (udf_rw_call_init_from_msg(call, &tr->msgp->msg)) {
+		return false;
+	}
+
+	call->tr = tr;
+
+	return true;
+}
 
 void
 udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
@@ -1385,7 +1389,6 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	d.msg_type	= AS_MSG_INFO2_WRITE;
 	d.fd_h		= NULL;
 	d.trid		= 0;				// TODO - transfer trid ???
-	d.udata		= NULL;				// TODO - unused - why is it there ???
 
 	// Release record lock before enqueuing transaction.
 	as_record_done(r_ref, ns);
@@ -1398,7 +1401,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_transaction tr;
 
-	if (as_transaction_create(&tr, &d) != 0) {
+	if (as_transaction_create_internal(&tr, &d) != 0) {
 		as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
 		return;
 	}
@@ -1406,10 +1409,6 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	tr.udata.req_cb		= udf_bg_scan_tr_complete;
 	tr.udata.req_udata	= (void*)job;
 	tr.udata.req_type	= UDF_SCAN_REQUEST;
-
-	// TODO - should these be done in as_transaction_create() ???
-	tr.flag |= AS_TRANSACTION_FLAG_INTERNAL;
-	tr.microbenchmark_is_resolve = false;
 
 	cf_atomic64_incr(&_job->n_records_read);
 	cf_atomic32_incr(&job->n_active_tr);

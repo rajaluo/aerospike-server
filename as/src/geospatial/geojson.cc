@@ -203,7 +203,7 @@ void
 process_circle(GeoJSON::GeometryHandler & geohand, json_t * coord)
 {
 	// {
-	//	   "type": "Circle",
+	//	   "type": "AeroCircle",
 	//	   "coordinates": [[-122.097837, 37.421363], 1000.0]
 	// }
 
@@ -272,7 +272,7 @@ void traverse_geometry(GeoJSON::GeometryHandler & geohand, json_t * geom)
 	else if (typestr == "MultiPolygon") {
 		process_multipolygon(geohand, json_object_get(geom, "coordinates"));
     }
-	else if (typestr == "Circle") {
+	else if (typestr == "AeroCircle") {
 		process_circle(geohand, json_object_get(geom, "coordinates"));
     }
 	else {
@@ -333,7 +333,7 @@ void parse(GeometryHandler & geohand, string const & geostr)
 	else if (typestr == "MultiPolygon") {
 		process_multipolygon(geohand, json_object_get(geojson, "coordinates"));
     }
-	else if (typestr == "Circle") {
+	else if (typestr == "AeroCircle") {
 		process_circle(geohand, json_object_get(geojson, "coordinates"));
     }
 	else {

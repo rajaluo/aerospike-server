@@ -406,7 +406,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.udf_scan_rec_reqs);
 
 	cf_dyn_buf_append_string(db, ";udf_query_rec_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_scan_rec_reqs);
+	APPEND_STAT_COUNTER(db, g_config.udf_query_rec_reqs);
 
 	cf_dyn_buf_append_string(db, ";udf_replica_writes=");
 	APPEND_STAT_COUNTER(db, g_config.udf_replica_writes);
@@ -555,6 +555,12 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.batch_index_errors);
 	cf_dyn_buf_append_string(db, ";batch_index_unused_buffers=");
 	cf_dyn_buf_append_int(db, as_batch_unused_buffers());
+	cf_dyn_buf_append_string(db, ";batch_index_huge_buffers=");
+	APPEND_STAT_COUNTER(db, g_config.batch_index_huge_buffers);
+	cf_dyn_buf_append_string(db, ";batch_index_created_buffers=");
+	APPEND_STAT_COUNTER(db, g_config.batch_index_created_buffers);
+	cf_dyn_buf_append_string(db, ";batch_index_destroyed_buffers=");
+	APPEND_STAT_COUNTER(db, g_config.batch_index_destroyed_buffers);
 
 	cf_dyn_buf_append_string(db, ";batch_initiate=");
 	APPEND_STAT_COUNTER(db, g_config.batch_initiate);
@@ -652,9 +658,11 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";partition_replica=");
 	cf_dyn_buf_append_int(db, ps.sync_replica);
 	cf_dyn_buf_append_string(db, ";partition_desync=");
-	cf_dyn_buf_append_int(db, (ps.desync + ps.zombie + ps.wait));
+	cf_dyn_buf_append_int(db, ps.desync);
 	cf_dyn_buf_append_string(db, ";partition_absent=");
 	cf_dyn_buf_append_int(db, ps.absent);
+	cf_dyn_buf_append_string(db, ";partition_zombie=");
+	cf_dyn_buf_append_int(db, ps.zombie);
 	cf_dyn_buf_append_string(db, ";partition_object_count=");
 	cf_dyn_buf_append_int(db, ps.n_objects);
 	cf_dyn_buf_append_string(db, ";partition_ref_count=");
@@ -3396,6 +3404,12 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					goto Error;
 				}
 			}
+			else if (0 == as_info_parameter_get(params, "set-stop-writes-count", context, &context_len) ||
+					0 == as_info_parameter_get(params, "stop-writes-count", context, &context_len)) {
+				uint64_t val = atoll(context);
+				cf_info(AS_INFO, "Changing value of set-stop-writes-count of ns %s set %s to %lu", ns->name, p_set->name, val);
+				cf_atomic64_set(&p_set->stop_writes_count, val);
+			}
 			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len) ||
 					0 == as_info_parameter_get(params, "delete", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
@@ -4978,8 +4992,8 @@ info_debug_ticker_fn(void *unused)
 
 			as_partition_states ps;
 			info_partition_getstates(&ps);
-			cf_info(AS_INFO, "   partitions: actual %d sync %d desync %d zombie %d wait %d absent %d",
-					ps.sync_actual, ps.sync_replica, ps.desync, ps.zombie, ps.wait, ps.absent);
+			cf_info(AS_INFO, "   partitions: actual %d sync %d desync %d zombie %d absent %d",
+					ps.sync_actual, ps.sync_replica, ps.desync, ps.zombie, ps.absent);
 
 			if (g_config.rt_hist)
 				cf_hist_track_dump(g_config.rt_hist);

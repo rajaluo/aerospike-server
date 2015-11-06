@@ -1,7 +1,7 @@
 /*
  * proto.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -1005,29 +1005,29 @@ uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		int len = 0;
 
 		// Append filename to message fields
-		len = strlen(call->filename) * sizeof(char);
+		len = strlen(call->def.filename) * sizeof(char);
 		mf->type = AS_MSG_FIELD_TYPE_UDF_FILENAME;
 		mf->field_sz =  len + 1;
-		memcpy(mf->data, call->filename, len);
+		memcpy(mf->data, call->def.filename, len);
 
 		mf_tmp = as_msg_field_get_next(mf);
 		mf = mf_tmp;
 
 		// Append function name to message fields
-		len = strlen(call->function) * sizeof(char);
+		len = strlen(call->def.function) * sizeof(char);
 		mf->type = AS_MSG_FIELD_TYPE_UDF_FUNCTION;
 		mf->field_sz =  len + 1;
-		memcpy(mf->data, call->function, len);
+		memcpy(mf->data, call->def.function, len);
 
 		mf_tmp = as_msg_field_get_next(mf);
 		mf = mf_tmp;
 
 		// Append arglist to message fields
-		if (call->arglist) {
-			len = call->arglist->field_sz * sizeof(char);
+		if (call->def.arglist) {
+			len = call->def.arglist->field_sz * sizeof(char);
 			mf->type = AS_MSG_FIELD_TYPE_UDF_ARGLIST;
 			mf->field_sz = len + 1;
-			memcpy(mf->data, call->arglist->data, len);
+			memcpy(mf->data, call->def.arglist->data, len);
 
 			mf_tmp = as_msg_field_get_next(mf);
 			mf = mf_tmp;

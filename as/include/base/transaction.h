@@ -1,7 +1,7 @@
 /*
  * transaction.h
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -255,7 +255,6 @@ typedef struct tr_create_data {
 	void *				udata;		/* udata to be passed on to the new transaction */
 } tr_create_data;
 
-extern int   as_internal_udf_txn_setup(tr_create_data * d);
-extern int   as_transaction_create(as_transaction *tr, tr_create_data * data);
+extern int   as_transaction_create_internal(as_transaction *tr, tr_create_data * data);
 
 void as_transaction_error(as_transaction* tr, uint32_t error_code);
