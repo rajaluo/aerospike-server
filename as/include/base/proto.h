@@ -1,7 +1,7 @@
 /*
  * proto.h
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -567,3 +567,13 @@ int as_netio_send(as_netio *io, void *q, bool);
 #define AS_NETIO_CONTINUE  1
 #define AS_NETIO_ERR       2 
 #define AS_NETIO_IO_ERR    3 
+
+// These values correspond to client protocol values - do not change them!
+typedef enum as_udf_op {
+	AS_UDF_OP_KVS		    = 0,
+	AS_UDF_OP_AGGREGATE	    = 1,
+	AS_UDF_OP_BACKGROUND	= 2,
+	AS_UDF_OP_FOREGROUND	= 3		// not supported yet
+} as_udf_op;
+
+
