@@ -552,6 +552,7 @@ typedef enum {
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
 	CASE_NAMESPACE_SET_ENABLE_XDR,
+	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
 	// Deprecated:
 	CASE_NAMESPACE_SET_EVICT_HWM_COUNT,
 	CASE_NAMESPACE_SET_EVICT_HWM_PCT,
@@ -567,7 +568,6 @@ typedef enum {
 	CASE_NAMESPACE_SI_GC_PERIOD,
 	CASE_NAMESPACE_SI_GC_MAX_UNITS,
 	CASE_NAMESPACE_SI_DATA_MAX_MEMORY,
-	CASE_NAMESPACE_SI_TRACING,
 	CASE_NAMESPACE_SI_HISTOGRAM,
 	CASE_NAMESPACE_SI_IGNORE_NOT_SYNC,
 
@@ -953,6 +953,7 @@ const cfg_opt NAMESPACE_STORAGE_KV_OPTS[] = {
 const cfg_opt NAMESPACE_SET_OPTS[] = {
 		{ "set-disable-eviction",			CASE_NAMESPACE_SET_DISABLE_EVICTION },
 		{ "set-enable-xdr",					CASE_NAMESPACE_SET_ENABLE_XDR },
+		{ "set-stop-writes-count",			CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
 		{ "set-evict-hwm-count",			CASE_NAMESPACE_SET_EVICT_HWM_COUNT },
 		{ "set-evict-hwm-pct",				CASE_NAMESPACE_SET_EVICT_HWM_PCT },
 		{ "set-stop-write-count",			CASE_NAMESPACE_SET_STOP_WRITE_COUNT },
@@ -970,7 +971,6 @@ const cfg_opt NAMESPACE_SI_OPTS[] = {
 		{ "si-gc-period",					CASE_NAMESPACE_SI_GC_PERIOD },
 		{ "si-gc-max-units",				CASE_NAMESPACE_SI_GC_MAX_UNITS },
 		{ "si-data-max-memory",				CASE_NAMESPACE_SI_DATA_MAX_MEMORY },
-		{ "si-tracing",						CASE_NAMESPACE_SI_TRACING},
 		{ "si-histogram",					CASE_NAMESPACE_SI_HISTOGRAM },
 		{ "si-ignore-not-sync",				CASE_NAMESPACE_SI_IGNORE_NOT_SYNC },
 		{ "}",								CASE_CONTEXT_END }
@@ -2808,6 +2808,9 @@ as_config_init(const char *config_file)
 					break;
 				}
 				break;
+			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
+				p_set->stop_writes_count = cfg_u64_no_checks(&line);
+				break;
 			case CASE_NAMESPACE_SET_EVICT_HWM_COUNT:
 			case CASE_NAMESPACE_SET_EVICT_HWM_PCT:
 			case CASE_NAMESPACE_SET_STOP_WRITE_COUNT:
@@ -2837,9 +2840,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_SI_DATA_MAX_MEMORY:
 				si_cfg.data_max_memory = cfg_u64_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_SI_TRACING:
-				si_cfg.trace_flag = cfg_u16_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SI_HISTOGRAM:
 				si_cfg.enable_histogram = cfg_bool(&line);

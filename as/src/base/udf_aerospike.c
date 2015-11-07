@@ -116,12 +116,19 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 		return -1;
 	}
 
-	SINDEX_BINS_SETUP(sbins, rd->ns->sindex_cnt);
-	int sbins_populated  = 0;
+	const char * set_name = as_index_get_set_name(rd->r, rd->ns);
+	
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
 	if (has_sindex) {
 		SINDEX_GRLOCK();
-		sbins_populated += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns), b, sbins, AS_SINDEX_OP_DELETE);
+	}
+	SINDEX_BINS_SETUP(sbins, rd->ns->sindex_cnt);
+	as_sindex * si_arr[rd->ns->sindex_cnt];
+	int si_arr_index = 0;
+	int sbins_populated  = 0;
+	if (has_sindex) {
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
+		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, sbins, AS_SINDEX_OP_DELETE);
 		SINDEX_GUNLOCK();
 	}
 
@@ -138,8 +145,9 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 		cf_warning(AS_UDF, "udf_aerospike_delbin: Internal Error [Deleting non-existing bin %s]... Fail", bname);
 	}
 
-	if (has_sindex && sbins_populated > 0) {
+	if (has_sindex) {
 		as_sindex_sbin_freeall(sbins, sbins_populated);
+		as_sindex_release_arr(si_arr, si_arr_index);
 	}
 
 	return 0;
@@ -264,10 +272,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	as_storage_rd * rd      = urecord->rd;
 	as_transaction *tr      = urecord->tr;
 
-	SINDEX_BINS_SETUP(sbins, 2 * rd->ns->sindex_cnt);
-	int sbins_populated = 0;
-	bool has_sindex          = as_sindex_ns_has_sindex(rd->ns);
-
 	as_bin * b = as_bin_get_or_create(rd, bname);
 
 	if ( !b ) {
@@ -275,10 +279,19 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 		return -1;
 	}
 
-	if (has_sindex ) {
+	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
+	if (has_sindex) {
 		SINDEX_GRLOCK();
-		sbins_populated += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns),
-							b, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
+	}
+	SINDEX_BINS_SETUP(sbins, 2 * rd->ns->sindex_cnt);
+	as_sindex * si_arr[2 * rd->ns->sindex_cnt];
+	int sbins_populated = 0;
+	int si_arr_index = 0;
+	const char * set_name = as_index_get_set_name(rd->r, rd->ns);
+
+	if (has_sindex ) {
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
+		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 	}
 
 	// we know we are doing an update now, make sure there is particle data,
@@ -315,25 +328,26 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 		}
 	}
 
-	// If something fail bailout
-	if (ret) {
-		SINDEX_GUNLOCK();
-		if (sbins_populated > 0) {
-			as_sindex_sbin_freeall(sbins, sbins_populated);
-		}
-		return ret;
-	}
-	
 	// Update sindex if required
 	if (has_sindex) {
-		sbins_populated += as_sindex_sbins_from_bin(rd->ns, as_index_get_set_name(rd->r, rd->ns),
-								b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
+		if (ret) {
+			SINDEX_GUNLOCK();
+			if (sbins_populated > 0) {
+				as_sindex_sbin_freeall(sbins, sbins_populated);
+			}
+			as_sindex_release_arr(si_arr, si_arr_index);
+			return ret;
+		}
+
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
+		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
 		SINDEX_GUNLOCK();
 		if (sbins_populated > 0) {
 			tr->flag |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 			as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sbins_populated, &rd->keyd);	
 			as_sindex_sbin_freeall(sbins, sbins_populated);
 		}
+		as_sindex_release_arr(si_arr, si_arr_index);
 	}
 
 	return ret;
