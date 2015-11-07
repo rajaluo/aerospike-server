@@ -3042,14 +3042,12 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode,
 				SINDEX_BINS_SETUP(sbins, ns->sindex_cnt);
 				as_sindex * si_arr[ns->sindex_cnt];
 				int si_arr_index = 0;
-				int si_cnt = 0;
 				int sbins_populated = 0;
 
 				// RESERVE MATCHING SIs
 				for (int i=0; i<rd.n_bins; i++) {
-					si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd.bins[i].id,
+					si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd.bins[i].id,
 								&si_arr[si_arr_index]);
-					si_arr_index += si_cnt;
 				}
 
 				for (int i = 0; i < rd.n_bins; i++) {
@@ -3604,25 +3602,21 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 	// Maximum number of sindexes which can be changed in one transaction is
 	// 2 * ns->sindex_cnt.
 
+	SINDEX_GRLOCK();
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
 	as_sindex *si_arr[2 * ns->sindex_cnt];
 	int si_arr_index = 0;
-	int si_cnt = 0;
-
-	SINDEX_GRLOCK();
 
 	// Reserve matching SIs.
 
 	for (int i = 0; i < n_old_bins; i++) {
-		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
 				old_bins[i].id, &si_arr[si_arr_index]);
-		si_arr_index += si_cnt;
 	}
 
 	for (int i = 0; i < n_new_bins; i++) {
-		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
 				new_bins[i].id, &si_arr[si_arr_index]);
-		si_arr_index += si_cnt;
 	}
 
 	// For every old bin, find the corresponding new bin (if any) and adjust the

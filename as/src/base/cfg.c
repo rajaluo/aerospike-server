@@ -367,6 +367,7 @@ typedef enum {
 	// Service paxos recovery policy options (value tokens):
 	CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL,
 	CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER,
+	CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER,
 	CASE_SERVICE_PAXOS_RECOVERY_MANUAL,
 
 	// Logging options:
@@ -760,6 +761,7 @@ const cfg_opt SERVICE_PAXOS_PROTOCOL_OPTS[] = {
 const cfg_opt SERVICE_PAXOS_RECOVERY_OPTS[] = {
 		{ "auto-dun-all",					CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL },
 		{ "auto-dun-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER },
+		{ "auto-reset-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER },
 		{ "manual",							CASE_SERVICE_PAXOS_RECOVERY_MANUAL }
 };
 
@@ -2002,6 +2004,9 @@ as_config_init(const char *config_file)
 					break;
 				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER:
 					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER;
+					break;
+				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER:
+					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER;
 					break;
 				case CASE_SERVICE_PAXOS_RECOVERY_MANUAL:
 					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_MANUAL;
