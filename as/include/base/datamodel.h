@@ -286,7 +286,7 @@ typedef void * geo_region_t;
 #define MAX_REGION_CELLS    32
 #define MAX_REGION_LEVELS   30
 extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
-extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
+extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region, bool is_strict);
 
 // list:
 extern void as_bin_particle_list_set_hidden(as_bin *b);
