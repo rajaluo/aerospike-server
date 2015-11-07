@@ -1767,10 +1767,29 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 					if (0 == buf[i])
 						break;
 
-					if (g_config.self_node == buf[i])
+					if (g_config.self_node == buf[i]) {
 						continue;
-					if (SHASH_ERR_NOTFOUND != shash_get(g_hb.adjacencies, &buf[i], a_p_pulse))
+					}
+
+					if (SHASH_ERR_NOTFOUND !=
+							shash_get(g_hb.adjacencies, &buf[i], a_p_pulse) &&
+						(AS_HB_MODE_MESH != g_config.hb_mode ||
+						 as_hb_nodes_discovered_hash_is_conn(buf[i]))) {
+
+						// In the multicast mode, its ok to check if this node
+						// is in the adjacency list and skipped.
+						// However in the mesh mode this node might be removed
+						// out of the mesh list and the discovered list because
+						// hb tcp connection failure but still be in the adjacency list.
+						// In GCE tests, on GCE live migration, the hb
+						// connection dropped but fabric was intact. Net effect
+						// was the node was off the mesh list but in adjacency
+						// list. The heart beats never were sent to this node.
+						// The node also never expired and got out of the
+						// adjacency list because the fabric connections were
+						// working.
 						continue;
+					}
 
 					/* We don't have a connection to this node; send an info
 					 * request to find out who to connect to */
