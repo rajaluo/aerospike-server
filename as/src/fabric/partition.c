@@ -324,8 +324,7 @@ bool increase_partition_version_tree_path(as_partition_vinfo *vinfo, cf_node fsn
 	int i;
 	for (i = 0; i < AS_PARTITION_MAX_VERSION; i++)
 	{
-		if (vinfo->vtp[i] == 0)
-		{
+		if (vinfo->vtp[i] == 0) {
 			vinfo->vtp[i] = old_fsn_index + 1;
 			break;
 		}
@@ -360,7 +359,12 @@ void print_partition_version(as_namespace *ns, size_t pid) {
 
 void print_partition_versions(const char* n, size_t pid, as_partition_vinfo *part1, const char *mess1, as_partition_vinfo *part2, const char *mess2)
 {
-	cf_warning(AS_PARTITION, "{%s:%d} %s %"PRIx64" %s %"PRIx64"", n, pid, mess1, part1->iid, mess2, part2->iid);
+	cf_warning(AS_PARTITION, "{%s:%d} %s %"PRIx64":%"PRIx64"-%"PRIx64" %s %"PRIx64":%"PRIx64"-%"PRIx64"",
+			n, pid,
+			mess1,
+			part1->iid, *(uint64_t*)&part1->vtp[0], *(uint64_t*)&part1->vtp[8],
+			mess2,
+			part2->iid, *(uint64_t*)&part2->vtp[0], *(uint64_t*)&part2->vtp[8]);
 	return;
 }
 
@@ -690,34 +694,34 @@ void as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p, in
 	// TODO: Ideally convert debugs below to warnings if we are confident.
 	if (migrating_to_master) {
 		if (p->target != p->replica[0]) {
-			cf_debug(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Target of migration not master node", ns->name, pid);
+			cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Target of migration not master node", ns->name, pid);
 		}
 
 		if (! ((is_zombie && is_primary) || (is_replica && is_sync && is_primary))) {
-			cf_debug(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Illegal state in node migrating to master", ns->name, pid);
+			cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Illegal state in node migrating to master", ns->name, pid);
 		}
 	}
 
 	if (((is_replica && is_desync) || (is_replica && is_sync && ! is_primary)) && p->origin != p->replica[0]) {
-		cf_debug(AS_PARTITION, "{%s:%d} Partition state error on write reservation. origin does not match master", ns->name, pid);
+		cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. origin does not match master", ns->name, pid);
 	}
 	else if (is_replica && is_sync && is_primary && ! migrating_to_master && p->origin && p->origin != p->replica[0]) {
-		cf_debug(AS_PARTITION, "{%s:%d} Partition state error on write reservation. replica sync node's origin does not match master", ns->name, pid);
+		cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. replica sync node's origin does not match master", ns->name, pid);
 	}
 	else if (is_master && is_desync && p->origin == (cf_node)0) {
-		cf_debug(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Origin node is NULL for non-sync master", ns->name, pid);
+		cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Origin node is NULL for non-sync master", ns->name, pid);
 	}
 
 	for (int i = 0; i < p->p_repl_factor; i++) {
 		if (p->replica[i] == (cf_node)0 && as_partition_balance_is_init_resolved()) {
-			cf_debug(AS_PARTITION, "{%s:%d} Detected state error. Replica list contains null node at position %d", ns->name, pid, i);
+			cf_warning(AS_PARTITION, "{%s:%d} Detected state error. Replica list contains null node at position %d", ns->name, pid, i);
 			cf_atomic_int_incr(&g_config.err_replica_null_node);
 		}
 	}
 
 	for (int i = p->p_repl_factor; i < g_config.paxos_max_cluster_size; i++) {
 		if (p->replica[i] != (cf_node)0) {
-			cf_debug(AS_PARTITION, "{%s:%d} Detected state error. Replica list contains non null node %"PRIx64" at position %d", ns->name, pid, p->replica[i], i);
+			cf_warning(AS_PARTITION, "{%s:%d} Detected state error. Replica list contains non null node %"PRIx64" at position %d", ns->name, pid, p->replica[i], i);
 			cf_atomic_int_incr(&g_config.err_replica_non_null_node);
 		}
 	}
@@ -1748,12 +1752,15 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 	cf_detail(AS_PARTITION, "migration tx : mig-state %d {%s:%d}", s, ns->name, pid);
 
 	if (AS_MIGRATE_STATE_DONE != s) {
-		if (s == AS_MIGRATE_STATE_ERROR)
+		if (s == AS_MIGRATE_STATE_ERROR) {
 			cf_debug(AS_PARTITION, "migration tx callback: migrate failed {%s:%d}", ns->name, pid);
-		else if (s == AS_MIGRATE_STATE_EAGAIN)
+		}
+		else if (s == AS_MIGRATE_STATE_EAGAIN) {
 			cf_debug(AS_PARTITION, "migration tx callback: migrate failed {%s:%d}", ns->name, pid);
-		else
-			cf_debug(AS_PARTITION, "migration tx callback: unknown notification %d {%s:%d}", (int) s, ns->name, pid);
+		}
+		else {
+			cf_warning(AS_PARTITION, "migration tx callback: unknown notification %d {%s:%d}", (int) s, ns->name, pid);
+		}
 		return AS_MIGRATE_CB_FAIL;
 	}
 
@@ -1780,7 +1787,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 	 */
 	if (p->pending_migrate_tx == 0)
 	{
-		cf_debug(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_tx?", ns->name, pid);
+		cf_warning(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_tx?", ns->name, pid);
 
 		pthread_mutex_unlock(&p->lock);
 
@@ -1793,7 +1800,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 		int64_t migrates_tx_remaining = cf_atomic_int_decr(&ns->migrate_tx_partitions_remaining);
 		if (migrates_tx_remaining < 0){
 			cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) tx partitions schedule exceeded, possibly a race with prior migration",
-					   ns->name, pid, p->pending_migrate_tx, migrates_tx_remaining);
+					ns->name, pid, p->pending_migrate_tx, migrates_tx_remaining);
 		}
 	}
 
@@ -1894,7 +1901,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 					rv = AS_MIGRATE_CB_FAIL;
 					break;
 				case AS_PARTITION_STATE_ABSENT:
-					cf_debug(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, already done (pending %d origin %"PRIx64")",
+					cf_warning(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, already done (pending %d origin %"PRIx64")",
 							 ns->name, pid, p->state, p->pending_migrate_rx, p->origin);
 					rv = AS_MIGRATE_CB_ALREADY_DONE;
 					break;
@@ -1903,7 +1910,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 						// theoretically, a journal start fails only when there's already another journal in progress
 						cf_warning(AS_PARTITION, "{%s:%d} could not start journal, continuing", ns->name, pid);
 					}
-					rv = 0;
+					rv = AS_MIGRATE_CB_OK;
 					break;
 				case AS_PARTITION_STATE_SYNC: // Allow migrations into sync
 				case AS_PARTITION_STATE_ZOMBIE: // This is a migration request
@@ -1932,7 +1939,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 						break;
 					}
 					if (p->state == AS_PARTITION_STATE_ZOMBIE) {
-						cf_debug(AS_PARTITION, "{%s:%d} migrate rx start while in zombie state %d, fail", ns->name, pid, p->state);
+						cf_warning(AS_PARTITION, "{%s:%d} migrate rx start while in zombie state %d, fail", ns->name, pid, p->state);
 						rv = AS_MIGRATE_CB_FAIL;
 						break;
 					}
@@ -1970,7 +1977,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 							// this has been debugged as normal not a state
 							// corruption error - duplicate migrate START?
 							// TODO: Check if AER-4512 corrects this issue.
-							cf_debug(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC replica node receiving migrate request has origin set to non-master", ns->name, pid);
+							cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC replica node receiving migrate request has origin set to non-master", ns->name, pid);
 							rv = AS_MIGRATE_CB_FAIL;
 							break; // out of switch
 						}
@@ -2004,7 +2011,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 							}
 						if (!dupl_node_found) {
 							// this has been determined NOT to be a state corruption error - I think it's multiple migrate STARTs?
-							cf_debug(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC Master receiving migrate from node not in duplicate list", ns->name, pid);
+							cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC Master receiving migrate from node not in duplicate list", ns->name, pid);
 							rv = AS_MIGRATE_CB_FAIL;
 							break; // out of switch
 						}
@@ -2058,7 +2065,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			cf_debug(AS_PARTITION, "{%s:%d} MIGRATE RECEIVE DONE, partition in state %d", ns->name, pid, p->state);
 
 			if (p->pending_migrate_rx == 0) {
-				cf_info(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_rx?", ns->name, pid);
+				cf_warning(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_rx?", ns->name, pid);
 				rv = AS_MIGRATE_CB_FAIL;
 
 				pthread_mutex_unlock(&p->lock);
@@ -2271,9 +2278,11 @@ void as_partition_set_ns_replication_factor(int new_cluster_size)
 	if (new_cluster_size <= g_config.paxos_single_replica_limit)
 		reduce_repl = true;
 	// normal case - set replication factor
+	uint16_t max_repl;
 	for (int i = 0; i < g_config.namespaces; i++) {
 		as_namespace *ns = g_config.namespace[i];
-		ns->replication_factor = reduce_repl ? 1 : ns->cfg_replication_factor;
+		max_repl = ns->cfg_replication_factor > new_cluster_size ? new_cluster_size : ns->cfg_replication_factor;
+		ns->replication_factor = reduce_repl ? 1 : max_repl;
 		cf_info(AS_PAXOS, "{%s} replication factor is %d", ns->name, ns->replication_factor);
 	}
 	return;
@@ -2507,6 +2516,14 @@ bool as_partition_valid_cluster_topology( as_paxos *paxos_p ) {
 	return result;
 } // end as_partition_valid_cluster_topology()
 
+void
+as_migrate_increment_all_tx_fail() {
+	for (int i = 0; i < g_config.namespaces; i++) {
+		// All namespaces will fail to migrate
+		as_namespace *ns = g_config.namespace[i];
+		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
+	}
+}
 
 /* as_partition_balance:
  * Balance partitions, succession lists and replica lists after cluster changes.
@@ -2525,12 +2542,14 @@ as_partition_balance()
 	cf_node self = g_config.self_node;
 
 	if ((NULL == succession) || (NULL == alive)) {
+		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION,
 				   "succession list is uninitialized: couldn't start migrate");
 		return;
 	}
 
 	if ((cf_node)0 == self) {
+		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION,
 				   "node value is uninitialized: couldn't start migrate");
 		return;
@@ -2560,9 +2579,10 @@ as_partition_balance()
 		// if (alive[i] == false)
 		// 	found_error = true;
 	}
-	if ((true == found_error) || (cluster_size == 0)) {
+	if ((found_error) || (cluster_size == 0)) {
+		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION,
-				   "succession list is corrupted: couldn't start migrate");
+				"succession list is corrupted: couldn't start migrate");
 		return;
 	}
 	paxos->cluster_size = cluster_size;
@@ -2581,9 +2601,10 @@ as_partition_balance()
 			break;
 		}
 	}
-	if (true == found_error) {
+	if (found_error) {
+		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION,
-				   "can't find self in succession list: couldn't start migrate");
+				"can't find self in succession list: couldn't start migrate");
 		return;
 	}
 
@@ -2593,14 +2614,18 @@ as_partition_balance()
 	 * Check that the global state table is well formed
 	 */
 	found_error = false;
-	for (int i = 0; i < g_config.namespaces; i++)
-		for (int j = 0; j < cluster_size; j++)
-			if (NULL == paxos->c_partition_vinfo[i][j])
+	for (int i = 0; i < g_config.namespaces; i++) {
+		for (int j = 0; j < cluster_size; j++) {
+			if (NULL == paxos->c_partition_vinfo[i][j]) {
 				found_error = true;
+			}
+		}
+	}
 
-	if (true == found_error) {
+	if (found_error) {
+		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION,
-				   "Global state is corrupted: couldn't start migrate");
+				"Global state is corrupted: couldn't start migrate");
 		as_paxos_set_cluster_integrity(paxos, false);
 		return;
 	}
@@ -2617,14 +2642,17 @@ as_partition_balance()
 	found_error = false;
 	for (int i = 0; i < g_config.namespaces; i++) {
 		as_namespace *ns = g_config.namespace[i];
-		for (int j = 0; j < AS_PARTITIONS; j++)
-			if (memcmp(&ns->partitions[j].version_info, &paxos->c_partition_vinfo[i][self_index][j], sizeof(as_partition_vinfo)) != 0)	{
+		for (int j = 0; j < AS_PARTITIONS; j++) {
+			if (memcmp(&ns->partitions[j].version_info, &paxos->c_partition_vinfo[i][self_index][j], sizeof(as_partition_vinfo)) != 0) {
 				found_error = true;
 				print_partition_versions(ns->name, j, &ns->partitions[j].version_info, "Global", &paxos->c_partition_vinfo[i][self_index][j], "Local");
 				break;
 			}
+		}
 	}
-	if (true == found_error) {
+
+	if (found_error) {
+		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION, "Global state is not identical to local state: couldn't start migrate");
 		return;
 	}
@@ -2789,8 +2817,9 @@ as_partition_balance()
 	int hv_slindex_ptr_sz = AS_PARTITIONS * g_config.paxos_max_cluster_size * sizeof(int);
 	int *hv_slindex_ptr   = cf_malloc(hv_slindex_ptr_sz);
 
-	if ((hv_slindex_ptr == NULL) || (hv_ptr == NULL))
+	if ((hv_slindex_ptr == NULL) || (hv_ptr == NULL)) {
 		cf_crash(AS_PARTITION, "as_partition_balance_new: couldn't allocate partition state tables: %s", cf_strerror(errno));
+	}
 
 	memset(hv_ptr, 0, hv_ptr_sz);
 	memset(hv_slindex_ptr, 0, hv_slindex_ptr_sz);

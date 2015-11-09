@@ -1054,6 +1054,9 @@ struct as_namespace_s {
 	cf_atomic_int	migrate_rx_partitions_initial;
 	cf_atomic_int	migrate_rx_partitions_remaining;
 
+	// migration transmit stats
+	cf_atomic_int	migrate_tx_partitions_imbalance;
+
 	// the maximum void time of all records in the namespace
 	cf_atomic_int max_void_time;
 

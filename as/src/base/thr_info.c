@@ -2489,6 +2489,9 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-remaining=");
 	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_remaining);
 
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-fail=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_imbalance);
+
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 
