@@ -1435,10 +1435,11 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			}
 
 			bool iswithin =
-				! qtr->ns->geo2dsphere_within_strict ||
-				as_bin_particle_geojson_match(b,
-											  qtr->srange->cellid,
-											  qtr->srange->region);
+				as_bin_particle_geojson_match(
+				    b,
+					qtr->srange->cellid,
+					qtr->srange->region,
+					qtr->ns->geo2dsphere_within_strict);
 
 			// We either found a valid point or a false positive.
 			if (iswithin)
