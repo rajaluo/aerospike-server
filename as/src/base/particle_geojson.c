@@ -294,14 +294,35 @@ geojson_to_wire(const as_particle *p, uint8_t *wire)
 uint32_t
 geojson_size_from_asval(const as_val *val)
 {
-	// TODO
-	return 0;
+	as_geojson *pg = as_geojson_fromval(val);
+	size_t jsz = as_geojson_len(pg);
+
+	// Compute the size; we won't be writing any cellids ...
+	uint32_t sz =
+		sizeof(uint8_t) +			// flags
+		sizeof(uint16_t) +			// ncells (always 0 here)
+		(0 * sizeof(uint64_t)) +	// cell array (none)
+		jsz;						// json string
+
+	return sz;
 }
 
 void
 geojson_from_asval(const as_val *val, as_particle **pp)
 {
-	// TODO
+	geojson_mem *p_geojson_mem = (geojson_mem *) *pp;
+
+	as_geojson *pg = as_geojson_fromval(val);
+	size_t jsz = as_geojson_len(pg);
+
+	p_geojson_mem->type = AS_PARTICLE_TYPE_GEOJSON;
+	p_geojson_mem->sz = geojson_size_from_asval(val);
+
+	p_geojson_mem->flags = 0;
+	p_geojson_mem->ncells = 0;
+
+	uint8_t *p8 = (uint8_t *) p_geojson_mem->data;
+	memcpy(p8, as_geojson_get(pg), jsz);
 }
 
 as_val *
