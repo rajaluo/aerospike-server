@@ -465,6 +465,9 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";stat_nsup_deletes_not_shipped=");
 	APPEND_STAT_COUNTER(db, g_config.stat_nsup_deletes_not_shipped);
 
+	cf_dyn_buf_append_string(db, ";stat_compressed_pkts_received=");
+	APPEND_STAT_COUNTER(db, g_config.stat_compressed_pkts_received);
+
 	cf_dyn_buf_append_string(db, ";err_tsvc_requests=");
 	APPEND_STAT_COUNTER(db, g_config.err_tsvc_requests);
 	cf_dyn_buf_append_string(db, ";err_tsvc_requests_timeout=");
