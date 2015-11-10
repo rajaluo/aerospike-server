@@ -451,7 +451,7 @@ as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_w
 	}
 
 	if (*hwm_breached || *stop_writes) {
-		cf_info(AS_NAMESPACE, "{%s} hwm_breached %s%s, stop_writes %s%s, memory sz:%"PRIu64" (%"PRIu64" + %"PRIu64") hwm:%"PRIu64" sw:%"PRIu64", disk sz:%"PRIu64" hwm:%"PRIu64,
+		cf_warning(AS_NAMESPACE, "{%s} hwm_breached %s%s, stop_writes %s%s, memory sz:%"PRIu64" (%"PRIu64" + %"PRIu64") hwm:%"PRIu64" sw:%"PRIu64", disk sz:%"PRIu64" hwm:%"PRIu64,
 				ns->name, *hwm_breached ? "true" : "false", reasons[how_breached], *stop_writes ? "true" : "false", reasons[why_stopped],
 				memory_sz, index_sz, data_in_memory_sz, mem_hwm, mem_stop_writes,
 				disk_sz, ssd_hwm);

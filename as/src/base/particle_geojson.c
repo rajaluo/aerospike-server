@@ -294,14 +294,35 @@ geojson_to_wire(const as_particle *p, uint8_t *wire)
 uint32_t
 geojson_size_from_asval(const as_val *val)
 {
-	// TODO
-	return 0;
+	as_geojson *pg = as_geojson_fromval(val);
+	size_t jsz = as_geojson_len(pg);
+
+	// Compute the size; we won't be writing any cellids ...
+	uint32_t sz =
+		sizeof(uint8_t) +			// flags
+		sizeof(uint16_t) +			// ncells (always 0 here)
+		(0 * sizeof(uint64_t)) +	// cell array (none)
+		jsz;						// json string
+
+	return sz;
 }
 
 void
 geojson_from_asval(const as_val *val, as_particle **pp)
 {
-	// TODO
+	geojson_mem *p_geojson_mem = (geojson_mem *) *pp;
+
+	as_geojson *pg = as_geojson_fromval(val);
+	size_t jsz = as_geojson_len(pg);
+
+	p_geojson_mem->type = AS_PARTICLE_TYPE_GEOJSON;
+	p_geojson_mem->sz = geojson_size_from_asval(val);
+
+	p_geojson_mem->flags = 0;
+	p_geojson_mem->ncells = 0;
+
+	uint8_t *p8 = (uint8_t *) p_geojson_mem->data;
+	memcpy(p8, as_geojson_get(pg), jsz);
 }
 
 as_val *
@@ -378,44 +399,61 @@ as_bin_particle_geojson_cellids(as_bin *b, uint64_t **ppcells)
 }
 
 bool
-as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region)
+as_bin_particle_geojson_match(as_bin *candidate_bin,
+							  uint64_t query_cellid,
+							  geo_region_t query_region,
+							  bool is_strict)
 {
-	geojson_mem *gp = (geojson_mem *)b->particle;
+	// Determine whether the candidate bin geometry is a match for the
+	// query geometry.
+	//
+	// If query_cellid is non-zero this is a regions-containing-point query.
+	//
+	// If query_region is non-null this is a points-in-region query.
+	//
+	// Candidate geometry can either be a point or a region.  Regions
+	// will have the GEOJSON_ISREGION flag set.
 
-	if (cellid != 0) {
-		// REGIONS-CONTAINING-POINT QUERY
+	geojson_mem *gp = (geojson_mem *)candidate_bin->particle;
+	
+	// Is this a REGIONS-CONTAINING-POINT query?
+	//
+	if (query_cellid != 0) {
 
 		if ((gp->flags & GEOJSON_ISREGION) != 0) {
-			// Checking a REGION.
+			// Candidate is a REGION.
+
+			// Shortcut, if we aren't strict just return true.
+			if (! is_strict) {
+				return true;
+			}
+			
 			size_t jsonsz;
 			char const *jsonptr = geojson_mem_jsonstr(gp, &jsonsz);
 			uint64_t parsed_cellid = 0;
 			geo_region_t parsed_region = NULL;
 
-			if (! geo_parse(NULL, jsonptr, jsonsz, &parsed_cellid, &parsed_region)) {
+			if (! geo_parse(NULL, jsonptr, jsonsz,
+							&parsed_cellid, &parsed_region)) {
 				cf_warning(AS_PARTICLE, "geo_parse failed");
 				geo_region_destroy(parsed_region);
 				return false;
 			}
 
-			bool iswithin = geo_point_within(cellid, parsed_region);
+			bool iswithin = geo_point_within(query_cellid, parsed_region);
 
 			geo_region_destroy(parsed_region);
 			return iswithin;
 		}
 		else {
-			// Checking a POINT.
-			// This seems very unlikely, only points that exactly match the cell
-			// level center points will be found.
-			return true;
+			// Candidate is a POINT, skip it.
+			return false;
 		}
 	}
 
-	if (region) {
-		// POINTS-IN-REGION QUERY
-
-		// TODO - should we enforce that only points can match here?
-		// The caller of this routine skips it if "strict" is off!
+	// Is this a POINTS-IN-REGION query?
+	//
+	if (query_region) {
 
 		uint64_t *cells = (uint64_t *)gp->data;
 
@@ -426,13 +464,17 @@ as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region)
 		}
 
 		if ((gp->flags & GEOJSON_ISREGION) != 0) {
-			// Checking a REGION.
-			// FIXME - what should this test look like?
-			return true;
+			// Candidate is a REGION, skip it.
+			return false;
 		}
 		else {
-			// Checking a POINT.
-			return geo_point_within(cells[0], region);
+			// Candidate is a POINT.
+			if (is_strict) {
+				return geo_point_within(cells[0], query_region);
+			}
+			else {
+				return true;
+			}
 		}
 	}
 
