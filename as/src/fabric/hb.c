@@ -1974,7 +1974,6 @@ as_hb_thr(void *arg)
 
 		g_hb.endpoint_txlist[sock] = true;
 		g_hb.endpoint_txlist_isudp[sock] = true;
-
 	} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
 		sock = g_hb.socket.sock;
 
@@ -2165,7 +2164,6 @@ CloseSocket:
 							as_hb_error(AS_HB_ERR_SENDTO_FAIL_5);
 						}
 					} else { // tcp
-
 						cf_detail(AS_HB, "sending tcp heartbeat to index %d : msg size %zu", i, n);
 						if (0 > as_hb_tcp_send(i, buft, n)) {
 							cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 6", i);
@@ -2611,6 +2609,12 @@ as_hb_shutdown()
 }
 
 /*
+ *  g_log_items
+ *  Only dump details of heartbeat-related items to the log when true.
+ */
+static bool g_log_items = false;
+
+/*
  *  as_hb_dump_pulse
  *  Log the properties of an as_hb_pulse object.
  */
@@ -2645,8 +2649,45 @@ as_hb_dump_adjacencies_entry(void *key, void *data, void *udata)
 	as_hb_pulse *pulse = (as_hb_pulse *) data;
 	int *count = (int *) udata;
 
-	cf_info(AS_HB, "Adjacencies[%d]: node %"PRIx64"", *count, node);
-	as_hb_dump_pulse(pulse);
+	if (g_log_items) {
+		cf_info(AS_HB, "Adjacencies[%d]: node %"PRIx64"", *count, node);
+		as_hb_dump_pulse(pulse);
+	}
+
+	*count += 1;
+
+	return 0;
+}
+
+/*
+ *  as_hb_dump_discovered_node_hval
+ *  Log the properties of a discovered node object.
+ */
+static void
+as_hb_dump_discovered_node_hval(discovered_node_hval_t *hval)
+{
+	cf_info(AS_HB, " num_conn %d", hval->num_conn);
+	for (int i = 0; i < hval->num_conn; i++) {
+		cf_info(AS_HB, " conn[%d] fd %d", i, hval->conn[i].fd);
+	}
+}
+
+/*
+ *  as_dump_discovered_list_entry
+ *  Log the properties of a single HB discovered list entry, i.e.,
+ *    cf_node ==> discovered_node_hval_t
+ */
+static int
+as_hb_dump_discovered_list_entry(void *key, void *data, void *udata)
+{
+	cf_node node = * (cf_node *) key;
+	discovered_node_hval_t *hval = (discovered_node_hval_t *) data;
+	int *count = (int *) udata;
+
+	if (g_log_items) {
+		cf_info(AS_HB, "DiscoveredList[%d]: node %"PRIx64"", *count, node);
+		as_hb_dump_discovered_node_hval(hval);
+	}
 
 	*count += 1;
 
@@ -2667,6 +2708,36 @@ as_hb_dump(bool verbose)
 	cf_info(AS_HB, "HB Mode:  %s (%d)", (AS_HB_MODE_MCAST == g_config.hb_mode ? "multicast" :
 										 (AS_HB_MODE_MESH == g_config.hb_mode ? "mesh" : "undefined")),
 			g_config.hb_mode);
+
+	cf_info(AS_HB, "HB Addr:  %s", g_config.hb_addr);
+	cf_info(AS_HB, "HB Port:  %d", g_config.hb_port);
+
+	cf_info(AS_HB, "HB Tx Addr:  %s", g_config.hb_tx_addr);
+
+	if (g_config.hb_mode == AS_HB_MODE_MESH) {
+		cf_info(AS_HB, "HB Addr Advertised for Receiving Heartbeats: %s", g_config.hb_addr_to_use);
+
+		if (g_config.hb_init_addr) {
+			cf_info(AS_HB, "Mesh Addr:  %s", g_config.hb_init_addr);
+			if (g_config.hb_init_port) {
+				cf_info(AS_HB, "Mesh Port:  %d", g_config.hb_init_port);
+			}
+		} else {
+			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
+				if (g_config.hb_mesh_seed_addrs[i]) {
+					cf_info(AS_HB, "MeshSeedAddrPort[%d]:  %s:%d",
+							i, g_config.hb_mesh_seed_addrs[i], g_config.hb_mesh_seed_ports[i]);
+				} else {
+					break;
+				}
+			}
+		}
+		cf_info(AS_HB, "HB Mesh RW Retry Timeout:  %d", g_config.hb_mesh_rw_retry_timeout);
+	} else {
+		// Mode is multicast.
+		cf_info(AS_HB, "HB MCast TTL:  %d", g_config.hb_mcast_ttl);
+	}
+
 	cf_info(AS_HB, "HB Interval:  %d", g_config.hb_interval);
 	cf_info(AS_HB, "HB Timeout:  %d", g_config.hb_timeout);
 	cf_info(AS_HB, "HB Protocol:  %s (%d)", (AS_HB_PROTOCOL_V1 == g_config.hb_protocol ? "V1" :
@@ -2680,27 +2751,50 @@ as_hb_dump(bool verbose)
 
 	if (socket) {
 		cf_info(AS_HB, "HB Socket:  addr:port %s:%d proto %d sock %d", socket->addr, socket->port, socket->proto, socket->sock);
+	} else {
+		cf_info(AS_HB, "There is no HB Socket.");
 	}
 
-	// Mesh Host List Info:
+	// Mesh Seed Host List Info:
 
 	mesh_host_list_element *elem = g_hb.mesh_seed_host_list;
 	int i = 0;
 	while (elem) {
-		cf_info(AS_HB, "MeshSeedHostList[%d] %s:%d %lu %d %d", i, elem->host, elem->port, elem->next_try, elem->try_interval, elem->fd);
+		if (verbose) {
+			cf_info(AS_HB, "MeshSeedHostList[%d]:  addr:port %s:%d next_try %lu try_interval %d fd %d",
+					i, elem->host, elem->port, elem->next_try, elem->try_interval, elem->fd);
+		}
 		i++;
 		elem = elem->next;
 	}
+	cf_info(AS_HB, "There are %d MeshSeedHostList entries.", i);
+
+	// Mesh Non-Seed Host List Info:
+
+	elem = g_hb.mesh_non_seed_host_list;
+	i = 0;
+	while (elem) {
+		if (verbose) {
+			cf_info(AS_HB, "MeshNonSeedHostList[%d]:  addr:port %s:%d next_try %lu try_interval %d fd %d",
+					i, elem->host, elem->port, elem->next_try, elem->try_interval, elem->fd);
+		}
+		i++;
+		elem = elem->next;
+	}
+	cf_info(AS_HB, "There are %d MeshNonSeedHostList entries.", i);
 
 	// Snub List:
 
 	snub_list_element *sle = g_hb.snub_list;
 	i = 0;
 	while (sle && sle->node) {
-		cf_info(AS_HB, "SnubList[%d] node %"PRIx64" expiration %"PRIx64"", i, sle->node, sle->expiration);
+		if (verbose) {
+			cf_info(AS_HB, "SnubList[%d]:  node %"PRIx64" expiration %"PRIx64"", i, sle->node, sle->expiration);
+		}
 		sle++;
 		i++;
 	}
+	cf_info(AS_HB, "There are %d SnubList entries.", i);
 
 	// TxList Info:
 
@@ -2708,17 +2802,27 @@ as_hb_dump(bool verbose)
 	for (i = 0; i < AS_HB_TXLIST_SZ; i++) {
 		if (g_hb.endpoint_txlist[i]) {
 			endpoint_count++;
-			cf_info(AS_HB, "TxList[%d]: fd %d isudp %d", i, i, g_hb.endpoint_txlist_isudp[i]);
+			if (verbose) {
+				cf_info(AS_HB, "TxList[%d]:  fd %d isudp %d", i, i, g_hb.endpoint_txlist_isudp[i]);
+			}
 		}
 	}
 	cf_info(AS_HB, "There are %d open HB TxList sockets.", endpoint_count);
 
-	// Adjacencies
+	// Log the details of following types of item when verbose.
+	g_log_items = verbose;
 
-	if (verbose) {
-		int count = 0;
-		shash_reduce(g_hb.adjacencies, as_hb_dump_adjacencies_entry, &count);
-	}
+	// Adjacencies Info:
+
+	int count = 0;
+	shash_reduce(g_hb.adjacencies, as_hb_dump_adjacencies_entry, &count);
+	cf_info(AS_HB, "There are %d adjacent nodes.", count);
+
+	// Discovered Nodes Info:
+
+	count = 0;
+	shash_reduce(g_hb.discovered_list, as_hb_dump_discovered_list_entry, &count);
+	cf_info(AS_HB, "There are %d discovered nodes.", count);
 }
 
 /**
