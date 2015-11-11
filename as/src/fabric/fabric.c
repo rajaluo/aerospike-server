@@ -774,25 +774,8 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	struct in_addr self;
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node); // identifies self to remote
 	if (AS_HB_MODE_MESH == g_config.hb_mode) {
-
-		// If the user specified 'any' as heartbeat address, we listen on 0.0.0.0 (all interfaces)
-		// But we should send a proper IP address to the remote machine to send back heartbeat.
-		// Use the node's IP address in this case.
-		char *hbaddr_to_use = g_config.hb_addr;
-		// Checking the first byte is enough as '0' cannot be a valid IP address other than 0.0.0.0
-		if (*hbaddr_to_use == '0') {
-			cf_debug(AS_FABRIC, "Using address \"any\" for listening for heartbeats and a real IP address for receiving heartbeats");
-			hbaddr_to_use = g_config.node_ip;
-		}
-		// If the user specified an interface-address, however, we should instead
-		// send that address to the remote machine to send back heartbeats to us.
-		if (g_config.hb_tx_addr) {
-			cf_debug(AS_FABRIC, "Using \"interface-address\" for receiving heartbeats");
-			hbaddr_to_use = g_config.hb_tx_addr;
-		}
-		cf_debug(AS_FABRIC, "Sending %s as the IP address for receiving heartbeats", hbaddr_to_use);
-		
-		if (1 != inet_pton(AF_INET, hbaddr_to_use, &self))
+		cf_debug(AS_FABRIC, "Sending %s as the IP address for receiving heartbeats", g_config.hb_addr_to_use);
+		if (1 != inet_pton(AF_INET, g_config.hb_addr_to_use, &self))
 			cf_warning(AS_HB, "unable to call inet_pton: %s", cf_strerror(errno));
 		else {
 			msg_set_uint32(m, FS_ADDR, *(uint32_t *)&self);
