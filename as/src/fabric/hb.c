@@ -2854,6 +2854,7 @@ int as_hb_find_new_nodes_reduce(void *key, void *data, void *udata)
 	}
 
 	if (is_new_node) {
+		memset(&u->events[u->event_count], 0, sizeof(as_fabric_event_node));
 		u->events[u->event_count].evt = AS_HB_NODE_ARRIVE;
 		u->events[u->event_count].nodeid = nodeid;
 		cf_info(AS_HB, "Marking node add for paxos recovery: %" PRIx64 "",
@@ -2893,6 +2894,7 @@ int as_hb_get_corrective_events(cf_node *succession_list,
 
 		// Check if the node is alive.
 		if (!as_hb_is_alive(succession_list[i])) {
+			memset(&events[event_count], 0, sizeof(as_fabric_event_node));
 			events[event_count].evt = AS_HB_NODE_DEPART;
 			events[event_count].nodeid = succession_list[i];
 			cf_info(AS_HB,
