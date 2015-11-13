@@ -86,9 +86,6 @@ void     udf_rw_complete(as_transaction *tr, int retcode, char *filename, int li
 int      udf_call_init(udf_call *, as_transaction *);
 void     udf_call_destroy(udf_call *);
 
-as_val  *as_val_frombin(as_bin *bb);
-as_val  *as_val_from_bin_and_type(as_bin *bb, as_particle_type type);
-
 void     xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
 				   cf_node masternode, bool is_delete, uint16_t set_id);
 
