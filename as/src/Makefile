@@ -34,6 +34,7 @@ BASE_HEADERS += write_request.h xdr_serverside.h
 BASE_SOURCES += aggr.c as.c asm.c batch.c bin.c cfg.c cluster_config.c index.c job_manager.c json_init.c
 BASE_SOURCES += ldt.c ldt_record.c ldt_aerospike.c monitor.c namespace.c packet_compression.c
 BASE_SOURCES += particle.c particle_blob.c particle_float.c particle_geojson.c particle_integer.c
+BASE_SOURCES += particle_list.c particle_map.c particle_string.c
 BASE_SOURCES += proto.c rec_props.c record.c scan.c signal.c secondary_index.c system_metadata.c
 BASE_SOURCES += thr_batch.c thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.c thr_proxy.c
 BASE_SOURCES += thr_query.c thr_rw.c thr_sindex.c thr_tsvc.c transaction.c

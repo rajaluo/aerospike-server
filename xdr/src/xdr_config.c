@@ -83,6 +83,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "stop-writes-noxdr",				XDR_CASE_STOP_WRITES_NOXDR },
 		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
+		{ "xdr-replace-record",				XDR_CASE_XDR_REPLACE_RECORD },
 		{ "xdr-hotkey-maxskip",				XDR_CASE_XDR_HOTKEY_MAXSKIP },
 		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
 		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
@@ -158,6 +159,7 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_check_data_before_delete = false;
 	c->xdr_hotkey_maxskip = 5;
 	c->xdr_fwd_with_gencheck = false;
+	c->xdr_replace_record = true;
 	c->xdr_info_request_timeout_ms = 500;
 	c->xdr_compression_threshold = 0; //0 = Disabled compressed shipping, > 0 minimum size of packet for compression
 	c->xdr_pidfile = NULL;

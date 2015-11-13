@@ -24,6 +24,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aerospike/as_double.h"
+#include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
 
 #include "fault.h"
@@ -46,6 +48,11 @@ int float_incr_from_wire(as_particle_type wire_type, const uint8_t *wire_value, 
 int float_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size, as_particle **pp);
 int float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const uint8_t *wire_value, uint32_t value_size);
 
+// Handle as_val translation.
+void float_from_asval(const as_val *val, as_particle **pp);
+as_val *float_to_asval(const as_particle *p);
+uint32_t float_asval_to_wire(const as_val *val, uint8_t *wire);
+
 
 //==========================================================
 // FLOAT particle interface - vtable.
@@ -54,7 +61,6 @@ int float_compare_from_wire(const as_particle *p, as_particle_type wire_type, co
 const as_particle_vtable float_vtable = {
 		integer_destruct,
 		integer_size,
-		NULL,
 
 		integer_concat_size_from_wire,
 		integer_append_from_wire,
@@ -66,10 +72,11 @@ const as_particle_vtable float_vtable = {
 		integer_wire_size,
 		integer_to_wire,
 
-		integer_size_from_mem,
-		integer_from_mem,
-		integer_mem_size,
-		integer_to_mem,
+		integer_size_from_asval,
+		float_from_asval,
+		float_to_asval,
+		integer_asval_wire_size,
+		float_asval_to_wire,
 
 		integer_size_from_flat,
 		integer_cast_from_flat,
@@ -138,4 +145,30 @@ float_compare_from_wire(const as_particle *p, as_particle_type wire_type, const 
 	}
 
 	return integer_compare_from_wire(p, AS_PARTICLE_TYPE_INTEGER, wire_value, value_size);
+}
+
+//------------------------------------------------
+// Handle as_val translation.
+//
+
+void
+float_from_asval(const as_val *val, as_particle **pp)
+{
+	*(double *)pp = as_double_get(as_double_fromval(val));
+}
+
+as_val *
+float_to_asval(const as_particle *p)
+{
+	return (as_val *)as_double_new(*(double *)&p);
+}
+
+uint32_t
+float_asval_to_wire(const as_val *val, uint8_t *wire)
+{
+	double x = as_double_get(as_double_fromval(val));
+
+	*(uint64_t *)wire = cf_swap_to_be64(*(uint64_t *)&x);
+
+	return (uint32_t)sizeof(uint64_t);
 }

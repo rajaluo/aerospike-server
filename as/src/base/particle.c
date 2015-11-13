@@ -50,7 +50,10 @@
 
 extern const as_particle_vtable integer_vtable;
 extern const as_particle_vtable float_vtable;
+extern const as_particle_vtable string_vtable;
 extern const as_particle_vtable blob_vtable;
+extern const as_particle_vtable map_vtable;
+extern const as_particle_vtable list_vtable;
 extern const as_particle_vtable geojson_vtable;
 
 // Array of particle vtable pointers.
@@ -58,7 +61,7 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_NULL]			= NULL,
 		[AS_PARTICLE_TYPE_INTEGER]		= &integer_vtable,
 		[AS_PARTICLE_TYPE_FLOAT]		= &float_vtable,
-		[AS_PARTICLE_TYPE_STRING]		= &blob_vtable,
+		[AS_PARTICLE_TYPE_STRING]		= &string_vtable,
 		[AS_PARTICLE_TYPE_BLOB]			= &blob_vtable,
 		[AS_PARTICLE_TYPE_TIMESTAMP]	= &integer_vtable,
 		[AS_PARTICLE_TYPE_JAVA_BLOB]	= &blob_vtable,
@@ -67,10 +70,10 @@ const as_particle_vtable *particle_vtable[] = {
 		[AS_PARTICLE_TYPE_RUBY_BLOB]	= &blob_vtable,
 		[AS_PARTICLE_TYPE_PHP_BLOB]		= &blob_vtable,
 		[AS_PARTICLE_TYPE_ERLANG_BLOB]	= &blob_vtable,
-		[AS_PARTICLE_TYPE_MAP]			= &blob_vtable,
-		[AS_PARTICLE_TYPE_LIST]			= &blob_vtable,
-		[AS_PARTICLE_TYPE_HIDDEN_LIST]	= &blob_vtable,
-		[AS_PARTICLE_TYPE_HIDDEN_MAP]	= &blob_vtable,
+		[AS_PARTICLE_TYPE_MAP]			= &map_vtable,
+		[AS_PARTICLE_TYPE_LIST]			= &list_vtable,
+		[AS_PARTICLE_TYPE_HIDDEN_LIST]	= &list_vtable,
+		[AS_PARTICLE_TYPE_HIDDEN_MAP]	= &map_vtable,
 		[AS_PARTICLE_TYPE_GEOJSON]		= &geojson_vtable
 };
 
@@ -113,6 +116,38 @@ safe_particle_type(uint8_t type)
 // Particle "class static" functions.
 //
 
+as_particle_type
+as_particle_type_from_asval(const as_val *val)
+{
+	as_val_t vtype = as_val_type(val);
+
+	switch (vtype) {
+	case AS_UNDEF: // if val was null - handle quietly
+	case AS_NIL:
+		return AS_PARTICLE_TYPE_NULL;
+	case AS_BOOLEAN:
+	case AS_INTEGER:
+		return AS_PARTICLE_TYPE_INTEGER;
+	case AS_DOUBLE:
+		return AS_PARTICLE_TYPE_FLOAT;
+	case AS_STRING:
+		return AS_PARTICLE_TYPE_STRING;
+	case AS_BYTES:
+		return AS_PARTICLE_TYPE_BLOB;
+	case AS_GEOJSON:
+		return AS_PARTICLE_TYPE_GEOJSON;
+	case AS_LIST:
+		return AS_PARTICLE_TYPE_LIST;
+	case AS_MAP:
+		return AS_PARTICLE_TYPE_MAP;
+	case AS_REC:
+	case AS_PAIR:
+	default:
+		cf_warning(AS_UDF, "no particle type for as_val_t %d", vtype);
+		return AS_PARTICLE_TYPE_NULL;
+	}
+}
+
 // TODO - will we ever need this?
 int32_t
 as_particle_size_from_client(const as_msg_op *op)
@@ -135,13 +170,21 @@ as_particle_size_from_pickled(uint8_t **p_pickled)
 
 	*p_pickled = (uint8_t *)value + value_size;
 
+	// TODO - safety-check type.
 	return particle_vtable[type]->size_from_wire_fn(value, value_size);
 }
 
 uint32_t
-as_particle_size_from_mem(as_particle_type type, const uint8_t *value, uint32_t value_size)
+as_particle_size_from_asval(const as_val *val)
 {
-	return particle_vtable[type]->size_from_mem_fn(type, value, value_size);
+	as_particle_type type = as_particle_type_from_asval(val);
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just skips unmanageable as_val types.
+		return 0;
+	}
+
+	return particle_vtable[type]->size_from_asval_fn(val);
 }
 
 // TODO - will we ever need this?
@@ -153,37 +196,37 @@ as_particle_size_from_flat(const uint8_t *flat, uint32_t flat_size)
 	return particle_vtable[type]->size_from_flat_fn(flat, flat_size);
 }
 
-as_particle_type
-as_particle_type_convert(as_particle_type type)
+uint32_t
+as_particle_asval_client_value_size(const as_val *val)
 {
-	switch (type) {
-	case AS_PARTICLE_TYPE_HIDDEN_MAP:
-		return AS_PARTICLE_TYPE_MAP;
-	case AS_PARTICLE_TYPE_HIDDEN_LIST:
-		return AS_PARTICLE_TYPE_LIST;
-	default:
-		return type;
+	as_particle_type type = as_particle_type_from_asval(val);
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just sends bin-op with NULL particle to client.
+		return 0;
 	}
+
+	return particle_vtable[type]->asval_wire_size_fn(val);
 }
 
-as_particle_type
-as_particle_type_convert_to_hidden(as_particle_type type)
+uint32_t
+as_particle_asval_to_client(const as_val *val, as_msg_op *op)
 {
-	switch (type) {
-	case AS_PARTICLE_TYPE_MAP:
-		return AS_PARTICLE_TYPE_HIDDEN_MAP;
-	case AS_PARTICLE_TYPE_LIST:
-		return AS_PARTICLE_TYPE_HIDDEN_LIST;
-	default:
-		return type;
-	}
-}
+	as_particle_type type = as_particle_type_from_asval(val);
 
-bool
-as_particle_type_hidden(as_particle_type type)
-{
-	return	type == AS_PARTICLE_TYPE_HIDDEN_MAP ||
-			type == AS_PARTICLE_TYPE_HIDDEN_LIST;
+	op->particle_type = type;
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just sends bin-op with NULL particle to client.
+		return 0;
+	}
+
+	uint8_t *value = (uint8_t *)op + sizeof(as_msg_op) + op->name_sz;
+	uint32_t added_size = particle_vtable[type]->asval_to_wire_fn(val, value);
+
+	op->op_sz += added_size;
+
+	return added_size;
 }
 
 
@@ -221,12 +264,6 @@ as_bin_particle_size(as_bin *b)
 	}
 
 	return particle_vtable[as_bin_get_particle_type(b)]->size_fn(b->particle);
-}
-
-uint32_t
-as_bin_particle_ptr(as_bin *b, uint8_t **p_value)
-{
-	return particle_vtable[as_bin_get_particle_type(b)]->ptr_fn(b->particle, p_value);
 }
 
 //------------------------------------------------
@@ -756,7 +793,7 @@ as_bin_particle_compare_from_pickled(const as_bin *b, uint8_t **p_pickled)
 }
 
 uint32_t
-as_bin_particle_client_value_size(as_bin *b)
+as_bin_particle_client_value_size(const as_bin *b)
 {
 	if (! as_bin_inuse(b)) {
 		// UDF result bin (bin name "SUCCESS" or "FAILURE") will get here.
@@ -801,7 +838,7 @@ as_bin_particle_to_client(const as_bin *b, as_msg_op *op)
 
 
 uint32_t
-as_bin_particle_pickled_size(as_bin *b)
+as_bin_particle_pickled_size(const as_bin *b)
 {
 	uint8_t type = as_bin_get_particle_type(b);
 
@@ -826,80 +863,85 @@ as_bin_particle_to_pickled(const as_bin *b, uint8_t *pickled)
 }
 
 //------------------------------------------------
-// Handle in-memory format.
+// Handle as_val translation.
 //
 
-// TODO - re-do to leave original intact on failure.
 int
-as_bin_particle_replace_from_mem(as_bin *b, as_particle_type type, const uint8_t *value, uint32_t value_size)
+as_bin_particle_replace_from_asval(as_bin *b, const as_val *val)
 {
 	uint8_t old_type = as_bin_get_particle_type(b);
-	uint32_t old_mem_size = as_bin_inuse(b) ? particle_vtable[old_type]->size_fn(b->particle) : 0;
+	as_particle_type new_type = as_particle_type_from_asval(val);
 
-	uint32_t new_mem_size = particle_vtable[type]->size_from_mem_fn(type, value, value_size);
-
-	if (new_mem_size != old_mem_size) {
-		if (as_bin_inuse(b)) {
-			// Destroy the old particle.
-			particle_vtable[old_type]->destructor_fn(b->particle);
-		}
-
-		b->particle = NULL;
+	if (new_type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just skips unmanageable as_val types.
+		return 0;
 	}
 
-	if (new_mem_size != 0 && ! b->particle) {
+	uint32_t new_mem_size = particle_vtable[new_type]->size_from_asval_fn(val);
+	// TODO - could this ever fail?
+
+	as_particle *old_particle = b->particle;
+
+	if (new_mem_size != 0) {
 		b->particle = cf_malloc(new_mem_size);
 
 		if (! b->particle) {
-			as_bin_set_empty(b);
-			return -1; // TODO - AS_PROTO error code seems inappropriate?
+			b->particle = old_particle;
+			return -1;
 		}
 	}
 
 	// Load the new particle into the bin.
-	particle_vtable[type]->from_mem_fn(type, value, value_size, &b->particle);
+	particle_vtable[new_type]->from_asval_fn(val, &b->particle);
+	// TODO - could this ever fail?
+
+	if (as_bin_inuse(b)) {
+		// Destroy the old particle.
+		particle_vtable[old_type]->destructor_fn(old_particle);
+	}
 
 	// Set the bin's iparticle metadata.
-	as_bin_state_set_from_type(b, type);
+	as_bin_state_set_from_type(b, new_type);
 
 	return 0;
 }
 
-uint32_t
-as_bin_particle_stack_from_mem(as_bin *b, uint8_t* stack, as_particle_type type, const uint8_t *value, uint32_t value_size)
+void
+as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val)
 {
 	// We assume that if we're using stack particles, the old particle is either
 	// nonexistent or also a stack particle - either way, don't destroy.
 
-	uint32_t mem_size = particle_vtable[type]->size_from_mem_fn(type, value, value_size);
+	as_particle_type type = as_particle_type_from_asval(val);
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		// Currently UDF code just skips unmanageable as_val types.
+		return;
+	}
 
 	// Instead of allocating, we use the stack buffer provided. (Note that
 	// embedded types like integer will overwrite this with the value.)
 	b->particle = (as_particle *)stack;
 
 	// Load the new particle into the bin.
-	particle_vtable[type]->from_mem_fn(type, value, value_size, &b->particle);
+	particle_vtable[type]->from_asval_fn(val, &b->particle);
+	// TODO - could this ever fail?
 
 	// Set the bin's iparticle metadata.
 	as_bin_state_set_from_type(b, type);
 
-	return mem_size;
+	// TODO - we don't bother returning size written, since nothing yet needs
+	// it and it's very expensive for CDTs to do an extra size_from_asval_fn()
+	// call. Perhaps we could have from_asval_fn() return the size if needed?
 }
 
-uint32_t
-as_bin_particle_mem_size(as_bin *b)
+as_val *
+as_bin_particle_to_asval(const as_bin *b)
 {
 	uint8_t type = as_bin_get_particle_type(b);
 
-	return particle_vtable[type]->mem_size_fn(b->particle);
-}
-
-uint32_t
-as_bin_particle_to_mem(const as_bin *b, uint8_t *value)
-{
-	uint8_t type = as_bin_get_particle_type(b);
-
-	return particle_vtable[type]->to_mem_fn(b->particle, value);
+	// Caller is responsible for freeing as_val returned here.
+	return particle_vtable[type]->to_asval_fn(b->particle);
 }
 
 //------------------------------------------------
@@ -1025,7 +1067,7 @@ as_ldt_particle_client_value_size(as_storage_rd *rd, as_bin *b, as_val **p_val)
 }
 
 uint32_t
-as_ldt_particle_to_client(const as_val *val, as_msg_op *op)
+as_ldt_particle_to_client(as_val *val, as_msg_op *op)
 {
 	if (! val) {
 		op->particle_type = AS_PARTICLE_TYPE_NULL;
@@ -1036,19 +1078,12 @@ as_ldt_particle_to_client(const as_val *val, as_msg_op *op)
 
 	uint8_t *value = (uint8_t *)op + sizeof(as_msg_op) + op->name_sz;
 
-	as_buffer abuf;
-	as_buffer_init(&abuf);
-
 	as_serializer s;
 	as_msgpack_init(&s);
-	as_serializer_serialize(&s, (as_val *)val, &abuf);
 
-	uint32_t added_size = abuf.size;
-
-	memcpy(value, abuf.data, abuf.size);
+	uint32_t added_size = as_serializer_serialize_presized(&s, val, value);
 
 	as_serializer_destroy(&s);
-	as_buffer_destroy(&abuf);
 	as_val_destroy(val);
 
 	op->op_sz += added_size;
