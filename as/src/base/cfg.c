@@ -377,6 +377,7 @@ typedef enum {
 	// Service paxos recovery policy options (value tokens):
 	CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL,
 	CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER,
+	CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER,
 	CASE_SERVICE_PAXOS_RECOVERY_MANUAL,
 
 	// Logging options:
@@ -561,6 +562,7 @@ typedef enum {
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
 	CASE_NAMESPACE_SET_ENABLE_XDR,
+	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
 	// Deprecated:
 	CASE_NAMESPACE_SET_EVICT_HWM_COUNT,
 	CASE_NAMESPACE_SET_EVICT_HWM_PCT,
@@ -769,6 +771,7 @@ const cfg_opt SERVICE_PAXOS_PROTOCOL_OPTS[] = {
 const cfg_opt SERVICE_PAXOS_RECOVERY_OPTS[] = {
 		{ "auto-dun-all",					CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL },
 		{ "auto-dun-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER },
+		{ "auto-reset-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER },
 		{ "manual",							CASE_SERVICE_PAXOS_RECOVERY_MANUAL }
 };
 
@@ -960,6 +963,7 @@ const cfg_opt NAMESPACE_STORAGE_KV_OPTS[] = {
 const cfg_opt NAMESPACE_SET_OPTS[] = {
 		{ "set-disable-eviction",			CASE_NAMESPACE_SET_DISABLE_EVICTION },
 		{ "set-enable-xdr",					CASE_NAMESPACE_SET_ENABLE_XDR },
+		{ "set-stop-writes-count",			CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
 		{ "set-evict-hwm-count",			CASE_NAMESPACE_SET_EVICT_HWM_COUNT },
 		{ "set-evict-hwm-pct",				CASE_NAMESPACE_SET_EVICT_HWM_PCT },
 		{ "set-stop-write-count",			CASE_NAMESPACE_SET_STOP_WRITE_COUNT },
@@ -2011,6 +2015,9 @@ as_config_init()
 				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER:
 					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER;
 					break;
+				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER:
+					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER;
+					break;
 				case CASE_SERVICE_PAXOS_RECOVERY_MANUAL:
 					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_MANUAL;
 					break;
@@ -2810,6 +2817,9 @@ as_config_init()
 					cfg_unknown_val_tok_1(&line);
 					break;
 				}
+				break;
+			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
+				p_set->stop_writes_count = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SET_EVICT_HWM_COUNT:
 			case CASE_NAMESPACE_SET_EVICT_HWM_PCT:

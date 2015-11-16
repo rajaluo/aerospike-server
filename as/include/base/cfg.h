@@ -86,6 +86,11 @@ typedef struct as_config_s {
 	char				*hb_mesh_seed_addrs[AS_CLUSTER_SZ];
 	int					hb_mesh_seed_ports[AS_CLUSTER_SZ];
 	char				*hb_tx_addr;
+	// Address advertised for receiving [mesh only] heartbeats:
+	// Computed starting with "heartbeat.address" (g_config.hb_addr),
+	// and set to a real IP address (g_config.node_ip) if that is "any",
+	// and finally overriden by "heartbeat.interface-address" (g_config.hb_tx_addr), if set.
+	char				*hb_addr_to_use;
 	uint32_t			hb_interval;
 	uint32_t			hb_timeout;
 	unsigned char		hb_mcast_ttl;
@@ -437,6 +442,9 @@ typedef struct as_config_s {
 	cf_atomic_int		batch_index_complete;
 	cf_atomic_int		batch_index_timeout;
 	cf_atomic_int		batch_index_errors;
+	cf_atomic_int		batch_index_huge_buffers;
+	cf_atomic_int		batch_index_created_buffers;
+	cf_atomic_int		batch_index_destroyed_buffers;
 
 	cf_atomic_int		batch_initiate;
 	cf_atomic_int		batch_tree_count;

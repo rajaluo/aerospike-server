@@ -117,16 +117,17 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 	}
 
 	const char * set_name = as_index_get_set_name(rd->r, rd->ns);
-	SINDEX_BINS_SETUP(sbins, rd->ns->sindex_cnt);
-	as_sindex * si_arr[rd->ns->sindex_cnt];
-	int si_cnt = 0;
-	int si_arr_index = 0;
-	int sbins_populated  = 0;
+	
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
 	if (has_sindex) {
 		SINDEX_GRLOCK();
-		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
-		si_arr_index += si_cnt;
+	}
+	SINDEX_BINS_SETUP(sbins, rd->ns->sindex_cnt);
+	as_sindex * si_arr[rd->ns->sindex_cnt];
+	int si_arr_index = 0;
+	int sbins_populated  = 0;
+	if (has_sindex) {
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, sbins, AS_SINDEX_OP_DELETE);
 		SINDEX_GUNLOCK();
 	}
@@ -271,17 +272,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	as_storage_rd * rd      = urecord->rd;
 	as_transaction *tr      = urecord->tr;
 
-	SINDEX_BINS_SETUP(sbins, 2 * rd->ns->sindex_cnt);
-	as_sindex * si_arr[2 * rd->ns->sindex_cnt];
-	int sbins_populated = 0;
-	int si_arr_index = 0;
-	int si_cnt = 0;
-	bool has_sindex          = as_sindex_ns_has_sindex(rd->ns);
-	if (has_sindex) {
-		SINDEX_GRLOCK();
-	}
-	const char * set_name = as_index_get_set_name(rd->r, rd->ns);
-
 	as_bin * b = as_bin_get_or_create(rd, bname);
 
 	if ( !b ) {
@@ -289,9 +279,18 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 		return -1;
 	}
 
+	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
+	if (has_sindex) {
+		SINDEX_GRLOCK();
+	}
+	SINDEX_BINS_SETUP(sbins, 2 * rd->ns->sindex_cnt);
+	as_sindex * si_arr[2 * rd->ns->sindex_cnt];
+	int sbins_populated = 0;
+	int si_arr_index = 0;
+	const char * set_name = as_index_get_set_name(rd->r, rd->ns);
+
 	if (has_sindex ) {
-		si_cnt += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
-		si_arr_index += si_cnt;
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 	}
 
@@ -340,8 +339,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 			return ret;
 		}
 
-		si_cnt += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
-		si_arr_index += si_cnt;
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
 		SINDEX_GUNLOCK();
 		if (sbins_populated > 0) {

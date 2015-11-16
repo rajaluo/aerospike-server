@@ -160,6 +160,11 @@ clean:
 	$(RM) $(DEPENDENCIES)
 	$(RM) $(MEXP_SOURCES) $(PREPROS)
 
+# Emacs syntax check target.CHK_SOURCES is set by emacs to the files being edited.
+.PHONY: check-syntax
+check-syntax:
+	$(CC) -Wall -Wextra -pedantic -fsyntax-only $(CHK_SOURCES)
+
 $(SERVER): $(OBJECTS) $(AS_LIB_DEPS)
 ifneq ($(PREPRO),1)
   ifneq ($(MEXP_PHASE),1)

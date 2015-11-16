@@ -1,7 +1,7 @@
 /*
  * transaction.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -286,11 +286,28 @@ as_transaction_digest_validate(as_transaction *tr)
  *           -1 on failure
  */
 int
-as_transaction_create( as_transaction *tr, tr_create_data *  trc_data)
+as_transaction_create_internal(as_transaction *tr, tr_create_data *  trc_data)
 {
 	tr_create_data * d = (tr_create_data*) trc_data;
-	udf_call * call    = d->call;
-	uint64_t now       = cf_getns();
+
+	// Get Defensive 
+	memset(tr, 0, sizeof(as_transaction));
+
+	if (d->fd_h) {
+		cf_warning(AS_PROTO, "Foreground Internal Transation .. Ignoring");
+		return -1;
+	} else {
+		tr->proto_fd_h = NULL;
+	}
+
+	tr->start_time   = cf_getns();
+	tr->flag         = AS_TRANSACTION_FLAG_INTERNAL;
+	tr->keyd         = d->digest;
+	tr->preprocessed = true;
+	tr->result_code  = AS_PROTO_RESULT_OK;
+
+	AS_PARTITION_RESERVATION_INIT(tr->rsv);
+	UREQ_DATA_INIT(&tr->udata);
 
 	// Get namespace and set lengths.
 	int ns_len        = strlen(d->ns->name);
@@ -322,38 +339,12 @@ as_transaction_create( as_transaction *tr, tr_create_data *  trc_data)
 	// Calculation of number of fields:
 	// n_fields = ( ns ? 1 : 0 ) + (set ? 1 : 0) + (digest ? 1 : 0) + (trid ? 1 : 0) + (call ? 3 : 0);
 
-	// Write the header.
+	// Write the header in case the request gets proxied. Is it enough ??
 	buf = as_msg_write_header(buf, msg_sz, 0, d->msg_type, 0, 0, 0, 0, 2 /*n_fields*/, 0);
-
-	// Now write the fields.
 	buf = as_msg_write_fields(buf, d->ns->name, ns_len, d->set, set_len, &(d->digest), 0, 0 , 0, 0);
 
-	tr->incoming_cluster_key = 0;
-	// Using the scan job fd. Reservation of this fd takes place at the
-	// transaction service time, when the write_request is reserved.
-	if (call->udf_type == AS_SCAN_UDF_OP_BACKGROUND) {
-		tr->proto_fd_h = NULL;
-	} else {
-		cf_rc_reserve(d->fd_h);
-		tr->proto_fd_h = d->fd_h;
-	}
-	tr->start_time   = now; // set transaction start time
-	tr->end_time     = 0;   // TODO: should it timeout as scan parent job
-	tr->proxy_node   = 0;   // will change if scan job can be proxied
-	tr->proxy_msg    = 0;
-	tr->trid         = 0;	// at this point we don't know the transaction-id
-	tr->generation   = 0;
-	tr->microbenchmark_time = 0;
-	tr->flag         = 0;
 	tr->msgp         = (cl_msg *) buf_r;
-	tr->keyd         = d->digest;
-	tr->preprocessed = true;
-	AS_PARTITION_RESERVATION_INIT(tr->rsv);
-	tr->result_code  = AS_PROTO_RESULT_OK;
-	UREQ_DATA_INIT(&tr->udata);
-	tr->batch_shared = 0;
-	tr->batch_index = 0;
-	tr->void_time = 0;
+
 	return 0;
 }
 
