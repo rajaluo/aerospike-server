@@ -333,18 +333,40 @@ thr_demarshal_read_integer(const char *path, int *value)
 int
 thr_demarshal_set_buffer(int fd, int option, int size)
 {
-	const char *proc = option == SO_RCVBUF ?
-			"/proc/sys/net/core/rmem_max" :
-			"/proc/sys/net/core/wmem_max";
-	int max = 0;
+	static int rcv_max = -1;
+	static int snd_max = -1;
 
-	if (thr_demarshal_read_integer(proc, &max) < 0) {
-		cf_crash(AS_DEMARSHAL, "Failed to read %s.", proc);
+	const char *proc;
+	int *max;
+
+	switch (option) {
+	case SO_RCVBUF:
+		proc = "/proc/sys/net/core/rmem_max";
+		max = &rcv_max;
+		break;
+
+	case SO_SNDBUF:
+		proc = "/proc/sys/net/core/wmem_max";
+		max = &snd_max;
+		break;
+
+	default:
+		cf_crash(AS_DEMARSHAL, "Invalid option: %d", option);
 	}
 
-	if (max < size) {
+	int tmp = ck_pr_load_int(max);
+
+	if (tmp < 0) {
+		if (thr_demarshal_read_integer(proc, &tmp) < 0) {
+			cf_crash(AS_DEMARSHAL, "Failed to read %s.", proc);
+		}
+
+		ck_pr_cas_int(max, -1, tmp);
+	}
+
+	if (tmp < size) {
 		cf_warning(AS_DEMARSHAL, "Buffer limit is %d, should be at least %d. Please set %s accordingly.",
-				max, size, proc);
+				tmp, size, proc);
 		return -1;
 	}
 
