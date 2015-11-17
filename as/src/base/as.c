@@ -296,11 +296,14 @@ main(int argc, char **argv)
 			break;
 		case 'F':
 			// A "new-style" daemon(*) runs in the foreground and:
-			//  -- Does not set the user/group (even if specified in the config. file.)
-			//  -- Does not write a PID file (even if specified in the config. file.)
-			//  -- Does not write to a log file (even if specified in the config. file.)
-			//  -- Does enables the console log (even if not specified in the config. file.)
-			//  -- Does not rotate the (console) log upon receiving SIGHUP.
+			//  -- Does not set the user/group.
+			//  -- Does not write a PID file.
+			//  -- Does not write to a log file.
+			//  -- Does enables the console (stderr) log.
+			//
+			// If any of these guidelines are not met, the server logs a warning.
+			//
+			// In addition, the server does not rotate the console log upon receiving SIGHUP.
 			//       [But should instead re-load the config. file. ~~ Not currently supported.]
 			//
 			// (*) Reference:  http://0pointer.de/public/systemd-man/daemon.html#New-Style%20Daemons
@@ -350,10 +353,14 @@ main(int argc, char **argv)
 	// point must be set up so that they are accessible without root privileges.
 	// If not, the process will self-terminate with (hopefully!) a log message
 	// indicating which resource is not set up properly.
-	if (! c->new_style_daemon && 0 != c->uid && 0 == geteuid()) {
-		// To see this log, change NO_SINKS_LIMIT in fault.c:
-		cf_info(AS_AS, "privsep to %d %d", c->uid, c->gid);
-		cf_process_privsep(c->uid, c->gid);
+	if (0 != c->uid && 0 == geteuid()) {
+		if (! c->new_style_daemon) {
+			// To see this log, change NO_SINKS_LIMIT in fault.c:
+			cf_info(AS_AS, "privsep to %d %d", c->uid, c->gid);
+			cf_process_privsep(c->uid, c->gid);
+		} else {
+			cf_warning(AS_AS, "Not doing privsep in new-style daemon mode.");
+		}
 	}
 
 	//
@@ -362,9 +369,12 @@ main(int argc, char **argv)
 	// that must be opened above, in order to parse the user & group.)
 	//==========================================================================
 
-	// If a "new-style" daemon, only (and always) activate the console sink.
+	// A "new-style" daemon expects console logging to be configured.
+	// (If not, log messages won't be seen via the standard path.)
 	if (c->new_style_daemon) {
-		cf_fault_sink_unhold_all_but_console();
+		if (! cf_fault_console_is_held()) {
+			cf_warning(AS_AS, "In new-style daemon mode, console logging is not configured.");
+		}
 	}
 
 	// Activate log sinks. Up to this point, 'cf_' log output goes to stderr,
@@ -415,6 +425,10 @@ main(int argc, char **argv)
 	// Write the pid file, if specified.
 	if (! c->new_style_daemon) {
 		write_pidfile(c->pidfile);
+	} else {
+		if (c->pidfile) {
+			cf_warning(AS_AS, "Not writing PID file in new-style daemon mode.");
+		}
 	}
 
 	// Check that required directories are set up properly.
