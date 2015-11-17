@@ -152,6 +152,7 @@ typedef struct {
 #define INFO_FIELD_OP	0
 #define INFO_FIELD_GENERATION 1
 #define INFO_FIELD_SERVICE_ADDRESS 2
+#define INFO_FIELD_ALT_ADDRESS 3
 
 #define INFO_OP_UPDATE 0
 #define INFO_OP_ACK 1
@@ -159,7 +160,8 @@ typedef struct {
 msg_template info_mt[] = {
 	{ INFO_FIELD_OP,	M_FT_UINT32 },
 	{ INFO_FIELD_GENERATION, M_FT_UINT32 },
-	{ INFO_FIELD_SERVICE_ADDRESS, M_FT_STR }
+	{ INFO_FIELD_SERVICE_ADDRESS, M_FT_STR },
+	{ INFO_FIELD_ALT_ADDRESS, M_FT_STR }
 };
 
 // Is dumping GLibC-level memory stats enabled?
@@ -960,30 +962,82 @@ info_command_snub(char *name, char *params, cf_dyn_buf *db)
 	int  time_str_len = sizeof(time_str);
 	cf_clock snub_time;
 
+	/*
+	 *  Command Format:  "snub:node=<NodeID>{;time=<TimeMS>}" [the "time" argument is optional]
+	 *
+	 *  where <NodeID> is a hex node ID and <TimeMS> is relative time in milliseconds,
+	 *  defaulting to 30 years.
+	 */
+
 	if (0 != as_info_parameter_get(params, "node", node_str, &node_str_len)) {
-		cf_info(AS_INFO, "snub command: no node to be snubbed");
+		cf_warning(AS_INFO, "snub command: no node to be snubbed");
+		cf_dyn_buf_append_string(db, "error");
 		return(0);
 	}
 
 	cf_node node;
 	if (0 != cf_str_atoi_u64_x(node_str, &node, 16)) {
-		cf_info(AS_INFO, "snub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_warning(AS_INFO, "snub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_dyn_buf_append_string(db, "error");
 		return(0);
 	}
 
 	if (0 != as_info_parameter_get(params, "time", time_str, &time_str_len)) {
 		cf_info(AS_INFO, "snub command: no time, that's OK (infinite)");
 		snub_time = 1000LL * 3600LL * 24LL * 365LL * 30LL; // 30 years is close to eternity
-	}
-	else {
-		if (0 != cf_str_atoi_u64(time_str, &snub_time) ) {
-			cf_info(AS_INFO, "snub command: time must be an integer, is: %s", time_str);
+	} else {
+		if (0 != cf_str_atoi_u64(time_str, &snub_time)) {
+			cf_warning(AS_INFO, "snub command: time must be an integer, is: %s", time_str);
+			cf_dyn_buf_append_string(db, "error");
 			return(0);
 		}
 	}
 
-	as_hb_snub(node , snub_time);
+	as_hb_snub(node, snub_time);
 	cf_info(AS_INFO, "snub command executed: params %s", params);
+	cf_dyn_buf_append_string(db, "ok");
+
+	return(0);
+}
+
+int
+info_command_unsnub(char *name, char *params, cf_dyn_buf *db)
+{
+	cf_debug(AS_INFO, "unsnub command received: params %s", params);
+
+	char node_str[50];
+	int  node_str_len = sizeof(node_str);
+
+	/*
+	 *  Command Format:  "unsnub:node=(<NodeID>|all)"
+	 *
+	 *  where <NodeID> is either a hex node ID or "all" (to unsnub all snubbed nodes.)
+	 */
+
+	if (0 != as_info_parameter_get(params, "node", node_str, &node_str_len)) {
+		cf_warning(AS_INFO, "unsnub command: no node to be snubbed");
+		cf_dyn_buf_append_string(db, "error");
+		return(0);
+	}
+
+	if (!strcmp(node_str, "all")) {
+		cf_info(AS_INFO, "unsnub command: unsnubbing all snubbed nodes");
+		as_hb_unsnub_all();
+		cf_dyn_buf_append_string(db, "ok");
+		return(0);
+	}
+
+	cf_node node;
+	if (0 != cf_str_atoi_u64_x(node_str, &node, 16)) {
+		cf_warning(AS_INFO, "unsnub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_dyn_buf_append_string(db, "error");
+		return(0);
+	}
+
+	// Using a time of 0 unsnubs the node.
+	as_hb_snub(node, 0);
+	cf_info(AS_INFO, "unsnub command executed: params %s", params);
+	cf_dyn_buf_append_string(db, "ok");
 
 	return(0);
 }
@@ -999,6 +1053,11 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 	char port_str[50];
 	int  port_str_len = sizeof(port_str);
 
+	/*
+	 *  Command Format:  "tip:host=<IPAddr>;port=<PortNum>"
+	 *
+	 *  where <IPAddr> is an IP address and <PortNum> is a valid TCP port number.
+	 */
 
 	if (0 != as_info_parameter_get(params, "host", host_str, &host_str_len)) {
 		cf_info(AS_INFO, "tip command: no host, must add a host parameter");
@@ -1016,20 +1075,129 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 		return(0);
 	}
 
-	as_hb_tip(host_str, port);
-	cf_info(AS_INFO, "tip command executed: params %s", params);
+	if (0 == as_hb_tip(host_str, port)) {
+		cf_info(AS_INFO, "tip command executed: params %s", params);
+		cf_dyn_buf_append_string(db, "ok");
+	} else {
+		cf_warning(AS_INFO, "tip command failed: params %s", params);
+		cf_dyn_buf_append_string(db, "error");
+	}
 
 	return(0);
 }
+
+typedef enum as_hpl_state_e {
+	AS_HPL_STATE_HOST,
+	AS_HPL_STATE_PORT
+} as_hpl_state;
 
 int
 info_command_tip_clear(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "tip clear command received: params %s", params);
 
-	as_hb_tip_clear();
+	char host_port_list[3000];
+	int host_port_list_len = sizeof(host_port_list);
+	bool clear_all = true; // By default, clear all host tips.
+
+	/*
+	 *  Command Format:  "tip-clear:{host-port-list=<hpl>}" [the "host-port-list" argument is optional]
+	 *
+	 *  where <hpl> is either "all" or else a comma-separated list of items of the form: <HostIPAddr>:<PortNum>
+	 */
+	host_port_list[0] = '\0';
+	int hapl_len = 0;
+	as_hb_host_addr_port host_addr_port_list[AS_CLUSTER_SZ];
+	if (!as_info_parameter_get(params, "host-port-list", host_port_list, &host_port_list_len)) {
+		if (0 != strcmp(host_port_list, "all")) {
+			clear_all = false;
+			char *c_p = host_port_list;
+			int pos = 0;
+			char host[16]; // "WWW.XXX.YYY.ZZZ\0"
+			char *host_p = host;
+			int host_len = 0;
+			bool valid = true, item_complete = false;
+			as_hpl_state state = AS_HPL_STATE_HOST;
+			as_hb_host_addr_port *hapl = host_addr_port_list;
+			while (valid && (pos < host_port_list_len)) {
+				switch (state) {
+				  case AS_HPL_STATE_HOST:
+					  if ((isdigit(*c_p)) || ('.' == *c_p)) {
+						  // (Doesn't really scan only valid IP addresses here ~~ it simply accumulates allowable characters.)
+						  *host_p++ = *c_p;
+						  if (++host_len >= sizeof(host)) {
+							  cf_warning(AS_INFO, "Error!  Too many characters: '%c' @ pos = %d in host IP address!", *c_p, pos);
+							  valid = false;
+							  continue;
+						  }
+					  } else if (':' == *c_p) {
+						  *host_p = '\0';
+						  // Verify IP address validity.
+						  if (1 == inet_pton(AF_INET, host, &(hapl->ip_addr))) {
+							  hapl_len++;
+							  hapl->port = 0;
+							  state = AS_HPL_STATE_PORT;
+						  } else {
+							  cf_warning(AS_INFO, "Error!  Cannot parse host \"%s\" into an IP address!", host);
+							  valid = false;
+							  continue;
+						  }
+					  } else {
+						  cf_warning(AS_INFO, "Error!  Bad character: '%c' @ pos = %d in host address!", *c_p, pos);
+						  valid = false;
+						  continue;
+					  }
+					  break;
+
+				  case AS_HPL_STATE_PORT:
+					  if (isdigit(*c_p)) {
+						  if (hapl->port) {
+							  hapl->port *= 10;
+						  }
+						  hapl->port += (*c_p - '0');
+						  if (hapl->port >= (1 << 16)) {
+							  cf_warning(AS_INFO, "Error!  Invalid port %d >= %d!", hapl->port, (1 << 16));
+							  valid = false;
+							  continue;
+						  }
+						  // At least one non-zero port digit has been scanned.
+						  item_complete = (hapl->port > 0);
+					  } else if (',' == *c_p) {
+						  host_p = host;
+						  host_len = 0;
+						  hapl++;
+						  state = AS_HPL_STATE_HOST;
+						  item_complete = false;
+					  } else {
+						  cf_warning(AS_INFO, "Error!  Non-digit character: '%c' @ pos = %d in port!", *c_p, pos);
+						  valid = false;
+						  continue;
+					  }
+					  break;
+
+				  default:
+					  valid = false;
+					  continue;
+				}
+				c_p++;
+				pos++;
+			}
+			if (!(valid && item_complete)) {
+				cf_warning(AS_INFO, "The \"%s:\" command argument \"host-port-list\" value must be a comma-separated list of items of the form <HostIPAddr>:<PortNum>, not \"%s\"", name, host_port_list);
+				cf_dyn_buf_append_string(db, "error");
+				return 0;
+			}
+		}
+	} else if (params && (0 < strlen(params))) {
+		cf_info(AS_INFO, "The \"%s:\" command only supports the optional argument \"host-port-list\", not \"%s\"", name, params);
+		cf_dyn_buf_append_string(db, "error");
+		return(0);
+	}
+
+	as_hb_tip_clear((clear_all ? NULL : host_addr_port_list), (clear_all ? 0 : hapl_len));
 
 	cf_info(AS_INFO, "tip clear command executed: params %s", params);
+	cf_dyn_buf_append_string(db, "ok");
 
 	return(0);
 }
@@ -1932,15 +2100,17 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "add-module command received: params %s", params);
 
-	/* Command format : "jobs:[module=<string>;cmd=<command>;<parameters]"
-	*                   asinfo -v 'jobs'              -> list all jobs
-	*                   asinfo -v 'jobs:module=query' -> list all jobs for query module
-	*                   asinfo -v 'jobs:module=query;cmd=kill-job;trid=<trid>'
-	*                   asinfo -v 'jobs:module=query;cmd=set-priority;trid=<trid>;value=<val>'
-	* where <module> is one of following :
-	* 		- query
-	* 		- scan
-	*/
+	/*
+	 *  Command Format:  "jobs:[module=<string>;cmd=<command>;<parameters>]"
+	 *                   asinfo -v 'jobs'              -> list all jobs
+	 *                   asinfo -v 'jobs:module=query' -> list all jobs for query module
+	 *                   asinfo -v 'jobs:module=query;cmd=kill-job;trid=<trid>'
+	 *                   asinfo -v 'jobs:module=query;cmd=set-priority;trid=<trid>;value=<val>'
+	 *
+	 *  where <module> is one of following:
+	 *      - query
+	 *      - scan
+	 */
 
 	char cmd[13];
 	char module[21];
@@ -2426,6 +2596,10 @@ info_network_info_config_get(cf_dyn_buf *db)
 	if (g_config.external_address) {
 		cf_dyn_buf_append_string(db, ";access-address=");
 		cf_dyn_buf_append_string(db, g_config.external_address);
+	}
+	if (g_config.alternate_address) {
+		cf_dyn_buf_append_string(db, ";alternate-address=");
+		cf_dyn_buf_append_string(db, g_config.alternate_address);
 	}
 	cf_dyn_buf_append_string(db, ";reuse-address=");
 	cf_dyn_buf_append_string(db, g_config.socket_reuse_addr ? "true" : "false");
@@ -4594,7 +4768,7 @@ as_info_queue_get_size()
 // Registers a dynamic name-value calculator.
 // the get_value_fn will be called if a request comes in for this name.
 // only does the registration!
-// def means it's part of the default set - will get returned if nothing is passed
+// def means it's part of the default results - will get invoked for a blank info command (asinfo -v "")
 
 
 int
@@ -5257,8 +5431,14 @@ uint32_t	g_service_generation = 0;
 typedef struct {
 	uint64_t	last;				// last notice we got from a given node
 	char 		*service_addr;		// string representing the service address
+	char 		*alternate_addr;		// string representing the alternate address
 	uint32_t	generation;			// acked generation counter
 } info_node_info;
+
+typedef struct {
+	bool		printed_element;	// Boolean flag to control printing of ';'
+	cf_dyn_buf	*db;
+} services_printer;
 
 
 // To avoid the services bug, g_info_node_info_hash should *always* be a subset
@@ -5415,6 +5595,7 @@ info_paxos_event_reduce_fn(void *key, void *data, void *udata)
 	if (succession[i] == 0) {
 		cf_debug(AS_INFO, " paxos event reduce: removing node %"PRIx64, *node);
 		if (infop->service_addr)    cf_free(infop->service_addr);
+		if (infop->alternate_addr)    cf_free(infop->alternate_addr);
 		return(SHASH_REDUCE_DELETE);
 	}
 
@@ -5450,6 +5631,7 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node su
 		if (succession[i] != g_config.self_node) {
 
 			info.service_addr = 0;
+			info.alternate_addr = 0;
 
 			// Get lock for info_history_hash
 			if (SHASH_OK != shash_get_vlock(g_info_node_info_history_hash,
@@ -5482,11 +5664,15 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node su
 					info.service_addr = cf_strdup( infop_info_history_hash->service_addr );
 					cf_assert(info.service_addr, AS_INFO, CF_CRITICAL, "malloc");
 				}
+				if (infop_info_history_hash->alternate_addr) {
+					info.alternate_addr = cf_strdup( infop_info_history_hash->alternate_addr );
+				}
 
 				if (SHASH_OK == shash_put_unique(g_info_node_info_hash, &(succession[i]), &info)) {
 					cf_debug(AS_INFO, "info: from paxos notification: inserted node %"PRIx64, succession[i]);
 				} else {
 					if (info.service_addr)	cf_free(info.service_addr);
+					if (info.alternate_addr)	cf_free(info.alternate_addr);
 					cf_assert(false, AS_INFO, CF_CRITICAL,
 							"could not insert node %"PRIx64" from paxos notification",
 							succession[i]);
@@ -5538,8 +5724,12 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 
 		msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_UPDATE);
 		msg_set_uint32(m, INFO_FIELD_GENERATION, g_service_generation);
-		if (g_service_str)
+		if (g_service_str) {
 			msg_set_str(m, INFO_FIELD_SERVICE_ADDRESS, g_service_str, MSG_SET_COPY);
+		}
+		if (g_config.alternate_address) {
+			msg_set_str(m, INFO_FIELD_ALT_ADDRESS, g_config.alternate_address, MSG_SET_COPY);
+		}
 
 		pthread_mutex_unlock(&g_service_lock);
 
@@ -5583,6 +5773,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				info_node_info info;
 				info.last = 0;
 				info.service_addr = 0;
+				info.alternate_addr = 0;
 				info.generation = 0;
 
 				// This may fail, but this is ok. This should only fail when
@@ -5599,30 +5790,45 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				}
 			}
 
-			if (infop_info_history_hash->service_addr)
+			if (infop_info_history_hash->service_addr) {
 				cf_free(infop_info_history_hash->service_addr);
-
-			infop_info_history_hash->service_addr = 0;
+				infop_info_history_hash->service_addr = 0;
+			}
+			if (infop_info_history_hash->alternate_addr) {
+				cf_free(infop_info_history_hash->alternate_addr);
+				infop_info_history_hash->alternate_addr = 0;
+			}
 
 			if (0 != msg_get_str(m, INFO_FIELD_SERVICE_ADDRESS,
 								 &(infop_info_history_hash->service_addr), 0,
 								 MSG_GET_COPY_MALLOC)) {
-				cf_warning(AS_INFO, "failed to get service address from an Info msg");
+				cf_warning(AS_INFO, "failed to get service address in an info msg from node %"PRIx64"", node);
 				pthread_mutex_unlock(vlock_info_history_hash);
 				break;
 			}
+			if (0 != msg_get_str(m, INFO_FIELD_ALT_ADDRESS,
+								 &(infop_info_history_hash->alternate_addr), 0,
+								 MSG_GET_COPY_MALLOC)) {
+				cf_debug(AS_INFO, "failed to get alternate address in an info msg from node %"PRIx64"", node);
+			}
 
 			cf_debug(AS_INFO, " new service address is: %s", infop_info_history_hash->service_addr);
+			cf_debug(AS_INFO, " new alternate address is: %s", infop_info_history_hash->alternate_addr ? 
+															infop_info_history_hash->alternate_addr : "NULL");
 
 			// See if element is in info_hash
 			// - if yes, update the service address.
 			if (SHASH_OK == shash_get_vlock(g_info_node_info_hash, &node,
 					(void **) &infop_info_hash, &vlock_info_hash)) {
 
-				if (infop_info_hash->service_addr)
+				if (infop_info_hash->service_addr) {
 					cf_free(infop_info_hash->service_addr);
-
-				infop_info_hash->service_addr = 0;
+					infop_info_hash->service_addr = 0;
+				}
+				if (infop_info_hash->alternate_addr) {
+					cf_free(infop_info_hash->alternate_addr);
+					infop_info_hash->alternate_addr = 0;
+				}
 
 				// Already unpacked msg in msg_get_str, so just copy the value
 				// from infop_info_history_hash.
@@ -5633,8 +5839,9 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 					break;
 				}
 
-				infop_info_hash->service_addr =
-					cf_strdup( infop_info_history_hash->service_addr );
+				infop_info_hash->service_addr = cf_strdup( infop_info_history_hash->service_addr );
+				infop_info_hash->alternate_addr = infop_info_history_hash->alternate_addr ? 
+												cf_strdup( infop_info_history_hash->alternate_addr ) : 0;
 				cf_assert(infop_info_hash->service_addr, AS_INFO, CF_CRITICAL, "malloc");
 
 				pthread_mutex_unlock(vlock_info_hash);
@@ -5649,6 +5856,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 
 			// Send the ack.
 			msg_set_unset(m, INFO_FIELD_SERVICE_ADDRESS);
+			msg_set_unset(m, INFO_FIELD_ALT_ADDRESS);
 			msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_ACK);
 
 			if ((rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH))) {
@@ -5691,21 +5899,37 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 // This dynamic function reduces the info_node_info hash and builds up the string of services
 //
 
-// Boolean flag to control printing a semicolon between service entries.
-static bool g_printed_a_service = false;
-
 int
 info_get_services_reduce_fn(void *key, void *data, void *udata)
 {
-	cf_dyn_buf *db = (cf_dyn_buf *) udata;
+	services_printer *sp = (services_printer *)udata;
+	cf_dyn_buf *db = sp->db;
 	info_node_info *infop = (info_node_info *) data;
 
 	if (infop->service_addr) {
-		if (g_printed_a_service) {
+		if (sp->printed_element) {
 			cf_dyn_buf_append_char(db, ';');
 		}
 		cf_dyn_buf_append_string(db, infop->service_addr);
-		g_printed_a_service = true;
+		sp->printed_element = true;
+	}
+
+	return(0);
+}
+
+int
+info_get_alt_addr_reduce_fn(void *key, void *data, void *udata)
+{
+	services_printer *sp = (services_printer *)udata;
+	cf_dyn_buf *db = sp->db;
+	info_node_info *infop = (info_node_info *) data;
+
+	if (infop->alternate_addr) {
+		if (sp->printed_element) {
+			cf_dyn_buf_append_char(db, ';');
+		}
+		cf_dyn_buf_append_string(db, infop->alternate_addr);
+		sp->printed_element = true;
 	}
 
 	return(0);
@@ -5714,8 +5938,23 @@ info_get_services_reduce_fn(void *key, void *data, void *udata)
 int
 info_get_services(char *name, cf_dyn_buf *db)
 {
-	g_printed_a_service = false;
-	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) db);
+	services_printer sp;
+	sp.printed_element = false;
+	sp.db = db;
+
+	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) &sp);
+
+	return(0);
+}
+
+int
+info_get_alt_addr(char *name, cf_dyn_buf *db)
+{
+	services_printer sp;
+	sp.printed_element = false;
+	sp.db = db;
+
+	shash_reduce(g_info_node_info_hash, info_get_alt_addr_reduce_fn, (void *) &sp);
 
 	return(0);
 }
@@ -5723,8 +5962,11 @@ info_get_services(char *name, cf_dyn_buf *db)
 int
 info_get_services_alumni(char *name, cf_dyn_buf *db)
 {
-	g_printed_a_service = false;
-	shash_reduce(g_info_node_info_history_hash, info_get_services_reduce_fn, (void *) db);
+	services_printer sp;
+	sp.printed_element = false;
+	sp.db = db;
+
+	shash_reduce(g_info_node_info_history_hash, info_get_services_reduce_fn, (void *) &sp);
 
 	return(0);
 }
@@ -6943,7 +7185,7 @@ as_info_init()
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
-				"smd;snub;statistics;status;tip;tip-clear;undun;version;"
+				"smd;snub;statistics;status;tip;tip-clear;undun;unsnub;version;"
 				"xdr-min-lastshipinfo",
 				false);
 	/*
@@ -6970,6 +7212,7 @@ as_info_init()
 	as_info_set_dynamic("service",info_get_service, false);           // IP address and server port for this node, expected to be a single.
 	                                                                  // address/port per node, may be multiple address if this node is configured.
 	                                                                  // to listen on multiple interfaces (typically not advised).
+	as_info_set_dynamic("services-alternate",info_get_alt_addr, false);     // IP address mapping from internal to public ones
 	as_info_set_dynamic("services",info_get_services, true);          // List of addresses of neighbor cluster nodes to advertise for Application to connect.
 	as_info_set_dynamic("services-alumni",info_get_services_alumni, true); // All neighbor addresses (services) this server has ever know about.
 	as_info_set_dynamic("services-alumni-reset",info_services_alumni_reset, false); // Reset the services alumni to equal services
@@ -7024,6 +7267,7 @@ as_info_init()
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
 	as_info_set_command("undun", info_command_undun, PERM_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
+	as_info_set_command("unsnub", info_command_unsnub, PERM_SERVICE_CTRL);                    // Stop ignoring heartbeats from the specified node(s).
 	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PERM_NONE);      // Get the min XDR lastshipinfo.
 
 	// SINDEX
