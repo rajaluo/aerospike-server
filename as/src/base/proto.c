@@ -1,7 +1,7 @@
 /*
  * proto.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -1005,29 +1005,29 @@ uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		int len = 0;
 
 		// Append filename to message fields
-		len = strlen(call->filename) * sizeof(char);
+		len = strlen(call->def.filename) * sizeof(char);
 		mf->type = AS_MSG_FIELD_TYPE_UDF_FILENAME;
 		mf->field_sz =  len + 1;
-		memcpy(mf->data, call->filename, len);
+		memcpy(mf->data, call->def.filename, len);
 
 		mf_tmp = as_msg_field_get_next(mf);
 		mf = mf_tmp;
 
 		// Append function name to message fields
-		len = strlen(call->function) * sizeof(char);
+		len = strlen(call->def.function) * sizeof(char);
 		mf->type = AS_MSG_FIELD_TYPE_UDF_FUNCTION;
 		mf->field_sz =  len + 1;
-		memcpy(mf->data, call->function, len);
+		memcpy(mf->data, call->def.function, len);
 
 		mf_tmp = as_msg_field_get_next(mf);
 		mf = mf_tmp;
 
 		// Append arglist to message fields
-		if (call->arglist) {
-			len = call->arglist->field_sz * sizeof(char);
+		if (call->def.arglist) {
+			len = call->def.arglist->field_sz * sizeof(char);
 			mf->type = AS_MSG_FIELD_TYPE_UDF_ARGLIST;
 			mf->field_sz = len + 1;
-			memcpy(mf->data, call->arglist->data, len);
+			memcpy(mf->data, call->def.arglist->data, len);
 
 			mf_tmp = as_msg_field_get_next(mf);
 			mf = mf_tmp;
@@ -1048,22 +1048,26 @@ uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 	return ( (uint8_t *) mf_tmp );
 }
 
+const char SUCCESS_BIN_NAME[] = "SUCCESS";
+const char FAILURE_BIN_NAME[] = "FAILURE";
+const int SUCCESS_BIN_NAME_LEN = (const int)sizeof(SUCCESS_BIN_NAME) - 1;
+const int FAILURE_BIN_NAME_LEN = (const int)sizeof(FAILURE_BIN_NAME) - 1;
+
 int
 as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, int val_sz, bool success)
 {
 	int msg_sz        = sizeof(as_msg);
 	msg_sz           += sizeof(as_msg_op) + val_sz;
 	if (success) {
-		msg_sz       += strlen("SUCCESS");  // fake bin name
+		msg_sz       += SUCCESS_BIN_NAME_LEN;  // fake bin name
 	} else {
-		msg_sz       += strlen("FAILURE");  // fake bin name
+		msg_sz       += FAILURE_BIN_NAME_LEN;  // fake bin name
 	}
 	uint8_t *b;
 	cf_buf_builder_reserve(bb_r, msg_sz, &b);
 
 	// set up the header
-	uint8_t *buf      = b;
-	as_msg *msgp      = (as_msg *) buf;
+	as_msg *msgp      = (as_msg *)b;
 
 	msgp->header_sz   = sizeof(as_msg);
 	msgp->info1       = 0;
@@ -1078,30 +1082,21 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, in
 	msgp->n_ops       = 1; // only 1 bin
 	as_msg_swap_header(msgp);
 
-	buf              += sizeof(as_msg);
-	as_msg_op *op     = (as_msg_op *)buf;
-	buf              += sizeof(as_msg_op);
+	as_msg_op *op     = (as_msg_op *)(b + sizeof(as_msg));
 
 	op->op            = AS_MSG_OP_READ;
 	if (success) {
-		op->name_sz       = strlen("SUCCESS");
-		memcpy(op->name, "SUCCESS", op->name_sz);
+		op->name_sz = SUCCESS_BIN_NAME_LEN;
+		memcpy(op->name, SUCCESS_BIN_NAME, op->name_sz);
 	} else {
-		op->name_sz       = strlen("FAILURE");
-		memcpy(op->name, "FAILURE", op->name_sz);
+		op->name_sz = FAILURE_BIN_NAME_LEN;
+		memcpy(op->name, FAILURE_BIN_NAME, op->name_sz);
 	}
 	op->op_sz         = 4 + op->name_sz;
-	op->particle_type = to_particle_type(as_val_type(val));
 	op->version       = 0;
-	buf              += op->name_sz;
 
-	uint32_t psz      = msg_sz - (buf - b); // size remaining in buffer, for safety
-	as_val_tobuf(val, buf, &psz);
-	if (psz == 0) {
-		cf_warning(AS_PROTO, "particle to buf: could not copy data!");
-	}
-	buf              += psz;
-	op->op_sz        += psz;
+	as_particle_asval_to_client(val, op);
+
 	as_msg_swap_op(op);
 	return(0);
 }

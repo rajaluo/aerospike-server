@@ -32,6 +32,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "citrusleaf/cf_clock.h"
+
 #include "msg.h"
 #include "queue.h"
 #include "util.h"
@@ -188,6 +190,7 @@ typedef struct as_paxos_transaction_t {
 	bool retired, confirmed;
 	bool votes[AS_CLUSTER_SZ];
 	as_paxos_change c;
+	cf_clock establish_time;
 } __attribute__((__packed__)) as_paxos_transaction;
 
 
