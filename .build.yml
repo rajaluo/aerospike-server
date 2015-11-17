@@ -2,13 +2,10 @@ name: aerospike-server
 
 environment:
   EEREPO: modules/ee
-  CLIENTREPO: modules/aerospike-client-c
 
 dependency:
   - url: git@github.com:citrusleaf/aerospike-server-enterprise
     dir: $EEREPO
-  - url: git@github.com:citrusleaf/client
-    dir: $CLIENTREPO
 
 container:
   - base:
@@ -34,9 +31,7 @@ build:
   - name: enterprise
     environment:
       EEREPO: /work/source/$EEREPO
-      CLIENTREPO: /work/source/$CLIENTREPO
     script:
-      - make -C $CLIENTREPO
       - make +ee
       - make $PKG+ee
       - make source+ee
@@ -45,9 +40,7 @@ build:
   - name: enterprise+asm
     environment:
       EEREPO: /work/source/$EEREPO
-      CLIENTREPO: /work/source/$CLIENTREPO
     script:
-      - make -C $CLIENTREPO
       - make asm+ee
       - make $PKG+ee USE_ASM=1
     artifact:
