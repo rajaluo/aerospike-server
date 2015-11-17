@@ -263,7 +263,6 @@ typedef enum fb_status_e {
 	FB_STATUS_IDLE,                 // The FB is not being used.
 	FB_STATUS_READ,                 // The FB has read data.
 	FB_STATUS_WRITE,                // The FB is being written.
-	FB_STATUS_ERROR                 // The FB is in an error state.
 } fb_status;
 
 
@@ -283,6 +282,8 @@ typedef struct {
 	int         connected;          // Is this a connected outbound FB?
 
 	fb_status   status;             // Is this FB in flight or idle?
+
+	bool failed;                    // This fb has failed and is unusable.
 
 	// this is the write section
 	size_t		w_total_len;		// total size to write
@@ -477,6 +478,7 @@ fabric_buffer_create(int fd)
 	fb->fne = NULL;
 	fb->connected = false; // not in the connected_fb_hash yet
 	fb->status = FB_STATUS_IDLE;
+	fb->failed = false;
 
 	fb->w_total_len = 0;
 	fb->w_len = 0;
@@ -772,25 +774,8 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	struct in_addr self;
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node); // identifies self to remote
 	if (AS_HB_MODE_MESH == g_config.hb_mode) {
-
-		// If the user specified 'any' as heartbeat address, we listen on 0.0.0.0 (all interfaces)
-		// But we should send a proper IP address to the remote machine to send back heartbeat.
-		// Use the node's IP address in this case.
-		char *hbaddr_to_use = g_config.hb_addr;
-		// Checking the first byte is enough as '0' cannot be a valid IP address other than 0.0.0.0
-		if (*hbaddr_to_use == '0') {
-			cf_debug(AS_FABRIC, "Using address \"any\" for listening for heartbeats and a real IP address for receiving heartbeats");
-			hbaddr_to_use = g_config.node_ip;
-		}
-		// If the user specified an interface-address, however, we should instead
-		// send that address to the remote machine to send back heartbeats to us.
-		if (g_config.hb_tx_addr) {
-			cf_debug(AS_FABRIC, "Using \"interface-address\" for receiving heartbeats");
-			hbaddr_to_use = g_config.hb_tx_addr;
-		}
-		cf_debug(AS_FABRIC, "Sending %s as the IP address for receiving heartbeats", hbaddr_to_use);
-		
-		if (1 != inet_pton(AF_INET, hbaddr_to_use, &self))
+		cf_debug(AS_FABRIC, "Sending %s as the IP address for receiving heartbeats", g_config.hb_addr_to_use);
+		if (1 != inet_pton(AF_INET, g_config.hb_addr_to_use, &self))
 			cf_warning(AS_HB, "unable to call inet_pton: %s", cf_strerror(errno));
 		else {
 			msg_set_uint32(m, FS_ADDR, *(uint32_t *)&self);
@@ -1510,7 +1495,7 @@ fabric_worker_fn(void *argv)
 
 				if (fb->fne && (fb->fne->live == false)) {
 
-					fb->status = FB_STATUS_ERROR;
+					fb->failed = true;
 
 					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fb->fd, 0);
 					fabric_buffer_release(fb);
@@ -1520,7 +1505,7 @@ fabric_worker_fn(void *argv)
 
 				if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
 
-					fb->status = FB_STATUS_ERROR;
+					fb->failed = true;
 
 					cf_debug(AS_FABRIC, "epoll : error, will close: fb %p fd %d errno %d", fb, fb->fd, errno);
 					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fb->fd, 0);
@@ -2107,8 +2092,8 @@ as_fabric_send(cf_node node, msg *m, int priority )
 	fabric_buffer *fb = 0;
 	do {
 		rv = cf_queue_pop(fne->xmit_buffer_queue, &fb, CF_QUEUE_NOWAIT);
-		if ((CF_QUEUE_OK == rv) && (fb->fd == -1)) {
-			cf_warning(AS_FABRIC, "releasing fb: %p with fne: %p and fd: -1", fb, fb->fne);
+		if ((CF_QUEUE_OK == rv) && (fb->fd == -1 || fb->failed)) {
+			cf_warning(AS_FABRIC, "releasing fb: %p with fne: %p and fd: %d (%s)", fb, fb->fne, fb->fd, fb->failed ? "Failed" : "Missing");
 			fabric_buffer_release(fb);
 			fb = 0;
 		}
@@ -2732,7 +2717,7 @@ fb_hash_dump_reduce_fn(void *key, void *data, void *udata)
 
 	int count = cf_rc_count(fb);
 
-	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %p: %s); fd: %d ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), fb->fd, fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
+	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %p: %s); fd: %d (%s) ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), fb->fd, fb->failed ? "failed" : "healthy", fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
 
 	*item_num += 1;
 

@@ -434,11 +434,14 @@ as_sindex__defrag_fn(void *udata)
 				uint64_t pimd_wlock_time_ns = 0; 
 				bool     more               = true;
 				while (more) {
+					// TODO IMD RLOCK
+					// TODO pimd = imd->pimd[p_index]
 					SINDEX_WLOCK(&pimd->slock);
 					SET_TIME_FOR_SINDEX_GC_HIST(pimd_wlock_time_ns);
 					more = ai_btree_defrag_list(si->imd, pimd, &defrag_list, wl_lim, &deleted);
 					SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_pimd_wlock_hist, pimd_wlock_time_ns);
 					SINDEX_UNLOCK(&pimd->slock);
+					// TODO IMD UNLOCK
 					pimd_wlock_time_ns = 0;
 				}
 				cf_detail(AS_SINDEX, "Deleted %d units of attempted %d units from index %s", listsize, limit, si->imd->iname);
