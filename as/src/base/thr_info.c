@@ -961,41 +961,81 @@ info_command_snub(char *name, char *params, cf_dyn_buf *db)
 	cf_clock snub_time;
 
 	/*
-	 *  Command Format:  "snub:node=(<NodeID>|none){;time=<TimeMS>}" [the "time" argument is optional]
+	 *  Command Format:  "snub:node=<NodeID>{;time=<TimeMS>}" [the "time" argument is optional]
 	 *
-	 *  where <NodeID> is a hex node ID (use "none" to unsnub all snubbed nodes)
-	 *  and <TimeMS> is relative time in milliseconds, defaulting to 30 years.
+	 *  where <NodeID> is a hex node ID and <TimeMS> is relative time in milliseconds,
+	 *  defaulting to 30 years.
 	 */
 
 	if (0 != as_info_parameter_get(params, "node", node_str, &node_str_len)) {
-		cf_info(AS_INFO, "snub command: no node to be snubbed");
+		cf_warning(AS_INFO, "snub command: no node to be snubbed");
+		cf_dyn_buf_append_string(db, "error");
 		return(0);
-	}
-
-	if (!strcmp(node_str, "none")) {
-		cf_info(AS_INFO, "snub command: unsnubbing all snubbed nodes");
-		return as_hb_unsnub_all();
 	}
 
 	cf_node node;
 	if (0 != cf_str_atoi_u64_x(node_str, &node, 16)) {
-		cf_info(AS_INFO, "snub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_warning(AS_INFO, "snub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_dyn_buf_append_string(db, "error");
 		return(0);
 	}
 
 	if (0 != as_info_parameter_get(params, "time", time_str, &time_str_len)) {
 		cf_info(AS_INFO, "snub command: no time, that's OK (infinite)");
 		snub_time = 1000LL * 3600LL * 24LL * 365LL * 30LL; // 30 years is close to eternity
-	}
-	else {
-		if (0 != cf_str_atoi_u64(time_str, &snub_time) ) {
-			cf_info(AS_INFO, "snub command: time must be an integer, is: %s", time_str);
+	} else {
+		if (0 != cf_str_atoi_u64(time_str, &snub_time)) {
+			cf_warning(AS_INFO, "snub command: time must be an integer, is: %s", time_str);
+			cf_dyn_buf_append_string(db, "error");
 			return(0);
 		}
 	}
 
 	as_hb_snub(node, snub_time);
 	cf_info(AS_INFO, "snub command executed: params %s", params);
+	cf_dyn_buf_append_string(db, "ok");
+
+	return(0);
+}
+
+int
+info_command_unsnub(char *name, char *params, cf_dyn_buf *db)
+{
+	cf_debug(AS_INFO, "unsnub command received: params %s", params);
+
+	char node_str[50];
+	int  node_str_len = sizeof(node_str);
+
+	/*
+	 *  Command Format:  "unsnub:node=(<NodeID>|all)"
+	 *
+	 *  where <NodeID> is either a hex node ID or "all" (to unsnub all snubbed nodes.)
+	 */
+
+	if (0 != as_info_parameter_get(params, "node", node_str, &node_str_len)) {
+		cf_warning(AS_INFO, "unsnub command: no node to be snubbed");
+		cf_dyn_buf_append_string(db, "error");
+		return(0);
+	}
+
+	if (!strcmp(node_str, "all")) {
+		cf_info(AS_INFO, "unsnub command: unsnubbing all snubbed nodes");
+		as_hb_unsnub_all();
+		cf_dyn_buf_append_string(db, "ok");
+		return(0);
+	}
+
+	cf_node node;
+	if (0 != cf_str_atoi_u64_x(node_str, &node, 16)) {
+		cf_warning(AS_INFO, "unsnub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_dyn_buf_append_string(db, "error");
+		return(0);
+	}
+
+	// Using a time of 0 unsnubs the node.
+	as_hb_snub(node, 0);
+	cf_info(AS_INFO, "unsnub command executed: params %s", params);
+	cf_dyn_buf_append_string(db, "ok");
 
 	return(0);
 }
@@ -2058,15 +2098,17 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "add-module command received: params %s", params);
 
-	/* Command format : "jobs:[module=<string>;cmd=<command>;<parameters]"
-	*                   asinfo -v 'jobs'              -> list all jobs
-	*                   asinfo -v 'jobs:module=query' -> list all jobs for query module
-	*                   asinfo -v 'jobs:module=query;cmd=kill-job;trid=<trid>'
-	*                   asinfo -v 'jobs:module=query;cmd=set-priority;trid=<trid>;value=<val>'
-	* where <module> is one of following :
-	* 		- query
-	* 		- scan
-	*/
+	/*
+	 *  Command Format:  "jobs:[module=<string>;cmd=<command>;<parameters>]"
+	 *                   asinfo -v 'jobs'              -> list all jobs
+	 *                   asinfo -v 'jobs:module=query' -> list all jobs for query module
+	 *                   asinfo -v 'jobs:module=query;cmd=kill-job;trid=<trid>'
+	 *                   asinfo -v 'jobs:module=query;cmd=set-priority;trid=<trid>;value=<val>'
+	 *
+	 *  where <module> is one of following:
+	 *      - query
+	 *      - scan
+	 */
 
 	char cmd[13];
 	char module[21];
@@ -7069,7 +7111,7 @@ as_info_init()
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
-				"smd;snub;statistics;status;tip;tip-clear;undun;version;"
+				"smd;snub;statistics;status;tip;tip-clear;undun;unsnub;version;"
 				"xdr-min-lastshipinfo",
 				false);
 	/*
@@ -7150,6 +7192,7 @@ as_info_init()
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
 	as_info_set_command("undun", info_command_undun, PERM_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
+	as_info_set_command("unsnub", info_command_unsnub, PERM_SERVICE_CTRL);                    // Stop ignoring heartbeats from the specified node(s).
 	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PERM_NONE);      // Get the min XDR lastshipinfo.
 
 	// SINDEX
