@@ -232,39 +232,20 @@ cf_fault_sink_hold(char *path)
 }
 
 
-/* cf_fault_sink_unhold_but_console
+/* cf_fault_console_is_held
+ * Return whether the console is held.
  */
-void
-cf_fault_sink_unhold_all_but_console()
+bool
+cf_fault_console_is_held()
 {
-	bool console_held = false;
-	int console_index = -1;
-
-	int orig_num_held = num_held_fault_sinks;
-	for (int i = 0; i < orig_num_held; i++) {
+	for (int i = 0; i < num_held_fault_sinks; i++) {
 		cf_fault_sink *s = &cf_fault_sinks[i];
 		if (!strcmp(s->path, "stderr")) {
-			console_held = true;
-			console_index = i;
-		} else {
-			cf_free(s->path);
-			s->path = NULL;
-			num_held_fault_sinks--;
+			return true;
 		}
 	}
 
-	if (! console_held) {
-		if (cf_fault_sink_hold("stderr") == NULL) {
-			cf_crash(CF_MISC, "can't add stderr as log sink");
-		}
-	} else if (console_index != 0) {
-		// Move the console sink down to the first position.
-		cf_fault_sinks[0].path = cf_fault_sinks[console_index].path;
-		for (int i = 0; i < CF_FAULT_CONTEXT_UNDEF; i++) {
-			cf_fault_sinks[0].limit[i] = cf_fault_sinks[console_index].limit[i];
-		}
-		cf_fault_sinks[console_index].path = NULL;
-	}
+	return false;
 }
 
 
