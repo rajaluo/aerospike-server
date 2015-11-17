@@ -1359,6 +1359,7 @@ as_paxos_transaction_establish(as_paxos_transaction *s)
 	t->confirmed = false;
 	t->establish_time = cf_getms();
 	memset(t->votes, 0, sizeof(t->votes));
+	t->election_cycle = AS_PAXOS_MSG_COMMAND_PREPARE;
 	as_paxos_current_update(t);
 
 	return(t);
@@ -2854,52 +2855,95 @@ as_paxos_thr(void *arg)
 
 		switch(c) {
 			case AS_PAXOS_MSG_COMMAND_PREPARE:
-			case AS_PAXOS_MSG_COMMAND_COMMIT:
-				cf_debug(AS_PAXOS, "received prepare/commit message from %"PRIx64"", qm->id);
-				/* Search for a transaction with this sequence number in the
-				 * pending transaction list */
-				if (NULL != (s = as_paxos_transaction_search(t))) {
-					/* We've seen this transaction before: check the proposal
-					 * number */
-					if (t.gen.proposal < s->gen.proposal) {
-						/* Reject: the proposal number is less than latest
-						 * one we've received */
-						cf_debug(AS_PAXOS, "rejecting older Paxos command gen:  %d vs. %d", t.gen.proposal, s->gen.proposal);
-						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, NACK));
-					} else {
-						/* Accept: if the proposal number is newer, update
-						 * our copy of the transaction */
-						if (t.gen.proposal > s->gen.proposal) {
-							as_paxos_transaction_update(s, &t);
-						}
-						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, ACK));
-					}
-				} else {
-					/* We've never seen a proposal for this sequence number */
+				cf_debug(AS_PAXOS, "{%d,%d} received prepare message from %"PRIx64"",
+						t.gen.sequence, t.gen.proposal, qm->id);
+
+				s = as_paxos_transaction_search(t);
+				if (NULL == s) {
+					// Otherwise this prepare is a retransmit.
 					if (as_paxos_current_is_candidate(t)) {
-						/* Accept */
 						if (NULL == (s = as_paxos_transaction_establish(&t))) {
 							cf_warning(AS_PAXOS, "unable to establish transaction");
 							break;
 						}
 						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, ACK));
-					} else
-						/* Reject: the proposed sequence number is out of
-						 * order */
-						/* FIXME we need to come up with a different way to do this */
+					}
+					else {
+						// Reject: the proposed sequence number is out of order.
+						// FIXME: we need to come up with a different way to do this.
 						reply = as_paxos_msg_wrap(as_paxos_current_get(), as_paxos_state_next(c, NACK));
+					}
+
+					cf_info(AS_PAXOS, "{%d,%d} sending prepare_ack to %"PRIx64"",
+							p->gen.sequence, p->gen.proposal, qm->id);
+					if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH)) {
+						as_fabric_msg_put(reply);
+					}
+					break;
+				}
+				else {
+					if (self == principal) {
+						// Principal establishes the transaction in spark,
+						// need to ack it.
+						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, ACK));
+
+						cf_info(AS_PAXOS, "{%d,%d} principal acking it's prepare %"PRIx64"",
+								t.gen.sequence, t.gen.proposal, qm->id);
+						if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH)) {
+							as_fabric_msg_put(reply);
+						}
+
+					}
+					else {
+						cf_info(AS_PAXOS, "{%d,%d} prevented PREPARE in COMMIT path.",
+								t.gen.sequence, t.gen.proposal);
+					}
+				}
+				break;
+
+			case AS_PAXOS_MSG_COMMAND_COMMIT:
+				cf_debug(AS_PAXOS, "{%d,%d} received commit message from %"PRIx64"",
+						t.gen.sequence, t.gen.proposal, qm->id);
+				if (NULL != (s = as_paxos_transaction_search(t))) {
+					// We've seen this transaction before: check the proposal
+					// number.
+					if (t.gen.proposal < s->gen.proposal) {
+						// Reject: the proposal number is less than latest
+						// one we've received.
+						cf_debug(AS_PAXOS, "rejecting older Paxos command gen:  %d vs. %d", t.gen.proposal, s->gen.proposal);
+						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, NACK));
+					}
+					else {
+						// Accept: if the proposal number is newer, update
+						// our copy of the transaction.
+						if (t.gen.proposal > s->gen.proposal) {
+							as_paxos_transaction_update(s, &t);
+						}
+						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, ACK));
+					}
+
+					cf_debug(AS_PAXOS, "{%d,%d} sending commit_ack to %"PRIx64"",
+							t.gen.sequence, t.gen.proposal, qm->id);
+					if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH))
+						as_fabric_msg_put(reply);
+				}
+				else {
+					cf_debug(AS_PAXOS, "{%d,%d} prevented COMMIT in PREPARE path.",
+							t.gen.sequence, t.gen.proposal);
+				}
+				break;
+
+			case AS_PAXOS_MSG_COMMAND_PREPARE_ACK:
+				cf_debug(AS_PAXOS, "{%d,%d} received prepare_ack message from %"PRIx64"",
+						t.gen.sequence, t.gen.proposal, qm->id);
+				// no break
+			case AS_PAXOS_MSG_COMMAND_COMMIT_ACK:
+				if (c == AS_PAXOS_MSG_COMMAND_COMMIT_ACK) {
+					cf_debug(AS_PAXOS, "{%d,%d} received commit_ack message from %"PRIx64"",
+							t.gen.sequence, t.gen.proposal, qm->id);
+
 				}
 
-				/* Error check the reply and transmit it to the principal */
-				if (NULL == reply)
-					cf_warning(AS_PAXOS, "unable to construct reply message");
-				else if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH))
-					as_fabric_msg_put(reply);
-
-				break;
-			case AS_PAXOS_MSG_COMMAND_PREPARE_ACK:
-			case AS_PAXOS_MSG_COMMAND_COMMIT_ACK:
-				cf_debug(AS_PAXOS, "received prepare_ack/commit_ack message from %"PRIx64"", qm->id);
 				if (self != as_paxos_succession_getprincipal()) {
 					cf_debug(AS_PAXOS, "I'm not principal ~~ Ignoring ACK %d message from %"PRIx64, c, qm->id);
 					break;
@@ -2910,34 +2954,56 @@ as_paxos_thr(void *arg)
 					break;
 				}
 
-				/* Attempt to record the vote; if this results in a quorum,
-				 * send a commit message and reset the vote count */
+				if (c == AS_PAXOS_MSG_COMMAND_PREPARE_ACK
+						&& s->election_cycle == AS_PAXOS_MSG_COMMAND_COMMIT) {
+					cf_debug(AS_PAXOS, "{%d,%d} PREPARE_ACK in COMMIT_ACK path -- ignoring.", t.gen.sequence, t.gen.proposal);
+					break;
+				}
+				if (c == AS_PAXOS_MSG_COMMAND_COMMIT_ACK
+						&& s->election_cycle == AS_PAXOS_MSG_COMMAND_PREPARE) {
+					cf_debug(AS_PAXOS, "{%d,%d} COMMIT_ACK in PREPARE_ACK path -- ignoring.", t.gen.sequence, t.gen.proposal);
+					break;
+				}
+
+				// Attempt to record the vote; if this results in a quorum,
+				// send a commit message and reset the vote count
 				switch(as_paxos_transaction_vote(s, qm->id, &t)) {
 					case AS_PAXOS_TRANSACTION_VOTE_ACCEPT:
-						cf_debug(AS_PAXOS, "received ACCEPT vote from %"PRIx64"", qm->id);
+						cf_debug(AS_PAXOS, "{%d,%d} received ACCEPT vote from %"PRIx64" election %d",
+								t.gen.sequence, t.gen.proposal, qm->id, s->election_cycle);
 						break;
 					case AS_PAXOS_TRANSACTION_VOTE_REJECT:
-						cf_debug(AS_PAXOS, "received REJECT vote from %"PRIx64"", qm->id);
+						cf_debug(AS_PAXOS, "{%d,%d} received REJECT vote from %"PRIx64" election %d",
+								t.gen.sequence, t.gen.proposal, qm->id, s->election_cycle);
 						break;
 					case AS_PAXOS_TRANSACTION_VOTE_QUORUM:
-						cf_debug(AS_PAXOS, "received ACCEPT vote from %"PRIx64" and reached quorum", qm->id);
+						cf_debug(AS_PAXOS, "{%d,%d} received ACCEPT vote from %"PRIx64" and reached quorum, election %d",
+								t.gen.sequence, t.gen.proposal, qm->id, s->election_cycle);
 						int cmd, rv;
 						if (!(reply = as_paxos_msg_wrap(s, cmd = as_paxos_state_next(c, ACK)))) {
 							cf_warning(AS_PAXOS, "failed to wrap Paxos command %s msg", as_paxos_cmd_name[cmd]);
 							break;
 						}
+
+						cf_debug(AS_PAXOS, "{%d,%d} sending %s to %"PRIx64"",
+								t.gen.sequence, t.gen.proposal,
+								as_paxos_cmd_name[cmd], qm->id);
 						if ((rv = as_paxos_send_to_sl(cmd, s, reply, AS_FABRIC_PRIORITY_HIGH))) {
 							cf_warning(AS_PAXOS, "sending Paxos command %s to successon list failed: rv %d", as_paxos_cmd_name[cmd], rv);
 							as_fabric_msg_put(reply);
 						}
 						as_paxos_transaction_vote_reset(s);
+
+						t.election_cycle = AS_PAXOS_MSG_COMMAND_COMMIT;
+
 						break;
 				}
 
 				break;
 			case AS_PAXOS_MSG_COMMAND_PREPARE_NACK:
 			case AS_PAXOS_MSG_COMMAND_COMMIT_NACK:
-				cf_debug(AS_PAXOS, "received prepare_nack/commit_nack message from %"PRIx64"", qm->id);
+				cf_debug(AS_PAXOS, "{%d,%d} received prepare_nack/commit_nack message from %"PRIx64"",
+						t.gen.sequence, t.gen.proposal, qm->id);
 				if (self != as_paxos_succession_getprincipal()) {
 					cf_debug(AS_PAXOS, "I'm not principal ~~ Ignoring NACK %d message from %"PRIx64, c, qm->id);
 					break;
@@ -2952,7 +3018,9 @@ as_paxos_thr(void *arg)
 			case AS_PAXOS_MSG_COMMAND_CONFIRM:
 				/* At this point, we cannot complain -- so we just accept
 				 * what we're told */
-				cf_debug(AS_PAXOS, "received state confirmation message from %"PRIx64"", qm->id);
+				cf_debug(AS_PAXOS, "{%d,%d} received state confirmation message from %"PRIx64"",
+						t.gen.sequence, t.gen.proposal, qm->id);
+
 				if (NULL == (s = as_paxos_transaction_search(t))) {
 					s = as_paxos_transaction_establish(&t);
 				} else {
@@ -2986,7 +3054,8 @@ as_paxos_thr(void *arg)
 					 * cluster node has had its state updated before starting partition rebalance?
 					 * Currently, the answer to this question is "no."
 					 */
-					cf_info(AS_PAXOS, "SINGLE NODE CLUSTER!!!");
+					cf_info(AS_PAXOS, "{%d,%d} SINGLE NODE CLUSTER!!!",
+							t.gen.sequence, t.gen.proposal);
 					/* Clean out the sync states array */
 					memset(p->partition_sync_state, 0, sizeof(p->partition_sync_state));
 
