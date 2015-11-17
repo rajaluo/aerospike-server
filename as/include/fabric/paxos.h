@@ -189,6 +189,7 @@ typedef struct as_paxos_transaction_t {
 	as_paxos_generation gen;
 	bool retired, confirmed;
 	bool votes[AS_CLUSTER_SZ];
+	int election_cycle;
 	as_paxos_change c;
 	cf_clock establish_time;
 } __attribute__((__packed__)) as_paxos_transaction;
