@@ -140,12 +140,11 @@ typedef struct as_packed_list_s {
 
 typedef struct list_wrapper_s {
 	uint8_t			type;
-	uint32_t		sz;
+	uint32_t		packed_sz;
 
 	uint8_t			magic;
 	uint8_t			flags;
 
-	uint32_t		packed_sz;
 	uint8_t 		*packed;
 
 	// Mutable state members.
@@ -169,7 +168,6 @@ static const uint8_t msgpack_nil[1] = {0xC0};
 static const uint8_t msgpack_empty_list[1] = {0x90};
 static const list_wrapper list_wrapper_empty = {
 	.type = AS_PARTICLE_TYPE_LIST,
-	.sz = 0,
 	.magic = LIST_MAGIC,
 	.flags = 0,
 	.packed_sz = 1,
@@ -380,17 +378,16 @@ list_from_asval(const as_val *val, as_particle **pp)
 {
 	list_wrapper *p_list_wrapped = (list_wrapper *)*pp;
 
-	uint32_t index_count = as_list_size((as_list *)val) / AS_PACKED_LIST_INDEX_STEP;
+	list_wrapper_init(p_list_wrapped, as_list_size((as_list *)val));
 
-	p_list_wrapped->packed = (uint8_t *)p_list_wrapped + sizeof(list_wrapper) + (sizeof(uint32_t) * index_count);
+	p_list_wrapped->packed = (uint8_t *)p_list_wrapped + sizeof(list_wrapper) + (sizeof(uint32_t) * p_list_wrapped->index.cap);
 
 	as_serializer s;
 	as_msgpack_init(&s);
 
 	uint32_t size = as_serializer_serialize_presized(&s, val, p_list_wrapped->packed);
 
-	p_list_wrapped->type = AS_PARTICLE_TYPE_LIST;
-	p_list_wrapped->sz = size;
+	p_list_wrapped->packed_sz = size;
 
 	as_serializer_destroy(&s);
 }
@@ -405,8 +402,8 @@ list_to_asval(const as_particle *p)
 		list_wrapper *p_list_wrapped = (list_wrapper *)p;
 
 		buf.data = p_list_wrapped->packed;
-		buf.capacity = p_list_wrapped->sz;
-		buf.size = p_list_wrapped->sz;
+		buf.capacity = p_list_wrapped->packed_sz;
+		buf.size = p_list_wrapped->packed_sz;
 	}
 	else {
 		list_mem *p_list_mem = (list_mem *)p;
@@ -1053,7 +1050,6 @@ static void
 list_wrapper_init(list_wrapper *p_list_wrapped, uint32_t ele_count)
 {
 	p_list_wrapped->type = AS_PARTICLE_TYPE_LIST;
-	p_list_wrapped->sz = 0;
 	p_list_wrapped->magic = LIST_MAGIC;
 	p_list_wrapped->flags = 0;
 	p_list_wrapped->packed_sz = 0;
@@ -1082,7 +1078,6 @@ packed_list_create(rollback_alloc *alloc_buf, uint32_t ele_count, const uint8_t 
 			return NULL;
 		}
 
-		p_list_wrapped->sz = new_size;
 		p_list_wrapped->packed_sz = new_size;
 
 		data = p_list_wrapped->packed;
