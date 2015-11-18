@@ -222,7 +222,7 @@ static void list_wrapper_init(list_wrapper *p_list_wrapped, uint32_t ele_count);
 
 // packed_list create
 static as_particle *packed_list_create(rollback_alloc *alloc_buf, uint32_t ele_count, const uint8_t *buf, uint32_t size, bool wrapped);
-static list_mem *packed_list_simple_create(rollback_alloc *alloc_buf, uint32_t new_size);
+//static list_mem *packed_list_simple_create(rollback_alloc *alloc_buf, uint32_t new_size);
 static inline as_particle *packed_list_simple_create_from_buf(rollback_alloc *alloc_buf, uint32_t ele_count, const uint8_t *buf, uint32_t size);
 static inline as_particle *packed_list_simple_create_empty(rollback_alloc *alloc_buf);
 static inline as_particle *packed_list_simple_create_nil(rollback_alloc *alloc_buf);
@@ -1119,6 +1119,7 @@ packed_list_create(rollback_alloc *alloc_buf, uint32_t ele_count, const uint8_t 
 	return particle;
 }
 
+#if 0
 static list_mem *
 packed_list_simple_create(rollback_alloc *alloc_buf, uint32_t new_size)
 {
@@ -1129,6 +1130,7 @@ packed_list_simple_create(rollback_alloc *alloc_buf, uint32_t new_size)
 
 	return p_list_mem;
 }
+#endif
 
 static inline as_particle *
 packed_list_simple_create_from_buf(rollback_alloc *alloc_buf, uint32_t ele_count, const uint8_t *buf, uint32_t size)
