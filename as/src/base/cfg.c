@@ -3471,26 +3471,12 @@ cfg_create_all_histograms()
 {
 	as_config* c = &g_config;
 
-// XXX - temp changed to micro
-	create_and_check_hist_track(&c->rt_hist, "reads", HIST_MICROSECONDS);
+	create_and_check_hist_track(&c->rt_hist, "reads", HIST_MILLISECONDS);
 	create_and_check_hist_track(&c->q_hist, "query", HIST_MILLISECONDS);
 	create_and_check_hist_track(&c->q_rcnt_hist, "query_rec_count", HIST_RAW);
 	create_and_check_hist_track(&c->ut_hist, "udf", HIST_MILLISECONDS);
-// XXX - temp changed to micro
-	create_and_check_hist_track(&c->wt_hist, "writes_master", HIST_MICROSECONDS);
+	create_and_check_hist_track(&c->wt_hist, "writes_master", HIST_MILLISECONDS);
 	create_and_check_hist_track(&c->px_hist, "proxy", HIST_MILLISECONDS);
-
-// XXX - temp histo
-	create_and_check_hist(&c->wt_cdt_dim_local_hist, "write_cdt_dim_local", HIST_MICROSECONDS);
-	create_and_check_hist(&c->pre_write_local_hist, "pre_write_local_hist", HIST_MICROSECONDS);
-	create_and_check_hist(&c->load_bins_hist, "load_bins_hist", HIST_MICROSECONDS);
-	create_and_check_hist(&c->wt_ssd_write_hist, "write_ssd", HIST_MICROSECONDS);
-	create_and_check_hist(&c->wt_cdt_modify_op_hist, "write_cdt_modify_op_mem", HIST_MICROSECONDS);
-	create_and_check_hist(&c->cdt_pack_hist, "cdt_pack_hist", HIST_MICROSECONDS);
-	create_and_check_hist(&c->cdt_unpack_hist, "cdt_unpack_from_wire_hist", HIST_MICROSECONDS);
-	create_and_check_hist(&c->cdt_pickle_hist, "cdt_pickle_hist", HIST_MICROSECONDS);
-	create_and_check_hist(&c->cdt_flat_memcpy_hist, "cdt_flat_memcpy_hist", HIST_MICROSECONDS);
-	create_and_check_hist(&c->cdt_read_op_hist, "cdt_read_op_hist", HIST_MICROSECONDS);
 
 	create_and_check_hist(&c->rt_cleanup_hist, "reads_cleanup", HIST_MILLISECONDS);
 	create_and_check_hist(&c->rt_net_hist, "reads_net", HIST_MILLISECONDS);

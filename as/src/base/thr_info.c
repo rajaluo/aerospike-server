@@ -6265,20 +6265,6 @@ clear_ldt_histograms()
 void
 clear_microbenchmark_histograms()
 {
-// XXX - temp histo stuff
-	histogram_clear((histogram *)g_config.rt_hist);
-	histogram_clear((histogram *)g_config.wt_hist);
-	histogram_clear(g_config.wt_cdt_dim_local_hist);
-	histogram_clear(g_config.pre_write_local_hist);
-	histogram_clear(g_config.load_bins_hist);
-	histogram_clear(g_config.wt_ssd_write_hist);
-	histogram_clear(g_config.wt_cdt_modify_op_hist);
-	histogram_clear(g_config.cdt_pack_hist);
-	histogram_clear(g_config.cdt_unpack_hist);
-	histogram_clear(g_config.cdt_pickle_hist);
-	histogram_clear(g_config.cdt_flat_memcpy_hist);
-	histogram_clear(g_config.cdt_read_op_hist);
-
 	histogram_clear(g_config.rt_cleanup_hist);
 	histogram_clear(g_config.rt_net_hist);
 	histogram_clear(g_config.wt_net_hist);

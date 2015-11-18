@@ -462,18 +462,6 @@ typedef struct as_config_s {
 	uint32_t			hist_track_slice; // period in seconds at which to cache histogram data
 	char *				hist_track_thresholds; // comma-separated bucket (ms) values to track
 
-// XXX - temp histo
-	histogram *			wt_cdt_modify_op_hist;
-	histogram *			wt_cdt_dim_local_hist;
-	histogram *			pre_write_local_hist;
-	histogram *			load_bins_hist;
-	histogram *			wt_ssd_write_hist;
-	histogram *			cdt_pack_hist;
-	histogram *			cdt_unpack_hist;
-	histogram *			cdt_pickle_hist;
-	histogram *			cdt_flat_memcpy_hist;
-	histogram *			cdt_read_op_hist;
-
 	histogram *			rt_cleanup_hist; // histogram around as_storage_record_close and as_record_done
 	histogram *			rt_net_hist; // histogram around the network send on reads
 	histogram *			wt_net_hist; // histogram around the network send on writes
