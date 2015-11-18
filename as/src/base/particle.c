@@ -1111,20 +1111,17 @@ as_ldt_particle_to_client(as_val *val, as_msg_op *op)
 int
 as_bin_cdt_read_from_client(const as_bin *b, as_msg_op *op, as_bin *result)
 {
-	// TODO
-	return -1;
+	return as_bin_cdt_packed_read(b, op, result);
 }
 
 int
 as_bin_cdt_alloc_modify_from_client(as_bin *b, as_msg_op *op, as_bin *result)
 {
-	// TODO
-	return -1;
+	return as_bin_cdt_packed_modify(b, op, result, NULL);
 }
 
 int
 as_bin_cdt_stack_modify_from_client(as_bin *b, cf_ll_buf *particles_llb, as_msg_op *op, as_bin *result)
 {
-	// TODO
-	return -1;
+	return as_bin_cdt_packed_modify(b, op, result, particles_llb);
 }

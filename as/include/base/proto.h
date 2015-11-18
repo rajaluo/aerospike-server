@@ -399,7 +399,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO3_BIN_REPLACE_ONLY	(1 << 6) // replace existing bin, do not create new bin
 // (Note:  Bit 7 is unused.)
 
-#define AS_MSG_FIELD_SCAN_IGNORE_LDT_DATA			(0x02) // whether to send ldt bin data back to the client
+#define AS_MSG_FIELD_SCAN_INCLUDE_LDT_DATA			(0x02) // whether to send ldt bin data back to the client
 #define AS_MSG_FIELD_SCAN_DISCONNECTED_JOB			(0x04) // for sproc jobs that won't be sending results back to the client [UNUSED]
 #define AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE	(0x08) // if we should fail when cluster is migrating or cluster changes
 #define AS_MSG_FIELD_SCAN_PRIORITY(__cl_byte)		((0xF0 & __cl_byte)>>4) // 4 bit value indicating the scan priority
@@ -576,4 +576,80 @@ typedef enum as_udf_op {
 	AS_UDF_OP_FOREGROUND	= 3		// not supported yet
 } as_udf_op;
 
+typedef enum as_cdt_paramtype_e {
+    AS_CDT_PARAM_NONE = 0,
 
+   // CDT_OP_CODE = 1;
+   // BIN_NAME = 2;
+    AS_CDT_PARAM_INDEX = 3,
+	AS_CDT_PARAM_COUNT = 4,
+	AS_CDT_PARAM_PAYLOAD = 5,
+	AS_CDT_PARAM_LAST_INDEX = 6,
+
+	AS_CDT_PARAM_MAP_KEY = 11,
+	AS_CDT_PARAM_MAP_VALUE = 12,
+
+	AS_CDT_PARAM_UDF_MODULE_NAME = 21,
+	AS_CDT_PARAM_UDF_FUNCTION_NAME = 22,
+	AS_CDT_PARAM_UDF_ARGS = 23,
+} as_cdt_paramtype;
+
+typedef enum as_cdt_optype_e {
+	// ------------------------------------------------------------------------
+	// List Operation
+
+	// Add Value to the List
+	AS_CDT_OP_LIST_APPEND        = 1,
+	AS_CDT_OP_LIST_APPEND_LIST   = 2,
+	AS_CDT_OP_LIST_INSERT        = 3,
+	AS_CDT_OP_LIST_INSERT_LIST   = 4,
+	AS_CDT_OP_LIST_SET           = 5,
+
+	// OP by Value
+	AS_CDT_OP_LIST_CONTAINS      = 6,
+	AS_CDT_OP_LIST_CONTAINS_ALL  = 7,
+	AS_CDT_OP_LIST_INDEX_OF      = 8,
+	AS_CDT_OP_LIST_LAST_INDEX_OF = 9,
+
+	AS_CDT_OP_LIST_REMOVE_VALUE  = 10,
+	AS_CDT_OP_LIST_REMOVE_ALL    = 11,
+
+	AS_CDT_OP_LIST_RETAIN_ALL    = 12,
+
+	// OP by Index
+	AS_CDT_OP_LIST_GET           = 13,
+	AS_CDT_OP_LIST_GET_RANGE     = 14,
+	AS_CDT_OP_LIST_POP           = 15,
+	AS_CDT_OP_LIST_POP_RANGE     = 16,
+	AS_CDT_OP_LIST_REMOVE_INDEX  = 17,
+	AS_CDT_OP_LIST_REMOVE_RANGE  = 18,
+	AS_CDT_OP_LIST_INCREMENT_BY  = 22,
+
+	// Misc
+	AS_CDT_OP_LIST_CLEAR         = 19,
+	AS_CDT_OP_LIST_SIZE          = 20,
+	AS_CDT_OP_LIST_TRIM          = 21,
+
+	// ------------------------------------------------------------------------
+    // Map Operation
+
+	// Adding <key, value> to the Map
+	AS_CDT_OP_MAP_PUT            = 30,
+	AS_CDT_OP_MAP_PUT_ALL        = 31,
+
+	// Op by key
+	AS_CDT_OP_MAP_GET            = 32,
+	AS_CDT_OP_MAP_GET_MATCHING   = 33,
+	AS_CDT_OP_MAP_REMOVE         = 34,
+	AS_CDT_OP_MAP_REMOVE_ALL     = 35,
+    AS_CDT_OP_MAP_CONTAINS_KEY   = 36,
+	AS_CDT_OP_MAP_INCREMENT_BY   = 37,
+	AS_CDT_OP_MAP_CONTAINS_VALUE = 38,
+
+	// Misc
+	AS_CDT_OP_MAP_GET_ALL        = 39,
+	AS_CDT_OP_MAP_KEYS           = 40,
+	AS_CDT_OP_MAP_VALUES         = 41,
+	AS_CDT_OP_MAP_CLEAR          = 42,
+	AS_CDT_OP_MAP_SIZE           = 43,
+} as_cdt_optype;
