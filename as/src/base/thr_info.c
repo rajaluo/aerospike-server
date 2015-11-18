@@ -960,30 +960,82 @@ info_command_snub(char *name, char *params, cf_dyn_buf *db)
 	int  time_str_len = sizeof(time_str);
 	cf_clock snub_time;
 
+	/*
+	 *  Command Format:  "snub:node=<NodeID>{;time=<TimeMS>}" [the "time" argument is optional]
+	 *
+	 *  where <NodeID> is a hex node ID and <TimeMS> is relative time in milliseconds,
+	 *  defaulting to 30 years.
+	 */
+
 	if (0 != as_info_parameter_get(params, "node", node_str, &node_str_len)) {
-		cf_info(AS_INFO, "snub command: no node to be snubbed");
+		cf_warning(AS_INFO, "snub command: no node to be snubbed");
+		cf_dyn_buf_append_string(db, "error");
 		return(0);
 	}
 
 	cf_node node;
 	if (0 != cf_str_atoi_u64_x(node_str, &node, 16)) {
-		cf_info(AS_INFO, "snub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_warning(AS_INFO, "snub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_dyn_buf_append_string(db, "error");
 		return(0);
 	}
 
 	if (0 != as_info_parameter_get(params, "time", time_str, &time_str_len)) {
 		cf_info(AS_INFO, "snub command: no time, that's OK (infinite)");
 		snub_time = 1000LL * 3600LL * 24LL * 365LL * 30LL; // 30 years is close to eternity
-	}
-	else {
-		if (0 != cf_str_atoi_u64(time_str, &snub_time) ) {
-			cf_info(AS_INFO, "snub command: time must be an integer, is: %s", time_str);
+	} else {
+		if (0 != cf_str_atoi_u64(time_str, &snub_time)) {
+			cf_warning(AS_INFO, "snub command: time must be an integer, is: %s", time_str);
+			cf_dyn_buf_append_string(db, "error");
 			return(0);
 		}
 	}
 
-	as_hb_snub(node , snub_time);
+	as_hb_snub(node, snub_time);
 	cf_info(AS_INFO, "snub command executed: params %s", params);
+	cf_dyn_buf_append_string(db, "ok");
+
+	return(0);
+}
+
+int
+info_command_unsnub(char *name, char *params, cf_dyn_buf *db)
+{
+	cf_debug(AS_INFO, "unsnub command received: params %s", params);
+
+	char node_str[50];
+	int  node_str_len = sizeof(node_str);
+
+	/*
+	 *  Command Format:  "unsnub:node=(<NodeID>|all)"
+	 *
+	 *  where <NodeID> is either a hex node ID or "all" (to unsnub all snubbed nodes.)
+	 */
+
+	if (0 != as_info_parameter_get(params, "node", node_str, &node_str_len)) {
+		cf_warning(AS_INFO, "unsnub command: no node to be snubbed");
+		cf_dyn_buf_append_string(db, "error");
+		return(0);
+	}
+
+	if (!strcmp(node_str, "all")) {
+		cf_info(AS_INFO, "unsnub command: unsnubbing all snubbed nodes");
+		as_hb_unsnub_all();
+		cf_dyn_buf_append_string(db, "ok");
+		return(0);
+	}
+
+	cf_node node;
+	if (0 != cf_str_atoi_u64_x(node_str, &node, 16)) {
+		cf_warning(AS_INFO, "unsnub command: not a valid format, should look like a 64-bit hex number, is %s", node_str);
+		cf_dyn_buf_append_string(db, "error");
+		return(0);
+	}
+
+	// Using a time of 0 unsnubs the node.
+	as_hb_snub(node, 0);
+	cf_info(AS_INFO, "unsnub command executed: params %s", params);
+	cf_dyn_buf_append_string(db, "ok");
 
 	return(0);
 }
@@ -999,6 +1051,11 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 	char port_str[50];
 	int  port_str_len = sizeof(port_str);
 
+	/*
+	 *  Command Format:  "tip:host=<IPAddr>;port=<PortNum>"
+	 *
+	 *  where <IPAddr> is an IP address and <PortNum> is a valid TCP port number.
+	 */
 
 	if (0 != as_info_parameter_get(params, "host", host_str, &host_str_len)) {
 		cf_info(AS_INFO, "tip command: no host, must add a host parameter");
@@ -1016,20 +1073,129 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 		return(0);
 	}
 
-	as_hb_tip(host_str, port);
-	cf_info(AS_INFO, "tip command executed: params %s", params);
+	if (0 == as_hb_tip(host_str, port)) {
+		cf_info(AS_INFO, "tip command executed: params %s", params);
+		cf_dyn_buf_append_string(db, "ok");
+	} else {
+		cf_warning(AS_INFO, "tip command failed: params %s", params);
+		cf_dyn_buf_append_string(db, "error");
+	}
 
 	return(0);
 }
+
+typedef enum as_hpl_state_e {
+	AS_HPL_STATE_HOST,
+	AS_HPL_STATE_PORT
+} as_hpl_state;
 
 int
 info_command_tip_clear(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "tip clear command received: params %s", params);
 
-	as_hb_tip_clear();
+	char host_port_list[3000];
+	int host_port_list_len = sizeof(host_port_list);
+	bool clear_all = true; // By default, clear all host tips.
+
+	/*
+	 *  Command Format:  "tip-clear:{host-port-list=<hpl>}" [the "host-port-list" argument is optional]
+	 *
+	 *  where <hpl> is either "all" or else a comma-separated list of items of the form: <HostIPAddr>:<PortNum>
+	 */
+	host_port_list[0] = '\0';
+	int hapl_len = 0;
+	as_hb_host_addr_port host_addr_port_list[AS_CLUSTER_SZ];
+	if (!as_info_parameter_get(params, "host-port-list", host_port_list, &host_port_list_len)) {
+		if (0 != strcmp(host_port_list, "all")) {
+			clear_all = false;
+			char *c_p = host_port_list;
+			int pos = 0;
+			char host[16]; // "WWW.XXX.YYY.ZZZ\0"
+			char *host_p = host;
+			int host_len = 0;
+			bool valid = true, item_complete = false;
+			as_hpl_state state = AS_HPL_STATE_HOST;
+			as_hb_host_addr_port *hapl = host_addr_port_list;
+			while (valid && (pos < host_port_list_len)) {
+				switch (state) {
+				  case AS_HPL_STATE_HOST:
+					  if ((isdigit(*c_p)) || ('.' == *c_p)) {
+						  // (Doesn't really scan only valid IP addresses here ~~ it simply accumulates allowable characters.)
+						  *host_p++ = *c_p;
+						  if (++host_len >= sizeof(host)) {
+							  cf_warning(AS_INFO, "Error!  Too many characters: '%c' @ pos = %d in host IP address!", *c_p, pos);
+							  valid = false;
+							  continue;
+						  }
+					  } else if (':' == *c_p) {
+						  *host_p = '\0';
+						  // Verify IP address validity.
+						  if (1 == inet_pton(AF_INET, host, &(hapl->ip_addr))) {
+							  hapl_len++;
+							  hapl->port = 0;
+							  state = AS_HPL_STATE_PORT;
+						  } else {
+							  cf_warning(AS_INFO, "Error!  Cannot parse host \"%s\" into an IP address!", host);
+							  valid = false;
+							  continue;
+						  }
+					  } else {
+						  cf_warning(AS_INFO, "Error!  Bad character: '%c' @ pos = %d in host address!", *c_p, pos);
+						  valid = false;
+						  continue;
+					  }
+					  break;
+
+				  case AS_HPL_STATE_PORT:
+					  if (isdigit(*c_p)) {
+						  if (hapl->port) {
+							  hapl->port *= 10;
+						  }
+						  hapl->port += (*c_p - '0');
+						  if (hapl->port >= (1 << 16)) {
+							  cf_warning(AS_INFO, "Error!  Invalid port %d >= %d!", hapl->port, (1 << 16));
+							  valid = false;
+							  continue;
+						  }
+						  // At least one non-zero port digit has been scanned.
+						  item_complete = (hapl->port > 0);
+					  } else if (',' == *c_p) {
+						  host_p = host;
+						  host_len = 0;
+						  hapl++;
+						  state = AS_HPL_STATE_HOST;
+						  item_complete = false;
+					  } else {
+						  cf_warning(AS_INFO, "Error!  Non-digit character: '%c' @ pos = %d in port!", *c_p, pos);
+						  valid = false;
+						  continue;
+					  }
+					  break;
+
+				  default:
+					  valid = false;
+					  continue;
+				}
+				c_p++;
+				pos++;
+			}
+			if (!(valid && item_complete)) {
+				cf_warning(AS_INFO, "The \"%s:\" command argument \"host-port-list\" value must be a comma-separated list of items of the form <HostIPAddr>:<PortNum>, not \"%s\"", name, host_port_list);
+				cf_dyn_buf_append_string(db, "error");
+				return 0;
+			}
+		}
+	} else if (params && (0 < strlen(params))) {
+		cf_info(AS_INFO, "The \"%s:\" command only supports the optional argument \"host-port-list\", not \"%s\"", name, params);
+		cf_dyn_buf_append_string(db, "error");
+		return(0);
+	}
+
+	as_hb_tip_clear((clear_all ? NULL : host_addr_port_list), (clear_all ? 0 : hapl_len));
 
 	cf_info(AS_INFO, "tip clear command executed: params %s", params);
+	cf_dyn_buf_append_string(db, "ok");
 
 	return(0);
 }
@@ -1932,15 +2098,17 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "add-module command received: params %s", params);
 
-	/* Command format : "jobs:[module=<string>;cmd=<command>;<parameters]"
-	*                   asinfo -v 'jobs'              -> list all jobs
-	*                   asinfo -v 'jobs:module=query' -> list all jobs for query module
-	*                   asinfo -v 'jobs:module=query;cmd=kill-job;trid=<trid>'
-	*                   asinfo -v 'jobs:module=query;cmd=set-priority;trid=<trid>;value=<val>'
-	* where <module> is one of following :
-	* 		- query
-	* 		- scan
-	*/
+	/*
+	 *  Command Format:  "jobs:[module=<string>;cmd=<command>;<parameters>]"
+	 *                   asinfo -v 'jobs'              -> list all jobs
+	 *                   asinfo -v 'jobs:module=query' -> list all jobs for query module
+	 *                   asinfo -v 'jobs:module=query;cmd=kill-job;trid=<trid>'
+	 *                   asinfo -v 'jobs:module=query;cmd=set-priority;trid=<trid>;value=<val>'
+	 *
+	 *  where <module> is one of following:
+	 *      - query
+	 *      - scan
+	 */
 
 	char cmd[13];
 	char module[21];
@@ -6943,7 +7111,7 @@ as_info_init()
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
-				"smd;snub;statistics;status;tip;tip-clear;undun;version;"
+				"smd;snub;statistics;status;tip;tip-clear;undun;unsnub;version;"
 				"xdr-min-lastshipinfo",
 				false);
 	/*
@@ -7024,6 +7192,7 @@ as_info_init()
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
 	as_info_set_command("undun", info_command_undun, PERM_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
+	as_info_set_command("unsnub", info_command_unsnub, PERM_SERVICE_CTRL);                    // Stop ignoring heartbeats from the specified node(s).
 	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PERM_NONE);      // Get the min XDR lastshipinfo.
 
 	// SINDEX
