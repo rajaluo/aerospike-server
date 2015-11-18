@@ -118,16 +118,22 @@ typedef struct mesh_host_list_element_s {
 	int         fd;     // -1 if inactive, allows nodes to come and go and be retried
 } mesh_host_list_element;
 
-#define MH_OP_REMOVE_ALL 1
-#define MH_OP_ADD        2
-#define MH_OP_REMOVE_FD  3
+typedef enum mesh_host_op_e
+{
+	MH_OP_ADD,
+	MH_OP_REMOVE_ALL,
+	MH_OP_REMOVE_FD,
+	MH_OP_REMOVE_LIST
+} mesh_host_op;
 
 typedef struct mesh_host_queue_element_s {
-	int         op;
-	char        host[128];
-	int         port;
-	int         remove_fd;
-	bool        seed;
+	mesh_host_op         op;
+	char                 host[128];
+	int                  port;
+	as_hb_host_addr_port list[AS_CLUSTER_SZ];
+	int                  list_len;
+	int                  remove_fd;
+	bool                 seed;
 } mesh_host_queue_element;
 
 /* as_hb
@@ -931,14 +937,15 @@ as_hb_snub_remove(int i)
 bool
 as_hb_is_snubbed(cf_node node)
 {
+	pthread_mutex_lock(&g_hb.snub_lock);
+
 	// quick cut-through for 99% of cases
 	if (g_hb.snub_list == 0) {
+		pthread_mutex_unlock(&g_hb.snub_lock);
 		return(false);
 	}
 
 	bool rv = false;
-
-	pthread_mutex_lock(&g_hb.snub_lock);
 
 	snub_list_element *e = g_hb.snub_list;
 
@@ -1015,12 +1022,26 @@ Out:
 	return(-1);
 }
 
+int
+as_hb_unsnub_all()
+{
+	cf_debug(AS_HB, "unsnub all");
+
+	pthread_mutex_lock(&g_hb.snub_lock);
+	while (g_hb.snub_list) {
+		as_hb_snub_remove(0);
+	}
+	pthread_mutex_unlock(&g_hb.snub_lock);
+
+	return 0;
+}
+
 //
 // MESH HOST LIST CONNECTIVITY
 //
 //
 #define MESH_RETRY_INTERVAL (2 * 1000)
-void as_hb_try_connecting_remote(mesh_host_list_element * e)
+void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 {
 	while (e) {
 		if ( (e->fd == -1) && (e->next_try < cf_getms()) ) {
@@ -1060,8 +1081,8 @@ void as_hb_try_connecting_remote(mesh_host_list_element * e)
 				if (getsockname(s.sock, (struct sockaddr*)&addr_in2, &addr_len2) == 0
 					&& inet_ntop(AF_INET, &addr_in2.sin_addr.s_addr, (char *)some_addr2, sizeof(some_addr2)) != NULL) {
 
-					cf_info(AS_HB, "initiated connection to mesh host at %s:%d (%s:%d) via socket %d from %s:%d",
-							some_addr, ntohs(addr_in.sin_port), e->host, e->port, s.sock, some_addr2, ntohs(addr_in2.sin_port));
+					cf_info(AS_HB, "initiated connection to mesh %sseed host at %s:%d (%s:%d) via socket %d from %s:%d",
+							(is_seed ? "" : "non-"), some_addr, ntohs(addr_in.sin_port), e->host, e->port, s.sock, some_addr2, ntohs(addr_in2.sin_port));
 				} else {
 					cf_warning(AS_HB, "getsockname() failed: %s", cf_strerror(errno));
 				}
@@ -1101,28 +1122,89 @@ mesh_list_service_fn(void *arg)
 	cf_debug(AS_HB, "starting mesh list service");
 
 	do {
-
-		mesh_host_list_element *e = 0;
+		mesh_host_list_element *e = 0, *previous = 0;
 
 		if (cf_queue_sz(g_hb.mesh_host_queue) > 0) cf_debug(AS_HB, "mesh list service: servicing queue");
 
 		// Get all elements off work queue and do them
 		mesh_host_queue_element mhqe;
-		if (CF_QUEUE_OK == cf_queue_pop( g_hb.mesh_host_queue, &mhqe, ((g_config.hb_interval * g_config.hb_timeout) / 2)) ) { // putting timed wait time equal to half of HB timeout
-
-			if (mhqe.op == MH_OP_REMOVE_ALL) {
-
-				cf_debug(AS_HB, "removing all hosts from mesh list");
-
+		// Note:  Wait on the queue for up to half of the HB timeout.
+		if (CF_QUEUE_OK == cf_queue_pop( g_hb.mesh_host_queue, &mhqe, ((g_config.hb_interval * g_config.hb_timeout) / 2)) ) {
+			switch (mhqe.op) {
+			  case MH_OP_REMOVE_ALL:
+				cf_debug(AS_HB, "removing all hosts from mesh seed host list");
 				while (g_hb.mesh_seed_host_list) {
 					e = g_hb.mesh_seed_host_list;
 					g_hb.mesh_seed_host_list = e->next;
-					if (e->fd) shutdown(e->fd, SHUT_RDWR);
+					if (-1 != e->fd) {
+						shutdown(e->fd, SHUT_RDWR);
+					}
 					cf_free(e);
 				}
-			} else if (mhqe.op == MH_OP_ADD) {
+				cf_debug(AS_HB, "removing all hosts from mesh non-seed host list");
+				while (g_hb.mesh_non_seed_host_list) {
+					e = g_hb.mesh_non_seed_host_list;
+					g_hb.mesh_non_seed_host_list = e->next;
+					if (-1 != e->fd) {
+						shutdown(e->fd, SHUT_RDWR);
+					}
+					cf_free(e);
+				}
+				break;
 
-				// check uniqueness
+			  case MH_OP_REMOVE_LIST:
+			  {
+				  as_hb_host_addr_port *hapl = mhqe.list;
+				  for (int i = 0; i < mhqe.list_len; i++) {
+					  char *host = inet_ntoa(hapl->ip_addr);
+
+					  e = g_hb.mesh_seed_host_list;
+					  while (e) {
+						  if (!strcmp(host, e->host) && (hapl->port == e->port)) {
+							  if (e == g_hb.mesh_seed_host_list) {
+								  g_hb.mesh_seed_host_list = e->next;
+							  } else {
+								  previous->next = e->next;
+							  }
+
+							  if (-1 != e->fd) {
+								  shutdown(e->fd, SHUT_RDWR);
+							  }
+							  cf_free(e);
+							  break;
+						  } else {
+							  previous = e;
+							  e = e->next;
+						  }
+					  }
+
+					  e = g_hb.mesh_non_seed_host_list;
+					  while (e) {
+						  if (!strcmp(host, e->host) && (hapl->port == e->port)) {
+							  if (e == g_hb.mesh_non_seed_host_list) {
+								  g_hb.mesh_non_seed_host_list = e->next;
+							  } else {
+								  previous->next = e->next;
+							  }
+
+							  if (-1 != e->fd) {
+								  shutdown(e->fd, SHUT_RDWR);
+							  }
+							  cf_free(e);
+							  break;
+						  } else {
+							  previous = e;
+							  e = e->next;
+						  }
+					  }
+
+					  hapl++;
+				  }
+				  break;
+			  }
+
+			  case MH_OP_ADD:
+				// verify uniqueness before adding
 				e = g_hb.mesh_seed_host_list;
 				while (e) {
 					if ((0 == strcmp(mhqe.host, e->host)) && (mhqe.port == e->port)) {
@@ -1157,8 +1239,9 @@ mesh_list_service_fn(void *arg)
 				e->port = mhqe.port;
 				e->fd = -1;
 				e->next_try = 0;
-			} else if (mhqe.op == MH_OP_REMOVE_FD) {
+				break;
 
+			  case MH_OP_REMOVE_FD:
 				cf_debug(AS_HB, "removing fd %d from mesh host list", mhqe.remove_fd);
 
 				//checking in seed host list
@@ -1193,9 +1276,11 @@ mesh_list_service_fn(void *arg)
 				}
 
 				cf_debug(AS_HB, "did NOT find fd %d in mesh host list",  mhqe.remove_fd);
+				break;
 
-			} else {
-				cf_warning(AS_HB, "recieved bad op service queue message: %d internal error", mhqe.op);
+			  default:
+				  cf_warning(AS_HB, "recieved bad op service queue message: %d internal error", mhqe.op);
+				  break;
 			}
 
 TryConnect:
@@ -1205,7 +1290,7 @@ TryConnect:
 
 		// Try any connections that might be a good idea
 
-		as_hb_try_connecting_remote(g_hb.mesh_non_seed_host_list);
+		as_hb_try_connecting_remote(g_hb.mesh_non_seed_host_list, false);
 		e = g_hb.mesh_non_seed_host_list;
 		mesh_host_list_element * prev_element = NULL;
 		while (e) {
@@ -1226,7 +1311,7 @@ TryConnect:
 			}
 		}
 		
-		as_hb_try_connecting_remote(g_hb.mesh_seed_host_list);
+		as_hb_try_connecting_remote(g_hb.mesh_seed_host_list, true);
 
 	} while (1);
 
@@ -1249,7 +1334,7 @@ int
 mesh_host_list_add(char *host, int port, bool is_seed)
 {
 	// validate input
-	if (port > (1 << 16)) {
+	if (port >= (1 << 16)) {
 		cf_info(AS_HB, "mesh host list add: invalid input: port %d out of range", port);
 		return(-1);
 	}
@@ -1261,13 +1346,23 @@ mesh_host_list_add(char *host, int port, bool is_seed)
 	cf_debug(AS_HB, "Mesh host list: queuing (not yet added) %s:%d", host, port);
 
 	// check that it's not myself
-	if ((0 == strcmp(g_config.hb_addr, host)) && (g_config.hb_port == port)) {
-		cf_debug(AS_HB, "rejected tip for self: %s:%d", host, port);
-		return(0);
+	if ((0 == strcmp(g_config.hb_addr_to_use, host)) && (g_config.hb_port == port)) {
+		cf_warning(AS_HB, "rejected tip for self: %s:%d", host, port);
+		return(-1);
 	}
 	if ((0 == strcmp("127.0.0.1", host)) && (g_config.hb_port == port)) {
-		cf_debug(AS_HB, "rejected tip for self2: %s:%d", host, port);
-		return(0);
+		cf_warning(AS_HB, "rejected tip for self2: %s:%d", host, port);
+		return(-1);
+	}
+
+	// Validate IP address.
+	struct in_addr ip_addr;
+	if (1 != inet_pton(AF_INET, host, &ip_addr)) {
+		cf_warning(AS_HB, "rejected tip with invalid IP address: %s:%d", host, port);
+		return(-1);
+	} else if (0 == ip_addr.s_addr) {
+		cf_warning(AS_HB, "rejected tip with invalid IP address: %s:%d", host, port);
+		return(-1);
 	}
 
 	// place on queue
@@ -1286,28 +1381,42 @@ mesh_host_list_add(char *host, int port, bool is_seed)
 //
 // TIP is an external control function that adds an IP address to the
 // list of configured MESH addresses.
-// It TIPs you off to good possible
-// The char * is used only during the call ---
-// and the call doesn't do the connect inline (?)
+// (It TIPs you off to good possible cluster members.)
+// The char * is used only during the call,
+// and actual mesh connect is done asynchonously.
 
 int
 as_hb_tip(char *host, int port)
 {
 	cf_debug(AS_HB, " Heartbeat: tipped about server at %s:%d", host, port);
 
-	mesh_host_list_add(host, port, true);
-
-	return(0);
+	return mesh_host_list_add(host, port, true);
 }
 
+// Clear mesh host tips:
+//   Clear all mesh host tips if the list is NULL or list length is 0.
+//   Otherise, remove the tips specified by the list items.
 int
-as_hb_tip_clear()
+as_hb_tip_clear(as_hb_host_addr_port *host_addr_port_list, int host_addr_port_list_len)
 {
-	cf_debug(AS_HB, " Heartbeat: clearing tip list");
+	cf_debug(AS_HB, "Heartbeat: clearing tip list");
 
 	mesh_host_queue_element mhqe;
 	memset(&mhqe, 0, sizeof(mhqe));
-	mhqe.op = MH_OP_REMOVE_ALL;
+
+	if ((NULL == host_addr_port_list) || (0 == host_addr_port_list_len)) {
+		cf_debug(AS_HB, "Removing all tip entries");
+
+		mhqe.op = MH_OP_REMOVE_ALL;
+	} else {
+		cf_debug(AS_HB, "Removing %d mesh host entries:", host_addr_port_list_len);
+
+		mhqe.op = MH_OP_REMOVE_LIST;
+		size_t list_sz = host_addr_port_list_len * sizeof(as_hb_host_addr_port);
+		memcpy(mhqe.list, host_addr_port_list, list_sz);
+		mhqe.list_len = host_addr_port_list_len;
+	}
+
 	cf_queue_push(g_hb.mesh_host_queue, (void *) &mhqe);
 	return(0);
 }
@@ -1351,7 +1460,7 @@ as_hb_start_receiving(int socket, int was_udp, cf_node node_id)
 	g_hb.endpoint_txlist_node_id[socket] = node_id; 
 	if ( node_id != 0 ) { 
 		//add this connection to discovered hash
-		as_hb_nodes_discovered_hash_put_conn (node_id, socket);
+		as_hb_nodes_discovered_hash_put_conn(node_id, socket);
 	}
 
 	return(0);
@@ -1629,14 +1738,12 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 
 			uint64_t now = cf_getms();
 
-			if (g_config.snub_nodes) {
-				/* ignore messages from snubbed nodes */
-				if (as_hb_is_snubbed(node)) {
-					cf_debug(AS_HB, "HB SNUBBED (%"PRIx64"+%"PRIu64")", node, now);
-					return;
-				} else {
-					cf_debug(AS_HB, "HB (%"PRIx64"+%"PRIu64")", node, now);
-				}
+			/* Ignore Pulse messages from snubbed nodes. */
+			if (g_config.snub_nodes && as_hb_is_snubbed(node)) {
+				cf_debug(AS_HB, "Ignoring HB Pulse:  HB SNUBBED (%"PRIx64"+%"PRIu64")", node, now);
+				return;
+			} else {
+				cf_debug(AS_HB, "HB (%"PRIx64"+%"PRIu64")", node, now);
 			}
 
 			/* Make sure this is actually a heartbeat message. */
@@ -1771,6 +1878,12 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 						continue;
 					}
 
+					/* Do not send requests to snubbed nodes. */
+					if (g_config.snub_nodes && as_hb_is_snubbed(node)) {
+						cf_debug(AS_HB, "Not sending HB Info Request: HB SNUBBED (%"PRIx64"+%"PRIu64")", node, now);
+						continue;
+					}
+
 					if (SHASH_ERR_NOTFOUND !=
 						shash_get(g_hb.adjacencies, &buf[i], a_p_pulse)  &&
 						(AS_HB_MODE_MESH != g_config.hb_mode ||
@@ -1836,6 +1949,12 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 				as_hb_error(AS_HB_ERR_NO_NODE_REQ);
 				return;
 			} else {
+				/* Ignore info. request messages from snubbed nodes. */
+				if (g_config.snub_nodes && as_hb_is_snubbed(node)) {
+					cf_debug(AS_HB, "Ignoring HB Info Request: HB SNUBBED (%"PRIx64")", node);
+					return;
+				}
+
 				msg *mt = as_fabric_msg_get(M_TYPE_HEARTBEAT);
 				byte bufm[512];
 
@@ -1889,6 +2008,12 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 				return;
 			}
 
+			/* Ignore info. reply messages from snubbed nodes. */
+			if (g_config.snub_nodes && as_hb_is_snubbed(node)) {
+				cf_debug(AS_HB, "Ignoring HB Info Reply: HB SNUBBED (%"PRIx64")", node);
+				return;
+			}
+
 			// If it's already known, we don't need to connect again
 			if (SHASH_OK == shash_get(g_hb.adjacencies, &node, a_p_pulse) &&
 				(AS_HB_MODE_MESH != g_config.hb_mode ||
@@ -1916,7 +2041,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 			}
 
 			// check discovered node data with this node id
-			if(as_hb_nodes_discovered_hash_is_conn(node)) {
+			if (as_hb_nodes_discovered_hash_is_conn(node)) {
 				cf_detail(AS_HB, "as_hb_rx_process node already connected, returning");
 				return;
 			} else {
@@ -1929,7 +2054,9 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 				cf_debug(AS_HB, "connecting to remote heartbeat service: %s:%d", cpaddr, port);
 				// could be both seed and non-seed but we are passing is_seed = 0, 
 				// as mesh_list_service_fn will take care of duplicates
-				mesh_host_list_add(cpaddr, port, false);
+				if (0 != mesh_host_list_add(cpaddr, port, false)) {
+					cf_warning(AS_HB, "Failed to add node %s:%d from info reply to mesh host list", cpaddr, port);
+				}
 			}
 			break;
 
@@ -1938,8 +2065,6 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 			as_hb_error(AS_HB_ERR_BAD_TYPE);
 			break;
 	}
-
-	return;
 }
 
 /* as_hb_thr
@@ -2028,7 +2153,7 @@ as_hb_thr(void *arg)
 					cf_info(AS_HB, "connecting to remote heartbeat service at %s:%d", g_config.hb_mesh_seed_addrs[i], g_config.hb_mesh_seed_ports[i]);
 
 					if (0 != mesh_host_list_add(g_config.hb_mesh_seed_addrs[i], g_config.hb_mesh_seed_ports[i], true)) {
-						cf_crash(AS_HB, "couldn't add remote heartbeat service %s:%d to mesh host list", g_config.hb_mesh_seed_addrs[i], g_config.hb_mesh_seed_ports[i]);
+						cf_warning(AS_HB, "couldn't add remote heartbeat service %s:%d to mesh host list", g_config.hb_mesh_seed_addrs[i], g_config.hb_mesh_seed_ports[i]);
 					}
 				} else {
 					break;
@@ -2073,10 +2198,11 @@ as_hb_thr(void *arg)
 				}
 				if (NULL == inet_ntop(AF_INET, &caddr.sin_addr.s_addr, (char *) cpaddr, sizeof(cpaddr)))
 					cf_crash(AS_HB, "inet_ntop failed: %s", cf_strerror(errno));
+
 				cf_debug(AS_HB, "new connection from %s:%d", cpaddr, caddr.sin_port);
 
 				cf_atomic_int_incr(&g_config.heartbeat_connections_opened);
-				if (0 != as_hb_endpoint_add(csock, false /*is not udp*/, 0 /*node id not known till pulse come*/)) {
+				if (0 != as_hb_endpoint_add(csock, false /*is not udp*/, 0 /*node id unknown until pulse arrives*/)) {
 					close(csock);
 					continue;
 				}
@@ -2252,10 +2378,16 @@ as_hb_monitor_reduce(void *key, void *data, void *udata)
 		}
 	}
 
+
+
 	/* suspect node. Ask fabric what fabric thinks. */
 	if (node_expired) {
 		uint64_t fabric_lasttime;
-		if (0 == as_fabric_get_node_lasttime(id, &fabric_lasttime)) {
+		// Even the fabric cannot save a snubbed node.
+		if (g_config.snub_nodes && as_hb_is_snubbed(id)) {
+			cf_info(AS_HB, "hb expires: snubbed node %"PRIx64, id);
+			node_expired = true;
+		} else if (0 == as_fabric_get_node_lasttime(id, &fabric_lasttime)) {
 			if (fabric_lasttime > (g_config.hb_interval * g_config.hb_timeout)) {
 				if (p->dunned) {
 					cf_debug(AS_HB, "hb expires but fabric says DEAD: node %"PRIx64, id);
@@ -2275,7 +2407,6 @@ as_hb_monitor_reduce(void *key, void *data, void *udata)
 
 				node_expired = false;
 			}
-
 		} else {
 			cf_info(AS_HB, "possible node expiration, check of fabric returns error: node %"PRIx64, id);
 		}
@@ -2784,6 +2915,8 @@ as_hb_dump(bool verbose)
 	cf_info(AS_HB, "There are %d MeshNonSeedHostList entries.", i);
 
 	// Snub List:
+
+	cf_info(AS_HB, "Node snubbing is %senabled.", (g_config.snub_nodes ? "" : "not "));
 
 	snub_list_element *sle = g_hb.snub_list;
 	i = 0;
