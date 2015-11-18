@@ -152,6 +152,7 @@ typedef struct {
 #define INFO_FIELD_OP	0
 #define INFO_FIELD_GENERATION 1
 #define INFO_FIELD_SERVICE_ADDRESS 2
+#define INFO_FIELD_ALT_ADDRESS 3
 
 #define INFO_OP_UPDATE 0
 #define INFO_OP_ACK 1
@@ -159,7 +160,8 @@ typedef struct {
 msg_template info_mt[] = {
 	{ INFO_FIELD_OP,	M_FT_UINT32 },
 	{ INFO_FIELD_GENERATION, M_FT_UINT32 },
-	{ INFO_FIELD_SERVICE_ADDRESS, M_FT_STR }
+	{ INFO_FIELD_SERVICE_ADDRESS, M_FT_STR },
+	{ INFO_FIELD_ALT_ADDRESS, M_FT_STR }
 };
 
 // Is dumping GLibC-level memory stats enabled?
@@ -2595,6 +2597,10 @@ info_network_info_config_get(cf_dyn_buf *db)
 		cf_dyn_buf_append_string(db, ";access-address=");
 		cf_dyn_buf_append_string(db, g_config.external_address);
 	}
+	if (g_config.alternate_address) {
+		cf_dyn_buf_append_string(db, ";alternate-address=");
+		cf_dyn_buf_append_string(db, g_config.alternate_address);
+	}
 	cf_dyn_buf_append_string(db, ";reuse-address=");
 	cf_dyn_buf_append_string(db, g_config.socket_reuse_addr ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";fabric-port=");
@@ -4762,7 +4768,7 @@ as_info_queue_get_size()
 // Registers a dynamic name-value calculator.
 // the get_value_fn will be called if a request comes in for this name.
 // only does the registration!
-// def means it's part of the default set - will get returned if nothing is passed
+// def means it's part of the default results - will get invoked for a blank info command (asinfo -v "")
 
 
 int
@@ -5425,8 +5431,14 @@ uint32_t	g_service_generation = 0;
 typedef struct {
 	uint64_t	last;				// last notice we got from a given node
 	char 		*service_addr;		// string representing the service address
+	char 		*alternate_addr;		// string representing the alternate address
 	uint32_t	generation;			// acked generation counter
 } info_node_info;
+
+typedef struct {
+	bool		printed_element;	// Boolean flag to control printing of ';'
+	cf_dyn_buf	*db;
+} services_printer;
 
 
 // To avoid the services bug, g_info_node_info_hash should *always* be a subset
@@ -5583,6 +5595,7 @@ info_paxos_event_reduce_fn(void *key, void *data, void *udata)
 	if (succession[i] == 0) {
 		cf_debug(AS_INFO, " paxos event reduce: removing node %"PRIx64, *node);
 		if (infop->service_addr)    cf_free(infop->service_addr);
+		if (infop->alternate_addr)    cf_free(infop->alternate_addr);
 		return(SHASH_REDUCE_DELETE);
 	}
 
@@ -5618,6 +5631,7 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node su
 		if (succession[i] != g_config.self_node) {
 
 			info.service_addr = 0;
+			info.alternate_addr = 0;
 
 			// Get lock for info_history_hash
 			if (SHASH_OK != shash_get_vlock(g_info_node_info_history_hash,
@@ -5650,11 +5664,15 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node su
 					info.service_addr = cf_strdup( infop_info_history_hash->service_addr );
 					cf_assert(info.service_addr, AS_INFO, CF_CRITICAL, "malloc");
 				}
+				if (infop_info_history_hash->alternate_addr) {
+					info.alternate_addr = cf_strdup( infop_info_history_hash->alternate_addr );
+				}
 
 				if (SHASH_OK == shash_put_unique(g_info_node_info_hash, &(succession[i]), &info)) {
 					cf_debug(AS_INFO, "info: from paxos notification: inserted node %"PRIx64, succession[i]);
 				} else {
 					if (info.service_addr)	cf_free(info.service_addr);
+					if (info.alternate_addr)	cf_free(info.alternate_addr);
 					cf_assert(false, AS_INFO, CF_CRITICAL,
 							"could not insert node %"PRIx64" from paxos notification",
 							succession[i]);
@@ -5706,8 +5724,12 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 
 		msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_UPDATE);
 		msg_set_uint32(m, INFO_FIELD_GENERATION, g_service_generation);
-		if (g_service_str)
+		if (g_service_str) {
 			msg_set_str(m, INFO_FIELD_SERVICE_ADDRESS, g_service_str, MSG_SET_COPY);
+		}
+		if (g_config.alternate_address) {
+			msg_set_str(m, INFO_FIELD_ALT_ADDRESS, g_config.alternate_address, MSG_SET_COPY);
+		}
 
 		pthread_mutex_unlock(&g_service_lock);
 
@@ -5751,6 +5773,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				info_node_info info;
 				info.last = 0;
 				info.service_addr = 0;
+				info.alternate_addr = 0;
 				info.generation = 0;
 
 				// This may fail, but this is ok. This should only fail when
@@ -5767,30 +5790,45 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				}
 			}
 
-			if (infop_info_history_hash->service_addr)
+			if (infop_info_history_hash->service_addr) {
 				cf_free(infop_info_history_hash->service_addr);
-
-			infop_info_history_hash->service_addr = 0;
+				infop_info_history_hash->service_addr = 0;
+			}
+			if (infop_info_history_hash->alternate_addr) {
+				cf_free(infop_info_history_hash->alternate_addr);
+				infop_info_history_hash->alternate_addr = 0;
+			}
 
 			if (0 != msg_get_str(m, INFO_FIELD_SERVICE_ADDRESS,
 								 &(infop_info_history_hash->service_addr), 0,
 								 MSG_GET_COPY_MALLOC)) {
-				cf_warning(AS_INFO, "failed to get service address from an Info msg");
+				cf_warning(AS_INFO, "failed to get service address in an info msg from node %"PRIx64"", node);
 				pthread_mutex_unlock(vlock_info_history_hash);
 				break;
 			}
+			if (0 != msg_get_str(m, INFO_FIELD_ALT_ADDRESS,
+								 &(infop_info_history_hash->alternate_addr), 0,
+								 MSG_GET_COPY_MALLOC)) {
+				cf_debug(AS_INFO, "failed to get alternate address in an info msg from node %"PRIx64"", node);
+			}
 
 			cf_debug(AS_INFO, " new service address is: %s", infop_info_history_hash->service_addr);
+			cf_debug(AS_INFO, " new alternate address is: %s", infop_info_history_hash->alternate_addr ? 
+															infop_info_history_hash->alternate_addr : "NULL");
 
 			// See if element is in info_hash
 			// - if yes, update the service address.
 			if (SHASH_OK == shash_get_vlock(g_info_node_info_hash, &node,
 					(void **) &infop_info_hash, &vlock_info_hash)) {
 
-				if (infop_info_hash->service_addr)
+				if (infop_info_hash->service_addr) {
 					cf_free(infop_info_hash->service_addr);
-
-				infop_info_hash->service_addr = 0;
+					infop_info_hash->service_addr = 0;
+				}
+				if (infop_info_hash->alternate_addr) {
+					cf_free(infop_info_hash->alternate_addr);
+					infop_info_hash->alternate_addr = 0;
+				}
 
 				// Already unpacked msg in msg_get_str, so just copy the value
 				// from infop_info_history_hash.
@@ -5801,8 +5839,9 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 					break;
 				}
 
-				infop_info_hash->service_addr =
-					cf_strdup( infop_info_history_hash->service_addr );
+				infop_info_hash->service_addr = cf_strdup( infop_info_history_hash->service_addr );
+				infop_info_hash->alternate_addr = infop_info_history_hash->alternate_addr ? 
+												cf_strdup( infop_info_history_hash->alternate_addr ) : 0;
 				cf_assert(infop_info_hash->service_addr, AS_INFO, CF_CRITICAL, "malloc");
 
 				pthread_mutex_unlock(vlock_info_hash);
@@ -5817,6 +5856,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 
 			// Send the ack.
 			msg_set_unset(m, INFO_FIELD_SERVICE_ADDRESS);
+			msg_set_unset(m, INFO_FIELD_ALT_ADDRESS);
 			msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_ACK);
 
 			if ((rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH))) {
@@ -5859,21 +5899,37 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 // This dynamic function reduces the info_node_info hash and builds up the string of services
 //
 
-// Boolean flag to control printing a semicolon between service entries.
-static bool g_printed_a_service = false;
-
 int
 info_get_services_reduce_fn(void *key, void *data, void *udata)
 {
-	cf_dyn_buf *db = (cf_dyn_buf *) udata;
+	services_printer *sp = (services_printer *)udata;
+	cf_dyn_buf *db = sp->db;
 	info_node_info *infop = (info_node_info *) data;
 
 	if (infop->service_addr) {
-		if (g_printed_a_service) {
+		if (sp->printed_element) {
 			cf_dyn_buf_append_char(db, ';');
 		}
 		cf_dyn_buf_append_string(db, infop->service_addr);
-		g_printed_a_service = true;
+		sp->printed_element = true;
+	}
+
+	return(0);
+}
+
+int
+info_get_alt_addr_reduce_fn(void *key, void *data, void *udata)
+{
+	services_printer *sp = (services_printer *)udata;
+	cf_dyn_buf *db = sp->db;
+	info_node_info *infop = (info_node_info *) data;
+
+	if (infop->alternate_addr) {
+		if (sp->printed_element) {
+			cf_dyn_buf_append_char(db, ';');
+		}
+		cf_dyn_buf_append_string(db, infop->alternate_addr);
+		sp->printed_element = true;
 	}
 
 	return(0);
@@ -5882,8 +5938,23 @@ info_get_services_reduce_fn(void *key, void *data, void *udata)
 int
 info_get_services(char *name, cf_dyn_buf *db)
 {
-	g_printed_a_service = false;
-	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) db);
+	services_printer sp;
+	sp.printed_element = false;
+	sp.db = db;
+
+	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) &sp);
+
+	return(0);
+}
+
+int
+info_get_alt_addr(char *name, cf_dyn_buf *db)
+{
+	services_printer sp;
+	sp.printed_element = false;
+	sp.db = db;
+
+	shash_reduce(g_info_node_info_hash, info_get_alt_addr_reduce_fn, (void *) &sp);
 
 	return(0);
 }
@@ -5891,8 +5962,11 @@ info_get_services(char *name, cf_dyn_buf *db)
 int
 info_get_services_alumni(char *name, cf_dyn_buf *db)
 {
-	g_printed_a_service = false;
-	shash_reduce(g_info_node_info_history_hash, info_get_services_reduce_fn, (void *) db);
+	services_printer sp;
+	sp.printed_element = false;
+	sp.db = db;
+
+	shash_reduce(g_info_node_info_history_hash, info_get_services_reduce_fn, (void *) &sp);
 
 	return(0);
 }
@@ -7138,6 +7212,7 @@ as_info_init()
 	as_info_set_dynamic("service",info_get_service, false);           // IP address and server port for this node, expected to be a single.
 	                                                                  // address/port per node, may be multiple address if this node is configured.
 	                                                                  // to listen on multiple interfaces (typically not advised).
+	as_info_set_dynamic("services-alternate",info_get_alt_addr, false);     // IP address mapping from internal to public ones
 	as_info_set_dynamic("services",info_get_services, true);          // List of addresses of neighbor cluster nodes to advertise for Application to connect.
 	as_info_set_dynamic("services-alumni",info_get_services_alumni, true); // All neighbor addresses (services) this server has ever know about.
 	as_info_set_dynamic("services-alumni-reset",info_services_alumni_reset, false); // Reset the services alumni to equal services
