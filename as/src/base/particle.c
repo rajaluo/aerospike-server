@@ -840,7 +840,7 @@ uint32_t
 as_bin_particle_to_xdr(const as_bin *b, uint8_t *value)
 {
 	uint8_t type = as_bin_get_particle_type(b);
-	uint32_t added_size = g_particle_to_wire_table[type](b->particle, value);
+	uint32_t added_size = particle_vtable[type]->to_wire_fn(b->particle, value);
 	return added_size;
 }
 
