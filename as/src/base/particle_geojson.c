@@ -316,7 +316,11 @@ geojson_from_asval(const as_val *val, as_particle **pp)
 	size_t jsz = as_geojson_len(pg);
 
 	p_geojson_mem->type = AS_PARTICLE_TYPE_GEOJSON;
-	p_geojson_mem->sz = geojson_size_from_asval(val);
+	p_geojson_mem->sz =
+			sizeof(uint8_t) +			// flags
+			sizeof(uint16_t) +			// ncells (always 0 here)
+			(0 * sizeof(uint64_t)) +	// cell array (none)
+			jsz;						// json string
 
 	p_geojson_mem->flags = 0;
 	p_geojson_mem->ncells = 0;
