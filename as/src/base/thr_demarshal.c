@@ -238,30 +238,6 @@ thr_demarshal_reaper_fn(void *arg)
 	return NULL;
 }
 
-// Get the remote IP address and port connected to a socket file descriptor.
-// Return 0 if successful, and populate the caller-provided IP address and port.
-// Return -1 otherwise.
-static int
-get_fd_ip_addr_and_port(int fd, char *ip_addr, size_t ip_addr_sz, int *port)
-{
-	struct sockaddr_in addr_in;
-	socklen_t addr_len = sizeof(addr_in);
-	int retval = -1;
-
-	// Try to get the client details for better logging.
-	// Otherwise, fall back to generic log message.
-	if (getpeername(fd, (struct sockaddr *) &addr_in, &addr_len) == 0
-		&& ip_addr
-		&& inet_ntop(AF_INET, &addr_in.sin_addr.s_addr, (char *) ip_addr, ip_addr_sz) != NULL) {
-		retval = 0;
-		if (port) {
-			*port = ntohs(addr_in.sin_port);
-		}
-	}
-
-	return retval;
-}
-
 
 // Log information about a suspicious incoming transaction.
 static void
@@ -365,7 +341,7 @@ thr_demarshal(void *arg)
 				int csocket = -1;
 				struct sockaddr_in caddr;
 				socklen_t clen = sizeof(caddr);
-				char cpaddr[24];
+				char cpaddr[64];
 
 				if (-1 == (csocket = accept(s->sock, (struct sockaddr *)&caddr, &clen))) {
 					// This means we're out of file descriptors - could be a SYN
@@ -382,8 +358,21 @@ thr_demarshal(void *arg)
 					cf_crash(AS_DEMARSHAL, "accept: %s (errno %d)", cf_strerror(errno), errno);
 				}
 
-				if (NULL == inet_ntop(AF_INET, &caddr.sin_addr.s_addr, (char *)cpaddr, sizeof(cpaddr))) {
-					cf_crash(AS_DEMARSHAL, "inet_ntop(): %s (errno %d)", cf_strerror(errno), errno);
+				// Get the client IP address in string form.
+				if (caddr.sin_family == AF_INET) {
+					if (NULL == inet_ntop(AF_INET, &caddr.sin_addr.s_addr, (char *)cpaddr, sizeof(cpaddr))) {
+						cf_crash(AS_DEMARSHAL, "inet_ntop(): %s (errno %d)", cf_strerror(errno), errno);
+					}
+				}
+				else if (caddr.sin_family == AF_INET6) {
+					struct sockaddr_in6* addr_in6 = (struct sockaddr_in6*)&caddr;
+
+					if (NULL == inet_ntop(AF_INET6, &addr_in6->sin6_addr, (char *)cpaddr, sizeof(cpaddr))) {
+						cf_crash(AS_DEMARSHAL, "inet_ntop(): %s (errno %d)", cf_strerror(errno), errno);
+					}
+				}
+				else {
+					cf_crash(AS_DEMARSHAL, "unknown address family %u", caddr.sin_family);
 				}
 
 				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", cpaddr, csocket);
@@ -417,6 +406,7 @@ thr_demarshal(void *arg)
 					cf_crash(AS_DEMARSHAL, "malloc");
 				}
 
+				sprintf(fd_h->client, "%s:%d", cpaddr, ntohs(caddr.sin_port));
 				fd_h->fd = csocket;
 
 				fd_h->last_used = cf_getms();
@@ -543,19 +533,9 @@ thr_demarshal(void *arg)
 					// Swap the necessary elements of the as_proto.
 					as_proto_swap(&proto);
 
-					// (For storing the returned values when getting the client info.)
-					char ip_addr[24];
-					ip_addr[0] = 0;
-					int port = 0;
-
 					if (proto.sz > PROTO_SIZE_MAX) {
-						if (!get_fd_ip_addr_and_port(fd, ip_addr, sizeof(ip_addr), &port)) {
-							cf_warning(AS_DEMARSHAL, "proto input from %s:%d: msg greater than %d, likely request from non-Aerospike client, rejecting: sz %"PRIu64,
-									   ip_addr, port, PROTO_SIZE_MAX, proto.sz);
-						} else {
-							cf_warning(AS_DEMARSHAL, "proto input: msg greater than %d, likely request from non-Aerospike client, rejecting: sz %"PRIu64,
-									   PROTO_SIZE_MAX, proto.sz);
-						}
+						cf_warning(AS_DEMARSHAL, "proto input from %s: msg greater than %d, likely request from non-Aerospike client, rejecting: sz %"PRIu64,
+								fd_h->client, PROTO_SIZE_MAX, proto.sz);
 						goto NextEvent_FD_Cleanup;
 					}
 
@@ -580,12 +560,7 @@ thr_demarshal(void *arg)
 						if (peeked_data_sz > min_as_msg_sz) {
 //							cf_debug(AS_DEMARSHAL, "(Peeked %zu bytes.)", peeked_data_sz);
 							if (peeked_data_sz > proto.sz) {
-								char ip_port_str[64];
-								ip_port_str[0] = '\0';
-								if (!get_fd_ip_addr_and_port(fd, ip_addr, sizeof(ip_addr), &port)) {
-									snprintf(ip_port_str, sizeof(ip_port_str), "%s:%d ", ip_addr, port);
-								}
-								cf_warning(AS_DEMARSHAL, "Received unexpected extra data from client %ssocket %d when peeking as_proto!", ip_port_str, fd);
+								cf_warning(AS_DEMARSHAL, "Received unexpected extra data from client %s socket %d when peeking as_proto!", fd_h->client, fd);
 								log_as_proto_and_peeked_data(&proto, peekbuf, peeked_data_sz);
 								goto NextEvent_FD_Cleanup;
 							}
