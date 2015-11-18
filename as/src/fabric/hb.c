@@ -237,6 +237,15 @@ typedef struct {
 } as_hb_monitor_reduce_udata;
 
 
+/**
+ *  Udata for finding nodes in the adjaceny list not in the input succession list.
+ */
+typedef struct {
+	int event_count;
+	as_fabric_event_node *events;
+	cf_node *succession_list;
+} as_hb_find_new_nodes_reduce_udata;
+
 //
 // Forward references
 //
@@ -1758,10 +1767,29 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 					if (0 == buf[i])
 						break;
 
-					if (g_config.self_node == buf[i])
+					if (g_config.self_node == buf[i]) {
 						continue;
-					if (SHASH_ERR_NOTFOUND != shash_get(g_hb.adjacencies, &buf[i], a_p_pulse))
+					}
+
+					if (SHASH_ERR_NOTFOUND !=
+						shash_get(g_hb.adjacencies, &buf[i], a_p_pulse)  &&
+						(AS_HB_MODE_MESH != g_config.hb_mode ||
+						 as_hb_nodes_discovered_hash_is_conn(buf[i]))) {
+
+						// In the multicast mode, its ok to check if this node
+						// is in the adjacency list and skipped.
+						// However in the mesh mode this node might be removed
+						// out of the mesh list and the discovered list because
+						// hb tcp connection failure but still be in the adjacency list.
+						// In GCE tests, on GCE live migration, the hb
+						// connection dropped but fabric was intact. Net effect
+						// was the node was off the mesh list but in adjacency
+						// list. The heart beats never were sent to this node.
+						// The node also never expired and got out of the
+						// adjacency list because the fabric connections were
+						// working.
 						continue;
+					}
 
 					/* We don't have a connection to this node; send an info
 					 * request to find out who to connect to */
@@ -1862,7 +1890,22 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 			}
 
 			// If it's already known, we don't need to connect again
-			if (SHASH_OK == shash_get(g_hb.adjacencies, &node, a_p_pulse)) {
+			if (SHASH_OK == shash_get(g_hb.adjacencies, &node, a_p_pulse) &&
+				(AS_HB_MODE_MESH != g_config.hb_mode ||
+				 as_hb_nodes_discovered_hash_is_conn(node))) {
+				// In the multicast mode, its ok to check if this node
+				// is in the adjacency list and skipped.
+				// However in the mesh mode this node might be removed
+				// out of the mesh list and the discovered list because
+				// hb tcp connection failure but still be in the adjacency
+				// list.
+				// In GCE tests, on GCE live migration, the hb
+				// connection dropped but fabric was intact. Net effect
+				// was the node was off the mesh list but in adjacency
+				// list. The heart beats never were sent to this node.
+				// The node also never expired and got out of the
+				// adjacency list because the fabric connections were
+				// working.
 				return;
 			}
 
@@ -1931,29 +1974,28 @@ as_hb_thr(void *arg)
 
 		g_hb.endpoint_txlist[sock] = true;
 		g_hb.endpoint_txlist_isudp[sock] = true;
-
 	} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
 		sock = g_hb.socket.sock;
 
 		// If the user specified 'any' as heartbeat address, we listen on 0.0.0.0 (all interfaces)
 		// But we should send a proper IP address to the remote machine to send back heartbeat.
 		// Use the node's IP address in this case.
-		char *hbaddr_to_use = g_config.hb_addr;
+		g_config.hb_addr_to_use = g_config.hb_addr;
 		// Checking the first byte is enough as '0' cannot be a valid IP address other than 0.0.0.0
-		if (*hbaddr_to_use == '0') {
+		if (*g_config.hb_addr_to_use == '0') {
 			cf_info(AS_AS, "Using address \"any\" for listening for heartbeats and a real IP address for receiving heartbeats");
-			hbaddr_to_use = g_config.node_ip;
+			g_config.hb_addr_to_use = g_config.node_ip;
 		}
 		// If the user specified an interface-address, however, we should instead
 		// send that address to the remote machine to send back heartbeats to us.
 		if (g_config.hb_tx_addr) {
 			cf_info(AS_HB, "Using \"interface-address\" for receiving heartbeats");
-			hbaddr_to_use = g_config.hb_tx_addr;
+			g_config.hb_addr_to_use = g_config.hb_tx_addr;
 		}
-		cf_info(AS_HB, "Sending %s as the IP address for receiving heartbeats", hbaddr_to_use);
+		cf_info(AS_HB, "Sending %s as the IP address for receiving heartbeats", g_config.hb_addr_to_use);
 
 		struct in_addr self;
-		if (1 != inet_pton(AF_INET, hbaddr_to_use, &self))
+		if (1 != inet_pton(AF_INET, g_config.hb_addr_to_use, &self))
 			cf_warning(AS_HB, "unable to call inet_pton: %s", cf_strerror(errno));
 		else {
 			msg_set_uint32(mt, AS_HB_MSG_ADDR, * (uint32_t *) &self);
@@ -2113,12 +2155,6 @@ CloseSocket:
 						struct sockaddr_in so;
 						cf_sockaddr dest;
 						so.sin_family = AF_INET;
-						if (g_config.hb_tx_addr) {
-							inet_pton(AF_INET, g_config.hb_tx_addr, &so.sin_addr.s_addr);
-						} else {
-							inet_pton(AF_INET, g_config.hb_addr, &so.sin_addr.s_addr);
-						}
-
 						inet_pton(AF_INET, g_config.hb_addr, &so.sin_addr.s_addr);
 						so.sin_port = htons(g_config.hb_port);
 						cf_sockaddr_convertto(&so, &dest);
@@ -2128,7 +2164,6 @@ CloseSocket:
 							as_hb_error(AS_HB_ERR_SENDTO_FAIL_5);
 						}
 					} else { // tcp
-
 						cf_detail(AS_HB, "sending tcp heartbeat to index %d : msg size %zu", i, n);
 						if (0 > as_hb_tcp_send(i, buft, n)) {
 							cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 6", i);
@@ -2574,6 +2609,12 @@ as_hb_shutdown()
 }
 
 /*
+ *  g_log_items
+ *  Only dump details of heartbeat-related items to the log when true.
+ */
+static bool g_log_items = false;
+
+/*
  *  as_hb_dump_pulse
  *  Log the properties of an as_hb_pulse object.
  */
@@ -2608,8 +2649,45 @@ as_hb_dump_adjacencies_entry(void *key, void *data, void *udata)
 	as_hb_pulse *pulse = (as_hb_pulse *) data;
 	int *count = (int *) udata;
 
-	cf_info(AS_HB, "Adjacencies[%d]: node %"PRIx64"", *count, node);
-	as_hb_dump_pulse(pulse);
+	if (g_log_items) {
+		cf_info(AS_HB, "Adjacencies[%d]: node %"PRIx64"", *count, node);
+		as_hb_dump_pulse(pulse);
+	}
+
+	*count += 1;
+
+	return 0;
+}
+
+/*
+ *  as_hb_dump_discovered_node_hval
+ *  Log the properties of a discovered node object.
+ */
+static void
+as_hb_dump_discovered_node_hval(discovered_node_hval_t *hval)
+{
+	cf_info(AS_HB, " num_conn %d", hval->num_conn);
+	for (int i = 0; i < hval->num_conn; i++) {
+		cf_info(AS_HB, " conn[%d] fd %d", i, hval->conn[i].fd);
+	}
+}
+
+/*
+ *  as_dump_discovered_list_entry
+ *  Log the properties of a single HB discovered list entry, i.e.,
+ *    cf_node ==> discovered_node_hval_t
+ */
+static int
+as_hb_dump_discovered_list_entry(void *key, void *data, void *udata)
+{
+	cf_node node = * (cf_node *) key;
+	discovered_node_hval_t *hval = (discovered_node_hval_t *) data;
+	int *count = (int *) udata;
+
+	if (g_log_items) {
+		cf_info(AS_HB, "DiscoveredList[%d]: node %"PRIx64"", *count, node);
+		as_hb_dump_discovered_node_hval(hval);
+	}
 
 	*count += 1;
 
@@ -2630,6 +2708,36 @@ as_hb_dump(bool verbose)
 	cf_info(AS_HB, "HB Mode:  %s (%d)", (AS_HB_MODE_MCAST == g_config.hb_mode ? "multicast" :
 										 (AS_HB_MODE_MESH == g_config.hb_mode ? "mesh" : "undefined")),
 			g_config.hb_mode);
+
+	cf_info(AS_HB, "HB Addr:  %s", g_config.hb_addr);
+	cf_info(AS_HB, "HB Port:  %d", g_config.hb_port);
+
+	cf_info(AS_HB, "HB Tx Addr:  %s", g_config.hb_tx_addr);
+
+	if (g_config.hb_mode == AS_HB_MODE_MESH) {
+		cf_info(AS_HB, "HB Addr Advertised for Receiving Heartbeats: %s", g_config.hb_addr_to_use);
+
+		if (g_config.hb_init_addr) {
+			cf_info(AS_HB, "Mesh Addr:  %s", g_config.hb_init_addr);
+			if (g_config.hb_init_port) {
+				cf_info(AS_HB, "Mesh Port:  %d", g_config.hb_init_port);
+			}
+		} else {
+			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
+				if (g_config.hb_mesh_seed_addrs[i]) {
+					cf_info(AS_HB, "MeshSeedAddrPort[%d]:  %s:%d",
+							i, g_config.hb_mesh_seed_addrs[i], g_config.hb_mesh_seed_ports[i]);
+				} else {
+					break;
+				}
+			}
+		}
+		cf_info(AS_HB, "HB Mesh RW Retry Timeout:  %d", g_config.hb_mesh_rw_retry_timeout);
+	} else {
+		// Mode is multicast.
+		cf_info(AS_HB, "HB MCast TTL:  %d", g_config.hb_mcast_ttl);
+	}
+
 	cf_info(AS_HB, "HB Interval:  %d", g_config.hb_interval);
 	cf_info(AS_HB, "HB Timeout:  %d", g_config.hb_timeout);
 	cf_info(AS_HB, "HB Protocol:  %s (%d)", (AS_HB_PROTOCOL_V1 == g_config.hb_protocol ? "V1" :
@@ -2643,27 +2751,50 @@ as_hb_dump(bool verbose)
 
 	if (socket) {
 		cf_info(AS_HB, "HB Socket:  addr:port %s:%d proto %d sock %d", socket->addr, socket->port, socket->proto, socket->sock);
+	} else {
+		cf_info(AS_HB, "There is no HB Socket.");
 	}
 
-	// Mesh Host List Info:
+	// Mesh Seed Host List Info:
 
 	mesh_host_list_element *elem = g_hb.mesh_seed_host_list;
 	int i = 0;
 	while (elem) {
-		cf_info(AS_HB, "MeshSeedHostList[%d] %s:%d %lu %d %d", i, elem->host, elem->port, elem->next_try, elem->try_interval, elem->fd);
+		if (verbose) {
+			cf_info(AS_HB, "MeshSeedHostList[%d]:  addr:port %s:%d next_try %lu try_interval %d fd %d",
+					i, elem->host, elem->port, elem->next_try, elem->try_interval, elem->fd);
+		}
 		i++;
 		elem = elem->next;
 	}
+	cf_info(AS_HB, "There are %d MeshSeedHostList entries.", i);
+
+	// Mesh Non-Seed Host List Info:
+
+	elem = g_hb.mesh_non_seed_host_list;
+	i = 0;
+	while (elem) {
+		if (verbose) {
+			cf_info(AS_HB, "MeshNonSeedHostList[%d]:  addr:port %s:%d next_try %lu try_interval %d fd %d",
+					i, elem->host, elem->port, elem->next_try, elem->try_interval, elem->fd);
+		}
+		i++;
+		elem = elem->next;
+	}
+	cf_info(AS_HB, "There are %d MeshNonSeedHostList entries.", i);
 
 	// Snub List:
 
 	snub_list_element *sle = g_hb.snub_list;
 	i = 0;
 	while (sle && sle->node) {
-		cf_info(AS_HB, "SnubList[%d] node %"PRIx64" expiration %"PRIx64"", i, sle->node, sle->expiration);
+		if (verbose) {
+			cf_info(AS_HB, "SnubList[%d]:  node %"PRIx64" expiration %"PRIx64"", i, sle->node, sle->expiration);
+		}
 		sle++;
 		i++;
 	}
+	cf_info(AS_HB, "There are %d SnubList entries.", i);
 
 	// TxList Info:
 
@@ -2671,15 +2802,115 @@ as_hb_dump(bool verbose)
 	for (i = 0; i < AS_HB_TXLIST_SZ; i++) {
 		if (g_hb.endpoint_txlist[i]) {
 			endpoint_count++;
-			cf_info(AS_HB, "TxList[%d]: fd %d isudp %d", i, i, g_hb.endpoint_txlist_isudp[i]);
+			if (verbose) {
+				cf_info(AS_HB, "TxList[%d]:  fd %d isudp %d", i, i, g_hb.endpoint_txlist_isudp[i]);
+			}
 		}
 	}
 	cf_info(AS_HB, "There are %d open HB TxList sockets.", endpoint_count);
 
-	// Adjacencies
+	// Log the details of following types of item when verbose.
+	g_log_items = verbose;
 
-	if (verbose) {
-		int count = 0;
-		shash_reduce(g_hb.adjacencies, as_hb_dump_adjacencies_entry, &count);
+	// Adjacencies Info:
+
+	int count = 0;
+	shash_reduce(g_hb.adjacencies, as_hb_dump_adjacencies_entry, &count);
+	cf_info(AS_HB, "There are %d adjacent nodes.", count);
+
+	// Discovered Nodes Info:
+
+	count = 0;
+	shash_reduce(g_hb.discovered_list, as_hb_dump_discovered_list_entry, &count);
+	cf_info(AS_HB, "There are %d discovered nodes.", count);
+}
+
+/**
+ * Check if a node is alive. Dunned nodes are considered dead.
+ */
+bool as_hb_is_alive(cf_node node)
+{
+	// consider nodes in adjacency list and not dunned as alive.
+	return !as_hb_get_is_node_dunned(node);
+}
+
+/**
+ * Find nodes that have are not in a succession list, but part of the adjacency
+ * list.
+ */
+int as_hb_find_new_nodes_reduce(void *key, void *data, void *udata)
+{
+	as_hb_find_new_nodes_reduce_udata *u =
+		(as_hb_find_new_nodes_reduce_udata *)udata;
+	cf_node nodeid = *(cf_node *)key;
+
+	bool is_new_node = true;
+
+	// Get a list of expired nodes.
+	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+		if (u->succession_list[i] == nodeid) {
+			is_new_node = false;
+		}
 	}
+
+	if (is_new_node) {
+		memset(&u->events[u->event_count], 0, sizeof(as_fabric_event_node));
+		u->events[u->event_count].evt = AS_HB_NODE_ARRIVE;
+		u->events[u->event_count].nodeid = nodeid;
+		cf_info(AS_HB, "Marking node add for paxos recovery: %" PRIx64 "",
+				u->events[u->event_count].nodeid);
+		u->event_count++;
+	}
+
+	return 0;
+}
+
+/**
+ * Generate events required to transform the input  succession list to a list
+ * that would be consistent with the heart beat adjacency list. This means nodes
+ * that are in the adjacency list but missing from the succession list will
+ * generate an NODE_ARRIVE event. Nodes in the succession list but missing from
+ * the adjacency list will generate a NODE_DEPART event.
+ *
+ * @param succession_list the succession list to correct. This should be large
+ * enough to hold g_config.paxos_max_cluster_size events.
+ * @param events the output events. This should be large enough to hold
+ * g_config.paxos_max_cluster_size events.
+ *
+ * @return the number of corrective events generated.
+ */
+int as_hb_get_corrective_events(cf_node *succession_list,
+								as_fabric_event_node *events)
+{
+	// current event count;
+	int event_count = 0;
+
+	// Mark expired nodes that are present in the succession list.
+	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+
+		if (succession_list[i] == 0) {
+			break;
+		}
+
+		// Check if the node is alive.
+		if (!as_hb_is_alive(succession_list[i])) {
+			memset(&events[event_count], 0, sizeof(as_fabric_event_node));
+			events[event_count].evt = AS_HB_NODE_DEPART;
+			events[event_count].nodeid = succession_list[i];
+			cf_info(AS_HB,
+					"Marking node removal for paxos recovery: %" PRIx64 "",
+					events[event_count].nodeid);
+			event_count++;
+		}
+	}
+
+	// Generate events for nodes that should be added to the succession list.
+	as_hb_find_new_nodes_reduce_udata udata;
+	memset(&udata, 0, sizeof(udata));
+	udata.event_count = event_count;
+	udata.events = events;
+	udata.succession_list = succession_list;
+	shash_reduce(g_hb.adjacencies, as_hb_find_new_nodes_reduce, &udata);
+
+	return udata.event_count;
 }

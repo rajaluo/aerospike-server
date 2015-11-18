@@ -91,6 +91,10 @@ extern udf_call *as_query_get_udf_call(void *ptr);
 int
 send_response(udf_call *call, const char *bin_name, const as_val *val)
 {
+	// NO response if background UDF
+	if (call->def.type == AS_UDF_OP_BACKGROUND) {
+		return 0;
+	}
 	// Note - this function quietly handles a null val. The response call will
 	// be given a bin with a name but not 'in use', and it does the right thing.
 

@@ -5,3 +5,9 @@
 TAGS
 run
 target
+
+# emacs backup / temp files
+*~
+\#*\#
+.\#*
+
