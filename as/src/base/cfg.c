@@ -159,6 +159,8 @@ cfg_set_defaults()
 
 	// Network service defaults.
 	c->socket.proto = SOCK_STREAM; // not configurable, but addr and port are
+	c->localhost_socket.proto = SOCK_STREAM; // not configurable
+	c->localhost_socket.addr = cf_strdup("127.0.0.1"); // port will match the main service socket port
 	c->socket_reuse_addr = true;
 
 	// Fabric TCP socket keepalive defaults.
@@ -2293,9 +2295,16 @@ as_config_init(const char *config_file)
 			case CASE_NETWORK_SERVICE_ADDRESS:
 				// TODO - is the strdup necessary (addr ever freed)?
 				c->socket.addr = strcmp(line.val_tok_1, "any") == 0 ? cf_strdup("0.0.0.0") : cfg_strdup_no_checks(&line);
+				// Set the localhost socket address only if the main service socket not already (effectively) listening on that address.
+				if (!strcmp(g_config.socket.addr, "0.0.0.0") || !strcmp(g_config.socket.addr, "127.0.0.1")) {
+					cf_debug(AS_CFG, "Already listening on %s ~~ Not opening localhost socket", g_config.socket.addr);
+					cf_free(g_config.localhost_socket.addr);
+					g_config.localhost_socket.addr = NULL;
+				}
 				break;
 			case CASE_NETWORK_SERVICE_PORT:
 				c->socket.port = cfg_port(&line);
+				c->localhost_socket.port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS:
 				cfg_renamed_name_tok(&line, "access-address");
