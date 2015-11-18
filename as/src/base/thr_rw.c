@@ -990,7 +990,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 				cf_crash(AS_RW,
 						"target replica set contains ourselves");
 		}
-		// TODO: We could optimize by not sending writes to replicas that reject_writes
 
 		// TODO: We are allowing write to go to non-master node prole here.
 		// At non-master it will fail but it has already been written at master.
@@ -2737,9 +2736,7 @@ write_process(cf_node node, msg *m, bool respond)
 			goto Out;
 		}
 
-		if( tr.rsv.state == AS_PARTITION_STATE_ABSENT ||
-			tr.rsv.state == AS_PARTITION_STATE_WAIT)
-		{
+		if (tr.rsv.state == AS_PARTITION_STATE_ABSENT) {
 			cf_debug_digest(AS_RW, keyd, "[PROLE STATE MISMATCH:1] TID(0) Partition PID(%u) State is Absent or other(%u). Return to Sender.",
 					tr.rsv.pid, tr.rsv.state );
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
@@ -2749,8 +2746,8 @@ write_process(cf_node node, msg *m, bool respond)
 			cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
 			cf_debug_digest(AS_RW, keyd, "[CK MISMATCH] P PID(%u) State ABSENT or other(%u):",
 					tr.rsv.pid, tr.rsv.state );
-		} else
-		{
+		}
+		else {
 			cf_debug_digest(AS_RW, keyd, "[PROLE write]: SingleBin(%d) generation(%d):",
 					ns->single_bin, generation );
 
@@ -2845,16 +2842,14 @@ write_process(cf_node node, msg *m, bool respond)
 		// See if we're being asked to write into an ABSENT PROLE PARTITION.
 		// If so, then DO NOT WRITE.  Instead, return an error so that the
 		// Master will retry with the correct node.
-		if (rsv.state == AS_PARTITION_STATE_ABSENT ||
-			rsv.state == AS_PARTITION_STATE_WAIT)
-		{
+		if (rsv.state == AS_PARTITION_STATE_ABSENT) {
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 			cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
 			cf_debug_digest(AS_RW, keyd,
 					"[PROLE STATE MISMATCH:2] TID(0) P PID(%u) State:ABSENT or other(%u). Return to Sender. :",
 					rsv.pid, rsv.state  );
-
-		} else {
+		}
+		else {
 			cf_debug_digest(AS_RW, keyd, "Write Pickled: PID(%u) PState(%d) Gen(%d):",
 					rsv.pid, rsv.p->state, generation);
 
@@ -3047,14 +3042,12 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode,
 				SINDEX_BINS_SETUP(sbins, ns->sindex_cnt);
 				as_sindex * si_arr[ns->sindex_cnt];
 				int si_arr_index = 0;
-				int si_cnt = 0;
 				int sbins_populated = 0;
 
 				// RESERVE MATCHING SIs
 				for (int i=0; i<rd.n_bins; i++) {
-					si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd.bins[i].id,
+					si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd.bins[i].id,
 								&si_arr[si_arr_index]);
-					si_arr_index += si_cnt;
 				}
 
 				for (int i = 0; i < rd.n_bins; i++) {
@@ -3360,14 +3353,9 @@ int write_local_preprocessing(as_transaction *tr, write_local_generation *wlg,
 		}
 	}
 
-	if (tr->rsv.reject_writes) {
-		cf_debug(AS_RW, "{%s:%d} write_local: partition rejects writes - writes will flow from master. digest %"PRIx64"",
-				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
-		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
-		return -1;
-	}
-	else if (AS_PARTITION_STATE_DESYNC == tr->rsv.state) {
-		cf_debug(AS_RW, "{%s:%d} write_local: partition is desync - writes will flow from master. digest %"PRIx64"",
+	// TODO - when we're *sure* this never happens, remove:
+	if (AS_PARTITION_STATE_DESYNC == tr->rsv.state) {
+		cf_crash(AS_RW, "{%s:%d} write_local: partition is desync - writes will flow from master. digest %"PRIx64"",
 				ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
 		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		return -1;
@@ -3614,25 +3602,21 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 	// Maximum number of sindexes which can be changed in one transaction is
 	// 2 * ns->sindex_cnt.
 
+	SINDEX_GRLOCK();
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
 	as_sindex *si_arr[2 * ns->sindex_cnt];
 	int si_arr_index = 0;
-	int si_cnt = 0;
-
-	SINDEX_GRLOCK();
 
 	// Reserve matching SIs.
 
 	for (int i = 0; i < n_old_bins; i++) {
-		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
 				old_bins[i].id, &si_arr[si_arr_index]);
-		si_arr_index += si_cnt;
 	}
 
 	for (int i = 0; i < n_new_bins; i++) {
-		si_cnt = as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
 				new_bins[i].id, &si_arr[si_arr_index]);
-		si_arr_index += si_cnt;
 	}
 
 	// For every old bin, find the corresponding new bin (if any) and adjust the
@@ -6276,9 +6260,7 @@ rw_multi_process(cf_node node, msg *m)
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, 0);
 	cf_atomic_int_incr(&g_config.wprocess_tree_count);
 	reserved = true;
-	if (rsv.state == AS_PARTITION_STATE_ABSENT ||
-		rsv.state == AS_PARTITION_STATE_WAIT)
-	{
+	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
 		result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
 		cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
 		cf_debug_digest(AS_RW, keyd,

@@ -286,7 +286,7 @@ typedef void * geo_region_t;
 #define MAX_REGION_CELLS    32
 #define MAX_REGION_LEVELS   30
 extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); // TODO - will we ever need this?
-extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region);
+extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region, bool is_strict);
 
 // list:
 extern void as_bin_particle_list_set_hidden(as_bin *b);
@@ -625,14 +625,12 @@ typedef uint16_t as_partition_id;
  *    SYNC: fully synchronized
  *    DESYNC: unsynchronized, but moving towards synchronization
  *    ZOMBIE: sync, but moving towards absent
- *    WAIT: waiting for pending writes to flush out
  *    ABSENT: empty
  */
 #define AS_PARTITION_STATE_UNDEF 0
 #define AS_PARTITION_STATE_SYNC  1
 #define AS_PARTITION_STATE_DESYNC  2
 #define AS_PARTITION_STATE_ZOMBIE  3
-#define AS_PARTITION_STATE_WAIT 4
 #define AS_PARTITION_STATE_ABSENT 5
 #define AS_PARTITION_STATE_JOURNAL_APPLY 6 // used in faked reservations
 typedef uint8_t as_partition_state;
@@ -665,13 +663,11 @@ struct as_partition_s {
 	 * target: an actual master that we're migrating to */
 	cf_node origin, target;
 	as_partition_state state;  // used to be consistency
-	int pending_writes;  // one thread polls on this going to 0
 	int pending_migrate_tx, pending_migrate_rx;
 	bool replica_tx_onsync[AS_CLUSTER_SZ];
 
 	size_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
-	bool reject_writes;
 	bool waiting_for_master;
 	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
 	as_partition_vinfo version_info;         // the version of my partition here and now
@@ -705,7 +701,7 @@ struct as_partition_s {
 struct as_partition_reservation_s {
 	as_namespace			*ns;
 	bool					is_write;
-	bool					reject_writes;
+	uint8_t					unused;
 	as_partition_state		state;
 	uint8_t					n_dupl;
 	as_partition_id			pid;
@@ -730,7 +726,6 @@ struct as_partition_reservation_s {
 	__rsv.state = AS_PARTITION_STATE_UNDEF; \
 	__rsv.tree = 0; \
 	__rsv.n_dupl = 0; \
-	__rsv.reject_writes = false; \
 	__rsv.cluster_key = 0;
 
 #define AS_PARTITION_RESERVATION_INITP(__rsv)   \
@@ -741,7 +736,6 @@ struct as_partition_reservation_s {
 	__rsv->state = AS_PARTITION_STATE_UNDEF; \
 	__rsv->tree = 0; \
 	__rsv->n_dupl = 0; \
-	__rsv->reject_writes = false; \
 	__rsv->cluster_key = 0;
 
 
@@ -751,7 +745,6 @@ typedef struct as_partition_states_s {
 	int		sync_replica;
 	int		desync;
 	int		zombie;
-	int 	wait;
 	int		absent;
 	int		undef;
 	int		n_objects;
