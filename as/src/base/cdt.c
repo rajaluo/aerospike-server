@@ -262,10 +262,6 @@ rollback_alloc_rollback(rollback_alloc *alloc_buf)
 int
 as_bin_cdt_packed_modify(as_bin *b, as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb)
 {
-#if defined(CDT_DO_TEMP_HISTO)
-// XXX - temp histo
-	uint64_t histo_start = cf_getns();
-#endif
 	cdt_process_state state;
 
 	if (! cdt_process_state_init(&state, op)) {
@@ -281,21 +277,12 @@ as_bin_cdt_packed_modify(as_bin *b, as_msg_op *op, as_bin *result, cf_ll_buf *pa
 
 	cdt_process_state_packed_list_modify_optype(&state, &udata);
 
-#if defined(CDT_DO_TEMP_HISTO)
-// XXX - temp histo
-	histogram_insert_data_point(g_config.wt_cdt_modify_op_hist, histo_start);
-#endif
-
 	return udata.ret_code;
 }
 
 int
 as_bin_cdt_packed_read(const as_bin *b, as_msg_op *op, as_bin *result)
 {
-#if defined(CDT_DO_TEMP_HISTO)
-// XXX - temp histo
-	uint64_t histo_start = cf_getns();
-#endif
 	cdt_process_state state;
 
 	if (! cdt_process_state_init(&state, op)) {
@@ -309,11 +296,6 @@ as_bin_cdt_packed_read(const as_bin *b, as_msg_op *op, as_bin *result)
 	};
 
 	cdt_process_state_packed_list_read_optype(&state, &udata);
-
-#if defined(CDT_DO_TEMP_HISTO)
-// XXX - temp histo
-	histogram_insert_data_point(g_config.cdt_read_op_hist, histo_start);
-#endif
 
 	return udata.ret_code;
 }
