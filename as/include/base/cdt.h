@@ -38,6 +38,8 @@
 // Typedefs & constants.
 //
 
+#define CDT_DO_TEMP_HISTO	1
+
 typedef struct {
 	cf_ll_buf *ll_buf;
 	size_t malloc_list_sz;
