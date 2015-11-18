@@ -281,6 +281,7 @@ typedef enum {
 	CASE_SERVICE_HIST_TRACK_THRESHOLDS,
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_LDT_BENCHMARKS,
+	CASE_SERVICE_LOG_LOCAL_TIME,
 	CASE_SERVICE_MICROBENCHMARKS,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
 	CASE_SERVICE_MIGRATE_READ_PRIORITY,
@@ -674,6 +675,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "hist-track-thresholds",			CASE_SERVICE_HIST_TRACK_THRESHOLDS },
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
+		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "microbenchmarks",				CASE_SERVICE_MICROBENCHMARKS },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
 		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
@@ -1931,6 +1933,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_LDT_BENCHMARKS:
 				c->ldt_benchmarks = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_LOG_LOCAL_TIME:
+				cf_fault_use_local_time(cfg_bool(&line));
 				break;
 			case CASE_SERVICE_MICROBENCHMARKS:
 				c->microbenchmarks = cfg_bool(&line);
