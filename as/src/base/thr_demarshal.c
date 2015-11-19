@@ -344,22 +344,14 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			int as = -1;
-			if (s->sock == events[i].data.fd) {
-				as = s->sock;
-			} else if (ls->sock == events[i].data.fd) {
-				as = ls->sock;
-			}
-
-			if (-1 != as) {
-
+			if ((s->sock == events[i].data.fd) || (ls->sock == events[i].data.fd)) {
 				// Accept new connections on the service socket.
 				int csocket = -1;
 				struct sockaddr_in caddr;
 				socklen_t clen = sizeof(caddr);
 				char cpaddr[64];
 
-				if (-1 == (csocket = accept(as, (struct sockaddr *)&caddr, &clen))) {
+				if (-1 == (csocket = accept(events[i].data.fd, (struct sockaddr *)&caddr, &clen))) {
 					// This means we're out of file descriptors - could be a SYN
 					// flood attack or misbehaving client. Eventually we'd like
 					// to make the reaper fairer, but for now we'll just have to
