@@ -93,11 +93,6 @@ AS_LIBRARIES += $(LIBRARY_DIR)/libai.a
 AS_LIBRARIES += $(MOD_LUA)/target/$(PLATFORM)/lib/libmod_lua.a
 AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
 AS_LIBRARIES += $(LIBRARY_DIR)/libxdrconfig.a
-ifeq ($(USE_XDR),1)
-	AS_LIBRARIES += $(LIBRARY_DIR)/libxdr.a
-	AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
-	AS_LIBRARIES += -lev
-endif
 
 ifeq ($(DOPROFILE),1)
   LIBRARIES += -pg -fprofile-arcs -lgcov
