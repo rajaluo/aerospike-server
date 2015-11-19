@@ -2030,47 +2030,33 @@ as_sindex_clear_stats_on_empty_index(as_sindex * si)
 	cf_atomic64_set(&si->stats.n_objects, 0);
 }
 
-as_sindex_status
+void
 as_sindex_empty_index(as_sindex_metadata * imd)
 {
-	as_sindex_status ret = AS_SINDEX_OK;
 	as_sindex_pmetadata * pimd;
 	for (int i=0; i<imd->nprts; i++) {
 		SINDEX_WLOCK(&imd->slock);
 		pimd = &imd->pimd[i];
 		SINDEX_WLOCK(&pimd->slock);
-		if (ai_btree_empty_pimd(pimd)) {
-			ret = AS_SINDEX_ERR;
-			cf_debug(AS_SINDEX, "pimd [%s %d] is not emptied on set %s delete", imd->iname, i, 
-					imd->set);
-		}
+		ai_btree_empty_pimd(pimd);
 		SINDEX_UNLOCK(&pimd->slock);
 		SINDEX_UNLOCK(&imd->slock);
 
 		as_sindex_clear_stats_on_empty_index(imd->si);
 	}
-
-	return ret;
 }
 
-as_sindex_status
+void
 as_sindex_drop_set(as_namespace * ns, char * set_name)
 {
-	as_sindex_status ret = AS_SINDEX_OK;
-	
 	SINDEX_GRLOCK();
 	as_sindex * si_arr[ns->sindex_cnt];
 	int sindex_count = as_sindex_arr_lookup_by_setname_lockfree(ns, set_name, si_arr);
 
 	for (int i=0; i<sindex_count; i++) {
-		if (as_sindex_empty_index(si_arr[i]->imd)) {
-			ret = AS_SINDEX_ERR;
-			cf_warning(AS_SINDEX, "Sindex %s is not emptied on set delete %s", si_arr[i]->imd->iname, 
-					set_name);
-		}
+		as_sindex_empty_index(si_arr[i]->imd);
 	}
 	SINDEX_GUNLOCK();
-	return ret;
 }
 //                                        END - SINDEX DELETE
 // ************************************************************************************************
