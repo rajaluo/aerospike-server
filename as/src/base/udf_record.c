@@ -1,7 +1,7 @@
 /*
  * udf_record.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2015 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -301,7 +301,7 @@ udf_record_close(udf_record *urecord)
  * 		udf_rw_local   (parent record before calling UDF)
  */
 void
-udf_record_init(udf_record *urecord)
+udf_record_init(udf_record *urecord, bool allow_updates)
 {
 	urecord->tr                 = NULL;
 	urecord->r_ref              = NULL;
@@ -316,8 +316,10 @@ udf_record_init(udf_record *urecord)
 
 	// Init flag
 	urecord->flag               = UDF_RECORD_FLAG_ISVALID;
-	urecord->flag              |= UDF_RECORD_FLAG_ALLOW_UPDATES;
 
+	if (allow_updates) {
+		urecord->flag           |= UDF_RECORD_FLAG_ALLOW_UPDATES;
+	}
 	urecord->pickled_buf        = NULL;
 	urecord->pickled_sz         = 0;
 
@@ -467,6 +469,7 @@ udf_record_cache_free(udf_record * urecord)
 		}
 	}
 	urecord->nupdates = 0;
+	urecord->flag &= ~UDF_RECORD_FLAG_TOO_MANY_BINS;
 }
 
 /**
@@ -505,15 +508,22 @@ udf_record_cache_set(udf_record * urecord, const char * name, as_val * value,
 	}
 
 	// If not modified, then we will add the bin to the cache
-	if ( !modified && urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
-		udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
-		strncpy(bin->name, name, AS_ID_BIN_SZ);
-		bin->value = (as_val *) value;
-		bin->dirty = dirty;
-		bin->ishidden = false;
-		urecord->nupdates++;
-		cf_detail(AS_UDF, "udf_record_set: %s not modified, add for %p:%p",
-				name, urecord, bin->value);
+	if ( ! modified ) {
+		if ( urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
+			udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
+			strncpy(bin->name, name, AS_ID_BIN_SZ);
+			bin->value = (as_val *) value;
+			bin->dirty = dirty;
+			bin->ishidden = false;
+			urecord->nupdates++;
+			cf_detail(AS_UDF, "udf_record_set: %s not modified, add for %p:%p",
+					name, urecord, bin->value);
+		}
+		else {
+			cf_warning(AS_UDF, "UDF bin limit (%d) exceeded (bin %s)",
+					UDF_RECORD_BIN_ULIMIT, name);
+			urecord->flag |= UDF_RECORD_FLAG_TOO_MANY_BINS;
+		}
 	}
 }
 
@@ -538,14 +548,21 @@ udf_record_cache_sethidden(udf_record * urecord, const char * name)
 	}
 
 	// If not modified, then we will add the bin to the cache
-	if ( !modified && urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
-		udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
-		strncpy(bin->name, name, AS_ID_BIN_SZ);
-		bin->ishidden = true;
-		bin->dirty    = true;
-		urecord->nupdates++;
-		cf_detail(AS_UDF, "udf_record_cache_sethidden: %s not modified, add for %p:%p",
-				name, urecord, bin->value);
+	if ( ! modified ) {
+		if ( urecord->nupdates < UDF_RECORD_BIN_ULIMIT ) {
+			udf_record_bin * bin = &(urecord->updates[urecord->nupdates]);
+			strncpy(bin->name, name, AS_ID_BIN_SZ);
+			bin->ishidden = true;
+			bin->dirty    = true;
+			urecord->nupdates++;
+			cf_detail(AS_UDF, "udf_record_cache_sethidden: %s not modified, add for %p:%p",
+					name, urecord, bin->value);
+		}
+		else {
+			cf_warning(AS_UDF, "UDF bin limit (%d) exceeded (bin %s)",
+					UDF_RECORD_BIN_ULIMIT, name);
+			urecord->flag |= UDF_RECORD_FLAG_TOO_MANY_BINS;
+		}
 	}
 }
 
@@ -622,7 +639,7 @@ udf_record_storage_get(const udf_record *urecord, const char *name)
 		return NULL;
 	}
 
-	return as_val_frombin(bb);
+	return as_bin_particle_to_asval(bb);
 }
 
 /*
@@ -1039,7 +1056,7 @@ udf_record_destroy(as_rec *rec)
 } 
 
 static as_bytes *
-udf_record_digest (const as_rec *rec)
+udf_record_digest(const as_rec *rec)
 {
 	int ret = udf_record_param_check(rec, UDF_BIN_NONAME, __FILE__, __LINE__);
 	if (ret) {
@@ -1102,24 +1119,6 @@ udf_record_bin_names(const as_rec *rec, as_rec_bin_names_callback callback, void
 	}
 }
 
-const as_rec_hooks udf_subrecord_hooks = {
-	.get		= udf_record_get,
-	.set		= udf_record_set,
-	.remove		= udf_record_remove,
-	.ttl		= udf_record_ttl,
-	.gen		= udf_record_gen,
-	.key		= udf_record_key,
-	.setname	= udf_record_setname,
-	.destroy	= NULL,
-	.digest		= udf_record_digest,
-	.set_flags	= udf_record_set_flags,	// @LDT:: added for control over LDT Bins from Lua
-	.set_type	= udf_record_set_type,	// @LDT:: added for control over Rec Types from Lua
-	.set_ttl	= udf_record_set_ttl,
-	.drop_key	= udf_record_drop_key,
-	.bin_names	= udf_record_bin_names,
-	.numbins	= NULL,
-};
-
 const as_rec_hooks udf_record_hooks = {
 	.get		= udf_record_get,
 	.set		= udf_record_set,
@@ -1128,7 +1127,7 @@ const as_rec_hooks udf_record_hooks = {
 	.gen		= udf_record_gen,
 	.key		= udf_record_key,
 	.setname	= udf_record_setname,
-	.destroy	= udf_record_destroy,
+	.destroy	= NULL,
 	.digest		= udf_record_digest,
 	.set_flags	= udf_record_set_flags,	// @LDT:: added for control over LDT Bins from Lua
 	.set_type	= udf_record_set_type,	// @LDT:: added for control over Rec Types from Lua

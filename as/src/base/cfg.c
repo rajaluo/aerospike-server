@@ -281,6 +281,7 @@ typedef enum {
 	CASE_SERVICE_HIST_TRACK_THRESHOLDS,
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_LDT_BENCHMARKS,
+	CASE_SERVICE_LOG_LOCAL_TIME,
 	CASE_SERVICE_MICROBENCHMARKS,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
 	CASE_SERVICE_MIGRATE_READ_PRIORITY,
@@ -367,6 +368,7 @@ typedef enum {
 	// Service paxos recovery policy options (value tokens):
 	CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL,
 	CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER,
+	CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER,
 	CASE_SERVICE_PAXOS_RECOVERY_MANUAL,
 
 	// Logging options:
@@ -401,6 +403,7 @@ typedef enum {
 	// Normally hidden:
 	CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS, // renamed
 	CASE_NETWORK_SERVICE_ACCESS_ADDRESS,
+	CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS,
 	CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME,
 	CASE_NETWORK_SERVICE_REUSE_ADDRESS,
 
@@ -551,6 +554,7 @@ typedef enum {
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
 	CASE_NAMESPACE_SET_ENABLE_XDR,
+	CASE_NAMESPACE_SET_STOP_WRITES_COUNT,
 	// Deprecated:
 	CASE_NAMESPACE_SET_EVICT_HWM_COUNT,
 	CASE_NAMESPACE_SET_EVICT_HWM_PCT,
@@ -566,7 +570,6 @@ typedef enum {
 	CASE_NAMESPACE_SI_GC_PERIOD,
 	CASE_NAMESPACE_SI_GC_MAX_UNITS,
 	CASE_NAMESPACE_SI_DATA_MAX_MEMORY,
-	CASE_NAMESPACE_SI_TRACING,
 	CASE_NAMESPACE_SI_HISTOGRAM,
 	CASE_NAMESPACE_SI_IGNORE_NOT_SYNC,
 
@@ -673,6 +676,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "hist-track-thresholds",			CASE_SERVICE_HIST_TRACK_THRESHOLDS },
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
+		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "microbenchmarks",				CASE_SERVICE_MICROBENCHMARKS },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
 		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
@@ -760,6 +764,7 @@ const cfg_opt SERVICE_PAXOS_PROTOCOL_OPTS[] = {
 const cfg_opt SERVICE_PAXOS_RECOVERY_OPTS[] = {
 		{ "auto-dun-all",					CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL },
 		{ "auto-dun-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER },
+		{ "auto-reset-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER },
 		{ "manual",							CASE_SERVICE_PAXOS_RECOVERY_MANUAL }
 };
 
@@ -794,6 +799,7 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "port",							CASE_NETWORK_SERVICE_PORT },
 		{ "external-address",				CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS },
 		{ "access-address",					CASE_NETWORK_SERVICE_ACCESS_ADDRESS },
+		{ "alternate-address",				CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS },
 		{ "network-interface-name",			CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME },
 		{ "reuse-address",					CASE_NETWORK_SERVICE_REUSE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
@@ -951,6 +957,7 @@ const cfg_opt NAMESPACE_STORAGE_KV_OPTS[] = {
 const cfg_opt NAMESPACE_SET_OPTS[] = {
 		{ "set-disable-eviction",			CASE_NAMESPACE_SET_DISABLE_EVICTION },
 		{ "set-enable-xdr",					CASE_NAMESPACE_SET_ENABLE_XDR },
+		{ "set-stop-writes-count",			CASE_NAMESPACE_SET_STOP_WRITES_COUNT },
 		{ "set-evict-hwm-count",			CASE_NAMESPACE_SET_EVICT_HWM_COUNT },
 		{ "set-evict-hwm-pct",				CASE_NAMESPACE_SET_EVICT_HWM_PCT },
 		{ "set-stop-write-count",			CASE_NAMESPACE_SET_STOP_WRITE_COUNT },
@@ -968,7 +975,6 @@ const cfg_opt NAMESPACE_SI_OPTS[] = {
 		{ "si-gc-period",					CASE_NAMESPACE_SI_GC_PERIOD },
 		{ "si-gc-max-units",				CASE_NAMESPACE_SI_GC_MAX_UNITS },
 		{ "si-data-max-memory",				CASE_NAMESPACE_SI_DATA_MAX_MEMORY },
-		{ "si-tracing",						CASE_NAMESPACE_SI_TRACING},
 		{ "si-histogram",					CASE_NAMESPACE_SI_HISTOGRAM },
 		{ "si-ignore-not-sync",				CASE_NAMESPACE_SI_IGNORE_NOT_SYNC },
 		{ "}",								CASE_CONTEXT_END }
@@ -1930,6 +1936,9 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_LDT_BENCHMARKS:
 				c->ldt_benchmarks = cfg_bool(&line);
 				break;
+			case CASE_SERVICE_LOG_LOCAL_TIME:
+				cf_fault_use_local_time(cfg_bool(&line));
+				break;
 			case CASE_SERVICE_MICROBENCHMARKS:
 				c->microbenchmarks = cfg_bool(&line);
 				break;
@@ -2002,6 +2011,9 @@ as_config_init(const char *config_file)
 					break;
 				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER:
 					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER;
+					break;
+				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER:
+					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER;
 					break;
 				case CASE_SERVICE_PAXOS_RECOVERY_MANUAL:
 					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_MANUAL;
@@ -2291,6 +2303,9 @@ as_config_init(const char *config_file)
 			case CASE_NETWORK_SERVICE_ACCESS_ADDRESS:
 				c->external_address = cfg_strdup_no_checks(&line);
 				c->is_external_address_virtual = strcmp(line.val_tok_2, "virtual") == 0;
+				break;
+			case CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS:
+				c->alternate_address = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME:
 				c->network_interface_name = cfg_strdup_no_checks(&line);
@@ -2803,6 +2818,9 @@ as_config_init(const char *config_file)
 					break;
 				}
 				break;
+			case CASE_NAMESPACE_SET_STOP_WRITES_COUNT:
+				p_set->stop_writes_count = cfg_u64_no_checks(&line);
+				break;
 			case CASE_NAMESPACE_SET_EVICT_HWM_COUNT:
 			case CASE_NAMESPACE_SET_EVICT_HWM_PCT:
 			case CASE_NAMESPACE_SET_STOP_WRITE_COUNT:
@@ -2832,9 +2850,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_SI_DATA_MAX_MEMORY:
 				si_cfg.data_max_memory = cfg_u64_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_SI_TRACING:
-				si_cfg.trace_flag = cfg_u16_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SI_HISTOGRAM:
 				si_cfg.enable_histogram = cfg_bool(&line);
