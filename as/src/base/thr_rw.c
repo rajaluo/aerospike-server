@@ -3642,11 +3642,7 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 			if (b_old->id == b_new->id) {
 				if (as_bin_get_particle_type(b_old) != as_bin_get_particle_type(b_new) ||
 						b_old->particle != b_new->particle) {
-					// TODO - might want a "diff" method that takes two bins and
-					// detects the (rare) case when a particle was rewritten
-					// with the exact old value.
-					sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b_old, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
-					sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b_new, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
+					sbins_populated += as_sindex_sbins_populate(&sbins[sbins_populated], ns, set_name, b_old, b_new);
 				}
 
 				found = true;

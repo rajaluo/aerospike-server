@@ -40,7 +40,7 @@
 
 #define CDT_DO_TEMP_HISTO	1
 
-typedef struct {
+typedef struct rollback_alloc_s {
 	cf_ll_buf *ll_buf;
 	size_t malloc_list_sz;
 	size_t malloc_list_cap;
@@ -54,18 +54,18 @@ typedef struct {
 		__name->malloc_list_sz = 0; \
 		__name->malloc_list_cap = (__alloc_buf ? 0 : __rollback_size);
 
-typedef struct {
+typedef struct cdt_process_state_s {
 	as_cdt_optype type;
 	as_unpacker pk;
 	uint32_t ele_count;
 } cdt_process_state;
 
-typedef struct {
+typedef struct cdt_payload_s {
 	uint8_t *ptr;
 	uint32_t size;
 } cdt_payload;
 
-typedef struct {
+typedef struct cdt_modify_data_s {
 	as_bin *b;
 	as_bin *result;
 	cf_ll_buf *alloc_buf;
@@ -73,14 +73,14 @@ typedef struct {
 	int ret_code;
 } cdt_modify_data;
 
-typedef struct {
+typedef struct cdt_read_data_s {
 	const as_bin *b;
 	as_bin *result;
 
 	int ret_code;
 } cdt_read_data;
 
-typedef struct {
+typedef struct cdt_op_table_entry_s {
 	int count;
 	const as_cdt_paramtype *args;
 } cdt_op_table_entry;
