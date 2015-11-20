@@ -1298,8 +1298,7 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 			mc->done_recv = 0;
 			mc->done_recv_ms = 0;
 			mc->incoming_ldt_version = 0;
-			// Record the time of the first START received.
-			mc->start_recv_ms = cf_getms();
+			mc->start_recv_ms = 0;
 			mc->source_node = id;
 			AS_PARTITION_RESERVATION_INIT(mc->rsv);
 
@@ -1424,10 +1423,12 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 
 				shash_put(g_migrate_incoming_ldt_version_hash, &mc_l, &mc);
 				cf_detail(AS_LDT, "LDT_MIGRATION: Incoming Version %ld, Started Receiving SubRecord Migration !! %s:%d:%d:%d",
-						  mc->incoming_ldt_version,
-						  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements,
-						  mc->rsv.p->sub_vp->elements);
+						mc->incoming_ldt_version,
+						mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements,
+						mc->rsv.p->sub_vp->elements);
 
+				// Record the time of the first START received.
+				mc->start_recv_ms = cf_getms();
 #ifdef USE_NETWORK_POLICY
 				migrate_start_network_policy(id);
 #endif
@@ -1608,21 +1609,23 @@ migrate_rx_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void *udat
 {
 	migrate_recv_control_index *mrc_idx = key;
 	migrate_recv_control *mci = object;
+	int rv = RCHASH_OK;
+
+	if (mci->start_recv_ms == 0) {
+		// If the start time isn't set then the mc is still being processed.
+		// Reaping the mc now could result in segv elsewhere.
+		return rv;
+	}
 
 	if (mci->cluster_key != as_paxos_get_cluster_key() ) {
 		cf_debug(AS_MIGRATE, "reaping migrate rx after a cluster key change: mci %p id %d node %"PRIx64,
 				mci, mrc_idx->mig_id, mrc_idx->source_node);
 
-		if (cf_atomic_int_decr(&g_config.migrate_progress_recv) < 0) {
-			cf_warning(AS_MIGRATE, "migrate_progress_recv < 0");
-			cf_atomic_int_incr(&g_config.migrate_progress_recv);
-		}
-
 		// This node is done with migration receive. reset rxstate
 		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld Finished Receiving Migration !! %s:%d:%d:%d",
 				mci->incoming_ldt_version, mci->rsv.ns->name, mci->rsv.p->partition_id, mci->rsv.p->vp->elements, mci->rsv.p->sub_vp->elements);
 
-		return RCHASH_REDUCE_DELETE;
+		rv = RCHASH_REDUCE_DELETE;
 	}
 	else if ((g_config.migrate_rx_lifetime_ms > 0)
 			&& mci->done_recv
@@ -1630,10 +1633,21 @@ migrate_rx_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void *udat
 		cf_debug(AS_MIGRATE, "reaping expired done mig rx %d (done recv count %d ; start ms %d ; done ms %d) from node %"PRIx64,
 				mrc_idx->mig_id, cf_atomic32_get(mci->done_recv), mci->start_recv_ms, mci->done_recv_ms, mci->source_node);
 
-		return RCHASH_REDUCE_DELETE;
+		rv = RCHASH_REDUCE_DELETE;
 	}
 
-	return 0;
+	if (rv == RCHASH_REDUCE_DELETE) {
+		if (cf_rc_count(mci) == 1 && cf_atomic32_get(mci->done_recv) == 0) {
+			// No outstanding readers of mci and hasn't yet completed means
+			// that we haven't already decremented migrate_progress_recv.
+			if (cf_atomic_int_decr(&g_config.migrate_progress_recv) < 0) {
+				cf_warning(AS_MIGRATE, "migrate_progress_recv < 0");
+				cf_atomic_int_incr(&g_config.migrate_progress_recv);
+			}
+		}
+	}
+
+	return rv;
 }
 
 //
