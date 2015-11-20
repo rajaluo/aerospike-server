@@ -62,6 +62,14 @@
 #include "fabric/migrate.h"
 
 
+//==============================================================================
+// Constants.
+//
+
+const char *IPV4_ANY_ADDR = "0.0.0.0";
+const char *IPV4_LOCALHOST_ADDR = "127.0.0.1";
+
+
 //==========================================================
 // Globals.
 //
@@ -82,6 +90,7 @@ void cfg_init_si_var(as_namespace* ns);
 uint32_t cfg_obj_size_hist_max(uint32_t hist_max);
 void cfg_create_all_histograms();
 int cfg_reset_self_node(as_config* config_p);
+char* cfg_set_addr(const char* name);
 void cfg_use_hardware_values(as_config* c);
 
 
@@ -160,7 +169,7 @@ cfg_set_defaults()
 	// Network service defaults.
 	c->socket.proto = SOCK_STREAM; // not configurable, but addr and port are
 	c->localhost_socket.proto = SOCK_STREAM; // not configurable
-	c->localhost_socket.addr = cf_strdup("127.0.0.1"); // port will match the main service socket port
+	c->socket.addr = IPV4_ANY_ADDR; // by default listen on any IPv4 address
 	c->socket_reuse_addr = true;
 
 	// Fabric TCP socket keepalive defaults.
@@ -2293,14 +2302,7 @@ as_config_init(const char *config_file)
 		case NETWORK_SERVICE:
 			switch(cfg_find_tok(line.name_tok, NETWORK_SERVICE_OPTS, NUM_NETWORK_SERVICE_OPTS)) {
 			case CASE_NETWORK_SERVICE_ADDRESS:
-				// TODO - is the strdup necessary (addr ever freed)?
-				c->socket.addr = strcmp(line.val_tok_1, "any") == 0 ? cf_strdup("0.0.0.0") : cfg_strdup_no_checks(&line);
-				// Set the localhost socket address only if the main service socket not already (effectively) listening on that address.
-				if (!strcmp(g_config.socket.addr, "0.0.0.0") || !strcmp(g_config.socket.addr, "127.0.0.1")) {
-					cf_debug(AS_CFG, "Already listening on %s ~~ Not opening localhost socket", g_config.socket.addr);
-					cf_free(g_config.localhost_socket.addr);
-					g_config.localhost_socket.addr = NULL;
-				}
+				c->socket.addr = cfg_set_addr(line.val_tok_1);
 				break;
 			case CASE_NETWORK_SERVICE_PORT:
 				c->socket.port = cfg_port(&line);
@@ -2352,7 +2354,7 @@ as_config_init(const char *config_file)
 				}
 				break;
 			case CASE_NETWORK_HEARTBEAT_ADDRESS:
-				c->hb_addr = strcmp(line.val_tok_1, "any") == 0 ? cf_strdup("0.0.0.0") : cfg_strdup_no_checks(&line);
+				c->hb_addr = cfg_set_addr(line.val_tok_1);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PORT:
 				c->hb_port = cfg_int_no_checks(&line);
@@ -3315,7 +3317,7 @@ as_config_post_process(as_config *c, const char *config_file)
 	cf_info(AS_CFG, "Node id %"PRIx64, c->self_node);
 
 	// Handle specific service address (as opposed to 'any') if configured.
-	if (strcmp(g_config.socket.addr, "0.0.0.0") != 0) {
+	if (g_config.socket.addr != IPV4_ANY_ADDR) {
 		if (g_config.external_address) {
 			if (strcmp(g_config.external_address, g_config.socket.addr) != 0) {
 				cf_crash_nostack(AS_CFG, "external address '%s' does not match service address '%s'",
@@ -3325,6 +3327,11 @@ as_config_post_process(as_config *c, const char *config_file)
 		else {
 			// Set external address to avoid updating service list continuously.
 			g_config.external_address = g_config.socket.addr;
+		}
+
+		// Set the localhost socket address only if the main service socket not already (effectively) listening on that address.
+		if ((g_config.socket.addr != IPV4_ANY_ADDR) && (g_config.socket.addr != IPV4_LOCALHOST_ADDR)) {
+			g_config.localhost_socket.addr = IPV4_LOCALHOST_ADDR;
 		}
 	}
 
@@ -3598,6 +3605,31 @@ cfg_reset_self_node(as_config * config_p) {
 
 	return 0;
 } // end cfg_reset_self_node()
+
+/**
+ * cfg_set_addr
+ * Normalize a name for an IP address into a specific IP address string.
+ * Returns a constant string pointer for certain well-known addresses.
+ */
+char *
+cfg_set_addr(const char* name)
+{
+	char *retval = NULL;
+
+	if ((!strcmp(name, "any")) || !strcmp(name, IPV4_ANY_ADDR)) {
+		return IPV4_ANY_ADDR;
+	}
+	else if (!strcmp(name, IPV4_LOCALHOST_ADDR)) {
+		return IPV4_LOCALHOST_ADDR;
+	}
+	else {
+		if (NULL == (retval = cf_strdup(name))) {
+			cf_crash_nostack(AS_CFG, "failed alloc for %s", name);
+		}
+	}
+
+	return retval;
+}
 
 /**
  * cfg_use_hardware_values
