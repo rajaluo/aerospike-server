@@ -553,6 +553,24 @@ as_bin_particle_list_set_hidden(as_bin *b)
 	as_bin_state_set_from_type(b, AS_PARTICLE_TYPE_HIDDEN_LIST);
 }
 
+void
+as_bin_particle_list_get_packed_val(const as_bin *b, cdt_payload *packed)
+{
+	if (list_is_wrapped(b->particle)) {
+		const list_wrapper *p_list_wrapped = (const list_wrapper *)b->particle;
+
+		packed->ptr = p_list_wrapped->packed;
+		packed->size = p_list_wrapped->packed_sz;
+
+		return;
+	}
+
+	const list_mem *p_list_mem = (const list_mem *)b->particle;
+
+	packed->ptr = p_list_mem->data;
+	packed->size = p_list_mem->sz;
+}
+
 
 //==========================================================
 // Local helpers.

@@ -100,6 +100,7 @@
 #include "cf_str.h"
 #include "fault.h"
 
+#include "base/cdt.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
@@ -4150,8 +4151,8 @@ as_sindex_add_diff_asval_to_mapvalues_sindex(as_val * old_val, as_val * new_val,
 
 typedef as_sindex_status (*as_sindex_add_diff_asval_to_itype_sindex_fn)
 			(as_val * old_val, as_val * new_val, as_sindex_bin * sbin, int * found);
-			static const as_sindex_add_diff_asval_to_itype_sindex_fn
-			as_sindex_add_diff_asval_to_itype_sindex[AS_SINDEX_ITYPE_MAX] = {
+static const as_sindex_add_diff_asval_to_itype_sindex_fn
+	as_sindex_add_diff_asval_to_itype_sindex[AS_SINDEX_ITYPE_MAX] = {
 	as_sindex_add_diff_asval_to_default_sindex,
 	as_sindex_add_diff_asval_to_list_sindex,
 	as_sindex_add_diff_asval_to_mapkeys_sindex,
@@ -4160,9 +4161,372 @@ typedef as_sindex_status (*as_sindex_add_diff_asval_to_itype_sindex_fn)
 //                                  END - DIFF FROM ASVAL TO SINDEX
 // ************************************************************************************************
 // ************************************************************************************************
+// DIFF FROM BIN TO SINDEX
+
+static bool
+as_sindex_bin_add_skey(as_sindex_bin *sbin, const void *skey, as_val_t type)
+{
+	if (type == AS_STRING) {
+		if (as_sindex_add_digest_to_sbin(sbin, *((cf_digest *)skey)) == AS_SINDEX_OK) {
+			return true;
+		}
+	}
+	else if (type == AS_INTEGER) {
+		if (as_sindex_add_integer_to_sbin(sbin, *((uint64_t *)skey)) == AS_SINDEX_OK) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static void
+packed_val_init_unpacker(const cdt_payload *val, as_unpacker *pk)
+{
+	pk->buffer = val->ptr;
+	pk->length = val->size;
+	pk->offset = 0;
+}
+
+static bool
+packed_val_make_skey(const cdt_payload *val, as_val_t type, void *skey)
+{
+	as_unpacker pk;
+	packed_val_init_unpacker(val, &pk);
+
+	as_val_t packed_type = as_unpack_peek_type(&pk);
+
+	if (packed_type != type) {
+		return false;
+	}
+
+	if (type == AS_STRING) {
+		int32_t size = as_unpack_blob_size(&pk);
+
+		if (size < 0) {
+			return false;
+		}
+
+		if (pk.buffer[pk.offset++] != AS_BYTES_STRING) {
+			return false;
+		}
+
+		cf_digest_compute(pk.buffer + pk.offset, pk.length - pk.offset, (cf_digest *)skey);
+	}
+	else if (type == AS_INTEGER) {
+		if (as_unpack_int64(&pk, (int64_t *)skey) < 0) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool
+packed_val_add_sbin_or_update_shash(cdt_payload *val, as_sindex_bin *sbin, shash *hash, as_val_t type)
+{
+	uint8_t skey[sizeof(cf_digest)];
+
+	if (! packed_val_make_skey(val, type, skey)) {
+		// packed_vals that aren't of type are ignored.
+		return true;
+	}
+
+	bool found = false;
+
+	if (shash_get(hash, skey, &found) != SHASH_OK) {
+		// Item not in hash, add to sbin.
+		return as_sindex_bin_add_skey(sbin, skey, type);
+	}
+	else {
+		// Item is in hash, set it to true.
+		found = true;
+
+		if (shash_put(hash, skey, &found) == SHASH_OK) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool
+shash_add_packed_val(shash *h, const cdt_payload *val, as_val_t type, bool value)
+{
+	uint8_t skey[sizeof(cf_digest)];
+
+	if (! packed_val_make_skey(val, type, skey)) {
+		// packed_vals that aren't of type are ignored.
+		return true;
+	}
+
+	if (shash_put(h, skey, &value) != SHASH_OK) {
+		return false;
+	}
+
+	return true;
+}
+
+static int
+shash_diff_reduce_fn(void *skey, void *data, void *udata)
+{
+	bool value = *(bool *)data;
+	as_sindex_bin *sbin = (as_sindex_bin *)udata;
+
+	if (! sbin) {
+		cf_debug(AS_SINDEX, "SBIN sent as NULL");
+		return -1;
+	}
+
+	if (! value) {
+		// Add in the sbin.
+		if (sbin->type == AS_PARTICLE_TYPE_STRING) {
+			as_sindex_add_digest_to_sbin(sbin, *(cf_digest*)skey);
+		}
+		else if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
+			as_sindex_add_integer_to_sbin(sbin, *(uint64_t*)skey);
+		}
+	}
+
+	return 0;
+}
+
+// Find delta list elements and put them into sbins.
+// Currently supports only string/integer index types.
+static int32_t
+as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, const as_bin *b_old, const as_bin *b_new)
+{
+	// Algorithm
+	//	Add elements of short_list into hash with value = false
+	//	Iterate through all the values in the long_list
+	//		For all elements of long_list in hash, set value = true
+	//		For all elements of long_list not in hash, add to sbin (insert or delete)
+	//	Iterate through all the elements of hash
+	//		For all elements where value == false, add to sbin (insert or delete)
+
+	as_particle_type type = as_sindex_pktype(si->imd);
+	int data_size;
+	as_val_t expected_type;
+
+	if (type == AS_PARTICLE_TYPE_STRING) {
+		data_size = 20;
+		expected_type = AS_STRING;
+	}
+	else if (type == AS_PARTICLE_TYPE_INTEGER) {
+		data_size = 8;
+		expected_type = AS_INTEGER;
+	}
+	else {
+		cf_debug(AS_SINDEX, "Invalid data type %d", type);
+		return -1;
+	}
+
+	cdt_payload old_val;
+	cdt_payload new_val;
+
+	as_bin_particle_list_get_packed_val(b_old, &old_val);
+	as_bin_particle_list_get_packed_val(b_new, &new_val);
+
+	as_unpacker pk_old;
+	as_unpacker pk_new;
+
+	packed_val_init_unpacker(&old_val, &pk_old);
+	packed_val_init_unpacker(&new_val, &pk_new);
+
+	int old_list_size = as_unpack_list_header_element_count(&pk_old);
+	int new_list_size = as_unpack_list_header_element_count(&pk_new);
+
+	if (old_list_size < 0 || new_list_size < 0) {
+		return -1;
+	}
+
+	bool old_list_is_short = old_list_size < new_list_size;
+
+	uint32_t short_list_size;
+	uint32_t long_list_size;
+	as_unpacker *pk_short;
+	as_unpacker *pk_long;
+
+	if (old_list_is_short) {
+		short_list_size		= old_list_size;
+		long_list_size		= new_list_size;
+		pk_short			= &pk_old;
+		pk_long				= &pk_new;
+	}
+	else {
+		short_list_size		= new_list_size;
+		long_list_size		= old_list_size;
+		pk_short			= &pk_new;
+		pk_long				= &pk_old;
+	}
+
+	shash *hash;
+	if (shash_create(&hash, as_sindex_hash_fn, data_size, 1, short_list_size, 0) != SHASH_OK) {
+		cf_warning(AS_SINDEX, "as_sindex_sbins_from_list_bin_diff_internal() failed to create hash");
+		return -1;
+	}
+
+	// Add elements of shorter list into hash with value = false.
+	for (uint32_t i = 0; i < short_list_size; i++) {
+		cdt_payload ele = {
+				.ptr = pk_short->buffer + pk_short->offset
+		};
+
+		int size = as_unpack_size(pk_short);
+
+		if (size < 0) {
+			cf_warning(AS_SINDEX, "as_sindex_sbins_from_list_bin_diff_internal() list unpack failed");
+			shash_destroy(hash);
+			return -1;
+		}
+
+		ele.size = size;
+
+		if (! shash_add_packed_val(hash, &ele, expected_type, false)) {
+			cf_warning(AS_SINDEX, "as_sindex_sbins_from_list_bin_diff_internal() hash add failed");
+			shash_destroy(hash);
+			return -1;
+		}
+	}
+
+	as_sindex_init_sbin(sbins, old_list_is_short ? AS_SINDEX_OP_INSERT : AS_SINDEX_OP_DELETE, type, si);
+
+	for (uint32_t i = 0; i < long_list_size; i++) {
+		cdt_payload ele;
+
+		ele.ptr = pk_long->buffer + pk_long->offset;
+		ele.size = as_unpack_size(pk_long);
+
+		if (! packed_val_add_sbin_or_update_shash(&ele, sbins, hash, expected_type)) {
+			cf_warning(AS_SINDEX, "as_sindex_sbins_from_list_bin_diff_internal() hash update failed");
+			as_sindex_sbin_free(sbins);
+			shash_destroy(hash);
+			return -1;
+		}
+	}
+
+	// Need to keep track of start for unwinding on error.
+	as_sindex_bin *start_sbin = sbins;
+	int found = 0;
+
+	if (sbins->num_values > 0) {
+		sbins++;
+		found++;
+	}
+
+	as_sindex_init_sbin(sbins, old_list_is_short ? AS_SINDEX_OP_DELETE : AS_SINDEX_OP_INSERT, type, si);
+
+	// Iterate through all the elements of hash.
+	if (shash_reduce(hash, shash_diff_reduce_fn, sbins) != 0) {
+		as_sindex_sbin_freeall(start_sbin, found + 1);
+		shash_destroy(hash);
+		return -1;
+	}
+
+	if (sbins->num_values > 0) {
+		found++;
+	}
+
+	shash_destroy(hash);
+
+	return found;
+}
+
+void
+as_sindex_sbins_debug_print(as_sindex_bin *sbins, uint32_t count)
+{
+	cf_warning( AS_SINDEX, "as_sindex_sbins_list_update_diff() found=%d", count);
+	for (uint32_t i = 0; i < count; i++) {
+		as_sindex_bin *p = sbins + i;
+
+		cf_warning( AS_SINDEX, "  %d: values=%d type=%d op=%d",
+				i, p->num_values, p->type, p->op);
+
+		if (p->type == AS_PARTICLE_TYPE_INTEGER) {
+			int64_t *values = (int64_t *)p->values;
+
+			if (p->num_values == 1) {
+				cf_warning( AS_SINDEX, "    %ld", p->value.int_val);
+			}
+			else {
+				for (uint64_t j = 0; j < p->num_values; j++) {
+					cf_warning( AS_SINDEX, "    %d: %ld", j, values[j]);
+				}
+			}
+		}
+	}
+}
+
+// Assumes b_old and b_new are AS_PARTICLE_TYPE_LIST bins.
+// Assumes b_old and b_new have the same id.
+static int32_t
+as_sindex_sbins_list_diff_populate(as_sindex_bin *sbins, as_namespace *ns, const char *set_name, const as_bin *b_old, const as_bin *b_new)
+{
+	uint16_t id = b_new->id;
+
+	if (! as_sindex_binid_has_sindex(ns, id)) {
+		return 0;
+	}
+
+	cf_ll *simatch_ll = NULL;
+	as_sindex__simatch_list_by_set_binid(ns, set_name, id, &simatch_ll);
+
+	if (! simatch_ll) {
+		return 0;
+	}
+
+	uint32_t populated = 0;
+
+	for (cf_ll_element *ele = cf_ll_get_head(simatch_ll); ele; ele = ele->next) {
+		sindex_set_binid_hash_ele *si_ele = (sindex_set_binid_hash_ele *)ele;
+		int simatch = si_ele->simatch;
+		as_sindex *si = &ns->sindex[simatch];
+
+		if (! as_sindex_isactive(si)) {
+			ele = ele->next;
+			continue;
+		}
+
+		int32_t delta = as_sindex_sbins_sindex_list_diff_populate(&sbins[populated], si, b_old, b_new);
+
+		if (delta < 0) {
+			return -1;
+		}
+
+		populated += delta;
+	}
+
+as_sindex_sbins_debug_print(sbins, populated);
+
+	return populated;
+}
+
+uint32_t
+as_sindex_sbins_populate(as_sindex_bin *sbins, as_namespace *ns, const char *set_name, const as_bin *b_old, const as_bin *b_new)
+{
+	if (as_bin_get_particle_type(b_old) == AS_PARTICLE_TYPE_LIST && as_bin_get_particle_type(b_new) == AS_PARTICLE_TYPE_LIST) {
+		int32_t ret = as_sindex_sbins_list_diff_populate(sbins, ns, set_name, b_old, b_new);
+
+		if (ret >= 0) {
+			return (uint32_t)ret;
+		}
+	}
+
+	uint32_t populated = 0;
+
+	// TODO - might want an optimization that detects the (rare) case when a
+	// particle was rewritten with the exact old value.
+	populated += as_sindex_sbins_from_bin(ns, set_name, b_old, &sbins[populated], AS_SINDEX_OP_DELETE);
+	populated += as_sindex_sbins_from_bin(ns, set_name, b_new, &sbins[populated], AS_SINDEX_OP_INSERT);
+
+	return populated;
+}
+// DIFF FROM BIN TO SINDEX
+// ************************************************************************************************
+// ************************************************************************************************
 //                                     SBIN INTERFACE FUNCTIONS
 int
-as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_val ** cdt_asval)
+as_sindex_sbin_from_sindex(as_sindex * si, const as_bin *b, as_sindex_bin * sbin, as_val ** cdt_asval)
 {
 	as_sindex_metadata * imd    = si->imd;
 	as_particle_type imd_btype  = as_sindex_pktype(imd);
@@ -4216,7 +4580,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, as_bin *b, as_sindex_bin * sbin, as_v
 				found = true;
 				bool added = false;
 				uint64_t * cells;
-				size_t ncells = as_bin_particle_geojson_cellids(b, &cells);
+				size_t ncells = as_bin_particle_geojson_cellids((as_bin *)b, &cells);
 				for (size_t ndx = 0; ndx < ncells; ++ndx) {
 					if (as_sindex_add_integer_to_sbin(sbin, cells[ndx]) == AS_SINDEX_OK) {
 						added = true;
@@ -4256,7 +4620,7 @@ END:
 // Returns the number of sindex found
 // TODO - deprecate and conflate body with as_sindex_sbins_from_bin() below.
 int
-as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin * start_sbin,
+as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, const as_bin *b, as_sindex_bin * start_sbin,
 					as_sindex_op op)
 {
 	// Check the sindex bit array.
@@ -4350,7 +4714,7 @@ as_sindex_sbins_from_bin_buf(as_namespace *ns, const char *set, as_bin *b, as_si
 }
 
 int
-as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, as_sindex_bin * start_sbin, as_sindex_op op)
+as_sindex_sbins_from_bin(as_namespace *ns, const char *set, const as_bin *b, as_sindex_bin * start_sbin, as_sindex_op op)
 {
 	return as_sindex_sbins_from_bin_buf(ns, set, b, start_sbin, op);
 }
