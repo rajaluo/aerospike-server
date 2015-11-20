@@ -193,8 +193,8 @@
 static volatile int g_allow_migrations = true;
 static volatile int g_multi_node = false;
 
-#define BALANCE_INIT_UNRESOLVED	0
-#define BALANCE_INIT_RESOLVED	1
+#define BALANCE_INIT_UNRESOLVED 0
+#define BALANCE_INIT_RESOLVED   1
 
 #define TX_FLAGS_NONE           ((uint32_t) 0x0)
 #define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
@@ -682,16 +682,15 @@ static
 void as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p, int my_index)
 {
 	as_partition_vinfo *pvinfo = &ns->partitions[pid].version_info;
-	bool is_sync 	= (p->state == AS_PARTITION_STATE_SYNC);
-	bool is_desync 	= (p->state == AS_PARTITION_STATE_DESYNC);
-	bool is_zombie 	= (p->state == AS_PARTITION_STATE_ZOMBIE);
-	bool is_master 	= (0 == my_index);
+	bool is_sync    = (p->state == AS_PARTITION_STATE_SYNC);
+	bool is_desync  = (p->state == AS_PARTITION_STATE_DESYNC);
+	bool is_zombie  = (p->state == AS_PARTITION_STATE_ZOMBIE);
+	bool is_master  = (0 == my_index);
 	bool is_replica = (0 < my_index) && (my_index < p->p_repl_factor);
 	bool is_primary = memcmp(pvinfo, &p->primary_version_info, sizeof(as_partition_vinfo)) == 0;
 	bool migrating_to_master = (p->target != 0);
 
 	// State consistency checks.
-	// TODO: Ideally convert debugs below to warnings if we are confident.
 	if (migrating_to_master) {
 		if (p->target != p->replica[0]) {
 			cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Target of migration not master node", ns->name, pid);
@@ -758,10 +757,10 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 	//		- it's a read, node is replica, and has no origin
 	// Otherwise, return (eventual) master.
 
-	bool is_sync	= (p->state == AS_PARTITION_STATE_SYNC);
-	bool is_desync	= (p->state == AS_PARTITION_STATE_DESYNC);
-	bool is_master	= (0 == my_index);
-	bool is_replica	= (0 < my_index) && (my_index < p->p_repl_factor);
+	bool is_sync    = (p->state == AS_PARTITION_STATE_SYNC);
+	bool is_desync  = (p->state == AS_PARTITION_STATE_DESYNC);
+	bool is_master  = (0 == my_index);
+	bool is_replica = (0 < my_index) && (my_index < p->p_repl_factor);
 	bool migrating_to_master = (p->target != 0);
 
 	if ((is_master && is_sync) || migrating_to_master) {
@@ -1775,9 +1774,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 	if (p->pending_migrate_tx == 0)
 	{
 		cf_warning(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_tx?", ns->name, pid);
-
 		pthread_mutex_unlock(&p->lock);
-
 		return AS_MIGRATE_FAIL;
 	}
 
@@ -1980,9 +1977,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 							// theoretically, a journal start fails only when there's already another journal in progress
 							cf_warning(AS_PARTITION, "{%s:%d} could not start journal, continuing", ns->name, pid);
 						}
-						// TODO What happens when a cluster reconfiguration happens to this node and this migration is not completed?
 						// TODO Should we always apply journals during a partition re-balance for desync nodes that have their versions set?
-						//
 					}
 					else { // migrations into SYNC Master must ONLY be from nodes containing duplicate partitions
 						if (p->origin != (cf_node)0) {
@@ -2273,7 +2268,6 @@ void as_partition_set_ns_replication_factor(int new_cluster_size)
 		ns->replication_factor = reduce_repl ? 1 : max_repl;
 		cf_info(AS_PAXOS, "{%s} replication factor is %d", ns->name, ns->replication_factor);
 	}
-	return;
 }
 
 // Define the macros for accessing the HV and hv_slindex arrays.
@@ -2507,7 +2501,7 @@ bool as_partition_valid_cluster_topology( as_paxos *paxos_p ) {
 void
 as_migrate_increment_all_tx_fail() {
 	for (int i = 0; i < g_config.namespaces; i++) {
-		// All namespaces will fail to migrate
+		// All namespaces will fail to migrate.
 		as_namespace *ns = g_config.namespace[i];
 		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 	}
@@ -2567,7 +2561,7 @@ as_partition_balance()
 		// if (alive[i] == false)
 		// 	found_error = true;
 	}
-	if ((found_error) || (cluster_size == 0)) {
+	if (found_error || cluster_size == 0) {
 		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION,
 				"succession list is corrupted: couldn't start migrate");
@@ -2609,7 +2603,6 @@ as_partition_balance()
 			}
 		}
 	}
-
 	if (found_error) {
 		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION,
@@ -2638,7 +2631,6 @@ as_partition_balance()
 			}
 		}
 	}
-
 	if (found_error) {
 		as_migrate_increment_all_tx_fail();
 		cf_warning(AS_PARTITION, "Global state is not identical to local state: couldn't start migrate");
@@ -2893,7 +2885,6 @@ as_partition_balance()
 				AS_PARTITIONS * g_config.namespaces, false);
 
 	for (int i = 0; i < g_config.namespaces; i++) {
-
 		as_namespace *ns = g_config.namespace[i];
 		if (NULL == ns)
 			continue;
@@ -3367,7 +3358,6 @@ as_partition_balance()
 									TX_FLAGS_ACTING_MASTER);
 						}
 						else {
-							// duplicate nodes reject writes, so no need to flush
 							partition_migrate_record_fill(&pmr, &HV(j, 0), 1,
 									ns, j, orig_cluster_key,
 									TX_FLAGS_NONE);
