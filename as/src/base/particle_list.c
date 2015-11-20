@@ -531,7 +531,7 @@ list_to_flat(const as_particle *p, uint8_t *flat)
 		memcpy(p_list_flat->data, p_list_mem->data, p_list_mem->sz);
 	}
 
-	p_list_flat->type = AS_PARTICLE_TYPE_LIST;
+	// Already wrote the type.
 
 	return sizeof(list_flat) + p_list_flat->size;
 }
