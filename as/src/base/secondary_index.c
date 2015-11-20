@@ -4514,6 +4514,8 @@ as_sindex_sbins_populate(as_sindex_bin *sbins, as_namespace *ns, const char *set
 
 	uint32_t populated = 0;
 
+	// TODO - might want an optimization that detects the (rare) case when a
+	// particle was rewritten with the exact old value.
 	populated += as_sindex_sbins_from_bin(ns, set_name, b_old, &sbins[populated], AS_SINDEX_OP_DELETE);
 	populated += as_sindex_sbins_from_bin(ns, set_name, b_new, &sbins[populated], AS_SINDEX_OP_INSERT);
 
