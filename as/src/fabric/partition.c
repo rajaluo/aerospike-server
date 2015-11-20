@@ -138,7 +138,7 @@
  *    the replica list.
  *
  * NB: Please note that write journalling and write rejection is
- *     primarly relevant only in the world where replication was delta
+ *     primarily relevant only in the world where replication was delta
  *     replication. But current (5/13) we do not do delta replication but we
  *     ship the entire record. So write_journal and write rejection in current
  *     world is not relevant. Revisit and fix comment
@@ -189,13 +189,16 @@
  *
  */
 
-static pthread_mutex_t		g_migration_lock = PTHREAD_MUTEX_INITIALIZER;
-static bool					g_allow_migrations = true;
-
+// Using int for 4-byte size, but maintaining bool semantics.
+static volatile int g_allow_migrations = true;
 static volatile int g_multi_node = false;
 
 #define BALANCE_INIT_UNRESOLVED	0
 #define BALANCE_INIT_RESOLVED	1
+
+#define TX_FLAGS_NONE			((uint64_t) 0x0)
+#define TX_FLAGS_ACTING_MASTER	((uint64_t) 0x1)
+#define TX_FLAGS_REQUEST		((uint64_t) 0x2)
 
 static volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
 
@@ -206,7 +209,7 @@ int
 as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states) {
 
 	if (!ns || !partition_states)
-		return (0);
+		return 0;
 
 	memset(partition_states, 0, sizeof(bool) * AS_PARTITIONS);
 
@@ -233,7 +236,7 @@ as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states) {
 			cf_debug(AS_PARTITION, "{%s:%d} Failed to get vinfo from storage ", ns->name, j);
 	} // end for
 
-	return (n_found);
+	return n_found;
 }
 
 // flush storage
@@ -314,8 +317,8 @@ bool increase_partition_version_tree_path(as_partition_vinfo *vinfo, cf_node fsn
 		}
 	}
 	if (!found) {
-		cf_detail(AS_PARTITION, "{%s:%d} can't find self in old succession list: Partition version will NOT change", n, pid);
-		return (false);
+		cf_detail(AS_PARTITION, "{%s:%d} can't find first sync in old succession list: Partition version will NOT change", n, pid);
+		return false;
 	}
 
 	int i;
@@ -362,58 +365,26 @@ void print_partition_versions(const char* n, size_t pid, as_partition_vinfo *par
 }
 
 // Set flag to allow migrations
-void as_partition_allow_migrations() {
-
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
+void
+as_partition_allow_migrations()
+{
 	cf_info(AS_PARTITION, "ALLOW MIGRATIONS");
 	g_allow_migrations = true;
-
-	// For receiver-side migration flow-control:
-	//   Reset number of active incoming migrations.
-	cf_atomic_int_set(&g_config.migrate_num_incoming, 0);
-
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	return;
 }
 
 // Set flag to disallow migrations
-void as_partition_disallow_migrations() {
-
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
+void
+as_partition_disallow_migrations()
+{
 	cf_info(AS_PARTITION, "DISALLOW MIGRATIONS");
 	g_allow_migrations = false;
-
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	return;
 }
 
 // get migration flag
-bool as_partition_get_migration_flag() {
-
-	bool flag;
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	flag = g_allow_migrations;
-
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-	return (flag);
-
+bool
+as_partition_get_migration_flag()
+{
+	return g_allow_migrations;
 }
 
 /* as_partition_reinit
@@ -429,7 +400,6 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 	p->origin = 0;
 	p->target = 0;
 	p->state = AS_PARTITION_STATE_ABSENT;
-	p->pending_writes = 0;
 	p->pending_migrate_tx = 0;
 	p->pending_migrate_rx = 0;
 
@@ -437,7 +407,6 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 
 	p->n_dupl = 0;
 	memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-	p->reject_writes = false;
 	p->waiting_for_master = false;
 	memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 	memset(&p->version_info, 0, sizeof(p->version_info));
@@ -503,6 +472,7 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 
 /*
  * Set a partition to be in the desync state
+ * Should always be called within partition lock
  * Set the state variable and clean out the version info
  */
 void set_partition_desync_lockfree(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, size_t pid, bool flush) {
@@ -528,34 +498,6 @@ void set_partition_desync_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
 	p->sub_vp->data_inmemory = ns->storage_data_in_memory;
 
 	return;
-}
-
-/*
- * Set a partition to be in the desync state
- * Should always be called within partition lock
- * Set the state variable and clean out the version info
- */
-int set_partition_desync(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, size_t pid) {
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	int retval = -1;
-	if (true == g_allow_migrations)
-	{
-		// Always set flush flag as this is never called from as_partition_balance_new
-		set_partition_desync_lockfree(p, vinfo, ns, pid, true);
-		retval = 0;
-	}
-	else {
-		cf_info(AS_PARTITION, "{%s:%d} MIGRATIONS DISALLOWED: State cannot be changed to ABSENT", p->partition_id, ns->name);
-	}
-
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	return (retval);
 }
 
 /*
@@ -598,30 +540,6 @@ void set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
 }
 
 /*
- * Set a partition to be in the absent state
- * Should always be called within partition lock
- * Set the state variable and clean out the version info
- */
-int set_partition_absent(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, size_t pid) {
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	int retval = -1;
-	if (true == g_allow_migrations)
-	{
-		set_partition_absent_lockfree(p, vinfo, ns, pid, true);
-		retval = 0;
-	}
-
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	return (retval);
-}
-
-/*
  * Set a partition to be in the sync state
  * Should always be called within partition lock
  * Set the state variables and initialize new version info
@@ -650,44 +568,6 @@ void set_partition_sync_lockfree(as_partition *p, size_t pid, as_namespace *ns, 
 	return;
 }
 
-/*
- * Set a partition to be in the sync state
- * Should always be called within partition lock
- * Set the state variables and initialize new version info
- */
-int set_partition_sync(as_partition *p, size_t pid, as_namespace *ns) {
-	/* lock */
-	if (0 != pthread_mutex_lock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	int retval = -1;
-	if (true == g_allow_migrations)
-	{
-		cf_detail(AS_PARTITION, "{%s:%d} Setting to SYNC", ns->name, pid);
-		set_partition_sync_lockfree(p, pid, ns, true);
-		retval = 0;
-	}
-
-	/* unlock */
-	if (0 != pthread_mutex_unlock(&g_migration_lock))
-		cf_crash(AS_PARTITION, "couldn't acquire migration state lock: %s", cf_strerror(errno));
-
-	return (retval);
-}
-
-/*
- * Set a partition to be in the zombie state
- * Should always be called within partition lock
- * Set the state variables and initialize new version info
- */
-void set_partition_zombie(as_partition *p, as_namespace *ns, size_t pid) {
-	if ((NULL == p) || (NULL == ns)) /* params */
-		return;
-	p->state = AS_PARTITION_STATE_ZOMBIE;
-	cf_debug(AS_PARTITION, "{%s:%d} Setting to ZOMBIE", ns->name, pid);
-	return;
-}
-
 /* as_partition_init
  * Create an as_partition */
 void
@@ -695,8 +575,7 @@ as_partition_init(as_partition *p, as_namespace *ns, int pid)
 {
 	cf_assert(p, AS_PARTITION, CF_CRITICAL, "invalid partition");
 
-	if (0 != pthread_mutex_init(&p->lock, 0))
-		cf_crash(AS_PARTITION, "couldn't initialize partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_init(&p->lock, 0);
 
 	p->vp = (as_index_tree *) NULL;
 	p->sub_vp = (as_index_tree *) NULL;
@@ -712,7 +591,6 @@ void
 as_partition_getstates(as_partition_states *ps)
 {
 	size_t active_partition_count = 0;
-	size_t reject_writes_partition_count = 0;
 
 	memset(ps, 0, sizeof(as_partition_states));
 
@@ -723,8 +601,7 @@ as_partition_getstates(as_partition_states *ps)
 
 			as_partition *p = &ns->partitions[j];
 
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_lock(&p->lock);
 
 			switch (p->state)
 			{
@@ -753,9 +630,6 @@ as_partition_getstates(as_partition_states *ps)
 				case AS_PARTITION_STATE_ZOMBIE:
 					ps->zombie++;
 					break;
-				case AS_PARTITION_STATE_WAIT:
-					ps->wait++;
-					break;
 				case AS_PARTITION_STATE_ABSENT:
 					ps->absent++;
 					ns_absent_partitions++;
@@ -767,23 +641,20 @@ as_partition_getstates(as_partition_states *ps)
 
 			if ((p->pending_migrate_tx != 0) || (p->pending_migrate_rx != 0) || (p->origin != 0) || (p->n_dupl != 0))
 				active_partition_count++;
-			if (p->reject_writes)
-				reject_writes_partition_count++;
 
 			ps->n_objects += p->vp->elements;
 			ps->n_ref_count += cf_rc_count(p->vp);
 			ps->n_sub_objects += p->sub_vp->elements;
 			ps->n_sub_ref_count += cf_rc_count(p->sub_vp);
 
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
 		}
 
 		cf_atomic_int_set(&ns->n_absent_partitions, ns_absent_partitions);
 		cf_atomic_int_set(&ns->n_actual_partitions, ps->sync_actual);
 	}
 
-	cf_debug(AS_PARTITION, "partitions: migrating %d, rejecting writes %d.", active_partition_count, reject_writes_partition_count);
+	cf_debug(AS_PARTITION, "partitions: migrating %d.", active_partition_count);
 
 	return;
 }
@@ -800,7 +671,7 @@ int find_in_replica_list(as_partition *p, cf_node self) {
 			break;
 		}
 	}
-	return (my_index);
+	return my_index;
 }
 
 static
@@ -891,7 +762,7 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 
 	if ((is_master && is_sync) || migrating_to_master) {
 		n = self;
-	} 
+	}
 	else if (is_master && is_desync) {
 		n = p->origin;
 	}
@@ -903,7 +774,7 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 	}
 
 	if (n == 0 && as_partition_balance_is_init_resolved()) {
-		cf_debug(AS_PARTITION, "{%s:%d} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64"", 
+		cf_debug(AS_PARTITION, "{%s:%d} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64"",
 					ns->name, pid, my_index, p->replica[0], p->replica[1], p->origin);
 		cf_atomic_int_incr(&g_config.err_sync_copy_null_master);
 	}
@@ -926,7 +797,6 @@ as_partition_reservation_copy(as_partition_reservation *dst, as_partition_reserv
 	dst->sub_tree = src->sub_tree;
 	dst->n_dupl = src->n_dupl;
 	memcpy(dst->dupl_nodes, src->dupl_nodes, sizeof(cf_node) * dst->n_dupl);
-	dst->reject_writes = src->reject_writes;
 	dst->cluster_key = src->cluster_key;
 	memcpy(&dst->vinfo, &src->vinfo, sizeof(as_partition_vinfo));
 }
@@ -947,13 +817,11 @@ as_partition_reserve_update_state(as_partition_reservation *rsv)
 {
 	cf_assert(rsv, AS_PARTITION, CF_CRITICAL, "invalid reservation");
 
-	if (0 != pthread_mutex_lock(&rsv->p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&rsv->p->lock);
 
 	rsv->state = rsv->p->state;
 	rsv->n_dupl = rsv->p->n_dupl;
 	memcpy(rsv->dupl_nodes, rsv->p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
-	rsv->reject_writes = rsv->p->reject_writes;
 	rsv->cluster_key = rsv->p->cluster_key;
 
 	if (!is_partition_null(&rsv->p->version_info))
@@ -961,8 +829,7 @@ as_partition_reserve_update_state(as_partition_reservation *rsv)
 	else
 		memcpy(&rsv->vinfo, &rsv->p->primary_version_info, sizeof(as_partition_vinfo));
 
-	if (0 != pthread_mutex_unlock(&rsv->p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&rsv->p->lock);
 
 	return;
 }
@@ -991,8 +858,7 @@ as_partition_reserve_read_write(as_namespace *ns, as_partition_id pid,
 
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	ck = p->cluster_key;
 	n = find_sync_copy(ns, pid, p, is_read);
@@ -1018,13 +884,9 @@ as_partition_reserve_read_write(as_namespace *ns, as_partition_id pid,
 		if (rsv->tree)
 			cf_assert(rsv->sub_tree, AS_PARTITION, CF_CRITICAL, "invalid partition");
 
-		if (!is_read)
-			rsv->p->pending_writes++;
-
 		rsv->state = p->state;
 		rsv->n_dupl = p->n_dupl;
 		memcpy(rsv->dupl_nodes, p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
-		rsv->reject_writes = p->reject_writes;
 		rsv->cluster_key = p->cluster_key;
 		// copy version info. this is guaranteed to not be null as the state is SYNC or ZOMBIE
 		memcpy(&rsv->vinfo, &p->version_info, sizeof(as_partition_vinfo));
@@ -1034,13 +896,15 @@ as_partition_reserve_read_write(as_namespace *ns, as_partition_id pid,
 		memset(rsv, 0, sizeof(*rsv));
 
 finish:
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-	if (node)
+	pthread_mutex_unlock(&p->lock);
+
+	if (node) {
 		*node = n;
-	if (cluster_key)
+	}
+	if (cluster_key) {
 		*cluster_key = ck;
-	return(rv);
+	}
+	return rv;
 }
 
 
@@ -1075,7 +939,6 @@ as_partition_reserve_lockfree(as_namespace *ns, as_partition_id pid, as_partitio
 	rsv->state = p->state;
 	rsv->n_dupl = p->n_dupl;
 	memcpy(rsv->dupl_nodes, p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
-	rsv->reject_writes = p->reject_writes;
 	rsv->cluster_key = p->cluster_key;
 	if (!is_partition_null(&p->version_info))
 		memcpy(&rsv->vinfo, &p->version_info, sizeof(as_partition_vinfo));
@@ -1099,12 +962,10 @@ as_partition_reserve_migrate_timeout(as_namespace *ns, as_partition_id pid, as_p
 	cf_set_wait_timespec(timeout_ms, &tp);
 	if (0 != pthread_mutex_timedlock(&p->lock, &tp)) {
 		return -1;
-	}    
+	}
 	as_partition_reserve_lockfree(ns, pid, rsv);
 
-	if (0 != pthread_mutex_unlock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_unlock(&p->lock);
 
 	if (node) {
 		*node = g_config.self_node;
@@ -1125,16 +986,15 @@ as_partition_reserve_migrate(as_namespace *ns, as_partition_id pid, as_partition
 	cf_assert((pid < AS_PARTITIONS), AS_PARTITION, CF_CRITICAL, "invalid partition");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	as_partition_reserve_lockfree(ns, pid, rsv);
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	if (node) *node = g_config.self_node;
-
+	if (node) {
+		*node = g_config.self_node;
+	}
 }
 
 /* as_partition_reserve_write
@@ -1182,7 +1042,7 @@ as_partition_prereserve_query(as_namespace * ns, bool can_partition_query[], as_
 	int reserved = 0;
 	for (int i=0; i<AS_PARTITIONS; i++) {
 		if (as_partition_reserve_query(ns, i, &rsv[i])) {
-			can_partition_query[i] = false;	
+			can_partition_query[i] = false;
 		}
 		else {
 			can_partition_query[i] = true;
@@ -1209,16 +1069,12 @@ as_partition_release_lockfree(as_partition_reservation *rsv)
 	cf_detail(AS_PARTITION, "{%s:%d} RELEASE LOCKFREE SUBRECORD TREE %p", rsv->ns->name, rsv->p->partition_id, rsv->p->sub_vp);
 	rsv->sub_tree = 0;
 
-	if (rsv->is_write)
-		rsv->p->pending_writes--;
-
 	// safety
 	rsv->tree = 0;
 	rsv->p = 0;
 	rsv->ns = 0;
 	rsv->n_dupl = 0;
 	memset(rsv->dupl_nodes, 0, sizeof(rsv->dupl_nodes));
-	rsv->reject_writes = false;
 	rsv->cluster_key = 0;
 	memset(&rsv->vinfo, 0, sizeof(as_partition_vinfo));
 
@@ -1236,18 +1092,14 @@ as_partition_release(as_partition_reservation *rsv)
 	cf_assert(rsv->p, AS_PARTITION, CF_CRITICAL, "invalid reservation partition");
 	cf_assert(rsv->tree, AS_PARTITION, CF_CRITICAL, "invalid reservation tree");
 
-	if (0 != pthread_mutex_lock(&rsv->p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&rsv->p->lock);
 
 	as_index_tree_release(rsv->tree, rsv->ns);
 	as_index_tree_release(rsv->sub_tree, rsv->ns);
 	if( TREE_PRINT )
 		cf_detail(AS_PARTITION, "{%s:%d} RELEASE TREE %p", rsv->ns->name, rsv->p->partition_id, rsv->p->vp);
-	if (rsv->is_write)
-		rsv->p->pending_writes--;
 
-	if (0 != pthread_mutex_unlock(&rsv->p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&rsv->p->lock);
 
 	// safety
 	rsv->tree = 0;
@@ -1256,7 +1108,6 @@ as_partition_release(as_partition_reservation *rsv)
 	rsv->ns = 0;
 	memset(rsv->dupl_nodes, 0, sizeof(cf_node) * rsv->n_dupl);
 	rsv->n_dupl = 0;
-	rsv->reject_writes = false;
 	rsv->cluster_key = 0;
 	memset(&rsv->vinfo, 0, sizeof(as_partition_vinfo));
 
@@ -1271,16 +1122,14 @@ as_partition_bless(as_partition *p)
 {
 	cf_assert(p, AS_PARTITION, CF_CRITICAL, "invalid partition");
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	/* partition version info must be set outside this call */
 	p->state = AS_PARTITION_STATE_SYNC;
 	p->replica[0] = g_config.self_node;
 	cf_atomic_int_incr(&g_config.partition_generation);
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
 	return;
 }
@@ -1298,15 +1147,13 @@ as_partition_getreplica_next(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	n = p->origin;
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	return(n);
+	return n;
 }
 
 
@@ -1322,15 +1169,13 @@ as_partition_getreplica_read(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	n = find_sync_copy(ns, pid, p, true);
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	return(n);
+	return n;
 }
 
 /* as_partition_getreplica_prole
@@ -1346,9 +1191,7 @@ as_partition_getreplica_prole(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_lock(&p->lock);
 
 	// Check is this is a master node.
 	cf_node n = find_sync_copy(ns, pid, p, false);
@@ -1362,9 +1205,7 @@ as_partition_getreplica_prole(as_namespace *ns, as_partition_id pid)
 		n = find_sync_copy(ns, pid, p, true);
 	}
 
-	if (0 != pthread_mutex_unlock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_unlock(&p->lock);
 
 	return n;
 }
@@ -1382,8 +1223,7 @@ as_partition_getreplica_readall(as_namespace *ns, as_partition_id pid, cf_node *
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		/* Break at the end of the list */
@@ -1398,10 +1238,9 @@ as_partition_getreplica_readall(as_namespace *ns, as_partition_id pid, cf_node *
 		nv[c++] = p->replica[i];
 	}
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	return(c);
+	return c;
 }
 
 
@@ -1417,15 +1256,13 @@ as_partition_getreplica_write(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
 
 	n = find_sync_copy(ns, pid, p, false);
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	return(n);
+	return n;
 }
 
 /* as_partition_getreplica_master
@@ -1442,17 +1279,13 @@ as_partition_getreplica_master(as_namespace *ns, as_partition_id pid)
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	if (0 != pthread_mutex_lock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_lock(&p->lock);
 
 	n = find_sync_copy(ns, pid, p, false);
 
-	if (0 != pthread_mutex_unlock(&p->lock)) {
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-	}
+	pthread_mutex_unlock(&p->lock);
 
-	return(n);
+	return n;
 }
 
 void
@@ -1678,8 +1511,6 @@ as_partition_getstate_str(int state)
 			return 'D';
 		case AS_PARTITION_STATE_ZOMBIE:
 			return 'Z';
-		case AS_PARTITION_STATE_WAIT:
-			return 'W';
 		case AS_PARTITION_STATE_ABSENT:
 			return 'A';
 		default:
@@ -1819,11 +1650,10 @@ as_partition_get_master_prole_stats(as_namespace* ns, as_master_prole_stats* p_s
 			// record's digest, VoidTime and Generation.
 			if (pcnt) {
 				cf_info(AS_PARTITION,
-						"[ATTENTION]<%s> NS(%s) Pid(%u) P State(%u) TPtr(%p) TRef(%d) P Cnt(%u) PendRx(%d) PenTx(%d) PendWrite(%d) TreeCount(%u)",
+						"[ATTENTION]<%s> NS(%s) Pid(%u) P State(%u) TPtr(%p) TRef(%d) P Cnt(%u) PendRx(%d) PenTx(%d) TreeCount(%u)",
 						"get_master_prole_stats()", ns->name, pid, p->state,
 						p->vp, tree_rc, pcnt, p->pending_migrate_rx,
-						p->pending_migrate_tx, p->pending_writes,
-						&g_config.nsup_tree_count);
+						p->pending_migrate_tx, &g_config.nsup_tree_count);
 				if (p->vp && p->state == AS_PARTITION_STATE_ABSENT ) {
 					cf_info(AS_PARTITION, "[ATTENTION]<%s> Showing Contents of Absent Partition(%d)",
 							"get_master_prole_stats()", pid );
@@ -1902,15 +1732,20 @@ void apply_write_journal(as_namespace *ns, size_t pid)
  * the only state we're really interested in is "DONE"
  */
 as_migrate_cb_return
-as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pid, as_index_tree *tree, cf_node node, void *udata)
+as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
+		as_partition_id pid, as_index_tree *tree, uint64_t orig_cluster_key,
+		cf_node node, void *udata)
 {
-	bool flush = (bool)udata;
+	uint64_t flags = (uint64_t)udata;
+	bool acting_master = (flags & TX_FLAGS_ACTING_MASTER) != 0;
+	bool migration_request = (flags & TX_FLAGS_REQUEST) != 0;
+
 	as_partition *p = NULL;
 
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
 	p = &ns->partitions[pid];
 
-	cf_detail(AS_PARTITION, "migration tx : mig-state %d open-writes %d {%s:%d}", s, p->pending_writes, ns->name, pid);
+	cf_detail(AS_PARTITION, "migration tx : mig-state %d {%s:%d}", s, ns->name, pid);
 
 	if (AS_MIGRATE_STATE_DONE != s) {
 		if (s == AS_MIGRATE_STATE_ERROR)
@@ -1919,16 +1754,20 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			cf_debug(AS_PARTITION, "migration tx callback: migrate failed {%s:%d}", ns->name, pid);
 		else
 			cf_debug(AS_PARTITION, "migration tx callback: unknown notification %d {%s:%d}", (int) s, ns->name, pid);
-		return(AS_MIGRATE_CB_FAIL);
+		return AS_MIGRATE_CB_FAIL;
 	}
 
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_lock(&p->lock);
+
+	if (orig_cluster_key != as_paxos_get_cluster_key()) {
+		pthread_mutex_unlock(&p->lock);
+		return AS_MIGRATE_CB_FAIL;
+	}
 
 	/*
 	 *  Flush writes on the acting master now that it has completed filling the real master with data
 	 */
-	if (flush) {
+	if (acting_master) {
 		p->target = 0;
 		p->n_dupl = 0;
 		memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
@@ -1942,73 +1781,36 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 	if (p->pending_migrate_tx == 0)
 	{
 		cf_debug(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_tx?", ns->name, pid);
-		if (0 != pthread_mutex_unlock(&p->lock))
-			cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-		return(AS_MIGRATE_CB_FAIL);
+
+		pthread_mutex_unlock(&p->lock);
+
+		return AS_MIGRATE_CB_FAIL;
 	}
+
 	p->pending_migrate_tx--;
-	if (AS_PARTITION_STATE_ZOMBIE == p->state && 0 == p->pending_migrate_tx) {
-		cf_detail(AS_PARTITION, "{%s:%d} migration tx callback: moving to WAIT", ns->name, pid);
-		p->state = AS_PARTITION_STATE_WAIT;
-		// Do not replace the tree. This has to be done synchronously with changing the version information and under the migration lock
-		// p->vp = as_index_create(ns->arena, (as_index_value_destructor)&as_record_destroy, ns);
-		cf_atomic_int_incr(&g_config.partition_generation);
+
+	if (! migration_request) {
+		int64_t migrates_tx_remaining = cf_atomic_int_decr(&ns->migrate_tx_partitions_remaining);
+		if (migrates_tx_remaining < 0){
+			cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) tx partitions schedule exceeded, possibly a race with prior migration",
+					   ns->name, pid, p->pending_migrate_tx, migrates_tx_remaining);
+		}
 	}
 
 	p->current_outgoing_ldt_version = 0;
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-
-	/* Apply all the transactions. This will halt eventually because the
-	   node filling us will stop sending write requests to us. */
-	int counter = 0;
-	while (flush) {
-		int i = p->pending_writes;  /* get a copy */
-		if (i == 0)
-			break;
-
-		cf_debug(AS_PARTITION, "blocking until pending writes are done: {%s:%d} p-state %d, %d to go", ns->name, pid, (int) p->state, i);
-
-		if (counter % 10 == 9)
-			cf_info(AS_PARTITION, "blocking until pending writes are done: {%s:%d}, pstate %d, %d to go %d centisecs", ns->name, pid, (int)p->state, i, counter);
-
-		usleep(100 * 1000);
-
-		// safety! 20 seconds would be a long time, probably means you're stuck
-		if (counter++ > 200) {
-			cf_crash(AS_PARTITION, "in migrate_tx, pending writes never drained: {%s:%d}", ns->name, pid);
-		}
-	}
-
-	if (0 != pthread_mutex_lock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-
-
-	if (AS_PARTITION_STATE_WAIT == p->state) {
-
+	if (AS_PARTITION_STATE_ZOMBIE == p->state && 0 == p->pending_migrate_tx) {
 		cf_detail(AS_PARTITION, "migration tx callback: moving to ABSENT {%s:%d}", ns->name, pid);
 
-		if (0 != set_partition_absent(p, &ns->partitions[pid].version_info, ns, pid)) {
-
-			cf_debug(AS_PARTITION, "{%s:%d} migrate rx aborted. Migrations are disallowed", ns->name, pid);
-
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-
-			return(AS_MIGRATE_CB_FAIL);
-
-		}
+		set_partition_absent_lockfree(p, &ns->partitions[pid].version_info, ns, pid, true);
 		cf_atomic_int_incr(&g_config.partition_generation);
 	}
 
-	if (0 != pthread_mutex_unlock(&p->lock))
-		cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+	pthread_mutex_unlock(&p->lock);
 
-	cf_detail(AS_PARTITION, "pending writes done: {%s:%d}", ns->name, pid);
 	cf_debug(AS_PARTITION, "{%s:%d} MIGRATE TRANSMIT DONE", ns->name, pid);
 
-	return(AS_MIGRATE_CB_OK);
+	return AS_MIGRATE_CB_OK;
 }
 
 
@@ -2044,7 +1846,9 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			 *
  */
 as_migrate_cb_return
-as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pid, as_index_tree *tree, cf_node source_node, void *udata)
+as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
+		as_partition_id pid, as_index_tree *tree, uint64_t orig_cluster_key,
+		cf_node source_node, void *udata)
 {
 	as_partition *p = NULL;
 	as_migrate_cb_return rv = AS_MIGRATE_CB_OK;
@@ -2053,9 +1857,9 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 	p = &ns->partitions[pid];
 
 	// possible to get migrate requests before our paxos is up. Prevent that.
-	if ((g_config.paxos == 0) || (g_config.paxos->ready == false) || (g_allow_migrations == false)) {
+	if ((g_config.paxos == 0) || (g_config.paxos->ready == false) || ! g_allow_migrations) {
 		cf_detail(AS_PARTITION, "{%s:%d} migrate rx, paxos unconfigured, try later", ns->name, pid);
-		return( AS_MIGRATE_CB_AGAIN );
+		return AS_MIGRATE_CB_AGAIN;
 	}
 
 	cf_queue *mq = NULL;
@@ -2068,14 +1872,18 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			if (num_incoming >= g_config.migrate_max_num_incoming) {
 				cf_atomic_int_incr(&g_config.migrate_num_incoming_refused);
 				cf_debug(AS_PARTITION, "too busy with %d incoming migrations ~~ waving off migrate request {%s:%d}", num_incoming, ns->name, pid);
-				return( AS_MIGRATE_CB_AGAIN );
+				return AS_MIGRATE_CB_AGAIN;
 			}
 
 			partition_migrate_record r;
 			mq =  cf_queue_create(sizeof(partition_migrate_record), false);
 
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_lock(&p->lock);
+
+			if (orig_cluster_key != as_paxos_get_cluster_key()) {
+				pthread_mutex_unlock(&p->lock);
+				return AS_MIGRATE_CB_AGAIN;
+			}
 
 			cf_debug(AS_PARTITION, "{%s:%d} MIGRATE RECEIVE START, partition in state %d", ns->name, pid, p->state);
 
@@ -2084,10 +1892,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 				case AS_PARTITION_STATE_JOURNAL_APPLY: // should never happen - it's a dummy state
 					cf_debug(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, fail", ns->name, pid, p->state);
 					rv = AS_MIGRATE_CB_FAIL;
-					break;
-				case AS_PARTITION_STATE_WAIT:
-					cf_debug(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, retry", ns->name, pid, p->state);
-					rv = AS_MIGRATE_CB_AGAIN;
 					break;
 				case AS_PARTITION_STATE_ABSENT:
 					cf_debug(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, already done (pending %d origin %"PRIx64")",
@@ -2117,12 +1921,14 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 							rv = AS_MIGRATE_CB_FAIL;
 							break; // out of switch
 						}
+
 						p->waiting_for_master = false;
 						p->pending_migrate_tx++; // Send request to dupl node
-						partition_migrate_record_fill(&r, &p->replica[0], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+						partition_migrate_record_fill(&r, &p->replica[0], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_NONE);
 						cf_queue_push(mq, &r);
+
 						rv = AS_MIGRATE_CB_ALREADY_DONE;
-						cf_info(AS_PARTITION, "{%s:%d} Request for migration received from master. Migrate scheduled", ns->name, pid);
+						cf_debug(AS_PARTITION, "{%s:%d} Request for migration received from master. Migrate scheduled", ns->name, pid);
 						break;
 					}
 					if (p->state == AS_PARTITION_STATE_ZOMBIE) {
@@ -2131,13 +1937,15 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						break;
 					}
 					/*
-					 * The node receiving a migrate can either be a master node or a replica node.
-					 * If it is the master node, then the node's origin must be null (only duplicate migrations allowed into master)
+					 * The node receiving a migrate can either be a master node
+					 *   or a replica node.
+					 * If it is the master node, then the node's origin must be
+					 *   null (only duplicate migrations allowed into master)
 					 * If it is a replica node, then it can be one of two cases:
-					 * 	Case 1: A duplicate node with reject_writes flag set to true.
-					 *		In this case, set reject_writes to be false and add a journal for storing writes.
-					 * 	Case 2: A sync replica of the primary partition version
-					 *		In this case, reject_writes setting should be already false. Add a journal for storing writes.
+					 *  Case 1: A duplicate node
+					 *    In this case, add a journal for storing writes.
+					 *  Case 2: A sync replica of the primary partition version
+					 *    In this case, add a journal for storing writes.
 					 */
 					if (g_config.self_node != p->replica[0]) {
 						bool is_replica = false;
@@ -2159,22 +1967,12 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 							break; // out of switch
 						}
 						if (p->origin != p->replica[0]) {
-							// this has been debugged as normally not a state corruption error - duplicate migrate START?
+							// this has been debugged as normal not a state
+							// corruption error - duplicate migrate START?
+							// TODO: Check if AER-4512 corrects this issue.
 							cf_debug(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC replica node receiving migrate request has origin set to non-master", ns->name, pid);
 							rv = AS_MIGRATE_CB_FAIL;
 							break; // out of switch
-						}
-						bool is_primary_version = (memcmp(&p->primary_version_info, &p->version_info, sizeof(as_partition_vinfo)) == 0);
-						if (p->reject_writes && is_primary_version) {
-							// this is a state corruption error
-							cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. During migrate receive start, duplicate partition contains primary version", ns->name, pid);
-							rv = AS_MIGRATE_CB_FAIL;
-							break; // out of switch
-						}
-
-						if (p->reject_writes) {// writes will be journaled, so unset reject_writes flag
-							p->reject_writes = false;
-							cf_debug(AS_PARTITION, "{%s:%d} Partition duplicate send complete. writes enabled again", ns->name, pid);
 						}
 
 						// Set the state to be DESYNC
@@ -2225,8 +2023,8 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 				if (CF_Q_SZ(mq) != 0) cf_detail(AS_PARTITION, "Migrate: Unexpected queue size != 0");
 			}
 
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
+
 			/*
 			 * Run all the queued migrations: this happens after the release of
 			 * the state lock to ensure that writes have begun to flow to their
@@ -2235,8 +2033,12 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			partition_migrate_record pmr;
 			while (0 == cf_queue_pop(mq, &pmr, 0)) {
 				cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate (in rx) to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
-				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid, pmr.mig_type, false, pmr.cb, pmr.cb_data))
+
+				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
+						pmr.mig_type, false, orig_cluster_key, pmr.cb,
+						pmr.cb_data)) {
 					cf_crash(AS_PARTITION, "couldn't start migrate");
+				}
 			}
 
 			break;
@@ -2245,15 +2047,22 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 		{
 			cf_debug(AS_PARTITION, "{%s:%d} migrate rx completed ", ns->name, pid);
 
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_lock(&p->lock);
+
+			if (orig_cluster_key != as_paxos_get_cluster_key()) {
+				pthread_mutex_unlock(&p->lock);
+				rv = AS_MIGRATE_CB_AGAIN;
+				break; // out of switch
+			}
+
 			cf_debug(AS_PARTITION, "{%s:%d} MIGRATE RECEIVE DONE, partition in state %d", ns->name, pid, p->state);
 
 			if (p->pending_migrate_rx == 0) {
 				cf_info(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_rx?", ns->name, pid);
 				rv = AS_MIGRATE_CB_FAIL;
-				if (0 != pthread_mutex_unlock(&p->lock))
-					cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+
+				pthread_mutex_unlock(&p->lock);
+
 				break; // out of switch
 			}
 			// Check if there are any final migrates to be done after merges and schedule these now.
@@ -2261,10 +2070,11 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			cf_queue *mq = NULL;
 			mq =  cf_queue_create(sizeof(partition_migrate_record), false);
 
-			switch (p->state) {
+			as_partition_state orig_p_state = p->state;
+
+			switch (orig_p_state) {
 				case AS_PARTITION_STATE_UNDEF:
 				case AS_PARTITION_STATE_JOURNAL_APPLY: // should never happen - it's a dummy state
-				case AS_PARTITION_STATE_WAIT:
 				case AS_PARTITION_STATE_ABSENT:
 				case AS_PARTITION_STATE_ZOMBIE:
 					/* check for illegal state */
@@ -2278,18 +2088,23 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						rv = AS_MIGRATE_CB_FAIL;
 						break; // out of switch
 					}
+
 					p->pending_migrate_rx--;
+
+					int64_t migrates_rx_remaining = cf_atomic_int_decr(&ns->migrate_rx_partitions_remaining);
+					if (migrates_rx_remaining < 0) {
+						cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) rx partitions schedule exceeded, possibly a race with prior migration",
+								ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
+					}
+
 					p->origin = 0;
 
 					// apply write journal
 					apply_write_journal(ns, pid);
-					if (0 != set_partition_sync(p, pid, ns)) {
-						cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. Migrations are disallowed", ns->name, pid);
-						rv = AS_MIGRATE_CB_AGAIN;
-						cf_atomic_int_incr(&g_config.partition_generation);
-						break; // out of switch
-					}
+
+					set_partition_sync_lockfree(p, pid, ns, true);
 					cf_atomic_int_incr(&g_config.partition_generation);
+
 					cf_debug(AS_PARTITION, "{%s:%d} migrate completed, partition sync", ns->name, pid);
 					// if this is not a master, we are done
 					if (g_config.self_node != p->replica[0]) {
@@ -2314,7 +2129,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 					for (int i = 0; i < p->n_dupl; i++)
 					{
 						p->pending_migrate_tx++; // Send request to dupl node
-						partition_migrate_record_fill(&r, &p->dupl_nodes[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+						partition_migrate_record_fill(&r, &p->dupl_nodes[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_REQUEST);
 						cf_queue_push(mq, &r);
 					}
 
@@ -2359,12 +2174,25 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 								p->dupl_nodes[i] = p->dupl_nodes[p->n_dupl - 1];
 								p->dupl_nodes[p->n_dupl - 1] = (cf_node)0;
 							}
-							p->pending_migrate_rx--; // one more migrate completed
-							p->n_dupl--; // reduce array size
+							p->n_dupl--;
+
+							p->pending_migrate_rx--;
+
+							int64_t migrates_rx_remaining = cf_atomic_int_decr(&ns->migrate_rx_partitions_remaining);
+							if (migrates_rx_remaining < 0) {
+								cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld)  rx partitions schedule exceeded, possibly a race with prior migration",
+										ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
+							}
 						}
 						else {
-							cf_warning(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state", ns->name, pid, source_node);
-							break; // out of switch
+							// We get here when DESYNC (empty) master becomes
+							// SYNC and there were duplicates. The first sync
+							// node is not a member of the dupl_nodes array.
+
+							if (orig_p_state != AS_PARTITION_STATE_DESYNC) {
+								cf_warning(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state", ns->name, pid, source_node);
+								break; // out of switch
+							}
 						}
 					}
 					else {
@@ -2388,7 +2216,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 						if (p->replica_tx_onsync[i] == true) {
 							p->replica_tx_onsync[i] = false;
 							p->pending_migrate_tx++;
-							partition_migrate_record_fill(&r, &p->replica[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+							partition_migrate_record_fill(&r, &p->replica[i], 1, ns, pid, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_NONE);
 							cf_queue_push(mq, &r);
 						}
 					}
@@ -2396,10 +2224,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 
 			cf_atomic_int_incr(&g_config.partition_generation);
 
-
-			/* unlock */
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
 
 			/* Run all the queued migrations: this happens after the release of
 				* the state lock to ensure that writes have begun to flow to their
@@ -2407,8 +2232,12 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			partition_migrate_record pmr;
 			while (0 == cf_queue_pop(mq, &pmr, 0)) {
 				cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate (in rx) to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
-				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid, pmr.mig_type, true, pmr.cb, pmr.cb_data))
+
+				if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
+						pmr.mig_type, true, orig_cluster_key, pmr.cb,
+						pmr.cb_data)) {
 					cf_crash(AS_PARTITION, "couldn't start migrate");
+				}
 			}
 
 			cf_queue_destroy(mq);
@@ -2426,11 +2255,11 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns, as_partition_id pi
 			break;
 	}
 
-	if (mq)		cf_queue_destroy(mq);
+	if (mq) {
+		cf_queue_destroy(mq);
+	}
 
-	if (-1 == rv)
-		cf_info(AS_PARTITION, "returning -1 from migrate_rx");
-	return(rv);
+	return rv;
 }
 
 
@@ -3033,17 +2862,18 @@ as_partition_balance()
 		cf_warning(AS_PAXOS, "null partition ID generated");
 	}
 
-	/*
-	 * Classify partitions in two ways, those with the same IID/VTP values
-	 * those with same IID but different VTP, and those with different IID
-	 */
-
 	size_t n_lost = 0;
 	size_t n_unique = 0;
 	size_t n_recreate = 0;
 	size_t n_duplicate = 0;
 
 	size_t n_total = g_config.namespaces * AS_PARTITIONS;
+	uint64_t orig_cluster_key = as_paxos_get_cluster_key();
+
+	cf_queue mig_q;
+	cf_queue* mq = &mig_q;
+	cf_queue_init(mq, sizeof(partition_migrate_record),
+				AS_PARTITIONS * g_config.namespaces, false);
 
 	for (int i = 0; i < g_config.namespaces; i++) {
 
@@ -3051,8 +2881,10 @@ as_partition_balance()
 		if (NULL == ns)
 			continue;
 
-		cf_queue *mq = NULL;
-		mq =  cf_queue_create(sizeof(partition_migrate_record), false);
+		cf_atomic_int_set(&ns->migrate_tx_partitions_initial, 0);
+		cf_atomic_int_set(&ns->migrate_tx_partitions_remaining, 0);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_initial, 0);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_remaining, 0);
 
 		int ns_pending_migrate_rx = 0;
 		int ns_pending_migrate_tx = 0;
@@ -3062,10 +2894,7 @@ as_partition_balance()
 			as_partition *p = &ns->partitions[j];
 			partition_migrate_record pmr;
 
-			/* lock */
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION,
-						 "couldn't acquire partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_lock(&p->lock);
 
 			// TODO - Need to handle case where a partition is DESYNC,
 			// has a version ID and has a journal.
@@ -3108,7 +2937,7 @@ as_partition_balance()
 				// Check and then update the HV and SLINDEX arrays appropriately.
 				as_partition_adjust_hv_and_slindex( p, hv_ptr, hv_slindex_ptr, j );
 			}
-			// So -- whether or not we udpated HV and SLINDEX, now we create
+			// So -- whether or not we updated HV and SLINDEX, now we create
 			// the the replica list for the current partition using the first
 			// "replication-factor" number of nodes from the HV array.
 			memset(p->replica, 0, g_config.paxos_max_cluster_size * sizeof(cf_node));
@@ -3121,7 +2950,6 @@ as_partition_balance()
 			/*
 			 * We are going to redo all the migrations that have not been completed based
 			 * on the global state, so clear the rx and tx flags
-			 * pending_writes cannot be cleared
 			 * partition state will be set later as needed
 			 */
 			p->pending_migrate_tx = 0;
@@ -3131,7 +2959,6 @@ as_partition_balance()
 			/* Reinitialize duplication list */
 			p->n_dupl = 0;
 			memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-			p->reject_writes = false;
 			p->waiting_for_master = false;
 			memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 
@@ -3202,19 +3029,16 @@ as_partition_balance()
 			bool ok = true;
 			if (is_partition_null(&ns->partitions[j].version_info)) {
 				ok = ((p->state != AS_PARTITION_STATE_SYNC)
-					  && (p->state != AS_PARTITION_STATE_ZOMBIE)
-					  && (p->state != AS_PARTITION_STATE_WAIT));
+					  && (p->state != AS_PARTITION_STATE_ZOMBIE));
 				if (!ok)
-					cf_info(AS_PARTITION,
+					cf_warning(AS_PARTITION,
 							"{%s:%d} partition version is null but state is SYNC or ZOMBIE or WAIT %d %"PRIx64"",
 							ns->name, j, p->state, self);
 			} else {
 				ok = ((p->state == AS_PARTITION_STATE_SYNC)
-					  || (p->state == AS_PARTITION_STATE_ZOMBIE)
-					  || (p->state == AS_PARTITION_STATE_SYNC)
-					  || (p->state == AS_PARTITION_STATE_WAIT));
+					  || (p->state == AS_PARTITION_STATE_ZOMBIE));
 				if (!ok)
-					cf_info(AS_PARTITION,
+					cf_warning(AS_PARTITION,
 							"{%s:%d} partition version is not null but state is not SYNC/ZOMBIE/WAIT  %d %"PRIx64"",
 							ns->name, j, p->state, self);
 			}
@@ -3398,6 +3222,9 @@ as_partition_balance()
 							set_partition_desync_lockfree(p, &ns->partitions[j].version_info, ns, j, false);
 							cf_debug(AS_PARTITION, "{%s:%d} Master case 6c: being marked desync, expect data from %"PRIx64" and %d duplicate partitions", ns->name, j, HV(j, first_sync_node), n_dupl);
 						}
+						else {
+							p->state = AS_PARTITION_STATE_SYNC;
+						}
 						/*
 						 * If there are duplicates, the master will expect migrations from the first sync node of
 						 * each duplicate partition version
@@ -3416,24 +3243,24 @@ as_partition_balance()
 						 * if master is sync and there are no duplicate partitions
 						 * schedule all the migrates to non-sync replicas right away
 						 */
-						if (p->pending_migrate_rx == 0)
-						{
+						if (p->pending_migrate_rx == 0) {
 							int loop_end = (cluster_size < p->p_repl_factor) ? cluster_size : p->p_repl_factor;
-							for (int k = 1; k < loop_end; k++)
+							for (int k = 1; k < loop_end; k++) {
 								if (false == is_sync[k]) {
 									/*
 									 * Schedule a migrate of this partition
 									 */
 									cf_debug(AS_PARTITION, "{%s:%d} Master case 6b: migrating to replica %"PRIx64, ns->name, j, HV(j, k));
 									p->pending_migrate_tx++;
-									partition_migrate_record_fill(&pmr, &HV(j, k), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+									partition_migrate_record_fill(&pmr, &HV(j, k), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_NONE);
 									cf_queue_push(mq, &pmr);
 								}
+							}
 							break; // out of switch
 						}
 						/*
 						 * Either master is not sync or it is waiting for duplicate partition versions or both
-						 * Schedule delated migrates of merged data to replicas
+						 * Schedule delayed migrates of merged data to replicas
 						 * All replicas will be migrated to in case duplicate partitions exist
 						 * Only non-sync partitions will be migrated to in case there are no duplicate partitions
 						 */
@@ -3464,10 +3291,10 @@ as_partition_balance()
 							p->origin = HV(j, 0);
 							set_partition_desync_lockfree(p, &ns->partitions[j].version_info, ns, j, false);
 							cf_debug(AS_PARTITION, "{%s:%d} Replica case 6a: being marked desync, expect data from %"PRIx64"", ns->name, j, HV(j, 0));
-
 						}
-						else
+						else {
 							set_partition_absent_lockfree(p, &ns->partitions[j].version_info, ns, j, false);
+						}
 						break; // out of switch
 					}
 					/*
@@ -3516,9 +3343,9 @@ as_partition_balance()
 								p->n_dupl = n_dupl;
 								memcpy(p->dupl_nodes, dupl_nodes, sizeof(cf_node) * p->n_dupl);
 							}
-							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)true);
+							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_ACTING_MASTER);
 						} else // duplicate nodes reject writes, so no need to flush
-							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)false);
+							partition_migrate_record_fill(&pmr, &HV(j, 0), 1, ns, j, AS_MIGRATE_TYPE_MERGE, as_partition_migrate_tx, (void *)TX_FLAGS_NONE);
 
 						cf_queue_push(mq, &pmr);
 					}
@@ -3532,15 +3359,6 @@ as_partition_balance()
 					}
 
 					/*
-					 * reject writes if this node contains a duplicate
-					 * version of this partition AND if it is also a replica
-					 */
-					if (cf_contains64(dupl_nodes, n_dupl, self) && (my_index_in_hvlist < p->p_repl_factor)) {
-						cf_debug(AS_PARTITION, "{%s:%d} Partition will reject writes during merge", ns->name, j);
-						p->reject_writes = true;
-					}
-
-					/*
 					 * if this is a replica and there are duplicate partitions
 					 * then wait for migration from master.
 					 */
@@ -3550,15 +3368,16 @@ as_partition_balance()
 							p->origin = HV(j, 0);
 							cf_debug(AS_PARTITION, "{%s:%d} Replica will wait for migration back from master %"PRIx64"", ns->name, j, HV(j, 0));
 						}
+						p->state = AS_PARTITION_STATE_SYNC;
 						break; // out of switch
 					}
 					/*
 					 * Not a replica. Partition will enter zombie state if it
 					 * has pending work. Otherwise, we discard the partition
 					 */
-					if (p->pending_migrate_tx || p->pending_writes || p->waiting_for_master) {
+					if (p->pending_migrate_tx || p->waiting_for_master) {
 						cf_debug(AS_PARTITION, "{%s:%d} Replica case 6b: becoming zombie replica", ns->name, j);
-						set_partition_zombie(p, ns, j);
+						p->state = AS_PARTITION_STATE_ZOMBIE;
 					}
 					else  { // throwing away duplicate partition
 						cf_debug(AS_PARTITION, "{%s:%d} Replica case 6: dropping replica", ns->name, j);
@@ -3573,7 +3392,7 @@ as_partition_balance()
 
 			/* copy the new succession list over the old succession list */
 			memcpy(p->old_sl, &hv_ptr[j * g_config.paxos_max_cluster_size], sizeof(cf_node) * g_config.paxos_max_cluster_size);
-			p->cluster_key = as_paxos_get_cluster_key();
+			p->cluster_key = orig_cluster_key;
 
 			cf_debug(AS_PARTITION, "[DEBUG] Partition PID(%u) gets new CK(%"PRIx64")",
 					 p->partition_id, p->cluster_key );
@@ -3581,27 +3400,20 @@ as_partition_balance()
 			ns_pending_migrate_rx += p->pending_migrate_rx;
 			ns_pending_migrate_tx += p->pending_migrate_tx;
 
-			/* unlock */
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
+			pthread_mutex_unlock(&p->lock);
 
 		} // end for each partition
 
+		int ns_pending_migrate_tx_total = ns_pending_migrate_tx + ns_pending_migrate_tx_later;
 
-		cf_info(AS_PARTITION, "{%s} re-balanced, expect migrations: out %d, in %d, out-later %d",
-				ns->name, ns_pending_migrate_tx, ns_pending_migrate_rx, ns_pending_migrate_tx_later);
+		cf_info(AS_PARTITION, "{%s} re-balanced, expected migrations - (%d tx, %d rx)",
+				ns->name, ns_pending_migrate_tx_total, ns_pending_migrate_rx);
 
-		/* Run all the queued migrations: this happens after the release of
-		 * the state lock to ensure that writes have begun to flow to their
-		 * new homes */
-		partition_migrate_record pmr;
-		while (0 == cf_queue_pop(mq, &pmr, 0)) {
-			cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
-			if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid, pmr.mig_type, false, pmr.cb, pmr.cb_data))
-				cf_crash(AS_PARTITION, "couldn't start migrate");
-		}
+		cf_atomic_int_set(&ns->migrate_tx_partitions_initial, ns_pending_migrate_tx_total);
+		cf_atomic_int_set(&ns->migrate_tx_partitions_remaining, ns_pending_migrate_tx_total);
 
-		cf_queue_destroy(mq);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_initial, ns_pending_migrate_rx);
+		cf_atomic_int_set(&ns->migrate_rx_partitions_remaining, ns_pending_migrate_rx);
 	} // end for each namespace.
 
 	// All partitions now have replicas assigned, ok to allow transactions.
@@ -3620,75 +3432,6 @@ as_partition_balance()
 		cf_warning(AS_PAXOS, "global partition state error: total %d lost %d unique %d duplicate %d", n_total, n_lost, n_unique, n_duplicate);
 
 	//
-	// Clean up wait states
-	//
-	for (int i = 0; i < g_config.namespaces; i++) {
-
-		as_namespace *ns = g_config.namespace[i];
-		if (NULL == ns)
-			continue;
-
-		for (int j = 0; j < AS_PARTITIONS; j++) {
-
-			as_partition *p = &ns->partitions[j];
-
-			int my_index_in_hvlist = -1;
-			/*
-			 * Note that we might need to look beyond the replica list
-			 * to find a sync node
-			 */
-			for (int k = 0; k < cluster_size; k++) {
-				if (HV(j, k) == self)
-					my_index_in_hvlist = k;
-			}
-			if (my_index_in_hvlist < 0) {
-				cf_warning(AS_PARTITION,
-						   "{%s:%d} State Error. Cannot find self in hash value list %"PRIx64"",
-						   ns->name, j, self);
-			}
-			/* lock */
-			if (0 != pthread_mutex_lock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't acquire partition state lock: %s", cf_strerror(errno));
-
-			bool is_wait = (p->state == AS_PARTITION_STATE_WAIT);
-			bool is_zombie = (p->state == AS_PARTITION_STATE_ZOMBIE);
-			char *z = "ZOMBIE";
-			char *w = "WAIT";
-
-			if (is_wait || is_zombie) {
-				//
-				// If the state is WAIT or ZOMBIE, then we have a fully valid partition tree in this node. The safest course
-				// is to make this partition state SYNC again. the rest of the partition balancing will take care of fixing this state
-				// properly
-				//
-
-				if (is_partition_null(&ns->partitions[j].version_info))  {
-					cf_warning(AS_PARTITION, "{%s:%d} Corrupted partition in %s state, found null partition version SYNC %"PRIx64"", ns->name, j, (is_wait ? w : z), self);
-					goto Out;
-				}
-				if (my_index_in_hvlist < p->p_repl_factor) { // replica
-					p->state = AS_PARTITION_STATE_SYNC;
-					cf_debug(AS_PARTITION, "{%s:%d} partition state changing from %s to SYNC %"PRIx64" self index %d repl %d", ns->name, j, (is_wait ? w : z), self, self_index, p->p_repl_factor);
-				}
-				else if (p->waiting_for_master || p->pending_migrate_tx) {
-					p->state = AS_PARTITION_STATE_ZOMBIE;
-					cf_debug(AS_PARTITION, "{%s:%d} partition state changing from %s to ZOMBIE %"PRIx64"", ns->name, j, (is_wait ? w : z), self);
-				}
-				else if (p->pending_writes)
-					cf_debug(AS_PARTITION, "{%s:%d} partition state left as %s to %s %"PRIx64"", ns->name, j, (is_wait ? w : z), (is_wait ? w : z), self);
-				else {
-					cf_debug(AS_PARTITION, "{%s:%d} partition state changing from %s to ABSENT %"PRIx64"", ns->name, j, (is_wait ? w : z), self);
-					set_partition_absent_lockfree(p, &ns->partitions[j].version_info, ns, j, false);
-				}
-			}
-Out:
-			if (0 != pthread_mutex_unlock(&p->lock))
-				cf_crash(AS_PARTITION, "couldn't release partition state lock: %s", cf_strerror(errno));
-		} // end for each partition
-		cf_atomic_int_incr(&g_config.partition_generation);
-	} // end for each namespace
-
-	//
 	// flush to storage
 	//
 	for (int i = 0; i < g_config.namespaces; i++) {
@@ -3700,6 +3443,19 @@ Out:
 	}
 
 	as_partition_allow_migrations();
+
+	partition_migrate_record pmr;
+	while (0 == cf_queue_pop(mq, &pmr, 0)) {
+		cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate to %"PRIx64"", pmr.ns->name, pmr.pid, *(pmr.dest));
+
+		if (0 != as_migrate(pmr.dest, pmr.destsz, pmr.ns, pmr.pid,
+				pmr.mig_type, false, orig_cluster_key, pmr.cb,
+				pmr.cb_data)) {
+			cf_crash(AS_PARTITION, "couldn't start migrate");
+		}
+	}
+
+	cf_queue_destroy(mq);
 
 	// free partition tables
 	cf_free(hv_ptr);
@@ -3835,7 +3591,7 @@ as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p)
 	bool is_sync             = (p->state == AS_PARTITION_STATE_SYNC);
 	bool migrating_to_master = (p->target != 0);
 	bool is_master           = (p->replica[0] == self);
-	
+
 	if ((is_master && is_sync) || migrating_to_master) {
 		return true;
 	} else {
