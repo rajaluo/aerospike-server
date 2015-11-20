@@ -1130,7 +1130,6 @@ migrate_send_finish(migration *mig, as_migrate_state state, char *reason)
 				mig->cluster_key, mig->tx_flags);
 		cf_atomic_int_decr( &g_config.migrate_progress_send );
 	}
-	return;
 }
 
 int
@@ -1290,7 +1289,8 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				goto Done;
 			}
 
-			// lookup in migration hash - see if this migration already exists & has been notified
+			// Lookup in migration hash - see if this migration already exists
+			// & has been notified.
 
 			migrate_recv_control *mc = cf_rc_alloc(sizeof(migrate_recv_control));
 			cf_assert(mc, AS_MIGRATE, CF_CRITICAL, "malloc" );
@@ -1298,7 +1298,7 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 			mc->done_recv = 0;
 			mc->done_recv_ms = 0;
 			mc->incoming_ldt_version = 0;
-			// Record the time fo the first START received.
+			// Record the time of the first START received.
 			mc->start_recv_ms = cf_getms();
 			mc->source_node = id;
 			AS_PARTITION_RESERVATION_INIT(mc->rsv);
@@ -1427,9 +1427,6 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 						  mc->incoming_ldt_version,
 						  mc->rsv.ns->name, mc->rsv.p->partition_id, mc->rsv.p->vp->elements,
 						  mc->rsv.p->sub_vp->elements);
-
-				// If I'm receiving migrates, then I should be batching messages
-				//cf_debug(AS_MIGRATE, "migrate_start: set fabric to high-throughtput %"PRIx64,id);
 
 #ifdef USE_NETWORK_POLICY
 				migrate_start_network_policy(id);
@@ -1614,7 +1611,7 @@ migrate_rx_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void *udat
 
 	if (mci->cluster_key != as_paxos_get_cluster_key() ) {
 		cf_debug(AS_MIGRATE, "reaping migrate rx after a cluster key change: mci %p id %d node %"PRIx64,
-				 mci, mrc_idx->mig_id, mrc_idx->source_node);
+				mci, mrc_idx->mig_id, mrc_idx->source_node);
 
 		if (cf_atomic_int_decr(&g_config.migrate_progress_recv) < 0) {
 			cf_warning(AS_MIGRATE, "migrate_progress_recv < 0");
@@ -1623,17 +1620,20 @@ migrate_rx_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void *udat
 
 		// This node is done with migration receive. reset rxstate
 		cf_detail(AS_MIGRATE, "LDT_MIGRATION: Incoming Version %ld Finished Receiving Migration !! %s:%d:%d:%d",
-				  mci->incoming_ldt_version, mci->rsv.ns->name, mci->rsv.p->partition_id, mci->rsv.p->vp->elements, mci->rsv.p->sub_vp->elements);
+				mci->incoming_ldt_version, mci->rsv.ns->name, mci->rsv.p->partition_id, mci->rsv.p->vp->elements, mci->rsv.p->sub_vp->elements);
 
-		return(RCHASH_REDUCE_DELETE);
-	} else if ((g_config.migrate_rx_lifetime_ms > 0) && mci->done_recv && (cf_getms() > (mci->done_recv_ms + g_config.migrate_rx_lifetime_ms))) {
+		return RCHASH_REDUCE_DELETE;
+	}
+	else if ((g_config.migrate_rx_lifetime_ms > 0)
+			&& mci->done_recv
+			&& (cf_getms() > (mci->done_recv_ms + g_config.migrate_rx_lifetime_ms))) {
 		cf_debug(AS_MIGRATE, "reaping expired done mig rx %d (done recv count %d ; start ms %d ; done ms %d) from node %"PRIx64,
-				 mrc_idx->mig_id, cf_atomic32_get(mci->done_recv), mci->start_recv_ms, mci->done_recv_ms, mci->source_node);
+				mrc_idx->mig_id, cf_atomic32_get(mci->done_recv), mci->start_recv_ms, mci->done_recv_ms, mci->source_node);
 
-		return(RCHASH_REDUCE_DELETE);
+		return RCHASH_REDUCE_DELETE;
 	}
 
-	return(0);
+	return 0;
 }
 
 //
@@ -1761,7 +1761,9 @@ migrate_start_send(migration *mig)
 	if (mig->start_m == 0) {
 		// cons up the start message
 		msg *start_m = as_fabric_msg_get(M_TYPE_MIGRATE);
-		if (!start_m)	return(-1);
+		if (!start_m) {
+			return -1;
+		}
 		msg_set_uint32(start_m, MIG_FIELD_OP, OPERATION_START);
 		msg_set_uint32(start_m, MIG_FIELD_MIG_ID, mig->id);
 		msg_set_uint64(start_m, MIG_FIELD_CLUSTER_KEY, mig->cluster_key);
@@ -1772,8 +1774,9 @@ migrate_start_send(migration *mig)
 		msg_set_uint64(start_m, MIG_FIELD_VERSION, mig->rsv.p->current_outgoing_ldt_version);
 
 		mig->start_m = start_m;
-		for (uint i = 0; i < mig->dst_nodes_sz; i++)
+		for (uint i = 0; i < mig->dst_nodes_sz; i++) {
 			mig->start_done[i] = false;
+		}
 
 		mig->start_xmit_ms = 0;
 		cf_debug(AS_MIGRATE, "{%s:%d} MIGRATE SEND: partition iid %"PRIx64"", mig->rsv.ns->name, mig->rsv.pid, mig->cluster_key);
@@ -1797,7 +1800,7 @@ migrate_start_send(migration *mig)
 
 	}
 
-	return(0);
+	return 0;
 }
 
 
@@ -1989,7 +1992,7 @@ as_migrate_tree(migration *mig, as_index_tree *tree, bool is_subrecord)
 
 		cf_detail(AS_MIGRATE, "retransmits done %d", mig->id);
 
-		if (mig->pickled_array)	{
+		if (mig->pickled_array) {
 			for (uint i = 0; i < mig->pickled_size; i++) {
 				if (mig->pickled_array[i].record_buf) {
 					cf_free(mig->pickled_array[i].record_buf);
@@ -2173,7 +2176,6 @@ migrate_xmit_fn(void *arg)
 		// send start messages until all nodes ack
 		bool done = false;
 		do {
-
 			if (0 != migrate_start_send(mig)) {
 				cf_info(AS_MIGRATE, "migrate start send failed, will retransmit (%d)", mig->id);
 			}
@@ -2203,8 +2205,8 @@ migrate_xmit_fn(void *arg)
 					case OPERATION_START_ACK_ALREADY_DONE:
 
 						// remove from the list - not doing to migrate to this chap
-						// todo: do we really need to handle > 1 migrate at the same time?
-						// it's hard to keep track of all the error states separately
+						// Q: do we really need to handle > 1 migrate at the same time?
+						// A: it's hard to keep track of all the error states separately
 
 						// Migrate is done!
 						goto CompletedMigrate;
@@ -2342,7 +2344,6 @@ DoneMigrate:
 		// send done messages until acked
 		done = false;
 		do {
-
 			if (0 != migrate_done_send(mig, cancel)) {
 				migrate_send_finish(mig, AS_MIGRATE_STATE_ERROR, "done send fail");
 				goto FinishedMigrate;
@@ -2351,7 +2352,7 @@ DoneMigrate:
 			migrate_xmit_control mxc;
 			if (0 == cf_queue_pop(mig->xmit_control_q, &mxc, MIGRATE_RETRANSMIT_STARTDONE_MS)) {
 
-				cf_debug(AS_MIGRATE, "migrate: received done: id %d op %d doneoffset %d", mxc.mig_id, mxc.op, mxc.node_offset);
+				cf_debug(AS_MIGRATE, "migrate: received done ack: id %d op %d doneoffset %d", mxc.mig_id, mxc.op, mxc.node_offset);
 
 				if ( (mxc.mig_id == mig->id) && (mxc.op == OPERATION_DONE_ACK) ) {
 					// set the start_done flag properly
@@ -2374,8 +2375,6 @@ DoneMigrate:
 CompletedMigrate:
 		// Migrate complete - notify caller
 		// TODO: should the callback be called to cleanup state with the cancel flag?
-		// TODO: What if migration is pushed to multiple nodes .. passes only first one.
-		// currently only sent to one node in a migration record
 		if (!cancel) {
 			migrate_send_finish(mig, AS_MIGRATE_STATE_DONE, "Successfully Sent");
 		}
@@ -2409,13 +2408,6 @@ NextMigrate:
 }
 
 
-int
-as_migrate_cancel(cf_node dst, as_namespace *ns, as_partition_id partition)
-{
-	cf_info(AS_MIGRATE, "as_migrate_cancel: stub");
-	return(0);
-}
-
 /*
 ** Externally visible function which kicks off a migrate
 **
@@ -2423,11 +2415,9 @@ as_migrate_cancel(cf_node dst, as_namespace *ns, as_partition_id partition)
 **
 ** put that structure on a queue over to the xmit function to kick off the transmission
 */
-
 int
 as_migrate(const partition_migrate_record *pmr, bool is_migrate_state_done)
 {
-
 	if (pmr->dest_sz< 1 || pmr->dest_sz>= g_config.paxos_max_cluster_size) {
 		cf_warning(AS_MIGRATE, "as_migrate: passed bad node length %d, fail",
 				pmr->dest_sz);
@@ -2568,7 +2558,6 @@ as_migrate_init()
 		cf_crash(AS_AS, "Couldn't incoming ldt migrate hash");
 	}
 
-	// Wait until init function completes to register with fabric.
 	as_fabric_register_msg_fn(M_TYPE_MIGRATE, migrate_mt, sizeof(migrate_mt), migrate_msg_fn, 0 /* udata */);
 }
 
