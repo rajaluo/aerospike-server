@@ -817,10 +817,10 @@ as_demarshal_start()
 	// de-escalation, we can't use privileged ports.
 	g_config.socket.reuse_addr = g_config.socket_reuse_addr;
 	if (0 != cf_socket_init_svc(&g_config.socket)) {
-		cf_crash(AS_DEMARSHAL, "couldn't initialize service socket: %s", cf_strerror(errno));
+		cf_crash(AS_DEMARSHAL, "couldn't initialize service socket");
 	}
 	if (-1 == cf_socket_set_nonblocking(g_config.socket.sock)) {
-		cf_crash(AS_DEMARSHAL, "couldn't set service socket nonblocking: %s", cf_strerror(errno));
+		cf_crash(AS_DEMARSHAL, "couldn't set service socket nonblocking");
 	}
 
 	// Note:  The localhost socket address will only be set if the main service socket
@@ -829,10 +829,10 @@ as_demarshal_start()
 		cf_debug(AS_DEMARSHAL, "Opening a localhost service socket");
 		g_config.localhost_socket.reuse_addr = g_config.socket_reuse_addr;
 		if (0 != cf_socket_init_svc(&g_config.localhost_socket)) {
-			cf_crash(AS_DEMARSHAL, "couldn't initialize localhost service socket: %s", cf_strerror(errno));
+			cf_crash(AS_DEMARSHAL, "couldn't initialize localhost service socket");
 		}
 		if (-1 == cf_socket_set_nonblocking(g_config.localhost_socket.sock)) {
-			cf_crash(AS_DEMARSHAL, "couldn't set localhost service socket nonblocking: %s", cf_strerror(errno));
+			cf_crash(AS_DEMARSHAL, "couldn't set localhost service socket nonblocking");
 		}
 	}
 

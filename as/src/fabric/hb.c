@@ -2668,7 +2668,7 @@ as_hb_init_socket()
 			g_hb.socket.proto = SOCK_STREAM;
 			g_hb.socket.reuse_addr = (g_config.socket_reuse_addr) ? true : false;
 			if (0 != cf_socket_init_svc(&g_hb.socket))
-				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket: %s", cf_strerror(errno));
+				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket");
 			break;
 		case AS_HB_MODE_UNDEF:
 		default:
