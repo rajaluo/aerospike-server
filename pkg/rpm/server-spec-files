@@ -3,3 +3,4 @@
 /usr/bin/asd
 /usr/bin/asmigrate2to3
 /usr/bin/asfixownership
+%config(noreplace) /etc/logrotate.d/aerospike

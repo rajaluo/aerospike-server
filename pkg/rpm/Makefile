@@ -86,9 +86,7 @@ package:
 	install -d $(SOURCE_ROOT)/RPMS/x86_64
 
 	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/rpm/server-spec-base > $(PKG)/rpm/aerospike.spec
-ifneq ($(USE_SYSTEMD),1)
 	cat $(PKG)/rpm/server-spec-logrotate >> $(PKG)/rpm/aerospike.spec
-endif
 	cat $(PKG)/rpm/server-spec-files >> $(PKG)/rpm/aerospike.spec
 ifeq ($(USE_SYSTEMD),1)
 	cat $(PKG)/rpm/server-spec-systemd >> $(PKG)/rpm/aerospike.spec
