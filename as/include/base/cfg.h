@@ -156,6 +156,10 @@ typedef struct as_config_s {
 	/* The TCP socket for the listener */
 	cf_socket_cfg		socket;
 
+	/* The TCP socket for the listener on 127.0.0.1 */
+	/* (Only opened if the main service socket is not already listening on 0.0.0.0 or 127.0.0.1.) */
+	cf_socket_cfg		localhost_socket;
+
 	char				*external_address; // hostname that clients will connect on
 	bool				is_external_address_virtual;
 	char				*alternate_address; // alternate service address (could be DNS)
