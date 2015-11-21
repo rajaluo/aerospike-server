@@ -105,15 +105,21 @@ typedef enum {
 	XDR_CASE_XDR_WRITE_BATCH_SIZE,
 	XDR_CASE_XDR_READ_BATCH_SIZE,
 	XDR_CASE_XDR_DO_VERSION_CHECK,
-
-	// Remote datacenter options:
-	XDR_CASE_DC_NODE_ADDRESS_PORT,
-	XDR_CASE_DC_INT_EXT_IPMAP,
 	XDR_CASE_XDR_INFO_TIMEOUT,
 	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
 	XDR_CASE_XDR_SHIP_DELAY,
 	XDR_CASE_XDR_SHIP_THREADS,
-	XDR_CASE_XDR_SHIP_SLAB_SIZE
+	XDR_CASE_XDR_SHIP_SLAB_SIZE,
+
+	// Security options:
+	XDR_CASE_SEC_CREDENTIALS_BEGIN,
+	XDR_CASE_SEC_CRED_USERNAME,
+	XDR_CASE_SEC_CRED_PASSWORD,
+
+	// Remote datacenter options:
+	XDR_CASE_DC_NODE_ADDRESS_PORT,
+	XDR_CASE_DC_INT_EXT_IPMAP,
+	XDR_CASE_DC_SECURITY_CONFIG_FILE
 } xdr_cfg_case_id;
 
 /* Configuration parser token plus case-identifier pair. The server (cfg.c)
@@ -133,6 +139,8 @@ extern const xdr_cfg_opt XDR_DC_OPTS[];
 extern const xdr_cfg_opt XDR_NS_OPTS[];
 extern const xdr_cfg_opt XDR_NS_STORAGE_OPTS[];
 extern const xdr_cfg_opt XDR_NS_SET_OPTS[];
+extern const xdr_cfg_opt XDR_SEC_GLOBAL_OPTS[];
+extern const xdr_cfg_opt XDR_SEC_CRED_OPTS[];
 
 /* The various xdr_cfg_opt array counts. The server (cfg.c) needs to see these.
  */
@@ -143,6 +151,8 @@ extern const int NUM_XDR_DC_OPTS;
 extern const int NUM_XDR_NS_OPTS;
 extern const int NUM_XDR_NS_STORAGE_OPTS;
 extern const int NUM_XDR_NS_SET_OPTS;
+extern const int NUM_XDR_SEC_GLOBAL_OPTS;
+extern const int NUM_XDR_SEC_CRED_OPTS;
 
 // Some static knobs shared between XDR and asd
 #define XDR_TIME_ADJUST	300000 // 5 min (ms) time value. Base macro for XDR(for LST adjustment in failure cases) and asd (as parameter for printing warrnings).

@@ -104,6 +104,7 @@ const xdr_cfg_opt XDR_DC_OPTS[] = {
 		{ "{",								XDR_CASE_CONTEXT_BEGIN },
 		{ "dc-node-address-port",			XDR_CASE_DC_NODE_ADDRESS_PORT },
 		{ "dc-int-ext-ipmap",				XDR_CASE_DC_INT_EXT_IPMAP },
+		{ "dc-security-config-file",		XDR_CASE_DC_SECURITY_CONFIG_FILE },
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -114,6 +115,21 @@ const int NUM_XDR_NS_STORAGE_OPTS	= sizeof(XDR_NS_STORAGE_OPTS) / sizeof(xdr_cfg
 const int NUM_XDR_NS_SET_OPTS		= sizeof(XDR_NS_SET_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_OPTS				= sizeof(XDR_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_DC_OPTS			= sizeof(XDR_DC_OPTS) / sizeof(xdr_cfg_opt);
+
+// Security related configs
+const xdr_cfg_opt XDR_SEC_GLOBAL_OPTS[] = {
+		{ "credentials",					XDR_CASE_SEC_CREDENTIALS_BEGIN }
+};
+
+const xdr_cfg_opt XDR_SEC_CRED_OPTS[] = {
+		{ "{",								XDR_CASE_CONTEXT_BEGIN },
+		{ "username",						XDR_CASE_SEC_CRED_USERNAME },
+		{ "password",						XDR_CASE_SEC_CRED_PASSWORD },
+		{ "}",								XDR_CASE_CONTEXT_END }
+};
+
+const int NUM_XDR_SEC_GLOBAL_OPTS	= sizeof(XDR_SEC_GLOBAL_OPTS) / sizeof(xdr_cfg_opt);
+const int NUM_XDR_SEC_CRED_OPTS		= sizeof(XDR_SEC_CRED_OPTS) / sizeof(xdr_cfg_opt);
 
 // N.B.:  Default to false.
 const bool g_xdr_supported;
