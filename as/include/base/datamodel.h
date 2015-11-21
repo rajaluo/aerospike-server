@@ -289,7 +289,11 @@ extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); /
 extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region, bool is_strict);
 
 // list:
+struct cdt_payload_s;
 extern void as_bin_particle_list_set_hidden(as_bin *b);
+extern void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
+extern int as_bin_cdt_packed_read(const as_bin *b, as_msg_op *op, as_bin *result);
+extern int as_bin_cdt_packed_modify(as_bin *b, as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb);
 
 // map:
 extern void as_bin_particle_map_set_hidden(as_bin *b);

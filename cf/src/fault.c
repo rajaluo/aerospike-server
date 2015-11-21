@@ -121,6 +121,8 @@ cf_fault_severity cf_fault_filter[CF_FAULT_CONTEXT_UNDEF];
 int cf_fault_sinks_inuse = 0;
 int num_held_fault_sinks = 0;
 
+bool g_use_local_time = false;
+
 // Filter stderr logging at this level when there are no sinks:
 #define NO_SINKS_LIMIT CF_WARNING
 
@@ -416,6 +418,12 @@ cf_fault_sink_setcontext(cf_fault_sink *s, char *context, char *severity)
 }
 
 
+void
+cf_fault_use_local_time(bool val)
+{
+	g_use_local_time = val;
+}
+
 /* cf_fault_event
  * Respond to a fault */
 void
@@ -431,6 +439,7 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
 	char mbuf[1024];
 	time_t now;
 	struct tm nowtm;
+	size_t pos;
 
 
 	/* Make sure there's always enough space for the \n\0. */
@@ -438,8 +447,15 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
 
 	/* Set the timestamp */
 	now = time(NULL);
-	gmtime_r(&now, &nowtm);
-	size_t pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
+
+	if (g_use_local_time) {
+		localtime_r(&now, &nowtm);
+		pos = strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
+	}
+	else {
+		gmtime_r(&now, &nowtm);
+		pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
+	}
 
 	/* Set the context/scope/severity tag */
 	pos += snprintf(mbuf + pos, limit - pos, "%s (%s): ", cf_fault_severity_strings[severity], cf_fault_context_strings[context]);
@@ -695,6 +711,7 @@ cf_fault_event2(const cf_fault_context context, const cf_fault_severity severity
 	char mbuf[MAX_BINARY_BUF_SZ];
 	time_t now;
 	struct tm nowtm;
+	size_t pos;
 
 	char binary_buf[MAX_BINARY_BUF_SZ];
 
@@ -709,8 +726,15 @@ cf_fault_event2(const cf_fault_context context, const cf_fault_severity severity
 
 	/* Set the timestamp */
 	now = time(NULL);
-	gmtime_r(&now, &nowtm);
-	size_t pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
+
+	if (g_use_local_time) {
+		localtime_r(&now, &nowtm);
+		pos = strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
+	}
+	else {
+		gmtime_r(&now, &nowtm);
+		pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
+	}
 
 	// If we're given a valid MEMORY POINTER for a binary value, then
 	// compute the string that corresponds to the bytes.
