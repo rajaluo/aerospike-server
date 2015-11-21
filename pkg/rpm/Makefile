@@ -29,11 +29,11 @@ ifeq ($(USE_SYSTEMD),1)
 	install -d $(BUILD_ROOT)/usr/lib/systemd/system
 	install -d $(BUILD_ROOT)/etc/systemd/system/aerospike.service.d
 else
-	install -d $(BUILD_ROOT)/etc/logrotate.d
 	install -d $(BUILD_ROOT)/var/log/aerospike
 	install -d $(BUILD_ROOT)/var/run/aerospike
 endif
 	install -d $(BUILD_ROOT)/etc/init.d
+	install -d $(BUILD_ROOT)/etc/logrotate.d
 	install -d $(BUILD_ROOT)/usr/bin
 
 	install -pm 755 $(BIN_DIR)/asd $(BUILD_ROOT)/usr/bin/asd
