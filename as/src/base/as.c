@@ -295,20 +295,18 @@ main(int argc, char **argv)
 			cf_assert(config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
 			break;
 		case 'F':
-			// A "new-style" daemon(*) runs in the foreground and:
-			//  -- Does not set the user/group.
-			//  -- Does not write a PID file.
-			//  -- Does not write to a log file.
-			//  -- Does enables the console (stderr) log.
+			// As a "new-style" daemon(*), asd runs in the foreground and
+			// ignores the following configuration items:
+			//  - user ('user')
+			//	- group ('group')
+			//  - PID file ('pidfile')
 			//
-			// If any of these guidelines are not met, the server logs a warning.
+			// If ignoring configuration items, or if the 'console' sink is not
+			// specified, warnings will appear in stderr.
 			//
-			// In addition, the server does not rotate the console log upon receiving SIGHUP.
-			//       [But should instead re-load the config. file. ~~ Not currently supported.]
-			//
-			// (*) Reference:  http://0pointer.de/public/systemd-man/daemon.html#New-Style%20Daemons
-			new_style_daemon = true;
+			// (*) http://0pointer.de/public/systemd-man/daemon.html#New-Style%20Daemons
 			run_in_foreground = true;
+			new_style_daemon = true;
 			break;
 		case 'd':
 			run_in_foreground = true;
@@ -331,10 +329,6 @@ main(int argc, char **argv)
 	// is a shortcut pointer to the global runtime configuration instance.)
 	as_config *c = as_config_init(config_file);
 
-	// (Need to have this available, but it can only be set on the command-line,
-	// not in the config. file.)
-	c->new_style_daemon = new_style_daemon;
-
 #ifdef USE_ASM
 	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
 
@@ -354,12 +348,13 @@ main(int argc, char **argv)
 	// If not, the process will self-terminate with (hopefully!) a log message
 	// indicating which resource is not set up properly.
 	if (0 != c->uid && 0 == geteuid()) {
-		if (! c->new_style_daemon) {
+		if (! new_style_daemon) {
 			// To see this log, change NO_SINKS_LIMIT in fault.c:
 			cf_info(AS_AS, "privsep to %d %d", c->uid, c->gid);
 			cf_process_privsep(c->uid, c->gid);
-		} else {
-			cf_warning(AS_AS, "Not doing privsep in new-style daemon mode.");
+		}
+		else {
+			cf_warning(AS_AS, "will not do privsep in new-style daemon mode");
 		}
 	}
 
@@ -369,11 +364,11 @@ main(int argc, char **argv)
 	// that must be opened above, in order to parse the user & group.)
 	//==========================================================================
 
-	// A "new-style" daemon expects console logging to be configured.
-	// (If not, log messages won't be seen via the standard path.)
-	if (c->new_style_daemon) {
+	// A "new-style" daemon expects console logging to be configured. (If not,
+	// log messages won't be seen via the standard path.)
+	if (new_style_daemon) {
 		if (! cf_fault_console_is_held()) {
-			cf_warning(AS_AS, "In new-style daemon mode, console logging is not configured.");
+			cf_warning(AS_AS, "in new-style daemon mode, console logging is not configured");
 		}
 	}
 
@@ -423,11 +418,12 @@ main(int argc, char **argv)
 	}
 
 	// Write the pid file, if specified.
-	if (! c->new_style_daemon) {
+	if (! new_style_daemon) {
 		write_pidfile(c->pidfile);
-	} else {
+	}
+	else {
 		if (c->pidfile) {
-			cf_warning(AS_AS, "Not writing PID file in new-style daemon mode.");
+			cf_warning(AS_AS, "will not write PID file in new-style daemon mode");
 		}
 	}
 
