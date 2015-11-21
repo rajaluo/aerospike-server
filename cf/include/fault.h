@@ -173,6 +173,8 @@ extern cf_fault_sink *cf_fault_sink_get_id(int id);
 
 extern void cf_fault_sink_logroll(void);
 
+extern void cf_fault_use_local_time(bool val);
+
 // Define the mechanism that we'll use to write into the Server Log.
 // cf_fault_event() is "regular" logging
 extern void cf_fault_event(const cf_fault_context,
