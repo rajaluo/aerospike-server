@@ -1586,13 +1586,15 @@ as_paxos_transaction_apply(cf_node from_id)
 			as_paxos_transaction_retire(t);
 		}
 
-		cf_debug(AS_PAXOS, "Non-principal retired %d transactions", n_xact);
+		cf_debug(AS_PAXOS, "{%d,%d} non-principal retired %d transactions",
+				p->gen.sequence, p->gen.proposal, n_xact);
 
 		return;
 	}
 
 	while (NULL != (t = as_paxos_transaction_getnext(self))) {
-		cf_debug(AS_PAXOS, "Applying transaction 0x%x", t);
+		cf_debug(AS_PAXOS, "{%d,%d} applying transaction 0x%x",
+				p->gen.sequence, p->gen.proposal, t);
 
 		if ((t->c.p_node != 0) && (t->c.p_node != as_paxos_succession_getprincipal()))
 			cf_warning(AS_PAXOS, "Applying transaction not from %"PRIx64" principal is %"PRIx64"",
@@ -1639,7 +1641,8 @@ as_paxos_transaction_apply(cf_node from_id)
 			}
 		}
 
-		cf_debug(AS_PAXOS, "Principal retiring transaction 0x%x", t);
+		cf_debug(AS_PAXOS, "{%d,%d} principal retiring transaction 0x%x",
+				p->gen.sequence, p->gen.proposal, t);
 		as_paxos_transaction_retire(t);
 	}
 
@@ -1650,11 +1653,12 @@ as_paxos_transaction_apply(cf_node from_id)
 		 * No transactions have been applied. So do not send sync messages.
 		 * This is most likely because confirmation messages have crossed over
 		 */
-		cf_warning(AS_PAXOS, "No changes applied on paxos confirmation message, principal is %"PRIx64". No sync messages will be sent", as_paxos_succession_getprincipal());
+		cf_warning(AS_PAXOS, "{%d,%d} no changes applied on paxos confirmation message, principal is %"PRIx64" - no sync messages will be sent",
+				p->gen.sequence, p->gen.proposal, as_paxos_succession_getprincipal());
 		return;
 	}
 
-	as_paxos_start_second_phase();
+	p->need_to_rebalance = true;
 }
 
 /* as_paxos_wire_change_create
@@ -2032,10 +2036,37 @@ as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 	msg_get_uint32(m, AS_PAXOS_MSG_COMMAND, &c);
 	cf_debug(AS_PAXOS, "PAXOS message with ID %d received from node %"PRIx64"", c, id);
 
-	if (0 != cf_queue_push(p->msgq, &qm))
-		cf_warning(AS_PAXOS, "PUSH FAILED: PAXOS message with ID %d received from node %"PRIx64"", c, id);
+	int q_priority;
+	// The goal here is to try to prioritize events that change the cluster
+	// membership over events that lead to a rebalance. Minimizing the number
+	// of rebalances performed reduced the duplicate resolution load.
+	switch (c) {
+		case AS_PAXOS_MSG_COMMAND_PREPARE:
+		case AS_PAXOS_MSG_COMMAND_PREPARE_ACK:
+		case AS_PAXOS_MSG_COMMAND_PREPARE_NACK:
+		case AS_PAXOS_MSG_COMMAND_COMMIT:
+		case AS_PAXOS_MSG_COMMAND_COMMIT_ACK:
+		case AS_PAXOS_MSG_COMMAND_COMMIT_NACK:
+		case AS_PAXOS_MSG_COMMAND_CONFIRM:
+		case AS_PAXOS_MSG_COMMAND_HEARTBEAT_EVENT:
+		case AS_PAXOS_MSG_COMMAND_SET_SUCC_LIST:
+		case AS_PAXOS_MSG_COMMAND_RETRANSMIT_CHECK:
+			q_priority = CF_QUEUE_PRIORITY_MEDIUM;
+			break;
+		case AS_PAXOS_MSG_COMMAND_SYNC:
+		case AS_PAXOS_MSG_COMMAND_SYNC_REQUEST:
+		case AS_PAXOS_MSG_COMMAND_PARTITION_SYNC_REQUEST:
+		case AS_PAXOS_MSG_COMMAND_PARTITION_SYNC:
+		case AS_PAXOS_MSG_COMMAND_UNDEF:
+		default:
+			q_priority = CF_QUEUE_PRIORITY_LOW;
+	}
 
-	return(0);
+	if (0 != cf_queue_priority_push(p->msgq, &qm, q_priority)) {
+		cf_warning(AS_PAXOS, "PUSH FAILED: PAXOS message with ID %d received from node %"PRIx64"", c, id);
+	}
+
+	return 0;
 }
 
 /* as_paxos_event
@@ -2224,10 +2255,11 @@ as_paxos_process_heartbeat_event(msg *m)
 							 */
 							cf_info(AS_PAXOS, "Skip node arrival %"PRIx64" cluster principal %"PRIx64" pulse principal %"PRIx64"",
 									 events[i].nodeid, principal, events[i].p_node);
-							//if (true == as_paxos_succession_ismember(events[i].nodeid))
-							//	cf_warning(AS_PAXOS, "Skipped arrival node %"PRIx64" is in succession list!", events[i].nodeid);
-							//if (true == as_paxos_succession_ismember(events[i].p_node))
-							//	cf_warning(AS_PAXOS, "Skipped arrival node's principal %"PRIx64" is in succession list!", events[i].p_node);
+
+							// TODO - but what if the other principal now
+							// quietly disappears and never returns?
+							p->need_to_rebalance = false;
+
 							break; // skip this event
 						}
 					}
@@ -2724,8 +2756,8 @@ as_paxos_process_retransmit_check()
 	}
 }
 
-/* as_paxos_thr
- * A thread to handle all Paxos events */
+// as_paxos_thr
+// A thread to handle all Paxos events
 void *
 as_paxos_thr(void *arg)
 {
@@ -2744,9 +2776,54 @@ as_paxos_thr(void *arg)
 
 		cf_debug(AS_PAXOS, "Popping paxos queue 0x%x", p->msgq);
 
-		/* Get the next message from the queue */
-		if (0 != cf_queue_pop(p->msgq, &qm, CF_QUEUE_FOREVER))
-			cf_crash(AS_PAXOS, "cf_queue_pop failed");
+		static const int Q_WAIT_MS = 400; // TODO - what to do with this?
+
+		// Get the next message from the queue.
+		if (0 != cf_queue_priority_pop(p->msgq, &qm, Q_WAIT_MS)) {
+			// Q: Couldn't this cause us to starve rebalance if there are
+			//    frequent cluster disruptions?
+			// A: We sure hope so! We want to minimize the number of rebalances
+			//    during these scenarios since they would have been pointless
+			//    and will cause unnecessary partition version
+			//    changes/creations which increases write duplicate resolution
+			//    load.
+
+			if (! p->need_to_rebalance) {
+				continue;
+			}
+
+			// No event came - do the rebalance.
+			p->need_to_rebalance = false;
+
+			cf_node principal = as_paxos_succession_getprincipal();
+
+			if (self != principal) {
+				// Only principal can initiate rebalance.
+				continue;
+			}
+
+			as_paxos_start_second_phase();
+
+			if (as_paxos_is_single_node_cluster()) {
+				// Clean out the sync states array.
+				memset(p->partition_sync_state, 0, sizeof(p->partition_sync_state));
+
+				as_partition_balance();
+
+				if (p->cb) {
+					as_paxos_change c;
+					c.n_change = 1;
+					c.type[0] = AS_PAXOS_CHANGE_SYNC;
+					c.id[0] = 0;
+
+					for (int i = 0; i < p->n_callbacks; i++) {
+						(p->cb[i])(p->gen, &c, p->succession, p->cb_udata[i]);
+					}
+				}
+			}
+
+			continue;
+		}
 
 		/* Unwrap and sanity check the message, then undertake the
 		 * appropriate action */
@@ -2772,10 +2849,6 @@ as_paxos_thr(void *arg)
 			as_paxos_process_retransmit_check();
 			goto cleanup;
 		}
-
-		/* Hold the state lock */
-//        if (0 != pthread_mutex_lock(&p->lock))
-//		    cf_fault(CF_FAULT_SCOPE_THREAD, CF_FAULT_SEVERITY_CRITICAL, "couldn't get Paxos lock: %s", cf_strerror(errno));
 
 		cf_node principal = as_paxos_succession_getprincipal();
 
@@ -3056,19 +3129,8 @@ as_paxos_thr(void *arg)
 					 */
 					cf_info(AS_PAXOS, "{%d,%d} SINGLE NODE CLUSTER!!!",
 							t.gen.sequence, t.gen.proposal);
-					/* Clean out the sync states array */
-					memset(p->partition_sync_state, 0, sizeof(p->partition_sync_state));
 
-					as_partition_balance();
-
-					if (p->cb) {
-						as_paxos_change c;
-						c.n_change = 1;
-						c.type[0] = AS_PAXOS_CHANGE_SYNC;
-						c.id[0] = 0;
-						for (int i = 0; i < p->n_callbacks; i++)
-							(p->cb[i])(p->gen, &c, p->succession, p->cb_udata[i]);
-					}
+					p->need_to_rebalance = true;
 				}
 
 				/*
@@ -3277,16 +3339,12 @@ as_paxos_thr(void *arg)
 		}
 
 cleanup:
-		/* Release the state lock */
-//        if (0 != pthread_mutex_unlock(&p->lock))
-//		    cf_fault(CF_FAULT_SCOPE_THREAD, CF_FAULT_SEVERITY_CRITICAL, "couldn't release Paxos lock: %s", cf_strerror(errno));
-
 		/* Free the message */
 		as_fabric_msg_put(qm->m);
 		cf_free(qm);
 	}
 
-	return(NULL);
+	return NULL;
 }
 
 /* as_paxos_init
@@ -3306,7 +3364,9 @@ as_paxos_init()
 	as_paxos_set_cluster_integrity(p, false);
 
 	as_paxos_current_init(p);
-	p->msgq = cf_queue_create(sizeof(void *), true);
+	p->msgq= cf_queue_priority_create(sizeof(void *), true);
+
+	p->need_to_rebalance = false;
 	p->ready = false;
 	p->cluster_size = 0;
 
