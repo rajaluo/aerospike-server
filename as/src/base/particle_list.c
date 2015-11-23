@@ -567,7 +567,7 @@ as_bin_particle_list_get_packed_val(const as_bin *b, cdt_payload *packed)
 
 	const list_mem *p_list_mem = (const list_mem *)b->particle;
 
-	packed->ptr = p_list_mem->data;
+	packed->ptr = (uint8_t *)p_list_mem->data;
 	packed->size = p_list_mem->sz;
 }
 
