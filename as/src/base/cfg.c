@@ -66,8 +66,8 @@
 // Constants.
 //
 
-const char *IPV4_ANY_ADDR = "0.0.0.0";
-const char *IPV4_LOCALHOST_ADDR = "127.0.0.1";
+const char IPV4_ANY_ADDR[] = "0.0.0.0";
+const char IPV4_LOCALHOST_ADDR[] = "127.0.0.1";
 
 
 //==========================================================
@@ -169,7 +169,7 @@ cfg_set_defaults()
 	// Network service defaults.
 	c->socket.proto = SOCK_STREAM; // not configurable, but addr and port are
 	c->localhost_socket.proto = SOCK_STREAM; // not configurable
-	c->socket.addr = IPV4_ANY_ADDR; // by default listen on any IPv4 address
+	c->socket.addr = (char*)IPV4_ANY_ADDR; // by default listen on any IPv4 address
 	c->socket_reuse_addr = true;
 
 	// Fabric TCP socket keepalive defaults.
@@ -3329,9 +3329,10 @@ as_config_post_process(as_config *c, const char *config_file)
 			g_config.external_address = g_config.socket.addr;
 		}
 
-		// Set the localhost socket address only if the main service socket not already (effectively) listening on that address.
-		if ((g_config.socket.addr != IPV4_ANY_ADDR) && (g_config.socket.addr != IPV4_LOCALHOST_ADDR)) {
-			g_config.localhost_socket.addr = IPV4_LOCALHOST_ADDR;
+		// Set the localhost socket address only if the main service socket is
+		// not already (effectively) listening on that address.
+		if (g_config.socket.addr != IPV4_LOCALHOST_ADDR) {
+			g_config.localhost_socket.addr = (char*)IPV4_LOCALHOST_ADDR;
 		}
 	}
 
@@ -3611,16 +3612,16 @@ cfg_reset_self_node(as_config * config_p) {
  * Normalize a name for an IP address into a specific IP address string.
  * Returns a constant string pointer for certain well-known addresses.
  */
-char *
+char*
 cfg_set_addr(const char* name)
 {
-	char *retval = NULL;
+	char* retval = NULL;
 
-	if ((!strcmp(name, "any")) || !strcmp(name, IPV4_ANY_ADDR)) {
-		return IPV4_ANY_ADDR;
+	if (strcmp(name, "any") == 0 || strcmp(name, IPV4_ANY_ADDR) == 0) {
+		return (char*)IPV4_ANY_ADDR;
 	}
-	else if (!strcmp(name, IPV4_LOCALHOST_ADDR)) {
-		return IPV4_LOCALHOST_ADDR;
+	else if (strcmp(name, IPV4_LOCALHOST_ADDR) == 0) {
+		return (char*)IPV4_LOCALHOST_ADDR;
 	}
 	else {
 		if (NULL == (retval = cf_strdup(name))) {
