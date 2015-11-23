@@ -234,6 +234,23 @@ cf_fault_sink_hold(char *path)
 }
 
 
+/* cf_fault_console_is_held
+ * Return whether the console is held.
+ */
+bool
+cf_fault_console_is_held()
+{
+	for (int i = 0; i < num_held_fault_sinks; i++) {
+		cf_fault_sink *s = &cf_fault_sinks[i];
+		if (!strcmp(s->path, "stderr")) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
 static void
 fault_filter_adjust(cf_fault_sink *s, cf_fault_context ctx)
 {
@@ -937,8 +954,7 @@ cf_fault_sink_logroll(void)
 	fprintf(stderr, "cf_fault: rolling log files\n");
 	for (int i = 0; i < cf_fault_sinks_inuse; i++) {
 		cf_fault_sink *s = &cf_fault_sinks[i];
-		if ((0 != strncmp(s->path,"stderr", 6)) && (s->fd > 2)) {
-
+		if ((0 != strncmp(s->path, "stderr", 6)) && (s->fd > 2)) {
 			int fd = s->fd;
 			s->fd = -1;
 			usleep(1);
@@ -946,9 +962,10 @@ cf_fault_sink_logroll(void)
 			// hopefully, the file has been relinked elsewhere - or you're OK losing it
 			unlink(s->path);
 			close(fd);
+
+			fd = open(s->path, O_WRONLY|O_CREAT|O_NONBLOCK|O_APPEND, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+			s->fd = fd;
 		}
-		int fd = open(s->path, O_WRONLY|O_CREAT|O_NONBLOCK|O_APPEND, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-		s->fd = fd;
 	}
 }
 
@@ -957,7 +974,6 @@ cf_fault_sink *cf_fault_sink_get_id(int id)
 {
 	if (id > cf_fault_sinks_inuse)	return(0);
 	return ( &cf_fault_sinks[id] );
-
 }
 
 int

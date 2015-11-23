@@ -2883,8 +2883,10 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 
 		// RESERVE SIs for old_bins
 		// Cannot reserve for new bins as binid is not known yet
-		for (int i=0; i<old_n_bins; i++) {
-			si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd.bins[i].id, &si_arr[si_arr_index]);
+		if (has_sindex) {
+			for (int i=0; i<old_n_bins; i++) {
+				si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd.bins[i].id, &si_arr[si_arr_index]);
+			}
 		}
 
 		if (! rd.ns->single_bin) {
