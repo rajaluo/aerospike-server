@@ -283,6 +283,11 @@ void write_request_destructor(void *object) {
 	if (wr->proxy_msg)
 		as_fabric_msg_put(wr->proxy_msg);
 	if (wr->msgp) {
+		// TODO - this is temporary defensive code!
+		if (wr->batch_shared) {
+			cf_warning(AS_RW, "write_request_destructor(): Free msgp FOR BATCH.");
+		}
+
 		cf_free(wr->msgp);
 		wr->msgp = 0;
 	}
@@ -296,6 +301,11 @@ void write_request_destructor(void *object) {
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 	}
 	if (wr->proto_fd_h) {
+		// TODO - this is temporary defensive code!
+		if (wr->batch_shared) {
+			cf_warning(AS_RW, "write_request_destructor(): Close fd FOR BATCH.");
+		}
+
 		as_end_of_transaction_ok(wr->proto_fd_h);
 		wr->proto_fd_h = 0;
 	}
@@ -5539,6 +5549,11 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 
 		pthread_mutex_lock(&wr->lock);
 		if (udf_rw_needcomplete_wr(wr)) {
+			// TODO - this is temporary defensive code!
+			if (wr->batch_shared) {
+				cf_warning(AS_RW, "rw_retransmit_reduce_fn(): udf_rw_needcomplete_wr() RETURNS TRUE FOR BATCH.");
+			}
+
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
 			udf_rw_complete(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT, __FILE__, __LINE__);
