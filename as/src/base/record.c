@@ -467,8 +467,10 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	
 	// RESERVE SIs for old bins
 	// Cannot reserve SIs for new bins as we do not know the bin-id yet
-	for (int i=0; i<old_n_bins; i++) {
-		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd->bins[i].id, &si_arr[si_arr_index]);
+	if (has_sindex) {
+		for (int i=0; i<old_n_bins; i++) {
+			si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd->bins[i].id, &si_arr[si_arr_index]);
+		}
 	}
 	
 	if ((delta_bins < 0) && has_sindex) {
