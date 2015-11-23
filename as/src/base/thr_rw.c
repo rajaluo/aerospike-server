@@ -2252,7 +2252,6 @@ Out1:
 int
 rw_dup_process(cf_node node, msg *m)
 {
-	cf_atomic_int_incr(&g_config.read_dup_prole);
 	if (g_config.n_transaction_duplicate_threads == 0) {
 		rw_dup_prole(node, m);
 		return (0);
