@@ -76,4 +76,4 @@ int ai_drop_index(char *iname);
  * Destroys the index (btr)
  * Does not destroy the metadata
  */
-void ai_destroy_index(int imatch);
+void ai_destroy_index(bt * ibtr, int imatch);

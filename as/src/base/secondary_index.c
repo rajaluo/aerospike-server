@@ -2035,13 +2035,14 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 {
 	as_sindex_pmetadata * pimd;
 	for (int i=0; i<imd->nprts; i++) {
-		SINDEX_WLOCK(&imd->slock);
+		SINDEX_RLOCK(&imd->slock);
 		pimd = &imd->pimd[i];
 		SINDEX_WLOCK(&pimd->slock);
-		ai_btree_empty_pimd(pimd);
+		struct btree * ibtr = pimd->ibtr;
+		ai_btree_reinit_pimd(pimd);
 		SINDEX_UNLOCK(&pimd->slock);
 		SINDEX_UNLOCK(&imd->slock);
-
+		ai_btree_delete_ibtr(ibtr, pimd->imatch);
 		as_sindex_clear_stats_on_empty_index(imd->si);
 	}
 }
@@ -2057,6 +2058,7 @@ as_sindex_drop_set(as_namespace * ns, char * set_name)
 		as_sindex_empty_index(si_arr[i]->imd);
 	}
 	SINDEX_GUNLOCK();
+	as_sindex_release_arr(si_arr, sindex_count);
 }
 //                                        END - SINDEX DELETE
 // ************************************************************************************************

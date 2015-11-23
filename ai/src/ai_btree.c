@@ -1513,16 +1513,24 @@ ai_btree_get_nsize(as_sindex_metadata *imd)
 }
 
 void
-ai_btree_empty_pimd(as_sindex_pmetadata * pimd)
+ai_btree_reinit_pimd(as_sindex_pmetadata * pimd)
 {
 	if(!pimd->ibtr)	{
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
 
-	ai_cleanup(pimd->ibtr);
-	
-	ai_destroy_index(pimd->imatch);
-	
 	r_ind_t *ri = &Index[pimd->imatch];
 	ri->btr = createIndexBT(ri->dtype, pimd->imatch);
+	pimd->ibtr = ri->btr;
+}
+
+void
+ai_btree_delete_ibtr(bt * ibtr, int imatch)
+{
+	if(!ibtr)	{
+		cf_crash(AS_SINDEX, "IBTR is null");
+	}
+
+	ai_cleanup(ibtr);
+	ai_destroy_index(ibtr, imatch);	
 }

@@ -91,4 +91,6 @@ int ai_btree_key_hash(as_sindex_metadata *imd, void *skey);
 
 int ai_post_index_creation_setup_pmetadata(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int simatch, int idx);
 
-void ai_btree_empty_pimd(as_sindex_pmetadata * pimd);
+void ai_btree_delete_ibtr(bt * ibtr, int imatch);
+
+void ai_btree_reinit_pimd(as_sindex_pmetadata * pimd);

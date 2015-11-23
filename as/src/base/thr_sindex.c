@@ -434,7 +434,7 @@ as_sindex__defrag_fn(void *udata)
 				uint64_t pimd_wlock_time_ns = 0; 
 				bool     more               = true;
 				while (more) {
-					SINDEX_WLOCK(&si->imd->slock);
+					SINDEX_RLOCK(&si->imd->slock);
 					pimd = &si->imd->pimd[p_index];
 					SINDEX_WLOCK(&pimd->slock);
 					SET_TIME_FOR_SINDEX_GC_HIST(pimd_wlock_time_ns);
