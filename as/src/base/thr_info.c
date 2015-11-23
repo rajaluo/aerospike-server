@@ -4390,26 +4390,24 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 //	log-message:message=<MESSAGE>[;who=<WHO>]
 //
 // Example:
-// 	log-message:message=The BI Agent has started.;who=BI Agent
+// 	log-message:message=Aerospike anonymous data collection is ACTIVE. For further information, see http://aerospike.com/aerospike-telemetry;who=Aerospike Telemetry Agent
 //
 int
 info_command_log_message(char *name, char *params, cf_dyn_buf *db)
 {
-	if(params) {
-		char who[150];
-		int who_len = sizeof(who);
-		if (0 != as_info_parameter_get(params, "who", who, &who_len)) {
-			strncpy(who, "unknown", 150);
-		}
-
-		char message[2048];
-		int message_len = sizeof(message);
-		if (0 == as_info_parameter_get(params, "message", message, &message_len)) {
-			cf_info(AS_INFO, "%s: %s", who, message);
-		}
+	char who[128];
+	int who_len = sizeof(who);
+	if (0 != as_info_parameter_get(params, "who", who, &who_len)) {
+		strcpy(who, "unknown");
 	}
 
-	return(0);
+	char message[2048];
+	int message_len = sizeof(message);
+	if (0 == as_info_parameter_get(params, "message", message, &message_len)) {
+		cf_info(AS_INFO, "%s: %s", who, message);
+	}
+
+	return 0;
 }
 
 // Generic info system functions
