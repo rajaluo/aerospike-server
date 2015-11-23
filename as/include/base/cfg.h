@@ -576,11 +576,6 @@ typedef struct as_config_s {
 	// and pop to match.
 	cf_atomic_int		stat_slow_trans_queue_pop;
 
-	// When we pop from the slow queue -- we pop the entire batch of held
-	// transactions in one quick "whooosh".  Here we count the number of
-	// slow queue batch POP operations.
-	cf_atomic_int		stat_slow_trans_queue_batch_pop;
-
 	// For all REGULAR jobs (that pass thru the CK test), count the number of
 	// regular RW jobs processed.
 	cf_atomic_int		stat_cluster_key_regular_processed;
