@@ -219,11 +219,12 @@ static void destroy_index(bt *ibtr, bt_n *n, int imatch)
 		if (anbtr) {
 			if (anbtr->is_btree) {
 				bt_destroy(anbtr->u.nbtr);
-				// TODO cf_free(anbtr) ??
 			} else {
-				// TODO can call ai_cleanup here
-				cf_free(anbtr);
+			// TODO will reduce time spent in dropping index by 50%
+			// TODO when enhancing sindex_delete code path
+			//	ai_arr_destroy(anbtr->u.arr);
 			}
+			cf_free(anbtr);
 		}
 	}
 }
@@ -279,10 +280,10 @@ static void emptyIndex(int imatch, bool is_part)
 	}
 }
 
-void ai_destroy_index(int imatch)
+// imatch is not necessary here.
+void ai_destroy_index(bt * btr, int imatch)
 {
-	r_ind_t *ri = &Index[imatch];	
-	destroy_index(ri->btr, ri->btr->root, imatch);
+	destroy_index(btr, btr->root, imatch);
 }
 
 static int validateCreateTableCnames(cf_ll *cnames)
