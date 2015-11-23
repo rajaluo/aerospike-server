@@ -156,6 +156,10 @@ typedef struct as_config_s {
 	/* The TCP socket for the listener */
 	cf_socket_cfg		socket;
 
+	/* The TCP socket for the listener on 127.0.0.1 */
+	/* (Only opened if the main service socket is not already listening on 0.0.0.0 or 127.0.0.1.) */
+	cf_socket_cfg		localhost_socket;
+
 	char				*external_address; // hostname that clients will connect on
 	bool				is_external_address_virtual;
 	char				*alternate_address; // alternate service address (could be DNS)
@@ -571,11 +575,6 @@ typedef struct as_config_s {
 	// we re-queue it on to the regular queue.  We expect slow queue push
 	// and pop to match.
 	cf_atomic_int		stat_slow_trans_queue_pop;
-
-	// When we pop from the slow queue -- we pop the entire batch of held
-	// transactions in one quick "whooosh".  Here we count the number of
-	// slow queue batch POP operations.
-	cf_atomic_int		stat_slow_trans_queue_batch_pop;
 
 	// For all REGULAR jobs (that pass thru the CK test), count the number of
 	// regular RW jobs processed.
