@@ -216,7 +216,8 @@ typedef void (*as_paxos_change_callback) (as_paxos_generation gen, as_paxos_chan
 typedef struct as_paxos_t {
 	pthread_mutex_t lock;
 
-	cf_queue *msgq;
+	cf_queue_priority *msgq;
+	bool need_to_rebalance;     // do rebalance if eq gen.sequence
 
 	bool ready;                    // Is Paxos intialized?
 
