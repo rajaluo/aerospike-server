@@ -436,9 +436,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db,   ";stat_slow_trans_queue_pop=");
 	APPEND_STAT_COUNTER(db, g_config.stat_slow_trans_queue_pop);
 
-	cf_dyn_buf_append_string(db,   ";stat_slow_trans_queue_batch_pop=");
-	APPEND_STAT_COUNTER(db, g_config.stat_slow_trans_queue_batch_pop);
-
 	cf_dyn_buf_append_string(db,   ";stat_cluster_key_regular_processed=");
 	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_regular_processed);
 
