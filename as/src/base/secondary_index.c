@@ -2045,8 +2045,8 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 		SINDEX_UNLOCK(&pimd->slock);
 		SINDEX_UNLOCK(&imd->slock);
 		ai_btree_delete_ibtr(ibtr, pimd->imatch);
-		as_sindex_clear_stats_on_empty_index(imd->si);
 	}
+	as_sindex_clear_stats_on_empty_index(imd->si);
 }
 
 void
