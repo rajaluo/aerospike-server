@@ -949,7 +949,7 @@ as_sindex_arr_lookup_by_setname_lockfree(as_namespace * ns, const char *setname,
 	as_sindex * si = NULL;
 
 	for (int i=0; i<AS_SINDEX_MAX; i++) {
-		if (i >= ns->sindex_cnt) {
+		if (sindex_count >= ns->sindex_cnt) {
 			break;
 		}
 		si = &ns->sindex[i];
