@@ -100,6 +100,7 @@
 //
 
 typedef struct as_file_handle_s {
+	char		client[64];		// client identifier (currently ip-addr:port)
 	uint64_t	last_used;		// last ms we read or wrote
 	int			fd;
 	int			epoll_fd;		// the file descriptor of our epoll instance

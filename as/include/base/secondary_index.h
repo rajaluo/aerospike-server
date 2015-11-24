@@ -516,11 +516,14 @@ extern void as_sindex_destroy_pmetadata(as_sindex *si);
 // **************************************************************************************************
 extern int  as_sindex_sbins_from_rd(as_storage_rd *rd, uint16_t from_bin, uint16_t to_bin, 
 			as_sindex_bin sbins[], as_sindex_op op);
-extern int  as_sindex_sbins_from_bin(as_namespace *ns, const char *set, as_bin *b, 
+extern int  as_sindex_sbins_from_bin(as_namespace *ns, const char *set, const as_bin *b,
 			as_sindex_bin * start_sbin, as_sindex_op op);
 extern int  as_sindex_update_by_sbin(as_namespace *ns, const char *set, as_sindex_bin *start_sbin, 
 			int num_sbins, cf_digest * pkey);
+extern uint32_t as_sindex_sbins_populate(as_sindex_bin *sbins, as_namespace *ns, const char *set_name,
+			const as_bin *b_old, const as_bin *b_new);
 // **************************************************************************************************
+
 
 /*
  * DMLs USING RECORDS
