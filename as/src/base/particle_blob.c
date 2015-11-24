@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "aerospike/as_bytes.h"
+#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 
@@ -65,6 +66,9 @@ const as_particle_vtable blob_vtable = {
 		blob_to_asval,
 		blob_asval_wire_size,
 		blob_asval_to_wire,
+
+		blob_size_from_msgpack,
+		blob_from_msgpack,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -268,6 +272,28 @@ blob_asval_to_wire(const as_val *val, uint8_t *wire)
 	memcpy(wire, as_bytes_get(bytes), size);
 
 	return size;
+}
+
+//------------------------------------------------
+// Handle msgpack translation.
+//
+
+uint32_t
+blob_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size)
+{
+	// TODO - add size of unwrapped bytes!
+	return (uint32_t)sizeof(blob_mem);
+}
+
+void
+blob_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+{
+	blob_mem *p_blob_mem = (blob_mem *)*pp;
+
+	// TODO - get unwrapped bytes!
+	p_blob_mem->type = as_particle_type_from_msgpack(packed_value, value_size);
+	p_blob_mem->sz = 0;
+	memcpy(p_blob_mem->data, packed_value, p_blob_mem->sz);
 }
 
 //------------------------------------------------
