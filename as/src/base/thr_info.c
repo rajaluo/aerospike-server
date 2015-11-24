@@ -2695,6 +2695,17 @@ info_xdr_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
 }
 
+void
+info_cluster_config_get(cf_dyn_buf *db)
+{
+	cf_dyn_buf_append_string(db, "mode=");
+	cf_dyn_buf_append_string(db, cc_mode_str[g_config.cluster_mode]);
+	cf_dyn_buf_append_string(db, ";self-group-id=");
+	cf_dyn_buf_append_uint32(db,g_config.cluster.cl_self_group);
+	cf_dyn_buf_append_string(db, ";self-node-id=");
+	cf_dyn_buf_append_uint32(db, g_config.cluster.cl_self_node);
+}
+
 
 int
 info_command_config_get(char *name, char *params, cf_dyn_buf *db)
@@ -2706,7 +2717,11 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 		char context[1024];
 		int context_len = sizeof(context);
 		if (0 == as_info_parameter_get(params, "context", context, &context_len)) {
-			if (strcmp(context, "namespace") == 0) {
+			if (strcmp(context, "cluster") == 0) {
+				info_cluster_config_get(db);
+				return 0;
+			}
+			else if (strcmp(context, "namespace") == 0) {
 				context_len = sizeof(context);
 				if (0 != as_info_parameter_get(params, "id", context, &context_len)) {
 					cf_dyn_buf_append_string(db, "Error:invalid id");
@@ -2715,20 +2730,20 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 				info_namespace_config_get(context, db);
 				return(0);
 			}
-			else if (strcmp(context, "service") == 0) {
-				info_service_config_get(db);
+			else if (strcmp(context, "network.heartbeat") == 0) {
+				info_network_heartbeat_config_get(db);
 				return(0);
 			}
 			else if (strcmp(context, "network.info") == 0) {
 				info_network_info_config_get(db);
 				return(0);
 			}
-			else if (strcmp(context, "network.heartbeat") == 0) {
-				info_network_heartbeat_config_get(db);
-				return(0);
-			}
 			else if (strcmp(context, "security") == 0) {
 				info_security_config_get(db);
+				return(0);
+			}
+			else if (strcmp(context, "service") == 0) {
+				info_service_config_get(db);
 				return(0);
 			}
 			else if (strcmp(context, "xdr") == 0) {

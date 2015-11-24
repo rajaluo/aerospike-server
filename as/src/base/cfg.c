@@ -3291,18 +3291,6 @@ as_config_post_process(as_config *c, const char *config_file)
 			cf_crash_nostack(AS_CFG,
 				"Cluster 'self-node-id' must be set to a non-zero value when in 'static' mode");
 		}
-		// Check that we are NOT claiming we can do Rack-Aware for RF > 2.
-		// Although that will be fixed soon, for now we must crash if the
-		// user has specified RA is ON for RF > 2.
-		// TODO: Remove this when RA works for RF > 2.
-		for (uint i = 0; i < g_config.namespaces; i++) {
-			as_namespace *ns = g_config.namespace[i];
-
-			if (ns->replication_factor > 2) {
-				cf_crash_nostack(AS_CFG,
-					"Rack-Aware Feature is not currently available for Replication Factor greater than 2.");
-			}
-		}
 
 		// If we got this far, then group/node should be ok.
 		cfg_reset_self_node(c);
