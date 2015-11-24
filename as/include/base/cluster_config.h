@@ -68,6 +68,7 @@
 #define CL_STR_NONE   "none"
 #define CL_STR_STATIC "static"
 #define CL_STR_DYNAMIC "dynamic"
+extern const char *cc_mode_str[];
 // TODO:
 // NOTE: These values will be set to the GLOBAL "Max Node Count" value.
 #define CL_MAX_NODES 127
@@ -88,16 +89,11 @@ extern const char * cc_state_str[];
 
 
 typedef struct cluster_config_s {
-	uint16_t version; // Track the version of this config struct
 	// We moved this up to the TOP LEVEL config section
 	// uint8_t  cluster_mode; // Off (0) Static (1) or Dynamic (2)
-	// uint8_t  unused; // Use this for bits or flags
-	// We use these TWO values (Node and Group) to create the TOP LEVEL
-	// "cl_self_node".
+
 	cc_node_t cl_self_node; // THIS node ID (read from config file)
 	cc_group_t cl_self_group; // The Group for THIS node
-	uint16_t cl_self_cluster; // The Cluster for THIS node
-	uint16_t cl_self_data_center; // The Data Center for THIS node
 
 	uint16_t node_count; // Total number of nodes defined
 	cc_node_t node_ids[CL_MAX_NODES]; // Admin configured IDs of the nodes
