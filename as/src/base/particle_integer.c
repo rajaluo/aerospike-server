@@ -28,6 +28,7 @@
 
 #include "aerospike/as_boolean.h"
 #include "aerospike/as_integer.h"
+#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
 
@@ -65,6 +66,9 @@ const as_particle_vtable integer_vtable = {
 		integer_to_asval,
 		integer_asval_wire_size,
 		integer_asval_to_wire,
+
+		integer_size_from_msgpack,
+		integer_from_msgpack,
 
 		integer_size_from_flat,
 		integer_cast_from_flat,
@@ -326,6 +330,32 @@ integer_asval_to_wire(const as_val *val, uint8_t *wire)
 	*(uint64_t *)wire = cf_swap_to_be64((uint64_t)i);
 
 	return (uint32_t)sizeof(uint64_t);
+}
+
+//------------------------------------------------
+// Handle msgpack translation.
+//
+
+uint32_t
+integer_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size)
+{
+	// Integer values live in the as_bin instead of a pointer.
+	return 0;
+}
+
+void
+integer_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+{
+	int64_t i;
+	as_unpacker pk = {
+			.buffer = (uint8_t *)packed_value,
+			.offset = 0,
+			.length = value_size
+	};
+
+	as_unpack_int64(&pk, &i);
+
+	*pp = (as_particle *)i;
 }
 
 //------------------------------------------------
