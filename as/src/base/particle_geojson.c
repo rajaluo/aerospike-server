@@ -203,18 +203,18 @@ geojson_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_
 
 	if (! geo_parse(NULL, injsonptr, injsonsz, &cellid, &region)) {
 		cf_warning(AS_PARTICLE, "geo_parse failed");
-		return -1;
+		return -AS_PROTO_RESULT_FAIL_GEO_INVALID_GEOJSON;
 	}
 
 	if (cellid && region) {
 		geo_region_destroy(region);
 		cf_warning(AS_PARTICLE, "geo_parse found both point and region");
-		return -1;
+		return -AS_PROTO_RESULT_FAIL_GEO_INVALID_GEOJSON;
 	}
 
 	if (! cellid && ! region) {
 		cf_warning(AS_PARTICLE, "geo_parse found neither point nor region");
-		return -1;
+		return -AS_PROTO_RESULT_FAIL_GEO_INVALID_GEOJSON;
 	}
 
 	geojson_mem *p_geojson_mem = (geojson_mem *)*pp;
@@ -241,7 +241,7 @@ geojson_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_
 		if (! geo_region_cover(NULL, region, MAX_REGION_CELLS, p_outcells, NULL, NULL, &numcells)) {
 			geo_region_destroy(region);
 			cf_warning(AS_PARTICLE, "geo_region_cover failed");
-			return -1;
+			return -AS_PROTO_RESULT_FAIL_GEO_INVALID_GEOJSON;
 		}
 
 		p_geojson_mem->ncells = numcells;
@@ -260,7 +260,7 @@ geojson_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_
 	// particle.
 	p_geojson_mem->sz = sizeof(uint8_t) + sizeof(uint16_t) + (p_geojson_mem->ncells * sizeof(uint64_t)) + injsonsz;
 
-	return 0;
+	return AS_PROTO_RESULT_OK;
 }
 
 uint32_t
@@ -403,10 +403,7 @@ as_bin_particle_geojson_cellids(as_bin *b, uint64_t **ppcells)
 }
 
 bool
-as_bin_particle_geojson_match(as_bin *candidate_bin,
-							  uint64_t query_cellid,
-							  geo_region_t query_region,
-							  bool is_strict)
+as_bin_particle_geojson_match(as_bin *candidate_bin, uint64_t query_cellid, geo_region_t query_region, bool is_strict)
 {
 	// Determine whether the candidate bin geometry is a match for the
 	// query geometry.
@@ -437,9 +434,8 @@ as_bin_particle_geojson_match(as_bin *candidate_bin,
 			uint64_t parsed_cellid = 0;
 			geo_region_t parsed_region = NULL;
 
-			if (! geo_parse(NULL, jsonptr, jsonsz,
-							&parsed_cellid, &parsed_region)) {
-				cf_warning(AS_PARTICLE, "geo_parse failed");
+			if (! geo_parse(NULL, jsonptr, jsonsz, &parsed_cellid, &parsed_region)) {
+				cf_warning(AS_PARTICLE, "geo_parse() failed - unexpected");
 				geo_region_destroy(parsed_region);
 				return false;
 			}
