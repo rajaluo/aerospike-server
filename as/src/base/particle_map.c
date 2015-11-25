@@ -66,8 +66,8 @@ uint32_t map_asval_wire_size(const as_val *val);
 uint32_t map_asval_to_wire(const as_val *val, uint8_t *wire);
 
 // Handle msgpack translation.
-uint32_t map_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size);
-void map_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp);
+uint32_t map_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
+void map_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 // Handle on-device "flat" format.
 int32_t map_size_from_flat(const uint8_t *flat, uint32_t flat_size);
@@ -306,19 +306,19 @@ map_asval_to_wire(const as_val *val, uint8_t *wire)
 //
 
 uint32_t
-map_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size)
+map_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 {
-	return (uint32_t)sizeof(map_mem) + value_size;
+	return (uint32_t)sizeof(map_mem) + packed_size;
 }
 
 void
-map_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+map_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 {
 	map_mem *p_map_mem = (map_mem *)*pp;
 
 	p_map_mem->type = AS_PARTICLE_TYPE_MAP;
-	p_map_mem->sz = value_size;
-	memcpy(p_map_mem->data, packed_value, p_map_mem->sz);
+	p_map_mem->sz = packed_size;
+	memcpy(p_map_mem->data, packed, p_map_mem->sz);
 }
 
 //------------------------------------------------

@@ -337,20 +337,20 @@ integer_asval_to_wire(const as_val *val, uint8_t *wire)
 //
 
 uint32_t
-integer_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size)
+integer_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 {
 	// Integer values live in the as_bin instead of a pointer.
 	return 0;
 }
 
 void
-integer_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+integer_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 {
 	int64_t i;
 	as_unpacker pk = {
-			.buffer = (uint8_t *)packed_value,
+			.buffer = packed,
 			.offset = 0,
-			.length = value_size
+			.length = packed_size
 	};
 
 	as_unpack_int64(&pk, &i);
