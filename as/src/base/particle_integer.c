@@ -348,7 +348,7 @@ integer_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_partic
 {
 	int64_t i;
 	as_unpacker pk = {
-			.buffer = (uint8_t *)packed_value,
+			.buffer = packed_value,
 			.offset = 0,
 			.length = value_size
 	};
