@@ -68,8 +68,8 @@ uint32_t list_asval_wire_size(const as_val *val);
 uint32_t list_asval_to_wire(const as_val *val, uint8_t *wire);
 
 // Handle msgpack translation.
-uint32_t list_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size);
-void list_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp);
+uint32_t list_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
+void list_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 // Handle on-device "flat" format.
 int32_t list_size_from_flat(const uint8_t *flat, uint32_t flat_size);
@@ -462,19 +462,19 @@ list_asval_to_wire(const as_val *val, uint8_t *wire)
 //
 
 uint32_t
-list_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size)
+list_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 {
-	return (uint32_t)sizeof(list_mem) + value_size;
+	return (uint32_t)sizeof(list_mem) + packed_size;
 }
 
 void
-list_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+list_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 {
 	list_mem *p_list_mem = (list_mem *)*pp;
 
 	p_list_mem->type = AS_PARTICLE_TYPE_LIST;
-	p_list_mem->sz = value_size;
-	memcpy(p_list_mem->data, packed_value, p_list_mem->sz);
+	p_list_mem->sz = packed_size;
+	memcpy(p_list_mem->data, packed, p_list_mem->sz);
 }
 
 //------------------------------------------------
