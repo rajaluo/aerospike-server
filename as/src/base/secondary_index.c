@@ -4497,8 +4497,6 @@ as_sindex_sbins_list_diff_populate(as_sindex_bin *sbins, as_namespace *ns, const
 		populated += delta;
 	}
 
-as_sindex_sbins_debug_print(sbins, populated);
-
 	return populated;
 }
 
