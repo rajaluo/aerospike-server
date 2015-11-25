@@ -215,7 +215,7 @@ static int as_packed_list_write_seg2(as_packed_list *pl, uint8_t *buf);
 static void as_packed_list_index_cpy(as_packed_list_index *dst, as_packed_list_index *src);
 static void as_packed_list_index_init(as_packed_list_index *pli, uint32_t ele_max);
 static void as_packed_list_index_truncate(as_packed_list_index *pli, uint32_t index);
-static uint8_t *as_unpack_list_elements_find_index(as_unpacker *pk, uint32_t index, as_packed_list_index *pli);
+static const uint8_t *as_unpack_list_elements_find_index(as_unpacker *pk, uint32_t index, as_packed_list_index *pli);
 
 // list_wrapper
 static inline bool list_is_wrapped(const as_particle *p);
@@ -676,7 +676,7 @@ as_packed_list_header_element_count(as_packed_list *pl)
 static void
 as_packed_list_init(as_packed_list *pl, const uint8_t *buf, uint32_t size)
 {
-	pl->upk.buffer = (unsigned char *)buf;
+	pl->upk.buffer = buf;
 	pl->upk.length = size;
 	pl->upk.offset = 0;
 
@@ -957,7 +957,7 @@ as_packed_list_index_truncate(as_packed_list_index *pli, uint32_t index)
 // Assumes element count has already been extracted.
 // Offset must be at start of list data when this is called.
 // Return ptr to element at index.
-static uint8_t *
+static const uint8_t *
 as_unpack_list_elements_find_index(as_unpacker *pk, uint32_t index, as_packed_list_index *pli)
 {
 	if (pli) {
@@ -1363,7 +1363,7 @@ packed_list_remove(as_bin *b, rollback_alloc *alloc_buf, uint32_t index, uint32_
 		}
 		else {
 			uint32_t result_start = pl.header_size + pl.seg1_size;
-			uint8_t *result_ptr = (uint8_t *)pl.upk.buffer + result_start;
+			const uint8_t *result_ptr = pl.upk.buffer + result_start;
 			uint32_t result_end = (pl.seg2_size > 0) ? pl.seg2_index : pl.upk.length;
 			uint32_t result_size = result_end - result_start;
 
@@ -1898,7 +1898,7 @@ cdt_process_state_packed_list_read_optype(cdt_process_state *state, cdt_read_dat
 		}
 
 		as_packed_list_index *pli = as_bin_get_packed_list_index(b);
-		uint8_t *ele_ptr = as_unpack_list_elements_find_index(&pl.upk, index, pli);
+		const uint8_t *ele_ptr = as_unpack_list_elements_find_index(&pl.upk, index, pli);
 		int ele_size = as_unpack_size(&pl.upk);
 
 		result->particle = packed_list_simple_create_from_buf(packed_alloc, 1, ele_ptr, ele_size);
@@ -1938,7 +1938,7 @@ cdt_process_state_packed_list_read_optype(cdt_process_state *state, cdt_read_dat
 		}
 
 		as_packed_list_index *pli = as_bin_get_packed_list_index(b);
-		uint8_t *ele_ptr = as_unpack_list_elements_find_index(&pl.upk, index, pli);
+		const uint8_t *ele_ptr = as_unpack_list_elements_find_index(&pl.upk, index, pli);
 		int ele_size = 0;
 
 		for (uint64_t i = 0; i < count; i++) {
