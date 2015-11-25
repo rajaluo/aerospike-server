@@ -143,8 +143,40 @@ as_particle_type_from_asval(const as_val *val)
 	case AS_REC:
 	case AS_PAIR:
 	default:
-		cf_warning(AS_UDF, "no particle type for as_val_t %d", vtype);
+		cf_warning(AS_PARTICLE, "no particle type for as_val_t %d", vtype);
 		return AS_PARTICLE_TYPE_NULL;
+	}
+}
+
+as_particle_type
+as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size)
+{
+	as_val_t vtype = as_unpack_buf_peek_type(packed, packed_size);
+
+	switch (vtype) {
+	case AS_NIL:
+		return AS_PARTICLE_TYPE_NULL;
+	case AS_BOOLEAN:
+	case AS_INTEGER:
+		return AS_PARTICLE_TYPE_INTEGER;
+	case AS_DOUBLE:
+		return AS_PARTICLE_TYPE_FLOAT;
+	case AS_STRING:
+		return AS_PARTICLE_TYPE_STRING;
+	case AS_BYTES:
+		return AS_PARTICLE_TYPE_BLOB;
+	case AS_GEOJSON:
+		return AS_PARTICLE_TYPE_GEOJSON;
+	case AS_LIST:
+		return AS_PARTICLE_TYPE_LIST;
+	case AS_MAP:
+		return AS_PARTICLE_TYPE_MAP;
+	case AS_UNDEF:
+	case AS_REC:
+	case AS_PAIR:
+	default:
+		cf_warning(AS_PARTICLE, "encountered bad as_val_t %d", vtype);
+		return AS_PARTICLE_TYPE_BAD;
 	}
 }
 
@@ -941,6 +973,43 @@ as_bin_particle_to_asval(const as_bin *b)
 
 	// Caller is responsible for freeing as_val returned here.
 	return particle_vtable[type]->to_asval_fn(b->particle);
+}
+
+//------------------------------------------------
+// Handle msgpack translation.
+//
+
+int
+as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_size)
+{
+	// We assume the bin is empty.
+
+	as_particle_type type = as_particle_type_from_msgpack(packed, packed_size);
+
+	if (type == AS_PARTICLE_TYPE_BAD) {
+		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+	}
+
+	if (type == AS_PARTICLE_TYPE_NULL) {
+		return 0;
+	}
+
+	uint32_t mem_size = particle_vtable[type]->size_from_msgpack_fn(packed, packed_size);
+
+	if (mem_size != 0) {
+		b->particle = cf_malloc(mem_size);
+
+		if (! b->particle) {
+			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
+	}
+
+	particle_vtable[type]->from_msgpack_fn(packed, packed_size, &b->particle);
+
+	// Set the bin's iparticle metadata.
+	as_bin_state_set_from_type(b, type);
+
+	return 0;
 }
 
 //------------------------------------------------

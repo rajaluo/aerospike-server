@@ -67,6 +67,10 @@ as_val *list_to_asval(const as_particle *p);
 uint32_t list_asval_wire_size(const as_val *val);
 uint32_t list_asval_to_wire(const as_val *val, uint8_t *wire);
 
+// Handle msgpack translation.
+uint32_t list_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size);
+void list_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp);
+
 // Handle on-device "flat" format.
 int32_t list_size_from_flat(const uint8_t *flat, uint32_t flat_size);
 int list_cast_from_flat(uint8_t *flat, uint32_t flat_size, as_particle **pp);
@@ -98,6 +102,9 @@ const as_particle_vtable list_vtable = {
 		list_to_asval,
 		list_asval_wire_size,
 		list_asval_to_wire,
+
+		list_size_from_msgpack,
+		list_from_msgpack,
 
 		list_size_from_flat,
 		list_cast_from_flat,
@@ -448,6 +455,26 @@ list_asval_to_wire(const as_val *val, uint8_t *wire)
 	as_serializer_destroy(&s);
 
 	return size;
+}
+
+//------------------------------------------------
+// Handle msgpack translation.
+//
+
+uint32_t
+list_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size)
+{
+	return (uint32_t)sizeof(list_mem) + value_size;
+}
+
+void
+list_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+{
+	list_mem *p_list_mem = (list_mem *)*pp;
+
+	p_list_mem->type = AS_PARTICLE_TYPE_LIST;
+	p_list_mem->sz = value_size;
+	memcpy(p_list_mem->data, packed_value, p_list_mem->sz);
 }
 
 //------------------------------------------------
