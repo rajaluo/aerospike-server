@@ -73,6 +73,9 @@ const as_particle_vtable string_vtable = {
 		string_asval_wire_size,
 		string_asval_to_wire,
 
+		blob_size_from_msgpack,
+		blob_from_msgpack,
+
 		blob_size_from_flat,
 		blob_cast_from_flat,
 		blob_from_flat,
