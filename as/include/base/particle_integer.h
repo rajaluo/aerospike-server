@@ -52,8 +52,8 @@ uint32_t integer_asval_wire_size(const as_val *val);
 uint32_t integer_asval_to_wire(const as_val *val, uint8_t *wire);
 
 // Handle msgpack translation.
-uint32_t integer_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size);
-void integer_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp);
+uint32_t integer_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
+void integer_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 // Handle on-device "flat" format.
 int32_t integer_size_from_flat(const uint8_t *flat, uint32_t flat_size);
