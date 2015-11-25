@@ -223,6 +223,7 @@ is_embedded_particle_type(as_particle_type type)
 }
 
 extern as_particle_type as_particle_type_from_asval(const as_val *val);
+extern as_particle_type as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size);
 
 extern int32_t as_particle_size_from_client(const as_msg_op *op); // TODO - will we ever need this?
 extern int32_t as_particle_size_from_pickled(uint8_t **p_pickled);
@@ -266,6 +267,9 @@ extern uint32_t as_ldt_particle_to_client(as_val *val, as_msg_op *op);
 extern int as_bin_particle_replace_from_asval(as_bin *b, const as_val *val);
 extern void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
 extern as_val *as_bin_particle_to_asval(const as_bin *b);
+
+// msgpack:
+extern int as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_size);
 
 // flat:
 extern int as_bin_particle_cast_from_flat(as_bin *b, uint8_t *flat, uint32_t flat_size);

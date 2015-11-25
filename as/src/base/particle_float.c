@@ -25,6 +25,7 @@
 #include <stdint.h>
 
 #include "aerospike/as_double.h"
+#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_byte_order.h"
 
@@ -53,6 +54,9 @@ void float_from_asval(const as_val *val, as_particle **pp);
 as_val *float_to_asval(const as_particle *p);
 uint32_t float_asval_to_wire(const as_val *val, uint8_t *wire);
 
+// Handle msgpack translation.
+void float_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp);
+
 
 //==========================================================
 // FLOAT particle interface - vtable.
@@ -77,6 +81,9 @@ const as_particle_vtable float_vtable = {
 		float_to_asval,
 		integer_asval_wire_size,
 		float_asval_to_wire,
+
+		integer_size_from_msgpack,
+		float_from_msgpack,
 
 		integer_size_from_flat,
 		integer_cast_from_flat,
@@ -171,4 +178,25 @@ float_asval_to_wire(const as_val *val, uint8_t *wire)
 	*(uint64_t *)wire = cf_swap_to_be64(*(uint64_t *)&x);
 
 	return (uint32_t)sizeof(uint64_t);
+}
+
+//------------------------------------------------
+// Handle msgpack translation.
+//
+
+void
+float_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+{
+	double x;
+//	as_unpacker pk = {
+//			.buffer = (uint8_t *)packed_value,
+//			.offset = 0,
+//			.length = value_size
+//	};
+
+	// TODO - write as_unpack_double()!
+//	as_unpack_double(&pk, &x);
+	x = 0;
+
+	*(double *)pp = x;
 }

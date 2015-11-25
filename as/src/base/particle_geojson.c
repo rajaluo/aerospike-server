@@ -87,6 +87,9 @@ const as_particle_vtable geojson_vtable = {
 		geojson_asval_wire_size,
 		geojson_asval_to_wire,
 
+		blob_size_from_msgpack,
+		blob_from_msgpack,
+
 		blob_size_from_flat,
 		blob_cast_from_flat,
 		blob_from_flat,
