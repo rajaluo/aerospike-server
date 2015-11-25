@@ -53,8 +53,8 @@ typedef uint32_t (*as_particle_asval_wire_size_fn) (const as_val *val);
 typedef uint32_t (*as_particle_asval_to_wire_fn) (const as_val *val, uint8_t *wire);
 
 // Handle msgpack translation.
-typedef uint32_t (*as_particle_size_from_msgpack_fn) (const uint8_t *packed_value, uint32_t value_size);
-typedef void (*as_particle_from_msgpack_fn) (const uint8_t *packed_value, uint32_t value_size, as_particle **pp);
+typedef uint32_t (*as_particle_size_from_msgpack_fn) (const uint8_t *packed, uint32_t packed_size);
+typedef void (*as_particle_from_msgpack_fn) (const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 // Handle on-device "flat" format.
 typedef int32_t (*as_particle_size_from_flat_fn) (const uint8_t *flat, uint32_t flat_size);
