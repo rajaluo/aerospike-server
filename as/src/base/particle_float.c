@@ -188,15 +188,13 @@ void
 float_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 {
 	double x;
-//	as_unpacker pk = {
-//			.buffer = (uint8_t *)packed,
-//			.offset = 0,
-//			.length = packed_size
-//	};
+	as_unpacker pk = {
+			.buffer = packed,
+			.offset = 0,
+			.length = packed_size
+	};
 
-	// TODO - write as_unpack_double()!
-//	as_unpack_double(&pk, &x);
-	x = 0;
+	as_unpack_double(&pk, &x);
 
 	*(double *)pp = x;
 }
