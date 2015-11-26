@@ -579,19 +579,11 @@ typedef enum as_udf_op {
 } as_udf_op;
 
 typedef enum as_cdt_paramtype_e {
-    AS_CDT_PARAM_NONE = 0,
+	AS_CDT_PARAM_NONE = 0,
 
-    AS_CDT_PARAM_INDEX = 1,
+	AS_CDT_PARAM_INDEX = 1,
 	AS_CDT_PARAM_COUNT = 2,
 	AS_CDT_PARAM_PAYLOAD = 3,
-//	AS_CDT_PARAM_LAST_INDEX = 6,
-
-//	AS_CDT_PARAM_MAP_KEY = 11,
-//	AS_CDT_PARAM_MAP_VALUE = 12,
-
-//	AS_CDT_PARAM_UDF_MODULE_NAME = 21,
-//	AS_CDT_PARAM_UDF_FUNCTION_NAME = 22,
-//	AS_CDT_PARAM_UDF_ARGS = 23,
 } as_cdt_paramtype;
 
 typedef enum as_cdt_optype_e {
@@ -633,7 +625,7 @@ typedef enum as_cdt_optype_e {
 	AS_CDT_OP_MAP_GET_MATCHING   = 35,
 	AS_CDT_OP_MAP_REMOVE         = 36,
 	AS_CDT_OP_MAP_REMOVE_ALL     = 37,
-    AS_CDT_OP_MAP_CONTAINS_KEY   = 38,
+	AS_CDT_OP_MAP_CONTAINS_KEY   = 38,
 	AS_CDT_OP_MAP_INCREMENT_BY   = 39,
 	AS_CDT_OP_MAP_CONTAINS_VALUE = 40,
 
