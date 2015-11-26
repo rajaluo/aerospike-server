@@ -97,18 +97,21 @@ struct as_file_handle_s;
 #define AS_SEC_ERR_NOT_AUTHENTICATED	80	// socket not authenticated
 #define AS_SEC_ERR_ROLE_VIOLATION		81	// role (privilege) violation
 
-// UDF Errors (100 - 120)
+// UDF Errors (100 - 109)
 #define AS_PROTO_RESULT_FAIL_UDF_EXECUTION     100
 
-// LDT (and general collection) Errors (125 - 140)
+// LDT (and general collection) Errors (125 - 129)
 #define AS_PROTO_RESULT_FAIL_COLLECTION_ITEM_NOT_FOUND 125 // Item not found
 
-// Batch Errors (150 - 160)
+// Batch Errors (150 - 159)
 #define AS_PROTO_RESULT_FAIL_BATCH_DISABLED		150 // batch functionality has been disabled
 #define AS_PROTO_RESULT_FAIL_BATCH_MAX_REQUESTS	151 // batch-max-requests has been exceeded
 #define AS_PROTO_RESULT_FAIL_BATCH_QUEUES_FULL	152 // all batch queues are full
 
-// Secondary Index Query Failure Codes 200 - 230
+// Geo Errors (160 - 169)
+#define AS_PROTO_RESULT_FAIL_GEO_INVALID_GEOJSON 160 // Invalid GeoJSON on insert/update
+
+// Secondary Index Query Failure Codes (200 - 219)
 #define AS_PROTO_RESULT_FAIL_INDEX_FOUND       200
 #define AS_PROTO_RESULT_FAIL_INDEX_NOTFOUND    201
 #define AS_PROTO_RESULT_FAIL_INDEX_OOM         202
@@ -123,7 +126,6 @@ struct as_file_handle_s;
 #define AS_PROTO_RESULT_FAIL_QUERY_CBERROR     213
 #define AS_PROTO_RESULT_FAIL_QUERY_NETIO_ERR   214
 #define AS_PROTO_RESULT_FAIL_QUERY_DUPLICATE   215
-
 
 /* SYNOPSIS
  * Aerospike wire protocol
