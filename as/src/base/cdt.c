@@ -101,7 +101,7 @@ cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
 	const uint16_t *type_ptr = (const uint16_t *)data;
 	cdt_state->type = cf_swap_from_be16(*type_ptr);
 
-	cdt_state->pk.buffer = (uint8_t *)data + sizeof(uint16_t);
+	cdt_state->pk.buffer = data + sizeof(uint16_t);
 	cdt_state->pk.length = size - sizeof(uint16_t);
 	cdt_state->pk.offset = 0;
 

@@ -61,7 +61,7 @@ typedef struct cdt_process_state_s {
 } cdt_process_state;
 
 typedef struct cdt_payload_s {
-	uint8_t *ptr;
+	const uint8_t *ptr;
 	uint32_t size;
 } cdt_payload;
 

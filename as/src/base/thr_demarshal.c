@@ -256,9 +256,9 @@ log_as_proto_and_peeked_data(as_proto *proto, uint8_t *peekbuf, size_t peeked_da
 void *
 thr_demarshal(void *arg)
 {
-	cf_socket_cfg *s;
+	cf_socket_cfg *s, *ls;
 	// Create my epoll fd, register in the global list.
-	static struct epoll_event ev;
+	static struct epoll_event ev, lev;
 	int nevents, i, n, epoll_fd;
 	cf_clock last_fd_print = 0;
 
@@ -269,6 +269,7 @@ thr_demarshal(void *arg)
 	// Early stage aborts; these will cause faults in process scope.
 	cf_assert(arg, AS_DEMARSHAL, CF_CRITICAL, "invalid argument");
 	s = &g_config.socket;
+	ls = &g_config.localhost_socket;
 
 #ifdef USE_JEM
 	int orig_arena;
@@ -303,7 +304,15 @@ thr_demarshal(void *arg)
 		ev.data.fd = s->sock;
 		if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->sock, &ev))
 			cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
-		cf_info(AS_DEMARSHAL, "Service started: socket %d", s->port);
+		cf_info(AS_DEMARSHAL, "Service started: socket %s:%d", s->addr, s->port);
+
+		if (ls->sock) {
+			lev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
+			lev.data.fd = ls->sock;
+			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ls->sock, &lev))
+			  cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
+		}
 	}
 	else {
 		epoll_fd = epoll_create(EPOLL_SZ);
@@ -335,15 +344,14 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			if (s->sock == events[i].data.fd) {
-
+			if ((s->sock == events[i].data.fd) || (ls->sock == events[i].data.fd)) {
 				// Accept new connections on the service socket.
 				int csocket = -1;
 				struct sockaddr_in caddr;
 				socklen_t clen = sizeof(caddr);
 				char cpaddr[64];
 
-				if (-1 == (csocket = accept(s->sock, (struct sockaddr *)&caddr, &clen))) {
+				if (-1 == (csocket = accept(events[i].data.fd, (struct sockaddr *)&caddr, &clen))) {
 					// This means we're out of file descriptors - could be a SYN
 					// flood attack or misbehaving client. Eventually we'd like
 					// to make the reaper fairer, but for now we'll just have to
@@ -809,10 +817,23 @@ as_demarshal_start()
 	// de-escalation, we can't use privileged ports.
 	g_config.socket.reuse_addr = g_config.socket_reuse_addr;
 	if (0 != cf_socket_init_svc(&g_config.socket)) {
-		cf_crash(AS_DEMARSHAL, "couldn't initialize service socket: %s", cf_strerror(errno));
+		cf_crash(AS_DEMARSHAL, "couldn't initialize service socket");
 	}
 	if (-1 == cf_socket_set_nonblocking(g_config.socket.sock)) {
-		cf_crash(AS_DEMARSHAL, "couldn't set socket nonblocking: %s", cf_strerror(errno));
+		cf_crash(AS_DEMARSHAL, "couldn't set service socket nonblocking");
+	}
+
+	// Note:  The localhost socket address will only be set if the main service socket
+	//        is not already (effectively) listening on the localhost address.
+	if (g_config.localhost_socket.addr) {
+		cf_debug(AS_DEMARSHAL, "Opening a localhost service socket");
+		g_config.localhost_socket.reuse_addr = g_config.socket_reuse_addr;
+		if (0 != cf_socket_init_svc(&g_config.localhost_socket)) {
+			cf_crash(AS_DEMARSHAL, "couldn't initialize localhost service socket");
+		}
+		if (-1 == cf_socket_set_nonblocking(g_config.localhost_socket.sock)) {
+			cf_crash(AS_DEMARSHAL, "couldn't set localhost service socket nonblocking");
+		}
 	}
 
 	// Create first thread which is the listener, and wait for it to come up
