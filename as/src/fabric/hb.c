@@ -99,6 +99,10 @@
  * Return the size of an as_hb_pulse structure relative to the current maximum cluster size. */
 #define AS_HB_PULSE_SIZE() (sizeof(as_hb_pulse) + sizeof(cf_node) * g_config.paxos_max_cluster_size)
 
+/* AS_HB_PULSE_TEMP
+ * Return a stack allocated temporary pulse variable. */
+#define AS_HB_PULSE_TEMP() ((as_hb_pulse *)alloca(AS_HB_PULSE_SIZE()))
+
 /*
  * AS_HB_MIN_INTERVAL
  * Minimum allowable heartbeat interval in milliseconds. */
@@ -395,8 +399,7 @@ as_hb_getaddr(cf_node node, cf_sockaddr *so)
 		return(-1);
 	}
 
-	// NB: Stack allocation!!
-	if (!(a_p_pulse = (as_hb_pulse *) alloca(AS_HB_PULSE_SIZE())))
+	if (!(a_p_pulse = AS_HB_PULSE_TEMP()))
 		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %d", AS_HB_PULSE_SIZE());
 
 	if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse))
@@ -603,8 +606,7 @@ as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sockaddr socket, uint32_
 		return;
 	}
 
-	// NB: Stack allocation!!
-	if (!(a_p_pulse = (as_hb_pulse *) alloca(AS_HB_PULSE_SIZE())))
+	if (!(a_p_pulse = AS_HB_PULSE_TEMP()))
 		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %d", AS_HB_PULSE_SIZE());
 
 	if (SHASH_ERR_NOTFOUND == shash_get_vlock(g_hb.adjacencies, &node, (void **) &p_pulse, &vlock)) {
@@ -668,8 +670,7 @@ as_hb_get_is_node_dunned(cf_node node)
 		return true;
 	}
 
-	// NB: Stack allocation!!
-	if (!(a_p_pulse = (as_hb_pulse *) alloca(AS_HB_PULSE_SIZE())))
+	if (!(a_p_pulse = AS_HB_PULSE_TEMP()))
 		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %d", AS_HB_PULSE_SIZE());
 
 	if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse)) {
@@ -1710,8 +1711,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 		return;
 	}
 
-	// NB: Stack allocation!!
-	if (!(a_p_pulse = (as_hb_pulse *) alloca(AS_HB_PULSE_SIZE())))
+	if (!(a_p_pulse = AS_HB_PULSE_TEMP()))
 		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %d", AS_HB_PULSE_SIZE());
 
 	if (0 > msg_get_uint32(m, AS_HB_MSG_TYPE, &type)) {
@@ -2668,7 +2668,7 @@ as_hb_init_socket()
 			g_hb.socket.proto = SOCK_STREAM;
 			g_hb.socket.reuse_addr = (g_config.socket_reuse_addr) ? true : false;
 			if (0 != cf_socket_init_svc(&g_hb.socket))
-				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket");
+				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket: %s", cf_strerror(errno));
 			break;
 		case AS_HB_MODE_UNDEF:
 		default:
@@ -2963,8 +2963,19 @@ as_hb_dump(bool verbose)
  */
 bool as_hb_is_alive(cf_node node)
 {
-	// consider nodes in adjacency list and not dunned as alive.
-	return !as_hb_get_is_node_dunned(node);
+	if (node == g_config.self_node) {
+		// Self is never dunned.
+		return true;
+	}
+
+	if (!g_hb.adjacencies) {
+		return false;
+	}
+
+	as_hb_pulse *pulse = AS_HB_PULSE_TEMP();
+	// consider nodes in a djacency list and not dunned as alive.
+	return (SHASH_OK == shash_get(g_hb.adjacencies, &node, pulse)) &&
+		   (!pulse->dunned);
 }
 
 /**
