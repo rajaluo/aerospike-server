@@ -55,6 +55,22 @@ set_shmmax() {
 	fi
 }
 
+set_socket_buffer_limit() {
+	name=${1}; path=${2}; size=${3}
+	curr=$(cat ${path})
+
+	if [ ${curr} -lt ${size} ]; then
+		echo "Increasing ${name} socket buffer limit (${path}): ${curr} -> ${size}"
+		echo ${size} >${path}
+	fi
+}
+
+set_socket_buffer_limits() {
+	set_socket_buffer_limit read /proc/sys/net/core/rmem_max 15728640
+	set_socket_buffer_limit write /proc/sys/net/core/wmem_max 5242880
+	exit 1
+}
+
 #We are adding create_piddir as /var/run is tmpfs on some distributions. 
 #This causes the piddir to be removed on reboot
 #adding this to centos init for parity
@@ -71,6 +87,7 @@ start() {
 	[ -x $ASD ] || exit 0
 	set_shmall
 	set_shmmax
+	set_socket_buffer_limits
 	create_piddir
 	echo -n $"Starting and checking aerospike: "
 	daemon "$CMD && pgrep $ASDN &> /dev/null"
@@ -86,6 +103,7 @@ coldstart() {
 	[ -x $ASD ] || exit 0
 	set_shmall
 	set_shmmax
+	set_socket_buffer_limits
 	create_piddir
 	echo -n $"Cold-starting aerospike: "
 	daemon "$CMD --cold-start && pgrep $ASDN &> /dev/null"
