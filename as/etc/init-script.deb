@@ -64,7 +64,6 @@ set_socket_buffer_limit() {
 set_socket_buffer_limits() {
 	set_socket_buffer_limit read /proc/sys/net/core/rmem_max 15728640
 	set_socket_buffer_limit write /proc/sys/net/core/wmem_max 5242880
-	exit 1
 }
 
 #We are adding create_piddir as /var/run is tmpfs on Debian 7+/Ubuntu 12+. This causes
