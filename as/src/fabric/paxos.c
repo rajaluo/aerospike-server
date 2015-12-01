@@ -1057,6 +1057,20 @@ as_paxos_set_recovery_policy(paxos_recovery_policy_enum policy)
 	return(0);
 }
 
+/**
+ * @return true if this node is in a single node cluster with self as the principal.
+ */
+bool as_paxos_is_single_node_cluster()
+{
+	as_paxos *p = g_config.paxos;
+
+	// For a single node cluster this node should be the first / principal in
+	// the succession list and the max cluster size shoulf be 1 or then the
+	// succession list sould have only one element.
+	return p->succession[0] == g_config.self_node &&
+		   (g_config.paxos_max_cluster_size == 1 || p->succession[1] == 0);
+}
+
 /* as_paxos_partition_sync_states_all
  * Returns true if all nodes currently in the cluster (i.e., where "alive" is true)
  * have already sent in a PARTITION_SYNC_REQUEST message. */
@@ -2955,7 +2969,7 @@ as_paxos_thr(void *arg)
 				/*
 				 * Check for the single node cluster case but only if the node is principal
 				 */
-				if ((true == as_paxos_partition_sync_states_all()) && (self == principal)) {
+				if (as_paxos_is_single_node_cluster()) {
 					/*
 					 * The principal can now balance its partitions
 					 * Should we have another phase to the synchronizations to make sure that every

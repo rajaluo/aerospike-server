@@ -89,7 +89,7 @@ typedef struct cdt_op_table_entry_s {
 #define CDT_OP_ENTRY(op, ...) [op].args = (const as_cdt_paramtype[]){__VA_ARGS__, 0}, [op].count = VA_NARGS(__VA_ARGS__)
 
 // Get around needing to pass last named arg to va_start().
-#define CDT_OP_TABLE_GET_PARAMS(state, ...) cdt_process_state_get_params(state, cdt_process_state_op_table_set_size(state->type), __VA_ARGS__)
+#define CDT_OP_TABLE_GET_PARAMS(state, ...) cdt_process_state_get_params(state, cdt_process_state_op_param_count(state->type), __VA_ARGS__)
 
 
 //==========================================================
@@ -98,11 +98,12 @@ typedef struct cdt_op_table_entry_s {
 
 // as_bin
 void as_bin_set_int(as_bin *b, int64_t value);
+bool as_bin_set_packed_val(as_bin *b, cdt_payload *packed);
 
 // cdt_process_state
 bool cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op);
 bool cdt_process_state_get_params(cdt_process_state *state, size_t n, ...);
-size_t cdt_process_state_op_table_set_size(as_cdt_optype op);
+size_t cdt_process_state_op_param_count(as_cdt_optype op);
 
 // cdt_process_state_packed_list
 bool cdt_process_state_packed_list_modify_optype(cdt_process_state *state, cdt_modify_data *cdt_udata);

@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "aerospike/as_geojson.h"
+#include "aerospike/as_msgpack.h"
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
@@ -62,6 +63,10 @@ as_val *geojson_to_asval(const as_particle *p);
 uint32_t geojson_asval_wire_size(const as_val *val);
 uint32_t geojson_asval_to_wire(const as_val *val, uint8_t *wire);
 
+// Handle msgpack translation.
+uint32_t geojson_size_from_msgpack(const uint8_t *packed, uint32_t packed_size);
+void geojson_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
+
 
 //==========================================================
 // GEOJSON particle interface - vtable.
@@ -87,8 +92,8 @@ const as_particle_vtable geojson_vtable = {
 		geojson_asval_wire_size,
 		geojson_asval_to_wire,
 
-		blob_size_from_msgpack,
-		blob_from_msgpack,
+		geojson_size_from_msgpack,
+		geojson_from_msgpack,
 
 		blob_size_from_flat,
 		blob_cast_from_flat,
@@ -129,6 +134,7 @@ typedef struct geojson_flat_s {
 //
 
 static char const *geojson_mem_jsonstr(geojson_mem *p_geojson_mem, size_t *p_jsonsz);
+static inline uint32_t geojson_size(uint32_t n_cells, size_t string_size);
 
 
 //==========================================================
@@ -301,34 +307,23 @@ geojson_size_from_asval(const as_val *val)
 	size_t jsz = as_geojson_len(pg);
 
 	// Compute the size; we won't be writing any cellids ...
-	uint32_t sz =
-		sizeof(uint8_t) +			// flags
-		sizeof(uint16_t) +			// ncells (always 0 here)
-		(0 * sizeof(uint64_t)) +	// cell array (none)
-		jsz;						// json string
-
-	return sz;
+	return geojson_size(0, jsz);
 }
 
 void
 geojson_from_asval(const as_val *val, as_particle **pp)
 {
-	geojson_mem *p_geojson_mem = (geojson_mem *) *pp;
+	geojson_mem *p_geojson_mem = (geojson_mem *)*pp;
 
 	as_geojson *pg = as_geojson_fromval(val);
 	size_t jsz = as_geojson_len(pg);
 
 	p_geojson_mem->type = AS_PARTICLE_TYPE_GEOJSON;
-	p_geojson_mem->sz =
-			sizeof(uint8_t) +			// flags
-			sizeof(uint16_t) +			// ncells (always 0 here)
-			(0 * sizeof(uint64_t)) +	// cell array (none)
-			jsz;						// json string
-
+	p_geojson_mem->sz = geojson_size(0, jsz);
 	p_geojson_mem->flags = 0;
 	p_geojson_mem->ncells = 0;
 
-	uint8_t *p8 = (uint8_t *) p_geojson_mem->data;
+	uint8_t *p8 = (uint8_t *)p_geojson_mem->data;
 	memcpy(p8, as_geojson_get(pg), jsz);
 }
 
@@ -358,11 +353,7 @@ geojson_asval_wire_size(const as_val *val)
 	size_t jsz = as_geojson_len(pg);
 
 	// We won't be writing any cellids ...
-	return (uint32_t)(
-		sizeof(uint8_t) +			// flags
-		sizeof(uint16_t) +			// ncells (always 0 here)
-		(0 * sizeof(uint64_t)) +	// cell array (none)
-		jsz);						// json string
+	return geojson_size(0, jsz);
 }
 
 uint32_t
@@ -381,11 +372,52 @@ geojson_asval_to_wire(const as_val *val, uint8_t *wire)
 	p8 = (uint8_t *)p16;
 	memcpy(p8, as_geojson_get(pg), jsz);
 
-	return (uint32_t)(
-		sizeof(uint8_t) +			// flags
-		sizeof(uint16_t) +			// ncells (always 0 here)
-		(0 * sizeof(uint64_t)) +	// cell array (none)
-		jsz);						// json string
+	return geojson_size(0, jsz);
+}
+
+//------------------------------------------------
+// Handle msgpack translation.
+//
+
+uint32_t
+geojson_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
+{
+	// Oversize by a few bytes doing the easy thing.
+	size_t jsz = (size_t)packed_size;
+
+	// Compute the size; we won't be writing any cellids ...
+	return geojson_size(0, jsz);
+}
+
+void
+geojson_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
+{
+	geojson_mem *p_geojson_mem = (geojson_mem *)*pp;
+
+	as_unpacker pk = {
+			.buffer = packed,
+			.offset = 0,
+			.length = packed_size
+	};
+
+	int64_t blob_size = as_unpack_blob_size(&pk);
+	const uint8_t *ptr = pk.buffer + pk.offset;
+
+	// *ptr should be AS_BYTES_GEOJSON at this point.
+
+	// Adjust for type (1 byte).
+	ptr++;
+	blob_size--;
+
+	size_t jsz = (size_t)blob_size;
+
+	p_geojson_mem->type = AS_PARTICLE_TYPE_GEOJSON;
+	p_geojson_mem->sz = geojson_size(0, jsz);
+	p_geojson_mem->flags = 0;
+	p_geojson_mem->ncells = 0;
+
+	uint8_t *p8 = (uint8_t *)p_geojson_mem->data;
+	memcpy(p8, ptr, jsz);
 }
 
 
@@ -498,4 +530,14 @@ geojson_mem_jsonstr(geojson_mem *p_geojson_mem, size_t *p_jsonsz)
 	*p_jsonsz = p_geojson_mem->sz - sizeof(uint8_t) - sizeof(uint16_t) - cellsz;
 
 	return (char const *)p_geojson_mem->data + cellsz;
+}
+
+static inline uint32_t
+geojson_size(uint32_t n_cells, size_t string_size)
+{
+	return (uint32_t)(
+			sizeof(uint8_t) +				// flags
+			sizeof(uint16_t) +				// ncells (always 0 here)
+			(n_cells * sizeof(uint64_t)) +	// cell array
+			string_size);					// json string
 }
