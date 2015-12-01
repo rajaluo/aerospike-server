@@ -55,7 +55,7 @@ as_val *float_to_asval(const as_particle *p);
 uint32_t float_asval_to_wire(const as_val *val, uint8_t *wire);
 
 // Handle msgpack translation.
-void float_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp);
+void float_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp);
 
 
 //==========================================================
@@ -185,13 +185,13 @@ float_asval_to_wire(const as_val *val, uint8_t *wire)
 //
 
 void
-float_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+float_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 {
 	double x;
 //	as_unpacker pk = {
-//			.buffer = (uint8_t *)packed_value,
+//			.buffer = (uint8_t *)packed,
 //			.offset = 0,
-//			.length = value_size
+//			.length = packed_size
 //	};
 
 	// TODO - write as_unpack_double()!
