@@ -279,21 +279,21 @@ blob_asval_to_wire(const as_val *val, uint8_t *wire)
 //
 
 uint32_t
-blob_size_from_msgpack(const uint8_t *packed_value, uint32_t value_size)
+blob_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 {
 	// TODO - add size of unwrapped bytes!
 	return (uint32_t)sizeof(blob_mem);
 }
 
 void
-blob_from_msgpack(const uint8_t *packed_value, uint32_t value_size, as_particle **pp)
+blob_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 {
 	blob_mem *p_blob_mem = (blob_mem *)*pp;
 
 	// TODO - get unwrapped bytes!
-	p_blob_mem->type = as_particle_type_from_msgpack(packed_value, value_size);
+	p_blob_mem->type = as_particle_type_from_msgpack(packed, packed_size);
 	p_blob_mem->sz = 0;
-	memcpy(p_blob_mem->data, packed_value, p_blob_mem->sz);
+	memcpy(p_blob_mem->data, packed, p_blob_mem->sz);
 }
 
 //------------------------------------------------
