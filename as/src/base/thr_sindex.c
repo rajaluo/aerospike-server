@@ -74,8 +74,11 @@ pthread_rwlock_t g_ai_rwlock     = PTHREAD_RWLOCK_INITIALIZER;
 pthread_t g_sindex_populate_th;
 pthread_t g_sindex_destroy_th;
 pthread_t g_sindex_defrag_th;
+pthread_t g_sindex_set_destroy_th;
+
 cf_queue *g_sindex_populate_q;
 cf_queue *g_sindex_destroy_q;
+cf_queue *g_sindex_set_destroy_q;
 cf_queue *g_sindex_populateall_done_q;
 cf_queue *g_q_objs_to_defrag;
 bool      g_sindex_boot_done;
@@ -220,6 +223,20 @@ as_sindex__destroy_fn(void *param)
 	}
 	return NULL;
 }
+
+void *
+as_sindex__set_destroy_fn(void *param)
+{
+	while(1){
+		as_sindex_set si_set;
+		cf_queue_pop(g_sindex_set_destroy_q, &si_set, CF_QUEUE_FOREVER);
+		uint64_t s_time = cf_getus();
+		as_sindex_drop_set(si_set.ns, si_set.set->name);
+		cf_info(AS_SINDEX, "Time taken to drop set %ld ms", (cf_getus() - s_time)/1000 );
+		SET_DELETED_OFF(si_set.set);
+	}
+}
+
 
 void
 as_sindex_update_defrag_stat(as_sindex *si, uint64_t r, uint64_t start_time_ms)
@@ -518,6 +535,11 @@ as_sindex_thr_init()
 
 	if (0 != pthread_create(&g_sindex_defrag_th, 0, as_sindex__defrag_fn, 0)) {
 		cf_crash(AS_SINDEX, " Could not create sindex defrag thread ");
+	}
+
+	g_sindex_set_destroy_q = cf_queue_create(sizeof(as_sindex_set), true);
+	if (0 != pthread_create(&g_sindex_set_destroy_th, 0, as_sindex__set_destroy_fn, 0)) {
+		cf_crash(AS_SINDEX, " Could not create sindex set destroy thread ");
 	}
 
 	g_sindex_populateall_done_q = cf_queue_create(sizeof(int), true);

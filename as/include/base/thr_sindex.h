@@ -58,6 +58,11 @@ do {                                                                            
 #define SINDEX_GC_QUEUE_HIGHWATER  10
 #define SINDEX_GC_NUM_OBJS_PER_ARR 20
 
+typedef struct as_sindex_set_s {
+	as_namespace * ns;
+	as_set * set;
+} as_sindex_set;
+
 typedef struct acol_digest_t {
 	cf_digest dig;
 	ai_obj    acol;
@@ -76,6 +81,7 @@ typedef struct ll_sindex_gc_element_s {
 extern pthread_rwlock_t sindex_rwlock;
 extern cf_queue *g_sindex_populate_q;
 extern cf_queue *g_sindex_destroy_q;
+extern cf_queue *g_sindex_set_destroy_q;
 extern cf_queue *g_sindex_populateall_done_q;
 extern bool      g_sindex_boot_done;
 
