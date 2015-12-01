@@ -52,6 +52,7 @@
 #include "base/ldt.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
+#include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/thr_write.h"
 #include "base/transaction.h"
@@ -1225,8 +1226,12 @@ thr_nsup(void *arg)
 						cf_info(AS_NSUP, "{%s} deleting set %s", ns->name, p_set->name);
 						continue;
 					}
-					as_sindex_drop_set(ns, p_set->name);
-					SET_DELETED_OFF(p_set);
+
+					as_sindex_set si_set;
+					si_set.set = p_set;
+					si_set.ns = ns;
+					// This call will offload the responsibility of resetting set-delete to a different thread		
+					cf_queue_push(g_sindex_set_destroy_q, &si_set);
 				}
 			}
 

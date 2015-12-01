@@ -25,6 +25,8 @@
 #include "base/secondary_index.h"
 
 #include "ai_obj.h"
+#include "btreepriv.h"
+
 #include <citrusleaf/cf_ll.h>
 
 #define NUM_DIGS_PER_ARR 51
@@ -38,6 +40,8 @@ typedef struct ll_recl_element_s {
 	cf_ll_element   ele;
 	dig_arr_t     * dig_arr;
 } ll_recl_element;
+
+void ai_arr_destroy(ai_arr *arr);
 
 void releaseDigArrToQueue(void *v);
 
