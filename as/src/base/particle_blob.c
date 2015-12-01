@@ -96,6 +96,13 @@ typedef struct blob_flat_s {
 
 
 //==========================================================
+// Forward declarations.
+//
+
+static inline as_particle_type blob_bytes_type_to_particle_type(as_bytes_type type);
+
+
+//==========================================================
 // BLOB particle interface - function definitions.
 //
 
@@ -236,7 +243,7 @@ blob_from_asval(const as_val *val, as_particle **pp)
 
 	as_bytes *bytes = as_bytes_fromval(val);
 
-	p_blob_mem->type = AS_PARTICLE_TYPE_BLOB;
+	p_blob_mem->type = (uint8_t)blob_bytes_type_to_particle_type(bytes->type);
 	p_blob_mem->sz = as_bytes_size(bytes);
 	memcpy(p_blob_mem->data, as_bytes_get(bytes), p_blob_mem->sz);
 }
@@ -281,19 +288,34 @@ blob_asval_to_wire(const as_val *val, uint8_t *wire)
 uint32_t
 blob_size_from_msgpack(const uint8_t *packed, uint32_t packed_size)
 {
-	// TODO - add size of unwrapped bytes!
-	return (uint32_t)sizeof(blob_mem);
+	// Ok to oversize by a few bytes - only used for allocation sizing.
+	// -1 for blob internal type and -1 for blob header.
+	return (uint32_t)sizeof(blob_mem) + packed_size - 2;
 }
 
 void
 blob_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **pp)
 {
+	as_unpacker pk = {
+			.buffer = packed,
+			.offset = 0,
+			.length = packed_size
+	};
+
+	int64_t blob_size = as_unpack_blob_size(&pk);
+	const uint8_t *ptr = pk.buffer + pk.offset;
+
+	uint8_t type = *ptr;
+
+	// Adjust for type (1 byte).
+	ptr++;
+	blob_size--;
+
 	blob_mem *p_blob_mem = (blob_mem *)*pp;
 
-	// TODO - get unwrapped bytes!
-	p_blob_mem->type = as_particle_type_from_msgpack(packed, packed_size);
-	p_blob_mem->sz = 0;
-	memcpy(p_blob_mem->data, packed, p_blob_mem->sz);
+	p_blob_mem->type = (uint8_t)blob_bytes_type_to_particle_type((as_bytes_type)type);
+	p_blob_mem->sz = blob_size;
+	memcpy(p_blob_mem->data, ptr, p_blob_mem->sz);
 }
 
 //------------------------------------------------
@@ -377,4 +399,45 @@ blob_to_flat(const as_particle *p, uint8_t *flat)
 	memcpy(p_blob_flat->data, p_blob_mem->data, p_blob_flat->size);
 
 	return blob_flat_size(p);
+}
+
+
+//==========================================================
+// Local helpers.
+//
+
+static inline as_particle_type
+blob_bytes_type_to_particle_type(as_bytes_type type)
+{
+	switch (type) {
+	case AS_BYTES_STRING:
+		return AS_PARTICLE_TYPE_STRING;
+	case AS_BYTES_BLOB:
+		return AS_PARTICLE_TYPE_BLOB;
+	case AS_BYTES_JAVA:
+		return AS_PARTICLE_TYPE_JAVA_BLOB;
+	case AS_BYTES_CSHARP:
+		return AS_PARTICLE_TYPE_CSHARP_BLOB;
+	case AS_BYTES_PYTHON:
+		return AS_PARTICLE_TYPE_PYTHON_BLOB;
+	case AS_BYTES_RUBY:
+		return AS_PARTICLE_TYPE_RUBY_BLOB;
+	case AS_BYTES_PHP:
+		return AS_PARTICLE_TYPE_PHP_BLOB;
+	case AS_BYTES_ERLANG:
+		return AS_PARTICLE_TYPE_ERLANG_BLOB;
+	case AS_BYTES_GEOJSON:
+		return AS_PARTICLE_TYPE_GEOJSON;
+	case AS_BYTES_INTEGER:
+	case AS_BYTES_DOUBLE:
+	case AS_BYTES_MAP:
+	case AS_BYTES_LIST:
+	case AS_BYTES_UNDEF:
+	case AS_BYTES_LDT:
+	default:
+		break;
+	}
+
+	// Invalid blob types remain as blobs.
+	return AS_PARTICLE_TYPE_BLOB;
 }
