@@ -33,7 +33,7 @@
 // String defined for the various cluster states
 const char * cc_state_str[] = {"unknown", "balanced", "unbalanced", "invalid"};
 
-const char * cc_mode_str[]= {"none", "static", "dynamic"};
+const char * cc_mode_str[] = {CL_STR_NONE, CL_STR_STATIC, CL_STR_DYNAMIC};
 
 
 /**

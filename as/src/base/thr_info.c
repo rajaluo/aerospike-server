@@ -2701,7 +2701,7 @@ info_cluster_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "mode=");
 	cf_dyn_buf_append_string(db, cc_mode_str[g_config.cluster_mode]);
 	cf_dyn_buf_append_string(db, ";self-group-id=");
-	cf_dyn_buf_append_uint32(db,g_config.cluster.cl_self_group);
+	cf_dyn_buf_append_uint32(db, g_config.cluster.cl_self_group);
 	cf_dyn_buf_append_string(db, ";self-node-id=");
 	cf_dyn_buf_append_uint32(db, g_config.cluster.cl_self_node);
 }
