@@ -226,8 +226,6 @@ typedef struct as_paxos_t {
 
 	cf_node principal_pro_tempore; // Node with greatest ID currently vying to become Paxos principal (or 0 if there is none.)
 
-	int num_incoming_migrations;   // For receiver-side migration flow control.
-
 	int n_callbacks;
 	as_paxos_change_callback cb[MAX_CHANGE_CALLBACKS];
 	void *cb_udata[MAX_CHANGE_CALLBACKS];

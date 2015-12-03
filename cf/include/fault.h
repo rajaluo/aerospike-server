@@ -160,6 +160,7 @@ extern cf_fault_sink *cf_fault_sink_add(char *path);
 extern int cf_fault_sink_remove(char *path);
 
 extern cf_fault_sink *cf_fault_sink_hold(char *path);
+extern bool cf_fault_console_is_held();
 extern int cf_fault_sink_activate_all_held();
 extern int cf_fault_sink_get_fd_list(int *fds);
 

@@ -291,6 +291,11 @@ void write_request_destructor(void *object) {
 	if (wr->proxy_msg)
 		as_fabric_msg_put(wr->proxy_msg);
 	if (wr->msgp) {
+		// TODO - this is temporary defensive code!
+		if (wr->batch_shared) {
+			cf_warning(AS_RW, "write_request_destructor(): Free msgp FOR BATCH.");
+		}
+
 		cf_free(wr->msgp);
 		wr->msgp = 0;
 	}
@@ -304,6 +309,11 @@ void write_request_destructor(void *object) {
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 	}
 	if (wr->proto_fd_h) {
+		// TODO - this is temporary defensive code!
+		if (wr->batch_shared) {
+			cf_warning(AS_RW, "write_request_destructor(): Close fd FOR BATCH.");
+		}
+
 		as_end_of_transaction_ok(wr->proto_fd_h);
 		wr->proto_fd_h = 0;
 	}
@@ -2265,7 +2275,6 @@ Out1:
 int
 rw_dup_process(cf_node node, msg *m)
 {
-	cf_atomic_int_incr(&g_config.read_dup_prole);
 	if (g_config.n_transaction_duplicate_threads == 0) {
 		rw_dup_prole(node, m);
 		return (0);
@@ -3655,11 +3664,7 @@ write_local_sindex_update(as_namespace *ns, const char *set_name,
 			if (b_old->id == b_new->id) {
 				if (as_bin_get_particle_type(b_old) != as_bin_get_particle_type(b_new) ||
 						b_old->particle != b_new->particle) {
-					// TODO - might want a "diff" method that takes two bins and
-					// detects the (rare) case when a particle was rewritten
-					// with the exact old value.
-					sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b_old, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
-					sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b_new, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
+					sbins_populated += as_sindex_sbins_populate(&sbins[sbins_populated], ns, set_name, b_old, b_new);
 				}
 
 				found = true;
@@ -5557,6 +5562,11 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 
 		pthread_mutex_lock(&wr->lock);
 		if (udf_rw_needcomplete_wr(wr)) {
+			// TODO - this is temporary defensive code!
+			if (wr->batch_shared) {
+				cf_warning(AS_RW, "rw_retransmit_reduce_fn(): udf_rw_needcomplete_wr() RETURNS TRUE FOR BATCH.");
+			}
+
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
 			udf_rw_complete(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT, __FILE__, __LINE__);

@@ -40,7 +40,7 @@
 
 #define CDT_DO_TEMP_HISTO	1
 
-typedef struct {
+typedef struct rollback_alloc_s {
 	cf_ll_buf *ll_buf;
 	size_t malloc_list_sz;
 	size_t malloc_list_cap;
@@ -54,18 +54,18 @@ typedef struct {
 		__name->malloc_list_sz = 0; \
 		__name->malloc_list_cap = (__alloc_buf ? 0 : __rollback_size);
 
-typedef struct {
+typedef struct cdt_process_state_s {
 	as_cdt_optype type;
 	as_unpacker pk;
 	uint32_t ele_count;
 } cdt_process_state;
 
-typedef struct {
-	uint8_t *ptr;
+typedef struct cdt_payload_s {
+	const uint8_t *ptr;
 	uint32_t size;
 } cdt_payload;
 
-typedef struct {
+typedef struct cdt_modify_data_s {
 	as_bin *b;
 	as_bin *result;
 	cf_ll_buf *alloc_buf;
@@ -73,23 +73,20 @@ typedef struct {
 	int ret_code;
 } cdt_modify_data;
 
-typedef struct {
+typedef struct cdt_read_data_s {
 	const as_bin *b;
 	as_bin *result;
 
 	int ret_code;
 } cdt_read_data;
 
-typedef struct {
+typedef struct cdt_op_table_entry_s {
 	int count;
 	const as_cdt_paramtype *args;
 } cdt_op_table_entry;
 
-#define VA_NARGS(...) (sizeof((int[]){__VA_ARGS__})/sizeof(int))
-#define CDT_OP_ENTRY(op, ...) [op].args = (const as_cdt_paramtype[]){__VA_ARGS__, 0}, [op].count = VA_NARGS(__VA_ARGS__)
-
 // Get around needing to pass last named arg to va_start().
-#define CDT_OP_TABLE_GET_PARAMS(state, ...) cdt_process_state_get_params(state, cdt_process_state_op_table_set_size(state->type), __VA_ARGS__)
+#define CDT_OP_TABLE_GET_PARAMS(state, ...) cdt_process_state_get_params(state, cdt_process_state_op_param_count(state->type), __VA_ARGS__)
 
 
 //==========================================================
@@ -98,11 +95,12 @@ typedef struct {
 
 // as_bin
 void as_bin_set_int(as_bin *b, int64_t value);
+bool as_bin_set_packed_val(as_bin *b, cdt_payload *packed);
 
 // cdt_process_state
 bool cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op);
 bool cdt_process_state_get_params(cdt_process_state *state, size_t n, ...);
-size_t cdt_process_state_op_table_set_size(as_cdt_optype op);
+size_t cdt_process_state_op_param_count(as_cdt_optype op);
 
 // cdt_process_state_packed_list
 bool cdt_process_state_packed_list_modify_optype(cdt_process_state *state, cdt_modify_data *cdt_udata);

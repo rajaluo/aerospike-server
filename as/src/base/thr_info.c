@@ -437,9 +437,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db,   ";stat_slow_trans_queue_pop=");
 	APPEND_STAT_COUNTER(db, g_config.stat_slow_trans_queue_pop);
 
-	cf_dyn_buf_append_string(db,   ";stat_slow_trans_queue_batch_pop=");
-	APPEND_STAT_COUNTER(db, g_config.stat_slow_trans_queue_batch_pop);
-
 	cf_dyn_buf_append_string(db,   ";stat_cluster_key_regular_processed=");
 	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_regular_processed);
 
@@ -2490,6 +2487,9 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-remaining=");
 	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_remaining);
 
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-imbalance=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_imbalance);
+
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 
@@ -4385,6 +4385,33 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
+//
+// Log a message to the server.
+// Limited to 2048 characters.
+//
+// Format:
+//	log-message:message=<MESSAGE>[;who=<WHO>]
+//
+// Example:
+// 	log-message:message=Aerospike anonymous data collection is ACTIVE. For further information, see http://aerospike.com/aerospike-telemetry;who=Aerospike Telemetry Agent
+//
+int
+info_command_log_message(char *name, char *params, cf_dyn_buf *db)
+{
+	char who[128];
+	int who_len = sizeof(who);
+	if (0 != as_info_parameter_get(params, "who", who, &who_len)) {
+		strcpy(who, "unknown");
+	}
+
+	char message[2048];
+	int message_len = sizeof(message);
+	if (0 == as_info_parameter_get(params, "message", message, &message_len)) {
+		cf_info(AS_INFO, "%s: %s", who, message);
+	}
+
+	return 0;
+}
 
 // Generic info system functions
 // These functions act when an INFO message comes in over the PROTO pipe
@@ -7169,7 +7196,7 @@ as_info_init()
 	as_info_set("node", istr, true);                     // Node ID. Unique 15 character hex string for each node based on the mac address and port.
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
-	as_info_set("features", "pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf;xdr", true);
+	as_info_set("features", "cdt-list;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf;xdr", true);
 	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
 		sprintf(istr, "%s:%d", g_config.hb_addr, g_config.hb_port);
 		as_info_set("mcast", istr, false);               // Returns the multicast heartbeat address and port used by this server. Only available in multicast heartbeat mode.
@@ -7184,7 +7211,7 @@ as_info_init()
 				"dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-smd;"
 				"dump-wb;dump-wb-summary;dump-wr;dun;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
-				"logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
+				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
@@ -7199,28 +7226,28 @@ as_info_init()
 	 */
 
 	// Set up some dynamic functions
-	as_info_set_dynamic("bins", info_get_bins, false);                // Returns bin usage information and used bin names.
-	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true); // Returns cluster generation.
-	as_info_set_dynamic("get-config", info_get_config, false);        // Returns running config for specified context.
-	as_info_set_dynamic("logs", info_get_logs, false);                // Returns a list of log file locations in use by this server.
-	as_info_set_dynamic("namespaces", info_get_namespaces, false);    // Returns a list of namespace defined on this server.
-	as_info_set_dynamic("objects", info_get_objects, false);          // Returns the number of objects stored on this server.
+	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
+	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true);     // Returns cluster generation.
+	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
+	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
+	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.
+	as_info_set_dynamic("objects", info_get_objects, false);                          // Returns the number of objects stored on this server.
 	as_info_set_dynamic("partition-generation", info_get_partition_generation, true); // Returns the current partition generation.
-	as_info_set_dynamic("partition-info", info_get_partition_info, false);  // Returns partition ownership information.
-	as_info_set_dynamic("replicas-read",info_get_replicas_read, false);     //
-	as_info_set_dynamic("replicas-prole",info_get_replicas_prole, false);   // Base 64 encoded binary representation of partitions this node is prole (replica) for.
-	as_info_set_dynamic("replicas-write",info_get_replicas_write, false);   //
-	as_info_set_dynamic("replicas-master",info_get_replicas_master, false); // Base 64 encoded binary representation of partitions this node is master (replica) for.
-	as_info_set_dynamic("replicas-all", info_get_replicas_all, false);      // Base 64 encoded binary representation of partitions this node is replica for.
-	as_info_set_dynamic("service",info_get_service, false);           // IP address and server port for this node, expected to be a single.
-	                                                                  // address/port per node, may be multiple address if this node is configured.
-	                                                                  // to listen on multiple interfaces (typically not advised).
-	as_info_set_dynamic("services-alternate",info_get_alt_addr, false);     // IP address mapping from internal to public ones
-	as_info_set_dynamic("services",info_get_services, true);          // List of addresses of neighbor cluster nodes to advertise for Application to connect.
-	as_info_set_dynamic("services-alumni",info_get_services_alumni, true); // All neighbor addresses (services) this server has ever know about.
-	as_info_set_dynamic("services-alumni-reset",info_services_alumni_reset, false); // Reset the services alumni to equal services
-	as_info_set_dynamic("sets", info_get_sets, false);                // Returns set statistics for all or a particular set.
-	as_info_set_dynamic("statistics", info_get_stats, true);          // Returns system health and usage stats for this server.
+	as_info_set_dynamic("partition-info", info_get_partition_info, false);            // Returns partition ownership information.
+	as_info_set_dynamic("replicas-all", info_get_replicas_all, false);                // Base 64 encoded binary representation of partitions this node is replica for.
+	as_info_set_dynamic("replicas-master", info_get_replicas_master, false);          // Base 64 encoded binary representation of partitions this node is master (replica) for.
+	as_info_set_dynamic("replicas-prole", info_get_replicas_prole, false);            // Base 64 encoded binary representation of partitions this node is prole (replica) for.
+	as_info_set_dynamic("replicas-read", info_get_replicas_read, false);              //
+	as_info_set_dynamic("replicas-write", info_get_replicas_write, false);            //
+	as_info_set_dynamic("service", info_get_service, false);                          // IP address and server port for this node, expected to be a single.
+	                                                                                  // address/port per node, may be multiple address if this node is configured.
+	                                                                                  // to listen on multiple interfaces (typically not advised).
+	as_info_set_dynamic("services", info_get_services, true);                         // List of addresses of neighbor cluster nodes to advertise for Application to connect.
+	as_info_set_dynamic("services-alternate", info_get_alt_addr, false);              // IP address mapping from internal to public ones
+	as_info_set_dynamic("services-alumni", info_get_services_alumni, true);           // All neighbor addresses (services) this server has ever know about.
+	as_info_set_dynamic("services-alumni-reset", info_services_alumni_reset, false);  // Reset the services alumni to equal services
+	as_info_set_dynamic("sets", info_get_sets, false);                                // Returns set statistics for all or a particular set.
+	as_info_set_dynamic("statistics", info_get_stats, true);                          // Returns system health and usage stats for this server.
 
 #ifdef INFO_SEGV_TEST
 	as_info_set_dynamic("segvtest", info_segv_test, true);
@@ -7256,6 +7283,7 @@ as_info_init()
 	as_info_set_command("hist-track-stop", info_command_hist_track, PERM_SERVICE_CTRL);       // Stop histogram tracking.
 	as_info_set_command("jem-stats", info_command_jem_stats, PERM_LOGGING_CTRL);              // Print JEMalloc statistics to the log file.
 	as_info_set_command("latency", info_command_hist_track, PERM_NONE);                       // Returns latency and throughput information.
+	as_info_set_command("log-message", info_command_log_message, PERM_NONE);                  // Log a message.
 	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("mem", info_command_mem, PERM_NONE);                                  // Report on memory usage.
 	as_info_set_command("mstats", info_command_mstats, PERM_LOGGING_CTRL);                    // Dump GLibC-level memory stats.

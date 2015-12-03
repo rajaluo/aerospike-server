@@ -223,6 +223,7 @@ is_embedded_particle_type(as_particle_type type)
 }
 
 extern as_particle_type as_particle_type_from_asval(const as_val *val);
+extern as_particle_type as_particle_type_from_msgpack(const uint8_t *packed, uint32_t packed_size);
 
 extern int32_t as_particle_size_from_client(const as_msg_op *op); // TODO - will we ever need this?
 extern int32_t as_particle_size_from_pickled(uint8_t **p_pickled);
@@ -267,6 +268,9 @@ extern int as_bin_particle_replace_from_asval(as_bin *b, const as_val *val);
 extern void as_bin_particle_stack_from_asval(as_bin *b, uint8_t* stack, const as_val *val);
 extern as_val *as_bin_particle_to_asval(const as_bin *b);
 
+// msgpack:
+extern int as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t packed_size);
+
 // flat:
 extern int as_bin_particle_cast_from_flat(as_bin *b, uint8_t *flat, uint32_t flat_size);
 extern int as_bin_particle_replace_from_flat(as_bin *b, const uint8_t *flat, uint32_t flat_size);
@@ -289,7 +293,9 @@ extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells); /
 extern bool as_bin_particle_geojson_match(as_bin *b, uint64_t cellid, geo_region_t region, bool is_strict);
 
 // list:
+struct cdt_payload_s;
 extern void as_bin_particle_list_set_hidden(as_bin *b);
+extern void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
 extern int as_bin_cdt_packed_read(const as_bin *b, as_msg_op *op, as_bin *result);
 extern int as_bin_cdt_packed_modify(as_bin *b, as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb);
 
@@ -1051,6 +1057,9 @@ struct as_namespace_s {
 	cf_atomic_int	migrate_tx_partitions_remaining;
 	cf_atomic_int	migrate_rx_partitions_initial;
 	cf_atomic_int	migrate_rx_partitions_remaining;
+
+	// migration transmit stats
+	cf_atomic_int	migrate_tx_partitions_imbalance;
 
 	// the maximum void time of all records in the namespace
 	cf_atomic_int max_void_time;

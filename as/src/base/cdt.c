@@ -39,50 +39,40 @@
 // Typedefs & constants.
 //
 
+#define VA_NARGS(...) (sizeof((int[]){__VA_ARGS__})/sizeof(int))
+#define CDT_OP_ENTRY(op, ...) [op].args = (const as_cdt_paramtype[]){__VA_ARGS__, 0}, [op].count = VA_NARGS(__VA_ARGS__)
+
 static const cdt_op_table_entry cdt_op_table[] = {
 	//--------------------------------------------
 	// Modify OPs
 
+	// Add to list
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND,			AS_CDT_PARAM_PAYLOAD),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND_LIST,	AS_CDT_PARAM_PAYLOAD),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT,			AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT_LIST,	AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_SET,			AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
 
-	// OP by Value
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE_VALUE,	AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE_ALL,		AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_RETAIN_ALL,		AS_CDT_PARAM_PAYLOAD),
-
-	// OP by Index
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP,			0),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP_RANGE,		AS_CDT_PARAM_COUNT),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE_INDEX,	AS_CDT_PARAM_INDEX),
+	// Remove from list
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP,			AS_CDT_PARAM_INDEX),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP_RANGE,		AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE,			AS_CDT_PARAM_INDEX),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE_RANGE,	AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_INCREMENT_BY,	AS_CDT_PARAM_INDEX),
 
-	// Misc.
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_CLEAR,			0),
+	// Other list modifies
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_SET,			AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_TRIM,			AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_CLEAR,			0),
 
 	//--------------------------------------------
 	// Read OPs
 
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_INDEX_OF,		AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_LAST_INDEX_OF,	AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_CONTAINS,		AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_CONTAINS_ALL,	AS_CDT_PARAM_PAYLOAD),
-
-	// OP by Index
+	// Read from list
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_SIZE,			0),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET,			AS_CDT_PARAM_INDEX),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET_RANGE,		AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
-
-	// Misc.
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_SIZE,			0),
 };
 
 static const size_t cdt_op_table_size = sizeof(cdt_op_table) / sizeof(cdt_op_table_entry);
-
 
 //==========================================================
 // as_bin functions.
@@ -114,7 +104,7 @@ cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
 	const uint16_t *type_ptr = (const uint16_t *)data;
 	cdt_state->type = cf_swap_from_be16(*type_ptr);
 
-	cdt_state->pk.buffer = (uint8_t *)data + sizeof(uint16_t);
+	cdt_state->pk.buffer = data + sizeof(uint16_t);
 	cdt_state->pk.length = size - sizeof(uint16_t);
 	cdt_state->pk.offset = 0;
 
@@ -166,11 +156,20 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 
 			break;
 		}
-		case AS_CDT_PARAM_COUNT:
-		case AS_CDT_PARAM_INDEX: {
+		case AS_CDT_PARAM_COUNT: {
 			uint64_t *arg = va_arg(vl, uint64_t *);
 
 			if (as_unpack_uint64(&state->pk, arg) != 0) {
+				va_end(vl);
+				return false;
+			}
+
+			break;
+		}
+		case AS_CDT_PARAM_INDEX: {
+			int64_t *arg = va_arg(vl, int64_t *);
+
+			if (as_unpack_int64(&state->pk, arg) != 0) {
 				va_end(vl);
 				return false;
 			}
@@ -189,7 +188,7 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 }
 
 size_t
-cdt_process_state_op_table_set_size(as_cdt_optype op)
+cdt_process_state_op_param_count(as_cdt_optype op)
 {
 	if (op >= cdt_op_table_size) {
 		return 0;

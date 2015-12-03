@@ -11,6 +11,10 @@ OPT_AS = $(BUILD_ROOT)/opt/aerospike
 REV = $(shell $(DEPTH)/build/version | sed 's/-/_/g')
 OS = $(shell $(DEPTH)/build/os_version)
 
+ifeq ($(OS),el7)
+  USE_SYSTEMD = 1
+endif
+
 ifeq ($(USE_XDR),1)
 all:	dist-xdr package clean
 else
@@ -20,33 +24,57 @@ endif
 .PHONY:dist
 dist:
 	install -d $(BUILD_ROOT)/etc/aerospike
-ifeq ($(OS), el7)
-	install -d $(BUILD_ROOT)/usr/lib/systemd/system
-endif
-	install -d $(BUILD_ROOT)/etc/init.d
 
-	install -d $(BUILD_ROOT)/etc/logrotate.d
-	install -d $(BUILD_ROOT)/usr/bin
+ifeq ($(USE_SYSTEMD),1)
+	install -d $(BUILD_ROOT)/usr/lib/systemd/system
+	install -d $(BUILD_ROOT)/etc/systemd/system/aerospike.service.d
+else
 	install -d $(BUILD_ROOT)/var/log/aerospike
 	install -d $(BUILD_ROOT)/var/run/aerospike
+endif
+	install -d $(BUILD_ROOT)/etc/init.d
+	install -d $(BUILD_ROOT)/etc/logrotate.d
+	install -d $(BUILD_ROOT)/usr/bin
 
 	install -pm 755 $(BIN_DIR)/asd $(BUILD_ROOT)/usr/bin/asd
+ifeq ($(USE_SYSTEMD),1)
+	install -pm 755 $(DEPTH)/tools/bin/asd-coldstart $(BUILD_ROOT)/usr/bin/asd-coldstart
+endif
 	install -pm 755 $(DEPTH)/tools/citrus2aero/upgrade2to3 $(BUILD_ROOT)/usr/bin/asmigrate2to3
 	install -pm 755 $(DEPTH)/tools/fixownership/fixownership.py $(BUILD_ROOT)/usr/bin/asfixownership
 
+ifeq ($(USE_SYSTEMD),1)
+	install -pm 644 $(DEPTH)/as/etc/aerospike_systemd.conf $(BUILD_ROOT)/etc/aerospike/aerospike.conf
+else
 	install -pm 644 $(DEPTH)/as/etc/aerospike.conf $(BUILD_ROOT)/etc/aerospike
+endif
 	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd.conf $(BUILD_ROOT)/etc/aerospike
 	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh.conf $(BUILD_ROOT)/etc/aerospike
 
-ifeq ($(OS), el7)
+ifeq ($(USE_SYSTEMD),1)
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.tmpfiles $(BUILD_ROOT)/etc/tmpfiles.d/aerospike.conf
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike
 	install -p -D -m 755 $(DEPTH)/as/etc/asd-systemd-helper $(BUILD_ROOT)/usr/bin/asd-systemd-helper
+	install -p -D -m 644 $(DEPTH)/as/etc/aerospike.service.d/* $(BUILD_ROOT)/etc/systemd/system/aerospike.service.d
 else
 	install -pm 755 $(DEPTH)/as/etc/init-script $(BUILD_ROOT)/etc/init.d/aerospike
+	sed -i 's/@EDITION@/$(EDITION)/g' $(BUILD_ROOT)/etc/init.d/aerospike
 endif
 	install -pm 644 $(DEPTH)/as/etc/logrotate_asd $(BUILD_ROOT)/etc/logrotate.d/aerospike
+
+ifeq ($(EDITION), community)
+	install -pm 755 $(DEPTH)/as/etc/init-telemetry-script $(BUILD_ROOT)/etc/init.d/aerospike_telemetry
+	install -pm 644 $(DEPTH)/as/etc/logrotate_telemetry $(BUILD_ROOT)/etc/logrotate.d/aerospike_telemetry
+
+	install -d $(OPT_AS)/telemetry
+	install -d $(OPT_AS)/telemetry/phonehome
+	install -d $(OPT_AS)/telemetry/daemon
+	install -pm 644 $(DEPTH)/as/etc/telemetry.conf $(BUILD_ROOT)/etc/aerospike
+	install -pm 755 $(DEPTH)/modules/telemetry/telemetry.py $(OPT_AS)/telemetry
+	install -pm 755 $(DEPTH)/modules/telemetry/phonehome/*.py $(OPT_AS)/telemetry/phonehome
+	install -pm 755 $(DEPTH)/modules/telemetry/daemon/*.py $(OPT_AS)/telemetry/daemon
+endif
 
 ifeq ($(USE_ASM),1)
 	install -pm 644 $(DEPTH)/as/etc/initfns $(BUILD_ROOT)/etc/aerospike
@@ -72,10 +100,12 @@ package:
 	install -d $(SOURCE_ROOT)/RPMS/x86_64
 
 	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/rpm/server-spec-base > $(PKG)/rpm/aerospike.spec
-ifeq ($(OS), el7)
-	cat $(PKG)/rpm/server-spec-system-el7 >> $(PKG)/rpm/aerospike.spec
+	cat $(PKG)/rpm/server-spec-logrotate >> $(PKG)/rpm/aerospike.spec
+	cat $(PKG)/rpm/server-spec-files >> $(PKG)/rpm/aerospike.spec
+ifeq ($(USE_SYSTEMD),1)
+	cat $(PKG)/rpm/server-spec-systemd >> $(PKG)/rpm/aerospike.spec
 else
-	cat $(PKG)/rpm/server-spec-system >> $(PKG)/rpm/aerospike.spec
+	cat $(PKG)/rpm/server-spec-sysv >> $(PKG)/rpm/aerospike.spec
 endif
 
 ifeq ($(USE_ASM),1)
@@ -85,6 +115,9 @@ ifeq ($(USE_XDR),1)
 	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
 endif
 	cat $(PKG)/rpm/server-spec-config >> $(PKG)/rpm/aerospike.spec
+ifeq ($(EDITION), community)
+	cat $(PKG)/rpm/server-spec-telemetry >> $(PKG)/rpm/aerospike.spec
+endif
 	cat $(PKG)/rpm/server-spec-scripts >> $(PKG)/rpm/aerospike.spec
 
 	sed -i 's/@RELEASE@/'$(OS)'/g' $(PKG)/rpm/aerospike.spec
