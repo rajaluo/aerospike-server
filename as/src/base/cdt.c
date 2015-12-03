@@ -167,7 +167,7 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 			break;
 		}
 		case AS_CDT_PARAM_INDEX: {
-			uint64_t *arg = va_arg(vl, int64_t *);
+			int64_t *arg = va_arg(vl, int64_t *);
 
 			if (as_unpack_int64(&state->pk, arg) != 0) {
 				va_end(vl);
