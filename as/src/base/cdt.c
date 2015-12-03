@@ -39,6 +39,9 @@
 // Typedefs & constants.
 //
 
+#define VA_NARGS(...) (sizeof((int[]){__VA_ARGS__})/sizeof(int))
+#define CDT_OP_ENTRY(op, ...) [op].args = (const as_cdt_paramtype[]){__VA_ARGS__, 0}, [op].count = VA_NARGS(__VA_ARGS__)
+
 static const cdt_op_table_entry cdt_op_table[] = {
 	//--------------------------------------------
 	// Modify OPs
