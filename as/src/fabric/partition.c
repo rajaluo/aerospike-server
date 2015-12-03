@@ -2331,31 +2331,25 @@ as_partition_adjust_hv_and_slindex(const as_partition *ptn, cf_node hv_ptr[],
 		const cc_group_t cur_group_id = cc_compute_group_id(cur_node);
 
 		if (cur_node == (cf_node)0) {
-			// Should not be possible
-			cf_warning(AS_PARTITION, "null node found within cluster_size");
-			break;
+			cf_crash(AS_PARTITION, "null node found within cluster_size");
 		}
-
 
 		// If cur_group is unique for nodes < cur_i then continue to next node.
 		if (! is_group_distinct_before_n(ptn, hv_ptr, hv_slindex_ptr,
 				cur_group_id, cur_i)) {
 
-			// Find a group after cur_i that is unique for groups before
-			// cur_i.
+			// Find a group after cur_i that is unique for groups before cur_i.
 			int swap_i = cur_i; // if swap cannot be found then no change
 			for ( ; next_i < cluster_size; next_i++) {
 				const cf_node next_node = HV(pid, next_i);
 				const cc_group_t next_group_id = cc_compute_group_id(next_node);
 
 				if (next_node == (cf_node)0) {
-					// Should not be possible
-					cf_warning(AS_PARTITION, "null node found within cluster_size");
-					break;
+					cf_crash(AS_PARTITION, "null node found within cluster_size");
 				}
 
 				if (is_group_distinct_before_n(ptn, hv_ptr, hv_slindex_ptr,
-						next_group_id, cur_i) || next_node == (cf_node)0) {
+						next_group_id, cur_i)) {
 					swap_i = next_i;
 					next_i++;
 					break;
@@ -2365,9 +2359,8 @@ as_partition_adjust_hv_and_slindex(const as_partition *ptn, cf_node hv_ptr[],
 			if (swap_i == cur_i) {
 				// No other distinct groups found. This shouldn't be possible.
 				// We should reach n_needed first.
-				cf_warning(AS_PARTITION, "can't find a diff cur:%d swap:%d repl:%d clsz:%d ptn:%d",
+				cf_crash(AS_PARTITION, "can't find a diff cur:%d swap:%d repl:%d clsz:%d ptn:%d",
 						cur_i, swap_i, rf, cluster_size, pid);
-				break;
 			}
 
 			// Now swap cur_i with swap_i.
@@ -2383,23 +2376,6 @@ as_partition_adjust_hv_and_slindex(const as_partition *ptn, cf_node hv_ptr[],
 		}
 	}
 } // end as_partition_adjust_hv_and_slindex()
-
-
-// Returns the max replication factor configured to a namespace.
-uint32_t
-max_ns_replication_factor() {
-	uint32_t max_repl = 1;
-
-	for (int i = 0; i < g_config.namespaces; i++) {
-		const as_namespace *ns = g_config.namespace[i];
-
-		if (ns->replication_factor > max_repl) {
-			max_repl = ns->replication_factor;
-		}
-	}
-
-	return max_repl;
-}
 
 
 // Check that we have more than one group in our paxos succession list,
@@ -2877,7 +2853,7 @@ as_partition_balance()
 			 * arrays to make sure that the first "replica-factor" entries have
 			 * group ids that are different than the master. (5/2013:tjl)
 			 */
-			if(g_config.cluster_mode != CL_MODE_NO_TOPOLOGY
+			if (g_config.cluster_mode != CL_MODE_NO_TOPOLOGY
 					&& paxos->cluster_size > 1) {
 				// Check and then update the HV and SLINDEX arrays appropriately.
 				as_partition_adjust_hv_and_slindex(p, hv_ptr, hv_slindex_ptr);
