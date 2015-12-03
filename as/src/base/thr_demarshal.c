@@ -352,6 +352,7 @@ thr_demarshal_set_buffer(int fd, int option, int size)
 
 	default:
 		cf_crash(AS_DEMARSHAL, "Invalid option: %d", option);
+		return -1; // cf_crash() should have a "noreturn" attribute, but is a macro
 	}
 
 	int tmp = ck_pr_load_int(max);
