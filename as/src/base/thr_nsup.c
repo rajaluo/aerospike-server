@@ -1227,11 +1227,9 @@ thr_nsup(void *arg)
 						continue;
 					}
 
-					as_sindex_set si_set;
-					si_set.set = p_set;
-					si_set.ns = ns;
-					// This call will offload the responsibility of resetting set-delete to a different thread		
-					cf_queue_push(g_sindex_set_destroy_q, &si_set);
+					// This call will clear all the sindex entries from this set and
+					// offload the responsibility of resetting set-delete to a new thread
+					as_sindex_initiate_set_delete(ns, p_set);
 				}
 			}
 

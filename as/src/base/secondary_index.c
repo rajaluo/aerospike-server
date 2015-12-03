@@ -2050,14 +2050,16 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 }
 
 void
-as_sindex_drop_set(as_namespace * ns, char * set_name)
+as_sindex_delete_set(as_namespace * ns, char * set_name)
 {
 	SINDEX_GRLOCK();
 	as_sindex * si_arr[ns->sindex_cnt];
 	int sindex_count = as_sindex_arr_lookup_by_setname_lockfree(ns, set_name, si_arr);
 
 	for (int i=0; i<sindex_count; i++) {
+		cf_info(AS_SINDEX, "Initiating si set delete for index %s in set %s", si_arr[i]->imd->iname, set_name);
 		as_sindex_empty_index(si_arr[i]->imd);
+		cf_info(AS_SINDEX, "Finished si set delete for index %s in set %s", si_arr[i]->imd->iname, set_name);
 	}
 	SINDEX_GUNLOCK();
 	as_sindex_release_arr(si_arr, sindex_count);
