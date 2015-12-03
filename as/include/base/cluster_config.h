@@ -84,9 +84,7 @@ typedef uint16_t cc_group_t;
 typedef uint32_t cc_node_t;
 
 typedef enum { unknown, balanced, unbalanced, invalid } cluster_state_t;
-extern const char * cc_state_str[];
-
-
+extern const char *cc_state_str[];
 
 typedef struct cluster_config_s {
 	// We moved this up to the TOP LEVEL config section
@@ -108,36 +106,21 @@ typedef struct cluster_config_s {
 
 } cluster_config_t;
 
-// extern const char * cc_state_str[];
-
 // Functions in cluster_config.c
-extern void
-cc_cluster_config_defaults(cluster_config_t * cc );
-extern int
-cc_locate_node(cluster_config_t * cc, cc_node_t node_id );
-extern int
-cc_add_node(cluster_config_t * cc, cc_node_t node_id );
-extern int
-cc_locate_group(cluster_config_t * cc, cc_group_t group_id );
-extern int
-cc_add_group(cluster_config_t * cc, cc_group_t group_id );
-extern int
-cc_add_node_group_entry(cluster_config_t * cc, cc_node_t node, cc_group_t group );
-extern int
-cc_add_fullnode_group_entry(cluster_config_t * cc, cf_node fullnode  );
-extern int
-cc_locate_node_group(cluster_config_t * cc, cc_node_t node_id );
-extern uint16_t
-cc_compute_port( cf_node self_node );
-extern cc_group_t
-cc_compute_group_id( cf_node self_node );
-extern cc_node_t
-cc_compute_node_id( cf_node self_node );
-extern cf_node
-cc_compute_self_node( uint16_t port_num, cc_group_t group_id, cc_node_t node_id );
-extern void
-cc_show_cluster_state( cluster_config_t * cc );
-extern cluster_state_t
-cc_get_cluster_state( cluster_config_t * cc );
-extern void
-cc_cluster_config_dump(bool verbose);
+void cc_cluster_config_defaults(cluster_config_t *cc);
+int cc_locate_node(const cluster_config_t *cc, const cc_node_t node_id);
+int cc_add_node(cluster_config_t *cc, const cc_node_t node_id);
+int cc_locate_group(const cluster_config_t *cc, const cc_group_t group_id);
+int cc_add_group(cluster_config_t *cc, const cc_group_t group_id);
+int cc_add_node_group_entry(cluster_config_t *cc, const cc_node_t node,
+		const cc_group_t group);
+int cc_add_fullnode_group_entry(cluster_config_t *cc, const cf_node fullnode);
+int cc_locate_node_group(const cluster_config_t *cc, const cc_node_t node_id);
+uint16_t cc_compute_port(const cf_node self_node);
+cc_group_t cc_compute_group_id(const cf_node self_node);
+cc_node_t cc_compute_node_id(const cf_node self_node);
+cf_node cc_compute_self_node(const uint16_t port_num, const cc_group_t group_id,
+		const cc_node_t node_id);
+void cc_show_cluster_state(const cluster_config_t *cc);
+cluster_state_t cc_get_cluster_state(const cluster_config_t *cc);
+void cc_cluster_config_dump(const bool verbose);
