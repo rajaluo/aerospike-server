@@ -85,9 +85,6 @@ typedef struct cdt_op_table_entry_s {
 	const as_cdt_paramtype *args;
 } cdt_op_table_entry;
 
-#define VA_NARGS(...) (sizeof((int[]){__VA_ARGS__})/sizeof(int))
-#define CDT_OP_ENTRY(op, ...) [op].args = (const as_cdt_paramtype[]){__VA_ARGS__, 0}, [op].count = VA_NARGS(__VA_ARGS__)
-
 // Get around needing to pass last named arg to va_start().
 #define CDT_OP_TABLE_GET_PARAMS(state, ...) cdt_process_state_get_params(state, cdt_process_state_op_param_count(state->type), __VA_ARGS__)
 
