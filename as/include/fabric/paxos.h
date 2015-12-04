@@ -262,7 +262,7 @@ void as_paxos_init();
 void as_paxos_start();
 int as_paxos_register_change_callback(as_paxos_change_callback cb, void *udata);
 int as_paxos_deregister_change_callback(as_paxos_change_callback cb, void *udata);
-cf_node as_paxos_succession_getprincipal(void);
+cf_node as_paxos_succession_getprincipal();
 bool as_paxos_succession_ismember(cf_node n);
 
 // Get the head of the Paxos succession list, or zero if there is none.
@@ -303,4 +303,4 @@ int as_paxos_get_succession_list(cf_dyn_buf *db);
  * The first element of the list will become the Paxos principal.
  * Returns 0 if successful, -1 otherwise.
  */
-int as_paxos_set_succession_list(char *nodes_str, int nodes_str_len);
+int as_paxos_set_succession_list(/*const*/ char *nodes_str, int nodes_str_len);
