@@ -61,8 +61,7 @@
  *
  * Generations
  * A Paxos generation consists of two unsigned 32-bit fields: a sequence
- * number, which tracks each separate Paxos action, and a proposal number,
- * which identifies convergence attempts within each sequence.  A sequence
+ * number, which tracks each separate Paxos action. A sequence
  * number of zero is invalid and used for internal record keeping.
  *
  * Pending transaction list
@@ -347,7 +346,7 @@ as_paxos_sync_msg_generate(uint64_t cluster_key)
 	e += msg_set_uint32(m, AS_PAXOS_MSG_ID, AS_PAXOS_PROTOCOL_IDENTIFIER());
 	e += msg_set_uint32(m, AS_PAXOS_MSG_COMMAND, AS_PAXOS_MSG_COMMAND_SYNC);
 	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, p->gen.sequence);
-	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, p->gen.proposal);
+	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
 
 	/* Include the succession list length in all Paxos protocol v2 or greater messages. */
 	if (!AS_PAXOS_PROTOCOL_IS_V(1))
@@ -384,7 +383,7 @@ as_paxos_sync_msg_apply(msg *m)
 	memset(&gen, 0, sizeof(as_paxos_generation));
 
 	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &gen.sequence);
-	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, &gen.proposal);
+	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
 
 	e += msg_get_buf(m, AS_PAXOS_MSG_SUCCESSION, &bufp, &bufsz, MSG_GET_DIRECT);
 	e += msg_get_uint64(m, AS_PAXOS_MSG_CLUSTER_KEY, &cluster_key);
@@ -403,16 +402,15 @@ as_paxos_sync_msg_apply(msg *m)
 			cf_info(AS_PAXOS, "Sync message received from a principal %"PRIx64" that is back from the dead?", p->succession[0]);
 		}
 		/* compare generations */
-		if ((gen.sequence < p->gen.sequence) || ((gen.sequence == p->gen.sequence) && (gen.proposal < p->gen.proposal))) {
-			cf_warning(AS_PAXOS, "Sync message ignored from %"PRIx64" - [%d.%d]@%"PRIx64" is arriving after [%d.%d]@%"PRIx64,
-					   succession[0], gen.sequence, gen.proposal, succession[0], p->gen.sequence, p->gen.proposal, p->succession[0]);
-			return(-1);
+		if (gen.sequence < p->gen.sequence) {
+			cf_warning(AS_PAXOS, "Sync message ignored from %"PRIx64" - [%d]@%"PRIx64" is arriving after [%d]@%"PRIx64,
+					succession[0], gen.sequence, succession[0], p->gen.sequence, p->succession[0]);
+			return -1;
 		}
 	}
 
 	/* Apply the sync msg to the current state */
 	p->gen.sequence = gen.sequence;
-	p->gen.proposal = gen.proposal;
 
 	memcpy(p->succession, bufp, g_config.paxos_max_cluster_size * sizeof(cf_node));
 
@@ -465,7 +463,7 @@ as_paxos_partition_sync_request_msg_generate()
 	e += msg_set_uint32(m, AS_PAXOS_MSG_ID, AS_PAXOS_PROTOCOL_IDENTIFIER());
 	e += msg_set_uint32(m, AS_PAXOS_MSG_COMMAND, AS_PAXOS_MSG_COMMAND_PARTITION_SYNC_REQUEST);
 	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, p->gen.sequence);
-	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, p->gen.proposal);
+	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
 
 	/* Include the succession list length in all Paxos protocol v2 or greater messages. */
 	if (!AS_PAXOS_PROTOCOL_IS_V(1))
@@ -552,12 +550,12 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 
 	/* We trust this state absolutely */
 	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &gen.sequence);
-	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, &gen.proposal);
+	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
 
-	if ((gen.sequence != p->gen.sequence) || (gen.proposal != p->gen.proposal)) {
-		cf_warning(AS_PAXOS, "sequence/proposal do not match (%"PRIu32", %"PRIu32" | %"PRIu32", %"PRIu32"). partition sync request not applied",
-				   gen.sequence, p->gen.sequence, gen.proposal, p->gen.proposal);
-		return(-1);
+	if (gen.sequence != p->gen.sequence) {
+		cf_warning(AS_PAXOS, "sequence does not match (%"PRIu32", %"PRIu32") - partition sync request not applied",
+				gen.sequence, p->gen.sequence);
+		return -1;
 	}
 
 	size_t array_size = g_config.n_namespaces;
@@ -643,7 +641,7 @@ as_paxos_partition_sync_msg_generate()
 	e += msg_set_uint32(m, AS_PAXOS_MSG_ID, AS_PAXOS_PROTOCOL_IDENTIFIER());
 	e += msg_set_uint32(m, AS_PAXOS_MSG_COMMAND, AS_PAXOS_MSG_COMMAND_PARTITION_SYNC);
 	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, p->gen.sequence);
-	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, p->gen.proposal);
+	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
 
 	/* Include the succession list length in all Paxos protocol v2 or greater messages. */
 	if (!AS_PAXOS_PROTOCOL_IS_V(1))
@@ -764,10 +762,10 @@ as_paxos_partition_sync_msg_apply(msg *m)
 
 	/* We trust this state absolutely */
 	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &gen.sequence);
-	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, &gen.proposal);
-	if ((gen.sequence != p->gen.sequence) || (gen.proposal != p->gen.proposal)) {
-		cf_warning(AS_PAXOS, "sequence/proposal do not match. partition sync message not applied");
-		return(-1);
+	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
+	if (gen.sequence != p->gen.sequence) {
+		cf_warning(AS_PAXOS, "sequence do not match. partition sync message not applied");
+		return -1;
 	}
 
 	e += msg_get_buf(m, AS_PAXOS_MSG_SUCCESSION, &bufp, &bufsz, MSG_GET_DIRECT);
@@ -1190,7 +1188,6 @@ as_paxos_current_init(as_paxos *p)
 
 	p->current[0] = &p->pending[0];
 	p->current[0]->gen.sequence = p->gen.sequence;
-	p->current[0]->gen.proposal = p->gen.proposal;
 }
 
 // Gets the transaction candidate with the largest principal.
@@ -1295,12 +1292,13 @@ as_paxos_transaction_compare(as_paxos_transaction *t1, as_paxos_transaction *t2)
 	cf_assert(t1, AS_PAXOS, CF_CRITICAL, "invalid transaction (t1)");
 	cf_assert(t2, AS_PAXOS, CF_CRITICAL, "invalid transaction (t2)");
 
-	if ((t1->gen.sequence == t2->gen.sequence) &&
-			(t1->gen.proposal == t2->gen.proposal) &&
-			(0 == memcmp(&t1->c, &t2->c, sizeof(as_paxos_change))))
-		return(0);
-	else
-		return(-1);
+	if (t1->gen.sequence == t2->gen.sequence &&
+			0 == memcmp(&t1->c, &t2->c, sizeof(as_paxos_change))) {
+		return 0;
+	}
+	else {
+		return -1;
+	}
 }
 
 /* as_paxos_transaction_update
@@ -1312,7 +1310,6 @@ as_paxos_transaction_update(as_paxos_transaction *oldt, as_paxos_transaction *ne
 	cf_assert(newt, AS_PAXOS, CF_CRITICAL, "invalid transaction (newt)");
 
 	oldt->gen.sequence = newt->gen.sequence;
-	oldt->gen.proposal = newt->gen.proposal;
 	memcpy(&oldt->c, &newt->c, sizeof(oldt->c));
 }
 
@@ -1339,8 +1336,7 @@ as_paxos_transaction_establish(as_paxos_transaction *s)
 		if (!oldest
 			|| (p->pending[i].retired && !oldest->retired)
 			|| (p->pending[i].retired == oldest->retired
-				&& (p->pending[i].gen.sequence < oldest->gen.sequence
-					|| (p->pending[i].gen.sequence == oldest->gen.sequence && p->pending[i].gen.proposal < oldest->gen.proposal)))) {
+				&& (p->pending[i].gen.sequence < oldest->gen.sequence))) {
 			oldest = &p->pending[i];
 		}
 	}
@@ -1488,7 +1484,7 @@ as_paxos_send_sync_messages() {
 	uint64_t cluster_key = as_paxos_get_cluster_key();
 	msg *reply = NULL;
 	char sbuf[(AS_CLUSTER_SZ * 17) + 49];
-	snprintf(sbuf, 49, "SUCCESSION [%d.%d]@%"PRIx64": ", p->gen.sequence, p->gen.proposal, g_config.self_node);
+	snprintf(sbuf, 49, "SUCCESSION [%d]@%"PRIx64": ", p->gen.sequence, g_config.self_node);
 	snprintf(sbuf + strlen(sbuf), 18, "%"PRIx64" ", p->succession[0]);
 
 	for (int i = 1; i < g_config.paxos_max_cluster_size; i++) {
@@ -1580,21 +1576,20 @@ as_paxos_transaction_apply(cf_node from_id)
 		while (NULL != (t = as_paxos_transaction_getnext(from_id))) {
 			/* Update the generation count in anticipation of the sync message*/
 			p->gen.sequence = t->gen.sequence;
-			p->gen.proposal = t->gen.proposal;
 			n_xact++;
 			cf_debug(AS_PAXOS, "Non-principal retiring transaction 0x%x (nc %d) from %"PRIx64, t, t->c.n_change, from_id);
 			as_paxos_transaction_retire(t);
 		}
 
-		cf_debug(AS_PAXOS, "{%d,%d} non-principal retired %d transactions",
-				p->gen.sequence, p->gen.proposal, n_xact);
+		cf_debug(AS_PAXOS, "{%d} non-principal retired %d transactions",
+				p->gen.sequence, n_xact);
 
 		return;
 	}
 
 	while (NULL != (t = as_paxos_transaction_getnext(self))) {
-		cf_debug(AS_PAXOS, "{%d,%d} applying transaction 0x%x",
-				p->gen.sequence, p->gen.proposal, t);
+		cf_debug(AS_PAXOS, "{%d} applying transaction 0x%x",
+				p->gen.sequence, t);
 
 		if ((t->c.p_node != 0) && (t->c.p_node != as_paxos_succession_getprincipal()))
 			cf_warning(AS_PAXOS, "Applying transaction not from %"PRIx64" principal is %"PRIx64"",
@@ -1605,7 +1600,6 @@ as_paxos_transaction_apply(cf_node from_id)
 
 		/* Update the generation count */
 		p->gen.sequence = t->gen.sequence;
-		p->gen.proposal = t->gen.proposal;
 		for (int i = 0; i < t->c.n_change; i++) {
 			switch(t->c.type[i]) {
 				case AS_PAXOS_CHANGE_NOOP:
@@ -1641,20 +1635,18 @@ as_paxos_transaction_apply(cf_node from_id)
 			}
 		}
 
-		cf_debug(AS_PAXOS, "{%d,%d} principal retiring transaction 0x%x",
-				p->gen.sequence, p->gen.proposal, t);
+		cf_debug(AS_PAXOS, "{%d} principal retiring transaction 0x%x",
+				p->gen.sequence, t);
 		as_paxos_transaction_retire(t);
 	}
 
 	cf_debug(AS_PAXOS, "Principal applied %d transactions", n_xact);
 
 	if (0 == n_xact) {
-		/*
-		 * No transactions have been applied. So do not send sync messages.
-		 * This is most likely because confirmation messages have crossed over
-		 */
-		cf_warning(AS_PAXOS, "{%d,%d} no changes applied on paxos confirmation message, principal is %"PRIx64" - no sync messages will be sent",
-				p->gen.sequence, p->gen.proposal, as_paxos_succession_getprincipal());
+		// No transactions have been applied. So do not send sync messages.
+		// This is most likely because confirmation messages have crossed over
+		cf_warning(AS_PAXOS, "{%d} no changes applied on paxos confirmation message, principal is %"PRIx64" - no sync messages will be sent",
+				p->gen.sequence, as_paxos_succession_getprincipal());
 		return;
 	}
 
@@ -1753,7 +1745,7 @@ as_paxos_msg_wrap(as_paxos_transaction *t, uint32_t c)
 	e += msg_set_uint32(m, AS_PAXOS_MSG_ID, AS_PAXOS_PROTOCOL_IDENTIFIER());
 	e += msg_set_uint32(m, AS_PAXOS_MSG_COMMAND, c);
 	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, t->gen.sequence);
-	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, t->gen.proposal);
+	e += msg_set_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
 
 	/* Include the succession list length in all Paxos protocol v2 or greater messages. */
 	if (!AS_PAXOS_PROTOCOL_IS_V(1))
@@ -1837,7 +1829,7 @@ as_paxos_msg_unwrap(msg *m, as_paxos_transaction *t)
 		c != AS_PAXOS_MSG_COMMAND_PARTITION_SYNC_REQUEST && c != AS_PAXOS_MSG_COMMAND_PARTITION_SYNC  &&
 		c != AS_PAXOS_MSG_COMMAND_HEARTBEAT_EVENT && c != AS_PAXOS_MSG_COMMAND_RETRANSMIT_CHECK) {
 		e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &t->gen.sequence);
-		e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, &t->gen.proposal);
+		// Older versions handled unused AS_PAXOS_MSG_GENERATION_PROPOSAL here.
 		size_t orig_bufsz = sizeof(as_paxos_wire_change) + (sizeof(uint8_t) + sizeof(cf_node)) * g_config.paxos_max_cluster_size;
 		bufsz = orig_bufsz;
 		e += msg_get_buf(m, AS_PAXOS_MSG_CHANGE, (byte **)&bufp, &bufsz, MSG_GET_DIRECT);
@@ -1911,8 +1903,8 @@ Cleanup:
 	as_fabric_msg_put(px_msg);
 
 Done:
-	cf_debug(AS_PAXOS, "sent Paxos command %s for transaction [%d.%d]@%"PRIx64" to %d of %d nodes",
-			 as_paxos_cmd_name[cmd], tr->gen.sequence, tr->gen.proposal, g_config.self_node, sent_count, nl.sz);
+	cf_debug(AS_PAXOS, "sent Paxos command %s for transaction [%d]@%"PRIx64" to %d of %d nodes",
+			as_paxos_cmd_name[cmd], tr->gen.sequence, g_config.self_node, sent_count, nl.sz);
 
 	return rv;
 }
@@ -1965,7 +1957,6 @@ as_paxos_spark(as_paxos_change *c)
 	}
 
 	t.gen.sequence = as_paxos_current_get_sequence() + 1;
-	t.gen.proposal = 0;
 
 	char change_buf[AS_CLUSTER_SZ * (2 * sizeof(cf_node) + 6) + 1] = { '\0' };
 	char *op = "", *cb = change_buf;
@@ -1993,8 +1984,8 @@ as_paxos_spark(as_paxos_change *c)
 		cb += count;
 	}
 	*cb = '\0';
-	cf_info(AS_PAXOS, "as_paxos_spark establishing transaction [%"PRIu32".%"PRIu32"]@%"PRIx64" ClSz = %d ; # change = %d : %s",
-			t.gen.sequence, t.gen.proposal, g_config.self_node, p->cluster_size, t.c.n_change, change_buf);
+	cf_info(AS_PAXOS, "as_paxos_spark establishing transaction [%"PRIu32"]@%"PRIx64" ClSz = %d ; # change = %d : %s",
+			t.gen.sequence, g_config.self_node, p->cluster_size, t.c.n_change, change_buf);
 
 	/* Populate a new transaction with the change, establish it
 	 * in the pending transaction table, and send the message */
@@ -2778,6 +2769,11 @@ as_paxos_thr(void *arg)
 
 		static const int Q_WAIT_MS = 400; // TODO - what to do with this?
 
+		if (Q_WAIT_MS >= (g_config.paxos_retransmit_period * 1000)) {
+			cf_crash(AS_PAXOS, "paxos_retransmit_period %d s is less than paxos msgq wait %d ms.",
+					g_config.paxos_retransmit_period, Q_WAIT_MS);
+		}
+
 		// Get the next message from the queue.
 		if (0 != cf_queue_priority_pop(p->msgq, &qm, Q_WAIT_MS)) {
 			// Q: Couldn't this cause us to starve rebalance if there are
@@ -2928,8 +2924,8 @@ as_paxos_thr(void *arg)
 
 		switch(c) {
 			case AS_PAXOS_MSG_COMMAND_PREPARE:
-				cf_debug(AS_PAXOS, "{%d,%d} received prepare message from %"PRIx64"",
-						t.gen.sequence, t.gen.proposal, qm->id);
+				cf_debug(AS_PAXOS, "{%d} received prepare message from %"PRIx64"",
+						t.gen.sequence, qm->id);
 
 				s = as_paxos_transaction_search(t);
 				if (NULL == s) {
@@ -2947,8 +2943,8 @@ as_paxos_thr(void *arg)
 						reply = as_paxos_msg_wrap(as_paxos_current_get(), as_paxos_state_next(c, NACK));
 					}
 
-					cf_info(AS_PAXOS, "{%d,%d} sending prepare_ack to %"PRIx64"",
-							p->gen.sequence, p->gen.proposal, qm->id);
+					cf_info(AS_PAXOS, "{%d} sending prepare_ack to %"PRIx64"",
+							p->gen.sequence, qm->id);
 					if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH)) {
 						as_fabric_msg_put(reply);
 					}
@@ -2960,60 +2956,46 @@ as_paxos_thr(void *arg)
 						// need to ack it.
 						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, ACK));
 
-						cf_info(AS_PAXOS, "{%d,%d} principal acking it's prepare %"PRIx64"",
-								t.gen.sequence, t.gen.proposal, qm->id);
+						cf_info(AS_PAXOS, "{%d} principal acking it's prepare %"PRIx64"",
+								t.gen.sequence, qm->id);
 						if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH)) {
 							as_fabric_msg_put(reply);
 						}
 
 					}
 					else {
-						cf_info(AS_PAXOS, "{%d,%d} prevented PREPARE in COMMIT path.",
-								t.gen.sequence, t.gen.proposal);
+						cf_info(AS_PAXOS, "{%d} prevented PREPARE in COMMIT path.",
+								t.gen.sequence);
 					}
 				}
 				break;
 
 			case AS_PAXOS_MSG_COMMAND_COMMIT:
-				cf_debug(AS_PAXOS, "{%d,%d} received commit message from %"PRIx64"",
-						t.gen.sequence, t.gen.proposal, qm->id);
+				cf_debug(AS_PAXOS, "{%d} received commit message from %"PRIx64"",
+						t.gen.sequence, qm->id);
 				if (NULL != (s = as_paxos_transaction_search(t))) {
-					// We've seen this transaction before: check the proposal
-					// number.
-					if (t.gen.proposal < s->gen.proposal) {
-						// Reject: the proposal number is less than latest
-						// one we've received.
-						cf_debug(AS_PAXOS, "rejecting older Paxos command gen:  %d vs. %d", t.gen.proposal, s->gen.proposal);
-						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, NACK));
-					}
-					else {
-						// Accept: if the proposal number is newer, update
-						// our copy of the transaction.
-						if (t.gen.proposal > s->gen.proposal) {
-							as_paxos_transaction_update(s, &t);
-						}
-						reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, ACK));
-					}
+					// We've seen this transaction before.
+					reply = as_paxos_msg_wrap(s, as_paxos_state_next(c, ACK));
 
-					cf_debug(AS_PAXOS, "{%d,%d} sending commit_ack to %"PRIx64"",
-							t.gen.sequence, t.gen.proposal, qm->id);
+					cf_debug(AS_PAXOS, "{%d} sending commit_ack to %"PRIx64"",
+							t.gen.sequence, qm->id);
 					if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH))
 						as_fabric_msg_put(reply);
 				}
 				else {
-					cf_debug(AS_PAXOS, "{%d,%d} prevented COMMIT in PREPARE path.",
-							t.gen.sequence, t.gen.proposal);
+					cf_debug(AS_PAXOS, "{%d} prevented COMMIT in PREPARE path.",
+							t.gen.sequence);
 				}
 				break;
 
 			case AS_PAXOS_MSG_COMMAND_PREPARE_ACK:
-				cf_debug(AS_PAXOS, "{%d,%d} received prepare_ack message from %"PRIx64"",
-						t.gen.sequence, t.gen.proposal, qm->id);
+				cf_debug(AS_PAXOS, "{%d} received prepare_ack message from %"PRIx64"",
+						t.gen.sequence, qm->id);
 				// no break
 			case AS_PAXOS_MSG_COMMAND_COMMIT_ACK:
 				if (c == AS_PAXOS_MSG_COMMAND_COMMIT_ACK) {
-					cf_debug(AS_PAXOS, "{%d,%d} received commit_ack message from %"PRIx64"",
-							t.gen.sequence, t.gen.proposal, qm->id);
+					cf_debug(AS_PAXOS, "{%d} received commit_ack message from %"PRIx64"",
+							t.gen.sequence, qm->id);
 
 				}
 
@@ -3029,12 +3011,14 @@ as_paxos_thr(void *arg)
 
 				if (c == AS_PAXOS_MSG_COMMAND_PREPARE_ACK
 						&& s->election_cycle == AS_PAXOS_MSG_COMMAND_COMMIT) {
-					cf_debug(AS_PAXOS, "{%d,%d} PREPARE_ACK in COMMIT_ACK path -- ignoring.", t.gen.sequence, t.gen.proposal);
+					cf_debug(AS_PAXOS, "{%d} prepare_ack in commit_ack path - ignoring",
+							t.gen.sequence);
 					break;
 				}
 				if (c == AS_PAXOS_MSG_COMMAND_COMMIT_ACK
 						&& s->election_cycle == AS_PAXOS_MSG_COMMAND_PREPARE) {
-					cf_debug(AS_PAXOS, "{%d,%d} COMMIT_ACK in PREPARE_ACK path -- ignoring.", t.gen.sequence, t.gen.proposal);
+					cf_debug(AS_PAXOS, "{%d} commit_ack in prepare_ack path - ignoring",
+							t.gen.sequence);
 					break;
 				}
 
@@ -3042,25 +3026,24 @@ as_paxos_thr(void *arg)
 				// send a commit message and reset the vote count
 				switch(as_paxos_transaction_vote(s, qm->id, &t)) {
 					case AS_PAXOS_TRANSACTION_VOTE_ACCEPT:
-						cf_debug(AS_PAXOS, "{%d,%d} received ACCEPT vote from %"PRIx64" election %d",
-								t.gen.sequence, t.gen.proposal, qm->id, s->election_cycle);
+						cf_debug(AS_PAXOS, "{%d} received 'accept' vote from %"PRIx64" election %d",
+								t.gen.sequence, qm->id, s->election_cycle);
 						break;
 					case AS_PAXOS_TRANSACTION_VOTE_REJECT:
-						cf_debug(AS_PAXOS, "{%d,%d} received REJECT vote from %"PRIx64" election %d",
-								t.gen.sequence, t.gen.proposal, qm->id, s->election_cycle);
+						cf_debug(AS_PAXOS, "{%d} received 'reject' vote from %"PRIx64" election %d",
+								t.gen.sequence, qm->id, s->election_cycle);
 						break;
 					case AS_PAXOS_TRANSACTION_VOTE_QUORUM:
-						cf_debug(AS_PAXOS, "{%d,%d} received ACCEPT vote from %"PRIx64" and reached quorum, election %d",
-								t.gen.sequence, t.gen.proposal, qm->id, s->election_cycle);
+						cf_debug(AS_PAXOS, "{%d} received 'accept' vote from %"PRIx64" and reached quorum, election %d",
+								t.gen.sequence, qm->id, s->election_cycle);
 						int cmd, rv;
 						if (!(reply = as_paxos_msg_wrap(s, cmd = as_paxos_state_next(c, ACK)))) {
 							cf_warning(AS_PAXOS, "failed to wrap Paxos command %s msg", as_paxos_cmd_name[cmd]);
 							break;
 						}
 
-						cf_debug(AS_PAXOS, "{%d,%d} sending %s to %"PRIx64"",
-								t.gen.sequence, t.gen.proposal,
-								as_paxos_cmd_name[cmd], qm->id);
+						cf_debug(AS_PAXOS, "{%d} sending %s to %"PRIx64"",
+								t.gen.sequence, as_paxos_cmd_name[cmd], qm->id);
 						if ((rv = as_paxos_send_to_sl(cmd, s, reply, AS_FABRIC_PRIORITY_HIGH))) {
 							cf_warning(AS_PAXOS, "sending Paxos command %s to successon list failed: rv %d", as_paxos_cmd_name[cmd], rv);
 							as_fabric_msg_put(reply);
@@ -3075,8 +3058,8 @@ as_paxos_thr(void *arg)
 				break;
 			case AS_PAXOS_MSG_COMMAND_PREPARE_NACK:
 			case AS_PAXOS_MSG_COMMAND_COMMIT_NACK:
-				cf_debug(AS_PAXOS, "{%d,%d} received prepare_nack/commit_nack message from %"PRIx64"",
-						t.gen.sequence, t.gen.proposal, qm->id);
+				cf_debug(AS_PAXOS, "{%d} received prepare_nack/commit_nack message from %"PRIx64"",
+						t.gen.sequence, qm->id);
 				if (self != as_paxos_succession_getprincipal()) {
 					cf_debug(AS_PAXOS, "I'm not principal ~~ Ignoring NACK %d message from %"PRIx64, c, qm->id);
 					break;
@@ -3089,10 +3072,10 @@ as_paxos_thr(void *arg)
 
 				break;
 			case AS_PAXOS_MSG_COMMAND_CONFIRM:
-				/* At this point, we cannot complain -- so we just accept
-				 * what we're told */
-				cf_debug(AS_PAXOS, "{%d,%d} received state confirmation message from %"PRIx64"",
-						t.gen.sequence, t.gen.proposal, qm->id);
+				// At this point, we cannot complain -- so we just accept
+				// what we're told.
+				cf_debug(AS_PAXOS, "{%d} received state confirmation message from %"PRIx64"",
+						t.gen.sequence, qm->id);
 
 				if (NULL == (s = as_paxos_transaction_search(t))) {
 					s = as_paxos_transaction_establish(&t);
@@ -3121,14 +3104,13 @@ as_paxos_thr(void *arg)
 				 * Check for the single node cluster case but only if the node is principal
 				 */
 				if (as_paxos_is_single_node_cluster()) {
-					/*
-					 * The principal can now balance its partitions
-					 * Should we have another phase to the synchronizations to make sure that every
-					 * cluster node has had its state updated before starting partition rebalance?
-					 * Currently, the answer to this question is "no."
-					 */
-					cf_info(AS_PAXOS, "{%d,%d} SINGLE NODE CLUSTER!!!",
-							t.gen.sequence, t.gen.proposal);
+					// The principal can now balance its partitions.
+					// Should we have another phase to the synchronizations to
+					// make sure that every cluster node has had its state
+					// updated before starting partition rebalance?
+					// Currently, the answer to this question is "no."
+					cf_info(AS_PAXOS, "{%d} SINGLE NODE CLUSTER",
+							t.gen.sequence);
 
 					p->need_to_rebalance = true;
 				}
@@ -3205,7 +3187,7 @@ as_paxos_thr(void *arg)
 				}
 
 				char sbuf[(AS_CLUSTER_SZ * 17) + 49];
-				snprintf(sbuf, 49, "SUCCESSION [%d.%d]@%"PRIx64"*: ", p->gen.sequence, p->gen.proposal, qm->id);
+				snprintf(sbuf, 49, "SUCCESSION [%d]@%"PRIx64"*: ", p->gen.sequence, qm->id);
 				for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 					if ((cf_node)0 != p->succession[i]) {
 						snprintf(sbuf + strlen(sbuf), 18, "%"PRIx64" ", p->succession[i]);
@@ -3622,7 +3604,8 @@ as_paxos_dump(bool verbose)
 
 	cf_info(AS_PAXOS, "Cluster Key: %"PRIx64"", as_paxos_get_cluster_key());
 
-	cf_info(AS_PAXOS, "Cluster Generation: [%d.%d]@%"PRIx64, p->gen.sequence, p->gen.proposal, p->succession[0]);
+	cf_info(AS_PAXOS, "cluster generation: [%d]@%"PRIx64,
+			p->gen.sequence, p->succession[0]);
 
 	cf_info(AS_PAXOS, "Cluster State: Has Integrity %s", (p->cluster_has_integrity ? "" : "FAULT"));
 
