@@ -143,7 +143,7 @@ static const msg_template as_paxos_msg_template[] = {
  * changes, and a proposal number, monotonic within each sequence.  Most
  * sequence numbers will have only one proposal number */
 typedef struct as_paxos_generation {
-	uint32_t sequence, proposal;
+	uint32_t sequence;
 } as_paxos_generation;
 
 
@@ -217,7 +217,7 @@ typedef struct as_paxos_t {
 	pthread_mutex_t lock;
 
 	cf_queue_priority *msgq;
-	bool need_to_rebalance;     // do rebalance if eq gen.sequence
+	bool need_to_rebalance;        // do rebalance if eq gen.sequence
 
 	bool ready;                    // Is Paxos intialized?
 
