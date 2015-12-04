@@ -91,17 +91,16 @@ udf_storage_record_open(udf_record *urecord)
 		return rv;
 	}
 	rd->n_bins = as_bin_get_n_bins(r, rd);
+
+	if (rd->n_bins > UDF_RECORD_BIN_ULIMIT) {
+		cf_warning(AS_UDF, "record has too many bins (%d) for UDF processing", rd->n_bins);
+		as_storage_record_close(r, rd);
+		return -1;
+	}
+
 	// if multibin storage, we will use urecord->stack_bins, so set the size appropriately
 	if ( ! tr->rsv.ns->storage_data_in_memory && ! tr->rsv.ns->single_bin ) {
-		uint16_t n_stack_bins = sizeof(urecord->stack_bins) / sizeof(as_bin);
-
-		if (n_stack_bins < rd->n_bins) {
-			cf_warning(AS_UDF, "record has too many bins (%d) for UDF processing", rd->n_bins);
-			as_storage_record_close(r, rd);
-			return -1;
-		}
-
-		rd->n_bins = n_stack_bins;
+		rd->n_bins = sizeof(urecord->stack_bins) / sizeof(as_bin);
 	}
 
 	rd->bins = as_bin_get_all(r, rd, urecord->stack_bins);
