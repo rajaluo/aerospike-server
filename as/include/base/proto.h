@@ -572,18 +572,18 @@ int as_netio_send(as_netio *io, void *q, bool);
 
 // These values correspond to client protocol values - do not change them!
 typedef enum as_udf_op {
-	AS_UDF_OP_KVS			= 0,
-	AS_UDF_OP_AGGREGATE		= 1,
-	AS_UDF_OP_BACKGROUND	= 2,
-	AS_UDF_OP_FOREGROUND	= 3		// not supported yet
+	AS_UDF_OP_KVS        = 0,
+	AS_UDF_OP_AGGREGATE  = 1,
+	AS_UDF_OP_BACKGROUND = 2,
+	AS_UDF_OP_FOREGROUND = 3		// not supported yet
 } as_udf_op;
 
 typedef enum as_cdt_paramtype_e {
-	AS_CDT_PARAM_NONE		= 0,
+	AS_CDT_PARAM_NONE    = 0,
 
-	AS_CDT_PARAM_INDEX		= 1,
-	AS_CDT_PARAM_COUNT		= 2,
-	AS_CDT_PARAM_PAYLOAD	= 3,
+	AS_CDT_PARAM_INDEX   = 1,
+	AS_CDT_PARAM_COUNT   = 2,
+	AS_CDT_PARAM_PAYLOAD = 3,
 } as_cdt_paramtype;
 
 typedef enum as_cdt_optype_e {
