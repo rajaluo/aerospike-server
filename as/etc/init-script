@@ -130,38 +130,18 @@ rh_status_quiet() {
 	status $ASDN >/dev/null 2>&1
 }
 
-do_telemetry_start () {
-	if [ $EDITION = "community" ];
-	then
-		/sbin/service aerospike_telemetry start >/dev/null  2>&1
-	fi
-}
-
-do_telemetry_stop () {
-	if [ $EDITION = "community" ];
-	then
-		/sbin/service aerospike_telemetry stop >/dev/null  2>&1
-	fi
-}
-
 case "$1" in
 	start)
 		rh_status_quiet && { echo -n "Already "; $0 status ; exit 0; }
 		$1
-
-		do_telemetry_start
 		;;
 	coldstart)
 		rh_status_quiet && { echo -n "Already "; $0 status ; exit 0; }
 		$1
-
-		do_telemetry_start
 		;;
 	stop)
 		rh_status_quiet || { echo -n "Already "; $0 status ; exit 0; }
 		$1
-
-		do_telemetry_stop
 		;;
 	status)
 		rh_status

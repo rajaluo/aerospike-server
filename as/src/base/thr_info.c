@@ -4393,7 +4393,7 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 //	log-message:message=<MESSAGE>[;who=<WHO>]
 //
 // Example:
-// 	log-message:message=Aerospike anonymous data collection is ACTIVE. For further information, see http://aerospike.com/aerospike-telemetry;who=Aerospike Telemetry Agent
+// 	log-message:message=Example Log Message;who=Aerospike User
 //
 int
 info_command_log_message(char *name, char *params, cf_dyn_buf *db)
