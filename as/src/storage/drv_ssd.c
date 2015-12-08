@@ -3929,8 +3929,8 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 void
 as_storage_cold_start_ticker_ssd()
 {
-	for (uint32_t i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		if (ns->cold_start_loading) {
 			char buf[2048];

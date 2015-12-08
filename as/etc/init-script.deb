@@ -74,20 +74,6 @@ stop() {
 	return $rv
 }
 
-do_telemetry_start () {
-	if [ $EDITION = "community" ];
-	then
-		/usr/sbin/service aerospike_telemetry start >/dev/null  2>&1
-	fi
-}
-
-do_telemetry_stop () {
-	if [ $EDITION = "community" ];
-	then
-		/usr/sbin/service aerospike_telemetry stop >/dev/null  2>&1
-	fi
-}
-
 case "$1" in
 	start|coldstart)
 		ulimit -n 100000
@@ -111,8 +97,6 @@ case "$1" in
 				log_end_msg 1
 				;;
 		esac
-
-		do_telemetry_start
 		;;
 	stop)
 		log_daemon_msg "Stopping aerospike"
@@ -137,8 +121,6 @@ case "$1" in
 		else
 			log_end_msg 1
 		fi
-
-		do_telemetry_stop
 		;;
 	status)
 		status_of_proc -p $PIDFILE $ASDN aerospike
