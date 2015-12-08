@@ -1651,7 +1651,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state, cdt_modify
 
 		break;
 	}
-	case AS_CDT_OP_LIST_APPEND_LIST: {
+	case AS_CDT_OP_LIST_APPEND_ITEMS: {
 		cdt_payload payload;
 
 		if (! CDT_OP_TABLE_GET_PARAMS(state, &payload)) {
@@ -1701,7 +1701,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state, cdt_modify
 
 		break;
 	}
-	case AS_CDT_OP_LIST_INSERT_LIST: {
+	case AS_CDT_OP_LIST_INSERT_ITEMS: {
 		const cdt_payload payload;
 		int64_t index;
 
