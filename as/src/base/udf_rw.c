@@ -830,7 +830,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	if (rec_rv == 0) {
 		urecord.flag   |= UDF_RECORD_FLAG_OPEN;
 		urecord.flag   |= UDF_RECORD_FLAG_PREEXISTS;
-		udf_storage_record_open(&urecord);
+
 		rec_rv = udf_storage_record_open(&urecord);
 
 		if (rec_rv == -1) {
