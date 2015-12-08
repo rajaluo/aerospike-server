@@ -2023,8 +2023,8 @@ as_sindex_boot_populateall()
 
 	// Trigger namespace scan to populate all secondary indexes
 	// mark all secondary index for a namespace as populated
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 		if (!ns || (ns->sindex_cnt == 0)) {
 			continue;
 		}
@@ -2049,8 +2049,8 @@ as_sindex_boot_populateall()
 		// TODO: Check for failure .. is generally fatal if it fails
 	}
 
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 		if (!ns || (ns->sindex_cnt == 0)) {
 			continue;
 		}
@@ -2070,8 +2070,8 @@ as_sindex_boot_populateall()
 	// This above flag indicates that the basic sindex boot-up loader is done
 	// Go and destroy the sindex_cfg_var_hash here to prevent run-time
 	// si's from getting the config-file settings.
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		if (ns->sindex_cfg_var_hash) {
 			shash_reduce(ns->sindex_cfg_var_hash, as_sindex_cfg_var_hash_reduce_fn, NULL);
@@ -5226,8 +5226,8 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 	// After merge resolution of cluster, drop the local sindex definitions which are not part
 	// of the paxos principal's sindex definition.
 	if (accept_opt & AS_SMD_ACCEPT_OPT_MERGE) {
-		for (int k = 0; k < g_config.namespaces; k++) { // for each namespace
-			as_namespace *local_ns = g_config.namespace[k];
+		for (int k = 0; k < g_config.n_namespaces; k++) { // for each namespace
+			as_namespace *local_ns = g_config.namespaces[k];
 
 			if (local_ns->sindex_cnt > 0) {
 				as_sindex *del_list[AS_SINDEX_MAX];
