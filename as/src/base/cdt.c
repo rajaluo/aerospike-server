@@ -39,7 +39,7 @@
 // Typedefs & constants.
 //
 
-#define VA_NARGS(...) (sizeof((int[]){__VA_ARGS__})/sizeof(int))
+#define VA_NARGS(...) (sizeof((int[]){__VA_ARGS__}) / sizeof(int))
 #define CDT_OP_ENTRY(op, ...) [op].args = (const as_cdt_paramtype[]){__VA_ARGS__, 0}, [op].count = VA_NARGS(__VA_ARGS__)
 
 static const cdt_op_table_entry cdt_op_table[] = {
@@ -48,9 +48,9 @@ static const cdt_op_table_entry cdt_op_table[] = {
 
 	// Add to list
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND,			AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND_LIST,	AS_CDT_PARAM_PAYLOAD),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND_ITEMS,	AS_CDT_PARAM_PAYLOAD),
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT,			AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT_LIST,	AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT_ITEMS,	AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
 
 	// Remove from list
 	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP,			AS_CDT_PARAM_INDEX),
@@ -108,7 +108,7 @@ cdt_process_state_init(cdt_process_state *cdt_state, const as_msg_op *op)
 	cdt_state->pk.length = size - sizeof(uint16_t);
 	cdt_state->pk.offset = 0;
 
-	int ele_count = as_unpack_list_header_element_count(&cdt_state->pk);
+	int ele_count = (cdt_state->pk.length == 0) ? 0 : as_unpack_list_header_element_count(&cdt_state->pk);
 
 	if (ele_count < 0) {
 		cf_warning(AS_PARTICLE, "cdt_parse_state_init() unpack list header failed: size=%u type=%u", size, cdt_state->type);
@@ -133,6 +133,11 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 
 	if (n == 0 || entry->args[0] == 0) {
 		return true;
+	}
+
+	if (state->ele_count < n) {
+		cf_warning(AS_PARTICLE, "cdt_process_state_get_params() count mismatch: got %u from client, expected %zu", state->ele_count, n);
+		return false;
 	}
 
 	va_list vl;

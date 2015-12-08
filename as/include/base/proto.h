@@ -572,17 +572,17 @@ int as_netio_send(as_netio *io, void *q, bool);
 
 // These values correspond to client protocol values - do not change them!
 typedef enum as_udf_op {
-	AS_UDF_OP_KVS		    = 0,
-	AS_UDF_OP_AGGREGATE	    = 1,
-	AS_UDF_OP_BACKGROUND	= 2,
-	AS_UDF_OP_FOREGROUND	= 3		// not supported yet
+	AS_UDF_OP_KVS        = 0,
+	AS_UDF_OP_AGGREGATE  = 1,
+	AS_UDF_OP_BACKGROUND = 2,
+	AS_UDF_OP_FOREGROUND = 3		// not supported yet
 } as_udf_op;
 
 typedef enum as_cdt_paramtype_e {
-	AS_CDT_PARAM_NONE = 0,
+	AS_CDT_PARAM_NONE    = 0,
 
-	AS_CDT_PARAM_INDEX = 1,
-	AS_CDT_PARAM_COUNT = 2,
+	AS_CDT_PARAM_INDEX   = 1,
+	AS_CDT_PARAM_COUNT   = 2,
 	AS_CDT_PARAM_PAYLOAD = 3,
 } as_cdt_paramtype;
 
@@ -592,9 +592,9 @@ typedef enum as_cdt_optype_e {
 
 	// Add to list
 	AS_CDT_OP_LIST_APPEND        = 1,
-	AS_CDT_OP_LIST_APPEND_LIST   = 2,
+	AS_CDT_OP_LIST_APPEND_ITEMS  = 2,
 	AS_CDT_OP_LIST_INSERT        = 3,
-	AS_CDT_OP_LIST_INSERT_LIST   = 4,
+	AS_CDT_OP_LIST_INSERT_ITEMS  = 4,
 
 	// Remove from list
 	AS_CDT_OP_LIST_POP           = 5,
@@ -614,11 +614,11 @@ typedef enum as_cdt_optype_e {
 	AS_CDT_OP_LIST_GET_RANGE     = 18,
 
 	// ------------------------------------------------------------------------
-    // Map Operation
+	// Map Operation
 
 	// Adding <key, value> to the Map
 	AS_CDT_OP_MAP_PUT            = 32,
-	AS_CDT_OP_MAP_PUT_ALL        = 33,
+	AS_CDT_OP_MAP_PUT_ITEMS      = 33,
 
 	// Op by key
 	AS_CDT_OP_MAP_GET            = 34,
@@ -630,7 +630,7 @@ typedef enum as_cdt_optype_e {
 	AS_CDT_OP_MAP_CONTAINS_VALUE = 40,
 
 	// Misc
-	AS_CDT_OP_MAP_GET_ALL        = 41,
+	AS_CDT_OP_MAP_GET_ITEMS      = 41,
 	AS_CDT_OP_MAP_KEYS           = 42,
 	AS_CDT_OP_MAP_VALUES         = 43,
 	AS_CDT_OP_MAP_CLEAR          = 44,
