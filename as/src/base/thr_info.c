@@ -285,8 +285,8 @@ info_get_utilization(cf_dyn_buf *db)
 	uint64_t    used_pindex_memory      = 0;
 	uint64_t    used_sindex_memory      = 0;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		total_number_objects    += ns->n_objects;
 		total_number_objects_sub += ns->n_sub_objects;
@@ -5133,8 +5133,8 @@ info_debug_ticker_fn(void *unused)
 
 			// namespace disk and memory size and ldt gc stats
 			total_ns_memory_inuse = 0;
-			for (int i = 0; i < g_config.namespaces; i++) {
-				as_namespace *ns = g_config.namespace[i];
+			for (int i = 0; i < g_config.n_namespaces; i++) {
+				as_namespace *ns = g_config.namespaces[i];
 				int available_pct;
 				uint64_t inuse_disk_bytes;
 				as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
@@ -6042,12 +6042,12 @@ info_services_alumni_reset(char *name, cf_dyn_buf *db)
 int
 info_get_namespaces(char *name, cf_dyn_buf *db)
 {
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		cf_dyn_buf_append_string(db, g_config.namespace[i]->name);
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		cf_dyn_buf_append_string(db, g_config.namespaces[i]->name);
 		cf_dyn_buf_append_char(db, ';');
 	}
 
-	if (g_config.namespaces > 0) {
+	if (g_config.n_namespaces > 0) {
 		cf_dyn_buf_chomp(db);
 	}
 
@@ -6066,8 +6066,8 @@ info_get_objects(char *name, cf_dyn_buf *db)
 {
 	uint64_t	objects = 0;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		objects += g_config.namespace[i]->n_objects;
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		objects += g_config.namespaces[i]->n_objects;
 	}
 
 	cf_dyn_buf_append_uint64(db, objects);
@@ -6103,8 +6103,8 @@ thr_info_get_object_count()
 {
 	uint64_t objects = 0;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		objects += g_config.namespace[i]->n_objects;
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		objects += g_config.namespaces[i]->n_objects;
 	}
 
 	return objects;
@@ -6115,8 +6115,8 @@ thr_info_get_subobject_count()
 {
 	uint64_t sub_objects = 0;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		sub_objects += g_config.namespace[i]->n_sub_objects;
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		sub_objects += g_config.namespaces[i]->n_sub_objects;
 	}
 
 	return sub_objects;
@@ -6363,8 +6363,8 @@ info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db)
 
 	// format w/o namespace is ns1:set1:prop1=val1:prop2=val2:..propn=valn;ns1:set2...;ns2:set1...;
 	if (!ns) {
-		for (uint i = 0; i < g_config.namespaces; i++) {
-			as_namespace_get_set_info(g_config.namespace[i], set_name, db);
+		for (uint i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace_get_set_info(g_config.namespaces[i], set_name, db);
 		}
 	}
 	// format w namespace w/o set name is ns:set1:prop1=val1:prop2=val2...propn=valn;ns:set2...;
@@ -6393,8 +6393,8 @@ info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db)
 	// format w/o namespace is
 	// ns:num-bin-names=val1,bin-names-quota=val2,name1,name2,...;ns:...
 	if (!ns) {
-		for (uint i = 0; i < g_config.namespaces; i++) {
-			as_namespace_get_bins_info(g_config.namespace[i], db, true);
+		for (uint i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace_get_bins_info(g_config.namespaces[i], db, true);
 		}
 	}
 	// format w/namespace is
@@ -6505,8 +6505,8 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 
 	// format w/o namespace is ns1:set1:prop1=val1:prop2=val2:..propn=valn;ns1:set2...;ns2:set1...;
 	if (!ns) {
-		for (uint i = 0; i < g_config.namespaces; i++) {
-			as_sindex_list_str(g_config.namespace[i], db);
+		for (uint i = 0; i < g_config.n_namespaces; i++) {
+			as_sindex_list_str(g_config.namespaces[i], db);
 		}
 	}
 	// format w namespace w/o set name is ns:set1:prop1=val1:prop2=val2...propn=valn;ns:set2...;
@@ -7132,8 +7132,8 @@ int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 
 	if (listall) {
 		bool found = 0;
-		for (int i = 0; i < g_config.namespaces; i++) {
-			as_namespace *ns = g_config.namespace[i];
+		for (int i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace *ns = g_config.namespaces[i];
 			if (ns) {
 				if (!as_sindex_list_str(ns, db)) {
 					found++;

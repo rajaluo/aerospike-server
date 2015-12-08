@@ -137,8 +137,8 @@ as_paxos_set_cluster_key(uint64_t cluster_key)
 	// Acquire and release each partition lock to ensure threads acquiring
 	// a partition lock after this loop will be forced to check the latest
 	// cluster key.
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		for (int j = 0; j < AS_PARTITIONS; j++) {
 			as_partition *p = &ns->partitions[j];
@@ -290,8 +290,8 @@ dump_partition_state()
 		if (g_config.paxos->succession[index] == (cf_node) 0)
 			continue;
 		cf_debug(AS_PAXOS, " Node %"PRIx64"", g_config.paxos->succession[index]);
-		for (int i = 0; i < g_config.namespaces; i++) {
-			cf_debug(AS_PAXOS, " Name Space: %s", g_config.namespace[i]->name);
+		for (int i = 0; i < g_config.n_namespaces; i++) {
+			cf_debug(AS_PAXOS, " Name Space: %s", g_config.namespaces[i]->name);
 			int k = 0;
 			as_partition_vinfo *parts = g_config.paxos->c_partition_vinfo[i][index];
 			if (NULL == parts) {
@@ -476,7 +476,7 @@ as_paxos_partition_sync_request_msg_generate()
 	 * In this case, however, migrates are disallowed when we are doing the copy
 	 * and the partition_vinfo should be consistent
 	 */
-	size_t array_size = g_config.namespaces;
+	size_t array_size = g_config.n_namespaces;
 	cf_debug(AS_PAXOS, "Partition Sync request Array Size = %d ", array_size);
 	size_t elem_size = sizeof(as_partition_vinfo) * AS_PARTITIONS;
 
@@ -486,10 +486,10 @@ as_paxos_partition_sync_request_msg_generate()
 	}
 
 	size_t n_elem = 0;
-	for (int i = 0; i < g_config.namespaces; i++) {
+	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_partition_vinfo vi[AS_PARTITIONS];
 		for (int j = 0; j < AS_PARTITIONS; j++)
-			memcpy(&vi[j], &g_config.namespace[i]->partitions[j].version_info, sizeof(as_partition_vinfo));
+			memcpy(&vi[j], &g_config.namespaces[i]->partitions[j].version_info, sizeof(as_partition_vinfo));
 		e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITION, n_elem, (uint8_t *)vi, elem_size);
 		cf_debug(AS_PAXOS, "writing element %d", n_elem);
 		n_elem++;
@@ -502,7 +502,7 @@ as_paxos_partition_sync_request_msg_generate()
 
 	/* Include the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC_REQUEST messages. */
 	if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
-		array_size = g_config.namespaces;
+		array_size = g_config.n_namespaces;
 		cf_debug(AS_PAXOS, "Partitionsz Sync request Array Size = %d ", array_size);
 		elem_size = sizeof(uint64_t) * AS_PARTITIONS;
 
@@ -512,14 +512,14 @@ as_paxos_partition_sync_request_msg_generate()
 		}
 
 		n_elem = 0;
-		for (int i = 0; i < g_config.namespaces; i++) {
+		for (int i = 0; i < g_config.n_namespaces; i++) {
 			uint64_t partitionsz[AS_PARTITIONS];
 			for (int j = 0; j < AS_PARTITIONS; j++) {
-				partitionsz[j] = (g_config.namespace[i]->partitions[j].vp)
-								 ? g_config.namespace[i]->partitions[j].vp->elements
+				partitionsz[j] = (g_config.namespaces[i]->partitions[j].vp)
+								 ? g_config.namespaces[i]->partitions[j].vp->elements
 								 : 0;
-				partitionsz[j] += (g_config.namespace[i]->partitions[j].sub_vp)
-								  ? g_config.namespace[i]->partitions[j].sub_vp->elements
+				partitionsz[j] += (g_config.namespaces[i]->partitions[j].sub_vp)
+								  ? g_config.namespaces[i]->partitions[j].sub_vp->elements
 								  : 0;
 				cf_detail(AS_PAXOS, "Assigning partition size for pid %d, %ld", j, partitionsz[j]);
 			}
@@ -560,7 +560,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 		return(-1);
 	}
 
-	size_t array_size = g_config.namespaces;
+	size_t array_size = g_config.n_namespaces;
 
 	int size;
 	if (0 != msg_get_buf_array_size(m, AS_PAXOS_MSG_PARTITION, &size)) {
@@ -576,7 +576,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 	 * reset the values of this node's partition version in the global list
 	 */
 	size_t elem = 0;
-	for (int i = 0; i < g_config.namespaces; i++) {
+	for (int i = 0; i < g_config.n_namespaces; i++) {
 		byte *bufp = NULL;
 		size_t bufsz = sizeof(as_partition_vinfo) * AS_PARTITIONS;
 		as_partition_vinfo *vi = p->c_partition_vinfo[i][n_pos];
@@ -597,7 +597,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 
 	/* Require the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC_REQUEST messages. */
 	if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
-		array_size = g_config.namespaces;
+		array_size = g_config.n_namespaces;
 		if (0 != msg_get_buf_array_size(m, AS_PAXOS_MSG_PARTITIONSZ, &size)) {
 			cf_warning(AS_PAXOS, "Unable to read partition sync message");
 			return(-1);
@@ -607,7 +607,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 			return(-1);
 		}
 		elem = 0;
-		for (int i = 0; i < g_config.namespaces; i++) {
+		for (int i = 0; i < g_config.n_namespaces; i++) {
 			byte *bufp = NULL;
 			size_t bufsz = sizeof(uint64_t) * AS_PARTITIONS;
 			uint64_t *partitionsz = p->c_partition_size[i][n_pos];
@@ -666,7 +666,7 @@ as_paxos_partition_sync_msg_generate()
 		return(NULL);
 	}
 
-	size_t array_size = cluster_size * g_config.namespaces;
+	size_t array_size = cluster_size * g_config.n_namespaces;
 	cf_debug(AS_PAXOS, "Array Size = %d ", array_size);
 	size_t elem_size = sizeof(as_partition_vinfo) * AS_PARTITIONS;
 
@@ -676,7 +676,7 @@ as_paxos_partition_sync_msg_generate()
 	}
 
 	size_t n_elem = 0;
-	for (int i = 0; i < g_config.namespaces; i++)
+	for (int i = 0; i < g_config.n_namespaces; i++)
 		for (int j = 0; j < g_config.paxos_max_cluster_size; j++) {
 			if (p->succession[j] == (cf_node)0)
 				continue;
@@ -700,7 +700,7 @@ as_paxos_partition_sync_msg_generate()
 
 	/* Include the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC messages. */
 	if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
-		array_size = cluster_size * g_config.namespaces;
+		array_size = cluster_size * g_config.n_namespaces;
 		elem_size = sizeof(uint64_t) * AS_PARTITIONS;
 
 		if (0 != msg_set_buf_array_size(m, AS_PAXOS_MSG_PARTITIONSZ, array_size, elem_size)) {
@@ -708,7 +708,7 @@ as_paxos_partition_sync_msg_generate()
 			return(NULL);
 		}
 		n_elem = 0;
-		for (int i = 0; i < g_config.namespaces; i++)
+		for (int i = 0; i < g_config.n_namespaces; i++)
 			for (int j = 0; j < g_config.paxos_max_cluster_size; j++) {
 				if (p->succession[j] == (cf_node)0)
 					continue;
@@ -717,11 +717,11 @@ as_paxos_partition_sync_msg_generate()
 				// populate latest for the self node
 				if (p->succession[j] == g_config.self_node) {
 					for (int j = 0; j < AS_PARTITIONS; j++) {
-						partitionsz[j] = (g_config.namespace[i]->partitions[j].vp)
-										 ? g_config.namespace[i]->partitions[j].vp->elements
+						partitionsz[j] = (g_config.namespaces[i]->partitions[j].vp)
+										 ? g_config.namespaces[i]->partitions[j].vp->elements
 										 : 0;
-						partitionsz[j] += (g_config.namespace[i]->partitions[j].sub_vp)
-										  ? g_config.namespace[i]->partitions[j].sub_vp->elements
+						partitionsz[j] += (g_config.namespaces[i]->partitions[j].sub_vp)
+										  ? g_config.namespaces[i]->partitions[j].sub_vp->elements
 										  : 0;
 						cf_detail(AS_PAXOS, "Assigning partition size for pid %d, %ld", j, partitionsz[j]);
 					}
@@ -806,7 +806,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 		return(-1);
 	}
 
-	size_t array_size = cluster_size * g_config.namespaces;
+	size_t array_size = cluster_size * g_config.n_namespaces;
 
 	int size;
 	if (0 != msg_get_buf_array_size(m, AS_PAXOS_MSG_PARTITION, &size)) {
@@ -822,7 +822,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 	 * reset the values of this node's partition version in the global list
 	 */
 	size_t elem = 0;
-	for (int i = 0; i < g_config.namespaces; i++)
+	for (int i = 0; i < g_config.n_namespaces; i++)
 		for (int j = 0; j < g_config.paxos_max_cluster_size; j++) {
 			if (p->succession[j] == (cf_node)0)
 				continue;
@@ -846,7 +846,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 
 	/* Require the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC messages. */
 	if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
-		array_size = cluster_size * g_config.namespaces;
+		array_size = cluster_size * g_config.n_namespaces;
 
 		if (0 != msg_get_buf_array_size(m, AS_PAXOS_MSG_PARTITIONSZ, &size)) {
 			cf_warning(AS_PAXOS, "Unable to read partition sync message");
@@ -857,7 +857,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 			return(-1);
 		}
 		elem = 0;
-		for (int i = 0; i < g_config.namespaces; i++)
+		for (int i = 0; i < g_config.n_namespaces; i++)
 			for (int j = 0; j < g_config.paxos_max_cluster_size; j++) {
 				if (p->succession[j] == (cf_node)0)
 					continue;
@@ -1540,7 +1540,7 @@ void as_paxos_start_second_phase()
 	 * version information into global table and set state flag.
 	 * Note that the index for the principal is 0 */
 
-	for (int i = 0; i < g_config.namespaces; i++) {
+	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_partition_vinfo *vi = p->c_partition_vinfo[i][0];
 		size_t vi_sz = sizeof(as_partition_vinfo) * AS_PARTITIONS;
 		if (NULL == vi) {
@@ -1550,7 +1550,7 @@ void as_paxos_start_second_phase()
 		}
 		memset(vi, 0, vi_sz);
 		for (int j = 0; j < AS_PARTITIONS; j++)
-			memcpy(&vi[j], &g_config.namespace[i]->partitions[j].version_info, sizeof(as_partition_vinfo));
+			memcpy(&vi[j], &g_config.namespaces[i]->partitions[j].version_info, sizeof(as_partition_vinfo));
 	}
 	p->partition_sync_state[0] = true; /* Principal's state is always local */
 	for (int i = 1; i < g_config.paxos_max_cluster_size; i++)
@@ -3276,9 +3276,9 @@ as_paxos_init()
 	size_t n_found_storage = 0;
 	size_t n_uninit_storage = 0;
 	/* Mark all partitions in all namespaces as lost unless there is partition data in storage*/
-	for (int i = 0; i < g_config.namespaces; i++) {
+	for (int i = 0; i < g_config.n_namespaces; i++) {
 		/* Initialize every partition's iid and vtp values */
-		as_namespace *ns = g_config.namespace[i];
+		as_namespace *ns = g_config.namespaces[i];
 
 		if (NAMESPACE_HAS_PERSISTENCE(ns)) { // skip loop if no persistent storage
 			for (int j = 0; j < AS_PARTITIONS; j++) {

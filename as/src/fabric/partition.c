@@ -598,8 +598,8 @@ as_partition_getstates(as_partition_states *ps)
 
 	memset(ps, 0, sizeof(as_partition_states));
 
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 		size_t ns_absent_partitions = 0;
 		for (int j = 0; j < AS_PARTITIONS; j++) {
 
@@ -1328,8 +1328,8 @@ as_partition_getreplica_write_str(cf_dyn_buf *db)
 {
 	size_t db_sz = db->used_sz;
 
-	for (uint i = 0 ; i < g_config.namespaces ; i++ ) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint i = 0 ; i < g_config.n_namespaces ; i++ ) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		for (uint j = 0 ; j < AS_PARTITIONS ; j++) {
 			if (g_config.self_node == as_partition_getreplica_write(ns, j) ) {
@@ -1358,8 +1358,8 @@ as_partition_getreplica_master_str(cf_dyn_buf *db)
 
 	size_t db_sz = db->used_sz;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		memset(master_bitmap, 0, BITMAP_SIZE);
 		cf_dyn_buf_append_string(db, ns->name);
@@ -1394,8 +1394,8 @@ as_partition_getreplica_read_str(cf_dyn_buf *db)
 {
 	size_t db_sz = db->used_sz;
 
-	for (uint i = 0 ; i < g_config.namespaces ; i++ ) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint i = 0 ; i < g_config.n_namespaces ; i++ ) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		for (uint j = 0 ; j < AS_PARTITIONS ; j++) {
 			if (g_config.self_node == as_partition_getreplica_read(ns, j) ) {
@@ -1420,8 +1420,8 @@ as_partition_getreplica_prole_str(cf_dyn_buf *db)
 
 	size_t db_sz = db->used_sz;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		memset(prole_bitmap, 0, sizeof(uint8_t) * BITMAP_SIZE);
 		cf_dyn_buf_append_string(db, ns->name);
@@ -1455,8 +1455,8 @@ as_partition_get_replicas_all_str(cf_dyn_buf *db)
 {
 	size_t db_sz = db->used_sz;
 
-	for (uint32_t i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		cf_dyn_buf_append_string(db, ns->name);
 		cf_dyn_buf_append_char(db, ':');
@@ -1541,8 +1541,8 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 {
 	size_t db_sz = db->used_sz;
 
-	for (uint i = 0 ; i < g_config.namespaces ; i++ ) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint i = 0 ; i < g_config.n_namespaces ; i++ ) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		for (uint j = 0 ; j < AS_PARTITIONS ; j++) {
 
@@ -2269,8 +2269,8 @@ as_partition_set_ns_replication_factor(int new_cluster_size)
 
 	// Normal case - set replication factor.
 	uint16_t max_repl;
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		max_repl = ns->cfg_replication_factor > new_cluster_size ?
 				new_cluster_size : ns->cfg_replication_factor;
@@ -2424,9 +2424,9 @@ as_partition_cluster_topology_info(const as_paxos *paxos_p) {
 
 void
 as_migrate_increment_all_tx_fail() {
-	for (int i = 0; i < g_config.namespaces; i++) {
+	for (int i = 0; i < g_config.n_namespaces; i++) {
 		// All namespaces will fail to migrate.
-		as_namespace *ns = g_config.namespace[i];
+		as_namespace *ns = g_config.namespaces[i];
 		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 	}
 }
@@ -2517,7 +2517,7 @@ as_partition_balance()
 	 * Check that the global state table is well formed
 	 */
 	found_error = false;
-	for (int i = 0; i < g_config.namespaces; i++) {
+	for (int i = 0; i < g_config.n_namespaces; i++) {
 		for (int j = 0; j < cluster_size; j++) {
 			if (NULL == paxos->c_partition_vinfo[i][j]) {
 				found_error = true;
@@ -2542,8 +2542,8 @@ as_partition_balance()
 	 * Check that this partition's global state is the same as its local state
 	 */
 	found_error = false;
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 		for (int j = 0; j < AS_PARTITIONS; j++) {
 			if (memcmp(&ns->partitions[j].version_info, &paxos->c_partition_vinfo[i][self_index][j], sizeof(as_partition_vinfo)) != 0) {
 				found_error = true;
@@ -2791,16 +2791,16 @@ as_partition_balance()
 	size_t n_recreate = 0;
 	size_t n_duplicate = 0;
 
-	size_t n_total = g_config.namespaces * AS_PARTITIONS;
+	size_t n_total = g_config.n_namespaces * AS_PARTITIONS;
 	uint64_t orig_cluster_key = as_paxos_get_cluster_key();
 
 	cf_queue mig_q;
 	cf_queue* mq = &mig_q;
 	cf_queue_init(mq, sizeof(partition_migrate_record),
-				AS_PARTITIONS * g_config.namespaces, false);
+				AS_PARTITIONS * g_config.n_namespaces, false);
 
-	for (int i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 		if (NULL == ns)
 			continue;
 
@@ -3363,9 +3363,9 @@ as_partition_balance()
 	//
 	// flush to storage
 	//
-	for (int i = 0; i < g_config.namespaces; i++) {
+	for (int i = 0; i < g_config.n_namespaces; i++) {
 
-		as_namespace *ns = g_config.namespace[i];
+		as_namespace *ns = g_config.namespaces[i];
 		if (NULL == ns)
 			continue;
 		flush_to_storage(ns);
@@ -3400,8 +3400,8 @@ as_partition_balance_init()
 	g_config.paxos->cluster_size = 1;
 	as_paxos_set_cluster_integrity(g_config.paxos, true);
 
-	for (uint32_t i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		ns->replication_factor = 1;
 
@@ -3454,8 +3454,8 @@ as_partition_balance_init_single_node_cluster()
 	memset(&new_vinfo, 0, sizeof(new_vinfo));
 	generate_new_partition_version(&new_vinfo);
 
-	for (uint32_t i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		uint32_t n_promoted = 0;
 
