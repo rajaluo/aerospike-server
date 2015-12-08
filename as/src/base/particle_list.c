@@ -612,7 +612,7 @@ is_list_type(uint8_t type)
 static inline int32_t
 calc_index(int32_t index, int ele_count)
 {
-	return (index < 0) ? ((int32_t) ele_count + index) : index;
+	return index < 0 ? (int32_t)ele_count + index : index;
 }
 
 //------------------------------------------------
