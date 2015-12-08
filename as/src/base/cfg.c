@@ -230,7 +230,7 @@ cfg_set_defaults()
 	c->start_ms = cf_getms();
 	c->record_locks = olock_create(16 * 1024, true); // TODO - configurable number of locks?
 
-	c->namespaces = 0;
+	c->n_namespaces = 0;
 }
 
 
