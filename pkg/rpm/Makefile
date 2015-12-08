@@ -63,19 +63,6 @@ else
 endif
 	install -pm 644 $(DEPTH)/as/etc/logrotate_asd $(BUILD_ROOT)/etc/logrotate.d/aerospike
 
-ifeq ($(EDITION), community)
-	install -pm 755 $(DEPTH)/as/etc/init-telemetry-script $(BUILD_ROOT)/etc/init.d/aerospike_telemetry
-	install -pm 644 $(DEPTH)/as/etc/logrotate_telemetry $(BUILD_ROOT)/etc/logrotate.d/aerospike_telemetry
-
-	install -d $(OPT_AS)/telemetry
-	install -d $(OPT_AS)/telemetry/phonehome
-	install -d $(OPT_AS)/telemetry/daemon
-	install -pm 644 $(DEPTH)/as/etc/telemetry.conf $(BUILD_ROOT)/etc/aerospike
-	install -pm 755 $(DEPTH)/modules/telemetry/telemetry.py $(OPT_AS)/telemetry
-	install -pm 755 $(DEPTH)/modules/telemetry/phonehome/*.py $(OPT_AS)/telemetry/phonehome
-	install -pm 755 $(DEPTH)/modules/telemetry/daemon/*.py $(OPT_AS)/telemetry/daemon
-endif
-
 ifeq ($(USE_ASM),1)
 	install -pm 644 $(DEPTH)/as/etc/initfns $(BUILD_ROOT)/etc/aerospike
 	install -d $(OPT_AS)/{bin,lib}
@@ -115,9 +102,6 @@ ifeq ($(USE_XDR),1)
 	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
 endif
 	cat $(PKG)/rpm/server-spec-config >> $(PKG)/rpm/aerospike.spec
-ifeq ($(EDITION), community)
-	cat $(PKG)/rpm/server-spec-telemetry >> $(PKG)/rpm/aerospike.spec
-endif
 	cat $(PKG)/rpm/server-spec-scripts >> $(PKG)/rpm/aerospike.spec
 
 	sed -i 's/@RELEASE@/'$(OS)'/g' $(PKG)/rpm/aerospike.spec
