@@ -48,6 +48,7 @@
 #include "base/thr_proxy.h"
 #include "base/thr_write.h"
 #include "base/transaction.h"
+#include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
 
@@ -62,8 +63,6 @@
 // Would you like to break the server into the debugger so we can examine a
 // failure?
 // #define VERIFY_BREAK 1
-
-int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr);
 
 // Forward declaration.
 int thr_tsvc_enqueue_slow(as_transaction *tr);
@@ -755,7 +754,7 @@ process_transaction(as_transaction *tr)
 				// As proxy is required for it, XDR should relog it at current owner and replicas.
 				// Send "AS_PROTO_RESULT_FAIL_UNKNOWN" back to XDR.
 				// XDR will relog digest on seeing this error.
-				xdr_internal_read_response(ns, AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, NULL, 0, NULL, tr->from_xdr);
+				xdr_internal_read_response(ns, AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, NULL, 0, NULL, 0, NULL, tr->from_xdr);
 				free_msgp = true;
 			} else if (tr->udata.req_udata){
 				cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
