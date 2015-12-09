@@ -2398,11 +2398,17 @@ void as_paxos_auto_reset_master(bool cluster_integrity_fault,
 			}
 
 			if (!found) {
+
+				cf_info(AS_PAXOS, "Marking node add for paxos recovery: %" PRIx64 "",
+				p->succession[i]);
+
+				memset(&corrective_events[corrective_event_count], 0, sizeof(as_fabric_event_node));
 				corrective_events[corrective_event_count].evt =
 					FABRIC_NODE_ARRIVE;
 				corrective_events[corrective_event_count].nodeid =
 					p->succession[i];
 				corrective_event_count++;
+
 			}
 		}
 	}
@@ -2424,7 +2430,9 @@ void as_paxos_auto_reset_master(bool cluster_integrity_fault,
 	}
 
 	// Force a paxos spark with all events even if they are redundant.
-	corrective_events[corrective_event_count++].evt = FABRIC_RESET;
+	memset(&corrective_events[corrective_event_count], 0, sizeof(as_fabric_event_node));
+	corrective_events[corrective_event_count].evt = FABRIC_RESET;
+	corrective_event_count++;
 
 	as_paxos_event(corrective_event_count, corrective_events, NULL);
 }
@@ -2548,11 +2556,13 @@ as_paxos_process_retransmit_check()
 
 	// check for succession list fault
 	as_fabric_event_node corrective_events[AS_CLUSTER_SZ + 1];
-	int corrective_event_count = as_hb_get_corrective_events(p->succession, corrective_events);	
+	memset(corrective_events, 0, sizeof(corrective_events));
+
+	int corrective_event_count = as_hb_get_corrective_events(p->succession, corrective_events);
     bool succession_list_fault = corrective_event_count > 0;
 
 	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
-	
+
 	if (cluster_integrity_fault || succession_list_fault) {
 
 		char sbuf[(AS_CLUSTER_SZ * 17) + 99];
