@@ -39,37 +39,39 @@
 // Typedefs & constants.
 //
 
-#define VA_NARGS(...) (sizeof((int[]){__VA_ARGS__}) / sizeof(int))
-#define CDT_OP_ENTRY(op, ...) [op].args = (const as_cdt_paramtype[]){__VA_ARGS__, 0}, [op].count = VA_NARGS(__VA_ARGS__)
+#define VA_FIRST(first, ...)	first
+#define VA_REST(first, ...)		__VA_ARGS__
 
-static const cdt_op_table_entry cdt_op_table[] = {
+#define CDT_OP_ENTRY(op, type, ...) [op].args = (const as_cdt_paramtype[]){VA_REST(__VA_ARGS__, 0)}, [op].count = VA_NARGS(__VA_ARGS__) - 1, [op].opt_args = VA_FIRST(__VA_ARGS__)
+
+const cdt_op_table_entry cdt_op_table[] = {
 	//--------------------------------------------
 	// Modify OPs
 
 	// Add to list
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND,			AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND_ITEMS,	AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT,			AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT_ITEMS,	AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND,			CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_PAYLOAD),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_APPEND_ITEMS,	CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_PAYLOAD),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT,			CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_INSERT_ITEMS,	CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
 
 	// Remove from list
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP,			AS_CDT_PARAM_INDEX),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP_RANGE,		AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE,			AS_CDT_PARAM_INDEX),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE_RANGE,	AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP,			CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_INDEX),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_POP_RANGE,		CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE,			CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_INDEX),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_REMOVE_RANGE,	CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
 
 	// Other list modifies
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_SET,			AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_TRIM,			AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_CLEAR,			0),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_SET,			CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_PAYLOAD),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_TRIM,			CDT_RW_TYPE_MODIFY, 0, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_CLEAR,			CDT_RW_TYPE_MODIFY, 0),
 
 	//--------------------------------------------
 	// Read OPs
 
 	// Read from list
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_SIZE,			0),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET,			AS_CDT_PARAM_INDEX),
-	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET_RANGE,		AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_SIZE,			CDT_RW_TYPE_READ, 0),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET,			CDT_RW_TYPE_READ, 0, AS_CDT_PARAM_INDEX),
+	CDT_OP_ENTRY(AS_CDT_OP_LIST_GET_RANGE,		CDT_RW_TYPE_READ, 1, AS_CDT_PARAM_INDEX, AS_CDT_PARAM_COUNT),
 };
 
 static const size_t cdt_op_table_size = sizeof(cdt_op_table) / sizeof(cdt_op_table_entry);
@@ -130,20 +132,30 @@ cdt_process_state_get_params(cdt_process_state *state, size_t n, ...)
 	}
 
 	const cdt_op_table_entry *entry = &cdt_op_table[op];
+	int required_count = entry->count - entry->opt_args;
+
+	if (n < (size_t)required_count) {
+		cf_crash(AS_PARTICLE, "cdt_process_state_get_params() called with %zu params, require at least %d - %d = %d params", n, entry->count, entry->opt_args, required_count);
+	}
 
 	if (n == 0 || entry->args[0] == 0) {
 		return true;
 	}
 
-	if (state->ele_count < n) {
-		cf_warning(AS_PARTICLE, "cdt_process_state_get_params() count mismatch: got %u from client, expected %zu", state->ele_count, n);
+	if (state->ele_count < (uint32_t)required_count) {
+		cf_warning(AS_PARTICLE, "cdt_process_state_get_params() count mismatch: got %u from client < expected %d", state->ele_count, required_count);
+		return false;
+	}
+
+	if (state->ele_count > (uint32_t)entry->count) {
+		cf_warning(AS_PARTICLE, "cdt_process_state_get_params() count mismatch: got %u from client > expected %u", state->ele_count, entry->count);
 		return false;
 	}
 
 	va_list vl;
 	va_start(vl, n);
 
-	for (size_t i = 0; i < entry->count; i++) {
+	for (size_t i = 0; i < state->ele_count; i++) {
 		switch (entry->args[i]) {
 		case AS_CDT_PARAM_PAYLOAD: {
 			cdt_payload *arg = va_arg(vl, cdt_payload *);
