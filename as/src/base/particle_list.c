@@ -1960,6 +1960,11 @@ cdt_process_state_packed_list_read_optype(cdt_process_state *state, cdt_read_dat
 
 		int ele_count = as_packed_list_header_element_count(&pl);
 
+		// If missing count, take the rest of the list.
+		if (state->ele_count == 1) {
+			count = ele_count - index;
+		}
+
 		if (index >= ele_count || (index = calc_index(index, ele_count)) < 0) {
 			cf_warning(AS_PARTICLE, "OP_LIST_GET_RANGE: index %d(%d) out of bounds", index - ele_count, index);
 			cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
