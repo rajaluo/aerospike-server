@@ -51,6 +51,7 @@
 #include "base/index.h"
 #include "base/ldt.h"
 #include "base/proto.h"
+#include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/thr_write.h"
 #include "base/transaction.h"
@@ -1225,7 +1226,9 @@ thr_nsup(void *arg)
 						continue;
 					}
 
-					SET_DELETED_OFF(p_set);
+					// Starts a detached thread which clears all sindex entries
+					// for this set, then switches off the set's 'deleted' flag.
+					as_sindex_initiate_set_delete(ns, p_set);
 				}
 			}
 

@@ -1088,7 +1088,7 @@ struct as_namespace_s {
 	int					sindex_cnt;
 	struct as_sindex_s	*sindex;  // array with AS_MAX_SINDEX meta data
 	uint64_t			sindex_data_max_memory;
-	cf_atomic_int		sindex_data_memory_used;
+	cf_atomic64		    sindex_data_memory_used;
 	shash               *sindex_set_binid_hash;
 	shash				*sindex_iname_hash;
 	uint32_t			binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
