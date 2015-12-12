@@ -98,7 +98,7 @@ as_sindex_gc_release_defrag_arr_to_queue(void *v)
 	objs_to_defrag_arr *dt = (objs_to_defrag_arr *)v;
 	if (cf_queue_sz(g_q_objs_to_defrag) < SINDEX_GC_QUEUE_HIGHWATER) {
 		cf_queue_push(g_q_objs_to_defrag, &dt);
-	} 
+	}
 	else {
 		cf_free(dt);
 	}
@@ -109,7 +109,7 @@ ll_sindex_gc_destroy_fn(cf_ll_element *ele)
 {
 	ll_sindex_gc_element * node = (ll_sindex_gc_element *) ele;
 	if (node) {
-		as_sindex_gc_release_defrag_arr_to_queue((void *)(node->objs_to_defrag));	
+		as_sindex_gc_release_defrag_arr_to_queue((void *)(node->objs_to_defrag));
 		cf_free(node);
 	}
 }
@@ -131,7 +131,7 @@ as_sindex_gc_histogram_dumpall()
 	if (g_config.sindex_gc_enable_histogram == false) {
 		return;
 	}
-	
+
 	if (g_config._sindex_gc_validate_obj_hist) {
 		histogram_dump(g_config._sindex_gc_validate_obj_hist);
 	}
@@ -144,7 +144,7 @@ as_sindex_gc_histogram_dumpall()
 	if (g_config._sindex_gc_pimd_wlock_hist) {
 		histogram_dump(g_config._sindex_gc_pimd_wlock_hist);
 	}
-	
+
 	return;
 }
 
@@ -205,7 +205,7 @@ as_sindex__destroy_fn(void *param)
 		snprintf(iname, strlen(imd->iname) + 1, "%s", imd->iname);
 		shash_delete(si->ns->sindex_iname_hash, (void *)iname);
 
-		
+
 		si->ns      = NULL;
 		si->simatch = -1;
 
@@ -233,7 +233,7 @@ as_sindex__set_delete_fn(void *param)
 	as_sindex_set * si_set = (as_sindex_set *) param;
 	uint64_t s_time = cf_getus();
 	as_sindex_delete_set(si_set->ns, si_set->set->name);
-	cf_debug(AS_SINDEX, "Time taken to clear sindexes on dropping set %s %ld ms", si_set->set->name, (cf_getus() - s_time)/1000 );
+	cf_debug(AS_SINDEX, "Time taken to clear sindexes on dropping set %s %ld ms", si_set->set->name, (cf_getus() - s_time) / 1000);
 	SET_DELETED_OFF(si_set->set);
 	cf_free(si_set);
 	return NULL;
@@ -242,13 +242,16 @@ as_sindex__set_delete_fn(void *param)
 void
 as_sindex_initiate_set_delete(as_namespace * ns, as_set * set)
 {
-	as_sindex_set * si_set = cf_malloc(sizeof(as_sindex_set));;
+	as_sindex_set * si_set = cf_malloc(sizeof(as_sindex_set));
 	si_set->set = set;
 	si_set->ns = ns;
-		
+
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	pthread_t sindex_set_delete_th;
-	if (0 != pthread_create(&sindex_set_delete_th, 0, as_sindex__set_delete_fn, (void*)si_set)) {
-		cf_warning(AS_SINDEX, " Could not create sindex set destroy thread ");
+	if (0 != pthread_create(&sindex_set_delete_th, &attr, as_sindex__set_delete_fn, (void*)si_set)) {
+		cf_warning(AS_SINDEX, "could not create sindex set-destroy thread");
 		SET_DELETED_OFF(si_set->set);
 		cf_free(si_set);
 	}
@@ -275,7 +278,7 @@ as_sindex_update_defrag_stat(as_sindex *si, uint64_t r, uint64_t start_time_ms)
  * 		Caller needs to release the ref count of sindex(si)
 */
 int
-get_pimd_and_reserve_si(as_namespace *ns, int *si_index, int *p_index, as_sindex ** sindex, 
+get_pimd_and_reserve_si(as_namespace *ns, int *si_index, int *p_index, as_sindex ** sindex,
 		int *si_defraged)
 {
 	if (*p_index >= ns->sindex_num_partitions) {
@@ -385,7 +388,7 @@ as_sindex__defrag_fn(void *udata)
 		int           sindex_defraged  = 0;
 		long          defrag_period    = 0;
 		long          limit            = 0;
-		
+
 		while (1) {
 			// Sleep for remainder of defrag period
 			curr_time                        = cf_getms();
@@ -444,7 +447,7 @@ as_sindex__defrag_fn(void *udata)
 				pimd = &si->imd->pimd[p_index];
 				SINDEX_RLOCK(&pimd->slock);
 				SET_TIME_FOR_SINDEX_GC_HIST(pimd_rlock_time_ns);
-				ret  = ai_btree_build_defrag_list(si->imd, pimd, &i_col, &n_offset, limit_per_iteration, &processed, &found, &defrag_list);	
+				ret  = ai_btree_build_defrag_list(si->imd, pimd, &i_col, &n_offset, limit_per_iteration, &processed, &found, &defrag_list);
 				SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_pimd_rlock_hist, pimd_rlock_time_ns);
 				SINDEX_UNLOCK(&pimd->slock);
 				SINDEX_UNLOCK(&si->imd->slock);
@@ -464,7 +467,7 @@ as_sindex__defrag_fn(void *udata)
 			if ( (ret != AS_SINDEX_ERR ) && (listsize > 0) ) {
 				ulong    wl_lim             = 10;
 				uint64_t start_time         = cf_getms();
-				uint64_t pimd_wlock_time_ns = 0; 
+				uint64_t pimd_wlock_time_ns = 0;
 				bool     more               = true;
 				while (more) {
 					SINDEX_RLOCK(&si->imd->slock);
@@ -478,7 +481,7 @@ as_sindex__defrag_fn(void *udata)
 					pimd_wlock_time_ns = 0;
 				}
 				cf_detail(AS_SINDEX, "Deleted %d units of attempted %d units from index %s", listsize, limit, si->imd->iname);
-				as_sindex_update_defrag_stat(si, deleted, start_time);	
+				as_sindex_update_defrag_stat(si, deleted, start_time);
 			}
 
 			cf_ll_reduce(&defrag_list, true /*forward*/, ll_sindex_gc_reduce_fn, NULL);
