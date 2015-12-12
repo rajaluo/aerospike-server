@@ -1114,8 +1114,8 @@ thr_ldt_sup(void *arg)
 		nanosleep(&delay, NULL);
 
 		// Iterate over every namespace.
-		for (int i = 0; i < g_config.namespaces; i++) {
-			as_namespace *ns = g_config.namespace[i];
+		for (int i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace *ns = g_config.namespaces[i];
 
 			if (! ns->ldt_enabled) {
 				cf_detail(AS_LDT, "{%s} ldt sub skip", ns->name);
@@ -1146,9 +1146,9 @@ thr_nsup(void *arg)
 	cf_info(AS_NSUP, "namespace supervisor started");
 
 	// Garbage-collect long-expired proles, one partition per loop.
-	int prole_pids[g_config.namespaces];
+	int prole_pids[g_config.n_namespaces];
 
-	for (int n = 0; n < g_config.namespaces; n++) {
+	for (int n = 0; n < g_config.n_namespaces; n++) {
 		prole_pids[n] = -1;
 	}
 
@@ -1168,10 +1168,10 @@ thr_nsup(void *arg)
 		last_time = curr_time;
 
 		// Iterate over every namespace.
-		for (int i = 0; i < g_config.namespaces; i++) {
+		for (int i = 0; i < g_config.n_namespaces; i++) {
 			uint64_t start_ms = cf_getms();
 
-			as_namespace *ns = g_config.namespace[i];
+			as_namespace *ns = g_config.namespaces[i];
 
 			cf_info(AS_NSUP, "{%s} nsup start", ns->name);
 

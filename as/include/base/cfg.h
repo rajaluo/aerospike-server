@@ -669,8 +669,8 @@ typedef struct as_config_s {
 	// cf_atomic_int	stat_lua_gc_full;
 
 	/* Namespaces */
-	uint32_t			namespaces;
-	struct as_namespace_s * namespace[AS_NAMESPACE_SZ];
+	uint32_t			n_namespaces;
+	struct as_namespace_s * namespaces[AS_NAMESPACE_SZ];
 
 	// To speed up transaction enqueue's determination of data-in-memory:
 	uint32_t			n_namespaces_in_memory;
