@@ -940,6 +940,39 @@ as_sindex_arr_lookup_by_set_binid_lockfree(as_namespace * ns, const char *set, i
 	return sindex_count;
 }
 
+// Populates the si_arr with all the sindexes which matches setname
+// Each sindex is reserved as well. Enough space is provided by caller in si_arr
+int
+as_sindex_arr_lookup_by_setname_lockfree(as_namespace * ns, const char *setname, as_sindex ** si_arr)
+{
+	int sindex_count = 0;
+	as_sindex * si = NULL;
+
+	for (int i=0; i<AS_SINDEX_MAX; i++) {
+		if (sindex_count >= ns->sindex_cnt) {
+			break;
+		}
+		si = &ns->sindex[i];
+		// Reserve only active sindexes.
+		// Do not break this rule
+		if (!as_sindex_isactive(si)) {
+			continue;
+		}
+	
+		SINDEX_RLOCK(&si->imd->slock);
+		if (!as_sindex__setname_match(si->imd, setname)) {
+			SINDEX_UNLOCK(&si->imd->slock);
+			continue;
+		}
+		SINDEX_UNLOCK(&si->imd->slock);
+	
+		AS_SINDEX_RESERVE(si);
+
+		si_arr[sindex_count++] = si;
+	}
+
+	return sindex_count;
+}
 int
 as_sindex__simatch_by_iname(as_namespace *ns, char *idx_name)
 {
@@ -1160,8 +1193,6 @@ as_sindex__config_default(as_sindex *si)
 	si->config.defrag_period    = 1000;
 	si->config.defrag_max_units = 1000;
 	si->config.data_max_memory  = ULONG_MAX; // No Limit
-	// related non config value defaults
-	si->data_memory_used        = 0;
 	si->config.flag             = 1; // Default is - index is active
 }
 
@@ -1240,7 +1271,7 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	int      ns_objects  = ns->n_objects;
 	uint64_t si_objects  = cf_atomic64_get(si->stats.n_objects);
 	uint64_t pending     = cf_atomic64_get(si->stats.recs_pending);
-	uint64_t si_memory   = cf_atomic64_get(si->data_memory_used);
+	uint64_t si_memory   = cf_atomic64_get(si->stats.mem_used);
 	// To protect the pimd while accessing it.
 	SINDEX_RLOCK(&si->imd->slock);
 	uint64_t n_keys      = ai_btree_get_numkeys(si->imd);
@@ -1429,7 +1460,7 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 			// in case value is ULONG_MAX
 			if (((si->config.data_max_memory != ULONG_MAX)
 				&& (val < (si->config.data_max_memory / 2L)))
-				|| (val < cf_atomic64_get(si->data_memory_used))) {
+				|| (val < cf_atomic64_get(si->stats.mem_used))) {
 				goto Error;
 			}
 			cf_info(AS_INFO,"Changing value of data-max-memory of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
@@ -1984,6 +2015,54 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR_NOTFOUND;
 	}
+}
+
+// On emptying a index
+// 		reset objects and keys
+// 		reset memory used 
+// 		add previous number of objects as deletes 
+void
+as_sindex_clear_stats_on_empty_index(as_sindex * si)
+{
+	as_sindex_release_data_memory(si->imd, si->stats.mem_used);	
+	as_sindex_reserve_data_memory(si->imd, ai_btree_get_isize(si->imd));
+
+	cf_atomic64_add(&si->stats.n_deletes, cf_atomic64_get(si->stats.n_objects));
+	cf_atomic64_set(&si->stats.n_keys, 0);
+	cf_atomic64_set(&si->stats.n_objects, 0);
+}
+
+void
+as_sindex_empty_index(as_sindex_metadata * imd)
+{
+	as_sindex_pmetadata * pimd;
+	for (int i=0; i<imd->nprts; i++) {
+		SINDEX_RLOCK(&imd->slock);
+		pimd = &imd->pimd[i];
+		SINDEX_WLOCK(&pimd->slock);
+		struct btree * ibtr = pimd->ibtr;
+		ai_btree_reinit_pimd(pimd);
+		SINDEX_UNLOCK(&pimd->slock);
+		SINDEX_UNLOCK(&imd->slock);
+		ai_btree_delete_ibtr(ibtr, pimd->imatch);
+	}
+	as_sindex_clear_stats_on_empty_index(imd->si);
+}
+
+void
+as_sindex_delete_set(as_namespace * ns, char * set_name)
+{
+	SINDEX_GRLOCK();
+	as_sindex * si_arr[ns->sindex_cnt];
+	int sindex_count = as_sindex_arr_lookup_by_setname_lockfree(ns, set_name, si_arr);
+
+	for (int i=0; i<sindex_count; i++) {
+		cf_info(AS_SINDEX, "Initiating si set delete for index %s in set %s", si_arr[i]->imd->iname, set_name);
+		as_sindex_empty_index(si_arr[i]->imd);
+		cf_info(AS_SINDEX, "Finished si set delete for index %s in set %s", si_arr[i]->imd->iname, set_name);
+	}
+	SINDEX_GUNLOCK();
+	as_sindex_release_arr(si_arr, sindex_count);
 }
 //                                        END - SINDEX DELETE
 // ************************************************************************************************
@@ -4854,43 +4933,62 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
  *
  * TODO: Make accounting subsystem cache friendly. At high speed it
  *       cache misses it causes starts to matter
+ * TODO: This shows up in perf output on running prformance run
  *
  * Reserve locally first then globally
  */
 bool
 as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes)
 {
-	if (!bytes)                           return true;
-	if (!imd || !imd->si || !imd->si->ns) return false;
+	if (!bytes) {
+		return true;
+	}
+
+	if (!imd) {
+		cf_warning(AS_SINDEX, "imd is null");
+		return false;
+	}
+
 	as_namespace *ns = imd->si->ns;
 	bool g_reserved  = false;
 	bool ns_reserved = false;
 	bool si_reserved = false;
 	uint64_t val     = 0;
 
-	// Global reservation
-	val = cf_atomic_int_add(&g_config.sindex_data_memory_used, bytes);
+	// Global sindex memory reservation
+	val = cf_atomic64_add(&g_config.sindex_data_memory_used, bytes);
 	g_reserved = true;
-	if (val > g_config.sindex_data_max_memory) goto FAIL;
-
-	// Namespace reservation
-	val = cf_atomic_int_add(&ns->sindex_data_memory_used, bytes);
+	if (val > g_config.sindex_data_max_memory) {
+		goto FAIL;
+	}
+	
+	// Namespace sindex memory reservation
+	val = cf_atomic64_add(&ns->sindex_data_memory_used, bytes);
 	ns_reserved = true;
-	if (val > ns->sindex_data_max_memory)      goto FAIL;
+	if (val > ns->sindex_data_max_memory) {
+		goto FAIL;
+	}
 
-	// Secondary Index Specific
-	val = cf_atomic_int_add(&imd->si->data_memory_used, bytes);
+	// Secondary Index memory reservation
+	val = cf_atomic64_add(&imd->si->stats.mem_used, bytes);
 	si_reserved = true;
-	if (val > imd->si->config.data_max_memory) goto FAIL;
-
+	if (val > imd->si->config.data_max_memory) {
+		goto FAIL;
+	}
 	return true;
 
 FAIL:
-	if (ns_reserved) cf_atomic_int_sub(&ns->sindex_data_memory_used, bytes);
-	if (g_reserved)  cf_atomic_int_sub(&g_config.sindex_data_memory_used, bytes);
-	if (si_reserved)  cf_atomic_int_sub(&imd->si->data_memory_used, bytes);
-	cf_warning(AS_SINDEX, "Data Memory Cap Hit for Secondary Index %s "
-							"while reserving %ld bytes", imd->iname, bytes);
+	if (ns_reserved) {
+		cf_atomic64_sub(&ns->sindex_data_memory_used, bytes);
+	}
+	if (g_reserved)  {
+		cf_atomic64_sub(&g_config.sindex_data_memory_used, bytes);
+	}
+	if (si_reserved) {
+		cf_atomic64_sub(&imd->si->stats.mem_used, bytes);
+	}
+	cf_warning(AS_SINDEX, "Sindex memory cap hit for index %s while reserving %ld bytes",
+			imd->iname, bytes);
 	return false;
 }
 
@@ -4898,15 +4996,24 @@ FAIL:
 bool
 as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes)
 {
-	as_namespace *ns = imd->si->ns;
-	if ((ns->sindex_data_memory_used < bytes)
-		|| (imd->si->data_memory_used < bytes)
-		|| (g_config.sindex_data_memory_used < bytes)) {
-		cf_warning(AS_SINDEX, "Sindex memory usage accounting corrupted");
+	if (!bytes) {
+		return true;
 	}
-	cf_atomic_int_sub(&ns->sindex_data_memory_used, bytes);
-	cf_atomic_int_sub(&g_config.sindex_data_memory_used, bytes);
-	cf_atomic_int_sub(&imd->si->data_memory_used, bytes);
+
+	as_namespace *ns = imd->si->ns;
+
+	uint64_t g_mem = cf_atomic64_get(g_config.sindex_data_memory_used);
+	uint64_t ns_mem = cf_atomic64_get(ns->sindex_data_memory_used);
+	uint64_t si_mem = cf_atomic64_get(imd->si->stats.mem_used);
+	
+	if (g_mem < bytes || ns_mem < bytes || si_mem < bytes) {
+		cf_warning(AS_SINDEX, "Sindex memory usage accounting is corrupted. [%ld %ld %ld %d]", 
+			g_mem, ns_mem, si_mem, bytes);
+		return false;
+	}
+	cf_atomic64_sub(&ns->sindex_data_memory_used, bytes);
+	cf_atomic64_sub(&g_config.sindex_data_memory_used, bytes);
+	cf_atomic64_sub(&imd->si->stats.mem_used, bytes);
 	return true;
 }
 
@@ -4914,7 +5021,7 @@ uint64_t
 as_sindex_get_ns_memory_used(as_namespace *ns)
 {
 	if (as_sindex_ns_has_sindex(ns)) {
-		return ns->sindex_data_memory_used;
+		return cf_atomic64_get(ns->sindex_data_memory_used);
 	}
 	return 0;
 }
@@ -5308,11 +5415,11 @@ as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint
 		char   * si_name     = NULL;
 
 		if (si) {
-			si_memory        = cf_atomic64_get(si->data_memory_used);
+			si_memory        = cf_atomic64_get(si->stats.mem_used);
 			si_name          = si->imd->iname;
 		}
 		else {
-			si_memory        = (uint64_t)cf_atomic_int_get(ns->sindex_data_memory_used);
+			si_memory        = (uint64_t)cf_atomic64_get(ns->sindex_data_memory_used);
 			si_name          = "<all>";
 		}
 
@@ -5335,11 +5442,11 @@ as_sindex_ticker_done(as_namespace * ns, as_sindex * si, uint64_t start_time)
 	char   * si_name     = NULL;
 
 	if (si) {
-		si_memory        = cf_atomic64_get(si->data_memory_used);
+		si_memory        = cf_atomic64_get(si->stats.mem_used);
 		si_name          = si->imd->iname;
 	}
 	else {
-		si_memory        = (uint64_t)cf_atomic_int_get(ns->sindex_data_memory_used);
+		si_memory        = (uint64_t)cf_atomic64_get(ns->sindex_data_memory_used);
 		si_name          = "<all>";
 	}
 

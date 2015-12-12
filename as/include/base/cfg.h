@@ -310,7 +310,7 @@ typedef struct as_config_s {
 	// per namespace configured value
 	uint32_t		sindex_builder_threads;   // Secondary index builder thread pool size
 	uint64_t		sindex_data_max_memory;   // Maximum memory for secondary index trees
-	cf_atomic_int	sindex_data_memory_used;  // Maximum memory for secondary index trees
+	cf_atomic64	    sindex_data_memory_used;  // Maximum memory for secondary index trees
 	cf_atomic_int   sindex_gc_timedout;           // Number of time sindex gc iteration timed out waiting for partition lock
 	uint64_t        sindex_gc_inactivity_dur;     // Commulative sum of sindex GC thread inactivity.
 	uint64_t        sindex_gc_activity_dur;       // Commulative sum of sindex gc thread activity.

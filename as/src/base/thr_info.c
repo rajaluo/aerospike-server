@@ -294,7 +294,7 @@ info_get_utilization(cf_dyn_buf *db)
 		total_memory_size       += ns->memory_size;
 		used_data_memory        += ns->n_bytes_memory;
 		used_pindex_memory      += as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
-		used_sindex_memory      += cf_atomic_int_get(ns->sindex_data_memory_used);
+		used_sindex_memory      += cf_atomic64_get(ns->sindex_data_memory_used);
 
 		uint64_t inuse_disk_bytes = 0;
 		as_storage_stats(ns, 0, &inuse_disk_bytes);
@@ -5144,7 +5144,7 @@ info_debug_ticker_fn(void *unused)
 							"sindex memory inuse: %"PRIu64" (bytes) "
 							"avail pct %d",
 							ns->name, inuse_disk_bytes, ns_memory_inuse,
-							ns->sindex_data_memory_used,
+							cf_atomic64_get(ns->sindex_data_memory_used),
 							available_pct);
 					if (ns->ldt_enabled) {
 						uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
@@ -5168,7 +5168,7 @@ info_debug_ticker_fn(void *unused)
 							"sindex memory inuse: %"PRIu64" (bytes) "
 							"avail pct %d cache-read pct %.2f",
 							ns->name, inuse_disk_bytes, ns_memory_inuse,
-							ns->sindex_data_memory_used,
+							cf_atomic64_get(ns->sindex_data_memory_used),
 							available_pct,
 							ns->cache_read_pct);
 					if (ns->ldt_enabled) {
@@ -6151,7 +6151,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// total used memory =  data memory + primary index memory + secondary index memory
 	data_memory   = ns->n_bytes_memory;
 	pindex_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
-	sindex_memory = cf_atomic_int_get(ns->sindex_data_memory_used);
+	sindex_memory = cf_atomic64_get(ns->sindex_data_memory_used);
 	used_memory   = data_memory + pindex_memory + sindex_memory;
 
 	info_append_uint64("", "used-bytes-memory",        used_memory,     db);
