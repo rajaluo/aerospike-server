@@ -32,9 +32,6 @@ dist:
 	install -d $(BUILD_ROOT)/var/run/aerospike
 
 	install -pm 644 $(PKG)/deb/conffiles $(BUILD_ROOT)/DEBIAN
-ifeq ($(EDITION), community)
-	cat $(PKG)/deb/conffiles.telemetry >> $(BUILD_ROOT)/DEBIAN/conffiles
-endif
 	install -pm 755 $(PKG)/deb/postinst.server $(BUILD_ROOT)/DEBIAN/postinst
 
 	install -pm 755 $(BIN_DIR)/asd $(BUILD_ROOT)/usr/bin/asd
@@ -56,19 +53,6 @@ ifeq ($(USE_ASM),1)
 	install -d $(OPT_AS)/lib
 	install -pm 644 $(DEPTH)/modules/asmalloc/lib/asmalloc.jem.so $(OPT_AS)/lib
 	install -pm 644 $(DEPTH)/modules/jemalloc/lib/libjemalloc.so $(OPT_AS)/lib
-endif
-
-ifeq ($(EDITION), community)
-	install -pm 755 $(DEPTH)/as/etc/init-telemetry-script.deb $(BUILD_ROOT)/etc/init.d/aerospike_telemetry
-	install -pm 644 $(DEPTH)/as/etc/logrotate_telemetry $(BUILD_ROOT)/etc/logrotate.d/aerospike_telemetry
-
-	install -d $(OPT_AS)/telemetry
-	install -d $(OPT_AS)/telemetry/phonehome
-	install -d $(OPT_AS)/telemetry/daemon
-	install -pm 644 $(DEPTH)/as/etc/telemetry.conf $(BUILD_ROOT)/etc/aerospike
-	install -pm 755 $(DEPTH)/modules/telemetry/telemetry.py $(OPT_AS)/telemetry
-	install -pm 755 $(DEPTH)/modules/telemetry/phonehome/*.py $(OPT_AS)/telemetry/phonehome
-	install -pm 755 $(DEPTH)/modules/telemetry/daemon/*.py $(OPT_AS)/telemetry/daemon
 endif
 
 	install -d $(OPT_AS)/data

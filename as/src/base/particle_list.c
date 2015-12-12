@@ -612,17 +612,7 @@ is_list_type(uint8_t type)
 static inline int32_t
 calc_index(int32_t index, int ele_count)
 {
-	if (index < 0) {
-		int32_t calc_index = ele_count + index;
-
-		if (calc_index < 0) {
-			return -AS_PROTO_RESULT_FAIL_PARAMETER;
-		}
-
-		return calc_index;
-	}
-
-	return index;
+	return index < 0 ? (int32_t)ele_count + index : index;
 }
 
 //------------------------------------------------
@@ -1246,8 +1236,8 @@ packed_list_insert(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *payl
 	}
 
 	if ((index = calc_index(index, ele_count)) < 0) {
-		cf_warning(AS_PARTICLE, "packed_list_insert() index %d out of bounds", index - ele_count);
-		return index;
+		cf_warning(AS_PARTICLE, "packed_list_insert() index %d(%d) out of bounds", index - ele_count, index);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	uint32_t uindex = (uint32_t)index;
@@ -1338,8 +1328,8 @@ packed_list_remove(as_bin *b, rollback_alloc *alloc_buf, int32_t index, uint32_t
 	}
 
 	if ((index = calc_index(index, ele_count)) < 0) {
-		cf_warning(AS_PARTICLE, "packed_list_remove() index %d out of bounds", index - ele_count);
-		return index;
+		cf_warning(AS_PARTICLE, "packed_list_remove() index %d(%d) out of bounds", index - ele_count, index);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	uint32_t uindex = (uint32_t)index;
@@ -1428,8 +1418,8 @@ packed_list_set(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *payload
 	}
 
 	if ((index = calc_index(index, ele_count)) < 0) {
-		cf_warning(AS_PARTICLE, "packed_list_set() index %d out of bounds", index - ele_count);
-		return index;
+		cf_warning(AS_PARTICLE, "packed_list_set() index %d(%d) out of bounds", index - ele_count, index);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	uint32_t uindex = (uint32_t)index;
@@ -1505,8 +1495,8 @@ packed_list_trim(as_bin *b, rollback_alloc *alloc_buf, int32_t index, uint32_t c
 	}
 
 	if ((index = calc_index(index, original_ele_count)) < 0) {
-		cf_warning(AS_PARTICLE, "packed_list_trim() index %d out of bounds", index - original_ele_count);
-		return index;
+		cf_warning(AS_PARTICLE, "packed_list_trim() index %d(%d) out of bounds", index - original_ele_count, index);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	uint32_t uindex = (uint32_t)index;
@@ -1651,7 +1641,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state, cdt_modify
 
 		break;
 	}
-	case AS_CDT_OP_LIST_APPEND_LIST: {
+	case AS_CDT_OP_LIST_APPEND_ITEMS: {
 		cdt_payload payload;
 
 		if (! CDT_OP_TABLE_GET_PARAMS(state, &payload)) {
@@ -1701,7 +1691,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state, cdt_modify
 
 		break;
 	}
-	case AS_CDT_OP_LIST_INSERT_LIST: {
+	case AS_CDT_OP_LIST_INSERT_ITEMS: {
 		const cdt_payload payload;
 		int64_t index;
 
@@ -1927,9 +1917,10 @@ cdt_process_state_packed_list_read_optype(cdt_process_state *state, cdt_read_dat
 
 		int ele_count = as_packed_list_header_element_count(&pl);
 
-		if ((index = calc_index(index, ele_count)) < 0) {
-			cf_warning(AS_PARTICLE, "OP_LIST_GET: index %d out of bounds", index - ele_count);
-			return index;
+		if (index >= ele_count || (index = calc_index(index, ele_count)) < 0) {
+			cf_warning(AS_PARTICLE, "OP_LIST_GET: index %d(%d) out of bounds", index - ele_count, index);
+			cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+			return false;
 		}
 
 		uint32_t uindex = (uint32_t)index;
@@ -1969,9 +1960,15 @@ cdt_process_state_packed_list_read_optype(cdt_process_state *state, cdt_read_dat
 
 		int ele_count = as_packed_list_header_element_count(&pl);
 
-		if ((index = calc_index(index, ele_count)) < 0) {
-			cf_warning(AS_PARTICLE, "OP_LIST_GET_RANGE: index %d out of bounds", index - ele_count);
-			return index;
+		// If missing count, take the rest of the list.
+		if (state->ele_count == 1) {
+			count = ele_count - index;
+		}
+
+		if (index >= ele_count || (index = calc_index(index, ele_count)) < 0) {
+			cf_warning(AS_PARTICLE, "OP_LIST_GET_RANGE: index %d(%d) out of bounds", index - ele_count, index);
+			cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+			return false;
 		}
 
 		uint32_t uindex = (uint32_t)index;

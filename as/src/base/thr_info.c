@@ -285,8 +285,8 @@ info_get_utilization(cf_dyn_buf *db)
 	uint64_t    used_pindex_memory      = 0;
 	uint64_t    used_sindex_memory      = 0;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 
 		total_number_objects    += ns->n_objects;
 		total_number_objects_sub += ns->n_sub_objects;
@@ -2695,6 +2695,17 @@ info_xdr_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
 }
 
+void
+info_cluster_config_get(cf_dyn_buf *db)
+{
+	cf_dyn_buf_append_string(db, "mode=");
+	cf_dyn_buf_append_string(db, cc_mode_str[g_config.cluster_mode]);
+	cf_dyn_buf_append_string(db, ";self-group-id=");
+	cf_dyn_buf_append_uint32(db, g_config.cluster.cl_self_group);
+	cf_dyn_buf_append_string(db, ";self-node-id=");
+	cf_dyn_buf_append_uint32(db, g_config.cluster.cl_self_node);
+}
+
 
 int
 info_command_config_get(char *name, char *params, cf_dyn_buf *db)
@@ -2706,7 +2717,11 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 		char context[1024];
 		int context_len = sizeof(context);
 		if (0 == as_info_parameter_get(params, "context", context, &context_len)) {
-			if (strcmp(context, "namespace") == 0) {
+			if (strcmp(context, "cluster") == 0) {
+				info_cluster_config_get(db);
+				return 0;
+			}
+			else if (strcmp(context, "namespace") == 0) {
 				context_len = sizeof(context);
 				if (0 != as_info_parameter_get(params, "id", context, &context_len)) {
 					cf_dyn_buf_append_string(db, "Error:invalid id");
@@ -2715,20 +2730,20 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 				info_namespace_config_get(context, db);
 				return(0);
 			}
-			else if (strcmp(context, "service") == 0) {
-				info_service_config_get(db);
+			else if (strcmp(context, "network.heartbeat") == 0) {
+				info_network_heartbeat_config_get(db);
 				return(0);
 			}
 			else if (strcmp(context, "network.info") == 0) {
 				info_network_info_config_get(db);
 				return(0);
 			}
-			else if (strcmp(context, "network.heartbeat") == 0) {
-				info_network_heartbeat_config_get(db);
-				return(0);
-			}
 			else if (strcmp(context, "security") == 0) {
 				info_security_config_get(db);
+				return(0);
+			}
+			else if (strcmp(context, "service") == 0) {
+				info_service_config_get(db);
 				return(0);
 			}
 			else if (strcmp(context, "xdr") == 0) {
@@ -4390,7 +4405,7 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 //	log-message:message=<MESSAGE>[;who=<WHO>]
 //
 // Example:
-// 	log-message:message=Aerospike anonymous data collection is ACTIVE. For further information, see http://aerospike.com/aerospike-telemetry;who=Aerospike Telemetry Agent
+// 	log-message:message=Example Log Message;who=Aerospike User
 //
 int
 info_command_log_message(char *name, char *params, cf_dyn_buf *db)
@@ -5118,8 +5133,8 @@ info_debug_ticker_fn(void *unused)
 
 			// namespace disk and memory size and ldt gc stats
 			total_ns_memory_inuse = 0;
-			for (int i = 0; i < g_config.namespaces; i++) {
-				as_namespace *ns = g_config.namespace[i];
+			for (int i = 0; i < g_config.n_namespaces; i++) {
+				as_namespace *ns = g_config.namespaces[i];
 				int available_pct;
 				uint64_t inuse_disk_bytes;
 				as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
@@ -6027,12 +6042,12 @@ info_services_alumni_reset(char *name, cf_dyn_buf *db)
 int
 info_get_namespaces(char *name, cf_dyn_buf *db)
 {
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		cf_dyn_buf_append_string(db, g_config.namespace[i]->name);
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		cf_dyn_buf_append_string(db, g_config.namespaces[i]->name);
 		cf_dyn_buf_append_char(db, ';');
 	}
 
-	if (g_config.namespaces > 0) {
+	if (g_config.n_namespaces > 0) {
 		cf_dyn_buf_chomp(db);
 	}
 
@@ -6051,8 +6066,8 @@ info_get_objects(char *name, cf_dyn_buf *db)
 {
 	uint64_t	objects = 0;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		objects += g_config.namespace[i]->n_objects;
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		objects += g_config.namespaces[i]->n_objects;
 	}
 
 	cf_dyn_buf_append_uint64(db, objects);
@@ -6088,8 +6103,8 @@ thr_info_get_object_count()
 {
 	uint64_t objects = 0;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		objects += g_config.namespace[i]->n_objects;
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		objects += g_config.namespaces[i]->n_objects;
 	}
 
 	return objects;
@@ -6100,8 +6115,8 @@ thr_info_get_subobject_count()
 {
 	uint64_t sub_objects = 0;
 
-	for (uint i = 0; i < g_config.namespaces; i++) {
-		sub_objects += g_config.namespace[i]->n_sub_objects;
+	for (uint i = 0; i < g_config.n_namespaces; i++) {
+		sub_objects += g_config.namespaces[i]->n_sub_objects;
 	}
 
 	return sub_objects;
@@ -6348,8 +6363,8 @@ info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db)
 
 	// format w/o namespace is ns1:set1:prop1=val1:prop2=val2:..propn=valn;ns1:set2...;ns2:set1...;
 	if (!ns) {
-		for (uint i = 0; i < g_config.namespaces; i++) {
-			as_namespace_get_set_info(g_config.namespace[i], set_name, db);
+		for (uint i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace_get_set_info(g_config.namespaces[i], set_name, db);
 		}
 	}
 	// format w namespace w/o set name is ns:set1:prop1=val1:prop2=val2...propn=valn;ns:set2...;
@@ -6378,8 +6393,8 @@ info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db)
 	// format w/o namespace is
 	// ns:num-bin-names=val1,bin-names-quota=val2,name1,name2,...;ns:...
 	if (!ns) {
-		for (uint i = 0; i < g_config.namespaces; i++) {
-			as_namespace_get_bins_info(g_config.namespace[i], db, true);
+		for (uint i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace_get_bins_info(g_config.namespaces[i], db, true);
 		}
 	}
 	// format w/namespace is
@@ -6490,8 +6505,8 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 
 	// format w/o namespace is ns1:set1:prop1=val1:prop2=val2:..propn=valn;ns1:set2...;ns2:set1...;
 	if (!ns) {
-		for (uint i = 0; i < g_config.namespaces; i++) {
-			as_sindex_list_str(g_config.namespace[i], db);
+		for (uint i = 0; i < g_config.n_namespaces; i++) {
+			as_sindex_list_str(g_config.namespaces[i], db);
 		}
 	}
 	// format w namespace w/o set name is ns:set1:prop1=val1:prop2=val2...propn=valn;ns:set2...;
@@ -7117,8 +7132,8 @@ int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 
 	if (listall) {
 		bool found = 0;
-		for (int i = 0; i < g_config.namespaces; i++) {
-			as_namespace *ns = g_config.namespace[i];
+		for (int i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace *ns = g_config.namespaces[i];
 			if (ns) {
 				if (!as_sindex_list_str(ns, db)) {
 					found++;

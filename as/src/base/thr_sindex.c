@@ -370,7 +370,7 @@ as_sindex__defrag_fn(void *udata)
 
 	uint16_t ns_id = 0;
 	while (true) {
-		as_namespace *ns = g_config.namespace[ns_id];
+		as_namespace *ns = g_config.namespaces[ns_id];
 		if (!ns || (ns->sindex_cnt == 0)) {
 			goto next_ns;
 		}
@@ -493,7 +493,7 @@ as_sindex__defrag_fn(void *udata)
 		}
 next_ns:
 		sleep(1);
-		ns_id = (ns_id + 1) % g_config.namespaces;
+		ns_id = (ns_id + 1) % g_config.n_namespaces;
 	}
 	return(0);
 }
