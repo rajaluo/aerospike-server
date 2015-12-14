@@ -383,7 +383,7 @@ as_paxos_sync_msg_apply(msg *m)
 	memset(&gen, 0, sizeof(as_paxos_generation));
 
 	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &gen.sequence);
-	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
+	// Older versions handled unused AS_PAXOS_MSG_GENERATION_PROPOSAL here.
 
 	e += msg_get_buf(m, AS_PAXOS_MSG_SUCCESSION, &bufp, &bufsz, MSG_GET_DIRECT);
 	e += msg_get_uint64(m, AS_PAXOS_MSG_CLUSTER_KEY, &cluster_key);
@@ -550,7 +550,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 
 	/* We trust this state absolutely */
 	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &gen.sequence);
-	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
+	// Older versions handled unused AS_PAXOS_MSG_GENERATION_PROPOSAL here.
 
 	if (gen.sequence != p->gen.sequence) {
 		cf_warning(AS_PAXOS, "sequence does not match (%"PRIu32", %"PRIu32") - partition sync request not applied",
@@ -762,7 +762,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 
 	/* We trust this state absolutely */
 	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &gen.sequence);
-	e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_PROPOSAL, 0); // not used
+	// Older versions handled unused AS_PAXOS_MSG_GENERATION_PROPOSAL here.
 	if (gen.sequence != p->gen.sequence) {
 		cf_warning(AS_PAXOS, "sequence do not match. partition sync message not applied");
 		return -1;
@@ -3048,9 +3048,9 @@ as_paxos_thr(void *arg)
 							cf_warning(AS_PAXOS, "sending Paxos command %s to successon list failed: rv %d", as_paxos_cmd_name[cmd], rv);
 							as_fabric_msg_put(reply);
 						}
-						as_paxos_transaction_vote_reset(s);
 
-						t.election_cycle = AS_PAXOS_MSG_COMMAND_COMMIT;
+						as_paxos_transaction_vote_reset(s);
+						s->election_cycle = AS_PAXOS_MSG_COMMAND_COMMIT;
 
 						break;
 				}
