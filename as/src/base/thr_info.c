@@ -2238,6 +2238,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.dump_message_above_size);
 	cf_dyn_buf_append_string(db, ";ticker-interval=");
 	cf_dyn_buf_append_int(db, g_config.ticker_interval);
+	cf_dyn_buf_append_string(db, ";log-local-time=");
+	cf_dyn_buf_append_string(db, cf_fault_is_using_local_time() ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";microbenchmarks=");
 	cf_dyn_buf_append_string(db, g_config.microbenchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";storage-benchmarks=");
