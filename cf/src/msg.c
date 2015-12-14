@@ -1347,7 +1347,7 @@ msg_get_buf_array_size(const msg *m, int field_id, int *size)
 {
 	VALIDATE(m, field_id, M_FT_ARRAY_BUF);
 
-	msg_field *mf = &(m->f[field_id]);
+	const msg_field *mf = &(m->f[field_id]);
 	if (mf->is_set == false) {
 		cf_info(CF_MSG, "msg_buf_array: field not set");
 		return(-2);
