@@ -4379,7 +4379,12 @@ write_local_dim(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 	memcpy((void*)new_bin_space->bins, new_bins, new_bins_size);
 
 	// Swizzle the index element's as_bin_space pointer.
-	cf_free(as_index_get_bin_space(r));
+	as_bin_space* old_bin_space = as_index_get_bin_space(r);
+
+	if (old_bin_space) {
+		cf_free(old_bin_space);
+	}
+
 	as_index_set_bin_space(r, new_bin_space);
 
 	// Accommodate a new stored key - wasn't needed for pickling and writing.
