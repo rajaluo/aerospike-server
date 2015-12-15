@@ -2238,6 +2238,8 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.dump_message_above_size);
 	cf_dyn_buf_append_string(db, ";ticker-interval=");
 	cf_dyn_buf_append_int(db, g_config.ticker_interval);
+	cf_dyn_buf_append_string(db, ";log-local-time=");
+	cf_dyn_buf_append_string(db, cf_fault_is_using_local_time() ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";microbenchmarks=");
 	cf_dyn_buf_append_string(db, g_config.microbenchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";storage-benchmarks=");
@@ -5064,6 +5066,7 @@ void *
 info_debug_ticker_fn(void *unused)
 {
 	size_t total_ns_memory_inuse = 0;
+	uint32_t ticker_cycles = 0;
 
 	// Helps to know how many messages are going in an out, some general status
 	do {
@@ -5133,29 +5136,22 @@ info_debug_ticker_fn(void *unused)
 
 			// namespace disk and memory size and ldt gc stats
 			total_ns_memory_inuse = 0;
+
 			for (int i = 0; i < g_config.n_namespaces; i++) {
 				as_namespace *ns = g_config.namespaces[i];
 				int available_pct;
 				uint64_t inuse_disk_bytes;
 				as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
-				size_t ns_memory_inuse = ns->n_bytes_memory + (as_index_size_get(ns) * ns->n_objects);
+				size_t ns_index_mem = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
+				size_t ns_sindex_mem = ns->sindex_data_memory_used;
+				size_t ns_total_mem = ns_index_mem + ns_sindex_mem + ns->n_bytes_memory;
+				double mem_used_pct = (double)(ns_total_mem * 100) / (double)ns->memory_size;
+
 				if (ns->storage_data_in_memory) {
-					cf_info(AS_INFO, "{%s} disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
-							"sindex memory inuse: %"PRIu64" (bytes) "
-							"avail pct %d",
-							ns->name, inuse_disk_bytes, ns_memory_inuse,
-							cf_atomic64_get(ns->sindex_data_memory_used),
-							available_pct);
-					if (ns->ldt_enabled) {
-						uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
-						uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
-						uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
-						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
-						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
-						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-						cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
-								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
-					}
+					cf_info(AS_INFO, "{%s} disk bytes used %"PRIu64" : avail pct %d",
+							ns->name, inuse_disk_bytes, available_pct);
+					cf_info(AS_INFO, "{%s} memory bytes used %"PRIu64" (index %"PRIu64" : sindex %"PRIu64" : data %"PRIu64") : used pct %.2lf",
+							ns->name, ns_total_mem, ns_index_mem, ns_sindex_mem, ns->n_bytes_memory, mem_used_pct);
 				}
 				else {
 					uint32_t n_reads_from_cache = cf_atomic32_get(ns->n_reads_from_cache);
@@ -5164,26 +5160,24 @@ info_debug_ticker_fn(void *unused)
 					cf_atomic32_set(&ns->n_reads_from_cache, 0);
 					ns->cache_read_pct = (float)(100 * n_reads_from_cache) / (float)(n_total_reads == 0 ? 1 : n_total_reads);
 
-					cf_info(AS_INFO, "{%s} disk inuse: %"PRIu64" memory inuse: %"PRIu64" (bytes) "
-							"sindex memory inuse: %"PRIu64" (bytes) "
-							"avail pct %d cache-read pct %.2f",
-							ns->name, inuse_disk_bytes, ns_memory_inuse,
-							cf_atomic64_get(ns->sindex_data_memory_used),
-							available_pct,
-							ns->cache_read_pct);
-					if (ns->ldt_enabled) {
-						uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
-						uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
-						uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
-						uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
-						uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
-						uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-						cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
-								ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
-					}
+					cf_info(AS_INFO, "{%s} disk bytes used %"PRIu64" : avail pct %d : cache-read pct %.2f",
+							ns->name, inuse_disk_bytes, available_pct, ns->cache_read_pct);
+					cf_info(AS_INFO, "{%s} memory bytes used %"PRIu64" (index %"PRIu64" : sindex %"PRIu64") : used pct %.2lf",
+							ns->name, ns_total_mem, ns_index_mem, ns_sindex_mem, mem_used_pct);
 				}
 
-				total_ns_memory_inuse += ns_memory_inuse;
+				if (ns->ldt_enabled) {
+					uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
+					uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
+					uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
+					uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
+					uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
+					uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
+					cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+							ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
+				}
+
+				total_ns_memory_inuse += ns_total_mem;
 				as_sindex_histogram_dumpall(ns);
 
 				int64_t initial_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_initial);
@@ -5390,6 +5384,42 @@ info_debug_ticker_fn(void *unused)
 
 			if (g_config.fabric_dump_msgs) {
 				as_fabric_msg_queue_dump();
+			}
+
+			// Dump some stats every 30 ticker cycles (default 5 minutes).
+			if ((ticker_cycles++ % 30) == 0) {
+				cf_info(AS_INFO, "node id %"PRIx64"", g_config.self_node);
+				// Various transaction & error counters
+				cf_info(AS_INFO, "reads %"PRIu64",%"PRIu64" : writes %"PRIu64",%"PRIu64"",
+						g_config.stat_read_success, g_config.stat_read_errs_notfound + g_config.stat_read_errs_other,
+						g_config.stat_write_success, g_config.stat_write_errs);
+				cf_info(AS_INFO, "udf reads %"PRIu64",%"PRIu64" : udf writes %"PRIu64",%"PRIu64" : udf deletes %"PRIu64",%"PRIu64" : lua errors %"PRIu64"",
+						g_config.udf_read_success, g_config.udf_read_errs_other,
+						g_config.udf_write_success, g_config.udf_write_errs_other,
+						g_config.udf_delete_success, g_config.udf_delete_errs_other, g_config.udf_lua_errs);
+				cf_info(AS_INFO, "basic scans %"PRIu64",%"PRIu64" : aggregation scans %"PRIu64",%"PRIu64" : udf background scans %"PRIu64",%"PRIu64" :: active scans %d",
+						g_config.basic_scans_succeeded, g_config.basic_scans_failed, g_config.aggr_scans_succeeded, g_config.aggr_scans_failed,
+						g_config.udf_bg_scans_succeeded, g_config.udf_bg_scans_failed, as_scan_get_active_job_count());
+				uint64_t batch_failures = cf_atomic64_get(g_config.batch_timeout) + cf_atomic64_get(g_config.batch_errors);
+				cf_info(AS_INFO, "index (new) batches %"PRIu64",%"PRIu64" : direct (old) batches %"PRIu64",%"PRIu64"",
+						g_config.batch_index_complete, g_config.batch_index_timeout + g_config.batch_index_errors,
+						g_config.batch_initiate - batch_failures, batch_failures);
+				uint64_t agg_failures = cf_atomic64_get(g_config.n_agg_errs) + cf_atomic64_get(g_config.n_agg_abort);
+				uint64_t lookup_failures = cf_atomic64_get(g_config.n_lookup_errs) + cf_atomic64_get(g_config.n_lookup_abort);
+				cf_info(AS_INFO, "aggregation queries %"PRIu64",%"PRIu64" : lookup queries %"PRIu64",%"PRIu64"",
+						cf_atomic64_get(g_config.n_agg_success), agg_failures, cf_atomic64_get(g_config.n_lookup_success), lookup_failures);
+				cf_info(AS_INFO, "proxies %"PRIu64",%"PRIu64"",
+						g_config.stat_proxy_success, g_config.stat_proxy_errs);
+
+				// Namespace stats
+				for (uint idx = 0; idx < g_config.n_namespaces; idx++) {
+					as_namespace *ns = g_config.namespaces[idx];
+					as_master_prole_stats mp;
+					as_partition_get_master_prole_stats(ns, &mp);
+
+					cf_info(AS_INFO, "{%s} objects %"PRIu64" : sub-objects %"PRIu64" : master objects %"PRIu64" : master sub-objects %"PRIu64" : prole objects %"PRIu64" : prole sub-objects %"PRIu64"",
+							ns->name, ns->n_objects, ns->n_sub_objects, mp.n_master_records, mp.n_master_sub_records, mp.n_prole_records, mp.n_prole_sub_records);
+				}
 			}
 		}
 
