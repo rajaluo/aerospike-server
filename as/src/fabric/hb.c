@@ -2633,7 +2633,7 @@ as_hb_init()
 	g_hb.mesh_seed_host_list = 0;
 	g_hb.mesh_non_seed_host_list = 0;
 	if (0 != pthread_create(&g_mesh_list_tid, 0, mesh_list_service_fn, 0))
-		cf_crash(AS_HB, "could not create hb monitor thread: %s", cf_strerror(errno));
+		cf_crash(AS_HB, "could not create hb mesh list service thread: %s", cf_strerror(errno));
 
 	pthread_mutex_init(&g_hb.snub_lock, 0);
 	pthread_mutex_init(&g_config.hb_paxos_lock, 0);
