@@ -1223,8 +1223,15 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				c.void_time     = void_time;
 				c.rec_props     = rec_props;
 
+				// TODO - should have inline wrapper to peek pickled bin count.
+				if (*(uint16_t *)c.record_buf == 0) {
+					cf_warning_digest(AS_MIGRATE, key, "migration received binless pickle ");
+					migrate_recv_control_release(mc);
+					goto Done;
+				}
+
 				if (as_ldt_get_migrate_info(mc, &c, m, key)) {
-					cf_debug_digest(AS_MIGRATE, &key, "LDT_MIGRATE: sub record received Out Of Order");
+					cf_debug_digest(AS_MIGRATE, key, "LDT_MIGRATE: sub-record received out of order ");
 					migrate_recv_control_release(mc);
 					goto Done;
 				}
