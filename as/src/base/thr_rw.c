@@ -2445,7 +2445,6 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	bool is_subrec        = false;
 	bool is_ldt_parent    = false;
 	bool is_create        = false;
-	bool do_destroy       = false;
 
 	if (rsv->ns->ldt_enabled) {
 		if ((info & RW_INFO_LDT_SUBREC)
@@ -2498,8 +2497,12 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 
 	// Check is duplication in case code is coming from multi op
 	if (as_ldt_check_and_get_prole_version(keyd, rsv, linfo, info, &rd, is_create, __FILE__, __LINE__)) {
-		do_destroy = true;
-		goto Out;
+		if (is_create) {
+			as_index_delete(tree, keyd);
+		}
+		as_storage_record_close(r, &rd);
+		as_record_done(&r_ref, rsv->ns);
+		return -1;
 	}
 
 	if (rv != 1) {
@@ -2512,9 +2515,12 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 			*(uint64_t *)&rd.keyd, as_ldt_record_get_rectype_bits(r));
 
 	if (0 != (rv = as_record_unpickle_replace(r, &rd, pickled_buf, pickled_sz, &p_stack_particles, has_sindex))) {
-		do_destroy = true;
-		goto Out;
-		// Is there any clean up that must be done here???
+		if (is_create) {
+			as_index_delete(tree, keyd);
+		}
+		as_storage_record_close(r, &rd);
+		as_record_done(&r_ref, rsv->ns);
+		return -1;
 	}
 
 	r->generation = generation;
@@ -2551,22 +2557,27 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 						linfo->replication_partition_version_match ? "true" : "false", version_to_set, linfo->ldt_prole_version_set, linfo->ldt_prole_version, linfo->ldt_source_version);
 	}
 
-Out:
-	if (is_create && do_destroy) {
+	bool is_delete = false;
+
+	if (! as_bin_inuse_has(&rd)) {
+		// A master write that deletes a record by deleting (all) bins sends a
+		// binless pickle that ends up here.
+		is_delete = true;
 		as_index_delete(tree, keyd);
+		// TODO - should we journal a delete here? The regular replica delete
+		// code path does so.
 	}
 
 	as_storage_record_close(r, &rd);
 
-	if ((tree == 0) || (rsv->ns == 0) || (rsv->p == 0)) {
-		cf_crash(AS_RW,
-				"record merge: bad reservation. tree %p ns %p part %p",
-				tree, rsv->ns, rsv->p);
-		return (-1);
-	}
-
 	uint16_t set_id = as_index_get_set_id(r);
+
 	as_record_done(&r_ref, rsv->ns);
+
+	// Don't send an XDR delete if it's disallowed.
+	if (is_delete && ! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+		return 0;
+	}
 
 	// Do XDR write if
 	// 1. If the write is not a migration write and
@@ -2576,16 +2587,8 @@ Out:
 		if (   ((info & RW_INFO_XDR) != RW_INFO_XDR)
 			|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
 				|| (rsv->ns->ns_forward_xdr_writes == true))) {
-			xdr_write(rsv->ns, *keyd, r->generation, masternode, false, set_id);
+			xdr_write(rsv->ns, *keyd, generation, masternode, is_delete, set_id);
 		}
-	}
-
-	if (!as_bin_inuse_has(&rd)) {
-		// INIT_TR
-		as_transaction tr;
-		as_transaction_init(&tr, keyd, NULL);
-		tr.rsv          = *rsv;
-		write_delete_local(&tr, false, masternode, false);
 	}
 
 	return (0);
