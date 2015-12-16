@@ -409,6 +409,10 @@ main(int argc, char **argv)
 	// Includes echoing the configuration file to log.
 	as_config_post_process();
 
+	// Make one more pass for XDR related conf and crash if needed
+	// TODO : XDR config parsing should be merged with main config parsing.
+	xdr_conf_init();
+
 	// Write the pid file, if specified.
 	if (! new_style_daemon) {
 		write_pidfile(c->pidfile);

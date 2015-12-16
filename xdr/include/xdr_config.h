@@ -223,9 +223,6 @@ typedef struct xdr_config {
 	bool	xdr_do_version_check;
 } xdr_config;
 
-// Prototypes
-void xdr_config_defaults(xdr_config *c);
-
 // XDR states
 typedef enum xdr_state_e {
 	XDR_COMING_UP,
@@ -234,3 +231,7 @@ typedef enum xdr_state_e {
 	XDR_GOING_DOWN,
 	XDR_DOWN
 } xdr_state;
+
+// Prototypes
+void xdr_config_defaults(xdr_config *c);
+

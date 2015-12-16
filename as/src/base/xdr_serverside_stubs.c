@@ -112,3 +112,7 @@ void xdr_sig_handler(int signum)
 void xdr_handle_failednodeprocessingdone(cf_node nodeid)
 {
 }
+
+void xdr_conf_init()
+{
+}
