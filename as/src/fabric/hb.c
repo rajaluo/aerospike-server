@@ -1453,6 +1453,7 @@ as_hb_start_receiving(int socket, int was_udp, cf_node node_id)
 		as_hb_adjacencies_create();
 
 	struct epoll_event ev;
+	memset(&ev, 0, sizeof(struct epoll_event));
 	ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP;  // level-triggered!
 	ev.data.fd = socket;
 
@@ -1478,8 +1479,9 @@ as_hb_stop_receiving()
 	cf_debug(AS_HB, "Heartbeat: stopping packet receive on socket fd %d", socket);
 
 	// creating a dummy epoll_event to support kernel version < 2.6.9. EPOLL_CTL_DEL ignores event.
-	struct epoll_event ev;
-	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, socket, &ev))
+	struct epoll_event dummy_ev;
+	memset(&dummy_ev, 0, sizeof(struct epoll_event));
+	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, socket, &dummy_ev))
 		cf_crash(AS_HB,  "unable to remove socket %d from epoll fd list: %s", socket, cf_strerror(errno));
 
 	g_hb.endpoint_txlist[socket] = false;
@@ -2138,6 +2140,7 @@ as_hb_thr(void *arg)
 		cf_crash(AS_HB, "unable to create epoll fd: %s", cf_strerror(errno));
 
 	struct epoll_event ev;
+	memset(&ev, 0, sizeof(struct epoll_event));
 	ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP;  // level-triggered!
 	ev.data.fd = sock;
 
