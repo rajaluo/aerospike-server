@@ -416,12 +416,12 @@ as_paxos_sync_msg_apply(msg *m)
 
 	cf_debug(AS_PAXOS, "SYNC getting cluster key %"PRIx64"", cluster_key);
 
-	as_paxos_set_cluster_key(cluster_key);
-
-	/*
-	 * Disallow migration requests into this node until we complete partition rebalancing
-	 */
+	// Disallow migration requests into this node until we complete partition
+	// rebalancing.
 	as_partition_disallow_migrations();
+
+	// AER-4645 Important that setting cluster key follows disallow_migrations.
+	as_paxos_set_cluster_key(cluster_key);
 
 	/* Fix up the auxiliary state around the succession table and destroy
 	 * any pending transactions */
@@ -1518,14 +1518,16 @@ void as_paxos_start_second_phase()
 	uint64_t cluster_key = 0;
 
 	// Generate a non-zero cluster key.
-	while (!(cluster_key = cf_get_rand64()))
-	  ;
-	as_paxos_set_cluster_key(cluster_key);
+	while (!(cluster_key = cf_get_rand64())) {
+		;
+	}
 
-	/*
-	 * Disallow migration requests into this node until we complete partition rebalancing
-	 */
+	// Disallow migration requests into this node until we complete partition
+	// rebalancing.
 	as_partition_disallow_migrations();
+
+	// AER-4645 Important that setting cluster key follows disallow_migrations.
+	as_paxos_set_cluster_key(cluster_key);
 
 	/* Earlier code used to synchronize only new members. However, this code is changed to
 	 * send sync messages to all members of the cluster. On receiving a sync, all nodes are expected to send
