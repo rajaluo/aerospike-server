@@ -158,7 +158,7 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_errorlog_level = CF_FAULT_SEVERITY_UNDEF;
 	c->xdr_local_port = 0;		//Port of the remote node
 	c->xdr_write_batch_size = 100;	//Number of digests to read from pipe before flushing them to disk
-	c->xdr_max_recs_inflight = 500; // Max number of digests shipped that can be in the async queue at any given point
+	c->xdr_max_recs_inflight = 0; // Max number of digests shipped that can be in the async queue at any given point
 	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go
 	c->xdr_ship_slab_size = 500;    // Number of digests processed by one shipper thread.
 	c->xdr_ship_threads = 8;        // Number of XDR shipper threads.
