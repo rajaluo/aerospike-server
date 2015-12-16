@@ -1629,6 +1629,13 @@ finish_rw_process_dup_ack(write_request *wr)
 						wr->keyd);
 				continue;
 			}
+
+			// TODO - should have inline wrapper to peek pickled bin count.
+			if (*(uint16_t *)buf == 0) {
+				cf_warning_digest(AS_RW, &wr->keyd, "migration received binless pickle ");
+				continue;
+			}
+
 			components[comp_sz].record_buf = buf;
 			components[comp_sz].record_buf_sz = buf_sz;
 
@@ -2576,6 +2583,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 
 	// Don't send an XDR delete if it's disallowed.
 	if (is_delete && ! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+		// TODO - should we also not ship if there was no record here before?
 		return 0;
 	}
 
