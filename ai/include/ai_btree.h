@@ -25,6 +25,8 @@
 #include "base/secondary_index.h"
 
 #include "ai_obj.h"
+#include "btreepriv.h"
+
 #include <citrusleaf/cf_ll.h>
 
 #define NUM_DIGS_PER_ARR 51
@@ -38,6 +40,8 @@ typedef struct ll_recl_element_s {
 	cf_ll_element   ele;
 	dig_arr_t     * dig_arr;
 } ll_recl_element;
+
+void ai_arr_destroy(ai_arr *arr);
 
 void releaseDigArrToQueue(void *v);
 
@@ -91,3 +95,6 @@ int ai_btree_key_hash(as_sindex_metadata *imd, void *skey);
 
 int ai_post_index_creation_setup_pmetadata(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int simatch, int idx);
 
+void ai_btree_delete_ibtr(bt * ibtr, int imatch);
+
+void ai_btree_reinit_pimd(as_sindex_pmetadata * pimd);

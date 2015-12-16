@@ -116,10 +116,8 @@ void g_write_hash_delete(global_keyd *gk) {
 // forward references internal to the file
 void rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref);
 void read_local(as_transaction *tr, as_index_ref *r_ref);
-int write_local(as_transaction *tr, write_local_generation *wlg,
-				uint8_t **pickled_buf, size_t *pickled_sz,
-				as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
-int write_journal(as_transaction *tr, write_local_generation *wlg); // only do write
+int write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
+		as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
 int write_delete_journal(as_transaction *tr, bool is_subrec);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
 			   cf_node masternode, bool is_delete, uint16_t set_id);
@@ -940,14 +938,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 					wr->has_udf = false;
 					cf_free(call);
 
-					write_local_generation wlg;
-					wlg.use_gen_check = false;
-					wlg.use_gen_set = false;
-					wlg.use_msg_gen = true;
-
-					rv = write_local(tr, &wlg, &wr->pickled_buf,
-							&wr->pickled_sz, &wr->pickled_rec_props,
-							&wr->response_db);
+					rv = write_local(tr, &wr->pickled_buf, &wr->pickled_sz,
+							&wr->pickled_rec_props, &wr->response_db);
 					WR_TRACK_INFO(wr, "internal_rw_start: write local done ");
 
 					// Temporary debugging clause...
@@ -2466,7 +2458,6 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	bool is_subrec        = false;
 	bool is_ldt_parent    = false;
 	bool is_create        = false;
-	bool do_destroy       = false;
 
 	if (rsv->ns->ldt_enabled) {
 		if ((info & RW_INFO_LDT_SUBREC)
@@ -2519,8 +2510,12 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 
 	// Check is duplication in case code is coming from multi op
 	if (as_ldt_check_and_get_prole_version(keyd, rsv, linfo, info, &rd, is_create, __FILE__, __LINE__)) {
-		do_destroy = true;
-		goto Out;
+		if (is_create) {
+			as_index_delete(tree, keyd);
+		}
+		as_storage_record_close(r, &rd);
+		as_record_done(&r_ref, rsv->ns);
+		return -1;
 	}
 
 	if (rv != 1) {
@@ -2533,9 +2528,12 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 			*(uint64_t *)&rd.keyd, as_ldt_record_get_rectype_bits(r));
 
 	if (0 != (rv = as_record_unpickle_replace(r, &rd, pickled_buf, pickled_sz, &p_stack_particles, has_sindex))) {
-		do_destroy = true;
-		goto Out;
-		// Is there any clean up that must be done here???
+		if (is_create) {
+			as_index_delete(tree, keyd);
+		}
+		as_storage_record_close(r, &rd);
+		as_record_done(&r_ref, rsv->ns);
+		return -1;
 	}
 
 	r->generation = generation;
@@ -2572,22 +2570,27 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 						linfo->replication_partition_version_match ? "true" : "false", version_to_set, linfo->ldt_prole_version_set, linfo->ldt_prole_version, linfo->ldt_source_version);
 	}
 
-Out:
-	if (is_create && do_destroy) {
+	bool is_delete = false;
+
+	if (! as_bin_inuse_has(&rd)) {
+		// A master write that deletes a record by deleting (all) bins sends a
+		// binless pickle that ends up here.
+		is_delete = true;
 		as_index_delete(tree, keyd);
+		// TODO - should we journal a delete here? The regular replica delete
+		// code path does so.
 	}
 
 	as_storage_record_close(r, &rd);
 
-	if ((tree == 0) || (rsv->ns == 0) || (rsv->p == 0)) {
-		cf_crash(AS_RW,
-				"record merge: bad reservation. tree %p ns %p part %p",
-				tree, rsv->ns, rsv->p);
-		return (-1);
-	}
-
 	uint16_t set_id = as_index_get_set_id(r);
+
 	as_record_done(&r_ref, rsv->ns);
+
+	// Don't send an XDR delete if it's disallowed.
+	if (is_delete && ! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+		return 0;
+	}
 
 	// Do XDR write if
 	// 1. If the write is not a migration write and
@@ -2597,16 +2600,8 @@ Out:
 		if (   ((info & RW_INFO_XDR) != RW_INFO_XDR)
 			|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
 				|| (rsv->ns->ns_forward_xdr_writes == true))) {
-			xdr_write(rsv->ns, *keyd, r->generation, masternode, false, set_id);
+			xdr_write(rsv->ns, *keyd, generation, masternode, is_delete, set_id);
 		}
-	}
-
-	if (!as_bin_inuse_has(&rd)) {
-		// INIT_TR
-		as_transaction tr;
-		as_transaction_init(&tr, keyd, NULL);
-		tr.rsv          = *rsv;
-		write_delete_local(&tr, false, masternode, false);
 	}
 
 	return (0);
@@ -3331,8 +3326,8 @@ write_local_failed(as_transaction* tr, as_index_ref* r_ref,
 	tr->result_code = result_code;
 }
 
-int write_local_preprocessing(as_transaction *tr, write_local_generation *wlg,
-		bool *is_done)
+int
+write_local_preprocessing(as_transaction *tr, bool *is_done)
 {
 	*is_done = true;
 
@@ -4392,7 +4387,12 @@ write_local_dim(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 	memcpy((void*)new_bin_space->bins, new_bins, new_bins_size);
 
 	// Swizzle the index element's as_bin_space pointer.
-	cf_free(as_index_get_bin_space(r));
+	as_bin_space* old_bin_space = as_index_get_bin_space(r);
+
+	if (old_bin_space) {
+		cf_free(old_bin_space);
+	}
+
 	as_index_set_bin_space(r, new_bin_space);
 
 	// Accommodate a new stored key - wasn't needed for pickling and writing.
@@ -4660,8 +4660,7 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 //
 
 int
-write_local(as_transaction *tr, write_local_generation *wlg,
-		uint8_t **pickled_buf, size_t *pickled_sz,
+write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, cf_dyn_buf *db)
 {
 	//------------------------------------------------------
@@ -4670,7 +4669,7 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	//
 
 	bool is_done = false;
-	int result = write_local_preprocessing(tr, wlg, &is_done);
+	int result = write_local_preprocessing(tr, &is_done);
 
 	if (is_done) {
 		return result;
@@ -4700,12 +4699,11 @@ write_local(as_transaction *tr, write_local_generation *wlg,
 	// Shortcut pointers.
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
+	as_index_tree *tree = tr->rsv.tree; // sub-records don't use write_local()
 
-	// Use the appropriate partition tree.
-	as_index_tree *tree = tr->rsv.tree;
-
-	if (ns->ldt_enabled && (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB)) {
-		tree = tr->rsv.sub_tree;
+	// TODO - temporary, remove this eventually:
+	if ((tr->flag & AS_TRANSACTION_FLAG_LDT_SUB) != 0) {
+		cf_crash(AS_RW, "sub-record encountered in write_local()");
 	}
 
 	// Find or create as_index, populate as_index_ref, lock record.
@@ -4929,9 +4927,6 @@ typedef struct {
 	as_namespace *ns; // reference count held
 	as_partition_id part_id; // won't vanish as long as ns refcount ok
 	cf_digest digest; // where to find the data
-	cl_msg *msgp; // data to write
-	bool delete; // or a delete flag if it's a delete
-	write_local_generation wlg;
 	bool is_subrec;
 } journal_queue_element;
 
@@ -4943,80 +4938,6 @@ typedef struct {
 
 shash *journal_hash = 0;
 pthread_mutex_t journal_lock = PTHREAD_MUTEX_INITIALIZER;
-
-//
-// Write a record to the journal for later application
-//
-// This is called in the same code path as write_local, and write_local
-// consumes nothing. You can't even be sure that some of these pointers
-// (like the proto) is really a malloc/free pointer.
-// So although it hurts, take a copy
-
-int write_journal(as_transaction *tr, write_local_generation *wlg) {
-	cf_detail(AS_RW, "write to journal: %"PRIx64, *(uint64_t*)&tr->keyd);
-
-	if (!journal_hash)
-		return (0);
-
-	journal_queue_element jqe;
-	jqe.ns = tr->rsv.ns;
-	jqe.part_id = tr->rsv.pid;
-	jqe.digest = tr->keyd;
-	jqe.msgp = cf_malloc(sizeof(as_proto) + tr->msgp->proto.sz);
-	memcpy(jqe.msgp, tr->msgp, sizeof(as_proto) + tr->msgp->proto.sz);
-	jqe.delete = false;
-	jqe.is_subrec = false;
-	jqe.wlg = *wlg;
-
-	journal_hash_key jhk;
-	jhk.ns_id = jqe.ns->id;
-	jhk.part_id = tr->rsv.pid;
-
-	cf_queue *j_q;
-
-#ifdef JOURNAL_HASH_CHECKING
-	{
-		as_msg *msgp = (as_msg *)jqe.msgp;
-		as_msg_op *op = 0;
-		char stupidbufk[128], stupidbufv[128];
-		int i = 0;
-
-		as_msg_key *kfp;
-		kfp = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_KEY);
-		memset(stupidbufk, 0, 128);
-		memcpy(stupidbufk, kfp->key, 11);
-
-		fprintf(stderr, "J key: %s\n", stupidbufk);
-
-		while ((op = as_msg_op_iterate(msgp, op, &i))) {
-			if (AS_MSG_OP_WRITE != op->op)
-				continue;
-
-			cf_digest d;
-			memset(stupidbufv, 0, 128);
-			stupidbufv[0] = 3;
-			memcpy(stupidbufv + sizeof(uint8_t), as_msg_op_get_value_p(op), as_msg_op_get_value_sz(op));
-			cf_digest_compute((void *)stupidbufv, 11, &d);
-			fprintf(stderr, "J write: %"PRIx64" %"PRIx64" %d %s\n", *(uint64_t *)&jqe.digest, *(uint64_t *)&d, as_msg_op_get_value_sz(op), stupidbufv);
-		}
-	}
-#endif
-
-	pthread_mutex_lock(&journal_lock);
-	if (SHASH_OK != shash_get(journal_hash, &jhk, &j_q)) {
-		if (jqe.msgp) {
-			cf_free(jqe.msgp);
-		}
-		pthread_mutex_unlock(&journal_lock);
-		return (0);
-	}
-
-	cf_queue_push(j_q, &jqe);
-
-	pthread_mutex_unlock(&journal_lock);
-
-	return (0);
-}
 
 //
 // Write into the journal a "delete" element
@@ -5032,8 +4953,6 @@ int write_delete_journal(as_transaction *tr, bool is_subrec) {
 	jqe.ns = tr->rsv.ns;
 	jqe.part_id = tr->rsv.pid;
 	jqe.digest = tr->keyd;
-	jqe.msgp = 0;
-	jqe.delete = true;
 	jqe.is_subrec = is_subrec;
 
 	journal_hash_key jhk;
@@ -5080,12 +4999,6 @@ int as_write_journal_start(as_namespace *ns, as_partition_id pid) {
 		cf_debug(AS_RW,
 				" warning: journal_start with journal already existing {%s:%d}",
 				ns, (int)pid);
-		journal_queue_element jqe;
-		while (0 == cf_queue_pop(journal_q, &jqe, CF_QUEUE_FOREVER)) {
-			if (jqe.msgp) {
-				cf_free(jqe.msgp);
-			}
-		}
 		cf_queue_destroy(journal_q);
 	}
 
@@ -5135,53 +5048,21 @@ int as_write_journal_apply(as_partition_reservation *prsv) {
 	while (0 == cf_queue_pop(journal_q, &jqe, CF_QUEUE_NOWAIT)) {
 		// INIT_TR
 		as_transaction tr;
-		as_transaction_init(&tr, &jqe.digest, jqe.msgp);
+		as_transaction_init(&tr, &jqe.digest, NULL);
 		as_partition_reservation_copy(&tr.rsv, prsv);
 		tr.rsv.is_write = true;
 		tr.rsv.state = AS_PARTITION_STATE_JOURNAL_APPLY; // doesn't matter
-#ifdef JOURNAL_HASH_CHECKING
-		{
-			as_msg *msgp = (as_msg *)jqe.proto;
-			as_msg_op *op = 0;
-			char stupidbufk[128], stupidbufv[128];
-			int i = 0;
-
-			as_msg_key *kfp;
-			kfp = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_KEY);
-			memset(stupidbufk, 0, 128);
-			memcpy(stupidbufk, kfp->key, 11);
-
-			fprintf(stderr, "Ja key: %s\n", stupidbufk);
-
-			while ((op = as_msg_op_iterate(msgp, op, &i))) {
-				if (AS_MSG_OP_WRITE != op->op)
-					continue;
-
-				cf_digest d;
-				memset(stupidbufv, 0, 128);
-				stupidbufv[0] = 3;
-				memcpy(stupidbufv + sizeof(uint8_t), as_msg_op_get_value_p(op), as_msg_op_get_value_sz(op));
-				cf_digest_compute((void *)stupidbufv, 11, &d);
-				fprintf(stderr, "Ja write: %"PRIx64" %"PRIx64" %d %s\n", *(uint64_t *)&jqe.digest, *(uint64_t *)&d, as_msg_op_get_value_sz(op), stupidbufv);
-			}
-		}
-#endif
 
 		int rv;
 		if (jqe.is_subrec) {
 			tr.flag |= AS_TRANSACTION_FLAG_LDT_SUB;
 		}
-		if (jqe.delete == true)
-			rv = write_delete_local(&tr, false, 0, false);
-		else
-			rv = write_local(&tr, &jqe.wlg, 0, 0, 0, 0);
+
+		// Note - we no longer journal writes, we only journal deletes.
+		rv = write_delete_local(&tr, false, 0, false);
 
 		cf_detail(AS_RW, "write journal: wrote: rv %d key %"PRIx64,
 				rv, *(uint64_t *)&tr.keyd);
-
-		if (jqe.msgp) {
-			cf_free(jqe.msgp);
-		}
 	}
 
 	cf_queue_destroy(journal_q);

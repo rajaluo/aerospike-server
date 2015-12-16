@@ -154,7 +154,7 @@ ai_arr_move_to_tree(ai_arr *arr, bt *nbtr)
 /*
  * Side effect if success full *arr will be freed
  */
-static void
+void
 ai_arr_destroy(ai_arr *arr)
 {
 	if (!arr) return;
@@ -1371,34 +1371,6 @@ ai_post_index_creation_setup_pmetadata(as_sindex_metadata *imd, as_sindex_pmetad
 	return AS_SINDEX_OK;
 }
 
-// Iterate through the btree and cleanup local array
-// if it is btree it will be cleaned up by Aerospike Index
-// call for dropIndex
-static int
-ai_cleanup(bt *ibtr)
-{
-	if (!ibtr) {
-		return 0;
-	}
-
-	btSIter stack_bi;
-	btEntry *be;
-	btSIter *bi = btSetFullRangeIter(&stack_bi, ibtr, 1, NULL);
-	if (bi) {
-		while ((be = btRangeNext(bi, 1))) {
-			ai_nbtr *anbtr = be->val;
-			if (anbtr) {
-				if (!anbtr->is_btree) {
-					ai_arr_destroy(anbtr->u.arr);
-				}
-			}
-		}
-		btReleaseRangeIterator(bi);
-	}
-
-	return 0;
-}
-
 int
 ai_btree_destroy(as_sindex_metadata *imd)
 {
@@ -1406,9 +1378,6 @@ ai_btree_destroy(as_sindex_metadata *imd)
 
 	AI_GWLOCK();
 
-	for (int i = 0; i < imd->nprts; i++) {
-		ai_cleanup(imd->pimd[i].ibtr);
-	}
 
 	if (!(tname = create_tname_from_imd(imd))) {
 		return AS_SINDEX_ERR_NO_MEMORY;
@@ -1510,4 +1479,26 @@ ai_btree_get_nsize(as_sindex_metadata *imd)
 	}
 
 	return size;
+}
+
+void
+ai_btree_reinit_pimd(as_sindex_pmetadata * pimd)
+{
+	if(!pimd->ibtr)	{
+		cf_crash(AS_SINDEX, "IBTR is null");
+	}
+
+	r_ind_t *ri = &Index[pimd->imatch];
+	ri->btr = createIndexBT(ri->dtype, pimd->imatch);
+	pimd->ibtr = ri->btr;
+}
+
+void
+ai_btree_delete_ibtr(bt * ibtr, int imatch)
+{
+	if(!ibtr)	{
+		cf_crash(AS_SINDEX, "IBTR is null");
+	}
+
+	ai_destroy_index(ibtr, imatch);	
 }

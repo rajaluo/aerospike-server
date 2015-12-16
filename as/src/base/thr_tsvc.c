@@ -882,10 +882,10 @@ void
 as_tsvc_init()
 {
 	int n_queues = 0;
-	g_tsvc_devices_a = (tsvc_namespace_devices *) cf_malloc(sizeof(tsvc_namespace_devices) * g_config.namespaces);
+	g_tsvc_devices_a = (tsvc_namespace_devices *) cf_malloc(sizeof(tsvc_namespace_devices) * g_config.n_namespaces);
 
-	for (int i = 0 ; i < g_config.namespaces ; i++) {
-		as_namespace *ns = g_config.namespace[i];
+	for (int i = 0 ; i < g_config.n_namespaces ; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 		tsvc_namespace_devices *dev = &g_tsvc_devices_a[i];
 		dev->n_sz = strlen(ns->name);
 		strcpy(dev->n_name, ns->name);
