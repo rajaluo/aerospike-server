@@ -4686,12 +4686,11 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 	// Shortcut pointers.
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
+	as_index_tree *tree = tr->rsv.tree; // sub-records don't use write_local()
 
-	// Use the appropriate partition tree.
-	as_index_tree *tree = tr->rsv.tree;
-
-	if (ns->ldt_enabled && (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB)) {
-		tree = tr->rsv.sub_tree;
+	// TODO - temporary, remove this eventually:
+	if ((tr->flag & AS_TRANSACTION_FLAG_LDT_SUB) != 0) {
+		cf_crash(AS_RW, "sub-record encountered in write_local()");
 	}
 
 	// Find or create as_index, populate as_index_ref, lock record.
