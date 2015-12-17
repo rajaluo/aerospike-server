@@ -116,6 +116,9 @@ void rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref);
 void read_local(as_transaction *tr, as_index_ref *r_ref);
 int write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
+int delete_local(as_transaction *tr);
+int delete_replica(as_transaction *tr, cf_node masternode);
+int apply_journaled_delete(as_transaction *tr);
 int write_delete_journal(as_transaction *tr, bool is_subrec);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
 			   cf_node masternode, bool is_delete, uint16_t set_id);
@@ -856,7 +859,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		udf_optype op = UDF_OPTYPE_NONE;
 		/* Commit the write locally */
 		if (is_delete) {
-			rv = write_delete_local(tr, false, 0, ! g_config.generation_disable);
+			rv = delete_local(tr);
 			WR_TRACK_INFO(wr, "internal_rw_start: delete local done ");
 			cf_detail(AS_RW,
 					"write_delete_local for digest returns %d, %d digest %"PRIx64"",
@@ -2786,7 +2789,7 @@ write_process(cf_node node, msg *m, bool respond)
 				cf_atomic_int_incr(&g_config.udf_replica_writes);
 			}
 			if (msgp->msg.info2 & AS_MSG_INFO2_DELETE) {
-				rv = write_delete_local(&tr, true, node, false);
+				rv = delete_replica(&tr, node);
 			} else {
 				// Older version nodes can send messages that get here.
 				cf_warning_digest(AS_RW, keyd, "replica write trying to use write_local() - ignoring ");
@@ -2956,7 +2959,7 @@ check_msg_key(as_msg* m, as_storage_rd* rd)
 	return true;
 }
 
-//
+/*
 // Returns a AS_PROTO_RESULT
 // masternode gets passed to XDR if we are shipping this write.
 // masternode is 0 if this node is master, otherwise its nodeid
@@ -3116,6 +3119,279 @@ write_delete_local(as_transaction *tr, bool journal, cf_node masternode,
 				xdr_write(ns, tr->keyd, tr->generation, masternode, true, set_id);
 			}
 		}
+	}
+
+	return 0;
+}
+*/
+
+
+
+//==============================================================================
+// Deletes.
+//
+
+// Remove record from secondary index. Called only for data-in-memory. If
+// data-not-in-memory existing record is not read, and secondary index entry is
+// cleaned up by background sindex defrag thread. TODO - should we bother take
+// advantage of record read if key check happened?
+void
+delete_adjust_sindex(as_storage_rd *rd)
+{
+	as_namespace *ns = rd->ns;
+
+	if (! as_sindex_ns_has_sindex(ns)) {
+		return;
+	}
+
+	as_index *r = rd->r;
+
+	rd->n_bins = as_bin_get_n_bins(r, rd);
+	rd->bins = as_bin_get_all(r, rd, NULL);
+
+	int status = AS_SINDEX_OK;
+	const char* set_name = as_index_get_set_name(r, ns);
+
+	SINDEX_GRLOCK();
+
+	SINDEX_BINS_SETUP(sbins, ns->sindex_cnt);
+	as_sindex *si_arr[ns->sindex_cnt];
+	int si_arr_index = 0;
+	int sbins_populated = 0;
+
+	// Reserve matching sindexes.
+	for (int i = 0; i < (int)rd->n_bins; i++) {
+		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
+				rd->bins[i].id, &si_arr[si_arr_index]);
+	}
+
+	for (int i = 0; i < (int)rd->n_bins; i++) {
+		sbins_populated += as_sindex_sbins_from_bin(ns, set_name, &rd->bins[i],
+				&sbins[sbins_populated], AS_SINDEX_OP_DELETE);
+	}
+
+	SINDEX_GUNLOCK();
+
+	// TODO - why are we printing file and line in the statement?
+	cf_debug(AS_SINDEX, "Delete @ %s %d digest %ld", __FILE__, __LINE__,
+			*(uint64_t *)&rd->keyd);
+
+	if (sbins_populated) {
+		status = as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated,
+				&rd->keyd);
+		as_sindex_sbin_freeall(sbins, sbins_populated);
+	}
+
+	if (status != AS_SINDEX_OK) {
+		cf_debug(AS_SINDEX, "Failed: %d", as_sindex_err_str(status));
+	}
+
+	as_sindex_release_arr(si_arr, si_arr_index);
+}
+
+//================================================
+// From client (or proxy), on acting master node.
+//
+int
+delete_local(as_transaction *tr)
+{
+	// Shortcut pointers & flags.
+	as_msg *m = &tr->msgp->msg;
+	as_namespace *ns = tr->rsv.ns;
+	as_index_tree *tree = tr->rsv.tree; // sub-records don't use delete_local()
+
+	as_index_ref r_ref;
+	r_ref.skip_lock = false;
+
+	if (0 != as_record_get(tree, &tr->keyd, &r_ref, ns)) {
+		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
+		return -1;
+	}
+
+	as_index *r = r_ref.r;
+
+	// Check generation requirement, if any.
+	if (! g_config.generation_disable &&
+			(((m->info2 & AS_MSG_INFO2_GENERATION) && m->generation != r->generation) ||
+			 ((m->info2 & AS_MSG_INFO2_GENERATION_GT) && m->generation <= r->generation))) {
+		as_record_done(&r_ref, ns);
+		tr->result_code = AS_PROTO_RESULT_FAIL_GENERATION;
+		return -1;
+	}
+
+	bool check_key = msg_has_key(m);
+
+	if (ns->storage_data_in_memory || check_key) {
+		as_storage_rd rd;
+		as_storage_record_open(ns, r, &rd, &tr->keyd);
+
+		// Check the key if required.
+		// Note - for data-not-in-memory a key check is expensive!
+		if (check_key && as_storage_record_get_key(&rd) &&
+				! check_msg_key(m, &rd)) {
+			as_storage_record_close(r, &rd);
+			as_record_done(&r_ref, ns);
+			tr->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
+			return -1;
+		}
+
+		if (ns->storage_data_in_memory) {
+			delete_adjust_sindex(&rd);
+		}
+
+		as_storage_record_close(r, &rd);
+	}
+
+	// Save the set-ID for XDR.
+	uint16_t set_id = as_index_get_set_id(r);
+
+	// Save the generation for XDR, and for ack to client. (This will also go to
+	// the prole, but the prole will ignore it.)
+	tr->generation = r->generation;
+
+	as_index_delete(tree, &tr->keyd);
+	cf_atomic_int_incr(&g_config.stat_delete_success);
+	as_record_done(&r_ref, ns);
+
+	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+		return 0;
+	}
+
+	// Don't ship expiration/eviction deletes unless configured to do so.
+	if ((tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) != 0 &&
+			! g_config.xdr_cfg.xdr_nsup_deletes_enabled) {
+		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
+	}
+	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
+			// If this delete is a result of XDR shipping, don't ship it unless
+			// configured to do so.
+			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			ns->ns_forward_xdr_writes) {
+		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id);
+	}
+
+	return 0;
+}
+
+//================================================
+// From acting master, on (other) replica node.
+//
+int
+delete_replica(as_transaction *tr, cf_node masternode)
+{
+	if (AS_PARTITION_STATE_SYNC != tr->rsv.state) {
+		write_delete_journal(tr, (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB));
+		return 0;
+	}
+
+	// Shortcut pointers & flags.
+	as_msg *m = &tr->msgp->msg;
+	as_namespace *ns = tr->rsv.ns;
+	as_index_tree *tree = tr->rsv.tree;
+
+	if (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB) {
+		tree = tr->rsv.sub_tree;
+	}
+
+	as_index_ref r_ref;
+	r_ref.skip_lock = false;
+
+	if (0 != as_record_get(tree, &tr->keyd, &r_ref, ns)) {
+		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
+		return -1;
+	}
+
+	as_index *r = r_ref.r;
+
+	if (ns->storage_data_in_memory) {
+		as_storage_rd rd;
+		as_storage_record_open(ns, r, &rd, &tr->keyd);
+		delete_adjust_sindex(&rd);
+		as_storage_record_close(r, &rd);
+	}
+
+	// Save the set-ID for XDR.
+	uint16_t set_id = as_index_get_set_id(r);
+
+	// Save the generation for XDR.
+	tr->generation = r->generation;
+
+	as_index_delete(tree, &tr->keyd);
+	as_record_done(&r_ref, ns);
+
+	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+		return 0;
+	}
+
+	// Don't ship expiration/eviction deletes unless configured to do so.
+	if ((tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) != 0 &&
+			! g_config.xdr_cfg.xdr_nsup_deletes_enabled) {
+		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
+	}
+	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
+			// If this delete is a result of XDR shipping, don't ship it unless
+			// configured to do so.
+			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			ns->ns_forward_xdr_writes) {
+		xdr_write(ns, tr->keyd, tr->generation, masternode, true, set_id);
+	}
+
+	return 0;
+}
+
+//================================================
+// From acting master, on (other) replica node.
+//
+int
+apply_journaled_delete(as_transaction *tr)
+{
+	// Shortcut pointers & flags.
+	as_namespace *ns = tr->rsv.ns;
+	as_index_tree *tree = tr->rsv.tree;
+
+	if (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB) {
+		tree = tr->rsv.sub_tree;
+	}
+
+	as_index_ref r_ref;
+	r_ref.skip_lock = false;
+
+	if (0 != as_record_get(tree, &tr->keyd, &r_ref, ns)) {
+		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
+		return -1;
+	}
+
+	as_index *r = r_ref.r;
+
+	if (ns->storage_data_in_memory) {
+		as_storage_rd rd;
+		as_storage_record_open(ns, r, &rd, &tr->keyd);
+		delete_adjust_sindex(&rd);
+		as_storage_record_close(r, &rd);
+	}
+
+	// Save the set-ID for XDR.
+	uint16_t set_id = as_index_get_set_id(r);
+
+	// Save the generation for XDR.
+	tr->generation = r->generation;
+
+	as_index_delete(tree, &tr->keyd);
+	as_record_done(&r_ref, ns);
+
+	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+		return 0;
+	}
+
+	// Journaled deletes lose info and behave as if:
+	// - none were nsup deletes
+	// - all were XDR deletes
+	//
+	// Journaled deletes assume we're the master node when they're applied. This
+	// is not necessarily true!
+
+	if (g_config.xdr_cfg.xdr_forward_xdrwrites || ns->ns_forward_xdr_writes) {
+		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id);
 	}
 
 	return 0;
@@ -4696,11 +4972,6 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 	as_namespace *ns = tr->rsv.ns;
 	as_index_tree *tree = tr->rsv.tree; // sub-records don't use write_local()
 
-	// TODO - temporary, remove this eventually:
-	if ((tr->flag & AS_TRANSACTION_FLAG_LDT_SUB) != 0) {
-		cf_crash(AS_RW, "sub-record encountered in write_local()");
-	}
-
 	// Find or create as_index, populate as_index_ref, lock record.
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
@@ -5054,7 +5325,7 @@ int as_write_journal_apply(as_partition_reservation *prsv) {
 		}
 
 		// Note - we no longer journal writes, we only journal deletes.
-		rv = write_delete_local(&tr, false, 0, false);
+		rv = apply_journaled_delete(&tr);
 
 		cf_detail(AS_RW, "write journal: wrote: rv %d key %"PRIx64,
 				rv, *(uint64_t *)&tr.keyd);
@@ -5071,7 +5342,7 @@ write_process_op(as_transaction *tr, cl_msg *msgp, cf_node node, as_generation g
 	as_namespace *ns = tr->rsv.ns;
 	int rv = 0;
 	if (msgp->msg.info2 & AS_MSG_INFO2_DELETE) {
-		rv = write_delete_local(tr, true, node, false);
+		rv = delete_replica(tr, node);
 	} else {
 		// Older version nodes can send messages that get here.
 		cf_warning_digest(AS_RW, &tr->keyd, "replica write trying to use write_local() - ignoring ");
