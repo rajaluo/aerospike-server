@@ -2145,13 +2145,11 @@ migrate_xmit_fn(void *arg)
 				break;
 			case AS_PARTITION_STATE_ABSENT:
 			case AS_PARTITION_STATE_UNDEF:
+			default:
 				cf_warning(AS_MIGRATE, "migration state %u unexpected", mig->rsv.state);
 				migrate_send_finish(mig, AS_MIGRATE_STATE_ERROR, "tree reserve fail");
 				cf_atomic_int_incr(&mig->rsv.ns->migrate_tx_partitions_imbalance);
 				goto FinishedMigrate;
-			case AS_PARTITION_STATE_JOURNAL_APPLY:
-				cf_crash(AS_MIGRATE, "migrations are not allowed to include state JOURNAL APPLY");
-				break;
 		}
 
 		cf_detail(AS_MIGRATE, "migrate xmit begin: migration id %d {%s:%d}  migp %p", mig->id, mig->rsv.ns->name, mig->rsv.pid, mig);
