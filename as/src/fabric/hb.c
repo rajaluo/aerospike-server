@@ -153,7 +153,6 @@ typedef struct as_hb_s {
 	bool endpoint_txlist_isudp[AS_HB_TXLIST_SZ];
 	cf_node endpoint_txlist_node_id[AS_HB_TXLIST_SZ]; // Node ID associated with a given mesh fd.
 
-	struct epoll_event ev;
 	int efd;
 
 	union {
@@ -650,7 +649,7 @@ as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sockaddr socket, uint32_
 		if (rv == SHASH_ERR_FOUND) {
 			as_hb_process_fabric_heartbeat(node, fd, socket, addr, port, buf, bufsz);
 		} else if (rv != 0) {
-			cf_warning(AS_FABRIC, "unable to update adjacencies hash");
+			cf_warning(AS_HB, "unable to update adjacencies hash");
 		}
 	}
 }
@@ -1453,7 +1452,12 @@ as_hb_start_receiving(int socket, int was_udp, cf_node node_id)
 	if (!g_hb.adjacencies)
 		as_hb_adjacencies_create();
 
-	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_ADD, socket, &g_hb.ev))
+	struct epoll_event ev;
+	memset(&ev, 0, sizeof(struct epoll_event));
+	ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP;  // level-triggered!
+	ev.data.fd = socket;
+
+	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_ADD, socket, &ev))
 		cf_crash(AS_HB,  "unable to add socket %d to epoll fd list: %s", socket, cf_strerror(errno));
 
 	g_hb.endpoint_txlist[socket] = true;
@@ -1474,7 +1478,10 @@ as_hb_stop_receiving()
 
 	cf_debug(AS_HB, "Heartbeat: stopping packet receive on socket fd %d", socket);
 
-	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, socket, &g_hb.ev))
+	// creating a dummy epoll_event to support kernel version < 2.6.9. EPOLL_CTL_DEL ignores event.
+	struct epoll_event dummy_ev;
+	memset(&dummy_ev, 0, sizeof(struct epoll_event));
+	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, socket, &dummy_ev))
 		cf_crash(AS_HB,  "unable to remove socket %d from epoll fd list: %s", socket, cf_strerror(errno));
 
 	g_hb.endpoint_txlist[socket] = false;
@@ -1575,10 +1582,7 @@ as_hb_endpoint_add(int socket, bool isudp, cf_node node_id)
 	}
 	cf_socket_set_nodelay(socket);
 
-	/* Put the socket in the event queue and update the transmit list */
-	g_hb.ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP;  // level-triggered!
-	g_hb.ev.data.fd = socket;
-
+	// start receiving on the socket
 	as_hb_start_receiving(socket, isudp, node_id);
 
 	return(0);
@@ -2134,9 +2138,13 @@ as_hb_thr(void *arg)
 	/* Configure epoll */
 	if (-1 == (g_hb.efd = epoll_create(EPOLL_SZ)))
 		cf_crash(AS_HB, "unable to create epoll fd: %s", cf_strerror(errno));
-	g_hb.ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-	g_hb.ev.data.fd = sock;
-	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_ADD, sock, &g_hb.ev))
+
+	struct epoll_event ev;
+	memset(&ev, 0, sizeof(struct epoll_event));
+	ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP;  // level-triggered!
+	ev.data.fd = sock;
+
+	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_ADD, sock, &ev))
 		cf_crash(AS_HB,  "unable to add socket %d to epoll fd list: %s", sock, cf_strerror(errno));
 
 	/* Mesh-topology systems allow config-file bootstraping; connect to the provided node */
@@ -2220,7 +2228,8 @@ CloseSocket:
 					g_hb.endpoint_txlist_node_id[fd] = 0;
 					cf_atomic_int_incr(&g_config.heartbeat_connections_closed);
 					mesh_host_list_remove_fd(fd);
-					if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, fd, &g_hb.ev)) {
+					// reusing ev as it is ignored for EPOLL_CTL_DEL
+					if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, fd, &ev)) {
 						cf_warning(AS_HB, "unable to remove socket %d from epoll fd list: %s", fd, cf_strerror(errno));
 					}
 					close(fd);
@@ -2633,7 +2642,7 @@ as_hb_init()
 	g_hb.mesh_seed_host_list = 0;
 	g_hb.mesh_non_seed_host_list = 0;
 	if (0 != pthread_create(&g_mesh_list_tid, 0, mesh_list_service_fn, 0))
-		cf_crash(AS_HB, "could not create hb monitor thread: %s", cf_strerror(errno));
+		cf_crash(AS_HB, "could not create hb mesh list service thread: %s", cf_strerror(errno));
 
 	pthread_mutex_init(&g_hb.snub_lock, 0);
 	pthread_mutex_init(&g_config.hb_paxos_lock, 0);

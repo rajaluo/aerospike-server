@@ -1878,8 +1878,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 
 			switch (p->state) {
 				case AS_PARTITION_STATE_UNDEF:
-				case AS_PARTITION_STATE_JOURNAL_APPLY: // should never happen - it's a dummy state
-					cf_debug(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, fail", ns->name, pid, p->state);
+					cf_warning(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, fail", ns->name, pid, p->state);
 					rv = AS_MIGRATE_FAIL;
 					break;
 				case AS_PARTITION_STATE_ABSENT:
@@ -2063,7 +2062,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 
 			switch (orig_p_state) {
 				case AS_PARTITION_STATE_UNDEF:
-				case AS_PARTITION_STATE_JOURNAL_APPLY: // should never happen - it's a dummy state
 				case AS_PARTITION_STATE_ABSENT:
 				case AS_PARTITION_STATE_ZOMBIE:
 					/* check for illegal state */
