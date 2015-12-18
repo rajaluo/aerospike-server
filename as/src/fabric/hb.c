@@ -649,7 +649,7 @@ as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sockaddr socket, uint32_
 		if (rv == SHASH_ERR_FOUND) {
 			as_hb_process_fabric_heartbeat(node, fd, socket, addr, port, buf, bufsz);
 		} else if (rv != 0) {
-			cf_warning(AS_FABRIC, "unable to update adjacencies hash");
+			cf_warning(AS_HB, "unable to update adjacencies hash");
 		}
 	}
 }
