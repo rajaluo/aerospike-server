@@ -117,8 +117,8 @@ void read_local(as_transaction *tr, as_index_ref *r_ref);
 int write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
 int delete_local(as_transaction *tr);
-int delete_replica(as_transaction *tr, cf_node masternode);
-int apply_journaled_delete(as_transaction *tr);
+int delete_replica(as_transaction *tr, bool is_subrec, cf_node masternode);
+void apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd);
 int write_delete_journal(as_transaction *tr, bool is_subrec);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
 			   cf_node masternode, bool is_delete, uint16_t set_id);
@@ -770,11 +770,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		// change transaction id for the second time
 		wr->tid = cf_atomic32_incr(&g_rw_tid);
 	}
-
-	if (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB) {
-		cf_crash(AS_RW, "Invalid transaction state");
-	}
-
 
 	// 1. Short Circuit Read if a record is found locally, and we don't need
 	//    strong read consistency, then make sure that we do not go through
@@ -2778,18 +2773,13 @@ write_process(cf_node node, msg *m, bool respond)
 				tr.flag |= AS_TRANSACTION_FLAG_NSUP_DELETE;
 			}
 
-			if ((info & RW_INFO_LDT_SUBREC)
-					|| (info & RW_INFO_LDT_ESR)) {
-				tr.flag |= AS_TRANSACTION_FLAG_LDT_SUB;
-				cf_detail(AS_RW,
-						"LDT Subrecord Replication Request Received %"PRIx64"\n",
-						*(uint64_t*)keyd);
-			}
+			bool is_subrec = (info & (RW_INFO_LDT_SUBREC | RW_INFO_LDT_ESR)) != 0;
+
 			if (info & RW_INFO_UDF_WRITE) {
 				cf_atomic_int_incr(&g_config.udf_replica_writes);
 			}
 			if (msgp->msg.info2 & AS_MSG_INFO2_DELETE) {
-				rv = delete_replica(&tr, node);
+				rv = delete_replica(&tr, is_subrec, node);
 			} else {
 				// Older version nodes can send messages that get here.
 				cf_warning_digest(AS_RW, keyd, "replica write trying to use write_local() - ignoring ");
@@ -3111,21 +3101,17 @@ delete_local(as_transaction *tr)
 // From acting master, on (other) replica node.
 //
 int
-delete_replica(as_transaction *tr, cf_node masternode)
+delete_replica(as_transaction *tr, bool is_subrec, cf_node masternode)
 {
 	if (AS_PARTITION_STATE_SYNC != tr->rsv.state) {
-		write_delete_journal(tr, (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB));
+		write_delete_journal(tr, is_subrec);
 		return 0;
 	}
 
 	// Shortcut pointers & flags.
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
-	as_index_tree *tree = tr->rsv.tree;
-
-	if (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB) {
-		tree = tr->rsv.sub_tree;
-	}
+	as_index_tree *tree = is_subrec ? tr->rsv.sub_tree : tr->rsv.tree;
 
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
@@ -3144,11 +3130,9 @@ delete_replica(as_transaction *tr, cf_node masternode)
 		as_storage_record_close(r, &rd);
 	}
 
-	// Save the set-ID for XDR.
+	// Save the set-ID and generation for XDR.
 	uint16_t set_id = as_index_get_set_id(r);
-
-	// Save the generation for XDR.
-	tr->generation = r->generation;
+	uint16_t generation = r->generation;
 
 	as_index_delete(tree, &tr->keyd);
 	as_record_done(&r_ref, ns);
@@ -3167,7 +3151,7 @@ delete_replica(as_transaction *tr, cf_node masternode)
 			// configured to do so.
 			g_config.xdr_cfg.xdr_forward_xdrwrites ||
 			ns->ns_forward_xdr_writes) {
-		xdr_write(ns, tr->keyd, tr->generation, masternode, true, set_id);
+		xdr_write(ns, tr->keyd, generation, masternode, true, set_id);
 	}
 
 	return 0;
@@ -3176,45 +3160,34 @@ delete_replica(as_transaction *tr, cf_node masternode)
 //================================================
 // From acting master, on (other) replica node.
 //
-int
-apply_journaled_delete(as_transaction *tr)
+void
+apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd)
 {
-	// Shortcut pointers & flags.
-	as_namespace *ns = tr->rsv.ns;
-	as_index_tree *tree = tr->rsv.tree;
-
-	if (tr->flag & AS_TRANSACTION_FLAG_LDT_SUB) {
-		tree = tr->rsv.sub_tree;
-	}
-
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (0 != as_record_get(tree, &tr->keyd, &r_ref, ns)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
-		return -1;
+	if (0 != as_record_get(tree, keyd, &r_ref, ns)) {
+		return;
 	}
 
 	as_index *r = r_ref.r;
 
 	if (ns->storage_data_in_memory) {
 		as_storage_rd rd;
-		as_storage_record_open(ns, r, &rd, &tr->keyd);
+		as_storage_record_open(ns, r, &rd, keyd);
 		delete_adjust_sindex(&rd);
 		as_storage_record_close(r, &rd);
 	}
 
-	// Save the set-ID for XDR.
+	// Save the set-ID and generation for XDR.
 	uint16_t set_id = as_index_get_set_id(r);
+	uint16_t generation = r->generation;
 
-	// Save the generation for XDR.
-	tr->generation = r->generation;
-
-	as_index_delete(tree, &tr->keyd);
+	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
 
 	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
-		return 0;
+		return;
 	}
 
 	// Journaled deletes lose info and behave as if:
@@ -3225,10 +3198,8 @@ apply_journaled_delete(as_transaction *tr)
 	// is not necessarily true!
 
 	if (g_config.xdr_cfg.xdr_forward_xdrwrites || ns->ns_forward_xdr_writes) {
-		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id);
+		xdr_write(ns, *keyd, generation, 0, true, set_id);
 	}
-
-	return 0;
 }
 
 
@@ -5024,9 +4995,7 @@ uint32_t journal_hash_fn(void *value) {
 }
 
 typedef struct {
-	as_namespace *ns; // reference count held
-	as_partition_id part_id; // won't vanish as long as ns refcount ok
-	cf_digest digest; // where to find the data
+	cf_digest digest;
 	bool is_subrec;
 } journal_queue_element;
 
@@ -5050,14 +5019,12 @@ int write_delete_journal(as_transaction *tr, bool is_subrec) {
 		return (0);
 
 	journal_queue_element jqe;
-	jqe.ns = tr->rsv.ns;
-	jqe.part_id = tr->rsv.pid;
 	jqe.digest = tr->keyd;
 	jqe.is_subrec = is_subrec;
 
 	journal_hash_key jhk;
-	jhk.ns_id = jqe.ns->id;
-	jhk.part_id = jqe.part_id;
+	jhk.ns_id = tr->rsv.ns->id;
+	jhk.part_id = tr->rsv.pid;
 
 	cf_queue *j_q;
 
@@ -5146,23 +5113,8 @@ int as_write_journal_apply(as_partition_reservation *prsv) {
 	// got the queue, got the journal, use it
 	journal_queue_element jqe;
 	while (0 == cf_queue_pop(journal_q, &jqe, CF_QUEUE_NOWAIT)) {
-		// INIT_TR
-		as_transaction tr;
-		as_transaction_init(&tr, &jqe.digest, NULL);
-		as_partition_reservation_copy(&tr.rsv, prsv);
-		tr.rsv.is_write = true;
-		tr.rsv.state = AS_PARTITION_STATE_JOURNAL_APPLY; // doesn't matter
-
-		int rv;
-		if (jqe.is_subrec) {
-			tr.flag |= AS_TRANSACTION_FLAG_LDT_SUB;
-		}
-
 		// Note - we no longer journal writes, we only journal deletes.
-		rv = apply_journaled_delete(&tr);
-
-		cf_detail(AS_RW, "write journal: wrote: rv %d key %"PRIx64,
-				rv, *(uint64_t *)&tr.keyd);
+		apply_journaled_delete(prsv->ns, jqe.is_subrec ? prsv->sub_tree : prsv->tree, &jqe.digest);
 	}
 
 	cf_queue_destroy(journal_q);
@@ -5171,12 +5123,12 @@ int as_write_journal_apply(as_partition_reservation *prsv) {
 }
 
 int
-write_process_op(as_transaction *tr, cl_msg *msgp, cf_node node, as_generation generation)
+write_process_op(as_transaction *tr, cl_msg *msgp, bool is_subrec, cf_node node)
 {
 	as_namespace *ns = tr->rsv.ns;
 	int rv = 0;
 	if (msgp->msg.info2 & AS_MSG_INFO2_DELETE) {
-		rv = delete_replica(tr, node);
+		rv = delete_replica(tr, is_subrec, node);
 	} else {
 		// Older version nodes can send messages that get here.
 		cf_warning_digest(AS_RW, &tr->keyd, "replica write trying to use write_local() - ignoring ");
@@ -5348,16 +5300,10 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 			tr.flag |= AS_TRANSACTION_FLAG_NSUP_DELETE;
 		}
 
-		if (ns->ldt_enabled) {
-			if ((info & RW_INFO_LDT_SUBREC)
-					|| (info & RW_INFO_LDT_ESR)) {
-				tr.flag |= AS_TRANSACTION_FLAG_LDT_SUB;
-				cf_detail_digest(AS_RW, keyd,
-						"LDT Subrecord Replication Request Received ");
-			}
-		}
+		bool is_subrec = ns->ldt_enabled &&
+				(info & (RW_INFO_LDT_SUBREC | RW_INFO_LDT_ESR)) != 0;
 
-		result_code = write_process_op(&tr, msgp, node, generation);
+		result_code = write_process_op(&tr, msgp, is_subrec, node);
 	} else {
 		rv = write_local_pickled(keyd, rsvp, pickled_buf, pickled_sz,
 				&rec_props, generation, void_time, node, info, linfo);
