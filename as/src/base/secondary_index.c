@@ -4298,6 +4298,9 @@ packed_val_make_skey(const cdt_payload *val, as_val_t type, void *skey)
 			return false;
 		}
 	}
+	else {
+		return false;
+	}
 
 	return true;
 }
@@ -4440,9 +4443,40 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 		pk_long				= &pk_old;
 	}
 
+	if (short_list_size == 0) {
+		if (long_list_size == 0) {
+			return 0;
+		}
+
+		as_sindex_init_sbin(sbins, old_list_is_short ? AS_SINDEX_OP_INSERT : AS_SINDEX_OP_DELETE, type, si);
+
+		for (uint32_t i = 0; i < long_list_size; i++) {
+			cdt_payload ele;
+
+			ele.ptr = pk_long->buffer + pk_long->offset;
+			ele.size = as_unpack_size(pk_long);
+
+			// sizeof(cf_digest) is big enough for all key types we support so far.
+			uint8_t skey[sizeof(cf_digest)];
+
+			if (! packed_val_make_skey(&ele, expected_type, skey)) {
+				// packed_vals that aren't of type are ignored.
+				continue;
+			}
+
+			if (! as_sindex_bin_add_skey(sbins, skey, expected_type)) {
+				cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() as_sindex_bin_add_skey failed");
+				as_sindex_sbin_free(sbins);
+				return -1;
+			}
+		}
+
+		return sbins->num_values == 0 ? 0 : 1;
+	}
+
 	shash *hash;
 	if (shash_create(&hash, as_sindex_hash_fn, data_size, 1, short_list_size, 0) != SHASH_OK) {
-		cf_warning(AS_SINDEX, "as_sindex_sbins_from_list_bin_diff_internal() failed to create hash");
+		cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() failed to create hash");
 		return -1;
 	}
 
@@ -4455,7 +4489,7 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 		int size = as_unpack_size(pk_short);
 
 		if (size < 0) {
-			cf_warning(AS_SINDEX, "as_sindex_sbins_from_list_bin_diff_internal() list unpack failed");
+			cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() list unpack failed");
 			shash_destroy(hash);
 			return -1;
 		}
@@ -4463,7 +4497,7 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 		ele.size = size;
 
 		if (! shash_add_packed_val(hash, &ele, expected_type, false)) {
-			cf_warning(AS_SINDEX, "as_sindex_sbins_from_list_bin_diff_internal() hash add failed");
+			cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() hash add failed");
 			shash_destroy(hash);
 			return -1;
 		}
@@ -4478,7 +4512,7 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 		ele.size = as_unpack_size(pk_long);
 
 		if (! packed_val_add_sbin_or_update_shash(&ele, sbins, hash, expected_type)) {
-			cf_warning(AS_SINDEX, "as_sindex_sbins_from_list_bin_diff_internal() hash update failed");
+			cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() hash update failed");
 			as_sindex_sbin_free(sbins);
 			shash_destroy(hash);
 			return -1;
