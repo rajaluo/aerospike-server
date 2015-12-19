@@ -775,7 +775,9 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node); // identifies self to remote
 	if (AS_HB_MODE_MESH == g_config.hb_mode) {
 		cf_debug(AS_FABRIC, "Sending %s as the IP address for receiving heartbeats", g_config.hb_addr_to_use);
-		if (1 != inet_pton(AF_INET, g_config.hb_addr_to_use, &self))
+		if (!g_config.hb_addr_to_use) {
+			cf_crash(AS_FABRIC, "hb_addr_to_use not initialized");
+		} else if (1 != inet_pton(AF_INET, g_config.hb_addr_to_use, &self))
 			cf_warning(AS_FABRIC, "unable to call inet_pton: %s", cf_strerror(errno));
 		else {
 			msg_set_uint32(m, FS_ADDR, *(uint32_t *)&self);

@@ -2105,24 +2105,6 @@ as_hb_thr(void *arg)
 		g_hb.endpoint_txlist_isudp[sock] = true;
 	} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
 		sock = g_hb.socket.sock;
-
-		// If the user specified 'any' as heartbeat address, we listen on 0.0.0.0 (all interfaces)
-		// But we should send a proper IP address to the remote machine to send back heartbeat.
-		// Use the node's IP address in this case.
-		g_config.hb_addr_to_use = g_config.hb_addr;
-		// Checking the first byte is enough as '0' cannot be a valid IP address other than 0.0.0.0
-		if (*g_config.hb_addr_to_use == '0') {
-			cf_info(AS_AS, "Using address \"any\" for listening for heartbeats and a real IP address for receiving heartbeats");
-			g_config.hb_addr_to_use = g_config.node_ip;
-		}
-		// If the user specified an interface-address, however, we should instead
-		// send that address to the remote machine to send back heartbeats to us.
-		if (g_config.hb_tx_addr) {
-			cf_info(AS_HB, "Using \"interface-address\" for receiving heartbeats");
-			g_config.hb_addr_to_use = g_config.hb_tx_addr;
-		}
-		cf_info(AS_HB, "Sending %s as the IP address for receiving heartbeats", g_config.hb_addr_to_use);
-
 		struct in_addr self;
 		if (1 != inet_pton(AF_INET, g_config.hb_addr_to_use, &self))
 			cf_warning(AS_HB, "unable to call inet_pton: %s", cf_strerror(errno));
@@ -2647,6 +2629,25 @@ as_hb_init()
 	pthread_mutex_init(&g_hb.snub_lock, 0);
 	pthread_mutex_init(&g_config.hb_paxos_lock, 0);
 	g_hb.snub_list = 0;
+
+	if (AS_HB_MODE_MESH == g_config.hb_mode) {
+		// If the user specified 'any' as heartbeat address, we listen on 0.0.0.0 (all interfaces)
+		// But we should send a proper IP address to the remote machine to send back heartbeat.
+		// Use the node's IP address in this case.
+		g_config.hb_addr_to_use = g_config.hb_addr;
+		// Checking the first byte is enough as '0' cannot be a valid IP address other than 0.0.0.0
+		if (*g_config.hb_addr_to_use == '0') {
+			cf_info(AS_AS, "Using address \"any\" for listening for heartbeats and a real IP address for receiving heartbeats");
+			g_config.hb_addr_to_use = g_config.node_ip;
+		}
+		// If the user specified an interface-address, however, we should instead
+		// send that address to the remote machine to send back heartbeats to us.
+		if (g_config.hb_tx_addr) {
+			cf_info(AS_HB, "Using \"interface-address\" for receiving heartbeats");
+			g_config.hb_addr_to_use = g_config.hb_tx_addr;
+		}
+		cf_info(AS_HB, "Sending %s as the IP address for receiving heartbeats", g_config.hb_addr_to_use);
+	}
 
 	/* Continue on with the initialization actions. */
 	as_hb_init_socket();
