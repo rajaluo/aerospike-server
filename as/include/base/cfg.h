@@ -562,12 +562,6 @@ typedef struct as_config_s {
 	// the transaction.
 	cf_atomic_int		stat_cluster_key_transaction_reenqueue;
 
-	// After we have queued up a transaction on the slow queue, we then count
-	// the number of times pop off a transaction from the slow queue and
-	// we re-queue it on to the regular queue.  We expect slow queue push
-	// and pop to match.
-	cf_atomic_int		stat_slow_trans_queue_pop;
-
 	// For all REGULAR jobs (that pass thru the CK test), count the number of
 	// regular RW jobs processed.
 	cf_atomic_int		stat_cluster_key_regular_processed;
