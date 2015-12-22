@@ -100,6 +100,27 @@ void_time_to_ttl(uint32_t void_time, uint32_t now)
 
 
 //------------------------------------------------
+// Is record's set evictable?
+//
+static bool
+cold_start_is_set_evictable(as_namespace* ns, as_index* r)
+{
+	uint32_t set_id = (uint32_t)as_index_get_set_id(r);
+
+	if (set_id == INVALID_SET_ID) {
+		return true;
+	}
+
+	as_set* p_set;
+
+	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) != CF_VMAPX_OK) {
+		cf_crash(AS_NSUP, "{%s} cold start evict failed to get set index %u from vmap", ns->name, set_id - 1);
+	}
+
+	return ! IS_SET_EVICTION_DISABLED(p_set);
+}
+
+//------------------------------------------------
 // Reduce callback prepares for cold-start eviction.
 // - builds cold-start eviction histogram
 //
@@ -114,7 +135,8 @@ cold_start_evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 	cold_start_evict_prep_info* p_info = (cold_start_evict_prep_info*)udata;
 	uint32_t void_time = r_ref->r->void_time;
 
-	if (void_time != 0) {
+	if (void_time != 0 &&
+			cold_start_is_set_evictable(p_info->ns, r_ref->r)) {
 		linear_histogram_insert_data_point(p_info->hist, void_time);
 	}
 
@@ -173,8 +195,9 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	uint32_t void_time = r_ref->r->void_time;
 
 	if (void_time != 0) {
-		if (void_time < ns->cold_start_threshold_void_time ||
-				(void_time < p_info->high_void_time && random_delete(p_info->mid_tenths_pct))) {
+		if (cold_start_is_set_evictable(ns, r_ref->r) &&
+				(void_time < ns->cold_start_threshold_void_time ||
+						(void_time < p_info->high_void_time && random_delete(p_info->mid_tenths_pct)))) {
 			as_index_delete(p_partition->vp, &r_ref->r->key);
 			p_info->num_evicted++;
 		}
