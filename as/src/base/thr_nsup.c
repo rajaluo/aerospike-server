@@ -849,9 +849,11 @@ evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 //------------------------------------------------
 // Reduce callback evicts records.
 // - evicts based on general threshold
+// - does expiration on eviction-disabled sets
 //
 typedef struct evict_info_s {
 	as_namespace*	ns;
+	uint32_t		now;
 	bool*			sets_not_evicting;
 	uint32_t		low_void_time;
 	uint32_t		high_void_time;
@@ -868,8 +870,14 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	uint32_t set_id = as_index_get_set_id(r);
 	uint32_t void_time = r->void_time;
 
-	if (void_time != 0 && ! p_info->sets_not_evicting[set_id]) {
-		if (void_time < p_info->low_void_time ||
+	if (void_time != 0) {
+		if (p_info->sets_not_evicting[set_id]) {
+			if (p_info->now > void_time) {
+				queue_for_delete(ns, &r->key);
+				p_info->num_evicted++;
+			}
+		}
+		else if (void_time < p_info->low_void_time ||
 				(void_time < p_info->high_void_time && random_delete(p_info->mid_tenths_pct))) {
 			queue_for_delete(ns, &r->key);
 			p_info->num_evicted++;
@@ -1329,6 +1337,7 @@ thr_nsup(void *arg)
 
 				memset(&cb_info2, 0, sizeof(cb_info2));
 				cb_info2.ns = ns;
+				cb_info2.now = now;
 				cb_info2.sets_not_evicting = sets_not_evicting;
 
 				// Determine general eviction thresholds.
