@@ -1119,14 +1119,14 @@ struct as_namespace_s {
 
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)
-	linear_histogram 	*obj_size_hist;
-	linear_histogram 	*set_obj_size_hists[AS_SET_MAX_COUNT + 1];
+	linear_hist 		*obj_size_hist;
+	linear_hist 		*set_obj_size_hists[AS_SET_MAX_COUNT + 1];
 	cf_atomic32			obj_size_hist_max;
 
 	// Histograms used for general eviction and expiration.
 	linear_hist 		*evict_hist;
-	linear_histogram 	*ttl_hist;
-	linear_histogram 	*set_ttl_hists[AS_SET_MAX_COUNT + 1]; // only for info
+	linear_hist 		*ttl_hist;
+	linear_hist 		*set_ttl_hists[AS_SET_MAX_COUNT + 1]; // only for info
 
 	as_partition partitions[AS_PARTITIONS];
 

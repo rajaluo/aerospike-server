@@ -23,13 +23,14 @@
 #include "linear_hist.h"
 
 #include <pthread.h>
-//#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "citrusleaf/alloc.h"
 
-//#include "dynbuf.h"
+#include "dynbuf.h"
 #include "fault.h"
 
 
@@ -173,4 +174,121 @@ linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal, uint32
 
 	// Return subtotal of everything below "threshold" bucket.
 	return count - h->counts[i];
+}
+
+//------------------------------------------------
+// Save a linear histogram "snapshot".
+//
+// Must only be called from thread that inserts
+// histogram data.
+//
+void
+linear_hist_save_info(linear_hist *h)
+{
+	pthread_mutex_lock(&h->info_lock);
+
+	if (h->num_buckets > 100) {
+		// For now, just don't bother if there's too much to save.
+		sprintf(h->info_snapshot, "%u,%u ...", h->num_buckets, h->bucket_width);
+
+		pthread_mutex_unlock(&h->info_lock);
+		return;
+	}
+
+	// Write num_buckets, the bucket width, and the first bucket's count.
+	int i = 0;
+	int pos = snprintf(h->info_snapshot, INFO_SNAPSHOT_SIZE, "%u,%u,%u",
+			h->num_buckets, h->bucket_width, h->counts[i++]);
+
+	while (pos < INFO_SNAPSHOT_SIZE && i < h->num_buckets) {
+		pos += snprintf(h->info_snapshot + pos, INFO_SNAPSHOT_SIZE - pos,
+				",%u", h->counts[i++]);
+	}
+
+	pthread_mutex_unlock(&h->info_lock);
+}
+
+//------------------------------------------------
+// Append a linear histogram "snapshot" to db.
+//
+void
+linear_hist_get_info(linear_hist *h, cf_dyn_buf *db)
+{
+	pthread_mutex_lock(&h->info_lock);
+	cf_dyn_buf_append_string(db, h->info_snapshot);
+	pthread_mutex_unlock(&h->info_lock);
+}
+
+//------------------------------------------------
+// Dump a linear histogram to log.
+//
+// Must only be called from thread that inserts
+// histogram data.
+//
+// Note - DO NOT change the log output format in
+// this method - public documentation assumes this
+// format.
+//
+void
+linear_hist_dump(linear_hist *h)
+{
+	uint32_t i = h->num_buckets;
+	uint32_t j = 0;
+	uint32_t k = 0;
+	uint32_t total_count = 0;
+
+	for (uint32_t b = 0; b < h->num_buckets; b++) {
+		if (h->counts[b] != 0) {
+			if (i > b) {
+				i = b;
+			}
+
+			j = b;
+			k++;
+			total_count += h->counts[b];
+		}
+	}
+
+	char buf[100];
+	int pos = 0;
+	int n = 0;
+
+	buf[0] = '\0';
+
+	cf_debug(AS_NSUP, "linear histogram dump: %s [%lu %lu]/[%lu] (%lu total)",
+			h->name, h->start, h->start + (h->num_buckets * h->bucket_width),
+			h->bucket_width, total_count);
+
+	if (k > 100) {
+		// For now, just don't bother if there's too much to dump.
+		cf_debug(AS_NSUP, "... (%u buckets with non-zero count)", k);
+		return;
+	}
+
+	for ( ; i <= j; i++) {
+		if (h->counts[i] == 0) { // print only non-zero columns
+			continue;
+		}
+
+		int bytes = sprintf(buf + pos, " (%02u: %010u)", i, h->counts[i]);
+
+		if (bytes <= 0) {
+			cf_debug(AS_NSUP, "linear histogram dump error");
+			return;
+		}
+
+		pos += bytes;
+
+		if ((n & 3) == 3) { // maximum of 4 printed columns per log line
+			 cf_debug(AS_NSUP, "%s", buf);
+			 pos = 0;
+			 buf[0] = '\0';
+		}
+
+		n++;
+	}
+
+	if (pos > 0) {
+		cf_debug(AS_NSUP, "%s", buf);
+	}
 }

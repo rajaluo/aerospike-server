@@ -729,13 +729,13 @@ static void
 add_to_obj_size_histograms(as_namespace* ns, as_index* r)
 {
 	uint32_t set_id = as_index_get_set_id(r);
-	linear_histogram* set_obj_size_hist = ns->set_obj_size_hists[set_id];
+	linear_hist* set_obj_size_hist = ns->set_obj_size_hists[set_id];
 	uint64_t n_rblocks = r->storage_key.ssd.n_rblocks;
 
-	linear_histogram_insert_data_point(ns->obj_size_hist, n_rblocks);
+	linear_hist_insert_data_point(ns->obj_size_hist, n_rblocks);
 
 	if (set_obj_size_hist) {
-		linear_histogram_insert_data_point(set_obj_size_hist, n_rblocks);
+		linear_hist_insert_data_point(set_obj_size_hist, n_rblocks);
 	}
 }
 
@@ -746,13 +746,13 @@ static void
 add_to_ttl_histograms(as_namespace* ns, as_index* r)
 {
 	uint32_t set_id = as_index_get_set_id(r);
-	linear_histogram* set_ttl_hist = ns->set_ttl_hists[set_id];
+	linear_hist* set_ttl_hist = ns->set_ttl_hists[set_id];
 	uint32_t void_time = r->void_time;
 
-	linear_histogram_insert_data_point(ns->ttl_hist, void_time);
+	linear_hist_insert_data_point(ns->ttl_hist, void_time);
 
 	if (set_ttl_hist) {
-		linear_histogram_insert_data_point(set_ttl_hist, void_time);
+		linear_hist_insert_data_point(set_ttl_hist, void_time);
 	}
 }
 
@@ -991,10 +991,10 @@ clear_set_obj_size_hist(as_namespace* ns, uint32_t set_id)
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
 		sprintf(hist_name, "%s set %u object size histogram", ns->name, set_id);
-		ns->set_obj_size_hists[set_id] = linear_histogram_create(hist_name, 0, 0, OBJ_SIZE_HIST_NUM_BUCKETS);
+		ns->set_obj_size_hists[set_id] = linear_hist_create(hist_name, 0, 0, OBJ_SIZE_HIST_NUM_BUCKETS);
 	}
 
-	linear_histogram_clear(ns->set_obj_size_hists[set_id], 0, cf_atomic32_get(ns->obj_size_hist_max));
+	linear_hist_clear(ns->set_obj_size_hists[set_id], 0, cf_atomic32_get(ns->obj_size_hist_max));
 }
 
 //------------------------------------------------
@@ -1007,15 +1007,16 @@ clear_set_ttl_hist(as_namespace* ns, uint32_t set_id, uint32_t now, uint64_t ttl
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
 		sprintf(hist_name, "%s set %u ttl histogram", ns->name, set_id);
-		ns->set_ttl_hists[set_id] = linear_histogram_create(hist_name, 0, 0, TTL_HIST_NUM_BUCKETS);
+		ns->set_ttl_hists[set_id] = linear_hist_create(hist_name, 0, 0, TTL_HIST_NUM_BUCKETS);
 	}
 
-	linear_histogram_clear(ns->set_ttl_hists[set_id], now, ttl_range);
+	linear_hist_clear(ns->set_ttl_hists[set_id], now, ttl_range);
 }
 
 //------------------------------------------------
 // Get the TTL range for histograms.
 //
+// TODO - ttl_range to 32 bits?
 static uint64_t
 get_ttl_range(as_namespace* ns, uint32_t now)
 {
@@ -1085,7 +1086,7 @@ get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 // Stats per namespace at the end of an nsup lap.
 //
 static void
-update_stats(as_namespace* ns, uint64_t n_master, uint32_t n_0_void_time,
+update_stats(as_namespace* ns, uint32_t n_master, uint32_t n_0_void_time,
 		uint32_t n_expired_records, uint32_t n_evicted_records, uint32_t n_deleted_set_records,
 		uint32_t evict_ttl, uint32_t n_set_waits, uint32_t n_clear_waits, uint32_t n_general_waits,
 		uint64_t start_ms)
@@ -1113,7 +1114,7 @@ update_stats(as_namespace* ns, uint64_t n_master, uint32_t n_0_void_time,
 	ns->nsup_cycle_duration = (uint32_t)(total_duration_ms / 1000);
 	ns->nsup_cycle_sleep_pct = total_duration_ms == 0 ? 0 : (uint32_t)((n_general_waits * 100) / total_duration_ms);
 
-	cf_info(AS_NSUP, "{%s} Records: %"PRIu64", %u 0-vt, "
+	cf_info(AS_NSUP, "{%s} Records: %u, %u 0-vt, "
 			"%u(%"PRIu64") expired, %u(%"PRIu64") evicted, "
 			"%u(%"PRIu64") set deletes. "
 			"Evict ttl: %d. Waits: %u,%u,%u. Total time: %"PRIu64" ms",
@@ -1198,15 +1199,15 @@ thr_nsup(void *arg)
 
 			cf_info(AS_NSUP, "{%s} nsup start", ns->name);
 
-			linear_histogram_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
+			linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
 
 			// The "now" used for all expiration and eviction.
 			uint32_t now = as_record_void_time_get();
 
 			// Get the histogram range - used by all histograms.
-			uint64_t ttl_range = get_ttl_range(ns, now);
+			uint32_t ttl_range = (uint32_t)get_ttl_range(ns, now);
 
-			linear_histogram_clear(ns->ttl_hist, now, ttl_range);
+			linear_hist_clear(ns->ttl_hist, now, ttl_range);
 
 			uint32_t n_expired_records = 0;
 			uint32_t n_0_void_time_records = 0;
@@ -1303,15 +1304,15 @@ thr_nsup(void *arg)
 				// Eviction is necessary.
 				cf_warning(AS_NSUP, "{%s} ***************** breach with ttl_range %u", ns->name, ttl_range);
 
-				linear_histogram_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
+				linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
 				linear_hist_clear(ns->evict_hist, now, ttl_range);
-				linear_histogram_clear(ns->ttl_hist, now, ttl_range);
+				linear_hist_clear(ns->ttl_hist, now, (uint32_t)ttl_range);
 
 				for (uint32_t j = 0; j < num_sets; j++) {
 					uint32_t set_id = j + 1;
 
-					linear_histogram_clear(ns->set_obj_size_hists[set_id], 0, cf_atomic32_get(ns->obj_size_hist_max));
-					linear_histogram_clear(ns->set_ttl_hists[set_id], now, ttl_range);
+					linear_hist_clear(ns->set_obj_size_hists[set_id], 0, cf_atomic32_get(ns->obj_size_hist_max));
+					linear_hist_clear(ns->set_ttl_hists[set_id], now, ttl_range);
 				}
 
 				evict_prep_info cb_info1;
@@ -1358,9 +1359,8 @@ thr_nsup(void *arg)
 					n_expired_records = cb_info2.num_evicted;
 				}
 
-//				linear_hist_dump(ns->evict_hist);		// TODO - can we do this?
-//				linear_hist_save_info(ns->evict_hist);	// TODO - can we do this?
-
+//				linear_hist_dump(ns->evict_hist);		// TODO - should we bither do this?
+				linear_hist_save_info(ns->evict_hist);	// TODO - can we do this better?
 			}
 			else if (! do_set_deletion) {
 				// Eviction is not necessary, only expiration. (But if set
@@ -1379,21 +1379,21 @@ thr_nsup(void *arg)
 				n_0_void_time_records = cb_info.num_0_void_time;
 			}
 
-			linear_histogram_dump(ns->obj_size_hist);
-			linear_histogram_save_info(ns->obj_size_hist);
-			linear_histogram_dump(ns->ttl_hist);
-			linear_histogram_save_info(ns->ttl_hist);
+			linear_hist_dump(ns->obj_size_hist);
+			linear_hist_save_info(ns->obj_size_hist);
+			linear_hist_dump(ns->ttl_hist);
+			linear_hist_save_info(ns->ttl_hist);
 
 			for (uint32_t j = 0; j < num_sets; j++) {
 				uint32_t set_id = j + 1;
 
-				linear_histogram_dump(ns->set_obj_size_hists[set_id]);
-				linear_histogram_save_info(ns->set_obj_size_hists[set_id]);
-				linear_histogram_dump(ns->set_ttl_hists[set_id]);
-				linear_histogram_save_info(ns->set_ttl_hists[set_id]);
+				linear_hist_dump(ns->set_obj_size_hists[set_id]);
+				linear_hist_save_info(ns->set_obj_size_hists[set_id]);
+				linear_hist_dump(ns->set_ttl_hists[set_id]);
+				linear_hist_save_info(ns->set_ttl_hists[set_id]);
 			}
 
-			update_stats(ns, linear_histogram_get_total(ns->ttl_hist) + n_0_void_time_records, n_0_void_time_records,
+			update_stats(ns, linear_hist_get_total(ns->ttl_hist) + n_0_void_time_records, n_0_void_time_records,
 					n_expired_records, n_evicted_records, n_deleted_set_records,
 					evict_ttl, n_set_waits, n_clear_waits, n_general_waits,
 					start_ms);
