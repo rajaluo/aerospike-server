@@ -1691,6 +1691,11 @@ migrate_tree_reduce(as_index_ref *r_ref, void *udata)
 
 	migration *mig = (migration *) udata;
 
+	if (mig->cluster_key != as_paxos_get_cluster_key()) {
+		as_record_done(r_ref, mig->rsv.ns);
+		return; // No point continuing to reduce this tree
+	}
+
 	if (mig->pickled_array == 0) {
 		// find the size, and malloc the pickled_array
 		// size is not guaranteed to be correct now, because this

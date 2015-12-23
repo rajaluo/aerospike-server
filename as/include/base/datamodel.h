@@ -44,6 +44,7 @@
 #include "arenax.h"
 #include "dynbuf.h"
 #include "hist.h"
+#include "linear_hist.h"
 #include "util.h"
 #include "vmapx.h"
 
@@ -84,7 +85,8 @@
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 100
-#define EVICTION_HIST_NUM_BUCKETS 100
+#define EVICTION_HIST_NUM_BUCKETS 1000000
+#define TTL_HIST_NUM_BUCKETS 100
 
 /*
  * Subrecord Digest Scramble Position
@@ -1122,8 +1124,7 @@ struct as_namespace_s {
 	cf_atomic32			obj_size_hist_max;
 
 	// Histograms used for general eviction and expiration.
-	linear_histogram 	*evict_hist;
-	linear_histogram 	*evict_coarse_hist;
+	linear_hist 		*evict_hist;
 	linear_histogram 	*ttl_hist;
 	linear_histogram 	*set_ttl_hists[AS_SET_MAX_COUNT + 1]; // only for info
 

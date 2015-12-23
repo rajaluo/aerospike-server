@@ -39,6 +39,7 @@
 #include "fault.h"
 #include "hist.h"
 #include "jem.h"
+#include "linear_hist.h"
 #include "meminfo.h"
 #include "vmapx.h"
 
@@ -185,13 +186,10 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->obj_size_hist = linear_histogram_create(hist_name, 0, 0, OBJ_SIZE_HIST_NUM_BUCKETS);
 
 	sprintf(hist_name, "%s evict histogram", name);
-	ns->evict_hist = linear_histogram_create(hist_name, 0, 0, EVICTION_HIST_NUM_BUCKETS);
-
-	sprintf(hist_name, "%s evict coarse histogram", name);
-	ns->evict_coarse_hist = linear_histogram_create(hist_name, 0, 0, EVICTION_HIST_NUM_BUCKETS);
+	ns->evict_hist = linear_hist_create(hist_name, 0, 0, EVICTION_HIST_NUM_BUCKETS);
 
 	sprintf(hist_name, "%s ttl histogram", name);
-	ns->ttl_hist = linear_histogram_create(hist_name, 0, 0, EVICTION_HIST_NUM_BUCKETS);
+	ns->ttl_hist = linear_histogram_create(hist_name, 0, 0, TTL_HIST_NUM_BUCKETS);
 
 	return ns;
 }
@@ -838,11 +836,7 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 			cf_dyn_buf_append_char(db, ';');
 		} else if (strcmp(hist_name, "evict") == 0) {
 			cf_dyn_buf_append_string(db, "evict=");
-			linear_histogram_get_info(ns->evict_hist, db);
-			cf_dyn_buf_append_char(db, ';');
-		} else if (strcmp(hist_name, "evictc") == 0) {
-			cf_dyn_buf_append_string(db, "evictc=");
-			linear_histogram_get_info(ns->evict_coarse_hist, db);
+//			linear_hist_get_info(ns->evict_hist, db); // TODO - can we report this?
 			cf_dyn_buf_append_char(db, ';');
 		} else if (strcmp(hist_name, "objsz") == 0) {
 			if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
