@@ -2965,9 +2965,6 @@ as_config_init()
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
-			case XDR_CASE_NAMEDPIPE_PATH_OLD:
-				cfg_deprecated_name_tok(&line);
-				cf_warning(AS_AS, "Use 'xdr-namedpipe-path'");
 			case XDR_CASE_NAMEDPIPE_PATH:
 				c->xdr_cfg.xdr_digestpipe_path = cfg_strdup_no_checks(&line);
 				break;

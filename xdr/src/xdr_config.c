@@ -65,20 +65,14 @@ const xdr_cfg_opt XDR_NS_SET_OPTS[] = {
 const xdr_cfg_opt XDR_OPTS[] = {
 		{ "{",								XDR_CASE_CONTEXT_BEGIN },
 		{ "enable-xdr",						XDR_CASE_ENABLE_XDR },
-		{ "namedpipe-path",					XDR_CASE_NAMEDPIPE_PATH_OLD }, // Deprecated
-		{ "xdr-namedpipe-path",				XDR_CASE_NAMEDPIPE_PATH }, // dup entry
-		{ "digestlog-path",					XDR_CASE_DIGESTLOG_PATH_OLD }, // Deprecated
-		{ "xdr-digestlog-path",				XDR_CASE_DIGESTLOG_PATH }, // dup entry
-		{ "errorlog-path",					XDR_CASE_ERRORLOG_PATH_OLD }, // Deprecated
-		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH }, // dup entry
-		{ "info-port",						XDR_CASE_INFO_PORT_OLD }, // Deprecated
-		{ "xdr-info-port",					XDR_CASE_INFO_PORT }, // dup entry
+		{ "xdr-namedpipe-path",				XDR_CASE_NAMEDPIPE_PATH },
+		{ "xdr-digestlog-path",				XDR_CASE_DIGESTLOG_PATH },
+		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH },
+		{ "xdr-info-port",					XDR_CASE_INFO_PORT },
 		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
-		{ "batch-size",						XDR_CASE_MAX_RECS_INFLIGHT_OLD }, // Deprecated
-		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT }, // dup entry
+		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT },
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
-		{ "threads",						XDR_CASE_THREADS_OLD }, // Deprecated
-		{ "xdr-threads",					XDR_CASE_THREADS }, // dup entry
+		{ "xdr-threads",					XDR_CASE_THREADS },
 		{ "timeout",						XDR_CASE_TIMEOUT }, // not exposed to users
 		{ "stop-writes-noxdr",				XDR_CASE_STOP_WRITES_NOXDR },
 		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
@@ -96,7 +90,6 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-pidfile",					XDR_CASE_XDR_PIDFILE },
 		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS}, // xdr in asd
 		{ "xdr-ship-slab-size",				XDR_CASE_XDR_SHIP_SLAB_SIZE}, // xdr in asd
-		{ "xdr-do-version-check",			XDR_CASE_XDR_DO_VERSION_CHECK},
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -179,5 +172,4 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_info_request_timeout_ms = 500;
 	c->xdr_compression_threshold = 0; //0 = Disabled compressed shipping, > 0 minimum size of packet for compression
 	c->xdr_pidfile = NULL;
-	c->xdr_do_version_check = false;
 }
