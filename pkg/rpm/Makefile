@@ -31,8 +31,8 @@ ifeq ($(USE_SYSTEMD),1)
 else
 	install -d $(BUILD_ROOT)/var/log/aerospike
 	install -d $(BUILD_ROOT)/var/run/aerospike
-endif
 	install -d $(BUILD_ROOT)/etc/init.d
+endif
 	install -d $(BUILD_ROOT)/etc/logrotate.d
 	install -d $(BUILD_ROOT)/usr/bin
 
