@@ -4,7 +4,6 @@ After=network.target
 Wants=network.target
 
 [Service]
-PIDFile=/var/run/aerospike/asd.pid
 LimitNOFILE=100000
 TimeoutSec=15
 User=root
