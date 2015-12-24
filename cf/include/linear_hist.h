@@ -1,7 +1,7 @@
 /*
  * linear_hist.h
  *
- * Copyright (C) 2015 Aerospike, Inc.
+ * Copyright (C) 2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -48,6 +48,7 @@ void linear_hist_destroy(linear_hist *h);
 void linear_hist_clear(linear_hist *h, uint32_t start, uint32_t max_offset);
 
 uint32_t linear_hist_get_total(linear_hist *h);
+void linear_hist_merge(linear_hist *h1, linear_hist *h2);
 void linear_hist_insert_data_point(linear_hist *h, uint32_t point);
 uint32_t linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct, uint32_t *p_low);
 uint32_t linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal, uint32_t *p_low);

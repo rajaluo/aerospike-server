@@ -1,7 +1,7 @@
 /*
  * linear_hist.c
  *
- * Copyright (C) 2015 Aerospike, Inc.
+ * Copyright (C) 2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -109,6 +109,22 @@ linear_hist_get_total(linear_hist *h)
 	}
 
 	return total_count;
+}
+
+//------------------------------------------------
+// Merge h2 into h1.
+//
+void
+linear_hist_merge(linear_hist *h1, linear_hist *h2)
+{
+	if (! (h1->num_buckets == h2->num_buckets && h1->start == h2->start &&
+			h1->bucket_width == h2->bucket_width)) {
+		cf_crash(AS_INFO, "linear_hist_merge - dissimilar histograms");
+	}
+
+	for (uint32_t i = 0; i < h1->num_buckets; i++) {
+		h1->counts[i] += h2->counts[i];
+	}
 }
 
 //------------------------------------------------

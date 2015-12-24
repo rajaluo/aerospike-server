@@ -1,7 +1,7 @@
 /*
  * thr_nsup.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -42,7 +42,6 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "fault.h"
-#include "hist.h"
 #include "linear_hist.h"
 #include "queue.h"
 #include "vmapx.h"
@@ -67,29 +66,6 @@ pthread_t g_nsup_thread;
 
 
 //==========================================================
-// Helpers used by both cold-start and runtime eviction.
-//
-
-//------------------------------------------------
-// Return true a specified fraction of the time.
-//
-static inline bool
-random_delete(uint32_t tenths_pct)
-{
-	return (rand() % 1000) < tenths_pct;
-}
-
-//------------------------------------------------
-// Convert void-time to TTL, handling edge cases.
-//
-static inline uint32_t
-void_time_to_ttl(uint32_t void_time, uint32_t now)
-{
-	return void_time == 0xFFFFffff ? 0xFFFFffff : (void_time > now ? void_time - now : 0);
-}
-
-
-//==========================================================
 // Eviction during cold-start.
 //
 // No real need for this to be in thr_nsup.c, except maybe
@@ -98,28 +74,8 @@ void_time_to_ttl(uint32_t void_time, uint32_t now)
 
 #define NUM_EVICT_THREADS 24
 #define EVAL_WRITE_STATE_FREQUENCY 1024
+#define COLD_START_HIST_NUM_BUCKETS 10000 // TODO - configurable?
 
-
-//------------------------------------------------
-// Is record's set evictable?
-//
-static bool
-cold_start_is_set_evictable(as_namespace* ns, as_index* r)
-{
-	uint32_t set_id = (uint32_t)as_index_get_set_id(r);
-
-	if (set_id == INVALID_SET_ID) {
-		return true;
-	}
-
-	as_set* p_set;
-
-	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) != CF_VMAPX_OK) {
-		cf_crash(AS_NSUP, "{%s} cold start evict failed to get set index %u from vmap", ns->name, set_id - 1);
-	}
-
-	return ! IS_SET_EVICTION_DISABLED(p_set);
-}
 
 //------------------------------------------------
 // Reduce callback prepares for cold-start eviction.
@@ -127,18 +83,21 @@ cold_start_is_set_evictable(as_namespace* ns, as_index* r)
 //
 typedef struct cold_start_evict_prep_info_s {
 	as_namespace*		ns;
-	linear_histogram*	hist;
+	linear_hist*		hist;
+	bool*				sets_not_evicting;
 } cold_start_evict_prep_info;
 
 static void
 cold_start_evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 {
+	as_index* r = r_ref->r;
 	cold_start_evict_prep_info* p_info = (cold_start_evict_prep_info*)udata;
-	uint32_t void_time = r_ref->r->void_time;
+	uint32_t set_id = as_index_get_set_id(r);
+	uint32_t void_time = r->void_time;
 
 	if (void_time != 0 &&
-			cold_start_is_set_evictable(p_info->ns, r_ref->r)) {
-		linear_histogram_insert_data_point(p_info->hist, void_time);
+			! p_info->sets_not_evicting[set_id]) {
+		linear_hist_insert_data_point(p_info->hist, void_time);
 	}
 
 	as_record_done(r_ref, p_info->ns);
@@ -150,7 +109,9 @@ cold_start_evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_prep_thread_info_s {
 	as_namespace*		ns;
 	cf_atomic32			pid;
-	linear_histogram*	hist;
+	int					index;
+	linear_hist**		hists;
+	bool*				sets_not_evicting;
 } evict_prep_thread_info;
 
 void*
@@ -162,7 +123,8 @@ run_cold_start_evict_prep(void* udata)
 	cold_start_evict_prep_info cb_info;
 
 	cb_info.ns = ns;
-	cb_info.hist = p_info->hist;
+	cb_info.hist = p_info->hists[p_info->index];
+	cb_info.sets_not_evicting = p_info->sets_not_evicting;
 
 	int pid;
 
@@ -181,8 +143,7 @@ run_cold_start_evict_prep(void* udata)
 typedef struct cold_start_evict_info_s {
 	as_namespace*	ns;
 	as_partition*	p_partition;
-	uint32_t		high_void_time;
-	uint32_t		mid_tenths_pct;
+	bool*			sets_not_evicting;
 	uint32_t		num_evicted;
 	uint32_t		num_0_void_time;
 } cold_start_evict_info;
@@ -190,16 +151,17 @@ typedef struct cold_start_evict_info_s {
 static void
 cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 {
+	as_index* r = r_ref->r;
 	cold_start_evict_info* p_info = (cold_start_evict_info*)udata;
 	as_namespace* ns = p_info->ns;
 	as_partition* p_partition = p_info->p_partition;
-	uint32_t void_time = r_ref->r->void_time;
+	uint32_t set_id = as_index_get_set_id(r);
+	uint32_t void_time = r->void_time;
 
 	if (void_time != 0) {
-		if (cold_start_is_set_evictable(ns, r_ref->r) &&
-				(void_time < ns->cold_start_threshold_void_time ||
-						(void_time < p_info->high_void_time && random_delete(p_info->mid_tenths_pct)))) {
-			as_index_delete(p_partition->vp, &r_ref->r->key);
+		if (! p_info->sets_not_evicting[set_id] &&
+				void_time < ns->cold_start_threshold_void_time) {
+			as_index_delete(p_partition->vp, &r->key);
 			p_info->num_evicted++;
 		}
 	}
@@ -216,8 +178,7 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_thread_info_s {
 	as_namespace*	ns;
 	cf_atomic32		pid;
-	uint32_t		high_void_time;
-	uint32_t		mid_tenths_pct;
+	bool*			sets_not_evicting;
 	cf_atomic32		total_evicted;
 	cf_atomic32		total_0_void_time;
 } evict_thread_info;
@@ -230,10 +191,10 @@ run_cold_start_evict(void* udata)
 
 	cold_start_evict_info cb_info;
 
-	memset(&cb_info, 0, sizeof(cb_info));
 	cb_info.ns = ns;
-	cb_info.high_void_time = p_info->high_void_time;
-	cb_info.mid_tenths_pct = p_info->mid_tenths_pct;
+	cb_info.sets_not_evicting = p_info->sets_not_evicting;
+	cb_info.num_evicted = 0;
+	cb_info.num_0_void_time = 0;
 
 	int pid;
 
@@ -254,6 +215,7 @@ run_cold_start_evict(void* udata)
 //------------------------------------------------
 // Get the cold-start histogram's TTL range.
 //
+// TODO - ttl_range to 32 bits?
 static uint64_t
 get_cold_start_ttl_range(as_namespace* ns, uint32_t now)
 {
@@ -283,29 +245,34 @@ get_cold_start_ttl_range(as_namespace* ns, uint32_t now)
 }
 
 //------------------------------------------------
-// Set cold-start eviction thresholds.
+// Set cold-start eviction threshold.
 //
-static void
-set_cold_start_thresholds(as_namespace* ns, linear_histogram* hist, uint32_t* p_high_void_time, uint32_t* p_mid_tenths_pct)
+static uint32_t
+set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 {
-	uint64_t low_void_time;
-	uint64_t high_void_time;
-	bool is_last = linear_histogram_get_thresholds_for_fraction(hist, ns->evict_tenths_pct, &low_void_time, &high_void_time, p_mid_tenths_pct);
+	uint32_t evict_void_time;
+	uint32_t subtotal = linear_hist_get_threshold_for_fraction(hist, ns->evict_tenths_pct, &evict_void_time);
+	bool all_buckets = evict_void_time == 0xFFFFffff;
 
-	if (high_void_time == 0) {
-		cf_warning(AS_NSUP, "{%s} cold-start can't evict %s", ns->name, is_last ? "everything" : "- no records eligible");
+	if (subtotal == 0) {
+		if (all_buckets) {
+			cf_warning(AS_NSUP, "{%s} cold-start found no records eligible for eviction", ns->name);
+		}
+		else {
+			cf_warning(AS_NSUP, "{%s} cold-start found no records below eviction void-time %u - insufficient histogram resolution?", ns->name, evict_void_time);
+		}
+
+		return 0;
 	}
-	else if (is_last) {
-		cf_info(AS_NSUP, "{%s} cold-start evicting into last bucket: using infinity for high void-time %u", ns->name, (uint32_t)high_void_time);
+
+	if (all_buckets) {
+		cf_warning(AS_NSUP, "{%s} cold-start would evict all %u records eligible - not evicting!", ns->name, subtotal);
+		return 0;
 	}
 
-	// See comment in get_thresholds() about evicting from last bucket.
+	cf_atomic32_set(&ns->cold_start_threshold_void_time, evict_void_time);
 
-	// TODO - consider only using random deletion if it's the last bucket, i.e.
-	// set low_void_time to high_void_time unless it's the last bucket.
-
-	cf_atomic32_set(&ns->cold_start_threshold_void_time, (uint32_t)low_void_time);
-	*p_high_void_time = is_last ? 0xFFFFffff : (uint32_t)high_void_time;
+	return subtotal;
 }
 
 //------------------------------------------------
@@ -359,50 +326,78 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	// We may evict - set up the cold-start eviction histogram.
 	cf_info(AS_NSUP, "{%s} cold-start building eviction histogram ...", ns->name);
 
-	uint64_t ttl_range = get_cold_start_ttl_range(ns, now);
+	uint32_t ttl_range = (uint32_t)get_cold_start_ttl_range(ns, now);
 
-	char hist_name[HISTOGRAM_NAME_SIZE];
+	uint32_t num_sets = cf_vmapx_count(ns->p_sets_vmap);
+	bool sets_not_evicting[AS_SET_MAX_COUNT + 1];
 
-	sprintf(hist_name, "%s cold-start evict histogram", ns->name);
-	linear_histogram* cold_start_evict_hist = linear_histogram_create(hist_name, now, ttl_range, TTL_HIST_NUM_BUCKETS);
+	memset(sets_not_evicting, 0, sizeof(sets_not_evicting));
+
+	for (uint32_t j = 0; j < num_sets; j++) {
+		uint32_t set_id = j + 1;
+		as_set* p_set;
+
+		if (cf_vmapx_get_by_index(ns->p_sets_vmap, j, (void**)&p_set) != CF_VMAPX_OK) {
+			cf_crash(AS_NSUP, "failed to get set index %u from vmap", j);
+		}
+
+		if (IS_SET_EVICTION_DISABLED(p_set)) {
+			sets_not_evicting[set_id] = true;
+		}
+	}
 
 	// Split these tasks across multiple threads.
 	pthread_t evict_threads[NUM_EVICT_THREADS];
+	linear_hist* thread_hists[NUM_EVICT_THREADS];
 
 	// Reduce all partitions to build the eviction histogram.
 	evict_prep_thread_info prep_thread_info;
 
 	prep_thread_info.ns = ns;
 	prep_thread_info.pid = -1;
-	prep_thread_info.hist = cold_start_evict_hist;
+	prep_thread_info.hists = thread_hists;
+	prep_thread_info.sets_not_evicting = sets_not_evicting;
 
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+		prep_thread_info.index = n;
+		thread_hists[n] = linear_hist_create("thread-hist", now, ttl_range, COLD_START_HIST_NUM_BUCKETS);
+
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_info) != 0) {
-			cf_warning(AS_NSUP, "{%s} failed to create evict-prep thread %d", ns->name, n);
+			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %d", ns->name, n);
 		}
 	}
 
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
 		pthread_join(evict_threads[n], NULL);
+
+		if (n == 0) {
+			continue;
+		}
+
+		linear_hist_merge(thread_hists[0], thread_hists[n]);
+		linear_hist_destroy(thread_hists[n]);
 	}
 	// Now we're single-threaded again.
 
 	evict_thread_info thread_info;
 
-	memset(&thread_info, 0, sizeof(thread_info));
 	thread_info.ns = ns;
 	thread_info.pid = -1;
+	thread_info.sets_not_evicting = sets_not_evicting;
+	thread_info.total_evicted = 0;
+	thread_info.total_0_void_time = 0;
 
-	// Calculate the eviction thresholds.
-	set_cold_start_thresholds(ns, cold_start_evict_hist, &thread_info.high_void_time, &thread_info.mid_tenths_pct);
+	// Calculate the eviction threshold.
+	uint32_t n_evictable = set_cold_start_threshold(ns, thread_hists[0]);
 
-	cf_info(AS_NSUP, "{%s} cold-start evict ttls %u,%d,0.%03u", ns->name,
-			void_time_to_ttl(cf_atomic32_get(ns->cold_start_threshold_void_time), now), void_time_to_ttl(thread_info.high_void_time, now), thread_info.mid_tenths_pct);
+	linear_hist_destroy(thread_hists[0]);
 
-	linear_histogram_dump(cold_start_evict_hist);
-	linear_histogram_destroy(cold_start_evict_hist);
+	if (n_evictable == 0) {
+		pthread_mutex_unlock(&ns->cold_start_evict_lock);
+		return false;
+	}
 
-	srand(time(NULL));
+	cf_info(AS_NSUP, "{%s} cold-start found %u records eligible for eviction, evict ttl %u", ns->name, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
 
 	// Reduce all partitions to evict based on the thresholds.
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
@@ -1053,7 +1048,7 @@ get_ttl_range(as_namespace* ns, uint32_t now)
 }
 
 //------------------------------------------------
-// Get general eviction thresholds.
+// Get general eviction threshold.
 //
 static bool
 get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
@@ -1302,11 +1297,10 @@ thr_nsup(void *arg)
 
 			if (hwm_breached) {
 				// Eviction is necessary.
-				cf_warning(AS_NSUP, "{%s} ***************** breach with ttl_range %u", ns->name, ttl_range);
 
 				linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
 				linear_hist_clear(ns->evict_hist, now, ttl_range);
-				linear_hist_clear(ns->ttl_hist, now, (uint32_t)ttl_range);
+				linear_hist_clear(ns->ttl_hist, now, ttl_range);
 
 				for (uint32_t j = 0; j < num_sets; j++) {
 					uint32_t set_id = j + 1;
@@ -1344,7 +1338,7 @@ thr_nsup(void *arg)
 					// (This automatically deletes expired records.)
 					reduce_master_partitions(ns, evict_reduce_cb, &cb_info2, &n_general_waits, "evict");
 
-					evict_ttl = void_time_to_ttl(cb_info2.evict_void_time, now); // TODO - this should just be doing void_time - now
+					evict_ttl = cb_info2.evict_void_time - now;
 					n_evicted_records = cb_info2.num_evicted;
 				}
 				else if (sets_protected) {
@@ -1359,7 +1353,6 @@ thr_nsup(void *arg)
 					n_expired_records = cb_info2.num_evicted;
 				}
 
-//				linear_hist_dump(ns->evict_hist);		// TODO - should we bither do this?
 				linear_hist_save_info(ns->evict_hist);	// TODO - can we do this better?
 			}
 			else if (! do_set_deletion) {

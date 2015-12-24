@@ -1,7 +1,7 @@
 /*
  * datamodel.h
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -85,7 +85,7 @@
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 100
-#define EVICTION_HIST_NUM_BUCKETS 1000000
+#define EVICTION_HIST_NUM_BUCKETS 100000 // TODO - configurable?
 #define TTL_HIST_NUM_BUCKETS 100
 
 /*
