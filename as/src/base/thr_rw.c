@@ -1630,7 +1630,7 @@ finish_rw_process_dup_ack(write_request *wr)
 
 			// TODO - should have inline wrapper to peek pickled bin count.
 			if (*(uint16_t *)buf == 0) {
-				cf_warning_digest(AS_RW, &wr->keyd, "migration received binless pickle ");
+				cf_warning_digest(AS_RW, &wr->keyd, "dup response received binless pickle ");
 				continue;
 			}
 
