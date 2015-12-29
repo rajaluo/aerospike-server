@@ -116,3 +116,25 @@ void xdr_handle_failednodeprocessingdone(cf_node nodeid)
 void xdr_conf_init()
 {
 }
+
+void as_xdr_info_init(void)
+{
+}
+
+void as_xdr_get_stats(char *name, cf_dyn_buf *db)
+{
+}
+
+void as_xdr_get_config(cf_dyn_buf *db)
+{
+}
+
+void as_xdr_set_config(char *params, cf_dyn_buf *db)
+{
+	cf_dyn_buf_append_string(db, "error");
+}
+
+int as_xdr_sink_set_severity(cf_fault_context context, cf_fault_severity severity)
+{
+	return 0;
+}

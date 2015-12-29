@@ -68,7 +68,6 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-namedpipe-path",				XDR_CASE_NAMEDPIPE_PATH },
 		{ "xdr-digestlog-path",				XDR_CASE_DIGESTLOG_PATH },
 		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH },
-		{ "xdr-info-port",					XDR_CASE_INFO_PORT },
 		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
 		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT },
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
@@ -145,7 +144,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_num_digestlog_paths = 0; //Number of rlog files 0 is default
 	c->xdr_digestlog_overwrite = true;
 	c->xdr_digestlog_persist = true;
-	c->xdr_info_port = 0;
 
 	c->xdr_errorlog_path = NULL;	//Path where the errorlog of XDR module goes
 	c->xdr_errorlog_level = CF_FAULT_SEVERITY_UNDEF;

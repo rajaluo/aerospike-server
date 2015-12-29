@@ -45,6 +45,7 @@
 #include "citrusleaf/cf_vector.h"
 
 #include "xdr_config.h"
+#include "base/xdr_serverside.h"
 
 #include "cf_str.h"
 #include "dynbuf.h"
@@ -98,28 +99,6 @@ extern bool g_shutdown_started;
 // Use the following macro to enforce locking around Info requests at run-time.
 // (Warning:  This will unnecessarily increase contention and Info request timeouts!)
 // #define USE_INFO_LOCK
-
-typedef int (*as_info_get_tree_fn) (char *name, char *subtree, cf_dyn_buf *db);
-typedef int (*as_info_get_value_fn) (char *name, cf_dyn_buf *db);
-typedef int (*as_info_command_fn) (char *name, char *parameters, cf_dyn_buf *db);
-
-// Sets a static value - set to 0 to remove a previous value.
-int as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool def);
-int as_info_set(const char *name, const char *value, bool def);
-
-// For dynamic items - you will get called when the name is requested. The
-// dynbuf will be fully set up for you - just add the information you want to
-// return.
-int as_info_set_dynamic(char *name, as_info_get_value_fn gv_fn, bool def);
-
-// For tree items - you will get called when the name is requested, and it will
-// have the name you registered (name) and the subtree portion (value). The
-// dynbuf will be fully set up for you - just add the information you want to
-// return
-int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
-
-// For commands - you will be called with the parameters.
-int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
 // Acceptable timediffs in XDR lastship times.
 // (Print warning only if time went back by at least 5 minutes.)
@@ -770,6 +749,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	// Query stats. Aggregation + Lookups
 	cf_dyn_buf_append_string(db, ";");
 	as_query_stat(name, db);
+
+	as_xdr_get_stats(name, db);
 
 	return(0);
 }
@@ -2698,6 +2679,8 @@ info_xdr_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";stop-writes-noxdr=");
 	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
+
+	as_xdr_get_config(db);
 }
 
 void
@@ -4108,8 +4091,9 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			} else {
 				goto Error;
 			}
-        	} else {
-			goto Error;
+		} else {
+			as_xdr_set_config(params, db);
+			return 0;
 		}
 	}
 	else
@@ -4189,7 +4173,16 @@ info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 			continue;
 		}
 
-		if (0 != cf_fault_sink_set_severity(s, c_id, cf_fault_sink_severity(level_str))) {
+		int res;
+
+		if (c_id == AS_XDR || c_id == CF_RBUFFER) {
+			res = as_xdr_sink_set_severity(c_id, cf_fault_sink_severity(level_str));
+		}
+		else {
+			res = cf_fault_sink_set_severity(s, c_id, cf_fault_sink_severity(level_str));
+		}
+
+		if (0 != res) {
 			cf_info(AS_INFO, "log-set command: set severity failed: context '%s' level '%s'", context, level_str);
 			cf_dyn_buf_append_string(db, "error-invalid-level");
 			return 0;
@@ -7376,6 +7369,8 @@ as_info_init()
 	as_info_set_command("sindex-stat", info_command_sindex_stat, PERM_NONE);
 	as_info_set_command("sindex-list", info_command_sindex_list, PERM_NONE);
 	as_info_set_dynamic("sindex-builder-list", as_sbld_list, false);                         // List info for all secondary index builder jobs.
+
+	as_xdr_info_init();
 
 	// Spin up the Info threads *after* all static and dynamic Info commands have been added
 	// so we can guarantee that the static and dynamic lists will never again be changed.
