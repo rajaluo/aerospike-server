@@ -424,26 +424,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
 	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
 
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_trans_to_proxy_retry=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_trans_to_proxy_retry);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_transaction_reenqueue=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_transaction_reenqueue);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_regular_processed=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_regular_processed);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_prole_retry=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_prole_retry);
-
 	cf_dyn_buf_append_string(db,   ";stat_cluster_key_err_ack_dup_trans_reenqueue=");
 	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_err_ack_dup_trans_reenqueue);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_partition_transaction_queue_count=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_partition_transaction_queue_count);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_err_ack_rw_trans_reenqueue=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_err_ack_rw_trans_reenqueue);
 
 	cf_dyn_buf_append_string(db, ";stat_expired_objects=");
 	APPEND_STAT_COUNTER(db, g_config.stat_expired_objects);
