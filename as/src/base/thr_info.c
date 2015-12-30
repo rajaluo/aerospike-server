@@ -410,12 +410,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db,   ";stat_cluster_key_transaction_reenqueue=");
 	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_transaction_reenqueue);
 
-	cf_dyn_buf_append_string(db,   ";stat_slow_trans_queue_push=");
-	APPEND_STAT_COUNTER(db, g_config.stat_slow_trans_queue_push);
-
-	cf_dyn_buf_append_string(db,   ";stat_slow_trans_queue_pop=");
-	APPEND_STAT_COUNTER(db, g_config.stat_slow_trans_queue_pop);
-
 	cf_dyn_buf_append_string(db,   ";stat_cluster_key_regular_processed=");
 	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_regular_processed);
 
@@ -5796,7 +5790,9 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 			msg_set_str(m, INFO_FIELD_SERVICE_ADDRESS, g_service_str, MSG_SET_COPY);
 		}
 		if (g_config.alternate_address) {
-			msg_set_str(m, INFO_FIELD_ALT_ADDRESS, g_config.alternate_address, MSG_SET_COPY);
+			char alt_add_port[1024];
+			snprintf(alt_add_port, 1024, "%s:%d", g_config.alternate_address, g_config.socket.port);
+			msg_set_str(m, INFO_FIELD_ALT_ADDRESS, alt_add_port, MSG_SET_COPY);
 		}
 
 		pthread_mutex_unlock(&g_service_lock);

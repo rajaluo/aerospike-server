@@ -188,7 +188,6 @@ typedef struct as_config_s {
 	/* The transaction queues */
 	uint32_t			transactionq_current;
 	cf_queue			*transactionq_a[MAX_TRANSACTION_QUEUES];
-	cf_queue			*transaction_slow_q; // One slow queue to hold sleepy trans
 
 	/* object lock structure */
 	olock				*record_locks;
@@ -562,19 +561,6 @@ typedef struct as_config_s {
 	// consistent (the Node CK doesn't match the Partition CK), we must re-queue
 	// the transaction.
 	cf_atomic_int		stat_cluster_key_transaction_reenqueue;
-
-	// When the cluster keys match (either it's a client-generated transaction,
-	// or the proxy tr CK matches the Partition CK), BUT the node itself is not yet
-	// consistent (the Node CK doesn't match the Partition CK), we queue the
-	// transaction in a special "slow" transaction queue -- until the
-	// CK mismatch has been resolved.
-	cf_atomic_int		stat_slow_trans_queue_push;
-
-	// After we have queued up a transaction on the slow queue, we then count
-	// the number of times pop off a transaction from the slow queue and
-	// we re-queue it on to the regular queue.  We expect slow queue push
-	// and pop to match.
-	cf_atomic_int		stat_slow_trans_queue_pop;
 
 	// For all REGULAR jobs (that pass thru the CK test), count the number of
 	// regular RW jobs processed.

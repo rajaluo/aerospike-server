@@ -1301,6 +1301,13 @@ cfg_unknown_val_tok_1(const cfg_line* p_line)
 }
 
 void
+cfg_obsolete(const cfg_line* p_line, const char *new_tok)
+{
+	cf_crash_nostack(AS_CFG, "line %d :: '%s' is obsolete - must use '%s'",
+			p_line->num, p_line->name_tok, new_tok);
+}
+
+void
 cfg_not_supported(const cfg_line* p_line, const char *feature)
 {
 	cf_crash_nostack(AS_CFG, "line %d :: illegal value '%s' for config parameter '%s' - feature %s is not supported",
