@@ -63,9 +63,6 @@
  */
 bool g_use_arr = true;
 
-// AI_BTREE GLOBALS
-static cf_queue *g_q_dig_arr       = NULL;
-
 extern pthread_rwlock_t g_ai_rwlock;
 
 #define AI_GRLOCK()													\
@@ -96,34 +93,6 @@ static void
 init_ai_objFromDigest(ai_obj *akey, cf_digest *d)
 {
 	init_ai_objU160(akey, *(uint160 *)d);
-}
-
-
-void
-ai_btree_init(void) {
-	if (!g_q_dig_arr) {
-		g_q_dig_arr = cf_queue_create(sizeof(void *), true);
-	}
-}
-
-dig_arr_t *
-getDigestArray(void)
-{
-	dig_arr_t *dt;
-	if (cf_queue_pop(g_q_dig_arr, &dt, CF_QUEUE_NOWAIT) == CF_QUEUE_EMPTY) {
-		dt = cf_malloc(sizeof(dig_arr_t));
-	}
-	dt->num = 0;
-	return dt;
-}
-
-void
-releaseDigArrToQueue(void *v)
-{
-	dig_arr_t *dt = (dig_arr_t *)v;
-	if (cf_queue_sz(g_q_dig_arr) < DIG_ARRAY_QUEUE_HIGHWATER) {
-		cf_queue_push(g_q_dig_arr, &dt);
-	} else cf_free(dt);
 }
 
 const byte INIT_CAPACITY = 1;
