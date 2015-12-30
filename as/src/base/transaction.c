@@ -82,7 +82,6 @@ as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 		tr->keyd                  = cf_digest_zero;
 		tr->preprocessed          = false;
 	}
-	tr->incoming_cluster_key      = 0;
 	tr->trid                      = 0;
 	tr->flag                      = 0;
 	tr->generation                = 0;
@@ -98,8 +97,6 @@ as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 
 	tr->proxy_node                = 0;
 	tr->proxy_msg                 = 0;
-
-	tr->incoming_cluster_key      = 0;
 
 	UREQ_DATA_INIT(&tr->udata);
 

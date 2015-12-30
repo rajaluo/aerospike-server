@@ -218,7 +218,6 @@ write_request_create(void) {
 int write_request_init_tr(as_transaction *tr, void *wreq) {
 	// INIT_TR
 	write_request *wr = (write_request *) wreq;
-	tr->incoming_cluster_key = 0;
 	tr->start_time = wr->start_time;
 	tr->end_time = cf_atomic64_get(wr->end_time);
 
@@ -1293,9 +1292,9 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			 */
 			// INIT_TR
 			wreq_tr_element *e = cf_malloc( sizeof(wreq_tr_element) );
-			if (!e)
+			if (!e) {
 				cf_crash(AS_RW, "cf_malloc");
-			e->tr.incoming_cluster_key = tr->incoming_cluster_key;
+			}
 			e->tr.start_time = tr->start_time;
 			e->tr.end_time = tr->end_time;
 			e->tr.proto_fd_h = tr->proto_fd_h;

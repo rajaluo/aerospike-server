@@ -537,13 +537,11 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			// to 0 if it doesn't exist.
 			uint32_t timeout_ms = 0;
 			msg_get_uint32(m, PROXY_FIELD_TIMEOUT_MS, &timeout_ms);
-//			cf_info(AS_PROXY, "proxy msg: received timeout_ms of %d",timeout_ms);
 
 			// Put the as_msg on the normal queue for processing.
 			// INIT_TR
 			as_transaction tr;
 			as_transaction_init(&tr, key, msgp);
-			tr.incoming_cluster_key = cluster_key;
 			tr.end_time             = (timeout_ms != 0) ? ((uint64_t)timeout_ms * 1000000) + tr.start_time : 0;
 			tr.proxy_node           = id;
 			tr.proxy_msg            = m;
