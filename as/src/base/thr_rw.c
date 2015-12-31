@@ -1896,13 +1896,11 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	WR_TRACK_INFO(wr, "rw_process_ack: entering");
 
 	if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH) {
-		if (is_write) {
-			cf_debug_digest(AS_RW, "{%s:%d} rw_process_ack: cluster_key_mismatch(%d) on write allowed:",
-					wr->rsv.ns->name, wr->rsv.pid, result_code );
-		} else {
+		if (! is_write) {
 			rw_process_dup_cluster_key_mismatch(wr, &gk);
 			goto Out;
 		}
+		// else - CLUSTER_KEY_MISMATCH on replica write is treated as OK.
 	}
 	else if (result_code != AS_PROTO_RESULT_OK) {
 		cf_debug_digest(AS_RW, "{%s:%d} rw_process_ack: Processing unexpected response(%d):",
@@ -2727,9 +2725,10 @@ write_process(cf_node node, msg *m, bool respond)
 		}
 
 		if (tr.rsv.state == AS_PARTITION_STATE_ABSENT) {
-			cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent. ",
+			cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent ",
 					tr.rsv.pid);
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+			// The requester will treat this as OK, but send this for info.
 		}
 		else {
 			cf_debug_digest(AS_RW, keyd, "[PROLE write]: SingleBin(%d) generation(%d):",
@@ -2818,15 +2817,11 @@ write_process(cf_node node, msg *m, bool respond)
 			goto Out;
 		}
 
-		// Though there is a cluster key mismatch here, we could still report
-		// success, migrations will take care of the replication. We continue
-		// to ship cluster_key_mismatch because knowing that a replica did not
-		// write is potentially important knowledge for future migration
-		// enhancements.
 		if (rsv.state == AS_PARTITION_STATE_ABSENT) {
-			cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent. ",
+			cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent ",
 					rsv.pid);
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+			// The requester will treat this as OK, but send this for info.
 		}
 		else {
 			cf_debug_digest(AS_RW, keyd, "Write Pickled: PID(%u) PState(%d) Gen(%d):",
@@ -6173,67 +6168,66 @@ rw_multi_process(cf_node node, msg *m)
 	cf_atomic_int_incr(&g_config.wprocess_tree_count);
 	reserved = true;
 	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
-		cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent. ",
+		cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent ",
 				rsv.pid);
 		result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
+		goto Out;
 	}
-	else {
-		ldt_prole_info linfo;
-		memset(&linfo, 1, sizeof(ldt_prole_info));
+	ldt_prole_info linfo;
+	memset(&linfo, 1, sizeof(ldt_prole_info));
 
-		int offset = 0;
-		int count = 0;
-		while (1) {
-			uint8_t *buf = (uint8_t *) (pickled_buf + offset);
-			size_t sz = pickled_sz - offset;
-			if (!sz)
-				break;
+	int offset = 0;
+	int count = 0;
+	while (1) {
+		uint8_t *buf = (uint8_t *) (pickled_buf + offset);
+		size_t sz = pickled_sz - offset;
+		if (!sz)
+			break;
 
-			uint32_t op_msg_len = 0;
-			msg_type op_msg_type = 0;
-			msg *op_msg = NULL;
+		uint32_t op_msg_len = 0;
+		msg_type op_msg_type = 0;
+		msg *op_msg = NULL;
 
-			cf_detail(AS_RW, "MULTI_OP: Stage 1[%d] [%p,%d,%d,%d,%d,%d]",
-					count, buf, pickled_sz, sz, offset, op_msg_type, op_msg_len);
-			if (0 != msg_get_initial(&op_msg_len, &op_msg_type,
-					(const uint8_t *) buf, sz)) {
-				ret = -1;
-				goto Out;
-			}
-
-			cf_detail(AS_RW, "MULTI_OP: Stage 2[%d] [%p,%d,%d,%d,%d,%d]",
-					count, buf, pickled_sz, sz, offset, op_msg_type, op_msg_len);
-			op_msg = as_fabric_msg_get(op_msg_type);
-			if (!op_msg) {
-				cf_warning(AS_RW, "MULTI_OP: Running out of fabric message");
-				ret = -2;
-				goto Out;
-			}
-
-			if (msg_parse(op_msg, (const uint8_t *) buf, sz, false)) {
-				ret = -3;
-				as_fabric_msg_put(op_msg);
-				goto Out;
-			}
-
-			offset += op_msg_len;
-			ret = 0;
-			if (op_msg_type == M_TYPE_SINDEX) {
-				cf_detail(AS_RW, "MULTI_OP: Received Sindex multi op");
-			} else {
-				cf_detail(AS_RW, "MULTI_OP: Received LDT multi op");
-				ret = write_process_new(node, op_msg, &rsv, false, &linfo);
-			}
-			if (ret) {
-				ret = -3;
-				as_fabric_msg_put(op_msg);
-				goto Out;
-			}
-			as_fabric_msg_put(op_msg);
-			count++;
+		cf_detail(AS_RW, "MULTI_OP: Stage 1[%d] [%p,%d,%d,%d,%d,%d]",
+				count, buf, pickled_sz, sz, offset, op_msg_type, op_msg_len);
+		if (0 != msg_get_initial(&op_msg_len, &op_msg_type,
+				(const uint8_t *) buf, sz)) {
+			ret = -1;
+			goto Out;
 		}
-		result_code = AS_PROTO_RESULT_OK;
+
+		cf_detail(AS_RW, "MULTI_OP: Stage 2[%d] [%p,%d,%d,%d,%d,%d]",
+				count, buf, pickled_sz, sz, offset, op_msg_type, op_msg_len);
+		op_msg = as_fabric_msg_get(op_msg_type);
+		if (!op_msg) {
+			cf_warning(AS_RW, "MULTI_OP: Running out of fabric message");
+			ret = -2;
+			goto Out;
+		}
+
+		if (msg_parse(op_msg, (const uint8_t *) buf, sz, false)) {
+			ret = -3;
+			as_fabric_msg_put(op_msg);
+			goto Out;
+		}
+
+		offset += op_msg_len;
+		ret = 0;
+		if (op_msg_type == M_TYPE_SINDEX) {
+			cf_detail(AS_RW, "MULTI_OP: Received Sindex multi op");
+		} else {
+			cf_detail(AS_RW, "MULTI_OP: Received LDT multi op");
+			ret = write_process_new(node, op_msg, &rsv, false, &linfo);
+		}
+		if (ret) {
+			ret = -3;
+			as_fabric_msg_put(op_msg);
+			goto Out;
+		}
+		as_fabric_msg_put(op_msg);
+		count++;
 	}
+	result_code = AS_PROTO_RESULT_OK;
 Out:
 
 	if (ret) {

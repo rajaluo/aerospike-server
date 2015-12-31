@@ -634,10 +634,9 @@ process_transaction(as_transaction *tr)
 				cf_warning(AS_RW,
 						"Failing the shipped op due to reservation error %d",
 						rv);
-				int ret_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 
 				as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
-						ret_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+						AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
 			}
 			else if (tr->proto_fd_h) {
 				// Divert the transaction into the proxy system; in this case, no
@@ -645,8 +644,7 @@ process_transaction(as_transaction *tr)
 
 				// Proxy divert - reroute client message. Note that
 				// as_proxy_divert() consumes the msgp.
-				cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")",
-						tr->proxy_node);
+				cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")", tr->proxy_node);
 				// Originating node, no write request associated.
 				as_proxy_divert(tr->proxy_node, tr, ns, partition_cluster_key);
 				ns = 0;
@@ -655,11 +653,10 @@ process_transaction(as_transaction *tr)
 			else if (tr->proxy_msg) {
 				as_proxy_return_to_sender(tr);
 			}
-			else if (tr->udata.req_udata){
+			else if (tr->udata.req_udata) {
 				cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
 				if (udf_rw_needcomplete(tr)) {
-					udf_rw_complete(tr, AS_PROTO_RESULT_FAIL_UNKNOWN,
-							__FILE__,__LINE__);
+					udf_rw_complete(tr, AS_PROTO_RESULT_FAIL_UNKNOWN, __FILE__,__LINE__);
 				}
 			}
 			goto Cleanup;
