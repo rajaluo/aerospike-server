@@ -67,7 +67,7 @@
 #define PROXY_FIELD_OP 0
 #define PROXY_FIELD_TID 1
 #define PROXY_FIELD_DIGEST 2
-#define PROXY_FIELD_REDIRECT_DEPRECATED 3
+#define PROXY_FIELD_REDIRECT 3 // deprecated
 #define PROXY_FIELD_AS_PROTO 4 // request as_proto - currently contains only as_msg's
 #define PROXY_FIELD_CLUSTER_KEY 5
 #define PROXY_FIELD_TIMEOUT_MS 6
@@ -83,7 +83,7 @@ msg_template proxy_mt[] = {
 	{ PROXY_FIELD_OP, M_FT_UINT32 },
 	{ PROXY_FIELD_TID, M_FT_UINT32 },
 	{ PROXY_FIELD_DIGEST, M_FT_BUF },
-	{ PROXY_FIELD_REDIRECT_DEPRECATED, M_FT_UINT64 },
+	{ PROXY_FIELD_REDIRECT, M_FT_UINT64 },
 	{ PROXY_FIELD_AS_PROTO, M_FT_BUF },
 	{ PROXY_FIELD_CLUSTER_KEY, M_FT_UINT64 },
 	{ PROXY_FIELD_TIMEOUT_MS, M_FT_UINT32 },
@@ -756,8 +756,7 @@ as_proxy_return_to_sender(const as_transaction *tr)
 	msg_set_uint32(tr->proxy_msg, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
 	msg_set_uint32(tr->proxy_msg, PROXY_FIELD_TID, tid);
 	// Redirect field no longer used, set for backwards compatibility.
-	msg_set_uint64(tr->proxy_msg, PROXY_FIELD_REDIRECT_DEPRECATED,
-			tr->proxy_node);
+	msg_set_uint64(tr->proxy_msg, PROXY_FIELD_REDIRECT, tr->proxy_node);
 
 	if (0 != (rv = as_fabric_send(tr->proxy_node, tr->proxy_msg,
 			AS_FABRIC_PRIORITY_MEDIUM))) {
