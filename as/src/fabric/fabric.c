@@ -1173,7 +1173,9 @@ Next:
 		if (RCHASH_OK != rv) {
 			// This happens sometimes. I might get a connection request before I get a ping
 			// stating that anything exists. So make, then try again
-			fne_create(node);
+			fne = fne_create(node);
+
+			cf_debug(AS_FABRIC, "created an FNE %p for node %p the weird way from incoming fabric msg!", fne, node);
 
 			rv = rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne );
 			if (RCHASH_OK != rv) {
@@ -1181,7 +1183,6 @@ Next:
 				cf_debug(AS_FABRIC, "fabric_process_read_msg: cf_node unknown, can't create new endpoint descriptor odd %d", rv);
 				return false;
 			}
-			cf_debug(AS_FABRIC, "created an FNE %p for node %p the weird way from incoming fabric msg!", fne, node);
 		}
 
 		fabric_buffer_associate(fb, fne);
@@ -1739,12 +1740,6 @@ fabric_node_disconnect(cf_node node)
 
 		};
 
-		//// DEBUG - it should be GONE
-		//if (RCHASH_OK == rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne)) {
-		//	fflush(NULL);
-		//	fne_release(fne);
-		//}
-
 		// drain the queues
 		int rv;
 		do {
@@ -1806,11 +1801,11 @@ fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 
 				// create corresponding fabric node element - add it to the hash table
 				if (RCHASH_OK != rchash_get(g_fabric_node_element_hash, &(events[i].nodeid), sizeof(cf_node), (void **) &fne)) {
-					fne_create(events[i].nodeid);
-					cf_debug(AS_FABRIC, "fne(): created an FNE for node %p from HB_NODE_ARRIVE", events[i].nodeid);
+					fne = fne_create(events[i].nodeid);
+					cf_debug(AS_FABRIC, "fhe(): created an FNE %p for node %p from HB_NODE_ARRIVE", fne, events[i].nodeid);
 				} else {
-					cf_debug(AS_FABRIC, "fne(): found an already-existing FNE %p for node %p from HB_NODE_ARRIVE", fne, events[i].nodeid);
-					cf_debug(AS_FABRIC, "fne(): need to let go of it ~~ before fne_release(%p) count:%d", fne, cf_rc_count(fne));
+					cf_debug(AS_FABRIC, "fhe(): found an already-existing FNE %p for node %p from HB_NODE_ARRIVE", fne, events[i].nodeid);
+					cf_debug(AS_FABRIC, "fhe(): need to let go of it ~~ before fne_release(%p) count:%d", fne, cf_rc_count(fne));
 					fne_release(fne);
 				}
 				cf_info(AS_FABRIC, "fabric: node %"PRIx64" arrived", events[i].nodeid);
@@ -2701,8 +2696,8 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 	// careful with the ref count here: need to increment before every
 	// send except the last
 	int rv = 0;
-	int index = 0;
-	for (index = 0; index < nodes_sz ; index++) {
+	int index;
+	for (index = 0; index < nodes_sz; index++) {
 		if (index != nodes_sz - 1) {
 			msg_incr_ref(m);
 		}
@@ -2713,7 +2708,7 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 	}
 	return(0);
 Cleanup:
-	if (index != nodes_sz - 1) { // It is not last node in the list.
+	if (index != nodes_sz - 1) {
 		as_fabric_msg_put(m);
 	}
 	return(rv);

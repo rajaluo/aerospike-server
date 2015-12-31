@@ -562,10 +562,7 @@ as_sindex_thr_init()
 	// At the beginning it is false. It is set to true when all the sindex
 	// are populated.
 	g_sindex_boot_done = false;
-
-	ai_btree_init();
 }
-
 
 
 //==============================================================================
