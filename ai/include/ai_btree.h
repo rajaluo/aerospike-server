@@ -29,25 +29,11 @@
 
 #include <citrusleaf/cf_ll.h>
 
-#define NUM_DIGS_PER_ARR 51
-
-typedef struct dig_arr_t { 
-	uint32_t  num;
-	cf_digest digs[NUM_DIGS_PER_ARR];
-} __attribute__ ((packed)) dig_arr_t;
-
-typedef struct ll_recl_element_s {
-	cf_ll_element   ele;
-	dig_arr_t     * dig_arr;
-} ll_recl_element;
-
 void ai_arr_destroy(ai_arr *arr);
 
 void releaseDigArrToQueue(void *v);
 
 int ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx);
-
-void ai_btree_init(void);
 
 int ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts);
 

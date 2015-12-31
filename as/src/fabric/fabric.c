@@ -400,6 +400,7 @@ fne_create(cf_node node)
 		cf_info(AS_FABRIC, " received second notification of already extant node: %"PRIx64, node);
 		cf_queue_destroy(fne->xmit_buffer_queue);
 		cf_queue_priority_destroy(fne->xmit_msg_queue);
+		shash_destroy(fne->connected_fb_hash);
 		cf_rc_releaseandfree( fne );
 		return fne;
 	}
@@ -1482,7 +1483,7 @@ fabric_worker_fn(void *argv)
 							}
 						}
 						else {
-							cf_debug(AS_FABRIC, "worker %d received unknown notification on queue", worker_id, wqe.type);
+							cf_warning(AS_FABRIC, "worker %d received unknown notification on queue", worker_id, wqe.type);
 						}
 					}
 				}
@@ -1738,12 +1739,6 @@ fabric_node_disconnect(cf_node node)
 			cf_info(AS_FABRIC, "fabric disconnecting FAIL rchash delete: node %"PRIx64, node);
 
 		};
-
-		// DEBUG - it should be GONE
-		if (RCHASH_OK == rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne)) {
-			cf_info(AS_FABRIC, "fabric disconnecting: deleted from hash, but still there SUPER FAIL");
-			fne_release(fne);
-		}
 
 		// drain the queues
 		int rv;
@@ -2326,7 +2321,10 @@ as_fabric_transact_reply(msg *m, void *transact_data) {
 	// TODO: make sure it's in the outbound hash?
 
 	// send the response for the first time
-	as_fabric_send(ftr->node, m, AS_FABRIC_PRIORITY_MEDIUM);
+	int rv = 0;
+	if ((rv = as_fabric_send(ftr->node, m, AS_FABRIC_PRIORITY_MEDIUM)) != 0) {
+		as_fabric_msg_put(m);
+	}
 
 	return(0);
 }
@@ -2608,7 +2606,7 @@ ll_ftx_reduce_fn(cf_ll_element *le, void *udata)
 			}
 		}
 		// Decrement ref count, incremented by rchash_get
-		cf_rc_release(ftx);
+		fabric_transact_xmit_release(ftx);
 	}
 	// Remove it from link list
 	return (CF_LL_REDUCE_DELETE);
@@ -2698,16 +2696,21 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 	// careful with the ref count here: need to increment before every
 	// send except the last
 	int rv = 0;
-	for (int i = 0; i < nodes_sz ; i++) {
-		if (i != nodes_sz - 1) {
+	int index;
+	for (index = 0; index < nodes_sz; index++) {
+		if (index != nodes_sz - 1) {
 			msg_incr_ref(m);
 		}
-		rv = as_fabric_send(nodes[i], m, priority);
-		if (0 != rv) goto Cleanup;
+		rv = as_fabric_send(nodes[index], m, priority);
+		if (0 != rv) {
+			goto Cleanup;
+		}
 	}
 	return(0);
 Cleanup:
-	as_fabric_msg_put(m);
+	if (index != nodes_sz - 1) {
+		as_fabric_msg_put(m);
+	}
 	return(rv);
 }
 
