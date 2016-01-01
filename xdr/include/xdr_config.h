@@ -111,7 +111,8 @@ typedef enum {
 	// Remote datacenter options:
 	XDR_CASE_DC_NODE_ADDRESS_PORT,
 	XDR_CASE_DC_INT_EXT_IPMAP,
-	XDR_CASE_DC_SECURITY_CONFIG_FILE
+	XDR_CASE_DC_SECURITY_CONFIG_FILE,
+	XDR_CASE_DC_USE_ALTERNATE_SERVICES
 } xdr_cfg_case_id;
 
 /* Configuration parser token plus case-identifier pair. The server (cfg.c)

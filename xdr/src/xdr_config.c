@@ -97,6 +97,7 @@ const xdr_cfg_opt XDR_DC_OPTS[] = {
 		{ "dc-node-address-port",			XDR_CASE_DC_NODE_ADDRESS_PORT },
 		{ "dc-int-ext-ipmap",				XDR_CASE_DC_INT_EXT_IPMAP },
 		{ "dc-security-config-file",		XDR_CASE_DC_SECURITY_CONFIG_FILE },
+		{ "dc-use-alternate-services",		XDR_CASE_DC_USE_ALTERNATE_SERVICES },
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -150,6 +151,7 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_local_port = 0;		//Port of the remote node
 	c->xdr_write_batch_size = 100;	//Number of digests to read from pipe before flushing them to disk
 	c->xdr_max_recs_inflight = 0; // Max number of digests shipped that can be in the async queue at any given point
+								  // The default will be determined based on remote DC's pipelining capabilties
 	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go
 	c->xdr_ship_slab_size = 500;    // Number of digests processed by one shipper thread.
 	c->xdr_ship_threads = 8;        // Number of XDR shipper threads.
