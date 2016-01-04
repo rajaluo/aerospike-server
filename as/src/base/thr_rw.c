@@ -218,7 +218,6 @@ write_request_create(void) {
 int write_request_init_tr(as_transaction *tr, void *wreq) {
 	// INIT_TR
 	write_request *wr = (write_request *) wreq;
-	tr->incoming_cluster_key = 0;
 	tr->start_time = wr->start_time;
 	tr->end_time = cf_atomic64_get(wr->end_time);
 
@@ -1293,9 +1292,9 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			 */
 			// INIT_TR
 			wreq_tr_element *e = cf_malloc( sizeof(wreq_tr_element) );
-			if (!e)
+			if (!e) {
 				cf_crash(AS_RW, "cf_malloc");
-			e->tr.incoming_cluster_key = tr->incoming_cluster_key;
+			}
 			e->tr.start_time = tr->start_time;
 			e->tr.end_time = tr->end_time;
 			e->tr.proto_fd_h = tr->proto_fd_h;
@@ -1759,7 +1758,7 @@ finish_rw_process_ack(write_request *wr, uint32_t result_code, bool is_repl_writ
 }
 
 void
-rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk, bool is_repl_write)
+rw_process_dup_cluster_key_mismatch(write_request *wr, global_keyd *gk)
 {
 	cf_debug(AS_RW,
 			"{%s:%d} rw_process_cluster_key_mismatch: CLUSTER KEY MISMATCH rsp %"PRIx64" %s",
@@ -1773,39 +1772,22 @@ rw_process_cluster_key_mismatch(write_request *wr, global_keyd *gk, bool is_repl
 		return;
 	}
 
-	if (! is_repl_write) {
-		if (1 == cf_atomic32_incr(&wr->dupl_trans_complete)) {
-			cf_atomic32_incr(&wr->trans_complete);
-			// also complete the next transaction. we are bailing out
-			// INIT_TR
-			as_transaction tr;
-			write_request_init_tr(&tr, wr);
-			MICROBENCHMARK_RESET();
-
-			cf_atomic_int_incr(&g_config.stat_cluster_key_err_ack_dup_trans_reenqueue);
-
-			cf_debug_digest(AS_RW, &(wr->keyd), "[RE-ENQUEUE JOB from CK ERR ACK:1] TrID(0) SelfNode(%"PRIx64")",
-					g_config.self_node );
-
-			thr_tsvc_enqueue(&tr);
-			wr->msgp = 0;
-			WR_TRACK_INFO(wr, "rw_process_cluster_key_mismatch: cluster key mismatch deleting - duplicate ");
-			must_delete = true;
-		}
-	} else if (1 == cf_atomic32_incr(&wr->trans_complete)) {
+	if (1 == cf_atomic32_incr(&wr->dupl_trans_complete)) {
+		cf_atomic32_incr(&wr->trans_complete);
+		// also complete the next transaction. we are bailing out
 		// INIT_TR
 		as_transaction tr;
 		write_request_init_tr(&tr, wr);
 		MICROBENCHMARK_RESET();
 
-		cf_atomic_int_incr(&g_config.stat_cluster_key_err_ack_rw_trans_reenqueue);
+		cf_atomic_int_incr(&g_config.stat_cluster_key_err_ack_dup_trans_reenqueue);
 
-		cf_debug_digest(AS_RW, &(wr->keyd), "[RE-ENQUEUE JOB from CK ERR ACK:2] TrID(0) SelfNode(%"PRIx64")",
+		cf_debug_digest(AS_RW, &(wr->keyd), "[RE-ENQUEUE JOB from CK ERR ACK:1] TrID(0) SelfNode(%"PRIx64")",
 				g_config.self_node );
 
 		thr_tsvc_enqueue(&tr);
-		wr->msgp = 0; // NULL this out so that the write_destructor does not free this pointer.
-		WR_TRACK_INFO(wr, "rw_process_cluster_key_mismatch: cluster key mismatch deleting - final ");
+		wr->msgp = 0;
+		WR_TRACK_INFO(wr, "rw_process_cluster_key_mismatch: cluster key mismatch deleting - duplicate ");
 		must_delete = true;
 	}
 
@@ -1914,8 +1896,11 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	WR_TRACK_INFO(wr, "rw_process_ack: entering");
 
 	if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH) {
-		rw_process_cluster_key_mismatch(wr, &gk, is_write);
-		goto Out;
+		if (! is_write) {
+			rw_process_dup_cluster_key_mismatch(wr, &gk);
+			goto Out;
+		}
+		// else - CLUSTER_KEY_MISMATCH on replica write is treated as OK.
 	}
 	else if (result_code != AS_PROTO_RESULT_OK) {
 		cf_debug_digest(AS_RW, "{%s:%d} rw_process_ack: Processing unexpected response(%d):",
@@ -2672,13 +2657,6 @@ write_process(cf_node node, msg *m, bool respond)
 		goto Out;
 	}
 
-	uint64_t cluster_key;
-	if (0 != msg_get_uint64(m, RW_FIELD_CLUSTER_KEY, &cluster_key)) {
-		cf_warning(AS_RW, "write process received message without cluster key");
-		cf_atomic_int_incr(&g_config.rw_err_write_internal);
-		goto Out;
-	}
-
 	as_generation generation = 0;
 	if (0 != msg_get_uint32(m, RW_FIELD_GENERATION, &generation)) {
 		cf_detail(AS_RW, "write process recevied message without generation");
@@ -2747,15 +2725,10 @@ write_process(cf_node node, msg *m, bool respond)
 		}
 
 		if (tr.rsv.state == AS_PARTITION_STATE_ABSENT) {
-			cf_debug_digest(AS_RW, keyd, "[PROLE STATE MISMATCH:1] TID(0) Partition PID(%u) State is Absent or other(%u). Return to Sender.",
-					tr.rsv.pid, tr.rsv.state );
+			cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent ",
+					tr.rsv.pid);
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
-			// We're going to have to retry this Prole Write operation.  We'll
-			// do this by telling the master to retry (which will cause the
-			// master to re-enqueue the transaction).
-			cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
-			cf_debug_digest(AS_RW, keyd, "[CK MISMATCH] P PID(%u) State ABSENT or other(%u):",
-					tr.rsv.pid, tr.rsv.state );
+			// The requester will treat this as OK, but send this for info.
 		}
 		else {
 			cf_debug_digest(AS_RW, keyd, "[PROLE write]: SingleBin(%d) generation(%d):",
@@ -2844,15 +2817,11 @@ write_process(cf_node node, msg *m, bool respond)
 			goto Out;
 		}
 
-		// See if we're being asked to write into an ABSENT PROLE PARTITION.
-		// If so, then DO NOT WRITE.  Instead, return an error so that the
-		// Master will retry with the correct node.
 		if (rsv.state == AS_PARTITION_STATE_ABSENT) {
+			cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent ",
+					rsv.pid);
 			result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
-			cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
-			cf_debug_digest(AS_RW, keyd,
-					"[PROLE STATE MISMATCH:2] TID(0) P PID(%u) State:ABSENT or other(%u). Return to Sender. :",
-					rsv.pid, rsv.state  );
+			// The requester will treat this as OK, but send this for info.
 		}
 		else {
 			cf_debug_digest(AS_RW, keyd, "Write Pickled: PID(%u) PState(%d) Gen(%d):",
@@ -2866,7 +2835,6 @@ write_process(cf_node node, msg *m, bool respond)
 			} else {
 				result_code = AS_PROTO_RESULT_OK;
 			}
-
 		} // end else valid Partition state
 
 		as_partition_release(&rsv);
@@ -2880,8 +2848,6 @@ Out:
 			cf_atomic_int_incr(&g_config.err_write_fail_prole_generation);
 		} else if (result_code == AS_PROTO_RESULT_FAIL_UNKNOWN) {
 			cf_atomic_int_incr(&g_config.err_write_fail_prole_unknown);
-		} else if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH ) {
-			cf_atomic_int_incr(&g_config.rw_err_write_cluster_key);
 		}
 	}
 
@@ -5169,13 +5135,6 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		goto Out;
 	}
 
-	uint64_t cluster_key;
-	if (0 != msg_get_uint64(m, RW_FIELD_CLUSTER_KEY, &cluster_key)) {
-		cf_warning(AS_RW, "write process received message without cluster key");
-		cf_atomic_int_incr(&g_config.rw_err_write_internal);
-		goto Out;
-	}
-
 	as_generation generation = 0;
 	if (0 != msg_get_uint32(m, RW_FIELD_GENERATION, &generation)) {
 		goto Out;
@@ -6177,12 +6136,6 @@ rw_multi_process(cf_node node, msg *m)
 		goto Out;
 	}
 
-	uint64_t cluster_key;
-	if (0 != msg_get_uint64(m, RW_FIELD_CLUSTER_KEY, &cluster_key)) {
-		cf_warning(AS_RW, "MULTI_OP: Message without Cluster Key");
-		goto Out;
-	}
-
 	uint8_t *ns_name = 0;
 	size_t ns_name_len;
 	if (0 != msg_get_buf(m, RW_FIELD_NAMESPACE, &ns_name, &ns_name_len,
@@ -6215,11 +6168,9 @@ rw_multi_process(cf_node node, msg *m)
 	cf_atomic_int_incr(&g_config.wprocess_tree_count);
 	reserved = true;
 	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
+		cf_debug_digest(AS_RW, keyd, "prole delete: ptn_id:%u state: absent ",
+				rsv.pid);
 		result_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
-		cf_atomic_int_incr(&g_config.stat_cluster_key_prole_retry);
-		cf_debug_digest(AS_RW, keyd,
-				"[PROLE STATE MISMATCH:2] TID(0) P PID(%u) State:ABSENT or other(%u). Return to Sender. :",
-				rsv.pid, rsv.state  );
 		goto Out;
 	}
 	ldt_prole_info linfo;

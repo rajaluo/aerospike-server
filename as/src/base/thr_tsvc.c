@@ -44,7 +44,6 @@
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/thr_batch.h"
-#include "base/thr_info.h"
 #include "base/thr_proxy.h"
 #include "base/thr_write.h"
 #include "base/transaction.h"
@@ -357,24 +356,14 @@ process_transaction(as_transaction *tr)
 		goto Cleanup;
 	}
 
-	if (msgp->proto.type == PROTO_TYPE_INFO) {
-
-		// Info request - process it.
-		if (0 == as_info(tr)) {
-			free_msgp = false;
-		}
-
-		goto Cleanup;
-	}
-
 	if (! as_partition_balance_is_init_resolved() &&
 			(tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) == 0) {
 		if (tr->preprocessed) {
 			// It's very possible proxy transactions get here.
-	        cf_debug(AS_TSVC, "rejecting fabric transaction - initial partition balance unresolved");
+			cf_debug(AS_TSVC, "rejecting fabric transaction - initial partition balance unresolved");
 		}
 		else {
-	        cf_warning(AS_TSVC, "rejecting client transaction - initial partition balance unresolved");
+			cf_warning(AS_TSVC, "rejecting client transaction - initial partition balance unresolved");
 		}
 		as_transaction_error(tr, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		goto Cleanup;
@@ -591,37 +580,7 @@ process_transaction(as_transaction *tr)
 			cf_crash(AS_TSVC, "invalid destination while reserving partition");
 		}
 
-		// If a partition reservation was obtained and the cluster keys (CK)
-		// DO NOT match, then release this reservation.
-		//
-		// Note that this execution path drops into the PROXY DIVERT case if the
-		// transaction CK does not match the partition CK. This is a reasonable
-		// action, since if the cluster got reorganized, it is likely that THIS
-		// NODE will no longer be the master for THIS partition, and thus we
-		// will need proxy_divert() to send it to the right node.
-		//
-		// Also, note that incoming_CK is ZERO is when it comes from the CLIENT,
-		// so any message from the client ALWAYS MATCHES. The OTHER case
-		// (non-zero) is when it is sent by proxy - and THEN it is important
-		// that the C Keys match.
-		bool cluster_keys_match = (tr->incoming_cluster_key == 0)
-				|| (tr->incoming_cluster_key == partition_cluster_key);
-		if ((0 == rv) && !cluster_keys_match) {
-			// Transaction and Partition cluster keys DO NOT MATCH, AND this msg
-			// was sent by another node (not the client).
-			ns = 0;
-			as_partition_release(&tr->rsv);
-			cf_atomic_int_decr(&g_config.rw_tree_count);
-			memset(&tr->rsv, -1, sizeof(tr->rsv)); // probably not needed
-			cf_debug_digest(AS_TSVC, &(tr->keyd),
-					"Trans/Part Cluster Key Mismatch: ReQ! P(%u) XCK(%"PRIx64") PtCK(%"PRIx64"): ",
-					tr->rsv.pid, tr->incoming_cluster_key, partition_cluster_key);
-			cf_atomic_int_incr(&g_config.stat_cluster_key_trans_to_proxy_retry);
-			// Execution path naturally drops into the proxy handling section
-			// below, which is the "else" clause of this next "if".
-		}
-
-		if ((0 == rv) && cluster_keys_match) {
+		if (0 == rv) {
 			ns = 0; // got a reservation
 			tr->microbenchmark_is_resolve = false;
 			if (msgp->msg.info2 & AS_MSG_INFO2_WRITE) {
@@ -657,57 +616,36 @@ process_transaction(as_transaction *tr)
 				as_rw_process_result(rv, tr, &free_msgp);
 			}
 		} else {
-			// rv != 0 (reservation failed) or cluster keys DO NOT MATCH.
+			// rv != 0 (reservation failed)
 			//
 			// Make sure that if it is shipped op it is not further redirected.
 			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-
-				int ret_code = 0;
-				if (!cluster_keys_match) {
-					ret_code = AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH;
-				} else {
-					cf_warning(AS_RW,
-							"Failing the shipped op due to reservation error %d",
-							rv);
-					ret_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-				}
+				cf_warning(AS_RW,
+						"Failing the shipped op due to reservation error %d",
+						rv);
 
 				as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
-						ret_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
-
-			} else if (tr->proto_fd_h) {
+						AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+			}
+			else if (tr->proto_fd_h) {
 				// Divert the transaction into the proxy system; in this case, no
-				// reservation was obtained. Pass the cluster key along. Note that
-				// if we landed here because of a CLUSTER KEY MISMATCH,
-				// (transaction CK != Partition CK), then it is probably the case
-				// that we have to forward this request by proxy, since the
-				// partition for this transaction has probably moved and is no
-				// longer appropriate for this node.
+				// reservation was obtained. Pass the cluster key along.
 
 				// Proxy divert - reroute client message. Note that
 				// as_proxy_divert() consumes the msgp.
-				cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")", dest);
+				cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")", tr->proxy_node);
 				// Originating node, no write request associated.
-				as_proxy_divert(dest, tr, ns, partition_cluster_key);
+				as_proxy_divert(tr->proxy_node, tr, ns, partition_cluster_key);
 				ns = 0;
 				free_msgp = false;
-			} else if (tr->proxy_msg) {
-				// Reroute proxy msg: in this case, send the request back to the
-				// original node for a retry. dest returned by partition
-				// reservation is meaningless here.
-				if (!cluster_keys_match) {
-					dest = tr->proxy_node;
-					cf_debug_digest(AS_PROXY, &(tr->keyd),
-							"[CLUSTER KEY MISMATCH] detected sending proxy redirect back to first node(%"PRIx64"): ", dest);
-				}
-				// Proxy redirect.
-				cf_debug_digest(AS_PROXY, &(tr->keyd),
-						"proxy REDIRECT (wr) to(%"PRIx64") :", dest);
-				as_proxy_send_redirect(tr->proxy_node, tr->proxy_msg, dest);
-			} else if (tr->udata.req_udata){
+			}
+			else if (tr->proxy_msg) {
+				as_proxy_return_to_sender(tr);
+			}
+			else if (tr->udata.req_udata) {
 				cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
 				if (udf_rw_needcomplete(tr)) {
-					udf_rw_complete(tr, cluster_keys_match ? AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH : AS_PROTO_RESULT_FAIL_UNKNOWN, __FILE__,__LINE__);
+					udf_rw_complete(tr, AS_PROTO_RESULT_FAIL_UNKNOWN, __FILE__,__LINE__);
 				}
 			}
 			goto Cleanup;

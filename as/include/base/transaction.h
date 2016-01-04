@@ -219,9 +219,6 @@ typedef struct as_transaction_s {
 	// to collect microbenchmarks
 	uint64_t          microbenchmark_time;
 
-	/* incoming cluster key passed in a proxy request */
-	uint64_t          incoming_cluster_key;
-
 	// Batch
 	struct as_batch_shared* batch_shared;
 	uint32_t batch_index;

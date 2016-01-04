@@ -424,26 +424,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
 	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
 
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_trans_to_proxy_retry=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_trans_to_proxy_retry);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_transaction_reenqueue=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_transaction_reenqueue);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_regular_processed=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_regular_processed);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_prole_retry=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_prole_retry);
-
 	cf_dyn_buf_append_string(db,   ";stat_cluster_key_err_ack_dup_trans_reenqueue=");
 	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_err_ack_dup_trans_reenqueue);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_partition_transaction_queue_count=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_partition_transaction_queue_count);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_err_ack_rw_trans_reenqueue=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_err_ack_rw_trans_reenqueue);
 
 	cf_dyn_buf_append_string(db, ";stat_expired_objects=");
 	APPEND_STAT_COUNTER(db, g_config.stat_expired_objects);
@@ -2615,8 +2597,6 @@ info_network_info_config_get(cf_dyn_buf *db)
 // Ideally XDR should use xdr-info-port and asd should use info-port.
 	cf_dyn_buf_append_string(db, ";network-info-port=");
 	cf_dyn_buf_append_int(db, g_config.info_port);
-	cf_dyn_buf_append_string(db, ";enable-fastpath=");
-	cf_dyn_buf_append_string(db, (g_config.info_fastpath_enabled ? "true" : "false"));
 }
 
 void
@@ -3521,23 +3501,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of heartbeat protocol version to %s", context);
 			if (0 > as_hb_set_protocol(protocol))
-				goto Error;
-		}
-		else
-			goto Error;
-	}
-	else if (strcmp(context, "network.info") == 0) {
-		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "enable-fastpath", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of enable-fastpath from %s to %s", bool_val[g_config.info_fastpath_enabled], context);
-				g_config.info_fastpath_enabled = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of enable-fastpath from %s to %s", bool_val[g_config.info_fastpath_enabled], context);
-				g_config.info_fastpath_enabled = false;
-			}
-			else
 				goto Error;
 		}
 		else
