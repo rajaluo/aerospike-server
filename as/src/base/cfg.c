@@ -185,9 +185,6 @@ cfg_set_defaults()
 	c->hb_mesh_rw_retry_timeout = 500;
 	c->hb_protocol = AS_HB_PROTOCOL_V2; // default to the latest heartbeat protocol version
 
-	// Network info defaults.
-	c->info_fastpath_enabled = true; // by default, don't force Info requests to go through the transaction queue
-
 	// XDR defaults.
 	xdr_config_defaults(&(c->xdr_cfg));
 
@@ -457,7 +454,7 @@ typedef enum {
 	// Normally visible, in canonical configuration file order:
 	CASE_NETWORK_INFO_ADDRESS,
 	CASE_NETWORK_INFO_PORT,
-	// Normally hidden:
+	// Deprecated:
 	CASE_NETWORK_INFO_ENABLE_FASTPATH,
 
 	// Namespace options:
@@ -2465,7 +2462,7 @@ as_config_init(const char *config_file)
 				c->info_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_INFO_ENABLE_FASTPATH:
-				c->info_fastpath_enabled = cfg_bool(&line);
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);

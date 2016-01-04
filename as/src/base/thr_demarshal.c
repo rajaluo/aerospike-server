@@ -730,9 +730,8 @@ thr_demarshal(void *arg)
 						goto NextEvent;
 					}
 
-					// Fast path for info protocol requests.
-					if ((tr.msgp->proto.type == PROTO_TYPE_INFO) && g_config.info_fastpath_enabled) {
-						cf_debug(AS_DEMARSHAL, "[Sending Info request via fast path.]");
+					// Info protocol requests.
+					if (tr.msgp->proto.type == PROTO_TYPE_INFO) {
 						if (as_info(&tr)) {
 							cf_warning(AS_DEMARSHAL, "Info request failed to be enqueued ~~ Freeing protocol buffer");
 							goto NextEvent_FD_Cleanup;
