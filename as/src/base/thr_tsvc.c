@@ -44,7 +44,6 @@
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/thr_batch.h"
-#include "base/thr_info.h"
 #include "base/thr_proxy.h"
 #include "base/thr_write.h"
 #include "base/transaction.h"
@@ -354,16 +353,6 @@ process_transaction(as_transaction *tr)
 		goto Cleanup;
 	} else if (retval == 2) {
 		free_msgp = true;
-		goto Cleanup;
-	}
-
-	if (msgp->proto.type == PROTO_TYPE_INFO) {
-
-		// Info request - process it.
-		if (0 == as_info(tr)) {
-			free_msgp = false;
-		}
-
 		goto Cleanup;
 	}
 

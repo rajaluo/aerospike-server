@@ -150,9 +150,6 @@ typedef struct as_config_s {
 	/* The TCP port for the info socket */
 	int					info_port;
 
-	/* Whether to bypass thr_tsvc for Info protocol requests. */
-	bool				info_fastpath_enabled;
-
 	/* The TCP socket for the listener */
 	cf_socket_cfg		socket;
 
