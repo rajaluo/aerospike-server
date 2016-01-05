@@ -82,7 +82,6 @@ as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 		tr->keyd                  = cf_digest_zero;
 		tr->preprocessed          = false;
 	}
-	tr->trid                      = 0;
 	tr->flag                      = 0;
 	tr->generation                = 0;
 	tr->result_code               = AS_PROTO_RESULT_OK;
@@ -166,17 +165,6 @@ int as_transaction_prepare(as_transaction *tr) {
 		cf_debug(AS_PROTO, "received request with digest array, batch");
 		return(-3);
 	}
-
-	// If the client had sent a transaction-id, set it as the attribute for the transaction.
-	as_msg_field *tridfp = as_msg_field_get(m, AS_MSG_FIELD_TYPE_TRID);
-	if (tridfp) {
-		//We know that the network byte order is big-endian.
-		//So, convert the 64bit integer from big-endian to host byte order.
-		uint64_t trid_nbo;
-		memcpy(&trid_nbo, tridfp->data, sizeof(trid_nbo));
-		tr->trid = __be64_to_cpu(trid_nbo);
-	}
-
 
 	// It's tempting to move this to the final return, but queries
 	// actually escape in the if clause below ...
@@ -354,7 +342,7 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 			tr->msgp = 0;
 		}
 		else {
-			as_msg_send_reply(tr->proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, tr->trid, NULL);
+			as_msg_send_reply(tr->proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
 			tr->proto_fd_h = 0;
 			MICROBENCHMARK_HIST_INSERT_P(error_hist);
 			cf_atomic_int_incr(&g_config.err_tsvc_requests);
