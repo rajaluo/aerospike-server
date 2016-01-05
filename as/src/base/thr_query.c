@@ -2820,7 +2820,7 @@ query_setup(as_transaction *tr, as_query_transaction **qtrp)
 	query_setup_fd(qtr, tr);
 
 	// Consume everything from tr rest will be picked up in init
-	qtr->trid                = tr->trid;
+	qtr->trid                = as_transaction_trid(tr);
 	qtr->ns                  = ns;
 	qtr->setname             = setname;
 	qtr->si                  = si;

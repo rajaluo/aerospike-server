@@ -304,7 +304,7 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 						tr->result_code, tr->proxy_node);
 			}
 			as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
-					tr->result_code, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+					tr->result_code, 0, 0, 0, 0, 0, 0, as_transaction_trid(tr), NULL);
 		}
 		else {
 			as_transaction_error(tr, tr->result_code);
@@ -399,7 +399,6 @@ process_transaction(as_transaction *tr)
 				int rr = 0;
 				if (as_msg_field_get(&msgp->msg,
 						AS_MSG_FIELD_TYPE_INDEX_RANGE) != NULL) {
-					cf_detail(AS_TSVC, "Received Query Request(%"PRIx64")", tr->trid);
 					cf_atomic64_incr(&g_config.query_reqs);
 					if (! as_security_check_data_op(tr, &msgp->msg, ns,
 							is_udf(msgp) ? PERM_UDF_QUERY : PERM_QUERY)) {
@@ -416,7 +415,6 @@ process_transaction(as_transaction *tr)
 						as_transaction_error(tr, tr->result_code);
 					}
 				} else {
-					cf_debug(AS_TSVC, "Received Scan Request: TrID(%"PRIx64")", tr->trid);
 					// We got a scan, it might be for udfs, no need to know now,
 					// for now, do not free msgp for all the cases. Should take
 					// care of it inside as_scan.
@@ -625,7 +623,7 @@ process_transaction(as_transaction *tr)
 						rv);
 
 				as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
-						AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+						AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, 0, 0, 0, 0, as_transaction_trid(tr), NULL);
 			}
 			else if (tr->proto_fd_h) {
 				// Divert the transaction into the proxy system; in this case, no
@@ -635,7 +633,7 @@ process_transaction(as_transaction *tr)
 				// as_proxy_divert() consumes the msgp.
 				cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")", tr->proxy_node);
 				// Originating node, no write request associated.
-				as_proxy_divert(tr->proxy_node, tr, ns, partition_cluster_key);
+				as_proxy_divert(dest, tr, ns, partition_cluster_key);
 				ns = 0;
 				free_msgp = false;
 			}
@@ -670,7 +668,7 @@ process_transaction(as_transaction *tr)
 						tr->proxy_node);
 			}
 			as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
-					AS_PROTO_RESULT_FAIL_PARAMETER, 0, 0, 0, 0, 0, 0, tr->trid, NULL);
+					AS_PROTO_RESULT_FAIL_PARAMETER, 0, 0, 0, 0, 0, 0, as_transaction_trid(tr), NULL);
 		}
 		goto Cleanup;
 	}

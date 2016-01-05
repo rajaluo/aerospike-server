@@ -553,7 +553,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 				tr.flag |= AS_TRANSACTION_FLAG_SHIPPED_OP;
 				cf_detail_digest(AS_PROXY, &tr.keyd, "SHIPPED_OP WINNER Operation Received");
 			} else {
-				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest tid(%d)", tr.trid);
+				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest ");
 			}
 
 			MICROBENCHMARK_RESET();
