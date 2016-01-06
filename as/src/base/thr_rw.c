@@ -4654,8 +4654,15 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 
 	rd->write_to_device = true;
 
+	// Secondary index may need old particles - stop as_storage_record_close()
+	// from freeing them. TODO - this is an ugly hack! Should really split a
+	// as_storage_record_write() off from as_storage_record_close()!
+	uint8_t* keep_read_buf = rd->u.ssd.must_free_block;
+	rd->u.ssd.must_free_block = NULL;
+
 	if ((result = as_storage_record_close(r, rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
+		rd->u.ssd.must_free_block = keep_read_buf; // end of hack
 		write_local_pickle_unwind(pickle);
 		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
@@ -4674,6 +4681,11 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 			write_local_sindex_update(ns, set_name, &tr->keyd,
 					old_bins, n_old_bins, new_bins, n_new_bins)) {
 		tr->flag |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+	}
+
+	// End of hack - OK to free the old particles now.
+	if (keep_read_buf) {
+		cf_free(keep_read_buf);
 	}
 
 	//------------------------------------------------------
