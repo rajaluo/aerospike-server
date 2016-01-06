@@ -405,10 +405,11 @@ process_transaction(as_transaction *tr)
 						as_transaction_error(tr, tr->result_code);
 						goto Cleanup;
 					}
-					// Responsibility of query layer to free the msgp.
-					free_msgp = false;
 					rr = as_query(tr);   // <><><> Q U E R Y <><><>
-					if (rr != 0) {
+					if (rr == 0) {
+						free_msgp = false;
+					}
+					else {
 						cf_atomic64_incr(&g_config.query_fail);
 						cf_debug(AS_TSVC, "Query failed with error %d",
 								tr->result_code);
@@ -423,9 +424,11 @@ process_transaction(as_transaction *tr)
 						as_transaction_error(tr, tr->result_code);
 						goto Cleanup;
 					}
-					free_msgp = false;
 					rr = as_scan(tr);   // <><><> S C A N <><><>
-					if (rr != 0) {
+					if (rr == 0) {
+						free_msgp = false;
+					}
+					else {
 						as_transaction_error(tr, rr);
 					}
 

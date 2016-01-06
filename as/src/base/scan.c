@@ -162,7 +162,6 @@ as_scan(as_transaction *tr)
 
 	if ((result = get_scan_ns(&tr->msgp->msg, &ns)) != 0 ||
 		(result = get_scan_set_id(&tr->msgp->msg, ns, &set_id)) != 0) {
-		cf_free(tr->msgp);
 		return result;
 	}
 
@@ -180,10 +179,6 @@ as_scan(as_transaction *tr)
 		cf_warning(AS_SCAN, "can't identify scan type");
 		result = AS_PROTO_RESULT_FAIL_PARAMETER;
 		break;
-	}
-
-	if (result != AS_PROTO_RESULT_OK) {
-		cf_free(tr->msgp);
 	}
 
 	return result;

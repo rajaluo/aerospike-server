@@ -2886,10 +2886,6 @@ as_query(as_transaction *tr)
 		}
 		return AS_QUERY_OK;
 	} else if (rv == AS_QUERY_ERR) {
-		if (tr->msgp) {
-			cf_free(tr->msgp);
-			tr->msgp = NULL;
-		}
 		return AS_QUERY_ERR;
 	}
 
@@ -2903,7 +2899,6 @@ as_query(as_transaction *tr)
 			// This error will be accounted by thr_tsvc layer. Thus
 			// reset fd_h and msgp before calling qtr release, let
 			// transaction deal with failure
-			cf_free(qtr->msgp);
 			qtr->msgp           = NULL;
 			qtr->fd_h           = NULL;
 			qtr_release(qtr, __FILE__, __LINE__);
