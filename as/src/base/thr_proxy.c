@@ -519,10 +519,20 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 				return 0;
 			}
 			cl_msg *msgp;
-			size_t as_msg_sz = 0;
-			if (0 != msg_get_buf(m, PROXY_FIELD_AS_PROTO, (byte **) &msgp, &as_msg_sz, MSG_GET_COPY_MALLOC)) {
+			sz = 0;
+			if (0 != msg_get_buf(m, PROXY_FIELD_AS_PROTO, (byte **) &msgp, &sz, MSG_GET_COPY_MALLOC)) {
 				cf_info(AS_PROXY, "proxy msg function: no as msg, problem");
 				as_fabric_msg_put(m);
+				return 0;
+			}
+
+			// Sanity check as_proto fields.
+			as_proto *proto = &msgp->proto;
+			if (! as_proto_wrapped_is_valid(proto, sz)) {
+				cf_warning(AS_PROXY, "proxyee got unusable proto: version %u, type %u, sz %lu [%lu]",
+						proto->version, proto->type, proto->sz, sz);
+				as_proxy_send_response(id, m, AS_PROTO_RESULT_FAIL_UNKNOWN,
+						0, 0, NULL, NULL, 0, NULL, 0, NULL);
 				return 0;
 			}
 
@@ -553,7 +563,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 				tr.flag |= AS_TRANSACTION_FLAG_SHIPPED_OP;
 				cf_detail_digest(AS_PROXY, &tr.keyd, "SHIPPED_OP WINNER Operation Received");
 			} else {
-				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest tid(%d)", tr.trid);
+				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest ");
 			}
 
 			MICROBENCHMARK_RESET();

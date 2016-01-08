@@ -234,7 +234,6 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	as_partition_reservation_copy(&tr->rsv, &wr->rsv);
 	tr->msgp = wr->msgp;
 	tr->result_code = AS_PROTO_RESULT_OK;
-	tr->trid = 0;
 	tr->preprocessed = true;
 	tr->flag = 0;
 
@@ -1306,7 +1305,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			AS_PARTITION_RESERVATION_INIT(e->tr.rsv);
 			e->tr.result_code = AS_PROTO_RESULT_OK;
 			e->tr.msgp = tr->msgp;
-			e->tr.trid = tr->trid;
 			tr->msgp = 0;
 			e->tr.preprocessed = true;
 			e->tr.flag = 0;
@@ -1325,8 +1323,8 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			cf_atomic_int_incr(&g_config.n_waiting_transactions);
 
 			cf_detail_digest(AS_RW, &tr->keyd,
-					"as rw start:  write in progress QUEUEING returning 0 (%d:%p:%"PRIx64") wr(%p) %ld",
-					tr->proto_fd_h ? tr->proto_fd_h->fd : 0, tr->proxy_msg, tr->proxy_node, wr2, tr->trid);
+					"as rw start:  write in progress QUEUEING returning 0 (%d:%p:%"PRIx64") wr(%p)",
+					tr->proto_fd_h ? tr->proto_fd_h->fd : 0, tr->proxy_msg, tr->proxy_node, wr2);
 
 			as_partition_release(&tr->rsv);
 			cf_atomic_int_decr(&g_config.rw_tree_count);
@@ -2010,7 +2008,7 @@ ops_complete(as_transaction *tr, cf_dyn_buf *db)
 	}
 	else if (tr->proxy_msg) {
 		as_proxy_send_ops_response(tr->proxy_node, tr->proxy_msg, db);
-		tr->proxy_msg = 0;
+		// TODO - set tr->proxy_msg NULL - currently used as flag for stats.
 	}
 	else {
 		cf_warning(AS_RW, "ops_complete with no proto_fd_h or proxy_msg");
@@ -2034,7 +2032,7 @@ write_complete(write_request *wr, as_transaction *tr)
 	else if (tr->proto_fd_h) {
 		if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
 				tr->generation, tr->void_time, NULL, NULL, 0, NULL, NULL,
-				tr->trid, NULL)) {
+				as_transaction_trid(tr), NULL)) {
 			cf_warning(AS_RW, "can't send reply to client, fd %d",
 					tr->proto_fd_h->fd);
 		}
@@ -2043,9 +2041,10 @@ write_complete(write_request *wr, as_transaction *tr)
 	}
 	else if (tr->proxy_msg) {
 		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, tr->result_code,
-				0, 0, NULL, NULL, 0, NULL, tr->trid, NULL);
+				0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
+		// TODO - set tr->proxy_msg NULL - currently used as flag for stats.
 	}
-	// else something is really wrong ...
+	// else (hopefully) it's an nsup delete ...
 
 	MICROBENCHMARK_HIST_INSERT_P(wt_net_hist);
 }
@@ -4127,7 +4126,8 @@ write_local_bin_ops(as_transaction *tr, as_storage_rd *rd,
 	size_t msg_sz = 0;
 	uint8_t *msgp = (uint8_t *)as_msg_make_response_msg(AS_PROTO_RESULT_OK,
 			r->generation, r->void_time, has_read_all_op ? NULL : ops, bins,
-			(uint16_t)n_response_bins, ns, NULL, &msg_sz, tr->trid, NULL);
+			(uint16_t)n_response_bins, ns, NULL, &msg_sz,
+			as_transaction_trid(tr), NULL);
 
 	destroy_stack_bins(result_bins, n_result_bins);
 
@@ -4655,8 +4655,15 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 
 	rd->write_to_device = true;
 
+	// Secondary index may need old particles - stop as_storage_record_close()
+	// from freeing them. TODO - this is an ugly hack! Should really split a
+	// as_storage_record_write() off from as_storage_record_close()!
+	uint8_t* keep_read_buf = rd->u.ssd.must_free_block;
+	rd->u.ssd.must_free_block = NULL;
+
 	if ((result = as_storage_record_close(r, rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
+		rd->u.ssd.must_free_block = keep_read_buf; // end of hack
 		write_local_pickle_unwind(pickle);
 		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
@@ -4675,6 +4682,11 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 			write_local_sindex_update(ns, set_name, &tr->keyd,
 					old_bins, n_old_bins, new_bins, n_new_bins)) {
 		tr->flag |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+	}
+
+	// End of hack - OK to free the old particles now.
+	if (keep_read_buf) {
+		cf_free(keep_read_buf);
 	}
 
 	//------------------------------------------------------
@@ -5788,7 +5800,7 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 		else {
 			if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
 					generation, void_time, ops, response_bins, n_bins, ns,
-					written_sz, tr->trid, setname)) {
+					written_sz, as_transaction_trid(tr), setname)) {
 				cf_info(AS_RW, "rw: can't send reply, fd %d rc %d",
 						tr->proto_fd_h->fd, tr->result_code);
 			}
@@ -5805,8 +5817,8 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 					tr->result_code, tr->proxy_node);
 
 		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, tr->result_code,
-				generation, void_time, ops, response_bins, n_bins, ns, tr->trid,
-				setname);
+				generation, void_time, ops, response_bins, n_bins, ns,
+				as_transaction_trid(tr), setname);
 		tr->proxy_msg = 0;
 	} else {
 		// In this case, this is a call from write_process() above.
@@ -5816,7 +5828,7 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 			size_t msg_sz = 0;
 			tr->msgp = as_msg_make_response_msg(tr->result_code, generation,
 					void_time, ops, response_bins, n_bins, ns, (cl_msg *) NULL,
-					&msg_sz, tr->trid, setname);
+					&msg_sz, as_transaction_trid(tr), setname);
 			// TODO - if it turns out this is normal, demote to debug:
 			cf_warning_digest(AS_RW, &tr->keyd,
 					"{%s} thr_tsvc_read returns response message for duplicate read %p ",

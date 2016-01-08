@@ -329,7 +329,6 @@ slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 	c_tr->microbenchmark_is_resolve = false;
 	c_tr->start_time           = h_tr->start_time;
 	c_tr->end_time             = h_tr->end_time;
-	c_tr->trid                 = h_tr->trid;
 
 	// Chunk transaction is always preprocessed
 	c_tr->preprocessed         = true;       // keyd is hence preprocessed

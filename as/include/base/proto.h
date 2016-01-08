@@ -457,11 +457,24 @@ as_msg_op_iterate(as_msg *msg, as_msg_op *current, int *n)
 }
 
 static inline size_t
-as_proto_size_get(as_proto *proto)
+as_proto_size_get(const as_proto *proto)
 {
 	return sizeof(as_proto) + proto->sz;
 }
 
+static inline bool
+as_proto_is_valid_type(const as_proto *proto)
+{
+	return proto->type != 0 && proto->type < PROTO_TYPE_MAX;
+}
+
+static inline bool
+as_proto_wrapped_is_valid(const as_proto *proto, size_t size)
+{
+	return proto->version == PROTO_VERSION &&
+			proto->type == PROTO_TYPE_AS_MSG && // currently we only wrap as_msg
+			as_proto_size_get(proto) == size;
+}
 
 extern void as_proto_swap(as_proto *m);
 extern void as_msg_swap_header(as_msg *m);
