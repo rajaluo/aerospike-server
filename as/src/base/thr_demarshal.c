@@ -58,6 +58,7 @@
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "base/xdr_serverside.h"
 
 #ifdef USE_JEM
 #include "base/datamodel.h"
