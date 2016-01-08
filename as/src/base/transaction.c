@@ -45,6 +45,7 @@
 #include "base/scan.h"
 #include "base/security.h"
 #include "base/thr_demarshal.h"
+#include "base/thr_proxy.h"
 #include "base/udf_rw.h"
 
 /* as_transaction_prepare
@@ -333,6 +334,16 @@ as_transaction_create_internal(as_transaction *tr, tr_create_data *  trc_data)
 }
 
 void
+as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
+{
+	as_msg_send_reply(tr->proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+	tr->proto_fd_h = NULL;
+
+	cf_free(tr->msgp);
+	tr->msgp = NULL;
+}
+
+void
 as_transaction_error(as_transaction* tr, uint32_t error_code)
 {
 	if (tr->proto_fd_h) {
@@ -350,7 +361,14 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 				cf_atomic_int_incr(&g_config.err_tsvc_requests_timeout);
 			}
 		}
-	} else if (tr->udata.req_udata) {
+	}
+	else if (tr->proxy_msg) {
+		as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
+				AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, NULL, NULL, 0, NULL,
+				as_transaction_trid(tr), NULL);
+		tr->proxy_msg = NULL;
+	}
+	else if (tr->udata.req_udata) {
 		if (udf_rw_needcomplete(tr)) {
 			udf_rw_complete(tr, error_code, __FILE__,__LINE__);
 		}
