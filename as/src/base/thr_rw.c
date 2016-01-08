@@ -490,7 +490,8 @@ rw_msg_setup_ldt_fields(msg *m, as_transaction *tr, cf_digest *keyd)
 int
 rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		uint8_t ** p_pickled_buf, size_t pickled_sz,
-		as_rec_props * p_pickled_rec_props, int op, bool has_udf, bool is_subrec)
+		as_rec_props * p_pickled_rec_props, int op, bool has_udf,
+		bool is_subrec, bool fast_dupl_resolve)
 {
 	// setup the write message
 	msg_set_buf(m, RW_FIELD_DIGEST, (void *) keyd, sizeof(cf_digest),
@@ -547,10 +548,21 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		}
 	} else if (op == RW_OP_DUP) {
 		msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP);
+
+		if (fast_dupl_resolve) {
+			as_index_ref r_ref;
+			r_ref.skip_lock = false;
+			if (0 == as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, tr->rsv.ns)) {
+				msg_set_uint32(m, RW_FIELD_GENERATION, r_ref.r->generation);
+				msg_set_uint32(m, RW_FIELD_VOID_TIME, r_ref.r->void_time);
+				as_record_done(&r_ref, tr->rsv.ns);
+			}
+		}
+
 		if (tr->rsv.n_dupl > 1) {
 			cf_debug(AS_RW, "{%s:%d} requesting duplicates from %d nodes, very "
-					 "unlikely, digest %"PRIx64"",
-					 tr->rsv.ns->name, tr->rsv.pid, tr->rsv.n_dupl, *(uint64_t*)&tr->keyd);
+					"unlikely, digest %"PRIx64"",
+					tr->rsv.ns->name, tr->rsv.pid, tr->rsv.n_dupl, *(uint64_t*)&tr->keyd);
 		}
 	} else if (op == RW_OP_MULTI) {
 		// TODO: What is meaning of generation and TTL here ???
@@ -589,7 +601,8 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 // Side effect: wr->dest_msg is allocated and populated
 //
 int
-write_request_setup(write_request *wr, as_transaction *tr, int optype)
+write_request_setup(write_request *wr, as_transaction *tr, int optype,
+		bool fast_dupl_resolve)
 {
 	// create the write message
 	if (!wr->dest_msg) {
@@ -603,7 +616,7 @@ write_request_setup(write_request *wr, as_transaction *tr, int optype)
 	}
 
 	rw_msg_setup(wr->dest_msg, tr, &wr->keyd, &wr->pickled_buf, wr->pickled_sz,
-			&wr->pickled_rec_props, optype, wr->has_udf, false);
+			&wr->pickled_rec_props, optype, wr->has_udf, false, fast_dupl_resolve);
 
 	if (wr->shipped_op) {
 		cf_detail(AS_RW,
@@ -757,6 +770,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	bool dupl_resolved = true;
 	int rv             = 0;
 	bool is_delete     = (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE);
+	bool fast_dupl_resolve = true;
 
 	if ((wr->dupl_trans_complete == 0) && (tr->rsv.n_dupl > 0)) {
 		dupl_resolved = false;
@@ -810,6 +824,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			//     - if there are duplicates then go do duplicate
 			//       resolution. To get hold of some value if there
 			//       is any in cluster
+			fast_dupl_resolve = false;
 		}
 	}
 
@@ -826,7 +841,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		wr->dest_sz = tr->rsv.n_dupl;
 		memcpy(wr->dest_nodes, tr->rsv.dupl_nodes,
 				wr->dest_sz * sizeof(cf_node));
-		if (write_request_setup(wr, tr, RW_OP_DUP)) {
+		if (write_request_setup(wr, tr, RW_OP_DUP, fast_dupl_resolve)) {
 			rw_cleanup(wr, tr, first_time, true, __LINE__);
 			*delete = true;
 			return (0);
@@ -1039,7 +1054,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			fabric_op = RW_OP_MULTI;
 		}
 
-		if (write_request_setup(wr, tr, fabric_op)) {
+		if (write_request_setup(wr, tr, fabric_op, false)) {
 			rw_cleanup(wr, tr, first_time, true, __LINE__);
 			*delete = true;
 			return (0);
@@ -1486,7 +1501,7 @@ void rw_msg_get_ldt_dupinfo(as_record_merge_component *c, msg *m) {
 int
 finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 {
-    cf_debug(AS_RW, "Prole Ack");
+	cf_debug(AS_RW, "Prole Ack");
 	if (wr->shipped_op) {
 		cf_detail_digest(AS_RW, &wr->keyd, "SHIPPED_OP WINNER [Digest %"PRIx64"] Replication Done",
 				*(uint64_t *)&wr->keyd);
@@ -2122,6 +2137,11 @@ rw_dup_prole(cf_node node, msg *m)
 		goto Out1;
 	}
 
+	uint32_t generation = 0;
+	uint32_t void_time = 0;
+	bool local_conflict_check = (0 == msg_get_uint32(m, RW_FIELD_GENERATION, &generation)
+			&& 0 == msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time));
+
 	// NB need to use the _migrate variant here so we can write into desync
 	as_partition_reservation rsv;
 	AS_PARTITION_RESERVATION_INIT(rsv);
@@ -2149,6 +2169,14 @@ rw_dup_prole(cf_node node, msg *m)
 	}
 	as_index *r = r_ref.r;
 	uint32_t info = 0;
+
+	if (local_conflict_check &&
+			0 >= as_record_resolve_conflict(rsv.ns->conflict_resolution_policy,
+					generation, void_time, r->generation, r->void_time)) {
+		result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
+		cf_debug_digest(AS_RW, keyd, "local conflict resolution lost ");
+		goto Out3;
+	}
 
 	if (rsv.ns->ldt_enabled && as_ldt_record_is_parent(r)) {
 		// NB: We search only on main tree in the code here because
