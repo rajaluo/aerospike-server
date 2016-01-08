@@ -213,9 +213,6 @@ typedef struct as_config_s {
 	// maximum number of "msg" objects permitted per type
 	int64_t				max_msgs_per_type;
 
-	// size at which to dump incoming data
-	uint32_t			dump_message_above_size;
-
 	// the common work directory cache
 	char				*work_directory;
 
