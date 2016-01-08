@@ -539,7 +539,10 @@ thr_demarshal(void *arg)
 						goto NextEvent_FD_Cleanup;
 					}
 
-					if (proto.version != PROTO_VERSION) {
+					if (proto.version != PROTO_VERSION &&
+							// For backward compatibility, allow version 0 with
+							// security messages.
+							! (proto.version == 0 && proto.type == PROTO_TYPE_SECURITY)) {
 						cf_warning(AS_DEMARSHAL, "proto input from %s: unsupported proto version %u",
 								fd_h->client, proto.version);
 						goto NextEvent_FD_Cleanup;
