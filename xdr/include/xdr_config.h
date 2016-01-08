@@ -81,6 +81,7 @@ typedef enum {
 	XDR_CASE_NAMEDPIPE_PATH,
 	XDR_CASE_DIGESTLOG_PATH,
 	XDR_CASE_ERRORLOG_PATH,
+	XDR_CASE_INFO_PORT,
 	XDR_CASE_DATACENTER_BEGIN,
 	XDR_CASE_MAX_RECS_INFLIGHT,
 	XDR_CASE_FORWARD_XDR_WRITES,
@@ -179,6 +180,7 @@ typedef struct xdr_config {
 	gid_t	gid;
 
 	// Ring buffer configuration
+	int     xdr_info_port;
 	char 	*xdr_digestlog_path[XDR_MAX_DGLOG_FILES];
 	uint64_t xdr_digestlog_file_size[XDR_MAX_DGLOG_FILES];
 	bool 	xdr_digestlog_overwrite;

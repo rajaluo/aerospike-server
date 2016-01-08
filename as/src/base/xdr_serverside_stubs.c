@@ -138,3 +138,8 @@ int as_xdr_sink_set_severity(cf_fault_context context, cf_fault_severity severit
 {
 	return 0;
 }
+
+int32_t as_xdr_info_port(void)
+{
+	return 0;
+}

@@ -179,8 +179,11 @@ cfg_set_defaults()
 	// Network service defaults.
 	c->socket.proto = SOCK_STREAM; // not configurable, but addr and port are
 	c->localhost_socket.proto = SOCK_STREAM; // not configurable
+	c->xdr_socket.proto = SOCK_STREAM;
 	c->socket.addr = (char*)IPV4_ANY_ADDR; // by default listen on any IPv4 address
+	c->xdr_socket.addr = (char*)IPV4_ANY_ADDR;
 	c->socket_reuse_addr = true;
+	c->xdr_socket.reuse_addr = true;
 
 	// Fabric TCP socket keepalive defaults.
 	c->fabric_keepalive_enabled = true;

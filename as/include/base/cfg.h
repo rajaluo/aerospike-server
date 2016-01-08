@@ -160,6 +160,9 @@ typedef struct as_config_s {
 	/* (Only opened if the main service socket is not already listening on 0.0.0.0 or 127.0.0.1.) */
 	cf_socket_cfg		localhost_socket;
 
+	/* The port to listen on for XDR compatibility, typically 3004. */
+	cf_socket_cfg		xdr_socket;
+
 	char				*external_address; // hostname that clients will connect on
 	bool				is_external_address_virtual;
 	char				*alternate_address; // alternate service address (could be DNS)

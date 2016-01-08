@@ -427,7 +427,7 @@ log_as_proto_and_peeked_data(as_proto *proto, uint8_t *peekbuf, size_t peeked_da
 void *
 thr_demarshal(void *arg)
 {
-	cf_socket_cfg *s, *ls;
+	cf_socket_cfg *s, *ls, *xs;
 	// Create my epoll fd, register in the global list.
 	struct epoll_event ev;
 	int nevents, i, n, epoll_fd;
@@ -441,6 +441,7 @@ thr_demarshal(void *arg)
 	cf_assert(arg, AS_DEMARSHAL, CF_CRITICAL, "invalid argument");
 	s = &g_config.socket;
 	ls = &g_config.localhost_socket;
+	xs = &g_config.xdr_socket;
 
 #ifdef USE_JEM
 	int orig_arena;
@@ -485,6 +486,16 @@ thr_demarshal(void *arg)
 			  cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
 			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
 		}
+
+		if (xs->sock) {
+			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
+			ev.data.fd = xs->sock;
+
+			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, xs->sock, &ev))
+			  cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+
+			cf_info(AS_DEMARSHAL, "Service also listening on XDR info socket %s:%d", xs->addr, xs->port);
+		}
 	}
 	else {
 		epoll_fd = epoll_create(EPOLL_SZ);
@@ -516,7 +527,7 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			if ((s->sock == events[i].data.fd) || (ls->sock == events[i].data.fd)) {
+			if ((s->sock == events[i].data.fd) || (ls->sock == events[i].data.fd) || (xs->sock == events[i].data.fd)) {
 				// Accept new connections on the service socket.
 				int csocket = -1;
 				struct sockaddr_in caddr;
@@ -559,7 +570,7 @@ thr_demarshal(void *arg)
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_config.proto_connections_opened - g_config.proto_connections_closed;
-				if (conns_open > g_config.n_proto_fd_max) {
+				if (xs->sock != events[i].data.fd && conns_open > g_config.n_proto_fd_max) {
 					if ((last_fd_print + 5000L) < cf_getms()) { // no more than 5 secs
 						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
 						last_fd_print = cf_getms();
@@ -1018,6 +1029,21 @@ as_demarshal_start()
 		}
 		if (-1 == cf_socket_set_nonblocking(g_config.localhost_socket.sock)) {
 			cf_crash(AS_DEMARSHAL, "couldn't set localhost service socket nonblocking");
+		}
+	}
+
+	g_config.xdr_socket.port = as_xdr_info_port();
+
+	if (g_config.xdr_socket.port != 0) {
+		cf_debug(AS_DEMARSHAL, "Opening XDR service socket");
+		g_config.xdr_socket.reuse_addr = g_config.socket_reuse_addr;
+
+		if (0 != cf_socket_init_svc(&g_config.xdr_socket)) {
+			cf_crash(AS_DEMARSHAL, "Couldn't initialize XDR service socket");
+		}
+
+		if (-1 == cf_socket_set_nonblocking(g_config.xdr_socket.sock)) {
+			cf_crash(AS_DEMARSHAL, "Couldn't set XDR service socket to non-blocking");
 		}
 	}
 
