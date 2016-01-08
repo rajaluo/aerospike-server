@@ -2008,7 +2008,7 @@ ops_complete(as_transaction *tr, cf_dyn_buf *db)
 	}
 	else if (tr->proxy_msg) {
 		as_proxy_send_ops_response(tr->proxy_node, tr->proxy_msg, db);
-		tr->proxy_msg = 0;
+		// TODO - set tr->proxy_msg NULL - currently used as flag for stats.
 	}
 	else {
 		cf_warning(AS_RW, "ops_complete with no proto_fd_h or proxy_msg");
@@ -2042,8 +2042,9 @@ write_complete(write_request *wr, as_transaction *tr)
 	else if (tr->proxy_msg) {
 		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, tr->result_code,
 				0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
+		// TODO - set tr->proxy_msg NULL - currently used as flag for stats.
 	}
-	// else something is really wrong ...
+	// else (hopefully) it's an nsup delete ...
 
 	MICROBENCHMARK_HIST_INSERT_P(wt_net_hist);
 }
