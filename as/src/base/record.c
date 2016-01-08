@@ -709,6 +709,50 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 	return (0);
 }
 
+// Returns -1 if left wins, 1 if right wins, and 0 for tie.
+int
+as_record_resolve_conflict(conflict_resolution_pol policy,
+		uint16_t l_generation, uint32_t l_void_time,
+		uint16_t r_generation, uint32_t r_void_time)
+{
+	switch (policy) {
+	case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION:
+		if (l_generation == r_generation) {
+			if (l_void_time == r_void_time) {
+				return 0;
+			}
+			if (l_void_time == 0 ||
+					(r_void_time != 0 && l_void_time > r_void_time)) {
+				return -1;
+			}
+			return 1;
+		}
+		if (l_generation > r_generation) {
+			return -1;
+		}
+		return 1;
+
+	case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL:
+		if (l_void_time == r_void_time) {
+			if (l_generation == r_generation) {
+				return 0;
+			}
+			if (l_generation > r_generation) {
+				return -1;
+			}
+			return 1;
+		}
+		if (l_void_time == 0 ||
+				(r_void_time != 0 && l_void_time > r_void_time)) {
+			return -1;
+		}
+		return 1;
+
+	default:
+		cf_crash(AS_RECORD, "invalid conflict resolution policy");
+		return 0;
+	}
+}
 
 int
 as_record_component_winner(as_partition_reservation *rsv, int n_components,
@@ -729,32 +773,17 @@ as_record_component_winner(as_partition_reservation *rsv, int n_components,
 		start          = 1;
 		winner_idx     = 0;
 	}
-	// cf_detail(AS_RECORD, "merge: new generation %d",r->generation);
+
 	for (uint16_t i = start; i < n_components; i++) {
 		as_record_merge_component *c = &components[i];
-		switch (rsv->ns->conflict_resolution_policy) {
-			case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION:
-				if (c->generation > max_generation || (c->generation == max_generation &&
-						(max_void_time != 0 && (c->void_time == 0 || c->void_time > max_void_time)))) {
-					max_void_time  = c->void_time;
-					max_generation = c->generation;
-					winner_idx = (int32_t)i;
-				}
-				break;
-			case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL:
-				if ((max_void_time != 0 && (c->void_time == 0 ||
-						c->void_time > max_void_time)) || (c->void_time == max_void_time &&
-								c->generation > max_generation)) {
+		if (-1 == as_record_resolve_conflict(rsv->ns->conflict_resolution_policy,
+				c->generation, c->void_time, max_generation, max_void_time)) {
 					max_void_time = c->void_time;
 					max_generation = c->generation;
 					winner_idx = (int32_t)i;
-				}
-				break;
-			default:
-				cf_crash(AS_RECORD, "invalid conflict resolution policy");
-				break;
 		}
 	}
+
 	return winner_idx;
 }
 
