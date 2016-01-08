@@ -2210,8 +2210,6 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, (int)(g_config.transaction_max_ns / 1000000));
 	cf_dyn_buf_append_string(db, ";transaction-repeatable-read=");
 	cf_dyn_buf_append_string(db, g_config.transaction_repeatable_read ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";dump-message-above-size=");
-	cf_dyn_buf_append_int(db, g_config.dump_message_above_size);
 	cf_dyn_buf_append_string(db, ";ticker-interval=");
 	cf_dyn_buf_append_int(db, g_config.ticker_interval);
 	cf_dyn_buf_append_string(db, ";log-local-time=");
@@ -2841,12 +2839,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of ticker-interval from %d to %d ", g_config.ticker_interval, val);
 			g_config.ticker_interval = val;
-		}
-		else if (0 == as_info_parameter_get(params, "dump-message-above-size", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of dump-message-above-size from %d to %d ", g_config.dump_message_above_size, val);
-			g_config.dump_message_above_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "microbenchmarks", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
