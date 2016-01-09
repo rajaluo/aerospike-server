@@ -711,6 +711,7 @@ process_transaction(as_transaction *tr)
 				// Send "AS_PROTO_RESULT_FAIL_UNKNOWN" back to XDR.
 				// XDR will relog digest on seeing this error.
 				xdr_internal_read_response(ns, AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, NULL, 0, NULL, 0, NULL, tr->from_xdr);
+				cf_detail(AS_TSVC, "Responded to XDR with error code %d", AS_PROTO_RESULT_FAIL_UNKNOWN);
 				free_msgp = true;
 			} else if (tr->udata.req_udata){
 				cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);

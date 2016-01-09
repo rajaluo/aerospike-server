@@ -479,10 +479,10 @@ main(int argc, char **argv)
 
 	as_smd_start(c->smd);		// enables receiving paxos state change events
 	as_fabric_start();			// may send & receive fabric messages
+	as_xdr_start();				// XDR should start before it joins other nodes
 	as_hb_start();				// start inter-node heatbeat
 	as_paxos_start();			// blocks until cluster membership is obtained
 	as_nsup_start();			// may send delete transactions to other nodes
-	as_xdr_start();				// XDR may now start
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
 

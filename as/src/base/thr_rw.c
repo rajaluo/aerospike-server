@@ -122,8 +122,6 @@ int delete_local(as_transaction *tr);
 int delete_replica(as_transaction *tr, bool is_subrec, cf_node masternode);
 void apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd);
 int write_delete_journal(as_transaction *tr, bool is_subrec);
-void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
-			   cf_node masternode, bool is_delete, uint16_t set_id);
 
 /*
  ** queue for async replication
@@ -5867,6 +5865,7 @@ single_transaction_response_with_key(as_transaction *tr, as_namespace *ns,
 		// Send data back to XDR.
 		xdr_internal_read_response(ns, tr->result_code, generation, void_time, key, key_size,
 				response_bins, n_bins, setname, tr->from_xdr);
+		cf_detail(AS_RW, "Responded to XDR with error code %d", tr->result_code);
 	} else {
 		// In this case, this is a call from write_process() above.
 		// create the response message (this is a new malloc that will be handed off to fabric (see end of write_process())
