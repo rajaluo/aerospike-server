@@ -145,6 +145,8 @@ process_transaction(as_transaction *tr)
 			// TODO - can't call as_transaction_error() yet - msgp is unswapped.
 			as_msg_send_reply(tr->proto_fd_h, AS_PROTO_RESULT_FAIL_UNAVAILABLE, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
 			tr->proto_fd_h = NULL;
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+			cf_atomic_int_incr(&g_config.err_tsvc_requests);
 		}
 		else {
 			// It's very possible proxy transactions get here.
@@ -163,6 +165,8 @@ process_transaction(as_transaction *tr)
 			// TODO - can't call as_transaction_error() yet - msgp is unswapped.
 			as_msg_send_reply(tr->proto_fd_h, (uint32_t)result, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
 			tr->proto_fd_h = NULL;
+			MICROBENCHMARK_HIST_INSERT_P(error_hist);
+			cf_atomic_int_incr(&g_config.err_tsvc_requests);
 			goto Cleanup;
 		}
 	}
