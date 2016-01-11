@@ -140,14 +140,17 @@ process_transaction(as_transaction *tr)
 
 	if (! as_partition_balance_is_init_resolved() &&
 			(tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) == 0) {
-		if (tr->preprocessed) {
-			// It's very possible proxy transactions get here.
-			cf_debug(AS_TSVC, "rejecting fabric transaction - initial partition balance unresolved");
+		if (tr->proto_fd_h) {
+			cf_warning(AS_TSVC, "rejecting client transaction - initial partition balance unresolved");
+			// TODO - can't call as_transaction_error() yet - msgp is unswapped.
+			as_msg_send_reply(tr->proto_fd_h, AS_PROTO_RESULT_FAIL_UNAVAILABLE, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+			tr->proto_fd_h = NULL;
 		}
 		else {
-			cf_warning(AS_TSVC, "rejecting client transaction - initial partition balance unresolved");
+			// It's very possible proxy transactions get here.
+			cf_debug(AS_TSVC, "rejecting fabric transaction - initial partition balance unresolved");
+			as_transaction_error(tr, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		}
-		as_transaction_error(tr, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		goto Cleanup;
 	}
 
@@ -157,7 +160,9 @@ process_transaction(as_transaction *tr)
 
 		if (result != AS_PROTO_RESULT_OK) {
 			as_security_log(tr->proto_fd_h, result, PERM_NONE, NULL, NULL);
-			as_transaction_error(tr, (uint32_t)result);
+			// TODO - can't call as_transaction_error() yet - msgp is unswapped.
+			as_msg_send_reply(tr->proto_fd_h, (uint32_t)result, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+			tr->proto_fd_h = NULL;
 			goto Cleanup;
 		}
 	}
