@@ -5481,6 +5481,7 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 				if (wr->msgp) {
 					as_batch_add_error(wr->batch_shared, wr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
 					wr->msgp = NULL;
+					wr->proto_fd_h = 0;
 				}
 			}
 			else if (wr->proto_fd_h) {
