@@ -3947,6 +3947,9 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					ns->name, ns->geo2dsphere_within_max_cells, val);
 			ns->geo2dsphere_within_max_cells = val;
 		}
+		else if (0 == as_xdr_set_config_ns(ns->name, params)) {
+			;
+		}
 		else {
 			goto Error;
 		}

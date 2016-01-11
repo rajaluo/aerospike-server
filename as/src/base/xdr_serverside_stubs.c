@@ -134,6 +134,11 @@ void as_xdr_set_config(char *params, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "error");
 }
 
+int32_t as_xdr_set_config_ns(char *ns_name, char *params)
+{
+	return -1;
+}
+
 int as_xdr_sink_set_severity(cf_fault_context context, cf_fault_severity severity)
 {
 	return 0;
