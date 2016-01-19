@@ -363,8 +363,6 @@ thr_demarshal_set_buffer(int fd, int option, int size)
 			cf_warning(AS_DEMARSHAL, "Failed to read %s; should be at least %d. Please verify.", proc, size);
 			tmp = size;
 		}
-
-		ck_pr_cas_int(max, -1, tmp);
 	}
 
 	if (tmp < size) {
@@ -372,6 +370,8 @@ thr_demarshal_set_buffer(int fd, int option, int size)
 				tmp, size, proc);
 		return -1;
 	}
+
+	ck_pr_cas_int(max, -1, tmp);
 
 	if (setsockopt(fd, SOL_SOCKET, option, &size, sizeof size) < 0) {
 		cf_crash(AS_DEMARSHAL, "Failed to set socket buffer for FD %d, size %d, error %d (%s)",
