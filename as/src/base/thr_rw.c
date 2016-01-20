@@ -4608,6 +4608,11 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 
 	if (has_sindex && n_old_bins != 0) {
 		memcpy(old_bins, new_bins, n_old_bins * sizeof(as_bin));
+
+		// If it's a replace, clear the new bins array.
+		if (record_level_replace) {
+			as_bin_set_all_empty(rd);
+		}
 	}
 
 	//------------------------------------------------------
