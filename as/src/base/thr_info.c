@@ -6498,7 +6498,7 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 	else {
 		int resp = as_sindex_stats_str(ns, index_name, db);
 		if (resp) {
-			cf_dyn_buf_append_string(db, "Invalid Stats");
+			cf_warning(AS_INFO, "Failed to get statistics for index %s: err = %d", index_name, resp);
 			INFO_COMMAND_SINDEX_FAILCODE(
 					as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 					as_sindex_err_str(resp));
@@ -6872,7 +6872,7 @@ int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 		cf_info(AS_INFO, "SINDEX DROP : Request received for %s:%s via info", imd.ns_name, imd.iname);	
 		res = as_sindex_destroy(ns, &imd);
 		if (0 != res) {
-			cf_warning(AS_INFO, "SINDEX DROP : Fails with error %s for index %s",
+			cf_warning(AS_INFO, "SINDEX DROP : Failed with error %s for index %s",
 					as_sindex_err_str(res), imd.iname);
 			INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(res, __FILE__, __LINE__),
 					as_sindex_err_str(res));
@@ -6902,7 +6902,7 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 				"Namespace name exceeds max length");
 		}
 		else {
-			cf_warning(AS_INFO, "%s : invalid namespace", sindex_cmd);
+			cf_warning(AS_INFO, "%s : invalid namespace %s", sindex_cmd, ns_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
 				"Namespace Not Specified");
 		}
@@ -6928,7 +6928,7 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 				"Index Name exceeds max length");
 		}
 		else {
-			cf_warning(AS_INFO, "%s : invalid indexname", sindex_cmd);
+			cf_warning(AS_INFO, "%s : invalid indexname %s", sindex_cmd, index_name_str);
 			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
 				"Index Name Not Specified");
 		}
@@ -6952,7 +6952,7 @@ int info_command_sindex_repair(char *name, char *params, cf_dyn_buf *db) {
 
 	int resp = as_sindex_repair(ns, iname);
 	if (resp) {
-		cf_dyn_buf_append_string(db, "Sindex repair failed");
+		cf_warning(AS_INFO, "Sindex repair failed for index %s: err = %d", name, resp);
 		INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 			as_sindex_err_str(resp));
 		cf_warning(AS_INFO, "SINDEX REPAIR : for index %s - ns %s failed with error %d",
@@ -7036,12 +7036,11 @@ int info_command_sindex_stat(char *name, char *params, cf_dyn_buf *db) {
 
 	int resp = as_sindex_stats_str(ns, iname, db);
 	if (resp)  {
-		cf_dyn_buf_append_string(db, "Sindex stat failed");
+		cf_warning(AS_INFO, "SINDEX STAT : for index %s - ns %s failed with error %d",
+			iname, ns->name, resp);
 		INFO_COMMAND_SINDEX_FAILCODE(
 				as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 				as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX STAT : for index %s - ns %s failed with error %d",
-			iname, ns->name, resp);
 	}
 
 	if (iname) {
@@ -7084,12 +7083,11 @@ int info_command_sindex_histogram(char *name, char *params, cf_dyn_buf *db)
 
 	int resp = as_sindex_histogram_enable(ns, iname, enable);
 	if (resp) {
-		cf_dyn_buf_append_string(db, "Sindex histogram failed");
+		cf_warning(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s failed with error %d",
+			iname, ns->name, resp);
 		INFO_COMMAND_SINDEX_FAILCODE(
 				as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
 				as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s failed with error %d",
-			iname, ns->name, resp);
 	} else {
 		cf_dyn_buf_append_string(db, "Ok");
 		cf_info(AS_INFO, "SINDEX HISTOGRAM : for index %s - ns %s histogram is set as %s",
@@ -7134,9 +7132,8 @@ int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 	else {
 		as_namespace *ns = as_namespace_get_byname(ns_str);
 		if (!ns) {
-			cf_info(AS_INFO, "ns not found");
-			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
-					"Namespace Not Found");
+			cf_warning(AS_INFO, "SINDEX LIST : ns %s not found", ns_str);
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Namespace Not Found");
 			return 0;
 		} else {
 			if (as_sindex_list_str(ns, db)) {
