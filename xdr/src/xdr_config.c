@@ -83,9 +83,8 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
 		{ "xdr-info-timeout",				XDR_CASE_XDR_INFO_TIMEOUT },
 		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
-		{ "xdr-write-batch-size",			XDR_CASE_XDR_WRITE_BATCH_SIZE },
 		{ "xdr-read-batch-size",			XDR_CASE_XDR_READ_BATCH_SIZE },
-		{ "xdr-ship-delay",				XDR_CASE_XDR_SHIP_DELAY },
+		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },
 		{ "xdr-check-data-before-delete",	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE },
 		{ "xdr-pidfile",					XDR_CASE_XDR_PIDFILE },
 		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS}, // xdr in asd
@@ -151,7 +150,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_errorlog_path = NULL;	//Path where the errorlog of XDR module goes
 	c->xdr_errorlog_level = CF_FAULT_SEVERITY_UNDEF;
 	c->xdr_local_port = 0;		//Port of the remote node
-	c->xdr_write_batch_size = 100;	//Number of digests to read from pipe before flushing them to disk
 	c->xdr_max_recs_inflight = 0; // Max number of digests shipped that can be in the async queue at any given point
 								  // The default will be determined based on remote DC's pipelining capabilties
 	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go

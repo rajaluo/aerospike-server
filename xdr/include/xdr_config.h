@@ -96,7 +96,6 @@ typedef enum {
 	XDR_CASE_XDR_HOTKEY_MAXSKIP,
 	XDR_CASE_XDR_SHIPPING_ENABLED,
 	XDR_CASE_XDR_PIDFILE,
-	XDR_CASE_XDR_WRITE_BATCH_SIZE,
 	XDR_CASE_XDR_READ_BATCH_SIZE,
 	XDR_CASE_XDR_INFO_TIMEOUT,
 	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
@@ -160,7 +159,6 @@ typedef struct xdr_lastship_s {
 
 // Config option in case the configuration value is changed
 typedef struct xdr_new_config_s {
-	int		xdr_write_batch_size;
 	int		xdr_max_recs_inflight;
 	int		xdr_read_batch_size;
 	int		xdr_threads;
@@ -190,7 +188,6 @@ typedef struct xdr_config {
 	cf_fault_severity xdr_errorlog_level;
 	int	xdr_digestpipe_fd;
 	int	xdr_local_port;
-	int	xdr_write_batch_size;
 	int	xdr_max_recs_inflight;
 	int	xdr_read_batch_size;
 	int	xdr_ship_slab_size;     // Maximum number of records, on receival of which, xdr start shipping.
