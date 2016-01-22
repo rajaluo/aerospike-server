@@ -45,6 +45,9 @@
  */
 #define MAX_BINARY_BUF_SZ (64 * 1024)
 
+#define SINK_OPEN_FLAGS O_WRONLY|O_CREAT|O_NONBLOCK|O_APPEND
+#define SINK_OPEN_MODE S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH
+
 /* cf_fault_context_strings, cf_fault_severity_strings, cf_fault_scope_strings
  * Strings describing fault states */
 
@@ -202,7 +205,7 @@ cf_fault_sink_add(char *path)
 	if (0 == strcmp(path, "stderr")) {
 		s->fd = 2;
 	}
-	else if (-1 == (s->fd = open(path, O_WRONLY|O_CREAT|O_APPEND|O_NONBLOCK, S_IRUSR|S_IWUSR))) {
+	else if (-1 == (s->fd = open(path, SINK_OPEN_FLAGS, SINK_OPEN_MODE))) {
 		cf_warning(CF_MISC, "can't open %s: %s", path, cf_strerror(errno));
 		return NULL;
 	}
@@ -368,7 +371,7 @@ cf_fault_sink_activate_all_held()
 		if (0 == strcmp(s->path, "stderr")) {
 			s->fd = 2;
 		}
-		else if (-1 == (s->fd = open(s->path, O_WRONLY|O_CREAT|O_NONBLOCK|O_APPEND, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH))) {
+		else if (-1 == (s->fd = open(s->path, SINK_OPEN_FLAGS, SINK_OPEN_MODE))) {
 			// In case this isn't first sink, force logging as if no sinks:
 			cf_fault_sinks_inuse = 0;
 			cf_warning(CF_MISC, "can't open %s: %s", s->path, cf_strerror(errno));
@@ -1051,7 +1054,7 @@ cf_fault_sink_logroll(void)
 			unlink(s->path);
 			close(fd);
 
-			fd = open(s->path, O_WRONLY|O_CREAT|O_NONBLOCK|O_APPEND, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+			fd = open(s->path, SINK_OPEN_FLAGS, SINK_OPEN_MODE);
 			s->fd = fd;
 		}
 	}
