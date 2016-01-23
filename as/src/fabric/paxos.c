@@ -146,6 +146,11 @@ as_paxos_set_cluster_key(uint64_t cluster_key)
 			pthread_mutex_unlock(&p->lock);
 		}
 	}
+
+	// Prior migrations are unable to decrement migrate_num_incoming due to
+	// cluster_key checking. Additionally migrations originating from a
+	// departed node are unable to decrement this value for obvious reasons.
+	cf_atomic_int_set(&g_config.migrate_num_incoming, 0);
 }
 
 // Get the cluster key

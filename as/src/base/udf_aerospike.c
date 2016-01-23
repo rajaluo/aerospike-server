@@ -564,6 +564,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 		}
 
 		if (! as_storage_record_size_and_check(rd)) {
+			cf_warning(AS_UDF, "record failed storage size check, will not be updated");
 			failmax = (int)urecord->nupdates;
 			goto Rollback;
 		}

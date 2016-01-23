@@ -170,7 +170,6 @@ cfg_set_defaults()
 	as_sindex_gconfig_default(c);
 	as_query_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
-	c->dump_message_above_size = PROTO_SIZE_MAX;
 	c->fabric_dump_msgs = false;
 	c->max_msgs_per_type = -1; // by default, the maximum number of "msg" objects per type is unlimited
 	c->memory_accounting = false;
@@ -197,9 +196,6 @@ cfg_set_defaults()
 	c->hb_timeout = 10;
 	c->hb_mesh_rw_retry_timeout = 500;
 	c->hb_protocol = AS_HB_PROTOCOL_V2; // default to the latest heartbeat protocol version
-
-	// Network info defaults.
-	c->info_fastpath_enabled = true; // by default, don't force Info requests to go through the transaction queue
 
 	// XDR defaults.
 	xdr_config_defaults(&(c->xdr_cfg));
@@ -355,7 +351,6 @@ typedef enum {
 	CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE,
 	// For special debugging or bug-related repair:
 	CASE_SERVICE_ASMALLOC_ENABLED,
-	CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE,
 	CASE_SERVICE_FABRIC_DUMP_MSGS,
 	CASE_SERVICE_MAX_MSGS_PER_TYPE,
 	CASE_SERVICE_MEMORY_ACCOUNTING,
@@ -367,6 +362,7 @@ typedef enum {
 	CASE_SERVICE_DEFRAG_QUEUE_HWM,
 	CASE_SERVICE_DEFRAG_QUEUE_LWM,
 	CASE_SERVICE_DEFRAG_QUEUE_PRIORITY,
+	CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE,
 	CASE_SERVICE_NSUP_AUTO_HWM,
 	CASE_SERVICE_NSUP_AUTO_HWM_PCT,
 	CASE_SERVICE_NSUP_MAX_DELETES,
@@ -470,7 +466,7 @@ typedef enum {
 	// Normally visible, in canonical configuration file order:
 	CASE_NETWORK_INFO_ADDRESS,
 	CASE_NETWORK_INFO_PORT,
-	// Normally hidden:
+	// Deprecated:
 	CASE_NETWORK_INFO_ENABLE_FASTPATH,
 
 	// Namespace options:
@@ -749,7 +745,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "write-duplicate-resolution-disable", CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE },
 		{ "asmalloc-enabled",				CASE_SERVICE_ASMALLOC_ENABLED },
-		{ "dump-message-above-size",		CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE },
 		{ "fabric-dump-msgs",				CASE_SERVICE_FABRIC_DUMP_MSGS },
 		{ "max-msgs-per-type",				CASE_SERVICE_MAX_MSGS_PER_TYPE },
 		{ "memory-accounting",				CASE_SERVICE_MEMORY_ACCOUNTING },
@@ -760,6 +755,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "defrag-queue-hwm",				CASE_SERVICE_DEFRAG_QUEUE_HWM },
 		{ "defrag-queue-lwm",				CASE_SERVICE_DEFRAG_QUEUE_LWM },
 		{ "defrag-queue-priority",			CASE_SERVICE_DEFRAG_QUEUE_PRIORITY },
+		{ "dump-message-above-size",		CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE },
 		{ "nsup-auto-hwm",					CASE_SERVICE_NSUP_AUTO_HWM },
 		{ "nsup-auto-hwm-pct",				CASE_SERVICE_NSUP_AUTO_HWM_PCT },
 		{ "nsup-max-deletes",				CASE_SERVICE_NSUP_MAX_DELETES },
@@ -2162,9 +2158,6 @@ as_config_init()
 			case CASE_SERVICE_ASMALLOC_ENABLED:
 				c->asmalloc_enabled = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE:
-				c->dump_message_above_size = cfg_u32_no_checks(&line);
-				break;
 			case CASE_SERVICE_FABRIC_DUMP_MSGS:
 				c->fabric_dump_msgs = cfg_bool(&line);
 				break;
@@ -2184,6 +2177,7 @@ as_config_init()
 			case CASE_SERVICE_DEFRAG_QUEUE_HWM:
 			case CASE_SERVICE_DEFRAG_QUEUE_LWM:
 			case CASE_SERVICE_DEFRAG_QUEUE_PRIORITY:
+			case CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE:
 			case CASE_SERVICE_NSUP_AUTO_HWM:
 			case CASE_SERVICE_NSUP_AUTO_HWM_PCT:
 			case CASE_SERVICE_NSUP_MAX_DELETES:
@@ -2478,7 +2472,7 @@ as_config_init()
 				c->info_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_INFO_ENABLE_FASTPATH:
-				c->info_fastpath_enabled = cfg_bool(&line);
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
