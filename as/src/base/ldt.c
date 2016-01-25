@@ -944,7 +944,6 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	cf_debug(AS_LDT, "(%s:%d) Setting parent version to %ld %d", fname, lineno, ldt_version,rd->r->generation);
 	//PRINT_STACK();
 
-	rd->write_to_device = true;
 	return 0;
 }
 
