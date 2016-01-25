@@ -542,7 +542,6 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 				cf_warning(AS_RECORD, "Failed: %s", as_sindex_err_str(sindex_ret));
 			}
 		}
-		rd->write_to_device = true;
 	}
 
 	if (has_sindex) {
@@ -703,9 +702,8 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
 
-	rd->write_to_device = true; // TODO - this seems redundant?
-
 	// write record to device
+	as_storage_record_write(r, rd);
 	as_storage_record_close(r, rd);
 
 	return (0);
