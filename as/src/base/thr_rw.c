@@ -2557,6 +2557,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 		// code path does so.
 	}
 
+	as_storage_record_write(r, &rd);
 	as_storage_record_close(r, &rd);
 
 	uint16_t set_id = as_index_get_set_id(r);
@@ -4240,10 +4241,8 @@ write_local_dim_single_bin(as_transaction *tr, as_storage_rd *rd,
 
 	uint64_t start_ns = g_config.microbenchmarks ? cf_getns() : 0;
 
-	rd->write_to_device = true;
-
-	if ((result = as_storage_record_close(r, rd)) < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
+	if ((result = as_storage_record_write(r, rd)) < 0) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_write() ", ns->name);
 		write_local_pickle_unwind(pickle);
 		write_local_index_metadata_unwind(&old_metadata, r);
 		write_local_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
@@ -4384,10 +4383,8 @@ write_local_dim(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 
 	uint64_t start_ns = g_config.microbenchmarks ? cf_getns() : 0;
 
-	rd->write_to_device = true;
-
-	if ((result = as_storage_record_close(r, rd)) < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
+	if ((result = as_storage_record_write(r, rd)) < 0) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_write() ", ns->name);
 		write_local_pickle_unwind(pickle);
 		cf_free(new_bin_space);
 		write_local_index_metadata_unwind(&old_metadata, r);
@@ -4520,16 +4517,12 @@ write_local_ssd_single_bin(as_transaction *tr, as_storage_rd *rd,
 
 	uint64_t start_ns = g_config.microbenchmarks ? cf_getns() : 0;
 
-	rd->write_to_device = true;
-
-	int write_result = as_storage_record_close(r, rd);
-
-	if (write_result < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
+	if ((result = as_storage_record_write(r, rd)) < 0) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_write() ", ns->name);
 		write_local_pickle_unwind(pickle);
 		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
-		return -write_result;
+		return -result;
 	}
 
 	if (g_config.microbenchmarks && start_ns) {
@@ -4653,17 +4646,8 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 
 	uint64_t start_ns = g_config.microbenchmarks ? cf_getns() : 0;
 
-	rd->write_to_device = true;
-
-	// Secondary index may need old particles - stop as_storage_record_close()
-	// from freeing them. TODO - this is an ugly hack! Should really split a
-	// as_storage_record_write() off from as_storage_record_close()!
-	uint8_t* keep_read_buf = rd->u.ssd.must_free_block;
-	rd->u.ssd.must_free_block = NULL;
-
-	if ((result = as_storage_record_close(r, rd)) < 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_close() ", ns->name);
-		rd->u.ssd.must_free_block = keep_read_buf; // end of hack
+	if ((result = as_storage_record_write(r, rd)) < 0) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: failed as_storage_record_write() ", ns->name);
 		write_local_pickle_unwind(pickle);
 		cf_ll_buf_free(&particles_llb);
 		write_local_index_metadata_unwind(&old_metadata, r);
@@ -4682,11 +4666,6 @@ write_local_ssd(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 			write_local_sindex_update(ns, set_name, &tr->keyd,
 					old_bins, n_old_bins, new_bins, n_new_bins)) {
 		tr->flag |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
-	}
-
-	// End of hack - OK to free the old particles now.
-	if (keep_read_buf) {
-		cf_free(keep_read_buf);
 	}
 
 	//------------------------------------------------------
@@ -4938,6 +4917,7 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 		cf_atomic_int_setmax( &tr->rsv.p->max_void_time, r->void_time);
 	}
 
+	as_storage_record_close(r, &rd);
 	as_record_done(&r_ref, ns);
 
 	// Don't send an XDR delete if it's disallowed.
