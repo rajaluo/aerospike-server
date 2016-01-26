@@ -55,7 +55,6 @@
 #include "util.h"
 
 #include "base/cfg.h"
-#include "fabric/fb_health.h"
 #include "fabric/hb.h"
 
 
@@ -1874,12 +1873,6 @@ as_fabric_init()
 
 	as_fabric_transact_init();
 
-	// Create a thread for monitoring general status of fabric
-	// pthread_create( &fabric_status_ticker_th, 0, fabric_status_ticker_fn, 0);
-
-	// TODO - decide if we really want to keep the fabric health subsystem.
-	as_fb_health_ack_other_nodes(true);
-
 	return(0);
 }
 
@@ -1933,11 +1926,7 @@ as_fabric_start()
 	// Register a callback with the heartbeat mechanism
 	as_hb_register(fabric_heartbeat_event, fa);
 
-	// TODO - decide if we really want to keep the fabric health subsystem.
-	as_fb_health_create();
-
 	return(0);
-
 }
 
 
