@@ -2574,10 +2574,6 @@ as_paxos_process_retransmit_check()
 			as_paxos_log_succession_list("Paxos List", p->succession);
 			as_paxos_log_succession_list("Node List", succ_list[i]);
 
-			if (g_config.auto_dun) {
-				as_hb_set_is_node_dunned(succ_list_index[i], true, "paxos");
-			}
-
 			cluster_integrity_fault = true;
 			as_paxos_add_missing_nodes(missing_nodes, succ_list[i], &are_nodes_not_dunned);
 		}
