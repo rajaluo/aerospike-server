@@ -361,7 +361,6 @@ process_transaction(as_transaction *tr)
 		}
 
 		if (0 == rv) {
-			ns = 0; // got a reservation
 			tr->microbenchmark_is_resolve = false;
 			if (msgp->msg.info2 & AS_MSG_INFO2_WRITE) {
 				// Do the WRITE.
@@ -416,7 +415,6 @@ process_transaction(as_transaction *tr)
 				cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")", tr->proxy_node);
 				// Originating node, no write request associated.
 				as_proxy_divert(dest, tr, ns, partition_cluster_key);
-				ns = 0;
 				free_msgp = false;
 			}
 			else if (tr->proxy_msg) {
@@ -433,9 +431,6 @@ process_transaction(as_transaction *tr)
 	} // end if read or write
 	else {
 		cf_info(AS_TSVC, " acting on transaction neither read nor write, error");
-		if (ns) {
-			ns = 0;
-		}
 		if (tr->proto_fd_h) {
 			as_transaction_error(tr, AS_PROTO_RESULT_FAIL_PARAMETER);
 		} else {
