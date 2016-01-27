@@ -2259,7 +2259,7 @@ Out1:
 	msg_set_uint32(m, RW_FIELD_RESULT, result_code);
 	msg_set_unset(m, RW_FIELD_NAMESPACE);
 
-	int rv2 = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH);
+	int rv2 = as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM);
 	if (rv2 != 0) {
 		cf_debug(AS_RW, "write process: send fabric message bad return %d",
 				rv2);
