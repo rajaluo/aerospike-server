@@ -343,6 +343,26 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 	tr->msgp = NULL;
 }
 
+// TODO - deprecate this when swap is moved out into thr_demarshal.c!
+void
+as_transaction_error_unswapped(as_transaction* tr, uint32_t error_code)
+{
+	if (tr->batch_shared) {
+		as_batch_add_error(tr->batch_shared, tr->batch_index, error_code);
+		// Clear this transaction's msgp so calling code does not free it.
+		tr->msgp = 0;
+	}
+	else {
+		as_msg_send_reply(tr->proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+		tr->proto_fd_h = 0;
+		MICROBENCHMARK_HIST_INSERT_P(error_hist);
+		cf_atomic_int_incr(&g_config.err_tsvc_requests);
+		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
+			cf_atomic_int_incr(&g_config.err_tsvc_requests_timeout);
+		}
+	}
+}
+
 void
 as_transaction_error(as_transaction* tr, uint32_t error_code)
 {
@@ -363,9 +383,7 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 		}
 	}
 	else if (tr->proxy_msg) {
-		as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
-				AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, NULL, NULL, 0, NULL,
-				as_transaction_trid(tr), NULL);
+		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 		tr->proxy_msg = NULL;
 	}
 	else if (tr->udata.req_udata) {

@@ -260,4 +260,5 @@ typedef struct tr_create_data {
 extern int   as_transaction_create_internal(as_transaction *tr, tr_create_data * data);
 
 void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
+void as_transaction_error_unswapped(as_transaction* tr, uint32_t error_code);
 void as_transaction_error(as_transaction* tr, uint32_t error_code);

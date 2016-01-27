@@ -1223,35 +1223,32 @@ migrate_msg_fn(cf_node id, msg *m, void *udata)
 				c.void_time     = void_time;
 				c.rec_props     = rec_props;
 
-				// TODO - should have inline wrapper to peek pickled bin count.
-				if (*(uint16_t *)c.record_buf == 0) {
-					cf_warning_digest(AS_MIGRATE, key, "migration received binless pickle ");
-					migrate_recv_control_release(mc);
-					goto Done;
-				}
-
 				if (as_ldt_get_migrate_info(mc, &c, m, key)) {
 					cf_debug_digest(AS_MIGRATE, key, "LDT_MIGRATE: sub-record received out of order ");
 					migrate_recv_control_release(mc);
 					goto Done;
 				}
 
-				// Default it to local node winner
-				int winner_idx  = -1;
-				// cf_info(AS_MIGRATE, "migrate rx: flatten insert %"PRIx64" gen %d",*(uint64_t*)key,generation);
-				int rv = as_record_flatten(&mc->rsv, key, 1, &c, &winner_idx);
-				if (rv) {
-					if (rv != -3) {
-						// -3 is not a failure. It is get_create failure inside as_record_flatten which is
-						// possible in case of race.
-						cf_warning_digest(AS_MIGRATE, key, "migrate: record flatten failed %d", rv);
-						migrate_recv_control_release(mc);
-						goto Done;
+				// TODO - should have inline wrapper to peek pickled bin count.
+				if (*(uint16_t *)c.record_buf == 0) {
+					cf_warning_digest(AS_MIGRATE, key, "migration received binless pickle, dropping digest: ");
+				}
+				else {
+					// Default it to local node winner
+					int winner_idx  = -1;
+					// cf_info(AS_MIGRATE, "migrate rx: flatten insert %"PRIx64" gen %d",*(uint64_t*)key,generation);
+					int rv = as_record_flatten(&mc->rsv, key, 1, &c, &winner_idx);
+					if (rv) {
+						if (rv != -3) {
+							// -3 is not a failure. It is get_create failure inside as_record_flatten which is
+							// possible in case of race.
+							cf_warning_digest(AS_MIGRATE, key, "migrate: record flatten failed %d", rv);
+							migrate_recv_control_release(mc);
+							goto Done;
+						}
 					}
 				}
-
 				migrate_recv_control_release(mc);
-
 			}
 
 			// ack it
