@@ -227,7 +227,6 @@ rchash *g_fabric_node_element_hash;
 // A fabric buffer sunk in an epoll holds a reference count on this object
 
 typedef struct {
-
 	cf_node 	node;   // when coming from a fd, we want to know the source node
 
 	cf_atomic32 fd_counter;         // Count of open outbound FDs.
@@ -243,12 +242,7 @@ typedef struct {
 	// Queue contains: fabric_buffer *
 	cf_queue_priority    *xmit_msg_queue; 	// queue of messages to be sent
 	// 	queue contains: msg *
-
-	uint32_t	parameter_gather_usec;
-	uint32_t	parameter_msg_size;
-
 } fabric_node_element;
-
 
 
 //
@@ -624,7 +618,7 @@ fabric_buffer_write_fill( fabric_buffer *fb )
 
 				// not enough room left. If it's the first part of a message,
 				// then malloc a new buffer
-				if (remain > FB_INPLACE_SZ && fb->w_len == 0) {
+				if (remain > FB_INPLACE_SZ && fb->w_total_len == 0) {
 					cf_debug(AS_FABRIC, "msg fillbuf returned fail, allocating new size %d", remain);
 					fb->w_buf = cf_malloc(remain);
 					if (fb->w_buf) {
@@ -843,8 +837,7 @@ fabric_write_complete(fabric_buffer *fb)
 	}
 	else {
 		// Is there a message waiting that I can send?
-		if (false == fabric_buffer_write_fill( fb))
-		{
+		if (! fabric_buffer_write_fill(fb)) {
 			cf_detail(AS_FABRIC, "fabric_write_complete: no buffers extant, sleeping %p", fb);
 
 			// patch up epoll state - no longer writable
@@ -895,27 +888,7 @@ fabric_process_writable(fabric_buffer *fb)
 {
 	int w_sz;
 
-	// cf_detail(AS_FABRIC,"fabric_writable: fb %p fd %d ( %d : %d )",fb, fb->fd, fb->w_total_len, fb->w_len);
-
-	// writable and nothing to write? A travesty! Fill me up, or try to
-	if ((fb->w_total_len == 0) || (fb->w_total_len - fb->w_len == 0))
-	{
-		if (fabric_buffer_write_fill( fb ) == false) {
-			// patch up epoll state - no longer writable
-			fabric_buffer_set_epoll_state(fb);
-			// Put fabric_buffer on waiting queue - always holds a ref while on the queue
-			cf_rc_reserve(fb);
-			cf_queue_push(fb->fne->xmit_buffer_queue, &fb);
-			return(0);
-		}
-	}
-
-	if (fb->fne->parameter_gather_usec) {
-		if (fb->w_total_len - fb->w_len < fb->fne->parameter_msg_size) {
-			usleep( fb->fne->parameter_gather_usec );
-			fabric_buffer_write_fill( fb );
-		}
-	}
+	fabric_buffer_write_fill(fb);
 
 	uint32_t w_len = fb->w_total_len - fb->w_len;
 	if (w_len < 500)
@@ -933,53 +906,25 @@ fabric_process_writable(fabric_buffer *fb)
 
 	fabric_set_keepalive_options(fb);
 
-	if (fb->w_in_place) {
-		// cf_assert(fb->fd, AS_FABRIC, CF_WARNING, "attempted write to fd 0");
-		if (0 > (w_sz = send(fb->fd, &fb->w_data[fb->w_len], w_len, MSG_NOSIGNAL))) {
-			if (errno == EAGAIN)	return(0);
-			else if (errno == EFAULT) {
-				cf_debug(AS_FABRIC, "write returned efault: data %p len %d", &fb->w_data[fb->w_len], fb->w_total_len - fb->w_len);
-			}
-			else {
-				cf_debug(AS_FABRIC, "fabric_process_writable: write return less than 0 %d", errno);
-			}
-			return(-1);
+	byte *send_buf = fb->w_in_place ? fb->w_data : fb->w_buf;
+
+	if (0 > (w_sz = send(fb->fd, send_buf + fb->w_len, w_len, MSG_NOSIGNAL))) {
+		if (errno == EAGAIN) {
+			return 0;
 		}
-
-		// cf_detail(AS_FABRIC,"fabric_writable: wrote %d",w_sz);
-
-		// it was a very good write!
-		fb->fne->good_write_counter = 0;
-
-		fb->w_len += w_sz;
-		if (fb->w_len == fb->w_total_len) {
-			// side effect: fb might not be any good after here
-			fabric_write_complete(fb);
-		}
-	}
-	else {
-		// cf_assert(fb->fd, AS_FABRIC, CF_WARNING, "attempted write to fd 0");
-		if (0 > (w_sz = send(fb->fd, fb->w_buf + fb->w_len, w_len, MSG_NOSIGNAL))) {
-			if (errno == EAGAIN) {
-				return 0;
-			}
-			cf_debug(AS_FABRIC, "fabric_process_writable: return less than 0 %d", errno);
-			return(-1);
-		}
-
-		// cf_detail(AS_FABRIC,"fabric_writable: wrote malloc: %d",w_sz);
-
-		// it was a very good write!
-		fb->fne->good_write_counter = 0;
-
-		fb->w_len += w_sz;
-		if (w_sz > 0) {
-			// side effect: fb might not be any good after here
-			fabric_write_complete(fb);
-		}
+		return -1;
 	}
 
-	return(0);
+	fb->fne->good_write_counter = 0;
+
+	fb->w_len += w_sz;
+
+	if (fb->w_len == fb->w_total_len) {
+		// side effect: fb might not be any good after here
+		fabric_write_complete(fb);
+	}
+
+	return 0;
 }
 
 // Log information about existing "msg" objects and queues.
@@ -1990,43 +1935,6 @@ as_fabric_start()
 
 	// TODO - decide if we really want to keep the fabric health subsystem.
 	as_fb_health_create();
-
-	return(0);
-
-}
-
-
-int
-as_fabric_set_node_parameter(cf_node node, int parameter, void *value)
-{
-	// Look up the node's FNE
-	fabric_node_element *fne;
-	int rv;
-	rv = rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne);
-	if (rv != RCHASH_OK) 		return(-1);
-
-	// set the parameter
-	if (parameter == AS_FABRIC_PARAMETER_GATHER_USEC) {
-		uint32_t *ui_val = (uint32_t *) value;
-		if (ui_val)
-			fne->parameter_gather_usec = *ui_val;
-		else
-			fne->parameter_gather_usec = 0;
-		cf_debug(AS_FABRIC, "node parameter GATHER USEC set to %d node %"PRIx64,
-				 fne->parameter_gather_usec, node);
-
-	}
-	else if (parameter == AS_FABRIC_PARAMETER_MSG_SIZE) {
-		uint32_t *ui_val = (uint32_t *) value;
-		if (ui_val)
-			fne->parameter_msg_size = *ui_val;
-		else
-			fne->parameter_msg_size = 2000;
-		cf_debug(AS_FABRIC, "node parameter MSG SIZE set to %d node %"PRIx64,
-				 fne->parameter_msg_size, node);
-	}
-
-	fne_release(fne);
 
 	return(0);
 
