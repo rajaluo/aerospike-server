@@ -1994,7 +1994,6 @@ as_fabric_send(cf_node node, msg *m, int priority )
 	} while ((CF_QUEUE_OK == rv) && (fb == 0));
 
 	if (fb == 0) {
-
 		// Queue the message, and consider creating a new connection to the endpoint
 		cf_detail(AS_FABRIC, "fabric_send: no connection, queueing message fne %p q %p m %p",
 				  fne, fne->xmit_msg_queue, m);
@@ -2003,7 +2002,6 @@ as_fabric_send(cf_node node, msg *m, int priority )
 		// check whether we've really got enough space on the xmit queue
 		if ( (priority == AS_FABRIC_PRIORITY_LOW) &&
 				(cf_queue_priority_sz(fne->xmit_msg_queue) > 50000) ) {
-//			cf_debug(AS_FABRIC,"queue full for low priority: sz %d",qs);
 			fne_release(fne);
 			return(AS_FABRIC_ERR_QUEUE_FULL);
 		}
@@ -2018,7 +2016,6 @@ as_fabric_send(cf_node node, msg *m, int priority )
 		uint32_t fds = cf_atomic32_incr( &(fne->fd_counter) );
 		if (fds < FABRIC_MAX_FDS ) {
 			// Room for more connections!
-//			cf_debug(AS_FABRIC," creating new connection: fd %d",fds);
 			if (0 != fabric_connect(g_fabric_args, fne)) {
 				// error! uncount the file descriptor
 				cf_atomic32_decr( &(fne->fd_counter) );
@@ -2034,17 +2031,11 @@ as_fabric_send(cf_node node, msg *m, int priority )
 	}
 	// Got an xmit buffer - can do an immediate send (or close anyway)
 	else {
-
-		// write the message into the buffer
+		// Write the message into the buffer.
 		fabric_buffer_set_write_msg(fb, m);
 
-		// try to pack more in - taking from my own queue
-		fabric_buffer_write_fill(fb);
-
-		// This function will patch up the epoll state (but somewhat expensive call,
-		// only call it if required)
-		if (fb->w_total_len > fb->w_len)
-			fabric_buffer_set_epoll_state(fb);
+		// This function will patch up the epoll state.
+		fabric_buffer_set_epoll_state(fb);
 
 		// since the fabric buffer is no longer on the queue, decrease its ref count
 		fabric_buffer_release(fb);
@@ -2052,7 +2043,7 @@ as_fabric_send(cf_node node, msg *m, int priority )
 
 	fne_release(fne);
 
-	return(0);
+	return 0;
 }
 
 int
