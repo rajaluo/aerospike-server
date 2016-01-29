@@ -3502,7 +3502,7 @@ write_local_policies(as_transaction *tr, bool *p_must_not_create,
 	as_namespace *ns = tr->rsv.ns;
 
 	if (m->n_ops == 0) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: no bin ops present in message ", ns->name);
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: bin op(s) expected, none present ", ns->name);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
