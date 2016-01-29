@@ -3500,6 +3500,12 @@ write_local_policies(as_transaction *tr, bool *p_must_not_create,
 	// Shortcut pointers.
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
+
+	if (m->n_ops == 0) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: no bin ops present in message ", ns->name);
+		return AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	bool info1_get_all = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0;
 	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
 
@@ -6024,6 +6030,12 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 		as_bin_get_all_p(&rd, response_bins);
 	}
 	else {
+		if (m->n_ops == 0) {
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: bin op(s) expected, none present ", ns->name);
+			read_local_done(tr, r_ref, &rd, AS_PROTO_RESULT_FAIL_PARAMETER);
+			return;
+		}
+
 		bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
 		int result;
 
