@@ -818,6 +818,12 @@ as_batch_queue_task(as_transaction* btr)
 			// n_fields/n_ops is in exact same place on both input/output, but the value still
 			// needs to be swapped.
 			out->msg.n_fields = cf_swap_from_be16(in->n_fields);
+
+			// Older clients sent zero, but always sent namespace.  Adjust this.
+			if (out->msg.n_fields == 0) {
+				out->msg.n_fields = 1;
+			}
+
 			out->msg.n_ops = cf_swap_from_be16(in->n_ops);
 
 			// Namespace input is same as namespace field, so just leave in place and swap.
