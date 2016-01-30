@@ -202,6 +202,7 @@ typedef struct as_msg_field_s {
 
 #define AS_MSG_FIELD_TYPE_QUERY_BINLIST			40
 #define AS_MSG_FIELD_TYPE_BATCH					41
+#define AS_MSG_FIELD_TYPE_BATCH_WITH_SET		42
 
 	/* NB: field_sz is sizeof(type) + sizeof(data) */
 	uint32_t field_sz; // get the data size through the accessor function, don't worry, it's a small macro
