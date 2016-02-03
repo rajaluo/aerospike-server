@@ -27,9 +27,7 @@
 #pragma once
 
 #include "datamodel.h"
-#include "fault.h"
 #include "xdr_config.h"
-
 
 int as_xdr_supported();
 int as_xdr_init();
@@ -55,5 +53,4 @@ void as_xdr_get_stats(char *name, cf_dyn_buf *db);
 void as_xdr_get_config(cf_dyn_buf *db);
 void as_xdr_set_config(char *params, cf_dyn_buf *db);
 int32_t as_xdr_set_config_ns(char *ns_name, char *params);
-int as_xdr_sink_set_severity(cf_fault_context context, cf_fault_severity severity);
 int32_t as_xdr_info_port(void);

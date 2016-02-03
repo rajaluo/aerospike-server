@@ -184,8 +184,6 @@ typedef struct xdr_config {
 	bool 	xdr_digestlog_overwrite;
 	bool	xdr_digestlog_persist;
 	uint8_t xdr_num_digestlog_paths;
-	char	*xdr_errorlog_path;
-	cf_fault_severity xdr_errorlog_level;
 	int	xdr_digestpipe_fd;
 	int	xdr_local_port;
 	int	xdr_max_recs_inflight;

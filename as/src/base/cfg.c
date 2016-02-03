@@ -2241,7 +2241,7 @@ as_config_init()
 		case LOGGING_FILE:
 			switch(cfg_find_tok(line.name_tok, LOGGING_FILE_OPTS, NUM_LOGGING_FILE_OPTS)) {
 			case CASE_LOG_FILE_CONTEXT:
-				if (0 != cf_fault_sink_set_context_level(sink, line.val_tok_1, line.val_tok_2)) {
+				if (0 != cf_fault_sink_addcontext(sink, line.val_tok_1, line.val_tok_2)) {
 					cf_crash_nostack(AS_CFG, "line %d :: can't add logging file context %s %s", line_num, line.val_tok_1, line.val_tok_2);
 				}
 				break;
@@ -2265,7 +2265,7 @@ as_config_init()
 		case LOGGING_CONSOLE:
 			switch(cfg_find_tok(line.name_tok, LOGGING_CONSOLE_OPTS, NUM_LOGGING_CONSOLE_OPTS)) {
 			case CASE_LOG_CONSOLE_CONTEXT:
-				if (0 != cf_fault_sink_set_context_level(sink, line.val_tok_1, line.val_tok_2)) {
+				if (0 != cf_fault_sink_addcontext(sink, line.val_tok_1, line.val_tok_2)) {
 					cf_crash_nostack(AS_CFG, "line %d :: can't add logging console context %s %s", line_num, line.val_tok_1, line.val_tok_2);
 				}
 				break;
