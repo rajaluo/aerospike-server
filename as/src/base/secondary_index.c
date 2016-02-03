@@ -2627,7 +2627,9 @@ as_sindex_range_free(as_sindex_range **range)
 {
 	cf_debug(AS_SINDEX, "as_sindex_range_free");
 	as_sindex_range *sk = (*range);
-	geo_region_destroy(sk->region);
+	if (sk->region) {
+		geo_region_destroy(sk->region);
+	}
 	cf_free(sk);
 	return AS_SINDEX_OK;
 }
@@ -2735,6 +2737,9 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 {
 	cf_debug(AS_SINDEX, "as_sindex_range_from_msg");
 	srange->num_binval = 0;
+	// Ensure region is initialized in case we need to return an error code early.
+	srange->region = NULL;
+
 	// getting ranges
 	as_msg_field *itype_fp  = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_INDEX_TYPE);
 	as_msg_field *rfp = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_INDEX_RANGE);
@@ -2874,7 +2879,6 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			}
 
 			srange->cellid = 0;
-			srange->region = NULL;
 			if (!geo_parse(ns, start_binval, startl,
 						   &srange->cellid, &srange->region)) {
 				cf_warning(AS_GEO, "failed to parse query GeoJSON");
@@ -2883,6 +2887,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 
 			if (srange->cellid && srange->region) {
 				geo_region_destroy(srange->region);
+				srange->region = NULL;
 				cf_warning(AS_GEO, "query geo_parse: both point and region");
 				goto Cleanup;
 			}
