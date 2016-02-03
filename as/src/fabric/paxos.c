@@ -2741,7 +2741,7 @@ as_paxos_thr(void *arg)
 
 		cf_debug(AS_PAXOS, "Popping paxos queue 0x%x", p->msgq);
 
-		static const int Q_WAIT_MS = 400; // TODO - what to do with this?
+		static const int Q_WAIT_MS = 1; // TODO - what to do with this?
 
 		if (Q_WAIT_MS >= (g_config.paxos_retransmit_period * 1000)) {
 			cf_crash(AS_PAXOS, "paxos_retransmit_period %d s is less than paxos msgq wait %d ms.",
