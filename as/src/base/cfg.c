@@ -129,10 +129,6 @@ cfg_set_defaults()
 	c->batch_priority = 200; // # of rows between a quick context switch?
 	c->n_batch_index_threads = 4;
 	c->n_fabric_workers = 16;
-	c->fb_health_bad_pct = 0; // percent of successful messages in a burst at/below which node is deemed bad
-	c->fb_health_good_pct = 50; // percent of successful messages in a burst at/above which node is deemed ok
-	c->fb_health_msg_per_burst = 0; // health probe paxos messages per "burst", 0 disables feature
-	c->fb_health_msg_timeout = 200; // milliseconds after which to give up on health probe message
 	c->hist_track_back = 1800;
 	c->hist_track_slice = 10;
 	c->n_info_threads = 16;
@@ -280,8 +276,6 @@ typedef enum {
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
-	CASE_SERVICE_AUTO_DUN,
-	CASE_SERVICE_AUTO_UNDUN,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
 	CASE_SERVICE_BATCH_MAX_REQUESTS,
@@ -289,10 +283,6 @@ typedef enum {
 	CASE_SERVICE_BATCH_PRIORITY,
 	CASE_SERVICE_BATCH_INDEX_THREADS,
 	CASE_SERVICE_FABRIC_WORKERS,
-	CASE_SERVICE_FB_HEALTH_BAD_PCT,
-	CASE_SERVICE_FB_HEALTH_GOOD_PCT,
-	CASE_SERVICE_FB_HEALTH_MSG_PER_BURST,
-	CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT,
 	CASE_SERVICE_GENERATION_DISABLE,
 	CASE_SERVICE_HIST_TRACK_BACK,
 	CASE_SERVICE_HIST_TRACK_SLICE,
@@ -354,6 +344,8 @@ typedef enum {
 	CASE_SERVICE_MEMORY_ACCOUNTING,
 	CASE_SERVICE_PROLE_EXTRA_TTL,
 	// Deprecated:
+	CASE_SERVICE_AUTO_DUN,
+	CASE_SERVICE_AUTO_UNDUN,
 	CASE_SERVICE_BATCH_RETRANSMIT,
 	CASE_SERVICE_CLIB_LIBRARY,
 	CASE_SERVICE_DEFRAG_QUEUE_ESCAPE,
@@ -361,6 +353,10 @@ typedef enum {
 	CASE_SERVICE_DEFRAG_QUEUE_LWM,
 	CASE_SERVICE_DEFRAG_QUEUE_PRIORITY,
 	CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE,
+	CASE_SERVICE_FB_HEALTH_BAD_PCT,
+	CASE_SERVICE_FB_HEALTH_GOOD_PCT,
+	CASE_SERVICE_FB_HEALTH_MSG_PER_BURST,
+	CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT,
 	CASE_SERVICE_NSUP_AUTO_HWM,
 	CASE_SERVICE_NSUP_AUTO_HWM_PCT,
 	CASE_SERVICE_NSUP_MAX_DELETES,
@@ -675,8 +671,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
-		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
-		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
 		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
@@ -684,10 +678,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
 		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
-		{ "fb-health-bad-pct",				CASE_SERVICE_FB_HEALTH_BAD_PCT },
-		{ "fb-health-good-pct",				CASE_SERVICE_FB_HEALTH_GOOD_PCT },
-		{ "fb-health-msg-per-burst",		CASE_SERVICE_FB_HEALTH_MSG_PER_BURST },
-		{ "fb-health-msg-timeout",			CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT },
 		{ "generation-disable",				CASE_SERVICE_GENERATION_DISABLE },
 		{ "hist-track-back",				CASE_SERVICE_HIST_TRACK_BACK },
 		{ "hist-track-slice",				CASE_SERVICE_HIST_TRACK_SLICE },
@@ -747,6 +737,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "max-msgs-per-type",				CASE_SERVICE_MAX_MSGS_PER_TYPE },
 		{ "memory-accounting",				CASE_SERVICE_MEMORY_ACCOUNTING },
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
+		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
+		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
 		{ "batch-retransmit",				CASE_SERVICE_BATCH_RETRANSMIT },
 		{ "clib-library",					CASE_SERVICE_CLIB_LIBRARY },
 		{ "defrag-queue-escape",			CASE_SERVICE_DEFRAG_QUEUE_ESCAPE },
@@ -754,6 +746,10 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "defrag-queue-lwm",				CASE_SERVICE_DEFRAG_QUEUE_LWM },
 		{ "defrag-queue-priority",			CASE_SERVICE_DEFRAG_QUEUE_PRIORITY },
 		{ "dump-message-above-size",		CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE },
+		{ "fb-health-bad-pct",				CASE_SERVICE_FB_HEALTH_BAD_PCT },
+		{ "fb-health-good-pct",				CASE_SERVICE_FB_HEALTH_GOOD_PCT },
+		{ "fb-health-msg-per-burst",		CASE_SERVICE_FB_HEALTH_MSG_PER_BURST },
+		{ "fb-health-msg-timeout",			CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT },
 		{ "nsup-auto-hwm",					CASE_SERVICE_NSUP_AUTO_HWM },
 		{ "nsup-auto-hwm-pct",				CASE_SERVICE_NSUP_AUTO_HWM_PCT },
 		{ "nsup-max-deletes",				CASE_SERVICE_NSUP_MAX_DELETES },
@@ -1903,12 +1899,6 @@ as_config_init()
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				c->allow_inline_transactions = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_AUTO_DUN:
-				c->auto_dun = cfg_bool(&line);
-				break;
-			case CASE_SERVICE_AUTO_UNDUN:
-				c->auto_undun = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_BATCH_THREADS:
 				c->n_batch_threads = cfg_int(&line, 0, MAX_BATCH_THREADS);
 				break;
@@ -1929,18 +1919,6 @@ as_config_init()
 				break;
 			case CASE_SERVICE_FABRIC_WORKERS:
 				c->n_fabric_workers = cfg_int(&line, 1, MAX_FABRIC_WORKERS);
-				break;
-			case CASE_SERVICE_FB_HEALTH_BAD_PCT:
-				c->fb_health_bad_pct = cfg_u32(&line, 0, 100);
-				break;
-			case CASE_SERVICE_FB_HEALTH_GOOD_PCT:
-				c->fb_health_good_pct = cfg_u32(&line, 0, 100);
-				break;
-			case CASE_SERVICE_FB_HEALTH_MSG_PER_BURST:
-				c->fb_health_msg_per_burst = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT:
-				c->fb_health_msg_timeout = cfg_u32(&line, 1, 200);
 				break;
 			case CASE_SERVICE_GENERATION_DISABLE:
 				c->generation_disable = cfg_bool(&line);
@@ -2169,6 +2147,8 @@ as_config_init()
 			case CASE_SERVICE_PROLE_EXTRA_TTL:
 				c->prole_extra_ttl = cfg_u32_no_checks(&line);
 				break;
+			case CASE_SERVICE_AUTO_DUN:
+			case CASE_SERVICE_AUTO_UNDUN:
 			case CASE_SERVICE_BATCH_RETRANSMIT:
 			case CASE_SERVICE_CLIB_LIBRARY:
 			case CASE_SERVICE_DEFRAG_QUEUE_ESCAPE:
@@ -2176,6 +2156,10 @@ as_config_init()
 			case CASE_SERVICE_DEFRAG_QUEUE_LWM:
 			case CASE_SERVICE_DEFRAG_QUEUE_PRIORITY:
 			case CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE:
+			case CASE_SERVICE_FB_HEALTH_BAD_PCT:
+			case CASE_SERVICE_FB_HEALTH_GOOD_PCT:
+			case CASE_SERVICE_FB_HEALTH_MSG_PER_BURST:
+			case CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT:
 			case CASE_SERVICE_NSUP_AUTO_HWM:
 			case CASE_SERVICE_NSUP_AUTO_HWM_PCT:
 			case CASE_SERVICE_NSUP_MAX_DELETES:

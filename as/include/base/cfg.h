@@ -284,13 +284,6 @@ typedef struct as_config_s {
 	// For debouncing re-tansmitted migrate start messages:
 	int					migrate_rx_lifetime_ms;
 
-	uint32_t			fb_health_msg_per_burst; // health probe paxos messages per "burst"
-	uint32_t			fb_health_msg_timeout; // milliseconds after which to give up on health probe message
-	uint32_t			fb_health_good_pct; // percent of successful messages in a burst at/above which node is deemed ok
-	uint32_t			fb_health_bad_pct; // percent of successful messages in a burst at/below which node is deemed bad
-	bool				auto_dun; // enables fb health and paxos to dun nodes
-	bool				auto_undun; // enables fb health to undun nodes that have been dunned
-
 	// Temporary dangling prole garbage collection.
 	uint32_t			prole_extra_ttl;	// seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
 	bool				non_master_sets_delete;	// locally delete non-master records in sets that are being emptied
