@@ -295,7 +295,6 @@ typedef struct as_config_s {
 	uint32_t			prole_extra_ttl;	// seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
 	bool				non_master_sets_delete;	// locally delete non-master records in sets that are being emptied
 
-	xdr_config			xdr_cfg;							// XDR related config parameters
 	xdr_lastship_s		xdr_lastship[AS_CLUSTER_SZ];		// last XDR shipping info of other nodes
 	cf_node				xdr_clmap[AS_CLUSTER_SZ];			// cluster map as known to XDR
 	uint64_t			xdr_self_lastshiptime[DC_MAX_NUM];	// last XDR shipping by this node
@@ -650,4 +649,5 @@ extern as_config *as_config_init();
 extern void as_config_post_process();
 
 extern as_config g_config;
+extern xdr_config g_xcfg;
 extern const char *g_config_file;

@@ -27,16 +27,8 @@
 #include "xdr_config.h"
 
 const xdr_cfg_opt XDR_GLOBAL_OPTS[] = {
-		{ "service",						XDR_CASE_SERVICE_BEGIN },
 		{ "namespace",						XDR_CASE_NAMESPACE_BEGIN },
 		{ "xdr",							XDR_CASE_XDR_BEGIN }
-};
-
-const xdr_cfg_opt XDR_SERVICE_OPTS[] = {
-		{ "{",								XDR_CASE_CONTEXT_BEGIN },
-		{ "user",							XDR_CASE_SERVICE_USER },
-		{ "group",							XDR_CASE_SERVICE_GROUP },
-		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
 const xdr_cfg_opt XDR_NS_OPTS[] = {
@@ -102,7 +94,6 @@ const xdr_cfg_opt XDR_DC_OPTS[] = {
 };
 
 const int NUM_XDR_GLOBAL_OPTS		= sizeof(XDR_GLOBAL_OPTS) / sizeof(xdr_cfg_opt);
-const int NUM_XDR_SERVICE_OPTS		= sizeof(XDR_SERVICE_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_NS_OPTS			= sizeof(XDR_NS_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_NS_STORAGE_OPTS	= sizeof(XDR_NS_STORAGE_OPTS) / sizeof(xdr_cfg_opt);
 const int NUM_XDR_NS_SET_OPTS		= sizeof(XDR_NS_SET_OPTS) / sizeof(xdr_cfg_opt);
@@ -131,13 +122,10 @@ void xdr_config_defaults(xdr_config *c)
 {
 	int index;
 
-	c->xdr_supported = g_xdr_supported;
-
-	c->uid = 0;
-	c->gid = 0;
 	c->xdr_global_enabled = false;	//This config option overrides the enable-xdr setting of the namespace(s)
 	c->xdr_digestpipe_path = NULL;	//The user has to specify a named pipe used to communicate the digests
-	c->xdr_digestpipe_fd = -1;	//Once the named pipe is open, the file descriptor will be stored here
+	c->xdr_digestpipe_readfd = -1;	//Once the named pipe reader is open, the file descriptor will be stored here
+	c->xdr_digestpipe_writefd = -1;	//Once the named pipe writer is open, the file descriptor will be stored here
 
 	for (index = 0; index < XDR_MAX_DGLOG_FILES ; index++) {
 		c->xdr_digestlog_path[index] = NULL;	//Path where the digest information is written to the disk

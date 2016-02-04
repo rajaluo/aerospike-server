@@ -198,8 +198,6 @@ cfg_set_defaults()
 	c->hb_protocol = AS_HB_PROTOCOL_V2; // default to the latest heartbeat protocol version
 
 	// XDR defaults.
-	xdr_config_defaults(&(c->xdr_cfg));
-
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		c->xdr_lastship[i].node = 0;
 
@@ -2528,31 +2526,31 @@ as_config_init()
 				break;
 			case CASE_NAMESPACE_ENABLE_XDR:
 				ns->enable_xdr = cfg_bool(&line);
-				if (ns->enable_xdr && ! c->xdr_cfg.xdr_supported) {
+				if (ns->enable_xdr && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
 			case CASE_NAMESPACE_SETS_ENABLE_XDR:
 				ns->sets_enable_xdr = cfg_bool(&line);
-				if (ns->sets_enable_xdr && ! c->xdr_cfg.xdr_supported) {
+				if (ns->sets_enable_xdr && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
 			case CASE_NAMESPACE_FORWARD_XDR_WRITES:
 				ns->ns_forward_xdr_writes = cfg_bool(&line);
-				if (ns->ns_forward_xdr_writes && ! c->xdr_cfg.xdr_supported) {
+				if (ns->ns_forward_xdr_writes && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
 			case CASE_NAMESPACE_ALLOW_NONXDR_WRITES:
 				ns->ns_allow_nonxdr_writes = cfg_bool(&line);
-				if (ns->ns_allow_nonxdr_writes && ! c->xdr_cfg.xdr_supported) {
+				if (ns->ns_allow_nonxdr_writes && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
 			case CASE_NAMESPACE_ALLOW_XDR_WRITES:
 				ns->ns_allow_xdr_writes = cfg_bool(&line);
-				if (ns->ns_allow_xdr_writes && ! c->xdr_cfg.xdr_supported) {
+				if (ns->ns_allow_xdr_writes && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
@@ -2963,27 +2961,9 @@ as_config_init()
 		//
 		case XDR:
 			switch(as_xdr_cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
-			case XDR_CASE_ENABLE_XDR:
-				c->xdr_cfg.xdr_global_enabled = cfg_bool(&line);
-				if (c->xdr_cfg.xdr_global_enabled && ! c->xdr_cfg.xdr_supported) {
-					cfg_not_supported(&line, "XDR");
-				}
-				break;
-			case XDR_CASE_NAMEDPIPE_PATH:
-				c->xdr_cfg.xdr_digestpipe_path = cfg_strdup_no_checks(&line);
-				break;
-			case XDR_CASE_FORWARD_XDR_WRITES:
-				c->xdr_cfg.xdr_forward_xdrwrites = cfg_bool(&line);
-				break;
-			case XDR_CASE_XDR_DELETE_SHIPPING_ENABLED:
-				c->xdr_cfg.xdr_delete_shipping_enabled = cfg_bool(&line);
-				break;
-			case XDR_CASE_XDR_NSUP_DELETES_ENABLED:
-				c->xdr_cfg.xdr_nsup_deletes_enabled = cfg_bool(&line);
-				break;
-			case XDR_CASE_STOP_WRITES_NOXDR:
-				c->xdr_cfg.xdr_stop_writes_noxdr = cfg_bool(&line);
-				break;
+			// Just skip over the XDR section and its DC subsection
+			// XDR conf parser will pick all the configs
+			// TODO: The conf parsing should be unified
 			case XDR_CASE_DATACENTER_BEGIN:
 				cfg_begin_context(&state, XDR_DATACENTER);
 				break;

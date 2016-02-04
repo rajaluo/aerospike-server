@@ -29,7 +29,6 @@
 #include "datamodel.h"
 #include "xdr_config.h"
 
-int as_xdr_supported();
 int as_xdr_init();
 int as_xdr_shutdown();
 void xdr_broadcast_lastshipinfo(uint64_t val[]);

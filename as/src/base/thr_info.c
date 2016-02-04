@@ -2637,21 +2637,6 @@ info_security_config_get(cf_dyn_buf *db)
 void
 info_xdr_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "enable-xdr=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-namedpipe-path=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_digestpipe_path ? g_config.xdr_cfg.xdr_digestpipe_path : "NULL");
-	cf_dyn_buf_append_string(db, ";forward-xdr-writes=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_forward_xdrwrites ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-delete-shipping-enabled=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_delete_shipping_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-nsup-deletes-enabled=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_nsup_deletes_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";enable-xdr-logging=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";stop-writes-noxdr=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
-
 	as_xdr_get_config(db);
 }
 
@@ -3925,18 +3910,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "xdr-digest-logging", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Enabling XDR digest logging");
-				g_config.xdr_cfg.xdr_global_enabled = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Disabling XDR digest logging");
-				g_config.xdr_cfg.xdr_global_enabled = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
 			// Dont print this command in logs as this happens every few seconds
 			// Ideally, this should not be done via config-set.
 			print_command = false;
@@ -3984,66 +3958,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_node nodeid = atoll(context);
 			xdr_handle_failednodeprocessingdone(nodeid);
 		}
-		else if (0 == as_info_parameter_get(params, "xdr-namedpipe-path", context, &context_len)) {
-			g_config.xdr_cfg.xdr_digestpipe_path = cf_strdup(context);
-			cf_info(AS_INFO, "xdr-namedpipe-path set to : %s", context);
-		}
-		else if (0 == as_info_parameter_get(params, "stop-writes-noxdr", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of stop-writes-noxdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_stop_writes_noxdr], context);
-				g_config.xdr_cfg.xdr_stop_writes_noxdr = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of stop-writes-noxdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_stop_writes_noxdr], context);
-				g_config.xdr_cfg.xdr_stop_writes_noxdr = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "forward-xdr-writes", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of forward-xdr-writes from %s to %s", bool_val[g_config.xdr_cfg.xdr_forward_xdrwrites], context);
-				g_config.xdr_cfg.xdr_forward_xdrwrites = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of forward-xdr-writes from %s to %s", bool_val[g_config.xdr_cfg.xdr_forward_xdrwrites], context);
-				g_config.xdr_cfg.xdr_forward_xdrwrites = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "xdr-delete-shipping-enabled", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-delete-shipping-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_delete_shipping_enabled], context);
-				g_config.xdr_cfg.xdr_delete_shipping_enabled = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-delete-shipping-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_delete_shipping_enabled], context);
-				g_config.xdr_cfg.xdr_delete_shipping_enabled = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "xdr-nsup-deletes-enabled", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-nsup-deletes-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_nsup_deletes_enabled], context);
-				g_config.xdr_cfg.xdr_nsup_deletes_enabled = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-nsup-deletes-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_nsup_deletes_enabled], context);
-				g_config.xdr_cfg.xdr_nsup_deletes_enabled = false;
-			} else {
-				goto Error;
-			}
-		} else  if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
-			if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
-				g_config.xdr_cfg.xdr_global_enabled = true;
-				as_xdr_set_shipping(true);
-				cf_info(AS_XDR, "XDR Service is Enabled");	
-			} else if (strncmp(context, "false", 5)==0 || strncmp(context, "no", 2)==0) {
-				g_config.xdr_cfg.xdr_global_enabled = false;
-				as_xdr_set_shipping(false);
-				cf_info(AS_XDR, "XDR Service is Disabled");	
-			} else {
-				goto Error;
-			}
-		} else {
+		else {
 			as_xdr_set_config(params, db);
 			return 0;
 		}

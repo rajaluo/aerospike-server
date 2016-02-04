@@ -54,13 +54,8 @@ typedef enum {
 	XDR_CASE_CONTEXT_END,
 
 	// Top-level options:
-	XDR_CASE_SERVICE_BEGIN,
 	XDR_CASE_NAMESPACE_BEGIN,
 	XDR_CASE_XDR_BEGIN,
-
-	// Server options:
-	XDR_CASE_SERVICE_USER,
-	XDR_CASE_SERVICE_GROUP,
 
 	// Namespace options:
 	XDR_CASE_NS_ENABLE_XDR,
@@ -166,25 +161,21 @@ typedef struct xdr_new_config_s {
 
 //Config option which is maintained both by the server and the XDR module
 typedef struct xdr_config {
-	// Is the XDR feature supported in the build?
-	bool	xdr_supported;
 
 	//This section is used by both the server and the XDR module
 	bool	xdr_global_enabled;
 	char	*xdr_digestpipe_path;
 
-	//This section is not used by the server and is meant only for XDR module
-	uid_t	uid;
-	gid_t	gid;
-
 	// Ring buffer configuration
-	int     xdr_info_port;
 	char 	*xdr_digestlog_path[XDR_MAX_DGLOG_FILES];
 	uint64_t xdr_digestlog_file_size[XDR_MAX_DGLOG_FILES];
 	bool 	xdr_digestlog_overwrite;
 	bool	xdr_digestlog_persist;
 	uint8_t xdr_num_digestlog_paths;
-	int	xdr_digestpipe_fd;
+
+	int	xdr_info_port;
+	int	xdr_digestpipe_readfd;
+	int	xdr_digestpipe_writefd;
 	int	xdr_local_port;
 	int	xdr_max_recs_inflight;
 	int	xdr_read_batch_size;
@@ -223,3 +214,5 @@ typedef enum xdr_state_e {
 // Prototypes
 void xdr_config_defaults(xdr_config *c);
 
+// Variables
+extern const bool g_xdr_supported;

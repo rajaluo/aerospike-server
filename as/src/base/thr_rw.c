@@ -875,10 +875,10 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 			// and if the xdr digestpipe is not opened fail the writes with appropriate return value
 			// We cannot do this check inside write_local() because that function is used for replica
 			// writes as well. We do not want to stop the writes on replica if the master write succeeded.
-			if (g_config.xdr_cfg.xdr_global_enabled &&
+			if (g_xcfg.xdr_global_enabled &&
 					g_xdr_state != XDR_UP &&
 					tr->rsv.ns && tr->rsv.ns->enable_xdr &&
-					g_config.xdr_cfg.xdr_stop_writes_noxdr) {
+					g_xcfg.xdr_stop_writes_noxdr) {
 				tr->result_code = AS_PROTO_RESULT_FAIL_NOXDR;
 				cf_atomic_int_incr(&g_config.err_write_fail_noxdr);
 				cf_debug(AS_RW,
@@ -2575,7 +2575,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	as_record_done(&r_ref, rsv->ns);
 
 	// Don't send an XDR delete if it's disallowed.
-	if (is_delete && ! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (is_delete && ! g_xcfg.xdr_delete_shipping_enabled) {
 		// TODO - should we also not ship if there was no record here before?
 		return 0;
 	}
@@ -2586,7 +2586,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	// 3. If the write is a XDR write and forwarding is enabled (either globally or for namespace).
 	if ((info & RW_INFO_MIGRATION) != RW_INFO_MIGRATION) {
 		if (   ((info & RW_INFO_XDR) != RW_INFO_XDR)
-			|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
+			|| (   (g_xcfg.xdr_forward_xdrwrites == true)
 				|| (rsv->ns->ns_forward_xdr_writes == true))) {
 			xdr_write(rsv->ns, *keyd, generation, masternode, is_delete, set_id);
 		}
@@ -3053,19 +3053,19 @@ delete_local(as_transaction *tr)
 	cf_atomic_int_incr(&g_config.stat_delete_success);
 	as_record_done(&r_ref, ns);
 
-	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (! g_xcfg.xdr_delete_shipping_enabled) {
 		return 0;
 	}
 
 	// Don't ship expiration/eviction deletes unless configured to do so.
 	if ((tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) != 0 &&
-			! g_config.xdr_cfg.xdr_nsup_deletes_enabled) {
+			! g_xcfg.xdr_nsup_deletes_enabled) {
 		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
 	}
 	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
 			// If this delete is a result of XDR shipping, don't ship it unless
 			// configured to do so.
-			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			g_xcfg.xdr_forward_xdrwrites ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id);
 	}
@@ -3113,19 +3113,19 @@ delete_replica(as_transaction *tr, bool is_subrec, cf_node masternode)
 	as_index_delete(tree, &tr->keyd);
 	as_record_done(&r_ref, ns);
 
-	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (! g_xcfg.xdr_delete_shipping_enabled) {
 		return 0;
 	}
 
 	// Don't ship expiration/eviction deletes unless configured to do so.
 	if ((tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) != 0 &&
-			! g_config.xdr_cfg.xdr_nsup_deletes_enabled) {
+			! g_xcfg.xdr_nsup_deletes_enabled) {
 		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
 	}
 	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
 			// If this delete is a result of XDR shipping, don't ship it unless
 			// configured to do so.
-			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			g_xcfg.xdr_forward_xdrwrites ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, tr->keyd, generation, masternode, true, set_id);
 	}
@@ -3162,7 +3162,7 @@ apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd)
 	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
 
-	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (! g_xcfg.xdr_delete_shipping_enabled) {
 		return;
 	}
 
@@ -3173,7 +3173,7 @@ apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd)
 	// Journaled deletes assume we're the master node when they're applied. This
 	// is not necessarily true!
 
-	if (g_config.xdr_cfg.xdr_forward_xdrwrites || ns->ns_forward_xdr_writes) {
+	if (g_xcfg.xdr_forward_xdrwrites || ns->ns_forward_xdr_writes) {
 		xdr_write(ns, *keyd, generation, 0, true, set_id);
 	}
 }
@@ -4957,14 +4957,14 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 	as_record_done(&r_ref, ns);
 
 	// Don't send an XDR delete if it's disallowed.
-	if (is_delete && ! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (is_delete && ! g_xcfg.xdr_delete_shipping_enabled) {
 		return 0;
 	}
 
 	// Do an XDR write if the write is a non-XDR write or is an XDR write with
 	// forwarding enabled.
 	if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
-			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			g_xcfg.xdr_forward_xdrwrites ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, tr->keyd, tr->generation, 0, is_delete, set_id);
 	}
