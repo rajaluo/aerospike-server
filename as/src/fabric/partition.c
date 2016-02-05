@@ -1579,6 +1579,14 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 			cf_dyn_buf_append_uint64(db, (uint64_t) p->sub_vp->elements);  // Subrecords
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->current_outgoing_ldt_version); // Current migrate out version ...
+			cf_dyn_buf_append_char(db, ':');
+			cf_dyn_buf_append_int(db, j);
+			cf_dyn_buf_append_char(db, '-');
+			cf_dyn_buf_append_uint64(db, p->version_info.iid);
+			cf_dyn_buf_append_char(db, '-');
+			cf_dyn_buf_append_uint64(db, p->version_info.vtp[0]);
+			cf_dyn_buf_append_char(db, '-');
+			cf_dyn_buf_append_uint64(db, p->version_info.vtp[8]);
 			// no meaning if migration is finished
 			cf_dyn_buf_append_char(db, ';');
 		}
