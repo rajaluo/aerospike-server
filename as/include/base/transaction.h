@@ -156,7 +156,7 @@ typedef struct udf_request_data {
 	(dest)->req_type  = (src)->req_type;
 
 #define AS_TRANSACTION_FLAG_NSUP_DELETE     0x0001
-#define AS_TRANSACTION_FLAG_INTERNAL        0x0002
+#define AS_TRANSACTION_FLAG_BATCH_SUB       0x0002 // was INTERNAL
 #define AS_TRANSACTION_FLAG_SHIPPED_OP      0x0004
 #define AS_TRANSACTION_FLAG_UNUSED_8        0x0008 // deprecated LDT_SUB
 #define AS_TRANSACTION_FLAG_SINDEX_TOUCHED  0x0010
@@ -176,19 +176,17 @@ typedef struct as_transaction_s {
 	/************ Frequently accessed fields *************/
 	/* The message describing the action */
 	cl_msg          * msgp;
+	/* Bit field showing which message fields are present */
+	uint32_t		  msg_fields;
 	/* and the digest to apply it to */
 	cf_digest 	      keyd;
-	/* generation to send to the user */
-	uint32_t          generation;
 
 	/* result code to send to user */
 	int               result_code;
+
+	uint16_t          generation;
 	// set to true in duplicate resolution phase
 	bool              microbenchmark_is_resolve;
-	/* has the transaction been 'prepared' by as_prepare_transaction? This
-	   means that the incoming msg has been translated and the corresponding
-	   transaction structure has been set up */
-	bool              preprocessed;
 	// By default we store the key if the client sends it. However some older
 	// clients send the key without a digest, without intent to store the key.
 	// In such cases, we set this flag false and don't store the key.
@@ -231,16 +229,86 @@ typedef struct as_query_transaction_s as_query_transaction;
 
 extern int as_transaction_prepare(as_transaction *tr);
 extern void as_transaction_init(as_transaction *tr, cf_digest *, cl_msg *);
-extern int as_transaction_digest_validate(as_transaction *tr);
+
+bool as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type);
+bool as_transaction_demarshal_prepare(as_transaction *tr);
+void as_transaction_proxyee_prepare(as_transaction *tr);
+
+static inline bool
+as_transaction_is_batch_sub(const as_transaction *tr)
+{
+	return (tr->flag & AS_TRANSACTION_FLAG_BATCH_SUB) != 0;
+}
+
+static inline bool
+as_transaction_has_set(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_SET) != 0;
+}
+
+static inline bool
+as_transaction_has_key(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_KEY) != 0;
+}
+
+static inline bool
+as_transaction_has_digest(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_DIGEST_RIPE) != 0;
+}
+
+static inline bool
+as_transaction_is_multi_record(const as_transaction *tr)
+{
+	return	(tr->msg_fields & (AS_MSG_FIELD_BIT_KEY | AS_MSG_FIELD_BIT_DIGEST_RIPE)) == 0 &&
+			(tr->flag & AS_TRANSACTION_FLAG_BATCH_SUB) == 0;
+}
+
+static inline bool
+as_transaction_is_batch_direct(const as_transaction *tr)
+{
+	// Assumes we're already multi-record.
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_DIGEST_RIPE_ARRAY) != 0;
+}
+
+static inline bool
+as_transaction_is_query(const as_transaction *tr)
+{
+	// Assumes we're already multi-record.
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_INDEX_RANGE) != 0;
+}
+
+static inline bool
+as_transaction_is_udf(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_UDF_FILENAME) != 0;
+}
+
+static inline bool
+as_transaction_has_udf_op(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_UDF_OP) != 0;
+}
+
+static inline bool
+as_transaction_has_scan_options(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_SCAN_OPTIONS) != 0;
+}
 
 // For now it's not worth storing the trid in the as_transaction struct since we
 // only parse it from the msg once per transaction anyway.
 static inline uint64_t
 as_transaction_trid(const as_transaction *tr)
 {
+	if ((tr->msg_fields & AS_MSG_FIELD_BIT_TRID) == 0) {
+		return 0;
+	}
+
 	as_msg_field *f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_TRID);
 
-	return f ? cf_swap_from_be64(*(uint64_t*)f->data) : 0;
+	return cf_swap_from_be64(*(uint64_t*)f->data);
 }
 
 struct udf_call_s; // forward declaration for udf_call, defined in udf_rw.h
@@ -260,5 +328,4 @@ typedef struct tr_create_data {
 extern int   as_transaction_create_internal(as_transaction *tr, tr_create_data * data);
 
 void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
-void as_transaction_error_unswapped(as_transaction* tr, uint32_t error_code);
 void as_transaction_error(as_transaction* tr, uint32_t error_code);

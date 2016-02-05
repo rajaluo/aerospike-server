@@ -691,8 +691,11 @@ run_nsup_delete(void* pv_data)
 
 		// INIT_TR
 		as_transaction tr;
-		as_transaction_init(&tr, &q_item.digest, msgp);
+		as_transaction_init(&tr, NULL, msgp);
 		tr.flag |= AS_TRANSACTION_FLAG_NSUP_DELETE;
+		tr.start_time = cf_getns();
+		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
+		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
 		MICROBENCHMARK_RESET();
 

@@ -276,16 +276,10 @@ int
 udf_rw_call_init_from_msg(udf_call * call, as_msg *msg)
 {
 	call->def.type = AS_UDF_OP_KVS;
-	as_msg_field *  filename = NULL;
-	as_msg_field *  function = NULL;
-	as_msg_field *  arglist =  NULL;
-
-	// Check the type of udf
-	as_msg_field *  op = NULL;
-	op = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_OP);
-	if ( op ) {
-		memcpy(&call->def.type, (byte *)op->data, sizeof(as_udf_op));
-	}
+	as_msg_field * filename = NULL;
+	as_msg_field * function = NULL;
+	as_msg_field * arglist = NULL;
+	as_msg_field * op = NULL;
 
 	filename = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
 	if ( filename ) {
@@ -296,6 +290,13 @@ udf_rw_call_init_from_msg(udf_call * call, as_msg *msg)
 				as_msg_field_get_strncpy(filename, &call->def.filename[0], sizeof(call->def.filename));
 				as_msg_field_get_strncpy(function, &call->def.function[0], sizeof(call->def.function));
 				call->def.arglist = arglist;
+
+				// TODO - could use transaction field flag to speed this up.
+				op = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_OP);
+				if ( op ) {
+					memcpy(&call->def.type, (byte *)op->data, sizeof(as_udf_op));
+				}
+
 				return 0;
 			}
 		}
@@ -654,11 +655,7 @@ end_time(time_tracker *tt)
 	if (!lr) return -1;
 	udf_record *r   = (udf_record *) as_rec_source(lr->h_urec);
 	if (!r)  return -1;
-	// If user has not specified timeout pick the max on server
-	// side
-	return (r->tr->end_time)
-		   ? r->tr->end_time
-		   : r->tr->start_time + g_config.transaction_max_ns;
+	return r->tr->end_time;
 }
 
 /*
@@ -844,7 +841,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 
 		// If both the record and the message have keys, check them.
 		if (rd.key) {
-			if (msg_has_key(m) && ! check_msg_key(m, &rd)) {
+			if (as_transaction_has_key(tr) && ! check_msg_key(m, &rd)) {
 				udf_record_close(&urecord);
 				call->tr->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
 				send_failure(call, NULL);
@@ -853,7 +850,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		}
 		else {
 			// If the message has a key, apply it to the record.
-			if (! get_msg_key(m, &rd)) {
+			if (! get_msg_key(tr, &rd)) {
 				udf_record_close(&urecord);
 				call->tr->result_code = AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
 				send_failure(call, NULL);

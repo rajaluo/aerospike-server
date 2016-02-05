@@ -71,16 +71,13 @@ typedef struct write_request_s {
 
 	// The incoming msgp from the transaction that created this request.
 	cl_msg             * msgp;
+	uint32_t             msg_fields;
 
 	cf_clock             xmit_ms; // time of next retransmit
 	uint32_t             retry_interval_ms; // interval to add for next retransmit
+
 	cf_clock             start_time;
-
-	// Be carefully atomic, since this is written in 2 places (constructor and
-	// when starting the transaction), as well as read in a number of places
-	// (including on the reaper thread.)
-	cf_atomic_clock      end_time;
-
+	cf_clock             end_time;
 	cf_clock             microbenchmark_time;
 
 	// The request we're making, so we can retransmit if necessary. Will be the
@@ -95,7 +92,7 @@ typedef struct write_request_s {
 	uint8_t            * pickled_buf;
 	size_t               pickled_sz;
 	as_rec_props         pickled_rec_props;
-	uint32_t             generation;
+	uint16_t             generation;
 	uint32_t             void_time;
 
 	// Store ops' responses here.

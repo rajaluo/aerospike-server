@@ -24,12 +24,13 @@
 
 #include <stdint.h>
 #include "dynbuf.h"
+#include "base/datamodel.h"
 #include "base/monitor.h"
 #include "base/transaction.h"
 #include "base/udf_rw.h"
 
 void as_scan_init();
-int as_scan(as_transaction *tr);
+int as_scan(as_transaction *tr, as_namespace *ns);
 void as_scan_limit_active_jobs(uint32_t max_active);
 void as_scan_limit_finished_jobs(uint32_t max_done);
 void as_scan_resize_thread_pool(uint32_t n_threads);
