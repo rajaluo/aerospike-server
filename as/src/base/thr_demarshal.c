@@ -684,7 +684,6 @@ thr_demarshal(void *arg)
 					has_extra_ref   = true;
 					tr.proto_fd_h   = fd_h;
 					tr.start_time   = now_ns; // set transaction start time
-					tr.preprocessed = false;
 
 					if (! as_proto_is_valid_type(proto_p)) {
 						cf_warning(AS_DEMARSHAL, "unsupported proto message type %u", proto_p->type);
@@ -756,6 +755,14 @@ thr_demarshal(void *arg)
 					// Fast path for batch requests.
 					if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
 						as_batch_queue_task(&tr);
+						cf_atomic_int_incr(&g_config.proto_transactions);
+						goto NextEvent;
+					}
+
+					// Swap as_msg fields and bin-ops to host order, and flag
+					// which fields are present, to reduce re-parsing.
+					if (! as_transaction_demarshal_prepare(&tr)) {
+						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_PARAMETER);
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
 					}

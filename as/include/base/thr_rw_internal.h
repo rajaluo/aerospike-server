@@ -119,9 +119,8 @@ int write_local_pickled(
 	ldt_prole_info *
 	);
 
-extern bool msg_has_key(as_msg* m);
 extern bool check_msg_key(as_msg* m, as_storage_rd* rd);
-extern bool get_msg_key(as_msg* m, as_storage_rd* rd);
+extern bool get_msg_key(as_transaction *tr, as_storage_rd* rd);
 
 extern void update_metadata_in_index(as_transaction *tr, bool increment_generation, as_index *r);
 

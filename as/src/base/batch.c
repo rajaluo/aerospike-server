@@ -767,11 +767,8 @@ as_batch_queue_task(as_transaction* btr)
 	tr.proto_fd_h = btr->proto_fd_h;
 	tr.start_time = btr->start_time;
 	tr.batch_shared = shared;
-	tr.preprocessed = true;
-
-	if (bmsg->transaction_ttl) {
-		tr.end_time = tr.start_time + ((uint64_t)bmsg->transaction_ttl * 1000000);
-	}
+	tr.flag |= AS_TRANSACTION_FLAG_BATCH_SUB;
+	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 
 	// Read batch keys and initialize generic transactions.
 	as_batch_input* in;
@@ -838,6 +835,10 @@ as_batch_queue_task(as_transaction* btr)
 
 			// Swap remaining fields.
 			for (uint16_t j = 1; j < out->msg.n_fields; j++) {
+				if (mf->type == AS_MSG_FIELD_TYPE_SET) {
+					as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_SET);
+				}
+
 				as_msg_swap_field(mf);
 				mf = as_msg_field_get_next(mf);
 			}

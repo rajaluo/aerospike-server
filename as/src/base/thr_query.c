@@ -1826,9 +1826,9 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 
 	qtr_reserve(qtr, __FILE__, __LINE__);
 	cf_atomic32_incr(&qtr->n_udf_tr_queued);
-	// Reset start time
-	tr.start_time = cf_getns();
+
 	thr_tsvc_enqueue(&tr);
+
 	return AS_QUERY_OK;
 }
 
@@ -2582,15 +2582,12 @@ query_th(void* q_to_wait_on)
 query_type
 query_get_type(as_transaction* tr)
 {
-	as_msg_field *filename_f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_UDF_FILENAME);
-
-	if (! filename_f && ! tr->udata.req_udata) {
+	if (! as_transaction_is_udf(tr) && ! tr->udata.req_udata) {
 		return QUERY_TYPE_LOOKUP;
 	}
 
-	as_msg_field *udf_op_f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_UDF_OP);
+	as_msg_field *udf_op_f = as_transaction_has_udf_op(tr) ?
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_UDF_OP) : NULL;
 
 	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_UDF_OP_AGGREGATE) {
 		return QUERY_TYPE_AGGR;
@@ -2689,7 +2686,7 @@ query_setup_fd(as_query_transaction *qtr, as_transaction *tr)
  *
  */
 static int
-query_setup(as_transaction *tr, as_query_transaction **qtrp)
+query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 {
 
 #if defined(USE_SYSTEMTAP)
@@ -2709,21 +2706,6 @@ query_setup(as_transaction *tr, as_query_transaction **qtrp)
 	char *setname           = NULL;
 	as_query_transaction *qtr = NULL;
 
-	as_msg_field *nsfp = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_NAMESPACE);
-	if (!nsfp) {
-		cf_debug(AS_QUERY,
-				"Query must have namespace, client error");
-		tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
-		goto Cleanup;
-	}
-	as_namespace *ns = as_namespace_get_bymsgfield(nsfp);
-	if (!ns) {
-		cf_debug(AS_QUERY, "Query with unavailable namespace");
-		tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
-		goto Cleanup;
-	}
-
 	bool has_sindex   = as_sindex_ns_has_sindex(ns);
 	if (!has_sindex) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_INDEX_NOTFOUND;
@@ -2731,6 +2713,7 @@ query_setup(as_transaction *tr, as_query_transaction **qtrp)
 		goto Cleanup;
 	}
 
+	// TODO - still lots of redundant msg field parsing (e.g. for set) - fix.
 	if ((si = as_sindex_from_msg(ns, &tr->msgp->msg)) == NULL) {
 		cf_debug(AS_QUERY, "No Index Defined in the Query");
 	}
@@ -2746,7 +2729,8 @@ query_setup(as_transaction *tr, as_query_transaction **qtrp)
 
 	ASD_SINDEX_MSGRANGE_FINISHED(nodeid, trid);
 	// get optional set
-	as_msg_field *sfp = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET);
+	as_msg_field *sfp = as_transaction_has_set(tr) ?
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
 	if (sfp && as_msg_field_get_value_sz(sfp) > 0) {
 		setname = cf_strndup((const char *)sfp->data, as_msg_field_get_value_sz(sfp));
 	}
@@ -2866,14 +2850,14 @@ Cleanup:
  * 		Either call query_transaction_done or Cleanup to free the msgp
  */
 int
-as_query(as_transaction *tr)
+as_query(as_transaction *tr, as_namespace *ns)
 {
 	if (tr) {
 		QUERY_HIST_INSERT_DATA_POINT(query_txn_q_wait_hist, tr->start_time);
 	}
 
 	as_query_transaction *qtr;
-	int rv = query_setup(tr, &qtr);
+	int rv = query_setup(tr, ns, &qtr);
 
 	if (rv == AS_QUERY_DONE) {
 		// Send FIN packet to client to ignore this.

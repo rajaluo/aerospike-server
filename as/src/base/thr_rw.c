@@ -181,13 +181,11 @@ write_request_create(void) {
 	wr->dest_msg = 0;
 	wr->proxy_msg = 0;
 	wr->msgp = 0;
+	wr->msg_fields = 0;
 	wr->pickled_buf = 0;
 	as_rec_props_clear(&wr->pickled_rec_props);
 	wr->respond_client_on_master_completion = false;
 	wr->replication_fire_and_forget = false;
-	// Set the initial limit on wr lifetime to guarantee finite life-span.
-	// (Will be reset relative to the transaction end time if/when the wr goes ready.)
-	cf_atomic64_set(&(wr->end_time), cf_getns() + g_config.transaction_max_ns);
 
 	// Initialize with the default consistency guarantee levels.
 	// (These will be re-set later according to combining the server's namespace
@@ -219,7 +217,7 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	// INIT_TR
 	write_request *wr = (write_request *) wreq;
 	tr->start_time = wr->start_time;
-	tr->end_time = cf_atomic64_get(wr->end_time);
+	tr->end_time = wr->end_time; // useless if we requeue transaction
 
 	// In case wr->proto_fd_h is set it is considered to be case system is
 	// bailing out to set it to NULL once it has been handed over to transaction
@@ -233,8 +231,8 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	// Partition reservation and msg are freed when the write request is destroyed
 	as_partition_reservation_copy(&tr->rsv, &wr->rsv);
 	tr->msgp = wr->msgp;
+	tr->msg_fields = wr->msg_fields;
 	tr->result_code = AS_PROTO_RESULT_OK;
-	tr->preprocessed = true;
 	tr->flag = 0;
 
 	tr->generation = wr->generation;
@@ -895,16 +893,19 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 				rv = -1;
 			} else {
 				// see if we have scripts to execute
-				udf_call *call = cf_malloc(sizeof(udf_call));
-				int uret;
+				udf_call *call = NULL;
+				int uret = -1;
 				if (tr->udata.req_udata) {
+					call = cf_malloc(sizeof(udf_call));
 					uret = udf_rw_call_init_internal(call, tr);
-				} else {
+				} else if (as_transaction_is_udf(tr)) {
+					// TODO - move is_udf check inside call_init.
+					call = cf_malloc(sizeof(udf_call));
 					uret = udf_rw_call_init_from_msg(call, &tr->msgp->msg);
 					call->tr = tr;
 				}
 
-				if (!uret) {
+				if (uret == 0) {
 					wr->has_udf = true;
 
 					rv = udf_rw_local(call, wr, &op);
@@ -937,9 +938,13 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 							cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
 						}
 					}
+				} else if (call) {
+					cf_warning(AS_RW, "transaction failed udf_call init");
+					cf_free(call);
+					tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+					rv = -1;
 				} else {
 					wr->has_udf = false;
-					cf_free(call);
 
 					rv = write_local(tr, &wr->pickled_buf, &wr->pickled_sz,
 							&wr->pickled_rec_props, &wr->response_db);
@@ -1130,9 +1135,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		tr->msgp = 0;
 		wr->xmit_ms = cf_getms() + g_config.transaction_retry_ms;
 		wr->retry_interval_ms = g_config.transaction_retry_ms;
-		wr->start_time = tr->start_time;
-		cf_atomic64_set(&(wr->end_time),
-				(tr->end_time != 0) ? tr->end_time : wr->start_time + g_config.transaction_max_ns);
 		wr->ready = true;
 		WR_TRACK_INFO(wr, "internal_rw_start: first time - tr->wr ");
 	}
@@ -1142,7 +1144,9 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	msg_dump(wr->dest_msg, "rw start outoing msg");
 #endif
 
-	wr->microbenchmark_time = cf_getns();
+	if (g_config.microbenchmarks) {
+		wr->microbenchmark_time = cf_getns();
+	}
 
 	if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP)
 		cf_detail(AS_RW, "[Digest %"PRIx64" Shipped OP] Replication Initiated",
@@ -1233,7 +1237,10 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 	cf_debug_digest(AS_RW, &(tr->keyd), "[PROCESS KEY] {%s:%u} Self(%"PRIx64") Read(%d):",
 			ns->name, tr->rsv.p->partition_id, g_config.self_node, is_read );
 
+	wr->msg_fields = tr->msg_fields;
 	wr->keyd = tr->keyd;
+	wr->start_time = tr->start_time;
+	wr->end_time = tr->end_time;
 
 	// Transaction Consistency Guarantees:
 	//   Use the client's requested guarantee level for this transaction
@@ -1310,7 +1317,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 				cf_crash(AS_RW, "cf_malloc");
 			}
 			e->tr.start_time = tr->start_time;
-			e->tr.end_time = tr->end_time;
 			e->tr.proto_fd_h = tr->proto_fd_h;
 			tr->proto_fd_h = 0;
 			e->tr.proxy_node = tr->proxy_node;
@@ -1321,7 +1327,7 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			e->tr.result_code = AS_PROTO_RESULT_OK;
 			e->tr.msgp = tr->msgp;
 			tr->msgp = 0;
-			e->tr.preprocessed = true;
+			e->tr.msg_fields = tr->msg_fields;
 			e->tr.flag = 0;
 			UREQ_DATA_COPY(&e->tr.udata, &tr->udata);
 			e->tr.batch_shared = tr->batch_shared;
@@ -1541,7 +1547,6 @@ finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 	// the response is built before another writer changes the value, in cases
 	// where the transaction included read requests.
 
-	tr.microbenchmark_time = wr->microbenchmark_time;
 	MICROBENCHMARK_HIST_INSERT_AND_RESET(wt_master_wait_prole_hist);
 
 	tr.microbenchmark_is_resolve = false;
@@ -2736,6 +2741,8 @@ write_process(cf_node node, msg *m, bool respond)
 		// INIT_TR
 		as_transaction tr;
 		as_transaction_init(&tr, keyd, msgp);
+		// Don't bother with msg_fields since we currently don't look for any
+		// fields in msgp here - tr is just a container, will not be processed.
 
 		/* NB need to use the _migrate variant here so we can write into desync
 		 * partitions - and that never fails */
@@ -2916,22 +2923,11 @@ Out:
 	return (0);
 }
 
-bool
-msg_has_key(as_msg* m)
-{
-	return as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY) != NULL;
-}
-
+// Caller must have checked that key is present in message.
 bool
 check_msg_key(as_msg* m, as_storage_rd* rd)
 {
 	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
-
-	if (! f) {
-		cf_warning(AS_RW, "no key sent for key check");
-		return false;
-	}
-
 	uint32_t key_size = as_msg_field_get_value_sz(f);
 	uint8_t* key = f->data;
 
@@ -3037,7 +3033,7 @@ delete_local(as_transaction *tr)
 		return -1;
 	}
 
-	bool check_key = msg_has_key(m);
+	bool check_key = as_transaction_has_key(tr);
 
 	if (ns->storage_data_in_memory || check_key) {
 		as_storage_rd rd;
@@ -3202,12 +3198,13 @@ apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd)
 // Utilities used by write_local() and UDF code.
 //
 
+// Caller must have checked that set is present in message.
 int
 as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m)
 {
 	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
 
-	if (! f || as_msg_field_get_value_sz(f) == 0) {
+	if (as_msg_field_get_value_sz(f) == 0) {
 		return 0;
 	}
 
@@ -3222,13 +3219,13 @@ as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m)
 }
 
 bool
-get_msg_key(as_msg* m, as_storage_rd* rd)
+get_msg_key(as_transaction *tr, as_storage_rd* rd)
 {
-	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
-
-	if (! f) {
+	if (! as_transaction_has_key(tr)) {
 		return true;
 	}
+
+	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_KEY);
 
 	if (rd->ns->single_bin && rd->ns->storage_data_in_memory) {
 		// For now we just ignore the key - should we fail out of write_local()?
@@ -3431,7 +3428,8 @@ write_local_preprocessing(as_transaction *tr, bool *is_done)
 
 	// Fail if disallow_null_setname is true and set name is absent or empty.
 	if (ns->disallow_null_setname) {
-		as_msg_field *f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
+		as_msg_field *f = as_transaction_has_set(tr) ?
+				as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET) : NULL;
 
 		if (! f || as_msg_field_get_value_sz(f) == 0) {
 			cf_info(AS_RW, "write_local: null/empty set name not allowed for namespace %s", ns->name);
@@ -3453,9 +3451,10 @@ write_local_preprocessing(as_transaction *tr, bool *is_done)
 }
 
 static bool
-check_msg_set_name(as_msg* m, const char* set_name)
+check_msg_set_name(as_transaction *tr, const char* set_name)
 {
-	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
+	as_msg_field* f = as_transaction_has_set(tr) ?
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {
 		if (set_name) {
@@ -3644,18 +3643,18 @@ write_local_handle_msg_key(as_transaction *tr, as_storage_rd *rd)
 		}
 
 		// Check the client-sent key, if any, against the stored key.
-		if (msg_has_key(m) && ! check_msg_key(m, rd)) {
+		if (as_transaction_has_key(tr) && ! check_msg_key(m, rd)) {
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: key mismatch ", ns->name);
 			return AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
 		}
 	}
 	// If we got a key without a digest, it's an old client, not a cue to store
 	// the key. (Remove this check when we're sure all old C clients are gone.)
-	else if (as_msg_field_get(m, AS_MSG_FIELD_TYPE_DIGEST_RIPE)) {
+	else if (as_transaction_has_digest(tr)) {
 		// Key not stored for this record - store one if sent from client. For
 		// data-in-memory, don't allocate the key until we reach the point of no
 		// return. Also don't set AS_INDEX_FLAG_KEY_STORED flag until then.
-		if (! get_msg_key(m, rd)) {
+		if (! get_msg_key(tr, rd)) {
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: can't store key ", ns->name);
 			return AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
 		}
@@ -4829,7 +4828,8 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 
 	// If creating record, write set-ID into index.
 	if (record_created) {
-		int rv_set = as_record_set_set_from_msg(r, ns, m);
+		int rv_set = as_transaction_has_set(tr) ?
+				as_record_set_set_from_msg(r, ns, m) : 0;
 
 		if (rv_set == -1) {
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: set can't be added ", ns->name);
@@ -4846,7 +4846,7 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 	const char* set_name = as_index_get_set_name(r, ns);
 
 	// If record existed, check that as_msg set name matches.
-	if (! record_created && ! check_msg_set_name(m, set_name)) {
+	if (! record_created && ! check_msg_set_name(tr, set_name)) {
 		write_local_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_PARAMETER);
 		return -1;
 	}
@@ -5281,6 +5281,8 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		// INIT_TR
 		as_transaction tr;
 		as_transaction_init(&tr, keyd, msgp);
+		// Don't bother with msg_fields since we currently don't look for any
+		// fields in msgp here - tr is just a container, will not be processed.
 
 		tr.rsv = *rsvp;
 
@@ -5464,7 +5466,7 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 	write_request *wr = data;
 	now_times *p_now = (now_times*)udata;
 
-	if (p_now->now_ns > cf_atomic64_get(wr->end_time)) {
+	if (p_now->now_ns > wr->end_time) {
 
 		if (!wr->ready) {
 			cf_detail(AS_RW, "Timing out never-ready wr %p", wr);
@@ -5891,7 +5893,7 @@ dump_rw_reduce_fn(void *key, uint32_t keylen, void *data,
 	pthread_mutex_lock(&wr->lock);
 	cf_info(AS_RW,
 			"gwh[%d]: wr %p rc %d ready %d et %ld xm %ld (delta %ld) ri %d pb %p |wq| %d",
-			*counter, wr, cf_rc_count(wr), wr->ready, cf_atomic64_get(wr->end_time) / 1000000,
+			*counter, wr, cf_rc_count(wr), wr->ready, wr->end_time / 1000000,
 			wr->xmit_ms, wr->xmit_ms - g_now, wr->retry_interval_ms, wr->pickled_buf, wq_len(wr->wait_queue_head));
 	pthread_mutex_unlock(&wr->lock);
 
@@ -5990,7 +5992,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 
 	// Check the key if required.
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!
-	if (msg_has_key(m) &&
+	if (as_transaction_has_key(tr) &&
 			as_storage_record_get_key(&rd) && ! check_msg_key(m, &rd)) {
 		read_local_done(tr, r_ref, &rd, AS_PROTO_RESULT_FAIL_KEY_MISMATCH);
 		return;

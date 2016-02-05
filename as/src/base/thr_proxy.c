@@ -70,7 +70,7 @@
 #define PROXY_FIELD_REDIRECT 3 // deprecated
 #define PROXY_FIELD_AS_PROTO 4 // request as_proto - currently contains only as_msg's
 #define PROXY_FIELD_CLUSTER_KEY 5
-#define PROXY_FIELD_TIMEOUT_MS 6
+#define PROXY_FIELD_TIMEOUT_MS 6 // deprecated
 #define PROXY_FIELD_INFO 7
 
 #define PROXY_INFO_SHIPPED_OP 0x0001
@@ -96,6 +96,8 @@ typedef struct {
 	msg		        *fab_msg;    // this is the fabric message in case we have to retransmit
 	cf_clock         xmit_ms;    // the ms time of the NEXT retransmit
 	uint32_t         retry_interval_ms; // number of ms to wait next time
+
+	uint32_t         msg_fields;
 	uint64_t         start_time;
 	uint64_t         end_time;
 
@@ -185,7 +187,6 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 	msg_set_type msettype = tr->batch_shared ? MSG_SET_COPY : MSG_SET_HANDOFF_MALLOC;
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void *) tr->msgp, as_proto_size_get(&tr->msgp->proto), msettype);
 	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, cluster_key);
-	msg_set_uint32(m, PROXY_FIELD_TIMEOUT_MS, tr->msgp->msg.transaction_ttl);
 
 	tr->msgp = 0;
 
@@ -194,8 +195,9 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 	// Fill out a retransmit structure, insert into the retransmit hash.
 	msg_incr_ref(m);
 	proxy_request pr;
+	pr.msg_fields = tr->msg_fields;
 	pr.start_time = tr->start_time;
-	pr.end_time = (tr->end_time != 0) ? tr->end_time : pr.start_time + g_config.transaction_max_ns;
+	pr.end_time = tr->end_time;
 	pr.fd_h = tr->proto_fd_h;
 	tr->proto_fd_h = 0;
 	pr.fab_msg = m;
@@ -248,7 +250,6 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 	msg_set_buf(m, PROXY_FIELD_DIGEST, (void *) &wr->keyd, sizeof(cf_digest), MSG_SET_COPY);
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void *) wr->msgp, as_proto_size_get(&wr->msgp->proto), MSG_SET_HANDOFF_MALLOC);
 	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, as_paxos_get_cluster_key());
-	msg_set_uint32(m, PROXY_FIELD_TIMEOUT_MS, wr->msgp->msg.transaction_ttl);
 	wr->msgp = 0;
 
 	// If it is shipped op.
@@ -262,8 +263,9 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 	// Fill out a retransmit structure, insert into the retransmit hash.
 	msg_incr_ref(m);
 	proxy_request pr;
+	pr.msg_fields  = wr->msg_fields;
 	pr.start_time  = wr->start_time;
-	pr.end_time    = (wr->end_time != 0) ? wr->end_time : pr.start_time + g_config.transaction_max_ns;
+	pr.end_time    = wr->end_time;
 	cf_rc_reserve(wr);
 	pr.wr          = wr;
 	pr.fab_msg     = m;
@@ -543,18 +545,23 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 				return 0;
 			}
 
-			// This is allowed to fail - this is a new field, and gets defaulted
-			// to 0 if it doesn't exist.
-			uint32_t timeout_ms = 0;
-			msg_get_uint32(m, PROXY_FIELD_TIMEOUT_MS, &timeout_ms);
-
 			// Put the as_msg on the normal queue for processing.
 			// INIT_TR
 			as_transaction tr;
 			as_transaction_init(&tr, key, msgp);
-			tr.end_time             = (timeout_ms != 0) ? ((uint64_t)timeout_ms * 1000000) + tr.start_time : 0;
+			// msgp might not have digest - batch sub-transactions, old clients.
+			// For old clients, will compute it again from msgp key and set.
+
+			tr.start_time           = cf_getns();
 			tr.proxy_node           = id;
 			tr.proxy_msg            = m;
+			as_transaction_proxyee_prepare(&tr);
+
+			// For batch sub-transactions, make sure we flag them so they're not
+			// mistaken for multi-record transactions (which never proxy).
+			if (as_transaction_is_multi_record(&tr)) {
+				tr.flag |= AS_TRANSACTION_FLAG_BATCH_SUB;
+			}
 
 			// Check here if this is shipped op.
 			uint32_t info = 0;
@@ -721,8 +728,11 @@ SendFin:
 			// Put the as_msg on the normal queue for processing.
 			as_transaction tr;
 			as_transaction_init(&tr, key, msgp);
-			tr.start_time = pr->start_time; // start time
-			tr.end_time   = pr->end_time;
+			// msgp might not have digest - batch sub-transactions, old clients.
+			// For old clients, will compute it again from msgp key and set.
+
+			tr.msg_fields = pr->msg_fields;
+			tr.start_time = pr->start_time;
 			tr.proto_fd_h = pr->fd_h;
 			tr.batch_shared = pr->batch_shared;
 			tr.batch_index = pr->batch_index;
@@ -975,17 +985,21 @@ Retry:
 				size_t sz = 0;
 				msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (byte **) &keyp, &sz, MSG_GET_DIRECT);
 
+				cl_msg *msgp;
+				sz = 0;
+				msg_get_buf(pr->fab_msg, PROXY_FIELD_AS_PROTO, (byte **) &msgp, &sz, MSG_GET_COPY_MALLOC);
+
 				// INIT_TR
 				as_transaction tr;
-				as_transaction_init(&tr, keyp, NULL);
-				// TODO - why not pr.start_time?
-				tr.end_time   = pr->end_time;
+				as_transaction_init(&tr, keyp, msgp);
+				// msgp might not have digest - batch sub-transactions, old clients.
+				// For old clients, will compute it again from msgp key and set.
+
+				tr.msg_fields = pr->msg_fields;
+				tr.start_time   = pr->start_time;
 				tr.proto_fd_h = pr->fd_h;
 				tr.batch_shared = pr->batch_shared;
 				tr.batch_index = pr->batch_index;
-
-				sz = 0;
-				msg_get_buf(pr->fab_msg, PROXY_FIELD_AS_PROTO, (byte **) & (tr.msgp), &sz, MSG_GET_COPY_MALLOC);
 
 				cf_atomic_int_incr(&g_config.proxy_unproxy);
 
