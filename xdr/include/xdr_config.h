@@ -176,7 +176,6 @@ typedef struct xdr_config {
 	int	xdr_info_port;
 	int	xdr_digestpipe_readfd;
 	int	xdr_digestpipe_writefd;
-	int	xdr_local_port;
 	int	xdr_max_recs_inflight;
 	int	xdr_read_batch_size;
 	int	xdr_ship_slab_size;     // Maximum number of records, on receival of which, xdr start shipping.
