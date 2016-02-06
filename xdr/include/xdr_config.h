@@ -197,7 +197,6 @@ typedef struct xdr_config {
 	bool	xdr_check_data_before_delete;
 	int		xdr_info_request_timeout_ms;
 	int     xdr_compression_threshold;
-	char	*xdr_pidfile;
 	char	*xdr_read_mode_string;
 } xdr_config;
 

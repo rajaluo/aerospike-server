@@ -156,5 +156,4 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_replace_record = true;
 	c->xdr_info_request_timeout_ms = 500;
 	c->xdr_compression_threshold = 0; //0 = Disabled compressed shipping, > 0 minimum size of packet for compression
-	c->xdr_pidfile = NULL;
 }
