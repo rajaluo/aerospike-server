@@ -5466,21 +5466,15 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 	write_request *wr = data;
 	now_times *p_now = (now_times*)udata;
 
+	if (! wr->ready) {
+		return 0;
+	}
+
 	if (p_now->now_ns > wr->end_time) {
-
-		if (!wr->ready) {
-			cf_detail(AS_RW, "Timing out never-ready wr %p", wr);
-
-			if (!(wr->proto_fd_h)) {
-				cf_detail(AS_RW, "No proto_fd_h on wr %p", wr);
-			}
-		}
-
 		cf_atomic_int_incr(&g_config.stat_rw_timeout);
-		if (wr->ready) {
-			if ( ! wr->has_udf ) {
-				cf_hist_track_insert_data_point(g_config.wt_hist, wr->start_time);
-			}
+
+		if (! wr->has_udf) {
+			cf_hist_track_insert_data_point(g_config.wt_hist, wr->start_time);
 		}
 
 		pthread_mutex_lock(&wr->lock);
@@ -5513,11 +5507,6 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 		pthread_mutex_unlock(&wr->lock);
 
 		return (RCHASH_REDUCE_DELETE);
-	}
-
-	// cases where the wr is inserted in the table but all structures are not ready yet
-	if (wr->ready == false) {
-		return (0);
 	}
 
 	if (wr->xmit_ms < p_now->now_ms) {
