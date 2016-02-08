@@ -205,7 +205,7 @@ inline bool as_sindex_isactive(as_sindex *si)
 }
 
 // Translation from sindex internal error code to generic client visible Aerospike error code
-int as_sindex_err_to_clienterr(int err, char *fname, int lineno) {
+uint8_t as_sindex_err_to_clienterr(int err, char *fname, int lineno) {
 	switch(err) {
 		case AS_SINDEX_ERR_FOUND:        return AS_PROTO_RESULT_FAIL_INDEX_FOUND;
 		case AS_SINDEX_ERR_INAME_MAXLEN: return AS_PROTO_RESULT_FAIL_INDEX_NAME_MAXLEN;

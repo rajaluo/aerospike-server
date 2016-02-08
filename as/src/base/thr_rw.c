@@ -396,7 +396,7 @@ void send_messages(write_request *wr) {
 }
 
 void as_rw_set_stat_counters(bool is_read, int rv, as_transaction *tr) {
-	int result_code = tr ? tr->result_code : 0;
+	uint8_t result_code = tr ? tr->result_code : 0;
 	if (is_read) {
 		if (rv == 0) {
 			if (result_code == AS_PROTO_RESULT_FAIL_NOTFOUND)
@@ -2806,7 +2806,7 @@ write_process(cf_node node, msg *m, bool respond)
 					cf_atomic_int_incr(&g_config.err_write_fail_prole_delete);
 				} else {
 					cf_info_digest(AS_RW, &(tr.keyd),
-							"rw prole operation: failed, ns(%s) rv(%d) result code(%d) : ",
+							"rw prole operation: failed, ns(%s) rv(%d) result code(%u) : ",
 							ns->name, rv, tr.result_code);
 				}
 			}
@@ -3390,7 +3390,7 @@ write_local_failed(as_transaction* tr, as_index_ref* r_ref,
 		break;
 	}
 
-	tr->result_code = result_code;
+	tr->result_code = (uint8_t)result_code;
 }
 
 int
@@ -5119,7 +5119,7 @@ int as_write_journal_apply(as_partition_reservation *prsv) {
 	return (0);
 }
 
-int
+uint32_t
 write_process_op(as_transaction *tr, cl_msg *msgp, bool is_subrec, cf_node node)
 {
 	as_namespace *ns = tr->rsv.ns;
@@ -5142,7 +5142,7 @@ write_process_op(as_transaction *tr, cl_msg *msgp, bool is_subrec, cf_node node)
 			cf_atomic_int_incr(&g_config.err_write_fail_prole_delete);
 		} else {
 			cf_info(AS_RW,
-					"rw prole operation: failed, ns %s rv %d result code %d, "
+					"rw prole operation: failed, ns %s rv %d result code %u, "
 					"digest %"PRIx64"",
 					ns->name, rv, tr->result_code, *(uint64_t*)&tr->keyd);
 		}
@@ -5812,7 +5812,7 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 			if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
 					generation, void_time, ops, response_bins, n_bins, ns,
 					written_sz, as_transaction_trid(tr), setname)) {
-				cf_info(AS_RW, "rw: can't send reply, fd %d rc %d",
+				cf_info(AS_RW, "rw: can't send reply, fd %d rc %u",
 						tr->proto_fd_h->fd, tr->result_code);
 			}
 		}
@@ -5929,7 +5929,7 @@ read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		as_record_done(r_ref, tr->rsv.ns);
 	}
 
-	tr->result_code = result_code;
+	tr->result_code = (uint8_t)result_code;
 
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_cleanup_hist);
 

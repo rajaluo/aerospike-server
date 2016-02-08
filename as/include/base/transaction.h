@@ -181,9 +181,6 @@ typedef struct as_transaction_s {
 	/* and the digest to apply it to */
 	cf_digest 	      keyd;
 
-	/* result code to send to user */
-	int               result_code;
-
 	uint16_t          generation;
 	// set to true in duplicate resolution phase
 	bool              microbenchmark_is_resolve;
@@ -191,6 +188,7 @@ typedef struct as_transaction_s {
 	// clients send the key without a digest, without intent to store the key.
 	// In such cases, we set this flag false and don't store the key.
 	uint8_t           flag;
+	uint8_t           result_code;
 
 	// INTERNAL INTERNAL INTERNAL
 	/* start time of the transaction at the running node */

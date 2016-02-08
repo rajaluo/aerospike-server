@@ -171,7 +171,7 @@ send_udf_failure(udf_call *call, const as_string *s)
 		if (error_code == AS_PROTO_RESULT_FAIL_NOTFOUND ||
 			error_code == AS_PROTO_RESULT_FAIL_COLLECTION_ITEM_NOT_FOUND) {
 
-			call->tr->result_code = error_code;
+			call->tr->result_code = (uint8_t)error_code;
 			// Send an "empty" response, with no failure bin.
 			as_transaction *    tr          = call->tr;
 			single_transaction_response(tr, tr->rsv.ns, NULL/*ops*/,
@@ -723,7 +723,7 @@ int response_cb(as_transaction *tr, int retcode)
 {
 	udf_call      * call = ((udf_response_udata *)tr->udata.res_udata)->call;
 	as_result     * res  = ((udf_response_udata *)tr->udata.res_udata)->res;
-	tr->result_code      = retcode;
+	tr->result_code      = (uint8_t)retcode;
 	call->tr             = tr;
 	send_result(res, call);
 	as_result_destroy(res);
