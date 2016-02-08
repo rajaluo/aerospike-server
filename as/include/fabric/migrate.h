@@ -80,8 +80,7 @@ typedef enum as_migrate_result_e {
 
 // A data structure for temporarily en-queuing partition migrations.
 typedef struct partition_migrate_record_s {
-	cf_node *dest;
-	uint dest_sz;
+	cf_node dest;
 	as_namespace *ns;
 	as_partition_id pid;
 	uint64_t cluster_key;
