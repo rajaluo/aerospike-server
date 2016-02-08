@@ -1700,12 +1700,11 @@ as_partition_getreplica_write_node(as_namespace *ns, cf_node *node_a)
 }
 
 void
-partition_migrate_record_fill(partition_migrate_record *pmr, cf_node *dest,
-		uint destsz, as_namespace *ns, as_partition_id pid,
+partition_migrate_record_fill(partition_migrate_record *pmr, cf_node dest,
+		as_namespace *ns, as_partition_id pid,
 		uint64_t cluster_key, uint32_t tx_flags)
 {
 	pmr->dest = dest;
-	pmr->dest_sz = destsz;
 	pmr->ns = ns;
 	pmr->pid = pid;
 	pmr->tx_flags = tx_flags;
@@ -1927,7 +1926,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 						p->pending_migrate_tx++; // Send request to dupl node
 
 						partition_migrate_record r;
-						partition_migrate_record_fill(&r, &p->replica[0], 1, ns,
+						partition_migrate_record_fill(&r, p->replica[0], ns,
 								pid, orig_cluster_key, TX_FLAGS_NONE);
 						cf_queue_push(mq, &r);
 
@@ -2040,7 +2039,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			partition_migrate_record pmr;
 			while (0 == cf_queue_pop(mq, &pmr, 0)) {
 				cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate (in rx) to %"PRIx64"",
-						pmr.ns->name, pmr.pid, *(pmr.dest));
+						pmr.ns->name, pmr.pid, pmr.dest);
 
 				if (0 != as_migrate(&pmr, false)) {
 					cf_crash(AS_PARTITION, "couldn't start migrate");
@@ -2134,7 +2133,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 					for (int i = 0; i < p->n_dupl; i++)
 					{
 						p->pending_migrate_tx++; // Send request to dupl node
-						partition_migrate_record_fill(&r, &p->dupl_nodes[i], 1,
+						partition_migrate_record_fill(&r, p->dupl_nodes[i],
 								ns, pid, orig_cluster_key, TX_FLAGS_REQUEST);
 						cf_queue_push(mq, &r);
 					}
@@ -2222,7 +2221,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 						if (p->replica_tx_onsync[i] == true) {
 							p->replica_tx_onsync[i] = false;
 							p->pending_migrate_tx++;
-							partition_migrate_record_fill(&r, &p->replica[i], 1,
+							partition_migrate_record_fill(&r, p->replica[i],
 									ns, pid, orig_cluster_key, TX_FLAGS_NONE);
 							cf_queue_push(mq, &r);
 						}
@@ -2239,7 +2238,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			partition_migrate_record pmr;
 			while (0 == cf_queue_pop(mq, &pmr, 0)) {
 				cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate (in rx) to %"PRIx64"",
-						pmr.ns->name, pmr.pid, *(pmr.dest));
+						pmr.ns->name, pmr.pid, pmr.dest);
 
 				if (0 != as_migrate(&pmr, true)) {
 					cf_crash(AS_PARTITION, "couldn't start migrate");
@@ -3190,7 +3189,7 @@ as_partition_balance()
 									cf_debug(AS_PARTITION, "{%s:%d} Master case 6b: migrating to replica %"PRIx64, ns->name, j, HV(j, k));
 									p->pending_migrate_tx++;
 									partition_migrate_record_fill(&pmr,
-											&HV(j, k), 1, ns, j,
+											HV(j, k), ns, j,
 											orig_cluster_key, TX_FLAGS_NONE);
 									cf_queue_push(mq, &pmr);
 								}
@@ -3282,12 +3281,12 @@ as_partition_balance()
 								p->n_dupl = n_dupl;
 								memcpy(p->dupl_nodes, dupl_nodes, sizeof(cf_node) * p->n_dupl);
 							}
-							partition_migrate_record_fill(&pmr, &HV(j, 0), 1,
+							partition_migrate_record_fill(&pmr, HV(j, 0),
 									ns, j, orig_cluster_key,
 									TX_FLAGS_ACTING_MASTER);
 						}
 						else {
-							partition_migrate_record_fill(&pmr, &HV(j, 0), 1,
+							partition_migrate_record_fill(&pmr, HV(j, 0),
 									ns, j, orig_cluster_key,
 									TX_FLAGS_NONE);
 						}
@@ -3392,7 +3391,7 @@ as_partition_balance()
 	partition_migrate_record pmr;
 	while (0 == cf_queue_pop(mq, &pmr, 0)) {
 		cf_debug(AS_PARTITION, "{%s:%d} Scheduling migrate to %"PRIx64"",
-				pmr.ns->name, pmr.pid, *(pmr.dest));
+				pmr.ns->name, pmr.pid, pmr.dest);
 
 		if (0 != as_migrate(&pmr, false)) {
 			cf_crash(AS_PARTITION, "couldn't start migrate");
