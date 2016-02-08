@@ -109,8 +109,6 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 void
 process_transaction(as_transaction *tr)
 {
-	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(q_wait_hist);
-
 	int rv;
 	bool free_msgp = true;
 	cl_msg *msgp = tr->msgp;
@@ -470,6 +468,9 @@ thr_tsvc(void *arg)
 		if (0 != cf_queue_pop(q, &tr, CF_QUEUE_FOREVER)) {
 			cf_crash(AS_TSVC, "unable to pop from transaction queue");
 		}
+
+		MICROBENCHMARK_HIST_INSERT_AND_RESET(q_wait_hist);
+
 		process_transaction(&tr);
 	}
 

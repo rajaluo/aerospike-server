@@ -553,6 +553,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			// For old clients, will compute it again from msgp key and set.
 
 			tr.start_time           = cf_getns();
+			tr.microbenchmark_time  = tr.start_time;
 			tr.proxy_node           = id;
 			tr.proxy_msg            = m;
 			as_transaction_proxyee_prepare(&tr);
@@ -733,6 +734,7 @@ SendFin:
 
 			tr.msg_fields = pr->msg_fields;
 			tr.start_time = pr->start_time;
+			// TODO - set microbenchmark_time if microbenchmarks are on?
 			tr.proto_fd_h = pr->fd_h;
 			tr.batch_shared = pr->batch_shared;
 			tr.batch_index = pr->batch_index;
@@ -997,6 +999,7 @@ Retry:
 
 				tr.msg_fields = pr->msg_fields;
 				tr.start_time   = pr->start_time;
+				// TODO - set microbenchmark_time if microbenchmarks are on?
 				tr.proto_fd_h = pr->fd_h;
 				tr.batch_shared = pr->batch_shared;
 				tr.batch_index = pr->batch_index;

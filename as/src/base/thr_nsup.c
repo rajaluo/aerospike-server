@@ -694,6 +694,7 @@ run_nsup_delete(void* pv_data)
 		as_transaction_init(&tr, NULL, msgp);
 		tr.flag |= AS_TRANSACTION_FLAG_NSUP_DELETE;
 		tr.start_time = cf_getns();
+		tr.microbenchmark_time = tr.start_time;
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
