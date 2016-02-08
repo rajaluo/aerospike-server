@@ -229,7 +229,6 @@ typedef struct as_transaction_s {
 
 typedef struct as_query_transaction_s as_query_transaction;
 
-extern int as_transaction_prepare(as_transaction *tr);
 extern void as_transaction_init(as_transaction *tr, cf_digest *, cl_msg *);
 
 bool as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type);
