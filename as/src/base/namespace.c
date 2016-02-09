@@ -340,13 +340,6 @@ as_namespace_get_bymsgfield(as_msg_field *fp)
 }
 
 
-as_namespace *
-as_namespace_get_bymsgfield_unswap(as_msg_field *fp)
-{
-	return as_namespace_get_bybuf((byte *)fp->data, as_msg_field_get_value_sz_unswap(fp));
-}
-
-
 as_namespace_id
 as_namespace_getid_bymsgfield(as_msg_field *fp)
 {

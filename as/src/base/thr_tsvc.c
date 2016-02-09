@@ -471,11 +471,7 @@ thr_tsvc(void *arg)
 } // end thr_tsvc()
 
 
-// Called at init time by as.c; must match the init sequence chosen.
-tsvc_namespace_devices *g_tsvc_devices_a = 0;
-
 pthread_t* g_transaction_threads;
-pthread_t g_slow_queue_thread;
 
 static inline pthread_t*
 transaction_thread(int i, int j)
@@ -487,24 +483,23 @@ void
 as_tsvc_init()
 {
 	int n_queues = 0;
-	g_tsvc_devices_a = (tsvc_namespace_devices *) cf_malloc(sizeof(tsvc_namespace_devices) * g_config.n_namespaces);
 
-	for (int i = 0 ; i < g_config.n_namespaces ; i++) {
+	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
-		tsvc_namespace_devices *dev = &g_tsvc_devices_a[i];
-		dev->n_sz = strlen(ns->name);
-		strcpy(dev->n_name, ns->name);
+		// TODO - get rid of this when we make general use of ns->n_devices, and
+		// set it in config parse:
 		as_storage_attributes s_attr;
 		as_storage_namespace_attributes_get(ns, &s_attr);
 
-		dev->n_devices = s_attr.n_devices;
-		if (dev->n_devices) {
+		ns->n_devices = s_attr.n_devices;
+
+		if (ns->n_devices > 0) {
 			// Use 1 queue per read, 1 queue per write, for each device.
-			dev->queue_offset = n_queues;
-			n_queues += dev->n_devices * 2; // one queue per device per read/write
+			ns->dev_q_offset = n_queues;
+			n_queues += ns->n_devices * 2; // one queue per device per read/write
 		} else {
 			// No devices - it's an in-memory only namespace.
-			dev->queue_offset = n_queues;
+			ns->dev_q_offset = n_queues;
 			n_queues += 2; // one read queue one write queue
 		}
 	}
@@ -554,7 +549,7 @@ thr_tsvc_process_or_enqueue(as_transaction *tr)
 	if (g_config.allow_inline_transactions &&
 			g_config.n_namespaces_in_memory != 0 &&
 					(g_config.n_namespaces_not_in_memory == 0 ||
-							as_msg_peek_data_in_memory(tr->msgp))) {
+							as_msg_peek_data_in_memory(&tr->msgp->msg))) {
 		process_transaction(tr);
 		return 0;
 	}
@@ -580,7 +575,7 @@ thr_tsvc_enqueue(as_transaction *tr)
 		// In queue-per-device mode, we must peek to find out which device (and
 		// so which queue) this transaction is destined for.
 		proto_peek ppeek;
-		as_msg_peek(tr->msgp, &ppeek);
+		as_msg_peek(tr, &ppeek);
 
 		if (ppeek.ns_n_devices) {
 			// Namespace with storage backing.

@@ -1023,6 +1023,10 @@ struct as_namespace_s {
 
 	void *storage_private;
 
+	// TODO - could use n_devices in general, if we set it during config parse.
+	int n_devices; // if using queue-per-device, store the number of devices used by this namespace
+	int dev_q_offset; // if using queue-per-device, where this namespace's transaction queues are
+
 	/* data store management */
 	uint64_t	memory_size;
 	uint64_t	ssd_size;
@@ -1212,7 +1216,6 @@ extern bool as_namespace_configure_sets(as_namespace *ns);
 extern as_namespace *as_namespace_get_byname(char *name);
 extern as_namespace *as_namespace_get_byid(uint id);
 extern as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
-extern as_namespace *as_namespace_get_bymsgfield_unswap(struct as_msg_field_s *fp);
 extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern as_namespace_id as_namespace_getid_bymsgfield(struct as_msg_field_s *fp);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);
