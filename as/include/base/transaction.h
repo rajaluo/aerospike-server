@@ -47,6 +47,20 @@
 // Microbenchmark macros.
 //
 
+#define MICROBENCHMARK_SET_TO_START() \
+{ \
+	if (g_config.microbenchmarks) { \
+		tr.microbenchmark_time = tr.start_time; \
+	} \
+}
+
+#define MICROBENCHMARK_SET_TO_START_P() \
+{ \
+	if (g_config.microbenchmarks) { \
+		tr->microbenchmark_time = tr->start_time; \
+	} \
+}
+
 #define MICROBENCHMARK_HIST_INSERT(__hist_name) \
 { \
 	if (g_config.microbenchmarks && tr.microbenchmark_time != 0) { \
