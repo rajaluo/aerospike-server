@@ -574,8 +574,6 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest ");
 			}
 
-			MICROBENCHMARK_RESET();
-
 			thr_tsvc_enqueue(&tr);
 		}
 		break;
@@ -734,7 +732,6 @@ SendFin:
 
 			tr.msg_fields = pr->msg_fields;
 			tr.start_time = pr->start_time;
-			// TODO - set microbenchmark_time if microbenchmarks are on?
 			tr.proto_fd_h = pr->fd_h;
 			tr.batch_shared = pr->batch_shared;
 			tr.batch_index = pr->batch_index;
@@ -999,7 +996,6 @@ Retry:
 
 				tr.msg_fields = pr->msg_fields;
 				tr.start_time   = pr->start_time;
-				// TODO - set microbenchmark_time if microbenchmarks are on?
 				tr.proto_fd_h = pr->fd_h;
 				tr.batch_shared = pr->batch_shared;
 				tr.batch_index = pr->batch_index;
