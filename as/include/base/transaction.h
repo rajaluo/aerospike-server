@@ -260,6 +260,12 @@ as_transaction_has_digest(const as_transaction *tr)
 }
 
 static inline bool
+as_transaction_has_no_key_or_digest(const as_transaction *tr)
+{
+	return (tr->msg_fields & (AS_MSG_FIELD_BIT_KEY | AS_MSG_FIELD_BIT_DIGEST_RIPE)) == 0;
+}
+
+static inline bool
 as_transaction_is_multi_record(const as_transaction *tr)
 {
 	return	(tr->msg_fields & (AS_MSG_FIELD_BIT_KEY | AS_MSG_FIELD_BIT_DIGEST_RIPE)) == 0 &&
