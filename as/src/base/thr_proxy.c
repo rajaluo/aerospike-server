@@ -560,7 +560,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 
 			// For batch sub-transactions, make sure we flag them so they're not
 			// mistaken for multi-record transactions (which never proxy).
-			if (as_transaction_is_multi_record(&tr)) {
+			if (as_transaction_has_no_key_or_digest(&tr)) {
 				tr.flag |= AS_TRANSACTION_FLAG_BATCH_SUB;
 			}
 
