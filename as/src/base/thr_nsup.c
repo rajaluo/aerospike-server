@@ -698,8 +698,6 @@ run_nsup_delete(void* pv_data)
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
-		MICROBENCHMARK_RESET();
-
 		thr_tsvc_enqueue(&tr);
 
 		// Throttle - don't overwhelm tsvc queue.
