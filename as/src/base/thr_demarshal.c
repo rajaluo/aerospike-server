@@ -750,8 +750,6 @@ thr_demarshal(void *arg)
 						goto NextEvent;
 					}
 
-					ASD_TRANS_DEMARSHAL(nodeid, (uint64_t) tr.msgp);
-
 					// Fast path for batch requests.
 					if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
 						as_batch_queue_task(&tr);
@@ -766,6 +764,8 @@ thr_demarshal(void *arg)
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
 					}
+
+					ASD_TRANS_DEMARSHAL(nodeid, (uint64_t) tr.msgp, as_transaction_trid(&tr));
 
 					// Either process the transaction directly in this thread,
 					// or queue it for processing by another thread (tsvc/info).

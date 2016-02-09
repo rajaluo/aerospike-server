@@ -148,13 +148,6 @@ process_transaction(as_transaction *tr)
 		}
 	}
 
-// TODO - used to be in as_transaction_prepare() which is deprecated - fix.
-//#if defined(USE_SYSTEMTAP)
-//	uint64_t nodeid = g_config.self_node;
-//#endif
-//	...
-//	ASD_TRANS_PREPARE(nodeid, (uint64_t)msgp, tr->trid);
-
 	// All transactions must have a namespace.
 	as_msg_field *nf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
 
