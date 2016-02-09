@@ -1729,7 +1729,6 @@ finish_rw_process_dup_ack(write_request *wr)
 		MICROBENCHMARK_HIST_INSERT_AND_RESET(wt_resolve_wait_hist);
 	}
 
-	MICROBENCHMARK_RESET();
 	tr.microbenchmark_is_resolve = true;
 
 	bool must_delete = true;
