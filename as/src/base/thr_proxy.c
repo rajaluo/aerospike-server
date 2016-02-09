@@ -552,10 +552,11 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			// msgp might not have digest - batch sub-transactions, old clients.
 			// For old clients, will compute it again from msgp key and set.
 
-			tr.start_time           = cf_getns();
-			tr.microbenchmark_time  = tr.start_time;
-			tr.proxy_node           = id;
-			tr.proxy_msg            = m;
+			tr.start_time = cf_getns();
+			MICROBENCHMARK_SET_TO_START();
+
+			tr.proxy_node = id;
+			tr.proxy_msg = m;
 			as_transaction_proxyee_prepare(&tr);
 
 			// For batch sub-transactions, make sure we flag them so they're not

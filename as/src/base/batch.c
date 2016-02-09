@@ -766,7 +766,7 @@ as_batch_queue_task(as_transaction* btr)
 	as_transaction_init(&tr, 0, 0);
 	tr.proto_fd_h = btr->proto_fd_h;
 	tr.start_time = btr->start_time;
-	// TODO - set microbenchmark_time if microbenchmarks are on?
+	MICROBENCHMARK_SET_TO_START();
 	tr.batch_shared = shared;
 	tr.flag |= AS_TRANSACTION_FLAG_BATCH_SUB;
 	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);

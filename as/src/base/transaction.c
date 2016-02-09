@@ -330,7 +330,7 @@ as_transaction_create_internal(as_transaction *tr, tr_create_data *  trc_data)
 
 	// Do this last, to exclude the setup time in this function.
 	tr->start_time   = cf_getns();
-	tr->microbenchmark_time = tr->start_time;
+	MICROBENCHMARK_SET_TO_START_P();
 
 	return 0;
 }
