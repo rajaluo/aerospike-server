@@ -733,124 +733,72 @@ Exit:
 }
 
 bool
-as_msg_peek_data_in_memory(cl_msg *msgp)
+as_msg_peek_data_in_memory(const as_msg *m)
 {
-	if (! msgp ||
-			msgp->proto.version != PROTO_VERSION ||
-			msgp->proto.type != PROTO_TYPE_AS_MSG) {
-		return false;
-	}
-
-	as_msg_field *f = as_msg_field_get(&msgp->msg, AS_MSG_FIELD_TYPE_NAMESPACE);
+	as_msg_field *f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
 
 	if (! f) {
+		// Should never happen, but don't bark here.
 		return false;
 	}
 
-	as_namespace *ns = as_namespace_get_bymsgfield_unswap(f);
+	as_namespace *ns = as_namespace_get_bymsgfield(f);
 
+	// If ns is null, don't be the first to bark.
 	return ns && ns->storage_data_in_memory;
 }
 
-/*
-** this function works on unswapped data
-*/
-
 void
-as_msg_peek( cl_msg *msgp, proto_peek *peek )
+as_msg_peek(const as_transaction *tr, proto_peek *peek)
 {
-	memset(peek, 0, sizeof(proto_peek));
+	as_msg *m = &tr->msgp->msg;
 
-	if (msgp == 0) return;
-
-	if (msgp->proto.version != PROTO_VERSION ||
-			msgp->proto.type != PROTO_TYPE_AS_MSG) {
-		return;
-	}
-
-	as_msg *m = &msgp->msg;
 	peek->info1 = m->info1;
-	peek->info2 = m->info2;
+	peek->keyd = cf_digest_zero;
+	peek->ns_n_devices = 0;
+	peek->ns_queue_offset = 0;
 
-	if (m->n_fields == 0) {
+	as_msg_field *nf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
+
+	if (! nf) {
+		// Should never happen, but don't bark here.
 		return;
 	}
 
-	int n_fields = m->n_fields;
-	bool swap = n_fields < 10 ? false : true;
-	if (swap) n_fields = ntohs(n_fields);
+	as_namespace *ns = as_namespace_get_bymsgfield(nf);
 
-	as_msg_field *kdfp = 0;
-	as_msg_field *sfp = 0;
-	as_msg_field *kfp = 0;
-	as_msg_field *nfp = 0;
-
-	// over all the fields
-	as_msg_field *mf = (as_msg_field *) m->data;
-	uint i = 0;
-	for (; i < n_fields ; i++) {
-		switch (mf->type) {
-			case AS_MSG_FIELD_TYPE_DIGEST_RIPE:
-				kdfp = mf;
-				break;
-			case AS_MSG_FIELD_TYPE_SET:
-				sfp = mf;
-				break;
-			case AS_MSG_FIELD_TYPE_KEY:
-				kfp = mf;
-				break;
-			case AS_MSG_FIELD_TYPE_NAMESPACE:
-				nfp = mf;
-				break;
-		}
-		if (swap)
-			mf = as_msg_field_get_next_unswap(mf);
-		else
-			mf = as_msg_field_get_next(mf);
+	if (! ns) {
+		// Should never happen, but don't bark here.
+		return;
 	}
 
-	// find the key
-	if (kdfp) {
-		peek->keyd = *(cf_digest *)kdfp->data;
-	}
-	else {
-		if (kfp) {
-			if (sfp == 0 || as_msg_field_get_value_sz(sfp) == 0) {
-				int ksz = swap ? as_msg_field_get_value_sz_unswap(kfp) : as_msg_field_get_value_sz(kfp);
-				cf_digest_compute(kfp->data, ksz, &peek->keyd);
-			}
-			else {
-				int ksz = swap ? as_msg_field_get_value_sz_unswap(kfp) : as_msg_field_get_value_sz(kfp);
-				int ssz = swap ? as_msg_field_get_value_sz_unswap(sfp) : as_msg_field_get_value_sz(sfp);
-				cf_digest_compute2(sfp->data, ssz, kfp->data, ksz, &peek->keyd);
-			}
-		}
+	peek->ns_n_devices = ns->n_devices;
+	peek->ns_queue_offset = ns->dev_q_offset;
+
+	if (as_transaction_has_digest(tr)) {
+		// Modern client, single record.
+
+		as_msg_field *df = as_msg_field_get(m, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
+		// Note - not checking size.
+
+		peek->keyd = *(cf_digest *)df->data;
+
+		return;
 	}
 
-	// find the namespace
-	if (nfp) {
-		uint32_t nsz = swap ? as_msg_field_get_value_sz_unswap(nfp) : as_msg_field_get_value_sz(nfp);
-		if (nsz >= AS_ID_NAMESPACE_SZ) goto no_ns; // this should be illegal
-		for (int i = 0; i < g_config.n_namespaces; i++) {
-			tsvc_namespace_devices *ndev = &g_tsvc_devices_a[i];
-			if (ndev->n_sz != nsz) continue;
-			if (0 == memcmp(ndev->n_name, nfp->data, nsz)) {
-				peek->ns_queue_offset = ndev->queue_offset;
-				peek->ns_n_devices = ndev->n_devices;
-				/*
-				if (peek->info1 & AS_MSG_INFO1_READ) {
-					cf_info(AS_PROTO, "read peek %s gives ofst %d n_dev %d",ndev->n_name,peek->ns_queue_offset,peek->ns_n_devices);
-				} else {
-					cf_info(AS_PROTO, "write peek %s gives ofst %d n_dev %d",ndev->n_name,peek->ns_queue_offset,peek->ns_n_devices);
-				}
-				*/
-				break;
-			}
-		}
-	}
-no_ns:
+	if (as_transaction_has_key(tr)) {
+		// Old client, single record - calculate digest from key & set.
 
-	return;
+		as_msg_field *kf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
+		uint32_t key_sz = as_msg_field_get_value_sz(kf);
+
+		as_msg_field *sf = as_transaction_has_set(tr) ?
+				as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET) : NULL;
+		uint32_t set_sz = sf ? as_msg_field_get_value_sz(sf) : 0;
+
+		cf_digest_compute2(sf->data, set_sz, kf->data, key_sz, &peek->keyd);
+	}
+	// else - multi-record transaction, return 0 digest - is this ok?
 }
 
 uint8_t *

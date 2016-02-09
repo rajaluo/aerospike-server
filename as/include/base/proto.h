@@ -45,6 +45,7 @@ struct as_index_s;
 struct as_storage_rd_s;
 struct as_namespace_s;
 struct as_file_handle_s;
+struct as_transaction_s;
 
 // These numbers match with cl_types.h on the client
 
@@ -402,7 +403,7 @@ as_msg_field_skip(as_msg_field *mf)
 /* as_msg_field_get
  * Retrieve a specific field from a message */
 static inline as_msg_field *
-as_msg_field_get(as_msg *msg, uint8_t type)
+as_msg_field_get(const as_msg *msg, uint8_t type)
 {
 	uint16_t n;
 	as_msg_field *fp = NULL;
@@ -522,19 +523,18 @@ extern int as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder
 extern int as_msg_send_response(int fd, uint8_t* buf, size_t len, int flags);
 extern int as_msg_send_fin(int fd, uint32_t result_code);
 
-extern bool as_msg_peek_data_in_memory(cl_msg *msgp);
+extern bool as_msg_peek_data_in_memory(const as_msg *m);
 
 // To find out key things about the message before actually reading it.
 typedef struct {
 	int       info1;
-	int       info2;
 	cf_digest keyd;
 	int       ns_queue_offset;
 	int       ns_n_devices;
 } proto_peek;
 
 // Always succeeds, sometimes finds nothing.
-extern void as_msg_peek(cl_msg *m, proto_peek *peek);
+extern void as_msg_peek(const struct as_transaction_s *tr, proto_peek *peek);
 
 extern uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		const char *set, int set_len, const cf_digest *d, cf_digest *d_ret,
