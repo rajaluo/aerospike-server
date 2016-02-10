@@ -285,7 +285,6 @@ typedef struct as_index_tree_s {
 	cf_arenax			*arena; // where we allocate and free to
 
 	uint32_t			elements; // not making this atomic, it's not very exact
-	uint16_t			data_inmemory;
 } as_index_tree;
 
 
