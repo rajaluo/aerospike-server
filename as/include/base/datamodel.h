@@ -771,7 +771,7 @@ extern bool is_partition_null(as_partition_vinfo *vinfo);
 extern cf_node as_partition_getreplica_read(as_namespace *ns, as_partition_id p);
 extern int as_partition_getreplica_readall(as_namespace *ns, as_partition_id p, cf_node *nv);
 extern cf_node as_partition_getreplica_write(as_namespace *ns, as_partition_id p);
-#define as_partition_isconsistent(_n, _p) (SYNC == ((_n)->consistency[(_p)]))
+cf_node as_partition_proxyee_redirect(as_namespace *ns, as_partition_id pid);
 
 // reserve_query - 
 extern int as_partition_reserve_query(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);

@@ -786,6 +786,26 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 }
 
 
+// If this node is an eventual master, return the acting master, else return 0.
+cf_node
+as_partition_proxyee_redirect(as_namespace *ns, as_partition_id pid)
+{
+	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
+	cf_assert((pid < AS_PARTITIONS), AS_PARTITION, CF_CRITICAL, "invalid partition id");
+
+	as_partition* p = &ns->partitions[pid];
+	cf_node self = g_config.self_node;
+
+	pthread_mutex_lock(&p->lock);
+	bool is_master = (0 == find_in_replica_list(p, self));
+	bool is_desync = (p->state == AS_PARTITION_STATE_DESYNC);
+	cf_node eventual = p->origin;
+	pthread_mutex_unlock(&p->lock);
+
+	return is_master && is_desync ? eventual : (cf_node)0;
+}
+
+
 /* as_partition_reservation_duplicate
  * A rare case where the source and dest both have a copy, NOT THE ACTUAL RESERVATION */
 void
