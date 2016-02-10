@@ -427,7 +427,10 @@ process_transaction(as_transaction *tr)
 			free_msgp = false;
 		}
 		else if (tr->proxy_msg) {
-			as_proxy_return_to_sender(tr);
+			as_partition_id pid = as_partition_getid(tr->keyd);
+			cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
+
+			as_proxy_return_to_sender(tr, redirect_node);
 		}
 		else if (tr->udata.req_udata) {
 			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
