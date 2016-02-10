@@ -202,13 +202,13 @@ extern void cf_fault_event_nostack(const cf_fault_context,
 
 // The "regular" version.
 #define cf_assert(a, context, severity, __msg, ...) \
-		(severity > cf_fault_filter[context] && (a) ? \
+		((a) || severity > cf_fault_filter[context] ? \
 				(void)0 : \
 				cf_fault_event((context), (severity), __FILENAME__, __func__, __LINE__, (__msg), ##__VA_ARGS__))
 
 // The "no stack" versions.
 #define cf_assert_nostack(a, context, severity, __msg, ...) \
-		(severity > cf_fault_filter[context] && (a) ? \
+		((a) || severity > cf_fault_filter[context] ? \
 				(void)0 : \
 				cf_fault_event_nostack((context), (severity), __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
 #define cf_crash_nostack(context, __msg, ...) \
