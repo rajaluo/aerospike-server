@@ -53,3 +53,10 @@ void as_xdr_get_config(cf_dyn_buf *db);
 void as_xdr_set_config(char *params, cf_dyn_buf *db);
 int32_t as_xdr_set_config_ns(char *ns_name, char *params);
 int32_t as_xdr_info_port(void);
+
+// Set of functions to check the configs. They return false in stubs.
+bool is_xdr_global_enabled();
+bool is_xdr_delete_shipping_enabled();
+bool is_xdr_nsup_deletes_enabled();
+bool is_xdr_forwarding_enabled();
+bool is_xdr_stopwrites_enabled();

@@ -1183,14 +1183,6 @@ info_command_show_devices(char *name, char *params, cf_dyn_buf *db)
 }
 
 int
-info_command_get_min_config(char *name, char *params, cf_dyn_buf *db)
-{
-	uint64_t minxdrls = xdr_min_lastshipinfo();
-	cf_dyn_buf_append_uint64(db, minxdrls);
-	return(0);
-}
-
-int
 info_command_dump_fabric(char *name, char *params, cf_dyn_buf *db)
 {
 	bool verbose = false;
@@ -7112,8 +7104,7 @@ as_info_init()
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
 	as_info_set_command("undun", info_command_undun, PERM_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
 	as_info_set_command("unsnub", info_command_unsnub, PERM_SERVICE_CTRL);                    // Stop ignoring heartbeats from the specified node(s).
-	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PERM_NONE);      // Get the min XDR lastshipinfo.
-	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);		  // Command to XDR module.
+	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);               // Command to XDR module.
 
 	// SINDEX
 	as_info_set_dynamic("sindex", info_get_sindexes, false);

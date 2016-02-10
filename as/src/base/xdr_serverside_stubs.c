@@ -58,11 +58,6 @@ int xdr_send_clust_state_change(cf_node node, int8_t change)
 	return -1;
 }
 
-uint64_t xdr_min_lastshipinfo()
-{
-	return -1;
-}
-
 void xdr_clmap_update(int changetype, cf_node succession[], int listsize)
 {
 }
@@ -142,4 +137,29 @@ int32_t as_xdr_set_config_ns(char *ns_name, char *params)
 int32_t as_xdr_info_port(void)
 {
 	return 0;
+}
+
+bool is_xdr_global_enabled()
+{
+	return false;
+}
+
+bool is_xdr_delete_shipping_enabled()
+{
+	return false;
+}
+
+bool is_xdr_nsup_deletes_enabled()
+{
+	return false;
+}
+
+bool is_xdr_forwarding_enabled()
+{
+	return false;
+}
+
+bool is_xdr_stopwrites_enabled()
+{
+	return false;
 }
