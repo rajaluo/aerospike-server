@@ -2279,18 +2279,6 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_config.use_queue_per_device ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";snub-nodes=");
 	cf_dyn_buf_append_string(db, g_config.snub_nodes ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";fb-health-msg-per-burst=");
-	cf_dyn_buf_append_int(db, g_config.fb_health_msg_per_burst);
-	cf_dyn_buf_append_string(db, ";fb-health-msg-timeout=");
-	cf_dyn_buf_append_int(db, g_config.fb_health_msg_timeout);
-	cf_dyn_buf_append_string(db, ";fb-health-good-pct=");
-	cf_dyn_buf_append_int(db, g_config.fb_health_good_pct);
-	cf_dyn_buf_append_string(db, ";fb-health-bad-pct=");
-	cf_dyn_buf_append_int(db, g_config.fb_health_bad_pct);
-	cf_dyn_buf_append_string(db, ";auto-dun=");
-	cf_dyn_buf_append_string(db, g_config.auto_dun ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";auto-undun=");
-	cf_dyn_buf_append_string(db, g_config.auto_undun ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";prole-extra-ttl=");
 	cf_dyn_buf_append_int(db, g_config.prole_extra_ttl);
 	cf_dyn_buf_append_string(db, ";max-msgs-per-type=");
@@ -3128,54 +3116,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of snub-nodes from %s to %s", bool_val[g_config.snub_nodes], context);
 				g_config.snub_nodes = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "fb-health-msg-per-burst", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of fb-health-msg-per-burst from %d to %d ", g_config.fb_health_msg_per_burst, val);
-			g_config.fb_health_msg_per_burst = val;
-		}
-		else if (0 == as_info_parameter_get(params, "fb-health-msg-timeout", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of fb-health-msg-timeout from %d to %d ", g_config.fb_health_msg_timeout, val);
-			g_config.fb_health_msg_timeout = val;
-		}
-		else if (0 == as_info_parameter_get(params, "fb-health-good-pct", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of fb-health-good-pct from %d to %d ", g_config.fb_health_good_pct, val);
-			g_config.fb_health_good_pct = val;
-		}
-		else if (0 == as_info_parameter_get(params, "fb-health-bad-pct", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of fb-health-bad-pct from %d to %d ", g_config.fb_health_bad_pct, val);
-			g_config.fb_health_bad_pct = val;
-		}
-		else if (0 == as_info_parameter_get(params, "auto-dun", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of auto-dun %s to %s", bool_val[g_config.auto_dun], context);
-				g_config.auto_dun = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of auto-dun from %s to %s", bool_val[g_config.auto_dun], context);
-				g_config.auto_dun = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "auto-undun", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of auto-undun from %s to %s", bool_val[g_config.auto_undun], context);
-				g_config.auto_undun = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of auto-undun from %s to %s", bool_val[g_config.auto_undun], context);
-				g_config.auto_undun = false;
 			}
 			else
 				goto Error;

@@ -139,7 +139,7 @@ process_transaction(as_transaction *tr)
 	if (! as_partition_balance_is_init_resolved() &&
 			(tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) == 0) {
 		if (tr->proto_fd_h) {
-			cf_warning(AS_TSVC, "rejecting client transaction - initial partition balance unresolved");
+			cf_debug(AS_TSVC, "rejecting client transaction - initial partition balance unresolved");
 			as_transaction_error_unswapped(tr, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		}
 		else {

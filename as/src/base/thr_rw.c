@@ -1724,7 +1724,6 @@ finish_rw_process_dup_ack(write_request *wr)
 		MICROBENCHMARK_HIST_INSERT_AND_RESET(wt_resolve_wait_hist);
 	}
 
-	MICROBENCHMARK_RESET();
 	tr.microbenchmark_is_resolve = true;
 
 	bool must_delete = true;
@@ -2259,7 +2258,7 @@ Out1:
 	msg_set_uint32(m, RW_FIELD_RESULT, result_code);
 	msg_set_unset(m, RW_FIELD_NAMESPACE);
 
-	int rv2 = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH);
+	int rv2 = as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM);
 	if (rv2 != 0) {
 		cf_debug(AS_RW, "write process: send fabric message bad return %d",
 				rv2);
@@ -3500,6 +3499,12 @@ write_local_policies(as_transaction *tr, bool *p_must_not_create,
 	// Shortcut pointers.
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
+
+	if (m->n_ops == 0) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_local: bin op(s) expected, none present ", ns->name);
+		return AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	bool info1_get_all = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0;
 	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
 
@@ -6024,6 +6029,12 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 		as_bin_get_all_p(&rd, response_bins);
 	}
 	else {
+		if (m->n_ops == 0) {
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: bin op(s) expected, none present ", ns->name);
+			read_local_done(tr, r_ref, &rd, AS_PROTO_RESULT_FAIL_PARAMETER);
+			return;
+		}
+
 		bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
 		int result;
 

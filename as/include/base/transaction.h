@@ -49,14 +49,14 @@
 
 #define MICROBENCHMARK_HIST_INSERT(__hist_name) \
 { \
-	if (g_config.microbenchmarks && tr.microbenchmark_time) { \
+	if (g_config.microbenchmarks && tr.microbenchmark_time != 0) { \
 		histogram_insert_data_point(g_config.__hist_name, tr.microbenchmark_time); \
 	} \
 }
 
 #define MICROBENCHMARK_HIST_INSERT_P(__hist_name) \
 { \
-	if (g_config.microbenchmarks && tr->microbenchmark_time) { \
+	if (g_config.microbenchmarks && tr->microbenchmark_time != 0) { \
 		histogram_insert_data_point(g_config.__hist_name, tr->microbenchmark_time); \
 	} \
 }
@@ -78,20 +78,24 @@
 #define MICROBENCHMARK_HIST_INSERT_AND_RESET(__hist_name) \
 { \
 	if (g_config.microbenchmarks) { \
-		if (tr.microbenchmark_time) { \
-			histogram_insert_data_point(g_config.__hist_name, tr.microbenchmark_time); \
+		if (tr.microbenchmark_time != 0) { \
+			tr.microbenchmark_time = histogram_insert_data_point(g_config.__hist_name, tr.microbenchmark_time); \
 		} \
-		tr.microbenchmark_time = cf_getns(); \
+		else { \
+			tr.microbenchmark_time = cf_getns(); \
+		} \
 	} \
 }
 
 #define MICROBENCHMARK_HIST_INSERT_AND_RESET_P(__hist_name) \
 { \
 	if (g_config.microbenchmarks) { \
-		if (tr->microbenchmark_time) { \
-			histogram_insert_data_point(g_config.__hist_name, tr->microbenchmark_time); \
+		if (tr->microbenchmark_time != 0) { \
+			tr->microbenchmark_time = histogram_insert_data_point(g_config.__hist_name, tr->microbenchmark_time); \
 		} \
-		tr->microbenchmark_time = cf_getns(); \
+		else { \
+			tr->microbenchmark_time = cf_getns(); \
+		} \
 	} \
 }
 
