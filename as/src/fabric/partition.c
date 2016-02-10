@@ -466,12 +466,6 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 		cf_debug(AS_PARTITION, "{%s:%d}as_partition_reinit: OLD SUBRECORD TREE %p  ref count %d", ns->name, pid, sub_t, cf_rc_count(sub_t));
 		as_index_tree_release(sub_t, ns);
 	}
-
-	// Currently both tree have same property
-	p->vp->data_inmemory      = ns->storage_data_in_memory;
-	p->sub_vp->data_inmemory  = ns->storage_data_in_memory;
-
-	return;
 } // end as_partition_reinit()
 
 /*
@@ -497,11 +491,6 @@ void set_partition_desync_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
 
 	clear_partition_version_in_storage(ns, pid, flush);
 	memset(vinfo, 0, sizeof(as_partition_vinfo));
-	// Currently both tree have same property
-	p->vp->data_inmemory = ns->storage_data_in_memory;
-	p->sub_vp->data_inmemory = ns->storage_data_in_memory;
-
-	return;
 }
 
 /*
@@ -535,12 +524,6 @@ void set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo, a
 	p->current_outgoing_ldt_version = 0;
 	clear_partition_version_in_storage(ns, pid, flush);
 	memset(vinfo, 0, sizeof(as_partition_vinfo));
-
-	// Currently both tree have same property
-	p->vp->data_inmemory = ns->storage_data_in_memory;
-	p->sub_vp->data_inmemory = ns->storage_data_in_memory;
-
-	return;
 }
 
 /*
