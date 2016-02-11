@@ -48,29 +48,29 @@ struct as_file_handle_s;
 
 // These numbers match with cl_types.h on the client
 
-#define AS_PROTO_RESULT_OK 0
-#define AS_PROTO_RESULT_FAIL_UNKNOWN 1 // unknown failure - consider retry
-#define AS_PROTO_RESULT_FAIL_NOTFOUND 2
-#define AS_PROTO_RESULT_FAIL_GENERATION 3
-#define AS_PROTO_RESULT_FAIL_PARAMETER 4
-#define AS_PROTO_RESULT_FAIL_RECORD_EXISTS 5 // if 'WRITE_ADD', could fail because already exists
-#define AS_PROTO_RESULT_FAIL_BIN_EXISTS 6
-#define AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH 7
-#define AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE 8
-#define AS_PROTO_RESULT_FAIL_TIMEOUT 9
-#define AS_PROTO_RESULT_FAIL_NOXDR 10
-#define AS_PROTO_RESULT_FAIL_UNAVAILABLE 11 // error returned during node down and partition isn't available
-#define AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE 12 // op and bin type incompatibility
-#define AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG 13
-#define AS_PROTO_RESULT_FAIL_KEY_BUSY 14
-#define AS_PROTO_RESULT_FAIL_SCAN_ABORT 15
-#define AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE 16 // asked to do something we don't yet do (like scan+udf).
-#define AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND 17
-#define AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD 18
-#define AS_PROTO_RESULT_FAIL_KEY_MISMATCH 19
-#define AS_PROTO_RESULT_FAIL_NAMESPACE 20
-#define AS_PROTO_RESULT_FAIL_BIN_NAME 21
-#define AS_PROTO_RESULT_FAIL_FORBIDDEN 22 // operation (perhaps temporarily) not possible
+#define AS_PROTO_RESULT_OK							0
+#define AS_PROTO_RESULT_FAIL_UNKNOWN				1	// unknown failure - consider retry
+#define AS_PROTO_RESULT_FAIL_NOTFOUND				2
+#define AS_PROTO_RESULT_FAIL_GENERATION				3
+#define AS_PROTO_RESULT_FAIL_PARAMETER				4
+#define AS_PROTO_RESULT_FAIL_RECORD_EXISTS			5	// if 'WRITE_ADD', could fail because already exists
+#define AS_PROTO_RESULT_FAIL_BIN_EXISTS				6
+#define AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH	7
+#define AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE	8
+#define AS_PROTO_RESULT_FAIL_TIMEOUT				9
+#define AS_PROTO_RESULT_FAIL_NOXDR					10	// Not used anymore
+#define AS_PROTO_RESULT_FAIL_UNAVAILABLE			11	// error returned during node down and partition isn't available
+#define AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE		12	// op and bin type incompatibility
+#define AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG			13
+#define AS_PROTO_RESULT_FAIL_KEY_BUSY				14
+#define AS_PROTO_RESULT_FAIL_SCAN_ABORT				15
+#define AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE	16	// asked to do something we don't yet do (like scan+udf).
+#define AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND			17
+#define AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD		18
+#define AS_PROTO_RESULT_FAIL_KEY_MISMATCH			19
+#define AS_PROTO_RESULT_FAIL_NAMESPACE				20
+#define AS_PROTO_RESULT_FAIL_BIN_NAME				21
+#define AS_PROTO_RESULT_FAIL_FORBIDDEN				22	// operation (perhaps temporarily) not possible
 
 // Security result codes. Must be <= 255, to fit in one byte. Defined here to
 // ensure no overlap with other result codes.

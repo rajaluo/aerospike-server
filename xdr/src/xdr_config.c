@@ -66,7 +66,6 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
 		{ "xdr-threads",					XDR_CASE_THREADS },
 		{ "timeout",						XDR_CASE_TIMEOUT }, // not exposed to users
-		{ "stop-writes-noxdr",				XDR_CASE_STOP_WRITES_NOXDR },
 		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
 		{ "xdr-replace-record",				XDR_CASE_XDR_REPLACE_RECORD },
@@ -145,7 +144,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_threads = 3;		//Number of receiver threads to spawn
 	c->xdr_forward_xdrwrites = false;	//If the writes due to xdr should be forwarded
 	c->xdr_nsup_deletes_enabled = false;		// Shall XDR ship deletes of evictions or expiration
-	c->xdr_stop_writes_noxdr = false;	//If the normal writes should be stopped if there is no xdr
 	c->xdr_internal_shipping_delay = 0; //Default sleep between shipping each batch is 0 second
 	c->xdr_conf_change_flag = 0;
 	c->xdr_shipping_enabled = true;

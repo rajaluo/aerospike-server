@@ -59,4 +59,3 @@ bool is_xdr_global_enabled();
 bool is_xdr_delete_shipping_enabled();
 bool is_xdr_nsup_deletes_enabled();
 bool is_xdr_forwarding_enabled();
-bool is_xdr_stopwrites_enabled();

@@ -82,7 +82,6 @@ typedef enum {
 	XDR_CASE_FORWARD_XDR_WRITES,
 	XDR_CASE_THREADS,
 	XDR_CASE_TIMEOUT,
-	XDR_CASE_STOP_WRITES_NOXDR,
 	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED,
 	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE,
 	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
@@ -184,7 +183,6 @@ typedef struct xdr_config {
 	int	xdr_nw_timeout;
 	int	xdr_threads;
 	int	xdr_forward_xdrwrites;
-	int	xdr_stop_writes_noxdr;
 	int xdr_internal_shipping_delay;
 	int	xdr_conf_change_flag;
 	xdr_new_config xdr_new_cfg;

@@ -886,82 +886,67 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		} else {
 			cf_atomic_int_incr(&g_config.write_master);
 
-			// If the XDR is enabled and if the user configured to stop the writes if there is no XDR
-			// and if the xdr digestpipe is not opened fail the writes with appropriate return value
-			// We cannot do this check inside write_local() because that function is used for replica
-			// writes as well. We do not want to stop the writes on replica if the master write succeeded.
-			if (is_xdr_global_enabled() &&
-					g_xdr_state != XDR_UP &&
-					tr->rsv.ns && tr->rsv.ns->enable_xdr &&
-					is_xdr_stopwrites_enabled()) {
-				tr->result_code = AS_PROTO_RESULT_FAIL_NOXDR;
-				cf_atomic_int_incr(&g_config.err_write_fail_noxdr);
-				cf_debug(AS_RW,
-						"internal_rw_start: XDR is enabled but XDR digest pipe is not open.");
-				rv = -1;
+			// see if we have scripts to execute
+			udf_call *call = cf_malloc(sizeof(udf_call));
+			int uret;
+			if (tr->udata.req_udata) {
+				uret = udf_rw_call_init_internal(call, tr);
 			} else {
-				// see if we have scripts to execute
-				udf_call *call = cf_malloc(sizeof(udf_call));
-				int uret;
-				if (tr->udata.req_udata) {
-					uret = udf_rw_call_init_internal(call, tr);
-				} else {
-					uret = udf_rw_call_init_from_msg(call, &tr->msgp->msg);
-					call->tr = tr;
-				}
+				uret = udf_rw_call_init_from_msg(call, &tr->msgp->msg);
+				call->tr = tr;
+			}
 
-				if (!uret) {
-					wr->has_udf = true;
+			if (!uret) {
+				wr->has_udf = true;
 
-					rv = udf_rw_local(call, wr, &op);
+				rv = udf_rw_local(call, wr, &op);
 
-					if (UDF_OP_IS_DELETE(op)) {
-						tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
-						is_delete = true;
-						// Counteract earlier increments -- don't count UDF
-						// deletes as writes.
-						cf_atomic_int_decr(&g_config.write_master);
-						cf_atomic_int_decr(&g_config.stat_write_reqs);
-					} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
-						// update stats to move from normal to uDF requests
-						as_rw_update_stat(wr);
-						// return early if the record was not updated
-						udf_rw_call_destroy(call);
-						cf_free(call);
-						call = NULL;
-						if (udf_rw_needcomplete(tr)) {
-							udf_rw_complete(tr, tr->result_code, __FILE__,
-									__LINE__);
-						}
-						rw_cleanup(wr, tr, first_time, false, __LINE__);
-						as_rw_set_stat_counters(true, rv, tr);
-						*delete = true;
-						return 0;
-					} else {
-						// Temporary debugging clause...
-						if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->pickled_buf && ! UDF_OP_IS_LDT(op)) {
-							cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
-						}
-					}
-				} else {
-					wr->has_udf = false;
+				if (UDF_OP_IS_DELETE(op)) {
+					tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
+					is_delete = true;
+					// Counteract earlier increments -- don't count UDF
+					// deletes as writes.
+					cf_atomic_int_decr(&g_config.write_master);
+					cf_atomic_int_decr(&g_config.stat_write_reqs);
+				} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
+					// update stats to move from normal to uDF requests
+					as_rw_update_stat(wr);
+					// return early if the record was not updated
+					udf_rw_call_destroy(call);
 					cf_free(call);
-
-					rv = write_local(tr, &wr->pickled_buf, &wr->pickled_sz,
-							&wr->pickled_rec_props, &wr->response_db);
-					WR_TRACK_INFO(wr, "internal_rw_start: write local done ");
-
+					call = NULL;
+					if (udf_rw_needcomplete(tr)) {
+						udf_rw_complete(tr, tr->result_code, __FILE__,
+								__LINE__);
+					}
+					rw_cleanup(wr, tr, first_time, false, __LINE__);
+					as_rw_set_stat_counters(true, rv, tr);
+					*delete = true;
+					return 0;
+				} else {
 					// Temporary debugging clause...
-					if (rv == 0 && ! wr->pickled_buf) {
-						cf_warning(AS_RW, "write_local() completed with no pickled buffer");
+					if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->pickled_buf && ! UDF_OP_IS_LDT(op)) {
+						cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
 					}
 				}
-				if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-					cf_detail(AS_RW,
-							"[Digest %"PRIx64" Shipped OP] Finished Transaction ret = %d",
-							*(uint64_t *)&tr->keyd, rv);
+			} else {
+				wr->has_udf = false;
+				cf_free(call);
+
+				rv = write_local(tr, &wr->pickled_buf, &wr->pickled_sz,
+						&wr->pickled_rec_props, &wr->response_db);
+				WR_TRACK_INFO(wr, "internal_rw_start: write local done ");
+
+				// Temporary debugging clause...
+				if (rv == 0 && ! wr->pickled_buf) {
+					cf_warning(AS_RW, "write_local() completed with no pickled buffer");
 				}
-			} // end, no XDR problems
+			}
+			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
+				cf_detail(AS_RW,
+						"[Digest %"PRIx64" Shipped OP] Finished Transaction ret = %d",
+						*(uint64_t *)&tr->keyd, rv);
+			}
 		} // end, else this is a write.
 
 		// from this function: -2 means retry, -1 means forever - like, gen mismatch or similar

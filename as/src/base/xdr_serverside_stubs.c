@@ -158,8 +158,3 @@ bool is_xdr_forwarding_enabled()
 {
 	return false;
 }
-
-bool is_xdr_stopwrites_enabled()
-{
-	return false;
-}

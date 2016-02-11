@@ -690,8 +690,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_parameter);
 	cf_dyn_buf_append_string(db, ";err_write_fail_incompatible_type=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_incompatible_type);
-	cf_dyn_buf_append_string(db, ";err_write_fail_noxdr=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_noxdr);
 	cf_dyn_buf_append_string(db, ";err_write_fail_prole_delete=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_delete);
 	cf_dyn_buf_append_string(db, ";err_write_fail_not_found=");
