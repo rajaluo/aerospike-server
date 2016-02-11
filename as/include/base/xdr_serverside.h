@@ -33,8 +33,6 @@ int as_xdr_init();
 int as_xdr_shutdown();
 void xdr_broadcast_lastshipinfo(uint64_t val[]);
 int xdr_create_named_pipe(xdr_config *xc);
-int xdr_send_nsinfo();
-int xdr_send_nodemap();
 int xdr_send_clust_state_change(cf_node node, int8_t change);
 uint64_t xdr_min_lastshipinfo();
 void xdr_clmap_update(int changetype, cf_node succession[], int listsize);

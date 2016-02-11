@@ -43,16 +43,6 @@ int xdr_create_named_pipe(xdr_config *xc)
 	return -1;
 }
 
-int xdr_send_nsinfo()
-{
-	return -1;
-}
-
-int xdr_send_nodemap()
-{
-	return -1;
-}
-
 int xdr_send_clust_state_change(cf_node node, int8_t change)
 {
 	return -1;
