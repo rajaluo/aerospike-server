@@ -57,7 +57,6 @@ const xdr_cfg_opt XDR_NS_SET_OPTS[] = {
 const xdr_cfg_opt XDR_OPTS[] = {
 		{ "{",								XDR_CASE_CONTEXT_BEGIN },
 		{ "enable-xdr",						XDR_CASE_ENABLE_XDR },
-		{ "xdr-namedpipe-path",				XDR_CASE_NAMEDPIPE_PATH },
 		{ "xdr-digestlog-path",				XDR_CASE_DIGESTLOG_PATH },
 		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH },
 		{ "xdr-info-port",					XDR_CASE_INFO_PORT },
@@ -122,9 +121,6 @@ void xdr_config_defaults(xdr_config *c)
 	int index;
 
 	c->xdr_global_enabled = false;	//This config option overrides the enable-xdr setting of the namespace(s)
-	c->xdr_digestpipe_path = NULL;	//The user has to specify a named pipe used to communicate the digests
-	c->xdr_digestpipe_readfd = -1;	//Once the named pipe reader is open, the file descriptor will be stored here
-	c->xdr_digestpipe_writefd = -1;	//Once the named pipe writer is open, the file descriptor will be stored here
 
 	for (index = 0; index < XDR_MAX_DGLOG_FILES ; index++) {
 		c->xdr_digestlog_path[index] = NULL;	//Path where the digest information is written to the disk

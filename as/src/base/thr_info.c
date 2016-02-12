@@ -350,10 +350,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_write_success);
 	cf_dyn_buf_append_string(db, ";stat_write_errs=");
 	APPEND_STAT_COUNTER(db, g_config.stat_write_errs);
-	cf_dyn_buf_append_string(db, ";stat_xdr_pipe_writes=");
-	APPEND_STAT_COUNTER(db, g_config.stat_xdr_pipe_writes);
-	cf_dyn_buf_append_string(db, ";stat_xdr_pipe_miss=");
-	APPEND_STAT_COUNTER(db, g_config.stat_xdr_pipe_miss);
 
 	cf_dyn_buf_append_string(db, ";stat_delete_success=");
 	APPEND_STAT_COUNTER(db, g_config.stat_delete_success);

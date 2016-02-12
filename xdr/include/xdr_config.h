@@ -73,7 +73,6 @@ typedef enum {
 
 	// Main XDR options:
 	XDR_CASE_ENABLE_XDR,
-	XDR_CASE_NAMEDPIPE_PATH,
 	XDR_CASE_DIGESTLOG_PATH,
 	XDR_CASE_ERRORLOG_PATH,
 	XDR_CASE_INFO_PORT,
@@ -163,7 +162,6 @@ typedef struct xdr_config {
 
 	//This section is used by both the server and the XDR module
 	bool	xdr_global_enabled;
-	char	*xdr_digestpipe_path;
 
 	// Ring buffer configuration
 	char 	*xdr_digestlog_path[XDR_MAX_DGLOG_FILES];
@@ -173,8 +171,6 @@ typedef struct xdr_config {
 	uint8_t xdr_num_digestlog_paths;
 
 	int	xdr_info_port;
-	int	xdr_digestpipe_readfd;
-	int	xdr_digestpipe_writefd;
 	int	xdr_max_recs_inflight;
 	int	xdr_read_batch_size;
 	int	xdr_ship_slab_size;     // Maximum number of records, on receival of which, xdr start shipping.

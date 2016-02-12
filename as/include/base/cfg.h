@@ -525,8 +525,6 @@ typedef struct as_config_s {
 	cf_atomic_int		stat_write_latency_gt50;
 	cf_atomic_int		stat_write_latency_gt100;
 	cf_atomic_int		stat_write_latency_gt250;
-	cf_atomic_int		stat_xdr_pipe_writes;
-	cf_atomic_int		stat_xdr_pipe_miss;
 
 	cf_atomic_int		stat_delete_success;
 	cf_atomic_int		stat_rw_timeout;

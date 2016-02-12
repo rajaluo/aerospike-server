@@ -38,14 +38,8 @@ void xdr_broadcast_lastshipinfo(uint64_t val[])
 {
 }
 
-int xdr_create_named_pipe(xdr_config *xc)
+void xdr_send_clust_state_change(cf_node node, int8_t change)
 {
-	return -1;
-}
-
-int xdr_send_clust_state_change(cf_node node, int8_t change)
-{
-	return -1;
 }
 
 void xdr_clmap_update(int changetype, cf_node succession[], int listsize)
@@ -76,11 +70,6 @@ int as_xdr_set_shipping(bool shipping_status)
 }
 
 int xdr_send_disabled()
-{
-	return -1;
-}
-
-int as_open_namedpipe()
 {
 	return -1;
 }
