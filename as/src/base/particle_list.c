@@ -1091,7 +1091,7 @@ list_wrapper_from_buf(list_wrapper *p_list_wrapped, const uint8_t *buf, uint32_t
 
 	list_wrapper_init(p_list_wrapped, ele_count);
 
-	uint8_t *new_buf = (uint8_t *)p_list_wrapped + sizeof(list_wrapper) + (ele_count / AS_PACKED_LIST_INDEX_STEP);
+	uint8_t *new_buf = (uint8_t *)p_list_wrapped + sizeof(list_wrapper) + (sizeof(uint32_t) * p_list_wrapped->index.cap);
 
 	memcpy(new_buf, buf, size);
 
