@@ -760,7 +760,7 @@ cf_node find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_re
 	}
 
 	if (n == 0 && as_partition_balance_is_init_resolved()) {
-		cf_debug(AS_PARTITION, "{%s:%d} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64"",
+		cf_warning(AS_PARTITION, "{%s:%d} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64"",
 					ns->name, pid, my_index, p->replica[0], p->replica[1], p->origin);
 		cf_atomic_int_incr(&g_config.err_sync_copy_null_master);
 	}
@@ -1752,7 +1752,7 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 			cf_debug(AS_PARTITION, "migration tx callback: migrate failed {%s:%d}", ns->name, pid);
 		}
 		else if (s == AS_MIGRATE_STATE_EAGAIN) {
-			cf_debug(AS_PARTITION, "migration tx callback: migrate failed {%s:%d}", ns->name, pid);
+			cf_warning(AS_PARTITION, "migration tx callback: migrate failed {%s:%d}", ns->name, pid);
 		}
 		else {
 			cf_warning(AS_PARTITION, "migration tx callback: unknown notification %d {%s:%d}", (int) s, ns->name, pid);
