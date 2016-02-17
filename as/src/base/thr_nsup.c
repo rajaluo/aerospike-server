@@ -352,7 +352,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	if (! g_config.nsup_startup_evict) {
 		cf_warning(AS_NSUP, "{%s} hwm breached but not allowed to evict", ns->name);
 		pthread_mutex_unlock(&ns->cold_start_evict_lock);
-		return false;
+		return true;
 	}
 
 	// We may evict - set up the cold-start eviction histogram.
