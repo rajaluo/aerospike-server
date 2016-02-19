@@ -67,7 +67,7 @@
 #define PROXY_FIELD_OP 0
 #define PROXY_FIELD_TID 1
 #define PROXY_FIELD_DIGEST 2
-#define PROXY_FIELD_REDIRECT 3 // deprecated
+#define PROXY_FIELD_REDIRECT 3
 #define PROXY_FIELD_AS_PROTO 4 // request as_proto - currently contains only as_msg's
 #define PROXY_FIELD_CLUSTER_KEY 5
 #define PROXY_FIELD_TIMEOUT_MS 6
@@ -700,6 +700,30 @@ SendFin:
 				return -1;
 			}
 
+			cf_node redirect_node;
+			if (0 == msg_get_uint64(m, PROXY_FIELD_REDIRECT, &redirect_node)
+					&& redirect_node != g_config.self_node
+					&& redirect_node != (cf_node)0) {
+				// If this node was a "random" node, i.e. neither acting nor
+				// eventual master, it diverts to the eventual master (the best
+				// it can do.) The eventual master must inform this node about
+				// the acting master.
+				pr->dest = redirect_node;
+				pr->xmit_ms = cf_getms() + g_config.transaction_retry_ms;
+
+				msg_incr_ref(pr->fab_msg);
+
+				if (0 != (rv = as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_PRIORITY_MEDIUM))) {
+					as_fabric_msg_put(pr->fab_msg);
+				}
+
+				pthread_mutex_unlock(pr_lock);
+
+				as_fabric_msg_put(m);
+
+				return rv == 0 ? 0 : -1;
+			}
+
 			cf_digest *key;
 			size_t sz = 0;
 			if (0 != msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (byte **) &key, &sz, MSG_GET_DIRECT)) {
@@ -753,7 +777,7 @@ SendFin:
 
 // Send a redirection message - consumes the message.
 int
-as_proxy_return_to_sender(const as_transaction *tr)
+as_proxy_return_to_sender(const as_transaction *tr, cf_node redirect_node)
 {
 	int rv;
 	uint32_t tid;
@@ -765,8 +789,8 @@ as_proxy_return_to_sender(const as_transaction *tr)
 	msg_reset(tr->proxy_msg);
 	msg_set_uint32(tr->proxy_msg, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
 	msg_set_uint32(tr->proxy_msg, PROXY_FIELD_TID, tid);
-	// Redirect field no longer used, set for backwards compatibility.
-	msg_set_uint64(tr->proxy_msg, PROXY_FIELD_REDIRECT, tr->proxy_node);
+	msg_set_uint64(tr->proxy_msg, PROXY_FIELD_REDIRECT,
+			redirect_node == (cf_node)0 ? tr->proxy_node : redirect_node);
 
 	if (0 != (rv = as_fabric_send(tr->proxy_node, tr->proxy_msg,
 			AS_FABRIC_PRIORITY_MEDIUM))) {

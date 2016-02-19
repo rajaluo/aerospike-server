@@ -425,8 +425,12 @@ process_transaction(as_transaction *tr)
 			free_msgp = false;
 		}
 		else if (tr->proxy_msg) {
-			as_proxy_return_to_sender(tr);
-		} else if (tr->from_xdr) {
+			as_partition_id pid = as_partition_getid(tr->keyd);
+			cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
+
+			as_proxy_return_to_sender(tr, redirect_node);
+		} 
+		else if (tr->from_xdr) {
 			// It is a read request from XDR.
 			// As proxy is required for it, XDR should relog it at current owner and replicas.
 			// Send "AS_PROTO_RESULT_FAIL_UNKNOWN" back to XDR.
@@ -434,7 +438,8 @@ process_transaction(as_transaction *tr)
 			xdr_internal_read_response(ns, AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, NULL, 0, NULL, 0, NULL, tr->from_xdr);
 			cf_detail(AS_TSVC, "Responded to XDR with error code %d", AS_PROTO_RESULT_FAIL_UNKNOWN);
 			free_msgp = true;
-		} else if (tr->udata.req_udata) {
+		}
+		else if (tr->udata.req_udata) {
 			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
 			if (udf_rw_needcomplete(tr)) {
 				udf_rw_complete(tr, AS_PROTO_RESULT_FAIL_UNKNOWN, __FILE__,__LINE__);

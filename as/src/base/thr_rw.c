@@ -1720,7 +1720,6 @@ finish_rw_process_dup_ack(write_request *wr)
 		MICROBENCHMARK_HIST_INSERT_AND_RESET(wt_resolve_wait_hist);
 	}
 
-	MICROBENCHMARK_RESET();
 	tr.microbenchmark_is_resolve = true;
 
 	bool must_delete = true;
@@ -6111,17 +6110,59 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_storage_read_hist);
 
-	single_transaction_response_with_key(tr, ns, p_ops, key, key_size,
-			response_bins, n_bins, r->generation, r->void_time, &written_sz,
-			(char *)set_name);
+	// Container to allow use of as_msg_send_ops_reply(), until we refactor and
+	// clean up single transaction response handling generally.
+	cf_dyn_buf db = { NULL, false, 0, 0 };
+	uint8_t stack_buf[16 * 1024];
 
-	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
+	if (tr->proto_fd_h && ! tr->batch_shared) {
+		// Single out the client transaction case for now - others don't need
+		// this special handling (as urgently) for various reasons.
+
+		size_t msg_sz = sizeof(stack_buf);
+		uint8_t *msgp = (uint8_t *)as_msg_make_response_msg(tr->result_code,
+				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
+				(cl_msg *)stack_buf, &msg_sz, as_transaction_trid(tr), NULL);
+
+		if (! msgp)	{
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed make response msg ", ns->name);
+			destroy_stack_bins(result_bins, n_result_bins);
+			read_local_done(tr, r_ref, &rd, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			return;
+		}
+
+		// Stash the message, to be sent just below, outside the record lock.
+		db.buf = msgp;
+		db.is_stack = msgp == stack_buf;
+		db.used_sz = msg_sz;
+	}
+	else {
+		single_transaction_response_with_key(tr, ns, p_ops, key, key_size,
+				response_bins, n_bins, r->generation, r->void_time, &written_sz,
+				(char *)set_name);
+
+		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
+	}
 
 	destroy_stack_bins(result_bins, n_result_bins);
 	as_storage_record_close(r, &rd);
 	as_record_done(r_ref, ns);
 
 	MICROBENCHMARK_HIST_INSERT_P(rt_cleanup_hist);
+
+	// Now that we're not under the record lock, send the message we just built.
+	if (db.buf) {
+		// Using the function for write responses for now.
+		as_msg_send_ops_reply(tr->proto_fd_h, &db);
+
+		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
+
+		if (! db.is_stack) {
+			cf_free(db.buf);
+		}
+
+		tr->proto_fd_h = NULL;
+	}
 
 #ifdef HISTOGRAM_OBJECT_LATENCY
 	if (written_sz && (m->info1 & AS_MSG_INFO1_READ) ) {
