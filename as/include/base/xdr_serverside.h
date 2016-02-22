@@ -40,7 +40,6 @@ void as_xdr_start();
 int as_xdr_stop();
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
 int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, const uint8_t *key, uint32_t key_size, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr);
-int as_xdr_set_shipping(bool shipping_status);
 void xdr_handle_failednodeprocessingdone(cf_node);
 void xdr_conf_init();
 void as_xdr_info_init(void);
@@ -51,7 +50,6 @@ int32_t as_xdr_set_config_ns(char *ns_name, char *params);
 int32_t as_xdr_info_port(void);
 
 // Set of functions to check the configs. They return false in stubs.
-bool is_xdr_global_enabled();
 bool is_xdr_delete_shipping_enabled();
 bool is_xdr_nsup_deletes_enabled();
 bool is_xdr_forwarding_enabled();

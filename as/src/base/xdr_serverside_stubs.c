@@ -118,11 +118,6 @@ int32_t as_xdr_info_port(void)
 	return 0;
 }
 
-bool is_xdr_global_enabled()
-{
-	return false;
-}
-
 bool is_xdr_delete_shipping_enabled()
 {
 	return false;
