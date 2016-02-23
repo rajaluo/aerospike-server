@@ -48,7 +48,6 @@ extern pthread_mutex_t g_NONSTOP;
 extern bool g_startup_complete;
 
 extern void xdr_sig_handler(int signum);
-extern int as_xdr_stop();
 
 //==========================================================
 // Local helpers.
@@ -144,7 +143,6 @@ as_sig_handle_int(int sig_num)
 		_exit(0);
 	}
 
-	as_xdr_stop();
 	xdr_sig_handler(sig_num);
 
 	pthread_mutex_unlock(&g_NONSTOP);
@@ -184,7 +182,6 @@ as_sig_handle_term(int sig_num)
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
 		_exit(0);
 	}
-	as_xdr_stop();
 	xdr_sig_handler(sig_num);
 
 	pthread_mutex_unlock(&g_NONSTOP);
