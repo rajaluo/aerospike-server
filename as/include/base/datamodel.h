@@ -766,7 +766,6 @@ typedef struct as_partition_states_s {
 /* Partition function declarations */
 extern void as_partition_init(as_partition *p, as_namespace *ns, int pid);
 extern void as_partition_reinit(as_partition *p, as_namespace *ns, int pid);
-extern void as_partition_bless(as_partition *p);
 extern bool is_partition_null(as_partition_vinfo *vinfo);
 extern cf_node as_partition_getreplica_read(as_namespace *ns, as_partition_id p);
 extern int as_partition_getreplica_readall(as_namespace *ns, as_partition_id p, cf_node *nv);
@@ -800,8 +799,6 @@ extern void as_partition_getreplica_master_str(cf_dyn_buf *db);
 extern void as_partition_get_replicas_all_str(cf_dyn_buf *db);
 extern void as_partition_getinfo_str(cf_dyn_buf *db);
 extern void as_partition_getstates(as_partition_states *ps);
-
-extern void as_partition_getreplica_write_node(as_namespace *ns, cf_node *node_a);
 
 extern void as_partition_balance();
 extern void as_partition_balance_init();
@@ -1219,7 +1216,6 @@ extern as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
 extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern as_namespace_id as_namespace_getid_bymsgfield(struct as_msg_field_s *fp);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);
-extern void as_namespace_bless(as_namespace *ns);
 extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool apply_restrictions);
 extern as_set * as_namespace_init_set(as_namespace *ns, const char *set_name);
 extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);
