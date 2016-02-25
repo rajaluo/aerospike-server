@@ -1936,7 +1936,7 @@ int
 as_fabric_send(cf_node node, msg *m, int priority )
 {
 	if (g_fabric_args == 0) {
-		cf_debug(AS_FABRIC, "fabric send without initilaized fabric, BOO!");
+		cf_debug(AS_FABRIC, "fabric send without initialized fabric, BOO!");
 		return(AS_FABRIC_ERR_UNINITIALIZED);
 	}
 
@@ -1950,7 +1950,7 @@ as_fabric_send(cf_node node, msg *m, int priority )
 
 	cf_detail(AS_FABRIC, "fabric send: m %p to node %"PRIx64, m, node);
 
-	// Short circut for self!
+	// Short circuit for self!
 	if (g_config.self_node == node) {
 
 		// statistic!

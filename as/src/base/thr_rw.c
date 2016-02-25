@@ -323,29 +323,6 @@ void write_request_destructor(void *object) {
 	return;
 }
 
-void rw_request_dump(write_request *wr, char *msg) {
-	cf_info(AS_RW, "Dump write request: tid %d : %p %s", wr->tid, wr, msg);
-	pthread_mutex_lock(&wr->lock);
-	cf_info(AS_RW,
-			" %p: ready %d isread %d trans_c %d dupl_trans_c %d rsv_valid %d : %s",
-			wr, wr->ready, wr->is_read, wr->trans_complete, wr->dupl_trans_complete, wr->rsv_valid, ((wr->wait_queue_head == 0) ? "" : "QUEUE"));
-	cf_info(AS_RW, " %p: protofd %p proxynode %"PRIx64" proxymsg %p",
-			wr, wr->proto_fd_h, wr->proxy_node, wr->proxy_msg);
-
-	cf_info(AS_RW, " %p: dest sz %d", wr->dest_sz);
-	for (int i = 0; i < wr->dest_sz; i++)
-		cf_info(AS_RW,
-				" %p: dest: %d node %"PRIx64" complete %d dupmsg %p dup_rc %d",
-				wr, i, wr->dest_nodes[i], wr->dest_complete[i], wr->dup_msg[i], wr->dup_result_code[i]);
-
-	pthread_mutex_unlock(&wr->lock);
-}
-
-int rw_dump_reduce(void *key, uint32_t keylen, void *data, void *udata) {
-	write_request *wr = data;
-	rw_request_dump(wr, "");
-	return (0);
-}
 
 /*
  * An in-flight transaction has dependencies on proles - send
@@ -5529,8 +5506,7 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 void *
 rw_retransmit_fn(void *unused)
 {
-	while (1) {
-
+	while (true) {
 		usleep(130 * 1000);
 
 		now_times now;
@@ -5538,17 +5514,9 @@ rw_retransmit_fn(void *unused)
 		now.now_ms = now.now_ns / 1000000;
 
 		rchash_reduce(g_write_hash, rw_retransmit_reduce_fn, &now);
+	}
 
-#ifdef DEBUG
-		// SUPER DEBUG --- catching some kind of leak of rchash
-		if ( rchash_get_size(g_write_hash) > 1000) {
-
-			rchash_reduce( g_write_hash, rw_dump_reduce, 0);
-		}
-#endif
-
-	};
-	return (0);
+	return 0;
 }
 
 //

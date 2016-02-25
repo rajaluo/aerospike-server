@@ -457,20 +457,6 @@ as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_w
 	}
 }
 
-/* as_namespace_bless
- * Bless a namespace: set all its partitions to be consistent */
-void
-as_namespace_bless(as_namespace *ns)
-{
-	if (NULL == ns) {
-		return;
-	}
-
-	for (int i = 0; i < AS_PARTITIONS; i++) {
-		as_partition_bless(&ns->partitions[i]);
-	}
-}
-
 const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id)
 {
 	// Note that set_id is 1-based, but cf_vmap index is 0-based.
