@@ -222,6 +222,7 @@ void emigration_destroy(void *parm);
 void emigration_release(emigration *emig);
 void immigration_destroy(void *parm);
 void immigration_release(immigration *immig);
+void pickled_record_destroy(pickled_record *pr);
 
 // Emigration.
 void *run_emigration(void *arg);
