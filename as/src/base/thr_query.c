@@ -1298,51 +1298,88 @@ query_match_string_fromval(as_query_transaction * qtr, as_val *v, as_sindex_key 
 	return true;
 }
 
+static bool
+query_match_geojson_fromval(as_query_transaction * qtr, as_val *v, as_sindex_key *skey)
+{
+	as_sindex_bin_data *start = &qtr->srange->start;
+	as_sindex_bin_data *end   = &qtr->srange->end;
+
+	if ((AS_PARTICLE_TYPE_GEOJSON != as_sindex_pktype(qtr->si->imd))
+			|| (AS_PARTICLE_TYPE_GEOJSON != start->type)
+			|| (AS_PARTICLE_TYPE_GEOJSON != end->type)) {
+		cf_debug(AS_QUERY, "query_record_matches: "
+				 "Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
+				 AS_PARTICLE_TYPE_GEOJSON, start->type, end->type,
+				 as_sindex_pktype(qtr->si->imd),
+				 qtr->si->imd->bname, qtr->si->imd->iname);
+		return false;
+	}
+
+	return as_particle_geojson_match_asval(v,
+										   qtr->srange->cellid,
+										   qtr->srange->region,
+										   qtr->ns->geo2dsphere_within_strict);
+}
+
 // If the value matches foreach should stop iterating the
 bool
 query_match_mapkeys_foreach(const as_val * key, const as_val * val, void * udata)
 {
 	qtr_skey * q_s = (qtr_skey *)udata;
-	if (key->type == AS_STRING) {
+	switch (key->type) {
+	case AS_STRING:
 		// If matches return false
 		return !query_match_string_fromval(q_s->qtr, (as_val *)key, q_s->skey);
-	}
-	else if (key->type == AS_INTEGER) {
+	case AS_INTEGER:
 		// If matches return false
 		return !query_match_integer_fromval(q_s->qtr,(as_val *) key, q_s->skey);
+	case AS_GEOJSON:
+		// If matches return false
+		return !query_match_geojson_fromval(q_s->qtr,(as_val *) key, q_s->skey);
+	default:
+		// All others don't match
+		return true;
 	}
-	return true;
 }
 
 static bool
 query_match_mapvalues_foreach(const as_val * key, const as_val * val, void * udata)
 {
 	qtr_skey * q_s = (qtr_skey *)udata;
-	if (val->type == AS_STRING) {
+	switch (val->type) {
+	case AS_STRING:
 		// If matches return false
 		return !query_match_string_fromval(q_s->qtr, (as_val *)val, q_s->skey);
-	}
-	else if (val->type == AS_INTEGER) {
+	case AS_INTEGER:
 		// If matches return false
 		return !query_match_integer_fromval(q_s->qtr, (as_val *)val, q_s->skey);
+	case AS_GEOJSON:
+		// If matches return false
+		return !query_match_geojson_fromval(q_s->qtr, (as_val *)val, q_s->skey);
+	default:
+		// All others don't match
+		return true;
 	}
-	return true;
-
 }
 
 static bool
 query_match_listele_foreach(as_val * val, void * udata)
 {
 	qtr_skey * q_s = (qtr_skey *)udata;
-	if (val->type == AS_STRING) {
+	switch (val->type) {
+	case AS_STRING:
 		// If matches return false
 		return !query_match_string_fromval(q_s->qtr, val, q_s->skey);
-	}
-	else if (val->type == AS_INTEGER) {
+	case AS_INTEGER:
 		// If matches return false
 		return !query_match_integer_fromval(q_s->qtr, val, q_s->skey);
+	case AS_GEOJSON:
+		// If matches return false
+		return !query_match_geojson_fromval(q_s->qtr, val, q_s->skey);
+	default:
+		// All others don't match
+		return true;
 	}
-	return true;
 }
 /*
  * Validate record based on its content and query make sure it indeed should
@@ -1435,8 +1472,8 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			}
 
 			bool iswithin =
-				as_bin_particle_geojson_match(
-				    b,
+				as_particle_geojson_match(
+				    b->particle,
 					qtr->srange->cellid,
 					qtr->srange->region,
 					qtr->ns->geo2dsphere_within_strict);
