@@ -1307,18 +1307,15 @@ query_match_geojson_fromval(as_query_transaction * qtr, as_val *v, as_sindex_key
 	if ((AS_PARTICLE_TYPE_GEOJSON != as_sindex_pktype(qtr->si->imd))
 			|| (AS_PARTICLE_TYPE_GEOJSON != start->type)
 			|| (AS_PARTICLE_TYPE_GEOJSON != end->type)) {
-		cf_debug(AS_QUERY, "query_record_matches: "
-				 "Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
-				 AS_PARTICLE_TYPE_GEOJSON, start->type, end->type,
-				 as_sindex_pktype(qtr->si->imd),
-				 qtr->si->imd->bname, qtr->si->imd->iname);
+		cf_debug(AS_QUERY, "query_record_matches: Type mismatch %d!=%d!=%d!=%d  binname=%s index=%s",
+				AS_PARTICLE_TYPE_GEOJSON, start->type, end->type,
+				as_sindex_pktype(qtr->si->imd), qtr->si->imd->bname,
+				qtr->si->imd->iname);
 		return false;
 	}
 
-	return as_particle_geojson_match_asval(v,
-										   qtr->srange->cellid,
-										   qtr->srange->region,
-										   qtr->ns->geo2dsphere_within_strict);
+	return as_particle_geojson_match_asval(v, qtr->srange->cellid,
+			qtr->srange->region, qtr->ns->geo2dsphere_within_strict);
 }
 
 // If the value matches foreach should stop iterating the
@@ -1471,18 +1468,17 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 				return false;
 			}
 
-			bool iswithin =
-				as_particle_geojson_match(
-				    b->particle,
-					qtr->srange->cellid,
-					qtr->srange->region,
+			bool iswithin = as_particle_geojson_match(b->particle,
+					qtr->srange->cellid, qtr->srange->region,
 					qtr->ns->geo2dsphere_within_strict);
 
 			// We either found a valid point or a false positive.
-			if (iswithin)
+			if (iswithin) {
 				cf_atomic_int_incr(&g_config.geo_region_query_points);
-			else
+			}
+			else {
 				cf_atomic_int_incr(&g_config.geo_region_query_falsepos);
+			}
 
 			return iswithin;
 		}

@@ -289,9 +289,9 @@ extern uint32_t as_bin_particle_string_ptr(const as_bin *b, char **p_value);
 typedef void * geo_region_t;
 #define MAX_REGION_CELLS    32
 #define MAX_REGION_LEVELS   30
-extern size_t as_bin_particle_geojson_cellids(as_bin *b, uint64_t **pp_cells);
+extern size_t as_bin_particle_geojson_cellids(const as_bin *b, uint64_t **pp_cells);
 extern bool as_particle_geojson_match(as_particle *p, uint64_t cellid, geo_region_t region, bool is_strict);
-extern bool as_particle_geojson_match_asval(as_val *v, uint64_t cellid, geo_region_t region, bool is_strict);
+extern bool as_particle_geojson_match_asval(const as_val *val, uint64_t cellid, geo_region_t region, bool is_strict);
 
 // list:
 struct cdt_payload_s;

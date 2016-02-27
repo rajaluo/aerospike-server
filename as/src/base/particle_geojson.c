@@ -423,48 +423,17 @@ geojson_from_msgpack(const uint8_t *packed, uint32_t packed_size, as_particle **
 
 
 //==========================================================
-// particle functions specific to GEOJSON.
+// Particle functions specific to GEOJSON.
 //
 
 size_t
-as_bin_particle_geojson_cellids(as_bin *b, uint64_t **ppcells)
+as_bin_particle_geojson_cellids(const as_bin *b, uint64_t **ppcells)
 {
 	geojson_mem *gp = (geojson_mem *)b->particle;
 
 	*ppcells = (uint64_t *)gp->data;
 
 	return (size_t)gp->ncells;
-}
-
-bool
-as_particle_geojson_match_asval(as_val *v,uint64_t query_cellid, geo_region_t query_region, bool is_strict)
-{
-	as_geojson *pg = as_geojson_fromval(v);
-	size_t jsonsz = as_geojson_len(pg);
-	char * jsonptr = as_geojson_get(pg);
-
-	uint64_t candidate_cellid = 0;
-	geo_region_t candidate_region = NULL;
-
-	if (! geo_parse(NULL, jsonptr, jsonsz,
-					&candidate_cellid, &candidate_region)) {
-		cf_warning(AS_PARTICLE, "geo_parse() failed - unexpected");
-		geo_region_destroy(candidate_region);
-		return false;
-	}
-
-	bool candidate_is_region = candidate_cellid == 0;
-
-	bool ismatch = geojson_match(candidate_is_region,
-								 candidate_cellid,
-								 candidate_region,
-								 query_cellid,
-								 query_region,
-								 is_strict);
-
-	geo_region_destroy(candidate_region);
-
-	return ismatch;
 }
 
 bool
@@ -483,32 +452,66 @@ as_particle_geojson_match(as_particle *particle, uint64_t query_cellid, geo_regi
 	geojson_mem *gp = (geojson_mem *)particle;
 
 	uint64_t *cells = (uint64_t *)gp->data;
-	
+
 	uint64_t candidate_cellid = cells[0];
 	geo_region_t candidate_region = NULL;
 
 	bool candidate_is_region = (gp->flags & GEOJSON_ISREGION) != 0;
-	
+
 	// If we are a strict RCP query on a region candidate we need to
 	// run the parser to obtain a candidate_region for the matcher.
 	//
 	if (query_cellid != 0 && candidate_is_region && is_strict) {
 		size_t jsonsz;
 		char const *jsonptr = geojson_mem_jsonstr(gp, &jsonsz);
-		if (! geo_parse(NULL, jsonptr, jsonsz,
-						&candidate_cellid, &candidate_region)) {
+
+		if (! geo_parse(NULL, jsonptr, jsonsz, &candidate_cellid,
+				&candidate_region)) {
 			cf_warning(AS_PARTICLE, "geo_parse() failed - unexpected");
 			geo_region_destroy(candidate_region);
 			return false;
 		}
 	}
 
-	bool ismatch = geojson_match(candidate_is_region,
-								 candidate_cellid,
-								 candidate_region,
-								 query_cellid,
-								 query_region,
-								 is_strict);
+	bool ismatch = geojson_match(
+			candidate_is_region,
+			candidate_cellid,
+			candidate_region,
+			query_cellid,
+			query_region,
+			is_strict);
+
+	geo_region_destroy(candidate_region);
+
+	return ismatch;
+}
+
+bool
+as_particle_geojson_match_asval(const as_val *val, uint64_t query_cellid, geo_region_t query_region, bool is_strict)
+{
+	as_geojson *pg = as_geojson_fromval(val);
+	size_t jsonsz = as_geojson_len(pg);
+	char * jsonptr = as_geojson_get(pg);
+
+	uint64_t candidate_cellid = 0;
+	geo_region_t candidate_region = NULL;
+
+	if (! geo_parse(NULL, jsonptr, jsonsz, &candidate_cellid,
+			&candidate_region)) {
+		cf_warning(AS_PARTICLE, "geo_parse() failed - unexpected");
+		geo_region_destroy(candidate_region);
+		return false;
+	}
+
+	bool candidate_is_region = candidate_cellid == 0;
+
+	bool ismatch = geojson_match(
+			candidate_is_region,
+			candidate_cellid,
+			candidate_region,
+			query_cellid,
+			query_region,
+			is_strict);
 
 	geo_region_destroy(candidate_region);
 
@@ -544,7 +547,7 @@ geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t 
 			if (! is_strict) {
 				return true;
 			}
-			
+
 			return geo_point_within(query_cellid, candidate_region);
 		}
 		else {
