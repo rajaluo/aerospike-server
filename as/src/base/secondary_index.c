@@ -4117,7 +4117,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, const as_bin *b, as_sindex_bin * sbin
 				found = true;
 				bool added = false;
 				uint64_t * cells;
-				size_t ncells = as_bin_particle_geojson_cellids((as_bin *)b, &cells);
+				size_t ncells = as_bin_particle_geojson_cellids(b, &cells);
 				for (size_t ndx = 0; ndx < ncells; ++ndx) {
 					if (as_sindex_add_integer_to_sbin(sbin, cells[ndx]) == AS_SINDEX_OK) {
 						added = true;
