@@ -2786,10 +2786,10 @@ as_partition_balance()
 			}
 
 			// Detect if there is a write journal and apply it here.
-			// TODO - does this happen?
+			// TODO - yes, this happens... try to understand it better.
 			if (p->state == AS_PARTITION_STATE_DESYNC &&
 					! is_partition_null(&p->version_info)) {
-				cf_warning(AS_PARTITION, "{%s:%d} Applying write journal from previous rebalance",
+				cf_info(AS_PARTITION, "{%s:%d} applying write journal from previous rebalance",
 						ns->name, j);
 
 				apply_write_journal(ns, j);
