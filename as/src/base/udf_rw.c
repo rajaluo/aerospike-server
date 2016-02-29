@@ -379,7 +379,7 @@ getop(udf_record *urecord, udf_optype *urecord_op)
 static void
 write_udf_post_processing(as_transaction *tr, as_storage_rd *rd,
 		uint8_t **pickled_buf, size_t *pickled_sz,
-		as_rec_props *p_pickled_rec_props, int64_t memory_bytes)
+		as_rec_props *p_pickled_rec_props)
 {
 	update_metadata_in_index(tr, true, rd->r);
 
@@ -394,8 +394,6 @@ write_udf_post_processing(as_transaction *tr, as_storage_rd *rd,
 
 	tr->generation = rd->r->generation;
 	tr->void_time = rd->r->void_time;
-
-	as_storage_record_adjust_mem_stats(rd, memory_bytes);
 }
 
 /* Internal Function: Does the post processing for the UDF record after the
@@ -455,8 +453,7 @@ post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set_id)
 		}
 
 		write_udf_post_processing(tr, rd, &urecord->pickled_buf,
-			&urecord->pickled_sz, &urecord->pickled_rec_props,
-			urecord->starting_memory_bytes);
+			&urecord->pickled_sz, &urecord->pickled_rec_props);
 
 		// Now ok to accommodate a new stored key...
 		if (! as_index_is_flag_set(r_ref->r, AS_INDEX_FLAG_KEY_STORED) && rd->key) {
@@ -474,6 +471,8 @@ post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set_id)
 
 			as_index_clear_flags(r_ref->r, AS_INDEX_FLAG_KEY_STORED);
 		}
+
+		as_storage_record_adjust_mem_stats(rd, urecord->starting_memory_bytes);
 	}
 
 	// Collect the record information (for XDR) before closing the record
