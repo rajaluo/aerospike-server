@@ -41,13 +41,13 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include <citrusleaf/cf_queue.h>
 #include "citrusleaf/cf_shash.h"
 
 #include "cf_str.h"
 #include "dynbuf.h"
 #include "fault.h"
 #include "msg.h"
-#include "queue.h"
 #include "socket.h"
 #include "util.h"
 
