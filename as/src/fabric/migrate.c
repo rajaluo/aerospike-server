@@ -350,12 +350,6 @@ as_migrate_emigrate(const partition_migrate_record *pmr,
 	emig->cluster_key = pmr->cluster_key;
 	emig->id = cf_atomic32_incr(&g_emigration_id);
 	emig->tx_flags = pmr->tx_flags;
-
-	// Do zombies first (priority == 2), then migrate_state == DONE
-	// (priority == 1) then the rest. If priority is tied, sort by smallest.
-	emig->sort_priority = emig->rsv.state == AS_PARTITION_STATE_ZOMBIE ?
-			2 : (is_migrate_state_done ? 1 : 0);
-
 	emig->aborted = false;
 
 	// Create these later only when we need them - we'll get lots at once.
@@ -367,6 +361,11 @@ as_migrate_emigrate(const partition_migrate_record *pmr,
 	AS_PARTITION_RESERVATION_INIT(emig->rsv);
 	as_partition_reserve_migrate(pmr->ns, pmr->pid, &emig->rsv, NULL);
 	cf_atomic_int_incr(&g_config.migtx_tree_count);
+
+	// Do zombies first (priority == 2), then migrate_state == DONE
+	// (priority == 1) then the rest. If priority is tied, sort by smallest.
+	emig->sort_priority = emig->rsv.state == AS_PARTITION_STATE_ZOMBIE ?
+			2 : (is_migrate_state_done ? 1 : 0);
 
 	// Generate new LDT version before starting the migration for a record.
 	// This would mean that every time an outgoing migration is triggered it
