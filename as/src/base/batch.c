@@ -27,14 +27,15 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
+#include <citrusleaf/cf_queue.h>
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/security.h"
 #include "base/thr_tsvc.h"
+#include "base/transaction.h"
 #include "jem.h"
-#include "queue.h"
 #include <errno.h>
 
 //---------------------------------------------------------

@@ -37,11 +37,11 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include <citrusleaf/cf_queue.h>
 
 #include "fault.h"
 #include "jem.h"
 #include "hist.h"
-#include "queue.h"
 #include "socket.h"
 
 #include "base/as_stap.h"

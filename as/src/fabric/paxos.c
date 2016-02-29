@@ -40,11 +40,11 @@
 #include <unistd.h>
 
 #include "citrusleaf/alloc.h"
+#include <citrusleaf/cf_queue_priority.h>
 #include "citrusleaf/cf_random.h"
 
 #include "fault.h"
 #include "msg.h"
-#include "queue.h"
 #include "util.h"
 
 #include "base/cfg.h"

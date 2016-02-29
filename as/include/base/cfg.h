@@ -36,11 +36,11 @@
 
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/cf_atomic.h"
+#include <citrusleaf/cf_queue.h>
 
 #include "hist.h"
 #include "hist_track.h"
 #include "olock.h"
-#include "queue.h"
 #include "socket.h"
 #include "util.h"
 
