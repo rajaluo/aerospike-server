@@ -152,8 +152,11 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 	case AS_MSG_FIELD_TYPE_QUERY_BINLIST:
 		tr->msg_fields |= AS_MSG_FIELD_BIT_QUERY_BINLIST;
 		break;
-	case AS_MSG_FIELD_TYPE_BATCH:
+	case AS_MSG_FIELD_TYPE_BATCH: // shouldn't get here - batch parent handles this
 		tr->msg_fields |= AS_MSG_FIELD_BIT_BATCH;
+		break;
+	case AS_MSG_FIELD_TYPE_BATCH_WITH_SET: // shouldn't get here - batch parent handles this
+		tr->msg_fields |= AS_MSG_FIELD_BIT_BATCH_WITH_SET;
 		break;
 	default:
 		return false;
