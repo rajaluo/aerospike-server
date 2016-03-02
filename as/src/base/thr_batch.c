@@ -36,7 +36,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
-#include <citrusleaf/cf_queue.h>
+#include "citrusleaf/cf_queue.h"
 
 #include "dynbuf.h"
 #include "hist.h"

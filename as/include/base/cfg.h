@@ -36,7 +36,7 @@
 
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/cf_atomic.h"
-#include <citrusleaf/cf_queue.h>
+#include "citrusleaf/cf_queue.h"
 
 #include "hist.h"
 #include "hist_track.h"

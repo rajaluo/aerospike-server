@@ -31,7 +31,7 @@
 #include <stdint.h>
 
 #include "citrusleaf/cf_digest.h"
-#include <citrusleaf/cf_queue.h>
+#include "citrusleaf/cf_queue.h"
 
 #include "ai_obj.h"
 #include "dynbuf.h"

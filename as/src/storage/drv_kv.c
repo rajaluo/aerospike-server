@@ -40,7 +40,7 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
-#include <citrusleaf/cf_queue.h>
+#include "citrusleaf/cf_queue.h"
 #endif
 
 #include <stdint.h>
