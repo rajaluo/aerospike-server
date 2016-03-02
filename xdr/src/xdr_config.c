@@ -58,13 +58,13 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "{",								XDR_CASE_CONTEXT_BEGIN },
 		{ "enable-xdr",						XDR_CASE_ENABLE_XDR },
 		{ "xdr-digestlog-path",				XDR_CASE_DIGESTLOG_PATH },
-		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH },
+		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH },					// depricated (3.8.0)
 		{ "xdr-info-port",					XDR_CASE_INFO_PORT },
 		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
 		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT },
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
 		{ "xdr-threads",					XDR_CASE_THREADS },
-		{ "timeout",						XDR_CASE_TIMEOUT }, // not exposed to users
+		{ "timeout",						XDR_CASE_TIMEOUT },							// not exposed to users
 		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
 		{ "xdr-replace-record",				XDR_CASE_XDR_REPLACE_RECORD },
@@ -75,10 +75,10 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
 		{ "xdr-read-batch-size",			XDR_CASE_XDR_READ_BATCH_SIZE },
 		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },
-		{ "xdr-check-data-before-delete",	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE },
-		{ "xdr-pidfile",					XDR_CASE_XDR_PIDFILE },
-		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS}, // xdr in asd
-		{ "xdr-ship-slab-size",				XDR_CASE_XDR_SHIP_SLAB_SIZE}, // xdr in asd
+		{ "xdr-check-data-before-delete",	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE },	// depricated (3.8.0)
+		{ "xdr-pidfile",					XDR_CASE_XDR_PIDFILE },						// depricated (3.8.0)
+		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS},
+		{ "xdr-ship-slab-size",				XDR_CASE_XDR_SHIP_SLAB_SIZE},
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -144,7 +144,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_conf_change_flag = 0;
 	c->xdr_shipping_enabled = true;
 	c->xdr_delete_shipping_enabled = true;
-	c->xdr_check_data_before_delete = false;
 	c->xdr_hotkey_maxskip = 5;
 	c->xdr_fwd_with_gencheck = false;
 	c->xdr_replace_record = true;

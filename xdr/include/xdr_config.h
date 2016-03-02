@@ -188,7 +188,6 @@ typedef struct xdr_config {
 	int 	xdr_hotkey_maxskip;
 	bool	xdr_fwd_with_gencheck;
 	bool	xdr_replace_record;
-	bool	xdr_check_data_before_delete;
 	int		xdr_info_request_timeout_ms;
 	int     xdr_compression_threshold;
 } xdr_config;
