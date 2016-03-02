@@ -46,8 +46,8 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_ll.h"
-#include <citrusleaf/cf_queue.h>
-#include <citrusleaf/cf_queue_priority.h>
+#include "citrusleaf/cf_queue.h"
+#include "citrusleaf/cf_queue_priority.h"
 #include "citrusleaf/cf_shash.h"
 
 #include "fault.h"

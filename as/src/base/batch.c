@@ -27,7 +27,7 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
-#include <citrusleaf/cf_queue.h>
+#include "citrusleaf/cf_queue.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"

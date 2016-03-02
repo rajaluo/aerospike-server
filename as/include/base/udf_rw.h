@@ -25,9 +25,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <aerospike/as_list.h>
-#include <aerospike/as_result.h>
-#include <citrusleaf/cf_digest.h>
+#include "aerospike/as_list.h"
+#include "aerospike/as_result.h"
+#include "citrusleaf/cf_digest.h"
 
 #include "util.h"
 

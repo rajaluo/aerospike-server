@@ -35,11 +35,11 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <aerospike/as_val.h>
-#include <citrusleaf/cf_atomic.h>
-#include <citrusleaf/cf_clock.h>
-#include <citrusleaf/cf_digest.h>
-#include <citrusleaf/cf_shash.h>
+#include "aerospike/as_val.h"
+#include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_digest.h"
+#include "citrusleaf/cf_shash.h"
 
 #include "arenax.h"
 #include "dynbuf.h"

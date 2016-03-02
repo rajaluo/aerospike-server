@@ -37,7 +37,7 @@
 #include <string.h>
 
 #include "citrusleaf/cf_digest.h"
-#include <citrusleaf/cf_queue.h>
+#include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
 #include "olock.h"

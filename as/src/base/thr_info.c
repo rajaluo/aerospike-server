@@ -41,7 +41,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <citrusleaf/cf_queue.h>
+#include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_shash.h"
 #include "citrusleaf/cf_vector.h"
 

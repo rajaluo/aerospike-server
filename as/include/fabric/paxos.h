@@ -33,7 +33,7 @@
 #include <stdint.h>
 
 #include "citrusleaf/cf_clock.h"
-#include <citrusleaf/cf_queue_priority.h>
+#include "citrusleaf/cf_queue_priority.h"
 
 #include "msg.h"
 #include "util.h"

@@ -31,7 +31,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <citrusleaf/cf_digest.h>
+#include "citrusleaf/cf_digest.h"
 
 #include "msg.h"
 #include "util.h"
