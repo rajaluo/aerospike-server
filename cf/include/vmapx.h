@@ -1,7 +1,7 @@
 /*
  * vmapx.h
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,12 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * A vector of fixed-size values, also accessible by name, which operates in
- * persistent memory.
- *
- */
-
 #pragma once
 
 
@@ -34,16 +28,18 @@
 //
 
 #include <pthread.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include <citrusleaf/cf_atomic.h>
-#include <citrusleaf/cf_shash.h>
+#include "citrusleaf/cf_atomic.h"
 
 
 //==========================================================
 // Typedefs
 //
+
+typedef struct vhash_s vhash;
 
 // DO NOT access this member data directly - use the API!
 typedef struct cf_vmapx_s {
@@ -53,7 +49,7 @@ typedef struct cf_vmapx_s {
 	cf_atomic32		count;
 
 	// Hash-related
-	shash*			p_hash;
+	vhash*			p_hash;
 	uint32_t		key_size;
 
 	// Generic
@@ -97,20 +93,20 @@ void cf_vmapx_release(cf_vmapx* _this);
 //------------------------------------------------
 // Number of Values
 //
-uint32_t cf_vmapx_count(cf_vmapx* _this);
+uint32_t cf_vmapx_count(const cf_vmapx* _this);
 
 //------------------------------------------------
 // Get a Value
 //
-cf_vmapx_err cf_vmapx_get_by_index(cf_vmapx* _this, uint32_t index,
+cf_vmapx_err cf_vmapx_get_by_index(const cf_vmapx* _this, uint32_t index,
 		void** pp_value);
-cf_vmapx_err cf_vmapx_get_by_name(cf_vmapx* _this, const char* name,
+cf_vmapx_err cf_vmapx_get_by_name(const cf_vmapx* _this, const char* name,
 		void** pp_value);
 
 //------------------------------------------------
 // Get Index from Name
 //
-cf_vmapx_err cf_vmapx_get_index(cf_vmapx* _this, const char* name,
+cf_vmapx_err cf_vmapx_get_index(const cf_vmapx* _this, const char* name,
 		uint32_t* p_index);
 
 //------------------------------------------------
@@ -124,5 +120,9 @@ cf_vmapx_err cf_vmapx_put_unique(cf_vmapx* _this, const void* p_value,
 // Private API - for enterprise separation only
 //
 
-uint32_t cf_vmapx_hash_fn(void* p_key);
-void* cf_vmapx_value_ptr(cf_vmapx* _this, uint32_t index);
+void* cf_vmapx_value_ptr(const cf_vmapx* _this, uint32_t index);
+
+vhash* vhash_create(uint32_t key_size, uint32_t n_rows);
+void vhash_destroy(vhash* h);
+cf_vmapx_err vhash_put_z(vhash* h, const char* zkey, uint32_t value);
+bool vhash_get_z(const vhash* h, const char* zkey, uint32_t* p_value);
