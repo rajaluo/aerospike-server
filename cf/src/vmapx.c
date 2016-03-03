@@ -22,7 +22,7 @@
 
 
 //==========================================================
-// Includes
+// Includes.
 //
 
 #include "vmapx.h"
@@ -34,20 +34,19 @@
 #include <string.h>
 
 #include "citrusleaf/alloc.h"
-#include "citrusleaf/cf_atomic.h"
 
 #include "util.h"
 
 
 //==========================================================
-// Forward Declarations
+// Forward declarations.
 //
 
-static bool get_index(const cf_vmapx* this, const char* name, uint32_t* p_index);
+bool vhash_get(const vhash* h, const char* key, size_t key_len, uint32_t* p_value);
 
 
 //==========================================================
-// Public API
+// Public API.
 //
 
 //------------------------------------------------
@@ -112,7 +111,7 @@ cf_vmapx_release(cf_vmapx* this)
 uint32_t
 cf_vmapx_count(const cf_vmapx* this)
 {
-	return cf_atomic32_get(this->count);
+	return this->count;
 }
 
 //------------------------------------------------
@@ -121,7 +120,7 @@ cf_vmapx_count(const cf_vmapx* this)
 cf_vmapx_err
 cf_vmapx_get_by_index(const cf_vmapx* this, uint32_t index, void** pp_value)
 {
-	if (index >= cf_atomic32_get(this->count)) {
+	if (index >= this->count) {
 		return CF_VMAPX_ERR_BAD_PARAM;
 	}
 
@@ -131,14 +130,14 @@ cf_vmapx_get_by_index(const cf_vmapx* this, uint32_t index, void** pp_value)
 }
 
 //------------------------------------------------
-// Get value by name.
+// Get value by null-terminated name.
 //
 cf_vmapx_err
 cf_vmapx_get_by_name(const cf_vmapx* this, const char* name, void** pp_value)
 {
 	uint32_t index;
 
-	if (! get_index(this, name, &index)) {
+	if (! vhash_get(this->p_hash, name, strlen(name), &index)) {
 		return CF_VMAPX_ERR_NAME_NOT_FOUND;
 	}
 
@@ -148,13 +147,24 @@ cf_vmapx_get_by_name(const cf_vmapx* this, const char* name, void** pp_value)
 }
 
 //------------------------------------------------
-// Get index by name. May pass null p_index to
-// just check existence.
+// Get index by null-terminated name. May pass
+// null p_index to just check existence.
 //
 cf_vmapx_err
 cf_vmapx_get_index(const cf_vmapx* this, const char* name, uint32_t* p_index)
 {
-	return get_index(this, name, p_index) ?
+	return vhash_get(this->p_hash, name, strlen(name), p_index) ?
+			CF_VMAPX_OK : CF_VMAPX_ERR_NAME_NOT_FOUND;
+}
+
+//------------------------------------------------
+// Same as above, but non-null-terminated name.
+//
+cf_vmapx_err
+cf_vmapx_get_index_w_len(const cf_vmapx* this, const char* name,
+		size_t name_len, uint32_t* p_index)
+{
+	return vhash_get(this->p_hash, name, name_len, p_index) ?
 			CF_VMAPX_OK : CF_VMAPX_ERR_NAME_NOT_FOUND;
 }
 
@@ -174,16 +184,27 @@ cf_vmapx_get_index(const cf_vmapx* this, const char* name, uint32_t* p_index)
 cf_vmapx_err
 cf_vmapx_put_unique(cf_vmapx* this, const void* p_value, uint32_t* p_index)
 {
+	return cf_vmapx_put_unique_w_len(this, p_value,
+			strlen((const char*)p_value), p_index);
+}
+
+//------------------------------------------------
+// Same as above, but with known name length.
+//
+cf_vmapx_err
+cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
+		uint32_t* p_index)
+{
 	pthread_mutex_lock(&this->write_lock);
 
 	// If name is found, return existing name's index, ignore p_value.
-	if (vhash_get_z(this->p_hash, (const char*)p_value, p_index)) {
+	if (vhash_get(this->p_hash, (const char*)p_value, name_len, p_index)) {
 		pthread_mutex_unlock(&this->write_lock);
 
 		return CF_VMAPX_ERR_NAME_EXISTS;
 	}
 
-	uint32_t count = cf_atomic32_get(this->count);
+	uint32_t count = this->count;
 
 	// Not allowed to add more.
 	if (count >= this->max_count) {
@@ -197,17 +218,18 @@ cf_vmapx_put_unique(cf_vmapx* this, const void* p_value, uint32_t* p_index)
 
 	// Increment count here so indexes returned by other public API calls (just
 	// after adding to hash below) are guaranteed to be valid.
-	cf_atomic32_incr(&this->count);
+	this->count++;
 
 	// Add to hash.
-	cf_vmapx_err rv = vhash_put_z(this->p_hash, (const char*)p_value, count);
+	cf_vmapx_err result =
+			vhash_put(this->p_hash, (const char*)p_value, name_len, count);
 
-	if (rv != CF_VMAPX_OK) {
-		cf_atomic32_decr(&this->count);
+	if (result != CF_VMAPX_OK) {
+		this->count--;
 
 		pthread_mutex_unlock(&this->write_lock);
 
-		return rv;
+		return result;
 	}
 
 	pthread_mutex_unlock(&this->write_lock);
@@ -221,7 +243,7 @@ cf_vmapx_put_unique(cf_vmapx* this, const void* p_value, uint32_t* p_index)
 
 
 //==========================================================
-// Private Functions
+// Private functions.
 //
 
 //------------------------------------------------
@@ -233,18 +255,9 @@ cf_vmapx_value_ptr(const cf_vmapx* this, uint32_t index)
 	return (void*)(this->values + (this->value_size * index));
 }
 
-//------------------------------------------------
-// Get index by trusted name.
-//
-static bool
-get_index(const cf_vmapx* this, const char* name, uint32_t* p_index)
-{
-	return vhash_get_z(this->p_hash, name, p_index);
-}
-
 
 //==========================================================
-// vhash Class
+// vhash "scoped class".
 //
 
 // Custom hashmap for cf_vmapx usage.
@@ -328,18 +341,17 @@ vhash_destroy(vhash* h)
 }
 
 //------------------------------------------------
-// Add element using null-terminated key.
+// Add element. Key must be null-terminated,
+// although its length is known.
 //
 cf_vmapx_err
-vhash_put_z(vhash* h, const char* zkey, uint32_t value)
+vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 {
-	size_t zkey_len = strlen(zkey);
-
-	if (zkey_len >= h->key_size) {
+	if (key_len >= h->key_size) {
 		return CF_VMAPX_ERR_BAD_PARAM;
 	}
 
-	uint64_t hashed_key = cf_hash_fnv((void*)zkey, zkey_len);
+	uint64_t hashed_key = cf_hash_fnv((void*)zkey, key_len);
 	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
 
 	vhash_ele* e = (vhash_ele*)(h->table + (h->ele_size * row_i));
@@ -377,12 +389,13 @@ vhash_put_z(vhash* h, const char* zkey, uint32_t value)
 }
 
 //------------------------------------------------
-// Get element value using null-terminated key.
+// Get element value. Key may or may not be
+// null-terminated.
 //
 bool
-vhash_get_z(const vhash* h, const char* zkey, uint32_t* p_value)
+vhash_get(const vhash* h, const char* key, size_t key_len, uint32_t* p_value)
 {
-	uint64_t hashed_key = cf_hash_fnv((void*)zkey, strlen(zkey));
+	uint64_t hashed_key = cf_hash_fnv((void*)key, key_len);
 	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
 	uint32_t row_count = h->row_counts[row_i];
 
@@ -395,7 +408,8 @@ vhash_get_z(const vhash* h, const char* zkey, uint32_t* p_value)
 	// Use row count instead of following pointers to the end, for thread
 	// safety with concurrent put.
 	for (uint32_t j = 0; j < row_count; j++) {
-		if (strcmp(VHASH_ELE_KEY_PTR(e), zkey) == 0) {
+		if (VHASH_ELE_KEY_PTR(e)[key_len] == 0 &&
+				memcmp(VHASH_ELE_KEY_PTR(e), key, key_len) == 0) {
 			if (p_value) {
 				*p_value = *VHASH_ELE_VALUE_PTR(h, e);
 			}
