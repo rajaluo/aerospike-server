@@ -24,6 +24,7 @@
 
 #include <pthread.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "citrusleaf/cf_atomic.h"
@@ -227,6 +228,21 @@ int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
 		bool apply_restrictions) {
 	uint16_t set_id;
 	int rv = as_namespace_get_create_set(ns, set_name, &set_id,
+			apply_restrictions);
+
+	if (rv != 0) {
+		return rv;
+	}
+
+	as_index_set_set_id(index, set_id);
+	return 0;
+}
+
+static inline
+int as_index_set_set_w_len(as_index *index, as_namespace *ns,
+		const char *set_name, size_t len, bool apply_restrictions) {
+	uint16_t set_id;
+	int rv = as_namespace_get_create_set_w_len(ns, set_name, len, &set_id,
 			apply_restrictions);
 
 	if (rv != 0) {

@@ -88,4 +88,4 @@ void* cf_vmapx_value_ptr(const cf_vmapx* _this, uint32_t index);
 
 vhash* vhash_create(uint32_t key_size, uint32_t n_rows);
 void vhash_destroy(vhash* h);
-cf_vmapx_err vhash_put(vhash* h, const char* key, size_t key_len, uint32_t value);
+bool vhash_put(vhash* h, const char* key, size_t key_len, uint32_t value);

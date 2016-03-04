@@ -477,6 +477,7 @@ as_bin_get_particle_type(const as_bin *b) {
 /* Bin function declarations */
 extern int16_t as_bin_get_id(as_namespace *ns, const char *name);
 extern uint16_t as_bin_get_or_assign_id(as_namespace *ns, const char *name);
+extern uint16_t as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len);
 extern const char* as_bin_get_name_from_id(as_namespace *ns, uint16_t id);
 extern bool as_bin_name_within_quota(as_namespace *ns, const char *name);
 extern uint16_t as_bin_get_n_bins(as_record *r, as_storage_rd *rd);
@@ -1174,11 +1175,7 @@ as_set_stop_writes(as_set *p_set) {
 static inline void
 as_bin_set_id_from_name_buf(as_namespace *ns, as_bin *b, byte *buf, int len) {
 	if (! ns->single_bin) {
-		char name[len + 1];
-
-		memcpy(name, buf, len);
-		name[len] = 0;
-		b->id = as_bin_get_or_assign_id(ns, name);
+		b->id = as_bin_get_or_assign_id_w_len(ns, (const char *)buf, len);
 	}
 }
 
@@ -1218,6 +1215,7 @@ extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern as_namespace_id as_namespace_getid_bymsgfield(struct as_msg_field_s *fp);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);
 extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool apply_restrictions);
+extern int as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions);
 extern as_set * as_namespace_init_set(as_namespace *ns, const char *set_name);
 extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);
 extern uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name);

@@ -3179,19 +3179,14 @@ int
 as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m)
 {
 	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
+	size_t name_len = (size_t)as_msg_field_get_value_sz(f);
 
-	if (as_msg_field_get_value_sz(f) == 0) {
+	if (name_len == 0) {
 		return 0;
 	}
 
-	size_t msg_set_name_len = as_msg_field_get_value_sz(f);
-	char msg_set_name[msg_set_name_len + 1];
-
-	memcpy((void*)msg_set_name, (const void*)f->data, msg_set_name_len);
-	msg_set_name[msg_set_name_len] = 0;
-
 	// Given the name, find/assign the set-ID and write it in the as_index.
-	return as_index_set_set(r, ns, msg_set_name, true);
+	return as_index_set_set_w_len(r, ns, (const char*)f->data, name_len, true);
 }
 
 bool
