@@ -67,7 +67,8 @@ cf_vmapx_create(cf_vmapx* this, uint32_t value_size, uint32_t max_count,
 		uint32_t hash_size, uint32_t max_name_size)
 {
 	// Value-size needs to be a multiple of 4 bytes for thread safety.
-	if ((value_size & 3) || ! max_count || ! hash_size || ! max_name_size) {
+	if ((value_size & 3) != 0 || max_count == 0 || hash_size == 0 ||
+			max_name_size == 0 || max_name_size > value_size) {
 		return CF_VMAPX_ERR_BAD_PARAM;
 	}
 
@@ -135,9 +136,15 @@ cf_vmapx_get_by_index(const cf_vmapx* this, uint32_t index, void** pp_value)
 cf_vmapx_err
 cf_vmapx_get_by_name(const cf_vmapx* this, const char* name, void** pp_value)
 {
+	size_t name_len = strlen(name);
+
+	if (name_len >= this->key_size) {
+		return CF_VMAPX_ERR_NAME_NOT_FOUND;
+	}
+
 	uint32_t index;
 
-	if (! vhash_get(this->p_hash, name, strlen(name), &index)) {
+	if (! vhash_get(this->p_hash, name, name_len, &index)) {
 		return CF_VMAPX_ERR_NAME_NOT_FOUND;
 	}
 
@@ -153,7 +160,13 @@ cf_vmapx_get_by_name(const cf_vmapx* this, const char* name, void** pp_value)
 cf_vmapx_err
 cf_vmapx_get_index(const cf_vmapx* this, const char* name, uint32_t* p_index)
 {
-	return vhash_get(this->p_hash, name, strlen(name), p_index) ?
+	size_t name_len = strlen(name);
+
+	if (name_len >= this->key_size) {
+		return CF_VMAPX_ERR_NAME_NOT_FOUND;
+	}
+
+	return vhash_get(this->p_hash, name, name_len, p_index) ?
 			CF_VMAPX_OK : CF_VMAPX_ERR_NAME_NOT_FOUND;
 }
 
@@ -169,11 +182,11 @@ cf_vmapx_get_index_w_len(const cf_vmapx* this, const char* name,
 }
 
 //------------------------------------------------
-// The value must begin with a null-terminated
-// string which is its name. (The hash map is not
-// stored in persistent memory, so names must be
-// in the vector to enable us to rebuild the hash
-// map on warm restart.)
+// The value must begin with a string which is its
+// name. (The hash map is not stored in persistent
+// memory, so names must be in the vector to
+// enable us to rebuild the hash map on warm
+// restart.)
 //
 // If name is not found, add new value and return
 // newly assigned index (and CF_VMAPX_OK). If name
@@ -195,41 +208,45 @@ cf_vmapx_err
 cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
 		uint32_t* p_index)
 {
+	// Make sure name fits in key's allocated size.
+	if (name_len >= this->key_size) {
+		return CF_VMAPX_ERR_BAD_PARAM;
+	}
+
 	pthread_mutex_lock(&this->write_lock);
 
 	// If name is found, return existing name's index, ignore p_value.
 	if (vhash_get(this->p_hash, (const char*)p_value, name_len, p_index)) {
 		pthread_mutex_unlock(&this->write_lock);
-
 		return CF_VMAPX_ERR_NAME_EXISTS;
 	}
 
 	uint32_t count = this->count;
 
-	// Not allowed to add more.
+	// If vmap is full, can't add more.
 	if (count >= this->max_count) {
 		pthread_mutex_unlock(&this->write_lock);
-
 		return CF_VMAPX_ERR_FULL;
 	}
 
 	// Add to vector.
-	memcpy(cf_vmapx_value_ptr(this, count), p_value, this->value_size);
+	char* value_ptr = (char*)cf_vmapx_value_ptr(this, count);
+
+	memcpy((void*)value_ptr, p_value, this->value_size);
+
+	// In case it wasn't already, null-terminate name within stored value.
+	value_ptr[name_len] = 0;
 
 	// Increment count here so indexes returned by other public API calls (just
 	// after adding to hash below) are guaranteed to be valid.
 	this->count++;
 
 	// Add to hash.
-	cf_vmapx_err result =
-			vhash_put(this->p_hash, (const char*)p_value, name_len, count);
-
-	if (result != CF_VMAPX_OK) {
+	if (! vhash_put(this->p_hash, value_ptr, name_len, count)) {
 		this->count--;
 
 		pthread_mutex_unlock(&this->write_lock);
-
-		return result;
+		return CF_VMAPX_ERR_UNKNOWN;
 	}
 
 	pthread_mutex_unlock(&this->write_lock);
@@ -344,13 +361,9 @@ vhash_destroy(vhash* h)
 // Add element. Key must be null-terminated,
 // although its length is known.
 //
-cf_vmapx_err
+bool
 vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 {
-	if (key_len >= h->key_size) {
-		return CF_VMAPX_ERR_BAD_PARAM;
-	}
-
 	uint64_t hashed_key = cf_hash_fnv((void*)zkey, key_len);
 	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
 
@@ -361,7 +374,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 		*VHASH_ELE_VALUE_PTR(h, e) = value;
 		h->row_counts[row_i]++;
 
-		return CF_VMAPX_OK;
+		return true;
 	}
 
 	vhash_ele* e_head = e;
@@ -375,7 +388,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 	e = (vhash_ele*)cf_malloc(h->ele_size);
 
 	if (! e) {
-		return CF_VMAPX_ERR_UNKNOWN;
+		return false;
 	}
 
 	e->next = e_head->next;
@@ -385,7 +398,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 	*VHASH_ELE_VALUE_PTR(h, e) = value;
 	h->row_counts[row_i]++;
 
-	return CF_VMAPX_OK;
+	return true;
 }
 
 //------------------------------------------------
