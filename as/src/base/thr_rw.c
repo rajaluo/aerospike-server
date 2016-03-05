@@ -6081,14 +6081,14 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	as_storage_record_close(r, &rd);
 	as_record_done(r_ref, ns);
 
-	MICROBENCHMARK_HIST_INSERT_P(rt_cleanup_hist);
+	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_cleanup_hist);
 
 	// Now that we're not under the record lock, send the message we just built.
 	if (db.buf) {
 		// Using the function for write responses for now.
 		as_msg_send_ops_reply(tr->proto_fd_h, &db);
 
-		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
+		MICROBENCHMARK_HIST_INSERT_P(rt_net_hist);
 
 		if (! db.is_stack) {
 			cf_free(db.buf);
