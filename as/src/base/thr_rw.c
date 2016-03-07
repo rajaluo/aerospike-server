@@ -3429,7 +3429,7 @@ check_msg_set_name(as_transaction *tr, const char* set_name)
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {
 		if (set_name) {
-			cf_warning(AS_RW, "op overwriting record in set '%s' has no set name",
+			cf_warning_digest(AS_RW, &tr->keyd, "op overwriting record in set '%s' has no set name ",
 					set_name);
 		}
 
@@ -3446,7 +3446,7 @@ check_msg_set_name(as_transaction *tr, const char* set_name)
 		memcpy((void*)msg_set_name, (const void*)f->data, msg_set_name_len);
 		msg_set_name[msg_set_name_len] = 0;
 
-		cf_warning(AS_RW, "op overwriting record in set '%s' has different set name '%s'",
+		cf_warning_digest(AS_RW, &tr->keyd, "op overwriting record in set '%s' has different set name '%s' ",
 				set_name ? set_name : "(null)", msg_set_name);
 		return false;
 	}
@@ -5760,9 +5760,8 @@ void
 single_transaction_response(as_transaction *tr, as_namespace *ns,
 		as_msg_op **ops, as_bin **response_bins, uint16_t n_bins,
 		uint32_t generation, uint32_t void_time, uint *written_sz,
-		char *setname)
+		const char *setname)
 {
-
 	cf_detail_digest(AS_RW, NULL, "[ENTER] NS(%s)", ns->name );
 
 	if (tr->proto_fd_h) {
@@ -6039,7 +6038,8 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	}
 
 	uint32_t written_sz = 0;
-	const char *set_name = as_index_get_set_name(r, ns);
+	const char *set_name = (m->info1 & AS_MSG_INFO1_XDR) != 0 ?
+			as_index_get_set_name(r, ns) : NULL;
 
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_storage_read_hist);
 
@@ -6071,7 +6071,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	}
 	else {
 		single_transaction_response(tr, ns, p_ops, response_bins, n_bins,
-				r->generation, r->void_time, &written_sz, (char *)set_name);
+				r->generation, r->void_time, &written_sz, set_name);
 
 		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
 	}
