@@ -3452,13 +3452,14 @@ write_local_preprocessing(as_transaction *tr, bool *is_done)
 }
 
 static bool
-check_msg_set_name(as_msg* m, const char* set_name)
+check_msg_set_name(as_transaction* tr, const char* set_name)
 {
+	as_msg *m = &tr->msgp->msg;
 	as_msg_field* f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {
 		if (set_name) {
-			cf_warning(AS_RW, "op overwriting record in set '%s' has no set name",
+			cf_warning_digest(AS_RW, &tr->keyd, "op overwriting record in set '%s' has no set name ",
 					set_name);
 		}
 
@@ -3475,7 +3476,7 @@ check_msg_set_name(as_msg* m, const char* set_name)
 		memcpy((void*)msg_set_name, (const void*)f->data, msg_set_name_len);
 		msg_set_name[msg_set_name_len] = 0;
 
-		cf_warning(AS_RW, "op overwriting record in set '%s' has different set name '%s'",
+		cf_warning_digest(AS_RW, &tr->keyd, "op overwriting record in set '%s' has different set name '%s' ",
 				set_name ? set_name : "(null)", msg_set_name);
 		return false;
 	}
@@ -4845,7 +4846,7 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 	const char* set_name = as_index_get_set_name(r, ns);
 
 	// If record existed, check that as_msg set name matches.
-	if (! record_created && ! check_msg_set_name(m, set_name)) {
+	if (! record_created && ! check_msg_set_name(tr, set_name)) {
 		write_local_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_PARAMETER);
 		return -1;
 	}
@@ -6102,7 +6103,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 		size_t msg_sz = sizeof(stack_buf);
 		uint8_t *msgp = (uint8_t *)as_msg_make_response_msg(tr->result_code,
 				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
-				(cl_msg *)stack_buf, &msg_sz, as_transaction_trid(tr), NULL);
+				(cl_msg *)stack_buf, &msg_sz, as_transaction_trid(tr), set_name);
 
 		if (! msgp)	{
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed make response msg ", ns->name);
