@@ -14,6 +14,7 @@
 [submodule "modules/jemalloc"]
 	path = modules/jemalloc
 	url = git@github.com:citrusleaf/jemalloc.git
+	ignore = dirty
 [submodule "modules/lua-core"]
 	path = modules/lua-core
 	url = git@github.com:citrusleaf/aerospike-lua-core.git
