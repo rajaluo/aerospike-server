@@ -119,7 +119,7 @@ uint32_t as_index_size_get(as_namespace *ns)
 	return (uint32_t)sizeof(as_index);
 }
 
-// Clear the record portion of as_index - excluding variable part, for speed.
+// Fast way to clear the record portion of as_index.
 // Note - relies on current layout and size of as_index!
 static inline
 void as_index_clear_record_info(as_index *index) {
@@ -292,7 +292,6 @@ typedef struct as_index_tree_s {
 	as_index			*root;
 	cf_arenax_handle	root_h;
 
-	as_index			*sentinel;
 	cf_arenax_handle	sentinel_h;
 
 	as_index_value_destructor destructor;
