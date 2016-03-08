@@ -133,7 +133,7 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go
 	c->xdr_ship_slab_size = 500;    // Number of digests processed by one shipper thread.
 	c->xdr_ship_threads = 8;        // Number of XDR shipper threads.
-	c->xdr_timeout = 30000;		// Timeout for each element that is shipped. default is 30000 ms
+	c->xdr_timeout = 10000;		// Timeout for each element that is shipped. default is 10000 ms
 								// asd side connection times out at 15 seconds
 	c->xdr_threads = 3;		//Number of receiver threads to spawn
 	c->xdr_forward_xdrwrites = false;	//If the writes due to xdr should be forwarded
