@@ -20,7 +20,7 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-//==============================================================================
+//==========================================================
 // Includes.
 //
 
@@ -53,7 +53,7 @@
 
 #define RESOLVE_H(__h) ((as_index*)cf_arenax_resolve(tree->arena, __h))
 
-typedef enum as_index_color_e {
+typedef enum {
 	AS_BLACK	= 0,
 	AS_RED		= 1
 } as_index_color;
@@ -95,13 +95,14 @@ void as_index_rotate_right(as_index_tree *tree, as_index_ele *a, as_index_ele *b
 
 
 
-//==============================================================================
+//==========================================================
 // Public API - create/resume/destroy/size a tree.
 //
 
 // Create a new red-black tree.
 as_index_tree *
-as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex)
+as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
+		void *destructor_udata, as_treex *p_treex)
 {
 	as_index_tree *tree = cf_rc_alloc(sizeof(as_index_tree));
 
@@ -122,10 +123,11 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor, voi
 		return NULL;
 	}
 
-	tree->sentinel = RESOLVE_H(tree->sentinel_h);
-	memset(tree->sentinel, 0, sizeof(as_index));
-	tree->sentinel->left_h = tree->sentinel->right_h = tree->sentinel_h;
-	tree->sentinel->color = AS_BLACK;
+	as_index *sentinel = RESOLVE_H(tree->sentinel_h);
+
+	memset(sentinel, 0, sizeof(as_index));
+	sentinel->left_h = sentinel->right_h = tree->sentinel_h;
+	sentinel->color = AS_BLACK;
 
 	// Make the fixed root element.
 	tree->root_h = cf_arenax_alloc(arena);
@@ -159,7 +161,8 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor, voi
 // Resume a red-black tree in persistent memory.
 // TODO - should really hide this in an EE version of as_index.c.
 as_index_tree *
-as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex)
+as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor,
+		void *destructor_udata, as_treex *p_treex)
 {
 	as_index_tree *tree = cf_rc_alloc(sizeof(as_index_tree));
 
@@ -179,8 +182,6 @@ as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor, voi
 		cf_rc_free(tree);
 		return NULL;
 	}
-
-	tree->sentinel = RESOLVE_H(tree->sentinel_h);
 
 	// Resume the fixed root.
 	tree->root_h = p_treex->root_h;
@@ -211,7 +212,8 @@ as_index_tree_release(as_index_tree *tree, void *destructor_udata)
 		return 1;
 	}
 
-	as_index_tree_purge(tree, RESOLVE_H(tree->root->left_h), tree->root->left_h);
+	as_index_tree_purge(tree, RESOLVE_H(tree->root->left_h),
+			tree->root->left_h);
 
 	cf_arenax_free(tree->arena, tree->root_h);
 	cf_arenax_free(tree->arena, tree->sentinel_h);
@@ -241,7 +243,7 @@ as_index_tree_size(as_index_tree *tree)
 
 
 
-//==============================================================================
+//==========================================================
 // Public API - reduce a tree.
 //
 
@@ -256,7 +258,8 @@ as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata)
 // Make a callback for a specified number of elements in the tree, from outside
 // the tree lock.
 void
-as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata)
+as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count,
+		as_index_reduce_fn cb, void *udata)
 {
 	pthread_mutex_lock(&tree->reduce_lock);
 
@@ -270,7 +273,8 @@ as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_red
 		return;
 	}
 
-	size_t sz = sizeof(as_index_ph_array) + (sizeof(as_index_ph) * sample_count);
+	size_t sz = sizeof(as_index_ph_array) +
+			(sizeof(as_index_ph) * sample_count);
 	as_index_ph_array *v_a;
 	uint8_t buf[64 * 1024];
 
@@ -294,10 +298,12 @@ as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_red
 	// Recursively, fetch all the value pointers into this array, so we can make
 	// all the callbacks outside the big lock.
 	if (tree->root->left_h != tree->sentinel_h) {
-		as_index_reduce_traverse(tree, tree->root->left_h, tree->sentinel_h, v_a);
+		as_index_reduce_traverse(tree, tree->root->left_h, tree->sentinel_h,
+				v_a);
 	}
 
-	cf_debug(AS_INDEX, "as_index_reduce_traverse took %"PRIu64" ms", cf_getms() - start_ms);
+	cf_debug(AS_INDEX, "as_index_reduce_traverse took %"PRIu64" ms",
+			cf_getms() - start_ms);
 
 	pthread_mutex_unlock(&tree->reduce_lock);
 
@@ -323,12 +329,14 @@ as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_red
 
 // Make a callback for every element in the tree, from under the tree lock.
 void
-as_index_reduce_sync(as_index_tree *tree, as_index_reduce_sync_fn cb, void *udata)
+as_index_reduce_sync(as_index_tree *tree, as_index_reduce_sync_fn cb,
+		void *udata)
 {
 	pthread_mutex_lock(&tree->reduce_lock);
 
 	if (tree->root->left_h != tree->sentinel_h) {
-		as_index_reduce_sync_traverse(tree, RESOLVE_H(tree->root->left_h), tree->sentinel_h, cb, udata);
+		as_index_reduce_sync_traverse(tree, RESOLVE_H(tree->root->left_h),
+				tree->sentinel_h, cb, udata);
 	}
 
 	pthread_mutex_unlock(&tree->reduce_lock);
@@ -336,7 +344,7 @@ as_index_reduce_sync(as_index_tree *tree, as_index_reduce_sync_fn cb, void *udat
 
 
 
-//==============================================================================
+//==========================================================
 // Public API - get/insert/delete an element in a tree.
 //
 
@@ -365,11 +373,13 @@ as_index_exists(as_index_tree *tree, cf_digest *keyd)
 //		 0 - found (reference returned in index_ref)
 //		-1 - not found (index_ref untouched)
 int
-as_index_get_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref)
+as_index_get_vlock(as_index_tree *tree, cf_digest *keyd,
+		as_index_ref *index_ref)
 {
 	pthread_mutex_lock(&tree->lock);
 
-	int rv = as_index_search_lockless(tree, keyd, &index_ref->r, &index_ref->r_h);
+	int rv = as_index_search_lockless(tree, keyd, &index_ref->r,
+			&index_ref->r_h);
 
 	if (rv != 0) {
 		pthread_mutex_unlock(&tree->lock);
@@ -400,7 +410,8 @@ as_index_get_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref
 //		 0 - found already existing (reference returned in index_ref)
 //		-1 - error (index_ref untouched)
 int
-as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref)
+as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
+		as_index_ref *index_ref)
 {
 	int cmp = 0;
 	bool retry;
@@ -557,7 +568,7 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 		r_h = tree->root->left_h;
 		r = RESOLVE_H(r_h);
 
-		while (r != tree->sentinel) {
+		while (r_h != tree->sentinel_h) {
 			ele++;
 			ele->parent = ele - 1;
 			ele->me_h = r_h;
@@ -573,7 +584,7 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 			r = RESOLVE_H(r_h);
 		}
 
-		if (r == tree->sentinel) {
+		if (r_h == tree->sentinel_h) {
 			pthread_mutex_unlock(&tree->lock);
 			return -1; // not found, nothing to delete
 		}
@@ -609,7 +620,7 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 		ele->me_h = r->right_h;
 		ele->me = RESOLVE_H(ele->me_h);
 
-		while (tree->sentinel_h != ele->me->left_h) {
+		while (ele->me->left_h != tree->sentinel_h) {
 			ele++;
 			ele->parent = ele - 1;
 			ele->me_h = ele->parent->me->left_h;
@@ -626,7 +637,7 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 	// Get the appropriate child of s. (Note - child could be sentinel.)
 	ele++;
 
-	if (tree->sentinel_h == s->left_h) {
+	if (s->left_h == tree->sentinel_h) {
 		ele->me_h = s->right_h;
 	}
 	else {
@@ -694,7 +705,7 @@ void
 as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
 {
 	// Don't purge the sentinel.
-	if (r == tree->sentinel) {
+	if (r_h == tree->sentinel_h) {
 		return;
 	}
 
@@ -714,7 +725,8 @@ as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
 
 
 void
-as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h, cf_arenax_handle sentinel_h, as_index_ph_array *v_a)
+as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h,
+		cf_arenax_handle sentinel_h, as_index_ph_array *v_a)
 {
 	if (v_a->pos >= v_a->alloc_sz) {
 		return;
@@ -740,27 +752,31 @@ as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h, cf_arenax_ha
 
 
 void
-as_index_reduce_sync_traverse(as_index_tree *tree, as_index *r, cf_arenax_handle sentinel_h, as_index_reduce_sync_fn cb, void *udata)
+as_index_reduce_sync_traverse(as_index_tree *tree, as_index *r,
+		cf_arenax_handle sentinel_h, as_index_reduce_sync_fn cb, void *udata)
 {
 	cb(r, udata);
 
 	if (r->left_h != sentinel_h) {
-		as_index_reduce_sync_traverse(tree, RESOLVE_H(r->left_h), sentinel_h, cb, udata);
+		as_index_reduce_sync_traverse(tree, RESOLVE_H(r->left_h), sentinel_h,
+				cb, udata);
 	}
 
 	if (r->right_h != sentinel_h) {
-		as_index_reduce_sync_traverse(tree, RESOLVE_H(r->right_h), sentinel_h, cb, udata);
+		as_index_reduce_sync_traverse(tree, RESOLVE_H(r->right_h), sentinel_h,
+				cb, udata);
 	}
 }
 
 
 int
-as_index_search_lockless(as_index_tree *tree, cf_digest *keyd, as_index **ret, cf_arenax_handle *ret_h)
+as_index_search_lockless(as_index_tree *tree, cf_digest *keyd, as_index **ret,
+		cf_arenax_handle *ret_h)
 {
 	cf_arenax_handle r_h = tree->root->left_h;
 	as_index *r = RESOLVE_H(r_h);
 
-	while (r != tree->sentinel) {
+	while (r_h != tree->sentinel_h) {
 		int cmp = cf_digest_compare(keyd, &r->key);
 
 		if (cmp == 0) {
@@ -788,7 +804,7 @@ as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele)
 {
 	// Entering here, ele is the last element on the stack. It turns out during
 	// insert rebalancing we won't ever need new elements on the stack, but make
-	// this resemble delete rebalance - define r_e to go up the stack.
+	// this resemble delete rebalance - define r_e to go back up the tree.
 	as_index_ele *r_e = ele;
 	as_index_ele *parent_e = r_e->parent;
 
@@ -878,7 +894,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 {
 	// Entering here, ele is the last element on the stack. It's possible as r_e
 	// crawls up the tree, we'll need new elements on the stack, in which case
-	// ele keeps going down the stack while r_e goes up.
+	// ele keeps building the stack down while r_e goes up.
 	as_index_ele *r_e = ele;
 
 	while (r_e->me->color == AS_BLACK && r_e->me_h != tree->root->left_h) {
