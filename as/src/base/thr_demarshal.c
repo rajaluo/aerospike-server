@@ -644,14 +644,7 @@ thr_demarshal(void *arg)
 
 					// Round-robin pick up demarshal thread epoll_fd and add
 					// this new connection to epoll.
-					int id;
-					while (true) {
-						id = (id_cntr++) % g_demarshal_args->num_threads;
-						if (g_demarshal_args->epoll_fd[id] != 0) {
-							break;
-						}
-					}
-
+					int id = (id_cntr++) % g_demarshal_args->num_threads;
 					fd_h->epoll_fd = g_demarshal_args->epoll_fd[id];
 
 					if (0 > (n = epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_ADD, csocket, &ev))) {
@@ -1058,15 +1051,6 @@ as_demarshal_start()
 		}
 	}
 
-	// Create first thread which is the listener, and wait for it to come up
-	// before others are spawned.
-	if (0 != pthread_create(&(dm->dm_th[0]), 0, thr_demarshal, &g_config.socket)) {
-		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
-	}
-	while (dm->epoll_fd[0] == 0) {
-		sleep(1);
-	}
-
 	// Create all the epoll_fds and wait for all the threads to come up.
 	int i;
 	for (i = 1; i < dm->num_threads; i++) {
@@ -1081,6 +1065,16 @@ as_demarshal_start()
 			cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads ...");
 		}
 	}
+
+	// Create first thread which is the listener. We do this one last, as it
+	// requires the other threads' epoll instances.
+	if (0 != pthread_create(&(dm->dm_th[0]), 0, thr_demarshal, &g_config.socket)) {
+		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
+	}
+	while (dm->epoll_fd[0] == 0) {
+		sleep(1);
+	}
+
 	cf_info(AS_DEMARSHAL, "Started %d Demarshal Threads", dm->num_threads);
 
 	return 0;
