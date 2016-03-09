@@ -58,7 +58,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "{",								XDR_CASE_CONTEXT_BEGIN },
 		{ "enable-xdr",						XDR_CASE_ENABLE_XDR },
 		{ "xdr-digestlog-path",				XDR_CASE_DIGESTLOG_PATH },
-		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH },					// depricated (3.8.0)
+		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH },					// deprecated (3.8.0)
 		{ "xdr-info-port",					XDR_CASE_INFO_PORT },
 		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
 		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT },
@@ -75,8 +75,6 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
 		{ "xdr-read-batch-size",			XDR_CASE_XDR_READ_BATCH_SIZE },
 		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },
-		{ "xdr-check-data-before-delete",	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE },	// depricated (3.8.0)
-		{ "xdr-pidfile",					XDR_CASE_XDR_PIDFILE },						// depricated (3.8.0)
 		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS},
 		{ "xdr-ship-slab-size",				XDR_CASE_XDR_SHIP_SLAB_SIZE},
 		{ "}",								XDR_CASE_CONTEXT_END }
