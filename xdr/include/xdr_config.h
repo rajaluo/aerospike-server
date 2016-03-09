@@ -176,7 +176,6 @@ typedef struct xdr_config {
 	int	xdr_ship_slab_size;     // Maximum number of records, on receival of which, xdr start shipping.
 	int	xdr_ship_threads;       // Number threads which will read from server and ship records.
 	int	xdr_timeout;
-	int	xdr_nw_timeout;
 	int	xdr_threads;
 	int	xdr_forward_xdrwrites;
 	int xdr_internal_shipping_delay;
