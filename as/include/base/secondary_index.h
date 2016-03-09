@@ -540,7 +540,7 @@ void as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd);
 // **************************************************************************************************
 extern int                  as_sindex_ns_has_sindex(as_namespace *ns);
 extern const char         * as_sindex_err_str(int err_code);
-extern int                  as_sindex_err_to_clienterr(int err, char *fname, int lineno);
+extern uint8_t              as_sindex_err_to_clienterr(int err, char *fname, int lineno);
 extern bool                 as_sindex_isactive(as_sindex *si);
 extern int                  as_sindex_get_err(int op_code, char *filename, int lineno);
 extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
@@ -721,7 +721,7 @@ extern int  as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, voi
  */
 // **************************************************************************************************
 extern void                 as_query_init();
-extern int                  as_query(as_transaction *tr);
+extern int                  as_query(as_transaction *tr, as_namespace *ns);
 extern int                  as_query_reinit(int set_size, int *actual_size);
 extern int                  as_query_worker_reinit(int set_size, int *actual_size);
 extern int                  as_query_stat(char *name, cf_dyn_buf *db);

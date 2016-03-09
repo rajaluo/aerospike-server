@@ -114,10 +114,9 @@ typedef struct scan_options_s {
 	uint32_t	sample_pct;
 } scan_options;
 
-int get_scan_ns(as_msg* m, as_namespace** p_ns);
-int get_scan_set_id(as_msg* m, as_namespace* ns, uint16_t* p_set_id);
+int get_scan_set_id(as_transaction* tr, as_namespace* ns, uint16_t* p_set_id);
 scan_type get_scan_type(as_transaction* tr);
-bool get_scan_options(as_msg* m, scan_options* options);
+bool get_scan_options(as_transaction* tr, scan_options* options);
 void set_blocking(int fd, bool block);
 size_t send_blocking_response_chunk(int fd, uint8_t* buf, size_t size);
 size_t send_blocking_response_fin(int fd, int result_code);
@@ -154,14 +153,12 @@ as_scan_init()
 }
 
 int
-as_scan(as_transaction *tr)
+as_scan(as_transaction *tr, as_namespace *ns)
 {
 	int result;
-	as_namespace* ns = NULL;
 	uint16_t set_id = INVALID_SET_ID;
 
-	if ((result = get_scan_ns(&tr->msgp->msg, &ns)) != 0 ||
-		(result = get_scan_set_id(&tr->msgp->msg, ns, &set_id)) != 0) {
+	if ((result = get_scan_set_id(tr, ns, &set_id)) != 0) {
 		return result;
 	}
 
@@ -252,32 +249,11 @@ as_scan_change_job_priority(uint64_t trid, uint32_t priority)
 //
 
 int
-get_scan_ns(as_msg* m, as_namespace** p_ns)
-{
-	as_msg_field *f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
-
-	if (! f) {
-		cf_warning(AS_SCAN, "scan msg has no namespace");
-		return AS_PROTO_RESULT_FAIL_NAMESPACE;
-	}
-
-	as_namespace* ns = as_namespace_get_bymsgfield(f);
-
-	if (! ns) {
-		cf_warning(AS_SCAN, "scan msg has unrecognized namespace");
-		return AS_PROTO_RESULT_FAIL_NAMESPACE;
-	}
-
-	*p_ns = ns;
-
-	return AS_PROTO_RESULT_OK;
-}
-
-int
-get_scan_set_id(as_msg* m, as_namespace* ns, uint16_t* p_set_id)
+get_scan_set_id(as_transaction* tr, as_namespace* ns, uint16_t* p_set_id)
 {
 	uint16_t set_id = INVALID_SET_ID;
-	as_msg_field *f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET);
+	as_msg_field *f = as_transaction_has_set(tr) ?
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
 
 	if (f && as_msg_field_get_value_sz(f) != 0) {
 		uint32_t set_name_len = as_msg_field_get_value_sz(f);
@@ -301,10 +277,7 @@ get_scan_set_id(as_msg* m, as_namespace* ns, uint16_t* p_set_id)
 scan_type
 get_scan_type(as_transaction* tr)
 {
-	as_msg_field *filename_f = as_msg_field_get(&tr->msgp->msg,
-			AS_MSG_FIELD_TYPE_UDF_FILENAME);
-
-	if (! filename_f) {
+	if (! as_transaction_is_udf(tr)) {
 		return SCAN_TYPE_BASIC;
 	}
 
@@ -323,23 +296,26 @@ get_scan_type(as_transaction* tr)
 }
 
 bool
-get_scan_options(as_msg* m, scan_options* options)
+get_scan_options(as_transaction* tr, scan_options* options)
 {
-	as_msg_field *f = as_msg_field_get(m, AS_MSG_FIELD_TYPE_SCAN_OPTIONS);
-
-	if (f) {
-		if (as_msg_field_get_value_sz(f) != 2) {
-			cf_warning(AS_SCAN, "scan msg options field size not 2");
-			return false;
-		}
-
-		options->priority = AS_MSG_FIELD_SCAN_PRIORITY(f->data[0]);
-		options->fail_on_cluster_change =
-				(AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE & f->data[0]) != 0;
-		options->include_ldt_data =
-				(AS_MSG_FIELD_SCAN_INCLUDE_LDT_DATA & f->data[0]) != 0;
-		options->sample_pct = f->data[1];
+	if (! as_transaction_has_scan_options(tr)) {
+		return true;
 	}
+
+	as_msg_field *f = as_msg_field_get(&tr->msgp->msg,
+			AS_MSG_FIELD_TYPE_SCAN_OPTIONS);
+
+	if (as_msg_field_get_value_sz(f) != 2) {
+		cf_warning(AS_SCAN, "scan msg options field size not 2");
+		return false;
+	}
+
+	options->priority = AS_MSG_FIELD_SCAN_PRIORITY(f->data[0]);
+	options->fail_on_cluster_change =
+			(AS_MSG_FIELD_SCAN_FAIL_ON_CLUSTER_CHANGE & f->data[0]) != 0;
+	options->include_ldt_data =
+			(AS_MSG_FIELD_SCAN_INCLUDE_LDT_DATA & f->data[0]) != 0;
+	options->sample_pct = f->data[1];
 
 	return true;
 }
@@ -606,7 +582,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	scan_options options = { 0, false, false, 100 };
 
-	if (! get_scan_options(&tr->msgp->msg, &options)) {
+	if (! get_scan_options(tr, &options)) {
 		cf_free(job);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -908,7 +884,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	scan_options options = { 0, false, false, 100 };
 
-	if (! get_scan_options(&tr->msgp->msg, &options)) {
+	if (! get_scan_options(tr, &options)) {
 		cf_free(job);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -1235,7 +1211,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	scan_options options = { 0, false, false, 100 };
 
-	if (! get_scan_options(&tr->msgp->msg, &options)) {
+	if (! get_scan_options(tr, &options)) {
 		cf_free(job);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}

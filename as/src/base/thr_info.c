@@ -41,6 +41,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_shash.h"
 #include "citrusleaf/cf_vector.h"
 
@@ -50,7 +51,6 @@
 #include "dynbuf.h"
 #include "jem.h"
 #include "meminfo.h"
-#include "queue.h"
 
 #include "ai_obj.h"
 #include "ai_btree.h"
