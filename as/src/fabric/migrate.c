@@ -128,7 +128,7 @@ const msg_template migrate_mt[] = {
 
 #define MIGRATE_RETRANSMIT_MS (g_config.transaction_retry_ms)
 #define MIGRATE_RETRANSMIT_STARTDONE_MS (g_config.transaction_retry_ms)
-#define BYTES_EMIGRATING_HWM (32 * 1024 * 1024)
+#define MAX_BYTES_EMIGRATING (32 * 1024 * 1024)
 
 typedef struct pickled_record_s {
 	cf_digest     keyd;
@@ -926,12 +926,20 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 		return;
 	}
 
-	if (cf_atomic32_get(emig->bytes_emigrating) > BYTES_EMIGRATING_HWM) {
-		usleep(1000);
-	}
-
 	if (ns->migrate_sleep != 0) {
 		usleep(ns->migrate_sleep);
+	}
+
+	uint32_t waits = 0;
+
+	while (cf_atomic32_get(emig->bytes_emigrating) > MAX_BYTES_EMIGRATING &&
+			emig->cluster_key == as_paxos_get_cluster_key()) {
+		usleep(1000);
+
+		// Temporary paranoia to inform us old nodes aren't acking properly.
+		if (++waits % 5000 == 0) {
+			cf_warning(AS_MIGRATE, "missing acks from node %lx", emig->dest);
+		}
 	}
 }
 
