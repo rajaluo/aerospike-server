@@ -128,6 +128,7 @@ const msg_template migrate_mt[] = {
 
 #define MIGRATE_RETRANSMIT_MS (g_config.transaction_retry_ms)
 #define MIGRATE_RETRANSMIT_STARTDONE_MS (g_config.transaction_retry_ms)
+#define BYTES_EMIGRATING_HWM (32 * 1024 * 1024)
 
 typedef struct pickled_record_s {
 	cf_digest     keyd;
@@ -149,13 +150,12 @@ typedef struct emigration_s {
 	uint32_t    id;
 	uint32_t    tx_flags;
 	int         sort_priority;
-	bool		aborted;
+	bool        aborted;
 	as_partition_mig_tx_state tx_state; // really only for LDT
 
+	cf_atomic32 bytes_emigrating;
 	shash       *reinsert_hash;
 	cf_queue    *ctrl_q;
-
-	uint64_t    yield_count; // may be gone in next release
 
 	as_partition_reservation rsv;
 } emigration;
@@ -353,10 +353,9 @@ as_migrate_emigrate(const partition_migrate_record *pmr,
 	emig->aborted = false;
 
 	// Create these later only when we need them - we'll get lots at once.
+	emig->bytes_emigrating = 0;
 	emig->reinsert_hash = NULL;
 	emig->ctrl_q = NULL;
-
-	emig->yield_count = 0;
 
 	AS_PARTITION_RESERVATION_INIT(emig->rsv);
 	as_partition_reserve_migrate(pmr->ns, pmr->pid, &emig->rsv, NULL);
@@ -720,8 +719,8 @@ emigrate(emigration *emig)
 	}
 
 	if (shash_create(&emig->reinsert_hash, emigration_insert_hashfn,
-			sizeof(uint32_t), sizeof(emigration_reinsert_ctrl), 512,
-			SHASH_CR_MT_BIGLOCK) != SHASH_OK) {
+			sizeof(uint32_t), sizeof(emigration_reinsert_ctrl),
+			32 * 1024, SHASH_CR_MT_BIGLOCK) != SHASH_OK) {
 		cf_warning(AS_MIGRATE, "imbalance: failed to allocate reinsert hash");
 		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 		return AS_MIGRATE_STATE_ERROR;
@@ -879,16 +878,6 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	as_storage_record_close(r, &rd);
 	as_record_done(r_ref, ns);
 
-	cf_atomic_int_incr(&g_config.migrate_reads);
-
-	// TODO - consolidate throttles!
-	emig->yield_count++;
-
-	if (g_config.migrate_read_priority &&
-			emig->yield_count % g_config.migrate_read_priority == 0) {
-		usleep(g_config.migrate_read_sleep);
-	}
-
 	//--------------------------------------------
 	// Fill and send the fabric message.
 	//
@@ -937,28 +926,12 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 		return;
 	}
 
-	// TODO - consolidate throttles!
-	// Monitor the hash size and pause if it gets too full.
-	if (shash_get_size(emig->reinsert_hash) > g_config.migrate_xmit_hwm) {
-		// NB: The escape is very important, without it we will infinite
-		//     loop on cluster key change.
-		int escape = 0;
-
-		while (shash_get_size(emig->reinsert_hash) > g_config.migrate_xmit_lwm) {
-			if (escape++ >= 300) {
-				break;
-			}
-
-			usleep(1000);
-		}
+	if (cf_atomic32_get(emig->bytes_emigrating) > BYTES_EMIGRATING_HWM) {
+		usleep(1000);
 	}
 
-	// TODO - consolidate throttles!
-	emig->yield_count++;
-
-	if (g_config.migrate_xmit_priority &&
-			emig->yield_count % g_config.migrate_xmit_priority == 0) {
-		usleep(g_config.migrate_xmit_sleep);
+	if (ns->migrate_sleep != 0) {
+		usleep(ns->migrate_sleep);
 	}
 }
 
@@ -983,6 +956,8 @@ emigrate_record(emigration *emig, msg *m)
 		return false;
 	}
 
+	cf_atomic32_add(&emig->bytes_emigrating, m->bytes_used);
+
 	int rv;
 
 	while ((rv = as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_LOW)) !=
@@ -1004,7 +979,6 @@ emigrate_record(emigration *emig, msg *m)
 	}
 
 	cf_atomic_int_incr(&g_config.migrate_msgs_sent);
-	cf_atomic_int_incr(&g_config.migrate_inserts_sent);
 
 	return true;
 }
@@ -1028,7 +1002,6 @@ emigration_reinsert_reduce_fn(void *key, void *data, void *udata)
 		}
 
 		cf_atomic_int_incr(&g_config.migrate_msgs_sent);
-		cf_atomic_int_incr(&g_config.migrate_inserts_sent);
 		ri_ctrl->xmit_ms = now;
 	}
 
@@ -1447,8 +1420,6 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 void
 immigration_handle_insert_request(cf_node src, msg *m) {
-	cf_atomic_int_incr(&g_config.migrate_inserts_rcvd);
-
 	cf_digest *keyd;
 	size_t sz = 0;
 
@@ -1569,7 +1540,6 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 		return;
 	}
 
-	cf_atomic_int_incr(&g_config.migrate_acks_sent);
 	cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 }
 
@@ -1648,8 +1618,6 @@ immigration_handle_done_request(cf_node src, msg *m) {
 void
 emigration_handle_insert_ack(cf_node src, msg *m)
 {
-	cf_atomic_int_incr(&g_config.migrate_acks_rcvd);
-
 	uint32_t emig_id;
 
 	if (msg_get_uint32(m, MIG_FIELD_EMIG_ID, &emig_id) != 0) {
@@ -1682,6 +1650,10 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 	if (shash_get_vlock(emig->reinsert_hash, &insert_id, (void **)&ri_ctrl,
 			&vlock) == SHASH_OK) {
 		if (src == emig->dest) {
+			if (cf_atomic32_sub(&emig->bytes_emigrating, m->bytes_used) < 0) {
+				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
+			}
+
 			as_fabric_msg_put(ri_ctrl->m);
 			// At this point, the rt is *GONE*.
 			shash_delete_lockfree(emig->reinsert_hash, &insert_id);
@@ -1748,8 +1720,8 @@ emigration_dump_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
 	emigration *emig = (emigration *)object;
 	int *item_num = (int *)udata;
 
-	cf_info(AS_MIGRATE, "[%d]: mig_id %u : id %u ; yc %lu ; ck %016lx",
-			*item_num, emig_id, emig->id, emig->yield_count, emig->cluster_key);
+	cf_info(AS_MIGRATE, "[%d]: mig_id %u : id %u ; ck %016lx", *item_num,
+			emig_id, emig->id, emig->cluster_key);
 
 	*item_num += 1;
 
