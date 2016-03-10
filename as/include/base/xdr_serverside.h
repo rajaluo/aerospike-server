@@ -39,7 +39,6 @@ void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_no
 void as_xdr_start();
 int as_xdr_stop();
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
-int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, const uint8_t *key, uint32_t key_size, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr);
 void xdr_handle_failednodeprocessingdone(cf_node);
 void xdr_conf_init();
 void as_xdr_info_init(void);
