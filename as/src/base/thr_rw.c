@@ -5836,11 +5836,7 @@ single_transaction_response_with_key(as_transaction *tr, as_namespace *ns,
 				as_transaction_trid(tr), setname);
 		tr->proxy_msg = 0;
 	} else if (tr->from_xdr) {
-		// It is a read for XDR.
-		// Send data back to XDR.
-		xdr_internal_read_response(ns, tr->result_code, generation, void_time, key, key_size,
-				response_bins, n_bins, setname, tr->from_xdr);
-		cf_detail(AS_RW, "Responded to XDR with error code %d", tr->result_code);
+		cf_crash(AS_RW, "Unexpected XDR transaction.");
 	} else {
 		// In this case, this is a call from write_process() above.
 		// create the response message (this is a new malloc that will be handed off to fabric (see end of write_process())

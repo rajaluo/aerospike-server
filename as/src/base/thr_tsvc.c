@@ -431,13 +431,7 @@ process_transaction(as_transaction *tr)
 			as_proxy_return_to_sender(tr, redirect_node);
 		} 
 		else if (tr->from_xdr) {
-			// It is a read request from XDR.
-			// As proxy is required for it, XDR should relog it at current owner and replicas.
-			// Send "AS_PROTO_RESULT_FAIL_UNKNOWN" back to XDR.
-			// XDR will relog digest on seeing this error.
-			xdr_internal_read_response(ns, AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, NULL, 0, NULL, 0, NULL, tr->from_xdr);
-			cf_detail(AS_TSVC, "Responded to XDR with error code %d", AS_PROTO_RESULT_FAIL_UNKNOWN);
-			free_msgp = true;
+			cf_crash(AS_TSVC, "Unexpected XDR transaction.");
 		}
 		else if (tr->udata.req_udata) {
 			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
