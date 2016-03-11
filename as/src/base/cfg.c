@@ -472,6 +472,7 @@ typedef enum {
 	CASE_NAMESPACE_LDT_GC_RATE,
 	CASE_NAMESPACE_LDT_PAGE_SIZE,
 	CASE_NAMESPACE_MAX_TTL,
+	CASE_NAMESPACE_MIGRATE_ORDER,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
@@ -870,6 +871,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ldt-gc-rate",					CASE_NAMESPACE_LDT_GC_RATE },
 		{ "ldt-page-size",					CASE_NAMESPACE_LDT_PAGE_SIZE },
 		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
+		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP},
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
@@ -2555,6 +2557,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_MAX_TTL:
 				ns->max_ttl = cfg_seconds(&line);
+				break;
+			case CASE_NAMESPACE_MIGRATE_ORDER:
+				ns->migrate_order = cfg_u32(&line, 1, 10);
 				break;
 			case CASE_NAMESPACE_MIGRATE_SLEEP:
 				ns->migrate_sleep = cfg_u32_no_checks(&line);
