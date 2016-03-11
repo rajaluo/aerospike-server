@@ -141,7 +141,7 @@ extern const int NUM_XDR_SEC_GLOBAL_OPTS;
 extern const int NUM_XDR_SEC_CRED_OPTS;
 
 // Some static knobs shared between XDR and asd
-#define XDR_TIME_ADJUST	300000 // 5 min (ms) time value. Base macro for XDR(for LST adjustment in failure cases) and asd (as parameter for printing warrnings).
+#define XDR_TIME_ADJUST	300000 // (5 minutes) LST adjustment in node failure cases.
 
 #define DC_MAX_NUM 32
 typedef struct xdr_lastship_s {
