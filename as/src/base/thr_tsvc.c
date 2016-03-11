@@ -432,11 +432,10 @@ process_transaction(as_transaction *tr)
 
 			as_proxy_return_to_sender(tr, redirect_node);
 		}
-		else if (tr->udata.req_udata) {
+		else if (tr->udata.req_cb) {
 			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
-			if (udf_rw_needcomplete(tr)) {
-				udf_rw_complete(tr, AS_PROTO_RESULT_FAIL_UNKNOWN, __FILE__,__LINE__);
-			}
+			tr->udata.req_cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			tr->udata.req_cb = NULL;
 		}
 	} // end else "other" transaction
 

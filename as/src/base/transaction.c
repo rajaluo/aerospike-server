@@ -371,10 +371,9 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 		tr->proxy_msg = NULL;
 	}
-	else if (tr->udata.req_udata) {
-		if (udf_rw_needcomplete(tr)) {
-			udf_rw_complete(tr, error_code, __FILE__,__LINE__);
-		}
+	else if (tr->udata.req_cb) {
+		tr->udata.req_cb(tr, error_code);
+		tr->udata.req_cb = NULL;
 	}
 }
 

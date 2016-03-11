@@ -92,11 +92,3 @@ int      udf_rw_call_init_internal(udf_call *, as_transaction *);
 int      udf_rw_call_init_from_msg(udf_call *, as_msg *);
 void     udf_rw_call_destroy(udf_call *);
 // **************************************************************************************************
-
-// **************************************************************************************************
-bool     udf_rw_needcomplete(as_transaction *tr);
-bool     udf_rw_needcomplete_wr(write_request *wr);
-void     udf_rw_complete(as_transaction *tr, int retcode, char *filename, int lineno);
-// **************************************************************************************************
-
-
