@@ -450,19 +450,18 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 			// will be cleaned up by then
 			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing proto_fd ");
 
-			// Note: This may be needed if this is node where internal scan or query
-			// UDF is initiated where it happens so that there is migration is going
-			// on and the request get routed to the remote node which is winning node
-			// This request may need the req_cb to be called.
-			if (udf_rw_needcomplete_wr(wr)) {
+			// Note: currently it should be impossible to have a callback here,
+			// since internal UDFs don't proxy.
+			if (wr->udata.req_cb) {
 				// TODO - this is temporary defensive code!
 				if (pr->batch_shared) {
-					cf_warning(AS_PROXY, "as_proxy_shipop_response_hdlr(): udf_rw_needcomplete_wr() RETURNS TRUE FOR BATCH.");
+					cf_warning(AS_PROXY, "as_proxy_shipop_response_hdlr(): request callback exists for batch.");
 				}
 
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
-				udf_rw_complete(&tr, 0, __FILE__, __LINE__);
+				wr->udata.req_cb(&tr, 0);
+				wr->udata.req_cb = NULL;
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -914,19 +913,19 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 				cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit Timeout ...");
 				cf_atomic_int_incr(&g_config.ldt_proxy_timeout);
 				pthread_mutex_lock(&pr->wr->lock);
-				// Note: This may be needed if this is node where internal scan or query
-				// UDF is initiated where it happens so that there is migration is going
-				// on and the request get routed to the remote node which is winning node
-				// This request may need the req_cb to be called.
-				if (udf_rw_needcomplete_wr(pr->wr)) {
+				// Note: currently it should be impossible to have a callback here,
+				// since internal UDFs don't proxy.
+				if (pr->wr->udata.req_cb) {
 					// TODO - this is temporary defensive code!
 					if (pr->batch_shared) {
-						cf_warning(AS_PROXY, "proxy_retransmit_reduce_fn(): udf_rw_needcomplete_wr() RETURNS TRUE FOR BATCH.");
+						cf_warning(AS_PROXY, "proxy_retransmit_reduce_fn(): request callback exists for batch.");
 					}
 
 					as_transaction tr;
 					write_request_init_tr(&tr, pr->wr);
-					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
+					pr->wr->udata.req_cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
+					pr->wr->udata.req_cb = NULL;
+
 					if (tr.proto_fd_h) {
 						as_end_of_transaction_force_close(tr.proto_fd_h);
 						tr.proto_fd_h = NULL;

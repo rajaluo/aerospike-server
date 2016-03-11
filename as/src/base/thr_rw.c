@@ -267,12 +267,11 @@ void write_request_destructor(void *object) {
 	wr_track_destroy(wr);
 #endif
 
-	if (udf_rw_needcomplete_wr(wr)) {
+	if (wr->udata.req_cb) {
 		as_transaction tr;
 		write_request_init_tr(&tr, wr);
-		cf_warning(AS_RW,
-				"UDF request not complete ... Completing it nonetheless !!!");
-		udf_rw_complete(&tr, 0, __FILE__, __LINE__);
+		cf_warning(AS_RW, "UDF request not complete ... Completing it nonetheless !!!");
+		wr->udata.req_cb(&tr, 0);
 	}
 
 	if (wr->dest_msg)
@@ -898,9 +897,9 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						// update stats to move from normal to uDF requests
 						as_rw_update_stat(wr);
 						// return early if the record was not updated
-						if (udf_rw_needcomplete(tr)) {
-							udf_rw_complete(tr, tr->result_code, __FILE__,
-									__LINE__);
+						if (tr->udata.req_cb) {
+							tr->udata.req_cb(tr, tr->result_code);
+							tr->udata.req_cb = NULL;
 						}
 						rw_cleanup(wr, tr, first_time, false, __LINE__);
 						as_rw_set_stat_counters(true, rv, tr);
@@ -1343,8 +1342,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 				"as_write_start:  unknown reason %d can't put unique? {%s.%d} (%d:%p) %"PRIx64"",
 				rv, ns->name, tr->rsv.pid, tr->proto_fd_h ? tr->proto_fd_h->fd : 0, tr->proxy_msg, *(uint64_t*)&tr->keyd);
 		WR_TRACK_INFO(wr, "as_rw_start: 701");
-		udf_rw_complete(tr, -2, __FILE__, __LINE__);
-		UREQ_DATA_RESET(&tr->udata);
 		WR_RELEASE(wr);
 		cf_atomic_int_incr(&g_config.err_rw_cant_put_unique);
 		return (-2);
@@ -2020,8 +2017,9 @@ write_complete(write_request *wr, as_transaction *tr)
 		return;
 	}
 
-	if (udf_rw_needcomplete(tr)) {
-		udf_rw_complete(tr, tr->result_code, __FILE__, __LINE__);
+	if (tr->udata.req_cb) {
+		tr->udata.req_cb(tr, tr->result_code);
+		tr->udata.req_cb = NULL;
 	}
 	else if (tr->proto_fd_h) {
 		if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
@@ -5447,15 +5445,17 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 		}
 
 		pthread_mutex_lock(&wr->lock);
-		if (udf_rw_needcomplete_wr(wr)) {
+		if (wr->udata.req_cb) {
 			// TODO - this is temporary defensive code!
 			if (wr->batch_shared) {
-				cf_warning(AS_RW, "rw_retransmit_reduce_fn(): udf_rw_needcomplete_wr() RETURNS TRUE FOR BATCH.");
+				cf_warning(AS_RW, "rw_retransmit_reduce_fn(): request callback exists for batch.");
 			}
 
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
-			udf_rw_complete(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT, __FILE__, __LINE__);
+			wr->udata.req_cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
+			wr->udata.req_cb = NULL;
+
 			if (tr.proto_fd_h) {
 				as_end_of_transaction_force_close(tr.proto_fd_h);
 				tr.proto_fd_h = 0;
