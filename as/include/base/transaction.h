@@ -152,16 +152,12 @@ typedef enum {
 typedef struct udf_request_data {
 	void *				req_udata;
 	ureq_cb				req_cb;		// callback called at completion with request structure
-	void *				res_udata;
-	ures_cb				res_cb;		// callback called at completion with response structure
 	udf_request_type	req_type;
 } ureq_data;
 
 #define UREQ_DATA_INIT(ureq)	\
 	(ureq)->req_cb    = NULL;	\
 	(ureq)->req_udata = NULL;	\
-	(ureq)->res_cb    = NULL;	\
-	(ureq)->res_udata = NULL;   \
 	(ureq)->req_type  = UDF_UNDEF_REQUEST;
 
 #define UREQ_DATA_RESET UREQ_DATA_INIT
@@ -169,8 +165,6 @@ typedef struct udf_request_data {
 #define UREQ_DATA_COPY(dest, src)			\
 	(dest)->req_cb    = (src)->req_cb;		\
 	(dest)->req_udata = (src)->req_udata;	\
-	(dest)->res_cb    = (src)->res_cb;		\
-	(dest)->res_udata = (src)->res_udata;   \
 	(dest)->req_type  = (src)->req_type;
 
 #define AS_TRANSACTION_FLAG_NSUP_DELETE     0x0001
