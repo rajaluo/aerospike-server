@@ -125,6 +125,7 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->ldt_page_size = 8192; // default ldt page size is 8192
 	ns->ldt_gc_sleep_us = 500; // Default is sleep for .5Ms. This translates to constant 2k Subrecord
 							   // GC per second.
+	ns->migrate_order = 5;
 	ns->obj_size_hist_max = OBJ_SIZE_HIST_NUM_BUCKETS;
 	ns->single_bin = false;
 	ns->stop_writes_pct = 0.9; // stop writes when 90% of either memory or disk is used

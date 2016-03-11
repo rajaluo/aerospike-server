@@ -66,7 +66,6 @@
 // Constants and typedefs.
 //
 
-// Template for migrate messages
 #define MIG_FIELD_OP 0
 #define MIG_FIELD_EMIG_INSERT_ID 1
 #define MIG_FIELD_EMIG_ID 2
@@ -149,7 +148,6 @@ typedef struct emigration_s {
 	uint64_t    cluster_key;
 	uint32_t    id;
 	uint32_t    tx_flags;
-	int         sort_priority;
 	bool        aborted;
 	as_partition_mig_tx_state tx_state; // really only for LDT
 
@@ -161,7 +159,7 @@ typedef struct emigration_s {
 } emigration;
 
 typedef struct emigration_pop_info_s {
-	int      best_sort_priority;
+	uint32_t best_migrate_order;
 	uint32_t best_tree_elements;
 } emigration_pop_info;
 
@@ -360,11 +358,6 @@ as_migrate_emigrate(const partition_migrate_record *pmr,
 	AS_PARTITION_RESERVATION_INIT(emig->rsv);
 	as_partition_reserve_migrate(pmr->ns, pmr->pid, &emig->rsv, NULL);
 	cf_atomic_int_incr(&g_config.migtx_tree_count);
-
-	// Do zombies first (priority == 2), then migrate_state == DONE
-	// (priority == 1) then the rest. If priority is tied, sort by smallest.
-	emig->sort_priority = emig->rsv.state == AS_PARTITION_STATE_ZOMBIE ?
-			2 : (is_migrate_state_done ? 1 : 0);
 
 	// Generate new LDT version before starting the migration for a record.
 	// This would mean that every time an outgoing migration is triggered it
@@ -633,7 +626,7 @@ emigration_pop(emigration **emigp)
 {
 	emigration_pop_info pop_info;
 
-	pop_info.best_sort_priority = -1;
+	pop_info.best_migrate_order = 0xFFFFffff;
 	pop_info.best_tree_elements = 0;
 	// 0 is a special value - means we haven't started.
 
@@ -659,29 +652,25 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 	emigration_pop_info *pop_info = (emigration_pop_info *)udata;
 	emigration *emig = *(emigration **)buf;
 
-	// If all elements are mig = 0, we'll always return 0 and pop it later.
-	if (! emig) {
-		return -1;
-	}
-
-	// If migration size = 0 OR cluster key mismatch, process immediately.
-	if (emig->rsv.tree->elements == 0 ||
+	if (! emig || // null emig terminates thread
+			emig->rsv.tree->elements == 0 ||
+			emig->tx_flags == TX_FLAGS_REQUEST ||
 			emig->cluster_key != as_paxos_get_cluster_key()) {
-		return -1;
+		return -1; // process immediately
 	}
 
-	// Do zombies first (priority == 2), then migrate_state == DONE
-	// (priority == 1) then the rest. If priority is tied, sort by smallest.
-	if (emig->sort_priority > pop_info->best_sort_priority ||
-			(emig->sort_priority == pop_info->best_sort_priority &&
-					emig->rsv.tree->elements < pop_info->best_tree_elements)) {
-		pop_info->best_sort_priority = emig->sort_priority;
-		pop_info->best_tree_elements = emig->rsv.tree->elements;
-		return -2;
+	uint32_t migrate_order = emig->rsv.ns->migrate_order;
+	uint32_t tree_elements = emig->rsv.tree->elements;
+
+	if (migrate_order < pop_info->best_migrate_order ||
+			(migrate_order == pop_info->best_migrate_order &&
+					tree_elements < pop_info->best_tree_elements)) {
+		pop_info->best_migrate_order = migrate_order;
+		pop_info->best_tree_elements = tree_elements;
+		return -2; // candidate
 	}
 
-	// Found a larger migration than the smallest we've found so far.
-	return 0;
+	return 0; // not interested
 }
 
 
