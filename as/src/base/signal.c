@@ -187,7 +187,6 @@ as_sig_handle_term(int sig_num)
 	pthread_mutex_unlock(&g_NONSTOP);
 }
 
-sighandler_t g_old_bus_handler = 0;
 void
 as_sig_handle_bus(int sig_num)
 {
@@ -199,6 +198,10 @@ as_sig_handle_bus(int sig_num)
 	PRINT_STACK();
 	reraise_signal(sig_num, as_sig_handle_bus);
 }
+
+//==========================================================
+// Public API.
+//
 
 void
 as_signal_setup()

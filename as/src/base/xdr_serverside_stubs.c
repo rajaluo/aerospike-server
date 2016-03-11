@@ -87,7 +87,7 @@ void xdr_handle_failednodeprocessingdone(cf_node nodeid)
 {
 }
 
-void xdr_conf_init()
+void xdr_conf_init(const char *config_file)
 {
 }
 

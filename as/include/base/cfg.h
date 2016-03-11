@@ -635,9 +635,9 @@ typedef struct as_config_s {
 } as_config;
 
 /* Configuration function declarations */
-extern as_config *as_config_init();
-extern void as_config_post_process();
+extern as_config *as_config_init(const char *config_file);
+extern void as_config_post_process(as_config *c, const char *config_file);
 
+/* Declare an instance of the configuration structure in global scope */
 extern as_config g_config;
 extern xdr_config g_xcfg;
-extern const char *g_config_file;

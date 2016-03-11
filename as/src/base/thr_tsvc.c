@@ -430,9 +430,6 @@ process_transaction(as_transaction *tr)
 
 			as_proxy_return_to_sender(tr, redirect_node);
 		} 
-		else if (tr->from_xdr) {
-			cf_crash(AS_TSVC, "Unexpected XDR transaction.");
-		}
 		else if (tr->udata.req_udata) {
 			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
 			if (udf_rw_needcomplete(tr)) {

@@ -98,8 +98,6 @@ as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 	tr->proxy_node                = 0;
 	tr->proxy_msg                 = 0;
 
-	tr->from_xdr                  = 0;
-
 	UREQ_DATA_INIT(&tr->udata);
 
 	tr->batch_shared              = 0;

@@ -146,6 +146,7 @@ const char USAGE[] =
 		"[--instance <0-15>]\n"
 		;
 
+const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
 
 //==========================================================
 // Globals.
@@ -271,6 +272,7 @@ main(int argc, char **argv)
 
 	int i;
 	int cmd_optidx;
+	const char *config_file = DEFAULT_CONFIG_FILE;
 	bool run_in_foreground = false;
 	bool new_style_daemon = false;
 	bool cold_start_cmd = false;
@@ -288,8 +290,8 @@ main(int argc, char **argv)
 			printf("%s build %s\n", aerospike_build_type, aerospike_build_id);
 			return 0;
 		case 'f':
-			g_config_file = cf_strdup(optarg);
-			cf_assert(g_config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
+			config_file = cf_strdup(optarg);
+			cf_assert(config_file, AS_AS, CF_CRITICAL, "config filename cf_strdup failed");
 			break;
 		case 'F':
 			// As a "new-style" daemon(*), asd runs in the foreground and
@@ -324,7 +326,7 @@ main(int argc, char **argv)
 	// Set all fields in the global runtime configuration instance. This parses
 	// the configuration file, and creates as_namespace objects. (Return value
 	// is a shortcut pointer to the global runtime configuration instance.)
-	as_config *c = as_config_init();
+	as_config *c = as_config_init(config_file);
 
 #ifdef USE_ASM
 	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
@@ -407,11 +409,16 @@ main(int argc, char **argv)
 			aerospike_build_type, aerospike_build_id);
 
 	// Includes echoing the configuration file to log.
-	as_config_post_process();
+	as_config_post_process(c, config_file);
+
+	// If we allocated a non-default config file name, free it.
+	if (config_file != DEFAULT_CONFIG_FILE) {
+		cf_free((void*)config_file);
+	}
 
 	// Make one more pass for XDR related conf and crash if needed
 	// TODO : XDR config parsing should be merged with main config parsing.
-	xdr_conf_init();
+	xdr_conf_init(config_file);
 
 	// Write the pid file, if specified.
 	if (! new_style_daemon) {
@@ -485,7 +492,6 @@ main(int argc, char **argv)
 	as_nsup_start();			// may send delete transactions to other nodes
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
-
 	info_debug_ticker_start();	// only after everything else is started
 
 	// Log a service-ready message.

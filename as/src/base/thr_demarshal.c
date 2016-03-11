@@ -250,7 +250,7 @@ thr_demarshal_reaper_fn(void *arg)
 // Get the remote IP address and port connected to a socket file descriptor.
 // Return 0 if successful, and populate the caller-provided IP address and port.
 // Return -1 otherwise.
-static int
+int
 get_fd_ip_addr_and_port(int fd, char *ip_addr, size_t ip_addr_sz, int *port)
 {
 	struct sockaddr_in addr_in;

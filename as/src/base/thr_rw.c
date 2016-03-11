@@ -100,8 +100,6 @@ static cf_atomic32 g_rw_tid = 0;
 static rchash *g_write_hash = 0;
 static pthread_t g_rw_retransmit_th;
 
-extern xdr_state g_xdr_state;
-
 // HELPER
 void print_digest(u_char *d) {
 	printf("0x");
@@ -206,9 +204,6 @@ write_request_create(void) {
 	wr->shipped_op     = false;
 	wr->shipped_op_initiator = false;
 
-	// Data from XDR, in case it is initiated by XDR
-	wr->from_xdr = 0;
-
 	wr->dest_sz = 0;
 	UREQ_DATA_INIT(&wr->udata);
 	memset((void *) & (wr->dup_msg[0]), 0, sizeof(wr->dup_msg));
@@ -251,9 +246,6 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	tr->microbenchmark_time = wr->microbenchmark_time;
 	tr->batch_shared = wr->batch_shared;
 	tr->batch_index = wr->batch_index;
-
-	// Data from XDR, in case this transaction is for XDR.
-	tr->from_xdr = wr->from_xdr;
 
 #if 0
 	if (wr->is_read) {
@@ -1226,9 +1218,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 
 	wr->keyd = tr->keyd;
 
-	// Incase this transaction for XDR, from_xdr is data given by XDR.
-	wr->from_xdr = tr->from_xdr;
-
 	// Transaction Consistency Guarantees:
 	//   Use the client's requested guarantee level for this transaction
 	//   unless the corresponding server's namespace override is enabled.
@@ -1311,8 +1300,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			e->tr.proxy_msg = tr->proxy_msg;
 			tr->proxy_msg = 0;
 			e->tr.keyd = tr->keyd;
-			e->tr.from_xdr = tr->from_xdr;
-			tr->from_xdr = 0;
 			AS_PARTITION_RESERVATION_INIT(e->tr.rsv);
 			e->tr.result_code = AS_PROTO_RESULT_OK;
 			e->tr.msgp = tr->msgp;
@@ -5799,9 +5786,9 @@ as_write_init()
 }
 
 void
-single_transaction_response_with_key(as_transaction *tr, as_namespace *ns,
-		as_msg_op **ops, const uint8_t *key, uint32_t key_size, as_bin **response_bins,
-		uint16_t n_bins, uint32_t generation, uint32_t void_time, uint *written_sz,
+single_transaction_response(as_transaction *tr, as_namespace *ns,
+		as_msg_op **ops, as_bin **response_bins, uint16_t n_bins,
+		uint32_t generation, uint32_t void_time, uint *written_sz,
 		char *setname)
 {
 
@@ -5835,8 +5822,6 @@ single_transaction_response_with_key(as_transaction *tr, as_namespace *ns,
 				generation, void_time, ops, response_bins, n_bins, ns,
 				as_transaction_trid(tr), setname);
 		tr->proxy_msg = 0;
-	} else if (tr->from_xdr) {
-		cf_crash(AS_RW, "Unexpected XDR transaction.");
 	} else {
 		// In this case, this is a call from write_process() above.
 		// create the response message (this is a new malloc that will be handed off to fabric (see end of write_process())
@@ -5859,16 +5844,6 @@ single_transaction_response_with_key(as_transaction *tr, as_namespace *ns,
 					ns->name, tr->msgp);
 		}
 	}
-}
-
-void
-single_transaction_response(as_transaction *tr, as_namespace *ns,
-		as_msg_op **ops, as_bin **response_bins, uint16_t n_bins,
-		uint32_t generation, uint32_t void_time, uint *written_sz,
-		char *setname)
-{
-	single_transaction_response_with_key(tr, ns, ops, NULL, 0, response_bins, n_bins,
-			generation, void_time, written_sz, setname);
 }
 
 // Compute length of the wait queue linked list on a wr.
@@ -6003,14 +5978,6 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 		return;
 	}
 
-	uint8_t *key = NULL;
-	uint32_t key_size = 0;
-
-	if (tr->from_xdr && as_storage_record_get_key(&rd)) {
-		key = rd.key;
-		key_size = rd.key_size;
-	}
-
 	if ((m->info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0) {
 		read_local_done(tr, r_ref, &rd, AS_PROTO_RESULT_OK);
 		return;
@@ -6133,9 +6100,8 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 		db.used_sz = msg_sz;
 	}
 	else {
-		single_transaction_response_with_key(tr, ns, p_ops, key, key_size,
-				response_bins, n_bins, r->generation, r->void_time, &written_sz,
-				(char *)set_name);
+		single_transaction_response(tr, ns, p_ops, response_bins, n_bins,
+				r->generation, r->void_time, &written_sz, (char *)set_name);
 
 		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
 	}

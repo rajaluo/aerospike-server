@@ -40,7 +40,7 @@ void as_xdr_start();
 int as_xdr_stop();
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
 void xdr_handle_failednodeprocessingdone(cf_node);
-void xdr_conf_init();
+void xdr_conf_init(const char *config_file);
 void as_xdr_info_init(void);
 void as_xdr_get_stats(char *name, cf_dyn_buf *db);
 void as_xdr_get_config(cf_dyn_buf *db);

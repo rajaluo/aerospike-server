@@ -45,8 +45,8 @@
  */
 #define MAX_BINARY_BUF_SZ (64 * 1024)
 
-#define SINK_OPEN_FLAGS O_WRONLY|O_CREAT|O_NONBLOCK|O_APPEND
-#define SINK_OPEN_MODE S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH
+#define SINK_OPEN_FLAGS (O_WRONLY | O_CREAT | O_NONBLOCK | O_APPEND)
+#define SINK_OPEN_MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
 /* cf_fault_context_strings, cf_fault_severity_strings, cf_fault_scope_strings
  * Strings describing fault states */

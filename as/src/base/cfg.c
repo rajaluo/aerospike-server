@@ -71,21 +71,11 @@ const char IPV4_LOCALHOST_ADDR[] = "127.0.0.1";
 
 
 //==========================================================
-// Constants.
-//
-
-const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
-
-
-//==========================================================
 // Globals.
 //
 
 // The runtime configuration instance.
 as_config g_config;
-
-// The configuration file name.
-const char *g_config_file = DEFAULT_CONFIG_FILE;
 
 
 //==========================================================
@@ -1736,7 +1726,7 @@ const char CFG_WHITESPACE[] = " \t\n\r\f\v";
 //
 
 as_config*
-as_config_init()
+as_config_init(const char *config_file)
 {
 	as_config* c = &g_config; // shortcut pointer
 
@@ -1764,8 +1754,8 @@ as_config_init()
 	bool transaction_queues_set = false;
 
 	// Open the configuration file for reading.
-	if (NULL == (FD = fopen(g_config_file, "r"))) {
-		cf_crash_nostack(AS_CFG, "couldn't open configuration file %s: %s", g_config_file, cf_strerror(errno));
+	if (NULL == (FD = fopen(config_file, "r"))) {
+		cf_crash_nostack(AS_CFG, "couldn't open configuration file %s: %s", config_file, cf_strerror(errno));
 	}
 
 	// Parse the configuration file, line by line.
@@ -3188,10 +3178,8 @@ as_config_init()
 //
 
 void
-as_config_post_process()
+as_config_post_process(as_config *c, const char *config_file)
 {
-	as_config *c = &g_config;
-
 	//--------------------------------------------
 	// Re-read the configuration file and print it to the logs, line by line.
 	// This will be the first thing to appear in the log file(s).
@@ -3199,8 +3187,8 @@ as_config_post_process()
 
 	FILE* FD;
 
-	if (NULL == (FD = fopen(g_config_file, "r"))) {
-		cf_crash_nostack(AS_CFG, "couldn't re-open configuration file %s: %s", g_config_file, cf_strerror(errno));
+	if (NULL == (FD = fopen(config_file, "r"))) {
+		cf_crash_nostack(AS_CFG, "couldn't re-open configuration file %s: %s", config_file, cf_strerror(errno));
 	}
 
 	char iobuf[256];

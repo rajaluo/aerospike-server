@@ -133,9 +133,6 @@ typedef struct write_request_s {
 	msg                * dup_msg[AS_CLUSTER_SZ];
 	int                  dup_result_code[AS_CLUSTER_SZ];
 
-	// XDR data to respond back to xdr on reading data.
-	void *from_xdr;
-
 	// Batch common data.
 	struct as_batch_shared* batch_shared;
 	uint32_t batch_index;
