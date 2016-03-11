@@ -869,23 +869,23 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						"internal_rw_start: XDR is enabled but XDR digest pipe is not open.");
 				rv = -1;
 			} else {
-				// see if we have scripts to execute
-				udf_call *call = NULL;
-				int uret = -1;
+				udf_call call;
+				int uret = 1;
+
 				if (tr->udata.req_udata) {
-					call = cf_malloc(sizeof(udf_call));
-					uret = udf_rw_call_init_internal(call, tr);
+					uret = udf_rw_call_init_internal(&call, tr);
 				} else if (as_transaction_is_udf(tr)) {
 					// TODO - move is_udf check inside call_init.
-					call = cf_malloc(sizeof(udf_call));
-					uret = udf_rw_call_init_from_msg(call, &tr->msgp->msg);
-					call->tr = tr;
+					uret = udf_rw_call_init_from_msg(&call, &tr->msgp->msg);
+					call.tr = tr;
 				}
 
 				if (uret == 0) {
 					wr->has_udf = true;
 
-					rv = udf_rw_local(call, wr, &op);
+					rv = udf_rw_local(&call, wr, &op);
+
+					udf_rw_call_destroy(&call);
 
 					if (UDF_OP_IS_DELETE(op)) {
 						tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
@@ -898,9 +898,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						// update stats to move from normal to uDF requests
 						as_rw_update_stat(wr);
 						// return early if the record was not updated
-						udf_rw_call_destroy(call);
-						cf_free(call);
-						call = NULL;
 						if (udf_rw_needcomplete(tr)) {
 							udf_rw_complete(tr, tr->result_code, __FILE__,
 									__LINE__);
@@ -915,9 +912,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 							cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
 						}
 					}
-				} else if (call) {
+				} else if (uret < 0) {
 					cf_warning(AS_RW, "transaction failed udf_call init");
-					cf_free(call);
 					tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 					rv = -1;
 				} else {
@@ -2016,6 +2012,8 @@ write_complete(write_request *wr, as_transaction *tr)
 {
 	if (wr->response_db.buf) {
 		ops_complete(tr, &wr->response_db);
+		// Note - UDF with response gets here, but not trying to make request
+		// callback for now, since callback is mutually exclusive with response.
 
 		MICROBENCHMARK_HIST_INSERT_P(wt_net_hist);
 
@@ -5459,7 +5457,7 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 			write_request_init_tr(&tr, wr);
 			udf_rw_complete(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT, __FILE__, __LINE__);
 			if (tr.proto_fd_h) {
-				as_end_of_transaction_ok(tr.proto_fd_h);
+				as_end_of_transaction_force_close(tr.proto_fd_h);
 				tr.proto_fd_h = 0;
 			}
 		} else {

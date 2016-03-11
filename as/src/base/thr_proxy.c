@@ -928,7 +928,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 					write_request_init_tr(&tr, pr->wr);
 					udf_rw_complete(&tr, 0, __FILE__, __LINE__);
 					if (tr.proto_fd_h) {
-						as_end_of_transaction_ok(tr.proto_fd_h);
+						as_end_of_transaction_force_close(tr.proto_fd_h);
 						tr.proto_fd_h = NULL;
 					}
 				}
