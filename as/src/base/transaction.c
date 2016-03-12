@@ -95,7 +95,7 @@ as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 	tr->proxy_node                = 0;
 	tr->proxy_msg                 = 0;
 
-	UREQ_DATA_INIT(&tr->udata);
+	tr->udata                     = 0;
 
 	tr->batch_shared              = 0;
 	tr->batch_index               = 0;
@@ -286,7 +286,8 @@ as_transaction_create_internal(as_transaction *tr, tr_create_data *  trc_data)
 	tr->result_code  = AS_PROTO_RESULT_OK;
 
 	AS_PARTITION_RESERVATION_INIT(tr->rsv);
-	UREQ_DATA_INIT(&tr->udata);
+
+	tr->udata = NULL;
 
 	uint32_t n_fields = 2; // namespace and digest always added
 
@@ -371,9 +372,9 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 		tr->proxy_msg = NULL;
 	}
-	else if (tr->udata.req_cb) {
-		tr->udata.req_cb(tr, error_code);
-		tr->udata.req_cb = NULL;
+	else if (tr->udata) {
+		tr->udata->req_cb(tr, error_code);
+		tr->udata = NULL;
 	}
 }
 

@@ -253,6 +253,7 @@ struct as_query_transaction_s {
 	struct ai_obj            bkey;
 	udf_call                 call;     // Record UDF Details
 	as_aggr_call             agg_call; // Stream UDF Details
+	ureq_data                req_data;
 	as_sindex_qctx           qctx;     // Secondary Index details
 	as_partition_reservation * rsv;
 };
@@ -1818,7 +1819,7 @@ const as_aggr_hooks query_aggr_hooks = {
 int
 query_udf_bg_tr_complete(as_transaction *tr, int retcode)
 {
-	as_query_transaction *qtr = (as_query_transaction *)tr->udata.req_udata;
+	as_query_transaction *qtr = (as_query_transaction *)tr->udata->req_udata;
 	if (!qtr) {
 		cf_warning(AS_QUERY, "Complete called with invalid job id");
 		return AS_QUERY_ERR;
@@ -1853,9 +1854,7 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 		return AS_QUERY_OK;
 	}
 
-	tr.udata.req_cb     = query_udf_bg_tr_complete;
-	tr.udata.req_udata  = qtr;
-	tr.udata.req_type   = UDF_QUERY_REQUEST;
+	tr.udata = &qtr->req_data;
 
 	qtr_reserve(qtr, __FILE__, __LINE__);
 	cf_atomic32_incr(&qtr->n_udf_tr_queued);
@@ -2615,7 +2614,7 @@ query_th(void* q_to_wait_on)
 query_type
 query_get_type(as_transaction* tr)
 {
-	if (! as_transaction_is_udf(tr) && ! tr->udata.req_udata) {
+	if (! as_transaction_is_udf(tr)) {
 		return QUERY_TYPE_LOOKUP;
 	}
 
@@ -2626,13 +2625,11 @@ query_get_type(as_transaction* tr)
 		return QUERY_TYPE_AGGR;
 	}
 
-	if (tr->udata.req_udata || (udf_op_f &&
-			*udf_op_f->data == (uint8_t)AS_UDF_OP_BACKGROUND)) {
+	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_UDF_OP_BACKGROUND) {
 		return QUERY_TYPE_UDF_BG;
 	}
 /*
-	if (tr->udata.req_udata || (udf_op_f &&
-			*udf_op_f->data == (uint8_t)AS_UDF_OP_FOREGROUND)) {
+	if (udf_op_f && *udf_op_f->data == (uint8_t)AS_UDF_OP_FOREGROUND) {
 		return QUERY_TYPE_UDF_FG;
 	}
 */
@@ -2835,6 +2832,12 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	}
 
 	query_setup_fd(qtr, tr);
+
+	if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+		qtr->req_data.req_cb     = query_udf_bg_tr_complete;
+		qtr->req_data.req_udata  = qtr;
+		qtr->req_data.req_type   = UDF_QUERY_REQUEST;
+	}
 
 	// Consume everything from tr rest will be picked up in init
 	qtr->trid                = as_transaction_trid(tr);

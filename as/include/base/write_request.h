@@ -113,7 +113,7 @@ typedef struct write_request_s {
 
 	cf_digest            keyd;
 	// udf request data
-	ureq_data            udata;
+	ureq_data          * udata;
 	bool                 shipped_op;
 	bool                 shipped_op_initiator;
 	bool                 has_udf;

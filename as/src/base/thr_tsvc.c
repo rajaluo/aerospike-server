@@ -296,7 +296,7 @@ process_transaction(as_transaction *tr)
 		// transaction, so don't free msgp here as other internal udf
 		// transactions might end up using it later. Free when the scan job
 		// is complete.
-		if (tr->udata.req_udata) {
+		if (tr->udata) {
 			free_msgp = false;
 		}
 		else if (tr->proto_fd_h && ! as_security_check_data_op(tr, ns, PERM_WRITE)) {
@@ -432,10 +432,10 @@ process_transaction(as_transaction *tr)
 
 			as_proxy_return_to_sender(tr, redirect_node);
 		}
-		else if (tr->udata.req_cb) {
+		else if (tr->udata) {
 			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
-			tr->udata.req_cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-			tr->udata.req_cb = NULL;
+			tr->udata->req_cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			tr->udata = NULL;
 		}
 	} // end else "other" transaction
 

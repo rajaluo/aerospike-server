@@ -1160,6 +1160,7 @@ typedef struct udf_bg_scan_job_s {
 	// Derived class data:
 	cl_msg*			msgp;
 	udf_call		call;
+	ureq_data		req_data;
 	cf_atomic32		n_active_tr;
 
 	cf_atomic64		n_successful_tr;
@@ -1230,6 +1231,10 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		as_job_destroy(_job);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
+
+	job->req_data.req_cb = udf_bg_scan_tr_complete;
+	job->req_data.req_udata = (void*)job;
+	job->req_data.req_type = UDF_SCAN_REQUEST;
 
 	cf_info(AS_SCAN, "starting udf-bg scan job %lu {%s:%s} priority %u",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
@@ -1376,9 +1381,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return;
 	}
 
-	tr.udata.req_cb		= udf_bg_scan_tr_complete;
-	tr.udata.req_udata	= (void*)job;
-	tr.udata.req_type	= UDF_SCAN_REQUEST;
+	tr.udata = &job->req_data;
 
 	cf_atomic64_incr(&_job->n_records_read);
 	cf_atomic32_incr(&job->n_active_tr);
@@ -1389,7 +1392,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 int
 udf_bg_scan_tr_complete(as_transaction *tr, int retcode)
 {
-	udf_bg_scan_job* job = (udf_bg_scan_job*)tr->udata.req_udata;
+	udf_bg_scan_job* job = (udf_bg_scan_job*)tr->udata->req_udata;
 
 	cf_atomic32_decr(&job->n_active_tr);
 	cf_atomic64_incr(retcode == 0 ? &job->n_successful_tr : &job->n_failed_tr);
