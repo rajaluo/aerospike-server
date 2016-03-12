@@ -205,7 +205,7 @@ write_request_create(void) {
 	wr->shipped_op_initiator = false;
 
 	wr->dest_sz = 0;
-	UREQ_DATA_INIT(&wr->udata);
+	wr->udata = NULL;
 	memset((void *) & (wr->dup_msg[0]), 0, sizeof(wr->dup_msg));
 
 	wr->batch_shared = 0;
@@ -241,8 +241,8 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 
 	if (wr->shipped_op)
 		tr->flag |= AS_TRANSACTION_FLAG_SHIPPED_OP;
-	UREQ_DATA_COPY(&tr->udata, &wr->udata);
-	UREQ_DATA_RESET(&wr->udata);
+	tr->udata = wr->udata;
+	wr->udata = NULL;
 	tr->microbenchmark_time = wr->microbenchmark_time;
 	tr->batch_shared = wr->batch_shared;
 	tr->batch_index = wr->batch_index;
@@ -267,11 +267,11 @@ void write_request_destructor(void *object) {
 	wr_track_destroy(wr);
 #endif
 
-	if (wr->udata.req_cb) {
+	if (wr->udata) {
 		as_transaction tr;
 		write_request_init_tr(&tr, wr);
 		cf_warning(AS_RW, "UDF request not complete ... Completing it nonetheless !!!");
-		wr->udata.req_cb(&tr, 0);
+		wr->udata->req_cb(&tr, 0);
 	}
 
 	if (wr->dest_msg)
@@ -871,7 +871,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 				udf_call call;
 				int uret = 1;
 
-				if (tr->udata.req_udata) {
+				if (tr->udata) {
 					uret = udf_rw_call_init_internal(&call, tr);
 				} else if (as_transaction_is_udf(tr)) {
 					// TODO - move is_udf check inside call_init.
@@ -897,9 +897,9 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						// update stats to move from normal to uDF requests
 						as_rw_update_stat(wr);
 						// return early if the record was not updated
-						if (tr->udata.req_cb) {
-							tr->udata.req_cb(tr, tr->result_code);
-							tr->udata.req_cb = NULL;
+						if (tr->udata) {
+							tr->udata->req_cb(tr, tr->result_code);
+							tr->udata = NULL;
 						}
 						rw_cleanup(wr, tr, first_time, false, __LINE__);
 						as_rw_set_stat_counters(true, rv, tr);
@@ -1071,7 +1071,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		rw_complete(wr, tr, NULL);
 		tr->proto_fd_h = NULL;
 		tr->proxy_msg = NULL;
-		UREQ_DATA_RESET(&wr->udata);
+		wr->udata = NULL; // ???
 
 		// if fire and forget, we're done, get out
 		if (wr->replication_fire_and_forget) {
@@ -1098,7 +1098,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	wr->generation = tr->generation;
 	wr->void_time = tr->void_time;
 
-	UREQ_DATA_COPY(&wr->udata, &tr->udata);
+	wr->udata = tr->udata;
+	tr->udata = NULL;
 
 	if (first_time == true) {
 		as_partition_reservation_move(&wr->rsv, &tr->rsv);
@@ -1301,7 +1302,8 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			tr->msgp = 0;
 			e->tr.msg_fields = tr->msg_fields;
 			e->tr.flag = 0;
-			UREQ_DATA_COPY(&e->tr.udata, &tr->udata);
+			e->tr.udata = tr->udata;
+			tr->udata = NULL;
 			e->tr.batch_shared = tr->batch_shared;
 			e->tr.batch_index = tr->batch_index;
 
@@ -2017,9 +2019,9 @@ write_complete(write_request *wr, as_transaction *tr)
 		return;
 	}
 
-	if (tr->udata.req_cb) {
-		tr->udata.req_cb(tr, tr->result_code);
-		tr->udata.req_cb = NULL;
+	if (tr->udata) {
+		tr->udata->req_cb(tr, tr->result_code);
+		tr->udata = NULL;
 	}
 	else if (tr->proto_fd_h) {
 		if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
@@ -5445,7 +5447,7 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 		}
 
 		pthread_mutex_lock(&wr->lock);
-		if (wr->udata.req_cb) {
+		if (wr->udata) {
 			// TODO - this is temporary defensive code!
 			if (wr->batch_shared) {
 				cf_warning(AS_RW, "rw_retransmit_reduce_fn(): request callback exists for batch.");
@@ -5453,8 +5455,8 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
-			wr->udata.req_cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-			wr->udata.req_cb = NULL;
+			wr->udata->req_cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
+			wr->udata = NULL;
 
 			if (tr.proto_fd_h) {
 				as_end_of_transaction_force_close(tr.proto_fd_h);

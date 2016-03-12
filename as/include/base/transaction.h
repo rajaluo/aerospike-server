@@ -155,18 +155,6 @@ typedef struct udf_request_data {
 	udf_request_type	req_type;
 } ureq_data;
 
-#define UREQ_DATA_INIT(ureq)	\
-	(ureq)->req_cb    = NULL;	\
-	(ureq)->req_udata = NULL;	\
-	(ureq)->req_type  = UDF_UNDEF_REQUEST;
-
-#define UREQ_DATA_RESET UREQ_DATA_INIT
-
-#define UREQ_DATA_COPY(dest, src)			\
-	(dest)->req_cb    = (src)->req_cb;		\
-	(dest)->req_udata = (src)->req_udata;	\
-	(dest)->req_type  = (src)->req_type;
-
 #define AS_TRANSACTION_FLAG_NSUP_DELETE     0x0001
 #define AS_TRANSACTION_FLAG_BATCH_SUB       0x0002 // was INTERNAL
 #define AS_TRANSACTION_FLAG_SHIPPED_OP      0x0004
@@ -224,7 +212,7 @@ typedef struct as_transaction_s {
 
 	/* User data corresponding to the internally created transaction
 	   first user is Scan UDF */
-	ureq_data         udata;
+	ureq_data       * udata;
 
 	// Batch
 	struct as_batch_shared* batch_shared;

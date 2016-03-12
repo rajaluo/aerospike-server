@@ -287,10 +287,10 @@ int
 udf_rw_call_init_internal(udf_call * call, as_transaction * tr)
 {
 	udf_call *ucall = NULL;
-	if (tr->udata.req_type == UDF_SCAN_REQUEST) {
-		ucall = as_scan_get_udf_call(tr->udata.req_udata);
-	} else if (tr->udata.req_type == UDF_QUERY_REQUEST) {
-		ucall = as_query_get_udf_call(tr->udata.req_udata);
+	if (tr->udata->req_type == UDF_SCAN_REQUEST) {
+		ucall = as_scan_get_udf_call(tr->udata->req_udata);
+	} else if (tr->udata->req_type == UDF_QUERY_REQUEST) {
+		ucall = as_query_get_udf_call(tr->udata->req_udata);
 	}
 
 	if (ucall) {
@@ -299,9 +299,9 @@ udf_rw_call_init_internal(udf_call * call, as_transaction * tr)
 		call->tr          = tr;
 		call->def.arglist = ucall->def.arglist;
 		call->def.type    = ucall->def.type;
-		if (tr->udata.req_type == UDF_SCAN_REQUEST) {
+		if (tr->udata->req_type == UDF_SCAN_REQUEST) {
 			cf_atomic_int_incr(&g_config.udf_scan_rec_reqs);
-		} else if (tr->udata.req_type == UDF_QUERY_REQUEST) {
+		} else if (tr->udata->req_type == UDF_QUERY_REQUEST) {
 			cf_atomic_int_incr(&g_config.udf_query_rec_reqs);
 		}
 		return 0;
