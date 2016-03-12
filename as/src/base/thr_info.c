@@ -2426,6 +2426,9 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";write-commit-level-override=");
 	cf_dyn_buf_append_string(db, NS_WRITE_COMMIT_LEVEL_NAME());
 
+	cf_dyn_buf_append_string(db, ";migrate-order=");
+	cf_dyn_buf_append_uint32(db, ns->migrate_order);
+
 	cf_dyn_buf_append_string(db, ";migrate-sleep=");
 	cf_dyn_buf_append_uint32(db, ns->migrate_sleep);
 
@@ -3514,6 +3517,13 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of max-ttl memory of ns %s from %"PRIu64" to %"PRIu64" ", ns->name, ns->max_ttl, val);
 			ns->max_ttl = val;
+		}
+		else if (0 == as_info_parameter_get(params, "migrate-order", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < 1 || val > 10) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of migrate-order of ns %s from %u to %d", ns->name, ns->migrate_order, val);
+			ns->migrate_order = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-sleep", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
