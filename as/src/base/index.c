@@ -734,16 +734,16 @@ as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h,
 
 	as_index *r = RESOLVE_H(r_h);
 
+	if (r->left_h != sentinel_h) {
+		as_index_reduce_traverse(tree, r->left_h, sentinel_h, v_a);
+	}
+
 	as_index_reserve(r);
 	cf_atomic_int_incr(&g_config.global_record_ref_count);
 
 	v_a->indexes[v_a->pos].r = r;
 	v_a->indexes[v_a->pos].r_h = r_h;
 	v_a->pos++;
-
-	if (r->left_h != sentinel_h) {
-		as_index_reduce_traverse(tree, r->left_h, sentinel_h, v_a);
-	}
 
 	if (r->right_h != sentinel_h) {
 		as_index_reduce_traverse(tree, r->right_h, sentinel_h, v_a);
