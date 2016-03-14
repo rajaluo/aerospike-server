@@ -359,7 +359,7 @@ thr_demarshal(void *arg)
 					// ignore the accept error and move on.
 					if ((errno == EMFILE) || (errno == ENFILE)) {
 						if (last_fd_print != (cf_getms() / 1000L)) {
-							cf_info(AS_DEMARSHAL, " warning: hit OS file descript limit (EMFILE on accept), consider raising limit");
+							cf_warning(AS_DEMARSHAL, "Hit OS file descriptor limit (EMFILE on accept). Consider raising limit for uid %d", g_config.uid);
 							last_fd_print = cf_getms() / 1000L;
 						}
 						continue;
