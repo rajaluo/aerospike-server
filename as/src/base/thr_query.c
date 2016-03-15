@@ -120,8 +120,8 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/udf_memtracker.h"
-#include "base/udf_rw.h"
 #include "base/udf_record.h"
+#include "base/udf_rw.h"
 #include "fabric/fabric.h"
 #include "geospatial/geospatial.h"
 
@@ -251,9 +251,8 @@ struct as_query_transaction_s {
 	* NB: Read Only or Single threaded
 	*/
 	struct ai_obj            bkey;
-	udf_call                 call;     // Record UDF Details
 	as_aggr_call             agg_call; // Stream UDF Details
-	ureq_data                req_data;
+	iudf_origin              origin;   // Record UDF Details
 	as_sindex_qctx           qctx;     // Secondary Index details
 	as_partition_reservation * rsv;
 };
@@ -267,7 +266,7 @@ struct as_query_transaction_s {
 // **************************************************************************************************
 typedef enum {
 	QUERY_WORK_TYPE_NONE   = -1, // Request for I/O
-	QUERY_WORK_TYPE_LOOKUP     =  0, // Request for I/O
+	QUERY_WORK_TYPE_LOOKUP =  0, // Request for I/O
 	QUERY_WORK_TYPE_AGG    =  1, // Request for Aggregation
 	QUERY_WORK_TYPE_UDF_BG =  2, // Request for running UDF on query result
 } query_work_type;
@@ -1819,7 +1818,7 @@ const as_aggr_hooks query_aggr_hooks = {
 int
 query_udf_bg_tr_complete(as_transaction *tr, int retcode)
 {
-	as_query_transaction *qtr = (as_query_transaction *)tr->udata->req_udata;
+	as_query_transaction *qtr = (as_query_transaction *)tr->iudf_orig->udata;
 	if (!qtr) {
 		cf_warning(AS_QUERY, "Complete called with invalid job id");
 		return AS_QUERY_ERR;
@@ -1837,24 +1836,14 @@ query_udf_bg_tr_complete(as_transaction *tr, int retcode)
 int
 query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 {
-	tr_create_data d;
-
-	d.digest   = *keyd;
-	d.ns       = qtr->ns;
-	d.set[0]   = 0;   // What set ??
-	d.call     = &qtr->call;
-	d.msg_type = AS_MSG_INFO2_WRITE;
-	d.fd_h     = NULL;
-	d.trid     = 0;
-
 	as_transaction tr;
 
-	if (as_transaction_create_internal(&tr, &d)) {
+	if (as_transaction_init_iudf(&tr, qtr->ns, keyd)) {
 		qtr_set_err(qtr, AS_PROTO_RESULT_FAIL_QUERY_CBERROR, __FILE__, __LINE__);
 		return AS_QUERY_OK;
 	}
 
-	tr.udata = &qtr->req_data;
+	tr.iudf_orig = &qtr->origin;
 
 	qtr_reserve(qtr, __FILE__, __LINE__);
 	cf_atomic32_incr(&qtr->n_udf_tr_queued);
@@ -2640,24 +2629,14 @@ query_get_type(as_transaction* tr)
  * Function aggr_query_init
  */
 int
-aggr_query_init(as_aggr_call * call, as_msg *msg, as_query_transaction *qtr)
+aggr_query_init(as_aggr_call * call, as_transaction *tr)
 {
-	if (udf_rw_call_init_from_msg((udf_call *)call, msg))
+	if (! udf_def_init_from_msg(&call->def, tr)) {
 		return AS_QUERY_ERR;
+	}
 
 	call->aggr_hooks    = &query_aggr_hooks;
 	return AS_QUERY_OK;
-}
-
-
-int
-udf_query_init(udf_call *call, as_transaction *tr)
-{
-	if (udf_rw_call_init_from_msg(call, &tr->msgp->msg)) {
-		return -1;
-	}
-	call->tr = tr;
-	return 0;
 }
 
 static int
@@ -2668,14 +2647,14 @@ query_setup_udf_call(as_query_transaction *qtr, as_transaction *tr)
 			cf_atomic64_incr(&g_config.n_lookup);
 			break;
 		case QUERY_TYPE_AGGR:
-			if (aggr_query_init(&qtr->agg_call, &tr->msgp->msg, qtr) != AS_QUERY_OK) {
+			if (aggr_query_init(&qtr->agg_call, tr) != AS_QUERY_OK) {
 				tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
 				return AS_QUERY_ERR;
 			}
 			cf_atomic64_incr(&g_config.n_aggregation);
 			break;
 		case QUERY_TYPE_UDF_BG:
-			if (udf_query_init(&qtr->call, tr) != AS_QUERY_OK) {
+			if (! udf_def_init_from_msg(&qtr->origin.def, tr)) {
 				tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
 				return AS_QUERY_ERR;
 			}
@@ -2834,9 +2813,9 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	query_setup_fd(qtr, tr);
 
 	if (qtr->job_type == QUERY_TYPE_UDF_BG) {
-		qtr->req_data.req_cb     = query_udf_bg_tr_complete;
-		qtr->req_data.req_udata  = qtr;
-		qtr->req_data.req_type   = UDF_QUERY_REQUEST;
+		qtr->origin.type   = UDF_QUERY_REQUEST;
+		qtr->origin.cb     = query_udf_bg_tr_complete;
+		qtr->origin.udata  = (void *)qtr;
 	}
 
 	// Consume everything from tr rest will be picked up in init
@@ -3209,13 +3188,6 @@ as_query_get_jobstat_all(int * size)
 	rchash_reduce(g_query_job_hash, as_mon_query_jobstat_reduce_fn, &job_pool);
 	*size              = job_pool.index;
 	return job_stats;
-}
-
-udf_call *
-as_query_get_udf_call(void *ptr)
-{
-	as_query_transaction *qtr = (as_query_transaction *)ptr;
-	return &qtr->call;
 }
 
 void
