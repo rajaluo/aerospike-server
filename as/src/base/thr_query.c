@@ -1951,7 +1951,8 @@ query_process_ioreq(query_work *qio)
 				goto Cleanup;
 			}
 
-			if (cf_atomic64_get(qtr->n_result_records) % qtr->priority == 0)
+			int64_t nresults = cf_atomic64_get(qtr->n_result_records);
+			if (nresults > 0 && (nresults % qtr->priority == 0))
 			{
 				usleep(g_config.query_sleep_us);
 				query_check_timeout(qtr);
