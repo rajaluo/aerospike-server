@@ -452,7 +452,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 
 			// Note: currently it should be impossible to have a callback here,
 			// since internal UDFs don't proxy.
-			if (wr->udata) {
+			if (wr->iudf_orig) {
 				// TODO - this is temporary defensive code!
 				if (pr->batch_shared) {
 					cf_warning(AS_PROXY, "as_proxy_shipop_response_hdlr(): request callback exists for batch.");
@@ -460,8 +460,8 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
-				wr->udata->req_cb(&tr, 0);
-				wr->udata = NULL;
+				wr->iudf_orig->cb(&tr, 0);
+				wr->iudf_orig = NULL;
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -915,7 +915,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 				pthread_mutex_lock(&pr->wr->lock);
 				// Note: currently it should be impossible to have a callback here,
 				// since internal UDFs don't proxy.
-				if (pr->wr->udata) {
+				if (pr->wr->iudf_orig) {
 					// TODO - this is temporary defensive code!
 					if (pr->batch_shared) {
 						cf_warning(AS_PROXY, "proxy_retransmit_reduce_fn(): request callback exists for batch.");
@@ -923,8 +923,8 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 
 					as_transaction tr;
 					write_request_init_tr(&tr, pr->wr);
-					pr->wr->udata->req_cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-					pr->wr->udata = NULL;
+					pr->wr->iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
+					pr->wr->iudf_orig = NULL;
 
 					if (tr.proto_fd_h) {
 						as_end_of_transaction_force_close(tr.proto_fd_h);

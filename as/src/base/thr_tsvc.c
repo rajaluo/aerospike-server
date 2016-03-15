@@ -49,6 +49,7 @@
 #include "base/thr_proxy.h"
 #include "base/thr_write.h"
 #include "base/transaction.h"
+#include "base/udf_rw.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
 
@@ -296,7 +297,7 @@ process_transaction(as_transaction *tr)
 		// transaction, so don't free msgp here as other internal udf
 		// transactions might end up using it later. Free when the scan job
 		// is complete.
-		if (tr->udata) {
+		if (tr->iudf_orig) {
 			free_msgp = false;
 		}
 		else if (tr->proto_fd_h && ! as_security_check_data_op(tr, ns, PERM_WRITE)) {
@@ -432,10 +433,10 @@ process_transaction(as_transaction *tr)
 
 			as_proxy_return_to_sender(tr, redirect_node);
 		}
-		else if (tr->udata) {
+		else if (tr->iudf_orig) {
 			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
-			tr->udata->req_cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-			tr->udata = NULL;
+			tr->iudf_orig->cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			tr->iudf_orig = NULL;
 		}
 	} // end else "other" transaction
 

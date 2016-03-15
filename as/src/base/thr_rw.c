@@ -205,7 +205,7 @@ write_request_create(void) {
 	wr->shipped_op_initiator = false;
 
 	wr->dest_sz = 0;
-	wr->udata = NULL;
+	wr->iudf_orig = NULL;
 	memset((void *) & (wr->dup_msg[0]), 0, sizeof(wr->dup_msg));
 
 	wr->batch_shared = 0;
@@ -241,8 +241,8 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 
 	if (wr->shipped_op)
 		tr->flag |= AS_TRANSACTION_FLAG_SHIPPED_OP;
-	tr->udata = wr->udata;
-	wr->udata = NULL;
+	tr->iudf_orig = wr->iudf_orig;
+	wr->iudf_orig = NULL;
 	tr->microbenchmark_time = wr->microbenchmark_time;
 	tr->batch_shared = wr->batch_shared;
 	tr->batch_index = wr->batch_index;
@@ -267,11 +267,11 @@ void write_request_destructor(void *object) {
 	wr_track_destroy(wr);
 #endif
 
-	if (wr->udata) {
+	if (wr->iudf_orig) {
 		as_transaction tr;
 		write_request_init_tr(&tr, wr);
 		cf_warning(AS_RW, "UDF request not complete ... Completing it nonetheless !!!");
-		wr->udata->req_cb(&tr, 0);
+		wr->iudf_orig->cb(&tr, 0);
 	}
 
 	if (wr->dest_msg)
@@ -868,54 +868,53 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						"internal_rw_start: XDR is enabled but XDR digest pipe is not open.");
 				rv = -1;
 			} else {
-				udf_call call;
-				int uret = 1;
-
-				if (tr->udata) {
-					uret = udf_rw_call_init_internal(&call, tr);
-				} else if (as_transaction_is_udf(tr)) {
-					// TODO - move is_udf check inside call_init.
-					uret = udf_rw_call_init_from_msg(&call, &tr->msgp->msg);
-					call.tr = tr;
-				}
-
-				if (uret == 0) {
+				if (tr->iudf_orig || as_transaction_is_udf(tr)) {
+					// <><><><><><><><><><>   Apply a UDF   <><><><><><><><><><>
 					wr->has_udf = true;
 
-					rv = udf_rw_local(&call, wr, &op);
+					udf_def def;
+					udf_call stack_call = { &def, tr };
+					udf_call *call = tr->iudf_orig ?
+							udf_rw_call_def_init_internal(&stack_call, tr) :
+							udf_rw_call_def_init_from_msg(&stack_call, tr);
 
-					udf_rw_call_destroy(&call);
+					if (call) {
+						rv = udf_rw_local(call, wr, &op);
 
-					if (UDF_OP_IS_DELETE(op)) {
-						tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
-						is_delete = true;
-						// Counteract earlier increments -- don't count UDF
-						// deletes as writes.
-						cf_atomic_int_decr(&g_config.write_master);
-						cf_atomic_int_decr(&g_config.stat_write_reqs);
-					} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
-						// update stats to move from normal to uDF requests
-						as_rw_update_stat(wr);
-						// return early if the record was not updated
-						if (tr->udata) {
-							tr->udata->req_cb(tr, tr->result_code);
-							tr->udata = NULL;
+						udf_rw_call_destroy(call);
+
+						if (UDF_OP_IS_DELETE(op)) {
+							tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
+							is_delete = true;
+							// Counteract earlier increments -- don't count UDF
+							// deletes as writes.
+							cf_atomic_int_decr(&g_config.write_master);
+							cf_atomic_int_decr(&g_config.stat_write_reqs);
+						} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
+							// update stats to move from normal to uDF requests
+							as_rw_update_stat(wr);
+							// return early if the record was not updated
+							if (tr->iudf_orig) {
+								tr->iudf_orig->cb(tr, tr->result_code);
+								tr->iudf_orig = NULL;
+							}
+							rw_cleanup(wr, tr, first_time, false, __LINE__);
+							as_rw_set_stat_counters(true, rv, tr);
+							*delete = true;
+							return 0;
+						} else {
+							// Temporary debugging clause...
+							if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->pickled_buf && ! UDF_OP_IS_LDT(op)) {
+								cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
+							}
 						}
-						rw_cleanup(wr, tr, first_time, false, __LINE__);
-						as_rw_set_stat_counters(true, rv, tr);
-						*delete = true;
-						return 0;
 					} else {
-						// Temporary debugging clause...
-						if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->pickled_buf && ! UDF_OP_IS_LDT(op)) {
-							cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
-						}
+						cf_warning(AS_RW, "transaction failed udf_call init");
+						tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+						rv = -1;
 					}
-				} else if (uret < 0) {
-					cf_warning(AS_RW, "transaction failed udf_call init");
-					tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-					rv = -1;
 				} else {
+					// <><><><><><><><><><>   Write Local   <><><><><><><><><><>
 					wr->has_udf = false;
 
 					rv = write_local(tr, &wr->pickled_buf, &wr->pickled_sz,
@@ -927,6 +926,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						cf_warning(AS_RW, "write_local() completed with no pickled buffer");
 					}
 				}
+
 				if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
 					cf_detail(AS_RW,
 							"[Digest %"PRIx64" Shipped OP] Finished Transaction ret = %d",
@@ -1071,7 +1071,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		rw_complete(wr, tr, NULL);
 		tr->proto_fd_h = NULL;
 		tr->proxy_msg = NULL;
-		wr->udata = NULL; // ???
+		wr->iudf_orig = NULL; // ???
 
 		// if fire and forget, we're done, get out
 		if (wr->replication_fire_and_forget) {
@@ -1098,8 +1098,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	wr->generation = tr->generation;
 	wr->void_time = tr->void_time;
 
-	wr->udata = tr->udata;
-	tr->udata = NULL;
+	wr->iudf_orig = tr->iudf_orig;
+	tr->iudf_orig = NULL;
 
 	if (first_time == true) {
 		as_partition_reservation_move(&wr->rsv, &tr->rsv);
@@ -1302,8 +1302,8 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			tr->msgp = 0;
 			e->tr.msg_fields = tr->msg_fields;
 			e->tr.flag = 0;
-			e->tr.udata = tr->udata;
-			tr->udata = NULL;
+			e->tr.iudf_orig = tr->iudf_orig;
+			tr->iudf_orig = NULL;
 			e->tr.batch_shared = tr->batch_shared;
 			e->tr.batch_index = tr->batch_index;
 
@@ -2019,9 +2019,9 @@ write_complete(write_request *wr, as_transaction *tr)
 		return;
 	}
 
-	if (tr->udata) {
-		tr->udata->req_cb(tr, tr->result_code);
-		tr->udata = NULL;
+	if (tr->iudf_orig) {
+		tr->iudf_orig->cb(tr, tr->result_code);
+		tr->iudf_orig = NULL;
 	}
 	else if (tr->proto_fd_h) {
 		if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
@@ -5447,7 +5447,7 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 		}
 
 		pthread_mutex_lock(&wr->lock);
-		if (wr->udata) {
+		if (wr->iudf_orig) {
 			// TODO - this is temporary defensive code!
 			if (wr->batch_shared) {
 				cf_warning(AS_RW, "rw_retransmit_reduce_fn(): request callback exists for batch.");
@@ -5455,8 +5455,8 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
-			wr->udata->req_cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-			wr->udata = NULL;
+			wr->iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
+			wr->iudf_orig = NULL;
 
 			if (tr.proto_fd_h) {
 				as_end_of_transaction_force_close(tr.proto_fd_h);
