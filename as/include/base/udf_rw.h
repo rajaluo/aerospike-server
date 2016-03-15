@@ -48,7 +48,7 @@ typedef struct udf_def_s {
 } udf_def;
 
 typedef struct udf_call_s {
-	udf_def          def;
+	udf_def         *def;
 	as_transaction	*tr;
 } udf_call;
 
@@ -98,8 +98,8 @@ int      udf_rw_local(udf_call *call, write_request *wr, udf_optype *optype);
 
 // UDF_CALL related functions
 // **************************************************************************************************
-udf_call *udf_rw_call_init_internal(udf_call * call, as_transaction *tr);
-udf_call *udf_rw_call_init_from_msg(udf_call *call, as_transaction *tr);
+udf_call *udf_rw_call_def_init_internal(udf_call * call, as_transaction *tr);
+udf_call *udf_rw_call_def_init_from_msg(udf_call *call, as_transaction *tr);
 udf_def *udf_def_init_from_msg(udf_def *def, const as_transaction *tr);
 void udf_rw_call_destroy(udf_call *call);
 // **************************************************************************************************

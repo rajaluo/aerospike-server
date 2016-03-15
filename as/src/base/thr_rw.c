@@ -872,10 +872,11 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 					// <><><><><><><><><><>   Apply a UDF   <><><><><><><><><><>
 					wr->has_udf = true;
 
-					udf_call stack_call;
+					udf_def def;
+					udf_call stack_call = { &def, tr };
 					udf_call *call = tr->iudf_orig ?
-							udf_rw_call_init_internal(&stack_call, tr) :
-							udf_rw_call_init_from_msg(&stack_call, tr);
+							udf_rw_call_def_init_internal(&stack_call, tr) :
+							udf_rw_call_def_init_from_msg(&stack_call, tr);
 
 					if (call) {
 						rv = udf_rw_local(call, wr, &op);
