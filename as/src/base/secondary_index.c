@@ -2725,7 +2725,7 @@ as_sindex_binlist_from_msg(as_namespace *ns, as_msg *msgp, int * num_bins)
  * Returns -
  *		AS_SINDEX_OK        - On success.
  *		AS_SINDEX_ERR_PARAM - On failure.
- *		AS_SINDEX_ERR_OTHER - On failure.
+ *		AS_SINDEX_ERR_BIN_NOTFOUND - On failure.
  *
  * Description -
  *		Frames a sane as_sindex_range from msg.
@@ -2904,7 +2904,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				int numcenters;
 				if (!geo_point_centers(ns, srange->cellid, MAX_REGION_LEVELS,
 									   center, &numcenters)) {
-					cf_warning(AS_GEO, "failed to center query point");
+					cf_warning(AS_GEO, "Query point invalid");
 					goto Cleanup;
 				}
 
@@ -2930,7 +2930,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				int numcells;
 				if (!geo_region_cover(ns, srange->region, MAX_REGION_CELLS,
 									  NULL, cellmin, cellmax, &numcells)) {
-					cf_warning(AS_GEO, "failed to cover query region");
+					cf_warning(AS_GEO, "Query region invalid.");
 					goto Cleanup;
 				}
 
@@ -2961,7 +2961,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 	return AS_SINDEX_OK;
 
 Cleanup:
-	return AS_SINDEX_ERR;
+	return AS_SINDEX_ERR_PARAM;
 }
 
 /*
