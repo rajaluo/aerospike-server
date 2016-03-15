@@ -72,8 +72,6 @@
  */
 as_aerospike g_as_aerospike;
 
-extern udf_call *as_query_get_udf_call(void *ptr);
-
 
 // UDF Network Send Interface
 // **************************************************************************************************
@@ -243,7 +241,7 @@ process_success(udf_call *call, const as_val *val, cf_dyn_buf *db)
  * 					  value translation.
  */
 void
-process_result(as_result * res, udf_call * call, cf_dyn_buf *db )
+process_result(const as_result * res, udf_call * call, cf_dyn_buf *db )
 {
 	as_val * v = res->value;
 	if ( res->is_success ) {
@@ -277,81 +275,82 @@ process_result(as_result * res, udf_call * call, cf_dyn_buf *db )
 // **************************************************************************************************
 
 /**
- * Initialize UDF from tr->udata. It is for internal UDF transactions
- * 
- * Returns:
- * 		0 on if found 
- * 		-1 if not found
+ * Get UDF call object pointer from parent job via tr->udata.
  */
-int
+udf_call *
 udf_rw_call_init_internal(udf_call * call, as_transaction * tr)
 {
-	udf_call *ucall = NULL;
-	if (tr->udata->req_type == UDF_SCAN_REQUEST) {
-		ucall = as_scan_get_udf_call(tr->udata->req_udata);
-	} else if (tr->udata->req_type == UDF_QUERY_REQUEST) {
-		ucall = as_query_get_udf_call(tr->udata->req_udata);
+	udf_def *def = &tr->iudf_orig->def;
+
+	// TODO - could avoid copy by pointing back to parent transaction's def, if
+	// def was a pointer on udf_call instead of an embedded member.
+	strcpy(call->def.filename, def->filename);
+	strcpy(call->def.function, def->function);
+	call->def.arglist = def->arglist;
+	call->def.type = def->type;
+
+	call->tr = tr;
+
+	if (tr->iudf_orig->type == UDF_SCAN_REQUEST) {
+		cf_atomic_int_incr(&g_config.udf_scan_rec_reqs);
+	}
+	else if (tr->iudf_orig->type == UDF_QUERY_REQUEST) {
+		cf_atomic_int_incr(&g_config.udf_query_rec_reqs);
 	}
 
-	if (ucall) {
-		strncpy (call->def.filename, ucall->def.filename, sizeof(ucall->def.filename));
-		strncpy (call->def.function, ucall->def.function, sizeof(ucall->def.function));
-		call->tr          = tr;
-		call->def.arglist = ucall->def.arglist;
-		call->def.type    = ucall->def.type;
-		if (tr->udata->req_type == UDF_SCAN_REQUEST) {
-			cf_atomic_int_incr(&g_config.udf_scan_rec_reqs);
-		} else if (tr->udata->req_type == UDF_QUERY_REQUEST) {
-			cf_atomic_int_incr(&g_config.udf_query_rec_reqs);
-		}
-		return 0;
-	} 
-	return -1;
+	return call;
 }
 
 /**
- * Initialize udf_call data structure from the msg over the wire
- *
- * Returns:
- * 		0 on success
- * 		-1 on failure
+ * Initialize udf_call data structure from the transaction over the wire.
  */
-int
-udf_rw_call_init_from_msg(udf_call * call, as_msg *msg)
+udf_call *
+udf_rw_call_init_from_msg(udf_call * call, as_transaction * tr)
 {
-	call->def.type = AS_UDF_OP_KVS;
-	as_msg_field * filename = NULL;
-	as_msg_field * function = NULL;
-	as_msg_field * arglist = NULL;
-	as_msg_field * op = NULL;
-
-	filename = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FILENAME);
-	if ( filename ) {
-		function = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
-		if ( function ) {
-			arglist = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_ARGLIST);
-			if ( arglist ) {
-				as_msg_field_get_strncpy(filename, &call->def.filename[0], sizeof(call->def.filename));
-				as_msg_field_get_strncpy(function, &call->def.function[0], sizeof(call->def.function));
-				call->def.arglist = arglist;
-
-				// TODO - could use transaction field flag to speed this up.
-				op = as_msg_field_get(msg, AS_MSG_FIELD_TYPE_UDF_OP);
-				if ( op ) {
-					memcpy(&call->def.type, (byte *)op->data, sizeof(as_udf_op));
-				}
-
-				return 0;
-			}
-		}
+	if (! udf_def_init_from_msg(&call->def, tr)) {
+		return NULL;
 	}
 
-	call->tr = NULL;
-	call->def.filename[0] = 0;
-	call->def.function[0] = 0;
-	call->def.arglist = NULL;
+	call->tr = tr;
 
-	return -1;
+	return call;
+}
+
+/**
+ * Initialize udf_def data structure from the transaction over the wire.
+ */
+udf_def *
+udf_def_init_from_msg(udf_def * def, const as_transaction * tr)
+{
+	as_msg *m = &tr->msgp->msg;
+	as_msg_field *filename = as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_FILENAME);
+
+	if (! filename) {
+		return NULL;
+	}
+
+	as_msg_field *function = as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_FUNCTION);
+
+	if (! function) {
+		return NULL;
+	}
+
+	as_msg_field *arglist = as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_ARGLIST);
+
+	if (! arglist) {
+		return NULL;
+	}
+
+	as_msg_field_get_strncpy(filename, def->filename, sizeof(def->filename));
+	as_msg_field_get_strncpy(function, def->function, sizeof(def->function));
+	def->arglist = arglist;
+
+	as_msg_field *op = as_transaction_has_udf_op(tr) ?
+			as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_OP) : NULL;
+
+	def->type = op ? *op->data : AS_UDF_OP_KVS;
+
+	return def;
 }
 
 /*
@@ -781,12 +780,14 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 {
 	*op = UDF_OPTYPE_NONE;
 
-	// Step 1: Setup UDF Record and LDT record
 	as_transaction *tr = call->tr;
-	as_index_ref    r_ref;
+	as_namespace *ns = tr->rsv.ns;
+
+	// Step 1: Setup UDF Record and LDT record
+	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	as_storage_rd  rd;
+	as_storage_rd rd;
 
 	udf_record urecord;
 	udf_record_init(&urecord, true);
@@ -797,7 +798,8 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	urecord.tr                 = tr;
 	urecord.r_ref              = &r_ref;
 	urecord.rd                 = &rd;
-	as_rec          urec;
+
+	as_rec urec;
 	as_rec_init(&urec, &urecord, &udf_record_hooks);
 
 	// NB: rec needs to be in the heap. Once passed in to the lua scope if
@@ -817,11 +819,11 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	uint32_t set_id = INVALID_SET_ID;
 
 	// Step 2: Setup Storage Record
-	int rec_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, tr->rsv.ns);
+	int rec_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns);
 
 	if (rec_rv == 0 && as_record_is_expired(r_ref.r)) {
 		// If record is expired, pretend it was not found.
-		as_record_done(&r_ref, tr->rsv.ns);
+		as_record_done(&r_ref, ns);
 		rec_rv = -1;
 	}
 
@@ -875,12 +877,11 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 
 
 	// Step 3: Run UDF
-	as_result       *res = as_result_new();
+	as_result result;
+	as_result_init(&result);
+
 	as_val_reserve(lrec);
-	int ret_value        = udf_apply_record(call, lrec, res);
-	as_namespace *  ns   = tr->rsv.ns;
-	// Capture the success of the Lua call to use below
-	bool success = res->is_success;
+	int ret_value = udf_apply_record(call, lrec, &result);
 
 	if (ret_value == 0) {
 
@@ -893,14 +894,14 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 			cf_warning(AS_UDF, "Investigate rw_finish() result");
 		}
 
-		if (!success) {
-			ldt_update_err_stats(ns, res->value);
+		if (! result.is_success) {
+			ldt_update_err_stats(ns, result.value);
 		}
 
 		if (UDF_OP_IS_READ(*op) || *op == UDF_OPTYPE_NONE) {
-			process_result(res, call, NULL);
+			process_result(&result, call, NULL);
 		} else {
-			process_result(res, call, &wr->response_db);
+			process_result(&result, call, &wr->response_db);
 		}
 
 	} else {
@@ -911,9 +912,9 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		cf_free(rs);
 	}
 
-	as_result_destroy(res);
+	update_stats(ns, *op, ret_value, result.is_success, (lrecord.udf_context & UDF_CONTEXT_LDT));
 
-	update_stats(ns, *op, ret_value, success, (lrecord.udf_context & UDF_CONTEXT_LDT));
+	as_result_destroy(&result);
 
 Cleanup:
 	// free everything we created - the rec destroy with ldt_record hooks

@@ -52,6 +52,8 @@ typedef struct wreq_tr_element_s {
 	struct wreq_tr_element_s *next;
 } wreq_tr_element;
 
+struct iudf_origin_s;
+
 // We have to keep track of the first time that all the writes come back, and
 // it's a little harsh. There's an atomic for each outstanding sub-transaction
 // and an atomic for all of them. The first thing an incoming ACK does is
@@ -113,7 +115,7 @@ typedef struct write_request_s {
 
 	cf_digest            keyd;
 	// udf request data
-	ureq_data          * udata;
+	struct iudf_origin_s *iudf_orig;
 	bool                 shipped_op;
 	bool                 shipped_op_initiator;
 	bool                 has_udf;

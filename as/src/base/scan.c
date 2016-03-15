@@ -61,6 +61,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/udf_memtracker.h"
+#include "base/udf_rw.h"
 
 
 
@@ -851,7 +852,7 @@ typedef struct aggr_scan_slice_s {
 	as_partition_reservation*	rsv;
 } aggr_scan_slice;
 
-bool aggr_scan_init(as_aggr_call* call, as_msg* msg);
+bool aggr_scan_init(as_aggr_call* call, const as_transaction* tr);
 void aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd);
 as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns, as_partition_id pid, as_partition_reservation* rsv);
@@ -894,7 +895,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	job->msgp = tr->msgp;
 
-	if (! aggr_scan_init(&job->aggr_call, &tr->msgp->msg)) {
+	if (! aggr_scan_init(&job->aggr_call, tr)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
 		job->msgp = NULL;
 		as_job_destroy(_job);
@@ -1024,9 +1025,9 @@ aggr_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 //
 
 bool
-aggr_scan_init(as_aggr_call* call, as_msg* msg)
+aggr_scan_init(as_aggr_call* call, const as_transaction* tr)
 {
-	if (udf_rw_call_init_from_msg((udf_call*)call, msg) != 0) {
+	if (! udf_def_init_from_msg(&call->def, tr)) {
 		return false;
 	}
 
@@ -1159,8 +1160,7 @@ typedef struct udf_bg_scan_job_s {
 
 	// Derived class data:
 	cl_msg*			msgp;
-	udf_call		call;
-	ureq_data		req_data;
+	iudf_origin		origin;
 	cf_atomic32		n_active_tr;
 
 	cf_atomic64		n_successful_tr;
@@ -1179,21 +1179,8 @@ const as_job_vtable udf_bg_scan_job_vtable = {
 		udf_bg_scan_job_info
 };
 
-bool udf_scan_init(udf_call* call, as_transaction* tr);
 void udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 int udf_bg_scan_tr_complete(as_transaction *tr, int retcode);
-
-//----------------------------------------------------------
-// as_scan public API for udf_bg_scan_job.
-//
-
-udf_call*
-as_scan_get_udf_call(void* req_udata)
-{
-	udf_bg_scan_job* job = (udf_bg_scan_job*)req_udata;
-
-	return &job->call;
-}
 
 //----------------------------------------------------------
 // udf_bg_scan_job public API.
@@ -1225,16 +1212,16 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->n_successful_tr = 0;
 	job->n_failed_tr = 0;
 
-	if (! udf_scan_init(&job->call, tr)) {
-		cf_warning(AS_SCAN, "udf-bg scan job failed call init");
+	if (! udf_def_init_from_msg(&job->origin.def, tr)) {
+		cf_warning(AS_SCAN, "udf-bg scan job failed def init");
 		job->msgp = NULL;
 		as_job_destroy(_job);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	job->req_data.req_cb = udf_bg_scan_tr_complete;
-	job->req_data.req_udata = (void*)job;
-	job->req_data.req_type = UDF_SCAN_REQUEST;
+	job->origin.type = UDF_SCAN_REQUEST;
+	job->origin.cb = udf_bg_scan_tr_complete;
+	job->origin.udata = (void*)job;
 
 	cf_info(AS_SCAN, "starting udf-bg scan job %lu {%s:%s} priority %u",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
@@ -1314,7 +1301,7 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 	char *extra = stat->jdata + strlen(stat->jdata);
 
 	sprintf(extra, ":udf-filename=%s:udf-function=%s:udf-active=%u:udf-success=%lu:udf-failed=%lu",
-			job->call.def.filename, job->call.def.function,
+			job->origin.def.filename, job->origin.def.function,
 			cf_atomic32_get(job->n_active_tr),
 			cf_atomic64_get(job->n_successful_tr),
 			cf_atomic64_get(job->n_failed_tr));
@@ -1323,18 +1310,6 @@ udf_bg_scan_job_info(as_job* _job, as_mon_jobstat* stat)
 //----------------------------------------------------------
 // udf_bg_scan_job utilities.
 //
-
-bool
-udf_scan_init(udf_call* call, as_transaction* tr)
-{
-	if (udf_rw_call_init_from_msg(call, &tr->msgp->msg)) {
-		return false;
-	}
-
-	call->tr = tr;
-
-	return true;
-}
 
 void
 udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
@@ -1355,15 +1330,8 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return;
 	}
 
-	tr_create_data d;
-
-	d.digest	= r->key;
-	d.ns		= ns;
-	d.set[0]	= 0;				// TODO - transfer set name ???
-	d.call		= &job->call;
-	d.msg_type	= AS_MSG_INFO2_WRITE;
-	d.fd_h		= NULL;
-	d.trid		= 0;				// TODO - transfer trid ???
+	// Save this before releasing record.
+	cf_digest d = r->key;
 
 	// Release record lock before enqueuing transaction.
 	as_record_done(r_ref, ns);
@@ -1376,12 +1344,12 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_transaction tr;
 
-	if (as_transaction_create_internal(&tr, &d) != 0) {
+	if (as_transaction_init_iudf(&tr, ns, &d) != 0) {
 		as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
 		return;
 	}
 
-	tr.udata = &job->req_data;
+	tr.iudf_orig = &job->origin;
 
 	cf_atomic64_incr(&_job->n_records_read);
 	cf_atomic32_incr(&job->n_active_tr);
@@ -1392,7 +1360,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 int
 udf_bg_scan_tr_complete(as_transaction *tr, int retcode)
 {
-	udf_bg_scan_job* job = (udf_bg_scan_job*)tr->udata->req_udata;
+	udf_bg_scan_job* job = (udf_bg_scan_job*)tr->iudf_orig->udata;
 
 	cf_atomic32_decr(&job->n_active_tr);
 	cf_atomic64_incr(retcode == 0 ? &job->n_successful_tr : &job->n_failed_tr);
