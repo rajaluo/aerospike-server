@@ -54,6 +54,10 @@
  */
 #define MAX_NUM_MIGRATE_XMIT_THREADS  (100)
 
+#define TX_FLAGS_NONE           ((uint32_t) 0x0)
+#define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
+#define TX_FLAGS_REQUEST        ((uint32_t) 0x2)
+
 typedef enum as_migrate_state_e {
 	AS_MIGRATE_STATE_DONE,
 	AS_MIGRATE_STATE_START,

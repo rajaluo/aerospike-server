@@ -139,46 +139,13 @@ void as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close);
 void as_end_of_transaction_ok(as_file_handle *proto_fd_h);
 void as_end_of_transaction_force_close(as_file_handle *proto_fd_h);
 
-struct as_transaction_s;
-typedef int (*ureq_cb)(struct as_transaction_s *tr, int retcode);
-typedef int (*ures_cb)(struct as_transaction_s *tr, int retcode);
-
-typedef enum {
-	UDF_UNDEF_REQUEST = -1,
-	UDF_SCAN_REQUEST  = 0,
-	UDF_QUERY_REQUEST = 1
-} udf_request_type;
-
-typedef struct udf_request_data {
-	void *				req_udata;
-	ureq_cb				req_cb;		// callback called at completion with request structure
-	void *				res_udata;
-	ures_cb				res_cb;		// callback called at completion with response structure
-	udf_request_type	req_type;
-} ureq_data;
-
-#define UREQ_DATA_INIT(ureq)	\
-	(ureq)->req_cb    = NULL;	\
-	(ureq)->req_udata = NULL;	\
-	(ureq)->res_cb    = NULL;	\
-	(ureq)->res_udata = NULL;   \
-	(ureq)->req_type  = UDF_UNDEF_REQUEST;
-
-#define UREQ_DATA_RESET UREQ_DATA_INIT
-
-#define UREQ_DATA_COPY(dest, src)			\
-	(dest)->req_cb    = (src)->req_cb;		\
-	(dest)->req_udata = (src)->req_udata;	\
-	(dest)->res_cb    = (src)->res_cb;		\
-	(dest)->res_udata = (src)->res_udata;   \
-	(dest)->req_type  = (src)->req_type;
-
 #define AS_TRANSACTION_FLAG_NSUP_DELETE     0x0001
 #define AS_TRANSACTION_FLAG_BATCH_SUB       0x0002 // was INTERNAL
 #define AS_TRANSACTION_FLAG_SHIPPED_OP      0x0004
 #define AS_TRANSACTION_FLAG_UNUSED_8        0x0008 // deprecated LDT_SUB
 #define AS_TRANSACTION_FLAG_SINDEX_TOUCHED  0x0010
 
+struct iudf_origin_s;
 struct as_batch_shared;
 
 /* as_transaction
@@ -230,7 +197,7 @@ typedef struct as_transaction_s {
 
 	/* User data corresponding to the internally created transaction
 	   first user is Scan UDF */
-	ureq_data         udata;
+	struct iudf_origin_s * iudf_orig;
 
 	// Batch
 	struct as_batch_shared* batch_shared;
@@ -332,21 +299,7 @@ as_transaction_trid(const as_transaction *tr)
 	return cf_swap_from_be64(*(uint64_t*)f->data);
 }
 
-struct udf_call_s; // forward declaration for udf_call, defined in udf_rw.h
-
-// Data needed for creation of a transaction, add more fields here later.
-typedef struct tr_create_data {
-	cf_digest			digest;
-	as_namespace *		ns;
-	char				set[AS_SET_NAME_MAX_SIZE];
-	struct udf_call_s *	call;
-	uint				msg_type;	/* Which type of msg is it -- maybe make it default? */
-	as_file_handle *	fd_h;		/* fd of the parent scan job */
-	uint64_t			trid;		/* transaction id of the parent job -- if any */
-	void *				udata;		/* udata to be passed on to the new transaction */
-} tr_create_data;
-
-extern int   as_transaction_create_internal(as_transaction *tr, tr_create_data * data);
+int as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd);
 
 void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
 void as_transaction_error(as_transaction* tr, uint32_t error_code);

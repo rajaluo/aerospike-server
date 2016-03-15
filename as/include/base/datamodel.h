@@ -957,6 +957,8 @@ struct as_namespace_s {
 #endif
 
 	/* Replication management */
+	uint32_t					migrate_order;
+	uint32_t					migrate_sleep;
 	uint16_t					replication_factor;
 	uint16_t					cfg_replication_factor;
 	conflict_resolution_pol		conflict_resolution_policy;

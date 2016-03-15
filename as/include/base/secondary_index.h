@@ -82,7 +82,7 @@ typedef enum {
 	AS_SINDEX_ERR_BIN_NOTFOUND     = -13,
 	AS_SINDEX_ERR_TYPE_MISMATCH    = -11,
 
-	// Needed when attemping index create
+	// Needed when attempting index create/query
 	AS_SINDEX_ERR_FOUND            = -6,
 	AS_SINDEX_ERR_NOTFOUND         = -5,
 	AS_SINDEX_ERR_NO_MEMORY        = -4,

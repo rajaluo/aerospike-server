@@ -95,7 +95,7 @@ as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 	tr->proxy_node                = 0;
 	tr->proxy_msg                 = 0;
 
-	UREQ_DATA_INIT(&tr->udata);
+	tr->iudf_orig                 = 0;
 
 	tr->batch_shared              = 0;
 	tr->batch_index               = 0;
@@ -260,79 +260,36 @@ as_transaction_proxyee_prepare(as_transaction *tr)
 	}
 }
 
-/* Create an internal transaction.
- * parameters:
- *     tr_create_data : Details for creating transaction
- *     tr             : to be filled
- *
- * return :  0  on success
- *           -1 on failure
- */
+// Initialize an internal UDF transaction (for a UDF scan/query). Allocates a
+// message with namespace and digest - no set for now, since these transactions
+// won't get security checked, and they can't create a record.
 int
-as_transaction_create_internal(as_transaction *tr, tr_create_data *  trc_data)
+as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 {
-	tr_create_data * d = (tr_create_data*) trc_data;
+	size_t msg_sz = sizeof(cl_msg);
+	int ns_len = strlen(ns->name);
 
-	// Get Defensive
-	memset(tr, 0, sizeof(as_transaction));
+	msg_sz += sizeof(as_msg_field) + ns_len;
+	msg_sz += sizeof(as_msg_field) + sizeof(cf_digest);
 
-	if (d->fd_h) {
-		cf_warning(AS_PROTO, "Foreground Internal Transation .. Ignoring");
+	cl_msg *msgp = (cl_msg *)cf_malloc(msg_sz);
+
+	if (! msgp) {
 		return -1;
-	} else {
-		tr->proto_fd_h = NULL;
 	}
 
-	tr->result_code  = AS_PROTO_RESULT_OK;
+	uint8_t *b = (uint8_t *)msgp;
 
-	AS_PARTITION_RESERVATION_INIT(tr->rsv);
-	UREQ_DATA_INIT(&tr->udata);
+	b = as_msg_write_header(b, msg_sz, 0, AS_MSG_INFO2_WRITE, 0, 0, 0, 0, 2, 0);
+	b = as_msg_write_fields(b, ns->name, ns_len, NULL, 0, keyd, 0, 0, 0, 0);
 
-	uint32_t n_fields = 2; // namespace and digest always added
+	as_transaction_init(tr, NULL, msgp);
 
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
-	// Get namespace and set lengths.
-	int ns_len        = strlen(d->ns->name);
-	int set_len       = strlen(d->set);
-
-	// Figure out the size of the message.
-	size_t  msg_sz = sizeof(cl_msg);
-
-	msg_sz += sizeof(as_msg_field) + ns_len;
-
-	if (set_len != 0) {
-		msg_sz += sizeof(as_msg_field) + set_len;
-		as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_SET);
-		n_fields++;
-	}
-
-	msg_sz += sizeof(as_msg_field) + sizeof(cf_digest);
-	msg_sz += sizeof(as_msg_field) + sizeof(d->trid);
-
-	// Udf call structure will go as a part of the transaction udata.
-	// Do not pack it in the message.
-	cf_debug(AS_PROTO, "UDF : Msg size for internal transaction is %d", msg_sz);
-
-	// Allocate space in the buffer.
-	uint8_t * buf   = cf_malloc(msg_sz); memset(buf, 0, msg_sz);
-	if (!buf) {
-		return -1;
-	}
-	uint8_t * buf_r = buf;
-
-	// Calculation of number of fields:
-	// n_fields = ( ns ? 1 : 0 ) + (set ? 1 : 0) + (digest ? 1 : 0) + (trid ? 1 : 0) + (call ? 3 : 0);
-
-	// Write the header in case the request gets proxied. Is it enough ??
-	buf = as_msg_write_header(buf, msg_sz, 0, d->msg_type, 0, 0, 0, 0, n_fields, 0);
-	buf = as_msg_write_fields(buf, d->ns->name, ns_len, d->set, set_len, &(d->digest), 0, 0, 0, 0);
-
-	tr->msgp         = (cl_msg *) buf_r;
-
 	// Do this last, to exclude the setup time in this function.
-	tr->start_time   = cf_getns();
+	tr->start_time = cf_getns();
 	MICROBENCHMARK_SET_TO_START_P();
 
 	return 0;
@@ -371,10 +328,9 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 		tr->proxy_msg = NULL;
 	}
-	else if (tr->udata.req_udata) {
-		if (udf_rw_needcomplete(tr)) {
-			udf_rw_complete(tr, error_code, __FILE__,__LINE__);
-		}
+	else if (tr->iudf_orig) {
+		tr->iudf_orig->cb(tr, error_code);
+		tr->iudf_orig = NULL;
 	}
 }
 

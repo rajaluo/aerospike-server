@@ -186,10 +186,6 @@ static volatile int g_multi_node = false;
 #define BALANCE_INIT_UNRESOLVED 0
 #define BALANCE_INIT_RESOLVED   1
 
-#define TX_FLAGS_NONE           ((uint32_t) 0x0)
-#define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
-#define TX_FLAGS_REQUEST        ((uint32_t) 0x2)
-
 static volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
 
 

@@ -27,7 +27,6 @@
 #include "base/datamodel.h"
 #include "base/monitor.h"
 #include "base/transaction.h"
-#include "base/udf_rw.h"
 
 void as_scan_init();
 int as_scan(as_transaction *tr, as_namespace *ns);
@@ -41,5 +40,3 @@ as_mon_jobstat* as_scan_get_jobstat_all(int* size);
 int as_scan_abort(uint64_t trid);
 int as_scan_abort_all();
 int as_scan_change_job_priority(uint64_t trid, uint32_t priority);
-
-udf_call* as_scan_get_udf_call(void* req_udata);

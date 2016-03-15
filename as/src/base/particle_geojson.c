@@ -560,17 +560,17 @@ geojson_match(bool candidate_is_region, uint64_t candidate_cellid, geo_region_t 
 	//
 	if (query_region) {
 
-		// Sanity check, make sure this geometry has been processed.
-		if (candidate_cellid == 0) {
-			cf_warning(AS_PARTICLE, "candidate cellid has no value");
-			return false;
-		}
-
 		if (candidate_is_region) {
 			// Candidate is a REGION, skip it.
 			return false;
 		}
 		else {
+			// Sanity check, make sure this geometry has been processed.
+			if (candidate_cellid == 0) {
+				cf_warning(AS_PARTICLE, "candidate cellid has no value");
+				return false;
+			}
+
 			// Candidate is a POINT.
 			if (is_strict) {
 				return geo_point_within(candidate_cellid, query_region);
