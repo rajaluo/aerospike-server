@@ -90,7 +90,7 @@ int
 process_response(udf_call *call, const char *bin_name, const as_val *val, cf_dyn_buf *db)
 {
 	// NO response if background UDF
-	if (call->def.type == AS_UDF_OP_BACKGROUND) {
+	if (call->def->type == AS_UDF_OP_BACKGROUND) {
 		return 0;
 	}
 	// Note - this function quietly handles a null val. The response call will
@@ -259,7 +259,7 @@ process_result(const as_result * res, udf_call * call, cf_dyn_buf *db )
 			process_udf_failure(call, as_string_fromval(v), db);
 		} else {
 			char lua_err_str[1024];
-			size_t len = (size_t)sprintf(lua_err_str, "%s:0: in function %s() - error() argument type not handled", call->def.filename, call->def.function);
+			size_t len = (size_t)sprintf(lua_err_str, "%s:0: in function %s() - error() argument type not handled", call->def->filename, call->def->function);
 
 			call->tr->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
 			process_failure_str(call, lua_err_str, len, db);
@@ -278,18 +278,9 @@ process_result(const as_result * res, udf_call * call, cf_dyn_buf *db )
  * Get UDF call object pointer from parent job via tr->udata.
  */
 udf_call *
-udf_rw_call_init_internal(udf_call * call, as_transaction * tr)
+udf_rw_call_def_init_internal(udf_call * call, as_transaction * tr)
 {
-	udf_def *def = &tr->iudf_orig->def;
-
-	// TODO - could avoid copy by pointing back to parent transaction's def, if
-	// def was a pointer on udf_call instead of an embedded member.
-	strcpy(call->def.filename, def->filename);
-	strcpy(call->def.function, def->function);
-	call->def.arglist = def->arglist;
-	call->def.type = def->type;
-
-	call->tr = tr;
+	call->def = &tr->iudf_orig->def;
 
 	if (tr->iudf_orig->type == UDF_SCAN_REQUEST) {
 		cf_atomic_int_incr(&g_config.udf_scan_rec_reqs);
@@ -305,15 +296,9 @@ udf_rw_call_init_internal(udf_call * call, as_transaction * tr)
  * Initialize udf_call data structure from the transaction over the wire.
  */
 udf_call *
-udf_rw_call_init_from_msg(udf_call * call, as_transaction * tr)
+udf_rw_call_def_init_from_msg(udf_call * call, as_transaction * tr)
 {
-	if (! udf_def_init_from_msg(&call->def, tr)) {
-		return NULL;
-	}
-
-	call->tr = tr;
-
-	return call;
+	return udf_def_init_from_msg(call->def, tr) ? call : NULL;
 }
 
 /**
@@ -361,8 +346,8 @@ udf_def_init_from_msg(udf_def * def, const as_transaction * tr)
 void
 udf_rw_call_destroy(udf_call * call)
 {
+	call->def = NULL;
 	call->tr = NULL;
-	call->def.arglist = NULL;
 }
 // **************************************************************************************************
 
@@ -716,7 +701,7 @@ int
 udf_apply_record(udf_call * call, as_rec *rec, as_result *res)
 {
 	as_list         arglist;
-	as_list_init(&arglist, call->def.arglist, &udf_arglist_hooks);
+	as_list_init(&arglist, call->def->arglist, &udf_arglist_hooks);
 
 	// Setup time tracker
 	time_tracker udf_timer_tracker = {
@@ -735,7 +720,7 @@ udf_apply_record(udf_call * call, as_rec *rec, as_result *res)
 
 	uint64_t now = cf_getns();
 	int ret_value = as_module_apply_record(&mod_lua, &ctx,
-			call->def.filename, call->def.function, rec, &arglist, res);
+			call->def->filename, call->def->function, rec, &arglist, res);
 	cf_hist_track_insert_data_point(g_config.ut_hist, now);
 	if (g_config.ldt_benchmarks) {
 		ldt_record *lrecord = (ldt_record *)as_rec_source(rec);
