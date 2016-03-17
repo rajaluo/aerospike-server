@@ -86,7 +86,6 @@ typedef enum {
 	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
 	XDR_CASE_XDR_FORWARD_WITH_GENCHECK,
 	XDR_CASE_XDR_REPLACE_RECORD,
-	XDR_CASE_XDR_HOTKEY_MAXSKIP,
 	XDR_CASE_XDR_SHIPPING_ENABLED,
 	XDR_CASE_XDR_PIDFILE,
 	XDR_CASE_XDR_READ_BATCH_SIZE,
@@ -94,7 +93,6 @@ typedef enum {
 	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
 	XDR_CASE_XDR_SHIP_DELAY,
 	XDR_CASE_XDR_SHIP_THREADS,
-	XDR_CASE_XDR_SHIP_SLAB_SIZE,
 
 	// Security options:
 	XDR_CASE_SEC_CREDENTIALS_BEGIN,
@@ -173,7 +171,6 @@ typedef struct xdr_config {
 	int	xdr_info_port;
 	int	xdr_max_recs_inflight;
 	int	xdr_read_batch_size;
-	int	xdr_ship_slab_size;     // Maximum number of records, on receival of which, xdr start shipping.
 	int	xdr_ship_threads;       // Number threads which will read from server and ship records.
 	int	xdr_timeout;
 	int	xdr_threads;
@@ -184,7 +181,6 @@ typedef struct xdr_config {
 	bool	xdr_shipping_enabled;
 	bool	xdr_delete_shipping_enabled;
 	bool	xdr_nsup_deletes_enabled;
-	int 	xdr_hotkey_maxskip;
 	bool	xdr_fwd_with_gencheck;
 	bool	xdr_replace_record;
 	int		xdr_info_request_timeout_ms;

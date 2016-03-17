@@ -68,7 +68,6 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
 		{ "xdr-replace-record",				XDR_CASE_XDR_REPLACE_RECORD },
-		{ "xdr-hotkey-maxskip",				XDR_CASE_XDR_HOTKEY_MAXSKIP },
 		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
 		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
 		{ "xdr-info-timeout",				XDR_CASE_XDR_INFO_TIMEOUT },
@@ -76,7 +75,6 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-read-batch-size",			XDR_CASE_XDR_READ_BATCH_SIZE },
 		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },
 		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS},
-		{ "xdr-ship-slab-size",				XDR_CASE_XDR_SHIP_SLAB_SIZE},
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -131,7 +129,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_max_recs_inflight = 0; // Max number of digests shipped that can be in the async queue at any given point
 								  // The default will be determined based on remote DC's pipelining capabilties
 	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go
-	c->xdr_ship_slab_size = 500;    // Number of digests processed by one shipper thread.
 	c->xdr_ship_threads = 8;        // Number of XDR shipper threads.
 	c->xdr_timeout = 10000;		// Timeout for each element that is shipped. default is 10000 ms
 								// asd side connection times out at 15 seconds
@@ -142,7 +139,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_conf_change_flag = 0;
 	c->xdr_shipping_enabled = true;
 	c->xdr_delete_shipping_enabled = true;
-	c->xdr_hotkey_maxskip = 5;
 	c->xdr_fwd_with_gencheck = false;
 	c->xdr_replace_record = true;
 	c->xdr_info_request_timeout_ms = 500;
