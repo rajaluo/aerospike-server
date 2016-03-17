@@ -948,14 +948,17 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 	as_index_reduce(tree, aggr_scan_job_reduce_cb, (void*)&slice);
 
 	if (cf_ll_size(&ll) != 0) {
-		as_result* res = as_result_new();
-		int ret = as_aggr_process(_job->ns, &job->aggr_call, &ll, (void*)&slice, res);
+		as_result result;
+		as_result_init(&result);
+
+		int ret = as_aggr_process(_job->ns, &job->aggr_call, &ll, (void*)&slice,
+				&result);
 
 		if (ret != 0) {
 			char* rs = as_module_err_string(ret);
 
-			if (res->value) {
-				as_string* lua_s = as_string_fromval(res->value);
+			if (result.value) {
+				as_string* lua_s = as_string_fromval(result.value);
 				char* lua_err = (char*)as_string_tostring(lua_s);
 
 				if (lua_err) {
@@ -974,6 +977,8 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 			as_job_manager_abandon_job(_job->mgr, _job,
 					AS_PROTO_RESULT_FAIL_UNKNOWN);
 		}
+
+		as_result_destroy(&result);
 	}
 
 	cf_ll_reduce(&ll, true, as_index_keys_ll_reduce_fn, NULL);
