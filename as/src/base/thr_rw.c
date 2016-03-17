@@ -271,7 +271,7 @@ void write_request_destructor(void *object) {
 		as_transaction tr;
 		write_request_init_tr(&tr, wr);
 		cf_warning(AS_RW, "UDF request not complete ... Completing it nonetheless !!!");
-		wr->iudf_orig->cb(&tr, 0);
+		tr.iudf_orig->cb(&tr, 0);
 	}
 
 	if (wr->dest_msg)
@@ -5455,12 +5455,10 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 
 			as_transaction tr;
 			write_request_init_tr(&tr, wr);
-			wr->iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-			wr->iudf_orig = NULL;
+			tr.iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
 
 			if (tr.proto_fd_h) {
 				as_end_of_transaction_force_close(tr.proto_fd_h);
-				tr.proto_fd_h = 0;
 			}
 		} else {
 			if (wr->batch_shared) {

@@ -460,8 +460,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
-				wr->iudf_orig->cb(&tr, 0);
-				wr->iudf_orig = NULL;
+				tr.iudf_orig->cb(&tr, 0);
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -923,12 +922,10 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 
 					as_transaction tr;
 					write_request_init_tr(&tr, pr->wr);
-					pr->wr->iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-					pr->wr->iudf_orig = NULL;
+					tr.iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
 
 					if (tr.proto_fd_h) {
 						as_end_of_transaction_force_close(tr.proto_fd_h);
-						tr.proto_fd_h = NULL;
 					}
 				}
 				pthread_mutex_unlock(&pr->wr->lock);
