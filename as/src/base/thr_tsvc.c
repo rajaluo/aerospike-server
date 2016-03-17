@@ -293,14 +293,7 @@ process_transaction(as_transaction *tr)
 
 	// Obtain a write reservation - or get the node that would satisfy.
 	if (msgp->msg.info2 & AS_MSG_INFO2_WRITE) {
-		// If there is udata in the transaction, it's a udf internal
-		// transaction, so don't free msgp here as other internal udf
-		// transactions might end up using it later. Free when the scan job
-		// is complete.
-		if (tr->iudf_orig) {
-			free_msgp = false;
-		}
-		else if (tr->proto_fd_h && ! as_security_check_data_op(tr, ns, PERM_WRITE)) {
+		if (tr->proto_fd_h && ! as_security_check_data_op(tr, ns, PERM_WRITE)) {
 			as_transaction_error(tr, tr->result_code);
 			goto Cleanup;
 		}

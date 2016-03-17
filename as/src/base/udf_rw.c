@@ -812,6 +812,13 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		rec_rv = -1;
 	}
 
+	if (rec_rv == -1 && tr->iudf_orig) {
+		// Internal UDFs must not create records.
+		call->tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
+		process_failure(call, NULL, NULL);
+		goto Cleanup;
+	}
+
 	if (rec_rv == 0) {
 		urecord.flag   |= UDF_RECORD_FLAG_OPEN;
 		urecord.flag   |= UDF_RECORD_FLAG_PREEXISTS;
