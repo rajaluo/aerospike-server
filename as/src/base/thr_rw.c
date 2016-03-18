@@ -152,8 +152,6 @@ void
 write_request_restart(wreq_tr_element *w)
 {
 	as_transaction *tr = &w->tr;
-	cf_debug(AS_RW, "as rw start:  QUEUEING BACK (%d:%p) %"PRIx64"",
-			 tr->proto_fd_h ? tr->proto_fd_h->fd : 0, tr->proxy_msg, *(uint64_t*)&tr->keyd);
 
 	MICROBENCHMARK_RESET_P();
 
@@ -179,7 +177,8 @@ write_request_create(void) {
 	wr->rsv_valid = false;
 	wr->proto_fd_h = 0;
 	wr->dest_msg = 0;
-	wr->proxy_msg = 0;
+	wr->proxy_node = 0;
+	wr->proxy_tid = 0;
 	wr->msgp = 0;
 	wr->msg_fields = 0;
 	wr->pickled_buf = 0;
@@ -224,8 +223,8 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	tr->proto_fd_h = wr->proto_fd_h;
 	wr->proto_fd_h = 0;
 	tr->proxy_node = wr->proxy_node;
-	tr->proxy_msg = wr->proxy_msg;
-	wr->proxy_msg = 0;
+	wr->proxy_node = 0;
+	tr->proxy_tid = wr->proxy_tid;
 	tr->keyd = wr->keyd;
 
 	// Partition reservation and msg are freed when the write request is destroyed
@@ -276,8 +275,6 @@ void write_request_destructor(void *object) {
 
 	if (wr->dest_msg)
 		as_fabric_msg_put(wr->dest_msg);
-	if (wr->proxy_msg)
-		as_fabric_msg_put(wr->proxy_msg);
 	if (wr->msgp) {
 		// TODO - this is temporary defensive code!
 		if (wr->batch_shared) {
@@ -651,7 +648,7 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 		cf_hist_track_insert_data_point(g_config.rt_hist, tr->start_time);
 	} else {
 		// Update Write Stats. Don't count Deletes or UDF calls.
-		if (! tr->proxy_msg && (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->has_udf) {
+		if (tr->proxy_node == 0 && (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->has_udf) {
 			cf_hist_track_insert_data_point(g_config.wt_hist, tr->start_time);
 		}
 	}
@@ -937,7 +934,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 		// from this function: -2 means retry, -1 means forever - like, gen mismatch or similar
 		if (rv != 0) {
-			if ((rv == -2) && (tr->proto_fd_h == 0) && (tr->proxy_msg == 0)) {
+			if ((rv == -2) && (tr->proto_fd_h == 0) && (tr->proxy_node == 0)) {
 				cf_crash(AS_RW,
 						"Can't retry a write if all data has been stripped out");
 			}
@@ -1070,7 +1067,8 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		wr->respond_client_on_master_completion = true;
 		rw_complete(wr, tr, NULL);
 		tr->proto_fd_h = NULL;
-		tr->proxy_msg = NULL;
+		tr->proxy_node = 0;
+		tr->proxy_tid = 0;
 		wr->iudf_orig = NULL; // ???
 
 		// if fire and forget, we're done, get out
@@ -1093,7 +1091,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		tr->proto_fd_h = 0;
 	}
 	wr->proxy_node = tr->proxy_node;
-	wr->proxy_msg  = tr->proxy_msg;
+	wr->proxy_tid  = tr->proxy_tid;
 	wr->shipped_op = (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) ? true : false;
 	wr->generation = tr->generation;
 	wr->void_time = tr->void_time;
@@ -1237,10 +1235,10 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 		write_request *wr2;
 		if (0 == rchash_get(g_write_hash, &gk, sizeof(gk), (void **) &wr2)) {
 			pthread_mutex_lock(&wr2->lock);
-			if ((wr2->ready == true) && (wr2->proxy_msg != 0)
-					&& (wr2->proxy_node == tr->proxy_node)) {
+			if (wr2->ready && wr2->proxy_node != 0
+					&& wr2->proxy_node == tr->proxy_node) {
 
-				if (as_proxy_msg_compare(tr->proxy_msg, wr2->proxy_msg) == 0) {
+				if (tr->proxy_tid == wr2->proxy_tid) {
 
 					cf_debug(AS_RW,
 							"proxy_write_start: duplicate, ignoring {%s:%d} %"PRIx64"",
@@ -1293,8 +1291,8 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			e->tr.proto_fd_h = tr->proto_fd_h;
 			tr->proto_fd_h = 0;
 			e->tr.proxy_node = tr->proxy_node;
-			e->tr.proxy_msg = tr->proxy_msg;
-			tr->proxy_msg = 0;
+			tr->proxy_node = 0;
+			e->tr.proxy_tid = tr->proxy_tid;
 			e->tr.keyd = tr->keyd;
 			AS_PARTITION_RESERVATION_INIT(e->tr.rsv);
 			e->tr.result_code = AS_PROTO_RESULT_OK;
@@ -1317,10 +1315,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 
 			cf_atomic_int_incr(&g_config.n_waiting_transactions);
 
-			cf_detail_digest(AS_RW, &tr->keyd,
-					"as rw start:  write in progress QUEUEING returning 0 (%d:%p:%"PRIx64") wr(%p)",
-					tr->proto_fd_h ? tr->proto_fd_h->fd : 0, tr->proxy_msg, tr->proxy_node, wr2);
-
 			as_partition_release(&tr->rsv);
 			cf_atomic_int_decr(&g_config.rw_tree_count);
 
@@ -1330,9 +1324,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			rv = -2;
 			cf_atomic_int_incr(&g_config.err_rw_request_not_found);
 			WR_TRACK_INFO(wr, "as_rw_start: not found: return -2");
-			cf_detail(AS_RW,
-					"as rw start:  could not find request in hash table! returning -2 {%s.%d} (%d:%p) %"PRIx64"",
-					ns->name, tr->rsv.pid, tr->proto_fd_h ? tr->proto_fd_h->fd : 0, tr->proxy_msg, *(uint64_t*)&tr->keyd);
 		}
 		cf_rc_release(wr);
 		WR_TRACK_INFO(wr, "as_rw_start: 694");
@@ -1340,9 +1331,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 		return (rv);
 	} // end if wr found in write hash
 	else if (rv != 0) {
-		cf_info(AS_RW,
-				"as_write_start:  unknown reason %d can't put unique? {%s.%d} (%d:%p) %"PRIx64"",
-				rv, ns->name, tr->rsv.pid, tr->proto_fd_h ? tr->proto_fd_h->fd : 0, tr->proxy_msg, *(uint64_t*)&tr->keyd);
 		WR_TRACK_INFO(wr, "as_rw_start: 701");
 		WR_RELEASE(wr);
 		cf_atomic_int_incr(&g_config.err_rw_cant_put_unique);
@@ -1495,11 +1483,6 @@ finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 	cf_detail(AS_RW,
 			"finish_rw_process_prole_ack: write operation phase complete, %"PRIx64,
 			wr->keyd);
-
-	if (wr->proxy_msg && cf_rc_count(wr->proxy_msg) == 0) {
-		cf_warning(AS_RW,
-				"rw transaction complete: proxy message but no reference count");
-	}
 
 	// INIT_TR
 	as_transaction tr;
@@ -1672,7 +1655,7 @@ finish_rw_process_dup_ack(write_request *wr)
 		}
 		cf_detail_digest(AS_RW, &wr->keyd,
 				"SHIPPED_OP %s Shipping %s op to %"PRIx64"",
-				wr->proxy_msg ? "NONORIG" : "ORIG",
+				wr->proxy_node != 0 ? "NONORIG" : "ORIG",
 				wr->is_read ? "Read" : "Write",
 				wr->dest_nodes[winner_idx]);
 		as_ldt_shipop(wr, wr->dest_nodes[winner_idx]);
@@ -1684,7 +1667,7 @@ finish_rw_process_dup_ack(write_request *wr)
 	cf_detail_digest(AS_RW, &wr->keyd,
 			"SHIPPED_OP %s=WINNER locally apply %s op after "
 			"flatten @ %"PRIx64"",
-			wr->proxy_msg ? "NONORIG" : "ORIG",
+			wr->proxy_node != 0 ? "NONORIG" : "ORIG",
 			wr->is_read ? "Read" : "Write",
 			g_config.self_node);
 
@@ -1997,9 +1980,9 @@ ops_complete(as_transaction *tr, cf_dyn_buf *db)
 
 		tr->proto_fd_h = 0;
 	}
-	else if (tr->proxy_msg) {
-		as_proxy_send_ops_response(tr->proxy_node, tr->proxy_msg, db);
-		// TODO - set tr->proxy_msg NULL - currently used as flag for stats.
+	else if (tr->proxy_node != 0) {
+		as_proxy_send_ops_response(tr->proxy_node, tr->proxy_tid, db);
+		// TODO - set tr->proxy_node to 0 - currently used as flag for stats.
 	}
 	else {
 		cf_warning(AS_RW, "ops_complete with no proto_fd_h or proxy_msg");
@@ -2033,10 +2016,10 @@ write_complete(write_request *wr, as_transaction *tr)
 
 		tr->proto_fd_h = 0;
 	}
-	else if (tr->proxy_msg) {
-		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, tr->result_code,
+	else if (tr->proxy_node != 0) {
+		as_proxy_send_response(tr->proxy_node, tr->proxy_tid, tr->result_code,
 				0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
-		// TODO - set tr->proxy_msg NULL - currently used as flag for stats.
+		// TODO - set tr->proxy_node to 0 - currently used as flag for stats.
 	}
 	// else (hopefully) it's an nsup delete ...
 
@@ -5776,7 +5759,7 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 			}
 		}
 		tr->proto_fd_h = 0;
-	} else if (tr->proxy_msg) {
+	} else if (tr->proxy_node != 0) {
 		// it was a proxy request - hand it back to the proxy for responding
 		if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP)
 			cf_detail(AS_RW,
@@ -5786,10 +5769,10 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 			cf_detail(AS_RW, "sending proxy reply, rc %d to %"PRIx64"",
 					tr->result_code, tr->proxy_node);
 
-		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, tr->result_code,
+		as_proxy_send_response(tr->proxy_node, tr->proxy_tid, tr->result_code,
 				generation, void_time, ops, response_bins, n_bins, ns,
 				as_transaction_trid(tr), setname);
-		tr->proxy_msg = 0;
+		tr->proxy_node = 0;
 	} else {
 		// In this case, this is a call from write_process() above.
 		// create the response message (this is a new malloc that will be handed off to fabric (see end of write_process())

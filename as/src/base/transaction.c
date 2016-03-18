@@ -93,7 +93,7 @@ as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 
 	tr->proto_fd_h                = 0;
 	tr->proxy_node                = 0;
-	tr->proxy_msg                 = 0;
+	tr->proxy_tid                 = 0;
 
 	tr->iudf_orig                 = 0;
 
@@ -324,9 +324,9 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 			}
 		}
 	}
-	else if (tr->proxy_msg) {
-		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
-		tr->proxy_msg = NULL;
+	else if (tr->proxy_node != 0) {
+		as_proxy_send_response(tr->proxy_node, tr->proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
+		tr->proxy_node = 0;
 	}
 	else if (tr->iudf_orig) {
 		tr->iudf_orig->cb(tr, error_code);

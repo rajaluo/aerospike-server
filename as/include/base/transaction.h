@@ -193,7 +193,7 @@ typedef struct as_transaction_s {
 	 * or a node ID */
 	as_file_handle	* proto_fd_h;
 	cf_node 	      proxy_node;
-	msg 		    * proxy_msg;
+	uint32_t          proxy_tid;
 
 	/* User data corresponding to the internally created transaction
 	   first user is Scan UDF */

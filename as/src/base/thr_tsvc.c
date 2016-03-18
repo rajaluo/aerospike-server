@@ -70,7 +70,6 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 		as_partition_release(&tr->rsv);
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 		MICROBENCHMARK_HIST_INSERT_P(error_hist);
-		as_fabric_msg_put(tr->proxy_msg);
 	} else {
 		cf_debug(AS_TSVC,
 				"write start failed: rv %d proto result %d", rv,
@@ -83,7 +82,7 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 
-		if (tr->proxy_msg) {
+		if (tr->proxy_node != 0) {
 			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
 				cf_detail_digest(AS_RW, &(tr->keyd),
 						"SHIPPED_OP :: Sending ship op reply, rc %d to (%"PRIx64") ::",
@@ -94,8 +93,9 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 						"sending proxy reply, rc %d to %"PRIx64"",
 						tr->result_code, tr->proxy_node);
 			}
-			as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
+			as_proxy_send_response(tr->proxy_node, tr->proxy_tid,
 					tr->result_code, 0, 0, 0, 0, 0, 0, as_transaction_trid(tr), NULL);
+			// TODO - should we zero proxy_node?
 		}
 		else {
 			as_transaction_error(tr, tr->result_code);
@@ -406,8 +406,9 @@ process_transaction(as_transaction *tr)
 					"Failing the shipped op due to reservation error %d",
 					rv);
 
-			as_proxy_send_response(tr->proxy_node, tr->proxy_msg,
+			as_proxy_send_response(tr->proxy_node, tr->proxy_tid,
 					AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, 0, 0, 0, 0, as_transaction_trid(tr), NULL);
+			// TODO - shouldn't this be in the proxyee clause?
 		}
 		else if (tr->proto_fd_h) {
 			// Divert the transaction into the proxy system; in this case, no
@@ -420,11 +421,12 @@ process_transaction(as_transaction *tr)
 			as_proxy_divert(dest, tr, ns, partition_cluster_key);
 			free_msgp = false;
 		}
-		else if (tr->proxy_msg) {
+		else if (tr->proxy_node != 0) {
 			as_partition_id pid = as_partition_getid(tr->keyd);
 			cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
 
 			as_proxy_return_to_sender(tr, redirect_node);
+			// TODO - should we zero proxy_node?
 		}
 		else if (tr->iudf_orig) {
 			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);

@@ -128,20 +128,6 @@ proxy_id_hash(void *value)
 }
 
 
-// Sometimes it's good for other units (currently, thr_write) to be able to tell
-// whether two proxy messages are really the "same". This function assumes
-// you've already compared the nodes they came from.
-int
-as_proxy_msg_compare(msg *m1, msg *m2)
-{
-	uint32_t tid1;
-	uint32_t tid2;
-	msg_get_uint32(m1, PROXY_FIELD_TID, &tid1);
-	msg_get_uint32(m2, PROXY_FIELD_TID, &tid2);
-	return tid1 == tid2 ? 0 : -1;
-}
-
-
 void as_proxy_set_stat_counters(int rv) {
 	if (rv == 0) {
 		cf_atomic_int_incr(&g_config.stat_proxy_success);
@@ -258,7 +244,7 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 	msg_set_uint32(m, PROXY_FIELD_INFO, info);
 
 	cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP %s->WINNER msg %p Proxy Sent to %"PRIx64" %p tid(%d)",
-			wr->proxy_msg ? "NONORIG" : "ORIG", m, dst, wr, tid);
+			wr->proxy_node != 0 ? "NONORIG" : "ORIG", m, dst, wr, tid);
 
 	// Fill out a retransmit structure, insert into the retransmit hash.
 	msg_incr_ref(m);
@@ -360,14 +346,12 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 	//    in that case send response back to the proxy originating node.
 
 	// Case 1: Non-originating node.
-	if (wr->proxy_msg) {
+	if (wr->proxy_node != 0) {
 		// Remember that "digest" gets printed at the end of cf_detail_digest().
 		// Fake the ORIGINATING Proxy tid
-		uint32_t transaction_id = 0;
-		msg_get_uint32(wr->proxy_msg, PROXY_FIELD_TID, &transaction_id);
-		msg_set_uint32(m, PROXY_FIELD_TID, transaction_id);
+		msg_set_uint32(m, PROXY_FIELD_TID, wr->proxy_tid);
 		cf_detail_digest(AS_PROXY, &(wr->keyd), "SHIPPED_OP NON-ORIG :: Got Op Response(%p) :", wr);
-		cf_detail_digest(AS_PROXY, &(wr->keyd), "SHIPPED_OP NON-ORIG :: Back Forwarding Response for tid (%d). : ", transaction_id);
+		cf_detail_digest(AS_PROXY, &(wr->keyd), "SHIPPED_OP NON-ORIG :: Back Forwarding Response for tid (%d). : ", wr->proxy_tid);
 		if (0 != (rv = as_fabric_send(wr->proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM))) {
 			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP NONORIG Failed Forwarding Response");
 			as_fabric_msg_put(m);
@@ -531,7 +515,8 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			if (! as_proto_wrapped_is_valid(proto, sz)) {
 				cf_warning(AS_PROXY, "proxyee got unusable proto: version %u, type %u, sz %lu [%lu]",
 						proto->version, proto->type, proto->sz, sz);
-				as_proxy_send_response(id, m, AS_PROTO_RESULT_FAIL_UNKNOWN,
+				as_fabric_msg_put(m);
+				as_proxy_send_response(id, transaction_id, AS_PROTO_RESULT_FAIL_UNKNOWN,
 						0, 0, NULL, NULL, 0, NULL, 0, NULL);
 				return 0;
 			}
@@ -554,7 +539,6 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			MICROBENCHMARK_SET_TO_START();
 
 			tr.proxy_node = id;
-			tr.proxy_msg = m;
 			as_transaction_proxyee_prepare(&tr);
 
 			// For batch sub-transactions, make sure we flag them so they're not
@@ -573,6 +557,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest ");
 			}
 
+			as_fabric_msg_put(m);
 			thr_tsvc_enqueue(&tr);
 		}
 		break;
@@ -784,51 +769,43 @@ SendFin:
 
 
 // Send a redirection message - consumes the message.
-int
+void
 as_proxy_return_to_sender(const as_transaction *tr, cf_node redirect_node)
 {
-	int rv;
-	uint32_t tid;
+	msg *m = as_fabric_msg_get(M_TYPE_PROXY);
 
-	cf_debug(AS_PROXY, "return proxy to sender: (%"PRIx64") :", tr->proxy_node);
-
-	msg_get_uint32(tr->proxy_msg, PROXY_FIELD_TID, &tid);
-
-	msg_reset(tr->proxy_msg);
-	msg_set_uint32(tr->proxy_msg, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
-	msg_set_uint32(tr->proxy_msg, PROXY_FIELD_TID, tid);
-	msg_set_uint64(tr->proxy_msg, PROXY_FIELD_REDIRECT,
-			redirect_node == (cf_node)0 ? tr->proxy_node : redirect_node);
-
-	if (0 != (rv = as_fabric_send(tr->proxy_node, tr->proxy_msg,
-			AS_FABRIC_PRIORITY_MEDIUM))) {
-		cf_debug(AS_PROXY, "sending redirection failed: fabric send error %d", rv);
-		as_fabric_msg_put(tr->proxy_msg);
+	if (! m) {
+		return;
 	}
 
-	return 0;
+	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
+	msg_set_uint32(m, PROXY_FIELD_TID, tr->proxy_tid);
+	msg_set_uint64(m, PROXY_FIELD_REDIRECT,
+			redirect_node == (cf_node)0 ? tr->proxy_node : redirect_node);
+
+	if (0 != as_fabric_send(tr->proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM)) {
+		as_fabric_msg_put(m);
+	}
 } // end as_proxy_send_redirect()
 
 
 // Looked up the message in the store. Time to send the response value back to
 // the requester. The CF_BYTEARRAY is handed off in this case. If you want to
 // keep a reference, then keep the reference yourself.
-int
-as_proxy_send_response(cf_node dst, msg *m, uint32_t result_code, uint32_t generation,
-		uint32_t void_time, as_msg_op **ops, as_bin **bins, uint16_t bin_count,
-		as_namespace *ns, uint64_t trid, const char *setname)
+void
+as_proxy_send_response(cf_node dst, uint32_t proxy_tid, uint32_t result_code,
+		uint32_t generation, uint32_t void_time, as_msg_op **ops, as_bin **bins,
+		uint16_t bin_count, as_namespace *ns, uint64_t trid,
+		const char *setname)
 {
-	uint32_t tid;
-	msg_get_uint32(m, PROXY_FIELD_TID, &tid);
+	msg *m = as_fabric_msg_get(M_TYPE_PROXY);
 
-#ifdef DEBUG
-	cf_debug(AS_PROXY, "proxy send response: message %p bytearray %p tid %d", m, result_code, tid);
-#endif
-
-	msg_reset(m);
+	if (! m) {
+		return;
+	}
 
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RESPONSE);
-	msg_set_uint32(m, PROXY_FIELD_TID, tid);
+	msg_set_uint32(m, PROXY_FIELD_TID, proxy_tid);
 
 	size_t msg_sz = 0;
 	cl_msg * msgp = as_msg_make_response_msg(result_code, generation, void_time, ops,
@@ -841,24 +818,19 @@ as_proxy_send_response(cf_node dst, msg *m, uint32_t result_code, uint32_t gener
 		cf_debug(AS_PROXY, "sending proxy response: fabric send err %d, catch you on the retry", rv);
 		as_fabric_msg_put(m);
 	}
-
-	return 0;
 } // end as_proxy_send_response()
 
-int
-as_proxy_send_ops_response(cf_node dst, msg *m, cf_dyn_buf *db)
+void
+as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf *db)
 {
-	uint32_t tid;
-	msg_get_uint32(m, PROXY_FIELD_TID, &tid);
+	msg *m = as_fabric_msg_get(M_TYPE_PROXY);
 
-#ifdef DEBUG
-	cf_debug(AS_PROXY, "proxy send response: message %p bytearray %p tid %d", m, result_code, tid);
-#endif
-
-	msg_reset(m);
+	if (! m) {
+		return;
+	}
 
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RESPONSE);
-	msg_set_uint32(m, PROXY_FIELD_TID, tid);
+	msg_set_uint32(m, PROXY_FIELD_TID, proxy_tid);
 
 	uint8_t *msgp = db->buf;
 	size_t msg_sz = db->used_sz;
@@ -876,8 +848,6 @@ as_proxy_send_ops_response(cf_node dst, msg *m, cf_dyn_buf *db)
 		cf_debug(AS_PROXY, "sending proxy response: fabric send err %d, catch you on the retry", rv);
 		as_fabric_msg_put(m);
 	}
-
-	return 0;
 } // end as_proxy_send_ops_response()
 
 

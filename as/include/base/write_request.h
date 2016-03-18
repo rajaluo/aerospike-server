@@ -69,7 +69,7 @@ typedef struct write_request_s {
 	// Where initial write request comes from.
 	as_file_handle     * proto_fd_h;
 	cf_node              proxy_node;
-	msg                * proxy_msg;
+	uint32_t             proxy_tid;
 
 	// The incoming msgp from the transaction that created this request.
 	cl_msg             * msgp;

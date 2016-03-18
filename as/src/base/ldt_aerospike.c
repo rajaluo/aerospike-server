@@ -314,7 +314,7 @@ slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 	// Chunk Record Does not respond for proxy request
 	c_tr->proto_fd_h           = NULL;       // Need not reply
 	c_tr->proxy_node           = 0;          // ??
-	c_tr->proxy_msg            = NULL;       // ??
+	c_tr->proxy_tid            = 0;          // ??
 
 	// Chunk Record Does not respond back to the client
 	c_tr->result_code          = 0;
