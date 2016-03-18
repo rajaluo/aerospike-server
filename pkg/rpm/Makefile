@@ -32,8 +32,8 @@ else
 	install -d $(BUILD_ROOT)/var/log/aerospike
 	install -d $(BUILD_ROOT)/var/run/aerospike
 	install -d $(BUILD_ROOT)/etc/init.d
-endif
 	install -d $(BUILD_ROOT)/etc/logrotate.d
+endif
 	install -d $(BUILD_ROOT)/usr/bin
 
 	install -pm 755 $(BIN_DIR)/asd $(BUILD_ROOT)/usr/bin/asd
@@ -60,8 +60,8 @@ ifeq ($(USE_SYSTEMD),1)
 else
 	install -pm 755 $(DEPTH)/as/etc/init-script $(BUILD_ROOT)/etc/init.d/aerospike
 	sed -i 's/@EDITION@/$(EDITION)/g' $(BUILD_ROOT)/etc/init.d/aerospike
-endif
 	install -pm 644 $(DEPTH)/as/etc/logrotate_asd $(BUILD_ROOT)/etc/logrotate.d/aerospike
+endif
 
 ifeq ($(USE_ASM),1)
 	install -pm 644 $(DEPTH)/as/etc/initfns $(BUILD_ROOT)/etc/aerospike
@@ -87,7 +87,9 @@ package:
 	install -d $(SOURCE_ROOT)/RPMS/x86_64
 
 	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/rpm/server-spec-base > $(PKG)/rpm/aerospike.spec
+ifneq ($(USE_SYSTEMD),1)
 	cat $(PKG)/rpm/server-spec-logrotate >> $(PKG)/rpm/aerospike.spec
+endif
 	cat $(PKG)/rpm/server-spec-files >> $(PKG)/rpm/aerospike.spec
 ifeq ($(USE_SYSTEMD),1)
 	cat $(PKG)/rpm/server-spec-systemd >> $(PKG)/rpm/aerospike.spec
