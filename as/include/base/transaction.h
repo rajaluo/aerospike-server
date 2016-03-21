@@ -145,8 +145,27 @@ void as_end_of_transaction_force_close(as_file_handle *proto_fd_h);
 #define AS_TRANSACTION_FLAG_UNUSED_8        0x0008 // deprecated LDT_SUB
 #define AS_TRANSACTION_FLAG_SINDEX_TOUCHED  0x0010
 
+// How to interpret the 'from' union.
+//
+// NOT a generic transaction type flag, e.g. batch sub-transactions that proxy
+// are FROM_PROXY on the proxyee node, hence we still need a separate
+// AS_TRANSACTION_FLAG_BATCH_SUB.
+//
+typedef enum {
+	// External, comes through demarshal or fabric:
+	FROM_CLIENT	= 1,
+	FROM_PROXY,
+
+	// Internal, generated on local node:
+	FROM_BATCH,
+	FROM_IUDF,
+	FROM_NSUP,
+
+	FROM_UNDEF	= 0
+} transaction_origin;
+
 struct iudf_origin_s;
-struct as_batch_shared;
+struct as_batch_shared_s;
 
 /* as_transaction
  * The basic unit of work
@@ -188,20 +207,21 @@ typedef struct as_transaction_s {
 	/* the reservation of the partition (and thus tree) I'm acting against */
 	as_partition_reservation rsv;
 
-	/******* Infrequently or conditionally accessed fields ************/
-	/* The origin of the transaction: either a file descriptor for a socket
-	 * or a node ID */
-	as_file_handle	* proto_fd_h;
-	cf_node 	      proxy_node;
-	uint32_t          proxy_tid;
+	// TODO - eventually move this near the top...
+	uint8_t origin;
+	union {
+		void*						any;
+		as_file_handle*				proto_fd_h;
+		cf_node						proxy_node;
+		struct iudf_origin_s*		iudf_orig;
+		struct as_batch_shared_s*	batch_shared;
+	} from;
 
-	/* User data corresponding to the internally created transaction
-	   first user is Scan UDF */
-	struct iudf_origin_s * iudf_orig;
-
-	// Batch
-	struct as_batch_shared* batch_shared;
-	uint32_t batch_index;
+	union {
+		uint32_t any;
+		uint32_t proxy_tid;
+		uint32_t batch_index;
+	} from_data;
 
 	// TODO - another re-org of this structure...
 	uint32_t void_time;

@@ -58,11 +58,6 @@
 #include "fabric/paxos.h"
 
 
-// Turn these OFF for production.
-//#define DEBUG 1
-//#define DEBUG_VERBOSE 1
-//#define EXTRA_CHECKS 1
-
 // Template for migrate messages.
 #define PROXY_FIELD_OP 0
 #define PROXY_FIELD_TID 1
@@ -90,27 +85,34 @@ msg_template proxy_mt[] = {
 	{ PROXY_FIELD_INFO, M_FT_UINT32 },
 };
 
-typedef struct {
+typedef struct proxy_request_s {
+	uint32_t		msg_fields;
 
-	as_file_handle	*fd_h;       // holds the response fd we're going to have to send back to
+	uint8_t			origin;
+	union {
+		void*				any;
+		as_file_handle*		proto_fd_h;
+		as_batch_shared*	batch_shared;
+		// No need for other members of this union.
+	} from;
+	// No need yet for a 'from_data" union.
+	uint32_t		batch_index;
+
+	write_request	*wr; // origin info for ship-op proxies
+
+	uint64_t		start_time;
+	uint64_t		end_time;
+
 	msg		        *fab_msg;    // this is the fabric message in case we have to retransmit
 	cf_clock         xmit_ms;    // the ms time of the NEXT retransmit
 	uint32_t         retry_interval_ms; // number of ms to wait next time
-
-	uint32_t         msg_fields;
-	uint64_t         start_time;
-	uint64_t         end_time;
 
 	cf_node          dest; // the node we're sending to
 	// These are very helpful in the error case of needing to re-redirect.
 	// Arguably, it's so rare that it's better to recalculate these.
 	as_partition_id  pid;
+
 	as_namespace    *ns;
-	// Write request on resolving node.
-	write_request   *wr;
-	// Common batch data.
-	struct as_batch_shared* batch_shared;
-	uint32_t batch_index;
 } proxy_request;
 
 
@@ -170,31 +172,40 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_REQUEST);
 	msg_set_uint32(m, PROXY_FIELD_TID, tid);
 	msg_set_buf(m, PROXY_FIELD_DIGEST, (void *) &tr->keyd, sizeof(cf_digest), MSG_SET_COPY);
-	msg_set_type msettype = tr->batch_shared ? MSG_SET_COPY : MSG_SET_HANDOFF_MALLOC;
+	msg_set_type msettype = tr->origin == FROM_BATCH ? MSG_SET_COPY : MSG_SET_HANDOFF_MALLOC;
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void *) tr->msgp, as_proto_size_get(&tr->msgp->proto), msettype);
 	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, cluster_key);
-
-	tr->msgp = 0;
 
 	cf_debug_digest(AS_PROXY, &tr->keyd, "proxy_divert: fab_msg %p dst %"PRIx64, m, dst);
 
 	// Fill out a retransmit structure, insert into the retransmit hash.
 	msg_incr_ref(m);
+
 	proxy_request pr;
+
 	pr.msg_fields = tr->msg_fields;
+
+	pr.origin = tr->origin;
+	pr.from.any = tr->from.any;
+	pr.batch_index = tr->from_data.batch_index;
+
+	pr.wr = NULL;
+
 	pr.start_time = tr->start_time;
 	pr.end_time = tr->end_time;
-	pr.fd_h = tr->proto_fd_h;
-	tr->proto_fd_h = 0;
+
 	pr.fab_msg = m;
 	pr.xmit_ms = cf_getms() + g_config.transaction_retry_ms;
 	pr.retry_interval_ms = g_config.transaction_retry_ms;
+
 	pr.dest = dst;
 	pr.pid = pid;
 	pr.ns = ns;
-	pr.wr = NULL;
-	pr.batch_shared = tr->batch_shared;
-	pr.batch_index = tr->batch_index;
+
+	// TODO - bother cleaning tr on the way out?
+	tr->msgp = NULL;
+	tr->origin = 0; // ???
+	tr->from.any = NULL;
 
 	if (0 != shash_put(g_proxy_hash, &tid, &pr)) {
 		cf_debug(AS_PROXY, " shash_put failed, need cleanup code");
@@ -244,24 +255,31 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 	msg_set_uint32(m, PROXY_FIELD_INFO, info);
 
 	cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP %s->WINNER msg %p Proxy Sent to %"PRIx64" %p tid(%d)",
-			wr->proxy_node != 0 ? "NONORIG" : "ORIG", m, dst, wr, tid);
+			wr->from.proxy_node != 0 ? "NONORIG" : "ORIG", m, dst, wr, tid);
 
 	// Fill out a retransmit structure, insert into the retransmit hash.
 	msg_incr_ref(m);
 	proxy_request pr;
-	pr.msg_fields  = wr->msg_fields;
-	pr.start_time  = wr->start_time;
-	pr.end_time    = wr->end_time;
-	cf_rc_reserve(wr);
-	pr.wr          = wr;
-	pr.fab_msg     = m;
-	pr.xmit_ms     = cf_getms() + g_config.transaction_retry_ms;
-	pr.retry_interval_ms = g_config.transaction_retry_ms;
-	pr.dest        = dst;
-	pr.pid         = pid;
-	pr.fd_h        = NULL;
-	pr.batch_shared = NULL;
+
+	pr.msg_fields = wr->msg_fields;
+
+	pr.origin = 0;
+	pr.from.any = NULL;
 	pr.batch_index = 0;
+
+	cf_rc_reserve(wr);
+	pr.wr = wr;
+
+	pr.start_time = wr->start_time;
+	pr.end_time = wr->end_time;
+
+	pr.fab_msg = m;
+	pr.xmit_ms = cf_getms() + g_config.transaction_retry_ms;
+	pr.retry_interval_ms = g_config.transaction_retry_ms;
+
+	pr.dest = dst;
+	pr.pid = pid;
+	pr.ns = NULL; // needed only for retry, which ship-op doesn't do
 
 	if (0 != shash_put(g_proxy_hash, &tid, &pr)) {
 		cf_info(AS_PROXY, " shash_put failed, need cleanup code");
@@ -335,7 +353,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 	if (!wr) {
 		return -1;
 	}
-	cf_assert((pr->fd_h == NULL), AS_PROXY, CF_WARNING, "fd_h set for shipop proxy response");
+	cf_assert((pr->origin == 0), AS_PROXY, CF_WARNING, "origin set for shipop proxy response");
 
 	// If there is a write request hanging from pr then this is a response to
 	// the proxy ship op request. This node is the resolving node (node @ which
@@ -346,31 +364,25 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 	//    in that case send response back to the proxy originating node.
 
 	// Case 1: Non-originating node.
-	if (wr->proxy_node != 0) {
+	if (wr->origin == FROM_PROXY) {
 		// Remember that "digest" gets printed at the end of cf_detail_digest().
 		// Fake the ORIGINATING Proxy tid
-		msg_set_uint32(m, PROXY_FIELD_TID, wr->proxy_tid);
+		msg_set_uint32(m, PROXY_FIELD_TID, wr->from_data.proxy_tid);
 		cf_detail_digest(AS_PROXY, &(wr->keyd), "SHIPPED_OP NON-ORIG :: Got Op Response(%p) :", wr);
-		cf_detail_digest(AS_PROXY, &(wr->keyd), "SHIPPED_OP NON-ORIG :: Back Forwarding Response for tid (%d). : ", wr->proxy_tid);
-		if (0 != (rv = as_fabric_send(wr->proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM))) {
+		cf_detail_digest(AS_PROXY, &(wr->keyd), "SHIPPED_OP NON-ORIG :: Back Forwarding Response for tid (%d). : ", wr->from_data.proxy_tid);
+		if (0 != (rv = as_fabric_send(wr->from.proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM))) {
 			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP NONORIG Failed Forwarding Response");
 			as_fabric_msg_put(m);
 		}
 		*free_msg = false;
 	}
-	// Case 2: Originating node.
+	// Case 2: Originating node. FROM_CLIENT
 	else {
 		cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Got Op Response");
 		pthread_mutex_lock(&wr->lock);
-		if (wr->proto_fd_h) {
-			if (!wr->proto_fd_h->fd) {
+		if (wr->origin == FROM_CLIENT) {
+			if (! wr->from.proto_fd_h->fd) {
 				cf_warning_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing fd in proto_fd ");
-
-				// TODO - this is temporary defensive code!
-				if (! pr->batch_shared) {
-					as_end_of_transaction_ok(wr->proto_fd_h);
-					wr->proto_fd_h = 0;
-				}
 			}
 			else {
 				as_proto *proto;
@@ -379,54 +391,37 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 					cf_info(AS_PROXY, "msg get buf failed!");
 				}
 
-				if (pr->batch_shared) {
-					// TODO - this is temporary defensive code!
-					cf_warning(AS_PROXY, "batch transaction in proxy 'ship-op' - unexpected");
-
-					cf_digest* digest;
-					size_t digest_sz = 0;
-
-					if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (byte **)&digest, &digest_sz, MSG_GET_DIRECT) == 0) {
-						as_batch_add_proxy_result(pr->batch_shared, pr->batch_index, digest, (cl_msg*)proto, proto_sz);
+				size_t pos = 0;
+				while (pos < proto_sz) {
+					rv = send(wr->from.proto_fd_h->fd, (((uint8_t *)proto) + pos), proto_sz - pos, MSG_NOSIGNAL);
+					if (rv > 0) {
+						pos += rv;
 					}
-					else {
-						cf_warning(AS_PROXY, "Failed to find batch proxy digest");
-						as_batch_add_error(pr->batch_shared, pr->batch_index, AS_PROTO_RESULT_FAIL_UNKNOWN);
-					}
-				}
-				else {
-					size_t pos = 0;
-					while (pos < proto_sz) {
-						rv = send(wr->proto_fd_h->fd, (((uint8_t *)proto) + pos), proto_sz - pos, MSG_NOSIGNAL);
-						if (rv > 0) {
-							pos += rv;
-						}
-						else if (rv < 0) {
-							if (errno != EWOULDBLOCK) {
-								// Common message when a client aborts.
-								cf_debug(AS_PROTO, "protocol proxy write fail: fd %d "
-										"sz %d pos %d rv %d errno %d",
-										wr->proto_fd_h->fd, proto_sz, pos, rv, errno);
-								as_end_of_transaction_force_close(wr->proto_fd_h);
-								wr->proto_fd_h = 0;
-								break;
-							}
-							usleep(1); // yield
-						}
-						else {
-							cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ",
-									wr->proto_fd_h->fd, proto_sz, pos);
-							as_end_of_transaction_force_close(wr->proto_fd_h);
-							wr->proto_fd_h = 0;
+					else if (rv < 0) {
+						if (errno != EWOULDBLOCK) {
+							// Common message when a client aborts.
+							cf_debug(AS_PROTO, "protocol proxy write fail: fd %d "
+									"sz %d pos %d rv %d errno %d",
+									wr->from.proto_fd_h->fd, proto_sz, pos, rv, errno);
+							as_end_of_transaction_force_close(wr->from.proto_fd_h);
+							wr->from.proto_fd_h = NULL;
 							break;
 						}
+						usleep(1); // yield
 					}
-					cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Response Sent to Client");
+					else {
+						cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ",
+								wr->from.proto_fd_h->fd, proto_sz, pos);
+						as_end_of_transaction_force_close(wr->from.proto_fd_h);
+						wr->from.proto_fd_h = NULL;
+						break;
+					}
+				}
+				cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Response Sent to Client");
 
-					if (wr->proto_fd_h) {
-						as_end_of_transaction_ok(wr->proto_fd_h);
-						wr->proto_fd_h = 0;
-					}
+				if (wr->from.proto_fd_h) {
+					as_end_of_transaction_ok(wr->from.proto_fd_h);
+					wr->from.proto_fd_h = NULL; // pattern, not needed
 				}
 			}
 		} else {
@@ -434,17 +429,11 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 			// will be cleaned up by then
 			cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing proto_fd ");
 
-			// Note: currently it should be impossible to have a callback here,
-			// since internal UDFs don't proxy.
-			if (wr->iudf_orig) {
-				// TODO - this is temporary defensive code!
-				if (pr->batch_shared) {
-					cf_warning(AS_PROXY, "as_proxy_shipop_response_hdlr(): request callback exists for batch.");
-				}
-
+			if (wr->origin == FROM_IUDF) {
+				// TODO - can we really get here?
 				as_transaction tr;
 				write_request_init_tr(&tr, wr);
-				tr.iudf_orig->cb(&tr, 0);
+				tr.from.iudf_orig->cb(&tr, 0);
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -489,14 +478,9 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 		{
 			cf_atomic_int_incr(&g_config.proxy_action);
 
-#ifdef DEBUG
-			cf_debug(AS_PROXY, "Proxy_msg: received request");
-#ifdef DEBUG_VERBOSE
-			msg_dump(m, "incoming proxy msg");
-#endif
-#endif
 			cf_digest *key;
 			size_t sz = 0;
+
 			if (0 != msg_get_buf(m, PROXY_FIELD_DIGEST, (byte **) &key, &sz, MSG_GET_DIRECT)) {
 				cf_info(AS_PROXY, "proxy msg function: no digest, problem");
 				as_fabric_msg_put(m);
@@ -538,7 +522,9 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			tr.start_time = cf_getns();
 			MICROBENCHMARK_SET_TO_START();
 
-			tr.proxy_node = id;
+			tr.origin = FROM_PROXY;
+			tr.from.proxy_node = id;
+			tr.from_data.proxy_tid = transaction_id;
 			as_transaction_proxyee_prepare(&tr);
 
 			// For batch sub-transactions, make sure we flag them so they're not
@@ -564,90 +550,63 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 
 		case PROXY_OP_RESPONSE:
 		{
-#ifdef DEBUG
-			// Got the response from the actual endpoint.
-			cf_debug(AS_PROXY, " proxy: received response! tid %d node %"PRIx64, transaction_id, id);
-#ifdef DEBUG_VERBOSE
-			msg_dump(m, "incoming proxy response");
-#endif
-#endif
-
 			// Look up the element.
 			proxy_request pr;
 			bool free_msg = true;
+
 			if (SHASH_OK == shash_get_and_delete(g_proxy_hash, &transaction_id, &pr)) {
 				// Found the element (sometimes we get two acks so it's OK for
 				// an ack to not find the transaction).
 
 				if (pr.wr) {
 					as_proxy_shipop_response_hdlr(m, &pr, &free_msg);
-				} else {
+				}
+				else {
 					as_proto *proto;
 					size_t proto_sz;
 					if (0 != msg_get_buf(m, PROXY_FIELD_AS_PROTO, (byte **) &proto, &proto_sz, MSG_GET_DIRECT)) {
 						cf_info(AS_PROXY, "msg get buf failed!");
 					}
 
-#ifdef DEBUG_VERBOSE
-					cf_debug(AS_PROXY, "proxy: sending proto response: ptr %p sz %"PRIu64" %d", proto, proto_sz, pr.fd);
-					for (size_t _i = 0; _i < proto_sz; _i++) {
-						fprintf(stderr, " %x", ((byte *)proto)[_i]);
-						if (_i % 16 == 15) {
-							fprintf(stderr, "\n");
-						}
-					}
-#endif
-
-#ifdef EXTRA_CHECKS
-					as_proto proto_copy = *proto;
-					as_proto_swap(&proto_copy);
-					if (proto_copy.sz + 8 != proto_sz) {
-						cf_info(AS_PROXY, "BONE BONE BONE!!!");
-						cf_info(AS_PROXY, "proto sz: %"PRIu64" sz %u", (uint64_t) proto_copy.sz, proto_sz);
-					}
-#endif
-
-					// Write to the file descriptor.
-					cf_detail(AS_PROXY, "direct write fd %d", pr.fd_h->fd);
-					cf_assert(pr.fd_h->fd, AS_PROXY, CF_WARNING, "attempted write to fd 0");
-
-					if (pr.batch_shared) {
+					if (pr.origin == FROM_BATCH) {
 						cf_digest* digest;
 						size_t digest_sz = 0;
 
 						if (msg_get_buf(pr.fab_msg, PROXY_FIELD_DIGEST, (byte **)&digest, &digest_sz, MSG_GET_DIRECT) == 0) {
-							as_batch_add_proxy_result(pr.batch_shared, pr.batch_index, digest, (cl_msg*)proto, proto_sz);
+							as_batch_add_proxy_result(pr.from.batch_shared, pr.batch_index, digest, (cl_msg*)proto, proto_sz);
 							as_proxy_set_stat_counters(0);
 						}
 						else {
 							cf_warning(AS_PROXY, "Failed to find batch proxy digest %u", transaction_id);
-							as_batch_add_error(pr.batch_shared, pr.batch_index, AS_PROTO_RESULT_FAIL_UNKNOWN);
+							as_batch_add_error(pr.from.batch_shared, pr.batch_index, AS_PROTO_RESULT_FAIL_UNKNOWN);
 							as_proxy_set_stat_counters(-1);
 						}
 						cf_hist_track_insert_data_point(g_config.px_hist, pr.start_time);
 					}
-					else {
+					else { // FROM_CLIENT - TODO - make this a switch!
+						cf_assert(pr.origin == FROM_CLIENT, AS_PROXY, CF_CRITICAL, "proxy response for unexpected origin %u", pr.origin);
+						cf_assert(pr.from.proto_fd_h, AS_PROXY, CF_CRITICAL, "null file handle");
+
 						size_t pos = 0;
 						while (pos < proto_sz) {
-							rv = send(pr.fd_h->fd, (((uint8_t *)proto) + pos), proto_sz - pos, MSG_NOSIGNAL);
+							rv = send(pr.from.proto_fd_h->fd, (((uint8_t *)proto) + pos), proto_sz - pos, MSG_NOSIGNAL);
 							if (rv > 0) {
 								pos += rv;
 							}
 							else if (rv < 0) {
 								if (errno != EWOULDBLOCK) {
-									// Common message when a client aborts.
-									cf_debug(AS_PROTO, "protocol proxy write fail: fd %d sz %d pos %d rv %d errno %d", pr.fd_h->fd, proto_sz, pos, rv, errno);
-									as_end_of_transaction_force_close(pr.fd_h);
-									pr.fd_h = 0;
+									// Common when a client aborts.
+									as_end_of_transaction_force_close(pr.from.proto_fd_h);
+									pr.from.proto_fd_h = NULL;
 									as_proxy_set_stat_counters(-1);
 									goto SendFin;
 								}
 								usleep(1); // yield
 							}
 							else {
-								cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", pr.fd_h->fd, proto_sz, pos);
-								as_end_of_transaction_force_close(pr.fd_h);
-								pr.fd_h = 0;
+								cf_warning(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", pr.from.proto_fd_h->fd, proto_sz, pos);
+								as_end_of_transaction_force_close(pr.from.proto_fd_h);
+								pr.from.proto_fd_h = NULL;
 								as_proxy_set_stat_counters(-1);
 								goto SendFin;
 							}
@@ -658,9 +617,9 @@ SendFin:
 
 						// Return the fabric message or the direct file descriptor -
 						// after write and complete.
-						if (pr.fd_h) {
-							as_end_of_transaction_ok(pr.fd_h);
-							pr.fd_h = 0;
+						if (pr.from.proto_fd_h) {
+							as_end_of_transaction_ok(pr.from.proto_fd_h);
+							pr.from.proto_fd_h = NULL; // pattern, not needed
 						}
 					}
 					as_fabric_msg_put(pr.fab_msg);
@@ -684,6 +643,7 @@ SendFin:
 			proxy_request *pr;
 			pthread_mutex_t *pr_lock;
 			int r = 0;
+
 			if (0 != (r = shash_get_vlock(g_proxy_hash, &transaction_id, (void **)&pr, &pr_lock))) {
 				cf_debug(AS_PROXY, "redirect: could not find transaction %d", transaction_id);
 				as_fabric_msg_put(m);
@@ -740,9 +700,9 @@ SendFin:
 
 			tr.msg_fields = pr->msg_fields;
 			tr.start_time = pr->start_time;
-			tr.proto_fd_h = pr->fd_h;
-			tr.batch_shared = pr->batch_shared;
-			tr.batch_index = pr->batch_index;
+			tr.origin = pr->origin;
+			tr.from.any = pr->from.any;
+			tr.from_data.batch_index = pr->batch_index;
 
 			MICROBENCHMARK_RESET();
 
@@ -779,11 +739,11 @@ as_proxy_return_to_sender(const as_transaction *tr, cf_node redirect_node)
 	}
 
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
-	msg_set_uint32(m, PROXY_FIELD_TID, tr->proxy_tid);
+	msg_set_uint32(m, PROXY_FIELD_TID, tr->from_data.proxy_tid);
 	msg_set_uint64(m, PROXY_FIELD_REDIRECT,
-			redirect_node == (cf_node)0 ? tr->proxy_node : redirect_node);
+			redirect_node == (cf_node)0 ? tr->from.proxy_node : redirect_node);
 
-	if (0 != as_fabric_send(tr->proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM)) {
+	if (0 != as_fabric_send(tr->from.proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM)) {
 		as_fabric_msg_put(m);
 	}
 } // end as_proxy_send_redirect()
@@ -882,42 +842,38 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 				cf_detail_digest(AS_PROXY, &pr->wr->keyd, "SHIPPED_OP Proxy Retransmit Timeout ...");
 				cf_atomic_int_incr(&g_config.ldt_proxy_timeout);
 				pthread_mutex_lock(&pr->wr->lock);
-				// Note: currently it should be impossible to have a callback here,
-				// since internal UDFs don't proxy.
-				if (pr->wr->iudf_orig) {
-					// TODO - this is temporary defensive code!
-					if (pr->batch_shared) {
-						cf_warning(AS_PROXY, "proxy_retransmit_reduce_fn(): request callback exists for batch.");
-					}
-
+				if (pr->wr->origin == FROM_IUDF) {
+					// TODO - can we really get here?
 					as_transaction tr;
 					write_request_init_tr(&tr, pr->wr);
-					tr.iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-
-					if (tr.proto_fd_h) {
-						as_end_of_transaction_force_close(tr.proto_fd_h);
-					}
+					tr.from.iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
 				}
 				pthread_mutex_unlock(&pr->wr->lock);
 				WR_RELEASE(pr->wr);
-				pr->wr            = NULL;
+				pr->wr = NULL;
 			}
 
 			if (pr->fab_msg) {
 				as_fabric_msg_put(pr->fab_msg);
 				pr->fab_msg = 0;
 			}
-			if (pr->ns) {
-				pr->ns = 0;
-			}
-			if (pr->fd_h) {
-				if (pr->batch_shared) {
-					as_batch_add_error(pr->batch_shared, pr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
-				}
-				else {
-					as_end_of_transaction_force_close(pr->fd_h);
-					pr->fd_h = 0;
-				}
+
+			switch (pr->origin) {
+			case FROM_CLIENT:
+				cf_assert(pr->from.proto_fd_h, AS_PROXY, CF_CRITICAL, "null file handle");
+				as_end_of_transaction_force_close(pr->from.proto_fd_h);
+				pr->from.proto_fd_h = NULL; // pattern, not needed
+				break;
+			case FROM_BATCH:
+				as_batch_add_error(pr->from.batch_shared, pr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
+				break;
+			case FROM_PROXY:
+			case FROM_IUDF:
+			case FROM_NSUP:
+				// Proxyees, internal UDFs, and nsup deletes don't proxy.
+			default:
+				cf_crash(AS_PROXY, "unexpected transaction origin %u", pr->origin);
+				break;
 			}
 
 			return SHASH_REDUCE_DELETE;
@@ -986,10 +942,10 @@ Retry:
 				// For old clients, will compute it again from msgp key and set.
 
 				tr.msg_fields = pr->msg_fields;
-				tr.start_time   = pr->start_time;
-				tr.proto_fd_h = pr->fd_h;
-				tr.batch_shared = pr->batch_shared;
-				tr.batch_index = pr->batch_index;
+				tr.origin = pr->origin;
+				tr.from.any = pr->from.any;
+				tr.from_data.batch_index = pr->batch_index;
+				tr.start_time = pr->start_time;
 
 				cf_atomic_int_incr(&g_config.proxy_unproxy);
 

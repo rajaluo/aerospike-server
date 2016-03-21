@@ -680,10 +680,12 @@ thr_demarshal(void *arg)
 					as_transaction tr;
 					as_transaction_init(&tr, NULL, (cl_msg *)proto_p);
 
+					tr.origin = FROM_CLIENT;
+					tr.from.proto_fd_h = fd_h;
+					tr.start_time = now_ns;
+
 					cf_rc_reserve(fd_h);
-					has_extra_ref   = true;
-					tr.proto_fd_h   = fd_h;
-					tr.start_time   = now_ns; // set transaction start time
+					has_extra_ref = true;
 
 					if (! as_proto_is_valid_type(proto_p)) {
 						cf_warning(AS_DEMARSHAL, "unsupported proto message type %u", proto_p->type);

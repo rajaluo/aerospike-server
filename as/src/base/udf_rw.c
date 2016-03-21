@@ -275,17 +275,17 @@ process_result(const as_result * res, udf_call * call, cf_dyn_buf *db )
 // **************************************************************************************************
 
 /**
- * Get UDF call object pointer from parent job via tr->udata.
+ * Get UDF call object pointer from parent job via tr->from.iudf_orig.
  */
 udf_call *
 udf_rw_call_def_init_internal(udf_call * call, as_transaction * tr)
 {
-	call->def = &tr->iudf_orig->def;
+	call->def = &tr->from.iudf_orig->def;
 
-	if (tr->iudf_orig->type == UDF_SCAN_REQUEST) {
+	if (tr->from.iudf_orig->type == UDF_SCAN_REQUEST) {
 		cf_atomic_int_incr(&g_config.udf_scan_rec_reqs);
 	}
-	else if (tr->iudf_orig->type == UDF_QUERY_REQUEST) {
+	else if (tr->from.iudf_orig->type == UDF_QUERY_REQUEST) {
 		cf_atomic_int_incr(&g_config.udf_query_rec_reqs);
 	}
 
@@ -812,7 +812,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		rec_rv = -1;
 	}
 
-	if (rec_rv == -1 && tr->iudf_orig) {
+	if (rec_rv == -1 && tr->origin == FROM_IUDF) {
 		// Internal UDFs must not create records.
 		call->tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
 		process_failure(call, NULL, NULL);

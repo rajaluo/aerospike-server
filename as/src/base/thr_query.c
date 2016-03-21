@@ -1239,11 +1239,11 @@ static void
 query_send_bg_udf_response(as_transaction *tr)
 {
 	cf_detail(AS_QUERY, "Send Fin for Background UDF");
-	bool force_close = as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK);
+	bool force_close = as_msg_send_fin(tr->from.proto_fd_h->fd, AS_PROTO_RESULT_OK);
 	// Note: should be inside release file handle ?
-	tr->proto_fd_h->last_used = cf_getms();
-	as_end_of_transaction(tr->proto_fd_h, force_close);
-	tr->proto_fd_h = 0;
+	tr->from.proto_fd_h->last_used = cf_getms();
+	as_end_of_transaction(tr->from.proto_fd_h, force_close);
+	tr->from.proto_fd_h = NULL;
 }
 
 static bool
@@ -1818,7 +1818,7 @@ const as_aggr_hooks query_aggr_hooks = {
 int
 query_udf_bg_tr_complete(as_transaction *tr, int retcode)
 {
-	as_query_transaction *qtr = (as_query_transaction *)tr->iudf_orig->udata;
+	as_query_transaction *qtr = (as_query_transaction *)tr->from.iudf_orig->udata;
 	if (!qtr) {
 		cf_warning(AS_QUERY, "Complete called with invalid job id");
 		return AS_QUERY_ERR;
@@ -1843,7 +1843,7 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 		return AS_QUERY_OK;
 	}
 
-	tr.iudf_orig = &qtr->origin;
+	tr.from.iudf_orig = &qtr->origin;
 
 	qtr_reserve(qtr, __FILE__, __LINE__);
 	cf_atomic32_incr(&qtr->n_udf_tr_queued);
@@ -2673,7 +2673,7 @@ query_setup_fd(as_query_transaction *qtr, as_transaction *tr)
 	switch (qtr->job_type) {
 		case QUERY_TYPE_LOOKUP:
 		case QUERY_TYPE_AGGR:
-			qtr->fd_h                = tr->proto_fd_h;
+			qtr->fd_h                = tr->from.proto_fd_h;
 			qtr->fd_h->fh_info      |= FH_INFO_DONOT_REAP;
 			break;
 		case QUERY_TYPE_UDF_BG:
@@ -2877,9 +2877,9 @@ as_query(as_transaction *tr, as_namespace *ns)
 
 	if (rv == AS_QUERY_DONE) {
 		// Send FIN packet to client to ignore this.
-		bool force_close = as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0;
-		as_end_of_transaction(tr->proto_fd_h, force_close);
-		tr->proto_fd_h = NULL; // Paranoid
+		bool force_close = as_msg_send_fin(tr->from.proto_fd_h->fd, AS_PROTO_RESULT_OK) != 0;
+		as_end_of_transaction(tr->from.proto_fd_h, force_close);
+		tr->from.proto_fd_h = NULL; // Paranoid
 		if (tr->msgp) {
 			cf_free(tr->msgp);
 			tr->msgp = NULL;
@@ -2913,7 +2913,7 @@ as_query(as_transaction *tr, as_namespace *ns)
 	// Reset msgp to NULL in tr to avoid double free. And it is successful queuing
 	// of query to the query engine. It will reply as needed. Reset proto_fd_h.
 	tr->msgp       = NULL;
-	tr->proto_fd_h = 0;
+	tr->from.proto_fd_h = NULL;
 	return AS_QUERY_OK;
 }
 // **************************************************************************************************

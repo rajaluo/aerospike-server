@@ -615,7 +615,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	// Take ownership of socket from transaction.
-	conn_scan_job_own_fd((conn_scan_job*)job, tr->proto_fd_h);
+	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h);
 
 	cf_info(AS_SCAN, "starting basic scan job %lu {%s:%s} priority %u, sample-pct %u%s%s%s",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
@@ -903,7 +903,7 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	}
 
 	// Take ownership of socket from transaction.
-	conn_scan_job_own_fd((conn_scan_job*)job, tr->proto_fd_h);
+	conn_scan_job_own_fd((conn_scan_job*)job, tr->from.proto_fd_h);
 
 	cf_info(AS_SCAN, "starting aggregation scan job %lu {%s:%s} priority %u",
 			_job->trid, ns->name, as_namespace_get_set_name(ns, set_id),
@@ -1242,17 +1242,17 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	if (as_msg_send_fin(tr->proto_fd_h->fd, AS_PROTO_RESULT_OK) == 0) {
-		tr->proto_fd_h->last_used = cf_getms();
-		as_end_of_transaction_ok(tr->proto_fd_h);
+	if (as_msg_send_fin(tr->from.proto_fd_h->fd, AS_PROTO_RESULT_OK) == 0) {
+		tr->from.proto_fd_h->last_used = cf_getms();
+		as_end_of_transaction_ok(tr->from.proto_fd_h);
 	}
 	else {
 		cf_warning(AS_SCAN, "udf-bg scan job error sending fin");
-		as_end_of_transaction_force_close(tr->proto_fd_h);
+		as_end_of_transaction_force_close(tr->from.proto_fd_h);
 		// No point returning an error - it can't be reported on this socket.
 	}
 
-	tr->proto_fd_h = NULL;
+	tr->from.proto_fd_h = NULL;
 
 	return AS_PROTO_RESULT_OK;
 }
@@ -1354,7 +1354,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return;
 	}
 
-	tr.iudf_orig = &job->origin;
+	tr.from.iudf_orig = &job->origin;
 
 	cf_atomic64_incr(&_job->n_records_read);
 	cf_atomic32_incr(&job->n_active_tr);
@@ -1365,7 +1365,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 int
 udf_bg_scan_tr_complete(as_transaction *tr, int retcode)
 {
-	udf_bg_scan_job* job = (udf_bg_scan_job*)tr->iudf_orig->udata;
+	udf_bg_scan_job* job = (udf_bg_scan_job*)tr->from.iudf_orig->udata;
 
 	cf_atomic32_decr(&job->n_active_tr);
 	cf_atomic64_incr(retcode == 0 ? &job->n_successful_tr : &job->n_failed_tr);

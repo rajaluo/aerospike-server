@@ -4577,10 +4577,10 @@ thr_info_fn(void *unused)
 
 		// Either we'e doing all, or doing some
 		if (pr->sz == 0) {
-			info_all(tr->proto_fd_h, &db);
+			info_all(tr->from.proto_fd_h, &db);
 		}
 		else {
-			info_some((char *)pr->data, (char *)pr->data + pr->sz, tr->proto_fd_h, &db);
+			info_some((char *)pr->data, (char *)pr->data + pr->sz, tr->from.proto_fd_h, &db);
 		}
 
 #ifdef USE_INFO_LOCK
@@ -4602,15 +4602,15 @@ thr_info_fn(void *unused)
 		uint8_t	*b = db.buf;
 		uint8_t	*lim = db.buf + db.used_sz;
 		while (b < lim) {
-			int rv = send(tr->proto_fd_h->fd, b, lim - b, MSG_NOSIGNAL);
+			int rv = send(tr->from.proto_fd_h->fd, b, lim - b, MSG_NOSIGNAL);
 			if ((rv < 0) && (errno != EAGAIN) ) {
 				if (errno == EPIPE) {
-					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", tr->proto_fd_h->fd);
+					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", tr->from.proto_fd_h->fd);
 				} else {
-					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", tr->proto_fd_h->fd, errno);
+					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", tr->from.proto_fd_h->fd, errno);
 				}
-				as_end_of_transaction_force_close(tr->proto_fd_h);
-				tr->proto_fd_h = 0;
+				as_end_of_transaction_force_close(tr->from.proto_fd_h);
+				tr->from.proto_fd_h = NULL;
 				break;
 			}
 			else if (rv > 0)
@@ -4623,9 +4623,9 @@ thr_info_fn(void *unused)
 
 		cf_free(tr->msgp);
 
-		if (tr->proto_fd_h) {
-			as_end_of_transaction_ok(tr->proto_fd_h);
-			tr->proto_fd_h = 0;
+		if (tr->from.proto_fd_h) {
+			as_end_of_transaction_ok(tr->from.proto_fd_h);
+			tr->from.proto_fd_h = NULL;
 		}
 
 		MICROBENCHMARK_HIST_INSERT_P(info_fulfill_hist);
@@ -4650,7 +4650,7 @@ as_info(as_transaction *tr)
 
 	work.tr = *tr;
 
-	tr->proto_fd_h = 0;
+	tr->from.proto_fd_h = NULL;
 	tr->msgp = 0;
 
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(info_tr_q_process_hist);

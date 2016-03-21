@@ -91,14 +91,8 @@ as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 
 	AS_PARTITION_RESERVATION_INIT(tr->rsv);
 
-	tr->proto_fd_h                = 0;
-	tr->proxy_node                = 0;
-	tr->proxy_tid                 = 0;
-
-	tr->iudf_orig                 = 0;
-
-	tr->batch_shared              = 0;
-	tr->batch_index               = 0;
+	tr->from.any                  = NULL;
+	tr->from_data.any             = 0;
 
 	tr->void_time                 = 0;
 }
@@ -288,6 +282,9 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
+	tr->origin = FROM_IUDF;
+	// Caller must set tr->from.iudf_orig immediately afterwards...
+
 	// Do this last, to exclude the setup time in this function.
 	tr->start_time = cf_getns();
 	MICROBENCHMARK_SET_TO_START_P();
@@ -298,8 +295,8 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 void
 as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 {
-	as_msg_send_reply(tr->proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
-	tr->proto_fd_h = NULL;
+	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+	tr->from.proto_fd_h = NULL;
 
 	cf_free(tr->msgp);
 	tr->msgp = NULL;
@@ -308,29 +305,37 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 void
 as_transaction_error(as_transaction* tr, uint32_t error_code)
 {
-	if (tr->proto_fd_h) {
-		if (tr->batch_shared) {
-			as_batch_add_error(tr->batch_shared, tr->batch_index, error_code);
-			// Clear this transaction's msgp so calling code does not free it.
-			tr->msgp = 0;
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		cf_assert(tr->from.proto_fd_h, AS_PROTO, CF_CRITICAL, "null file handle");
+		as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
+		tr->from.proto_fd_h = 0; // pattern, not needed
+		MICROBENCHMARK_HIST_INSERT_P(error_hist);
+		cf_atomic_int_incr(&g_config.err_tsvc_requests);
+		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
+			cf_atomic_int_incr(&g_config.err_tsvc_requests_timeout);
 		}
-		else {
-			as_msg_send_reply(tr->proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
-			tr->proto_fd_h = 0;
-			MICROBENCHMARK_HIST_INSERT_P(error_hist);
-			cf_atomic_int_incr(&g_config.err_tsvc_requests);
-			if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-				cf_atomic_int_incr(&g_config.err_tsvc_requests_timeout);
-			}
-		}
-	}
-	else if (tr->proxy_node != 0) {
-		as_proxy_send_response(tr->proxy_node, tr->proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
-		tr->proxy_node = 0;
-	}
-	else if (tr->iudf_orig) {
-		tr->iudf_orig->cb(tr, error_code);
-		tr->iudf_orig = NULL;
+		break;
+	case FROM_PROXY:
+		cf_assert(tr->from.proxy_node != 0, AS_PROTO, CF_CRITICAL, "no proxy node");
+		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
+		tr->from.proxy_node = 0; // pattern, not needed
+		break;
+	case FROM_BATCH:
+		as_batch_add_error(tr->from.batch_shared, tr->from_data.batch_index, error_code);
+		// Clear this transaction's msgp so calling code does not free it.
+		tr->msgp = NULL;
+		break;
+	case FROM_IUDF:
+		cf_assert(tr->from.iudf_orig, AS_PROTO, CF_CRITICAL, "null iudf origin");
+		tr->from.iudf_orig->cb(tr, error_code);
+		tr->from.iudf_orig = NULL; // pattern, not needed
+		break;
+	case FROM_NSUP:
+		break;
+	default:
+		cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
+		break;
 	}
 }
 

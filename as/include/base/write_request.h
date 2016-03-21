@@ -53,6 +53,7 @@ typedef struct wreq_tr_element_s {
 } wreq_tr_element;
 
 struct iudf_origin_s;
+struct as_batch_shared_s;
 
 // We have to keep track of the first time that all the writes come back, and
 // it's a little harsh. There's an atomic for each outstanding sub-transaction
@@ -67,9 +68,19 @@ typedef struct write_request_s {
 	uint32_t             tid;
 
 	// Where initial write request comes from.
-	as_file_handle     * proto_fd_h;
-	cf_node              proxy_node;
-	uint32_t             proxy_tid;
+	uint8_t              origin;
+	union {
+		void*						any;
+		as_file_handle*				proto_fd_h;
+		cf_node						proxy_node;
+		struct iudf_origin_s*		iudf_orig;
+		struct as_batch_shared_s*	batch_shared;
+	} from;
+	union {
+		uint32_t any;
+		uint32_t batch_index;
+		uint32_t proxy_tid;
+	} from_data;
 
 	// The incoming msgp from the transaction that created this request.
 	cl_msg             * msgp;
@@ -114,8 +125,7 @@ typedef struct write_request_s {
 	as_policy_commit_level        write_commit_level;
 
 	cf_digest            keyd;
-	// udf request data
-	struct iudf_origin_s *iudf_orig;
+
 	bool                 shipped_op;
 	bool                 shipped_op_initiator;
 	bool                 has_udf;
@@ -131,10 +141,6 @@ typedef struct write_request_s {
 	// response that comes back from a given node
 	msg                * dup_msg[AS_CLUSTER_SZ];
 	int                  dup_result_code[AS_CLUSTER_SZ];
-
-	// Batch common data.
-	struct as_batch_shared* batch_shared;
-	uint32_t batch_index;
 } write_request; // this is really an rw_request, but the old name looks pretty
 
 void write_request_destructor (void *object);

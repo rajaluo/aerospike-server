@@ -82,28 +82,20 @@ as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 
-		if (tr->proxy_node != 0) {
-			if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-				cf_detail_digest(AS_RW, &(tr->keyd),
-						"SHIPPED_OP :: Sending ship op reply, rc %d to (%"PRIx64") ::",
-						tr->result_code, tr->proxy_node);
-			}
-			else {
-				cf_detail(AS_RW,
-						"sending proxy reply, rc %d to %"PRIx64"",
-						tr->result_code, tr->proxy_node);
-			}
-			as_proxy_send_response(tr->proxy_node, tr->proxy_tid,
-					tr->result_code, 0, 0, 0, 0, 0, 0, as_transaction_trid(tr), NULL);
-			// TODO - should we zero proxy_node?
-		}
-		else {
-			as_transaction_error(tr, tr->result_code);
-		}
+		as_transaction_error(tr, tr->result_code);
+
 		return -1;
 	}
 	return 0;
 }
+
+
+static inline bool
+should_security_check_data_op(const as_transaction *tr)
+{
+	return tr->origin == FROM_CLIENT || tr->origin == FROM_BATCH;
+}
+
 
 
 // Handle the transaction, including proxy to another node if necessary.
@@ -139,11 +131,11 @@ process_transaction(as_transaction *tr)
 	}
 
 	// Check that the socket is authenticated.
-	if (tr->proto_fd_h) {
-		uint8_t result = as_security_check(tr->proto_fd_h, PERM_NONE);
+	if (tr->origin == FROM_CLIENT) {
+		uint8_t result = as_security_check(tr->from.proto_fd_h, PERM_NONE);
 
 		if (result != AS_PROTO_RESULT_OK) {
-			as_security_log(tr->proto_fd_h, result, PERM_NONE, NULL, NULL);
+			as_security_log(tr->from.proto_fd_h, result, PERM_NONE, NULL, NULL);
 			as_transaction_error(tr, (uint32_t)result);
 			goto Cleanup;
 		}
@@ -285,15 +277,14 @@ process_transaction(as_transaction *tr)
 	}
 
 	// Process the transaction.
-	cf_detail_digest(AS_TSVC, &(tr->keyd), "  wr  tr %p fd %d proxy(%"PRIx64") ::",
-			tr, tr->proto_fd_h ? tr->proto_fd_h->fd : 0, tr->proxy_node);
 
 	cf_node dest;
 	uint64_t partition_cluster_key = 0;
 
 	// Obtain a write reservation - or get the node that would satisfy.
 	if (msgp->msg.info2 & AS_MSG_INFO2_WRITE) {
-		if (tr->proto_fd_h && ! as_security_check_data_op(tr, ns, PERM_WRITE)) {
+		if (should_security_check_data_op(tr) &&
+				! as_security_check_data_op(tr, ns, PERM_WRITE)) {
 			as_transaction_error(tr, tr->result_code);
 			goto Cleanup;
 		}
@@ -325,7 +316,8 @@ process_transaction(as_transaction *tr)
 	}
 	else {  // <><><> READ Transaction <><><>
 
-		if (tr->proto_fd_h && ! as_security_check_data_op(tr, ns, PERM_READ)) {
+		if (should_security_check_data_op(tr) &&
+				! as_security_check_data_op(tr, ns, PERM_READ)) {
 			as_transaction_error(tr, tr->result_code);
 			goto Cleanup;
 		}
@@ -397,49 +389,47 @@ process_transaction(as_transaction *tr)
 		if (0 != rv) {
 			as_rw_process_result(rv, tr, &free_msgp);
 		}
-	} else {
-		// rv != 0 (reservation failed)
-		//
-		// Make sure that if it is shipped op it is not further redirected.
-		if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
-			cf_warning(AS_RW,
-					"Failing the shipped op due to reservation error %d",
-					rv);
+	}
+	else {
+		// <><><><><><>  Reservation Failed  <><><><><><>
 
-			as_proxy_send_response(tr->proxy_node, tr->proxy_tid,
-					AS_PROTO_RESULT_FAIL_UNKNOWN, 0, 0, 0, 0, 0, 0, as_transaction_trid(tr), NULL);
-			// TODO - shouldn't this be in the proxyee clause?
-		}
-		else if (tr->proto_fd_h) {
-			// Divert the transaction into the proxy system; in this case, no
-			// reservation was obtained. Pass the cluster key along.
-
-			// Proxy divert - reroute client message. Note that
-			// as_proxy_divert() consumes the msgp.
-			cf_detail(AS_PROXY, "proxy divert (wr) to %("PRIx64")", tr->proxy_node);
-			// Originating node, no write request associated.
+		switch (tr->origin) {
+		case FROM_CLIENT:
+		case FROM_BATCH:
 			as_proxy_divert(dest, tr, ns, partition_cluster_key);
 			free_msgp = false;
-		}
-		else if (tr->proxy_node != 0) {
-			as_partition_id pid = as_partition_getid(tr->keyd);
-			cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
+			break;
+		case FROM_PROXY:
+			if ((tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) != 0) {
+				cf_warning(AS_RW, "Failing the shipped op due to reservation error %d", rv);
 
-			as_proxy_return_to_sender(tr, redirect_node);
-			// TODO - should we zero proxy_node?
-		}
-		else if (tr->iudf_orig) {
-			cf_debug(AS_TSVC,"Internal transaction. Partition reservation failed or cluster key mismatch:%d", rv);
-			tr->iudf_orig->cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-			tr->iudf_orig = NULL;
+				as_proxy_send_response(tr->from.proxy_node,
+						tr->from_data.proxy_tid, AS_PROTO_RESULT_FAIL_UNKNOWN,
+						0, 0, 0, 0, 0, 0, as_transaction_trid(tr), NULL);
+			}
+			else {
+				as_partition_id pid = as_partition_getid(tr->keyd);
+				cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
+
+				as_proxy_return_to_sender(tr, redirect_node);
+				// TODO - should we zero proxy_node?
+			}
+			break;
+		case FROM_IUDF:
+			tr->from.iudf_orig->cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			tr->from.iudf_orig = NULL;
+			break;
+		case FROM_NSUP:
+			break;
+		default:
+			cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
+			break;
 		}
 	} // end else "other" transaction
 
-	cf_detail(AS_TSVC, "message service complete tr %p", tr);
-
 Cleanup:
 	// Batch transactions should never free msgp.
-	if (free_msgp && !tr->batch_shared) {
+	if (free_msgp && tr->origin != FROM_BATCH) {
 		cf_free(msgp);
 	}
 } // end process_transaction()

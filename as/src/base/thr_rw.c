@@ -175,10 +175,12 @@ write_request_create(void) {
 	wr->ready = false;
 	wr->tid = cf_atomic32_incr(&g_rw_tid);
 	wr->rsv_valid = false;
-	wr->proto_fd_h = 0;
+
+	wr->origin = 0;
+	wr->from.any = NULL;
+	wr->from_data.any = 0;
+
 	wr->dest_msg = 0;
-	wr->proxy_node = 0;
-	wr->proxy_tid = 0;
 	wr->msgp = 0;
 	wr->msg_fields = 0;
 	wr->pickled_buf = 0;
@@ -204,11 +206,9 @@ write_request_create(void) {
 	wr->shipped_op_initiator = false;
 
 	wr->dest_sz = 0;
-	wr->iudf_orig = NULL;
+
 	memset((void *) & (wr->dup_msg[0]), 0, sizeof(wr->dup_msg));
 
-	wr->batch_shared = 0;
-	wr->batch_index = 0;
 	return (wr);
 }
 
@@ -218,18 +218,17 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	tr->start_time = wr->start_time;
 	tr->end_time = wr->end_time; // useless if we requeue transaction
 
-	// In case wr->proto_fd_h is set it is considered to be case system is
-	// bailing out to set it to NULL once it has been handed over to transaction
-	tr->proto_fd_h = wr->proto_fd_h;
-	wr->proto_fd_h = 0;
-	tr->proxy_node = wr->proxy_node;
-	wr->proxy_node = 0;
-	tr->proxy_tid = wr->proxy_tid;
+	tr->origin = wr->origin;
+	tr->from.any = wr->from.any;
+	tr->from_data.any = wr->from_data.any;
+
+	wr->from.any = NULL; // TODO - clears batch_shared - is that OK?
+
 	tr->keyd = wr->keyd;
 
 	// Partition reservation and msg are freed when the write request is destroyed
 	as_partition_reservation_copy(&tr->rsv, &wr->rsv);
-	tr->msgp = wr->msgp;
+	tr->msgp = wr->msgp; // TODO - we don't clear wr->msgp???
 	tr->msg_fields = wr->msg_fields;
 	tr->result_code = AS_PROTO_RESULT_OK;
 	tr->flag = 0;
@@ -240,11 +239,7 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 
 	if (wr->shipped_op)
 		tr->flag |= AS_TRANSACTION_FLAG_SHIPPED_OP;
-	tr->iudf_orig = wr->iudf_orig;
-	wr->iudf_orig = NULL;
 	tr->microbenchmark_time = wr->microbenchmark_time;
-	tr->batch_shared = wr->batch_shared;
-	tr->batch_index = wr->batch_index;
 
 #if 0
 	if (wr->is_read) {
@@ -266,18 +261,18 @@ void write_request_destructor(void *object) {
 	wr_track_destroy(wr);
 #endif
 
-	if (wr->iudf_orig) {
+	if (wr->origin == FROM_IUDF) {
 		as_transaction tr;
 		write_request_init_tr(&tr, wr);
 		cf_warning(AS_RW, "UDF request not complete ... Completing it nonetheless !!!");
-		tr.iudf_orig->cb(&tr, 0);
+		tr.from.iudf_orig->cb(&tr, 0);
 	}
 
 	if (wr->dest_msg)
 		as_fabric_msg_put(wr->dest_msg);
 	if (wr->msgp) {
 		// TODO - this is temporary defensive code!
-		if (wr->batch_shared) {
+		if (wr->origin == FROM_BATCH) {
 			cf_warning(AS_RW, "write_request_destructor(): Free msgp FOR BATCH.");
 		}
 
@@ -293,14 +288,9 @@ void write_request_destructor(void *object) {
 		as_partition_release(&wr->rsv);
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 	}
-	if (wr->proto_fd_h) {
-		// TODO - this is temporary defensive code!
-		if (wr->batch_shared) {
-			cf_warning(AS_RW, "write_request_destructor(): Close fd FOR BATCH.");
-		}
-
-		as_end_of_transaction_ok(wr->proto_fd_h);
-		wr->proto_fd_h = 0;
+	if (wr->origin == FROM_CLIENT) {
+		as_end_of_transaction_ok(wr->from.proto_fd_h);
+		wr->from.proto_fd_h = NULL;
 	}
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (wr->dup_msg[i])
@@ -648,7 +638,7 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 		cf_hist_track_insert_data_point(g_config.rt_hist, tr->start_time);
 	} else {
 		// Update Write Stats. Don't count Deletes or UDF calls.
-		if (tr->proxy_node == 0 && (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->has_udf) {
+		if (tr->origin != FROM_PROXY && (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->has_udf) {
 			cf_hist_track_insert_data_point(g_config.wt_hist, tr->start_time);
 		}
 	}
@@ -681,15 +671,15 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 		}
 	}
 
-	if (tr->proto_fd_h) {
+	if (tr->origin == FROM_CLIENT) {
 		if (release) {
 			cf_detail(AS_RW, "releasing proto_fd_h %d:%p",
-					tr->proto_fd_h, line);
-			as_end_of_transaction_force_close(tr->proto_fd_h);
+					tr->from.proto_fd_h, line);
+			as_end_of_transaction_force_close(tr->from.proto_fd_h);
 		} else {
-			as_end_of_transaction_ok(tr->proto_fd_h);
+			as_end_of_transaction_ok(tr->from.proto_fd_h);
 		}
-		tr->proto_fd_h = 0;
+		tr->from.proto_fd_h = NULL;
 	}
 
 	return 0;
@@ -865,13 +855,13 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						"internal_rw_start: XDR is enabled but XDR digest pipe is not open.");
 				rv = -1;
 			} else {
-				if (tr->iudf_orig || as_transaction_is_udf(tr)) {
+				if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
 					// <><><><><><><><><><>   Apply a UDF   <><><><><><><><><><>
 					wr->has_udf = true;
 
 					udf_def def;
 					udf_call stack_call = { &def, tr };
-					udf_call *call = tr->iudf_orig ?
+					udf_call *call = tr->origin == FROM_IUDF ?
 							udf_rw_call_def_init_internal(&stack_call, tr) :
 							udf_rw_call_def_init_from_msg(&stack_call, tr);
 
@@ -891,9 +881,9 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 							// update stats to move from normal to uDF requests
 							as_rw_update_stat(wr);
 							// return early if the record was not updated
-							if (tr->iudf_orig) {
-								tr->iudf_orig->cb(tr, tr->result_code);
-								tr->iudf_orig = NULL;
+							if (tr->origin == FROM_IUDF) {
+								tr->from.iudf_orig->cb(tr, tr->result_code);
+								tr->from.iudf_orig = NULL;
 							}
 							rw_cleanup(wr, tr, first_time, false, __LINE__);
 							as_rw_set_stat_counters(true, rv, tr);
@@ -934,11 +924,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 		// from this function: -2 means retry, -1 means forever - like, gen mismatch or similar
 		if (rv != 0) {
-			if ((rv == -2) && (tr->proto_fd_h == 0) && (tr->proxy_node == 0)) {
-				cf_crash(AS_RW,
-						"Can't retry a write if all data has been stripped out");
-			}
-
 			// If first time, the caller will free msgp and the partition or retry request
 			if (!first_time) {
 				if (RW_TR_WR_MISMATCH(tr, wr)) {
@@ -1066,10 +1051,9 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		cf_debug(AS_RW, "respond_client_on_master_completion");
 		wr->respond_client_on_master_completion = true;
 		rw_complete(wr, tr, NULL);
-		tr->proto_fd_h = NULL;
-		tr->proxy_node = 0;
-		tr->proxy_tid = 0;
-		wr->iudf_orig = NULL; // ???
+		tr->from.any = NULL;
+		tr->from_data.any = 0;
+		wr->from.any = NULL; // TODO - WTF???
 
 		// if fire and forget, we're done, get out
 		if (wr->replication_fire_and_forget) {
@@ -1086,18 +1070,14 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 
 	// Set up the write request structure and enable it
 	// steals everything from the transaction
-	if (tr->proto_fd_h) {
-		wr->proto_fd_h = tr->proto_fd_h;
-		tr->proto_fd_h = 0;
-	}
-	wr->proxy_node = tr->proxy_node;
-	wr->proxy_tid  = tr->proxy_tid;
+	wr->origin = tr->origin;
+	wr->from.any = tr->from.any;
+	wr->from_data.any  = tr->from_data.any;
+	tr->from.any = NULL;
+
 	wr->shipped_op = (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) ? true : false;
 	wr->generation = tr->generation;
 	wr->void_time = tr->void_time;
-
-	wr->iudf_orig = tr->iudf_orig;
-	tr->iudf_orig = NULL;
 
 	if (first_time == true) {
 		as_partition_reservation_move(&wr->rsv, &tr->rsv);
@@ -1219,9 +1199,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 	wr->read_consistency_level = TRANSACTION_CONSISTENCY_LEVEL(tr);
 	wr->write_commit_level = TRANSACTION_COMMIT_LEVEL(tr);
 
-	wr->batch_shared = tr->batch_shared;
-	wr->batch_index = tr->batch_index;
-
 	// Fetching the write_request out of the hash table
 	global_keyd gk;
 	gk.ns_id = ns->id;
@@ -1229,16 +1206,18 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 
 	cf_rc_reserve(wr); // need to keep an extra reference count in case it inserts
 	rv = rchash_put_unique(g_write_hash, &gk, sizeof(gk), wr);
+
 	if (rv == RCHASH_ERR_FOUND) {
 		// could be a retransmit. Get the transaction that's there and compare
 		// of course it might not be there anymore, but that's OK
 		write_request *wr2;
 		if (0 == rchash_get(g_write_hash, &gk, sizeof(gk), (void **) &wr2)) {
 			pthread_mutex_lock(&wr2->lock);
-			if (wr2->ready && wr2->proxy_node != 0
-					&& wr2->proxy_node == tr->proxy_node) {
+			if (wr2->ready &&
+					wr2->origin == FROM_PROXY && tr->origin == FROM_PROXY &&
+					wr2->from.proxy_node == tr->from.proxy_node) {
 
-				if (tr->proxy_tid == wr2->proxy_tid) {
+				if (tr->from_data.proxy_tid == wr2->from_data.proxy_tid) {
 
 					cf_debug(AS_RW,
 							"proxy_write_start: duplicate, ignoring {%s:%d} %"PRIx64"",
@@ -1288,22 +1267,17 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 				cf_crash(AS_RW, "cf_malloc");
 			}
 			e->tr.start_time = tr->start_time;
-			e->tr.proto_fd_h = tr->proto_fd_h;
-			tr->proto_fd_h = 0;
-			e->tr.proxy_node = tr->proxy_node;
-			tr->proxy_node = 0;
-			e->tr.proxy_tid = tr->proxy_tid;
+			e->tr.origin = tr->origin;
+			e->tr.from.any = tr->from.any;
+			e->tr.from_data.any = tr->from_data.any;
+			tr->from.any = NULL;
 			e->tr.keyd = tr->keyd;
 			AS_PARTITION_RESERVATION_INIT(e->tr.rsv);
 			e->tr.result_code = AS_PROTO_RESULT_OK;
 			e->tr.msgp = tr->msgp;
-			tr->msgp = 0;
+			tr->msgp = NULL;
 			e->tr.msg_fields = tr->msg_fields;
 			e->tr.flag = 0;
-			e->tr.iudf_orig = tr->iudf_orig;
-			tr->iudf_orig = NULL;
-			e->tr.batch_shared = tr->batch_shared;
-			e->tr.batch_index = tr->batch_index;
 
 			// add this transactions to the queue
 			e->next = wr2->wait_queue_head;
@@ -1417,7 +1391,7 @@ int as_read_start(as_transaction *tr) {
 		// This code does task of rw_cleanup ... like releasing
 		// reservation cleaning up msgp etc ...
 		// (Todo) consolidate duplicate code
-		if (! tr->proxy_node) {
+		if (tr->origin != FROM_PROXY) {
 			cf_hist_track_insert_data_point(g_config.rt_hist, tr->start_time);
 		}
 
@@ -1491,10 +1465,6 @@ finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 	if (wr->shipped_op) {
 		tr.flag |= AS_TRANSACTION_FLAG_SHIPPED_OP;
 	}
-
-	cf_detail(AS_RW,
-			"write process ack complete: fd %d result code %d, %"PRIx64"",
-			wr->proto_fd_h ? wr->proto_fd_h->fd : 0, result_code, wr->keyd);
 
 	// It is critical that the write complete must be done before
 	// the wr is removed from the table. The table protects against
@@ -1655,7 +1625,7 @@ finish_rw_process_dup_ack(write_request *wr)
 		}
 		cf_detail_digest(AS_RW, &wr->keyd,
 				"SHIPPED_OP %s Shipping %s op to %"PRIx64"",
-				wr->proxy_node != 0 ? "NONORIG" : "ORIG",
+				wr->origin == FROM_PROXY ? "NONORIG" : "ORIG",
 				wr->is_read ? "Read" : "Write",
 				wr->dest_nodes[winner_idx]);
 		as_ldt_shipop(wr, wr->dest_nodes[winner_idx]);
@@ -1667,7 +1637,7 @@ finish_rw_process_dup_ack(write_request *wr)
 	cf_detail_digest(AS_RW, &wr->keyd,
 			"SHIPPED_OP %s=WINNER locally apply %s op after "
 			"flatten @ %"PRIx64"",
-			wr->proxy_node != 0 ? "NONORIG" : "ORIG",
+			wr->origin == FROM_PROXY ? "NONORIG" : "ORIG",
 			wr->is_read ? "Read" : "Write",
 			g_config.self_node);
 
@@ -1739,7 +1709,7 @@ rw_process_dup_cluster_key_mismatch(write_request *wr, global_keyd *gk)
 
 	pthread_mutex_lock(&wr->lock);
 
-	if (wr->batch_shared && ! wr->msgp) {
+	if (wr->origin == FROM_BATCH && ! wr->msgp) {
 		pthread_mutex_unlock(&wr->lock);
 		return;
 	}
@@ -1850,17 +1820,13 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	}
 
 	if (wr->ready == false) {
-		cf_warning(AS_RW,
-				"write process ack: write request not 'ready': investigate! fd %d",
-				wr->proto_fd_h ? wr->proto_fd_h->fd : 0);
+		cf_warning(AS_RW, "write process ack: write request not 'ready'");
 		cf_atomic_int_incr(&g_config.rw_err_ack_internal);
 		goto Out;
 	}
 
 	if ((wr->dupl_trans_complete == 0) && is_write) {
-		cf_warning(AS_RW,
-				"rw process ack: dupl not complete, but received write ack: not legal (retransmit?) investigate! fd %d",
-				wr->proto_fd_h ? wr->proto_fd_h->fd : 0);
+		cf_warning(AS_RW, "rw process ack: dupl not complete, but received write ack");
 		cf_atomic_int_incr(&g_config.rw_err_ack_internal);
 		goto Out;
 	}
@@ -1890,7 +1856,7 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 		goto Out;
 	}
 
-	if (wr->batch_shared && ! wr->msgp) {
+	if (wr->origin == FROM_BATCH && ! wr->msgp) {
 		pthread_mutex_unlock(&wr->lock);
 		goto Out;
 	}
@@ -1944,7 +1910,7 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	WR_TRACK_INFO(wr, "finish_rw_process_ack: entering");
 	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK, is_write);
 
-	if (wr->batch_shared && finished) {
+	if (wr->origin == FROM_BATCH && finished) {
 		wr->msgp = NULL;
 	}
 
@@ -1972,6 +1938,30 @@ Out:
 void
 ops_complete(as_transaction *tr, cf_dyn_buf *db)
 {
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		if (tr->from.proto_fd_h) {
+			as_msg_send_ops_reply(tr->from.proto_fd_h, db);
+			tr->from.proto_fd_h = NULL;
+		}
+		break;
+	case FROM_PROXY:
+		if (tr->from.proxy_node != 0) {
+			as_proxy_send_ops_response(tr->from.proxy_node,
+					tr->from_data.proxy_tid, db);
+			tr->from.proxy_node = 0;
+		}
+		break;
+	case FROM_NSUP:
+		break;
+	case FROM_BATCH:
+	case FROM_IUDF:
+		// Should be impossible for batch read and internal UDF to get here.
+	default:
+		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
+		break;
+	}
+	/*
 	if (tr->proto_fd_h) {
 		if (0 != as_msg_send_ops_reply(tr->proto_fd_h, db)) {
 			cf_warning(AS_RW, "can't send ops reply, fd %d",
@@ -1987,6 +1977,7 @@ ops_complete(as_transaction *tr, cf_dyn_buf *db)
 	else {
 		cf_warning(AS_RW, "ops_complete with no proto_fd_h or proxy_msg");
 	}
+	*/
 }
 
 void
@@ -2002,6 +1993,38 @@ write_complete(write_request *wr, as_transaction *tr)
 		return;
 	}
 
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		if (tr->from.proto_fd_h) {
+			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
+					tr->generation, tr->void_time, NULL, NULL, 0, NULL, NULL,
+					as_transaction_trid(tr), NULL);
+			tr->from.proto_fd_h = NULL;
+		}
+		break;
+	case FROM_PROXY:
+		if (tr->from.proxy_node != 0) {
+			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
+					tr->result_code, 0, 0, NULL, NULL, 0, NULL,
+					as_transaction_trid(tr), NULL);
+			tr->from.proxy_node = 0;
+		}
+		break;
+	case FROM_IUDF:
+		if (tr->from.iudf_orig) {
+			tr->from.iudf_orig->cb(tr, tr->result_code);
+			tr->from.iudf_orig = NULL;
+		}
+		break;
+	case FROM_NSUP:
+		break;
+	case FROM_BATCH:
+		// Should be impossible for batch read to get here.
+	default:
+		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
+		break;
+	}
+/*
 	if (tr->iudf_orig) {
 		tr->iudf_orig->cb(tr, tr->result_code);
 		tr->iudf_orig = NULL;
@@ -2022,7 +2045,7 @@ write_complete(write_request *wr, as_transaction *tr)
 		// TODO - set tr->proxy_node to 0 - currently used as flag for stats.
 	}
 	// else (hopefully) it's an nsup delete ...
-
+*/
 	MICROBENCHMARK_HIST_INSERT_P(wt_net_hist);
 }
 
@@ -2042,15 +2065,16 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	else {
 		read_local(tr, r_ref);
 
-		if (wr && wr->batch_shared) {
+		if (wr && wr->origin == FROM_BATCH) {
 			wr->msgp = NULL;
 		}
 	}
-
+/*
 	if (tr->proto_fd_h != 0) {
 		as_end_of_transaction_ok(tr->proto_fd_h);
 		tr->proto_fd_h = 0;
 	}
+*/
 }
 
 cf_queue *g_rw_dup_q;
@@ -5430,6 +5454,38 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 		}
 
 		pthread_mutex_lock(&wr->lock);
+
+		switch (wr->origin) {
+		case FROM_CLIENT:
+			if (wr->from.proto_fd_h) {
+				as_end_of_transaction_force_close(wr->from.proto_fd_h);
+				wr->from.proto_fd_h = NULL;
+			}
+			break;
+		case FROM_PROXY:
+			wr->from.proxy_node = 0;
+			break;
+		case FROM_BATCH:
+			// TODO - should zero/flag on from.batch_shared???
+			if (wr->msgp) {
+				as_batch_add_error(wr->from.batch_shared, wr->from_data.batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
+				wr->msgp = NULL;
+			}
+			break;
+		case FROM_IUDF:
+			if (wr->from.iudf_orig) {
+				as_transaction tr;
+				write_request_init_tr(&tr, wr);
+				tr.from.iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
+			}
+			break;
+		case FROM_NSUP:
+			break;
+		default:
+			cf_crash(AS_PROXY, "unexpected transaction origin %u", wr->origin);
+			break;
+		}
+		/*
 		if (wr->iudf_orig) {
 			// TODO - this is temporary defensive code!
 			if (wr->batch_shared) {
@@ -5456,6 +5512,8 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 				wr->proto_fd_h = 0;
 			}
 		}
+		*/
+
 		pthread_mutex_unlock(&wr->lock);
 
 		return (RCHASH_REDUCE_DELETE);
@@ -5743,6 +5801,37 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 		uint32_t generation, uint32_t void_time, uint *written_sz,
 		const char *setname)
 {
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		if (tr->from.proto_fd_h) {
+			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, generation,
+					void_time, ops, response_bins, n_bins, ns, written_sz,
+					as_transaction_trid(tr), setname);
+			tr->from.proto_fd_h = NULL;
+		}
+		break;
+	case FROM_PROXY:
+		if (tr->from.proxy_node != 0) {
+			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
+					tr->result_code, generation, void_time, ops, response_bins,
+					n_bins, ns, as_transaction_trid(tr), setname);
+			tr->from.proxy_node = 0;
+		}
+		break;
+	case FROM_BATCH:
+		// TODO - should zero/flag on from.batch_shared???
+		as_batch_add_result(tr, ns, setname, generation, void_time, n_bins,
+				response_bins, ops);
+		break;
+	case FROM_IUDF:
+	case FROM_NSUP:
+		// Should be impossible for internal UDFs and nsup deletes to get here.
+	default:
+		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
+		break;
+	}
+
+/*
 	cf_detail_digest(AS_RW, NULL, "[ENTER] NS(%s)", ns->name );
 
 	if (tr->proto_fd_h) {
@@ -5795,6 +5884,7 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 					ns->name, tr->msgp);
 		}
 	}
+*/
 }
 
 // Compute length of the wait queue linked list on a wr.
@@ -6029,7 +6119,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	cf_dyn_buf db = { NULL, false, 0, 0 };
 	uint8_t stack_buf[16 * 1024];
 
-	if (tr->proto_fd_h && ! tr->batch_shared) {
+	if (tr->origin == FROM_CLIENT) {
 		// Single out the client transaction case for now - others don't need
 		// this special handling (as urgently) for various reasons.
 
@@ -6066,7 +6156,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	// Now that we're not under the record lock, send the message we just built.
 	if (db.buf) {
 		// Using the function for write responses for now.
-		as_msg_send_ops_reply(tr->proto_fd_h, &db);
+		as_msg_send_ops_reply(tr->from.proto_fd_h, &db);
 
 		MICROBENCHMARK_HIST_INSERT_P(rt_net_hist);
 
@@ -6074,7 +6164,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 			cf_free(db.buf);
 		}
 
-		tr->proto_fd_h = NULL;
+		tr->from.proto_fd_h = NULL;
 	}
 
 #ifdef HISTOGRAM_OBJECT_LATENCY
