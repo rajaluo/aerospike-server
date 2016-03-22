@@ -680,7 +680,7 @@ struct as_partition_s {
 
 	size_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
-	bool waiting_for_master;
+	uint8_t master_wait_state;
 	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
 	as_partition_vinfo version_info;         // the version of my partition here and now
 
