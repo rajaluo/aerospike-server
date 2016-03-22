@@ -97,7 +97,6 @@ should_security_check_data_op(const as_transaction *tr)
 }
 
 
-
 // Handle the transaction, including proxy to another node if necessary.
 void
 process_transaction(as_transaction *tr)
@@ -397,6 +396,8 @@ process_transaction(as_transaction *tr)
 		case FROM_CLIENT:
 		case FROM_BATCH:
 			as_proxy_divert(dest, tr, ns, partition_cluster_key);
+			// as_proxy_divert() zeroes tr->from, though it's not really needed.
+			// CLIENT - fabric owns msgp, BATCH - it's shared, don't free it.
 			free_msgp = false;
 			break;
 		case FROM_PROXY:
@@ -412,12 +413,12 @@ process_transaction(as_transaction *tr)
 				cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
 
 				as_proxy_return_to_sender(tr, redirect_node);
-				// TODO - should we zero proxy_node?
 			}
+			tr->from.proxy_node = 0; // pattern, not needed
 			break;
 		case FROM_IUDF:
 			tr->from.iudf_orig->cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-			tr->from.iudf_orig = NULL;
+			tr->from.iudf_orig = NULL; // pattern, not needed
 			break;
 		case FROM_NSUP:
 			break;
@@ -425,10 +426,10 @@ process_transaction(as_transaction *tr)
 			cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
 			break;
 		}
-	} // end else "other" transaction
+	}
 
 Cleanup:
-	// Batch transactions should never free msgp.
+
 	if (free_msgp && tr->origin != FROM_BATCH) {
 		cf_free(msgp);
 	}

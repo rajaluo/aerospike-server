@@ -176,6 +176,8 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void *) tr->msgp, as_proto_size_get(&tr->msgp->proto), msettype);
 	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, cluster_key);
 
+	tr->msgp = NULL; // pattern, not needed
+
 	cf_debug_digest(AS_PROXY, &tr->keyd, "proxy_divert: fab_msg %p dst %"PRIx64, m, dst);
 
 	// Fill out a retransmit structure, insert into the retransmit hash.
@@ -188,6 +190,7 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 	pr.origin = tr->origin;
 	pr.from.any = tr->from.any;
 	pr.batch_index = tr->from_data.batch_index;
+	tr->from.any = NULL;  // pattern, not needed
 
 	pr.wr = NULL;
 
@@ -201,11 +204,6 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 	pr.dest = dst;
 	pr.pid = pid;
 	pr.ns = ns;
-
-	// TODO - bother cleaning tr on the way out?
-	tr->msgp = NULL;
-	tr->origin = 0; // ???
-	tr->from.any = NULL;
 
 	if (0 != shash_put(g_proxy_hash, &tid, &pr)) {
 		cf_debug(AS_PROXY, " shash_put failed, need cleanup code");
@@ -569,6 +567,8 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 					}
 
 					if (pr.origin == FROM_BATCH) {
+						cf_assert(pr.from.batch_shared, AS_PROXY, CF_CRITICAL, "null batch shared");
+
 						cf_digest* digest;
 						size_t digest_sz = 0;
 
@@ -581,6 +581,10 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 							as_batch_add_error(pr.from.batch_shared, pr.batch_index, AS_PROTO_RESULT_FAIL_UNKNOWN);
 							as_proxy_set_stat_counters(-1);
 						}
+
+						pr.from.batch_shared = NULL; // pattern, not needed
+						// Note - no worries about msgp, proxy divert copied it.
+
 						cf_hist_track_insert_data_point(g_config.px_hist, pr.start_time);
 					}
 					else { // FROM_CLIENT - TODO - make this a switch!
@@ -865,7 +869,10 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 				pr->from.proto_fd_h = NULL; // pattern, not needed
 				break;
 			case FROM_BATCH:
+				cf_assert(pr->from.batch_shared, AS_PROXY, CF_CRITICAL, "null batch shared");
 				as_batch_add_error(pr->from.batch_shared, pr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
+				pr->from.batch_shared = NULL; // pattern, not needed
+				// Note - no worries about msgp, proxy divert copied it.
 				break;
 			case FROM_PROXY:
 			case FROM_IUDF:

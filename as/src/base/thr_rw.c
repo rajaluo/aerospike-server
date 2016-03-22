@@ -1052,8 +1052,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		wr->respond_client_on_master_completion = true;
 		rw_complete(wr, tr, NULL);
 		tr->from.any = NULL;
-		tr->from_data.any = 0;
-		wr->from.any = NULL; // TODO - WTF???
+		wr->from.any = NULL;
 
 		// if fire and forget, we're done, get out
 		if (wr->replication_fire_and_forget) {
@@ -1709,7 +1708,7 @@ rw_process_dup_cluster_key_mismatch(write_request *wr, global_keyd *gk)
 
 	pthread_mutex_lock(&wr->lock);
 
-	if (wr->origin == FROM_BATCH && ! wr->msgp) {
+	if (wr->origin == FROM_BATCH && ! wr->from.batch_shared) {
 		pthread_mutex_unlock(&wr->lock);
 		return;
 	}
@@ -1856,7 +1855,7 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 		goto Out;
 	}
 
-	if (wr->origin == FROM_BATCH && ! wr->msgp) {
+	if (wr->origin == FROM_BATCH && ! wr->from.batch_shared) {
 		pthread_mutex_unlock(&wr->lock);
 		goto Out;
 	}
@@ -1911,6 +1910,7 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK, is_write);
 
 	if (wr->origin == FROM_BATCH && finished) {
+		wr->from.batch_shared = NULL;
 		wr->msgp = NULL;
 	}
 
@@ -2065,7 +2065,9 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	else {
 		read_local(tr, r_ref);
 
+		// read_local() handled tr, not wr.
 		if (wr && wr->origin == FROM_BATCH) {
+			wr->from.batch_shared = NULL;
 			wr->msgp = NULL;
 		}
 	}
@@ -5466,9 +5468,9 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 			wr->from.proxy_node = 0;
 			break;
 		case FROM_BATCH:
-			// TODO - should zero/flag on from.batch_shared???
-			if (wr->msgp) {
+			if (wr->from.batch_shared) {
 				as_batch_add_error(wr->from.batch_shared, wr->from_data.batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
+				wr->from.batch_shared = NULL;
 				wr->msgp = NULL;
 			}
 			break;
@@ -5819,9 +5821,17 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 		}
 		break;
 	case FROM_BATCH:
-		// TODO - should zero/flag on from.batch_shared???
-		as_batch_add_result(tr, ns, setname, generation, void_time, n_bins,
-				response_bins, ops);
+		// We don't need this check since we're protected against the race with
+		// timeout via exit clauses in the dup-res ack handling, but follow the
+		// pattern.
+		// TODO - should other transaction origins do the same as batch, or
+		// should batch allow the zombie dup-res to finish, like others do ???
+		if (tr->from.batch_shared) {
+			as_batch_add_result(tr, ns, setname, generation, void_time, n_bins,
+					response_bins, ops);
+			tr->from.batch_shared = NULL;
+			// as_batch_add_result zeroed tr->msgp.
+		}
 		break;
 	case FROM_IUDF:
 	case FROM_NSUP:

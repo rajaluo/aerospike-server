@@ -322,9 +322,10 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 		tr->from.proxy_node = 0; // pattern, not needed
 		break;
 	case FROM_BATCH:
+		cf_assert(tr->from.batch_shared, AS_PROTO, CF_CRITICAL, "null batch shared");
 		as_batch_add_error(tr->from.batch_shared, tr->from_data.batch_index, error_code);
-		// Clear this transaction's msgp so calling code does not free it.
-		tr->msgp = NULL;
+		tr->from.batch_shared = NULL; // pattern, not needed
+		tr->msgp = NULL; // pattern, not needed
 		break;
 	case FROM_IUDF:
 		cf_assert(tr->from.iudf_orig, AS_PROTO, CF_CRITICAL, "null iudf origin");
