@@ -137,6 +137,11 @@ process_transaction(as_transaction *tr)
 
 	cl_msg *msgp = tr->msgp;
 
+	if (msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
+		as_xdr_handle_txn(tr);
+		return;
+	}
+
 	if (! as_partition_balance_is_init_resolved() &&
 			(tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) == 0) {
 		if (tr->proto_fd_h) {

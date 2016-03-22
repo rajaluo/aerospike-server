@@ -151,7 +151,8 @@ struct as_file_handle_s;
 #define PROTO_TYPE_SECURITY				2
 #define PROTO_TYPE_AS_MSG				3
 #define PROTO_TYPE_AS_MSG_COMPRESSED	4
-#define PROTO_TYPE_MAX					5 // if you see 5, it's illegal
+#define PROTO_TYPE_INTERNAL_XDR			5
+#define PROTO_TYPE_MAX					6 // if you see 6, it's illegal
 
 #define PROTO_SIZE_MAX (128 * 1024 * 1024) // used simply for validation, as we've been corrupting msgp's
 
