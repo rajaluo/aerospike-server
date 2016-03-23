@@ -40,10 +40,10 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
+#include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
 #include "hist.h"
-#include "queue.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"
@@ -691,10 +691,12 @@ run_nsup_delete(void* pv_data)
 
 		// INIT_TR
 		as_transaction tr;
-		as_transaction_init(&tr, &q_item.digest, msgp);
+		as_transaction_init(&tr, NULL, msgp);
 		tr.flag |= AS_TRANSACTION_FLAG_NSUP_DELETE;
-
-		MICROBENCHMARK_RESET();
+		tr.start_time = cf_getns();
+		MICROBENCHMARK_SET_TO_START();
+		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
+		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
 		thr_tsvc_enqueue(&tr);
 
