@@ -29,16 +29,24 @@ int as_xdr_init()
 	return -1;
 }
 
+void xdr_conf_init(const char *config_file)
+{
+}
+
+void as_xdr_start()
+{
+}
+
 int as_xdr_shutdown()
 {
 	return -1;
 }
 
-void xdr_broadcast_lastshipinfo(uint64_t val[])
+void xdr_sig_handler(int signum)
 {
 }
 
-void xdr_send_clust_state_change(cf_node node, int8_t change)
+void xdr_broadcast_lastshipinfo(uint64_t val[])
 {
 }
 
@@ -50,8 +58,17 @@ void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_no
 {
 }
 
-void as_xdr_start()
+void as_xdr_handle_txn(as_transaction *txn)
 {
+}
+
+void as_xdr_info_init(void)
+{
+}
+
+int32_t as_xdr_info_port(void)
+{
+	return 0;
 }
 
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db)
@@ -59,39 +76,7 @@ int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db)
 	return -1;
 }
 
-int as_xdr_stop()
-{
-	return -1;
-}
-
-int as_xdr_set_shipping(bool shipping_status)
-{
-	return 0;
-}
-
-int xdr_send_disabled()
-{
-	return -1;
-}
-
-int xdr_internal_read_response(as_namespace *ptr_namespace, int tr_result_code, uint32_t generation, uint32_t void_time, const uint8_t *key, uint32_t key_size, as_bin** as_bins, uint16_t n_as_bins, char* setname, void* from_xdr)
-{
-	return 0;
-}
-
-void xdr_sig_handler(int signum)
-{
-}
-
 void xdr_handle_failednodeprocessingdone(cf_node nodeid)
-{
-}
-
-void xdr_conf_init(const char *config_file)
-{
-}
-
-void as_xdr_info_init(void)
 {
 }
 
@@ -111,11 +96,6 @@ void as_xdr_set_config(char *params, cf_dyn_buf *db)
 int32_t as_xdr_set_config_ns(char *ns_name, char *params)
 {
 	return -1;
-}
-
-int32_t as_xdr_info_port(void)
-{
-	return 0;
 }
 
 bool is_xdr_delete_shipping_enabled()

@@ -2925,9 +2925,9 @@ as_config_init(const char *config_file)
 		//
 		case XDR:
 			switch(as_xdr_cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
-			// Just skip over the XDR section and its DC subsection
-			// XDR conf parser will pick all the configs
-			// TODO: The conf parsing should be unified
+			// Just skip over the XDR section and its DC subsection. XDR config
+			// parser will pick up XDR configuration.
+			// TODO - config parsing should be unified.
 			case XDR_CASE_DATACENTER_BEGIN:
 				cfg_begin_context(&state, XDR_DATACENTER);
 				break;

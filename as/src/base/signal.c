@@ -29,6 +29,8 @@
 
 #include "fault.h"
 
+#include "base/xdr_serverside.h"
+
 
 //==========================================================
 // Constants.
@@ -39,6 +41,7 @@ extern const char aerospike_build_type[];
 extern const char aerospike_build_id[];
 extern const char aerospike_build_os[];
 
+
 //==========================================================
 // Globals.
 //
@@ -47,7 +50,6 @@ extern const char aerospike_build_os[];
 extern pthread_mutex_t g_NONSTOP;
 extern bool g_startup_complete;
 
-extern void xdr_sig_handler(int signum);
 
 //==========================================================
 // Local helpers.
@@ -97,6 +99,18 @@ as_sig_handle_abort(int sig_num)
 
 	PRINT_STACK();
 	reraise_signal(sig_num, as_sig_handle_abort);
+}
+
+void
+as_sig_handle_bus(int sig_num)
+{
+	cf_warning(AS_AS, "SIGBUS received, aborting %s build %s",
+			aerospike_build_type, aerospike_build_id);
+
+	xdr_sig_handler(sig_num);
+
+	PRINT_STACK();
+	reraise_signal(sig_num, as_sig_handle_bus);
 }
 
 // Floating point exception.
@@ -182,22 +196,12 @@ as_sig_handle_term(int sig_num)
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
 		_exit(0);
 	}
+
 	xdr_sig_handler(sig_num);
 
 	pthread_mutex_unlock(&g_NONSTOP);
 }
 
-void
-as_sig_handle_bus(int sig_num)
-{
-	cf_warning(AS_AS, "SIGBUS received, aborting %s build %s",
-			aerospike_build_type, aerospike_build_id);
-
-	xdr_sig_handler(sig_num);
-
-	PRINT_STACK();
-	reraise_signal(sig_num, as_sig_handle_bus);
-}
 
 //==========================================================
 // Public API.
@@ -207,6 +211,7 @@ void
 as_signal_setup()
 {
 	register_signal_handler(SIGABRT, as_sig_handle_abort);
+	register_signal_handler(SIGBUS, as_sig_handle_bus);
 	register_signal_handler(SIGFPE, as_sig_handle_fpe);
 	register_signal_handler(SIGHUP, as_sig_handle_hup);
 	register_signal_handler(SIGILL, as_sig_handle_ill);
@@ -214,7 +219,6 @@ as_signal_setup()
 	register_signal_handler(SIGQUIT, as_sig_handle_quit);
 	register_signal_handler(SIGSEGV, as_sig_handle_segv);
 	register_signal_handler(SIGTERM, as_sig_handle_term);
-	register_signal_handler(SIGBUS , as_sig_handle_bus);
 
 	// Block SIGPIPE signal when there is some error while writing to pipe. The
 	// write() call will return with a normal error which we can handle.

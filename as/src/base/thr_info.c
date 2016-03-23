@@ -46,7 +46,6 @@
 #include "citrusleaf/cf_vector.h"
 
 #include "xdr_config.h"
-#include "base/xdr_serverside.h"
 
 #include "cf_str.h"
 #include "dynbuf.h"
@@ -74,6 +73,7 @@
 #include "base/security.h"
 #include "base/system_metadata.h"
 #include "base/udf_cask.h"
+#include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"

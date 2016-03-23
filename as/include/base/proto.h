@@ -59,7 +59,7 @@ struct as_transaction_s;
 #define AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH	7
 #define AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE	8
 #define AS_PROTO_RESULT_FAIL_TIMEOUT				9
-#define AS_PROTO_RESULT_FAIL_NOXDR					10	// Not used anymore
+#define AS_PROTO_RESULT_FAIL_UNUSED_10				10	// recycle - was AS_PROTO_RESULT_FAIL_NOXDR
 #define AS_PROTO_RESULT_FAIL_UNAVAILABLE			11	// error returned during node down and partition isn't available
 #define AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE		12	// op and bin type incompatibility
 #define AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG			13

@@ -247,30 +247,6 @@ thr_demarshal_reaper_fn(void *arg)
 	return NULL;
 }
 
-// Get the remote IP address and port connected to a socket file descriptor.
-// Return 0 if successful, and populate the caller-provided IP address and port.
-// Return -1 otherwise.
-int
-get_fd_ip_addr_and_port(int fd, char *ip_addr, size_t ip_addr_sz, int *port)
-{
-	struct sockaddr_in addr_in;
-	socklen_t addr_len = sizeof(addr_in);
-	int retval = -1;
-
-	// Try to get the client details for better logging.
-	// Otherwise, fall back to generic log message.
-	if (getpeername(fd, (struct sockaddr *) &addr_in, &addr_len) == 0
-		&& ip_addr
-		&& inet_ntop(AF_INET, &addr_in.sin_addr.s_addr, (char *) ip_addr, ip_addr_sz) != NULL) {
-		retval = 0;
-		if (port) {
-			*port = ntohs(addr_in.sin_port);
-		}
-	}
-
-	return retval;
-}
-
 int
 thr_demarshal_read_file(const char *path, char *buffer, size_t size)
 {
@@ -470,21 +446,29 @@ thr_demarshal(void *arg)
 	if (thr_id == 0) {
 		demarshal_file_handle_init();
 		epoll_fd = epoll_create(EPOLL_SZ);
-		if (epoll_fd == -1)
+
+		if (epoll_fd == -1) {
 			cf_crash(AS_DEMARSHAL, "epoll_create(): %s", cf_strerror(errno));
+		}
 
 		memset(&ev, 0, sizeof (ev));
 		ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
 		ev.data.fd = s->sock;
-		if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->sock, &ev))
+
+		if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->sock, &ev)) {
 			cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+		}
+
 		cf_info(AS_DEMARSHAL, "Service started: socket %s:%d", s->addr, s->port);
 
 		if (ls->sock) {
 			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
 			ev.data.fd = ls->sock;
-			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ls->sock, &ev))
-			  cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+
+			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ls->sock, &ev)) {
+				cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+			}
+
 			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
 		}
 
@@ -492,16 +476,19 @@ thr_demarshal(void *arg)
 			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
 			ev.data.fd = xs->sock;
 
-			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, xs->sock, &ev))
-			  cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, xs->sock, &ev)) {
+				cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+			}
 
 			cf_info(AS_DEMARSHAL, "Service also listening on XDR info socket %s:%d", xs->addr, xs->port);
 		}
 	}
 	else {
 		epoll_fd = epoll_create(EPOLL_SZ);
-		if (epoll_fd == -1)
+
+		if (epoll_fd == -1) {
 			cf_crash(AS_DEMARSHAL, "epoll_create(): %s", cf_strerror(errno));
+		}
 	}
 
 	g_demarshal_args->epoll_fd[thr_id] = epoll_fd;
