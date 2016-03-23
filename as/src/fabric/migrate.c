@@ -1185,7 +1185,7 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 			(g_config.migrate_rx_lifetime_ms > 0 &&
 					cf_atomic32_get(immig->done_recv) != 0 &&
 					cf_getms() > immig->done_recv_ms +
-								 g_config.migrate_rx_lifetime_ms)) {
+								g_config.migrate_rx_lifetime_ms)) {
 
 		if (cf_rc_count(immig) == 1 && cf_atomic32_get(immig->done_recv) == 0) {
 			// No outstanding readers of hkey and hasn't yet completed means
