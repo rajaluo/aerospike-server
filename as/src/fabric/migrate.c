@@ -1185,7 +1185,7 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 			(g_config.migrate_rx_lifetime_ms > 0 &&
 					cf_atomic32_get(immig->done_recv) != 0 &&
 					cf_getms() > immig->done_recv_ms +
-								 g_config.migrate_rx_lifetime_ms)) {
+								g_config.migrate_rx_lifetime_ms)) {
 
 		if (cf_rc_count(immig) == 1 && cf_atomic32_get(immig->done_recv) == 0) {
 			// No outstanding readers of hkey and hasn't yet completed means
@@ -1602,7 +1602,7 @@ immigration_handle_done_request(cf_node src, msg *m) {
 			as_fabric_msg_put(m);
 		}
 
-		cf_warning(AS_MIGRATE, "handle done: received done message for unknown migrate, acking source %lx emig id %u",
+		cf_detail(AS_MIGRATE, "handle done: received done message for unknown migrate, acking source %lx emig id %u",
 				src, emig_id);
 		cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 	}
@@ -1698,7 +1698,7 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op) {
 		emigration_release(emig);
 	}
 	else {
-		cf_warning(AS_MIGRATE, "ctrl ack (%d): can't find emig id %u", op,
+		cf_detail(AS_MIGRATE, "ctrl ack (%d): can't find emig id %u", op,
 				emig_id);
 	}
 
