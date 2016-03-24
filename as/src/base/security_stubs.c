@@ -127,7 +127,7 @@ as_security_transact(as_transaction* tr)
 	// Send the complete response.
 	uint8_t* p_write = resp;
 	uint8_t* p_end = resp + resp_size;
-	int fd = tr->proto_fd_h->fd;
+	int fd = tr->from.proto_fd_h->fd;
 
 	while (p_write < p_end) {
 		int rv = send(fd, (void*)p_write, p_end - p_write, MSG_NOSIGNAL);
@@ -137,8 +137,8 @@ as_security_transact(as_transaction* tr)
 		}
 		else if (rv == 0) {
 			cf_warning(AS_SECURITY, "fd %d send returned 0", fd);
-			as_end_of_transaction_force_close(tr->proto_fd_h);
-			tr->proto_fd_h = NULL;
+			as_end_of_transaction_force_close(tr->from.proto_fd_h);
+			tr->from.proto_fd_h = NULL;
 			return;
 		}
 		// rv < 0
@@ -147,14 +147,14 @@ as_security_transact(as_transaction* tr)
 		}
 		else {
 			cf_warning(AS_SECURITY, "fd %d send failed, errno %d", fd, errno);
-			as_end_of_transaction_force_close(tr->proto_fd_h);
-			tr->proto_fd_h = NULL;
+			as_end_of_transaction_force_close(tr->from.proto_fd_h);
+			tr->from.proto_fd_h = NULL;
 			return;
 		}
 	}
 
-	as_end_of_transaction_ok(tr->proto_fd_h);
-	tr->proto_fd_h = NULL;
+	as_end_of_transaction_ok(tr->from.proto_fd_h);
+	tr->from.proto_fd_h = NULL;
 }
 
 
