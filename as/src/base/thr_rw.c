@@ -1304,6 +1304,7 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 		return (rv);
 	} // end if wr found in write hash
 	else if (rv != 0) {
+		cf_rc_release(wr);
 		WR_TRACK_INFO(wr, "as_rw_start: 701");
 		WR_RELEASE(wr);
 		cf_atomic_int_incr(&g_config.err_rw_cant_put_unique);
