@@ -309,7 +309,7 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 	case FROM_CLIENT:
 		cf_assert(tr->from.proto_fd_h, AS_PROTO, CF_CRITICAL, "null file handle");
 		as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
-		tr->from.proto_fd_h = 0; // pattern, not needed
+		tr->from.proto_fd_h = NULL; // pattern, not needed
 		MICROBENCHMARK_HIST_INSERT_P(error_hist);
 		cf_atomic_int_incr(&g_config.err_tsvc_requests);
 		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {

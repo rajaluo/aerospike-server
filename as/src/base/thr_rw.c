@@ -671,7 +671,7 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 		}
 	}
 
-	if (tr->origin == FROM_CLIENT) {
+	if (tr->origin == FROM_CLIENT && tr->from.proto_fd_h) {
 		if (release) {
 			cf_detail(AS_RW, "releasing proto_fd_h %d:%p",
 					tr->from.proto_fd_h, line);
@@ -896,7 +896,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 							}
 						}
 					} else {
-						cf_warning(AS_RW, "transaction failed udf_call init");
+						// Don't warn - happens on FROM_IUDF timeout.
 						tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 						rv = -1;
 					}
@@ -6129,7 +6129,9 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	cf_dyn_buf db = { NULL, false, 0, 0 };
 	uint8_t stack_buf[16 * 1024];
 
-	if (tr->origin == FROM_CLIENT) {
+	// TODO - wouldn't need proto_fd_h check if we bailed early on losing race
+	// vs. timeout.
+	if (tr->origin == FROM_CLIENT && tr->from.proto_fd_h) {
 		// Single out the client transaction case for now - others don't need
 		// this special handling (as urgently) for various reasons.
 

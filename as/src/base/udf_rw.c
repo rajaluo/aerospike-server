@@ -280,6 +280,11 @@ process_result(const as_result * res, udf_call * call, cf_dyn_buf *db )
 udf_call *
 udf_rw_call_def_init_internal(udf_call * call, as_transaction * tr)
 {
+	// TODO - wouldn't need this if we bailed early on losing race vs. timeout.
+	if (! tr->from.iudf_orig) {
+		return NULL; // can happen on timeout
+	}
+
 	call->def = &tr->from.iudf_orig->def;
 
 	if (tr->from.iudf_orig->type == UDF_SCAN_REQUEST) {
@@ -298,7 +303,12 @@ udf_rw_call_def_init_internal(udf_call * call, as_transaction * tr)
 udf_call *
 udf_rw_call_def_init_from_msg(udf_call * call, as_transaction * tr)
 {
-	return udf_def_init_from_msg(call->def, tr) ? call : NULL;
+	if (! udf_def_init_from_msg(call->def, tr)) {
+		cf_warning(AS_UDF, "failed udf_rw_call_def_init_from_msg()");
+		return NULL;
+	}
+
+	return call;
 }
 
 /**
