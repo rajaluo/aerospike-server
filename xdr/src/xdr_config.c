@@ -62,6 +62,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-info-port",					XDR_CASE_INFO_PORT },
 		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
 		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT },
+		{ "xdr-max-ship-throughput",		XDR_CASE_MAX_SHIP_THROUGHPUT },
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
 		{ "xdr-threads",					XDR_CASE_THREADS },
 		{ "timeout",						XDR_CASE_TIMEOUT },							// not exposed to users
@@ -128,6 +129,7 @@ void xdr_config_defaults(xdr_config *c)
 
 	c->xdr_max_recs_inflight = 0; // Max number of digests shipped that can be in the async queue at any given point
 								  // The default will be determined based on remote DC's pipelining capabilties
+	c->xdr_max_ship_throughput = 0;	// XDR TPS limit.
 	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go
 	c->xdr_ship_threads = 8;        // Number of XDR shipper threads.
 	c->xdr_timeout = 10000;		// Timeout for each element that is shipped. default is 10000 ms
