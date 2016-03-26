@@ -261,7 +261,7 @@ void write_request_destructor(void *object) {
 	wr_track_destroy(wr);
 #endif
 
-	if (wr->origin == FROM_IUDF) {
+	if (wr->origin == FROM_IUDF && wr->from.iudf_orig) {
 		as_transaction tr;
 		write_request_init_tr(&tr, wr);
 		cf_warning(AS_RW, "UDF request not complete ... Completing it nonetheless !!!");
@@ -288,7 +288,7 @@ void write_request_destructor(void *object) {
 		as_partition_release(&wr->rsv);
 		cf_atomic_int_decr(&g_config.rw_tree_count);
 	}
-	if (wr->origin == FROM_CLIENT) {
+	if (wr->origin == FROM_CLIENT && wr->from.proto_fd_h) {
 		as_end_of_transaction_ok(wr->from.proto_fd_h);
 		wr->from.proto_fd_h = NULL;
 	}
@@ -1962,23 +1962,6 @@ ops_complete(as_transaction *tr, cf_dyn_buf *db)
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
-	/*
-	if (tr->proto_fd_h) {
-		if (0 != as_msg_send_ops_reply(tr->proto_fd_h, db)) {
-			cf_warning(AS_RW, "can't send ops reply, fd %d",
-					tr->proto_fd_h->fd);
-		}
-
-		tr->proto_fd_h = 0;
-	}
-	else if (tr->proxy_node != 0) {
-		as_proxy_send_ops_response(tr->proxy_node, tr->proxy_tid, db);
-		// TODO - set tr->proxy_node to 0 - currently used as flag for stats.
-	}
-	else {
-		cf_warning(AS_RW, "ops_complete with no proto_fd_h or proxy_msg");
-	}
-	*/
 }
 
 void
@@ -2025,28 +2008,7 @@ write_complete(write_request *wr, as_transaction *tr)
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
-/*
-	if (tr->iudf_orig) {
-		tr->iudf_orig->cb(tr, tr->result_code);
-		tr->iudf_orig = NULL;
-	}
-	else if (tr->proto_fd_h) {
-		if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
-				tr->generation, tr->void_time, NULL, NULL, 0, NULL, NULL,
-				as_transaction_trid(tr), NULL)) {
-			cf_warning(AS_RW, "can't send reply to client, fd %d",
-					tr->proto_fd_h->fd);
-		}
 
-		tr->proto_fd_h = 0;
-	}
-	else if (tr->proxy_node != 0) {
-		as_proxy_send_response(tr->proxy_node, tr->proxy_tid, tr->result_code,
-				0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
-		// TODO - set tr->proxy_node to 0 - currently used as flag for stats.
-	}
-	// else (hopefully) it's an nsup delete ...
-*/
 	MICROBENCHMARK_HIST_INSERT_P(wt_net_hist);
 }
 
@@ -2072,12 +2034,6 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 			wr->msgp = NULL;
 		}
 	}
-/*
-	if (tr->proto_fd_h != 0) {
-		as_end_of_transaction_ok(tr->proto_fd_h);
-		tr->proto_fd_h = 0;
-	}
-*/
 }
 
 cf_queue *g_rw_dup_q;
@@ -5488,34 +5444,6 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 			cf_crash(AS_PROXY, "unexpected transaction origin %u", wr->origin);
 			break;
 		}
-		/*
-		if (wr->iudf_orig) {
-			// TODO - this is temporary defensive code!
-			if (wr->batch_shared) {
-				cf_warning(AS_RW, "rw_retransmit_reduce_fn(): request callback exists for batch.");
-			}
-
-			as_transaction tr;
-			write_request_init_tr(&tr, wr);
-			tr.iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-
-			if (tr.proto_fd_h) {
-				as_end_of_transaction_force_close(tr.proto_fd_h);
-			}
-		} else {
-			if (wr->batch_shared) {
-				if (wr->msgp) {
-					as_batch_add_error(wr->batch_shared, wr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
-					wr->msgp = NULL;
-					wr->proto_fd_h = 0;
-				}
-			}
-			else if (wr->proto_fd_h) {
-				as_end_of_transaction_force_close(wr->proto_fd_h);
-				wr->proto_fd_h = 0;
-			}
-		}
-		*/
 
 		pthread_mutex_unlock(&wr->lock);
 
@@ -5841,61 +5769,6 @@ single_transaction_response(as_transaction *tr, as_namespace *ns,
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
-
-/*
-	cf_detail_digest(AS_RW, NULL, "[ENTER] NS(%s)", ns->name );
-
-	if (tr->proto_fd_h) {
-		if (tr->batch_shared) {
-			as_batch_add_result(tr, ns, setname, generation, void_time,
-				n_bins, response_bins, ops);
-		}
-		else {
-			if (0 != as_msg_send_reply(tr->proto_fd_h, tr->result_code,
-					generation, void_time, ops, response_bins, n_bins, ns,
-					written_sz, as_transaction_trid(tr), setname)) {
-				cf_info(AS_RW, "rw: can't send reply, fd %d rc %u",
-						tr->proto_fd_h->fd, tr->result_code);
-			}
-		}
-		tr->proto_fd_h = 0;
-	} else if (tr->proxy_node != 0) {
-		// it was a proxy request - hand it back to the proxy for responding
-		if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP)
-			cf_detail(AS_RW,
-					"[Digest %"PRIx64" Shipped OP] sending reply, rc %d to %"PRIx64"",
-					*(uint64_t *)&tr->keyd, tr->result_code, tr->proxy_node);
-		else
-			cf_detail(AS_RW, "sending proxy reply, rc %d to %"PRIx64"",
-					tr->result_code, tr->proxy_node);
-
-		as_proxy_send_response(tr->proxy_node, tr->proxy_tid, tr->result_code,
-				generation, void_time, ops, response_bins, n_bins, ns,
-				as_transaction_trid(tr), setname);
-		tr->proxy_node = 0;
-	} else {
-		// In this case, this is a call from write_process() above.
-		// create the response message (this is a new malloc that will be handed off to fabric (see end of write_process())
-		// Can we even get here from write_process()? Or is this dead code?
-		if (! tr->msgp) {
-			size_t msg_sz = 0;
-			tr->msgp = as_msg_make_response_msg(tr->result_code, generation,
-					void_time, ops, response_bins, n_bins, ns, (cl_msg *) NULL,
-					&msg_sz, as_transaction_trid(tr), setname);
-			// TODO - if it turns out this is normal, demote to debug:
-			cf_warning_digest(AS_RW, &tr->keyd,
-					"{%s} thr_tsvc_read returns response message for duplicate read %p ",
-					ns->name, tr->msgp);
-		}
-		else {
-			// We can get here if a timeout in rw_retransmit_reduce_fn() zeros
-			// the proto_fd_h out from under a live finish_rw_process_ack()...
-			cf_warning_digest(AS_RW, &tr->keyd,
-					"{%s} prevented overwrite and leak of tr->msgp %p ",
-					ns->name, tr->msgp);
-		}
-	}
-*/
 }
 
 // Compute length of the wait queue linked list on a wr.
