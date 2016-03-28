@@ -1,7 +1,7 @@
 /*
  * partition.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -143,8 +143,6 @@
  *     ship the entire record. So write_journal and write rejection in current
  *     world is not relevant. Revisit and fix comment
  */
-
-#include "base/feature.h" // Turn new AS Features on/off (must be first in line)
 
 #include <errno.h>
 #include <pthread.h>

@@ -1,7 +1,7 @@
 /*
  * record.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -23,8 +23,6 @@
 /*
  * Record operations
  */
-
-#include "base/feature.h" // Turn new AS Features on/off (must be first in line)
 
 #include <pthread.h>
 #include <stdbool.h>

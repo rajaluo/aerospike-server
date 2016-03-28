@@ -1,7 +1,7 @@
 /*
  * ldt_aerospike.h
  *
- * Copyright (C) 2013-2015 Aerospike, Inc.
+ * Copyright (C) 2013-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "base/feature.h" // turn new AS Features on/off
 #include "base/udf_record.h"
 #include "aerospike/as_aerospike.h"
 

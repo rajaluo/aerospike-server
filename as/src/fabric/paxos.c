@@ -1,7 +1,7 @@
 /*
  * paxos.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,8 +24,6 @@
  *  Paxos consensus algorithm
  *
  */
-
-#include "base/feature.h" // Turn new AS Features on/off (must be first in line)
 
 #include "fabric/paxos.h"
 

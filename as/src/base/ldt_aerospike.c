@@ -1,7 +1,7 @@
 /*
  * ldt_aerospike.c
  *
- * Copyright (C) 2013-2015 Aerospike, Inc.
+ * Copyright (C) 2013-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -28,8 +28,6 @@
  *  Entire ldt_aerospike is some part wrapper over the udf_aerospike and
  *  some part its own logic
  */
-
-#include "base/feature.h" // Turn new AS Features on/off
 
 #include "base/ldt_aerospike.h"
 

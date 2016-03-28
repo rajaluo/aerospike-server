@@ -1,7 +1,7 @@
 /*
  * udf_aerospike.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -19,8 +19,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
-
-#include "base/feature.h" // Turn new AS Features on/off
 
 #include "base/udf_aerospike.h"
 

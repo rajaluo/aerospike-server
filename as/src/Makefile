@@ -21,7 +21,7 @@ ifeq ($(USE_EE),1)
   include $(EEREPO)/as/make_in/Makefile.vars
 endif
 
-BASE_HEADERS += aggr.h asm.h batch.h cdt.h cfg.h cluster_config.h datamodel.h feature.h index.h job_manager.h json_init.h
+BASE_HEADERS += aggr.h asm.h batch.h cdt.h cfg.h cluster_config.h datamodel.h index.h job_manager.h json_init.h
 BASE_HEADERS += ldt.h ldt_aerospike.h ldt_record.h monitor.h packet_compression.h
 BASE_HEADERS += particle.h particle_blob.h particle_integer.h
 BASE_HEADERS += proto.h rec_props.h scan.h secondary_index.h security.h security_config.h system_metadata.h
