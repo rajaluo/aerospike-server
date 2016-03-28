@@ -128,7 +128,7 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_info_port = 0;
 
 	c->xdr_max_recs_inflight = 0; // Max number of digests shipped that can be in the async queue at any given point
-								  // The default will be determined based on remote DC's pipelining capabilties
+								  // The default will be determined based on remote DC's pipelining capabilities
 	c->xdr_max_ship_throughput = 0;	// XDR TPS limit.
 	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go
 	c->xdr_ship_threads = 8;        // Number of XDR shipper threads.
