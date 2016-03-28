@@ -6,10 +6,10 @@ ALL_FEATURES=( "${@:3}" )
 for FEATURE in "${ALL_FEATURES[@]}"
 do
    if [[ "$FEATURE" =~ ^USE_.*=1 ]]; then
-      feature=`echo $FEATURE | sed 's/USE_\([A-Z]*\)=1/\1/' | tr [A-Z] [a-z]`
+      feature=`echo $FEATURE | sed 's/USE_\([A-Z]*\)=1/\1/'`
       case "$feature" in
-         xdr)
-            FEATURES="$FEATURES"";$feature";;
+         XDR)
+            FEATURES="$FEATURES"";xdr";;
       esac
    fi
 done
