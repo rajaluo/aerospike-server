@@ -44,10 +44,10 @@ ifneq ($(USE_XDR),1)
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
 ifneq ($(USE_WARM),1)
-  BASE_SOURCES += namespace_cold.c
+  BASE_SOURCES += namespace_ce.c
 endif
 ifneq ($(USE_SEC),1)
-  BASE_SOURCES += security_stubs.c
+  BASE_SOURCES += security_ce.c
 endif
 
 FABRIC_HEADERS += hb.h fabric.h migrate.h paxos.h
@@ -59,7 +59,7 @@ GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
 STORAGE_HEADERS += storage.h drv_ssd.h
 STORAGE_SOURCES += storage.c drv_kv.c drv_memory.c drv_ssd.c
 ifneq ($(USE_WARM),1)
-  STORAGE_SOURCES += drv_ssd_cold.c
+  STORAGE_SOURCES += drv_ssd_ce.c
 endif
 
 HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%) $(GEOSPATIAL_HEADERS:%=geospatial/%)
