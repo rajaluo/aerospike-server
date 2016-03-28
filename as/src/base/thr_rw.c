@@ -116,7 +116,8 @@ int write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
 int delete_local(as_transaction *tr);
 int delete_replica(as_transaction *tr, bool is_subrec, cf_node masternode);
-void apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd);
+void apply_journaled_delete(as_namespace *ns, as_index_tree *tree,
+		cf_digest *keyd, bool is_nsup_delete, bool is_xdr_op);
 int write_delete_journal(as_transaction *tr, bool is_subrec);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
 			   cf_node masternode, bool is_delete, uint16_t set_id);
@@ -3089,7 +3090,8 @@ delete_replica(as_transaction *tr, bool is_subrec, cf_node masternode)
 // From acting master, on (other) replica node.
 //
 void
-apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd)
+apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd,
+		bool is_nsup_delete, bool is_xdr_op)
 {
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
@@ -3118,15 +3120,18 @@ apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd)
 		return;
 	}
 
-	// Journaled deletes lose info and behave as if:
-	// - none were nsup deletes
-	// - all were XDR deletes
-	//
-	// Journaled deletes assume we're the master node when they're applied. This
-	// is not necessarily true!
-
-	if (g_config.xdr_cfg.xdr_forward_xdrwrites || ns->ns_forward_xdr_writes) {
+	// Don't ship expiration/eviction deletes unless configured to do so.
+	if (is_nsup_delete && ! g_config.xdr_cfg.xdr_nsup_deletes_enabled) {
+		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
+	}
+	else if (! is_xdr_op ||
+			// If this delete is a result of XDR shipping, don't ship it unless
+			// configured to do so.
+			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, *keyd, generation, 0, true, set_id);
+		// Note - journaled deletes assume we're the master node when they're
+		// applied. This is not necessarily true!
 	}
 }
 
@@ -4927,6 +4932,8 @@ uint32_t journal_hash_fn(void *value) {
 typedef struct {
 	cf_digest digest;
 	bool is_subrec;
+	bool is_nsup_delete;
+	bool is_xdr_op;
 } journal_queue_element;
 
 //
@@ -4951,6 +4958,8 @@ int write_delete_journal(as_transaction *tr, bool is_subrec) {
 	journal_queue_element jqe;
 	jqe.digest = tr->keyd;
 	jqe.is_subrec = is_subrec;
+	jqe.is_nsup_delete = (tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) != 0;
+	jqe.is_xdr_op = (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0;
 
 	journal_hash_key jhk;
 	jhk.ns_id = tr->rsv.ns->id;
@@ -5044,7 +5053,8 @@ int as_write_journal_apply(as_partition_reservation *prsv) {
 	journal_queue_element jqe;
 	while (0 == cf_queue_pop(journal_q, &jqe, CF_QUEUE_NOWAIT)) {
 		// Note - we no longer journal writes, we only journal deletes.
-		apply_journaled_delete(prsv->ns, jqe.is_subrec ? prsv->sub_tree : prsv->tree, &jqe.digest);
+		apply_journaled_delete(prsv->ns, jqe.is_subrec ? prsv->sub_tree : prsv->tree, &jqe.digest,
+				jqe.is_nsup_delete, jqe.is_xdr_op);
 	}
 
 	cf_queue_destroy(journal_q);
