@@ -79,6 +79,7 @@ typedef enum {
 	XDR_CASE_DATACENTER_BEGIN,
 	XDR_CASE_MAX_RECS_INFLIGHT,
 	XDR_CASE_MAX_SHIP_THROUGHPUT,
+	XDR_CASE_MAX_SHIP_BANDWIDTH,
 	XDR_CASE_HOTKEY_TIME,
 	XDR_CASE_FORWARD_XDR_WRITES,
 	XDR_CASE_CLIENT_THREADS,
@@ -170,6 +171,7 @@ typedef struct xdr_config {
 	int	xdr_info_port;
 	int	xdr_max_recs_inflight;
 	int	xdr_max_ship_throughput;
+	int	xdr_max_ship_bandwidth;
 	int	xdr_hotkey_time;
 	int	xdr_read_batch_size;
 	int	xdr_read_threads;       // Number threads which will read from server and ship records.
