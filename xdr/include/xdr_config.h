@@ -77,7 +77,6 @@ typedef enum {
 	XDR_CASE_ERRORLOG_PATH,
 	XDR_CASE_INFO_PORT,
 	XDR_CASE_DATACENTER_BEGIN,
-	XDR_CASE_MAX_RECS_INFLIGHT,
 	XDR_CASE_MAX_SHIP_THROUGHPUT,
 	XDR_CASE_MAX_SHIP_BANDWIDTH,
 	XDR_CASE_HOTKEY_TIME,
@@ -169,7 +168,6 @@ typedef struct xdr_config {
 	uint8_t xdr_num_digestlog_paths;
 
 	int	xdr_info_port;
-	int	xdr_max_recs_inflight;
 	int	xdr_max_ship_throughput;
 	int	xdr_max_ship_bandwidth;
 	int	xdr_hotkey_time;

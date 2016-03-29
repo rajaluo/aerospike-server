@@ -61,7 +61,6 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-errorlog-path",				XDR_CASE_ERRORLOG_PATH },					// deprecated (3.8.0)
 		{ "xdr-info-port",					XDR_CASE_INFO_PORT },
 		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
-		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT },
 		{ "xdr-max-ship-throughput",		XDR_CASE_MAX_SHIP_THROUGHPUT },
 		{ "xdr-max-ship-bandwidth",			XDR_CASE_MAX_SHIP_BANDWIDTH },
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
@@ -127,8 +126,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_digestlog_persist = true;
 	c->xdr_info_port = 0;
 
-	c->xdr_max_recs_inflight = 0; // Max number of digests shipped that can be in the async queue at any given point
-								  // The default will be determined based on remote DC's pipelining capabilities
 	c->xdr_max_ship_throughput = 0;	// XDR TPS limit.
 	c->xdr_max_ship_bandwidth = 0;	// XDR bandwidth limit.
 	c->xdr_hotkey_time = 100;		// Expiration time for the deduplication cache.
