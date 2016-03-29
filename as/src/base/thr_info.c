@@ -139,10 +139,6 @@ int as_storage_analyze_wblock(as_namespace* ns, int device_index, uint32_t wbloc
 
 static cf_queue *g_info_work_q = 0;
 
-typedef struct {
-	as_transaction tr;
-} info_work;
-
 //
 // Info has its own fabric service
 // which allows it to communicate things like the IP addresses of
@@ -4554,16 +4550,16 @@ thr_info_fn(void *unused)
 {
 	for ( ; ; ) {
 
-		info_work work;
+		as_info_transaction tr; // 'tr' so we can share microbenchmark macros
 
-		if (0 != cf_queue_pop(g_info_work_q, &work, CF_QUEUE_FOREVER)) {
+		if (0 != cf_queue_pop(g_info_work_q, &tr, CF_QUEUE_FOREVER)) {
 			cf_crash(AS_TSVC, "unable to pop from info work queue");
 		}
 
-		as_transaction *tr = &work.tr;
-		as_proto *pr = (as_proto *) tr->msgp;
+		as_file_handle *fd_h = tr.fd_h;
+		as_proto *pr = tr.proto;
 
-		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(info_q_wait_hist);
+		MICROBENCHMARK_HIST_INSERT_AND_RESET(info_q_wait_hist);
 
 		// Allocate an output buffer sufficiently large to avoid ever resizing
 		cf_dyn_buf_define_size(db, 128 * 1024);
@@ -4577,17 +4573,17 @@ thr_info_fn(void *unused)
 
 		// Either we'e doing all, or doing some
 		if (pr->sz == 0) {
-			info_all(tr->from.proto_fd_h, &db);
+			info_all(fd_h, &db);
 		}
 		else {
-			info_some((char *)pr->data, (char *)pr->data + pr->sz, tr->from.proto_fd_h, &db);
+			info_some((char *)pr->data, (char *)pr->data + pr->sz, fd_h, &db);
 		}
 
 #ifdef USE_INFO_LOCK
 		pthread_mutex_unlock(&g_info_lock);
 #endif
 
-		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(info_post_lock_hist);
+		MICROBENCHMARK_HIST_INSERT_AND_RESET(info_post_lock_hist);
 
 		// write the proto header in the space we pre-wrote
 		db.buf[0] = 2;
@@ -4602,15 +4598,15 @@ thr_info_fn(void *unused)
 		uint8_t	*b = db.buf;
 		uint8_t	*lim = db.buf + db.used_sz;
 		while (b < lim) {
-			int rv = send(tr->from.proto_fd_h->fd, b, lim - b, MSG_NOSIGNAL);
+			int rv = send(fd_h->fd, b, lim - b, MSG_NOSIGNAL);
 			if ((rv < 0) && (errno != EAGAIN) ) {
 				if (errno == EPIPE) {
-					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", tr->from.proto_fd_h->fd);
+					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", fd_h->fd);
 				} else {
-					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", tr->from.proto_fd_h->fd, errno);
+					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", fd_h->fd, errno);
 				}
-				as_end_of_transaction_force_close(tr->from.proto_fd_h);
-				tr->from.proto_fd_h = NULL;
+				as_end_of_transaction_force_close(fd_h);
+				fd_h = NULL;
 				break;
 			}
 			else if (rv > 0)
@@ -4621,17 +4617,17 @@ thr_info_fn(void *unused)
 
 		cf_dyn_buf_free(&db);
 
-		cf_free(tr->msgp);
+		cf_free(pr);
 
-		if (tr->from.proto_fd_h) {
-			as_end_of_transaction_ok(tr->from.proto_fd_h);
-			tr->from.proto_fd_h = NULL;
+		if (fd_h) {
+			as_end_of_transaction_ok(fd_h);
+			fd_h = NULL;
 		}
 
-		MICROBENCHMARK_HIST_INSERT_P(info_fulfill_hist);
+		MICROBENCHMARK_HIST_INSERT(info_fulfill_hist);
 	}
-	return(0);
 
+	return NULL;
 }
 
 //
@@ -4643,24 +4639,16 @@ thr_info_fn(void *unused)
 // Proto will be freed by the caller
 //
 
-int
-as_info(as_transaction *tr)
+void
+as_info(as_info_transaction *it)
 {
-	info_work  work;
+	if (0 != cf_queue_push(g_info_work_q, it)) {
+		cf_warning(AS_INFO, "failed info queue push");
 
-	work.tr = *tr;
-
-	tr->from.proto_fd_h = NULL;
-	tr->msgp = 0;
-
-	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(info_tr_q_process_hist);
-
-	if (0 != cf_queue_push(g_info_work_q, &work)) {
-		cf_warning(AS_INFO, "PUSH FAILED: todo: kill info request file descriptor or something");
-		return(-1);
+		// TODO - bother "handling" this?
+		as_end_of_transaction_force_close(it->fd_h);
+		cf_free(it->proto);
 	}
-
-	return(0);
 }
 
 // Return the number of pending Info requests in the queue.
@@ -5132,8 +5120,6 @@ info_debug_ticker_fn(void *unused)
 					histogram_dump(g_config.batch_index_reads_hist);
 				if (g_config.batch_q_process_hist)
 					histogram_dump(g_config.batch_q_process_hist);
-				if (g_config.info_tr_q_process_hist)
-					histogram_dump(g_config.info_tr_q_process_hist);
 				if (g_config.info_q_wait_hist)
 					histogram_dump(g_config.info_q_wait_hist);
 				if (g_config.info_post_lock_hist)
@@ -6465,7 +6451,6 @@ clear_microbenchmark_histograms()
 	histogram_clear(g_config.error_hist);
 	histogram_clear(g_config.batch_index_reads_hist);
 	histogram_clear(g_config.batch_q_process_hist);
-	histogram_clear(g_config.info_tr_q_process_hist);
 	histogram_clear(g_config.info_q_wait_hist);
 	histogram_clear(g_config.info_post_lock_hist);
 	histogram_clear(g_config.info_fulfill_hist);
@@ -7078,7 +7063,7 @@ as_info_init()
 	shash_create(&g_info_node_info_hash, cf_nodeid_shash_fn, sizeof(cf_node), sizeof(info_node_info), 64, SHASH_CR_MT_BIGLOCK);
 
 	// create worker threads
-	g_info_work_q = cf_queue_create(sizeof(info_work), true);
+	g_info_work_q = cf_queue_create(sizeof(as_info_transaction), true);
 
 	char vstr[64];
 	sprintf(vstr, "%s build %s", aerospike_build_type, aerospike_build_id);

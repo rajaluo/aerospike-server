@@ -89,12 +89,15 @@ typedef struct proxy_request_s {
 	uint32_t		msg_fields;
 
 	uint8_t			origin;
+	uint8_t			from_flags;
+
 	union {
 		void*				any;
 		as_file_handle*		proto_fd_h;
 		as_batch_shared*	batch_shared;
 		// No need for other members of this union.
 	} from;
+
 	// No need yet for a 'from_data" union.
 	uint32_t		batch_index;
 
@@ -188,6 +191,7 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 	pr.msg_fields = tr->msg_fields;
 
 	pr.origin = tr->origin;
+	pr.from_flags = tr->from_flags;
 	pr.from.any = tr->from.any;
 	pr.batch_index = tr->from_data.batch_index;
 	tr->from.any = NULL;  // pattern, not needed
@@ -262,6 +266,7 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 	pr.msg_fields = wr->msg_fields;
 
 	pr.origin = 0;
+	pr.from_flags = 0;
 	pr.from.any = NULL;
 	pr.batch_index = 0;
 
@@ -513,7 +518,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			// Put the as_msg on the normal queue for processing.
 			// INIT_TR
 			as_transaction tr;
-			as_transaction_init(&tr, key, msgp);
+			as_transaction_init_head(&tr, key, msgp);
 			// msgp might not have digest - batch sub-transactions, old clients.
 			// For old clients, will compute it again from msgp key and set.
 
@@ -528,14 +533,14 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			// For batch sub-transactions, make sure we flag them so they're not
 			// mistaken for multi-record transactions (which never proxy).
 			if (as_transaction_has_no_key_or_digest(&tr)) {
-				tr.flag |= AS_TRANSACTION_FLAG_BATCH_SUB;
+				tr.from_flags |= FROM_FLAG_BATCH_SUB;
 			}
 
 			// Check here if this is shipped op.
 			uint32_t info = 0;
 			msg_get_uint32(m, PROXY_FIELD_INFO, &info);
 			if (info & PROXY_INFO_SHIPPED_OP) {
-				tr.flag |= AS_TRANSACTION_FLAG_SHIPPED_OP;
+				tr.from_flags |= FROM_FLAG_SHIPPED_OP;
 				cf_detail_digest(AS_PROXY, &tr.keyd, "SHIPPED_OP WINNER Operation Received");
 			} else {
 				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest ");
@@ -698,15 +703,16 @@ SendFin:
 
 			// Put the as_msg on the normal queue for processing.
 			as_transaction tr;
-			as_transaction_init(&tr, key, msgp);
+			as_transaction_init_head(&tr, key, msgp);
 			// msgp might not have digest - batch sub-transactions, old clients.
 			// For old clients, will compute it again from msgp key and set.
 
 			tr.msg_fields = pr->msg_fields;
-			tr.start_time = pr->start_time;
 			tr.origin = pr->origin;
+			tr.from_flags = pr->from_flags;
 			tr.from.any = pr->from.any;
 			tr.from_data.batch_index = pr->batch_index;
+			tr.start_time = pr->start_time;
 
 			MICROBENCHMARK_RESET();
 
@@ -944,12 +950,13 @@ Retry:
 
 				// INIT_TR
 				as_transaction tr;
-				as_transaction_init(&tr, keyp, msgp);
+				as_transaction_init_head(&tr, keyp, msgp);
 				// msgp might not have digest - batch sub-transactions, old clients.
 				// For old clients, will compute it again from msgp key and set.
 
 				tr.msg_fields = pr->msg_fields;
 				tr.origin = pr->origin;
+				tr.from_flags = pr->from_flags;
 				tr.from.any = pr->from.any;
 				tr.from_data.batch_index = pr->batch_index;
 				tr.start_time = pr->start_time;

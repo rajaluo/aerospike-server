@@ -329,7 +329,8 @@ slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 
 	// Chunk transaction is always preprocessed
 	c_tr->msg_fields           = h_tr->msg_fields;
-	c_tr->flag                 = 0;
+	c_tr->from_flags           = 0;
+	c_tr->flags                = 0;
 
 	// Parent reservation cannot go away as long as Chunck needs reservation.
 	memcpy(&c_tr->rsv, &h_tr->rsv, sizeof(as_partition_reservation));

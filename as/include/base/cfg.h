@@ -464,7 +464,6 @@ typedef struct as_config_s {
 	histogram *			error_hist;  // histogram of error requests only
 	histogram *			batch_index_reads_hist;        // New batch index protocol latency histogram.
 	histogram *			batch_q_process_hist; // Old batch direct protocol latency histogram.
-	histogram *			info_tr_q_process_hist;  // histogram of time spent processing info messages in transaction q
 	histogram *			info_q_wait_hist;  // histogram of time info transaction spends on info q
 	histogram *			info_post_lock_hist; // histogram of time spent processing the Info command under the mutex before sending the response on the network
 	histogram *			info_fulfill_hist; // histogram of time spent to fulfill info request after taking it off the info q

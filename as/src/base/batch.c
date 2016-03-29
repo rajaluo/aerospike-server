@@ -762,11 +762,11 @@ as_batch_queue_task(as_transaction* btr)
 
 	// Initialize generic transaction.
 	as_transaction tr;
-	as_transaction_init(&tr, 0, 0);
+	as_transaction_init_head(&tr, 0, 0);
 
 	tr.origin = FROM_BATCH;
 	tr.from.batch_shared = shared;
-	tr.flag |= AS_TRANSACTION_FLAG_BATCH_SUB;
+	tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	tr.start_time = btr->start_time;
 	MICROBENCHMARK_SET_TO_START();
 

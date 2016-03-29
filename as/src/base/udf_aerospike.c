@@ -134,7 +134,7 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 	if (i != -1) {
 		if (has_sindex) {
 			if (sbins_populated > 0) {	
-				tr->flag |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+				tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 				as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sbins_populated, &rd->keyd);
 			}
 		}
@@ -341,7 +341,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
 		SINDEX_GUNLOCK();
 		if (sbins_populated > 0) {
-			tr->flag |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
+			tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 			as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sbins_populated, &rd->keyd);	
 			as_sindex_sbin_freeall(sbins, sbins_populated);
 		}

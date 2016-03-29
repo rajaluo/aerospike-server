@@ -62,13 +62,18 @@ struct as_batch_shared_s;
 // complete, then atomic-increment the number of complete transactions.
 
 typedef struct write_request_s {
-	pthread_mutex_t      lock;
-	wreq_tr_element    * wait_queue_head;
-	bool                 ready; // set to true when fully initialized
-	uint32_t             tid;
 
-	// Where initial write request comes from.
+	//------------------------------------------------------
+	// Matches as_transaction.
+	//
+
+	cl_msg             * msgp;
+	uint32_t             msg_fields;
+
 	uint8_t              origin;
+	uint8_t              from_flags;
+	// Don't need microbenchmark_is_resolve flag.
+
 	union {
 		void*						any;
 		as_file_handle*				proto_fd_h;
@@ -76,61 +81,69 @@ typedef struct write_request_s {
 		struct iudf_origin_s*		iudf_orig;
 		struct as_batch_shared_s*	batch_shared;
 	} from;
+
 	union {
 		uint32_t any;
 		uint32_t batch_index;
 		uint32_t proxy_tid;
 	} from_data;
 
-	// The incoming msgp from the transaction that created this request.
-	cl_msg             * msgp;
-	uint32_t             msg_fields;
-
-	cf_clock             xmit_ms; // time of next retransmit
-	uint32_t             retry_interval_ms; // interval to add for next retransmit
+	cf_digest            keyd;
 
 	cf_clock             start_time;
-	cf_clock             end_time;
 	cf_clock             microbenchmark_time;
 
-	// The request we're making, so we can retransmit if necessary. Will be the
-	// duplicate request if we're in dup phase, or the op (write) if we're in
-	// the second phase but it's always the message we're sending out to the
-	// nodes in the dest array.
-	msg                * dest_msg;
+	as_partition_reservation rsv;
 
-	// After a merge-and-write is done, we need to have the real generation and
-	// data so we can reflect it out to the secondaries. Who knows what data
-	// they might or might not have.
+	cf_clock             end_time;
+	// Don't (yet) need result or flags.
+	uint16_t             generation;
+	uint32_t             void_time;
+
+	//
+	// End of as_transaction look-alike.
+	//------------------------------------------------------
+
+	pthread_mutex_t      lock;
+
+	wreq_tr_element    * wait_queue_head;
+
+	bool                 ready; // set to true when fully initialized
+	bool                 rsv_valid; // TODO - redundant, same as 'ready'
+	bool                 shipped_op; // TODO - redundant, on 'from_flags'
+	bool                 is_read;
+
+	bool                 respond_client_on_master_completion;
+	bool                 replication_fire_and_forget;
+	bool                 shipped_op_initiator;
+	bool                 has_udf; // TODO - possibly redundant
+
+	// Transaction consistency guarantees:
+	as_policy_consistency_level read_consistency_level;
+	as_policy_commit_level      write_commit_level;
+
+	// Store pickled data, for use in replica write.
 	uint8_t            * pickled_buf;
 	size_t               pickled_sz;
 	as_rec_props         pickled_rec_props;
-	uint16_t             generation;
-	uint32_t             void_time;
 
 	// Store ops' responses here.
 	cf_dyn_buf           response_db;
 
-	cf_atomic32          trans_complete; // make sure transaction gets processed only once
-	cf_atomic32          dupl_trans_complete; // if 0, we are in 'dup' phase (and use atomic to only-once
+	// Manage responses of duplicate resolution and replica writes.
+	uint32_t             tid;
+	cf_atomic32          trans_complete;
+	cf_atomic32          dupl_trans_complete; // 0 in 'dup' phase
 
-	bool                 is_read;
-	bool                 rsv_valid;
-	// If set, this transaction should respond back to client after write on master.
-	bool                 respond_client_on_master_completion;
-	bool                 replication_fire_and_forget;
+	// The request we're making, so we can retransmit if necessary. Will be the
+	// duplicate request if we're in 'dup' phase, or the op (write) if we're in
+	// the second phase but it's always the message we're sending out to the
+	// nodes in the dest array.
+	msg                * dest_msg;
 
-	// Transaction consistency guarantees:
-	as_policy_consistency_level   read_consistency_level;
-	as_policy_commit_level        write_commit_level;
+	cf_clock             xmit_ms; // time of next retransmit
+	uint32_t             retry_interval_ms; // interval to add for next retransmit
 
-	cf_digest            keyd;
-
-	bool                 shipped_op;
-	bool                 shipped_op_initiator;
-	bool                 has_udf;
-
-	as_partition_reservation rsv;
 	// These three elements are used both for the duplicate resolution phase
 	//  the "operation" (usually write) phase.
 	int                  dest_sz;
@@ -141,7 +154,8 @@ typedef struct write_request_s {
 	// response that comes back from a given node
 	msg                * dup_msg[AS_CLUSTER_SZ];
 	int                  dup_result_code[AS_CLUSTER_SZ];
-} write_request; // this is really an rw_request, but the old name looks pretty
+
+} write_request;
 
 void write_request_destructor (void *object);
 
@@ -196,7 +210,7 @@ void wr_track_init()
 
 void 			g_write_hash_delete(global_keyd *gk);
 write_request * write_request_create(void);
-int             write_request_init_tr(as_transaction *tr, void *wreq);
+void            write_request_init_tr(as_transaction *tr, write_request *wr);
 bool            finish_rw_process_ack(write_request *wr, uint32_t result_code, bool is_repl_write);
 int             write_request_process_ack(int ns_id, cf_digest *keyd);
 void            write_request_finish(as_transaction *tr, write_request *wr, bool must_delete);

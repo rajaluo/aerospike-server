@@ -106,6 +106,8 @@ process_transaction(as_transaction *tr)
 	cl_msg *msgp = tr->msgp;
 	as_msg *m = &msgp->msg;
 
+	as_transaction_init_body(tr);
+
 	// Calculate end_time based on message transaction TTL. May be recalculating
 	// for re-queued transactions, but nice if end_time not copied on/off queue.
 	if (m->transaction_ttl != 0) {
@@ -123,7 +125,7 @@ process_transaction(as_transaction *tr)
 
 	// Have we finished the very first partition balance?
 	if (! as_partition_balance_is_init_resolved() &&
-			(tr->flag & AS_TRANSACTION_FLAG_NSUP_DELETE) == 0) {
+			(tr->from_flags & FROM_FLAG_NSUP_DELETE) == 0) {
 		cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
 		as_transaction_error(tr, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		goto Cleanup;
@@ -290,7 +292,7 @@ process_transaction(as_transaction *tr)
 
 		// If the transaction is "shipped proxy op" to the winner node then
 		// just do the migrate reservation.
-		if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
+		if (tr->from_flags & FROM_FLAG_SHIPPED_OP) {
 			as_partition_reserve_migrate(ns, as_partition_getid(tr->keyd),
 					&tr->rsv, &dest);
 			partition_cluster_key = tr->rsv.cluster_key;
@@ -323,7 +325,7 @@ process_transaction(as_transaction *tr)
 
 		// If the transaction is "shipped proxy op" to the winner node then
 		// just do the migrate reservation.
-		if (tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) {
+		if (tr->from_flags & FROM_FLAG_SHIPPED_OP) {
 			as_partition_reserve_migrate(ns, as_partition_getid(tr->keyd),
 					&tr->rsv, &dest);
 			partition_cluster_key = tr->rsv.cluster_key;
@@ -401,7 +403,7 @@ process_transaction(as_transaction *tr)
 			free_msgp = false;
 			break;
 		case FROM_PROXY:
-			if ((tr->flag & AS_TRANSACTION_FLAG_SHIPPED_OP) != 0) {
+			if ((tr->from_flags & FROM_FLAG_SHIPPED_OP) != 0) {
 				cf_warning(AS_RW, "Failing the shipped op due to reservation error %d", rv);
 
 				as_proxy_send_response(tr->from.proxy_node,
@@ -508,7 +510,7 @@ as_tsvc_init()
 
 	// Create the transaction queues.
 	for (int i = 0; i < g_config.n_transaction_queues ; i++) {
-		g_config.transactionq_a[i] = cf_queue_create(sizeof(as_transaction), true);
+		g_config.transactionq_a[i] = cf_queue_create(AS_TRANSACTION_HEAD_SIZE, true);
 	}
 
 	// Allocate the transaction threads that service all the queues.

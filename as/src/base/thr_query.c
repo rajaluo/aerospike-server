@@ -179,7 +179,7 @@ typedef enum {
  * Query Transaction Structure
  */
 // **************************************************************************************************
-struct as_query_transaction_s {
+typedef struct as_query_transaction_s {
 
 	/*
  	* MT (Read Only) No protection required
@@ -255,7 +255,7 @@ struct as_query_transaction_s {
 	iudf_origin              origin;   // Record UDF Details
 	as_sindex_qctx           qctx;     // Secondary Index details
 	as_partition_reservation * rsv;
-};
+} as_query_transaction;
 // **************************************************************************************************
 
 

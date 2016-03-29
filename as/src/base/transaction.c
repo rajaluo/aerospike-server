@@ -38,7 +38,6 @@
 
 #include "fault.h"
 
-#include "base/as_stap.h"
 #include "base/batch.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
@@ -48,53 +47,57 @@
 #include "base/thr_proxy.h"
 #include "base/udf_rw.h"
 
-/* as_transaction_prepare
- * Prepare a transaction that has just been received from the wire.
- * NB: This should only be called once on any given transaction, because it swaps bytes! */
 
-/*
-** the layout for the digest is:
-** type byte - set
-** set's bytes
-** type byte - key
-** key's bytes
-**
-** Notice that in the case of the 'key', the payload includes a particle-type byte.
-**
-** return -2 means no digest no key
-** return -3 means batch digest request
-** return -4 means bad protocol data  (but no longer used??)
-*/
-
-/*
- * Code to init the fields in a transaction.  Use this instead of memset.
- *
- * NB: DO NOT SHUFFLE INIT ORDER .. it is based on elements found in the
- *     structure.
- */
 void
-as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
+as_transaction_init_head(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 {
-	tr->msgp                      = msgp;
-	tr->msg_fields                = 0;
+	tr->msgp				= msgp;
+	tr->msg_fields			= 0;
 
-	tr->keyd                      = keyd ? *keyd : cf_digest_zero;
+	tr->origin				= 0;
+	tr->from_flags			= 0;
 
-	tr->result_code               = AS_PROTO_RESULT_OK;
-	tr->generation                = 0;
-	tr->microbenchmark_is_resolve = false;
-	tr->flag                      = 0;
+	tr->microbenchmark_is_resolve = false; // will soon be gone
 
-	tr->start_time                = 0;
-	tr->end_time                  = 0;
-	tr->microbenchmark_time       = 0;
+	tr->from.any			= NULL;
+	tr->from_data.any		= 0;
 
+	tr->keyd				= keyd ? *keyd : cf_digest_zero;
+
+	tr->start_time			= 0;
+	tr->microbenchmark_time	= 0;
+}
+
+void
+as_transaction_init_body(as_transaction *tr)
+{
 	AS_PARTITION_RESERVATION_INIT(tr->rsv);
 
-	tr->from.any                  = NULL;
-	tr->from_data.any             = 0;
+	tr->end_time			= 0;
+	tr->result_code			= AS_PROTO_RESULT_OK;
+	tr->flags				= 0;
+	tr->generation			= 0;
+	tr->void_time			= 0;
+}
 
-	tr->void_time                 = 0;
+void
+as_transaction_copy_head(as_transaction *to, const as_transaction *from)
+{
+	to->msgp				= from->msgp;
+	to->msg_fields			= from->msg_fields;
+
+	to->origin				= from->origin;
+	to->from_flags			= from->from_flags;
+
+	to->microbenchmark_is_resolve = false; // will soon be gone
+
+	to->from.any			= from->from.any;
+	to->from_data.any		= from->from_data.any;
+
+	to->keyd				= from->keyd;
+
+	to->start_time			= from->start_time;
+	to->microbenchmark_time	= from->microbenchmark_time;
 }
 
 bool
@@ -277,7 +280,7 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 	b = as_msg_write_header(b, msg_sz, 0, AS_MSG_INFO2_WRITE, 0, 0, 0, 0, 2, 0);
 	b = as_msg_write_fields(b, ns->name, ns_len, NULL, 0, keyd, 0, 0, 0, 0);
 
-	as_transaction_init(tr, NULL, msgp);
+	as_transaction_init_head(tr, NULL, msgp);
 
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);

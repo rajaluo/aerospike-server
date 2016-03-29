@@ -676,16 +676,32 @@ thr_demarshal(void *arg)
 					fd_h->proto = 0;
 					fd_h->proto_unread = 0;
 
+					cf_rc_reserve(fd_h);
+					has_extra_ref = true;
+
+					uint64_t microbenchmark_time = 0;
+
+					if (g_config.microbenchmarks) {
+						microbenchmark_time = histogram_insert_data_point(g_config.demarshal_hist, now_ns);
+					}
+
+					// Info protocol requests.
+					if (proto_p->type == PROTO_TYPE_INFO) {
+						as_info_transaction it = { fd_h, proto_p, microbenchmark_time };
+
+						as_info(&it);
+						cf_atomic_int_incr(&g_config.proto_transactions);
+						goto NextEvent;
+					}
+
 					// INIT_TR
 					as_transaction tr;
-					as_transaction_init(&tr, NULL, (cl_msg *)proto_p);
+					as_transaction_init_head(&tr, NULL, (cl_msg *)proto_p);
 
 					tr.origin = FROM_CLIENT;
 					tr.from.proto_fd_h = fd_h;
 					tr.start_time = now_ns;
-
-					cf_rc_reserve(fd_h);
-					has_extra_ref = true;
+					tr.microbenchmark_time = microbenchmark_time;
 
 					if (! as_proto_is_valid_type(proto_p)) {
 						cf_warning(AS_DEMARSHAL, "unsupported proto message type %u", proto_p->type);
@@ -695,11 +711,6 @@ thr_demarshal(void *arg)
 						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
-					}
-
-					if (g_config.microbenchmarks) {
-						histogram_insert_data_point(g_config.demarshal_hist, now_ns);
-						tr.microbenchmark_time = cf_getns();
 					}
 
 					// Check if it's compressed.
@@ -738,16 +749,6 @@ thr_demarshal(void *arg)
 					// Security protocol transactions.
 					if (tr.msgp->proto.type == PROTO_TYPE_SECURITY) {
 						as_security_transact(&tr);
-						cf_atomic_int_incr(&g_config.proto_transactions);
-						goto NextEvent;
-					}
-
-					// Info protocol requests.
-					if (tr.msgp->proto.type == PROTO_TYPE_INFO) {
-						if (as_info(&tr)) {
-							cf_warning(AS_DEMARSHAL, "Info request failed to be enqueued ~~ Freeing protocol buffer");
-							goto NextEvent_FD_Cleanup;
-						}
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
 					}

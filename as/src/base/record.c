@@ -491,7 +491,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	for (uint16_t i = 0; i < newbins; i++) {
 		if (buf >= buf_lim) {
 			cf_warning(AS_RECORD, "as_record_unpickle_replace: bad format: on bin %d of %d, %p >= %p (diff: %lu) newbins: %d", i, newbins, buf, buf_lim, buf - buf_lim, newbins);
-			ret = -3;
+			ret = -4;
 			break;
 		}
 
@@ -855,7 +855,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 	int ret             = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
 	if (-1 == ret) {
 		cf_debug_digest(AS_RECORD, keyd, "{%s} record flatten: could not get-create record %b", rsv->ns->name, is_subrec);
-		return(-3);
+		return -3;
 	} else if (ret) {
 		has_local_copy  = false;
 		r               = r_ref.r;
@@ -895,7 +895,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 			} else {
 				cf_detail(AS_LDT, "Ship Operation");
 				// NB: DO NOT CHANGE THIS RETURN. IT MEANS A SPECIAL THING TO THE CALLER
-				rv = -2;
+				rv = -7;
 			}
 		} else {
 			// Case 2:
