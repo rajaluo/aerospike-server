@@ -64,10 +64,9 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-max-recs-inflight",			XDR_CASE_MAX_RECS_INFLIGHT },
 		{ "xdr-max-ship-throughput",		XDR_CASE_MAX_SHIP_THROUGHPUT },
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
-		{ "xdr-threads",					XDR_CASE_THREADS },
+		{ "xdr-client-threads",				XDR_CASE_CLIENT_THREADS },
 		{ "timeout",						XDR_CASE_TIMEOUT },							// not exposed to users
 		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
-		{ "xdr-forward-with-gencheck",		XDR_CASE_XDR_FORWARD_WITH_GENCHECK },
 		{ "xdr-replace-record",				XDR_CASE_XDR_REPLACE_RECORD },
 		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
 		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
@@ -75,7 +74,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
 		{ "xdr-read-batch-size",			XDR_CASE_XDR_READ_BATCH_SIZE },
 		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },
-		{ "xdr-ship-threads",				XDR_CASE_XDR_SHIP_THREADS},
+		{ "xdr-read-threads",				XDR_CASE_XDR_READ_THREADS},
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -131,17 +130,16 @@ void xdr_config_defaults(xdr_config *c)
 								  // The default will be determined based on remote DC's pipelining capabilities
 	c->xdr_max_ship_throughput = 0;	// XDR TPS limit.
 	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go
-	c->xdr_ship_threads = 8;        // Number of XDR shipper threads.
+	c->xdr_read_threads = 4;        // Number of XDR read threads.
 	c->xdr_timeout = 10000;		// Timeout for each element that is shipped. default is 10000 ms
 								// asd side connection times out at 15 seconds
-	c->xdr_threads = 3;		//Number of receiver threads to spawn
+	c->xdr_client_threads = 3;		//Number of async client threads (event loops)
 	c->xdr_forward_xdrwrites = false;	//If the writes due to xdr should be forwarded
 	c->xdr_nsup_deletes_enabled = false;		// Shall XDR ship deletes of evictions or expiration
 	c->xdr_internal_shipping_delay = 0; //Default sleep between shipping each batch is 0 second
 	c->xdr_conf_change_flag = 0;
 	c->xdr_shipping_enabled = true;
 	c->xdr_delete_shipping_enabled = true;
-	c->xdr_fwd_with_gencheck = false;
 	c->xdr_replace_record = true;
 	c->xdr_info_request_timeout_ms = 500;
 	c->xdr_compression_threshold = 0; //0 = Disabled compressed shipping, > 0 minimum size of packet for compression

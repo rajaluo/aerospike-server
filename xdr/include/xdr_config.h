@@ -80,12 +80,11 @@ typedef enum {
 	XDR_CASE_MAX_RECS_INFLIGHT,
 	XDR_CASE_MAX_SHIP_THROUGHPUT,
 	XDR_CASE_FORWARD_XDR_WRITES,
-	XDR_CASE_THREADS,
+	XDR_CASE_CLIENT_THREADS,
 	XDR_CASE_TIMEOUT,
 	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED,
 	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE,
 	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
-	XDR_CASE_XDR_FORWARD_WITH_GENCHECK,
 	XDR_CASE_XDR_REPLACE_RECORD,
 	XDR_CASE_XDR_SHIPPING_ENABLED,
 	XDR_CASE_XDR_PIDFILE,
@@ -93,7 +92,7 @@ typedef enum {
 	XDR_CASE_XDR_INFO_TIMEOUT,
 	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
 	XDR_CASE_XDR_SHIP_DELAY,
-	XDR_CASE_XDR_SHIP_THREADS,
+	XDR_CASE_XDR_READ_THREADS,
 
 	// Security options:
 	XDR_CASE_SEC_CREDENTIALS_BEGIN,
@@ -151,9 +150,7 @@ typedef struct xdr_lastship_s {
 
 // Config option in case the configuration value is changed
 typedef struct xdr_new_config_s {
-	int		xdr_max_recs_inflight;
 	int		xdr_read_batch_size;
-	int		xdr_threads;
 } xdr_new_config;
 
 //Config option which is maintained both by the server and the XDR module
@@ -173,9 +170,9 @@ typedef struct xdr_config {
 	int	xdr_max_recs_inflight;
 	int	xdr_max_ship_throughput;
 	int	xdr_read_batch_size;
-	int	xdr_ship_threads;       // Number threads which will read from server and ship records.
+	int	xdr_read_threads;       // Number threads which will read from server and ship records.
 	int	xdr_timeout;
-	int	xdr_threads;
+	int	xdr_client_threads;
 	int	xdr_forward_xdrwrites;
 	int xdr_internal_shipping_delay;
 	int	xdr_conf_change_flag;
@@ -183,7 +180,6 @@ typedef struct xdr_config {
 	bool	xdr_shipping_enabled;
 	bool	xdr_delete_shipping_enabled;
 	bool	xdr_nsup_deletes_enabled;
-	bool	xdr_fwd_with_gencheck;
 	bool	xdr_replace_record;
 	int		xdr_info_request_timeout_ms;
 	int     xdr_compression_threshold;
