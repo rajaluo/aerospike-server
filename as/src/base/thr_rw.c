@@ -231,7 +231,7 @@ int write_request_init_tr(as_transaction *tr, void *wreq) {
 	tr->msgp = wr->msgp;
 	tr->msg_fields = wr->msg_fields;
 	tr->result_code = AS_PROTO_RESULT_OK;
-	tr->flag = 0;
+	tr->flag = wr->flag;
 
 	tr->generation = wr->generation;
 	tr->void_time = wr->void_time;
@@ -1194,6 +1194,7 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			ns->name, tr->rsv.p->partition_id, g_config.self_node, is_read );
 
 	wr->msg_fields = tr->msg_fields;
+	wr->flag = tr->flag;
 	wr->keyd = tr->keyd;
 	wr->start_time = tr->start_time;
 	wr->end_time = tr->end_time;
@@ -1284,7 +1285,7 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 			e->tr.msgp = tr->msgp;
 			tr->msgp = 0;
 			e->tr.msg_fields = tr->msg_fields;
-			e->tr.flag = 0;
+			e->tr.flag = tr->flag;
 			e->tr.iudf_orig = tr->iudf_orig;
 			tr->iudf_orig = NULL;
 			e->tr.batch_shared = tr->batch_shared;
