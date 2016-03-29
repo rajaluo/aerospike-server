@@ -74,6 +74,7 @@ typedef struct write_request_s {
 	// The incoming msgp from the transaction that created this request.
 	cl_msg             * msgp;
 	uint32_t             msg_fields;
+	uint8_t              flag;
 
 	cf_clock             xmit_ms; // time of next retransmit
 	uint32_t             retry_interval_ms; // interval to add for next retransmit
