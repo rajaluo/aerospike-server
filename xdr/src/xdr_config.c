@@ -116,31 +116,30 @@ void xdr_config_defaults(xdr_config *c)
 {
 	int index;
 
-	c->xdr_global_enabled = false;	//This config option overrides the enable-xdr setting of the namespace(s)
+	c->xdr_global_enabled = false;		// This config option overrides the enable-xdr setting of the namespace(s)
 
 	for (index = 0; index < XDR_MAX_DGLOG_FILES ; index++) {
-		c->xdr_digestlog_path[index] = NULL;	//Path where the digest information is written to the disk
+		c->xdr_digestlog_path[index] = NULL;	// Path where the digest information is written to the disk
 	}
-	c->xdr_num_digestlog_paths = 0; //Number of rlog files 0 is default
+	c->xdr_num_digestlog_paths = 0;		// Number of rlog files 0 is default
 	c->xdr_digestlog_overwrite = true;
 	c->xdr_digestlog_persist = true;
 	c->xdr_info_port = 0;
 
-	c->xdr_max_ship_throughput = 0;	// XDR TPS limit.
-	c->xdr_max_ship_bandwidth = 0;	// XDR bandwidth limit.
-	c->xdr_hotkey_time = 100;		// Expiration time for the deduplication cache.
-	c->xdr_read_batch_size = 500;   // Number of digests read from the digest log and processed in one go
-	c->xdr_read_threads = 4;        // Number of XDR read threads.
-	c->xdr_timeout = 10000;		// Timeout for each element that is shipped. default is 10000 ms
-								// asd side connection times out at 15 seconds
-	c->xdr_client_threads = 3;		//Number of async client threads (event loops)
-	c->xdr_forward_xdrwrites = false;	//If the writes due to xdr should be forwarded
-	c->xdr_nsup_deletes_enabled = false;		// Shall XDR ship deletes of evictions or expiration
-	c->xdr_internal_shipping_delay = 0; //Default sleep between shipping each batch is 0 second
+	c->xdr_max_ship_throughput = 0;		// XDR TPS limit
+	c->xdr_max_ship_bandwidth = 0;		// XDR bandwidth limit
+	c->xdr_hotkey_time = 100;			// Expiration time for the de-duplication cache
+	c->xdr_read_batch_size = 500;		// Number of digests read from the digest log and processed in one go
+	c->xdr_read_threads = 4;			// Number of XDR read threads.
+	c->xdr_timeout = 10000;				// Timeout for each element that is shipped.
+	c->xdr_client_threads = 3;			// Number of async client threads (event loops)
+	c->xdr_forward_xdrwrites = false;	// If the writes due to xdr should be forwarded
+	c->xdr_nsup_deletes_enabled = false;// Shall XDR ship deletes of evictions or expiration
+	c->xdr_internal_shipping_delay = 0;	// Default sleep between shipping each batch is 0 second
 	c->xdr_conf_change_flag = 0;
 	c->xdr_shipping_enabled = true;
 	c->xdr_delete_shipping_enabled = true;
 	c->xdr_replace_record = true;
 	c->xdr_info_request_timeout_ms = 500;
-	c->xdr_compression_threshold = 0; //0 = Disabled compressed shipping, > 0 minimum size of packet for compression
+	c->xdr_compression_threshold = 0; 	// 0 = Disabled compressed shipping, > 0 minimum size of packet for compression
 }
