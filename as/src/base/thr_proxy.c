@@ -98,6 +98,7 @@ typedef struct {
 	uint32_t         retry_interval_ms; // number of ms to wait next time
 
 	uint32_t         msg_fields;
+	uint8_t          flag;
 	uint64_t         start_time;
 	uint64_t         end_time;
 
@@ -196,6 +197,7 @@ as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t clus
 	msg_incr_ref(m);
 	proxy_request pr;
 	pr.msg_fields = tr->msg_fields;
+	pr.flag = tr->flag;
 	pr.start_time = tr->start_time;
 	pr.end_time = tr->end_time;
 	pr.fd_h = tr->proto_fd_h;
@@ -264,6 +266,7 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 	msg_incr_ref(m);
 	proxy_request pr;
 	pr.msg_fields  = wr->msg_fields;
+	pr.flag        = wr->flag;
 	pr.start_time  = wr->start_time;
 	pr.end_time    = wr->end_time;
 	cf_rc_reserve(wr);
@@ -754,6 +757,7 @@ SendFin:
 			// For old clients, will compute it again from msgp key and set.
 
 			tr.msg_fields = pr->msg_fields;
+			tr.flag = pr->flag;
 			tr.start_time = pr->start_time;
 			tr.proto_fd_h = pr->fd_h;
 			tr.batch_shared = pr->batch_shared;
@@ -1016,6 +1020,7 @@ Retry:
 				// For old clients, will compute it again from msgp key and set.
 
 				tr.msg_fields = pr->msg_fields;
+				tr.flag = pr->flag;
 				tr.start_time   = pr->start_time;
 				tr.proto_fd_h = pr->fd_h;
 				tr.batch_shared = pr->batch_shared;
