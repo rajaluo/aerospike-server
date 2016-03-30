@@ -63,7 +63,12 @@ endif
 	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh.conf $(BUILD_ROOT)/etc/aerospike
 
 ifeq ($(USE_SYSTEMD),1)
-	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
+	cat $(DEPTH)/as/etc/aerospike.service.head >> $(PKG)/deb/aerospike.service
+  ifeq ($(EDITION),community)
+	cat $(DEPTH)/as/etc/aerospike.service.telemetry >> $(PKG)/deb/aerospike.service
+  endif
+	cat $(DEPTH)/as/etc/aerospike.service.tail >> $(PKG)/deb/aerospike.service
+	install -p -D -m 644 $(PKG)/deb/aerospike.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike.service
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.tmpfiles $(BUILD_ROOT)/etc/tmpfiles.d/aerospike.conf
 	install -p -D -m 644 $(DEPTH)/as/etc/aerospike-server.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike
 	install -p -D -m 755 $(DEPTH)/as/etc/asd-systemd-helper $(BUILD_ROOT)/usr/bin/asd-systemd-helper
@@ -78,9 +83,13 @@ endif
 	install -pm 644 $(DEPTH)/LICENSE $(OPT_AS)/doc
 
 ifeq ($(EDITION),community)
+  ifeq ($(USE_SYSTEMD),1)
+	install -pm 755 $(DEPTH)/as/etc/aerospike_telemetry.service $(BUILD_ROOT)/usr/lib/systemd/system/aerospike_telemetry.service
+	install -pm 644 $(DEPTH)/as/etc/aerospike_telemetry.sysconfig $(BUILD_ROOT)/etc/sysconfig/aerospike_telemetry
+  else
 	install -pm 755 $(DEPTH)/as/etc/init-telemetry-script.deb $(BUILD_ROOT)/etc/init.d/aerospike_telemetry
 	install -pm 644 $(DEPTH)/as/etc/logrotate_telemetry $(BUILD_ROOT)/etc/logrotate.d/aerospike_telemetry
-
+  endif
 	install -d $(OPT_AS)/telemetry
 	install -d $(OPT_AS)/telemetry/phonehome
 	install -d $(OPT_AS)/telemetry/daemon
@@ -102,9 +111,8 @@ endif
 
 ifeq ($(USE_ASM),1)
 	install -pm 644 $(DEPTH)/as/etc/initfns $(BUILD_ROOT)/etc/aerospike
-	install -d $(OPT_AS)/bin
+	install -d $(OPT_AS)/{bin,lib}
 	install -pm 755 $(DEPTH)/as/etc/run-under-gdb $(OPT_AS)/bin
-	install -d $(OPT_AS)/lib
 	install -pm 644 $(DEPTH)/modules/asmalloc/lib/asmalloc.jem.so $(OPT_AS)/lib
 	install -pm 644 $(DEPTH)/modules/jemalloc/lib/libjemalloc.so $(OPT_AS)/lib
 endif
@@ -119,6 +127,9 @@ package:
 
 clean:
 	rm -rf $(SOURCE_ROOT)/*
+ifeq ($(USE_SYSTEMD),1)
+	rm -rf $(PKG)/deb/aerospike.service
+endif
 
 ifeq ($(USE_XDR),1)
   include $(XDR)/make_in/Makefile.deb.in
