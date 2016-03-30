@@ -4,11 +4,19 @@ Welcome to the Aerospike Database Server source code tree!
 
 Aerospike is a distributed, scalable NoSQL database. It is architected with three key objectives:
 
-- To create a high-performance, scalable platform that would meet the needs of today’s web-scale applications
+- To create a high-performance, scalable platform that would meet the needs of today's web-scale applications
 - To provide the robustness and reliability (i.e., ACID) expected from traditional databases.
 - To provide operational efficiency (minimal manual involvement)
 
 For more information on Aerospike, please visit: [http://aerospike.com](http://aerospike.com)
+
+## Telemetry Anonymized Data Collection
+
+The Aerospike Community Edition collects anonymized server performance statistics.
+Please see the
+[Aerospike Telemetery web page](http://aerospike.com/aerospike-telemetry) for more
+information.  The full Telemetry data collection agent source code may be found in the
+["telemetry" submodule](https://github.com/aerospike/aerospike-telemetry-agent/blob/master/README.md).
 
 ## Build Prerequisites
 
@@ -66,7 +74,7 @@ by the build environment.  In that case:
 
 ### Submodules
 
-The Aerospike Database Server build depends upon 8 submodules:
+The Aerospike Database Server build depends upon (up to) 9 submodules:
 
 | Submodule | Description |
 |---------- | ----------- |
@@ -78,6 +86,7 @@ The Aerospike Database Server build depends upon 8 submodules:
 | luajit    | The LuaJIT (Just-In-Time Compiler for Lua) |
 | mod-lua   | The Aerospike Lua Interface |
 | s2-geometry-library | The S2 Spherical Geometry Library |
+| telemetry | The Aerospike Telemetry Agent (Community Edition only) |
 
 After the initial cloning of the `aerospike-server` repo., the
 submodules must be fetched for the first time using the following

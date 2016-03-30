@@ -32,6 +32,9 @@ dist:
 	install -d $(BUILD_ROOT)/var/run/aerospike
 
 	install -pm 644 $(PKG)/deb/conffiles $(BUILD_ROOT)/DEBIAN
+ifeq ($(EDITION),community)
+	cat $(PKG)/deb/conffiles.telemetry >> $(BUILD_ROOT)/DEBIAN/conffiles
+endif
 	install -pm 755 $(PKG)/deb/postinst.server $(BUILD_ROOT)/DEBIAN/postinst
 
 	install -pm 755 $(BIN_DIR)/asd $(BUILD_ROOT)/usr/bin/asd
@@ -46,13 +49,21 @@ dist:
 	sed -i 's/@EDITION@/$(EDITION)/g' $(BUILD_ROOT)/etc/init.d/aerospike
 	install -pm 644 $(DEPTH)/as/etc/logrotate_asd $(BUILD_ROOT)/etc/logrotate.d/aerospike
 
-ifeq ($(USE_ASM),1)
-	install -pm 644 $(DEPTH)/as/etc/initfns $(BUILD_ROOT)/etc/aerospike
-	install -d $(OPT_AS)/bin
-	install -pm 755 $(DEPTH)/as/etc/run-under-gdb $(OPT_AS)/bin
-	install -d $(OPT_AS)/lib
-	install -pm 644 $(DEPTH)/modules/asmalloc/lib/asmalloc.jem.so $(OPT_AS)/lib
-	install -pm 644 $(DEPTH)/modules/jemalloc/lib/libjemalloc.so $(OPT_AS)/lib
+	install -d $(OPT_AS)/doc
+	install -pm 644 $(DEPTH)/LICENSE $(OPT_AS)/doc
+
+ifeq ($(EDITION),community)
+	install -pm 755 $(DEPTH)/as/etc/init-telemetry-script.deb $(BUILD_ROOT)/etc/init.d/aerospike_telemetry
+	install -pm 644 $(DEPTH)/as/etc/logrotate_telemetry $(BUILD_ROOT)/etc/logrotate.d/aerospike_telemetry
+
+	install -d $(OPT_AS)/telemetry
+	install -d $(OPT_AS)/telemetry/phonehome
+	install -d $(OPT_AS)/telemetry/daemon
+	install -pm 644 $(DEPTH)/as/etc/telemetry.conf $(BUILD_ROOT)/etc/aerospike
+	install -pm 644 $(DEPTH)/modules/telemetry/README.md $(OPT_AS)/doc/TELEMETRY.md
+	install -pm 755 $(DEPTH)/modules/telemetry/telemetry.py $(OPT_AS)/telemetry
+	install -pm 755 $(DEPTH)/modules/telemetry/phonehome/*.py $(OPT_AS)/telemetry/phonehome
+	install -pm 755 $(DEPTH)/modules/telemetry/daemon/*.py $(OPT_AS)/telemetry/daemon
 endif
 
 	install -d $(OPT_AS)/data
@@ -64,8 +75,14 @@ endif
 	install -pm 644 $(DEPTH)/modules/lua-core/src/external/* $(OPT_AS)/sys/udf/lua/external
 	install -pm 644 $(DEPTH)/modules/lua-core/src/ldt/* $(OPT_AS)/sys/udf/lua/ldt
 
-	install -d $(OPT_AS)/doc
-	install -pm 644 $(DEPTH)/LICENSE $(OPT_AS)/doc
+ifeq ($(USE_ASM),1)
+	install -pm 644 $(DEPTH)/as/etc/initfns $(BUILD_ROOT)/etc/aerospike
+	install -d $(OPT_AS)/bin
+	install -pm 755 $(DEPTH)/as/etc/run-under-gdb $(OPT_AS)/bin
+	install -d $(OPT_AS)/lib
+	install -pm 644 $(DEPTH)/modules/asmalloc/lib/asmalloc.jem.so $(OPT_AS)/lib
+	install -pm 644 $(DEPTH)/modules/jemalloc/lib/libjemalloc.so $(OPT_AS)/lib
+endif
 
 	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/deb/server-64 > $(BUILD_ROOT)/DEBIAN/control
 	sed -i 's/@EDITION@/'$(EDITION)'/g' $(BUILD_ROOT)/DEBIAN/control
