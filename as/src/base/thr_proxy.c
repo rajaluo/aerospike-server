@@ -296,7 +296,6 @@ as_proxy_shipop(cf_node dst, write_request *wr)
 		as_fabric_msg_put(m);
 	}
 
-	wr->shipped_op_initiator = true;
 	cf_atomic_int_incr(&g_config.ldt_proxy_initiate);
 
 	return 0;

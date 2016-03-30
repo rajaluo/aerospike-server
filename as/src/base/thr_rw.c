@@ -196,11 +196,10 @@ write_request_create()
 	wr->ready = false;
 	wr->rsv_valid = false;
 	wr->is_read = false;
+	wr->has_udf = false;
 
 	wr->respond_client_on_master_completion = false;
 	wr->replication_fire_and_forget = false;
-	wr->shipped_op_initiator = false;
-	wr->has_udf = false;
 
 	wr->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE;
 	wr->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL;

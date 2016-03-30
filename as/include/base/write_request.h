@@ -111,11 +111,10 @@ typedef struct write_request_s {
 	bool                 ready; // set to true when fully initialized
 	bool                 rsv_valid; // TODO - redundant, same as 'ready'
 	bool                 is_read;
+	bool                 has_udf; // TODO - possibly redundant
 
 	bool                 respond_client_on_master_completion;
 	bool                 replication_fire_and_forget;
-	bool                 shipped_op_initiator;
-	bool                 has_udf; // TODO - possibly redundant
 
 	// Transaction consistency guarantees:
 	as_policy_consistency_level read_consistency_level;
