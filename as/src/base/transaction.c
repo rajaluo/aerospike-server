@@ -235,11 +235,14 @@ as_transaction_demarshal_prepare(as_transaction *tr)
 		}
 	}
 
+	// In this build (3.7.5.1) we'll forgive messages containing extra bytes,
+	// for compatibility with older C clients.
+/*
 	if (p_read != p_end) {
 		cf_warning(AS_PROTO, "extra bytes follow fields and bin-ops");
 		return false;
 	}
-
+*/
 	return true;
 }
 
