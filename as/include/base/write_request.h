@@ -110,7 +110,6 @@ typedef struct write_request_s {
 
 	bool                 ready; // set to true when fully initialized
 	bool                 rsv_valid; // TODO - redundant, same as 'ready'
-	bool                 shipped_op; // TODO - redundant, on 'from_flags'
 	bool                 is_read;
 
 	bool                 respond_client_on_master_completion;

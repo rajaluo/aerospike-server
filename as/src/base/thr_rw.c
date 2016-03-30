@@ -195,7 +195,6 @@ write_request_create()
 
 	wr->ready = false;
 	wr->rsv_valid = false;
-	wr->shipped_op = false;
 	wr->is_read = false;
 
 	wr->respond_client_on_master_completion = false;
@@ -255,10 +254,6 @@ write_request_init_tr(as_transaction *tr, write_request *wr)
 
 	wr->from.any = NULL;
 	// Note - we don't clear wr->msgp, some cases rely on destructor to free it.
-
-	if (wr->shipped_op) { // TODO - redundant, may deprecate.
-		tr->from_flags |= FROM_FLAG_SHIPPED_OP;
-	}
 }
 
 void
@@ -601,7 +596,7 @@ write_request_setup(write_request *wr, as_transaction *tr, int optype,
 	rw_msg_setup(wr->dest_msg, tr, &wr->keyd, &wr->pickled_buf, wr->pickled_sz,
 			&wr->pickled_rec_props, optype, wr->has_udf, false, fast_dupl_resolve);
 
-	if (wr->shipped_op) {
+	if ((wr->from_flags & FROM_FLAG_SHIPPED_OP) != 0) {
 		cf_detail(AS_RW,
 				"SHIPPED_OP WINNER [Digest %"PRIx64"] Initiating Replication for %s op ",
 				*(uint64_t *)&wr->keyd, wr->is_read ? "Read" : "Write");
@@ -1096,7 +1091,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 	wr->from_data.any  = tr->from_data.any;
 	tr->from.any = NULL;
 
-	wr->shipped_op = (tr->from_flags & FROM_FLAG_SHIPPED_OP) != 0;
 	wr->generation = tr->generation;
 	wr->void_time = tr->void_time;
 
@@ -1455,7 +1449,7 @@ int
 finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 {
 	cf_debug(AS_RW, "Prole Ack");
-	if (wr->shipped_op) {
+	if ((wr->from_flags & FROM_FLAG_SHIPPED_OP) != 0) {
 		cf_detail_digest(AS_RW, &wr->keyd, "SHIPPED_OP WINNER [Digest %"PRIx64"] Replication Done",
 				*(uint64_t *)&wr->keyd);
 	}
@@ -1611,7 +1605,6 @@ finish_rw_process_dup_ack(write_request *wr)
 			comp_sz, wr->keyd);
 	// updates the local in-memory representation
 	int rv         = 0;
-	wr->shipped_op = false;
 	int winner_idx = -1;
 	if (comp_sz > 0) {
 		rv = as_record_flatten(&wr->rsv, &wr->keyd, comp_sz, components,

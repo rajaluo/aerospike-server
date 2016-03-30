@@ -508,11 +508,18 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 				return 0;
 			}
 
-			uint64_t cluster_key = 0;
-			if (0 != msg_get_uint64(m, PROXY_FIELD_CLUSTER_KEY, &cluster_key)) {
-				cf_info(AS_PROXY, "proxy msg function: no cluster key, problem");
-				as_fabric_msg_put(m);
-				return 0;
+			uint32_t info = 0;
+			msg_get_uint32(m, PROXY_FIELD_INFO, &info);
+
+			if ((info & PROXY_INFO_SHIPPED_OP) != 0) {
+				uint64_t cluster_key = 0;
+				if (0 == msg_get_uint64(m, PROXY_FIELD_CLUSTER_KEY, &cluster_key) &&
+						cluster_key != as_paxos_get_cluster_key()) {
+					as_fabric_msg_put(m);
+					as_proxy_send_response(id, transaction_id, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH,
+							0, 0, NULL, NULL, 0, NULL, 0, NULL);
+					return 0;
+				}
 			}
 
 			// Put the as_msg on the normal queue for processing.
@@ -536,14 +543,9 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 				tr.from_flags |= FROM_FLAG_BATCH_SUB;
 			}
 
-			// Check here if this is shipped op.
-			uint32_t info = 0;
-			msg_get_uint32(m, PROXY_FIELD_INFO, &info);
-			if (info & PROXY_INFO_SHIPPED_OP) {
+			// Flag shipped ops.
+			if ((info & PROXY_INFO_SHIPPED_OP) != 0) {
 				tr.from_flags |= FROM_FLAG_SHIPPED_OP;
-				cf_detail_digest(AS_PROXY, &tr.keyd, "SHIPPED_OP WINNER Operation Received");
-			} else {
-				cf_detail_digest(AS_PROXY, &tr.keyd, "Received Proxy Request digest ");
 			}
 
 			as_fabric_msg_put(m);
@@ -740,13 +742,16 @@ SendFin:
 
 // Send a redirection message - consumes the message.
 void
-as_proxy_return_to_sender(const as_transaction *tr, cf_node redirect_node)
+as_proxy_return_to_sender(const as_transaction *tr, as_namespace *ns)
 {
 	msg *m = as_fabric_msg_get(M_TYPE_PROXY);
 
 	if (! m) {
 		return;
 	}
+
+	as_partition_id pid = as_partition_getid(tr->keyd);
+	cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
 
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
 	msg_set_uint32(m, PROXY_FIELD_TID, tr->from_data.proxy_tid);

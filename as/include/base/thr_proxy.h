@@ -48,7 +48,7 @@ extern void as_proxy_send_response(cf_node dst, uint32_t proxy_tid,
 extern void as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid,
 		cf_dyn_buf *db);
 extern void as_proxy_return_to_sender(const as_transaction *tr,
-		cf_node redirect_node);
+		as_namespace *ns);
 
 // Get a rough estimate of the in progress size for statistics.
 extern uint32_t as_proxy_inprogress();
