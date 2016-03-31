@@ -1,7 +1,7 @@
 /*
  * ldt.h
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,8 +26,6 @@
  */
 
 #pragma once
-
-#include "base/feature.h" // turn new AS Features on/off
 
 #include <stdbool.h>
 #include <stdint.h>

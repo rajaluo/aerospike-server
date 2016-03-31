@@ -21,7 +21,7 @@ ifeq ($(USE_EE),1)
   include $(EEREPO)/as/make_in/Makefile.vars
 endif
 
-BASE_HEADERS += aggr.h asm.h batch.h cdt.h cfg.h cluster_config.h datamodel.h feature.h index.h job_manager.h json_init.h
+BASE_HEADERS += aggr.h asm.h batch.h cdt.h cfg.h cluster_config.h datamodel.h index.h job_manager.h json_init.h
 BASE_HEADERS += ldt.h ldt_aerospike.h ldt_record.h monitor.h packet_compression.h
 BASE_HEADERS += particle.h particle_blob.h particle_integer.h
 BASE_HEADERS += proto.h rec_props.h scan.h secondary_index.h security.h security_config.h system_metadata.h
@@ -44,10 +44,10 @@ ifneq ($(USE_XDR),1)
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
 ifneq ($(USE_WARM),1)
-  BASE_SOURCES += namespace_cold.c
+  BASE_SOURCES += namespace_ce.c
 endif
 ifneq ($(USE_SEC),1)
-  BASE_SOURCES += security_stubs.c
+  BASE_SOURCES += security_ce.c
 endif
 
 FABRIC_HEADERS += hb.h fabric.h migrate.h paxos.h
@@ -59,7 +59,7 @@ GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
 STORAGE_HEADERS += storage.h drv_ssd.h
 STORAGE_SOURCES += storage.c drv_kv.c drv_memory.c drv_ssd.c
 ifneq ($(USE_WARM),1)
-  STORAGE_SOURCES += drv_ssd_cold.c
+  STORAGE_SOURCES += drv_ssd_ce.c
 endif
 
 HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%) $(GEOSPATIAL_HEADERS:%=geospatial/%)
@@ -172,8 +172,8 @@ include $(DEPTH)/make_in/Makefile.targets
 
 # Ignore S2 induced warnings
 S2_WNO = -Wno-unused-local-typedefs -Wno-deprecated -Wno-sign-compare
-$(OBJECT_DIR)/geospatial/geojson.o: CXXFLAGS += $(S2_WNO)
-$(OBJECT_DIR)/geospatial/geospatial.o: CXXFLAGS += $(S2_WNO)
+$(OBJECT_DIR)/geospatial/%.o: CXXFLAGS += $(S2_WNO)
+$(OBJECT_DIR)/geospatial/%.o: CFLAGS := $(filter-out -std=gnu99,$(CFLAGS))
 
 ifeq ($(USE_SYSTEMTAP),1)
 $(SYSTEMTAP_PROBES_H):	$(SYSTEMTAP_PROBES_D)

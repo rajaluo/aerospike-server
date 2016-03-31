@@ -38,7 +38,6 @@
 
 #include "fault.h"
 
-#include "base/as_stap.h"
 #include "base/batch.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
@@ -48,59 +47,57 @@
 #include "base/thr_proxy.h"
 #include "base/udf_rw.h"
 
-/* as_transaction_prepare
- * Prepare a transaction that has just been received from the wire.
- * NB: This should only be called once on any given transaction, because it swaps bytes! */
 
-/*
-** the layout for the digest is:
-** type byte - set
-** set's bytes
-** type byte - key
-** key's bytes
-**
-** Notice that in the case of the 'key', the payload includes a particle-type byte.
-**
-** return -2 means no digest no key
-** return -3 means batch digest request
-** return -4 means bad protocol data  (but no longer used??)
-*/
-
-/*
- * Code to init the fields in a transaction.  Use this instead of memset.
- *
- * NB: DO NOT SHUFFLE INIT ORDER .. it is based on elements found in the
- *     structure.
- */
 void
-as_transaction_init(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
+as_transaction_init_head(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 {
-	tr->msgp                      = msgp;
-	tr->msg_fields                = 0;
+	tr->msgp				= msgp;
+	tr->msg_fields			= 0;
 
-	tr->keyd                      = keyd ? *keyd : cf_digest_zero;
+	tr->origin				= 0;
+	tr->from_flags			= 0;
 
-	tr->result_code               = AS_PROTO_RESULT_OK;
-	tr->generation                = 0;
-	tr->microbenchmark_is_resolve = false;
-	tr->flag                      = 0;
+	tr->microbenchmark_is_resolve = false; // will soon be gone
 
-	tr->start_time                = 0;
-	tr->end_time                  = 0;
-	tr->microbenchmark_time       = 0;
+	tr->from.any			= NULL;
+	tr->from_data.any		= 0;
 
+	tr->keyd				= keyd ? *keyd : cf_digest_zero;
+
+	tr->start_time			= 0;
+	tr->microbenchmark_time	= 0;
+}
+
+void
+as_transaction_init_body(as_transaction *tr)
+{
 	AS_PARTITION_RESERVATION_INIT(tr->rsv);
 
-	tr->proto_fd_h                = 0;
-	tr->proxy_node                = 0;
-	tr->proxy_msg                 = 0;
+	tr->end_time			= 0;
+	tr->result_code			= AS_PROTO_RESULT_OK;
+	tr->flags				= 0;
+	tr->generation			= 0;
+	tr->void_time			= 0;
+}
 
-	tr->iudf_orig                 = 0;
+void
+as_transaction_copy_head(as_transaction *to, const as_transaction *from)
+{
+	to->msgp				= from->msgp;
+	to->msg_fields			= from->msg_fields;
 
-	tr->batch_shared              = 0;
-	tr->batch_index               = 0;
+	to->origin				= from->origin;
+	to->from_flags			= from->from_flags;
 
-	tr->void_time                 = 0;
+	to->microbenchmark_is_resolve = false; // will soon be gone
+
+	to->from.any			= from->from.any;
+	to->from_data.any		= from->from_data.any;
+
+	to->keyd				= from->keyd;
+
+	to->start_time			= from->start_time;
+	to->microbenchmark_time	= from->microbenchmark_time;
 }
 
 bool
@@ -283,10 +280,13 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 	b = as_msg_write_header(b, msg_sz, 0, AS_MSG_INFO2_WRITE, 0, 0, 0, 0, 2, 0);
 	b = as_msg_write_fields(b, ns->name, ns_len, NULL, 0, keyd, 0, 0, 0, 0);
 
-	as_transaction_init(tr, NULL, msgp);
+	as_transaction_init_head(tr, NULL, msgp);
 
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
+
+	tr->origin = FROM_IUDF;
+	// Caller must set tr->from.iudf_orig immediately afterwards...
 
 	// Do this last, to exclude the setup time in this function.
 	tr->start_time = cf_getns();
@@ -298,8 +298,8 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 void
 as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 {
-	as_msg_send_reply(tr->proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
-	tr->proto_fd_h = NULL;
+	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+	tr->from.proto_fd_h = NULL;
 
 	cf_free(tr->msgp);
 	tr->msgp = NULL;
@@ -308,29 +308,38 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 void
 as_transaction_error(as_transaction* tr, uint32_t error_code)
 {
-	if (tr->proto_fd_h) {
-		if (tr->batch_shared) {
-			as_batch_add_error(tr->batch_shared, tr->batch_index, error_code);
-			// Clear this transaction's msgp so calling code does not free it.
-			tr->msgp = 0;
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		cf_assert(tr->from.proto_fd_h, AS_PROTO, CF_CRITICAL, "null file handle");
+		as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
+		tr->from.proto_fd_h = NULL; // pattern, not needed
+		MICROBENCHMARK_HIST_INSERT_P(error_hist);
+		cf_atomic_int_incr(&g_config.err_tsvc_requests);
+		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
+			cf_atomic_int_incr(&g_config.err_tsvc_requests_timeout);
 		}
-		else {
-			as_msg_send_reply(tr->proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
-			tr->proto_fd_h = 0;
-			MICROBENCHMARK_HIST_INSERT_P(error_hist);
-			cf_atomic_int_incr(&g_config.err_tsvc_requests);
-			if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-				cf_atomic_int_incr(&g_config.err_tsvc_requests_timeout);
-			}
-		}
-	}
-	else if (tr->proxy_msg) {
-		as_proxy_send_response(tr->proxy_node, tr->proxy_msg, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
-		tr->proxy_msg = NULL;
-	}
-	else if (tr->iudf_orig) {
-		tr->iudf_orig->cb(tr, error_code);
-		tr->iudf_orig = NULL;
+		break;
+	case FROM_PROXY:
+		cf_assert(tr->from.proxy_node != 0, AS_PROTO, CF_CRITICAL, "no proxy node");
+		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
+		tr->from.proxy_node = 0; // pattern, not needed
+		break;
+	case FROM_BATCH:
+		cf_assert(tr->from.batch_shared, AS_PROTO, CF_CRITICAL, "null batch shared");
+		as_batch_add_error(tr->from.batch_shared, tr->from_data.batch_index, error_code);
+		tr->from.batch_shared = NULL; // pattern, not needed
+		tr->msgp = NULL; // pattern, not needed
+		break;
+	case FROM_IUDF:
+		cf_assert(tr->from.iudf_orig, AS_PROTO, CF_CRITICAL, "null iudf origin");
+		tr->from.iudf_orig->cb(tr, error_code);
+		tr->from.iudf_orig = NULL; // pattern, not needed
+		break;
+	case FROM_NSUP:
+		break;
+	default:
+		cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
+		break;
 	}
 }
 

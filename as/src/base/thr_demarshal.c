@@ -23,16 +23,21 @@
 #include "base/thr_demarshal.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
-#include <sys/resource.h>
 #include <sys/param.h>	// for MIN()
+#include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -53,6 +58,7 @@
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "base/xdr_serverside.h"
 
 #ifdef USE_JEM
 #include "base/datamodel.h"
@@ -64,6 +70,9 @@
 #define EPOLLRDHUP EPOLLHUP
 #endif
 
+
+#define XDR_WRITE_BUFFER_SIZE (5 * 1024 * 1024)
+#define XDR_READ_BUFFER_SIZE (15 * 1024 * 1024)
 
 extern void *thr_demarshal(void *arg);
 
@@ -238,6 +247,145 @@ thr_demarshal_reaper_fn(void *arg)
 	return NULL;
 }
 
+int
+thr_demarshal_read_file(const char *path, char *buffer, size_t size)
+{
+	int res = -1;
+	int fd = open(path, O_RDONLY);
+
+	if (fd < 0) {
+		cf_warning(AS_DEMARSHAL, "Failed to open %s for reading.", path);
+		goto cleanup0;
+	}
+
+	size_t len = 0;
+
+	while (len < size - 1) {
+		ssize_t n = read(fd, buffer + len, size - len - 1);
+
+		if (n < 0) {
+			cf_warning(AS_DEMARSHAL, "Failed to read from %s", path);
+			goto cleanup1;
+		}
+
+		if (n == 0) {
+			buffer[len] = 0;
+			res = 0;
+			goto cleanup1;
+		}
+
+		len += n;
+	}
+
+	cf_warning(AS_DEMARSHAL, "%s is too large.", path);
+
+cleanup1:
+	close(fd);
+
+cleanup0:
+	return res;
+}
+
+int
+thr_demarshal_read_integer(const char *path, int *value)
+{
+	char buffer[21];
+
+	if (thr_demarshal_read_file(path, buffer, sizeof buffer) < 0) {
+		return -1;
+	}
+
+	char *end;
+	uint64_t x = strtoul(buffer, &end, 10);
+
+	if (*end != '\n' || x > INT_MAX) {
+		cf_warning(AS_DEMARSHAL, "Invalid integer value in %s.", path);
+		return -1;
+	}
+
+	*value = (int)x;
+	return 0;
+}
+
+int
+thr_demarshal_set_buffer(int fd, int option, int size)
+{
+	static int rcv_max = -1;
+	static int snd_max = -1;
+
+	const char *proc;
+	int *max;
+
+	switch (option) {
+	case SO_RCVBUF:
+		proc = "/proc/sys/net/core/rmem_max";
+		max = &rcv_max;
+		break;
+
+	case SO_SNDBUF:
+		proc = "/proc/sys/net/core/wmem_max";
+		max = &snd_max;
+		break;
+
+	default:
+		cf_crash(AS_DEMARSHAL, "Invalid option: %d", option);
+		return -1; // cf_crash() should have a "noreturn" attribute, but is a macro
+	}
+
+	int tmp = ck_pr_load_int(max);
+
+	if (tmp < 0) {
+		if (thr_demarshal_read_integer(proc, &tmp) < 0) {
+			cf_warning(AS_DEMARSHAL, "Failed to read %s; should be at least %d. Please verify.", proc, size);
+			tmp = size;
+		}
+	}
+
+	if (tmp < size) {
+		cf_warning(AS_DEMARSHAL, "Buffer limit is %d, should be at least %d. Please set %s accordingly.",
+				tmp, size, proc);
+		return -1;
+	}
+
+	ck_pr_cas_int(max, -1, tmp);
+
+	if (setsockopt(fd, SOL_SOCKET, option, &size, sizeof size) < 0) {
+		cf_crash(AS_DEMARSHAL, "Failed to set socket buffer for FD %d, size %d, error %d (%s)",
+				fd, size, errno, strerror(errno));
+	}
+
+	return 0;
+}
+
+int
+thr_demarshal_config_xdr(int fd)
+{
+	if (thr_demarshal_set_buffer(fd, SO_RCVBUF, XDR_READ_BUFFER_SIZE) < 0) {
+		return -1;
+	}
+
+	if (thr_demarshal_set_buffer(fd, SO_SNDBUF, XDR_WRITE_BUFFER_SIZE) < 0) {
+		return -1;
+	}
+
+	int arg = XDR_READ_BUFFER_SIZE;
+
+	if (setsockopt(fd, SOL_TCP, TCP_WINDOW_CLAMP, &arg, sizeof arg) < 0) {
+		cf_crash(AS_DEMARSHAL, "Failed to set TCP window on FD %d, error %d (%s)",
+				fd, errno, strerror(errno));
+		return -1;
+	}
+
+	arg = 0;
+
+	if (setsockopt(fd, SOL_TCP, TCP_NODELAY, &arg, sizeof arg) < 0) {
+		cf_crash(AS_DEMARSHAL, "Failed to re-enable Nagle algorithm on FD %d, error %d (%s)",
+				fd, errno, strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
 
 // Log information about a suspicious incoming transaction.
 static void
@@ -256,7 +404,7 @@ log_as_proto_and_peeked_data(as_proto *proto, uint8_t *peekbuf, size_t peeked_da
 void *
 thr_demarshal(void *arg)
 {
-	cf_socket_cfg *s, *ls;
+	cf_socket_cfg *s, *ls, *xs;
 	// Create my epoll fd, register in the global list.
 	struct epoll_event ev;
 	int nevents, i, n, epoll_fd;
@@ -270,6 +418,7 @@ thr_demarshal(void *arg)
 	cf_assert(arg, AS_DEMARSHAL, CF_CRITICAL, "invalid argument");
 	s = &g_config.socket;
 	ls = &g_config.localhost_socket;
+	xs = &g_config.xdr_socket;
 
 #ifdef USE_JEM
 	int orig_arena;
@@ -297,28 +446,49 @@ thr_demarshal(void *arg)
 	if (thr_id == 0) {
 		demarshal_file_handle_init();
 		epoll_fd = epoll_create(EPOLL_SZ);
-		if (epoll_fd == -1)
+
+		if (epoll_fd == -1) {
 			cf_crash(AS_DEMARSHAL, "epoll_create(): %s", cf_strerror(errno));
+		}
 
 		memset(&ev, 0, sizeof (ev));
 		ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
 		ev.data.fd = s->sock;
-		if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->sock, &ev))
+
+		if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->sock, &ev)) {
 			cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+		}
+
 		cf_info(AS_DEMARSHAL, "Service started: socket %s:%d", s->addr, s->port);
 
 		if (ls->sock) {
 			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
 			ev.data.fd = ls->sock;
-			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ls->sock, &ev))
-			  cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+
+			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ls->sock, &ev)) {
+				cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+			}
+
 			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
+		}
+
+		if (xs->sock) {
+			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
+			ev.data.fd = xs->sock;
+
+			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, xs->sock, &ev)) {
+				cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
+			}
+
+			cf_info(AS_DEMARSHAL, "Service also listening on XDR info socket %s:%d", xs->addr, xs->port);
 		}
 	}
 	else {
 		epoll_fd = epoll_create(EPOLL_SZ);
-		if (epoll_fd == -1)
+
+		if (epoll_fd == -1) {
 			cf_crash(AS_DEMARSHAL, "epoll_create(): %s", cf_strerror(errno));
+		}
 	}
 
 	g_demarshal_args->epoll_fd[thr_id] = epoll_fd;
@@ -345,7 +515,7 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			if ((s->sock == events[i].data.fd) || (ls->sock == events[i].data.fd)) {
+			if ((s->sock == events[i].data.fd) || (ls->sock == events[i].data.fd) || (xs->sock == events[i].data.fd)) {
 				// Accept new connections on the service socket.
 				int csocket = -1;
 				struct sockaddr_in caddr;
@@ -388,7 +558,7 @@ thr_demarshal(void *arg)
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_config.proto_connections_opened - g_config.proto_connections_closed;
-				if (conns_open > g_config.n_proto_fd_max) {
+				if (xs->sock != events[i].data.fd && conns_open > g_config.n_proto_fd_max) {
 					if ((last_fd_print + 5000L) < cf_getms()) { // no more than 5 secs
 						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
 						last_fd_print = cf_getms();
@@ -461,14 +631,7 @@ thr_demarshal(void *arg)
 
 					// Round-robin pick up demarshal thread epoll_fd and add
 					// this new connection to epoll.
-					int id;
-					while (true) {
-						id = (id_cntr++) % g_demarshal_args->num_threads;
-						if (g_demarshal_args->epoll_fd[id] != 0) {
-							break;
-						}
-					}
-
+					int id = (id_cntr++) % g_demarshal_args->num_threads;
 					fd_h->epoll_fd = g_demarshal_args->epoll_fd[id];
 
 					if (0 > (n = epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_ADD, csocket, &ev))) {
@@ -676,14 +839,32 @@ thr_demarshal(void *arg)
 					fd_h->proto = 0;
 					fd_h->proto_unread = 0;
 
+					cf_rc_reserve(fd_h);
+					has_extra_ref = true;
+
+					uint64_t microbenchmark_time = 0;
+
+					if (g_config.microbenchmarks) {
+						microbenchmark_time = histogram_insert_data_point(g_config.demarshal_hist, now_ns);
+					}
+
+					// Info protocol requests.
+					if (proto_p->type == PROTO_TYPE_INFO) {
+						as_info_transaction it = { fd_h, proto_p, microbenchmark_time };
+
+						as_info(&it);
+						cf_atomic_int_incr(&g_config.proto_transactions);
+						goto NextEvent;
+					}
+
 					// INIT_TR
 					as_transaction tr;
-					as_transaction_init(&tr, NULL, (cl_msg *)proto_p);
+					as_transaction_init_head(&tr, NULL, (cl_msg *)proto_p);
 
-					cf_rc_reserve(fd_h);
-					has_extra_ref   = true;
-					tr.proto_fd_h   = fd_h;
-					tr.start_time   = now_ns; // set transaction start time
+					tr.origin = FROM_CLIENT;
+					tr.from.proto_fd_h = fd_h;
+					tr.start_time = now_ns;
+					tr.microbenchmark_time = microbenchmark_time;
 
 					if (! as_proto_is_valid_type(proto_p)) {
 						cf_warning(AS_DEMARSHAL, "unsupported proto message type %u", proto_p->type);
@@ -693,11 +874,6 @@ thr_demarshal(void *arg)
 						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
-					}
-
-					if (g_config.microbenchmarks) {
-						histogram_insert_data_point(g_config.demarshal_hist, now_ns);
-						tr.microbenchmark_time = cf_getns();
 					}
 
 					// Check if it's compressed.
@@ -733,19 +909,22 @@ thr_demarshal(void *arg)
 						}
 					}
 
+					// If it's an XDR connection and we haven't yet modified the connection settings, ...
+					if (tr.msgp->proto.type == PROTO_TYPE_AS_MSG &&
+							(tr.msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0 &&
+							(fd_h->fh_info & FH_INFO_XDR) == 0) {
+						// ... modify them.
+						if (thr_demarshal_config_xdr(fd_h->fd) != 0) {
+							cf_warning(AS_DEMARSHAL, "Failed to configure XDR connection");
+							goto NextEvent_FD_Cleanup;
+						}
+
+						fd_h->fh_info |= FH_INFO_XDR;
+					}
+
 					// Security protocol transactions.
 					if (tr.msgp->proto.type == PROTO_TYPE_SECURITY) {
 						as_security_transact(&tr);
-						cf_atomic_int_incr(&g_config.proto_transactions);
-						goto NextEvent;
-					}
-
-					// Info protocol requests.
-					if (tr.msgp->proto.type == PROTO_TYPE_INFO) {
-						if (as_info(&tr)) {
-							cf_warning(AS_DEMARSHAL, "Info request failed to be enqueued ~~ Freeing protocol buffer");
-							goto NextEvent_FD_Cleanup;
-						}
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
 					}
@@ -854,13 +1033,19 @@ as_demarshal_start()
 		}
 	}
 
-	// Create first thread which is the listener, and wait for it to come up
-	// before others are spawned.
-	if (0 != pthread_create(&(dm->dm_th[0]), 0, thr_demarshal, &g_config.socket)) {
-		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
-	}
-	while (dm->epoll_fd[0] == 0) {
-		sleep(1);
+	g_config.xdr_socket.port = as_xdr_info_port();
+
+	if (g_config.xdr_socket.port != 0) {
+		cf_debug(AS_DEMARSHAL, "Opening XDR service socket");
+		g_config.xdr_socket.reuse_addr = g_config.socket_reuse_addr;
+
+		if (0 != cf_socket_init_svc(&g_config.xdr_socket)) {
+			cf_crash(AS_DEMARSHAL, "Couldn't initialize XDR service socket");
+		}
+
+		if (-1 == cf_socket_set_nonblocking(g_config.xdr_socket.sock)) {
+			cf_crash(AS_DEMARSHAL, "Couldn't set XDR service socket to non-blocking");
+		}
 	}
 
 	// Create all the epoll_fds and wait for all the threads to come up.
@@ -877,6 +1062,16 @@ as_demarshal_start()
 			cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads ...");
 		}
 	}
+
+	// Create first thread which is the listener. We do this one last, as it
+	// requires the other threads' epoll instances.
+	if (0 != pthread_create(&(dm->dm_th[0]), 0, thr_demarshal, &g_config.socket)) {
+		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
+	}
+	while (dm->epoll_fd[0] == 0) {
+		sleep(1);
+	}
+
 	cf_info(AS_DEMARSHAL, "Started %d Demarshal Threads", dm->num_threads);
 
 	return 0;

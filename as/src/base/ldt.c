@@ -1,7 +1,7 @@
 /*
  * ldt.c
  *
- * Copyright (C) 2013-2015 Aerospike, Inc.
+ * Copyright (C) 2013-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -268,8 +268,6 @@
  *  - Defrag : Defrag when walking through storage looks up key in both record
  *    tree and sub record tree. If not found the record is candidate for defrag.
  */
-
-#include "base/feature.h" // Turn new AS Features on/off (must be first in line)
 
 #include <base/datamodel.h>
 #include <base/ldt.h>

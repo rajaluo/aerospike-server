@@ -26,8 +26,6 @@
 
 #pragma once
 
-#include "base/feature.h" // turn new AS Features on/off (must be first in line)
-
 #include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -159,6 +157,20 @@ struct as_index_tree_s;
 /* as_generation
  * A generation ID */
 typedef uint32_t as_generation;
+
+/*
+ * Compare two 16-bit generation counts, allowing wrap-arounds.
+ * Works correctly, if:
+ *
+ *   - rhs is ahead of lhs, but rhs isn't ahead more than 32,768.
+ *   - lhs is ahead of rhs, but lhs isn't ahead more than 32,767.
+ */
+
+static inline bool
+as_gen_less_than(uint16_t lhs, uint16_t rhs)
+{
+	return (uint16_t)(lhs - rhs) >= 32768;
+}
 
 
 /* as_particle_type
@@ -682,7 +694,7 @@ struct as_partition_s {
 
 	size_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
-	bool waiting_for_master;
+	uint8_t master_wait_state;
 	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
 	as_partition_vinfo version_info;         // the version of my partition here and now
 

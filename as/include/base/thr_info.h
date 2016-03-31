@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -29,9 +30,32 @@
 #include "socket.h"
 #include "util.h"
 
+#include "base/proto.h"
+#include "base/security.h"
 #include "base/transaction.h"
 #include "fabric/paxos.h"
 
+typedef int (*as_info_get_tree_fn) (char *name, char *subtree, cf_dyn_buf *db);
+typedef int (*as_info_get_value_fn) (char *name, cf_dyn_buf *db);
+typedef int (*as_info_command_fn) (char *name, char *parameters, cf_dyn_buf *db);
+
+// Sets a static value - set to 0 to remove a previous value.
+extern int as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool def);
+extern int as_info_set(const char *name, const char *value, bool def);
+
+// For dynamic items - you will get called when the name is requested. The
+// dynbuf will be fully set up for you - just add the information you want to
+// return.
+extern int as_info_set_dynamic(char *name, as_info_get_value_fn gv_fn, bool def);
+
+// For tree items - you will get called when the name is requested, and it will
+// have the name you registered (name) and the subtree portion (value). The
+// dynbuf will be fully set up for you - just add the information you want to
+// return
+extern int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
+
+// For commands - you will be called with the parameters.
+extern int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
 extern void as_info_paxos_event(as_paxos_generation gen,
 		as_paxos_change *change, cf_node succession[], void *udata);
@@ -41,8 +65,14 @@ extern void as_info_paxos_event(as_paxos_generation gen,
 extern uint64_t thr_info_get_object_count();
 extern uint64_t thr_info_get_subobject_count();
 
+typedef struct as_info_transaction_s {
+	as_file_handle *fd_h;
+	as_proto *proto;
+	uint64_t microbenchmark_time;
+} as_info_transaction;
+
 // Processes an info request that comes in from the network, sends the response.
-extern int as_info(as_transaction *tr);
+extern void as_info(as_info_transaction *it);
 
 // Processes a pure puffer request without any info header stuff.
 extern int as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp);

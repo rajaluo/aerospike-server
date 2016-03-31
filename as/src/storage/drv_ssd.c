@@ -1,7 +1,7 @@
 /*
  * drv_ssd.c
  *
- * Copyright (C) 2009-2014 Aerospike, Inc.
+ * Copyright (C) 2009-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,8 +24,6 @@
  * "file" based storage driver, which applies to both SSD namespaces and, in
  * some cases, to file-backed main-memory namespaces.
  */
-
-#include "base/feature.h" // turn new AS Features on/off (must be first in line)
 
 #include "storage/drv_ssd.h"
 

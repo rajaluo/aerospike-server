@@ -275,17 +275,22 @@ process_result(const as_result * res, udf_call * call, cf_dyn_buf *db )
 // **************************************************************************************************
 
 /**
- * Get UDF call object pointer from parent job via tr->udata.
+ * Get UDF call object pointer from parent job via tr->from.iudf_orig.
  */
 udf_call *
 udf_rw_call_def_init_internal(udf_call * call, as_transaction * tr)
 {
-	call->def = &tr->iudf_orig->def;
+	// TODO - wouldn't need this if we bailed early on losing race vs. timeout.
+	if (! tr->from.iudf_orig) {
+		return NULL; // can happen on timeout
+	}
 
-	if (tr->iudf_orig->type == UDF_SCAN_REQUEST) {
+	call->def = &tr->from.iudf_orig->def;
+
+	if (tr->from.iudf_orig->type == UDF_SCAN_REQUEST) {
 		cf_atomic_int_incr(&g_config.udf_scan_rec_reqs);
 	}
-	else if (tr->iudf_orig->type == UDF_QUERY_REQUEST) {
+	else if (tr->from.iudf_orig->type == UDF_QUERY_REQUEST) {
 		cf_atomic_int_incr(&g_config.udf_query_rec_reqs);
 	}
 
@@ -298,7 +303,12 @@ udf_rw_call_def_init_internal(udf_call * call, as_transaction * tr)
 udf_call *
 udf_rw_call_def_init_from_msg(udf_call * call, as_transaction * tr)
 {
-	return udf_def_init_from_msg(call->def, tr) ? call : NULL;
+	if (! udf_def_init_from_msg(call->def, tr)) {
+		cf_warning(AS_UDF, "failed udf_rw_call_def_init_from_msg()");
+		return NULL;
+	}
+
+	return call;
 }
 
 /**
@@ -810,6 +820,13 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		// If record is expired, pretend it was not found.
 		as_record_done(&r_ref, ns);
 		rec_rv = -1;
+	}
+
+	if (rec_rv == -1 && tr->origin == FROM_IUDF) {
+		// Internal UDFs must not create records.
+		call->tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
+		process_failure(call, NULL, NULL);
+		goto Cleanup;
 	}
 
 	if (rec_rv == 0) {

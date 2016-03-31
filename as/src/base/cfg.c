@@ -132,7 +132,7 @@ cfg_set_defaults()
 	c->nsup_startup_evict = true;
 	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // default the maximum cluster size to a "reasonable" value
 	c->paxos_protocol = AS_PAXOS_PROTOCOL_V3; // default to 3.0 "sindex" paxos protocol version
-	c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_MANUAL; // default to the manual paxos recovery policy
+	c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER; // default to auto reset master
 	c->paxos_retransmit_period = 5; // run paxos retransmit once every 5 seconds
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
@@ -158,8 +158,11 @@ cfg_set_defaults()
 	// Network service defaults.
 	c->socket.proto = SOCK_STREAM; // not configurable, but addr and port are
 	c->localhost_socket.proto = SOCK_STREAM; // not configurable
+	c->xdr_socket.proto = SOCK_STREAM;
 	c->socket.addr = (char*)IPV4_ANY_ADDR; // by default listen on any IPv4 address
+	c->xdr_socket.addr = (char*)IPV4_ANY_ADDR;
 	c->socket_reuse_addr = true;
+	c->xdr_socket.reuse_addr = true;
 
 	// Fabric TCP socket keepalive defaults.
 	c->fabric_keepalive_enabled = true;
@@ -175,8 +178,6 @@ cfg_set_defaults()
 	c->hb_protocol = AS_HB_PROTOCOL_V2; // default to the latest heartbeat protocol version
 
 	// XDR defaults.
-	xdr_config_defaults(&(c->xdr_cfg));
-
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		c->xdr_lastship[i].node = 0;
 
@@ -1201,7 +1202,7 @@ cfg_find_tok(const char* tok, const cfg_opt opts[], int num_opts)
 }
 
 xdr_cfg_case_id
-xdr_cfg_find_tok(const char* tok, const xdr_cfg_opt opts[], int num_opts)
+as_xdr_cfg_find_tok(const char* tok, const xdr_cfg_opt opts[], int num_opts)
 {
 	for (int i = 0; i < num_opts; i++) {
 		if (strcmp(tok, opts[i].tok) == 0) {
@@ -2483,31 +2484,31 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_ENABLE_XDR:
 				ns->enable_xdr = cfg_bool(&line);
-				if (ns->enable_xdr && ! c->xdr_cfg.xdr_supported) {
+				if (ns->enable_xdr && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
 			case CASE_NAMESPACE_SETS_ENABLE_XDR:
 				ns->sets_enable_xdr = cfg_bool(&line);
-				if (ns->sets_enable_xdr && ! c->xdr_cfg.xdr_supported) {
+				if (ns->sets_enable_xdr && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
 			case CASE_NAMESPACE_FORWARD_XDR_WRITES:
 				ns->ns_forward_xdr_writes = cfg_bool(&line);
-				if (ns->ns_forward_xdr_writes && ! c->xdr_cfg.xdr_supported) {
+				if (ns->ns_forward_xdr_writes && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
 			case CASE_NAMESPACE_ALLOW_NONXDR_WRITES:
 				ns->ns_allow_nonxdr_writes = cfg_bool(&line);
-				if (ns->ns_allow_nonxdr_writes && ! c->xdr_cfg.xdr_supported) {
+				if (ns->ns_allow_nonxdr_writes && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
 			case CASE_NAMESPACE_ALLOW_XDR_WRITES:
 				ns->ns_allow_xdr_writes = cfg_bool(&line);
-				if (ns->ns_allow_xdr_writes && ! c->xdr_cfg.xdr_supported) {
+				if (ns->ns_allow_xdr_writes && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
@@ -2923,28 +2924,10 @@ as_config_init(const char *config_file)
 		// Parse xdr context items.
 		//
 		case XDR:
-			switch(xdr_cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
-			case XDR_CASE_ENABLE_XDR:
-				c->xdr_cfg.xdr_global_enabled = cfg_bool(&line);
-				if (c->xdr_cfg.xdr_global_enabled && ! c->xdr_cfg.xdr_supported) {
-					cfg_not_supported(&line, "XDR");
-				}
-				break;
-			case XDR_CASE_NAMEDPIPE_PATH:
-				c->xdr_cfg.xdr_digestpipe_path = cfg_strdup_no_checks(&line);
-				break;
-			case XDR_CASE_FORWARD_XDR_WRITES:
-				c->xdr_cfg.xdr_forward_xdrwrites = cfg_bool(&line);
-				break;
-			case XDR_CASE_XDR_DELETE_SHIPPING_ENABLED:
-				c->xdr_cfg.xdr_delete_shipping_enabled = cfg_bool(&line);
-				break;
-			case XDR_CASE_XDR_NSUP_DELETES_ENABLED:
-				c->xdr_cfg.xdr_nsup_deletes_enabled = cfg_bool(&line);
-				break;
-			case XDR_CASE_STOP_WRITES_NOXDR:
-				c->xdr_cfg.xdr_stop_writes_noxdr = cfg_bool(&line);
-				break;
+			switch(as_xdr_cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
+			// Just skip over the XDR section and its DC subsection. XDR config
+			// parser will pick up XDR configuration.
+			// TODO - config parsing should be unified.
 			case XDR_CASE_DATACENTER_BEGIN:
 				cfg_begin_context(&state, XDR_DATACENTER);
 				break;
@@ -2967,7 +2950,7 @@ as_config_init(const char *config_file)
 			// This is a hack to avoid defining a new array for the datacenter
 			// subsection. The server is not interested in the details. It just
 			// wants the subsection to end. So just check for the closing brace.
-			switch(xdr_cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
+			switch(as_xdr_cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
 			case XDR_CASE_CONTEXT_END:
 				cfg_end_context(&state);
 				break;
@@ -3491,7 +3474,6 @@ cfg_create_all_histograms()
 	create_and_check_hist(&c->error_hist, "error", HIST_MILLISECONDS);
 	create_and_check_hist(&c->batch_index_reads_hist, "batch_index_reads", HIST_MILLISECONDS);
 	create_and_check_hist(&c->batch_q_process_hist, "batch_q_process", HIST_MILLISECONDS);
-	create_and_check_hist(&c->info_tr_q_process_hist, "info_tr_q_process", HIST_MILLISECONDS);
 	create_and_check_hist(&c->info_q_wait_hist, "info_q_wait", HIST_MILLISECONDS);
 	create_and_check_hist(&c->info_post_lock_hist, "info_post_lock", HIST_MILLISECONDS);
 	create_and_check_hist(&c->info_fulfill_hist, "info_fulfill", HIST_MILLISECONDS);

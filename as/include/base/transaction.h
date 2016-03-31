@@ -115,7 +115,7 @@
 
 
 //==========================================================
-// Transaction.
+// Client socket information - as_file_handle.
 //
 
 typedef struct as_file_handle_s {
@@ -132,6 +132,7 @@ typedef struct as_file_handle_s {
 } as_file_handle;
 
 #define FH_INFO_DONOT_REAP	0x00000001	// this bit indicates that this file handle should not be reaped
+#define FH_INFO_XDR			0x00000002	// the file handle belongs to an XDR connection
 
 // Helpers to release transaction file handles.
 void as_release_file_handle(as_file_handle *proto_fd_h);
@@ -139,78 +140,98 @@ void as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close);
 void as_end_of_transaction_ok(as_file_handle *proto_fd_h);
 void as_end_of_transaction_force_close(as_file_handle *proto_fd_h);
 
-#define AS_TRANSACTION_FLAG_NSUP_DELETE     0x0001
-#define AS_TRANSACTION_FLAG_BATCH_SUB       0x0002 // was INTERNAL
-#define AS_TRANSACTION_FLAG_SHIPPED_OP      0x0004
-#define AS_TRANSACTION_FLAG_UNUSED_8        0x0008 // deprecated LDT_SUB
-#define AS_TRANSACTION_FLAG_SINDEX_TOUCHED  0x0010
+
+//==========================================================
+// Transaction.
+//
+
+// How to interpret the 'from' union.
+//
+// NOT a generic transaction type flag, e.g. batch sub-transactions that proxy
+// are FROM_PROXY on the proxyee node, hence we still need a separate
+// FROM_FLAG_BATCH_SUB.
+//
+typedef enum {
+	// External, comes through demarshal or fabric:
+	FROM_CLIENT	= 1,
+	FROM_PROXY,
+
+	// Internal, generated on local node:
+	FROM_BATCH,
+	FROM_IUDF,
+	FROM_NSUP,
+
+	FROM_UNDEF	= 0
+} transaction_origin;
 
 struct iudf_origin_s;
-struct as_batch_shared;
+struct as_batch_shared_s;
 
-/* as_transaction
- * The basic unit of work
- *
- * NB: Fields which are frequently accessed together are laid out
- *     to be single cache line. DO NOT REORGANIZE unless you know
- *     what you are doing ..and tr.rsv starts at 64byte aligned
- *     address
- */
 typedef struct as_transaction_s {
 
-	/************ Frequently accessed fields *************/
-	/* The message describing the action */
-	cl_msg          * msgp;
-	/* Bit field showing which message fields are present */
-	uint32_t		  msg_fields;
-	/* and the digest to apply it to */
-	cf_digest 	      keyd;
+	//------------------------------------------------------
+	// transaction 'head' - copied onto queue.
+	//
 
-	uint16_t          generation;
-	// set to true in duplicate resolution phase
-	bool              microbenchmark_is_resolve;
-	// By default we store the key if the client sends it. However some older
-	// clients send the key without a digest, without intent to store the key.
-	// In such cases, we set this flag false and don't store the key.
-	uint8_t           flag;
-	uint8_t           result_code;
+	cl_msg*		msgp;
+	uint32_t	msg_fields;
 
-	// INTERNAL INTERNAL INTERNAL
-	/* start time of the transaction at the running node */
-	uint64_t          start_time;
-	uint64_t          end_time; // client requested end time, same time base as start
+	uint8_t		origin;
+	uint8_t		from_flags;
 
-	// to collect microbenchmarks
-	uint64_t          microbenchmark_time;
+	bool		microbenchmark_is_resolve; // will soon be gone
+	// Spare byte.
 
-	/******************** 64 bytes *****************/
-	// Make sure rsv starts aligned at the cacheline
-	/* the reservation of the partition (and thus tree) I'm acting against */
+	union {
+		void*						any;
+		as_file_handle*				proto_fd_h;
+		cf_node						proxy_node;
+		struct iudf_origin_s*		iudf_orig;
+		struct as_batch_shared_s*	batch_shared;
+	} from;
+
+	union {
+		uint32_t any;
+		uint32_t proxy_tid;
+		uint32_t batch_index;
+	} from_data;
+
+	cf_digest	keyd; // only batch sub-transactions require this on queue
+
+	uint64_t	start_time;
+	uint64_t	microbenchmark_time;
+
+	//<><><><><><><><><><><> 64 bytes <><><><><><><><><><><>
+
+	//------------------------------------------------------
+	// transaction 'body' - NOT copied onto queue.
+	//
+
 	as_partition_reservation rsv;
 
-	/******* Infrequently or conditionally accessed fields ************/
-	/* The origin of the transaction: either a file descriptor for a socket
-	 * or a node ID */
-	as_file_handle	* proto_fd_h;
-	cf_node 	      proxy_node;
-	msg 		    * proxy_msg;
-
-	/* User data corresponding to the internally created transaction
-	   first user is Scan UDF */
-	struct iudf_origin_s * iudf_orig;
-
-	// Batch
-	struct as_batch_shared* batch_shared;
-	uint32_t batch_index;
-
-	// TODO - another re-org of this structure...
-	uint32_t void_time;
+	uint64_t	end_time;
+	uint8_t		result_code;
+	uint8_t		flags;
+	uint16_t	generation;
+	uint32_t	void_time;
 
 } as_transaction;
 
-typedef struct as_query_transaction_s as_query_transaction;
+#define AS_TRANSACTION_HEAD_SIZE (offsetof(as_transaction, rsv))
 
-extern void as_transaction_init(as_transaction *tr, cf_digest *, cl_msg *);
+// 'from_flags' bits - set before queuing transaction head:
+#define FROM_FLAG_NSUP_DELETE	0x0001
+#define FROM_FLAG_BATCH_SUB		0x0002
+#define FROM_FLAG_SHIPPED_OP	0x0004
+
+// 'flags' bits - set in transaction body after queuing:
+#define AS_TRANSACTION_FLAG_SINDEX_TOUCHED	0x0001
+
+
+void as_transaction_init_head(as_transaction *tr, cf_digest *, cl_msg *);
+void as_transaction_init_body(as_transaction *tr);
+
+void as_transaction_copy_head(as_transaction *to, const as_transaction *from);
 
 bool as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type);
 bool as_transaction_demarshal_prepare(as_transaction *tr);
@@ -219,7 +240,7 @@ void as_transaction_proxyee_prepare(as_transaction *tr);
 static inline bool
 as_transaction_is_batch_sub(const as_transaction *tr)
 {
-	return (tr->flag & AS_TRANSACTION_FLAG_BATCH_SUB) != 0;
+	return (tr->from_flags & FROM_FLAG_BATCH_SUB) != 0;
 }
 
 static inline bool
@@ -250,7 +271,7 @@ static inline bool
 as_transaction_is_multi_record(const as_transaction *tr)
 {
 	return	(tr->msg_fields & (AS_MSG_FIELD_BIT_KEY | AS_MSG_FIELD_BIT_DIGEST_RIPE)) == 0 &&
-			(tr->flag & AS_TRANSACTION_FLAG_BATCH_SUB) == 0;
+			(tr->from_flags & FROM_FLAG_BATCH_SUB) == 0;
 }
 
 static inline bool

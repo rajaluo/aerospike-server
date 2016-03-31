@@ -405,8 +405,8 @@ as_batch_direct_queue_task(as_transaction* tr, as_namespace *ns)
 	}
 
 	btr.binlist = as_binlist_from_op(msg);
-	btr.fd_h = tr->proto_fd_h;
-	tr->proto_fd_h = 0;
+	btr.fd_h = tr->from.proto_fd_h;
+	tr->from.proto_fd_h = NULL;
 	btr.fd_h->last_used = cf_getms();
 
 	int status = as_thread_pool_queue_task_fixed(&batch_direct_thread_pool, &btr);

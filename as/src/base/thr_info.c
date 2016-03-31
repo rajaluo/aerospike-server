@@ -49,6 +49,7 @@
 
 #include "cf_str.h"
 #include "dynbuf.h"
+#include "fault.h"
 #include "jem.h"
 #include "meminfo.h"
 
@@ -72,6 +73,7 @@
 #include "base/security.h"
 #include "base/system_metadata.h"
 #include "base/udf_cask.h"
+#include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
@@ -98,28 +100,6 @@ extern bool g_shutdown_started;
 // (Warning:  This will unnecessarily increase contention and Info request timeouts!)
 // #define USE_INFO_LOCK
 
-typedef int (*as_info_get_tree_fn) (char *name, char *subtree, cf_dyn_buf *db);
-typedef int (*as_info_get_value_fn) (char *name, cf_dyn_buf *db);
-typedef int (*as_info_command_fn) (char *name, char *parameters, cf_dyn_buf *db);
-
-// Sets a static value - set to 0 to remove a previous value.
-int as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool def);
-int as_info_set(const char *name, const char *value, bool def);
-
-// For dynamic items - you will get called when the name is requested. The
-// dynbuf will be fully set up for you - just add the information you want to
-// return.
-int as_info_set_dynamic(char *name, as_info_get_value_fn gv_fn, bool def);
-
-// For tree items - you will get called when the name is requested, and it will
-// have the name you registered (name) and the subtree portion (value). The
-// dynbuf will be fully set up for you - just add the information you want to
-// return
-int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
-
-// For commands - you will be called with the parameters.
-int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
-
 // Acceptable timediffs in XDR lastship times.
 // (Print warning only if time went back by at least 5 minutes.)
 #define XDR_ACCEPTABLE_TIMEDIFF XDR_TIME_ADJUST
@@ -138,10 +118,6 @@ void as_storage_summarize_wblock_stats(as_namespace *ns);
 int as_storage_analyze_wblock(as_namespace* ns, int device_index, uint32_t wblock_id);
 
 static cf_queue *g_info_work_q = 0;
-
-typedef struct {
-	as_transaction tr;
-} info_work;
 
 //
 // Info has its own fabric service
@@ -370,10 +346,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_write_success);
 	cf_dyn_buf_append_string(db, ";stat_write_errs=");
 	APPEND_STAT_COUNTER(db, g_config.stat_write_errs);
-	cf_dyn_buf_append_string(db, ";stat_xdr_pipe_writes=");
-	APPEND_STAT_COUNTER(db, g_config.stat_xdr_pipe_writes);
-	cf_dyn_buf_append_string(db, ";stat_xdr_pipe_miss=");
-	APPEND_STAT_COUNTER(db, g_config.stat_xdr_pipe_miss);
 
 	cf_dyn_buf_append_string(db, ";stat_delete_success=");
 	APPEND_STAT_COUNTER(db, g_config.stat_delete_success);
@@ -710,8 +682,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_parameter);
 	cf_dyn_buf_append_string(db, ";err_write_fail_incompatible_type=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_incompatible_type);
-	cf_dyn_buf_append_string(db, ";err_write_fail_noxdr=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_noxdr);
 	cf_dyn_buf_append_string(db, ";err_write_fail_prole_delete=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_delete);
 	cf_dyn_buf_append_string(db, ";err_write_fail_not_found=");
@@ -745,6 +715,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	// Query stats. Aggregation + Lookups
 	cf_dyn_buf_append_string(db, ";");
 	as_query_stat(name, db);
+
+	as_xdr_get_stats(name, db);
 
 	return(0);
 }
@@ -1197,14 +1169,6 @@ info_command_show_devices(char *name, char *params, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, "ok");
 
-	return(0);
-}
-
-int
-info_command_get_min_config(char *name, char *params, cf_dyn_buf *db)
-{
-	uint64_t minxdrls = xdr_min_lastshipinfo();
-	cf_dyn_buf_append_uint64(db, minxdrls);
 	return(0);
 }
 
@@ -2637,18 +2601,7 @@ info_security_config_get(cf_dyn_buf *db)
 void
 info_xdr_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "enable-xdr=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-namedpipe-path=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_digestpipe_path ? g_config.xdr_cfg.xdr_digestpipe_path : "NULL");
-	cf_dyn_buf_append_string(db, ";forward-xdr-writes=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_forward_xdrwrites ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-delete-shipping-enabled=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_delete_shipping_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-nsup-deletes-enabled=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_nsup_deletes_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";stop-writes-noxdr=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
+	as_xdr_get_config(db);
 }
 
 void
@@ -3828,6 +3781,9 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					ns->name, ns->geo2dsphere_within_max_cells, val);
 			ns->geo2dsphere_within_max_cells = val;
 		}
+		else if (0 == as_xdr_set_config_ns(ns->name, params)) {
+			;
+		}
 		else {
 			goto Error;
 		}
@@ -3848,52 +3804,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-
-				// If this is for a fresh start, we better close the existing pipe
-				// and reopen as it can be in a broken state.
-				context_len = sizeof(context);
-				if (0 == as_info_parameter_get(params, "freshstart", context, &context_len)) {
-					cf_info(AS_INFO, "Closing the digest pipe for a fresh start");
-					close(g_config.xdr_cfg.xdr_digestpipe_fd);
-					g_config.xdr_cfg.xdr_digestpipe_fd = -1;
-				}
-
-				// Create the named pipe if it is not already open
-				// Note below that we do not close named pipe when xdr is disabled.
-				if (g_config.xdr_cfg.xdr_digestpipe_fd == -1) {
-
-					if (xdr_create_named_pipe(&(g_config.xdr_cfg)) != 0) {
-						goto Error;
-					}
-
-					// We need to send the namespace info
-					if (xdr_send_nsinfo() != 0) {
-						goto Error;
-					}
-
-					if (xdr_send_nodemap() != 0) {
-						goto Error;
-					}
-				}
-
-				// Everything set.
-				cf_info(AS_INFO, "Changing value of enable-xdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_global_enabled], context);
-				g_config.xdr_cfg.xdr_global_enabled = true;
-
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of enable-xdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_global_enabled], context);
-				g_config.xdr_cfg.xdr_global_enabled = false;
-				/* Closing the named pipe is not really necessary. Moreover, this
-				 * will allow us to have additional functionality where XDR on server
-				 * can be temporarily disabled.
-				 */
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
 			// Dont print this command in logs as this happens every few seconds
 			// Ideally, this should not be done via config-set.
 			print_command = false;
@@ -3941,56 +3852,10 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_node nodeid = atoll(context);
 			xdr_handle_failednodeprocessingdone(nodeid);
 		}
-		else if (0 == as_info_parameter_get(params, "xdr-namedpipe-path", context, &context_len)) {
-			g_config.xdr_cfg.xdr_digestpipe_path = cf_strdup(context);
-			cf_info(AS_INFO, "xdr-namedpipe-path set to : %s", context);
+		else {
+			as_xdr_set_config(params, db);
+			return 0;
 		}
-		else if (0 == as_info_parameter_get(params, "stop-writes-noxdr", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of stop-writes-noxdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_stop_writes_noxdr], context);
-				g_config.xdr_cfg.xdr_stop_writes_noxdr = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of stop-writes-noxdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_stop_writes_noxdr], context);
-				g_config.xdr_cfg.xdr_stop_writes_noxdr = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "forward-xdr-writes", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of forward-xdr-writes from %s to %s", bool_val[g_config.xdr_cfg.xdr_forward_xdrwrites], context);
-				g_config.xdr_cfg.xdr_forward_xdrwrites = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of forward-xdr-writes from %s to %s", bool_val[g_config.xdr_cfg.xdr_forward_xdrwrites], context);
-				g_config.xdr_cfg.xdr_forward_xdrwrites = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "xdr-delete-shipping-enabled", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-delete-shipping-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_delete_shipping_enabled], context);
-				g_config.xdr_cfg.xdr_delete_shipping_enabled = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-delete-shipping-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_delete_shipping_enabled], context);
-				g_config.xdr_cfg.xdr_delete_shipping_enabled = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "xdr-nsup-deletes-enabled", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-nsup-deletes-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_nsup_deletes_enabled], context);
-				g_config.xdr_cfg.xdr_nsup_deletes_enabled = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-nsup-deletes-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_nsup_deletes_enabled], context);
-				g_config.xdr_cfg.xdr_nsup_deletes_enabled = false;
-			} else {
-				goto Error;
-			}
-		}
-		else
-			goto Error;
 	}
 	else
 		goto Error;
@@ -4554,16 +4419,16 @@ thr_info_fn(void *unused)
 {
 	for ( ; ; ) {
 
-		info_work work;
+		as_info_transaction tr; // 'tr' so we can share microbenchmark macros
 
-		if (0 != cf_queue_pop(g_info_work_q, &work, CF_QUEUE_FOREVER)) {
+		if (0 != cf_queue_pop(g_info_work_q, &tr, CF_QUEUE_FOREVER)) {
 			cf_crash(AS_TSVC, "unable to pop from info work queue");
 		}
 
-		as_transaction *tr = &work.tr;
-		as_proto *pr = (as_proto *) tr->msgp;
+		as_file_handle *fd_h = tr.fd_h;
+		as_proto *pr = tr.proto;
 
-		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(info_q_wait_hist);
+		MICROBENCHMARK_HIST_INSERT_AND_RESET(info_q_wait_hist);
 
 		// Allocate an output buffer sufficiently large to avoid ever resizing
 		cf_dyn_buf_define_size(db, 128 * 1024);
@@ -4577,17 +4442,17 @@ thr_info_fn(void *unused)
 
 		// Either we'e doing all, or doing some
 		if (pr->sz == 0) {
-			info_all(tr->proto_fd_h, &db);
+			info_all(fd_h, &db);
 		}
 		else {
-			info_some((char *)pr->data, (char *)pr->data + pr->sz, tr->proto_fd_h, &db);
+			info_some((char *)pr->data, (char *)pr->data + pr->sz, fd_h, &db);
 		}
 
 #ifdef USE_INFO_LOCK
 		pthread_mutex_unlock(&g_info_lock);
 #endif
 
-		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(info_post_lock_hist);
+		MICROBENCHMARK_HIST_INSERT_AND_RESET(info_post_lock_hist);
 
 		// write the proto header in the space we pre-wrote
 		db.buf[0] = 2;
@@ -4602,15 +4467,15 @@ thr_info_fn(void *unused)
 		uint8_t	*b = db.buf;
 		uint8_t	*lim = db.buf + db.used_sz;
 		while (b < lim) {
-			int rv = send(tr->proto_fd_h->fd, b, lim - b, MSG_NOSIGNAL);
+			int rv = send(fd_h->fd, b, lim - b, MSG_NOSIGNAL);
 			if ((rv < 0) && (errno != EAGAIN) ) {
 				if (errno == EPIPE) {
-					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", tr->proto_fd_h->fd);
+					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", fd_h->fd);
 				} else {
-					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", tr->proto_fd_h->fd, errno);
+					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", fd_h->fd, errno);
 				}
-				as_end_of_transaction_force_close(tr->proto_fd_h);
-				tr->proto_fd_h = 0;
+				as_end_of_transaction_force_close(fd_h);
+				fd_h = NULL;
 				break;
 			}
 			else if (rv > 0)
@@ -4621,17 +4486,17 @@ thr_info_fn(void *unused)
 
 		cf_dyn_buf_free(&db);
 
-		cf_free(tr->msgp);
+		cf_free(pr);
 
-		if (tr->proto_fd_h) {
-			as_end_of_transaction_ok(tr->proto_fd_h);
-			tr->proto_fd_h = 0;
+		if (fd_h) {
+			as_end_of_transaction_ok(fd_h);
+			fd_h = NULL;
 		}
 
-		MICROBENCHMARK_HIST_INSERT_P(info_fulfill_hist);
+		MICROBENCHMARK_HIST_INSERT(info_fulfill_hist);
 	}
-	return(0);
 
+	return NULL;
 }
 
 //
@@ -4643,24 +4508,16 @@ thr_info_fn(void *unused)
 // Proto will be freed by the caller
 //
 
-int
-as_info(as_transaction *tr)
+void
+as_info(as_info_transaction *it)
 {
-	info_work  work;
+	if (0 != cf_queue_push(g_info_work_q, it)) {
+		cf_warning(AS_INFO, "failed info queue push");
 
-	work.tr = *tr;
-
-	tr->proto_fd_h = 0;
-	tr->msgp = 0;
-
-	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(info_tr_q_process_hist);
-
-	if (0 != cf_queue_push(g_info_work_q, &work)) {
-		cf_warning(AS_INFO, "PUSH FAILED: todo: kill info request file descriptor or something");
-		return(-1);
+		// TODO - bother "handling" this?
+		as_end_of_transaction_force_close(it->fd_h);
+		cf_free(it->proto);
 	}
-
-	return(0);
 }
 
 // Return the number of pending Info requests in the queue.
@@ -5132,8 +4989,6 @@ info_debug_ticker_fn(void *unused)
 					histogram_dump(g_config.batch_index_reads_hist);
 				if (g_config.batch_q_process_hist)
 					histogram_dump(g_config.batch_q_process_hist);
-				if (g_config.info_tr_q_process_hist)
-					histogram_dump(g_config.info_tr_q_process_hist);
 				if (g_config.info_q_wait_hist)
 					histogram_dump(g_config.info_q_wait_hist);
 				if (g_config.info_post_lock_hist)
@@ -6465,7 +6320,6 @@ clear_microbenchmark_histograms()
 	histogram_clear(g_config.error_hist);
 	histogram_clear(g_config.batch_index_reads_hist);
 	histogram_clear(g_config.batch_q_process_hist);
-	histogram_clear(g_config.info_tr_q_process_hist);
 	histogram_clear(g_config.info_q_wait_hist);
 	histogram_clear(g_config.info_post_lock_hist);
 	histogram_clear(g_config.info_fulfill_hist);
@@ -7061,6 +6915,7 @@ int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 // Defined in "make_in/version.c" (auto-generated by the build system.)
 extern const char aerospike_build_id[];
 extern const char aerospike_build_type[];
+extern const char aerospike_build_features[];
 
 int
 as_info_init()
@@ -7077,7 +6932,7 @@ as_info_init()
 	shash_create(&g_info_node_info_hash, cf_nodeid_shash_fn, sizeof(cf_node), sizeof(info_node_info), 64, SHASH_CR_MT_BIGLOCK);
 
 	// create worker threads
-	g_info_work_q = cf_queue_create(sizeof(info_work), true);
+	g_info_work_q = cf_queue_create(sizeof(as_info_transaction), true);
 
 	char vstr[64];
 	sprintf(vstr, "%s build %s", aerospike_build_type, aerospike_build_id);
@@ -7098,7 +6953,10 @@ as_info_init()
 	as_info_set("node", istr, true);                     // Node ID. Unique 15 character hex string for each node based on the mac address and port.
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
-	as_info_set("features", "cdt-list;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf", true);
+	static char features[1024];
+	strcat(features, "cdt-list;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf");
+	strcat(features, aerospike_build_features);
+	as_info_set("features", features, true);
 	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
 		sprintf(istr, "%s:%d", g_config.hb_addr, g_config.hb_port);
 		as_info_set("mcast", istr, false);               // Returns the multicast heartbeat address and port used by this server. Only available in multicast heartbeat mode.
@@ -7201,7 +7059,7 @@ as_info_init()
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
 	as_info_set_command("undun", info_command_undun, PERM_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
 	as_info_set_command("unsnub", info_command_unsnub, PERM_SERVICE_CTRL);                    // Stop ignoring heartbeats from the specified node(s).
-	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PERM_NONE);      // Get the min XDR lastshipinfo.
+	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);               // Command to XDR module.
 
 	// SINDEX
 	as_info_set_dynamic("sindex", info_get_sindexes, false);
@@ -7232,6 +7090,8 @@ as_info_init()
 	as_info_set_command("sindex-stat", info_command_sindex_stat, PERM_NONE);
 	as_info_set_command("sindex-list", info_command_sindex_list, PERM_NONE);
 	as_info_set_dynamic("sindex-builder-list", as_sbld_list, false);                         // List info for all secondary index builder jobs.
+
+	as_xdr_info_init();
 
 	// Spin up the Info threads *after* all static and dynamic Info commands have been added
 	// so we can guarantee that the static and dynamic lists will never again be changed.

@@ -1,7 +1,7 @@
 /*
  * partition.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -144,8 +144,6 @@
  *     world is not relevant. Revisit and fix comment
  */
 
-#include "base/feature.h" // Turn new AS Features on/off (must be first in line)
-
 #include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -185,6 +183,12 @@ static volatile int g_multi_node = false;
 
 #define BALANCE_INIT_UNRESOLVED 0
 #define BALANCE_INIT_RESOLVED   1
+
+typedef enum {
+	MASTER_NOT_WAITING,
+	MASTER_WAITING,
+	MASTER_DONE_WAITING
+} master_wait_state;
 
 static volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
 
@@ -379,7 +383,7 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 
 	p->n_dupl = 0;
 	memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-	p->waiting_for_master = false;
+	p->master_wait_state = MASTER_NOT_WAITING;
 	memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 	memset(&p->version_info, 0, sizeof(p->version_info));
 	memset(p->old_sl, 0, sizeof(p->old_sl));
@@ -1810,25 +1814,33 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			// schedule a migrate now
 			// do not decrement the migrate count since we expect
 			// another migrate from master after the merge completes
-			if (g_config.self_node != p->replica[0] && p->waiting_for_master) {
-				if (source_node != p->replica[0]) {
-					// this is a state corruption error
-					cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. Waiting node received migrate request from non-master",
-							ns->name, pid);
-					rv = AS_MIGRATE_FAIL;
-					break; // out of switch
+			if (g_config.self_node != p->replica[0]) {
+				if (p->master_wait_state == MASTER_WAITING) {
+					if (source_node != p->replica[0]) {
+						// this is a state corruption error
+						cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. Waiting node received migrate request from non-master",
+								ns->name, pid);
+						rv = AS_MIGRATE_FAIL;
+						break; // out of switch
+					}
+
+					p->master_wait_state = MASTER_DONE_WAITING;
+					p->pending_migrate_tx++; // Send request to dupl node
+
+					partition_migrate_record r;
+					partition_migrate_record_fill(&r, p->replica[0], ns,
+							pid, orig_cluster_key, TX_FLAGS_NONE);
+					cf_queue_push(mq, &r);
+
+					rv = AS_MIGRATE_ALREADY_DONE;
+					break;
 				}
 
-				p->waiting_for_master = false;
-				p->pending_migrate_tx++; // Send request to dupl node
-
-				partition_migrate_record r;
-				partition_migrate_record_fill(&r, p->replica[0], ns,
-						pid, orig_cluster_key, TX_FLAGS_NONE);
-				cf_queue_push(mq, &r);
-
-				rv = AS_MIGRATE_ALREADY_DONE;
-				break;
+				if (p->master_wait_state == MASTER_DONE_WAITING) {
+					// Handles duplicate start request.
+					rv = AS_MIGRATE_ALREADY_DONE;
+					break;
+				}
 			}
 
 			if (p->state == AS_PARTITION_STATE_ZOMBIE) {
@@ -1874,9 +1886,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 				}
 
 				if (p->origin != p->replica[0]) {
-					// this has been debugged as normal not a state
-					// corruption error - duplicate migrate START?
-					// TODO: Check if AER-4512 corrects this issue.
 					cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC replica node receiving migrate request has origin set to non-master",
 							ns->name, pid);
 					rv = AS_MIGRATE_FAIL;
@@ -1922,8 +1931,9 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 
 				if (! dupl_node_found) {
 					// This has been determined NOT to be a state corruption
-					// error - I think it's multiple migrate STARTs?
-					cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC Master receiving migrate from node not in duplicate list",
+					// error - Retransmitted START after a done completes on a
+					// DSYNC master. This shouldn't affect emigrating node.
+					cf_detail(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC Master receiving migrate from node not in duplicate list",
 							ns->name, pid);
 					rv = AS_MIGRATE_FAIL;
 					break; // out of switch
@@ -2754,7 +2764,7 @@ as_partition_balance()
 
 			p->n_dupl = 0;
 			memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-			p->waiting_for_master = false;
+			p->master_wait_state = MASTER_NOT_WAITING;
 			memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 
 			// Check if any of the replicas for this partition in the old
@@ -3130,7 +3140,7 @@ as_partition_balance()
 				// Wait for master to flag that it is sync before
 				// transmitting the partition
 				else if (cf_contains64(dupl_nodes, n_dupl, self) && ! is_sync[0]) {
-					p->waiting_for_master = true;
+					p->master_wait_state = MASTER_WAITING;
 					ns_pending_migrate_tx_later++;
 				}
 
@@ -3149,7 +3159,7 @@ as_partition_balance()
 
 				// Not a replica. Partition will enter zombie state if it
 				// has pending work. Otherwise, we discard the partition.
-				if (p->pending_migrate_tx || p->waiting_for_master) {
+				if (p->pending_migrate_tx || p->master_wait_state == MASTER_WAITING) {
 					p->state = AS_PARTITION_STATE_ZOMBIE;
 				}
 				else  { // throwing away duplicate partition

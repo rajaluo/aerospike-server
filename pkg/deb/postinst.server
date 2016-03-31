@@ -15,7 +15,11 @@ case "$1" in
     useradd -r -d /opt/aerospike -g aerospike aerospike
   fi
 
-  chown -R aerospike:aerospike /opt/aerospike /var/log/aerospike /var/run/aerospike
+  for dir in /opt/aerospike /var/log/aerospike /var/run/aerospike ; do
+    if [ -d $dir ]; then
+      chown -R aerospike:aerospike $dir
+    fi
+  done
 
   if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null 2>&1 || true

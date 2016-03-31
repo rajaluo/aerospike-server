@@ -1,7 +1,7 @@
 /*
  * ldt_record.c
  *
- * Copyright (C) 2013-2015 Aerospike, Inc.
+ * Copyright (C) 2013-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,8 +24,6 @@
  * as_record interface for large stack objects
  *
  */
-
-#include "base/feature.h" // Turn new AS Features on/off (must be first in line)
 
 #include "base/ldt_record.h"
 

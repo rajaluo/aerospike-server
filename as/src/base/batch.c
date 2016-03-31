@@ -72,7 +72,7 @@ typedef struct {
 	uint8_t data[];
 } __attribute__((__packed__)) as_batch_buffer;
 
-struct as_batch_shared {
+struct as_batch_shared_s {
 	pthread_mutex_t lock;
 	cf_queue* response_queue;
 	as_file_handle* fd_h;
@@ -84,8 +84,6 @@ struct as_batch_shared {
 	uint32_t tran_max;
 	int result_code;
 };
-
-typedef struct as_batch_shared as_batch_shared;
 
 typedef struct {
 	as_batch_shared* shared;
@@ -167,10 +165,10 @@ as_batch_send_error(as_transaction* btr, int result_code)
 	m.msg.n_ops = 0;
 	as_msg_swap_header(&m.msg);
 
-	int status = as_batch_send(btr->proto_fd_h->fd, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
+	int status = as_batch_send(btr->from.proto_fd_h->fd, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
 
-	as_end_of_transaction(btr->proto_fd_h, status != 0);
-	btr->proto_fd_h = 0;
+	as_end_of_transaction(btr->from.proto_fd_h, status != 0);
+	btr->from.proto_fd_h = NULL;
 
 	cf_free(btr->msgp);
 	btr->msgp = 0;
@@ -670,10 +668,10 @@ as_batch_queue_task(as_transaction* btr)
 	}
 
 	// Check that the socket is authenticated.
-	uint8_t result = as_security_check(btr->proto_fd_h, PERM_NONE);
+	uint8_t result = as_security_check(btr->from.proto_fd_h, PERM_NONE);
 
 	if (result != AS_PROTO_RESULT_OK) {
-		as_security_log(btr->proto_fd_h, result, PERM_NONE, NULL, NULL);
+		as_security_log(btr->from.proto_fd_h, result, PERM_NONE, NULL, NULL);
 		return as_batch_send_error(btr, result);
 	}
 
@@ -738,7 +736,7 @@ as_batch_queue_task(as_transaction* btr)
 		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 	}
 
-	shared->fd_h = btr->proto_fd_h;
+	shared->fd_h = btr->from.proto_fd_h;
 	shared->msgp = btr->msgp;
 	shared->tran_max = tran_count;
 
@@ -764,12 +762,14 @@ as_batch_queue_task(as_transaction* btr)
 
 	// Initialize generic transaction.
 	as_transaction tr;
-	as_transaction_init(&tr, 0, 0);
-	tr.proto_fd_h = btr->proto_fd_h;
+	as_transaction_init_head(&tr, 0, 0);
+
+	tr.origin = FROM_BATCH;
+	tr.from.batch_shared = shared;
+	tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	tr.start_time = btr->start_time;
 	MICROBENCHMARK_SET_TO_START();
-	tr.batch_shared = shared;
-	tr.flag |= AS_TRANSACTION_FLAG_BATCH_SUB;
+
 	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 
 	// Read batch keys and initialize generic transactions.
@@ -790,7 +790,7 @@ as_batch_queue_task(as_transaction* btr)
 	while (tran_row < tran_count && data + BATCH_REPEAT_SIZE <= limit) {
 		// Copy transaction data before memory gets overwritten.
 		in = (as_batch_input*)data;
-		tr.batch_index = cf_swap_from_be32(in->index);
+		tr.from_data.batch_index = cf_swap_from_be32(in->index);
 		memcpy(&tr.keyd, &in->keyd, sizeof(cf_digest));
 
 		if (in->repeat) {
@@ -900,7 +900,7 @@ TranEnd:
 	}
 
 	// Reset original socket because socket now owned by batch shared.
-	btr->proto_fd_h = 0;
+	btr->from.proto_fd_h = NULL;
 	return 0;
 }
 
@@ -943,11 +943,11 @@ as_batch_add_result(as_transaction* tr, as_namespace* ns, const char* setname, u
 		}
 	}
 
-	as_batch_shared* shared = tr->batch_shared;
+	as_batch_shared* shared = tr->from.batch_shared;
 
 	if (size > BATCH_MAX_TRANSACTION_SIZE) {
 		cf_warning(AS_BATCH, "Record size %zu exceeds max %d", size, BATCH_MAX_TRANSACTION_SIZE);
-		as_batch_add_error(shared, tr->batch_index, AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG);
+		as_batch_add_error(shared, tr->from_data.batch_index, AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG);
 		return;
 	}
 
@@ -969,7 +969,7 @@ as_batch_add_result(as_transaction* tr, as_namespace* ns, const char* setname, u
 		m->record_ttl = void_time;
 
 		// Overload transaction_ttl to store batch index.
-		m->transaction_ttl = tr->batch_index;
+		m->transaction_ttl = tr->from_data.batch_index;
 
 		m->n_fields = n_fields;
 		m->n_ops = n_bins;
@@ -1179,4 +1179,10 @@ as_batch_destroy()
 	as_batch_shutdown_thread_queues(0, batch_thread_pool.thread_size);
 	pthread_mutex_unlock(&batch_resize_lock);
 	pthread_mutex_destroy(&batch_resize_lock);
+}
+
+as_file_handle*
+as_batch_get_fd_h(as_batch_shared* shared)
+{
+	return shared->fd_h;
 }

@@ -1,7 +1,7 @@
 /*
  * ldt_aerospike.c
  *
- * Copyright (C) 2013-2015 Aerospike, Inc.
+ * Copyright (C) 2013-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -28,8 +28,6 @@
  *  Entire ldt_aerospike is some part wrapper over the udf_aerospike and
  *  some part its own logic
  */
-
-#include "base/feature.h" // Turn new AS Features on/off
 
 #include "base/ldt_aerospike.h"
 
@@ -312,9 +310,8 @@ slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 	as_transaction * c_tr      = &lslotp->tr;
 
 	// Chunk Record Does not respond for proxy request
-	c_tr->proto_fd_h           = NULL;       // Need not reply
-	c_tr->proxy_node           = 0;          // ??
-	c_tr->proxy_msg            = NULL;       // ??
+	c_tr->from.any             = NULL;       // Need not reply
+	c_tr->from_data.any        = 0;          // ??
 
 	// Chunk Record Does not respond back to the client
 	c_tr->result_code          = 0;
@@ -332,7 +329,8 @@ slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 
 	// Chunk transaction is always preprocessed
 	c_tr->msg_fields           = h_tr->msg_fields;
-	c_tr->flag                 = 0;
+	c_tr->from_flags           = 0;
+	c_tr->flags                = 0;
 
 	// Parent reservation cannot go away as long as Chunck needs reservation.
 	memcpy(&c_tr->rsv, &h_tr->rsv, sizeof(as_partition_reservation));
