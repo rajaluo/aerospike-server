@@ -46,6 +46,8 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_ll.h"
+#include "citrusleaf/cf_queue.h"
 
 #include "ai_obj.h"
 #include "ai_btree.h"

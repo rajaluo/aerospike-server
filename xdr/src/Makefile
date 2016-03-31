@@ -18,8 +18,10 @@ XDR_CONFIG_LIBRARY = $(LIBRARY_DIR)/libxdrconfig.a
 
 XDR_ALL_OBJECTS += $(XDR_CONFIG_OBJECTS)
 
+INCLUDES += -I$(AS)/include
 INCLUDES += -I$(CF)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
+INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += $(XDR_INCLUDES)
 INCLUDES += -I$(XDR_INCLUDE_DIR)
 
@@ -35,7 +37,7 @@ ifeq ($(USE_XDR),1)
   ifeq ($(EEREPO), )
     $(error "To build with XDR support, the EEREPO environment variable must be set appropriately.")
   endif
-  all: $(SERVER)
+  all: $(XDR_LIBRARY)
 else
   all: $(XDR_CONFIG_LIBRARY)
 endif

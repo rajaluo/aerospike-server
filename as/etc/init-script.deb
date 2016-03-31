@@ -49,6 +49,21 @@ set_shmmax() {
 	fi
 }
 
+set_socket_buffer_limit() {
+	name=${1}; path=${2}; size=${3}
+	curr=$(cat ${path})
+
+	if [ ${curr} -lt ${size} ]; then
+		echo "Increasing ${name} socket buffer limit (${path}): ${curr} -> ${size}"
+		echo ${size} >${path}
+	fi
+}
+
+set_socket_buffer_limits() {
+	set_socket_buffer_limit read /proc/sys/net/core/rmem_max 15728640
+	set_socket_buffer_limit write /proc/sys/net/core/wmem_max 5242880
+}
+
 #We are adding create_piddir as /var/run is tmpfs on Debian 7+/Ubuntu 12+. This causes
 #the piddir to be removed on reboot
 create_piddir() {
@@ -94,6 +109,7 @@ case "$1" in
 		logger -t aerospike "ulimit -n=" `ulimit -n`
 		set_shmall
 		set_shmmax
+		set_socket_buffer_limits
 		create_piddir
 
 		[ -n "$LD_PRELOAD" ] && export LD_PRELOAD

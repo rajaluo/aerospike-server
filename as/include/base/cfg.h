@@ -157,6 +157,9 @@ typedef struct as_config_s {
 	/* (Only opened if the main service socket is not already listening on 0.0.0.0 or 127.0.0.1.) */
 	cf_socket_cfg		localhost_socket;
 
+	/* The port to listen on for XDR compatibility, typically 3004. */
+	cf_socket_cfg		xdr_socket;
+
 	char				*external_address; // hostname that clients will connect on
 	bool				is_external_address_virtual;
 	char				*alternate_address; // alternate service address (could be DNS)
@@ -278,7 +281,6 @@ typedef struct as_config_s {
 	uint32_t			prole_extra_ttl;	// seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
 	bool				non_master_sets_delete;	// locally delete non-master records in sets that are being emptied
 
-	xdr_config			xdr_cfg;							// XDR related config parameters
 	xdr_lastship_s		xdr_lastship[AS_CLUSTER_SZ];		// last XDR shipping info of other nodes
 	cf_node				xdr_clmap[AS_CLUSTER_SZ];			// cluster map as known to XDR
 	uint64_t			xdr_self_lastshiptime[DC_MAX_NUM];	// last XDR shipping by this node
@@ -511,8 +513,6 @@ typedef struct as_config_s {
 	cf_atomic_int		stat_write_latency_gt50;
 	cf_atomic_int		stat_write_latency_gt100;
 	cf_atomic_int		stat_write_latency_gt250;
-	cf_atomic_int		stat_xdr_pipe_writes;
-	cf_atomic_int		stat_xdr_pipe_miss;
 
 	cf_atomic_int		stat_delete_success;
 	cf_atomic_int		stat_rw_timeout;
@@ -559,7 +559,6 @@ typedef struct as_config_s {
 	cf_atomic_int		err_write_fail_generation_xdr;
 	cf_atomic_int		err_write_fail_bin_exists;
 	cf_atomic_int		err_write_fail_parameter;
-	cf_atomic_int		err_write_fail_noxdr;
 	cf_atomic_int		err_write_fail_prole_unknown;
 	cf_atomic_int		err_write_fail_prole_generation;
 	cf_atomic_int		err_write_fail_not_found;
@@ -629,3 +628,4 @@ extern void as_config_post_process(as_config *c, const char *config_file);
 
 /* Declare an instance of the configuration structure in global scope */
 extern as_config g_config;
+extern xdr_config g_xcfg;
