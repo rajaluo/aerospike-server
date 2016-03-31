@@ -113,6 +113,7 @@ else
       $(wildcard /usr/lib64/liblua$(LUA_SUFFIX).a), \
       $(wildcard /usr/lib/x86_64-linux-gnu/liblua$(LUA_SUFFIX).a), \
       $(wildcard /usr/lib/liblua.a), \
+      $(wildcard /usr/lib/powerpc64le-linux-gnu/liblua.a), \
       $(error Cannot find "liblua.a"))
   else
     LIBRARIES += -llua$(LUA_SUFFIX)
