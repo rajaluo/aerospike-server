@@ -172,8 +172,8 @@ include $(DEPTH)/make_in/Makefile.targets
 
 # Ignore S2 induced warnings
 S2_WNO = -Wno-unused-local-typedefs -Wno-deprecated -Wno-sign-compare
-$(OBJECT_DIR)/geospatial/geojson.o: CXXFLAGS += $(S2_WNO)
-$(OBJECT_DIR)/geospatial/geospatial.o: CXXFLAGS += $(S2_WNO)
+$(OBJECT_DIR)/geospatial/%.o: CXXFLAGS += $(S2_WNO)
+$(OBJECT_DIR)/geospatial/%.o: CFLAGS := $(filter-out -std=gnu99,$(CFLAGS))
 
 ifeq ($(USE_SYSTEMTAP),1)
 $(SYSTEMTAP_PROBES_H):	$(SYSTEMTAP_PROBES_D)

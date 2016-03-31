@@ -1,7 +1,7 @@
 /*
  * xdr_config.h
  *
- * Copyright (C) 2011-2014 Aerospike, Inc.
+ * Copyright (C) 2011-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include "fault.h"
 #include "util.h"
 
 //Length definitions. This should be in sync with the server definitions.
@@ -53,13 +54,8 @@ typedef enum {
 	XDR_CASE_CONTEXT_END,
 
 	// Top-level options:
-	XDR_CASE_SERVICE_BEGIN,
 	XDR_CASE_NAMESPACE_BEGIN,
 	XDR_CASE_XDR_BEGIN,
-
-	// Server options:
-	XDR_CASE_SERVICE_USER,
-	XDR_CASE_SERVICE_GROUP,
 
 	// Namespace options:
 	XDR_CASE_NS_ENABLE_XDR,
@@ -77,42 +73,38 @@ typedef enum {
 
 	// Main XDR options:
 	XDR_CASE_ENABLE_XDR,
-	XDR_CASE_NAMEDPIPE_PATH,
 	XDR_CASE_DIGESTLOG_PATH,
 	XDR_CASE_ERRORLOG_PATH,
-	XDR_CASE_LOCAL_NODE_PORT,
 	XDR_CASE_INFO_PORT,
 	XDR_CASE_DATACENTER_BEGIN,
-	XDR_CASE_MAX_RECS_INFLIGHT,
-	XDR_CASE_DIGESTLOG_OVERWRITE,
-	XDR_CASE_DIGESTLOG_PERSIST,
+	XDR_CASE_MAX_SHIP_THROUGHPUT,
+	XDR_CASE_MAX_SHIP_BANDWIDTH,
+	XDR_CASE_HOTKEY_TIME,
 	XDR_CASE_FORWARD_XDR_WRITES,
-	XDR_CASE_THREADS,
+	XDR_CASE_CLIENT_THREADS,
 	XDR_CASE_TIMEOUT,
-	XDR_CASE_STOP_WRITES_NOXDR,
-	XDR_CASE_XDR_BATCH_NUM_RETRY,
-	XDR_CASE_XDR_BATCH_RETRY_SLEEP,
 	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED,
 	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE,
 	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
-	XDR_CASE_XDR_FORWARD_WITH_GENCHECK,
 	XDR_CASE_XDR_REPLACE_RECORD,
-	XDR_CASE_XDR_HOTKEY_MAXSKIP,
 	XDR_CASE_XDR_SHIPPING_ENABLED,
 	XDR_CASE_XDR_PIDFILE,
-	XDR_CASE_XDR_WRITE_BATCH_SIZE,
 	XDR_CASE_XDR_READ_BATCH_SIZE,
-	XDR_CASE_XDR_READ_THREAD_COUNT,
-	XDR_CASE_XDR_READ_MODE,
-	XDR_CASE_XDR_DO_VERSION_CHECK,
+	XDR_CASE_XDR_INFO_TIMEOUT,
+	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
+	XDR_CASE_XDR_SHIP_DELAY,
+	XDR_CASE_XDR_READ_THREADS,
+
+	// Security options:
+	XDR_CASE_SEC_CREDENTIALS_BEGIN,
+	XDR_CASE_SEC_CRED_USERNAME,
+	XDR_CASE_SEC_CRED_PASSWORD,
 
 	// Remote datacenter options:
 	XDR_CASE_DC_NODE_ADDRESS_PORT,
 	XDR_CASE_DC_INT_EXT_IPMAP,
-	XDR_CASE_XDR_INFO_TIMEOUT,
-	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
-	XDR_CASE_XDR_SHIP_DELAY
-
+	XDR_CASE_DC_SECURITY_CONFIG_FILE,
+	XDR_CASE_DC_USE_ALTERNATE_SERVICES
 } xdr_cfg_case_id;
 
 /* Configuration parser token plus case-identifier pair. The server (cfg.c)
@@ -132,6 +124,8 @@ extern const xdr_cfg_opt XDR_DC_OPTS[];
 extern const xdr_cfg_opt XDR_NS_OPTS[];
 extern const xdr_cfg_opt XDR_NS_STORAGE_OPTS[];
 extern const xdr_cfg_opt XDR_NS_SET_OPTS[];
+extern const xdr_cfg_opt XDR_SEC_GLOBAL_OPTS[];
+extern const xdr_cfg_opt XDR_SEC_CRED_OPTS[];
 
 /* The various xdr_cfg_opt array counts. The server (cfg.c) needs to see these.
  */
@@ -142,9 +136,11 @@ extern const int NUM_XDR_DC_OPTS;
 extern const int NUM_XDR_NS_OPTS;
 extern const int NUM_XDR_NS_STORAGE_OPTS;
 extern const int NUM_XDR_NS_SET_OPTS;
+extern const int NUM_XDR_SEC_GLOBAL_OPTS;
+extern const int NUM_XDR_SEC_CRED_OPTS;
 
 // Some static knobs shared between XDR and asd
-#define XDR_TIME_ADJUST	300000 // 5 min (ms) time value. Base macro for XDR(for LST adjustment in failure cases) and asd (as parameter for printing warrnings).
+#define XDR_TIME_ADJUST	300000 // (5 minutes) LST adjustment in node failure cases.
 
 #define DC_MAX_NUM 32
 typedef struct xdr_lastship_s {
@@ -152,72 +148,56 @@ typedef struct xdr_lastship_s {
 	uint64_t	time[DC_MAX_NUM];
 } xdr_lastship_s;
 
-typedef enum {
-	XDR_MODE_BATCH_GET = 0,
-	XDR_MODE_SINGLE_RECORD_GET = 1
-} xdr_mode;
 
 // Config option in case the configuration value is changed
 typedef struct xdr_new_config_s {
-	int		xdr_write_batch_size;
-	int		xdr_max_recs_inflight;
 	int		xdr_read_batch_size;
-	int		xdr_threads;
-	xdr_mode 	xdr_read_mode;
-	int     	xdr_read_threads;	// configured number of threads
 } xdr_new_config;
 
 //Config option which is maintained both by the server and the XDR module
 typedef struct xdr_config {
-	// Is the XDR feature supported in the build?
-	bool	xdr_supported;
 
 	//This section is used by both the server and the XDR module
 	bool	xdr_global_enabled;
-	char	*xdr_digestpipe_path;
-
-	//This section is not used by the server and is meant only for XDR module
-	uid_t	uid;
-	gid_t	gid;
 
 	// Ring buffer configuration
-	int	xdr_info_port;
 	char 	*xdr_digestlog_path[XDR_MAX_DGLOG_FILES];
 	uint64_t xdr_digestlog_file_size[XDR_MAX_DGLOG_FILES];
 	bool 	xdr_digestlog_overwrite;
 	bool	xdr_digestlog_persist;
 	uint8_t xdr_num_digestlog_paths;
-	char	*xdr_errorlog_path;
-	int	xdr_digestpipe_fd;
-	int	xdr_local_port;
-	int	xdr_write_batch_size;
-	int	xdr_max_recs_inflight;
+
+	int	xdr_info_port;
+	int	xdr_max_ship_throughput;
+	int	xdr_max_ship_bandwidth;
+	int	xdr_hotkey_time;
 	int	xdr_read_batch_size;
+	int	xdr_read_threads;       // Number threads which will read from server and ship records.
 	int	xdr_timeout;
-	int	xdr_nw_timeout;
-	int	xdr_threads;
+	int	xdr_client_threads;
 	int	xdr_forward_xdrwrites;
-	int	xdr_stop_writes_noxdr;
 	int xdr_internal_shipping_delay;
 	int	xdr_conf_change_flag;
 	xdr_new_config xdr_new_cfg;
 	bool	xdr_shipping_enabled;
 	bool	xdr_delete_shipping_enabled;
 	bool	xdr_nsup_deletes_enabled;
-	int 	xdr_hotkey_maxskip;
-	int 	xdr_batch_retry_sleep;
-	int 	xdr_batch_num_retry;
-	bool	xdr_fwd_with_gencheck;
 	bool	xdr_replace_record;
-	bool	xdr_check_data_before_delete;
 	int		xdr_info_request_timeout_ms;
 	int     xdr_compression_threshold;
-	char	*xdr_pidfile;
-	int     xdr_read_threads;
-	xdr_mode xdr_read_mode;
-	char	*xdr_read_mode_string;
-	bool	xdr_do_version_check;
 } xdr_config;
+
+// XDR states
+typedef enum xdr_state_e {
+	XDR_COMING_UP,
+	XDR_DLOG_WRITER_UP,
+	XDR_UP,
+	XDR_GOING_DOWN,
+	XDR_DOWN
+} xdr_state;
 
 // Prototypes
 void xdr_config_defaults(xdr_config *c);
+
+// Variables
+extern const bool g_xdr_supported;

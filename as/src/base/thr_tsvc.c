@@ -50,6 +50,7 @@
 #include "base/thr_write.h"
 #include "base/transaction.h"
 #include "base/udf_rw.h"
+#include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
 
@@ -101,6 +102,11 @@ should_security_check_data_op(const as_transaction *tr)
 void
 process_transaction(as_transaction *tr)
 {
+	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
+		as_xdr_handle_txn(tr);
+		return;
+	}
+
 	int rv;
 	bool free_msgp = true;
 	cl_msg *msgp = tr->msgp;

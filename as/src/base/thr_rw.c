@@ -119,8 +119,6 @@ int delete_replica(as_transaction *tr, bool is_subrec, cf_node masternode);
 void apply_journaled_delete(as_namespace *ns, as_index_tree *tree,
 		cf_digest *keyd, bool is_nsup_delete, bool is_xdr_op);
 int write_delete_journal(as_transaction *tr, bool is_subrec);
-void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation,
-			   cf_node masternode, bool is_delete, uint16_t set_id);
 
 /*
  ** queue for async replication
@@ -857,85 +855,70 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 		} else {
 			cf_atomic_int_incr(&g_config.write_master);
 
-			// If the XDR is enabled and if the user configured to stop the writes if there is no XDR
-			// and if the xdr digestpipe is not opened fail the writes with appropriate return value
-			// We cannot do this check inside write_local() because that function is used for replica
-			// writes as well. We do not want to stop the writes on replica if the master write succeeded.
-			if ((g_config.xdr_cfg.xdr_global_enabled == true)
-					&& (g_config.xdr_cfg.xdr_digestpipe_fd == -1)
-					&& (tr->rsv.ns && tr->rsv.ns->enable_xdr == true)
-					&& (g_config.xdr_cfg.xdr_stop_writes_noxdr == true)) {
-				tr->result_code = AS_PROTO_RESULT_FAIL_NOXDR;
-				cf_atomic_int_incr(&g_config.err_write_fail_noxdr);
-				cf_debug(AS_RW,
-						"internal_rw_start: XDR is enabled but XDR digest pipe is not open.");
-				rv = -1;
-			} else {
-				if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
-					// <><><><><><><><><><>   Apply a UDF   <><><><><><><><><><>
-					wr->has_udf = true;
+			if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
+				// <><><><><><><><><><>   Apply a UDF   <><><><><><><><><><>
+				wr->has_udf = true;
 
-					udf_def def;
-					udf_call stack_call = { &def, tr };
-					udf_call *call = tr->origin == FROM_IUDF ?
-							udf_rw_call_def_init_internal(&stack_call, tr) :
-							udf_rw_call_def_init_from_msg(&stack_call, tr);
+				udf_def def;
+				udf_call stack_call = { &def, tr };
+				udf_call *call = tr->origin == FROM_IUDF ?
+						udf_rw_call_def_init_internal(&stack_call, tr) :
+						udf_rw_call_def_init_from_msg(&stack_call, tr);
 
-					if (call) {
-						rv = udf_rw_local(call, wr, &op);
+				if (call) {
+					rv = udf_rw_local(call, wr, &op);
 
-						udf_rw_call_destroy(call);
+					udf_rw_call_destroy(call);
 
-						if (UDF_OP_IS_DELETE(op)) {
-							tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
-							is_delete = true;
-							// Counteract earlier increments -- don't count UDF
-							// deletes as writes.
-							cf_atomic_int_decr(&g_config.write_master);
-							cf_atomic_int_decr(&g_config.stat_write_reqs);
-						} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
-							// update stats to move from normal to uDF requests
-							as_rw_update_stat(wr);
-							// return early if the record was not updated
-							if (tr->origin == FROM_IUDF) {
-								tr->from.iudf_orig->cb(tr, tr->result_code);
-								tr->from.iudf_orig = NULL;
-							}
-							rw_cleanup(wr, tr, first_time, false, __LINE__);
-							as_rw_set_stat_counters(true, rv, tr);
-							*delete = true;
-							return 0;
-						} else {
-							// Temporary debugging clause...
-							if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->pickled_buf && ! UDF_OP_IS_LDT(op)) {
-								cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
-							}
+					if (UDF_OP_IS_DELETE(op)) {
+						tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
+						is_delete = true;
+						// Counteract earlier increments -- don't count UDF
+						// deletes as writes.
+						cf_atomic_int_decr(&g_config.write_master);
+						cf_atomic_int_decr(&g_config.stat_write_reqs);
+					} else if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
+						// update stats to move from normal to uDF requests
+						as_rw_update_stat(wr);
+						// return early if the record was not updated
+						if (tr->origin == FROM_IUDF) {
+							tr->from.iudf_orig->cb(tr, tr->result_code);
+							tr->from.iudf_orig = NULL;
 						}
+						rw_cleanup(wr, tr, first_time, false, __LINE__);
+						as_rw_set_stat_counters(true, rv, tr);
+						*delete = true;
+						return 0;
 					} else {
-						// Don't warn - happens on FROM_IUDF timeout.
-						tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-						rv = -1;
+						// Temporary debugging clause...
+						if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0 && ! wr->pickled_buf && ! UDF_OP_IS_LDT(op)) {
+							cf_warning(AS_RW, "non-LDT UDF write completed with AS_MSG_INFO2_DELETE not set and no pickled buffer (%d) rv=%d", op, rv);
+						}
 					}
 				} else {
-					// <><><><><><><><><><>   Write Local   <><><><><><><><><><>
-					wr->has_udf = false;
-
-					rv = write_local(tr, &wr->pickled_buf, &wr->pickled_sz,
-							&wr->pickled_rec_props, &wr->response_db);
-					WR_TRACK_INFO(wr, "internal_rw_start: write local done ");
-
-					// Temporary debugging clause...
-					if (rv == 0 && ! wr->pickled_buf) {
-						cf_warning(AS_RW, "write_local() completed with no pickled buffer");
-					}
+					// Don't warn - happens on FROM_IUDF timeout.
+					tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+					rv = -1;
 				}
+			} else {
+				// <><><><><><><><><><>   Write Local   <><><><><><><><><><>
+				wr->has_udf = false;
 
-				if (tr->from_flags & FROM_FLAG_SHIPPED_OP) {
-					cf_detail(AS_RW,
-							"[Digest %"PRIx64" Shipped OP] Finished Transaction ret = %d",
-							*(uint64_t *)&tr->keyd, rv);
+				rv = write_local(tr, &wr->pickled_buf, &wr->pickled_sz,
+						&wr->pickled_rec_props, &wr->response_db);
+				WR_TRACK_INFO(wr, "internal_rw_start: write local done ");
+
+				// Temporary debugging clause...
+				if (rv == 0 && ! wr->pickled_buf) {
+					cf_warning(AS_RW, "write_local() completed with no pickled buffer");
 				}
-			} // end, no XDR problems
+			}
+
+			if (tr->from_flags & FROM_FLAG_SHIPPED_OP) {
+				cf_detail(AS_RW,
+						"[Digest %"PRIx64" Shipped OP] Finished Transaction ret = %d",
+						*(uint64_t *)&tr->keyd, rv);
+			}
 		} // end, else this is a write.
 
 		// from this function: -2 means retry, -1 means forever - like, gen mismatch or similar
@@ -2539,7 +2522,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	as_record_done(&r_ref, rsv->ns);
 
 	// Don't send an XDR delete if it's disallowed.
-	if (is_delete && ! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (is_delete && ! is_xdr_delete_shipping_enabled()) {
 		// TODO - should we also not ship if there was no record here before?
 		return 0;
 	}
@@ -2550,7 +2533,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 	// 3. If the write is a XDR write and forwarding is enabled (either globally or for namespace).
 	if ((info & RW_INFO_MIGRATION) != RW_INFO_MIGRATION) {
 		if (   ((info & RW_INFO_XDR) != RW_INFO_XDR)
-			|| (   (g_config.xdr_cfg.xdr_forward_xdrwrites == true)
+			|| (   (is_xdr_forwarding_enabled() == true)
 				|| (rsv->ns->ns_forward_xdr_writes == true))) {
 			xdr_write(rsv->ns, *keyd, generation, masternode, is_delete, set_id);
 		}
@@ -3008,19 +2991,19 @@ delete_local(as_transaction *tr)
 	cf_atomic_int_incr(&g_config.stat_delete_success);
 	as_record_done(&r_ref, ns);
 
-	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (! is_xdr_delete_shipping_enabled()) {
 		return 0;
 	}
 
 	// Don't ship expiration/eviction deletes unless configured to do so.
 	if ((tr->from_flags & FROM_FLAG_NSUP_DELETE) != 0 &&
-			! g_config.xdr_cfg.xdr_nsup_deletes_enabled) {
+			! is_xdr_nsup_deletes_enabled()) {
 		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
 	}
 	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
 			// If this delete is a result of XDR shipping, don't ship it unless
 			// configured to do so.
-			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			is_xdr_forwarding_enabled() ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id);
 	}
@@ -3068,19 +3051,19 @@ delete_replica(as_transaction *tr, bool is_subrec, cf_node masternode)
 	as_index_delete(tree, &tr->keyd);
 	as_record_done(&r_ref, ns);
 
-	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (! is_xdr_delete_shipping_enabled()) {
 		return 0;
 	}
 
 	// Don't ship expiration/eviction deletes unless configured to do so.
 	if ((tr->from_flags & FROM_FLAG_NSUP_DELETE) != 0 &&
-			! g_config.xdr_cfg.xdr_nsup_deletes_enabled) {
+			! is_xdr_nsup_deletes_enabled()) {
 		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
 	}
 	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
 			// If this delete is a result of XDR shipping, don't ship it unless
 			// configured to do so.
-			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			is_xdr_forwarding_enabled() ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, tr->keyd, generation, masternode, true, set_id);
 	}
@@ -3118,18 +3101,18 @@ apply_journaled_delete(as_namespace *ns, as_index_tree *tree, cf_digest *keyd,
 	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
 
-	if (! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (! is_xdr_delete_shipping_enabled()) {
 		return;
 	}
 
 	// Don't ship expiration/eviction deletes unless configured to do so.
-	if (is_nsup_delete && ! g_config.xdr_cfg.xdr_nsup_deletes_enabled) {
+	if (is_nsup_delete && ! is_xdr_nsup_deletes_enabled()) {
 		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
 	}
 	else if (! is_xdr_op ||
 			// If this delete is a result of XDR shipping, don't ship it unless
 			// configured to do so.
-			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			is_xdr_forwarding_enabled() ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, *keyd, generation, 0, true, set_id);
 		// Note - journaled deletes assume we're the master node when they're
@@ -4900,14 +4883,14 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 	as_record_done(&r_ref, ns);
 
 	// Don't send an XDR delete if it's disallowed.
-	if (is_delete && ! g_config.xdr_cfg.xdr_delete_shipping_enabled) {
+	if (is_delete && ! is_xdr_delete_shipping_enabled()) {
 		return 0;
 	}
 
 	// Do an XDR write if the write is a non-XDR write or is an XDR write with
 	// forwarding enabled.
 	if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
-			g_config.xdr_cfg.xdr_forward_xdrwrites ||
+			is_xdr_forwarding_enabled() ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, tr->keyd, tr->generation, 0, is_delete, set_id);
 	}

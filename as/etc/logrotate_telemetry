@@ -1,12 +1,12 @@
-/var/log/aerospike/aerospike.log {
+/var/log/aerospike/telemetry.log {
     daily
-    rotate 90
+    rotate 5
     dateext
     compress
     olddir /var/log/aerospike
     missingok
     notifempty
     postrotate
-        (kill -HUP `pgrep asd`) > /dev/null 2>&1 || true
+        service aerospike_telemetry try-restart > /dev/null 2>&1 || true
     endscript
 }

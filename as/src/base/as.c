@@ -412,6 +412,10 @@ main(int argc, char **argv)
 	// Includes echoing the configuration file to log.
 	as_config_post_process(c, config_file);
 
+	// Make one more pass for XDR-related config and crash if needed.
+	// TODO : XDR config parsing should be merged with main config parsing.
+	xdr_conf_init(config_file);
+
 	// If we allocated a non-default config file name, free it.
 	if (config_file != DEFAULT_CONFIG_FILE) {
 		cf_free((void*)config_file);
@@ -482,6 +486,7 @@ main(int argc, char **argv)
 	// cluster nodes, and ultimately with clients.
 
 	as_smd_start(c->smd);		// enables receiving paxos state change events
+	as_xdr_start();				// XDR should start before it joins other nodes
 	as_fabric_start();			// may send & receive fabric messages
 	as_hb_start();				// start inter-node heatbeat
 	as_paxos_start();			// blocks until cluster membership is obtained

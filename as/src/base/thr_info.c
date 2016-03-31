@@ -49,6 +49,7 @@
 
 #include "cf_str.h"
 #include "dynbuf.h"
+#include "fault.h"
 #include "jem.h"
 #include "meminfo.h"
 
@@ -72,6 +73,7 @@
 #include "base/security.h"
 #include "base/system_metadata.h"
 #include "base/udf_cask.h"
+#include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
@@ -97,28 +99,6 @@ extern bool g_shutdown_started;
 // Use the following macro to enforce locking around Info requests at run-time.
 // (Warning:  This will unnecessarily increase contention and Info request timeouts!)
 // #define USE_INFO_LOCK
-
-typedef int (*as_info_get_tree_fn) (char *name, char *subtree, cf_dyn_buf *db);
-typedef int (*as_info_get_value_fn) (char *name, cf_dyn_buf *db);
-typedef int (*as_info_command_fn) (char *name, char *parameters, cf_dyn_buf *db);
-
-// Sets a static value - set to 0 to remove a previous value.
-int as_info_set_buf(const char *name, const uint8_t *value, size_t value_sz, bool def);
-int as_info_set(const char *name, const char *value, bool def);
-
-// For dynamic items - you will get called when the name is requested. The
-// dynbuf will be fully set up for you - just add the information you want to
-// return.
-int as_info_set_dynamic(char *name, as_info_get_value_fn gv_fn, bool def);
-
-// For tree items - you will get called when the name is requested, and it will
-// have the name you registered (name) and the subtree portion (value). The
-// dynbuf will be fully set up for you - just add the information you want to
-// return
-int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
-
-// For commands - you will be called with the parameters.
-int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
 // Acceptable timediffs in XDR lastship times.
 // (Print warning only if time went back by at least 5 minutes.)
@@ -366,10 +346,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_write_success);
 	cf_dyn_buf_append_string(db, ";stat_write_errs=");
 	APPEND_STAT_COUNTER(db, g_config.stat_write_errs);
-	cf_dyn_buf_append_string(db, ";stat_xdr_pipe_writes=");
-	APPEND_STAT_COUNTER(db, g_config.stat_xdr_pipe_writes);
-	cf_dyn_buf_append_string(db, ";stat_xdr_pipe_miss=");
-	APPEND_STAT_COUNTER(db, g_config.stat_xdr_pipe_miss);
 
 	cf_dyn_buf_append_string(db, ";stat_delete_success=");
 	APPEND_STAT_COUNTER(db, g_config.stat_delete_success);
@@ -706,8 +682,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_parameter);
 	cf_dyn_buf_append_string(db, ";err_write_fail_incompatible_type=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_incompatible_type);
-	cf_dyn_buf_append_string(db, ";err_write_fail_noxdr=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_noxdr);
 	cf_dyn_buf_append_string(db, ";err_write_fail_prole_delete=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_delete);
 	cf_dyn_buf_append_string(db, ";err_write_fail_not_found=");
@@ -741,6 +715,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	// Query stats. Aggregation + Lookups
 	cf_dyn_buf_append_string(db, ";");
 	as_query_stat(name, db);
+
+	as_xdr_get_stats(name, db);
 
 	return(0);
 }
@@ -1193,14 +1169,6 @@ info_command_show_devices(char *name, char *params, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, "ok");
 
-	return(0);
-}
-
-int
-info_command_get_min_config(char *name, char *params, cf_dyn_buf *db)
-{
-	uint64_t minxdrls = xdr_min_lastshipinfo();
-	cf_dyn_buf_append_uint64(db, minxdrls);
 	return(0);
 }
 
@@ -2633,18 +2601,7 @@ info_security_config_get(cf_dyn_buf *db)
 void
 info_xdr_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "enable-xdr=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_global_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-namedpipe-path=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_digestpipe_path ? g_config.xdr_cfg.xdr_digestpipe_path : "NULL");
-	cf_dyn_buf_append_string(db, ";forward-xdr-writes=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_forward_xdrwrites ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-delete-shipping-enabled=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_delete_shipping_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";xdr-nsup-deletes-enabled=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_nsup_deletes_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";stop-writes-noxdr=");
-	cf_dyn_buf_append_string(db, g_config.xdr_cfg.xdr_stop_writes_noxdr ? "true" : "false");
+	as_xdr_get_config(db);
 }
 
 void
@@ -3824,6 +3781,9 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					ns->name, ns->geo2dsphere_within_max_cells, val);
 			ns->geo2dsphere_within_max_cells = val;
 		}
+		else if (0 == as_xdr_set_config_ns(ns->name, params)) {
+			;
+		}
 		else {
 			goto Error;
 		}
@@ -3844,52 +3804,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-
-				// If this is for a fresh start, we better close the existing pipe
-				// and reopen as it can be in a broken state.
-				context_len = sizeof(context);
-				if (0 == as_info_parameter_get(params, "freshstart", context, &context_len)) {
-					cf_info(AS_INFO, "Closing the digest pipe for a fresh start");
-					close(g_config.xdr_cfg.xdr_digestpipe_fd);
-					g_config.xdr_cfg.xdr_digestpipe_fd = -1;
-				}
-
-				// Create the named pipe if it is not already open
-				// Note below that we do not close named pipe when xdr is disabled.
-				if (g_config.xdr_cfg.xdr_digestpipe_fd == -1) {
-
-					if (xdr_create_named_pipe(&(g_config.xdr_cfg)) != 0) {
-						goto Error;
-					}
-
-					// We need to send the namespace info
-					if (xdr_send_nsinfo() != 0) {
-						goto Error;
-					}
-
-					if (xdr_send_nodemap() != 0) {
-						goto Error;
-					}
-				}
-
-				// Everything set.
-				cf_info(AS_INFO, "Changing value of enable-xdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_global_enabled], context);
-				g_config.xdr_cfg.xdr_global_enabled = true;
-
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of enable-xdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_global_enabled], context);
-				g_config.xdr_cfg.xdr_global_enabled = false;
-				/* Closing the named pipe is not really necessary. Moreover, this
-				 * will allow us to have additional functionality where XDR on server
-				 * can be temporarily disabled.
-				 */
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
 			// Dont print this command in logs as this happens every few seconds
 			// Ideally, this should not be done via config-set.
 			print_command = false;
@@ -3937,56 +3852,10 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_node nodeid = atoll(context);
 			xdr_handle_failednodeprocessingdone(nodeid);
 		}
-		else if (0 == as_info_parameter_get(params, "xdr-namedpipe-path", context, &context_len)) {
-			g_config.xdr_cfg.xdr_digestpipe_path = cf_strdup(context);
-			cf_info(AS_INFO, "xdr-namedpipe-path set to : %s", context);
+		else {
+			as_xdr_set_config(params, db);
+			return 0;
 		}
-		else if (0 == as_info_parameter_get(params, "stop-writes-noxdr", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of stop-writes-noxdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_stop_writes_noxdr], context);
-				g_config.xdr_cfg.xdr_stop_writes_noxdr = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of stop-writes-noxdr from %s to %s", bool_val[g_config.xdr_cfg.xdr_stop_writes_noxdr], context);
-				g_config.xdr_cfg.xdr_stop_writes_noxdr = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "forward-xdr-writes", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of forward-xdr-writes from %s to %s", bool_val[g_config.xdr_cfg.xdr_forward_xdrwrites], context);
-				g_config.xdr_cfg.xdr_forward_xdrwrites = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of forward-xdr-writes from %s to %s", bool_val[g_config.xdr_cfg.xdr_forward_xdrwrites], context);
-				g_config.xdr_cfg.xdr_forward_xdrwrites = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "xdr-delete-shipping-enabled", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-delete-shipping-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_delete_shipping_enabled], context);
-				g_config.xdr_cfg.xdr_delete_shipping_enabled = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-delete-shipping-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_delete_shipping_enabled], context);
-				g_config.xdr_cfg.xdr_delete_shipping_enabled = false;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "xdr-nsup-deletes-enabled", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-nsup-deletes-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_nsup_deletes_enabled], context);
-				g_config.xdr_cfg.xdr_nsup_deletes_enabled = true;
-			} else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of xdr-nsup-deletes-enabled from %s to %s", bool_val[g_config.xdr_cfg.xdr_nsup_deletes_enabled], context);
-				g_config.xdr_cfg.xdr_nsup_deletes_enabled = false;
-			} else {
-				goto Error;
-			}
-		}
-		else
-			goto Error;
 	}
 	else
 		goto Error;
@@ -7190,7 +7059,7 @@ as_info_init()
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
 	as_info_set_command("undun", info_command_undun, PERM_SERVICE_CTRL);                      // Instruct this server to not ignore another node.
 	as_info_set_command("unsnub", info_command_unsnub, PERM_SERVICE_CTRL);                    // Stop ignoring heartbeats from the specified node(s).
-	as_info_set_command("xdr-min-lastshipinfo", info_command_get_min_config, PERM_NONE);      // Get the min XDR lastshipinfo.
+	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);               // Command to XDR module.
 
 	// SINDEX
 	as_info_set_dynamic("sindex", info_get_sindexes, false);
@@ -7221,6 +7090,8 @@ as_info_init()
 	as_info_set_command("sindex-stat", info_command_sindex_stat, PERM_NONE);
 	as_info_set_command("sindex-list", info_command_sindex_list, PERM_NONE);
 	as_info_set_dynamic("sindex-builder-list", as_sbld_list, false);                         // List info for all secondary index builder jobs.
+
+	as_xdr_info_init();
 
 	// Spin up the Info threads *after* all static and dynamic Info commands have been added
 	// so we can guarantee that the static and dynamic lists will never again be changed.

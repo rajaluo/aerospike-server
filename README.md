@@ -4,17 +4,25 @@ Welcome to the Aerospike Database Server source code tree!
 
 Aerospike is a distributed, scalable NoSQL database. It is architected with three key objectives:
 
-- To create a high-performance, scalable platform that would meet the needs of today’s web-scale applications
+- To create a high-performance, scalable platform that would meet the needs of today's web-scale applications
 - To provide the robustness and reliability (i.e., ACID) expected from traditional databases.
 - To provide operational efficiency (minimal manual involvement)
 
 For more information on Aerospike, please visit: [http://aerospike.com](http://aerospike.com)
 
+## Telemetry Anonymized Data Collection
+
+The Aerospike Community Edition collects anonymized server performance statistics.
+Please see the
+[Aerospike Telemetery web page](http://aerospike.com/aerospike-telemetry) for more
+information.  The full Telemetry data collection agent source code may be found in the
+["telemetry" submodule](https://github.com/aerospike/aerospike-telemetry-agent/blob/master/README.md).
+
 ## Build Prerequisites
 
 The Aerospike Database Server can be built and deployed on various
 current 64-bit GNU/Linux platform versions, such as the Red Hat family (e.g.,
-CentOS 6 or later), Debian 6 or later, and Ubuntu 10.04 or later.
+CentOS 6 or later), Debian 7 or later, and Ubuntu 10.04 or later.
 
 ### Dependencies
 
@@ -32,7 +40,7 @@ feature and its dependency, Google's S2 Geometry Library (both written in C++.)
 
 * The required CentOS 6/7 package to install is: `gcc-c++`.
 
-* The required Debian 6/7/8 and Ubuntu 10/12/14 package to install is: `g++`.
+* The required Debian 7/8 and Ubuntu 10/12/14 package to install is: `g++`.
 
 #### OpenSSL
 
@@ -42,7 +50,7 @@ OpenSSL 0.9.8b or later is required for cryptographic hash functions
 * The CentOS 6/7 OpenSSL packages to install are:  `openssl`,
 `openssl-devel`, `openssl-static`.
 
-* The Debian 6/7/8 and Ubuntu 10/12/14 OpenSSL packages to install are:
+* The Debian 7/8 and Ubuntu 10/12/14 OpenSSL packages to install are:
 `openssl` and `libssl-dev`.
 
 #### Lua 5.1
@@ -59,14 +67,14 @@ by the build environment.  In that case:
 	* The CentOS 6/7 Lua packages to install are:  `lua`,
 `lua-devel`, and `lua-static`.
 
-	* The Debian 6/7/8 and Ubuntu 10/12/14 Lua packages to install are:
+	* The Debian 7/8 and Ubuntu 10/12/14 Lua packages to install are:
 `lua5.1` and `liblua5.1-dev`.
 
 	* Build by passing the `USE_LUAJIT=0` option to `make`.
 
 ### Submodules
 
-The Aerospike Database Server build depends upon 8 submodules:
+The Aerospike Database Server build depends upon (up to) 9 submodules:
 
 | Submodule | Description |
 |---------- | ----------- |
@@ -78,6 +86,7 @@ The Aerospike Database Server build depends upon 8 submodules:
 | luajit    | The LuaJIT (Just-In-Time Compiler for Lua) |
 | mod-lua   | The Aerospike Lua Interface |
 | s2-geometry-library | The S2 Spherical Geometry Library |
+| telemetry | The Aerospike Telemetry Agent (Community Edition only) |
 
 After the initial cloning of the `aerospike-server` repo., the
 submodules must be fetched for the first time using the following

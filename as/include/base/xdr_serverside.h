@@ -1,7 +1,7 @@
 /*
  * xdr_serverside.h
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,18 +26,38 @@
 
 #pragma once
 
-#include "datamodel.h"
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "citrusleaf/cf_digest.h"
+
+#include "dynbuf.h"
+#include "util.h"
 #include "xdr_config.h"
 
-int as_xdr_supported();
+#include "base/datamodel.h"
+#include "base/transaction.h"
+
 int as_xdr_init();
+void xdr_conf_init(const char *config_file);
+void as_xdr_start();
 int as_xdr_shutdown();
+void xdr_sig_handler(int signum);
+
 void xdr_broadcast_lastshipinfo(uint64_t val[]);
-int xdr_create_named_pipe(xdr_config *xc);
-int xdr_send_nsinfo();
-int xdr_send_nodemap();
-int xdr_send_clust_state_change(cf_node node, int8_t change);
-uint64_t xdr_min_lastshipinfo();
 void xdr_clmap_update(int changetype, cf_node succession[], int listsize);
 void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, bool is_delete, uint16_t set_id);
+void as_xdr_handle_txn(as_transaction *txn);
+
+void as_xdr_info_init(void);
+int32_t as_xdr_info_port(void);
+int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
 void xdr_handle_failednodeprocessingdone(cf_node);
+void as_xdr_get_stats(char *name, cf_dyn_buf *db);
+void as_xdr_get_config(cf_dyn_buf *db);
+void as_xdr_set_config(char *params, cf_dyn_buf *db);
+int32_t as_xdr_set_config_ns(char *ns_name, char *params);
+
+bool is_xdr_delete_shipping_enabled();
+bool is_xdr_nsup_deletes_enabled();
+bool is_xdr_forwarding_enabled();
