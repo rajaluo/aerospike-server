@@ -4143,7 +4143,7 @@ write_local_dim_single_bin(as_transaction *tr, as_storage_rd *rd,
 
 #ifdef USE_JEM
 	// Set this thread's JEMalloc arena to one used by the current namespace for long-term storage.
-	int arena = as_namespace_get_jem_arena(ns->name);
+	int arena = ns->jem_arena;
 	cf_debug(AS_RW, "Setting JEMalloc arena #%d for long-term storage in namespace \"%s\"", arena, ns->name);
 	jem_set_arena(arena);
 #endif
@@ -4249,7 +4249,7 @@ write_local_dim(as_transaction *tr, const char *set_name, as_storage_rd *rd,
 
 #ifdef USE_JEM
 	// Set this thread's JEMalloc arena to one used by the current namespace for long-term storage.
-	int arena = as_namespace_get_jem_arena(ns->name);
+	int arena = ns->jem_arena;
 	cf_debug(AS_RW, "Setting JEMalloc arena #%d for long-term storage in namespace \"%s\"", arena, ns->name);
 	jem_set_arena(arena);
 #endif
