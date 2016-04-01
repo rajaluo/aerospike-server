@@ -132,6 +132,7 @@ static cf_queue *g_info_work_q = 0;
 
 #define INFO_OP_UPDATE 0
 #define INFO_OP_ACK 1
+#define INFO_OP_UPDATE_REQ 2
 
 msg_template info_mt[] = {
 	{ INFO_FIELD_OP,	M_FT_UINT32 },
@@ -5510,7 +5511,8 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 			return(-1);
 		}
 
-		msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_UPDATE);
+		// If we don't have the remote node's service address, request it via our update info. msg.
+		msg_set_uint32(m, INFO_FIELD_OP, (infop->service_addr ? INFO_OP_UPDATE : INFO_OP_UPDATE_REQ));
 		msg_set_uint32(m, INFO_FIELD_GENERATION, g_service_generation);
 		if (g_service_str) {
 			msg_set_str(m, INFO_FIELD_SERVICE_ADDRESS, g_service_str, MSG_SET_COPY);
@@ -5546,8 +5548,9 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 
 	switch (op) {
 	case INFO_OP_UPDATE:
+	case INFO_OP_UPDATE_REQ:
 		{
-			cf_debug(AS_INFO, " received service address from node %"PRIx64, node);
+			cf_debug(AS_INFO, " received service address from node %"PRIx64" ; op = %d", node, op);
 
 			pthread_mutex_t *vlock_info_hash;
 			info_node_info *infop_info_hash;
@@ -5633,6 +5636,11 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				infop_info_hash->alternate_addr = infop_info_history_hash->alternate_addr ? 
 												cf_strdup( infop_info_history_hash->alternate_addr ) : 0;
 				cf_assert(infop_info_hash->service_addr, AS_INFO, CF_CRITICAL, "malloc");
+
+				if (INFO_OP_UPDATE_REQ == op) {
+					cf_debug(AS_INFO, "Received request for info update from node %"PRIx64" ~~ setting node's info generation to 0!", node);
+					infop_info_hash->generation = 0;
+				}
 
 				pthread_mutex_unlock(vlock_info_hash);
 
