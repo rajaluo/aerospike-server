@@ -83,7 +83,6 @@
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 100
-#define EVICTION_HIST_NUM_BUCKETS 100000 // TODO - configurable?
 #define TTL_HIST_NUM_BUCKETS 100
 
 /*
@@ -1049,6 +1048,7 @@ struct as_namespace_s {
 	bool		cond_write;  // true if writing uniqueness is to be enforced by the KV store.
 	float		hwm_disk, hwm_memory;
 	float   	stop_writes_pct;
+	uint32_t	evict_hist_buckets;
 	uint32_t	evict_tenths_pct;
 	uint64_t	default_ttl;
 	uint64_t	max_ttl;

@@ -46,19 +46,19 @@ linear_hist_create(const char *name, uint32_t start, uint32_t max_offset, uint32
 	}
 
 	if (num_buckets == 0) {
-		cf_crash(AS_INFO, "linear_hist_create -  0 num_buckets");
+		cf_crash(AS_INFO, "linear_hist_create - 0 num_buckets");
 	}
 
 	linear_hist *h = cf_malloc(sizeof(linear_hist) + (sizeof(uint32_t) * num_buckets));
 
 	if (! h) {
-		cf_crash(AS_INFO, "linear_hist_create -  alloc failed");
+		cf_crash(AS_INFO, "linear_hist_create - alloc failed");
 	}
 
 	strcpy(h->name, name);
 
 	if (0 != pthread_mutex_init(&h->info_lock, NULL)) {
-		cf_crash(AS_INFO, "linear_hist_create -  mutex init failed");
+		cf_crash(AS_INFO, "linear_hist_create - mutex init failed");
 	}
 
 	h->info_snapshot[0] = 0;
@@ -77,6 +77,40 @@ linear_hist_destroy(linear_hist *h)
 {
 	pthread_mutex_destroy(&h->info_lock);
 	cf_free(h);
+}
+
+//------------------------------------------------
+// Clear, re-scale/re-size a linear histogram.
+//
+linear_hist*
+linear_hist_recreate(linear_hist *h, uint32_t start, uint32_t max_offset, uint32_t num_buckets)
+{
+	if (h->num_buckets == num_buckets) {
+		linear_hist_clear(h, start, max_offset);
+
+		return h;
+	}
+
+	if (num_buckets == 0) {
+		cf_warning(AS_INFO, "failed linear_hist_recreate - 0 num_buckets");
+
+		return h;
+	}
+
+	linear_hist *h_old = h;
+
+	h = cf_realloc(h, sizeof(linear_hist) + (sizeof(uint32_t) * num_buckets));
+
+	if (! h) {
+		cf_warning(AS_INFO, "failed linear_hist_recreate - realloc failed");
+
+		return h_old;
+	}
+
+	h->num_buckets = num_buckets;
+	linear_hist_clear(h, start, max_offset);
+
+	return h;
 }
 
 //------------------------------------------------
@@ -193,49 +227,6 @@ linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal, uint32
 }
 
 //------------------------------------------------
-// Save a linear histogram "snapshot".
-//
-// Must only be called from thread that inserts
-// histogram data.
-//
-void
-linear_hist_save_info(linear_hist *h)
-{
-	pthread_mutex_lock(&h->info_lock);
-
-	if (h->num_buckets > 100) {
-		// For now, just don't bother if there's too much to save.
-		sprintf(h->info_snapshot, "%u,%u ...", h->num_buckets, h->bucket_width);
-
-		pthread_mutex_unlock(&h->info_lock);
-		return;
-	}
-
-	// Write num_buckets, the bucket width, and the first bucket's count.
-	int i = 0;
-	int pos = snprintf(h->info_snapshot, INFO_SNAPSHOT_SIZE, "%u,%u,%u",
-			h->num_buckets, h->bucket_width, h->counts[i++]);
-
-	while (pos < INFO_SNAPSHOT_SIZE && i < h->num_buckets) {
-		pos += snprintf(h->info_snapshot + pos, INFO_SNAPSHOT_SIZE - pos,
-				",%u", h->counts[i++]);
-	}
-
-	pthread_mutex_unlock(&h->info_lock);
-}
-
-//------------------------------------------------
-// Append a linear histogram "snapshot" to db.
-//
-void
-linear_hist_get_info(linear_hist *h, cf_dyn_buf *db)
-{
-	pthread_mutex_lock(&h->info_lock);
-	cf_dyn_buf_append_string(db, h->info_snapshot);
-	pthread_mutex_unlock(&h->info_lock);
-}
-
-//------------------------------------------------
 // Dump a linear histogram to log.
 //
 // Must only be called from thread that inserts
@@ -307,4 +298,47 @@ linear_hist_dump(linear_hist *h)
 	if (pos > 0) {
 		cf_debug(AS_NSUP, "%s", buf);
 	}
+}
+
+//------------------------------------------------
+// Save a linear histogram "snapshot".
+//
+// Must only be called from thread that inserts
+// histogram data.
+//
+void
+linear_hist_save_info(linear_hist *h)
+{
+	pthread_mutex_lock(&h->info_lock);
+
+	if (h->num_buckets > 100) {
+		// For now, just don't bother if there's too much to save.
+		sprintf(h->info_snapshot, "%u,%u ...", h->num_buckets, h->bucket_width);
+
+		pthread_mutex_unlock(&h->info_lock);
+		return;
+	}
+
+	// Write num_buckets, the bucket width, and the first bucket's count.
+	int i = 0;
+	int pos = snprintf(h->info_snapshot, INFO_SNAPSHOT_SIZE, "%u,%u,%u",
+			h->num_buckets, h->bucket_width, h->counts[i++]);
+
+	while (pos < INFO_SNAPSHOT_SIZE && i < h->num_buckets) {
+		pos += snprintf(h->info_snapshot + pos, INFO_SNAPSHOT_SIZE - pos,
+				",%u", h->counts[i++]);
+	}
+
+	pthread_mutex_unlock(&h->info_lock);
+}
+
+//------------------------------------------------
+// Append a linear histogram "snapshot" to db.
+//
+void
+linear_hist_get_info(linear_hist *h, cf_dyn_buf *db)
+{
+	pthread_mutex_lock(&h->info_lock);
+	cf_dyn_buf_append_string(db, h->info_snapshot);
+	pthread_mutex_unlock(&h->info_lock);
 }

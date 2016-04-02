@@ -43,7 +43,6 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
-#include "hist.h"
 #include "linear_hist.h"
 #include "vmapx.h"
 
@@ -75,7 +74,7 @@ pthread_t g_nsup_thread;
 
 #define NUM_EVICT_THREADS 24
 #define EVAL_WRITE_STATE_FREQUENCY 1024
-#define COLD_START_HIST_NUM_BUCKETS 10000 // TODO - configurable?
+#define COLD_START_HIST_MIN_BUCKETS 100000 // histogram memory is transient
 
 
 //------------------------------------------------
@@ -328,6 +327,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	cf_info(AS_NSUP, "{%s} cold-start building eviction histogram ...", ns->name);
 
 	uint32_t ttl_range = (uint32_t)get_cold_start_ttl_range(ns, now);
+	uint32_t n_buckets = MAX(ns->evict_hist_buckets, COLD_START_HIST_MIN_BUCKETS);
 
 	uint32_t num_sets = cf_vmapx_count(ns->p_sets_vmap);
 	bool sets_not_evicting[AS_SET_MAX_COUNT + 1];
@@ -361,7 +361,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
 		prep_thread_info.index = n;
-		thread_hists[n] = linear_hist_create("thread-hist", now, ttl_range, COLD_START_HIST_NUM_BUCKETS);
+		thread_hists[n] = linear_hist_create("thread-hist", now, ttl_range, n_buckets);
 
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_info) != 0) {
 			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %d", ns->name, n);
@@ -398,7 +398,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 		return false;
 	}
 
-	cf_info(AS_NSUP, "{%s} cold-start found %u records eligible for eviction, evict ttl %u", ns->name, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
+	cf_info(AS_NSUP, "{%s} cold-start found %u records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
 
 	// Reduce all partitions to evict based on the thresholds.
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
@@ -1302,8 +1302,9 @@ thr_nsup(void *arg)
 			if (hwm_breached) {
 				// Eviction is necessary.
 
+				ns->evict_hist = linear_hist_recreate(ns->evict_hist, now, ttl_range, ns->evict_hist_buckets);
+
 				linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
-				linear_hist_clear(ns->evict_hist, now, ttl_range);
 				linear_hist_clear(ns->ttl_hist, now, ttl_range);
 
 				for (uint32_t j = 0; j < num_sets; j++) {

@@ -466,6 +466,7 @@ typedef enum {
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
+	CASE_NAMESPACE_EVICT_HIST_BUCKETS,
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
 	CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT,
@@ -865,6 +866,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
+		{ "evict-hist-buckets",				CASE_NAMESPACE_EVICT_HIST_BUCKETS },
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
 		{ "high-water-memory-pct",			CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT },
@@ -2538,6 +2540,9 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_DISALLOW_NULL_SETNAME:
 				ns->disallow_null_setname = cfg_bool(&line);
 				break;
+			case CASE_NAMESPACE_EVICT_HIST_BUCKETS:
+				ns->evict_hist_buckets = cfg_u32(&line, 100, 10000000);
+				break;
 			case CASE_NAMESPACE_EVICT_TENTHS_PCT:
 				ns->evict_tenths_pct = cfg_u32_no_checks(&line);
 				break;
@@ -3302,6 +3307,26 @@ as_config_post_process(as_config *c, const char *config_file)
 
 		cf_dyn_buf_free(&temp_service_db);
 		cf_free(service_str);
+	}
+
+	//--------------------------------------------
+	// Per-namespace config post-processing.
+	//
+
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+
+		char hist_name[HISTOGRAM_NAME_SIZE];
+		// Note - histograms' ranges MUST be set before use.
+
+		sprintf(hist_name, "%s object size histogram", ns->name);
+		ns->obj_size_hist = linear_hist_create(hist_name, 0, 0, OBJ_SIZE_HIST_NUM_BUCKETS);
+
+		sprintf(hist_name, "%s evict histogram", ns->name);
+		ns->evict_hist = linear_hist_create(hist_name, 0, 0, ns->evict_hist_buckets);
+
+		sprintf(hist_name, "%s ttl histogram", ns->name);
+		ns->ttl_hist = linear_hist_create(hist_name, 0, 0, TTL_HIST_NUM_BUCKETS);
 	}
 }
 
