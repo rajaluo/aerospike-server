@@ -65,6 +65,8 @@ extern uint64_t histogram_insert_data_point(histogram *h, uint64_t start_ns);
 extern void histogram_insert_raw(histogram *h, uint64_t value);
 
 
+// TODO - reinstate this elsewhere as needed.
+#if 0
 //==========================================================
 // Histogram with linear buckets, used by the eviction
 // algorithm, and for statistics such as the record storage
@@ -104,3 +106,4 @@ extern bool linear_histogram_get_thresholds_for_subtotal(linear_histogram *h,
 
 extern void linear_histogram_save_info(linear_histogram *h);
 extern void linear_histogram_get_info(linear_histogram *h, cf_dyn_buf *db);
+#endif // 0

@@ -9,12 +9,12 @@ ifeq ($(USE_EE),1)
 endif
 
 HEADERS += arenax.h cf_str.h dynbuf.h
-HEADERS += enhanced_alloc.h fault.h hist.h hist_track.h mem_count.h
+HEADERS += enhanced_alloc.h fault.h hist.h hist_track.h linear_hist.h mem_count.h
 HEADERS += meminfo.h msg.h olock.h rchash.h socket.h util.h
 HEADERS += vmapx.h
 
 SOURCES += alloc.c arenax.c cf_str.c daemon.c dynbuf.c fault.c
-SOURCES += hist.c hist_track.c id.c meminfo.c msg.c olock.c
+SOURCES += hist.c hist_track.c id.c linear_hist.c meminfo.c msg.c olock.c
 SOURCES += socket.c vmapx.c
 ifneq ($(USE_WARM),1)
   SOURCES += arenax_ce.c

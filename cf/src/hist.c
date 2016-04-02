@@ -303,6 +303,7 @@ histogram_insert_raw(histogram *h, uint64_t value)
 }
 
 
+#if 0
 //==========================================================
 // Histogram with linear buckets.
 //
@@ -580,3 +581,4 @@ linear_histogram_get_info(linear_histogram *h, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, h->info_snapshot);
 	pthread_mutex_unlock(&h->info_lock);
 }
+#endif //0

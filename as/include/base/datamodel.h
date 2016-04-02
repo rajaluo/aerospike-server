@@ -42,6 +42,7 @@
 #include "arenax.h"
 #include "dynbuf.h"
 #include "hist.h"
+#include "linear_hist.h"
 #include "util.h"
 #include "vmapx.h"
 
@@ -82,7 +83,7 @@
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 100
-#define EVICTION_HIST_NUM_BUCKETS 100
+#define TTL_HIST_NUM_BUCKETS 100
 
 /*
  * Subrecord Digest Scramble Position
@@ -1047,6 +1048,7 @@ struct as_namespace_s {
 	bool		cond_write;  // true if writing uniqueness is to be enforced by the KV store.
 	float		hwm_disk, hwm_memory;
 	float   	stop_writes_pct;
+	uint32_t	evict_hist_buckets;
 	uint32_t	evict_tenths_pct;
 	uint64_t	default_ttl;
 	uint64_t	max_ttl;
@@ -1133,15 +1135,14 @@ struct as_namespace_s {
 
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)
-	linear_histogram 	*obj_size_hist;
-	linear_histogram 	*set_obj_size_hists[AS_SET_MAX_COUNT + 1];
+	linear_hist 		*obj_size_hist;
+	linear_hist 		*set_obj_size_hists[AS_SET_MAX_COUNT + 1];
 	cf_atomic32			obj_size_hist_max;
 
 	// Histograms used for general eviction and expiration.
-	linear_histogram 	*evict_hist;
-	linear_histogram 	*evict_coarse_hist;
-	linear_histogram 	*ttl_hist;
-	linear_histogram 	*set_ttl_hists[AS_SET_MAX_COUNT + 1]; // only for info
+	linear_hist 		*evict_hist;
+	linear_hist 		*ttl_hist;
+	linear_hist 		*set_ttl_hists[AS_SET_MAX_COUNT + 1]; // only for info
 
 	as_partition partitions[AS_PARTITIONS];
 

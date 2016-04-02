@@ -39,6 +39,7 @@
 #include "fault.h"
 #include "hist.h"
 #include "jem.h"
+#include "linear_hist.h"
 #include "meminfo.h"
 #include "vmapx.h"
 
@@ -118,6 +119,7 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->cold_start_evict_ttl = 0xFFFFffff; // unless this is specified via config file, use evict void-time saved in device header
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
 	ns->data_in_index = false;
+	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
 	ns->hwm_disk = 0.5; // default high water mark for eviction is 50%
 	ns->hwm_memory = 0.6; // default high water mark for eviction is 60%
@@ -179,21 +181,6 @@ as_namespace_create(char *name, uint16_t replication_factor)
 
 	g_config.namespaces[g_config.n_namespaces] = ns;
 	g_config.n_namespaces++;
-
-	char hist_name[HISTOGRAM_NAME_SIZE];
-	// Note - histograms' ranges MUST be set before use.
-
-	sprintf(hist_name, "%s object size histogram", name);
-	ns->obj_size_hist = linear_histogram_create(hist_name, 0, 0, OBJ_SIZE_HIST_NUM_BUCKETS);
-
-	sprintf(hist_name, "%s evict histogram", name);
-	ns->evict_hist = linear_histogram_create(hist_name, 0, 0, EVICTION_HIST_NUM_BUCKETS);
-
-	sprintf(hist_name, "%s evict coarse histogram", name);
-	ns->evict_coarse_hist = linear_histogram_create(hist_name, 0, 0, EVICTION_HIST_NUM_BUCKETS);
-
-	sprintf(hist_name, "%s ttl histogram", name);
-	ns->ttl_hist = linear_histogram_create(hist_name, 0, 0, EVICTION_HIST_NUM_BUCKETS);
 
 	return ns;
 }
@@ -830,20 +817,12 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 	if (set_name == NULL || set_name[0] == 0) {
 		if (strcmp(hist_name, "ttl") == 0) {
 			cf_dyn_buf_append_string(db, "ttl=");
-			linear_histogram_get_info(ns->ttl_hist, db);
-			cf_dyn_buf_append_char(db, ';');
-		} else if (strcmp(hist_name, "evict") == 0) {
-			cf_dyn_buf_append_string(db, "evict=");
-			linear_histogram_get_info(ns->evict_hist, db);
-			cf_dyn_buf_append_char(db, ';');
-		} else if (strcmp(hist_name, "evictc") == 0) {
-			cf_dyn_buf_append_string(db, "evictc=");
-			linear_histogram_get_info(ns->evict_coarse_hist, db);
+			linear_hist_get_info(ns->ttl_hist, db);
 			cf_dyn_buf_append_char(db, ';');
 		} else if (strcmp(hist_name, "objsz") == 0) {
 			if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 				cf_dyn_buf_append_string(db, "objsz=");
-				linear_histogram_get_info(ns->obj_size_hist, db);
+				linear_hist_get_info(ns->obj_size_hist, db);
 				cf_dyn_buf_append_char(db, ';');
 			} else {
 				cf_dyn_buf_append_string(db, "hist-not-applicable");
@@ -857,7 +836,7 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 			if (strcmp(hist_name, "ttl") == 0) {
 				if (ns->set_ttl_hists[set_id]) {
 					cf_dyn_buf_append_string(db, "ttl=");
-					linear_histogram_get_info(ns->set_ttl_hists[set_id], db);
+					linear_hist_get_info(ns->set_ttl_hists[set_id], db);
 					cf_dyn_buf_append_char(db, ';');
 				} else {
 					cf_dyn_buf_append_string(db, "hist-unavailable");
@@ -866,7 +845,7 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 				if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 					if (ns->set_obj_size_hists[set_id]) {
 						cf_dyn_buf_append_string(db, "objsz=");
-						linear_histogram_get_info(ns->set_obj_size_hists[set_id], db);
+						linear_hist_get_info(ns->set_obj_size_hists[set_id], db);
 						cf_dyn_buf_append_char(db, ';');
 					} else {
 						cf_dyn_buf_append_string(db, "hist-unavailable");
