@@ -2329,6 +2329,9 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";evict-tenths-pct=");
 	cf_dyn_buf_append_uint32(db, ns->evict_tenths_pct);
 
+	cf_dyn_buf_append_string(db, ";evict-hist-buckets=");
+	cf_dyn_buf_append_uint32(db, ns->evict_hist_buckets);
+
 	cf_dyn_buf_append_string(db, ";stop-writes-pct=");
 	cf_dyn_buf_append_int(db, ns->stop_writes_pct * 100);
 
@@ -3449,6 +3452,13 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "evict-tenths-pct", context, &context_len)) {
 			cf_info(AS_INFO, "Changing value of evict-tenths-pct memory of ns %s from %d to %d ", ns->name, ns->evict_tenths_pct, atoi(context));
 			ns->evict_tenths_pct = atoi(context);
+		}
+		else if (0 == as_info_parameter_get(params, "evict-hist-buckets", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || val < 100 || val > 10000000) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of evict-hist-buckets of ns %s from %u to %d ", ns->name, ns->evict_hist_buckets, val);
+			ns->evict_hist_buckets = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "stop-writes-pct", context, &context_len)) {
 			cf_info(AS_INFO, "Changing value of stop-writes-pct memory of ns %s from %1.3f to %1.3f ", ns->name, ns->stop_writes_pct, atof(context) / (float)100);

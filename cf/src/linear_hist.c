@@ -20,6 +20,11 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+
+//==========================================================
+// Includes.
+//
+
 #include "linear_hist.h"
 
 #include <pthread.h>
@@ -34,22 +39,52 @@
 #include "fault.h"
 
 
+//==========================================================
+// Private class data.
+//
+
+#define LINEAR_HIST_NAME_SIZE 512
+#define INFO_SNAPSHOT_SIZE 2048
+
+struct linear_hist_s {
+	char name[LINEAR_HIST_NAME_SIZE];
+
+	pthread_mutex_t info_lock;
+	char info_snapshot[INFO_SNAPSHOT_SIZE];
+
+	uint32_t num_buckets;
+	uint32_t *counts;
+
+	uint32_t start;
+	uint32_t bucket_width;
+};
+
+
+//==========================================================
+// Public API.
+//
 
 //------------------------------------------------
 // Create a linear histogram.
 //
 linear_hist*
-linear_hist_create(const char *name, uint32_t start, uint32_t max_offset, uint32_t num_buckets)
+linear_hist_create(const char *name, uint32_t start, uint32_t max_offset,
+		uint32_t num_buckets)
 {
 	if (! (name && strlen(name) < LINEAR_HIST_NAME_SIZE)) {
-		cf_crash(AS_INFO, "linear_hist_create - bad name %s", name ? name : "<null>");
+		cf_crash(AS_INFO, "linear_hist_create - bad name %s",
+				name ? name : "<null>");
+	}
+
+	if (start + max_offset < start) {
+		cf_crash(AS_INFO, "linear_hist_create - max_offset overflow");
 	}
 
 	if (num_buckets == 0) {
 		cf_crash(AS_INFO, "linear_hist_create - 0 num_buckets");
 	}
 
-	linear_hist *h = cf_malloc(sizeof(linear_hist) + (sizeof(uint32_t) * num_buckets));
+	linear_hist *h = cf_malloc(sizeof(linear_hist));
 
 	if (! h) {
 		cf_crash(AS_INFO, "linear_hist_create - alloc failed");
@@ -64,6 +99,11 @@ linear_hist_create(const char *name, uint32_t start, uint32_t max_offset, uint32
 	h->info_snapshot[0] = 0;
 
 	h->num_buckets = num_buckets;
+
+	if (! (h->counts = cf_malloc(sizeof(uint32_t) * num_buckets))) {
+		cf_crash(AS_INFO, "linear_hist_create - alloc counts failed");
+	}
+
 	linear_hist_clear(h, start, max_offset);
 
 	return h;
@@ -82,35 +122,26 @@ linear_hist_destroy(linear_hist *h)
 //------------------------------------------------
 // Clear, re-scale/re-size a linear histogram.
 //
-linear_hist*
-linear_hist_recreate(linear_hist *h, uint32_t start, uint32_t max_offset, uint32_t num_buckets)
+void
+linear_hist_reset(linear_hist *h, uint32_t start, uint32_t max_offset,
+		uint32_t num_buckets)
 {
 	if (h->num_buckets == num_buckets) {
 		linear_hist_clear(h, start, max_offset);
-
-		return h;
+		return;
 	}
 
-	if (num_buckets == 0) {
-		cf_warning(AS_INFO, "failed linear_hist_recreate - 0 num_buckets");
+	uint32_t *counts = cf_realloc(h->counts, sizeof(uint32_t) * num_buckets);
 
-		return h;
-	}
-
-	linear_hist *h_old = h;
-
-	h = cf_realloc(h, sizeof(linear_hist) + (sizeof(uint32_t) * num_buckets));
-
-	if (! h) {
-		cf_warning(AS_INFO, "failed linear_hist_recreate - realloc failed");
-
-		return h_old;
+	if (! counts) {
+		cf_warning(AS_INFO, "failed linear_hist_reset - realloc failed");
+		linear_hist_clear(h, start, max_offset);
+		return;
 	}
 
 	h->num_buckets = num_buckets;
+	h->counts = counts;
 	linear_hist_clear(h, start, max_offset);
-
-	return h;
 }
 
 //------------------------------------------------
@@ -189,9 +220,11 @@ linear_hist_insert_data_point(linear_hist *h, uint32_t point)
 // bucket).
 //
 uint32_t
-linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct, uint32_t *p_low)
+linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct,
+		uint32_t *p_low)
 {
-	return linear_hist_get_threshold_for_subtotal(h, (linear_hist_get_total(h) * tenths_pct) / 1000, p_low);
+	return linear_hist_get_threshold_for_subtotal(h,
+			(linear_hist_get_total(h) * tenths_pct) / 1000, p_low);
 }
 
 //------------------------------------------------
@@ -201,7 +234,8 @@ linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct, uint
 // bucket).
 //
 uint32_t
-linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal, uint32_t *p_low)
+linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal,
+		uint32_t *p_low)
 {
 	uint32_t count = 0;
 	uint32_t i;
@@ -228,9 +262,6 @@ linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal, uint32
 
 //------------------------------------------------
 // Dump a linear histogram to log.
-//
-// Must only be called from thread that inserts
-// histogram data.
 //
 // Note - DO NOT change the log output format in
 // this method - public documentation assumes this
@@ -302,9 +333,6 @@ linear_hist_dump(linear_hist *h)
 
 //------------------------------------------------
 // Save a linear histogram "snapshot".
-//
-// Must only be called from thread that inserts
-// histogram data.
 //
 void
 linear_hist_save_info(linear_hist *h)

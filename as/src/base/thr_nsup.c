@@ -1302,9 +1302,8 @@ thr_nsup(void *arg)
 			if (hwm_breached) {
 				// Eviction is necessary.
 
-				ns->evict_hist = linear_hist_recreate(ns->evict_hist, now, ttl_range, ns->evict_hist_buckets);
-
 				linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
+				linear_hist_reset(ns->evict_hist, now, ttl_range, ns->evict_hist_buckets);
 				linear_hist_clear(ns->ttl_hist, now, ttl_range);
 
 				for (uint32_t j = 0; j < num_sets; j++) {
@@ -1335,12 +1334,12 @@ thr_nsup(void *arg)
 
 				// Determine general eviction threshold.
 				if (get_threshold(ns, &cb_info2.evict_void_time)) {
-					// Save the eviction depth in the device header(s) so it can be
-					// used to speed up cold start, etc.
+					// Save the eviction depth in the device header(s) so it can
+					// be used to speed up cold start, etc.
 					as_storage_save_evict_void_time(ns, cb_info2.evict_void_time);
 
-					// Reduce master partitions, deleting records up to threshold.
-					// (This automatically deletes expired records.)
+					// Reduce master partitions, deleting records up to
+					// threshold. (This automatically deletes expired records.)
 					reduce_master_partitions(ns, evict_reduce_cb, &cb_info2, &n_general_waits, "evict");
 
 					evict_ttl = cb_info2.evict_void_time - now;
@@ -1358,7 +1357,8 @@ thr_nsup(void *arg)
 					n_expired_records = cb_info2.num_evicted;
 				}
 
-				linear_hist_save_info(ns->evict_hist);	// TODO - can we do this better?
+				// For now there's no get_info() call for evict_hist.
+				//linear_hist_save_info(ns->evict_hist);
 			}
 			else if (! do_set_deletion) {
 				// Eviction is not necessary, only expiration. (But if set
