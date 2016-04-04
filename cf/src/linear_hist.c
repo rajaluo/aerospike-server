@@ -158,7 +158,7 @@ linear_hist_clear(linear_hist *h, uint32_t start, uint32_t max_offset)
 		h->bucket_width = 1;
 	}
 
-	memset((void *)&h->counts, 0, sizeof(uint32_t) * h->num_buckets);
+	memset((void *)h->counts, 0, sizeof(uint32_t) * h->num_buckets);
 }
 
 //------------------------------------------------
