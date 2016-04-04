@@ -163,8 +163,9 @@ deployment or software development.
 The preferred method for running Aerospike in a production environment
 is to build and install the Aerospike package appropriate for the target
 Linux distribution (i.e., an `".rpm"`, `".deb"`, or `".tgz"` file), and
-then to control the state of the Aerospike daemon via the daemon init
-script commands, e.g., `service aerospike start`.
+then to control the state of the Aerospike daemon, either via the SysV
+daemon init script commands, e.g., `service aerospike start`, or else
+via `systemctl` on `systemd`-based systems, e.g., `systemctl start aerospike`.
 
 A convenient way to run Aerospike in a development environment is to use
 the following commands from within the top-level directory of the source
@@ -186,6 +187,7 @@ To launch the server with `as/etc/aerospike_dev.conf` as the config:
 
 or, equivalently:
 
+	$ ./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf &
 	$ target/Linux-x86_64/bin/asd --config-file as/etc/aerospike_dev.conf
 
 To halt the server:
@@ -194,6 +196,7 @@ To halt the server:
 
 or, equivalently:
 
+	$ PID=`pgrep telemetry.py | grep -v grep`; if [ -n "$PID" ]; then kill $PID; fi
 	$ kill `cat run/asd.pid` ; rm run/asd.pid
 
 Please refer to the full documentation on the Aerospike web site,
