@@ -266,7 +266,7 @@ const as_stream_hooks ostream_hooks = {
 static int
 as_aggr_aerospike_log(const as_aerospike * a, const char * file, const int line, const int lvl, const char * msg)
 {
-	cf_fault_event(AS_AGGR, lvl, file, NULL, line, (char *) msg);
+	cf_fault_event(AS_AGGR, lvl, file, line, (char *) msg);
 	return 0;
 }
 

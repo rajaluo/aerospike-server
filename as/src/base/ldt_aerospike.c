@@ -835,7 +835,7 @@ ldt_aerospike_log(const as_aerospike * a, const char * file,
 	// Logging for Lua Files (UDFs) should be labeled as "UDF", not "LDT".
 	// If we want to distinguish between LDT and general UDF calls, then we
 	// need to create a separate context for LDT.
-	cf_fault_event(AS_UDF, lvl, file, NULL, line, "%s", (char *) msg);
+	cf_fault_event(AS_UDF, lvl, file, line, "%s", (char *) msg);
 	return 0;
 }
 

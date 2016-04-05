@@ -184,13 +184,12 @@ extern cf_fault_severity cf_fault_filter[];
 // cf_fault_event() is "regular" logging
 extern void cf_fault_event(const cf_fault_context,
 		const cf_fault_severity severity, const char *file_name,
-		const char *function_name, const int line, char *msg, ...);
+		const int line, char *msg, ...);
 
 // cf_fault_event2() is for advanced logging, where we want to print some
 // binary object (often a digest).
 extern void cf_fault_event2(const cf_fault_context,
-		const cf_fault_severity severity, const char *file_name,
-		const char *function_name, const int line,
+		const cf_fault_severity severity, const char *file_name, const int line,
 		void * mem_ptr, size_t len, cf_display_type dt, char *msg, ...);
 
 extern void cf_fault_event_nostack(const cf_fault_context,
@@ -207,7 +206,7 @@ extern void cf_fault_event_nostack(const cf_fault_context,
 #define cf_assert(a, context, severity, __msg, ...) \
 		((a) || severity > cf_fault_filter[context] ? \
 				(void)0 : \
-				cf_fault_event((context), (severity), __FILENAME__, __func__, __LINE__, (__msg), ##__VA_ARGS__))
+				cf_fault_event((context), (severity), __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
 
 // The "no stack" versions.
 #define cf_assert_nostack(a, context, severity, __msg, ...) \
@@ -239,15 +238,13 @@ do { \
 } while (0);
 
 // The "regular" versions.
-// Note that we use the function name ONLY in crash(), debug() and detail(),
-// as this information is relevant mostly to the Aerospike software engineers.
 #define __SEVLOG(severity, context, __msg, ...) \
 		(severity > cf_fault_filter[context] ? \
 				(void)0 : \
-				cf_fault_event((context), severity, __FILENAME__, NULL, __LINE__, (__msg), ##__VA_ARGS__))
+				cf_fault_event((context), severity, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
 
 #define cf_crash(context, __msg, ...) \
-		cf_fault_event((context), CF_CRITICAL, __FILENAME__, NULL, __LINE__, (__msg), ##__VA_ARGS__)
+		cf_fault_event((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__)
 
 #define cf_warning(...) __SEVLOG(CF_WARNING, ##__VA_ARGS__)
 #define cf_info(...) __SEVLOG(CF_INFO, ##__VA_ARGS__)
@@ -263,10 +260,10 @@ do { \
 #define __BINARY_SEVLOG(severity, context, ptr, len, DT, __msg, ...) \
 		(severity > cf_fault_filter[context] ? \
 				(void)0 : \
-				cf_fault_event2((context), severity, __FILENAME__, __func__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__))
+				cf_fault_event2((context), severity, __FILENAME__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__))
 
 #define cf_crash_binary(context, ptr, len, DT, __msg, ...) \
-		cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __func__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__)
+		cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__)
 
 #define cf_warning_binary(...) __BINARY_SEVLOG(CF_WARNING, ##__VA_ARGS__)
 #define cf_info_binary(...) __BINARY_SEVLOG(CF_INFO, ##__VA_ARGS__)
@@ -274,15 +271,13 @@ do { \
 #define cf_detail_binary(...) __BINARY_SEVLOG(CF_DETAIL, ##__VA_ARGS__)
 
 // This set of log calls specifically handles DIGEST values.
-// Note that we use the function name ONLY in crash(), debug() and detail(),
-// as this information is relevant mostly to the Aerospike software engineers.
 #define __DIGEST_SEVLOG(severity, context, ptr,__msg, ...) \
 		(severity > cf_fault_filter[context] ? \
 				(void)0 : \
-				cf_fault_event2((context), severity, __FILENAME__, __func__, __LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__))
+				cf_fault_event2((context), severity, __FILENAME__, __LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__))
 
 #define cf_crash_digest(context, ptr,__msg, ...) \
-		cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __func__, __LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__)
+		cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__)
 
 #define cf_warning_digest(...)  __DIGEST_SEVLOG(CF_WARNING, ##__VA_ARGS__)
 #define cf_info_digest(...)  __DIGEST_SEVLOG(CF_INFO, ##__VA_ARGS__)

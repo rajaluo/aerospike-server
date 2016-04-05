@@ -432,8 +432,7 @@ cf_fault_is_using_local_time()
  * Respond to a fault */
 void
 cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
-		const char *file_name, const char * function_name, const int line,
-		char *msg, ...)
+		const char *file_name, const int line, char *msg, ...)
 {
 	va_list argp;
 	char mbuf[1024];
@@ -469,13 +468,9 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
 		pos = limit;
 	}
 
-	/* Set the location: FileName, Optional FunctionName, and Line.  It is
-	 * expected that we'll use FunctionName ONLY for debug() and detail(),
-	 * hence we must treat function_name as optional.  */
-	const char * func_name = ( function_name == NULL ) ? "" : function_name;
+	/* Set the location: filename and line number */
 	if (file_name) {
-		pos += snprintf(mbuf + pos, limit - pos, "(%s:%s:%d) ",
-				file_name, func_name, line);
+		pos += snprintf(mbuf + pos, limit - pos, "(%s:%d) ", file_name, line);
 	}
 
 	if (pos > limit) {
@@ -687,7 +682,6 @@ int generate_column_bits_string(void *mem_ptr, uint len, char* output)
  * (*) scope: The module family (e.g. AS_RW, AS_UDF...)
  * (*) severify: The scope severity (e.g. INFO, DEBUG, DETAIL)
  * (*) file_name: Ptr to the FILE generating the call
- * (*) function_name: Ptr to the function generating the call
  * (*) line: The function (really, the FILE) line number of the source call
  * (*) mem_ptr: Ptr to memory location of binary array (or NULL)
  * (*) len: Length of the binary string
@@ -698,8 +692,8 @@ int generate_column_bits_string(void *mem_ptr, uint len, char* output)
  * NOTE: We will eventually merge this function with the original cf_fault_event()
  **/
 void
-cf_fault_event2(const cf_fault_context context, const cf_fault_severity severity,
-		const char *file_name, const char *function_name, const int line,
+cf_fault_event2(const cf_fault_context context,
+		const cf_fault_severity severity, const char *file_name, const int line,
 		void * mem_ptr, size_t len, cf_display_type dt, char *msg, ...)
 {
 	va_list argp;
@@ -785,13 +779,9 @@ cf_fault_event2(const cf_fault_context context, const cf_fault_severity severity
 		pos = limit;
 	}
 
-	/* Set the location: FileName, Optional FunctionName, and Line.  It is
-	 * expected that we'll use FunctionName ONLY for debug() and detail(),
-	 * hence we must treat function_name as optional.  */
-	const char * func_name = ( function_name == NULL ) ? "" : function_name;
+	/* Set the location: filename and line number */
 	if (file_name) {
-		pos += snprintf(mbuf + pos, limit - pos, "(%s:%s:%d) ",
-				file_name, func_name, line);
+		pos += snprintf(mbuf + pos, limit - pos, "(%s:%d) ", file_name, line);
 	}
 
 	// Check for overflow (see above).
