@@ -717,6 +717,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";");
 	as_query_stat(name, db);
 
+	cf_dyn_buf_append_string(db, ";");
 	as_xdr_get_stats(name, db);
 
 	return(0);
@@ -2603,12 +2604,6 @@ info_security_config_get(cf_dyn_buf *db)
 }
 
 void
-info_xdr_config_get(cf_dyn_buf *db)
-{
-	as_xdr_get_config(db);
-}
-
-void
 info_cluster_config_get(cf_dyn_buf *db)
 {
 	cf_dyn_buf_append_string(db, "mode=");
@@ -2660,7 +2655,7 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 				return(0);
 			}
 			else if (strcmp(context, "xdr") == 0) {
-				info_xdr_config_get(db);
+				as_xdr_get_config(db);
 				return(0);
 			}
 			else {
@@ -2683,7 +2678,7 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, ';');
 	info_security_config_get(db);
 	cf_dyn_buf_append_char(db, ';');
-	info_xdr_config_get(db);
+	as_xdr_get_config(db);
 
 	// Add the current histogram tracking settings.
 	cf_hist_track_get_settings(g_config.rt_hist, db);
