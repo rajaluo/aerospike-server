@@ -1009,6 +1009,35 @@ as_partition_reserve_migrate(as_namespace *ns, as_partition_id pid, as_partition
 	}
 }
 
+// Obtain a partition reservation for XDR reads. Succeeds, if we are sync
+// or zombie for the partition.
+int
+as_partition_reserve_xdr_read(as_namespace *ns, as_partition_id pid,
+		as_partition_reservation *rsv)
+{
+	as_partition *p = &ns->partitions[pid];
+
+	if (pthread_mutex_lock(&p->lock) != 0) {
+		cf_crash(AS_PARTITION, "pthread_mutex_lock() failed");
+	}
+
+	int res;
+
+	if (p->state == AS_PARTITION_STATE_SYNC || p->state == AS_PARTITION_STATE_ZOMBIE) {
+		as_partition_reserve_lockfree(ns, pid, rsv);
+		res = 0;
+	}
+	else {
+		res = -1;
+	}
+
+	if (pthread_mutex_unlock(&p->lock) != 0) {
+		cf_crash(AS_PARTITION, "pthread_mutex_unlock() failed");
+	}
+
+	return res;
+}
+
 
 // Obtain a write reservation on a partition, or get the address of a
 // node who can.
