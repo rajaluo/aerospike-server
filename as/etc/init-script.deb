@@ -145,14 +145,6 @@ case "$1" in
 				log_end_msg 1
 				;;
 		esac
-		;;
-	stop)
-		log_daemon_msg "Halt aerospike: " "asd"
-		if start-stop-daemon --stop --quiet --name $ASDN  ; then
-			log_end_msg 0
-		else
-			log_end_msg 1
-		fi
 
 		do_telemetry_stop
 		;;
