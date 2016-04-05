@@ -54,69 +54,65 @@
 /* MUST BE KEPT IN SYNC WITH FAULT.H */
 
 char *cf_fault_context_strings[] = {
-	"cf:misc",	   // 00
-	"cf:alloc",    // 01
-	"cf:hash",     // 02
-	"cf:rchash",   // 03
-	"cf:shash",    // 04
-	"cf:queue",    // 05
-	"cf:msg",      // 06
-	"cf:redblack", // 07
-	"cf:socket",   // 08
-	"cf:timer",    // 09
-	"cf:ll",       // 10
-	"cf:arenah",   // 11
-	"cf:arena",    // 12
-	"config",      // 13
-	"namespace",   // 14
-	"as",          // 15
-	"bin",         // 16
-	"record",      // 17
-	"proto",       // 18
-	"particle",    // 19
-	"demarshal",   // 20
-	"write",       // 21
-	"rw",          // 22
-	"tsvc",        // 23
-	"test",        // 24
-	"nsup",        // 25
-	"proxy",       // 26
-	"hb",          // 27
-	"fabric",      // 28
-	"partition",   // 29
-	"paxos",       // 30
-	"migrate",     // 31
-	"info",        // 32
-	"info-port",   // 33
-	"storage",     // 34
-	"drv_mem",     // 35
-	"drv_fs",      // 36
-	"drv_files",   // 37
-	"drv_ssd",     // 38
-	"drv_kv",      // 39
-	"scan",        // 40
-	"index",       // 41
-	"batch",       // 42
-	"trial",       // 43
-	"xdr",         // 44
-	"cf:rbuffer",  // 45
-	"cf:arenax",   // 46
-	"compression", // 47
-	"sindex",      // 48
-	"udf",         // 49
-	"query",       // 50
-	"smd",         // 51
-	"mon",         // 52
-	"ldt",         // 53
-	"cf:jem",      // 54
-	"security",    // 55
-	"aggr",        // 56
-	"job",         // 57
-	"geo",         // 58
-	NULL           // 59
+		"cf:misc",
+
+		"cf:alloc",
+		"cf:arenax",
+		"cf:jem",
+		"cf:msg",
+		"cf:rbuffer",
+		"cf:socket",
+
+		"aggr",
+		"as",
+		"batch",
+		"bin",
+		"config",
+		"compression",
+		"demarshal",
+		"drv_kv",
+		"drv_ssd",
+		"fabric",
+		"geo",
+		"hb",
+		"index",
+		"info",
+		"info-port",
+		"job",
+		"ldt",
+		"migrate",
+		"mon",
+		"namespace",
+		"nsup",
+		"particle",
+		"partition",
+		"paxos",
+		"proto",
+		"proxy",
+		"query",
+		"record",
+		"rw",
+		"scan",
+		"security",
+		"sindex",
+		"smd",
+		"storage",
+		"tsvc",
+		"udf",
+		"xdr"
 };
 
-static const char *cf_fault_severity_strings[] = { "CRITICAL", "WARNING", "INFO", "DEBUG", "DETAIL", NULL };
+COMPILER_ASSERT(sizeof(cf_fault_context_strings) / sizeof(char*) == CF_FAULT_CONTEXT_UNDEF);
+
+static const char *cf_fault_severity_strings[] = {
+		"CRITICAL",
+		"WARNING",
+		"INFO",
+		"DEBUG",
+		"DETAIL"
+};
+
+COMPILER_ASSERT(sizeof(cf_fault_severity_strings) / sizeof(const char*) == CF_FAULT_SEVERITY_UNDEF);
 
 cf_fault_sink cf_fault_sinks[CF_FAULT_SINKS_MAX];
 cf_fault_severity cf_fault_filter[CF_FAULT_CONTEXT_UNDEF];

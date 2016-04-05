@@ -29,6 +29,21 @@
 #include <stdlib.h>
 #include "dynbuf.h"
 
+
+// Use COMPILER_ASSERT() for compile-time verification.
+//
+// Usage does not add any compiled code, or cost anything at runtime. When the
+// evaluated expression is false, it causes a compile error which will draw
+// attention to the relevant line.
+//
+// e.g.
+// COMPILER_ASSERT(sizeof(my_int_array) / sizeof(int) == MY_INT_ARRAY_SIZE);
+//
+#define CGLUE(a, b) a##b
+#define CVERIFY(expr, line) typedef char CGLUE(compiler_assert_failed_on_line_, line)[(expr) ? 1 : -1]
+#define COMPILER_ASSERT(expr) CVERIFY(expr, __LINE__)
+
+
 /* SYNOPSIS
  * Fault scoping
  *
@@ -45,66 +60,54 @@
  * NB: if you add or remove entries from this enum, you must also change
  * the corresponding strings structure in fault.c */
 typedef enum {
-	CF_MISC = 0,
-	CF_ALLOC = 1,
-	CF_HASH = 2,
-	CF_RCHASH = 3,
-	CF_SHASH = 4,
-	CF_QUEUE = 5,
-	CF_MSG = 6,
-	CF_RB = 7,
-	CF_SOCKET = 8,
-	CF_TIMER = 9,
-	CF_LL = 10,
-	CF_ARENAH = 11,
-	CF_ARENA = 12,
-	AS_CFG = 13,
-	AS_NAMESPACE = 14,
-	AS_AS = 15,
-	AS_BIN = 16,
-	AS_RECORD = 17,
-	AS_PROTO = 18,
-	AS_PARTICLE = 19,
-	AS_DEMARSHAL = 20,
-	AS_WRITE = 21,
-	AS_RW = 22,
-	AS_TSVC = 23,
-	AS_TEST = 24,
-	AS_NSUP = 25,
-	AS_PROXY = 26,
-	AS_HB = 27,
-	AS_FABRIC = 28,
-	AS_PARTITION = 29,
-	AS_PAXOS = 30,
-	AS_MIGRATE = 31,
-	AS_INFO = 32,
-	AS_INFO_PORT = 33,
-	AS_STORAGE = 34,
-	AS_DRV_MEM = 35,
-	AS_DRV_FS = 36,
-	AS_DRV_FILES = 37,
-	AS_DRV_SSD = 38,
-	AS_DRV_KV = 39,
-	AS_SCAN = 40,
-	AS_INDEX = 41,
-	AS_BATCH = 42,
-	AS_TRIAL = 43,
-	AS_XDR = 44,
-	CF_RBUFFER = 45,
-	CF_ARENAX = 46,
-	AS_COMPRESSION = 47,
-	AS_SINDEX = 48,
-	AS_UDF = 49,
-	AS_QUERY = 50,
-	AS_SMD = 51,
-	AS_MON = 52,
-	AS_LDT = 53,
-	CF_JEM = 54,
-	AS_SECURITY = 55,
-	AS_AGGR = 56,
-	AS_JOB = 57,
-	AS_GEO = 58,
-	CF_FAULT_CONTEXT_UNDEF = 59
+	CF_MISC,
+
+	CF_ALLOC,
+	CF_ARENAX,
+	CF_JEM,
+	CF_MSG,
+	CF_RBUFFER,
+	CF_SOCKET,
+
+	AS_AGGR,
+	AS_AS,
+	AS_BATCH,
+	AS_BIN,
+	AS_CFG,
+	AS_COMPRESSION,
+	AS_DEMARSHAL,
+	AS_DRV_KV,
+	AS_DRV_SSD,
+	AS_FABRIC,
+	AS_GEO,
+	AS_HB,
+	AS_INDEX,
+	AS_INFO,
+	AS_INFO_PORT,
+	AS_JOB,
+	AS_LDT,
+	AS_MIGRATE,
+	AS_MON,
+	AS_NAMESPACE,
+	AS_NSUP,
+	AS_PARTICLE,
+	AS_PARTITION,
+	AS_PAXOS,
+	AS_PROTO,
+	AS_PROXY,
+	AS_QUERY,
+	AS_RECORD,
+	AS_RW,
+	AS_SCAN,
+	AS_SECURITY,
+	AS_SINDEX,
+	AS_SMD,
+	AS_STORAGE,
+	AS_TSVC,
+	AS_UDF,
+	AS_XDR,
+
+	CF_FAULT_CONTEXT_UNDEF
 } cf_fault_context;
 
 extern char *cf_fault_context_strings[];
