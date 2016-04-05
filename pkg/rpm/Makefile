@@ -24,6 +24,7 @@ endif
 .PHONY:dist
 dist:
 	install -d $(BUILD_ROOT)/etc/aerospike
+	install -d $(BUILD_ROOT)/etc/aerospike/sample
 
 ifeq ($(USE_SYSTEMD),1)
 	install -d $(BUILD_ROOT)/usr/lib/systemd/system
@@ -48,8 +49,9 @@ ifeq ($(USE_SYSTEMD),1)
 else
 	install -pm 644 $(DEPTH)/as/etc/aerospike.conf $(BUILD_ROOT)/etc/aerospike
 endif
-	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd.conf $(BUILD_ROOT)/etc/aerospike
-	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh.conf $(BUILD_ROOT)/etc/aerospike
+	cat $(DEPTH)/as/etc/README.sample.conf.md > $(BUILD_ROOT)/etc/aerospike/sample/README.md
+	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd.conf $(BUILD_ROOT)/etc/aerospike/sample
+	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh.conf $(BUILD_ROOT)/etc/aerospike/sample
 
 ifeq ($(USE_SYSTEMD),1)
 	cat $(DEPTH)/as/etc/aerospike.service.head >> $(PKG)/rpm/aerospike.service
