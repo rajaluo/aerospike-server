@@ -919,7 +919,7 @@ udf_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 	// make sure record exists and is already opened up
 	if (!urecord || !(urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN)
 			|| !(urecord->flag & UDF_RECORD_FLAG_OPEN) ) {
-		cf_warning(AS_UDF, "Record not found to be open while updating urecord flag=%d", urecord->flag);
+		cf_warning(AS_UDF, "Record not found to be open while updating urecord flag=%d", urecord ? urecord->flag : -1);
 		return -2;
 	}
 	cf_detail_digest(AS_UDF, &urecord->rd->r->key, "Executing Updates");
