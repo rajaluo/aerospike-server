@@ -555,7 +555,6 @@ typedef struct as_config_s {
 	cf_atomic_int		err_write_fail_unknown;
 	cf_atomic_int		err_write_fail_key_exists;
 	cf_atomic_int		err_write_fail_generation;
-	cf_atomic_int		err_write_fail_generation_xdr;
 	cf_atomic_int		err_write_fail_bin_exists;
 	cf_atomic_int		err_write_fail_parameter;
 	cf_atomic_int		err_write_fail_prole_unknown;
