@@ -232,10 +232,13 @@ as_transaction_demarshal_prepare(as_transaction *tr)
 		}
 	}
 
-	if (p_read != p_end) {
-		cf_warning(AS_PROTO, "extra bytes follow fields and bin-ops");
-		return false;
-	}
+	// Temporarily skip the check for extra message bytes, for compatibility
+	// with legacy clients.
+
+//	if (p_read != p_end) {
+//		cf_warning(AS_PROTO, "extra bytes follow fields and bin-ops");
+//		return false;
+//	}
 
 	return true;
 }
