@@ -647,7 +647,7 @@ ldt_aerospike_crec_update(const as_aerospike * as, const as_rec *crec)
 {
 	cf_detail(AS_LDT, "[ENTER] as(%p) subrec(%p)", as, crec );
 	if (!as || !crec) {
-		cf_warning(AS_LDT, "ldt_aerospike_crec_update: Invalid Parameters [as=%p, record=%p subrecord=%p]... Fail", as, crec);
+		cf_warning(AS_LDT, "ldt_aerospike_crec_update: Invalid Parameters [as=%p, subrecord=%p]... Fail", as, crec);
 		return 2;
 	}
 	if (!udf_record_ldt_enabled(crec)) {
@@ -714,7 +714,7 @@ ldt_aerospike_crec_open(const as_aerospike * as, const as_rec *rec, const char *
 {
 	static char * meth = "ldt_aerospike_crec_open()";
 	if (!as || !rec || !bdig) {
-		cf_warning(AS_LDT, "ldt_aerospike_crec_open: Invalid Parameters [as=%p, record=%p digest=%p]... Fail", meth, as, rec, bdig);
+		cf_warning(AS_LDT, "%s: Invalid Parameters [as=%p, record=%p digest=%p]... Fail", meth, as, rec, bdig);
 		return NULL;
 	}
 	cf_digest keyd;
@@ -769,7 +769,7 @@ ldt_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 	} else if (ret == -2) {
 		// Record is not open. Unexpected with LDT usage, though a UDF test case
 		// does come through here.
-		cf_warning(AS_LDT, "%s: Record does not exist or is not open, cannot update");
+		cf_warning(AS_LDT, "%s: Record does not exist or is not open, cannot update", meth);
 	}
 	return ret;
 }
