@@ -3273,9 +3273,6 @@ write_local_failed(as_transaction* tr, as_index_ref* r_ref,
 		break;
 	case AS_PROTO_RESULT_FAIL_GENERATION:
 		cf_atomic_int_incr(&g_config.err_write_fail_generation);
-		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
-			cf_atomic_int_incr(&g_config.err_write_fail_generation_xdr);
-		}
 		break;
 	case AS_PROTO_RESULT_FAIL_PARAMETER:
 		cf_atomic_int_incr(&g_config.err_write_fail_parameter);
