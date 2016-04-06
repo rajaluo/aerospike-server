@@ -569,6 +569,12 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			failmax = (int)urecord->nupdates;
 			goto Rollback;
 		}
+
+		if (cf_atomic32_get(rd->ns->stop_writes) == 1) {
+			cf_warning(AS_UDF, "UDF failed by stop-writes, record will not be updated");
+			failmax = (int)urecord->nupdates;
+			goto Rollback;
+		}
 	}
 
 	if (has_sindex) {
