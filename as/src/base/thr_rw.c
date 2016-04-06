@@ -1302,9 +1302,6 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 
 	if (is_read) {
 		cf_atomic_int_incr(&g_config.stat_read_reqs);
-		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
-			cf_atomic_int_incr(&g_config.stat_read_reqs_xdr);
-		}
 	} else if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
 		cf_atomic_int_incr(&g_config.stat_write_reqs);
 		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
@@ -1371,9 +1368,6 @@ int as_read_start(as_transaction *tr) {
 		&& (tr->msgp->msg.info1 & AS_MSG_INFO1_READ)
 		&& (TRANSACTION_CONSISTENCY_LEVEL(tr) == AS_POLICY_CONSISTENCY_LEVEL_ONE)) {
 		cf_atomic_int_incr(&g_config.stat_read_reqs);
-		if (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) {
-			cf_atomic_int_incr(&g_config.stat_read_reqs_xdr);
-		}
 
 		rw_complete(NULL, tr, NULL);
 
@@ -5983,9 +5977,6 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	}
 
 	uint32_t written_sz = 0;
-	const char *set_name = (m->info1 & AS_MSG_INFO1_XDR) != 0 ?
-			as_index_get_set_name(r, ns) : NULL;
-
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_storage_read_hist);
 
 	// Container to allow use of as_msg_send_ops_reply(), until we refactor and
@@ -6002,7 +5993,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 		size_t msg_sz = sizeof(stack_buf);
 		uint8_t *msgp = (uint8_t *)as_msg_make_response_msg(tr->result_code,
 				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
-				(cl_msg *)stack_buf, &msg_sz, as_transaction_trid(tr), set_name);
+				(cl_msg *)stack_buf, &msg_sz, as_transaction_trid(tr), NULL);
 
 		if (! msgp)	{
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed make response msg ", ns->name);
@@ -6018,7 +6009,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	}
 	else {
 		single_transaction_response(tr, ns, p_ops, response_bins, n_bins,
-				r->generation, r->void_time, &written_sz, set_name);
+				r->generation, r->void_time, &written_sz, NULL);
 
 		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
 	}
