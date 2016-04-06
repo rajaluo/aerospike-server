@@ -675,8 +675,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_key_exists);
 	cf_dyn_buf_append_string(db, ";err_write_fail_generation=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_generation);
-	cf_dyn_buf_append_string(db, ";err_write_fail_generation_xdr=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_generation_xdr);
 	cf_dyn_buf_append_string(db, ";err_write_fail_bin_exists=");
 	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_exists);
 	cf_dyn_buf_append_string(db, ";err_write_fail_parameter=");
