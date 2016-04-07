@@ -63,6 +63,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
 		{ "xdr-max-ship-throughput",		XDR_CASE_MAX_SHIP_THROUGHPUT },
 		{ "xdr-max-ship-bandwidth",			XDR_CASE_MAX_SHIP_BANDWIDTH },
+		{ "xdr-hotkey-time-ms",				XDR_CASE_HOTKEY_TIME_MS },
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
 		{ "xdr-client-threads",				XDR_CASE_CLIENT_THREADS },
 		{ "timeout",						XDR_CASE_TIMEOUT },							// not exposed to users
@@ -128,7 +129,7 @@ void xdr_config_defaults(xdr_config *c)
 
 	c->xdr_max_ship_throughput = 0;		// XDR TPS limit
 	c->xdr_max_ship_bandwidth = 0;		// XDR bandwidth limit
-	c->xdr_hotkey_time = 100;			// Expiration time for the de-duplication cache
+	c->xdr_hotkey_time_ms = 100;		// Expiration time for the de-duplication cache
 	c->xdr_read_batch_size = 500;		// Number of digests read from the digest log and processed in one go
 	c->xdr_read_threads = 4;			// Number of XDR read threads.
 	c->xdr_timeout = 10000;				// Timeout for each element that is shipped.
