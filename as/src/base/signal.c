@@ -63,11 +63,11 @@ register_signal_handler(int sig_num, sighandler_t handler)
 	if (old_handler == SIG_ERR) {
 		cf_crash(AS_AS, "could not register signal handler for %d", sig_num);
 	}
-	else if (old_handler) {
-		// Occasionally we've seen the value 1 returned, but otherwise the
-		// registration of the handler seems to be fine, so proceed...
+	// Occasionally we've seen the value 1 (SIG_IGN) returned, assume it's ok.
+	else if (old_handler != SIG_IGN) {
 		cf_warning(AS_AS, "found unexpected old signal handler %p for %d",
 				old_handler, sig_num);
+		// This should never happen, but for now, proceed anyway...
 	}
 }
 
