@@ -878,7 +878,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 	as_index  *r        = NULL;
 	int ret             = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
 	if (-1 == ret) {
-		cf_debug_digest(AS_RECORD, keyd, "{%s} record flatten: could not get-create record %b", rsv->ns->name, is_subrec);
+		cf_debug_digest(AS_RECORD, keyd, "{%s} record flatten: could not get-create record %d", rsv->ns->name, is_subrec);
 		return -3;
 	} else if (ret) {
 		has_local_copy  = false;

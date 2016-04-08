@@ -2001,7 +2001,7 @@ info_command_smd_cmd(char *name, char *params, cf_dyn_buf *db)
 		node[0] = '\0';
 		if (!as_info_parameter_get(params, "node", node, &node_len)) {
 			if (cf_str_atoi_u64_x(node, &node_id, 16)) {
-				cf_warning(AS_INFO, "The \"%s:\" command \"node\" parameter must be a 64-bit hex number, not \"%s\"", node);
+				cf_warning(AS_INFO, "The \"%s:\" command \"node\" parameter must be a 64-bit hex number, not \"%s\"", name, node);
 				cf_dyn_buf_append_string(db, "error");
 				return 0;
 			}
@@ -5485,7 +5485,7 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node su
 
 	shash_reduce_delete(g_info_node_info_hash, info_paxos_event_reduce_fn, succession);
 
-	cf_debug(AS_INFO, "info: after delete, info hash has %d", i, shash_get_size(g_info_node_info_hash));
+	cf_debug(AS_INFO, "info: after delete, info hash has %d", shash_get_size(g_info_node_info_hash));
 
 	// probably, something changed in the list. Just ask the clients to update
 	cf_atomic32_incr(&g_node_info_generation);
@@ -6476,8 +6476,8 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	char indexdata_str[AS_SINDEXDATA_STR_SIZE];
 	int  indexdata_len = sizeof(indexdata_str);
 	if (as_info_parameter_get(params, STR_INDEXDATA, indexdata_str, &indexdata_len)) {
-		cf_warning(AS_INFO, "%s : Failed. Invalid indexdata for index %s", 
-				cmd, indexname_str, indexdata_str);
+		cf_warning(AS_INFO, "%s : Failed. Invalid indexdata %s for index %s",
+				cmd, indexdata_str, indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Invalid indexdata");
 		return AS_SINDEX_ERR_PARAM;
 	}

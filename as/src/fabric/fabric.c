@@ -1428,7 +1428,7 @@ fabric_worker_fn(void *argv)
 							}
 						}
 						else {
-							cf_warning(AS_FABRIC, "worker %d received unknown notification on queue", worker_id, wqe.type);
+							cf_warning(AS_FABRIC, "worker %d received unknown notification %d on queue", worker_id, wqe.type);
 						}
 					}
 				}

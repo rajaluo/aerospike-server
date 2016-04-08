@@ -3200,8 +3200,8 @@ ssd_load_devices_fn(void *udata)
 		ssd->record_add_expired_counter, ssd->record_add_max_ttl_counter);
 
 	if (ssd->record_add_sigfail_counter) {
-		cf_warning(AS_DRV_SSD, "devices %s: WARNING: %"PRIu64" elements could not be read due to signature failure. Possible hardware errors.",
-			ssd->record_add_sigfail_counter);
+		cf_warning(AS_DRV_SSD, "device %s: WARNING: %"PRIu64" elements could not be read due to signature failure. Possible hardware errors.",
+			ssd->name, ssd->record_add_sigfail_counter);
 	}
 
 	if (0 == cf_rc_release(complete_rc)) {

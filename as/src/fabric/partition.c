@@ -3200,7 +3200,7 @@ as_partition_balance()
 
 			case true:
 			default:
-				cf_crash(AS_PARTITION, "{%s:%d} State Error.");
+				cf_crash(AS_PARTITION, "{%s:%d} State Error.", ns->name, j);
 				break;
 			}
 

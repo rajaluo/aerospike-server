@@ -857,7 +857,7 @@ as_hb_set_are_nodes_dunned(char *nodes_str, int nodes_str_len, bool is_dunned)
 				as_hb_set_is_node_dunned(u.nodes_to_dun[i], is_dunned, "info command");
 			}
 		} else
-			cf_info(AS_HB, "[self in list] no nodes to %sdun", (is_dunned ? "" : "un-"), nodes_str);
+			cf_info(AS_HB, "[self in list] no nodes to %sdun", (is_dunned ? "" : "un-"));
 	} else {
 		if (num_nodes > 0) {
 			cf_info(AS_HB, "%sdunning nodes: %s", (is_dunned ? "" : "un-"), nodes_str);
@@ -865,7 +865,7 @@ as_hb_set_are_nodes_dunned(char *nodes_str, int nodes_str_len, bool is_dunned)
 			for (int i = 0; i < num_nodes; i++)
 				as_hb_set_is_node_dunned(nodes[i], is_dunned, "info command");
 		} else
-			cf_info(AS_HB, "no nodes to %sdun", (is_dunned ? "" : "un-"), nodes_str);
+			cf_info(AS_HB, "no nodes to %sdun", (is_dunned ? "" : "un-"));
 	}
 
 	return 0;

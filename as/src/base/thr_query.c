@@ -2572,7 +2572,7 @@ query_th(void* q_to_wait_on)
 {
 	cf_queue *           query_queue = (cf_queue*)q_to_wait_on;
 	unsigned int         thread_id    = cf_atomic32_incr(&g_query_threadcnt);
-	cf_detail(AS_QUERY, "Query Thread Created %d");
+	cf_detail(AS_QUERY, "Query Thread Created %d", thread_id);
 	as_query_transaction *qtr         = NULL;
 
 	while (1) {
