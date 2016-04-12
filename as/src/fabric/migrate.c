@@ -127,7 +127,7 @@ const msg_template migrate_mt[] = {
 
 #define MIGRATE_RETRANSMIT_MS (g_config.transaction_retry_ms)
 #define MIGRATE_RETRANSMIT_STARTDONE_MS (g_config.transaction_retry_ms)
-#define MAX_BYTES_EMIGRATING (32 * 1024 * 1024)
+#define MAX_BYTES_EMIGRATING (16 * 1024 * 1024)
 
 typedef struct pickled_record_s {
 	cf_digest     keyd;
@@ -143,11 +143,19 @@ typedef struct pickled_record_s {
 	uint64_t      version;
 } pickled_record;
 
+typedef enum {
+	// Order matters - we use an atomic set-max that relies on it.
+	EMIG_STATE_ACTIVE,
+	EMIG_STATE_FINISHED,
+	EMIG_STATE_ABORTED
+} emigration_state;
+
 typedef struct emigration_s {
 	cf_node     dest;
 	uint64_t    cluster_key;
 	uint32_t    id;
 	uint32_t    tx_flags;
+	cf_atomic32 state;
 	bool        aborted;
 	as_partition_mig_tx_state tx_state; // really only for LDT
 
@@ -217,6 +225,7 @@ static shash *g_immigration_ldt_version_hash;
 
 // Emigration, immigration, & pickled record destructors.
 void emigration_destroy(void *parm);
+int emigration_reinsert_destroy_reduce_fn(void *key, void *data, void *udata);
 void emigration_release(emigration *emig);
 void immigration_destroy(void *parm);
 void immigration_release(immigration *immig);
@@ -228,6 +237,7 @@ void emigration_pop(emigration **emigp);
 int emigration_pop_reduce_fn(void *buf, void *udata);
 as_migrate_state emigrate(emigration *emig);
 as_migrate_state emigrate_tree(emigration *emig);
+void *run_emigration_reinserter(void *arg);
 void emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata);
 bool emigrate_record(emigration *emig, msg *m);
 int emigration_reinsert_reduce_fn(void *key, void *data, void *udata);
@@ -348,6 +358,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr,
 	emig->cluster_key = pmr->cluster_key;
 	emig->id = cf_atomic32_incr(&g_emigration_id);
 	emig->tx_flags = pmr->tx_flags;
+	emig->state = EMIG_STATE_ACTIVE;
 	emig->aborted = false;
 
 	// Create these later only when we need them - we'll get lots at once.
@@ -501,6 +512,8 @@ emigration_destroy(void *parm)
 	emigration *emig = (emigration *)parm;
 
 	if (emig->reinsert_hash) {
+		shash_reduce_delete(emig->reinsert_hash,
+				emigration_reinsert_destroy_reduce_fn, NULL);
 		shash_destroy(emig->reinsert_hash);
 	}
 
@@ -514,6 +527,17 @@ emigration_destroy(void *parm)
 	}
 
 	cf_atomic_int_decr(&g_config.migrate_tx_object_count);
+}
+
+
+int
+emigration_reinsert_destroy_reduce_fn(void *key, void *data, void *udata)
+{
+	emigration_reinsert_ctrl *ri_ctrl = (emigration_reinsert_ctrl *)data;
+
+	as_fabric_msg_put(ri_ctrl->m);
+
+	return SHASH_REDUCE_DELETE;
 }
 
 
@@ -709,7 +733,7 @@ emigrate(emigration *emig)
 
 	if (shash_create(&emig->reinsert_hash, emigration_insert_hashfn,
 			sizeof(uint32_t), sizeof(emigration_reinsert_ctrl),
-			32 * 1024, SHASH_CR_MT_BIGLOCK) != SHASH_OK) {
+			16 * 1024, SHASH_CR_MT_MANYLOCK) != SHASH_OK) {
 		cf_warning(AS_MIGRATE, "imbalance: failed to allocate reinsert hash");
 		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 		return AS_MIGRATE_STATE_ERROR;
@@ -764,24 +788,53 @@ emigrate_tree(emigration *emig)
 		return AS_MIGRATE_STATE_DONE;
 	}
 
-	as_index_reduce(tree, emigrate_tree_reduce_fn, emig);
+	cf_atomic32_set(&emig->state, EMIG_STATE_ACTIVE);
 
-	if (emig->aborted) {
-		return AS_MIGRATE_STATE_ERROR;
+	pthread_t thread;
+
+	if (pthread_create(&thread, NULL, run_emigration_reinserter, emig) != 0) {
+		cf_crash(AS_MIGRATE, "could not start reinserter thread");
 	}
 
+	as_index_reduce(tree, emigrate_tree_reduce_fn, emig);
+
+	// Sets EMIG_STATE_FINISHED only if not already EMIG_STATE_ABORTED.
+	cf_atomic32_setmax(&emig->state, EMIG_STATE_FINISHED);
+
+	pthread_join(thread, NULL);
+
+	return emig->state == EMIG_STATE_ABORTED ?
+			AS_MIGRATE_STATE_ERROR : AS_MIGRATE_STATE_DONE;
+}
+
+
+void *
+run_emigration_reinserter(void *arg)
+{
+	emigration *emig = (emigration *)arg;
+	emigration_state emig_state;
+
 	// Reduce over the reinsert hash until finished.
-	while (true) {
+	while ((emig_state = cf_atomic32_get(emig->state)) != EMIG_STATE_ABORTED) {
 		if (emig->cluster_key != as_paxos_get_cluster_key()) {
-			return AS_MIGRATE_STATE_ERROR;
+			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+			return NULL;
 		}
 
-		uint64_t now = cf_getms();
+		usleep(1000 * 1);
+
+		if (shash_get_size(emig->reinsert_hash) == 0) {
+			if (emig_state == EMIG_STATE_FINISHED) {
+				return NULL;
+			}
+
+			continue;
+		}
 
 		// The only rv from this is the rv of the reduce fn, which is the
 		// return value of a fabric_send.
 		int rv = shash_reduce(emig->reinsert_hash,
-				emigration_reinsert_reduce_fn, &now);
+				emigration_reinsert_reduce_fn, (void *)cf_getms());
 
 		switch (rv) {
 		case AS_FABRIC_SUCCESS:
@@ -789,22 +842,18 @@ emigrate_tree(emigration *emig)
 			break;
 		case AS_FABRIC_ERR_NO_NODE:
 			// New rebalance expected.
-			return AS_MIGRATE_STATE_ERROR;
+			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+			return NULL;
 		default:
 			cf_warning(AS_MIGRATE, "imbalance: failure emigrating - bad fabric send in retransmission - error %d",
 					rv);
 			cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_partitions_imbalance);
-			return AS_MIGRATE_STATE_ERROR;
+			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+			return NULL;
 		}
-
-		if (shash_get_size(emig->reinsert_hash) == 0) {
-			break;
-		}
-
-		usleep(1000 * 50);
 	}
 
-	return AS_MIGRATE_STATE_DONE;
+	return NULL;
 }
 
 
@@ -822,6 +871,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	if (emig->cluster_key != as_paxos_get_cluster_key()) {
 		as_record_done(r_ref, ns);
 		emig->aborted = true;
+		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
 		return; // no point continuing to reduce this tree
 	}
 
@@ -878,6 +928,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 		pickled_record_destroy(&pr);
 		emig->aborted = true;
+		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
 		return;
 	}
 
@@ -912,6 +963,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	// hard-fail - can't notify other side.
 	if (! emigrate_record(emig, m)) {
 		emig->aborted = true;
+		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
 		return;
 	}
 
@@ -985,7 +1037,7 @@ int
 emigration_reinsert_reduce_fn(void *key, void *data, void *udata)
 {
 	emigration_reinsert_ctrl *ri_ctrl = (emigration_reinsert_ctrl *)data;
-	uint64_t now = *(uint64_t *)udata;
+	uint64_t now = (uint64_t)udata;
 
 	if (ri_ctrl->xmit_ms + MIGRATE_RETRANSMIT_MS < now) {
 		msg_incr_ref(ri_ctrl->m);
