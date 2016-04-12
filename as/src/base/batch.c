@@ -658,7 +658,7 @@ as_batch_queue_task(as_transaction* btr)
 
 	if (bproto->sz > PROTO_SIZE_MAX) {
 		cf_warning(AS_BATCH, "can't process message: invalid size %"PRIu64" should be %d or less",
-				bproto->sz, PROTO_SIZE_MAX);
+				(uint64_t)bproto->sz, PROTO_SIZE_MAX);
 		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_PARAMETER);
 	}
 

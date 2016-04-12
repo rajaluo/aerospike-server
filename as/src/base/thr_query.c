@@ -471,10 +471,10 @@ bb_poolrelease(cf_buf_builder *bb_r)
 	int ret = AS_QUERY_OK;
 	if ((cf_queue_sz(g_query_response_bb_pool) > g_config.query_bufpool_size)
 			|| g_config.query_buf_size != cf_buf_builder_size(bb_r)) {
-		cf_detail(AS_QUERY, "Freed Buffer of Size %d with", bb_r->alloc_sz + sizeof(as_msg));
+		cf_detail(AS_QUERY, "Freed Buffer of Size %zu with", bb_r->alloc_sz + sizeof(as_msg));
 		cf_buf_builder_free(bb_r);
 	} else {
-		cf_detail(AS_QUERY, "Pushed %p %d %d ", bb_r, g_config.query_buf_size, cf_buf_builder_size(bb_r));
+		cf_detail(AS_QUERY, "Pushed %p %"PRIu64" %d ", bb_r, g_config.query_buf_size, cf_buf_builder_size(bb_r));
 		if (cf_queue_push(g_query_response_bb_pool, &bb_r) != CF_QUEUE_OK) {
 			cf_crash(AS_QUERY, "Failed to push into bb pool queue !!");
 		}
@@ -765,7 +765,7 @@ query_update_stats(as_query_transaction *qtr)
 	uint64_t query_stop_time = cf_getns();
 	uint64_t elapsed_us = (query_stop_time - qtr->start_time) / 1000;
 	cf_detail(AS_QUERY,
-			"Total time elapsed %"PRIu64" us, %d of %d read operations avg latency %"PRIu64" us",
+			"Total time elapsed %"PRIu64" us, %"PRIu64" of %d read operations avg latency %"PRIu64" us",
 			elapsed_us, rows, qtr->n_digests, rows > 0 ? elapsed_us / rows : 0);
 }
 
@@ -1181,7 +1181,7 @@ query_add_response(void *void_qtr, as_index_ref *r_ref, as_storage_rd *rd)
 			NULL, false, true, true, qtr->binlist);
 	if (ret != 0) {
 		cf_warning(AS_QUERY, "Weird there is space but still the packing failed "
-				"available = %d msg size = %d",
+				"available = %zd msg size = %zu",
 				bb_r->alloc_sz - bb_r->used_sz, msg_sz);
 	}
 	cf_atomic64_incr(&qtr->n_result_records);
@@ -1291,8 +1291,6 @@ query_match_string_fromval(as_query_transaction * qtr, as_val *v, as_sindex_key 
 	cf_digest_compute(str_val, strlen(str_val), &str_digest);
 
 	if (memcmp(&str_digest, &skey->key.str_key, AS_DIGEST_KEY_SZ)) {
-		cf_debug(AS_QUERY, "query_record_matches: sindex key does not matches bin value in record."
-				" skey %"PRIu64" value in bin %"PRIu64"", skey->key.str_key, str_digest);
 		return false;
 	}
 	return true;
@@ -1449,9 +1447,6 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 			cf_digest bin_digest;
 			cf_digest_compute(buf, psz, &bin_digest);
 			if (memcmp(&skey->key.str_key, &bin_digest, AS_DIGEST_KEY_SZ)) {
-				cf_debug(AS_QUERY, "query_record_matches: sindex key does not matches bin value in record."
-				" skey %"PRIu64" value in bin %"PRIu64"", skey->key.str_key, bin_digest);
-
 				matches = false;
 				break;
 			}
@@ -1691,7 +1686,7 @@ query_add_val_response(void *void_qtr, const as_val *val, bool success)
 	ret = as_msg_make_val_response_bufbuilder(val, &qtr->bb_r, msg_sz, success);
 	if (ret != 0) {
 		cf_warning(AS_QUERY, "Weird there is space but still the packing failed "
-				"available = %d msg size = %d",
+				"available = %zd msg size = %d",
 				bb_r->alloc_sz - bb_r->used_sz, msg_sz);
 	}
 	cf_atomic64_incr(&qtr->n_result_records);
@@ -2150,7 +2145,7 @@ query_get_nextbatch(as_query_transaction *qtr)
 
 	// Query Aerospike Index
 	int      qret            = as_sindex_query(qtr->si, srange, &qtr->qctx);
-	cf_detail(AS_QUERY, "start %ld end %ld @ %d pimd found %d", srange->start.u.i64, srange->end.u.i64, qctx->pimd_idx, qctx->n_bdigs);
+	cf_detail(AS_QUERY, "start %ld end %ld @ %d pimd found %"PRIu64, srange->start.u.i64, srange->end.u.i64, qctx->pimd_idx, qctx->n_bdigs);
 
 	qctx->new_ibtr           = false;
 	if (qret < 0) { // [AS_SINDEX_OK, AS_SINDEX_CONTINUE] -> OK
@@ -2513,7 +2508,7 @@ query_generator(as_query_transaction *qtr)
 		loop++;
 		int qret    = query_get_nextbatch(qtr);
 
-		cf_detail(AS_QUERY, "Loop=%d, Selected=%d, ret=%d", loop, qtr->qctx.n_bdigs, qret);
+		cf_detail(AS_QUERY, "Loop=%d, Selected=%"PRIu64", ret=%d", loop, qtr->qctx.n_bdigs, qret);
 		switch (qret) {
 			case  AS_QUERY_OK:
 			case  AS_QUERY_DONE:

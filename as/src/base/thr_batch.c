@@ -159,7 +159,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 
 				if (other_node != 0) {
 					bmd->node = other_node;
-					cf_debug(AS_BATCH, "other_node is: %p.", other_node);
+					cf_debug(AS_BATCH, "other_node is:  %"PRIu64".", other_node);
 				} else {
 					cf_debug(AS_BATCH, "other_node is NULL.");
 				}

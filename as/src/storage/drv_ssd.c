@@ -330,7 +330,7 @@ swb_dereference_and_release(drv_ssd *ssd, uint32_t wblock_id,
 	pthread_mutex_lock(&wblock_state->LOCK);
 
 	if (swb != wblock_state->swb) {
-		cf_warning(AS_DRV_SSD, "releasing wrong swb! %p (%d) != %p (%d), thread %d",
+		cf_warning(AS_DRV_SSD, "releasing wrong swb! %p (%d) != %p (%d), thread %lu",
 			swb, (int32_t)swb->wblock_id, wblock_state->swb,
 			(int32_t)wblock_state->swb->wblock_id, pthread_self());
 	}
@@ -1478,7 +1478,7 @@ void
 ssd_start_write_worker_threads(drv_ssds *ssds)
 {
 	if (ssds->ns->storage_write_threads > MAX_SSD_THREADS) {
-		cf_warning(AS_DRV_SSD, "configured number of write threads %s greater than max, using %d instead",
+		cf_warning(AS_DRV_SSD, "configured number of write threads %u greater than max, using %d instead",
 				ssds->ns->storage_write_threads, MAX_SSD_THREADS);
 		ssds->ns->storage_write_threads = MAX_SSD_THREADS;
 	}
@@ -1881,7 +1881,7 @@ as_storage_summarize_wblock_stats(as_namespace *ns)
 
 		for (int i = 0; i < MAX_WRITE_BLOCK_SIZE; i++) {
 			if (wb_hist[i] > 0) {
-				cf_info(AS_DRV_SSD, "WBH: %d block%s of size %lu bytes",
+				cf_info(AS_DRV_SSD, "WBH: %d block%s of size %d bytes",
 						wb_hist[i], (wb_hist[i] != 1 ? "s" : ""), i);
 			}
 		}
@@ -4232,7 +4232,7 @@ as_storage_info_set_ssd(as_namespace *ns, uint idx, uint8_t *buf, size_t len)
 		return -1;
 	}
 	if (len > ssds->header->info_stride - sizeof(info_buf)) {
-		cf_info(AS_DRV_SSD, "storage info set failed: bad length %d", len);
+		cf_info(AS_DRV_SSD, "storage info set failed: bad length %zu", len);
 		return -1;
 	}
 
@@ -4266,7 +4266,7 @@ as_storage_info_get_ssd(as_namespace *ns, uint idx, uint8_t *buf, size_t *len)
 			(ssds->header->info_data + (ssds->header->info_stride * idx));
 
 	if (b->len > *len || b->len > ssds->header->info_stride) {
-		cf_info(AS_DRV_SSD, "storage info get ssd: bad length: from disk %d input %d stride %d",
+		cf_info(AS_DRV_SSD, "storage info get ssd: bad length: from disk %d input %zu stride %d",
 			b->len, *len, ssds->header->info_stride);
 		return -1;
 	}

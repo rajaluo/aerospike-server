@@ -398,7 +398,7 @@ as_hb_getaddr(cf_node node, cf_sockaddr *so)
 	}
 
 	if (!(a_p_pulse = AS_HB_PULSE_TEMP()))
-		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %d", AS_HB_PULSE_SIZE());
+		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %lu", AS_HB_PULSE_SIZE());
 
 	if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse))
 		return(-1);
@@ -605,7 +605,7 @@ as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sockaddr socket, uint32_
 	}
 
 	if (!(a_p_pulse = AS_HB_PULSE_TEMP()))
-		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %d", AS_HB_PULSE_SIZE());
+		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %lu", AS_HB_PULSE_SIZE());
 
 	if (SHASH_ERR_NOTFOUND == shash_get_vlock(g_hb.adjacencies, &node, (void **) &p_pulse, &vlock)) {
 		p_pulse = a_p_pulse;
@@ -669,7 +669,7 @@ as_hb_get_is_node_dunned(cf_node node)
 	}
 
 	if (!(a_p_pulse = AS_HB_PULSE_TEMP()))
-		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %d", AS_HB_PULSE_SIZE());
+		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %lu", AS_HB_PULSE_SIZE());
 
 	if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse)) {
 		return false;
@@ -1502,7 +1502,7 @@ as_hb_set_protocol(hb_protocol_enum protocol)
 			cf_info(AS_HB, "setting heartbeat protocol version number to %d", protocol);
 
 			if (AS_HB_PROTOCOL_V1 == protocol && AS_CLUSTER_LEGACY_SZ != g_config.paxos_max_cluster_size) {
-				cf_warning(AS_HB, "setting heartbeat protocol version v1 only allowed when paxos_max_cluster_size = %d not the current value of %d",
+				cf_warning(AS_HB, "setting heartbeat protocol version v1 only allowed when paxos_max_cluster_size = %d not the current value of %"PRIu64,
 						   AS_CLUSTER_LEGACY_SZ, g_config.paxos_max_cluster_size);
 				return(-1);
 			}
@@ -1603,7 +1603,7 @@ as_hb_tcp_send(int fd, byte * buff, size_t msg_size)
 	size_t orig_size = msg_size;
 	cf_clock start = cf_getus();
 	do {
-		cf_detail(AS_HB, "cf_socket_sendto() fd %d retry count:%d msg_size:%d", fd, retry, msg_size);
+		cf_detail(AS_HB, "cf_socket_sendto() fd %d retry count:%d msg_size:%zu", fd, retry, msg_size);
 		ret =  cf_socket_sendto(fd, buff, msg_size, 0, 0);
 		if( ( ret < 0 ) && (( errno != EAGAIN ) || ( errno != EWOULDBLOCK ))) {
 			cf_info(AS_HB, "as_hb_tcp_send cf_socket_sendto() fd %d failed", fd);
@@ -1618,13 +1618,13 @@ as_hb_tcp_send(int fd, byte * buff, size_t msg_size)
 			retry++;
 			usleep(g_config.hb_mesh_rw_retry_timeout/3);
 		} else {
-			cf_detail(AS_HB, "cf_socket_sendto() fd %d retry count:%d msg_size:%d complete msg sent", fd, retry, msg_size);
+			cf_detail(AS_HB, "cf_socket_sendto() fd %d retry count:%d msg_size:%zu complete msg sent", fd, retry, msg_size);
 			break;
 		}
 	} while ( ((start + g_config.hb_mesh_rw_retry_timeout) > cf_getus()) && (retry < max_retry) );
 
 	if ( (msg_size != 0)  && (msg_size != orig_size) ) {
-		cf_warning(AS_HB, "as_hb_tcp_send cf_socket_sendto() fd %d incomplete msg sent. %d bytes left out of %d bytes.", fd, msg_size, orig_size);
+		cf_warning(AS_HB, "as_hb_tcp_send cf_socket_sendto() fd %d incomplete msg sent. %zu bytes left out of %zu bytes.", fd, msg_size, orig_size);
 		as_hb_tcp_close(fd); //closing fd
 		return -1;
 	}
@@ -1701,7 +1701,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 	}
 
 	if (!(a_p_pulse = AS_HB_PULSE_TEMP()))
-		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %d", AS_HB_PULSE_SIZE());
+		cf_crash(AS_HB, "failed to alloca() a heartbeat pulse of size %lu", AS_HB_PULSE_SIZE());
 
 	if (0 > msg_get_uint32(m, AS_HB_MSG_TYPE, &type)) {
 		cf_detail(AS_HB, "unable to get type field");
@@ -1758,7 +1758,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 					return;
 				}
 				if (c != g_config.paxos_max_cluster_size) {
-					cf_warning(AS_HB, "Received heartbeat message with a different maximum cluster size (received %d ; expected %d) ~~ Ignoring message!", c, g_config.paxos_max_cluster_size);
+					cf_warning(AS_HB, "Received heartbeat message with a different maximum cluster size (received %d ; expected %"PRIu64") ~~ Ignoring message!", c, g_config.paxos_max_cluster_size);
 					return;
 				}
 			}
@@ -1826,7 +1826,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 			int retval = msg_get_buf(m, AS_HB_MSG_ANV, (byte **) &buf, &bufsz, MSG_GET_DIRECT);
 
 			if (bufsz != (g_config.paxos_max_cluster_size * sizeof(cf_node)))
-				cf_warning(AS_HB, "Corrupted data? The size of anv is inaccurate. Received: %d ; Expected: %d", bufsz, (g_config.paxos_max_cluster_size * sizeof(cf_node)));
+				cf_warning(AS_HB, "Corrupted data? The size of anv is inaccurate. Received: %zu ; Expected: %lu", bufsz, (g_config.paxos_max_cluster_size * sizeof(cf_node)));
 
 			/* copy the succession list into the heartbeat pulse for sending over to paxos code */
 			if (0 == retval) {
@@ -2253,7 +2253,7 @@ CloseSocket:
 			for (int i = 0; i < AS_HB_TXLIST_SZ; i++) {
 				if (true == g_hb.endpoint_txlist[i]) {
 					if (true == g_hb.endpoint_txlist_isudp[i]) {
-						cf_detail(AS_HB, "sending udp heartbeat to index %d : msg size %d", i, n);
+						cf_detail(AS_HB, "sending udp heartbeat to index %d : msg size %zu", i, n);
 						struct sockaddr_in so;
 						cf_sockaddr dest;
 						so.sin_family = AF_INET;

@@ -478,7 +478,7 @@ as_paxos_partition_sync_request_msg_generate()
 	 * and the partition_vinfo should be consistent
 	 */
 	size_t array_size = g_config.n_namespaces;
-	cf_debug(AS_PAXOS, "Partition Sync request Array Size = %d ", array_size);
+	cf_debug(AS_PAXOS, "Partition Sync request Array Size = %zu ", array_size);
 	size_t elem_size = sizeof(as_partition_vinfo) * AS_PARTITIONS;
 
 	if (0 != msg_set_buf_array_size(m, AS_PAXOS_MSG_PARTITION, array_size, elem_size)) {
@@ -492,7 +492,7 @@ as_paxos_partition_sync_request_msg_generate()
 		for (int j = 0; j < AS_PARTITIONS; j++)
 			memcpy(&vi[j], &g_config.namespaces[i]->partitions[j].version_info, sizeof(as_partition_vinfo));
 		e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITION, n_elem, (uint8_t *)vi, elem_size);
-		cf_debug(AS_PAXOS, "writing element %d", n_elem);
+		cf_debug(AS_PAXOS, "writing element %zu", n_elem);
 		n_elem++;
 	}
 
@@ -504,7 +504,7 @@ as_paxos_partition_sync_request_msg_generate()
 	/* Include the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC_REQUEST messages. */
 	if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
 		array_size = g_config.n_namespaces;
-		cf_debug(AS_PAXOS, "Partitionsz Sync request Array Size = %d ", array_size);
+		cf_debug(AS_PAXOS, "Partitionsz Sync request Array Size = %zu", array_size);
 		elem_size = sizeof(uint64_t) * AS_PARTITIONS;
 
 		if (0 != msg_set_buf_array_size(m, AS_PAXOS_MSG_PARTITIONSZ, array_size, elem_size)) {
@@ -525,7 +525,7 @@ as_paxos_partition_sync_request_msg_generate()
 				cf_detail(AS_PAXOS, "Assigning partition size for pid %d, %ld", j, partitionsz[j]);
 			}
 			e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITIONSZ, n_elem, (uint8_t *)partitionsz, elem_size);
-			cf_debug(AS_PAXOS, "writing element %d", n_elem);
+			cf_debug(AS_PAXOS, "writing element %zu", n_elem);
 			n_elem++;
 		}
 
@@ -569,7 +569,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 		return(-1);
 	}
 	if (size != array_size) {
-		cf_warning(AS_PAXOS, "Different number of namespaces (expected: %d, received in partition sync message: %d) between nodes in same cluster ~~ Please check node configurations", array_size, size);
+		cf_warning(AS_PAXOS, "Different number of namespaces (expected: %zu, received in partition sync message: %d) between nodes in same cluster ~~ Please check node configurations", array_size, size);
 		return(-1);
 	}
 
@@ -604,7 +604,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 			return(-1);
 		}
 		if (size != array_size) {
-			cf_warning(AS_PAXOS, "Different number of namespaces (expected: %d, received in partition sync message: %d) between nodes in same cluster ~~ Please check node configurations", array_size, size);
+			cf_warning(AS_PAXOS, "Different number of namespaces (expected: %zu, received in partition sync message: %d) between nodes in same cluster ~~ Please check node configurations", array_size, size);
 			return(-1);
 		}
 		elem = 0;
@@ -663,12 +663,12 @@ as_paxos_partition_sync_msg_generate()
 			cluster_size++;
 
 	if (2 > cluster_size) {
-		cf_warning(AS_PAXOS, "Cluster size is wrong %d. unable to set fabric message", cluster_size);
+		cf_warning(AS_PAXOS, "Cluster size is wrong %zu. unable to set fabric message", cluster_size);
 		return(NULL);
 	}
 
 	size_t array_size = cluster_size * g_config.n_namespaces;
-	cf_debug(AS_PAXOS, "Array Size = %d ", array_size);
+	cf_debug(AS_PAXOS, "Array Size = %zu", array_size);
 	size_t elem_size = sizeof(as_partition_vinfo) * AS_PARTITIONS;
 
 	if (0 != msg_set_buf_array_size(m, AS_PAXOS_MSG_PARTITION, array_size, elem_size)) {
@@ -686,7 +686,7 @@ as_paxos_partition_sync_msg_generate()
 				cf_warning(AS_PAXOS, "unable to generate partition sync message. no data for [ns=%d][node=%d]", i, j);
 				return (NULL);
 			}
-			cf_debug(AS_PAXOS, "writing element %d", n_elem);
+			cf_debug(AS_PAXOS, "writing element %zu", n_elem);
 			e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITION, n_elem, (uint8_t *)vi, elem_size);
 			if (0 > e) {
 				cf_warning(AS_PAXOS, "unable to generate sync message");
@@ -727,7 +727,7 @@ as_paxos_partition_sync_msg_generate()
 						cf_detail(AS_PAXOS, "Assigning partition size for pid %d, %ld", j, partitionsz[j]);
 					}
 				}
-				cf_debug(AS_PAXOS, "writing element %d", n_elem);
+				cf_debug(AS_PAXOS, "writing element %zu", n_elem);
 				e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITIONSZ, n_elem, (uint8_t *)partitionsz, elem_size);
 				if (0 > e) {
 					cf_warning(AS_PAXOS, "unable to generate sync message");
@@ -795,7 +795,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 			cluster_size++;
 
 	if (2 > cluster_size) {
-		cf_warning(AS_PAXOS, "Cluster size is wrong %d. unable to apply partition sync message", cluster_size);
+		cf_warning(AS_PAXOS, "Cluster size is wrong %zu. unable to apply partition sync message", cluster_size);
 		return(-1);
 	}
 
@@ -815,7 +815,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 		return(-1);
 	}
 	if (size != array_size) {
-		cf_warning(AS_PAXOS, "Expected array size %d, received %d, Unable to read partition sync message", array_size, size);
+		cf_warning(AS_PAXOS, "Expected array size %zu, received %d, Unable to read partition sync message", array_size, size);
 		return(-1);
 	}
 
@@ -854,7 +854,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 			return(-1);
 		}
 		if (size != array_size) {
-			cf_warning(AS_PAXOS, "Expected array size %d, received %d, Unable to read partition sync message", array_size, size);
+			cf_warning(AS_PAXOS, "Expected array size %zu, received %d, Unable to read partition sync message", array_size, size);
 			return(-1);
 		}
 		elem = 0;
@@ -1024,7 +1024,7 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 			cf_debug(AS_PAXOS, "setting Paxos protocol to version %d", AS_PAXOS_PROTOCOL_VERSION_NUMBER(protocol));
 
 			if (AS_PAXOS_PROTOCOL_V1 == protocol && AS_CLUSTER_LEGACY_SZ != g_config.paxos_max_cluster_size) {
-				cf_warning(AS_PAXOS, "setting paxos protocol version v1 only allowed when paxos_max_cluster_size = %d not the current value of %d",
+				cf_warning(AS_PAXOS, "setting paxos protocol version v1 only allowed when paxos_max_cluster_size = %d not the current value of %"PRIu64,
 						   AS_CLUSTER_LEGACY_SZ, g_config.paxos_max_cluster_size);
 				return(-1);
 			}
@@ -1582,7 +1582,7 @@ as_paxos_transaction_apply(cf_node from_id)
 			/* Update the generation count in anticipation of the sync message*/
 			p->gen.sequence = t->gen.sequence;
 			n_xact++;
-			cf_debug(AS_PAXOS, "Non-principal retiring transaction 0x%x (nc %d) from %"PRIx64, t, t->c.n_change, from_id);
+			cf_debug(AS_PAXOS, "Non-principal retiring transaction %p (nc %d) from %"PRIx64, t, t->c.n_change, from_id);
 			as_paxos_transaction_retire(t);
 		}
 
@@ -1593,7 +1593,7 @@ as_paxos_transaction_apply(cf_node from_id)
 	}
 
 	while (NULL != (t = as_paxos_transaction_getnext(self))) {
-		cf_debug(AS_PAXOS, "{%d} applying transaction 0x%x",
+		cf_debug(AS_PAXOS, "{%d} applying transaction %p",
 				p->gen.sequence, t);
 
 		if ((t->c.p_node != 0) && (t->c.p_node != as_paxos_succession_getprincipal()))
@@ -1640,7 +1640,7 @@ as_paxos_transaction_apply(cf_node from_id)
 			}
 		}
 
-		cf_debug(AS_PAXOS, "{%d} principal retiring transaction 0x%x",
+		cf_debug(AS_PAXOS, "{%d} principal retiring transaction %p",
 				p->gen.sequence, t);
 		as_paxos_transaction_retire(t);
 	}
@@ -1817,7 +1817,7 @@ as_paxos_msg_unwrap(msg *m, as_paxos_transaction *t)
 			return(-1);
 		}
 		if (c != g_config.paxos_max_cluster_size) {
-			cf_warning(AS_PAXOS, "Received Paxos message with a different maximum cluster size (received %d ; expected %d) ~~ Ignoring message!", c, g_config.paxos_max_cluster_size);
+			cf_warning(AS_PAXOS, "Received Paxos message with a different maximum cluster size (received %d ; expected %"PRIu64") ~~ Ignoring message!", c, g_config.paxos_max_cluster_size);
 			return(-1);
 		}
 	}
@@ -1839,7 +1839,7 @@ as_paxos_msg_unwrap(msg *m, as_paxos_transaction *t)
 		bufsz = orig_bufsz;
 		e += msg_get_buf(m, AS_PAXOS_MSG_CHANGE, (byte **)&bufp, &bufsz, MSG_GET_DIRECT);
 		if (bufsz != orig_bufsz)
-			cf_warning(AS_PAXOS, "received Paxos message with size %d, expected size %d", bufsz, orig_bufsz);
+			cf_warning(AS_PAXOS, "received Paxos message with size %zu, expected size %zu", bufsz, orig_bufsz);
 	}
 
 	if (0 > e) {
@@ -1960,7 +1960,7 @@ as_paxos_spark(as_paxos_change *c)
 		cb += count;
 	}
 	*cb = '\0';
-	cf_info(AS_PAXOS, "as_paxos_spark establishing transaction [%"PRIu32"]@%"PRIx64" ClSz = %d ; # change = %d : %s",
+	cf_info(AS_PAXOS, "as_paxos_spark establishing transaction [%"PRIu32"]@%"PRIx64" ClSz = %zu ; # change = %d : %s",
 			t.gen.sequence, g_config.self_node, p->cluster_size, t.c.n_change, change_buf);
 
 	/* Populate a new transaction with the change, establish it
@@ -2737,7 +2737,7 @@ as_paxos_thr(void *arg)
 		 * to a rejected transaction */
 		as_paxos_transaction *r, *s, t;
 
-		cf_debug(AS_PAXOS, "Popping paxos queue 0x%x", p->msgq);
+		cf_debug(AS_PAXOS, "Popping paxos queue %p", p->msgq);
 
 		static const int Q_WAIT_MS = 1; // TODO - what to do with this?
 
@@ -3393,7 +3393,7 @@ as_paxos_init()
 						}
 					}
 					else { // treat partition as lost - common on startup
-						cf_debug(AS_PAXOS, "{%s:%d} Error getting info from storage, got len %d; partition will be treated as lost", ns->name, j, vinfo_len);
+						cf_debug(AS_PAXOS, "{%s:%d} Error getting info from storage, got len %zu; partition will be treated as lost", ns->name, j, vinfo_len);
 						n_uninit_storage++;
 					}
 				}
@@ -3420,8 +3420,8 @@ as_paxos_init()
 		}
 	}
 
-	cf_debug(AS_PAXOS, "storage info reads: total %d successful %d failed %d", successful_storage_reads + failed_storage_reads, successful_storage_reads, failed_storage_reads);
-	cf_info(AS_PAXOS, "partitions from storage: total %d found %d lost(set) %d lost(unset) %d", n_found_storage + n_null_storage + n_uninit_storage, n_found_storage, n_null_storage, n_uninit_storage);
+	cf_debug(AS_PAXOS, "storage info reads: total %zu successful %zu failed %zu", successful_storage_reads + failed_storage_reads, successful_storage_reads, failed_storage_reads);
+	cf_info(AS_PAXOS, "partitions from storage: total %zu found %zu lost(set) %zu lost(unset) %zu", n_found_storage + n_null_storage + n_uninit_storage, n_found_storage, n_null_storage, n_uninit_storage);
 
 	as_partition_balance_init();
 
@@ -3572,7 +3572,7 @@ as_paxos_dump(bool verbose)
 	as_paxos *p = g_config.paxos;
 	bool self = false, principal = false;
 
-	cf_info(AS_PAXOS, "Paxos Cluster Size: %d [soft max: %d ; hard max: %d]", p->cluster_size, g_config.paxos_max_cluster_size, AS_CLUSTER_SZ);
+	cf_info(AS_PAXOS, "Paxos Cluster Size: %zu [soft max: %zu ; hard max: %d]", p->cluster_size, g_config.paxos_max_cluster_size, AS_CLUSTER_SZ);
 
 	cf_info(AS_PAXOS, "Cluster Key: %"PRIx64"", as_paxos_get_cluster_key());
 

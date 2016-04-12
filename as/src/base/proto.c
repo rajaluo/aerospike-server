@@ -258,7 +258,7 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 			usleep(1); // yield
 		}
 		else {
-			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", fd_h->fd, msg_sz, pos);
+			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ", fd_h->fd, msg_sz, pos);
 			as_end_of_transaction_force_close(fd_h);
 			rv = -1;
 			goto Exit;
@@ -713,7 +713,7 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 			}
 			usleep(1); // Yield
 		} else {
-			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", fd_h->fd, msg_sz, pos);
+			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ", fd_h->fd, msg_sz, pos);
 			as_end_of_transaction_force_close(fd_h);
 			rv = -1;
 			goto Exit;

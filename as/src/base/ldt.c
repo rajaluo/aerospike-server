@@ -860,7 +860,7 @@ as_ldt_set_in_map(as_map *prop_map, char prop_type, void *value)
 					cf_free(valstr2);
 				}
 			} else {
-				cf_debug(AS_LDT, "Failed to set version %c=%d",
+				cf_debug(AS_LDT, "Failed to set version %c=%lu",
 						prop_type, ldt_version);
 				// note: not necessary to destroy key_val here.
 				rv = -2;
@@ -1395,7 +1395,7 @@ as_ldt_merge_component_is_candidate(as_partition_reservation *rsv, as_record_mer
 		rv = false;
 		as_record_done(&r_ref, rsv->ns);
 	}
-	cf_detail_digest(AS_LDT, &r->key, "Local Parent vs incoming [%d %d] void_time [%ld %ld]", r->generation, c->pgeneration, r->void_time, c->pvoid_time);
+	cf_detail_digest(AS_LDT, &r->key, "Local Parent vs incoming [%d %d] void_time [%u %u]", r->generation, c->pgeneration, r->void_time, c->pvoid_time);
 	return rv;
 
 #if 0

@@ -1331,8 +1331,8 @@ void as_smd_dump_metadata(as_smd_t *smd, as_smd_cmd_t *cmd)
 	// Print info. about the System Metadata system.
 	cf_info(AS_SMD, "System Metadata Status:");
 	cf_info(AS_SMD, "-----------------------");
-	cf_info(AS_SMD, "thr_id: %p", smd->thr_id);
-	cf_info(AS_SMD, "thr_attr: %p", smd->thr_attr);
+	cf_info(AS_SMD, "thr_id: %lu", smd->thr_id);
+	cf_info(AS_SMD, "thr_attr: %p", &smd->thr_attr);
 	cf_info(AS_SMD, "state: %s", AS_SMD_STATE_NAME(smd->state));
 	cf_info(AS_SMD, "number of modules: %d", rchash_get_size(smd->modules));
 	cf_info(AS_SMD, "number of pending messages in queue: %d", cf_queue_sz(smd->msgq));
@@ -1529,7 +1529,7 @@ static int as_smd_module_restore(as_smd_module_t *module_obj)
 		size_t num_fields = json_object_size(json_item);
 		if (5 != num_fields) {
 			// Warn if the item doesn't have the right number of fields.
-			cf_warning(AS_SMD, "wrong number of fields %d (expected 5) for object %d in persisted System Metadata for module \"%s\"", num_fields, i, module_obj->module);
+			cf_warning(AS_SMD, "wrong number of fields %zu (expected 5) for object %d in persisted System Metadata for module \"%s\"", num_fields, i, module_obj->module);
 		}
 
 		char *module = (char *) json_string_value(json_object_get(json_item, "module"));
@@ -1634,7 +1634,7 @@ static int as_smd_module_persist(as_smd_module_t *module_obj)
 	int retval = 0;
 
 	if (module_obj->json) {
-		cf_warning(AS_SMD, "module \"%s\" JSON is unexpectedly non-NULL (rc %d) ~~ Nulling!", module_obj->module, module_obj->json->refcount);
+		cf_warning(AS_SMD, "module \"%s\" JSON is unexpectedly non-NULL (rc %zu) ~~ Nulling!", module_obj->module, module_obj->json->refcount);
 		json_decref(module_obj->json);
 		module_obj->json = NULL;
 	}
@@ -1818,7 +1818,7 @@ static msg *as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_
 {
 	msg *msg = NULL;
 
-	cf_debug(AS_SMD, "Getting a msg for module %s with num_items %d for accept option 0x%08x", module_name, num_items, accept_opt);
+	cf_debug(AS_SMD, "Getting a msg for module %s with num_items %zu for accept option 0x%08x", module_name, num_items, accept_opt);
 
 	// Get an existing (or create a new) System Metadata fabric msg.
 	if (!(msg = as_fabric_msg_get(M_TYPE_SMD))) {
@@ -1861,7 +1861,7 @@ static msg *as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_
 		e += msg_set_uint64_array_size(msg, AS_SMD_MSG_TIMESTAMP, num_items);
 
 		if (0 > e) {
-			cf_warning(AS_SMD, "failed to set array size when constructing outbound System Metadata fabric msg for operation %s with %d items: module \"%s\" ; key \"%s\" (rv %d)",
+			cf_warning(AS_SMD, "failed to set array size when constructing outbound System Metadata fabric msg for operation %s with %zu items: module \"%s\" ; key \"%s\" (rv %d)",
 					   AS_SMD_MSG_OP_NAME(op), num_items, item[0]->module_name, item[0]->key, e);
 			as_fabric_msg_put(msg);
 			return 0;
@@ -2182,7 +2182,7 @@ static int as_smd_metadata_get(as_smd_t *smd, as_smd_cmd_t *cmd)
 	// Allocate a list of sufficient size for the get result.
 	as_smd_item_list_t *item_list = NULL;
 	if (!(item_list = as_smd_item_list_alloc(get_state.num_items))) {
-		cf_warning(AS_SMD, "failed to allocate metadata item list of length %d ~~ Not getting metadata!", get_state.num_items);
+		cf_warning(AS_SMD, "failed to allocate metadata item list of length %zu ~~ Not getting metadata!", get_state.num_items);
 		return -1;
 	}
 	get_state.item_list = item_list;
@@ -2315,13 +2315,13 @@ static void as_smd_paxos_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 	size_t num_items = 0;
 	rchash_reduce(smd->modules, as_smd_module_count_items_reduce_fn, &num_items);
 
-	cf_debug(AS_SMD, "sending %d serialized metadata items to the Paxos principal", num_items);
+	cf_debug(AS_SMD, "sending %zu serialized metadata items to the Paxos principal", num_items);
 
 	// Copy all reference-counted metadata item pointers from the hash table into an item list.
 	// (Note:  Even if this node has no metadata items, we must still send a message to the principal.)
 	as_smd_item_list_t *item_list;
 	if (!(item_list = as_smd_item_list_alloc(num_items))) {
-		cf_crash(AS_SMD, "failed to create a System Metadata item list of size %d", num_items);
+		cf_crash(AS_SMD, "failed to create a System Metadata item list of size %zu", num_items);
 	}
 	// (Note:  Use num_items to count the position for each serialized metadata item.)
 	item_list->num_items = 0;
@@ -2329,7 +2329,7 @@ static void as_smd_paxos_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 	item_list->module_name = NULL;
 	rchash_reduce(smd->modules, as_smd_module_serialize_reduce_fn, item_list);
 
-	cf_debug(AS_SMD, "aspc():  num_items = %d (%d)", item_list->num_items, num_items);
+	cf_debug(AS_SMD, "aspc():  num_items = %zu (%zu)", item_list->num_items, num_items);
 
 	// Build a System Metadata fabric msg containing serialized metadata from the item list.
 	msg *msg = NULL;
@@ -2534,7 +2534,7 @@ static int as_smd_shash_incr(shash *ht, as_smd_module_t *module_obj, size_t delt
 		cf_crash(AS_SMD, "failed to increment shash value for module \"%s\"", module_obj->module);
 	}
 
-	cf_debug(AS_SMD, "incrementing metadata item count for module \"%s\" to %d", module_obj->module, count);
+	cf_debug(AS_SMD, "incrementing metadata item count for module \"%s\" to %zu", module_obj->module, count);
 
 	return count;
 }
@@ -2627,7 +2627,7 @@ static int as_smd_item_list_for_node_reduce_fn(void *key, uint32_t keylen, void 
 		cf_rc_reserve(item);
 		search->item_list->item[search->item_list->num_items] = item;
 		search->item_list->num_items += 1;
-		cf_debug(AS_SMD, "For the node \"%016lX\", num_items is %d", item_key->node_id, search->item_list->num_items);
+		cf_debug(AS_SMD, "For the node \"%016lX\", num_items is %zu", item_key->node_id, search->item_list->num_items);
 	}
 
 	return 0;
@@ -2644,7 +2644,7 @@ static int as_smd_list_items_reduce_fn(void *key, uint32_t keylen, void *object,
 
 	cf_debug(AS_SMD, "adding to item list item: node: %016lX ; module: \"%s\" ; key: \"%s\"", item->node_id, item->module_name, item->key);
 	cf_debug(AS_SMD, "item list: %p", item_list);
-	cf_debug(AS_SMD, "item list length: %d", item_list->num_items);
+	cf_debug(AS_SMD, "item list length: %zu", item_list->num_items);
 
 	cf_rc_reserve(item);
 
@@ -2669,7 +2669,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 	size_t num_lists = g_config.paxos->cluster_size;
 	as_smd_item_list_t **item_lists_in = NULL;
 	if (!(item_lists_in = (as_smd_item_list_t **) cf_calloc(num_lists, sizeof(as_smd_item_list_t *)))) {
-		cf_crash(AS_SMD, "failed to allocate %d System Metadata item lists", num_lists);
+		cf_crash(AS_SMD, "failed to allocate %zu System Metadata item lists", num_lists);
 	}
 
 	int list_num = 0;
@@ -2684,7 +2684,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 
 		shash *module_item_count_hash = NULL;
 		if (SHASH_OK != shash_get(smd->scoreboard, &node_id, &module_item_count_hash)) {
-			cf_debug(AS_SMD, "***Cluster Size Is: %d ; Scoreboard size is %d***", g_config.paxos->cluster_size, shash_get_size(smd->scoreboard));
+			cf_debug(AS_SMD, "***Cluster Size Is: %zu ; Scoreboard size is %d***", g_config.paxos->cluster_size, shash_get_size(smd->scoreboard));
 
 			// Node may be in succession but not officially in cluster yet....
 			cf_debug(AS_SMD, "failed to get module item count hash for node %016lX ~~ Skipping!", node_id);
@@ -2763,7 +2763,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 		// Create a merged items list.
 		size_t num_items = rchash_get_size(merge_hash);
 		if (!(item_list_out = as_smd_item_list_alloc(num_items))) {
-			cf_crash(AS_SMD, "failed to create System Metadata items list of size %d", num_items);
+			cf_crash(AS_SMD, "failed to create System Metadata items list of size %zu", num_items);
 		}
 
 		// Populate the merged items list from the hash table.
@@ -2849,7 +2849,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 
 	// Merge the metadata when all nodes have reported in.
 	if (shash_get_size(smd->scoreboard) == g_config.paxos->cluster_size) {
-		cf_debug(AS_SMD, "received metadata from all %d cluster nodes ~~ invoking merge policies", g_config.paxos->cluster_size);
+		cf_debug(AS_SMD, "received metadata from all %zu cluster nodes ~~ invoking merge policies", g_config.paxos->cluster_size);
 
 		// TODO: Make sure we're still principal. 
 		if (as_paxos_succession_getprincipal() != g_config.self_node) {
@@ -2871,7 +2871,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 		// But now two node has gone down. Cluster size is reduced to 2.
 		as_smd_clear_scoreboard(smd);
 	} else {
-		cf_debug(AS_SMD, "Cluster size = %d and smd->scoreboard size = %d ", g_config.paxos->cluster_size, shash_get_size(smd->scoreboard));
+		cf_debug(AS_SMD, "Cluster size = %zu and smd->scoreboard size = %d ", g_config.paxos->cluster_size, shash_get_size(smd->scoreboard));
 	}
 
 	return retval;
@@ -2895,7 +2895,7 @@ static int as_smd_accept_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as
 	// >= 1 items when, after the merge, a non-empty list of items is valid according to the merge algorithm.
 	if (smd_msg->items->num_items) {
 		as_smd_item_t *item = smd_msg->items->item[0]; // (Only log the fist item.)
-		cf_debug(AS_SMD, "System Metadata thread - accepting metadata %s change: %d items: item 0: module \"%s\" ; key \"%s\" ; value \"%s\"",
+		cf_debug(AS_SMD, "System Metadata thread - accepting metadata %s change: %zu items: item 0: module \"%s\" ; key \"%s\" ; value \"%s\"",
 				 AS_SMD_MSG_OP_NAME(smd_msg->op), smd_msg->items->num_items, module_obj->module, item->key, item->value);
 	} else {
 		// Allow empty item list for merge and module create.
@@ -2933,7 +2933,7 @@ static int as_smd_accept_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as
 	// Accept the metadata item list for this module.
 	if (module_obj->accept_cb) {
 		// Invoke the module's registered accept policy callback function.
-		cf_debug(AS_SMD, "Calling accept callback with OPT_MERGE for module %s with nitems %d", smd_msg->items->module_name, smd_msg->items->num_items);
+		cf_debug(AS_SMD, "Calling accept callback with OPT_MERGE for module %s with nitems %zu", smd_msg->items->module_name, smd_msg->items->num_items);
 		(module_obj->accept_cb)(module_obj->module, smd_msg->items, module_obj->accept_udata, smd_msg->options);
 	}
 
@@ -2983,7 +2983,7 @@ static int as_smd_merge_resolution_reduce_fn(void *key, void *data, void *udata)
 
 		list->merge_list->item[list->merge_list->num_items] = itfq->item;
 		list->merge_list->num_items++;
-		cf_debug(AS_SMD, "Num items in the merged list %d", list->merge_list->num_items);
+		cf_debug(AS_SMD, "Num items in the merged list %zu", list->merge_list->num_items);
 	} else {
 		cf_debug(AS_SMD, " key %s in the module %s is dropped after merge", (itfq)->item->key, (itfq)->item->module_name);
 	}

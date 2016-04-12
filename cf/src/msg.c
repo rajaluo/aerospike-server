@@ -75,7 +75,7 @@ msg_create(msg **m_r, msg_type type, const msg_template *mt, size_t mt_sz)
 	// (The default value of -1 means there is no limit.)
 	if (g_max_msgs_per_type > 0) {
 		if (cf_atomic_int_get(g_num_msgs_by_type[type]) >= g_max_msgs_per_type) {
-			cf_warning(CF_MSG, "refusing to allocate more than %d msg of type %d", g_max_msgs_per_type, type);
+			cf_warning(CF_MSG, "refusing to allocate more than %ld msg of type %d", g_max_msgs_per_type, type);
 			return -1;
 		}
 	}
@@ -106,7 +106,7 @@ msg_create(msg **m_r, msg_type type, const msg_template *mt, size_t mt_sz)
 	a_sz = (a_sz + 511) & ~511UL;
 	m = cf_rc_alloc(a_sz);
 
-	cf_debug(CF_MSG, "msg_create(type: %d): a_sz: %d", type, a_sz);
+	cf_debug(CF_MSG, "msg_create(type: %d): a_sz: %zu", type, a_sz);
 
 	cf_assert(m, CF_MSG, CF_CRITICAL, "malloc");
 	m->len = max_id;
@@ -186,12 +186,12 @@ int
 msg_parse(msg *m, const uint8_t *buf, const size_t buflen, bool copy)
 {
 	if (buflen < 6) {
-		cf_debug(CF_MSG,"msg_parse: but not enough data! will get called again len %d need 6.",buflen);
+		cf_debug(CF_MSG,"msg_parse: but not enough data! will get called again len %zu need 6.",buflen);
 		return(-2);
 	}
 	uint32_t len = ntohl( *(uint32_t *) buf );
 	if (buflen < len + 6) {
-		cf_debug(CF_MSG,"msg_parse: but not enough data! will get called again. buf %p len %d need %d",buf, buflen, (len + 6));
+		cf_debug(CF_MSG,"msg_parse: but not enough data! will get called again. buf %p len %zu need %d",buf, buflen, (len + 6));
 		return(-2);
 	}
 	buf += 4;
@@ -535,7 +535,7 @@ msg_fillbuf(const msg *m, uint8_t *buf, size_t *buflen)
 
 	// validate the size
 	if (sz > *buflen) {
-		cf_debug(CF_MSG,"msg_fillbuf: passed in size too small want %d have %d",sz,*buflen);
+		cf_debug(CF_MSG,"msg_fillbuf: passed in size too small want %d have %zu",sz,*buflen);
 		*buflen = sz; // tell the caller how much size you're really going to need
 		return(-2);
 	}
@@ -918,7 +918,7 @@ int msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t len, msg_set_type
 		else {
 			mf->u.buf = cf_malloc(len);
 			if (mf->u.buf == NULL)
-				cf_info(CF_MSG, "could not allocate: len %d",len);
+				cf_info(CF_MSG, "could not allocate: len %zu",len);
 			cf_assert(mf->u.buf, CF_MSG, CF_CRITICAL, "malloc");
 			mf->free = mf->u.buf; // free on exit/reset
 			mf->rc_free = 0;

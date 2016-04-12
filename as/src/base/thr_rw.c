@@ -338,14 +338,6 @@ void send_messages(write_request *wr) {
 		WR_TRACK_INFO(wr, "send_messages: sending message");
 		// Retransmit the message
 		msg_incr_ref(wr->dest_msg);
-		if (wr->rsv_valid)
-			cf_debug(AS_RW,
-					"resending rw request: {%s:%d} node %"PRIx64" digest %"PRIx64"",
-					wr->rsv.ns->name, wr->rsv.pid, wr->dest_nodes[i], wr->keyd);
-		else
-			cf_debug(AS_RW,
-					"resending rw request: no reservation node %"PRIx64" digest %"PRIx64"",
-					wr->dest_nodes[i], wr->keyd);
 		int rv = as_fabric_send(wr->dest_nodes[i], wr->dest_msg,
 				AS_FABRIC_PRIORITY_MEDIUM);
 		if (rv != 0) {
@@ -356,9 +348,6 @@ void send_messages(write_request *wr) {
 				// simply complete the write back to the sender, because at least its written to the
 				// master (here). Another policy would be to pick up the new list, and write to the new
 				// replica.
-				cf_debug(AS_RW,
-						"can't send write retranmit: no node {%s:%d} digest %"PRIx64"",
-						wr->rsv.ns->name, wr->rsv.pid, wr->keyd);
 				wr->dest_complete[i] = true;
 				// Handle the case for the duplicate merge
 				wr->dup_result_code[i] = AS_PROTO_RESULT_FAIL_UNKNOWN;
@@ -687,8 +676,6 @@ rw_cleanup(write_request *wr, as_transaction *tr, bool first_time,
 
 	if (tr->origin == FROM_CLIENT && tr->from.proto_fd_h) {
 		if (release) {
-			cf_detail(AS_RW, "releasing proto_fd_h %d:%p",
-					tr->from.proto_fd_h, line);
 			as_end_of_transaction_force_close(tr->from.proto_fd_h);
 		} else {
 			as_end_of_transaction_ok(tr->from.proto_fd_h);
@@ -971,7 +958,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 				&& (tr->rsv.p->target == 0)) {
 			cf_warning(AS_RW, "internal_rw_start called from non-master "
 				"node %"PRIx64", with TRANSACTION_FLAG_SHIPPED_OP not set and without any cluster key "
-				"mismatch too. Cluster key is %"PRIx64", cluster size = %d my id %"PRIx64"",
+				"mismatch too. Cluster key is %"PRIx64", cluster size = %zu my id %"PRIx64"",
 				g_config.self_node, tr->rsv.cluster_key, g_config.paxos->cluster_size , g_config.self_node);
 			//PRINT_STACK();
 		}
@@ -1437,10 +1424,6 @@ finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 		return true;
 	}
 
-	cf_detail(AS_RW,
-			"finish_rw_process_prole_ack: write operation phase complete, %"PRIx64,
-			wr->keyd);
-
 	// INIT_TR
 	as_transaction tr;
 	write_request_init_tr(&tr, wr);
@@ -1484,9 +1467,6 @@ finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 bool
 finish_rw_process_dup_ack(write_request *wr)
 {
-	cf_detail(AS_RW, "finish rw process dup ack: duplicate phase %"PRIx64"",
-			wr->keyd);
-
 	int comp_sz = 0;
 	as_record_merge_component components[wr->dest_sz];
 	memset(&components, 0, sizeof(components));
@@ -1509,9 +1489,7 @@ finish_rw_process_dup_ack(write_request *wr)
 			continue;
 		}
 		if (result_code != 0) {
-			cf_debug(AS_RW,
-					"finish_rw_process_dup_ack: result code %d digest %"PRIx64"",
-					result_code, wr->keyd);
+			cf_debug_digest(AS_RW, &wr->keyd, "finish_rw_process_dup_ack: result code %d ", result_code);
 			continue;
 		}
 		if (wr->rsv.ns->ldt_enabled) {
@@ -1525,27 +1503,21 @@ finish_rw_process_dup_ack(write_request *wr)
 
 		uint32_t generation = 0;
 		if (0 != msg_get_uint32(m, RW_FIELD_GENERATION, &generation)) {
-			cf_info(AS_RW,
-					"finish_rw_process_dup_ack: received dup-response with no generation, %"PRIx64"",
-					wr->keyd);
+			cf_info_digest(AS_RW, &wr->keyd, "finish_rw_process_dup_ack: received dup-response with no generation: ");
 			continue;
 		}
 		components[comp_sz].generation = generation;
 
 		uint32_t void_time = 0;
 		if (0 != msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time)) {
-			cf_info(AS_RW,
-					"finish_rw_process_dup_ack: received dup-response with no void_time, %"PRIx64"",
-					wr->keyd);
+			cf_info_digest(AS_RW, &wr->keyd, "finish_rw_process_dup_ack: received dup-response with no void_time: ");
 		}
 		components[comp_sz].void_time = void_time;
 
 		if (!COMPONENT_IS_LDT(&components[comp_sz])) {
 			if (0 != msg_get_buf(m, RW_FIELD_RECORD, &buf, &buf_sz,
 						MSG_GET_DIRECT)) {
-				cf_info(AS_RW,
-						"finish_rw_process_dup_ack: received dup-response with no data (ok for deleted?), %"PRIx64"",
-						wr->keyd);
+				cf_info_digest(AS_RW, &wr->keyd, "finish_rw_process_dup_ack: received dup-response with no data (ok for deleted?): ");
 				continue;
 			}
 
@@ -1577,8 +1549,6 @@ finish_rw_process_dup_ack(write_request *wr)
 		comp_sz++;
 	}
 
-	cf_detail(AS_RW, "finish_rw_process_dup_ack: comp_sz %d, %"PRIx64"",
-			comp_sz, wr->keyd);
 	// updates the local in-memory representation
 	int rv         = 0;
 	int winner_idx = -1;
@@ -2915,7 +2885,7 @@ delete_adjust_sindex(as_storage_rd *rd)
 	}
 
 	if (status != AS_SINDEX_OK) {
-		cf_debug(AS_SINDEX, "Failed: %d", as_sindex_err_str(status));
+		cf_debug(AS_SINDEX, "Failed: %s", as_sindex_err_str(status));
 	}
 
 	as_sindex_release_arr(si_arr, si_arr_index);
@@ -3335,7 +3305,7 @@ write_local_preprocessing(as_transaction *tr, bool *is_done)
 	// "never expire" flag (0xFFFFffff), and it exceeds configured max_ttl.
 	if (m->record_ttl != 0 && m->record_ttl != 0xFFFFffff &&
 			ns->max_ttl != 0 && m->record_ttl > ns->max_ttl) {
-		cf_info(AS_RW, "write_local: incoming ttl %u too big compared to %u", m->record_ttl, ns->max_ttl);
+		cf_info(AS_RW, "write_local: incoming ttl %u too big compared to %"PRIu64, m->record_ttl, ns->max_ttl);
 		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARAMETER);
 		return -1;
 	}
@@ -4980,7 +4950,7 @@ int as_write_journal_start(as_namespace *ns, as_partition_id pid) {
 	if (SHASH_OK == shash_get_and_delete(journal_hash, &jhk, &journal_q)) {
 		cf_debug(AS_RW,
 				" warning: journal_start with journal already existing {%s:%d}",
-				ns, (int)pid);
+				ns->name, (int)pid);
 		cf_queue_destroy(journal_q);
 	}
 
@@ -6158,7 +6128,7 @@ rw_multi_process(cf_node node, msg *m)
 		msg_type op_msg_type = 0;
 		msg *op_msg = NULL;
 
-		cf_detail(AS_RW, "MULTI_OP: Stage 1[%d] [%p,%d,%d,%d,%d,%d]",
+		cf_detail(AS_RW, "MULTI_OP: Stage 1[%d] [%p,%zu,%zu,%d,%d,%d]",
 				count, buf, pickled_sz, sz, offset, op_msg_type, op_msg_len);
 		if (0 != msg_get_initial(&op_msg_len, &op_msg_type,
 				(const uint8_t *) buf, sz)) {
@@ -6166,7 +6136,7 @@ rw_multi_process(cf_node node, msg *m)
 			goto Out;
 		}
 
-		cf_detail(AS_RW, "MULTI_OP: Stage 2[%d] [%p,%d,%d,%d,%d,%d]",
+		cf_detail(AS_RW, "MULTI_OP: Stage 2[%d] [%p,%zu,%zu,%d,%d,%d]",
 				count, buf, pickled_sz, sz, offset, op_msg_type, op_msg_len);
 		op_msg = as_fabric_msg_get(op_msg_type);
 		if (!op_msg) {

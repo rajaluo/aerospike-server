@@ -1483,7 +1483,7 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 			if (val < 0) {
 				goto Error;
 			}
-			cf_info(AS_INFO,"Changing value of gc-max-units of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
+			cf_info(AS_INFO,"Changing value of gc-max-units of ns %s sindex %s from %u to %lu",
 							ns->name, imd->iname, si->config.defrag_max_units, val);
 			si->config.defrag_max_units = val;
 		}
@@ -1608,7 +1608,7 @@ as_sindex_release(as_sindex *si, char *fname, int lineno)
 	else {
 		SINDEX_RLOCK(&si->imd->slock);
 		cf_debug(AS_SINDEX, "Index %s in %d state Released "
-					"to reference count %d < 2 at %s:%d",
+					"to reference count  %"PRIu64" < 2 at %s:%d",
 					si->imd->iname, si->state, val, fname, lineno);
 		// Display a warning when rc math is messed-up during sindex-delete
 		if(si->state == AS_SINDEX_DESTROY){
@@ -1845,7 +1845,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_ERR;
 	}
-	cf_detail(AS_SINDEX, "Put iname simatch %s:%d->%d", iname, strlen(imd->iname), chosen_id);
+	cf_detail(AS_SINDEX, "Put iname simatch %s:%zu->%d", iname, strlen(imd->iname), chosen_id);
 
 	as_sindex__dup_meta(imd, &qimd, true);
 	qimd->si    = si;
@@ -2806,7 +2806,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			data            += sizeof(uint32_t);
 			if (startl != 8) {
 				cf_warning(AS_SINDEX,
-					"Can only handle 8 byte numerics right now %ld", startl);
+					"Can only handle 8 byte numerics right now %u", startl);
 				goto Cleanup;
 			}
 			start->u.i64  = __cpu_to_be64(*((uint64_t *)data));
@@ -2817,7 +2817,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			data         += sizeof(uint32_t);
 			if (endl != 8) {
 				cf_warning(AS_SINDEX,
-						"can only handle 8 byte numerics right now %ld", endl);
+						"can only handle 8 byte numerics right now %u", endl);
 				goto Cleanup;
 			}
 			end->u.i64  = __cpu_to_be64(*((uint64_t *)data));
@@ -2831,7 +2831,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			} else {
 				srange->isrange = TRUE;
 			}
-			cf_debug(AS_SINDEX, "Range is equal %d,%d",
+			cf_debug(AS_SINDEX, "Range is equal  %"PRId64", %"PRId64"",
 								start->u.i64, end->u.i64);
 		} else if (type == AS_PARTICLE_TYPE_STRING) {
 			// get start point
@@ -2842,7 +2842,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			srange->isrange    = FALSE;
 
 			if ((startl <= 0) || (startl >= AS_SINDEX_MAX_STRING_KSIZE)) {
-				cf_warning(AS_SINDEX, "Out of bound query key size %ld", startl);
+				cf_warning(AS_SINDEX, "Out of bound query key size %u", startl);
 				goto Cleanup;
 			}
 			uint32_t endl	   = ntohl(*((uint32_t *)data));
@@ -2865,7 +2865,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			data += startl;
 
 			if ((startl <= 0) || (startl >= AS_SINDEX_MAX_GEOJSON_KSIZE)) {
-				cf_warning(AS_SINDEX, "Out of bound query key size %ld", startl);
+				cf_warning(AS_SINDEX, "Out of bound query key size %u", startl);
 				goto Cleanup;
 			}
 			uint32_t endl = ntohl(*((uint32_t *)data));
@@ -3239,7 +3239,7 @@ as_sindex_add_sbin_value_in_heap(as_sindex_bin * sbin, void * val)
 			tmp_value = sbin->values;
 		}
 		else {
-			cf_warning(AS_SINDEX, "num_values in sbin is less than 0 %d", sbin->num_values);
+			cf_warning(AS_SINDEX, "num_values in sbin is less than 0  %"PRIu64"", sbin->num_values);
 			return AS_SINDEX_ERR;
 		}
 
@@ -3983,7 +3983,7 @@ as_sindex_sbins_debug_print(as_sindex_bin *sbins, uint32_t count)
 	for (uint32_t i = 0; i < count; i++) {
 		as_sindex_bin *p = sbins + i;
 
-		cf_warning( AS_SINDEX, "  %d: values=%d type=%d op=%d",
+		cf_warning( AS_SINDEX, "  %d: values= %"PRIu64" type=%d op=%d",
 				i, p->num_values, p->type, p->op);
 
 		if (p->type == AS_PARTICLE_TYPE_INTEGER) {
@@ -3994,7 +3994,7 @@ as_sindex_sbins_debug_print(as_sindex_bin *sbins, uint32_t count)
 			}
 			else {
 				for (uint64_t j = 0; j < p->num_values; j++) {
-					cf_warning( AS_SINDEX, "    %d: %ld", j, values[j]);
+					cf_warning( AS_SINDEX, "     %"PRIu64":  %"PRId64"", j, values[j]);
 				}
 			}
 		}
@@ -4471,8 +4471,8 @@ as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes)
 	uint64_t si_mem = cf_atomic64_get(imd->si->stats.mem_used);
 	
 	if (g_mem < bytes || ns_mem < bytes || si_mem < bytes) {
-		cf_warning(AS_SINDEX, "Sindex memory usage accounting is corrupted. [%ld %ld %ld %d]", 
-			g_mem, ns_mem, si_mem, bytes);
+		cf_warning(AS_SINDEX, "Sindex memory usage accounting is corrupted. [%"PRIu64" %"PRIu64" %"PRIu64" %"PRIu64"]",
+				g_mem, ns_mem, si_mem, bytes);
 		return false;
 	}
 	cf_atomic64_sub(&ns->sindex_data_memory_used, bytes);
@@ -4893,7 +4893,7 @@ as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint
 		uint64_t est_time        = (elapsed * n_objects)/n_obj_scanned - elapsed;
 
 		cf_info(AS_SINDEX, " Sindex-ticker: ns=%s si=%s obj-scanned=%"PRIu64" si-mem-used=%"PRIu64""
-				" progress=%d%% est-time=%"PRIu64" ms",
+				" progress= %"PRIu64"%% est-time=%"PRIu64" ms",
 				ns->name, si_name, n_obj_scanned, si_memory, pct_obj_scanned, est_time);
 	}
 }

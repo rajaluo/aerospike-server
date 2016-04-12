@@ -236,7 +236,7 @@ thr_demarshal_reaper_fn(void *arg)
 
 		// Validate the system statistics.
 		if (g_config.proto_connections_opened - g_config.proto_connections_closed != inuse_cnt) {
-			cf_debug(AS_DEMARSHAL, "reaper: mismatched connection count: %d in stats vs %d calculated",
+			cf_debug(AS_DEMARSHAL, "reaper: mismatched connection count:  %"PRIu64" in stats vs %d calculated",
 					g_config.proto_connections_opened - g_config.proto_connections_closed,
 					inuse_cnt);
 		}
@@ -391,8 +391,8 @@ thr_demarshal_config_xdr(int fd)
 static void
 log_as_proto_and_peeked_data(as_proto *proto, uint8_t *peekbuf, size_t peeked_data_sz)
 {
-	cf_warning(AS_DEMARSHAL, "as_proto {version = %d ; type = %d ; sz = %zu (0x%x)}", proto->version, proto->type, proto->sz, proto->sz);
-	cf_warning(AS_DEMARSHAL, "peeked_data_sz = %ld (0x%x)", peeked_data_sz, peeked_data_sz);
+	cf_warning(AS_DEMARSHAL, "as_proto {version = %d ; type = %d ; sz =  %"PRIu64" (0x%"PRIx64")}", proto->version, proto->type, (uint64_t)proto->sz, (uint64_t)proto->sz);
+	cf_warning(AS_DEMARSHAL, "peeked_data_sz = %ld (0x%zx)", peeked_data_sz, peeked_data_sz);
 	cf_warning_binary(AS_DEMARSHAL, peekbuf, peeked_data_sz, CF_DISPLAY_HEX_SPACED, "peekbuf");
 }
 
@@ -716,7 +716,7 @@ thr_demarshal(void *arg)
 
 					if (proto.sz > PROTO_SIZE_MAX) {
 						cf_warning(AS_DEMARSHAL, "proto input from %s: msg greater than %d, likely request from non-Aerospike client, rejecting: sz %"PRIu64,
-								fd_h->client, PROTO_SIZE_MAX, proto.sz);
+								fd_h->client, PROTO_SIZE_MAX, (uint64_t)proto.sz);
 						goto NextEvent_FD_Cleanup;
 					}
 
@@ -825,7 +825,7 @@ thr_demarshal(void *arg)
 					}
 
 					// Decrement bytes-unread counter.
-					cf_detail(AS_DEMARSHAL, "read fd %d (%d %d)", fd, n, fd_h->proto_unread);
+					cf_detail(AS_DEMARSHAL, "read fd %d (%d %"PRIu64")", fd, n, fd_h->proto_unread);
 					fd_h->proto_unread -= n;
 				}
 
@@ -902,7 +902,7 @@ thr_demarshal(void *arg)
 
 						if (! as_proto_wrapped_is_valid(&tr.msgp->proto, decompressed_buf_size)) {
 							cf_warning(AS_DEMARSHAL, "decompressed unusable proto: version %u, type %u, sz %lu [%lu]",
-									tr.msgp->proto.version, tr.msgp->proto.type, tr.msgp->proto.sz, decompressed_buf_size);
+									tr.msgp->proto.version, tr.msgp->proto.type, (uint64_t)tr.msgp->proto.sz, decompressed_buf_size);
 							as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 							cf_atomic_int_incr(&g_config.proto_transactions);
 							goto NextEvent;

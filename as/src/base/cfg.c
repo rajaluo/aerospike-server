@@ -3567,7 +3567,7 @@ cfg_reset_self_node(as_config * config_p) {
 		}
 	}
 	else if (config_p->cluster_mode == CL_MODE_STATIC) {
-		cf_info(AS_CFG, "Cluster Mode Static: Config self-node-id (%"PRIx64") for Self Node", node_id);
+		cf_info(AS_CFG, "Cluster Mode Static: Config self-node-id (%u) for Self Node", node_id);
 	}
 
 	cf_node new_self = cc_compute_self_node(port_num, group_id, node_id);

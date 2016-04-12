@@ -625,7 +625,7 @@ udf_cask_smd_accept_fn(char *module, as_smd_item_list_t *items, void *udata, uin
 		return 0;
 	}
 
-	cf_debug(AS_UDF, "UDF CASK accept fn : n items %d", items->num_items);
+	cf_debug(AS_UDF, "UDF CASK accept fn : n items %zu", items->num_items);
 
 	// For each item in the list, see if the current version
 	// is different from the curretly stored version

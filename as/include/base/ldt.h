@@ -269,7 +269,7 @@ static inline int
 as_ldt_string_todigest(const char *bdig, cf_digest *keyd)
 {
 	if (strlen(bdig) < ((CF_DIGEST_KEY_SZ * 3) - 1)) {
-		cf_warning(AS_LDT, "ldt_string_todigest Invalid digest %s:%d", bdig, strlen(bdig));
+		cf_warning(AS_LDT, "ldt_string_todigest Invalid digest %s:%zu", bdig, strlen(bdig));
 		return -1;
 	}
 	// bdig looks like
@@ -287,7 +287,6 @@ as_ldt_string_todigest(const char *bdig, cf_digest *keyd)
 		keyd->digest[j++] = intval;
 		if (j == CF_DIGEST_KEY_SZ) break;
 	}
-	cf_detail(AS_LDT, "Convert %s to %"PRIx64"", bdig, keyd);
 	return 0;
 }
 

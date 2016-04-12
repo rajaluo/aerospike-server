@@ -176,7 +176,7 @@ chunk_print(ldt_slot *lslotp)
 	udf_record *c_urecord = &lslotp->c_urecord;
 
 	cf_detail(AS_LDT, "LSO CHUNK: slotp = %p lchunk [%p,%p,%p,%p] ", lslotp,
-				lslotp->c_urecord, &lslotp->tr, &lslotp->rd, &lslotp->r_ref);
+				&lslotp->c_urecord, &lslotp->tr, &lslotp->rd, &lslotp->r_ref);
 	cf_detail(AS_LDT, "LSO CHUNK: slotp = %p urecord   [%p,%p,%p,%p] ", lslotp,
 				c_urecord, c_urecord->tr, c_urecord->rd, c_urecord->r_ref);
 	return 0;
@@ -356,7 +356,6 @@ slot_setup_digest(ldt_slot *lslotp, cf_digest *keyd)
 	//
 	// urecord->keyd is the digest which gets exposed to lua world. In this
 	// version bits are always set to zero.
-	cf_detail(AS_LDT, "LDT_VERSION Resetting @ create LDT version %p", *(uint64_t *)&c_urecord->keyd);
 	as_ldt_subdigest_resetversion(&c_urecord->keyd);
 
 }

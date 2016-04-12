@@ -2721,7 +2721,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "transaction-max-ms", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
-			cf_info(AS_INFO, "Changing value of transaction-retry-ms from %d to %d ", (g_config.transaction_max_ns / 1000000), val);
+			cf_info(AS_INFO, "Changing value of transaction-retry-ms from %"PRIu64" to %d ", (g_config.transaction_max_ns / 1000000), val);
 			g_config.transaction_max_ns = (uint64_t)val * 1000000;
 		}
 		else if (0 == as_info_parameter_get(params, "transaction-pending-limit", context, &context_len)) {
@@ -2898,7 +2898,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "paxos-max-cluster-size", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (1 >= val) || (val > AS_CLUSTER_SZ))
 				goto Error;
-			cf_info(AS_INFO, "Changing value of paxos-max-cluster-size from %d to %d ", g_config.paxos_max_cluster_size, val);
+			cf_info(AS_INFO, "Changing value of paxos-max-cluster-size from %"PRIu64" to %d ", g_config.paxos_max_cluster_size, val);
 			g_config.paxos_max_cluster_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "paxos-protocol", context, &context_len)) {
@@ -3050,7 +3050,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "max-msgs-per-type", context, &context_len)) {
 			if ((0 != cf_str_atoi(context, &val)) || (val == 0))
 				goto Error;
-			cf_info(AS_INFO, "Changing value of max-msgs-per-type from %d to %d ", g_config.max_msgs_per_type, val);
+			cf_info(AS_INFO, "Changing value of max-msgs-per-type from %"PRId64" to %d ", g_config.max_msgs_per_type, val);
 			msg_set_max_msgs_per_type(g_config.max_msgs_per_type = (val >= 0 ? val : -1));
 		}
 #ifdef MEM_COUNT
@@ -3077,7 +3077,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (val < (g_config.udf_runtime_max_gmemory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of udf-runtime-gmax-memory from %d to %d ", g_config.udf_runtime_max_gmemory, val);
+			cf_info(AS_INFO, "Changing value of udf-runtime-gmax-memory from %"PRIu64" to %"PRIu64, g_config.udf_runtime_max_gmemory, val);
 			g_config.udf_runtime_max_gmemory = val;
 		}
 		else if (0 == as_info_parameter_get(params, "udf-runtime-max-memory", context, &context_len)) {
@@ -3088,7 +3088,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (val < (g_config.udf_runtime_max_memory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of udf-runtime-max-memory from %d to %d ", g_config.udf_runtime_max_memory, val);
+			cf_info(AS_INFO, "Changing value of udf-runtime-max-memory from %"PRIu64" to %"PRIu64, g_config.udf_runtime_max_memory, val);
 			g_config.udf_runtime_max_memory = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-buf-size", context, &context_len)) {
@@ -3106,7 +3106,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (val <= 0) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of query-threshold from %"PRIu64" to %"PRIu64"", g_config.query_threshold, val);
+			cf_info(AS_INFO, "Changing value of query-threshold from %u to %"PRIu64, g_config.query_threshold, val);
 			g_config.query_threshold = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-untracked-time-ms", context, &context_len)) {
@@ -3147,12 +3147,12 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (val < (g_config.sindex_data_max_memory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of sindex-data-max-memory from %d to %d ", g_config.sindex_data_max_memory, val);
+			cf_info(AS_INFO, "Changing value of sindex-data-max-memory from %"PRIu64" to %"PRIu64, g_config.sindex_data_max_memory, val);
 			g_config.sindex_data_max_memory = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-threads", context, &context_len)) {
 			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-threads = %d", val);
+			cf_info(AS_INFO, "query-threads = %"PRIu64, val);
 			if (val == 0) {
 				cf_warning(AS_INFO, "query-threads should be a number %s", context);
 				goto Error;
@@ -3169,7 +3169,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "query-worker-threads", context, &context_len)) {
 			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-worker-threads = %d", val);
+			cf_info(AS_INFO, "query-worker-threads = %"PRIu64, val);
 			if (val == 0) {
 				cf_warning(AS_INFO, "query-worker-threads should be a number %s", context);
 				goto Error;
@@ -3185,12 +3185,12 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "query-priority", context, &context_len)) {
 			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query_priority = %d", val);
+			cf_info(AS_INFO, "query_priority = %"PRIu64, val);
 			if (val == 0) {
 				cf_warning(AS_INFO, "query_priority should be a number %s", context);
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of query-priority from %d to %d ", g_config.query_priority, val);
+			cf_info(AS_INFO, "Changing value of query-priority from %d to %"PRIu64, g_config.query_priority, val);
 			g_config.query_priority = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-priority-sleep-us", context, &context_len)) {
@@ -3204,32 +3204,32 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "query-batch-size", context, &context_len)) {
 			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-batch-size = %d", val);
+			cf_info(AS_INFO, "query-batch-size = %"PRIu64, val);
 			if((int)val <= 0) {
 				cf_warning(AS_INFO, "query-batch-size should be a positive number");
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of query-batch-size from %d to %d ", g_config.query_bsize, val);
+			cf_info(AS_INFO, "Changing value of query-batch-size from %d to %"PRIu64, g_config.query_bsize, val);
 			g_config.query_bsize = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-req-max-inflight", context, &context_len)) {
 			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-req-max-inflight = %d", val);
+			cf_info(AS_INFO, "query-req-max-inflight = %"PRIu64, val);
 			if((int)val <= 0) {
 				cf_warning(AS_INFO, "query-req-max-inflight should be a positive number");
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of query-req-max-inflight from %d to %d ", g_config.query_req_max_inflight, val);
+			cf_info(AS_INFO, "Changing value of query-req-max-inflight from %d to %"PRIu64, g_config.query_req_max_inflight, val);
 			g_config.query_req_max_inflight = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-bufpool-size", context, &context_len)) {
 			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-bufpool-size = %d", val);
+			cf_info(AS_INFO, "query-bufpool-size = %"PRIu64, val);
 			if((int)val <= 0) {
 				cf_warning(AS_INFO, "query-bufpool-size should be a positive number");
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of query-bufpool-size from %d to %d ", g_config.query_bufpool_size, val);
+			cf_info(AS_INFO, "Changing value of query-bufpool-size from %d to %"PRIu64, g_config.query_bufpool_size, val);
 			g_config.query_bufpool_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-in-transaction-thread", context, &context_len)) {
@@ -3259,22 +3259,22 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "query-short-q-max-size", context, &context_len)) {
 			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-short-q-max-size = %d", val);
+			cf_info(AS_INFO, "query-short-q-max-size = %"PRIu64, val);
 			if((int)val <= 0) {
 				cf_warning(AS_INFO, "query-short-q-max-size should be a positive number");
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of query-short-q-max-size from %d to %d ", g_config.query_short_q_max_size, val);
+			cf_info(AS_INFO, "Changing value of query-short-q-max-size from %d to %"PRIu64, g_config.query_short_q_max_size, val);
 			g_config.query_short_q_max_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-long-q-max-size", context, &context_len)) {
 			uint64_t val = atoll(context);
-			cf_info(AS_INFO, "query-long-q-max-size = %d", val);
+			cf_info(AS_INFO, "query-long-q-max-size = %"PRIu64, val);
 			if((int)val <= 0) {
 				cf_warning(AS_INFO, "query-long-q-max-size should be a positive number");
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of query-longq-max-size from %d to %d ", g_config.query_long_q_max_size, val);
+			cf_info(AS_INFO, "Changing value of query-longq-max-size from %d to %"PRIu64, g_config.query_long_q_max_size, val);
 			g_config.query_long_q_max_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "sindex-gc-enable-histogram", context, &context_len)) {
@@ -3431,7 +3431,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (val < (ns->memory_size / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of memory-size of ns %s from %d to %d ", ns->name, ns->memory_size, val);
+			cf_info(AS_INFO, "Changing value of memory-size of ns %s from %"PRIu64" to %"PRIu64, ns->name, ns->memory_size, val);
 			ns->memory_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "high-water-disk-pct", context, &context_len)) {
@@ -3545,7 +3545,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if ((rate == 0) || (rate > LDT_SUB_GC_MAX_RATE)) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of ldt-gc-rate of ns %s from %lu to %d", ns->name, (1000 * 1000)/ns->ldt_gc_sleep_us , val);
+			cf_info(AS_INFO, "Changing value of ldt-gc-rate of ns %s from %u to %d", ns->name, (1000 * 1000)/ns->ldt_gc_sleep_us , val);
 			ns->ldt_gc_sleep_us = 1000 * 1000 / rate;
 		}
 		else if (0 == as_info_parameter_get(params, "defrag-lwm-pct", context, &context_len)) {
@@ -3709,7 +3709,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (val < (ns->sindex_data_max_memory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of sindex-data-max-memory of ns %s from %d to %d ", ns->name, ns->sindex_data_max_memory, val);
+			cf_info(AS_INFO, "Changing value of sindex-data-max-memory of ns %s from %"PRIu64" to %"PRIu64, ns->name, ns->sindex_data_max_memory, val);
 			ns->sindex_data_max_memory = val;
 		}
 		else if (0 == as_info_parameter_get(params, "indexname", context, &context_len)) {
@@ -4831,7 +4831,7 @@ info_debug_ticker_fn(void *unused)
 					cf_atomic_int_get(g_config.err_sync_copy_null_master)
 					);
 
-			cf_info(AS_INFO, "   trans_in_progress: wr %d prox %d wait %d ::: q %d ::: iq %d ::: dq %d : fds - proto (%d, %"PRIu64", %"PRIu64") : hb (%d, %"PRIu64", %"PRIu64") : fab (%d, %"PRIu64", %"PRIu64")",
+			cf_info(AS_INFO, "   trans_in_progress: wr %d prox %d wait %"PRIu64" ::: q %d ::: iq %d ::: dq %d : fds - proto (%"PRIu64", %"PRIu64", %"PRIu64") : hb (%"PRIu64", %"PRIu64", %"PRIu64") : fab (%"PRIu64", %"PRIu64", %"PRIu64")",
 					as_write_inprogress(), as_proxy_inprogress(), g_config.n_waiting_transactions, thr_tsvc_queue_get_size(), as_info_queue_get_size(), as_nsup_queue_get_size(),
 					g_config.proto_connections_opened - g_config.proto_connections_closed,
 					g_config.proto_connections_opened, g_config.proto_connections_closed,
@@ -5441,7 +5441,7 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node su
 						&(succession[i]), (void **) &infop_info_history_hash,
 						&vlock_info_history_hash)) {
 					cf_assert(false, AS_INFO, CF_CRITICAL,
-							"could not create info_history_hash entry for %"PRIx64, &(succession[i]));
+							"could not create info_history_hash entry for %"PRIx64, (succession[i]));
 					continue;
 				}
 			}
@@ -5529,7 +5529,7 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 		pthread_mutex_unlock(&g_service_lock);
 
 		if ((rv = as_fabric_send(*node, m, AS_FABRIC_PRIORITY_MEDIUM))) {
-			cf_warning(AS_INFO, "failed to send msg %p type %d to node %p (rv %d)", m, m->type, *node, rv);
+			cf_warning(AS_INFO, "failed to send msg %p type %d to node %"PRIu64" (rv %d)", m, m->type, *node, rv);
 			as_fabric_msg_put(m);
 		}
 	}
@@ -5661,7 +5661,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_ACK);
 
 			if ((rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH))) {
-				cf_warning(AS_INFO, "failed to send msg %p type %d to node %p (rv %d)", m, m->type, node, rv);
+				cf_warning(AS_INFO, "failed to send msg %p type %d to node %"PRIu64" (rv %d)", m, m->type, node, rv);
 				as_fabric_msg_put(m);
 			}
 		}

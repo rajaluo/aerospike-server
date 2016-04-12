@@ -284,7 +284,7 @@ thr_info_port_fn(void *arg)
 					}
 					if (EINVAL == errno) {
 						if (!(err_count++ % 1000)) {
-							cf_warning(AS_INFO_PORT, "accept(%d, %p, %d) returned EINVAL ~~ Ignoring (err_count: %d)", s->sock, caddr, clen, err_count);
+							cf_warning(AS_INFO_PORT, "accept(%d, %p, %d) returned EINVAL ~~ Ignoring (err_count: %d)", s->sock, &caddr, clen, err_count);
 						}
 						continue;
 					}

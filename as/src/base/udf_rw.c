@@ -527,10 +527,10 @@ post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set_id)
 	// early as possible.
 	if (udf_xdr_ship_op == true) {
 		if (UDF_OP_IS_WRITE(*urecord_op)) {
-			cf_detail(AS_UDF, "UDF write shipping for key %" PRIx64, tr->keyd);
+			cf_detail_digest(AS_UDF, &tr->keyd, "UDF write shipping ");
 			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, false, set_id);
 		} else if (UDF_OP_IS_DELETE(*urecord_op)) {
-			cf_detail(AS_UDF, "UDF delete shipping for key %" PRIx64, tr->keyd);
+			cf_detail_digest(AS_UDF, &tr->keyd, "UDF delete shipping ");
 			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, true, set_id);
 		}
 	}

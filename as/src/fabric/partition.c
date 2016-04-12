@@ -236,7 +236,7 @@ set_partition_version_in_storage(as_namespace *ns, size_t pid, as_partition_vinf
 		}
 	}
 	else {
-		cf_warning(AS_PARTITION, "{%s:%d} setting version in storage failed, version %"PRIx64" will not be set in storage!",
+		cf_warning(AS_PARTITION, "{%s:%zu} setting version in storage failed, version %"PRIx64" will not be set in storage!",
 				ns->name, pid, vinfo->iid);
 	}
 }
@@ -333,7 +333,7 @@ set_new_partition_version(as_partition_vinfo *dest,
 void
 print_partition_versions(const char* n, size_t pid, as_partition_vinfo *part1, const char *mess1, as_partition_vinfo *part2, const char *mess2)
 {
-	cf_warning(AS_PARTITION, "{%s:%d} %s %"PRIx64":%"PRIx64"-%"PRIx64" %s %"PRIx64":%"PRIx64"-%"PRIx64,
+	cf_warning(AS_PARTITION, "{%s:%zu} %s %"PRIx64":%"PRIx64"-%"PRIx64" %s %"PRIx64":%"PRIx64"-%"PRIx64,
 			n, pid,
 			mess1,
 			part1->iid, *(uint64_t*)&part1->vtp[0], *(uint64_t*)&part1->vtp[8],
@@ -522,14 +522,14 @@ set_partition_sync_lockfree(as_partition *p, size_t pid, as_namespace *ns, bool 
 	// If the node is master and it partition_vinfo is already set, do nothing.
 	if  (g_config.self_node == p->replica[0] && ! is_partition_null(&p->version_info)) {
 		if (memcmp(&p->version_info, &p->primary_version_info, sizeof(as_partition_vinfo)) != 0) {
-			cf_warning(AS_PARTITION, "{%s:%d} Attempt to set a master sync partition to a non-primary version value", ns->name, pid);
+			cf_warning(AS_PARTITION, "{%s:%zu} Attempt to set a master sync partition to a non-primary version value", ns->name, pid);
 		}
 
 		return;
 	}
 
 	if  (is_partition_null(&p->primary_version_info)) {
-		cf_warning(AS_PARTITION, "{%s:%d} Failed: Attempt to set partition sync with primary version NULL", ns->name, pid);
+		cf_warning(AS_PARTITION, "{%s:%zu} Failed: Attempt to set partition sync with primary version NULL", ns->name, pid);
 		return;
 	}
 
@@ -664,35 +664,35 @@ as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p,
 	// State consistency checks.
 	if (migrating_to_master) {
 		if (p->target != p->replica[0]) {
-			cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Target of migration not master node",
+			cf_warning(AS_PARTITION, "{%s:%zu} Partition state error on write reservation. Target of migration not master node",
 					ns->name, pid);
 		}
 
 		if (! ((is_zombie && is_primary) || (is_replica && is_sync && is_primary))) {
-			cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Illegal state in node migrating to master",
+			cf_warning(AS_PARTITION, "{%s:%zu} Partition state error on write reservation. Illegal state in node migrating to master",
 					ns->name, pid);
 		}
 	}
 
 	if (((is_replica && is_desync) || (is_replica && is_sync && ! is_primary))
 			&& p->origin != p->replica[0]) {
-		cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. origin does not match master",
+		cf_warning(AS_PARTITION, "{%s:%zu} Partition state error on write reservation. origin does not match master",
 				ns->name, pid);
 	}
 	else if (is_replica && is_sync && is_primary && ! migrating_to_master
 			&& p->origin && p->origin != p->replica[0]) {
-		cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. replica sync node's origin does not match master",
+		cf_warning(AS_PARTITION, "{%s:%zu} Partition state error on write reservation. replica sync node's origin does not match master",
 				ns->name, pid);
 	}
 	else if (is_master && is_desync && p->origin == (cf_node)0) {
-		cf_warning(AS_PARTITION, "{%s:%d} Partition state error on write reservation. Origin node is NULL for non-sync master",
+		cf_warning(AS_PARTITION, "{%s:%zu} Partition state error on write reservation. Origin node is NULL for non-sync master",
 				ns->name, pid);
 	}
 
 	for (int i = 0; i < p->p_repl_factor; i++) {
 		if (p->replica[i] == (cf_node)0
 				&& as_partition_balance_is_init_resolved()) {
-			cf_warning(AS_PARTITION, "{%s:%d} Detected state error. Replica list contains null node at position %d",
+			cf_warning(AS_PARTITION, "{%s:%zu} Detected state error. Replica list contains null node at position %d",
 					ns->name, pid, i);
 			cf_atomic_int_incr(&g_config.err_replica_null_node);
 		}
@@ -700,7 +700,7 @@ as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p,
 
 	for (int i = p->p_repl_factor; i < g_config.paxos_max_cluster_size; i++) {
 		if (p->replica[i] != (cf_node)0) {
-			cf_warning(AS_PARTITION, "{%s:%d} Detected state error. Replica list contains non null node %"PRIx64" at position %d",
+			cf_warning(AS_PARTITION, "{%s:%zu} Detected state error. Replica list contains non null node %"PRIx64" at position %d",
 					ns->name, pid, p->replica[i], i);
 			cf_atomic_int_incr(&g_config.err_replica_non_null_node);
 		}
@@ -761,7 +761,7 @@ find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_read)
 	}
 
 	if (n == 0 && as_partition_balance_is_init_resolved()) {
-		cf_warning(AS_PARTITION, "{%s:%d} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64,
+		cf_warning(AS_PARTITION, "{%s:%zu} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64,
 				ns->name, pid, my_index, p->replica[0], p->replica[1], p->origin);
 		cf_atomic_int_incr(&g_config.err_sync_copy_null_master);
 	}
@@ -1673,7 +1673,7 @@ apply_write_journal(as_namespace *ns, size_t pid)
 	as_partition_reserve_lockfree(ns, pid, &prsv);
 
 	if (0 != as_write_journal_apply(&prsv)) {
-		cf_warning(AS_PARTITION, "{%s:%d} couldn't apply write journal",
+		cf_warning(AS_PARTITION, "{%s:%zu} couldn't apply write journal",
 				ns->name, pid);
 	}
 
@@ -2025,7 +2025,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 		case AS_PARTITION_STATE_ABSENT:
 		case AS_PARTITION_STATE_ZOMBIE:
 			// Check for illegal state.
-			cf_warning(AS_PARTITION, "{%s:%p} received migrate done into bad state partition: %p ",
+			cf_warning(AS_PARTITION, "{%s:%u} received migrate done into bad state partition: %u ",
 					ns->name, pid, p->state);
 			rv = AS_MIGRATE_FAIL;
 			break; // out of switch
@@ -2323,7 +2323,7 @@ as_partition_adjust_hv_and_slindex(const as_partition *ptn, cf_node hv_ptr[],
 			if (swap_i == cur_i) {
 				// No other distinct groups found. This shouldn't be possible.
 				// We should reach n_needed first.
-				cf_crash(AS_PARTITION, "can't find a diff cur:%d swap:%d repl:%d clsz:%d ptn:%d",
+				cf_crash(AS_PARTITION, "can't find a diff cur:%d swap:%d repl:%d clsz:%"PRIu64" ptn:%d",
 						cur_i, swap_i, rf, cluster_size, pid);
 			}
 
@@ -2444,7 +2444,7 @@ as_partition_balance()
 	}
 
 	paxos->cluster_size = cluster_size;
-	cf_info(AS_PARTITION, "CLUSTER SIZE = %d", paxos->cluster_size);
+	cf_info(AS_PARTITION, "CLUSTER SIZE = %zu", paxos->cluster_size);
 
 	// Find this node's index in the succession list.
 	size_t self_index;
@@ -3235,15 +3235,15 @@ as_partition_balance()
 	// counter, we could get rid of g_balance_init and just use this instead.
 	cf_atomic_int_incr(&g_config.partition_generation);
 
-	cf_info(AS_PAXOS, "global partition state: total %d lost %d unique %d duplicate %d",
+	cf_info(AS_PAXOS, "global partition state: total %zu lost %zu unique %zu duplicate %zu",
 			n_total, n_lost, n_unique, n_duplicate);
-	cf_info(AS_PAXOS, "partition state after fixing lost partitions (master): total %d lost %d unique %d duplicate %d",
+	cf_info(AS_PAXOS, "partition state after fixing lost partitions (master): total %zu lost %zu unique %zu duplicate %zu",
 			n_total, n_lost - n_recreate, n_unique + n_recreate, n_duplicate);
 	cf_info(AS_PAXOS, "%d new partition version tree paths generated",
 			n_new_versions);
 
 	if (n_total != (n_lost + n_unique + n_duplicate)) {
-		cf_warning(AS_PAXOS, "global partition state error: total %d lost %d unique %d duplicate %d",
+		cf_warning(AS_PAXOS, "global partition state error: total %zu lost %zu unique %zu duplicate %zu",
 				n_total, n_lost, n_unique, n_duplicate);
 	}
 

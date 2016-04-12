@@ -403,7 +403,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 						if (errno != EWOULDBLOCK) {
 							// Common message when a client aborts.
 							cf_debug(AS_PROTO, "protocol proxy write fail: fd %d "
-									"sz %d pos %d rv %d errno %d",
+									"sz %zu pos %zu rv %d errno %d",
 									wr->from.proto_fd_h->fd, proto_sz, pos, rv, errno);
 							as_end_of_transaction_force_close(wr->from.proto_fd_h);
 							wr->from.proto_fd_h = NULL;
@@ -412,7 +412,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 						usleep(1); // yield
 					}
 					else {
-						cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ",
+						cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ",
 								wr->from.proto_fd_h->fd, proto_sz, pos);
 						as_end_of_transaction_force_close(wr->from.proto_fd_h);
 						wr->from.proto_fd_h = NULL;
@@ -500,7 +500,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			as_proto *proto = &msgp->proto;
 			if (! as_proto_wrapped_is_valid(proto, sz)) {
 				cf_warning(AS_PROXY, "proxyee got unusable proto: version %u, type %u, sz %lu [%lu]",
-						proto->version, proto->type, proto->sz, sz);
+						proto->version, proto->type, (uint64_t)proto->sz, sz);
 				as_fabric_msg_put(m);
 				as_proxy_send_response(id, transaction_id, AS_PROTO_RESULT_FAIL_UNKNOWN,
 						0, 0, NULL, NULL, 0, NULL, 0, NULL);
@@ -614,7 +614,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 								usleep(1); // yield
 							}
 							else {
-								cf_warning(AS_PROTO, "protocol write fail zero return: fd %d sz %d pos %d ", pr.from.proto_fd_h->fd, proto_sz, pos);
+								cf_warning(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ", pr.from.proto_fd_h->fd, proto_sz, pos);
 								as_end_of_transaction_force_close(pr.from.proto_fd_h);
 								pr.from.proto_fd_h = NULL;
 								as_proxy_set_stat_counters(-1);
@@ -849,7 +849,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 		if (p_now->now_ns > pr->end_time) {
 
 			// Can get very verbose, when another server is slow.
-			cf_debug(AS_PROXY, "proxy_retransmit: too old request %d ms: terminating (dest %"PRIx64" {%s:%d}",
+			cf_debug(AS_PROXY, "proxy_retransmit: too old request %zu ms: terminating (dest %"PRIx64" {%s:%d}",
 					(p_now->now_ns - pr->start_time) / 1000000, pr->dest, pr->ns->name, pr->pid);
 
 			if (pr->wr) {

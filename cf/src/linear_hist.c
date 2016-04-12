@@ -293,7 +293,7 @@ linear_hist_dump(linear_hist *h)
 
 	buf[0] = '\0';
 
-	cf_debug(AS_NSUP, "linear histogram dump: %s [%lu %lu]/[%lu] (%lu total)",
+	cf_debug(AS_NSUP, "linear histogram dump: %s [%u %u]/[%u] (%u total)",
 			h->name, h->start, h->start + (h->num_buckets * h->bucket_width),
 			h->bucket_width, total_count);
 

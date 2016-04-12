@@ -184,17 +184,20 @@ extern cf_fault_severity cf_fault_filter[];
 // cf_fault_event() is "regular" logging
 extern void cf_fault_event(const cf_fault_context,
 		const cf_fault_severity severity, const char *file_name,
-		const int line, char *msg, ...);
+		const int line, char *msg, ...)
+		__attribute__ ((format (printf, 5, 6)));
 
 // cf_fault_event2() is for advanced logging, where we want to print some
 // binary object (often a digest).
 extern void cf_fault_event2(const cf_fault_context,
 		const cf_fault_severity severity, const char *file_name, const int line,
-		void * mem_ptr, size_t len, cf_display_type dt, char *msg, ...);
+		void * mem_ptr, size_t len, cf_display_type dt, char *msg, ...)
+		__attribute__ ((format (printf, 8, 9)));
 
 extern void cf_fault_event_nostack(const cf_fault_context,
 		const cf_fault_severity severity, const char *fn, const int line,
-		char *msg, ...);
+		char *msg, ...)
+		__attribute__ ((format (printf, 5, 6)));
 
 // This is ONLY to keep Eclipse happy without having to tell it __FILENAME__ is
 // defined. The make process will define it via the -D mechanism.

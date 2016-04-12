@@ -482,7 +482,7 @@ as_sindex__defrag_fn(void *udata)
 					SINDEX_UNLOCK(&si->imd->slock);
 					pimd_wlock_time_ns = 0;
 				}
-				cf_detail(AS_SINDEX, "Deleted %d units of attempted %d units from index %s", listsize, limit, si->imd->iname);
+				cf_detail(AS_SINDEX, "Deleted %d units of attempted %ld units from index %s", listsize, limit, si->imd->iname);
 				as_sindex_update_defrag_stat(si, deleted, start_time);
 			}
 

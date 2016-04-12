@@ -568,7 +568,7 @@ fabric_buffer_release(fabric_buffer *fb)
 		fb->worker_id = -1;
 
 		if (fb->w_total_len != fb->w_len)
-			cf_debug(AS_FABRIC, "dropping message: TCP connection close with writable bytes %d", fb->w_total_len - fb->w_len);
+			cf_debug(AS_FABRIC, "dropping message: TCP connection close with writable bytes %zu", fb->w_total_len - fb->w_len);
 
 		if (fb->r_buf != fb->r_stack_buf) {
 			cf_free(fb->r_buf);
@@ -619,7 +619,7 @@ fabric_buffer_write_fill( fabric_buffer *fb )
 				// not enough room left. If it's the first part of a message,
 				// then malloc a new buffer
 				if (remain > FB_INPLACE_SZ && fb->w_total_len == 0) {
-					cf_debug(AS_FABRIC, "msg fillbuf returned fail, allocating new size %d", remain);
+					cf_debug(AS_FABRIC, "msg fillbuf returned fail, allocating new size %zu", remain);
 					fb->w_buf = cf_malloc(remain);
 					if (fb->w_buf) {
 						cf_atomic_int_incr(&g_config.fabric_msgs_sent);
@@ -636,7 +636,7 @@ fabric_buffer_write_fill( fabric_buffer *fb )
 					cf_queue_priority_push(fne->xmit_msg_queue, &m, CF_QUEUE_PRIORITY_HIGH);
 				}
 
-				cf_detail(AS_FABRIC, "+ tot %d len %d", fb->w_total_len, fb->w_len);
+				cf_detail(AS_FABRIC, "+ tot %zu len %zu", fb->w_total_len, fb->w_len);
 
 				return(true);
 			}
@@ -646,7 +646,7 @@ fabric_buffer_write_fill( fabric_buffer *fb )
 		}
 	} while(q_rv == 0 );
 
-	cf_detail(AS_FABRIC, "fabric_buffer_write_fill: fb %p inplace %d ( %d : %d )", fb, fb->w_in_place, fb->w_total_len, fb->w_len);
+	cf_detail(AS_FABRIC, "fabric_buffer_write_fill: fb %p inplace %d ( %zu : %zu )", fb, fb->w_in_place, fb->w_total_len, fb->w_len);
 
 	return ( (fb->w_total_len == fb->w_len) ? false : true );
 
@@ -668,7 +668,7 @@ fabric_buffer_set_write_msg( fabric_buffer *fb, msg *m )
 	if (0 != msg_fillbuf(m, &fb->w_data[0], &fb->w_total_len)) {
 		// msg_fillbuf says we don't have enough data, but has graciously suggested
 		// the real amount of size we need
-		cf_detail(AS_FABRIC, "msg fillbuf returned long buffer: allocating not-in-place %d", fb->w_total_len);
+		cf_detail(AS_FABRIC, "msg fillbuf returned long buffer: allocating not-in-place %zu", fb->w_total_len);
 		fb->w_buf = cf_malloc(fb->w_total_len);
 		if (fb->w_buf == 0)	return(false);
 		msg_fillbuf(m, fb->w_buf, &fb->w_total_len);
@@ -981,7 +981,7 @@ as_fabric_msg_put(msg *m)
 	// Debug: validate that there was a reference count held before decrementing
 	cf_atomic_int_t d_cnt = cf_rc_count(m);
 	if (d_cnt <= 0) {
-		cf_debug(AS_FABRIC, "as_fabric_msg_put:  bad scene, ref count already low: m %p cnt %d", m, d_cnt);
+		cf_debug(AS_FABRIC, "as_fabric_msg_put:  bad scene, ref count already low: m %p cnt %"PRIu64, m, d_cnt);
 		return;
 	}
 
@@ -1101,7 +1101,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 			goto Next;
 
 		if (bufsz != (g_config.paxos_max_cluster_size * sizeof(cf_node))) {
-			cf_warning(AS_FABRIC, "Corrupted data? The size of anv is inaccurate. Received: %d ; Expected: %d", bufsz, (g_config.paxos_max_cluster_size * sizeof(cf_node)));
+			cf_warning(AS_FABRIC, "Corrupted data? The size of anv is inaccurate. Received: %zu ; Expected: %lu", bufsz, (g_config.paxos_max_cluster_size * sizeof(cf_node)));
 			goto Next;
 		}
 
@@ -1120,7 +1120,7 @@ Next:
 			// stating that anything exists. So make, then try again
 			fne = fne_create(node);
 
-			cf_debug(AS_FABRIC, "created an FNE %p for node %p the weird way from incoming fabric msg!", fne, node);
+			cf_debug(AS_FABRIC, "created an FNE %p for node %"PRIx64" the weird way from incoming fabric msg!", fne, node);
 
 			rv = rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne );
 			if (RCHASH_OK != rv) {
@@ -1693,7 +1693,7 @@ fabric_node_disconnect(cf_node node)
 			if (rv == CF_QUEUE_OK) {
 				fabric_buffer_release(fb);
 			} else {
-				cf_debug(AS_FABRIC, "fabric_node_disconnect(%p): fne: %p : xmit buffer queue empty", node, fne);
+				cf_debug(AS_FABRIC, "fabric_node_disconnect(%"PRIx64"): fne: %p : xmit buffer queue empty", node, fne);
 			}
 		} while (rv == CF_QUEUE_OK);
 
@@ -1705,7 +1705,7 @@ fabric_node_disconnect(cf_node node)
 				cf_debug(AS_FABRIC, "fabric: dropping message to now-gone (heartbeat fail) node %"PRIx64, node);
 				as_fabric_msg_put(m);
 			} else {
-				cf_debug(AS_FABRIC, "fabric_node_disconnect(%p): fne: %p : xmit msg queue empty", node, fne);
+				cf_debug(AS_FABRIC, "fabric_node_disconnect(%"PRIx64"): fne: %p : xmit msg queue empty", node, fne);
 			}
 		} while (rv == CF_QUEUE_OK);
 
@@ -1747,9 +1747,9 @@ fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 				// create corresponding fabric node element - add it to the hash table
 				if (RCHASH_OK != rchash_get(g_fabric_node_element_hash, &(events[i].nodeid), sizeof(cf_node), (void **) &fne)) {
 					fne = fne_create(events[i].nodeid);
-					cf_debug(AS_FABRIC, "fhe(): created an FNE %p for node %p from HB_NODE_ARRIVE", fne, events[i].nodeid);
+					cf_debug(AS_FABRIC, "fhe(): created an FNE %p for node %"PRIx64" from HB_NODE_ARRIVE", fne, events[i].nodeid);
 				} else {
-					cf_debug(AS_FABRIC, "fhe(): found an already-existing FNE %p for node %p from HB_NODE_ARRIVE", fne, events[i].nodeid);
+					cf_debug(AS_FABRIC, "fhe(): found an already-existing FNE %p for node %"PRIx64" from HB_NODE_ARRIVE", fne, events[i].nodeid);
 					cf_debug(AS_FABRIC, "fhe(): need to let go of it ~~ before fne_release(%p) count:%d", fne, cf_rc_count(fne));
 					fne_release(fne);
 				}
@@ -2611,7 +2611,7 @@ fb_hash_dump_reduce_fn(void *key, void *data, void *udata)
 
 	int count = cf_rc_count(fb);
 
-	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %p: %s); fd: %d (%s) ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), fb->fd, fb->failed ? "failed" : "healthy", fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
+	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %"PRIx64": %s); fd: %d (%s) ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), fb->fd, fb->failed ? "failed" : "healthy", fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
 
 	*item_num += 1;
 
@@ -2642,7 +2642,7 @@ as_fabric_dump(bool verbose)
 			cf_info(AS_FABRIC, "   %"PRIx64" node not found in hash although reported available", nl.nodes[i]);
 		}
 		else {
-			cf_info(AS_FABRIC, "    %"PRIx64" fds %d live %d goodwrite %d goodread %d q %d", fne->node,
+			cf_info(AS_FABRIC, "    %"PRIx64" fds %d live %d goodwrite %"PRIu64" goodread %"PRIu64" q %d", fne->node,
 					fne->fd_counter, fne->live, fne->good_write_counter, fne->good_read_counter, cf_queue_priority_sz(fne->xmit_msg_queue));
 			fne_release(fne);
 		}

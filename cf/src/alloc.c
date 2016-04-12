@@ -1393,7 +1393,7 @@ update_alloc_info(void *key, void *value_old, void *value_new, void *udata)
 	make_location(&(alloc_info_new->loc), "(unused)", 0);
 
 	if (0 > alloc_info_new->net_alloc_count) {
-		cf_crash(CF_ALLOC, "allocation count for location \"%s\" just went negative!", loc);
+		cf_crash(CF_ALLOC, "allocation count for location \"%s\" just went negative!", (char *) loc);
 	}
 }
 
@@ -1421,10 +1421,10 @@ update_alloc_at_location(void *p, size_t sz, alloc_type type, char *file, int li
 #ifdef STRICT_MEMORY_ACCOUNTING
 			cf_crash(CF_ALLOC, "Could not put %p into ptr2loc_shash with sz: %zu loc: \"%s\"", p, sz, loc);
 #else
-			cf_warning(CF_ALLOC, "Could not put %p into ptr2loc_shash with sz: %zu loc: \"%s\" (rv: %d) [IGNORED]", p, sz, loc, rv);
+			cf_warning(CF_ALLOC, "Could not put %p into ptr2loc_shash with sz: %zu loc: \"%s\" (rv: %d) [IGNORED]", p, sz, (char *) loc, rv);
 			if (SHASH_ERR_FOUND == rv) {
 				if (SHASH_OK != (rv = shash_get(ptr2loc_shash, &p, &alloc_loc))) {
-					cf_warning(CF_ALLOC, "Found existing {loc: \"%s\"; type: %d; sz: %d} @ ptr %p in ptr2loc_shash", alloc_loc.loc, alloc_loc.type, alloc_loc.sz, p);
+					cf_warning(CF_ALLOC, "Found existing {loc: \"%s\"; type: %d; sz: %zu} @ ptr %p in ptr2loc_shash", alloc_loc.loc, alloc_loc.type, alloc_loc.sz, p);
 				} else {
 					cf_warning(CF_ALLOC, "Could not find existing allocation @ %p in ptr2loc_shash (rv: %d)", p, rv);
 				}
@@ -1437,7 +1437,7 @@ update_alloc_at_location(void *p, size_t sz, alloc_type type, char *file, int li
 #ifdef STRICT_MEMORY_ACCOUNTING
 			cf_crash(CF_ALLOC, "Could not get %p from ptr2loc_shash with sz: %zu loc: \"%s\"", p, sz, loc);
 #else
-			cf_warning(CF_ALLOC, "Could not get %p from ptr2loc_shash with sz: %zu loc: \"%s\" [IGNORED]", p, sz, loc);
+			cf_warning(CF_ALLOC, "Could not get %p from ptr2loc_shash with sz: %zu loc: \"%s\" [IGNORED]", p, sz, (char *) loc);
 			return;
 #endif
 		}
@@ -1455,7 +1455,7 @@ update_alloc_at_location(void *p, size_t sz, alloc_type type, char *file, int li
 #ifdef STRICT_MEMORY_ACCOUNTING
 		cf_crash(CF_ALLOC, "Could not update loc2alloc_shash with sz: %zu loc: \"%s\"", sz, loc);
 #else
-		cf_warning(CF_ALLOC, "Could not update loc2alloc_shash with sz: %zu loc: \"%s\" [IGNORED]", sz, loc);
+		cf_warning(CF_ALLOC, "Could not update loc2alloc_shash with sz: %zu loc: \"%s\" [IGNORED]", sz, (char *) loc);
 #endif
 	}
 }
@@ -1483,7 +1483,7 @@ cf_malloc_at(size_t sz, char *file, int line)
 			cf_warning(CF_ALLOC, "Could not add ptr: %p sz: %zu to mem_count_shash @ %s:%d (rv: %d) [IGNORED]", p, sz, file, line, rv);
 			if (SHASH_ERR_FOUND == rv) {
 				if (SHASH_OK != (rv = shash_get(mem_count_shash, &p, &sz))) {
-					cf_warning(CF_ALLOC, "Found existing allocation with sz: %d @ ptr %p in mem_count_shash", sz, p);
+					cf_warning(CF_ALLOC, "Found existing allocation with sz: %zu @ ptr %p in mem_count_shash", sz, p);
 				} else {
 					cf_warning(CF_ALLOC, "Could not find existing allocation @ %p in mem_count_shash (rv: %d)", p, rv);
 				}

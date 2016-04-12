@@ -945,7 +945,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 	} else {
 		cf_assert(has_local_copy, AS_RECORD, CF_CRITICAL,
 				"Local Copy Won when there is no local copy");
-		cf_detail_digest(AS_LDT, keyd, "Local Copy Win [%d %d] %d winner_idx=%d", r->generation, components[0].generation, r->void_time, winner_idx);
+		cf_detail_digest(AS_LDT, keyd, "Local Copy Win [%d %d] %d winner_idx=%d", r->generation, components[0].generation, r->void_time, *winner_idx);
 	}
 
 	// our reservation must still be valid here. Check it.
