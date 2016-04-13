@@ -1994,6 +1994,8 @@ as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 
 	cf_assert(m, AS_PAXOS, CF_CRITICAL, "null message");
 
+	msg_preserve_all_fields(m);
+
 	qm = cf_calloc(1, sizeof(as_paxos_msg));
 	cf_assert(qm, AS_PAXOS, CF_CRITICAL, "allocation: %s", cf_strerror(errno));
 	qm->id = id;

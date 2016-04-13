@@ -5656,8 +5656,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			pthread_mutex_unlock(vlock_info_history_hash);
 
 			// Send the ack.
-			msg_set_unset(m, INFO_FIELD_SERVICE_ADDRESS);
-			msg_set_unset(m, INFO_FIELD_ALT_ADDRESS);
+			msg_preserve_fields(m, 1, INFO_FIELD_GENERATION);
 			msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_ACK);
 
 			if ((rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH))) {

@@ -1158,6 +1158,9 @@ static int as_smd_transact_recv_fn(cf_node node_id, msg *msg, void *transact_dat
 			 g_config.self_node, (as_paxos_succession_getprincipal() == g_config.self_node ? "Paxos principal" : "regular node"),
 			 node_id, (as_paxos_succession_getprincipal() == node_id ? "Paxos principal" : "regular node"));
 
+	// Make sure fields pointing into the fabric buffer are preserved.
+	msg_preserve_all_fields(msg);
+
 	// Send the received msg to the System Metadata thread.
 	if ((retval = as_smd_msgq_push(node_id, msg, smd))) {
 		cf_warning(AS_SMD, "failed to push received transact msg (retval %d)", retval);

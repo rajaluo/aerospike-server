@@ -367,6 +367,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 
 	// Case 1: Non-originating node.
 	if (wr->origin == FROM_PROXY) {
+		msg_preserve_fields(m, 2, PROXY_FIELD_OP, PROXY_FIELD_AS_PROTO);
 		// Remember that "digest" gets printed at the end of cf_detail_digest().
 		// Fake the ORIGINATING Proxy tid
 		msg_set_uint32(m, PROXY_FIELD_TID, wr->from_data.proxy_tid);

@@ -2216,7 +2216,7 @@ CloseSocket:
 					}
 					cf_detail(AS_HB, "received %d bytes, calling msg_parse", r);
 					if (r > 0) {
-						if (0 > msg_parse(mr, bufr, r, false)) {
+						if (0 > msg_parse(mr, bufr, r)) {
 							cf_detail(AS_HB, "unable to parse heartbeat message");
 							as_hb_error(AS_HB_ERR_UNPARSABLE_MSG);
 						} else {

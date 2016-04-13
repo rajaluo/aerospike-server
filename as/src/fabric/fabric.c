@@ -1045,7 +1045,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 		// unique fabric address.
 		msg *m = as_fabric_msg_get(M_TYPE_FABRIC);
 
-		if (msg_parse(m, fb->r_parse, fb->r_msg_size, true) != 0) {
+		if (msg_parse(m, fb->r_parse, fb->r_msg_size) != 0) {
 			cf_warning(AS_FABRIC, "fabric_process_read: msg_parse failed fabric msg");
 			// TODO: Should never happen, because the first message in a connection should be short
 			// abandon this connection is OK
@@ -1140,7 +1140,7 @@ Next:
 			return false;
 		}
 
-		if (msg_parse(m, fb->r_parse, fb->r_msg_size, true) != 0) {
+		if (msg_parse(m, fb->r_parse, fb->r_msg_size) != 0) {
 			cf_warning(AS_FABRIC, "msg_parse failed regular message, not supposed to happen: fb %p", fb);
 			shutdown(fb->fd, SHUT_WR);
 			return false;
