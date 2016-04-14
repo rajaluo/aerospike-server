@@ -58,6 +58,8 @@
 #include "base/secondary_index.h"
 #include "base/security_config.h"
 #include "base/thr_info.h"
+#include "base/thr_query.h"
+#include "base/thr_sindex.h"
 #include "base/transaction_policy.h"
 #include "fabric/migrate.h"
 
@@ -287,12 +289,20 @@ typedef enum {
 	CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
+	CASE_SERVICE_QUERY_BUFPOOL_SIZE,
 	CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD,
+	CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE,
 	CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS,
 	CASE_SERVICE_QUERY_PRIORITY,
 	CASE_SERVICE_QUERY_PRIORITY_SLEEP_US,
+	CASE_SERVICE_QUERY_REC_COUNT_BOUND,
+	CASE_SERVICE_QUERY_REQ_IN_QUERY_THREAD,
+	CASE_SERVICE_QUERY_REQ_MAX_INFLIGHT,
+	CASE_SERVICE_QUERY_SHORT_Q_MAX_SIZE,
+	CASE_SERVICE_QUERY_THREADS,
 	CASE_SERVICE_QUERY_THRESHOLD,
 	CASE_SERVICE_QUERY_UNTRACKED_TIME_MS,
+	CASE_SERVICE_QUERY_WORKER_THREADS,
 	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
 	CASE_SERVICE_RUN_AS_DAEMON,
@@ -300,6 +310,7 @@ typedef enum {
 	CASE_SERVICE_SCAN_MAX_DONE,
 	CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS,
 	CASE_SERVICE_SCAN_THREADS,
+	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_DATA_MAX_MEMORY,
 	CASE_SERVICE_SNUB_NODES,
 	CASE_SERVICE_STORAGE_BENCHMARKS,
@@ -692,12 +703,20 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "paxos-retransmit-period",		CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
+		{ "query-bufpool-size",				CASE_SERVICE_QUERY_BUFPOOL_SIZE },
 		{ "query-in-transaction-thread",	CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD },
+		{ "query-long-q-max-size",			CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE },
+		{ "query-rec-count-bound",			CASE_SERVICE_QUERY_REC_COUNT_BOUND },
 		{ "query-pre-reserve-partitions",   CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS },
 		{ "query-priority", 				CASE_SERVICE_QUERY_PRIORITY },
 		{ "query-priority-sleep-us", 		CASE_SERVICE_QUERY_PRIORITY_SLEEP_US },
+		{ "query-req-in-query-thread",		CASE_SERVICE_QUERY_REQ_IN_QUERY_THREAD },
+		{ "query-req-max-inflight",			CASE_SERVICE_QUERY_REQ_MAX_INFLIGHT },
+		{ "query-short-q-max-size",			CASE_SERVICE_QUERY_SHORT_Q_MAX_SIZE },
+		{ "query-threads",					CASE_SERVICE_QUERY_THREADS },
 		{ "query-threshold", 				CASE_SERVICE_QUERY_THRESHOLD },
 		{ "query-untracked-time-ms",		CASE_SERVICE_QUERY_UNTRACKED_TIME_MS },
+		{ "query-worker-threads",			CASE_SERVICE_QUERY_WORKER_THREADS },
 		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
 		{ "run-as-daemon",					CASE_SERVICE_RUN_AS_DAEMON },
@@ -705,6 +724,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-max-done",					CASE_SERVICE_SCAN_MAX_DONE },
 		{ "scan-max-udf-transactions",		CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS },
 		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
+		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-data-max-memory",			CASE_SERVICE_SINDEX_DATA_MAX_MEMORY },
 		{ "snub-nodes",						CASE_SERVICE_SNUB_NODES },
 		{ "storage-benchmarks",				CASE_SERVICE_STORAGE_BENCHMARKS },
@@ -2005,8 +2025,14 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_QUERY_BATCH_SIZE:
 				c->query_bsize = cfg_int_no_checks(&line);
 				break;
+			case CASE_SERVICE_QUERY_BUFPOOL_SIZE:
+				c->query_bufpool_size = cfg_u32(&line, 1, UINT32_MAX);
+				break;
 			case CASE_SERVICE_QUERY_IN_TRANSACTION_THREAD:
 				c->query_in_transaction_thr = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_QUERY_LONG_Q_MAX_SIZE:
+				c->query_long_q_max_size = cfg_u32(&line, 1, UINT32_MAX);
 				break;
 			case CASE_SERVICE_QUERY_PRE_RESERVE_PARTITIONS:
 				c->partitions_pre_reserved = cfg_bool(&line);
@@ -2017,11 +2043,29 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_QUERY_PRIORITY_SLEEP_US:
 				c->query_sleep_us = cfg_u64_no_checks(&line);
 				break;
+			case CASE_SERVICE_QUERY_REC_COUNT_BOUND:
+				c->query_rec_count_bound = cfg_u64(&line, 1, UINT64_MAX);
+				break;
+			case CASE_SERVICE_QUERY_REQ_IN_QUERY_THREAD:
+				c->query_req_in_query_thread = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_QUERY_REQ_MAX_INFLIGHT:
+				c->query_req_max_inflight = cfg_u32(&line, 1, UINT32_MAX);
+				break;
+			case CASE_SERVICE_QUERY_SHORT_Q_MAX_SIZE:
+				c->query_short_q_max_size = cfg_u32(&line, 1, UINT32_MAX);
+				break;
+			case CASE_SERVICE_QUERY_THREADS:
+				c->query_threads = cfg_u32(&line, 1, AS_QUERY_MAX_THREADS);
+				break;
 			case CASE_SERVICE_QUERY_THRESHOLD:
 				c->query_threshold = cfg_int_no_checks(&line);
 				break;
 			case CASE_SERVICE_QUERY_UNTRACKED_TIME_MS:
 				c->query_untracked_time_ms = cfg_u64_no_checks(&line);
+				break;
+			case CASE_SERVICE_QUERY_WORKER_THREADS:
+				c->query_worker_threads = cfg_u32(&line, 1, AS_QUERY_MAX_WORKER_THREADS);
 				break;
 			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
 				c->replication_fire_and_forget = cfg_bool(&line);
@@ -2043,6 +2087,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_SCAN_THREADS:
 				c->scan_threads = cfg_u32(&line, 0, 32);
+				break;
+			case CASE_SERVICE_SINDEX_BUILDER_THREADS:
+				c->sindex_builder_threads = cfg_u32(&line, 1, MAX_SINDEX_BUILDER_THREADS);
 				break;
 			case CASE_SERVICE_SINDEX_DATA_MAX_MEMORY:
 				config_val = cfg_u64_no_checks(&line);
