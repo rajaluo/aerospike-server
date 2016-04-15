@@ -2652,8 +2652,9 @@ as_hb_init_socket()
 			g_hb.socket_mcast.s.port = g_config.hb_port;
 			g_hb.socket_mcast.tx_addr = g_config.hb_tx_addr;
 			g_hb.socket_mcast.mcast_ttl = g_config.hb_mcast_ttl;
-			if (0 != cf_mcastsocket_init(&g_hb.socket_mcast))
-				cf_crash(AS_HB, "couldn't initialize multicast heartbeat socket: %s", cf_strerror(errno));
+			if (0 != cf_mcastsocket_init(&g_hb.socket_mcast)) {
+				cf_crash(AS_HB, "couldn't initialize multicast heartbeat socket");
+			}
 			cf_debug(AS_HB, "Opened multicast socket %d", g_hb.socket_mcast.s.sock);
 			break;
 		case AS_HB_MODE_MESH:
@@ -2662,8 +2663,9 @@ as_hb_init_socket()
 			g_hb.socket.port = g_config.hb_port;
 			g_hb.socket.proto = SOCK_STREAM;
 			g_hb.socket.reuse_addr = (g_config.socket_reuse_addr) ? true : false;
-			if (0 != cf_socket_init_svc(&g_hb.socket))
-				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket: %s", cf_strerror(errno));
+			if (0 != cf_socket_init_svc(&g_hb.socket)) {
+				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket");
+			}
 			break;
 		case AS_HB_MODE_UNDEF:
 		default:
