@@ -136,11 +136,11 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_client_threads = 3;			// Number of async client threads (event loops)
 	c->xdr_forward_xdrwrites = false;	// If the writes due to xdr should be forwarded
 	c->xdr_nsup_deletes_enabled = false;// Shall XDR ship deletes of evictions or expiration
-	c->xdr_internal_shipping_delay = 0;	// Default sleep between shipping each batch is 0 second
+	c->xdr_internal_shipping_delay = 0;	// Default sleep between shipping each batch is 0 seconds
 	c->xdr_conf_change_flag = 0;
 	c->xdr_shipping_enabled = true;
 	c->xdr_delete_shipping_enabled = true;
 	c->xdr_replace_record = true;
 	c->xdr_info_request_timeout_ms = 500;
-	c->xdr_compression_threshold = 0; 	// 0 = Disabled compressed shipping, > 0 minimum size of packet for compression
+	c->xdr_compression_threshold = 0; 	// 0 disables compressed shipping, > 0 specifies minimum request size for compression
 }
