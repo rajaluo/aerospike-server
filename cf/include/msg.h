@@ -266,3 +266,8 @@ extern void msg_destroy(msg *m);
 
 // A debug function for finding out what's in a message.
 extern void msg_dump(const msg *m, const char *info);
+
+
+// TODO - move when merged to new dev branch.
+uint32_t msg_get_wire_size(const msg *m);
+

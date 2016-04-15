@@ -783,25 +783,16 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 
 	fabric_buffer_set_write_msg(fb, m);
 
-	// pass the fabric_buffer to a worker thread
-	fabric_worker_add(fa, fb);
-
-//	cf_debug(AS_FABRIC, "fabric_connect(): adding to fne %p : fb %p w/ wid %d", fne, fb, fb->worker_id);
+	fb->connected = true;
 
 	int value = 0; // (Arbitrary & unused.)
 	int rv = 0;
-	if (SHASH_OK == shash_get(fne->connected_fb_hash, fb, &value)) {
-		cf_warning(AS_FABRIC, "fb %p is already in fne %p connected_fb_hash (connected: %d)", fb, fne, fb->connected);
-#ifdef CONNECTED_FB_HASH_USE_PUT_UNIQUE
-	} else if (SHASH_OK != (rv = shash_put_unique(fne->connected_fb_hash, &fb, &value))) {
+
+	if (SHASH_OK != (rv = shash_put_unique(fne->connected_fb_hash, &fb, &value))) {
 		cf_crash(AS_FABRIC, "failed to add unique fb %p to fne %p connected_fb_hash -- rv %d", fb, fne, rv);
-#else
-	} else if (SHASH_OK != (rv = shash_put(fne->connected_fb_hash, &fb, &value))) {
-		cf_crash(AS_FABRIC, "failed to shash_put() fb %p into fne %p connected_fb_hash -- rv %d", fb, fne, rv);
-#endif
 	}
 
-	fb->connected = true;
+	fabric_worker_add(fa, fb);
 
 	return(0);
 }

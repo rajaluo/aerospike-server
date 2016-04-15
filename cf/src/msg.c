@@ -1627,3 +1627,21 @@ msg_dump(const msg *m, const char *info)
 		}
 	}
 }
+
+
+// TODO - move when merged to new dev branch.
+uint32_t
+msg_get_wire_size(const msg *m)
+{
+	uint32_t sz = 6;
+
+	for (int i = 0; i < m->len; i++) {
+		const msg_field *mf = &m->f[i];
+
+		if (mf->is_valid && mf->is_set) {
+			sz += msg_get_wire_field_size(mf);
+		}
+	}
+
+	return sz;
+}

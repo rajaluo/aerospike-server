@@ -1005,7 +1005,7 @@ emigrate_record(emigration *emig, msg *m)
 		return false;
 	}
 
-	cf_atomic32_add(&emig->bytes_emigrating, m->bytes_used);
+	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
 
 	int rv;
 
@@ -1583,8 +1583,13 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
 	msg_set_unset(m, MIG_FIELD_REC_PROPS);
 
-	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_LOW) != AS_FABRIC_SUCCESS) {
-		cf_warning(AS_MIGRATE, "handle insert: ack send failed");
+	int rv = as_fabric_send(src, m, AS_FABRIC_PRIORITY_LOW);
+
+	if (rv != AS_FABRIC_SUCCESS) {
+		if (rv != AS_FABRIC_ERR_NO_NODE) {
+			cf_warning(AS_MIGRATE, "handle insert: ack send failed");
+		}
+
 		as_fabric_msg_put(m);
 		return;
 	}
@@ -1699,7 +1704,8 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 	if (shash_get_vlock(emig->reinsert_hash, &insert_id, (void **)&ri_ctrl,
 			&vlock) == SHASH_OK) {
 		if (src == emig->dest) {
-			if (cf_atomic32_sub(&emig->bytes_emigrating, m->bytes_used) < 0) {
+			if (cf_atomic32_sub(&emig->bytes_emigrating,
+					(int32_t)msg_get_wire_size(m)) < 0) {
 				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
 			}
 
