@@ -1375,6 +1375,11 @@ as_hb_tip(char *host, int port)
 {
 	cf_debug(AS_HB, " Heartbeat: tipped about server at %s:%d", host, port);
 
+	if (AS_HB_MODE_MESH != g_config.hb_mode) {
+		cf_warning(AS_HB, "tip command is only supported in heartbeat mode \"mesh\"");
+		return(-1);
+	}
+
 	return mesh_host_list_add(host, port, true);
 }
 
