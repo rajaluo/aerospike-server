@@ -5977,6 +5977,14 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	}
 
 	uint32_t written_sz = 0;
+	// We need the set name here, although XDR doesn't use the read transaction
+	// path anymore. During a cluster upgrade, we may be running in a mixed-version
+	// cluster. Older versions of asd may still use the transaction path and their
+	// reads may be proxied to us. These reads will have AS_MSG_INFO1_XDR set and
+	// we need to return the set name for them.
+	const char *set_name = (m->info1 & AS_MSG_INFO1_XDR) != 0 ?
+			as_index_get_set_name(r, ns) : NULL;
+
 	MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_storage_read_hist);
 
 	// Container to allow use of as_msg_send_ops_reply(), until we refactor and
@@ -5993,7 +6001,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 		size_t msg_sz = sizeof(stack_buf);
 		uint8_t *msgp = (uint8_t *)as_msg_make_response_msg(tr->result_code,
 				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
-				(cl_msg *)stack_buf, &msg_sz, as_transaction_trid(tr), NULL);
+				(cl_msg *)stack_buf, &msg_sz, as_transaction_trid(tr), set_name);
 
 		if (! msgp)	{
 			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed make response msg ", ns->name);
@@ -6009,7 +6017,7 @@ read_local(as_transaction *tr, as_index_ref *r_ref)
 	}
 	else {
 		single_transaction_response(tr, ns, p_ops, response_bins, n_bins,
-				r->generation, r->void_time, &written_sz, NULL);
+				r->generation, r->void_time, &written_sz, set_name);
 
 		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_net_hist);
 	}
