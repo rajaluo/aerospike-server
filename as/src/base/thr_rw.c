@@ -88,6 +88,9 @@ msg_template rw_mt[] =
 	{ RW_FIELD_MULTIOP, M_FT_BUF },
 	{ RW_FIELD_LDT_VERSION, M_FT_UINT64 },
 };
+
+#define RW_MSG_SCRATCH_SIZE 280 // 128 + 152 for prole deletes
+
 // General Debug Stmts
 // #define DEBUG 1
 // Specific Flag to dump the MSG
@@ -5661,8 +5664,8 @@ as_write_init()
 		return;
 	}
 
-	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt), write_msg_fn,
-			0 /* udata */);
+	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt),
+			RW_MSG_SCRATCH_SIZE, write_msg_fn, 0 /* udata */);
 
 	as_paxos_register_change_callback(rw_paxos_change, 0);
 

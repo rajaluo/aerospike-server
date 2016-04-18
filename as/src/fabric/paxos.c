@@ -3337,7 +3337,9 @@ as_paxos_init()
 
 	/* Register with the fabric */
 	as_fabric_register_event_fn(&as_paxos_event, NULL);
-	as_fabric_register_msg_fn(M_TYPE_PAXOS, as_paxos_msg_template, sizeof(as_paxos_msg_template), &as_paxos_msgq_push, NULL);
+	as_fabric_register_msg_fn(M_TYPE_PAXOS, as_paxos_msg_template,
+			sizeof(as_paxos_msg_template), AS_PAXOS_MSG_SCRATCH_SIZE,
+			&as_paxos_msgq_push, NULL);
 
 	/* this may not be needed but just do it anyway */
 	memset(p->c_partition_vinfo, 0, sizeof(p->c_partition_vinfo));

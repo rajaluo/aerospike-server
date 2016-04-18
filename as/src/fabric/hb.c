@@ -211,6 +211,8 @@ static const msg_template as_hb_msg_template[] = {
 	{ AS_HB_MSG_ANV_LENGTH, M_FT_UINT32 }
 };
 
+#define AS_HB_MSG_SCRATCH_SIZE 512 // accommodate 64-node cluster
+
 /* as_hb_pulse
  * A tracking structure for heartbeats
  * These structures are stored in the adjacency hash, indexed by node id
@@ -2071,7 +2073,8 @@ as_hb_thr(void *arg)
 
 	/* Register fabric heartbeat msg type with no processing function:
 	   This permits getting / putting heartbeat msgs to be moderated via an idle msg queue. */
-	as_fabric_register_msg_fn(M_TYPE_HEARTBEAT, as_hb_msg_template, sizeof(as_hb_msg_template), 0, 0);
+	as_fabric_register_msg_fn(M_TYPE_HEARTBEAT, as_hb_msg_template,
+			sizeof(as_hb_msg_template), AS_HB_MSG_SCRATCH_SIZE, 0, 0);
 
 	/* Create the invariant portion of the heartbeat message */
 	mt = as_fabric_msg_get(M_TYPE_HEARTBEAT);

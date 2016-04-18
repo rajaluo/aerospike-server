@@ -432,6 +432,8 @@ static const msg_template as_smd_msg_template[] = {
 	{ AS_SMD_MSG_OPTIONS, M_FT_UINT32 }            // Option flags specifying the originator of the message (i.e., MERGE/API)
 };
 
+#define AS_SMD_MSG_SCRATCH_SIZE 64 // accommodate module name
+
 /*
  *  State of operation of the System Metadata module.
  */
@@ -1178,7 +1180,9 @@ static int as_smd_transact_recv_fn(cf_node node_id, msg *msg, void *transact_dat
 int as_smd_start(as_smd_t *smd)
 {
 	// Register System Metadata fabric transact message type.
-	if (as_fabric_transact_register(M_TYPE_SMD, as_smd_msg_template, sizeof(as_smd_msg_template), as_smd_transact_recv_fn, smd)) {
+	if (as_fabric_transact_register(M_TYPE_SMD, as_smd_msg_template,
+			sizeof(as_smd_msg_template), AS_SMD_MSG_SCRATCH_SIZE,
+			as_smd_transact_recv_fn, smd)) {
 		cf_crash(AS_SMD, "Failed to register System Metadata fabric transact msg type!");
 	}
 

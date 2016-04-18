@@ -186,6 +186,7 @@ typedef struct {
 	// Arguably, these first two should be pushed into the msg system
 	const msg_template 	*mt[M_TYPE_MAX];
 	size_t 				mt_sz[M_TYPE_MAX];
+	size_t 				scratch_sz[M_TYPE_MAX];
 
 	as_fabric_msg_fn 		msg_cb[M_TYPE_MAX];
 	void 				*msg_udata[M_TYPE_MAX];
@@ -345,6 +346,8 @@ msg_template fabric_mt[] = {
 	{ FS_PORT, M_FT_UINT32 },
 	{ FS_ANV, M_FT_BUF }
 };
+
+#define FS_MSG_SCRATCH_SIZE 512 // accommodate 64-node cluster
 
 // Hash table of all fabric buffers.
 //  Key: fabric_buffer * ; Value: 0 (Arbitrary & unused.)
@@ -955,7 +958,8 @@ as_fabric_msg_get(msg_type type)
 	cf_queue *q = g_fabric_args->msg_pool_queue[type];
 
 	if (0 != cf_queue_pop(q, &m, CF_QUEUE_NOWAIT)) {
-		msg_create(&m, 	type, g_fabric_args->mt[type], g_fabric_args->mt_sz[type]);
+		msg_create(&m, 	type, g_fabric_args->mt[type],
+				g_fabric_args->mt_sz[type], g_fabric_args->scratch_sz[type]);
 	}
 	else {
 		msg_incr_ref(m);
@@ -1792,12 +1796,14 @@ as_fabric_register_event_fn( as_fabric_event_fn event_cb, void *event_udata )
 }
 
 int
-as_fabric_register_msg_fn ( msg_type type, const msg_template *mt, size_t mt_sz,  as_fabric_msg_fn msg_cb, void *msg_udata)
+as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz,
+		size_t scratch_sz, as_fabric_msg_fn msg_cb, void *msg_udata)
 {
 	if (type >= M_TYPE_MAX)
 		return(-1);
-	g_fabric_args->mt_sz[type] = mt_sz;
 	g_fabric_args->mt[type] = mt;
+	g_fabric_args->mt_sz[type] = mt_sz;
+	g_fabric_args->scratch_sz[type] = scratch_sz;
 	g_fabric_args->msg_cb[type] = msg_cb;
 	g_fabric_args->msg_udata[type] = msg_udata;
 	return(0);
@@ -1849,7 +1855,8 @@ as_fabric_init()
 	fa->num_workers = g_config.n_fabric_workers;
 
 	// register my little fabric message type, so I can create 'em
-	as_fabric_register_msg_fn(M_TYPE_FABRIC, fabric_mt, sizeof(fabric_mt), 0 /* arrival function!*/, 0);
+	as_fabric_register_msg_fn(M_TYPE_FABRIC, fabric_mt, sizeof(fabric_mt),
+			FS_MSG_SCRATCH_SIZE, 0 /* arrival function!*/, 0);
 
 	// Create the cf_node hash table
 	rchash_create( &g_fabric_node_element_hash, cf_nodeid_rchash_fn, fne_destructor,
@@ -2360,16 +2367,16 @@ fabric_transact_msg_fn(cf_node node, msg *m, void *udata)
 // registers all of this message type as a
 // transaction type message, which means the main message
 int
-as_fabric_transact_register( msg_type type, const msg_template *mt, size_t mt_sz,
-							 as_fabric_transact_recv_fn cb, void *udata)
+as_fabric_transact_register(msg_type type, const msg_template *mt, size_t mt_sz,
+		size_t scratch_sz, as_fabric_transact_recv_fn cb, void *udata)
 {
-
 	// put details in the global structure
 	fabric_transact_recv_cb[type] = cb;
 	fabric_transact_recv_udata[type] = udata;
 
 	// register my internal callback with the main message callback
-	as_fabric_register_msg_fn( type, mt, mt_sz,  fabric_transact_msg_fn, 0);
+	as_fabric_register_msg_fn(type, mt, mt_sz, scratch_sz,
+			fabric_transact_msg_fn, 0);
 
 	return(0);
 }

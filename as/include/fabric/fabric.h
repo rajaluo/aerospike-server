@@ -133,7 +133,7 @@ extern int as_fabric_register_event_fn(as_fabric_event_fn event_cb, void *udata_
 // one handler. Right now there is only one handlers - but it's really cheap to have multiple
 // handlers, if we wanted, because of the reference counting system.
 
-extern int as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz,  as_fabric_msg_fn msg_cb, void *udata_msg);
+extern int as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz, size_t scratch_sz, as_fabric_msg_fn msg_cb, void *udata_msg);
 
 // Call this once your register functions are all done and ready (or ready enough)
 
@@ -172,7 +172,7 @@ extern void as_fabric_transact_start(cf_node node, msg *m, int timeout_ms, as_fa
 
 typedef int (*as_fabric_transact_recv_fn) (cf_node node, msg *msg, void *transact_data, void *udata);
 
-extern int as_fabric_transact_register(	msg_type type, const msg_template *mt, size_t mt_sz,  as_fabric_transact_recv_fn cb, void *udata);
+extern int as_fabric_transact_register(msg_type type, const msg_template *mt, size_t mt_sz, size_t scratch_sz, as_fabric_transact_recv_fn cb, void *udata);
 
 // this is how you reply to a message you've received - pass back the same transact data
 extern int as_fabric_transact_reply(msg *reply_msg, void *transact_data);

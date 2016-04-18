@@ -120,6 +120,8 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_PVOID_TIME, M_FT_UINT32 },
 };
 
+#define MIG_MSG_SCRATCH_SIZE 128
+
 // If the bit is not set then it is normal record.
 #define MIG_INFO_LDT_REC    0x0001
 #define MIG_INFO_LDT_SUBREC 0x0002
@@ -339,7 +341,7 @@ as_migrate_init()
 	}
 
 	as_fabric_register_msg_fn(M_TYPE_MIGRATE, migrate_mt, sizeof(migrate_mt),
-			migrate_receive_msg_cb, NULL);
+			MIG_MSG_SCRATCH_SIZE, migrate_receive_msg_cb, NULL);
 }
 
 

@@ -85,6 +85,8 @@ msg_template proxy_mt[] = {
 	{ PROXY_FIELD_INFO, M_FT_UINT32 },
 };
 
+#define PROXY_MSG_SCRATCH_SIZE 128
+
 typedef struct proxy_request_s {
 	uint32_t		msg_fields;
 
@@ -1135,7 +1137,7 @@ as_proxy_init()
 
 	pthread_create(&g_proxy_retransmit_th, 0, proxy_retransmit_fn, 0);
 
-	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt), proxy_msg_fn, NULL);
+	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt), PROXY_MSG_SCRATCH_SIZE, proxy_msg_fn, NULL);
 
 	as_paxos_register_change_callback(as_proxy_paxos_change, 0);
 }

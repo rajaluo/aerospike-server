@@ -141,6 +141,8 @@ msg_template info_mt[] = {
 	{ INFO_FIELD_ALT_ADDRESS, M_FT_STR }
 };
 
+#define INFO_MSG_SCRATCH_SIZE 128
+
 // Is dumping GLibC-level memory stats enabled?
 static bool g_mstats_enabled = false;
 
@@ -7116,7 +7118,7 @@ as_info_init()
 		}
 	}
 
-	as_fabric_register_msg_fn(M_TYPE_INFO, info_mt, sizeof(info_mt), info_msg_fn, 0 /* udata */ );
+	as_fabric_register_msg_fn(M_TYPE_INFO, info_mt, sizeof(info_mt), INFO_MSG_SCRATCH_SIZE, info_msg_fn, 0 /* udata */ );
 
 	pthread_t info_interfaces_th;
 	// if there's a statically configured external interface, use this simple function to monitor
