@@ -460,7 +460,18 @@ cf_socket_connect_nb(cf_sockaddr so, int *fd_r)
 int
 cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 {
+	cf_assert(ms, CF_SOCKET, CF_CRITICAL, "invalid argument");
 	cf_socket_cfg *s = &(ms->s);
+
+	if (!s->addr) {
+		cf_warning(CF_SOCKET, "multicast socket address not configured");
+		return -1;
+	}
+
+	if (!s->port) {
+		cf_warning(CF_SOCKET, "multicast socket port not configured");
+		return -1;
+	}
 
 	if (0 > (s->sock = socket(AF_INET, SOCK_DGRAM, 0))) {
 		cf_warning(CF_SOCKET, "multicast socket open error: %d %s", errno, cf_strerror(errno));
