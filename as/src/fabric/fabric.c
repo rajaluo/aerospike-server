@@ -1298,12 +1298,7 @@ fabric_worker_add(fabric_args *fa, fabric_buffer *fb)
 	e.fb = fb;
 
 	// decide which queue to add to -- try round robin for the moment
-	int worker;
-	do {
-		worker = worker_add_index % fa->num_workers;
-		worker_add_index++;
-	} while(fa->note_fd[worker] == 0);
-
+	int worker = worker_add_index++ % fa->num_workers;
 	cf_debug(AS_FABRIC, "worker_fabric_add: adding fd %d to worker id %d notefd %d", fb->fd, worker, fa->note_fd[worker]);
 
 	fb->worker_id = worker;
@@ -1916,6 +1911,13 @@ as_fabric_start()
 		// todo: handle errors
 		fa->workers_queue[i] = cf_queue_create( sizeof(worker_queue_element), true);
 		pthread_create( &(fa->workers_th[i]), 0, fabric_worker_fn, fa);
+	}
+
+	// We want all workers to be available before starting the accept thread.
+	for (int32_t i = 0; i < fa->num_workers; ++i) {
+		while (fa->note_fd[i] == 0) {
+			usleep(100 * 1000);
+		}
 	}
 
 	// Create the Accept thread
