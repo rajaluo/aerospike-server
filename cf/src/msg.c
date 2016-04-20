@@ -107,7 +107,7 @@ msg_create(msg **m_r, msg_type type, const msg_template *mt, size_t mt_sz,
 	if (g_max_msgs_per_type > 0 &&
 			cf_atomic_int_get(g_num_msgs_by_type[type]) >=
 					g_max_msgs_per_type) {
-		cf_warning(CF_MSG, "refusing to allocate more than %d msg of type %d",
+		cf_warning(CF_MSG, "refusing to allocate more than %ld msg of type %d",
 				g_max_msgs_per_type, type);
 		return -1;
 	}
