@@ -350,6 +350,10 @@ swb_dereference_and_release(drv_ssd *ssd, uint32_t wblock_id,
 			push_wblock_to_defrag_q(ssd, wblock_id);
 		}
 	}
+	else {
+		cf_warning(AS_DRV_SSD, "device %s: wblock-id %u state is DEFRAG on swb release",
+				ssd->name, wblock_id);
+	}
 
 	pthread_mutex_unlock(&wblock_state->LOCK);
 }
