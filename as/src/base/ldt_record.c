@@ -270,6 +270,23 @@ ldt_record_bin_names(const as_rec * rec, as_rec_bin_names_callback callback, voi
 	return as_rec_bin_names(h_urec, callback, context);
 }
 
+static uint16_t
+ldt_record_numbins(const as_rec * rec)
+{
+	static const char * meth = "ldt_record_numbins()";
+	if (!rec) {
+		cf_warning(AS_UDF, "%s Invalid Parameters: record=%p", meth, rec);
+		return 0;
+	}
+	ldt_record *lrecord  = (ldt_record *)as_rec_source(rec);
+	if (!lrecord) {
+		return 0;
+	}
+	const as_rec *h_urec = lrecord->h_urec;
+
+	return as_rec_numbins(h_urec);
+}
+
 const as_rec_hooks ldt_record_hooks = {
 	.get		= ldt_record_get,
 	.set		= ldt_record_set,
@@ -285,5 +302,5 @@ const as_rec_hooks ldt_record_hooks = {
 	.set_ttl	= ldt_record_set_ttl,
 	.drop_key	= ldt_record_drop_key,
 	.bin_names	= ldt_record_bin_names,
-	.numbins	= NULL
+	.numbins	= ldt_record_numbins
 };

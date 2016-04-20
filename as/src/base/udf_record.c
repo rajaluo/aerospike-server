@@ -1114,6 +1114,37 @@ udf_record_bin_names(const as_rec *rec, as_rec_bin_names_callback callback, void
 	}
 }
 
+static uint16_t
+udf_record_numbins(const as_rec * rec)
+{
+	int ret = udf_record_param_check(rec, UDF_BIN_NONAME, __FILE__, __LINE__);
+	if (ret) {
+		return 0;
+	}
+
+	udf_record *urecord = (udf_record *) as_rec_source(rec);
+	if (urecord && (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN)) {
+
+		if (urecord->rd->ns->single_bin) {
+			return 1;
+		}
+
+		uint16_t i;
+		as_storage_rd *rd = urecord->rd;
+		for (i = 0; i < rd->n_bins; i++) {
+			as_bin *b = &rd->bins[i];
+			if (! as_bin_inuse(b)) {
+				break;
+			}
+		}
+		return i;
+	}
+	else {
+		cf_warning(AS_UDF, "Error in getting numbins: no record found");
+		return 0;
+	}
+}
+
 const as_rec_hooks udf_record_hooks = {
 	.get		= udf_record_get,
 	.set		= udf_record_set,
@@ -1129,5 +1160,5 @@ const as_rec_hooks udf_record_hooks = {
 	.set_ttl	= udf_record_set_ttl,
 	.drop_key	= udf_record_drop_key,
 	.bin_names	= udf_record_bin_names,
-	.numbins	= NULL,
+	.numbins	= udf_record_numbins
 };
