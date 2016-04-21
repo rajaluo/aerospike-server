@@ -3361,6 +3361,8 @@ as_config_post_process(as_config *c, const char *config_file)
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
+		client_replica_maps_create(ns);
+
 		char hist_name[HISTOGRAM_NAME_SIZE];
 		// Note - histograms' ranges MUST be set before use.
 
