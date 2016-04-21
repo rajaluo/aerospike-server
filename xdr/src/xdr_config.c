@@ -67,7 +67,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
 		{ "xdr-client-threads",				XDR_CASE_CLIENT_THREADS },
 		{ "timeout",						XDR_CASE_TIMEOUT },							// not exposed to users
-		{ "enable-xdr-delete-shipping",		XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
+		{ "xdr-delete-shipping-enabled",	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-replace-record",				XDR_CASE_XDR_REPLACE_RECORD },
 		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
 		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },

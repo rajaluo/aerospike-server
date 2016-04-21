@@ -88,6 +88,9 @@ msg_template rw_mt[] =
 	{ RW_FIELD_MULTIOP, M_FT_BUF },
 	{ RW_FIELD_LDT_VERSION, M_FT_UINT64 },
 };
+
+#define RW_MSG_SCRATCH_SIZE 280 // 128 + 152 for prole deletes
+
 // General Debug Stmts
 // #define DEBUG 1
 // Specific Flag to dump the MSG
@@ -457,6 +460,8 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		as_rec_props * p_pickled_rec_props, int op, bool has_udf,
 		bool is_subrec, bool fast_dupl_resolve)
 {
+	msg_reset(m);
+
 	// setup the write message
 	msg_set_buf(m, RW_FIELD_DIGEST, (void *) keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
@@ -486,7 +491,6 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 			as_ldt_get_property(p_pickled_rec_props, &is_ldt_parent, &is_ldt_sub);
 			rw_msg_setup_infobits(m, tr, has_udf, is_ldt_sub, is_ldt_parent);
 
-			msg_set_unset(m, RW_FIELD_AS_MSG);
 			msg_set_buf(m, RW_FIELD_RECORD, (void *) *p_pickled_buf, pickled_sz,
 					MSG_SET_HANDOFF_MALLOC);
 			*p_pickled_buf = NULL;
@@ -500,10 +504,10 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 			cf_detail_digest(AS_RW, keyd, "Send delete to replica ");
 			msg_set_buf(m, RW_FIELD_AS_MSG, (void *) tr->msgp,
 					as_proto_size_get(&tr->msgp->proto), MSG_SET_COPY);
-			msg_set_unset(m, RW_FIELD_RECORD);
 
 			rw_msg_setup_infobits(m, tr, has_udf, is_subrec, false);
 
+			// XXX - temporary paranoia:
 			if ((tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) == 0) {
 				uint32_t info = 0;
 				msg_get_uint32(m, RW_FIELD_INFO, &info);
@@ -536,9 +540,6 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		rw_msg_setup_ldt_fields(m, tr, keyd);
 
 		msg_set_uint32(m, RW_FIELD_INFO, RW_INFO_LDT);
-		msg_set_unset(m, RW_FIELD_AS_MSG);
-		msg_set_unset(m, RW_FIELD_RECORD);
-		msg_set_unset(m, RW_FIELD_REC_PROPS);
 		msg_set_buf(m, RW_FIELD_MULTIOP, (void *) *p_pickled_buf, pickled_sz,
 				MSG_SET_HANDOFF_MALLOC);
 		*p_pickled_buf = NULL;
@@ -2035,6 +2036,8 @@ rw_dup_prole(cf_node node, msg *m)
 	bool local_conflict_check = (0 == msg_get_uint32(m, RW_FIELD_GENERATION, &generation)
 			&& 0 == msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time));
 
+	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
+
 	// NB need to use the _migrate variant here so we can write into desync
 	as_partition_reservation rsv;
 	AS_PARTITION_RESERVATION_INIT(rsv);
@@ -2089,7 +2092,6 @@ rw_dup_prole(cf_node node, msg *m)
 
 		if (0 != as_storage_record_open(rsv.ns, r, &rd, keyd)) {
 			cf_debug(AS_RW, "pickle: couldn't open record");
-			msg_set_unset(m, RW_FIELD_VINFOSET);
 			cf_atomic_int_incr(&g_config.rw_err_dup_internal);
 			goto Out3;
 		}
@@ -2100,7 +2102,6 @@ rw_dup_prole(cf_node node, msg *m)
 
 		if (0 != as_record_pickle(r, &rd, &buf, &buf_len)) {
 			cf_info(AS_RW, "pickle: could not allocate memory");
-			msg_set_unset(m, RW_FIELD_VINFOSET);
 			cf_atomic_int_incr(&g_config.rw_err_dup_internal);
 			as_storage_record_close(r, &rd);
 			goto Out3;
@@ -2115,8 +2116,6 @@ rw_dup_prole(cf_node node, msg *m)
 			as_storage_record_set_rec_props(&rd, rec_props_data);
 			msg_set_buf(m, RW_FIELD_REC_PROPS, rd.rec_props.p_data,
 					rd.rec_props.size, MSG_SET_COPY);
-			// TODO - better to use as_storage_record_copy_rec_props() and
-			// MSG_SET_HANDOFF_MALLOC?
 		}
 
 		as_storage_record_close(r, &rd);
@@ -2150,7 +2149,6 @@ Out2:
 Out1:
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result_code);
-	msg_set_unset(m, RW_FIELD_NAMESPACE);
 
 	int rv2 = as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM);
 	if (rv2 != 0) {
@@ -2782,10 +2780,8 @@ Out:
 				result_code);
 	}
 
-	// clear out the old message, change op to ack, set result code and add new response if any
-	msg_set_unset(m, RW_FIELD_AS_MSG);
-	msg_set_unset(m, RW_FIELD_RECORD);
-	msg_set_unset(m, RW_FIELD_REC_PROPS);
+	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
+
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result_code);
 
@@ -5220,9 +5216,8 @@ Out:
 		}
 	}
 
-	msg_set_unset(m, RW_FIELD_AS_MSG);
-	msg_set_unset(m, RW_FIELD_RECORD);
-	msg_set_unset(m, RW_FIELD_REC_PROPS);
+	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
+
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result_code);
 
@@ -5669,8 +5664,8 @@ as_write_init()
 		return;
 	}
 
-	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt), write_msg_fn,
-			0 /* udata */);
+	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt),
+			RW_MSG_SCRATCH_SIZE, write_msg_fn, 0 /* udata */);
 
 	as_paxos_register_change_callback(rw_paxos_change, 0);
 
@@ -6153,7 +6148,7 @@ rw_multi_process(cf_node node, msg *m)
 			goto Out;
 		}
 
-		if (msg_parse(op_msg, (const uint8_t *) buf, sz, false)) {
+		if (msg_parse(op_msg, (const uint8_t *) buf, sz)) {
 			ret = -3;
 			as_fabric_msg_put(op_msg);
 			goto Out;
@@ -6182,6 +6177,7 @@ Out:
 		cf_warning(AS_RW,
 				"MULTI_OP: Internal Error ... Multi Op Message Corrupted ");
 		as_fabric_msg_put(m);
+		// FIXME - we're using 'm' below - but it may be gone?!
 	}
 
 	if (reserved) {
@@ -6190,9 +6186,8 @@ Out:
 		reserved = false;
 	}
 
-	msg_set_unset(m, RW_FIELD_AS_MSG);
-	msg_set_unset(m, RW_FIELD_RECORD);
-	msg_set_unset(m, RW_FIELD_REC_PROPS);
+	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
+
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_MULTI_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result_code);
 

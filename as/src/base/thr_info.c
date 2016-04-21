@@ -141,6 +141,8 @@ msg_template info_mt[] = {
 	{ INFO_FIELD_ALT_ADDRESS, M_FT_STR }
 };
 
+#define INFO_MSG_SCRATCH_SIZE 128
+
 // Is dumping GLibC-level memory stats enabled?
 static bool g_mstats_enabled = false;
 
@@ -5656,8 +5658,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			pthread_mutex_unlock(vlock_info_history_hash);
 
 			// Send the ack.
-			msg_set_unset(m, INFO_FIELD_SERVICE_ADDRESS);
-			msg_set_unset(m, INFO_FIELD_ALT_ADDRESS);
+			msg_preserve_fields(m, 1, INFO_FIELD_GENERATION);
 			msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_ACK);
 
 			if ((rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH))) {
@@ -7117,7 +7118,7 @@ as_info_init()
 		}
 	}
 
-	as_fabric_register_msg_fn(M_TYPE_INFO, info_mt, sizeof(info_mt), info_msg_fn, 0 /* udata */ );
+	as_fabric_register_msg_fn(M_TYPE_INFO, info_mt, sizeof(info_mt), INFO_MSG_SCRATCH_SIZE, info_msg_fn, 0 /* udata */ );
 
 	pthread_t info_interfaces_th;
 	// if there's a statically configured external interface, use this simple function to monitor

@@ -211,6 +211,8 @@ static const msg_template as_hb_msg_template[] = {
 	{ AS_HB_MSG_ANV_LENGTH, M_FT_UINT32 }
 };
 
+#define AS_HB_MSG_SCRATCH_SIZE 512 // accommodate 64-node cluster
+
 /* as_hb_pulse
  * A tracking structure for heartbeats
  * These structures are stored in the adjacency hash, indexed by node id
@@ -1375,6 +1377,11 @@ as_hb_tip(char *host, int port)
 {
 	cf_debug(AS_HB, " Heartbeat: tipped about server at %s:%d", host, port);
 
+	if (AS_HB_MODE_MESH != g_config.hb_mode) {
+		cf_warning(AS_HB, "tip command is only supported in heartbeat mode \"mesh\"");
+		return(-1);
+	}
+
 	return mesh_host_list_add(host, port, true);
 }
 
@@ -2071,7 +2078,8 @@ as_hb_thr(void *arg)
 
 	/* Register fabric heartbeat msg type with no processing function:
 	   This permits getting / putting heartbeat msgs to be moderated via an idle msg queue. */
-	as_fabric_register_msg_fn(M_TYPE_HEARTBEAT, as_hb_msg_template, sizeof(as_hb_msg_template), 0, 0);
+	as_fabric_register_msg_fn(M_TYPE_HEARTBEAT, as_hb_msg_template,
+			sizeof(as_hb_msg_template), AS_HB_MSG_SCRATCH_SIZE, 0, 0);
 
 	/* Create the invariant portion of the heartbeat message */
 	mt = as_fabric_msg_get(M_TYPE_HEARTBEAT);
@@ -2216,7 +2224,7 @@ CloseSocket:
 					}
 					cf_detail(AS_HB, "received %d bytes, calling msg_parse", r);
 					if (r > 0) {
-						if (0 > msg_parse(mr, bufr, r, false)) {
+						if (0 > msg_parse(mr, bufr, r)) {
 							cf_detail(AS_HB, "unable to parse heartbeat message");
 							as_hb_error(AS_HB_ERR_UNPARSABLE_MSG);
 						} else {
@@ -2652,8 +2660,9 @@ as_hb_init_socket()
 			g_hb.socket_mcast.s.port = g_config.hb_port;
 			g_hb.socket_mcast.tx_addr = g_config.hb_tx_addr;
 			g_hb.socket_mcast.mcast_ttl = g_config.hb_mcast_ttl;
-			if (0 != cf_mcastsocket_init(&g_hb.socket_mcast))
-				cf_crash(AS_HB, "couldn't initialize multicast heartbeat socket: %s", cf_strerror(errno));
+			if (0 != cf_mcastsocket_init(&g_hb.socket_mcast)) {
+				cf_crash(AS_HB, "couldn't initialize multicast heartbeat socket");
+			}
 			cf_debug(AS_HB, "Opened multicast socket %d", g_hb.socket_mcast.s.sock);
 			break;
 		case AS_HB_MODE_MESH:
@@ -2662,8 +2671,9 @@ as_hb_init_socket()
 			g_hb.socket.port = g_config.hb_port;
 			g_hb.socket.proto = SOCK_STREAM;
 			g_hb.socket.reuse_addr = (g_config.socket_reuse_addr) ? true : false;
-			if (0 != cf_socket_init_svc(&g_hb.socket))
-				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket: %s", cf_strerror(errno));
+			if (0 != cf_socket_init_svc(&g_hb.socket)) {
+				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket");
+			}
 			break;
 		case AS_HB_MODE_UNDEF:
 		default:

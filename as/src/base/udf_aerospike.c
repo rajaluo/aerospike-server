@@ -575,6 +575,12 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			failmax = (int)urecord->nupdates;
 			goto Rollback;
 		}
+
+		if (! as_storage_has_space(rd->ns)) {
+			cf_warning(AS_UDF, "drives full, record will not be updated");
+			failmax = (int)urecord->nupdates;
+			goto Rollback;
+		}
 	}
 
 	if (has_sindex) {

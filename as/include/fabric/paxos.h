@@ -117,6 +117,8 @@ static const msg_template as_paxos_msg_template[] = {
 	{ AS_PAXOS_MSG_PARTITIONSZ, M_FT_ARRAY_BUF}
 };
 
+#define AS_PAXOS_MSG_SCRATCH_SIZE 1536 // accommodate AS_PAXOS_MSG_HEARTBEAT_EVENTS in 64-node cluster
+
 
 /* Paxos command encoding
  * Representations of the possible Paxos message types; if these get

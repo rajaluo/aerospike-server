@@ -85,6 +85,8 @@ msg_template proxy_mt[] = {
 	{ PROXY_FIELD_INFO, M_FT_UINT32 },
 };
 
+#define PROXY_MSG_SCRATCH_SIZE 128
+
 typedef struct proxy_request_s {
 	uint32_t		msg_fields;
 
@@ -367,6 +369,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 
 	// Case 1: Non-originating node.
 	if (wr->origin == FROM_PROXY) {
+		msg_preserve_fields(m, 2, PROXY_FIELD_OP, PROXY_FIELD_AS_PROTO);
 		// Remember that "digest" gets printed at the end of cf_detail_digest().
 		// Fake the ORIGINATING Proxy tid
 		msg_set_uint32(m, PROXY_FIELD_TID, wr->from_data.proxy_tid);
@@ -1134,7 +1137,7 @@ as_proxy_init()
 
 	pthread_create(&g_proxy_retransmit_th, 0, proxy_retransmit_fn, 0);
 
-	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt), proxy_msg_fn, NULL);
+	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt), PROXY_MSG_SCRATCH_SIZE, proxy_msg_fn, NULL);
 
 	as_paxos_register_change_callback(as_proxy_paxos_change, 0);
 }

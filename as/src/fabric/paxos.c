@@ -1994,6 +1994,8 @@ as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 
 	cf_assert(m, AS_PAXOS, CF_CRITICAL, "null message");
 
+	msg_preserve_all_fields(m);
+
 	qm = cf_calloc(1, sizeof(as_paxos_msg));
 	cf_assert(qm, AS_PAXOS, CF_CRITICAL, "allocation: %s", cf_strerror(errno));
 	qm->id = id;
@@ -3335,7 +3337,9 @@ as_paxos_init()
 
 	/* Register with the fabric */
 	as_fabric_register_event_fn(&as_paxos_event, NULL);
-	as_fabric_register_msg_fn(M_TYPE_PAXOS, as_paxos_msg_template, sizeof(as_paxos_msg_template), &as_paxos_msgq_push, NULL);
+	as_fabric_register_msg_fn(M_TYPE_PAXOS, as_paxos_msg_template,
+			sizeof(as_paxos_msg_template), AS_PAXOS_MSG_SCRATCH_SIZE,
+			&as_paxos_msgq_push, NULL);
 
 	/* this may not be needed but just do it anyway */
 	memset(p->c_partition_vinfo, 0, sizeof(p->c_partition_vinfo));

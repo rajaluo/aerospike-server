@@ -120,6 +120,8 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_PVOID_TIME, M_FT_UINT32 },
 };
 
+#define MIG_MSG_SCRATCH_SIZE 128
+
 // If the bit is not set then it is normal record.
 #define MIG_INFO_LDT_REC    0x0001
 #define MIG_INFO_LDT_SUBREC 0x0002
@@ -127,7 +129,7 @@ const msg_template migrate_mt[] = {
 
 #define MIGRATE_RETRANSMIT_MS (g_config.transaction_retry_ms)
 #define MIGRATE_RETRANSMIT_STARTDONE_MS (g_config.transaction_retry_ms)
-#define MAX_BYTES_EMIGRATING (32 * 1024 * 1024)
+#define MAX_BYTES_EMIGRATING (16 * 1024 * 1024)
 
 typedef struct pickled_record_s {
 	cf_digest     keyd;
@@ -143,11 +145,19 @@ typedef struct pickled_record_s {
 	uint64_t      version;
 } pickled_record;
 
+typedef enum {
+	// Order matters - we use an atomic set-max that relies on it.
+	EMIG_STATE_ACTIVE,
+	EMIG_STATE_FINISHED,
+	EMIG_STATE_ABORTED
+} emigration_state;
+
 typedef struct emigration_s {
 	cf_node     dest;
 	uint64_t    cluster_key;
 	uint32_t    id;
 	uint32_t    tx_flags;
+	cf_atomic32 state;
 	bool        aborted;
 	as_partition_mig_tx_state tx_state; // really only for LDT
 
@@ -217,6 +227,7 @@ static shash *g_immigration_ldt_version_hash;
 
 // Emigration, immigration, & pickled record destructors.
 void emigration_destroy(void *parm);
+int emigration_reinsert_destroy_reduce_fn(void *key, void *data, void *udata);
 void emigration_release(emigration *emig);
 void immigration_destroy(void *parm);
 void immigration_release(immigration *immig);
@@ -228,6 +239,7 @@ void emigration_pop(emigration **emigp);
 int emigration_pop_reduce_fn(void *buf, void *udata);
 as_migrate_state emigrate(emigration *emig);
 as_migrate_state emigrate_tree(emigration *emig);
+void *run_emigration_reinserter(void *arg);
 void emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata);
 bool emigrate_record(emigration *emig, msg *m);
 int emigration_reinsert_reduce_fn(void *key, void *data, void *udata);
@@ -329,7 +341,7 @@ as_migrate_init()
 	}
 
 	as_fabric_register_msg_fn(M_TYPE_MIGRATE, migrate_mt, sizeof(migrate_mt),
-			migrate_receive_msg_cb, NULL);
+			MIG_MSG_SCRATCH_SIZE, migrate_receive_msg_cb, NULL);
 }
 
 
@@ -348,6 +360,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr,
 	emig->cluster_key = pmr->cluster_key;
 	emig->id = cf_atomic32_incr(&g_emigration_id);
 	emig->tx_flags = pmr->tx_flags;
+	emig->state = EMIG_STATE_ACTIVE;
 	emig->aborted = false;
 
 	// Create these later only when we need them - we'll get lots at once.
@@ -501,6 +514,8 @@ emigration_destroy(void *parm)
 	emigration *emig = (emigration *)parm;
 
 	if (emig->reinsert_hash) {
+		shash_reduce_delete(emig->reinsert_hash,
+				emigration_reinsert_destroy_reduce_fn, NULL);
 		shash_destroy(emig->reinsert_hash);
 	}
 
@@ -514,6 +529,17 @@ emigration_destroy(void *parm)
 	}
 
 	cf_atomic_int_decr(&g_config.migrate_tx_object_count);
+}
+
+
+int
+emigration_reinsert_destroy_reduce_fn(void *key, void *data, void *udata)
+{
+	emigration_reinsert_ctrl *ri_ctrl = (emigration_reinsert_ctrl *)data;
+
+	as_fabric_msg_put(ri_ctrl->m);
+
+	return SHASH_REDUCE_DELETE;
 }
 
 
@@ -709,7 +735,7 @@ emigrate(emigration *emig)
 
 	if (shash_create(&emig->reinsert_hash, emigration_insert_hashfn,
 			sizeof(uint32_t), sizeof(emigration_reinsert_ctrl),
-			32 * 1024, SHASH_CR_MT_BIGLOCK) != SHASH_OK) {
+			16 * 1024, SHASH_CR_MT_MANYLOCK) != SHASH_OK) {
 		cf_warning(AS_MIGRATE, "imbalance: failed to allocate reinsert hash");
 		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 		return AS_MIGRATE_STATE_ERROR;
@@ -764,24 +790,53 @@ emigrate_tree(emigration *emig)
 		return AS_MIGRATE_STATE_DONE;
 	}
 
-	as_index_reduce(tree, emigrate_tree_reduce_fn, emig);
+	cf_atomic32_set(&emig->state, EMIG_STATE_ACTIVE);
 
-	if (emig->aborted) {
-		return AS_MIGRATE_STATE_ERROR;
+	pthread_t thread;
+
+	if (pthread_create(&thread, NULL, run_emigration_reinserter, emig) != 0) {
+		cf_crash(AS_MIGRATE, "could not start reinserter thread");
 	}
 
+	as_index_reduce(tree, emigrate_tree_reduce_fn, emig);
+
+	// Sets EMIG_STATE_FINISHED only if not already EMIG_STATE_ABORTED.
+	cf_atomic32_setmax(&emig->state, EMIG_STATE_FINISHED);
+
+	pthread_join(thread, NULL);
+
+	return emig->state == EMIG_STATE_ABORTED ?
+			AS_MIGRATE_STATE_ERROR : AS_MIGRATE_STATE_DONE;
+}
+
+
+void *
+run_emigration_reinserter(void *arg)
+{
+	emigration *emig = (emigration *)arg;
+	emigration_state emig_state;
+
 	// Reduce over the reinsert hash until finished.
-	while (true) {
+	while ((emig_state = cf_atomic32_get(emig->state)) != EMIG_STATE_ABORTED) {
 		if (emig->cluster_key != as_paxos_get_cluster_key()) {
-			return AS_MIGRATE_STATE_ERROR;
+			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+			return NULL;
 		}
 
-		uint64_t now = cf_getms();
+		usleep(1000);
+
+		if (shash_get_size(emig->reinsert_hash) == 0) {
+			if (emig_state == EMIG_STATE_FINISHED) {
+				return NULL;
+			}
+
+			continue;
+		}
 
 		// The only rv from this is the rv of the reduce fn, which is the
 		// return value of a fabric_send.
 		int rv = shash_reduce(emig->reinsert_hash,
-				emigration_reinsert_reduce_fn, &now);
+				emigration_reinsert_reduce_fn, (void *)cf_getms());
 
 		switch (rv) {
 		case AS_FABRIC_SUCCESS:
@@ -789,22 +844,18 @@ emigrate_tree(emigration *emig)
 			break;
 		case AS_FABRIC_ERR_NO_NODE:
 			// New rebalance expected.
-			return AS_MIGRATE_STATE_ERROR;
+			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+			return NULL;
 		default:
 			cf_warning(AS_MIGRATE, "imbalance: failure emigrating - bad fabric send in retransmission - error %d",
 					rv);
 			cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_partitions_imbalance);
-			return AS_MIGRATE_STATE_ERROR;
+			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
+			return NULL;
 		}
-
-		if (shash_get_size(emig->reinsert_hash) == 0) {
-			break;
-		}
-
-		usleep(1000 * 50);
 	}
 
-	return AS_MIGRATE_STATE_DONE;
+	return NULL;
 }
 
 
@@ -822,6 +873,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	if (emig->cluster_key != as_paxos_get_cluster_key()) {
 		as_record_done(r_ref, ns);
 		emig->aborted = true;
+		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
 		return; // no point continuing to reduce this tree
 	}
 
@@ -878,6 +930,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 		pickled_record_destroy(&pr);
 		emig->aborted = true;
+		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
 		return;
 	}
 
@@ -912,6 +965,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	// hard-fail - can't notify other side.
 	if (! emigrate_record(emig, m)) {
 		emig->aborted = true;
+		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
 		return;
 	}
 
@@ -953,7 +1007,7 @@ emigrate_record(emigration *emig, msg *m)
 		return false;
 	}
 
-	cf_atomic32_add(&emig->bytes_emigrating, m->bytes_used);
+	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
 
 	int rv;
 
@@ -985,7 +1039,7 @@ int
 emigration_reinsert_reduce_fn(void *key, void *data, void *udata)
 {
 	emigration_reinsert_ctrl *ri_ctrl = (emigration_reinsert_ctrl *)data;
-	uint64_t now = *(uint64_t *)udata;
+	uint64_t now = (uint64_t)udata;
 
 	if (ri_ctrl->xmit_ms + MIGRATE_RETRANSMIT_MS < now) {
 		msg_incr_ref(ri_ctrl->m);
@@ -1095,19 +1149,16 @@ emigration_send_start(emigration *emig)
 as_migrate_state
 emigration_send_done(emigration *emig)
 {
-	msg *done_m = as_fabric_msg_get(M_TYPE_MIGRATE);
+	msg *m = as_fabric_msg_get(M_TYPE_MIGRATE);
 
-	if (! done_m) {
+	if (! m) {
 		cf_warning(AS_MIGRATE, "imbalance: failed to get fabric msg");
 		cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_partitions_imbalance);
 		return -1;
 	}
 
-	msg_set_uint32(done_m, MIG_FIELD_OP, OPERATION_DONE);
-	msg_set_uint32(done_m, MIG_FIELD_EMIG_ID, emig->id);
-	msg_set_buf(done_m, MIG_FIELD_NAMESPACE, (byte *)emig->rsv.ns->name,
-			strlen(emig->rsv.ns->name), MSG_SET_COPY);
-	msg_set_uint32(done_m, MIG_FIELD_PARTITION, emig->rsv.pid);
+	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_DONE);
+	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 
 	uint64_t done_xmit_ms = 0;
 
@@ -1115,19 +1166,18 @@ emigration_send_done(emigration *emig)
 		uint64_t now = cf_getms();
 
 		if (done_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
-			cf_rc_reserve(done_m);
+			cf_rc_reserve(m);
 
-			int rv = as_fabric_send(emig->dest, done_m,
-					AS_FABRIC_PRIORITY_MEDIUM);
+			int rv = as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM);
 
 			if (rv == AS_FABRIC_SUCCESS) {
 				cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 			}
 			else {
-				as_fabric_msg_put(done_m);
+				as_fabric_msg_put(m);
 
 				if (rv == AS_FABRIC_ERR_NO_NODE) {
-					as_fabric_msg_put(done_m);
+					as_fabric_msg_put(m);
 					return AS_MIGRATE_STATE_ERROR;
 				}
 			}
@@ -1141,7 +1191,7 @@ emigration_send_done(emigration *emig)
 				MIGRATE_RETRANSMIT_STARTDONE_MS) == CF_QUEUE_OK) {
 			if (emig_ctrl.emig_id == emig->id &&
 					emig_ctrl.op == OPERATION_DONE_ACK) {
-				as_fabric_msg_put(done_m);
+				as_fabric_msg_put(m);
 				return AS_MIGRATE_STATE_DONE;
 			}
 		}
@@ -1268,35 +1318,11 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		return;
 	}
 
-	immigration *immig = cf_rc_alloc(sizeof(immigration));
+	uint64_t cluster_key;
 
-	cf_assert(immig, AS_MIGRATE, CF_CRITICAL, "malloc");
-	cf_atomic_int_incr(&g_config.migrate_rx_object_count);
-
-	immig->done_recv = 0;
-	immig->done_recv_ms = 0;
-	immig->incoming_ldt_version = 0;
-	immig->start_recv_ms = 0;
-	immig->src = src;
-	AS_PARTITION_RESERVATION_INIT(immig->rsv);
-
-	if (msg_get_uint64(m, MIG_FIELD_CLUSTER_KEY, &immig->cluster_key) != 0) {
+	if (msg_get_uint64(m, MIG_FIELD_CLUSTER_KEY, &cluster_key) != 0) {
 		cf_warning(AS_MIGRATE, "handle start: msg get for cluster key failed");
-		immigration_release(immig);
 		as_fabric_msg_put(m);
-		return;
-	}
-
-	if (immig->cluster_key != as_paxos_get_cluster_key()) {
-		immigration_release(immig);
-		// Do not fail, sender may be from an advanced cluster key.
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_EAGAIN);
-
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-
 		return;
 	}
 
@@ -1305,7 +1331,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 	if (msg_get_buf(m, MIG_FIELD_NAMESPACE, &ns_name, &ns_name_len,
 			MSG_GET_DIRECT) != 0) {
-		immigration_release(immig);
+		cf_warning(AS_MIGRATE, "handle start: msg get for namespace failed");
 		as_fabric_msg_put(m);
 		return;
 	}
@@ -1314,7 +1340,6 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 	if (! ns) {
 		cf_warning(AS_MIGRATE, "handle start: bad namespace");
-		immigration_release(immig);
 		as_fabric_msg_put(m);
 		return;
 	}
@@ -1323,17 +1348,21 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 	if (msg_get_uint32(m, MIG_FIELD_PARTITION, &pid) != 0) {
 		cf_warning(AS_MIGRATE, "handle start: msg get for pid failed");
-		immigration_release(immig);
 		as_fabric_msg_put(m);
 		return;
 	}
 
+	uint64_t incoming_ldt_version = 0;
+
+	msg_get_uint64(m, MIG_FIELD_VERSION, &incoming_ldt_version);
+
+	msg_preserve_fields(m, 1, MIG_FIELD_EMIG_ID);
+
 	as_migrate_result rv = as_partition_migrate_rx(AS_MIGRATE_STATE_START, ns,
-			pid, immig->cluster_key, immig->src);
+			pid, cluster_key, src);
 
 	switch (rv) {
 	case AS_MIGRATE_FAIL:
-		immigration_release(immig);
 		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_FAIL);
 		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 				AS_FABRIC_SUCCESS) {
@@ -1341,7 +1370,6 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		}
 		return;
 	case AS_MIGRATE_AGAIN:
-		immigration_release(immig);
 		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_EAGAIN);
 		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 				AS_FABRIC_SUCCESS) {
@@ -1349,7 +1377,6 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		}
 		return;
 	case AS_MIGRATE_ALREADY_DONE:
-		immigration_release(immig);
 		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_ALREADY_DONE);
 		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 				AS_FABRIC_SUCCESS) {
@@ -1363,31 +1390,27 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		break;
 	}
 
+	immigration *immig = cf_rc_alloc(sizeof(immigration));
+
+	cf_assert(immig, AS_MIGRATE, CF_CRITICAL, "malloc");
+	cf_atomic_int_incr(&g_config.migrate_rx_object_count);
+
+	immig->src = src;
+	immig->cluster_key = cluster_key;
+	immig->pid = pid;
+	immig->rx_state = AS_MIGRATE_RX_STATE_SUBRECORD; // always starts this way
+	immig->incoming_ldt_version = incoming_ldt_version;
+	immig->done_recv = 0;
+	immig->start_recv_ms = 0;
+	immig->done_recv_ms = 0;
+
 	as_partition_reserve_migrate(ns, pid, &immig->rsv, NULL);
 	cf_atomic_int_incr(&g_config.migrx_tree_count);
-
-	if (immig->cluster_key != immig->rsv.cluster_key) {
-		immigration_release(immig);
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_EAGAIN);
-
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-
-		return;
-	}
 
 	immigration_hkey hkey;
 
 	hkey.src = src;
 	hkey.emig_id = emig_id;
-
-	// This node is going to accept a migration. When a migration starts it is a
-	// subrecord migration.
-	immig->rx_state = AS_MIGRATE_RX_STATE_SUBRECORD;
-	msg_get_uint64(m, MIG_FIELD_VERSION, &immig->incoming_ldt_version);
-	immig->pid = immig->rsv.p->partition_id;
 
 	if (rchash_put_unique(g_immigration_hash, (void *)&hkey, sizeof(hkey),
 			(void *)immig) == RCHASH_OK) {
@@ -1522,17 +1545,17 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 		immigration_release(immig);
 	}
 
-	msg_set_unset(m, MIG_FIELD_INFO);
-	msg_set_unset(m, MIG_FIELD_RECORD);
-	msg_set_unset(m, MIG_FIELD_DIGEST);
-	msg_set_unset(m, MIG_FIELD_NAMESPACE);
-	msg_set_unset(m, MIG_FIELD_GENERATION);
-	msg_set_unset(m, MIG_FIELD_VOID_TIME);
-	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
-	msg_set_unset(m, MIG_FIELD_REC_PROPS);
+	msg_preserve_fields(m, 2, MIG_FIELD_EMIG_INSERT_ID, MIG_FIELD_EMIG_ID);
 
-	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_LOW) != AS_FABRIC_SUCCESS) {
-		cf_warning(AS_MIGRATE, "handle insert: ack send failed");
+	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
+
+	int rv = as_fabric_send(src, m, AS_FABRIC_PRIORITY_LOW);
+
+	if (rv != AS_FABRIC_SUCCESS) {
+		if (rv != AS_FABRIC_ERR_NO_NODE) {
+			cf_warning(AS_MIGRATE, "handle insert: ack send failed");
+		}
+
 		as_fabric_msg_put(m);
 		return;
 	}
@@ -1550,6 +1573,10 @@ immigration_handle_done_request(cf_node src, msg *m) {
 		as_fabric_msg_put(m);
 		return;
 	}
+
+	msg_preserve_fields(m, 1, MIG_FIELD_EMIG_ID);
+
+	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_DONE_ACK);
 
 	// See if this migration already exists & has been notified.
 	immigration_hkey hkey;
@@ -1582,30 +1609,16 @@ immigration_handle_done_request(cf_node src, msg *m) {
 			immigration_release(immig);
 		}
 		// else - was likely a retransmitted done message.
-
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_DONE_ACK);
-
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-			return;
-		}
-
-		cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 	}
-	else {
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_DONE_ACK);
+	// else - garbage, or super-stale retransmitted done message.
 
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			cf_warning(AS_MIGRATE, "handle done: received unknown done, could not ack");
-			as_fabric_msg_put(m);
-		}
-
-		cf_detail(AS_MIGRATE, "handle done: received done message for unknown migrate, acking source %lx emig id %u",
-				src, emig_id);
-		cf_atomic_int_incr(&g_config.migrate_msgs_sent);
+	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+			AS_FABRIC_SUCCESS) {
+		as_fabric_msg_put(m);
+		return;
 	}
+
+	cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 }
 
 //----------------------------------------------------------
@@ -1647,7 +1660,8 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 	if (shash_get_vlock(emig->reinsert_hash, &insert_id, (void **)&ri_ctrl,
 			&vlock) == SHASH_OK) {
 		if (src == emig->dest) {
-			if (cf_atomic32_sub(&emig->bytes_emigrating, m->bytes_used) < 0) {
+			if (cf_atomic32_sub(&emig->bytes_emigrating,
+					(int32_t)msg_get_wire_size(m)) < 0) {
 				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
 			}
 
@@ -1678,6 +1692,8 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op) {
 		return;
 	}
 
+	as_fabric_msg_put(m);
+
 	emigration *emig;
 
 	if (rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
@@ -1701,8 +1717,6 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op) {
 		cf_detail(AS_MIGRATE, "ctrl ack (%d): can't find emig id %u", op,
 				emig_id);
 	}
-
-	as_fabric_msg_put(m);
 }
 
 
@@ -1802,13 +1816,6 @@ int
 as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr)
 {
 	if (! emig->rsv.ns->ldt_enabled) {
-		msg_set_unset(m, MIG_FIELD_VERSION);
-		msg_set_unset(m, MIG_FIELD_PVOID_TIME);
-		msg_set_unset(m, MIG_FIELD_PGENERATION);
-		msg_set_unset(m, MIG_FIELD_PDIGEST);
-		msg_set_unset(m, MIG_FIELD_EDIGEST);
-		msg_set_unset(m, MIG_FIELD_INFO);
-
 		return 0;
 	}
 
@@ -1846,7 +1853,6 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr)
 
 		if (as_ldt_precord_is_esr(pr)) {
 			info |= MIG_INFO_LDT_ESR;
-			msg_set_unset(m, MIG_FIELD_EDIGEST);
 		}
 		else if (as_ldt_precord_is_subrec(pr)) {
 			info |= MIG_INFO_LDT_SUBREC;
@@ -1857,15 +1863,8 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr)
 			cf_warning(AS_MIGRATE, "expected subrec and esr bit not found");
 		}
 	}
-	else {
-		if (as_ldt_precord_is_parent(pr)) {
-			info |= MIG_INFO_LDT_REC;
-		}
-
-		msg_set_unset(m, MIG_FIELD_PVOID_TIME);
-		msg_set_unset(m, MIG_FIELD_PGENERATION);
-		msg_set_unset(m, MIG_FIELD_PDIGEST);
-		msg_set_unset(m, MIG_FIELD_EDIGEST);
+	else if (as_ldt_precord_is_parent(pr)) {
+		info |= MIG_INFO_LDT_REC;
 	}
 
 	msg_set_uint32(m, MIG_FIELD_INFO, info);
