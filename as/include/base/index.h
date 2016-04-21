@@ -53,9 +53,8 @@ typedef struct as_index_s {
 	// offset: 24
 	cf_arenax_handle right_h;
 	cf_arenax_handle left_h;
-	uint32_t unused_but_reserved;
 
-	// offset: 36
+	// offset: 32
 	// Don't use the free bits here for record info - this is accessed outside
 	// the record lock.
 	uint32_t color: 1; // one bit
@@ -63,13 +62,14 @@ typedef struct as_index_s {
 
 	// Everything below here is used under the record lock.
 
-	// offset: 40
+	// offset: 36
 	uint32_t void_time;
 
-	// offset: 44
-	uint16_t generation;
+	// offset: 40
+	uint64_t last_update_time: 40;
+	uint64_t generation: 16;
 
-	// offset: 46
+	// offset: 47
 	// Used by the storage engines.
 	union {
 		struct {
@@ -83,16 +83,12 @@ typedef struct as_index_s {
 		} kv;
 	} storage_key;
 
-	// offset: 54
-	// This byte is currently unused.
-	uint8_t flex_bits_1;
-
 	// offset: 55
 	// In single-bin mode for data-in-memory namespaces, this is cast to an
 	// as_bin, though only the last 4 bits get used (for the iparticle state).
 	// The first 4 bits are used for index flags. Do not use flex_bits_2
 	// directly - use access functions!
-	uint8_t flex_bits_2;
+	uint8_t flex_bits;
 
 	// offset: 56
 	// For data-not-in-memory namespaces, these 8 bytes are currently unused.
@@ -123,7 +119,9 @@ uint32_t as_index_size_get(as_namespace *ns)
 // Note - relies on current layout and size of as_index!
 static inline
 void as_index_clear_record_info(as_index *index) {
-	uint64_t *p_clear = (uint64_t*)&index->void_time;
+	*(uint32_t*)((uint8_t*)index + 36) = 0;
+
+	uint64_t *p_clear = (uint64_t*)((uint8_t*)index + 40);
 
 	*p_clear++	= 0;
 	*p_clear++	= 0;
@@ -152,22 +150,22 @@ typedef enum {
 
 static inline
 bool as_index_is_flag_set(const as_index* index, as_index_flag flag) {
-	return (((as_index_flag_bits*)&index->flex_bits_2)->flag_bits & flag) != 0;
+	return (((as_index_flag_bits*)&index->flex_bits)->flag_bits & flag) != 0;
 }
 
 static inline
 uint8_t as_index_get_flags(const as_index* index) {
-	return ((as_index_flag_bits*)&index->flex_bits_2)->flag_bits;
+	return ((as_index_flag_bits*)&index->flex_bits)->flag_bits;
 }
 
 static inline
 void as_index_set_flags(as_index* index, as_index_flag flags) {
-	((as_index_flag_bits*)&index->flex_bits_2)->flag_bits |= flags;
+	((as_index_flag_bits*)&index->flex_bits)->flag_bits |= flags;
 }
 
 static inline
 void as_index_clear_flags(as_index* index, as_index_flag flags) {
-	((as_index_flag_bits*)&index->flex_bits_2)->flag_bits &= ~flags;
+	((as_index_flag_bits*)&index->flex_bits)->flag_bits &= ~flags;
 }
 
 
@@ -178,7 +176,7 @@ void as_index_clear_flags(as_index* index, as_index_flag flags) {
 static inline
 as_bin *as_index_get_single_bin(const as_index *index) {
 	// We're only allowed to use the last 4 bits for the bin state.
-	return (as_bin*)&index->flex_bits_2;
+	return (as_bin*)&index->flex_bits;
 }
 
 static inline
