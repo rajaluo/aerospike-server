@@ -122,8 +122,7 @@ typedef struct drv_ssd_block_s {
 	cf_clock		void_time;
 	uint32_t		bins_offset;	// offset to bins from data
 	uint32_t		n_bins;
-	uint32_t		vinfo_offset;	// deprecated
-	uint32_t		vinfo_length;	// deprecated
+	uint64_t		last_update_time;
 	uint8_t			data[];
 } __attribute__ ((__packed__)) drv_ssd_block;
 
@@ -1682,8 +1681,7 @@ ssd_write_bins(as_record *r, as_storage_rd *rd)
 	block->void_time = r->void_time;
 	block->bins_offset = rd->rec_props.p_data ? rd->rec_props.size : 0;
 	block->n_bins = write_nbins;
-	block->vinfo_offset = 0; // deprecated
-	block->vinfo_length = 0; // deprecated
+	block->last_update_time = r->last_update_time;
 
 	r->storage_key.ssd.file_id = ssd->file_id;
 	r->storage_key.ssd.rblock_id = BYTES_TO_RBLOCKS(WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id) + swb_pos);
@@ -2631,6 +2629,35 @@ as_storage_write_header(drv_ssd *ssd, ssd_device_header *header, size_t size)
 //
 
 bool
+prefer_existing_record(drv_ssd* ssd, uint32_t wblock_id, drv_ssd_block* block,
+		as_index* r)
+{
+	// If the existing record points to the wblock we're reading, the existing
+	// record must be older.
+	if (wblock_id == RBLOCK_ID_TO_WBLOCK_ID(ssd, r->storage_key.ssd.rblock_id)
+			&& ssd->file_id == r->storage_key.ssd.file_id) {
+		return false;
+	}
+
+	// If both last-update-times are set and are different, later is newer.
+	if (block->last_update_time != 0 && r->last_update_time != 0 &&
+			block->last_update_time != r->last_update_time) {
+		return block->last_update_time < r->last_update_time;
+	}
+
+	// If generations are different, bigger (considering wrap-around) is newer.
+	if (block->generation != r->generation) {
+		return as_gen_less_than(block->generation, r->generation);
+	}
+
+	// Finally, compare void-times. Note that defragged records will generate
+	// identical copies on drive, so they'll get here and return true.
+	return r->void_time == 0 ||
+			(block->void_time != 0 && block->void_time <= r->void_time);
+}
+
+
+bool
 is_set_evictable(as_namespace* ns, const as_rec_props* p_props)
 {
 	if (p_props->size == 0) {
@@ -2737,27 +2764,22 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	}
 
 	as_index* r = r_ref.r;
+	uint32_t wblock_id = RBLOCK_ID_TO_WBLOCK_ID(ssd, rblock_id);
+	// TODO - pass in wblock_id when we do boundary check in sweep.
 
 	if (rv == 0) {
-		// Record already existed. Perform generation check first, and ignore
-		// this record if existing record is newer. Use void-times as tie-break
-		// if generations are equal.
-		if (block->generation < r->generation ||
-				(block->generation == r->generation &&
-						(r->void_time == 0 || (block->void_time != 0 &&
-								block->void_time <= r->void_time)))) {
-			cf_detail(AS_DRV_SSD, "record-add skipping generation %u <= existing %u",
-					block->generation, r->generation);
-
+		// Record already existed. Ignore this one if existing record is newer.
+		if (prefer_existing_record(ssd, wblock_id, block, r)) {
 			as_record_done(&r_ref, ns);
-			ssd->record_add_generation_counter++;
+			ssd->record_add_older_counter++;
 			return -1;
 		}
 	}
 	// The record we're now reading is the latest version (so far) ...
 
-	// Set/reset the record's void-time and generation.
+	// Set/reset the record's void-time, last-update-time, and generation.
 	r->void_time = block->void_time;
+	r->last_update_time = block->last_update_time;
 	r->generation = block->generation;
 
 	// Skip records that have expired. Note - LDT subrecords are expired via
@@ -2974,8 +2996,6 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	}
 
 	// Update storage accounting to include this record.
-	// TODO - pass in wblock_id when we do boundary check in sweep.
-	uint32_t wblock_id = RBLOCK_ID_TO_WBLOCK_ID(ssd, rblock_id);
 	// TODO - pass in size instead of n_rblocks.
 	uint32_t size = (uint32_t)RBLOCKS_TO_BYTES(n_rblocks);
 
@@ -3191,9 +3211,9 @@ ssd_load_devices_fn(void *udata)
 		ssd_load_device_sweep(ssds, ssd);
 	}
 
-	cf_info(AS_DRV_SSD, "device %s: read complete: UNIQUE %"PRIu64" (REPLACED %"PRIu64") (GEN %"PRIu64") (EXPIRED %"PRIu64") (MAX-TTL %"PRIu64") records",
+	cf_info(AS_DRV_SSD, "device %s: read complete: UNIQUE %"PRIu64" (REPLACED %"PRIu64") (OLDER %"PRIu64") (EXPIRED %"PRIu64") (MAX-TTL %"PRIu64") records",
 		ssd->name, ssd->record_add_unique_counter,
-		ssd->record_add_replace_counter, ssd->record_add_generation_counter,
+		ssd->record_add_replace_counter, ssd->record_add_older_counter,
 		ssd->record_add_expired_counter, ssd->record_add_max_ttl_counter);
 
 	if (ssd->record_add_sigfail_counter) {

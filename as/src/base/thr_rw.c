@@ -3156,6 +3156,12 @@ update_metadata_in_index(as_transaction *tr, bool increment_generation,
 		r->void_time = 0;
 	}
 
+	uint64_t now = cf_clepoch_milliseconds();
+
+	if (now > r->last_update_time) {
+		r->last_update_time = now;
+	}
+
 	if (increment_generation) {
 		r->generation++;
 
@@ -3737,6 +3743,7 @@ write_local_pickle_unwind(pickle_info *pickle)
 
 typedef struct index_metadata_s {
 	uint32_t	void_time;
+	uint64_t	last_update_time;
 	uint16_t	generation;
 } index_metadata;
 
@@ -3745,6 +3752,7 @@ write_local_update_index_metadata(as_transaction *tr, bool increment_generation,
 		index_metadata *old, as_index *r)
 {
 	old->void_time = r->void_time;
+	old->last_update_time = r->last_update_time;
 	old->generation = r->generation;
 
 	update_metadata_in_index(tr, increment_generation, r);
@@ -3754,6 +3762,7 @@ void
 write_local_index_metadata_unwind(index_metadata *old, as_index *r)
 {
 	r->void_time = old->void_time;
+	r->last_update_time = old->last_update_time;
 	r->generation = old->generation;
 }
 
