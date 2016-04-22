@@ -98,21 +98,15 @@ typedef struct ldt_prole_info_s {
 	bool        ldt_prole_version_set;
 } ldt_prole_info;
 
-int write_local_pickled(
-	cf_digest *,
-	as_partition_reservation *,
-	uint8_t *,
-	size_t,
-	const as_rec_props *,
-	as_generation,
-	uint32_t,
-	cf_node,
-	uint32_t,
-	ldt_prole_info *
-	);
-
 extern bool check_msg_key(as_msg* m, as_storage_rd* rd);
 extern bool get_msg_key(as_transaction *tr, as_storage_rd* rd);
+
+static inline bool
+is_valid_ttl(as_namespace *ns, uint32_t ttl)
+{
+	// Note - TTL 0 means "use namespace default", -1 means "never expire".
+	return ttl <= ns->max_ttl || ttl == 0xFFFFffff;
+}
 
 extern void update_metadata_in_index(as_transaction *tr, bool increment_generation, as_index *r);
 
@@ -124,8 +118,6 @@ typedef struct pickle_info_s {
 } pickle_info;
 
 extern bool pickle_all(as_storage_rd *rd, pickle_info *pickle);
-
-extern int rw_udf_replicate(udf_record *urecord);
 
 extern int
 rw_msg_setup(

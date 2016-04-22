@@ -114,6 +114,11 @@ void g_write_hash_delete(global_keyd *gk) {
 
 // forward references internal to the file
 void rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref);
+int write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
+        uint8_t *pickled_buf, size_t pickled_sz,
+        const as_rec_props *p_rec_props, as_generation generation,
+        uint32_t void_time, cf_node masternode, uint32_t info,
+        ldt_prole_info *linfo);
 void read_local(as_transaction *tr, as_index_ref *r_ref);
 int write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
@@ -3282,11 +3287,8 @@ write_local_preprocessing(as_transaction *tr, bool *is_done)
 		return -1;
 	}
 
-	// Fail if record_ttl is neither "use namespace default" flag (0) nor
-	// "never expire" flag (0xFFFFffff), and it exceeds configured max_ttl.
-	if (m->record_ttl != 0 && m->record_ttl != 0xFFFFffff &&
-			m->record_ttl > ns->max_ttl) {
-		cf_warning(AS_RW, "write_local: incoming ttl %u > max-ttl %"PRIu64, m->record_ttl, ns->max_ttl);
+	if (! is_valid_ttl(ns, m->record_ttl)) {
+		cf_warning(AS_RW, "write_local: invalid ttl %u", m->record_ttl);
 		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARAMETER);
 		return -1;
 	}
