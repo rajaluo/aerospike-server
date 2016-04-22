@@ -2785,20 +2785,13 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			return -1;
 		}
 
-		// If the record is beyond max-ttl, either it's rogue data (from
-		// improperly coded clients) or it's data the users don't want anymore
-		// (user decreased the max-ttl setting). No such check is needed for
-		// the subrecords ...
-		if (ns->max_ttl != 0) {
-			if (r->void_time > ns->cold_start_max_void_time) {
-				cf_debug(AS_DRV_SSD, "record-add deleting void-time %u > max %u",
-						r->void_time, ns->cold_start_max_void_time);
+		// If the record is beyond max-ttl, truncate the void-time.
+		if (r->void_time > ns->cold_start_max_void_time) {
+			cf_detail(AS_DRV_SSD, "record-add truncating void-time %u > max %u",
+					r->void_time, ns->cold_start_max_void_time);
 
-				as_index_delete(p_partition->vp, &block->keyd);
-				as_record_done(&r_ref, ns);
-				ssd->record_add_max_ttl_counter++;
-				return -1;
-			}
+			r->void_time = ns->cold_start_max_void_time;
+			ssd->record_add_max_ttl_counter++;
 		}
 	}
 

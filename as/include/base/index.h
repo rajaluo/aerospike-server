@@ -63,7 +63,8 @@ typedef struct as_index_s {
 	// Everything below here is used under the record lock.
 
 	// offset: 36
-	uint32_t void_time;
+	uint32_t reserved_bits: 2;
+	uint32_t void_time: 30;
 
 	// offset: 40
 	uint64_t last_update_time: 40;

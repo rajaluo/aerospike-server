@@ -3465,6 +3465,10 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				cf_warning(AS_INFO, "default-ttl must be an unsigned number with time unit (s, m, h, or d)");
 				goto Error;
 			}
+			if (val > ns->max_ttl) {
+				cf_warning(AS_INFO, "default-ttl must be <= max-ttl (%lu seconds)", ns->max_ttl);
+				goto Error;
+			}
 			cf_info(AS_INFO, "Changing value of default-ttl memory of ns %s from %"PRIu64" to %"PRIu64" ", ns->name, ns->default_ttl, val);
 			ns->default_ttl = val;
 		}
@@ -3472,6 +3476,14 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			uint64_t val;
 			if (cf_str_atoi_seconds(context, &val) != 0) {
 				cf_warning(AS_INFO, "max-ttl must be an unsigned number with time unit (s, m, h, or d)");
+				goto Error;
+			}
+			if (val == 0 || val > MAX_ALLOWED_TTL) {
+				cf_warning(AS_INFO, "max-ttl must be non-zero and <= %u seconds", MAX_ALLOWED_TTL);
+				goto Error;
+			}
+			if (val < ns->default_ttl) {
+				cf_warning(AS_INFO, "max-ttl must be >= default-ttl (%lu seconds)", ns->default_ttl);
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of max-ttl memory of ns %s from %"PRIu64" to %"PRIu64" ", ns->name, ns->max_ttl, val);

@@ -3135,23 +3135,8 @@ update_metadata_in_index(as_transaction *tr, bool increment_generation,
 		r->void_time = 0;
 	}
 	else if (m->record_ttl != 0) {
-		// Check for sizes that might be too large - limit it to 0xFFFFffff.
-		uint64_t temp_big = (uint64_t)as_record_void_time_get() + (uint64_t)m->record_ttl;
-
-		if (temp_big > 0xFFFFffff) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} ttl %u causes void-time overflow, clamping void-time to max ",
-					ns->name, m->record_ttl);
-
-			r->void_time = 0xFFFFffff;
-		}
-		else {
-			if (m->record_ttl > MAX_TTL_WARNING && ns->max_ttl == 0) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} ttl %u exceeds %u - set config value max-ttl to suppress this warning ",
-						ns->name, m->record_ttl, MAX_TTL_WARNING);
-			}
-
-			r->void_time = (uint32_t)temp_big;
-		}
+		// Assuming we checked m->record_ttl <= 10 years, so no overflow etc.
+		r->void_time = as_record_void_time_get() + m->record_ttl;
 	}
 	else if (ns->default_ttl != 0) {
 		// TTL = 0 set record_void time to default ttl value.
@@ -3300,8 +3285,8 @@ write_local_preprocessing(as_transaction *tr, bool *is_done)
 	// Fail if record_ttl is neither "use namespace default" flag (0) nor
 	// "never expire" flag (0xFFFFffff), and it exceeds configured max_ttl.
 	if (m->record_ttl != 0 && m->record_ttl != 0xFFFFffff &&
-			ns->max_ttl != 0 && m->record_ttl > ns->max_ttl) {
-		cf_info(AS_RW, "write_local: incoming ttl %u too big compared to %"PRIu64, m->record_ttl, ns->max_ttl);
+			m->record_ttl > ns->max_ttl) {
+		cf_warning(AS_RW, "write_local: incoming ttl %u > max-ttl %"PRIu64, m->record_ttl, ns->max_ttl);
 		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARAMETER);
 		return -1;
 	}

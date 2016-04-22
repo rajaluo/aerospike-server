@@ -89,14 +89,6 @@
 #define RW_INFO_LDT            0x0100 // Indicating LDT Multi Op Message
 #define RW_INFO_UDF_WRITE      0x0200 // Indicating the write is done from inside UDF
 
-// Define the various TTL milestone limits in terms of seconds.
-#define TTL_ONE_YEAR     31536000
-#define TTL_FIVE_YEARS  157680000
-#define TTL_TEN YEARS   315360000
-
-/* TTL values set above this value, when max_ttl is NOT set, will generate an
- * error on the server. */
-#define MAX_TTL_WARNING 315360000 // Set to ten years for now.
 
 typedef struct ldt_prole_info_s {
 	bool        replication_partition_version_match;

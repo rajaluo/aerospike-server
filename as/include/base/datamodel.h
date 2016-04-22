@@ -85,6 +85,8 @@
 #define OBJ_SIZE_HIST_NUM_BUCKETS 100
 #define TTL_HIST_NUM_BUCKETS 100
 
+#define MAX_ALLOWED_TTL (3600 * 24 * 365 * 10) // 10 years
+
 /*
  * Subrecord Digest Scramble Position
  */
