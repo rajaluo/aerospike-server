@@ -66,6 +66,7 @@
 //    single message.
 #define RW_FIELD_MULTIOP        14
 #define RW_FIELD_LDT_VERSION    15
+#define RW_FIELD_LAST_UPDATE_TIME 16
 
 #define RW_OP_WRITE 1
 #define RW_OP_WRITE_ACK 2

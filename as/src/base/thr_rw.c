@@ -87,6 +87,7 @@ msg_template rw_mt[] =
 	{ RW_FIELD_REC_PROPS, M_FT_BUF },
 	{ RW_FIELD_MULTIOP, M_FT_BUF },
 	{ RW_FIELD_LDT_VERSION, M_FT_UINT64 },
+	{ RW_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 }
 };
 
 #define RW_MSG_SCRATCH_SIZE 280 // 128 + 152 for prole deletes
@@ -115,10 +116,10 @@ void g_write_hash_delete(global_keyd *gk) {
 // forward references internal to the file
 void rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref);
 int write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
-        uint8_t *pickled_buf, size_t pickled_sz,
-        const as_rec_props *p_rec_props, as_generation generation,
-        uint32_t void_time, cf_node masternode, uint32_t info,
-        ldt_prole_info *linfo);
+		uint8_t *pickled_buf, size_t pickled_sz,
+		const as_rec_props *p_rec_props, as_generation generation,
+		uint32_t void_time, uint64_t last_update_time, cf_node masternode,
+		uint32_t info, ldt_prole_info *linfo);
 void read_local(as_transaction *tr, as_index_ref *r_ref);
 int write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
@@ -480,6 +481,7 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 
 		msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
 		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
 
 		// Send this along with parent packet as well. This is required
 		// in case the LDT parent replication is done without MULTI_OP.
@@ -2341,9 +2343,10 @@ as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
 //
 int
 write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
-        uint8_t *pickled_buf, size_t pickled_sz,
-        const as_rec_props *p_rec_props, as_generation generation,
-        uint32_t void_time, cf_node masternode, uint32_t info, ldt_prole_info *linfo)
+		uint8_t *pickled_buf, size_t pickled_sz,
+		const as_rec_props *p_rec_props, as_generation generation,
+		uint32_t void_time, uint64_t last_update_time, cf_node masternode,
+		uint32_t info, ldt_prole_info *linfo)
 {
 	if (! as_storage_has_space(rsv->ns)) {
 		cf_warning(AS_RW, "{%s}: write_local_pickled: drives full", rsv->ns->name);
@@ -2438,6 +2441,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 
 	r->generation = generation;
 	r->void_time = void_time;
+	r->last_update_time = last_update_time;
 
 	as_storage_record_adjust_mem_stats(&rd, memory_bytes);
 
@@ -2719,6 +2723,10 @@ write_process(cf_node node, msg *m, bool respond)
 			missing_fields++;
 		}
 
+		uint64_t last_update_time = 0;
+		// Optional - older versions won't send it.
+		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+
 		uint32_t info = 0;
 		if (0 != msg_get_uint32(m, RW_FIELD_INFO, &info)) {
 			cf_warning(AS_RW,
@@ -2754,7 +2762,8 @@ write_process(cf_node node, msg *m, bool respond)
 					rsv.pid, rsv.p->state, generation);
 
 			int rsp = write_local_pickled(keyd, &rsv, pickled_buf, pickled_sz,
-					&rec_props, generation, void_time, node, info, &linfo);
+					&rec_props, generation, void_time, last_update_time, node,
+					info, &linfo);
 			if (rsp != 0) {
 				cf_info_digest(AS_RW, keyd, "[NOTICE] writing pickled failed(%d):", rsp );
 				result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
@@ -3135,17 +3144,19 @@ update_metadata_in_index(as_transaction *tr, bool increment_generation,
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
 
+	uint64_t now = cf_clepoch_milliseconds();
+
 	if (m->record_ttl == 0xFFFFffff) {
 		// TTL = -1 sets record_void time to "never expires".
 		r->void_time = 0;
 	}
 	else if (m->record_ttl != 0) {
 		// Assuming we checked m->record_ttl <= 10 years, so no overflow etc.
-		r->void_time = as_record_void_time_get() + m->record_ttl;
+		r->void_time = (now / 1000) + m->record_ttl;
 	}
 	else if (ns->default_ttl != 0) {
 		// TTL = 0 set record_void time to default ttl value.
-		r->void_time = as_record_void_time_get() + ns->default_ttl;
+		r->void_time = (now / 1000) + ns->default_ttl;
 	}
 	else {
 		r->void_time = 0;
@@ -3155,8 +3166,6 @@ update_metadata_in_index(as_transaction *tr, bool increment_generation,
 		// Sub-records never expire by themselves.
 		r->void_time = 0;
 	}
-
-	uint64_t now = cf_clepoch_milliseconds();
 
 	if (now > r->last_update_time) {
 		r->last_update_time = now;
@@ -4817,6 +4826,7 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 
 	tr->generation = r->generation;
 	tr->void_time = r->void_time;
+	tr->last_update_time = r->last_update_time;
 
 	// Get set-id before releasing.
 	uint16_t set_id = as_index_get_set_id(r_ref.r);
@@ -4828,8 +4838,8 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 	}
 	// Or (normally) adjust max void-times.
 	else if (r->void_time != 0) {
-		cf_atomic_int_setmax( &ns->max_void_time, r->void_time);
-		cf_atomic_int_setmax( &tr->rsv.p->max_void_time, r->void_time);
+		cf_atomic_int_setmax(&ns->max_void_time, r->void_time);
+		cf_atomic_int_setmax(&tr->rsv.p->max_void_time, r->void_time);
 	}
 
 	as_storage_record_close(r, &rd);
@@ -5086,6 +5096,10 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		missing_fields++;
 	}
 
+	uint64_t last_update_time = 0;
+	// Optional - older versions won't send it.
+	msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+
 	uint32_t info = 0;
 	if (0 != msg_get_uint32(m, RW_FIELD_INFO, &info)) {
 		cf_warning(AS_RW, "write process received message without info field");
@@ -5179,7 +5193,8 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		result_code = write_process_op(&tr, msgp, is_subrec, node);
 	} else {
 		rv = write_local_pickled(keyd, rsvp, pickled_buf, pickled_sz,
-				&rec_props, generation, void_time, node, info, linfo);
+				&rec_props, generation, void_time, last_update_time, node,
+				info, linfo);
 		if (rv == 0) {
 			result_code = AS_PROTO_RESULT_OK;
 		} else {

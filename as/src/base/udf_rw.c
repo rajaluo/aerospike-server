@@ -432,6 +432,7 @@ write_udf_post_processing(as_transaction *tr, as_storage_rd *rd,
 
 	tr->generation = rd->r->generation;
 	tr->void_time = rd->r->void_time;
+	tr->last_update_time = rd->r->last_update_time;
 }
 
 /* Internal Function: Does the post processing for the UDF record after the

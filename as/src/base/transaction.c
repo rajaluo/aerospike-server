@@ -78,6 +78,7 @@ as_transaction_init_body(as_transaction *tr)
 	tr->flags				= 0;
 	tr->generation			= 0;
 	tr->void_time			= 0;
+	tr->last_update_time	= 0;
 }
 
 void

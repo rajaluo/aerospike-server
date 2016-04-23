@@ -214,6 +214,7 @@ typedef struct as_transaction_s {
 	uint8_t		flags;
 	uint16_t	generation;
 	uint32_t	void_time;
+	uint64_t	last_update_time;
 
 } as_transaction;
 
