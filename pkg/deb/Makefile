@@ -13,7 +13,7 @@ OS = $(shell $(DEPTH)/build/os_version)
 SIZE = $(shell du -k $(BIN_DIR)/asd | cut -f1)
 DEPS = ", logrotate"
 
-ifeq ($(OS),debian8)
+ifeq ($(OS),$(filter $(OS),debian8 ubuntu16.04))
   USE_SYSTEMD = 1
   DEPS =
 endif
