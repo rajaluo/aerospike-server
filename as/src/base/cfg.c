@@ -315,7 +315,6 @@ typedef enum {
 	CASE_SERVICE_SNUB_NODES,
 	CASE_SERVICE_STORAGE_BENCHMARKS,
 	CASE_SERVICE_TICKER_INTERVAL,
-	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
@@ -366,6 +365,7 @@ typedef enum {
 	CASE_SERVICE_SCAN_RETRANSMIT,
 	CASE_SERVICE_SCHEDULER_PRIORITY,
 	CASE_SERVICE_SCHEDULER_TYPE,
+	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS,
 	CASE_SERVICE_TRIAL_ACCOUNT_KEY,
 
 	// Service paxos protocol options (value tokens):
@@ -729,7 +729,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "snub-nodes",						CASE_SERVICE_SNUB_NODES },
 		{ "storage-benchmarks",				CASE_SERVICE_STORAGE_BENCHMARKS },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
-		{ "transaction-duplicate-threads",	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
@@ -771,6 +770,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-retransmit",				CASE_SERVICE_SCAN_RETRANSMIT },
 		{ "scheduler-priority",				CASE_SERVICE_SCHEDULER_PRIORITY },
 		{ "scheduler-type",					CASE_SERVICE_SCHEDULER_TYPE },
+		{ "transaction-duplicate-threads",	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS },
 		{ "trial-account-key",				CASE_SERVICE_TRIAL_ACCOUNT_KEY },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -2131,9 +2131,6 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
 				break;
-			case CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS:
-				c->n_transaction_duplicate_threads = cfg_int_no_checks(&line);
-				break;
 			case CASE_SERVICE_TRANSACTION_MAX_MS:
 				c->transaction_max_ns = cfg_u64_no_checks(&line) * 1000000;
 				break;
@@ -2217,6 +2214,7 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_SCAN_RETRANSMIT:
 			case CASE_SERVICE_SCHEDULER_PRIORITY:
 			case CASE_SERVICE_SCHEDULER_TYPE:
+			case CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS:
 			case CASE_SERVICE_TRIAL_ACCOUNT_KEY:
 				cfg_deprecated_name_tok(&line);
 				break;

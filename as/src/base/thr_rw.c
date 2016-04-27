@@ -136,9 +136,7 @@ int write_delete_journal(as_transaction *tr, bool is_subrec);
  ** persist in any way
  */
 
-void rw_replicate_process_ack(cf_node node, msg * m, bool is_write);
 void rw_replicate_async(cf_node node, msg *m);
-int rw_replicate_init(void);
 int rw_multi_process(cf_node node, msg *m);
 
 uint32_t
@@ -1872,6 +1870,10 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	WR_TRACK_INFO(wr, "finish_rw_process_ack: entering");
 	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK, is_write);
 
+	if (! finished) {
+		msg_preserve_all_fields(m);
+	}
+
 	if (wr->origin == FROM_BATCH && finished) {
 		wr->from.batch_shared = NULL;
 		wr->msgp = NULL;
@@ -1998,17 +2000,8 @@ rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref)
 	}
 }
 
-cf_queue *g_rw_dup_q;
-#define DUP_THREAD_MAX 16
-pthread_t g_rw_dup_th[DUP_THREAD_MAX];
-
-typedef struct {
-	cf_node node;
-	msg *m;
-} dup_element;
-
 void
-rw_dup_prole(cf_node node, msg *m)
+rw_dup_process(cf_node node, msg *m)
 {
 	uint32_t rv = 1;
 	int result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
@@ -2076,8 +2069,6 @@ rw_dup_prole(cf_node node, msg *m)
 	rv = as_record_get(rsv.tree, keyd, &r_ref, rsv.ns);
 	if (rv != 0) {
 		result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
-		cf_debug_digest(AS_RW, keyd, "[REC NOT FOUND:1]<rw_dup_prole()>PID(%u) Pstate(%d):",
-				rsv.pid, rsv.p->state );
 		goto Out2;
 	}
 	as_index *r = r_ref.r;
@@ -2177,75 +2168,6 @@ Out1:
 		cf_atomic_int_incr(&g_config.rw_err_dup_send);
 	}
 }
-
-int
-rw_dup_process(cf_node node, msg *m)
-{
-	if (g_config.n_transaction_duplicate_threads == 0) {
-		rw_dup_prole(node, m);
-		return (0);
-	}
-
-	// if could result in an IO, don't want to run too long on the fabric
-	// thread - queue it
-	dup_element e;
-	e.node = node;
-	e.m = m;
-	if (0 != cf_queue_push(g_rw_dup_q, &e)) {
-		cf_warning(AS_RW, "dup process: could not queue");
-		as_fabric_msg_put(m);
-	}
-	return (0);
-}
-
-void *
-rw_dup_worker_fn(void *yeah_yeah_yeah) {
-
-	for (;;) {
-
-		dup_element e;
-
-		if (0 != cf_queue_pop(g_rw_dup_q, &e, CF_QUEUE_FOREVER)) {
-			cf_crash(AS_RW, "unable to pop from dup work queue");
-		}
-
-		cf_detail(AS_RW,
-				"dup_process: prole received request message from %"PRIx64,
-				e.node);
-#ifdef DEBUG_MSG
-		msg_dump(m, "rw incoming dup");
-#endif
-
-		rw_dup_prole(e.node, e.m);
-
-	}
-	return (0);
-}
-
-int rw_dup_init() {
-	if (g_config.n_transaction_duplicate_threads > 0) {
-
-		g_rw_dup_q = cf_queue_create(sizeof(dup_element), true);
-		if (!g_rw_dup_q)
-			return (-1);
-
-		if (g_config.n_transaction_duplicate_threads > DUP_THREAD_MAX) {
-			cf_warning(AS_RW,
-					"configured duplicate threads %d: reducing to maximum of %d",
-					g_config.n_transaction_duplicate_threads, DUP_THREAD_MAX);
-			g_config.n_transaction_duplicate_threads = DUP_THREAD_MAX;
-		}
-
-		for (int i = 0; i < g_config.n_transaction_duplicate_threads; i++) {
-			if (0 != pthread_create(&g_rw_dup_th[i], 0, rw_dup_worker_fn, 0)) {
-				cf_crash(AS_RW,
-						"can't create worker threads for duplicate resolution");
-			}
-		}
-	}
-	return (0);
-}
-
 
 
 // If the replication request is coming from partition version which
@@ -5305,7 +5227,7 @@ write_msg_fn(cf_node id, msg *m, void *udata)
 
 		// different path if we're using async replication
 		if (g_config.replication_fire_and_forget) {
-			rw_replicate_process_ack(id, m, true);
+			as_fabric_msg_put(m);
 		} else {
 			rw_process_ack(id, m, true);
 		}
@@ -5456,20 +5378,6 @@ rw_retransmit_fn(void *unused)
 	return 0;
 }
 
-//
-// Eventually, we'd like to have a hash table and a queue
-// but realistically, all you need to do is send, because the
-// fabric is pretty reliable. Expand this section when you want
-// to make the system more reliable
-//
-cf_queue *g_rw_replication_q = 0;
-#define RW_REPLICATION_THREAD_MAX 16
-pthread_t g_rw_replication_th[RW_REPLICATION_THREAD_MAX];
-
-typedef struct {
-	cf_node node;
-	msg *m;
-} rw_replication_element;
 
 void
 rw_replicate_async(cf_node node, msg *m)
@@ -5485,53 +5393,6 @@ rw_replicate_async(cf_node node, msg *m)
 	return;
 }
 
-//
-// Either is write, or is dup (if !is_write)
-//
-void
-rw_replicate_process_ack(cf_node node, msg *m, bool is_write)
-{
-	if (m)
-		as_fabric_msg_put(m);
-
-	return;
-}
-
-void *
-rw_replication_worker_fn(void *yeah_yeah_yeah)
-{
-	for (;;) {
-
-		rw_replication_element e;
-
-		if (0 != cf_queue_pop(g_rw_replication_q, &e, CF_QUEUE_FOREVER)) {
-			cf_crash(AS_RW, "unable to pop from dup work queue");
-		}
-
-		cf_detail(AS_RW,
-				"replication_process: sending message to destination to %"PRIx64,
-				e.node);
-#ifdef DEBUG_MSG
-		msg_dump(m, "rw incoming dup");
-#endif
-
-	}
-	return (0);
-}
-
-int rw_replicate_init(void) {
-#if 0
-	g_rw_replication_q = cf_queue_create( sizeof(rw_replication_element) , true /*multithreaded*/);
-	if (!g_rw_replication_q) return(-1);
-
-	for (int i = 0; i < 1; i++) {
-		if (0 != pthread_create(&g_rw_replication_th[i], 0, rw_replication_worker_fn, 0)) {
-			cf_crash(AS_RW, "can't create worker threads for duplicate resolution");
-		}
-	}
-#endif
-	return (0);
-}
 
 //
 // This function is called right after a partition re-balance
@@ -5676,16 +5537,6 @@ as_write_init()
 			sizeof(global_keyd), 32 * 1024, RCHASH_CR_MT_MANYLOCK);
 
 	pthread_create(&g_rw_retransmit_th, 0, rw_retransmit_fn, 0);
-
-	if (0 != rw_dup_init()) {
-		cf_crash(AS_RW, "couldn't initialize duplicate write unit threads");
-		return;
-	}
-
-	if (0 != rw_replicate_init()) {
-		cf_crash(AS_RW, "couldn't initialize write unit threads");
-		return;
-	}
 
 	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt),
 			RW_MSG_SCRATCH_SIZE, write_msg_fn, 0 /* udata */);

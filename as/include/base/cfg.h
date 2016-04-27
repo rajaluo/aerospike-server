@@ -123,7 +123,6 @@ typedef struct as_config_s {
 
 	int					n_transaction_queues;
 	int					n_transaction_threads_per_queue;
-	int					n_transaction_duplicate_threads;
 	int					n_service_threads;
 	int					n_fabric_workers;
 	bool				use_queue_per_device;
@@ -383,7 +382,6 @@ typedef struct as_config_s {
 	cf_atomic_int		write_prole;
 	cf_atomic_int		read_dup_prole;
 	cf_atomic_int		rw_err_dup_internal;
-	// When rw_dup_prole() sees a cluster key mismatch, we increment this counter.
 	cf_atomic_int		rw_err_dup_cluster_key;
 	cf_atomic_int		rw_err_dup_send;
 	cf_atomic_int		rw_err_write_internal;

@@ -2142,8 +2142,6 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.n_transaction_queues);
 	cf_dyn_buf_append_string(db, ";transaction-threads-per-queue=");
 	cf_dyn_buf_append_int(db, g_config.n_transaction_threads_per_queue);
-	cf_dyn_buf_append_string(db, ";transaction-duplicate-threads=");
-	cf_dyn_buf_append_int(db, g_config.n_transaction_duplicate_threads);
 	cf_dyn_buf_append_string(db, ";transaction-pending-limit=");
 	cf_dyn_buf_append_int(db, g_config.transaction_pending_limit);
 	cf_dyn_buf_append_string(db, ";migrate-threads=");
