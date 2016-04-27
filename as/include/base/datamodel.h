@@ -536,7 +536,7 @@ as_partition_vinfo_same(as_partition_vinfo *v1, as_partition_vinfo *v2) {
 typedef enum {
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF = 0,
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION = 1,
-	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL = 2
+	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME = 2
 } conflict_resolution_pol;
 
 /* Record function declarations */
@@ -555,7 +555,7 @@ extern void as_record_done(as_index_ref *r_ref, as_namespace *ns);
 
 extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);
 extern void as_record_remove_key(as_record* r);
-extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t l_generation, uint32_t l_void_time, uint16_t r_generation, uint32_t r_void_time);
+extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint32_t left_vt, uint16_t right_gen, uint64_t right_lut, uint32_t right_vt);
 extern int as_record_pickle(as_record *r, as_storage_rd *rd, uint8_t **buf_r, size_t *len_r);
 extern int as_record_pickle_a_delete(byte **buf_r, size_t *len_r);
 extern uint32_t as_record_buf_get_stack_particles_sz(uint8_t *buf);
@@ -609,6 +609,7 @@ typedef struct {
 	size_t					record_buf_sz;
 	uint32_t				generation;
 	uint32_t				void_time;
+	uint64_t				last_update_time;
 	as_rec_props			rec_props;
 	char					flag;
 	cf_digest               pdigest;

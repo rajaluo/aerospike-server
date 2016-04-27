@@ -2352,8 +2352,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	if(ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
 		cf_dyn_buf_append_string(db, "generation");
 	}
-	else if(ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL) {
-		cf_dyn_buf_append_string(db, "ttl");
+	else if(ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME) {
+		cf_dyn_buf_append_string(db, "last-update-time");
 	}
 	else {
 		cf_dyn_buf_append_string(db, "undefined");
@@ -3518,9 +3518,9 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				cf_info(AS_INFO, "Changing value of conflict-resolution-policy of ns %s from %d to %s", ns->name, ns->conflict_resolution_policy, context);
 				ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
 			}
-			else if (strncmp(context, "ttl", 3) == 0) {
+			else if (strncmp(context, "last-update-time", 16) == 0) {
 				cf_info(AS_INFO, "Changing value of conflict-resolution-policy of ns %s from %d to %s", ns->name, ns->conflict_resolution_policy, context);
-				ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL;
+				ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
 			}
 			else {
 				goto Error;

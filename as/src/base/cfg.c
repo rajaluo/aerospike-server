@@ -505,7 +505,7 @@ typedef enum {
 
 	// Namespace conflict-resolution-policy options (value tokens):
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION,
-	CASE_NAMESPACE_CONFLICT_RESOLUTION_TTL,
+	CASE_NAMESPACE_CONFLICT_RESOLUTION_LAST_UPDATE_TIME,
 
 	// Namespace read consistency level options:
 	CASE_NAMESPACE_READ_CONSISTENCY_ALL,
@@ -915,7 +915,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 
 const cfg_opt NAMESPACE_CONFLICT_RESOLUTION_OPTS[] = {
 		{ "generation",						CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION },
-		{ "ttl",							CASE_NAMESPACE_CONFLICT_RESOLUTION_TTL }
+		{ "last-update-time",				CASE_NAMESPACE_CONFLICT_RESOLUTION_LAST_UPDATE_TIME }
 };
 
 const cfg_opt NAMESPACE_READ_CONSISTENCY_OPTS[] = {
@@ -2592,8 +2592,8 @@ as_config_init(const char *config_file)
 				case CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION:
 					ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
 					break;
-				case CASE_NAMESPACE_CONFLICT_RESOLUTION_TTL:
-					ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL;
+				case CASE_NAMESPACE_CONFLICT_RESOLUTION_LAST_UPDATE_TIME:
+					ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
 					break;
 				case CASE_NOT_FOUND:
 				default:

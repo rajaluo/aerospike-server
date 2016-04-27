@@ -530,6 +530,7 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 			if (0 == as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, tr->rsv.ns)) {
 				msg_set_uint32(m, RW_FIELD_GENERATION, r_ref.r->generation);
 				msg_set_uint32(m, RW_FIELD_VOID_TIME, r_ref.r->void_time);
+				msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r_ref.r->last_update_time);
 				as_record_done(&r_ref, tr->rsv.ns);
 			}
 		}
@@ -1522,6 +1523,11 @@ finish_rw_process_dup_ack(write_request *wr)
 		}
 		components[comp_sz].void_time = void_time;
 
+		uint64_t last_update_time = 0;
+		// Older nodes won't send this.
+		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+		components[comp_sz].last_update_time = last_update_time;
+
 		if (!COMPONENT_IS_LDT(&components[comp_sz])) {
 			if (0 != msg_get_buf(m, RW_FIELD_RECORD, &buf, &buf_sz,
 						MSG_GET_DIRECT)) {
@@ -2043,6 +2049,10 @@ rw_dup_prole(cf_node node, msg *m)
 	bool local_conflict_check = (0 == msg_get_uint32(m, RW_FIELD_GENERATION, &generation)
 			&& 0 == msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time));
 
+	uint64_t last_update_time = 0;
+	// Older nodes won't send this.
+	msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+
 	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
 
 	// NB need to use the _migrate variant here so we can write into desync
@@ -2075,7 +2085,8 @@ rw_dup_prole(cf_node node, msg *m)
 
 	if (local_conflict_check &&
 			0 >= as_record_resolve_conflict(rsv.ns->conflict_resolution_policy,
-					generation, void_time, r->generation, r->void_time)) {
+					generation, last_update_time, void_time,
+					r->generation, r->last_update_time, r->void_time)) {
 		result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
 		cf_debug_digest(AS_RW, keyd, "local conflict resolution lost ");
 		goto Out3;
@@ -2142,6 +2153,7 @@ rw_dup_prole(cf_node node, msg *m)
 
 	msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
 	msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
+	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
 
 	result_code = AS_PROTO_RESULT_OK;
 

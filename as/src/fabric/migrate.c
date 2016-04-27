@@ -85,6 +85,7 @@
 #define MIG_FIELD_EDIGEST 16
 #define MIG_FIELD_PGENERATION 17
 #define MIG_FIELD_PVOID_TIME 18
+#define MIG_FIELD_LAST_UPDATE_TIME 19
 
 #define OPERATION_UNDEF 0
 #define OPERATION_INSERT 1
@@ -118,6 +119,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_EDIGEST, M_FT_BUF },
 		{ MIG_FIELD_PGENERATION, M_FT_UINT32 },
 		{ MIG_FIELD_PVOID_TIME, M_FT_UINT32 },
+		{ MIG_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 }
 };
 
 #define MIG_MSG_SCRATCH_SIZE 128
@@ -135,6 +137,7 @@ typedef struct pickled_record_s {
 	cf_digest     keyd;
 	uint32_t      generation;
 	uint32_t      void_time;
+	uint64_t      last_update_time;
 	byte          *record_buf; // pickled!
 	size_t        record_len;
 	as_rec_props  rec_props;
@@ -904,6 +907,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	pr.keyd = r->key;
 	pr.generation = r->generation;
 	pr.void_time = r->void_time;
+	pr.last_update_time = r->last_update_time;
 
 	as_storage_record_get_key(&rd);
 
@@ -949,6 +953,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 			MSG_SET_COPY);
 	msg_set_uint32(m, MIG_FIELD_GENERATION, pr.generation);
 	msg_set_uint32(m, MIG_FIELD_VOID_TIME, pr.void_time);
+	msg_set_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, pr.last_update_time);
 	// Note - older versions handle missing MIG_FIELD_VINFOSET field.
 
 	// Note - after MSG_SET_HANDOFF_MALLOCs, no need to destroy pickled_record.
@@ -1490,6 +1495,11 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 			cf_warning(AS_MIGRATE, "handle insert: no void-time - making it 0");
 		}
 
+		uint64_t last_update_time = 0;
+
+		// Older nodes won't send this.
+		msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, &last_update_time);
+
 		void *value = NULL;
 		size_t value_sz = 0;
 
@@ -1510,11 +1520,12 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 		as_record_merge_component c;
 
-		c.record_buf    = value;
+		c.record_buf = value;
 		c.record_buf_sz = value_sz;
-		c.generation    = generation;
-		c.void_time     = void_time;
-		c.rec_props     = rec_props;
+		c.generation = generation;
+		c.void_time = void_time;
+		c.last_update_time = last_update_time;
+		c.rec_props = rec_props;
 
 		if (as_ldt_get_migrate_info(immig, &c, m, keyd)) {
 			immigration_release(immig);
