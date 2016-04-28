@@ -1870,8 +1870,8 @@ rw_process_ack(cf_node node, msg *m, bool is_write)
 	WR_TRACK_INFO(wr, "finish_rw_process_ack: entering");
 	bool finished = finish_rw_process_ack(wr, AS_PROTO_RESULT_OK, is_write);
 
-	if (! finished) {
-		msg_preserve_all_fields(m);
+	if (! finished && wr->dup_msg[node_id]) {
+		msg_preserve_all_fields(wr->dup_msg[node_id]);
 	}
 
 	if (wr->origin == FROM_BATCH && finished) {

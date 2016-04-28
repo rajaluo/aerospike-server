@@ -806,7 +806,6 @@ extern int as_partition_reserve_read(as_namespace *ns, as_partition_id pid, as_p
 // moves the reservation -
 extern void as_partition_reservation_move(as_partition_reservation *dst, as_partition_reservation *src);
 extern void as_partition_reservation_copy(as_partition_reservation *dst, as_partition_reservation *src);
-extern void as_partition_reserve_update_state(as_partition_reservation *rsv);
 extern void as_partition_release(as_partition_reservation *rsv);
 
 extern int as_partition_tree_release(struct as_index_tree_s *p);
