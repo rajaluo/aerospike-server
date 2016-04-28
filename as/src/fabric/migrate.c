@@ -45,7 +45,6 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_queue_priority.h"
 #include "citrusleaf/cf_shash.h"
 
 #include "fault.h"
@@ -216,7 +215,7 @@ typedef struct immigration_ldt_version_s {
 static rchash *g_emigration_hash = NULL;
 static cf_atomic32 g_emigration_id = 0;
 static cf_atomic32 g_emigration_insert_id = 0;
-static cf_queue_priority *g_emigration_q = NULL;
+static cf_queue *g_emigration_q = NULL;
 static rchash *g_immigration_hash = NULL;
 static shash *g_immigration_ldt_version_hash;
 
@@ -303,7 +302,7 @@ immigration_ldt_version_hashfn(void *key)
 void
 as_migrate_init()
 {
-	g_emigration_q = cf_queue_priority_create(sizeof(void *), true);
+	g_emigration_q = cf_queue_create(sizeof(void *), true);
 
 	if (rchash_create(&g_emigration_hash, emigration_hashfn, emigration_destroy,
 			sizeof(uint32_t), 64, RCHASH_CR_MT_MANYLOCK) != RCHASH_OK) {
@@ -390,8 +389,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr,
 		emig->rsv.p->current_outgoing_ldt_version = 0;
 	}
 
-	if (cf_queue_priority_push(g_emigration_q, &emig, CF_QUEUE_PRIORITY_HIGH) !=
-			CF_QUEUE_OK) {
+	if (cf_queue_push(g_emigration_q, &emig) != CF_QUEUE_OK) {
 		cf_crash(AS_MIGRATE, "failed emigration queue push");
 	}
 }
@@ -433,9 +431,8 @@ as_migrate_set_num_xmit_threads(int n_threads)
 		while (g_config.n_migrate_threads > n_threads) {
 			void *death_msg = NULL;
 
-			// Send high priority terminator (NULL message).
-			if (cf_queue_priority_push(g_emigration_q, &death_msg,
-					CF_QUEUE_PRIORITY_HIGH) != CF_QUEUE_OK) {
+			// Send terminator (NULL message).
+			if (cf_queue_push(g_emigration_q, &death_msg) != CF_QUEUE_OK) {
 				cf_warning(AS_MIGRATE, "failed to queue thread terminator");
 				return;
 			}
@@ -472,7 +469,7 @@ as_migrate_dump(bool verbose)
 	cf_info(AS_MIGRATE, "number of emigrations in g_emigration_hash: %d",
 			rchash_get_size(g_emigration_hash));
 	cf_info(AS_MIGRATE, "number of requested emigrations waiting in g_emigration_q : %d",
-			cf_queue_priority_sz(g_emigration_q));
+			cf_queue_sz(g_emigration_q));
 	cf_info(AS_MIGRATE, "number of immigrations in g_immigration_hash: %d",
 			rchash_get_size(g_immigration_hash));
 	cf_info(AS_MIGRATE, "current emigration id: %d", g_emigration_id);
@@ -612,21 +609,6 @@ run_emigration(void *arg)
 			break; // signal of death
 		}
 
-		// Re-queue migration from desync. TODO - does this happen? How?
-		if (emig->rsv.state == AS_PARTITION_STATE_DESYNC) {
-			cf_debug(AS_MIGRATE, "attempted to migrate a desync partition");
-
-			as_partition_reserve_update_state(&emig->rsv);
-
-			if (cf_queue_priority_push(g_emigration_q, (void *)&emig,
-					CF_QUEUE_PRIORITY_LOW) != CF_QUEUE_OK) {
-				cf_crash(AS_MIGRATE, "failed re-queueing desync emigration");
-			}
-
-			usleep(1000);
-			continue;
-		}
-
 		cf_atomic_int_incr(&g_config.migrate_progress_send);
 
 		as_migrate_state result = emigrate(emig);
@@ -656,7 +638,7 @@ emigration_pop(emigration **emigp)
 	pop_info.best_tree_elements = 0;
 	// 0 is a special value - means we haven't started.
 
-	int rv = cf_queue_priority_reduce_pop(g_emigration_q, (void *)emigp,
+	int rv = cf_queue_reduce_pop(g_emigration_q, (void *)emigp,
 			emigration_pop_reduce_fn, &pop_info);
 
 	if (rv == CF_QUEUE_ERR) {
@@ -664,8 +646,8 @@ emigration_pop(emigration **emigp)
 	}
 
 	if (rv == CF_QUEUE_NOMATCH) {
-		if (cf_queue_priority_pop(g_emigration_q, (void *)emigp,
-				CF_QUEUE_FOREVER) != CF_QUEUE_OK) {
+		if (cf_queue_pop(g_emigration_q, (void *)emigp, CF_QUEUE_FOREVER) !=
+				CF_QUEUE_OK) {
 			cf_crash(AS_MIGRATE, "emigration queue pop failed");
 		}
 	}
@@ -711,6 +693,7 @@ emigrate(emigration *emig)
 
 	switch (emig->rsv.state) {
 	case AS_PARTITION_STATE_DESYNC:
+		// Used to re-queue migration from desync. TODO - does this happen? How?
 		cf_crash(AS_MIGRATE, "can't emigrate from desync");
 		break;
 	case AS_PARTITION_STATE_SYNC:
