@@ -247,6 +247,8 @@ typedef struct as_paxos_t {
 	bool cluster_has_integrity;    // Is true when there is no cluster integrity fault.
 
 	bool dun_other_clusters;       // Do we automatically dun nodes in other clusters?
+
+    int sync_attempt_number;       // Number of times sync was attempted during current paxos round
 } as_paxos;
 
 /* as_paxos_petition_type

@@ -118,6 +118,13 @@ void as_paxos_current_init(as_paxos *p);
 #define AS_PAXOS_AUTO_RESET_MAX_WAIT 5000
 
 /*
+ * Maximum number of attempts for a sync message before trying a full recovery.
+ * Should necessarily be >= 1 to ensure that at leat one attempt at sync is
+ * allowed to go through.
+ */
+#define AS_PAXOS_SYNC_MAX_ATTEMPTS 2
+
+/*
  * The migrate key changes once when a Paxos vote completes.
  * Every migration operation stores its key and sends it as part of its start
  * message. If a migrate message's key does not match its global key, the
@@ -1213,22 +1220,14 @@ as_paxos_current_get()
 	return(max);
 }
 
-// Get the current sequence number (for this node, or for the old principal).
-// (No guarantee this is bulletproof...)
+// Get the sequence number to use for the next transaction.
 uint32_t
-as_paxos_current_get_sequence()
+as_paxos_sequence_getnext()
 {
-	as_paxos *p = g_config.paxos;
-
-	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
-		if (NULL == p->current[i])
-			return(p->current[0]->gen.sequence);
-
-		if (p->current[i]->c.p_node == g_config.self_node)
-			return(p->current[i]->gen.sequence);
-	}
-
-	return(p->current[0]->gen.sequence);
+	// Uses time in seconds from wall clock for now. Should be updated to
+	// use time in seconds from the physical component of HLC timestamp with
+	// hbv3.
+	return (uint32_t)(cf_clock_getabsolute() / 1000);
 }
 
 // Checks to see if this transaction has the highest sequence for a
@@ -1472,7 +1471,7 @@ as_paxos_transaction_getnext(cf_node master_node)
 
 	for (int i = 0; i < AS_PAXOS_ALPHA; i++) {
 		if (p->pending[i].c.p_node == master_node && p->pending[i].confirmed &&
-				(p->pending[i].gen.sequence == p->gen.sequence + 1)) {
+				(p->pending[i].gen.sequence > p->gen.sequence)) {
 			t = &p->pending[i];
 			break;
 		}
@@ -1490,6 +1489,11 @@ as_paxos_send_sync_messages() {
 	snprintf(sbuf, 49, "SUCCESSION [%d]@%"PRIx64": ", p->gen.sequence, g_config.self_node);
 	snprintf(sbuf + strlen(sbuf), 18, "%"PRIx64" ", p->succession[0]);
 
+	/*
+	 * Note the fact that we have send a sync message.
+	 */
+	p->sync_attempt_number++;
+
 	for (int i = 1; i < g_config.paxos_max_cluster_size; i++) {
 		if ((cf_node)0 != p->succession[i])
 			snprintf(sbuf + strlen(sbuf), 18, "%"PRIx64" ", p->succession[i]);
@@ -1506,7 +1510,7 @@ as_paxos_send_sync_messages() {
 		}
 	}
 
-	cf_info(AS_PAXOS, sbuf);
+	cf_info(AS_PAXOS, "%s", sbuf);
 	as_paxos_print_cluster_key("COMMAND CONFIRM");
 }
 
@@ -1932,7 +1936,7 @@ as_paxos_spark(as_paxos_change *c)
 		return;
 	}
 
-	t.gen.sequence = as_paxos_current_get_sequence() + 1;
+	t.gen.sequence = as_paxos_sequence_getnext();
 
 	char change_buf[AS_CLUSTER_SZ * (2 * sizeof(cf_node) + 6) + 1] = { '\0' };
 	char *op = "", *cb = change_buf;
@@ -1962,6 +1966,11 @@ as_paxos_spark(as_paxos_change *c)
 	*cb = '\0';
 	cf_info(AS_PAXOS, "as_paxos_spark establishing transaction [%"PRIu32"]@%"PRIx64" ClSz = %zu ; # change = %d : %s",
 			t.gen.sequence, g_config.self_node, p->cluster_size, t.c.n_change, change_buf);
+
+	/*
+	 * Reset the sync attempt number.
+	 */
+	p->sync_attempt_number = 0;
 
 	/* Populate a new transaction with the change, establish it
 	 * in the pending transaction table, and send the message */
@@ -2342,19 +2351,21 @@ as_paxos_retransmit_check()
 }
 
 /**
- * Fix succession list errors by resetting the cluster at master / potential master nodes.
+ * Fix succession list errors by resetting the cluster at master / potential
+ * master nodes.
  *
- * @param cluster_integrity_fault true if the cluster has integrity fault.
+ * @param reset_cluster set to true if the cluster has integrity fault or second
+ * phase failure to force reforming the cluster from scratch.
  * @param corrective_event_count the number of corrective events.
  * @param corrective events the corrective events.
  */
-void as_paxos_auto_reset_master(bool cluster_integrity_fault,
+void as_paxos_auto_reset_master(bool reset_cluster,
 								int corrective_event_count,
 								as_fabric_event_node *corrective_events)
 {
 
 	cf_info(AS_PAXOS, "Corrective changes: %d. Integrity fault: %s",
-			corrective_event_count, cluster_integrity_fault ? "true" : "false");
+			corrective_event_count, reset_cluster ? "true" : "false");
 
 	as_paxos *p = g_config.paxos;
 
@@ -2381,7 +2392,7 @@ void as_paxos_auto_reset_master(bool cluster_integrity_fault,
 		}
 	}
 
-	if (cluster_integrity_fault) {
+	if (reset_cluster) {
 		// Add nodes in the current succession list to the changes list, to
 		// reform the cluster from scratch.
 		for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -2537,7 +2548,7 @@ as_paxos_process_retransmit_check()
 				snprintf(sbuf + strlen(sbuf), 18, "%"PRIx64" ", succ_list[i][j]);
 			}
 		}
-		cf_debug(AS_PAXOS, sbuf);
+		cf_debug(AS_PAXOS, "%s", sbuf);
 		if (memcmp(p->succession, succ_list[i], sizeof(succ_list[i])) != 0) {
 			cf_info(AS_PAXOS, "Cluster Integrity Check: Detected succession list discrepancy between node %"PRIx64" and self %"PRIx64"",
 					succ_list_index[i], g_config.self_node);
@@ -2561,7 +2572,13 @@ as_paxos_process_retransmit_check()
 
 	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
 
-	if (cluster_integrity_fault || succession_list_fault) {
+	// Second phase failed if migrations are disallowed and we have attempted sync more than the threshold number of times.
+	bool second_phase_failed = as_partition_get_migration_flag() ? false : (p->sync_attempt_number > AS_PAXOS_SYNC_MAX_ATTEMPTS);
+
+	// Indicates if new paxos round was sparked for recovery.
+	bool paxos_sparked = false;
+
+	if (cluster_integrity_fault || succession_list_fault || second_phase_failed) {
 
 		char sbuf[(AS_CLUSTER_SZ * 17) + 99];
 
@@ -2569,7 +2586,7 @@ as_paxos_process_retransmit_check()
 
 			case AS_PAXOS_RECOVERY_POLICY_MANUAL:
 			{
-				if (!cluster_integrity_fault) {
+				if (!cluster_integrity_fault && succession_list_fault) {
 						cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
 						// only handles cluster integrity faults.
 						break;
@@ -2595,14 +2612,14 @@ as_paxos_process_retransmit_check()
 				sbuf[strlen(sbuf) - 1] = 0;
 
 				if (nodes_missing)
-					cf_info(AS_PAXOS, sbuf);
+						cf_info(AS_PAXOS, "%s", sbuf);
 
 				break;
 			}
 
 			case AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER:
 			{
-				if (!cluster_integrity_fault) {
+				if (!cluster_integrity_fault && succession_list_fault) {
 					  cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
 					  // only handles cluster integrity faults.
 					  break;
@@ -2646,7 +2663,7 @@ as_paxos_process_retransmit_check()
 
 			case AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL:
 			{
-				if (!cluster_integrity_fault) {
+				if (!cluster_integrity_fault && succession_list_fault) {
 					  cf_warning(AS_PAXOS, "SUCCESSION FAULT. Try paxos-recovery-policy 'auto-reset-master' if the problem persists.");
 					  // only handles cluster integrity faults.
 					  break;
@@ -2691,11 +2708,12 @@ as_paxos_process_retransmit_check()
 				break;
 			}
 
-			case AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER:
-			{
-				as_paxos_auto_reset_master(cluster_integrity_fault,
-										   corrective_event_count,
-										   corrective_events);
+			case AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER: {
+				as_paxos_auto_reset_master(
+				  cluster_integrity_fault ||
+				    second_phase_failed,
+				  corrective_event_count, corrective_events);
+				paxos_sparked = true;
 				break;
 			}
 
@@ -2704,8 +2722,9 @@ as_paxos_process_retransmit_check()
 		}
 	}
 
-	// If migration is enabled, we are already in a cluster, hence we are done.
-	if (as_partition_get_migration_flag() == true) {
+	// Second phase succeeded, we are already in a cluster, hence we are
+	// done or we started a new paxos round and should wait longer.
+	if (as_partition_get_migration_flag() || paxos_sparked) {
 		return;
 	}
 
@@ -2739,7 +2758,7 @@ as_paxos_thr(void *arg)
 		 * to a rejected transaction */
 		as_paxos_transaction *r, *s, t;
 
-		cf_debug(AS_PAXOS, "Popping paxos queue %p", p->msgq);
+		cf_detail(AS_PAXOS, "Popping paxos queue %p", p->msgq);
 
 		static const int Q_WAIT_MS = 1; // TODO - what to do with this?
 
@@ -3167,7 +3186,7 @@ as_paxos_thr(void *arg)
 						snprintf(sbuf + strlen(sbuf), 18, "%"PRIx64" ", p->succession[i]);
 					}
 				}
-				cf_info(AS_PAXOS, sbuf);
+				cf_info(AS_PAXOS, "%s", sbuf);
 				as_paxos_print_cluster_key("SYNC MESSAGE");
 
 				if (qm->id != p->succession[0]) {
@@ -3179,6 +3198,7 @@ as_paxos_thr(void *arg)
 				 */
 				cf_info(AS_PAXOS, "node %"PRIx64" is %s principal pro tempore",
 						qm->id, (p->principal_pro_tempore != qm->id ? "now" : "still"));
+
 				p->principal_pro_tempore = qm->id;
 
 				/*
