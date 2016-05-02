@@ -1338,7 +1338,7 @@ void as_smd_dump_metadata(as_smd_t *smd, as_smd_cmd_t *cmd)
 	// Print info. about the System Metadata system.
 	cf_info(AS_SMD, "System Metadata Status:");
 	cf_info(AS_SMD, "-----------------------");
-	cf_info(AS_SMD, "thr_id: %lu", smd->thr_id);
+	cf_info(AS_SMD, "thr_id: 0x%lx", smd->thr_id);
 	cf_info(AS_SMD, "thr_attr: %p", &smd->thr_attr);
 	cf_info(AS_SMD, "state: %s", AS_SMD_STATE_NAME(smd->state));
 	cf_info(AS_SMD, "number of modules: %d", rchash_get_size(smd->modules));

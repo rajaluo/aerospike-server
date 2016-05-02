@@ -3404,6 +3404,7 @@ as_paxos_init()
 				else {
 					failed_storage_reads++;
 				}
+				client_replica_maps_update(ns, j);
 			} // end for
 		} // end if
 

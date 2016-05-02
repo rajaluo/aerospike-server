@@ -945,6 +945,21 @@ typedef struct ns_ldt_stats_s {
 
 } ns_ldt_stats;
 
+
+#define CLIENT_BITMAP_BYTES ((AS_PARTITIONS + 7) / 8)
+#define CLIENT_B64MAP_BYTES (((CLIENT_BITMAP_BYTES + 2) / 3) * 4)
+
+typedef struct client_replica_map_s {
+	pthread_mutex_t write_lock;
+
+	volatile uint8_t bitmap[CLIENT_BITMAP_BYTES];
+	volatile char b64map[CLIENT_B64MAP_BYTES];
+} client_replica_map;
+
+extern void client_replica_maps_create(as_namespace* ns);
+extern bool client_replica_maps_update(as_namespace* ns, as_partition_id pid);
+
+
 struct as_namespace_s {
 	/* Namespaces are internally assigned monotonic identifiers, but these
 	 * are not portable across node boundaries; to identify a namespace
@@ -975,6 +990,7 @@ struct as_namespace_s {
 	uint32_t					migrate_sleep;
 	uint16_t					replication_factor;
 	uint16_t					cfg_replication_factor;
+	client_replica_map			*replica_maps;
 	conflict_resolution_pol		conflict_resolution_policy;
 	bool						single_bin;		// restrict the namespace to objects with exactly one bin
 	bool						data_in_index;	// with single-bin, allows warm restart for data-in-memory (with storage-engine device)
