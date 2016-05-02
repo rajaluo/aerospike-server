@@ -936,6 +936,24 @@ udf_record_ttl(const as_rec * rec)
 	return 0;
 }
 
+static uint64_t
+udf_record_last_update_time(const as_rec * rec)
+{
+	int ret = udf_record_param_check(rec, UDF_BIN_NONAME, __FILE__, __LINE__);
+	if (ret) {
+		return 0;
+	}
+
+	udf_record * urecord = (udf_record *) as_rec_source(rec);
+	if (urecord && (urecord->flag & UDF_RECORD_FLAG_STORAGE_OPEN)) {
+		return urecord->r_ref->r->last_update_time;
+	}
+	else {
+		cf_warning(AS_UDF, "Error getting last update time: no record found");
+		return 0;
+	}
+}
+
 static uint16_t
 udf_record_gen(const as_rec * rec)
 {
@@ -1150,6 +1168,7 @@ const as_rec_hooks udf_record_hooks = {
 	.set		= udf_record_set,
 	.remove		= udf_record_remove,
 	.ttl		= udf_record_ttl,
+	.last_update_time	= udf_record_last_update_time,
 	.gen		= udf_record_gen,
 	.key		= udf_record_key,
 	.setname	= udf_record_setname,
