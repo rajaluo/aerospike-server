@@ -13,6 +13,7 @@ OS = $(shell $(DEPTH)/build/os_version)
 
 ifeq ($(OS),el7)
   USE_SYSTEMD = 1
+  CONF_VERSION = _systemd
 endif
 
 ifeq ($(USE_XDR),1)
@@ -43,15 +44,10 @@ ifeq ($(USE_SYSTEMD),1)
 endif
 	install -pm 755 $(DEPTH)/tools/citrus2aero/upgrade2to3 $(BUILD_ROOT)/usr/bin/asmigrate2to3
 	install -pm 755 $(DEPTH)/tools/fixownership/fixownership.py $(BUILD_ROOT)/usr/bin/asfixownership
-
-ifeq ($(USE_SYSTEMD),1)
-	install -pm 644 $(DEPTH)/as/etc/aerospike_systemd.conf $(BUILD_ROOT)/etc/aerospike/aerospike.conf
-else
-	install -pm 644 $(DEPTH)/as/etc/aerospike.conf $(BUILD_ROOT)/etc/aerospike
-endif
+	install -pm 644 $(DEPTH)/as/etc/aerospike$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/aerospike.conf
 	cat $(DEPTH)/as/etc/README.sample.conf.md > $(BUILD_ROOT)/etc/aerospike/sample/README.md
-	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd.conf $(BUILD_ROOT)/etc/aerospike/sample
-	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh.conf $(BUILD_ROOT)/etc/aerospike/sample
+	install -pm 644 $(DEPTH)/as/etc/aerospike_ssd$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_ssd.conf
+	install -pm 644 $(DEPTH)/as/etc/aerospike_mesh$(CONF_VERSION).conf $(BUILD_ROOT)/etc/aerospike/sample/aerospike_mesh.conf
 
 ifeq ($(USE_SYSTEMD),1)
 	cat $(DEPTH)/as/etc/aerospike.service.head >> $(PKG)/rpm/aerospike.service

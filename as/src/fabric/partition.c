@@ -818,30 +818,6 @@ as_partition_reservation_move(as_partition_reservation *dst, as_partition_reserv
 }
 
 
-// Update a reservation on a partition.
-void
-as_partition_reserve_update_state(as_partition_reservation *rsv)
-{
-	cf_assert(rsv, AS_PARTITION, CF_CRITICAL, "invalid reservation");
-
-	pthread_mutex_lock(&rsv->p->lock);
-
-	rsv->state = rsv->p->state;
-	rsv->n_dupl = rsv->p->n_dupl;
-	memcpy(rsv->dupl_nodes, rsv->p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
-	rsv->cluster_key = rsv->p->cluster_key;
-
-	if (! is_partition_null(&rsv->p->version_info)) {
-		memcpy(&rsv->vinfo, &rsv->p->version_info, sizeof(as_partition_vinfo));
-	}
-	else {
-		memcpy(&rsv->vinfo, &rsv->p->primary_version_info, sizeof(as_partition_vinfo));
-	}
-
-	pthread_mutex_unlock(&rsv->p->lock);
-}
-
-
 // Obtain a write reservation on a partition, or get the address of a
 // node who can.
 // On success, the provided as_partition_reservation * is filled in with the appropriate
