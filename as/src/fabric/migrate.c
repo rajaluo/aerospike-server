@@ -349,8 +349,7 @@ as_migrate_init()
 
 // Kicks off an emigration.
 void
-as_migrate_emigrate(const partition_migrate_record *pmr,
-		bool is_migrate_state_done)
+as_migrate_emigrate(const partition_migrate_record *pmr)
 {
 	emigration *emig = cf_rc_alloc(sizeof(emigration));
 

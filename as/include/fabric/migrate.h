@@ -93,7 +93,7 @@ typedef struct partition_migrate_record_s {
 
 // Public API.
 void as_migrate_init();
-void as_migrate_emigrate(const partition_migrate_record *pmr, bool is_migrate_state_done);
+void as_migrate_emigrate(const partition_migrate_record *pmr);
 bool as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id, int state);
 void as_migrate_set_num_xmit_threads(int n_threads);
 void as_migrate_dump(bool verbose);

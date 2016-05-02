@@ -1976,7 +1976,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 		partition_migrate_record pmr;
 
 		while (0 == cf_queue_pop(mq, &pmr, 0)) {
-			as_migrate_emigrate(&pmr, false);
+			as_migrate_emigrate(&pmr);
 		}
 
 		cf_queue_destroy(mq);
@@ -2188,7 +2188,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 		partition_migrate_record pmr;
 
 		while (0 == cf_queue_pop(mq, &pmr, 0)) {
-			as_migrate_emigrate(&pmr, true);
+			as_migrate_emigrate(&pmr);
 		}
 
 		cf_queue_destroy(mq);
@@ -3249,7 +3249,7 @@ as_partition_balance()
 	partition_migrate_record pmr;
 
 	while (cf_queue_pop(mq, &pmr, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
-		as_migrate_emigrate(&pmr, false);
+		as_migrate_emigrate(&pmr);
 	}
 
 	cf_queue_destroy(mq);
