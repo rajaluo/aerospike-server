@@ -926,8 +926,6 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT);
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
-	msg_set_buf(m, MIG_FIELD_NAMESPACE, (byte *)ns->name, strlen(ns->name),
-			MSG_SET_COPY);
 	msg_set_buf(m, MIG_FIELD_DIGEST, (void *)&pr.keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
 	msg_set_uint32(m, MIG_FIELD_GENERATION, pr.generation);
