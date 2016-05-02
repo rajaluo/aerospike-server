@@ -52,6 +52,9 @@ endif
 
 FABRIC_HEADERS += hb.h fabric.h migrate.h paxos.h
 FABRIC_SOURCES += hb.c fabric.c migrate.c partition.c paxos.c
+ifneq ($(USE_WARM),1)
+  FABRIC_SOURCES += migrate_ce.c
+endif
 
 GEOSPATIAL_HEADERS += geospatial.h
 GEOSPATIAL_SOURCES += geospatial.cc geojson.cc

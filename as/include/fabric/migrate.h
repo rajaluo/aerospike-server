@@ -29,6 +29,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_digest.h"
+#include "citrusleaf/cf_queue.h"
+#include "citrusleaf/cf_shash.h"
+
+#include "msg.h"
+#include "rchash.h"
 #include "util.h"
 
 #include "base/index.h"
@@ -108,3 +115,152 @@ as_migrate_result as_partition_migrate_rx(as_migrate_state s,
 as_migrate_result as_partition_migrate_tx(as_migrate_state s,
 		as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key,
 		uint32_t tx_flags);
+
+
+//==========================================================
+// Private API - for enterprise separation only.
+//
+
+typedef enum {
+	// These values go on the wire, so mind backward compatibility if changing.
+	MIG_FIELD_OP,
+	MIG_FIELD_EMIG_INSERT_ID,
+	MIG_FIELD_EMIG_ID,
+	MIG_FIELD_NAMESPACE,
+	MIG_FIELD_PARTITION,
+	MIG_FIELD_DIGEST,
+	MIG_FIELD_GENERATION,
+	MIG_FIELD_RECORD,
+	MIG_FIELD_CLUSTER_KEY,
+	MIG_FIELD_VINFOSET, // deprecated
+	MIG_FIELD_VOID_TIME,
+	MIG_FIELD_TYPE, // deprecated
+	MIG_FIELD_REC_PROPS,
+	MIG_FIELD_INFO,
+	MIG_FIELD_VERSION,
+	MIG_FIELD_PDIGEST,
+	MIG_FIELD_EDIGEST,
+	MIG_FIELD_PGENERATION,
+	MIG_FIELD_PVOID_TIME,
+	MIG_FIELD_LAST_UPDATE_TIME,
+	MIG_FIELD_FEATURES,
+	MIG_FIELD_PARTITION_SIZE,
+	MIG_FIELD_META_RECORDS,
+	MIG_FIELD_META_SEQUENCE,
+	MIG_FIELD_META_SEQUENCE_FINAL,
+
+	NUM_MIG_FIELDS
+} migrate_msg_fields;
+
+#define OPERATION_UNDEF 0
+#define OPERATION_INSERT 1
+#define OPERATION_INSERT_ACK 2
+#define OPERATION_START 3
+#define OPERATION_START_ACK_OK 4
+#define OPERATION_START_ACK_EAGAIN 5
+#define OPERATION_START_ACK_FAIL 6
+#define OPERATION_START_ACK_ALREADY_DONE 7
+#define OPERATION_DONE 8
+#define OPERATION_DONE_ACK 9
+#define OPERATION_CANCEL 10 // deprecated
+#define OPERATION_MERGE_META 11
+#define OPERATION_MERGE_META_ACK 12
+
+#define MIG_FEATURE_MERGE 0x00000001
+#define MIG_FEATURES_SEEN 0x80000000 // needed for backward compatibility
+extern const uint32_t MY_MIG_FEATURES;
+
+typedef struct meta_record_s {
+	cf_digest keyd;
+	uint16_t generation;
+	uint64_t last_update_time: 40;
+} __attribute__ ((__packed__)) meta_record;
+
+typedef struct meta_batch_s {
+	bool is_final;
+	uint32_t n_records;
+	meta_record *records;
+} meta_batch;
+
+typedef struct emig_meta_q_s {
+	uint32_t current_rec_i;
+	meta_batch current_batch;
+	cf_queue *batch_q;
+	cf_atomic32 last_acked;
+	bool is_done;
+} emig_meta_q;
+
+typedef struct emigration_s {
+	cf_node     dest;
+	uint64_t    cluster_key;
+	uint32_t    id;
+	uint32_t    tx_flags;
+	cf_atomic32 state;
+	bool        aborted;
+	as_partition_mig_tx_state tx_state; // really only for LDT
+
+	cf_atomic32 bytes_emigrating;
+	shash       *reinsert_hash;
+	cf_queue    *ctrl_q; // TODO - Remove, overkill for single dest.
+	emig_meta_q *meta_q;
+
+	as_partition_reservation rsv;
+} emigration;
+
+typedef struct immig_meta_q_s {
+	meta_batch current_batch;
+	cf_queue *batch_q;
+	uint32_t sequence;
+	cf_atomic32 last_acked;
+} immig_meta_q;
+
+typedef struct immigration_s {
+	cf_node          src;
+	uint64_t         cluster_key;
+	as_partition_id  pid;
+	as_partition_mig_rx_state rx_state; // really only for LDT
+	uint64_t         incoming_ldt_version;
+
+	cf_atomic32      done_recv;      // flag - 0 if not yet received, atomic counter for receives
+	uint64_t         start_recv_ms;  // time the first START event was received
+	uint64_t         done_recv_ms;   // time the first DONE event was received
+
+	uint32_t         emig_id;
+	immig_meta_q     meta_q;
+
+	as_partition_reservation rsv;
+} immigration;
+
+typedef struct immigration_hkey_s {
+	cf_node src;
+	uint32_t emig_id;
+} __attribute__((__packed__)) immigration_hkey;
+
+
+// Globals.
+extern rchash *g_emigration_hash;
+extern rchash *g_immigration_hash;
+
+
+// Emigration, immigration, & pickled record destructors.
+void emigration_release(emigration *emig);
+void immigration_release(immigration *immig);
+
+// Emigration.
+bool should_emigrate_record(emigration *emig, as_index_ref *r_ref);
+
+// Emigration meta queue.
+emig_meta_q *emig_meta_q_create();
+void emig_meta_q_destroy(emig_meta_q *emq);
+void emig_meta_q_push_batch(emig_meta_q *emq, const meta_batch *batch);
+
+// Migrate fabric message handling.
+void emigration_handle_meta_batch_request(cf_node src, msg *m);
+void immigration_handle_meta_batch_ack(cf_node src, msg *m);
+
+// Meta sender.
+bool immigration_start_meta_sender(immigration *immig, uint32_t emig_features, uint32_t emig_n_recs);
+
+// Immigration meta queue.
+void immig_meta_q_init(immig_meta_q *imq);
+void immig_meta_q_destroy(immig_meta_q *imq);
