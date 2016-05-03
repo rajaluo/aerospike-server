@@ -1217,6 +1217,7 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 	if (immig->cluster_key != as_paxos_get_cluster_key() ||
 			(g_config.migrate_rx_lifetime_ms > 0 &&
 					cf_atomic32_get(immig->done_recv) != 0 &&
+					immig->done_recv_ms != 0 &&
 					cf_getms() > immig->done_recv_ms +
 								g_config.migrate_rx_lifetime_ms)) {
 
@@ -1532,11 +1533,11 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
 
-	int rv = as_fabric_send(src, m, AS_FABRIC_PRIORITY_LOW);
+	int rv = as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM);
 
 	if (rv != AS_FABRIC_SUCCESS) {
 		if (rv != AS_FABRIC_ERR_NO_NODE) {
-			cf_warning(AS_MIGRATE, "handle insert: ack send failed");
+			cf_warning(AS_MIGRATE, "handle insert: ack send failed %d", rv);
 		}
 
 		as_fabric_msg_put(m);
@@ -1586,12 +1587,10 @@ immigration_handle_done_request(cf_node src, msg *m) {
 			if (g_config.migrate_rx_lifetime_ms <= 0) {
 				rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
 			}
-
-			// And we always need to release the extra ref-count now that we're
-			// done accessing the object.
-			immigration_release(immig);
 		}
 		// else - was likely a retransmitted done message.
+
+		immigration_release(immig);
 	}
 	// else - garbage, or super-stale retransmitted done message.
 
