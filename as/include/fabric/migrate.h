@@ -58,6 +58,10 @@
 #define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
 #define TX_FLAGS_REQUEST        ((uint32_t) 0x2)
 
+// If 0 then it is a migration start from an old node.
+#define MIG_TYPE_START_IS_NORMAL 1
+#define MIG_TYPE_START_IS_REQUEST 2
+
 typedef enum as_migrate_state_e {
 	AS_MIGRATE_STATE_DONE,
 	AS_MIGRATE_STATE_START,
@@ -100,7 +104,7 @@ void as_migrate_dump(bool verbose);
 
 as_migrate_result as_partition_migrate_rx(as_migrate_state s,
 		as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key,
-		cf_node source_node);
+		uint32_t start_type, cf_node source_node);
 as_migrate_result as_partition_migrate_tx(as_migrate_state s,
 		as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key,
 		uint32_t tx_flags);

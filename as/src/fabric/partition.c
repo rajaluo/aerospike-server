@@ -184,12 +184,6 @@ static volatile int g_multi_node = false;
 #define BALANCE_INIT_UNRESOLVED 0
 #define BALANCE_INIT_RESOLVED   1
 
-typedef enum {
-	MASTER_NOT_WAITING,
-	MASTER_WAITING,
-	MASTER_DONE_WAITING
-} master_wait_state;
-
 static volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
 
 
@@ -383,7 +377,8 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 
 	p->n_dupl = 0;
 	memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-	p->master_wait_state = MASTER_NOT_WAITING;
+	p->has_master_wait = false;
+	p->has_migrate_tx_later = false;
 	memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 	memset(&p->version_info, 0, sizeof(p->version_info));
 	memset(p->old_sl, 0, sizeof(p->old_sl));
@@ -1768,7 +1763,8 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 //    Schedule migrate to master, at completion switch to absent.
 as_migrate_result
 as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
-		as_partition_id pid, uint64_t orig_cluster_key, cf_node source_node)
+		as_partition_id pid, uint64_t orig_cluster_key, uint32_t start_type,
+		cf_node source_node)
 {
 	if (! g_allow_migrations) {
 		return AS_MIGRATE_AGAIN;
@@ -1826,7 +1822,24 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			// do not decrement the migrate count since we expect
 			// another migrate from master after the merge completes
 			if (g_config.self_node != p->replica[0]) {
-				if (p->master_wait_state == MASTER_WAITING) {
+				// TODO - deprecate in "six months".
+				if (start_type == 0) {
+					// Start message from old node. Note that this still has a
+					// bug for replication factor > 2, where subsequent normal
+					// starts masquerade as duplicate request-type starts.
+					start_type = MIG_TYPE_START_IS_NORMAL;
+
+					if (p->has_master_wait) {
+						start_type = MIG_TYPE_START_IS_REQUEST;
+					}
+				}
+
+				if (start_type == MIG_TYPE_START_IS_REQUEST) {
+					if (! p->has_migrate_tx_later) {
+						rv = AS_MIGRATE_ALREADY_DONE;
+						break;
+					}
+
 					if (source_node != p->replica[0]) {
 						// this is a state corruption error
 						cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. Waiting node received migrate request from non-master",
@@ -1835,7 +1848,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 						break; // out of switch
 					}
 
-					p->master_wait_state = MASTER_DONE_WAITING;
+					p->has_migrate_tx_later = false;
 					p->pending_migrate_tx++; // Send request to dupl node
 
 					partition_migrate_record r;
@@ -1843,12 +1856,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 							pid, orig_cluster_key, TX_FLAGS_NONE);
 					cf_queue_push(mq, &r);
 
-					rv = AS_MIGRATE_ALREADY_DONE;
-					break;
-				}
-
-				if (p->master_wait_state == MASTER_DONE_WAITING) {
-					// Handles duplicate start request.
 					rv = AS_MIGRATE_ALREADY_DONE;
 					break;
 				}
@@ -2784,7 +2791,8 @@ as_partition_balance()
 
 			p->n_dupl = 0;
 			memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-			p->master_wait_state = MASTER_NOT_WAITING;
+			p->has_master_wait = false;
+			p->has_migrate_tx_later = false;
 			memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 
 			// Check if any of the replicas for this partition in the old
@@ -3160,7 +3168,8 @@ as_partition_balance()
 				// Wait for master to flag that it is sync before
 				// transmitting the partition
 				else if (cf_contains64(dupl_nodes, n_dupl, self) && ! is_sync[0]) {
-					p->master_wait_state = MASTER_WAITING;
+					p->has_master_wait = true;
+					p->has_migrate_tx_later = true;
 					ns_pending_migrate_tx_later++;
 				}
 
@@ -3179,7 +3188,7 @@ as_partition_balance()
 
 				// Not a replica. Partition will enter zombie state if it
 				// has pending work. Otherwise, we discard the partition.
-				if (p->pending_migrate_tx || p->master_wait_state == MASTER_WAITING) {
+				if (p->pending_migrate_tx || p->has_migrate_tx_later) {
 					p->state = AS_PARTITION_STATE_ZOMBIE;
 				}
 				else  { // throwing away duplicate partition

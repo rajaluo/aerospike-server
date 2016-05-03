@@ -124,7 +124,7 @@ const msg_template migrate_mt[] = {
 #define MIG_MSG_SCRATCH_SIZE 128
 
 // If the bit is not set then it is normal record.
-#define MIG_INFO_LDT_REC    0x0001
+#define MIG_INFO_LDT_PREC   0x0001
 #define MIG_INFO_LDT_SUBREC 0x0002
 #define MIG_INFO_LDT_ESR    0x0004
 
@@ -1062,7 +1062,8 @@ emigration_send_start(emigration *emig)
 	msg_set_buf(start_m, MIG_FIELD_NAMESPACE, (byte *)ns->name,
 			strlen(ns->name), MSG_SET_COPY);
 	msg_set_uint32(start_m, MIG_FIELD_PARTITION, emig->rsv.pid);
-	msg_set_uint32(start_m, MIG_FIELD_TYPE, 0); // not used, but older nodes expect this
+	msg_set_uint32(start_m, MIG_FIELD_TYPE, emig->tx_flags == TX_FLAGS_REQUEST ?
+			MIG_TYPE_START_IS_REQUEST : MIG_TYPE_START_IS_NORMAL);
 	msg_set_uint64(start_m, MIG_FIELD_VERSION,
 			emig->rsv.p->current_outgoing_ldt_version);
 
@@ -1113,7 +1114,7 @@ emigration_send_start(emigration *emig)
 				usleep(1000);
 				break;
 			case OPERATION_START_ACK_FAIL:
-				cf_warning(AS_MIGRATE, "dest refused migrate with ACK_FAIL");
+				cf_warning(AS_MIGRATE, "imbalance: dest refused migrate with ACK_FAIL");
 				cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 				as_fabric_msg_put(start_m);
 				return AS_MIGRATE_STATE_ERROR;
@@ -1338,6 +1339,10 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		return;
 	}
 
+	uint32_t start_type = 0;
+
+	msg_get_uint32(m, MIG_FIELD_TYPE, &start_type);
+
 	uint64_t incoming_ldt_version = 0;
 
 	msg_get_uint64(m, MIG_FIELD_VERSION, &incoming_ldt_version);
@@ -1345,7 +1350,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 	msg_preserve_fields(m, 1, MIG_FIELD_EMIG_ID);
 
 	as_migrate_result rv = as_partition_migrate_rx(AS_MIGRATE_STATE_START, ns,
-			pid, cluster_key, src);
+			pid, cluster_key, start_type, src);
 
 	switch (rv) {
 	case AS_MIGRATE_FAIL:
@@ -1590,7 +1595,7 @@ immigration_handle_done_request(cf_node src, msg *m) {
 			}
 
 			as_partition_migrate_rx(AS_MIGRATE_STATE_DONE, immig->rsv.ns,
-					immig->rsv.pid, immig->cluster_key, immig->src);
+					immig->rsv.pid, immig->cluster_key, 0, immig->src);
 
 			if (g_config.migrate_rx_lifetime_ms <= 0) {
 				rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
@@ -1854,7 +1859,7 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr)
 		}
 	}
 	else if (as_ldt_precord_is_parent(pr)) {
-		info |= MIG_INFO_LDT_REC;
+		info |= MIG_INFO_LDT_PREC;
 	}
 
 	msg_set_uint32(m, MIG_FIELD_INFO, info);
@@ -1960,7 +1965,7 @@ as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
 		if ((info & MIG_INFO_LDT_SUBREC) != 0) {
 			c->flag |= AS_COMPONENT_FLAG_LDT_SUBREC;
 		}
-		else if ((info & MIG_INFO_LDT_REC) != 0) {
+		else if ((info & MIG_INFO_LDT_PREC) != 0) {
 			c->flag |= AS_COMPONENT_FLAG_LDT_REC;
 		}
 		else if ((info & MIG_INFO_LDT_ESR) != 0) {
