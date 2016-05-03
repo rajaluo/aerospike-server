@@ -87,7 +87,7 @@ init:
 start:
 	@echo "Running the Aerospike Server locally..."
 	@PIDFILE=run/asd.pid ; if [ -f $$PIDFILE ]; then echo "Aerospike already running?  Please do \"make stop\" first."; exit -1; fi
-	@./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf &
+	@nohup ./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf > /dev/null 2>1 &
 	$(BIN_DIR)/asd --config-file as/etc/aerospike_dev.conf
 
 stop:
