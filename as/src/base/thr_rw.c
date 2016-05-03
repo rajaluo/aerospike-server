@@ -1233,11 +1233,9 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 					wq_depth++;
 					e = e->next;
 				}
-				// allow a depth of 2 - only
+
 				if (wq_depth > g_config.transaction_pending_limit) {
-					cf_debug(AS_RW,
-							"as_rw_start: pending limit, ignoring {%s:%d} %"PRIx64"",
-							ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
+					cf_debug_digest(AS_RW, &tr->keyd, "reached pending limit, ignoring {%s:%d}",ns->name, tr->rsv.pid);
 					cf_rc_release(wr);
 					WR_TRACK_INFO(wr, "as_rw_start: pending - limit");
 					WR_RELEASE(wr);
