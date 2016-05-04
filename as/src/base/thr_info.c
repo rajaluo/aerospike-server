@@ -453,12 +453,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
 	cf_dyn_buf_append_string(db, paxos_principal);
 
-	cf_dyn_buf_append_string(db, ";migrate_msgs_sent=");
-	APPEND_STAT_COUNTER(db, g_config.migrate_msgs_sent);
-
-	cf_dyn_buf_append_string(db, ";migrate_msgs_recv=");
-	APPEND_STAT_COUNTER(db, g_config.migrate_msgs_rcvd);
-
 	cf_dyn_buf_append_string(db, ";migrate_progress_send=");
 	APPEND_STAT_COUNTER(db, g_config.migrate_progress_send);
 

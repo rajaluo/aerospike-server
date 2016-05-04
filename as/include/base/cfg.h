@@ -354,8 +354,6 @@ typedef struct as_config_s {
 	cf_atomic_int		fabric_read_short;
 	cf_atomic_int		fabric_read_medium;
 	cf_atomic_int		fabric_read_long;
-	cf_atomic_int		migrate_msgs_sent;
-	cf_atomic_int		migrate_msgs_rcvd;
 	cf_atomic_int		migrate_progress_send;
 	cf_atomic_int		migrate_progress_recv;
 	cf_atomic_int		migrate_num_incoming_accepted;

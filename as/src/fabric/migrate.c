@@ -818,26 +818,8 @@ run_emigration_reinserter(void *arg)
 			continue;
 		}
 
-		// The only rv from this is the rv of the reduce fn, which is the
-		// return value of a fabric_send.
-		int rv = shash_reduce(emig->reinsert_hash,
-				emigration_reinsert_reduce_fn, (void *)cf_getms());
-
-		switch (rv) {
-		case AS_FABRIC_SUCCESS:
-		case AS_FABRIC_ERR_QUEUE_FULL:
-			break;
-		case AS_FABRIC_ERR_NO_NODE:
-			// New rebalance expected.
-			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
-			return NULL;
-		default:
-			cf_warning(AS_MIGRATE, "imbalance: failure emigrating - bad fabric send in retransmission - error %d",
-					rv);
-			cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_partitions_imbalance);
-			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
-			return NULL;
-		}
+		shash_reduce(emig->reinsert_hash, emigration_reinsert_reduce_fn,
+				(void *)cf_getms());
 	}
 
 	return NULL;
@@ -994,27 +976,10 @@ emigrate_record(emigration *emig, msg *m)
 
 	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
 
-	int rv;
-
-	while ((rv = as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_LOW)) !=
+	if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_LOW) !=
 			AS_FABRIC_SUCCESS) {
-		switch (rv) {
-		case AS_FABRIC_ERR_QUEUE_FULL:
-			usleep(1000 * 10);
-			break;
-		case AS_FABRIC_ERR_NO_NODE:
-			// New rebalance expected.
-			as_fabric_msg_put(m);
-			return false;
-		default:
-			cf_warning(AS_MIGRATE, "imbalance: emigrate record failed fabric send");
-			cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_partitions_imbalance);
-			as_fabric_msg_put(m);
-			return false;
-		}
+		as_fabric_msg_put(m);
 	}
-
-	cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 
 	return true;
 }
@@ -1029,15 +994,12 @@ emigration_reinsert_reduce_fn(void *key, void *data, void *udata)
 	if (ri_ctrl->xmit_ms + MIGRATE_RETRANSMIT_MS < now) {
 		msg_incr_ref(ri_ctrl->m);
 
-		int rv = as_fabric_send(ri_ctrl->emig->dest, ri_ctrl->m,
-				AS_FABRIC_PRIORITY_LOW);
-
-		if (rv != AS_FABRIC_SUCCESS) {
+		if (as_fabric_send(ri_ctrl->emig->dest, ri_ctrl->m,
+				AS_FABRIC_PRIORITY_LOW) != AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(ri_ctrl->m);
-			return rv; // this will stop the reduce
+			return -1; // this will stop the reduce
 		}
 
-		cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 		ri_ctrl->xmit_ms = now;
 	}
 
@@ -1084,11 +1046,6 @@ emigration_send_start(emigration *emig)
 
 			if ((rv = as_fabric_send(emig->dest, start_m,
 					AS_FABRIC_PRIORITY_MEDIUM)) != AS_FABRIC_SUCCESS) {
-				// NO_NODE is expected when node drops, new rebalance imminent.
-				if (rv != AS_FABRIC_ERR_NO_NODE) {
-					cf_warning(AS_MIGRATE, "could not send start rv: %d", rv);
-				}
-
 				as_fabric_msg_put(start_m);
 			}
 
@@ -1149,23 +1106,19 @@ emigration_send_done(emigration *emig)
 	uint64_t done_xmit_ms = 0;
 
 	while (true) {
+		if (emig->cluster_key != as_paxos_get_cluster_key()) {
+			as_fabric_msg_put(m);
+			return AS_MIGRATE_STATE_ERROR;
+		}
+
 		uint64_t now = cf_getms();
 
 		if (done_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
 			cf_rc_reserve(m);
 
-			int rv = as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM);
-
-			if (rv == AS_FABRIC_SUCCESS) {
-				cf_atomic_int_incr(&g_config.migrate_msgs_sent);
-			}
-			else {
+			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+					AS_FABRIC_SUCCESS) {
 				as_fabric_msg_put(m);
-
-				if (rv == AS_FABRIC_ERR_NO_NODE) {
-					as_fabric_msg_put(m);
-					return AS_MIGRATE_STATE_ERROR;
-				}
 			}
 
 			done_xmit_ms = now;
@@ -1247,8 +1200,6 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 int
 migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 {
-	cf_atomic_int_incr(&g_config.migrate_msgs_rcvd);
-
 	uint32_t op = OPERATION_UNDEF;
 
 	msg_get_uint32(m, MIG_FIELD_OP, &op);
@@ -1546,18 +1497,11 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
 
-	int rv = as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM);
-
-	if (rv != AS_FABRIC_SUCCESS) {
-		if (rv != AS_FABRIC_ERR_NO_NODE) {
-			cf_warning(AS_MIGRATE, "handle insert: ack send failed %d", rv);
-		}
-
+	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+			AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 		return;
 	}
-
-	cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 }
 
 
@@ -1612,8 +1556,6 @@ immigration_handle_done_request(cf_node src, msg *m) {
 		as_fabric_msg_put(m);
 		return;
 	}
-
-	cf_atomic_int_incr(&g_config.migrate_msgs_sent);
 }
 
 //----------------------------------------------------------
