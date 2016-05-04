@@ -151,7 +151,7 @@ typedef struct xdr_lastship_s {
 
 // Config option in case the configuration value is changed
 typedef struct xdr_new_config_s {
-	int		xdr_read_batch_size;
+	bool	skip_outstanding;
 } xdr_new_config;
 
 //Config option which is maintained both by the server and the XDR module
@@ -171,7 +171,6 @@ typedef struct xdr_config {
 	int	xdr_max_ship_throughput;
 	int	xdr_max_ship_bandwidth;
 	int	xdr_hotkey_time_ms;
-	int	xdr_read_batch_size;
 	int	xdr_read_threads;       // Number threads which will read from server and ship records.
 	int	xdr_timeout;
 	int	xdr_client_threads;

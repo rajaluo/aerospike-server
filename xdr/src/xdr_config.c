@@ -130,7 +130,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_max_ship_throughput = 0;		// XDR TPS limit
 	c->xdr_max_ship_bandwidth = 0;		// XDR bandwidth limit
 	c->xdr_hotkey_time_ms = 100;		// Expiration time for the de-duplication cache
-	c->xdr_read_batch_size = 500;		// Number of digests read from the digest log and processed in one go
 	c->xdr_read_threads = 4;			// Number of XDR read threads.
 	c->xdr_timeout = 10000;				// Timeout for each element that is shipped.
 	c->xdr_client_threads = 3;			// Number of async client threads (event loops)
