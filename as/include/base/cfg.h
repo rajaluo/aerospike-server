@@ -336,7 +336,7 @@ typedef struct as_config_s {
 	uint64_t			udf_runtime_max_gmemory; // maximum runtime memory alloed for all UDF
 	cf_atomic_int		udf_runtime_gmemory_used; // Current runtime memory reserve by per UDF - BUG if global should be 64?
 
-    // Geospatial stats
+	// Geospatial stats
 	cf_atomic_int		geo_region_query_count;		// Number of region queries
 	cf_atomic_int		geo_region_query_cells;		// Number of cells used by region queries
 	cf_atomic_int		geo_region_query_points;	// Number of valid points found
@@ -354,12 +354,6 @@ typedef struct as_config_s {
 	cf_atomic_int		fabric_read_short;
 	cf_atomic_int		fabric_read_medium;
 	cf_atomic_int		fabric_read_long;
-	cf_atomic_int		migrate_progress_send;
-	cf_atomic_int		migrate_progress_recv;
-	cf_atomic_int		migrate_num_incoming_accepted;
-	cf_atomic_int		migrate_num_incoming_refused; // For receiver-side migration flow control.
-	cf_atomic_int		migrate_tx_object_count;
-	cf_atomic_int		migrate_rx_object_count;
 	cf_atomic_int		proto_transactions;
 	cf_atomic_int		proxy_initiate; // initiated
 	cf_atomic_int		ldt_proxy_initiate; // initiated

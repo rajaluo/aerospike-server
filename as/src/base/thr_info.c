@@ -453,18 +453,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
 	cf_dyn_buf_append_string(db, paxos_principal);
 
-	cf_dyn_buf_append_string(db, ";migrate_progress_send=");
-	APPEND_STAT_COUNTER(db, g_config.migrate_progress_send);
-
-	cf_dyn_buf_append_string(db, ";migrate_progress_recv=");
-	APPEND_STAT_COUNTER(db, g_config.migrate_progress_recv);
-
-	cf_dyn_buf_append_string(db, ";migrate_num_incoming_accepted=");
-	APPEND_STAT_COUNTER(db, g_config.migrate_num_incoming_accepted);
-
-	cf_dyn_buf_append_string(db, ";migrate_num_incoming_refused=");
-	APPEND_STAT_COUNTER(db, g_config.migrate_num_incoming_refused);
-
 	cf_dyn_buf_append_string(db, ";queue=");
 	cf_dyn_buf_append_int(db, thr_tsvc_queue_get_size() );
 
@@ -585,12 +573,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";record_locks=");
 	APPEND_STAT_COUNTER(db, g_config.global_record_lock_count);
-
-	cf_dyn_buf_append_string(db, ";migrate_tx_objs=");
-	APPEND_STAT_COUNTER(db, g_config.migrate_tx_object_count);
-
-	cf_dyn_buf_append_string(db, ";migrate_rx_objs=");
-	APPEND_STAT_COUNTER(db, g_config.migrate_rx_object_count);
 
 	cf_dyn_buf_append_string(db, ";ongoing_write_reqs=");
 	APPEND_STAT_COUNTER(db, g_config.write_req_object_count);
@@ -2393,6 +2375,21 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";migrate-sleep=");
 	cf_dyn_buf_append_uint32(db, ns->migrate_sleep);
 
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-imbalance=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_imbalance);
+
+	cf_dyn_buf_append_string(db, ";migrate-tx-instance-count=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_instance_count);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-instance-count=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_instance_count);
+
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-active=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_active);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-active=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_active);
+
 	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-initial=");
 	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_initial);
 
@@ -2405,8 +2402,17 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-remaining=");
 	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_remaining);
 
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-imbalance=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_imbalance);
+	cf_dyn_buf_append_string(db, ";migrate-records-skipped=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_records_skipped);
+
+	cf_dyn_buf_append_string(db, ";migrate-records-transmitted=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_records_transmitted);
+
+	cf_dyn_buf_append_string(db, ";migrate-record-retransmits=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_record_retransmits);
+
+	cf_dyn_buf_append_string(db, ";migrate-record-receives=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_record_receives);
 
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
@@ -4823,14 +4829,13 @@ info_debug_ticker_fn(void *unused)
 					thr_info_get_subobject_count()
 					);
 
-			cf_info(AS_INFO, " rec refs %"PRIu64" ::: rec locks %"PRIu64" ::: trees %"PRIu64" ::: wr reqs %"PRIu64" ::: mig tx %"PRIu64" ::: mig rx %"PRIu64"",
+			cf_info(AS_INFO, " rec refs %"PRIu64" ::: rec locks %"PRIu64" ::: trees %"PRIu64" ::: wr reqs %"PRIu64,
 					cf_atomic_int_get(g_config.global_record_ref_count),
 					cf_atomic_int_get(g_config.global_record_lock_count),
 					cf_atomic_int_get(g_config.global_tree_count),
-					cf_atomic_int_get(g_config.write_req_object_count),
-					cf_atomic_int_get(g_config.migrate_tx_object_count),
-					cf_atomic_int_get(g_config.migrate_rx_object_count)
+					cf_atomic_int_get(g_config.write_req_object_count)
 				 	);
+
 			cf_info(AS_INFO, " replica errs :: null %"PRIu64" non-null %"PRIu64" ::: sync copy errs :: master %"PRIu64" ",
 					cf_atomic_int_get(g_config.err_replica_null_node),
 					cf_atomic_int_get(g_config.err_replica_non_null_node),
@@ -4922,8 +4927,8 @@ info_debug_ticker_fn(void *unused)
 							ns->name,
 							remaining_tx_migrations,
 							remaining_rx_migrations,
-							cf_atomic_int_get(g_config.migrate_progress_send),
-							cf_atomic_int_get(g_config.migrate_progress_recv),
+							cf_atomic_int_get(ns->migrate_tx_partitions_active),
+							cf_atomic_int_get(ns->migrate_rx_partitions_active),
 							migrations_pct_complete
 							);
 				} else {

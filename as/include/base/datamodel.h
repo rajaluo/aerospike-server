@@ -1090,13 +1090,21 @@ struct as_namespace_s {
 	cf_atomic_int	n_deleted_set_objects;
 
 	// migration counters
+	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only
+	cf_atomic_int	migrate_tx_instance_count; // debug only
+	cf_atomic_int	migrate_rx_instance_count; // debug only
+	cf_atomic_int	migrate_tx_partitions_active;
+	cf_atomic_int	migrate_rx_partitions_active;
 	cf_atomic_int	migrate_tx_partitions_initial;
 	cf_atomic_int	migrate_tx_partitions_remaining;
 	cf_atomic_int	migrate_rx_partitions_initial;
 	cf_atomic_int	migrate_rx_partitions_remaining;
 
-	// migration transmit stats
-	cf_atomic_int	migrate_tx_partitions_imbalance;
+	// migration per-record stats
+	cf_atomic_int	migrate_records_skipped; // relevant only for enterprise edition
+	cf_atomic_int	migrate_records_transmitted;
+	cf_atomic_int	migrate_record_retransmits;
+	cf_atomic_int	migrate_record_receives;
 
 	// the maximum void time of all records in the namespace
 	cf_atomic_int max_void_time;

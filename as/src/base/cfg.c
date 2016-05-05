@@ -213,9 +213,6 @@ cfg_set_defaults()
 	c->sec_cfg.syslog_local = AS_SYSLOG_NONE;
 
 	// TODO - not sure why these are in configuration - just to be global?
-	cf_atomic_int_set(&c->migrate_num_incoming, 0);
-	cf_atomic_int_set(&c->migrate_num_incoming_accepted, 0);
-	cf_atomic_int_set(&c->migrate_num_incoming_refused, 0);
 	c->start_ms = cf_getms();
 	c->record_locks = olock_create(16 * 1024, true); // TODO - configurable number of locks?
 
