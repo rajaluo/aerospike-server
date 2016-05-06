@@ -108,7 +108,7 @@ cold_start_evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 //
 typedef struct evict_prep_thread_info_s {
 	as_namespace*		ns;
-	cf_atomic32			pid;
+	cf_atomic32*		p_pid;
 	linear_hist*		hist;
 	bool*				sets_not_evicting;
 } evict_prep_thread_info;
@@ -127,7 +127,7 @@ run_cold_start_evict_prep(void* udata)
 
 	int pid;
 
-	while ((pid = (int)cf_atomic32_incr(&p_info->pid)) < AS_PARTITIONS) {
+	while ((pid = (int)cf_atomic32_incr(p_info->p_pid)) < AS_PARTITIONS) {
 		// Don't bother with partition reservations - it's startup.
 		as_index_reduce(ns->partitions[pid].vp, cold_start_evict_prep_reduce_cb, &cb_info);
 	}
@@ -348,20 +348,18 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 
 	// Split these tasks across multiple threads.
 	pthread_t evict_threads[NUM_EVICT_THREADS];
-	linear_hist* thread_hists[NUM_EVICT_THREADS];
 
 	// Reduce all partitions to build the eviction histogram.
-	evict_prep_thread_info prep_thread_info;
-
-	prep_thread_info.ns = ns;
-	prep_thread_info.pid = -1;
-	prep_thread_info.sets_not_evicting = sets_not_evicting;
+	evict_prep_thread_info prep_thread_infos[NUM_EVICT_THREADS];
+	cf_atomic32 pid = -1;
 
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
-		thread_hists[n] = linear_hist_create("thread-hist", now, ttl_range, n_buckets);
-		prep_thread_info.hist = thread_hists[n];
+		prep_thread_infos[n].ns = ns;
+		prep_thread_infos[n].p_pid = &pid;
+		prep_thread_infos[n].hist = linear_hist_create("thread-hist", now, ttl_range, n_buckets);
+		prep_thread_infos[n].sets_not_evicting = sets_not_evicting;
 
-		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_info) != 0) {
+		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_infos[n]) != 0) {
 			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %d", ns->name, n);
 		}
 	}
@@ -373,23 +371,15 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 			continue;
 		}
 
-		linear_hist_merge(thread_hists[0], thread_hists[n]);
-		linear_hist_destroy(thread_hists[n]);
+		linear_hist_merge(prep_thread_infos[0].hist, prep_thread_infos[n].hist);
+		linear_hist_destroy(prep_thread_infos[n].hist);
 	}
 	// Now we're single-threaded again.
 
-	evict_thread_info thread_info;
-
-	thread_info.ns = ns;
-	thread_info.pid = -1;
-	thread_info.sets_not_evicting = sets_not_evicting;
-	thread_info.total_evicted = 0;
-	thread_info.total_0_void_time = 0;
-
 	// Calculate the eviction threshold.
-	uint32_t n_evictable = set_cold_start_threshold(ns, thread_hists[0]);
+	uint32_t n_evictable = set_cold_start_threshold(ns, prep_thread_infos[0].hist);
 
-	linear_hist_destroy(thread_hists[0]);
+	linear_hist_destroy(prep_thread_infos[0].hist);
 
 	if (n_evictable == 0) {
 		pthread_mutex_unlock(&ns->cold_start_evict_lock);
@@ -399,6 +389,14 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	cf_info(AS_NSUP, "{%s} cold-start found %u records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
 
 	// Reduce all partitions to evict based on the thresholds.
+	evict_thread_info thread_info;
+
+	thread_info.ns = ns;
+	thread_info.pid = -1;
+	thread_info.sets_not_evicting = sets_not_evicting;
+	thread_info.total_evicted = 0;
+	thread_info.total_0_void_time = 0;
+
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict, (void*)&thread_info) != 0) {
 			cf_warning(AS_NSUP, "{%s} failed to create evict thread %d", ns->name, n);
