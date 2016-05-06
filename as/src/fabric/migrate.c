@@ -1622,7 +1622,7 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op)
 			if ((immig_features & MIG_FEATURES_SEEN) == 0 ||
 					(immig_features & MIG_FEATURE_MERGE) == 0) {
 				// TODO - rethink where this should go after further refactor.
-				if (op == OPERATION_START_ACK_OK) {
+				if (op == OPERATION_START_ACK_OK && emig->meta_q) {
 					emig->meta_q->is_done = true;
 				}
 			}

@@ -521,6 +521,14 @@ post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set_id)
 		set_id = as_index_get_set_id(r_ref->r);
 	}
 	urecord->op = *urecord_op;
+
+	xdr_dirty_bins dirty_bins;
+	xdr_clear_dirty_bins(&dirty_bins);
+
+	if (udf_xdr_ship_op && UDF_OP_IS_WRITE(*urecord_op)) {
+		xdr_copy_dirty_bins(urecord->dirty, &dirty_bins);
+	}
+
 	// Close the record for all the cases
 	udf_record_close(urecord);
 
@@ -529,10 +537,10 @@ post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set_id)
 	if (udf_xdr_ship_op == true) {
 		if (UDF_OP_IS_WRITE(*urecord_op)) {
 			cf_detail_digest(AS_UDF, &tr->keyd, "UDF write shipping ");
-			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, false, set_id);
+			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, false, set_id, &dirty_bins);
 		} else if (UDF_OP_IS_DELETE(*urecord_op)) {
 			cf_detail_digest(AS_UDF, &tr->keyd, "UDF delete shipping ");
-			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, true, set_id);
+			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, true, set_id, NULL);
 		}
 	}
 }
@@ -791,9 +799,13 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 	ldt_record lrecord;
 	ldt_record_init(&lrecord);
 
+	xdr_dirty_bins dirty_bins;
+	xdr_clear_dirty_bins(&dirty_bins);
+
 	urecord.tr                 = tr;
 	urecord.r_ref              = &r_ref;
 	urecord.rd                 = &rd;
+	urecord.dirty              = &dirty_bins;
 
 	as_rec urec;
 	as_rec_init(&urec, &urecord, &udf_record_hooks);

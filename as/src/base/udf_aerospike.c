@@ -49,6 +49,7 @@
 #include "base/transaction.h"
 #include "base/udf_record.h"
 #include "base/udf_rw.h"
+#include "base/xdr_serverside.h"
 #include "storage/storage.h"
 
 
@@ -415,7 +416,8 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	int failmax					= 0;
 	int new_bins				= 0;	// How many new bins have to be created in this update
 	as_storage_rd * rd			= urecord->rd;
-	bool has_sindex				= as_sindex_ns_has_sindex(rd->ns);
+	as_namespace * ns			= rd->ns;
+	bool has_sindex				= as_sindex_ns_has_sindex(ns);
 	bool is_record_dirty		= false;
 	bool is_record_flag_dirty	= false;
 	uint8_t old_index_flags		= as_index_get_flags(rd->r);
@@ -495,6 +497,10 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 					// Only case delete fails if bin is not found that is 
 					// as good as delete. Ignore return code !!
 					udf_aerospike_delbin(urecord, k);
+
+					if (urecord->dirty != NULL) {
+						xdr_fill_dirty_bins(urecord->dirty);
+					}
 				}
 				else {
 					// otherwise, it is a set
@@ -510,8 +516,13 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 						failmax = i;
 						goto Rollback;
 					}
+
+					if (urecord->dirty != NULL) {
+						xdr_add_dirty_bin(ns, urecord->dirty, k, strlen(k));
+					}
 				}
 			}
+
 			is_record_dirty = true;
 		}
 	}
@@ -642,6 +653,10 @@ Rollback:
 				cf_debug(AS_UDF, "ROLLBACK as_val_destroy()");
 			}
 		}
+	}
+
+	if (is_record_dirty && urecord->dirty != NULL) {
+		xdr_clear_dirty_bins(urecord->dirty);
 	}
 
 	if (is_record_flag_dirty) {

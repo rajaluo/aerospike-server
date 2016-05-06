@@ -68,7 +68,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-client-threads",				XDR_CASE_CLIENT_THREADS },
 		{ "timeout",						XDR_CASE_TIMEOUT },							// not exposed to users
 		{ "xdr-delete-shipping-enabled",	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
-		{ "xdr-replace-record",				XDR_CASE_XDR_REPLACE_RECORD },
+		{ "xdr-ship-bins",					XDR_CASE_XDR_SHIP_BINS },
 		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
 		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
 		{ "xdr-info-timeout",				XDR_CASE_XDR_INFO_TIMEOUT },
@@ -139,7 +139,7 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_conf_change_flag = 0;
 	c->xdr_shipping_enabled = true;
 	c->xdr_delete_shipping_enabled = true;
-	c->xdr_replace_record = true;
+	c->xdr_ship_bins = false;
 	c->xdr_info_request_timeout_ms = 500;
 	c->xdr_compression_threshold = 0; 	// 0 disables compressed shipping, > 0 specifies minimum request size for compression
 }
