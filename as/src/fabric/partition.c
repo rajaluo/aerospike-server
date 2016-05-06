@@ -184,12 +184,6 @@ static volatile int g_multi_node = false;
 #define BALANCE_INIT_UNRESOLVED 0
 #define BALANCE_INIT_RESOLVED   1
 
-typedef enum {
-	MASTER_NOT_WAITING,
-	MASTER_WAITING,
-	MASTER_DONE_WAITING
-} master_wait_state;
-
 static volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
 
 
@@ -383,7 +377,8 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 
 	p->n_dupl = 0;
 	memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-	p->master_wait_state = MASTER_NOT_WAITING;
+	p->has_master_wait = false;
+	p->has_migrate_tx_later = false;
 	memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 	memset(&p->version_info, 0, sizeof(p->version_info));
 	memset(p->old_sl, 0, sizeof(p->old_sl));
@@ -1230,52 +1225,89 @@ as_partition_getreplica_write(as_namespace *ns, as_partition_id pid)
 }
 
 
-// currently an exact copy of getreplica_write, but we'll see if this can be
-// optimized later-on, for example returning status instead of cf_node.
-// Get the node ID of the node that is the actual for the specified
-// partition.
-cf_node
-as_partition_getreplica_master(as_namespace *ns, as_partition_id pid)
+int
+as_partition_get_replica_self_lockfree(as_namespace *ns, as_partition_id pid)
 {
-	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
-
-	as_partition *p = &ns->partitions[pid];
-
-	pthread_mutex_lock(&p->lock);
-
-	cf_node n = find_sync_copy(ns, pid, p, false);
-
-	pthread_mutex_unlock(&p->lock);
-
-	return n;
-}
-
-
-void
-as_partition_get_replicas_all(as_namespace *ns, as_partition_id pid, bool *owned, int n_repl)
-{
-	for (int j = 0; j < n_repl; j++) {
-		owned[j] = false;
-	}
-
+	uint16_t n_repl = ns->replication_factor;
 	as_partition *p = &ns->partitions[pid];
 	cf_node self = g_config.self_node;
-
-	pthread_mutex_lock(&p->lock);
 
 	int my_index = find_in_replica_list(p, self); // -1 if node is not found
 	bool am_master = (my_index == 0 && p->state == AS_PARTITION_STATE_SYNC) || p->target != 0;
 
 	if (am_master) {
-		owned[0] = true;
+		return 0;
 	}
 	else if (my_index > 0 && p->origin == 0 && my_index < n_repl) {
 		// Check my_index < n_repl only because n_repl could be out-of-sync with
-		// (less than) partition's replica list count.
-		owned[my_index] = true;
+		// (less than) partition's replica list count
+		return my_index;
 	}
 
-	pthread_mutex_unlock(&p->lock);
+	return -1; // not a replica
+}
+
+
+void
+client_replica_maps_create(as_namespace* ns)
+{
+	uint32_t size = sizeof(client_replica_map) * ns->cfg_replication_factor;
+
+	ns->replica_maps = cf_malloc(size);
+	memset(ns->replica_maps, 0, size);
+
+	for (uint16_t r = 0; r < ns->cfg_replication_factor; r++) {
+		client_replica_map* repl_map = ns->replica_maps + r;
+
+		pthread_mutex_init(&repl_map->write_lock, 0);
+
+		cf_b64_encode((uint8_t*)repl_map->bitmap,
+				(uint32_t)sizeof(repl_map->bitmap), (char*)repl_map->b64map);
+	}
+}
+
+
+bool
+client_replica_maps_update(as_namespace* ns, as_partition_id pid)
+{
+	uint32_t byte_i = pid >> 3;
+	uint32_t byte_chunk = (byte_i / 3);
+	uint32_t chunk_bitmap_offset = byte_chunk * 3;
+	uint32_t chunk_b64map_offset = byte_chunk << 2;
+
+	uint32_t bytes_from_end = CLIENT_BITMAP_BYTES - chunk_bitmap_offset;
+	uint32_t input_size = bytes_from_end > 3 ? 3 : bytes_from_end;
+
+	int replica = as_partition_get_replica_self_lockfree(ns, pid);
+	uint8_t set_mask = 0x80 >> (pid & 0x7);
+	bool changed = false;
+
+	for (int r = 0; r < (int)ns->cfg_replication_factor; r++) {
+		client_replica_map* repl_map = ns->replica_maps + r;
+
+		volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
+		bool owned = replica == r;
+		bool is_set = (*mbyte & set_mask) != 0;
+		bool needs_update = (owned && ! is_set) || (! owned && is_set);
+
+		if (! needs_update) {
+			continue;
+		}
+
+		volatile uint8_t* bitmap_chunk = repl_map->bitmap + chunk_bitmap_offset;
+		volatile char* b64map_chunk = repl_map->b64map + chunk_b64map_offset;
+
+		pthread_mutex_lock(&repl_map->write_lock);
+
+		*mbyte ^= set_mask;
+		cf_b64_encode((uint8_t*)bitmap_chunk, input_size, (char*)b64map_chunk);
+
+		pthread_mutex_unlock(&repl_map->write_lock);
+
+		changed = true;
+	}
+
+	return changed;
 }
 
 
@@ -1305,32 +1337,18 @@ as_partition_getreplica_write_str(cf_dyn_buf *db)
 }
 
 
-#define BITMAP_SIZE ((AS_PARTITIONS + 7) / 8)
-#define B64_BITMAP_SIZE (((BITMAP_SIZE + 2) / 3) * 4)
-
 void
 as_partition_getreplica_master_str(cf_dyn_buf *db)
 {
-	uint8_t master_bitmap[BITMAP_SIZE];
-	char b64_bitmap[B64_BITMAP_SIZE];
-
 	size_t db_sz = db->used_sz;
 
 	for (uint i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
-		memset(master_bitmap, 0, BITMAP_SIZE);
 		cf_dyn_buf_append_string(db, ns->name);
 		cf_dyn_buf_append_char(db, ':');
-
-		for (uint j = 0; j < AS_PARTITIONS; j++) {
-			if (g_config.self_node == as_partition_getreplica_master(ns, j) ) {
-				master_bitmap[j >> 3] |= (1 << (7 - (j & 7)));
-			}
-		}
-
-		cf_b64_encode(master_bitmap, BITMAP_SIZE, b64_bitmap);
-		cf_dyn_buf_append_buf(db, (uint8_t*)b64_bitmap, B64_BITMAP_SIZE);
+		cf_dyn_buf_append_buf(db, (uint8_t*)ns->replica_maps[0].b64map,
+				sizeof(ns->replica_maps[0].b64map));
 		cf_dyn_buf_append_char(db, ';');
 	}
 
@@ -1367,26 +1385,26 @@ as_partition_getreplica_read_str(cf_dyn_buf *db)
 void
 as_partition_getreplica_prole_str(cf_dyn_buf *db)
 {
-	uint8_t prole_bitmap[BITMAP_SIZE];
-	char b64_bitmap[B64_BITMAP_SIZE];
+	uint8_t prole_bitmap[CLIENT_BITMAP_BYTES];
+	char b64_bitmap[CLIENT_B64MAP_BYTES];
 
 	size_t db_sz = db->used_sz;
 
 	for (uint i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
-		memset(prole_bitmap, 0, sizeof(uint8_t) * BITMAP_SIZE);
+		memset(prole_bitmap, 0, sizeof(uint8_t) * CLIENT_BITMAP_BYTES);
 		cf_dyn_buf_append_string(db, ns->name);
 		cf_dyn_buf_append_char(db, ':');
 
 		for (uint j = 0; j < AS_PARTITIONS; j++) {
 			if (g_config.self_node == as_partition_getreplica_prole(ns, j) ) {
-				prole_bitmap[j >> 3] |= (1 << (7 - (j & 7)));
+				prole_bitmap[j >> 3] |= (0x80 >> (j & 7));
 			}
 		}
 
-		cf_b64_encode(prole_bitmap, BITMAP_SIZE, b64_bitmap);
-		cf_dyn_buf_append_buf(db, (uint8_t*)b64_bitmap, B64_BITMAP_SIZE);
+		cf_b64_encode(prole_bitmap, CLIENT_BITMAP_BYTES, b64_bitmap);
+		cf_dyn_buf_append_buf(db, (uint8_t*)b64_bitmap, CLIENT_B64MAP_BYTES);
 		cf_dyn_buf_append_char(db, ';');
 	}
 
@@ -1411,30 +1429,10 @@ as_partition_get_replicas_all_str(cf_dyn_buf *db)
 
 		cf_dyn_buf_append_int(db, n_repl);
 
-		uint8_t repl_bitmaps[n_repl][BITMAP_SIZE];
-
-		memset(repl_bitmaps, 0, sizeof(repl_bitmaps));
-
-		bool owned[n_repl];
-
-		for (uint32_t j = 0; j < AS_PARTITIONS; j++) {
-			as_partition_get_replicas_all(ns, (as_partition_id)j, owned,
-					n_repl);
-
-			for (int n = 0; n < n_repl; n++) {
-				if (owned[n]) {
-					repl_bitmaps[n][j >> 3] |= (1 << (7 - (j & 7)));
-				}
-			}
-		}
-
-		char b64_bitmaps[n_repl][B64_BITMAP_SIZE];
-
 		for (int n = 0; n < n_repl; n++) {
 			cf_dyn_buf_append_char(db, ',');
-			cf_b64_encode(repl_bitmaps[n], BITMAP_SIZE, b64_bitmaps[n]);
-			cf_dyn_buf_append_buf(db, (uint8_t*)b64_bitmaps[n],
-					B64_BITMAP_SIZE);
+			cf_dyn_buf_append_buf(db, (uint8_t*)&ns->replica_maps[n].b64map,
+					sizeof(ns->replica_maps[n].b64map));
 		}
 
 		cf_dyn_buf_append_char(db, ';');
@@ -1723,6 +1721,9 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 
 	if (AS_PARTITION_STATE_ZOMBIE == p->state && 0 == p->pending_migrate_tx) {
 		set_partition_absent_lockfree(p, &ns->partitions[pid].version_info, ns, pid, true);
+	}
+
+	if (client_replica_maps_update(ns, pid)) {
 		cf_atomic_int_incr(&g_config.partition_generation);
 	}
 
@@ -1762,7 +1763,8 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 //    Schedule migrate to master, at completion switch to absent.
 as_migrate_result
 as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
-		as_partition_id pid, uint64_t orig_cluster_key, cf_node source_node)
+		as_partition_id pid, uint64_t orig_cluster_key, uint32_t start_type,
+		cf_node source_node)
 {
 	if (! g_allow_migrations) {
 		return AS_MIGRATE_AGAIN;
@@ -1820,7 +1822,24 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			// do not decrement the migrate count since we expect
 			// another migrate from master after the merge completes
 			if (g_config.self_node != p->replica[0]) {
-				if (p->master_wait_state == MASTER_WAITING) {
+				// TODO - deprecate in "six months".
+				if (start_type == 0) {
+					// Start message from old node. Note that this still has a
+					// bug for replication factor > 2, where subsequent normal
+					// starts masquerade as duplicate request-type starts.
+					start_type = MIG_TYPE_START_IS_NORMAL;
+
+					if (p->has_master_wait) {
+						start_type = MIG_TYPE_START_IS_REQUEST;
+					}
+				}
+
+				if (start_type == MIG_TYPE_START_IS_REQUEST) {
+					if (! p->has_migrate_tx_later) {
+						rv = AS_MIGRATE_ALREADY_DONE;
+						break;
+					}
+
 					if (source_node != p->replica[0]) {
 						// this is a state corruption error
 						cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. Waiting node received migrate request from non-master",
@@ -1829,7 +1848,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 						break; // out of switch
 					}
 
-					p->master_wait_state = MASTER_DONE_WAITING;
+					p->has_migrate_tx_later = false;
 					p->pending_migrate_tx++; // Send request to dupl node
 
 					partition_migrate_record r;
@@ -1837,12 +1856,6 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 							pid, orig_cluster_key, TX_FLAGS_NONE);
 					cf_queue_push(mq, &r);
 
-					rv = AS_MIGRATE_ALREADY_DONE;
-					break;
-				}
-
-				if (p->master_wait_state == MASTER_DONE_WAITING) {
-					// Handles duplicate start request.
 					rv = AS_MIGRATE_ALREADY_DONE;
 					break;
 				}
@@ -1902,6 +1915,10 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 				// to the journal and re-applied after the merged records
 				// are migrated from the master.
 				p->state = AS_PARTITION_STATE_DESYNC;
+
+				if (client_replica_maps_update(ns, pid)) {
+					cf_atomic_int_incr(&g_config.partition_generation);
+				}
 
 				// Open the write journal and set state to DESYNC
 				if (0 != as_write_journal_start(ns, pid)) {
@@ -1966,7 +1983,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 		partition_migrate_record pmr;
 
 		while (0 == cf_queue_pop(mq, &pmr, 0)) {
-			as_migrate_emigrate(&pmr, false);
+			as_migrate_emigrate(&pmr);
 		}
 
 		cf_queue_destroy(mq);
@@ -2029,7 +2046,10 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			apply_write_journal(ns, pid);
 
 			set_partition_sync_lockfree(p, pid, ns, true);
-			cf_atomic_int_incr(&g_config.partition_generation);
+
+			if (client_replica_maps_update(ns, pid)) {
+				cf_atomic_int_incr(&g_config.partition_generation);
+			}
 
 			// If this is not a master, we are done.
 			if (g_config.self_node != p->replica[0]) {
@@ -2163,7 +2183,9 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			}
 		}
 
-		cf_atomic_int_incr(&g_config.partition_generation);
+		if (client_replica_maps_update(ns, pid)) {
+			cf_atomic_int_incr(&g_config.partition_generation);
+		}
 
 		pthread_mutex_unlock(&p->lock);
 
@@ -2173,7 +2195,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 		partition_migrate_record pmr;
 
 		while (0 == cf_queue_pop(mq, &pmr, 0)) {
-			as_migrate_emigrate(&pmr, true);
+			as_migrate_emigrate(&pmr);
 		}
 
 		cf_queue_destroy(mq);
@@ -2769,7 +2791,8 @@ as_partition_balance()
 
 			p->n_dupl = 0;
 			memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-			p->master_wait_state = MASTER_NOT_WAITING;
+			p->has_master_wait = false;
+			p->has_migrate_tx_later = false;
 			memset(&p->primary_version_info, 0, sizeof(p->primary_version_info));
 
 			// Check if any of the replicas for this partition in the old
@@ -3145,7 +3168,8 @@ as_partition_balance()
 				// Wait for master to flag that it is sync before
 				// transmitting the partition
 				else if (cf_contains64(dupl_nodes, n_dupl, self) && ! is_sync[0]) {
-					p->master_wait_state = MASTER_WAITING;
+					p->has_master_wait = true;
+					p->has_migrate_tx_later = true;
 					ns_pending_migrate_tx_later++;
 				}
 
@@ -3164,7 +3188,7 @@ as_partition_balance()
 
 				// Not a replica. Partition will enter zombie state if it
 				// has pending work. Otherwise, we discard the partition.
-				if (p->pending_migrate_tx || p->master_wait_state == MASTER_WAITING) {
+				if (p->pending_migrate_tx || p->has_migrate_tx_later) {
 					p->state = AS_PARTITION_STATE_ZOMBIE;
 				}
 				else  { // throwing away duplicate partition
@@ -3188,6 +3212,8 @@ as_partition_balance()
 
 			ns_pending_migrate_rx += p->pending_migrate_rx;
 			ns_pending_migrate_tx += p->pending_migrate_tx;
+
+			client_replica_maps_update(ns, j);
 
 			pthread_mutex_unlock(&p->lock);
 		} // end for each partition
@@ -3232,7 +3258,7 @@ as_partition_balance()
 	partition_migrate_record pmr;
 
 	while (cf_queue_pop(mq, &pmr, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
-		as_migrate_emigrate(&pmr, false);
+		as_migrate_emigrate(&pmr);
 	}
 
 	cf_queue_destroy(mq);
@@ -3325,6 +3351,8 @@ as_partition_balance_init_single_node_cluster()
 				p->primary_version_info = new_vinfo;
 				g_config.paxos->c_partition_vinfo[i][0][j] = new_vinfo;
 				set_partition_version_in_storage(ns, j, &new_vinfo, false);
+
+				client_replica_maps_update(ns, j);
 
 				n_promoted++;
 

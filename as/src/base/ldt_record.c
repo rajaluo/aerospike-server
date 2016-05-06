@@ -182,6 +182,23 @@ ldt_record_ttl(const as_rec * rec)
 	return as_rec_ttl(h_urec);
 }
 
+static uint64_t
+ldt_record_last_update_time(const as_rec * rec)
+{
+	static const char * meth = "ldt_record_last_update_time()";
+	if (!rec) {
+		cf_warning(AS_UDF, "%s: Invalid Parameters [record=%p]", meth, rec);
+		return 0;
+	}
+	ldt_record *lrecord  = (ldt_record *)as_rec_source(rec);
+	if (!lrecord) {
+		return 0;
+	}
+	const as_rec *h_urec = lrecord->h_urec;
+
+	return as_rec_last_update_time(h_urec);
+}
+
 static uint16_t
 ldt_record_gen(const as_rec * rec)
 {
@@ -292,6 +309,7 @@ const as_rec_hooks ldt_record_hooks = {
 	.set		= ldt_record_set,
 	.remove		= ldt_record_remove,
 	.ttl		= ldt_record_ttl,
+	.last_update_time	= ldt_record_last_update_time,
 	.gen		= ldt_record_gen,
 	.key		= ldt_record_key,
 	.setname	= ldt_record_setname,

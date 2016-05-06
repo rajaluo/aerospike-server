@@ -229,15 +229,11 @@ get_cold_start_ttl_range(as_namespace* ns, uint32_t now)
 		}
 	}
 
-	// If configuration specifies max-ttl, use that to cap the namespace
-	// maximum void-time.
+	// Use max-ttl to cap the namespace maximum void-time.
+	uint64_t cap = now + ns->max_ttl;
 
-	if (ns->max_ttl > 0) {
-		uint64_t cap = ns->max_ttl + now;
-
-		if (max_void_time > cap) {
-			max_void_time = cap;
-		}
+	if (max_void_time > cap) {
+		max_void_time = cap;
 	}
 
 	// Convert to TTL - used for cold-start histogram range.
@@ -1036,15 +1032,11 @@ get_ttl_range(as_namespace* ns, uint32_t now)
 		}
 	}
 
-	// If configuration specifies max-ttl, use that to cap the namespace
-	// maximum void-time.
+	// Use max-ttl to cap the namespace maximum void-time.
+	uint64_t cap = now + ns->max_ttl;
 
-	if (ns->max_ttl > 0) {
-		uint64_t cap = ns->max_ttl + now;
-
-		if (max_master_void_time > cap) {
-			max_master_void_time = cap;
-		}
+	if (max_master_void_time > cap) {
+		max_master_void_time = cap;
 	}
 
 	// Convert to TTL - used for histogram ranges.

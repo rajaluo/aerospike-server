@@ -32,6 +32,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "citrusleaf/cf_queue_priority.h"
+
 #include "msg.h"
 #include "rchash.h"
 #include "util.h"

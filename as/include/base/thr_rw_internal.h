@@ -66,6 +66,7 @@
 //    single message.
 #define RW_FIELD_MULTIOP        14
 #define RW_FIELD_LDT_VERSION    15
+#define RW_FIELD_LAST_UPDATE_TIME 16
 
 #define RW_OP_WRITE 1
 #define RW_OP_WRITE_ACK 2
@@ -89,14 +90,6 @@
 #define RW_INFO_LDT            0x0100 // Indicating LDT Multi Op Message
 #define RW_INFO_UDF_WRITE      0x0200 // Indicating the write is done from inside UDF
 
-// Define the various TTL milestone limits in terms of seconds.
-#define TTL_ONE_YEAR     31536000
-#define TTL_FIVE_YEARS  157680000
-#define TTL_TEN YEARS   315360000
-
-/* TTL values set above this value, when max_ttl is NOT set, will generate an
- * error on the server. */
-#define MAX_TTL_WARNING 315360000 // Set to ten years for now.
 
 typedef struct ldt_prole_info_s {
 	bool        replication_partition_version_match;
@@ -106,21 +99,15 @@ typedef struct ldt_prole_info_s {
 	bool        ldt_prole_version_set;
 } ldt_prole_info;
 
-int write_local_pickled(
-	cf_digest *,
-	as_partition_reservation *,
-	uint8_t *,
-	size_t,
-	const as_rec_props *,
-	as_generation,
-	uint32_t,
-	cf_node,
-	uint32_t,
-	ldt_prole_info *
-	);
-
 extern bool check_msg_key(as_msg* m, as_storage_rd* rd);
 extern bool get_msg_key(as_transaction *tr, as_storage_rd* rd);
+
+static inline bool
+is_valid_ttl(as_namespace *ns, uint32_t ttl)
+{
+	// Note - TTL 0 means "use namespace default", -1 means "never expire".
+	return ttl <= ns->max_ttl || ttl == 0xFFFFffff;
+}
 
 extern void update_metadata_in_index(as_transaction *tr, bool increment_generation, as_index *r);
 
@@ -132,8 +119,6 @@ typedef struct pickle_info_s {
 } pickle_info;
 
 extern bool pickle_all(as_storage_rd *rd, pickle_info *pickle);
-
-extern int rw_udf_replicate(udf_record *urecord);
 
 extern int
 rw_msg_setup(

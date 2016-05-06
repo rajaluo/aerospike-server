@@ -87,6 +87,7 @@ msg_template rw_mt[] =
 	{ RW_FIELD_REC_PROPS, M_FT_BUF },
 	{ RW_FIELD_MULTIOP, M_FT_BUF },
 	{ RW_FIELD_LDT_VERSION, M_FT_UINT64 },
+	{ RW_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 }
 };
 
 #define RW_MSG_SCRATCH_SIZE 280 // 128 + 152 for prole deletes
@@ -114,6 +115,11 @@ void g_write_hash_delete(global_keyd *gk) {
 
 // forward references internal to the file
 void rw_complete(write_request *wr, as_transaction *tr, as_index_ref *r_ref);
+int write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
+		uint8_t *pickled_buf, size_t pickled_sz,
+		const as_rec_props *p_rec_props, as_generation generation,
+		uint32_t void_time, uint64_t last_update_time, cf_node masternode,
+		uint32_t info, ldt_prole_info *linfo);
 void read_local(as_transaction *tr, as_index_ref *r_ref);
 int write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 		as_rec_props *p_pickled_rec_props, cf_dyn_buf *db);
@@ -473,6 +479,7 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 
 		msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
 		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
 
 		// Send this along with parent packet as well. This is required
 		// in case the LDT parent replication is done without MULTI_OP.
@@ -521,6 +528,7 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 			if (0 == as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, tr->rsv.ns)) {
 				msg_set_uint32(m, RW_FIELD_GENERATION, r_ref.r->generation);
 				msg_set_uint32(m, RW_FIELD_VOID_TIME, r_ref.r->void_time);
+				msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r_ref.r->last_update_time);
 				as_record_done(&r_ref, tr->rsv.ns);
 			}
 		}
@@ -1225,11 +1233,9 @@ int as_rw_start(as_transaction *tr, bool is_read) {
 					wq_depth++;
 					e = e->next;
 				}
-				// allow a depth of 2 - only
+
 				if (wq_depth > g_config.transaction_pending_limit) {
-					cf_debug(AS_RW,
-							"as_rw_start: pending limit, ignoring {%s:%d} %"PRIx64"",
-							ns->name, tr->rsv.pid, *(uint64_t*)&tr->keyd);
+					cf_debug_digest(AS_RW, &tr->keyd, "reached pending limit, ignoring {%s:%d}",ns->name, tr->rsv.pid);
 					cf_rc_release(wr);
 					WR_TRACK_INFO(wr, "as_rw_start: pending - limit");
 					WR_RELEASE(wr);
@@ -1512,6 +1518,11 @@ finish_rw_process_dup_ack(write_request *wr)
 			cf_info_digest(AS_RW, &wr->keyd, "finish_rw_process_dup_ack: received dup-response with no void_time: ");
 		}
 		components[comp_sz].void_time = void_time;
+
+		uint64_t last_update_time = 0;
+		// Older nodes won't send this.
+		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+		components[comp_sz].last_update_time = last_update_time;
 
 		if (!COMPONENT_IS_LDT(&components[comp_sz])) {
 			if (0 != msg_get_buf(m, RW_FIELD_RECORD, &buf, &buf_sz,
@@ -2029,6 +2040,10 @@ rw_dup_process(cf_node node, msg *m)
 	bool local_conflict_check = (0 == msg_get_uint32(m, RW_FIELD_GENERATION, &generation)
 			&& 0 == msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time));
 
+	uint64_t last_update_time = 0;
+	// Older nodes won't send this.
+	msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+
 	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
 
 	// NB need to use the _migrate variant here so we can write into desync
@@ -2059,7 +2074,8 @@ rw_dup_process(cf_node node, msg *m)
 
 	if (local_conflict_check &&
 			0 >= as_record_resolve_conflict(rsv.ns->conflict_resolution_policy,
-					generation, void_time, r->generation, r->void_time)) {
+					generation, last_update_time, void_time,
+					r->generation, r->last_update_time, r->void_time)) {
 		result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
 		cf_debug_digest(AS_RW, keyd, "local conflict resolution lost ");
 		goto Out3;
@@ -2126,6 +2142,7 @@ rw_dup_process(cf_node node, msg *m)
 
 	msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
 	msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
+	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
 
 	result_code = AS_PROTO_RESULT_OK;
 
@@ -2258,9 +2275,10 @@ as_ldt_set_prole_subrec_version(cf_digest *keyd, as_partition_reservation *rsv,
 //
 int
 write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
-        uint8_t *pickled_buf, size_t pickled_sz,
-        const as_rec_props *p_rec_props, as_generation generation,
-        uint32_t void_time, cf_node masternode, uint32_t info, ldt_prole_info *linfo)
+		uint8_t *pickled_buf, size_t pickled_sz,
+		const as_rec_props *p_rec_props, as_generation generation,
+		uint32_t void_time, uint64_t last_update_time, cf_node masternode,
+		uint32_t info, ldt_prole_info *linfo)
 {
 	if (! as_storage_has_space(rsv->ns)) {
 		cf_warning(AS_RW, "{%s}: write_local_pickled: drives full", rsv->ns->name);
@@ -2355,6 +2373,7 @@ write_local_pickled(cf_digest *keyd, as_partition_reservation *rsv,
 
 	r->generation = generation;
 	r->void_time = void_time;
+	r->last_update_time = last_update_time;
 
 	as_storage_record_adjust_mem_stats(&rd, memory_bytes);
 
@@ -2636,6 +2655,10 @@ write_process(cf_node node, msg *m, bool respond)
 			missing_fields++;
 		}
 
+		uint64_t last_update_time = 0;
+		// Optional - older versions won't send it.
+		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+
 		uint32_t info = 0;
 		if (0 != msg_get_uint32(m, RW_FIELD_INFO, &info)) {
 			cf_warning(AS_RW,
@@ -2671,7 +2694,8 @@ write_process(cf_node node, msg *m, bool respond)
 					rsv.pid, rsv.p->state, generation);
 
 			int rsp = write_local_pickled(keyd, &rsv, pickled_buf, pickled_sz,
-					&rec_props, generation, void_time, node, info, &linfo);
+					&rec_props, generation, void_time, last_update_time, node,
+					info, &linfo);
 			if (rsp != 0) {
 				cf_info_digest(AS_RW, keyd, "[NOTICE] writing pickled failed(%d):", rsp );
 				result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
@@ -3052,32 +3076,19 @@ update_metadata_in_index(as_transaction *tr, bool increment_generation,
 	as_msg *m = &tr->msgp->msg;
 	as_namespace *ns = tr->rsv.ns;
 
+	uint64_t now = cf_clepoch_milliseconds();
+
 	if (m->record_ttl == 0xFFFFffff) {
 		// TTL = -1 sets record_void time to "never expires".
 		r->void_time = 0;
 	}
 	else if (m->record_ttl != 0) {
-		// Check for sizes that might be too large - limit it to 0xFFFFffff.
-		uint64_t temp_big = (uint64_t)as_record_void_time_get() + (uint64_t)m->record_ttl;
-
-		if (temp_big > 0xFFFFffff) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} ttl %u causes void-time overflow, clamping void-time to max ",
-					ns->name, m->record_ttl);
-
-			r->void_time = 0xFFFFffff;
-		}
-		else {
-			if (m->record_ttl > MAX_TTL_WARNING && ns->max_ttl == 0) {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} ttl %u exceeds %u - set config value max-ttl to suppress this warning ",
-						ns->name, m->record_ttl, MAX_TTL_WARNING);
-			}
-
-			r->void_time = (uint32_t)temp_big;
-		}
+		// Assuming we checked m->record_ttl <= 10 years, so no overflow etc.
+		r->void_time = (now / 1000) + m->record_ttl;
 	}
 	else if (ns->default_ttl != 0) {
 		// TTL = 0 set record_void time to default ttl value.
-		r->void_time = as_record_void_time_get() + ns->default_ttl;
+		r->void_time = (now / 1000) + ns->default_ttl;
 	}
 	else {
 		r->void_time = 0;
@@ -3086,6 +3097,10 @@ update_metadata_in_index(as_transaction *tr, bool increment_generation,
 	if (as_ldt_record_is_sub(r)) {
 		// Sub-records never expire by themselves.
 		r->void_time = 0;
+	}
+
+	if (now > r->last_update_time) {
+		r->last_update_time = now;
 	}
 
 	if (increment_generation) {
@@ -3219,11 +3234,8 @@ write_local_preprocessing(as_transaction *tr, bool *is_done)
 		return -1;
 	}
 
-	// Fail if record_ttl is neither "use namespace default" flag (0) nor
-	// "never expire" flag (0xFFFFffff), and it exceeds configured max_ttl.
-	if (m->record_ttl != 0 && m->record_ttl != 0xFFFFffff &&
-			ns->max_ttl != 0 && m->record_ttl > ns->max_ttl) {
-		cf_info(AS_RW, "write_local: incoming ttl %u too big compared to %"PRIu64, m->record_ttl, ns->max_ttl);
+	if (! is_valid_ttl(ns, m->record_ttl)) {
+		cf_warning(AS_RW, "write_local: invalid ttl %u", m->record_ttl);
 		write_local_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARAMETER);
 		return -1;
 	}
@@ -3672,6 +3684,7 @@ write_local_pickle_unwind(pickle_info *pickle)
 
 typedef struct index_metadata_s {
 	uint32_t	void_time;
+	uint64_t	last_update_time;
 	uint16_t	generation;
 } index_metadata;
 
@@ -3680,6 +3693,7 @@ write_local_update_index_metadata(as_transaction *tr, bool increment_generation,
 		index_metadata *old, as_index *r)
 {
 	old->void_time = r->void_time;
+	old->last_update_time = r->last_update_time;
 	old->generation = r->generation;
 
 	update_metadata_in_index(tr, increment_generation, r);
@@ -3689,6 +3703,7 @@ void
 write_local_index_metadata_unwind(index_metadata *old, as_index *r)
 {
 	r->void_time = old->void_time;
+	r->last_update_time = old->last_update_time;
 	r->generation = old->generation;
 }
 
@@ -4743,6 +4758,7 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 
 	tr->generation = r->generation;
 	tr->void_time = r->void_time;
+	tr->last_update_time = r->last_update_time;
 
 	// Get set-id before releasing.
 	uint16_t set_id = as_index_get_set_id(r_ref.r);
@@ -4754,8 +4770,8 @@ write_local(as_transaction *tr, uint8_t **pickled_buf, size_t *pickled_sz,
 	}
 	// Or (normally) adjust max void-times.
 	else if (r->void_time != 0) {
-		cf_atomic_int_setmax( &ns->max_void_time, r->void_time);
-		cf_atomic_int_setmax( &tr->rsv.p->max_void_time, r->void_time);
+		cf_atomic_int_setmax(&ns->max_void_time, r->void_time);
+		cf_atomic_int_setmax(&tr->rsv.p->max_void_time, r->void_time);
 	}
 
 	as_storage_record_close(r, &rd);
@@ -5012,6 +5028,10 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		missing_fields++;
 	}
 
+	uint64_t last_update_time = 0;
+	// Optional - older versions won't send it.
+	msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+
 	uint32_t info = 0;
 	if (0 != msg_get_uint32(m, RW_FIELD_INFO, &info)) {
 		cf_warning(AS_RW, "write process received message without info field");
@@ -5105,7 +5125,8 @@ write_process_new(cf_node node, msg *m, as_partition_reservation *rsvp, bool f_r
 		result_code = write_process_op(&tr, msgp, is_subrec, node);
 	} else {
 		rv = write_local_pickled(keyd, rsvp, pickled_buf, pickled_sz,
-				&rec_props, generation, void_time, node, info, linfo);
+				&rec_props, generation, void_time, last_update_time, node,
+				info, linfo);
 		if (rv == 0) {
 			result_code = AS_PROTO_RESULT_OK;
 		} else {

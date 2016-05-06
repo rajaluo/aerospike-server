@@ -124,9 +124,10 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->hwm_disk = 0.5; // default high water mark for eviction is 50%
 	ns->hwm_memory = 0.6; // default high water mark for eviction is 60%
 	ns->ldt_enabled = false; // By default ldt is not enabled
-	ns->ldt_page_size = 8192; // default ldt page size is 8192
 	ns->ldt_gc_sleep_us = 500; // Default is sleep for .5Ms. This translates to constant 2k Subrecord
 							   // GC per second.
+	ns->ldt_page_size = 8192; // default ldt page size is 8192
+	ns->max_ttl = MAX_ALLOWED_TTL; // 10 years
 	ns->migrate_order = 5;
 	ns->migrate_sleep = 1;
 	ns->obj_size_hist_max = OBJ_SIZE_HIST_NUM_BUCKETS;
@@ -167,13 +168,13 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->sindex_cfg_var_hash = NULL;
 	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_INDEX;
 
-    // Geospatial query within defaults
-    ns->geo2dsphere_within_strict = true;
-    ns->geo2dsphere_within_min_level = 1;
-    ns->geo2dsphere_within_max_level = 30;
-    ns->geo2dsphere_within_max_cells = 12;
-    ns->geo2dsphere_within_level_mod = 1;
-    ns->geo2dsphere_within_earth_radius_meters = 6371000;  // Wikipedia, mean
+	// Geospatial query within defaults
+	ns->geo2dsphere_within_strict = true;
+	ns->geo2dsphere_within_min_level = 1;
+	ns->geo2dsphere_within_max_level = 30;
+	ns->geo2dsphere_within_max_cells = 12;
+	ns->geo2dsphere_within_level_mod = 1;
+	ns->geo2dsphere_within_earth_radius_meters = 6371000;  // Wikipedia, mean
 
 	//
 	// END - Configuration defaults.

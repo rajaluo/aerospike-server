@@ -505,7 +505,7 @@ typedef enum {
 
 	// Namespace conflict-resolution-policy options (value tokens):
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION,
-	CASE_NAMESPACE_CONFLICT_RESOLUTION_TTL,
+	CASE_NAMESPACE_CONFLICT_RESOLUTION_LAST_UPDATE_TIME,
 
 	// Namespace read consistency level options:
 	CASE_NAMESPACE_READ_CONSISTENCY_ALL,
@@ -915,7 +915,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 
 const cfg_opt NAMESPACE_CONFLICT_RESOLUTION_OPTS[] = {
 		{ "generation",						CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION },
-		{ "ttl",							CASE_NAMESPACE_CONFLICT_RESOLUTION_TTL }
+		{ "last-update-time",				CASE_NAMESPACE_CONFLICT_RESOLUTION_LAST_UPDATE_TIME }
 };
 
 const cfg_opt NAMESPACE_READ_CONSISTENCY_OPTS[] = {
@@ -1699,8 +1699,8 @@ cfg_pct_fraction(const cfg_line* p_line)
 	return value / 100.0;
 }
 
-uint64_t
-cfg_seconds(const cfg_line* p_line)
+uint32_t
+cfg_seconds_no_checks(const cfg_line* p_line)
 {
 	if (*p_line->val_tok_1 == '\0') {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must specify an unsigned integer value with time unit (s, m, h, or d)",
@@ -1709,9 +1709,29 @@ cfg_seconds(const cfg_line* p_line)
 
 	uint64_t value;
 
+	// TODO - should fix this to guard against overflow, give uint32_t.
 	if (0 != cf_str_atoi_seconds(p_line->val_tok_1, &value)) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must be an unsigned number with time unit (s, m, h, or d), not %s",
 				p_line->num, p_line->name_tok, p_line->val_tok_1);
+	}
+
+	return (uint32_t)value;
+}
+
+uint32_t
+cfg_seconds(const cfg_line* p_line, uint32_t min, uint32_t max)
+{
+	uint32_t value = cfg_seconds_no_checks(p_line);
+
+	if (min == 0) {
+		if (value > max) {
+			cf_crash_nostack(AS_CFG, "line %d :: %s must be <= %u seconds, not %u seconds",
+					p_line->num, p_line->name_tok, max, value);
+		}
+	}
+	else if (value < min || value > max) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %u seconds and <= %u seconds, not %u seconds",
+				p_line->num, p_line->name_tok, min, max, value);
 	}
 
 	return value;
@@ -2502,7 +2522,7 @@ as_config_init(const char *config_file)
 				ns->memory_size = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_DEFAULT_TTL:
-				ns->default_ttl = cfg_seconds(&line);
+				ns->default_ttl = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_ENGINE_BEGIN:
 				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
@@ -2570,8 +2590,8 @@ as_config_init(const char *config_file)
 				case CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION:
 					ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
 					break;
-				case CASE_NAMESPACE_CONFLICT_RESOLUTION_TTL:
-					ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL;
+				case CASE_NAMESPACE_CONFLICT_RESOLUTION_LAST_UPDATE_TIME:
+					ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME;
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -2607,7 +2627,7 @@ as_config_init(const char *config_file)
 				ns->ldt_page_size = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_MAX_TTL:
-				ns->max_ttl = cfg_seconds(&line);
+				ns->max_ttl = cfg_seconds(&line, 1, MAX_ALLOWED_TTL);
 				break;
 			case CASE_NAMESPACE_MIGRATE_ORDER:
 				ns->migrate_order = cfg_u32(&line, 1, 10);
@@ -2692,6 +2712,9 @@ as_config_init(const char *config_file)
 				}
 				if (ns->ldt_enabled && ns->single_bin) {
 					cf_crash_nostack(AS_CFG, "ns %s ldt-enabled and single-bin can't both be true", ns->name);
+				}
+				if (ns->default_ttl > ns->max_ttl) {
+					cf_crash_nostack(AS_CFG, "ns %s default-ttl can't be > max-ttl", ns->name);
 				}
 				if (ns->storage_data_in_memory) {
 					ns->storage_post_write_queue = 0; // override default (or configuration mistake)
@@ -3360,6 +3383,8 @@ as_config_post_process(as_config *c, const char *config_file)
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
+
+		client_replica_maps_create(ns);
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
 		// Note - histograms' ranges MUST be set before use.

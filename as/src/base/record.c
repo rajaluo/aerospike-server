@@ -694,6 +694,7 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
     }
 
 	r->void_time  = c->void_time;
+	r->last_update_time  = c->last_update_time;
 	r->generation = c->generation;
 	// Update the version in the parent. In case it is incoming migration
 	//
@@ -732,48 +733,77 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 }
 
 // Returns -1 if left wins, 1 if right wins, and 0 for tie.
+
+static inline int
+resolve_generation(uint16_t left, uint16_t right)
+{
+	if (left == right) {
+		return 0;
+	}
+
+	return as_gen_less_than(left, right) ? 1 : -1;
+}
+
+static inline int
+resolve_last_update_time(uint64_t left, uint64_t right)
+{
+	if (left == right ||
+			// If either is unknown, fall back to void-time. TODO - ok?
+			left == 0 || right == 0) {
+		return 0;
+	}
+
+	return right > left ? 1 : -1;
+}
+
+static inline int
+resolve_void_time(uint32_t left, uint32_t right)
+{
+	if (left == right) {
+		return 0;
+	}
+
+	if (left == 0 || (right != 0 && left > right)) {
+		return -1;
+	}
+
+	return 1;
+}
+
 int
 as_record_resolve_conflict(conflict_resolution_pol policy,
-		uint16_t l_generation, uint32_t l_void_time,
-		uint16_t r_generation, uint32_t r_void_time)
+		uint16_t left_gen, uint64_t left_lut, uint32_t left_vt,
+		uint16_t right_gen, uint64_t right_lut, uint32_t right_vt)
 {
+	int result = 0;
+
 	switch (policy) {
 	case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION:
-		if (l_generation == r_generation) {
-			if (l_void_time == r_void_time) {
-				return 0;
-			}
-			if (l_void_time == 0 ||
-					(r_void_time != 0 && l_void_time > r_void_time)) {
-				return -1;
-			}
-			return 1;
+		result = resolve_generation(left_gen, right_gen);
+		if (result == 0) {
+			result = resolve_last_update_time(left_lut, right_lut);
 		}
-		if (l_generation > r_generation) {
-			return -1;
+		if (result == 0) {
+			result = resolve_void_time(left_vt, right_vt);
 		}
-		return 1;
+		break;
 
-	case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_TTL:
-		if (l_void_time == r_void_time) {
-			if (l_generation == r_generation) {
-				return 0;
-			}
-			if (l_generation > r_generation) {
-				return -1;
-			}
-			return 1;
+	case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME:
+		result = resolve_last_update_time(left_lut, right_lut);
+		if (result == 0) {
+			result = resolve_void_time(left_vt, right_vt);
 		}
-		if (l_void_time == 0 ||
-				(r_void_time != 0 && l_void_time > r_void_time)) {
-			return -1;
+		if (result == 0) {
+			result = resolve_generation(left_gen, right_gen);
 		}
-		return 1;
+		break;
 
 	default:
 		cf_crash(AS_RECORD, "invalid conflict resolution policy");
-		return 0;
+		break;
 	}
+
+	return result;
 }
 
 int
@@ -781,15 +811,18 @@ as_record_component_winner(as_partition_reservation *rsv, int n_components,
 		as_record_merge_component *components, as_index *r)
 {
 	uint32_t max_void_time, max_generation, start, winner_idx;
+	uint64_t max_last_update_time;
 
 	// if local record is there set its as starting value other
 	// was set initial value to be of component[0]
 	if (r) {
+		max_last_update_time = r->last_update_time;
 		max_void_time  = r->void_time;
 		max_generation = r->generation;
 		start          = 0;
 		winner_idx     = -1;
 	} else {
+		max_last_update_time = components[0].last_update_time;
 		max_void_time  = components[0].void_time;
 		max_generation = components[0].generation;
 		start          = 1;
@@ -799,7 +832,8 @@ as_record_component_winner(as_partition_reservation *rsv, int n_components,
 	for (uint16_t i = start; i < n_components; i++) {
 		as_record_merge_component *c = &components[i];
 		if (-1 == as_record_resolve_conflict(rsv->ns->conflict_resolution_policy,
-				c->generation, c->void_time, max_generation, max_void_time)) {
+				c->generation, c->last_update_time, c->void_time,
+				max_generation, max_last_update_time, max_void_time)) {
 					max_void_time = c->void_time;
 					max_generation = c->generation;
 					winner_idx = (int32_t)i;

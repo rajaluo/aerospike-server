@@ -185,7 +185,7 @@ typedef struct drv_ssd_s
 	bool			sub_sweep;
 
 	uint32_t		cold_start_block_counter;		// large blocks read
-	uint64_t		record_add_generation_counter;	// records not inserted due to generation
+	uint64_t		record_add_older_counter;		// records not inserted due to better existing one
 	uint64_t		record_add_expired_counter;		// records not inserted due to expiration
 	uint64_t		record_add_max_ttl_counter;		// records not inserted due to max-ttl
 	uint64_t		record_add_replace_counter;		// records reinserted

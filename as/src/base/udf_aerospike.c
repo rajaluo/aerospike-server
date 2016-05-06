@@ -581,6 +581,12 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 			failmax = (int)urecord->nupdates;
 			goto Rollback;
 		}
+
+		if (! is_valid_ttl(rd->ns, urecord->tr->msgp->msg.record_ttl)) {
+			cf_warning(AS_UDF, "invalid ttl %u", urecord->tr->msgp->msg.record_ttl);
+			failmax = (int)urecord->nupdates;
+			goto Rollback;
+		}
 	}
 
 	if (has_sindex) {

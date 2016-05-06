@@ -39,8 +39,8 @@
 #
 # Intermediate Targets Used for ASMalloc Support:
 #
-#   make gen   - Generate the "cf/include/mallocation.h" file via "cpp" & Python.
-#   make mexp  - Build server using 2-phase macro expansion to transform  and instrument the source tree.
+#   make gen   - Generate the "gen/mallocations.h" file via "cpp" & Python.
+#   make mexp  - Build server using 2-phase macro expansion to transform and instrument the source tree.
 #   make mexp1 - Macroexpand Phase 1:  Create the macroexpanded source tree using "m4" & Python.
 #   make mexp2 - Macroexpand Phase 2:  Build the macroexpanded source tree.
 #
@@ -87,7 +87,7 @@ init:
 start:
 	@echo "Running the Aerospike Server locally..."
 	@PIDFILE=run/asd.pid ; if [ -f $$PIDFILE ]; then echo "Aerospike already running?  Please do \"make stop\" first."; exit -1; fi
-	@./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf &
+	@nohup ./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf > /dev/null 2>1 &
 	$(BIN_DIR)/asd --config-file as/etc/aerospike_dev.conf
 
 stop:
