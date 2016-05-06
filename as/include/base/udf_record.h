@@ -34,6 +34,7 @@
 #include "base/datamodel.h"
 #include "base/rec_props.h"
 #include "base/transaction.h"
+#include "base/xdr_serverside.h"
 #include "storage/storage.h"
 
 
@@ -59,6 +60,7 @@ typedef struct udf_record_s {
 	as_index_ref 		*r_ref;
 	as_transaction 		*tr;
 	as_storage_rd 		*rd;
+	xdr_dirty_bins		*dirty;
 	cf_digest			keyd;
 	as_bin				stack_bins[UDF_RECORD_BIN_ULIMIT]; // TODO increase bin limit?
 

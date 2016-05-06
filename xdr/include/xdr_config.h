@@ -86,7 +86,7 @@ typedef enum {
 	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED,
 	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE,
 	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
-	XDR_CASE_XDR_REPLACE_RECORD,
+	XDR_CASE_XDR_SHIP_BINS,
 	XDR_CASE_XDR_SHIPPING_ENABLED,
 	XDR_CASE_XDR_PIDFILE,
 	XDR_CASE_XDR_READ_BATCH_SIZE,
@@ -181,7 +181,7 @@ typedef struct xdr_config {
 	bool	xdr_shipping_enabled;
 	bool	xdr_delete_shipping_enabled;
 	bool	xdr_nsup_deletes_enabled;
-	bool	xdr_replace_record;
+	bool	xdr_ship_bins;
 	int		xdr_info_request_timeout_ms;
 	int     xdr_compression_threshold;
 } xdr_config;
