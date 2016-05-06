@@ -135,7 +135,7 @@ cfg_set_defaults()
 	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // default the maximum cluster size to a "reasonable" value
 	c->paxos_protocol = AS_PAXOS_PROTOCOL_V3; // default to 3.0 "sindex" paxos protocol version
 	c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER; // default to auto reset master
-	c->paxos_retransmit_period = 5; // run paxos retransmit once every 5 seconds
+	c->paxos_retransmit_period = 3; // run paxos retransmit once every 3 seconds
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
