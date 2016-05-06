@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/param.h> // For MAX() and MIN().
 #include <time.h>
 #include <unistd.h>
 
@@ -122,7 +123,7 @@ void as_paxos_current_init(as_paxos *p);
  * Should necessarily be >= 1 to ensure that at leat one attempt at sync is
  * allowed to go through.
  */
-#define AS_PAXOS_SYNC_MAX_ATTEMPTS 2
+#define AS_PAXOS_SYNC_ATTEMPTS_MAX 2
 
 /*
  * The migrate key changes once when a Paxos vote completes.
@@ -237,16 +238,14 @@ static char *as_paxos_cmd_name[] = {
  *
  * @param msg the log record prefix. Cannot be NULL.
  * @param slist the succession list to log.
+ * @param list_max_length the maximum length of the list.
  */
-void as_paxos_log_succession_list(char *msg, cf_node slist[])
+void as_paxos_log_succession_list(char *msg, cf_node slist[], int list_max_length)
 {
-	int list_size = ((g_config.paxos_max_cluster_size < AS_CLUSTER_SZ)
-						 ? g_config.paxos_max_cluster_size
-						 : AS_CLUSTER_SZ);
 
 	// Each byte of node id requires two bytes in hex, plus space for trailing
 	// comma
-	int print_buff_capacity = list_size * ((sizeof(cf_node) * 2) + 1);
+	int print_buff_capacity = list_max_length * ((sizeof(cf_node) * 2) + 1);
 
 	// For closing and opening parens.
 	print_buff_capacity += 2;
@@ -262,7 +261,7 @@ void as_paxos_log_succession_list(char *msg, cf_node slist[])
 	int used = 0;
 	used += snprintf(buff, print_buff_capacity, "%s [", msg);
 
-	for (int i = 0; i < list_size && used < print_buff_capacity; i++) {
+	for (int i = 0; i < list_max_length && used < print_buff_capacity; i++) {
 		if (slist[i] == (cf_node)0) {
 			// End of list.
 			break;
@@ -1224,10 +1223,17 @@ as_paxos_current_get()
 uint32_t
 as_paxos_sequence_getnext()
 {
+	as_paxos* p = g_config.paxos;
+
 	// Uses time in seconds from wall clock for now. Should be updated to
 	// use time in seconds from the physical component of HLC timestamp with
 	// hbv3.
-	return (uint32_t)(cf_clock_getabsolute() / 1000);
+	uint32_t time_seconds = (uint32_t)(cf_clock_getabsolute() / 1000);
+
+	// Use the max of the last sequence number + 1 and the clock, to prevent
+	// the sequence number for sliding back.This will not help if asd is
+	// restarted and the clock has slid a long way.
+	return MAX(p->gen.sequence + 1, time_seconds);
 }
 
 // Checks to see if this transaction has the highest sequence for a
@@ -1492,7 +1498,7 @@ as_paxos_send_sync_messages() {
 	/*
 	 * Note the fact that we have send a sync message.
 	 */
-	p->sync_attempt_number++;
+	p->num_sync_attempts++;
 
 	for (int i = 1; i < g_config.paxos_max_cluster_size; i++) {
 		if ((cf_node)0 != p->succession[i])
@@ -1970,7 +1976,7 @@ as_paxos_spark(as_paxos_change *c)
 	/*
 	 * Reset the sync attempt number.
 	 */
-	p->sync_attempt_number = 0;
+	p->num_sync_attempts = 0;
 
 	/* Populate a new transaction with the change, establish it
 	 * in the pending transaction table, and send the message */
@@ -2553,8 +2559,8 @@ as_paxos_process_retransmit_check()
 			cf_info(AS_PAXOS, "Cluster Integrity Check: Detected succession list discrepancy between node %"PRIx64" and self %"PRIx64"",
 					succ_list_index[i], g_config.self_node);
 
-			as_paxos_log_succession_list("Paxos List", p->succession);
-			as_paxos_log_succession_list("Node List", succ_list[i]);
+			as_paxos_log_succession_list("Paxos List", p->succession, AS_CLUSTER_SZ);
+			as_paxos_log_succession_list("Node List", succ_list[i], AS_CLUSTER_SZ);
 
 			cluster_integrity_fault = true;
 			as_paxos_add_missing_nodes(missing_nodes, succ_list[i], &are_nodes_not_dunned);
@@ -2573,7 +2579,7 @@ as_paxos_process_retransmit_check()
 	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
 
 	// Second phase failed if migrations are disallowed and we have attempted sync more than the threshold number of times.
-	bool second_phase_failed = as_partition_get_migration_flag() ? false : (p->sync_attempt_number > AS_PAXOS_SYNC_MAX_ATTEMPTS);
+	bool second_phase_failed = as_partition_get_migration_flag() ? false : (p->num_sync_attempts > AS_PAXOS_SYNC_ATTEMPTS_MAX);
 
 	// Indicates if new paxos round was sparked for recovery.
 	bool paxos_sparked = false;

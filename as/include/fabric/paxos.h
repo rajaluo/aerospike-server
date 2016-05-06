@@ -248,7 +248,7 @@ typedef struct as_paxos_t {
 
 	bool dun_other_clusters;       // Do we automatically dun nodes in other clusters?
 
-    int sync_attempt_number;       // Number of times sync was attempted during current paxos round
+	int num_sync_attempts;       // Number of times sync was attempted during current paxos round
 } as_paxos;
 
 /* as_paxos_petition_type
