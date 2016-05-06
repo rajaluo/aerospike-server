@@ -109,8 +109,7 @@ cold_start_evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_prep_thread_info_s {
 	as_namespace*		ns;
 	cf_atomic32			pid;
-	int					index;
-	linear_hist**		hists;
+	linear_hist*		hist;
 	bool*				sets_not_evicting;
 } evict_prep_thread_info;
 
@@ -123,7 +122,7 @@ run_cold_start_evict_prep(void* udata)
 	cold_start_evict_prep_info cb_info;
 
 	cb_info.ns = ns;
-	cb_info.hist = p_info->hists[p_info->index];
+	cb_info.hist = p_info->hist;
 	cb_info.sets_not_evicting = p_info->sets_not_evicting;
 
 	int pid;
@@ -352,12 +351,11 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 
 	prep_thread_info.ns = ns;
 	prep_thread_info.pid = -1;
-	prep_thread_info.hists = thread_hists;
 	prep_thread_info.sets_not_evicting = sets_not_evicting;
 
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
-		prep_thread_info.index = n;
 		thread_hists[n] = linear_hist_create("thread-hist", now, ttl_range, n_buckets);
+		prep_thread_info.hist = thread_hists[n];
 
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_info) != 0) {
 			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %d", ns->name, n);
