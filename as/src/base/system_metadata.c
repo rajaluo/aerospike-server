@@ -2430,7 +2430,7 @@ static int as_smd_apply_metadata_change(as_smd_t *smd, as_smd_module_t *module_o
 			if (module_obj->can_accept_cb) {
 				int ret = (module_obj->can_accept_cb)(module_obj->module, item, module_obj->can_accept_udata);
 				if (ret != 0) {
-					cf_info(AS_SMD, "Paxos principal rejected the user operation with error code %s", as_sindex_err_str(ret));
+					cf_debug(AS_SMD, "Paxos principal rejected the user operation with error code %s", as_sindex_err_str(ret));
 					continue;
 				} else {
 					cf_debug(AS_SMD, "Paxos principal validity check succeeded.");
@@ -2453,7 +2453,7 @@ static int as_smd_apply_metadata_change(as_smd_t *smd, as_smd_module_t *module_o
 				cf_debug(AS_SMD, "asamc():  Old item does not exist.");
 
 				if (AS_SMD_ACTION_DELETE == item->action) {
-					cf_warning(AS_SMD, "deleting a non-extant item: module \"%s\" ; key \"%s\"", item->module_name, item->key);
+					cf_debug(AS_SMD, "deleting a non-extant item: module \"%s\" ; key \"%s\"", item->module_name, item->key);
 				}
 			}
 

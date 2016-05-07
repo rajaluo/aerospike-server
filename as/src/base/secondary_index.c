@@ -4617,7 +4617,7 @@ as_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 				char * saveptr = NULL;
 				char * ns_tmpname    = strtok_r(key_dup, ":", &saveptr);
 				if (!ns_tmpname) {
-					cf_warning(AS_SINDEX, "Failed to extract namspace name from SMD delete item value");
+					cf_debug(AS_SINDEX, "Failed to extract namspace name from SMD delete item value");
 					retval = AS_SINDEX_ERR;
 					cf_free(key_dup);
 					goto ERROR;
@@ -4629,7 +4629,7 @@ as_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 				// Get index name
 				char * i_tmpname      = strtok_r(NULL, ":", &saveptr);
 				if (!i_tmpname) {
-					cf_warning(AS_SINDEX, "Failed to extract index name from SMD delete item value");
+					cf_debug(AS_SINDEX, "Failed to extract index name from SMD delete item value");
 					retval = AS_SINDEX_ERR;
 					cf_free(key_dup);
 					goto ERROR;
@@ -4764,7 +4764,7 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				// Get ns name
 				char * ns_tmpname    = strtok_r(key_dup, ":", &saveptr);
 				if (!ns_tmpname) {
-					cf_warning(AS_SINDEX, "Failed to extract namspace name from SMD delete item value");
+					cf_debug(AS_SINDEX, "Failed to extract namspace name from SMD delete item value");
 					cf_free(key_dup);
 					break;
 				}
@@ -4775,7 +4775,7 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				// Get index name
 				char * i_tmpname      = strtok_r(NULL, ":", &saveptr);
 				if (!i_tmpname) {
-					cf_warning(AS_SINDEX, "Failed to extract index name from SMD delete item value");
+					cf_debug(AS_SINDEX, "Failed to extract index name from SMD delete item value");
 					cf_free(key_dup);
 					break;
 				}
