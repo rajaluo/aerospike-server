@@ -5258,7 +5258,11 @@ build_service_list(cf_ifaddr * ifaddr, int ifaddr_sz, cf_dyn_buf *db) {
 			char    addr_str[50];
 
 			inet_ntop(AF_INET, &sin->sin_addr, addr_str, sizeof(addr_str));
-			if ( strcmp(addr_str, "127.0.0.1") == 0) continue;
+			// Match with any 127.0.0.*. Ideally, 127.*.*.* is legal loopback
+			// address range but thats too wide. Keep it a bit tighter for now.
+			if ( strncmp(addr_str, "127.0.0.", 8) == 0) {
+				continue;
+			}
 
 			cf_dyn_buf_append_string(db, addr_str);
 			cf_dyn_buf_append_char(db, ':');
