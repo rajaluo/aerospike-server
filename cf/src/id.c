@@ -239,7 +239,7 @@ cf_nodeid_get(unsigned short port, cf_node *id, char **node_ipp, hb_mode_enum hb
 				sprintf(req.ifr_name, interface_names[i], j);
 			}
 			else {
-				sprintf(req.ifr_name, interface_names[i]);
+				sprintf(req.ifr_name, "%s", interface_names[i]);
 			}
 
 			if (0 == ioctl(fdesc, SIOCGIFHWADDR, &req)) {
