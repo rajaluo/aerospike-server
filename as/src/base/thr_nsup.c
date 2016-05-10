@@ -1333,12 +1333,12 @@ thr_nsup(void *arg)
 					evict_ttl = cb_info2.evict_void_time - now;
 					n_evicted_records = cb_info2.num_evicted;
 				}
-				else if (sets_protected) {
-					// Prevent regular eviction.
-					cb_info2.evict_void_time = 0;
+				else if (sets_protected || cb_info2.evict_void_time == now) {
+					// Convert eviction into expiration.
+					cb_info2.evict_void_time = now;
 
-					// Reduce master partitions, deleting expired records in
-					// eviction-protected sets.
+					// Reduce master partitions, deleting expired records,
+					// including those in eviction-protected sets.
 					reduce_master_partitions(ns, evict_reduce_cb, &cb_info2, &n_general_waits, "expire-protected-sets");
 
 					// Count these as expired rather than evicted, since we can.
