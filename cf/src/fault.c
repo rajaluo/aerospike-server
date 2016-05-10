@@ -144,21 +144,6 @@ cf_fault_set_severity(const cf_fault_context context, const cf_fault_severity se
 	}
 }
 
-/* cf_strerror
- * Some platforms return the errno in the string if the errno's value is
- * unknown: this is traditionally done with a static buffer.  Unfortunately,
- * this causes strerror to not be thread-safe.  cf_strerror() acts properly
- * and simply returns "Unknown error", avoiding thread safety issues */
-char *
-cf_strerror(const int err)
-{
-	if (err < sys_nerr && err >= 0)
-		return ((char *)sys_errlist[err]);
-
-	errno = EINVAL;
-	return("Unknown error");
-}
-
 /* cf_fault_init
  * This code MUST be the first thing executed by main(). */
 void
