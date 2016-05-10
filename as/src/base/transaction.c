@@ -312,6 +312,11 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 void
 as_transaction_error(as_transaction* tr, uint32_t error_code)
 {
+	if (error_code == 0) {
+		cf_warning(AS_PROTO, "converting error code 0 to 1 (unknown)");
+		error_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+	}
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		cf_assert(tr->from.proto_fd_h, AS_PROTO, CF_CRITICAL, "null file handle");

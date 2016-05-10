@@ -55,42 +55,6 @@
 #include "storage/storage.h"
 
 
-int
-as_rw_process_result(int rv, as_transaction *tr, bool *free_msgp)
-{
-	if (-2 == rv) {
-		cf_debug_digest(AS_TSVC, &(tr->keyd), "write re-attempt: ");
-		as_partition_release(&tr->rsv);
-		cf_atomic_int_decr(&g_config.rw_tree_count);
-		MICROBENCHMARK_HIST_INSERT_AND_RESET_P(error_hist);
-		thr_tsvc_enqueue(tr);
-		*free_msgp = false;
-	} else if (-3 == rv) {
-		cf_debug(AS_TSVC,
-				"write in progress on key - delay and reattempt");
-		as_partition_release(&tr->rsv);
-		cf_atomic_int_decr(&g_config.rw_tree_count);
-		MICROBENCHMARK_HIST_INSERT_P(error_hist);
-	} else {
-		cf_debug(AS_TSVC,
-				"write start failed: rv %d proto result %d", rv,
-				tr->result_code);
-		as_partition_release(&tr->rsv);
-		cf_atomic_int_decr(&g_config.rw_tree_count);
-		if (tr->result_code == 0) {
-			cf_warning(AS_TSVC,
-					"   warning: failure should have set protocol result code");
-			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-		}
-
-		as_transaction_error(tr, tr->result_code);
-
-		return -1;
-	}
-	return 0;
-}
-
-
 static inline bool
 should_security_check_data_op(const as_transaction *tr)
 {
@@ -344,6 +308,7 @@ process_transaction(as_transaction *tr)
 			// Upgrade to a write reservation.
 			as_partition_release(&tr->rsv);
 			cf_atomic_int_decr(&g_config.rw_tree_count);
+
 			rv = as_partition_reserve_write(ns, pid, &tr->rsv, &dest,
 					&partition_cluster_key);
 
@@ -382,11 +347,28 @@ process_transaction(as_transaction *tr)
 			free_msgp = false;
 		}
 		else {
-			// Process the return value from as_rw_start():
+			// Process the return value from as_write_start()/as_read_start():
 			// -1 :: "report error to requester"
 			// -2 :: "try again"
 			// -3 :: "duplicate proxy request, drop"
-			as_rw_process_result(rv, tr, &free_msgp);
+
+			as_partition_release(&tr->rsv);
+			cf_atomic_int_decr(&g_config.rw_tree_count);
+
+			switch (rv) {
+			case -3:
+				MICROBENCHMARK_HIST_INSERT_P(error_hist);
+				break;
+			case -2:
+				MICROBENCHMARK_HIST_INSERT_AND_RESET_P(error_hist);
+				thr_tsvc_enqueue(tr);
+				free_msgp = false;
+				break;
+			case -1:
+			default:
+				as_transaction_error(tr, tr->result_code);
+				break;
+			}
 		}
 	}
 	else {

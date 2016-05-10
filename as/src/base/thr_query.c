@@ -2770,6 +2770,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	ASD_QUERY_QTRSETUP_STARTING(nodeid, trid);
 	qtr = qtr_alloc();
 	if (!qtr) {
+		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		goto Cleanup;
 	}
 	ASD_QUERY_QTR_ALLOC(nodeid, trid, (void *) qtr);
