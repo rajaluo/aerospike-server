@@ -387,7 +387,8 @@ process_transaction(as_transaction *tr)
 			tr->from.proxy_node = 0; // pattern, not needed
 			break;
 		case FROM_IUDF:
-			tr->from.iudf_orig->cb(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata,
+					AS_PROTO_RESULT_FAIL_UNKNOWN);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 			break;
 		case FROM_NSUP:

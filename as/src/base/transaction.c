@@ -341,7 +341,7 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 		break;
 	case FROM_IUDF:
 		cf_assert(tr->from.iudf_orig, AS_PROTO, CF_CRITICAL, "null iudf origin");
-		tr->from.iudf_orig->cb(tr, error_code);
+		tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, error_code);
 		tr->from.iudf_orig = NULL; // pattern, not needed
 		break;
 	case FROM_NSUP:

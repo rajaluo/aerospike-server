@@ -1185,7 +1185,7 @@ const as_job_vtable udf_bg_scan_job_vtable = {
 };
 
 void udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
-int udf_bg_scan_tr_complete(as_transaction *tr, int retcode);
+int udf_bg_scan_tr_complete(void* udata, int retcode);
 
 //----------------------------------------------------------
 // udf_bg_scan_job public API.
@@ -1363,9 +1363,9 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 }
 
 int
-udf_bg_scan_tr_complete(as_transaction *tr, int retcode)
+udf_bg_scan_tr_complete(void* udata, int retcode)
 {
-	udf_bg_scan_job* job = (udf_bg_scan_job*)tr->from.iudf_orig->udata;
+	udf_bg_scan_job* job = (udf_bg_scan_job*)udata;
 
 	cf_atomic32_decr(&job->n_active_tr);
 	cf_atomic64_incr(retcode == 0 ? &job->n_successful_tr : &job->n_failed_tr);

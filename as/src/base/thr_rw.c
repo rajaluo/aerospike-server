@@ -270,10 +270,9 @@ write_request_destructor(void *object)
 #endif
 
 	if (wr->origin == FROM_IUDF && wr->from.iudf_orig) {
-		as_transaction tr;
-		write_request_init_tr(&tr, wr);
 		cf_warning(AS_RW, "UDF request not complete ... Completing it nonetheless !!!");
-		tr.from.iudf_orig->cb(&tr, 0);
+		wr->from.iudf_orig->cb(wr->from.iudf_orig->udata, 0);
+		wr->from.iudf_orig = NULL;
 	}
 
 	if (wr->dest_msg) {
@@ -876,7 +875,7 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						as_rw_update_stat(wr);
 						// return early if the record was not updated
 						if (tr->origin == FROM_IUDF) {
-							tr->from.iudf_orig->cb(tr, tr->result_code);
+							tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
 							tr->from.iudf_orig = NULL;
 						}
 						rw_cleanup(wr, tr, first_time, false, __LINE__);
@@ -1958,7 +1957,7 @@ write_complete(write_request *wr, as_transaction *tr)
 		break;
 	case FROM_IUDF:
 		if (tr->from.iudf_orig) {
-			tr->from.iudf_orig->cb(tr, tr->result_code);
+			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
 			tr->from.iudf_orig = NULL;
 		}
 		break;
@@ -5342,9 +5341,8 @@ rw_retransmit_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
 			break;
 		case FROM_IUDF:
 			if (wr->from.iudf_orig) {
-				as_transaction tr;
-				write_request_init_tr(&tr, wr);
-				tr.from.iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
+				wr->from.iudf_orig->cb(wr->from.iudf_orig->udata, AS_PROTO_RESULT_FAIL_TIMEOUT);
+				wr->from.iudf_orig = NULL;
 			}
 			break;
 		case FROM_NSUP:

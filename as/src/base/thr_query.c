@@ -1792,16 +1792,14 @@ const as_aggr_hooks query_aggr_hooks = {
 // NB: Caller holds a write hash lock _BE_CAREFUL_ if you intend to take
 // lock inside this function
 int
-query_udf_bg_tr_complete(as_transaction *tr, int retcode)
+query_udf_bg_tr_complete(void *udata, int retcode)
 {
-	as_query_transaction *qtr = (as_query_transaction *)tr->from.iudf_orig->udata;
+	as_query_transaction *qtr = (as_query_transaction *)udata;
 	if (!qtr) {
 		cf_warning(AS_QUERY, "Complete called with invalid job id");
 		return AS_QUERY_ERR;
 	}
-	cf_detail(AS_QUERY, "UDF: Internal transaction remaining %d, total txn processing time %"PRIu64"",
-				cf_atomic32_get(qtr->n_udf_tr_queued),
-				(cf_getns() - tr->start_time) / 1000000);
+
 	qtr_finish_work(qtr, &qtr->n_udf_tr_queued, __FILE__, __LINE__, true);
 	return AS_QUERY_OK;
 }

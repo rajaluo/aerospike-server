@@ -52,7 +52,7 @@ typedef struct udf_call_s {
 	as_transaction	*tr;
 } udf_call;
 
-typedef int (*iudf_cb)(as_transaction *tr, int retcode);
+typedef int (*iudf_cb)(void *udata, int retcode);
 
 typedef enum {
 	UDF_UNDEF_REQUEST = -1,

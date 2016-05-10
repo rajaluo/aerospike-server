@@ -436,9 +436,8 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 
 			if (wr->origin == FROM_IUDF) {
 				// TODO - can we really get here?
-				as_transaction tr;
-				write_request_init_tr(&tr, wr);
-				tr.from.iudf_orig->cb(&tr, 0);
+				wr->from.iudf_orig->cb(wr->from.iudf_orig->udata, 0);
+				wr->from.iudf_orig = NULL;
 			}
 		}
 		pthread_mutex_unlock(&wr->lock);
@@ -861,9 +860,8 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 				pthread_mutex_lock(&pr->wr->lock);
 				if (pr->wr->origin == FROM_IUDF) {
 					// TODO - can we really get here?
-					as_transaction tr;
-					write_request_init_tr(&tr, pr->wr);
-					tr.from.iudf_orig->cb(&tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
+					pr->wr->from.iudf_orig->cb(pr->wr->from.iudf_orig->udata, AS_PROTO_RESULT_FAIL_TIMEOUT);
+					pr->wr->from.iudf_orig = NULL;
 				}
 				pthread_mutex_unlock(&pr->wr->lock);
 				WR_RELEASE(pr->wr);
