@@ -139,7 +139,6 @@ extern const int NUM_XDR_NS_SET_OPTS;
 extern const int NUM_XDR_SEC_GLOBAL_OPTS;
 extern const int NUM_XDR_SEC_CRED_OPTS;
 
-// Some static knobs shared between XDR and asd
 #define XDR_TIME_ADJUST	300000 // (5 minutes) LST adjustment in node failure cases.
 
 #define DC_MAX_NUM 32
@@ -157,7 +156,7 @@ typedef struct xdr_new_config_s {
 //Config option which is maintained both by the server and the XDR module
 typedef struct xdr_config {
 
-	//This section is used by both the server and the XDR module
+	// This section is used by both the server and the XDR module
 	bool	xdr_global_enabled;
 
 	// Ring buffer configuration
