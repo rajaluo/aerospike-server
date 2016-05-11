@@ -483,7 +483,7 @@ rw_msg_setup(msg *m, as_transaction *tr, cf_digest *keyd,
 		// Send this along with parent packet as well. This is required
 		// in case the LDT parent replication is done without MULTI_OP.
 		// Example touch of the some other bin in the LDT parent
-		if (!is_subrec) {
+		if (tr->rsv.ns->ldt_enabled && ! is_subrec) {
 			rw_msg_setup_ldt_fields(m, tr, keyd);
 		}
 
