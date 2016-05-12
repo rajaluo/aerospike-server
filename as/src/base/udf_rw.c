@@ -525,7 +525,7 @@ post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set_id)
 	xdr_dirty_bins dirty_bins;
 	xdr_clear_dirty_bins(&dirty_bins);
 
-	if (udf_xdr_ship_op && UDF_OP_IS_WRITE(*urecord_op)) {
+	if (urecord->dirty != NULL && udf_xdr_ship_op && UDF_OP_IS_WRITE(*urecord_op)) {
 		xdr_copy_dirty_bins(urecord->dirty, &dirty_bins);
 	}
 
