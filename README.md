@@ -27,11 +27,23 @@ CentOS 6 or later), Debian 7 or later, and Ubuntu 10.04 or later.
 ### Dependencies
 
 The majority of the Aerospike source code is written in the C
-programming language, conforming to the ANSI C99 standard. Building
-Aerospike requires the GCC 4.1 or later toolchain, with the standard
-GNU/Linux development tools and libraries installed in the build
-environment, including `autoconf`, `automake`, and `libtool`. In
-particular, the following libraries are needed:
+programming language, conforming to the ANSI C99 standard.
+
+In particular, the following tools and libraries are needed:
+
+#### C Compiler Toolchain
+
+Building Aerospike requires the GCC 4.1 or later C compiler toolchain,
+with the standard GNU/Linux development tools and libraries installed in
+the build environment, including:
+
+* `autoconf`
+
+* `automake`
+
+* `libtool`
+
+* `make`
 
 #### C++
 
