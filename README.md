@@ -8,7 +8,7 @@ Aerospike is a distributed, scalable NoSQL database. It is architected with thre
 - To provide the robustness and reliability (i.e., ACID) expected from traditional databases.
 - To provide operational efficiency (minimal manual involvement)
 
-For more information on Aerospike, please visit: [http://aerospike.com](http://aerospike.com)
+For more information on Aerospike, please visit: [`http://aerospike.com`](http://aerospike.com)
 
 ## Telemetry Anonymized Data Collection
 
@@ -212,6 +212,7 @@ or, equivalently:
 	$ kill `cat run/asd.pid` ; rm run/asd.pid
 
 Please refer to the full documentation on the Aerospike web site,
-`www.aerospike.com`, for more detailed information about configuring
-and running the Aerospike Database Server, as well as the about the
-Aerospike client API packages for popular programming languages.
+[`http://aerospike.com/docs/`](http://aerospike.com/docs/), for more
+detailed information about configuring and running the Aerospike
+Database Server, as well as the about the Aerospike client API packages
+for popular programming languages.
