@@ -187,7 +187,7 @@ To launch the server with `as/etc/aerospike_dev.conf` as the config:
 
 or, equivalently:
 
-	$ ./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf &
+	$ nohup ./modules/telemetry/telemetry.py as/etc/telemetry_dev.conf > /dev/null 2>&1 &
 	$ target/Linux-x86_64/bin/asd --config-file as/etc/aerospike_dev.conf
 
 To halt the server:
