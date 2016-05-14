@@ -23,7 +23,7 @@ CMD="$ASD --config-file $CONFIG_FILE"
 PIDDIR="/var/run/aerospike"
 ASD_USER="aerospike"
 ASD_GROUP=$ASD_USER
-STOP_TIMEOUT=${STOP_TIMEOUT-10}
+STOP_TIMEOUT=${STOP_TIMEOUT-30}
 EDITION="@EDITION@"
 
 INITFNS=/etc/aerospike/initfns
