@@ -205,7 +205,7 @@ static int32_t as_packed_list_get_new_element_count(as_packed_list *pl);
 static int32_t as_packed_list_header_element_count(as_packed_list *pl);
 static void as_packed_list_init(as_packed_list *pl, const uint8_t *buf, uint32_t size);
 static void as_packed_list_init_from_bin(as_packed_list *pl, const as_bin *b);
-static int32_t as_packed_list_insert(as_packed_list *pl, uint32_t index, uint32_t count, uint32_t insert_size, as_packed_list_index *pli);
+static int64_t as_packed_list_insert(as_packed_list *pl, uint32_t index, uint32_t count, uint32_t insert_size, as_packed_list_index *pli);
 static int32_t as_packed_list_remove(as_packed_list *pl, uint32_t index, uint32_t count, as_packed_list_index *pli);
 static int32_t as_packed_list_write_hdrseg1(as_packed_list *pl, uint8_t *buf);
 static int32_t as_packed_list_write_header(uint8_t *buf, uint32_t ele_count);
@@ -742,7 +742,7 @@ as_packed_list_init_from_bin(as_packed_list *pl, const as_bin *b)
 
 // Calculate a packed list split via insert op.
 // Return negative int on failure, new size of packed buffer.
-static int32_t
+static int64_t
 as_packed_list_insert(as_packed_list *pl, uint32_t index, uint32_t count, uint32_t insert_size, as_packed_list_index *pli)
 {
 	int32_t ele_count = as_packed_list_header_element_count(pl);
@@ -755,6 +755,11 @@ as_packed_list_insert(as_packed_list *pl, uint32_t index, uint32_t count, uint32
 		pl->header_size = (uint32_t)pl->upk.offset;
 
 		if (index >= ele_count) {
+			if (index + count >= INT32_MAX) {
+				cf_warning(AS_PARTICLE, "as_packed_list_insert() index %u + count %u overflow", index, count);
+				return -2;
+			}
+
 			pl->new_ele_count = (int)(index + count);
 			pl->nil_ele_size = index - (uint32_t)ele_count;
 
@@ -766,7 +771,7 @@ as_packed_list_insert(as_packed_list *pl, uint32_t index, uint32_t count, uint32
 			pl->nil_ele_size = 0;
 
 			if (! as_unpack_list_elements_find_index(&pl->upk, index, pli)) {
-				return -2;
+				return -3;
 			}
 
 			pl->seg1_size = pl->upk.offset;
@@ -778,11 +783,11 @@ as_packed_list_insert(as_packed_list *pl, uint32_t index, uint32_t count, uint32
 		pl->seg1_size -= pl->header_size;
 	}
 
-	return (int32_t)(as_pack_list_header_get_size(pl->new_ele_count)
+	return (int64_t)as_pack_list_header_get_size(pl->new_ele_count)
 			+ pl->seg1_size
 			+ pl->nil_ele_size
 			+ insert_size
-			+ pl->seg2_size);
+			+ pl->seg2_size;
 }
 
 // Calculate a packed list split via remove op.
@@ -1267,7 +1272,7 @@ packed_list_insert(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *payl
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	if (index > UINT32_MAX || (index = calc_index(index, ele_count)) < 0) {
+	if (index > INT32_MAX || (index = calc_index(index, ele_count)) < 0) {
 		cf_warning(AS_PARTICLE, "packed_list_insert() index %ld out of bounds for ele_count %d", index > 0 ? index : index - ele_count, ele_count);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -1275,10 +1280,15 @@ packed_list_insert(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *payl
 	uint32_t uindex = (uint32_t)index;
 
 	as_packed_list_index *pli = as_bin_get_packed_list_index(b);
-	int32_t new_size = as_packed_list_insert(&pl, uindex, count, payload->size - payload_hdr_sz, pli);
+	int64_t new_size = as_packed_list_insert(&pl, uindex, count, payload->size - payload_hdr_sz, pli);
 
 	if (new_size < 0) {
 		cf_warning(AS_PARTICLE, "packed_list_insert() as_packed_list_insert failed with ret=%d, index.cap=%u", new_size, pli->cap);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
+	if (new_size > (int64_t)UINT32_MAX) {
+		cf_warning(AS_PARTICLE, "packed_list_insert() mem size overflow with new_size=%ld", new_size);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
