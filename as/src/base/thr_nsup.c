@@ -378,8 +378,9 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	linear_hist_destroy(prep_thread_infos[0].hist);
 
 	if (n_evictable == 0) {
+		cf_warning(AS_NSUP, "{%s} hwm breached but no records to evict", ns->name);
 		pthread_mutex_unlock(&ns->cold_start_evict_lock);
-		return false;
+		return true;
 	}
 
 	cf_info(AS_NSUP, "{%s} cold-start found %u records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
@@ -395,7 +396,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 
 	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict, (void*)&thread_info) != 0) {
-			cf_warning(AS_NSUP, "{%s} failed to create evict thread %d", ns->name, n);
+			cf_crash(AS_NSUP, "{%s} failed to create evict thread %d", ns->name, n);
 		}
 	}
 
@@ -405,13 +406,6 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	// Now we're single-threaded again.
 
 	cf_info(AS_NSUP, "{%s} cold-start evicted %u records, found %u 0-void-time records", ns->name, thread_info.total_evicted, thread_info.total_0_void_time);
-
-	// TODO - do we really need this?
-	if (thread_info.total_evicted == 0) {
-		cf_warning(AS_NSUP, "{%s} could not evict any records", ns->name);
-		pthread_mutex_unlock(&ns->cold_start_evict_lock);
-		return false;
-	}
 
 	pthread_mutex_unlock(&ns->cold_start_evict_lock);
 	return true;

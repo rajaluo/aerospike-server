@@ -2705,7 +2705,6 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	// expiration. (If evicting, this call will block for a long time.) This
 	// call also updates the cold-start threshold void-time.
 	if (! as_cold_start_evict_if_needed(ns)) {
-		cf_warning(AS_DRV_SSD, "device %s: record-add halting read", ssd->name);
 		return -2;
 	}
 
@@ -3118,8 +3117,7 @@ ssd_load_device_sweep(drv_ssds *ssds, drv_ssd *ssd)
 					(uint32_t)BYTES_TO_RBLOCKS(next_block_offset - block_offset));
 
 			if (add_rv == -2) {
-				cf_warning(AS_DRV_SSD, "disk restore: hit high water limit before disk entirely loaded.");
-				goto Finished;
+				cf_crash(AS_DRV_SSD, "hit stop-writes limit before drive scan completed");
 			}
 
 			if (add_rv == -3) {
