@@ -1283,7 +1283,7 @@ packed_list_insert(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *payl
 	int64_t new_size = as_packed_list_insert(&pl, uindex, count, payload->size - payload_hdr_sz, pli);
 
 	if (new_size < 0) {
-		cf_warning(AS_PARTICLE, "packed_list_insert() as_packed_list_insert failed with ret=%d, index.cap=%u", new_size, pli->cap);
+		cf_warning(AS_PARTICLE, "packed_list_insert() as_packed_list_insert failed with ret=%ld, index.cap=%u", new_size, pli->cap);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
