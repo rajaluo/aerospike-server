@@ -964,7 +964,7 @@ log_callback(as_log_level level, const char * func, const char * file, uint32_t 
 	vsnprintf(message, 1024, fmt, ap);
 	va_end(ap);
 
-	cf_fault_event(AS_UDF, severity, file, line, message);
+	cf_fault_event(AS_UDF, severity, file, line, "%s", message);
 	return true;
 }
 

@@ -22,11 +22,13 @@
 
 #pragma once
 
+#include <alloca.h>
 #include <execinfo.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include "dynbuf.h"
 
 
@@ -287,8 +289,8 @@ do { \
 #define cf_debug_digest(...)  __DIGEST_SEVLOG(CF_DEBUG, ##__VA_ARGS__)
 #define cf_detail_digest(...)  __DIGEST_SEVLOG(CF_DETAIL, ##__VA_ARGS__)
 
-// strerror override. GP claims standard strerror has a rare but existant concurrency hole, this fixes that hole
-extern char *cf_strerror(const int err);
+// _GNU_SOURCE gives us a strerror_r() that returns (char *).
+#define cf_strerror(err) strerror_r(err, alloca(200), 200)
 
 /* cf_context_at_severity
  * Return whether the given context is set to this severity level or higher. */

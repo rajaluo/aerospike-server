@@ -1591,7 +1591,7 @@ info_log_with_datestamp(void (*log_fn)(void))
 	strftime(datestamp, sizeof(datestamp), "%b %d %Y %T %Z:\n", &nowtm);
 
 	/* Output the date-stamp followed by the output of the log function. */
-	fprintf(stderr, datestamp);
+	fprintf(stderr, "%s", datestamp);
 	log_fn();
 	fprintf(stderr, "\n");
 }

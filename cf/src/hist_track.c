@@ -605,7 +605,7 @@ output_header(cf_hist_track* this, uint32_t start_ts, uint32_t num_cols,
 
 	gmtime_r(&start_ts_time_t, &start_tm);
 	write_p += strftime(output, MAX_FORMATTED_ROW_SIZE - 2, time_fmt, &start_tm);
-	write_p += snprintf(write_p, end_p - write_p, rate_fmt);
+	write_p += snprintf(write_p, end_p - write_p, "%s", rate_fmt);
 
 	for (int i = 0; i < num_cols; i++) {
 		write_p += snprintf(write_p, end_p - write_p, pcts_fmt,
