@@ -317,11 +317,18 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 		error_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
+	// The 'from' checks below should not be necessary, but there's a known race
+	// between duplicate-resolution's cluster-key-mismatch handler (which
+	// re-queues transactions) and retransmit thread timeouts which can allow a
+	// null 'from' to get here. That race will be fixed in a future release, but
+	// for now these checks keep us safe.
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		cf_assert(tr->from.proto_fd_h, AS_PROTO, CF_CRITICAL, "null file handle");
-		as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
-		tr->from.proto_fd_h = NULL; // pattern, not needed
+		if (tr->from.proto_fd_h) {
+			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
+			tr->from.proto_fd_h = NULL; // pattern, not needed
+		}
 		MICROBENCHMARK_HIST_INSERT_P(error_hist);
 		cf_atomic_int_incr(&g_config.err_tsvc_requests);
 		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
@@ -329,20 +336,23 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 		}
 		break;
 	case FROM_PROXY:
-		cf_assert(tr->from.proxy_node != 0, AS_PROTO, CF_CRITICAL, "no proxy node");
-		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
-		tr->from.proxy_node = 0; // pattern, not needed
+		if (tr->from.proxy_node != 0) {
+			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
+			tr->from.proxy_node = 0; // pattern, not needed
+		}
 		break;
 	case FROM_BATCH:
-		cf_assert(tr->from.batch_shared, AS_PROTO, CF_CRITICAL, "null batch shared");
-		as_batch_add_error(tr->from.batch_shared, tr->from_data.batch_index, error_code);
-		tr->from.batch_shared = NULL; // pattern, not needed
-		tr->msgp = NULL; // pattern, not needed
+		if (tr->from.batch_shared) {
+			as_batch_add_error(tr->from.batch_shared, tr->from_data.batch_index, error_code);
+			tr->from.batch_shared = NULL; // pattern, not needed
+			tr->msgp = NULL; // pattern, not needed
+		}
 		break;
 	case FROM_IUDF:
-		cf_assert(tr->from.iudf_orig, AS_PROTO, CF_CRITICAL, "null iudf origin");
-		tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, error_code);
-		tr->from.iudf_orig = NULL; // pattern, not needed
+		if (tr->from.iudf_orig) {
+			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, error_code);
+			tr->from.iudf_orig = NULL; // pattern, not needed
+		}
 		break;
 	case FROM_NSUP:
 		break;
