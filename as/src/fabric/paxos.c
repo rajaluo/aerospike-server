@@ -139,6 +139,7 @@ as_paxos_set_cluster_key(uint64_t cluster_key)
 {
 	g_cluster_key = cluster_key;
 
+	cf_info(AS_PAXOS, "cluster_key set to 0x%"PRIx64"", g_cluster_key);
 	// Acquire and release each partition lock to ensure threads acquiring
 	// a partition lock after this loop will be forced to check the latest
 	// cluster key.
