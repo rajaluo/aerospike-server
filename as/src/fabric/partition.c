@@ -1655,36 +1655,39 @@ apply_write_journal(as_namespace *ns, size_t pid)
 }
 
 
-// A callback from the migration unit to register state transitions
-// This one called for migrates initiated from here, for transmit
-// the only state we're really interested in is "DONE".
-as_migrate_result
-as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
+void
+as_partition_emigrate_done(as_migrate_state s, as_namespace *ns,
 		as_partition_id pid, uint64_t orig_cluster_key, uint32_t tx_flags)
 {
+	// TODO - better handled outside?
+	if (AS_MIGRATE_STATE_DONE != s) {
+		if (s == AS_MIGRATE_STATE_ERROR) {
+			if (orig_cluster_key == as_paxos_get_cluster_key()) {
+				cf_warning(AS_PARTITION, "{%s:%d} emigrate done: failed with error and cluster key is current",
+						ns->name, pid);
+			}
+		}
+		else if (s == AS_MIGRATE_STATE_EAGAIN) {
+			cf_warning(AS_PARTITION, " {%s:%d} emigrate done: migrate failed",
+					ns->name, pid);
+		}
+		else {
+			cf_warning(AS_PARTITION, " {%s:%d} emigrate done: unknown notification %d",
+					ns->name, pid, (int)s);
+		}
+
+		return;
+	}
+
 	bool acting_master = (tx_flags & TX_FLAGS_ACTING_MASTER) != 0;
 	bool migration_request = (tx_flags & TX_FLAGS_REQUEST) != 0;
 	as_partition *p = &ns->partitions[pid];
-
-	if (AS_MIGRATE_STATE_DONE != s) {
-		if (s == AS_MIGRATE_STATE_ERROR) {
-			;
-		}
-		else if (s == AS_MIGRATE_STATE_EAGAIN) {
-			cf_warning(AS_PARTITION, "migration tx callback: migrate failed {%s:%d}", ns->name, pid);
-		}
-		else {
-			cf_warning(AS_PARTITION, "migration tx callback: unknown notification %d {%s:%d}", (int) s, ns->name, pid);
-		}
-
-		return AS_MIGRATE_FAIL;
-	}
 
 	pthread_mutex_lock(&p->lock);
 
 	if (orig_cluster_key != as_paxos_get_cluster_key()) {
 		pthread_mutex_unlock(&p->lock);
-		return AS_MIGRATE_FAIL;
+		return;
 	}
 
 	// Flush writes on the acting master now that it has completed filling the
@@ -1699,10 +1702,10 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 	// a paxos vote. If this is the case, release the lock and return failure.
 	// Otherwise, continue.
 	if (p->pending_migrate_tx == 0) {
-		cf_warning(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_tx?",
+		cf_warning(AS_PARTITION, "{%s:%d} concurrency event - paxos reconfiguration occurred during migrate_tx?",
 				ns->name, pid);
 		pthread_mutex_unlock(&p->lock);
-		return AS_MIGRATE_FAIL;
+		return;
 	}
 
 	p->pending_migrate_tx--;
@@ -1729,489 +1732,393 @@ as_partition_migrate_tx(as_migrate_state s, as_namespace *ns,
 
 	pthread_mutex_unlock(&p->lock);
 
-	return AS_MIGRATE_OK;
+	return;
 }
 
 
-// When on the receiving end of a migrate, be notified that
-// a migrate is starting (and give the chance to say "not now"),
-// or be notified that the reception of the migrate data has concluded
-//
-// Return values meaning: (should change to enum)
-//
-// There are the following cases:
-// 1. This node is DESYNC master and is receiving primary version
-//    Apply journal and set state to sync (writes are allowed)
-//    Request any duplicate copies. If there are none, migrate
-//    data to replicas as indicated by migrate_tx_onsync[r]
-// 2. This node is SYNC master and is receiving duplicates
-//    If all duplicate merges are completed, then migrate merged
-//    data to replicas as indicated by migrate_tx_onsync[r]
-// 3. This node is SYNC replica with a duplicate partition copy
-//    and is receiving a migrate request from master
-//    Check that writes are disabled on this node
-//    Schedule migrate to master
-// 4. This node is SYNC replica and is receiving data from master
-//    after a duplicate partition merge
-//    Apply the merges and at the end, enable writes, if needed.
-// 5. This node is DESYNC replica and is receiving data from
-//    master.
-//    Apply journal and set state to sync (writes are allowed).
-// 6. This node is SYNC non-replica with a duplicate partition
-//    copy (zombie) and receives a migrate request from master
-//    Check that writes are disabled on this node.
-//    Schedule migrate to master, at completion switch to absent.
 as_migrate_result
-as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
-		as_partition_id pid, uint64_t orig_cluster_key, uint32_t start_type,
-		cf_node source_node)
+as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
+		uint64_t orig_cluster_key, uint32_t start_type, cf_node source_node)
 {
 	if (! g_allow_migrations) {
 		return AS_MIGRATE_AGAIN;
 	}
 
-	as_migrate_result rv = AS_MIGRATE_OK;
 	as_partition *p = &ns->partitions[pid];
 
-	switch (s) {
-	case AS_MIGRATE_STATE_START:
-	{
-		pthread_mutex_lock(&p->lock);
+	pthread_mutex_lock(&p->lock);
 
-		if (orig_cluster_key != as_paxos_get_cluster_key()) {
-			pthread_mutex_unlock(&p->lock);
-			return AS_MIGRATE_AGAIN;
+	if (orig_cluster_key != as_paxos_get_cluster_key()) {
+		pthread_mutex_unlock(&p->lock);
+		return AS_MIGRATE_AGAIN;
+	}
+
+	int64_t num_incoming = cf_atomic_int_incr(&g_config.migrate_num_incoming);
+
+	if (num_incoming > g_config.migrate_max_num_incoming) {
+		cf_atomic_int_decr(&g_config.migrate_num_incoming);
+		pthread_mutex_unlock(&p->lock);
+		return AS_MIGRATE_AGAIN;
+	}
+
+	as_migrate_result rv = AS_MIGRATE_FAIL;
+	cf_queue mq;
+
+	cf_queue_init(&mq, sizeof(partition_migrate_record),
+			ns->cfg_replication_factor, false);
+
+	switch (p->state) {
+	case AS_PARTITION_STATE_UNDEF:
+		cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - in UNDEF state, fail",
+				ns->name, pid);
+		rv = AS_MIGRATE_FAIL;
+		break;
+	case AS_PARTITION_STATE_ABSENT:
+		cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - in ABSENT state, already done (pending %d origin %"PRIx64")",
+				ns->name, pid, p->pending_migrate_rx, p->origin);
+		rv = AS_MIGRATE_ALREADY_DONE;
+		break;
+	case AS_PARTITION_STATE_DESYNC:
+		if (0 != as_journal_start(ns, pid)) {
+			cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - could not start journal, continuing",
+					ns->name, pid);
 		}
+		rv = AS_MIGRATE_OK;
+		break;
+	case AS_PARTITION_STATE_SYNC:
+	case AS_PARTITION_STATE_ZOMBIE:
+		if (g_config.self_node != p->replica[0]) {
+			// TODO - deprecate in "six months".
+			if (start_type == 0) {
+				// Start message from old node. Note that this still has a
+				// bug for replication factor > 2, where subsequent normal
+				// starts masquerade as duplicate request-type starts.
+				start_type = MIG_TYPE_START_IS_NORMAL;
 
-		// Receiver-side migration flow control check.
-		int64_t num_incoming = cf_atomic_int_incr(&g_config.migrate_num_incoming);
-
-		if (num_incoming > g_config.migrate_max_num_incoming) {
-			cf_atomic_int_decr(&g_config.migrate_num_incoming);
-			cf_atomic_int_incr(&g_config.migrate_num_incoming_refused);
-			pthread_mutex_unlock(&p->lock);
-			return AS_MIGRATE_AGAIN;
-		}
-
-		cf_queue *mq = cf_queue_create(sizeof(partition_migrate_record), false);
-
-		switch (p->state) {
-		case AS_PARTITION_STATE_UNDEF:
-			cf_warning(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, fail",
-					ns->name, pid, p->state);
-			rv = AS_MIGRATE_FAIL;
-			break;
-		case AS_PARTITION_STATE_ABSENT:
-			cf_warning(AS_PARTITION, "{%s:%d} migrate rx start while in state %d, already done (pending %d origin %"PRIx64")",
-					ns->name, pid, p->state, p->pending_migrate_rx, p->origin);
-			rv = AS_MIGRATE_ALREADY_DONE;
-			break;
-		case AS_PARTITION_STATE_DESYNC:
-			if (0 != as_journal_start(ns, pid)) {
-				// theoretically, a journal start fails only when there's already another journal in progress
-				cf_warning(AS_PARTITION, "{%s:%d} could not start journal, continuing",
-						ns->name, pid);
-			}
-			rv = AS_MIGRATE_OK;
-			break;
-		case AS_PARTITION_STATE_SYNC: // Allow migrations into sync
-		case AS_PARTITION_STATE_ZOMBIE: // This is a migration request
-			// A non-master node with flag waiting_for_master == true
-			// Master just became sync and is requesting the duplicate
-			// schedule a migrate now
-			// do not decrement the migrate count since we expect
-			// another migrate from master after the merge completes
-			if (g_config.self_node != p->replica[0]) {
-				// TODO - deprecate in "six months".
-				if (start_type == 0) {
-					// Start message from old node. Note that this still has a
-					// bug for replication factor > 2, where subsequent normal
-					// starts masquerade as duplicate request-type starts.
-					start_type = MIG_TYPE_START_IS_NORMAL;
-
-					if (p->has_master_wait) {
-						start_type = MIG_TYPE_START_IS_REQUEST;
-					}
+				if (p->has_master_wait) {
+					start_type = MIG_TYPE_START_IS_REQUEST;
 				}
+			}
 
-				if (start_type == MIG_TYPE_START_IS_REQUEST) {
-					if (! p->has_migrate_tx_later) {
-						rv = AS_MIGRATE_ALREADY_DONE;
-						break;
-					}
-
-					if (source_node != p->replica[0]) {
-						// this is a state corruption error
-						cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. Waiting node received migrate request from non-master",
-								ns->name, pid);
-						rv = AS_MIGRATE_FAIL;
-						break; // out of switch
-					}
-
-					p->has_migrate_tx_later = false;
-					p->pending_migrate_tx++; // Send request to dupl node
-
-					partition_migrate_record r;
-					partition_migrate_record_fill(&r, p->replica[0], ns,
-							pid, orig_cluster_key, TX_FLAGS_NONE);
-					cf_queue_push(mq, &r);
-
+			if (start_type == MIG_TYPE_START_IS_REQUEST) {
+				if (! p->has_migrate_tx_later) {
 					rv = AS_MIGRATE_ALREADY_DONE;
 					break;
 				}
+
+				if (source_node != p->replica[0]) {
+					cf_warning(AS_PARTITION, "{%s:%d} immigrate_start aborted - waiting node received migrate request from non-master",
+							ns->name, pid);
+					rv = AS_MIGRATE_FAIL;
+					break;
+				}
+
+				p->has_migrate_tx_later = false;
+				p->pending_migrate_tx++;
+
+				partition_migrate_record r;
+				partition_migrate_record_fill(&r, p->replica[0], ns,
+						pid, orig_cluster_key, TX_FLAGS_NONE);
+				cf_queue_push(&mq, &r);
+
+				rv = AS_MIGRATE_ALREADY_DONE;
+				break;
+			}
+		}
+
+		if (p->state == AS_PARTITION_STATE_ZOMBIE) {
+			cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - in zombie state %d, fail",
+					ns->name, pid, p->state);
+			rv = AS_MIGRATE_FAIL;
+			break;
+		}
+
+		if (g_config.self_node != p->replica[0]) {
+			bool is_replica = false;
+
+			for (int i = 1; i < p->p_repl_factor; i++) {
+				if (g_config.self_node == p->replica[i]) {
+					is_replica = true;
+					break; // out of for loop
+				}
 			}
 
-			if (p->state == AS_PARTITION_STATE_ZOMBIE) {
-				cf_warning(AS_PARTITION, "{%s:%d} migrate rx start while in zombie state %d, fail",
-						ns->name, pid, p->state);
+			if (! is_replica) {
+				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start aborted - non replica node received migrate request",
+						ns->name, pid);
 				rv = AS_MIGRATE_FAIL;
 				break;
 			}
 
-			// The node receiving a migrate can either be a master node
-			//   or a replica node.
-			// If it is the master node, then the node's origin must be
-			//   null (only duplicate migrations allowed into master)
-			// If it is a replica node, then it can be one of two cases:
-			//  Case 1: A duplicate node
-			//    In this case, add a journal for storing writes.
-			//  Case 2: A sync replica of the primary partition version
-			//    In this case, add a journal for storing writes.
-			if (g_config.self_node != p->replica[0]) {
-				bool is_replica = false;
-
-				for (int i = 1; i < p->p_repl_factor; i++) {
-					if (g_config.self_node == p->replica[i]) {
-						is_replica = true;
-						break;
-					}
-				}
-
-				if (! is_replica) {
-					// this is a state corruption error
-					cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. NON replica node received migrate request",
-							ns->name, pid);
-					rv = AS_MIGRATE_FAIL;
-					break; // out of switch
-				}
-
-				if (source_node != p->replica[0]) {
-					// this is a state corruption error
-					cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC replica node received migrate request from non-master",
-							ns->name, pid);
-					rv = AS_MIGRATE_FAIL;
-					break; // out of switch
-				}
-
-				if (p->origin != p->replica[0]) {
-					cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC replica node receiving migrate request has origin set to non-master",
-							ns->name, pid);
-					rv = AS_MIGRATE_FAIL;
-					break; // out of switch
-				}
-
-				// Set the state to be DESYNC
-				// and leave the tree as is. The new writes will be written
-				// to the journal and re-applied after the merged records
-				// are migrated from the master.
-				p->state = AS_PARTITION_STATE_DESYNC;
-
-				if (client_replica_maps_update(ns, pid)) {
-					cf_atomic_int_incr(&g_config.partition_generation);
-				}
-
-				// Open the write journal and set state to DESYNC
-				if (0 != as_journal_start(ns, pid)) {
-					// Theoretically, a journal start fails only when
-					// there's already another journal in progress.
-					cf_warning(AS_PARTITION, "{%s:%d} could not start journal, continuing",
-							ns->name, pid);
-				}
-				// TODO: Should we always apply journals during a partition
-				//       re-balance for desync nodes that have their
-				//       versions set?
+			if (source_node != p->replica[0]) {
+				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start aborted - sync replica node received migrate request from non-master",
+						ns->name, pid);
+				rv = AS_MIGRATE_FAIL;
+				break;
 			}
-			else {
-				// Migrations into SYNC Master must ONLY be from nodes
-				// containing duplicate partitions.
-				if (p->origin != (cf_node)0) {
-					// this is a state corruption error.
-					cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC Master has origin set to non-NULL",
-							ns->name, pid);
-					rv = AS_MIGRATE_FAIL;
-					break; // out of switch
-				}
 
-				bool dupl_node_found = false;
+			if (p->origin != p->replica[0]) {
+				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start aborted - sync replica node receiving migrate request has origin set to non-master",
+						ns->name, pid);
+				rv = AS_MIGRATE_FAIL;
+				break;
+			}
 
-				for (int i = 0; i < p->n_dupl; i++) {
-					if (source_node == p->dupl_nodes[i]) {
-						dupl_node_found = true;
-						break;
-					}
-				}
+			// The only place we switch to DESYNC outside of re-balance.
+			p->state = AS_PARTITION_STATE_DESYNC;
 
-				if (! dupl_node_found) {
-					// This has been determined NOT to be a state corruption
-					// error - Retransmitted START after a done completes on a
-					// DSYNC master. This shouldn't affect emigrating node.
-					cf_detail(AS_PARTITION, "{%s:%d} migrate rx aborted. SYNC Master receiving migrate from node not in duplicate list",
-							ns->name, pid);
-					rv = AS_MIGRATE_FAIL;
-					break; // out of switch
+			if (0 != as_journal_start(ns, pid)) {
+				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - could not start journal, continuing",
+						ns->name, pid);
+			}
+		}
+		else {
+			if (p->origin != (cf_node)0) {
+				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start aborted - sync master has origin set to non-null",
+						ns->name, pid);
+				rv = AS_MIGRATE_FAIL;
+				break;
+			}
+
+			bool dupl_node_found = false;
+
+			for (int i = 0; i < p->n_dupl; i++) {
+				if (source_node == p->dupl_nodes[i]) {
+					dupl_node_found = true;
+					break;
 				}
 			}
 
-			rv = AS_MIGRATE_OK;
+			if (! dupl_node_found) {
+				cf_detail(AS_PARTITION, "{%s:%d} immigrate_start aborted - sync master receiving migrate from node not in duplicate list",
+						ns->name, pid);
+				rv = AS_MIGRATE_FAIL;
+				break;
+			}
+		}
+
+		rv = AS_MIGRATE_OK;
+		break;
+	}
+
+	if (rv != AS_MIGRATE_OK) {
+		// Migration has been rejected, incoming migration not expected.
+		cf_atomic_int_decr(&g_config.migrate_num_incoming);
+	}
+
+	if (client_replica_maps_update(ns, pid)) {
+		cf_atomic_int_incr(&g_config.partition_generation);
+	}
+
+	pthread_mutex_unlock(&p->lock);
+
+	partition_migrate_record pmr;
+
+	while (CF_QUEUE_OK == cf_queue_pop(&mq, &pmr, 0)) {
+		as_migrate_emigrate(&pmr);
+	}
+
+	cf_queue_destroy(&mq);
+
+	return rv;
+}
+
+
+as_migrate_result
+as_partition_immigrate_done(as_namespace *ns, as_partition_id pid,
+		uint64_t orig_cluster_key, cf_node source_node)
+{
+	if (! g_allow_migrations) {
+		return AS_MIGRATE_AGAIN;
+	}
+
+	as_partition *p = &ns->partitions[pid];
+
+	pthread_mutex_lock(&p->lock);
+
+	if (orig_cluster_key != as_paxos_get_cluster_key()) {
+		pthread_mutex_unlock(&p->lock);
+		return AS_MIGRATE_FAIL;
+	}
+
+	if (p->pending_migrate_rx == 0) {
+		pthread_mutex_unlock(&p->lock);
+		cf_warning(AS_PARTITION, "{%s:%d} immigrate_done concurrency event - paxos reconfiguration occurred during migrate_done?",
+				ns->name, pid);
+		return AS_MIGRATE_FAIL;
+	}
+
+	as_migrate_result rv = AS_MIGRATE_OK;
+	as_partition_state orig_p_state = p->state;
+	cf_queue mq;
+
+	cf_queue_init(&mq, sizeof(partition_migrate_record),
+			ns->cfg_replication_factor, false);
+
+	switch (orig_p_state) {
+	case AS_PARTITION_STATE_UNDEF:
+	case AS_PARTITION_STATE_ABSENT:
+	case AS_PARTITION_STATE_ZOMBIE:
+		cf_warning(AS_PARTITION, "{%s:%u} immigrate_done received with bad state partition: %u ",
+				ns->name, pid, p->state);
+		rv = AS_MIGRATE_FAIL;
+		break;
+	case AS_PARTITION_STATE_DESYNC:
+		if (p->origin != source_node || p->pending_migrate_rx == 0) {
+			cf_warning(AS_PARTITION, "{%s:%d} immigrate_done aborted - state error for desync partition",
+					ns->name, pid);
+			rv = AS_MIGRATE_FAIL;
 			break;
 		}
 
-		if (rv == AS_MIGRATE_OK) {
-			// Total number of incoming migrations accepted.
-			cf_atomic_int_incr(&g_config.migrate_num_incoming_accepted);
-		}
-		else {
-			// Migration has been rejected, incoming migration not expected.
-			cf_atomic_int_decr(&g_config.migrate_num_incoming);
-		}
+		p->pending_migrate_rx--;
 
-		pthread_mutex_unlock(&p->lock);
+		int64_t migrates_rx_remaining = cf_atomic_int_decr(
+				&ns->migrate_rx_partitions_remaining);
 
-		// Run all the queued migrations: this happens after the release of
-		// the state lock to ensure that writes have begun to flow to their
-		// new homes.
-		partition_migrate_record pmr;
-
-		while (0 == cf_queue_pop(mq, &pmr, 0)) {
-			as_migrate_emigrate(&pmr);
+		if (migrates_rx_remaining < 0) {
+			cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) immigrate_done - partitions schedule exceeded, possibly a race with prior migration",
+					ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
 		}
 
-		cf_queue_destroy(mq);
+		p->origin = 0;
 
-		break;
-	}
-	case AS_MIGRATE_STATE_DONE:
-	{
-		pthread_mutex_lock(&p->lock);
+		apply_write_journal(ns, pid);
 
-		if (orig_cluster_key != as_paxos_get_cluster_key()) {
+		set_partition_sync_lockfree(p, pid, ns, true);
+
+		// If this is not the eventual master, we are done.
+		if (g_config.self_node != p->replica[0]) {
+			if (p->pending_migrate_rx != 0) {
+				cf_warning(AS_PARTITION, "{%s:%d} immigrate_done aborted - rx %d is non zero",
+						ns->name, pid, p->pending_migrate_rx);
+				rv = AS_MIGRATE_FAIL;
+			}
+
+			break;
+		}
+		// else - a DESYNC master has just become SYNC.
+
+		if (p->pending_migrate_tx != 0) {
+			cf_warning(AS_PARTITION, "{%s:%d} immigrate_done aborted - tx %d value is non-zero for master that just turned sync after migrate",
+					ns->name, pid, p->pending_migrate_tx);
 			rv = AS_MIGRATE_FAIL;
-			pthread_mutex_unlock(&p->lock);
-			break; // out of switch
+			break;
 		}
 
-		if (p->pending_migrate_rx == 0) {
-			cf_warning(AS_PARTITION, "{%s:%d} Concurrency event. Paxos reconfiguration occurred during migrate_rx?",
+		// Send migrate messages to request migrations, if needed.
+		for (int i = 0; i < p->n_dupl; i++) {
+			p->pending_migrate_tx++;
+
+			partition_migrate_record r;
+			partition_migrate_record_fill(&r, p->dupl_nodes[i],
+					ns, pid, orig_cluster_key, TX_FLAGS_REQUEST);
+
+			cf_queue_push(&mq, &r);
+		}
+
+		if (p->pending_migrate_tx != p->pending_migrate_rx) {
+			cf_warning(AS_PARTITION, "{%s:%d} immigrate_done aborted - rx %d and tx %d values mismatch",
+					ns->name, pid, p->pending_migrate_rx, p->pending_migrate_tx);
+			rv = AS_MIGRATE_FAIL;
+			break;
+		}
+
+		// Continue to code block below - the state is sync now.
+
+	// No break.
+	case AS_PARTITION_STATE_SYNC:
+		if (g_config.self_node != p->replica[0]) {
+			cf_warning(AS_PARTITION, "{%s:%d} immigrate_done aborted - state error for sync partition",
 					ns->name, pid);
 			rv = AS_MIGRATE_FAIL;
-			pthread_mutex_unlock(&p->lock);
-			break; // out of switch
+			break;
 		}
 
-		// Check if there are any final migrates to be done after merges and
-		// schedule these now.
-		cf_queue *mq = cf_queue_create(sizeof(partition_migrate_record), false);
-		as_partition_state orig_p_state = p->state;
+		if (p->n_dupl > 0) {
+			bool found = false;
+			int i = 0;
 
-		switch (orig_p_state) {
-		case AS_PARTITION_STATE_UNDEF:
-		case AS_PARTITION_STATE_ABSENT:
-		case AS_PARTITION_STATE_ZOMBIE:
-			// Check for illegal state.
-			cf_warning(AS_PARTITION, "{%s:%u} received migrate done into bad state partition: %u ",
-					ns->name, pid, p->state);
-			rv = AS_MIGRATE_FAIL;
-			break; // out of switch
-		case AS_PARTITION_STATE_DESYNC:
-			if (p->origin != source_node || p->pending_migrate_rx == 0) {
-				// This is a state corruption error.
-				cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. State error for desync partition",
-						ns->name, pid);
-				rv = AS_MIGRATE_FAIL;
-				break; // out of switch
+			for (i = 0; i < p->n_dupl; i++) {
+				if (p->dupl_nodes[i] == source_node) {
+					found = true;
+					break;
+				}
 			}
 
-			p->pending_migrate_rx--;
-
-			int64_t migrates_rx_remaining = cf_atomic_int_decr(
-					&ns->migrate_rx_partitions_remaining);
-
-			if (migrates_rx_remaining < 0) {
-				cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) rx partitions schedule exceeded, possibly a race with prior migration",
-						ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
-			}
-
-			p->origin = 0;
-
-			apply_write_journal(ns, pid);
-
-			set_partition_sync_lockfree(p, pid, ns, true);
-
-			if (client_replica_maps_update(ns, pid)) {
-				cf_atomic_int_incr(&g_config.partition_generation);
-			}
-
-			// If this is not a master, we are done.
-			if (g_config.self_node != p->replica[0]) {
-				if (p->pending_migrate_rx != 0) {
-					// This is a state corruption error.
-					cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. rx %d is non zero",
-							ns->name, pid, p->pending_migrate_rx);
-					rv = AS_MIGRATE_FAIL;
+			if (found) {
+				if (i == (p->n_dupl - 1)) { // delete last entry
+					p->dupl_nodes[i] = (cf_node)0;
+				}
+				else { // copy last entry into deleted entry
+					p->dupl_nodes[i] = p->dupl_nodes[p->n_dupl - 1];
+					p->dupl_nodes[p->n_dupl - 1] = (cf_node)0;
 				}
 
-				break; // out of switch
-			}
+				p->n_dupl--;
+				p->pending_migrate_rx--;
 
-			// A desync master has just become sync.
-			if (p->pending_migrate_tx != 0) {
-				// This is a state corruption error.
-				cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. tx %d value is non-zero for master that just turned sync after migrate",
-						ns->name, pid, p->pending_migrate_tx);
-				rv = AS_MIGRATE_FAIL;
-				break; // out of switch
-			}
+				int64_t migrates_rx_remaining = cf_atomic_int_decr(
+						&ns->migrate_rx_partitions_remaining);
 
-			// Send migrate message to node containing every duplicate
-			// version. This is really a request for migrate, so only
-			// the start message will be sent and the node having the
-			// duplicate will respond with migrate already done.
-			// (the type doesn't matter here since it's a "false migrate")
-			for (int i = 0; i < p->n_dupl; i++) {
-				p->pending_migrate_tx++; // Send request to dupl node
+				if (migrates_rx_remaining < 0) {
+					cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) immigrate_done - partitions schedule exceeded, possibly a race with prior migration",
+							ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
+				}
+			}
+			else {
+				// We get here when DESYNC (empty) master becomes SYNC and there
+				// were duplicates. The first sync node is not a member of the
+				// dupl_nodes array.
+
+				if (orig_p_state != AS_PARTITION_STATE_DESYNC) {
+					cf_warning(AS_PARTITION, "{%s:%d} immigrate_done - source node %"PRIx64" not found in desync state",
+							ns->name, pid, source_node);
+					rv = AS_MIGRATE_FAIL;
+					break;
+				}
+			}
+		}
+		// else - no duplicates - we get here e.g. if master & prole(s) are
+		// DESYNC and there is a single partition version coming from a zombie
+		// to here - the DESYNC master. Might now do migration(s) to prole(s) -
+		// don't break!
+
+		if (p->pending_migrate_rx > 0) {
+			break;
+		}
+		// else - received all expected, send anything pending as needed.
+
+		for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+			if (p->replica_tx_onsync[i]) {
+				p->replica_tx_onsync[i] = false;
+				p->pending_migrate_tx++;
 
 				partition_migrate_record r;
-				partition_migrate_record_fill(&r, p->dupl_nodes[i],
-						ns, pid, orig_cluster_key, TX_FLAGS_REQUEST);
+				partition_migrate_record_fill(&r, p->replica[i],
+						ns, pid, orig_cluster_key, TX_FLAGS_NONE);
 
-				cf_queue_push(mq, &r);
-			}
-
-			// Tally the migrate_rx and migrate_tx - they need to be
-			// identical
-			if (p->pending_migrate_tx != p->pending_migrate_rx) {
-				// this is a state corruption error
-				cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. rx %d and tx %d values mismatch",
-						ns->name, pid, p->pending_migrate_rx, p->pending_migrate_tx);
-				rv = AS_MIGRATE_FAIL;
-				break; // out of switch
-			}
-
-			// Continue to code block below where the tx_onsync processing
-			// occurs, fall into next block. The state is sync now.
-		case AS_PARTITION_STATE_SYNC:
-			// A sync node has received a migrate_rx DONE message.
-			// This node has to be the master node receiving duplicate messages.
-			if (g_config.self_node != p->replica[0]) {
-				// this is a state corruption error
-				cf_warning(AS_PARTITION, "{%s:%d} migrate rx aborted. State error for sync partition",
-						ns->name, pid);
-				rv = AS_MIGRATE_FAIL;
-				break; // out of switch
-			}
-
-			// Master node that is sync getting a migrate end. should be
-			// duplicate data check p->origin and p->dupl_nodes for matching
-			// the sources.
-			if (p->n_dupl > 0) {
-				bool found = false;
-				int i = 0;
-
-				for (i = 0; i < p->n_dupl; i++) {
-					if (p->dupl_nodes[i] == source_node) {
-						found = true;
-						break;
-					}
-				}
-
-				if (found) {
-					if (i == (p->n_dupl - 1)) { // delete last entry
-						p->dupl_nodes[i] = (cf_node)0;
-					}
-					else { // copy last entry into deleted entry
-						p->dupl_nodes[i] = p->dupl_nodes[p->n_dupl - 1];
-						p->dupl_nodes[p->n_dupl - 1] = (cf_node)0;
-					}
-
-					p->n_dupl--;
-					p->pending_migrate_rx--;
-
-					int64_t migrates_rx_remaining = cf_atomic_int_decr(
-							&ns->migrate_rx_partitions_remaining);
-
-					if (migrates_rx_remaining < 0) {
-						cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld)  rx partitions schedule exceeded, possibly a race with prior migration",
-								ns->name, pid, p->pending_migrate_rx, migrates_rx_remaining);
-					}
-				}
-				else {
-					// We get here when DESYNC (empty) master becomes
-					// SYNC and there were duplicates. The first sync
-					// node is not a member of the dupl_nodes array.
-
-					if (orig_p_state != AS_PARTITION_STATE_DESYNC) {
-						cf_warning(AS_PARTITION, "{%s:%d} source node %"PRIx64" not found in migration rx state",
-								ns->name, pid, source_node);
-						rv = AS_MIGRATE_FAIL;
-						break; // out of switch
-					}
-				}
-			}
-			// else -
-				// No duplicates - we get here e.g. if master & prole(s)
-				// are desync and there is a single partition version
-				// coming from a zombie to here - the desync master.
-				// Might now do migration(s) to prole(s) - don't break!
-
-			if (p->pending_migrate_rx > 0) {
-				break; // out of switch
-			}
-
-			// Check if there are any replicas that are not sync and need
-			// migration.
-			for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
-				if (p->replica_tx_onsync[i] == true) {
-					p->replica_tx_onsync[i] = false;
-					p->pending_migrate_tx++;
-
-					partition_migrate_record r;
-					partition_migrate_record_fill(&r, p->replica[i],
-							ns, pid, orig_cluster_key, TX_FLAGS_NONE);
-
-					cf_queue_push(mq, &r);
-				}
+				cf_queue_push(&mq, &r);
 			}
 		}
-
-		if (client_replica_maps_update(ns, pid)) {
-			cf_atomic_int_incr(&g_config.partition_generation);
-		}
-
-		pthread_mutex_unlock(&p->lock);
-
-		// Run all the queued migrations: this happens after the release of
-		// the state lock to ensure that writes have begun to flow to their
-		// new homes.
-		partition_migrate_record pmr;
-
-		while (0 == cf_queue_pop(mq, &pmr, 0)) {
-			as_migrate_emigrate(&pmr);
-		}
-
-		cf_queue_destroy(mq);
-
-		// For receiver-side migration flow control.
-		cf_atomic_int_decr(&g_config.migrate_num_incoming);
-
-		break;
 	}
-	case AS_MIGRATE_STATE_ERROR:
-	case AS_MIGRATE_STATE_EAGAIN:
-		cf_warning(AS_PARTITION, "partition migrate failure! {%s:%d}", ns->name, pid);
-		break;
-	default:
-		break;
+
+	if (client_replica_maps_update(ns, pid)) {
+		cf_atomic_int_incr(&g_config.partition_generation);
 	}
+
+	pthread_mutex_unlock(&p->lock);
+
+	partition_migrate_record pmr;
+
+	while (0 == cf_queue_pop(&mq, &pmr, 0)) {
+		as_migrate_emigrate(&pmr);
+	}
+
+	cf_queue_destroy(&mq);
+
+	// For receiver-side migration flow control.
+	cf_atomic_int_decr(&g_config.migrate_num_incoming);
 
 	return rv;
 }
@@ -2746,10 +2653,9 @@ as_partition_balance()
 
 	size_t n_total = g_config.n_namespaces * AS_PARTITIONS;
 	uint64_t orig_cluster_key = as_paxos_get_cluster_key();
+	cf_queue mq;
 
-	cf_queue mig_q;
-	cf_queue* mq = &mig_q;
-	cf_queue_init(mq, sizeof(partition_migrate_record),
+	cf_queue_init(&mq, sizeof(partition_migrate_record),
 			AS_PARTITIONS * g_config.n_namespaces, false);
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
@@ -3059,7 +2965,7 @@ as_partition_balance()
 								partition_migrate_record_fill(&pmr,
 										HV(j, k), ns, j,
 										orig_cluster_key, TX_FLAGS_NONE);
-								cf_queue_push(mq, &pmr);
+								cf_queue_push(&mq, &pmr);
 							}
 						}
 
@@ -3163,7 +3069,7 @@ as_partition_balance()
 								orig_cluster_key, TX_FLAGS_NONE);
 					}
 
-					cf_queue_push(mq, &pmr);
+					cf_queue_push(&mq, &pmr);
 				}
 				// Wait for master to flag that it is sync before
 				// transmitting the partition
@@ -3257,11 +3163,11 @@ as_partition_balance()
 
 	partition_migrate_record pmr;
 
-	while (cf_queue_pop(mq, &pmr, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
+	while (cf_queue_pop(&mq, &pmr, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
 		as_migrate_emigrate(&pmr);
 	}
 
-	cf_queue_destroy(mq);
+	cf_queue_destroy(&mq);
 
 	cf_free(hv_ptr);
 	cf_free(hv_slindex_ptr);

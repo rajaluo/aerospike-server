@@ -109,12 +109,9 @@ bool as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_parti
 void as_migrate_set_num_xmit_threads(int n_threads);
 void as_migrate_dump(bool verbose);
 
-as_migrate_result as_partition_migrate_rx(as_migrate_state s,
-		as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key,
-		uint32_t start_type, cf_node source_node);
-as_migrate_result as_partition_migrate_tx(as_migrate_state s,
-		as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key,
-		uint32_t tx_flags);
+as_migrate_result as_partition_immigrate_start(as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, uint32_t start_type, cf_node source_node);
+as_migrate_result as_partition_immigrate_done(as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, cf_node source_node);
+void as_partition_emigrate_done(as_migrate_state s, as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, uint32_t tx_flags);
 
 
 //==========================================================
@@ -137,7 +134,7 @@ typedef enum {
 	MIG_FIELD_TYPE, // deprecated
 	MIG_FIELD_REC_PROPS,
 	MIG_FIELD_INFO,
-	MIG_FIELD_VERSION,
+	MIG_FIELD_LDT_VERSION,
 	MIG_FIELD_PDIGEST,
 	MIG_FIELD_EDIGEST,
 	MIG_FIELD_PGENERATION,
@@ -201,7 +198,7 @@ typedef struct emigration_s {
 
 	cf_atomic32 bytes_emigrating;
 	shash       *reinsert_hash;
-	cf_queue    *ctrl_q; // TODO - Remove, overkill for single dest.
+	cf_queue    *ctrl_q;
 	emig_meta_q *meta_q;
 
 	as_partition_reservation rsv;
