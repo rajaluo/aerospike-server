@@ -955,20 +955,6 @@ internal_rw_start(as_transaction *tr, write_request *wr, bool *delete)
 						"target replica set contains ourselves");
 		}
 
-		// TODO: We are allowing write to go to non-master node prole here.
-		// At non-master it will fail but it has already been written at master.
-		// Ideally we should roll back.
-		if ((g_config.self_node != tr->rsv.p->replica[0])
-				&& (as_paxos_get_cluster_key() == tr->rsv.cluster_key)
-				&& !(tr->from_flags & FROM_FLAG_SHIPPED_OP)
-				&& (tr->rsv.p->target == 0)) {
-			cf_warning(AS_RW, "internal_rw_start called from non-master "
-				"node %"PRIx64", with TRANSACTION_FLAG_SHIPPED_OP not set and without any cluster key "
-				"mismatch too. Cluster key is %"PRIx64", cluster size = %zu my id %"PRIx64"",
-				g_config.self_node, tr->rsv.cluster_key, g_config.paxos->cluster_size , g_config.self_node);
-			//PRINT_STACK();
-		}
-
 		/* Short circuit for one-replica writes */
 		if (0 == node_sz) {
 
