@@ -2197,8 +2197,6 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, g_config.write_duplicate_resolution_disable ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";respond-client-on-master-completion=");
 	cf_dyn_buf_append_string(db, g_config.respond_client_on_master_completion ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";replication-fire-and-forget=");
-	cf_dyn_buf_append_string(db, g_config.replication_fire_and_forget ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";info-threads=");
 	cf_dyn_buf_append_int(db, g_config.n_info_threads);
 	cf_dyn_buf_append_string(db, ";allow-inline-transactions=");
@@ -2976,18 +2974,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of respond-client-on-master-completion from %s to %s", bool_val[g_config.respond_client_on_master_completion], context);
 				g_config.respond_client_on_master_completion = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "replication-fire-and-forget", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of replication-fire-and-forget from %s to %s", bool_val[g_config.replication_fire_and_forget], context);
-				g_config.replication_fire_and_forget = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of replication-fire-and-forget from %s to %s", bool_val[g_config.replication_fire_and_forget], context);
-				g_config.replication_fire_and_forget = false;
 			}
 			else
 				goto Error;

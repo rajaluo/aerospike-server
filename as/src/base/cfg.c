@@ -300,7 +300,6 @@ typedef enum {
 	CASE_SERVICE_QUERY_THRESHOLD,
 	CASE_SERVICE_QUERY_UNTRACKED_TIME_MS,
 	CASE_SERVICE_QUERY_WORKER_THREADS,
-	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
 	CASE_SERVICE_RUN_AS_DAEMON,
 	CASE_SERVICE_SCAN_MAX_ACTIVE,
@@ -357,6 +356,7 @@ typedef enum {
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
 	CASE_SERVICE_NSUP_THREADS,
+	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
 	CASE_SERVICE_SCAN_MEMORY,
 	CASE_SERVICE_SCAN_PRIORITY,
 	CASE_SERVICE_SCAN_RETRANSMIT,
@@ -714,7 +714,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "query-threshold", 				CASE_SERVICE_QUERY_THRESHOLD },
 		{ "query-untracked-time-ms",		CASE_SERVICE_QUERY_UNTRACKED_TIME_MS },
 		{ "query-worker-threads",			CASE_SERVICE_QUERY_WORKER_THREADS },
-		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
 		{ "run-as-daemon",					CASE_SERVICE_RUN_AS_DAEMON },
 		{ "scan-max-active",				CASE_SERVICE_SCAN_MAX_ACTIVE },
@@ -762,6 +761,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
 		{ "nsup-threads",					CASE_SERVICE_NSUP_THREADS },
+		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
 		{ "scan-memory",					CASE_SERVICE_SCAN_MEMORY },
 		{ "scan-priority",					CASE_SERVICE_SCAN_PRIORITY },
 		{ "scan-retransmit",				CASE_SERVICE_SCAN_RETRANSMIT },
@@ -2084,9 +2084,6 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_QUERY_WORKER_THREADS:
 				c->query_worker_threads = cfg_u32(&line, 1, AS_QUERY_MAX_WORKER_THREADS);
 				break;
-			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
-				c->replication_fire_and_forget = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION:
 				c->respond_client_on_master_completion = cfg_bool(&line);
 				break;
@@ -2206,6 +2203,7 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
 			case CASE_SERVICE_NSUP_THREADS:
+			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
 			case CASE_SERVICE_SCAN_MEMORY:
 			case CASE_SERVICE_SCAN_PRIORITY:
 			case CASE_SERVICE_SCAN_RETRANSMIT:

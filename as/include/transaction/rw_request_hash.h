@@ -70,7 +70,7 @@ typedef enum {
 #define RW_OP_MULTI_ACK 6
 
 #define RW_INFO_XDR				0x0001
-#define RW_INFO_MIGRATION		0x0002 // TODO - seems vestigial, deprecate
+#define RW_INFO_UNUSED_2		0x0002 // was RW_INFO_MIGRATE
 #define RW_INFO_NSUP_DELETE		0x0004
 #define RW_INFO_LDT_DUMMY		0x0008 // dummy (no data)
 #define RW_INFO_LDT_PARENTREC	0x0010 // LDT parent record

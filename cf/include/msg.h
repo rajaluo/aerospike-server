@@ -67,7 +67,7 @@ typedef enum msg_type_t {
 	M_TYPE_UNUSED_14 = 14,
 	M_TYPE_SMD = 15,
 	M_TYPE_UNUSED_16 = 16,
-	M_TYPE_SINDEX = 17, // FIXME - seems obsolete
+	M_TYPE_UNUSED_17 = 17,
 	M_TYPE_MAX = 18
 } msg_type;
 
@@ -183,7 +183,7 @@ int msg_fillbuf(const msg *m, uint8_t *buf, size_t *buflen);
 // Parse flattened data into messages.
 //
 
-int msg_parse(msg *m, const uint8_t *buf, const size_t buflen);
+int msg_parse(msg *m, const uint8_t *buf, size_t buflen);
 int msg_get_initial(uint32_t *size, msg_type *type, const uint8_t *buf, uint32_t buflen);
 
 void msg_reset(msg *m);

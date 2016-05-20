@@ -235,8 +235,6 @@ typedef struct as_config_s {
 	bool				write_duplicate_resolution_disable;
 	/* respond client on master completion */
 	bool				respond_client_on_master_completion;
-	// replication is queued and sent
-	bool				replication_fire_and_forget;
 	/* enables node snubbing - this code caused a Paxos issue in the past */
 	bool				snub_nodes;
 
