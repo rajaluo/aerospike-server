@@ -310,10 +310,13 @@ extern bool as_particle_geojson_match_asval(const as_val *val, uint64_t cellid, 
 
 // list:
 struct cdt_payload_s;
+struct rollback_alloc_s;
 extern void as_bin_particle_list_set_hidden(as_bin *b);
 extern void as_bin_particle_list_get_packed_val(const as_bin *b, struct cdt_payload_s *packed);
 extern int as_bin_cdt_packed_read(const as_bin *b, as_msg_op *op, as_bin *result);
 extern int as_bin_cdt_packed_modify(as_bin *b, as_msg_op *op, as_bin *result, cf_ll_buf *particles_llb);
+extern as_particle *packed_list_simple_create_from_buf(struct rollback_alloc_s *alloc_buf, uint32_t ele_count, const uint8_t *buf, uint32_t size);
+extern as_particle *packed_list_simple_create_empty(struct rollback_alloc_s *alloc_buf);
 
 // map:
 extern void as_bin_particle_map_set_hidden(as_bin *b);

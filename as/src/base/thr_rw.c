@@ -1450,7 +1450,7 @@ finish_rw_process_prole_ack(write_request *wr, uint32_t result_code)
 	if (0L == tr.msgp)
 		wr->msgp = 0;
 
-	WR_TRACK_INFO(wr, "finish_rw_process_ack: compeleted write_prole phase");
+	WR_TRACK_INFO(wr, "finish_rw_process_ack: completed write_prole phase");
 	return (true);
 }
 
@@ -1590,7 +1590,7 @@ finish_rw_process_dup_ack(write_request *wr)
 	// INIT_TR
 	as_transaction tr;
 	write_request_init_tr(&tr, wr);
-	WR_TRACK_INFO(wr, "finish_rw_process_dup_ack: compeleted duplicate phase");
+	WR_TRACK_INFO(wr, "finish_rw_process_dup_ack: completed duplicate phase");
 	if (wr->is_read) {
 		MICROBENCHMARK_HIST_INSERT_AND_RESET(rt_resolve_wait_hist);
 	} else {

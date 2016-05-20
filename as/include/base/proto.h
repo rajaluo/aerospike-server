@@ -577,13 +577,32 @@ typedef enum as_udf_op {
 	AS_UDF_OP_FOREGROUND = 3		// not supported yet
 } as_udf_op;
 
-typedef enum as_cdt_paramtype_e {
-	AS_CDT_PARAM_NONE    = 0,
+#define CDT_MAGIC	0xC0 // so we know it can't be (first byte of) msgpack list/map
 
-	AS_CDT_PARAM_INDEX   = 1,
-	AS_CDT_PARAM_COUNT   = 2,
-	AS_CDT_PARAM_PAYLOAD = 3,
+typedef enum as_cdt_paramtype_e {
+	AS_CDT_PARAM_NONE		= 0,
+
+	AS_CDT_PARAM_INDEX		= 1,
+	AS_CDT_PARAM_COUNT		= 2,
+	AS_CDT_PARAM_PAYLOAD	= 3,
+	AS_CDT_PARAM_FLAGS		= 4,
 } as_cdt_paramtype;
+
+typedef enum result_type_e {
+	RESULT_TYPE_NONE			= 0,
+	RESULT_TYPE_INDEX			= 1,
+	RESULT_TYPE_REVINDEX		= 2,
+	RESULT_TYPE_RANK			= 3,
+	RESULT_TYPE_REVRANK			= 4,
+	RESULT_TYPE_COUNT			= 5,
+	RESULT_TYPE_KEY				= 6,
+	RESULT_TYPE_VALUE			= 7,
+	RESULT_TYPE_MAP				= 8,
+	RESULT_TYPE_RANK_RANGE		= 9,
+	RESULT_TYPE_REVRANK_RANGE	= 10,
+	RESULT_TYPE_INDEX_RANGE		= 11,
+	RESULT_TYPE_REVINDEX_RANGE	= 12,
+} result_type_t;
 
 typedef enum as_cdt_optype_e {
 	// ------------------------------------------------------------------------
@@ -615,23 +634,55 @@ typedef enum as_cdt_optype_e {
 	// ------------------------------------------------------------------------
 	// Map Operation
 
-	// Adding <key, value> to the Map
-	AS_CDT_OP_MAP_PUT            = 32,
-	AS_CDT_OP_MAP_PUT_ITEMS      = 33,
+	// Create and flags
+	AS_CDT_OP_MAP_SET_TYPE							= 64,
 
-	// Op by key
-	AS_CDT_OP_MAP_GET            = 34,
-	AS_CDT_OP_MAP_GET_MATCHING   = 35,
-	AS_CDT_OP_MAP_REMOVE         = 36,
-	AS_CDT_OP_MAP_REMOVE_ALL     = 37,
-	AS_CDT_OP_MAP_CONTAINS_KEY   = 38,
-	AS_CDT_OP_MAP_INCREMENT_BY   = 39,
-	AS_CDT_OP_MAP_CONTAINS_VALUE = 40,
+	// Modify Ops
+	AS_CDT_OP_MAP_ADD								= 65,
+	AS_CDT_OP_MAP_ADD_ITEMS							= 66,
+	AS_CDT_OP_MAP_PUT								= 67,
+	AS_CDT_OP_MAP_PUT_ITEMS							= 68,
+	AS_CDT_OP_MAP_REPLACE							= 69,
+	AS_CDT_OP_MAP_REPLACE_ITEMS						= 70,
+	AS_CDT_OP_MAP_RESERVED_0						= 71,
+	AS_CDT_OP_MAP_RESERVED_1						= 72,
 
-	// Misc
-	AS_CDT_OP_MAP_GET_ITEMS      = 41,
-	AS_CDT_OP_MAP_KEYS           = 42,
-	AS_CDT_OP_MAP_VALUES         = 43,
-	AS_CDT_OP_MAP_CLEAR          = 44,
-	AS_CDT_OP_MAP_SIZE           = 45,
+	AS_CDT_OP_MAP_INCREMENT							= 73,
+	AS_CDT_OP_MAP_DECREMENT							= 74,
+
+	AS_CDT_OP_MAP_CLEAR								= 75,
+
+	AS_CDT_OP_MAP_REMOVE_BY_KEY						= 76,
+	AS_CDT_OP_MAP_REMOVE_BY_INDEX					= 77,
+	AS_CDT_OP_MAP_REMOVE_BY_VALUE					= 78,
+	AS_CDT_OP_MAP_REMOVE_BY_RANK					= 79,
+
+	AS_CDT_OP_MAP_RESERVED_2						= 80,
+	AS_CDT_OP_MAP_REMOVE_BY_KEY_LIST				= 81,
+	AS_CDT_OP_MAP_REMOVE_ALL_BY_VALUE				= 82,
+	AS_CDT_OP_MAP_REMOVE_BY_VALUE_LIST				= 83,
+
+	AS_CDT_OP_MAP_REMOVE_BY_KEY_INTERVAL			= 84,
+	AS_CDT_OP_MAP_REMOVE_BY_INDEX_RANGE				= 85,
+	AS_CDT_OP_MAP_REMOVE_BY_VALUE_INTERVAL			= 86,
+	AS_CDT_OP_MAP_REMOVE_BY_RANK_RANGE				= 87,
+
+	// Read ops
+	AS_CDT_OP_MAP_SIZE								= 96,
+
+	AS_CDT_OP_MAP_GET_BY_KEY						= 97,
+	AS_CDT_OP_MAP_GET_BY_INDEX						= 98,
+	AS_CDT_OP_MAP_GET_BY_VALUE						= 99,
+	AS_CDT_OP_MAP_GET_BY_RANK						= 100,
+
+	AS_CDT_OP_MAP_RESERVED_3						= 101,
+	AS_CDT_OP_MAP_GET_ALL_BY_VALUE					= 102,
+
+	AS_CDT_OP_MAP_GET_BY_KEY_INTERVAL				= 103,
+	AS_CDT_OP_MAP_GET_BY_INDEX_RANGE				= 104,
+	AS_CDT_OP_MAP_GET_BY_VALUE_INTERVAL				= 105,
+	AS_CDT_OP_MAP_GET_BY_RANK_RANGE					= 106,
+
 } as_cdt_optype;
+
+#define AS_CDT_OP_LIST_LAST	AS_CDT_OP_LIST_GET_RANGE
