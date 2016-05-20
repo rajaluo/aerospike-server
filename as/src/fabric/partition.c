@@ -167,11 +167,11 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/ldt.h"
-#include "base/thr_write.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h"
 #include "fabric/paxos.h"
 #include "storage/storage.h"
+#include "transaction/replica_write.h"
 
 
 // #define PARTITION_INFO_CHECK 1
@@ -1646,7 +1646,7 @@ apply_write_journal(as_namespace *ns, size_t pid)
 
 	as_partition_reserve_lockfree(ns, pid, &prsv);
 
-	if (0 != as_write_journal_apply(&prsv)) {
+	if (0 != as_journal_apply(&prsv)) {
 		cf_warning(AS_PARTITION, "{%s:%zu} couldn't apply write journal",
 				ns->name, pid);
 	}
@@ -1807,7 +1807,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 			rv = AS_MIGRATE_ALREADY_DONE;
 			break;
 		case AS_PARTITION_STATE_DESYNC:
-			if (0 != as_write_journal_start(ns, pid)) {
+			if (0 != as_journal_start(ns, pid)) {
 				// theoretically, a journal start fails only when there's already another journal in progress
 				cf_warning(AS_PARTITION, "{%s:%d} could not start journal, continuing",
 						ns->name, pid);
@@ -1921,7 +1921,7 @@ as_partition_migrate_rx(as_migrate_state s, as_namespace *ns,
 				}
 
 				// Open the write journal and set state to DESYNC
-				if (0 != as_write_journal_start(ns, pid)) {
+				if (0 != as_journal_start(ns, pid)) {
 					// Theoretically, a journal start fails only when
 					// there's already another journal in progress.
 					cf_warning(AS_PARTITION, "{%s:%d} could not start journal, continuing",

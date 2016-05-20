@@ -49,7 +49,6 @@
 #include "base/datamodel.h"
 #include "base/ldt.h"
 #include "base/ldt_record.h"
-#include "base/thr_rw_internal.h"
 #include "base/transaction.h"
 #include "base/udf_record.h"
 #include "fabric/fabric.h"

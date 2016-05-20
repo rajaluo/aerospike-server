@@ -41,8 +41,8 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/ldt_record.h"
-#include "base/write_request.h"
 #include "storage/storage.h"
+#include "transaction/rw_request.h"
 
 #define LDT_SUB_GC_MAX_RATE         100000 // Do not allow more than 100,000 subrecord GC per second
 
@@ -158,7 +158,7 @@ extern bool     as_ldt_flag_has_subrec     (uint16_t flag);
 extern bool     as_ldt_flag_has_esr        (uint16_t flag);
 
 extern void     as_ldt_sub_gc_fn           (as_index_ref *r_ref, void *udata);
-extern int      as_ldt_shipop              (write_request *wr, cf_node dest_node);
+extern int      as_ldt_shipop              (rw_request *rw, cf_node dest_node);
 
 extern int      as_ldt_parent_storage_set_version (as_storage_rd *rd, uint64_t, uint8_t *, char *fname, int lineno);
 extern int      as_ldt_parent_storage_get_version (as_storage_rd *rd, uint64_t *, bool, char *fname, int lineno);

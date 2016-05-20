@@ -56,7 +56,6 @@
 #include "base/thr_proxy.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
-#include "base/thr_write.h"
 #include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
@@ -64,6 +63,7 @@
 #include "fabric/migrate.h"
 #include "fabric/paxos.h"
 #include "storage/storage.h"
+#include "transaction/rw_request_hash.h"
 
 
 //==========================================================
@@ -469,7 +469,7 @@ main(int argc, char **argv)
 	as_paxos_init();			// cluster consensus algorithm
 	as_migrate_init();			// move data between nodes
 	as_proxy_init();			// do work on behalf of others
-	as_write_init();			// write service
+	as_rw_init();				// read & write service
 	as_query_init();			// query transaction handling
 	as_udf_rw_init();			// apply user-defined functions
 	as_scan_init();				// scan a namespace or set

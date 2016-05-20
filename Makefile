@@ -71,8 +71,8 @@ endif
 .PHONY: targetdirs
 targetdirs:
 	mkdir -p $(GEN_DIR) $(LIBRARY_DIR) $(BIN_DIR)
-	mkdir -p $(MEXP_DIR)/base $(MEXP_DIR)/fabric $(MEXP_DIR)/storage $(MEXP_DIR)/geospatial
-	mkdir -p $(OBJECT_DIR)/base $(OBJECT_DIR)/fabric $(OBJECT_DIR)/storage $(OBJECT_DIR)/geospatial
+	mkdir -p $(MEXP_DIR)/base $(MEXP_DIR)/fabric $(MEXP_DIR)/storage $(MEXP_DIR)/geospatial $(MEXP_DIR)/transaction
+	mkdir -p $(OBJECT_DIR)/base $(OBJECT_DIR)/fabric $(OBJECT_DIR)/storage $(OBJECT_DIR)/geospatial $(OBJECT_DIR)/transaction
 
 strip:	server
 	$(MAKE) -C xdr strip

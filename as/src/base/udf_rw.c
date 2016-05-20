@@ -57,15 +57,16 @@
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/scan.h"
-#include "base/thr_rw_internal.h"
-#include "base/thr_write.h"
+#include "base/thr_proxy.h"
 #include "base/transaction.h"
 #include "base/udf_aerospike.h"
 #include "base/udf_arglist.h"
 #include "base/udf_cask.h"
+#include "base/udf_record.h"
 #include "base/udf_timer.h"
-#include "base/write_request.h"
 #include "base/xdr_serverside.h"
+#include "transaction/rw_request.h"
+#include "transaction/rw_utils.h"
 
 /*
  * Extern
@@ -75,9 +76,42 @@ as_aerospike g_as_aerospike;
 
 // UDF Network Send Interface
 // **************************************************************************************************
-/* Internal Function: Packs up passed in data into as_bin which is
- *                    used to send result after the UDF execution.
- */
+
+void
+send_udf_response(as_transaction* tr, as_bin** response_bins, uint16_t n_bins)
+{
+	// We don't need the tr->from check since we're protected against the race
+	// with timeout via exit clause in the dup-res ack handling, but follow the
+	// pattern.
+
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		if (tr->from.proto_fd_h) {
+			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
+					tr->generation, tr->void_time, NULL, response_bins, n_bins,
+					tr->rsv.ns, NULL, as_transaction_trid(tr), NULL);
+			tr->from.proto_fd_h = NULL;
+		}
+		break;
+	case FROM_PROXY:
+		if (tr->from.proxy_node != 0) {
+			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
+					tr->result_code, tr->generation, tr->void_time, NULL,
+					response_bins, n_bins, tr->rsv.ns, as_transaction_trid(tr),
+					NULL);
+			tr->from.proxy_node = 0;
+		}
+		break;
+	case FROM_BATCH:
+	case FROM_IUDF:
+	case FROM_NSUP:
+		// Should be impossible for batch reads, internal UDFs, and nsup deletes
+		// to get here.
+	default:
+		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
+		break;
+	}
+}
 
 /* Workhorse function to send response back to the client after UDF execution.
  *
@@ -143,7 +177,7 @@ process_response(udf_call *call, const char *bin_name, const as_val *val, cf_dyn
 		db->used_sz = msg_sz;
 	}
 	else {
-		single_transaction_response(tr, ns, NULL, &bin, 1, tr->generation, tr->void_time, NULL, NULL);
+		send_udf_response(tr, &bin, 1);
 	}
 
 	if (particle_buf != stack_particle) {
@@ -215,8 +249,7 @@ process_udf_failure(udf_call *call, const as_string *s, cf_dyn_buf *db)
 				db->used_sz = msg_sz;
 			}
 			else {
-				single_transaction_response(tr, tr->rsv.ns, NULL/*ops*/,
-						NULL /*bin*/, 0 /*nbins*/, 0, 0, NULL, NULL);
+				send_udf_response(tr, NULL, 0); // with no bin
 			}
 			return 0;
 		}
@@ -412,6 +445,45 @@ getop(udf_record *urecord, udf_optype *urecord_op)
 }
 
 /*
+ * UDF version of pickler - TODO - try to re-unify with write version in future.
+ */
+
+typedef struct pickle_info_s {
+	uint8_t*	rec_props_data;
+	uint32_t	rec_props_size;
+	uint8_t*	buf;
+	size_t		buf_size;
+} pickle_info;
+
+bool
+udf_pickle_all(as_storage_rd *rd, pickle_info *pickle)
+{
+	if (0 != as_record_pickle(rd->r, rd, &pickle->buf, &pickle->buf_size)) {
+		return false;
+	}
+
+	pickle->rec_props_data = NULL;
+	pickle->rec_props_size = 0;
+
+	// TODO - we could avoid this copy (and maybe even not do this here at all)
+	// if all callers malloced rdp->rec_props.p_data upstream for hand-off...
+	if (rd->rec_props.p_data) {
+		pickle->rec_props_size = rd->rec_props.size;
+		pickle->rec_props_data = cf_malloc(pickle->rec_props_size);
+
+		if (! pickle->rec_props_data) {
+			cf_free(pickle->buf);
+			return false;
+		}
+
+		memcpy(pickle->rec_props_data, rd->rec_props.p_data,
+				pickle->rec_props_size);
+	}
+
+	return true;
+}
+
+/*
  * Helper for post_processing().
  */
 static void
@@ -423,7 +495,7 @@ write_udf_post_processing(as_transaction *tr, as_storage_rd *rd,
 
 	pickle_info pickle;
 
-	pickle_all(rd, &pickle);
+	udf_pickle_all(rd, &pickle);
 
 	*pickled_buf = pickle.buf;
 	*pickled_sz = pickle.buf_size;
@@ -613,7 +685,7 @@ update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success, bool is_
  *           otherwise on failure
  */
 static int
-rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint16_t set_id)
+rw_finish(ldt_record *lrecord, rw_request *rw, udf_optype * lrecord_op, uint16_t set_id)
 {
 	int subrec_count = 0;
 	udf_optype h_urecord_op = UDF_OPTYPE_READ;
@@ -626,9 +698,9 @@ rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint1
 
 	if (h_urecord_op == UDF_OPTYPE_DELETE) {
 		post_processing(h_urecord, &h_urecord_op, set_id);
-		wr->pickled_buf      = NULL;
-		wr->pickled_sz       = 0;
-		as_rec_props_clear(&wr->pickled_rec_props);
+		rw->pickled_buf      = NULL;
+		rw->pickled_sz       = 0;
+		as_rec_props_clear(&rw->pickled_rec_props);
 		*lrecord_op  = UDF_OPTYPE_DELETE;
 	} else {
 
@@ -654,7 +726,7 @@ rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint1
 
 		if (is_ldt) {
 			// Create the multiop pickled buf for thr_rw.c
-			ret = as_ldt_record_pickle(lrecord, &wr->pickled_buf, &wr->pickled_sz);
+			ret = as_ldt_record_pickle(lrecord, &rw->pickled_buf, &rw->pickled_sz);
 			FOR_EACH_SUBRECORD(i, j, lrecord) {
 				udf_record *c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
 				// Cleanup in case pickle code bailed out
@@ -664,9 +736,9 @@ rw_finish(ldt_record *lrecord, write_request *wr, udf_optype * lrecord_op, uint1
 			}
 		} else {
 			// Normal UDF case simply pass on pickled buf created for the record
-			wr->pickled_buf       = h_urecord->pickled_buf;
-			wr->pickled_sz        = h_urecord->pickled_sz;
-			wr->pickled_rec_props = h_urecord->pickled_rec_props;
+			rw->pickled_buf       = h_urecord->pickled_buf;
+			rw->pickled_sz        = h_urecord->pickled_sz;
+			rw->pickled_rec_props = h_urecord->pickled_rec_props;
 			udf_record_cleanup(h_urecord, false);
 		}
 	}
@@ -770,7 +842,7 @@ udf_apply_record(udf_call * call, as_rec *rec, as_result *res)
  *
  * Parameter:
  * 		call - UDF call to be executed
- * 		wr   - write_request 
+ * 		rw   - rw_request
  * 		op   - (OUT) Returns op type of operation performed by UDF
  *
  * Returns: Always 0
@@ -780,7 +852,7 @@ udf_apply_record(udf_call * call, as_rec *rec, as_result *res)
  *  Setups response callback should be called at the end of transaction.
  */
 int
-udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
+udf_rw_local(udf_call * call, rw_request *rw, udf_optype *op)
 {
 	*op = UDF_OPTYPE_NONE;
 
@@ -904,7 +976,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 			histogram_insert_raw(g_config.ldt_io_record_cnt_hist, lrecord.subrec_io + 1);
 		}
 
-		if (rw_finish(&lrecord, wr, op, set_id)) {
+		if (rw_finish(&lrecord, rw, op, set_id)) {
 			// replication did not happen what to do now ??
 			cf_warning(AS_UDF, "Investigate rw_finish() result");
 		}
@@ -916,7 +988,7 @@ udf_rw_local(udf_call * call, write_request *wr, udf_optype *op)
 		if (UDF_OP_IS_READ(*op) || *op == UDF_OPTYPE_NONE) {
 			process_result(&result, call, NULL);
 		} else {
-			process_result(&result, call, &wr->response_db);
+			process_result(&result, call, &rw->response_db);
 		}
 
 	} else {

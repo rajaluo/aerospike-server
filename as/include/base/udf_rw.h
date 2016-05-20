@@ -34,7 +34,7 @@
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/transaction.h"
-#include "base/write_request.h"
+#include "transaction/rw_request.h"
 
 
 // parameter read off from a transaction
@@ -93,7 +93,7 @@ typedef enum {
 // Executes the script on a local record
 // **************************************************************************************************
 void	 as_udf_rw_init(void);
-int      udf_rw_local(udf_call *call, write_request *wr, udf_optype *optype);
+int      udf_rw_local(udf_call *call, rw_request *rw, udf_optype *optype);
 // **************************************************************************************************
 
 // UDF_CALL related functions

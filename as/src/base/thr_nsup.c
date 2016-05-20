@@ -53,7 +53,6 @@
 #include "base/proto.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
-#include "base/thr_write.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
 

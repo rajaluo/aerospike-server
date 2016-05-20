@@ -66,7 +66,6 @@
 #include "base/thr_proxy.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
-#include "base/thr_write.h"
 #include "base/transaction.h"
 #include "base/xdr_serverside.h"
 #include "base/secondary_index.h"
@@ -78,6 +77,7 @@
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/paxos.h"
+#include "transaction/rw_request_hash.h"
 
 #define STR_NS              "ns"
 #define STR_SET             "set"
@@ -1401,9 +1401,9 @@ info_command_dump_wb_summary(char *name, char *params, cf_dyn_buf *db)
 }
 
 int
-info_command_dump_wr(char *name, char *params, cf_dyn_buf *db)
+info_command_dump_rw_request_hash(char *name, char *params, cf_dyn_buf *db)
 {
-	as_dump_wr();
+	rw_request_hash_dump();
 	cf_dyn_buf_append_string(db, "ok");
 	return(0);
 }
@@ -4838,7 +4838,7 @@ info_debug_ticker_fn(void *unused)
 					);
 
 			cf_info(AS_INFO, "   trans_in_progress: wr %d prox %d wait %"PRIu64" ::: q %d ::: iq %d ::: dq %d : fds - proto (%"PRIu64", %"PRIu64", %"PRIu64") : hb (%"PRIu64", %"PRIu64", %"PRIu64") : fab (%"PRIu64", %"PRIu64", %"PRIu64")",
-					as_write_inprogress(), as_proxy_inprogress(), g_config.n_waiting_transactions, thr_tsvc_queue_get_size(), as_info_queue_get_size(), as_nsup_queue_get_size(),
+					rw_request_hash_count(), as_proxy_inprogress(), g_config.n_waiting_transactions, thr_tsvc_queue_get_size(), as_info_queue_get_size(), as_nsup_queue_get_size(),
 					g_config.proto_connections_opened - g_config.proto_connections_closed,
 					g_config.proto_connections_opened, g_config.proto_connections_closed,
 					g_config.heartbeat_connections_opened - g_config.heartbeat_connections_closed,
@@ -7054,7 +7054,7 @@ as_info_init()
 	as_info_set_command("dump-smd", info_command_dump_smd, PERM_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.
 	as_info_set_command("dump-wb", info_command_dump_wb, PERM_LOGGING_CTRL);                  // Print debug information about Write Bocks (WB) to the log file.
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
-	as_info_set_command("dump-wr", info_command_dump_wr, PERM_LOGGING_CTRL);                  // Print debug information about transaction hash table to the log file.
+	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
 	as_info_set_command("dun", info_command_dun, PERM_SERVICE_CTRL);                          // Instruct this server to ignore another node.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.

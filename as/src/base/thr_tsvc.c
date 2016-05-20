@@ -47,12 +47,14 @@
 #include "base/security.h"
 #include "base/thr_batch.h"
 #include "base/thr_proxy.h"
-#include "base/thr_write.h"
 #include "base/transaction.h"
 #include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
+#include "transaction/read.h"
+#include "transaction/rw_utils.h" // for enum, which may move!
+#include "transaction/write.h"
 
 
 static inline bool
@@ -241,8 +243,8 @@ process_transaction(as_transaction *tr)
 
 	// Process the transaction.
 
-	bool is_write = (msgp->msg.info2 & AS_MSG_INFO2_WRITE) != 0;
-	bool is_read = (msgp->msg.info1 & AS_MSG_INFO1_READ) != 0;
+	bool is_write = (m->info2 & AS_MSG_INFO2_WRITE) != 0;
+	bool is_read = (m->info1 & AS_MSG_INFO1_READ) != 0;
 
 	as_partition_id pid = as_partition_getid(tr->keyd);
 	cf_node dest;
@@ -281,11 +283,6 @@ process_transaction(as_transaction *tr)
 		rv = as_partition_reserve_write(ns, pid, &tr->rsv, &dest,
 				&partition_cluster_key);
 
-		if (g_config.write_duplicate_resolution_disable) {
-			// If duplicate resolutions hurt performance, we can turn them off.
-			tr->rsv.n_dupl = 0;
-		}
-
 		if (rv == 0) {
 			cf_atomic_int_incr(&g_config.rw_tree_count);
 		}
@@ -304,6 +301,7 @@ process_transaction(as_transaction *tr)
 			cf_atomic_int_incr(&g_config.rw_tree_count);
 		}
 
+		// TODO - does this reservation promotion really accomplish anything?
 		if (rv == 0 && tr->rsv.n_dupl > 0) {
 			// Upgrade to a write reservation.
 			as_partition_release(&tr->rsv);
@@ -330,41 +328,37 @@ process_transaction(as_transaction *tr)
 	if (rv == 0) {
 		// <><><><><><>  Reservation Succeeded  <><><><><><>
 
-		tr->microbenchmark_is_resolve = false;
+		transaction_status status;
 
 		if (is_write) {
 			MICROBENCHMARK_HIST_INSERT_AND_RESET_P(wt_q_process_hist);
 
-			rv = as_write_start(tr);
+			status = as_write_start(tr);
 		}
 		else {
 			MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_q_process_hist);
 
-			rv = as_read_start(tr);
+			status = as_read_start(tr);
 		}
 
-		if (rv == 0) {
+		if (status == TRANS_IN_PROGRESS) {
+			// Don't free msg or release reservation - both owned by rw_request.
 			free_msgp = false;
 		}
 		else {
-			// Process the return value from as_write_start()/as_read_start():
-			// -1 :: "report error to requester"
-			// -2 :: "try again"
-			// -3 :: "duplicate proxy request, drop"
-
 			as_partition_release(&tr->rsv);
 			cf_atomic_int_decr(&g_config.rw_tree_count);
 
-			switch (rv) {
-			case -3:
-				MICROBENCHMARK_HIST_INSERT_P(error_hist);
+			switch (status) {
+			case TRANS_DONE_SUCCESS:
+				// Done, response sent - free msg and release reservation.
 				break;
-			case -2:
-				MICROBENCHMARK_HIST_INSERT_AND_RESET_P(error_hist);
-				thr_tsvc_enqueue(tr);
+			case TRANS_WAITING:
+				// Will be re-queued - don't free msg, but release reservation.
 				free_msgp = false;
 				break;
-			case -1:
+			case TRANS_DONE_ERROR:
+				// Done - send response, free msg, and release reservation.
 			default:
 				as_transaction_error(tr, tr->result_code);
 				break;

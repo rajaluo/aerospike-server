@@ -274,10 +274,11 @@
 #include <base/ldt_record.h>
 #include <fabric/fabric.h>
 #include <fabric/migrate.h>
-#include <base/thr_rw_internal.h>
-#include <base/write_request.h>
 #include "base/thr_proxy.h"
 #include "base/udf_rw.h"
+#include "transaction/replica_write.h"
+#include "transaction/rw_request.h"
+#include "transaction/rw_request_hash.h"
 
 #include "aerospike/as_types.h"
 #include "aerospike/as_msgpack.h"
@@ -733,11 +734,11 @@ as_ldt_digest_randomizer(cf_digest *dig)
  *       key contraint in LLIST or in case of LSET or LMAP the op may be idempotent
  */
 int
-as_ldt_shipop(write_request *wr, cf_node dest_node)
+as_ldt_shipop(rw_request *rw, cf_node dest_node)
 {
 	// Create transaction to trigger proxy request. The only
 	// parts of transaction needed is msgp / keyd / proto_fd
-	as_proxy_shipop(dest_node, wr);
+	as_proxy_shipop(dest_node, rw);
 	return 0;
 }
 
@@ -1477,12 +1478,11 @@ as_ldt_record_pickle(ldt_record *lrecord,
 		}
 		if (!is_delete && h_urecord->pickled_buf) {
 			cf_detail(AS_LDT, "MULTI_OP: Packing LDT Head Record");
-			rw_msg_setup(m[ops], h_tr, &h_tr->keyd,
+			repl_write_ldt_make_message(m[ops], h_tr,
 							&h_urecord->pickled_buf,
 							h_urecord->pickled_sz,
 							&h_urecord->pickled_rec_props,
-							RW_OP_WRITE,
-							true, false, false);
+							false);
 			buflen = 0;
 			msg_fillbuf(m[ops], NULL, &buflen);
 			sz += buflen;
@@ -1516,12 +1516,11 @@ as_ldt_record_pickle(ldt_record *lrecord,
 				}
 			}
 
-			rw_msg_setup(m[ops], c_tr, &c_tr->keyd,
+			repl_write_ldt_make_message(m[ops], c_tr,
 							&c_urecord->pickled_buf,
 							c_urecord->pickled_sz,
 							&c_urecord->pickled_rec_props,
-							RW_OP_WRITE,
-							true, true, false);
+							true);
 
 			if (reset_flag) {
 				c_tr->msgp->msg.info2 &= ~AS_MSG_INFO2_DELETE;
