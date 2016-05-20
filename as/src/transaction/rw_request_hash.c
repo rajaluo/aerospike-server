@@ -46,10 +46,9 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
-#include "base/thr_tsvc.h" // for TRANSACTION_CONSISTENCY_LEVEL!
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
-#include "base/udf_rw.h" // include loop with rw_request.h
+#include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/paxos.h"
@@ -103,7 +102,7 @@ typedef struct rw_paxos_change_struct_t {
 //
 
 uint32_t rw_request_hash_fn(void* value, uint32_t value_len);
-int handle_hot_key(rw_request* rw0, as_transaction* tr);
+transaction_status handle_hot_key(rw_request* rw0, as_transaction* tr);
 
 void* run_retransmit(void* arg);
 int retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata);
@@ -158,7 +157,7 @@ rw_request_hash_count()
 }
 
 
-int
+transaction_status
 rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 		as_transaction* tr)
 {
@@ -241,7 +240,7 @@ rw_request_hash_fn(void* value, uint32_t value_len)
 }
 
 
-int
+transaction_status
 handle_hot_key(rw_request* rw0, as_transaction* tr)
 {
 	if (rw0->is_set_up &&

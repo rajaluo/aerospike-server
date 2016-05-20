@@ -37,15 +37,6 @@
 #include "transaction/rw_request.h"
 
 
-// TODO - move to transaction.h or thr_tsvc.h:
-typedef enum {
-	TRANS_DONE_ERROR	= -1, // tsvc frees msgp & reservation, sends response to origin
-	TRANS_DONE_SUCCESS	=  0, // tsvc frees msgp & reservation, assumes response was sent to origin
-	TRANS_IN_PROGRESS	=  1, // tsvc leaves msgp & reservation alone, rw_request now owns them
-	TRANS_WAITING		=  2  // tsvc leaves msgp alone but frees reservation
-} transaction_status;
-
-
 //==========================================================
 // Public API.
 //
@@ -78,7 +69,6 @@ op_is_read_all(as_msg_op* op, as_msg* m)
 }
 
 
-// TODO - not sure where this should go...
 static inline bool
 is_valid_ttl(as_namespace* ns, uint32_t ttl)
 {

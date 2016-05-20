@@ -166,10 +166,6 @@ typedef struct rw_request_s {
 rw_request* rw_request_create();
 void rw_request_destroy(rw_request* rw);
 
-// TODO - where should these go ???
-void as_transaction_init_from_rw(as_transaction* tr, rw_request* rw);
-void as_transaction_init_head_from_rw(as_transaction* tr, rw_request* rw);
-
 
 static inline void
 rw_request_hdestroy(void* pv)

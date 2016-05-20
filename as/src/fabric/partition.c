@@ -804,15 +804,6 @@ as_partition_reservation_copy(as_partition_reservation *dst, as_partition_reserv
 }
 
 
-// Simply moves the reservation from one structure to the other.
-void
-as_partition_reservation_move(as_partition_reservation *dst, as_partition_reservation *src)
-{
-	as_partition_reservation_copy(dst, src);
-	memset(src, 0, sizeof(as_partition_reservation));
-}
-
-
 // Obtain a write reservation on a partition, or get the address of a
 // node who can.
 // On success, the provided as_partition_reservation * is filled in with the appropriate

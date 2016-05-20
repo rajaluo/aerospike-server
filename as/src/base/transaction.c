@@ -46,6 +46,7 @@
 #include "base/thr_demarshal.h"
 #include "base/thr_proxy.h"
 #include "base/udf_rw.h"
+#include "transaction/rw_request.h"
 
 
 void
@@ -99,6 +100,39 @@ as_transaction_copy_head(as_transaction *to, const as_transaction *from)
 
 	to->start_time			= from->start_time;
 	to->microbenchmark_time	= from->microbenchmark_time;
+}
+
+void
+as_transaction_init_from_rw(as_transaction *tr, rw_request *rw)
+{
+	as_transaction_init_head_from_rw(tr, rw);
+	// Note - we don't clear rw->msgp, destructor will free it.
+
+	as_partition_reservation_copy(&tr->rsv, &rw->rsv);
+	// Note - destructor will still release the reservation.
+
+	tr->end_time = rw->end_time;
+	tr->result_code = AS_PROTO_RESULT_OK;
+	tr->flags = 0;
+	tr->generation = rw->generation;
+	tr->void_time = rw->void_time;
+}
+
+void
+as_transaction_init_head_from_rw(as_transaction *tr, rw_request *rw)
+{
+	tr->msgp				= rw->msgp;
+	tr->msg_fields			= rw->msg_fields;
+	tr->origin				= rw->origin;
+	tr->from_flags			= rw->from_flags;
+	tr->from.any			= rw->from.any;
+	tr->from_data.any		= rw->from_data.any;
+	tr->keyd				= rw->keyd;
+	tr->start_time			= rw->start_time;
+	tr->microbenchmark_time	= rw->microbenchmark_time;
+
+	rw->from.any = NULL;
+	// Note - we don't clear rw->msgp, destructor will free it.
 }
 
 bool

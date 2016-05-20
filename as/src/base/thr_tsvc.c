@@ -350,17 +350,19 @@ process_transaction(as_transaction *tr)
 			cf_atomic_int_decr(&g_config.rw_tree_count);
 
 			switch (status) {
+			case TRANS_DONE_ERROR:
+				// Done - send response, free msg & release reservation.
+				as_transaction_error(tr, tr->result_code);
+				break;
 			case TRANS_DONE_SUCCESS:
-				// Done, response sent - free msg and release reservation.
+				// Done, response already sent - free msg & release reservation.
 				break;
 			case TRANS_WAITING:
 				// Will be re-queued - don't free msg, but release reservation.
 				free_msgp = false;
 				break;
-			case TRANS_DONE_ERROR:
-				// Done - send response, free msg, and release reservation.
 			default:
-				as_transaction_error(tr, tr->result_code);
+				cf_crash(AS_TSVC, "invalid transaction status %d", status);
 				break;
 			}
 		}

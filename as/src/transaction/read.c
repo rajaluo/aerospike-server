@@ -44,7 +44,6 @@
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/thr_proxy.h"
-#include "base/thr_tsvc.h" // for TRANSACTION_CONSISTENCY_LEVEL!
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "storage/storage.h"
@@ -58,7 +57,7 @@
 // Forward Declarations.
 //
 
-int start_read_dup_res(as_transaction* tr, bool send_metadata);
+transaction_status start_read_dup_res(as_transaction* tr, bool send_metadata);
 bool read_after_dup_res(rw_request* rw);
 void read_local(as_transaction* tr, bool stop_if_not_found);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
@@ -72,7 +71,7 @@ void send_read_response(as_transaction* tr, as_namespace* ns, as_msg_op** ops,
 // Public API.
 //
 
-int
+transaction_status
 as_read_start(as_transaction* tr)
 {
 	// If there are duplicates and we always resolve them, start doing so.
@@ -104,7 +103,7 @@ as_read_start(as_transaction* tr)
 // Local helpers.
 //
 
-int
+transaction_status
 start_read_dup_res(as_transaction* tr, bool send_metadata)
 {
 	// Create rw_request and add to hash.

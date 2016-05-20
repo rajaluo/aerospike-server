@@ -42,7 +42,6 @@
 #include "base/ldt.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
-#include "base/thr_tsvc.h" // for TRANSACTION_CONSISTENCY_LEVEL!
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h" // for LDTs

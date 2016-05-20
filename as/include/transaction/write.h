@@ -33,4 +33,4 @@
 // Public API.
 //
 
-int as_write_start(as_transaction* tr);
+transaction_status as_write_start(as_transaction* tr);

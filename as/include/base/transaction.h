@@ -1,7 +1,7 @@
 /*
  * transaction.h
  *
- * Copyright (C) 2008-2015 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -145,6 +145,13 @@ void as_end_of_transaction_force_close(as_file_handle *proto_fd_h);
 // Transaction.
 //
 
+typedef enum {
+	TRANS_DONE_ERROR	= -1, // tsvc frees msgp & reservation, sends response to origin
+	TRANS_DONE_SUCCESS	=  0, // tsvc frees msgp & reservation, assumes response was sent to origin
+	TRANS_IN_PROGRESS	=  1, // tsvc leaves msgp & reservation alone, rw_request now owns them
+	TRANS_WAITING		=  2  // tsvc leaves msgp alone but frees reservation
+} transaction_status;
+
 // How to interpret the 'from' union.
 //
 // NOT a generic transaction type flag, e.g. batch sub-transactions that proxy
@@ -234,6 +241,11 @@ void as_transaction_init_body(as_transaction *tr);
 
 void as_transaction_copy_head(as_transaction *to, const as_transaction *from);
 
+struct rw_request_s;
+
+void as_transaction_init_from_rw(as_transaction *tr, struct rw_request_s *rw);
+void as_transaction_init_head_from_rw(as_transaction *tr, struct rw_request_s *rw);
+
 bool as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type);
 bool as_transaction_demarshal_prepare(as_transaction *tr);
 void as_transaction_proxyee_prepare(as_transaction *tr);
@@ -319,6 +331,19 @@ as_transaction_trid(const as_transaction *tr)
 	as_msg_field *f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_TRID);
 
 	return cf_swap_from_be64(*(uint64_t*)f->data);
+}
+
+static inline bool
+as_transaction_is_delete(as_transaction *tr)
+{
+	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0;
+}
+
+// TODO - just use origin and deprecate FROM_FLAG_NSUP_DELETE?
+static inline bool
+as_transaction_is_nsup_delete(as_transaction *tr)
+{
+	return (tr->from_flags & FROM_FLAG_NSUP_DELETE) != 0;
 }
 
 int as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd);

@@ -47,7 +47,6 @@
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/thr_proxy.h"
-#include "base/thr_tsvc.h" // for TRANSACTION_CONSISTENCY_LEVEL!
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/udf_rw.h"
@@ -83,15 +82,15 @@ bool start_repl_write(rw_request* rw, as_transaction* tr);
 bool write_after_dup_res(rw_request* rw);
 void write_after_repl_write(rw_request* rw);
 bool start_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
-int apply_master(rw_request* rw, as_transaction* tr);
 void send_write_response(as_transaction* tr, cf_dyn_buf* db);
 void send_ops_response(as_transaction* tr, cf_dyn_buf* db);
+transaction_status apply_master(rw_request* rw, as_transaction* tr);
 
-int udf_master(rw_request* rw, as_transaction* tr);
+transaction_status udf_master(rw_request* rw, as_transaction* tr);
 
-int delete_master(as_transaction* tr);
+transaction_status delete_master(as_transaction* tr);
 
-int write_master(rw_request* rw, as_transaction* tr);
+transaction_status write_master(rw_request* rw, as_transaction* tr);
 void write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 		bool record_created, as_index_tree* tree, as_storage_rd* rd,
 		int result_code);
@@ -138,7 +137,6 @@ void write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins,
 		as_bin* new_bins, uint32_t n_new_bins, as_bin* cleanup_bins,
 		uint32_t n_cleanup_bins);
 
-
 static inline bool
 respond_on_master_complete(as_transaction* tr)
 {
@@ -155,26 +153,12 @@ append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 	}
 }
 
-// TODO - move to transaction.h
-static inline bool
-is_delete(as_transaction* tr)
-{
-	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0;
-}
-
-// TODO - move to transaction.h
-static inline bool
-is_nsup_delete(as_transaction* tr)
-{
-	return (tr->from_flags & FROM_FLAG_NSUP_DELETE) != 0;
-}
-
 
 //==========================================================
 // Public API.
 //
 
-int
+transaction_status
 as_write_start(as_transaction* tr)
 {
 	// Apply XDR filter.
@@ -184,7 +168,7 @@ as_write_start(as_transaction* tr)
 	}
 
 	// If we're doing a non-delete write, check that we aren't backed up.
-	if (! is_delete(tr) && as_storage_overloaded(tr->rsv.ns)) {
+	if (! as_transaction_is_delete(tr) && as_storage_overloaded(tr->rsv.ns)) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD;
 		return TRANS_DONE_ERROR;
 	}
@@ -201,15 +185,14 @@ as_write_start(as_transaction* tr)
 	}
 	// else - rw_request is now in hash, continue...
 
-	// If duplicate resolutions hurt performance, we can turn them off.
 	if (g_config.write_duplicate_resolution_disable) {
-		tr->rsv.n_dupl = 0;
 		// Note - preventing duplicate resolution this way allows
 		// rw_request_destroy() to handle dup_msg[] cleanup correctly.
+		tr->rsv.n_dupl = 0;
 	}
 
 	// If there are duplicates to resolve, start doing so.
-	if (tr->rsv.n_dupl != 0 && ! is_nsup_delete(tr)) {
+	if (tr->rsv.n_dupl != 0 && ! as_transaction_is_nsup_delete(tr)) {
 		if (! start_write_dup_res(rw, tr)) {
 			rw_request_hash_delete(&hkey);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
@@ -232,6 +215,7 @@ as_write_start(as_transaction* tr)
 			rw->dest_nodes);
 
 	// If we don't need replica writes, transaction is finished.
+	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
 		send_write_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey);
@@ -398,21 +382,6 @@ write_after_repl_write(rw_request* rw)
 }
 
 
-int
-apply_master(rw_request* rw, as_transaction* tr)
-{
-	if (is_delete(tr)) {
-		return delete_master(tr);
-	}
-	else if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
-		return udf_master(rw, tr);
-	}
-	else {
-		return write_master(rw, tr);
-	}
-}
-
-
 void
 send_write_response(as_transaction* tr, cf_dyn_buf* db)
 {
@@ -487,11 +456,26 @@ send_ops_response(as_transaction* tr, cf_dyn_buf* db)
 }
 
 
+transaction_status
+apply_master(rw_request* rw, as_transaction* tr)
+{
+	if (as_transaction_is_delete(tr)) {
+		return delete_master(tr);
+	}
+
+	if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
+		return udf_master(rw, tr);
+	}
+
+	return write_master(rw, tr);
+}
+
+
 //==========================================================
 // Local helpers - UDF.
 //
 
-int
+transaction_status
 udf_master(rw_request* rw, as_transaction* tr)
 {
 	rw->has_udf = true;
@@ -540,7 +524,7 @@ udf_master(rw_request* rw, as_transaction* tr)
 // Local helpers - delete.
 //
 
-int
+transaction_status
 delete_master(as_transaction* tr)
 {
 	// Shortcut pointers & flags.
@@ -608,7 +592,7 @@ delete_master(as_transaction* tr)
 	}
 
 	// Don't ship expiration/eviction deletes unless configured to do so.
-	if (is_nsup_delete(tr) && ! is_xdr_nsup_deletes_enabled()) {
+	if (as_transaction_is_nsup_delete(tr) && ! is_xdr_nsup_deletes_enabled()) {
 		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
 	}
 	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
@@ -627,7 +611,7 @@ delete_master(as_transaction* tr)
 // Local helpers - write master.
 //
 
-int
+transaction_status
 write_master(rw_request* rw, as_transaction* tr)
 {
 	//------------------------------------------------------
