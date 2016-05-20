@@ -453,6 +453,14 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
 	cf_dyn_buf_append_string(db, paxos_principal);
 
+	uint64_t remaining_migrations = as_partition_remaining_migrations();
+	cf_dyn_buf_append_string(db, ";migrate_progress_send=");
+	APPEND_STAT_COUNTER(db, remaining_migrations);
+	cf_dyn_buf_append_string(db, ";migrate_progress_recv=");
+	APPEND_STAT_COUNTER(db, remaining_migrations);
+	cf_dyn_buf_append_string(db, ";remaining_migrations=");
+	APPEND_STAT_COUNTER(db, remaining_migrations);
+
 	cf_dyn_buf_append_string(db, ";queue=");
 	cf_dyn_buf_append_int(db, thr_tsvc_queue_get_size() );
 
