@@ -6987,7 +6987,7 @@ as_info_init()
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
 	static char features[1024];
-	strcat(features, "cdt-list;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf");
+	strcat(features, "cdt-list;cdt-map;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf");
 	strcat(features, aerospike_build_features);
 	as_info_set("features", features, true);
 	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
