@@ -542,7 +542,7 @@ as_bin_cdt_packed_modify(as_bin *b, as_msg_op *op, as_bin *result, cf_ll_buf *pa
 		.ret_code = AS_PROTO_RESULT_OK,
 	};
 
-	if ((int)state.type <= AS_CDT_OP_LIST_LAST) {
+	if ((int)state.type <= (int)AS_CDT_OP_LIST_LAST) {
 		cdt_process_state_packed_list_modify_optype(&state, &udata);
 	}
 	else {
