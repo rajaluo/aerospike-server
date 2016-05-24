@@ -3766,7 +3766,7 @@ packed_map_op_get_remove_by_key_interval(packed_map_op *op, as_bin *b, rollback_
 	}
 
 	if (result_data_is_return_rank_range(result)) {
-		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_key_interval() result_type %d not supported", result->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key_interval() result_type %d not supported", result->type);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
@@ -3849,7 +3849,7 @@ packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, roll
 	}
 
 	if (result_data_is_return_rank_range(result)) {
-		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() result_type %d not supported", result->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() result_type %d not supported", result->type);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
@@ -3994,7 +3994,7 @@ packed_map_op_get_remove_by_value_interval(const packed_map_op *op, as_bin *b, r
 	}
 
 	if (result_data_is_return_index_range(result)) {
-		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_value_interval() result_type %d not supported", result->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_value_interval() result_type %d not supported", result->type);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
@@ -4111,7 +4111,7 @@ packed_map_op_get_remove_by_rank_range(const packed_map_op *op, as_bin *b, rollb
 	}
 
 	if (result_data_is_return_index_range(result)) {
-		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_rank_range() result_type %d not supported", result->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_rank_range() result_type %d not supported", result->type);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
