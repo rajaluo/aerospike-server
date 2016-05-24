@@ -4566,7 +4566,7 @@ packed_map_op_build_ele_result_by_idx_range(const packed_map_op *op, uint32_t el
 	if (result->type == RESULT_TYPE_MAP) {
 		get_by_idx_func = packed_map_op_get_pair_by_idx;
 
-		if (! cdt_map_builder_start(&builder, result->alloc, count, content_size, op->pmi.flags | AS_PACKED_MAP_FLAG_PRESERVE_ORDER)) {
+		if (! cdt_map_builder_start(&builder, result->alloc, count, content_size, AS_PACKED_MAP_FLAG_PRESERVE_ORDER)) {
 			return false;
 		}
 	}
@@ -4626,7 +4626,7 @@ packed_map_op_build_ele_result_by_ele_idx(const packed_map_op *op, const order_i
 	if (result->type == RESULT_TYPE_MAP) {
 		get_by_index_func = packed_map_op_get_pair_by_idx;
 
-		if (! cdt_map_builder_start(&builder, result->alloc, count, content_size, op->pmi.flags | AS_PACKED_MAP_FLAG_PRESERVE_ORDER)) {
+		if (! cdt_map_builder_start(&builder, result->alloc, count, content_size, AS_PACKED_MAP_FLAG_PRESERVE_ORDER)) {
 			return false;
 		}
 	}
