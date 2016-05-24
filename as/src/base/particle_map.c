@@ -4421,6 +4421,7 @@ packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t
 		}
 	}
 
+	result->result->particle = builder.particle;
 	as_bin_state_set_from_type(result->result, AS_PARTICLE_TYPE_LIST);
 
 	return AS_PROTO_RESULT_OK;
@@ -4548,6 +4549,7 @@ packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order
 		}
 	}
 
+	result->result->particle = builder.particle;
 	as_bin_state_set_from_type(result->result, AS_PARTICLE_TYPE_LIST);
 
 	return AS_PROTO_RESULT_OK;
@@ -6746,6 +6748,7 @@ result_data_set_ordered_list(cdt_result_data *rd, order_index *ordidx, uint32_t 
 		cdt_container_builder_add_int64(&builder, (int64_t)idx);
 	}
 
+	rd->result->particle = builder.particle;
 	as_bin_state_set_from_type(rd->result, AS_PARTICLE_TYPE_LIST);
 
 	return true;
