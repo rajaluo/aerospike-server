@@ -1537,6 +1537,21 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 	}
 }
 
+uint64_t
+as_partition_remaining_migrations()
+{
+	uint64_t remaining_migrations = 0;
+
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+
+		remaining_migrations += ns->migrate_tx_partitions_remaining;
+		remaining_migrations += ns->migrate_rx_partitions_remaining;
+	}
+
+	return remaining_migrations;
+}
+
 #ifdef PARTITION_INFO_CHECK
 // Use this to dump out records from a partition -- especially records that
 // should not be there (like, in an ABSENT partition).
@@ -2651,11 +2666,6 @@ as_partition_balance()
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
-
-		cf_atomic_int_set(&ns->migrate_tx_partitions_initial, 0);
-		cf_atomic_int_set(&ns->migrate_tx_partitions_remaining, 0);
-		cf_atomic_int_set(&ns->migrate_rx_partitions_initial, 0);
-		cf_atomic_int_set(&ns->migrate_rx_partitions_remaining, 0);
 
 		int ns_pending_migrate_rx = 0;
 		int ns_pending_migrate_tx = 0;

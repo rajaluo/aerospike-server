@@ -384,8 +384,9 @@ as_record_pickle(as_record *r, as_storage_rd *rd, byte **buf_r, size_t *len_r)
 		buf += as_bin_particle_to_pickled(b, buf);
 	}
 
-	if (buf > buf_lim)
+	if (buf > buf_lim) {
 		cf_crash(AS_RECORD, "pickle record overwriting data");
+	}
 
 	return(0);
 }

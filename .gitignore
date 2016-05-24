@@ -1,6 +1,7 @@
 .DS_Store
 .cproject
 .project
+.settings
 /vg.log
 TAGS
 run

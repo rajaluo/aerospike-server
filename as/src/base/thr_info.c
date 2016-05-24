@@ -453,6 +453,14 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
 	cf_dyn_buf_append_string(db, paxos_principal);
 
+	uint64_t remaining_migrations = as_partition_remaining_migrations();
+	cf_dyn_buf_append_string(db, ";migrate_progress_send=");
+	APPEND_STAT_COUNTER(db, remaining_migrations);
+	cf_dyn_buf_append_string(db, ";migrate_progress_recv=");
+	APPEND_STAT_COUNTER(db, remaining_migrations);
+	cf_dyn_buf_append_string(db, ";remaining_migrations=");
+	APPEND_STAT_COUNTER(db, remaining_migrations);
+
 	cf_dyn_buf_append_string(db, ";queue=");
 	cf_dyn_buf_append_int(db, thr_tsvc_queue_get_size() );
 
@@ -6965,7 +6973,7 @@ as_info_init()
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
 	static char features[1024];
-	strcat(features, "cdt-list;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf");
+	strcat(features, "cdt-list;cdt-map;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf");
 	strcat(features, aerospike_build_features);
 	as_info_set("features", features, true);
 	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
