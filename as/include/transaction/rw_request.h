@@ -62,6 +62,7 @@ struct as_batch_shared_s;
 
 typedef bool (*dup_res_done_cb) (struct rw_request_s* rw);
 typedef void (*repl_write_done_cb) (struct rw_request_s* rw);
+typedef void (*timeout_done_cb) (struct rw_request_s* rw);
 
 
 typedef struct rw_wait_ele_s {
@@ -117,7 +118,7 @@ typedef struct rw_request_s {
 
 	rw_wait_ele*		wait_queue_head;
 
-	bool				is_set_up;
+	bool				is_set_up; // TODO - redundant with timeout_cb
 	bool				has_udf; // TODO - only for stats?
 	bool				is_multiop;
 	bool				respond_client_on_master_completion;
@@ -130,11 +131,13 @@ typedef struct rw_request_s {
 	// Store ops' responses here.
 	cf_dyn_buf			response_db;
 
-	// Manage responses of duplicate resolution and replica writes.
+	// Manage responses of duplicate resolution and replica writes, or
+	// alternatively, timeouts.
 	uint32_t			tid;
 	bool				dup_res_complete;
 	dup_res_done_cb		dup_res_cb;
 	repl_write_done_cb	repl_write_cb;
+	timeout_done_cb		timeout_cb;
 
 	// The request we're making, so we can retransmit if necessary. Will be the
 	// duplicate request if we're in 'dup' phase, or the op (write) if we're in

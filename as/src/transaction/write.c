@@ -82,8 +82,11 @@ bool start_repl_write(rw_request* rw, as_transaction* tr);
 bool write_after_dup_res(rw_request* rw);
 void write_after_repl_write(rw_request* rw);
 bool start_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
+
 void send_write_response(as_transaction* tr, cf_dyn_buf* db);
 void send_ops_response(as_transaction* tr, cf_dyn_buf* db);
+void write_timeout(rw_request* rw);
+
 transaction_status apply_master(rw_request* rw, as_transaction* tr);
 
 transaction_status udf_master(rw_request* rw, as_transaction* tr);
@@ -164,12 +167,14 @@ as_write_start(as_transaction* tr)
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_FORBIDDEN;
+		send_write_response(tr, NULL);
 		return TRANS_DONE_ERROR;
 	}
 
 	// If we're doing a non-delete write, check that we aren't backed up.
 	if (! as_transaction_is_delete(tr) && as_storage_overloaded(tr->rsv.ns)) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD;
+		send_write_response(tr, NULL);
 		return TRANS_DONE_ERROR;
 	}
 
@@ -181,6 +186,11 @@ as_write_start(as_transaction* tr)
 	// If rw_request wasn't inserted in hash, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
 		rw_request_release(rw);
+
+		if (status != TRANS_WAITING) {
+			send_write_response(tr, NULL);
+		}
+
 		return status;
 	}
 	// else - rw_request is now in hash, continue...
@@ -196,6 +206,7 @@ as_write_start(as_transaction* tr)
 		if (! start_write_dup_res(rw, tr)) {
 			rw_request_hash_delete(&hkey);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+			send_write_response(tr, NULL);
 			return TRANS_DONE_ERROR;
 		}
 
@@ -207,6 +218,7 @@ as_write_start(as_transaction* tr)
 	// If error or UDF was a read, transaction is finished.
 	if ((status = apply_master(rw, tr)) != TRANS_IN_PROGRESS) {
 		rw_request_hash_delete(&hkey);
+		send_write_response(tr, NULL);
 		return status;
 	}
 
@@ -225,6 +237,7 @@ as_write_start(as_transaction* tr)
 	if (! start_repl_write(rw, tr)) {
 		rw_request_hash_delete(&hkey);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		send_write_response(tr, NULL);
 		return TRANS_DONE_ERROR;
 	}
 
@@ -267,6 +280,7 @@ start_write_dup_res(rw_request* rw, as_transaction* tr)
 		return false;
 	}
 
+	rw->timeout_cb = write_timeout;
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	pthread_mutex_lock(&rw->lock);
@@ -289,6 +303,7 @@ start_repl_write(rw_request* rw, as_transaction* tr)
 		return false;
 	}
 
+	rw->timeout_cb = write_timeout;
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	if (rw->respond_client_on_master_completion) {
@@ -382,6 +397,10 @@ write_after_repl_write(rw_request* rw)
 }
 
 
+//==========================================================
+// Local helpers - transaction end.
+//
+
 void
 send_write_response(as_transaction* tr, cf_dyn_buf* db)
 {
@@ -455,6 +474,41 @@ send_ops_response(as_transaction* tr, cf_dyn_buf* db)
 	}
 }
 
+
+void
+write_timeout(rw_request* rw)
+{
+	switch (rw->origin) {
+	case FROM_CLIENT:
+		if (rw->from.proto_fd_h) {
+			as_end_of_transaction_force_close(rw->from.proto_fd_h);
+			rw->from.proto_fd_h = NULL;
+		}
+		break;
+	case FROM_PROXY:
+		rw->from.proxy_node = 0;
+		break;
+	case FROM_IUDF:
+		if (rw->from.iudf_orig) {
+			rw->from.iudf_orig->cb(rw->from.iudf_orig->udata,
+					AS_PROTO_RESULT_FAIL_TIMEOUT);
+			rw->from.iudf_orig = NULL;
+		}
+		break;
+	case FROM_NSUP:
+		break;
+	case FROM_BATCH:
+		// Should be impossible for batch read and internal UDF to get here.
+	default:
+		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
+		break;
+	}
+}
+
+
+//==========================================================
+// Local helpers - apply operation.
+//
 
 transaction_status
 apply_master(rw_request* rw, as_transaction* tr)

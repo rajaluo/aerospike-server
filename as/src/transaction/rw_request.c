@@ -102,6 +102,7 @@ rw_request_create(cf_digest* keyd)
 	rw->dup_res_complete = false;
 	rw->dup_res_cb = NULL;
 	rw->repl_write_cb = NULL;
+	rw->timeout_cb = NULL;
 
 	rw->dest_msg = NULL;
 	rw->xmit_ms = 0;

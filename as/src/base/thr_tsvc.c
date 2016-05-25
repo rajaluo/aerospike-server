@@ -341,30 +341,26 @@ process_transaction(as_transaction *tr)
 			status = as_read_start(tr);
 		}
 
-		if (status == TRANS_IN_PROGRESS) {
-			// Don't free msg or release reservation - both owned by rw_request.
-			free_msgp = false;
-		}
-		else {
+		switch (status) {
+		case TRANS_DONE_ERROR:
+		case TRANS_DONE_SUCCESS:
+			// Done, response already sent - free msg & release reservation.
 			as_partition_release(&tr->rsv);
 			cf_atomic_int_decr(&g_config.rw_tree_count);
-
-			switch (status) {
-			case TRANS_DONE_ERROR:
-				// Done - send response, free msg & release reservation.
-				as_transaction_error(tr, tr->result_code);
-				break;
-			case TRANS_DONE_SUCCESS:
-				// Done, response already sent - free msg & release reservation.
-				break;
-			case TRANS_WAITING:
-				// Will be re-queued - don't free msg, but release reservation.
-				free_msgp = false;
-				break;
-			default:
-				cf_crash(AS_TSVC, "invalid transaction status %d", status);
-				break;
-			}
+			break;
+		case TRANS_IN_PROGRESS:
+			// Don't free msg or release reservation - both owned by rw_request.
+			free_msgp = false;
+			break;
+		case TRANS_WAITING:
+			// Will be re-queued - don't free msg, but release reservation.
+			free_msgp = false;
+			as_partition_release(&tr->rsv);
+			cf_atomic_int_decr(&g_config.rw_tree_count);
+			break;
+		default:
+			cf_crash(AS_TSVC, "invalid transaction status %d", status);
+			break;
 		}
 	}
 	else {

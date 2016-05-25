@@ -62,9 +62,10 @@ bool read_after_dup_res(rw_request* rw);
 void read_local(as_transaction* tr, bool stop_if_not_found);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code);
-void send_read_response(as_transaction* tr, as_namespace* ns, as_msg_op** ops,
+void send_read_response(as_transaction* tr, as_msg_op** ops,
 		as_bin** response_bins, uint16_t n_bins, uint32_t generation,
 		uint32_t void_time, const char* set_name);
+void read_timeout(rw_request* rw);
 
 
 //==========================================================
@@ -114,6 +115,11 @@ start_read_dup_res(as_transaction* tr, bool send_metadata)
 	// If rw_request wasn't inserted in hash, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
 		rw_request_release(rw);
+
+		if (status != TRANS_WAITING) {
+			send_read_response(tr, NULL, NULL, 0, 0, 0, NULL);
+		}
+
 		return status;
 	}
 	// else - rw_request is now in hash, continue...
@@ -123,8 +129,11 @@ start_read_dup_res(as_transaction* tr, bool send_metadata)
 	if (! dup_res_make_message(rw, tr, send_metadata)) {
 		rw_request_hash_delete(&hkey);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		send_read_response(tr, NULL, NULL, 0, 0, 0, NULL);
 		return TRANS_DONE_ERROR;
 	}
+
+	rw->timeout_cb = read_timeout;
 
 	pthread_mutex_lock(&rw->lock);
 
@@ -309,7 +318,7 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 		// Note - not bothering to correct alloc_sz if buf was allocated.
 	}
 	else {
-		send_read_response(tr, ns, p_ops, response_bins, n_bins, r->generation,
+		send_read_response(tr, p_ops, response_bins, n_bins, r->generation,
 				r->void_time, set_name);
 	}
 
@@ -348,15 +357,14 @@ read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 
 	tr->result_code = (uint8_t)result_code;
 
-	send_read_response(tr, tr->rsv.ns, NULL, NULL, 0, generation, void_time,
-			NULL);
+	send_read_response(tr, NULL, NULL, 0, generation, void_time, NULL);
 }
 
 
 void
-send_read_response(as_transaction* tr, as_namespace* ns,
-		as_msg_op** ops, as_bin** response_bins, uint16_t n_bins,
-		uint32_t generation, uint32_t void_time, const char* set_name)
+send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
+		uint16_t n_bins, uint32_t generation, uint32_t void_time,
+		const char* set_name)
 {
 	// We don't need the tr->from check since we're protected against the race
 	// with timeout via exit clause in the dup-res ack handling, but follow the
@@ -366,7 +374,7 @@ send_read_response(as_transaction* tr, as_namespace* ns,
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, generation,
-					void_time, ops, response_bins, n_bins, ns, NULL,
+					void_time, ops, response_bins, n_bins, tr->rsv.ns, NULL,
 					as_transaction_trid(tr), set_name);
 			tr->from.proto_fd_h = NULL;
 		}
@@ -375,14 +383,14 @@ send_read_response(as_transaction* tr, as_namespace* ns,
 		if (tr->from.proxy_node != 0) {
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 					tr->result_code, generation, void_time, ops, response_bins,
-					n_bins, ns, as_transaction_trid(tr), set_name);
+					n_bins, tr->rsv.ns, as_transaction_trid(tr), set_name);
 			tr->from.proxy_node = 0;
 		}
 		break;
 	case FROM_BATCH:
 		if (tr->from.batch_shared) {
-			as_batch_add_result(tr, ns, set_name, generation, void_time, n_bins,
-					response_bins, ops);
+			as_batch_add_result(tr, tr->rsv.ns, set_name, generation, void_time,
+					n_bins, response_bins, ops);
 			tr->from.batch_shared = NULL;
 			// as_batch_add_result zeroed tr->msgp.
 		}
@@ -392,6 +400,38 @@ send_read_response(as_transaction* tr, as_namespace* ns,
 		// Should be impossible for internal UDFs and nsup deletes to get here.
 	default:
 		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
+		break;
+	}
+}
+
+
+void
+read_timeout(rw_request* rw)
+{
+	switch (rw->origin) {
+	case FROM_CLIENT:
+		if (rw->from.proto_fd_h) {
+			as_end_of_transaction_force_close(rw->from.proto_fd_h);
+			rw->from.proto_fd_h = NULL;
+		}
+		break;
+	case FROM_PROXY:
+		rw->from.proxy_node = 0;
+		break;
+	case FROM_BATCH:
+		if (rw->from.batch_shared) {
+			as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
+					AS_PROTO_RESULT_FAIL_TIMEOUT);
+			rw->from.batch_shared = NULL;
+			rw->msgp = NULL;
+		}
+		break;
+	case FROM_IUDF:
+	case FROM_NSUP:
+		// Should be impossible for internal UDFs and nsup deletes to get here.
+		break;
+	default:
+		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
 	}
 }

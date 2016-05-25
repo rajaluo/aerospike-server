@@ -311,42 +311,9 @@ retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 	}
 
 	if (now->now_ns > rw->end_time) {
-		cf_atomic_int_incr(&g_config.stat_rw_timeout);
-
 		pthread_mutex_lock(&rw->lock);
 
-		switch (rw->origin) {
-		case FROM_CLIENT:
-			if (rw->from.proto_fd_h) {
-				as_end_of_transaction_force_close(rw->from.proto_fd_h);
-				rw->from.proto_fd_h = NULL;
-			}
-			break;
-		case FROM_PROXY:
-			rw->from.proxy_node = 0;
-			break;
-		case FROM_BATCH:
-			if (rw->from.batch_shared) {
-				as_batch_add_error(rw->from.batch_shared,
-						rw->from_data.batch_index,
-						AS_PROTO_RESULT_FAIL_TIMEOUT);
-				rw->from.batch_shared = NULL;
-				rw->msgp = NULL;
-			}
-			break;
-		case FROM_IUDF:
-			if (rw->from.iudf_orig) {
-				rw->from.iudf_orig->cb(rw->from.iudf_orig->udata,
-						AS_PROTO_RESULT_FAIL_TIMEOUT);
-				rw->from.iudf_orig = NULL;
-			}
-			break;
-		case FROM_NSUP:
-			break;
-		default:
-			cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
-			break;
-		}
+		rw->timeout_cb(rw);
 
 		pthread_mutex_unlock(&rw->lock);
 
