@@ -6876,7 +6876,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state, cdt_modify_
 		return false;
 	}
 
-	rollback_alloc_inita(alloc_buf, cdt_udata->alloc_buf, 5);
+	rollback_alloc_inita(alloc_buf, cdt_udata->alloc_buf, 1);
 	// Results always on the heap.
 	rollback_alloc_inita(alloc_result, NULL, 1);
 
@@ -7233,7 +7233,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state, cdt_modify_
 		int ret = packed_map_remove_all_key_items(b, alloc_buf, &items, &result_data);
 
 		if (ret < 0) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_packed_map_modify_optype() REMOVE_ALL_ITEMS_BY_KEY failed");
+			cf_warning(AS_PARTICLE, "cdt_process_state_packed_map_modify_optype() REMOVE_BY_KEY_LIST failed");
 			cdt_udata->ret_code = ret;
 			rollback_alloc_rollback(alloc_result);
 			rollback_alloc_rollback(alloc_buf);
@@ -7291,7 +7291,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state, cdt_modify_
 		int ret = packed_map_remove_all_value_items(b, alloc_buf, &items, &result_data);
 
 		if (ret < 0) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_packed_map_modify_optype() REMOVE_ALL_ITEMS_BY_VALUE failed");
+			cf_warning(AS_PARTICLE, "cdt_process_state_packed_map_modify_optype() REMOVE_BY_VALUE_LIST failed");
 			cdt_udata->ret_code = ret;
 			rollback_alloc_rollback(alloc_result);
 			rollback_alloc_rollback(alloc_buf);
@@ -7397,7 +7397,7 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state, cdt_modify_
 		int ret = packed_map_remove_by_value_interval(b, alloc_buf, &value_start, p_value_end, &result_data);
 
 		if (ret < 0) {
-			cf_warning(AS_PARTICLE, "cdt_process_state_packed_map_modify_optype() AS_CDT_OP_MAP_REMOVE_BY_VALUE_INTERVAL failed");
+			cf_warning(AS_PARTICLE, "cdt_process_state_packed_map_modify_optype() REMOVE_BY_VALUE_INTERVAL failed");
 			cdt_udata->ret_code = ret;
 			rollback_alloc_rollback(alloc_result);
 			rollback_alloc_rollback(alloc_buf);
@@ -7789,6 +7789,13 @@ bool
 as_bin_verify(const as_bin *b)
 {
 	packed_map_op op;
+
+	uint8_t type = as_bin_get_particle_type(b);
+
+	if (type != AS_PARTICLE_TYPE_MAP) {
+		cf_warning(AS_PARTICLE, "as_bin_verify() non-map type: %u", type);
+		return false;
+	}
 
 	// Check header.
 	if (! packed_map_op_init_from_bin(&op, b)) {
