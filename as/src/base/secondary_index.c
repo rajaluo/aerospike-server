@@ -1278,7 +1278,10 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	SINDEX_UNLOCK(&si->imd->slock);
 	cf_dyn_buf_append_string(db, "keys=");
 	cf_dyn_buf_append_uint64(db,  n_keys);
+	// Note:  The "objects" field is deprecated (in favor of "entries") and will be removed in the future.
 	cf_dyn_buf_append_string(db, ";objects=");
+	cf_dyn_buf_append_uint64(db,  si_objects);
+	cf_dyn_buf_append_string(db, ";entries=");
 	cf_dyn_buf_append_uint64(db,  si_objects);
 	SINDEX_RLOCK(&si->imd->slock);
 	uint64_t i_size      = ai_btree_get_isize(si->imd);
