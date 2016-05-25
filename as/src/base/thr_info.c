@@ -6270,18 +6270,21 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 		}
 	}
 
-	// format w/o namespace is ns1:set1:prop1=val1:prop2=val2:..propn=valn;ns1:set2...;ns2:set1...;
+	// format w/o namespace is:
+	//    ns=ns1:set=set1:indexname=index1:prop1=val1:...:propn=valn;ns=ns1:set=set2:indexname=index2:...;ns=ns2:set=set1:...;
 	if (!ns) {
 		for (uint i = 0; i < g_config.n_namespaces; i++) {
 			as_sindex_list_str(g_config.namespaces[i], db);
 		}
 	}
-	// format w namespace w/o set name is ns:set1:prop1=val1:prop2=val2...propn=valn;ns:set2...;
-	// format w namespace & set name is prop1=val1:prop2=val2...propn=valn;
+	// format w namespace w/o index name is:
+	//    ns=ns1:set=set1:indexname=index1:prop1=val1:...:propn=valn;ns=ns1:set=set2:indexname=indexname2:...;
 	else if (!index_name) {
 		as_sindex_list_str(ns, db);
 	}
 	else {
+		// format w namespace & index name is:
+		//    prop1=val1;prop2=val2;...;propn=valn
 		int resp = as_sindex_stats_str(ns, index_name, db);
 		if (resp) {
 			cf_warning(AS_INFO, "Failed to get statistics for index %s: err = %d", index_name, resp);

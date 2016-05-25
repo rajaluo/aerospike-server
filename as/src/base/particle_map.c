@@ -3766,7 +3766,7 @@ packed_map_op_get_remove_by_key_interval(packed_map_op *op, as_bin *b, rollback_
 	}
 
 	if (result_data_is_return_rank_range(result)) {
-		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_key_interval() result_type %d not supported", result->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key_interval() result_type %d not supported", result->type);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
@@ -3849,7 +3849,7 @@ packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, roll
 	}
 
 	if (result_data_is_return_rank_range(result)) {
-		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() result_type %d not supported", result->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() result_type %d not supported", result->type);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
@@ -3994,7 +3994,7 @@ packed_map_op_get_remove_by_value_interval(const packed_map_op *op, as_bin *b, r
 	}
 
 	if (result_data_is_return_index_range(result)) {
-		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_value_interval() result_type %d not supported", result->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_value_interval() result_type %d not supported", result->type);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
@@ -4111,7 +4111,7 @@ packed_map_op_get_remove_by_rank_range(const packed_map_op *op, as_bin *b, rollb
 	}
 
 	if (result_data_is_return_index_range(result)) {
-		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_rank_range() result_type %d not supported", result->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_rank_range() result_type %d not supported", result->type);
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
@@ -4421,6 +4421,7 @@ packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t
 		}
 	}
 
+	result->result->particle = builder.particle;
 	as_bin_state_set_from_type(result->result, AS_PARTICLE_TYPE_LIST);
 
 	return AS_PROTO_RESULT_OK;
@@ -4548,6 +4549,7 @@ packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order
 		}
 	}
 
+	result->result->particle = builder.particle;
 	as_bin_state_set_from_type(result->result, AS_PARTICLE_TYPE_LIST);
 
 	return AS_PROTO_RESULT_OK;
@@ -4564,7 +4566,7 @@ packed_map_op_build_ele_result_by_idx_range(const packed_map_op *op, uint32_t el
 	if (result->type == RESULT_TYPE_MAP) {
 		get_by_idx_func = packed_map_op_get_pair_by_idx;
 
-		if (! cdt_map_builder_start(&builder, result->alloc, count, content_size, op->pmi.flags | AS_PACKED_MAP_FLAG_PRESERVE_ORDER)) {
+		if (! cdt_map_builder_start(&builder, result->alloc, count, content_size, AS_PACKED_MAP_FLAG_PRESERVE_ORDER)) {
 			return false;
 		}
 	}
@@ -4624,7 +4626,7 @@ packed_map_op_build_ele_result_by_ele_idx(const packed_map_op *op, const order_i
 	if (result->type == RESULT_TYPE_MAP) {
 		get_by_index_func = packed_map_op_get_pair_by_idx;
 
-		if (! cdt_map_builder_start(&builder, result->alloc, count, content_size, op->pmi.flags | AS_PACKED_MAP_FLAG_PRESERVE_ORDER)) {
+		if (! cdt_map_builder_start(&builder, result->alloc, count, content_size, AS_PACKED_MAP_FLAG_PRESERVE_ORDER)) {
 			return false;
 		}
 	}
@@ -6746,6 +6748,7 @@ result_data_set_ordered_list(cdt_result_data *rd, order_index *ordidx, uint32_t 
 		cdt_container_builder_add_int64(&builder, (int64_t)idx);
 	}
 
+	rd->result->particle = builder.particle;
 	as_bin_state_set_from_type(rd->result, AS_PARTICLE_TYPE_LIST);
 
 	return true;
