@@ -5656,6 +5656,10 @@ offset_index_is_full(const offset_index *offidx)
 		return false;
 	}
 
+	if (offidx->_.ele_count == 0) {
+		return true;
+	}
+
 	uint32_t filled = offset_index_get_filled(offidx);
 
 	if (filled > offidx->_.ele_count) {
