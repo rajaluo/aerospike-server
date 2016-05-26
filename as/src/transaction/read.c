@@ -57,15 +57,17 @@
 // Forward Declarations.
 //
 
-transaction_status start_read_dup_res(as_transaction* tr, bool send_metadata);
+bool start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata);
 bool read_after_dup_res(rw_request* rw);
-void read_local(as_transaction* tr, bool stop_if_not_found);
-void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
-		int result_code);
+
 void send_read_response(as_transaction* tr, as_msg_op** ops,
 		as_bin** response_bins, uint16_t n_bins, uint32_t generation,
 		uint32_t void_time, const char* set_name);
 void read_timeout(rw_request* rw);
+
+transaction_status read_local(as_transaction* tr, bool stop_if_not_found);
+void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
+		int result_code);
 
 
 //==========================================================
@@ -75,45 +77,34 @@ void read_timeout(rw_request* rw);
 transaction_status
 as_read_start(as_transaction* tr)
 {
-	// If there are duplicates and we always resolve them, start doing so.
-	if (tr->rsv.n_dupl != 0 &&
-			(g_config.transaction_repeatable_read ||
-					TRANSACTION_CONSISTENCY_LEVEL(tr) ==
-							AS_POLICY_CONSISTENCY_LEVEL_ALL)) {
-		return start_read_dup_res(tr, true);
+	if (tr->rsv.n_dupl == 0) {
+		// We won't be doing duplicate resolution. Try to read local copy,
+		// response is sent to origin no matter what.
+		return read_local(tr, false);
 	}
 
-	// Try to read local copy. If record is found or there are no duplicates,
-	// response is sent to origin.
-	read_local(tr, tr->rsv.n_dupl != 0);
+	transaction_status status;
+	bool send_metadata = true;
 
-	// If no local copy was found, fetch possible duplicates.
-	if (tr->rsv.n_dupl != 0 &&
-			tr->result_code == AS_PROTO_RESULT_FAIL_NOTFOUND) {
-		return start_read_dup_res(tr, false);
+	if (! g_config.transaction_repeatable_read &&
+			TRANSACTION_CONSISTENCY_LEVEL(tr) !=
+					AS_POLICY_CONSISTENCY_LEVEL_ALL) {
+		// We only resolve duplicates if we don't find the record. Try to read
+		// local copy. If record is found, response is sent to origin.
+		if ((status = read_local(tr, true)) != TRANS_IN_PROGRESS) {
+			return status;
+		}
+
+		// Record metadata doesn't exist, so don't try to send it.
+		send_metadata = false;
 	}
 
-	// We don't need duplicate resolution, transaction is finished.
-	// Note - transaction may have failed, but response has been sent, so as far
-	// as thr_tsvc is concerned, it looks like a success.
-	return TRANS_DONE_SUCCESS;
-}
-
-
-//==========================================================
-// Local helpers.
-//
-
-transaction_status
-start_read_dup_res(as_transaction* tr, bool send_metadata)
-{
-	// Create rw_request and add to hash.
+	// Must resolve duplicates - create rw_request and add to hash.
 	rw_request_hkey hkey = { tr->rsv.ns->id, tr->keyd };
 	rw_request* rw = rw_request_create(&tr->keyd);
-	transaction_status status = rw_request_hash_insert(&hkey, rw, tr);
 
 	// If rw_request wasn't inserted in hash, transaction is finished.
-	if (status != TRANS_IN_PROGRESS) {
+	if ((status = rw_request_hash_insert(&hkey, rw, tr)) != TRANS_IN_PROGRESS) {
 		rw_request_release(rw);
 
 		if (status != TRANS_WAITING) {
@@ -124,13 +115,29 @@ start_read_dup_res(as_transaction* tr, bool send_metadata)
 	}
 	// else - rw_request is now in hash, continue...
 
-	// Finish initializing rw_request, construct and send dup-res message.
-
-	if (! dup_res_make_message(rw, tr, send_metadata)) {
+	if (! start_read_dup_res(rw, tr, send_metadata)) {
 		rw_request_hash_delete(&hkey);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_read_response(tr, NULL, NULL, 0, 0, 0, NULL);
 		return TRANS_DONE_ERROR;
+	}
+
+	// Started duplicate resolution.
+	return TRANS_IN_PROGRESS;
+}
+
+
+//==========================================================
+// Local helpers - transaction flow.
+//
+
+bool
+start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata)
+{
+	// Finish initializing rw_request, construct and send dup-res message.
+
+	if (! dup_res_make_message(rw, tr, send_metadata)) {
+		return false;
 	}
 
 	rw->timeout_cb = read_timeout;
@@ -142,8 +149,7 @@ start_read_dup_res(as_transaction* tr, bool send_metadata)
 
 	pthread_mutex_unlock(&rw->lock);
 
-	// Started duplicate resolution.
-	return TRANS_IN_PROGRESS;
+	return true;
 }
 
 
@@ -161,205 +167,9 @@ read_after_dup_res(rw_request* rw)
 }
 
 
-void
-read_local(as_transaction* tr, bool stop_if_not_found)
-{
-	as_msg* m = &tr->msgp->msg;
-	as_namespace* ns = tr->rsv.ns;
-
-	as_index_ref r_ref;
-	r_ref.skip_lock = false;
-
-	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) != 0) {
-		if (stop_if_not_found) {
-			tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
-			return;
-		}
-
-		read_local_done(tr, NULL, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
-		return;
-	}
-
-	as_record* r = r_ref.r;
-	as_storage_rd rd;
-
-	as_storage_record_open(ns, r, &rd, &tr->keyd);
-
-	// Check if it's an expired record.
-	if (as_record_is_expired(r)) {
-		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_NOTFOUND);
-		return;
-	}
-
-	// Check the key if required.
-	// Note - for data-not-in-memory "exists" ops, key check is expensive!
-	if (as_transaction_has_key(tr) &&
-			as_storage_record_get_key(&rd) && ! check_msg_key(m, &rd)) {
-		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_KEY_MISMATCH);
-		return;
-	}
-
-	if ((m->info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0) {
-		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_OK);
-		return;
-	}
-
-	rd.n_bins = as_bin_get_n_bins(r, &rd);
-
-	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
-
-	rd.bins = as_bin_get_all(r, &rd, stack_bins);
-
-	if (! as_bin_inuse_has(&rd)) {
-		cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: found record with no bins ", ns->name);
-		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_NOTFOUND);
-		return;
-	}
-
-	uint32_t bin_count = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0 ?
-			rd.n_bins : m->n_ops;
-
-	as_msg_op* ops[bin_count];
-	as_msg_op** p_ops = ops;
-	as_bin* response_bins[bin_count];
-	uint16_t n_bins = 0;
-
-	as_bin result_bins[bin_count];
-	uint32_t n_result_bins = 0;
-
-	if ((m->info1 & AS_MSG_INFO1_GET_ALL) != 0) {
-		p_ops = NULL;
-		n_bins = as_bin_inuse_count(&rd);
-		as_bin_get_all_p(&rd, response_bins);
-	}
-	else {
-		if (m->n_ops == 0) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: bin op(s) expected, none present ", ns->name);
-			read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_PARAMETER);
-			return;
-		}
-
-		bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
-		int result;
-
-		as_msg_op* op = 0;
-		int n = 0;
-
-		while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
-			if (op->op == AS_MSG_OP_READ) {
-				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
-
-				if (b || respond_all_ops) {
-					ops[n_bins] = op;
-					response_bins[n_bins++] = b;
-				}
-			}
-			else if (op->op == AS_MSG_OP_CDT_READ) {
-				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
-
-				if (b) {
-					as_bin* rb = &result_bins[n_result_bins];
-					as_bin_set_empty(rb);
-
-					if ((result = as_bin_cdt_read_from_client(b, op, rb)) < 0) {
-						cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed as_bin_cdt_read_from_client() ", ns->name);
-						destroy_stack_bins(result_bins, n_result_bins);
-						read_local_done(tr, &r_ref, &rd, -result);
-						return;
-					}
-
-					if (as_bin_inuse(rb)) {
-						b = rb;
-						n_result_bins++;
-					}
-				}
-
-				if (b || respond_all_ops) {
-					ops[n_bins] = op;
-					response_bins[n_bins++] = b;
-				}
-			}
-			else {
-				cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: unexpected bin op %u ", ns->name, op->op);
-				destroy_stack_bins(result_bins, n_result_bins);
-				read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_PARAMETER);
-				return;
-			}
-		}
-	}
-
-	const char* set_name = (m->info1 & AS_MSG_INFO1_XDR) != 0 ?
-			as_index_get_set_name(r, ns) : NULL;
-
-	// Container to allow use of as_msg_send_ops_reply(), until we refactor and
-	// clean up single transaction response handling generally.
-	cf_dyn_buf_define_size(db, 16 * 1024);
-
-	// Note - don't really need proto_fd_h check since we bailed early on losing
-	// race vs. timeout.
-	if (tr->origin == FROM_CLIENT && tr->from.proto_fd_h) {
-		// Single out the client transaction case for now - others don't need
-		// this special handling (as urgently) for various reasons.
-
-		db.used_sz = db.alloc_sz;
-		db.buf = (uint8_t*)as_msg_make_response_msg(tr->result_code,
-				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
-				(cl_msg*)dyn_bufdb, &db.used_sz, as_transaction_trid(tr),
-				set_name);
-
-		if (! db.buf)	{
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed make response msg ", ns->name);
-			destroy_stack_bins(result_bins, n_result_bins);
-			read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_UNKNOWN);
-			return;
-		}
-
-		db.is_stack = db.buf == dyn_bufdb;
-		// Note - not bothering to correct alloc_sz if buf was allocated.
-	}
-	else {
-		send_read_response(tr, p_ops, response_bins, n_bins, r->generation,
-				r->void_time, set_name);
-	}
-
-	destroy_stack_bins(result_bins, n_result_bins);
-	as_storage_record_close(r, &rd);
-	as_record_done(&r_ref, ns);
-
-	// Now that we're not under the record lock, send the message we just built.
-	if (db.used_sz != 0) {
-		// Using the function for write responses for now.
-		as_msg_send_ops_reply(tr->from.proto_fd_h, &db);
-
-		cf_dyn_buf_free(&db);
-		tr->from.proto_fd_h = NULL;
-	}
-}
-
-
-void
-read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
-		int result_code)
-{
-	uint32_t generation = 0;
-	uint32_t void_time = 0;
-
-	if (r_ref) {
-		if (rd) {
-			as_storage_record_close(r_ref->r, rd);
-		}
-
-		generation = r_ref->r->generation;
-		void_time = r_ref->r->void_time;
-
-		as_record_done(r_ref, tr->rsv.ns);
-	}
-
-	tr->result_code = (uint8_t)result_code;
-
-	send_read_response(tr, NULL, NULL, 0, generation, void_time, NULL);
-}
-
+//==========================================================
+// Local helpers - transaction end.
+//
 
 void
 send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
@@ -434,4 +244,209 @@ read_timeout(rw_request* rw)
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
 	}
+}
+
+
+//==========================================================
+// Local helpers - read local.
+//
+
+transaction_status
+read_local(as_transaction* tr, bool stop_if_not_found)
+{
+	as_msg* m = &tr->msgp->msg;
+	as_namespace* ns = tr->rsv.ns;
+
+	as_index_ref r_ref;
+	r_ref.skip_lock = false;
+
+	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) != 0) {
+		if (stop_if_not_found) {
+			return TRANS_IN_PROGRESS;
+		}
+
+		read_local_done(tr, NULL, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
+		return TRANS_DONE_ERROR;
+	}
+
+	as_record* r = r_ref.r;
+	as_storage_rd rd;
+
+	as_storage_record_open(ns, r, &rd, &tr->keyd);
+
+	// Check if it's an expired record.
+	if (as_record_is_expired(r)) {
+		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_NOTFOUND);
+		return TRANS_DONE_ERROR;
+	}
+
+	// Check the key if required.
+	// Note - for data-not-in-memory "exists" ops, key check is expensive!
+	if (as_transaction_has_key(tr) &&
+			as_storage_record_get_key(&rd) && ! check_msg_key(m, &rd)) {
+		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_KEY_MISMATCH);
+		return TRANS_DONE_ERROR;
+	}
+
+	if ((m->info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0) {
+		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_OK);
+		return TRANS_DONE_SUCCESS;
+	}
+
+	rd.n_bins = as_bin_get_n_bins(r, &rd);
+
+	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
+
+	rd.bins = as_bin_get_all(r, &rd, stack_bins);
+
+	if (! as_bin_inuse_has(&rd)) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: found record with no bins ", ns->name);
+		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_NOTFOUND);
+		return TRANS_DONE_ERROR;
+	}
+
+	uint32_t bin_count = (m->info1 & AS_MSG_INFO1_GET_ALL) != 0 ?
+			rd.n_bins : m->n_ops;
+
+	as_msg_op* ops[bin_count];
+	as_msg_op** p_ops = ops;
+	as_bin* response_bins[bin_count];
+	uint16_t n_bins = 0;
+
+	as_bin result_bins[bin_count];
+	uint32_t n_result_bins = 0;
+
+	if ((m->info1 & AS_MSG_INFO1_GET_ALL) != 0) {
+		p_ops = NULL;
+		n_bins = as_bin_inuse_count(&rd);
+		as_bin_get_all_p(&rd, response_bins);
+	}
+	else {
+		if (m->n_ops == 0) {
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: bin op(s) expected, none present ", ns->name);
+			read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_PARAMETER);
+			return TRANS_DONE_ERROR;
+		}
+
+		bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
+		int result;
+
+		as_msg_op* op = 0;
+		int n = 0;
+
+		while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
+			if (op->op == AS_MSG_OP_READ) {
+				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
+
+				if (b || respond_all_ops) {
+					ops[n_bins] = op;
+					response_bins[n_bins++] = b;
+				}
+			}
+			else if (op->op == AS_MSG_OP_CDT_READ) {
+				as_bin* b = as_bin_get_from_buf(&rd, op->name, op->name_sz);
+
+				if (b) {
+					as_bin* rb = &result_bins[n_result_bins];
+					as_bin_set_empty(rb);
+
+					if ((result = as_bin_cdt_read_from_client(b, op, rb)) < 0) {
+						cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed as_bin_cdt_read_from_client() ", ns->name);
+						destroy_stack_bins(result_bins, n_result_bins);
+						read_local_done(tr, &r_ref, &rd, -result);
+						return TRANS_DONE_ERROR;
+					}
+
+					if (as_bin_inuse(rb)) {
+						b = rb;
+						n_result_bins++;
+					}
+				}
+
+				if (b || respond_all_ops) {
+					ops[n_bins] = op;
+					response_bins[n_bins++] = b;
+				}
+			}
+			else {
+				cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: unexpected bin op %u ", ns->name, op->op);
+				destroy_stack_bins(result_bins, n_result_bins);
+				read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_PARAMETER);
+				return TRANS_DONE_ERROR;
+			}
+		}
+	}
+
+	const char* set_name = (m->info1 & AS_MSG_INFO1_XDR) != 0 ?
+			as_index_get_set_name(r, ns) : NULL;
+
+	// Container to allow use of as_msg_send_ops_reply(), until we refactor and
+	// clean up single transaction response handling generally.
+	cf_dyn_buf_define_size(db, 16 * 1024);
+
+	// Note - don't really need proto_fd_h check since we bailed early on losing
+	// race vs. timeout.
+	if (tr->origin == FROM_CLIENT && tr->from.proto_fd_h) {
+		// Single out the client transaction case for now - others don't need
+		// this special handling (as urgently) for various reasons.
+
+		db.used_sz = db.alloc_sz;
+		db.buf = (uint8_t*)as_msg_make_response_msg(tr->result_code,
+				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
+				(cl_msg*)dyn_bufdb, &db.used_sz, as_transaction_trid(tr),
+				set_name);
+
+		if (! db.buf)	{
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: failed make response msg ", ns->name);
+			destroy_stack_bins(result_bins, n_result_bins);
+			read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			return TRANS_DONE_ERROR;
+		}
+
+		db.is_stack = db.buf == dyn_bufdb;
+		// Note - not bothering to correct alloc_sz if buf was allocated.
+	}
+	else {
+		send_read_response(tr, p_ops, response_bins, n_bins, r->generation,
+				r->void_time, set_name);
+	}
+
+	destroy_stack_bins(result_bins, n_result_bins);
+	as_storage_record_close(r, &rd);
+	as_record_done(&r_ref, ns);
+
+	// Now that we're not under the record lock, send the message we just built.
+	if (db.used_sz != 0) {
+		// Using the function for write responses for now.
+		as_msg_send_ops_reply(tr->from.proto_fd_h, &db);
+
+		cf_dyn_buf_free(&db);
+		tr->from.proto_fd_h = NULL;
+	}
+
+	return TRANS_DONE_SUCCESS;
+}
+
+
+void
+read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
+		int result_code)
+{
+	uint32_t generation = 0;
+	uint32_t void_time = 0;
+
+	if (r_ref) {
+		if (rd) {
+			as_storage_record_close(r_ref->r, rd);
+		}
+
+		generation = r_ref->r->generation;
+		void_time = r_ref->r->void_time;
+
+		as_record_done(r_ref, tr->rsv.ns);
+	}
+
+	tr->result_code = (uint8_t)result_code;
+
+	send_read_response(tr, NULL, NULL, 0, generation, void_time, NULL);
 }
