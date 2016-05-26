@@ -44,7 +44,7 @@
 //
 
 bool repl_write_make_message(rw_request* rw, as_transaction* tr);
-void repl_write_setup_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb);
+void repl_write_setup_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb repl_write_cb, timeout_done_cb timeout_cb);
 void repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb);
 void repl_write_handle_op(cf_node node, msg* m);
 void repl_write_handle_ack(cf_node node, msg* m);

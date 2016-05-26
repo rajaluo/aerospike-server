@@ -38,7 +38,6 @@
 #include "dynbuf.h"
 #include "fault.h"
 #include "jem.h"
-#include "msg.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -49,7 +48,6 @@
 #include "base/thr_proxy.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
-#include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
@@ -76,22 +74,14 @@ typedef struct index_metadata_s {
 // Forward Declarations.
 //
 
-bool xdr_allows_write(as_transaction* tr);
 bool start_write_dup_res(rw_request* rw, as_transaction* tr);
-bool start_repl_write(rw_request* rw, as_transaction* tr);
-bool write_after_dup_res(rw_request* rw);
-void write_after_repl_write(rw_request* rw);
-bool start_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
+bool start_write_repl_write(rw_request* rw, as_transaction* tr);
+bool write_dup_res_cb(rw_request* rw);
+bool write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
+void write_repl_write_cb(rw_request* rw);
 
 void send_write_response(as_transaction* tr, cf_dyn_buf* db);
-void send_ops_response(as_transaction* tr, cf_dyn_buf* db);
-void write_timeout(rw_request* rw);
-
-transaction_status apply_master(rw_request* rw, as_transaction* tr);
-
-transaction_status udf_master(rw_request* rw, as_transaction* tr);
-
-transaction_status delete_master(as_transaction* tr);
+void write_timeout_cb(rw_request* rw);
 
 transaction_status write_master(rw_request* rw, as_transaction* tr);
 void write_master_failed(as_transaction* tr, as_index_ref* r_ref,
@@ -140,14 +130,6 @@ void write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins,
 		as_bin* new_bins, uint32_t n_new_bins, as_bin* cleanup_bins,
 		uint32_t n_cleanup_bins);
 
-static inline bool
-respond_on_master_complete(as_transaction* tr)
-{
-	return tr->origin == FROM_CLIENT &&
-			(g_config.respond_client_on_master_completion ||
-			TRANSACTION_COMMIT_LEVEL(tr) == AS_POLICY_COMMIT_LEVEL_MASTER);
-}
-
 static inline void
 append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 {
@@ -171,8 +153,8 @@ as_write_start(as_transaction* tr)
 		return TRANS_DONE_ERROR;
 	}
 
-	// If we're doing a non-delete write, check that we aren't backed up.
-	if (! as_transaction_is_delete(tr) && as_storage_overloaded(tr->rsv.ns)) {
+	// Check that we aren't backed up.
+	if (as_storage_overloaded(tr->rsv.ns)) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD;
 		send_write_response(tr, NULL);
 		return TRANS_DONE_ERROR;
@@ -202,7 +184,7 @@ as_write_start(as_transaction* tr)
 	}
 
 	// If there are duplicates to resolve, start doing so.
-	if (tr->rsv.n_dupl != 0 && ! as_transaction_is_nsup_delete(tr)) {
+	if (tr->rsv.n_dupl != 0) {
 		if (! start_write_dup_res(rw, tr)) {
 			rw_request_hash_delete(&hkey);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
@@ -215,8 +197,8 @@ as_write_start(as_transaction* tr)
 	}
 	// else - no duplicate resolution phase, apply operation to master.
 
-	// If error or UDF was a read, transaction is finished.
-	if ((status = apply_master(rw, tr)) != TRANS_IN_PROGRESS) {
+	// If error, transaction is finished.
+	if ((status = write_master(rw, tr)) != TRANS_IN_PROGRESS) {
 		rw_request_hash_delete(&hkey);
 		send_write_response(tr, NULL);
 		return status;
@@ -234,7 +216,7 @@ as_write_start(as_transaction* tr)
 		return TRANS_DONE_SUCCESS;
 	}
 
-	if (! start_repl_write(rw, tr)) {
+	if (! start_write_repl_write(rw, tr)) {
 		rw_request_hash_delete(&hkey);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_write_response(tr, NULL);
@@ -250,27 +232,6 @@ as_write_start(as_transaction* tr)
 // Local helpers - transaction flow.
 //
 
-// TODO - really? we can't hide this behind an XDR stub?
-bool
-xdr_allows_write(as_transaction* tr)
-{
-	if ((tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0) {
-		if (tr->rsv.ns->ns_allow_xdr_writes) {
-			return true;
-		}
-	}
-	else {
-		if (tr->rsv.ns->ns_allow_nonxdr_writes) {
-			return true;
-		}
-	}
-
-	cf_atomic_int_incr(&g_config.err_write_fail_forbidden);
-
-	return false;
-}
-
-
 bool
 start_write_dup_res(rw_request* rw, as_transaction* tr)
 {
@@ -280,12 +241,11 @@ start_write_dup_res(rw_request* rw, as_transaction* tr)
 		return false;
 	}
 
-	rw->timeout_cb = write_timeout;
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	pthread_mutex_lock(&rw->lock);
 
-	dup_res_setup_rw(rw, tr, write_after_dup_res);
+	dup_res_setup_rw(rw, tr, write_dup_res_cb, write_timeout_cb);
 	send_rw_messages(rw);
 
 	pthread_mutex_unlock(&rw->lock);
@@ -295,7 +255,7 @@ start_write_dup_res(rw_request* rw, as_transaction* tr)
 
 
 bool
-start_repl_write(rw_request* rw, as_transaction* tr)
+start_write_repl_write(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw, construct and send repl-write message.
 
@@ -303,7 +263,6 @@ start_repl_write(rw_request* rw, as_transaction* tr)
 		return false;
 	}
 
-	rw->timeout_cb = write_timeout;
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	if (rw->respond_client_on_master_completion) {
@@ -314,7 +273,7 @@ start_repl_write(rw_request* rw, as_transaction* tr)
 
 	pthread_mutex_lock(&rw->lock);
 
-	repl_write_setup_rw(rw, tr, write_after_repl_write);
+	repl_write_setup_rw(rw, tr, write_repl_write_cb, write_timeout_cb);
 	send_rw_messages(rw);
 
 	pthread_mutex_unlock(&rw->lock);
@@ -324,20 +283,15 @@ start_repl_write(rw_request* rw, as_transaction* tr)
 
 
 bool
-write_after_dup_res(rw_request* rw)
+write_dup_res_cb(rw_request* rw)
 {
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
-	transaction_status status = apply_master(rw, &tr);
+	transaction_status status = write_master(rw, &tr);
 
 	if (status == TRANS_DONE_ERROR) {
 		send_write_response(&tr, &rw->response_db);
-		return true;
-	}
-
-	if (status == TRANS_DONE_SUCCESS) {
-		// UDF was a read, has already responded to origin.
 		return true;
 	}
 
@@ -351,7 +305,7 @@ write_after_dup_res(rw_request* rw)
 		return true;
 	}
 
-	if (! start_repl_write_after_dup_res(rw, &tr)) {
+	if (! write_repl_write_after_dup_res(rw, &tr)) {
 		tr.result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_write_response(&tr, NULL);
 		return true;
@@ -363,7 +317,7 @@ write_after_dup_res(rw_request* rw)
 
 
 bool
-start_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
+write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 {
 	// Recycle rw_request that was just used for duplicate resolution to now do
 	// replica writes. Note - we are under the rw_request lock here!
@@ -378,7 +332,7 @@ start_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 		send_write_response(tr, &rw->response_db);
 	}
 
-	repl_write_reset_rw(rw, tr, write_after_repl_write);
+	repl_write_reset_rw(rw, tr, write_repl_write_cb);
 	send_rw_messages(rw);
 
 	return true;
@@ -386,7 +340,7 @@ start_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 
 
 void
-write_after_repl_write(rw_request* rw)
+write_repl_write_cb(rw_request* rw)
 {
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
@@ -404,260 +358,73 @@ write_after_repl_write(rw_request* rw)
 void
 send_write_response(as_transaction* tr, cf_dyn_buf* db)
 {
-	if (db && db->used_sz != 0) {
-		send_ops_response(tr, db);
-		// Note - UDF with response gets here, but not trying to make request
-		// callback for now, since callback is mutually exclusive with response.
-
+	// Paranoia - shouldn't get here on losing race with timeout.
+	if (! tr->from.any) {
+		cf_warning(AS_RW, "transaction origin %u has null 'from'", tr->origin);
 		return;
 	}
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		if (tr->from.proto_fd_h) {
+		if (db && db->used_sz != 0) {
+			as_msg_send_ops_reply(tr->from.proto_fd_h, db);
+		}
+		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, NULL, NULL, 0, NULL, NULL,
 					as_transaction_trid(tr), NULL);
-			tr->from.proto_fd_h = NULL;
 		}
 		break;
 	case FROM_PROXY:
-		if (tr->from.proxy_node != 0) {
+		if (db && db->used_sz != 0) {
+			as_proxy_send_ops_response(tr->from.proxy_node,
+					tr->from_data.proxy_tid, db);
+		}
+		else {
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 					tr->result_code, 0, 0, NULL, NULL, 0, NULL,
 					as_transaction_trid(tr), NULL);
-			tr->from.proxy_node = 0;
 		}
-		break;
-	case FROM_IUDF:
-		if (tr->from.iudf_orig) {
-			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
-			tr->from.iudf_orig = NULL;
-		}
-		break;
-	case FROM_NSUP:
 		break;
 	case FROM_BATCH:
-		// Should be impossible for batch read to get here.
+	case FROM_IUDF:
+	case FROM_NSUP:
+		// Should be impossible for batch reads, internal UDFs, and nsup deletes
+		// to get here.
 	default:
-		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
+		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
+
+	tr->from.any = NULL; // inform timeout it lost the race
 }
 
 
 void
-send_ops_response(as_transaction* tr, cf_dyn_buf* db)
+write_timeout_cb(rw_request* rw)
 {
-	switch (tr->origin) {
-	case FROM_CLIENT:
-		if (tr->from.proto_fd_h) {
-			as_msg_send_ops_reply(tr->from.proto_fd_h, db);
-			tr->from.proto_fd_h = NULL;
-		}
-		break;
-	case FROM_PROXY:
-		if (tr->from.proxy_node != 0) {
-			as_proxy_send_ops_response(tr->from.proxy_node,
-					tr->from_data.proxy_tid, db);
-			tr->from.proxy_node = 0;
-		}
-		break;
-	case FROM_NSUP:
-		break;
-	case FROM_BATCH:
-	case FROM_IUDF:
-		// Should be impossible for batch read and internal UDF to get here.
-	default:
-		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
-		break;
+	if (! rw->from.any) {
+		return; // lost race against dup-res or repl-write callback
 	}
-}
 
-
-void
-write_timeout(rw_request* rw)
-{
 	switch (rw->origin) {
 	case FROM_CLIENT:
-		if (rw->from.proto_fd_h) {
-			as_end_of_transaction_force_close(rw->from.proto_fd_h);
-			rw->from.proto_fd_h = NULL;
-		}
+		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		break;
 	case FROM_PROXY:
-		rw->from.proxy_node = 0;
-		break;
-	case FROM_IUDF:
-		if (rw->from.iudf_orig) {
-			rw->from.iudf_orig->cb(rw->from.iudf_orig->udata,
-					AS_PROTO_RESULT_FAIL_TIMEOUT);
-			rw->from.iudf_orig = NULL;
-		}
-		break;
-	case FROM_NSUP:
 		break;
 	case FROM_BATCH:
-		// Should be impossible for batch read and internal UDF to get here.
+	case FROM_IUDF:
+	case FROM_NSUP:
+		// Should be impossible for batch reads, internal UDFs, and nsup deletes
+		// to get here.
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
 	}
-}
 
-
-//==========================================================
-// Local helpers - apply operation.
-//
-
-transaction_status
-apply_master(rw_request* rw, as_transaction* tr)
-{
-	if (as_transaction_is_delete(tr)) {
-		return delete_master(tr);
-	}
-
-	if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
-		return udf_master(rw, tr);
-	}
-
-	return write_master(rw, tr);
-}
-
-
-//==========================================================
-// Local helpers - UDF.
-//
-
-transaction_status
-udf_master(rw_request* rw, as_transaction* tr)
-{
-	rw->has_udf = true;
-
-	udf_def def;
-	udf_call stack_call = { &def, tr };
-	udf_call* call = tr->origin == FROM_IUDF ?
-			udf_rw_call_def_init_internal(&stack_call, tr) :
-			udf_rw_call_def_init_from_msg(&stack_call, tr);
-
-	if (! call) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-		return TRANS_DONE_ERROR;
-	}
-
-	udf_optype op = UDF_OPTYPE_NONE;
-
-	udf_rw_local(call, rw, &op);
-	udf_rw_call_destroy(call);
-
-	if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
-		if (tr->origin == FROM_IUDF) {
-			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
-			tr->from.iudf_orig = NULL;
-		}
-
-		// UDF is done, has responded to origin, no replica writes needed.
-		return TRANS_DONE_SUCCESS;
-	}
-
-	if (UDF_OP_IS_LDT(op)) {
-		rw->is_multiop = true;
-	}
-
-	// UDFs send original msg for replica deletes.
-	// Note - not currently necessary to set this message flag.
-	if (UDF_OP_IS_DELETE(op)) {
-		tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
-	}
-
-	return TRANS_IN_PROGRESS;
-}
-
-
-//==========================================================
-// Local helpers - delete.
-//
-
-transaction_status
-delete_master(as_transaction* tr)
-{
-	// Shortcut pointers & flags.
-	as_msg* m = &tr->msgp->msg;
-	as_namespace* ns = tr->rsv.ns;
-	as_index_tree* tree = tr->rsv.tree; // sub-records don't use delete_local()
-
-	as_index_ref r_ref;
-	r_ref.skip_lock = false;
-
-	if (0 != as_record_get(tree, &tr->keyd, &r_ref, ns)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
-		return TRANS_DONE_ERROR;
-	}
-
-	as_record* r = r_ref.r;
-
-	// Check generation requirement, if any.
-	if (! g_config.generation_disable &&
-			(((m->info2 & AS_MSG_INFO2_GENERATION) != 0 &&
-					m->generation != r->generation) ||
-			 ((m->info2 & AS_MSG_INFO2_GENERATION_GT) != 0 &&
-					m->generation <= r->generation))) {
-		as_record_done(&r_ref, ns);
-		tr->result_code = AS_PROTO_RESULT_FAIL_GENERATION;
-		return TRANS_DONE_ERROR;
-	}
-
-	bool check_key = as_transaction_has_key(tr);
-
-	if (ns->storage_data_in_memory || check_key) {
-		as_storage_rd rd;
-		as_storage_record_open(ns, r, &rd, &tr->keyd);
-
-		// Check the key if required.
-		// Note - for data-not-in-memory a key check is expensive!
-		if (check_key && as_storage_record_get_key(&rd) &&
-				! check_msg_key(m, &rd)) {
-			as_storage_record_close(r, &rd);
-			as_record_done(&r_ref, ns);
-			tr->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
-			return TRANS_DONE_ERROR;
-		}
-
-		if (ns->storage_data_in_memory) {
-			delete_adjust_sindex(&rd);
-		}
-
-		as_storage_record_close(r, &rd);
-	}
-
-	// Save the set-ID for XDR.
-	uint16_t set_id = as_index_get_set_id(r);
-
-	// Save the generation for XDR, and for ack to client. (This will also go to
-	// the prole, but the prole will ignore it.)
-	tr->generation = r->generation;
-
-	as_index_delete(tree, &tr->keyd);
-	cf_atomic_int_incr(&g_config.stat_delete_success);
-	as_record_done(&r_ref, ns);
-
-	if (! is_xdr_delete_shipping_enabled()) {
-		return TRANS_IN_PROGRESS;
-	}
-
-	// Don't ship expiration/eviction deletes unless configured to do so.
-	if (as_transaction_is_nsup_delete(tr) && ! is_xdr_nsup_deletes_enabled()) {
-		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
-	}
-	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
-			// If this delete is a result of XDR shipping, don't ship it unless
-			// configured to do so.
-			is_xdr_forwarding_enabled() ||
-			ns->ns_forward_xdr_writes) {
-		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id, NULL);
-	}
-
-	return TRANS_IN_PROGRESS;
+	// Paranoia - shouldn't need this to inform other callback it lost race.
+	rw->from.any = NULL;
 }
 
 

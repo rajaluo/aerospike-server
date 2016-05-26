@@ -78,7 +78,7 @@ as_aerospike g_as_aerospike;
 // **************************************************************************************************
 
 void
-send_udf_response(as_transaction* tr, as_bin** response_bins, uint16_t n_bins)
+send_udf_response_bin(as_transaction* tr, as_bin** response_bins, uint16_t n_bins)
 {
 	// We don't need the tr->from check since we're protected against the race
 	// with timeout via exit clause in the dup-res ack handling, but follow the
@@ -177,7 +177,7 @@ process_response(udf_call *call, const char *bin_name, const as_val *val, cf_dyn
 		db->used_sz = msg_sz;
 	}
 	else {
-		send_udf_response(tr, &bin, 1);
+		send_udf_response_bin(tr, &bin, 1);
 	}
 
 	if (particle_buf != stack_particle) {
@@ -249,7 +249,7 @@ process_udf_failure(udf_call *call, const as_string *s, cf_dyn_buf *db)
 				db->used_sz = msg_sz;
 			}
 			else {
-				send_udf_response(tr, NULL, 0); // with no bin
+				send_udf_response_bin(tr, NULL, 0); // but with no bin
 			}
 			return 0;
 		}

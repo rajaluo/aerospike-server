@@ -1,0 +1,430 @@
+/*
+ * delete.c
+ *
+ * Copyright (C) 2016 Aerospike, Inc.
+ *
+ * Portions may be licensed to Aerospike, Inc. under one or more contributor
+ * license agreements.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option) any
+ * later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/
+ */
+
+//==========================================================
+// Includes.
+//
+
+#include "transaction/delete.h"
+
+#include <pthread.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_clock.h"
+
+#include "dynbuf.h"
+#include "fault.h"
+
+#include "base/cfg.h"
+#include "base/datamodel.h"
+#include "base/index.h"
+#include "base/proto.h"
+#include "base/secondary_index.h"
+#include "base/thr_proxy.h"
+#include "base/transaction.h"
+#include "base/transaction_policy.h"
+#include "base/xdr_serverside.h"
+#include "storage/storage.h"
+#include "transaction/duplicate_resolve.h"
+#include "transaction/replica_write.h"
+#include "transaction/rw_request.h"
+#include "transaction/rw_request_hash.h"
+#include "transaction/rw_utils.h"
+
+
+//==========================================================
+// Forward Declarations.
+//
+
+bool start_delete_dup_res(rw_request* rw, as_transaction* tr);
+bool start_delete_repl_write(rw_request* rw, as_transaction* tr);
+bool delete_dup_res_cb(rw_request* rw);
+bool delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr);
+void delete_repl_write_cb(rw_request* rw);
+
+void send_delete_response(as_transaction* tr);
+void delete_timeout_cb(rw_request* rw);
+
+transaction_status delete_master(as_transaction* tr);
+
+
+//==========================================================
+// Public API.
+//
+
+transaction_status
+as_delete_start(as_transaction* tr)
+{
+	// Apply XDR filter.
+	if (! xdr_allows_write(tr)) {
+		tr->result_code = AS_PROTO_RESULT_FAIL_FORBIDDEN;
+		send_delete_response(tr);
+		return TRANS_DONE_ERROR;
+	}
+
+	// Create rw_request and add to hash.
+	rw_request_hkey hkey = { tr->rsv.ns->id, tr->keyd };
+	rw_request* rw = rw_request_create(&tr->keyd);
+	transaction_status status = rw_request_hash_insert(&hkey, rw, tr);
+
+	// If rw_request wasn't inserted in hash, transaction is finished.
+	if (status != TRANS_IN_PROGRESS) {
+		rw_request_release(rw);
+
+		if (status != TRANS_WAITING) {
+			send_delete_response(tr);
+		}
+
+		return status;
+	}
+	// else - rw_request is now in hash, continue...
+
+	if (g_config.write_duplicate_resolution_disable) {
+		// Note - preventing duplicate resolution this way allows
+		// rw_request_destroy() to handle dup_msg[] cleanup correctly.
+		tr->rsv.n_dupl = 0;
+	}
+
+	// If there are duplicates to resolve, start doing so.
+	// TODO - should we bother if there's no generation check?
+	if (tr->rsv.n_dupl != 0 && ! as_transaction_is_nsup_delete(tr)) {
+		if (! start_delete_dup_res(rw, tr)) {
+			rw_request_hash_delete(&hkey);
+			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+			send_delete_response(tr);
+			return TRANS_DONE_ERROR;
+		}
+
+		// Started duplicate resolution.
+		return TRANS_IN_PROGRESS;
+	}
+	// else - no duplicate resolution phase, apply operation to master.
+
+	// If error or UDF was a read, transaction is finished.
+	if ((status = delete_master(tr)) != TRANS_IN_PROGRESS) {
+		rw_request_hash_delete(&hkey);
+		send_delete_response(tr);
+		return status;
+	}
+
+	// Set up the nodes to which we'll write replicas.
+	rw->n_dest_nodes = as_partition_getreplica_readall(tr->rsv.ns, tr->rsv.pid,
+			rw->dest_nodes);
+
+	// If we don't need replica writes, transaction is finished.
+	// TODO - consider a single-node fast path bypassing hash?
+	if (rw->n_dest_nodes == 0) {
+		send_delete_response(tr);
+		rw_request_hash_delete(&hkey);
+		return TRANS_DONE_SUCCESS;
+	}
+
+	if (! start_delete_repl_write(rw, tr)) {
+		rw_request_hash_delete(&hkey);
+		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		send_delete_response(tr);
+		return TRANS_DONE_ERROR;
+	}
+
+	// Started replica write.
+	return TRANS_IN_PROGRESS;
+}
+
+
+//==========================================================
+// Local helpers - transaction flow.
+//
+
+bool
+start_delete_dup_res(rw_request* rw, as_transaction* tr)
+{
+	// Finish initializing rw, construct and send dup-res message.
+
+	if (! dup_res_make_message(rw, tr, true)) {
+		return false;
+	}
+
+	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
+
+	pthread_mutex_lock(&rw->lock);
+
+	dup_res_setup_rw(rw, tr, delete_dup_res_cb, delete_timeout_cb);
+	send_rw_messages(rw);
+
+	pthread_mutex_unlock(&rw->lock);
+
+	return true;
+}
+
+
+bool
+start_delete_repl_write(rw_request* rw, as_transaction* tr)
+{
+	// Finish initializing rw, construct and send repl-delete message.
+
+	if (! repl_write_make_message(rw, tr)) { // TODO - split this?
+		return false;
+	}
+
+	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
+
+	if (rw->respond_client_on_master_completion) {
+		// Don't wait for replication. When replication is complete, we will
+		// call send_write_response() again, but it will no-op quietly.
+		send_delete_response(tr);
+	}
+
+	pthread_mutex_lock(&rw->lock);
+
+	repl_write_setup_rw(rw, tr, delete_repl_write_cb, delete_timeout_cb);
+	send_rw_messages(rw);
+
+	pthread_mutex_unlock(&rw->lock);
+
+	return true;
+}
+
+
+bool
+delete_dup_res_cb(rw_request* rw)
+{
+	as_transaction tr;
+	as_transaction_init_from_rw(&tr, rw);
+
+	transaction_status status = delete_master(&tr);
+
+	if (status == TRANS_DONE_ERROR) {
+		send_delete_response(&tr);
+		return true;
+	}
+
+	// Set up the nodes to which we'll write replicas.
+	rw->n_dest_nodes = as_partition_getreplica_readall(tr.rsv.ns, tr.rsv.pid,
+			rw->dest_nodes);
+
+	// If we don't need replica writes, transaction is finished.
+	if (rw->n_dest_nodes == 0) {
+		send_delete_response(&tr);
+		return true;
+	}
+
+	if (! delete_repl_write_after_dup_res(rw, &tr)) {
+		tr.result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+		send_delete_response(&tr);
+		return true;
+	}
+
+	// Started replica write - don't delete rw_request from hash.
+	return false;
+}
+
+
+bool
+delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
+{
+	// Recycle rw_request that was just used for duplicate resolution to now do
+	// replica writes. Note - we are under the rw_request lock here!
+
+	if (! repl_write_make_message(rw, tr)) { // TODO - split this?
+		return false;
+	}
+
+	if (rw->respond_client_on_master_completion) {
+		// Don't wait for replication. When replication is complete, we will
+		// call send_delete_response() again, but it will no-op quietly.
+		send_delete_response(tr);
+	}
+
+	repl_write_reset_rw(rw, tr, delete_repl_write_cb);
+	send_rw_messages(rw);
+
+	return true;
+}
+
+
+void
+delete_repl_write_cb(rw_request* rw)
+{
+	as_transaction tr;
+	as_transaction_init_from_rw(&tr, rw);
+
+	send_delete_response(&tr);
+
+	// Finished transaction - rw_request cleans up reservation and msgp!
+}
+
+
+//==========================================================
+// Local helpers - transaction end.
+//
+
+void
+send_delete_response(as_transaction* tr)
+{
+	// Paranoia - shouldn't get here on losing race with timeout.
+	if (! tr->from.any && tr->origin != FROM_NSUP) {
+		cf_warning(AS_RW, "transaction origin %u has null 'from'", tr->origin);
+		return;
+	}
+
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
+				tr->void_time, NULL, NULL, 0, NULL, NULL,
+				as_transaction_trid(tr), NULL);
+		break;
+	case FROM_PROXY:
+		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
+				tr->result_code, 0, 0, NULL, NULL, 0, NULL,
+				as_transaction_trid(tr), NULL);
+		break;
+	case FROM_NSUP:
+		break;
+	case FROM_BATCH:
+	case FROM_IUDF:
+		// Should be impossible for batch reads and internal UDFs to get here.
+	default:
+		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
+		break;
+	}
+
+	tr->from.any = NULL; // inform timeout it lost the race
+}
+
+
+void
+delete_timeout_cb(rw_request* rw)
+{
+	if (! rw->from.any && rw->origin != FROM_NSUP) {
+		return; // lost race against dup-res or repl-write callback
+	}
+
+	switch (rw->origin) {
+	case FROM_CLIENT:
+		as_end_of_transaction_force_close(rw->from.proto_fd_h);
+		break;
+	case FROM_PROXY:
+		break;
+	case FROM_NSUP:
+		break;
+	case FROM_BATCH:
+	case FROM_IUDF:
+		// Should be impossible for batch reads and internal UDFs to get here.
+	default:
+		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
+		break;
+	}
+
+	// Paranoia - shouldn't need this to inform other callback it lost race.
+	rw->from.any = NULL;
+}
+
+
+//==========================================================
+// Local helpers - delete.
+//
+
+transaction_status
+delete_master(as_transaction* tr)
+{
+	// Shortcut pointers & flags.
+	as_msg* m = &tr->msgp->msg;
+	as_namespace* ns = tr->rsv.ns;
+	as_index_tree* tree = tr->rsv.tree; // sub-records don't use delete_local()
+
+	as_index_ref r_ref;
+	r_ref.skip_lock = false;
+
+	if (0 != as_record_get(tree, &tr->keyd, &r_ref, ns)) {
+		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
+		return TRANS_DONE_ERROR;
+	}
+
+	as_record* r = r_ref.r;
+
+	// Check generation requirement, if any.
+	if (! g_config.generation_disable &&
+			(((m->info2 & AS_MSG_INFO2_GENERATION) != 0 &&
+					m->generation != r->generation) ||
+			 ((m->info2 & AS_MSG_INFO2_GENERATION_GT) != 0 &&
+					m->generation <= r->generation))) {
+		as_record_done(&r_ref, ns);
+		tr->result_code = AS_PROTO_RESULT_FAIL_GENERATION;
+		return TRANS_DONE_ERROR;
+	}
+
+	bool check_key = as_transaction_has_key(tr);
+
+	if (ns->storage_data_in_memory || check_key) {
+		as_storage_rd rd;
+		as_storage_record_open(ns, r, &rd, &tr->keyd);
+
+		// Check the key if required.
+		// Note - for data-not-in-memory a key check is expensive!
+		if (check_key && as_storage_record_get_key(&rd) &&
+				! check_msg_key(m, &rd)) {
+			as_storage_record_close(r, &rd);
+			as_record_done(&r_ref, ns);
+			tr->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
+			return TRANS_DONE_ERROR;
+		}
+
+		if (ns->storage_data_in_memory) {
+			delete_adjust_sindex(&rd);
+		}
+
+		as_storage_record_close(r, &rd);
+	}
+
+	// Save the set-ID for XDR.
+	uint16_t set_id = as_index_get_set_id(r);
+
+	// Save the generation for XDR, and for ack to client. (This will also go to
+	// the prole, but the prole will ignore it.)
+	tr->generation = r->generation;
+
+	as_index_delete(tree, &tr->keyd);
+	cf_atomic_int_incr(&g_config.stat_delete_success);
+	as_record_done(&r_ref, ns);
+
+	if (! is_xdr_delete_shipping_enabled()) {
+		return TRANS_IN_PROGRESS;
+	}
+
+	// Don't ship expiration/eviction deletes unless configured to do so.
+	if (as_transaction_is_nsup_delete(tr) && ! is_xdr_nsup_deletes_enabled()) {
+		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
+	}
+	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
+			// If this delete is a result of XDR shipping, don't ship it unless
+			// configured to do so.
+			is_xdr_forwarding_enabled() ||
+			ns->ns_forward_xdr_writes) {
+		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id, NULL);
+	}
+
+	return TRANS_IN_PROGRESS;
+}

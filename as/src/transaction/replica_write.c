@@ -213,7 +213,8 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 
 
 void
-repl_write_setup_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
+repl_write_setup_rw(rw_request* rw, as_transaction* tr,
+		repl_write_done_cb repl_write_cb, timeout_done_cb timeout_cb)
 {
 	rw->msgp = tr->msgp;
 	tr->msgp = NULL;
@@ -235,7 +236,8 @@ repl_write_setup_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
 	rw->end_time = tr->end_time;
 	// Note - don't need as_transaction's other 'container' members.
 
-	rw->repl_write_cb = cb;
+	rw->repl_write_cb = repl_write_cb;
+	rw->timeout_cb = timeout_cb;
 
 	rw->xmit_ms = cf_getms() + g_config.transaction_retry_ms;
 	rw->retry_interval_ms = g_config.transaction_retry_ms;

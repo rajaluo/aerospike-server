@@ -31,8 +31,10 @@
 
 #include "msg.h"
 
+#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/transaction.h"
+#include "base/transaction_policy.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
 
@@ -41,6 +43,7 @@
 // Public API.
 //
 
+bool xdr_allows_write(as_transaction* tr);
 void send_rw_messages(rw_request* rw);
 int set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m);
 bool check_msg_key(as_msg* m, as_storage_rd* rd);
@@ -48,6 +51,15 @@ bool get_msg_key(as_transaction* tr, as_storage_rd* rd);
 void update_metadata_in_index(as_transaction* tr, bool increment_generation, as_record* r);
 bool pickle_all(as_storage_rd* rd, rw_request* rw);
 void delete_adjust_sindex(as_storage_rd* rd);
+
+
+static inline bool
+respond_on_master_complete(as_transaction* tr)
+{
+	return tr->origin == FROM_CLIENT &&
+			(g_config.respond_client_on_master_completion ||
+			TRANSACTION_COMMIT_LEVEL(tr) == AS_POLICY_COMMIT_LEVEL_MASTER);
+}
 
 
 static inline void

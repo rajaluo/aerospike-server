@@ -27,16 +27,20 @@
 #include "transaction/rw_utils.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
+#include "citrusleaf/cf_atomic.h" // xdr_allows_write
 #include "citrusleaf/cf_clock.h"
 
 #include "fault.h"
 #include "msg.h"
 
+#include "base/cfg.h" // xdr_allows_write
 #include "base/datamodel.h"
 #include "base/ldt.h"
+#include "base/proto.h" // xdr_allows_write
 #include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
@@ -47,6 +51,27 @@
 //==========================================================
 // Public API.
 //
+
+// TODO - really? we can't hide this behind an XDR stub?
+bool
+xdr_allows_write(as_transaction* tr)
+{
+	if ((tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0) {
+		if (tr->rsv.ns->ns_allow_xdr_writes) {
+			return true;
+		}
+	}
+	else {
+		if (tr->rsv.ns->ns_allow_nonxdr_writes) {
+			return true;
+		}
+	}
+
+	cf_atomic_int_incr(&g_config.err_write_fail_forbidden);
+
+	return false;
+}
+
 
 void
 send_rw_messages(rw_request* rw)

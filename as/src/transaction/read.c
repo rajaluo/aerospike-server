@@ -58,12 +58,11 @@
 //
 
 bool start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata);
-bool read_after_dup_res(rw_request* rw);
+bool read_dup_res_cb(rw_request* rw);
 
 void send_read_response(as_transaction* tr, as_msg_op** ops,
-		as_bin** response_bins, uint16_t n_bins, uint32_t generation,
-		uint32_t void_time, const char* set_name);
-void read_timeout(rw_request* rw);
+		as_bin** response_bins, uint16_t n_bins, const char* set_name);
+void read_timeout_cb(rw_request* rw);
 
 transaction_status read_local(as_transaction* tr, bool stop_if_not_found);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
@@ -78,8 +77,8 @@ transaction_status
 as_read_start(as_transaction* tr)
 {
 	if (tr->rsv.n_dupl == 0) {
-		// We won't be doing duplicate resolution. Try to read local copy,
-		// response is sent to origin no matter what.
+		// No duplicates to resolve. Try to read local copy - response sent to
+		// origin no matter what.
 		return read_local(tr, false);
 	}
 
@@ -90,12 +89,12 @@ as_read_start(as_transaction* tr)
 			TRANSACTION_CONSISTENCY_LEVEL(tr) !=
 					AS_POLICY_CONSISTENCY_LEVEL_ALL) {
 		// We only resolve duplicates if we don't find the record. Try to read
-		// local copy. If record is found, response is sent to origin.
+		// local copy - done, and response sent to origin, if record is found.
 		if ((status = read_local(tr, true)) != TRANS_IN_PROGRESS) {
 			return status;
 		}
 
-		// Record metadata doesn't exist, so don't try to send it.
+		// Don't try to send non-existent metadata.
 		send_metadata = false;
 	}
 
@@ -108,7 +107,7 @@ as_read_start(as_transaction* tr)
 		rw_request_release(rw);
 
 		if (status != TRANS_WAITING) {
-			send_read_response(tr, NULL, NULL, 0, 0, 0, NULL);
+			send_read_response(tr, NULL, NULL, 0, NULL);
 		}
 
 		return status;
@@ -118,7 +117,7 @@ as_read_start(as_transaction* tr)
 	if (! start_read_dup_res(rw, tr, send_metadata)) {
 		rw_request_hash_delete(&hkey);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-		send_read_response(tr, NULL, NULL, 0, 0, 0, NULL);
+		send_read_response(tr, NULL, NULL, 0, NULL);
 		return TRANS_DONE_ERROR;
 	}
 
@@ -140,11 +139,9 @@ start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata)
 		return false;
 	}
 
-	rw->timeout_cb = read_timeout;
-
 	pthread_mutex_lock(&rw->lock);
 
-	dup_res_setup_rw(rw, tr, read_after_dup_res);
+	dup_res_setup_rw(rw, tr, read_dup_res_cb, read_timeout_cb);
 	send_rw_messages(rw);
 
 	pthread_mutex_unlock(&rw->lock);
@@ -154,7 +151,7 @@ start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata)
 
 
 bool
-read_after_dup_res(rw_request* rw)
+read_dup_res_cb(rw_request* rw)
 {
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
@@ -173,68 +170,61 @@ read_after_dup_res(rw_request* rw)
 
 void
 send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
-		uint16_t n_bins, uint32_t generation, uint32_t void_time,
-		const char* set_name)
+		uint16_t n_bins, const char* set_name)
 {
-	// We don't need the tr->from check since we're protected against the race
-	// with timeout via exit clause in the dup-res ack handling, but follow the
-	// pattern.
+	// Paranoia - shouldn't get here on losing race with timeout.
+	if (! tr->from.any) {
+		cf_warning(AS_RW, "transaction origin %u has null 'from'", tr->origin);
+		return;
+	}
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		if (tr->from.proto_fd_h) {
-			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, generation,
-					void_time, ops, response_bins, n_bins, tr->rsv.ns, NULL,
-					as_transaction_trid(tr), set_name);
-			tr->from.proto_fd_h = NULL;
-		}
+		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
+				tr->void_time, ops, response_bins, n_bins, tr->rsv.ns, NULL,
+				as_transaction_trid(tr), set_name);
 		break;
 	case FROM_PROXY:
-		if (tr->from.proxy_node != 0) {
-			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
-					tr->result_code, generation, void_time, ops, response_bins,
-					n_bins, tr->rsv.ns, as_transaction_trid(tr), set_name);
-			tr->from.proxy_node = 0;
-		}
+		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
+				tr->result_code, tr->generation, tr->void_time, ops,
+				response_bins, n_bins, tr->rsv.ns, as_transaction_trid(tr),
+				set_name);
 		break;
 	case FROM_BATCH:
-		if (tr->from.batch_shared) {
-			as_batch_add_result(tr, tr->rsv.ns, set_name, generation, void_time,
-					n_bins, response_bins, ops);
-			tr->from.batch_shared = NULL;
-			// as_batch_add_result zeroed tr->msgp.
-		}
+		// TODO - redo function signature, since it takes tr.
+		as_batch_add_result(tr, tr->rsv.ns, set_name, tr->generation,
+				tr->void_time, n_bins, response_bins, ops);
+		tr->msgp = NULL;
 		break;
 	case FROM_IUDF:
 	case FROM_NSUP:
 		// Should be impossible for internal UDFs and nsup deletes to get here.
 	default:
-		cf_crash(AS_PROXY, "unexpected transaction origin %u", tr->origin);
+		cf_crash(AS_RW, "unexpected transaction origin %u", tr->origin);
 		break;
 	}
+
+	tr->from.any = NULL; // inform timeout it lost the race
 }
 
 
 void
-read_timeout(rw_request* rw)
+read_timeout_cb(rw_request* rw)
 {
+	if (! rw->from.any) {
+		return; // lost race against dup-res callback
+	}
+
 	switch (rw->origin) {
 	case FROM_CLIENT:
-		if (rw->from.proto_fd_h) {
-			as_end_of_transaction_force_close(rw->from.proto_fd_h);
-			rw->from.proto_fd_h = NULL;
-		}
+		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		break;
 	case FROM_PROXY:
-		rw->from.proxy_node = 0;
 		break;
 	case FROM_BATCH:
-		if (rw->from.batch_shared) {
-			as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
-					AS_PROTO_RESULT_FAIL_TIMEOUT);
-			rw->from.batch_shared = NULL;
-			rw->msgp = NULL;
-		}
+		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
+				AS_PROTO_RESULT_FAIL_TIMEOUT);
+		rw->msgp = NULL;
 		break;
 	case FROM_IUDF:
 	case FROM_NSUP:
@@ -244,6 +234,9 @@ read_timeout(rw_request* rw)
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
 	}
+
+	// Paranoia - shouldn't need this to inform other callback it lost race.
+	rw->from.any = NULL;
 }
 
 
@@ -289,6 +282,9 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 	}
 
 	if ((m->info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0) {
+		tr->generation = r->generation;
+		tr->void_time = r->void_time;
+
 		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_OK);
 		return TRANS_DONE_SUCCESS;
 	}
@@ -407,8 +403,10 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 		// Note - not bothering to correct alloc_sz if buf was allocated.
 	}
 	else {
-		send_read_response(tr, p_ops, response_bins, n_bins, r->generation,
-				r->void_time, set_name);
+		tr->generation = r->generation;
+		tr->void_time = r->void_time;
+
+		send_read_response(tr, p_ops, response_bins, n_bins, set_name);
 	}
 
 	destroy_stack_bins(result_bins, n_result_bins);
@@ -432,21 +430,15 @@ void
 read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code)
 {
-	uint32_t generation = 0;
-	uint32_t void_time = 0;
-
 	if (r_ref) {
 		if (rd) {
 			as_storage_record_close(r_ref->r, rd);
 		}
-
-		generation = r_ref->r->generation;
-		void_time = r_ref->r->void_time;
 
 		as_record_done(r_ref, tr->rsv.ns);
 	}
 
 	tr->result_code = (uint8_t)result_code;
 
-	send_read_response(tr, NULL, NULL, 0, generation, void_time, NULL);
+	send_read_response(tr, NULL, NULL, 0, NULL);
 }

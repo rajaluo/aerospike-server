@@ -52,8 +52,9 @@
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
+#include "transaction/delete.h"
 #include "transaction/read.h"
-#include "transaction/rw_utils.h" // for enum, which may move!
+#include "transaction/udf.h"
 #include "transaction/write.h"
 
 
@@ -245,6 +246,9 @@ process_transaction(as_transaction *tr)
 
 	bool is_write = (m->info2 & AS_MSG_INFO2_WRITE) != 0;
 	bool is_read = (m->info1 & AS_MSG_INFO1_READ) != 0;
+	// Both can be set together, but is_write puts us on the 'write path' -
+	// write reservation, replica writes, etc. Writes quickly get split into
+	// write, delete, or UDF after the reservation.
 
 	as_partition_id pid = as_partition_getid(tr->keyd);
 	cf_node dest;
@@ -331,13 +335,17 @@ process_transaction(as_transaction *tr)
 		transaction_status status;
 
 		if (is_write) {
-			MICROBENCHMARK_HIST_INSERT_AND_RESET_P(wt_q_process_hist);
-
-			status = as_write_start(tr);
+			if (as_transaction_is_delete(tr)) {
+				status = as_delete_start(tr);
+			}
+			else if (tr->origin == FROM_IUDF || as_transaction_is_udf(tr)) {
+				status = as_udf_start(tr);
+			}
+			else {
+				status = as_write_start(tr);
+			}
 		}
 		else {
-			MICROBENCHMARK_HIST_INSERT_AND_RESET_P(rt_q_process_hist);
-
 			status = as_read_start(tr);
 		}
 

@@ -65,8 +65,8 @@ ifneq ($(USE_WARM),1)
   STORAGE_SOURCES += drv_ssd_ce.c
 endif
 
-TRANSACTION_HEADERS += duplicate_resolve.h read.h replica_write.h rw_request_hash.h rw_request.h rw_utils.h write.h
-TRANSACTION_SOURCES += duplicate_resolve.c read.c replica_write.c rw_request_hash.c rw_request.c rw_utils.c write.c
+TRANSACTION_HEADERS += delete.h duplicate_resolve.h read.h replica_write.h rw_request_hash.h rw_request.h rw_utils.h udf.h write.h
+TRANSACTION_SOURCES += delete.c duplicate_resolve.c read.c replica_write.c rw_request_hash.c rw_request.c rw_utils.c udf.c write.c
 
 HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%) $(GEOSPATIAL_HEADERS:%=geospatial/%) $(TRANSACTION_HEADERS:%=transaction/%)
 SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCES:%=storage/%) $(GEOSPATIAL_SOURCES:%=geospatial/%) $(TRANSACTION_SOURCES:%=transaction/%)

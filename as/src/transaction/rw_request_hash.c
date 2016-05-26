@@ -42,13 +42,11 @@
 #include "rchash.h"
 #include "util.h"
 
-#include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
-#include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/paxos.h"
