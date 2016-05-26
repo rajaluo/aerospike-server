@@ -458,7 +458,7 @@ static int packed_map_op_get_remove_by_rank_range(const packed_map_op *op, as_bi
 
 static bool packed_map_op_get_range_by_key_interval_unordered(packed_map_op *op, const cdt_payload *key_start, const cdt_payload *key_end, uint32_t *index, uint32_t *count, order_index *ranks);
 static bool packed_map_op_get_range_by_key_interval_ordered(packed_map_op *op, const cdt_payload *key_start, const cdt_payload *key_end, uint32_t *index, uint32_t *count);
-static int packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t index, uint32_t count, order_index *ele_idx, uint32_t start, cdt_result_data *result);
+static int packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t index, uint32_t count, const order_index *ele_idx, uint32_t start, cdt_result_data *result);
 
 static bool packed_map_op_get_key_by_idx(const packed_map_op *op, cdt_payload *key, uint32_t index);
 static bool packed_map_op_get_value_by_idx(const packed_map_op *op, cdt_payload *value, uint32_t idx);
@@ -3960,7 +3960,7 @@ packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, roll
 			}
 		}
 		else if (result_data_is_return_rank(result)) {
-				ret = packed_map_op_build_rank_result_by_index_range(op, index, count, &heap._, heap.filled, result);
+			ret = packed_map_op_build_rank_result_by_index_range(op, index, count, &heap._, heap.filled, result);
 		}
 		else {
 			ret = result_data_set_range(result, index, count, op->ele_count);
@@ -4352,7 +4352,7 @@ packed_map_op_get_range_by_key_interval_ordered(packed_map_op *op, const cdt_pay
 }
 
 static int
-packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t index, uint32_t count, order_index *ele_idx, uint32_t start, cdt_result_data *result)
+packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t index, uint32_t count, const order_index *ele_idx, uint32_t start, cdt_result_data *result)
 {
 	offset_index *offidx = (offset_index *)&op->pmi.offset_idx;
 	order_index *ordidx = (order_index *)&op->pmi.value_idx;
@@ -4373,11 +4373,23 @@ packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t
 		return false;
 	}
 
+	// Preset offsets if necessary.
+	if (offset_index_fill(offidx, op->ele_count) < 0) {
+		cf_warning(AS_PARTICLE, "packed_map_op_build_rank_range_result_by_index_range() invalid packed map");
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	if (order_index_is_valid(ordidx)) {
 		if (! packed_map_op_ensure_ordidx_filled(op)) {
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
+	}
+	else {
+		order_index_inita(ordidx, op->ele_count);
+		order_index_set_sorted(ordidx, offidx, op->packed + op->ele_start, op->packed_sz - op->ele_start, SORT_BY_VALUE);
+	}
 
+	if (op_is_k_ordered(op)) {
 		for (uint32_t i = 0; i < count; i++) {
 			map_ele_find find;
 
@@ -4395,16 +4407,6 @@ packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t
 		if (! ele_idx) {
 			cf_crash(AS_PARTICLE, "packed_map_op_build_rank_range_result_by_index_range() require ele_idx != NULL for unindexed");
 		}
-
-		// Preset offsets if necessary.
-		if (offset_index_fill(offidx, op->ele_count) < 0) {
-			cf_warning(AS_PARTICLE, "packed_map_op_build_rank_range_result_by_index_range() invalid packed map");
-			return -AS_PROTO_RESULT_FAIL_PARAMETER;
-		}
-
-		// Make order index on stack.
-		order_index_inita(ordidx, op->ele_count);
-		order_index_set_sorted(ordidx, offidx, op->packed + op->ele_start, op->packed_sz - op->ele_start, SORT_BY_VALUE);
 
 		for (uint32_t i = 0; i < count; i++) {
 			uint32_t idx = order_index_get(ele_idx, start + i);
