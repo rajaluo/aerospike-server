@@ -592,8 +592,6 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 
 						pr.from.batch_shared = NULL; // pattern, not needed
 						// Note - no worries about msgp, proxy divert copied it.
-
-						cf_hist_track_insert_data_point(g_config.px_hist, pr.start_time);
 					}
 					else { // FROM_CLIENT - TODO - make this a switch!
 						cf_assert(pr.origin == FROM_CLIENT, AS_PROXY, CF_CRITICAL, "proxy response for unexpected origin %u", pr.origin);
@@ -625,8 +623,6 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 						}
 						as_proxy_set_stat_counters(0);
 SendFin:
-						cf_hist_track_insert_data_point(g_config.px_hist, pr.start_time);
-
 						// Return the fabric message or the direct file descriptor -
 						// after write and complete.
 						if (pr.from.proto_fd_h) {
@@ -634,8 +630,11 @@ SendFin:
 							pr.from.proto_fd_h = NULL; // pattern, not needed
 						}
 					}
+
 					as_fabric_msg_put(pr.fab_msg);
 					pr.fab_msg = 0;
+
+					histogram_insert_data_point(pr.ns->proxy_hist, pr.start_time);
 				}
 			}
 			else {

@@ -420,10 +420,8 @@ typedef struct as_config_s {
 	cf_atomic_int		batch_timeout;
 	cf_atomic_int		batch_errors;
 
-	cf_hist_track *		px_hist; // histogram that tracks proxy performance
-	cf_hist_track *		q_hist;  // histogram that tracks query performance
-	cf_hist_track *		q_rcnt_hist;  // histogram that tracks query row count
-
+	// For now all tracked histograms are namespace scoped, but these controls
+	// are still global:
 	uint32_t			hist_track_back; // total time span in seconds over which to cache data
 	uint32_t			hist_track_slice; // period in seconds at which to cache histogram data
 	char *				hist_track_thresholds; // comma-separated bucket (ms) values to track

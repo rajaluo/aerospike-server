@@ -1166,6 +1166,12 @@ struct as_namespace_s {
 	cf_hist_track*	read_hist;
 	cf_hist_track*	write_hist;
 	cf_hist_track*	udf_hist;
+	cf_hist_track*	query_hist;
+
+	histogram*		query_rec_count_hist;
+
+	// FIXME - needs a config bool to enable/disable.
+	histogram*		proxy_hist;
 
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)

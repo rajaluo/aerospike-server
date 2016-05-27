@@ -3385,6 +3385,8 @@ as_config_post_process(as_config *c, const char *config_file)
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
+		// Tracked histograms.
+
 		sprintf(hist_name, "{%s} read", ns->name);
 		create_and_check_hist_track(&ns->read_hist, hist_name, HIST_MILLISECONDS);
 
@@ -3394,6 +3396,18 @@ as_config_post_process(as_config *c, const char *config_file)
 		sprintf(hist_name, "{%s} udf", ns->name);
 		create_and_check_hist_track(&ns->udf_hist, hist_name, HIST_MILLISECONDS);
 
+		sprintf(hist_name, "{%s} query", ns->name);
+		create_and_check_hist_track(&ns->query_hist, hist_name, HIST_MILLISECONDS);
+
+		// Regular histograms.
+
+		sprintf(hist_name, "{%s} query-rec-count", ns->name);
+		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} proxy", ns->name);
+		create_and_check_hist(&ns->proxy_hist, hist_name, HIST_MILLISECONDS);
+
+		// Linear 'nsup' histograms.
 		// Note - histograms' ranges MUST be set before use.
 
 		sprintf(hist_name, "%s object size histogram", ns->name);
@@ -3545,10 +3559,6 @@ void
 cfg_create_all_histograms()
 {
 	as_config* c = &g_config;
-
-	create_and_check_hist_track(&c->q_hist, "query", HIST_MILLISECONDS);
-	create_and_check_hist_track(&c->q_rcnt_hist, "query_rec_count", HIST_RAW);
-	create_and_check_hist_track(&c->px_hist, "proxy", HIST_MILLISECONDS);
 
 	create_and_check_hist(&c->rt_cleanup_hist, "reads_cleanup", HIST_MILLISECONDS);
 	create_and_check_hist(&c->rt_net_hist, "reads_net", HIST_MILLISECONDS);

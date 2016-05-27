@@ -726,7 +726,7 @@ query_update_stats(as_query_transaction *qtr)
 			break;
 	}
 
-	cf_hist_track_insert_data_point(g_config.q_hist, qtr->start_time);
+	cf_hist_track_insert_data_point(qtr->ns->query_hist, qtr->start_time);
 	SINDEX_HIST_INSERT_DATA_POINT(qtr->si, query_hist, qtr->start_time);
 
 	if (qtr->querying_ai_time_ns) {
@@ -736,7 +736,7 @@ query_update_stats(as_query_transaction *qtr)
 	if (qtr->n_digests) {
 		SINDEX_HIST_INSERT_RAW(qtr->si, query_rcnt_hist, qtr->n_digests);
 		if (rows) {
-			cf_hist_track_insert_raw(g_config.q_rcnt_hist, rows);
+			histogram_insert_raw(qtr->ns->query_rec_count_hist, rows);
 			SINDEX_HIST_INSERT_RAW(qtr->si, query_diff_hist, qtr->n_digests - rows);
 		}
 	}
