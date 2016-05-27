@@ -504,7 +504,9 @@ repl_write_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	rw->repl_write_cb(rw);
+	if (! rw->respond_client_on_master_completion) {
+		rw->repl_write_cb(rw);
+	}
 
 	pthread_mutex_unlock(&rw->lock);
 

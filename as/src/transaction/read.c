@@ -61,7 +61,8 @@ bool start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata);
 bool read_dup_res_cb(rw_request* rw);
 
 void send_read_response(as_transaction* tr, as_msg_op** ops,
-		as_bin** response_bins, uint16_t n_bins, const char* set_name);
+		as_bin** response_bins, uint16_t n_bins, const char* set_name,
+		cf_dyn_buf* db);
 void read_timeout_cb(rw_request* rw);
 
 transaction_status read_local(as_transaction* tr, bool stop_if_not_found);
@@ -107,7 +108,7 @@ as_read_start(as_transaction* tr)
 		rw_request_release(rw);
 
 		if (status != TRANS_WAITING) {
-			send_read_response(tr, NULL, NULL, 0, NULL);
+			send_read_response(tr, NULL, NULL, 0, NULL, NULL);
 		}
 
 		return status;
@@ -117,7 +118,7 @@ as_read_start(as_transaction* tr)
 	if (! start_read_dup_res(rw, tr, send_metadata)) {
 		rw_request_hash_delete(&hkey);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
-		send_read_response(tr, NULL, NULL, 0, NULL);
+		send_read_response(tr, NULL, NULL, 0, NULL, NULL);
 		return TRANS_DONE_ERROR;
 	}
 
@@ -170,7 +171,7 @@ read_dup_res_cb(rw_request* rw)
 
 void
 send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
-		uint16_t n_bins, const char* set_name)
+		uint16_t n_bins, const char* set_name, cf_dyn_buf* db)
 {
 	// Paranoia - shouldn't get here on losing race with timeout.
 	if (! tr->from.any) {
@@ -180,18 +181,31 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
-				tr->void_time, ops, response_bins, n_bins, tr->rsv.ns, NULL,
-				as_transaction_trid(tr), set_name);
+		if (db && db->used_sz != 0) {
+			as_msg_send_ops_reply(tr->from.proto_fd_h, db);
+		}
+		else {
+			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
+					tr->generation, tr->void_time, ops, response_bins, n_bins,
+					tr->rsv.ns, NULL, as_transaction_trid(tr), set_name);
+		}
+		cf_hist_track_insert_data_point(tr->rsv.ns->read_hist, tr->start_time);
 		break;
 	case FROM_PROXY:
-		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
-				tr->result_code, tr->generation, tr->void_time, ops,
-				response_bins, n_bins, tr->rsv.ns, as_transaction_trid(tr),
-				set_name);
+		if (db && db->used_sz != 0) {
+			as_proxy_send_ops_response(tr->from.proxy_node,
+					tr->from_data.proxy_tid, db);
+		}
+		else {
+			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
+					tr->result_code, tr->generation, tr->void_time, ops,
+					response_bins, n_bins, tr->rsv.ns, as_transaction_trid(tr),
+					set_name);
+		}
 		break;
 	case FROM_BATCH:
-		// TODO - redo function signature, since it takes tr.
+		// TODO - redo function signature, since it takes tr. Also, we'd like it
+		// to be able to take a db.
 		as_batch_add_result(tr, tr->rsv.ns, set_name, tr->generation,
 				tr->void_time, n_bins, response_bins, ops);
 		tr->msgp = NULL;
@@ -218,6 +232,7 @@ read_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
+		cf_hist_track_insert_data_point(rw->rsv.ns->read_hist, rw->start_time);
 		break;
 	case FROM_PROXY:
 		break;
@@ -284,6 +299,7 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 	if ((m->info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0) {
 		tr->generation = r->generation;
 		tr->void_time = r->void_time;
+		tr->last_update_time = r->last_update_time;
 
 		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_OK);
 		return TRANS_DONE_SUCCESS;
@@ -376,16 +392,9 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 	const char* set_name = (m->info1 & AS_MSG_INFO1_XDR) != 0 ?
 			as_index_get_set_name(r, ns) : NULL;
 
-	// Container to allow use of as_msg_send_ops_reply(), until we refactor and
-	// clean up single transaction response handling generally.
 	cf_dyn_buf_define_size(db, 16 * 1024);
 
-	// Note - don't really need proto_fd_h check since we bailed early on losing
-	// race vs. timeout.
-	if (tr->origin == FROM_CLIENT && tr->from.proto_fd_h) {
-		// Single out the client transaction case for now - others don't need
-		// this special handling (as urgently) for various reasons.
-
+	if (tr->origin != FROM_BATCH) {
 		db.used_sz = db.alloc_sz;
 		db.buf = (uint8_t*)as_msg_make_response_msg(tr->result_code,
 				r->generation, r->void_time, p_ops, response_bins, n_bins, ns,
@@ -405,8 +414,10 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 	else {
 		tr->generation = r->generation;
 		tr->void_time = r->void_time;
+		tr->last_update_time = r->last_update_time;
 
-		send_read_response(tr, p_ops, response_bins, n_bins, set_name);
+		// TODO - deal with as_batch_add_result() to be able to take db ???
+		send_read_response(tr, p_ops, response_bins, n_bins, set_name, NULL);
 	}
 
 	destroy_stack_bins(result_bins, n_result_bins);
@@ -415,8 +426,7 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 
 	// Now that we're not under the record lock, send the message we just built.
 	if (db.used_sz != 0) {
-		// Using the function for write responses for now.
-		as_msg_send_ops_reply(tr->from.proto_fd_h, &db);
+		send_read_response(tr, NULL, NULL, 0, NULL, &db);
 
 		cf_dyn_buf_free(&db);
 		tr->from.proto_fd_h = NULL;
@@ -440,5 +450,5 @@ read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 
 	tr->result_code = (uint8_t)result_code;
 
-	send_read_response(tr, NULL, NULL, 0, NULL);
+	send_read_response(tr, NULL, NULL, 0, NULL, NULL);
 }

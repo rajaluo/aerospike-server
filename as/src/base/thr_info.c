@@ -2685,10 +2685,8 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	as_xdr_get_config(db);
 
 	// Add the current histogram tracking settings.
-	cf_hist_track_get_settings(g_config.rt_hist, db);
-	cf_hist_track_get_settings(g_config.wt_hist, db);
+	// FIXME - do the new namespace-scoped tracked histograms.
 	cf_hist_track_get_settings(g_config.px_hist, db);
-	cf_hist_track_get_settings(g_config.ut_hist, db);
 	cf_hist_track_get_settings(g_config.q_hist, db);
 	cf_hist_track_get_settings(g_config.q_rcnt_hist, db);
 
@@ -3994,17 +3992,9 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		cf_debug(AS_INFO, "hist track %s command: no histogram specified - doing all", name);
 	}
 	else {
-		if (0 == strcmp(value_str, "reads")) {
-			hist_p = g_config.rt_hist;
-		}
-		else if (0 == strcmp(value_str, "writes") || 0 == strcmp(value_str, "writes_master")) {
-			hist_p = g_config.wt_hist;
-		}
-		else if (0 == strcmp(value_str, "proxy")) {
+		// FIXME - do the new namespace-scoped tracked histograms.
+		if (0 == strcmp(value_str, "proxy")) {
 			hist_p = g_config.px_hist;
-		}
-		else if (0 == strcmp(value_str, "udf")) {
-			hist_p = g_config.ut_hist;
 		}
 		else if (0 == strcmp(value_str, "query")) {
 			hist_p = g_config.q_hist;
@@ -4021,10 +4011,8 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			cf_hist_track_stop(hist_p);
 		}
 		else {
-			cf_hist_track_stop(g_config.rt_hist);
-			cf_hist_track_stop(g_config.wt_hist);
+			// FIXME - do the new namespace-scoped tracked histograms.
 			cf_hist_track_stop(g_config.px_hist);
-			cf_hist_track_stop(g_config.ut_hist);
 			cf_hist_track_stop(g_config.q_rcnt_hist);
 			cf_hist_track_stop(g_config.q_hist);
 		}
@@ -4084,12 +4072,10 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			}
 		}
 		else {
-			if (cf_hist_track_start(g_config.rt_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.wt_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.px_hist, back_sec, slice_sec, thresholds) &&
+			// FIXME - do the new namespace-scoped tracked histograms.
+			if (cf_hist_track_start(g_config.px_hist, back_sec, slice_sec, thresholds) &&
 				cf_hist_track_start(g_config.q_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.q_rcnt_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.ut_hist, back_sec, slice_sec, thresholds)) {
+				cf_hist_track_start(g_config.q_rcnt_hist, back_sec, slice_sec, thresholds)) {
 
 				cf_dyn_buf_append_string(db, "ok");
 			}
@@ -4125,10 +4111,8 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		cf_hist_track_get_info(hist_p, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 	}
 	else {
-		cf_hist_track_get_info(g_config.rt_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-		cf_hist_track_get_info(g_config.wt_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
+		// FIXME - do the new namespace-scoped tracked histograms.
 		cf_hist_track_get_info(g_config.px_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-		cf_hist_track_get_info(g_config.ut_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 		cf_hist_track_get_info(g_config.q_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 	}
 
@@ -4925,9 +4909,14 @@ info_debug_ticker_fn(void *unused)
 							cf_atomic_int_get(ns->migrate_rx_partitions_active),
 							migrations_pct_complete
 							);
-				} else {
+				}
+				else {
 					cf_info(AS_INFO, "{%s} migrations - complete", ns->name);
 				}
+
+				cf_hist_track_dump(ns->read_hist);
+				cf_hist_track_dump(ns->write_hist);
+				cf_hist_track_dump(ns->udf_hist);
 			}
 
 			as_partition_states ps;
@@ -4935,18 +4924,9 @@ info_debug_ticker_fn(void *unused)
 			cf_info(AS_INFO, "   partitions: actual %d sync %d desync %d zombie %d absent %d",
 					ps.sync_actual, ps.sync_replica, ps.desync, ps.zombie, ps.absent);
 
-			if (g_config.rt_hist)
-				cf_hist_track_dump(g_config.rt_hist);
-			if (g_config.wt_hist)
-				cf_hist_track_dump(g_config.wt_hist);
-			if (g_config.px_hist)
-				cf_hist_track_dump(g_config.px_hist);
-			if (g_config.ut_hist)
-				cf_hist_track_dump(g_config.ut_hist);
-			if (g_config.q_hist)
-				cf_hist_track_dump(g_config.q_hist);
-			if (g_config.q_rcnt_hist)
-				cf_hist_track_dump(g_config.q_rcnt_hist);
+			cf_hist_track_dump(g_config.px_hist);
+			cf_hist_track_dump(g_config.q_hist);
+			cf_hist_track_dump(g_config.q_rcnt_hist);
 
 			as_query_histogram_dumpall();
 			as_sindex_gc_histogram_dumpall();

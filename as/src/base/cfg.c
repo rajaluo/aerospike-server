@@ -90,6 +90,8 @@ void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
 void cfg_init_si_var(as_namespace* ns);
 uint32_t cfg_obj_size_hist_max(uint32_t hist_max);
+void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
+void create_and_check_hist(histogram** h, const char* name, histogram_scale scale);
 void cfg_create_all_histograms();
 int cfg_reset_self_node(as_config* config_p);
 char* cfg_set_addr(const char* name);
@@ -3382,6 +3384,16 @@ as_config_post_process(as_config *c, const char *config_file)
 		client_replica_maps_create(ns);
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
+
+		sprintf(hist_name, "{%s} read", ns->name);
+		create_and_check_hist_track(&ns->read_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} write", ns->name);
+		create_and_check_hist_track(&ns->write_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} udf", ns->name);
+		create_and_check_hist_track(&ns->udf_hist, hist_name, HIST_MILLISECONDS);
+
 		// Note - histograms' ranges MUST be set before use.
 
 		sprintf(hist_name, "%s object size histogram", ns->name);
@@ -3505,7 +3517,7 @@ cfg_obj_size_hist_max(uint32_t hist_max)
 // Other (non-item-specific) utilities.
 //
 
-static void
+void
 create_and_check_hist_track(cf_hist_track** h, const char* name,
 		histogram_scale scale)
 {
@@ -3521,7 +3533,7 @@ create_and_check_hist_track(cf_hist_track** h, const char* name,
 	}
 }
 
-static void
+void
 create_and_check_hist(histogram** h, const char* name, histogram_scale scale)
 {
 	if (NULL == (*h = histogram_create(name, scale))) {
@@ -3534,11 +3546,8 @@ cfg_create_all_histograms()
 {
 	as_config* c = &g_config;
 
-	create_and_check_hist_track(&c->rt_hist, "reads", HIST_MILLISECONDS);
 	create_and_check_hist_track(&c->q_hist, "query", HIST_MILLISECONDS);
 	create_and_check_hist_track(&c->q_rcnt_hist, "query_rec_count", HIST_RAW);
-	create_and_check_hist_track(&c->ut_hist, "udf", HIST_MILLISECONDS);
-	create_and_check_hist_track(&c->wt_hist, "writes_master", HIST_MILLISECONDS);
 	create_and_check_hist_track(&c->px_hist, "proxy", HIST_MILLISECONDS);
 
 	create_and_check_hist(&c->rt_cleanup_hist, "reads_cleanup", HIST_MILLISECONDS);

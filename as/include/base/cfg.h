@@ -420,9 +420,6 @@ typedef struct as_config_s {
 	cf_atomic_int		batch_timeout;
 	cf_atomic_int		batch_errors;
 
-	cf_hist_track *		rt_hist; // histogram that tracks read performance
-	cf_hist_track *		ut_hist; // histogram that tracks udf performance
-	cf_hist_track *		wt_hist; // histogram that tracks write performance
 	cf_hist_track *		px_hist; // histogram that tracks proxy performance
 	cf_hist_track *		q_hist;  // histogram that tracks query performance
 	cf_hist_track *		q_rcnt_hist;  // histogram that tracks query row count

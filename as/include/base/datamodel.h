@@ -42,6 +42,7 @@
 #include "arenax.h"
 #include "dynbuf.h"
 #include "hist.h"
+#include "hist_track.h"
 #include "linear_hist.h"
 #include "util.h"
 #include "vmapx.h"
@@ -1161,6 +1162,10 @@ struct as_namespace_s {
 	uint32_t		cold_start_evict_ttl;
 	cf_atomic32		cold_start_threshold_void_time;
 	uint32_t		cold_start_max_void_time;
+
+	cf_hist_track*	read_hist;
+	cf_hist_track*	write_hist;
+	cf_hist_track*	udf_hist;
 
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)

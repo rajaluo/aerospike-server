@@ -298,8 +298,8 @@ send_delete_response(as_transaction* tr)
 		break;
 	case FROM_PROXY:
 		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
-				tr->result_code, 0, 0, NULL, NULL, 0, NULL,
-				as_transaction_trid(tr), NULL);
+				tr->result_code, tr->generation, tr->void_time, NULL, NULL, 0,
+				NULL, as_transaction_trid(tr), NULL);
 		break;
 	case FROM_NSUP:
 		break;
@@ -402,9 +402,11 @@ delete_master(as_transaction* tr)
 	// Save the set-ID for XDR.
 	uint16_t set_id = as_index_get_set_id(r);
 
-	// Save the generation for XDR, and for ack to client. (This will also go to
-	// the prole, but the prole will ignore it.)
+	// Save for XDR, and for ack to client. (These will also go to the prole,
+	// but the prole will ignore it.)
 	tr->generation = r->generation;
+	tr->void_time = r->void_time;
+	tr->last_update_time = r->last_update_time;
 
 	as_index_delete(tree, &tr->keyd);
 	cf_atomic_int_incr(&g_config.stat_delete_success);

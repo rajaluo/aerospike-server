@@ -92,6 +92,7 @@ send_udf_response_bin(as_transaction* tr, as_bin** response_bins, uint16_t n_bin
 					tr->rsv.ns, NULL, as_transaction_trid(tr), NULL);
 			tr->from.proto_fd_h = NULL;
 		}
+		cf_hist_track_insert_data_point(tr->rsv.ns->udf_hist, tr->start_time);
 		break;
 	case FROM_PROXY:
 		if (tr->from.proxy_node != 0) {
@@ -812,7 +813,7 @@ udf_apply_record(udf_call * call, as_rec *rec, as_result *res)
 	uint64_t now = cf_getns();
 	int ret_value = as_module_apply_record(&mod_lua, &ctx,
 			call->def->filename, call->def->function, rec, &arglist, res);
-	cf_hist_track_insert_data_point(g_config.ut_hist, now);
+
 	if (g_config.ldt_benchmarks) {
 		ldt_record *lrecord = (ldt_record *)as_rec_source(rec);
 		if (lrecord->udf_context & UDF_CONTEXT_LDT) {

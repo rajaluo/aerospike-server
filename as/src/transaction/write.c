@@ -374,6 +374,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->generation, tr->void_time, NULL, NULL, 0, NULL, NULL,
 					as_transaction_trid(tr), NULL);
 		}
+		cf_hist_track_insert_data_point(tr->rsv.ns->write_hist, tr->start_time);
 		break;
 	case FROM_PROXY:
 		if (db && db->used_sz != 0) {
@@ -382,8 +383,8 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		}
 		else {
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
-					tr->result_code, 0, 0, NULL, NULL, 0, NULL,
-					as_transaction_trid(tr), NULL);
+					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
+					0, NULL, as_transaction_trid(tr), NULL);
 		}
 		break;
 	case FROM_BATCH:
@@ -410,6 +411,7 @@ write_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
+		cf_hist_track_insert_data_point(rw->rsv.ns->write_hist, rw->start_time);
 		break;
 	case FROM_PROXY:
 		break;
