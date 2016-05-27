@@ -126,15 +126,9 @@ const as_particle_vtable map_vtable = {
 #define AS_PACKED_MAP_INVALID	1
 #define AS_PACKED_MAP_FAILED	2
 
-#define AS_PACKED_MAP_FLAG_NONE				0x00
-#define AS_PACKED_MAP_FLAG_K_ORDERED		0x01
-#define AS_PACKED_MAP_FLAG_V_ORDERED		0x02 // not allowed on its own
 #define AS_PACKED_MAP_FLAG_RESERVED_0		0x04 // placeholder for multimap
-#define AS_PACKED_MAP_FLAG_PRESERVE_ORDER	0x08
 #define AS_PACKED_MAP_FLAG_OFF_IDX			0x10 // has list offset index
 #define AS_PACKED_MAP_FLAG_ORD_IDX			0x20 // has value order index
-
-#define AS_PACKED_MAP_FLAG_KV_ORDERED	(AS_PACKED_MAP_FLAG_K_ORDERED | AS_PACKED_MAP_FLAG_V_ORDERED)
 
 struct order_index_adjust_s;
 struct packed_map_op_s;

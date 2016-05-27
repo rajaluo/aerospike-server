@@ -38,8 +38,6 @@
 // Typedefs & constants.
 //
 
-#define CDT_DO_TEMP_HISTO	1
-
 typedef struct rollback_alloc_s {
 	cf_ll_buf *ll_buf;
 	size_t malloc_list_sz;
