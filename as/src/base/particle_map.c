@@ -3496,7 +3496,7 @@ packed_map_op_find_key(const packed_map_op *op, map_ele_find *find, const cdt_pa
 					return false;
 				}
 
-				pk.offset = (int)offset_index_get(offidx, i + 1) + op->ele_start;
+				pk.offset = (int)offset_index_get(offidx, i + 1);
 				size = (uint32_t)ret;
 			}
 			else {
