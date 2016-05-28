@@ -69,6 +69,22 @@ void udf_timeout_cb(rw_request* rw);
 
 transaction_status udf_master(rw_request* rw, as_transaction* tr);
 
+static inline void
+client_udf_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_client_udf_success);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_client_udf_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_client_udf_error);
+		break;
+	}
+}
+
 
 //==========================================================
 // Public API.
@@ -311,6 +327,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 					as_transaction_trid(tr), NULL);
 		}
 		cf_hist_track_insert_data_point(tr->rsv.ns->udf_hist, tr->start_time);
+		client_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:
 		if (db && db->used_sz != 0) {
@@ -352,6 +369,7 @@ udf_timeout_cb(rw_request* rw)
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		cf_hist_track_insert_data_point(rw->rsv.ns->udf_hist, rw->start_time);
+		client_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
 		break;

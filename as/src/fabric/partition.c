@@ -615,9 +615,6 @@ as_partition_getstates(as_partition_states *ps)
 
 			pthread_mutex_unlock(&p->lock);
 		}
-
-		cf_atomic_int_set(&ns->n_absent_partitions, ns_absent_partitions);
-		cf_atomic_int_set(&ns->n_actual_partitions, ps->sync_actual);
 	}
 }
 

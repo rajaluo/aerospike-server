@@ -329,31 +329,11 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_get_utilization(db);
 
-	cf_dyn_buf_append_string(db, ";stat_read_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_reqs);
 	cf_dyn_buf_append_string(db, ";stat_read_reqs_xdr=");
 	APPEND_STAT_COUNTER(db, g_config.stat_read_reqs_xdr);
-	cf_dyn_buf_append_string(db, ";stat_read_success=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_success);
-	cf_dyn_buf_append_string(db, ";stat_read_errs_notfound=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_errs_notfound);
-	cf_dyn_buf_append_string(db, ";stat_read_errs_other=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_errs_other);
 
-
-	cf_dyn_buf_append_string(db, ";stat_write_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_reqs);
 	cf_dyn_buf_append_string(db, ";stat_write_reqs_xdr=");
 	APPEND_STAT_COUNTER(db, g_config.stat_write_reqs_xdr);
-	cf_dyn_buf_append_string(db, ";stat_write_success=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_success);
-	cf_dyn_buf_append_string(db, ";stat_write_errs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_errs);
-
-	cf_dyn_buf_append_string(db, ";stat_delete_success=");
-	APPEND_STAT_COUNTER(db, g_config.stat_delete_success);
-	cf_dyn_buf_append_string(db, ";stat_rw_timeout=");
-	APPEND_STAT_COUNTER(db, g_config.stat_rw_timeout);
 
 	cf_dyn_buf_append_string(db, ";udf_read_reqs=");
 	APPEND_STAT_COUNTER(db, g_config.udf_read_reqs);
@@ -388,14 +368,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";udf_replica_writes=");
 	APPEND_STAT_COUNTER(db, g_config.udf_replica_writes);
 
-	cf_dyn_buf_append_string(db, ";stat_proxy_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_proxy_reqs);
 	cf_dyn_buf_append_string(db, ";stat_proxy_reqs_xdr=");
 	APPEND_STAT_COUNTER(db, g_config.stat_proxy_reqs_xdr);
-	cf_dyn_buf_append_string(db, ";stat_proxy_success=");
-	APPEND_STAT_COUNTER(db, g_config.stat_proxy_success);
-	cf_dyn_buf_append_string(db, ";stat_proxy_errs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_proxy_errs);
 	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
 	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
 
@@ -685,12 +659,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_duplicate_operation);
 	cf_dyn_buf_append_string(db, ";uptime=");
 	APPEND_STAT_COUNTER(db, ((cf_getms() - g_config.start_ms) / 1000) );
-
-	// Write errors are now split into write_errs_notfound and write_errs_other
-	cf_dyn_buf_append_string(db, ";stat_write_errs_notfound=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_errs_notfound);
-	cf_dyn_buf_append_string(db, ";stat_write_errs_other=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_errs_other);
 
 	cf_dyn_buf_append_string(db, ";heartbeat_received_self=");
 	cf_dyn_buf_append_uint64(db, g_config.heartbeat_received_self);
@@ -4956,6 +4924,15 @@ info_debug_ticker_fn(void *unused)
 					cf_info(AS_INFO, "{%s} migrations - complete", ns->name);
 				}
 
+				cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu) udf (%lu,%lu,%lu)",
+						ns->name,
+						ns->n_client_proxy_success, ns->n_client_proxy_timeout, ns->n_client_proxy_error,
+						ns->n_client_read_success, ns->n_client_read_timeout, ns->n_client_read_error, ns->n_client_read_not_found,
+						ns->n_client_write_success, ns->n_client_write_timeout, ns->n_client_write_error,
+						ns->n_client_delete_success, ns->n_client_delete_timeout, ns->n_client_delete_error,
+						ns->n_client_udf_success, ns->n_client_udf_timeout, ns->n_client_udf_error
+						);
+
 				cf_hist_track_dump(ns->read_hist);
 				cf_hist_track_dump(ns->write_hist);
 				cf_hist_track_dump(ns->udf_hist);
@@ -5134,9 +5111,6 @@ info_debug_ticker_fn(void *unused)
 			if ((ticker_cycles++ % 30) == 0) {
 				cf_info(AS_INFO, "node id %"PRIx64"", g_config.self_node);
 				// Various transaction & error counters
-				cf_info(AS_INFO, "reads %"PRIu64",%"PRIu64" : writes %"PRIu64",%"PRIu64"",
-						g_config.stat_read_success, g_config.stat_read_errs_notfound + g_config.stat_read_errs_other,
-						g_config.stat_write_success, g_config.stat_write_errs);
 				cf_info(AS_INFO, "udf reads %"PRIu64",%"PRIu64" : udf writes %"PRIu64",%"PRIu64" : udf deletes %"PRIu64",%"PRIu64" : lua errors %"PRIu64"",
 						g_config.udf_read_success, g_config.udf_read_errs_other,
 						g_config.udf_write_success, g_config.udf_write_errs_other,
@@ -5152,8 +5126,6 @@ info_debug_ticker_fn(void *unused)
 				uint64_t lookup_failures = cf_atomic64_get(g_config.n_lookup_errs) + cf_atomic64_get(g_config.n_lookup_abort);
 				cf_info(AS_INFO, "aggregation queries %"PRIu64",%"PRIu64" : lookup queries %"PRIu64",%"PRIu64"",
 						cf_atomic64_get(g_config.n_agg_success), agg_failures, cf_atomic64_get(g_config.n_lookup_success), lookup_failures);
-				cf_info(AS_INFO, "proxies %"PRIu64",%"PRIu64"",
-						g_config.stat_proxy_success, g_config.stat_proxy_errs);
 
 				// Namespace stats
 				for (uint idx = 0; idx < g_config.n_namespaces; idx++) {
@@ -5959,6 +5931,29 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";hwm-breached=");
 	cf_dyn_buf_append_string(db, cf_atomic32_get(ns->hwm_breached) != 0 ? "true" : "false");
+
+	// From-client transaction stats.
+
+	info_append_uint64("", "client-proxy-success",  ns->n_client_proxy_success, db);
+	info_append_uint64("", "client-proxy-timeout",  ns->n_client_proxy_timeout, db);
+	info_append_uint64("", "client-proxy-error",  ns->n_client_proxy_error, db);
+
+	info_append_uint64("", "client-read-success",  ns->n_client_read_success, db);
+	info_append_uint64("", "client-read-timeout",  ns->n_client_read_timeout, db);
+	info_append_uint64("", "client-read-error",  ns->n_client_read_error, db);
+	info_append_uint64("", "client-read-not-found",  ns->n_client_read_not_found, db);
+
+	info_append_uint64("", "client-write-success",  ns->n_client_write_success, db);
+	info_append_uint64("", "client-write-timeout",  ns->n_client_write_timeout, db);
+	info_append_uint64("", "client-write-error",  ns->n_client_write_error, db);
+
+	info_append_uint64("", "client-delete-success",  ns->n_client_delete_success, db);
+	info_append_uint64("", "client-delete-timeout",  ns->n_client_delete_timeout, db);
+	info_append_uint64("", "client-delete-error",  ns->n_client_delete_error, db);
+
+	info_append_uint64("", "client-udf-success",  ns->n_client_udf_success, db);
+	info_append_uint64("", "client-udf-timeout",  ns->n_client_udf_timeout, db);
+	info_append_uint64("", "client-udf-error",  ns->n_client_udf_error, db);
 
 	// remaining bin-name slots (yes, this can be negative)
 	if (! ns->single_bin) {

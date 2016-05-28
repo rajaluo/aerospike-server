@@ -480,33 +480,13 @@ typedef struct as_config_s {
 	histogram *			ldt_update_io_bytes_hist;   // histogram that tracks number bytes written by LDT every transaction
 	histogram * 		ldt_hist;            // histogram that tracks ldt performance
 
-	cf_atomic_int		stat_read_reqs;
 	cf_atomic_int		stat_read_reqs_xdr;
-	cf_atomic_int		stat_read_success;
-	cf_atomic_int		stat_read_errs_notfound;
-	cf_atomic_int		stat_read_errs_other;
-
-	cf_atomic_int		stat_write_reqs;
-	cf_atomic_int		stat_write_reqs_xdr;
-	cf_atomic_int		stat_write_success;
-	cf_atomic_int		stat_write_errs; // deprecated
-	cf_atomic_int		stat_write_errs_notfound;
-	cf_atomic_int		stat_write_errs_other;
-	cf_atomic_int		stat_write_latency_gt50;
-	cf_atomic_int		stat_write_latency_gt100;
-	cf_atomic_int		stat_write_latency_gt250;
-
-	cf_atomic_int		stat_delete_success;
-	cf_atomic_int		stat_rw_timeout;
+	cf_atomic_int		stat_write_reqs_xdr; // FIXME - what do we need?
 
 	cf_atomic_int		stat_compressed_pkts_received;
 
-	cf_atomic_int		stat_proxy_reqs;
-	cf_atomic_int		stat_proxy_reqs_xdr;
-	cf_atomic_int		stat_proxy_success;
-	cf_atomic_int		stat_proxy_errs;
-	cf_atomic_int		stat_proxy_retransmits;
-	cf_atomic_int		stat_proxy_redirect;
+	cf_atomic_int		stat_proxy_reqs; // FIXME - what do we need?
+	cf_atomic_int		stat_proxy_reqs_xdr; // FIXME - what do we need?
 
 	// When a Prole Write fails, it returns a CLUSTER_KEY_MISMATCH error to the
 	// master, who then re-queues the transaction to be performed again.

@@ -1074,7 +1074,6 @@ struct as_namespace_s {
 	uint32_t	evict_tenths_pct;
 	uint64_t	default_ttl;
 	uint64_t	max_ttl;
-	int			auto_hwm_last_free;
 	int			storage_min_free_wblocks; // the number of wblocks per device to "reserve"
 	int			storage_last_avail_pct; // most recently calculated available percent
 	int			storage_max_write_q; // storage_max_write_cache is converted to this
@@ -1085,11 +1084,32 @@ struct as_namespace_s {
 	cf_atomic_int	n_objects;
 	cf_atomic_int	n_sub_objects;
 	cf_atomic_int	n_bytes_memory;
-	cf_atomic_int	n_absent_partitions;
-	cf_atomic_int	n_actual_partitions;
 	cf_atomic_int	n_expired_objects;
 	cf_atomic_int	n_evicted_objects;
 	cf_atomic_int	n_deleted_set_objects;
+
+	// From-client transaction stats.
+
+	cf_atomic64		n_client_proxy_success;
+	cf_atomic64		n_client_proxy_timeout;
+	cf_atomic64		n_client_proxy_error;
+
+	cf_atomic64		n_client_read_success;
+	cf_atomic64		n_client_read_timeout;
+	cf_atomic64		n_client_read_error;
+	cf_atomic64		n_client_read_not_found;
+
+	cf_atomic64		n_client_write_success;
+	cf_atomic64		n_client_write_timeout;
+	cf_atomic64		n_client_write_error;
+
+	cf_atomic64		n_client_delete_success;
+	cf_atomic64		n_client_delete_timeout;
+	cf_atomic64		n_client_delete_error;
+
+	cf_atomic64		n_client_udf_success;
+	cf_atomic64		n_client_udf_timeout;
+	cf_atomic64		n_client_udf_error;
 
 	// migration counters
 	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only

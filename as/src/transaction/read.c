@@ -69,6 +69,25 @@ transaction_status read_local(as_transaction* tr, bool stop_if_not_found);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code);
 
+static inline void
+client_read_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_client_read_success);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_client_read_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_client_read_error);
+		break;
+	case AS_PROTO_RESULT_FAIL_NOTFOUND:
+		cf_atomic64_incr(&ns->n_client_read_not_found);
+		break;
+	}
+}
+
 
 //==========================================================
 // Public API.
@@ -190,6 +209,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 					tr->rsv.ns, NULL, as_transaction_trid(tr), set_name);
 		}
 		cf_hist_track_insert_data_point(tr->rsv.ns->read_hist, tr->start_time);
+		client_read_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:
 		if (db && db->used_sz != 0) {
@@ -233,6 +253,7 @@ read_timeout_cb(rw_request* rw)
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		cf_hist_track_insert_data_point(rw->rsv.ns->read_hist, rw->start_time);
+		client_read_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
 		break;

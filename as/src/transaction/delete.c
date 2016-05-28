@@ -70,6 +70,22 @@ void delete_timeout_cb(rw_request* rw);
 
 transaction_status delete_master(as_transaction* tr);
 
+static inline void
+client_delete_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_client_delete_success);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_client_delete_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_client_delete_error);
+		break;
+	}
+}
+
 
 //==========================================================
 // Public API.
@@ -295,6 +311,7 @@ send_delete_response(as_transaction* tr)
 		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
 				tr->void_time, NULL, NULL, 0, NULL, NULL,
 				as_transaction_trid(tr), NULL);
+		client_delete_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:
 		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
@@ -325,6 +342,7 @@ delete_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
+		client_delete_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
 		break;
@@ -409,7 +427,6 @@ delete_master(as_transaction* tr)
 	tr->last_update_time = r->last_update_time;
 
 	as_index_delete(tree, &tr->keyd);
-	cf_atomic_int_incr(&g_config.stat_delete_success);
 	as_record_done(&r_ref, ns);
 
 	if (! is_xdr_delete_shipping_enabled()) {

@@ -136,12 +136,19 @@ proxy_id_hash(void *value)
 }
 
 
-void as_proxy_set_stat_counters(int rv) {
-	if (rv == 0) {
-		cf_atomic_int_incr(&g_config.stat_proxy_success);
-	}
-	else {
-		cf_atomic_int_incr(&g_config.stat_proxy_errs);
+static inline void
+client_proxy_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_client_proxy_success);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_client_proxy_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_client_proxy_error);
+		break;
 	}
 }
 
@@ -582,12 +589,10 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 
 						if (msg_get_buf(pr.fab_msg, PROXY_FIELD_DIGEST, (byte **)&digest, &digest_sz, MSG_GET_DIRECT) == 0) {
 							as_batch_add_proxy_result(pr.from.batch_shared, pr.batch_index, digest, (cl_msg*)proto, proto_sz);
-							as_proxy_set_stat_counters(0);
 						}
 						else {
 							cf_warning(AS_PROXY, "Failed to find batch proxy digest %u", transaction_id);
 							as_batch_add_error(pr.from.batch_shared, pr.batch_index, AS_PROTO_RESULT_FAIL_UNKNOWN);
-							as_proxy_set_stat_counters(-1);
 						}
 
 						pr.from.batch_shared = NULL; // pattern, not needed
@@ -596,6 +601,8 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 					else { // FROM_CLIENT - TODO - make this a switch!
 						cf_assert(pr.origin == FROM_CLIENT, AS_PROXY, CF_CRITICAL, "proxy response for unexpected origin %u", pr.origin);
 						cf_assert(pr.from.proto_fd_h, AS_PROXY, CF_CRITICAL, "null file handle");
+
+						int stat_result = AS_PROTO_RESULT_OK;
 
 						size_t pos = 0;
 						while (pos < proto_sz) {
@@ -608,8 +615,8 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 									// Common when a client aborts.
 									as_end_of_transaction_force_close(pr.from.proto_fd_h);
 									pr.from.proto_fd_h = NULL;
-									as_proxy_set_stat_counters(-1);
-									goto SendFin;
+									stat_result = AS_PROTO_RESULT_FAIL_UNKNOWN;
+									break;
 								}
 								usleep(1); // yield
 							}
@@ -617,29 +624,31 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 								cf_warning(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ", pr.from.proto_fd_h->fd, proto_sz, pos);
 								as_end_of_transaction_force_close(pr.from.proto_fd_h);
 								pr.from.proto_fd_h = NULL;
-								as_proxy_set_stat_counters(-1);
-								goto SendFin;
+								stat_result = AS_PROTO_RESULT_FAIL_UNKNOWN;
+								break;
 							}
 						}
-						as_proxy_set_stat_counters(0);
-SendFin:
+
 						// Return the fabric message or the direct file descriptor -
 						// after write and complete.
 						if (pr.from.proto_fd_h) {
 							as_end_of_transaction_ok(pr.from.proto_fd_h);
 							pr.from.proto_fd_h = NULL; // pattern, not needed
 						}
+
+						// TODO - is scope incomplete?
+						client_proxy_update_stats(pr.ns, stat_result);
 					}
 
 					as_fabric_msg_put(pr.fab_msg);
 					pr.fab_msg = 0;
 
+					// TODO - not sure if this should care about origin.
 					histogram_insert_data_point(pr.ns->proxy_hist, pr.start_time);
 				}
 			}
 			else {
 				cf_debug(AS_PROXY, "proxy: received result but no transaction, tid %d", transaction_id);
-				as_proxy_set_stat_counters(-1);
 			}
 
 			if (free_msg) {
@@ -877,6 +886,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 				cf_assert(pr->from.proto_fd_h, AS_PROXY, CF_CRITICAL, "null file handle");
 				as_end_of_transaction_force_close(pr->from.proto_fd_h);
 				pr->from.proto_fd_h = NULL; // pattern, not needed
+				client_proxy_update_stats(pr->ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 				break;
 			case FROM_BATCH:
 				cf_assert(pr->from.batch_shared, AS_PROXY, CF_CRITICAL, "null batch shared");

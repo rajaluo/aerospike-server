@@ -131,6 +131,22 @@ void write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins,
 		uint32_t n_cleanup_bins);
 
 static inline void
+client_write_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_client_write_success);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_client_write_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_client_write_error);
+		break;
+	}
+}
+
+static inline void
 append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 {
 	if (as_bin_inuse(b) && ! as_bin_is_embedded_particle(b)) {
@@ -375,6 +391,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 					as_transaction_trid(tr), NULL);
 		}
 		cf_hist_track_insert_data_point(tr->rsv.ns->write_hist, tr->start_time);
+		client_write_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:
 		if (db && db->used_sz != 0) {
@@ -412,6 +429,7 @@ write_timeout_cb(rw_request* rw)
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		cf_hist_track_insert_data_point(rw->rsv.ns->write_hist, rw->start_time);
+		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
 		break;
@@ -651,7 +669,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	// If we ended up with no bins, delete the record.
 	if (is_delete) {
 		as_index_delete(tree, &tr->keyd);
-		cf_atomic_int_incr(&g_config.stat_delete_success);
+		// TODO - maybe this needs a special counter?
 	}
 	// Or (normally) adjust max void-times.
 	else if (r->void_time != 0) {
