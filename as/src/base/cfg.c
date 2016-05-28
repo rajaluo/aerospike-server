@@ -3402,7 +3402,7 @@ as_config_post_process(as_config *c, const char *config_file)
 		// Regular histograms.
 
 		sprintf(hist_name, "{%s} query-rec-count", ns->name);
-		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_MILLISECONDS);
+		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_RAW);
 
 		sprintf(hist_name, "{%s} proxy", ns->name);
 		create_and_check_hist(&ns->proxy_hist, hist_name, HIST_MILLISECONDS);

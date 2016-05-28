@@ -44,6 +44,7 @@
 #include "citrusleaf/cf_shash.h"
 
 #include "fault.h"
+#include "hist.h"
 #include "msg.h"
 #include "util.h"
 

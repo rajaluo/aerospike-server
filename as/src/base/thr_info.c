@@ -384,8 +384,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_deleted_set_objects);
 	cf_dyn_buf_append_string(db, ";stat_evicted_objects_time=");
 	APPEND_STAT_COUNTER(db, g_config.stat_evicted_objects_time);
-	cf_dyn_buf_append_string(db, ";stat_zero_bin_records=");
-	APPEND_STAT_COUNTER(db, g_config.stat_zero_bin_records);
 	cf_dyn_buf_append_string(db, ";stat_nsup_deletes_not_shipped=");
 	APPEND_STAT_COUNTER(db, g_config.stat_nsup_deletes_not_shipped);
 
