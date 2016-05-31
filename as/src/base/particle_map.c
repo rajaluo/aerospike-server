@@ -2840,7 +2840,7 @@ packed_map_op_unpack_hdridx(packed_map_op *op)
 
 	as_packed_map_index *pmi = &op->pmi;
 
-	if (as_unpack_peek_is_ext(&pk)) {
+	if (ele_count > 0 && as_unpack_peek_is_ext(&pk)) {
 		if (op->ele_count == 0) {
 			return false;
 		}
@@ -5135,11 +5135,13 @@ packed_map_strip_indexes_delta(const as_particle *p)
 			.length = (int)p_map_mem->sz
 	};
 
-	if (as_unpack_map_header_element_count(&pk) < 0) {
+	int64_t ele_count = as_unpack_map_header_element_count(&pk);
+
+	if (ele_count < 0) {
 		return -1;
 	}
 
-	if (as_unpack_peek_is_ext(&pk)) {
+	if (ele_count > 0 && as_unpack_peek_is_ext(&pk)) {
 		as_msgpack_ext ext;
 		uint32_t ext_start = (uint32_t)pk.offset;
 
