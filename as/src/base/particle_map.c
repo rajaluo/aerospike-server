@@ -840,18 +840,33 @@ map_from_asval(const as_val *val, as_particle **pp)
 	uint32_t content_length = op.packed_sz - op.ele_start;
 
 	map_packer_init(&mpk, (uint32_t)ele_count, map_flags, content_length);
-	mpk.write_ptr = buf;
+	mpk.write_ptr = p_map_mem->data;
 	map_packer_write_hdridx(&mpk);
 
 	if (! packed_map_op_write_k_ordered(&op, mpk.write_ptr, &mpk.offset_idx)) {
 		cf_crash(AS_PARTICLE, "map_from_asval() sort on key failed");
 	}
 
-	p_map_mem->sz = (uint32_t)(mpk.ele_start_ptr - buf + content_length);
+	p_map_mem->sz = (uint32_t)(mpk.ele_start_ptr - p_map_mem->data + content_length);
 
 	if (order_index_is_valid(&mpk.value_idx)) {
 		order_index_set(&mpk.value_idx, 0, ele_count);
 	}
+
+#ifdef MAP_DEBUG_VERIFY
+	{
+		as_bin b;
+		b.particle = (as_particle *)p_map_mem;
+		as_bin_state_set_from_type(&b, AS_PARTICLE_TYPE_MAP);
+		if (! as_bin_verify(&b)) {
+			const map_mem *p = p_map_mem;
+			cf_warning(AS_PARTICLE, "map_from_asval(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
+			char buf[4096];
+			print_hex(p->data, p->sz, buf, 4096);
+			cf_warning(AS_PARTICLE, "map_from_asval(): buf=%s", buf);
+		}
+	}
+#endif
 }
 
 as_val *
@@ -1667,7 +1682,7 @@ packed_map_set_flags(as_bin *b, rollback_alloc *alloc_buf, as_bin *result, uint8
 
 #ifdef MAP_DEBUG_VERIFY
 	if (! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_set_flags(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
@@ -1906,7 +1921,7 @@ packed_map_add(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *key, con
 
 #ifdef MAP_DEBUG_VERIFY
 	if (! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_add(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
@@ -2432,7 +2447,7 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 
 #ifdef MAP_DEBUG_VERIFY
 	if (! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_remove_all_key_items(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
@@ -2613,7 +2628,7 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 
 #ifdef MAP_DEBUG_VERIFY
 	if (! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_remove_all_value_items(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
@@ -3741,7 +3756,7 @@ packed_map_op_get_remove_by_key(packed_map_op *op, as_bin *b, rollback_alloc *al
 
 #ifdef MAP_DEBUG_VERIFY
 	if (b && ! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_remove_by_key(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
@@ -3818,7 +3833,7 @@ packed_map_op_get_remove_by_key_interval(packed_map_op *op, as_bin *b, rollback_
 
 #ifdef MAP_DEBUG_VERIFY
 	if (b && ! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key_interval(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
@@ -3967,7 +3982,7 @@ packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, roll
 
 #ifdef MAP_DEBUG_VERIFY
 	if (b && ! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_index_range(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
@@ -4086,7 +4101,7 @@ packed_map_op_get_remove_by_value_interval(const packed_map_op *op, as_bin *b, r
 
 #ifdef MAP_DEBUG_VERIFY
 	if (b && ! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_value_interval(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
@@ -4217,7 +4232,7 @@ packed_map_op_get_remove_by_rank_range(const packed_map_op *op, as_bin *b, rollb
 
 #ifdef MAP_DEBUG_VERIFY
 	if (b && ! as_bin_verify(b)) {
-		map_mem *p = (map_mem *)b->particle;
+		const map_mem *p = (const map_mem *)b->particle;
 		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_rank_range(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
