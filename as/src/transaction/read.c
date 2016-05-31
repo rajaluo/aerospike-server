@@ -206,7 +206,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, ops, response_bins, n_bins,
-					tr->rsv.ns, NULL, as_transaction_trid(tr), set_name);
+					tr->rsv.ns, as_transaction_trid(tr), set_name);
 		}
 		cf_hist_track_insert_data_point(tr->rsv.ns->read_hist, tr->start_time);
 		client_read_update_stats(tr->rsv.ns, tr->result_code);
@@ -224,11 +224,8 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		}
 		break;
 	case FROM_BATCH:
-		// TODO - redo function signature, since it takes tr. Also, we'd like it
-		// to be able to take a db.
-		as_batch_add_result(tr, tr->rsv.ns, set_name, tr->generation,
-				tr->void_time, n_bins, response_bins, ops);
-		tr->msgp = NULL;
+		as_batch_add_result(tr, set_name, tr->generation, tr->void_time, n_bins,
+				response_bins, ops);
 		break;
 	case FROM_IUDF:
 	case FROM_NSUP:
@@ -260,7 +257,6 @@ read_timeout_cb(rw_request* rw)
 	case FROM_BATCH:
 		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
 				AS_PROTO_RESULT_FAIL_TIMEOUT);
-		rw->msgp = NULL;
 		break;
 	case FROM_IUDF:
 	case FROM_NSUP:
@@ -437,7 +433,8 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 		tr->void_time = r->void_time;
 		tr->last_update_time = r->last_update_time;
 
-		// TODO - deal with as_batch_add_result() to be able to take db ???
+		// Since as_batch_add_result() constructs response directly in shared
+		// buffer to avoid extra copies, can't use db.
 		send_read_response(tr, p_ops, response_bins, n_bins, set_name, NULL);
 	}
 

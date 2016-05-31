@@ -289,7 +289,6 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 	int rv = 0;
 	if (!r_ref->skip_lock) {
 		rv = pthread_mutex_unlock(r_ref->olock);
-		cf_atomic_int_decr(&g_config.global_record_lock_count);
 	}
 	if (0 != rv)
 		cf_crash(AS_RECORD, "couldn't release lock: %s", cf_strerror(rv));

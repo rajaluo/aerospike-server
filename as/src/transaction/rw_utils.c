@@ -67,7 +67,7 @@ xdr_allows_write(as_transaction* tr)
 		}
 	}
 
-	cf_atomic_int_incr(&g_config.err_write_fail_forbidden);
+	cf_atomic_int_incr(&g_config.err_xdr_write_forbidden);
 
 	return false;
 }

@@ -309,8 +309,8 @@ send_delete_response(as_transaction* tr)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
-				tr->void_time, NULL, NULL, 0, NULL, NULL,
-				as_transaction_trid(tr), NULL);
+				tr->void_time, NULL, NULL, 0, NULL, as_transaction_trid(tr),
+				NULL);
 		client_delete_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:

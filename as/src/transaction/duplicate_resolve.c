@@ -150,8 +150,6 @@ dup_res_setup_rw(rw_request* rw, as_transaction* tr, dup_res_done_cb dup_res_cb,
 void
 dup_res_handle_request(cf_node node, msg* m)
 {
-	cf_atomic_int_incr(&g_config.read_dup_prole);
-
 	cf_digest* keyd;
 	size_t sz = 0;
 

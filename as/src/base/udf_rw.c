@@ -77,6 +77,24 @@ as_aerospike g_as_aerospike;
 // UDF Network Send Interface
 // **************************************************************************************************
 
+// TODO - merge into transaction/udf.c
+static inline void
+client_udf_update_stats_bin(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_client_udf_success);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_client_udf_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_client_udf_error);
+		break;
+	}
+}
+
+// TODO - merge into transaction/udf.c
 void
 send_udf_response_bin(as_transaction* tr, as_bin** response_bins, uint16_t n_bins)
 {
@@ -89,10 +107,11 @@ send_udf_response_bin(as_transaction* tr, as_bin** response_bins, uint16_t n_bin
 		if (tr->from.proto_fd_h) {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, NULL, response_bins, n_bins,
-					tr->rsv.ns, NULL, as_transaction_trid(tr), NULL);
+					tr->rsv.ns, as_transaction_trid(tr), NULL);
 			tr->from.proto_fd_h = NULL;
 		}
 		cf_hist_track_insert_data_point(tr->rsv.ns->udf_hist, tr->start_time);
+		client_udf_update_stats_bin(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:
 		if (tr->from.proxy_node != 0) {

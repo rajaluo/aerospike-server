@@ -504,7 +504,7 @@ extern void as_msg_swap_op(as_msg_op *op);
 extern int as_msg_send_reply(struct as_file_handle_s *fd_h, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, as_msg_op **ops,
 		struct as_bin_s **bins, uint16_t bin_count, struct as_namespace_s *ns,
-		uint *written_sz, uint64_t trid, const char *setname);
+		uint64_t trid, const char *setname);
 extern int as_msg_send_ops_reply(struct as_file_handle_s *fd_h, cf_dyn_buf *db);
 
 extern cl_msg *as_msg_make_response_msg(uint32_t result_code, uint32_t generation,

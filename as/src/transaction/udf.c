@@ -323,7 +323,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		}
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
-					tr->generation, tr->void_time, NULL, NULL, 0, NULL, NULL,
+					tr->generation, tr->void_time, NULL, NULL, 0, NULL,
 					as_transaction_trid(tr), NULL);
 		}
 		cf_hist_track_insert_data_point(tr->rsv.ns->udf_hist, tr->start_time);

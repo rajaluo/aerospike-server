@@ -335,6 +335,9 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";stat_write_reqs_xdr=");
 	APPEND_STAT_COUNTER(db, g_config.stat_write_reqs_xdr);
 
+	cf_dyn_buf_append_string(db, ";err_xdr_write_forbidden=");
+	APPEND_STAT_COUNTER(db, g_config.err_xdr_write_forbidden);
+
 	cf_dyn_buf_append_string(db, ";udf_read_reqs=");
 	APPEND_STAT_COUNTER(db, g_config.udf_read_reqs);
 	cf_dyn_buf_append_string(db, ";udf_read_success=");
@@ -373,9 +376,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
 	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
 
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_err_ack_dup_trans_reenqueue=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_err_ack_dup_trans_reenqueue);
-
 	cf_dyn_buf_append_string(db, ";stat_expired_objects=");
 	APPEND_STAT_COUNTER(db, g_config.stat_expired_objects);
 	cf_dyn_buf_append_string(db, ";stat_evicted_objects=");
@@ -394,16 +394,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.err_tsvc_requests);
 	cf_dyn_buf_append_string(db, ";err_tsvc_requests_timeout=");
 	APPEND_STAT_COUNTER(db, g_config.err_tsvc_requests_timeout);
-	cf_dyn_buf_append_string(db, ";err_out_of_space=");
-	APPEND_STAT_COUNTER(db, g_config.err_out_of_space);
-	cf_dyn_buf_append_string(db, ";err_duplicate_proxy_request=");
-	APPEND_STAT_COUNTER(db, g_config.err_duplicate_proxy_request);
-	cf_dyn_buf_append_string(db, ";err_rw_request_not_found=");
-	APPEND_STAT_COUNTER(db, g_config.err_rw_request_not_found);
-	cf_dyn_buf_append_string(db, ";err_rw_pending_limit=");
-	APPEND_STAT_COUNTER(db, g_config.err_rw_pending_limit);
-	cf_dyn_buf_append_string(db, ";err_rw_cant_put_unique=");
-	APPEND_STAT_COUNTER(db, g_config.err_rw_cant_put_unique);
 
 	cf_dyn_buf_append_string(db, ";geo_region_query_count=");
 	APPEND_STAT_COUNTER(db, g_config.geo_region_query_count);
@@ -511,34 +501,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";proxy_retry_new_dest=");
 	APPEND_STAT_COUNTER(db, g_config.proxy_retry_new_dest);
 
-	cf_dyn_buf_append_string(db, ";write_master=");
-	APPEND_STAT_COUNTER(db, g_config.write_master);
-	cf_dyn_buf_append_string(db, ";write_prole=");
-	APPEND_STAT_COUNTER(db, g_config.write_prole);
-
-	cf_dyn_buf_append_string(db, ";read_dup_prole=");
-	APPEND_STAT_COUNTER(db, g_config.read_dup_prole);
-	cf_dyn_buf_append_string(db, ";rw_err_dup_internal=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_dup_internal);
-	cf_dyn_buf_append_string(db, ";rw_err_dup_cluster_key=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_dup_cluster_key);
-	cf_dyn_buf_append_string(db, ";rw_err_dup_send=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_dup_send);
-
-	cf_dyn_buf_append_string(db, ";rw_err_write_internal=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_write_internal);
-	cf_dyn_buf_append_string(db, ";rw_err_write_cluster_key=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_write_cluster_key);
-	cf_dyn_buf_append_string(db, ";rw_err_write_send=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_write_send);
-
-	cf_dyn_buf_append_string(db, ";rw_err_ack_internal=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_ack_internal);
-	cf_dyn_buf_append_string(db, ";rw_err_ack_nomatch=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_ack_nomatch);
-	cf_dyn_buf_append_string(db, ";rw_err_ack_badnode=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_ack_badnode);
-
 	cf_dyn_buf_append_string(db, ";client_connections=");
 	cf_dyn_buf_append_int(db, (g_config.proto_connections_opened - g_config.proto_connections_closed));
 
@@ -550,12 +512,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";record_refs=");
 	APPEND_STAT_COUNTER(db, g_config.global_record_ref_count);
-
-	cf_dyn_buf_append_string(db, ";record_locks=");
-	APPEND_STAT_COUNTER(db, g_config.global_record_lock_count);
-
-	cf_dyn_buf_append_string(db, ";ongoing_write_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.write_req_object_count);
 
 	cf_dyn_buf_append_string(db, ";err_storage_queue_full=");
 	APPEND_STAT_COUNTER(db, g_config.err_storage_queue_full);
@@ -623,38 +579,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";storage_defrag_corrupt_record=");
 	APPEND_STAT_COUNTER(db, g_config.err_storage_defrag_corrupt_record);
-	cf_dyn_buf_append_string(db, ";err_write_fail_prole_unknown=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_unknown);
-	cf_dyn_buf_append_string(db, ";err_write_fail_prole_generation=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_generation);
-	cf_dyn_buf_append_string(db, ";err_write_fail_unknown=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_unknown);
-	cf_dyn_buf_append_string(db, ";err_write_fail_key_exists=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_key_exists);
-	cf_dyn_buf_append_string(db, ";err_write_fail_generation=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_generation);
-	cf_dyn_buf_append_string(db, ";err_write_fail_bin_exists=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_exists);
-	cf_dyn_buf_append_string(db, ";err_write_fail_parameter=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_parameter);
-	cf_dyn_buf_append_string(db, ";err_write_fail_incompatible_type=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_incompatible_type);
-	cf_dyn_buf_append_string(db, ";err_write_fail_prole_delete=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_delete);
-	cf_dyn_buf_append_string(db, ";err_write_fail_not_found=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_not_found);
-	cf_dyn_buf_append_string(db, ";err_write_fail_key_mismatch=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_key_mismatch);
-	cf_dyn_buf_append_string(db, ";err_write_fail_record_too_big=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_record_too_big);
-	cf_dyn_buf_append_string(db, ";err_write_fail_bin_name=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_name);
-	cf_dyn_buf_append_string(db, ";err_write_fail_bin_not_found=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_not_found);
-	cf_dyn_buf_append_string(db, ";err_write_fail_forbidden=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_forbidden);
-	cf_dyn_buf_append_string(db, ";stat_duplicate_operation=");
-	APPEND_STAT_COUNTER(db, g_config.stat_duplicate_operation);
+
 	cf_dyn_buf_append_string(db, ";uptime=");
 	APPEND_STAT_COUNTER(db, ((cf_getms() - g_config.start_ms) / 1000) );
 
@@ -4815,11 +4740,9 @@ info_debug_ticker_fn(void *unused)
 					thr_info_get_subobject_count()
 					);
 
-			cf_info(AS_INFO, " rec refs %"PRIu64" ::: rec locks %"PRIu64" ::: trees %"PRIu64" ::: wr reqs %"PRIu64,
+			cf_info(AS_INFO, " rec refs %"PRIu64" ::: trees %"PRIu64,
 					cf_atomic_int_get(g_config.global_record_ref_count),
-					cf_atomic_int_get(g_config.global_record_lock_count),
-					cf_atomic_int_get(g_config.global_tree_count),
-					cf_atomic_int_get(g_config.write_req_object_count)
+					cf_atomic_int_get(g_config.global_tree_count)
 				 	);
 
 			cf_info(AS_INFO, " replica errs :: null %"PRIu64" non-null %"PRIu64" ::: sync copy errs :: master %"PRIu64" ",
@@ -5017,28 +4940,6 @@ info_debug_ticker_fn(void *unused)
 				histogram_dump(g_config.ldt_update_io_bytes_hist);
 				histogram_dump(g_config.ldt_hist);
 			}
-#ifdef HISTOGRAM_OBJECT_LATENCY
-			if (g_config.read0_hist)
-				histogram_dump(g_config.read0_hist);
-			if (g_config.read1_hist)
-				histogram_dump(g_config.read1_hist);
-			if (g_config.read2_hist)
-				histogram_dump(g_config.read2_hist);
-			if (g_config.read3_hist)
-				histogram_dump(g_config.read3_hist);
-			if (g_config.read4_hist)
-				histogram_dump(g_config.read4_hist);
-			if (g_config.read5_hist)
-				histogram_dump(g_config.read5_hist);
-			if (g_config.read6_hist)
-				histogram_dump(g_config.read6_hist);
-			if (g_config.read7_hist)
-				histogram_dump(g_config.read7_hist);
-			if (g_config.read8_hist)
-				histogram_dump(g_config.read8_hist);
-			if (g_config.read9_hist)
-				histogram_dump(g_config.read9_hist);
-#endif
 
 #ifdef MEM_COUNT
 			if (g_config.memory_accounting) {
@@ -5932,26 +5833,30 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// From-client transaction stats.
 
-	info_append_uint64("", "client-proxy-success",  ns->n_client_proxy_success, db);
-	info_append_uint64("", "client-proxy-timeout",  ns->n_client_proxy_timeout, db);
-	info_append_uint64("", "client-proxy-error",  ns->n_client_proxy_error, db);
+	info_append_uint64("", "client-proxy-success", ns->n_client_proxy_success, db);
+	info_append_uint64("", "client-proxy-timeout", ns->n_client_proxy_timeout, db);
+	info_append_uint64("", "client-proxy-error", ns->n_client_proxy_error, db);
 
-	info_append_uint64("", "client-read-success",  ns->n_client_read_success, db);
-	info_append_uint64("", "client-read-timeout",  ns->n_client_read_timeout, db);
-	info_append_uint64("", "client-read-error",  ns->n_client_read_error, db);
-	info_append_uint64("", "client-read-not-found",  ns->n_client_read_not_found, db);
+	info_append_uint64("", "client-read-success", ns->n_client_read_success, db);
+	info_append_uint64("", "client-read-timeout", ns->n_client_read_timeout, db);
+	info_append_uint64("", "client-read-error", ns->n_client_read_error, db);
+	info_append_uint64("", "client-read-not-found", ns->n_client_read_not_found, db);
 
-	info_append_uint64("", "client-write-success",  ns->n_client_write_success, db);
-	info_append_uint64("", "client-write-timeout",  ns->n_client_write_timeout, db);
-	info_append_uint64("", "client-write-error",  ns->n_client_write_error, db);
+	info_append_uint64("", "client-write-success", ns->n_client_write_success, db);
+	info_append_uint64("", "client-write-timeout", ns->n_client_write_timeout, db);
+	info_append_uint64("", "client-write-error", ns->n_client_write_error, db);
 
-	info_append_uint64("", "client-delete-success",  ns->n_client_delete_success, db);
-	info_append_uint64("", "client-delete-timeout",  ns->n_client_delete_timeout, db);
-	info_append_uint64("", "client-delete-error",  ns->n_client_delete_error, db);
+	info_append_uint64("", "client-delete-success", ns->n_client_delete_success, db);
+	info_append_uint64("", "client-delete-timeout", ns->n_client_delete_timeout, db);
+	info_append_uint64("", "client-delete-error", ns->n_client_delete_error, db);
 
-	info_append_uint64("", "client-udf-success",  ns->n_client_udf_success, db);
-	info_append_uint64("", "client-udf-timeout",  ns->n_client_udf_timeout, db);
-	info_append_uint64("", "client-udf-error",  ns->n_client_udf_error, db);
+	info_append_uint64("", "client-udf-success", ns->n_client_udf_success, db);
+	info_append_uint64("", "client-udf-timeout", ns->n_client_udf_timeout, db);
+	info_append_uint64("", "client-udf-error", ns->n_client_udf_error, db);
+
+	info_append_uint64("", "client-trans-fail-key-busy", ns->n_client_trans_fail_key_busy, db);
+	info_append_uint64("", "client-write-fail-generation", ns->n_client_write_fail_generation, db);
+	info_append_uint64("", "client-write-fail-record-too-big", ns->n_client_write_fail_record_too_big, db);
 
 	// remaining bin-name slots (yes, this can be negative)
 	if (! ns->single_bin) {

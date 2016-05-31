@@ -675,7 +675,7 @@ as_msg_make_error_response_bufbuilder(cf_digest *keyd, int result_code, cf_buf_b
 int
 as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generation,
 		uint32_t void_time, as_msg_op **ops, as_bin **bins, uint16_t bin_count,
-		as_namespace *ns, uint *written_sz, uint64_t trid, const char *setname)
+		as_namespace *ns, uint64_t trid, const char *setname)
 {
 	int rv = 0;
 
@@ -719,9 +719,6 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 			goto Exit;
 		}
 	}
-
-	// good for stats as a higher layer
-	if (written_sz) *written_sz = msg_sz;
 
 	as_end_of_transaction_ok(fd_h);
 

@@ -315,7 +315,6 @@ as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count,
 		r_ref.r_h = v_a->indexes[i].r_h;
 
 		olock_vlock(g_config.record_locks, &r_ref.r->key, &r_ref.olock);
-		cf_atomic_int_incr(&g_config.global_record_lock_count);
 
 		// Callback MUST call as_record_done() to unlock and release record.
 		cb(&r_ref, udata);
@@ -393,7 +392,6 @@ as_index_get_vlock(as_index_tree *tree, cf_digest *keyd,
 
 	if (! index_ref->skip_lock) {
 		olock_vlock(g_config.record_locks, keyd, &index_ref->olock);
-		cf_atomic_int_incr(&g_config.global_record_lock_count);
 	}
 
 	return 0;
@@ -450,7 +448,6 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 
 				if (! index_ref->skip_lock) {
 					olock_vlock(g_config.record_locks, keyd, &index_ref->olock);
-					cf_atomic_int_incr(&g_config.global_record_lock_count);
 				}
 
 				index_ref->r = t;
@@ -529,7 +526,6 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 
 	if (! index_ref->skip_lock) {
 		olock_vlock(g_config.record_locks, keyd, &index_ref->olock);
-		cf_atomic_int_incr(&g_config.global_record_lock_count);
 	}
 
 	index_ref->r = n;

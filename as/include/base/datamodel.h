@@ -1111,6 +1111,11 @@ struct as_namespace_s {
 	cf_atomic64		n_client_udf_timeout;
 	cf_atomic64		n_client_udf_error;
 
+	// Special errors that deserve their own counters:
+	cf_atomic64		n_client_trans_fail_key_busy;
+	cf_atomic64		n_client_write_fail_generation;
+	cf_atomic64		n_client_write_fail_record_too_big;
+
 	// migration counters
 	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only
 	cf_atomic_int	migrate_tx_instance_count; // debug only

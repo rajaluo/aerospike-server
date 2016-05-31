@@ -3595,19 +3595,6 @@ cfg_create_all_histograms()
 	create_and_check_hist(&c->ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
 	create_and_check_hist(&c->ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_RAW);
 	create_and_check_hist(&c->ldt_hist, "ldt", HIST_MILLISECONDS);
-
-#ifdef HISTOGRAM_OBJECT_LATENCY
-	create_and_check_hist(&c->read0_hist, "read_0bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read1_hist, "read_1bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read2_hist, "read_2bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read3_hist, "read_3bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read4_hist, "read_4bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read5_hist, "read_5bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read6_hist, "read_6bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read7_hist, "read_7bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read8_hist, "read_8bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read9_hist, "read_9bucket", HIST_MILLISECONDS);
-#endif
 }
 
 /**

@@ -336,7 +336,7 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 void
 as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 {
-	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, 0, NULL);
 	tr->from.proto_fd_h = NULL;
 
 	cf_free(tr->msgp);
@@ -360,10 +360,9 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
-			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
+			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
-		MICROBENCHMARK_HIST_INSERT_P(error_hist);
 		cf_atomic_int_incr(&g_config.err_tsvc_requests);
 		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
 			cf_atomic_int_incr(&g_config.err_tsvc_requests_timeout);

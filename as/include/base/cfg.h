@@ -368,18 +368,6 @@ typedef struct as_config_s {
 	cf_atomic_int		aggr_scans_failed;
 	cf_atomic_int		udf_bg_scans_succeeded;
 	cf_atomic_int		udf_bg_scans_failed;
-	cf_atomic_int		write_master;
-	cf_atomic_int		write_prole;
-	cf_atomic_int		read_dup_prole;
-	cf_atomic_int		rw_err_dup_internal;
-	cf_atomic_int		rw_err_dup_cluster_key;
-	cf_atomic_int		rw_err_dup_send;
-	cf_atomic_int		rw_err_write_internal;
-	cf_atomic_int		rw_err_write_cluster_key;
-	cf_atomic_int		rw_err_write_send;
-	cf_atomic_int		rw_err_ack_internal;
-	cf_atomic_int		rw_err_ack_nomatch;
-	cf_atomic_int		rw_err_ack_badnode;
 	cf_atomic_int		proto_connections_opened;
 	cf_atomic_int		proto_connections_closed;
 	cf_atomic_int		fabric_connections_opened;
@@ -390,11 +378,9 @@ typedef struct as_config_s {
 	cf_atomic_int		heartbeat_received_foreign;
 	cf_atomic_int		info_connections_opened;
 	cf_atomic_int		info_connections_closed;
-	cf_atomic_int		n_waiting_transactions;
+	cf_atomic_int		n_waiting_transactions; // FIXME - what?
 	cf_atomic_int		global_record_ref_count;
-	cf_atomic_int		global_record_lock_count;
 	cf_atomic_int		global_tree_count;
-	cf_atomic_int		write_req_object_count;
 	cf_atomic_int		nsup_tree_count;
 	cf_atomic_int		nsup_subtree_count;
 	cf_atomic_int		scan_tree_count;
@@ -457,20 +443,6 @@ typedef struct as_config_s {
 	histogram *			write_sindex_hist; // secondary index latency histogram
 	histogram *			prole_fabric_send_hist; // histogram of time spent for prole fabric getting queued
 
-#ifdef HISTOGRAM_OBJECT_LATENCY
-	// these track read latencies of different size databuckets
-	histogram *			read0_hist;
-	histogram *			read1_hist;
-	histogram *			read2_hist;
-	histogram *			read3_hist;
-	histogram *			read4_hist;
-	histogram *			read5_hist;
-	histogram *			read6_hist;
-	histogram *			read7_hist;
-	histogram *			read8_hist;
-	histogram *			read9_hist;
-#endif
-
 	// LDT related histogram
 	histogram *			ldt_multiop_prole_hist;   // histogram that tracks LDT multi op replication performance (in fabric)
 	histogram *			ldt_update_record_cnt_hist; // histogram that tracks number of records written (write/update)
@@ -480,32 +452,23 @@ typedef struct as_config_s {
 	histogram *			ldt_update_io_bytes_hist;   // histogram that tracks number bytes written by LDT every transaction
 	histogram * 		ldt_hist;            // histogram that tracks ldt performance
 
-	cf_atomic_int		stat_read_reqs_xdr;
+	// XDR-related.
+	cf_atomic_int		stat_read_reqs_xdr; // FIXME - what do we need?
 	cf_atomic_int		stat_write_reqs_xdr; // FIXME - what do we need?
-
+	cf_atomic_int		err_xdr_write_forbidden; // FIXME - what do we need?
+	cf_atomic_int		stat_nsup_deletes_not_shipped;
 	cf_atomic_int		stat_compressed_pkts_received;
 
 	cf_atomic_int		stat_proxy_reqs; // FIXME - what do we need?
 	cf_atomic_int		stat_proxy_reqs_xdr; // FIXME - what do we need?
 
-	// When a Prole Write fails, it returns a CLUSTER_KEY_MISMATCH error to the
-	// master, who then re-queues the transaction to be performed again.
-	// There are two cases: One for Duplicate transactions and one for RW trans.
-	cf_atomic_int		stat_cluster_key_err_ack_dup_trans_reenqueue;
-
 	cf_atomic_int		stat_expired_objects;
 	cf_atomic_int		stat_evicted_objects;
 	cf_atomic_int		stat_deleted_set_objects;
 	cf_atomic_int		stat_evicted_objects_time;
-	cf_atomic_int		stat_nsup_deletes_not_shipped;
 
 	cf_atomic_int		err_tsvc_requests;
 	cf_atomic_int		err_tsvc_requests_timeout;
-	cf_atomic_int		err_out_of_space;
-	cf_atomic_int		err_duplicate_proxy_request;
-	cf_atomic_int		err_rw_request_not_found;
-	cf_atomic_int		err_rw_cant_put_unique;
-	cf_atomic_int		err_rw_pending_limit;
 
 	cf_atomic_int		err_replica_null_node;
 	cf_atomic_int		err_replica_non_null_node;
@@ -514,25 +477,8 @@ typedef struct as_config_s {
 	cf_atomic_int		err_storage_queue_full;
 	cf_atomic_int		err_storage_defrag_corrupt_record;
 
-	cf_atomic_int		err_write_fail_unknown;
-	cf_atomic_int		err_write_fail_key_exists;
-	cf_atomic_int		err_write_fail_generation;
-	cf_atomic_int		err_write_fail_bin_exists;
-	cf_atomic_int		err_write_fail_parameter;
-	cf_atomic_int		err_write_fail_prole_unknown;
-	cf_atomic_int		err_write_fail_prole_generation;
-	cf_atomic_int		err_write_fail_not_found;
-	cf_atomic_int		err_write_fail_incompatible_type;
-	cf_atomic_int		err_write_fail_prole_delete;
-	cf_atomic_int		err_write_fail_key_mismatch;
-	cf_atomic_int		err_write_fail_record_too_big;
-	cf_atomic_int		err_write_fail_bin_name;
-	cf_atomic_int		err_write_fail_bin_not_found;
-	cf_atomic_int		err_write_fail_forbidden;
-
-	cf_atomic_int		stat_duplicate_operation;
-
 	//stats for UDF read - write operation.
+	 // FIXME - how to incorporate these in new namespace scoped scheme?
 	cf_atomic_int		udf_read_reqs;
 	cf_atomic_int		udf_read_success;
 	cf_atomic_int		udf_read_errs_other;

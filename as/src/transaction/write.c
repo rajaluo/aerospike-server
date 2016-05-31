@@ -387,7 +387,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		}
 		else {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
-					tr->generation, tr->void_time, NULL, NULL, 0, NULL, NULL,
+					tr->generation, tr->void_time, NULL, NULL, 0, NULL,
 					as_transaction_trid(tr), NULL);
 		}
 		cf_hist_track_insert_data_point(tr->rsv.ns->write_hist, tr->start_time);
@@ -716,45 +716,14 @@ write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 	}
 
 	switch (result_code) {
-	case AS_PROTO_RESULT_FAIL_NOTFOUND:
-		cf_atomic_int_incr(&g_config.err_write_fail_not_found);
-		break;
 	case AS_PROTO_RESULT_FAIL_GENERATION:
-		cf_atomic_int_incr(&g_config.err_write_fail_generation);
-		break;
-	case AS_PROTO_RESULT_FAIL_PARAMETER:
-		cf_atomic_int_incr(&g_config.err_write_fail_parameter);
-		break;
-	case AS_PROTO_RESULT_FAIL_RECORD_EXISTS:
-		cf_atomic_int_incr(&g_config.err_write_fail_key_exists);
-		break;
-	case AS_PROTO_RESULT_FAIL_BIN_EXISTS:
-		cf_atomic_int_incr(&g_config.err_write_fail_bin_exists);
-		break;
-	case AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE:
-		cf_atomic_int_incr(&g_config.err_out_of_space);
-		break;
-	case AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE:
-		cf_atomic_int_incr(&g_config.err_write_fail_incompatible_type);
+		cf_atomic64_incr(&tr->rsv.ns->n_client_write_fail_generation);
 		break;
 	case AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG:
-		cf_atomic_int_incr(&g_config.err_write_fail_record_too_big);
+		cf_atomic64_incr(&tr->rsv.ns->n_client_write_fail_record_too_big);
 		break;
-	case AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND:
-		cf_atomic_int_incr(&g_config.err_write_fail_bin_not_found);
-		break;
-	case AS_PROTO_RESULT_FAIL_KEY_MISMATCH:
-		cf_atomic_int_incr(&g_config.err_write_fail_key_mismatch);
-		break;
-	case AS_PROTO_RESULT_FAIL_BIN_NAME:
-		cf_atomic_int_incr(&g_config.err_write_fail_bin_name);
-		break;
-	case AS_PROTO_RESULT_FAIL_FORBIDDEN:
-		cf_atomic_int_incr(&g_config.err_write_fail_forbidden);
-		break;
-	case AS_PROTO_RESULT_FAIL_UNKNOWN:
 	default:
-		cf_atomic_int_incr(&g_config.err_write_fail_unknown);
+		// These either log warnings or aren't interesting enough to count.
 		break;
 	}
 

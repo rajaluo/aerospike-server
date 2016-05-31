@@ -905,11 +905,10 @@ TranEnd:
 }
 
 void
-as_batch_add_result(as_transaction* tr, as_namespace* ns, const char* setname, uint32_t generation,
+as_batch_add_result(as_transaction* tr, const char* setname, uint32_t generation,
 		uint32_t void_time, uint16_t n_bins, as_bin** bins, as_msg_op** ops)
 {
-	// Always clear this transaction's msgp so calling code does not free it.
-	tr->msgp = 0;
+	as_namespace* ns = tr->rsv.ns;
 
 	// Calculate size.
 	size_t size = sizeof(as_msg);
