@@ -410,13 +410,13 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
 	cf_dyn_buf_append_string(db, paxos_principal);
 
-	uint64_t remaining_migrations = as_partition_remaining_migrations();
+	uint64_t migrate_partitions_remaining = as_partition_remaining_migrations();
 	cf_dyn_buf_append_string(db, ";migrate_progress_send=");
-	APPEND_STAT_COUNTER(db, remaining_migrations);
+	APPEND_STAT_COUNTER(db, migrate_partitions_remaining);
 	cf_dyn_buf_append_string(db, ";migrate_progress_recv=");
-	APPEND_STAT_COUNTER(db, remaining_migrations);
-	cf_dyn_buf_append_string(db, ";remaining_migrations=");
-	APPEND_STAT_COUNTER(db, remaining_migrations);
+	APPEND_STAT_COUNTER(db, migrate_partitions_remaining);
+	cf_dyn_buf_append_string(db, ";migrate_partitions_remaining=");
+	APPEND_STAT_COUNTER(db, migrate_partitions_remaining);
 
 	cf_dyn_buf_append_string(db, ";queue=");
 	cf_dyn_buf_append_int(db, thr_tsvc_queue_get_size() );
@@ -2266,45 +2266,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";migrate-sleep=");
 	cf_dyn_buf_append_uint32(db, ns->migrate_sleep);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-imbalance=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_imbalance);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-instance-count=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_instance_count);
-
-	cf_dyn_buf_append_string(db, ";migrate-rx-instance-count=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_rx_instance_count);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-active=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_active);
-
-	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-active=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_active);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-initial=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_initial);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-remaining=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_remaining);
-
-	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-initial=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_initial);
-
-	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-remaining=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_remaining);
-
-	cf_dyn_buf_append_string(db, ";migrate-records-skipped=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_records_skipped);
-
-	cf_dyn_buf_append_string(db, ";migrate-records-transmitted=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_records_transmitted);
-
-	cf_dyn_buf_append_string(db, ";migrate-record-retransmits=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_record_retransmits);
-
-	cf_dyn_buf_append_string(db, ";migrate-record-receives=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_record_receives);
 
 	cf_hist_track_get_settings(ns->read_hist, db);
 	cf_hist_track_get_settings(ns->write_hist, db);
@@ -5868,6 +5829,45 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		cf_dyn_buf_append_string(db, ";available-bin-names=");
 		cf_dyn_buf_append_int(db, BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
 	}
+
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-imbalance=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_imbalance);
+
+	cf_dyn_buf_append_string(db, ";migrate-tx-instance-count=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_instance_count);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-instance-count=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_instance_count);
+
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-active=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_active);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-active=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_active);
+
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-initial=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_initial);
+
+	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-remaining=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_remaining);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-initial=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_initial);
+
+	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-remaining=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_remaining);
+
+	cf_dyn_buf_append_string(db, ";migrate-records-skipped=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_records_skipped);
+
+	cf_dyn_buf_append_string(db, ";migrate-records-transmitted=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_records_transmitted);
+
+	cf_dyn_buf_append_string(db, ";migrate-record-retransmits=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_record_retransmits);
+
+	cf_dyn_buf_append_string(db, ";migrate-record-receives=");
+	cf_dyn_buf_append_uint64(db, ns->migrate_record_receives);
 
 	// LDT operational statistics
 	//
