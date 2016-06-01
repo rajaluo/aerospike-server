@@ -147,7 +147,12 @@ as_udf_start(as_transaction* tr)
 	// If error or UDF was a read, transaction is finished.
 	if ((status = udf_master(rw, tr)) != TRANS_IN_PROGRESS) {
 		rw_request_hash_delete(&hkey);
-		send_udf_response(tr, NULL);
+
+		if (status == TRANS_DONE_ERROR) {
+			send_udf_response(tr, NULL);
+		}
+		// else - UDF was a read, has already responded to origin.
+
 		return status;
 	}
 

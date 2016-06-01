@@ -430,19 +430,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";scans_active=");
 	APPEND_STAT_COUNTER(db, as_scan_get_active_job_count());
 
-	cf_dyn_buf_append_string(db, ";basic_scans_succeeded=");
-	APPEND_STAT_COUNTER(db, g_config.basic_scans_succeeded);
-	cf_dyn_buf_append_string(db, ";basic_scans_failed=");
-	APPEND_STAT_COUNTER(db, g_config.basic_scans_failed);
-	cf_dyn_buf_append_string(db, ";aggr_scans_succeeded=");
-	APPEND_STAT_COUNTER(db, g_config.aggr_scans_succeeded);
-	cf_dyn_buf_append_string(db, ";aggr_scans_failed=");
-	APPEND_STAT_COUNTER(db, g_config.aggr_scans_failed);
-	cf_dyn_buf_append_string(db, ";udf_bg_scans_succeeded=");
-	APPEND_STAT_COUNTER(db, g_config.udf_bg_scans_succeeded);
-	cf_dyn_buf_append_string(db, ";udf_bg_scans_failed=");
-	APPEND_STAT_COUNTER(db, g_config.udf_bg_scans_failed);
-
 	cf_dyn_buf_append_string(db, ";batch_index_initiate=");
 	APPEND_STAT_COUNTER(db, g_config.batch_index_initiate);
 	cf_dyn_buf_append_string(db, ";batch_index_queue=");
@@ -4815,6 +4802,13 @@ info_debug_ticker_fn(void *unused)
 						ns->n_client_udf_success, ns->n_client_udf_timeout, ns->n_client_udf_error
 						);
 
+				cf_info(AS_INFO, "{%s} basic-scan (%lu,%lu) aggr-scan (%lu,%lu) udf-bg-scan (%lu,%lu)",
+						ns->name,
+						ns->n_basic_scan_success, ns->n_basic_scan_failure,
+						ns->n_aggr_scan_success, ns->n_aggr_scan_failure,
+						ns->n_udf_bg_scan_success, ns->n_udf_bg_scan_failure
+						);
+
 				cf_hist_track_dump(ns->read_hist);
 				cf_hist_track_dump(ns->write_hist);
 				cf_hist_track_dump(ns->udf_hist);
@@ -4975,9 +4969,6 @@ info_debug_ticker_fn(void *unused)
 						g_config.udf_read_success, g_config.udf_read_errs_other,
 						g_config.udf_write_success, g_config.udf_write_errs_other,
 						g_config.udf_delete_success, g_config.udf_delete_errs_other, g_config.udf_lua_errs);
-				cf_info(AS_INFO, "basic scans %"PRIu64",%"PRIu64" : aggregation scans %"PRIu64",%"PRIu64" : udf background scans %"PRIu64",%"PRIu64" :: active scans %d",
-						g_config.basic_scans_succeeded, g_config.basic_scans_failed, g_config.aggr_scans_succeeded, g_config.aggr_scans_failed,
-						g_config.udf_bg_scans_succeeded, g_config.udf_bg_scans_failed, as_scan_get_active_job_count());
 				uint64_t batch_failures = cf_atomic64_get(g_config.batch_timeout) + cf_atomic64_get(g_config.batch_errors);
 				cf_info(AS_INFO, "index (new) batches %"PRIu64",%"PRIu64" : direct (old) batches %"PRIu64",%"PRIu64"",
 						g_config.batch_index_complete, g_config.batch_index_timeout + g_config.batch_index_errors,
@@ -5823,6 +5814,17 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "client-trans-fail-key-busy", ns->n_client_trans_fail_key_busy, db);
 	info_append_uint64("", "client-write-fail-generation", ns->n_client_write_fail_generation, db);
 	info_append_uint64("", "client-write-fail-record-too-big", ns->n_client_write_fail_record_too_big, db);
+
+	// Scan stats.
+
+	info_append_uint64("", "basic-scan-success", ns->n_basic_scan_success, db);
+	info_append_uint64("", "basic-scan-failure", ns->n_basic_scan_failure, db);
+
+	info_append_uint64("", "aggr-scan-success", ns->n_aggr_scan_success, db);
+	info_append_uint64("", "aggr-scan-failure", ns->n_aggr_scan_failure, db);
+
+	info_append_uint64("", "udf-bg-scan-success", ns->n_udf_bg_scan_success, db);
+	info_append_uint64("", "udf-bg-scan-failure", ns->n_udf_bg_scan_failure, db);
 
 	// remaining bin-name slots (yes, this can be negative)
 	if (! ns->single_bin) {

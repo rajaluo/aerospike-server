@@ -1121,6 +1121,17 @@ struct as_namespace_s {
 	cf_atomic64		n_client_write_fail_generation;
 	cf_atomic64		n_client_write_fail_record_too_big;
 
+	// Scan stats.
+
+	cf_atomic64		n_basic_scan_success;
+	cf_atomic64		n_basic_scan_failure;
+
+	cf_atomic64		n_aggr_scan_success;
+	cf_atomic64		n_aggr_scan_failure;
+
+	cf_atomic64		n_udf_bg_scan_success;
+	cf_atomic64		n_udf_bg_scan_failure;
+
 	// migration counters
 	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only
 	cf_atomic_int	migrate_tx_instance_count; // debug only

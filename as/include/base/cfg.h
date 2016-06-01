@@ -362,12 +362,6 @@ typedef struct as_config_s {
 	cf_atomic_int		proxy_unproxy;
 	cf_atomic_int		proxy_retry_same_dest;
 	cf_atomic_int		proxy_retry_new_dest;
-	cf_atomic_int		basic_scans_succeeded;
-	cf_atomic_int		basic_scans_failed;
-	cf_atomic_int		aggr_scans_succeeded;
-	cf_atomic_int		aggr_scans_failed;
-	cf_atomic_int		udf_bg_scans_succeeded;
-	cf_atomic_int		udf_bg_scans_failed;
 	cf_atomic_int		proto_connections_opened;
 	cf_atomic_int		proto_connections_closed;
 	cf_atomic_int		fabric_connections_opened;
