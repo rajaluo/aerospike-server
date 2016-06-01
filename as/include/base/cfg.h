@@ -467,9 +467,6 @@ typedef struct as_config_s {
 	cf_atomic_int		stat_deleted_set_objects;
 	cf_atomic_int		stat_evicted_objects_time;
 
-	cf_atomic_int		err_tsvc_requests;
-	cf_atomic_int		err_tsvc_requests_timeout;
-
 	cf_atomic_int		err_replica_null_node;
 	cf_atomic_int		err_replica_non_null_node;
 	cf_atomic_int		err_sync_copy_null_master;
@@ -478,7 +475,7 @@ typedef struct as_config_s {
 	cf_atomic_int		err_storage_defrag_corrupt_record;
 
 	//stats for UDF read - write operation.
-	 // FIXME - how to incorporate these in new namespace scoped scheme?
+	// FIXME - how to incorporate these in new namespace scoped scheme?
 	cf_atomic_int		udf_read_reqs;
 	cf_atomic_int		udf_read_success;
 	cf_atomic_int		udf_read_errs_other;

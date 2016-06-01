@@ -390,11 +390,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";stat_compressed_pkts_received=");
 	APPEND_STAT_COUNTER(db, g_config.stat_compressed_pkts_received);
 
-	cf_dyn_buf_append_string(db, ";err_tsvc_requests=");
-	APPEND_STAT_COUNTER(db, g_config.err_tsvc_requests);
-	cf_dyn_buf_append_string(db, ";err_tsvc_requests_timeout=");
-	APPEND_STAT_COUNTER(db, g_config.err_tsvc_requests_timeout);
-
 	cf_dyn_buf_append_string(db, ";geo_region_query_count=");
 	APPEND_STAT_COUNTER(db, g_config.geo_region_query_count);
 	cf_dyn_buf_append_string(db, ";geo_region_query_cells=");
@@ -4845,6 +4840,11 @@ info_debug_ticker_fn(void *unused)
 					cf_info(AS_INFO, "{%s} migrations - complete", ns->name);
 				}
 
+				cf_info(AS_INFO, "{%s} tsvc: client (%lu,%lu)",
+						ns->name,
+						ns->n_tsvc_client_timeout, ns->n_tsvc_client_error
+						);
+
 				cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu) udf (%lu,%lu,%lu)",
 						ns->name,
 						ns->n_client_proxy_success, ns->n_client_proxy_timeout, ns->n_client_proxy_error,
@@ -5830,6 +5830,11 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";hwm-breached=");
 	cf_dyn_buf_append_string(db, cf_atomic32_get(ns->hwm_breached) != 0 ? "true" : "false");
+
+	// tsvc-stage error counters.
+
+	info_append_uint64("", "tsvc-client-timeout", ns->n_tsvc_client_timeout, db);
+	info_append_uint64("", "tsvc-client-error", ns->n_tsvc_client_error, db);
 
 	// From-client transaction stats.
 

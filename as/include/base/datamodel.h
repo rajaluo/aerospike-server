@@ -1088,6 +1088,11 @@ struct as_namespace_s {
 	cf_atomic_int	n_evicted_objects;
 	cf_atomic_int	n_deleted_set_objects;
 
+	// tsvc-stage error counters.
+
+	cf_atomic64		n_tsvc_client_timeout;
+	cf_atomic64		n_tsvc_client_error;
+
 	// From-client transaction stats.
 
 	cf_atomic64		n_client_proxy_success;

@@ -81,36 +81,13 @@ process_transaction(as_transaction *tr)
 
 	as_transaction_init_body(tr);
 
-	// Calculate end_time based on message transaction TTL. May be recalculating
-	// for re-queued transactions, but nice if end_time not copied on/off queue.
-	if (m->transaction_ttl != 0) {
-		tr->end_time = tr->start_time +
-				((uint64_t)m->transaction_ttl * 1000000);
-
-		// Did the transaction time out while on the queue?
-		if (cf_getns() > tr->end_time) {
-			cf_debug(AS_TSVC, "transaction timed out in queue");
-			as_transaction_error(tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-			goto Cleanup;
-		}
-	}
-	// else - can't incorporate g_config.transaction_max_ns before as_query()
-
-	// Have we finished the very first partition balance?
-	if (! as_partition_balance_is_init_resolved() &&
-			(tr->from_flags & FROM_FLAG_NSUP_DELETE) == 0) {
-		cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
-		as_transaction_error(tr, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
-		goto Cleanup;
-	}
-
 	// Check that the socket is authenticated.
 	if (tr->origin == FROM_CLIENT) {
 		uint8_t result = as_security_check(tr->from.proto_fd_h, PERM_NONE);
 
 		if (result != AS_PROTO_RESULT_OK) {
 			as_security_log(tr->from.proto_fd_h, result, PERM_NONE, NULL, NULL);
-			as_transaction_error(tr, (uint32_t)result);
+			as_transaction_error(tr, NULL, (uint32_t)result);
 			goto Cleanup;
 		}
 	}
@@ -120,7 +97,7 @@ process_transaction(as_transaction *tr)
 
 	if (! nf) {
 		cf_warning(AS_TSVC, "no namespace in protocol request");
-		as_transaction_error(tr, AS_PROTO_RESULT_FAIL_NAMESPACE);
+		as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_NAMESPACE);
 		goto Cleanup;
 	}
 
@@ -137,7 +114,15 @@ process_transaction(as_transaction *tr)
 		cf_warning(AS_TSVC, "unknown namespace %s (%u) in protocol request - check configuration file",
 				ns_name, ns_sz);
 
-		as_transaction_error(tr, AS_PROTO_RESULT_FAIL_NAMESPACE);
+		as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_NAMESPACE);
+		goto Cleanup;
+	}
+
+	// Have we finished the very first partition balance?
+	if (! as_partition_balance_is_init_resolved() &&
+			! as_transaction_is_nsup_delete(tr)) {
+		cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
+		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
 		goto Cleanup;
 	}
 
@@ -146,15 +131,23 @@ process_transaction(as_transaction *tr)
 	//
 
 	if (as_transaction_is_multi_record(tr)) {
+		if (m->transaction_ttl != 0) {
+			// Old batch and queries may specify transaction_ttl, but don't use
+			// g_config.transaction_max_ns as a default. Assuming specified TTL
+			// is large enough that it's not worth checking for timeout here.
+			tr->end_time = tr->start_time +
+					((uint64_t)m->transaction_ttl * 1000000);
+		}
+
 		if (as_transaction_is_batch_direct(tr)) {
 			// Old batch.
 			if (! as_security_check_data_op(tr, ns, PERM_READ)) {
-				as_transaction_error(tr, tr->result_code);
+				as_transaction_error(tr, ns, tr->result_code);
 				goto Cleanup;
 			}
 
 			if ((rv = as_batch_direct_queue_task(tr, ns)) != 0) {
-				as_transaction_error(tr, rv);
+				as_transaction_error(tr, ns, rv);
 				cf_atomic_int_incr(&g_config.batch_errors);
 			}
 		}
@@ -164,7 +157,7 @@ process_transaction(as_transaction *tr)
 
 			if (! as_security_check_data_op(tr, ns,
 					as_transaction_is_udf(tr) ? PERM_UDF_QUERY : PERM_QUERY)) {
-				as_transaction_error(tr, tr->result_code);
+				as_transaction_error(tr, ns, tr->result_code);
 				goto Cleanup;
 			}
 
@@ -173,14 +166,14 @@ process_transaction(as_transaction *tr)
 			}
 			else {
 				cf_atomic64_incr(&g_config.query_fail);
-				as_transaction_error(tr, tr->result_code);
+				as_transaction_error(tr, ns, tr->result_code);
 			}
 		}
 		else {
 			// Scan.
 			if (! as_security_check_data_op(tr, ns,
 					as_transaction_is_udf(tr) ? PERM_UDF_SCAN : PERM_SCAN)) {
-				as_transaction_error(tr, tr->result_code);
+				as_transaction_error(tr, ns, tr->result_code);
 				goto Cleanup;
 			}
 
@@ -188,7 +181,7 @@ process_transaction(as_transaction *tr)
 				free_msgp = false;
 			}
 			else {
-				as_transaction_error(tr, rv);
+				as_transaction_error(tr, ns, rv);
 			}
 		}
 
@@ -199,17 +192,23 @@ process_transaction(as_transaction *tr)
 	// Single-record transaction.
 	//
 
-	// May now incorporate g_config.transaction_max_ns if appropriate.
-	// TODO - should g_config.transaction_max_ns = 0 be special?
-	if (tr->end_time == 0) {
+	// Calculate end_time based on message transaction TTL. May be recalculating
+	// for re-queued transactions, but nice if end_time not copied on/off queue.
+	if (m->transaction_ttl != 0) {
+		tr->end_time = tr->start_time +
+				((uint64_t)m->transaction_ttl * 1000000);
+	}
+	else {
+		// Incorporate g_config.transaction_max_ns if appropriate.
+		// TODO - should g_config.transaction_max_ns = 0 be special?
 		tr->end_time = tr->start_time + g_config.transaction_max_ns;
+	}
 
-		// Again - did the transaction time out while on the queue?
-		if (cf_getns() > tr->end_time) {
-			cf_debug(AS_TSVC, "transaction timed out in queue");
-			as_transaction_error(tr, AS_PROTO_RESULT_FAIL_TIMEOUT);
-			goto Cleanup;
-		}
+	// Did the transaction time out while on the queue?
+	if (cf_getns() > tr->end_time) {
+		cf_debug(AS_TSVC, "transaction timed out in queue");
+		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
+		goto Cleanup;
 	}
 
 	// All single-record transactions must have a digest, or a key from which
@@ -222,7 +221,7 @@ process_transaction(as_transaction *tr)
 
 		if (digest_sz != sizeof(cf_digest)) {
 			cf_warning(AS_TSVC, "digest msg field size %u", digest_sz);
-			as_transaction_error(tr, AS_PROTO_RESULT_FAIL_PARAMETER);
+			as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_PARAMETER);
 			goto Cleanup;
 		}
 
@@ -257,7 +256,7 @@ process_transaction(as_transaction *tr)
 	if ((tr->from_flags & FROM_FLAG_SHIPPED_OP) != 0) {
 		if (! is_write) {
 			cf_warning(AS_TSVC, "shipped-op is not write - unexpected");
-			as_transaction_error(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			goto Cleanup;
 		}
 
@@ -271,7 +270,7 @@ process_transaction(as_transaction *tr)
 			cf_warning(AS_TSVC, "shipped-op rsv has duplicates - unexpected");
 			as_partition_release(&tr->rsv);
 			cf_atomic_int_decr(&g_config.rw_tree_count);
-			as_transaction_error(tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			goto Cleanup;
 		}
 
@@ -280,7 +279,7 @@ process_transaction(as_transaction *tr)
 	else if (is_write) {
 		if (should_security_check_data_op(tr) &&
 				! as_security_check_data_op(tr, ns, PERM_WRITE)) {
-			as_transaction_error(tr, tr->result_code);
+			as_transaction_error(tr, ns, tr->result_code);
 			goto Cleanup;
 		}
 
@@ -294,7 +293,7 @@ process_transaction(as_transaction *tr)
 	else if (is_read) {
 		if (should_security_check_data_op(tr) &&
 				! as_security_check_data_op(tr, ns, PERM_READ)) {
-			as_transaction_error(tr, tr->result_code);
+			as_transaction_error(tr, ns, tr->result_code);
 			goto Cleanup;
 		}
 
@@ -321,7 +320,7 @@ process_transaction(as_transaction *tr)
 	}
 	else {
 		cf_warning(AS_TSVC, "transaction is neither read nor write - unexpected");
-		as_transaction_error(tr, AS_PROTO_RESULT_FAIL_PARAMETER);
+		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_PARAMETER);
 		goto Cleanup;
 	}
 
