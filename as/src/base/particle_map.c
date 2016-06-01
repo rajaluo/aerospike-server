@@ -2325,13 +2325,13 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 			if (return_need_array && ! is_prev) {
 				uint32_t j = 0;
 
-				for (; j < items_count; j++) {
+				for (; j < ele_found; j++) {
 					if (return_array[2 * j] == idx) {
 						break;
 					}
 				}
 
-				for (j++; j < items_count; j++) {
+				for (j++; j < ele_found; j++) {
 					if (return_array[2 * j] == idx) {
 						return_array[2 * j] = op.ele_count;
 					}
@@ -2374,7 +2374,7 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 		ret_idx._.ptr = alloca(sorted_size);
 		ret_idx._.ele_count = ele_removed;
 
-		for (int64_t i = 0; i < items_count; i++) {
+		for (int64_t i = 0; i < ele_found; i++) {
 			uint32_t idx = return_array[2 * i];
 
 			if (idx >= op.ele_count) {
@@ -2405,7 +2405,7 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 		ret_index._.ptr = alloca(sorted_size);
 		ret_index._.ele_count = ele_removed;
 
-		for (int64_t i = 0; i < items_count; i++) {
+		for (int64_t i = 0; i < ele_found; i++) {
 			uint32_t index = return_array[2 * i];
 
 			if (index >= op.ele_count) {
