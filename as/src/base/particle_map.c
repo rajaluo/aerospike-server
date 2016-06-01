@@ -1399,14 +1399,13 @@ map_packer_write_hdridx(map_packer *pk)
 
 	as_pack_ext_header(&write, pk->index_size, pk->flags);
 
-	uint8_t *ptr = pk->write_ptr + write.offset;
-
 	if (pk->index_size > 0) {
+		uint8_t *ptr = pk->write_ptr + write.offset;
 		size_t index_size_left = pk->index_size;
 		size_t size = offset_index_size(&pk->offset_idx);
 
 		if ((pk->flags & AS_PACKED_MAP_FLAG_OFF_IDX) && index_size_left >= size) {
-			offset_index_set_ptr(&pk->offset_idx, ptr, ptr + pk->index_size);
+			offset_index_set_ptr(&pk->offset_idx, ptr, ptr + pk->index_size + 1);	// +1 for nil pair
 			ptr += size;
 			index_size_left -= size;
 		}
@@ -1653,7 +1652,7 @@ packed_map_set_flags(as_bin *b, rollback_alloc *alloc_buf, as_bin *result, uint8
 
 	if (reorder) {
 		if (! packed_map_op_write_k_ordered(&op, mpk.write_ptr, &mpk.offset_idx)) {
-			cf_warning(AS_PARTICLE, "packed_map_set_flags() sort on key failed");
+			cf_warning(AS_PARTICLE, "packed_map_set_flags() sort on key failed, set_flags = 0x%x", set_flags);
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
 	}
@@ -5073,9 +5072,12 @@ packed_map_op_write_k_ordered(packed_map_op *op, uint8_t *write_ptr, offset_inde
 	order_index temp_key_order;
 
 	order_index_inita(&temp_key_order, ele_count);
-
 	offset_index_inita_from_op_if_invalid(&op->pmi.offset_idx, op);
-	offset_index_fill(&op->pmi.offset_idx, ele_count);
+
+	if (! offset_index_fill(&op->pmi.offset_idx, ele_count)) {
+		cf_warning(AS_PARTICLE, "packed_map_op_write_k_ordered() offset fill failed");
+		return false;
+	}
 
 	const offset_index *offsets_old = &op->pmi.offset_idx;
 
@@ -5582,6 +5584,7 @@ offset_index_fill(offset_index *offidx, size_t index)
 	}
 	// Check if sizes match.
 	else if (pk.offset != offidx->tot_ele_sz) {
+		cf_warning(AS_PARTICLE, "offset_index_fill() offset mismatch %d, expected %zu", pk.offset, offidx->tot_ele_sz);
 		return false;
 	}
 	else {
