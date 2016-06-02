@@ -204,7 +204,6 @@ dup_res_handle_request(cf_node node, msg* m)
 	AS_PARTITION_RESERVATION_INIT(rsv); // TODO - not really needed?
 
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
-	cf_atomic_int_incr(&g_config.dup_tree_count);
 
 	if (rsv.cluster_key != cluster_key) {
 		done_handle_request(&rsv, NULL);
@@ -474,7 +473,6 @@ done_handle_request(as_partition_reservation* rsv, as_index_ref* r_ref)
 
 	if (rsv) {
 		as_partition_release(rsv);
-		cf_atomic_int_decr(&g_config.dup_tree_count);
 	}
 }
 

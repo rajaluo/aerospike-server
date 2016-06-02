@@ -338,6 +338,9 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";err_xdr_write_forbidden=");
 	APPEND_STAT_COUNTER(db, g_config.err_xdr_write_forbidden);
 
+	cf_dyn_buf_append_string(db, ";stat_nsup_deletes_not_shipped=");
+	APPEND_STAT_COUNTER(db, g_config.stat_nsup_deletes_not_shipped);
+
 	cf_dyn_buf_append_string(db, ";udf_read_reqs=");
 	APPEND_STAT_COUNTER(db, g_config.udf_read_reqs);
 	cf_dyn_buf_append_string(db, ";udf_read_success=");
@@ -375,17 +378,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.stat_proxy_reqs_xdr);
 	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
 	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
-
-	cf_dyn_buf_append_string(db, ";stat_expired_objects=");
-	APPEND_STAT_COUNTER(db, g_config.stat_expired_objects);
-	cf_dyn_buf_append_string(db, ";stat_evicted_objects=");
-	APPEND_STAT_COUNTER(db, g_config.stat_evicted_objects);
-	cf_dyn_buf_append_string(db, ";stat_deleted_set_objects=");
-	APPEND_STAT_COUNTER(db, g_config.stat_deleted_set_objects);
-	cf_dyn_buf_append_string(db, ";stat_evicted_objects_time=");
-	APPEND_STAT_COUNTER(db, g_config.stat_evicted_objects_time);
-	cf_dyn_buf_append_string(db, ";stat_nsup_deletes_not_shipped=");
-	APPEND_STAT_COUNTER(db, g_config.stat_nsup_deletes_not_shipped);
 
 	cf_dyn_buf_append_string(db, ";stat_compressed_pkts_received=");
 	APPEND_STAT_COUNTER(db, g_config.stat_compressed_pkts_received);
@@ -453,8 +445,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	APPEND_STAT_COUNTER(db, g_config.batch_initiate);
 	cf_dyn_buf_append_string(db, ";batch_queue=");
 	cf_dyn_buf_append_int(db, as_batch_direct_queue_size());
-	cf_dyn_buf_append_string(db, ";batch_tree_count=");
-	APPEND_STAT_COUNTER(db, g_config.batch_tree_count);
 	cf_dyn_buf_append_string(db, ";batch_timeout=");
 	APPEND_STAT_COUNTER(db, g_config.batch_timeout);
 	cf_dyn_buf_append_string(db, ";batch_errors=");
@@ -488,9 +478,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";waiting_transactions=");
 	APPEND_STAT_COUNTER(db, g_config.n_waiting_transactions);
-
-	cf_dyn_buf_append_string(db, ";tree_count=");
-	APPEND_STAT_COUNTER(db, g_config.global_tree_count);
 
 	cf_dyn_buf_append_string(db, ";record_refs=");
 	APPEND_STAT_COUNTER(db, g_config.global_record_ref_count);
@@ -551,13 +538,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";system_swapping=");
 	cf_dyn_buf_append_string(db, swapping ? "true" : "false");
-
-	cf_dyn_buf_append_string(db, ";err_replica_null_node=");
-	APPEND_STAT_COUNTER(db, g_config.err_replica_null_node);
-	cf_dyn_buf_append_string(db, ";err_replica_non_null_node=");
-	APPEND_STAT_COUNTER(db, g_config.err_replica_non_null_node);
-	cf_dyn_buf_append_string(db, ";err_sync_copy_null_master=");
-	APPEND_STAT_COUNTER(db, g_config.err_sync_copy_null_master);
 
 	cf_dyn_buf_append_string(db, ";storage_defrag_corrupt_record=");
 	APPEND_STAT_COUNTER(db, g_config.err_storage_defrag_corrupt_record);
@@ -4667,75 +4647,81 @@ info_debug_ticker_fn(void *unused)
 			cf_debug(AS_INFO, "Shutdown in progress. Skipping info ticker");
 		} else {
 
+			cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %zd",
+					g_config.self_node,
+					g_config.paxos->cluster_size
+					);
+
 			uint64_t freemem;
-			int		 freepct;
-			bool     swapping = false;
+			int freepct;
+			bool swapping = false;
+
 			cf_meminfo(0, &freemem, &freepct, &swapping);
-			cf_info(AS_INFO, " system memory: free %"PRIu64"kb ( %d percent free ) %s",
+
+			cf_info(AS_INFO, "   system-memory: free-kbytes %lu free-pct %d%s",
 					freemem / 1024,
 					freepct,
-					(swapping == true) ? "SWAPPING!" : ""
+					swapping ? " SWAPPING!" : ""
 					);
 
-			cf_info(AS_INFO, " ClusterSize %zd ::: objects %"PRIu64" ::: sub_objects %"PRIu64,
-					g_config.paxos->cluster_size,  // add real cluster size when srini has it
-					thr_info_get_object_count(),
-					thr_info_get_subobject_count()
+			cf_info(AS_INFO, "   in-progress: rw-hash %u proxy-hash %u tsvc-q %d info-q %d nsup-delete-q %d rec-refs %lu",
+					rw_request_hash_count(),
+					as_proxy_inprogress(),
+					thr_tsvc_queue_get_size(),
+					as_info_queue_get_size(),
+					as_nsup_queue_get_size(),
+					g_config.global_record_ref_count
 					);
 
-			cf_info(AS_INFO, " rec refs %"PRIu64" ::: trees %"PRIu64,
-					cf_atomic_int_get(g_config.global_record_ref_count),
-					cf_atomic_int_get(g_config.global_tree_count)
-				 	);
+			uint64_t n_proto_fds_opened = g_config.proto_connections_opened;
+			uint64_t n_proto_fds_closed = g_config.proto_connections_closed;
+			uint64_t n_hb_fds_opened = g_config.heartbeat_connections_opened;
+			uint64_t n_hb_fds_closed = g_config.heartbeat_connections_closed;
+			uint64_t n_fabric_fds_opened = g_config.fabric_connections_opened;
+			uint64_t n_fabric_fds_closed = g_config.fabric_connections_closed;
 
-			cf_info(AS_INFO, " replica errs :: null %"PRIu64" non-null %"PRIu64" ::: sync copy errs :: master %"PRIu64" ",
-					cf_atomic_int_get(g_config.err_replica_null_node),
-					cf_atomic_int_get(g_config.err_replica_non_null_node),
-					cf_atomic_int_get(g_config.err_sync_copy_null_master)
+			cf_info(AS_INFO, "   fds: proto (%lu,%lu,%lu) heartbeat (%lu,%lu,%lu) fabric (%lu,%lu,%lu)",
+					n_proto_fds_opened - n_proto_fds_closed, n_proto_fds_opened, n_proto_fds_closed,
+					n_hb_fds_opened - n_hb_fds_closed, n_hb_fds_opened, n_hb_fds_closed,
+					n_fabric_fds_opened - n_fabric_fds_closed, n_fabric_fds_opened, n_fabric_fds_closed
 					);
 
-			cf_info(AS_INFO, "   trans_in_progress: wr %d prox %d wait %"PRIu64" ::: q %d ::: iq %d ::: dq %d : fds - proto (%"PRIu64", %"PRIu64", %"PRIu64") : hb (%"PRIu64", %"PRIu64", %"PRIu64") : fab (%"PRIu64", %"PRIu64", %"PRIu64")",
-					rw_request_hash_count(), as_proxy_inprogress(), g_config.n_waiting_transactions, thr_tsvc_queue_get_size(), as_info_queue_get_size(), as_nsup_queue_get_size(),
-					g_config.proto_connections_opened - g_config.proto_connections_closed,
-					g_config.proto_connections_opened, g_config.proto_connections_closed,
-					g_config.heartbeat_connections_opened - g_config.heartbeat_connections_closed,
-					g_config.heartbeat_connections_opened, g_config.heartbeat_connections_closed,
-					g_config.fabric_connections_opened - g_config.fabric_connections_closed,
-					g_config.fabric_connections_opened, g_config.fabric_connections_closed
-					);
+			cf_info(AS_INFO, "   heartbeat-received: self %lu foreign %lu",
+					g_config.heartbeat_received_self, g_config.heartbeat_received_foreign);
 
-			cf_info(AS_INFO, "   heartbeat_received: self %lu : foreign %lu", g_config.heartbeat_received_self, g_config.heartbeat_received_foreign);
-			cf_info(AS_INFO, "   heartbeat_stats: %s", as_hb_stats(false));
-
-			cf_info(AS_INFO, "   tree_counts: nsup %"PRIu64" scan %"PRIu64" dup %"PRIu64" wprocess %"PRIu64" migrx %"PRIu64" migtx %"PRIu64" ssdr %"PRIu64" ssdw %"PRIu64" rw %"PRIu64"",
-					cf_atomic_int_get(g_config.nsup_tree_count),
-					cf_atomic_int_get(g_config.scan_tree_count),
-					cf_atomic_int_get(g_config.dup_tree_count),
-					cf_atomic_int_get(g_config.wprocess_tree_count),
-					cf_atomic_int_get(g_config.migrx_tree_count),
-					cf_atomic_int_get(g_config.migtx_tree_count),
-					cf_atomic_int_get(g_config.ssdr_tree_count),
-					cf_atomic_int_get(g_config.ssdw_tree_count),
-					cf_atomic_int_get(g_config.rw_tree_count)
-					);
+			cf_info(AS_INFO, "   heartbeat-stats: %s",
+					as_hb_stats(false));
 
 			// namespace disk and memory size and ldt gc stats
 			total_ns_memory_inuse = 0;
 
 			for (int i = 0; i < g_config.n_namespaces; i++) {
 				as_namespace *ns = g_config.namespaces[i];
+
 				int available_pct;
 				uint64_t inuse_disk_bytes;
 				as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
-				size_t ns_index_mem = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
+
+				uint64_t ns_n_objects = ns->n_objects;
+				uint64_t ns_n_sub_objects = ns->n_sub_objects;
+				size_t ns_index_mem = as_index_size_get(ns) * (ns_n_objects + ns_n_sub_objects);
 				size_t ns_sindex_mem = ns->sindex_data_memory_used;
 				size_t ns_total_mem = ns_index_mem + ns_sindex_mem + ns->n_bytes_memory;
 				double mem_used_pct = (double)(ns_total_mem * 100) / (double)ns->memory_size;
 
+				// TODO - not do this loop over all partitions every time?
+				as_master_prole_stats mp;
+				as_partition_get_master_prole_stats(ns, &mp);
+
+				cf_info(AS_INFO, "{%s} objects: normal %lu sub %lu master %lu master-sub %lu prole %lu prole-sub %lu",
+						ns->name, ns_n_objects, ns_n_sub_objects,
+						mp.n_master_records, mp.n_master_sub_records,
+						mp.n_prole_records, mp.n_prole_sub_records);
+
 				if (ns->storage_data_in_memory) {
-					cf_info(AS_INFO, "{%s} disk bytes used %"PRIu64" : avail pct %d",
+					cf_info(AS_INFO, "{%s} used-drive-bytes %lu avail-pct %d",
 							ns->name, inuse_disk_bytes, available_pct);
-					cf_info(AS_INFO, "{%s} memory bytes used %"PRIu64" (index %"PRIu64" : sindex %"PRIu64" : data %"PRIu64") : used pct %.2lf",
+					cf_info(AS_INFO, "{%s} used-memory-bytes: total %lu index %lu sindex %lu data %lu used-pct %.2lf",
 							ns->name, ns_total_mem, ns_index_mem, ns_sindex_mem, ns->n_bytes_memory, mem_used_pct);
 				}
 				else {
@@ -4745,9 +4731,9 @@ info_debug_ticker_fn(void *unused)
 					cf_atomic32_set(&ns->n_reads_from_cache, 0);
 					ns->cache_read_pct = (float)(100 * n_reads_from_cache) / (float)(n_total_reads == 0 ? 1 : n_total_reads);
 
-					cf_info(AS_INFO, "{%s} disk bytes used %"PRIu64" : avail pct %d : cache-read pct %.2f",
+					cf_info(AS_INFO, "{%s} used-drive-bytes %lu avail-pct %d cache-read-pct %.2f",
 							ns->name, inuse_disk_bytes, available_pct, ns->cache_read_pct);
-					cf_info(AS_INFO, "{%s} memory bytes used %"PRIu64" (index %"PRIu64" : sindex %"PRIu64") : used pct %.2lf",
+					cf_info(AS_INFO, "{%s} used-memory-bytes: total %lu index %lu sindex %lu used-pct %.2lf",
 							ns->name, ns_total_mem, ns_index_mem, ns_sindex_mem, mem_used_pct);
 				}
 
@@ -4758,7 +4744,7 @@ info_debug_ticker_fn(void *unused)
 					uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
 					uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
 					uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-					cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
+					cf_info(AS_INFO, "{%s} ldt_gc: cnt %lu io %lu gc %lu (%lu, %lu, %lu)",
 							ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
 				}
 
@@ -4802,7 +4788,7 @@ info_debug_ticker_fn(void *unused)
 						ns->n_client_udf_success, ns->n_client_udf_timeout, ns->n_client_udf_error
 						);
 
-				cf_info(AS_INFO, "{%s} basic-scan (%lu,%lu) aggr-scan (%lu,%lu) udf-bg-scan (%lu,%lu)",
+				cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
 						ns->name,
 						ns->n_basic_scan_success, ns->n_basic_scan_failure,
 						ns->n_aggr_scan_success, ns->n_aggr_scan_failure,
@@ -4963,7 +4949,6 @@ info_debug_ticker_fn(void *unused)
 
 			// Dump some stats every 30 ticker cycles (default 5 minutes).
 			if ((ticker_cycles++ % 30) == 0) {
-				cf_info(AS_INFO, "node id %"PRIx64"", g_config.self_node);
 				// Various transaction & error counters
 				cf_info(AS_INFO, "udf reads %"PRIu64",%"PRIu64" : udf writes %"PRIu64",%"PRIu64" : udf deletes %"PRIu64",%"PRIu64" : lua errors %"PRIu64"",
 						g_config.udf_read_success, g_config.udf_read_errs_other,
@@ -4977,16 +4962,6 @@ info_debug_ticker_fn(void *unused)
 				uint64_t lookup_failures = cf_atomic64_get(g_config.n_lookup_errs) + cf_atomic64_get(g_config.n_lookup_abort);
 				cf_info(AS_INFO, "aggregation queries %"PRIu64",%"PRIu64" : lookup queries %"PRIu64",%"PRIu64"",
 						cf_atomic64_get(g_config.n_agg_success), agg_failures, cf_atomic64_get(g_config.n_lookup_success), lookup_failures);
-
-				// Namespace stats
-				for (uint idx = 0; idx < g_config.n_namespaces; idx++) {
-					as_namespace *ns = g_config.namespaces[idx];
-					as_master_prole_stats mp;
-					as_partition_get_master_prole_stats(ns, &mp);
-
-					cf_info(AS_INFO, "{%s} objects %"PRIu64" : sub-objects %"PRIu64" : master objects %"PRIu64" : master sub-objects %"PRIu64" : prole objects %"PRIu64" : prole sub-objects %"PRIu64"",
-							ns->name, ns->n_objects, ns->n_sub_objects, mp.n_master_records, mp.n_master_sub_records, mp.n_prole_records, mp.n_prole_sub_records);
-				}
 			}
 		}
 
@@ -5707,30 +5682,6 @@ info_get_sindexes(char *name, cf_dyn_buf *db)
 	return info_get_tree_sindexes(name, "", db);
 }
 
-uint64_t
-thr_info_get_object_count()
-{
-	uint64_t objects = 0;
-
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
-		objects += g_config.namespaces[i]->n_objects;
-	}
-
-	return objects;
-}
-
-uint64_t
-thr_info_get_subobject_count()
-{
-	uint64_t sub_objects = 0;
-
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
-		sub_objects += g_config.namespaces[i]->n_sub_objects;
-	}
-
-	return sub_objects;
-}
-
 
 void
 info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
@@ -5754,6 +5705,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "expired-objects",  ns->n_expired_objects, db);
 	info_append_uint64("", "evicted-objects",  ns->n_evicted_objects, db);
 	info_append_uint64("", "set-deleted-objects", ns->n_deleted_set_objects, db);
+	info_append_uint64("", "evict-ttl", ns->evict_ttl, db);
 	info_append_uint64("", "nsup-cycle-duration", (uint64_t)ns->nsup_cycle_duration, db);
 	info_append_uint64("", "nsup-cycle-sleep-pct", (uint64_t)ns->nsup_cycle_sleep_pct, db);
 

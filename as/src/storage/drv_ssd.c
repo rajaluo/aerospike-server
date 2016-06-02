@@ -630,7 +630,6 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 	as_partition_id pid = as_partition_getid(block->keyd);
 
 	as_partition_reserve_migrate(ns, pid, &rsv, 0);
-	cf_atomic_int_incr(&g_config.ssdr_tree_count);
 
 	int rv;
 	as_index_ref r_ref;
@@ -676,7 +675,6 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 	}
 
 	as_partition_release(&rsv);
-	cf_atomic_int_decr(&g_config.ssdr_tree_count);
 
 	return rv;
 }
@@ -1996,7 +1994,6 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 		as_partition_reservation rsv;
 
 		as_partition_reserve_migrate(ns, pid, &rsv, 0);
-		cf_atomic_int_incr(&g_config.ssdr_tree_count);
 
 		as_index_ref r_ref;
 		r_ref.skip_lock = false;
@@ -2025,7 +2022,6 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 		// else it was deleted (?) so call it a zombie...
 
 		as_partition_release(&rsv);
-		cf_atomic_int_decr(&g_config.ssdr_tree_count);
 
 		if (living) {
 			living_populations[pid]++;

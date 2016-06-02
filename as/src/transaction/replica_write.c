@@ -300,11 +300,9 @@ repl_write_handle_op(cf_node node, msg* m)
 	as_partition_reservation rsv;
 
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
-	cf_atomic_int_incr(&g_config.wprocess_tree_count);
 
 	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
 		as_partition_release(&rsv);
-		cf_atomic_int_decr(&g_config.wprocess_tree_count);
 		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
 		return;
 	}
@@ -318,7 +316,6 @@ repl_write_handle_op(cf_node node, msg* m)
 	if ((info & RW_INFO_LDT) != 0 && ! ldt_get_info(&linfo, m, &rsv)) {
 		cf_warning(AS_RW, "repl_write_handle_op: bad ldt info");
 		as_partition_release(&rsv);
-		cf_atomic_int_decr(&g_config.wprocess_tree_count);
 		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
 		return;
 	}
@@ -338,7 +335,6 @@ repl_write_handle_op(cf_node node, msg* m)
 		// TODO - does this really need to be here? Just to fill linfo?
 		if (! ldt_get_prole_version(&rsv, keyd, &linfo, info, NULL, false)) {
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.wprocess_tree_count);
 			send_repl_write_ack(node, m, AS_PROTO_RESULT_OK); // ???
 			return;
 		}
@@ -358,7 +354,6 @@ repl_write_handle_op(cf_node node, msg* m)
 		if (msg_get_uint32(m, RW_FIELD_GENERATION, &generation) != 0) {
 			cf_warning(AS_RW, "repl_write_handle_op: no generation");
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.wprocess_tree_count);
 			send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return;
 		}
@@ -368,7 +363,6 @@ repl_write_handle_op(cf_node node, msg* m)
 		if (msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time) != 0) {
 			cf_warning(AS_RW, "repl_write_handle_op: no void-time");
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.wprocess_tree_count);
 			send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return;
 		}
@@ -394,7 +388,6 @@ repl_write_handle_op(cf_node node, msg* m)
 	}
 
 	as_partition_release(&rsv);
-	cf_atomic_int_decr(&g_config.wprocess_tree_count);
 	send_repl_write_ack(node, m, result);
 }
 
@@ -691,11 +684,9 @@ repl_write_handle_multiop(cf_node node, msg* m)
 	as_partition_reservation rsv;
 
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
-	cf_atomic_int_incr(&g_config.wprocess_tree_count);
 
 	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
 		as_partition_release(&rsv);
-		cf_atomic_int_decr(&g_config.wprocess_tree_count);
 		send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
 		return;
 	}
@@ -720,7 +711,6 @@ repl_write_handle_multiop(cf_node node, msg* m)
 				op_msg_type != M_TYPE_RW) {
 			cf_warning(AS_RW, "handle_multiop: peek multiop msg failed");
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.wprocess_tree_count);
 			send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return;
 		}
@@ -730,7 +720,6 @@ repl_write_handle_multiop(cf_node node, msg* m)
 		if (! op_msg) {
 			cf_warning(AS_RW, "handle_multiop: can't get fabric msg");
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.wprocess_tree_count);
 			send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return;
 		}
@@ -739,7 +728,6 @@ repl_write_handle_multiop(cf_node node, msg* m)
 			cf_warning(AS_RW, "handle_multiop: can't parse multiop msg");
 			as_fabric_msg_put(op_msg);
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.wprocess_tree_count);
 			send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return;
 		}
@@ -750,7 +738,6 @@ repl_write_handle_multiop(cf_node node, msg* m)
 			cf_warning(AS_RW, "handle_multiop: write_process_new failed");
 			as_fabric_msg_put(op_msg);
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.wprocess_tree_count);
 			send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return;
 		}
@@ -759,7 +746,6 @@ repl_write_handle_multiop(cf_node node, msg* m)
 	}
 
 	as_partition_release(&rsv);
-	cf_atomic_int_decr(&g_config.wprocess_tree_count);
 	send_multiop_ack(node, m, AS_PROTO_RESULT_OK);
 }
 

@@ -1084,9 +1084,14 @@ struct as_namespace_s {
 	cf_atomic_int	n_objects;
 	cf_atomic_int	n_sub_objects;
 	cf_atomic_int	n_bytes_memory;
-	cf_atomic_int	n_expired_objects;
-	cf_atomic_int	n_evicted_objects;
-	cf_atomic_int	n_deleted_set_objects;
+
+	// nsup-related stats.
+
+	cf_atomic64		n_expired_objects;
+	cf_atomic64		n_evicted_objects;
+	cf_atomic64		n_deleted_set_objects;
+
+	cf_atomic64		evict_ttl;
 
 	// tsvc-stage error counters.
 

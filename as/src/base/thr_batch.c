@@ -100,8 +100,6 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 			int rv = as_partition_reserve_read(ns, as_partition_getid(bmd->keyd), &rsv, &other_node, &cluster_key);
 
 			if (rv == 0) {
-				cf_atomic_int_incr(&g_config.batch_tree_count);
-
 				as_index_ref r_ref;
 				r_ref.skip_lock = false;
 				int rec_rv = as_record_get(rsv.tree, &bmd->keyd, &r_ref, ns);
@@ -150,7 +148,6 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 				bmd->done = true;
 
 				as_partition_release(&rsv);
-				cf_atomic_int_decr(&g_config.batch_tree_count);
 			}
 			else {
 				cf_debug(AS_BATCH, "batch_build_response: partition reserve read failed: rv %d", rv);

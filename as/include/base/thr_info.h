@@ -60,11 +60,6 @@ extern int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec
 extern void as_info_paxos_event(as_paxos_generation gen,
 		as_paxos_change *change, cf_node succession[], void *udata);
 
-// Starting to calculate more and more stats in thr_info. Perhaps this should be
-// elsewhere?
-extern uint64_t thr_info_get_object_count();
-extern uint64_t thr_info_get_subobject_count();
-
 typedef struct as_info_transaction_s {
 	as_file_handle *fd_h;
 	as_proto *proto;

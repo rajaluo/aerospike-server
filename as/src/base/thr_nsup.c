@@ -463,8 +463,6 @@ garbage_collect_next_prole_partition(as_namespace* ns, int pid)
 		}
 		else if (0 == as_partition_reserve_read(ns, pid, &rsv, 0, 0)) {
 			// This is a prole partition - garbage collect and break.
-			cf_atomic_int_incr(&g_config.nsup_tree_count);
-
 			garbage_collect_info cb_info;
 
 			cb_info.ns = ns;
@@ -481,7 +479,6 @@ garbage_collect_next_prole_partition(as_namespace* ns, int pid)
 			}
 
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.nsup_tree_count);
 
 			// Do only one partition per nsup loop.
 			break;
@@ -538,8 +535,6 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 		}
 		else if (0 == as_partition_reserve_read(ns, n, &rsv, 0, 0)) {
 			// This is a prole partition - check it.
-			cf_atomic_int_incr(&g_config.nsup_tree_count);
-
 			non_master_sets_delete_info cb_info;
 
 			cb_info.ns = ns;
@@ -556,12 +551,10 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 			}
 
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.nsup_tree_count);
 		}
 		else {
 			// We don't own this partition - check anyway.
 			as_partition_reserve_migrate(ns, n, &rsv, 0);
-			cf_atomic_int_incr(&g_config.nsup_tree_count);
 
 			non_master_sets_delete_info cb_info;
 
@@ -579,7 +572,6 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 			}
 
 			as_partition_release(&rsv);
-			cf_atomic_int_decr(&g_config.nsup_tree_count);
 		}
 	}
 }
@@ -921,12 +913,9 @@ reduce_master_partitions(as_namespace* ns, as_index_reduce_fn cb, void* udata, u
 			continue;
 		}
 
-		cf_atomic_int_incr(&g_config.nsup_tree_count);
-
 		as_index_reduce(rsv.p->vp, cb, udata);
 
 		as_partition_release(&rsv);
-		cf_atomic_int_decr(&g_config.nsup_tree_count);
 
 		while (cf_queue_sz(g_p_nsup_delete_q) > DELETE_Q_SAFETY_THRESHOLD) {
 			usleep(DELETE_Q_SAFETY_SLEEP_us);
@@ -948,12 +937,10 @@ sub_reduce_partitions(as_namespace* ns, as_index_reduce_fn cb, void* udata, uint
 
 	for (int n = 0; n < AS_PARTITIONS; n++) {
 		as_partition_reserve_migrate(ns, n, &rsv, 0);
-		cf_atomic_int_incr(&g_config.nsup_subtree_count);
 
 		as_index_reduce(rsv.p->sub_vp, cb, udata);
 
 		as_partition_release(&rsv);
-		cf_atomic_int_decr(&g_config.nsup_subtree_count);
 
 		usleep(LDT_SUB_GC_SAFETY_SLEEP_us);
 
@@ -1072,19 +1059,16 @@ update_stats(as_namespace* ns, uint32_t n_master, uint32_t n_0_void_time,
 		uint64_t start_ms)
 {
 	if (n_expired_records != 0) {
-		cf_atomic_int_add(&g_config.stat_expired_objects, n_expired_records);
-		cf_atomic_int_add(&ns->n_expired_objects, n_expired_records);
+		cf_atomic64_add(&ns->n_expired_objects, n_expired_records);
 	}
 
 	if (n_evicted_records != 0) {
-		cf_atomic_int_set(&g_config.stat_evicted_objects_time, evict_ttl);
-		cf_atomic_int_add(&g_config.stat_evicted_objects, n_evicted_records);
-		cf_atomic_int_add(&ns->n_evicted_objects, n_evicted_records);
+		cf_atomic64_set(&ns->evict_ttl, evict_ttl);
+		cf_atomic64_add(&ns->n_evicted_objects, n_evicted_records);
 	}
 
 	if (n_deleted_set_records != 0) {
-		cf_atomic_int_add(&g_config.stat_deleted_set_objects, n_deleted_set_records);
-		cf_atomic_int_add(&ns->n_deleted_set_objects, n_deleted_set_records);
+		cf_atomic64_add(&ns->n_deleted_set_objects, n_deleted_set_records);
 	}
 
 	ns->non_expirable_objects = n_0_void_time;

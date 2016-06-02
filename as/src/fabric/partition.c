@@ -686,7 +686,6 @@ as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p,
 				&& as_partition_balance_is_init_resolved()) {
 			cf_warning(AS_PARTITION, "{%s:%zu} Detected state error. Replica list contains null node at position %d",
 					ns->name, pid, i);
-			cf_atomic_int_incr(&g_config.err_replica_null_node);
 		}
 	}
 
@@ -694,7 +693,6 @@ as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p,
 		if (p->replica[i] != (cf_node)0) {
 			cf_warning(AS_PARTITION, "{%s:%zu} Detected state error. Replica list contains non null node %"PRIx64" at position %d",
 					ns->name, pid, p->replica[i], i);
-			cf_atomic_int_incr(&g_config.err_replica_non_null_node);
 		}
 	}
 }
@@ -755,7 +753,6 @@ find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_read)
 	if (n == 0 && as_partition_balance_is_init_resolved()) {
 		cf_warning(AS_PARTITION, "{%s:%zu} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64,
 				ns->name, pid, my_index, p->replica[0], p->replica[1], p->origin);
-		cf_atomic_int_incr(&g_config.err_sync_copy_null_master);
 	}
 
 	return n;

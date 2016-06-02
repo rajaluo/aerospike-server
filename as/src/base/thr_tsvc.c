@@ -264,12 +264,9 @@ process_transaction(as_transaction *tr)
 		// just do a migrate reservation.
 		as_partition_reserve_migrate(ns, pid, &tr->rsv, &dest);
 
-		cf_atomic_int_incr(&g_config.rw_tree_count);
-
 		if (tr->rsv.n_dupl != 0) {
 			cf_warning(AS_TSVC, "shipped-op rsv has duplicates - unexpected");
 			as_partition_release(&tr->rsv);
-			cf_atomic_int_decr(&g_config.rw_tree_count);
 			as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			goto Cleanup;
 		}
@@ -285,10 +282,6 @@ process_transaction(as_transaction *tr)
 
 		rv = as_partition_reserve_write(ns, pid, &tr->rsv, &dest,
 				&partition_cluster_key);
-
-		if (rv == 0) {
-			cf_atomic_int_incr(&g_config.rw_tree_count);
-		}
 	}
 	else if (is_read) {
 		if (should_security_check_data_op(tr) &&
@@ -300,22 +293,13 @@ process_transaction(as_transaction *tr)
 		rv = as_partition_reserve_read(ns, pid, &tr->rsv, &dest,
 				&partition_cluster_key);
 
-		if (rv == 0) {
-			cf_atomic_int_incr(&g_config.rw_tree_count);
-		}
-
 		// TODO - does this reservation promotion really accomplish anything?
 		if (rv == 0 && tr->rsv.n_dupl > 0) {
 			// Upgrade to a write reservation.
 			as_partition_release(&tr->rsv);
-			cf_atomic_int_decr(&g_config.rw_tree_count);
 
 			rv = as_partition_reserve_write(ns, pid, &tr->rsv, &dest,
 					&partition_cluster_key);
-
-			if (rv == 0) {
-				cf_atomic_int_incr(&g_config.rw_tree_count);
-			}
 		}
 	}
 	else {
@@ -353,7 +337,6 @@ process_transaction(as_transaction *tr)
 		case TRANS_DONE_SUCCESS:
 			// Done, response already sent - free msg & release reservation.
 			as_partition_release(&tr->rsv);
-			cf_atomic_int_decr(&g_config.rw_tree_count);
 			break;
 		case TRANS_IN_PROGRESS:
 			// Don't free msg or release reservation - both owned by rw_request.
@@ -363,7 +346,6 @@ process_transaction(as_transaction *tr)
 			// Will be re-queued - don't free msg, but release reservation.
 			free_msgp = false;
 			as_partition_release(&tr->rsv);
-			cf_atomic_int_decr(&g_config.rw_tree_count);
 			break;
 		default:
 			cf_crash(AS_TSVC, "invalid transaction status %d", status);

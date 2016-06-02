@@ -666,7 +666,6 @@ query_release_prereserved_partitions(as_query_transaction * qtr)
 		for (int i=0; i<AS_PARTITIONS; i++) {
 			if (qtr->qctx.can_partition_query[i]) {
 				as_partition_release(&qtr->rsv[i]);
-				cf_atomic_int_decr(&g_config.dup_tree_count);
 			}
 		}
 		if (qtr->rsv) {
@@ -1008,7 +1007,7 @@ query_reserve_partition(as_namespace * ns, as_query_transaction * qtr, as_partit
 	if (0 != as_partition_reserve_query(ns, pid, rsv)) {
 		return NULL;
 	}
-	cf_atomic_int_incr(&g_config.dup_tree_count);
+
 	return rsv;
 }
 
@@ -1017,7 +1016,6 @@ query_release_partition(as_query_transaction * qtr, as_partition_reservation * r
 {
 	if (!qtr->qctx.partitions_pre_reserved) {
 		as_partition_release(rsv);
-		cf_atomic_int_decr(&g_config.dup_tree_count);
 	}
 }
 

@@ -150,7 +150,6 @@ rw_request_destroy(rw_request* rw)
 		}
 
 		as_partition_release(&rw->rsv);
-		cf_atomic_int_decr(&g_config.rw_tree_count);
 	}
 
 	pthread_mutex_destroy(&rw->lock);

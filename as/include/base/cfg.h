@@ -374,17 +374,6 @@ typedef struct as_config_s {
 	cf_atomic_int		info_connections_closed;
 	cf_atomic_int		n_waiting_transactions; // FIXME - what?
 	cf_atomic_int		global_record_ref_count;
-	cf_atomic_int		global_tree_count;
-	cf_atomic_int		nsup_tree_count;
-	cf_atomic_int		nsup_subtree_count;
-	cf_atomic_int		scan_tree_count;
-	cf_atomic_int		dup_tree_count;
-	cf_atomic_int		wprocess_tree_count;
-	cf_atomic_int		migrx_tree_count;
-	cf_atomic_int		migtx_tree_count;
-	cf_atomic_int		ssdr_tree_count;
-	cf_atomic_int		ssdw_tree_count;
-	cf_atomic_int		rw_tree_count;
 	cf_atomic_int		reaper_count;
 
 	cf_atomic_int		batch_index_initiate;
@@ -396,7 +385,6 @@ typedef struct as_config_s {
 	cf_atomic_int		batch_index_destroyed_buffers;
 
 	cf_atomic_int		batch_initiate;
-	cf_atomic_int		batch_tree_count;
 	cf_atomic_int		batch_timeout;
 	cf_atomic_int		batch_errors;
 
@@ -455,15 +443,6 @@ typedef struct as_config_s {
 
 	cf_atomic_int		stat_proxy_reqs; // FIXME - what do we need?
 	cf_atomic_int		stat_proxy_reqs_xdr; // FIXME - what do we need?
-
-	cf_atomic_int		stat_expired_objects;
-	cf_atomic_int		stat_evicted_objects;
-	cf_atomic_int		stat_deleted_set_objects;
-	cf_atomic_int		stat_evicted_objects_time;
-
-	cf_atomic_int		err_replica_null_node;
-	cf_atomic_int		err_replica_non_null_node;
-	cf_atomic_int		err_sync_copy_null_master;
 
 	cf_atomic_int		err_storage_queue_full;
 	cf_atomic_int		err_storage_defrag_corrupt_record;
