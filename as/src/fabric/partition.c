@@ -1466,39 +1466,30 @@ as_partition_getstate_str(int state)
 }
 
 
-char
-as_partition_gettxmigstate_str(int state)
-{
-	switch (state) {
-	case AS_PARTITION_MIG_TX_STATE_NONE:
-		return 'N';
-	case AS_PARTITION_MIG_TX_STATE_SUBRECORD:
-		return 'C';
-	case AS_PARTITION_MIG_TX_STATE_RECORD:
-		return 'P';
-	default:
-		return '?';
-	}
-}
-
-
 void
 as_partition_getinfo_str(cf_dyn_buf *db)
 {
 	size_t db_sz = db->used_sz;
+
+	cf_dyn_buf_append_string(db, "namespace:partition:state:n_dupl");
+	cf_dyn_buf_append_string(db, ":replica:origin:target:emigrates:immigrates");
+	cf_dyn_buf_append_string(db, ":records:sub_records:ldt_version:version;");
 
 	for (uint i = 0 ; i < g_config.n_namespaces ; i++ ) {
 		as_namespace *ns = g_config.namespaces[i];
 
 		for (uint j = 0 ; j < AS_PARTITIONS ; j++) {
 			as_partition *p = &ns->partitions[j];
+
+			pthread_mutex_lock(&p->lock);
+
 			char state_c = as_partition_getstate_str(p->state);
 
 			// Find myself in the replica list.
 			int replica_idx;
 
 			for (replica_idx = 0; replica_idx < g_config.paxos_max_cluster_size; replica_idx++) {
-				if (p->replica[replica_idx] == 0) {
+				if (p->replica[replica_idx] == (cf_node)0) {
 					break;
 				}
 
@@ -1507,12 +1498,13 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 				}
 			}
 
-			// This is debugging info.
 			cf_dyn_buf_append_string(db, ns->name);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_int(db, j); // part_id
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_char(db, state_c);
+			cf_dyn_buf_append_char(db, ':');
+			cf_dyn_buf_append_uint64(db, (uint64_t)p->n_dupl);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_int(db, replica_idx); // partition index
 			cf_dyn_buf_append_char(db, ':');
@@ -1530,14 +1522,14 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->current_outgoing_ldt_version);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_int(db, j);
-			cf_dyn_buf_append_char(db, '-');
 			cf_dyn_buf_append_uint64(db, p->version_info.iid);
 			cf_dyn_buf_append_char(db, '-');
 			cf_dyn_buf_append_uint64(db, p->version_info.vtp[0]);
 			cf_dyn_buf_append_char(db, '-');
 			cf_dyn_buf_append_uint64(db, p->version_info.vtp[8]);
 			cf_dyn_buf_append_char(db, ';');
+
+			pthread_mutex_unlock(&p->lock);
 		}
 	}
 
