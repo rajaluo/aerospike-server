@@ -5484,6 +5484,10 @@ offset_index_set(offset_index *offidx, size_t index, uint32_t value)
 static bool
 offset_index_set_next(offset_index *offidx, size_t index, uint32_t value)
 {
+	if (index >= offidx->_.ele_count) {
+		return true;
+	}
+
 	uint32_t filled = offset_index_get_filled(offidx);
 
 	if (index == filled) {
