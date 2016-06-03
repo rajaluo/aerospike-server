@@ -702,11 +702,10 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t va
 		return 0;
 	}
 
+	// TODO - May want to check key order here but for now we'll trust the client/other node.
 	size_t ext_content_sz = op_map_ext_content_sz(&op);
 	// 1 byte for header, 1 byte for type, 1 byte for length for existing ext.
 	size_t extra_sz = as_pack_ext_header_get_size((uint32_t)ext_content_sz) - 3;
-
-	memcpy(p_map_mem->data + extra_sz, wire_value, value_size);
 
 	as_packer pk = {
 			.head = NULL,
@@ -720,7 +719,8 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t va
 	as_pack_ext_header(&pk, ext_content_sz, map_adjust_flags(op.pmi.flags));
 	as_pack_init_indexes(&pk, &op);
 	as_pack_val(&pk, (const as_val *)&as_nil);
-	p_map_mem->sz = value_size + extra_sz;
+	memcpy(pk.buffer + pk.offset, op.packed + op.ele_start, op.packed_sz - op.ele_start);
+	p_map_mem->sz = value_size + ext_content_sz + extra_sz;
 
 	return 0;
 }
@@ -1177,13 +1177,18 @@ as_pack_init_indexes(as_packer *pk, const packed_map_op *op)
 		uint32_t content_size = op->packed_sz - op->ele_start;
 
 		offset_index_init(offidx, ptr, op->ele_count, content_size);
-		ptr += offset_index_size(offidx);
+
+		size_t offidx_sz = offset_index_size(offidx);
+
+		ptr += offidx_sz;
 		offset_index_set_filled(offidx, 1);
+		pk->offset += (int)offidx_sz;
 	}
 
 	if (op_is_kv_ordered(op)) {
 		order_index_init(ordidx, ptr, op->ele_count);
 		order_index_set(ordidx, 0, op->ele_count);
+		pk->offset += (int)order_index_size(ordidx);
 	}
 }
 
@@ -1399,14 +1404,13 @@ map_packer_write_hdridx(map_packer *pk)
 
 	as_pack_ext_header(&write, pk->index_size, pk->flags);
 
-	uint8_t *ptr = pk->write_ptr + write.offset;
-
 	if (pk->index_size > 0) {
+		uint8_t *ptr = pk->write_ptr + write.offset;
 		size_t index_size_left = pk->index_size;
 		size_t size = offset_index_size(&pk->offset_idx);
 
 		if ((pk->flags & AS_PACKED_MAP_FLAG_OFF_IDX) && index_size_left >= size) {
-			offset_index_set_ptr(&pk->offset_idx, ptr, ptr + pk->index_size);
+			offset_index_set_ptr(&pk->offset_idx, ptr, ptr + pk->index_size + 1);	// +1 for nil pair
 			ptr += size;
 			index_size_left -= size;
 		}
@@ -1653,7 +1657,7 @@ packed_map_set_flags(as_bin *b, rollback_alloc *alloc_buf, as_bin *result, uint8
 
 	if (reorder) {
 		if (! packed_map_op_write_k_ordered(&op, mpk.write_ptr, &mpk.offset_idx)) {
-			cf_warning(AS_PARTICLE, "packed_map_set_flags() sort on key failed");
+			cf_warning(AS_PARTICLE, "packed_map_set_flags() sort on key failed, set_flags = 0x%x", set_flags);
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
 	}
@@ -2003,14 +2007,17 @@ packed_map_add_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *it
 			break;
 		}
 
-		if (i == items_count - 1) {
-			if (old_particle == b->particle) {
+		// Check for no-op.
+		if (old_particle == b->particle) {
+			if (i == items_count - 1) {
 				// Must copy to non-temp alloc memory.
 				map_mem *p_map_mem = (map_mem *)b->particle;
 				size_t size = sizeof(map_mem) + p_map_mem->sz;
 				b->particle = (as_particle *)rollback_alloc_reserve(alloc_buf, size);
 				memcpy(b->particle, p_map_mem, size);
 			}
+
+			continue;
 		}
 
 		rollback_alloc_rollback(alloc_1);
@@ -2325,13 +2332,13 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 			if (return_need_array && ! is_prev) {
 				uint32_t j = 0;
 
-				for (; j < items_count; j++) {
+				for (; j < ele_found; j++) {
 					if (return_array[2 * j] == idx) {
 						break;
 					}
 				}
 
-				for (j++; j < items_count; j++) {
+				for (j++; j < ele_found; j++) {
 					if (return_array[2 * j] == idx) {
 						return_array[2 * j] = op.ele_count;
 					}
@@ -2374,7 +2381,7 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 		ret_idx._.ptr = alloca(sorted_size);
 		ret_idx._.ele_count = ele_removed;
 
-		for (int64_t i = 0; i < items_count; i++) {
+		for (int64_t i = 0; i < ele_found; i++) {
 			uint32_t idx = return_array[2 * i];
 
 			if (idx >= op.ele_count) {
@@ -2405,7 +2412,7 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 		ret_index._.ptr = alloca(sorted_size);
 		ret_index._.ele_count = ele_removed;
 
-		for (int64_t i = 0; i < items_count; i++) {
+		for (int64_t i = 0; i < ele_found; i++) {
 			uint32_t index = return_array[2 * i];
 
 			if (index >= op.ele_count) {
@@ -5073,9 +5080,12 @@ packed_map_op_write_k_ordered(packed_map_op *op, uint8_t *write_ptr, offset_inde
 	order_index temp_key_order;
 
 	order_index_inita(&temp_key_order, ele_count);
-
 	offset_index_inita_from_op_if_invalid(&op->pmi.offset_idx, op);
-	offset_index_fill(&op->pmi.offset_idx, ele_count);
+
+	if (! offset_index_fill(&op->pmi.offset_idx, ele_count)) {
+		cf_warning(AS_PARTICLE, "packed_map_op_write_k_ordered() offset fill failed");
+		return false;
+	}
 
 	const offset_index *offsets_old = &op->pmi.offset_idx;
 
@@ -5482,6 +5492,10 @@ offset_index_set(offset_index *offidx, size_t index, uint32_t value)
 static bool
 offset_index_set_next(offset_index *offidx, size_t index, uint32_t value)
 {
+	if (index >= offidx->_.ele_count) {
+		return true;
+	}
+
 	uint32_t filled = offset_index_get_filled(offidx);
 
 	if (index == filled) {
@@ -5582,6 +5596,7 @@ offset_index_fill(offset_index *offidx, size_t index)
 	}
 	// Check if sizes match.
 	else if (pk.offset != offidx->tot_ele_sz) {
+		cf_warning(AS_PARTICLE, "offset_index_fill() offset mismatch %d, expected %zu", pk.offset, offidx->tot_ele_sz);
 		return false;
 	}
 	else {
