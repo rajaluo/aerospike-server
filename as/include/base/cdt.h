@@ -46,8 +46,7 @@ typedef struct rollback_alloc_s {
 } rollback_alloc;
 
 #define rollback_alloc_inita(__name, __alloc_buf, __rollback_size) \
-		uint8_t cdt_packed_alloc_stage##__name[sizeof(rollback_alloc) + sizeof(void *)*(__alloc_buf ? 0 : __rollback_size)]; \
-		rollback_alloc *__name = (rollback_alloc *)cdt_packed_alloc_stage##__name; \
+		rollback_alloc *__name = (rollback_alloc *)alloca(sizeof(rollback_alloc) + sizeof(void *)*(__alloc_buf ? 0 : __rollback_size)); \
 		__name->ll_buf = __alloc_buf; \
 		__name->malloc_list_sz = 0; \
 		__name->malloc_list_cap = (__alloc_buf ? 0 : __rollback_size);

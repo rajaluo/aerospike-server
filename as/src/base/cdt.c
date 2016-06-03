@@ -446,7 +446,7 @@ cdt_process_state_op_param_count(as_cdt_optype op)
 void
 rollback_alloc_push(rollback_alloc *packed_alloc, void *ptr)
 {
-	if (packed_alloc->malloc_list_sz == packed_alloc->malloc_list_cap) {
+	if (packed_alloc->malloc_list_sz >= packed_alloc->malloc_list_cap) {
 		cf_crash(AS_PARTICLE, "rollback_alloc_push() need to make rollback list larger: cap=%zu", packed_alloc->malloc_list_cap);
 	}
 

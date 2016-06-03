@@ -2002,14 +2002,17 @@ packed_map_add_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *it
 			break;
 		}
 
-		if (i == items_count - 1) {
-			if (old_particle == b->particle) {
+		// Check for no-op.
+		if (old_particle == b->particle) {
+			if (i == items_count - 1) {
 				// Must copy to non-temp alloc memory.
 				map_mem *p_map_mem = (map_mem *)b->particle;
 				size_t size = sizeof(map_mem) + p_map_mem->sz;
 				b->particle = (as_particle *)rollback_alloc_reserve(alloc_buf, size);
 				memcpy(b->particle, p_map_mem, size);
 			}
+
+			continue;
 		}
 
 		rollback_alloc_rollback(alloc_1);
