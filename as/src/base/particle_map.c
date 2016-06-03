@@ -702,11 +702,10 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t va
 		return 0;
 	}
 
+	// TODO - May want to check key order here but for now we'll trust the client/other node.
 	size_t ext_content_sz = op_map_ext_content_sz(&op);
 	// 1 byte for header, 1 byte for type, 1 byte for length for existing ext.
 	size_t extra_sz = as_pack_ext_header_get_size((uint32_t)ext_content_sz) - 3;
-
-	memcpy(p_map_mem->data + extra_sz, wire_value, value_size);
 
 	as_packer pk = {
 			.head = NULL,
@@ -720,7 +719,8 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t va
 	as_pack_ext_header(&pk, ext_content_sz, map_adjust_flags(op.pmi.flags));
 	as_pack_init_indexes(&pk, &op);
 	as_pack_val(&pk, (const as_val *)&as_nil);
-	p_map_mem->sz = value_size + extra_sz;
+	memcpy(pk.buffer + pk.offset, op.packed + op.ele_start, op.packed_sz - op.ele_start);
+	p_map_mem->sz = value_size + ext_content_sz + extra_sz;
 
 	return 0;
 }
@@ -1177,13 +1177,18 @@ as_pack_init_indexes(as_packer *pk, const packed_map_op *op)
 		uint32_t content_size = op->packed_sz - op->ele_start;
 
 		offset_index_init(offidx, ptr, op->ele_count, content_size);
-		ptr += offset_index_size(offidx);
+
+		size_t offidx_sz = offset_index_size(offidx);
+
+		ptr += offidx_sz;
 		offset_index_set_filled(offidx, 1);
+		pk->offset += (int)offidx_sz;
 	}
 
 	if (op_is_kv_ordered(op)) {
 		order_index_init(ordidx, ptr, op->ele_count);
 		order_index_set(ordidx, 0, op->ele_count);
+		pk->offset += (int)order_index_size(ordidx);
 	}
 }
 
