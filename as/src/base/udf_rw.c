@@ -83,7 +83,7 @@ client_udf_update_stats_bin(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_PROTO_RESULT_OK:
-		cf_atomic64_incr(&ns->n_client_udf_success);
+		cf_atomic64_incr(&ns->n_client_udf_complete);
 		break;
 	case AS_PROTO_RESULT_FAIL_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_udf_timeout);
@@ -649,43 +649,73 @@ post_processing(udf_record *urecord, udf_optype *urecord_op, uint16_t set_id)
  *  Returns: nothing
 */
 static void
-update_stats(as_namespace *ns, udf_optype op, int ret, bool is_success, bool is_ldt)
+update_ldt_stats(as_namespace *ns, udf_optype op, int ret, bool is_success)
 {
-	if (is_ldt) {
-		if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->lstats.ldt_read_reqs);
-		else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->lstats.ldt_delete_reqs);
-		else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->lstats.ldt_write_reqs);
-
-		if (ret == 0) {
-			if (is_success) {
-				if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->lstats.ldt_read_success);
-				else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->lstats.ldt_delete_success);
-				else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->lstats.ldt_write_success);
-			} else {
-				cf_atomic_int_incr(&ns->lstats.ldt_errs);
-			}
-		} else {
-			cf_atomic_int_incr(&g_config.udf_lua_errs);
-		}
-	} 
-
-	if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_reqs);
-	else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_reqs);
-	else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_reqs);
+	if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->lstats.ldt_read_reqs);
+	else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->lstats.ldt_delete_reqs);
+	else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->lstats.ldt_write_reqs);
 
 	if (ret == 0) {
 		if (is_success) {
-			if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_success);
-			else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_success);
-			else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_success);
+			if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&ns->lstats.ldt_read_success);
+			else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&ns->lstats.ldt_delete_success);
+			else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&ns->lstats.ldt_write_success);
 		} else {
-			if (UDF_OP_IS_READ(op))        cf_atomic_int_incr(&g_config.udf_read_errs_other);
-			else if (UDF_OP_IS_DELETE(op)) cf_atomic_int_incr(&g_config.udf_delete_errs_other);
-			else if (UDF_OP_IS_WRITE (op)) cf_atomic_int_incr(&g_config.udf_write_errs_other);
+			cf_atomic_int_incr(&ns->lstats.ldt_errs);
 		}
 	} else {
-		cf_info(AS_UDF,"lua error, ret:%d",ret);
-		cf_atomic_int_incr(&g_config.udf_lua_errs);
+		cf_atomic_int_incr(&ns->lstats.ldt_errs);
+	}
+}
+
+static void
+update_lua_complete_stats(uint8_t origin, as_namespace *ns, udf_optype op, int ret, bool is_success)
+{
+	switch (origin) {
+	case FROM_CLIENT:
+		if (ret == 0 && is_success) {
+			if (UDF_OP_IS_READ(op)) {
+				cf_atomic_int_incr(&ns->n_client_lua_read_success);
+			}
+			else if (UDF_OP_IS_DELETE(op)) {
+				cf_atomic_int_incr(&ns->n_client_lua_delete_success);
+			}
+			else if (UDF_OP_IS_WRITE (op)) {
+				cf_atomic_int_incr(&ns->n_client_lua_write_success);
+			}
+		}
+		else {
+			cf_info(AS_UDF, "lua error, ret:%d", ret);
+			cf_atomic_int_incr(&ns->n_client_lua_error);
+		}
+		break;
+	case FROM_PROXY:
+		// TODO?
+		break;
+	case FROM_IUDF:
+		if (ret == 0 && is_success) {
+			if (UDF_OP_IS_READ(op)) {
+				// Note - this would be weird, since there's nowhere for a
+				// response to go in our current UDF scans & queries.
+				cf_atomic_int_incr(&ns->n_udf_sub_lua_read_success);
+			}
+			else if (UDF_OP_IS_DELETE(op)) {
+				cf_atomic_int_incr(&ns->n_udf_sub_lua_delete_success);
+			}
+			else if (UDF_OP_IS_WRITE (op)) {
+				cf_atomic_int_incr(&ns->n_udf_sub_lua_write_success);
+			}
+		}
+		else {
+			cf_info(AS_UDF, "lua error, ret:%d", ret);
+			cf_atomic_int_incr(&ns->n_udf_sub_lua_error);
+		}
+		break;
+	case FROM_BATCH:
+	case FROM_NSUP:
+	default:
+		cf_crash(AS_UDF, "unexpected transaction origin %u", origin);
+		break;
 	}
 }
 
@@ -1019,7 +1049,12 @@ udf_rw_local(udf_call * call, rw_request *rw, udf_optype *op)
 		cf_free(rs);
 	}
 
-	update_stats(ns, *op, ret_value, result.is_success, (lrecord.udf_context & UDF_CONTEXT_LDT));
+	if ((lrecord.udf_context & UDF_CONTEXT_LDT) != 0) {
+		update_ldt_stats(ns, *op, ret_value, result.is_success);
+	}
+	else {
+		update_lua_complete_stats(tr->origin, ns, *op, ret_value, result.is_success);
+	}
 
 	as_result_destroy(&result);
 

@@ -385,12 +385,30 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 			tr->from.batch_shared = NULL; // pattern, not needed
 			tr->msgp = NULL; // pattern, not needed
 		}
+		if (ns) {
+			if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
+				cf_atomic_int_incr(&ns->n_tsvc_batch_sub_timeout);
+			}
+			else {
+				cf_atomic_int_incr(&ns->n_tsvc_batch_sub_error);
+			}
+		}
+		// else - global error stat?
 		break;
 	case FROM_IUDF:
 		if (tr->from.iudf_orig) {
 			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, error_code);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 		}
+		if (ns) {
+			if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
+				cf_atomic_int_incr(&ns->n_tsvc_udf_sub_timeout);
+			}
+			else {
+				cf_atomic_int_incr(&ns->n_tsvc_udf_sub_error);
+			}
+		}
+		// else - global error stat?
 		break;
 	case FROM_NSUP:
 		break;

@@ -687,37 +687,42 @@ query_update_stats(as_query_transaction *qtr)
 	switch (qtr->job_type) {
 		case QUERY_TYPE_LOOKUP:
 			if (qtr->state == AS_QTR_STATE_ABORT) {
-				cf_atomic64_incr(&g_config.n_lookup_abort);
+				cf_atomic64_incr(&qtr->ns->n_lookup_abort);
 			} else if (qtr->state == AS_QTR_STATE_ERR) {
 				cf_atomic64_incr(&(qtr->si->stats.lookup_errs));
-				cf_atomic64_incr(&g_config.n_lookup_errs);
+				cf_atomic64_incr(&qtr->ns->n_lookup_errs);
 			}
 			if (!qtr_failed(qtr))
-				cf_atomic64_incr(&g_config.n_lookup_success);
+				cf_atomic64_incr(&qtr->ns->n_lookup_success);
 			cf_atomic64_incr(&qtr->si->stats.n_lookup);
 			cf_atomic64_add(&qtr->si->stats.lookup_response_size, qtr->net_io_bytes);
 			cf_atomic64_add(&qtr->si->stats.lookup_num_records, rows);
-			cf_atomic64_add(&g_config.lookup_response_size, qtr->net_io_bytes);
-			cf_atomic64_add(&g_config.lookup_num_records, rows);
+			cf_atomic64_add(&qtr->ns->lookup_response_size, qtr->net_io_bytes);
+			cf_atomic64_add(&qtr->ns->lookup_num_records, rows);
 			break;
 
 		case QUERY_TYPE_AGGR:
 			if (qtr->state == AS_QTR_STATE_ABORT) {
-				cf_atomic64_incr(&g_config.n_agg_abort);
+				cf_atomic64_incr(&qtr->ns->n_agg_abort);
 			} else if (qtr->state == AS_QTR_STATE_ERR) {
 				cf_atomic64_incr(&(qtr->si->stats.agg_errs));
-				cf_atomic64_incr(&g_config.n_agg_errs);
+				cf_atomic64_incr(&qtr->ns->n_agg_errs);
 			}
 			if (!qtr_failed(qtr))
-				cf_atomic64_incr(&g_config.n_agg_success);
+				cf_atomic64_incr(&qtr->ns->n_agg_success);
 			cf_atomic64_incr(&qtr->si->stats.n_aggregation);
 			cf_atomic64_add(&qtr->si->stats.agg_response_size, qtr->net_io_bytes);
 			cf_atomic64_add(&qtr->si->stats.agg_num_records, rows);
-			cf_atomic64_add(&g_config.agg_response_size, qtr->net_io_bytes);
-			cf_atomic64_add(&g_config.agg_num_records, rows);
+			cf_atomic64_add(&qtr->ns->agg_response_size, qtr->net_io_bytes);
+			cf_atomic64_add(&qtr->ns->agg_num_records, rows);
 			break;
 
 		case QUERY_TYPE_UDF_BG:
+			if (qtr_failed(qtr)) {
+				cf_atomic64_incr(&qtr->ns->n_udf_bg_query_failure);
+			} else {
+				cf_atomic64_incr(&qtr->ns->n_udf_bg_query_success);
+			}
 			break;
 
 		default:
@@ -2218,7 +2223,7 @@ query_run_setup(as_query_transaction *qtr)
 	cf_buf_builder_reserve(&qtr->bb_r, 8, NULL);
 
 	qtr_set_running(qtr);
-	cf_atomic64_incr(&g_config.query_short_reqs);
+	cf_atomic64_incr(&qtr->ns->query_short_reqs);
 	cf_atomic32_incr(&g_query_short_running);
 
 	// This needs to be distant from the initialization of nodeid to
@@ -2239,13 +2244,13 @@ query_qtr_enqueue(as_query_transaction *qtr, bool is_requeue)
 		limit          = g_config.query_short_q_max_size;
 		size           = cf_atomic32_get(g_query_short_running);
 		q              = g_query_short_queue;
-		queue_full_err = &g_config.query_short_queue_full;
+		queue_full_err = &qtr->ns->query_short_queue_full;
 	}
 	else {
 		limit          = g_config.query_long_q_max_size;
 		size           = cf_atomic32_get(g_query_long_running);
 		q              = g_query_long_queue;
-		queue_full_err = &g_config.query_long_queue_full;
+		queue_full_err = &qtr->ns->query_long_queue_full;
 	}
 
 	// Allow requeue without limit check, to cover for dynamic
@@ -2332,8 +2337,8 @@ query_qtr_check_and_requeue(as_query_transaction *qtr)
 		qtr->qctx.bsize          = g_config.query_bsize;
 		cf_atomic32_decr(&g_query_short_running);
 		cf_atomic32_incr(&g_query_long_running);
-		cf_atomic64_incr(&g_config.query_long_reqs);
-		cf_atomic64_decr(&g_config.query_short_reqs);
+		cf_atomic64_incr(&qtr->ns->query_long_reqs);
+		cf_atomic64_decr(&qtr->ns->query_short_reqs);
 		cf_detail(AS_QUERY, "Query Queued Into Long running thread pool %ld %d", cf_atomic64_get(qtr->n_result_records), qtr->short_running);
 		do_enqueue = true;
 	}
@@ -2617,14 +2622,14 @@ query_setup_udf_call(as_query_transaction *qtr, as_transaction *tr)
 {
 	switch (qtr->job_type) {
 		case QUERY_TYPE_LOOKUP:
-			cf_atomic64_incr(&g_config.n_lookup);
+			cf_atomic64_incr(&qtr->ns->n_lookup);
 			break;
 		case QUERY_TYPE_AGGR:
 			if (aggr_query_init(&qtr->agg_call, tr) != AS_QUERY_OK) {
 				tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
 				return AS_QUERY_ERR;
 			}
-			cf_atomic64_incr(&g_config.n_aggregation);
+			cf_atomic64_incr(&qtr->ns->n_aggregation);
 			break;
 		case QUERY_TYPE_UDF_BG:
 			if (! udf_def_init_from_msg(&qtr->origin.def, tr)) {
@@ -2776,6 +2781,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 
 	ASD_QUERY_QTRSETUP_FINISHED(nodeid, trid);
 
+	qtr->ns = ns;
 	qtr->job_type = qtype;
 
 	if (query_setup_udf_call(qtr, tr)) {
@@ -2794,7 +2800,6 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 
 	// Consume everything from tr rest will be picked up in init
 	qtr->trid                = as_transaction_trid(tr);
-	qtr->ns                  = ns;
 	qtr->setname             = setname;
 	qtr->si                  = si;
 	qtr->srange              = srange;
@@ -2938,29 +2943,29 @@ as_query_set_priority(uint64_t trid, uint32_t priority)
 	return rv;
 }
 
-int
-as_query_stat(char *name, cf_dyn_buf *db)
+void
+as_query_stat(as_namespace *ns, cf_dyn_buf *db)
 {
-	// Store stats to avoid dynamic changes.
-	uint64_t agg          = cf_atomic64_get(g_config.n_aggregation);
-	uint64_t agg_success  = cf_atomic64_get(g_config.n_agg_success);
-	uint64_t agg_err     = cf_atomic64_get(g_config.n_agg_errs);
-	uint64_t agg_records  = cf_atomic64_get(g_config.agg_num_records);
-	uint64_t agg_abort    = cf_atomic64_get(g_config.n_agg_abort);
-	uint64_t lkup         = cf_atomic64_get(g_config.n_lookup);
-	uint64_t lkup_success = cf_atomic64_get(g_config.n_lookup_success);
-	uint64_t lkup_err     = cf_atomic64_get(g_config.n_lookup_errs);
-	uint64_t lkup_records = cf_atomic64_get(g_config.lookup_num_records);
-	uint64_t lkup_abort   = cf_atomic64_get(g_config.n_lookup_abort);
+	uint64_t agg          = cf_atomic64_get(ns->n_aggregation);
+	uint64_t agg_success  = cf_atomic64_get(ns->n_agg_success);
+	uint64_t agg_err      = cf_atomic64_get(ns->n_agg_errs);
+	uint64_t agg_records  = cf_atomic64_get(ns->agg_num_records);
+	uint64_t agg_abort    = cf_atomic64_get(ns->n_agg_abort);
+
+	uint64_t lkup         = cf_atomic64_get(ns->n_lookup);
+	uint64_t lkup_success = cf_atomic64_get(ns->n_lookup_success);
+	uint64_t lkup_err     = cf_atomic64_get(ns->n_lookup_errs);
+	uint64_t lkup_records = cf_atomic64_get(ns->lookup_num_records);
+	uint64_t lkup_abort   = cf_atomic64_get(ns->n_lookup_abort);
 
 	cf_dyn_buf_append_string(db, "query_reqs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(g_config.query_reqs));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_reqs));
 
 	cf_dyn_buf_append_string(db, ";query_success=");
 	cf_dyn_buf_append_uint64(db, agg_success + lkup_success);
 
 	cf_dyn_buf_append_string(db, ";query_fail=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(g_config.query_fail) + lkup_err + agg_err);
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_fail) + lkup_err + agg_err);
 
 	cf_dyn_buf_append_string(db, ";query_abort=");
 	cf_dyn_buf_append_uint64(db, agg_abort + lkup_abort );
@@ -2977,16 +2982,16 @@ as_query_stat(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_uint32(db, cf_atomic32_get(g_query_long_running));
 
 	cf_dyn_buf_append_string(db, ";query_short_queue_full=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(g_config.query_short_queue_full));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_short_queue_full));
 
 	cf_dyn_buf_append_string(db, ";query_long_queue_full=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(g_config.query_long_queue_full));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_long_queue_full));
 
 	cf_dyn_buf_append_string(db, ";query_short_reqs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(g_config.query_short_reqs));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_short_reqs));
 
 	cf_dyn_buf_append_string(db, ";query_long_reqs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(g_config.query_long_reqs));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_long_reqs));
 
 	// Aggregation stats
 	cf_dyn_buf_append_string(db, ";query_agg=");
@@ -3021,7 +3026,12 @@ as_query_stat(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";query_lookup_avg_rec_count=");
 	cf_dyn_buf_append_uint64(db, lkup ? lkup_records / lkup : 0);
 
-	return AS_QUERY_OK;
+	// UDF-background stats
+	cf_dyn_buf_append_string(db, ";udf-bg-query-success=");
+	cf_dyn_buf_append_uint64(db, ns->n_udf_bg_query_success);
+
+	cf_dyn_buf_append_string(db, ";udf-bg-query-failure=");
+	cf_dyn_buf_append_uint64(db, ns->n_udf_bg_query_failure);
 }
 
 int

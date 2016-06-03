@@ -724,7 +724,7 @@ extern void                 as_query_init();
 extern int                  as_query(as_transaction *tr, as_namespace *ns);
 extern int                  as_query_reinit(int set_size, int *actual_size);
 extern int                  as_query_worker_reinit(int set_size, int *actual_size);
-extern int                  as_query_stat(char *name, cf_dyn_buf *db);
+extern void                 as_query_stat(as_namespace *ns, cf_dyn_buf *db);
 extern int                  as_query_list(char *name, cf_dyn_buf *db);
 extern int                  as_query_kill(uint64_t trid);
 extern void                 as_query_gconfig_default(struct as_config_s *c);

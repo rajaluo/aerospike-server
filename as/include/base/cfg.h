@@ -305,30 +305,9 @@ typedef struct as_config_s {
 
 	bool                partitions_pre_reserved;  // If true query will reserve all the partitions upfront 
 												  // before processing query. Default - FALSE
-	cf_atomic64			query_reqs;
-	cf_atomic64			query_fail;
-	cf_atomic64			query_short_queue_full;
-	cf_atomic64			query_long_queue_full;
-	cf_atomic64			query_short_reqs;
-	cf_atomic64			query_long_reqs;
+
 	cf_atomic64			query_false_positives;
 	bool				query_enable_histogram;
-
-	// Aggregation stat
-	cf_atomic64			n_aggregation;
-	cf_atomic64			n_agg_success;
-	cf_atomic64			n_agg_abort;
-	cf_atomic64			n_agg_errs;
-	cf_atomic64			agg_response_size;
-	cf_atomic64			agg_num_records;
-
-	// Lookup stat
-	cf_atomic64			n_lookup;
-	cf_atomic64			n_lookup_success;
-	cf_atomic64			n_lookup_abort;
-	cf_atomic64			n_lookup_errs;
-	cf_atomic64			lookup_response_size;
-	cf_atomic64			lookup_num_records;
 
 	uint64_t			udf_runtime_max_memory; // Maximum runtime memory allowed for per UDF
 	uint64_t			udf_runtime_max_gmemory; // maximum runtime memory alloed for all UDF
@@ -372,7 +351,6 @@ typedef struct as_config_s {
 	cf_atomic_int		heartbeat_received_foreign;
 	cf_atomic_int		info_connections_opened;
 	cf_atomic_int		info_connections_closed;
-	cf_atomic_int		n_waiting_transactions; // FIXME - what?
 	cf_atomic_int		global_record_ref_count;
 	cf_atomic_int		reaper_count;
 
@@ -447,25 +425,8 @@ typedef struct as_config_s {
 	cf_atomic_int		err_storage_queue_full;
 	cf_atomic_int		err_storage_defrag_corrupt_record;
 
-	//stats for UDF read - write operation.
-	// FIXME - how to incorporate these in new namespace scoped scheme?
-	cf_atomic_int		udf_read_reqs;
-	cf_atomic_int		udf_read_success;
-	cf_atomic_int		udf_read_errs_other;
-
-	cf_atomic_int		udf_write_reqs;
-	cf_atomic_int		udf_write_success;
-	cf_atomic_int		udf_write_errs_other;
-
-	cf_atomic_int		udf_delete_reqs;
-	cf_atomic_int		udf_delete_success;
-	cf_atomic_int		udf_delete_errs_other;
-
-	cf_atomic_int		udf_lua_errs;
-
-	cf_atomic_int		udf_scan_rec_reqs;
-	cf_atomic_int		udf_query_rec_reqs;
-	cf_atomic_int		udf_replica_writes;
+	cf_atomic_int		udf_scan_rec_reqs; // FIXME - what do we need?
+	cf_atomic_int		udf_query_rec_reqs; // FIXME - what do we need?
 
 	// For Lua Garbage Collection, we want to track three things:
 	// (1) The number of times we were below the GC threshold

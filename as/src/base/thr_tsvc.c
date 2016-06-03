@@ -153,7 +153,7 @@ process_transaction(as_transaction *tr)
 		}
 		else if (as_transaction_is_query(tr)) {
 			// Query.
-			cf_atomic64_incr(&g_config.query_reqs);
+			cf_atomic64_incr(&ns->query_reqs);
 
 			if (! as_security_check_data_op(tr, ns,
 					as_transaction_is_udf(tr) ? PERM_UDF_QUERY : PERM_QUERY)) {
@@ -165,7 +165,7 @@ process_transaction(as_transaction *tr)
 				free_msgp = false;
 			}
 			else {
-				cf_atomic64_incr(&g_config.query_fail);
+				cf_atomic64_incr(&ns->query_fail);
 				as_transaction_error(tr, ns, tr->result_code);
 			}
 		}

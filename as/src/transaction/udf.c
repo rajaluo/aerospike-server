@@ -74,13 +74,29 @@ client_udf_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_PROTO_RESULT_OK:
-		cf_atomic64_incr(&ns->n_client_udf_success);
+		cf_atomic64_incr(&ns->n_client_udf_complete);
 		break;
 	case AS_PROTO_RESULT_FAIL_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_udf_timeout);
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_client_udf_error);
+		break;
+	}
+}
+
+static inline void
+udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_udf_sub_udf_complete);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_udf_sub_udf_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_udf_sub_udf_error);
 		break;
 	}
 }
@@ -350,6 +366,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 			cf_crash(AS_RW, "unexpected - internal udf has response");
 		}
 		tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
+		udf_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_BATCH:
 	case FROM_NSUP:
@@ -381,6 +398,7 @@ udf_timeout_cb(rw_request* rw)
 	case FROM_IUDF:
 		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata,
 				AS_PROTO_RESULT_FAIL_TIMEOUT);
+		udf_sub_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_BATCH:
 	case FROM_NSUP:
@@ -424,6 +442,8 @@ udf_master(rw_request* rw, as_transaction* tr)
 		if (tr->origin == FROM_IUDF) {
 			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
 			tr->from.iudf_orig = NULL;
+
+			cf_atomic64_incr(&tr->rsv.ns->n_udf_sub_udf_complete);
 		}
 
 		// UDF is done, has responded to origin, no replica writes needed.

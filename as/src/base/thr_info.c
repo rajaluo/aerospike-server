@@ -341,38 +341,11 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";stat_nsup_deletes_not_shipped=");
 	APPEND_STAT_COUNTER(db, g_config.stat_nsup_deletes_not_shipped);
 
-	cf_dyn_buf_append_string(db, ";udf_read_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_read_reqs);
-	cf_dyn_buf_append_string(db, ";udf_read_success=");
-	APPEND_STAT_COUNTER(db, g_config.udf_read_success);
-	cf_dyn_buf_append_string(db, ";udf_read_errs_other=");
-	APPEND_STAT_COUNTER(db, g_config.udf_read_errs_other);
-
-	cf_dyn_buf_append_string(db, ";udf_write_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_write_reqs);
-	cf_dyn_buf_append_string(db, ";udf_write_success=");
-	APPEND_STAT_COUNTER(db, g_config.udf_write_success);
-	cf_dyn_buf_append_string(db, ";udf_write_err_others=");
-	APPEND_STAT_COUNTER(db, g_config.udf_write_errs_other);
-
-	cf_dyn_buf_append_string(db, ";udf_delete_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_delete_reqs);
-	cf_dyn_buf_append_string(db, ";udf_delete_success=");
-	APPEND_STAT_COUNTER(db, g_config.udf_delete_success);
-	cf_dyn_buf_append_string(db, ";udf_delete_err_others=");
-	APPEND_STAT_COUNTER(db, g_config.udf_delete_errs_other);
-
-	cf_dyn_buf_append_string(db, ";udf_lua_errs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_lua_errs);
-
 	cf_dyn_buf_append_string(db, ";udf_scan_rec_reqs=");
 	APPEND_STAT_COUNTER(db, g_config.udf_scan_rec_reqs);
 
 	cf_dyn_buf_append_string(db, ";udf_query_rec_reqs=");
 	APPEND_STAT_COUNTER(db, g_config.udf_query_rec_reqs);
-
-	cf_dyn_buf_append_string(db, ";udf_replica_writes=");
-	APPEND_STAT_COUNTER(db, g_config.udf_replica_writes);
 
 	cf_dyn_buf_append_string(db, ";stat_proxy_reqs_xdr=");
 	APPEND_STAT_COUNTER(db, g_config.stat_proxy_reqs_xdr);
@@ -476,9 +449,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";client_connections=");
 	cf_dyn_buf_append_int(db, (g_config.proto_connections_opened - g_config.proto_connections_closed));
 
-	cf_dyn_buf_append_string(db, ";waiting_transactions=");
-	APPEND_STAT_COUNTER(db, g_config.n_waiting_transactions);
-
 	cf_dyn_buf_append_string(db, ";record_refs=");
 	APPEND_STAT_COUNTER(db, g_config.global_record_ref_count);
 
@@ -549,10 +519,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_uint64(db, g_config.heartbeat_received_self);
 	cf_dyn_buf_append_string(db, ";heartbeat_received_foreign=");
 	cf_dyn_buf_append_uint64(db, g_config.heartbeat_received_foreign);
-
-	// Query stats. Aggregation + Lookups
-	cf_dyn_buf_append_string(db, ";");
-	as_query_stat(name, db);
 
 	cf_dyn_buf_append_string(db, ";");
 	as_xdr_get_stats(name, db);
@@ -4634,7 +4600,7 @@ void *
 info_debug_ticker_fn(void *unused)
 {
 	size_t total_ns_memory_inuse = 0;
-	uint32_t ticker_cycles = 0;
+//	uint32_t ticker_cycles = 0;
 
 	// Helps to know how many messages are going in an out, some general status
 	do {
@@ -4692,6 +4658,11 @@ info_debug_ticker_fn(void *unused)
 			cf_info(AS_INFO, "   heartbeat-stats: %s",
 					as_hb_stats(false));
 
+			cf_info(AS_INFO, "   batch-index (%lu,%lu,%lu)",
+					g_config.batch_index_complete,
+					g_config.batch_index_timeout,
+					g_config.batch_index_errors);
+
 			// namespace disk and memory size and ldt gc stats
 			total_ns_memory_inuse = 0;
 
@@ -4709,14 +4680,20 @@ info_debug_ticker_fn(void *unused)
 				size_t ns_total_mem = ns_index_mem + ns_sindex_mem + ns->n_bytes_memory;
 				double mem_used_pct = (double)(ns_total_mem * 100) / (double)ns->memory_size;
 
-				// TODO - not do this loop over all partitions every time?
+				// TODO - not do the loop over all partitions every time?
+//				if ((ticker_cycles++ % 30) == 0) {
+//				}
+
 				as_master_prole_stats mp;
 				as_partition_get_master_prole_stats(ns, &mp);
 
-				cf_info(AS_INFO, "{%s} objects: normal %lu sub %lu master %lu master-sub %lu prole %lu prole-sub %lu",
-						ns->name, ns_n_objects, ns_n_sub_objects,
-						mp.n_master_records, mp.n_master_sub_records,
-						mp.n_prole_records, mp.n_prole_sub_records);
+				cf_info(AS_INFO, "{%s} objects: all %lu master %lu prole %lu",
+						ns->name, ns_n_objects,
+						mp.n_master_records, mp.n_prole_records);
+
+				cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu prole %lu",
+						ns->name, ns_n_sub_objects,
+						mp.n_master_sub_records, mp.n_prole_sub_records);
 
 				if (ns->storage_data_in_memory) {
 					cf_info(AS_INFO, "{%s} used-drive-bytes %lu avail-pct %d",
@@ -4761,7 +4738,7 @@ info_debug_ticker_fn(void *unused)
 				if (initial_migrations > 0 && remaining_migrations > 0) {
 					float migrations_pct_complete = (1 - ((float)remaining_migrations / (float)initial_migrations)) * 100;
 
-					cf_info(AS_INFO, "{%s} migrations - remaining (%ld tx, %ld rx), active (%ld tx, %ld rx), %0.2f%% complete",
+					cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld) active (%ld,%ld) complete-pct %0.2f",
 							ns->name,
 							remaining_tx_migrations,
 							remaining_rx_migrations,
@@ -4771,21 +4748,36 @@ info_debug_ticker_fn(void *unused)
 							);
 				}
 				else {
-					cf_info(AS_INFO, "{%s} migrations - complete", ns->name);
+					cf_info(AS_INFO, "{%s} migrations: complete", ns->name);
 				}
 
-				cf_info(AS_INFO, "{%s} tsvc: client (%lu,%lu)",
+				cf_info(AS_INFO, "{%s} tsvc-fail: client (%lu,%lu) batch-sub (%lu,%lu) udf-sub (%lu,%lu)",
 						ns->name,
-						ns->n_tsvc_client_timeout, ns->n_tsvc_client_error
+						ns->n_tsvc_client_timeout, ns->n_tsvc_client_error,
+						ns->n_tsvc_batch_sub_timeout, ns->n_tsvc_batch_sub_error,
+						ns->n_tsvc_udf_sub_timeout, ns->n_tsvc_udf_sub_error
 						);
 
-				cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu) udf (%lu,%lu,%lu)",
+				cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu) udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
 						ns->name,
-						ns->n_client_proxy_success, ns->n_client_proxy_timeout, ns->n_client_proxy_error,
+						ns->n_client_proxy_complete, ns->n_client_proxy_timeout, ns->n_client_proxy_error,
 						ns->n_client_read_success, ns->n_client_read_timeout, ns->n_client_read_error, ns->n_client_read_not_found,
 						ns->n_client_write_success, ns->n_client_write_timeout, ns->n_client_write_error,
 						ns->n_client_delete_success, ns->n_client_delete_timeout, ns->n_client_delete_error,
-						ns->n_client_udf_success, ns->n_client_udf_timeout, ns->n_client_udf_error
+						ns->n_client_udf_complete, ns->n_client_udf_timeout, ns->n_client_udf_error,
+						ns->n_client_lua_read_success, ns->n_client_lua_write_success, ns->n_client_lua_delete_success, ns->n_client_lua_error
+						);
+
+				cf_info(AS_INFO, "{%s} batch-sub: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu)",
+						ns->name,
+						ns->n_batch_sub_proxy_complete, ns->n_batch_sub_proxy_timeout, ns->n_batch_sub_proxy_error,
+						ns->n_batch_sub_read_success, ns->n_batch_sub_read_timeout, ns->n_batch_sub_read_error, ns->n_batch_sub_read_not_found
+						);
+
+				cf_info(AS_INFO, "{%s} udf-sub: udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
+						ns->name,
+						ns->n_udf_sub_udf_complete, ns->n_udf_sub_udf_timeout, ns->n_udf_sub_udf_error,
+						ns->n_udf_sub_lua_read_success, ns->n_udf_sub_lua_write_success, ns->n_udf_sub_lua_delete_success, ns->n_udf_sub_lua_error
 						);
 
 				cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
@@ -4793,6 +4785,13 @@ info_debug_ticker_fn(void *unused)
 						ns->n_basic_scan_success, ns->n_basic_scan_failure,
 						ns->n_aggr_scan_success, ns->n_aggr_scan_failure,
 						ns->n_udf_bg_scan_success, ns->n_udf_bg_scan_failure
+						);
+
+				cf_info(AS_INFO, "{%s} query: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
+						ns->name,
+						ns->n_lookup_success, ns->n_lookup_errs + ns->n_lookup_abort,
+						ns->n_agg_success, ns->n_agg_errs + ns->n_agg_abort,
+						ns->n_udf_bg_query_success, ns->n_udf_bg_query_failure
 						);
 
 				cf_hist_track_dump(ns->read_hist);
@@ -4945,23 +4944,6 @@ info_debug_ticker_fn(void *unused)
 
 			if (g_config.fabric_dump_msgs) {
 				as_fabric_msg_queue_dump();
-			}
-
-			// Dump some stats every 30 ticker cycles (default 5 minutes).
-			if ((ticker_cycles++ % 30) == 0) {
-				// Various transaction & error counters
-				cf_info(AS_INFO, "udf reads %"PRIu64",%"PRIu64" : udf writes %"PRIu64",%"PRIu64" : udf deletes %"PRIu64",%"PRIu64" : lua errors %"PRIu64"",
-						g_config.udf_read_success, g_config.udf_read_errs_other,
-						g_config.udf_write_success, g_config.udf_write_errs_other,
-						g_config.udf_delete_success, g_config.udf_delete_errs_other, g_config.udf_lua_errs);
-				uint64_t batch_failures = cf_atomic64_get(g_config.batch_timeout) + cf_atomic64_get(g_config.batch_errors);
-				cf_info(AS_INFO, "index (new) batches %"PRIu64",%"PRIu64" : direct (old) batches %"PRIu64",%"PRIu64"",
-						g_config.batch_index_complete, g_config.batch_index_timeout + g_config.batch_index_errors,
-						g_config.batch_initiate - batch_failures, batch_failures);
-				uint64_t agg_failures = cf_atomic64_get(g_config.n_agg_errs) + cf_atomic64_get(g_config.n_agg_abort);
-				uint64_t lookup_failures = cf_atomic64_get(g_config.n_lookup_errs) + cf_atomic64_get(g_config.n_lookup_abort);
-				cf_info(AS_INFO, "aggregation queries %"PRIu64",%"PRIu64" : lookup queries %"PRIu64",%"PRIu64"",
-						cf_atomic64_get(g_config.n_agg_success), agg_failures, cf_atomic64_get(g_config.n_lookup_success), lookup_failures);
 			}
 		}
 
@@ -5740,9 +5722,15 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "tsvc-client-timeout", ns->n_tsvc_client_timeout, db);
 	info_append_uint64("", "tsvc-client-error", ns->n_tsvc_client_error, db);
 
+	info_append_uint64("", "tsvc-batch-sub-timeout", ns->n_tsvc_batch_sub_timeout, db);
+	info_append_uint64("", "tsvc-batch-sub-error", ns->n_tsvc_batch_sub_error, db);
+
+	info_append_uint64("", "tsvc-udf-sub-timeout", ns->n_tsvc_udf_sub_timeout, db);
+	info_append_uint64("", "tsvc-udf-sub-error", ns->n_tsvc_udf_sub_error, db);
+
 	// From-client transaction stats.
 
-	info_append_uint64("", "client-proxy-success", ns->n_client_proxy_success, db);
+	info_append_uint64("", "client-proxy-complete", ns->n_client_proxy_complete, db);
 	info_append_uint64("", "client-proxy-timeout", ns->n_client_proxy_timeout, db);
 	info_append_uint64("", "client-proxy-error", ns->n_client_proxy_error, db);
 
@@ -5759,13 +5747,40 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "client-delete-timeout", ns->n_client_delete_timeout, db);
 	info_append_uint64("", "client-delete-error", ns->n_client_delete_error, db);
 
-	info_append_uint64("", "client-udf-success", ns->n_client_udf_success, db);
+	info_append_uint64("", "client-udf-complete", ns->n_client_udf_complete, db);
 	info_append_uint64("", "client-udf-timeout", ns->n_client_udf_timeout, db);
 	info_append_uint64("", "client-udf-error", ns->n_client_udf_error, db);
+
+	info_append_uint64("", "client-lua-read-success", ns->n_client_lua_read_success, db);
+	info_append_uint64("", "client-lua-write-success", ns->n_client_lua_write_success, db);
+	info_append_uint64("", "client-lua-delete-success", ns->n_client_lua_delete_success, db);
+	info_append_uint64("", "client-lua-error", ns->n_client_lua_error, db);
 
 	info_append_uint64("", "client-trans-fail-key-busy", ns->n_client_trans_fail_key_busy, db);
 	info_append_uint64("", "client-write-fail-generation", ns->n_client_write_fail_generation, db);
 	info_append_uint64("", "client-write-fail-record-too-big", ns->n_client_write_fail_record_too_big, db);
+
+	// Batch sub-transaction stats.
+
+	info_append_uint64("", "batch-sub-proxy-complete", ns->n_batch_sub_proxy_complete, db);
+	info_append_uint64("", "batch-sub-proxy-timeout", ns->n_batch_sub_proxy_timeout, db);
+	info_append_uint64("", "batch-sub-proxy-error", ns->n_batch_sub_proxy_error, db);
+
+	info_append_uint64("", "batch-sub-read-success", ns->n_batch_sub_read_success, db);
+	info_append_uint64("", "batch-sub-read-timeout", ns->n_batch_sub_read_timeout, db);
+	info_append_uint64("", "batch-sub-read-error", ns->n_batch_sub_read_error, db);
+	info_append_uint64("", "batch-sub-read-not-found", ns->n_batch_sub_read_not_found, db);
+
+	// Internal-UDF sub-transaction stats.
+
+	info_append_uint64("", "udf-sub-udf-complete", ns->n_udf_sub_udf_complete, db);
+	info_append_uint64("", "udf-sub-udf-timeout", ns->n_udf_sub_udf_timeout, db);
+	info_append_uint64("", "udf-sub-udf-error", ns->n_udf_sub_udf_error, db);
+
+	info_append_uint64("", "udf-sub-lua-read-success", ns->n_udf_sub_lua_read_success, db);
+	info_append_uint64("", "udf-sub-lua-write-success", ns->n_udf_sub_lua_write_success, db);
+	info_append_uint64("", "udf-sub-lua-delete-success", ns->n_udf_sub_lua_delete_success, db);
+	info_append_uint64("", "udf-sub-lua-error", ns->n_udf_sub_lua_error, db);
 
 	// Scan stats.
 
@@ -5777,6 +5792,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64("", "udf-bg-scan-success", ns->n_udf_bg_scan_success, db);
 	info_append_uint64("", "udf-bg-scan-failure", ns->n_udf_bg_scan_failure, db);
+
+	// Query stats.
+
+	as_query_stat(ns, db);
 
 	// remaining bin-name slots (yes, this can be negative)
 	if (! ns->single_bin) {
@@ -6981,7 +7000,6 @@ as_info_init()
 
 	as_info_set_dynamic("query-list", as_query_list, false);
 	as_info_set_command("query-kill", info_command_query_kill, PERM_QUERY_MANAGE);
-	as_info_set_dynamic("query-stat", as_query_stat, false);
 	as_info_set_command("scan-abort", info_command_abort_scan, PERM_SCAN_MANAGE);            // Abort a scan with a given id.
 	as_info_set_command("scan-abort-all", info_command_abort_all_scans, PERM_SCAN_MANAGE);   // Abort all scans.
 	as_info_set_dynamic("scan-list", as_scan_list, false);                                   // List info for all scan jobs.

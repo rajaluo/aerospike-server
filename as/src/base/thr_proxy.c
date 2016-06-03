@@ -142,13 +142,30 @@ client_proxy_update_stats(as_namespace* ns, uint8_t result_code)
 {
 	switch (result_code) {
 	case AS_PROTO_RESULT_OK:
-		cf_atomic64_incr(&ns->n_client_proxy_success);
+		cf_atomic64_incr(&ns->n_client_proxy_complete);
 		break;
 	case AS_PROTO_RESULT_FAIL_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_proxy_timeout);
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_client_proxy_error);
+		break;
+	}
+}
+
+
+static inline void
+bacth_sub_proxy_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_batch_sub_proxy_complete);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_batch_sub_proxy_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_batch_sub_proxy_error);
 		break;
 	}
 }
@@ -590,10 +607,12 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 
 						if (msg_get_buf(pr.fab_msg, PROXY_FIELD_DIGEST, (byte **)&digest, &digest_sz, MSG_GET_DIRECT) == 0) {
 							as_batch_add_proxy_result(pr.from.batch_shared, pr.batch_index, digest, (cl_msg*)proto, proto_sz);
+							bacth_sub_proxy_update_stats(pr.ns, AS_PROTO_RESULT_OK);
 						}
 						else {
 							cf_warning(AS_PROXY, "Failed to find batch proxy digest %u", transaction_id);
 							as_batch_add_error(pr.from.batch_shared, pr.batch_index, AS_PROTO_RESULT_FAIL_UNKNOWN);
+							bacth_sub_proxy_update_stats(pr.ns, AS_PROTO_RESULT_FAIL_UNKNOWN);
 						}
 
 						pr.from.batch_shared = NULL; // pattern, not needed
@@ -894,6 +913,7 @@ proxy_retransmit_reduce_fn(void *key, void *data, void *udata)
 				as_batch_add_error(pr->from.batch_shared, pr->batch_index, AS_PROTO_RESULT_FAIL_TIMEOUT);
 				pr->from.batch_shared = NULL; // pattern, not needed
 				// Note - no worries about msgp, proxy divert copied it.
+				bacth_sub_proxy_update_stats(pr->ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 				break;
 			case FROM_PROXY:
 			case FROM_IUDF:

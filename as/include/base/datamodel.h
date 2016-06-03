@@ -1098,9 +1098,15 @@ struct as_namespace_s {
 	cf_atomic64		n_tsvc_client_timeout;
 	cf_atomic64		n_tsvc_client_error;
 
+	cf_atomic64		n_tsvc_batch_sub_timeout;
+	cf_atomic64		n_tsvc_batch_sub_error;
+
+	cf_atomic64		n_tsvc_udf_sub_timeout;
+	cf_atomic64		n_tsvc_udf_sub_error;
+
 	// From-client transaction stats.
 
-	cf_atomic64		n_client_proxy_success;
+	cf_atomic64		n_client_proxy_complete;
 	cf_atomic64		n_client_proxy_timeout;
 	cf_atomic64		n_client_proxy_error;
 
@@ -1117,14 +1123,41 @@ struct as_namespace_s {
 	cf_atomic64		n_client_delete_timeout;
 	cf_atomic64		n_client_delete_error;
 
-	cf_atomic64		n_client_udf_success;
+	cf_atomic64		n_client_udf_complete;
 	cf_atomic64		n_client_udf_timeout;
 	cf_atomic64		n_client_udf_error;
+
+	cf_atomic64		n_client_lua_read_success;
+	cf_atomic64		n_client_lua_write_success;
+	cf_atomic64		n_client_lua_delete_success;
+	cf_atomic64		n_client_lua_error;
 
 	// Special errors that deserve their own counters:
 	cf_atomic64		n_client_trans_fail_key_busy;
 	cf_atomic64		n_client_write_fail_generation;
 	cf_atomic64		n_client_write_fail_record_too_big;
+
+	// Batch sub-transaction stats.
+
+	cf_atomic64		n_batch_sub_proxy_complete;
+	cf_atomic64		n_batch_sub_proxy_timeout;
+	cf_atomic64		n_batch_sub_proxy_error;
+
+	cf_atomic64		n_batch_sub_read_success;
+	cf_atomic64		n_batch_sub_read_timeout;
+	cf_atomic64		n_batch_sub_read_error;
+	cf_atomic64		n_batch_sub_read_not_found;
+
+	// Internal-UDF sub-transaction stats.
+
+	cf_atomic64		n_udf_sub_udf_complete;
+	cf_atomic64		n_udf_sub_udf_timeout;
+	cf_atomic64		n_udf_sub_udf_error;
+
+	cf_atomic64		n_udf_sub_lua_read_success;
+	cf_atomic64		n_udf_sub_lua_write_success;
+	cf_atomic64		n_udf_sub_lua_delete_success;
+	cf_atomic64		n_udf_sub_lua_error;
 
 	// Scan stats.
 
@@ -1136,6 +1169,32 @@ struct as_namespace_s {
 
 	cf_atomic64		n_udf_bg_scan_success;
 	cf_atomic64		n_udf_bg_scan_failure;
+
+	// Query stats.
+
+	cf_atomic64		query_reqs;
+	cf_atomic64		query_fail;
+	cf_atomic64		query_short_queue_full;
+	cf_atomic64		query_long_queue_full;
+	cf_atomic64		query_short_reqs;
+	cf_atomic64		query_long_reqs;
+
+	cf_atomic64		n_lookup;
+	cf_atomic64		n_lookup_success;
+	cf_atomic64		n_lookup_abort;
+	cf_atomic64		n_lookup_errs;
+	cf_atomic64		lookup_response_size;
+	cf_atomic64		lookup_num_records;
+
+	cf_atomic64		n_aggregation;
+	cf_atomic64		n_agg_success;
+	cf_atomic64		n_agg_abort;
+	cf_atomic64		n_agg_errs;
+	cf_atomic64		agg_response_size;
+	cf_atomic64		agg_num_records;
+
+	cf_atomic64		n_udf_bg_query_success;
+	cf_atomic64		n_udf_bg_query_failure;
 
 	// migration counters
 	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only

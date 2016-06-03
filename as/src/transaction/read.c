@@ -88,6 +88,25 @@ client_read_update_stats(as_namespace* ns, uint8_t result_code)
 	}
 }
 
+static inline void
+batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
+{
+	switch (result_code) {
+	case AS_PROTO_RESULT_OK:
+		cf_atomic64_incr(&ns->n_batch_sub_read_success);
+		break;
+	case AS_PROTO_RESULT_FAIL_TIMEOUT:
+		cf_atomic64_incr(&ns->n_batch_sub_read_timeout);
+		break;
+	default:
+		cf_atomic64_incr(&ns->n_batch_sub_read_error);
+		break;
+	case AS_PROTO_RESULT_FAIL_NOTFOUND:
+		cf_atomic64_incr(&ns->n_batch_sub_read_not_found);
+		break;
+	}
+}
+
 
 //==========================================================
 // Public API.
@@ -226,6 +245,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 	case FROM_BATCH:
 		as_batch_add_result(tr, set_name, tr->generation, tr->void_time, n_bins,
 				response_bins, ops);
+		batch_sub_read_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_IUDF:
 	case FROM_NSUP:
@@ -257,6 +277,7 @@ read_timeout_cb(rw_request* rw)
 	case FROM_BATCH:
 		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
 				AS_PROTO_RESULT_FAIL_TIMEOUT);
+		batch_sub_read_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_IUDF:
 	case FROM_NSUP:
