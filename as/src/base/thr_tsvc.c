@@ -403,8 +403,6 @@ thr_tsvc(void *arg)
 			cf_crash(AS_TSVC, "unable to pop from transaction queue");
 		}
 
-		MICROBENCHMARK_HIST_INSERT_AND_RESET(q_wait_hist);
-
 		process_transaction(&tr);
 	}
 

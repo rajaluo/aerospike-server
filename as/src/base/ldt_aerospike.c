@@ -322,7 +322,6 @@ slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 
 	// We do not track microbenchmark or time for chunk today
 	c_tr->microbenchmark_time  = 0;
-	c_tr->microbenchmark_is_resolve = false;
 	c_tr->start_time           = h_tr->start_time;
 	c_tr->end_time             = h_tr->end_time;
 

@@ -260,6 +260,7 @@ typedef enum {
 	CASE_SERVICE_CLIENT_FD_MAX, // renamed
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
+	CASE_SERVICE_ACTIVATE_HIST_INFO,
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
@@ -472,6 +473,11 @@ typedef enum {
 	CASE_NAMESPACE_ALLOW_NONXDR_WRITES,
 	CASE_NAMESPACE_ALLOW_XDR_WRITES,
 	// Normally hidden:
+	CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_READ,
+	CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_WRITE,
+	CASE_NAMESPACE_ACTIVATE_HIST_BATCH_SUB,
+	CASE_NAMESPACE_ACTIVATE_HIST_PROXY,
+	CASE_NAMESPACE_ACTIVATE_HIST_UDF_SUB,
 	CASE_NAMESPACE_COLD_START_EVICT_TTL,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
@@ -667,6 +673,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
+		{ "activate-hist-info",				CASE_SERVICE_ACTIVATE_HIST_INFO },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
@@ -881,6 +888,11 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ns-forward-xdr-writes",			CASE_NAMESPACE_FORWARD_XDR_WRITES },
 		{ "allow-nonxdr-writes",			CASE_NAMESPACE_ALLOW_NONXDR_WRITES },
 		{ "allow-xdr-writes",				CASE_NAMESPACE_ALLOW_XDR_WRITES },
+		{ "activate-benchmark-hists-read",	CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_READ },
+		{ "activate-benchmark-hists-write",	CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_WRITE },
+		{ "activate-hist-batch-sub",		CASE_NAMESPACE_ACTIVATE_HIST_BATCH_SUB },
+		{ "activate-hist-proxy",			CASE_NAMESPACE_ACTIVATE_HIST_PROXY },
+		{ "activate-hist-udf-sub",			CASE_NAMESPACE_ACTIVATE_HIST_UDF_SUB },
 		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
@@ -1925,6 +1937,9 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_PROTO_FD_MAX:
 				c->n_proto_fd_max = cfg_int_no_checks(&line);
 				break;
+			case CASE_SERVICE_ACTIVATE_HIST_INFO:
+				c->info_hist_active = cfg_bool(&line);
+				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				c->allow_inline_transactions = cfg_bool(&line);
 				break;
@@ -2578,6 +2593,21 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
 				// The server isn't interested in this, but the XDR module is!
+				break;
+			case CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_READ:
+				ns->read_benchmark_hists_active = true;
+				break;
+			case CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_WRITE:
+				ns->write_benchmark_hists_active = true;
+				break;
+			case CASE_NAMESPACE_ACTIVATE_HIST_BATCH_SUB:
+				ns->batch_sub_hist_active = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_ACTIVATE_HIST_PROXY:
+				ns->proxy_hist_active = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_ACTIVATE_HIST_UDF_SUB:
+				ns->udf_sub_hist_active = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_COLD_START_EVICT_TTL:
 				ns->cold_start_evict_ttl = cfg_u32_no_checks(&line);
@@ -3385,7 +3415,7 @@ as_config_post_process(as_config *c, const char *config_file)
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
-		// Tracked histograms.
+		// One-way activated histograms (may be tracked histograms).
 
 		sprintf(hist_name, "{%s} read", ns->name);
 		create_and_check_hist_track(&ns->read_hist, hist_name, HIST_MILLISECONDS);
@@ -3399,13 +3429,39 @@ as_config_post_process(as_config *c, const char *config_file)
 		sprintf(hist_name, "{%s} query", ns->name);
 		create_and_check_hist_track(&ns->query_hist, hist_name, HIST_MILLISECONDS);
 
-		// Regular histograms.
-
 		sprintf(hist_name, "{%s} query-rec-count", ns->name);
 		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_RAW);
 
+		// Activate-by-config histograms (can't be tracked histograms).
+
 		sprintf(hist_name, "{%s} proxy", ns->name);
 		create_and_check_hist(&ns->proxy_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} batch-sub", ns->name);
+		create_and_check_hist(&ns->batch_sub_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} udf-sub", ns->name);
+		create_and_check_hist(&ns->udf_sub_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} read-tsvc", ns->name);
+		create_and_check_hist(&ns->read_tsvc_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} read-dup-res", ns->name);
+		create_and_check_hist(&ns->read_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} read-local", ns->name);
+		create_and_check_hist(&ns->read_local_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} read-response", ns->name);
+		create_and_check_hist(&ns->read_response_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} write-tsvc", ns->name);
+		create_and_check_hist(&ns->write_tsvc_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} write-dup-res", ns->name);
+		create_and_check_hist(&ns->write_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} write-master", ns->name);
+		create_and_check_hist(&ns->write_master_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} write-repl-write", ns->name);
+		create_and_check_hist(&ns->write_repl_write_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} write-response", ns->name);
+		create_and_check_hist(&ns->write_response_hist, hist_name, HIST_MILLISECONDS);
 
 		// Linear 'nsup' histograms.
 		// Note - histograms' ranges MUST be set before use.
@@ -3560,35 +3616,11 @@ cfg_create_all_histograms()
 {
 	as_config* c = &g_config;
 
-	create_and_check_hist(&c->rt_cleanup_hist, "reads_cleanup", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_net_hist, "reads_net", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_net_hist, "writes_net", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_storage_read_hist, "reads_storage_read", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_storage_open_hist, "reads_storage_open", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_tree_hist, "reads_tree", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_internal_hist, "reads_internal", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_internal_hist, "writes_internal", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_start_hist, "reads_start", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_start_hist, "writes_start", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_q_process_hist, "reads_q_process", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_q_process_hist, "writes_q_process", HIST_MILLISECONDS);
-	create_and_check_hist(&c->q_wait_hist, "q_wait", HIST_MILLISECONDS);
 	create_and_check_hist(&c->demarshal_hist, "demarshal_hist", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_master_wait_prole_hist, "wt_master_wait_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_prole_hist, "writes_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_resolve_hist, "reads_resolve", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_resolve_hist, "writes_resolve", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_resolve_wait_hist, "reads_resolve_wait", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_resolve_wait_hist, "writes_resolve_wait", HIST_MILLISECONDS);
-	create_and_check_hist(&c->error_hist, "error", HIST_MILLISECONDS);
 	create_and_check_hist(&c->batch_index_reads_hist, "batch_index_reads", HIST_MILLISECONDS);
 	create_and_check_hist(&c->batch_q_process_hist, "batch_q_process", HIST_MILLISECONDS);
-	create_and_check_hist(&c->info_q_wait_hist, "info_q_wait", HIST_MILLISECONDS);
-	create_and_check_hist(&c->info_post_lock_hist, "info_post_lock", HIST_MILLISECONDS);
-	create_and_check_hist(&c->info_fulfill_hist, "info_fulfill", HIST_MILLISECONDS);
-	create_and_check_hist(&c->write_storage_close_hist, "write_storage_close", HIST_MILLISECONDS);
-	create_and_check_hist(&c->write_sindex_hist, "write_sindex", HIST_MILLISECONDS);
-	create_and_check_hist(&c->prole_fabric_send_hist, "prole_fabric_send", HIST_MILLISECONDS);
+
+	create_and_check_hist(&c->info_hist, "info", HIST_MILLISECONDS);
 
 	create_and_check_hist(&c->ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
 	create_and_check_hist(&c->ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);

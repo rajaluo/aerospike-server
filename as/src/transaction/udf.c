@@ -347,7 +347,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->generation, tr->void_time, NULL, NULL, 0, NULL,
 					as_transaction_trid(tr), NULL);
 		}
-		cf_hist_track_insert_data_point(tr->rsv.ns->udf_hist, tr->start_time);
+		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, udf_hist);
 		client_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:
@@ -366,6 +366,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 			cf_crash(AS_RW, "unexpected - internal udf has response");
 		}
 		tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
+		HIST_INSERT_DATA_POINT(tr, udf_sub_hist);
 		udf_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_BATCH:
@@ -390,7 +391,7 @@ udf_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
-		cf_hist_track_insert_data_point(rw->rsv.ns->udf_hist, rw->start_time);
+		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, udf_hist);
 		client_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
@@ -398,6 +399,7 @@ udf_timeout_cb(rw_request* rw)
 	case FROM_IUDF:
 		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata,
 				AS_PROTO_RESULT_FAIL_TIMEOUT);
+		HIST_INSERT_DATA_POINT(rw, udf_sub_hist);
 		udf_sub_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_BATCH:
@@ -440,9 +442,13 @@ udf_master(rw_request* rw, as_transaction* tr)
 
 	if (UDF_OP_IS_READ(op) || op == UDF_OPTYPE_NONE) {
 		if (tr->origin == FROM_IUDF) {
+			// For internal UDFs, we skipped sending a response, so some work
+			// normally handled by the response method needs to happen here.
+
 			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
 			tr->from.iudf_orig = NULL;
 
+			HIST_INSERT_DATA_POINT(tr, udf_sub_hist);
 			cf_atomic64_incr(&tr->rsv.ns->n_udf_sub_udf_complete);
 		}
 

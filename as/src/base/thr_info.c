@@ -96,10 +96,6 @@
 extern int as_nsup_queue_get_size();
 extern bool g_shutdown_started;
 
-// Use the following macro to enforce locking around Info requests at run-time.
-// (Warning:  This will unnecessarily increase contention and Info request timeouts!)
-// #define USE_INFO_LOCK
-
 // Acceptable timediffs in XDR lastship times.
 // (Print warning only if time went back by at least 5 minutes.)
 #define XDR_ACCEPTABLE_TIMEDIFF XDR_TIME_ADJUST
@@ -4204,11 +4200,6 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 int
 as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp)
 {
-
-#ifdef USE_INFO_LOCK
-	pthread_mutex_lock(&g_info_lock);
-#endif
-
 	// Either we'e doing all, or doing some
 	if (req_buf_len == 0) {
 		info_all(NULL, rsp);
@@ -4216,10 +4207,6 @@ as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp)
 	else {
 		info_some((char *)req_buf, (char *)(req_buf + req_buf_len), NULL, rsp);
 	}
-
-#ifdef USE_INFO_LOCK
-	pthread_mutex_unlock(&g_info_lock);
-#endif
 
 	return(0);
 }
@@ -4235,26 +4222,20 @@ thr_info_fn(void *unused)
 {
 	for ( ; ; ) {
 
-		as_info_transaction tr; // 'tr' so we can share microbenchmark macros
+		as_info_transaction it;
 
-		if (0 != cf_queue_pop(g_info_work_q, &tr, CF_QUEUE_FOREVER)) {
+		if (0 != cf_queue_pop(g_info_work_q, &it, CF_QUEUE_FOREVER)) {
 			cf_crash(AS_TSVC, "unable to pop from info work queue");
 		}
 
-		as_file_handle *fd_h = tr.fd_h;
-		as_proto *pr = tr.proto;
-
-		MICROBENCHMARK_HIST_INSERT_AND_RESET(info_q_wait_hist);
+		as_file_handle *fd_h = it.fd_h;
+		as_proto *pr = it.proto;
 
 		// Allocate an output buffer sufficiently large to avoid ever resizing
 		cf_dyn_buf_define_size(db, 128 * 1024);
 		// write space for the header
 		uint64_t	h = 0;
 		cf_dyn_buf_append_buf(&db, (uint8_t *) &h, sizeof(h));
-
-#ifdef USE_INFO_LOCK
-		pthread_mutex_lock(&g_info_lock);
-#endif
 
 		// Either we'e doing all, or doing some
 		if (pr->sz == 0) {
@@ -4263,12 +4244,6 @@ thr_info_fn(void *unused)
 		else {
 			info_some((char *)pr->data, (char *)pr->data + pr->sz, fd_h, &db);
 		}
-
-#ifdef USE_INFO_LOCK
-		pthread_mutex_unlock(&g_info_lock);
-#endif
-
-		MICROBENCHMARK_HIST_INSERT_AND_RESET(info_post_lock_hist);
 
 		// write the proto header in the space we pre-wrote
 		db.buf[0] = 2;
@@ -4309,7 +4284,7 @@ thr_info_fn(void *unused)
 			fd_h = NULL;
 		}
 
-		MICROBENCHMARK_HIST_INSERT(info_fulfill_hist);
+		G_HIST_INSERT_DATA_POINT((&it), info_hist);
 	}
 
 	return NULL;
@@ -4663,6 +4638,25 @@ info_debug_ticker_fn(void *unused)
 					g_config.batch_index_timeout,
 					g_config.batch_index_errors);
 
+			if (g_config.info_hist) {
+				histogram_dump(g_config.info_hist);
+			}
+
+			// TODO - modernize.
+			if (g_config.microbenchmarks) {
+				if (g_config.demarshal_hist) {
+					histogram_dump(g_config.demarshal_hist);
+				}
+
+				if (g_config.batch_index_reads_hist) {
+					histogram_dump(g_config.batch_index_reads_hist);
+				}
+
+				if (g_config.batch_q_process_hist) {
+					histogram_dump(g_config.batch_q_process_hist);
+				}
+			}
+
 			// namespace disk and memory size and ldt gc stats
 			total_ns_memory_inuse = 0;
 
@@ -4794,80 +4788,60 @@ info_debug_ticker_fn(void *unused)
 						ns->n_udf_bg_query_success, ns->n_udf_bg_query_failure
 						);
 
-				cf_hist_track_dump(ns->read_hist);
-				cf_hist_track_dump(ns->write_hist);
-				cf_hist_track_dump(ns->udf_hist);
-				cf_hist_track_dump(ns->query_hist);
+				// One-way activated histograms.
 
-				histogram_dump(ns->query_rec_count_hist);
+				if (ns->read_hist_active) {
+					cf_hist_track_dump(ns->read_hist);
+				}
 
-				// FIXME - how to hide/show.
-				histogram_dump(ns->proxy_hist);
+				if (ns->write_hist_active) {
+					cf_hist_track_dump(ns->write_hist);
+				}
+
+				if (ns->udf_hist_active) {
+					cf_hist_track_dump(ns->udf_hist);
+				}
+
+				if (ns->query_hist_active) {
+					cf_hist_track_dump(ns->query_hist);
+				}
+
+				if (ns->query_rec_count_hist_active) {
+					histogram_dump(ns->query_rec_count_hist);
+				}
+
+				// Activate-by-config histograms.
+
+				if (ns->proxy_hist_active) {
+					histogram_dump(ns->proxy_hist);
+				}
+
+				if (ns->batch_sub_hist_active) {
+					histogram_dump(ns->batch_sub_hist);
+				}
+
+				if (ns->udf_sub_hist_active) {
+					histogram_dump(ns->udf_sub_hist);
+				}
+
+				if (ns->read_benchmark_hists_active) {
+					histogram_dump(ns->read_tsvc_hist);
+					histogram_dump(ns->read_dup_res_hist);
+					histogram_dump(ns->read_local_hist);
+					histogram_dump(ns->read_response_hist);
+				}
+
+				if (ns->write_benchmark_hists_active) {
+					histogram_dump(ns->write_tsvc_hist);
+					histogram_dump(ns->write_dup_res_hist);
+					histogram_dump(ns->write_master_hist);
+					histogram_dump(ns->write_repl_write_hist);
+					histogram_dump(ns->write_response_hist);
+				}
 			}
 
 			as_query_histogram_dumpall();
 			as_sindex_gc_histogram_dumpall();
-
-			if (g_config.microbenchmarks) {
-				if (g_config.rt_cleanup_hist)
-					histogram_dump(g_config.rt_cleanup_hist);
-				if (g_config.rt_net_hist)
-					histogram_dump(g_config.rt_net_hist);
-				if (g_config.wt_net_hist)
-					histogram_dump(g_config.wt_net_hist);
-				if (g_config.rt_storage_read_hist)
-					histogram_dump(g_config.rt_storage_read_hist);
-				if (g_config.rt_storage_open_hist)
-					histogram_dump(g_config.rt_storage_open_hist);
-				if (g_config.rt_tree_hist)
-					histogram_dump(g_config.rt_tree_hist);
-				if (g_config.rt_internal_hist)
-					histogram_dump(g_config.rt_internal_hist);
-				if (g_config.wt_internal_hist)
-					histogram_dump(g_config.wt_internal_hist);
-				if (g_config.rt_start_hist)
-					histogram_dump(g_config.rt_start_hist);
-				if (g_config.wt_start_hist)
-					histogram_dump(g_config.wt_start_hist);
-				if (g_config.rt_q_process_hist)
-					histogram_dump(g_config.rt_q_process_hist);
-				if (g_config.wt_q_process_hist)
-					histogram_dump(g_config.wt_q_process_hist);
-				if (g_config.q_wait_hist)
-					histogram_dump(g_config.q_wait_hist);
-				if (g_config.demarshal_hist)
-					histogram_dump(g_config.demarshal_hist);
-				if (g_config.wt_master_wait_prole_hist)
-					histogram_dump(g_config.wt_master_wait_prole_hist);
-				if (g_config.wt_prole_hist)
-					histogram_dump(g_config.wt_prole_hist);
-				if (g_config.rt_resolve_hist)
-					histogram_dump(g_config.rt_resolve_hist);
-				if (g_config.wt_resolve_hist)
-					histogram_dump(g_config.wt_resolve_hist);
-				if (g_config.rt_resolve_wait_hist)
-					histogram_dump(g_config.rt_resolve_wait_hist);
-				if (g_config.wt_resolve_wait_hist)
-					histogram_dump(g_config.wt_resolve_wait_hist);
-				if (g_config.error_hist)
-					histogram_dump(g_config.error_hist);
-				if (g_config.batch_index_reads_hist)
-					histogram_dump(g_config.batch_index_reads_hist);
-				if (g_config.batch_q_process_hist)
-					histogram_dump(g_config.batch_q_process_hist);
-				if (g_config.info_q_wait_hist)
-					histogram_dump(g_config.info_q_wait_hist);
-				if (g_config.info_post_lock_hist)
-					histogram_dump(g_config.info_post_lock_hist);
-				if (g_config.info_fulfill_hist)
-					histogram_dump(g_config.info_fulfill_hist);
-				if (g_config.write_storage_close_hist)
-					histogram_dump(g_config.write_storage_close_hist);
-				if (g_config.write_sindex_hist)
-					histogram_dump(g_config.write_sindex_hist);
-				if (g_config.prole_fabric_send_hist)
-					histogram_dump(g_config.prole_fabric_send_hist);
-			}
 
 			if (g_config.storage_benchmarks) {
 				as_storage_ticker_stats();
@@ -6214,35 +6188,9 @@ clear_ldt_histograms()
 void
 clear_microbenchmark_histograms()
 {
-	histogram_clear(g_config.rt_cleanup_hist);
-	histogram_clear(g_config.rt_net_hist);
-	histogram_clear(g_config.wt_net_hist);
-	histogram_clear(g_config.rt_storage_read_hist);
-	histogram_clear(g_config.rt_storage_open_hist);
-	histogram_clear(g_config.rt_tree_hist);
-	histogram_clear(g_config.rt_internal_hist);
-	histogram_clear(g_config.wt_internal_hist);
-	histogram_clear(g_config.rt_start_hist);
-	histogram_clear(g_config.wt_start_hist);
-	histogram_clear(g_config.rt_q_process_hist);
-	histogram_clear(g_config.wt_q_process_hist);
-	histogram_clear(g_config.q_wait_hist);
 	histogram_clear(g_config.demarshal_hist);
-	histogram_clear(g_config.wt_master_wait_prole_hist);
-	histogram_clear(g_config.wt_prole_hist);
-	histogram_clear(g_config.rt_resolve_hist);
-	histogram_clear(g_config.wt_resolve_hist);
-	histogram_clear(g_config.rt_resolve_wait_hist);
-	histogram_clear(g_config.wt_resolve_wait_hist);
-	histogram_clear(g_config.error_hist);
 	histogram_clear(g_config.batch_index_reads_hist);
 	histogram_clear(g_config.batch_q_process_hist);
-	histogram_clear(g_config.info_q_wait_hist);
-	histogram_clear(g_config.info_post_lock_hist);
-	histogram_clear(g_config.info_fulfill_hist);
-	histogram_clear(g_config.write_storage_close_hist);
-	histogram_clear(g_config.write_sindex_hist);
-	histogram_clear(g_config.prole_fabric_send_hist);
 }
 
 // SINDEX wire protocol examples:

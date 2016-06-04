@@ -63,7 +63,7 @@ extern void as_info_paxos_event(as_paxos_generation gen,
 typedef struct as_info_transaction_s {
 	as_file_handle *fd_h;
 	as_proto *proto;
-	uint64_t microbenchmark_time;
+	uint64_t start_time;
 } as_info_transaction;
 
 // Processes an info request that comes in from the network, sends the response.

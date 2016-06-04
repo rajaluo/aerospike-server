@@ -110,7 +110,7 @@ send_udf_response_bin(as_transaction* tr, as_bin** response_bins, uint16_t n_bin
 					tr->rsv.ns, as_transaction_trid(tr), NULL);
 			tr->from.proto_fd_h = NULL;
 		}
-		cf_hist_track_insert_data_point(tr->rsv.ns->udf_hist, tr->start_time);
+		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, udf_hist);
 		client_udf_update_stats_bin(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:

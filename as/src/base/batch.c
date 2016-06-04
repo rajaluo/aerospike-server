@@ -768,7 +768,6 @@ as_batch_queue_task(as_transaction* btr)
 	tr.from.batch_shared = shared;
 	tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	tr.start_time = btr->start_time;
-	MICROBENCHMARK_SET_TO_START();
 
 	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 

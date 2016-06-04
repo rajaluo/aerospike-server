@@ -58,8 +58,6 @@ as_transaction_init_head(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 	tr->origin				= 0;
 	tr->from_flags			= 0;
 
-	tr->microbenchmark_is_resolve = false; // will soon be gone
-
 	tr->from.any			= NULL;
 	tr->from_data.any		= 0;
 
@@ -90,8 +88,6 @@ as_transaction_copy_head(as_transaction *to, const as_transaction *from)
 
 	to->origin				= from->origin;
 	to->from_flags			= from->from_flags;
-
-	to->microbenchmark_is_resolve = false; // will soon be gone
 
 	to->from.any			= from->from.any;
 	to->from_data.any		= from->from_data.any;
@@ -328,7 +324,6 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 
 	// Do this last, to exclude the setup time in this function.
 	tr->start_time = cf_getns();
-	MICROBENCHMARK_SET_TO_START_P();
 
 	return 0;
 }

@@ -1268,15 +1268,39 @@ struct as_namespace_s {
 	cf_atomic32		cold_start_threshold_void_time;
 	uint32_t		cold_start_max_void_time;
 
+	// One-way activated histograms.
 	cf_hist_track*	read_hist;
+	bool			read_hist_active;
 	cf_hist_track*	write_hist;
+	bool			write_hist_active;
 	cf_hist_track*	udf_hist;
+	bool			udf_hist_active;
 	cf_hist_track*	query_hist;
-
+	bool			query_hist_active;
 	histogram*		query_rec_count_hist;
+	bool			query_rec_count_hist_active;
 
-	// FIXME - needs a config bool to enable/disable.
+	// Activate-by-config histograms.
+
 	histogram*		proxy_hist;
+	bool			proxy_hist_active;
+	histogram*		batch_sub_hist;
+	bool			batch_sub_hist_active;
+	histogram*		udf_sub_hist;
+	bool			udf_sub_hist_active;
+
+	histogram*		read_tsvc_hist;
+	histogram*		read_dup_res_hist;
+	histogram*		read_local_hist;
+	histogram*		read_response_hist;
+	bool			read_benchmark_hists_active;
+
+	histogram*		write_tsvc_hist;
+	histogram*		write_dup_res_hist;
+	histogram*		write_master_hist; // split this?
+	histogram*		write_repl_write_hist;
+	histogram*		write_response_hist;
+	bool			write_benchmark_hists_active;
 
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)

@@ -162,6 +162,8 @@ append_bin_to_destroy(as_bin* b, as_bin* bins, uint32_t* p_n_bins)
 transaction_status
 as_write_start(as_transaction* tr)
 {
+	WRITE_BENCHMARK_HIST_INSERT_DATA_POINT(tr, write_tsvc_hist);
+
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_FORBIDDEN;
@@ -213,8 +215,12 @@ as_write_start(as_transaction* tr)
 	}
 	// else - no duplicate resolution phase, apply operation to master.
 
+	status = write_master(rw, tr);
+
+	WRITE_BENCHMARK_HIST_INSERT_DATA_POINT(tr, write_master_hist);
+
 	// If error, transaction is finished.
-	if ((status = write_master(rw, tr)) != TRANS_IN_PROGRESS) {
+	if (status != TRANS_IN_PROGRESS) {
 		rw_request_hash_delete(&hkey);
 		send_write_response(tr, NULL);
 		return status;
@@ -301,10 +307,14 @@ start_write_repl_write(rw_request* rw, as_transaction* tr)
 bool
 write_dup_res_cb(rw_request* rw)
 {
+	WRITE_BENCHMARK_HIST_INSERT_DATA_POINT(rw, write_dup_res_hist);
+
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
 	transaction_status status = write_master(rw, &tr);
+
+	WRITE_BENCHMARK_HIST_INSERT_DATA_POINT((&tr), write_master_hist);
 
 	if (status == TRANS_DONE_ERROR) {
 		send_write_response(&tr, &rw->response_db);
@@ -358,6 +368,8 @@ write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 void
 write_repl_write_cb(rw_request* rw)
 {
+	WRITE_BENCHMARK_HIST_INSERT_DATA_POINT(rw, write_repl_write_hist);
+
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
@@ -390,7 +402,8 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->generation, tr->void_time, NULL, NULL, 0, NULL,
 					as_transaction_trid(tr), NULL);
 		}
-		cf_hist_track_insert_data_point(tr->rsv.ns->write_hist, tr->start_time);
+		WRITE_BENCHMARK_HIST_INSERT_DATA_POINT(tr, write_response_hist);
+		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, write_hist);
 		client_write_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:
@@ -428,7 +441,8 @@ write_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
-		cf_hist_track_insert_data_point(rw->rsv.ns->write_hist, rw->start_time);
+		// TODO - should we have a write_dup_res_hist/write_repl_write_hist entry here?
+		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, write_hist);
 		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:

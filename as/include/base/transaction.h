@@ -44,72 +44,63 @@
 
 
 //==========================================================
-// Microbenchmark macros.
+// Histogram macros.
 //
 
-#define MICROBENCHMARK_SET_TO_START() \
+#define G_HIST_INSERT_DATA_POINT(tr, name) \
 { \
-	if (g_config.microbenchmarks) { \
-		tr.microbenchmark_time = tr.start_time; \
+	if (g_config.name##_active) { \
+		histogram_insert_data_point(g_config.name, tr->start_time); \
 	} \
 }
 
-#define MICROBENCHMARK_SET_TO_START_P() \
+#define HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, name) \
 { \
-	if (g_config.microbenchmarks) { \
-		tr->microbenchmark_time = tr->start_time; \
+	tr->rsv.ns->name##_active = true; \
+	cf_hist_track_insert_data_point(tr->rsv.ns->name, tr->start_time); \
+}
+
+#define HIST_INSERT_DATA_POINT(tr, name) \
+{ \
+	if (tr->rsv.ns->name##_active) { \
+		histogram_insert_data_point(tr->rsv.ns->name, tr->start_time); \
 	} \
 }
 
-#define MICROBENCHMARK_HIST_INSERT(__hist_name) \
+#define READ_BENCHMARK_HIST_INSERT_DATA_POINT(tr, name) \
 { \
-	if (g_config.microbenchmarks && tr.microbenchmark_time != 0) { \
-		histogram_insert_data_point(g_config.__hist_name, tr.microbenchmark_time); \
-	} \
-}
-
-#define MICROBENCHMARK_HIST_INSERT_P(__hist_name) \
-{ \
-	if (g_config.microbenchmarks && tr->microbenchmark_time != 0) { \
-		histogram_insert_data_point(g_config.__hist_name, tr->microbenchmark_time); \
-	} \
-}
-
-#define MICROBENCHMARK_RESET() \
-{ \
-	if (g_config.microbenchmarks) { \
-		tr.microbenchmark_time = cf_getns(); \
-	} \
-}
-
-#define MICROBENCHMARK_RESET_P() \
-{ \
-	if (g_config.microbenchmarks) { \
-		tr->microbenchmark_time = cf_getns(); \
-	} \
-}
-
-#define MICROBENCHMARK_HIST_INSERT_AND_RESET(__hist_name) \
-{ \
-	if (g_config.microbenchmarks) { \
-		if (tr.microbenchmark_time != 0) { \
-			tr.microbenchmark_time = histogram_insert_data_point(g_config.__hist_name, tr.microbenchmark_time); \
-		} \
-		else { \
-			tr.microbenchmark_time = cf_getns(); \
-		} \
-	} \
-}
-
-#define MICROBENCHMARK_HIST_INSERT_AND_RESET_P(__hist_name) \
-{ \
-	if (g_config.microbenchmarks) { \
+	if (tr->rsv.ns->read_benchmark_hists_active && tr->origin == FROM_CLIENT) { \
 		if (tr->microbenchmark_time != 0) { \
-			tr->microbenchmark_time = histogram_insert_data_point(g_config.__hist_name, tr->microbenchmark_time); \
+			tr->microbenchmark_time = histogram_insert_data_point(tr->rsv.ns->name, tr->microbenchmark_time); \
 		} \
 		else { \
 			tr->microbenchmark_time = cf_getns(); \
 		} \
+	} \
+}
+
+#define WRITE_BENCHMARK_HIST_INSERT_DATA_POINT(tr, name) \
+{ \
+	if (tr->rsv.ns->write_benchmark_hists_active && tr->origin == FROM_CLIENT) { \
+		if (tr->microbenchmark_time != 0) { \
+			tr->microbenchmark_time = histogram_insert_data_point(tr->rsv.ns->name, tr->microbenchmark_time); \
+		} \
+		else { \
+			tr->microbenchmark_time = cf_getns(); \
+		} \
+	} \
+}
+
+
+//==========================================================
+// Microbenchmark macros.
+//
+
+// TODO - will soon be gone when we solve the time initialization issues.
+#define MICROBENCHMARK_RESET() \
+{ \
+	if (g_config.microbenchmarks) { \
+		tr.microbenchmark_time = cf_getns(); \
 	} \
 }
 
@@ -186,8 +177,7 @@ typedef struct as_transaction_s {
 	uint8_t		origin;
 	uint8_t		from_flags;
 
-	bool		microbenchmark_is_resolve; // will soon be gone
-	// Spare byte.
+	// 2 spare bytes.
 
 	union {
 		void*						any;

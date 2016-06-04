@@ -372,36 +372,13 @@ typedef struct as_config_s {
 	uint32_t			hist_track_slice; // period in seconds at which to cache histogram data
 	char *				hist_track_thresholds; // comma-separated bucket (ms) values to track
 
-	histogram *			rt_cleanup_hist; // histogram around as_storage_record_close and as_record_done
-	histogram *			rt_net_hist; // histogram around the network send on reads
-	histogram *			wt_net_hist; // histogram around the network send on writes
-	histogram *			rt_storage_read_hist; // histogram taken from after opening the device to after reading from device
-	histogram *			rt_storage_open_hist; // histogram around as_storage_record_open
-	histogram *			rt_tree_hist; // histogram from rw_complete to fetching record from rb tree
-	histogram *			rt_internal_hist; // read histogram from internal to rw_complete
-	histogram *			wt_internal_hist; // write histogram from internal to either send to prole or return to client (if no replication)
-	histogram *			rt_start_hist; // read histogram from read_start to internal
-	histogram *			wt_start_hist; // write histogram from write_start to internal
-	histogram *			rt_q_process_hist; // histogram from transaction off q to read_start
-	histogram *			wt_q_process_hist; // histogram from transaction off q to write_start
-	histogram *			q_wait_hist; // histogram taken right after transaction is plucked off the q
+	// TODO - modernize.
 	histogram *			demarshal_hist; // histogram around demarshal loop only
-	histogram *			wt_master_wait_prole_hist; // histogram of time spent on master between sending rw and ack
-	histogram *			wt_prole_hist; // histogram that tracks write replication performance (in fabric)
-	histogram *			rt_resolve_hist; // histogram that tracks duplicate resolution after receiving all messages from other nodes
-	histogram *			wt_resolve_hist; // histogram that tracks duplicate resolution after receiving all messages from other nodes
-	histogram *			rt_resolve_wait_hist; // histogram that tracks the time the master waits for other nodes to complete duplicate resolution on reads
-	histogram *			wt_resolve_wait_hist; // histogram that tracks the time the master waits for other nodes to complete duplicate resolution on writes
-	histogram *			error_hist;  // histogram of error requests only
-	histogram *			batch_index_reads_hist;        // New batch index protocol latency histogram.
+	histogram *			batch_index_reads_hist; // New batch index protocol latency histogram.
 	histogram *			batch_q_process_hist; // Old batch direct protocol latency histogram.
-	histogram *			info_q_wait_hist;  // histogram of time info transaction spends on info q
-	histogram *			info_post_lock_hist; // histogram of time spent processing the Info command under the mutex before sending the response on the network
-	histogram *			info_fulfill_hist; // histogram of time spent to fulfill info request after taking it off the info q
 
-	histogram *			write_storage_close_hist; // histogram of time spent around record_storage close on a write path
-	histogram *			write_sindex_hist; // secondary index latency histogram
-	histogram *			prole_fabric_send_hist; // histogram of time spent for prole fabric getting queued
+	histogram *			info_hist; // histogram of time spent to fulfill info request
+	bool				info_hist_active;
 
 	// LDT related histogram
 	histogram *			ldt_multiop_prole_hist;   // histogram that tracks LDT multi op replication performance (in fabric)

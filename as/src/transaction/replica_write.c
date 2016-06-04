@@ -228,7 +228,7 @@ repl_write_setup_rw(rw_request* rw, as_transaction* tr,
 	tr->from.any = NULL;
 
 	rw->start_time = tr->start_time;
-	// TODO - microbenchmark_time
+	rw->microbenchmark_time = tr->microbenchmark_time;
 
 	as_partition_reservation_copy(&rw->rsv, &tr->rsv);
 	// Hereafter, rw_request must release reservation - happens in destructor.

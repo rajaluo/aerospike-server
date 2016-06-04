@@ -556,7 +556,6 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			// For old clients, will compute it again from msgp key and set.
 
 			tr.start_time = cf_getns();
-			MICROBENCHMARK_SET_TO_START();
 
 			tr.origin = FROM_PROXY;
 			tr.from.proxy_node = id;
@@ -664,7 +663,9 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 					pr.fab_msg = 0;
 
 					// TODO - not sure if this should care about origin.
-					histogram_insert_data_point(pr.ns->proxy_hist, pr.start_time);
+					if (pr.ns->proxy_hist_active) {
+						histogram_insert_data_point(pr.ns->proxy_hist, pr.start_time);
+					}
 				}
 			}
 			else {

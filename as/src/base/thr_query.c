@@ -730,7 +730,10 @@ query_update_stats(as_query_transaction *qtr)
 			break;
 	}
 
+	// Can't use macro that tr and rw use.
+	qtr->ns->query_hist_active = true;
 	cf_hist_track_insert_data_point(qtr->ns->query_hist, qtr->start_time);
+
 	SINDEX_HIST_INSERT_DATA_POINT(qtr->si, query_hist, qtr->start_time);
 
 	if (qtr->querying_ai_time_ns) {
@@ -740,7 +743,10 @@ query_update_stats(as_query_transaction *qtr)
 	if (qtr->n_digests) {
 		SINDEX_HIST_INSERT_RAW(qtr->si, query_rcnt_hist, qtr->n_digests);
 		if (rows) {
+			// Can't use macro that tr and rw use.
+			qtr->ns->query_rec_count_hist_active = true;
 			histogram_insert_raw(qtr->ns->query_rec_count_hist, rows);
+
 			SINDEX_HIST_INSERT_RAW(qtr->si, query_diff_hist, qtr->n_digests - rows);
 		}
 	}

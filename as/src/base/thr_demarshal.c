@@ -847,10 +847,14 @@ thr_demarshal(void *arg)
 					if (g_config.microbenchmarks) {
 						microbenchmark_time = histogram_insert_data_point(g_config.demarshal_hist, now_ns);
 					}
+					// TODO - how to manage benchmark hists initialization?
+					else {
+						microbenchmark_time = now_ns; //cf_getns();
+					}
 
 					// Info protocol requests.
 					if (proto_p->type == PROTO_TYPE_INFO) {
-						as_info_transaction it = { fd_h, proto_p, microbenchmark_time };
+						as_info_transaction it = { fd_h, proto_p, now_ns };
 
 						as_info(&it);
 						cf_atomic_int_incr(&g_config.proto_transactions);
