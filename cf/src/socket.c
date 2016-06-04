@@ -490,10 +490,15 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 	/* Set close-on-exec */
 	fcntl(s->sock, F_SETFD, 1);
 
-	// Bind to the incoming port on inaddr any
+	// Bind to the incoming port on the specified mcast IP address.
 	memset(&s->saddr, 0, sizeof(s->saddr));
 	s->saddr.sin_family = AF_INET;
-	s->saddr.sin_addr.s_addr = INADDR_ANY;
+	if (!inet_pton(AF_INET, s->addr, &s->saddr.sin_addr)) {
+		cf_warning(CF_SOCKET, "multicast socket inet_pton(%s) failed: %d %s", s->addr, errno, cf_strerror(errno));
+		close(s->sock);
+		s->sock = -1;
+		return -1;
+	}
 	s->saddr.sin_port = htons(s->port);
 	if (ms->tx_addr) {
 		struct in_addr iface_in;
