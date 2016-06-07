@@ -104,12 +104,14 @@ send_udf_response_bin(as_transaction* tr, as_bin** response_bins, uint16_t n_bin
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
+		BENCHMARK_NEXT_DATA_POINT(tr, udf, master);
 		if (tr->from.proto_fd_h) {
 			as_msg_send_reply(tr->from.proto_fd_h, tr->result_code,
 					tr->generation, tr->void_time, NULL, response_bins, n_bins,
 					tr->rsv.ns, as_transaction_trid(tr), NULL);
 			tr->from.proto_fd_h = NULL;
 		}
+		BENCHMARK_NEXT_DATA_POINT(tr, udf, response);
 		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, udf_hist);
 		client_udf_update_stats_bin(tr->rsv.ns, tr->result_code);
 		break;
@@ -121,6 +123,7 @@ send_udf_response_bin(as_transaction* tr, as_bin** response_bins, uint16_t n_bin
 					NULL);
 			tr->from.proxy_node = 0;
 		}
+		proxyee_update_stats(tr->rsv.ns, tr->from_flags);
 		break;
 	case FROM_BATCH:
 	case FROM_IUDF:

@@ -321,7 +321,7 @@ slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 	c_tr->msgp                 = h_tr->msgp;
 
 	// We do not track microbenchmark or time for chunk today
-	c_tr->microbenchmark_time  = 0;
+	c_tr->benchmark_time  = 0;
 	c_tr->start_time           = h_tr->start_time;
 	c_tr->end_time             = h_tr->end_time;
 

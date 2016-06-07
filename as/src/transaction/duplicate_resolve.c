@@ -119,7 +119,7 @@ dup_res_setup_rw(rw_request* rw, as_transaction* tr, dup_res_done_cb dup_res_cb,
 	tr->from.any = NULL;
 
 	rw->start_time = tr->start_time;
-	rw->microbenchmark_time = tr->microbenchmark_time;
+	rw->benchmark_time = tr->benchmark_time;
 
 	as_partition_reservation_copy(&rw->rsv, &tr->rsv);
 	// Hereafter, rw must release the reservation - happens in destructor.
@@ -373,6 +373,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 		// Note also that rw will release rsv - tr will get a new one.
 		rw->msgp = NULL;
 
+		tr.from_flags |= FROM_FLAG_RESTART;
 		thr_tsvc_enqueue(&tr);
 
 		rw->dup_res_complete = true;

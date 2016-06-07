@@ -746,8 +746,6 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 			tr.from_data.batch_index = pr->batch_index;
 			tr.start_time = pr->start_time;
 
-			MICROBENCHMARK_RESET();
-
 			thr_tsvc_enqueue(&tr);
 
 			as_fabric_msg_put(pr->fab_msg);
@@ -998,8 +996,6 @@ Retry:
 				tr.start_time = pr->start_time;
 
 				cf_atomic_int_incr(&g_config.proxy_unproxy);
-
-				MICROBENCHMARK_RESET();
 
 				thr_tsvc_enqueue(&tr);
 

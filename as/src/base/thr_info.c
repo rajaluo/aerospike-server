@@ -4284,7 +4284,7 @@ thr_info_fn(void *unused)
 			fd_h = NULL;
 		}
 
-		G_HIST_INSERT_DATA_POINT((&it), info_hist);
+		G_HIST_INSERT_DATA_POINT(info_hist, it.start_time);
 	}
 
 	return NULL;
@@ -4633,21 +4633,32 @@ info_debug_ticker_fn(void *unused)
 			cf_info(AS_INFO, "   heartbeat-stats: %s",
 					as_hb_stats(false));
 
+			cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-via-proxy %lu tsvc-batch-sub %lu tsvc-udf-sub %lu",
+					g_config.n_demarshal_error,
+					g_config.n_tsvc_client_error,
+					g_config.n_tsvc_proxyee_error,
+					g_config.n_tsvc_batch_sub_error,
+					g_config.n_tsvc_udf_sub_error);
+
 			cf_info(AS_INFO, "   batch-index (%lu,%lu,%lu)",
 					g_config.batch_index_complete,
 					g_config.batch_index_timeout,
 					g_config.batch_index_errors);
 
-			if (g_config.info_hist) {
+			if (g_config.demarshal_hist_active) {
+				histogram_dump(g_config.demarshal_hist);
+			}
+
+			if (g_config.info_hist_active) {
 				histogram_dump(g_config.info_hist);
+			}
+
+			if (g_config.tsvc_q_hist_active) {
+				histogram_dump(g_config.tsvc_q_hist);
 			}
 
 			// TODO - modernize.
 			if (g_config.microbenchmarks) {
-				if (g_config.demarshal_hist) {
-					histogram_dump(g_config.demarshal_hist);
-				}
-
 				if (g_config.batch_index_reads_hist) {
 					histogram_dump(g_config.batch_index_reads_hist);
 				}
@@ -4752,6 +4763,12 @@ info_debug_ticker_fn(void *unused)
 						ns->n_tsvc_udf_sub_timeout, ns->n_tsvc_udf_sub_error
 						);
 
+				cf_info(AS_INFO, "{%s} via-proxy: client %lu batch-sub %lu",
+						ns->name,
+						ns->n_proxyee_client_complete,
+						ns->n_proxyee_batch_sub_complete
+						);
+
 				cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu) udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
 						ns->name,
 						ns->n_client_proxy_complete, ns->n_client_proxy_timeout, ns->n_client_proxy_error,
@@ -4768,12 +4785,6 @@ info_debug_ticker_fn(void *unused)
 						ns->n_batch_sub_read_success, ns->n_batch_sub_read_timeout, ns->n_batch_sub_read_error, ns->n_batch_sub_read_not_found
 						);
 
-				cf_info(AS_INFO, "{%s} udf-sub: udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
-						ns->name,
-						ns->n_udf_sub_udf_complete, ns->n_udf_sub_udf_timeout, ns->n_udf_sub_udf_error,
-						ns->n_udf_sub_lua_read_success, ns->n_udf_sub_lua_write_success, ns->n_udf_sub_lua_delete_success, ns->n_udf_sub_lua_error
-						);
-
 				cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
 						ns->name,
 						ns->n_basic_scan_success, ns->n_basic_scan_failure,
@@ -4788,18 +4799,48 @@ info_debug_ticker_fn(void *unused)
 						ns->n_udf_bg_query_success, ns->n_udf_bg_query_failure
 						);
 
-				// One-way activated histograms.
+				cf_info(AS_INFO, "{%s} udf-sub: udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
+						ns->name,
+						ns->n_udf_sub_udf_complete, ns->n_udf_sub_udf_timeout, ns->n_udf_sub_udf_error,
+						ns->n_udf_sub_lua_read_success, ns->n_udf_sub_lua_write_success, ns->n_udf_sub_lua_delete_success, ns->n_udf_sub_lua_error
+						);
 
 				if (ns->read_hist_active) {
 					cf_hist_track_dump(ns->read_hist);
+				}
+
+				if (ns->read_benchmarks_active) {
+					histogram_dump(ns->read_start_hist);
+					histogram_dump(ns->read_restart_hist);
+					histogram_dump(ns->read_dup_res_hist);
+					histogram_dump(ns->read_local_hist);
+					histogram_dump(ns->read_response_hist);
 				}
 
 				if (ns->write_hist_active) {
 					cf_hist_track_dump(ns->write_hist);
 				}
 
+				if (ns->write_benchmarks_active) {
+					histogram_dump(ns->write_start_hist);
+					histogram_dump(ns->write_restart_hist);
+					histogram_dump(ns->write_dup_res_hist);
+					histogram_dump(ns->write_master_hist);
+					histogram_dump(ns->write_repl_write_hist);
+					histogram_dump(ns->write_response_hist);
+				}
+
 				if (ns->udf_hist_active) {
 					cf_hist_track_dump(ns->udf_hist);
+				}
+
+				if (ns->udf_benchmarks_active) {
+					histogram_dump(ns->udf_start_hist);
+					histogram_dump(ns->udf_restart_hist);
+					histogram_dump(ns->udf_dup_res_hist);
+					histogram_dump(ns->udf_master_hist);
+					histogram_dump(ns->udf_repl_write_hist);
+					histogram_dump(ns->udf_response_hist);
 				}
 
 				if (ns->query_hist_active) {
@@ -4810,33 +4851,25 @@ info_debug_ticker_fn(void *unused)
 					histogram_dump(ns->query_rec_count_hist);
 				}
 
-				// Activate-by-config histograms.
-
 				if (ns->proxy_hist_active) {
 					histogram_dump(ns->proxy_hist);
 				}
 
-				if (ns->batch_sub_hist_active) {
-					histogram_dump(ns->batch_sub_hist);
+				if (ns->batch_sub_benchmarks_active) {
+					histogram_dump(ns->batch_sub_start_hist);
+					histogram_dump(ns->batch_sub_restart_hist);
+					histogram_dump(ns->batch_sub_dup_res_hist);
+					histogram_dump(ns->batch_sub_read_local_hist);
+					histogram_dump(ns->batch_sub_response_hist);
 				}
 
-				if (ns->udf_sub_hist_active) {
-					histogram_dump(ns->udf_sub_hist);
-				}
-
-				if (ns->read_benchmark_hists_active) {
-					histogram_dump(ns->read_tsvc_hist);
-					histogram_dump(ns->read_dup_res_hist);
-					histogram_dump(ns->read_local_hist);
-					histogram_dump(ns->read_response_hist);
-				}
-
-				if (ns->write_benchmark_hists_active) {
-					histogram_dump(ns->write_tsvc_hist);
-					histogram_dump(ns->write_dup_res_hist);
-					histogram_dump(ns->write_master_hist);
-					histogram_dump(ns->write_repl_write_hist);
-					histogram_dump(ns->write_response_hist);
+				if (ns->udf_sub_benchmarks_active) {
+					histogram_dump(ns->udf_sub_start_hist);
+					histogram_dump(ns->udf_sub_restart_hist);
+					histogram_dump(ns->udf_sub_dup_res_hist);
+					histogram_dump(ns->udf_sub_master_hist);
+					histogram_dump(ns->udf_sub_repl_write_hist);
+					histogram_dump(ns->udf_sub_response_hist);
 				}
 			}
 
@@ -5701,6 +5734,11 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64("", "tsvc-udf-sub-timeout", ns->n_tsvc_udf_sub_timeout, db);
 	info_append_uint64("", "tsvc-udf-sub-error", ns->n_tsvc_udf_sub_error, db);
+
+	// Proxyee stats - collected from tsvc-stage and later stages.
+
+	info_append_uint64("", "proxyee-client-complete", ns->n_proxyee_client_complete, db);
+	info_append_uint64("", "proxyee-batch-sub-complete", ns->n_proxyee_batch_sub_complete, db);
 
 	// From-client transaction stats.
 

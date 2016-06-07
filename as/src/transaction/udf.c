@@ -109,6 +109,9 @@ udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 transaction_status
 as_udf_start(as_transaction* tr)
 {
+	BENCHMARK_START(tr, udf, FROM_CLIENT);
+	BENCHMARK_START(tr, udf_sub, FROM_IUDF);
+
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_FORBIDDEN;
@@ -160,15 +163,21 @@ as_udf_start(as_transaction* tr)
 	}
 	// else - no duplicate resolution phase, apply operation to master.
 
-	// If error or UDF was a read, transaction is finished.
-	if ((status = udf_master(rw, tr)) != TRANS_IN_PROGRESS) {
+	status = udf_master(rw, tr);
+
+	// TODO - really need to refactor so response isn't sent in udf_master()!
+	if (status == TRANS_DONE_SUCCESS) {
+		// UDF was a read, has already responded to origin.
 		rw_request_hash_delete(&hkey);
+		return status;
+	}
 
-		if (status == TRANS_DONE_ERROR) {
-			send_udf_response(tr, NULL);
-		}
-		// else - UDF was a read, has already responded to origin.
+	BENCHMARK_NEXT_DATA_POINT(tr, udf, master);
+	BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, master);
 
+	if (status == TRANS_DONE_ERROR) {
+		rw_request_hash_delete(&hkey);
+		send_udf_response(tr, NULL);
 		return status;
 	}
 
@@ -253,18 +262,25 @@ start_udf_repl_write(rw_request* rw, as_transaction* tr)
 bool
 udf_dup_res_cb(rw_request* rw)
 {
+	BENCHMARK_NEXT_DATA_POINT(rw, udf, dup_res);
+	BENCHMARK_NEXT_DATA_POINT(rw, udf_sub, dup_res);
+
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
 	transaction_status status = udf_master(rw, &tr);
 
-	if (status == TRANS_DONE_ERROR) {
-		send_udf_response(&tr, &rw->response_db);
+	// TODO - really need to refactor so response isn't sent in udf_master()!
+	if (status == TRANS_DONE_SUCCESS) {
+		// UDF was a read, has already responded to origin.
 		return true;
 	}
 
-	if (status == TRANS_DONE_SUCCESS) {
-		// UDF was a read, has already responded to origin.
+	BENCHMARK_NEXT_DATA_POINT((&tr), udf, master);
+	BENCHMARK_NEXT_DATA_POINT((&tr), udf_sub, master);
+
+	if (status == TRANS_DONE_ERROR) {
+		send_udf_response(&tr, &rw->response_db);
 		return true;
 	}
 
@@ -315,6 +331,9 @@ udf_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 void
 udf_repl_write_cb(rw_request* rw)
 {
+	BENCHMARK_NEXT_DATA_POINT(rw, udf, repl_write);
+	BENCHMARK_NEXT_DATA_POINT(rw, udf_sub, repl_write);
+
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
@@ -347,6 +366,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->generation, tr->void_time, NULL, NULL, 0, NULL,
 					as_transaction_trid(tr), NULL);
 		}
+		BENCHMARK_NEXT_DATA_POINT(tr, udf, response);
 		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, udf_hist);
 		client_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
@@ -360,13 +380,15 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
 					0, NULL, as_transaction_trid(tr), NULL);
 		}
+		proxyee_update_stats(tr->rsv.ns, tr->from_flags);
 		break;
 	case FROM_IUDF:
 		if (db && db->used_sz != 0) {
 			cf_crash(AS_RW, "unexpected - internal udf has response");
 		}
 		tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
-		HIST_INSERT_DATA_POINT(tr, udf_sub_hist);
+		// TODO - is it worth it?
+		BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, response);
 		udf_sub_udf_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_BATCH:
@@ -391,15 +413,16 @@ udf_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
-		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, udf_hist);
+//		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, udf_hist);
 		client_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
+		proxyee_update_stats(rw->rsv.ns, rw->from_flags);
 		break;
 	case FROM_IUDF:
 		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata,
 				AS_PROTO_RESULT_FAIL_TIMEOUT);
-		HIST_INSERT_DATA_POINT(rw, udf_sub_hist);
+		// TODO - histograms?
 		udf_sub_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_BATCH:
@@ -444,11 +467,13 @@ udf_master(rw_request* rw, as_transaction* tr)
 		if (tr->origin == FROM_IUDF) {
 			// For internal UDFs, we skipped sending a response, so some work
 			// normally handled by the response method needs to happen here.
+			BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, master);
 
 			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, tr->result_code);
 			tr->from.iudf_orig = NULL;
 
-			HIST_INSERT_DATA_POINT(tr, udf_sub_hist);
+			// TODO - is it worth it?
+			BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, response);
 			cf_atomic64_incr(&tr->rsv.ns->n_udf_sub_udf_complete);
 		}
 

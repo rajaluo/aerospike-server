@@ -100,7 +100,7 @@ typedef struct rw_request_s {
 	cf_digest			keyd;
 
 	cf_clock			start_time;
-	cf_clock			microbenchmark_time;
+	cf_clock			benchmark_time;
 
 	as_partition_reservation rsv;
 

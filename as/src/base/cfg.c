@@ -260,7 +260,9 @@ typedef enum {
 	CASE_SERVICE_CLIENT_FD_MAX, // renamed
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
+	CASE_SERVICE_ACTIVATE_HIST_DEMARSHAL,
 	CASE_SERVICE_ACTIVATE_HIST_INFO,
+	CASE_SERVICE_ACTIVATE_HIST_TSVC_Q,
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
@@ -473,11 +475,12 @@ typedef enum {
 	CASE_NAMESPACE_ALLOW_NONXDR_WRITES,
 	CASE_NAMESPACE_ALLOW_XDR_WRITES,
 	// Normally hidden:
-	CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_READ,
-	CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_WRITE,
-	CASE_NAMESPACE_ACTIVATE_HIST_BATCH_SUB,
+	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB,
+	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ,
+	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF,
+	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB,
+	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE,
 	CASE_NAMESPACE_ACTIVATE_HIST_PROXY,
-	CASE_NAMESPACE_ACTIVATE_HIST_UDF_SUB,
 	CASE_NAMESPACE_COLD_START_EVICT_TTL,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
@@ -673,7 +676,9 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
+		{ "activate-hist-demarshal",		CASE_SERVICE_ACTIVATE_HIST_DEMARSHAL },
 		{ "activate-hist-info",				CASE_SERVICE_ACTIVATE_HIST_INFO },
+		{ "activate-hist-tsvc-q",			CASE_SERVICE_ACTIVATE_HIST_TSVC_Q },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
@@ -888,11 +893,12 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ns-forward-xdr-writes",			CASE_NAMESPACE_FORWARD_XDR_WRITES },
 		{ "allow-nonxdr-writes",			CASE_NAMESPACE_ALLOW_NONXDR_WRITES },
 		{ "allow-xdr-writes",				CASE_NAMESPACE_ALLOW_XDR_WRITES },
-		{ "activate-benchmark-hists-read",	CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_READ },
-		{ "activate-benchmark-hists-write",	CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_WRITE },
-		{ "activate-hist-batch-sub",		CASE_NAMESPACE_ACTIVATE_HIST_BATCH_SUB },
+		{ "activate-benchmarks-batch-sub",	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB },
+		{ "activate-benchmarks-read",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ },
+		{ "activate-benchmarks-udf",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF },
+		{ "activate-benchmarks-udf-sub",	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB },
+		{ "activate-benchmarks-write",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE },
 		{ "activate-hist-proxy",			CASE_NAMESPACE_ACTIVATE_HIST_PROXY },
-		{ "activate-hist-udf-sub",			CASE_NAMESPACE_ACTIVATE_HIST_UDF_SUB },
 		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
@@ -1937,8 +1943,14 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_PROTO_FD_MAX:
 				c->n_proto_fd_max = cfg_int_no_checks(&line);
 				break;
+			case CASE_SERVICE_ACTIVATE_HIST_DEMARSHAL:
+				c->demarshal_hist_active = cfg_bool(&line);
+				break;
 			case CASE_SERVICE_ACTIVATE_HIST_INFO:
 				c->info_hist_active = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_ACTIVATE_HIST_TSVC_Q:
+				c->tsvc_q_hist_active = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				c->allow_inline_transactions = cfg_bool(&line);
@@ -2594,20 +2606,23 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
 				// The server isn't interested in this, but the XDR module is!
 				break;
-			case CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_READ:
-				ns->read_benchmark_hists_active = true;
+			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB:
+				ns->batch_sub_benchmarks_active = true;
 				break;
-			case CASE_NAMESPACE_ACTIVATE_BENCHMARK_HISTS_WRITE:
-				ns->write_benchmark_hists_active = true;
+			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ:
+				ns->read_benchmarks_active = true;
 				break;
-			case CASE_NAMESPACE_ACTIVATE_HIST_BATCH_SUB:
-				ns->batch_sub_hist_active = cfg_bool(&line);
+			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF:
+				ns->udf_benchmarks_active = true;
+				break;
+			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB:
+				ns->udf_sub_benchmarks_active = true;
+				break;
+			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE:
+				ns->write_benchmarks_active = true;
 				break;
 			case CASE_NAMESPACE_ACTIVATE_HIST_PROXY:
 				ns->proxy_hist_active = cfg_bool(&line);
-				break;
-			case CASE_NAMESPACE_ACTIVATE_HIST_UDF_SUB:
-				ns->udf_sub_hist_active = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_COLD_START_EVICT_TTL:
 				ns->cold_start_evict_ttl = cfg_u32_no_checks(&line);
@@ -3437,14 +3452,10 @@ as_config_post_process(as_config *c, const char *config_file)
 		sprintf(hist_name, "{%s} proxy", ns->name);
 		create_and_check_hist(&ns->proxy_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} batch-sub", ns->name);
-		create_and_check_hist(&ns->batch_sub_hist, hist_name, HIST_MILLISECONDS);
-
-		sprintf(hist_name, "{%s} udf-sub", ns->name);
-		create_and_check_hist(&ns->udf_sub_hist, hist_name, HIST_MILLISECONDS);
-
-		sprintf(hist_name, "{%s} read-tsvc", ns->name);
-		create_and_check_hist(&ns->read_tsvc_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} read-start", ns->name);
+		create_and_check_hist(&ns->read_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} read-restart", ns->name);
+		create_and_check_hist(&ns->read_restart_hist, hist_name, HIST_MILLISECONDS);
 		sprintf(hist_name, "{%s} read-dup-res", ns->name);
 		create_and_check_hist(&ns->read_dup_res_hist, hist_name, HIST_MILLISECONDS);
 		sprintf(hist_name, "{%s} read-local", ns->name);
@@ -3452,8 +3463,10 @@ as_config_post_process(as_config *c, const char *config_file)
 		sprintf(hist_name, "{%s} read-response", ns->name);
 		create_and_check_hist(&ns->read_response_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} write-tsvc", ns->name);
-		create_and_check_hist(&ns->write_tsvc_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} write-start", ns->name);
+		create_and_check_hist(&ns->write_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} write-restart", ns->name);
+		create_and_check_hist(&ns->write_restart_hist, hist_name, HIST_MILLISECONDS);
 		sprintf(hist_name, "{%s} write-dup-res", ns->name);
 		create_and_check_hist(&ns->write_dup_res_hist, hist_name, HIST_MILLISECONDS);
 		sprintf(hist_name, "{%s} write-master", ns->name);
@@ -3462,6 +3475,43 @@ as_config_post_process(as_config *c, const char *config_file)
 		create_and_check_hist(&ns->write_repl_write_hist, hist_name, HIST_MILLISECONDS);
 		sprintf(hist_name, "{%s} write-response", ns->name);
 		create_and_check_hist(&ns->write_response_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} udf-start", ns->name);
+		create_and_check_hist(&ns->udf_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-restart", ns->name);
+		create_and_check_hist(&ns->udf_restart_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-dup-res", ns->name);
+		create_and_check_hist(&ns->udf_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-master", ns->name);
+		create_and_check_hist(&ns->udf_master_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-repl-write", ns->name);
+		create_and_check_hist(&ns->udf_repl_write_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-response", ns->name);
+		create_and_check_hist(&ns->udf_response_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} batch-sub-start", ns->name);
+		create_and_check_hist(&ns->batch_sub_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} batch-sub-restart", ns->name);
+		create_and_check_hist(&ns->batch_sub_restart_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} batch-sub-dup-res", ns->name);
+		create_and_check_hist(&ns->batch_sub_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} batch-sub-read-local", ns->name);
+		create_and_check_hist(&ns->batch_sub_read_local_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} batch-sub-response", ns->name);
+		create_and_check_hist(&ns->batch_sub_response_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s} udf-sub-start", ns->name);
+		create_and_check_hist(&ns->udf_sub_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-sub-restart", ns->name);
+		create_and_check_hist(&ns->udf_sub_restart_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-sub-dup-res", ns->name);
+		create_and_check_hist(&ns->udf_sub_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-sub-master", ns->name);
+		create_and_check_hist(&ns->udf_sub_master_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-sub-repl-write", ns->name);
+		create_and_check_hist(&ns->udf_sub_repl_write_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s} udf-sub-response", ns->name);
+		create_and_check_hist(&ns->udf_sub_response_hist, hist_name, HIST_MILLISECONDS);
 
 		// Linear 'nsup' histograms.
 		// Note - histograms' ranges MUST be set before use.
@@ -3617,10 +3667,11 @@ cfg_create_all_histograms()
 	as_config* c = &g_config;
 
 	create_and_check_hist(&c->demarshal_hist, "demarshal_hist", HIST_MILLISECONDS);
+	create_and_check_hist(&c->info_hist, "info", HIST_MILLISECONDS);
+	create_and_check_hist(&c->tsvc_q_hist, "tsvc-q", HIST_MILLISECONDS);
+
 	create_and_check_hist(&c->batch_index_reads_hist, "batch_index_reads", HIST_MILLISECONDS);
 	create_and_check_hist(&c->batch_q_process_hist, "batch_q_process", HIST_MILLISECONDS);
-
-	create_and_check_hist(&c->info_hist, "info", HIST_MILLISECONDS);
 
 	create_and_check_hist(&c->ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
 	create_and_check_hist(&c->ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);

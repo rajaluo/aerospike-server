@@ -71,7 +71,7 @@ rw_request_create(cf_digest* keyd)
 	rw->from_data.any		= 0;
 	rw->keyd				= *keyd;
 	rw->start_time			= 0;
-	rw->microbenchmark_time	= 0;
+	rw->benchmark_time		= 0;
 
 	AS_PARTITION_RESERVATION_INIT(rw->rsv);
 
@@ -159,7 +159,9 @@ rw_request_destroy(rw_request* rw)
 	while (e) {
 		rw_wait_ele* next = e->next;
 
+		e->tr.from_flags |= FROM_FLAG_RESTART;
 		thr_tsvc_enqueue(&e->tr);
+
 		cf_free(e);
 		e = next;
 	}

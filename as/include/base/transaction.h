@@ -47,60 +47,35 @@
 // Histogram macros.
 //
 
-#define G_HIST_INSERT_DATA_POINT(tr, name) \
+#define G_HIST_INSERT_DATA_POINT(name, start_time) \
 { \
 	if (g_config.name##_active) { \
-		histogram_insert_data_point(g_config.name, tr->start_time); \
+		histogram_insert_data_point(g_config.name, start_time); \
 	} \
 }
 
-#define HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, name) \
+#define HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(trw, name) \
 { \
-	tr->rsv.ns->name##_active = true; \
-	cf_hist_track_insert_data_point(tr->rsv.ns->name, tr->start_time); \
+	trw->rsv.ns->name##_active = true; \
+	cf_hist_track_insert_data_point(trw->rsv.ns->name, trw->start_time); \
 }
 
-#define HIST_INSERT_DATA_POINT(tr, name) \
+#define BENCHMARK_START(tr, name, orig) \
 { \
-	if (tr->rsv.ns->name##_active) { \
-		histogram_insert_data_point(tr->rsv.ns->name, tr->start_time); \
-	} \
-}
-
-#define READ_BENCHMARK_HIST_INSERT_DATA_POINT(tr, name) \
-{ \
-	if (tr->rsv.ns->read_benchmark_hists_active && tr->origin == FROM_CLIENT) { \
-		if (tr->microbenchmark_time != 0) { \
-			tr->microbenchmark_time = histogram_insert_data_point(tr->rsv.ns->name, tr->microbenchmark_time); \
+	if (tr->rsv.ns->name##_benchmarks_active && tr->origin == orig) { \
+		if (tr->benchmark_time == 0) { \
+			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_start_hist, tr->start_time); \
 		} \
 		else { \
-			tr->microbenchmark_time = cf_getns(); \
+			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_restart_hist, tr->benchmark_time); \
 		} \
 	} \
 }
 
-#define WRITE_BENCHMARK_HIST_INSERT_DATA_POINT(tr, name) \
+#define BENCHMARK_NEXT_DATA_POINT(trw, name, tok) \
 { \
-	if (tr->rsv.ns->write_benchmark_hists_active && tr->origin == FROM_CLIENT) { \
-		if (tr->microbenchmark_time != 0) { \
-			tr->microbenchmark_time = histogram_insert_data_point(tr->rsv.ns->name, tr->microbenchmark_time); \
-		} \
-		else { \
-			tr->microbenchmark_time = cf_getns(); \
-		} \
-	} \
-}
-
-
-//==========================================================
-// Microbenchmark macros.
-//
-
-// TODO - will soon be gone when we solve the time initialization issues.
-#define MICROBENCHMARK_RESET() \
-{ \
-	if (g_config.microbenchmarks) { \
-		tr.microbenchmark_time = cf_getns(); \
+	if (trw->rsv.ns->name##_benchmarks_active && trw->benchmark_time != 0) { \
+		trw->benchmark_time = histogram_insert_data_point(trw->rsv.ns->name##_##tok##_hist, trw->benchmark_time); \
 	} \
 }
 
@@ -196,7 +171,7 @@ typedef struct as_transaction_s {
 	cf_digest	keyd; // only batch sub-transactions require this on queue
 
 	uint64_t	start_time;
-	uint64_t	microbenchmark_time;
+	uint64_t	benchmark_time;
 
 	//<><><><><><><><><><><> 64 bytes <><><><><><><><><><><>
 
@@ -221,6 +196,7 @@ typedef struct as_transaction_s {
 #define FROM_FLAG_NSUP_DELETE	0x0001
 #define FROM_FLAG_BATCH_SUB		0x0002
 #define FROM_FLAG_SHIPPED_OP	0x0004
+#define FROM_FLAG_RESTART		0x0008
 
 // 'flags' bits - set in transaction body after queuing:
 #define AS_TRANSACTION_FLAG_SINDEX_TOUCHED	0x0001
@@ -239,6 +215,12 @@ void as_transaction_init_head_from_rw(as_transaction *tr, struct rw_request_s *r
 bool as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type);
 bool as_transaction_demarshal_prepare(as_transaction *tr);
 void as_transaction_proxyee_prepare(as_transaction *tr);
+
+static inline bool
+as_transaction_is_restart(const as_transaction *tr)
+{
+	return (tr->from_flags & FROM_FLAG_RESTART) != 0;
+}
 
 static inline bool
 as_transaction_is_batch_sub(const as_transaction *tr)

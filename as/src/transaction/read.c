@@ -115,7 +115,8 @@ batch_sub_read_update_stats(as_namespace* ns, uint8_t result_code)
 transaction_status
 as_read_start(as_transaction* tr)
 {
-	READ_BENCHMARK_HIST_INSERT_DATA_POINT(tr, read_tsvc_hist);
+	BENCHMARK_START(tr, read, FROM_CLIENT);
+	BENCHMARK_START(tr, batch_sub, FROM_BATCH);
 
 	if (tr->rsv.n_dupl == 0) {
 		// No duplicates to resolve. Try to read local copy - response sent to
@@ -194,7 +195,8 @@ start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata)
 bool
 read_dup_res_cb(rw_request* rw)
 {
-	READ_BENCHMARK_HIST_INSERT_DATA_POINT(rw, read_tsvc_hist);
+	BENCHMARK_NEXT_DATA_POINT(rw, read, dup_res);
+	BENCHMARK_NEXT_DATA_POINT(rw, batch_sub, dup_res);
 
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
@@ -224,7 +226,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		// TODO - philosophical choice as to what this should include.
-		READ_BENCHMARK_HIST_INSERT_DATA_POINT(tr, read_local_hist);
+		BENCHMARK_NEXT_DATA_POINT(tr, read, local);
 		if (db && db->used_sz != 0) {
 			as_msg_send_ops_reply(tr->from.proto_fd_h, db);
 		}
@@ -233,7 +235,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 					tr->generation, tr->void_time, ops, response_bins, n_bins,
 					tr->rsv.ns, as_transaction_trid(tr), set_name);
 		}
-		READ_BENCHMARK_HIST_INSERT_DATA_POINT(tr, read_response_hist);
+		BENCHMARK_NEXT_DATA_POINT(tr, read, response);
 		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, read_hist);
 		client_read_update_stats(tr->rsv.ns, tr->result_code);
 		break;
@@ -248,11 +250,14 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 					response_bins, n_bins, tr->rsv.ns, as_transaction_trid(tr),
 					set_name);
 		}
+		proxyee_update_stats(tr->rsv.ns, tr->from_flags);
 		break;
 	case FROM_BATCH:
+		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, read_local);
 		as_batch_add_result(tr, set_name, tr->generation, tr->void_time, n_bins,
 				response_bins, ops);
-		HIST_INSERT_DATA_POINT(tr, batch_sub_hist);
+		// TODO - is it worth it?
+		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
 		batch_sub_read_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_IUDF:
@@ -278,15 +283,16 @@ read_timeout_cb(rw_request* rw)
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		// TODO - should we have a read_dup_res_hist entry here?
-		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, read_hist);
+//		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, read_hist);
 		client_read_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
+		proxyee_update_stats(rw->rsv.ns, rw->from_flags);
 		break;
 	case FROM_BATCH:
 		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
 				AS_PROTO_RESULT_FAIL_TIMEOUT);
-		HIST_INSERT_DATA_POINT(rw, batch_sub_hist);
+		// TODO - histograms?
 		batch_sub_read_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_IUDF:

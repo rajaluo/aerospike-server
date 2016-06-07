@@ -842,15 +842,7 @@ thr_demarshal(void *arg)
 					cf_rc_reserve(fd_h);
 					has_extra_ref = true;
 
-					uint64_t microbenchmark_time = 0;
-
-					if (g_config.microbenchmarks) {
-						microbenchmark_time = histogram_insert_data_point(g_config.demarshal_hist, now_ns);
-					}
-					// TODO - how to manage benchmark hists initialization?
-					else {
-						microbenchmark_time = now_ns; //cf_getns();
-					}
+					G_HIST_INSERT_DATA_POINT(demarshal_hist, now_ns);
 
 					// Info protocol requests.
 					if (proto_p->type == PROTO_TYPE_INFO) {
@@ -868,7 +860,6 @@ thr_demarshal(void *arg)
 					tr.origin = FROM_CLIENT;
 					tr.from.proto_fd_h = fd_h;
 					tr.start_time = now_ns;
-					tr.microbenchmark_time = microbenchmark_time;
 
 					if (! as_proto_is_valid_type(proto_p)) {
 						cf_warning(AS_DEMARSHAL, "unsupported proto message type %u", proto_p->type);

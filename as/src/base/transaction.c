@@ -47,6 +47,7 @@
 #include "base/thr_proxy.h"
 #include "base/udf_rw.h"
 #include "transaction/rw_request.h"
+#include "transaction/rw_utils.h"
 
 
 void
@@ -64,7 +65,7 @@ as_transaction_init_head(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 	tr->keyd				= keyd ? *keyd : cf_digest_zero;
 
 	tr->start_time			= 0;
-	tr->microbenchmark_time	= 0;
+	tr->benchmark_time		= 0;
 }
 
 void
@@ -95,7 +96,7 @@ as_transaction_copy_head(as_transaction *to, const as_transaction *from)
 	to->keyd				= from->keyd;
 
 	to->start_time			= from->start_time;
-	to->microbenchmark_time	= from->microbenchmark_time;
+	to->benchmark_time		= from->benchmark_time;
 }
 
 void
@@ -125,7 +126,7 @@ as_transaction_init_head_from_rw(as_transaction *tr, rw_request *rw)
 	tr->from_data.any		= rw->from_data.any;
 	tr->keyd				= rw->keyd;
 	tr->start_time			= rw->start_time;
-	tr->microbenchmark_time	= rw->microbenchmark_time;
+	tr->benchmark_time		= rw->benchmark_time;
 
 	rw->from.any = NULL;
 	// Note - we don't clear rw->msgp, destructor will free it.
@@ -336,7 +337,22 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 
 	cf_free(tr->msgp);
 	tr->msgp = NULL;
+
+	cf_atomic64_incr(&g_config.n_demarshal_error);
 }
+
+#define UPDATE_ERROR_STATS(name) \
+	if (ns) { \
+		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) { \
+			cf_atomic64_incr(&ns->n_tsvc_##name##_timeout); \
+		} \
+		else { \
+			cf_atomic64_incr(&ns->n_tsvc_##name##_error); \
+		} \
+	} \
+	else { \
+		cf_atomic64_incr(&g_config.n_tsvc_##name##_error); \
+	}
 
 void
 as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
@@ -358,20 +374,18 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
-		if (ns) {
-			if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-				cf_atomic_int_incr(&ns->n_tsvc_client_timeout);
-			}
-			else {
-				cf_atomic_int_incr(&ns->n_tsvc_client_error);
-			}
-		}
-		// else - global error stat?
+		UPDATE_ERROR_STATS(client);
 		break;
 	case FROM_PROXY:
 		if (tr->from.proxy_node != 0) {
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 			tr->from.proxy_node = 0; // pattern, not needed
+		}
+		if (ns) {
+			proxyee_update_stats(ns, tr->from_flags);
+		}
+		else {
+			cf_atomic64_incr(&g_config.n_tsvc_proxyee_error);
 		}
 		break;
 	case FROM_BATCH:
@@ -380,30 +394,14 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 			tr->from.batch_shared = NULL; // pattern, not needed
 			tr->msgp = NULL; // pattern, not needed
 		}
-		if (ns) {
-			if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-				cf_atomic_int_incr(&ns->n_tsvc_batch_sub_timeout);
-			}
-			else {
-				cf_atomic_int_incr(&ns->n_tsvc_batch_sub_error);
-			}
-		}
-		// else - global error stat?
+		UPDATE_ERROR_STATS(batch_sub);
 		break;
 	case FROM_IUDF:
 		if (tr->from.iudf_orig) {
 			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, error_code);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 		}
-		if (ns) {
-			if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-				cf_atomic_int_incr(&ns->n_tsvc_udf_sub_timeout);
-			}
-			else {
-				cf_atomic_int_incr(&ns->n_tsvc_udf_sub_error);
-			}
-		}
-		// else - global error stat?
+		UPDATE_ERROR_STATS(udf_sub);
 		break;
 	case FROM_NSUP:
 		break;

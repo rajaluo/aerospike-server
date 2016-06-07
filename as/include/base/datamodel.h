@@ -1104,6 +1104,11 @@ struct as_namespace_s {
 	cf_atomic64		n_tsvc_udf_sub_timeout;
 	cf_atomic64		n_tsvc_udf_sub_error;
 
+	// Proxyee stats - collected from tsvc-stage and later stages.
+
+	cf_atomic64		n_proxyee_client_complete;
+	cf_atomic64		n_proxyee_batch_sub_complete;
+
 	// From-client transaction stats.
 
 	cf_atomic64		n_client_proxy_complete;
@@ -1284,23 +1289,44 @@ struct as_namespace_s {
 
 	histogram*		proxy_hist;
 	bool			proxy_hist_active;
-	histogram*		batch_sub_hist;
-	bool			batch_sub_hist_active;
-	histogram*		udf_sub_hist;
-	bool			udf_sub_hist_active;
 
-	histogram*		read_tsvc_hist;
+	histogram*		read_start_hist;
+	histogram*		read_restart_hist;
 	histogram*		read_dup_res_hist;
 	histogram*		read_local_hist;
 	histogram*		read_response_hist;
-	bool			read_benchmark_hists_active;
+	bool			read_benchmarks_active;
 
-	histogram*		write_tsvc_hist;
+	histogram*		write_start_hist;
+	histogram*		write_restart_hist;
 	histogram*		write_dup_res_hist;
 	histogram*		write_master_hist; // split this?
 	histogram*		write_repl_write_hist;
 	histogram*		write_response_hist;
-	bool			write_benchmark_hists_active;
+	bool			write_benchmarks_active;
+
+	histogram*		udf_start_hist;
+	histogram*		udf_restart_hist;
+	histogram*		udf_dup_res_hist;
+	histogram*		udf_master_hist; // split this?
+	histogram*		udf_repl_write_hist;
+	histogram*		udf_response_hist;
+	bool			udf_benchmarks_active;
+
+	histogram*		batch_sub_start_hist;
+	histogram*		batch_sub_restart_hist;
+	histogram*		batch_sub_dup_res_hist;
+	histogram*		batch_sub_read_local_hist;
+	histogram*		batch_sub_response_hist;
+	bool			batch_sub_benchmarks_active;
+
+	histogram*		udf_sub_start_hist;
+	histogram*		udf_sub_restart_hist;
+	histogram*		udf_sub_dup_res_hist;
+	histogram*		udf_sub_master_hist; // split this?
+	histogram*		udf_sub_repl_write_hist;
+	histogram*		udf_sub_response_hist;
+	bool			udf_sub_benchmarks_active;
 
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)
