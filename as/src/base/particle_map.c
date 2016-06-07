@@ -3790,14 +3790,6 @@ packed_map_op_get_remove_by_key_interval(packed_map_op *op, as_bin *b, rollback_
 	uint32_t count = 0;
 
 	if (op_is_k_ordered(op)) {
-		offset_index *offidx = &op->pmi.offset_idx;
-
-		// Pre-fill index.
-		if (! offset_index_fill(offidx, index + count)) {
-			cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key_interval() invalid packed map");
-			return -AS_PROTO_RESULT_FAIL_PARAMETER;
-		}
-
 		if (! packed_map_op_get_range_by_key_interval_ordered(op, key_start, key_end, &index, &count)) {
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
