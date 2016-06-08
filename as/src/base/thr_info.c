@@ -380,6 +380,10 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
 	cf_dyn_buf_append_string(db, paxos_principal);
 
+	cf_dyn_buf_append_string(db, ";migrate_allowed=");
+	cf_dyn_buf_append_string(db, as_partition_get_migration_flag() ?
+			"true" : "false");
+
 	uint64_t migrate_partitions_remaining = as_partition_remaining_migrations();
 	cf_dyn_buf_append_string(db, ";migrate_progress_send=");
 	APPEND_STAT_COUNTER(db, migrate_partitions_remaining);
