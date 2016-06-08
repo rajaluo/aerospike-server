@@ -334,31 +334,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ";tsvc-udf-sub-error=");
 	APPEND_STAT_COUNTER(db, g_config.n_tsvc_udf_sub_error);
 
-	cf_dyn_buf_append_string(db, ";stat_read_reqs_xdr=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_reqs_xdr);
-
-	cf_dyn_buf_append_string(db, ";stat_write_reqs_xdr=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_reqs_xdr);
-
-	cf_dyn_buf_append_string(db, ";err_xdr_write_forbidden=");
-	APPEND_STAT_COUNTER(db, g_config.err_xdr_write_forbidden);
-
-	cf_dyn_buf_append_string(db, ";stat_nsup_deletes_not_shipped=");
-	APPEND_STAT_COUNTER(db, g_config.stat_nsup_deletes_not_shipped);
-
-	cf_dyn_buf_append_string(db, ";udf_scan_rec_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_scan_rec_reqs);
-
-	cf_dyn_buf_append_string(db, ";udf_query_rec_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_query_rec_reqs);
-
-	cf_dyn_buf_append_string(db, ";stat_proxy_reqs_xdr=");
-	APPEND_STAT_COUNTER(db, g_config.stat_proxy_reqs_xdr);
 	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
 	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
-
-	cf_dyn_buf_append_string(db, ";stat_compressed_pkts_received=");
-	APPEND_STAT_COUNTER(db, g_config.stat_compressed_pkts_received);
 
 	cf_dyn_buf_append_string(db, ";geo_region_query_count=");
 	APPEND_STAT_COUNTER(db, g_config.geo_region_query_count);
@@ -1980,6 +1957,12 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, cf_fault_is_using_local_time() ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";storage-benchmarks=");
 	cf_dyn_buf_append_string(db, g_config.storage_benchmarks ? "true" : "false");
+
+	cf_dyn_buf_append_string(db, ";activate-hist-info=");
+	cf_dyn_buf_append_string(db, g_config.info_hist_active ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";activate-benchmarks-svc=");
+	cf_dyn_buf_append_string(db, g_config.svc_benchmarks_active ? "true" : "false");
+
 	cf_dyn_buf_append_string(db, ";ldt-benchmarks=");
 	cf_dyn_buf_append_string(db, g_config.ldt_benchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";scan-max-active=");
@@ -2211,6 +2194,19 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_hist_track_get_settings(ns->write_hist, db);
 	cf_hist_track_get_settings(ns->udf_hist, db);
 	cf_hist_track_get_settings(ns->query_hist, db);
+
+	cf_dyn_buf_append_string(db, ";activate-hist-proxy=");
+	cf_dyn_buf_append_string(db, ns->proxy_hist_active ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";activate-benchmarks-read=");
+	cf_dyn_buf_append_string(db, ns->read_benchmarks_active ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";activate-benchmarks-write=");
+	cf_dyn_buf_append_string(db, ns->write_benchmarks_active ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";activate-benchmarks-udf=");
+	cf_dyn_buf_append_string(db, ns->udf_benchmarks_active ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";activate-benchmarks-batch-sub=");
+	cf_dyn_buf_append_string(db, ns->batch_sub_benchmarks_active ? "true" : "false");
+	cf_dyn_buf_append_string(db, ";activate-benchmarks-udf-sub=");
+	cf_dyn_buf_append_string(db, ns->udf_sub_benchmarks_active ? "true" : "false");
 
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
@@ -5874,6 +5870,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "client-lua-delete-success", ns->n_client_lua_delete_success, db);
 	info_append_uint64("", "client-lua-error", ns->n_client_lua_error, db);
 
+	info_append_uint64("", "client-read-success-xdr", ns->n_client_read_success_xdr, db);
+	info_append_uint64("", "client-write-success-xdr", ns->n_client_write_success_xdr, db);
+
+	info_append_uint64("", "client-trans-fail-xdr-forbidden", ns->n_client_trans_fail_xdr_forbidden, db);
 	info_append_uint64("", "client-trans-fail-key-busy", ns->n_client_trans_fail_key_busy, db);
 	info_append_uint64("", "client-write-fail-generation", ns->n_client_write_fail_generation, db);
 	info_append_uint64("", "client-write-fail-record-too-big", ns->n_client_write_fail_record_too_big, db);

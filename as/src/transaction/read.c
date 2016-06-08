@@ -441,7 +441,7 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 		}
 	}
 
-	const char* set_name = (m->info1 & AS_MSG_INFO1_XDR) != 0 ?
+	const char* set_name = as_msg_is_xdr(m) ?
 			as_index_get_set_name(r, ns) : NULL;
 
 	cf_dyn_buf_define_size(db, 16 * 1024);

@@ -429,19 +429,8 @@ delete_master(as_transaction* tr)
 	as_index_delete(tree, &tr->keyd);
 	as_record_done(&r_ref, ns);
 
-	if (! is_xdr_delete_shipping_enabled()) {
-		return TRANS_IN_PROGRESS;
-	}
-
-	// Don't ship expiration/eviction deletes unless configured to do so.
-	if (as_transaction_is_nsup_delete(tr) && ! is_xdr_nsup_deletes_enabled()) {
-		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
-	}
-	else if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
-			// If this delete is a result of XDR shipping, don't ship it unless
-			// configured to do so.
-			is_xdr_forwarding_enabled() ||
-			ns->ns_forward_xdr_writes) {
+	if (xdr_must_ship_delete(ns, as_transaction_is_nsup_delete(tr),
+			as_msg_is_xdr(m))) {
 		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id, NULL);
 	}
 

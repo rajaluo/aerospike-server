@@ -54,15 +54,8 @@ typedef struct udf_call_s {
 
 typedef int (*iudf_cb)(void *udata, int retcode);
 
-typedef enum {
-	UDF_UNDEF_REQUEST = -1,
-	UDF_SCAN_REQUEST  = 0,
-	UDF_QUERY_REQUEST = 1
-} iudf_type;
-
 typedef struct iudf_origin_s {
 	udf_def		def;
-	iudf_type	type;
 	iudf_cb		cb;
 	void *		udata;
 } iudf_origin;

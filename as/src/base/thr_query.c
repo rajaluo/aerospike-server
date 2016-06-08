@@ -2799,7 +2799,6 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	query_setup_fd(qtr, tr);
 
 	if (qtr->job_type == QUERY_TYPE_UDF_BG) {
-		qtr->origin.type   = UDF_QUERY_REQUEST;
 		qtr->origin.cb     = query_udf_bg_tr_complete;
 		qtr->origin.udata  = (void *)qtr;
 	}

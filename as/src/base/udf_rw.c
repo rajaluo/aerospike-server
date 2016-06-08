@@ -342,13 +342,6 @@ udf_rw_call_def_init_internal(udf_call * call, as_transaction * tr)
 
 	call->def = &tr->from.iudf_orig->def;
 
-	if (tr->from.iudf_orig->type == UDF_SCAN_REQUEST) {
-		cf_atomic_int_incr(&g_config.udf_scan_rec_reqs);
-	}
-	else if (tr->from.iudf_orig->type == UDF_QUERY_REQUEST) {
-		cf_atomic_int_incr(&g_config.udf_query_rec_reqs);
-	}
-
 	return call;
 }
 

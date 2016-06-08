@@ -179,12 +179,6 @@ bacth_sub_proxy_update_stats(as_namespace* ns, uint8_t result_code)
 int
 as_proxy_divert(cf_node dst, as_transaction *tr, as_namespace *ns, uint64_t cluster_key)
 {
-	cf_detail(AS_PROXY, "proxy divert");
-
-	cf_atomic_int_incr(&g_config.stat_proxy_reqs);
-	if (tr->msgp && (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR)) {
-		cf_atomic_int_incr(&g_config.stat_proxy_reqs_xdr);
-	}
 	as_partition_id pid = as_partition_getid(tr->keyd);
 
 	if (dst == 0) {

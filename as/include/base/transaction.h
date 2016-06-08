@@ -317,6 +317,19 @@ as_transaction_is_delete(as_transaction *tr)
 	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0;
 }
 
+// TODO - where should this go?
+static inline bool
+as_msg_is_xdr(as_msg *m)
+{
+	return (m->info1 & AS_MSG_INFO1_XDR) != 0;
+}
+
+static inline bool
+as_transaction_is_xdr(as_transaction *tr)
+{
+	return (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0;
+}
+
 // TODO - just use origin and deprecate FROM_FLAG_NSUP_DELETE?
 static inline bool
 as_transaction_is_nsup_delete(as_transaction *tr)

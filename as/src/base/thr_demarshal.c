@@ -883,8 +883,7 @@ thr_demarshal(void *arg)
 							cf_atomic_int_incr(&g_config.proto_transactions);
 							goto NextEvent;
 						}
-						// Count the packets.
-						cf_atomic_int_add(&g_config.stat_compressed_pkts_received, 1);
+
 						// Free the compressed packet since we'll be using the
 						// decompressed packet from now on.
 						cf_free(proto_p);
@@ -904,7 +903,7 @@ thr_demarshal(void *arg)
 
 					// If it's an XDR connection and we haven't yet modified the connection settings, ...
 					if (tr.msgp->proto.type == PROTO_TYPE_AS_MSG &&
-							(tr.msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0 &&
+							as_transaction_is_xdr(&tr) &&
 							(fd_h->fh_info & FH_INFO_XDR) == 0) {
 						// ... modify them.
 						if (thr_demarshal_config_xdr(fd_h->fd) != 0) {

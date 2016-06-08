@@ -56,7 +56,7 @@
 bool
 xdr_allows_write(as_transaction* tr)
 {
-	if ((tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0) {
+	if (as_transaction_is_xdr(tr)) {
 		if (tr->rsv.ns->ns_allow_xdr_writes) {
 			return true;
 		}
@@ -67,7 +67,7 @@ xdr_allows_write(as_transaction* tr)
 		}
 	}
 
-	cf_atomic_int_incr(&g_config.err_xdr_write_forbidden);
+	cf_atomic_int_incr(&tr->rsv.ns->n_client_trans_fail_xdr_forbidden);
 
 	return false;
 }
@@ -278,4 +278,24 @@ delete_adjust_sindex(as_storage_rd* rd)
 	}
 
 	as_sindex_release_arr(si_arr, si_arr_index);
+}
+
+
+bool
+xdr_must_ship_delete(as_namespace* ns, bool is_nsup_delete, bool is_xdr_op)
+{
+	if (! is_xdr_delete_shipping_enabled()) {
+		return false;
+	}
+
+	// If this delete is a result of expiration/eviction, don't ship it unless
+	// configured to do so.
+	if (is_nsup_delete && ! is_xdr_nsup_deletes_enabled()) {
+		return false;
+	}
+
+	return (! is_xdr_op ||
+			// If this delete is a result of XDR shipping, don't ship it unless
+			// configured to do so.
+			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes);
 }

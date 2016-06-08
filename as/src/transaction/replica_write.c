@@ -342,7 +342,7 @@ repl_write_handle_op(cf_node node, msg* m)
 		result = delete_replica(&rsv, keyd,
 				(info & (RW_INFO_LDT_SUBREC | RW_INFO_LDT_ESR)) != 0,
 				(info & RW_INFO_NSUP_DELETE) != 0,
-				(msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0,
+				as_msg_is_xdr(&msgp->msg),
 				node);
 	}
 	else if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
@@ -768,7 +768,7 @@ pack_info_bits(as_transaction* tr, bool has_udf)
 {
 	uint32_t info = 0;
 
-	if ((tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0) {
+	if (as_transaction_is_xdr(tr)) {
 		info |= RW_INFO_XDR;
 	}
 
@@ -892,7 +892,7 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 		delete_replica(rsv, keyd,
 				(info & (RW_INFO_LDT_SUBREC | RW_INFO_LDT_ESR)) != 0,
 				(info & RW_INFO_NSUP_DELETE) != 0,
-				(msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0,
+				as_msg_is_xdr(&msgp->msg),
 				node);
 	}
 	else if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
@@ -1050,19 +1050,7 @@ delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
 
-	if (! is_xdr_delete_shipping_enabled()) {
-		return AS_PROTO_RESULT_OK;
-	}
-
-	// Don't ship expiration/eviction deletes unless configured to do so.
-	if (is_nsup_delete && ! is_xdr_nsup_deletes_enabled()) {
-		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
-	}
-	else if (! is_xdr_op ||
-			// If this delete is a result of XDR shipping, don't ship it unless
-			// configured to do so.
-			is_xdr_forwarding_enabled() ||
-			ns->ns_forward_xdr_writes) {
+	if (xdr_must_ship_delete(ns, is_nsup_delete, is_xdr_op)) {
 		xdr_write(ns, *keyd, generation, master, true, set_id, NULL);
 	}
 
@@ -1124,19 +1112,7 @@ apply_journaled_delete(as_namespace* ns, as_index_tree* tree, cf_digest* keyd,
 	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
 
-	if (! is_xdr_delete_shipping_enabled()) {
-		return;
-	}
-
-	// Don't ship expiration/eviction deletes unless configured to do so.
-	if (is_nsup_delete && ! is_xdr_nsup_deletes_enabled()) {
-		cf_atomic_int_incr(&g_config.stat_nsup_deletes_not_shipped);
-	}
-	else if (! is_xdr_op ||
-			// If this delete is a result of XDR shipping, don't ship it unless
-			// configured to do so.
-			is_xdr_forwarding_enabled() ||
-			ns->ns_forward_xdr_writes) {
+	if (xdr_must_ship_delete(ns, is_nsup_delete, is_xdr_op)) {
 		xdr_write(ns, *keyd, generation, 0, true, set_id, NULL);
 		// Note - journaled deletes assume we're the master node when they're
 		// applied. This is not necessarily true!

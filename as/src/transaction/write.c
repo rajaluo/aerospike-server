@@ -405,6 +405,9 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		BENCHMARK_NEXT_DATA_POINT(tr, write, response);
 		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, write_hist);
 		client_write_update_stats(tr->rsv.ns, tr->result_code);
+		if (tr->result_code == 0 && as_transaction_is_xdr(tr)) {
+			cf_atomic64_incr(&tr->rsv.ns->n_client_write_success_xdr);
+		}
 		break;
 	case FROM_PROXY:
 		if (db && db->used_sz != 0) {
@@ -701,7 +704,7 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	// Do an XDR write if the write is a non-XDR write or is an XDR write with
 	// forwarding enabled.
-	if ((m->info1 & AS_MSG_INFO1_XDR) == 0 ||
+	if (as_msg_is_xdr(m) ||
 			is_xdr_forwarding_enabled() ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, tr->keyd, tr->generation, 0, is_delete, set_id,

@@ -1224,7 +1224,6 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	job->origin.type = UDF_SCAN_REQUEST;
 	job->origin.cb = udf_bg_scan_tr_complete;
 	job->origin.udata = (void*)job;
 

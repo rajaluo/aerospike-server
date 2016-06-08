@@ -51,6 +51,7 @@ bool get_msg_key(as_transaction* tr, as_storage_rd* rd);
 void update_metadata_in_index(as_transaction* tr, bool increment_generation, as_record* r);
 bool pickle_all(as_storage_rd* rd, rw_request* rw);
 void delete_adjust_sindex(as_storage_rd* rd);
+bool xdr_must_ship_delete(as_namespace* ns, bool is_nsup_delete, bool is_xdr_op);
 
 
 static inline bool

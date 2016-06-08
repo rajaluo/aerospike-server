@@ -194,9 +194,6 @@ typedef struct as_config_s {
 	/* global configuration for how often to print 'ticker' info to the log - 0 is no ticker */
 	uint32_t			ticker_interval;
 
-	// whether to collect microbenchmarks
-	bool				microbenchmarks;
-
 	// whether to collect storage benchmarks
 	bool				storage_benchmarks;
 	
@@ -359,14 +356,17 @@ typedef struct as_config_s {
 	cf_atomic64			n_tsvc_batch_sub_error;
 	cf_atomic64			n_tsvc_udf_sub_error;
 
-	cf_atomic_int		batch_index_initiate;
+	cf_atomic_int		batch_index_initiate; // not (just) a statistic
+
 	cf_atomic_int		batch_index_complete;
 	cf_atomic_int		batch_index_timeout;
 	cf_atomic_int		batch_index_errors;
+
 	cf_atomic_int		batch_index_huge_buffers;
 	cf_atomic_int		batch_index_created_buffers;
 	cf_atomic_int		batch_index_destroyed_buffers;
 
+	// "Old" batch.
 	cf_atomic_int		batch_initiate;
 	cf_atomic_int		batch_timeout;
 	cf_atomic_int		batch_errors;
@@ -396,21 +396,8 @@ typedef struct as_config_s {
 	histogram *			ldt_update_io_bytes_hist;   // histogram that tracks number bytes written by LDT every transaction
 	histogram * 		ldt_hist;            // histogram that tracks ldt performance
 
-	// XDR-related.
-	cf_atomic_int		stat_read_reqs_xdr; // FIXME - what do we need?
-	cf_atomic_int		stat_write_reqs_xdr; // FIXME - what do we need?
-	cf_atomic_int		err_xdr_write_forbidden; // FIXME - what do we need?
-	cf_atomic_int		stat_nsup_deletes_not_shipped;
-	cf_atomic_int		stat_compressed_pkts_received;
-
-	cf_atomic_int		stat_proxy_reqs; // FIXME - what do we need?
-	cf_atomic_int		stat_proxy_reqs_xdr; // FIXME - what do we need?
-
 	cf_atomic_int		err_storage_queue_full;
 	cf_atomic_int		err_storage_defrag_corrupt_record;
-
-	cf_atomic_int		udf_scan_rec_reqs; // FIXME - what do we need?
-	cf_atomic_int		udf_query_rec_reqs; // FIXME - what do we need?
 
 	// For Lua Garbage Collection, we want to track three things:
 	// (1) The number of times we were below the GC threshold
