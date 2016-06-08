@@ -293,7 +293,7 @@ static void
 batch_worker(void* udata)
 {
 	batch_transaction* btr = (batch_transaction*)udata;
-	
+
 	// Check for timeouts.
 	if (btr->end_time != 0 && cf_getns() > btr->end_time) {
 		cf_atomic_int_incr(&g_config.batch_timeout);
@@ -306,11 +306,9 @@ batch_worker(void* udata)
 		batch_transaction_done(btr, false);
 		return;
 	}
-	
+
 	// Process batch request.
-	uint64_t start = cf_getns();
 	batch_process_request(btr);
-	histogram_insert_data_point(g_config.batch_q_process_hist, start);	
 }
 
 // Create bin name list from message.
@@ -343,7 +341,7 @@ as_batch_direct_init()
 	uint32_t threads = g_config.n_batch_threads;
 	cf_info(AS_BATCH, "Initialize batch-threads to %u", threads);
 	int status = as_thread_pool_init_fixed(&batch_direct_thread_pool, threads, batch_worker, sizeof(batch_transaction), offsetof(batch_transaction,complete));
-	
+
 	if (status) {
 		cf_warning(AS_BATCH, "Failed to initialize batch-threads to %u: %d", threads, status);
 	}
@@ -407,10 +405,10 @@ as_batch_direct_queue_task(as_transaction* tr, as_namespace *ns)
 	btr.fd_h->last_used = cf_getms();
 
 	int status = as_thread_pool_queue_task_fixed(&batch_direct_thread_pool, &btr);
-	
+
 	if (status) {
 		cf_warning(AS_BATCH, "Batch enqueue failed");
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;		
+		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 	return 0;
 }
@@ -434,7 +432,7 @@ as_batch_direct_threads_resize(uint32_t threads)
 	g_config.n_batch_threads = batch_direct_thread_pool.thread_size;
 
 	if (status) {
-		cf_warning(AS_BATCH, "Failed to resize batch-threads. status=%d, batch-threads=%d", 
+		cf_warning(AS_BATCH, "Failed to resize batch-threads. status=%d, batch-threads=%d",
 				status, g_config.n_batch_index_threads);
 	}
 	return status;

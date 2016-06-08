@@ -381,12 +381,6 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 			as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 			tr->from.proxy_node = 0; // pattern, not needed
 		}
-		if (ns) {
-			proxyee_update_stats(ns, tr->from_flags);
-		}
-		else {
-			cf_atomic64_incr(&g_config.n_tsvc_proxyee_error);
-		}
 		break;
 	case FROM_BATCH:
 		if (tr->from.batch_shared) {

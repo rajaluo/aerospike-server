@@ -237,7 +237,10 @@ as_batch_send_final(as_batch_shared* shared)
 	as_end_of_transaction(shared->fd_h, status != 0);
 	shared->fd_h = 0;
 
-	histogram_insert_data_point(g_config.batch_index_reads_hist, shared->start);
+	// For now the model is timeouts don't appear in histograms.
+	if (shared->result_code != AS_PROTO_RESULT_FAIL_TIMEOUT) {
+		G_HIST_ACTIVATE_INSERT_DATA_POINT(batch_index_hist, shared->start);
+	}
 
 	// Check final return code in order to update statistics.
 	if (status == 0 && shared->result_code == 0) {
@@ -728,7 +731,6 @@ as_batch_queue_task(as_transaction* btr)
 	}
 
 	memset(shared, 0, sizeof(as_batch_shared));
-	shared->start = cf_getns();
 
 	if (pthread_mutex_init(&shared->lock, NULL)) {
 		cf_warning(AS_BATCH, "Failed to initialize batch lock");
@@ -736,6 +738,7 @@ as_batch_queue_task(as_transaction* btr)
 		return as_batch_send_error(btr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 	}
 
+	shared->start = btr->start_time;
 	shared->fd_h = btr->from.proto_fd_h;
 	shared->msgp = btr->msgp;
 	shared->tran_max = tran_count;

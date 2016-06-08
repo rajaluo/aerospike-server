@@ -325,6 +325,15 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_get_utilization(db);
 
+	cf_dyn_buf_append_string(db, ";demarshal-error=");
+	APPEND_STAT_COUNTER(db, g_config.n_demarshal_error);
+	cf_dyn_buf_append_string(db, ";tsvc-client-error=");
+	APPEND_STAT_COUNTER(db, g_config.n_tsvc_client_error);
+	cf_dyn_buf_append_string(db, ";tsvc-batch-sub-error=");
+	APPEND_STAT_COUNTER(db, g_config.n_tsvc_batch_sub_error);
+	cf_dyn_buf_append_string(db, ";tsvc-udf-sub-error=");
+	APPEND_STAT_COUNTER(db, g_config.n_tsvc_udf_sub_error);
+
 	cf_dyn_buf_append_string(db, ";stat_read_reqs_xdr=");
 	APPEND_STAT_COUNTER(db, g_config.stat_read_reqs_xdr);
 
@@ -1965,8 +1974,6 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.ticker_interval);
 	cf_dyn_buf_append_string(db, ";log-local-time=");
 	cf_dyn_buf_append_string(db, cf_fault_is_using_local_time() ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";microbenchmarks=");
-	cf_dyn_buf_append_string(db, g_config.microbenchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";storage-benchmarks=");
 	cf_dyn_buf_append_string(db, g_config.storage_benchmarks ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";ldt-benchmarks=");
@@ -2526,19 +2533,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of ticker-interval from %d to %d ", g_config.ticker_interval, val);
 			g_config.ticker_interval = val;
-		}
-		else if (0 == as_info_parameter_get(params, "microbenchmarks", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				clear_microbenchmark_histograms();
-				cf_info(AS_INFO, "Changing value of microbenchmarks from %s to %s", bool_val[g_config.microbenchmarks], context);
-				g_config.microbenchmarks = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of microbenchmarks from %s to %s", bool_val[g_config.microbenchmarks], context);
-				g_config.microbenchmarks = false;
-			}
-			else
-				goto Error;
 		}
 		else if (0 == as_info_parameter_get(params, "storage-benchmarks", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -4605,12 +4599,12 @@ info_debug_ticker_fn(void *unused)
 					swapping ? " SWAPPING!" : ""
 					);
 
-			cf_info(AS_INFO, "   in-progress: rw-hash %u proxy-hash %u tsvc-q %d info-q %d nsup-delete-q %d rec-refs %lu",
-					rw_request_hash_count(),
-					as_proxy_inprogress(),
+			cf_info(AS_INFO, "   in-progress: tsvc-q %d info-q %d nsup-delete-q rw-hash %u proxy-hash %u %d rec-refs %lu",
 					thr_tsvc_queue_get_size(),
 					as_info_queue_get_size(),
 					as_nsup_queue_get_size(),
+					rw_request_hash_count(),
+					as_proxy_inprogress(),
 					g_config.global_record_ref_count
 					);
 
@@ -4628,44 +4622,52 @@ info_debug_ticker_fn(void *unused)
 					);
 
 			cf_info(AS_INFO, "   heartbeat-received: self %lu foreign %lu",
-					g_config.heartbeat_received_self, g_config.heartbeat_received_foreign);
+					g_config.heartbeat_received_self, g_config.heartbeat_received_foreign
+					);
 
 			cf_info(AS_INFO, "   heartbeat-stats: %s",
-					as_hb_stats(false));
+					as_hb_stats(false)
+					);
 
-			cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-via-proxy %lu tsvc-batch-sub %lu tsvc-udf-sub %lu",
-					g_config.n_demarshal_error,
-					g_config.n_tsvc_client_error,
-					g_config.n_tsvc_proxyee_error,
-					g_config.n_tsvc_batch_sub_error,
-					g_config.n_tsvc_udf_sub_error);
+			{
+				uint64_t n_demarshal = g_config.n_demarshal_error;
+				uint64_t n_tsvc_client = g_config.n_tsvc_client_error;
+				uint64_t n_tsvc_batch_sub = g_config.n_tsvc_batch_sub_error;
+				uint64_t n_tsvc_udf_sub = g_config.n_tsvc_udf_sub_error;
 
-			cf_info(AS_INFO, "   batch-index (%lu,%lu,%lu)",
-					g_config.batch_index_complete,
-					g_config.batch_index_timeout,
-					g_config.batch_index_errors);
+				if ((n_demarshal | n_tsvc_client | n_tsvc_batch_sub | n_tsvc_udf_sub) != 0) {
+					cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-batch-sub %lu tsvc-udf-sub %lu",
+							n_demarshal,
+							n_tsvc_client,
+							n_tsvc_batch_sub,
+							n_tsvc_udf_sub
+							);
+				}
+			}
 
-			if (g_config.demarshal_hist_active) {
-				histogram_dump(g_config.demarshal_hist);
+			{
+				uint64_t n_complete = g_config.batch_index_complete;
+				uint64_t n_timeout = g_config.batch_index_timeout;
+				uint64_t n_error = g_config.batch_index_errors;
+
+				if ((n_complete | n_timeout | n_error) != 0) {
+					cf_info(AS_INFO, "   batch-index (%lu,%lu,%lu)",
+							n_complete, n_timeout, n_error
+							);
+				}
+			}
+
+			if (g_config.batch_index_hist_active) {
+				histogram_dump(g_config.batch_index_hist);
 			}
 
 			if (g_config.info_hist_active) {
 				histogram_dump(g_config.info_hist);
 			}
 
-			if (g_config.tsvc_q_hist_active) {
-				histogram_dump(g_config.tsvc_q_hist);
-			}
-
-			// TODO - modernize.
-			if (g_config.microbenchmarks) {
-				if (g_config.batch_index_reads_hist) {
-					histogram_dump(g_config.batch_index_reads_hist);
-				}
-
-				if (g_config.batch_q_process_hist) {
-					histogram_dump(g_config.batch_q_process_hist);
-				}
+			if (g_config.svc_benchmarks_active) {
+				histogram_dump(g_config.svc_demarshal_hist);
+				histogram_dump(g_config.svc_queue_hist);
 			}
 
 			// namespace disk and memory size and ldt gc stats
@@ -4692,19 +4694,38 @@ info_debug_ticker_fn(void *unused)
 				as_master_prole_stats mp;
 				as_partition_get_master_prole_stats(ns, &mp);
 
+				// ?????????
 				cf_info(AS_INFO, "{%s} objects: all %lu master %lu prole %lu",
-						ns->name, ns_n_objects,
-						mp.n_master_records, mp.n_prole_records);
+						ns->name,
+						ns_n_objects,
+						mp.n_master_records,
+						mp.n_prole_records
+						);
 
-				cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu prole %lu",
-						ns->name, ns_n_sub_objects,
-						mp.n_master_sub_records, mp.n_prole_sub_records);
+				if ((ns_n_sub_objects | mp.n_master_sub_records | mp.n_prole_sub_records) != 0) {
+					cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu prole %lu",
+							ns->name,
+							ns_n_sub_objects,
+							mp.n_master_sub_records,
+							mp.n_prole_sub_records
+							);
+				}
 
 				if (ns->storage_data_in_memory) {
 					cf_info(AS_INFO, "{%s} used-drive-bytes %lu avail-pct %d",
-							ns->name, inuse_disk_bytes, available_pct);
+							ns->name,
+							inuse_disk_bytes,
+							available_pct
+							);
+
 					cf_info(AS_INFO, "{%s} used-memory-bytes: total %lu index %lu sindex %lu data %lu used-pct %.2lf",
-							ns->name, ns_total_mem, ns_index_mem, ns_sindex_mem, ns->n_bytes_memory, mem_used_pct);
+							ns->name,
+							ns_total_mem,
+							ns_index_mem,
+							ns_sindex_mem,
+							ns->n_bytes_memory,
+							mem_used_pct
+							);
 				}
 				else {
 					uint32_t n_reads_from_cache = cf_atomic32_get(ns->n_reads_from_cache);
@@ -4714,9 +4735,19 @@ info_debug_ticker_fn(void *unused)
 					ns->cache_read_pct = (float)(100 * n_reads_from_cache) / (float)(n_total_reads == 0 ? 1 : n_total_reads);
 
 					cf_info(AS_INFO, "{%s} used-drive-bytes %lu avail-pct %d cache-read-pct %.2f",
-							ns->name, inuse_disk_bytes, available_pct, ns->cache_read_pct);
+							ns->name,
+							inuse_disk_bytes,
+							available_pct,
+							ns->cache_read_pct
+							);
+
 					cf_info(AS_INFO, "{%s} used-memory-bytes: total %lu index %lu sindex %lu used-pct %.2lf",
-							ns->name, ns_total_mem, ns_index_mem, ns_sindex_mem, mem_used_pct);
+							ns->name,
+							ns_total_mem,
+							ns_index_mem,
+							ns_sindex_mem,
+							mem_used_pct
+							);
 				}
 
 				if (ns->ldt_enabled) {
@@ -4733,10 +4764,10 @@ info_debug_ticker_fn(void *unused)
 				total_ns_memory_inuse += ns_total_mem;
 				as_sindex_histogram_dumpall(ns);
 
-				int64_t initial_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_initial);
-				int64_t initial_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_initial);
-				int64_t remaining_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_remaining);
-				int64_t remaining_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_remaining);
+				int64_t initial_rx_migrations = (int64_t)ns->migrate_rx_partitions_initial;
+				int64_t initial_tx_migrations = (int64_t)ns->migrate_tx_partitions_initial;
+				int64_t remaining_rx_migrations = (int64_t)ns->migrate_rx_partitions_remaining;
+				int64_t remaining_tx_migrations = (int64_t)ns->migrate_tx_partitions_remaining;
 				int64_t initial_migrations = initial_rx_migrations + initial_tx_migrations;
 				int64_t remaining_migrations = remaining_rx_migrations + remaining_tx_migrations;
 
@@ -4745,10 +4776,8 @@ info_debug_ticker_fn(void *unused)
 
 					cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld) active (%ld,%ld) complete-pct %0.2f",
 							ns->name,
-							remaining_tx_migrations,
-							remaining_rx_migrations,
-							cf_atomic_int_get(ns->migrate_tx_partitions_active),
-							cf_atomic_int_get(ns->migrate_rx_partitions_active),
+							remaining_tx_migrations, remaining_rx_migrations,
+							ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active,
 							migrations_pct_complete
 							);
 				}
@@ -4756,54 +4785,132 @@ info_debug_ticker_fn(void *unused)
 					cf_info(AS_INFO, "{%s} migrations: complete", ns->name);
 				}
 
-				cf_info(AS_INFO, "{%s} tsvc-fail: client (%lu,%lu) batch-sub (%lu,%lu) udf-sub (%lu,%lu)",
-						ns->name,
-						ns->n_tsvc_client_timeout, ns->n_tsvc_client_error,
-						ns->n_tsvc_batch_sub_timeout, ns->n_tsvc_batch_sub_error,
-						ns->n_tsvc_udf_sub_timeout, ns->n_tsvc_udf_sub_error
-						);
+				{
+					uint64_t n_client_timeout = ns->n_tsvc_client_timeout;
+					uint64_t n_client_error = ns->n_tsvc_client_error;
+					uint64_t n_batch_sub_timeout = ns->n_tsvc_batch_sub_timeout;
+					uint64_t n_batch_sub_error = ns->n_tsvc_batch_sub_error;
+					uint64_t n_udf_sub_timeout = ns->n_tsvc_udf_sub_timeout;
+					uint64_t n_udf_sub_error = ns->n_tsvc_udf_sub_error;
 
-				cf_info(AS_INFO, "{%s} via-proxy: client %lu batch-sub %lu",
-						ns->name,
-						ns->n_proxyee_client_complete,
-						ns->n_proxyee_batch_sub_complete
-						);
+					if ((n_client_timeout | n_client_error | n_batch_sub_timeout | n_batch_sub_error | n_udf_sub_timeout | n_udf_sub_error) != 0) {
+						cf_info(AS_INFO, "{%s} tsvc-fail: client (%lu,%lu) batch-sub (%lu,%lu) udf-sub (%lu,%lu)",
+								ns->name,
+								n_client_timeout, n_client_error,
+								n_batch_sub_timeout, n_batch_sub_error,
+								n_udf_sub_timeout, n_udf_sub_error
+								);
+					}
+				}
 
-				cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu) udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
-						ns->name,
-						ns->n_client_proxy_complete, ns->n_client_proxy_timeout, ns->n_client_proxy_error,
-						ns->n_client_read_success, ns->n_client_read_timeout, ns->n_client_read_error, ns->n_client_read_not_found,
-						ns->n_client_write_success, ns->n_client_write_timeout, ns->n_client_write_error,
-						ns->n_client_delete_success, ns->n_client_delete_timeout, ns->n_client_delete_error,
-						ns->n_client_udf_complete, ns->n_client_udf_timeout, ns->n_client_udf_error,
-						ns->n_client_lua_read_success, ns->n_client_lua_write_success, ns->n_client_lua_delete_success, ns->n_client_lua_error
-						);
+				{
+					uint64_t n_proxy_complete = ns->n_client_proxy_complete;
+					uint64_t n_proxy_timeout = ns->n_client_proxy_timeout;
+					uint64_t n_proxy_error = ns->n_client_proxy_error;
+					uint64_t n_read_success = ns->n_client_read_success;
+					uint64_t n_read_timeout = ns->n_client_read_timeout;
+					uint64_t n_read_error = ns->n_client_read_error;
+					uint64_t n_read_not_found = ns->n_client_read_not_found;
+					uint64_t n_write_success = ns->n_client_write_success;
+					uint64_t n_write_timeout = ns->n_client_write_timeout;
+					uint64_t n_write_error = ns->n_client_write_error;
+					uint64_t n_delete_success = ns->n_client_delete_success;
+					uint64_t n_delete_timeout = ns->n_client_delete_timeout;
+					uint64_t n_delete_error = ns->n_client_delete_error;
+					uint64_t n_udf_complete = ns->n_client_udf_complete;
+					uint64_t n_udf_timeout = ns->n_client_udf_timeout;
+					uint64_t n_udf_error = ns->n_client_udf_error;
+					uint64_t n_lua_read_success = ns->n_client_lua_read_success;
+					uint64_t n_lua_write_success = ns->n_client_lua_write_success;
+					uint64_t n_lua_delete_success = ns->n_client_lua_delete_success;
+					uint64_t n_lua_error = ns->n_client_lua_error;
 
-				cf_info(AS_INFO, "{%s} batch-sub: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu)",
-						ns->name,
-						ns->n_batch_sub_proxy_complete, ns->n_batch_sub_proxy_timeout, ns->n_batch_sub_proxy_error,
-						ns->n_batch_sub_read_success, ns->n_batch_sub_read_timeout, ns->n_batch_sub_read_error, ns->n_batch_sub_read_not_found
-						);
+					if ((n_proxy_complete | n_proxy_timeout | n_proxy_error | n_read_success | n_read_timeout | n_read_error | n_read_not_found |
+							n_write_success | n_write_timeout | n_write_error | n_delete_success | n_delete_timeout | n_delete_error |
+							n_udf_complete | n_udf_timeout | n_udf_error | n_lua_read_success | n_lua_write_success | n_lua_delete_success | n_lua_error) != 0) {
+						cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu) udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
+								ns->name,
+								n_proxy_complete, n_proxy_timeout, n_proxy_error,
+								n_read_success, n_read_timeout, n_read_error, n_read_not_found,
+								n_write_success, n_write_timeout, n_write_error,
+								n_delete_success, n_delete_timeout, n_delete_error,
+								n_udf_complete, n_udf_timeout, n_udf_error,
+								n_lua_read_success, n_lua_write_success, n_lua_delete_success, n_lua_error
+								);
+					}
+				}
 
-				cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
-						ns->name,
-						ns->n_basic_scan_success, ns->n_basic_scan_failure,
-						ns->n_aggr_scan_success, ns->n_aggr_scan_failure,
-						ns->n_udf_bg_scan_success, ns->n_udf_bg_scan_failure
-						);
+				{
+					uint64_t n_proxy_complete = ns->n_batch_sub_proxy_complete;
+					uint64_t n_proxy_timeout = ns->n_batch_sub_proxy_timeout;
+					uint64_t n_proxy_error = ns->n_batch_sub_proxy_error;
+					uint64_t n_read_success = ns->n_batch_sub_read_success;
+					uint64_t n_read_timeout = ns->n_batch_sub_read_timeout;
+					uint64_t n_read_error = ns->n_batch_sub_read_error;
+					uint64_t n_read_not_found = ns->n_batch_sub_read_not_found;
 
-				cf_info(AS_INFO, "{%s} query: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
-						ns->name,
-						ns->n_lookup_success, ns->n_lookup_errs + ns->n_lookup_abort,
-						ns->n_agg_success, ns->n_agg_errs + ns->n_agg_abort,
-						ns->n_udf_bg_query_success, ns->n_udf_bg_query_failure
-						);
+					if ((n_proxy_complete | n_proxy_timeout | n_proxy_error | n_read_success | n_read_timeout | n_read_error | n_read_not_found) != 0) {
+						cf_info(AS_INFO, "{%s} batch-sub: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu)",
+								ns->name,
+								n_proxy_complete, n_proxy_timeout, n_proxy_error,
+								n_read_success, n_read_timeout, n_read_error, n_read_not_found
+								);
+					}
+				}
 
-				cf_info(AS_INFO, "{%s} udf-sub: udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
-						ns->name,
-						ns->n_udf_sub_udf_complete, ns->n_udf_sub_udf_timeout, ns->n_udf_sub_udf_error,
-						ns->n_udf_sub_lua_read_success, ns->n_udf_sub_lua_write_success, ns->n_udf_sub_lua_delete_success, ns->n_udf_sub_lua_error
-						);
+				{
+					uint64_t n_basic_success = ns->n_basic_scan_success;
+					uint64_t n_basic_failure = ns->n_basic_scan_failure;
+					uint64_t n_aggr_success = ns->n_aggr_scan_success;
+					uint64_t n_aggr_failure = ns->n_aggr_scan_failure;
+					uint64_t n_udf_bg_success = ns->n_udf_bg_scan_success;
+					uint64_t n_udf_bg_failure = ns->n_udf_bg_scan_failure;
+
+					if ((n_basic_success | n_basic_failure | n_aggr_success | n_aggr_failure | n_udf_bg_success | n_udf_bg_failure) != 0) {
+						cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
+								ns->name,
+								n_basic_success, n_basic_failure,
+								n_aggr_success, n_aggr_failure,
+								n_udf_bg_success, n_udf_bg_failure
+								);
+						}
+				}
+
+				{
+					uint64_t n_basic_success = ns->n_lookup_success;
+					uint64_t n_basic_failure = ns->n_lookup_errs + ns->n_lookup_abort;
+					uint64_t n_aggr_success = ns->n_agg_success;
+					uint64_t n_aggr_failure = ns->n_agg_errs + ns->n_agg_abort;
+					uint64_t n_udf_bg_success = ns->n_udf_bg_query_success;
+					uint64_t n_udf_bg_failure = ns->n_udf_bg_query_failure;
+
+					if ((n_basic_success | n_basic_failure | n_aggr_success | n_aggr_failure | n_udf_bg_success | n_udf_bg_failure) != 0) {
+						cf_info(AS_INFO, "{%s} query: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
+								ns->name,
+								n_basic_success, n_basic_failure,
+								n_aggr_success, n_aggr_failure,
+								n_udf_bg_success, n_udf_bg_failure
+								);
+						}
+				}
+
+				{
+					uint64_t n_udf_complete = ns->n_udf_sub_udf_complete;
+					uint64_t n_udf_timeout = ns->n_udf_sub_udf_timeout;
+					uint64_t n_udf_error = ns->n_udf_sub_udf_error;
+					uint64_t n_lua_read_success = ns->n_udf_sub_lua_read_success;
+					uint64_t n_lua_write_success = ns->n_udf_sub_lua_write_success;
+					uint64_t n_lua_delete_success = ns->n_udf_sub_lua_delete_success;
+					uint64_t n_lua_error = ns->n_udf_sub_lua_error;
+
+					if ((n_udf_complete | n_udf_timeout | n_udf_error | n_lua_read_success | n_lua_write_success | n_lua_delete_success | n_lua_error) != 0) {
+						cf_info(AS_INFO, "{%s} udf-sub: udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
+								ns->name,
+								n_udf_complete, n_udf_timeout, n_udf_error,
+								n_lua_read_success, n_lua_write_success, n_lua_delete_success, n_lua_error
+								);
+					}
+				}
 
 				if (ns->read_hist_active) {
 					cf_hist_track_dump(ns->read_hist);
@@ -5735,11 +5842,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("", "tsvc-udf-sub-timeout", ns->n_tsvc_udf_sub_timeout, db);
 	info_append_uint64("", "tsvc-udf-sub-error", ns->n_tsvc_udf_sub_error, db);
 
-	// Proxyee stats - collected from tsvc-stage and later stages.
-
-	info_append_uint64("", "proxyee-client-complete", ns->n_proxyee_client_complete, db);
-	info_append_uint64("", "proxyee-batch-sub-complete", ns->n_proxyee_batch_sub_complete, db);
-
 	// From-client transaction stats.
 
 	info_append_uint64("", "client-proxy-complete", ns->n_client_proxy_complete, db);
@@ -6226,9 +6328,7 @@ clear_ldt_histograms()
 void
 clear_microbenchmark_histograms()
 {
-	histogram_clear(g_config.demarshal_hist);
-	histogram_clear(g_config.batch_index_reads_hist);
-	histogram_clear(g_config.batch_q_process_hist);
+	// TODO - new dynamically configured histograms!
 }
 
 // SINDEX wire protocol examples:

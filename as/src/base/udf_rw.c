@@ -123,7 +123,6 @@ send_udf_response_bin(as_transaction* tr, as_bin** response_bins, uint16_t n_bin
 					NULL);
 			tr->from.proxy_node = 0;
 		}
-		proxyee_update_stats(tr->rsv.ns, tr->from_flags);
 		break;
 	case FROM_BATCH:
 	case FROM_IUDF:

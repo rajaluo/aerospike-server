@@ -842,8 +842,6 @@ thr_demarshal(void *arg)
 					cf_rc_reserve(fd_h);
 					has_extra_ref = true;
 
-					G_HIST_INSERT_DATA_POINT(demarshal_hist, now_ns);
-
 					// Info protocol requests.
 					if (proto_p->type == PROTO_TYPE_INFO) {
 						as_info_transaction it = { fd_h, proto_p, now_ns };
@@ -922,6 +920,11 @@ thr_demarshal(void *arg)
 						as_security_transact(&tr);
 						cf_atomic_int_incr(&g_config.proto_transactions);
 						goto NextEvent;
+					}
+
+					// For now only AS_MSG's contribute to this benchmark.
+					if (g_config.svc_benchmarks_active) {
+						tr.benchmark_time = histogram_insert_data_point(g_config.svc_demarshal_hist, now_ns);
 					}
 
 					// Fast path for batch requests.

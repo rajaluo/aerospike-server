@@ -356,7 +356,6 @@ typedef struct as_config_s {
 
 	cf_atomic64			n_demarshal_error;
 	cf_atomic64			n_tsvc_client_error;
-	cf_atomic64			n_tsvc_proxyee_error;
 	cf_atomic64			n_tsvc_batch_sub_error;
 	cf_atomic64			n_tsvc_udf_sub_error;
 
@@ -378,18 +377,15 @@ typedef struct as_config_s {
 	uint32_t			hist_track_slice; // period in seconds at which to cache histogram data
 	char *				hist_track_thresholds; // comma-separated bucket (ms) values to track
 
-	histogram *			demarshal_hist;
-	bool				demarshal_hist_active;
+	histogram *			batch_index_hist;
+	bool				batch_index_hist_active;
 
 	histogram *			info_hist;
 	bool				info_hist_active;
 
-	histogram *			tsvc_q_hist;
-	bool				tsvc_q_hist_active;
-
-	// TODO - modernize.
-	histogram *			batch_index_reads_hist; // New batch index protocol latency histogram.
-	histogram *			batch_q_process_hist; // Old batch direct protocol latency histogram.
+	histogram *			svc_demarshal_hist;
+	histogram *			svc_queue_hist;
+	bool				svc_benchmarks_active;
 
 	// LDT related histogram
 	histogram *			ldt_multiop_prole_hist;   // histogram that tracks LDT multi op replication performance (in fabric)

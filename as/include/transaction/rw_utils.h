@@ -87,17 +87,3 @@ is_valid_ttl(as_namespace* ns, uint32_t ttl)
 	// Note - TTL 0 means "use namespace default", -1 means "never expire".
 	return ttl <= ns->max_ttl || ttl == 0xFFFFffff;
 }
-
-
-// For now we're not distinguishing across read, write, etc. Nor are we
-// distinguishing tsvc-stage failures from later stages.
-static inline void
-proxyee_update_stats(as_namespace* ns, uint8_t from_flags)
-{
-	if ((from_flags & FROM_FLAG_BATCH_SUB) != 0) {
-		cf_atomic64_incr(&ns->n_proxyee_batch_sub_complete);
-	}
-	else {
-		cf_atomic64_incr(&ns->n_proxyee_client_complete);
-	}
-}

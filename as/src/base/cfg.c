@@ -127,7 +127,6 @@ cfg_set_defaults()
 	c->hist_track_slice = 10;
 	c->n_info_threads = 16;
 	c->ldt_benchmarks = false;
-	c->microbenchmarks = false;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
 	c->migrate_rx_lifetime_ms = AS_MIGRATE_DEFAULT_RX_LIFETIME_MS; // for debouncing re-transmitted migrate start messages
 	c->n_migrate_threads = 1;
@@ -260,9 +259,8 @@ typedef enum {
 	CASE_SERVICE_CLIENT_FD_MAX, // renamed
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
-	CASE_SERVICE_ACTIVATE_HIST_DEMARSHAL,
+	CASE_SERVICE_ACTIVATE_BENCHMARKS_SVC,
 	CASE_SERVICE_ACTIVATE_HIST_INFO,
-	CASE_SERVICE_ACTIVATE_HIST_TSVC_Q,
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
@@ -278,7 +276,6 @@ typedef enum {
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_LDT_BENCHMARKS,
 	CASE_SERVICE_LOG_LOCAL_TIME,
-	CASE_SERVICE_MICROBENCHMARKS,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
 	CASE_SERVICE_MIGRATE_RX_LIFETIME_MS,
 	CASE_SERVICE_MIGRATE_THREADS,
@@ -676,9 +673,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
-		{ "activate-hist-demarshal",		CASE_SERVICE_ACTIVATE_HIST_DEMARSHAL },
+		{ "activate-benchmarks-svc",		CASE_SERVICE_ACTIVATE_BENCHMARKS_SVC },
 		{ "activate-hist-info",				CASE_SERVICE_ACTIVATE_HIST_INFO },
-		{ "activate-hist-tsvc-q",			CASE_SERVICE_ACTIVATE_HIST_TSVC_Q },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
@@ -694,7 +690,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
-		{ "microbenchmarks",				CASE_SERVICE_MICROBENCHMARKS },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
 		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
 		{ "migrate-read-sleep",				CASE_SERVICE_MIGRATE_READ_SLEEP },
@@ -1943,14 +1938,11 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_PROTO_FD_MAX:
 				c->n_proto_fd_max = cfg_int_no_checks(&line);
 				break;
-			case CASE_SERVICE_ACTIVATE_HIST_DEMARSHAL:
-				c->demarshal_hist_active = cfg_bool(&line);
+			case CASE_SERVICE_ACTIVATE_BENCHMARKS_SVC:
+				c->svc_benchmarks_active = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_ACTIVATE_HIST_INFO:
 				c->info_hist_active = cfg_bool(&line);
-				break;
-			case CASE_SERVICE_ACTIVATE_HIST_TSVC_Q:
-				c->tsvc_q_hist_active = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				c->allow_inline_transactions = cfg_bool(&line);
@@ -1997,9 +1989,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_LOG_LOCAL_TIME:
 				cf_fault_use_local_time(cfg_bool(&line));
-				break;
-			case CASE_SERVICE_MICROBENCHMARKS:
-				c->microbenchmarks = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING:
 				c->migrate_max_num_incoming = cfg_int(&line, 0, INT_MAX);
@@ -3666,12 +3655,10 @@ cfg_create_all_histograms()
 {
 	as_config* c = &g_config;
 
-	create_and_check_hist(&c->demarshal_hist, "demarshal_hist", HIST_MILLISECONDS);
+	create_and_check_hist(&c->batch_index_hist, "batch-index", HIST_MILLISECONDS);
 	create_and_check_hist(&c->info_hist, "info", HIST_MILLISECONDS);
-	create_and_check_hist(&c->tsvc_q_hist, "tsvc-q", HIST_MILLISECONDS);
-
-	create_and_check_hist(&c->batch_index_reads_hist, "batch_index_reads", HIST_MILLISECONDS);
-	create_and_check_hist(&c->batch_q_process_hist, "batch_q_process", HIST_MILLISECONDS);
+	create_and_check_hist(&c->svc_demarshal_hist, "svc-demarshal", HIST_MILLISECONDS);
+	create_and_check_hist(&c->svc_queue_hist, "svc-queue", HIST_MILLISECONDS);
 
 	create_and_check_hist(&c->ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
 	create_and_check_hist(&c->ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);

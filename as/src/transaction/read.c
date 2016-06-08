@@ -250,7 +250,6 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 					response_bins, n_bins, tr->rsv.ns, as_transaction_trid(tr),
 					set_name);
 		}
-		proxyee_update_stats(tr->rsv.ns, tr->from_flags);
 		break;
 	case FROM_BATCH:
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, read_local);
@@ -287,7 +286,6 @@ read_timeout_cb(rw_request* rw)
 		client_read_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
-		proxyee_update_stats(rw->rsv.ns, rw->from_flags);
 		break;
 	case FROM_BATCH:
 		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,

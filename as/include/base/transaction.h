@@ -54,6 +54,12 @@
 	} \
 }
 
+#define G_HIST_ACTIVATE_INSERT_DATA_POINT(name, start_time) \
+{ \
+	g_config.name##_active = true; \
+	histogram_insert_data_point(g_config.name, start_time); \
+}
+
 #define HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(trw, name) \
 { \
 	trw->rsv.ns->name##_active = true; \

@@ -317,7 +317,6 @@ send_delete_response(as_transaction* tr)
 		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
 				tr->result_code, tr->generation, tr->void_time, NULL, NULL, 0,
 				NULL, as_transaction_trid(tr), NULL);
-		proxyee_update_stats(tr->rsv.ns, tr->from_flags);
 		break;
 	case FROM_NSUP:
 		break;
@@ -346,7 +345,6 @@ delete_timeout_cb(rw_request* rw)
 		client_delete_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
-		proxyee_update_stats(rw->rsv.ns, rw->from_flags);
 		break;
 	case FROM_NSUP:
 		break;

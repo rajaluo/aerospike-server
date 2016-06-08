@@ -416,7 +416,6 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 					tr->result_code, tr->generation, tr->void_time, NULL, NULL,
 					0, NULL, as_transaction_trid(tr), NULL);
 		}
-		proxyee_update_stats(tr->rsv.ns, tr->from_flags);
 		break;
 	case FROM_BATCH:
 	case FROM_IUDF:
@@ -447,7 +446,6 @@ write_timeout_cb(rw_request* rw)
 		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
-		proxyee_update_stats(rw->rsv.ns, rw->from_flags);
 		break;
 	case FROM_BATCH:
 	case FROM_IUDF:

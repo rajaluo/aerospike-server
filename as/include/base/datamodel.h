@@ -1104,11 +1104,6 @@ struct as_namespace_s {
 	cf_atomic64		n_tsvc_udf_sub_timeout;
 	cf_atomic64		n_tsvc_udf_sub_error;
 
-	// Proxyee stats - collected from tsvc-stage and later stages.
-
-	cf_atomic64		n_proxyee_client_complete;
-	cf_atomic64		n_proxyee_batch_sub_complete;
-
 	// From-client transaction stats.
 
 	cf_atomic64		n_client_proxy_complete;
