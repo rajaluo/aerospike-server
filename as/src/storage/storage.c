@@ -621,14 +621,10 @@ static const as_storage_ticker_stats_fn as_storage_ticker_stats_table[AS_STORAGE
 };
 
 int
-as_storage_ticker_stats()
+as_storage_ticker_stats(as_namespace *ns)
 {
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-
-		if (as_storage_ticker_stats_table[ns->storage_type]) {
-			as_storage_ticker_stats_table[ns->storage_type](ns);
-		}
+	if (as_storage_ticker_stats_table[ns->storage_type]) {
+		return as_storage_ticker_stats_table[ns->storage_type](ns);
 	}
 
 	return 0;
@@ -647,14 +643,10 @@ static const as_storage_histogram_clear_fn as_storage_histogram_clear_table[AS_S
 };
 
 int
-as_storage_histogram_clear_all()
+as_storage_histogram_clear_all(as_namespace *ns)
 {
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-
-		if (as_storage_histogram_clear_table[ns->storage_type]) {
-			as_storage_histogram_clear_table[ns->storage_type](ns);
-		}
+	if (as_storage_histogram_clear_table[ns->storage_type]) {
+		return as_storage_histogram_clear_table[ns->storage_type](ns);
 	}
 
 	return 0;

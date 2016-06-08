@@ -737,7 +737,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 	int fd = ssd_fd_get(ssd);
 	uint64_t file_offset = WBLOCK_ID_TO_BYTES(ssd, wblock_id);
 
-	uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_active ? cf_getns() : 0;
 
 	if (lseek(fd, (off_t)file_offset, SEEK_SET) != (off_t)file_offset) {
 		cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
@@ -1189,7 +1189,7 @@ as_storage_record_read_ssd(as_storage_rd *rd)
 
 		int fd = ssd_fd_get(ssd);
 
-		uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+		uint64_t start_ns = rd->ns->storage_benchmarks_active ? cf_getns() : 0;
 
 		if (lseek(fd, (off_t)read_offset, SEEK_SET) != (off_t)read_offset) {
 			cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
@@ -1314,7 +1314,7 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	int fd = ssd_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id);
 
-	uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_active ? cf_getns() : 0;
 
 	if (lseek(fd, write_offset, SEEK_SET) != write_offset) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: offset %ld: errno %d (%s)",
@@ -1342,7 +1342,7 @@ ssd_shadow_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	int fd = ssd_shadow_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id);
 
-	uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_active ? cf_getns() : 0;
 
 	if (lseek(fd, write_offset, SEEK_SET) != write_offset) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: offset %ld: errno %d (%s)",
@@ -2216,7 +2216,7 @@ ssd_fsync(drv_ssd *ssd)
 {
 	int fd = ssd_fd_get(ssd);
 
-	uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_active ? cf_getns() : 0;
 
 	fsync(fd);
 
@@ -3910,33 +3910,33 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 
 		char histname[HISTOGRAM_NAME_SIZE];
 
-		snprintf(histname, sizeof(histname), "SSD_READ_%d %s", i, ssd->name);
+		snprintf(histname, sizeof(histname), "{%s} read-%d %s", ns->name, i, ssd->name);
 
 		if (! (ssd->hist_read = histogram_create(histname, HIST_MILLISECONDS))) {
 			cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
 		}
 
-		snprintf(histname, sizeof(histname), "SSD_LARGE_BLOCK_READ_%d %s", i, ssd->name);
+		snprintf(histname, sizeof(histname), "{%s} large-block-read-%d %s", ns->name, i, ssd->name);
 
 		if (! (ssd->hist_large_block_read = histogram_create(histname, HIST_MILLISECONDS))) {
 			cf_crash(AS_DRV_SSD,"cannot create histogram %s", histname);
 		}
 
-		snprintf(histname, sizeof(histname), "SSD_WRITE_%d %s", i, ssd->name);
+		snprintf(histname, sizeof(histname), "{%s} write-%d %s", ns->name, i, ssd->name);
 
 		if (! (ssd->hist_write = histogram_create(histname, HIST_MILLISECONDS))) {
 			cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
 		}
 
 		if (ssd->shadow_name) {
-			snprintf(histname, sizeof(histname), "SSD_SHADOW_WRITE_%d %s", i, ssd->name);
+			snprintf(histname, sizeof(histname), "{%s} shadow-write-%d %s", ns->name, i, ssd->name);
 
 			if (! (ssd->hist_shadow_write = histogram_create(histname, HIST_MILLISECONDS))) {
 				cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
 			}
 		}
 
-		snprintf(histname, sizeof(histname), "SSD_FSYNC_%d %s", i, ssd->name);
+		snprintf(histname, sizeof(histname), "{%s} fsync-%d %s", ns->name, i, ssd->name);
 
 		if (! (ssd->hist_fsync = histogram_create(histname, HIST_MILLISECONDS))) {
 			cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);

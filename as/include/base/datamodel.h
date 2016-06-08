@@ -1328,6 +1328,8 @@ struct as_namespace_s {
 	histogram*		udf_sub_response_hist;
 	bool			udf_sub_benchmarks_active;
 
+	bool			storage_benchmarks_active; // histograms are per-drive
+
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)
 	linear_hist 		*obj_size_hist;

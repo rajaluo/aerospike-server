@@ -1955,8 +1955,6 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_int(db, g_config.ticker_interval);
 	cf_dyn_buf_append_string(db, ";log-local-time=");
 	cf_dyn_buf_append_string(db, cf_fault_is_using_local_time() ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";storage-benchmarks=");
-	cf_dyn_buf_append_string(db, g_config.storage_benchmarks ? "true" : "false");
 
 	cf_dyn_buf_append_string(db, ";activate-hist-info=");
 	cf_dyn_buf_append_string(db, g_config.info_hist_active ? "true" : "false");
@@ -2197,6 +2195,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, ";activate-hist-proxy=");
 	cf_dyn_buf_append_string(db, ns->proxy_hist_active ? "true" : "false");
+
 	cf_dyn_buf_append_string(db, ";activate-benchmarks-read=");
 	cf_dyn_buf_append_string(db, ns->read_benchmarks_active ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";activate-benchmarks-write=");
@@ -2207,6 +2206,9 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, ns->batch_sub_benchmarks_active ? "true" : "false");
 	cf_dyn_buf_append_string(db, ";activate-benchmarks-udf-sub=");
 	cf_dyn_buf_append_string(db, ns->udf_sub_benchmarks_active ? "true" : "false");
+
+	cf_dyn_buf_append_string(db, ";activate-benchmarks-storage=");
+	cf_dyn_buf_append_string(db, ns->storage_benchmarks_active ? "true" : "false");
 
 	// if storage, lots of information about the storage
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
@@ -2533,19 +2535,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of ticker-interval from %d to %d ", g_config.ticker_interval, val);
 			g_config.ticker_interval = val;
-		}
-		else if (0 == as_info_parameter_get(params, "storage-benchmarks", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				as_storage_histogram_clear_all();
-				cf_info(AS_INFO, "Changing value of storage-benchmarks from %s to %s", bool_val[g_config.storage_benchmarks], context);
-				g_config.storage_benchmarks = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of storage-benchmarks from %s to %s", bool_val[g_config.storage_benchmarks], context);
-				g_config.storage_benchmarks = false;
-			}
-			else
-				goto Error;
 		}
 		else if (0 == as_info_parameter_get(params, "ldt-benchmarks", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -4978,14 +4967,14 @@ info_debug_ticker_fn(void *unused)
 					histogram_dump(ns->udf_sub_repl_write_hist);
 					histogram_dump(ns->udf_sub_response_hist);
 				}
+
+				if (ns->storage_benchmarks_active) {
+					as_storage_ticker_stats(ns);
+				}
 			}
 
 			as_query_histogram_dumpall();
 			as_sindex_gc_histogram_dumpall();
-
-			if (g_config.storage_benchmarks) {
-				as_storage_ticker_stats();
-			}
 
 			if (g_config.ldt_benchmarks) {
 				histogram_dump(g_config.ldt_multiop_prole_hist);

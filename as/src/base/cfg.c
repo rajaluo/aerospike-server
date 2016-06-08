@@ -144,7 +144,6 @@ cfg_set_defaults()
 	c->scan_max_done = 100;
 	c->scan_max_udf_transactions = 32;
 	c->scan_threads = 4;
-	c->storage_benchmarks = false;
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_pending_limit = 20;
@@ -311,7 +310,6 @@ typedef enum {
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_DATA_MAX_MEMORY,
 	CASE_SERVICE_SNUB_NODES,
-	CASE_SERVICE_STORAGE_BENCHMARKS,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
@@ -474,6 +472,7 @@ typedef enum {
 	// Normally hidden:
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB,
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ,
+	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_STORAGE,
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF,
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB,
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE,
@@ -732,7 +731,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-data-max-memory",			CASE_SERVICE_SINDEX_DATA_MAX_MEMORY },
 		{ "snub-nodes",						CASE_SERVICE_SNUB_NODES },
-		{ "storage-benchmarks",				CASE_SERVICE_STORAGE_BENCHMARKS },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
@@ -890,6 +888,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "allow-xdr-writes",				CASE_NAMESPACE_ALLOW_XDR_WRITES },
 		{ "activate-benchmarks-batch-sub",	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB },
 		{ "activate-benchmarks-read",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ },
+		{ "activate-benchmarks-storage",	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_STORAGE },
 		{ "activate-benchmarks-udf",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF },
 		{ "activate-benchmarks-udf-sub",	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB },
 		{ "activate-benchmarks-write",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE },
@@ -2137,9 +2136,6 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_SNUB_NODES:
 				c->snub_nodes = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_STORAGE_BENCHMARKS:
-				c->storage_benchmarks = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
 				break;
@@ -2600,6 +2596,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ:
 				ns->read_benchmarks_active = true;
+				break;
+			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_STORAGE:
+				ns->storage_benchmarks_active = true;
 				break;
 			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF:
 				ns->udf_benchmarks_active = true;

@@ -193,9 +193,6 @@ typedef struct as_config_s {
 
 	/* global configuration for how often to print 'ticker' info to the log - 0 is no ticker */
 	uint32_t			ticker_interval;
-
-	// whether to collect storage benchmarks
-	bool				storage_benchmarks;
 	
 	// whether to collect ldt benchmarks
 	bool				ldt_benchmarks;
