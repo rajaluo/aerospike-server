@@ -1032,7 +1032,6 @@ struct as_namespace_s {
 	char *storage_files[AS_STORAGE_MAX_FILES];
 	char *storage_scheduler_mode; // relevant for devices only, not files
 	off_t		storage_filesize;
-	uint32_t	storage_blocksize;
 	uint32_t	storage_write_threads;
 	uint64_t	storage_max_write_cache;
 	uint32_t	storage_read_block_size;
