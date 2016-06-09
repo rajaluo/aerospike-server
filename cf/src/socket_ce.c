@@ -85,25 +85,30 @@ cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size)
 int32_t
 cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size)
 {
-	if (size < 4) {
+	if (size < 5) {
 		cf_warning(CF_SOCKET, "Input buffer underflow");
 		return -1;
 	}
 
-	memcpy(&addr->s_addr, binary, 4);
-	return 4;
+	if (binary[0] != AF_INET) {
+		cf_crash(CF_SOCKET, "Invalid address family: %d", binary[0]);
+	}
+
+	memcpy(&addr->s_addr, binary + 1, 4);
+	return 5;
 }
 
 int32_t
 cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
 {
-	if (size < 4) {
+	if (size < 5) {
 		cf_warning(CF_SOCKET, "Output buffer overflow");
 		return -1;
 	}
 
-	memcpy(binary, &addr->s_addr, 4);
-	return 4;
+	binary[0] = AF_INET;
+	memcpy(binary + 1, &addr->s_addr, 4);
+	return 5;
 }
 
 int32_t
@@ -146,4 +151,27 @@ cf_sock_addr_from_binary_legacy(const uint64_t *binary, cf_sock_addr *addr)
 void
 cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, uint64_t *binary)
 {
+}
+
+void
+cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr)
+{
+	struct sockaddr_in *sai = (struct sockaddr_in *)native;
+
+	if (sai->sin_family != AF_INET) {
+		cf_crash(CF_SOCKET, "Invalid address family: %d", sai->sin_family);
+	}
+
+	addr->addr = sai->sin_addr;
+	addr->port = ntohs(sai->sin_port);
+}
+
+void
+cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native)
+{
+	struct sockaddr_in *sai = (struct sockaddr_in *)native;
+	memset(sai, 0, sizeof (struct sockaddr_in));
+	sai->sin_family = AF_INET;
+	sai->sin_addr = addr->addr;
+	sai->sin_port = htons(addr->port);
 }

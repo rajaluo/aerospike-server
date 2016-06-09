@@ -32,6 +32,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <sys/socket.h>
+
 int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size);
@@ -49,6 +51,9 @@ int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t
 
 void cf_sock_addr_from_binary_legacy(const uint64_t *binary, cf_sock_addr *addr);
 void cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, uint64_t *binary);
+
+void cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr);
+void cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native);
 
 void cf_socket_disable_blocking(int32_t fd);
 void cf_socket_disable_nagle(int32_t fd);
