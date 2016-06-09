@@ -27,8 +27,4 @@
 
 typedef struct in_addr cf_ip_addr;
 typedef in_port_t cf_ip_port;
-
-typedef struct {
-	cf_ip_addr addr;
-	cf_ip_port port;
-} cf_sock_addr;
+typedef struct sockaddr_in cf_sock_addr;
