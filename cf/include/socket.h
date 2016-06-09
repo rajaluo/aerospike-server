@@ -37,10 +37,10 @@ int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size);
 int32_t cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size);
 
-int32_t cf_ip_port_from_string(const char *string, in_port_t *port);
-int32_t cf_ip_port_to_string(in_port_t port, char *string, size_t size);
-int32_t cf_ip_port_from_binary(const uint8_t *binary, in_port_t *port, size_t size);
-int32_t cf_ip_port_to_binary(in_port_t port, uint8_t *binary, size_t size);
+int32_t cf_ip_port_from_string(const char *string, cf_ip_port *port);
+int32_t cf_ip_port_to_string(cf_ip_port port, char *string, size_t size);
+int32_t cf_ip_port_from_binary(const uint8_t *binary, cf_ip_port *port, size_t size);
+int32_t cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size);
 
 int32_t cf_sock_addr_from_string(const char *string, cf_sock_addr *addr);
 int32_t cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size);

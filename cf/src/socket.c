@@ -30,7 +30,7 @@
 #include <fault.h>
 
 int32_t
-cf_ip_port_from_string(const char *string, in_port_t *port)
+cf_ip_port_from_string(const char *string, cf_ip_port *port)
 {
 	char *end;
 	uint64_t tmp = strtoul(string, &end, 10);
@@ -40,12 +40,12 @@ cf_ip_port_from_string(const char *string, in_port_t *port)
 		return -1;
 	}
 
-	*port = (in_port_t)tmp;
+	*port = (cf_ip_port)tmp;
 	return 0;
 }
 
 int32_t
-cf_ip_port_to_string(in_port_t port, char *string, size_t size)
+cf_ip_port_to_string(cf_ip_port port, char *string, size_t size)
 {
 	int32_t count = snprintf(string, size, "%hu", port);
 
@@ -57,7 +57,7 @@ cf_ip_port_to_string(in_port_t port, char *string, size_t size)
 	return count;
 }
 
-int32_t cf_ip_port_from_binary(const uint8_t *binary, in_port_t *port, size_t size)
+int32_t cf_ip_port_from_binary(const uint8_t *binary, cf_ip_port *port, size_t size)
 {
 	if (size < 2) {
 		cf_warning(CF_SOCKET, "Input buffer underflow");
@@ -68,7 +68,7 @@ int32_t cf_ip_port_from_binary(const uint8_t *binary, in_port_t *port, size_t si
 	return 2;
 }
 
-int32_t cf_ip_port_to_binary(in_port_t port, uint8_t *binary, size_t size)
+int32_t cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size)
 {
 	if (size < 2) {
 		cf_warning(CF_SOCKET, "Output buffer overflow");
