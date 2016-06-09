@@ -94,14 +94,12 @@
 #define STR_BINTYPE         "bintype"
 
 extern int as_nsup_queue_get_size();
-extern bool g_shutdown_started;
 
 // Acceptable timediffs in XDR lastship times.
 // (Print warning only if time went back by at least 5 minutes.)
 #define XDR_ACCEPTABLE_TIMEDIFF XDR_TIME_ADJUST
 
 
-static int as_info_queue_get_size(void);
 int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
 int info_get_objects(char *name, cf_dyn_buf *db);
 void clear_microbenchmark_histograms();
@@ -140,7 +138,7 @@ msg_template info_mt[] = {
 #define INFO_MSG_SCRATCH_SIZE 128
 
 // Is dumping GLibC-level memory stats enabled?
-static bool g_mstats_enabled = false;
+bool g_mstats_enabled = false;
 
 // Is GLibC-level memory tracing enabled?
 static bool g_mtrace_enabled = false;
@@ -1326,7 +1324,7 @@ info_command_mem(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
-static void
+void
 info_log_with_datestamp(void (*log_fn)(void))
 {
 	char datestamp[1024];
@@ -4116,7 +4114,7 @@ as_info(as_info_transaction *it)
 }
 
 // Return the number of pending Info requests in the queue.
-static int
+int
 as_info_queue_get_size()
 {
 	return cf_queue_sz(g_info_work_q);
@@ -4374,525 +4372,6 @@ as_info_set(const char *name, const char *value, bool def)
 {
 	return(as_info_set_buf(name, (const uint8_t *) value, strlen(value), def ) );
 }
-
-void *
-info_debug_ticker_fn(void *unused)
-{
-	size_t total_ns_memory_inuse = 0;
-//	uint32_t ticker_cycles = 0;
-
-	// Helps to know how many messages are going in an out, some general status
-	do {
-		struct timespec delay = { g_config.ticker_interval, 0 }; // this is the time between log lines - should be a config parameter
-		nanosleep(&delay, NULL);
-
-		if ((g_config.paxos == 0) || (g_config.paxos->ready == false)) {
-			cf_info(AS_INFO, " fabric: cluster not ready yet");
-		} else if (g_shutdown_started) {
-			cf_debug(AS_INFO, "Shutdown in progress. Skipping info ticker");
-		} else {
-
-			cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %zd",
-					g_config.self_node,
-					g_config.paxos->cluster_size
-					);
-
-			uint64_t freemem;
-			int freepct;
-			bool swapping = false;
-
-			cf_meminfo(0, &freemem, &freepct, &swapping);
-
-			cf_info(AS_INFO, "   system-memory: free-kbytes %lu free-pct %d%s",
-					freemem / 1024,
-					freepct,
-					swapping ? " SWAPPING!" : ""
-					);
-
-			cf_info(AS_INFO, "   in-progress: tsvc-q %d info-q %d nsup-delete-q rw-hash %u proxy-hash %u %d rec-refs %lu",
-					thr_tsvc_queue_get_size(),
-					as_info_queue_get_size(),
-					as_nsup_queue_get_size(),
-					rw_request_hash_count(),
-					as_proxy_inprogress(),
-					g_config.global_record_ref_count
-					);
-
-			uint64_t n_proto_fds_opened = g_config.proto_connections_opened;
-			uint64_t n_proto_fds_closed = g_config.proto_connections_closed;
-			uint64_t n_hb_fds_opened = g_config.heartbeat_connections_opened;
-			uint64_t n_hb_fds_closed = g_config.heartbeat_connections_closed;
-			uint64_t n_fabric_fds_opened = g_config.fabric_connections_opened;
-			uint64_t n_fabric_fds_closed = g_config.fabric_connections_closed;
-
-			cf_info(AS_INFO, "   fds: proto (%lu,%lu,%lu) heartbeat (%lu,%lu,%lu) fabric (%lu,%lu,%lu)",
-					n_proto_fds_opened - n_proto_fds_closed, n_proto_fds_opened, n_proto_fds_closed,
-					n_hb_fds_opened - n_hb_fds_closed, n_hb_fds_opened, n_hb_fds_closed,
-					n_fabric_fds_opened - n_fabric_fds_closed, n_fabric_fds_opened, n_fabric_fds_closed
-					);
-
-			cf_info(AS_INFO, "   heartbeat-received: self %lu foreign %lu",
-					g_config.heartbeat_received_self, g_config.heartbeat_received_foreign
-					);
-
-			cf_info(AS_INFO, "   heartbeat-stats: %s",
-					as_hb_stats(false)
-					);
-
-			{
-				uint64_t n_demarshal = g_config.n_demarshal_error;
-				uint64_t n_tsvc_client = g_config.n_tsvc_client_error;
-				uint64_t n_tsvc_batch_sub = g_config.n_tsvc_batch_sub_error;
-				uint64_t n_tsvc_udf_sub = g_config.n_tsvc_udf_sub_error;
-
-				if ((n_demarshal | n_tsvc_client | n_tsvc_batch_sub | n_tsvc_udf_sub) != 0) {
-					cf_info(AS_INFO, "   early-fail: demarshal %lu tsvc-client %lu tsvc-batch-sub %lu tsvc-udf-sub %lu",
-							n_demarshal,
-							n_tsvc_client,
-							n_tsvc_batch_sub,
-							n_tsvc_udf_sub
-							);
-				}
-			}
-
-			{
-				uint64_t n_complete = g_config.batch_index_complete;
-				uint64_t n_timeout = g_config.batch_index_timeout;
-				uint64_t n_error = g_config.batch_index_errors;
-
-				if ((n_complete | n_timeout | n_error) != 0) {
-					cf_info(AS_INFO, "   batch-index (%lu,%lu,%lu)",
-							n_complete, n_timeout, n_error
-							);
-				}
-			}
-
-			if (g_config.batch_index_hist_active) {
-				histogram_dump(g_config.batch_index_hist);
-			}
-
-			if (g_config.info_hist_active) {
-				histogram_dump(g_config.info_hist);
-			}
-
-			if (g_config.svc_benchmarks_active) {
-				histogram_dump(g_config.svc_demarshal_hist);
-				histogram_dump(g_config.svc_queue_hist);
-			}
-
-			// namespace disk and memory size and ldt gc stats
-			total_ns_memory_inuse = 0;
-
-			for (int i = 0; i < g_config.n_namespaces; i++) {
-				as_namespace *ns = g_config.namespaces[i];
-
-				int available_pct;
-				uint64_t inuse_disk_bytes;
-				as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
-
-				uint64_t ns_n_objects = ns->n_objects;
-				uint64_t ns_n_sub_objects = ns->n_sub_objects;
-				size_t ns_index_mem = as_index_size_get(ns) * (ns_n_objects + ns_n_sub_objects);
-				size_t ns_sindex_mem = ns->sindex_data_memory_used;
-				size_t ns_total_mem = ns_index_mem + ns_sindex_mem + ns->n_bytes_memory;
-				double mem_used_pct = (double)(ns_total_mem * 100) / (double)ns->memory_size;
-
-				// TODO - not do the loop over all partitions every time?
-//				if ((ticker_cycles++ % 30) == 0) {
-//				}
-
-				as_master_prole_stats mp;
-				as_partition_get_master_prole_stats(ns, &mp);
-
-				// ?????????
-				cf_info(AS_INFO, "{%s} objects: all %lu master %lu prole %lu",
-						ns->name,
-						ns_n_objects,
-						mp.n_master_records,
-						mp.n_prole_records
-						);
-
-				if ((ns_n_sub_objects | mp.n_master_sub_records | mp.n_prole_sub_records) != 0) {
-					cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu prole %lu",
-							ns->name,
-							ns_n_sub_objects,
-							mp.n_master_sub_records,
-							mp.n_prole_sub_records
-							);
-				}
-
-				if (ns->storage_data_in_memory) {
-					cf_info(AS_INFO, "{%s} used-drive-bytes %lu avail-pct %d",
-							ns->name,
-							inuse_disk_bytes,
-							available_pct
-							);
-
-					cf_info(AS_INFO, "{%s} used-memory-bytes: total %lu index %lu sindex %lu data %lu used-pct %.2lf",
-							ns->name,
-							ns_total_mem,
-							ns_index_mem,
-							ns_sindex_mem,
-							ns->n_bytes_memory,
-							mem_used_pct
-							);
-				}
-				else {
-					uint32_t n_reads_from_cache = cf_atomic32_get(ns->n_reads_from_cache);
-					uint32_t n_total_reads = cf_atomic32_get(ns->n_reads_from_device) + n_reads_from_cache;
-					cf_atomic32_set(&ns->n_reads_from_device, 0);
-					cf_atomic32_set(&ns->n_reads_from_cache, 0);
-					ns->cache_read_pct = (float)(100 * n_reads_from_cache) / (float)(n_total_reads == 0 ? 1 : n_total_reads);
-
-					cf_info(AS_INFO, "{%s} used-drive-bytes %lu avail-pct %d cache-read-pct %.2f",
-							ns->name,
-							inuse_disk_bytes,
-							available_pct,
-							ns->cache_read_pct
-							);
-
-					cf_info(AS_INFO, "{%s} used-memory-bytes: total %lu index %lu sindex %lu used-pct %.2lf",
-							ns->name,
-							ns_total_mem,
-							ns_index_mem,
-							ns_sindex_mem,
-							mem_used_pct
-							);
-				}
-
-				if (ns->ldt_enabled) {
-					uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
-					uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
-					uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
-					uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
-					uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
-					uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-					cf_info(AS_INFO, "{%s} ldt_gc: cnt %lu io %lu gc %lu (%lu, %lu, %lu)",
-							ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
-				}
-
-				total_ns_memory_inuse += ns_total_mem;
-				as_sindex_histogram_dumpall(ns);
-
-				int64_t initial_rx_migrations = (int64_t)ns->migrate_rx_partitions_initial;
-				int64_t initial_tx_migrations = (int64_t)ns->migrate_tx_partitions_initial;
-				int64_t remaining_rx_migrations = (int64_t)ns->migrate_rx_partitions_remaining;
-				int64_t remaining_tx_migrations = (int64_t)ns->migrate_tx_partitions_remaining;
-				int64_t initial_migrations = initial_rx_migrations + initial_tx_migrations;
-				int64_t remaining_migrations = remaining_rx_migrations + remaining_tx_migrations;
-
-				if (initial_migrations > 0 && remaining_migrations > 0) {
-					float migrations_pct_complete = (1 - ((float)remaining_migrations / (float)initial_migrations)) * 100;
-
-					cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld) active (%ld,%ld) complete-pct %0.2f",
-							ns->name,
-							remaining_tx_migrations, remaining_rx_migrations,
-							ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active,
-							migrations_pct_complete
-							);
-				}
-				else {
-					cf_info(AS_INFO, "{%s} migrations: complete", ns->name);
-				}
-
-				{
-					uint64_t n_client_timeout = ns->n_tsvc_client_timeout;
-					uint64_t n_client_error = ns->n_tsvc_client_error;
-					uint64_t n_batch_sub_timeout = ns->n_tsvc_batch_sub_timeout;
-					uint64_t n_batch_sub_error = ns->n_tsvc_batch_sub_error;
-					uint64_t n_udf_sub_timeout = ns->n_tsvc_udf_sub_timeout;
-					uint64_t n_udf_sub_error = ns->n_tsvc_udf_sub_error;
-
-					if ((n_client_timeout | n_client_error | n_batch_sub_timeout | n_batch_sub_error | n_udf_sub_timeout | n_udf_sub_error) != 0) {
-						cf_info(AS_INFO, "{%s} tsvc-fail: client (%lu,%lu) batch-sub (%lu,%lu) udf-sub (%lu,%lu)",
-								ns->name,
-								n_client_timeout, n_client_error,
-								n_batch_sub_timeout, n_batch_sub_error,
-								n_udf_sub_timeout, n_udf_sub_error
-								);
-					}
-				}
-
-				{
-					uint64_t n_proxy_complete = ns->n_client_proxy_complete;
-					uint64_t n_proxy_timeout = ns->n_client_proxy_timeout;
-					uint64_t n_proxy_error = ns->n_client_proxy_error;
-					uint64_t n_read_success = ns->n_client_read_success;
-					uint64_t n_read_timeout = ns->n_client_read_timeout;
-					uint64_t n_read_error = ns->n_client_read_error;
-					uint64_t n_read_not_found = ns->n_client_read_not_found;
-					uint64_t n_write_success = ns->n_client_write_success;
-					uint64_t n_write_timeout = ns->n_client_write_timeout;
-					uint64_t n_write_error = ns->n_client_write_error;
-					uint64_t n_delete_success = ns->n_client_delete_success;
-					uint64_t n_delete_timeout = ns->n_client_delete_timeout;
-					uint64_t n_delete_error = ns->n_client_delete_error;
-					uint64_t n_udf_complete = ns->n_client_udf_complete;
-					uint64_t n_udf_timeout = ns->n_client_udf_timeout;
-					uint64_t n_udf_error = ns->n_client_udf_error;
-					uint64_t n_lua_read_success = ns->n_client_lua_read_success;
-					uint64_t n_lua_write_success = ns->n_client_lua_write_success;
-					uint64_t n_lua_delete_success = ns->n_client_lua_delete_success;
-					uint64_t n_lua_error = ns->n_client_lua_error;
-
-					if ((n_proxy_complete | n_proxy_timeout | n_proxy_error | n_read_success | n_read_timeout | n_read_error | n_read_not_found |
-							n_write_success | n_write_timeout | n_write_error | n_delete_success | n_delete_timeout | n_delete_error |
-							n_udf_complete | n_udf_timeout | n_udf_error | n_lua_read_success | n_lua_write_success | n_lua_delete_success | n_lua_error) != 0) {
-						cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu) udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
-								ns->name,
-								n_proxy_complete, n_proxy_timeout, n_proxy_error,
-								n_read_success, n_read_timeout, n_read_error, n_read_not_found,
-								n_write_success, n_write_timeout, n_write_error,
-								n_delete_success, n_delete_timeout, n_delete_error,
-								n_udf_complete, n_udf_timeout, n_udf_error,
-								n_lua_read_success, n_lua_write_success, n_lua_delete_success, n_lua_error
-								);
-					}
-				}
-
-				{
-					uint64_t n_proxy_complete = ns->n_batch_sub_proxy_complete;
-					uint64_t n_proxy_timeout = ns->n_batch_sub_proxy_timeout;
-					uint64_t n_proxy_error = ns->n_batch_sub_proxy_error;
-					uint64_t n_read_success = ns->n_batch_sub_read_success;
-					uint64_t n_read_timeout = ns->n_batch_sub_read_timeout;
-					uint64_t n_read_error = ns->n_batch_sub_read_error;
-					uint64_t n_read_not_found = ns->n_batch_sub_read_not_found;
-
-					if ((n_proxy_complete | n_proxy_timeout | n_proxy_error | n_read_success | n_read_timeout | n_read_error | n_read_not_found) != 0) {
-						cf_info(AS_INFO, "{%s} batch-sub: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu)",
-								ns->name,
-								n_proxy_complete, n_proxy_timeout, n_proxy_error,
-								n_read_success, n_read_timeout, n_read_error, n_read_not_found
-								);
-					}
-				}
-
-				{
-					uint64_t n_basic_success = ns->n_basic_scan_success;
-					uint64_t n_basic_failure = ns->n_basic_scan_failure;
-					uint64_t n_aggr_success = ns->n_aggr_scan_success;
-					uint64_t n_aggr_failure = ns->n_aggr_scan_failure;
-					uint64_t n_udf_bg_success = ns->n_udf_bg_scan_success;
-					uint64_t n_udf_bg_failure = ns->n_udf_bg_scan_failure;
-
-					if ((n_basic_success | n_basic_failure | n_aggr_success | n_aggr_failure | n_udf_bg_success | n_udf_bg_failure) != 0) {
-						cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
-								ns->name,
-								n_basic_success, n_basic_failure,
-								n_aggr_success, n_aggr_failure,
-								n_udf_bg_success, n_udf_bg_failure
-								);
-						}
-				}
-
-				{
-					uint64_t n_basic_success = ns->n_lookup_success;
-					uint64_t n_basic_failure = ns->n_lookup_errs + ns->n_lookup_abort;
-					uint64_t n_aggr_success = ns->n_agg_success;
-					uint64_t n_aggr_failure = ns->n_agg_errs + ns->n_agg_abort;
-					uint64_t n_udf_bg_success = ns->n_udf_bg_query_success;
-					uint64_t n_udf_bg_failure = ns->n_udf_bg_query_failure;
-
-					if ((n_basic_success | n_basic_failure | n_aggr_success | n_aggr_failure | n_udf_bg_success | n_udf_bg_failure) != 0) {
-						cf_info(AS_INFO, "{%s} query: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
-								ns->name,
-								n_basic_success, n_basic_failure,
-								n_aggr_success, n_aggr_failure,
-								n_udf_bg_success, n_udf_bg_failure
-								);
-						}
-				}
-
-				{
-					uint64_t n_udf_complete = ns->n_udf_sub_udf_complete;
-					uint64_t n_udf_timeout = ns->n_udf_sub_udf_timeout;
-					uint64_t n_udf_error = ns->n_udf_sub_udf_error;
-					uint64_t n_lua_read_success = ns->n_udf_sub_lua_read_success;
-					uint64_t n_lua_write_success = ns->n_udf_sub_lua_write_success;
-					uint64_t n_lua_delete_success = ns->n_udf_sub_lua_delete_success;
-					uint64_t n_lua_error = ns->n_udf_sub_lua_error;
-
-					if ((n_udf_complete | n_udf_timeout | n_udf_error | n_lua_read_success | n_lua_write_success | n_lua_delete_success | n_lua_error) != 0) {
-						cf_info(AS_INFO, "{%s} udf-sub: udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
-								ns->name,
-								n_udf_complete, n_udf_timeout, n_udf_error,
-								n_lua_read_success, n_lua_write_success, n_lua_delete_success, n_lua_error
-								);
-					}
-				}
-
-				if (ns->read_hist_active) {
-					cf_hist_track_dump(ns->read_hist);
-				}
-
-				if (ns->read_benchmarks_active) {
-					histogram_dump(ns->read_start_hist);
-					histogram_dump(ns->read_restart_hist);
-					histogram_dump(ns->read_dup_res_hist);
-					histogram_dump(ns->read_local_hist);
-					histogram_dump(ns->read_response_hist);
-				}
-
-				if (ns->write_hist_active) {
-					cf_hist_track_dump(ns->write_hist);
-				}
-
-				if (ns->write_benchmarks_active) {
-					histogram_dump(ns->write_start_hist);
-					histogram_dump(ns->write_restart_hist);
-					histogram_dump(ns->write_dup_res_hist);
-					histogram_dump(ns->write_master_hist);
-					histogram_dump(ns->write_repl_write_hist);
-					histogram_dump(ns->write_response_hist);
-				}
-
-				if (ns->udf_hist_active) {
-					cf_hist_track_dump(ns->udf_hist);
-				}
-
-				if (ns->udf_benchmarks_active) {
-					histogram_dump(ns->udf_start_hist);
-					histogram_dump(ns->udf_restart_hist);
-					histogram_dump(ns->udf_dup_res_hist);
-					histogram_dump(ns->udf_master_hist);
-					histogram_dump(ns->udf_repl_write_hist);
-					histogram_dump(ns->udf_response_hist);
-				}
-
-				if (ns->query_hist_active) {
-					cf_hist_track_dump(ns->query_hist);
-				}
-
-				if (ns->query_rec_count_hist_active) {
-					histogram_dump(ns->query_rec_count_hist);
-				}
-
-				if (ns->proxy_hist_active) {
-					histogram_dump(ns->proxy_hist);
-				}
-
-				if (ns->batch_sub_benchmarks_active) {
-					histogram_dump(ns->batch_sub_start_hist);
-					histogram_dump(ns->batch_sub_restart_hist);
-					histogram_dump(ns->batch_sub_dup_res_hist);
-					histogram_dump(ns->batch_sub_read_local_hist);
-					histogram_dump(ns->batch_sub_response_hist);
-				}
-
-				if (ns->udf_sub_benchmarks_active) {
-					histogram_dump(ns->udf_sub_start_hist);
-					histogram_dump(ns->udf_sub_restart_hist);
-					histogram_dump(ns->udf_sub_dup_res_hist);
-					histogram_dump(ns->udf_sub_master_hist);
-					histogram_dump(ns->udf_sub_repl_write_hist);
-					histogram_dump(ns->udf_sub_response_hist);
-				}
-
-				if (ns->storage_benchmarks_active) {
-					as_storage_ticker_stats(ns);
-				}
-			}
-
-			as_query_histogram_dumpall();
-			as_sindex_gc_histogram_dumpall();
-
-			if (g_config.ldt_benchmarks) {
-				histogram_dump(g_config.ldt_multiop_prole_hist);
-				histogram_dump(g_config.ldt_update_record_cnt_hist);
-				histogram_dump(g_config.ldt_io_record_cnt_hist);
-				histogram_dump(g_config.ldt_update_io_bytes_hist);
-				histogram_dump(g_config.ldt_hist);
-			}
-
-#ifdef MEM_COUNT
-			if (g_config.memory_accounting) {
-				mem_count_stats();
-			}
-#endif
-
-#ifdef USE_ASM
-			if (g_asm_hook_enabled) {
-				static uint64_t iter = 0;
-				static asm_stats_t *asm_stats = NULL;
-				static vm_stats_t *vm_stats = NULL;
-				size_t vm_size = 0;
-				size_t total_accounted_memory = 0;
-
-				as_asm_hook((void *) iter++, &asm_stats, &vm_stats);
-
-				if (asm_stats) {
-#ifdef DEBUG_ASM
-					fprintf(stderr, "***THR_INFO:  asm:  mem_count: %lu ; net_mmaps: %lu ; net_shm: %lu***\n",
-							asm_stats->mem_count, asm_stats->net_mmaps, asm_stats->net_shm);
-#endif
-					total_accounted_memory = asm_stats->mem_count + asm_stats->net_mmaps + asm_stats->net_shm;
-				}
-
-				if (vm_stats) {
-					// N.B.:  The VM stats description is used implicitly by the accessor "vm_stats_*()" macros!
-					vm_stats_desc_t *vm_stats_desc = vm_stats->desc;
-					vm_size = vm_stats_get_key_value(vm_stats, VM_SIZE);
-#ifdef DEBUG_ASM
-					fprintf(stderr, "***THR_INFO:  vm:  %s: %lu KB; %s: %lu KB ; %s: %lu KB ; %s: %lu KB***\n",
-							vm_stats_key_name(VM_PEAK),
-							vm_stats_get_key_value(vm_stats, VM_PEAK),
-							vm_stats_key_name(VM_SIZE),
-							vm_size,
-							vm_stats_key_name(VM_RSS),
-							vm_stats_get_key_value(vm_stats, VM_RSS),
-							vm_stats_key_name(VM_DATA),
-							vm_stats_get_key_value(vm_stats, VM_DATA));
-#endif
-
-					// Convert from KB to B.
-					vm_size *= 1024;
-
-					// Calculate the storage efficiency percentages.
-					double dynamic_eff = ((double) total_accounted_memory / (double) MAX(vm_size, 1)) * 100.0;
-					double obj_eff = ((double) total_ns_memory_inuse / (double) MAX(vm_size, 1)) * 100.0;
-
-#ifdef DEBUG_ASM
-					fprintf(stderr, "VM size: %lu ; Total Accounted Memory: %lu (%.3f%%) ; Total NS Memory in use: %lu (%.3f%%)\n",
-							vm_size, total_accounted_memory, dynamic_eff, total_ns_memory_inuse, obj_eff);
-#endif
-					cf_info(AS_INFO, "VM size: %lu ; Total Accounted Memory: %lu (%.3f%%) ; Total NS Memory in use: %lu (%.3f%%)",
-							vm_size, total_accounted_memory, dynamic_eff, total_ns_memory_inuse, obj_eff);
-				}
-			}
-#endif // defined(USE_ASM)
-
-			if (g_mstats_enabled) {
-				info_log_with_datestamp(malloc_stats);
-			}
-
-			if (g_config.fabric_dump_msgs) {
-				as_fabric_msg_queue_dump();
-			}
-		}
-
-	} while(1);
-
-	return(0);
-}
-
-// This function is meant to kick-start the info debug ticker that prints
-// system statistics. It should start only when the system is booted-up
-// fully and is ready to take reads and writes. It should wait for
-// the boot-time secondary index loading to be done.
-void
-info_debug_ticker_start()
-{
-	// Create a debug thread to pump out some statistics
-	if (g_config.ticker_interval) {
-		pthread_attr_t thr_attr;
-		pthread_attr_init(&thr_attr);
-		pthread_attr_setdetachstate(&thr_attr, PTHREAD_CREATE_DETACHED);
-		pthread_t info_debug_ticker_th;
-		pthread_create(&info_debug_ticker_th, &thr_attr, info_debug_ticker_fn, 0);
-	}
-}
-
 
 //
 //
@@ -5670,6 +5149,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("client-delete-success", ns->n_client_delete_success, db);
 	info_append_uint64("client-delete-timeout", ns->n_client_delete_timeout, db);
 	info_append_uint64("client-delete-error", ns->n_client_delete_error, db);
+	info_append_uint64("client-delete-not-found", ns->n_client_delete_not_found, db);
 
 	info_append_uint64("client-udf-complete", ns->n_client_udf_complete, db);
 	info_append_uint64("client-udf-timeout", ns->n_client_udf_timeout, db);
@@ -5680,8 +5160,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("client-lua-delete-success", ns->n_client_lua_delete_success, db);
 	info_append_uint64("client-lua-error", ns->n_client_lua_error, db);
 
-	info_append_uint64("client-read-success-xdr", ns->n_client_read_success_xdr, db);
-	info_append_uint64("client-write-success-xdr", ns->n_client_write_success_xdr, db);
+	info_append_uint64("xdr-read-success", ns->n_xdr_read_success, db);
+	info_append_uint64("xdr-write-success", ns->n_xdr_write_success, db);
 
 	info_append_uint64("client-trans-fail-xdr-forbidden", ns->n_client_trans_fail_xdr_forbidden, db);
 	info_append_uint64("client-trans-fail-key-busy", ns->n_client_trans_fail_key_busy, db);
@@ -5746,9 +5226,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64("migrate-record-retransmits", ns->migrate_record_retransmits, db);
 	info_append_uint64("migrate-record-receives", ns->migrate_record_receives, db);
 
-	// LDT operational statistics
-	//
-	// print only if LDT is enabled
+	// LDT stats.
+
 	if (ns->ldt_enabled) {
 		cf_dyn_buf_append_string(db, ";ldt-reads=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_reqs));
@@ -5835,7 +5314,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		cf_dyn_buf_append_string(db, ";ldt-err-unknown=");
 		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unknown));
 	}
-
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 		int available_pct = 0;

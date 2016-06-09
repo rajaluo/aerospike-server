@@ -1121,6 +1121,7 @@ struct as_namespace_s {
 	cf_atomic64		n_client_delete_success;
 	cf_atomic64		n_client_delete_timeout;
 	cf_atomic64		n_client_delete_error;
+	cf_atomic64		n_client_delete_not_found;
 
 	cf_atomic64		n_client_udf_complete;
 	cf_atomic64		n_client_udf_timeout;
@@ -1132,8 +1133,8 @@ struct as_namespace_s {
 	cf_atomic64		n_client_lua_error;
 
 	// Special stats that deserve their own counters:
-	cf_atomic64		n_client_read_success_xdr; // incremented in EE code
-	cf_atomic64		n_client_write_success_xdr;
+	cf_atomic64		n_xdr_read_success; // incremented in EE code
+	cf_atomic64		n_xdr_write_success;
 
 	// Special errors that deserve their own counters:
 	cf_atomic64		n_client_trans_fail_xdr_forbidden;

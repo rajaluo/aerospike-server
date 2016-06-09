@@ -406,7 +406,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, write_hist);
 		client_write_update_stats(tr->rsv.ns, tr->result_code);
 		if (tr->result_code == 0 && as_transaction_is_xdr(tr)) {
-			cf_atomic64_incr(&tr->rsv.ns->n_client_write_success_xdr);
+			cf_atomic64_incr(&tr->rsv.ns->n_xdr_write_success);
 		}
 		break;
 	case FROM_PROXY:

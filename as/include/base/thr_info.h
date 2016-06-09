@@ -72,8 +72,6 @@ extern void as_info(as_info_transaction *it);
 // Processes a pure puffer request without any info header stuff.
 extern int as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp);
 
-extern void info_debug_ticker_start();
-
 // The info unit uses the fabric to communicate with the other members of the
 // cluster so it needs to register for different messages and create listener
 // threads, etc.
@@ -83,3 +81,10 @@ extern int as_info_init();
 extern int as_info_port_start();
 
 extern void build_service_list(cf_ifaddr *ifaddr, int ifaddr_sz, cf_dyn_buf *db);
+
+// Needed by ticker:
+
+int as_info_queue_get_size();
+void info_log_with_datestamp(void (*log_fn)(void));
+
+extern bool g_mstats_enabled;

@@ -56,6 +56,7 @@
 #include "base/thr_proxy.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
+#include "base/ticker.h"
 #include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
@@ -493,7 +494,7 @@ main(int argc, char **argv)
 	as_nsup_start();			// may send delete transactions to other nodes
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
-	info_debug_ticker_start();	// only after everything else is started
+	as_ticker_start();			// only after everything else is started
 
 	// Log a service-ready message.
 	cf_info(AS_AS, "service ready: soon there will be cake!");
