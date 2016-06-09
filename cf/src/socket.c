@@ -22,6 +22,136 @@
 
 #include "socket.h"
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include <fault.h>
+
+int32_t
+cf_ip_port_from_string(const char *string, in_port_t *port)
+{
+	char *end;
+	uint64_t tmp = strtoul(string, &end, 10);
+
+	if (*end != 0 || tmp > 65535) {
+		cf_warning(CF_SOCKET, "Invalid port '%s'", string);
+		return -1;
+	}
+
+	*port = (in_port_t)tmp;
+	return 0;
+}
+
+int32_t
+cf_ip_port_to_string(in_port_t port, char *string, size_t size)
+{
+	int32_t count = snprintf(string, size, "%hu", port);
+
+	if ((size_t)count >= size) {
+		cf_warning(CF_SOCKET, "Output buffer overflow");
+		return -1;
+	}
+
+	return count;
+}
+
+int32_t cf_ip_port_from_binary(const uint8_t *binary, in_port_t *port, size_t size)
+{
+	if (size < 2) {
+		cf_warning(CF_SOCKET, "Input buffer underflow");
+		return -1;
+	}
+
+	*port = (binary[0] << 8) | binary[1];
+	return 2;
+}
+
+int32_t cf_ip_port_to_binary(in_port_t port, uint8_t *binary, size_t size)
+{
+	if (size < 2) {
+		cf_warning(CF_SOCKET, "Output buffer overflow");
+		return -1;
+	}
+
+	binary[0] = port >> 8;
+	binary[1] = port & 255;
+	return 2;
+}
+
+int32_t
+cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
+{
+	int32_t total = 0;
+	int32_t count = cf_ip_addr_to_string(&addr->addr, string, size);
+
+	if (count < 0) {
+		return -1;
+	}
+
+	total += count;
+
+	if (size - total < 2) {
+		cf_warning(CF_SOCKET, "Output buffer overflow");
+		return -1;
+	}
+
+	string[total++] = ':';
+	string[total] = 0;
+
+	count = cf_ip_port_to_string(addr->port, string + total, size - total);
+
+	if (count < 0) {
+		return -1;
+	}
+
+	total += count;
+	return total;
+}
+
+int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size)
+{
+	int32_t total = 0;
+	int32_t count = cf_ip_addr_from_binary(binary, &addr->addr, size);
+
+	if (count < 0) {
+		return -1;
+	}
+
+	total += count;
+	count = cf_ip_port_from_binary(binary + total, &addr->port, size - total);
+
+	if (count < 0) {
+		return -1;
+	}
+
+	total += count;
+	return total;
+}
+
+int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size)
+{
+	int32_t total = 0;
+	int32_t count = cf_ip_addr_to_binary(&addr->addr, binary, size);
+
+	if (count < 0) {
+		return -1;
+	}
+
+	total += count;
+	count = cf_ip_port_to_binary(addr->port, binary + total, size - total);
+
+	if (count < 0) {
+		return -1;
+	}
+
+	total += count;
+	return total;
+}
+
+// -------------------- OLD CODE --------------------
+
 #include <errno.h>
 #include <fcntl.h>
 #include <ifaddrs.h>

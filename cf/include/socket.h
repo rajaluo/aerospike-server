@@ -22,9 +22,36 @@
 
 #pragma once
 
+#if defined USE_IPV6
+#include <socket_ee.h>
+#else
+#include <socket_ce.h>
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
+int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
+int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size);
+int32_t cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size);
+
+int32_t cf_ip_port_from_string(const char *string, in_port_t *port);
+int32_t cf_ip_port_to_string(in_port_t port, char *string, size_t size);
+int32_t cf_ip_port_from_binary(const uint8_t *binary, in_port_t *port, size_t size);
+int32_t cf_ip_port_to_binary(in_port_t port, uint8_t *binary, size_t size);
+
+int32_t cf_sock_addr_from_string(const char *string, cf_sock_addr *addr);
+int32_t cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size);
+int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size);
+int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size);
+
+void cf_sock_addr_from_binary_legacy(const uint64_t *binary, cf_sock_addr *addr);
+void cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, uint64_t *binary);
+
+// -------------------- OLD CODE --------------------
+
 #include <netinet/in.h>
 #include <sys/socket.h>
 
