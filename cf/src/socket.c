@@ -91,7 +91,7 @@ int32_t
 cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
 {
 	int32_t total = 0;
-	int32_t count = cf_ip_addr_to_string(&addr->sin_addr, string, size);
+	int32_t count = cf_ip_addr_to_string(&addr->addr, string, size);
 
 	if (count < 0) {
 		return -1;
@@ -107,8 +107,7 @@ cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
 	string[total++] = ':';
 	string[total] = 0;
 
-	cf_ip_port port = ntohs(addr->sin_port);
-	count = cf_ip_port_to_string(port, string + total, size - total);
+	count = cf_ip_port_to_string(addr->port, string + total, size - total);
 
 	if (count < 0) {
 		return -1;
@@ -121,22 +120,19 @@ cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
 int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size)
 {
 	int32_t total = 0;
-	int32_t count = cf_ip_addr_from_binary(binary, &addr->sin_addr, size);
+	int32_t count = cf_ip_addr_from_binary(binary, &addr->addr, size);
 
 	if (count < 0) {
 		return -1;
 	}
 
 	total += count;
-
-	cf_ip_port port;
-	count = cf_ip_port_from_binary(binary + total, &port, size - total);
+	count = cf_ip_port_from_binary(binary + total, &addr->port, size - total);
 
 	if (count < 0) {
 		return -1;
 	}
 
-	addr->sin_port = htons(port);
 	total += count;
 	return total;
 }
@@ -144,16 +140,14 @@ int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size
 int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size)
 {
 	int32_t total = 0;
-	int32_t count = cf_ip_addr_to_binary(&addr->sin_addr, binary, size);
+	int32_t count = cf_ip_addr_to_binary(&addr->addr, binary, size);
 
 	if (count < 0) {
 		return -1;
 	}
 
 	total += count;
-
-	cf_ip_port port = ntohs(addr->sin_port);
-	count = cf_ip_port_to_binary(port, binary + total, size - total);
+	count = cf_ip_port_to_binary(addr->port, binary + total, size - total);
 
 	if (count < 0) {
 		return -1;

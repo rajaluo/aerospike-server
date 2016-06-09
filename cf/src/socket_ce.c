@@ -122,22 +122,18 @@ cf_sock_addr_from_string(const char *string, cf_sock_addr *addr)
 		goto cleanup0;
 	}
 
-	addr->sin_family = AF_INET;
 	const char *host = safe_strndup(string, colon - string);
 
-	if (cf_ip_addr_from_string(string, &addr->sin_addr) < 0) {
+	if (cf_ip_addr_from_string(string, &addr->addr) < 0) {
 		cf_warning(CF_SOCKET, "Invalid host address '%s' in socket address '%s'", host, string);
 		goto cleanup1;
 	}
 
-	cf_ip_port port;
-
-	if (cf_ip_port_from_string(colon + 1, &port) < 0) {
+	if (cf_ip_port_from_string(colon + 1, &addr->port) < 0) {
 		cf_warning(CF_SOCKET, "Invalid port '%s' in socket address '%s'", colon + 1, string);
 		goto cleanup1;
 	}
 
-	addr->sin_port = htons(port);
 	res = 0;
 
 cleanup1:
@@ -155,4 +151,27 @@ cf_sock_addr_from_binary_legacy(const uint64_t *binary, cf_sock_addr *addr)
 void
 cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, uint64_t *binary)
 {
+}
+
+void
+cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr)
+{
+	struct sockaddr_in *sai = (struct sockaddr_in *)native;
+
+	if (sai->sin_family != AF_INET) {
+		cf_crash(CF_SOCKET, "Invalid address family: %d", sai->sin_family);
+	}
+
+	addr->addr = sai->sin_addr;
+	addr->port = ntohs(sai->sin_port);
+}
+
+void
+cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native)
+{
+	struct sockaddr_in *sai = (struct sockaddr_in *)native;
+	memset(sai, 0, sizeof (struct sockaddr_in));
+	sai->sin_family = AF_INET;
+	sai->sin_addr = addr->addr;
+	sai->sin_port = htons(addr->port);
 }
