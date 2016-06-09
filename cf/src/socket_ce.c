@@ -32,9 +32,9 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include <fault.h>
+#include "fault.h"
 
-#include <citrusleaf/alloc.h>
+#include "citrusleaf/alloc.h"
 
 static char *
 safe_strndup(const char *string, size_t length)

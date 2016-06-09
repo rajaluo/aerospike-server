@@ -570,13 +570,7 @@ thr_demarshal(void *arg)
 				}
 
 				// Set the socket to nonblocking.
-				if (-1 == cf_socket_set_nonblocking(csocket)) {
-					cf_info(AS_DEMARSHAL, "unable to set client socket to nonblocking mode");
-					shutdown(csocket, SHUT_RDWR);
-					close(csocket);
-					csocket = -1;
-					continue;
-				}
+				cf_socket_disable_blocking(csocket);
 
 				// Create as_file_handle and queue it up in epoll_fd for further
 				// communication on one of the demarshal threads.
@@ -1016,9 +1010,7 @@ as_demarshal_start()
 	if (0 != cf_socket_init_svc(&g_config.socket)) {
 		cf_crash(AS_DEMARSHAL, "couldn't initialize service socket");
 	}
-	if (-1 == cf_socket_set_nonblocking(g_config.socket.sock)) {
-		cf_crash(AS_DEMARSHAL, "couldn't set service socket nonblocking");
-	}
+	cf_socket_disable_blocking(g_config.socket.sock);
 
 	// Note:  The localhost socket address will only be set if the main service socket
 	//        is not already (effectively) listening on the localhost address.
@@ -1028,9 +1020,7 @@ as_demarshal_start()
 		if (0 != cf_socket_init_svc(&g_config.localhost_socket)) {
 			cf_crash(AS_DEMARSHAL, "couldn't initialize localhost service socket");
 		}
-		if (-1 == cf_socket_set_nonblocking(g_config.localhost_socket.sock)) {
-			cf_crash(AS_DEMARSHAL, "couldn't set localhost service socket nonblocking");
-		}
+		cf_socket_disable_blocking(g_config.localhost_socket.sock);
 	}
 
 	g_config.xdr_socket.port = as_xdr_info_port();
@@ -1043,9 +1033,7 @@ as_demarshal_start()
 			cf_crash(AS_DEMARSHAL, "Couldn't initialize XDR service socket");
 		}
 
-		if (-1 == cf_socket_set_nonblocking(g_config.xdr_socket.sock)) {
-			cf_crash(AS_DEMARSHAL, "Couldn't set XDR service socket to non-blocking");
-		}
+		cf_socket_disable_blocking(g_config.xdr_socket.sock);
 	}
 
 	// Create all the epoll_fds and wait for all the threads to come up.

@@ -234,9 +234,7 @@ thr_info_port_fn(void *arg)
 	if (0 != cf_socket_init_svc(&info_socket)) {
 		cf_crash(AS_AS, "couldn't initialize service socket");
 	}
-	if (-1 == cf_socket_set_nonblocking(info_socket.sock)) {
-		cf_crash(AS_AS, "couldn't set socket nonblocking");
-	}
+	cf_socket_disable_blocking(info_socket.sock);
 
 	s = &info_socket;
 
@@ -297,11 +295,7 @@ thr_info_port_fn(void *arg)
 				cf_detail(AS_INFO_PORT, "new connection: %s", cpaddr);
 
 				// Set the socket to nonblocking.
-				if (-1 == cf_socket_set_nonblocking(csocket)) {
-					cf_debug(AS_INFO_PORT, "unable to set client socket to nonblocking mode");
-					close(csocket);
-					continue;
-				}
+				cf_socket_disable_blocking(csocket);
 
 				info_port_state *ips = cf_malloc(sizeof(info_port_state));
 				if (!ips) {

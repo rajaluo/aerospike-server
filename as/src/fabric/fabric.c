@@ -1531,11 +1531,7 @@ fabric_accept_fn(void *argv)
 		cf_debug(AS_FABRIC, "fabric_accept: accepting new sock %d", csocket);
 
 		/* Set the socket to nonblocking */
-		if (-1 == cf_socket_set_nonblocking(csocket)) {
-			cf_info(AS_FABRIC, "unable to set client socket to nonblocking mode");
-			close(csocket);
-			continue;
-		}
+		cf_socket_disable_blocking(csocket);
 
 		cf_atomic_int_incr(&g_config.fabric_connections_opened);
 
@@ -1579,11 +1575,7 @@ fabric_note_server_fn(void *argv)
 		}
 
 		/* Set the socket to nonblocking */
-		if (-1 == cf_socket_set_nonblocking(fd)) {
-			cf_info(AS_FABRIC, "unable to set client socket to nonblocking mode");
-			close(fd);
-			continue;
-		}
+		cf_socket_disable_blocking(fd);
 
 		cf_atomic_int_incr(&g_config.fabric_connections_opened);
 

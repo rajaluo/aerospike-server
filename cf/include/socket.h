@@ -23,9 +23,9 @@
 #pragma once
 
 #if defined USE_IPV6
-#include <socket_ee.h>
+#include "socket_ee.h"
 #else
-#include <socket_ce.h>
+#include "socket_ce.h"
 #endif
 
 #include <stdbool.h>
@@ -49,6 +49,9 @@ int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t
 
 void cf_sock_addr_from_binary_legacy(const uint64_t *binary, cf_sock_addr *addr);
 void cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, uint64_t *binary);
+
+void cf_socket_disable_blocking(int32_t fd);
+void cf_socket_disable_nagle(int32_t fd);
 
 // -------------------- OLD CODE --------------------
 
@@ -90,8 +93,6 @@ typedef struct cf_mcastsocket_cfg_t {
 } cf_mcastsocket_cfg;
 
 /* Function declarations */
-extern int cf_socket_set_nonblocking(int s);
-extern void cf_socket_set_nodelay(int s);
 extern int cf_socket_recv(int sock, void *buf, size_t buflen, int flags);
 extern int cf_socket_send(int sock, void *buf, size_t buflen, int flags);
 extern int cf_socket_init_svc(cf_socket_cfg *s);

@@ -1567,12 +1567,8 @@ as_hb_endpoint_add(int socket, bool isudp, cf_node node_id)
 	}
 
 	/* Make the socket nonblocking */
-	if (-1 == cf_socket_set_nonblocking(socket)) {
-		cf_info(AS_HB, "unable to set client socket %d to nonblocking mode: %s", socket, cf_strerror(errno));
-		cf_atomic_int_incr(&g_config.heartbeat_connections_closed);
-		return(-1);
-	}
-	cf_socket_set_nodelay(socket);
+	cf_socket_disable_blocking(socket);
+	cf_socket_disable_nagle(socket);
 
 	// start receiving on the socket
 	as_hb_start_receiving(socket, isudp, node_id);

@@ -22,12 +22,19 @@
 
 #include "socket.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <unistd.h>
 
-#include <fault.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+
+#include "fault.h"
 
 int32_t
 cf_ip_port_from_string(const char *string, cf_ip_port *port)
@@ -150,6 +157,40 @@ int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t
 	return total;
 }
 
+static int32_t
+safe_fcntl(int32_t fd, int32_t cmd, int32_t arg)
+{
+	int32_t res = fcntl(fd, cmd, arg);
+
+	if (res < 0) {
+		cf_crash(CF_SOCKET, "fcntl() failed: %d (%s)", errno, cf_strerror(errno));
+	}
+
+	return res;
+}
+
+static void
+safe_setsockopt(int32_t fd, int32_t level, int32_t name, void *val, socklen_t len)
+{
+	if (setsockopt(fd, level, name, val, len) < 0) {
+		cf_crash(CF_SOCKET, "setsockopt() failed: %d (%s)", errno, cf_strerror(errno));
+	}
+}
+
+void
+cf_socket_disable_blocking(int32_t fd)
+{
+	int32_t flags = safe_fcntl(fd, F_GETFL, 0);
+	safe_fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+void
+cf_socket_disable_nagle(int32_t fd)
+{
+	static int32_t flag = 1;
+	safe_setsockopt(fd, SOL_TCP, TCP_NODELAY, &flag, sizeof flag);
+}
+
 // -------------------- OLD CODE --------------------
 
 #include <errno.h>
@@ -202,33 +243,6 @@ cf_sockaddr_setport(cf_sockaddr *so, unsigned short port)
 	memcpy(b+4,&(port),2);
 }
 
-
-
-/* cf_socket_set_nonblocking
- * Set a socket to nonblocking mode */
-int
-cf_socket_set_nonblocking(int s)
-{
-	int flags = 0;
-
-	if (-1 == (flags = fcntl(s, F_GETFL, 0))) {
-		cf_warning(CF_SOCKET, "fcntl(): failed to get socket %d flags - %s", s, cf_strerror(errno));
-		return(-1);
-	}
-	if (-1 == fcntl(s, F_SETFL, flags | O_NONBLOCK)) {
-		cf_warning(CF_SOCKET, "fcntl(): failed to set socket %d O_NONBLOCK flag - %s", s, cf_strerror(errno));
-		return(-1);
-	}
-
-	return(0);
-}
-
-void
-cf_socket_set_nodelay(int s)
-{
-	int flag = 1;
-	setsockopt(s, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
-}
 
 
 /* cf_socket_recv
@@ -564,7 +578,7 @@ cf_socket_connect_nb(cf_sockaddr so, int *fd_r)
 	/* Set close-on-exec */
 	fcntl(fd, F_SETFD, 1);
 
-	cf_socket_set_nonblocking(fd);
+	cf_socket_disable_blocking(fd);
 
 	if (0 > (connect(fd, (struct sockaddr *)&sa, sizeof(sa)))) {
 		if (errno != EINPROGRESS) {
