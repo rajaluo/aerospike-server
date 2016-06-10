@@ -475,7 +475,7 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 
 	if (0 > (s->sock = socket(AF_INET, SOCK_DGRAM, 0))) {
 		cf_warning(CF_SOCKET, "multicast socket open error: %d %s", errno, cf_strerror(errno));
-		return(-1);
+		return -1;
 	}
 
 	cf_debug(CF_SOCKET, "mcast_socket init: socket %d",s->sock);
@@ -484,7 +484,7 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 	uint yes=1;
  	if (setsockopt(s->sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
 		cf_warning(CF_SOCKET, "multicast socket reuse failed: %d %s", errno, cf_strerror(errno));
-		return(-1);
+		goto err_cleanup;
 	}
 
 	/* Set close-on-exec */
@@ -493,34 +493,43 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 	// Bind to the incoming port on the specified mcast IP address.
 	memset(&s->saddr, 0, sizeof(s->saddr));
 	s->saddr.sin_family = AF_INET;
+
 	if (!inet_pton(AF_INET, s->addr, &s->saddr.sin_addr)) {
 		cf_warning(CF_SOCKET, "multicast socket inet_pton(%s) failed: %d %s", s->addr, errno, cf_strerror(errno));
-		close(s->sock);
-		s->sock = -1;
-		return -1;
+		goto err_cleanup;
 	}
+
+	// Only receive traffic from multicast groups this socket actually joins.
+	// [Note:  Bind address filtering takes precedence, so this is simply an extra level of restriction.]
+	uint no = 0;
+	if (setsockopt(s->sock, IPPROTO_IP, IP_MULTICAST_ALL, &no, sizeof(no)) == -1) {
+		cf_warning(CF_SOCKET, "IP_MULTICAST_ALL: %d %s", errno, cf_strerror(errno));
+		goto err_cleanup;
+	}
+
 	s->saddr.sin_port = htons(s->port);
 	if (ms->tx_addr) {
 		struct in_addr iface_in;
 		memset((char *)&iface_in,0,sizeof(iface_in));
 		iface_in.s_addr = inet_addr(ms->tx_addr);
 
-		if(setsockopt(s->sock, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&iface_in, sizeof(iface_in)) == -1) {
+		if (setsockopt(s->sock, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&iface_in, sizeof(iface_in)) == -1) {
 			cf_warning(CF_SOCKET, "IP_MULTICAST_IF: %d %s", errno, cf_strerror(errno));
-			return(-1);
+			goto err_cleanup;
 		}
 	}
 	unsigned char ttlvar = ms->mcast_ttl;
 	if (ttlvar>0) {
-		if (setsockopt(s->sock,IPPROTO_IP,IP_MULTICAST_TTL,(char *)&ttlvar,
-				sizeof(ttlvar)) == -1) {
+		if (setsockopt(s->sock,IPPROTO_IP,IP_MULTICAST_TTL,(char *)&ttlvar, sizeof(ttlvar)) == -1) {
 			cf_warning(CF_SOCKET, "IP_MULTICAST_TTL: %d %s", errno, cf_strerror(errno));
+			goto err_cleanup;
 		} else {
 			cf_info(CF_SOCKET, "setting multicast TTL to be %d",ttlvar);
 		}
 	}
 	while (0 > (bind(s->sock, (struct sockaddr *)&s->saddr, sizeof(struct sockaddr)))) {
 		cf_info(CF_SOCKET, "multicast socket bind failed: %d %s", errno, cf_strerror(errno));
+		goto err_cleanup;
 	}
 
 	// Register for the multicast group
@@ -529,11 +538,20 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 	if (ms->tx_addr) {
 		ms->ireq.imr_interface.s_addr = inet_addr(ms->tx_addr);
 	}
-	setsockopt(s->sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (const void *)&ms->ireq, sizeof(struct ip_mreq));
+	if (setsockopt(s->sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (const void *)&ms->ireq, sizeof(struct ip_mreq))) {
+		cf_warning(CF_SOCKET, "IP_ADD_MEMBERSHIP: %d %s", errno, cf_strerror(errno));
+		goto err_cleanup;
+	}
 
-	return(0);
+	return 0;
+
+ err_cleanup:
+
+	close(s->sock);
+	s->sock = -1;
+
+	return -1;
 }
-
 
 void
 cf_mcastsocket_close(cf_mcastsocket_cfg *ms)
