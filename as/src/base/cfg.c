@@ -158,9 +158,9 @@ cfg_set_defaults()
 	c->asmalloc_enabled = true;
 
 	// Network service defaults.
-	c->socket.proto = SOCK_STREAM; // not configurable, but addr and port are
-	c->localhost_socket.proto = SOCK_STREAM; // not configurable
-	c->xdr_socket.proto = SOCK_STREAM;
+	c->socket.type = SOCK_STREAM; // not configurable, but addr and port are
+	c->localhost_socket.type = SOCK_STREAM; // not configurable
+	c->xdr_socket.type = SOCK_STREAM;
 	c->socket.addr = (char*)IPV4_ANY_ADDR; // by default listen on any IPv4 address
 	c->xdr_socket.addr = (char*)IPV4_ANY_ADDR;
 	c->socket_reuse_addr = true;

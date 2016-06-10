@@ -64,7 +64,7 @@ cf_ip_addr_from_string(const char *string, cf_ip_addr *addr)
 		return -1;
 	}
 
-	struct sockaddr_in *sai = (struct sockaddr_in *)&info->ai_addr;
+	struct sockaddr_in *sai = (struct sockaddr_in *)info->ai_addr;
 	*addr = sai->sin_addr;
 
 	freeaddrinfo(info);
@@ -124,7 +124,7 @@ cf_sock_addr_from_string(const char *string, cf_sock_addr *addr)
 
 	const char *host = safe_strndup(string, colon - string);
 
-	if (cf_ip_addr_from_string(string, &addr->addr) < 0) {
+	if (cf_ip_addr_from_string(host, &addr->addr) < 0) {
 		cf_warning(CF_SOCKET, "Invalid host address '%s' in socket address '%s'", host, string);
 		goto cleanup1;
 	}
@@ -144,13 +144,26 @@ cleanup0:
 }
 
 void
-cf_sock_addr_from_binary_legacy(const uint64_t *binary, cf_sock_addr *addr)
+cf_sock_addr_from_binary_legacy(const cf_sock_addr_legacy *legacy, cf_sock_addr *addr)
 {
+	uint8_t *binary = (uint8_t *)legacy;
+	memcpy(&addr->addr, binary, 4);
+
+	uint16_t net_port;
+	memcpy(&net_port, binary + 4, 2);
+	addr->port = ntohs(net_port);
 }
 
 void
-cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, uint64_t *binary)
+cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, cf_sock_addr_legacy *legacy)
 {
+	uint8_t *binary = (uint8_t *)legacy;
+	memcpy(binary, &addr->addr, 4);
+
+	uint16_t net_port = htons(addr->port);
+	memcpy(binary + 4, &net_port, 2);
+
+	binary[6] = binary[7] = 0;
 }
 
 void

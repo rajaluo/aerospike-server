@@ -159,7 +159,7 @@ typedef struct as_config_s {
 	/* The port to listen on for XDR compatibility, typically 3004. */
 	cf_socket_cfg		xdr_socket;
 
-	char				*external_address; // hostname that clients will connect on
+	const char			*external_address; // hostname that clients will connect on
 	bool				is_external_address_virtual;
 	char				*alternate_address; // alternate service address (could be DNS)
 	char				*network_interface_name; // network_interface_name to use on this machine for generating the IP addresses

@@ -36,6 +36,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
@@ -743,15 +744,19 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 {
 
 	// Get the address of the remote endpoint
-	cf_sockaddr so;
-	if (0 > as_hb_getaddr(fne->node, &so)) {
+	cf_sock_addr_legacy sal;
+	if (0 > as_hb_getaddr(fne->node, &sal)) {
 		cf_debug(AS_FABRIC, "fabric_connect: unknown remote endpoint %"PRIx64, fne->node);
 		return(-1);
 	}
 
 	// Initiate the connect to the remote endpoint
-	int fd;
-	if (0 != cf_socket_connect_nb(so, &fd)) {
+	cf_sock_addr sa;
+	cf_sock_addr_from_binary_legacy(&sal, &sa);
+
+	int fd = cf_socket_init_client_nb(&sa);
+
+	if (fd < 0) {
 		cf_debug(AS_FABRIC, "fabric connect could not create connect");
 		return(-1);
 	}
@@ -1060,7 +1065,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 
 		// create as_hb_pulse - code copied from as_hb_rx_process
 		cf_node node;
-		cf_sockaddr socket;
+		cf_sock_addr_legacy sal;
 		uint32_t addr;
 		uint32_t port;
 		cf_node *buf;
@@ -1072,18 +1077,17 @@ fabric_process_read_msg(fabric_buffer *fb)
 			goto Next;
 
 		if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-			struct sockaddr_in addr_in;
-			socklen_t addr_len = sizeof(addr_in);
-			if (0 != getpeername(fd, (struct sockaddr*)&addr_in, &addr_len))
+			cf_sock_addr sa;
+
+			if (cf_socket_peer_name(fd, &sa) < 0) {
 				goto Next;
+			}
 
-			char some_addr[24];
-			if (NULL == inet_ntop(AF_INET, &addr_in.sin_addr.s_addr, (char *)some_addr, sizeof(some_addr)))
-				goto Next;
+			char sa_str[1000];
+			cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
+			cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)", sa_str, node, fd);
 
-			cf_debug(AS_FABRIC, "getpeername | %s:%d (node = %"PRIx64", fd = %d)", some_addr, ntohs(addr_in.sin_port), node, fd);
-
-			cf_sockaddr_convertto(&addr_in, &socket);
+			cf_sock_addr_to_binary_legacy(&sa, &sal);
 		} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
 			if (0 != msg_get_uint32(m, FS_ADDR, &addr))
 				goto Next;
@@ -1100,7 +1104,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 			goto Next;
 		}
 
-		as_hb_process_fabric_heartbeat(node, fd, socket, addr, port, buf, bufsz);
+		as_hb_process_fabric_heartbeat(node, fd, &sal, addr, port, buf, bufsz);
 
 Next:
 		as_fabric_msg_put(m);
@@ -1502,8 +1506,8 @@ fabric_accept_fn(void *argv)
 	sc.addr = "0.0.0.0";     // inaddr any!
 	sc.port = g_config.fabric_port;
 	sc.reuse_addr = (g_config.socket_reuse_addr) ? true : false;
-	sc.proto = SOCK_STREAM;
-	if (0 != cf_socket_init_svc(&sc)) {
+	sc.type = SOCK_STREAM;
+	if (0 != cf_socket_init_server(&sc)) {
 		cf_crash(AS_FABRIC, "Could not create fabric listener socket - check configuration");
 	}
 

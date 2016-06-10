@@ -31,6 +31,7 @@
 #include <unistd.h>
 
 #include <netinet/tcp.h>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
@@ -64,7 +65,8 @@ cf_ip_port_to_string(cf_ip_port port, char *string, size_t size)
 	return count;
 }
 
-int32_t cf_ip_port_from_binary(const uint8_t *binary, cf_ip_port *port, size_t size)
+int32_t
+cf_ip_port_from_binary(const uint8_t *binary, cf_ip_port *port, size_t size)
 {
 	if (size < 2) {
 		cf_warning(CF_SOCKET, "Input buffer underflow");
@@ -75,7 +77,8 @@ int32_t cf_ip_port_from_binary(const uint8_t *binary, cf_ip_port *port, size_t s
 	return 2;
 }
 
-int32_t cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size)
+int32_t
+cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size)
 {
 	if (size < 2) {
 		cf_warning(CF_SOCKET, "Output buffer overflow");
@@ -85,6 +88,18 @@ int32_t cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size)
 	binary[0] = port >> 8;
 	binary[1] = port & 255;
 	return 2;
+}
+
+int32_t
+cf_sock_addr_from_host_port(const char *host, cf_ip_port port, cf_sock_addr *addr)
+{
+	if (cf_ip_addr_from_string(host, &addr->addr) < 0) {
+		cf_warning(CF_SOCKET, "Invalid host address '%s'", host);
+		return -1;
+	}
+
+	addr->port = port;
+	return 0;
 }
 
 int32_t
@@ -117,7 +132,8 @@ cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
 	return total;
 }
 
-int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size)
+int32_t
+cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size)
 {
 	int32_t total = 0;
 	int32_t count = cf_ip_addr_from_binary(binary, &addr->addr, size);
@@ -137,7 +153,8 @@ int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size
 	return total;
 }
 
-int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size)
+int32_t
+cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size)
 {
 	int32_t total = 0;
 	int32_t count = cf_ip_addr_to_binary(&addr->addr, binary, size);
@@ -157,13 +174,21 @@ int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t
 	return total;
 }
 
+void
+cf_sock_addr_legacy_set_port(cf_sock_addr_legacy *legacy, cf_ip_port port)
+{
+	uint8_t *binary = (uint8_t *)legacy;
+	uint16_t net_port = htons(port);
+	memcpy(binary + 4, &net_port, 2);
+}
+
 static int32_t
 safe_fcntl(int32_t fd, int32_t cmd, int32_t arg)
 {
 	int32_t res = fcntl(fd, cmd, arg);
 
 	if (res < 0) {
-		cf_crash(CF_SOCKET, "fcntl() failed: %d (%s)", errno, cf_strerror(errno));
+		cf_crash(CF_SOCKET, "fcntl() failed on FD %d: %d (%s)", fd, errno, cf_strerror(errno));
 	}
 
 	return res;
@@ -173,7 +198,47 @@ static void
 safe_setsockopt(int32_t fd, int32_t level, int32_t name, void *val, socklen_t len)
 {
 	if (setsockopt(fd, level, name, val, len) < 0) {
-		cf_crash(CF_SOCKET, "setsockopt() failed: %d (%s)", errno, cf_strerror(errno));
+		cf_crash(CF_SOCKET, "setsockopt() failed on FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
+	}
+}
+
+static void
+safe_getsockopt(int32_t fd, int32_t level, int32_t name, void *val, socklen_t *len)
+{
+	if (getsockopt(fd, level, name, val, len) < 0) {
+		cf_crash(CF_SOCKET, "getsockopt() failed on FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
+	}
+}
+
+static int32_t
+safe_wait(int32_t efd, struct epoll_event *events, int32_t max, int32_t timeout)
+{
+	while (true) {
+		cf_debug(CF_SOCKET, "Waiting on epoll FD %d", efd);
+		int32_t count = epoll_wait(efd, events, max, timeout);
+
+		if (count < 0) {
+			if (errno == EINTR) {
+				cf_debug(CF_SOCKET, "Interrupted");
+				continue;
+			}
+
+			cf_crash(CF_SOCKET, "epoll_wait() failed on epoll FD %d: %d (%s)",
+					efd, errno, cf_strerror(errno));
+		}
+
+		return count;
+	}
+}
+
+static void
+safe_close(int32_t fd)
+{
+	if (close(fd) < 0) {
+		cf_crash(CF_SOCKET, "Error while closing FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
 	}
 }
 
@@ -185,10 +250,385 @@ cf_socket_disable_blocking(int32_t fd)
 }
 
 void
+cf_socket_enable_blocking(int32_t fd)
+{
+	int32_t flags = safe_fcntl(fd, F_GETFL, 0);
+	safe_fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+}
+
+void
 cf_socket_disable_nagle(int32_t fd)
 {
 	static int32_t flag = 1;
 	safe_setsockopt(fd, SOL_TCP, TCP_NODELAY, &flag, sizeof flag);
+}
+
+void
+cf_socket_enable_nagle(int32_t fd)
+{
+	static int32_t flag = 0;
+	safe_setsockopt(fd, SOL_TCP, TCP_NODELAY, &flag, sizeof flag);
+}
+
+static size_t
+addr_len(const struct sockaddr *sa)
+{
+	switch (sa->sa_family) {
+	case AF_INET:
+		return sizeof (struct sockaddr_in);
+
+	case AF_INET6:
+		return sizeof (struct sockaddr_in6);
+
+	default:
+		cf_crash(CF_SOCKET, "Invalid address family: %d", sa->sa_family);
+		// XXX - Find a way to mark cf_crash() as "noreturn".
+		return 0;
+	}
+}
+
+static int32_t
+config_to_native(const cf_socket_cfg *conf, struct sockaddr *sa)
+{
+	cf_sock_addr addr;
+
+	if (conf->addr == NULL) {
+		cf_warning(CF_SOCKET, "Missing service address");
+		return -1;
+	}
+
+	if (cf_ip_addr_from_string(conf->addr, &addr.addr) < 0) {
+		cf_warning(CF_SOCKET, "Invalid service address: %s", conf->addr);
+		return -1;
+	}
+
+	if (conf->port == 0) {
+		cf_warning(CF_SOCKET, "Missing service port");
+		return -1;
+	}
+
+	addr.port = conf->port;
+	cf_sock_addr_to_native(&addr, sa);
+	return 0;
+}
+
+int32_t
+cf_socket_init_server(cf_socket_cfg *conf)
+{
+	int32_t res = -1;
+	struct sockaddr_storage sas;
+
+	if (config_to_native(conf, (struct sockaddr *)&sas) < 0) {
+		goto cleanup0;
+	}
+
+	int32_t fd = socket(sas.ss_family, conf->type, 0);
+
+	if (fd < 0) {
+		cf_warning(CF_SOCKET, "Error while creating socket for %s:%d: %d (%s)",
+				conf->addr, conf->port, errno, cf_strerror(errno));
+		goto cleanup0;
+	}
+
+	if (conf->reuse_addr) {
+		static int32_t flag = 1;
+		safe_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof flag);
+	}
+
+	// XXX - Why are we doing this?
+	safe_fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+	while (bind(fd, (struct sockaddr *)&sas, addr_len((struct sockaddr *)&sas)) < 0) {
+		if (errno != EADDRINUSE) {
+			cf_warning(CF_SOCKET, "Error while binding to %s:%d: %d (%s)",
+					conf->addr, conf->port, errno, cf_strerror(errno));
+			goto cleanup1;
+		}
+
+		cf_warning(CF_SOCKET, "Socket %s:%d in use, waiting", conf->addr, conf->port);
+		usleep(5 * 1000);
+	}
+
+	if (conf->type == SOCK_STREAM && listen(fd, 512) < 0) {
+		cf_warning(CF_SOCKET, "Error while listening on %s:%d: %d (%s)",
+				conf->addr, conf->port, errno, cf_strerror(errno));
+		goto cleanup1;
+	}
+
+	// No Nagle here. It will be disabled for the accepted connections.
+
+	conf->sock = fd;
+	res = 0;
+	goto cleanup0;
+
+cleanup1:
+	safe_close(fd);
+
+cleanup0:
+	return res;
+}
+
+static int32_t
+connect_socket(int32_t fd, struct sockaddr *sa, int32_t timeout)
+{
+	cf_debug(CF_SOCKET, "Connecting FD %d", fd);
+	int32_t res = -1;
+
+	cf_socket_disable_blocking(fd);
+	int32_t rv = connect(fd, sa, addr_len(sa));
+
+	if (rv == 0) {
+		cf_debug(CF_SOCKET, "FD %d connected [1]", fd);
+		res = 0;
+		goto cleanup1;
+	}
+
+	if (errno != EINPROGRESS) {
+		cf_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
+		goto cleanup1;
+	}
+
+	int32_t efd = epoll_create(1);
+
+	if (efd < 0) {
+		cf_crash(CF_SOCKET, "epoll_create() failed: %d (%s)", errno, cf_strerror(errno));
+	}
+
+	struct epoll_event event = { .data.fd = fd, .events = EPOLLOUT };
+
+	if (epoll_ctl(efd, EPOLL_CTL_ADD, fd, &event) < 0) {
+		cf_crash(CF_SOCKET, "epoll_ctl() failed: %d (%s)", errno, cf_strerror(errno));
+	}
+
+	int32_t count = safe_wait(efd, &event, 1, timeout);
+
+	if (count == 0) {
+		cf_warning(CF_SOCKET, "Timeout while connecting FD %d", fd);
+		goto cleanup2;
+	}
+
+	int32_t err;
+	socklen_t err_len = sizeof err;
+	safe_getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
+
+	if (err != 0) {
+		cf_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)", fd, err, cf_strerror(err));
+		goto cleanup2;
+	}
+
+	cf_debug(CF_SOCKET, "FD %d connected [2]", fd);
+	res = 0;
+
+cleanup2:
+	if (epoll_ctl(efd, EPOLL_CTL_DEL, fd, NULL) < 0) {
+		cf_crash(CF_SOCKET, "epoll_ctl() failed: %d (%s)", errno, cf_strerror(errno));
+	}
+
+	safe_close(efd);
+
+cleanup1:
+	cf_socket_enable_blocking(fd);
+	return res;
+}
+
+int32_t
+cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout)
+{
+	int32_t res = -1;
+	struct sockaddr_storage sas;
+
+	if (config_to_native(conf, (struct sockaddr *)&sas) < 0) {
+		goto cleanup0;
+	}
+
+	int32_t fd = socket(sas.ss_family, conf->type, 0);
+
+	if (fd < 0) {
+		cf_warning(CF_SOCKET, "Error while creating socket for %s:%d: %d (%s)",
+				conf->addr, conf->port, errno, cf_strerror(errno));
+		goto cleanup0;
+	}
+
+	// XXX - Why are we doing this?
+	safe_fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+	if (connect_socket(fd, (struct sockaddr *)&sas, timeout) < 0) {
+		cf_warning(CF_SOCKET, "Error while connecting socket to %s:%d",
+				conf->addr, conf->port);
+		goto cleanup1;
+	}
+
+	cf_socket_disable_nagle(fd);
+
+	conf->sock = fd;
+	res = 0;
+	goto cleanup0;
+
+cleanup1:
+	safe_close(fd);
+
+cleanup0:
+	return res;
+}
+
+int32_t
+cf_socket_init_client_nb(cf_sock_addr *addr)
+{
+	int32_t res = -1;
+
+	struct sockaddr_storage sas;
+	cf_sock_addr_to_native(addr, (struct sockaddr *)&sas);
+
+	char friendly[1000];
+	cf_sock_addr_to_string(addr, friendly, sizeof friendly);
+
+	int32_t fd = socket(sas.ss_family, SOCK_STREAM, 0);
+
+	if (fd < 0) {
+		cf_warning(CF_SOCKET, "Error while creating socket for %s: %d (%s)",
+				friendly, errno, cf_strerror(errno));
+		goto cleanup0;
+	}
+
+	// XXX - Why are we doing this?
+	safe_fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+	cf_socket_disable_blocking(fd);
+
+	if (connect(fd, (struct sockaddr *)&sas, addr_len((struct sockaddr *)&sas)) < 0) {
+		if (errno != EINPROGRESS) {
+			cf_warning(CF_SOCKET, "Error while connecting socket to %s: %d (%s)",
+					friendly, errno, cf_strerror(errno));
+			goto cleanup1;
+		}
+	}
+
+	res = fd;
+	goto cleanup0;
+
+cleanup1:
+	safe_close(fd);
+
+cleanup0:
+	return res;
+}
+
+int32_t
+cf_socket_peer_name(int32_t fd, cf_sock_addr *addr)
+{
+	struct sockaddr_storage sas;
+	socklen_t sas_len = sizeof sas;
+
+	if (getpeername(fd, (struct sockaddr *)&sas, &sas_len) < 0) {
+		cf_warning(CF_SOCKET, "Error while getting peer name: %d (%s)", errno, cf_strerror(errno));
+		return -1;
+	}
+
+	cf_sock_addr_from_native((struct sockaddr *)&sas, addr);
+	return 0;
+}
+
+int32_t
+cf_socket_send_to(int32_t fd, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
+{
+	struct sockaddr_storage sas;
+	struct sockaddr *sa = NULL;
+	socklen_t sa_len = 0;
+
+	if (addr != NULL) {
+		cf_sock_addr_to_native(addr, (struct sockaddr *)&sas);
+		sa = (struct sockaddr *)&sas;
+		sa_len = addr_len((struct sockaddr *)&sas);
+	}
+
+	int32_t res = sendto(fd, buff, size, flags | MSG_NOSIGNAL, sa, sa_len);
+
+	if (res < 0) {
+		cf_debug(CF_SOCKET, "Error while sending on FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
+	}
+
+	return res;
+}
+
+int32_t
+cf_socket_send(int32_t fd, void *buff, size_t size, int32_t flags)
+{
+	return cf_socket_send_to(fd, buff, size, flags, NULL);
+}
+
+int32_t
+cf_socket_recv_from(int32_t fd, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
+{
+	struct sockaddr_storage sas;
+	struct sockaddr *sa = NULL;
+	socklen_t sa_len = 0;
+
+	if (addr != NULL) {
+		sa = (struct sockaddr *)&sas;
+		sa_len = sizeof sas;
+	}
+
+	int32_t res = recvfrom(fd, buff, size, flags | MSG_NOSIGNAL, sa, &sa_len);
+
+	if (res < 0) {
+		cf_debug(CF_SOCKET, "Error while receiving on FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
+	}
+	else if (addr != NULL) {
+		cf_sock_addr_from_native(sa, addr);
+	}
+
+	return res;
+}
+
+int32_t
+cf_socket_recv(int32_t fd, void *buff, size_t size, int32_t flags)
+{
+	return cf_socket_recv_from(fd, buff, size, flags, NULL);
+}
+
+void
+cf_socket_close(cf_socket_cfg *conf)
+{
+	int32_t fd = conf->sock;
+	cf_debug(CF_SOCKET, "Closing FD %d", fd);
+
+	int32_t efd = epoll_create(1);
+
+	if (efd < 0) {
+		cf_crash(CF_SOCKET, "epoll_create() failed: %d (%s)", errno, cf_strerror(errno));
+	}
+
+	struct epoll_event event = { .data.fd = fd, .events = EPOLLRDHUP };
+
+	if (epoll_ctl(efd, EPOLL_CTL_ADD, fd, &event) < 0) {
+		cf_crash(CF_SOCKET, "epoll_ctl() failed: %d (%s)", errno, cf_strerror(errno));
+	}
+
+	if (shutdown(fd, SHUT_RDWR) < 0) {
+		cf_warning(CF_SOCKET, "Error while shutting down FD %d", fd);
+		goto cleanup1;
+	}
+
+	int32_t count = safe_wait(efd, &event, 1, 5000);
+
+	if (count == 0) {
+		cf_warning(CF_SOCKET, "Timeout while waiting for FD %d to flush", fd);
+		goto cleanup1;
+	}
+
+	cf_debug(CF_SOCKET, "FD %d flushed", fd);
+
+cleanup1:
+	if (epoll_ctl(efd, EPOLL_CTL_DEL, fd, NULL) < 0) {
+		cf_crash(CF_SOCKET, "epoll_ctl() failed: %d (%s)", errno, cf_strerror(errno));
+	}
+
+	safe_close(efd);
+	safe_close(fd);
+	conf->sock = -1;
 }
 
 // -------------------- OLD CODE --------------------
@@ -213,389 +653,6 @@ cf_socket_disable_nagle(int32_t fd)
 #include <citrusleaf/cf_types.h>
 
 #include "fault.h"
-
-
-void
-cf_sockaddr_convertto(const struct sockaddr_in *src, cf_sockaddr *dst)
-{
-	if (src->sin_family != AF_INET)	return;
-	byte *b = (byte *) dst;
-	memcpy(b, &(src->sin_addr.s_addr),4);
-	memcpy(b+4,&(src->sin_port),2);
-	memset(b+6,0,2);
-}
-
-void
-cf_sockaddr_convertfrom(const cf_sockaddr src, struct sockaddr_in *dst)
-{
-	byte *b = (byte *) &src;
-
-	dst->sin_family = AF_INET;
-	memcpy(&dst->sin_addr.s_addr,b,4);
-	memcpy(&dst->sin_port, b+4, 2);
-}
-
-void
-cf_sockaddr_setport(cf_sockaddr *so, unsigned short port)
-{
-	byte *b = (byte *) so;
-	port = htons(port);
-	memcpy(b+4,&(port),2);
-}
-
-
-
-/* cf_socket_recv
- * Read from a service socket */
-int
-cf_socket_recv(int sock, void *buf, size_t buflen, int flags)
-{
-	int i;
-	flags |= MSG_NOSIGNAL;
-	if (0 >= (i = recv(sock, buf, buflen, flags))) {
-		if (EAGAIN == errno)
-			return(0);
-		else if (ECONNRESET == errno || 0 == i)
-			cf_detail(CF_SOCKET, "socket disconnected");
-		else {
-			cf_crash(CF_SOCKET, "recv() failed: %d %s", errno, cf_strerror(errno));
-		}
-
-	}
-
-	return(i);
-}
-
-
-/* cf_socket_send
- * Send to a socket */
-int
-cf_socket_send(int sock, void *buf, size_t buflen, int flags)
-{
-	int i;
-	flags |= MSG_NOSIGNAL;
-	if (0 >= (i = send(sock, buf, buflen, flags))) {
-		cf_debug(CF_SOCKET, "send() failed: %d %s", errno, cf_strerror(errno));
-	}
-
-	return(i);
-}
-
-
-
-/* cf_socket_recvfrom
- * Read from a service socket */
-int
-cf_socket_recvfrom(int sock, void *buf, size_t buflen, int flags, cf_sockaddr *from)
-{
-	int i;
-	struct sockaddr_in f, *fp = NULL;
-	socklen_t fl = sizeof(f);
-
-	if (from) {
-		fp = &f;
-		f.sin_family = AF_INET;
-	}
-
-	flags |= MSG_NOSIGNAL;
-
-	if (0 >= (i = recvfrom(sock, buf, buflen, flags, (struct sockaddr *)fp, &fl))) {
-		cf_debug(CF_SOCKET, "recvfrom() failed: %d %s", errno, cf_strerror(errno));
-		if (from) memset(from, 0, sizeof(cf_sockaddr));
-	}
-	else{
-		if (from) cf_sockaddr_convertto(fp, from);
-	}
-
-	return(i);
-}
-
-
-/* cf_socket_send
- * Send to a socket */
-int
-cf_socket_sendto(int sock, void *buf, size_t buflen, int flags, cf_sockaddr to)
-{
-	int i;
-	struct sockaddr_in s, *sp = NULL;
-
-	if (to) {
-		sp = &s;
-		cf_sockaddr_convertfrom(to, sp);
-	}
-
-	flags |= MSG_NOSIGNAL;
-
-	if (0 >= (i = sendto(sock, buf, buflen, flags, (struct sockaddr *)sp, sizeof(const struct sockaddr))))
-		cf_debug(CF_SOCKET, "sendto() failed: %d %s", errno, cf_strerror(errno));
-
-	return(i);
-}
-
-/* cf_socket_init_svc
- * Initialize a socket for listening
- * Leaves the socket in a blocking state - if you want nonblocking, set nonblocking
- */
-int
-cf_socket_init_svc(cf_socket_cfg *s)
-{
-	struct timespec delay;
-	cf_assert(s, CF_SOCKET, CF_CRITICAL, "invalid argument");
-	if (!s->addr) {
-		cf_warning(CF_SOCKET, "could not initialize service, check config file");
-		return(-1);
-	}
-	if (s->port == 0) {
-		cf_warning(CF_SOCKET, "could not initialize service, missing port, check config file");
-		return(-1);
-	}
-
-	delay.tv_sec = 5;
-	delay.tv_nsec = 0;
-
-	/* Create the socket */
-	if (0 > (s->sock = socket(AF_INET, s->proto, 0))) {
-		cf_warning(CF_SOCKET, "socket: %s", cf_strerror(errno));
-		return(-1);
-	}
-	s->saddr.sin_family = AF_INET;
-	if (1 != inet_pton(AF_INET, s->addr, &s->saddr.sin_addr.s_addr)) {
-		cf_warning(CF_SOCKET, "inet_pton: %s", cf_strerror(errno));
-		return(-1);
-	}
-	s->saddr.sin_port = htons(s->port);
-
-	if (s->reuse_addr) {
-		int v = 1;
-		setsockopt(s->sock, SOL_SOCKET, SO_REUSEADDR, &v, sizeof(v) );
-	}
-
-	/* Set close-on-exec */
-	fcntl(s->sock, F_SETFD, FD_CLOEXEC);
-
-	// I've tried a little tuning here, doesn't seem terribly important.
-	// int flag = (1024 * 32);
-	// setsockopt(s->sock, SOL_SOCKET, SO_SNDBUF, &flag, sizeof(flag) );
-	// setsockopt(s->sock, SOL_SOCKET, SO_RCVBUF, &flag, sizeof(flag) );
-
-	// No-delay is terribly important, but setting here doesn't seem all that effective. Doesn't
-	// seem to effect the accepted file descriptors derived from the listen fd
-	// int flag = 1;
-	// setsockopt(s->sock, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag) );
-
-	/* Bind to the socket; if we can't, nanosleep() and retry */
-	while (0 > (bind(s->sock, (struct sockaddr *)&s->saddr, sizeof(struct sockaddr)))) {
-		if (EADDRINUSE != errno) {
-			cf_warning(CF_SOCKET, "bind: %s", cf_strerror(errno));
-			return(-1);
-		}
-
-		cf_warning(CF_SOCKET, "bind: socket in use, waiting (port:%d)",s->port);
-
-		nanosleep(&delay, NULL);
-	}
-
-	/* Listen for connections */
-	if ((SOCK_STREAM == s->proto) && (0 > listen(s->sock, 512))) {
-		cf_warning(CF_SOCKET, "listen: %s", cf_strerror(errno));
-		return(-1);
-	}
-
-	return(0);
-}
-
-/* cf_socket_init_client
- * Connect a socket to a remote endpoint
- * DOES A BLOCKING CONNECT INLINE - timeout
- */
-int
-cf_socket_init_client(cf_socket_cfg *s, int timeout)
-{
-	cf_assert(s, CF_SOCKET, CF_CRITICAL, "invalid argument");
-
-	if (0 > (s->sock = socket(AF_INET, s->proto, 0))) {
-		cf_warning(CF_SOCKET, "socket: %s", cf_strerror(errno));
-		return(-1);
-	}
-
-	fcntl(s->sock, F_SETFD, FD_CLOEXEC);  /* close on exec */
-	fcntl(s->sock, F_SETFL, O_NONBLOCK); /* non-blocking */
-
-	// Try tuning the window: must be done before connect
-//	int flag = (1024 * 32);
-//	setsockopt(s->sock, SOL_SOCKET, SO_SNDBUF, &flag, sizeof(flag) );
-//	setsockopt(s->sock, SOL_SOCKET, SO_RCVBUF, &flag, sizeof(flag) );
-
-	memset(&s->saddr,0,sizeof(s->saddr));
-	s->saddr.sin_family = AF_INET;
-	int rv = inet_pton(AF_INET, s->addr, &s->saddr.sin_addr.s_addr);
-	if (rv < 0) {
-		cf_warning(CF_SOCKET, "inet_pton: %s", cf_strerror(errno));
-		close(s->sock);
-		return(-1);
-	} else if (rv == 0) {
-		cf_warning(CF_SOCKET, "inet_pton: invalid ip %s", s->addr);
-		close(s->sock);
-		return(-1);
-	}
-	s->saddr.sin_port = htons(s->port);
-
-	rv = connect(s->sock, (struct sockaddr *)&s->saddr, sizeof(s->saddr));
-	cf_debug(CF_SOCKET, "connect: rv %d errno %s",rv,cf_strerror(errno));
-
-	if (rv < 0) {
-		int epoll_fd = -1;
-
-		if (errno == EINPROGRESS) {
-			cf_clock start = cf_getms();
-
-			if (0 > (epoll_fd = epoll_create(1))) {
-				cf_warning(CF_SOCKET, "epoll_create() failed (errno %d: \"%s\")", errno, cf_strerror(errno));
-				goto Fail;
-			}
-
-			struct epoll_event event;
-			memset(&event, 0, sizeof(struct epoll_event));
-			event.data.fd = s->sock;
-			event.events = EPOLLOUT;
-
-			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->sock, &event)) {
-				cf_warning(CF_SOCKET, "epoll_ctl(ADD) of client socket failed (errno %d: \"%s\")", errno, cf_strerror(errno));
-				goto Fail;
-			}
-
-			int tries = 0;
-			do {
-				int nevents = 0;
-				int max_events = 1;
-				int wait_ms = 1;
-				struct epoll_event events[max_events];
-
-				if (0 > (nevents = epoll_wait(epoll_fd, events, max_events, wait_ms))) {
-					if (errno == EINTR) {
-						cf_debug(CF_SOCKET, "epoll_wait() on client socket encountered EINTR ~~ Retrying!");
-						goto Retry;
-					} else {
-						cf_warning(CF_SOCKET, "epoll_wait() on client socket failed (errno %d: \"%s\") ~~ Failing!", errno, cf_strerror(errno));
-						goto Fail;
-					}
-				} else {
-					if (nevents == 0) {
-						cf_debug(CF_SOCKET, "epoll_wait() returned no events ~~ Retrying!");
-						goto Retry;
-					}
-					if (nevents != 1) {
-						cf_warning(CF_SOCKET, "epoll_wait() returned %d events ~~ only 1 expected, so ignoring others!", nevents);
-					}
-					if (events[0].data.fd == s->sock) {
-						if (events[0].events & EPOLLOUT) {
-							cf_debug(CF_SOCKET, "epoll_wait() on client socket ready for write detected ~~ Succeeding!");
-						} else {
-							// (Note:  ERR and HUP events are automatically waited for as well.)
-							if (events[0].events & (EPOLLERR | EPOLLHUP)) {
-								cf_debug(CF_SOCKET, "epoll_wait() on client socket detected failure event 0x%x ~~ Failing!", events[0].events);
-							} else {
-								cf_warning(CF_SOCKET, "epoll_wait() on client socket detected non-write events 0x%x ~~ Failing!", events[0].events);
-							}
-							goto Fail;
-						}
-					} else {
-						cf_warning(CF_SOCKET, "epoll_wait() on client socket returned event on unknown socket %d ~~ Retrying!", events[0].data.fd);
-						goto Retry;
-					}
-					if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_DEL, s->sock, &event)) {
-						cf_warning(CF_SOCKET, "epoll_ctl(DEL) on client socket failed (errno %d: \"%s\")", errno, cf_strerror(errno));
-					}
-					close(epoll_fd);
-					goto Success;
-				}
-Retry:
-				cf_debug(CF_SOCKET, "Connect epoll loop:  Retry #%d", tries++);
-				if (start + timeout < cf_getms()) {
-					cf_warning(CF_SOCKET, "Error in delayed connect() to %s:%d: timed out", s->addr, s->port);
-					errno = ETIMEDOUT;
-					goto Fail;
-				}
-			} while (1);
-		}
-Fail:
-		cf_debug(CF_SOCKET, "connect failed to %s:%d : %s", s->addr, s->port, cf_strerror(errno));
-
-		if (epoll_fd > 0) {
-			close(epoll_fd);
-		}
-
-		close(s->sock);
-		s->sock = -1;
-		return(-1);
-	} else {
-		cf_debug(CF_SOCKET, "client socket connect() to %s:%d in 1 try!", s->addr, s->port);
-	}
-Success:	;
-	// regarding this: calling here doesn't seem terribly effective.
-	// on the fabric threads, it seems important to set no-delay much later
-	int flag = 1;
-	setsockopt(s->sock, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
-	long farg = fcntl(s->sock, F_GETFL, 0);
-	fcntl(s->sock, F_SETFL, farg & (~O_NONBLOCK)); /* blocking again */
-
-	return(0);
-}
-
-/* cf_socket_close
- * Close a socket originally opened listening
- */
-void
-cf_socket_close(cf_socket_cfg *s)
-{
-	if (!s) {
-		cf_warning(CF_SOCKET, "not closing null socket!");
-		return;
-	}
-
-	shutdown(s->sock, SHUT_RDWR);
-	close(s->sock);
-	s->sock = -1;
-}
-
-/* cf_socket_connect_nb
- * Connect a socket to a remote endpoint
- * In the nonblocking fashion
- * returns the file descriptor
- */
-int
-cf_socket_connect_nb(cf_sockaddr so, int *fd_r)
-{
-	struct sockaddr_in sa;
-	cf_sockaddr_convertfrom(so, &sa);
-
-	int fd;
-	if (0 > (fd = socket(AF_INET, SOCK_STREAM, 0))) {
-		cf_warning(CF_SOCKET, "socket connect error: %d %s", errno, cf_strerror(errno));
-		return(-1);
-	}
-
-	/* Set close-on-exec */
-	fcntl(fd, F_SETFD, 1);
-
-	cf_socket_disable_blocking(fd);
-
-	if (0 > (connect(fd, (struct sockaddr *)&sa, sizeof(sa)))) {
-		if (errno != EINPROGRESS) {
-			cf_warning(CF_SOCKET, "socket connect error: %d %s", errno, cf_strerror(errno));
-			close(fd);
-			return(-1);
-		}
-	}
-
-//	byte *b = (byte *) &sa.sin_addr;
-//	cf_debug(CF_SOCKET,"creating connection: fd %d %02x.%02x.%02x.%02x : %d",fd, b[0],b[1],b[2],b[3] ,htons(sa.sin_port) );
-
-	*fd_r = fd;
-	return(0);
-}
-
-
 
 /* cf_svcmsocket_init
  * Initialize a multicast service/receive socket
@@ -717,7 +774,7 @@ cf_mcastsocket_close(cf_mcastsocket_cfg *ms)
 {
 	cf_socket_cfg *s = &(ms->s);
 
-	close(s->sock);
+	safe_close(s->sock);
 }
 
 //

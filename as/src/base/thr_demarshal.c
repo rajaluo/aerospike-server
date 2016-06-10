@@ -726,7 +726,9 @@ thr_demarshal(void *arg)
 						// Number of bytes to peek from the socket.
 //						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
 						size_t peek_sz = MIN(proto.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
-						if (!(peeked_data_sz = cf_socket_recv(fd, peekbuf, peek_sz, 0))) {
+						int32_t tmp = cf_socket_recv(fd, peekbuf, peek_sz, 0);
+						peeked_data_sz = tmp < 0 ? 0 : tmp;
+						if (!peeked_data_sz) {
 							// That's actually legitimate. The as_proto may have gone into one
 							// packet, the as_msg into the next one, which we haven't yet received.
 							// This just "never happened" without async.
@@ -811,7 +813,7 @@ thr_demarshal(void *arg)
 					// Read the data.
 					n = cf_socket_recv(fd, proto_p->data + (proto_p->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
 					if (0 >= n) {
-						if (errno == EAGAIN) {
+						if (n < 0 && errno == EAGAIN) {
 							continue;
 						}
 						cf_info(AS_DEMARSHAL, "receive socket: fail? n %d errno %d %s closing connection.", n, errno, cf_strerror(errno));
@@ -1007,7 +1009,7 @@ as_demarshal_start()
 	// Start the listener socket: note that because this is done after privilege
 	// de-escalation, we can't use privileged ports.
 	g_config.socket.reuse_addr = g_config.socket_reuse_addr;
-	if (0 != cf_socket_init_svc(&g_config.socket)) {
+	if (0 != cf_socket_init_server(&g_config.socket)) {
 		cf_crash(AS_DEMARSHAL, "couldn't initialize service socket");
 	}
 	cf_socket_disable_blocking(g_config.socket.sock);
@@ -1017,7 +1019,7 @@ as_demarshal_start()
 	if (g_config.localhost_socket.addr) {
 		cf_debug(AS_DEMARSHAL, "Opening a localhost service socket");
 		g_config.localhost_socket.reuse_addr = g_config.socket_reuse_addr;
-		if (0 != cf_socket_init_svc(&g_config.localhost_socket)) {
+		if (0 != cf_socket_init_server(&g_config.localhost_socket)) {
 			cf_crash(AS_DEMARSHAL, "couldn't initialize localhost service socket");
 		}
 		cf_socket_disable_blocking(g_config.localhost_socket.sock);
@@ -1029,7 +1031,7 @@ as_demarshal_start()
 		cf_debug(AS_DEMARSHAL, "Opening XDR service socket");
 		g_config.xdr_socket.reuse_addr = g_config.socket_reuse_addr;
 
-		if (0 != cf_socket_init_svc(&g_config.xdr_socket)) {
+		if (0 != cf_socket_init_server(&g_config.xdr_socket)) {
 			cf_crash(AS_DEMARSHAL, "Couldn't initialize XDR service socket");
 		}
 

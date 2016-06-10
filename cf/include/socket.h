@@ -34,6 +34,16 @@
 
 #include <sys/socket.h>
 
+typedef uint64_t cf_sock_addr_legacy;
+
+typedef struct {
+	const char *addr;
+	cf_ip_port port;
+	bool reuse_addr;
+	int32_t type;
+	int32_t sock;
+} cf_socket_cfg;
+
 int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size);
@@ -44,49 +54,38 @@ int32_t cf_ip_port_to_string(cf_ip_port port, char *string, size_t size);
 int32_t cf_ip_port_from_binary(const uint8_t *binary, cf_ip_port *port, size_t size);
 int32_t cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size);
 
+int32_t cf_sock_addr_from_host_port(const char *host, cf_ip_port port, cf_sock_addr *addr);
 int32_t cf_sock_addr_from_string(const char *string, cf_sock_addr *addr);
 int32_t cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size);
 int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size);
 int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size);
 
-void cf_sock_addr_from_binary_legacy(const uint64_t *binary, cf_sock_addr *addr);
-void cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, uint64_t *binary);
+void cf_sock_addr_from_binary_legacy(const cf_sock_addr_legacy *sal, cf_sock_addr *addr);
+void cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, cf_sock_addr_legacy *sal);
+void cf_sock_addr_legacy_set_port(cf_sock_addr_legacy *legacy, cf_ip_port port);
 
 void cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr);
 void cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native);
 
 void cf_socket_disable_blocking(int32_t fd);
+void cf_socket_enable_blocking(int32_t fd);
 void cf_socket_disable_nagle(int32_t fd);
+void cf_socket_enable_nagle(int32_t fd);
+
+int32_t cf_socket_init_server(cf_socket_cfg *conf);
+int32_t cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout);
+int32_t cf_socket_init_client_nb(cf_sock_addr *addr);
+
+int32_t cf_socket_peer_name(int32_t fd, cf_sock_addr *addr);
+
+int32_t cf_socket_recv_from(int32_t fd, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
+int32_t cf_socket_recv(int32_t fd, void *buff, size_t size, int32_t flags);
+int32_t cf_socket_send_to(int32_t fd, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
+int32_t cf_socket_send(int32_t fd, void *buff, size_t size, int32_t flags);
+
+void cf_socket_close(cf_socket_cfg *conf);
 
 // -------------------- OLD CODE --------------------
-
-#include <netinet/in.h>
-#include <sys/socket.h>
-
-// TODO - as_ .c files depend on this:
-#include <arpa/inet.h>
-
-
-/* SYNOPSIS
- * */
-
-// the reality is all addresses are IPv4, even with the coming ipv6, an address can
-// fit easily in a uint64_t. Create a type and some utility routines so you can just
-// traffic in an address type.
-
-typedef uint64_t cf_sockaddr;
-
-/* cf_socket_cfg
- * A socket, which can be used for either inbound or outbound connections */
-typedef struct cf_socket_cfg_t {
-	char *addr;
-	int port;
-	bool reuse_addr; // set if you want 'reuseaddr' for server socket setup
-					 // not recommended for production use, rather nice for debugging
-	int proto;
-	int sock;
-	struct sockaddr_in saddr;
-} cf_socket_cfg;
 
 /* cf_mcastsocket_cfg
  * A multicast socket */
@@ -98,20 +97,8 @@ typedef struct cf_mcastsocket_cfg_t {
 } cf_mcastsocket_cfg;
 
 /* Function declarations */
-extern int cf_socket_recv(int sock, void *buf, size_t buflen, int flags);
-extern int cf_socket_send(int sock, void *buf, size_t buflen, int flags);
-extern int cf_socket_init_svc(cf_socket_cfg *s);
-extern int cf_socket_init_client(cf_socket_cfg *s, int timeout);
-extern void cf_socket_close(cf_socket_cfg *s);
 extern int cf_mcastsocket_init(cf_mcastsocket_cfg *ms);
 extern void cf_mcastsocket_close(cf_mcastsocket_cfg *ms);
-extern int cf_socket_recvfrom(int sock, void *buf, size_t buflen, int flags, cf_sockaddr *from);
-extern int cf_socket_sendto(int sock, void *buf, size_t buflen, int flags, cf_sockaddr to);
-
-extern int cf_socket_connect_nb(cf_sockaddr so, int *fd);
-extern void cf_sockaddr_convertto(const struct sockaddr_in *src, cf_sockaddr *dst);
-extern void cf_sockaddr_convertfrom(const cf_sockaddr src, struct sockaddr_in *dst);
-extern void cf_sockaddr_setport(cf_sockaddr *so, unsigned short port);
 
 /*
 ** get information about all interfaces

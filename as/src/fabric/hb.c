@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/param.h>  // For MAX().
 
@@ -219,7 +220,7 @@ static const msg_template as_hb_msg_template[] = {
  */
 typedef struct {
 	uint64_t last;
-	cf_sockaddr socket;         // if mcast, the socket we heard about the node
+	cf_sock_addr_legacy sal;    // if mcast, the socket we heard about the node
 	uint32_t addr, port;        // if mesh, filled with the address and port
 	int fd;                     // last fd we heard a pulse from, so as to avoid multiple fds between nodes
 	bool new;                   // note if this is a new node
@@ -277,12 +278,12 @@ typedef enum as_hb_err_type_e
 	AS_HB_ERR_NO_NODE_PULSE,
 	AS_HB_ERR_NO_NODE_REQ,
 	AS_HB_ERR_NO_ANV_LENGTH,
-	AS_HB_ERR_SENDTO_FAIL_1,
-	AS_HB_ERR_SENDTO_FAIL_2,
-	AS_HB_ERR_SENDTO_FAIL_3,
-	AS_HB_ERR_SENDTO_FAIL_4,
-	AS_HB_ERR_SENDTO_FAIL_5,
-	AS_HB_ERR_SENDTO_FAIL_6,
+	AS_HB_ERR_SEND_TO_FAIL_1,
+	AS_HB_ERR_SEND_TO_FAIL_2,
+	AS_HB_ERR_SEND_TO_FAIL_3,
+	AS_HB_ERR_SEND_TO_FAIL_4,
+	AS_HB_ERR_SEND_TO_FAIL_5,
+	AS_HB_ERR_SEND_TO_FAIL_6,
 	AS_HB_ERR_MISSING_FIELD,
 	AS_HB_ERR_EXPIRE_HB,
 	AS_HB_ERR_EXPIRE_FAB_DEAD,
@@ -313,12 +314,12 @@ static char *as_hb_error_msg[AS_HB_ERR_MAX_TYPE][2] =
 	{ "no node in pulse", "nn", },
 	{ "no node in info request", "nnir", },
 	{ "no anv length", "nal", },
-	{ "sendto fail 1", "sf1", },
-	{ "sendto fail 2", "sf2", },
-	{ "sendto fail 3", "sf3", },
-	{ "sendto fail 4", "sf4", },
-	{ "sendto fail 5", "sf5", },
-	{ "sendto fail 6", "sf6", },
+	{ "send_to fail 1", "sf1", },
+	{ "send_to fail 2", "sf2", },
+	{ "send_to fail 3", "sf3", },
+	{ "send_to fail 4", "sf4", },
+	{ "send_to fail 5", "sf5", },
+	{ "send_to fail 6", "sf6", },
 	{ "missing required field", "mrf", },
 	{ "expire hb", "eh", },
 	{ "expire fab dead", "efd", },
@@ -390,7 +391,7 @@ as_hb_register(as_hb_event_fn cb, void *udata)
 /* as_hb_getaddr
  * Get the socket address for a node - stashed in the adjacency hash */
 int
-as_hb_getaddr(cf_node node, cf_sockaddr *so)
+as_hb_getaddr(cf_node node, cf_sock_addr_legacy *sal)
 {
 	as_hb_pulse *a_p_pulse = NULL;
 
@@ -405,13 +406,13 @@ as_hb_getaddr(cf_node node, cf_sockaddr *so)
 	if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse))
 		return(-1);
 	if (AS_HB_MODE_MCAST == g_config.hb_mode)
-		*so = a_p_pulse->socket;
+		*sal = a_p_pulse->sal;
 	else
-		*so = a_p_pulse->addr;
+		*sal = a_p_pulse->addr;
 
 	/* Overwrite the port */
 	unsigned short port = cf_nodeid_get_port(node);
-	cf_sockaddr_setport(so, port);
+	cf_sock_addr_legacy_set_port(sal, port);
 
 	return(0);
 }
@@ -594,7 +595,7 @@ as_hb_nodes_discovered_hash_put_conn(cf_node node, int fd)
 }
 
 void
-as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sockaddr socket, uint32_t addr, uint32_t port, cf_node *buf, size_t bufsz)
+as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sock_addr_legacy *sal, uint32_t addr, uint32_t port, cf_node *buf, size_t bufsz)
 {
 	as_hb_pulse *a_p_pulse = NULL, *p_pulse = NULL;
 	pthread_mutex_t *vlock;
@@ -632,7 +633,7 @@ as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sockaddr socket, uint32_
 	// Not sure that keeping the socket is safe for MCAST, but going to try it for now.
 	if (p_pulse->new) {
 		if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-			p_pulse->socket = socket;
+			p_pulse->sal = *sal;
 		} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
 			p_pulse->addr = addr;
 			p_pulse->port = port;
@@ -648,7 +649,7 @@ as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sockaddr socket, uint32_
 	} else {
 		int rv = shash_put_unique(g_hb.adjacencies, &node, p_pulse);
 		if (rv == SHASH_ERR_FOUND) {
-			as_hb_process_fabric_heartbeat(node, fd, socket, addr, port, buf, bufsz);
+			as_hb_process_fabric_heartbeat(node, fd, sal, addr, port, buf, bufsz);
 		} else if (rv != 0) {
 			cf_warning(AS_HB, "unable to update adjacencies hash");
 		}
@@ -1037,7 +1038,7 @@ void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 			cf_socket_cfg s;
 			s.addr = e->host;
 			s.port = e->port;
-			s.proto = SOCK_STREAM;
+			s.type = SOCK_STREAM;
 
 			cf_debug(AS_HB, "attempting to connect mesh host at %s:%d", e->host, e->port);
 
@@ -1606,10 +1607,10 @@ as_hb_tcp_send(int fd, byte * buff, size_t msg_size)
 	size_t orig_size = msg_size;
 	cf_clock start = cf_getus();
 	do {
-		cf_detail(AS_HB, "cf_socket_sendto() fd %d retry count:%d msg_size:%zu", fd, retry, msg_size);
-		ret =  cf_socket_sendto(fd, buff, msg_size, 0, 0);
+		cf_detail(AS_HB, "cf_socket_send_to() fd %d retry count:%d msg_size:%zu", fd, retry, msg_size);
+		ret =  cf_socket_send_to(fd, buff, msg_size, 0, NULL);
 		if( ( ret < 0 ) && (( errno != EAGAIN ) || ( errno != EWOULDBLOCK ))) {
-			cf_info(AS_HB, "as_hb_tcp_send cf_socket_sendto() fd %d failed", fd);
+			cf_info(AS_HB, "as_hb_tcp_send cf_socket_send_to() fd %d failed", fd);
 			as_hb_tcp_close(fd);
 			return -1;
 		} else if (ret > 0) {
@@ -1621,13 +1622,13 @@ as_hb_tcp_send(int fd, byte * buff, size_t msg_size)
 			retry++;
 			usleep(g_config.hb_mesh_rw_retry_timeout/3);
 		} else {
-			cf_detail(AS_HB, "cf_socket_sendto() fd %d retry count:%d msg_size:%zu complete msg sent", fd, retry, msg_size);
+			cf_detail(AS_HB, "cf_socket_send_to() fd %d retry count:%d msg_size:%zu complete msg sent", fd, retry, msg_size);
 			break;
 		}
 	} while ( ((start + g_config.hb_mesh_rw_retry_timeout) > cf_getus()) && (retry < max_retry) );
 
 	if ( (msg_size != 0)  && (msg_size != orig_size) ) {
-		cf_warning(AS_HB, "as_hb_tcp_send cf_socket_sendto() fd %d incomplete msg sent. %zu bytes left out of %zu bytes.", fd, msg_size, orig_size);
+		cf_warning(AS_HB, "as_hb_tcp_send cf_socket_send_to() fd %d incomplete msg sent. %zu bytes left out of %zu bytes.", fd, msg_size, orig_size);
 		as_hb_tcp_close(fd); //closing fd
 		return -1;
 	}
@@ -1690,7 +1691,7 @@ as_hb_tcp_recv(int fd, byte * buff, size_t msg_size)
 /* as_hb_rx_process
  * Process a received heartbeat */
 void
-as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
+as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, int fd)
 {
 	cf_node node;
 	as_hb_pulse *a_p_pulse = NULL;
@@ -1811,7 +1812,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 			// receiving other's heartbeats
 			p_pulse->fd = fd;
 			if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-				p_pulse->socket = so;
+				p_pulse->sal = *sal;
 				p_pulse->port = p_pulse->addr = 0;
 			} else {
 				msg_get_uint32(m, AS_HB_MSG_ADDR, &p_pulse->addr);
@@ -1822,7 +1823,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 							  inet_ntop(AF_INET, &p_pulse->addr, fromip, INET_ADDRSTRLEN) == NULL ? "Unknown" : fromip,
 							  p_pulse->port);
 				}
-				memset(&p_pulse->socket, 0, sizeof(cf_sockaddr));
+				memset(&p_pulse->sal, 0, sizeof(cf_sock_addr_legacy));
 			}
 
 			/* Get the succession list from the pulse message */
@@ -1852,7 +1853,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 #ifdef FAIL_FAST
 					cf_crash(AS_HB, "declining to recurse");
 #endif
-					as_hb_rx_process(m, so, fd);
+					as_hb_rx_process(m, sal, fd);
 					break;
 				} else if (rv != 0) {
 					cf_warning(AS_HB, "unable to update adjacencies hash");
@@ -1914,14 +1915,16 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 					size_t n = sizeof(bufm);
 					if (0 == msg_fillbuf(mt, bufm, &n)) {
 						if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-							if (0 > cf_socket_sendto(fd, bufm, n, 0, so)) {
-								cf_detail(AS_HB, "cf_socket_sendto() failed 1");
-								as_hb_error(AS_HB_ERR_SENDTO_FAIL_1);
+							cf_sock_addr sa;
+							cf_sock_addr_from_binary_legacy(sal, &sa);
+							if (0 > cf_socket_send_to(fd, bufm, n, 0, &sa)) {
+								cf_detail(AS_HB, "cf_socket_send_to() failed 1");
+								as_hb_error(AS_HB_ERR_SEND_TO_FAIL_1);
 							}
 						} else {
 							if (0 > as_hb_tcp_send(fd, bufm, n)) {
 								cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 2", fd);
-								as_hb_error(AS_HB_ERR_SENDTO_FAIL_2);
+								as_hb_error(AS_HB_ERR_SEND_TO_FAIL_2);
 							}
 						}
 					} else {
@@ -1972,14 +1975,16 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 				size_t n = sizeof(bufm);
 				if (0 == msg_fillbuf(mt, bufm, &n)) {
 					if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-						if (0 > cf_socket_sendto(fd, bufm, n, 0, so)) {
-							cf_detail(AS_HB, "cf_socket_sendto() failed 3");
-							as_hb_error(AS_HB_ERR_SENDTO_FAIL_3);
+						cf_sock_addr sa;
+						cf_sock_addr_from_binary_legacy(sal, &sa);
+						if (0 > cf_socket_send_to(fd, bufm, n, 0, &sa)) {
+							cf_detail(AS_HB, "cf_socket_send_to() failed 3");
+							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_3);
 						}
 					} else {
 						if (0 > as_hb_tcp_send(fd, bufm, n)) {
 							cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 4", fd);
-							as_hb_error(AS_HB_ERR_SENDTO_FAIL_4);
+							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_4);
 						}
 					}
 				} else {
@@ -2209,12 +2214,17 @@ CloseSocket:
 
 				if (events[i].events & EPOLLIN) {
 
-					cf_sockaddr from;
+					cf_sock_addr_legacy from;
 					int r = 0;
 					memset(&from, 0, sizeof(from));
 
 					if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-						r = cf_socket_recvfrom(fd, bufr, sizeof(bufr), 0, &from);
+						cf_sock_addr sa;
+						r = cf_socket_recv_from(fd, bufr, sizeof(bufr), 0, &sa);
+
+						if (r >= 0) {
+							cf_sock_addr_to_binary_legacy(&sa, &from);
+						}
 					} else {
 						r = as_hb_tcp_recv(fd, bufr, sizeof(bufr));
 					}
@@ -2224,7 +2234,7 @@ CloseSocket:
 							cf_detail(AS_HB, "unable to parse heartbeat message");
 							as_hb_error(AS_HB_ERR_UNPARSABLE_MSG);
 						} else {
-							as_hb_rx_process(mr, from, fd);
+							as_hb_rx_process(mr, &from, fd);
 						}
 						msg_reset(mr);
 					} else {
@@ -2258,22 +2268,18 @@ CloseSocket:
 				if (true == g_hb.endpoint_txlist[i]) {
 					if (true == g_hb.endpoint_txlist_isudp[i]) {
 						cf_detail(AS_HB, "sending udp heartbeat to index %d : msg size %zu", i, n);
-						struct sockaddr_in so;
-						cf_sockaddr dest;
-						so.sin_family = AF_INET;
-						inet_pton(AF_INET, g_config.hb_addr, &so.sin_addr.s_addr);
-						so.sin_port = htons(g_config.hb_port);
-						cf_sockaddr_convertto(&so, &dest);
+						cf_sock_addr dest;
+						cf_sock_addr_from_host_port(g_config.hb_addr, g_config.hb_port, &dest);
 
-						if (0 > cf_socket_sendto(i, buft, n, 0, dest)) {
-							cf_detail(AS_HB, "cf_socket_sendto() failed 5");
-							as_hb_error(AS_HB_ERR_SENDTO_FAIL_5);
+						if (0 > cf_socket_send_to(i, buft, n, 0, &dest)) {
+							cf_detail(AS_HB, "cf_socket_send_to() failed 5");
+							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_5);
 						}
 					} else { // tcp
 						cf_detail(AS_HB, "sending tcp heartbeat to index %d : msg size %zu", i, n);
 						if (0 > as_hb_tcp_send(i, buft, n)) {
 							cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 6", i);
-							as_hb_error(AS_HB_ERR_SENDTO_FAIL_6);
+							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_6);
 						}
 					}
 				}
@@ -2665,9 +2671,9 @@ as_hb_init_socket()
 			cf_info(AS_HB, "initializing mesh heartbeat socket : %s:%d", g_config.hb_addr, g_config.hb_port);
 			g_hb.socket.addr = g_config.hb_addr;
 			g_hb.socket.port = g_config.hb_port;
-			g_hb.socket.proto = SOCK_STREAM;
+			g_hb.socket.type = SOCK_STREAM;
 			g_hb.socket.reuse_addr = (g_config.socket_reuse_addr) ? true : false;
-			if (0 != cf_socket_init_svc(&g_hb.socket)) {
+			if (0 != cf_socket_init_server(&g_hb.socket)) {
 				cf_crash(AS_AS, "couldn't initialize unicast heartbeat socket");
 			}
 			break;
@@ -2752,7 +2758,7 @@ static void
 as_hb_dump_pulse(as_hb_pulse *pulse)
 {
 	cf_info(AS_HB, " last %lu", pulse->last);
-	cf_info(AS_HB, " sockaddr %"PRIx64"", pulse->socket);
+	cf_info(AS_HB, " sockaddr %"PRIx64"", pulse->sal);
 	uint8_t *addr = (uint8_t *) &pulse->addr;
 	cf_info(AS_HB, " addr %d.%d.%d.%d port %d", addr[0], addr[1], addr[2], addr[3], pulse->port);
 	cf_info(AS_HB, " fd %d", pulse->fd);
@@ -2880,7 +2886,7 @@ as_hb_dump(bool verbose)
 							 (AS_HB_MODE_MESH == g_config.hb_mode ? &g_hb.socket : NULL));
 
 	if (socket) {
-		cf_info(AS_HB, "HB Socket:  addr:port %s:%d proto %d sock %d", socket->addr, socket->port, socket->proto, socket->sock);
+		cf_info(AS_HB, "HB Socket:  addr:port %s:%d type %d sock %d", socket->addr, socket->port, socket->type, socket->sock);
 	} else {
 		cf_info(AS_HB, "There is no HB Socket.");
 	}

@@ -65,10 +65,10 @@ typedef void (*as_hb_event_fn) (int nevents, as_hb_event_node *events, void *uda
 extern void as_hb_init();
 extern void as_hb_start();
 extern bool as_hb_shutdown();
-extern int as_hb_getaddr(cf_node node, cf_sockaddr *so);
+extern int as_hb_getaddr(cf_node node, cf_sock_addr_legacy *sal);
 extern int as_hb_register(as_hb_event_fn cb, void *udata);
 
-extern void as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sockaddr socket, uint32_t addr, uint32_t port, cf_node *buf, size_t bufsz);
+extern void as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sock_addr_legacy *sal, uint32_t addr, uint32_t port, cf_node *buf, size_t bufsz);
 extern bool as_hb_get_is_node_dunned(cf_node node);
 extern void as_hb_set_is_node_dunned(cf_node node, bool state, char *context);
 extern int as_hb_set_are_nodes_dunned(char *node_str, int node_str_len, bool is_dunned);

@@ -227,11 +227,11 @@ thr_info_port_fn(void *arg)
 	// de-escalation, we can't use privileged ports.
 	cf_socket_cfg info_socket;
 	info_socket.addr = cf_strdup("0.0.0.0");
-	info_socket.proto = SOCK_STREAM;
+	info_socket.type = SOCK_STREAM;
 	info_socket.port = g_config.info_port;
 	info_socket.reuse_addr = g_config.socket_reuse_addr ? true : false;
 	// Listen happens here.
-	if (0 != cf_socket_init_svc(&info_socket)) {
+	if (0 != cf_socket_init_server(&info_socket)) {
 		cf_crash(AS_AS, "couldn't initialize service socket");
 	}
 	cf_socket_disable_blocking(info_socket.sock);
