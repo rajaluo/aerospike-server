@@ -2734,7 +2734,8 @@ as_hb_shutdown()
 			cf_mcastsocket_close(&g_hb.socket_mcast);
 			break;
 		case AS_HB_MODE_MESH:
-			cf_socket_close(&g_hb.socket);
+			cf_socket_shutdown(g_hb.socket.sock);
+			cf_socket_close(g_hb.socket.sock);
 			break;
 		case AS_HB_MODE_UNDEF:
 		default:

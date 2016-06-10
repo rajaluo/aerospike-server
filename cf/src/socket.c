@@ -398,7 +398,8 @@ connect_socket(int32_t fd, struct sockaddr *sa, int32_t timeout)
 	struct epoll_event event = { .data.fd = fd, .events = EPOLLOUT };
 
 	if (epoll_ctl(efd, EPOLL_CTL_ADD, fd, &event) < 0) {
-		cf_crash(CF_SOCKET, "epoll_ctl() failed: %d (%s)", errno, cf_strerror(errno));
+		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
 	}
 
 	int32_t count = safe_wait(efd, &event, 1, timeout);
@@ -413,7 +414,8 @@ connect_socket(int32_t fd, struct sockaddr *sa, int32_t timeout)
 	safe_getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
 
 	if (err != 0) {
-		cf_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)", fd, err, cf_strerror(err));
+		cf_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)",
+				fd, err, cf_strerror(err));
 		goto cleanup2;
 	}
 
@@ -422,7 +424,8 @@ connect_socket(int32_t fd, struct sockaddr *sa, int32_t timeout)
 
 cleanup2:
 	if (epoll_ctl(efd, EPOLL_CTL_DEL, fd, NULL) < 0) {
-		cf_crash(CF_SOCKET, "epoll_ctl() failed: %d (%s)", errno, cf_strerror(errno));
+		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
 	}
 
 	safe_close(efd);
@@ -590,45 +593,64 @@ cf_socket_recv(int32_t fd, void *buff, size_t size, int32_t flags)
 }
 
 void
-cf_socket_close(cf_socket_cfg *conf)
+cf_socket_shutdown(int32_t fd)
 {
-	int32_t fd = conf->sock;
-	cf_debug(CF_SOCKET, "Closing FD %d", fd);
+	cf_debug(CF_SOCKET, "Shutting down FD %d", fd);
 
+	if (shutdown(fd, SHUT_RDWR) < 0) {
+		if (errno != ENOTCONN) {
+			cf_crash(CF_SOCKET, "shutdown() failed on FD %d: %d (%s)",
+					fd, errno, cf_strerror(errno));
+		}
+		else {
+			cf_warning(CF_SOCKET, "shutdown() on disconnected FD %d: %d (%s)",
+					fd, errno, cf_strerror(errno));
+		}
+	}
+}
+
+void
+cf_socket_close(int32_t fd)
+{
+	cf_debug(CF_SOCKET, "Closing FD %d", fd);
+	safe_close(fd);
+}
+
+void
+cf_socket_drain_close(cf_socket sock)
+{
+	cf_debug(CF_SOCKET, "Draining and closing FD %d", sock.fd);
 	int32_t efd = epoll_create(1);
 
 	if (efd < 0) {
 		cf_crash(CF_SOCKET, "epoll_create() failed: %d (%s)", errno, cf_strerror(errno));
 	}
 
-	struct epoll_event event = { .data.fd = fd, .events = EPOLLRDHUP };
+	struct epoll_event event = { .data.fd = sock.fd, .events = EPOLLRDHUP };
 
-	if (epoll_ctl(efd, EPOLL_CTL_ADD, fd, &event) < 0) {
-		cf_crash(CF_SOCKET, "epoll_ctl() failed: %d (%s)", errno, cf_strerror(errno));
+	if (epoll_ctl(efd, EPOLL_CTL_ADD, sock.fd, &event) < 0) {
+		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
+				sock.fd, errno, cf_strerror(errno));
 	}
 
-	if (shutdown(fd, SHUT_RDWR) < 0) {
-		cf_warning(CF_SOCKET, "Error while shutting down FD %d", fd);
-		goto cleanup1;
-	}
-
+	cf_socket_shutdown(sock.fd);
 	int32_t count = safe_wait(efd, &event, 1, 5000);
 
 	if (count == 0) {
-		cf_warning(CF_SOCKET, "Timeout while waiting for FD %d to flush", fd);
+		cf_warning(CF_SOCKET, "Timeout while waiting for FD %d to drain", sock.fd);
 		goto cleanup1;
 	}
 
-	cf_debug(CF_SOCKET, "FD %d flushed", fd);
+	cf_debug(CF_SOCKET, "FD %d drained", sock.fd);
 
 cleanup1:
-	if (epoll_ctl(efd, EPOLL_CTL_DEL, fd, NULL) < 0) {
-		cf_crash(CF_SOCKET, "epoll_ctl() failed: %d (%s)", errno, cf_strerror(errno));
+	if (epoll_ctl(efd, EPOLL_CTL_DEL, sock.fd, NULL) < 0) {
+		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
+				sock.fd, errno, cf_strerror(errno));
 	}
 
 	safe_close(efd);
-	safe_close(fd);
-	conf->sock = -1;
+	cf_socket_close(sock.fd);
 }
 
 // -------------------- OLD CODE --------------------

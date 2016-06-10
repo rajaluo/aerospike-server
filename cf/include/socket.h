@@ -34,6 +34,10 @@
 
 #include <sys/socket.h>
 
+typedef struct {
+	int32_t fd;
+} __attribute__((packed)) cf_socket;
+
 typedef uint64_t cf_sock_addr_legacy;
 
 typedef struct {
@@ -83,7 +87,9 @@ int32_t cf_socket_recv(int32_t fd, void *buff, size_t size, int32_t flags);
 int32_t cf_socket_send_to(int32_t fd, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
 int32_t cf_socket_send(int32_t fd, void *buff, size_t size, int32_t flags);
 
-void cf_socket_close(cf_socket_cfg *conf);
+void cf_socket_shutdown(int32_t fd);
+void cf_socket_close(int32_t fd);
+void cf_socket_drain_close(cf_socket sock);
 
 // -------------------- OLD CODE --------------------
 
