@@ -1079,7 +1079,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 		if (AS_HB_MODE_MCAST == g_config.hb_mode) {
 			cf_sock_addr sa;
 
-			if (cf_socket_peer_name(fd, &sa) < 0) {
+			if (cf_socket_remote_name(fd, &sa) < 0) {
 				goto Next;
 			}
 
@@ -1516,21 +1516,17 @@ fabric_accept_fn(void *argv)
 	do {
 		/* Accept new connections on the service socket */
 		int csocket;
-		struct sockaddr_in caddr;
-		socklen_t clen = sizeof(caddr);
-		char cpaddr[24];
+		cf_sock_addr sa;
 
-		if (-1 == (csocket = accept(sc.sock, (struct sockaddr *)&caddr, &clen))) {
+		if (-1 == (csocket = cf_socket_accept(sc.sock, &sa))) {
 			if (errno == EMFILE) {
 				cf_info(AS_FABRIC, " warning : low on file descriptors ");
 				continue;
 			}
 			else {
-				cf_crash(AS_FABRIC, "accept: %d %s", errno, cf_strerror(errno));
+				cf_crash(AS_FABRIC, "cf_socket_accept: %d %s", errno, cf_strerror(errno));
 			}
 		}
-		if (NULL == inet_ntop(AF_INET, &caddr.sin_addr.s_addr, (char *)cpaddr, sizeof(cpaddr)))
-			cf_crash(AS_FABRIC, "inet_ntop(): %s", cf_strerror(errno));
 
 		cf_debug(AS_FABRIC, "fabric_accept: accepting new sock %d", csocket);
 

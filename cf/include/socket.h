@@ -80,7 +80,9 @@ int32_t cf_socket_init_server(cf_socket_cfg *conf);
 int32_t cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout);
 int32_t cf_socket_init_client_nb(cf_sock_addr *addr);
 
-int32_t cf_socket_peer_name(int32_t fd, cf_sock_addr *addr);
+int32_t cf_socket_accept(int32_t fd, cf_sock_addr *addr);
+int32_t cf_socket_remote_name(int32_t fd, cf_sock_addr *addr);
+int32_t cf_socket_local_name(int32_t fd, cf_sock_addr *addr);
 
 int32_t cf_socket_recv_from(int32_t fd, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
 int32_t cf_socket_recv(int32_t fd, void *buff, size_t size, int32_t flags);

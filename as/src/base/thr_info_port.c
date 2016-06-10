@@ -267,11 +267,9 @@ thr_info_port_fn(void *arg)
 
 				// Accept new connections on the service socket.
 				int csocket;
-				struct sockaddr_in caddr;
-				socklen_t clen = sizeof(caddr);
-				char cpaddr[24];
+				cf_sock_addr sa;
 
-				if (-1 == (csocket = accept(s->sock, (struct sockaddr *)&caddr, &clen))) {
+				if (-1 == (csocket = cf_socket_accept(s->sock, &sa))) {
 					// This means we're out of file descriptors - could be a SYN
 					// flood attack or misbehaving client. Eventually we'd like
 					// to make the reaper fairer, but for now we'll just have to
@@ -282,17 +280,16 @@ thr_info_port_fn(void *arg)
 					}
 					if (EINVAL == errno) {
 						if (!(err_count++ % 1000)) {
-							cf_warning(AS_INFO_PORT, "accept(%d, %p, %d) returned EINVAL ~~ Ignoring (err_count: %d)", s->sock, &caddr, clen, err_count);
+							cf_warning(AS_INFO_PORT, "cf_socket_accept(%d) returned EINVAL ~~ Ignoring (err_count: %d)", s->sock, err_count);
 						}
 						continue;
 					}
-					cf_crash(AS_INFO_PORT, "accept: %s (errno %d)", cf_strerror(errno), errno);
-				}
-				if (NULL == inet_ntop(AF_INET, &caddr.sin_addr.s_addr, (char *)cpaddr, sizeof(cpaddr))) {
-					cf_crash(AS_INFO_PORT, "inet_ntop(): %s (errno %d)", cf_strerror(errno), errno);
+					cf_crash(AS_INFO_PORT, "cf_socket_accept: %s (errno %d)", cf_strerror(errno), errno);
 				}
 
-				cf_detail(AS_INFO_PORT, "new connection: %s", cpaddr);
+				char sa_str[1000];
+				cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
+				cf_detail(AS_INFO_PORT, "new connection: %s", sa_str);
 
 				// Set the socket to nonblocking.
 				cf_socket_disable_blocking(csocket);

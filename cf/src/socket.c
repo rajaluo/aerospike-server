@@ -517,19 +517,58 @@ cleanup0:
 	return res;
 }
 
+int32_t cf_socket_accept(int32_t fd, cf_sock_addr *addr)
+{
+	struct sockaddr_storage sas;
+	struct sockaddr *sa = NULL;
+	socklen_t sa_len = 0;
+
+	if (addr != NULL) {
+		sa = (struct sockaddr *)&sas;
+		sa_len = sizeof sas;
+	}
+
+	int32_t res = accept(fd, sa, &sa_len);
+
+	if (res < 0) {
+		cf_debug(CF_SOCKET, "Error while accepting from FD %d: %d (%s)",
+				fd, errno, cf_strerror(errno));
+	}
+	else if (addr != NULL) {
+		cf_sock_addr_from_native(sa, addr);
+	}
+
+	return res;
+}
+
+typedef int32_t (*name_func)(int32_t fd, struct sockaddr *sa, socklen_t *sa_len);
+
 int32_t
-cf_socket_peer_name(int32_t fd, cf_sock_addr *addr)
+cf_socket_x_name(name_func func, const char *which, int32_t fd, cf_sock_addr *addr)
 {
 	struct sockaddr_storage sas;
 	socklen_t sas_len = sizeof sas;
 
-	if (getpeername(fd, (struct sockaddr *)&sas, &sas_len) < 0) {
-		cf_warning(CF_SOCKET, "Error while getting peer name: %d (%s)", errno, cf_strerror(errno));
+	if (func(fd, (struct sockaddr *)&sas, &sas_len) < 0) {
+		cf_warning(CF_SOCKET, "Error while getting %s name: %d (%s)",
+				which, errno, cf_strerror(errno));
 		return -1;
 	}
 
 	cf_sock_addr_from_native((struct sockaddr *)&sas, addr);
 	return 0;
+}
+
+int32_t
+cf_socket_remote_name(int32_t fd, cf_sock_addr *addr)
+{
+	return cf_socket_x_name(getpeername, "remote", fd, addr);
+}
+
+int32_t
+cf_socket_local_name(int32_t fd, cf_sock_addr *addr)
+{
+	return cf_socket_x_name(getsockname, "local", fd, addr);
 }
 
 int32_t

@@ -2161,11 +2161,9 @@ as_hb_thr(void *arg)
 			/* Accept a new connection */
 			if (fd == sock && (AS_HB_MODE_MESH == g_config.hb_mode)) {
 				int csock;
-				struct sockaddr_in caddr;
-				socklen_t clen = sizeof(caddr);
-				char cpaddr[24];
+				cf_sock_addr sa;
 
-				if (-1 == (csock = accept(fd, (struct sockaddr *) &caddr, &clen))) {
+				if (-1 == (csock = cf_socket_accept(fd, &sa))) {
 					if ((errno == EMFILE) || (errno == ENFILE) || (errno == ENOMEM) || (errno == ENOBUFS)) {
 						if (last_fd_print != (cf_getms() / 1000L)) {
 							cf_warning(AS_HB, "Failed to accept heartbeat connection due to error : %s", cf_strerror(errno));
@@ -2177,13 +2175,13 @@ as_hb_thr(void *arg)
 						usleep(MAX(g_config.hb_interval/2, 1) * 1000);
 						continue;
 					} else {
-						cf_crash(AS_HB, "accept failed: %s", cf_strerror(errno));
+						cf_crash(AS_HB, "cf_socket_accept failed: %s", cf_strerror(errno));
 					}
 				}
-				if (NULL == inet_ntop(AF_INET, &caddr.sin_addr.s_addr, (char *) cpaddr, sizeof(cpaddr)))
-					cf_crash(AS_HB, "inet_ntop failed: %s", cf_strerror(errno));
 
-				cf_debug(AS_HB, "new connection from %s:%d", cpaddr, caddr.sin_port);
+				char sa_str[1000];
+				cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
+				cf_debug(AS_HB, "new connection from %s", sa_str);
 
 				cf_atomic_int_incr(&g_config.heartbeat_connections_opened);
 				if (0 != as_hb_endpoint_add(csock, false /*is not udp*/, 0 /*node id unknown until pulse arrives*/)) {

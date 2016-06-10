@@ -518,11 +518,9 @@ thr_demarshal(void *arg)
 			if ((s->sock == events[i].data.fd) || (ls->sock == events[i].data.fd) || (xs->sock == events[i].data.fd)) {
 				// Accept new connections on the service socket.
 				int csocket = -1;
-				struct sockaddr_in caddr;
-				socklen_t clen = sizeof(caddr);
-				char cpaddr[64];
+				cf_sock_addr sa;
 
-				if (-1 == (csocket = accept(events[i].data.fd, (struct sockaddr *)&caddr, &clen))) {
+				if (-1 == (csocket = cf_socket_accept(events[i].data.fd, &sa))) {
 					// This means we're out of file descriptors - could be a SYN
 					// flood attack or misbehaving client. Eventually we'd like
 					// to make the reaper fairer, but for now we'll just have to
@@ -537,24 +535,9 @@ thr_demarshal(void *arg)
 					cf_crash(AS_DEMARSHAL, "accept: %s (errno %d)", cf_strerror(errno), errno);
 				}
 
-				// Get the client IP address in string form.
-				if (caddr.sin_family == AF_INET) {
-					if (NULL == inet_ntop(AF_INET, &caddr.sin_addr.s_addr, (char *)cpaddr, sizeof(cpaddr))) {
-						cf_crash(AS_DEMARSHAL, "inet_ntop(): %s (errno %d)", cf_strerror(errno), errno);
-					}
-				}
-				else if (caddr.sin_family == AF_INET6) {
-					struct sockaddr_in6* addr_in6 = (struct sockaddr_in6*)&caddr;
-
-					if (NULL == inet_ntop(AF_INET6, &addr_in6->sin6_addr, (char *)cpaddr, sizeof(cpaddr))) {
-						cf_crash(AS_DEMARSHAL, "inet_ntop(): %s (errno %d)", cf_strerror(errno), errno);
-					}
-				}
-				else {
-					cf_crash(AS_DEMARSHAL, "unknown address family %u", caddr.sin_family);
-				}
-
-				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", cpaddr, csocket);
+				char sa_str[sizeof ((as_file_handle *)NULL)->client];
+				cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
+				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", sa_str, csocket);
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_config.proto_connections_opened - g_config.proto_connections_closed;
@@ -579,7 +562,7 @@ thr_demarshal(void *arg)
 					cf_crash(AS_DEMARSHAL, "malloc");
 				}
 
-				sprintf(fd_h->client, "%s:%d", cpaddr, ntohs(caddr.sin_port));
+				strcpy(fd_h->client, sa_str);
 				fd_h->fd = csocket;
 
 				fd_h->last_used = cf_getms();

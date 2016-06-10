@@ -79,7 +79,7 @@ cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size)
 		return -1;
 	}
 
-	return 0;
+	return strlen(string);
 }
 
 int32_t
