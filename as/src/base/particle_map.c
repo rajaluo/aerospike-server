@@ -354,7 +354,7 @@ static inline bool is_map_type(uint8_t type);
 static inline bool is_k_ordered(uint8_t flags);
 static inline bool is_kv_ordered(uint8_t flags);
 static size_t map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_size);
-static uint8_t map_adjust_flags(uint8_t flags);
+static uint8_t map_adjust_incoming_flags(uint8_t flags);
 
 static size_t op_map_ext_content_sz(const packed_map_op *op);
 static inline bool op_is_k_ordered(const packed_map_op *op);
@@ -716,7 +716,7 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t va
 	};
 
 	as_pack_map_header(&pk, op.ele_count + 1);
-	as_pack_ext_header(&pk, ext_content_sz, map_adjust_flags(op.pmi.flags));
+	as_pack_ext_header(&pk, ext_content_sz, map_adjust_incoming_flags(op.pmi.flags));
 	as_pack_init_indexes(&pk, &op);
 	as_pack_val(&pk, (const as_val *)&as_nil);
 	memcpy(pk.buffer + pk.offset, op.packed + op.ele_start, op.packed_sz - op.ele_start);
@@ -836,7 +836,7 @@ map_from_asval(const as_val *val, as_particle **pp)
 
 	map_packer mpk;
 	uint32_t ele_count = op.ele_count;
-	uint8_t map_flags = map_adjust_flags(map->flags);
+	uint8_t map_flags = map_adjust_incoming_flags(map->flags);
 	uint32_t content_length = op.packed_sz - op.ele_start;
 
 	map_packer_init(&mpk, (uint32_t)ele_count, map_flags, content_length);
@@ -995,7 +995,7 @@ map_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
 
 	const uint8_t *content_ptr = op.packed + op.ele_start;
 	uint32_t content_sz = op.packed_sz - op.ele_start;
-	uint8_t flags = map_adjust_flags(op.pmi.flags);
+	uint8_t flags = map_adjust_incoming_flags(op.pmi.flags);
 	map_packer mpk;
 
 	map_packer_init(&mpk, op.ele_count, flags, content_sz);
@@ -1115,6 +1115,7 @@ map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_size
 
 	if (is_kv_ordered(flags)) {
 		order_index ordidx;
+
 		order_index_init(&ordidx, NULL, ele_count);
 		size += order_index_size(&ordidx);
 	}
@@ -1123,8 +1124,10 @@ map_calc_ext_content_sz(uint8_t flags, uint32_t ele_count, uint32_t content_size
 }
 
 static uint8_t
-map_adjust_flags(uint8_t flags)
+map_adjust_incoming_flags(uint8_t flags)
 {
+	static const uint8_t mask = AS_PACKED_MAP_FLAG_KV_ORDERED | AS_PACKED_MAP_FLAG_OFF_IDX | AS_PACKED_MAP_FLAG_ORD_IDX;
+
 	if (is_k_ordered(flags)) {
 		flags |= AS_PACKED_MAP_FLAG_OFF_IDX;
 	}
@@ -1133,7 +1136,7 @@ map_adjust_flags(uint8_t flags)
 		flags |= AS_PACKED_MAP_FLAG_ORD_IDX;
 	}
 
-	return flags;
+	return flags & mask;
 }
 
 static size_t
