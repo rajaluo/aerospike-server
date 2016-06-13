@@ -53,7 +53,6 @@
 #include "base/system_metadata.h"
 #include "base/thr_batch.h"
 #include "base/thr_info.h"
-#include "base/thr_proxy.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/ticker.h"
@@ -64,6 +63,7 @@
 #include "fabric/migrate.h"
 #include "fabric/paxos.h"
 #include "storage/storage.h"
+#include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
 
 

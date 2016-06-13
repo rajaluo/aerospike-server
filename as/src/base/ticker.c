@@ -52,12 +52,12 @@
 #include "base/index.h"
 #include "base/secondary_index.h"
 #include "base/thr_info.h"
-#include "base/thr_proxy.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "storage/storage.h"
+#include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
 
 
@@ -234,7 +234,7 @@ log_line_in_progress()
 			as_info_queue_get_size(),
 			as_nsup_queue_get_size(),
 			rw_request_hash_count(),
-			as_proxy_inprogress(),
+			as_proxy_hash_count(),
 			g_config.global_record_ref_count
 			);
 }

@@ -44,8 +44,8 @@
 #include "base/scan.h"
 #include "base/security.h"
 #include "base/thr_demarshal.h"
-#include "base/thr_proxy.h"
 #include "base/udf_rw.h"
+#include "transaction/proxy.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"
 

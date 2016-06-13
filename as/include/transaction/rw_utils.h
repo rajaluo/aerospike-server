@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 #include "msg.h"
+#include "util.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -37,6 +38,21 @@
 #include "base/transaction_policy.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
+
+
+//==========================================================
+// Typedefs and constants.
+//
+
+typedef struct now_times_s {
+	uint64_t now_ns;
+	uint64_t now_ms;
+} now_times;
+
+typedef struct rw_paxos_change_struct_t {
+	cf_node succession[AS_CLUSTER_SZ];
+	cf_node deletions[AS_CLUSTER_SZ];
+} rw_paxos_change_struct;
 
 
 //==========================================================

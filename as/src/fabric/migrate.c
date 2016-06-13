@@ -93,7 +93,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_META_SEQUENCE_FINAL, M_FT_UINT32 }
 };
 
-COMPILER_ASSERT(sizeof(migrate_mt) / sizeof (msg_template) == NUM_MIG_FIELDS);
+COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 
 #define MIG_MSG_SCRATCH_SIZE 128
 
@@ -976,10 +976,8 @@ emigration_send_start(emigration *emig)
 		if (start_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
 			cf_rc_reserve(m);
 
-			int rv;
-
-			if ((rv = as_fabric_send(emig->dest, m,
-					AS_FABRIC_PRIORITY_MEDIUM)) != AS_FABRIC_SUCCESS) {
+			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+					AS_FABRIC_SUCCESS) {
 				as_fabric_msg_put(m);
 			}
 

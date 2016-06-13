@@ -57,7 +57,6 @@
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/scan.h"
-#include "base/thr_proxy.h"
 #include "base/transaction.h"
 #include "base/udf_aerospike.h"
 #include "base/udf_arglist.h"
@@ -65,6 +64,7 @@
 #include "base/udf_record.h"
 #include "base/udf_timer.h"
 #include "base/xdr_serverside.h"
+#include "transaction/proxy.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"
 

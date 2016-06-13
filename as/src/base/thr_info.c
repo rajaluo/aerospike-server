@@ -63,7 +63,6 @@
 #include "base/monitor.h"
 #include "base/scan.h"
 #include "base/thr_batch.h"
-#include "base/thr_proxy.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
@@ -77,6 +76,7 @@
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/paxos.h"
+#include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
 
 #define STR_NS              "ns"
@@ -404,7 +404,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_int("info_queue", as_info_queue_get_size(), db);
 	info_append_int("delete_queue", as_nsup_queue_get_size(), db);
-	info_append_int("proxy_in_progress", as_proxy_inprogress(), db);
+	info_append_int("proxy_in_progress", as_proxy_hash_count(), db);
+	// TODO - why no rw_request hash count?
 
 	info_append_uint64("proxy_initiate", g_config.proxy_initiate, db);
 	info_append_uint64("proxy_action", g_config.proxy_action, db);

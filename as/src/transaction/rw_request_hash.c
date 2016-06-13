@@ -80,19 +80,9 @@ const msg_template rw_mt[] = {
 		{ RW_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 }
 };
 
-COMPILER_ASSERT(sizeof(rw_mt) / sizeof (msg_template) == NUM_RW_FIELDS);
+COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 
 #define RW_MSG_SCRATCH_SIZE 280 // 128 + 152 for prole deletes
-
-typedef struct now_times_s {
-	uint64_t now_ns;
-	uint64_t now_ms;
-} now_times;
-
-typedef struct rw_paxos_change_struct_t {
-	cf_node succession[AS_CLUSTER_SZ];
-	cf_node deletions[AS_CLUSTER_SZ];
-} rw_paxos_change_struct;
 
 
 //==========================================================
@@ -363,7 +353,7 @@ on_paxos_change(as_paxos_generation gen, as_paxos_change* change,
 
 	// If there are nodes to be deleted, execute the deletion algorithm.
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
-		if ((cf_node)0 != del.deletions[i]) {
+		if (del.deletions[i] != (cf_node)0) {
 			rchash_reduce(g_rw_request_hash, paxos_change_delete_reduce_fn,
 					(void*)&del.deletions[i]);
 		}
@@ -374,8 +364,8 @@ on_paxos_change(as_paxos_generation gen, as_paxos_change* change,
 int
 paxos_change_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 {
+	rw_request* rw = (rw_request*)data;
 	rw_paxos_change_struct* del = (rw_paxos_change_struct*)udata;
-	rw_request* rw = data;
 	bool node_in_slist = false;
 
 	for (int i = 0; i < rw->n_dest_nodes; i++) {
@@ -413,7 +403,7 @@ int
 paxos_change_delete_reduce_fn(void* key, uint32_t keylen, void* data,
 		void* udata)
 {
-	rw_request* rw = data;
+	rw_request* rw = (rw_request*)data;
 	cf_node* node = (cf_node*)udata;
 
 	for (int i = 0; i < rw->n_dest_nodes; i++) {

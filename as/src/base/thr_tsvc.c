@@ -46,13 +46,13 @@
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/thr_batch.h"
-#include "base/thr_proxy.h"
 #include "base/transaction.h"
 #include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
+#include "transaction/proxy.h"
 #include "transaction/read.h"
 #include "transaction/udf.h"
 #include "transaction/write.h"
@@ -362,10 +362,13 @@ process_transaction(as_transaction *tr)
 		switch (tr->origin) {
 		case FROM_CLIENT:
 		case FROM_BATCH:
-			as_proxy_divert(dest, tr, ns, partition_cluster_key);
-			// as_proxy_divert() zeroes tr->from, though it's not really needed.
-			// CLIENT - fabric owns msgp, BATCH - it's shared, don't free it.
-			free_msgp = false;
+			if (! as_proxy_divert(dest, tr, ns, partition_cluster_key)) {
+				as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			}
+			else {
+				// CLIENT: fabric owns msgp, BATCH: it's shared, don't free it.
+				free_msgp = false;
+			}
 			break;
 		case FROM_PROXY:
 			as_proxy_return_to_sender(tr, ns);
