@@ -564,7 +564,7 @@ fabric_buffer_release(fabric_buffer *fb)
 		// int epoll_fd = g_fabric_args->workers_epoll_fd[fb->worker_id];
 		// epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fb->fd, 0);
 
-		cf_socket_close(CSFD(fb->sock));
+		cf_socket_close(fb->sock);
 		SFD(fb->sock) = -1;
 		cf_atomic_int_incr(&g_config.fabric_connections_closed);
 
@@ -753,10 +753,9 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	// Initiate the connect to the remote endpoint
 	cf_sock_addr sa;
 	cf_sock_addr_from_binary_legacy(&sal, &sa);
+	cf_socket sock;
 
-	int fd = cf_socket_init_client_nb(&sa);
-
-	if (fd < 0) {
+	if (cf_socket_init_client_nb(&sa, &sock) < 0) {
 		cf_debug(AS_FABRIC, "fabric connect could not create connect");
 		return(-1);
 	}
@@ -764,7 +763,7 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	cf_atomic_int_incr(&g_config.fabric_connections_opened);
 
 	// Create a fabric buffer to go along with the file descriptor
-	fabric_buffer *fb = fabric_buffer_create(WSFD(fd));
+	fabric_buffer *fb = fabric_buffer_create(sock);
 	fabric_buffer_associate(fb, fne);
 
 	// Grab a start message, send it to the remote endpoint so it knows me
@@ -852,7 +851,7 @@ static void
 fabric_set_keepalive_options(fabric_buffer *fb)
 {
 	if (!fb->keepalive_isset && g_config.fabric_keepalive_enabled) {
-		cf_socket_keep_alive(CSFD(fb->sock), g_config.fabric_keepalive_time,
+		cf_socket_keep_alive(fb->sock, g_config.fabric_keepalive_time,
 				g_config.fabric_keepalive_intvl, g_config.fabric_keepalive_probes);
 		fb->keepalive_isset = true;
 	}
@@ -874,7 +873,7 @@ fabric_process_writable(fabric_buffer *fb)
 		cf_atomic_int_incr(&g_config.fabric_write_long);
 
 	if (fb->nodelay_isset == false) {
-		cf_socket_disable_nagle(CSFD(fb->sock));
+		cf_socket_disable_nagle(fb->sock);
 		fb->nodelay_isset = true;
 	}
 
@@ -882,7 +881,7 @@ fabric_process_writable(fabric_buffer *fb)
 
 	byte *send_buf = fb->w_in_place ? fb->w_data : fb->w_buf;
 
-	if (0 > (w_sz = cf_socket_send(CSFD(fb->sock), send_buf + fb->w_len, w_len, MSG_NOSIGNAL))) {
+	if (0 > (w_sz = cf_socket_send(fb->sock, send_buf + fb->w_len, w_len, MSG_NOSIGNAL))) {
 		if (errno == EAGAIN) {
 			return 0;
 		}
@@ -1052,7 +1051,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 		if (AS_HB_MODE_MCAST == g_config.hb_mode) {
 			cf_sock_addr sa;
 
-			if (cf_socket_remote_name(CSFD(fb->sock), &sa) < 0) {
+			if (cf_socket_remote_name(fb->sock, &sa) < 0) {
 				goto Next;
 			}
 
@@ -1117,13 +1116,13 @@ Next:
 			// or if we're way out of memory --- close the connection and let
 			// the error paths take care of it
 			cf_warning(AS_FABRIC, "msg_parse could not parse message, for type %d", fb->r_type);
-			cf_socket_shutdown(CSFD(fb->sock));
+			cf_socket_shutdown(fb->sock);
 			return false;
 		}
 
 		if (msg_parse(m, fb->r_parse, fb->r_msg_size) != 0) {
 			cf_warning(AS_FABRIC, "msg_parse failed regular message, not supposed to happen: fb %p", fb);
-			cf_socket_shutdown(CSFD(fb->sock));
+			cf_socket_shutdown(fb->sock);
 			return false;
 		}
 
@@ -1176,7 +1175,7 @@ fabric_process_readable(fabric_buffer *fb)
 {
 	int32_t	rsz;
 
-	if (0 >= (rsz = cf_socket_recv(CSFD(fb->sock), fb->r_append, fb->r_end - fb->r_append, 0))) {
+	if (0 >= (rsz = cf_socket_recv(fb->sock, fb->r_append, fb->r_end - fb->r_append, 0))) {
 		cf_debug(AS_FABRIC, "read returned %d, broken connection? %d %s", rsz, errno, cf_strerror(errno));
 		return -1;
 	}
@@ -1388,7 +1387,7 @@ fabric_worker_fn(void *argv)
 							} else {
 								cf_debug(AS_FABRIC, "shutting down fd %d", CSFD(fb->sock));
 								if (fb) {
-									cf_socket_shutdown(CSFD(fb->sock));
+									cf_socket_shutdown(fb->sock);
 								} else {
 									cf_warning(AS_FABRIC, "got a NULL fb ~~ Ignorning");
 								}
@@ -1488,10 +1487,10 @@ fabric_accept_fn(void *argv)
 
 	do {
 		/* Accept new connections on the service socket */
-		int csocket;
+		cf_socket csock;
 		cf_sock_addr sa;
 
-		if (-1 == (csocket = cf_socket_accept(sc.sock, &sa))) {
+		if (cf_socket_accept(sc.sock, &csock, &sa) < 0) {
 			if (errno == EMFILE) {
 				cf_info(AS_FABRIC, " warning : low on file descriptors ");
 				continue;
@@ -1501,16 +1500,16 @@ fabric_accept_fn(void *argv)
 			}
 		}
 
-		cf_debug(AS_FABRIC, "fabric_accept: accepting new sock %d", csocket);
+		cf_debug(AS_FABRIC, "fabric_accept: accepting new sock %d", CSFD(csock));
 
 		/* Set the socket to nonblocking */
-		cf_socket_disable_blocking(csocket);
+		cf_socket_disable_blocking(csock);
 
 		cf_atomic_int_incr(&g_config.fabric_connections_opened);
 
 		/* Create new fabric buffer, but don't yet know
 		   the remote endpoint, so the FNE is not associated yet */
-		fabric_buffer *fb = fabric_buffer_create(WSFD(csocket));
+		fabric_buffer *fb = fabric_buffer_create(csock);
 
 		fabric_worker_add(fa, fb);
 
@@ -1548,7 +1547,7 @@ fabric_note_server_fn(void *argv)
 		}
 
 		/* Set the socket to nonblocking */
-		cf_socket_disable_blocking(fd);
+		cf_socket_disable_blocking(WSFD(fd));
 
 		cf_atomic_int_incr(&g_config.fabric_connections_opened);
 

@@ -45,7 +45,7 @@ typedef struct {
 	cf_ip_port port;
 	bool reuse_addr;
 	int32_t type;
-	int32_t sock;
+	cf_socket sock;
 } cf_socket_cfg;
 
 // Accesses the socket file descriptor as an lvalue, i.e., the socket file descriptor
@@ -82,27 +82,28 @@ void cf_sock_addr_legacy_set_port(cf_sock_addr_legacy *legacy, cf_ip_port port);
 void cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr);
 void cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native);
 
-void cf_socket_disable_blocking(int32_t fd);
-void cf_socket_enable_blocking(int32_t fd);
-void cf_socket_disable_nagle(int32_t fd);
-void cf_socket_enable_nagle(int32_t fd);
-void cf_socket_keep_alive(int32_t fd, int32_t idle, int32_t interval, int32_t count);
+void cf_socket_disable_blocking(cf_socket sock);
+void cf_socket_enable_blocking(cf_socket sock);
+void cf_socket_disable_nagle(cf_socket sock);
+void cf_socket_enable_nagle(cf_socket sock);
+void cf_socket_keep_alive(cf_socket sock, int32_t idle, int32_t interval, int32_t count);
 
 int32_t cf_socket_init_server(cf_socket_cfg *conf);
 int32_t cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout);
-int32_t cf_socket_init_client_nb(cf_sock_addr *addr);
+int32_t cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock);
 
-int32_t cf_socket_accept(int32_t fd, cf_sock_addr *addr);
-int32_t cf_socket_remote_name(int32_t fd, cf_sock_addr *addr);
-int32_t cf_socket_local_name(int32_t fd, cf_sock_addr *addr);
+int32_t cf_socket_accept(cf_socket lsock, cf_socket *sock, cf_sock_addr *addr);
+int32_t cf_socket_remote_name(cf_socket sock, cf_sock_addr *addr);
+int32_t cf_socket_local_name(cf_socket sock, cf_sock_addr *addr);
+int32_t cf_socket_available(cf_socket sock);
 
-int32_t cf_socket_recv_from(int32_t fd, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
-int32_t cf_socket_recv(int32_t fd, void *buff, size_t size, int32_t flags);
-int32_t cf_socket_send_to(int32_t fd, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
-int32_t cf_socket_send(int32_t fd, void *buff, size_t size, int32_t flags);
+int32_t cf_socket_recv_from(cf_socket sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
+int32_t cf_socket_recv(cf_socket sock, void *buff, size_t size, int32_t flags);
+int32_t cf_socket_send_to(cf_socket sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
+int32_t cf_socket_send(cf_socket sock, void *buff, size_t size, int32_t flags);
 
-void cf_socket_shutdown(int32_t fd);
-void cf_socket_close(int32_t fd);
+void cf_socket_shutdown(cf_socket sock);
+void cf_socket_close(cf_socket sock);
 void cf_socket_drain_close(cf_socket sock);
 
 // -------------------- OLD CODE --------------------

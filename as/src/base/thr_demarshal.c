@@ -453,30 +453,30 @@ thr_demarshal(void *arg)
 
 		memset(&ev, 0, sizeof (ev));
 		ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-		ev.data.fd = s->sock;
+		ev.data.fd = CSFD(s->sock);
 
-		if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s->sock, &ev)) {
+		if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(s->sock), &ev)) {
 			cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
 		}
 
 		cf_info(AS_DEMARSHAL, "Service started: socket %s:%d", s->addr, s->port);
 
-		if (ls->sock) {
+		if (CSFD(ls->sock)) {
 			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-			ev.data.fd = ls->sock;
+			ev.data.fd = CSFD(ls->sock);
 
-			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ls->sock, &ev)) {
+			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(ls->sock), &ev)) {
 				cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
 			}
 
 			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
 		}
 
-		if (xs->sock) {
+		if (CSFD(xs->sock)) {
 			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-			ev.data.fd = xs->sock;
+			ev.data.fd = CSFD(xs->sock);
 
-			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, xs->sock, &ev)) {
+			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(xs->sock), &ev)) {
 				cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
 			}
 
@@ -515,12 +515,12 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			if ((s->sock == events[i].data.fd) || (ls->sock == events[i].data.fd) || (xs->sock == events[i].data.fd)) {
+			if ((CSFD(s->sock) == events[i].data.fd) || (CSFD(ls->sock) == events[i].data.fd) || (CSFD(xs->sock) == events[i].data.fd)) {
 				// Accept new connections on the service socket.
-				int csocket = -1;
+				cf_socket csock;
 				cf_sock_addr sa;
 
-				if (-1 == (csocket = cf_socket_accept(events[i].data.fd, &sa))) {
+				if (cf_socket_accept(WSFD(events[i].data.fd), &csock, &sa) < 0) {
 					// This means we're out of file descriptors - could be a SYN
 					// flood attack or misbehaving client. Eventually we'd like
 					// to make the reaper fairer, but for now we'll just have to
@@ -537,23 +537,22 @@ thr_demarshal(void *arg)
 
 				char sa_str[sizeof ((as_file_handle *)NULL)->client];
 				cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
-				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", sa_str, csocket);
+				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", sa_str, CSFD(csock));
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_config.proto_connections_opened - g_config.proto_connections_closed;
-				if (xs->sock != events[i].data.fd && conns_open > g_config.n_proto_fd_max) {
+				if (CSFD(xs->sock) != events[i].data.fd && conns_open > g_config.n_proto_fd_max) {
 					if ((last_fd_print + 5000L) < cf_getms()) { // no more than 5 secs
 						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
 						last_fd_print = cf_getms();
 					}
-					shutdown(csocket, SHUT_RDWR);
-					close(csocket);
-					csocket = -1;
+					cf_socket_shutdown(csock);
+					cf_socket_close(csock);
 					continue;
 				}
 
 				// Set the socket to nonblocking.
-				cf_socket_disable_blocking(csocket);
+				cf_socket_disable_blocking(csock);
 
 				// Create as_file_handle and queue it up in epoll_fd for further
 				// communication on one of the demarshal threads.
@@ -563,7 +562,7 @@ thr_demarshal(void *arg)
 				}
 
 				strcpy(fd_h->client, sa_str);
-				fd_h->fd = csocket;
+				fd_h->fd = CSFD(csock);
 
 				fd_h->last_used = cf_getms();
 				fd_h->reap_me = false;
@@ -595,9 +594,8 @@ thr_demarshal(void *arg)
 
 				if (!inserted) {
 					cf_info(AS_DEMARSHAL, "unable to add socket to file handle table");
-					shutdown(csocket, SHUT_RDWR);
-					close(csocket);
-					csocket = -1;
+					cf_socket_shutdown(csock);
+					cf_socket_close(csock);
 					cf_rc_free(fd_h); // will free even with ref-count of 2
 				}
 				else {
@@ -611,7 +609,7 @@ thr_demarshal(void *arg)
 					int id = (id_cntr++) % g_demarshal_args->num_threads;
 					fd_h->epoll_fd = g_demarshal_args->epoll_fd[id];
 
-					if (0 > (n = epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_ADD, csocket, &ev))) {
+					if (0 > (n = epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_ADD, CSFD(csock), &ev))) {
 						cf_info(AS_DEMARSHAL, "unable to add socket to event queue of demarshal thread %d %d", id, g_demarshal_args->num_threads);
 						pthread_mutex_lock(&g_file_handle_a_LOCK);
 						fd_h->reap_me = true;
@@ -654,13 +652,7 @@ thr_demarshal(void *arg)
 				// store it in the buffer.
 				if (fd_h->proto == NULL) {
 					as_proto proto;
-					int sz;
-
-					/* Get the number of available bytes */
-					if (-1 == ioctl(fd, FIONREAD, &sz)) {
-						cf_info(AS_DEMARSHAL, "unable to get number of available bytes");
-						goto NextEvent_FD_Cleanup;
-					}
+					int sz = cf_socket_available(WSFD(fd));
 
 					// If we don't have enough data to fill the message buffer,
 					// just wait and we'll come back to this one. However, we'll
@@ -674,7 +666,7 @@ thr_demarshal(void *arg)
 					// Do a preliminary read of the header into a stack-
 					// allocated structure, so that later on we can allocate the
 					// entire message buffer.
-					if (0 >= (n = cf_socket_recv(fd, &proto, sizeof(as_proto), MSG_WAITALL))) {
+					if (0 >= (n = cf_socket_recv(WSFD(fd), &proto, sizeof(as_proto), MSG_WAITALL))) {
 						cf_detail(AS_DEMARSHAL, "proto socket: read header fail: error: rv %d sz was %d errno %d", n, sz, errno);
 						goto NextEvent_FD_Cleanup;
 					}
@@ -709,7 +701,7 @@ thr_demarshal(void *arg)
 						// Number of bytes to peek from the socket.
 //						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
 						size_t peek_sz = MIN(proto.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
-						int32_t tmp = cf_socket_recv(fd, peekbuf, peek_sz, 0);
+						int32_t tmp = cf_socket_recv(WSFD(fd), peekbuf, peek_sz, 0);
 						peeked_data_sz = tmp < 0 ? 0 : tmp;
 						if (!peeked_data_sz) {
 							// That's actually legitimate. The as_proto may have gone into one
@@ -794,7 +786,7 @@ thr_demarshal(void *arg)
 				if (fd_h->proto_unread > 0) {
 
 					// Read the data.
-					n = cf_socket_recv(fd, proto_p->data + (proto_p->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
+					n = cf_socket_recv(WSFD(fd), proto_p->data + (proto_p->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
 					if (0 >= n) {
 						if (n < 0 && errno == EAGAIN) {
 							continue;
