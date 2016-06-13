@@ -355,8 +355,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64("tsvc-batch-sub-error", g_config.n_tsvc_batch_sub_error, db);
 	info_append_uint64("tsvc-udf-sub-error", g_config.n_tsvc_udf_sub_error, db);
 
-	info_append_uint64("stat_ldt_proxy", g_config.ldt_proxy_initiate, db);
-
 	info_append_uint64("geo_region_query_count", g_config.geo_region_query_count, db);
 	info_append_uint64("geo_region_query_cells", g_config.geo_region_query_cells, db);
 	info_append_uint64("geo_region_query_points", g_config.geo_region_query_points, db);
@@ -407,13 +405,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_int("proxy_in_progress", as_proxy_hash_count(), db);
 	// TODO - why no rw_request hash count?
 
-	info_append_uint64("proxy_initiate", g_config.proxy_initiate, db);
-	info_append_uint64("proxy_action", g_config.proxy_action, db);
 	info_append_uint64("proxy_retry", g_config.proxy_retry, db);
-	info_append_uint64("proxy_retry_q_full", g_config.proxy_retry_q_full, db);
-	info_append_uint64("proxy_unproxy", g_config.proxy_unproxy, db);
-	info_append_uint64("proxy_retry_same_dest", g_config.proxy_retry_same_dest, db);
-	info_append_uint64("proxy_retry_new_dest", g_config.proxy_retry_new_dest, db);
 
 	info_append_uint64("client_connections", g_config.proto_connections_opened - g_config.proto_connections_closed, db);
 	info_append_uint64("record_refs", g_config.global_record_ref_count, db);

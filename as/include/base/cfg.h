@@ -326,15 +326,6 @@ typedef struct as_config_s {
 	cf_atomic_int		fabric_read_medium;
 	cf_atomic_int		fabric_read_long;
 	cf_atomic_int		proto_transactions;
-	cf_atomic_int		proxy_initiate; // initiated
-	cf_atomic_int		ldt_proxy_initiate; // initiated
-	cf_atomic_int		proxy_action;   // did it
-	cf_atomic_int		proxy_retry;    // retried it
-	cf_atomic_int		ldt_proxy_timeout;    // retried it
-	cf_atomic_int		proxy_retry_q_full;
-	cf_atomic_int		proxy_unproxy;
-	cf_atomic_int		proxy_retry_same_dest;
-	cf_atomic_int		proxy_retry_new_dest;
 	cf_atomic_int		proto_connections_opened;
 	cf_atomic_int		proto_connections_closed;
 	cf_atomic_int		fabric_connections_opened;
@@ -347,6 +338,8 @@ typedef struct as_config_s {
 	cf_atomic_int		info_connections_closed;
 	cf_atomic_int		global_record_ref_count;
 	cf_atomic_int		reaper_count;
+
+	uint64_t			proxy_retry; // incremented only in proxy retransmit thread
 
 	cf_atomic64			n_demarshal_error;
 	cf_atomic64			n_tsvc_client_error;

@@ -838,6 +838,8 @@ int
 proxy_retransmit_send(proxy_request* pr)
 {
 	while (true) {
+		g_config.proxy_retry++;
+
 		msg_incr_ref(pr->fab_msg);
 
 		int rv = as_fabric_send(pr->dest, pr->fab_msg,
@@ -1136,8 +1138,6 @@ shipop_handle_client_response(msg* m, rw_request* rw)
 void
 shipop_timeout_handler(proxy_request* pr)
 {
-	cf_atomic_int_incr(&g_config.ldt_proxy_timeout);
-
 	pthread_mutex_lock(&pr->rw->lock);
 
 	if (pr->rw->origin == FROM_IUDF) {
