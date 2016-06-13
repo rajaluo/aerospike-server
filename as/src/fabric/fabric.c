@@ -1116,13 +1116,13 @@ Next:
 			// or if we're way out of memory --- close the connection and let
 			// the error paths take care of it
 			cf_warning(AS_FABRIC, "msg_parse could not parse message, for type %d", fb->r_type);
-			cf_socket_shutdown(fb->sock);
+			cf_socket_write_shutdown(fb->sock);
 			return false;
 		}
 
 		if (msg_parse(m, fb->r_parse, fb->r_msg_size) != 0) {
 			cf_warning(AS_FABRIC, "msg_parse failed regular message, not supposed to happen: fb %p", fb);
-			cf_socket_shutdown(fb->sock);
+			cf_socket_write_shutdown(fb->sock);
 			return false;
 		}
 

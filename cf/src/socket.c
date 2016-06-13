@@ -706,12 +706,10 @@ cf_socket_recv(cf_socket sock, void *buff, size_t size, int32_t flags)
 	return cf_socket_recv_from(sock, buff, size, flags, NULL);
 }
 
-void
-cf_socket_shutdown(cf_socket sock)
+static void
+x_shutdown(cf_socket sock, int32_t how)
 {
-	cf_debug(CF_SOCKET, "Shutting down FD %d", sock.fd);
-
-	if (shutdown(sock.fd, SHUT_RDWR) < 0) {
+	if (shutdown(sock.fd, how) < 0) {
 		if (errno != ENOTCONN) {
 			cf_crash(CF_SOCKET, "shutdown() failed on FD %d: %d (%s)",
 					sock.fd, errno, cf_strerror(errno));
@@ -721,6 +719,20 @@ cf_socket_shutdown(cf_socket sock)
 					sock.fd, errno, cf_strerror(errno));
 		}
 	}
+}
+
+void
+cf_socket_write_shutdown(cf_socket sock)
+{
+	cf_debug(CF_SOCKET, "Shutting down write channel of FD %d", sock.fd);
+	x_shutdown(sock, SHUT_WR);
+}
+
+void
+cf_socket_shutdown(cf_socket sock)
+{
+	cf_debug(CF_SOCKET, "Shutting down FD %d", sock.fd);
+	x_shutdown(sock, SHUT_RDWR);
 }
 
 void
