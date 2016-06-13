@@ -478,7 +478,7 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 		return -1;
 	}
 
-	cf_debug(CF_SOCKET, "mcast_socket init: socket %d",s->sock);
+	cf_debug(CF_SOCKET, "cf_mcastsocket_init: socket %d", s->sock);
 
 	// allows multiple readers on the same address
 	uint yes=1;
@@ -527,9 +527,20 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 			cf_info(CF_SOCKET, "setting multicast TTL to be %d",ttlvar);
 		}
 	}
+
+	struct timespec delay;
+	delay.tv_sec = 5;
+	delay.tv_nsec = 0;
+
 	while (0 > (bind(s->sock, (struct sockaddr *)&s->saddr, sizeof(struct sockaddr)))) {
-		cf_info(CF_SOCKET, "multicast socket bind failed: %d %s", errno, cf_strerror(errno));
-		goto err_cleanup;
+		if (EADDRINUSE != errno) {
+			cf_warning(CF_SOCKET, "multicast bind: %d %s", errno, cf_strerror(errno));
+			goto err_cleanup;
+		}
+
+		cf_warning(CF_SOCKET, "multicast bind: socket in use, waiting (port:%d)", s->port);
+
+		nanosleep(&delay, NULL);
 	}
 
 	// Register for the multicast group
