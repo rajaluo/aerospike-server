@@ -281,7 +281,7 @@ compare_cb(void* buf, void* task)
 //
 
 static inline const char* as_job_safe_set_name(as_job* _job);
-static inline uint32_t as_job_progress(as_job* _job);
+static inline float as_job_progress(as_job* _job);
 int as_job_partition_reserve(as_job* _job, int pid, as_partition_reservation* rsv);
 
 //----------------------------------------------------------
@@ -412,10 +412,10 @@ as_job_safe_set_name(as_job* _job)
 	return set_name ? set_name : ""; // empty string means no set name displayed
 }
 
-static inline uint32_t
+static inline float
 as_job_progress(as_job* _job)
 {
-	return ((uint32_t)_job->next_pid * 100) / AS_PARTITIONS;
+	return ((float)(_job->next_pid * 100)) / (float)AS_PARTITIONS;
 }
 
 int

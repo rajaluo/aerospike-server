@@ -221,10 +221,10 @@ linear_hist_insert_data_point(linear_hist *h, uint32_t point)
 //
 uint32_t
 linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct,
-		uint32_t *p_low)
+		linear_hist_threshold *p_threshold)
 {
 	return linear_hist_get_threshold_for_subtotal(h,
-			(linear_hist_get_total(h) * tenths_pct) / 1000, p_low);
+			(linear_hist_get_total(h) * tenths_pct) / 1000, p_threshold);
 }
 
 //------------------------------------------------
@@ -235,8 +235,11 @@ linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct,
 //
 uint32_t
 linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal,
-		uint32_t *p_low)
+		linear_hist_threshold *p_threshold)
 {
+	p_threshold->bucket_width = h->bucket_width;
+	p_threshold->target_count = subtotal;
+
 	uint32_t count = 0;
 	uint32_t i;
 
@@ -250,11 +253,15 @@ linear_hist_get_threshold_for_subtotal(linear_hist *h, uint32_t subtotal,
 
 	if (i == h->num_buckets) {
 		// This means subtotal >= h->total_count.
-		*p_low = 0xFFFFffff;
+		p_threshold->value = 0xFFFFffff;
+		p_threshold->bucket_index = 0; // irrelevant
+		p_threshold->bucket_count = 0; // irrelevant
 		return count;
 	}
 
-	*p_low = h->start + (i * h->bucket_width);
+	p_threshold->value = h->start + (i * h->bucket_width);
+	p_threshold->bucket_index = i;
+	p_threshold->bucket_count = h->counts[i];
 
 	// Return subtotal of everything below "threshold" bucket.
 	return count - h->counts[i];

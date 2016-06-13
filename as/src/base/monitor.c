@@ -323,12 +323,15 @@ as_mon_populate_jobstat(as_mon_jobstat * job_stat, cf_dyn_buf *db)
 		cf_dyn_buf_append_string(db, old_status_str(job_stat->status));
 	}
 
+	char progress_pct[8];
+	sprintf(progress_pct, "%.2f", job_stat->progress_pct);
+
 	cf_dyn_buf_append_string(db, ":job-progress=");
-	cf_dyn_buf_append_uint32(db, job_stat->progress_pct);
+	cf_dyn_buf_append_string(db, progress_pct);
 
 	// For backward compatibility - remove eventually:
 	cf_dyn_buf_append_string(db, ":job_progress(%)=");
-	cf_dyn_buf_append_uint32(db, job_stat->progress_pct);
+	cf_dyn_buf_append_string(db, progress_pct);
 
 	cf_dyn_buf_append_string(db, ":run-time=");
 	cf_dyn_buf_append_uint64(db, job_stat->run_time);
