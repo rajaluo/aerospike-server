@@ -119,7 +119,7 @@ typedef struct mesh_host_list_element_s {
 	int         port;
 	cf_clock    next_try;
 	int         try_interval;
-	int         fd;     // -1 if inactive, allows nodes to come and go and be retried
+	cf_socket   sock;     // -1 if inactive, allows nodes to come and go and be retried
 } mesh_host_list_element;
 
 typedef enum mesh_host_op_e
@@ -136,7 +136,7 @@ typedef struct mesh_host_queue_element_s {
 	int                  port;
 	as_hb_host_addr_port list[AS_CLUSTER_SZ];
 	int                  list_len;
-	int                  remove_fd;
+	cf_socket            remove_sock;
 	bool                 seed;
 } mesh_host_queue_element;
 
@@ -222,7 +222,7 @@ typedef struct {
 	uint64_t last;
 	cf_sock_addr_legacy sal;    // if mcast, the socket we heard about the node
 	uint32_t addr, port;        // if mesh, filled with the address and port
-	int fd;                     // last fd we heard a pulse from, so as to avoid multiple fds between nodes
+	cf_socket sock;             // last fd we heard a pulse from, so as to avoid multiple fds between nodes
 	bool new;                   // note if this is a new node
 	bool updated;               // used by paxos and fabric health to detect when a node has just been dunned or undunned
 	bool dunned;                // if true, node is "dunned". this will remove it from the paxos succession list, but not from the fabric's node list.
@@ -262,8 +262,8 @@ typedef struct {
 //
 
 static void as_hb_init_socket();
-static void as_hb_reinit(int socket, bool isudp);
-static int as_hb_endpoint_add(int socket, bool isudp, cf_node node_id);
+static void as_hb_reinit(cf_socket sock, bool isudp);
+static int as_hb_endpoint_add(cf_socket sock, bool isudp, cf_node node_id);
 
 /*
  * Enumeration of the types of heartbeat error events.
@@ -421,7 +421,7 @@ as_hb_getaddr(cf_node node, cf_sock_addr_legacy *sal)
 #define AS_HB_MAX_OPEN_CONN_PER_NODE 2
 
 typedef struct discovered_node_conn_s {
-	int fd;
+	cf_socket sock;
 	// [TODO:  Add more parameters for debugging.]
 } discovered_node_conn_t;
 
@@ -435,7 +435,7 @@ static void
 init_discovered_node_conn(discovered_node_conn_t * ap_conn)
 {
 	if(ap_conn) {
-		ap_conn->fd = -1;
+		SFD(ap_conn->sock) = -1;
 	}
 }
 
@@ -477,8 +477,8 @@ as_hb_nodes_discovered_hash_is_conn(cf_node node)
 	}
 
 	for ( int i = 0 ; i < AS_HB_MAX_OPEN_CONN_PER_NODE ; i++) {
-		if (p_hval->conn[i].fd != -1) {
-			cf_detail(AS_HB, "as_hb_nodes_discovered_hash_is_conn node %"PRIx64" conn[%d] fd:[%d] ", node, i, p_hval->conn[i].fd );
+		if (CSFD(p_hval->conn[i].sock) != -1) {
+			cf_detail(AS_HB, "as_hb_nodes_discovered_hash_is_conn node %"PRIx64" conn[%d] fd:[%d] ", node, i, CSFD(p_hval->conn[i].sock) );
 			ret = true;
 			break;
 		}
@@ -488,7 +488,7 @@ as_hb_nodes_discovered_hash_is_conn(cf_node node)
 }
 
 static int
-as_hb_nodes_discovered_hash_del_conn(cf_node node, int fd)
+as_hb_nodes_discovered_hash_del_conn(cf_node node, cf_socket sock)
 {
 	pthread_mutex_t *vlock = NULL;
 	int ret = -1;
@@ -501,21 +501,21 @@ as_hb_nodes_discovered_hash_del_conn(cf_node node, int fd)
 		cf_warning(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" not found", node);
 	}
 	else {
-		cf_detail(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" fd:[%d] num curr conn before deleting %d", node, fd, p_hval->num_conn);
+		cf_detail(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" fd:[%d] num curr conn before deleting %d", node, CSFD(sock), p_hval->num_conn);
 		for ( int i = 0 ; i < AS_HB_MAX_OPEN_CONN_PER_NODE ; i++ ) {
-			if (p_hval->conn[i].fd == fd) {
-				cf_detail(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" conn[%d] fd:[%d] ", node, i, fd);
-				p_hval->conn[i].fd = -1;
+			if (CSFD(p_hval->conn[i].sock) == CSFD(sock)) {
+				cf_detail(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" conn[%d] fd:[%d] ", node, i, CSFD(sock));
+				SFD(p_hval->conn[i].sock) = -1;
 				p_hval->num_conn--;
 				found = true;
 				ret = 0;
 				break;
 			}
 		}
-		cf_detail(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" fd:[%d] num curr conn after deleting %d", node, fd, p_hval->num_conn);
+		cf_detail(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" fd:[%d] num curr conn after deleting %d", node, CSFD(sock), p_hval->num_conn);
 		pthread_mutex_unlock(vlock);
 		if (!found) {
-			cf_warning(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" fd:[%d] not found", node, fd);
+			cf_warning(AS_HB, "as_hb_nodes_discovered_hash_del_conn node %"PRIx64" fd:[%d] not found", node, CSFD(sock));
 		}
 	}
 
@@ -537,9 +537,9 @@ as_hb_nodes_discovered_hash_shutdown_conn(cf_node node)
 	else {
 		cf_detail(AS_HB, "as_hb_nodes_discovered_hash_shutdown_conn node %"PRIx64" num curr conn %d", node, p_hval->num_conn);
 		for ( int i = 0 ; i < AS_HB_MAX_OPEN_CONN_PER_NODE ; i++ ) {
-			if (p_hval->conn[i].fd != -1) {
-				cf_detail(AS_HB, "as_hb_nodes_discovered_hash_shutdown_conn node %"PRIx64" conn[%d] fd:[%d] ", node, i, p_hval->conn[i].fd);
-				shutdown(p_hval->conn[i].fd, SHUT_RDWR);
+			if (CSFD(p_hval->conn[i].sock) != -1) {
+				cf_detail(AS_HB, "as_hb_nodes_discovered_hash_shutdown_conn node %"PRIx64" conn[%d] fd:[%d] ", node, i, CSFD(p_hval->conn[i].sock));
+				cf_socket_shutdown(CSFD(p_hval->conn[i].sock));
 			}
 		}
 		cf_detail(AS_HB, "as_hb_nodes_discovered_hash_shutdown_conn node %"PRIx64" num curr conn %d exiting", node, p_hval->num_conn);
@@ -550,12 +550,12 @@ as_hb_nodes_discovered_hash_shutdown_conn(cf_node node)
 
 
 static int
-as_hb_nodes_discovered_hash_put_conn(cf_node node, int fd)
+as_hb_nodes_discovered_hash_put_conn(cf_node node, cf_socket sock)
 {
 	pthread_mutex_t *vlock = NULL;
 	int ret = 0;
 
-	cf_detail(AS_HB, "as_hb_nodes_discovered_hash_put_conn  node %"PRIx64" fd %d", node, fd);
+	cf_detail(AS_HB, "as_hb_nodes_discovered_hash_put_conn  node %"PRIx64" fd %d", node, CSFD(sock));
 
 	discovered_node_hval_t * p_hval = NULL;
 
@@ -567,13 +567,13 @@ as_hb_nodes_discovered_hash_put_conn(cf_node node, int fd)
 		p_hval = &l_hval;
 	}
 
-	cf_detail(AS_HB, "as_hb_nodes_discovered_hash_put_conn node %"PRIx64" fd:[%d] num curr conn before adding %d", node, fd, p_hval->num_conn);
+	cf_detail(AS_HB, "as_hb_nodes_discovered_hash_put_conn node %"PRIx64" fd:[%d] num curr conn before adding %d", node, CSFD(sock), p_hval->num_conn);
 
 	for ( int i = 0 ; i < AS_HB_MAX_OPEN_CONN_PER_NODE ; i++) {
-		if (p_hval->conn[i].fd == -1) {
-			p_hval->conn[i].fd = fd;
+		if (CSFD(p_hval->conn[i].sock) == -1) {
+			p_hval->conn[i].sock = sock;
 			p_hval->num_conn++;
-			cf_detail(AS_HB, "as_hb_nodes_discovered_hash_put_conn node %"PRIx64" conn[%d] fd:[%d]", node, i, p_hval->conn[i].fd );
+			cf_detail(AS_HB, "as_hb_nodes_discovered_hash_put_conn node %"PRIx64" conn[%d] fd:[%d]", node, i, CSFD(p_hval->conn[i].sock) );
 			break;
 		}
 	}
@@ -584,18 +584,18 @@ as_hb_nodes_discovered_hash_put_conn(cf_node node, int fd)
 		int rv = shash_put_unique(g_hb.discovered_list, &node, p_hval);
 		if (rv == SHASH_ERR_FOUND) {
 			cf_info(AS_HB, "as_hb_nodes_discovered_hash_put_conn node found in discovered list");
-			ret = as_hb_nodes_discovered_hash_put_conn(node, fd); //calling recursively
+			ret = as_hb_nodes_discovered_hash_put_conn(node, sock); //calling recursively
 		} else if (rv != 0) {
 			cf_warning(AS_HB, "as_hb_nodes_discovered_hash_put_conn unable to update discovered_list");
 			ret = -1;
 		}
 	}
-	cf_detail(AS_HB, "as_hb_nodes_discovered_hash_put_conn node %"PRIx64" fd:[%d] num curr conn after addition %d", node, fd, p_hval->num_conn);
+	cf_detail(AS_HB, "as_hb_nodes_discovered_hash_put_conn node %"PRIx64" fd:[%d] num curr conn after addition %d", node, CSFD(sock), p_hval->num_conn);
 	return ret;
 }
 
 void
-as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sock_addr_legacy *sal, uint32_t addr, uint32_t port, cf_node *buf, size_t bufsz)
+as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr_legacy *sal, uint32_t addr, uint32_t port, cf_node *buf, size_t bufsz)
 {
 	as_hb_pulse *a_p_pulse = NULL, *p_pulse = NULL;
 	pthread_mutex_t *vlock;
@@ -649,7 +649,7 @@ as_hb_process_fabric_heartbeat(cf_node node, int fd, cf_sock_addr_legacy *sal, u
 	} else {
 		int rv = shash_put_unique(g_hb.adjacencies, &node, p_pulse);
 		if (rv == SHASH_ERR_FOUND) {
-			as_hb_process_fabric_heartbeat(node, fd, sal, addr, port, buf, bufsz);
+			as_hb_process_fabric_heartbeat(node, sock, sal, addr, port, buf, bufsz);
 		} else if (rv != 0) {
 			cf_warning(AS_HB, "unable to update adjacencies hash");
 		}
@@ -1032,7 +1032,7 @@ as_hb_unsnub_all()
 void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 {
 	while (e) {
-		if ( (e->fd == -1) && (e->next_try < cf_getms()) ) {
+		if ( (CSFD(e->sock) == -1) && (e->next_try < cf_getms()) ) {
 
 			// found one to try
 			cf_socket_cfg s;
@@ -1085,10 +1085,10 @@ void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 			// node id will be set for this socket after 
 			// receiving HB pulse as that is the place we are 
 			// populating adjancency list also.
-			if (0 != as_hb_endpoint_add(s.sock, false /*is not udp*/, 0 )) { 
-				close(s.sock);
+			if (0 != as_hb_endpoint_add(WSFD(s.sock), false /*is not udp*/, 0 )) {
+				cf_socket_close(s.sock);
 			} else {
-				e->fd = s.sock;
+				e->sock = WSFD(s.sock);
 			}
 		}
 		e = e->next;
@@ -1124,8 +1124,8 @@ mesh_list_service_fn(void *arg)
 				while (g_hb.mesh_seed_host_list) {
 					e = g_hb.mesh_seed_host_list;
 					g_hb.mesh_seed_host_list = e->next;
-					if (-1 != e->fd) {
-						shutdown(e->fd, SHUT_RDWR);
+					if (-1 != CSFD(e->sock)) {
+						cf_socket_shutdown(CSFD(e->sock));
 					}
 					cf_free(e);
 				}
@@ -1133,8 +1133,8 @@ mesh_list_service_fn(void *arg)
 				while (g_hb.mesh_non_seed_host_list) {
 					e = g_hb.mesh_non_seed_host_list;
 					g_hb.mesh_non_seed_host_list = e->next;
-					if (-1 != e->fd) {
-						shutdown(e->fd, SHUT_RDWR);
+					if (-1 != CSFD(e->sock)) {
+						cf_socket_shutdown(CSFD(e->sock));
 					}
 					cf_free(e);
 				}
@@ -1155,8 +1155,8 @@ mesh_list_service_fn(void *arg)
 								  previous->next = e->next;
 							  }
 
-							  if (-1 != e->fd) {
-								  shutdown(e->fd, SHUT_RDWR);
+							  if (-1 != CSFD(e->sock)) {
+								  cf_socket_shutdown(CSFD(e->sock));
 							  }
 							  cf_free(e);
 							  break;
@@ -1175,8 +1175,8 @@ mesh_list_service_fn(void *arg)
 								  previous->next = e->next;
 							  }
 
-							  if (-1 != e->fd) {
-								  shutdown(e->fd, SHUT_RDWR);
+							  if (-1 != CSFD(e->sock)) {
+								  cf_socket_shutdown(CSFD(e->sock));
 							  }
 							  cf_free(e);
 							  break;
@@ -1225,19 +1225,19 @@ mesh_list_service_fn(void *arg)
 				}
 				strcpy(e->host, mhqe.host);
 				e->port = mhqe.port;
-				e->fd = -1;
+				SFD(e->sock) = -1;
 				e->next_try = 0;
 				break;
 
 			  case MH_OP_REMOVE_FD:
-				cf_debug(AS_HB, "removing fd %d from mesh host list", mhqe.remove_fd);
+				cf_debug(AS_HB, "removing fd %d from mesh host list", CSFD(mhqe.remove_sock));
 
 				//checking in seed host list
 				e = g_hb.mesh_seed_host_list;
 				while (e) {
-					if (e->fd == mhqe.remove_fd) {
-						cf_debug(AS_HB, "seed node putting it for retry fd %d",  mhqe.remove_fd);
-						e->fd = -1;
+					if (CSFD(e->sock) == CSFD(mhqe.remove_sock)) {
+						cf_debug(AS_HB, "seed node putting it for retry fd %d",  CSFD(mhqe.remove_sock));
+						SFD(e->sock) = -1;
 						e->next_try = cf_getms() + MESH_RETRY_INTERVAL;
 						goto TryConnect;
 					}
@@ -1247,9 +1247,9 @@ mesh_list_service_fn(void *arg)
 				e = g_hb.mesh_non_seed_host_list;
 				mesh_host_list_element * trailing_e = NULL;
 				while (e) {
-					cf_detail(AS_HB, "non seed list fd %d", e->fd);
-					if (e->fd == mhqe.remove_fd) {
-						cf_debug(AS_HB, "actually removing fd %d",  mhqe.remove_fd);
+					cf_detail(AS_HB, "non seed list fd %d", CSFD(e->sock));
+					if (CSFD(e->sock) == CSFD(mhqe.remove_sock)) {
+						cf_debug(AS_HB, "actually removing fd %d",  CSFD(mhqe.remove_sock));
 						if ( trailing_e == NULL ) { //e is first node
 							g_hb.mesh_non_seed_host_list = e->next;
 						} else {
@@ -1263,7 +1263,7 @@ mesh_list_service_fn(void *arg)
 					e = e->next;
 				}
 
-				cf_debug(AS_HB, "did NOT find fd %d in mesh host list",  mhqe.remove_fd);
+				cf_debug(AS_HB, "did NOT find fd %d in mesh host list",  CSFD(mhqe.remove_sock));
 				break;
 
 			  default:
@@ -1282,8 +1282,8 @@ TryConnect:
 		e = g_hb.mesh_non_seed_host_list;
 		mesh_host_list_element * prev_element = NULL;
 		while (e) {
-			cf_debug(AS_HB, "traversing list to remove non connected fds current fd %d", e->fd);
-			if (e->fd == -1) {
+			cf_debug(AS_HB, "traversing list to remove non connected fds current fd %d", CSFD(e->sock));
+			if (CSFD(e->sock) == -1) {
 				if ( prev_element == NULL ) { //e is first node
 					g_hb.mesh_non_seed_host_list = e->next;
 					cf_free(e);
@@ -1307,12 +1307,12 @@ TryConnect:
 }
 
 int
-mesh_host_list_remove_fd(int fd)
+mesh_host_list_remove_fd(cf_socket sock)
 {
 	mesh_host_queue_element mhqe;
 	memset(&mhqe, 0, sizeof(mhqe));
 	mhqe.op = MH_OP_REMOVE_FD;
-	mhqe.remove_fd = fd;
+	mhqe.remove_sock = sock;
 	cf_queue_push(g_hb.mesh_host_queue, (void *) &mhqe);
 
 	return(0);
@@ -1359,7 +1359,6 @@ mesh_host_list_add(char *host, int port, bool is_seed)
 	mhqe.op = MH_OP_ADD;
 	strcpy(mhqe.host, host);
 	mhqe.port = port;
-	mhqe.remove_fd = -1;
 	mhqe.seed = is_seed;
 	cf_queue_push(g_hb.mesh_host_queue, (void *) &mhqe);
 
@@ -1438,9 +1437,9 @@ as_hb_adjacencies_destroy()
 }
 
 static int
-as_hb_start_receiving(int socket, int was_udp, cf_node node_id)
+as_hb_start_receiving(cf_socket sock, int was_udp, cf_node node_id)
 {
-	cf_debug(AS_HB, "Heartbeat: starting packet receive on socket fd %d", socket);
+	cf_debug(AS_HB, "Heartbeat: starting packet receive on socket fd %d", CSFD(sock));
 
 	if (!g_hb.adjacencies)
 		as_hb_adjacencies_create();
@@ -1448,17 +1447,17 @@ as_hb_start_receiving(int socket, int was_udp, cf_node node_id)
 	struct epoll_event ev;
 	memset(&ev, 0, sizeof(struct epoll_event));
 	ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP;  // level-triggered!
-	ev.data.fd = socket;
+	ev.data.fd = CSFD(sock);
 
-	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_ADD, socket, &ev))
-		cf_crash(AS_HB,  "unable to add socket %d to epoll fd list: %s", socket, cf_strerror(errno));
+	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_ADD, CSFD(sock), &ev))
+		cf_crash(AS_HB,  "unable to add socket %d to epoll fd list: %s", CSFD(sock), cf_strerror(errno));
 
-	g_hb.endpoint_txlist[socket] = true;
-	g_hb.endpoint_txlist_isudp[socket] = was_udp;
-	g_hb.endpoint_txlist_node_id[socket] = node_id; 
+	g_hb.endpoint_txlist[CSFD(sock)] = true;
+	g_hb.endpoint_txlist_isudp[CSFD(sock)] = was_udp;
+	g_hb.endpoint_txlist_node_id[CSFD(sock)] = node_id;
 	if ( node_id != 0 ) { 
 		//add this connection to discovered hash
-		as_hb_nodes_discovered_hash_put_conn(node_id, socket);
+		as_hb_nodes_discovered_hash_put_conn(node_id, sock);
 	}
 
 	return(0);
@@ -1521,7 +1520,7 @@ as_hb_set_protocol(hb_protocol_enum protocol)
 				g_config.hb_protocol = AS_HB_PROTOCOL_NONE;
 			}
 
-			as_hb_start_receiving(socket, s_was_udp, 0 /*multicast node id not required*/);
+			as_hb_start_receiving(WSFD(socket), s_was_udp, 0 /*multicast node id not required*/);
 			g_config.hb_protocol = protocol;
 			break;
 
@@ -1545,7 +1544,7 @@ as_hb_set_protocol(hb_protocol_enum protocol)
 			g_config.hb_protocol = AS_HB_PROTOCOL_NONE;
 			s_was_udp = as_hb_shutdown();
 
-			as_hb_reinit(socket, s_was_udp);
+			as_hb_reinit(WSFD(socket), s_was_udp);
 			g_config.hb_protocol = saved_hb_protocol;
 			break;
 
@@ -1560,19 +1559,19 @@ as_hb_set_protocol(hb_protocol_enum protocol)
 /* as_hb_endpoint_add
  * Add a new endpoint to listen to */
 static int
-as_hb_endpoint_add(int socket, bool isudp, cf_node node_id)
+as_hb_endpoint_add(cf_socket sock, bool isudp, cf_node node_id)
 {
-	if (socket >= AS_HB_TXLIST_SZ) {
-		cf_info(AS_HB, "attempting to add heartbeat: socket fd %d too large", socket);
+	if (CSFD(sock) >= AS_HB_TXLIST_SZ) {
+		cf_info(AS_HB, "attempting to add heartbeat: socket fd %d too large", CSFD(sock));
 		return(-1);
 	}
 
 	/* Make the socket nonblocking */
-	cf_socket_disable_blocking(socket);
-	cf_socket_disable_nagle(socket);
+	cf_socket_disable_blocking(CSFD(sock));
+	cf_socket_disable_nagle(CSFD(sock));
 
 	// start receiving on the socket
-	as_hb_start_receiving(socket, isudp, node_id);
+	as_hb_start_receiving(sock, isudp, node_id);
 
 	return(0);
 }
@@ -1581,17 +1580,17 @@ as_hb_endpoint_add(int socket, bool isudp, cf_node node_id)
 /* as_hb_tcp_close
  * closes hb tcp socket and removed it from discovered hash*/
 static void
-as_hb_tcp_close(int fd)
+as_hb_tcp_close(cf_socket sock)
 {
-	cf_detail(AS_HB, "as_hb_tcp_close():  Closing HB TCP fd %d to node %"PRIx64, fd, g_hb.endpoint_txlist_node_id[fd]);
-	g_hb.endpoint_txlist[fd] = false;
+	cf_detail(AS_HB, "as_hb_tcp_close():  Closing HB TCP fd %d to node %"PRIx64, CSFD(sock), g_hb.endpoint_txlist_node_id[CSFD(sock)]);
+	g_hb.endpoint_txlist[CSFD(sock)] = false;
 	// Remove node from discovered list.
-	if (g_hb.endpoint_txlist_node_id[fd]) {
-		as_hb_nodes_discovered_hash_del_conn(g_hb.endpoint_txlist_node_id[fd], fd);
+	if (g_hb.endpoint_txlist_node_id[CSFD(sock)]) {
+		as_hb_nodes_discovered_hash_del_conn(g_hb.endpoint_txlist_node_id[CSFD(sock)], sock);
 	}
-	g_hb.endpoint_txlist_node_id[fd] = 0;
-	mesh_host_list_remove_fd(fd);
-	shutdown(fd, SHUT_RDWR);
+	g_hb.endpoint_txlist_node_id[CSFD(sock)] = 0;
+	mesh_host_list_remove_fd(sock);
+	cf_socket_shutdown(CSFD(sock));
 }
 
 /* as_hb_tcp_send
@@ -1599,7 +1598,7 @@ as_hb_tcp_close(int fd)
  * and EWOULDBLOCK*/
 
 static int 
-as_hb_tcp_send(int fd, byte * buff, size_t msg_size) 
+as_hb_tcp_send(cf_socket sock, byte * buff, size_t msg_size)
 {  
 	int ret = 0;
 	int retry = 0;
@@ -1607,11 +1606,11 @@ as_hb_tcp_send(int fd, byte * buff, size_t msg_size)
 	size_t orig_size = msg_size;
 	cf_clock start = cf_getus();
 	do {
-		cf_detail(AS_HB, "cf_socket_send_to() fd %d retry count:%d msg_size:%zu", fd, retry, msg_size);
-		ret =  cf_socket_send_to(fd, buff, msg_size, 0, NULL);
+		cf_detail(AS_HB, "cf_socket_send_to() fd %d retry count:%d msg_size:%zu", CSFD(sock), retry, msg_size);
+		ret =  cf_socket_send_to(CSFD(sock), buff, msg_size, 0, NULL);
 		if( ( ret < 0 ) && (( errno != EAGAIN ) || ( errno != EWOULDBLOCK ))) {
-			cf_info(AS_HB, "as_hb_tcp_send cf_socket_send_to() fd %d failed", fd);
-			as_hb_tcp_close(fd);
+			cf_info(AS_HB, "as_hb_tcp_send cf_socket_send_to() fd %d failed", CSFD(sock));
+			as_hb_tcp_close(sock);
 			return -1;
 		} else if (ret > 0) {
 			buff += ret; //incrementing buff pointer
@@ -1622,14 +1621,14 @@ as_hb_tcp_send(int fd, byte * buff, size_t msg_size)
 			retry++;
 			usleep(g_config.hb_mesh_rw_retry_timeout/3);
 		} else {
-			cf_detail(AS_HB, "cf_socket_send_to() fd %d retry count:%d msg_size:%zu complete msg sent", fd, retry, msg_size);
+			cf_detail(AS_HB, "cf_socket_send_to() fd %d retry count:%d msg_size:%zu complete msg sent", CSFD(sock), retry, msg_size);
 			break;
 		}
 	} while ( ((start + g_config.hb_mesh_rw_retry_timeout) > cf_getus()) && (retry < max_retry) );
 
 	if ( (msg_size != 0)  && (msg_size != orig_size) ) {
-		cf_warning(AS_HB, "as_hb_tcp_send cf_socket_send_to() fd %d incomplete msg sent. %zu bytes left out of %zu bytes.", fd, msg_size, orig_size);
-		as_hb_tcp_close(fd); //closing fd
+		cf_warning(AS_HB, "as_hb_tcp_send cf_socket_send_to() fd %d incomplete msg sent. %zu bytes left out of %zu bytes.", CSFD(sock), msg_size, orig_size);
+		as_hb_tcp_close(sock); //closing fd
 		return -1;
 	}
 	return (orig_size - msg_size);
@@ -1639,22 +1638,22 @@ as_hb_tcp_send(int fd, byte * buff, size_t msg_size)
  * recv hb protocol message and retry after 100 u sec in case of EAGAIN 
  * and EWOULDBLOCK*/
 static int 
-as_hb_tcp_recv(int fd, byte * buff, size_t msg_size)
+as_hb_tcp_recv(cf_socket sock, byte * buff, size_t msg_size)
 {
 	int ret = 0;
 	uint32_t len = 0;
 	int flags = (MSG_NOSIGNAL | MSG_PEEK);
-	if (0 >= (ret = recv(fd, buff, 4, flags))) {
-		cf_warning(AS_HB, "as_hb_tcp_recv() fd %d recv peek error", fd);
+	if (0 >= (ret = cf_socket_recv(CSFD(sock), buff, 4, flags))) {
+		cf_warning(AS_HB, "as_hb_tcp_recv() fd %d recv peek error", CSFD(sock));
 		return ret;
 	} 
 	if (ret != 4) {
-		cf_warning(AS_HB, "as_hb_tcp_recv() fd %d not even 4 bytes", fd);
+		cf_warning(AS_HB, "as_hb_tcp_recv() fd %d not even 4 bytes", CSFD(sock));
 		return -1;
 	}
 	len = ntohl(*((uint32_t *)buff))  + 6;
 	if (msg_size < len) {
-		cf_warning(AS_HB, "as_hb_tcp_recv() fd %d buffer size insufficient", fd);
+		cf_warning(AS_HB, "as_hb_tcp_recv() fd %d buffer size insufficient", CSFD(sock));
 		return -1;
 	}
 
@@ -1663,35 +1662,35 @@ as_hb_tcp_recv(int fd, byte * buff, size_t msg_size)
 	int read_so_far = 0;
 	cf_clock start = cf_getus();
 	do {
-		cf_detail(AS_HB, "as_hb_tcp_recv() fd %d try %d len %d", fd, try, len);
-		if (0 >= (ret = recv(fd, (buff + read_so_far), len - read_so_far, MSG_NOSIGNAL))) {
+		cf_detail(AS_HB, "as_hb_tcp_recv() fd %d try %d len %d", CSFD(sock), try, len);
+		if (0 >= (ret = cf_socket_recv(CSFD(sock), (buff + read_so_far), len - read_so_far, MSG_NOSIGNAL))) {
 			if(errno == EAGAIN || errno == EWOULDBLOCK) {
 				try++;
 				usleep(g_config.hb_mesh_rw_retry_timeout/3);
 				continue;
 			}
-			cf_info(AS_HB, "as_hb_tcp_recv() fd %d recv error try %d", fd, try);
+			cf_info(AS_HB, "as_hb_tcp_recv() fd %d recv error try %d", CSFD(sock), try);
 			return ret;
 		} 
 
 		read_so_far += ret;
 		if(read_so_far < len) {
-			cf_detail(AS_HB, "as_hb_tcp_recv() recv success fd %d try %d read_so_far %d ", fd, try, read_so_far);
+			cf_detail(AS_HB, "as_hb_tcp_recv() recv success fd %d try %d read_so_far %d ", CSFD(sock), try, read_so_far);
 			try++;
 			usleep(g_config.hb_mesh_rw_retry_timeout/3);
 		} else {
-			cf_detail(AS_HB, "as_hb_tcp_recv() recv success fd %d try %d len %d ", fd, try, len);
+			cf_detail(AS_HB, "as_hb_tcp_recv() recv success fd %d try %d len %d ", CSFD(sock), try, len);
 			return len;
 		}
 	} while ( (try < max_try) && ((start + g_config.hb_mesh_rw_retry_timeout) > cf_getus()) );
-	cf_info(AS_HB, "as_hb_tcp_recv() fd %d returning error try %d len %d read_so_far %d", fd, try, len, read_so_far);
+	cf_info(AS_HB, "as_hb_tcp_recv() fd %d returning error try %d len %d read_so_far %d", CSFD(sock), try, len, read_so_far);
 	return -1;
 }
 
 /* as_hb_rx_process
  * Process a received heartbeat */
 void
-as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, int fd)
+as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
 {
 	cf_node node;
 	as_hb_pulse *a_p_pulse = NULL;
@@ -1780,9 +1779,9 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, int fd)
 			pthread_mutex_t *vlock = NULL;
 
 			// Add the association between this node ID and mesh fd.
-			if ((AS_HB_MODE_MESH == g_config.hb_mode) && (g_hb.endpoint_txlist_node_id[fd] == 0)) {
-				g_hb.endpoint_txlist_node_id[fd] = node;
-				as_hb_nodes_discovered_hash_put_conn(node, fd);
+			if ((AS_HB_MODE_MESH == g_config.hb_mode) && (g_hb.endpoint_txlist_node_id[CSFD(sock)] == 0)) {
+				g_hb.endpoint_txlist_node_id[CSFD(sock)] = node;
+				as_hb_nodes_discovered_hash_put_conn(node, sock);
 			}
 
 			int rv = shash_get_vlock(g_hb.adjacencies, &node, (void **) &p_pulse, &vlock);
@@ -1792,13 +1791,13 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, int fd)
 				vlock = 0;
 				p_pulse->new = true;
 			} else if (rv == SHASH_OK) {
-				if (p_pulse->fd != fd) {
+				if (CSFD(p_pulse->sock) != CSFD(sock)) {
 					cf_detail(AS_HB, "received same pulse from other fd, surprising");
-					if (0 > p_pulse->fd) {
-						cf_detail(AS_HB, "Re-setting Fabric-opened HB fd %d to the current fd %d", - p_pulse->fd, fd);
-						p_pulse->fd = fd;
+					if (0 > CSFD(p_pulse->sock)) {
+						cf_detail(AS_HB, "Re-setting Fabric-opened HB fd %d to the current fd %d", - CSFD(p_pulse->sock), CSFD(sock));
+						p_pulse->sock = sock;
 					} else {
-						cf_detail(AS_HB, "Bad Pulse FD: pulse says %d ; received on %d", p_pulse->fd, fd);
+						cf_detail(AS_HB, "Bad Pulse FD: pulse says %d ; received on %d", CSFD(p_pulse->sock), CSFD(sock));
 						as_hb_error(AS_HB_ERR_BAD_PULSE_FD);
 					}
 					// cf_warning(AS_HB, "closing redundant HB socket fd %d (same as addr 0x%08x port %d fd %d)", fd, p_pulse->addr, p_pulse->port, p_pulse->fd);
@@ -1810,7 +1809,7 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, int fd)
 			p_pulse->last = now;
 			// this is a really interesting print, because it shows the true smoothness of
 			// receiving other's heartbeats
-			p_pulse->fd = fd;
+			p_pulse->sock = sock;
 			if (AS_HB_MODE_MCAST == g_config.hb_mode) {
 				p_pulse->sal = *sal;
 				p_pulse->port = p_pulse->addr = 0;
@@ -1849,11 +1848,11 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, int fd)
 			} else {
 				int rv = shash_put_unique(g_hb.adjacencies, &node, p_pulse);
 				if (rv == SHASH_ERR_FOUND) {
-					cf_warning(AS_HB, "reprocessing HB msg, ppaddr %08x ppport %d ppfd %d fd %d", p_pulse->addr, p_pulse->port, p_pulse->fd, fd);
+					cf_warning(AS_HB, "reprocessing HB msg, ppaddr %08x ppport %d ppfd %d fd %d", p_pulse->addr, p_pulse->port, CSFD(p_pulse->sock), CSFD(sock));
 #ifdef FAIL_FAST
 					cf_crash(AS_HB, "declining to recurse");
 #endif
-					as_hb_rx_process(m, sal, fd);
+					as_hb_rx_process(m, sal, sock);
 					break;
 				} else if (rv != 0) {
 					cf_warning(AS_HB, "unable to update adjacencies hash");
@@ -1917,13 +1916,13 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, int fd)
 						if (AS_HB_MODE_MCAST == g_config.hb_mode) {
 							cf_sock_addr sa;
 							cf_sock_addr_from_binary_legacy(sal, &sa);
-							if (0 > cf_socket_send_to(fd, bufm, n, 0, &sa)) {
+							if (0 > cf_socket_send_to(CSFD(sock), bufm, n, 0, &sa)) {
 								cf_detail(AS_HB, "cf_socket_send_to() failed 1");
 								as_hb_error(AS_HB_ERR_SEND_TO_FAIL_1);
 							}
 						} else {
-							if (0 > as_hb_tcp_send(fd, bufm, n)) {
-								cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 2", fd);
+							if (0 > as_hb_tcp_send(sock, bufm, n)) {
+								cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 2", CSFD(sock));
 								as_hb_error(AS_HB_ERR_SEND_TO_FAIL_2);
 							}
 						}
@@ -1977,13 +1976,13 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, int fd)
 					if (AS_HB_MODE_MCAST == g_config.hb_mode) {
 						cf_sock_addr sa;
 						cf_sock_addr_from_binary_legacy(sal, &sa);
-						if (0 > cf_socket_send_to(fd, bufm, n, 0, &sa)) {
+						if (0 > cf_socket_send_to(CSFD(sock), bufm, n, 0, &sa)) {
 							cf_detail(AS_HB, "cf_socket_send_to() failed 3");
 							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_3);
 						}
 					} else {
-						if (0 > as_hb_tcp_send(fd, bufm, n)) {
-							cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 4", fd);
+						if (0 > as_hb_tcp_send(sock, bufm, n)) {
+							cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 4", CSFD(sock));
 							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_4);
 						}
 					}
@@ -2184,8 +2183,8 @@ as_hb_thr(void *arg)
 				cf_debug(AS_HB, "new connection from %s", sa_str);
 
 				cf_atomic_int_incr(&g_config.heartbeat_connections_opened);
-				if (0 != as_hb_endpoint_add(csock, false /*is not udp*/, 0 /*node id unknown until pulse arrives*/)) {
-					close(csock);
+				if (0 != as_hb_endpoint_add(WSFD(csock), false /*is not udp*/, 0 /*node id unknown until pulse arrives*/)) {
+					cf_socket_close(csock);
 					continue;
 				}
 			} else {
@@ -2197,11 +2196,11 @@ CloseSocket:
 					g_hb.endpoint_txlist[fd] = false;
 					// Remove node from the discovered list.
 					if (g_hb.endpoint_txlist_node_id[fd]) {
-						as_hb_nodes_discovered_hash_del_conn(g_hb.endpoint_txlist_node_id[fd], fd);
+						as_hb_nodes_discovered_hash_del_conn(g_hb.endpoint_txlist_node_id[fd], WSFD(fd));
 					}
 					g_hb.endpoint_txlist_node_id[fd] = 0;
 					cf_atomic_int_incr(&g_config.heartbeat_connections_closed);
-					mesh_host_list_remove_fd(fd);
+					mesh_host_list_remove_fd(WSFD(fd));
 					// reusing ev as it is ignored for EPOLL_CTL_DEL
 					if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, fd, &ev)) {
 						cf_warning(AS_HB, "unable to remove socket %d from epoll fd list: %s", fd, cf_strerror(errno));
@@ -2224,7 +2223,7 @@ CloseSocket:
 							cf_sock_addr_to_binary_legacy(&sa, &from);
 						}
 					} else {
-						r = as_hb_tcp_recv(fd, bufr, sizeof(bufr));
+						r = as_hb_tcp_recv(WSFD(fd), bufr, sizeof(bufr));
 					}
 					cf_detail(AS_HB, "received %d bytes, calling msg_parse", r);
 					if (r > 0) {
@@ -2232,7 +2231,7 @@ CloseSocket:
 							cf_detail(AS_HB, "unable to parse heartbeat message");
 							as_hb_error(AS_HB_ERR_UNPARSABLE_MSG);
 						} else {
-							as_hb_rx_process(mr, &from, fd);
+							as_hb_rx_process(mr, &from, WSFD(fd));
 						}
 						msg_reset(mr);
 					} else {
@@ -2275,7 +2274,7 @@ CloseSocket:
 						}
 					} else { // tcp
 						cf_detail(AS_HB, "sending tcp heartbeat to index %d : msg size %zu", i, n);
-						if (0 > as_hb_tcp_send(i, buft, n)) {
+						if (0 > as_hb_tcp_send(WSFD(i), buft, n)) {
 							cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 6", i);
 							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_6);
 						}
@@ -2690,13 +2689,13 @@ as_hb_init_socket()
  * Re-initialize the heartbeat subsystem
  * (Open socket, but don't create threads, etc.) */
 static void
-as_hb_reinit(int socket, bool isudp)
+as_hb_reinit(cf_socket sock, bool isudp)
 {
-	cf_info(AS_HB, "heartbeat re-initialization: socket %d is%s UDP", socket, (isudp ? "" : " not"));
+	cf_info(AS_HB, "heartbeat re-initialization: socket %d is%s UDP", CSFD(sock), (isudp ? "" : " not"));
 
 	as_hb_init_socket();
 
-	as_hb_start_receiving(socket, isudp, 0 /*node*/);
+	as_hb_start_receiving(sock, isudp, 0 /*node*/);
 }
 
 /* as_hb_start
@@ -2760,7 +2759,7 @@ as_hb_dump_pulse(as_hb_pulse *pulse)
 	cf_info(AS_HB, " sockaddr %"PRIx64"", pulse->sal);
 	uint8_t *addr = (uint8_t *) &pulse->addr;
 	cf_info(AS_HB, " addr %d.%d.%d.%d port %d", addr[0], addr[1], addr[2], addr[3], pulse->port);
-	cf_info(AS_HB, " fd %d", pulse->fd);
+	cf_info(AS_HB, " fd %d", CSFD(pulse->sock));
 	cf_info(AS_HB, " new %d updated %d dunned %d", pulse->new, pulse->updated, pulse->dunned);
 	cf_info(AS_HB, " last detected %lu", pulse->last_detected);
 	cf_info(AS_HB, " principal %"PRIx64"", pulse->principal);
@@ -2803,7 +2802,7 @@ as_hb_dump_discovered_node_hval(discovered_node_hval_t *hval)
 {
 	cf_info(AS_HB, " num_conn %d", hval->num_conn);
 	for (int i = 0; i < hval->num_conn; i++) {
-		cf_info(AS_HB, " conn[%d] fd %d", i, hval->conn[i].fd);
+		cf_info(AS_HB, " conn[%d] fd %d", i, CSFD(hval->conn[i].sock));
 	}
 }
 
@@ -2897,7 +2896,7 @@ as_hb_dump(bool verbose)
 	while (elem) {
 		if (verbose) {
 			cf_info(AS_HB, "MeshSeedHostList[%d]:  addr:port %s:%d next_try %lu try_interval %d fd %d",
-					i, elem->host, elem->port, elem->next_try, elem->try_interval, elem->fd);
+					i, elem->host, elem->port, elem->next_try, elem->try_interval, CSFD(elem->sock));
 		}
 		i++;
 		elem = elem->next;
@@ -2911,7 +2910,7 @@ as_hb_dump(bool verbose)
 	while (elem) {
 		if (verbose) {
 			cf_info(AS_HB, "MeshNonSeedHostList[%d]:  addr:port %s:%d next_try %lu try_interval %d fd %d",
-					i, elem->host, elem->port, elem->next_try, elem->try_interval, elem->fd);
+					i, elem->host, elem->port, elem->next_try, elem->try_interval, CSFD(elem->sock));
 		}
 		i++;
 		elem = elem->next;

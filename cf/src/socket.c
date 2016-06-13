@@ -270,6 +270,25 @@ cf_socket_enable_nagle(int32_t fd)
 	safe_setsockopt(fd, SOL_TCP, TCP_NODELAY, &flag, sizeof flag);
 }
 
+void
+cf_socket_keep_alive(int32_t fd, int32_t idle, int32_t interval, int32_t count)
+{
+	static int32_t flag = 1;
+	safe_setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof flag);
+
+	if (idle > 0) {
+		safe_setsockopt(fd, SOL_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
+	}
+
+	if (interval > 0) {
+		safe_setsockopt(fd, SOL_TCP, TCP_KEEPINTVL, &interval, sizeof interval);
+	}
+
+	if (count > 0) {
+		safe_setsockopt(fd, SOL_TCP, TCP_KEEPCNT, &count, sizeof count);
+	}
+}
+
 static size_t
 addr_len(const struct sockaddr *sa)
 {

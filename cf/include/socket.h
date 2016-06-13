@@ -48,6 +48,17 @@ typedef struct {
 	int32_t sock;
 } cf_socket_cfg;
 
+// Accesses the socket file descriptor as an lvalue, i.e., the socket file descriptor
+// can be modified.
+#define SFD(sock) ((sock).fd)
+
+// More restrictive version (think "const") of the above. Produces an rvalue, i.e.,
+// the socket file descriptor cannot be modified.
+#define CSFD(sock) ((int32_t)(sock).fd)
+
+// Wraps a socket file descriptor.
+#define WSFD(_fd) ((cf_socket){ .fd = _fd })
+
 int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size);
@@ -75,6 +86,7 @@ void cf_socket_disable_blocking(int32_t fd);
 void cf_socket_enable_blocking(int32_t fd);
 void cf_socket_disable_nagle(int32_t fd);
 void cf_socket_enable_nagle(int32_t fd);
+void cf_socket_keep_alive(int32_t fd, int32_t idle, int32_t interval, int32_t count);
 
 int32_t cf_socket_init_server(cf_socket_cfg *conf);
 int32_t cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout);

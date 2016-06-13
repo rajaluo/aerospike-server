@@ -267,7 +267,7 @@ typedef enum fb_status_e {
 
 typedef struct {
 
-	int fd;
+	cf_socket sock;
 	int worker_id;
 
 	bool nodelay_isset;
@@ -466,11 +466,11 @@ fne_release(fabric_node_element *fne)
 
 
 fabric_buffer *
-fabric_buffer_create(int fd)
+fabric_buffer_create(cf_socket sock)
 {
 	fabric_buffer *fb = cf_rc_alloc(sizeof(fabric_buffer));
 
-	fb->fd = fd;
+	fb->sock = sock;
 	fb->worker_id = -1; // no worker assigned yet
 	fb->nodelay_isset = false;
 	fb->keepalive_isset = false;
@@ -498,7 +498,7 @@ fabric_buffer_create(int fd)
 	}
 #else
 	if (SHASH_OK == shash_get(g_fb_hash, &fb, &value)) {
-		cf_warning(AS_FABRIC, "fbc(%d): fb %p unexpectedly found in g_fb_hash", fd, fb);
+		cf_warning(AS_FABRIC, "fbc(%d): fb %p unexpectedly found in g_fb_hash", CSFD(sock), fb);
 	} else if (SHASH_OK != shash_put(g_fb_hash, &fb, &value)) {
 		cf_crash(AS_FABRIC, "failed to shash_put() into hash fb %p", fb);
 	}
@@ -564,8 +564,8 @@ fabric_buffer_release(fabric_buffer *fb)
 		// int epoll_fd = g_fabric_args->workers_epoll_fd[fb->worker_id];
 		// epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fb->fd, 0);
 
-		close(fb->fd);
-		fb->fd = -1;
+		cf_socket_close(CSFD(fb->sock));
+		SFD(fb->sock) = -1;
 		cf_atomic_int_incr(&g_config.fabric_connections_closed);
 
 		// No longer assigned to a worker.
@@ -764,7 +764,7 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	cf_atomic_int_incr(&g_config.fabric_connections_opened);
 
 	// Create a fabric buffer to go along with the file descriptor
-	fabric_buffer *fb = fabric_buffer_create(fd);
+	fabric_buffer *fb = fabric_buffer_create(WSFD(fd));
 	fabric_buffer_associate(fb, fne);
 
 	// Grab a start message, send it to the remote endpoint so it knows me
@@ -852,32 +852,8 @@ static void
 fabric_set_keepalive_options(fabric_buffer *fb)
 {
 	if (!fb->keepalive_isset && g_config.fabric_keepalive_enabled) {
-		int value = 1;
-
-		cf_debug(AS_FABRIC, "Setting keepalive on fd %d to %s time: %d intvl: %d probes: %d",
-				   fb->fd, g_config.fabric_keepalive_enabled ? "ON" : "OFF",
-				   g_config.fabric_keepalive_time, g_config.fabric_keepalive_intvl,
-				   g_config.fabric_keepalive_probes);
-
-		if (0 > setsockopt(fb->fd, SOL_SOCKET, SO_KEEPALIVE, &value, sizeof(value))) {
-			cf_warning(AS_FABRIC, "setsockopt: SO_KEEPALIVE (fd %d; errno %d)", fb->fd, errno);
-		}
-
-		value = g_config.fabric_keepalive_time;
-		if ((value > 0) && (0 > setsockopt(fb->fd, IPPROTO_TCP, TCP_KEEPIDLE, &value, sizeof(value)))) {
-			cf_warning(AS_FABRIC, "setsockopt: TCP_KEEPIDLE (fd %d; errno %d)", fb->fd, errno);
-		}
-
-		value = g_config.fabric_keepalive_intvl;
-		if ((value > 0) && (0 > setsockopt(fb->fd, IPPROTO_TCP, TCP_KEEPINTVL, &value, sizeof(value)))) {
-			cf_warning(AS_FABRIC, "setsockopt: TCP_KEEPINTVL (fd %d; errno %d)", fb->fd, errno);
-		}
-
-		value = g_config.fabric_keepalive_probes;
-		if ((value > 0) && (0 > setsockopt(fb->fd, IPPROTO_TCP, TCP_KEEPCNT, &value, sizeof(value)))) {
-			cf_warning(AS_FABRIC, "setsockopt: TCP_KEEPCNT (fd %d; errno %d)", fb->fd, errno);
-		}
-
+		cf_socket_keep_alive(CSFD(fb->sock), g_config.fabric_keepalive_time,
+				g_config.fabric_keepalive_intvl, g_config.fabric_keepalive_probes);
 		fb->keepalive_isset = true;
 	}
 }
@@ -898,8 +874,7 @@ fabric_process_writable(fabric_buffer *fb)
 		cf_atomic_int_incr(&g_config.fabric_write_long);
 
 	if (fb->nodelay_isset == false) {
-		int flag = 1;
-		setsockopt(fb->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
+		cf_socket_disable_nagle(CSFD(fb->sock));
 		fb->nodelay_isset = true;
 	}
 
@@ -907,7 +882,7 @@ fabric_process_writable(fabric_buffer *fb)
 
 	byte *send_buf = fb->w_in_place ? fb->w_data : fb->w_buf;
 
-	if (0 > (w_sz = send(fb->fd, send_buf + fb->w_len, w_len, MSG_NOSIGNAL))) {
+	if (0 > (w_sz = cf_socket_send(CSFD(fb->sock), send_buf + fb->w_len, w_len, MSG_NOSIGNAL))) {
 		if (errno == EAGAIN) {
 			return 0;
 		}
@@ -1071,21 +1046,19 @@ fabric_process_read_msg(fabric_buffer *fb)
 		cf_node *buf;
 		size_t bufsz;
 
-		int fd = fb->fd;
-
 		if (0 != msg_get_uint64(m, FS_FIELD_NODE, &node))
 			goto Next;
 
 		if (AS_HB_MODE_MCAST == g_config.hb_mode) {
 			cf_sock_addr sa;
 
-			if (cf_socket_remote_name(fd, &sa) < 0) {
+			if (cf_socket_remote_name(CSFD(fb->sock), &sa) < 0) {
 				goto Next;
 			}
 
 			char sa_str[1000];
 			cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
-			cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)", sa_str, node, fd);
+			cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)", sa_str, node, CSFD(fb->sock));
 
 			cf_sock_addr_to_binary_legacy(&sa, &sal);
 		} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
@@ -1104,7 +1077,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 			goto Next;
 		}
 
-		as_hb_process_fabric_heartbeat(node, fd, &sal, addr, port, buf, bufsz);
+		as_hb_process_fabric_heartbeat(node, fb->sock, &sal, addr, port, buf, bufsz);
 
 Next:
 		as_fabric_msg_put(m);
@@ -1144,13 +1117,13 @@ Next:
 			// or if we're way out of memory --- close the connection and let
 			// the error paths take care of it
 			cf_warning(AS_FABRIC, "msg_parse could not parse message, for type %d", fb->r_type);
-			shutdown(fb->fd, SHUT_WR);
+			cf_socket_shutdown(CSFD(fb->sock));
 			return false;
 		}
 
 		if (msg_parse(m, fb->r_parse, fb->r_msg_size) != 0) {
 			cf_warning(AS_FABRIC, "msg_parse failed regular message, not supposed to happen: fb %p", fb);
-			shutdown(fb->fd, SHUT_WR);
+			cf_socket_shutdown(CSFD(fb->sock));
 			return false;
 		}
 
@@ -1203,7 +1176,7 @@ fabric_process_readable(fabric_buffer *fb)
 {
 	int32_t	rsz;
 
-	if (0 >= (rsz = read(fb->fd, fb->r_append, fb->r_end - fb->r_append))) {
+	if (0 >= (rsz = cf_socket_recv(CSFD(fb->sock), fb->r_append, fb->r_end - fb->r_append, 0))) {
 		cf_debug(AS_FABRIC, "read returned %d, broken connection? %d %s", rsz, errno, cf_strerror(errno));
 		return -1;
 	}
@@ -1243,7 +1216,7 @@ fabric_buffer_set_epoll_state(fabric_buffer *fb)
 		ev.events |= EPOLLOUT;
 	}
 
-	epoll_ctl( g_fabric_args->workers_epoll_fd[ fb->worker_id ], EPOLL_CTL_MOD, fb->fd, &ev);
+	epoll_ctl( g_fabric_args->workers_epoll_fd[ fb->worker_id ], EPOLL_CTL_MOD, CSFD(fb->sock), &ev);
 }
 
 //
@@ -1298,7 +1271,7 @@ fabric_worker_add(fabric_args *fa, fabric_buffer *fb)
 
 	// decide which queue to add to -- try round robin for the moment
 	int worker = worker_add_index++ % fa->num_workers;
-	cf_debug(AS_FABRIC, "worker_fabric_add: adding fd %d to worker id %d notefd %d", fb->fd, worker, fa->note_fd[worker]);
+	cf_debug(AS_FABRIC, "worker_fabric_add: adding fd %d to worker id %d notefd %d", CSFD(fb->sock), worker, fa->note_fd[worker]);
 
 	fb->worker_id = worker;
 
@@ -1402,7 +1375,7 @@ fabric_worker_fn(void *argv)
 							ev.data.ptr = fb;
 							ev.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
 							if (fb->w_total_len > fb->w_len) ev.events |= EPOLLOUT;
-							if (0 != epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fb->fd, &ev)) {
+							if (0 != epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(fb->sock), &ev)) {
 								cf_debug(AS_FABRIC, "fabric_worker_fn: epoll_ctl failed %s", cf_strerror(errno));
 							}
 						} else if (DELETE_FABRIC_BUFFER == wqe.type) {
@@ -1413,9 +1386,9 @@ fabric_worker_fn(void *argv)
 							if (FB_STATUS_IDLE != fb->status) {
 								cf_warning(AS_FABRIC, "received a DELETE message for a non-idle FB %p (status %d) ~~ Ignorning", fb, fb->status);
 							} else {
-								cf_debug(AS_FABRIC, "shutting down fd %d", fb->fd);
+								cf_debug(AS_FABRIC, "shutting down fd %d", CSFD(fb->sock));
 								if (fb) {
-									shutdown(fb->fd, SHUT_RDWR);
+									cf_socket_shutdown(CSFD(fb->sock));
 								} else {
 									cf_warning(AS_FABRIC, "got a NULL fb ~~ Ignorning");
 								}
@@ -1433,13 +1406,13 @@ fabric_worker_fn(void *argv)
 
 				fabric_buffer *fb = events[i].data.ptr;
 
-				cf_detail(AS_FABRIC, "epoll trigger: fd %d events %x", fb->fd, events[i].events);
+				cf_detail(AS_FABRIC, "epoll trigger: fd %d events %x", CSFD(fb->sock), events[i].events);
 
 				if (fb->fne && (fb->fne->live == false)) {
 
 					fb->failed = true;
 
-					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fb->fd, 0);
+					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(fb->sock), 0);
 					fabric_buffer_release(fb);
 					fb = 0;
 					continue;
@@ -1449,8 +1422,8 @@ fabric_worker_fn(void *argv)
 
 					fb->failed = true;
 
-					cf_debug(AS_FABRIC, "epoll : error, will close: fb %p fd %d errno %d", fb, fb->fd, errno);
-					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fb->fd, 0);
+					cf_debug(AS_FABRIC, "epoll : error, will close: fb %p fd %d errno %d", fb, CSFD(fb->sock), errno);
+					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(fb->sock), 0);
 					fabric_buffer_release(fb);
 					fb = 0;
 					continue;
@@ -1462,7 +1435,7 @@ fabric_worker_fn(void *argv)
 					fb->status = FB_STATUS_READ;
 
 					if (fabric_process_readable(fb) < 0) {
-						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fb->fd, 0);
+						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(fb->sock), 0);
 						fabric_buffer_release(fb);
 						fb = 0;
 						continue;
@@ -1475,7 +1448,7 @@ fabric_worker_fn(void *argv)
 					fb->status = FB_STATUS_WRITE;
 
 					if (fabric_process_writable(fb) < 0) {
-						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fb->fd, 0);
+						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(fb->sock), 0);
 						fabric_buffer_release(fb);
 						fb = 0;
 						continue;
@@ -1537,7 +1510,7 @@ fabric_accept_fn(void *argv)
 
 		/* Create new fabric buffer, but don't yet know
 		   the remote endpoint, so the FNE is not associated yet */
-		fabric_buffer *fb = fabric_buffer_create(csocket);
+		fabric_buffer *fb = fabric_buffer_create(WSFD(csocket));
 
 		fabric_worker_add(fa, fb);
 
@@ -1979,8 +1952,8 @@ as_fabric_send(cf_node node, msg *m, int priority )
 	fabric_buffer *fb = 0;
 	do {
 		rv = cf_queue_pop(fne->xmit_buffer_queue, &fb, CF_QUEUE_NOWAIT);
-		if ((CF_QUEUE_OK == rv) && (fb->fd == -1 || fb->failed)) {
-			cf_detail(AS_FABRIC, "releasing fb: %p with fne: %p and fd: %d (%s)", fb, fb->fne, fb->fd, fb->failed ? "Failed" : "Missing");
+		if ((CF_QUEUE_OK == rv) && (CSFD(fb->sock) == -1 || fb->failed)) {
+			cf_detail(AS_FABRIC, "releasing fb: %p with fne: %p and fd: %d (%s)", fb, fb->fne, CSFD(fb->sock), fb->failed ? "Failed" : "Missing");
 			fabric_buffer_release(fb);
 			fb = 0;
 		}
@@ -2603,7 +2576,7 @@ fb_hash_dump_reduce_fn(void *key, void *data, void *udata)
 
 	int count = cf_rc_count(fb);
 
-	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %"PRIx64": %s); fd: %d (%s) ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), fb->fd, fb->failed ? "failed" : "healthy", fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
+	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %"PRIx64": %s); fd: %d (%s) ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), CSFD(fb->sock), fb->failed ? "failed" : "healthy", fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
 
 	*item_num += 1;
 
