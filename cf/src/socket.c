@@ -499,6 +499,9 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 		goto err_cleanup;
 	}
 
+#ifdef IP_MULTICAST_ALL
+	// [FYI:  This socket option has existed since the Linux 2.6.31 kernel.]
+
 	// Only receive traffic from multicast groups this socket actually joins.
 	// [Note:  Bind address filtering takes precedence, so this is simply an extra level of restriction.]
 	uint no = 0;
@@ -506,6 +509,7 @@ cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
 		cf_warning(CF_SOCKET, "IP_MULTICAST_ALL: %d %s", errno, cf_strerror(errno));
 		goto err_cleanup;
 	}
+#endif
 
 	s->saddr.sin_port = htons(s->port);
 	if (ms->tx_addr) {
