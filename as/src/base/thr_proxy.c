@@ -386,7 +386,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 		cf_detail_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Got Op Response");
 		pthread_mutex_lock(&wr->lock);
 		if (wr->origin == FROM_CLIENT) {
-			if (! wr->from.proto_fd_h->fd) {
+			if (! CSFD(wr->from.proto_fd_h->sock)) {
 				cf_warning_digest(AS_PROXY, &wr->keyd, "SHIPPED_OP ORIG Missing fd in proto_fd ");
 			}
 			else {
@@ -398,7 +398,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 
 				size_t pos = 0;
 				while (pos < proto_sz) {
-					rv = send(wr->from.proto_fd_h->fd, (((uint8_t *)proto) + pos), proto_sz - pos, MSG_NOSIGNAL);
+					rv = cf_socket_send(wr->from.proto_fd_h->sock, (((uint8_t *)proto) + pos), proto_sz - pos, MSG_NOSIGNAL);
 					if (rv > 0) {
 						pos += rv;
 					}
@@ -407,7 +407,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 							// Common message when a client aborts.
 							cf_debug(AS_PROTO, "protocol proxy write fail: fd %d "
 									"sz %zu pos %zu rv %d errno %d",
-									wr->from.proto_fd_h->fd, proto_sz, pos, rv, errno);
+									CSFD(wr->from.proto_fd_h->sock), proto_sz, pos, rv, errno);
 							as_end_of_transaction_force_close(wr->from.proto_fd_h);
 							wr->from.proto_fd_h = NULL;
 							break;
@@ -416,7 +416,7 @@ as_proxy_shipop_response_hdlr(msg *m, proxy_request *pr, bool *free_msg)
 					}
 					else {
 						cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ",
-								wr->from.proto_fd_h->fd, proto_sz, pos);
+								CSFD(wr->from.proto_fd_h->sock), proto_sz, pos);
 						as_end_of_transaction_force_close(wr->from.proto_fd_h);
 						wr->from.proto_fd_h = NULL;
 						break;
@@ -601,7 +601,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 
 						size_t pos = 0;
 						while (pos < proto_sz) {
-							rv = send(pr.from.proto_fd_h->fd, (((uint8_t *)proto) + pos), proto_sz - pos, MSG_NOSIGNAL);
+							rv = cf_socket_send(pr.from.proto_fd_h->sock, (((uint8_t *)proto) + pos), proto_sz - pos, MSG_NOSIGNAL);
 							if (rv > 0) {
 								pos += rv;
 							}
@@ -616,7 +616,7 @@ proxy_msg_fn(cf_node id, msg *m, void *udata)
 								usleep(1); // yield
 							}
 							else {
-								cf_warning(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ", pr.from.proto_fd_h->fd, proto_sz, pos);
+								cf_warning(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ", CSFD(pr.from.proto_fd_h->sock), proto_sz, pos);
 								as_end_of_transaction_force_close(pr.from.proto_fd_h);
 								pr.from.proto_fd_h = NULL;
 								as_proxy_set_stat_counters(-1);

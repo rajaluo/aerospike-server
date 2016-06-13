@@ -118,9 +118,8 @@ typedef struct scan_options_s {
 int get_scan_set_id(as_transaction* tr, as_namespace* ns, uint16_t* p_set_id);
 scan_type get_scan_type(as_transaction* tr);
 bool get_scan_options(as_transaction* tr, scan_options* options);
-void set_blocking(int fd, bool block);
-size_t send_blocking_response_chunk(int fd, uint8_t* buf, size_t size);
-size_t send_blocking_response_fin(int fd, int result_code);
+size_t send_blocking_response_chunk(cf_socket sock, uint8_t* buf, size_t size);
+size_t send_blocking_response_fin(cf_socket sock, int result_code);
 static inline bool excluded_set(as_index* r, uint16_t set_id);
 
 
@@ -321,26 +320,8 @@ get_scan_options(as_transaction* tr, scan_options* options)
 	return true;
 }
 
-void
-set_blocking(int fd, bool block)
-{
-	int flags = fcntl(fd, F_GETFL, 0);
-
-	if (flags < 0) {
-		cf_crash(AS_SCAN, "error getting flags on fd %d (%d: %s)", fd, errno,
-				cf_strerror(errno));
-	}
-
-	flags = block ? flags & ~O_NONBLOCK : flags | O_NONBLOCK;
-
-	if (fcntl(fd, F_SETFL, flags) < 0) {
-		cf_crash(AS_SCAN, "error setting flags on fd %d (%d: %s)", fd, errno,
-				cf_strerror(errno));
-	}
-}
-
 size_t
-send_blocking_response_chunk(int fd, uint8_t* buf, size_t size)
+send_blocking_response_chunk(cf_socket sock, uint8_t* buf, size_t size)
 {
 	as_proto proto;
 
@@ -349,18 +330,18 @@ send_blocking_response_chunk(int fd, uint8_t* buf, size_t size)
 	proto.sz = size;
 	as_proto_swap(&proto);
 
-	int rv = send(fd, (uint8_t*)&proto, sizeof(as_proto),
+	int rv = cf_socket_send(sock, (uint8_t*)&proto, sizeof(as_proto),
 			MSG_NOSIGNAL | MSG_MORE);
 
 	if (rv != sizeof(as_proto)) {
-		cf_warning(AS_SCAN, "send error - fd %d rv %d %s", fd, rv,
+		cf_warning(AS_SCAN, "send error - fd %d rv %d %s", CSFD(sock), rv,
 				rv < 0 ? cf_strerror(errno) : "");
 		return 0;
 	}
 
-	if ((rv = send(fd, buf, size, MSG_NOSIGNAL)) != size) {
-		cf_warning(AS_SCAN, "send error - fd %d sz %lu rv %d %s", fd, size, rv,
-				rv < 0 ? cf_strerror(errno) : "");
+	if ((rv = cf_socket_send(sock, buf, size, MSG_NOSIGNAL)) != size) {
+		cf_warning(AS_SCAN, "send error - fd %d sz %lu rv %d %s", CSFD(sock),
+				size, rv, rv < 0 ? cf_strerror(errno) : "");
 		return 0;
 	}
 
@@ -368,7 +349,7 @@ send_blocking_response_chunk(int fd, uint8_t* buf, size_t size)
 }
 
 size_t
-send_blocking_response_fin(int fd, int result_code)
+send_blocking_response_fin(cf_socket sock, int result_code)
 {
 	cl_msg m;
 
@@ -390,10 +371,10 @@ send_blocking_response_fin(int fd, int result_code)
 	m.msg.n_ops = 0;
 	as_msg_swap_header(&m.msg);
 
-	int rv = send(fd, (uint8_t*)&m, sizeof(cl_msg), MSG_NOSIGNAL);
+	int rv = cf_socket_send(sock, (uint8_t*)&m, sizeof(cl_msg), MSG_NOSIGNAL);
 
 	if (rv != sizeof(cl_msg)) {
-		cf_warning(AS_SCAN, "send error - fd %d rv %d %s", fd, rv,
+		cf_warning(AS_SCAN, "send error - fd %d rv %d %s", CSFD(sock), rv,
 				rv < 0 ? cf_strerror(errno) : "");
 		return 0;
 	}
@@ -446,7 +427,7 @@ conn_scan_job_own_fd(conn_scan_job* job, as_file_handle* fd_h)
 
 	job->fd_h = fd_h;
 	job->fd_h->fh_info |= FH_INFO_DONOT_REAP;
-	set_blocking(job->fd_h->fd, true);
+	cf_socket_enable_blocking(job->fd_h->sock);
 
 	job->net_io_bytes = 0;
 }
@@ -456,7 +437,7 @@ conn_scan_job_disown_fd(conn_scan_job* job)
 {
 	// Just undo conn_scan_job_own_fd(), nothing more.
 
-	set_blocking(job->fd_h->fd, false);
+	cf_socket_disable_blocking(job->fd_h->sock);
 	job->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 
 	pthread_mutex_destroy(&job->fd_lock);
@@ -468,7 +449,7 @@ conn_scan_job_finish(conn_scan_job* job)
 	as_job* _job = (as_job*)job;
 
 	if (job->fd_h) {
-		size_t size_sent = send_blocking_response_fin(job->fd_h->fd,
+		size_t size_sent = send_blocking_response_fin(job->fd_h->sock,
 				_job->abandoned);
 
 		job->net_io_bytes += size_sent;
@@ -491,7 +472,7 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 		return false;
 	}
 
-	size_t size_sent = send_blocking_response_chunk(job->fd_h->fd, buf, size);
+	size_t size_sent = send_blocking_response_chunk(job->fd_h->sock, buf, size);
 
 	if (size_sent == 0) {
 		conn_scan_job_release_fd(job, true);
@@ -510,7 +491,7 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 void
 conn_scan_job_release_fd(conn_scan_job* job, bool force_close)
 {
-	set_blocking(job->fd_h->fd, false);
+	cf_socket_disable_blocking(job->fd_h->sock);
 	job->fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
 	job->fd_h->last_used = cf_getms();
 	as_end_of_transaction(job->fd_h, force_close);
@@ -1242,7 +1223,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	if (as_msg_send_fin(tr->from.proto_fd_h->fd, AS_PROTO_RESULT_OK) == 0) {
+	if (as_msg_send_fin(tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) == 0) {
 		tr->from.proto_fd_h->last_used = cf_getms();
 		as_end_of_transaction_ok(tr->from.proto_fd_h);
 	}

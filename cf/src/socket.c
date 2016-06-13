@@ -302,6 +302,23 @@ cf_socket_keep_alive(cf_socket sock, int32_t idle, int32_t interval, int32_t cou
 	}
 }
 
+void
+cf_socket_set_send_buffer(cf_socket sock, int32_t size)
+{
+	safe_setsockopt(sock.fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof size);
+}
+
+void
+cf_socket_set_receive_buffer(cf_socket sock, int32_t size)
+{
+	safe_setsockopt(sock.fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof size);
+}
+
+void cf_socket_set_window(cf_socket sock, int32_t size)
+{
+	safe_setsockopt(sock.fd, SOL_TCP, TCP_WINDOW_CLAMP, &size, sizeof size);
+}
+
 static size_t
 addr_len(const struct sockaddr *sa)
 {

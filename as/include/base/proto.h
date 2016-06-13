@@ -37,6 +37,7 @@
 #include "citrusleaf/cf_vector.h"
 
 #include "dynbuf.h"
+#include "socket.h"
 
 
 // Forward declarations.
@@ -521,8 +522,8 @@ extern size_t as_msg_response_msgsize(struct as_index_s *r, struct as_storage_rd
 		bool nobindata, char *nsname, bool use_sets, cf_vector *binlist);
 extern int as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, int val_sz, bool);
 
-extern int as_msg_send_response(int fd, uint8_t* buf, size_t len, int flags);
-extern int as_msg_send_fin(int fd, uint32_t result_code);
+extern int as_msg_send_response(cf_socket sock, uint8_t* buf, size_t len, int flags);
+extern int as_msg_send_fin(cf_socket sock, uint32_t result_code);
 
 extern bool as_msg_peek_data_in_memory(const as_msg *m);
 
