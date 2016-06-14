@@ -1052,7 +1052,7 @@ info_command_tip_clear(char *name, char *params, cf_dyn_buf *db)
 	char *walker = buff;
 	char *start = walker;
 
-	while (true) {
+	while (buff[0] != 0) {
 		bool end = *walker == 0;
 
 		if (*walker == ',' || end) {
