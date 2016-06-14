@@ -87,30 +87,42 @@ cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size)
 int32_t
 cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size)
 {
-	if (size < 5) {
+	if (size < 16) {
 		cf_warning(CF_SOCKET, "Input buffer underflow");
 		return -1;
 	}
 
-	if (binary[0] != AF_INET) {
-		cf_crash(CF_SOCKET, "Invalid address family: %d", binary[0]);
+	for (int32_t i = 0; i < 10; ++i) {
+		if (binary[i] != 0) {
+			cf_warning(CF_SOCKET, "Invalid binary IPv4 address");
+			return -1;
+		}
 	}
 
-	memcpy(&addr->s_addr, binary + 1, 4);
-	return 5;
+	if (binary[10] != 0xff || binary[11] != 0xff) {
+		cf_warning(CF_SOCKET, "Invalid binary IPv4 address");
+		return -1;
+	}
+
+	memcpy(&addr->s_addr, binary + 12, 4);
+	return 16;
 }
 
 int32_t
 cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
 {
-	if (size < 5) {
+	if (size < 16) {
 		cf_warning(CF_SOCKET, "Output buffer overflow");
 		return -1;
 	}
 
-	binary[0] = AF_INET;
-	memcpy(binary + 1, &addr->s_addr, 4);
-	return 5;
+	for (int32_t i = 0; i < 10; ++i) {
+		binary[i] = 0;
+	}
+
+	binary[10] = binary[11] = 0xff;
+	memcpy(binary + 12, &addr->s_addr, 4);
+	return 16;
 }
 
 int32_t
