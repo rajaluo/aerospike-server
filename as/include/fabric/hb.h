@@ -55,20 +55,15 @@ typedef struct as_hb_event_node_s {
 	cf_node p_node; // the principal node from the succession list
 } as_hb_event_node;
 
-typedef struct as_hb_host_addr_port_s {
-	struct in_addr ip_addr;
-	int port;
-} as_hb_host_addr_port;
-
 typedef void (*as_hb_event_fn) (int nevents, as_hb_event_node *events, void *udata);
 
 extern void as_hb_init();
 extern void as_hb_start();
 extern bool as_hb_shutdown();
-extern int as_hb_getaddr(cf_node node, cf_sock_addr_legacy *sal);
+extern int as_hb_getaddr(cf_node node, cf_sock_addr *addr);
 extern int as_hb_register(as_hb_event_fn cb, void *udata);
 
-extern void as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr_legacy *sal, uint32_t addr, uint32_t port, cf_node *buf, size_t bufsz);
+extern void as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr *addr, cf_node *buf, size_t bufsz);
 extern bool as_hb_get_is_node_dunned(cf_node node);
 extern void as_hb_set_is_node_dunned(cf_node node, bool state, char *context);
 extern int as_hb_set_are_nodes_dunned(char *node_str, int node_str_len, bool is_dunned);
@@ -84,7 +79,7 @@ extern int as_hb_unsnub_all();
 // TIP the heartbeat system that there might be a cluster at a given IP address.
 extern int as_hb_tip(char *host, int port);
 // Clear tips for the given list of nodes, or for all nodes if the list is empty.
-extern int as_hb_tip_clear(as_hb_host_addr_port *host_addr_port_list, int host_port_list_len);
+extern int as_hb_tip_clear(cf_sock_addr *addr_list, int addr_list_len);
 
 // Set the heartbeat protocol version.
 extern int as_hb_set_protocol(hb_protocol_enum protocol);

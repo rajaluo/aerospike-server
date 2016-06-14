@@ -33,8 +33,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <asm/byteorder.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 
 #include "aerospike/as_val.h"
 #include "citrusleaf/alloc.h"

@@ -35,7 +35,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
 
 #include "aerospike/as_module.h"
 #include "aerospike/as_string.h"

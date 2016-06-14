@@ -30,7 +30,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <netinet/in.h>
 
 #include "aerospike/as_val.h"
 #include "citrusleaf/cf_digest.h"

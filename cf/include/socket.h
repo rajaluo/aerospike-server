@@ -34,11 +34,11 @@
 
 #include <sys/socket.h>
 
+#include "msg.h"
+
 typedef struct {
 	int32_t fd;
 } __attribute__((packed)) cf_socket;
-
-typedef uint64_t cf_sock_addr_legacy;
 
 typedef struct {
 	const char *addr;
@@ -65,6 +65,15 @@ typedef struct {
 	uint8_t ttl;
 } cf_socket_mcast_cfg;
 
+// XXX - Cleanly share the following with hb.c and fabric.c.
+#define AS_HB_MSG_ADDR 3
+#define AS_HB_MSG_PORT 4
+#define AS_HB_MSG_ADDR_EX 7
+
+#define FS_ADDR 1
+#define FS_PORT 2
+#define FS_ADDR_EX 4
+
 int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size);
@@ -81,9 +90,10 @@ int32_t cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t si
 int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size);
 int32_t cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size);
 
-void cf_sock_addr_from_binary_legacy(const cf_sock_addr_legacy *sal, cf_sock_addr *addr);
-void cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, cf_sock_addr_legacy *sal);
-void cf_sock_addr_legacy_set_port(cf_sock_addr_legacy *legacy, cf_ip_port port);
+int32_t cf_sock_addr_from_heartbeat(const msg *msg, cf_sock_addr *addr);
+void cf_sock_addr_to_heartbeat(cf_sock_addr *addr, msg *msg);
+int32_t cf_sock_addr_from_fabric(const msg *msg, cf_sock_addr *addr);
+void cf_sock_addr_to_fabric(cf_sock_addr *addr, msg *msg);
 
 void cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr);
 void cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native);

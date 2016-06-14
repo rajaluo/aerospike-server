@@ -36,8 +36,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <arpa/inet.h>
-#include <netinet/tcp.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -339,6 +337,7 @@ static fabric_args *g_fabric_args = 0;
 #define FS_ADDR          1
 #define FS_PORT          2
 #define FS_ANV           3
+#define FS_ADDR_EX       4
 
 // Special message at the front to describe my node ID
 msg_template fabric_mt[] = {
@@ -744,18 +743,16 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 {
 
 	// Get the address of the remote endpoint
-	cf_sock_addr_legacy sal;
-	if (0 > as_hb_getaddr(fne->node, &sal)) {
+	cf_sock_addr addr;
+	if (0 > as_hb_getaddr(fne->node, &addr)) {
 		cf_debug(AS_FABRIC, "fabric_connect: unknown remote endpoint %"PRIx64, fne->node);
 		return(-1);
 	}
 
 	// Initiate the connect to the remote endpoint
-	cf_sock_addr sa;
-	cf_sock_addr_from_binary_legacy(&sal, &sa);
 	cf_socket sock;
 
-	if (cf_socket_init_client_nb(&sa, &sock) < 0) {
+	if (cf_socket_init_client_nb(&addr, &sock) < 0) {
 		cf_debug(AS_FABRIC, "fabric connect could not create connect");
 		return(-1);
 	}
@@ -773,17 +770,19 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 		return(-1);
 	}
 
-	struct in_addr self;
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node); // identifies self to remote
 	if (AS_HB_MODE_MESH == g_config.hb_mode) {
 		cf_debug(AS_FABRIC, "Sending %s as the IP address for receiving heartbeats", g_config.hb_addr_to_use);
 		if (!g_config.hb_addr_to_use) {
 			cf_crash(AS_FABRIC, "hb_addr_to_use not initialized");
-		} else if (1 != inet_pton(AF_INET, g_config.hb_addr_to_use, &self))
-			cf_warning(AS_FABRIC, "unable to call inet_pton: %s", cf_strerror(errno));
-		else {
-			msg_set_uint32(m, FS_ADDR, *(uint32_t *)&self);
-			msg_set_uint32(m, FS_PORT, g_config.hb_port);
+		}
+
+		cf_sock_addr addr;
+
+		if (cf_sock_addr_from_host_port(g_config.hb_addr_to_use, g_config.hb_port, &addr) < 0) {
+			cf_warning(AS_FABRIC, "Invalid heartbeat IP address: %s", g_config.hb_addr_to_use);
+		} else {
+			cf_sock_addr_to_fabric(&addr, m);
 		}
 	}
 	msg_set_buf(m, FS_ANV, (byte *)g_config.paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
@@ -1039,9 +1038,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 
 		// create as_hb_pulse - code copied from as_hb_rx_process
 		cf_node node;
-		cf_sock_addr_legacy sal;
-		uint32_t addr;
-		uint32_t port;
+		cf_sock_addr addr;
 		cf_node *buf;
 		size_t bufsz;
 
@@ -1049,22 +1046,17 @@ fabric_process_read_msg(fabric_buffer *fb)
 			goto Next;
 
 		if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-			cf_sock_addr sa;
-
-			if (cf_socket_remote_name(fb->sock, &sa) < 0) {
+			if (cf_socket_remote_name(fb->sock, &addr) < 0) {
 				goto Next;
 			}
 
-			char sa_str[1000];
-			cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
-			cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)", sa_str, node, CSFD(fb->sock));
-
-			cf_sock_addr_to_binary_legacy(&sa, &sal);
+			if (cf_fault_filter[AS_FABRIC] >= CF_DEBUG) {
+				char tmp[1000];
+				cf_sock_addr_to_string(&addr, tmp, sizeof tmp);
+				cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)", tmp, node, CSFD(fb->sock));
+			}
 		} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
-			if (0 != msg_get_uint32(m, FS_ADDR, &addr))
-				goto Next;
-			if (0 != msg_get_uint32(m, FS_PORT, &port))
-				goto Next;
+			cf_sock_addr_from_fabric(m, &addr);
 		}
 
 		// Get the succession list from the pulse message
@@ -1076,7 +1068,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 			goto Next;
 		}
 
-		as_hb_process_fabric_heartbeat(node, fb->sock, &sal, addr, port, buf, bufsz);
+		as_hb_process_fabric_heartbeat(node, fb->sock, &addr, buf, bufsz);
 
 Next:
 		as_fabric_msg_put(m);

@@ -29,7 +29,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
 
 #include "aerospike/as_thread_pool.h"
 #include "citrusleaf/alloc.h"

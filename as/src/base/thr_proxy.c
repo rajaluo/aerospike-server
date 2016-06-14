@@ -35,7 +35,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"

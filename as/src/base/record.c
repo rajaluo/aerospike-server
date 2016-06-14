@@ -29,7 +29,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <netinet/in.h>
 #include <sys/param.h>
 
 #include "citrusleaf/alloc.h"

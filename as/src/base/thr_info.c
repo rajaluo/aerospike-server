@@ -37,7 +37,6 @@
 #include <sys/ioctl.h>
 #include <sys/param.h>
 #include <sys/resource.h>
-#include <arpa/inet.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -1021,120 +1020,71 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 	return(0);
 }
 
-typedef enum as_hpl_state_e {
-	AS_HPL_STATE_HOST,
-	AS_HPL_STATE_PORT
-} as_hpl_state;
+/*
+ *  Command Format:  "tip-clear:{host-port-list=<hpl>}" [the "host-port-list" argument is optional]
+ *
+ *  where <hpl> is either "all" or else a comma-separated list of items of the form: <HostIPAddr>:<PortNum>
+ */
 
-int
+int32_t
 info_command_tip_clear(char *name, char *params, cf_dyn_buf *db)
 {
-	cf_debug(AS_INFO, "tip clear command received: params %s", params);
+	cf_debug(AS_INFO, "tip-clear command with parameters \"%s\"", params);
+	cf_sock_addr addrs[AS_CLUSTER_SZ];
+	int32_t count = 0;
 
-	char host_port_list[3000];
-	int host_port_list_len = sizeof(host_port_list);
-	bool clear_all = true; // By default, clear all host tips.
+	char buff[3000];
+	int32_t buff_len = (int32_t)sizeof buff;
 
-	/*
-	 *  Command Format:  "tip-clear:{host-port-list=<hpl>}" [the "host-port-list" argument is optional]
-	 *
-	 *  where <hpl> is either "all" or else a comma-separated list of items of the form: <HostIPAddr>:<PortNum>
-	 */
-	host_port_list[0] = '\0';
-	int hapl_len = 0;
-	as_hb_host_addr_port host_addr_port_list[AS_CLUSTER_SZ];
-	if (!as_info_parameter_get(params, "host-port-list", host_port_list, &host_port_list_len)) {
-		if (0 != strcmp(host_port_list, "all")) {
-			clear_all = false;
-			char *c_p = host_port_list;
-			int pos = 0;
-			char host[16]; // "WWW.XXX.YYY.ZZZ\0"
-			char *host_p = host;
-			int host_len = 0;
-			bool valid = true, item_complete = false;
-			as_hpl_state state = AS_HPL_STATE_HOST;
-			as_hb_host_addr_port *hapl = host_addr_port_list;
-			while (valid && (pos < host_port_list_len)) {
-				switch (state) {
-				  case AS_HPL_STATE_HOST:
-					  if ((isdigit(*c_p)) || ('.' == *c_p)) {
-						  // (Doesn't really scan only valid IP addresses here ~~ it simply accumulates allowable characters.)
-						  *host_p++ = *c_p;
-						  if (++host_len >= sizeof(host)) {
-							  cf_warning(AS_INFO, "Error!  Too many characters: '%c' @ pos = %d in host IP address!", *c_p, pos);
-							  valid = false;
-							  continue;
-						  }
-					  } else if (':' == *c_p) {
-						  *host_p = '\0';
-						  // Verify IP address validity.
-						  if (1 == inet_pton(AF_INET, host, &(hapl->ip_addr))) {
-							  hapl_len++;
-							  hapl->port = 0;
-							  state = AS_HPL_STATE_PORT;
-						  } else {
-							  cf_warning(AS_INFO, "Error!  Cannot parse host \"%s\" into an IP address!", host);
-							  valid = false;
-							  continue;
-						  }
-					  } else {
-						  cf_warning(AS_INFO, "Error!  Bad character: '%c' @ pos = %d in host address!", *c_p, pos);
-						  valid = false;
-						  continue;
-					  }
-					  break;
+	if (*params == 0) {
+		buff[0] = 0;
+	}
+	else if (as_info_parameter_get(params, "host-port-list", buff, &buff_len) < 0) {
+		cf_info(AS_INFO, "The tip-clear command only takes an (optional) host-port-list argument");
+		cf_dyn_buf_append_string(db, "error");
+		return 0;
+	}
 
-				  case AS_HPL_STATE_PORT:
-					  if (isdigit(*c_p)) {
-						  if (hapl->port) {
-							  hapl->port *= 10;
-						  }
-						  hapl->port += (*c_p - '0');
-						  if (hapl->port >= (1 << 16)) {
-							  cf_warning(AS_INFO, "Error!  Invalid port %d >= %d!", hapl->port, (1 << 16));
-							  valid = false;
-							  continue;
-						  }
-						  // At least one non-zero port digit has been scanned.
-						  item_complete = (hapl->port > 0);
-					  } else if (',' == *c_p) {
-						  host_p = host;
-						  host_len = 0;
-						  hapl++;
-						  state = AS_HPL_STATE_HOST;
-						  item_complete = false;
-					  } else {
-						  cf_warning(AS_INFO, "Error!  Non-digit character: '%c' @ pos = %d in port!", *c_p, pos);
-						  valid = false;
-						  continue;
-					  }
-					  break;
+	if (strcmp(buff, "all") == 0) {
+		buff[0] = 0;
+	}
 
-				  default:
-					  valid = false;
-					  continue;
-				}
-				c_p++;
-				pos++;
-			}
-			if (!(valid && item_complete)) {
-				cf_warning(AS_INFO, "The \"%s:\" command argument \"host-port-list\" value must be a comma-separated list of items of the form <HostIPAddr>:<PortNum>, not \"%s\"", name, host_port_list);
+	char *walker = buff;
+	char *start = walker;
+
+	while (true) {
+		bool end = *walker == 0;
+
+		if (*walker == ',' || end) {
+			*walker = 0;
+
+			if (cf_sock_addr_from_string(start, &addrs[count]) < 0) {
+				cf_info(AS_INFO, "Invalid host or port in tip-clear command: %s", start);
 				cf_dyn_buf_append_string(db, "error");
 				return 0;
 			}
+
+			++count;
+			start = walker + 1;
+
+			if (end) {
+				break;
+			}
 		}
-	} else if (params && (0 < strlen(params))) {
-		cf_info(AS_INFO, "The \"%s:\" command only supports the optional argument \"host-port-list\", not \"%s\"", name, params);
-		cf_dyn_buf_append_string(db, "error");
-		return(0);
+
+		++walker;
 	}
 
-	as_hb_tip_clear((clear_all ? NULL : host_addr_port_list), (clear_all ? 0 : hapl_len));
+	if (count > 0) {
+		as_hb_tip_clear(addrs, count);
+	}
+	else {
+		as_hb_tip_clear(NULL, 0);
+	}
 
-	cf_info(AS_INFO, "tip clear command executed: params %s", params);
+	cf_info(AS_INFO, "tip-clear command executed with parameters %s", params);
 	cf_dyn_buf_append_string(db, "ok");
-
-	return(0);
+	return 0;
 }
 
 int

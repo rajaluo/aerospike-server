@@ -145,27 +145,69 @@ cleanup0:
 	return res;
 }
 
-void
-cf_sock_addr_from_binary_legacy(const cf_sock_addr_legacy *legacy, cf_sock_addr *addr)
+static int32_t
+from_x(const msg *msg, cf_sock_addr *addr, int32_t addr_id, int32_t port_id)
 {
-	uint8_t *binary = (uint8_t *)legacy;
-	memcpy(&addr->addr, binary, 4);
+	int32_t res = 0;
+	uint32_t v4;
 
-	uint16_t net_port;
-	memcpy(&net_port, binary + 4, 2);
-	addr->port = ntohs(net_port);
+	if (msg_get_uint32(msg, addr_id, &v4) < 0) {
+		cf_crash(CF_SOCKET, "Heartbeat message without IPv4 address field (AS_HB_MSG_ADDR)");
+	}
+
+	if (v4 != 0) {
+		++res;
+	}
+
+	uint32_t port;
+
+	if (msg_get_uint32(msg, port_id, &port) < 0) {
+		cf_crash(CF_SOCKET, "Heartbeat message without port field (AS_HB_MSG_PORT)");
+	}
+
+	if (port != 0) {
+		++port;
+	}
+
+	addr->addr.s_addr = v4;
+	addr->port = (cf_ip_port)port;
+	return res;
 }
 
-void
-cf_sock_addr_to_binary_legacy(const cf_sock_addr *addr, cf_sock_addr_legacy *legacy)
+int32_t cf_sock_addr_from_heartbeat(const msg *msg, cf_sock_addr *addr)
 {
-	uint8_t *binary = (uint8_t *)legacy;
-	memcpy(binary, &addr->addr, 4);
+	return from_x(msg, addr, AS_HB_MSG_ADDR, AS_HB_MSG_PORT);
+}
 
-	uint16_t net_port = htons(addr->port);
-	memcpy(binary + 4, &net_port, 2);
+int32_t cf_sock_addr_from_fabric(const msg *msg, cf_sock_addr *addr)
+{
+	return from_x(msg, addr, FS_ADDR, FS_PORT);
+}
 
-	binary[6] = binary[7] = 0;
+static void
+to_x(cf_sock_addr *addr, msg *msg, int32_t addr_id, int32_t port_id)
+{
+	uint32_t v4 = addr->addr.s_addr;
+
+	if (msg_set_uint32(msg, addr_id, v4)) {
+		cf_crash(CF_SOCKET, "Error while adding IPv4 address field (AS_HB_MSG_ADDR) to heartbeat.");
+	}
+
+	uint32_t port = addr->port;
+
+	if (msg_set_uint32(msg, port_id, port)) {
+		cf_crash(CF_SOCKET, "Error while adding port field (AS_HB_MSG_PORT) to heartbeat.");
+	}
+}
+
+void cf_sock_addr_to_heartbeat(cf_sock_addr *addr, msg *msg)
+{
+	to_x(addr, msg, AS_HB_MSG_ADDR, AS_HB_MSG_PORT);
+}
+
+void cf_sock_addr_to_fabric(cf_sock_addr *addr, msg *msg)
+{
+	to_x(addr, msg, FS_ADDR, FS_PORT);
 }
 
 void

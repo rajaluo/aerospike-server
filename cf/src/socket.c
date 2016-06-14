@@ -175,14 +175,6 @@ cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size)
 	return total;
 }
 
-void
-cf_sock_addr_legacy_set_port(cf_sock_addr_legacy *legacy, cf_ip_port port)
-{
-	uint8_t *binary = (uint8_t *)legacy;
-	uint16_t net_port = htons(port);
-	memcpy(binary + 4, &net_port, 2);
-}
-
 static int32_t
 safe_fcntl(int32_t fd, int32_t cmd, int32_t arg)
 {

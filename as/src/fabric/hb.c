@@ -35,7 +35,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/param.h>  // For MAX().
 
@@ -134,7 +133,7 @@ typedef struct mesh_host_queue_element_s {
 	mesh_host_op         op;
 	char                 host[128];
 	int                  port;
-	as_hb_host_addr_port list[AS_CLUSTER_SZ];
+	cf_sock_addr         list[AS_CLUSTER_SZ];
 	int                  list_len;
 	cf_socket            remove_sock;
 	bool                 seed;
@@ -191,6 +190,7 @@ as_hb g_hb;
 #define AS_HB_MSG_PORT 4
 #define AS_HB_MSG_ANV 5
 #define AS_HB_MSG_ANV_LENGTH 6
+#define AS_HB_MSG_ADDR_EX 7
 
 
 /* as_hb_message
@@ -220,8 +220,7 @@ static const msg_template as_hb_msg_template[] = {
  */
 typedef struct {
 	uint64_t last;
-	cf_sock_addr_legacy sal;    // if mcast, the socket we heard about the node
-	uint32_t addr, port;        // if mesh, filled with the address and port
+	cf_sock_addr addr;          // the address of the other node
 	cf_socket sock;             // last fd we heard a pulse from, so as to avoid multiple fds between nodes
 	bool new;                   // note if this is a new node
 	bool updated;               // used by paxos and fabric health to detect when a node has just been dunned or undunned
@@ -391,7 +390,7 @@ as_hb_register(as_hb_event_fn cb, void *udata)
 /* as_hb_getaddr
  * Get the socket address for a node - stashed in the adjacency hash */
 int
-as_hb_getaddr(cf_node node, cf_sock_addr_legacy *sal)
+as_hb_getaddr(cf_node node, cf_sock_addr *addr)
 {
 	as_hb_pulse *a_p_pulse = NULL;
 
@@ -405,15 +404,11 @@ as_hb_getaddr(cf_node node, cf_sock_addr_legacy *sal)
 
 	if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse))
 		return(-1);
-	if (AS_HB_MODE_MCAST == g_config.hb_mode)
-		*sal = a_p_pulse->sal;
-	else
-		*sal = a_p_pulse->addr;
 
-	/* Overwrite the port */
-	unsigned short port = cf_nodeid_get_port(node);
-	cf_sock_addr_legacy_set_port(sal, port);
+	*addr = a_p_pulse->addr;
 
+	// XXX - Why is the real port to be used in the node ID?
+	addr->port = cf_nodeid_get_port(node);
 	return(0);
 }
 
@@ -595,7 +590,7 @@ as_hb_nodes_discovered_hash_put_conn(cf_node node, cf_socket sock)
 }
 
 void
-as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr_legacy *sal, uint32_t addr, uint32_t port, cf_node *buf, size_t bufsz)
+as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr *addr, cf_node *buf, size_t bufsz)
 {
 	as_hb_pulse *a_p_pulse = NULL, *p_pulse = NULL;
 	pthread_mutex_t *vlock;
@@ -618,7 +613,12 @@ as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr_legacy
 	}
 
 	p_pulse->last = cf_getms();
-	cf_debug(AS_HB, "HB fabric (%"PRIx64"+%"PRIu64"): addr %08x port %d", node, p_pulse->last, addr, port);
+
+	if (cf_fault_filter[AS_HB] >= CF_DEBUG) {
+		char tmp[1000];
+		cf_sock_addr_to_string(addr, tmp, sizeof tmp);
+		cf_debug(AS_HB, "HB fabric (%"PRIx64"+%"PRIu64"): %s", node, p_pulse->last, tmp);
+	}
 
 	// Don't steal or remember the file descriptor from fabric. Fabric is using it,
 	// and pain breaks out if we use it.
@@ -632,12 +632,7 @@ as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr_legacy
 	// If this is a new pulse message, we will keep track of the socket and addr.
 	// Not sure that keeping the socket is safe for MCAST, but going to try it for now.
 	if (p_pulse->new) {
-		if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-			p_pulse->sal = *sal;
-		} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
-			p_pulse->addr = addr;
-			p_pulse->port = port;
-		}
+		p_pulse->addr = *addr;
 	}
 
 	// copy the succession list into the pulse structure
@@ -649,7 +644,7 @@ as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr_legacy
 	} else {
 		int rv = shash_put_unique(g_hb.adjacencies, &node, p_pulse);
 		if (rv == SHASH_ERR_FOUND) {
-			as_hb_process_fabric_heartbeat(node, sock, sal, addr, port, buf, bufsz);
+			as_hb_process_fabric_heartbeat(node, sock, addr, buf, bufsz);
 		} else if (rv != 0) {
 			cf_warning(AS_HB, "unable to update adjacencies hash");
 		}
@@ -1135,13 +1130,14 @@ mesh_list_service_fn(void *arg)
 
 			  case MH_OP_REMOVE_LIST:
 			  {
-				  as_hb_host_addr_port *hapl = mhqe.list;
+				  cf_sock_addr *walker = mhqe.list;
 				  for (int i = 0; i < mhqe.list_len; i++) {
-					  char *host = inet_ntoa(hapl->ip_addr);
+					  char host[1000];
+					  cf_ip_addr_to_string(&walker->addr, host, sizeof host);
 
 					  e = g_hb.mesh_seed_host_list;
 					  while (e) {
-						  if (!strcmp(host, e->host) && (hapl->port == e->port)) {
+						  if (!strcmp(host, e->host) && (walker->port == e->port)) {
 							  if (e == g_hb.mesh_seed_host_list) {
 								  g_hb.mesh_seed_host_list = e->next;
 							  } else {
@@ -1161,7 +1157,7 @@ mesh_list_service_fn(void *arg)
 
 					  e = g_hb.mesh_non_seed_host_list;
 					  while (e) {
-						  if (!strcmp(host, e->host) && (hapl->port == e->port)) {
+						  if (!strcmp(host, e->host) && (walker->port == e->port)) {
 							  if (e == g_hb.mesh_non_seed_host_list) {
 								  g_hb.mesh_non_seed_host_list = e->next;
 							  } else {
@@ -1179,7 +1175,7 @@ mesh_list_service_fn(void *arg)
 						  }
 					  }
 
-					  hapl++;
+					  ++walker;
 				  }
 				  break;
 			  }
@@ -1336,14 +1332,11 @@ mesh_host_list_add(char *host, int port, bool is_seed)
 		return(-1);
 	}
 
-	// Validate IP address.
-	struct in_addr ip_addr;
-	if (1 != inet_pton(AF_INET, host, &ip_addr)) {
+	cf_sock_addr addr;
+
+	if (cf_sock_addr_from_host_port(host, port, &addr) < 0) {
 		cf_warning(AS_HB, "rejected tip with invalid IP address: %s:%d", host, port);
-		return(-1);
-	} else if (0 == ip_addr.s_addr) {
-		cf_warning(AS_HB, "rejected tip with invalid IP address: %s:%d", host, port);
-		return(-1);
+		return -1;
 	}
 
 	// place on queue
@@ -1382,24 +1375,24 @@ as_hb_tip(char *host, int port)
 //   Clear all mesh host tips if the list is NULL or list length is 0.
 //   Otherise, remove the tips specified by the list items.
 int
-as_hb_tip_clear(as_hb_host_addr_port *host_addr_port_list, int host_addr_port_list_len)
+as_hb_tip_clear(cf_sock_addr *addr_list, int addr_list_len)
 {
 	cf_debug(AS_HB, "Heartbeat: clearing tip list");
 
 	mesh_host_queue_element mhqe;
 	memset(&mhqe, 0, sizeof(mhqe));
 
-	if ((NULL == host_addr_port_list) || (0 == host_addr_port_list_len)) {
+	if ((NULL == addr_list) || (0 == addr_list_len)) {
 		cf_debug(AS_HB, "Removing all tip entries");
 
 		mhqe.op = MH_OP_REMOVE_ALL;
 	} else {
-		cf_debug(AS_HB, "Removing %d mesh host entries:", host_addr_port_list_len);
+		cf_debug(AS_HB, "Removing %d mesh host entries:", addr_list_len);
 
 		mhqe.op = MH_OP_REMOVE_LIST;
-		size_t list_sz = host_addr_port_list_len * sizeof(as_hb_host_addr_port);
-		memcpy(mhqe.list, host_addr_port_list, list_sz);
-		mhqe.list_len = host_addr_port_list_len;
+		size_t list_sz = addr_list_len * sizeof (cf_sock_addr);
+		memcpy(mhqe.list, addr_list, list_sz);
+		mhqe.list_len = addr_list_len;
 	}
 
 	cf_queue_push(g_hb.mesh_host_queue, (void *) &mhqe);
@@ -1683,11 +1676,12 @@ as_hb_tcp_recv(cf_socket sock, byte * buff, size_t msg_size)
 /* as_hb_rx_process
  * Process a received heartbeat */
 void
-as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
+as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 {
 	cf_node node;
 	as_hb_pulse *a_p_pulse = NULL;
-	uint32_t addr, port, type = 8888;
+	uint32_t type = 8888;
+	cf_sock_addr tmp_addr;
 	cf_node *buf;
 	size_t bufsz;
 
@@ -1803,19 +1797,18 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
 			// this is a really interesting print, because it shows the true smoothness of
 			// receiving other's heartbeats
 			p_pulse->sock = sock;
+
 			if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-				p_pulse->sal = *sal;
-				p_pulse->port = p_pulse->addr = 0;
-			} else {
-				msg_get_uint32(m, AS_HB_MSG_ADDR, &p_pulse->addr);
-				msg_get_uint32(m, AS_HB_MSG_PORT, &p_pulse->port);
-				if (p_pulse->addr) {
-					char fromip[INET_ADDRSTRLEN];
-					cf_detail(AS_HB, "Got heartbeat pulse from node identifying itself as %s:%d",
-							  inet_ntop(AF_INET, &p_pulse->addr, fromip, INET_ADDRSTRLEN) == NULL ? "Unknown" : fromip,
-							  p_pulse->port);
+				p_pulse->addr = *from;
+			}
+			else {
+				cf_sock_addr_from_heartbeat(m, &p_pulse->addr);
+
+				if (cf_fault_filter[AS_HB] >= CF_DETAIL) {
+					char tmp[1000];
+					cf_sock_addr_to_string(&p_pulse->addr, tmp, sizeof tmp);
+					cf_detail(AS_HB, "Got heartbeat pulse from node identifying itself as %s", tmp);
 				}
-				memset(&p_pulse->sal, 0, sizeof(cf_sock_addr_legacy));
 			}
 
 			/* Get the succession list from the pulse message */
@@ -1841,11 +1834,13 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
 			} else {
 				int rv = shash_put_unique(g_hb.adjacencies, &node, p_pulse);
 				if (rv == SHASH_ERR_FOUND) {
-					cf_warning(AS_HB, "reprocessing HB msg, ppaddr %08x ppport %d ppfd %d fd %d", p_pulse->addr, p_pulse->port, CSFD(p_pulse->sock), CSFD(sock));
+					char tmp[1000];
+					cf_sock_addr_to_string(&p_pulse->addr, tmp, sizeof tmp);
+					cf_warning(AS_HB, "reprocessing HB msg, ppaddr %s ppfd %d fd %d", tmp, CSFD(p_pulse->sock), CSFD(sock));
 #ifdef FAIL_FAST
 					cf_crash(AS_HB, "declining to recurse");
 #endif
-					as_hb_rx_process(m, sal, sock);
+					as_hb_rx_process(m, from, sock);
 					break;
 				} else if (rv != 0) {
 					cf_warning(AS_HB, "unable to update adjacencies hash");
@@ -1907,9 +1902,7 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
 					size_t n = sizeof(bufm);
 					if (0 == msg_fillbuf(mt, bufm, &n)) {
 						if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-							cf_sock_addr sa;
-							cf_sock_addr_from_binary_legacy(sal, &sa);
-							if (0 > cf_socket_send_to(sock, bufm, n, 0, &sa)) {
+							if (0 > cf_socket_send_to(sock, bufm, n, 0, from)) {
 								cf_detail(AS_HB, "cf_socket_send_to() failed 1");
 								as_hb_error(AS_HB_ERR_SEND_TO_FAIL_1);
 							}
@@ -1956,20 +1949,16 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
 
 				if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse)) {
 //                    fprintf(stderr, "Request: Node %"PRIx64" not found!", node);
-					msg_set_uint32(mt, AS_HB_MSG_ADDR, 0);
-					msg_set_uint32(mt, AS_HB_MSG_PORT, 0);
+					memset(&tmp_addr, 0, sizeof tmp_addr);
+					cf_sock_addr_to_heartbeat(&tmp_addr, mt);
 				} else {
-					msg_set_uint32(mt, AS_HB_MSG_ADDR, a_p_pulse->addr);
-					msg_set_uint32(mt, AS_HB_MSG_PORT, a_p_pulse->port);
-//                    fprintf(stderr, "Request: Node %"PRIx64" found at %d:%d", node, p.addr, p.port);
+					cf_sock_addr_to_heartbeat(&a_p_pulse->addr, mt);
 				}
 
 				size_t n = sizeof(bufm);
 				if (0 == msg_fillbuf(mt, bufm, &n)) {
 					if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-						cf_sock_addr sa;
-						cf_sock_addr_from_binary_legacy(sal, &sa);
-						if (0 > cf_socket_send_to(sock, bufm, n, 0, &sa)) {
+						if (0 > cf_socket_send_to(sock, bufm, n, 0, from)) {
 							cf_detail(AS_HB, "cf_socket_send_to() failed 3");
 							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_3);
 						}
@@ -1989,9 +1978,7 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
 		case AS_HB_MSG_TYPE_INFO_REPLY:
 //            fprintf(stderr, "got an info reply\n");
 //            msg_dump(m);
-			if ((0 > msg_get_uint64(m, AS_HB_MSG_NODE, &node)) ||
-					(0 > msg_get_uint32(m, AS_HB_MSG_ADDR, &addr)) ||
-					(0 > msg_get_uint32(m, AS_HB_MSG_PORT, &port))) {
+			if (0 > msg_get_uint64(m, AS_HB_MSG_NODE, &node)) {
 				cf_detail(AS_HB, "unable to get required field");
 				as_hb_error(AS_HB_ERR_MISSING_FIELD);
 				return;
@@ -2025,7 +2012,7 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
 
 			/* If the address or port are zero, just wait; we'll try again
 			 * when the next heartbeat is received */
-			if (0 == addr || 0 == port) {
+			if (cf_sock_addr_from_heartbeat(m, &tmp_addr) < 2) {
 				return;
 			}
 
@@ -2034,17 +2021,19 @@ as_hb_rx_process(msg *m, cf_sock_addr_legacy *sal, cf_socket sock)
 				cf_detail(AS_HB, "as_hb_rx_process node already connected, returning");
 				return;
 			} else {
-				// unwind the address
-				char cpaddr[24];
-				if (NULL == inet_ntop(AF_INET, &addr, (char *) cpaddr, sizeof(cpaddr))) {
-					cf_info(AS_HB, "heartbeat: received suspicious address %s : %s", cpaddr, cf_strerror(errno));
-					return;
+				if (cf_fault_filter[AS_HB] >= CF_DEBUG) {
+					char tmp[1000];
+					cf_sock_addr_to_string(from, tmp, sizeof tmp);
+					cf_debug(AS_HB, "connecting to remote heartbeat service: %s", tmp);
 				}
-				cf_debug(AS_HB, "connecting to remote heartbeat service: %s:%d", cpaddr, port);
+
+				char host[1000];
+				cf_ip_addr_to_string(&tmp_addr.addr, host, sizeof host);
+
 				// could be both seed and non-seed but we are passing is_seed = 0, 
 				// as mesh_list_service_fn will take care of duplicates
-				if (0 != mesh_host_list_add(cpaddr, port, false)) {
-					cf_warning(AS_HB, "Failed to add node %s:%d from info reply to mesh host list", cpaddr, port);
+				if (0 != mesh_host_list_add(host, tmp_addr.port, false)) {
+					cf_warning(AS_HB, "Failed to add node %s:%d from info reply to mesh host list", host, tmp_addr.port);
 				}
 			}
 			break;
@@ -2092,12 +2081,13 @@ as_hb_thr(void *arg)
 		g_hb.endpoint_txlist_isudp[CSFD(sock)] = true;
 	} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
 		sock = g_hb.socket.sock;
-		struct in_addr self;
-		if (1 != inet_pton(AF_INET, g_config.hb_addr_to_use, &self))
-			cf_warning(AS_HB, "unable to call inet_pton: %s", cf_strerror(errno));
-		else {
-			msg_set_uint32(mt, AS_HB_MSG_ADDR, * (uint32_t *) &self);
-			msg_set_uint32(mt, AS_HB_MSG_PORT, g_config.hb_port);
+
+		cf_sock_addr addr;
+
+		if (cf_sock_addr_from_host_port(g_config.hb_addr_to_use, g_config.hb_port, &addr) < 0) {
+			cf_warning(AS_FABRIC, "Invalid heartbeat IP address: %s", g_config.hb_addr_to_use);
+		} else {
+			cf_sock_addr_to_heartbeat(&addr, mt);
 		}
 	}
 	else {
@@ -2207,20 +2197,14 @@ CloseSocket:
 				}
 
 				if (events[i].events & EPOLLIN) {
-
-					cf_sock_addr_legacy from;
+					cf_sock_addr from;
 					int r = 0;
-					memset(&from, 0, sizeof(from));
 
 					if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-						cf_sock_addr sa;
-						r = cf_socket_recv_from(esock, bufr, sizeof(bufr), 0, &sa);
-
-						if (r >= 0) {
-							cf_sock_addr_to_binary_legacy(&sa, &from);
-						}
+						r = cf_socket_recv_from(esock, bufr, sizeof(bufr), 0, &from);
 					} else {
 						r = as_hb_tcp_recv(esock, bufr, sizeof(bufr));
+						memset(&from, 0, sizeof from);
 					}
 					cf_detail(AS_HB, "received %d bytes, calling msg_parse", r);
 					if (r > 0) {
@@ -2752,10 +2736,11 @@ static bool g_log_items = false;
 static void
 as_hb_dump_pulse(as_hb_pulse *pulse)
 {
+	char tmp[1000];
+	cf_sock_addr_to_string(&pulse->addr, tmp, sizeof tmp);
+
 	cf_info(AS_HB, " last %lu", pulse->last);
-	cf_info(AS_HB, " sockaddr %"PRIx64"", pulse->sal);
-	uint8_t *addr = (uint8_t *) &pulse->addr;
-	cf_info(AS_HB, " addr %d.%d.%d.%d port %d", addr[0], addr[1], addr[2], addr[3], pulse->port);
+	cf_info(AS_HB, " addr %s", tmp);
 	cf_info(AS_HB, " fd %d", CSFD(pulse->sock));
 	cf_info(AS_HB, " new %d updated %d dunned %d", pulse->new, pulse->updated, pulse->dunned);
 	cf_info(AS_HB, " last detected %lu", pulse->last_detected);

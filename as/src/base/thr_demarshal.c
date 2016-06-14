@@ -28,14 +28,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/param.h>	// for MIN()
 #include <sys/resource.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 

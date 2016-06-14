@@ -34,9 +34,6 @@
 #include "base/thr_rw_internal.h"
 
 #include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <assert.h>
 #include <strings.h>
 
