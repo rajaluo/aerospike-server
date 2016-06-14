@@ -59,6 +59,12 @@ typedef struct {
 // Wraps a socket file descriptor.
 #define WSFD(_fd) ((cf_socket){ .fd = _fd })
 
+typedef struct {
+	cf_socket_cfg conf;
+	const char *if_addr;
+	uint8_t ttl;
+} cf_socket_mcast_cfg;
+
 int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size);
@@ -110,20 +116,12 @@ void cf_socket_shutdown(cf_socket sock);
 void cf_socket_close(cf_socket sock);
 void cf_socket_drain_close(cf_socket sock);
 
+int32_t cf_socket_mcast_init(cf_socket_mcast_cfg *mconf);
+int32_t cf_socket_mcast_set_inter(cf_socket sock, const cf_ip_addr *iaddr);
+int32_t cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr);
+void cf_socket_mcast_close(cf_socket_mcast_cfg *mconf);
+
 // -------------------- OLD CODE --------------------
-
-/* cf_mcastsocket_cfg
- * A multicast socket */
-typedef struct cf_mcastsocket_cfg_t {
-	cf_socket_cfg s;
-	struct ip_mreq ireq;
-    char *tx_addr;    // if there is a specific ip address that should be used to send the mcast message
-    unsigned char mcast_ttl;
-} cf_mcastsocket_cfg;
-
-/* Function declarations */
-extern int cf_mcastsocket_init(cf_mcastsocket_cfg *ms);
-extern void cf_mcastsocket_close(cf_mcastsocket_cfg *ms);
 
 /*
 ** get information about all interfaces

@@ -156,7 +156,7 @@ typedef struct as_hb_s {
 	int efd;
 
 	union {
-		cf_mcastsocket_cfg socket_mcast;
+		cf_socket_mcast_cfg socket_mcast;
 		cf_socket_cfg socket;
 	};
 
@@ -1459,7 +1459,7 @@ as_hb_start_receiving(cf_socket sock, int was_udp, cf_node node_id)
 static int
 as_hb_stop_receiving()
 {
-	cf_socket sock = g_hb.socket_mcast.s.sock;
+	cf_socket sock = g_hb.socket_mcast.conf.sock;
 
 	cf_debug(AS_HB, "Heartbeat: stopping packet receive on socket fd %d", CSFD(sock));
 
@@ -1484,7 +1484,7 @@ int
 as_hb_set_protocol(hb_protocol_enum protocol)
 {
 	static bool s_was_udp = false;
-	cf_socket sock = g_hb.socket_mcast.s.sock;
+	cf_socket sock = g_hb.socket_mcast.conf.sock;
 
 	if (g_config.hb_protocol == protocol) {
 		cf_info(AS_HB, "no heartbeat protocol change needed");
@@ -2084,7 +2084,7 @@ as_hb_thr(void *arg)
 
 	/* Set the socket descriptor and some associated properties */
 	if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-		sock = g_hb.socket_mcast.s.sock;
+		sock = g_hb.socket_mcast.conf.sock;
 		if (CSFD(sock) >= AS_HB_TXLIST_SZ)
 			cf_crash(AS_HB, "unable to add mcast socket to txlist, too large");
 
@@ -2652,14 +2652,14 @@ as_hb_init_socket()
 	switch (g_config.hb_mode) {
 		case AS_HB_MODE_MCAST:
 			cf_info(AS_HB, "initializing multicast heartbeat socket : %s:%d", g_config.hb_addr, g_config.hb_port);
-			g_hb.socket_mcast.s.addr = g_config.hb_addr;
-			g_hb.socket_mcast.s.port = g_config.hb_port;
-			g_hb.socket_mcast.tx_addr = g_config.hb_tx_addr;
-			g_hb.socket_mcast.mcast_ttl = g_config.hb_mcast_ttl;
-			if (0 != cf_mcastsocket_init(&g_hb.socket_mcast)) {
+			g_hb.socket_mcast.conf.addr = g_config.hb_addr;
+			g_hb.socket_mcast.conf.port = g_config.hb_port;
+			g_hb.socket_mcast.if_addr = g_config.hb_tx_addr;
+			g_hb.socket_mcast.ttl = g_config.hb_mcast_ttl;
+			if (0 != cf_socket_mcast_init(&g_hb.socket_mcast)) {
 				cf_crash(AS_HB, "couldn't initialize multicast heartbeat socket");
 			}
-			cf_debug(AS_HB, "Opened multicast socket %d", CSFD(g_hb.socket_mcast.s.sock));
+			cf_debug(AS_HB, "Opened multicast socket %d", CSFD(g_hb.socket_mcast.conf.sock));
 			break;
 		case AS_HB_MODE_MESH:
 			cf_info(AS_HB, "initializing mesh heartbeat socket : %s:%d", g_config.hb_addr, g_config.hb_port);
@@ -2724,8 +2724,8 @@ as_hb_shutdown()
 
 	switch (g_config.hb_mode) {
 		case AS_HB_MODE_MCAST:
-			cf_debug(AS_HB, "Closing multicast socket %d", CSFD(g_hb.socket_mcast.s.sock));
-			cf_mcastsocket_close(&g_hb.socket_mcast);
+			cf_debug(AS_HB, "Closing multicast socket %d", CSFD(g_hb.socket_mcast.conf.sock));
+			cf_socket_mcast_close(&g_hb.socket_mcast);
 			break;
 		case AS_HB_MODE_MESH:
 			cf_socket_shutdown(g_hb.socket.sock);
@@ -2877,7 +2877,7 @@ as_hb_dump(bool verbose)
 											   (AS_HB_PROTOCOL_RESET == g_config.hb_protocol ? "reset" : "undefined")))),
 			g_config.hb_protocol);
 
-	cf_socket_cfg *socket = (AS_HB_MODE_MCAST == g_config.hb_mode ? &g_hb.socket_mcast.s :
+	cf_socket_cfg *socket = (AS_HB_MODE_MCAST == g_config.hb_mode ? &g_hb.socket_mcast.conf :
 							 (AS_HB_MODE_MESH == g_config.hb_mode ? &g_hb.socket : NULL));
 
 	if (socket) {

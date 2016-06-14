@@ -189,7 +189,8 @@ safe_fcntl(int32_t fd, int32_t cmd, int32_t arg)
 	int32_t res = fcntl(fd, cmd, arg);
 
 	if (res < 0) {
-		cf_crash(CF_SOCKET, "fcntl() failed on FD %d: %d (%s)", fd, errno, cf_strerror(errno));
+		cf_crash(CF_SOCKET, "fcntl(%d) failed on FD %d: %d (%s)",
+				cmd, fd, errno, cf_strerror(errno));
 	}
 
 	return res;
@@ -201,18 +202,19 @@ safe_ioctl(int32_t fd, int32_t req, int32_t *arg)
 	int32_t res = ioctl(fd, req, arg);
 
 	if (res < 0) {
-		cf_crash(CF_SOCKET, "ioctl() failed on FD %d: %d (%s)", fd, errno, cf_strerror(errno));
+		cf_crash(CF_SOCKET, "ioctl(%d) failed on FD %d: %d (%s)",
+				req, fd, errno, cf_strerror(errno));
 	}
 
 	return res;
 }
 
 static void
-safe_setsockopt(int32_t fd, int32_t level, int32_t name, void *val, socklen_t len)
+safe_setsockopt(int32_t fd, int32_t level, int32_t name, const void *val, socklen_t len)
 {
 	if (setsockopt(fd, level, name, val, len) < 0) {
-		cf_crash(CF_SOCKET, "setsockopt() failed on FD %d: %d (%s)",
-				fd, errno, cf_strerror(errno));
+		cf_crash(CF_SOCKET, "setsockopt(%d¸ %d) failed on FD %d: %d (%s)",
+				level, name, fd, errno, cf_strerror(errno));
 	}
 }
 
@@ -220,8 +222,8 @@ static void
 safe_getsockopt(int32_t fd, int32_t level, int32_t name, void *val, socklen_t *len)
 {
 	if (getsockopt(fd, level, name, val, len) < 0) {
-		cf_crash(CF_SOCKET, "getsockopt() failed on FD %d: %d (%s)",
-				fd, errno, cf_strerror(errno));
+		cf_crash(CF_SOCKET, "getsockopt(%d, %d) failed on FD %d: %d (%s)",
+				level, name, fd, errno, cf_strerror(errno));
 	}
 }
 
@@ -272,21 +274,21 @@ cf_socket_enable_blocking(cf_socket sock)
 void
 cf_socket_disable_nagle(cf_socket sock)
 {
-	static int32_t flag = 1;
+	static const int32_t flag = 1;
 	safe_setsockopt(sock.fd, SOL_TCP, TCP_NODELAY, &flag, sizeof flag);
 }
 
 void
 cf_socket_enable_nagle(cf_socket sock)
 {
-	static int32_t flag = 0;
+	static const int32_t flag = 0;
 	safe_setsockopt(sock.fd, SOL_TCP, TCP_NODELAY, &flag, sizeof flag);
 }
 
 void
 cf_socket_keep_alive(cf_socket sock, int32_t idle, int32_t interval, int32_t count)
 {
-	static int32_t flag = 1;
+	static const int32_t flag = 1;
 	safe_setsockopt(sock.fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof flag);
 
 	if (idle > 0) {
@@ -337,16 +339,20 @@ addr_len(const struct sockaddr *sa)
 }
 
 static int32_t
-config_to_native(const cf_socket_cfg *conf, struct sockaddr *sa)
+config_address(const cf_socket_cfg *conf, struct sockaddr *sa, cf_sock_addr *addr)
 {
-	cf_sock_addr addr;
+	cf_sock_addr _addr;
+
+	if (addr == NULL) {
+		addr = &_addr;
+	}
 
 	if (conf->addr == NULL) {
 		cf_warning(CF_SOCKET, "Missing service address");
 		return -1;
 	}
 
-	if (cf_ip_addr_from_string(conf->addr, &addr.addr) < 0) {
+	if (cf_ip_addr_from_string(conf->addr, &addr->addr) < 0) {
 		cf_warning(CF_SOCKET, "Invalid service address: %s", conf->addr);
 		return -1;
 	}
@@ -356,8 +362,8 @@ config_to_native(const cf_socket_cfg *conf, struct sockaddr *sa)
 		return -1;
 	}
 
-	addr.port = conf->port;
-	cf_sock_addr_to_native(&addr, sa);
+	addr->port = conf->port;
+	cf_sock_addr_to_native(addr, sa);
 	return 0;
 }
 
@@ -367,7 +373,7 @@ cf_socket_init_server(cf_socket_cfg *conf)
 	int32_t res = -1;
 	struct sockaddr_storage sas;
 
-	if (config_to_native(conf, (struct sockaddr *)&sas) < 0) {
+	if (config_address(conf, (struct sockaddr *)&sas, NULL) < 0) {
 		goto cleanup0;
 	}
 
@@ -383,7 +389,7 @@ cf_socket_init_server(cf_socket_cfg *conf)
 	fd = -1;
 
 	if (conf->reuse_addr) {
-		static int32_t flag = 1;
+		static const int32_t flag = 1;
 		safe_setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof flag);
 	}
 
@@ -398,7 +404,7 @@ cf_socket_init_server(cf_socket_cfg *conf)
 		}
 
 		cf_warning(CF_SOCKET, "Socket %s:%d in use, waiting", conf->addr, conf->port);
-		usleep(5 * 1000);
+		usleep(5 * 1000 * 1000);
 	}
 
 	if (conf->type == SOCK_STREAM && listen(sock.fd, 512) < 0) {
@@ -493,7 +499,7 @@ cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout)
 	int32_t res = -1;
 	struct sockaddr_storage sas;
 
-	if (config_to_native(conf, (struct sockaddr *)&sas) < 0) {
+	if (config_address(conf, (struct sockaddr *)&sas, NULL) < 0) {
 		goto cleanup0;
 	}
 
@@ -779,6 +785,114 @@ cleanup1:
 	cf_socket_close(sock);
 }
 
+int32_t
+cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
+{
+	static const int32_t yes = 1;
+	static const int32_t no = 0;
+
+	int32_t res = -1;
+
+	cf_socket_cfg *conf = &mconf->conf;
+	struct sockaddr_storage sas;
+	cf_sock_addr addr;
+
+	if (config_address(conf, (struct sockaddr *)&sas, &addr) < 0) {
+		goto cleanup0;
+	}
+
+	cf_ip_addr _iaddr;
+	cf_ip_addr *iaddr = NULL;
+
+	if (mconf->if_addr != NULL) {
+		if (cf_ip_addr_from_string(mconf->if_addr, &_iaddr) < 0) {
+			cf_warning(CF_SOCKET, "Invalid multicast interface address: %s", mconf->if_addr);
+			goto cleanup0;
+		}
+
+		iaddr = &_iaddr;
+	}
+
+	int32_t fd = socket(sas.ss_family, SOCK_DGRAM, 0);
+
+	if (fd < 0) {
+		cf_warning(CF_SOCKET, "Error while creating socket for %s:%d: %d (%s)",
+				conf->addr, conf->port, errno, cf_strerror(errno));
+		goto cleanup0;
+	}
+
+	cf_socket sock = (cf_socket){ .fd = fd };
+	fd = -1;
+
+	safe_setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+
+	// XXX - Why are we doing this?
+	safe_fcntl(sock.fd, F_SETFD, FD_CLOEXEC);
+
+#ifdef IP_MULTICAST_ALL
+	// [FYI:  This socket option has existed since the Linux 2.6.31 kernel.]
+
+	// Only receive traffic from multicast groups this socket actually joins.
+	// [Note:  Bind address filtering takes precedence, so this is simply an extra level of restriction.]
+	safe_setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_ALL, &no, sizeof no);
+#endif
+
+	if (iaddr != NULL) {
+		char tmp[1000];
+		cf_ip_addr_to_string(iaddr, tmp, sizeof tmp);
+		cf_info(CF_SOCKET, "Setting multicast interface address: %s", tmp);
+
+		if (cf_socket_mcast_set_inter(sock, iaddr) < 0) {
+			cf_warning(CF_SOCKET, "Error while binding to interface %s", tmp);
+			goto cleanup1;
+		}
+	}
+
+	uint8_t ttl = mconf->ttl;
+
+	if (ttl > 0) {
+		cf_info(CF_SOCKET, "Setting multicast TTL: %d", ttl);
+		safe_setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
+	}
+
+	while (bind(sock.fd, (struct sockaddr *)&sas, addr_len((struct sockaddr *)&sas)) < 0) {
+		if (errno != EADDRINUSE) {
+			cf_warning(CF_SOCKET, "Error while binding to %s:%d: %d (%s)",
+					conf->addr, conf->port, errno, cf_strerror(errno));
+			goto cleanup1;
+		}
+
+		cf_warning(CF_SOCKET, "Socket %s:%d in use, waiting", conf->addr, conf->port);
+		usleep(5 * 1000 * 1000);
+	}
+
+	char tmp[1000];
+	cf_ip_addr_to_string(&addr.addr, tmp, sizeof tmp);
+	cf_info(CF_SOCKET, "Joining multicast group: %s", tmp);
+
+	if (cf_socket_mcast_join_group(sock, iaddr, &addr.addr) < 0) {
+		cf_warning(CF_SOCKET, "Error while joining multicast group %s", tmp);
+		goto cleanup1;
+	}
+
+	conf->sock = sock;
+	res = 0;
+	goto cleanup0;
+
+cleanup1:
+	safe_close(sock.fd);
+
+cleanup0:
+	return res;
+}
+
+void
+cf_socket_mcast_close(cf_socket_mcast_cfg *mconf)
+{
+	cf_socket_cfg *conf = &mconf->conf;
+	safe_close(conf->sock.fd);
+}
+
 // -------------------- OLD CODE --------------------
 
 #include <errno.h>
@@ -806,127 +920,6 @@ cleanup1:
  * Initialize a multicast service/receive socket
  * Bind is done to INADDR_ANY - all interfaces
  *  */
-int
-cf_mcastsocket_init(cf_mcastsocket_cfg *ms)
-{
-	cf_assert(ms, CF_SOCKET, CF_CRITICAL, "invalid argument");
-	cf_socket_cfg *s = &(ms->s);
-
-	if (!s->addr) {
-		cf_warning(CF_SOCKET, "multicast socket address not configured");
-		return -1;
-	}
-
-	if (!s->port) {
-		cf_warning(CF_SOCKET, "multicast socket port not configured");
-		return -1;
-	}
-
-	int32_t fd;
-
-	if (0 > (fd = socket(AF_INET, SOCK_DGRAM, 0))) {
-		cf_warning(CF_SOCKET, "multicast socket open error: %d %s", errno, cf_strerror(errno));
-		return -1;
-	}
-
-	cf_debug(CF_SOCKET, "cf_mcastsocket_init: socket %d", s->sock);
-
-	// allows multiple readers on the same address
-	uint yes=1;
- 	if (setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
-		cf_warning(CF_SOCKET, "multicast socket reuse failed: %d %s", errno, cf_strerror(errno));
-		goto err_cleanup;
-	}
-
-	/* Set close-on-exec */
-	fcntl(sock.fd, F_SETFD, 1);
-
-	// Bind to the incoming port on the specified mcast IP address.
-	memset(&s->saddr, 0, sizeof(s->saddr));
-	s->saddr.sin_family = AF_INET;
-
-	if (!inet_pton(AF_INET, s->addr, &s->saddr.sin_addr)) {
-		cf_warning(CF_SOCKET, "multicast socket inet_pton(%s) failed: %d %s", s->addr, errno, cf_strerror(errno));
-		goto err_cleanup;
-	}
-
-#ifdef IP_MULTICAST_ALL
-	// [FYI:  This socket option has existed since the Linux 2.6.31 kernel.]
-
-	// Only receive traffic from multicast groups this socket actually joins.
-	// [Note:  Bind address filtering takes precedence, so this is simply an extra level of restriction.]
-	uint no = 0;
-	if (setsockopt(s->sock, IPPROTO_IP, IP_MULTICAST_ALL, &no, sizeof(no)) == -1) {
-		cf_warning(CF_SOCKET, "IP_MULTICAST_ALL: %d %s", errno, cf_strerror(errno));
-		goto err_cleanup;
-	}
-#endif
-
-	s->saddr.sin_port = htons(s->port);
-	if (ms->tx_addr) {
-		struct in_addr iface_in;
-		memset((char *)&iface_in,0,sizeof(iface_in));
-		iface_in.s_addr = inet_addr(ms->tx_addr);
-
-		if (setsockopt(s->sock, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&iface_in, sizeof(iface_in)) == -1) {
-			cf_warning(CF_SOCKET, "IP_MULTICAST_IF: %d %s", errno, cf_strerror(errno));
-			goto err_cleanup;
-		}
-	}
-	unsigned char ttlvar = ms->mcast_ttl;
-	if (ttlvar>0) {
-		if (setsockopt(s->sock,IPPROTO_IP,IP_MULTICAST_TTL,(char *)&ttlvar, sizeof(ttlvar)) == -1) {
-			cf_warning(CF_SOCKET, "IP_MULTICAST_TTL: %d %s", errno, cf_strerror(errno));
-			goto err_cleanup;
-		} else {
-			cf_info(CF_SOCKET, "setting multicast TTL to be %d",ttlvar);
-		}
-	}
-
-	struct timespec delay;
-	delay.tv_sec = 5;
-	delay.tv_nsec = 0;
-
-	while (0 > (bind(s->sock, (struct sockaddr *)&s->saddr, sizeof(struct sockaddr)))) {
-		if (EADDRINUSE != errno) {
-			cf_warning(CF_SOCKET, "multicast bind: %d %s", errno, cf_strerror(errno));
-			goto err_cleanup;
-		}
-
-		cf_warning(CF_SOCKET, "multicast bind: socket in use, waiting (port:%d)", s->port);
-
-		nanosleep(&delay, NULL);
-	}
-
-	// Register for the multicast group
-	inet_pton(AF_INET, s->addr, &ms->ireq.imr_multiaddr.s_addr);
-	ms->ireq.imr_interface.s_addr = htonl(INADDR_ANY);
-	if (ms->tx_addr) {
-		ms->ireq.imr_interface.s_addr = inet_addr(ms->tx_addr);
-	}
-	if (setsockopt(s->sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (const void *)&ms->ireq, sizeof(struct ip_mreq))) {
-		cf_warning(CF_SOCKET, "IP_ADD_MEMBERSHIP: %d %s", errno, cf_strerror(errno));
-		goto err_cleanup;
-	}
-
-	return 0;
-
- err_cleanup:
-
-	close(s->sock);
-	s->sock = -1;
-
-	return -1;
-}
-
-void
-cf_mcastsocket_close(cf_mcastsocket_cfg *ms)
-{
-	cf_socket_cfg *s = &(ms->s);
-
-	safe_close(s->sock.fd);
-}
-
 //
 // get information about the interfaces and what their addresses are
 //
