@@ -47,10 +47,10 @@
 #include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/udf_record.h"
-#include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "storage/storage.h"
 #include "transaction/rw_utils.h"
+#include "transaction/udf.h"
 
 
 static int udf_aerospike_rec_remove(const as_aerospike *, const as_rec *);

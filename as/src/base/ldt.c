@@ -274,11 +274,11 @@
 #include <base/ldt_record.h>
 #include <fabric/fabric.h>
 #include <fabric/migrate.h>
-#include "base/udf_rw.h"
 #include "transaction/proxy.h"
 #include "transaction/replica_write.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
+#include "transaction/udf.h"
 
 #include "aerospike/as_types.h"
 #include "aerospike/as_msgpack.h"

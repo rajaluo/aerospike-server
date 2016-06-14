@@ -42,8 +42,9 @@
 #include "base/ldt.h"
 #include "base/rec_props.h"
 #include "base/transaction.h"
-#include "base/udf_rw.h"
 #include "storage/storage.h"
+#include "transaction/udf.h"
+
 
 bool
 udf_record_ldt_enabled(const as_rec * rec)

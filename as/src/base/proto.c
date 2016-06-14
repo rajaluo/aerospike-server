@@ -51,8 +51,8 @@
 #include "base/index.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/udf_rw.h"
 #include "storage/storage.h"
+
 
 void
 as_proto_swap(as_proto *p)
@@ -822,10 +822,8 @@ as_msg_write_header(uint8_t *buf, size_t msg_sz, uint info1, uint info2,
 }
 
 uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
-		const char *set, int set_len, const cf_digest *d, cf_digest *d_ret,
-		uint64_t trid, as_msg_field *scan_param_field, void * c)
+		const char *set, int set_len, const cf_digest *d, uint64_t trid)
 {
-	udf_call * call = (udf_call*) c;
 	// printf("write_fields\n");
 	// lay out the fields
 	as_msg_field *mf = (as_msg_field *) buf;
@@ -840,6 +838,7 @@ uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		mf = mf_tmp;
 	}
 
+	// Not currently used, but it's at least plausible we'll do so in future.
 	if (set && set_len != 0) {
 		mf->type = AS_MSG_FIELD_TYPE_SET;
 		mf->field_sz = set_len + 1;
@@ -849,6 +848,7 @@ uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		mf = mf_tmp;
 	}
 
+	// Not currently used, but it's at least plausible we'll do so in future.
 	if (trid) {
 		mf->type = AS_MSG_FIELD_TYPE_TRID;
 		//Convert the transaction-id to network byte order (big-endian)
@@ -860,64 +860,15 @@ uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		mf = mf_tmp;
 	}
 
-	if (scan_param_field) {
-		mf->type = AS_MSG_FIELD_TYPE_SCAN_OPTIONS;
-		mf->field_sz = sizeof(as_msg_field) + 1;
-		//printf("write_fields: scan: write_fields: %d\n", mf->field_sz);
-		memcpy(mf->data, scan_param_field, sizeof(as_msg_field));
-		mf_tmp = as_msg_field_get_next(mf);
-		mf = mf_tmp;
-	}
-
-	/**
-	 * UDF
-	 */
-	if ( call ) {
-
-		int len = 0;
-
-		// Append filename to message fields
-		len = strlen(call->def->filename) * sizeof(char);
-		mf->type = AS_MSG_FIELD_TYPE_UDF_FILENAME;
-		mf->field_sz =  len + 1;
-		memcpy(mf->data, call->def->filename, len);
-
-		mf_tmp = as_msg_field_get_next(mf);
-		mf = mf_tmp;
-
-		// Append function name to message fields
-		len = strlen(call->def->function) * sizeof(char);
-		mf->type = AS_MSG_FIELD_TYPE_UDF_FUNCTION;
-		mf->field_sz =  len + 1;
-		memcpy(mf->data, call->def->function, len);
-
-		mf_tmp = as_msg_field_get_next(mf);
-		mf = mf_tmp;
-
-		// Append arglist to message fields
-		if (call->def->arglist) {
-			len = call->def->arglist->field_sz * sizeof(char);
-			mf->type = AS_MSG_FIELD_TYPE_UDF_ARGLIST;
-			mf->field_sz = len + 1;
-			memcpy(mf->data, call->def->arglist->data, len);
-
-			mf_tmp = as_msg_field_get_next(mf);
-			mf = mf_tmp;
-		}
-
-	}
 	if (d) {
 		mf->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
 		mf->field_sz = sizeof(cf_digest) + 1;
 		memcpy(mf->data, d, sizeof(cf_digest));
 		mf_tmp = as_msg_field_get_next(mf);
-		if (d_ret)
-			memcpy(d_ret, d, sizeof(cf_digest));
-
 		mf = mf_tmp;
-
 	}
-	return ( (uint8_t *) mf_tmp );
+
+	return (uint8_t *) mf_tmp;
 }
 
 const char SUCCESS_BIN_NAME[] = "SUCCESS";

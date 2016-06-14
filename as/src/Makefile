@@ -28,7 +28,7 @@ BASE_HEADERS += proto.h rec_props.h scan.h secondary_index.h security.h security
 BASE_HEADERS += thr_batch.h thr_info.h thr_query.h thr_sindex.h
 BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h
 BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h
-BASE_HEADERS += udf_memtracker.h udf_record.h udf_rw.h udf_timer.h
+BASE_HEADERS += udf_memtracker.h udf_record.h udf_timer.h
 BASE_HEADERS += xdr_serverside.h
 
 BASE_SOURCES += aggr.c as.c asm.c batch.c bin.c cdt.c cfg.c cluster_config.c index.c job_manager.c json_init.c
@@ -39,7 +39,7 @@ BASE_SOURCES += proto.c rec_props.c record.c scan.c signal.c secondary_index.c s
 BASE_SOURCES += thr_batch.c thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.c
 BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
 BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
-BASE_SOURCES += udf_memtracker.c udf_record.c udf_rw.c udf_timer.c
+BASE_SOURCES += udf_memtracker.c udf_record.c udf_timer.c
 ifneq ($(USE_XDR),1)
   BASE_SOURCES += xdr_serverside_stubs.c
 endif

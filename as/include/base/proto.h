@@ -538,8 +538,7 @@ typedef struct {
 extern void as_msg_peek(const struct as_transaction_s *tr, proto_peek *peek);
 
 extern uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
-		const char *set, int set_len, const cf_digest *d, cf_digest *d_ret,
-		uint64_t trid, as_msg_field *scan_param_field, void * call);
+		const char *set, int set_len, const cf_digest *d, uint64_t trid);
 
 extern uint8_t * as_msg_write_header(uint8_t *buf, size_t msg_sz, uint info1,
 		uint info2, uint info3, uint32_t generation, uint32_t record_ttl,

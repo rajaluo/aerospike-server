@@ -705,7 +705,7 @@ udf_cask_smd_accept_fn(char *module, as_smd_item_list_t *items, void *udata, uin
 }
 
 
-int
+void
 udf_cask_init()
 {
 	// Have to delete the existing files in the user path on startup
@@ -714,12 +714,11 @@ udf_cask_init()
 	// opendir(NULL) seg-faults
 	if (!g_config.mod_lua.user_path)
 	{
-		return -1;
+		cf_crash(AS_UDF, "cask init: null mod-lua user-path");
 	}
 	dir = opendir(g_config.mod_lua.user_path);
 	if ( dir == 0 ) {
-		cf_warning(AS_UDF, "cask init: could not open udf directory %s: %s", g_config.mod_lua.user_path, cf_strerror(errno));
-		return -1;
+		cf_crash(AS_UDF, "cask init: could not open udf directory %s: %s", g_config.mod_lua.user_path, cf_strerror(errno));
 	}
 	while ( (entry = readdir(dir)) && entry->d_name) {
 		// readdir also reads "." and ".." entries.
@@ -738,11 +737,8 @@ udf_cask_init()
 	// as_smd_create_module(udf_smd_module_name, udf_cask_smd_merge_fn, 0, udf_cask_smd_accept_fn, 0);
 	// take the default merge function
 	if (as_smd_create_module(udf_smd_module_name, 0, 0, udf_cask_smd_accept_fn, 0, 0, 0)) {
-		cf_warning(AS_UDF, "failed to create SMD module \"%s\"", udf_smd_module_name);
-		return -1;
+		cf_crash(AS_UDF, "failed to create SMD module \"%s\"", udf_smd_module_name);
 	}
 
 	// there may be existing data. Read it and populate the local file system.
-
-	return(0);
 }

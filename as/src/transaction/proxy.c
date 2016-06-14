@@ -50,12 +50,12 @@
 #include "base/proto.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/udf_rw.h"
 #include "fabric/fabric.h"
 #include "fabric/paxos.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
+#include "transaction/udf.h"
 
 
 //==========================================================

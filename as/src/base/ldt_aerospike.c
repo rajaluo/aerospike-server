@@ -52,6 +52,8 @@
 #include "base/transaction.h"
 #include "base/udf_record.h"
 #include "fabric/fabric.h"
+#include "transaction/udf.h"
+
 
 /* GLOBALS */
 as_aerospike g_ldt_aerospike; // Only instantiation is enough
@@ -515,7 +517,6 @@ crec_create(ldt_record *lrecord)
  * lrecord init and cleanup funtions
  */
 // **************************************************************************************************
-extern as_aerospike g_as_aerospike;
 void
 ldt_record_init(ldt_record *lrecord)
 {

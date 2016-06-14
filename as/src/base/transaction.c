@@ -44,10 +44,10 @@
 #include "base/scan.h"
 #include "base/security.h"
 #include "base/thr_demarshal.h"
-#include "base/udf_rw.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"
+#include "transaction/udf.h"
 
 
 void
@@ -313,7 +313,7 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 	uint8_t *b = (uint8_t *)msgp;
 
 	b = as_msg_write_header(b, msg_sz, 0, AS_MSG_INFO2_WRITE, 0, 0, 0, 0, 2, 0);
-	b = as_msg_write_fields(b, ns->name, ns_len, NULL, 0, keyd, 0, 0, 0, 0);
+	b = as_msg_write_fields(b, ns->name, ns_len, NULL, 0, keyd, 0);
 
 	as_transaction_init_head(tr, NULL, msgp);
 

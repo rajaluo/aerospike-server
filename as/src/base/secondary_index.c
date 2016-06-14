@@ -106,8 +106,8 @@
 #include "base/index.h"
 #include "base/system_metadata.h"
 #include "base/thr_sindex.h"
-#include "base/udf_rw.h"
 #include "geospatial/geospatial.h"
+#include "transaction/udf.h"
 
 
 #define SINDEX_CRASH(str, ...) \

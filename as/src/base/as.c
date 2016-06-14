@@ -56,7 +56,6 @@
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/ticker.h"
-#include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
@@ -65,6 +64,7 @@
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
+#include "transaction/udf.h"
 
 
 //==========================================================
@@ -472,7 +472,7 @@ main(int argc, char **argv)
 	as_proxy_init();			// do work on behalf of others
 	as_rw_init();				// read & write service
 	as_query_init();			// query transaction handling
-	as_udf_rw_init();			// apply user-defined functions
+	as_udf_init();				// user-defined functions
 	as_scan_init();				// scan a namespace or set
 	as_batch_init();			// batch transaction handling
 	as_batch_direct_init();		// low priority transaction handling        

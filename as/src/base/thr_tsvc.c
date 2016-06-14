@@ -47,7 +47,6 @@
 #include "base/security.h"
 #include "base/thr_batch.h"
 #include "base/transaction.h"
-#include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "storage/storage.h"
