@@ -1239,6 +1239,12 @@ struct as_namespace_s {
 	cf_atomic64		n_udf_bg_query_success;
 	cf_atomic64		n_udf_bg_query_failure;
 
+	// Geospatial query stats:
+	cf_atomic64		geo_region_query_count;		// number of region queries
+	cf_atomic64		geo_region_query_cells;		// number of cells used by region queries
+	cf_atomic64		geo_region_query_points;	// number of valid points found
+	cf_atomic64		geo_region_query_falsepos;	// number of false positives found
+
 	// LDT stats.
 
 	ns_ldt_stats        lstats;

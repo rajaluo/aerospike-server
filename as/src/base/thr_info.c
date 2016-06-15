@@ -354,11 +354,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64("tsvc-batch-sub-error", g_config.n_tsvc_batch_sub_error, db);
 	info_append_uint64("tsvc-udf-sub-error", g_config.n_tsvc_udf_sub_error, db);
 
-	info_append_uint64("geo_region_query_count", g_config.geo_region_query_count, db);
-	info_append_uint64("geo_region_query_cells", g_config.geo_region_query_cells, db);
-	info_append_uint64("geo_region_query_points", g_config.geo_region_query_points, db);
-	info_append_uint64("geo_region_query_falsepos", g_config.geo_region_query_falsepos, db);
-
 	info_append_uint64("fabric_msgs_sent", g_config.fabric_msgs_sent, db);
 	info_append_uint64("fabric_msgs_rcvd", g_config.fabric_msgs_rcvd, db);
 
@@ -5421,6 +5416,12 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64("udf-bg-query-success", ns->n_udf_bg_query_success, db);
 	info_append_uint64("udf-bg-query-failure", ns->n_udf_bg_query_failure, db);
+
+	// Geospatial query stats:
+	info_append_uint64("geo_region_query_count", ns->geo_region_query_count, db);
+	info_append_uint64("geo_region_query_cells", ns->geo_region_query_cells, db);
+	info_append_uint64("geo_region_query_points", ns->geo_region_query_points, db);
+	info_append_uint64("geo_region_query_falsepos", ns->geo_region_query_falsepos, db);
 
 	// LDT stats.
 

@@ -1460,10 +1460,10 @@ query_record_matches(as_query_transaction *qtr, as_storage_rd *rd, as_sindex_key
 
 			// We either found a valid point or a false positive.
 			if (iswithin) {
-				cf_atomic_int_incr(&g_config.geo_region_query_points);
+				cf_atomic64_incr(&qtr->ns->geo_region_query_points);
 			}
 			else {
-				cf_atomic_int_incr(&g_config.geo_region_query_falsepos);
+				cf_atomic64_incr(&qtr->ns->geo_region_query_falsepos);
 			}
 
 			return iswithin;
