@@ -412,8 +412,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64("client_connections", g_config.proto_connections_opened - g_config.proto_connections_closed, db);
 	info_append_uint64("record_refs", g_config.global_record_ref_count, db);
 
-	info_append_uint64("err_storage_queue_full", g_config.err_storage_queue_full, db);
-
 	as_partition_states ps;
 	info_partition_getstates(&ps);
 
@@ -443,7 +441,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_bool("system_swapping", swapping, db);
 
-	info_append_uint64("storage_defrag_corrupt_record", g_config.err_storage_defrag_corrupt_record, db);
 	info_append_uint64("uptime", (cf_getms() - g_config.start_ms) / 1000, db);
 
 	info_append_uint64("heartbeat_received_self", g_config.heartbeat_received_self, db);
@@ -5278,6 +5275,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		if (! ns->storage_data_in_memory) {
 			info_append_int("cache-read-pct", (int)(ns->cache_read_pct + 0.5), db);
 		}
+
+		info_append_uint64("err_storage_queue_full", ns->err_storage_queue_full, db);
+		info_append_uint64("storage_defrag_corrupt_record", ns->err_storage_defrag_corrupt_record, db);
 	}
 
 	// Migration stats.

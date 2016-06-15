@@ -885,12 +885,6 @@ fabric_process_writable(fabric_buffer *fb)
 	fabric_buffer_write_fill(fb);
 
 	uint32_t w_len = fb->w_total_len - fb->w_len;
-	if (w_len < 500)
-		cf_atomic_int_incr(&g_config.fabric_write_short);
-	else if (w_len < (4 * 1024))
-		cf_atomic_int_incr(&g_config.fabric_write_medium);
-	else
-		cf_atomic_int_incr(&g_config.fabric_write_long);
 
 	if (fb->nodelay_isset == false) {
 		int flag = 1;
@@ -1209,13 +1203,6 @@ fabric_process_readable(fabric_buffer *fb)
 	while (fabric_process_read_msg(fb)) {
 		;
 	}
-
-	if (rsz < 500)
-		cf_atomic_int_incr(&g_config.fabric_read_short);
-	else if (rsz < (4 * 1024))
-		cf_atomic_int_incr(&g_config.fabric_read_medium);
-	else
-		cf_atomic_int_incr(&g_config.fabric_read_long);
 
 	return 0;
 }
@@ -1953,9 +1940,6 @@ as_fabric_send(cf_node node, msg *m, int priority )
 
 	// Short circuit for self!
 	if (g_config.self_node == node) {
-
-		// statistic!
-		cf_atomic_int_incr(&g_config.fabric_msgs_selfsend);
 
 		// if not, just deliver raw message
 		if (g_fabric_args->msg_cb[m->type]) {

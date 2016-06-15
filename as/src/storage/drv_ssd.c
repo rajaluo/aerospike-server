@@ -809,7 +809,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 			num_deleted_records++;
 		}
 		else if (rv == -3) {
-			cf_atomic_int_incr(&g_config.err_storage_defrag_corrupt_record);
+			cf_atomic64_incr(&ssd->ns->err_storage_defrag_corrupt_record);
 			record_err_count++;
 		}
 
@@ -4167,7 +4167,7 @@ as_storage_overloaded_ssd(as_namespace *ns)
 		int qsz = cf_queue_sz(ssd->swb_write_q);
 
 		if (qsz > max_write_q) {
-			cf_atomic_int_incr(&g_config.err_storage_queue_full);
+			cf_atomic64_incr(&ns->err_storage_queue_full);
 			cf_warning(AS_DRV_SSD, "{%s} write fail: queue too deep: q %d, max %d",
 					ns->name, qsz, max_write_q);
 			return true;
@@ -4177,7 +4177,7 @@ as_storage_overloaded_ssd(as_namespace *ns)
 			qsz = cf_queue_sz(ssd->swb_shadow_q);
 
 			if (qsz > max_write_q) {
-				cf_atomic_int_incr(&g_config.err_storage_queue_full);
+				cf_atomic64_incr(&ns->err_storage_queue_full);
 				cf_warning(AS_DRV_SSD, "{%s} write fail: shadow queue too deep: q %d, max %d",
 						ns->name, qsz, max_write_q);
 				return true;

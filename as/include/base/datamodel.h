@@ -1054,7 +1054,6 @@ struct as_namespace_s {
 	// To track fraction of reads from cache:
 	cf_atomic32 n_reads_from_cache;
 	cf_atomic32 n_reads_from_device;
-	float cache_read_pct;
 
 	void *storage_private;
 
@@ -1079,18 +1078,57 @@ struct as_namespace_s {
 	uint32_t	saved_defrag_sleep; // restore after defrag at startup is done
 	uint32_t	defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
 
-	/* very interesting counters */
+	// Object counts.
+
 	cf_atomic_int	n_objects;
 	cf_atomic_int	n_sub_objects;
-	cf_atomic_int	n_bytes_memory;
 
-	// nsup-related stats.
+	// Expiration & eviction (nsup) stats.
+
+	cf_atomic32		stop_writes;
+	cf_atomic32		hwm_breached;
+
+	cf_atomic_int	max_void_time;
+	uint64_t		non_expirable_objects;
 
 	cf_atomic64		n_expired_objects;
 	cf_atomic64		n_evicted_objects;
 	cf_atomic64		n_deleted_set_objects;
 
 	cf_atomic64		evict_ttl;
+
+	uint32_t		nsup_cycle_duration; // seconds taken for most recent nsup cycle
+	uint32_t		nsup_cycle_sleep_pct; // fraction of most recent nsup cycle that was spent sleeping
+
+	// Memory usage stats.
+
+	cf_atomic_int	n_bytes_memory;
+	cf_atomic64		sindex_data_memory_used;
+
+	// Persistent storage stats.
+
+	float			cache_read_pct;
+
+	cf_atomic64		err_storage_queue_full;
+	cf_atomic64		err_storage_defrag_corrupt_record;
+
+	// Migration stats.
+
+	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only
+	cf_atomic_int	migrate_tx_instance_count; // debug only
+	cf_atomic_int	migrate_rx_instance_count; // debug only
+	cf_atomic_int	migrate_tx_partitions_active;
+	cf_atomic_int	migrate_rx_partitions_active;
+	cf_atomic_int	migrate_tx_partitions_initial;
+	cf_atomic_int	migrate_tx_partitions_remaining;
+	cf_atomic_int	migrate_rx_partitions_initial;
+	cf_atomic_int	migrate_rx_partitions_remaining;
+
+	// Per-record migration stats:
+	cf_atomic_int	migrate_records_skipped; // relevant only for enterprise edition
+	cf_atomic_int	migrate_records_transmitted;
+	cf_atomic_int	migrate_record_retransmits;
+	cf_atomic_int	migrate_record_receives;
 
 	// tsvc-stage error counters.
 
@@ -1201,31 +1239,9 @@ struct as_namespace_s {
 	cf_atomic64		n_udf_bg_query_success;
 	cf_atomic64		n_udf_bg_query_failure;
 
-	// migration counters
-	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only
-	cf_atomic_int	migrate_tx_instance_count; // debug only
-	cf_atomic_int	migrate_rx_instance_count; // debug only
-	cf_atomic_int	migrate_tx_partitions_active;
-	cf_atomic_int	migrate_rx_partitions_active;
-	cf_atomic_int	migrate_tx_partitions_initial;
-	cf_atomic_int	migrate_tx_partitions_remaining;
-	cf_atomic_int	migrate_rx_partitions_initial;
-	cf_atomic_int	migrate_rx_partitions_remaining;
+	// LDT stats.
 
-	// migration per-record stats
-	cf_atomic_int	migrate_records_skipped; // relevant only for enterprise edition
-	cf_atomic_int	migrate_records_transmitted;
-	cf_atomic_int	migrate_record_retransmits;
-	cf_atomic_int	migrate_record_receives;
-
-	// the maximum void time of all records in the namespace
-	cf_atomic_int max_void_time;
-
-	// Number of 0-void-time objects. TODO - should be atomic.
-	uint64_t non_expirable_objects;
-
-	uint32_t	nsup_cycle_duration; // seconds taken for most recent nsup cycle
-	uint32_t	nsup_cycle_sleep_pct; // fraction of most recent nsup cycle that was spent sleeping
+	ns_ldt_stats        lstats;
 
 	// Pointer to bin name vmap in persistent memory.
 	cf_vmapx		*p_bin_name_vmap;
@@ -1245,7 +1261,6 @@ struct as_namespace_s {
 	int					sindex_cnt;
 	struct as_sindex_s	*sindex;  // array with AS_MAX_SINDEX meta data
 	uint64_t			sindex_data_max_memory;
-	cf_atomic64		    sindex_data_memory_used;
 	shash               *sindex_set_binid_hash;
 	shash				*sindex_iname_hash;
 	uint32_t			binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
@@ -1258,10 +1273,6 @@ struct as_namespace_s {
 	uint16_t		geo2dsphere_within_max_cells;
 	uint16_t		geo2dsphere_within_level_mod;
 	uint32_t		geo2dsphere_within_earth_radius_meters;
-
-	// Current state of threshold breaches.
-	cf_atomic32		hwm_breached;
-	cf_atomic32		stop_writes;
 
 	// Flag for cold-start ticker and eviction threshold check.
 	bool			cold_start_loading;
@@ -1342,8 +1353,6 @@ struct as_namespace_s {
 	linear_hist 		*set_ttl_hists[AS_SET_MAX_COUNT + 1]; // only for info
 
 	as_partition partitions[AS_PARTITIONS];
-
-	ns_ldt_stats        lstats;
 };
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator

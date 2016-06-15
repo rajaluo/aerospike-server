@@ -318,13 +318,7 @@ typedef struct as_config_s {
 	*/
 	cf_atomic_int		fabric_msgs_sent;
 	cf_atomic_int		fabric_msgs_rcvd;
-	cf_atomic_int		fabric_msgs_selfsend;  // not included in prev send + receive
-	cf_atomic_int		fabric_write_short;
-	cf_atomic_int		fabric_write_medium;
-	cf_atomic_int		fabric_write_long;
-	cf_atomic_int		fabric_read_short;
-	cf_atomic_int		fabric_read_medium;
-	cf_atomic_int		fabric_read_long;
+
 	cf_atomic_int		proto_transactions;
 	cf_atomic_int		proto_connections_opened;
 	cf_atomic_int		proto_connections_closed;
@@ -334,8 +328,7 @@ typedef struct as_config_s {
 	cf_atomic_int		heartbeat_connections_closed;
 	cf_atomic_int		heartbeat_received_self;
 	cf_atomic_int		heartbeat_received_foreign;
-	cf_atomic_int		info_connections_opened;
-	cf_atomic_int		info_connections_closed;
+
 	cf_atomic_int		global_record_ref_count;
 	cf_atomic_int		reaper_count;
 
@@ -385,9 +378,6 @@ typedef struct as_config_s {
                                              // by LDT UDF execluding parent record
 	histogram *			ldt_update_io_bytes_hist;   // histogram that tracks number bytes written by LDT every transaction
 	histogram * 		ldt_hist;            // histogram that tracks ldt performance
-
-	cf_atomic_int		err_storage_queue_full;
-	cf_atomic_int		err_storage_defrag_corrupt_record;
 
 	// For Lua Garbage Collection, we want to track three things:
 	// (1) The number of times we were below the GC threshold
