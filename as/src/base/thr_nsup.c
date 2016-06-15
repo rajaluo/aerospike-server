@@ -245,16 +245,19 @@ get_cold_start_ttl_range(as_namespace* ns, uint32_t now)
 static uint32_t
 set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 {
-	uint32_t evict_void_time;
-	uint32_t subtotal = linear_hist_get_threshold_for_fraction(hist, ns->evict_tenths_pct, &evict_void_time);
-	bool all_buckets = evict_void_time == 0xFFFFffff;
+	linear_hist_threshold threshold;
+	uint32_t subtotal = linear_hist_get_threshold_for_fraction(hist, ns->evict_tenths_pct, &threshold);
+	bool all_buckets = threshold.value == 0xFFFFffff;
 
 	if (subtotal == 0) {
 		if (all_buckets) {
 			cf_warning(AS_NSUP, "{%s} cold-start found no records eligible for eviction", ns->name);
 		}
 		else {
-			cf_warning(AS_NSUP, "{%s} cold-start found no records below eviction void-time %u - insufficient histogram resolution?", ns->name, evict_void_time);
+			cf_warning(AS_NSUP, "{%s} cold-start found no records below eviction void-time %u - threshold bucket %u, width %u sec, count %u > target %u (%.1f pct)",
+					ns->name, threshold.value, threshold.bucket_index,
+					threshold.bucket_width, threshold.bucket_count,
+					threshold.target_count, (float)ns->evict_tenths_pct / 10.0);
 		}
 
 		return 0;
@@ -265,7 +268,7 @@ set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 		return 0;
 	}
 
-	cf_atomic32_set(&ns->cold_start_threshold_void_time, evict_void_time);
+	cf_atomic32_set(&ns->cold_start_threshold_void_time, threshold.value);
 
 	return subtotal;
 }
@@ -1039,15 +1042,21 @@ get_ttl_range(as_namespace* ns, uint32_t now)
 static bool
 get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 {
-	uint32_t subtotal = linear_hist_get_threshold_for_fraction(ns->evict_hist, ns->evict_tenths_pct, p_evict_void_time);
-	bool all_buckets = *p_evict_void_time == 0xFFFFffff;
+	linear_hist_threshold threshold;
+	uint32_t subtotal = linear_hist_get_threshold_for_fraction(ns->evict_hist, ns->evict_tenths_pct, &threshold);
+	bool all_buckets = threshold.value == 0xFFFFffff;
+
+	*p_evict_void_time = threshold.value;
 
 	if (subtotal == 0) {
 		if (all_buckets) {
 			cf_warning(AS_NSUP, "{%s} no records eligible for eviction", ns->name);
 		}
 		else {
-			cf_warning(AS_NSUP, "{%s} no records below eviction void-time %u - insufficient histogram resolution?", ns->name, *p_evict_void_time);
+			cf_warning(AS_NSUP, "{%s} no records below eviction void-time %u - threshold bucket %u, width %u sec, count %u > target %u (%.1f pct)",
+					ns->name, threshold.value, threshold.bucket_index,
+					threshold.bucket_width, threshold.bucket_count,
+					threshold.target_count, (float)ns->evict_tenths_pct / 10.0);
 		}
 
 		return false;

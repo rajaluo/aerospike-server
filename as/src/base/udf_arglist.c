@@ -1,7 +1,7 @@
 /*
  * udf_arglist.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,8 +24,8 @@
 #include "aerospike/as_list_iterator.h"
 #include "aerospike/as_msgpack.h"
 
-#include "base/udf_arglist.h"
 #include "base/proto.h"
+#include "base/udf_arglist.h"
 
 /******************************************************************************
  * STATIC FUNCTIONS
