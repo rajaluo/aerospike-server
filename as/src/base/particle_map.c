@@ -2952,6 +2952,10 @@ packed_map_op_find_index_by_key_unordered(const packed_map_op *op, const cdt_pay
 		if (cmp == MSGPACK_COMPARE_LESS) {
 			index++;
 		}
+
+		if (as_unpack_size(&pk) < 0) {
+			return op->ele_count;
+		}
 	}
 
 	return index;
