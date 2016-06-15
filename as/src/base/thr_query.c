@@ -2963,7 +2963,7 @@ as_query_stat(as_namespace *ns, cf_dyn_buf *db)
 	uint64_t lkup_records = cf_atomic64_get(ns->lookup_num_records);
 	uint64_t lkup_abort   = cf_atomic64_get(ns->n_lookup_abort);
 
-	cf_dyn_buf_append_string(db, "query_reqs=");
+	cf_dyn_buf_append_string(db, ";query_reqs=");
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_reqs));
 
 	cf_dyn_buf_append_string(db, ";query_success=");
