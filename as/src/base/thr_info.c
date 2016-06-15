@@ -102,7 +102,6 @@ extern int as_nsup_queue_get_size();
 
 int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
 int info_get_objects(char *name, cf_dyn_buf *db);
-void clear_microbenchmark_histograms();
 void clear_ldt_histograms();
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db);
@@ -2842,6 +2841,29 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of query-longq-max-size from %d to %"PRIu64, g_config.query_long_q_max_size, val);
 			g_config.query_long_q_max_size = val;
 		}
+		else if (0 == as_info_parameter_get(params, "activate-benchmarks-svc", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-svc to %s", context);
+				g_config.svc_benchmarks_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-svc to %s", context);
+				g_config.svc_benchmarks_active = false;
+				histogram_clear(g_config.svc_demarshal_hist);
+				histogram_clear(g_config.svc_queue_hist);
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "activate-hist-info", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-hist-info to %s", context);
+				g_config.info_hist_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-hist-info to %s", context);
+				g_config.info_hist_active = false;
+				histogram_clear(g_config.info_hist);
+			}
+		}
 		else if (0 == as_info_parameter_get(params, "sindex-gc-enable-histogram", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of sindex-gc-enable-histogram to %s", context);
@@ -3241,6 +3263,127 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of disallow-null-setname of ns %s from %s to %s", ns->name, bool_val[ns->disallow_null_setname], context);
 				ns->disallow_null_setname = false;
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "activate-benchmarks-batch-sub", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-batch-sub of ns %s from %s to %s", ns->name, bool_val[ns->batch_sub_benchmarks_active], context);
+				ns->batch_sub_benchmarks_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-batch-sub of ns %s from %s to %s", ns->name, bool_val[ns->batch_sub_benchmarks_active], context);
+				ns->batch_sub_benchmarks_active = false;
+				histogram_clear(ns->batch_sub_start_hist);
+				histogram_clear(ns->batch_sub_restart_hist);
+				histogram_clear(ns->batch_sub_dup_res_hist);
+				histogram_clear(ns->batch_sub_read_local_hist);
+				histogram_clear(ns->batch_sub_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "activate-benchmarks-read", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-read of ns %s from %s to %s", ns->name, bool_val[ns->read_benchmarks_active], context);
+				ns->read_benchmarks_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-read of ns %s from %s to %s", ns->name, bool_val[ns->read_benchmarks_active], context);
+				ns->read_benchmarks_active = false;
+				histogram_clear(ns->read_start_hist);
+				histogram_clear(ns->read_restart_hist);
+				histogram_clear(ns->read_dup_res_hist);
+				histogram_clear(ns->read_local_hist);
+				histogram_clear(ns->read_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "activate-benchmarks-storage", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-storage of ns %s from %s to %s", ns->name, bool_val[ns->storage_benchmarks_active], context);
+				ns->storage_benchmarks_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-storage of ns %s from %s to %s", ns->name, bool_val[ns->storage_benchmarks_active], context);
+				ns->storage_benchmarks_active = false;
+				as_storage_histogram_clear_all(ns);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "activate-benchmarks-udf", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-udf of ns %s from %s to %s", ns->name, bool_val[ns->udf_benchmarks_active], context);
+				ns->udf_benchmarks_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-udf of ns %s from %s to %s", ns->name, bool_val[ns->udf_benchmarks_active], context);
+				ns->udf_benchmarks_active = false;
+				histogram_clear(ns->udf_start_hist);
+				histogram_clear(ns->udf_restart_hist);
+				histogram_clear(ns->udf_dup_res_hist);
+				histogram_clear(ns->udf_master_hist);
+				histogram_clear(ns->udf_repl_write_hist);
+				histogram_clear(ns->udf_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "activate-benchmarks-udf-sub", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-udf-sub of ns %s from %s to %s", ns->name, bool_val[ns->udf_sub_benchmarks_active], context);
+				ns->udf_sub_benchmarks_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-udf-sub of ns %s from %s to %s", ns->name, bool_val[ns->udf_sub_benchmarks_active], context);
+				ns->udf_sub_benchmarks_active = false;
+				histogram_clear(ns->udf_sub_start_hist);
+				histogram_clear(ns->udf_sub_restart_hist);
+				histogram_clear(ns->udf_sub_dup_res_hist);
+				histogram_clear(ns->udf_sub_master_hist);
+				histogram_clear(ns->udf_sub_repl_write_hist);
+				histogram_clear(ns->udf_sub_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "activate-benchmarks-write", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-write of ns %s from %s to %s", ns->name, bool_val[ns->write_benchmarks_active], context);
+				ns->write_benchmarks_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-benchmarks-write of ns %s from %s to %s", ns->name, bool_val[ns->write_benchmarks_active], context);
+				ns->write_benchmarks_active = false;
+				histogram_clear(ns->write_start_hist);
+				histogram_clear(ns->write_restart_hist);
+				histogram_clear(ns->write_dup_res_hist);
+				histogram_clear(ns->write_master_hist);
+				histogram_clear(ns->write_repl_write_hist);
+				histogram_clear(ns->write_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "activate-hist-proxy", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-hist-proxy of ns %s from %s to %s", ns->name, bool_val[ns->proxy_hist_active], context);
+				ns->proxy_hist_active = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of activate-hist-proxy of ns %s from %s to %s", ns->name, bool_val[ns->proxy_hist_active], context);
+				ns->proxy_hist_active = false;
+				histogram_clear(ns->proxy_hist);
 			}
 			else {
 				goto Error;
@@ -5579,12 +5722,6 @@ clear_ldt_histograms()
 	histogram_clear(g_config.ldt_io_record_cnt_hist);
 	histogram_clear(g_config.ldt_update_io_bytes_hist);
 	histogram_clear(g_config.ldt_hist);
-}
-
-void
-clear_microbenchmark_histograms()
-{
-	// TODO - new dynamically configured histograms!
 }
 
 // SINDEX wire protocol examples:
