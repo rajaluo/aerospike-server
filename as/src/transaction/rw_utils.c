@@ -247,7 +247,6 @@ delete_adjust_sindex(as_storage_rd* rd)
 	rd->n_bins = as_bin_get_n_bins(r, rd);
 	rd->bins = as_bin_get_all(r, rd, NULL);
 
-	int status = AS_SINDEX_OK;
 	const char* set_name = as_index_get_set_name(r, ns);
 
 	SINDEX_GRLOCK();
@@ -272,7 +271,7 @@ delete_adjust_sindex(as_storage_rd* rd)
 	SINDEX_GUNLOCK();
 
 	if (sbins_populated) {
-		status = as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated,
+		as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated,
 				&rd->keyd);
 		as_sindex_sbin_freeall(sbins, sbins_populated);
 	}
