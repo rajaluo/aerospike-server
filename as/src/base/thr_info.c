@@ -381,6 +381,9 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_int("scans_active", as_scan_get_active_job_count(), db);
 
+	info_append_uint32("query_short_running", g_query_short_running, db);
+	info_append_uint32("query_long_running", g_query_long_running, db);
+
 	info_append_uint64("batch_index_initiate", g_config.batch_index_initiate, db);
 
 	cf_dyn_buf_append_string(db, ";batch_index_queue=");
@@ -5064,21 +5067,27 @@ info_get_sindexes(char *name, cf_dyn_buf *db)
 void
 info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 {
-	uint64_t free_pct;
-	uint64_t data_memory;
-	uint64_t pindex_memory;
-	uint64_t sindex_memory;
-	uint64_t used_memory;
+	// Object counts.
+
+	info_append_uint64("objects", ns->n_objects, db);
+	info_append_uint64("sub-objects", ns->n_sub_objects, db);
 
 	as_master_prole_stats mp;
 	as_partition_get_master_prole_stats(ns, &mp);
 
-	info_append_uint64("objects", ns->n_objects, db);
-	info_append_uint64("sub-objects", ns->n_sub_objects, db);
 	info_append_uint64("master-objects", mp.n_master_records, db);
 	info_append_uint64("master-sub-objects", mp.n_master_sub_records, db);
 	info_append_uint64("prole-objects", mp.n_prole_records, db);
 	info_append_uint64("prole-sub-objects", mp.n_prole_sub_records, db);
+
+	// Expiration & eviction (nsup) stats.
+
+	info_append_bool("stop-writes", ns->stop_writes != 0, db);
+	info_append_bool("hwm-breached", ns->hwm_breached != 0, db);
+
+	info_append_uint64("current-time", as_record_void_time_get(), db);
+	info_append_uint64("max-void-time", ns->max_void_time, db);
+	info_append_uint64("non-expirable-objects", ns->non_expirable_objects, db);
 	info_append_uint64("expired-objects", ns->n_expired_objects, db);
 	info_append_uint64("evicted-objects", ns->n_evicted_objects, db);
 	info_append_uint64("set-deleted-objects", ns->n_deleted_set_objects, db);
@@ -5086,32 +5095,68 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint32("nsup-cycle-duration", ns->nsup_cycle_duration, db);
 	info_append_uint32("nsup-cycle-sleep-pct", ns->nsup_cycle_sleep_pct, db);
 
-	// total used memory =  data memory + primary index memory + secondary index memory
-	data_memory   = ns->n_bytes_memory;
-	pindex_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
-	sindex_memory = ns->sindex_data_memory_used;
-	used_memory   = data_memory + pindex_memory + sindex_memory;
+	// Memory usage stats.
+
+	uint64_t data_memory = ns->n_bytes_memory;
+	uint64_t index_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
+	uint64_t sindex_memory = ns->sindex_data_memory_used;
+	uint64_t used_memory = data_memory + index_memory + sindex_memory;
 
 	info_append_uint64("used-bytes-memory", used_memory, db);
 	info_append_uint64("data-used-bytes-memory", data_memory, db);
-	info_append_uint64("index-used-bytes-memory", pindex_memory, db);
+	info_append_uint64("index-used-bytes-memory", index_memory, db);
 	info_append_uint64("sindex-used-bytes-memory", sindex_memory, db);
 
-	free_pct = (ns->memory_size != 0 && (ns->memory_size > used_memory)) ?
+	uint64_t free_pct = (ns->memory_size != 0 && (ns->memory_size > used_memory)) ?
 			((ns->memory_size - used_memory) * 100L) / ns->memory_size : 0;
 
 	info_append_uint64("free-pct-memory", free_pct, db);
-	info_append_uint64("max-void-time", ns->max_void_time, db);
-	info_append_uint64("non-expirable-objects", ns->non_expirable_objects, db);
-	info_append_uint64("current-time", as_record_void_time_get(), db);
-
-	info_append_bool("stop-writes", ns->stop_writes != 0, db);
-	info_append_bool("hwm-breached", ns->hwm_breached != 0, db);
 
 	// Remaining bin-name slots (yes, this can be negative).
 	if (! ns->single_bin) {
 		info_append_int("available-bin-names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap), db);
 	}
+
+	// Persistent storage stats.
+
+	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+		int available_pct = 0;
+		uint64_t inuse_disk_bytes = 0;
+		as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
+
+		info_append_uint64("used-bytes-disk", inuse_disk_bytes, db);
+
+		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > inuse_disk_bytes)) ?
+				((ns->ssd_size - inuse_disk_bytes) * 100L) / ns->ssd_size : 0;
+
+		info_append_uint64("free-pct-disk", free_pct, db);
+		info_append_int("available_pct", available_pct, db); // TODO - underscore???
+
+		if (! ns->storage_data_in_memory) {
+			info_append_int("cache-read-pct", (int)(ns->cache_read_pct + 0.5), db);
+		}
+	}
+
+	// Migration stats.
+
+	info_append_uint64("migrate-tx-partitions-imbalance", ns->migrate_tx_partitions_imbalance, db);
+
+	info_append_uint64("migrate-tx-instance-count", ns->migrate_tx_instance_count, db);
+	info_append_uint64("migrate-rx-instance-count", ns->migrate_rx_instance_count, db);
+
+	info_append_uint64("migrate-tx-partitions-active", ns->migrate_tx_partitions_active, db);
+	info_append_uint64("migrate-rx-partitions-active", ns->migrate_rx_partitions_active, db);
+
+	info_append_uint64("migrate-tx-partitions-initial", ns->migrate_tx_partitions_initial, db);
+	info_append_uint64("migrate-tx-partitions-remaining", ns->migrate_tx_partitions_remaining, db);
+
+	info_append_uint64("migrate-rx-partitions-initial", ns->migrate_rx_partitions_initial, db);
+	info_append_uint64("migrate-rx-partitions-remaining", ns->migrate_rx_partitions_remaining, db);
+
+	info_append_uint64("migrate-records-skipped", ns->migrate_records_skipped, db);
+	info_append_uint64("migrate-records-transmitted", ns->migrate_records_transmitted, db);
+	info_append_uint64("migrate-record-retransmits", ns->migrate_record_retransmits, db);
+	info_append_uint64("migrate-record-receives", ns->migrate_record_receives, db);
 
 	// tsvc-stage error counters.
 
@@ -5196,134 +5241,86 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Query stats.
 
-	as_query_stat(ns, db);
+	uint64_t agg			= ns->n_aggregation;
+	uint64_t agg_success	= ns->n_agg_success;
+	uint64_t agg_err		= ns->n_agg_errs;
+	uint64_t agg_records	= ns->agg_num_records;
+	uint64_t agg_abort		= ns->n_agg_abort;
 
-	// Migration stats.
+	uint64_t lkup			= ns->n_lookup;
+	uint64_t lkup_success	= ns->n_lookup_success;
+	uint64_t lkup_err		= ns->n_lookup_errs;
+	uint64_t lkup_records	= ns->lookup_num_records;
+	uint64_t lkup_abort		= ns->n_lookup_abort;
 
-	info_append_uint64("migrate-tx-partitions-imbalance", ns->migrate_tx_partitions_imbalance, db);
+	info_append_uint64("query_reqs", ns->query_reqs, db);
+	info_append_uint64("query_success", agg_success + lkup_success, db);
+	info_append_uint64("query_fail", ns->query_fail + lkup_err + agg_err, db);
+	info_append_uint64("query_abort", agg_abort + lkup_abort, db);
 
-	info_append_uint64("migrate-tx-instance-count", ns->migrate_tx_instance_count, db);
-	info_append_uint64("migrate-rx-instance-count", ns->migrate_rx_instance_count, db);
+	info_append_uint64("query_avg_rec_count", (agg + lkup) ? (agg_records + lkup_records) / (agg + lkup) : 0, db);
+	info_append_uint64("query_short_queue_full", ns->query_short_queue_full, db);
+	info_append_uint64("query_long_queue_full", ns->query_long_queue_full, db);
+	info_append_uint64("query_short_reqs", ns->query_short_reqs, db);
+	info_append_uint64("query_long_reqs", ns->query_long_reqs, db);
 
-	info_append_uint64("migrate-tx-partitions-active", ns->migrate_tx_partitions_active, db);
-	info_append_uint64("migrate-rx-partitions-active", ns->migrate_rx_partitions_active, db);
+	info_append_uint64("query_agg", agg, db);
+	info_append_uint64("query_agg_success", agg_success, db);
+	info_append_uint64("query_agg_err", agg_err, db);
+	info_append_uint64("query_agg_abort", agg_abort, db);
+	info_append_uint64("query_agg_avg_rec_count", agg ? agg_records / agg : 0, db);
 
-	info_append_uint64("migrate-tx-partitions-initial", ns->migrate_tx_partitions_initial, db);
-	info_append_uint64("migrate-tx-partitions-remaining", ns->migrate_tx_partitions_remaining, db);
+	info_append_uint64("query_lookups", lkup, db);
+	info_append_uint64("query_lookup_success", lkup_success, db);
+	info_append_uint64("query_lookup_err", lkup_err, db);
+	info_append_uint64("query_lookup_abort", lkup_abort, db);
+	info_append_uint64("query_lookup_avg_rec_count", lkup ? lkup_records / lkup : 0, db);
 
-	info_append_uint64("migrate-rx-partitions-initial", ns->migrate_rx_partitions_initial, db);
-	info_append_uint64("migrate-rx-partitions-remaining", ns->migrate_rx_partitions_remaining, db);
-
-	info_append_uint64("migrate-records-skipped", ns->migrate_records_skipped, db);
-	info_append_uint64("migrate-records-transmitted", ns->migrate_records_transmitted, db);
-	info_append_uint64("migrate-record-retransmits", ns->migrate_record_retransmits, db);
-	info_append_uint64("migrate-record-receives", ns->migrate_record_receives, db);
+	info_append_uint64("udf-bg-query-success", ns->n_udf_bg_query_success, db);
+	info_append_uint64("udf-bg-query-failure", ns->n_udf_bg_query_failure, db);
 
 	// LDT stats.
 
 	if (ns->ldt_enabled) {
-		cf_dyn_buf_append_string(db, ";ldt-reads=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_reqs));
-		cf_dyn_buf_append_string(db, ";ldt-read-success=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_success));
-		cf_dyn_buf_append_string(db, ";ldt-deletes=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_reqs));
-		cf_dyn_buf_append_string(db, ";ldt-delete-success=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_success));
-		cf_dyn_buf_append_string(db, ";ldt-writes=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_reqs));
-		cf_dyn_buf_append_string(db, ";ldt-write-success=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_success));
-		cf_dyn_buf_append_string(db, ";ldt-updates=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_update_reqs));
+		info_append_uint64("ldt-reads", ns->lstats.ldt_read_reqs, db);
+		info_append_uint64("ldt-read-success", ns->lstats.ldt_read_success, db);
+		info_append_uint64("ldt-deletes", ns->lstats.ldt_delete_reqs, db);
+		info_append_uint64("ldt-delete-success", ns->lstats.ldt_delete_success, db);
+		info_append_uint64("ldt-writes", ns->lstats.ldt_write_reqs, db);
+		info_append_uint64("ldt-write-success", ns->lstats.ldt_write_success, db);
+		info_append_uint64("ldt-updates", ns->lstats.ldt_update_reqs, db);
 
-		cf_dyn_buf_append_string(db, ";ldt-gc-io=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_io));
-		cf_dyn_buf_append_string(db, ";ldt-gc-cnt=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_cnt));
-		cf_dyn_buf_append_string(db, ";ldt-randomizer-retry=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_randomizer_retry));
+		info_append_uint64("ldt-gc-io", ns->lstats.ldt_gc_io, db);
+		info_append_uint64("ldt-gc-cnt", ns->lstats.ldt_gc_cnt, db);
+		info_append_uint64("ldt-randomizer-retry", ns->lstats.ldt_randomizer_retry, db);
 
-		cf_dyn_buf_append_string(db, ";ldt-errors=");
-		cf_dyn_buf_append_uint32(db, ns->lstats.ldt_errs);
+		info_append_uint64("ldt-errors", ns->lstats.ldt_errs, db);
 
-		cf_dyn_buf_append_string(db, ";ldt-err-toprec-notfound=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_not_found));
-		cf_dyn_buf_append_string(db, ";ldt-err-item-notfound=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_item_not_found));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-internal=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_internal));
-		cf_dyn_buf_append_string(db, ";ldt-err-unique-key-violation=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unique_key_violation));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-insert-fail=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_insert_fail));
-		cf_dyn_buf_append_string(db, ";ldt-err-delete-fail=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_delete_fail));
-		cf_dyn_buf_append_string(db, ";ldt-err-search-fail=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_search_fail));
-		cf_dyn_buf_append_string(db, ";ldt-err-version-mismatch=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_version_mismatch));
-
-
-		cf_dyn_buf_append_string(db, ";ldt-err-capacity-exceeded=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_capacity_exceeded));
-		cf_dyn_buf_append_string(db, ";ldt-err-param=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_param));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-op-bintype-mismatch=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_op_bintype_mismatch));
-		cf_dyn_buf_append_string(db, ";ldt-err-too-many-open-subrec=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_too_many_open_subrec));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-subrec-not-found=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_not_found));
-		cf_dyn_buf_append_string(db, ";ldt-err-bin-does-not-exist=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_does_not_exist));
-		cf_dyn_buf_append_string(db, ";ldt-err-bin-exits=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_exits));
-		cf_dyn_buf_append_string(db, ";ldt-err-bin-damaged=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_damaged));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-toprec-internal=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_internal));
-		cf_dyn_buf_append_string(db, ";ldt-err-subrec-internal=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_internal));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-filer=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_filter));
-		cf_dyn_buf_append_string(db, ";ldt-err-key=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_key));
-		cf_dyn_buf_append_string(db, ";ldt-err-createspec=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_createspec));
-		cf_dyn_buf_append_string(db, ";ldt-err-usermodule=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_usermodule));
-		cf_dyn_buf_append_string(db, ";ldt-err-input-too-large=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_input_too_large));
-		cf_dyn_buf_append_string(db, ";ldt-err-ldt-not-enabled=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_ldt_not_enabled));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-unknown=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unknown));
-	}
-
-	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-		int available_pct = 0;
-		uint64_t inuse_disk_bytes = 0;
-		as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
-
-		info_append_uint64("used-bytes-disk", inuse_disk_bytes, db);
-
-		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > inuse_disk_bytes)) ?
-				((ns->ssd_size - inuse_disk_bytes) * 100L) / ns->ssd_size : 0;
-
-		info_append_uint64("free-pct-disk", free_pct, db);
-		info_append_int("available_pct", available_pct, db); // TODO - underscore???
-
-		if (! ns->storage_data_in_memory) {
-			info_append_int("cache-read-pct", (int)(ns->cache_read_pct + 0.5), db);
-		}
+		info_append_uint64("ldt-err-toprec-notfound", ns->lstats.ldt_err_toprec_not_found, db);
+		info_append_uint64("ldt-err-item-notfound", ns->lstats.ldt_err_item_not_found, db);
+		info_append_uint64("ldt-err-internal", ns->lstats.ldt_err_internal, db);
+		info_append_uint64("ldt-err-unique-key-violation", ns->lstats.ldt_err_unique_key_violation, db);
+		info_append_uint64("ldt-err-insert-fail", ns->lstats.ldt_err_insert_fail, db);
+		info_append_uint64("ldt-err-delete-fail", ns->lstats.ldt_err_delete_fail, db);
+		info_append_uint64("ldt-err-search-fail", ns->lstats.ldt_err_search_fail, db);
+		info_append_uint64("ldt-err-version-mismatch", ns->lstats.ldt_err_version_mismatch, db);
+		info_append_uint64("ldt-err-capacity-exceeded", ns->lstats.ldt_err_capacity_exceeded, db);
+		info_append_uint64("ldt-err-param", ns->lstats.ldt_err_param, db);
+		info_append_uint64("ldt-err-op-bintype-mismatch", ns->lstats.ldt_err_op_bintype_mismatch, db);
+		info_append_uint64("ldt-err-too-many-open-subrec", ns->lstats.ldt_err_too_many_open_subrec, db);
+		info_append_uint64("ldt-err-subrec-not-found", ns->lstats.ldt_err_subrec_not_found, db);
+		info_append_uint64("ldt-err-bin-does-not-exist", ns->lstats.ldt_err_bin_does_not_exist, db);
+		info_append_uint64("ldt-err-bin-exits", ns->lstats.ldt_err_bin_exits, db);
+		info_append_uint64("ldt-err-bin-damaged", ns->lstats.ldt_err_bin_damaged, db);
+		info_append_uint64("ldt-err-toprec-internal", ns->lstats.ldt_err_toprec_internal, db);
+		info_append_uint64("ldt-err-subrec-internal", ns->lstats.ldt_err_subrec_internal, db);
+		info_append_uint64("ldt-err-filer", ns->lstats.ldt_err_filter, db);
+		info_append_uint64("ldt-err-key", ns->lstats.ldt_err_key, db);
+		info_append_uint64("ldt-err-createspec", ns->lstats.ldt_err_createspec, db);
+		info_append_uint64("ldt-err-usermodule", ns->lstats.ldt_err_usermodule, db);
+		info_append_uint64("ldt-err-input-too-large", ns->lstats.ldt_err_input_too_large, db);
+		info_append_uint64("ldt-err-ldt-not-enabled", ns->lstats.ldt_err_ldt_not_enabled, db);
+		info_append_uint64("ldt-err-unknown", ns->lstats.ldt_err_unknown, db);
 	}
 }
 

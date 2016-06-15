@@ -310,8 +310,9 @@ static pthread_attr_t   g_query_th_attr;
 static cf_queue       * g_query_short_queue     = 0;
 static cf_queue       * g_query_long_queue      = 0;
 static cf_atomic32      g_query_threadcnt       = 0;
-static cf_atomic32      g_query_short_running   = 0;
-static cf_atomic32      g_query_long_running    = 0;
+
+cf_atomic32             g_query_short_running   = 0;
+cf_atomic32             g_query_long_running    = 0;
 
 // I/O & AGGREGATOR
 static pthread_t       g_query_worker_threads[AS_QUERY_MAX_WORKER_THREADS];
@@ -2946,97 +2947,6 @@ as_query_set_priority(uint64_t trid, uint32_t priority)
 		qtr_release(qtr, __FILE__, __LINE__);
 	}
 	return rv;
-}
-
-void
-as_query_stat(as_namespace *ns, cf_dyn_buf *db)
-{
-	uint64_t agg          = cf_atomic64_get(ns->n_aggregation);
-	uint64_t agg_success  = cf_atomic64_get(ns->n_agg_success);
-	uint64_t agg_err      = cf_atomic64_get(ns->n_agg_errs);
-	uint64_t agg_records  = cf_atomic64_get(ns->agg_num_records);
-	uint64_t agg_abort    = cf_atomic64_get(ns->n_agg_abort);
-
-	uint64_t lkup         = cf_atomic64_get(ns->n_lookup);
-	uint64_t lkup_success = cf_atomic64_get(ns->n_lookup_success);
-	uint64_t lkup_err     = cf_atomic64_get(ns->n_lookup_errs);
-	uint64_t lkup_records = cf_atomic64_get(ns->lookup_num_records);
-	uint64_t lkup_abort   = cf_atomic64_get(ns->n_lookup_abort);
-
-	cf_dyn_buf_append_string(db, ";query_reqs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_reqs));
-
-	cf_dyn_buf_append_string(db, ";query_success=");
-	cf_dyn_buf_append_uint64(db, agg_success + lkup_success);
-
-	cf_dyn_buf_append_string(db, ";query_fail=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_fail) + lkup_err + agg_err);
-
-	cf_dyn_buf_append_string(db, ";query_abort=");
-	cf_dyn_buf_append_uint64(db, agg_abort + lkup_abort );
-
-
-	cf_dyn_buf_append_string(db, ";query_avg_rec_count=");
-	cf_dyn_buf_append_uint64(db,  (agg + lkup) ? ( agg_records + lkup_records )
-									/ (agg + lkup) : 0);
-
-	cf_dyn_buf_append_string(db, ";query_short_running=");
-	cf_dyn_buf_append_uint32(db, cf_atomic32_get(g_query_short_running));
-
-	cf_dyn_buf_append_string(db, ";query_long_running=");
-	cf_dyn_buf_append_uint32(db, cf_atomic32_get(g_query_long_running));
-
-	cf_dyn_buf_append_string(db, ";query_short_queue_full=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_short_queue_full));
-
-	cf_dyn_buf_append_string(db, ";query_long_queue_full=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_long_queue_full));
-
-	cf_dyn_buf_append_string(db, ";query_short_reqs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_short_reqs));
-
-	cf_dyn_buf_append_string(db, ";query_long_reqs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(ns->query_long_reqs));
-
-	// Aggregation stats
-	cf_dyn_buf_append_string(db, ";query_agg=");
-	cf_dyn_buf_append_uint64(db, agg);
-
-	cf_dyn_buf_append_string(db, ";query_agg_success=");
-	cf_dyn_buf_append_uint64(db, agg_success);
-
-	cf_dyn_buf_append_string(db, ";query_agg_err=");
-	cf_dyn_buf_append_uint64(db, agg_err);
-
-
-	cf_dyn_buf_append_string(db, ";query_agg_abort=");
-	cf_dyn_buf_append_uint64(db, agg_abort);
-
-	cf_dyn_buf_append_string(db, ";query_agg_avg_rec_count=");
-	cf_dyn_buf_append_uint64(db, agg ? agg_records / agg : 0);
-
-	// Lookup stats
-	cf_dyn_buf_append_string(db, ";query_lookups=");
-	cf_dyn_buf_append_uint64(db, lkup);
-
-	cf_dyn_buf_append_string(db, ";query_lookup_success=");
-	cf_dyn_buf_append_uint64(db, lkup_success);
-
-	cf_dyn_buf_append_string(db, ";query_lookup_err=");
-	cf_dyn_buf_append_uint64(db, lkup_err);
-
-	cf_dyn_buf_append_string(db, ";query_lookup_abort=");
-	cf_dyn_buf_append_uint64(db, lkup_abort);
-
-	cf_dyn_buf_append_string(db, ";query_lookup_avg_rec_count=");
-	cf_dyn_buf_append_uint64(db, lkup ? lkup_records / lkup : 0);
-
-	// UDF-background stats
-	cf_dyn_buf_append_string(db, ";udf-bg-query-success=");
-	cf_dyn_buf_append_uint64(db, ns->n_udf_bg_query_success);
-
-	cf_dyn_buf_append_string(db, ";udf-bg-query-failure=");
-	cf_dyn_buf_append_uint64(db, ns->n_udf_bg_query_failure);
 }
 
 int
