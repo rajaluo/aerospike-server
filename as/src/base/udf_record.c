@@ -84,11 +84,9 @@ udf_storage_record_open(udf_record *urecord)
 	as_storage_rd  *rd    = urecord->rd;
 	as_index       *r	  = urecord->r_ref->r;
 	as_transaction *tr    = urecord->tr;
-	int rv = as_storage_record_open(tr->rsv.ns, r, rd, &r->key);
-	if (0 != rv) {
-		cf_warning(AS_UDF, "Could not open record !! %d", rv);
-		return rv;
-	}
+
+	as_storage_record_open(tr->rsv.ns, r, rd, &r->key);
+
 	rd->n_bins = as_bin_get_n_bins(r, rd);
 
 	if (rd->n_bins > UDF_RECORD_BIN_ULIMIT) {
