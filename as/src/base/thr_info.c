@@ -112,8 +112,20 @@ void as_storage_summarize_wblock_stats(as_namespace *ns);
 int as_storage_analyze_wblock(as_namespace* ns, int device_index, uint32_t wblock_id);
 
 
-// This is here for now, until such time as a separate .c file is worth it.
+//------------------------------------------------
+// This is here for now, until such time as a
+// separate .c file is worth it.
+//
+
 as_stats g_stats;
+
+void
+as_stats_init()
+{
+	memset((void*)&g_stats, 0, sizeof(g_stats));
+}
+
+//------------------------------------------------
 
 
 static cf_queue *g_info_work_q = 0;

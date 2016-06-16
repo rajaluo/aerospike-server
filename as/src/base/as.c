@@ -51,6 +51,7 @@
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/system_metadata.h"
+#include "base/stats.h"
 #include "base/thr_batch.h"
 #include "base/thr_info.h"
 #include "base/thr_sindex.h"
@@ -271,6 +272,9 @@ main(int argc, char **argv)
 
 	// Initialize the Jansson JSON API.
 	as_json_init();
+
+	// Start global stats at 0.
+	as_stats_init();
 
 	int i;
 	int cmd_optidx;

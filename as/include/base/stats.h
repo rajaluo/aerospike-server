@@ -104,4 +104,5 @@ typedef struct as_stats_s {
 //
 
 // For now this is in thr_info.c, until a separate .c file is worth it.
+void as_stats_init();
 extern as_stats g_stats;

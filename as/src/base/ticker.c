@@ -300,15 +300,15 @@ void
 log_line_batch_index()
 {
 	uint64_t n_complete = g_stats.batch_index_complete;
-	uint64_t n_timeout = g_stats.batch_index_timeout;
 	uint64_t n_error = g_stats.batch_index_errors;
+	uint64_t n_timeout = g_stats.batch_index_timeout;
 
-	if ((n_complete | n_timeout | n_error) == 0) {
+	if ((n_complete | n_error | n_timeout) == 0) {
 		return;
 	}
 
 	cf_info(AS_INFO, "   batch-index: batches (%lu,%lu,%lu)",
-			n_complete, n_timeout, n_error
+			n_complete, n_error, n_timeout
 			);
 }
 
@@ -462,24 +462,24 @@ log_line_migrations(as_namespace* ns)
 void
 log_line_tsvc_fail(as_namespace* ns)
 {
-	uint64_t n_client_timeout = ns->n_tsvc_client_timeout;
 	uint64_t n_client_error = ns->n_tsvc_client_error;
-	uint64_t n_batch_sub_timeout = ns->n_tsvc_batch_sub_timeout;
+	uint64_t n_client_timeout = ns->n_tsvc_client_timeout;
 	uint64_t n_batch_sub_error = ns->n_tsvc_batch_sub_error;
-	uint64_t n_udf_sub_timeout = ns->n_tsvc_udf_sub_timeout;
+	uint64_t n_batch_sub_timeout = ns->n_tsvc_batch_sub_timeout;
 	uint64_t n_udf_sub_error = ns->n_tsvc_udf_sub_error;
+	uint64_t n_udf_sub_timeout = ns->n_tsvc_udf_sub_timeout;
 
-	if ((n_client_timeout | n_client_error |
-			n_batch_sub_timeout | n_batch_sub_error |
-			n_udf_sub_timeout | n_udf_sub_error) == 0) {
+	if ((n_client_error |n_client_timeout |
+			n_batch_sub_error | n_batch_sub_timeout |
+			n_udf_sub_error | n_udf_sub_timeout) == 0) {
 		return;
 	}
 
 	cf_info(AS_INFO, "{%s} tsvc-fail: client (%lu,%lu) batch-sub (%lu,%lu) udf-sub (%lu,%lu)",
 			ns->name,
-			n_client_timeout, n_client_error,
-			n_batch_sub_timeout, n_batch_sub_error,
-			n_udf_sub_timeout, n_udf_sub_error
+			n_client_error, n_client_timeout,
+			n_batch_sub_error, n_batch_sub_timeout,
+			n_udf_sub_error, n_udf_sub_timeout
 			);
 }
 
@@ -488,43 +488,43 @@ void
 log_line_client(as_namespace* ns)
 {
 	uint64_t n_proxy_complete = ns->n_client_proxy_complete;
-	uint64_t n_proxy_timeout = ns->n_client_proxy_timeout;
 	uint64_t n_proxy_error = ns->n_client_proxy_error;
+	uint64_t n_proxy_timeout = ns->n_client_proxy_timeout;
 	uint64_t n_read_success = ns->n_client_read_success;
-	uint64_t n_read_timeout = ns->n_client_read_timeout;
 	uint64_t n_read_error = ns->n_client_read_error;
+	uint64_t n_read_timeout = ns->n_client_read_timeout;
 	uint64_t n_read_not_found = ns->n_client_read_not_found;
 	uint64_t n_write_success = ns->n_client_write_success;
-	uint64_t n_write_timeout = ns->n_client_write_timeout;
 	uint64_t n_write_error = ns->n_client_write_error;
+	uint64_t n_write_timeout = ns->n_client_write_timeout;
 	uint64_t n_delete_success = ns->n_client_delete_success;
-	uint64_t n_delete_timeout = ns->n_client_delete_timeout;
 	uint64_t n_delete_error = ns->n_client_delete_error;
+	uint64_t n_delete_timeout = ns->n_client_delete_timeout;
 	uint64_t n_delete_not_found = ns->n_client_delete_not_found;
 	uint64_t n_udf_complete = ns->n_client_udf_complete;
-	uint64_t n_udf_timeout = ns->n_client_udf_timeout;
 	uint64_t n_udf_error = ns->n_client_udf_error;
+	uint64_t n_udf_timeout = ns->n_client_udf_timeout;
 	uint64_t n_lua_read_success = ns->n_client_lua_read_success;
 	uint64_t n_lua_write_success = ns->n_client_lua_write_success;
 	uint64_t n_lua_delete_success = ns->n_client_lua_delete_success;
 	uint64_t n_lua_error = ns->n_client_lua_error;
 
-	if ((n_proxy_complete | n_proxy_timeout | n_proxy_error |
-			n_read_success | n_read_timeout | n_read_error | n_read_not_found |
-			n_write_success | n_write_timeout | n_write_error |
-			n_delete_success | n_delete_timeout | n_delete_error | n_delete_not_found |
-			n_udf_complete | n_udf_timeout | n_udf_error |
+	if ((n_proxy_complete | n_proxy_error | n_proxy_timeout |
+			n_read_success | n_read_error | n_read_timeout | n_read_not_found |
+			n_write_success | n_write_error | n_write_timeout |
+			n_delete_success | n_delete_error | n_delete_timeout | n_delete_not_found |
+			n_udf_complete | n_udf_error | n_udf_timeout |
 			n_lua_read_success | n_lua_write_success | n_lua_delete_success | n_lua_error) == 0) {
 		return;
 	}
 
 	cf_info(AS_INFO, "{%s} client: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu) write (%lu,%lu,%lu) delete (%lu,%lu,%lu,%lu) udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
 			ns->name,
-			n_proxy_complete, n_proxy_timeout, n_proxy_error,
-			n_read_success, n_read_timeout, n_read_error, n_read_not_found,
-			n_write_success, n_write_timeout, n_write_error,
-			n_delete_success, n_delete_timeout, n_delete_error, n_delete_not_found,
-			n_udf_complete, n_udf_timeout, n_udf_error,
+			n_proxy_complete, n_proxy_error, n_proxy_timeout,
+			n_read_success, n_read_error, n_read_timeout, n_read_not_found,
+			n_write_success, n_write_error, n_write_timeout,
+			n_delete_success, n_delete_error, n_delete_timeout, n_delete_not_found,
+			n_udf_complete, n_udf_error, n_udf_timeout,
 			n_lua_read_success, n_lua_write_success, n_lua_delete_success, n_lua_error
 			);
 }
@@ -534,22 +534,22 @@ void
 log_line_batch_sub(as_namespace* ns)
 {
 	uint64_t n_proxy_complete = ns->n_batch_sub_proxy_complete;
-	uint64_t n_proxy_timeout = ns->n_batch_sub_proxy_timeout;
 	uint64_t n_proxy_error = ns->n_batch_sub_proxy_error;
+	uint64_t n_proxy_timeout = ns->n_batch_sub_proxy_timeout;
 	uint64_t n_read_success = ns->n_batch_sub_read_success;
-	uint64_t n_read_timeout = ns->n_batch_sub_read_timeout;
 	uint64_t n_read_error = ns->n_batch_sub_read_error;
+	uint64_t n_read_timeout = ns->n_batch_sub_read_timeout;
 	uint64_t n_read_not_found = ns->n_batch_sub_read_not_found;
 
-	if ((n_proxy_complete | n_proxy_timeout | n_proxy_error |
-			n_read_success | n_read_timeout | n_read_error | n_read_not_found) == 0) {
+	if ((n_proxy_complete | n_proxy_error | n_proxy_timeout |
+			n_read_success | n_read_error | n_read_timeout | n_read_not_found) == 0) {
 		return;
 	}
 
 	cf_info(AS_INFO, "{%s} batch-sub: proxy (%lu,%lu,%lu) read (%lu,%lu,%lu,%lu)",
 			ns->name,
-			n_proxy_complete, n_proxy_timeout, n_proxy_error,
-			n_read_success, n_read_timeout, n_read_error, n_read_not_found
+			n_proxy_complete, n_proxy_error, n_proxy_timeout,
+			n_read_success, n_read_error, n_read_timeout, n_read_not_found
 			);
 }
 
@@ -608,21 +608,21 @@ void
 log_line_udf_sub(as_namespace* ns)
 {
 	uint64_t n_udf_complete = ns->n_udf_sub_udf_complete;
-	uint64_t n_udf_timeout = ns->n_udf_sub_udf_timeout;
 	uint64_t n_udf_error = ns->n_udf_sub_udf_error;
+	uint64_t n_udf_timeout = ns->n_udf_sub_udf_timeout;
 	uint64_t n_lua_read_success = ns->n_udf_sub_lua_read_success;
 	uint64_t n_lua_write_success = ns->n_udf_sub_lua_write_success;
 	uint64_t n_lua_delete_success = ns->n_udf_sub_lua_delete_success;
 	uint64_t n_lua_error = ns->n_udf_sub_lua_error;
 
-	if ((n_udf_complete | n_udf_timeout | n_udf_error |
+	if ((n_udf_complete | n_udf_error | n_udf_timeout |
 			n_lua_read_success | n_lua_write_success | n_lua_delete_success | n_lua_error) == 0) {
 		return;
 	}
 
 	cf_info(AS_INFO, "{%s} udf-sub: udf (%lu,%lu,%lu) lua (%lu,%lu,%lu,%lu)",
 			ns->name,
-			n_udf_complete, n_udf_timeout, n_udf_error,
+			n_udf_complete, n_udf_error, n_udf_timeout,
 			n_lua_read_success, n_lua_write_success, n_lua_delete_success, n_lua_error
 			);
 }
