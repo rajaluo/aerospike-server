@@ -315,8 +315,8 @@ typedef enum {
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
-	CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY,
-	CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY,
+	CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY, // TODO - unused?
+	CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY, // TODO - unused?
 	CASE_SERVICE_USE_QUEUE_PER_DEVICE,
 	CASE_SERVICE_WORK_DIRECTORY,
 	CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE,
@@ -690,15 +690,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
-		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
-		{ "migrate-read-sleep",				CASE_SERVICE_MIGRATE_READ_SLEEP },
 		{ "migrate-rx-lifetime-ms",			CASE_SERVICE_MIGRATE_RX_LIFETIME_MS },
 		{ "migrate-threads",				CASE_SERVICE_MIGRATE_THREADS },
-		{ "migrate-xmit-hwm",				CASE_SERVICE_MIGRATE_XMIT_HWM },
-		{ "migrate-xmit-lwm",				CASE_SERVICE_MIGRATE_XMIT_LWM },
-		{ "migrate-priority",				CASE_SERVICE_MIGRATE_PRIORITY },
-		{ "migrate-xmit-priority",			CASE_SERVICE_MIGRATE_XMIT_PRIORITY },
-		{ "migrate-xmit-sleep",				CASE_SERVICE_MIGRATE_XMIT_SLEEP },
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
@@ -759,6 +752,13 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "fb-health-good-pct",				CASE_SERVICE_FB_HEALTH_GOOD_PCT },
 		{ "fb-health-msg-per-burst",		CASE_SERVICE_FB_HEALTH_MSG_PER_BURST },
 		{ "fb-health-msg-timeout",			CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT },
+		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
+		{ "migrate-read-sleep",				CASE_SERVICE_MIGRATE_READ_SLEEP },
+		{ "migrate-xmit-hwm",				CASE_SERVICE_MIGRATE_XMIT_HWM },
+		{ "migrate-xmit-lwm",				CASE_SERVICE_MIGRATE_XMIT_LWM },
+		{ "migrate-priority",				CASE_SERVICE_MIGRATE_PRIORITY },
+		{ "migrate-xmit-priority",			CASE_SERVICE_MIGRATE_XMIT_PRIORITY },
+		{ "migrate-xmit-sleep",				CASE_SERVICE_MIGRATE_XMIT_SLEEP },
 		{ "nsup-auto-hwm",					CASE_SERVICE_NSUP_AUTO_HWM },
 		{ "nsup-auto-hwm-pct",				CASE_SERVICE_NSUP_AUTO_HWM_PCT },
 		{ "nsup-max-deletes",				CASE_SERVICE_NSUP_MAX_DELETES },
@@ -2576,6 +2576,9 @@ as_config_init(const char *config_file)
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
+			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
+				// The server isn't interested in this, but the XDR module is!
+				break;
 			case CASE_NAMESPACE_ALLOW_NONXDR_WRITES:
 				ns->ns_allow_nonxdr_writes = cfg_bool(&line);
 				if (ns->ns_allow_nonxdr_writes && ! g_xdr_supported) {
@@ -2587,9 +2590,6 @@ as_config_init(const char *config_file)
 				if (ns->ns_allow_xdr_writes && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
-				break;
-			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
-				// The server isn't interested in this, but the XDR module is!
 				break;
 			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB:
 				ns->batch_sub_benchmarks_active = true;

@@ -1866,45 +1866,41 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 int
 info_service_config_get(cf_dyn_buf *db)
 {
+	// Note - no user, group.
+
 	// Note - this isn't preceded by a semicolon.
-	cf_dyn_buf_append_string(db, "transaction-queues=");
-	cf_dyn_buf_append_int(db, g_config.n_transaction_queues);
+	cf_dyn_buf_append_string(db, "paxos-single-replica-limit=");
+	cf_dyn_buf_append_uint32(db, g_config.paxos_single_replica_limit);
 
+	info_append_string("pidfile", g_config.pidfile ? g_config.pidfile : "null", db);
+	info_append_int("service-threads", g_config.n_service_threads, db);
+	info_append_int("transaction-queues", g_config.n_transaction_queues, db);
 	info_append_int("transaction-threads-per-queue", g_config.n_transaction_threads_per_queue, db);
-	info_append_uint32("transaction-pending-limit", g_config.transaction_pending_limit, db);
-	info_append_int("migrate-threads", g_config.n_migrate_threads, db);
-	info_append_int("migrate-max-num-incoming", g_config.migrate_max_num_incoming, db);
-	info_append_int("migrate-rx-lifetime-ms", g_config.migrate_rx_lifetime_ms, db);
-	info_append_int("proto-fd-max", g_config.n_proto_fd_max, db);
-	info_append_int("proto-fd-idle-ms", g_config.proto_fd_idle_ms, db);
-	info_append_int("proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms, db);
-	info_append_uint32("transaction-retry-ms", g_config.transaction_retry_ms, db);
-	info_append_int("transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000), db);
-	info_append_bool("transaction-repeatable-read", g_config.transaction_repeatable_read, db);
-	info_append_uint32("ticker-interval", g_config.ticker_interval, db);
-	info_append_bool("log-local-time", cf_fault_is_using_local_time(), db);
-	info_append_bool("activate-hist-info", g_config.info_hist_active, db);
+	info_append_int("proto-fd-max", g_config.n_proto_fd_max, db); // TODO - rename to client-fd-max?
+
 	info_append_bool("activate-benchmarks-svc", g_config.svc_benchmarks_active, db);
-	info_append_bool("ldt-benchmarks", g_config.ldt_benchmarks, db);
-
-	info_append_uint32("scan-max-active", g_config.scan_max_active, db);
-	info_append_uint32("scan-max-done", g_config.scan_max_done, db);
-	info_append_uint32("scan-max-udf-transactions", g_config.scan_max_udf_transactions, db);
-	info_append_uint32("scan-threads", g_config.scan_threads, db);
-
-	info_append_int("batch-index-threads", g_config.n_batch_index_threads, db);
+	info_append_bool("activate-hist-info", g_config.info_hist_active, db);
+	info_append_bool("allow-inline-transactions", g_config.allow_inline_transactions, db);
 	info_append_int("batch-threads", g_config.n_batch_threads, db);
-	info_append_uint32("batch-max-requests", g_config.batch_max_requests, db);
 	info_append_uint32("batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue, db);
+	info_append_uint32("batch-max-requests", g_config.batch_max_requests, db);
 	info_append_uint32("batch-max-unused-buffers", g_config.batch_max_unused_buffers, db);
 	info_append_uint32("batch-priority", g_config.batch_priority, db);
-
+	info_append_int("batch-index-threads", g_config.n_batch_index_threads, db);
+	info_append_int("fabric-workers", g_config.n_fabric_workers, db);
+	info_append_bool("generation-disable", g_config.generation_disable, db);
+	info_append_uint32("hist-track-back", g_config.hist_track_back, db);
+	info_append_uint32("hist-track-slice", g_config.hist_track_slice, db);
+	info_append_string("hist-track-thresholds", g_config.hist_track_thresholds, db);
+	info_append_bool("info-threads", g_config.n_info_threads, db);
+	info_append_bool("ldt-benchmarks", g_config.ldt_benchmarks, db);
+	info_append_bool("log-local-time", cf_fault_is_using_local_time(), db);
+	info_append_int("migrate-max-num-incoming", g_config.migrate_max_num_incoming, db);
+	info_append_int("migrate-rx-lifetime-ms", g_config.migrate_rx_lifetime_ms, db);
+	info_append_int("migrate-threads", g_config.n_migrate_threads, db);
 	info_append_uint32("nsup-delete-sleep", g_config.nsup_delete_sleep, db);
 	info_append_uint32("nsup-period", g_config.nsup_period, db);
 	info_append_bool("nsup-startup-evict", g_config.nsup_startup_evict, db);
-
-	info_append_uint32("paxos-retransmit-period", g_config.paxos_retransmit_period, db);
-	info_append_uint32("paxos-single-replica-limit", g_config.paxos_single_replica_limit, db);
 	info_append_uint64("paxos-max-cluster-size", g_config.paxos_max_cluster_size, db);
 
 	info_append_string("paxos-protocol",
@@ -1922,38 +1918,30 @@ info_service_config_get(cf_dyn_buf *db)
 			     (AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined")))),
 			db);
 
-	info_append_bool("write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable, db);
+	info_append_uint32("paxos-retransmit-period", g_config.paxos_retransmit_period, db);
+	info_append_int("proto-fd-idle-ms", g_config.proto_fd_idle_ms, db);
+	info_append_int("proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms, db); // dynamic only
+	info_append_uint32("query-batch-size", g_config.query_bsize, db);
+	info_append_uint32("query-bufpool-size", g_config.query_bufpool_size, db);
+	info_append_bool("query-in-transaction-thread", g_config.query_in_transaction_thr, db);
+	info_append_uint32("query-long-q-max-size", g_config.query_long_q_max_size, db);
+	info_append_bool("query-pre-reserve-partitions", g_config.partitions_pre_reserved, db);
+	info_append_uint32("query-priority", g_config.query_priority, db);
+	info_append_uint64("query-priority-sleep-us", g_config.query_sleep_us, db);
+	info_append_uint64("query-rec-count-bound", g_config.query_rec_count_bound, db);
+	info_append_bool("query-req-in-query-thread", g_config.query_req_in_query_thread, db);
+	info_append_uint32("query-req-max-inflight", g_config.query_req_max_inflight, db);
+	info_append_uint32("query-short-q-max-size", g_config.query_short_q_max_size, db);
+	info_append_uint32("query-threads", g_config.query_threads, db);
+	info_append_uint32("query-threshold", g_config.query_threshold, db);
+	info_append_uint64("query-untracked-time-ms", g_config.query_untracked_time_ms, db);
+	info_append_uint32("query-worker-threads", g_config.query_worker_threads, db);
 	info_append_bool("respond-client-on-master-completion", g_config.respond_client_on_master_completion, db);
-	info_append_bool("info-threads", g_config.n_info_threads, db);
-	info_append_bool("allow-inline-transactions", g_config.allow_inline_transactions, db);
-	info_append_bool("use-queue-per-device", g_config.use_queue_per_device, db);
-	info_append_bool("snub-nodes", g_config.snub_nodes, db);
-
-	info_append_uint32("prole-extra-ttl", g_config.prole_extra_ttl, db);
-	info_append_int("max-msgs-per-type", (int)g_config.max_msgs_per_type, db);
-
-	info_append_int("service-threads", g_config.n_service_threads, db);
-	info_append_int("fabric-workers", g_config.n_fabric_workers, db);
-
-	if (g_config.pidfile) {
-		info_append_string("pidfile", g_config.pidfile, db);
-	}
-
-	if (g_config.generation_disable) {
-		info_append_bool("generation-disable", g_config.generation_disable, db);
-	}
-
-#ifdef MEM_COUNT
-	info_append_bool("memory-accounting", g_config.memory_accounting, db);
-#endif
-
-#ifdef USE_ASM
-	info_append_bool("asmalloc_enabled", g_config.asmalloc_enabled, db);
-#endif
-
-	info_append_uint64("udf-runtime-gmax-memory", g_config.udf_runtime_max_gmemory, db);
-	info_append_uint64("udf-runtime-max-memory", g_config.udf_runtime_max_memory, db);
-
+	info_append_bool("run-as-daemon", g_config.run_as_daemon, db);
+	info_append_uint32("scan-max-active", g_config.scan_max_active, db);
+	info_append_uint32("scan-max-done", g_config.scan_max_done, db);
+	info_append_uint32("scan-max-udf-transactions", g_config.scan_max_udf_transactions, db);
+	info_append_uint32("scan-threads", g_config.scan_threads, db);
 	info_append_uint32("sindex-builder-threads", g_config.sindex_builder_threads, db);
 
 	if (g_config.sindex_data_max_memory != ULONG_MAX) {
@@ -1963,21 +1951,29 @@ info_service_config_get(cf_dyn_buf *db)
 		info_append_string("sindex-data-max-memory", "ULONG_MAX", db);
 	}
 
-	info_append_uint32("query-threads", g_config.query_threads, db);
-	info_append_uint32("query-worker-threads", g_config.query_worker_threads, db);
-	info_append_uint32("query-priority", g_config.query_priority, db);
-	info_append_bool("query-in-transaction-thread", g_config.query_in_transaction_thr, db);
-	info_append_bool("query-req-in-query-thread", g_config.query_req_in_query_thread, db);
-	info_append_uint32("query-req-max-inflight", g_config.query_req_max_inflight, db);
-	info_append_uint32("query-bufpool-size", g_config.query_bufpool_size, db);
-	info_append_uint32("query-batch-size", g_config.query_bsize, db);
-	info_append_uint64("query-priority-sleep-us", g_config.query_sleep_us, db);
-	info_append_uint32("query-short-q-max-size", g_config.query_short_q_max_size, db);
-	info_append_uint32("query-long-q-max-size", g_config.query_long_q_max_size, db);
-	info_append_uint64("query-rec-count-bound", g_config.query_rec_count_bound, db);
-	info_append_uint32("query-threshold", g_config.query_threshold, db);
-	info_append_uint64("query-untracked-time-ms", g_config.query_untracked_time_ms, db);
-	info_append_bool("query-pre-reserve-partitions", g_config.partitions_pre_reserved, db);
+	info_append_bool("snub-nodes", g_config.snub_nodes, db);
+	info_append_uint32("ticker-interval", g_config.ticker_interval, db);
+	info_append_int("transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000), db);
+	info_append_uint32("transaction-pending-limit", g_config.transaction_pending_limit, db);
+	info_append_bool("transaction-repeatable-read", g_config.transaction_repeatable_read, db);
+	info_append_uint32("transaction-retry-ms", g_config.transaction_retry_ms, db);
+	info_append_uint64("udf-runtime-max-gmemory", g_config.udf_runtime_max_gmemory, db);
+	info_append_uint64("udf-runtime-max-memory", g_config.udf_runtime_max_memory, db);
+	info_append_bool("use-queue-per-device", g_config.use_queue_per_device, db);
+	// TODO - why no work-directory?
+	info_append_bool("write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable, db);
+
+#ifdef USE_ASM
+	info_append_bool("asmalloc_enabled", g_config.asmalloc_enabled, db);
+#endif
+
+	info_append_int("max-msgs-per-type", (int)g_config.max_msgs_per_type, db);
+
+#ifdef MEM_COUNT
+	info_append_bool("memory-accounting", g_config.memory_accounting, db);
+#endif
+
+	info_append_uint32("prole-extra-ttl", g_config.prole_extra_ttl, db);
 
 	return 0;
 }
@@ -1989,23 +1985,37 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	as_namespace *ns = as_namespace_get_byname(context);
 
 	if (! ns) {
-		cf_dyn_buf_append_string(db, "Namespace not found");
+		cf_dyn_buf_append_string(db, "namespace not found");
 		return -1;
 	}
 
 	// Note - this isn't preceded by a semicolon.
-	cf_dyn_buf_append_string(db, "memory-size=");
-	cf_dyn_buf_append_uint64(db, ns->memory_size);
+	cf_dyn_buf_append_string(db, "repl-factor=");
+	cf_dyn_buf_append_uint32(db, (uint32_t)ns->replication_factor);
 
-	info_append_int("high-water-disk-pct", (int)(ns->hwm_disk * 100), db);
-	info_append_int("high-water-memory-pct", (int)(ns->hwm_memory * 100), db);
-	info_append_uint32("evict-tenths-pct", ns->evict_tenths_pct, db);
-	info_append_uint32("evict-hist-buckets", ns->evict_hist_buckets, db);
-	info_append_int("stop-writes-pct", (int)(ns->stop_writes_pct * 100), db);
-	info_append_uint32("cold-start-evict-ttl", ns->cold_start_evict_ttl, db);
-	info_append_uint32("repl-factor", (uint32_t)ns->replication_factor, db);
+	info_append_uint64("memory-size", ns->memory_size, db);
 	info_append_uint64("default-ttl", ns->default_ttl, db);
-	info_append_uint64("max-ttl", ns->max_ttl, db);
+
+	info_append_bool("enable-xdr", ns->enable_xdr, db);
+	info_append_bool("sets-enable-xdr", ns->sets_enable_xdr, db);
+	info_append_bool("ns-forward-xdr-writes", ns->ns_forward_xdr_writes, db);
+	info_append_bool("allow-nonxdr-writes", ns->ns_allow_nonxdr_writes, db);
+	info_append_bool("allow-xdr-writes", ns->ns_allow_xdr_writes, db);
+
+	// Not true config, but act as config overrides:
+	cf_hist_track_get_settings(ns->read_hist, db);
+	cf_hist_track_get_settings(ns->query_hist, db);
+	cf_hist_track_get_settings(ns->udf_hist, db);
+	cf_hist_track_get_settings(ns->write_hist, db);
+
+	info_append_bool("activate-benchmarks-batch-sub", ns->batch_sub_benchmarks_active, db);
+	info_append_bool("activate-benchmarks-read", ns->read_benchmarks_active, db);
+	info_append_bool("activate-benchmarks-storage", ns->storage_benchmarks_active, db);
+	info_append_bool("activate-benchmarks-udf", ns->udf_benchmarks_active, db);
+	info_append_bool("activate-benchmarks-udf-sub", ns->udf_sub_benchmarks_active, db);
+	info_append_bool("activate-benchmarks-write", ns->write_benchmarks_active, db);
+	info_append_bool("activate-hist-proxy", ns->proxy_hist_active, db);
+	info_append_uint32("cold-start-evict-ttl", ns->cold_start_evict_ttl, db);
 
 	if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
 		info_append_string("conflict-resolution-policy", "generation", db);
@@ -2017,53 +2027,25 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_string("conflict-resolution-policy", "undefined", db);
 	}
 
-	info_append_bool("single-bin", ns->single_bin, db);
+	info_append_bool("data-in-index", ns->data_in_index, db);
 	info_append_bool("disallow-null-setname", ns->disallow_null_setname, db);
-
+	info_append_uint32("evict-hist-buckets", ns->evict_hist_buckets, db);
+	info_append_uint32("evict-tenths-pct", ns->evict_tenths_pct, db);
+	info_append_int("high-water-disk-pct", (int)(ns->hwm_disk * 100), db);
+	info_append_int("high-water-memory-pct", (int)(ns->hwm_memory * 100), db);
 	info_append_bool("ldt-enabled", ns->ldt_enabled, db);
+	info_append_uint32("ldt-gc-rate", ns->ldt_gc_sleep_us / 1000000, db);
 	info_append_uint32("ldt-page-size", ns->ldt_page_size, db);
-
-	info_append_bool("enable-xdr", ns->enable_xdr, db);
-	info_append_bool("sets-enable-xdr", ns->sets_enable_xdr, db);
-	info_append_bool("ns-forward-xdr-writes", ns->ns_forward_xdr_writes, db);
-	info_append_bool("allow-nonxdr-writes", ns->ns_allow_nonxdr_writes, db);
-	info_append_bool("allow-xdr-writes", ns->ns_allow_xdr_writes, db);
-
-	info_append_uint64("total-bytes-memory", ns->memory_size, db);
-
-	info_append_string("read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME(), db);
-	info_append_string("write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME(), db);
-
+	info_append_uint64("max-ttl", ns->max_ttl, db);
 	info_append_uint32("migrate-order", ns->migrate_order, db);
 	info_append_uint32("migrate-sleep", ns->migrate_sleep, db);
-
-	cf_hist_track_get_settings(ns->read_hist, db);
-	cf_hist_track_get_settings(ns->write_hist, db);
-	cf_hist_track_get_settings(ns->udf_hist, db);
-	cf_hist_track_get_settings(ns->query_hist, db);
-
-	info_append_bool("activate-hist-proxy", ns->proxy_hist_active, db);
-	info_append_bool("activate-benchmarks-read", ns->read_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-write", ns->write_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-udf", ns->udf_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-batch-sub", ns->batch_sub_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-udf-sub", ns->udf_sub_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-storage", ns->storage_benchmarks_active, db);
+	// Note - no obj-size-hist-max, too much to reverse rounding algorithm.
+	info_append_string("read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME(), db);
+	info_append_bool("single-bin", ns->single_bin, db);
+	info_append_int("stop-writes-pct", (int)(ns->stop_writes_pct * 100), db);
+	info_append_string("write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME(), db);
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-		info_append_uint64("total-bytes-disk", ns->ssd_size, db);
-		info_append_uint32("defrag-lwm-pct", ns->storage_defrag_lwm_pct, db);
-		info_append_uint32("defrag-queue-min", ns->storage_defrag_queue_min, db);
-		info_append_uint32("defrag-sleep", ns->storage_defrag_sleep, db);
-		info_append_int("defrag-startup-minimum", ns->storage_defrag_startup_minimum, db);
-		info_append_uint64("flush-max-ms", ns->storage_flush_max_us / 1000, db);
-		info_append_uint64("fsync-max-sec", ns->storage_fsync_max_us / 1000000, db);
-		info_append_uint64("max-write-cache", ns->storage_max_write_cache, db);
-		info_append_uint32("min-avail-pct", ns->storage_min_avail_pct, db);
-		info_append_uint32("post-write-queue", ns->storage_post_write_queue, db);
-
-		info_append_bool("data-in-memory", ns->storage_data_in_memory, db);
-
 		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
 			if (! ns->storage_devices[i]) {
 				break;
@@ -2081,9 +2063,22 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		}
 
 		info_append_uint64("filesize", ns->storage_filesize, db);
-		info_append_uint32("writethreads", ns->storage_write_threads, db);
-		info_append_uint64("writecache", ns->storage_max_write_cache, db);
-		info_append_uint32("obj-size-hist-max", ns->obj_size_hist_max, db);
+		info_append_string("scheduler-mode", ns->storage_scheduler_mode ? ns->storage_scheduler_mode : "null", db);
+		info_append_uint32("write-block-size", ns->storage_write_block_size, db);
+		info_append_bool("data-in-memory", ns->storage_data_in_memory, db);
+		info_append_bool("cold-start-empty", ns->storage_cold_start_empty, db);
+		info_append_uint32("defrag-lwm-pct", ns->storage_defrag_lwm_pct, db);
+		info_append_uint32("defrag-queue-min", ns->storage_defrag_queue_min, db);
+		info_append_uint32("defrag-sleep", ns->storage_defrag_sleep, db);
+		info_append_int("defrag-startup-minimum", ns->storage_defrag_startup_minimum, db);
+		info_append_bool("disable-odirect", ns->storage_disable_odirect, db);
+		info_append_bool("enable-osync", ns->storage_enable_osync, db);
+		info_append_uint64("flush-max-ms", ns->storage_flush_max_us / 1000, db);
+		info_append_uint64("fsync-max-sec", ns->storage_fsync_max_us / 1000000, db);
+		info_append_uint64("max-write-cache", ns->storage_max_write_cache, db);
+		info_append_uint32("min-avail-pct", ns->storage_min_avail_pct, db);
+		info_append_uint32("post-write-queue", ns->storage_post_write_queue, db);
+		info_append_uint32("write-threads", ns->storage_write_threads, db);
 	}
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_KV) {
@@ -2106,11 +2101,30 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 void
 info_network_info_config_get(cf_dyn_buf *db)
 {
+	// Service:
+
 	// Note - this isn't preceded by a semicolon.
 	cf_dyn_buf_append_string(db, "service-address=");
 	cf_dyn_buf_append_string(db, g_config.socket.addr);
 
 	info_append_int("service-port", g_config.socket.port, db);
+
+	if (g_config.external_address) {
+		info_append_string("access-address", g_config.external_address, db);
+		info_append_bool("virtual", g_config.is_external_address_virtual, db);
+	}
+
+	if (g_config.alternate_address) {
+		info_append_string("alternate-address", g_config.alternate_address, db);
+	}
+
+	if (g_config.network_interface_name) {
+		info_append_string("network-interface-name", g_config.network_interface_name, db);
+	}
+
+	info_append_bool("reuse-address", g_config.socket_reuse_addr, db);
+
+	// Some of heartbeat:
 
 	if (g_config.hb_mode == AS_HB_MODE_MESH) {
 		if (g_config.hb_init_addr) {
@@ -2134,24 +2148,15 @@ info_network_info_config_get(cf_dyn_buf *db)
 		}
 	}
 
-	if (g_config.network_interface_name) {
-		info_append_string("network-interface-name", g_config.network_interface_name, db);
-	}
+	// Fabric:
 
-	if (g_config.external_address) {
-		info_append_string("access-address", g_config.external_address, db);
-	}
-
-	if (g_config.alternate_address) {
-		info_append_string("alternate-address", g_config.alternate_address, db);
-	}
-
-	info_append_bool("reuse-address", g_config.socket_reuse_addr, db);
 	info_append_int("fabric-port", g_config.fabric_port, db);
 	info_append_bool("fabric-keepalive-enabled", g_config.fabric_keepalive_enabled, db);
 	info_append_int("fabric-keepalive-time", g_config.fabric_keepalive_time, db);
 	info_append_int("fabric-keepalive-intvl", g_config.fabric_keepalive_intvl, db);
 	info_append_int("fabric-keepalive-probes", g_config.fabric_keepalive_probes, db);
+
+	// Info:
 
 	// network-info-port is the asd info port variable/output, This was chosen
 	// because info-port conflicts with XDR config parameter. Ideally XDR should
@@ -5263,6 +5268,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		uint64_t inuse_disk_bytes = 0;
 		as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
 
+		info_append_uint64("total-bytes-disk", ns->ssd_size, db);
 		info_append_uint64("used-bytes-disk", inuse_disk_bytes, db);
 
 		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > inuse_disk_bytes)) ?
