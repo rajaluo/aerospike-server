@@ -4415,7 +4415,13 @@ packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t
 				return -AS_PROTO_RESULT_FAIL_PARAMETER;
 			}
 
-			cdt_container_builder_add_int64(&builder, find.rank);
+			uint32_t rank = find.rank;
+
+			if (result->type == RESULT_TYPE_REVRANK) {
+				rank = op->ele_count - rank - 1;
+			}
+
+			cdt_container_builder_add_int64(&builder, rank);
 		}
 	}
 	else {
@@ -4434,7 +4440,13 @@ packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t
 				return -AS_PROTO_RESULT_FAIL_PARAMETER;
 			}
 
-			cdt_container_builder_add_int64(&builder, find.rank);
+			uint32_t rank = find.rank;
+
+			if (result->type == RESULT_TYPE_REVRANK) {
+				rank = op->ele_count - rank - 1;
+			}
+
+			cdt_container_builder_add_int64(&builder, rank);
 		}
 	}
 
@@ -4504,12 +4516,6 @@ packed_map_op_get_pair_by_idx(const packed_map_op *op, cdt_payload *value, uint3
 static int
 packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order_index *ele_idx, uint32_t start, uint32_t count, cdt_result_data *result)
 {
-	cdt_container_builder builder;
-
-	if (! cdt_list_builder_start(&builder, result->alloc, count, (sizeof(uint64_t) + 1) * count)) {
-		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
-	}
-
 	if (! result->is_multi) {
 		uint32_t index = order_index_get(ele_idx, start);
 
@@ -4524,6 +4530,12 @@ packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order
 		as_bin_set_int(result->result, index);
 
 		return AS_PROTO_RESULT_OK;
+	}
+
+	cdt_container_builder builder;
+
+	if (! cdt_list_builder_start(&builder, result->alloc, count, (sizeof(uint64_t) + 1) * count)) {
+		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
 	if (op_is_k_ordered(op)) {
@@ -4562,7 +4574,14 @@ packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order
 				return -AS_PROTO_RESULT_FAIL_PARAMETER;
 			}
 
-			cdt_container_builder_add_int64(&builder, find.rank);
+			// find.rank is actually an index here because of SORT_BY_KEY above.
+			uint32_t index = find.rank;
+
+			if (result->type == RESULT_TYPE_REVINDEX) {
+				index = op->ele_count - index - 1;
+			}
+
+			cdt_container_builder_add_int64(&builder, index);
 		}
 	}
 
