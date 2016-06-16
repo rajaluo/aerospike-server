@@ -557,6 +557,7 @@ static bool order_index_set_sorted_with_offsets(order_index *ordidx, const offse
 static void order_index_remove_dup_idx(order_index *ordidx, uint32_t x);
 static uint32_t order_index_sorted_remove_dups(order_index *ordidx);
 
+static uint32_t order_index_find_idx(const order_index *ordidx, uint32_t idx, uint32_t start, uint32_t len);
 static bool order_index_sorted_has_dups(const order_index *ordidx);
 static inline void *order_index_get_mem(const order_index *ordidx, size_t index);
 static inline size_t order_index_size(const order_index *ordidx);
@@ -2964,15 +2965,11 @@ packed_map_op_find_index_by_key_unordered(const packed_map_op *op, const cdt_pay
 static void
 packed_map_op_find_rank_indexed_linear(const packed_map_op *op, map_ele_find *find, uint32_t start, uint32_t len)
 {
-	const order_index *value_idx = &op->pmi.value_idx;
+	uint32_t rank = order_index_find_idx(&op->pmi.value_idx, find->idx, start, len);
 
-	for (uint32_t i = start; i < start + len; i++) {
-		if (order_index_get(value_idx, i) == find->idx) {
-			find->found_value = true;
-			find->rank = i;
-
-			return;
-		}
+	if (rank < start + len) {
+		find->found_value = true;
+		find->rank = rank;
 	}
 }
 
@@ -4565,17 +4562,11 @@ packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order
 
 		for (uint32_t i = 0; i < count; i++) {
 			uint32_t idx = order_index_get(ele_idx, start + i);
-			map_ele_find find;
+			uint32_t index = order_index_find_idx(ordidx, idx, 0, op->ele_count);
 
-			map_ele_find_init_from_idx(&find, op, idx);
-			packed_map_op_find_rank_indexed_linear(op, &find, 0, op->ele_count);
-
-			if (! find.found_value) {
+			if (index >= op->ele_count) {
 				return -AS_PROTO_RESULT_FAIL_PARAMETER;
 			}
-
-			// find.rank is actually an index here because of SORT_BY_KEY above.
-			uint32_t index = find.rank;
 
 			if (result->type == RESULT_TYPE_REVINDEX) {
 				index = op->ele_count - index - 1;
@@ -6273,6 +6264,18 @@ order_index_sorted_remove_dups(order_index *ordidx)
 	ordidx->_.ele_count = ret_count;
 
 	return ret_count;
+}
+
+static uint32_t
+order_index_find_idx(const order_index *ordidx, uint32_t idx, uint32_t start, uint32_t len)
+{
+	for (uint32_t i = start; i < start + len; i++) {
+		if (order_index_get(ordidx, i) == idx) {
+			return i;
+		}
+	}
+
+	return start + len;
 }
 
 static bool
