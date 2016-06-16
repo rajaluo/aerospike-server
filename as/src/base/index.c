@@ -44,6 +44,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/stats.h"
 
 
 
@@ -386,7 +387,7 @@ as_index_get_vlock(as_index_tree *tree, cf_digest *keyd,
 	}
 
 	as_index_reserve(index_ref->r);
-	cf_atomic_int_incr(&g_config.global_record_ref_count);
+	cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 	pthread_mutex_unlock(&tree->lock);
 
@@ -442,7 +443,7 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 				// The element already exists, simply return it.
 
 				as_index_reserve(t);
-				cf_atomic_int_incr(&g_config.global_record_ref_count);
+				cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 				pthread_mutex_unlock(&tree->lock);
 
@@ -493,7 +494,7 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 	as_index *n = RESOLVE_H(n_h);
 
 	n->rc = 2; // one for create (eventually balanced by delete), one for caller
-	cf_atomic_int_add(&g_config.global_record_ref_count, 2);
+	cf_atomic64_add(&g_stats.global_record_ref_count, 2);
 
 	n->key = *keyd;
 
@@ -681,7 +682,7 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 		cf_arenax_free(tree->arena, r_h);
 	}
 
-	cf_atomic_int_decr(&g_config.global_record_ref_count);
+	cf_atomic64_decr(&g_stats.global_record_ref_count);
 
 	tree->elements--;
 
@@ -716,7 +717,7 @@ as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
 		cf_arenax_free(tree->arena, r_h);
 	}
 
-	cf_atomic_int_decr(&g_config.global_record_ref_count);
+	cf_atomic64_decr(&g_stats.global_record_ref_count);
 }
 
 
@@ -735,7 +736,7 @@ as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h,
 	}
 
 	as_index_reserve(r);
-	cf_atomic_int_incr(&g_config.global_record_ref_count);
+	cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 	v_a->indexes[v_a->pos].r = r;
 	v_a->indexes[v_a->pos].r_h = r_h;

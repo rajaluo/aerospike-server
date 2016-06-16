@@ -45,6 +45,7 @@
 #include "base/scan.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
+#include "base/stats.h"
 #include "base/thr_batch.h"
 #include "base/transaction.h"
 #include "base/xdr_serverside.h"
@@ -147,7 +148,7 @@ process_transaction(as_transaction *tr)
 
 			if ((rv = as_batch_direct_queue_task(tr, ns)) != 0) {
 				as_transaction_error(tr, ns, rv);
-				cf_atomic_int_incr(&g_config.batch_errors);
+				cf_atomic64_incr(&g_stats.batch_errors);
 			}
 		}
 		else if (as_transaction_is_query(tr)) {

@@ -50,6 +50,7 @@
 #include "base/proto.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
+#include "base/stats.h"
 #include "fabric/fabric.h"
 #include "fabric/paxos.h"
 #include "transaction/rw_request.h"
@@ -838,7 +839,7 @@ int
 proxy_retransmit_send(proxy_request* pr)
 {
 	while (true) {
-		g_config.proxy_retry++;
+		g_stats.proxy_retry++;
 
 		msg_incr_ref(pr->fab_msg);
 

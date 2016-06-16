@@ -119,6 +119,7 @@
 #include "base/as_stap.h"
 #include "base/datamodel.h"
 #include "base/secondary_index.h"
+#include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/udf_memtracker.h"
@@ -1610,7 +1611,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 			as_storage_record_close(r, &rd);
 			as_record_done(&r_ref, ns);
 			query_release_partition(qtr, rsv);
-			cf_atomic64_incr(&g_config.query_false_positives);
+			cf_atomic64_incr(&g_stats.query_false_positives);
 			ASD_QUERY_IO_NOTMATCH(nodeid, qtr->trid);
 			return AS_QUERY_OK;
 		}
@@ -1776,7 +1777,7 @@ agg_record_matches(void *udata, udf_record *urecord, void *key_data)
 	as_sindex_key *skey        = (void *)key_data;
 	qtr->n_read_success++;
 	if (query_record_matches(qtr, urecord->rd, skey) == false) {
-		cf_atomic64_incr(&g_config.query_false_positives); // PUT IT INSIDE PRE_CHECK
+		cf_atomic64_incr(&g_stats.query_false_positives); // PUT IT INSIDE PRE_CHECK
 		return false;
 	}
 	return true;

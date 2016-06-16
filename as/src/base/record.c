@@ -46,6 +46,7 @@
 #include "base/ldt.h"
 #include "base/rec_props.h"
 #include "base/secondary_index.h"
+#include "base/stats.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
 
@@ -298,9 +299,8 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 		as_record_destroy(r_ref->r, ns);
 		cf_arenax_free(ns->arena, r_ref->r_h);
 	}
-	cf_atomic_int_decr(&g_config.global_record_ref_count);
 
-	return;
+	cf_atomic64_decr(&g_stats.global_record_ref_count);
 }
 
 // Called only for data-in-memory multi-bin, with no key currently stored.

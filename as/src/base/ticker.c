@@ -51,6 +51,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/secondary_index.h"
+#include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
@@ -235,7 +236,7 @@ log_line_in_progress()
 			as_nsup_queue_get_size(),
 			rw_request_hash_count(),
 			as_proxy_hash_count(),
-			g_config.global_record_ref_count
+			g_stats.global_record_ref_count
 			);
 }
 
@@ -243,12 +244,12 @@ log_line_in_progress()
 void
 log_line_fds()
 {
-	uint64_t n_proto_fds_opened = g_config.proto_connections_opened;
-	uint64_t n_proto_fds_closed = g_config.proto_connections_closed;
-	uint64_t n_hb_fds_opened = g_config.heartbeat_connections_opened;
-	uint64_t n_hb_fds_closed = g_config.heartbeat_connections_closed;
-	uint64_t n_fabric_fds_opened = g_config.fabric_connections_opened;
-	uint64_t n_fabric_fds_closed = g_config.fabric_connections_closed;
+	uint64_t n_proto_fds_opened = g_stats.proto_connections_opened;
+	uint64_t n_proto_fds_closed = g_stats.proto_connections_closed;
+	uint64_t n_hb_fds_opened = g_stats.heartbeat_connections_opened;
+	uint64_t n_hb_fds_closed = g_stats.heartbeat_connections_closed;
+	uint64_t n_fabric_fds_opened = g_stats.fabric_connections_opened;
+	uint64_t n_fabric_fds_closed = g_stats.fabric_connections_closed;
 
 	uint64_t n_proto_fds_open = n_proto_fds_opened - n_proto_fds_closed;
 	uint64_t n_hb_fds_open = n_hb_fds_opened - n_hb_fds_closed;
@@ -266,12 +267,7 @@ void
 log_line_heartbeat()
 {
 	cf_info(AS_INFO, "   heartbeat-received: self %lu foreign %lu",
-			g_config.heartbeat_received_self, g_config.heartbeat_received_foreign
-			);
-
-	// TODO - do we still need this ???
-	cf_info(AS_INFO, "   heartbeat-stats: %s",
-			as_hb_stats(false)
+			g_stats.heartbeat_received_self, g_stats.heartbeat_received_foreign
 			);
 }
 
@@ -279,10 +275,10 @@ log_line_heartbeat()
 void
 log_line_early_fail()
 {
-	uint64_t n_demarshal = g_config.n_demarshal_error;
-	uint64_t n_tsvc_client = g_config.n_tsvc_client_error;
-	uint64_t n_tsvc_batch_sub = g_config.n_tsvc_batch_sub_error;
-	uint64_t n_tsvc_udf_sub = g_config.n_tsvc_udf_sub_error;
+	uint64_t n_demarshal = g_stats.n_demarshal_error;
+	uint64_t n_tsvc_client = g_stats.n_tsvc_client_error;
+	uint64_t n_tsvc_batch_sub = g_stats.n_tsvc_batch_sub_error;
+	uint64_t n_tsvc_udf_sub = g_stats.n_tsvc_udf_sub_error;
 
 	if ((n_demarshal |
 			n_tsvc_client |
@@ -303,9 +299,9 @@ log_line_early_fail()
 void
 log_line_batch_index()
 {
-	uint64_t n_complete = g_config.batch_index_complete;
-	uint64_t n_timeout = g_config.batch_index_timeout;
-	uint64_t n_error = g_config.batch_index_errors;
+	uint64_t n_complete = g_stats.batch_index_complete;
+	uint64_t n_timeout = g_stats.batch_index_timeout;
+	uint64_t n_error = g_stats.batch_index_errors;
 
 	if ((n_complete | n_timeout | n_error) == 0) {
 		return;

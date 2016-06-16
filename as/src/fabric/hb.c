@@ -52,6 +52,7 @@
 #include "util.h"
 
 #include "base/cfg.h"
+#include "base/stats.h"
 #include "fabric/fabric.h"
 
 
@@ -354,6 +355,7 @@ as_hb_error(as_hb_err_type type)
  *  Return a string summarizing the number of heartbeat-related errors of each type.
  *  Use long format messages if "verbose" is true, otherwise use short format messages.
  */
+// TODO - unused (was in log ticker), can make available via info if necessary.
 const char *
 as_hb_stats(bool verbose)
 {
@@ -1077,7 +1079,7 @@ void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 				as_hb_error(AS_HB_ERR_MESH_CONNECT_FAIL);
 				cf_debug(AS_HB, "failed - initiated connection to mesh host at %s:%d socket %d from %s:%d", e->host, e->port, s.sock,some_addr, ntohs(addr_in.sin_port));
 			}
-			cf_atomic_int_incr(&g_config.heartbeat_connections_opened);
+			cf_atomic64_incr(&g_stats.heartbeat_connections_opened);
 
 			// simply adds the socket to the epoll list
 			// if this call fails, sock has been eaten.
@@ -1569,7 +1571,7 @@ as_hb_endpoint_add(int socket, bool isudp, cf_node node_id)
 	/* Make the socket nonblocking */
 	if (-1 == cf_socket_set_nonblocking(socket)) {
 		cf_info(AS_HB, "unable to set client socket %d to nonblocking mode: %s", socket, cf_strerror(errno));
-		cf_atomic_int_incr(&g_config.heartbeat_connections_closed);
+		cf_atomic64_incr(&g_stats.heartbeat_connections_closed);
 		return(-1);
 	}
 	cf_socket_set_nodelay(socket);
@@ -1728,7 +1730,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 			}
 
 			if (node == g_config.self_node) {
-				cf_atomic_int_incr(&g_config.heartbeat_received_self);
+				cf_atomic64_incr(&g_stats.heartbeat_received_self);
 				return;
 			}
 
@@ -1770,7 +1772,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 				}
 			}
 
-			cf_atomic_int_incr(&g_config.heartbeat_received_foreign);
+			cf_atomic64_incr(&g_stats.heartbeat_received_foreign);
 
 			// If this node encounters other nodes at startup, prevent it from
 			// switching to a single-node cluster.
@@ -2184,7 +2186,7 @@ as_hb_thr(void *arg)
 
 				cf_debug(AS_HB, "new connection from %s:%d", cpaddr, caddr.sin_port);
 
-				cf_atomic_int_incr(&g_config.heartbeat_connections_opened);
+				cf_atomic64_incr(&g_stats.heartbeat_connections_opened);
 				if (0 != as_hb_endpoint_add(csock, false /*is not udp*/, 0 /*node id unknown until pulse arrives*/)) {
 					close(csock);
 					continue;
@@ -2201,7 +2203,7 @@ CloseSocket:
 						as_hb_nodes_discovered_hash_del_conn(g_hb.endpoint_txlist_node_id[fd], fd);
 					}
 					g_hb.endpoint_txlist_node_id[fd] = 0;
-					cf_atomic_int_incr(&g_config.heartbeat_connections_closed);
+					cf_atomic64_incr(&g_stats.heartbeat_connections_closed);
 					mesh_host_list_remove_fd(fd);
 					// reusing ev as it is ignored for EPOLL_CTL_DEL
 					if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, fd, &ev)) {

@@ -69,6 +69,7 @@
 #include "base/xdr_serverside.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
+#include "base/stats.h"
 #include "base/system_metadata.h"
 #include "base/udf_cask.h"
 #include "base/xdr_serverside.h"
@@ -109,6 +110,11 @@ int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
 void as_storage_show_wblock_stats(as_namespace *ns);
 void as_storage_summarize_wblock_stats(as_namespace *ns);
 int as_storage_analyze_wblock(as_namespace* ns, int device_index, uint32_t wblock_id);
+
+
+// This is here for now, until such time as a separate .c file is worth it.
+as_stats g_stats;
+
 
 static cf_queue *g_info_work_q = 0;
 
@@ -365,59 +371,59 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_int("delete_queue", as_nsup_queue_get_size(), db);
 	// TODO - why no rw_request hash count?
 	info_append_int("proxy_in_progress", as_proxy_hash_count(), db);
-	info_append_uint64("record_refs", g_config.global_record_ref_count, db);
+	info_append_uint64("record_refs", g_stats.global_record_ref_count, db);
 
 	// TODO - why no heartbeat or fabric connections?
-	info_append_uint64("client_connections", g_config.proto_connections_opened - g_config.proto_connections_closed, db);
+	info_append_uint64("client_connections", g_stats.proto_connections_opened - g_stats.proto_connections_closed, db);
 
-	info_append_uint64("heartbeat_received_self", g_config.heartbeat_received_self, db);
-	info_append_uint64("heartbeat_received_foreign", g_config.heartbeat_received_foreign, db);
+	info_append_uint64("heartbeat_received_self", g_stats.heartbeat_received_self, db);
+	info_append_uint64("heartbeat_received_foreign", g_stats.heartbeat_received_foreign, db);
 
-	info_append_uint64("transactions", g_config.proto_transactions, db); // not in ticker
-	info_append_uint64("reaped_fds", g_config.reaper_count, db); // not in ticker
+	info_append_uint64("transactions", g_stats.proto_transactions, db); // not in ticker
+	info_append_uint64("reaped_fds", g_stats.reaper_count, db); // not in ticker
 
-	info_append_uint64("proxy_retry", g_config.proxy_retry, db); // not in ticker
+	info_append_uint64("proxy_retry", g_stats.proxy_retry, db); // not in ticker
 
-	info_append_uint64("demarshal-error", g_config.n_demarshal_error, db);
-	info_append_uint64("tsvc-client-error", g_config.n_tsvc_client_error, db);
-	info_append_uint64("tsvc-batch-sub-error", g_config.n_tsvc_batch_sub_error, db);
-	info_append_uint64("tsvc-udf-sub-error", g_config.n_tsvc_udf_sub_error, db);
+	info_append_uint64("demarshal-error", g_stats.n_demarshal_error, db);
+	info_append_uint64("tsvc-client-error", g_stats.n_tsvc_client_error, db);
+	info_append_uint64("tsvc-batch-sub-error", g_stats.n_tsvc_batch_sub_error, db);
+	info_append_uint64("tsvc-udf-sub-error", g_stats.n_tsvc_udf_sub_error, db);
 
-	info_append_uint64("batch_index_initiate", g_config.batch_index_initiate, db); // not in ticker
+	info_append_uint64("batch_index_initiate", g_stats.batch_index_initiate, db); // not in ticker
 
 	cf_dyn_buf_append_string(db, ";batch_index_queue=");
 	as_batch_queues_info(db); // not in ticker
 
-	info_append_uint64("batch_index_complete", g_config.batch_index_complete, db);
-	info_append_uint64("batch_index_timeout", g_config.batch_index_timeout, db);
-	info_append_uint64("batch_index_errors", g_config.batch_index_errors, db);
+	info_append_uint64("batch_index_complete", g_stats.batch_index_complete, db);
+	info_append_uint64("batch_index_timeout", g_stats.batch_index_timeout, db);
+	info_append_uint64("batch_index_errors", g_stats.batch_index_errors, db);
 
 	// Everything below is not in ticker...
 
 	info_append_int("batch_index_unused_buffers", as_batch_unused_buffers(), db);
-	info_append_uint64("batch_index_huge_buffers", g_config.batch_index_huge_buffers, db);
-	info_append_uint64("batch_index_created_buffers", g_config.batch_index_created_buffers, db);
-	info_append_uint64("batch_index_destroyed_buffers", g_config.batch_index_destroyed_buffers, db);
+	info_append_uint64("batch_index_huge_buffers", g_stats.batch_index_huge_buffers, db);
+	info_append_uint64("batch_index_created_buffers", g_stats.batch_index_created_buffers, db);
+	info_append_uint64("batch_index_destroyed_buffers", g_stats.batch_index_destroyed_buffers, db);
 
-	info_append_uint64("batch_initiate", g_config.batch_initiate, db);
+	info_append_uint64("batch_initiate", g_stats.batch_initiate, db);
 	info_append_int("batch_queue", as_batch_direct_queue_size(), db);
-	info_append_uint64("batch_timeout", g_config.batch_timeout, db);
-	info_append_uint64("batch_errors", g_config.batch_errors, db);
+	info_append_uint64("batch_timeout", g_stats.batch_timeout, db);
+	info_append_uint64("batch_errors", g_stats.batch_errors, db);
 
 	info_append_int("scans_active", as_scan_get_active_job_count(), db);
 
 	info_append_uint32("query_short_running", g_query_short_running, db);
 	info_append_uint32("query_long_running", g_query_long_running, db);
 
-	info_append_uint64("sindex_ucgarbage_found", g_config.query_false_positives, db);
-	info_append_uint64("sindex_gc_locktimedout", g_config.sindex_gc_timedout, db);
-	info_append_uint64("sindex_gc_inactivity_dur", g_config.sindex_gc_inactivity_dur, db);
-	info_append_uint64("sindex_gc_activity_dur", g_config.sindex_gc_activity_dur, db);
-	info_append_uint64("sindex_gc_list_creation_time", g_config.sindex_gc_list_creation_time, db);
-	info_append_uint64("sindex_gc_list_deletion_time", g_config.sindex_gc_list_deletion_time, db);
-	info_append_uint64("sindex_gc_objects_validated", g_config.sindex_gc_objects_validated, db);
-	info_append_uint64("sindex_gc_garbage_found", g_config.sindex_gc_garbage_found, db);
-	info_append_uint64("sindex_gc_garbage_cleaned", g_config.sindex_gc_garbage_cleaned, db);
+	info_append_uint64("sindex_ucgarbage_found", g_stats.query_false_positives, db);
+	info_append_uint64("sindex_gc_locktimedout", g_stats.sindex_gc_timedout, db);
+	info_append_uint64("sindex_gc_inactivity_dur", g_stats.sindex_gc_inactivity_dur, db);
+	info_append_uint64("sindex_gc_activity_dur", g_stats.sindex_gc_activity_dur, db);
+	info_append_uint64("sindex_gc_list_creation_time", g_stats.sindex_gc_list_creation_time, db);
+	info_append_uint64("sindex_gc_list_deletion_time", g_stats.sindex_gc_list_deletion_time, db);
+	info_append_uint64("sindex_gc_objects_validated", g_stats.sindex_gc_objects_validated, db);
+	info_append_uint64("sindex_gc_garbage_found", g_stats.sindex_gc_garbage_found, db);
+	info_append_uint64("sindex_gc_garbage_cleaned", g_stats.sindex_gc_garbage_cleaned, db);
 
 	char paxos_principal[19];
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
@@ -442,8 +448,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_int("partition_object_count", ps.n_objects, db);
 	info_append_int("partition_ref_count", ps.n_ref_count, db);
 
-	info_append_uint64("fabric_msgs_sent", g_config.fabric_msgs_sent, db);
-	info_append_uint64("fabric_msgs_rcvd", g_config.fabric_msgs_rcvd, db);
+	info_append_uint64("fabric_msgs_sent", g_stats.fabric_msgs_sent, db);
+	info_append_uint64("fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd, db);
 
 	cf_dyn_buf_append_string(db, ";");
 	as_xdr_get_stats(name, db);

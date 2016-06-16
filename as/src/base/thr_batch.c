@@ -46,6 +46,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/stats.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
 
@@ -296,7 +297,7 @@ batch_worker(void* udata)
 
 	// Check for timeouts.
 	if (btr->end_time != 0 && cf_getns() > btr->end_time) {
-		cf_atomic_int_incr(&g_config.batch_timeout);
+		cf_atomic64_incr(&g_stats.batch_timeout);
 
 		if (btr->fd_h) {
 			as_msg_send_reply(btr->fd_h, AS_PROTO_RESULT_FAIL_TIMEOUT,
@@ -352,7 +353,7 @@ as_batch_direct_init()
 int
 as_batch_direct_queue_task(as_transaction* tr, as_namespace *ns)
 {
-	cf_atomic_int_incr(&g_config.batch_initiate);
+	cf_atomic64_incr(&g_stats.batch_initiate);
 
 	if (g_config.n_batch_threads <= 0) {
 		cf_warning(AS_BATCH, "batch-threads has been disabled.");

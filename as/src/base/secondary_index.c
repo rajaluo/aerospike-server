@@ -104,6 +104,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/stats.h"
 #include "base/system_metadata.h"
 #include "base/thr_sindex.h"
 #include "geospatial/geospatial.h"
@@ -257,7 +258,7 @@ as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 
 	int timeout_ms = 2;
 	if (as_partition_reserve_migrate_timeout(ns, pid, &rsv, 0, timeout_ms) != 0 ) {
-		cf_atomic_int_add(&g_config.sindex_gc_timedout, 1);
+		cf_atomic64_incr(&g_stats.sindex_gc_timedout);
 		return AS_SINDEX_GC_SKIP_ITERATION;
 	}
 

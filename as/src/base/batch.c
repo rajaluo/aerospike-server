@@ -33,6 +33,7 @@
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/security.h"
+#include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "jem.h"
@@ -174,10 +175,10 @@ as_batch_send_error(as_transaction* btr, int result_code)
 	btr->msgp = 0;
 
 	if (result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-		cf_atomic_int_incr(&g_config.batch_index_timeout);
+		cf_atomic64_incr(&g_stats.batch_index_timeout);
 	}
 	else {
-		cf_atomic_int_incr(&g_config.batch_index_errors);
+		cf_atomic64_incr(&g_stats.batch_index_errors);
 	}
 	return status;
 }
@@ -202,7 +203,7 @@ as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 		// Socket error. Close socket.
 		as_end_of_transaction_force_close(shared->fd_h);
 		shared->fd_h = 0;
-		cf_atomic_int_incr(&g_config.batch_index_errors);
+		cf_atomic64_incr(&g_stats.batch_index_errors);
 	}
 }
 
@@ -244,14 +245,14 @@ as_batch_send_final(as_batch_shared* shared)
 
 	// Check final return code in order to update statistics.
 	if (status == 0 && shared->result_code == 0) {
-		cf_atomic_int_incr(&g_config.batch_index_complete);
+		cf_atomic64_incr(&g_stats.batch_index_complete);
 	}
 	else {
 		if (shared->result_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-			cf_atomic_int_incr(&g_config.batch_index_timeout);
+			cf_atomic64_incr(&g_stats.batch_index_timeout);
 		}
 		else {
-			cf_atomic_int_incr(&g_config.batch_index_errors);
+			cf_atomic64_incr(&g_stats.batch_index_errors);
 		}
 	}
 }
@@ -298,13 +299,13 @@ as_batch_worker(void* udata)
 			as_batch_send_buffer(shared, buffer);
 
 			if (as_buffer_pool_push_limit(&batch_buffer_pool, buffer, buffer->capacity, g_config.batch_max_unused_buffers) != 0) {
-				cf_atomic_int_incr(&g_config.batch_index_destroyed_buffers);
+				cf_atomic64_incr(&g_stats.batch_index_destroyed_buffers);
 			}
 		}
 		else {
 			// Server error buffers should not be put into buffer pool.
 			cf_free(buffer);
-			cf_atomic_int_incr(&g_config.batch_index_destroyed_buffers);
+			cf_atomic64_incr(&g_stats.batch_index_destroyed_buffers);
 		}
 
 		// Wait till all transactions have been received before sending
@@ -448,7 +449,7 @@ as_batch_buffer_create(uint32_t size, int arena)
 #ifdef USE_JEM
 	jem_set_arena(orig_arena);
 #endif
-	cf_atomic_int_incr(&g_config.batch_index_created_buffers);
+	cf_atomic64_incr(&g_stats.batch_index_created_buffers);
 	return buffer;
 }
 
@@ -462,7 +463,7 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 		// Requested size is greater than fixed buffer size.
 		// Allocate new buffer, but don't put back into pool.
 		buffer = as_batch_buffer_create(mem_size, batch_buffer_arena_huge);
-		cf_atomic_int_incr(&g_config.batch_index_huge_buffers);
+		cf_atomic64_incr(&g_stats.batch_index_huge_buffers);
 	}
 	else {
 		// Pop existing buffer from queue.
@@ -647,7 +648,7 @@ as_batch_init()
 int
 as_batch_queue_task(as_transaction* btr)
 {
-	uint64_t counter = cf_atomic_int_incr(&g_config.batch_index_initiate);
+	uint64_t counter = cf_atomic64_incr(&g_stats.batch_index_initiate);
 	uint32_t thread_size = batch_thread_pool.thread_size;
 
 	if (thread_size == 0 || thread_size > MAX_BATCH_THREADS) {

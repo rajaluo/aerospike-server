@@ -283,14 +283,7 @@ typedef struct as_config_s {
 	uint32_t		sindex_builder_threads;   // Secondary index builder thread pool size
 	uint64_t		sindex_data_max_memory;   // Maximum memory for secondary index trees
 	cf_atomic64	    sindex_data_memory_used;  // Maximum memory for secondary index trees
-	cf_atomic_int   sindex_gc_timedout;           // Number of time sindex gc iteration timed out waiting for partition lock
-	uint64_t        sindex_gc_inactivity_dur;     // Cumulative sum of sindex GC thread inactivity.
-	uint64_t        sindex_gc_activity_dur;       // Cumulative sum of sindex gc thread activity.
-	uint64_t        sindex_gc_list_creation_time; // Cumulative sum of list creation phase in sindex GC
-	uint64_t        sindex_gc_list_deletion_time; // Cumulative sum of list deletion phase in sindex GC
-	uint64_t        sindex_gc_garbage_found;      // Amount of garbage found during list creation phase
-	uint64_t        sindex_gc_garbage_cleaned;    // Amount of garbage deleted during list deletion phase
-	uint64_t        sindex_gc_objects_validated;  // Cumulative sum of sindex objects validated
+
 	bool            sindex_gc_enable_histogram;
 	histogram      *_sindex_gc_validate_obj_hist; // Histogram to track time taken to validate sindex object
 	histogram      *_sindex_gc_delete_obj_hist;   // Histogram to track time taken to delete sindex object by GC
@@ -300,53 +293,11 @@ typedef struct as_config_s {
 	bool                partitions_pre_reserved;  // If true query will reserve all the partitions upfront 
 												  // before processing query. Default - FALSE
 
-	cf_atomic64			query_false_positives;
 	bool				query_enable_histogram;
 
 	uint64_t			udf_runtime_max_memory; // Maximum runtime memory allowed for per UDF
 	uint64_t			udf_runtime_max_gmemory; // maximum runtime memory alloed for all UDF
 	cf_atomic_int		udf_runtime_gmemory_used; // Current runtime memory reserve by per UDF - BUG if global should be 64?
-
-	/*
-	** STATISTICS
-	*/
-	cf_atomic_int		fabric_msgs_sent;
-	cf_atomic_int		fabric_msgs_rcvd;
-
-	cf_atomic_int		proto_transactions;
-	cf_atomic_int		proto_connections_opened;
-	cf_atomic_int		proto_connections_closed;
-	cf_atomic_int		fabric_connections_opened;
-	cf_atomic_int		fabric_connections_closed;
-	cf_atomic_int		heartbeat_connections_opened;
-	cf_atomic_int		heartbeat_connections_closed;
-	cf_atomic_int		heartbeat_received_self;
-	cf_atomic_int		heartbeat_received_foreign;
-
-	cf_atomic_int		global_record_ref_count;
-	cf_atomic_int		reaper_count;
-
-	uint64_t			proxy_retry; // incremented only in proxy retransmit thread
-
-	cf_atomic64			n_demarshal_error;
-	cf_atomic64			n_tsvc_client_error;
-	cf_atomic64			n_tsvc_batch_sub_error;
-	cf_atomic64			n_tsvc_udf_sub_error;
-
-	cf_atomic_int		batch_index_initiate; // not (just) a statistic
-
-	cf_atomic_int		batch_index_complete;
-	cf_atomic_int		batch_index_timeout;
-	cf_atomic_int		batch_index_errors;
-
-	cf_atomic_int		batch_index_huge_buffers;
-	cf_atomic_int		batch_index_created_buffers;
-	cf_atomic_int		batch_index_destroyed_buffers;
-
-	// "Old" batch.
-	cf_atomic_int		batch_initiate;
-	cf_atomic_int		batch_timeout;
-	cf_atomic_int		batch_errors;
 
 	// For now all tracked histograms are namespace scoped, but these controls
 	// are still global:

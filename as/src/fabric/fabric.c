@@ -56,6 +56,7 @@
 #include "util.h"
 
 #include "base/cfg.h"
+#include "base/stats.h"
 #include "fabric/hb.h"
 
 
@@ -565,7 +566,7 @@ fabric_buffer_release(fabric_buffer *fb)
 
 		close(fb->fd);
 		fb->fd = -1;
-		cf_atomic_int_incr(&g_config.fabric_connections_closed);
+		cf_atomic64_incr(&g_stats.fabric_connections_closed);
 
 		// No longer assigned to a worker.
 		fb->worker_id = -1;
@@ -625,7 +626,7 @@ fabric_buffer_write_fill( fabric_buffer *fb )
 					cf_debug(AS_FABRIC, "msg fillbuf returned fail, allocating new size %zu", remain);
 					fb->w_buf = cf_malloc(remain);
 					if (fb->w_buf) {
-						cf_atomic_int_incr(&g_config.fabric_msgs_sent);
+						cf_atomic64_incr(&g_stats.fabric_msgs_sent);
 						msg_fillbuf(m, fb->w_buf, &remain);
 						fb->w_in_place = false;
 						fb->w_total_len = remain;
@@ -643,7 +644,7 @@ fabric_buffer_write_fill( fabric_buffer *fb )
 
 				return(true);
 			}
-			cf_atomic_int_incr(&g_config.fabric_msgs_sent);
+			cf_atomic64_incr(&g_stats.fabric_msgs_sent);
 			fb->w_total_len += remain;
 			as_fabric_msg_put(m);
 		}
@@ -663,7 +664,7 @@ bool
 fabric_buffer_set_write_msg( fabric_buffer *fb, msg *m )
 {
 	// statistic - doesn't really show the message went out, though
-	cf_atomic_int_incr(&g_config.fabric_msgs_sent);
+	cf_atomic64_incr(&g_stats.fabric_msgs_sent);
 
 	// Parse out the message to the inplace buffer
 	fb->w_len = 0;
@@ -756,7 +757,7 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 		return(-1);
 	}
 
-	cf_atomic_int_incr(&g_config.fabric_connections_opened);
+	cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
 	// Create a fabric buffer to go along with the file descriptor
 	fabric_buffer *fb = fabric_buffer_create(fd);
@@ -1149,7 +1150,7 @@ Next:
 		cf_detail(AS_FABRIC, "msg_read: received msg: type %d node %"PRIx64, m->type, fb->fne->node);
 
 		// statistic - received a message.
-		cf_atomic_int_incr(&g_config.fabric_msgs_rcvd);
+		cf_atomic64_incr(&g_stats.fabric_msgs_rcvd);
 		// and it was a good read
 		fb->fne->good_read_counter = 0;
 
@@ -1524,7 +1525,7 @@ fabric_accept_fn(void *argv)
 			continue;
 		}
 
-		cf_atomic_int_incr(&g_config.fabric_connections_opened);
+		cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
 		/* Create new fabric buffer, but don't yet know
 		   the remote endpoint, so the FNE is not associated yet */
@@ -1572,7 +1573,7 @@ fabric_note_server_fn(void *argv)
 			continue;
 		}
 
-		cf_atomic_int_incr(&g_config.fabric_connections_opened);
+		cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
 		cf_debug(AS_FABRIC, "Notification server: received connect from index %d", fd_idx);
 

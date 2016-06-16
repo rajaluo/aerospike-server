@@ -60,6 +60,8 @@
 #include "base/job_manager.h"
 #include "base/monitor.h"
 #include "base/secondary_index.h"
+#include "base/stats.h"
+
 
 int as_sbld_build(as_sindex* si);
 
@@ -395,9 +397,9 @@ as_sindex__defrag_fn(void *udata)
 			// Sleep for remainder of defrag period
 			curr_time                        = cf_getms();
 			uint64_t diff                    = curr_time - last_time;
-			g_config.sindex_gc_activity_dur += diff;
+			g_stats.sindex_gc_activity_dur  += diff;
 			if (diff < defrag_period) {
-				g_config.sindex_gc_inactivity_dur += (defrag_period - diff);
+				g_stats.sindex_gc_inactivity_dur += (defrag_period - diff);
 				usleep(1000 * (defrag_period - diff));
 			}
 			last_time = cf_getms();
@@ -459,10 +461,10 @@ as_sindex__defrag_fn(void *udata)
 				}
 			}
 
-			g_config.sindex_gc_list_creation_time    += (cf_getms() - start_time);
-			g_config.sindex_gc_objects_validated     += processed;
-			g_config.sindex_gc_garbage_found         += found;
-			int listsize                              = cf_ll_size(&defrag_list);
+			g_stats.sindex_gc_list_creation_time    += (cf_getms() - start_time);
+			g_stats.sindex_gc_objects_validated     += processed;
+			g_stats.sindex_gc_garbage_found         += found;
+			int listsize                             = cf_ll_size(&defrag_list);
 
 			uint64_t deleted = 0;
 			start_time = cf_getms();
@@ -491,8 +493,8 @@ as_sindex__defrag_fn(void *udata)
 				RELEASE_ITERATORS(icol)
 				p_index++;
 			}
-			g_config.sindex_gc_list_deletion_time += (cf_getms() - start_time);
-			g_config.sindex_gc_garbage_cleaned    += deleted;
+			g_stats.sindex_gc_list_deletion_time += (cf_getms() - start_time);
+			g_stats.sindex_gc_garbage_cleaned    += deleted;
 
 			AS_SINDEX_RELEASE(si);
 		}

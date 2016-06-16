@@ -24,7 +24,7 @@ endif
 BASE_HEADERS += aggr.h asm.h batch.h cdt.h cfg.h cluster_config.h datamodel.h index.h job_manager.h json_init.h
 BASE_HEADERS += ldt.h ldt_aerospike.h ldt_record.h monitor.h packet_compression.h
 BASE_HEADERS += particle.h particle_blob.h particle_integer.h
-BASE_HEADERS += proto.h rec_props.h scan.h secondary_index.h security.h security_config.h system_metadata.h
+BASE_HEADERS += proto.h rec_props.h scan.h secondary_index.h security.h security_config.h stats.h system_metadata.h
 BASE_HEADERS += thr_batch.h thr_info.h thr_query.h thr_sindex.h
 BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h
 BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h

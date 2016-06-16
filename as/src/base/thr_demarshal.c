@@ -55,6 +55,7 @@
 #include "base/packet_compression.h"
 #include "base/proto.h"
 #include "base/security.h"
+#include "base/stats.h"
 #include "base/thr_info.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
@@ -219,7 +220,7 @@ thr_demarshal_reaper_fn(void *arg)
 					cf_queue_push(g_freeslot, &i);
 					as_release_file_handle(fd_h);
 					fd_h = 0;
-					cf_atomic_int_incr(&g_config.reaper_count);
+					g_stats.reaper_count++;
 				}
 				else {
 					inuse_cnt++;
@@ -235,9 +236,9 @@ thr_demarshal_reaper_fn(void *arg)
 		}
 
 		// Validate the system statistics.
-		if (g_config.proto_connections_opened - g_config.proto_connections_closed != inuse_cnt) {
+		if (g_stats.proto_connections_opened - g_stats.proto_connections_closed != inuse_cnt) {
 			cf_debug(AS_DEMARSHAL, "reaper: mismatched connection count:  %"PRIu64" in stats vs %d calculated",
-					g_config.proto_connections_opened - g_config.proto_connections_closed,
+					g_stats.proto_connections_opened - g_stats.proto_connections_closed,
 					inuse_cnt);
 		}
 
@@ -557,7 +558,7 @@ thr_demarshal(void *arg)
 				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", cpaddr, csocket);
 
 				// Validate the limit of protocol connections we allow.
-				uint32_t conns_open = g_config.proto_connections_opened - g_config.proto_connections_closed;
+				uint32_t conns_open = g_stats.proto_connections_opened - g_stats.proto_connections_closed;
 				if (xs->sock != events[i].data.fd && conns_open > g_config.n_proto_fd_max) {
 					if ((last_fd_print + 5000L) < cf_getms()) { // no more than 5 secs
 						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
@@ -643,7 +644,7 @@ thr_demarshal(void *arg)
 						pthread_mutex_unlock(&g_file_handle_a_LOCK);
 					}
 					else {
-						cf_atomic_int_incr(&g_config.proto_connections_opened);
+						cf_atomic64_incr(&g_stats.proto_connections_opened);
 					}
 				}
 			}
@@ -847,7 +848,7 @@ thr_demarshal(void *arg)
 						as_info_transaction it = { fd_h, proto_p, now_ns };
 
 						as_info(&it);
-						cf_atomic_int_incr(&g_config.proto_transactions);
+						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -865,7 +866,7 @@ thr_demarshal(void *arg)
 						// may not do any good to send back an as_msg error, but
 						// it's the best we can do. At least we can keep the fd.
 						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-						cf_atomic_int_incr(&g_config.proto_transactions);
+						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -880,7 +881,7 @@ thr_demarshal(void *arg)
 							cf_warning(AS_DEMARSHAL, "as_proto decompression failed! (rv %d)", rv);
 							cf_warning_binary(AS_DEMARSHAL, proto_p, sizeof(as_proto) + proto_p->sz, CF_DISPLAY_HEX_SPACED, "compressed proto_p");
 							as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-							cf_atomic_int_incr(&g_config.proto_transactions);
+							cf_atomic64_incr(&g_stats.proto_transactions);
 							goto NextEvent;
 						}
 
@@ -896,7 +897,7 @@ thr_demarshal(void *arg)
 							cf_warning(AS_DEMARSHAL, "decompressed unusable proto: version %u, type %u, sz %lu [%lu]",
 									tr.msgp->proto.version, tr.msgp->proto.type, (uint64_t)tr.msgp->proto.sz, decompressed_buf_size);
 							as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-							cf_atomic_int_incr(&g_config.proto_transactions);
+							cf_atomic64_incr(&g_stats.proto_transactions);
 							goto NextEvent;
 						}
 					}
@@ -917,7 +918,7 @@ thr_demarshal(void *arg)
 					// Security protocol transactions.
 					if (tr.msgp->proto.type == PROTO_TYPE_SECURITY) {
 						as_security_transact(&tr);
-						cf_atomic_int_incr(&g_config.proto_transactions);
+						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -929,7 +930,7 @@ thr_demarshal(void *arg)
 					// Fast path for batch requests.
 					if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
 						as_batch_queue_task(&tr);
-						cf_atomic_int_incr(&g_config.proto_transactions);
+						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -937,7 +938,7 @@ thr_demarshal(void *arg)
 					// which fields are present, to reduce re-parsing.
 					if (! as_transaction_demarshal_prepare(&tr)) {
 						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_PARAMETER);
-						cf_atomic_int_incr(&g_config.proto_transactions);
+						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -950,7 +951,7 @@ thr_demarshal(void *arg)
 						goto NextEvent_FD_Cleanup;
 					}
 					else {
-						cf_atomic_int_incr(&g_config.proto_transactions);
+						cf_atomic64_incr(&g_stats.proto_transactions);
 					}
 				}
 

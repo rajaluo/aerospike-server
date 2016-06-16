@@ -43,6 +43,7 @@
 #include "base/proto.h"
 #include "base/scan.h"
 #include "base/security.h"
+#include "base/stats.h"
 #include "base/thr_demarshal.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request.h"
@@ -338,7 +339,7 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 	cf_free(tr->msgp);
 	tr->msgp = NULL;
 
-	cf_atomic64_incr(&g_config.n_demarshal_error);
+	cf_atomic64_incr(&g_stats.n_demarshal_error);
 }
 
 #define UPDATE_ERROR_STATS(name) \
@@ -351,7 +352,7 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 		} \
 	} \
 	else { \
-		cf_atomic64_incr(&g_config.n_tsvc_##name##_error); \
+		cf_atomic64_incr(&g_stats.n_tsvc_##name##_error); \
 	}
 
 void
@@ -441,7 +442,7 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 	}
 
 	cf_rc_free(proto_fd_h);
-	cf_atomic_int_incr(&g_config.proto_connections_closed);
+	cf_atomic64_incr(&g_stats.proto_connections_closed);
 }
 
 void
