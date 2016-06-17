@@ -40,6 +40,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/stats.h"
 #include "storage/storage.h"
 
 
@@ -50,14 +51,14 @@
 #define G_HIST_INSERT_DATA_POINT(name, start_time) \
 { \
 	if (g_config.name##_active) { \
-		histogram_insert_data_point(g_config.name, start_time); \
+		histogram_insert_data_point(g_stats.name, start_time); \
 	} \
 }
 
 #define G_HIST_ACTIVATE_INSERT_DATA_POINT(name, start_time) \
 { \
-	g_config.name##_active = true; \
-	histogram_insert_data_point(g_config.name, start_time); \
+	g_stats.name##_active = true; \
+	histogram_insert_data_point(g_stats.name, start_time); \
 }
 
 #define HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(trw, name) \

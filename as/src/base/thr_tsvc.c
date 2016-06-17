@@ -412,7 +412,7 @@ thr_tsvc(void *arg)
 
 		if (g_config.svc_benchmarks_active &&
 				tr.benchmark_time != 0 && ! as_transaction_is_restart(&tr)) {
-			histogram_insert_data_point(g_config.svc_queue_hist, tr.benchmark_time);
+			histogram_insert_data_point(g_stats.svc_queue_hist, tr.benchmark_time);
 		}
 
 		process_transaction(&tr);

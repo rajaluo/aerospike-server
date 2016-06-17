@@ -456,7 +456,16 @@ rw_msg_cb(cf_node id, msg* m, void* udata)
 	// LDT-related:
 	//
 	case RW_OP_MULTI:
-		repl_write_handle_multiop(id, m);
+		{
+			uint64_t start_ns = g_config.ldt_benchmarks ?  cf_getns() : 0;
+
+			repl_write_handle_multiop(id, m);
+
+			if (start_ns != 0) {
+				histogram_insert_data_point(g_stats.ldt_multiop_prole_hist,
+						start_ns);
+			}
+		}
 		break;
 	case RW_OP_MULTI_ACK:
 		repl_write_handle_multiop_ack(id, m);

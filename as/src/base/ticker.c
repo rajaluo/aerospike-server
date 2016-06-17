@@ -631,28 +631,28 @@ log_line_udf_sub(as_namespace* ns)
 void
 dump_global_histograms()
 {
-	if (g_config.batch_index_hist_active) {
-		histogram_dump(g_config.batch_index_hist);
+	if (g_stats.batch_index_hist_active) {
+		histogram_dump(g_stats.batch_index_hist);
 	}
 
 	if (g_config.info_hist_active) {
-		histogram_dump(g_config.info_hist);
+		histogram_dump(g_stats.info_hist);
 	}
 
 	if (g_config.svc_benchmarks_active) {
-		histogram_dump(g_config.svc_demarshal_hist);
-		histogram_dump(g_config.svc_queue_hist);
+		histogram_dump(g_stats.svc_demarshal_hist);
+		histogram_dump(g_stats.svc_queue_hist);
 	}
 
 	as_query_histogram_dumpall();
 	as_sindex_gc_histogram_dumpall();
 
 	if (g_config.ldt_benchmarks) {
-		histogram_dump(g_config.ldt_multiop_prole_hist);
-		histogram_dump(g_config.ldt_update_record_cnt_hist);
-		histogram_dump(g_config.ldt_io_record_cnt_hist);
-		histogram_dump(g_config.ldt_update_io_bytes_hist);
-		histogram_dump(g_config.ldt_hist);
+		histogram_dump(g_stats.ldt_multiop_prole_hist);
+		histogram_dump(g_stats.ldt_update_record_cnt_hist);
+		histogram_dump(g_stats.ldt_io_record_cnt_hist);
+		histogram_dump(g_stats.ldt_update_io_bytes_hist);
+		histogram_dump(g_stats.ldt_hist);
 	}
 }
 

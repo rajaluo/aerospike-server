@@ -762,7 +762,7 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 	if (apply_rv == 0) {
 		if ((lrecord.udf_context & UDF_CONTEXT_LDT) != 0) {
-			histogram_insert_raw(g_config.ldt_io_record_cnt_hist,
+			histogram_insert_raw(g_stats.ldt_io_record_cnt_hist,
 					lrecord.subrec_io + 1);
 		}
 
@@ -834,7 +834,7 @@ udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 		ldt_record* lrecord = (ldt_record*)as_rec_source(rec);
 
 		if ((lrecord->udf_context & UDF_CONTEXT_LDT) != 0) {
-			histogram_insert_data_point(g_config.ldt_hist, start_time);
+			histogram_insert_data_point(g_stats.ldt_hist, start_time);
 		}
 	}
 
@@ -933,7 +933,7 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 
 	if (UDF_OP_IS_WRITE(*lrecord_op) &&
 			(lrecord->udf_context & UDF_CONTEXT_LDT) != 0) {
-		histogram_insert_raw(g_config.ldt_update_record_cnt_hist,
+		histogram_insert_raw(g_stats.ldt_update_record_cnt_hist,
 				subrec_count + 1);
 	}
 

@@ -3649,21 +3649,20 @@ create_and_check_hist(histogram** h, const char* name, histogram_scale scale)
 	}
 }
 
+// TODO - not really a config method any more, reorg needed.
 void
 cfg_create_all_histograms()
 {
-	as_config* c = &g_config;
+	create_and_check_hist(&g_stats.batch_index_hist, "batch-index", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.info_hist, "info", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.svc_demarshal_hist, "svc-demarshal", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.svc_queue_hist, "svc-queue", HIST_MILLISECONDS);
 
-	create_and_check_hist(&c->batch_index_hist, "batch-index", HIST_MILLISECONDS);
-	create_and_check_hist(&c->info_hist, "info", HIST_MILLISECONDS);
-	create_and_check_hist(&c->svc_demarshal_hist, "svc-demarshal", HIST_MILLISECONDS);
-	create_and_check_hist(&c->svc_queue_hist, "svc-queue", HIST_MILLISECONDS);
-
-	create_and_check_hist(&c->ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&c->ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);
-	create_and_check_hist(&c->ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
-	create_and_check_hist(&c->ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_RAW);
-	create_and_check_hist(&c->ldt_hist, "ldt", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);
+	create_and_check_hist(&g_stats.ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
+	create_and_check_hist(&g_stats.ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_RAW);
+	create_and_check_hist(&g_stats.ldt_hist, "ldt", HIST_MILLISECONDS);
 }
 
 /**

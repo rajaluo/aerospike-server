@@ -125,6 +125,8 @@ as_stats_init()
 	memset((void*)&g_stats, 0, sizeof(g_stats));
 }
 
+//
+// END - provisional stats.c
 //------------------------------------------------
 
 
@@ -1940,9 +1942,11 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int("proto-fd-idle-ms", g_config.proto_fd_idle_ms, db);
 	info_append_int("proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms, db); // dynamic only
 	info_append_uint32("query-batch-size", g_config.query_bsize, db);
+	info_append_uint32("query-buf-size", g_config.query_buf_size, db); // dynamic only
 	info_append_uint32("query-bufpool-size", g_config.query_bufpool_size, db);
 	info_append_bool("query-in-transaction-thread", g_config.query_in_transaction_thr, db);
 	info_append_uint32("query-long-q-max-size", g_config.query_long_q_max_size, db);
+	info_append_bool("query-microbenchmark", g_config.query_enable_histogram, db); // dynamic only
 	info_append_bool("query-pre-reserve-partitions", g_config.partitions_pre_reserved, db);
 	info_append_uint32("query-priority", g_config.query_priority, db);
 	info_append_uint64("query-priority-sleep-us", g_config.query_sleep_us, db);
@@ -1969,6 +1973,7 @@ info_service_config_get(cf_dyn_buf *db)
 		info_append_string("sindex-data-max-memory", "ULONG_MAX", db);
 	}
 
+	info_append_bool("sindex-gc-enable-histogram", g_config.sindex_gc_enable_histogram, db); // dynamic only
 	info_append_bool("snub-nodes", g_config.snub_nodes, db);
 	info_append_uint32("ticker-interval", g_config.ticker_interval, db);
 	info_append_int("transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000), db);
@@ -1981,17 +1986,12 @@ info_service_config_get(cf_dyn_buf *db)
 	// TODO - why no work-directory?
 	info_append_bool("write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable, db);
 
-#ifdef USE_ASM
 	info_append_bool("asmalloc_enabled", g_config.asmalloc_enabled, db);
-#endif
-
+	info_append_bool("fabric-dump-msgs", g_config.fabric_dump_msgs, db);
 	info_append_int("max-msgs-per-type", (int)g_config.max_msgs_per_type, db);
-
-#ifdef MEM_COUNT
 	info_append_bool("memory-accounting", g_config.memory_accounting, db);
-#endif
-
 	info_append_uint32("prole-extra-ttl", g_config.prole_extra_ttl, db);
+	info_append_bool("non-master-sets-delete", g_config.non_master_sets_delete, db); // dynamic only
 
 	return 0;
 }
@@ -2868,8 +2868,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of activate-benchmarks-svc to %s", context);
 				g_config.svc_benchmarks_active = false;
-				histogram_clear(g_config.svc_demarshal_hist);
-				histogram_clear(g_config.svc_queue_hist);
+				histogram_clear(g_stats.svc_demarshal_hist);
+				histogram_clear(g_stats.svc_queue_hist);
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "activate-hist-info", context, &context_len)) {
@@ -2880,7 +2880,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of activate-hist-info to %s", context);
 				g_config.info_hist_active = false;
-				histogram_clear(g_config.info_hist);
+				histogram_clear(g_stats.info_hist);
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "sindex-gc-enable-histogram", context, &context_len)) {
@@ -5746,11 +5746,11 @@ info_get_service(char *name, cf_dyn_buf *db)
 void
 clear_ldt_histograms()
 {
-	histogram_clear(g_config.ldt_multiop_prole_hist);
-	histogram_clear(g_config.ldt_update_record_cnt_hist);
-	histogram_clear(g_config.ldt_io_record_cnt_hist);
-	histogram_clear(g_config.ldt_update_io_bytes_hist);
-	histogram_clear(g_config.ldt_hist);
+	histogram_clear(g_stats.ldt_multiop_prole_hist);
+	histogram_clear(g_stats.ldt_update_record_cnt_hist);
+	histogram_clear(g_stats.ldt_io_record_cnt_hist);
+	histogram_clear(g_stats.ldt_update_io_bytes_hist);
+	histogram_clear(g_stats.ldt_hist);
 }
 
 // SINDEX wire protocol examples:

@@ -58,300 +58,204 @@
 
 struct as_namespace_s;
 
-/* as_config
- * Runtime configuration */
+
 typedef struct as_config_s {
 
-	/* Global service configuration */
+	//--------------------------------------------
+	// service context.
+	//
+
 	uid_t				uid;
 	gid_t				gid;
-	char				*pidfile;
-	bool				run_as_daemon;
+	uint32_t			paxos_single_replica_limit; // cluster size at which, and below, the cluster will run with replication factor 1
+	char*				pidfile;
+	int					n_service_threads;
+	int					n_transaction_queues;
+	int					n_transaction_threads_per_queue;
+	int					n_proto_fd_max;
 
-	/* A unique instance ID: Either HW inspired, or Cluster Group/Node ID */
-	cf_node				self_node;
-	uint16_t			cluster_mode;
-	cf_node				hw_self_node; // Cache the HW value self-node value, for various uses.
-
-	/* IP address */
-	char				*node_ip;
-
-	/* Heartbeat system */
-	hb_mode_enum		hb_mode;
-	hb_protocol_enum	hb_protocol;
-	char				*hb_addr;
-	char 				*hb_init_addr;
-	int					hb_port;
-	int					hb_init_port;
-	char				*hb_mesh_seed_addrs[AS_CLUSTER_SZ];
-	int					hb_mesh_seed_ports[AS_CLUSTER_SZ];
-	char				*hb_tx_addr;
-	// Address advertised for receiving [mesh only] heartbeats:
-	// Computed starting with "heartbeat.address" (g_config.hb_addr),
-	// and set to a real IP address (g_config.node_ip) if that is "any",
-	// and finally overriden by "heartbeat.interface-address" (g_config.hb_tx_addr), if set.
-	char				*hb_addr_to_use;
-	uint32_t			hb_interval;
-	uint32_t			hb_timeout;
-	unsigned char		hb_mcast_ttl;
-	uint32_t			hb_mesh_rw_retry_timeout;
-
-	uint64_t			start_ms; // filled with the start time of the server
-
-	/* tuning parameters */
-	int					n_migrate_threads;
-	int					n_info_threads;
-	int					n_batch_index_threads;
+	bool				svc_benchmarks_active;
+	bool				info_hist_active;
+	bool				allow_inline_transactions;
 	int					n_batch_threads;
-
-	/* Query tunables */
-	uint32_t			query_threads;
-	uint32_t			query_worker_threads;
+	uint32_t			batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
+	uint32_t			batch_max_requests; // maximum count of database requests in a single batch
+	uint32_t			batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
+	uint32_t			batch_priority; // number of records between an enforced context switch, used by old batch only
+	int					n_batch_index_threads;
+	int					n_fabric_workers;
+	bool				generation_disable;
+	uint32_t			hist_track_back; // total time span in seconds over which to cache data
+	uint32_t			hist_track_slice; // period in seconds at which to cache histogram data
+	char*				hist_track_thresholds; // comma-separated bucket (ms) values to track
+	int					n_info_threads;
+	bool				ldt_benchmarks;
+	// Note - log-local-time affects a global in cf_fault.c, so can't be here.
+	int					migrate_max_num_incoming;
+	int					migrate_rx_lifetime_ms; // for debouncing re-tansmitted migrate start messages
+	int					n_migrate_threads;
+	uint32_t			nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
+	uint32_t			nsup_period;
+	bool				nsup_startup_evict;
+	uint64_t			paxos_max_cluster_size;
+	paxos_protocol_enum	paxos_protocol;
+	paxos_recovery_policy_enum paxos_recovery_policy;
+	uint32_t			paxos_retransmit_period;
+	int					proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
+	int					proto_slow_netio_sleep_ms; // dynamic only
+	uint32_t			query_bsize;
+	uint64_t			query_buf_size; // dynamic only
+	uint32_t			query_bufpool_size;
+	bool				query_in_transaction_thr;
+	uint32_t			query_long_q_max_size;
+	bool				query_enable_histogram;
+	bool                partitions_pre_reserved; // query will reserve all partitions up front
 	uint32_t			query_priority;
 	uint64_t			query_sleep_us;
-	uint32_t			query_bsize;
-	bool				query_in_transaction_thr;
-	uint64_t			query_buf_size;
-	uint32_t			query_threshold;
 	uint64_t			query_rec_count_bound;
 	bool				query_req_in_query_thread;
 	uint32_t			query_req_max_inflight;
-	uint32_t			query_bufpool_size;
 	uint32_t			query_short_q_max_size;
-	uint32_t			query_long_q_max_size;
+	uint32_t			query_threads;
+	uint32_t			query_threshold;
 	uint64_t			query_untracked_time_ms;
-
-	int					n_transaction_queues;
-	int					n_transaction_threads_per_queue;
-	int					n_service_threads;
-	int					n_fabric_workers;
+	uint32_t			query_worker_threads;
+	bool				respond_client_on_master_completion;
+	bool				run_as_daemon;
+	uint32_t			scan_max_active; // maximum number of active scans allowed
+	uint32_t			scan_max_done; // maximum number of finished scans kept for monitoring
+	uint32_t			scan_max_udf_transactions; // maximum number of active transactions per UDF background scan
+	uint32_t			scan_threads; // size of scan thread pool
+	uint32_t			sindex_builder_threads; // secondary index builder thread pool size
+	uint64_t			sindex_data_max_memory; // maximum memory for secondary index trees
+	bool				sindex_gc_enable_histogram; // dynamic only
+	bool				snub_nodes;
+	uint32_t			ticker_interval;
+	uint64_t			transaction_max_ns;
+	uint32_t			transaction_pending_limit; // 0 means no limit
+	bool				transaction_repeatable_read;
+	uint32_t			transaction_retry_ms;
+	uint64_t			udf_runtime_max_gmemory; // maximum runtime memory allowed for all UDF - TODO - used?
+	uint64_t			udf_runtime_max_memory; // maximum runtime memory allowed for per UDF - TODO - used?
 	bool				use_queue_per_device;
-	bool				allow_inline_transactions;
+	char*				work_directory;
+	bool				write_duplicate_resolution_disable;
 
-	/* max client file descriptors */
-	int					n_proto_fd_max;
+	bool				asmalloc_enabled; // whether ASMalloc integration is enabled
+	bool				fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
+	int64_t				max_msgs_per_type; // maximum number of "msg" objects permitted per type
+	bool				memory_accounting; // whether memory accounting is enabled
+	uint32_t			prole_extra_ttl; // seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
+	bool				non_master_sets_delete;	// dynamic only - locally delete non-master records in sets that are being emptied
 
-	/* after this many milliseconds, connections are aborted unless transaction is in progress */
-	int					proto_fd_idle_ms;
+	//--------------------------------------------
+	// network::service context.
+	//
 
-	/* sleep this many millisecond before retrying for all the blocked query */
-	int					proto_slow_netio_sleep_ms;
+	cf_socket_cfg		socket;
+	cf_socket_cfg		localhost_socket; // for listener on 127.0.0.1, only opened if main socket not already listening on 0.0.0.0 or 127.0.0.1
+	char*				external_address; // host name that clients will connect on
+	bool				is_external_address_virtual;
+	char*				alternate_address; // alternate service address (could be DNS)
+	char*				network_interface_name; // network_interface_name to use on this machine for generating the IP addresses
+	bool				socket_reuse_addr; // whether or not a socket can be reused (SO_REUSEADDR)
 
-	/* The TCP port for the fabric */
+	//--------------------------------------------
+	// network::heartbeat context.
+	//
+
+	hb_mode_enum		hb_mode;
+	char*				hb_addr;
+	int					hb_port;
+	char* 				hb_init_addr;
+	int					hb_init_port;
+	char*				hb_mesh_seed_addrs[AS_CLUSTER_SZ];
+	int					hb_mesh_seed_ports[AS_CLUSTER_SZ];
+	uint32_t			hb_interval;
+	uint32_t			hb_timeout;
+	char*				hb_tx_addr;
+	uint8_t				hb_mcast_ttl;
+	uint32_t			hb_mesh_rw_retry_timeout;
+	hb_protocol_enum	hb_protocol;
+
+	//--------------------------------------------
+	// network::fabric context.
+	//
+
 	int					fabric_port;
 
-	/* Fabric TCP socket keepalive parameters */
 	bool				fabric_keepalive_enabled;
 	int					fabric_keepalive_time;
 	int					fabric_keepalive_intvl;
 	int					fabric_keepalive_probes;
 
-	/* The TCP port for the info socket */
+	//--------------------------------------------
+	// network::info context.
+	//
+
 	int					info_port;
 
-	/* The TCP socket for the listener */
-	cf_socket_cfg		socket;
+	//--------------------------------------------
+	// Configuration sub-containers.
+	//
 
-	/* The TCP socket for the listener on 127.0.0.1 */
-	/* (Only opened if the main service socket is not already listening on 0.0.0.0 or 127.0.0.1.) */
-	cf_socket_cfg		localhost_socket;
+	mod_lua_config		mod_lua;
+	cluster_config_t	cluster;
+	as_sec_config		sec_cfg;
 
-	/* The port to listen on for XDR compatibility, typically 3004. */
-	cf_socket_cfg		xdr_socket;
+	//--------------------------------------------
+	// Namespaces. (These are configured...)
+	//
 
-	char				*external_address; // hostname that clients will connect on
-	bool				is_external_address_virtual;
-	char				*alternate_address; // alternate service address (could be DNS)
-	char				*network_interface_name; // network_interface_name to use on this machine for generating the IP addresses
-
-	/* Whether or not a socket can be reused (SO_REUSEADDR) */
-	bool				socket_reuse_addr;
-
-	/* Consensus algorithm runtime data */
-	as_paxos			*paxos;
-
-	/*
-	 * heartbeat: takes the lock and fills in this structure
-	 * paxos: read only uses it for detecting changes
-	 */
-	cf_node				hb_paxos_succ_list_index[AS_CLUSTER_SZ];
-	cf_node				hb_paxos_succ_list[AS_CLUSTER_SZ][AS_CLUSTER_SZ];
-	pthread_mutex_t		hb_paxos_lock;
-
-	/* System Metadata module state */
-	as_smd_t			*smd;
-
-	/* a global generation count on all partition state changes */
-	cf_atomic_int		partition_generation;
-
-	/* The transaction queues */
-	uint32_t			transactionq_current;
-	cf_queue			*transactionq_a[MAX_TRANSACTION_QUEUES];
-
-	/* object lock structure */
-	olock				*record_locks;
-
-	/* global configuration for how often to print 'ticker' info to the log - 0 is no ticker */
-	uint32_t			ticker_interval;
-	
-	// whether to collect ldt benchmarks
-	bool				ldt_benchmarks;
-
-	// whether memory accounting is enabled
-	bool				memory_accounting;
-
-	// whether ASMalloc integration is enabled
-	bool				asmalloc_enabled;
-
-	// whether to log information about existing "msg" objects and queues
-	bool				fabric_dump_msgs;
-
-	// maximum number of "msg" objects permitted per type
-	int64_t				max_msgs_per_type;
-
-	// the common work directory cache
-	char				*work_directory;
-
-	/*
-	**  TUNING PARAMETERS
-	*/
-
-	/* global timeout configuration */
-	uint32_t			transaction_retry_ms;
-	// max time (ns) in the system before we kick the request out forever
-	uint64_t			transaction_max_ns;
-	// transaction pending limit - number of pending transactions ON A SINGLE RECORD (0 means no limit)
-	uint32_t			transaction_pending_limit;
-	/* transaction_repeatable_read flag defines whether a read should attempt to get all duplicate values before returning */
-	bool				transaction_repeatable_read;
-	/* disable generation checking */
-	bool				generation_disable;
-	bool				write_duplicate_resolution_disable;
-	/* respond client on master completion */
-	bool				respond_client_on_master_completion;
-	/* enables node snubbing - this code caused a Paxos issue in the past */
-	bool				snub_nodes;
-
-	uint32_t			scan_max_active;			// maximum number of active scans allowed
-	uint32_t			scan_max_done;				// maximum number of finished scans kept for monitoring
-	uint32_t			scan_max_udf_transactions;	// maximum number of active transactions per UDF background scan
-	uint32_t			scan_threads;				// size of scan thread pool
-
-	// maximum count of database requests in a single batch
-	uint32_t			batch_max_requests;
-	// maximum number of buffers allowed in a buffer queue at any one time.  Fail batch if full.
-	uint32_t			batch_max_buffers_per_queue;
-	// maximum number of buffers allowed in buffer pool at any one time.
-	uint32_t			batch_max_unused_buffers;
-	// number of records between an enforced context switch - thus 1 is very low priority, 1000000 would be very high
-	uint32_t			batch_priority;  // Used by old batch functionality only.
-
-	// nsup (expiration and eviction) tuning parameters
-	uint32_t			nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
-	uint32_t			nsup_period;
-	bool				nsup_startup_evict;
-
-	/* tuning parameter for how often to run retransmit checks for paxos */
-	uint32_t			paxos_retransmit_period;
-	/* parameter that let the cluster run under lower replication factor for less than 1 */
-	uint32_t			paxos_single_replica_limit; // cluster size at which, and below, the cluster will run with repl factor 1
-	/* Maximum size of cluster allowed to be formed. */
-	uint64_t			paxos_max_cluster_size;
-	/* Currently-active Paxos protocol version. */
-	paxos_protocol_enum	paxos_protocol;
-	/* Currently-active Paxos recovery policy. */
-	paxos_recovery_policy_enum	paxos_recovery_policy;
-
-	// For receiver-side migration flow control:
-	int					migrate_max_num_incoming;
-	cf_atomic_int		migrate_num_incoming;
-	// For debouncing re-tansmitted migrate start messages:
-	int					migrate_rx_lifetime_ms;
-
-	// Temporary dangling prole garbage collection.
-	uint32_t			prole_extra_ttl;	// seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
-	bool				non_master_sets_delete;	// locally delete non-master records in sets that are being emptied
-
-	xdr_lastship_s		xdr_lastship[AS_CLUSTER_SZ];		// last XDR shipping info of other nodes
-	cf_node				xdr_clmap[AS_CLUSTER_SZ];			// cluster map as known to XDR
-	uint64_t			xdr_self_lastshiptime[DC_MAX_NUM];	// last XDR shipping by this node
-
-	// configuration to put cap on amount of memory
-	// all secondary index put together can take
-	// this is to protect cluster. This override the
-	// per namespace configured value
-	uint32_t		sindex_builder_threads;   // Secondary index builder thread pool size
-	uint64_t		sindex_data_max_memory;   // Maximum memory for secondary index trees
-	cf_atomic64	    sindex_data_memory_used;  // Maximum memory for secondary index trees
-
-	bool            sindex_gc_enable_histogram;
-	histogram      *_sindex_gc_validate_obj_hist; // Histogram to track time taken to validate sindex object
-	histogram      *_sindex_gc_delete_obj_hist;   // Histogram to track time taken to delete sindex object by GC
-	histogram      *_sindex_gc_pimd_rlock_hist;   // HIstogram to track time spent under pimd rlock by sindex GC
-	histogram      *_sindex_gc_pimd_wlock_hist;   // Histogram to track time spent under pimd wlock by sindex GC
-
-	bool                partitions_pre_reserved;  // If true query will reserve all the partitions upfront 
-												  // before processing query. Default - FALSE
-
-	bool				query_enable_histogram;
-
-	uint64_t			udf_runtime_max_memory; // Maximum runtime memory allowed for per UDF
-	uint64_t			udf_runtime_max_gmemory; // maximum runtime memory alloed for all UDF
-	cf_atomic_int		udf_runtime_gmemory_used; // Current runtime memory reserve by per UDF - BUG if global should be 64?
-
-	// For now all tracked histograms are namespace scoped, but these controls
-	// are still global:
-	uint32_t			hist_track_back; // total time span in seconds over which to cache data
-	uint32_t			hist_track_slice; // period in seconds at which to cache histogram data
-	char *				hist_track_thresholds; // comma-separated bucket (ms) values to track
-
-	histogram *			batch_index_hist;
-	bool				batch_index_hist_active;
-
-	histogram *			info_hist;
-	bool				info_hist_active;
-
-	histogram *			svc_demarshal_hist;
-	histogram *			svc_queue_hist;
-	bool				svc_benchmarks_active;
-
-	// LDT related histogram
-	histogram *			ldt_multiop_prole_hist;   // histogram that tracks LDT multi op replication performance (in fabric)
-	histogram *			ldt_update_record_cnt_hist; // histogram that tracks number of records written (write/update)
-                                             // by LDT UDF execluding parent record
-	histogram *			ldt_io_record_cnt_hist; // histogram that tracks number of records opened (write/update)
-                                             // by LDT UDF execluding parent record
-	histogram *			ldt_update_io_bytes_hist;   // histogram that tracks number bytes written by LDT every transaction
-	histogram * 		ldt_hist;            // histogram that tracks ldt performance
-
-	// For Lua Garbage Collection, we want to track three things:
-	// (1) The number of times we were below the GC threshold
-	// (2) The number of times we performed "Light GC" (step-wise gc)
-	// (3) The number of times we performed "Heavy GC" (full gc)
-	// Currently, however, there is no direct connection between the g_config
-	// object and the mod-lua world, so we will need to use some other
-	// mechanism to fill in these stats.  They are inactive for now.
-	// (May 19, 2014 tjl)
-	// cf_atomic_int	stat_lua_gc_delay;
-	// cf_atomic_int	stat_lua_gc_step;
-	// cf_atomic_int	stat_lua_gc_full;
-
-	/* Namespaces */
+	struct as_namespace_s* namespaces[AS_NAMESPACE_SZ];
 	uint32_t			n_namespaces;
-	struct as_namespace_s * namespaces[AS_NAMESPACE_SZ];
 
 	// To speed up transaction enqueue's determination of data-in-memory:
 	uint32_t			n_namespaces_in_memory;
 	uint32_t			n_namespaces_not_in_memory;
 
-	// MOD_LUA Config
-	mod_lua_config		mod_lua;
 
-	// Cluster Config Info
-	cluster_config_t	cluster;
+	//======================================================
+	// Not (directly) configuration. Many should probably be
+	// relocated...
+	//
 
-	// Security configuration info.
-	as_sec_config		sec_cfg;
+	// Address advertised for receiving [mesh only] heartbeats: computed
+	// starting with "heartbeat.address" (g_config.hb_addr), and set to a real
+	// IP address (g_config.node_ip) if that is "any", and finally overriden by
+	// "heartbeat.interface-address" (g_config.hb_tx_addr), if set.
+	char*				hb_addr_to_use;
+
+	// heartbeat: takes the lock and fills in this structure
+	// paxos: read only uses it for detecting changes
+	cf_node				hb_paxos_succ_list_index[AS_CLUSTER_SZ];
+	cf_node				hb_paxos_succ_list[AS_CLUSTER_SZ][AS_CLUSTER_SZ];
+	pthread_mutex_t		hb_paxos_lock;
+
+	// Cluster-config related.
+	cf_node				self_node; // unique instance ID either HW inspired or cluster group/node ID
+	uint16_t			cluster_mode;
+	cf_node				hw_self_node; // cache the HW value self-node value, for various uses
+	char*				node_ip;
+
+	// Global object pointers that just shouldn't be here.
+	as_paxos*			paxos;
+	as_smd_t*			smd;
+	olock*				record_locks;
+
+	// Global variables that just shouldn't be here.
+	cf_atomic_int		migrate_num_incoming; // for receiver-side migration flow control
+	cf_atomic_int		partition_generation; // global counter to signal clients that partition map changed
+	uint64_t			start_ms; // start time of the server
+	cf_queue*			transactionq_a[MAX_TRANSACTION_QUEUES];
+	uint32_t			transactionq_current;
+	cf_socket_cfg		xdr_socket; // the port to listen on for XDR compatibility, typically 3004
+	cf_node				xdr_clmap[AS_CLUSTER_SZ]; // cluster map as known to XDR
+	xdr_lastship_s		xdr_lastship[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
+	uint64_t			xdr_self_lastshiptime[DC_MAX_NUM]; // last XDR shipping by this node
+
+	cf_atomic64	    	sindex_data_memory_used;  // TODO - used?
+	cf_atomic_int		udf_runtime_gmemory_used; // TODO - used?
 
 } as_config;
 
