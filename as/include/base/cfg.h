@@ -1,7 +1,7 @@
 /*
  * cfg.h
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,11 +20,11 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * configuration structure
- */
-
 #pragma once
+
+//==========================================================
+// Includes.
+//
 
 #include <grp.h>
 #include <pthread.h>
@@ -51,19 +51,41 @@
 #include "fabric/paxos.h"
 
 
-#define MAX_TRANSACTION_QUEUES 128
-#define MAX_DEMARSHAL_THREADS  256	// maximum number of demarshal worker threads
-#define MAX_FABRIC_WORKERS 128		// maximum fabric worker threads
-#define MAX_BATCH_THREADS 64		// maximum batch worker threads
+//==========================================================
+// Forward declarations.
+//
 
 struct as_namespace_s;
 
 
+//==========================================================
+// Typedefs and constants.
+//
+
+#define MAX_TRANSACTION_QUEUES 128
+#define MAX_DEMARSHAL_THREADS 256
+#define MAX_FABRIC_WORKERS 128
+#define MAX_BATCH_THREADS 64
+
+// Declare bools with PAD_BOOL so they can't share a 4-byte space with other
+// bools, chars or shorts. This prevents adjacent bools set concurrently in
+// different threads (albeit very unlikely) from interfering with each other.
+// Add others (e.g. PAD_UINT8, PAD_UINT16 ...) as needed.
+#define PGLUE(a, b) a##b
+#define PBOOL(line) bool PGLUE(pad_, line)[3]; bool
+#define PAD_BOOL PBOOL(__LINE__)
+
+
 typedef struct as_config_s {
+
+	// The order here matches that in the configuration parser's enum,
+	// cfg_case_id. This is for organizational sanity.
 
 	//--------------------------------------------
 	// service context.
 	//
+
+	// Normally visible, in canonical configuration file order:
 
 	uid_t				uid;
 	gid_t				gid;
@@ -74,9 +96,11 @@ typedef struct as_config_s {
 	int					n_transaction_threads_per_queue;
 	int					n_proto_fd_max;
 
-	bool				svc_benchmarks_active;
-	bool				info_hist_active;
-	bool				allow_inline_transactions;
+	// Normally hidden:
+
+	PAD_BOOL			svc_benchmarks_active;
+	PAD_BOOL			info_hist_active;
+	PAD_BOOL			allow_inline_transactions;
 	int					n_batch_threads;
 	uint32_t			batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
 	uint32_t			batch_max_requests; // maximum count of database requests in a single batch
@@ -84,19 +108,19 @@ typedef struct as_config_s {
 	uint32_t			batch_priority; // number of records between an enforced context switch, used by old batch only
 	int					n_batch_index_threads;
 	int					n_fabric_workers;
-	bool				generation_disable;
+	PAD_BOOL			generation_disable;
 	uint32_t			hist_track_back; // total time span in seconds over which to cache data
 	uint32_t			hist_track_slice; // period in seconds at which to cache histogram data
 	char*				hist_track_thresholds; // comma-separated bucket (ms) values to track
 	int					n_info_threads;
-	bool				ldt_benchmarks;
+	PAD_BOOL			ldt_benchmarks;
 	// Note - log-local-time affects a global in cf_fault.c, so can't be here.
 	int					migrate_max_num_incoming;
 	int					migrate_rx_lifetime_ms; // for debouncing re-tansmitted migrate start messages
 	int					n_migrate_threads;
 	uint32_t			nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
 	uint32_t			nsup_period;
-	bool				nsup_startup_evict;
+	PAD_BOOL			nsup_startup_evict;
 	uint64_t			paxos_max_cluster_size;
 	paxos_protocol_enum	paxos_protocol;
 	paxos_recovery_policy_enum paxos_recovery_policy;
@@ -106,63 +130,72 @@ typedef struct as_config_s {
 	uint32_t			query_bsize;
 	uint64_t			query_buf_size; // dynamic only
 	uint32_t			query_bufpool_size;
-	bool				query_in_transaction_thr;
+	PAD_BOOL			query_in_transaction_thr;
 	uint32_t			query_long_q_max_size;
-	bool				query_enable_histogram;
-	bool                partitions_pre_reserved; // query will reserve all partitions up front
+	PAD_BOOL			query_enable_histogram;
+	PAD_BOOL			partitions_pre_reserved; // query will reserve all partitions up front
 	uint32_t			query_priority;
 	uint64_t			query_sleep_us;
 	uint64_t			query_rec_count_bound;
-	bool				query_req_in_query_thread;
+	PAD_BOOL			query_req_in_query_thread;
 	uint32_t			query_req_max_inflight;
 	uint32_t			query_short_q_max_size;
 	uint32_t			query_threads;
 	uint32_t			query_threshold;
 	uint64_t			query_untracked_time_ms;
 	uint32_t			query_worker_threads;
-	bool				respond_client_on_master_completion;
-	bool				run_as_daemon;
+	PAD_BOOL			respond_client_on_master_completion;
+	PAD_BOOL			run_as_daemon;
 	uint32_t			scan_max_active; // maximum number of active scans allowed
 	uint32_t			scan_max_done; // maximum number of finished scans kept for monitoring
 	uint32_t			scan_max_udf_transactions; // maximum number of active transactions per UDF background scan
 	uint32_t			scan_threads; // size of scan thread pool
 	uint32_t			sindex_builder_threads; // secondary index builder thread pool size
 	uint64_t			sindex_data_max_memory; // maximum memory for secondary index trees
-	bool				sindex_gc_enable_histogram; // dynamic only
-	bool				snub_nodes;
+	PAD_BOOL			sindex_gc_enable_histogram; // dynamic only
+	PAD_BOOL			snub_nodes;
 	uint32_t			ticker_interval;
 	uint64_t			transaction_max_ns;
 	uint32_t			transaction_pending_limit; // 0 means no limit
-	bool				transaction_repeatable_read;
+	PAD_BOOL			transaction_repeatable_read;
 	uint32_t			transaction_retry_ms;
 	uint64_t			udf_runtime_max_gmemory; // maximum runtime memory allowed for all UDF - TODO - used?
 	uint64_t			udf_runtime_max_memory; // maximum runtime memory allowed for per UDF - TODO - used?
-	bool				use_queue_per_device;
+	PAD_BOOL			use_queue_per_device;
 	char*				work_directory;
-	bool				write_duplicate_resolution_disable;
+	PAD_BOOL			write_duplicate_resolution_disable;
 
-	bool				asmalloc_enabled; // whether ASMalloc integration is enabled
-	bool				fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
+	// For special debugging or bug-related repair:
+
+	PAD_BOOL			asmalloc_enabled; // whether ASMalloc integration is enabled
+	PAD_BOOL			fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
 	int64_t				max_msgs_per_type; // maximum number of "msg" objects permitted per type
-	bool				memory_accounting; // whether memory accounting is enabled
+	PAD_BOOL			memory_accounting; // whether memory accounting is enabled
 	uint32_t			prole_extra_ttl; // seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
-	bool				non_master_sets_delete;	// dynamic only - locally delete non-master records in sets that are being emptied
+	PAD_BOOL			non_master_sets_delete;	// dynamic only - locally delete non-master records in sets that are being emptied
 
 	//--------------------------------------------
 	// network::service context.
 	//
 
+	// Normally visible, in canonical configuration file order:
+
 	cf_socket_cfg		socket;
 	cf_socket_cfg		localhost_socket; // for listener on 127.0.0.1, only opened if main socket not already listening on 0.0.0.0 or 127.0.0.1
+
+	// Normally hidden:
+
 	char*				external_address; // host name that clients will connect on
-	bool				is_external_address_virtual;
+	PAD_BOOL			is_external_address_virtual;
 	char*				alternate_address; // alternate service address (could be DNS)
 	char*				network_interface_name; // network_interface_name to use on this machine for generating the IP addresses
-	bool				socket_reuse_addr; // whether or not a socket can be reused (SO_REUSEADDR)
+	PAD_BOOL			socket_reuse_addr; // whether or not a socket can be reused (SO_REUSEADDR)
 
 	//--------------------------------------------
 	// network::heartbeat context.
 	//
+
+	// Normally visible, in canonical configuration file order:
 
 	hb_mode_enum		hb_mode;
 	char*				hb_addr;
@@ -173,6 +206,9 @@ typedef struct as_config_s {
 	int					hb_mesh_seed_ports[AS_CLUSTER_SZ];
 	uint32_t			hb_interval;
 	uint32_t			hb_timeout;
+
+	// Normally hidden:
+
 	char*				hb_tx_addr;
 	uint8_t				hb_mcast_ttl;
 	uint32_t			hb_mesh_rw_retry_timeout;
@@ -182,9 +218,13 @@ typedef struct as_config_s {
 	// network::fabric context.
 	//
 
+	// Normally visible, in canonical configuration file order:
+
 	int					fabric_port;
 
-	bool				fabric_keepalive_enabled;
+	// Normally hidden, in canonical configuration file order:
+
+	PAD_BOOL			fabric_keepalive_enabled;
 	int					fabric_keepalive_time;
 	int					fabric_keepalive_intvl;
 	int					fabric_keepalive_probes;
@@ -192,6 +232,8 @@ typedef struct as_config_s {
 	//--------------------------------------------
 	// network::info context.
 	//
+
+	// Normally visible, in canonical configuration file order:
 
 	int					info_port;
 
@@ -202,17 +244,6 @@ typedef struct as_config_s {
 	mod_lua_config		mod_lua;
 	cluster_config_t	cluster;
 	as_sec_config		sec_cfg;
-
-	//--------------------------------------------
-	// Namespaces. (These are configured...)
-	//
-
-	struct as_namespace_s* namespaces[AS_NAMESPACE_SZ];
-	uint32_t			n_namespaces;
-
-	// To speed up transaction enqueue's determination of data-in-memory:
-	uint32_t			n_namespaces_in_memory;
-	uint32_t			n_namespaces_not_in_memory;
 
 
 	//======================================================
@@ -257,12 +288,23 @@ typedef struct as_config_s {
 	cf_atomic64	    	sindex_data_memory_used;  // TODO - used?
 	cf_atomic_int		udf_runtime_gmemory_used; // TODO - used?
 
+	// Namespaces.
+	struct as_namespace_s* namespaces[AS_NAMESPACE_SZ];
+	uint32_t			n_namespaces;
+
+	// To speed up transaction enqueue's determination of data-in-memory:
+	uint32_t			n_namespaces_in_memory;
+	uint32_t			n_namespaces_not_in_memory;
+
 } as_config;
 
-/* Configuration function declarations */
-extern as_config *as_config_init(const char *config_file);
-extern void as_config_post_process(as_config *c, const char *config_file);
 
-/* Declare an instance of the configuration structure in global scope */
+//==========================================================
+// Public API.
+//
+
+as_config* as_config_init(const char* config_file);
+void as_config_post_process(as_config* c, const char* config_file);
+
 extern as_config g_config;
 extern xdr_config g_xcfg;

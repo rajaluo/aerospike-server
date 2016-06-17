@@ -100,24 +100,24 @@ typedef struct as_stats_s {
 	// Histograms.
 	//
 
-	histogram*			batch_index_hist;
-	bool				batch_index_hist_active; // "auto" histogram
+	histogram*		batch_index_hist;
+	bool			batch_index_hist_active; // automatically activated
 
-	histogram*			info_hist;
+	histogram*		info_hist;
 
-	histogram*			svc_demarshal_hist;
-	histogram*			svc_queue_hist;
+	histogram*		svc_demarshal_hist;
+	histogram*		svc_queue_hist;
 
-	histogram*			_sindex_gc_validate_obj_hist; // time taken to validate sindex object
-	histogram*			_sindex_gc_delete_obj_hist; // time taken to delete sindex object by gc
-	histogram*			_sindex_gc_pimd_rlock_hist; // time spent under pimd rlock by sindex gc - TODO - unused?
-	histogram*			_sindex_gc_pimd_wlock_hist; // time spent under pimd wlock by sindex gc - TODO - unused?
+	histogram*		_sindex_gc_validate_obj_hist; // time taken to validate sindex object
+	histogram*		_sindex_gc_delete_obj_hist; // time taken to delete sindex object by gc
+	histogram*		_sindex_gc_pimd_rlock_hist; // time spent under pimd rlock by sindex gc - TODO - unused?
+	histogram*		_sindex_gc_pimd_wlock_hist; // time spent under pimd wlock by sindex gc - TODO - unused?
 
-	histogram*			ldt_multiop_prole_hist; // tracks LDT multi op replication performance (in fabric)
-	histogram*			ldt_update_record_cnt_hist; // tracks number of records written (write/update) by LDT UDF excluding parent record
-	histogram*			ldt_io_record_cnt_hist; // tracks number of records opened (write/update) by LDT UDF excluding parent record
-	histogram*			ldt_update_io_bytes_hist; // tracks number bytes written by LDT every transaction - TODO - unused?
-	histogram*			ldt_hist; // tracks ldt performance
+	histogram*		ldt_multiop_prole_hist; // tracks LDT multi op replication performance (in fabric)
+	histogram*		ldt_update_record_cnt_hist; // tracks number of records written (write/update) by LDT UDF excluding parent record
+	histogram*		ldt_io_record_cnt_hist; // tracks number of records opened (write/update) by LDT UDF excluding parent record
+	histogram*		ldt_update_io_bytes_hist; // tracks number bytes written by LDT every transaction - TODO - unused?
+	histogram*		ldt_hist; // tracks ldt performance
 
 } as_stats;
 
