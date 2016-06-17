@@ -472,7 +472,7 @@ typedef enum {
 	// Normally hidden:
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB,
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ,
-	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_STORAGE,
+	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_STORAGE, // TODO - should be in storage scope.
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF,
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB,
 	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE,
@@ -2933,7 +2933,7 @@ as_config_init(const char *config_file)
 		case NAMESPACE_SI:
 			switch(cfg_find_tok(line.name_tok, NAMESPACE_SI_OPTS, NUM_NAMESPACE_SI_OPTS)) {
 			case CASE_NAMESPACE_SI_GC_PERIOD:
-				si_cfg.defrag_period= cfg_u64_no_checks(&line);
+				si_cfg.defrag_period = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SI_GC_MAX_UNITS:
 				si_cfg.defrag_max_units = cfg_u32_no_checks(&line);

@@ -176,6 +176,10 @@
 
 // #define PARTITION_INFO_CHECK 1
 
+// The instantaneous maximum number of cluster participants, represented as a
+// positive and negative mask.
+#define AS_CLUSTER_SZ_MASKP ((uint64_t)(1 - (AS_CLUSTER_SZ + 1)))
+#define AS_CLUSTER_SZ_MASKN ((uint64_t)(AS_CLUSTER_SZ - 1))
 
 // Using int for 4-byte size, but maintaining bool semantics.
 static volatile int g_allow_migrations = true;

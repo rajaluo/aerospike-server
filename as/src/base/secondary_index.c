@@ -84,6 +84,8 @@
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_queue.h"
+
 #include "aerospike/as_arraylist.h"
 #include "aerospike/as_arraylist_iterator.h"
 #include "aerospike/as_buffer.h"

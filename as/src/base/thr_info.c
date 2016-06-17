@@ -2063,6 +2063,10 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_int("stop-writes-pct", (int)(ns->stop_writes_pct * 100), db);
 	info_append_string("write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME(), db);
 
+	// TODO - report storage-type?
+
+	// TODO - consider sub-scoped item names - how to indicate scope?
+
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
 			if (! ns->storage_devices[i]) {
@@ -2079,6 +2083,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 			info_append_string("file", ns->storage_files[i], db);
 		}
+
+		// TODO - report the shadows?
 
 		info_append_uint64("filesize", ns->storage_filesize, db);
 		info_append_string("scheduler-mode", ns->storage_scheduler_mode ? ns->storage_scheduler_mode : "null", db);
@@ -2100,8 +2106,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	}
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_KV) {
-		info_append_uint64("total-bytes-disk", ns->kv_size, db);
-
 		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
 			if (! ns->storage_devices[i]) {
 				break;
@@ -2111,7 +2115,21 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		}
 
 		info_append_uint64("filesize", ns->storage_filesize, db);
+		info_append_uint32("read-block-size", ns->storage_read_block_size, db);
+		info_append_uint32("write-block-size", ns->storage_write_block_size, db);
+		info_append_uint32("num-write-blocks", ns->storage_num_write_blocks, db);
+		info_append_bool("cond-write", ns->cond_write, db);
 	}
+
+	info_append_uint64("data-max-memory", ns->sindex_data_max_memory, db);
+	info_append_uint32("num-partitions", ns->sindex_num_partitions, db);
+
+	info_append_bool("strict", ns->geo2dsphere_within_strict, db);
+	info_append_uint32("min-level", (uint32_t)ns->geo2dsphere_within_min_level, db);
+	info_append_uint32("max-level", (uint32_t)ns->geo2dsphere_within_max_level, db);
+	info_append_uint32("max-cells", (uint32_t)ns->geo2dsphere_within_max_cells, db);
+	info_append_uint32("level-mod", (uint32_t)ns->geo2dsphere_within_level_mod, db);
+	info_append_uint32("earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters, db);
 
 	return 0;
 }
@@ -5302,6 +5320,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		info_append_uint64("err_storage_queue_full", ns->err_storage_queue_full, db);
 		info_append_uint64("storage_defrag_corrupt_record", ns->err_storage_defrag_corrupt_record, db);
 	}
+
+	// Not bothering with AS_STORAGE_ENGINE_KV.
 
 	// Migration stats.
 
