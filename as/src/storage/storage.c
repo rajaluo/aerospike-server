@@ -830,10 +830,8 @@ as_storage_shutdown(void)
 	// Pull all record locks - stops everything writing to current swbs such
 	// that each write's record lock scope is either completed or never entered.
 
-	olock* p_olock = g_config.record_locks;
-
-	for (uint32_t n = 0; n < p_olock->n_locks; n++) {
-		pthread_mutex_lock(&p_olock->locks[n]);
+	for (uint32_t n = 0; n < g_record_locks->n_locks; n++) {
+		pthread_mutex_lock(&g_record_locks->locks[n]);
 	}
 
 	// Now flush everything outstanding to storage devices.

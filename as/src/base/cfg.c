@@ -214,7 +214,6 @@ cfg_set_defaults()
 
 	// TODO - not sure why these are in configuration - just to be global?
 	c->start_ms = cf_getms();
-	c->record_locks = olock_create(16 * 1024, true); // TODO - configurable number of locks?
 
 	c->n_namespaces = 0;
 }
@@ -3317,6 +3316,10 @@ as_config_post_process(as_config *c, const char *config_file)
 	}
 
 	cf_info(AS_CFG, "system file descriptor limit: %lu, proto-fd-max: %d", fd_limit.rlim_cur, c->n_proto_fd_max);
+
+	// Allocate and initialize the record locks (olocks). Maybe not the best
+	// place for this, unless we make number of locks configurable.
+	g_record_locks = olock_create(16 * 1024, true);
 
 	// Setup performance metrics histograms.
 	cfg_create_all_histograms();

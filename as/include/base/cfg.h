@@ -40,7 +40,6 @@
 
 #include "hist.h"
 #include "hist_track.h"
-#include "olock.h"
 #include "socket.h"
 #include "util.h"
 
@@ -263,7 +262,6 @@ typedef struct as_config_s {
 	// Global object pointers that just shouldn't be here.
 	as_paxos*		paxos;
 	as_smd_t*		smd;
-	olock*			record_locks;
 
 	// Global variables that just shouldn't be here.
 	cf_atomic_int	migrate_num_incoming; // for receiver-side migration flow control
