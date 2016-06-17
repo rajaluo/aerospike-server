@@ -88,3 +88,6 @@ int as_info_queue_get_size();
 void info_log_with_datestamp(void (*log_fn)(void));
 
 extern bool g_mstats_enabled;
+
+// Needed by main():
+extern uint64_t g_start_ms;

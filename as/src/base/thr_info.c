@@ -129,6 +129,7 @@ as_stats_init()
 // END - provisional stats.c
 //------------------------------------------------
 
+uint64_t g_start_ms; // start time of the server
 
 static cf_queue *g_info_work_q = 0;
 
@@ -362,14 +363,14 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	// Note - this isn't preceded by a semicolon.
 	cf_dyn_buf_append_string(db, "cluster_size=");
-	cf_dyn_buf_append_int(db, g_config.paxos->cluster_size);
+	cf_dyn_buf_append_int(db, g_paxos->cluster_size);
 
 	cf_dyn_buf_append_string(db, ";cluster_key=");
 	cf_dyn_buf_append_uint64_x(db, as_paxos_get_cluster_key()); // not in ticker
 
-	info_append_bool("cluster_integrity", as_paxos_get_cluster_integrity(g_config.paxos), db); // not in ticker
+	info_append_bool("cluster_integrity", as_paxos_get_cluster_integrity(g_paxos), db); // not in ticker
 
-	info_append_uint64("uptime", (cf_getms() - g_config.start_ms) / 1000, db); // not in ticker
+	info_append_uint64("uptime", (cf_getms() - g_start_ms) / 1000, db); // not in ticker
 
 	int freepct;
 	bool swapping;
@@ -486,7 +487,7 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 int
 info_get_partition_generation(char *name, cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_int(db, g_config.partition_generation);
+	cf_dyn_buf_append_int(db, (int)g_partition_generation);
 
 	return(0);
 }

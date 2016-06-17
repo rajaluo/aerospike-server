@@ -79,6 +79,11 @@ typedef struct as_smd_item_list_s {
 typedef struct as_smd_s as_smd_t;
 
 /*
+ *  SMD is a singleton, though many class methods are passed an object pointer.
+ */
+extern as_smd_t *g_smd;
+
+/*
  *  Type for mutually-disjoint flag values passed by SMD to the module's accept callback
  *   via the "accept_opt" argument specifying the originator of the operation.
  */

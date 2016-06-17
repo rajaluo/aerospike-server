@@ -461,7 +461,7 @@ cc_cluster_config_dump(const bool verbose)
 				(CL_MODE_STATIC == g_config.cluster_mode ? CL_STR_STATIC : CL_STR_DYNAMIC));
 
 		if (verbose) {
-			as_paxos *p = g_config.paxos;
+			as_paxos *p = g_paxos;
 			bool self = false, principal = false;
 
 			cf_node principal_node = as_paxos_succession_getprincipal();

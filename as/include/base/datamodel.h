@@ -639,6 +639,12 @@ extern int as_record_replace(as_partition_reservation *rsv, cf_digest *keyd,
 bool as_record_is_expired(as_record *r); // TODO - eventually inline
 
 
+// Counter that tells clients partition ownership has changed.
+extern cf_atomic32 g_partition_generation;
+
+// Counter for receiver-side migration flow control.
+extern cf_atomic_int g_migrate_num_incoming;
+
 /* as_partition_id
  * A generic type for partition identifiers */
 typedef uint16_t as_partition_id;

@@ -181,6 +181,10 @@
 #define AS_CLUSTER_SZ_MASKP ((uint64_t)(1 - (AS_CLUSTER_SZ + 1)))
 #define AS_CLUSTER_SZ_MASKN ((uint64_t)(AS_CLUSTER_SZ - 1))
 
+cf_atomic32 g_partition_generation = 0;
+
+cf_atomic_int g_migrate_num_incoming = 0;
+
 // Using int for 4-byte size, but maintaining bool semantics.
 static volatile int g_allow_migrations = true;
 static volatile int g_multi_node = false;
@@ -1723,7 +1727,7 @@ as_partition_emigrate_done(as_migrate_state s, as_namespace *ns,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic_int_incr(&g_config.partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -1749,10 +1753,10 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 		return AS_MIGRATE_AGAIN;
 	}
 
-	int64_t num_incoming = cf_atomic_int_incr(&g_config.migrate_num_incoming);
+	int64_t num_incoming = cf_atomic_int_incr(&g_migrate_num_incoming);
 
 	if (num_incoming > g_config.migrate_max_num_incoming) {
-		cf_atomic_int_decr(&g_config.migrate_num_incoming);
+		cf_atomic_int_decr(&g_migrate_num_incoming);
 		pthread_mutex_unlock(&p->lock);
 		return AS_MIGRATE_AGAIN;
 	}
@@ -1899,11 +1903,11 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 
 	if (rv != AS_MIGRATE_OK) {
 		// Migration has been rejected, incoming migration not expected.
-		cf_atomic_int_decr(&g_config.migrate_num_incoming);
+		cf_atomic_int_decr(&g_migrate_num_incoming);
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic_int_incr(&g_config.partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -2100,7 +2104,7 @@ as_partition_immigrate_done(as_namespace *ns, as_partition_id pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic_int_incr(&g_config.partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -2114,7 +2118,7 @@ as_partition_immigrate_done(as_namespace *ns, as_partition_id pid,
 	cf_queue_destroy(&mq);
 
 	// For receiver-side migration flow control.
-	cf_atomic_int_decr(&g_config.migrate_num_incoming);
+	cf_atomic_int_decr(&g_migrate_num_incoming);
 
 	return rv;
 }
@@ -2186,7 +2190,7 @@ as_partition_adjust_hv_and_slindex(const as_partition *ptn, cf_node hv_ptr[],
 {
 	const uint rf = ptn->p_repl_factor;
 	const uint16_t pid = ptn->partition_id;
-	const uint64_t cluster_size = g_config.paxos->cluster_size;
+	const uint64_t cluster_size = g_paxos->cluster_size;
 	const uint16_t n_groups = g_config.cluster.group_count;
 	const uint16_t n_needed = n_groups < rf ? n_groups : rf;
 
@@ -2249,7 +2253,7 @@ as_partition_adjust_hv_and_slindex(const as_partition *ptn, cf_node hv_ptr[],
 void
 as_partition_cluster_topology_info(const as_paxos *paxos_p) {
 	const cf_node * succession = paxos_p->succession;
-	const uint64_t cluster_size = g_config.paxos->cluster_size;
+	const uint64_t cluster_size = g_paxos->cluster_size;
 
 	uint32_t distinct_groups = 0;
 	cluster_config_t cc; // structure to hold state of the group
@@ -2303,7 +2307,7 @@ void
 as_partition_balance()
 {
 	// Shortcut pointers.
-	as_paxos *paxos = g_config.paxos;
+	as_paxos *paxos = g_paxos;
 	cf_node *succession = paxos->succession;
 	bool *alive = paxos->alive;
 	cf_node self = g_config.self_node;
@@ -3132,7 +3136,7 @@ as_partition_balance()
 
 	// Note - if we decide this is the best place to first increment this
 	// counter, we could get rid of g_balance_init and just use this instead.
-	cf_atomic_int_incr(&g_config.partition_generation);
+	cf_atomic32_incr(&g_partition_generation);
 
 	cf_info(AS_PAXOS, "global partition state: total %zu lost %zu unique %zu duplicate %zu",
 			n_total, n_lost, n_unique, n_duplicate);
@@ -3170,8 +3174,8 @@ as_partition_balance()
 void
 as_partition_balance_init()
 {
-	g_config.paxos->cluster_size = 1;
-	as_paxos_set_cluster_integrity(g_config.paxos, true);
+	g_paxos->cluster_size = 1;
+	as_paxos_set_cluster_integrity(g_paxos, true);
 
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
@@ -3246,7 +3250,7 @@ as_partition_balance_init_single_node_cluster()
 
 				p->version_info = new_vinfo;
 				p->primary_version_info = new_vinfo;
-				g_config.paxos->c_partition_vinfo[i][0][j] = new_vinfo;
+				g_paxos->c_partition_vinfo[i][0][j] = new_vinfo;
 				set_partition_version_in_storage(ns, j, &new_vinfo, false);
 
 				client_replica_maps_update(ns, j);
@@ -3268,7 +3272,7 @@ as_partition_balance_init_single_node_cluster()
 	// Ok to allow transactions.
 	g_balance_init = BALANCE_INIT_RESOLVED;
 
-	cf_atomic_int_incr(&g_config.partition_generation);
+	cf_atomic32_incr(&g_partition_generation);
 }
 
 

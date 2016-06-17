@@ -54,6 +54,7 @@
 #include "base/cfg.h"
 #include "base/stats.h"
 #include "fabric/fabric.h"
+#include "fabric/paxos.h"
 
 
 /* SYNOPSIS
@@ -2253,7 +2254,7 @@ CloseSocket:
 					cf_crash(AS_HB, "Failed to set ANV length in heartbeat protocol v2 message.");
 
 			/* Fill in the current adjacency list and bufferize the message */
-			msg_set_buf(mt, AS_HB_MSG_ANV, (byte *) g_config.paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
+			msg_set_buf(mt, AS_HB_MSG_ANV, (byte *) g_paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
 			/* cf_info(AS_HB, "PUT HEARTBEAT PULSE PRINCIPAL is %"PRIx64"", g_config.paxos->succession[0]); */
 			size_t n = sizeof(buft);
 			if (0 != msg_fillbuf(mt, buft, &n)) {
@@ -2472,7 +2473,7 @@ as_hb_monitor_reduce(void *key, void *data, void *udata)
 	 * Check if this node's succession list is in sync with ours
 	 */
 	bool slists_match = true;
-	as_paxos *px = g_config.paxos;
+	as_paxos *px = g_paxos;
 	char *same_diff = (px->succession[0] == p->anv[0] ? "same" : "different");
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {

@@ -243,6 +243,8 @@ validate_smd_directory()
 int
 main(int argc, char **argv)
 {
+	g_start_ms = cf_getms();
+
 #ifdef USE_ASM
 	as_mallocation_t asm_array[MAX_NUM_MALLOCATIONS];
 
@@ -490,7 +492,7 @@ main(int argc, char **argv)
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
-	as_smd_start(c->smd);		// enables receiving paxos state change events
+	as_smd_start(g_smd);		// enables receiving paxos state change events
 	as_fabric_start();			// may send & receive fabric messages
 	as_xdr_start();				// XDR should start before it joins other nodes
 	as_hb_start();				// start inter-node heatbeat
@@ -529,7 +531,7 @@ main(int argc, char **argv)
 
 	as_storage_shutdown();
 	as_xdr_shutdown();
-	as_smd_shutdown(c->smd);
+	as_smd_shutdown(g_smd);
 
 	cf_info(AS_AS, "finished clean shutdown - exiting");
 

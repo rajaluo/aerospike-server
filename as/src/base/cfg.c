@@ -60,6 +60,7 @@
 #include "base/thr_info.h"
 #include "base/thr_query.h"
 #include "base/thr_sindex.h"
+#include "base/thr_tsvc.h"
 #include "base/transaction_policy.h"
 #include "fabric/migrate.h"
 
@@ -211,11 +212,6 @@ cfg_set_defaults()
 	// TODO - security set default config API?
 	c->sec_cfg.privilege_refresh_period = 60 * 5; // refresh socket privileges every 5 minutes
 	c->sec_cfg.syslog_local = AS_SYSLOG_NONE;
-
-	// TODO - not sure why these are in configuration - just to be global?
-	c->start_ms = cf_getms();
-
-	c->n_namespaces = 0;
 }
 
 

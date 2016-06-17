@@ -36,7 +36,6 @@
 
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/cf_atomic.h"
-#include "citrusleaf/cf_queue.h"
 
 #include "hist.h"
 #include "hist_track.h"
@@ -46,8 +45,6 @@
 #include "base/cluster_config.h"
 #include "base/datamodel.h"
 #include "base/security_config.h"
-#include "base/system_metadata.h"
-#include "fabric/paxos.h"
 
 
 //==========================================================
@@ -61,7 +58,6 @@ struct as_namespace_s;
 // Typedefs and constants.
 //
 
-#define MAX_TRANSACTION_QUEUES 128
 #define MAX_DEMARSHAL_THREADS 256
 #define MAX_FABRIC_WORKERS 128
 #define MAX_BATCH_THREADS 64
@@ -259,16 +255,7 @@ typedef struct as_config_s {
 	cf_node			hw_self_node; // cache the HW value self-node value, for various uses
 	char*			node_ip;
 
-	// Global object pointers that just shouldn't be here.
-	as_paxos*		paxos;
-	as_smd_t*		smd;
-
 	// Global variables that just shouldn't be here.
-	cf_atomic_int	migrate_num_incoming; // for receiver-side migration flow control
-	cf_atomic_int	partition_generation; // global counter to signal clients that partition map changed
-	uint64_t		start_ms; // start time of the server
-	cf_queue*		transactionq_a[MAX_TRANSACTION_QUEUES];
-	uint32_t		transactionq_current;
 	cf_socket_cfg	xdr_socket; // the port to listen on for XDR compatibility, typically 3004
 	cf_node			xdr_clmap[AS_CLUSTER_SZ]; // cluster map as known to XDR
 	xdr_lastship_s	xdr_lastship[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes

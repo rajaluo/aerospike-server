@@ -33,3 +33,7 @@ extern int thr_tsvc_queue_get_size();
 
 // Initialize the queues and start the handler threads.
 extern void as_tsvc_init();
+
+// Needed by XDR.
+#define MAX_TRANSACTION_QUEUES 128
+extern cf_queue *g_transaction_queues[MAX_TRANSACTION_QUEUES];

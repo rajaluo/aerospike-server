@@ -45,6 +45,7 @@
 #include "base/secondary_index.h"
 #include "base/system_metadata.h"
 #include "fabric/fabric.h"
+#include "fabric/paxos.h"
 #include "jansson.h"
 
 
@@ -541,6 +542,12 @@ typedef struct as_smd_module_s {
 
 static int as_smd_module_persist(as_smd_module_t *module_obj);
 void *as_smd_thr(void *arg);
+
+
+/* Globals. */
+
+
+as_smd_t *g_smd;
 
 
 /* Internal message passing functions. */
@@ -1074,13 +1081,13 @@ static as_smd_t *as_smd_create(void)
  */
 as_smd_t *as_smd_init(void)
 {
-	if (! g_config.smd) {
-		g_config.smd = as_smd_create();
+	if (! g_smd) {
+		g_smd = as_smd_create();
 	} else {
 		cf_warning(AS_SMD, "System Metadata is already initialized");
 	}
 
-	return g_config.smd;
+	return g_smd;
 }
 
 /*
@@ -1224,7 +1231,7 @@ int as_smd_create_module(char *module, as_smd_merge_cb merge_cb, void *merge_uda
 						 as_smd_can_accept_cb can_accept_cb, void *can_accept_udata)
 {
 	// Send a CREATE command to the System Metadata thread.
-	return as_smd_send_event(g_config.smd, as_smd_create_cmd_event(AS_SMD_CMD_CREATE_MODULE, module, merge_cb, merge_udata, accept_cb, accept_udata,
+	return as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_CREATE_MODULE, module, merge_cb, merge_udata, accept_cb, accept_udata,
 							 can_accept_cb, can_accept_udata));
 }
 
@@ -1234,7 +1241,7 @@ int as_smd_create_module(char *module, as_smd_merge_cb merge_cb, void *merge_uda
 int as_smd_destroy_module(char *module)
 {
 	// Send a DESTROY command to the System Metadata thread.
-	return as_smd_send_event(g_config.smd, as_smd_create_cmd_event(AS_SMD_CMD_DESTROY_MODULE, module));
+	return as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_DESTROY_MODULE, module));
 }
 
 /*
@@ -1243,7 +1250,7 @@ int as_smd_destroy_module(char *module)
 int as_smd_set_metadata(char *module, char *key, char *value)
 {
 	// Send an SET command to the System Metadata thread.
-	return as_smd_send_event(g_config.smd, as_smd_create_cmd_event(AS_SMD_CMD_SET_METADATA, module, key, value, 0, 0UL));
+	return as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_SET_METADATA, module, key, value, 0, 0UL));
 }
 
 /*
@@ -1253,7 +1260,7 @@ int as_smd_set_metadata(char *module, char *key, char *value)
 int as_smd_set_metadata_gen_ts(char *module, char *key, char *value, uint32_t generation, uint64_t timestamp)
 {
 	// Send an SET command to the System Metadata thread.
-	return as_smd_send_event(g_config.smd, as_smd_create_cmd_event(AS_SMD_CMD_SET_METADATA, module, key, value, generation, timestamp));
+	return as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_SET_METADATA, module, key, value, generation, timestamp));
 }
 
 /*
@@ -1262,7 +1269,7 @@ int as_smd_set_metadata_gen_ts(char *module, char *key, char *value, uint32_t ge
 int as_smd_delete_metadata(char *module, char *key)
 {
 	// Send a DELETE command to the System Metadata thread.
-	return as_smd_send_event(g_config.smd, as_smd_create_cmd_event(AS_SMD_CMD_DELETE_METADATA, module, key));
+	return as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_DELETE_METADATA, module, key));
 }
 
 /*
@@ -1271,7 +1278,7 @@ int as_smd_delete_metadata(char *module, char *key)
 int as_smd_get_metadata(char *module, char *key, as_smd_get_cb cb, void *udata)
 {
 	// Send a GET command to the System Metadata thread.
-	return as_smd_send_event(g_config.smd, as_smd_create_cmd_event(AS_SMD_CMD_GET_METADATA, module, key, cb, udata));
+	return as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_GET_METADATA, module, key, cb, udata));
 }
 
 
@@ -1358,7 +1365,7 @@ void as_smd_dump_metadata(as_smd_t *smd, as_smd_cmd_t *cmd)
 void as_smd_dump(bool verbose)
 {
 	// Send an INTERNAL + DUMP_SMD + verbosity command to the System Metadata thread.
-	as_smd_send_event(g_config.smd, as_smd_create_cmd_event(AS_SMD_CMD_INTERNAL,
+	as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_INTERNAL,
 					  (AS_SMD_CMD_OPT_DUMP_SMD | (verbose ? AS_SMD_CMD_OPT_VERBOSE : 0))));
 }
 
@@ -1408,16 +1415,16 @@ void as_smd_info_cmd(char *cmd, cf_node node_id, char *module, char *key, char *
 	} else if (!strcmp(cmd, "init")) {
 		as_smd_init();
 	} else if (!strcmp(cmd, "start")) {
-		if (g_config.smd) {
-			if ((retval = as_smd_start(g_config.smd))) {
+		if (g_smd) {
+			if ((retval = as_smd_start(g_smd))) {
 				cf_warning(AS_SMD, "System Metadata start up failed (retval %d)", retval);
 			}
 		} else {
 			cf_warning(AS_SMD, "System Metadata is not initialized");
 		}
 	} else if (!strcmp(cmd, "shutdown")) {
-		if (g_config.smd) {
-			as_smd_shutdown(g_config.smd);
+		if (g_smd) {
+			as_smd_shutdown(g_smd);
 		} else {
 			cf_warning(AS_SMD, "System Metadata is not initialized");
 		}
@@ -2218,7 +2225,7 @@ static void as_smd_terminate(as_smd_t *smd)
 	cf_debug(AS_SMD, "SMD Terminate called");
 
 	// After this is NULLed out, no more messages will be sent to the System Metadata queue.
-	g_config.smd = NULL;
+	g_smd = NULL;
 
 	// De-register reception of Paxos state changed events.
 	if (as_paxos_deregister_change_callback(as_smd_paxos_state_changed_fn, smd)) {
@@ -2503,7 +2510,7 @@ static int as_smd_apply_metadata_change(as_smd_t *smd, as_smd_module_t *module_o
 			// (Note:  Ideally this map-transaction-over-succession-list operation should be provided by Paxos.)
 			for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 				msg *msg = NULL;
-				cf_node node_id = g_config.paxos->succession[i];
+				cf_node node_id = g_paxos->succession[i];
 				if (!node_id) {
 					continue;
 				}
@@ -2673,7 +2680,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 	cf_debug(AS_SMD, "invoking merge policy for module \"%s\"", module);
 
 	as_smd_item_list_t *item_list_out = NULL;
-	size_t num_lists = g_config.paxos->cluster_size;
+	size_t num_lists = g_paxos->cluster_size;
 	as_smd_item_list_t **item_lists_in = NULL;
 	if (!(item_lists_in = (as_smd_item_list_t **) cf_calloc(num_lists, sizeof(as_smd_item_list_t *)))) {
 		cf_crash(AS_SMD, "failed to allocate %zu System Metadata item lists", num_lists);
@@ -2681,7 +2688,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 
 	int list_num = 0;
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
-		cf_node node_id = g_config.paxos->succession[i];
+		cf_node node_id = g_paxos->succession[i];
 
 		// Skip any non-existent nodes.
 		if (!node_id) {
@@ -2691,7 +2698,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 
 		shash *module_item_count_hash = NULL;
 		if (SHASH_OK != shash_get(smd->scoreboard, &node_id, &module_item_count_hash)) {
-			cf_debug(AS_SMD, "***Cluster Size Is: %zu ; Scoreboard size is %d***", g_config.paxos->cluster_size, shash_get_size(smd->scoreboard));
+			cf_debug(AS_SMD, "***Cluster Size Is: %zu ; Scoreboard size is %d***", g_paxos->cluster_size, shash_get_size(smd->scoreboard));
 
 			// Node may be in succession but not officially in cluster yet....
 			cf_debug(AS_SMD, "failed to get module item count hash for node %016lX ~~ Skipping!", node_id);
@@ -2784,7 +2791,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 	msg *msg = NULL;
 	as_smd_msg_op_t merge_op = AS_SMD_MSG_OP_ACCEPT_THIS_METADATA;
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
-		cf_node node_id = g_config.paxos->succession[i];
+		cf_node node_id = g_paxos->succession[i];
 		// Skip any non-existent nodes.
 		if (!node_id) {
 			continue;
@@ -2855,8 +2862,8 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 	}
 
 	// Merge the metadata when all nodes have reported in.
-	if (shash_get_size(smd->scoreboard) == g_config.paxos->cluster_size) {
-		cf_debug(AS_SMD, "received metadata from all %zu cluster nodes ~~ invoking merge policies", g_config.paxos->cluster_size);
+	if (shash_get_size(smd->scoreboard) == g_paxos->cluster_size) {
+		cf_debug(AS_SMD, "received metadata from all %zu cluster nodes ~~ invoking merge policies", g_paxos->cluster_size);
 
 		// TODO: Make sure we're still principal. 
 		if (as_paxos_succession_getprincipal() != g_config.self_node) {
@@ -2869,7 +2876,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 
 		// Clear out the state used to notify cluster nodes of the new metadata.
 		as_smd_clear_scoreboard(smd);
-	} else if (shash_get_size(smd->scoreboard) > g_config.paxos->cluster_size) {
+	} else if (shash_get_size(smd->scoreboard) > g_paxos->cluster_size) {
 		// Cluster is unstable.
 		// While one node is coming up, one of other nodes has gone down.
 		// e.g Consider 3 node cluster. Add new node. Cluster size is 4.
@@ -2878,7 +2885,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 		// But now two node has gone down. Cluster size is reduced to 2.
 		as_smd_clear_scoreboard(smd);
 	} else {
-		cf_debug(AS_SMD, "Cluster size = %zu and smd->scoreboard size = %d ", g_config.paxos->cluster_size, shash_get_size(smd->scoreboard));
+		cf_debug(AS_SMD, "Cluster size = %zu and smd->scoreboard size = %d ", g_paxos->cluster_size, shash_get_size(smd->scoreboard));
 	}
 
 	return retval;

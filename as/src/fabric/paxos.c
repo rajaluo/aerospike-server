@@ -126,6 +126,11 @@ void as_paxos_current_init(as_paxos *p);
 #define AS_PAXOS_SYNC_ATTEMPTS_MAX 2
 
 /*
+ * The singleton paxos object. TODO - why a pointer, is struct too big?
+ */
+as_paxos *g_paxos = NULL;
+
+/*
  * The migrate key changes once when a Paxos vote completes.
  * Every migration operation stores its key and sends it as part of its start
  * message. If a migrate message's key does not match its global key, the
@@ -157,7 +162,7 @@ as_paxos_set_cluster_key(uint64_t cluster_key)
 	// Prior migrations are unable to decrement migrate_num_incoming due to
 	// cluster_key checking. Additionally migrations originating from a
 	// departed node are unable to decrement this value for obvious reasons.
-	cf_atomic_int_set(&g_config.migrate_num_incoming, 0);
+	cf_atomic_int_set(&g_migrate_num_incoming, 0);
 }
 
 // Get the cluster key
@@ -172,10 +177,10 @@ uint64_t
 as_paxos_get_cluster_key_and_size(size_t *cluster_size)
 {
 	if (cluster_size) {
-		*cluster_size = g_config.paxos->cluster_size;
+		*cluster_size = g_paxos->cluster_size;
 	}
 
-	if (!g_config.paxos->cluster_size) {
+	if (!g_paxos->cluster_size) {
 		cf_warning(AS_PAXOS, ">>>>cluster size is zero!!!<<<<");
 	}
 
@@ -296,13 +301,13 @@ dump_partition_state()
 	cf_debug(AS_PAXOS, " Partition State Dump");
 
 	for (int index = 0; index < g_config.paxos_max_cluster_size; index++) {
-		if (g_config.paxos->succession[index] == (cf_node) 0)
+		if (g_paxos->succession[index] == (cf_node) 0)
 			continue;
-		cf_debug(AS_PAXOS, " Node %"PRIx64"", g_config.paxos->succession[index]);
+		cf_debug(AS_PAXOS, " Node %"PRIx64"", g_paxos->succession[index]);
 		for (int i = 0; i < g_config.n_namespaces; i++) {
 			cf_debug(AS_PAXOS, " Name Space: %s", g_config.namespaces[i]->name);
 			int k = 0;
-			as_partition_vinfo *parts = g_config.paxos->c_partition_vinfo[i][index];
+			as_partition_vinfo *parts = g_paxos->c_partition_vinfo[i][index];
 			if (NULL == parts) {
 				cf_debug(AS_PAXOS, " STATE is EMPTY");
 				continue;
@@ -342,7 +347,7 @@ as_paxos_print_cluster_key(const char *message)
 msg *
 as_paxos_sync_msg_generate(uint64_t cluster_key)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	msg *m = NULL;
 	int e = 0;
 
@@ -377,7 +382,7 @@ as_paxos_sync_msg_generate(uint64_t cluster_key)
 int
 as_paxos_sync_msg_apply(msg *m)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	byte *bufp = NULL;
 	size_t bufsz = g_config.paxos_max_cluster_size * sizeof(cf_node);
@@ -461,7 +466,7 @@ as_paxos_sync_msg_apply(msg *m)
 msg *
 as_paxos_partition_sync_request_msg_generate()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	msg *m = NULL;
 	int e = 0;
 
@@ -550,7 +555,7 @@ as_paxos_partition_sync_request_msg_generate()
 int
 as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	int e = 0;
 
 	cf_assert(m, AS_PAXOS, CF_CRITICAL, "invalid argument");
@@ -639,7 +644,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 msg *
 as_paxos_partition_sync_msg_generate()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	msg *m = NULL;
 	int e = 0;
 
@@ -760,7 +765,7 @@ as_paxos_partition_sync_msg_generate()
 int
 as_paxos_partition_sync_msg_apply(msg *m)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	byte *bufp = NULL;
 	size_t bufsz = g_config.paxos_max_cluster_size * sizeof(cf_node);
 	int e = 0;
@@ -898,7 +903,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 int
 as_paxos_succession_insert(cf_node n)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	int i;
 
 	for (i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -935,7 +940,7 @@ as_paxos_succession_insert(cf_node n)
 int
 as_paxos_succession_remove(cf_node n)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	int i;
 
 	bool found = false;
@@ -981,7 +986,7 @@ as_paxos_succession_remove(cf_node n)
 cf_node
 as_paxos_succession_getprincipal()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	if (!p) {
 		cf_warning(AS_PAXOS, "Paxos is not yet initialized ~~ returning NULL principal");
@@ -1003,7 +1008,7 @@ as_paxos_succession_getprincipal()
 bool
 as_paxos_succession_ismember(cf_node n)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if ((n == p->succession[i]) && p->alive[i])
@@ -1070,7 +1075,7 @@ as_paxos_set_recovery_policy(paxos_recovery_policy_enum policy)
  */
 bool as_paxos_is_single_node_cluster()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	// For a single node cluster this node should be the first / principal in
 	// the succession list and the max cluster size shoulf be 1 or then the
@@ -1085,7 +1090,7 @@ bool as_paxos_is_single_node_cluster()
 bool
 as_paxos_partition_sync_states_all()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		// It is important to check the p->alive[] flag here. If a node has just departed, we return
@@ -1107,7 +1112,7 @@ as_paxos_partition_sync_states_all()
 bool
 as_paxos_set_partition_sync_state(cf_node n)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if ((n == p->succession[i]) && p->alive[i]) {
@@ -1124,7 +1129,7 @@ as_paxos_set_partition_sync_state(cf_node n)
 int
 as_paxos_get_succession_index(cf_node n)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if ((n == p->succession[i]) && p->alive[i]) {
@@ -1140,7 +1145,7 @@ as_paxos_get_succession_index(cf_node n)
 void
 as_paxos_succession_setdeceased(cf_node n)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if ((n == p->succession[i]) && p->alive[i]) {
@@ -1155,7 +1160,7 @@ as_paxos_succession_setdeceased(cf_node n)
 void
 as_paxos_succession_setrevived(cf_node n)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (n == p->succession[i]) {
@@ -1173,7 +1178,7 @@ as_paxos_succession_setrevived(cf_node n)
 bool
 as_paxos_succession_quorum()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	int a = 0, c = 0;
 	bool r;
 
@@ -1205,7 +1210,7 @@ as_paxos_current_init(as_paxos *p)
 as_paxos_transaction *
 as_paxos_current_get()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	as_paxos_transaction *max = p->current[0];
 
@@ -1224,7 +1229,7 @@ as_paxos_current_get()
 uint32_t
 as_paxos_sequence_getnext()
 {
-	as_paxos* p = g_config.paxos;
+	as_paxos* p = g_paxos;
 
 	// Uses time in seconds from wall clock for now. Should be updated to
 	// use time in seconds from the physical component of HLC timestamp with
@@ -1242,7 +1247,7 @@ as_paxos_sequence_getnext()
 bool
 as_paxos_current_is_candidate(as_paxos_transaction t)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (NULL == p->current[i])
@@ -1262,7 +1267,7 @@ as_paxos_current_is_candidate(as_paxos_transaction t)
 void
 as_paxos_current_update(as_paxos_transaction *t)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (NULL == p->current[i] || t->c.p_node == p->current[i]->c.p_node) {
@@ -1278,7 +1283,7 @@ as_paxos_current_update(as_paxos_transaction *t)
 as_paxos_transaction *
 as_paxos_transaction_search(as_paxos_transaction s)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	as_paxos_transaction *t = NULL;
 
 	/* Scan through the list until we find a transaction with a matching
@@ -1328,7 +1333,7 @@ as_paxos_transaction_update(as_paxos_transaction *oldt, as_paxos_transaction *ne
 as_paxos_transaction *
 as_paxos_transaction_establish(as_paxos_transaction *s)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	as_paxos_transaction *t = NULL, *oldest = NULL;
 
 	cf_assert(s, AS_PAXOS, CF_CRITICAL, "invalid transaction");
@@ -1379,7 +1384,7 @@ as_paxos_transaction_confirm(as_paxos_transaction *t)
 
 	t->confirmed = true;
 
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	// We also have to confirm transactions that have sequence numbers less than this transaction.
 	// It is possible that messages have been lost
 	for (int i = 0; i < AS_PAXOS_ALPHA; i++) {
@@ -1423,7 +1428,7 @@ as_paxos_transaction_destroy(as_paxos_transaction *t)
 as_paxos_transaction_vote_result
 as_paxos_transaction_vote(as_paxos_transaction *s, cf_node n, as_paxos_transaction *t)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	as_paxos_transaction_vote_result r;
 	int c = 0, v = 0;
 
@@ -1473,7 +1478,7 @@ as_paxos_transaction_vote_reset(as_paxos_transaction *t)
 as_paxos_transaction *
 as_paxos_transaction_getnext(cf_node master_node)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	as_paxos_transaction *t = NULL;
 
 	for (int i = 0; i < AS_PAXOS_ALPHA; i++) {
@@ -1489,7 +1494,7 @@ as_paxos_transaction_getnext(cf_node master_node)
 
 void
 as_paxos_send_sync_messages() {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	uint64_t cluster_key = as_paxos_get_cluster_key();
 	msg *reply = NULL;
 	char sbuf[(AS_CLUSTER_SZ * 17) + 49];
@@ -1523,7 +1528,7 @@ as_paxos_send_sync_messages() {
 
 void as_paxos_start_second_phase()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	cf_node self = g_config.self_node;
 
 	/*
@@ -1577,7 +1582,7 @@ void as_paxos_start_second_phase()
 void
 as_paxos_transaction_apply(cf_node from_id)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	as_paxos_transaction *t = NULL;
 	cf_node self = g_config.self_node;
 	int n_xact = 0;
@@ -1870,7 +1875,7 @@ static int
 as_paxos_send_to_sl(int cmd, as_paxos_transaction *tr, msg *px_msg, int priority)
 {
 	as_node_list nl;
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	int succ_list_len = 0, succ_list_num_alive = 0;
 
 	nl.sz = 1;
@@ -1901,7 +1906,7 @@ as_paxos_send_to_sl(int cmd, as_paxos_transaction *tr, msg *px_msg, int priority
 void
 as_paxos_spark(as_paxos_change *c)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	cf_node self = g_config.self_node;
 	as_paxos_transaction *s, t;
 	msg *m = NULL;
@@ -2005,7 +2010,7 @@ as_paxos_spark(as_paxos_change *c)
 int
 as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	as_paxos_msg *qm;
 
 	cf_assert(m, AS_PAXOS, CF_CRITICAL, "null message");
@@ -2113,7 +2118,7 @@ as_paxos_process_set_succession_list(cf_node *nodes)
 	// [Note:  This is also done on the principal when the second phase is started below.]
 	as_partition_disallow_migrations();
 
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	bool list_end = false;
 	cf_node *nodes_p = nodes;
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -2159,7 +2164,7 @@ as_paxos_process_heartbeat_event(msg *m)
 	 */
 	cf_node old_principal = as_paxos_succession_getprincipal();
 	cf_node self = g_config.self_node;
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	as_paxos_change c;
 	memset(&c, 0, sizeof(as_paxos_change));
@@ -2374,7 +2379,7 @@ void as_paxos_auto_reset_master(bool reset_cluster,
 	cf_info(AS_PAXOS, "Corrective changes: %d. Integrity fault: %s",
 			corrective_event_count, reset_cluster ? "true" : "false");
 
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	// Check if a paxos call has been triggered in between now and the last
 	// check.
@@ -2462,7 +2467,7 @@ void as_paxos_auto_reset_master(bool reset_cluster,
 void
 as_paxos_dun_hold(bool is_dunned)
 {
-	g_config.paxos->dun_other_clusters = is_dunned;
+	g_paxos->dun_other_clusters = is_dunned;
 }
 
 #define NODE_IS_MISSING 0
@@ -2508,7 +2513,7 @@ as_paxos_add_missing_nodes(cf_node *missing_nodes, cf_node *succ_list, bool *are
 void
 as_paxos_process_retransmit_check()
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	// Perform a general consistency check between our succession list and the list
 	// that heart beat thinks is correct. First get a copy of the heartbeat's compiled list
@@ -2752,7 +2757,7 @@ as_paxos_process_retransmit_check()
 void *
 as_paxos_thr(void *arg)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	cf_node self = g_config.self_node;
 	int c;
 
@@ -3335,10 +3340,10 @@ cleanup:
 void
 as_paxos_init()
 {
-	g_config.paxos = cf_calloc(1, sizeof(as_paxos));
-	cf_assert(g_config.paxos, AS_PAXOS, CF_CRITICAL, "allocation: %s", cf_strerror(errno));
+	g_paxos = cf_calloc(1, sizeof(as_paxos));
+	cf_assert(g_paxos, AS_PAXOS, CF_CRITICAL, "allocation: %s", cf_strerror(errno));
 
-	as_paxos *p = g_config.paxos; // shortcut pointer
+	as_paxos *p = g_paxos; // shortcut pointer
 
 	if (0 != pthread_mutex_init(&p->lock, NULL)) {
 		cf_crash(AS_PAXOS, "unable to init mutex: %s", cf_strerror(errno));
@@ -3473,7 +3478,7 @@ as_paxos_init()
 int
 as_paxos_register_change_callback(as_paxos_change_callback cb, void *udata)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 
 	if (p->n_callbacks < MAX_CHANGE_CALLBACKS - 1) {
 		p->cb[p->n_callbacks] = cb;
@@ -3487,7 +3492,7 @@ as_paxos_register_change_callback(as_paxos_change_callback cb, void *udata)
 int
 as_paxos_deregister_change_callback(as_paxos_change_callback cb, void *udata)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	int i = 0;
 	bool found = false;
 
@@ -3560,7 +3565,7 @@ as_paxos_start()
 		as_partition_balance_init_single_node_cluster();
 	}
 
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	pthread_attr_t thr_attr;
 	pthread_t thr_id;
 	pthread_t sup_thr_id;
@@ -3601,7 +3606,7 @@ as_paxos_set_cluster_integrity(as_paxos *p, bool state)
 void
 as_paxos_dump(bool verbose)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	bool self = false, principal = false;
 
 	cf_info(AS_PAXOS, "Paxos Cluster Size: %zu [soft max: %zu ; hard max: %d]", p->cluster_size, g_config.paxos_max_cluster_size, AS_CLUSTER_SZ);
@@ -3636,7 +3641,7 @@ as_paxos_dump(bool verbose)
 int
 as_paxos_get_succession_list(cf_dyn_buf *db)
 {
-	as_paxos *p = g_config.paxos;
+	as_paxos *p = g_paxos;
 	char hex_node_id[18];
 	bool need_comma = false;
 	char line[AS_CLUSTER_SZ * 17];

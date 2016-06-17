@@ -430,6 +430,9 @@ transaction_thread(int i, int j)
 	return g_transaction_threads + (g_config.n_transaction_threads_per_queue * i) + j;
 }
 
+cf_queue* g_transaction_queues[MAX_TRANSACTION_QUEUES];
+uint32_t g_current_q = 0;
+
 void
 as_tsvc_init()
 {
@@ -470,7 +473,7 @@ as_tsvc_init()
 
 	// Create the transaction queues.
 	for (int i = 0; i < g_config.n_transaction_queues ; i++) {
-		g_config.transactionq_a[i] = cf_queue_create(AS_TRANSACTION_HEAD_SIZE, true);
+		g_transaction_queues[i] = cf_queue_create(AS_TRANSACTION_HEAD_SIZE, true);
 	}
 
 	// Allocate the transaction threads that service all the queues.
@@ -483,7 +486,7 @@ as_tsvc_init()
 	// Start all the transaction threads.
 	for (int i = 0; i < g_config.n_transaction_queues; i++) {
 		for (int j = 0; j < g_config.n_transaction_threads_per_queue; j++) {
-			if (0 != pthread_create(transaction_thread(i, j), NULL, thr_tsvc, (void*)g_config.transactionq_a[i])) {
+			if (0 != pthread_create(transaction_thread(i, j), NULL, thr_tsvc, (void*)g_transaction_queues[i])) {
 				cf_crash(AS_TSVC, "tsvc thread %d:%d create failed", i, j);
 			}
 		}
@@ -552,12 +555,12 @@ thr_tsvc_enqueue(as_transaction *tr)
 	}
 	else {
 		// In default mode, transaction can go on any queue - distribute evenly.
-		n_q = (g_config.transactionq_current++) % g_config.n_transaction_queues;
+		n_q = (g_current_q++) % g_config.n_transaction_queues;
 	}
 
 	cf_queue *q;
 
-	if ((q = g_config.transactionq_a[n_q]) == NULL) {
+	if ((q = g_transaction_queues[n_q]) == NULL) {
 		cf_crash(AS_TSVC, "transaction queue #%d not initialized!", n_q);
 	}
 
@@ -576,8 +579,8 @@ thr_tsvc_queue_get_size()
 	int qs = 0;
 
 	for (int i = 0; i < g_config.n_transaction_queues; i++) {
-		if (g_config.transactionq_a[i]) {
-			qs += cf_queue_sz(g_config.transactionq_a[i]);
+		if (g_transaction_queues[i]) {
+			qs += cf_queue_sz(g_transaction_queues[i]);
 		}
 		else {
 			cf_detail(AS_TSVC, "no queue when getting size");

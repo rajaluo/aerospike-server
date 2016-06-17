@@ -58,6 +58,7 @@
 #include "base/cfg.h"
 #include "base/stats.h"
 #include "fabric/hb.h"
+#include "fabric/paxos.h"
 
 
 // #define EXTRA_CHECKS 1
@@ -783,7 +784,7 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 			msg_set_uint32(m, FS_PORT, g_config.hb_port);
 		}
 	}
-	msg_set_buf(m, FS_ANV, (byte *)g_config.paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
+	msg_set_buf(m, FS_ANV, (byte *)g_paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
 
 	fabric_buffer_set_write_msg(fb, m);
 
