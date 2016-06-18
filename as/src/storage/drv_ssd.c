@@ -64,6 +64,7 @@
 #include "base/cfg.h"
 #include "base/index.h"
 #include "base/ldt.h"
+#include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/secondary_index.h"
 
