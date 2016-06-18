@@ -1191,38 +1191,38 @@ struct as_namespace_s {
 
 	// tsvc-stage error counters.
 
-	cf_atomic64		n_tsvc_client_timeout;
 	cf_atomic64		n_tsvc_client_error;
+	cf_atomic64		n_tsvc_client_timeout;
 
-	cf_atomic64		n_tsvc_batch_sub_timeout;
 	cf_atomic64		n_tsvc_batch_sub_error;
+	cf_atomic64		n_tsvc_batch_sub_timeout;
 
-	cf_atomic64		n_tsvc_udf_sub_timeout;
 	cf_atomic64		n_tsvc_udf_sub_error;
+	cf_atomic64		n_tsvc_udf_sub_timeout;
 
 	// From-client transaction stats.
 
 	cf_atomic64		n_client_proxy_complete;
-	cf_atomic64		n_client_proxy_timeout;
 	cf_atomic64		n_client_proxy_error;
+	cf_atomic64		n_client_proxy_timeout;
 
 	cf_atomic64		n_client_read_success;
-	cf_atomic64		n_client_read_timeout;
 	cf_atomic64		n_client_read_error;
+	cf_atomic64		n_client_read_timeout;
 	cf_atomic64		n_client_read_not_found;
 
 	cf_atomic64		n_client_write_success;
-	cf_atomic64		n_client_write_timeout;
 	cf_atomic64		n_client_write_error;
+	cf_atomic64		n_client_write_timeout;
 
 	cf_atomic64		n_client_delete_success;
-	cf_atomic64		n_client_delete_timeout;
 	cf_atomic64		n_client_delete_error;
+	cf_atomic64		n_client_delete_timeout;
 	cf_atomic64		n_client_delete_not_found;
 
 	cf_atomic64		n_client_udf_complete;
-	cf_atomic64		n_client_udf_timeout;
 	cf_atomic64		n_client_udf_error;
+	cf_atomic64		n_client_udf_timeout;
 
 	cf_atomic64		n_client_lua_read_success;
 	cf_atomic64		n_client_lua_write_success;
@@ -1242,19 +1242,19 @@ struct as_namespace_s {
 	// Batch sub-transaction stats.
 
 	cf_atomic64		n_batch_sub_proxy_complete;
-	cf_atomic64		n_batch_sub_proxy_timeout;
 	cf_atomic64		n_batch_sub_proxy_error;
+	cf_atomic64		n_batch_sub_proxy_timeout;
 
 	cf_atomic64		n_batch_sub_read_success;
-	cf_atomic64		n_batch_sub_read_timeout;
 	cf_atomic64		n_batch_sub_read_error;
+	cf_atomic64		n_batch_sub_read_timeout;
 	cf_atomic64		n_batch_sub_read_not_found;
 
 	// Internal-UDF sub-transaction stats.
 
 	cf_atomic64		n_udf_sub_udf_complete;
-	cf_atomic64		n_udf_sub_udf_timeout;
 	cf_atomic64		n_udf_sub_udf_error;
+	cf_atomic64		n_udf_sub_udf_timeout;
 
 	cf_atomic64		n_udf_sub_lua_read_success;
 	cf_atomic64		n_udf_sub_lua_write_success;

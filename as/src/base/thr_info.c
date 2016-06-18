@@ -410,8 +410,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	as_batch_queues_info(db); // not in ticker
 
 	info_append_uint64("batch_index_complete", g_stats.batch_index_complete, db);
-	info_append_uint64("batch_index_timeout", g_stats.batch_index_timeout, db);
 	info_append_uint64("batch_index_errors", g_stats.batch_index_errors, db);
+	info_append_uint64("batch_index_timeout", g_stats.batch_index_timeout, db);
 
 	// Everything below is not in ticker...
 
@@ -5347,38 +5347,38 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// tsvc-stage error counters.
 
-	info_append_uint64("tsvc-client-timeout", ns->n_tsvc_client_timeout, db);
 	info_append_uint64("tsvc-client-error", ns->n_tsvc_client_error, db);
+	info_append_uint64("tsvc-client-timeout", ns->n_tsvc_client_timeout, db);
 
-	info_append_uint64("tsvc-batch-sub-timeout", ns->n_tsvc_batch_sub_timeout, db);
 	info_append_uint64("tsvc-batch-sub-error", ns->n_tsvc_batch_sub_error, db);
+	info_append_uint64("tsvc-batch-sub-timeout", ns->n_tsvc_batch_sub_timeout, db);
 
-	info_append_uint64("tsvc-udf-sub-timeout", ns->n_tsvc_udf_sub_timeout, db);
 	info_append_uint64("tsvc-udf-sub-error", ns->n_tsvc_udf_sub_error, db);
+	info_append_uint64("tsvc-udf-sub-timeout", ns->n_tsvc_udf_sub_timeout, db);
 
 	// From-client transaction stats.
 
 	info_append_uint64("client-proxy-complete", ns->n_client_proxy_complete, db);
-	info_append_uint64("client-proxy-timeout", ns->n_client_proxy_timeout, db);
 	info_append_uint64("client-proxy-error", ns->n_client_proxy_error, db);
+	info_append_uint64("client-proxy-timeout", ns->n_client_proxy_timeout, db);
 
 	info_append_uint64("client-read-success", ns->n_client_read_success, db);
-	info_append_uint64("client-read-timeout", ns->n_client_read_timeout, db);
 	info_append_uint64("client-read-error", ns->n_client_read_error, db);
+	info_append_uint64("client-read-timeout", ns->n_client_read_timeout, db);
 	info_append_uint64("client-read-not-found", ns->n_client_read_not_found, db);
 
 	info_append_uint64("client-write-success", ns->n_client_write_success, db);
-	info_append_uint64("client-write-timeout", ns->n_client_write_timeout, db);
 	info_append_uint64("client-write-error", ns->n_client_write_error, db);
+	info_append_uint64("client-write-timeout", ns->n_client_write_timeout, db);
 
 	info_append_uint64("client-delete-success", ns->n_client_delete_success, db);
-	info_append_uint64("client-delete-timeout", ns->n_client_delete_timeout, db);
 	info_append_uint64("client-delete-error", ns->n_client_delete_error, db);
+	info_append_uint64("client-delete-timeout", ns->n_client_delete_timeout, db);
 	info_append_uint64("client-delete-not-found", ns->n_client_delete_not_found, db);
 
 	info_append_uint64("client-udf-complete", ns->n_client_udf_complete, db);
-	info_append_uint64("client-udf-timeout", ns->n_client_udf_timeout, db);
 	info_append_uint64("client-udf-error", ns->n_client_udf_error, db);
+	info_append_uint64("client-udf-timeout", ns->n_client_udf_timeout, db);
 
 	info_append_uint64("client-lua-read-success", ns->n_client_lua_read_success, db);
 	info_append_uint64("client-lua-write-success", ns->n_client_lua_write_success, db);
@@ -5396,19 +5396,19 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// Batch sub-transaction stats.
 
 	info_append_uint64("batch-sub-proxy-complete", ns->n_batch_sub_proxy_complete, db);
-	info_append_uint64("batch-sub-proxy-timeout", ns->n_batch_sub_proxy_timeout, db);
 	info_append_uint64("batch-sub-proxy-error", ns->n_batch_sub_proxy_error, db);
+	info_append_uint64("batch-sub-proxy-timeout", ns->n_batch_sub_proxy_timeout, db);
 
 	info_append_uint64("batch-sub-read-success", ns->n_batch_sub_read_success, db);
-	info_append_uint64("batch-sub-read-timeout", ns->n_batch_sub_read_timeout, db);
 	info_append_uint64("batch-sub-read-error", ns->n_batch_sub_read_error, db);
+	info_append_uint64("batch-sub-read-timeout", ns->n_batch_sub_read_timeout, db);
 	info_append_uint64("batch-sub-read-not-found", ns->n_batch_sub_read_not_found, db);
 
 	// Internal-UDF sub-transaction stats.
 
 	info_append_uint64("udf-sub-udf-complete", ns->n_udf_sub_udf_complete, db);
-	info_append_uint64("udf-sub-udf-timeout", ns->n_udf_sub_udf_timeout, db);
 	info_append_uint64("udf-sub-udf-error", ns->n_udf_sub_udf_error, db);
+	info_append_uint64("udf-sub-udf-timeout", ns->n_udf_sub_udf_timeout, db);
 
 	info_append_uint64("udf-sub-lua-read-success", ns->n_udf_sub_lua_read_success, db);
 	info_append_uint64("udf-sub-lua-write-success", ns->n_udf_sub_lua_write_success, db);
