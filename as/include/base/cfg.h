@@ -37,13 +37,10 @@
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/cf_atomic.h"
 
-#include "hist.h"
-#include "hist_track.h"
 #include "socket.h"
 #include "util.h"
 
 #include "base/cluster_config.h"
-#include "base/datamodel.h"
 #include "base/security_config.h"
 
 
@@ -58,9 +55,20 @@ struct as_namespace_s;
 // Typedefs and constants.
 //
 
+#define AS_CLUSTER_SZ 128
+#define AS_NAMESPACE_SZ 32
+
 #define MAX_DEMARSHAL_THREADS 256
 #define MAX_FABRIC_WORKERS 128
 #define MAX_BATCH_THREADS 64
+
+// Declare bools with PAD_BOOL so they can't share a 4-byte space with other
+// bools, chars or shorts. This prevents adjacent bools set concurrently in
+// different threads (albeit very unlikely) from interfering with each other.
+// Add others (e.g. PAD_UINT8, PAD_UINT16 ...) as needed.
+#define PGLUE(a, b) a##b
+#define PBOOL(line) bool PGLUE(pad_, line)[3]; bool
+#define PAD_BOOL PBOOL(__LINE__)
 
 typedef struct as_config_s {
 

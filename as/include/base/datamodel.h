@@ -47,22 +47,11 @@
 #include "util.h"
 #include "vmapx.h"
 
+#include "base/cfg.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/transaction_policy.h"
 
-
-
-// Declare bools with PAD_BOOL so they can't share a 4-byte space with other
-// bools, chars or shorts. This prevents adjacent bools set concurrently in
-// different threads (albeit very unlikely) from interfering with each other.
-// Add others (e.g. PAD_UINT8, PAD_UINT16 ...) as needed.
-// TODO - here until include loops with cfg.h can be untangled.
-#define PGLUE(a, b) a##b
-#define PBOOL(line) bool PGLUE(pad_, line)[3]; bool
-#define PAD_BOOL PBOOL(__LINE__)
-
-#define AS_CLUSTER_SZ 128
 
 #define SINDEX 1
 
@@ -77,11 +66,6 @@
  * [Note:  The legacy size is used for backward-compatibility with previous releases.]
  */
 #define AS_CLUSTER_DEFAULT_SZ (AS_CLUSTER_LEGACY_SZ)
-
-/* AS_NAMESPACE_SZ
- * The maximum number of namespaces that can exist at any one moment
- */
-#define AS_NAMESPACE_SZ 32
 
 #define AS_STORAGE_MAX_DEVICES 32 // maximum devices per namespace
 #define AS_STORAGE_MAX_FILES 32 // maximum files per namespace
