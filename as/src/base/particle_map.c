@@ -2858,8 +2858,13 @@ packed_map_op_unpack_hdridx(packed_map_op *op)
 
 		as_msgpack_ext ext;
 
-		as_unpack_ext(&pk, &ext);
-		as_unpack_size(&pk);	// skip the packed nil
+		if (as_unpack_ext(&pk, &ext) != 0) {
+			return false;
+		}
+
+		if (as_unpack_size(&pk) < 0) {	// skip the packed nil
+			return false;
+		}
 
 		pmi->flags = ext.type;
 		op->ele_count--;
