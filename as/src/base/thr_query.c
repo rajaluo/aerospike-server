@@ -118,6 +118,7 @@
 #include "base/aggr.h"
 #include "base/as_stap.h"
 #include "base/datamodel.h"
+#include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
@@ -3147,11 +3148,6 @@ as_query_gconfig_default(as_config *c)
 	c->query_untracked_time_ms   = AS_QUERY_UNTRACKED_TIME;
 
 	c->partitions_pre_reserved       = false;
-
-	// Aggregation
-	c->udf_runtime_max_memory    = ULONG_MAX;
-	c->udf_runtime_max_gmemory   = ULONG_MAX;
-	c->udf_runtime_gmemory_used  = 0;
 }
 
 uint32_t

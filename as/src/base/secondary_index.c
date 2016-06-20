@@ -106,6 +106,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/proto.h"
 #include "base/stats.h"
 #include "base/system_metadata.h"
 #include "base/thr_sindex.h"

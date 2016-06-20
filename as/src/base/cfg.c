@@ -310,8 +310,6 @@ typedef enum {
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
-	CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY, // TODO - unused?
-	CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY, // TODO - unused?
 	CASE_SERVICE_USE_QUEUE_PER_DEVICE,
 	CASE_SERVICE_WORK_DIRECTORY,
 	CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE,
@@ -359,6 +357,8 @@ typedef enum {
 	CASE_SERVICE_SCHEDULER_TYPE,
 	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS,
 	CASE_SERVICE_TRIAL_ACCOUNT_KEY,
+	CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY,
+	CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY,
 
 	// Service paxos protocol options (value tokens):
 	CASE_SERVICE_PAXOS_PROTOCOL_V1,
@@ -724,8 +724,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
-		{ "udf-runtime-max-gmemory",		CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY },
-		{ "udf-runtime-max-memory",			CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY },
 		{ "use-queue-per-device",			CASE_SERVICE_USE_QUEUE_PER_DEVICE },
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "write-duplicate-resolution-disable", CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE },
@@ -771,6 +769,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scheduler-type",					CASE_SERVICE_SCHEDULER_TYPE },
 		{ "transaction-duplicate-threads",	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS },
 		{ "trial-account-key",				CASE_SERVICE_TRIAL_ACCOUNT_KEY },
+		{ "udf-runtime-max-gmemory",		CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY },
+		{ "udf-runtime-max-memory",			CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1792,7 +1792,6 @@ as_config_init(const char *config_file)
 	as_set* p_set = NULL; // local variable used for set initialization
 	as_sindex_config_var si_cfg;
 
-	uint64_t config_val = 0;
 	cc_group_t cluster_group_id = 0; // hold the group name while we process nodes (0 not a valid ID #)
 	cc_node_t cluster_node_id; // capture the node id in a group
 
@@ -2118,15 +2117,7 @@ as_config_init(const char *config_file)
 				c->sindex_builder_threads = cfg_u32(&line, 1, MAX_SINDEX_BUILDER_THREADS);
 				break;
 			case CASE_SERVICE_SINDEX_DATA_MAX_MEMORY:
-				config_val = cfg_u64_no_checks(&line);
-				if (config_val <  cf_atomic64_get(c->sindex_data_memory_used)) {
-					cf_warning(AS_CFG, "sindex-data-max-memory must"
-							" be greater than existing used memory %ld (line %d)",
-							cf_atomic64_get(c->sindex_data_memory_used), line_num);
-				}
-				else {
-					c->sindex_data_max_memory = config_val; // this is in addition to namespace memory
-				}
+				c->sindex_data_max_memory = cfg_u64_no_checks(&line);
 				break;
 			case CASE_SERVICE_SNUB_NODES:
 				c->snub_nodes = cfg_bool(&line);
@@ -2145,18 +2136,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_TRANSACTION_RETRY_MS:
 				c->transaction_retry_ms = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY:
-				config_val = cfg_u64_no_checks(&line);
-				if (config_val < c->udf_runtime_gmemory_used) {
-					cf_crash_nostack(AS_CFG, "udf-runtime-max-gmemory must"
-							" be greater than existing used memory %ld (line %d)",
-							cf_atomic_int_get(c->udf_runtime_gmemory_used), line_num);
-				}
-				c->udf_runtime_max_gmemory = config_val;
-				break;
-			case CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY:
-				config_val = cfg_u64_no_checks(&line);
 				break;
 			case CASE_SERVICE_USE_QUEUE_PER_DEVICE:
 				c->use_queue_per_device = cfg_bool(&line);
@@ -2220,6 +2199,8 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_SCHEDULER_TYPE:
 			case CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS:
 			case CASE_SERVICE_TRIAL_ACCOUNT_KEY:
+			case CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY:
+			case CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY:
 				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
@@ -2961,15 +2942,7 @@ as_config_init(const char *config_file)
 		case NAMESPACE_SINDEX:
 			switch(cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
 			case CASE_NAMESPACE_SINDEX_DATA_MAX_MEMORY:
-				config_val = cfg_u64_no_checks(&line);
-				if (config_val < cf_atomic64_get(ns->sindex_data_memory_used)) {
-					cf_warning(AS_CFG, "sindex-data-max-memory must"
-							" be greater than existing used memory %ld (line %d)",
-							cf_atomic64_get(ns->sindex_data_memory_used), line_num);
-				}
-				else {
-					ns->sindex_data_max_memory = config_val; // this is in addition to namespace memory
-				}
+				ns->sindex_data_max_memory = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SINDEX_NUM_PARTITIONS:
 				// FIXME - minimum should be 1, but currently crashes.

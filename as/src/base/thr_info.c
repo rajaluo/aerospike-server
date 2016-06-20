@@ -1981,8 +1981,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32("transaction-pending-limit", g_config.transaction_pending_limit, db);
 	info_append_bool("transaction-repeatable-read", g_config.transaction_repeatable_read, db);
 	info_append_uint32("transaction-retry-ms", g_config.transaction_retry_ms, db);
-	info_append_uint64("udf-runtime-max-gmemory", g_config.udf_runtime_max_gmemory, db);
-	info_append_uint64("udf-runtime-max-memory", g_config.udf_runtime_max_memory, db);
 	info_append_bool("use-queue-per-device", g_config.use_queue_per_device, db);
 	// TODO - why no work-directory?
 	info_append_bool("write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable, db);
@@ -2671,28 +2669,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 		}
 #endif
-		else if (0 == as_info_parameter_get(params, "udf-runtime-gmax-memory", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "global udf-runtime-max-memory = %"PRIu64"", val);
-			if (val > g_config.udf_runtime_max_gmemory)
-				g_config.udf_runtime_max_gmemory = val;
-			if (val < (g_config.udf_runtime_max_gmemory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of udf-runtime-gmax-memory from %"PRIu64" to %"PRIu64, g_config.udf_runtime_max_gmemory, val);
-			g_config.udf_runtime_max_gmemory = val;
-		}
-		else if (0 == as_info_parameter_get(params, "udf-runtime-max-memory", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "udf-runtime-max-memory = %"PRIu64"", val);
-			if (val > g_config.udf_runtime_max_memory)
-				g_config.udf_runtime_max_memory = val;
-			if (val < (g_config.udf_runtime_max_memory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of udf-runtime-max-memory from %"PRIu64" to %"PRIu64, g_config.udf_runtime_max_memory, val);
-			g_config.udf_runtime_max_memory = val;
-		}
 		else if (0 == as_info_parameter_get(params, "query-buf-size", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-buf-size = %"PRIu64"", val);

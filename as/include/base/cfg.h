@@ -153,8 +153,6 @@ typedef struct as_config_s {
 	uint32_t		transaction_pending_limit; // 0 means no limit
 	PAD_BOOL		transaction_repeatable_read;
 	uint32_t		transaction_retry_ms;
-	uint64_t		udf_runtime_max_gmemory; // maximum runtime memory allowed for all UDF - TODO - used?
-	uint64_t		udf_runtime_max_memory; // maximum runtime memory allowed for per UDF - TODO - used?
 	PAD_BOOL		use_queue_per_device;
 	char*			work_directory;
 	PAD_BOOL		write_duplicate_resolution_disable;
@@ -269,8 +267,7 @@ typedef struct as_config_s {
 	xdr_lastship_s	xdr_lastship[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
 	uint64_t		xdr_self_lastshiptime[DC_MAX_NUM]; // last XDR shipping by this node
 
-	cf_atomic64	    sindex_data_memory_used;  // TODO - used?
-	cf_atomic_int	udf_runtime_gmemory_used; // TODO - used?
+	cf_atomic64	    sindex_data_memory_used;
 
 	// Namespaces.
 	struct as_namespace_s* namespaces[AS_NAMESPACE_SZ];
