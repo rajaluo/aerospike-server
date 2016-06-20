@@ -34,7 +34,6 @@ const xdr_cfg_opt XDR_GLOBAL_OPTS[] = {
 const xdr_cfg_opt XDR_NS_OPTS[] = {
 		{ "enable-xdr",						XDR_CASE_NS_ENABLE_XDR },
 		{ "xdr-remote-datacenter",			XDR_CASE_NS_XDR_REMOTE_DATACENTER },
-		{ "default-ttl",					XDR_CASE_NS_DEFAULT_TTL },
 		{ "max-ttl",						XDR_CASE_NS_MAX_TTL },
 		{ "storage-engine",					XDR_CASE_NS_STORAGE_ENGINE_BEGIN },
 		{ "set",							XDR_CASE_NS_SET_BEGIN },
