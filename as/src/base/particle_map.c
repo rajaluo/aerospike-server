@@ -6657,7 +6657,7 @@ result_data_set_index_rank_count(cdt_result_data *rd, uint32_t start, uint32_t c
 				int64_t n = start + i;
 
 				if (is_reverse) {
-					n = ele_count - n - count;
+					n = ele_count - n - 1;
 				}
 
 				cdt_container_builder_add_int64(&builder, n);
