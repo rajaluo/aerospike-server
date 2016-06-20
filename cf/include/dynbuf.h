@@ -56,6 +56,14 @@ extern int cf_dyn_buf_chomp(cf_dyn_buf *db);
 extern char *cf_dyn_buf_strdup(cf_dyn_buf *db);
 extern void cf_dyn_buf_free(cf_dyn_buf *db);
 
+// Helpers to append name value pairs to a cf_dyn_buf in pattern: name=value;
+void info_append_bool(cf_dyn_buf *db, const char *name, bool value);
+void info_append_int(cf_dyn_buf *db, const char *name, int value);
+void info_append_string(cf_dyn_buf *db, const char *name, const char *value);
+void info_append_uint32(cf_dyn_buf *db, const char *name, uint32_t value);
+void info_append_uint64(cf_dyn_buf *db, const char *name, uint64_t value);
+void info_append_uint64_x(cf_dyn_buf *db, const char *name, uint64_t value);
+
 typedef struct cf_buf_builder_s {
 	size_t	alloc_sz;
 	size_t	used_sz;

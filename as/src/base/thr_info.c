@@ -239,56 +239,6 @@ info_partition_getstates(as_partition_states *ps)
 	return;
 }
 
-//
-// DYNAMIC FUNCTIONS
-// These functions are internal bits that allow us to gather some basic
-// statistics
-//
-
-void
-info_append_bool(const char *stats_name, bool value, cf_dyn_buf *db)
-{
-	cf_dyn_buf_append_char(db, ';');
-	cf_dyn_buf_append_string(db, stats_name);
-	cf_dyn_buf_append_char(db, '=');
-	cf_dyn_buf_append_string(db, value ? "true" : "false");
-}
-
-void
-info_append_int(const char *stats_name, int value, cf_dyn_buf *db)
-{
-	cf_dyn_buf_append_char(db, ';');
-	cf_dyn_buf_append_string(db, stats_name);
-	cf_dyn_buf_append_char(db, '=');
-	cf_dyn_buf_append_int(db, value);
-}
-
-void
-info_append_uint32(const char *stats_name, uint32_t value, cf_dyn_buf *db)
-{
-	cf_dyn_buf_append_char(db, ';');
-	cf_dyn_buf_append_string(db, stats_name);
-	cf_dyn_buf_append_char(db, '=');
-	cf_dyn_buf_append_uint32(db, value);
-}
-
-void
-info_append_uint64(const char *stats_name, uint64_t value, cf_dyn_buf *db)
-{
-	cf_dyn_buf_append_char(db, ';');
-	cf_dyn_buf_append_string(db, stats_name);
-	cf_dyn_buf_append_char(db, '=');
-	cf_dyn_buf_append_uint64(db, value);
-}
-
-void
-info_append_string(const char *stats_name, const char *value, cf_dyn_buf *db)
-{
-	cf_dyn_buf_append_char(db, ';');
-	cf_dyn_buf_append_string(db, stats_name);
-	cf_dyn_buf_append_char(db, '=');
-	cf_dyn_buf_append_string(db, value);
-}
 
 int
 info_get_utilization(cf_dyn_buf *db)
@@ -329,17 +279,17 @@ info_get_utilization(cf_dyn_buf *db)
 						? (((total_memory_size - used_memory_size) * 100L) / total_memory_size)
 						: 0;
 
-	info_append_uint64("objects", total_number_objects, db);
-	info_append_uint64("sub-records", total_number_objects_sub, db);
-	info_append_uint64("total-bytes-disk", total_disk_size, db);
-	info_append_uint64("used-bytes-disk", used_disk_size, db);
-	info_append_uint64("free-pct-disk", disk_free_pct, db);
-	info_append_uint64("total-bytes-memory", total_memory_size, db);
-	info_append_uint64("used-bytes-memory", used_memory_size, db);
-	info_append_uint64("data-used-bytes-memory", used_data_memory, db);
-	info_append_uint64("index-used-bytes-memory", used_pindex_memory, db);
-	info_append_uint64("sindex-used-bytes-memory", used_sindex_memory, db);
-	info_append_uint64("free-pct-memory", mem_free_pct, db);
+	info_append_uint64(db, "objects", total_number_objects);
+	info_append_uint64(db, "sub-records", total_number_objects_sub);
+	info_append_uint64(db, "total-bytes-disk", total_disk_size);
+	info_append_uint64(db, "used-bytes-disk", used_disk_size);
+	info_append_uint64(db, "free-pct-disk", disk_free_pct);
+	info_append_uint64(db, "total-bytes-memory", total_memory_size);
+	info_append_uint64(db, "used-bytes-memory", used_memory_size);
+	info_append_uint64(db, "data-used-bytes-memory", used_data_memory);
+	info_append_uint64(db, "index-used-bytes-memory", used_pindex_memory);
+	info_append_uint64(db, "sindex-used-bytes-memory", used_sindex_memory);
+	info_append_uint64(db, "free-pct-memory", mem_free_pct);
 
 	return 0;
 }
@@ -365,106 +315,104 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "cluster_size=");
 	cf_dyn_buf_append_int(db, g_paxos->cluster_size);
 
-	cf_dyn_buf_append_string(db, ";cluster_key=");
-	cf_dyn_buf_append_uint64_x(db, as_paxos_get_cluster_key()); // not in ticker
+	info_append_uint64_x(db, "cluster_key", as_paxos_get_cluster_key()); // not in ticker
+	info_append_bool(db, "cluster_integrity", as_paxos_get_cluster_integrity(g_paxos)); // not in ticker
 
-	info_append_bool("cluster_integrity", as_paxos_get_cluster_integrity(g_paxos), db); // not in ticker
-
-	info_append_uint64("uptime", (cf_getms() - g_start_ms) / 1000, db); // not in ticker
+	info_append_uint64(db, "uptime", (cf_getms() - g_start_ms) / 1000); // not in ticker
 
 	int freepct;
 	bool swapping;
 
 	cf_meminfo(NULL, NULL, &freepct, &swapping);
-	info_append_int("system_free_mem_pct", freepct, db);
-	info_append_bool("system_swapping", swapping, db);
+	info_append_int(db, "system_free_mem_pct", freepct);
+	info_append_bool(db, "system_swapping", swapping);
 
 	info_get_utilization(db); // aggregated from namespace stats
 
-	info_append_int("queue", thr_tsvc_queue_get_size(), db);
-	info_append_int("info_queue", as_info_queue_get_size(), db);
-	info_append_int("delete_queue", as_nsup_queue_get_size(), db);
+	info_append_int(db, "queue", thr_tsvc_queue_get_size());
+	info_append_int(db, "info_queue", as_info_queue_get_size());
+	info_append_int(db, "delete_queue", as_nsup_queue_get_size());
 	// TODO - why no rw_request hash count?
-	info_append_int("proxy_in_progress", as_proxy_hash_count(), db);
-	info_append_uint64("record_refs", g_stats.global_record_ref_count, db);
+	info_append_int(db, "proxy_in_progress", as_proxy_hash_count());
+	info_append_uint64(db, "record_refs", g_stats.global_record_ref_count);
 
 	// TODO - why no heartbeat or fabric connections?
-	info_append_uint64("client_connections", g_stats.proto_connections_opened - g_stats.proto_connections_closed, db);
+	info_append_uint64(db, "client_connections", g_stats.proto_connections_opened - g_stats.proto_connections_closed);
 
-	info_append_uint64("heartbeat_received_self", g_stats.heartbeat_received_self, db);
-	info_append_uint64("heartbeat_received_foreign", g_stats.heartbeat_received_foreign, db);
+	info_append_uint64(db, "heartbeat_received_self", g_stats.heartbeat_received_self);
+	info_append_uint64(db, "heartbeat_received_foreign", g_stats.heartbeat_received_foreign);
 
-	info_append_uint64("transactions", g_stats.proto_transactions, db); // not in ticker
-	info_append_uint64("reaped_fds", g_stats.reaper_count, db); // not in ticker
+	info_append_uint64(db, "transactions", g_stats.proto_transactions); // not in ticker
+	info_append_uint64(db, "reaped_fds", g_stats.reaper_count); // not in ticker
 
-	info_append_uint64("proxy_retry", g_stats.proxy_retry, db); // not in ticker
+	info_append_uint64(db, "proxy_retry", g_stats.proxy_retry); // not in ticker
 
-	info_append_uint64("demarshal-error", g_stats.n_demarshal_error, db);
-	info_append_uint64("tsvc-client-error", g_stats.n_tsvc_client_error, db);
-	info_append_uint64("tsvc-batch-sub-error", g_stats.n_tsvc_batch_sub_error, db);
-	info_append_uint64("tsvc-udf-sub-error", g_stats.n_tsvc_udf_sub_error, db);
+	info_append_uint64(db, "demarshal-error", g_stats.n_demarshal_error);
+	info_append_uint64(db, "tsvc-client-error", g_stats.n_tsvc_client_error);
+	info_append_uint64(db, "tsvc-batch-sub-error", g_stats.n_tsvc_batch_sub_error);
+	info_append_uint64(db, "tsvc-udf-sub-error", g_stats.n_tsvc_udf_sub_error);
 
-	info_append_uint64("batch_index_initiate", g_stats.batch_index_initiate, db); // not in ticker
+	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
 
 	cf_dyn_buf_append_string(db, ";batch_index_queue=");
 	as_batch_queues_info(db); // not in ticker
 
-	info_append_uint64("batch_index_complete", g_stats.batch_index_complete, db);
-	info_append_uint64("batch_index_errors", g_stats.batch_index_errors, db);
-	info_append_uint64("batch_index_timeout", g_stats.batch_index_timeout, db);
+	info_append_uint64(db, "batch_index_complete", g_stats.batch_index_complete);
+	info_append_uint64(db, "batch_index_errors", g_stats.batch_index_errors);
+	info_append_uint64(db, "batch_index_timeout", g_stats.batch_index_timeout);
 
 	// Everything below is not in ticker...
 
-	info_append_int("batch_index_unused_buffers", as_batch_unused_buffers(), db);
-	info_append_uint64("batch_index_huge_buffers", g_stats.batch_index_huge_buffers, db);
-	info_append_uint64("batch_index_created_buffers", g_stats.batch_index_created_buffers, db);
-	info_append_uint64("batch_index_destroyed_buffers", g_stats.batch_index_destroyed_buffers, db);
+	info_append_int(db, "batch_index_unused_buffers", as_batch_unused_buffers());
+	info_append_uint64(db, "batch_index_huge_buffers", g_stats.batch_index_huge_buffers);
+	info_append_uint64(db, "batch_index_created_buffers", g_stats.batch_index_created_buffers);
+	info_append_uint64(db, "batch_index_destroyed_buffers", g_stats.batch_index_destroyed_buffers);
 
-	info_append_uint64("batch_initiate", g_stats.batch_initiate, db);
-	info_append_int("batch_queue", as_batch_direct_queue_size(), db);
-	info_append_uint64("batch_timeout", g_stats.batch_timeout, db);
-	info_append_uint64("batch_errors", g_stats.batch_errors, db);
+	info_append_uint64(db, "batch_initiate", g_stats.batch_initiate);
+	info_append_int(db, "batch_queue", as_batch_direct_queue_size());
+	info_append_uint64(db, "batch_timeout", g_stats.batch_timeout);
+	info_append_uint64(db, "batch_errors", g_stats.batch_errors);
 
-	info_append_int("scans_active", as_scan_get_active_job_count(), db);
+	info_append_int(db, "scans_active", as_scan_get_active_job_count());
 
-	info_append_uint32("query_short_running", g_query_short_running, db);
-	info_append_uint32("query_long_running", g_query_long_running, db);
+	info_append_uint32(db, "query_short_running", g_query_short_running);
+	info_append_uint32(db, "query_long_running", g_query_long_running);
 
-	info_append_uint64("sindex_ucgarbage_found", g_stats.query_false_positives, db);
-	info_append_uint64("sindex_gc_locktimedout", g_stats.sindex_gc_timedout, db);
-	info_append_uint64("sindex_gc_inactivity_dur", g_stats.sindex_gc_inactivity_dur, db);
-	info_append_uint64("sindex_gc_activity_dur", g_stats.sindex_gc_activity_dur, db);
-	info_append_uint64("sindex_gc_list_creation_time", g_stats.sindex_gc_list_creation_time, db);
-	info_append_uint64("sindex_gc_list_deletion_time", g_stats.sindex_gc_list_deletion_time, db);
-	info_append_uint64("sindex_gc_objects_validated", g_stats.sindex_gc_objects_validated, db);
-	info_append_uint64("sindex_gc_garbage_found", g_stats.sindex_gc_garbage_found, db);
-	info_append_uint64("sindex_gc_garbage_cleaned", g_stats.sindex_gc_garbage_cleaned, db);
+	info_append_uint64(db, "sindex_ucgarbage_found", g_stats.query_false_positives);
+	info_append_uint64(db, "sindex_gc_locktimedout", g_stats.sindex_gc_timedout);
+	info_append_uint64(db, "sindex_gc_inactivity_dur", g_stats.sindex_gc_inactivity_dur);
+	info_append_uint64(db, "sindex_gc_activity_dur", g_stats.sindex_gc_activity_dur);
+	info_append_uint64(db, "sindex_gc_list_creation_time", g_stats.sindex_gc_list_creation_time);
+	info_append_uint64(db, "sindex_gc_list_deletion_time", g_stats.sindex_gc_list_deletion_time);
+	info_append_uint64(db, "sindex_gc_objects_validated", g_stats.sindex_gc_objects_validated);
+	info_append_uint64(db, "sindex_gc_garbage_found", g_stats.sindex_gc_garbage_found);
+	info_append_uint64(db, "sindex_gc_garbage_cleaned", g_stats.sindex_gc_garbage_cleaned);
 
 	char paxos_principal[19];
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
-	info_append_string("paxos_principal", paxos_principal, db);
+	info_append_string(db, "paxos_principal", paxos_principal);
 
-	info_append_bool("migrate_allowed", as_partition_get_migration_flag(), db);
+	info_append_bool(db, "migrate_allowed", as_partition_get_migration_flag());
 
 	uint64_t migrate_partitions_remaining = as_partition_remaining_migrations();
 
-	info_append_uint64("migrate_progress_send", migrate_partitions_remaining, db);
-	info_append_uint64("migrate_progress_recv", migrate_partitions_remaining, db);
-	info_append_uint64("migrate_partitions_remaining", migrate_partitions_remaining, db);
+	info_append_uint64(db, "migrate_progress_send", migrate_partitions_remaining);
+	info_append_uint64(db, "migrate_progress_recv", migrate_partitions_remaining);
+	info_append_uint64(db, "migrate_partitions_remaining", migrate_partitions_remaining);
 
 	as_partition_states ps;
 	info_partition_getstates(&ps);
 
-	info_append_int("partition_actual", ps.sync_actual, db);
-	info_append_int("partition_replica", ps.sync_replica, db);
-	info_append_int("partition_desync", ps.desync, db);
-	info_append_int("partition_absent", ps.absent, db);
-	info_append_int("partition_zombie", ps.zombie, db);
-	info_append_int("partition_object_count", ps.n_objects, db);
-	info_append_int("partition_ref_count", ps.n_ref_count, db);
+	info_append_int(db, "partition_actual", ps.sync_actual);
+	info_append_int(db, "partition_replica", ps.sync_replica);
+	info_append_int(db, "partition_desync", ps.desync);
+	info_append_int(db, "partition_absent", ps.absent);
+	info_append_int(db, "partition_zombie", ps.zombie);
+	info_append_int(db, "partition_object_count", ps.n_objects);
+	info_append_int(db, "partition_ref_count", ps.n_ref_count);
 
-	info_append_uint64("fabric_msgs_sent", g_stats.fabric_msgs_sent, db);
-	info_append_uint64("fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd, db);
+	info_append_uint64(db, "fabric_msgs_sent", g_stats.fabric_msgs_sent);
+	info_append_uint64(db, "fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd);
 
 	cf_dyn_buf_append_string(db, ";");
 	as_xdr_get_stats(name, db);
@@ -1893,104 +1841,102 @@ info_service_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "paxos-single-replica-limit=");
 	cf_dyn_buf_append_uint32(db, g_config.paxos_single_replica_limit);
 
-	info_append_string("pidfile", g_config.pidfile ? g_config.pidfile : "null", db);
-	info_append_int("service-threads", g_config.n_service_threads, db);
-	info_append_int("transaction-queues", g_config.n_transaction_queues, db);
-	info_append_int("transaction-threads-per-queue", g_config.n_transaction_threads_per_queue, db);
-	info_append_int("proto-fd-max", g_config.n_proto_fd_max, db); // TODO - rename to client-fd-max?
+	info_append_string(db, "pidfile", g_config.pidfile ? g_config.pidfile : "null");
+	info_append_int(db, "service-threads", g_config.n_service_threads);
+	info_append_int(db, "transaction-queues", g_config.n_transaction_queues);
+	info_append_int(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
+	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max); // TODO - rename to client-fd-max?
 
-	info_append_bool("activate-benchmarks-svc", g_config.svc_benchmarks_active, db);
-	info_append_bool("activate-hist-info", g_config.info_hist_active, db);
-	info_append_bool("allow-inline-transactions", g_config.allow_inline_transactions, db);
-	info_append_int("batch-threads", g_config.n_batch_threads, db);
-	info_append_uint32("batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue, db);
-	info_append_uint32("batch-max-requests", g_config.batch_max_requests, db);
-	info_append_uint32("batch-max-unused-buffers", g_config.batch_max_unused_buffers, db);
-	info_append_uint32("batch-priority", g_config.batch_priority, db);
-	info_append_int("batch-index-threads", g_config.n_batch_index_threads, db);
-	info_append_int("fabric-workers", g_config.n_fabric_workers, db);
-	info_append_bool("generation-disable", g_config.generation_disable, db);
-	info_append_uint32("hist-track-back", g_config.hist_track_back, db);
-	info_append_uint32("hist-track-slice", g_config.hist_track_slice, db);
-	info_append_string("hist-track-thresholds", g_config.hist_track_thresholds, db);
-	info_append_bool("info-threads", g_config.n_info_threads, db);
-	info_append_bool("ldt-benchmarks", g_config.ldt_benchmarks, db);
-	info_append_bool("log-local-time", cf_fault_is_using_local_time(), db);
-	info_append_int("migrate-max-num-incoming", g_config.migrate_max_num_incoming, db);
-	info_append_int("migrate-rx-lifetime-ms", g_config.migrate_rx_lifetime_ms, db);
-	info_append_int("migrate-threads", g_config.n_migrate_threads, db);
-	info_append_uint32("nsup-delete-sleep", g_config.nsup_delete_sleep, db);
-	info_append_uint32("nsup-period", g_config.nsup_period, db);
-	info_append_bool("nsup-startup-evict", g_config.nsup_startup_evict, db);
-	info_append_uint64("paxos-max-cluster-size", g_config.paxos_max_cluster_size, db);
+	info_append_bool(db, "activate-benchmarks-svc", g_config.svc_benchmarks_active);
+	info_append_bool(db, "activate-hist-info", g_config.info_hist_active);
+	info_append_bool(db, "allow-inline-transactions", g_config.allow_inline_transactions);
+	info_append_int(db, "batch-threads", g_config.n_batch_threads);
+	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
+	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
+	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
+	info_append_uint32(db, "batch-priority", g_config.batch_priority);
+	info_append_int(db, "batch-index-threads", g_config.n_batch_index_threads);
+	info_append_int(db, "fabric-workers", g_config.n_fabric_workers);
+	info_append_bool(db, "generation-disable", g_config.generation_disable);
+	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
+	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
+	info_append_string(db, "hist-track-thresholds", g_config.hist_track_thresholds);
+	info_append_bool(db, "info-threads", g_config.n_info_threads);
+	info_append_bool(db, "ldt-benchmarks", g_config.ldt_benchmarks);
+	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
+	info_append_int(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
+	info_append_int(db, "migrate-rx-lifetime-ms", g_config.migrate_rx_lifetime_ms);
+	info_append_int(db, "migrate-threads", g_config.n_migrate_threads);
+	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
+	info_append_uint32(db, "nsup-period", g_config.nsup_period);
+	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
+	info_append_uint64(db, "paxos-max-cluster-size", g_config.paxos_max_cluster_size);
 
-	info_append_string("paxos-protocol",
+	info_append_string(db, "paxos-protocol",
 			(AS_PAXOS_PROTOCOL_V1 == g_config.paxos_protocol ? "v1" :
 			  (AS_PAXOS_PROTOCOL_V2 == g_config.paxos_protocol ? "v2" :
 			   (AS_PAXOS_PROTOCOL_V3 == g_config.paxos_protocol ? "v3" :
 				(AS_PAXOS_PROTOCOL_V4 == g_config.paxos_protocol ? "v4" :
-				 (AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined"))))),
-			db);
+				 (AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined"))))));
 
-	info_append_string("paxos-recovery-policy",
+	info_append_string(db, "paxos-recovery-policy",
 			(AS_PAXOS_RECOVERY_POLICY_MANUAL == g_config.paxos_recovery_policy ? "manual" :
 			  (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER == g_config.paxos_recovery_policy ? "auto-dun-master" :
 			   (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL == g_config.paxos_recovery_policy ? "auto-dun-all" :
-			     (AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined")))),
-			db);
+			     (AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined")))));
 
-	info_append_uint32("paxos-retransmit-period", g_config.paxos_retransmit_period, db);
-	info_append_int("proto-fd-idle-ms", g_config.proto_fd_idle_ms, db);
-	info_append_int("proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms, db); // dynamic only
-	info_append_uint32("query-batch-size", g_config.query_bsize, db);
-	info_append_uint32("query-buf-size", g_config.query_buf_size, db); // dynamic only
-	info_append_uint32("query-bufpool-size", g_config.query_bufpool_size, db);
-	info_append_bool("query-in-transaction-thread", g_config.query_in_transaction_thr, db);
-	info_append_uint32("query-long-q-max-size", g_config.query_long_q_max_size, db);
-	info_append_bool("query-microbenchmark", g_config.query_enable_histogram, db); // dynamic only
-	info_append_bool("query-pre-reserve-partitions", g_config.partitions_pre_reserved, db);
-	info_append_uint32("query-priority", g_config.query_priority, db);
-	info_append_uint64("query-priority-sleep-us", g_config.query_sleep_us, db);
-	info_append_uint64("query-rec-count-bound", g_config.query_rec_count_bound, db);
-	info_append_bool("query-req-in-query-thread", g_config.query_req_in_query_thread, db);
-	info_append_uint32("query-req-max-inflight", g_config.query_req_max_inflight, db);
-	info_append_uint32("query-short-q-max-size", g_config.query_short_q_max_size, db);
-	info_append_uint32("query-threads", g_config.query_threads, db);
-	info_append_uint32("query-threshold", g_config.query_threshold, db);
-	info_append_uint64("query-untracked-time-ms", g_config.query_untracked_time_ms, db);
-	info_append_uint32("query-worker-threads", g_config.query_worker_threads, db);
-	info_append_bool("respond-client-on-master-completion", g_config.respond_client_on_master_completion, db);
-	info_append_bool("run-as-daemon", g_config.run_as_daemon, db);
-	info_append_uint32("scan-max-active", g_config.scan_max_active, db);
-	info_append_uint32("scan-max-done", g_config.scan_max_done, db);
-	info_append_uint32("scan-max-udf-transactions", g_config.scan_max_udf_transactions, db);
-	info_append_uint32("scan-threads", g_config.scan_threads, db);
-	info_append_uint32("sindex-builder-threads", g_config.sindex_builder_threads, db);
+	info_append_uint32(db, "paxos-retransmit-period", g_config.paxos_retransmit_period);
+	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
+	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
+	info_append_uint32(db, "query-batch-size", g_config.query_bsize);
+	info_append_uint32(db, "query-buf-size", g_config.query_buf_size); // dynamic only
+	info_append_uint32(db, "query-bufpool-size", g_config.query_bufpool_size);
+	info_append_bool(db, "query-in-transaction-thread", g_config.query_in_transaction_thr);
+	info_append_uint32(db, "query-long-q-max-size", g_config.query_long_q_max_size);
+	info_append_bool(db, "query-microbenchmark", g_config.query_enable_histogram); // dynamic only
+	info_append_bool(db, "query-pre-reserve-partitions", g_config.partitions_pre_reserved);
+	info_append_uint32(db, "query-priority", g_config.query_priority);
+	info_append_uint64(db, "query-priority-sleep-us", g_config.query_sleep_us);
+	info_append_uint64(db, "query-rec-count-bound", g_config.query_rec_count_bound);
+	info_append_bool(db, "query-req-in-query-thread", g_config.query_req_in_query_thread);
+	info_append_uint32(db, "query-req-max-inflight", g_config.query_req_max_inflight);
+	info_append_uint32(db, "query-short-q-max-size", g_config.query_short_q_max_size);
+	info_append_uint32(db, "query-threads", g_config.query_threads);
+	info_append_uint32(db, "query-threshold", g_config.query_threshold);
+	info_append_uint64(db, "query-untracked-time-ms", g_config.query_untracked_time_ms);
+	info_append_uint32(db, "query-worker-threads", g_config.query_worker_threads);
+	info_append_bool(db, "respond-client-on-master-completion", g_config.respond_client_on_master_completion);
+	info_append_bool(db, "run-as-daemon", g_config.run_as_daemon);
+	info_append_uint32(db, "scan-max-active", g_config.scan_max_active);
+	info_append_uint32(db, "scan-max-done", g_config.scan_max_done);
+	info_append_uint32(db, "scan-max-udf-transactions", g_config.scan_max_udf_transactions);
+	info_append_uint32(db, "scan-threads", g_config.scan_threads);
+	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 
 	if (g_config.sindex_data_max_memory != ULONG_MAX) {
-		info_append_uint64("sindex-data-max-memory", g_config.sindex_data_max_memory, db);
+		info_append_uint64(db, "sindex-data-max-memory", g_config.sindex_data_max_memory);
 	}
 	else {
-		info_append_string("sindex-data-max-memory", "ULONG_MAX", db);
+		info_append_string(db, "sindex-data-max-memory", "ULONG_MAX");
 	}
 
-	info_append_bool("sindex-gc-enable-histogram", g_config.sindex_gc_enable_histogram, db); // dynamic only
-	info_append_bool("snub-nodes", g_config.snub_nodes, db);
-	info_append_uint32("ticker-interval", g_config.ticker_interval, db);
-	info_append_int("transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000), db);
-	info_append_uint32("transaction-pending-limit", g_config.transaction_pending_limit, db);
-	info_append_bool("transaction-repeatable-read", g_config.transaction_repeatable_read, db);
-	info_append_uint32("transaction-retry-ms", g_config.transaction_retry_ms, db);
-	info_append_bool("use-queue-per-device", g_config.use_queue_per_device, db);
+	info_append_bool(db, "sindex-gc-enable-histogram", g_config.sindex_gc_enable_histogram); // dynamic only
+	info_append_bool(db, "snub-nodes", g_config.snub_nodes);
+	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
+	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
+	info_append_uint32(db, "transaction-pending-limit", g_config.transaction_pending_limit);
+	info_append_bool(db, "transaction-repeatable-read", g_config.transaction_repeatable_read);
+	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
+	info_append_bool(db, "use-queue-per-device", g_config.use_queue_per_device);
 	// TODO - why no work-directory?
-	info_append_bool("write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable, db);
+	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 
-	info_append_bool("asmalloc_enabled", g_config.asmalloc_enabled, db);
-	info_append_bool("fabric-dump-msgs", g_config.fabric_dump_msgs, db);
-	info_append_int("max-msgs-per-type", (int)g_config.max_msgs_per_type, db);
-	info_append_bool("memory-accounting", g_config.memory_accounting, db);
-	info_append_uint32("prole-extra-ttl", g_config.prole_extra_ttl, db);
-	info_append_bool("non-master-sets-delete", g_config.non_master_sets_delete, db); // dynamic only
+	info_append_bool(db, "asmalloc_enabled", g_config.asmalloc_enabled);
+	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
+	info_append_int(db, "max-msgs-per-type", (int)g_config.max_msgs_per_type);
+	info_append_bool(db, "memory-accounting", g_config.memory_accounting);
+	info_append_uint32(db, "prole-extra-ttl", g_config.prole_extra_ttl);
+	info_append_bool(db, "non-master-sets-delete", g_config.non_master_sets_delete); // dynamic only
 
 	return 0;
 }
@@ -2010,14 +1956,14 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "repl-factor=");
 	cf_dyn_buf_append_uint32(db, (uint32_t)ns->replication_factor);
 
-	info_append_uint64("memory-size", ns->memory_size, db);
-	info_append_uint64("default-ttl", ns->default_ttl, db);
+	info_append_uint64(db, "memory-size", ns->memory_size);
+	info_append_uint64(db, "default-ttl", ns->default_ttl);
 
-	info_append_bool("enable-xdr", ns->enable_xdr, db);
-	info_append_bool("sets-enable-xdr", ns->sets_enable_xdr, db);
-	info_append_bool("ns-forward-xdr-writes", ns->ns_forward_xdr_writes, db);
-	info_append_bool("allow-nonxdr-writes", ns->ns_allow_nonxdr_writes, db);
-	info_append_bool("allow-xdr-writes", ns->ns_allow_xdr_writes, db);
+	info_append_bool(db, "enable-xdr", ns->enable_xdr);
+	info_append_bool(db, "sets-enable-xdr", ns->sets_enable_xdr);
+	info_append_bool(db, "ns-forward-xdr-writes", ns->ns_forward_xdr_writes);
+	info_append_bool(db, "allow-nonxdr-writes", ns->ns_allow_nonxdr_writes);
+	info_append_bool(db, "allow-xdr-writes", ns->ns_allow_xdr_writes);
 
 	// Not true config, but act as config overrides:
 	cf_hist_track_get_settings(ns->read_hist, db);
@@ -2025,42 +1971,42 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	cf_hist_track_get_settings(ns->udf_hist, db);
 	cf_hist_track_get_settings(ns->write_hist, db);
 
-	info_append_bool("activate-benchmarks-batch-sub", ns->batch_sub_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-read", ns->read_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-storage", ns->storage_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-udf", ns->udf_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-udf-sub", ns->udf_sub_benchmarks_active, db);
-	info_append_bool("activate-benchmarks-write", ns->write_benchmarks_active, db);
-	info_append_bool("activate-hist-proxy", ns->proxy_hist_active, db);
-	info_append_uint32("cold-start-evict-ttl", ns->cold_start_evict_ttl, db);
+	info_append_bool(db, "activate-benchmarks-batch-sub", ns->batch_sub_benchmarks_active);
+	info_append_bool(db, "activate-benchmarks-read", ns->read_benchmarks_active);
+	info_append_bool(db, "activate-benchmarks-storage", ns->storage_benchmarks_active);
+	info_append_bool(db, "activate-benchmarks-udf", ns->udf_benchmarks_active);
+	info_append_bool(db, "activate-benchmarks-udf-sub", ns->udf_sub_benchmarks_active);
+	info_append_bool(db, "activate-benchmarks-write", ns->write_benchmarks_active);
+	info_append_bool(db, "activate-hist-proxy", ns->proxy_hist_active);
+	info_append_uint32(db, "cold-start-evict-ttl", ns->cold_start_evict_ttl);
 
 	if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
-		info_append_string("conflict-resolution-policy", "generation", db);
+		info_append_string(db, "conflict-resolution-policy", "generation");
 	}
 	else if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME) {
-		info_append_string("conflict-resolution-policy", "last-update-time", db);
+		info_append_string(db, "conflict-resolution-policy", "last-update-time");
 	}
 	else {
-		info_append_string("conflict-resolution-policy", "undefined", db);
+		info_append_string(db, "conflict-resolution-policy", "undefined");
 	}
 
-	info_append_bool("data-in-index", ns->data_in_index, db);
-	info_append_bool("disallow-null-setname", ns->disallow_null_setname, db);
-	info_append_uint32("evict-hist-buckets", ns->evict_hist_buckets, db);
-	info_append_uint32("evict-tenths-pct", ns->evict_tenths_pct, db);
-	info_append_int("high-water-disk-pct", (int)(ns->hwm_disk * 100), db);
-	info_append_int("high-water-memory-pct", (int)(ns->hwm_memory * 100), db);
-	info_append_bool("ldt-enabled", ns->ldt_enabled, db);
-	info_append_uint32("ldt-gc-rate", ns->ldt_gc_sleep_us / 1000000, db);
-	info_append_uint32("ldt-page-size", ns->ldt_page_size, db);
-	info_append_uint64("max-ttl", ns->max_ttl, db);
-	info_append_uint32("migrate-order", ns->migrate_order, db);
-	info_append_uint32("migrate-sleep", ns->migrate_sleep, db);
+	info_append_bool(db, "data-in-index", ns->data_in_index);
+	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
+	info_append_uint32(db, "evict-hist-buckets", ns->evict_hist_buckets);
+	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
+	info_append_int(db, "high-water-disk-pct", (int)(ns->hwm_disk * 100));
+	info_append_int(db, "high-water-memory-pct", (int)(ns->hwm_memory * 100));
+	info_append_bool(db, "ldt-enabled", ns->ldt_enabled);
+	info_append_uint32(db, "ldt-gc-rate", ns->ldt_gc_sleep_us / 1000000);
+	info_append_uint32(db, "ldt-page-size", ns->ldt_page_size);
+	info_append_uint64(db, "max-ttl", ns->max_ttl);
+	info_append_uint32(db, "migrate-order", ns->migrate_order);
+	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
 	// Note - no obj-size-hist-max, too much to reverse rounding algorithm.
-	info_append_string("read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME(), db);
-	info_append_bool("single-bin", ns->single_bin, db);
-	info_append_int("stop-writes-pct", (int)(ns->stop_writes_pct * 100), db);
-	info_append_string("write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME(), db);
+	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
+	info_append_bool(db, "single-bin", ns->single_bin);
+	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));
+	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
 	// TODO - report storage-type?
 
@@ -2072,7 +2018,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				break;
 			}
 
-			info_append_string("dev", ns->storage_devices[i], db);
+			info_append_string(db, "dev", ns->storage_devices[i]);
 		}
 
 		for (int i = 0; i < AS_STORAGE_MAX_FILES; i++) {
@@ -2080,28 +2026,28 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				break;
 			}
 
-			info_append_string("file", ns->storage_files[i], db);
+			info_append_string(db, "file", ns->storage_files[i]);
 		}
 
 		// TODO - report the shadows?
 
-		info_append_uint64("filesize", ns->storage_filesize, db);
-		info_append_string("scheduler-mode", ns->storage_scheduler_mode ? ns->storage_scheduler_mode : "null", db);
-		info_append_uint32("write-block-size", ns->storage_write_block_size, db);
-		info_append_bool("data-in-memory", ns->storage_data_in_memory, db);
-		info_append_bool("cold-start-empty", ns->storage_cold_start_empty, db);
-		info_append_uint32("defrag-lwm-pct", ns->storage_defrag_lwm_pct, db);
-		info_append_uint32("defrag-queue-min", ns->storage_defrag_queue_min, db);
-		info_append_uint32("defrag-sleep", ns->storage_defrag_sleep, db);
-		info_append_int("defrag-startup-minimum", ns->storage_defrag_startup_minimum, db);
-		info_append_bool("disable-odirect", ns->storage_disable_odirect, db);
-		info_append_bool("enable-osync", ns->storage_enable_osync, db);
-		info_append_uint64("flush-max-ms", ns->storage_flush_max_us / 1000, db);
-		info_append_uint64("fsync-max-sec", ns->storage_fsync_max_us / 1000000, db);
-		info_append_uint64("max-write-cache", ns->storage_max_write_cache, db);
-		info_append_uint32("min-avail-pct", ns->storage_min_avail_pct, db);
-		info_append_uint32("post-write-queue", ns->storage_post_write_queue, db);
-		info_append_uint32("write-threads", ns->storage_write_threads, db);
+		info_append_uint64(db, "filesize", ns->storage_filesize);
+		info_append_string(db, "scheduler-mode", ns->storage_scheduler_mode ? ns->storage_scheduler_mode : "null");
+		info_append_uint32(db, "write-block-size", ns->storage_write_block_size);
+		info_append_bool(db, "data-in-memory", ns->storage_data_in_memory);
+		info_append_bool(db, "cold-start-empty", ns->storage_cold_start_empty);
+		info_append_uint32(db, "defrag-lwm-pct", ns->storage_defrag_lwm_pct);
+		info_append_uint32(db, "defrag-queue-min", ns->storage_defrag_queue_min);
+		info_append_uint32(db, "defrag-sleep", ns->storage_defrag_sleep);
+		info_append_int(db, "defrag-startup-minimum", ns->storage_defrag_startup_minimum);
+		info_append_bool(db, "disable-odirect", ns->storage_disable_odirect);
+		info_append_bool(db, "enable-osync", ns->storage_enable_osync);
+		info_append_uint64(db, "flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint64(db, "fsync-max-sec", ns->storage_fsync_max_us / 1000000);
+		info_append_uint64(db, "max-write-cache", ns->storage_max_write_cache);
+		info_append_uint32(db, "min-avail-pct", ns->storage_min_avail_pct);
+		info_append_uint32(db, "post-write-queue", ns->storage_post_write_queue);
+		info_append_uint32(db, "write-threads", ns->storage_write_threads);
 	}
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_KV) {
@@ -2110,25 +2056,25 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				break;
 			}
 
-			info_append_string("dev", ns->storage_devices[i], db);
+			info_append_string(db, "dev", ns->storage_devices[i]);
 		}
 
-		info_append_uint64("filesize", ns->storage_filesize, db);
-		info_append_uint32("read-block-size", ns->storage_read_block_size, db);
-		info_append_uint32("write-block-size", ns->storage_write_block_size, db);
-		info_append_uint32("num-write-blocks", ns->storage_num_write_blocks, db);
-		info_append_bool("cond-write", ns->cond_write, db);
+		info_append_uint64(db, "filesize", ns->storage_filesize);
+		info_append_uint32(db, "read-block-size", ns->storage_read_block_size);
+		info_append_uint32(db, "write-block-size", ns->storage_write_block_size);
+		info_append_uint32(db, "num-write-blocks", ns->storage_num_write_blocks);
+		info_append_bool(db, "cond-write", ns->cond_write);
 	}
 
-	info_append_uint64("data-max-memory", ns->sindex_data_max_memory, db);
-	info_append_uint32("num-partitions", ns->sindex_num_partitions, db);
+	info_append_uint64(db, "data-max-memory", ns->sindex_data_max_memory);
+	info_append_uint32(db, "num-partitions", ns->sindex_num_partitions);
 
-	info_append_bool("strict", ns->geo2dsphere_within_strict, db);
-	info_append_uint32("min-level", (uint32_t)ns->geo2dsphere_within_min_level, db);
-	info_append_uint32("max-level", (uint32_t)ns->geo2dsphere_within_max_level, db);
-	info_append_uint32("max-cells", (uint32_t)ns->geo2dsphere_within_max_cells, db);
-	info_append_uint32("level-mod", (uint32_t)ns->geo2dsphere_within_level_mod, db);
-	info_append_uint32("earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters, db);
+	info_append_bool(db, "strict", ns->geo2dsphere_within_strict);
+	info_append_uint32(db, "min-level", (uint32_t)ns->geo2dsphere_within_min_level);
+	info_append_uint32(db, "max-level", (uint32_t)ns->geo2dsphere_within_max_level);
+	info_append_uint32(db, "max-cells", (uint32_t)ns->geo2dsphere_within_max_cells);
+	info_append_uint32(db, "level-mod", (uint32_t)ns->geo2dsphere_within_level_mod);
+	info_append_uint32(db, "earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters);
 
 	return 0;
 }
@@ -2142,37 +2088,37 @@ info_network_info_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "service-address=");
 	cf_dyn_buf_append_string(db, g_config.socket.addr);
 
-	info_append_int("service-port", g_config.socket.port, db);
+	info_append_int(db, "service-port", g_config.socket.port);
 
 	if (g_config.external_address) {
-		info_append_string("access-address", g_config.external_address, db);
-		info_append_bool("virtual", g_config.is_external_address_virtual, db);
+		info_append_string(db, "access-address", g_config.external_address);
+		info_append_bool(db, "virtual", g_config.is_external_address_virtual);
 	}
 
 	if (g_config.alternate_address) {
-		info_append_string("alternate-address", g_config.alternate_address, db);
+		info_append_string(db, "alternate-address", g_config.alternate_address);
 	}
 
 	if (g_config.network_interface_name) {
-		info_append_string("network-interface-name", g_config.network_interface_name, db);
+		info_append_string(db, "network-interface-name", g_config.network_interface_name);
 	}
 
-	info_append_bool("reuse-address", g_config.socket_reuse_addr, db);
+	info_append_bool(db, "reuse-address", g_config.socket_reuse_addr);
 
 	// Some of heartbeat:
 
 	if (g_config.hb_mode == AS_HB_MODE_MESH) {
 		if (g_config.hb_init_addr) {
-			info_append_string("mesh-address", g_config.hb_init_addr, db);
+			info_append_string(db, "mesh-address", g_config.hb_init_addr);
 
 			if (g_config.hb_init_port) {
-				info_append_int("mesh-port", g_config.hb_init_port, db);
+				info_append_int(db, "mesh-port", g_config.hb_init_port);
 			}
 		}
 		else {
 			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 				if (g_config.hb_mesh_seed_addrs[i]) {
-					info_append_string("mesh-seed-address-port", g_config.hb_mesh_seed_addrs[i], db);
+					info_append_string(db, "mesh-seed-address-port", g_config.hb_mesh_seed_addrs[i]);
 					cf_dyn_buf_append_string(db, ":");
 					cf_dyn_buf_append_int(db, g_config.hb_mesh_seed_ports[i]);
 				}
@@ -2185,18 +2131,18 @@ info_network_info_config_get(cf_dyn_buf *db)
 
 	// Fabric:
 
-	info_append_int("fabric-port", g_config.fabric_port, db);
-	info_append_bool("fabric-keepalive-enabled", g_config.fabric_keepalive_enabled, db);
-	info_append_int("fabric-keepalive-time", g_config.fabric_keepalive_time, db);
-	info_append_int("fabric-keepalive-intvl", g_config.fabric_keepalive_intvl, db);
-	info_append_int("fabric-keepalive-probes", g_config.fabric_keepalive_probes, db);
+	info_append_int(db, "fabric-port", g_config.fabric_port);
+	info_append_bool(db, "fabric-keepalive-enabled", g_config.fabric_keepalive_enabled);
+	info_append_int(db, "fabric-keepalive-time", g_config.fabric_keepalive_time);
+	info_append_int(db, "fabric-keepalive-intvl", g_config.fabric_keepalive_intvl);
+	info_append_int(db, "fabric-keepalive-probes", g_config.fabric_keepalive_probes);
 
 	// Info:
 
 	// network-info-port is the asd info port variable/output, This was chosen
 	// because info-port conflicts with XDR config parameter. Ideally XDR should
 	// use xdr-info-port and asd should use info-port.
-	info_append_int("network-info-port", g_config.info_port, db);
+	info_append_int(db, "network-info-port", g_config.info_port);
 }
 
 void
@@ -2214,20 +2160,19 @@ info_network_heartbeat_config_get(cf_dyn_buf *db)
 	}
 
 	if (g_config.hb_tx_addr) {
-		info_append_string("heartbeat-interface-address", g_config.hb_tx_addr, db);
+		info_append_string(db, "heartbeat-interface-address", g_config.hb_tx_addr);
 	}
 
-	info_append_string("heartbeat-protocol",
+	info_append_string(db, "heartbeat-protocol",
 			(AS_HB_PROTOCOL_V1 == g_config.hb_protocol ? "v1" :
 			  (AS_HB_PROTOCOL_V2 == g_config.hb_protocol ? "v2" :
 			   (AS_HB_PROTOCOL_RESET == g_config.hb_protocol ? "reset" :
-				(AS_HB_PROTOCOL_NONE == g_config.hb_protocol ? "none" : "undefined")))),
-			db);
+				(AS_HB_PROTOCOL_NONE == g_config.hb_protocol ? "none" : "undefined")))));
 
-	info_append_string("heartbeat-address", g_config.hb_addr, db);
-	info_append_int("heartbeat-port", g_config.hb_port, db);
-	info_append_uint32("heartbeat-interval", g_config.hb_interval, db);
-	info_append_uint32("heartbeat-timeout", g_config.hb_timeout, db);
+	info_append_string(db, "heartbeat-address", g_config.hb_addr);
+	info_append_int(db, "heartbeat-port", g_config.hb_port);
+	info_append_uint32(db, "heartbeat-interval", g_config.hb_interval);
+	info_append_uint32(db, "heartbeat-timeout", g_config.hb_timeout);
 }
 
 // TODO - security API?
@@ -2238,13 +2183,13 @@ info_security_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "enable-security=");
 	cf_dyn_buf_append_string(db, g_config.sec_cfg.security_enabled ? "true" : "false");
 
-	info_append_uint32("privilege-refresh-period", g_config.sec_cfg.privilege_refresh_period, db);
-	info_append_uint32("report-authentication-sinks", g_config.sec_cfg.report.authentication, db);
-	info_append_uint32("report-data-op-sinks", g_config.sec_cfg.report.data_op, db);
-	info_append_uint32("report-sys-admin-sinks", g_config.sec_cfg.report.sys_admin, db);
-	info_append_uint32("report-user-admin-sinks", g_config.sec_cfg.report.user_admin, db);
-	info_append_uint32("report-violation-sinks", g_config.sec_cfg.report.violation, db);
-	info_append_int("syslog-local", g_config.sec_cfg.syslog_local, db);
+	info_append_uint32(db, "privilege-refresh-period", g_config.sec_cfg.privilege_refresh_period);
+	info_append_uint32(db, "report-authentication-sinks", g_config.sec_cfg.report.authentication);
+	info_append_uint32(db, "report-data-op-sinks", g_config.sec_cfg.report.data_op);
+	info_append_uint32(db, "report-sys-admin-sinks", g_config.sec_cfg.report.sys_admin);
+	info_append_uint32(db, "report-user-admin-sinks", g_config.sec_cfg.report.user_admin);
+	info_append_uint32(db, "report-violation-sinks", g_config.sec_cfg.report.violation);
+	info_append_int(db, "syslog-local", g_config.sec_cfg.syslog_local);
 }
 
 void
@@ -2254,8 +2199,8 @@ info_cluster_config_get(cf_dyn_buf *db)
 	cf_dyn_buf_append_string(db, "mode=");
 	cf_dyn_buf_append_string(db, cc_mode_str[g_config.cluster_mode]);
 
-	info_append_uint32("self-group-id", (uint32_t)g_config.cluster.cl_self_group, db);
-	info_append_uint32("self-node-id", g_config.cluster.cl_self_node, db);
+	info_append_uint32(db, "self-group-id", (uint32_t)g_config.cluster.cl_self_group);
+	info_append_uint32(db, "self-node-id", g_config.cluster.cl_self_node);
 }
 
 
@@ -5226,31 +5171,31 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 {
 	// Object counts.
 
-	info_append_uint64("objects", ns->n_objects, db);
-	info_append_uint64("sub-objects", ns->n_sub_objects, db);
+	info_append_uint64(db, "objects", ns->n_objects);
+	info_append_uint64(db, "sub-objects", ns->n_sub_objects);
 
 	as_master_prole_stats mp;
 	as_partition_get_master_prole_stats(ns, &mp);
 
-	info_append_uint64("master-objects", mp.n_master_records, db);
-	info_append_uint64("master-sub-objects", mp.n_master_sub_records, db);
-	info_append_uint64("prole-objects", mp.n_prole_records, db);
-	info_append_uint64("prole-sub-objects", mp.n_prole_sub_records, db);
+	info_append_uint64(db, "master-objects", mp.n_master_records);
+	info_append_uint64(db, "master-sub-objects", mp.n_master_sub_records);
+	info_append_uint64(db, "prole-objects", mp.n_prole_records);
+	info_append_uint64(db, "prole-sub-objects", mp.n_prole_sub_records);
 
 	// Expiration & eviction (nsup) stats.
 
-	info_append_bool("stop-writes", ns->stop_writes != 0, db);
-	info_append_bool("hwm-breached", ns->hwm_breached != 0, db);
+	info_append_bool(db, "stop-writes", ns->stop_writes != 0);
+	info_append_bool(db, "hwm-breached", ns->hwm_breached != 0);
 
-	info_append_uint64("current-time", as_record_void_time_get(), db);
-	info_append_uint64("max-void-time", ns->max_void_time, db);
-	info_append_uint64("non-expirable-objects", ns->non_expirable_objects, db);
-	info_append_uint64("expired-objects", ns->n_expired_objects, db);
-	info_append_uint64("evicted-objects", ns->n_evicted_objects, db);
-	info_append_uint64("set-deleted-objects", ns->n_deleted_set_objects, db);
-	info_append_uint64("evict-ttl", ns->evict_ttl, db);
-	info_append_uint32("nsup-cycle-duration", ns->nsup_cycle_duration, db);
-	info_append_uint32("nsup-cycle-sleep-pct", ns->nsup_cycle_sleep_pct, db);
+	info_append_uint64(db, "current-time", as_record_void_time_get());
+	info_append_uint64(db, "max-void-time", ns->max_void_time);
+	info_append_uint64(db, "non-expirable-objects", ns->non_expirable_objects);
+	info_append_uint64(db, "expired-objects", ns->n_expired_objects);
+	info_append_uint64(db, "evicted-objects", ns->n_evicted_objects);
+	info_append_uint64(db, "set-deleted-objects", ns->n_deleted_set_objects);
+	info_append_uint64(db, "evict-ttl", ns->evict_ttl);
+	info_append_uint32(db, "nsup-cycle-duration", ns->nsup_cycle_duration);
+	info_append_uint32(db, "nsup-cycle-sleep-pct", ns->nsup_cycle_sleep_pct);
 
 	// Memory usage stats.
 
@@ -5259,19 +5204,19 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	uint64_t sindex_memory = ns->sindex_data_memory_used;
 	uint64_t used_memory = data_memory + index_memory + sindex_memory;
 
-	info_append_uint64("used-bytes-memory", used_memory, db);
-	info_append_uint64("data-used-bytes-memory", data_memory, db);
-	info_append_uint64("index-used-bytes-memory", index_memory, db);
-	info_append_uint64("sindex-used-bytes-memory", sindex_memory, db);
+	info_append_uint64(db, "used-bytes-memory", used_memory);
+	info_append_uint64(db, "data-used-bytes-memory", data_memory);
+	info_append_uint64(db, "index-used-bytes-memory", index_memory);
+	info_append_uint64(db, "sindex-used-bytes-memory", sindex_memory);
 
 	uint64_t free_pct = (ns->memory_size != 0 && (ns->memory_size > used_memory)) ?
 			((ns->memory_size - used_memory) * 100L) / ns->memory_size : 0;
 
-	info_append_uint64("free-pct-memory", free_pct, db);
+	info_append_uint64(db, "free-pct-memory", free_pct);
 
 	// Remaining bin-name slots (yes, this can be negative).
 	if (! ns->single_bin) {
-		info_append_int("available-bin-names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap), db);
+		info_append_int(db, "available-bin-names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
 	}
 
 	// Persistent storage stats.
@@ -5281,126 +5226,126 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		uint64_t inuse_disk_bytes = 0;
 		as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
 
-		info_append_uint64("total-bytes-disk", ns->ssd_size, db);
-		info_append_uint64("used-bytes-disk", inuse_disk_bytes, db);
+		info_append_uint64(db, "total-bytes-disk", ns->ssd_size);
+		info_append_uint64(db, "used-bytes-disk", inuse_disk_bytes);
 
 		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > inuse_disk_bytes)) ?
 				((ns->ssd_size - inuse_disk_bytes) * 100L) / ns->ssd_size : 0;
 
-		info_append_uint64("free-pct-disk", free_pct, db);
-		info_append_int("available_pct", available_pct, db); // TODO - underscore???
+		info_append_uint64(db, "free-pct-disk", free_pct);
+		info_append_int(db, "available_pct", available_pct); // TODO - underscore???
 
 		if (! ns->storage_data_in_memory) {
-			info_append_int("cache-read-pct", (int)(ns->cache_read_pct + 0.5), db);
+			info_append_int(db, "cache-read-pct", (int)(ns->cache_read_pct + 0.5));
 		}
 
-		info_append_uint64("err_storage_queue_full", ns->err_storage_queue_full, db);
-		info_append_uint64("storage_defrag_corrupt_record", ns->err_storage_defrag_corrupt_record, db);
+		info_append_uint64(db, "err_storage_queue_full", ns->err_storage_queue_full);
+		info_append_uint64(db, "storage_defrag_corrupt_record", ns->err_storage_defrag_corrupt_record);
 	}
 
 	// Not bothering with AS_STORAGE_ENGINE_KV.
 
 	// Migration stats.
 
-	info_append_uint64("migrate-tx-partitions-imbalance", ns->migrate_tx_partitions_imbalance, db);
+	info_append_uint64(db, "migrate-tx-partitions-imbalance", ns->migrate_tx_partitions_imbalance);
 
-	info_append_uint64("migrate-tx-instance-count", ns->migrate_tx_instance_count, db);
-	info_append_uint64("migrate-rx-instance-count", ns->migrate_rx_instance_count, db);
+	info_append_uint64(db, "migrate-tx-instance-count", ns->migrate_tx_instance_count);
+	info_append_uint64(db, "migrate-rx-instance-count", ns->migrate_rx_instance_count);
 
-	info_append_uint64("migrate-tx-partitions-active", ns->migrate_tx_partitions_active, db);
-	info_append_uint64("migrate-rx-partitions-active", ns->migrate_rx_partitions_active, db);
+	info_append_uint64(db, "migrate-tx-partitions-active", ns->migrate_tx_partitions_active);
+	info_append_uint64(db, "migrate-rx-partitions-active", ns->migrate_rx_partitions_active);
 
-	info_append_uint64("migrate-tx-partitions-initial", ns->migrate_tx_partitions_initial, db);
-	info_append_uint64("migrate-tx-partitions-remaining", ns->migrate_tx_partitions_remaining, db);
+	info_append_uint64(db, "migrate-tx-partitions-initial", ns->migrate_tx_partitions_initial);
+	info_append_uint64(db, "migrate-tx-partitions-remaining", ns->migrate_tx_partitions_remaining);
 
-	info_append_uint64("migrate-rx-partitions-initial", ns->migrate_rx_partitions_initial, db);
-	info_append_uint64("migrate-rx-partitions-remaining", ns->migrate_rx_partitions_remaining, db);
+	info_append_uint64(db, "migrate-rx-partitions-initial", ns->migrate_rx_partitions_initial);
+	info_append_uint64(db, "migrate-rx-partitions-remaining", ns->migrate_rx_partitions_remaining);
 
-	info_append_uint64("migrate-records-skipped", ns->migrate_records_skipped, db);
-	info_append_uint64("migrate-records-transmitted", ns->migrate_records_transmitted, db);
-	info_append_uint64("migrate-record-retransmits", ns->migrate_record_retransmits, db);
-	info_append_uint64("migrate-record-receives", ns->migrate_record_receives, db);
+	info_append_uint64(db, "migrate-records-skipped", ns->migrate_records_skipped);
+	info_append_uint64(db, "migrate-records-transmitted", ns->migrate_records_transmitted);
+	info_append_uint64(db, "migrate-record-retransmits", ns->migrate_record_retransmits);
+	info_append_uint64(db, "migrate-record-receives", ns->migrate_record_receives);
 
 	// tsvc-stage error counters.
 
-	info_append_uint64("tsvc-client-error", ns->n_tsvc_client_error, db);
-	info_append_uint64("tsvc-client-timeout", ns->n_tsvc_client_timeout, db);
+	info_append_uint64(db, "tsvc-client-error", ns->n_tsvc_client_error);
+	info_append_uint64(db, "tsvc-client-timeout", ns->n_tsvc_client_timeout);
 
-	info_append_uint64("tsvc-batch-sub-error", ns->n_tsvc_batch_sub_error, db);
-	info_append_uint64("tsvc-batch-sub-timeout", ns->n_tsvc_batch_sub_timeout, db);
+	info_append_uint64(db, "tsvc-batch-sub-error", ns->n_tsvc_batch_sub_error);
+	info_append_uint64(db, "tsvc-batch-sub-timeout", ns->n_tsvc_batch_sub_timeout);
 
-	info_append_uint64("tsvc-udf-sub-error", ns->n_tsvc_udf_sub_error, db);
-	info_append_uint64("tsvc-udf-sub-timeout", ns->n_tsvc_udf_sub_timeout, db);
+	info_append_uint64(db, "tsvc-udf-sub-error", ns->n_tsvc_udf_sub_error);
+	info_append_uint64(db, "tsvc-udf-sub-timeout", ns->n_tsvc_udf_sub_timeout);
 
 	// From-client transaction stats.
 
-	info_append_uint64("client-proxy-complete", ns->n_client_proxy_complete, db);
-	info_append_uint64("client-proxy-error", ns->n_client_proxy_error, db);
-	info_append_uint64("client-proxy-timeout", ns->n_client_proxy_timeout, db);
+	info_append_uint64(db, "client-proxy-complete", ns->n_client_proxy_complete);
+	info_append_uint64(db, "client-proxy-error", ns->n_client_proxy_error);
+	info_append_uint64(db, "client-proxy-timeout", ns->n_client_proxy_timeout);
 
-	info_append_uint64("client-read-success", ns->n_client_read_success, db);
-	info_append_uint64("client-read-error", ns->n_client_read_error, db);
-	info_append_uint64("client-read-timeout", ns->n_client_read_timeout, db);
-	info_append_uint64("client-read-not-found", ns->n_client_read_not_found, db);
+	info_append_uint64(db, "client-read-success", ns->n_client_read_success);
+	info_append_uint64(db, "client-read-error", ns->n_client_read_error);
+	info_append_uint64(db, "client-read-timeout", ns->n_client_read_timeout);
+	info_append_uint64(db, "client-read-not-found", ns->n_client_read_not_found);
 
-	info_append_uint64("client-write-success", ns->n_client_write_success, db);
-	info_append_uint64("client-write-error", ns->n_client_write_error, db);
-	info_append_uint64("client-write-timeout", ns->n_client_write_timeout, db);
+	info_append_uint64(db, "client-write-success", ns->n_client_write_success);
+	info_append_uint64(db, "client-write-error", ns->n_client_write_error);
+	info_append_uint64(db, "client-write-timeout", ns->n_client_write_timeout);
 
-	info_append_uint64("client-delete-success", ns->n_client_delete_success, db);
-	info_append_uint64("client-delete-error", ns->n_client_delete_error, db);
-	info_append_uint64("client-delete-timeout", ns->n_client_delete_timeout, db);
-	info_append_uint64("client-delete-not-found", ns->n_client_delete_not_found, db);
+	info_append_uint64(db, "client-delete-success", ns->n_client_delete_success);
+	info_append_uint64(db, "client-delete-error", ns->n_client_delete_error);
+	info_append_uint64(db, "client-delete-timeout", ns->n_client_delete_timeout);
+	info_append_uint64(db, "client-delete-not-found", ns->n_client_delete_not_found);
 
-	info_append_uint64("client-udf-complete", ns->n_client_udf_complete, db);
-	info_append_uint64("client-udf-error", ns->n_client_udf_error, db);
-	info_append_uint64("client-udf-timeout", ns->n_client_udf_timeout, db);
+	info_append_uint64(db, "client-udf-complete", ns->n_client_udf_complete);
+	info_append_uint64(db, "client-udf-error", ns->n_client_udf_error);
+	info_append_uint64(db, "client-udf-timeout", ns->n_client_udf_timeout);
 
-	info_append_uint64("client-lua-read-success", ns->n_client_lua_read_success, db);
-	info_append_uint64("client-lua-write-success", ns->n_client_lua_write_success, db);
-	info_append_uint64("client-lua-delete-success", ns->n_client_lua_delete_success, db);
-	info_append_uint64("client-lua-error", ns->n_client_lua_error, db);
+	info_append_uint64(db, "client-lua-read-success", ns->n_client_lua_read_success);
+	info_append_uint64(db, "client-lua-write-success", ns->n_client_lua_write_success);
+	info_append_uint64(db, "client-lua-delete-success", ns->n_client_lua_delete_success);
+	info_append_uint64(db, "client-lua-error", ns->n_client_lua_error);
 
-	info_append_uint64("xdr-read-success", ns->n_xdr_read_success, db);
-	info_append_uint64("xdr-write-success", ns->n_xdr_write_success, db);
+	info_append_uint64(db, "xdr-read-success", ns->n_xdr_read_success);
+	info_append_uint64(db, "xdr-write-success", ns->n_xdr_write_success);
 
-	info_append_uint64("client-trans-fail-xdr-forbidden", ns->n_client_trans_fail_xdr_forbidden, db);
-	info_append_uint64("client-trans-fail-key-busy", ns->n_client_trans_fail_key_busy, db);
-	info_append_uint64("client-write-fail-generation", ns->n_client_write_fail_generation, db);
-	info_append_uint64("client-write-fail-record-too-big", ns->n_client_write_fail_record_too_big, db);
+	info_append_uint64(db, "client-trans-fail-xdr-forbidden", ns->n_client_trans_fail_xdr_forbidden);
+	info_append_uint64(db, "client-trans-fail-key-busy", ns->n_client_trans_fail_key_busy);
+	info_append_uint64(db, "client-write-fail-generation", ns->n_client_write_fail_generation);
+	info_append_uint64(db, "client-write-fail-record-too-big", ns->n_client_write_fail_record_too_big);
 
 	// Batch sub-transaction stats.
 
-	info_append_uint64("batch-sub-proxy-complete", ns->n_batch_sub_proxy_complete, db);
-	info_append_uint64("batch-sub-proxy-error", ns->n_batch_sub_proxy_error, db);
-	info_append_uint64("batch-sub-proxy-timeout", ns->n_batch_sub_proxy_timeout, db);
+	info_append_uint64(db, "batch-sub-proxy-complete", ns->n_batch_sub_proxy_complete);
+	info_append_uint64(db, "batch-sub-proxy-error", ns->n_batch_sub_proxy_error);
+	info_append_uint64(db, "batch-sub-proxy-timeout", ns->n_batch_sub_proxy_timeout);
 
-	info_append_uint64("batch-sub-read-success", ns->n_batch_sub_read_success, db);
-	info_append_uint64("batch-sub-read-error", ns->n_batch_sub_read_error, db);
-	info_append_uint64("batch-sub-read-timeout", ns->n_batch_sub_read_timeout, db);
-	info_append_uint64("batch-sub-read-not-found", ns->n_batch_sub_read_not_found, db);
+	info_append_uint64(db, "batch-sub-read-success", ns->n_batch_sub_read_success);
+	info_append_uint64(db, "batch-sub-read-error", ns->n_batch_sub_read_error);
+	info_append_uint64(db, "batch-sub-read-timeout", ns->n_batch_sub_read_timeout);
+	info_append_uint64(db, "batch-sub-read-not-found", ns->n_batch_sub_read_not_found);
 
 	// Internal-UDF sub-transaction stats.
 
-	info_append_uint64("udf-sub-udf-complete", ns->n_udf_sub_udf_complete, db);
-	info_append_uint64("udf-sub-udf-error", ns->n_udf_sub_udf_error, db);
-	info_append_uint64("udf-sub-udf-timeout", ns->n_udf_sub_udf_timeout, db);
+	info_append_uint64(db, "udf-sub-udf-complete", ns->n_udf_sub_udf_complete);
+	info_append_uint64(db, "udf-sub-udf-error", ns->n_udf_sub_udf_error);
+	info_append_uint64(db, "udf-sub-udf-timeout", ns->n_udf_sub_udf_timeout);
 
-	info_append_uint64("udf-sub-lua-read-success", ns->n_udf_sub_lua_read_success, db);
-	info_append_uint64("udf-sub-lua-write-success", ns->n_udf_sub_lua_write_success, db);
-	info_append_uint64("udf-sub-lua-delete-success", ns->n_udf_sub_lua_delete_success, db);
-	info_append_uint64("udf-sub-lua-error", ns->n_udf_sub_lua_error, db);
+	info_append_uint64(db, "udf-sub-lua-read-success", ns->n_udf_sub_lua_read_success);
+	info_append_uint64(db, "udf-sub-lua-write-success", ns->n_udf_sub_lua_write_success);
+	info_append_uint64(db, "udf-sub-lua-delete-success", ns->n_udf_sub_lua_delete_success);
+	info_append_uint64(db, "udf-sub-lua-error", ns->n_udf_sub_lua_error);
 
 	// Scan stats.
 
-	info_append_uint64("basic-scan-success", ns->n_basic_scan_success, db);
-	info_append_uint64("basic-scan-failure", ns->n_basic_scan_failure, db);
+	info_append_uint64(db, "basic-scan-success", ns->n_basic_scan_success);
+	info_append_uint64(db, "basic-scan-failure", ns->n_basic_scan_failure);
 
-	info_append_uint64("aggr-scan-success", ns->n_aggr_scan_success, db);
-	info_append_uint64("aggr-scan-failure", ns->n_aggr_scan_failure, db);
+	info_append_uint64(db, "aggr-scan-success", ns->n_aggr_scan_success);
+	info_append_uint64(db, "aggr-scan-failure", ns->n_aggr_scan_failure);
 
-	info_append_uint64("udf-bg-scan-success", ns->n_udf_bg_scan_success, db);
-	info_append_uint64("udf-bg-scan-failure", ns->n_udf_bg_scan_failure, db);
+	info_append_uint64(db, "udf-bg-scan-success", ns->n_udf_bg_scan_success);
+	info_append_uint64(db, "udf-bg-scan-failure", ns->n_udf_bg_scan_failure);
 
 	// Query stats.
 
@@ -5416,80 +5361,80 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	uint64_t lkup_records	= ns->lookup_num_records;
 	uint64_t lkup_abort		= ns->n_lookup_abort;
 
-	info_append_uint64("query_reqs", ns->query_reqs, db);
-	info_append_uint64("query_success", agg_success + lkup_success, db);
-	info_append_uint64("query_fail", ns->query_fail + lkup_err + agg_err, db);
-	info_append_uint64("query_abort", agg_abort + lkup_abort, db);
+	info_append_uint64(db, "query_reqs", ns->query_reqs);
+	info_append_uint64(db, "query_success", agg_success + lkup_success);
+	info_append_uint64(db, "query_fail", ns->query_fail + lkup_err + agg_err);
+	info_append_uint64(db, "query_abort", agg_abort + lkup_abort);
 
-	info_append_uint64("query_avg_rec_count", (agg + lkup) ? (agg_records + lkup_records) / (agg + lkup) : 0, db);
-	info_append_uint64("query_short_queue_full", ns->query_short_queue_full, db);
-	info_append_uint64("query_long_queue_full", ns->query_long_queue_full, db);
-	info_append_uint64("query_short_reqs", ns->query_short_reqs, db);
-	info_append_uint64("query_long_reqs", ns->query_long_reqs, db);
+	info_append_uint64(db, "query_avg_rec_count", (agg + lkup) ? (agg_records + lkup_records) / (agg + lkup) : 0);
+	info_append_uint64(db, "query_short_queue_full", ns->query_short_queue_full);
+	info_append_uint64(db, "query_long_queue_full", ns->query_long_queue_full);
+	info_append_uint64(db, "query_short_reqs", ns->query_short_reqs);
+	info_append_uint64(db, "query_long_reqs", ns->query_long_reqs);
 
-	info_append_uint64("query_agg", agg, db);
-	info_append_uint64("query_agg_success", agg_success, db);
-	info_append_uint64("query_agg_err", agg_err, db);
-	info_append_uint64("query_agg_abort", agg_abort, db);
-	info_append_uint64("query_agg_avg_rec_count", agg ? agg_records / agg : 0, db);
+	info_append_uint64(db, "query_agg", agg);
+	info_append_uint64(db, "query_agg_success", agg_success);
+	info_append_uint64(db, "query_agg_err", agg_err);
+	info_append_uint64(db, "query_agg_abort", agg_abort);
+	info_append_uint64(db, "query_agg_avg_rec_count", agg ? agg_records / agg : 0);
 
-	info_append_uint64("query_lookups", lkup, db);
-	info_append_uint64("query_lookup_success", lkup_success, db);
-	info_append_uint64("query_lookup_err", lkup_err, db);
-	info_append_uint64("query_lookup_abort", lkup_abort, db);
-	info_append_uint64("query_lookup_avg_rec_count", lkup ? lkup_records / lkup : 0, db);
+	info_append_uint64(db, "query_lookups", lkup);
+	info_append_uint64(db, "query_lookup_success", lkup_success);
+	info_append_uint64(db, "query_lookup_err", lkup_err);
+	info_append_uint64(db, "query_lookup_abort", lkup_abort);
+	info_append_uint64(db, "query_lookup_avg_rec_count", lkup ? lkup_records / lkup : 0);
 
-	info_append_uint64("udf-bg-query-success", ns->n_udf_bg_query_success, db);
-	info_append_uint64("udf-bg-query-failure", ns->n_udf_bg_query_failure, db);
+	info_append_uint64(db, "udf-bg-query-success", ns->n_udf_bg_query_success);
+	info_append_uint64(db, "udf-bg-query-failure", ns->n_udf_bg_query_failure);
 
 	// Geospatial query stats:
-	info_append_uint64("geo_region_query_count", ns->geo_region_query_count, db);
-	info_append_uint64("geo_region_query_cells", ns->geo_region_query_cells, db);
-	info_append_uint64("geo_region_query_points", ns->geo_region_query_points, db);
-	info_append_uint64("geo_region_query_falsepos", ns->geo_region_query_falsepos, db);
+	info_append_uint64(db, "geo_region_query_count", ns->geo_region_query_count);
+	info_append_uint64(db, "geo_region_query_cells", ns->geo_region_query_cells);
+	info_append_uint64(db, "geo_region_query_points", ns->geo_region_query_points);
+	info_append_uint64(db, "geo_region_query_falsepos", ns->geo_region_query_falsepos);
 
 	// LDT stats.
 
 	if (ns->ldt_enabled) {
-		info_append_uint64("ldt-reads", ns->lstats.ldt_read_reqs, db);
-		info_append_uint64("ldt-read-success", ns->lstats.ldt_read_success, db);
-		info_append_uint64("ldt-deletes", ns->lstats.ldt_delete_reqs, db);
-		info_append_uint64("ldt-delete-success", ns->lstats.ldt_delete_success, db);
-		info_append_uint64("ldt-writes", ns->lstats.ldt_write_reqs, db);
-		info_append_uint64("ldt-write-success", ns->lstats.ldt_write_success, db);
-		info_append_uint64("ldt-updates", ns->lstats.ldt_update_reqs, db);
+		info_append_uint64(db, "ldt-reads", ns->lstats.ldt_read_reqs);
+		info_append_uint64(db, "ldt-read-success", ns->lstats.ldt_read_success);
+		info_append_uint64(db, "ldt-deletes", ns->lstats.ldt_delete_reqs);
+		info_append_uint64(db, "ldt-delete-success", ns->lstats.ldt_delete_success);
+		info_append_uint64(db, "ldt-writes", ns->lstats.ldt_write_reqs);
+		info_append_uint64(db, "ldt-write-success", ns->lstats.ldt_write_success);
+		info_append_uint64(db, "ldt-updates", ns->lstats.ldt_update_reqs);
 
-		info_append_uint64("ldt-gc-io", ns->lstats.ldt_gc_io, db);
-		info_append_uint64("ldt-gc-cnt", ns->lstats.ldt_gc_cnt, db);
-		info_append_uint64("ldt-randomizer-retry", ns->lstats.ldt_randomizer_retry, db);
+		info_append_uint64(db, "ldt-gc-io", ns->lstats.ldt_gc_io);
+		info_append_uint64(db, "ldt-gc-cnt", ns->lstats.ldt_gc_cnt);
+		info_append_uint64(db, "ldt-randomizer-retry", ns->lstats.ldt_randomizer_retry);
 
-		info_append_uint64("ldt-errors", ns->lstats.ldt_errs, db);
+		info_append_uint64(db, "ldt-errors", ns->lstats.ldt_errs);
 
-		info_append_uint64("ldt-err-toprec-notfound", ns->lstats.ldt_err_toprec_not_found, db);
-		info_append_uint64("ldt-err-item-notfound", ns->lstats.ldt_err_item_not_found, db);
-		info_append_uint64("ldt-err-internal", ns->lstats.ldt_err_internal, db);
-		info_append_uint64("ldt-err-unique-key-violation", ns->lstats.ldt_err_unique_key_violation, db);
-		info_append_uint64("ldt-err-insert-fail", ns->lstats.ldt_err_insert_fail, db);
-		info_append_uint64("ldt-err-delete-fail", ns->lstats.ldt_err_delete_fail, db);
-		info_append_uint64("ldt-err-search-fail", ns->lstats.ldt_err_search_fail, db);
-		info_append_uint64("ldt-err-version-mismatch", ns->lstats.ldt_err_version_mismatch, db);
-		info_append_uint64("ldt-err-capacity-exceeded", ns->lstats.ldt_err_capacity_exceeded, db);
-		info_append_uint64("ldt-err-param", ns->lstats.ldt_err_param, db);
-		info_append_uint64("ldt-err-op-bintype-mismatch", ns->lstats.ldt_err_op_bintype_mismatch, db);
-		info_append_uint64("ldt-err-too-many-open-subrec", ns->lstats.ldt_err_too_many_open_subrec, db);
-		info_append_uint64("ldt-err-subrec-not-found", ns->lstats.ldt_err_subrec_not_found, db);
-		info_append_uint64("ldt-err-bin-does-not-exist", ns->lstats.ldt_err_bin_does_not_exist, db);
-		info_append_uint64("ldt-err-bin-exits", ns->lstats.ldt_err_bin_exits, db);
-		info_append_uint64("ldt-err-bin-damaged", ns->lstats.ldt_err_bin_damaged, db);
-		info_append_uint64("ldt-err-toprec-internal", ns->lstats.ldt_err_toprec_internal, db);
-		info_append_uint64("ldt-err-subrec-internal", ns->lstats.ldt_err_subrec_internal, db);
-		info_append_uint64("ldt-err-filer", ns->lstats.ldt_err_filter, db);
-		info_append_uint64("ldt-err-key", ns->lstats.ldt_err_key, db);
-		info_append_uint64("ldt-err-createspec", ns->lstats.ldt_err_createspec, db);
-		info_append_uint64("ldt-err-usermodule", ns->lstats.ldt_err_usermodule, db);
-		info_append_uint64("ldt-err-input-too-large", ns->lstats.ldt_err_input_too_large, db);
-		info_append_uint64("ldt-err-ldt-not-enabled", ns->lstats.ldt_err_ldt_not_enabled, db);
-		info_append_uint64("ldt-err-unknown", ns->lstats.ldt_err_unknown, db);
+		info_append_uint64(db, "ldt-err-toprec-notfound", ns->lstats.ldt_err_toprec_not_found);
+		info_append_uint64(db, "ldt-err-item-notfound", ns->lstats.ldt_err_item_not_found);
+		info_append_uint64(db, "ldt-err-internal", ns->lstats.ldt_err_internal);
+		info_append_uint64(db, "ldt-err-unique-key-violation", ns->lstats.ldt_err_unique_key_violation);
+		info_append_uint64(db, "ldt-err-insert-fail", ns->lstats.ldt_err_insert_fail);
+		info_append_uint64(db, "ldt-err-delete-fail", ns->lstats.ldt_err_delete_fail);
+		info_append_uint64(db, "ldt-err-search-fail", ns->lstats.ldt_err_search_fail);
+		info_append_uint64(db, "ldt-err-version-mismatch", ns->lstats.ldt_err_version_mismatch);
+		info_append_uint64(db, "ldt-err-capacity-exceeded", ns->lstats.ldt_err_capacity_exceeded);
+		info_append_uint64(db, "ldt-err-param", ns->lstats.ldt_err_param);
+		info_append_uint64(db, "ldt-err-op-bintype-mismatch", ns->lstats.ldt_err_op_bintype_mismatch);
+		info_append_uint64(db, "ldt-err-too-many-open-subrec", ns->lstats.ldt_err_too_many_open_subrec);
+		info_append_uint64(db, "ldt-err-subrec-not-found", ns->lstats.ldt_err_subrec_not_found);
+		info_append_uint64(db, "ldt-err-bin-does-not-exist", ns->lstats.ldt_err_bin_does_not_exist);
+		info_append_uint64(db, "ldt-err-bin-exits", ns->lstats.ldt_err_bin_exits);
+		info_append_uint64(db, "ldt-err-bin-damaged", ns->lstats.ldt_err_bin_damaged);
+		info_append_uint64(db, "ldt-err-toprec-internal", ns->lstats.ldt_err_toprec_internal);
+		info_append_uint64(db, "ldt-err-subrec-internal", ns->lstats.ldt_err_subrec_internal);
+		info_append_uint64(db, "ldt-err-filer", ns->lstats.ldt_err_filter);
+		info_append_uint64(db, "ldt-err-key", ns->lstats.ldt_err_key);
+		info_append_uint64(db, "ldt-err-createspec", ns->lstats.ldt_err_createspec);
+		info_append_uint64(db, "ldt-err-usermodule", ns->lstats.ldt_err_usermodule);
+		info_append_uint64(db, "ldt-err-input-too-large", ns->lstats.ldt_err_input_too_large);
+		info_append_uint64(db, "ldt-err-ldt-not-enabled", ns->lstats.ldt_err_ldt_not_enabled);
+		info_append_uint64(db, "ldt-err-unknown", ns->lstats.ldt_err_unknown);
 	}
 }
 
