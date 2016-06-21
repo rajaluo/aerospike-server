@@ -453,12 +453,12 @@ cf_hist_track_get_settings(cf_hist_track* this, cf_dyn_buf* db_p)
 	const char* name = ((histogram*)this)->name;
 	char output[MAX_FORMATTED_SETTINGS_SIZE];
 	char* write_p = output;
-	char* end_p = output + MAX_FORMATTED_SETTINGS_SIZE - 1;
+	char* end_p = output + MAX_FORMATTED_SETTINGS_SIZE - 2;
 
-	write_p += snprintf(output, MAX_FORMATTED_SETTINGS_SIZE - 1,
-			";%s-hist-track-back=%u"
-			";%s-hist-track-slice=%u"
-			";%s-hist-track-thresholds=",
+	write_p += snprintf(output, MAX_FORMATTED_SETTINGS_SIZE - 2,
+			"%s-hist-track-back=%u;"
+			"%s-hist-track-slice=%u;"
+			"%s-hist-track-thresholds=",
 			name, this->num_rows * this->slice_sec,
 			name, this->slice_sec,
 			name);
@@ -472,6 +472,7 @@ cf_hist_track_get_settings(cf_hist_track* this, cf_dyn_buf* db_p)
 		write_p--;
 	}
 
+	*write_p++ = ';';
 	*write_p = 0;
 
 	cf_dyn_buf_append_string(db_p, output);

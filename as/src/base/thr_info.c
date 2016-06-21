@@ -310,11 +310,7 @@ int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
 	// TODO - do we want the node-id?
-
-	// Note - this isn't preceded by a semicolon.
-	cf_dyn_buf_append_string(db, "cluster_size=");
-	cf_dyn_buf_append_int(db, g_paxos->cluster_size);
-
+	info_append_int(db, "cluster_size", g_paxos->cluster_size);
 	info_append_uint64_x(db, "cluster_key", as_paxos_get_cluster_key()); // not in ticker
 	info_append_bool(db, "cluster_integrity", as_paxos_get_cluster_integrity(g_paxos)); // not in ticker
 
@@ -354,8 +350,10 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
 
-	cf_dyn_buf_append_string(db, ";batch_index_queue=");
+	// TODO - bury everything in the helper?
+	cf_dyn_buf_append_string(db, "batch_index_queue=");
 	as_batch_queues_info(db); // not in ticker
+	cf_dyn_buf_append_char(db, ';');
 
 	info_append_uint64(db, "batch_index_complete", g_stats.batch_index_complete);
 	info_append_uint64(db, "batch_index_errors", g_stats.batch_index_errors);
@@ -414,8 +412,9 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "fabric_msgs_sent", g_stats.fabric_msgs_sent);
 	info_append_uint64(db, "fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd);
 
-	cf_dyn_buf_append_string(db, ";");
 	as_xdr_get_stats(name, db);
+
+	cf_dyn_buf_chomp(db);
 
 	return 0;
 }
@@ -1832,15 +1831,11 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 
 
 
-int
+void
 info_service_config_get(cf_dyn_buf *db)
 {
 	// Note - no user, group.
-
-	// Note - this isn't preceded by a semicolon.
-	cf_dyn_buf_append_string(db, "paxos-single-replica-limit=");
-	cf_dyn_buf_append_uint32(db, g_config.paxos_single_replica_limit);
-
+	info_append_uint32(db, "paxos-single-replica-limit", g_config.paxos_single_replica_limit);
 	info_append_string(db, "pidfile", g_config.pidfile ? g_config.pidfile : "null");
 	info_append_int(db, "service-threads", g_config.n_service_threads);
 	info_append_int(db, "transaction-queues", g_config.n_transaction_queues);
@@ -1860,8 +1855,8 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "generation-disable", g_config.generation_disable);
 	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
 	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
-	info_append_string(db, "hist-track-thresholds", g_config.hist_track_thresholds);
-	info_append_bool(db, "info-threads", g_config.n_info_threads);
+	info_append_string(db, "hist-track-thresholds", g_config.hist_track_thresholds ? g_config.hist_track_thresholds : "null");
+	info_append_int(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "ldt-benchmarks", g_config.ldt_benchmarks);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_int(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
@@ -1874,16 +1869,16 @@ info_service_config_get(cf_dyn_buf *db)
 
 	info_append_string(db, "paxos-protocol",
 			(AS_PAXOS_PROTOCOL_V1 == g_config.paxos_protocol ? "v1" :
-			  (AS_PAXOS_PROTOCOL_V2 == g_config.paxos_protocol ? "v2" :
-			   (AS_PAXOS_PROTOCOL_V3 == g_config.paxos_protocol ? "v3" :
-				(AS_PAXOS_PROTOCOL_V4 == g_config.paxos_protocol ? "v4" :
-				 (AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined"))))));
+				(AS_PAXOS_PROTOCOL_V2 == g_config.paxos_protocol ? "v2" :
+					(AS_PAXOS_PROTOCOL_V3 == g_config.paxos_protocol ? "v3" :
+						(AS_PAXOS_PROTOCOL_V4 == g_config.paxos_protocol ? "v4" :
+							(AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined"))))));
 
 	info_append_string(db, "paxos-recovery-policy",
 			(AS_PAXOS_RECOVERY_POLICY_MANUAL == g_config.paxos_recovery_policy ? "manual" :
-			  (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER == g_config.paxos_recovery_policy ? "auto-dun-master" :
-			   (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL == g_config.paxos_recovery_policy ? "auto-dun-all" :
-			     (AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined")))));
+				(AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER == g_config.paxos_recovery_policy ? "auto-dun-master" :
+					(AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL == g_config.paxos_recovery_policy ? "auto-dun-all" :
+						(AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined")))));
 
 	info_append_uint32(db, "paxos-retransmit-period", g_config.paxos_retransmit_period);
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
@@ -1937,25 +1932,20 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "memory-accounting", g_config.memory_accounting);
 	info_append_uint32(db, "prole-extra-ttl", g_config.prole_extra_ttl);
 	info_append_bool(db, "non-master-sets-delete", g_config.non_master_sets_delete); // dynamic only
-
-	return 0;
 }
 
 
-int
+void
 info_namespace_config_get(char* context, cf_dyn_buf *db)
 {
 	as_namespace *ns = as_namespace_get_byname(context);
 
 	if (! ns) {
-		cf_dyn_buf_append_string(db, "namespace not found");
-		return -1;
+		cf_dyn_buf_append_string(db, "namespace not found;"); // TODO - start with "error"?
+		return;
 	}
 
-	// Note - this isn't preceded by a semicolon.
-	cf_dyn_buf_append_string(db, "repl-factor=");
-	cf_dyn_buf_append_uint32(db, (uint32_t)ns->replication_factor);
-
+	info_append_uint32(db, "repl-factor", (uint32_t)ns->replication_factor);
 	info_append_uint64(db, "memory-size", ns->memory_size);
 	info_append_uint64(db, "default-ttl", ns->default_ttl);
 
@@ -2008,7 +1998,11 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
-	// TODO - report storage-type?
+	// TODO - move near front?
+	info_append_string(db, "storage-engine",
+			(ns->storage_type == AS_STORAGE_ENGINE_MEMORY ? "memory" :
+				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" :
+					(ns->storage_type == AS_STORAGE_ENGINE_KV ? "kv" : "illegal"))));
 
 	// TODO - consider sub-scoped item names - how to indicate scope?
 
@@ -2066,7 +2060,13 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_bool(db, "cond-write", ns->cond_write);
 	}
 
-	info_append_uint64(db, "data-max-memory", ns->sindex_data_max_memory);
+	if (ns->sindex_data_max_memory != ULONG_MAX) {
+		info_append_uint64(db, "data-max-memory", ns->sindex_data_max_memory);
+	}
+	else {
+		info_append_string(db, "data-max-memory", "ULONG_MAX");
+	}
+
 	info_append_uint32(db, "num-partitions", ns->sindex_num_partitions);
 
 	info_append_bool(db, "strict", ns->geo2dsphere_within_strict);
@@ -2075,8 +2075,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "max-cells", (uint32_t)ns->geo2dsphere_within_max_cells);
 	info_append_uint32(db, "level-mod", (uint32_t)ns->geo2dsphere_within_level_mod);
 	info_append_uint32(db, "earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters);
-
-	return 0;
 }
 
 void
@@ -2084,10 +2082,7 @@ info_network_info_config_get(cf_dyn_buf *db)
 {
 	// Service:
 
-	// Note - this isn't preceded by a semicolon.
-	cf_dyn_buf_append_string(db, "service-address=");
-	cf_dyn_buf_append_string(db, g_config.socket.addr);
-
+	info_append_string(db, "service-address", g_config.socket.addr);
 	info_append_int(db, "service-port", g_config.socket.port);
 
 	if (g_config.external_address) {
@@ -2118,9 +2113,11 @@ info_network_info_config_get(cf_dyn_buf *db)
 		else {
 			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 				if (g_config.hb_mesh_seed_addrs[i]) {
-					info_append_string(db, "mesh-seed-address-port", g_config.hb_mesh_seed_addrs[i]);
-					cf_dyn_buf_append_string(db, ":");
+					cf_dyn_buf_append_string(db, "mesh-seed-address-port=");
+					cf_dyn_buf_append_string(db, g_config.hb_mesh_seed_addrs[i]);
+					cf_dyn_buf_append_char(db, ':');
 					cf_dyn_buf_append_int(db, g_config.hb_mesh_seed_ports[i]);
+					cf_dyn_buf_append_char(db, ';');
 				}
 				else {
 					break;
@@ -2148,16 +2145,9 @@ info_network_info_config_get(cf_dyn_buf *db)
 void
 info_network_heartbeat_config_get(cf_dyn_buf *db)
 {
-	// Note - this isn't preceded by a semicolon.
-	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
-		cf_dyn_buf_append_string(db, "heartbeat-mode=multicast");
-	}
-	else if (g_config.hb_mode == AS_HB_MODE_MESH) {
-		cf_dyn_buf_append_string(db, "heartbeat-mode=mesh");
-	}
-	else {
-		cf_dyn_buf_append_string(db, "heartbeat-mode=UNKNOWN");
-	}
+	info_append_string(db, "heartbeat-mode",
+			(g_config.hb_mode == AS_HB_MODE_MCAST ? "multicast" :
+				(g_config.hb_mode == AS_HB_MODE_MESH ? "mesh" : "UNKNOWN")));
 
 	if (g_config.hb_tx_addr) {
 		info_append_string(db, "heartbeat-interface-address", g_config.hb_tx_addr);
@@ -2165,9 +2155,9 @@ info_network_heartbeat_config_get(cf_dyn_buf *db)
 
 	info_append_string(db, "heartbeat-protocol",
 			(AS_HB_PROTOCOL_V1 == g_config.hb_protocol ? "v1" :
-			  (AS_HB_PROTOCOL_V2 == g_config.hb_protocol ? "v2" :
-			   (AS_HB_PROTOCOL_RESET == g_config.hb_protocol ? "reset" :
-				(AS_HB_PROTOCOL_NONE == g_config.hb_protocol ? "none" : "undefined")))));
+				(AS_HB_PROTOCOL_V2 == g_config.hb_protocol ? "v2" :
+					(AS_HB_PROTOCOL_RESET == g_config.hb_protocol ? "reset" :
+						(AS_HB_PROTOCOL_NONE == g_config.hb_protocol ? "none" : "undefined")))));
 
 	info_append_string(db, "heartbeat-address", g_config.hb_addr);
 	info_append_int(db, "heartbeat-port", g_config.hb_port);
@@ -2179,10 +2169,7 @@ info_network_heartbeat_config_get(cf_dyn_buf *db)
 void
 info_security_config_get(cf_dyn_buf *db)
 {
-	// Note - this isn't preceded by a semicolon.
-	cf_dyn_buf_append_string(db, "enable-security=");
-	cf_dyn_buf_append_string(db, g_config.sec_cfg.security_enabled ? "true" : "false");
-
+	info_append_bool(db, "enable-security", g_config.sec_cfg.security_enabled);
 	info_append_uint32(db, "privilege-refresh-period", g_config.sec_cfg.privilege_refresh_period);
 	info_append_uint32(db, "report-authentication-sinks", g_config.sec_cfg.report.authentication);
 	info_append_uint32(db, "report-data-op-sinks", g_config.sec_cfg.report.data_op);
@@ -2195,12 +2182,54 @@ info_security_config_get(cf_dyn_buf *db)
 void
 info_cluster_config_get(cf_dyn_buf *db)
 {
-	// Note - this isn't preceded by a semicolon.
-	cf_dyn_buf_append_string(db, "mode=");
-	cf_dyn_buf_append_string(db, cc_mode_str[g_config.cluster_mode]);
-
+	info_append_string(db, "mode", cc_mode_str[g_config.cluster_mode]);
 	info_append_uint32(db, "self-group-id", (uint32_t)g_config.cluster.cl_self_group);
 	info_append_uint32(db, "self-node-id", g_config.cluster.cl_self_node);
+}
+
+
+void
+info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
+{
+	char context[1024];
+	int context_len = sizeof(context);
+
+	if (as_info_parameter_get(params, "context", context, &context_len) != 0) {
+		cf_dyn_buf_append_string(db, "Error: Invalid get-config parameter;");
+		return;
+	}
+
+	if (strcmp(context, "service") == 0) {
+		info_service_config_get(db);
+	}
+	else if (strcmp(context, "network.info") == 0) {
+		info_network_info_config_get(db);
+	}
+	else if (strcmp(context, "network.heartbeat") == 0) {
+		info_network_heartbeat_config_get(db);
+	}
+	else if (strcmp(context, "namespace") == 0) {
+		context_len = sizeof(context);
+
+		if (as_info_parameter_get(params, "id", context, &context_len) != 0) {
+			cf_dyn_buf_append_string(db, "Error:invalid id;");
+			return;
+		}
+
+		info_namespace_config_get(context, db);
+	}
+	else if (strcmp(context, "cluster") == 0) {
+		info_cluster_config_get(db);
+	}
+	else if (strcmp(context, "security") == 0) {
+		info_security_config_get(db);
+	}
+	else if (strcmp(context, "xdr") == 0) {
+		as_xdr_get_config(db);
+	}
+	else {
+		cf_dyn_buf_append_string(db, "Error:Invalid context;");
+	}
 }
 
 
@@ -2209,67 +2238,23 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "config-get command received: params %s", params);
 
-	if(params) {
-
-		char context[1024];
-		int context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "context", context, &context_len)) {
-			if (strcmp(context, "cluster") == 0) {
-				info_cluster_config_get(db);
-				return 0;
-			}
-			else if (strcmp(context, "namespace") == 0) {
-				context_len = sizeof(context);
-				if (0 != as_info_parameter_get(params, "id", context, &context_len)) {
-					cf_dyn_buf_append_string(db, "Error:invalid id");
-					return(0);
-				}
-				info_namespace_config_get(context, db);
-				return(0);
-			}
-			else if (strcmp(context, "network.heartbeat") == 0) {
-				info_network_heartbeat_config_get(db);
-				return(0);
-			}
-			else if (strcmp(context, "network.info") == 0) {
-				info_network_info_config_get(db);
-				return(0);
-			}
-			else if (strcmp(context, "security") == 0) {
-				info_security_config_get(db);
-				return(0);
-			}
-			else if (strcmp(context, "service") == 0) {
-				info_service_config_get(db);
-				return(0);
-			}
-			else if (strcmp(context, "xdr") == 0) {
-				as_xdr_get_config(db);
-				return(0);
-			}
-			else {
-				cf_dyn_buf_append_string(db, "Error:Invalid context");
-				return(0);
-			}
-		} else if (strcmp(params, "") != 0) {
-			cf_dyn_buf_append_string(db, "Error: Invalid get-config parameter");
-			return(0);
-		}
+	if (params && *params != 0) {
+		info_command_config_get_with_params(name, params, db);
+		cf_dyn_buf_chomp(db);
+		return 0;
 	}
 
 	// We come here when context is not mentioned.
 	// In that case we want to print everything.
 	info_service_config_get(db);
-	cf_dyn_buf_append_char(db, ';');
 	info_network_info_config_get(db);
-	cf_dyn_buf_append_char(db, ';');
 	info_network_heartbeat_config_get(db);
-	cf_dyn_buf_append_char(db, ';');
 	info_security_config_get(db);
-	cf_dyn_buf_append_char(db, ';');
 	as_xdr_get_config(db);
 
-	return(0);
+	cf_dyn_buf_chomp(db);
+
+	return 0;
 }
 
 
@@ -5445,35 +5430,19 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 int
 info_get_tree_namespace(char *name, char *subtree, cf_dyn_buf *db)
 {
-
 	as_namespace *ns = as_namespace_get_byname(subtree);
-	if (!ns)   {
-		cf_dyn_buf_append_string(db, "type=unknown");
-		return(0);
+
+	if (! ns)   {
+		cf_dyn_buf_append_string(db, "type=unknown"); // TODO - better message?
+		return 0;
 	}
 
-	switch (ns->storage_type) {
-		case AS_STORAGE_ENGINE_UNDEF:
-		default:
-			cf_dyn_buf_append_string(db, "type=illegal");
-			goto Done;
-
-		case AS_STORAGE_ENGINE_SSD:
-			cf_dyn_buf_append_string(db, "type=device");
-			break;
-		case AS_STORAGE_ENGINE_MEMORY:
-			cf_dyn_buf_append_string(db, "type=memory");
-			break;
-		case AS_STORAGE_ENGINE_KV:
-			cf_dyn_buf_append_string(db, "type=kv");
-			break;
-	}
-
+	// TODO - config before stats?
 	info_get_namespace_info(ns, db);
-	cf_dyn_buf_append_string(db, ";");
 	info_namespace_config_get(ns->name, db);
 
-Done:
+	cf_dyn_buf_chomp(db);
+
 	return 0;
 }
 

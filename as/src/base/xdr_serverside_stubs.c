@@ -98,14 +98,10 @@ void xdr_handle_failednodeprocessingdone(cf_node nodeid)
 
 void as_xdr_get_stats(char *name, cf_dyn_buf *db)
 {
-	// No XDR stats. Remove the last ';' that will be added by the caller
-	cf_dyn_buf_chomp(db);
 }
 
 void as_xdr_get_config(cf_dyn_buf *db)
 {
-	// No XDR config. Remove the last ';' that will be added by the caller
-	cf_dyn_buf_chomp(db);
 }
 
 void as_xdr_set_config(char *params, cf_dyn_buf *db)
