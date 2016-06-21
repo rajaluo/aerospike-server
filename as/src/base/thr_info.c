@@ -35,7 +35,6 @@
 #include <mcheck.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
-#include <sys/param.h>
 #include <sys/resource.h>
 #include <arpa/inet.h>
 #include <time.h>

@@ -30,7 +30,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <netinet/in.h>
-#include <sys/param.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"

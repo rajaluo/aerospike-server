@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
+#include <sys/param.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
