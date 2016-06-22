@@ -1935,6 +1935,90 @@ info_service_config_get(cf_dyn_buf *db)
 
 
 void
+info_network_config_get(cf_dyn_buf *db)
+{
+	// Service:
+
+	info_append_string(db, "service.address", g_config.socket.addr);
+	info_append_int(db, "service.port", g_config.socket.port);
+
+	if (g_config.external_address) {
+		info_append_string(db, "service.access-address", g_config.external_address);
+		info_append_bool(db, "virtual", g_config.is_external_address_virtual); // TODO - how to present?
+	}
+
+	if (g_config.alternate_address) {
+		info_append_string(db, "service.alternate-address", g_config.alternate_address);
+	}
+
+	if (g_config.network_interface_name) {
+		info_append_string(db, "service.network-interface-name", g_config.network_interface_name);
+	}
+
+	info_append_bool(db, "service.reuse-address", g_config.socket_reuse_addr);
+
+	// Heartbeat:
+
+	info_append_string(db, "heartbeat.mode",
+			(g_config.hb_mode == AS_HB_MODE_MCAST ? "multicast" :
+				(g_config.hb_mode == AS_HB_MODE_MESH ? "mesh" : "UNKNOWN")));
+
+	info_append_string(db, "heartbeat.address", g_config.hb_addr);
+	info_append_int(db, "heartbeat.port", g_config.hb_port);
+
+	if (g_config.hb_mode == AS_HB_MODE_MESH) {
+		if (g_config.hb_init_addr) {
+			info_append_string(db, "heartbeat.mesh-address", g_config.hb_init_addr);
+
+			if (g_config.hb_init_port) {
+				info_append_int(db, "heartbeat.mesh-port", g_config.hb_init_port);
+			}
+		}
+		else {
+			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
+				if (g_config.hb_mesh_seed_addrs[i]) {
+					cf_dyn_buf_append_string(db, "heartbeat.mesh-seed-address-port=");
+					cf_dyn_buf_append_string(db, g_config.hb_mesh_seed_addrs[i]);
+					cf_dyn_buf_append_char(db, ':');
+					cf_dyn_buf_append_int(db, g_config.hb_mesh_seed_ports[i]);
+					cf_dyn_buf_append_char(db, ';');
+				}
+				else {
+					break;
+				}
+			}
+		}
+	}
+
+	info_append_uint32(db, "heartbeat.interval", g_config.hb_interval);
+	info_append_uint32(db, "heartbeat.timeout", g_config.hb_timeout);
+	info_append_string(db, "heartbeat.interface-address", g_config.hb_tx_addr ? g_config.hb_tx_addr : "null");
+	// Note - no heartbeat.mcast-ttl or heartbeat.mesh-rw-retry-timeout ...
+
+	info_append_string(db, "heartbeat.protocol",
+			(AS_HB_PROTOCOL_V1 == g_config.hb_protocol ? "v1" :
+				(AS_HB_PROTOCOL_V2 == g_config.hb_protocol ? "v2" :
+					(AS_HB_PROTOCOL_RESET == g_config.hb_protocol ? "reset" :
+						(AS_HB_PROTOCOL_NONE == g_config.hb_protocol ? "none" : "undefined")))));
+
+	// Fabric:
+
+	info_append_int(db, "fabric.port", g_config.fabric_port);
+	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
+	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
+	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
+	info_append_int(db, "fabric.keepalive-probes", g_config.fabric_keepalive_probes);
+
+	// Info:
+
+	// network.info.port is the asd info port variable/output, This was chosen
+	// because info.port conflicts with XDR config parameter. Ideally XDR should
+	// use xdr.info.port and asd should use info.port.
+	info_append_int(db, "info.port", g_config.info_port);
+}
+
+
+void
 info_namespace_config_get(char* context, cf_dyn_buf *db)
 {
 	as_namespace *ns = as_namespace_get_byname(context);
@@ -1997,13 +2081,10 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
-	// TODO - move near front?
 	info_append_string(db, "storage-engine",
 			(ns->storage_type == AS_STORAGE_ENGINE_MEMORY ? "memory" :
 				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" :
 					(ns->storage_type == AS_STORAGE_ENGINE_KV ? "kv" : "illegal"))));
-
-	// TODO - consider sub-scoped item names - how to indicate scope?
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
@@ -2011,7 +2092,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				break;
 			}
 
-			info_append_string(db, "dev", ns->storage_devices[i]);
+			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
 		}
 
 		for (int i = 0; i < AS_STORAGE_MAX_FILES; i++) {
@@ -2019,28 +2100,28 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				break;
 			}
 
-			info_append_string(db, "file", ns->storage_files[i]);
+			info_append_string(db, "storage-engine.file", ns->storage_files[i]);
 		}
 
-		// TODO - report the shadows?
+		// TODO - how to report the shadows?
 
-		info_append_uint64(db, "filesize", ns->storage_filesize);
-		info_append_string(db, "scheduler-mode", ns->storage_scheduler_mode ? ns->storage_scheduler_mode : "null");
-		info_append_uint32(db, "write-block-size", ns->storage_write_block_size);
-		info_append_bool(db, "data-in-memory", ns->storage_data_in_memory);
-		info_append_bool(db, "cold-start-empty", ns->storage_cold_start_empty);
-		info_append_uint32(db, "defrag-lwm-pct", ns->storage_defrag_lwm_pct);
-		info_append_uint32(db, "defrag-queue-min", ns->storage_defrag_queue_min);
-		info_append_uint32(db, "defrag-sleep", ns->storage_defrag_sleep);
-		info_append_int(db, "defrag-startup-minimum", ns->storage_defrag_startup_minimum);
-		info_append_bool(db, "disable-odirect", ns->storage_disable_odirect);
-		info_append_bool(db, "enable-osync", ns->storage_enable_osync);
-		info_append_uint64(db, "flush-max-ms", ns->storage_flush_max_us / 1000);
-		info_append_uint64(db, "fsync-max-sec", ns->storage_fsync_max_us / 1000000);
-		info_append_uint64(db, "max-write-cache", ns->storage_max_write_cache);
-		info_append_uint32(db, "min-avail-pct", ns->storage_min_avail_pct);
-		info_append_uint32(db, "post-write-queue", ns->storage_post_write_queue);
-		info_append_uint32(db, "write-threads", ns->storage_write_threads);
+		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
+		info_append_string(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode ? ns->storage_scheduler_mode : "null");
+		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
+		info_append_bool(db, "storage-engine.data-in-memory", ns->storage_data_in_memory);
+		info_append_bool(db, "storage-engine.cold-start-empty", ns->storage_cold_start_empty);
+		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
+		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
+		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
+		info_append_int(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
+		info_append_bool(db, "storage-engine.disable-odirect", ns->storage_disable_odirect);
+		info_append_bool(db, "storage-engine.enable-osync", ns->storage_enable_osync);
+		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint64(db, "storage-engine.fsync-max-sec", ns->storage_fsync_max_us / 1000000);
+		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
+		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
+		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
+		info_append_uint32(db, "storage-engine.write-threads", ns->storage_write_threads);
 	}
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_KV) {
@@ -2049,120 +2130,42 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 				break;
 			}
 
-			info_append_string(db, "dev", ns->storage_devices[i]);
+			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
 		}
 
-		info_append_uint64(db, "filesize", ns->storage_filesize);
-		info_append_uint32(db, "read-block-size", ns->storage_read_block_size);
-		info_append_uint32(db, "write-block-size", ns->storage_write_block_size);
-		info_append_uint32(db, "num-write-blocks", ns->storage_num_write_blocks);
-		info_append_bool(db, "cond-write", ns->cond_write);
+		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
+		info_append_uint32(db, "storage-engine.read-block-size", ns->storage_read_block_size);
+		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
+		info_append_uint32(db, "storage-engine.num-write-blocks", ns->storage_num_write_blocks);
+		info_append_bool(db, "storage-engine.cond-write", ns->cond_write);
 	}
 
 	if (ns->sindex_data_max_memory != ULONG_MAX) {
-		info_append_uint64(db, "data-max-memory", ns->sindex_data_max_memory);
+		info_append_uint64(db, "sindex.data-max-memory", ns->sindex_data_max_memory);
 	}
 	else {
-		info_append_string(db, "data-max-memory", "ULONG_MAX");
+		info_append_string(db, "sindex.data-max-memory", "ULONG_MAX");
 	}
 
-	info_append_uint32(db, "num-partitions", ns->sindex_num_partitions);
+	info_append_uint32(db, "sindex.num-partitions", ns->sindex_num_partitions);
 
-	info_append_bool(db, "strict", ns->geo2dsphere_within_strict);
-	info_append_uint32(db, "min-level", (uint32_t)ns->geo2dsphere_within_min_level);
-	info_append_uint32(db, "max-level", (uint32_t)ns->geo2dsphere_within_max_level);
-	info_append_uint32(db, "max-cells", (uint32_t)ns->geo2dsphere_within_max_cells);
-	info_append_uint32(db, "level-mod", (uint32_t)ns->geo2dsphere_within_level_mod);
-	info_append_uint32(db, "earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters);
+	info_append_bool(db, "geo2dsphere-within.strict", ns->geo2dsphere_within_strict);
+	info_append_uint32(db, "geo2dsphere-within.min-level", (uint32_t)ns->geo2dsphere_within_min_level);
+	info_append_uint32(db, "geo2dsphere-within.max-level", (uint32_t)ns->geo2dsphere_within_max_level);
+	info_append_uint32(db, "geo2dsphere-within.max-cells", (uint32_t)ns->geo2dsphere_within_max_cells);
+	info_append_uint32(db, "geo2dsphere-within.level-mod", (uint32_t)ns->geo2dsphere_within_level_mod);
+	info_append_uint32(db, "geo2dsphere-within.earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters);
 }
+
 
 void
-info_network_info_config_get(cf_dyn_buf *db)
+info_cluster_config_get(cf_dyn_buf *db)
 {
-	// Service:
-
-	info_append_string(db, "service-address", g_config.socket.addr);
-	info_append_int(db, "service-port", g_config.socket.port);
-
-	if (g_config.external_address) {
-		info_append_string(db, "access-address", g_config.external_address);
-		info_append_bool(db, "virtual", g_config.is_external_address_virtual);
-	}
-
-	if (g_config.alternate_address) {
-		info_append_string(db, "alternate-address", g_config.alternate_address);
-	}
-
-	if (g_config.network_interface_name) {
-		info_append_string(db, "network-interface-name", g_config.network_interface_name);
-	}
-
-	info_append_bool(db, "reuse-address", g_config.socket_reuse_addr);
-
-	// Some of heartbeat:
-
-	if (g_config.hb_mode == AS_HB_MODE_MESH) {
-		if (g_config.hb_init_addr) {
-			info_append_string(db, "mesh-address", g_config.hb_init_addr);
-
-			if (g_config.hb_init_port) {
-				info_append_int(db, "mesh-port", g_config.hb_init_port);
-			}
-		}
-		else {
-			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-				if (g_config.hb_mesh_seed_addrs[i]) {
-					cf_dyn_buf_append_string(db, "mesh-seed-address-port=");
-					cf_dyn_buf_append_string(db, g_config.hb_mesh_seed_addrs[i]);
-					cf_dyn_buf_append_char(db, ':');
-					cf_dyn_buf_append_int(db, g_config.hb_mesh_seed_ports[i]);
-					cf_dyn_buf_append_char(db, ';');
-				}
-				else {
-					break;
-				}
-			}
-		}
-	}
-
-	// Fabric:
-
-	info_append_int(db, "fabric-port", g_config.fabric_port);
-	info_append_bool(db, "fabric-keepalive-enabled", g_config.fabric_keepalive_enabled);
-	info_append_int(db, "fabric-keepalive-time", g_config.fabric_keepalive_time);
-	info_append_int(db, "fabric-keepalive-intvl", g_config.fabric_keepalive_intvl);
-	info_append_int(db, "fabric-keepalive-probes", g_config.fabric_keepalive_probes);
-
-	// Info:
-
-	// network-info-port is the asd info port variable/output, This was chosen
-	// because info-port conflicts with XDR config parameter. Ideally XDR should
-	// use xdr-info-port and asd should use info-port.
-	info_append_int(db, "network-info-port", g_config.info_port);
+	info_append_string(db, "mode", cc_mode_str[g_config.cluster_mode]);
+	info_append_uint32(db, "self-group-id", (uint32_t)g_config.cluster.cl_self_group);
+	info_append_uint32(db, "self-node-id", g_config.cluster.cl_self_node);
 }
 
-void
-info_network_heartbeat_config_get(cf_dyn_buf *db)
-{
-	info_append_string(db, "heartbeat-mode",
-			(g_config.hb_mode == AS_HB_MODE_MCAST ? "multicast" :
-				(g_config.hb_mode == AS_HB_MODE_MESH ? "mesh" : "UNKNOWN")));
-
-	if (g_config.hb_tx_addr) {
-		info_append_string(db, "heartbeat-interface-address", g_config.hb_tx_addr);
-	}
-
-	info_append_string(db, "heartbeat-protocol",
-			(AS_HB_PROTOCOL_V1 == g_config.hb_protocol ? "v1" :
-				(AS_HB_PROTOCOL_V2 == g_config.hb_protocol ? "v2" :
-					(AS_HB_PROTOCOL_RESET == g_config.hb_protocol ? "reset" :
-						(AS_HB_PROTOCOL_NONE == g_config.hb_protocol ? "none" : "undefined")))));
-
-	info_append_string(db, "heartbeat-address", g_config.hb_addr);
-	info_append_int(db, "heartbeat-port", g_config.hb_port);
-	info_append_uint32(db, "heartbeat-interval", g_config.hb_interval);
-	info_append_uint32(db, "heartbeat-timeout", g_config.hb_timeout);
-}
 
 // TODO - security API?
 void
@@ -2176,14 +2179,6 @@ info_security_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "report-user-admin-sinks", g_config.sec_cfg.report.user_admin);
 	info_append_uint32(db, "report-violation-sinks", g_config.sec_cfg.report.violation);
 	info_append_int(db, "syslog-local", g_config.sec_cfg.syslog_local);
-}
-
-void
-info_cluster_config_get(cf_dyn_buf *db)
-{
-	info_append_string(db, "mode", cc_mode_str[g_config.cluster_mode]);
-	info_append_uint32(db, "self-group-id", (uint32_t)g_config.cluster.cl_self_group);
-	info_append_uint32(db, "self-node-id", g_config.cluster.cl_self_node);
 }
 
 
@@ -2201,11 +2196,8 @@ info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
 	if (strcmp(context, "service") == 0) {
 		info_service_config_get(db);
 	}
-	else if (strcmp(context, "network.info") == 0) {
-		info_network_info_config_get(db);
-	}
-	else if (strcmp(context, "network.heartbeat") == 0) {
-		info_network_heartbeat_config_get(db);
+	else if (strcmp(context, "network") == 0) {
+		info_network_config_get(db);
 	}
 	else if (strcmp(context, "namespace") == 0) {
 		context_len = sizeof(context);
@@ -2246,8 +2238,7 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	// We come here when context is not mentioned.
 	// In that case we want to print everything.
 	info_service_config_get(db);
-	info_network_info_config_get(db);
-	info_network_heartbeat_config_get(db);
+	info_network_config_get(db);
 	info_security_config_get(db);
 	as_xdr_get_config(db);
 
