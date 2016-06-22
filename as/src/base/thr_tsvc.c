@@ -410,7 +410,7 @@ thr_tsvc(void *arg)
 			cf_crash(AS_TSVC, "unable to pop from transaction queue");
 		}
 
-		if (g_config.svc_benchmarks_active &&
+		if (g_config.svc_benchmarks_enabled &&
 				tr.benchmark_time != 0 && ! as_transaction_is_restart(&tr)) {
 			histogram_insert_data_point(g_stats.svc_queue_hist, tr.benchmark_time);
 		}

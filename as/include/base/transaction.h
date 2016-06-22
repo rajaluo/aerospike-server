@@ -50,7 +50,7 @@
 
 #define G_HIST_INSERT_DATA_POINT(name, start_time) \
 { \
-	if (g_config.name##_active) { \
+	if (g_config.name##_enabled) { \
 		histogram_insert_data_point(g_stats.name, start_time); \
 	} \
 }
@@ -69,7 +69,7 @@
 
 #define BENCHMARK_START(tr, name, orig) \
 { \
-	if (tr->rsv.ns->name##_benchmarks_active && tr->origin == orig) { \
+	if (tr->rsv.ns->name##_benchmarks_enabled && tr->origin == orig) { \
 		if (tr->benchmark_time == 0) { \
 			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_start_hist, tr->start_time); \
 		} \
@@ -81,7 +81,7 @@
 
 #define BENCHMARK_NEXT_DATA_POINT(trw, name, tok) \
 { \
-	if (trw->rsv.ns->name##_benchmarks_active && trw->benchmark_time != 0) { \
+	if (trw->rsv.ns->name##_benchmarks_enabled && trw->benchmark_time != 0) { \
 		trw->benchmark_time = histogram_insert_data_point(trw->rsv.ns->name##_##tok##_hist, trw->benchmark_time); \
 	} \
 }

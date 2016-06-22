@@ -738,7 +738,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 	int fd = ssd_fd_get(ssd);
 	uint64_t file_offset = WBLOCK_ID_TO_BYTES(ssd, wblock_id);
 
-	uint64_t start_ns = ssd->ns->storage_benchmarks_active ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (lseek(fd, (off_t)file_offset, SEEK_SET) != (off_t)file_offset) {
 		cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
@@ -1190,7 +1190,7 @@ as_storage_record_read_ssd(as_storage_rd *rd)
 
 		int fd = ssd_fd_get(ssd);
 
-		uint64_t start_ns = rd->ns->storage_benchmarks_active ? cf_getns() : 0;
+		uint64_t start_ns = rd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 		if (lseek(fd, (off_t)read_offset, SEEK_SET) != (off_t)read_offset) {
 			cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
@@ -1315,7 +1315,7 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	int fd = ssd_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id);
 
-	uint64_t start_ns = ssd->ns->storage_benchmarks_active ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (lseek(fd, write_offset, SEEK_SET) != write_offset) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: offset %ld: errno %d (%s)",
@@ -1343,7 +1343,7 @@ ssd_shadow_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	int fd = ssd_shadow_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id);
 
-	uint64_t start_ns = ssd->ns->storage_benchmarks_active ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (lseek(fd, write_offset, SEEK_SET) != write_offset) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: offset %ld: errno %d (%s)",
@@ -2217,7 +2217,7 @@ ssd_fsync(drv_ssd *ssd)
 {
 	int fd = ssd_fd_get(ssd);
 
-	uint64_t start_ns = ssd->ns->storage_benchmarks_active ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	fsync(fd);
 

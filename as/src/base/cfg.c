@@ -253,8 +253,6 @@ typedef enum {
 	CASE_SERVICE_CLIENT_FD_MAX, // renamed
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
-	CASE_SERVICE_ACTIVATE_BENCHMARKS_SVC,
-	CASE_SERVICE_ACTIVATE_HIST_INFO,
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
@@ -262,6 +260,8 @@ typedef enum {
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
 	CASE_SERVICE_BATCH_PRIORITY,
 	CASE_SERVICE_BATCH_INDEX_THREADS,
+	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
+	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FABRIC_WORKERS,
 	CASE_SERVICE_GENERATION_DISABLE,
 	CASE_SERVICE_HIST_TRACK_BACK,
@@ -465,17 +465,17 @@ typedef enum {
 	CASE_NAMESPACE_ALLOW_NONXDR_WRITES,
 	CASE_NAMESPACE_ALLOW_XDR_WRITES,
 	// Normally hidden:
-	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB,
-	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ,
-	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_STORAGE, // TODO - should be in storage scope.
-	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF,
-	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB,
-	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE,
-	CASE_NAMESPACE_ACTIVATE_HIST_PROXY,
 	CASE_NAMESPACE_COLD_START_EVICT_TTL,
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_READ,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE, // TODO - should this be in storage scope?
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE,
+	CASE_NAMESPACE_ENABLE_HIST_PROXY,
 	CASE_NAMESPACE_EVICT_HIST_BUCKETS,
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
@@ -667,8 +667,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
-		{ "activate-benchmarks-svc",		CASE_SERVICE_ACTIVATE_BENCHMARKS_SVC },
-		{ "activate-hist-info",				CASE_SERVICE_ACTIVATE_HIST_INFO },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
@@ -676,6 +674,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
 		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
 		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
+		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
+		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
 		{ "generation-disable",				CASE_SERVICE_GENERATION_DISABLE },
 		{ "hist-track-back",				CASE_SERVICE_HIST_TRACK_BACK },
@@ -881,17 +881,17 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ns-forward-xdr-writes",			CASE_NAMESPACE_FORWARD_XDR_WRITES },
 		{ "allow-nonxdr-writes",			CASE_NAMESPACE_ALLOW_NONXDR_WRITES },
 		{ "allow-xdr-writes",				CASE_NAMESPACE_ALLOW_XDR_WRITES },
-		{ "activate-benchmarks-batch-sub",	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB },
-		{ "activate-benchmarks-read",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ },
-		{ "activate-benchmarks-storage",	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_STORAGE },
-		{ "activate-benchmarks-udf",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF },
-		{ "activate-benchmarks-udf-sub",	CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB },
-		{ "activate-benchmarks-write",		CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE },
-		{ "activate-hist-proxy",			CASE_NAMESPACE_ACTIVATE_HIST_PROXY },
 		{ "cold-start-evict-ttl",			CASE_NAMESPACE_COLD_START_EVICT_TTL },
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
+		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
+		{ "enable-benchmarks-read",			CASE_NAMESPACE_ENABLE_BENCHMARKS_READ },
+		{ "enable-benchmarks-storage",		CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE },
+		{ "enable-benchmarks-udf",			CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF },
+		{ "enable-benchmarks-udf-sub",		CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB },
+		{ "enable-benchmarks-write",		CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE },
+		{ "enable-hist-proxy",				CASE_NAMESPACE_ENABLE_HIST_PROXY },
 		{ "evict-hist-buckets",				CASE_NAMESPACE_EVICT_HIST_BUCKETS },
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
@@ -1931,12 +1931,6 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_PROTO_FD_MAX:
 				c->n_proto_fd_max = cfg_int_no_checks(&line);
 				break;
-			case CASE_SERVICE_ACTIVATE_BENCHMARKS_SVC:
-				c->svc_benchmarks_active = cfg_bool(&line);
-				break;
-			case CASE_SERVICE_ACTIVATE_HIST_INFO:
-				c->info_hist_active = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				c->allow_inline_transactions = cfg_bool(&line);
 				break;
@@ -1957,6 +1951,12 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_BATCH_INDEX_THREADS:
 				c->n_batch_index_threads = cfg_int(&line, 1, MAX_BATCH_THREADS);
+				break;
+			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
+				c->svc_benchmarks_enabled = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_ENABLE_HIST_INFO:
+				c->info_hist_enabled = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_FABRIC_WORKERS:
 				c->n_fabric_workers = cfg_int(&line, 1, MAX_FABRIC_WORKERS);
@@ -2567,27 +2567,6 @@ as_config_init(const char *config_file)
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
-			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_BATCH_SUB:
-				ns->batch_sub_benchmarks_active = true;
-				break;
-			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_READ:
-				ns->read_benchmarks_active = true;
-				break;
-			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_STORAGE:
-				ns->storage_benchmarks_active = true;
-				break;
-			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF:
-				ns->udf_benchmarks_active = true;
-				break;
-			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_UDF_SUB:
-				ns->udf_sub_benchmarks_active = true;
-				break;
-			case CASE_NAMESPACE_ACTIVATE_BENCHMARKS_WRITE:
-				ns->write_benchmarks_active = true;
-				break;
-			case CASE_NAMESPACE_ACTIVATE_HIST_PROXY:
-				ns->proxy_hist_active = cfg_bool(&line);
-				break;
 			case CASE_NAMESPACE_COLD_START_EVICT_TTL:
 				ns->cold_start_evict_ttl = cfg_u32_no_checks(&line);
 				break;
@@ -2610,6 +2589,27 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_DISALLOW_NULL_SETNAME:
 				ns->disallow_null_setname = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB:
+				ns->batch_sub_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_READ:
+				ns->read_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE:
+				ns->storage_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF:
+				ns->udf_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB:
+				ns->udf_sub_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE:
+				ns->write_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_HIST_PROXY:
+				ns->proxy_hist_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_EVICT_HIST_BUCKETS:
 				ns->evict_hist_buckets = cfg_u32(&line, 100, 10000000);
@@ -3392,85 +3392,85 @@ as_config_post_process(as_config *c, const char *config_file)
 
 		// One-way activated histograms (may be tracked histograms).
 
-		sprintf(hist_name, "{%s} read", ns->name);
+		sprintf(hist_name, "{%s}-read", ns->name);
 		create_and_check_hist_track(&ns->read_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} write", ns->name);
+		sprintf(hist_name, "{%s}-write", ns->name);
 		create_and_check_hist_track(&ns->write_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} udf", ns->name);
+		sprintf(hist_name, "{%s}-udf", ns->name);
 		create_and_check_hist_track(&ns->udf_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} query", ns->name);
+		sprintf(hist_name, "{%s}-query", ns->name);
 		create_and_check_hist_track(&ns->query_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} query-rec-count", ns->name);
+		sprintf(hist_name, "{%s}-query-rec-count", ns->name);
 		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_RAW);
 
 		// Activate-by-config histograms (can't be tracked histograms).
 
-		sprintf(hist_name, "{%s} proxy", ns->name);
+		sprintf(hist_name, "{%s}-proxy", ns->name);
 		create_and_check_hist(&ns->proxy_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} read-start", ns->name);
+		sprintf(hist_name, "{%s}-read-start", ns->name);
 		create_and_check_hist(&ns->read_start_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} read-restart", ns->name);
+		sprintf(hist_name, "{%s}-read-restart", ns->name);
 		create_and_check_hist(&ns->read_restart_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} read-dup-res", ns->name);
+		sprintf(hist_name, "{%s}-read-dup-res", ns->name);
 		create_and_check_hist(&ns->read_dup_res_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} read-local", ns->name);
+		sprintf(hist_name, "{%s}-read-local", ns->name);
 		create_and_check_hist(&ns->read_local_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} read-response", ns->name);
+		sprintf(hist_name, "{%s}-read-response", ns->name);
 		create_and_check_hist(&ns->read_response_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} write-start", ns->name);
+		sprintf(hist_name, "{%s}-write-start", ns->name);
 		create_and_check_hist(&ns->write_start_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} write-restart", ns->name);
+		sprintf(hist_name, "{%s}-write-restart", ns->name);
 		create_and_check_hist(&ns->write_restart_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} write-dup-res", ns->name);
+		sprintf(hist_name, "{%s}-write-dup-res", ns->name);
 		create_and_check_hist(&ns->write_dup_res_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} write-master", ns->name);
+		sprintf(hist_name, "{%s}-write-master", ns->name);
 		create_and_check_hist(&ns->write_master_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} write-repl-write", ns->name);
+		sprintf(hist_name, "{%s}-write-repl-write", ns->name);
 		create_and_check_hist(&ns->write_repl_write_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} write-response", ns->name);
+		sprintf(hist_name, "{%s}-write-response", ns->name);
 		create_and_check_hist(&ns->write_response_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} udf-start", ns->name);
+		sprintf(hist_name, "{%s}-udf-start", ns->name);
 		create_and_check_hist(&ns->udf_start_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-restart", ns->name);
+		sprintf(hist_name, "{%s}-udf-restart", ns->name);
 		create_and_check_hist(&ns->udf_restart_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-dup-res", ns->name);
+		sprintf(hist_name, "{%s}-udf-dup-res", ns->name);
 		create_and_check_hist(&ns->udf_dup_res_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-master", ns->name);
+		sprintf(hist_name, "{%s}-udf-master", ns->name);
 		create_and_check_hist(&ns->udf_master_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-repl-write", ns->name);
+		sprintf(hist_name, "{%s}-udf-repl-write", ns->name);
 		create_and_check_hist(&ns->udf_repl_write_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-response", ns->name);
+		sprintf(hist_name, "{%s}-udf-response", ns->name);
 		create_and_check_hist(&ns->udf_response_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} batch-sub-start", ns->name);
+		sprintf(hist_name, "{%s}-batch-sub-start", ns->name);
 		create_and_check_hist(&ns->batch_sub_start_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} batch-sub-restart", ns->name);
+		sprintf(hist_name, "{%s}-batch-sub-restart", ns->name);
 		create_and_check_hist(&ns->batch_sub_restart_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} batch-sub-dup-res", ns->name);
+		sprintf(hist_name, "{%s}-batch-sub-dup-res", ns->name);
 		create_and_check_hist(&ns->batch_sub_dup_res_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} batch-sub-read-local", ns->name);
+		sprintf(hist_name, "{%s}-batch-sub-read-local", ns->name);
 		create_and_check_hist(&ns->batch_sub_read_local_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} batch-sub-response", ns->name);
+		sprintf(hist_name, "{%s}-batch-sub-response", ns->name);
 		create_and_check_hist(&ns->batch_sub_response_hist, hist_name, HIST_MILLISECONDS);
 
-		sprintf(hist_name, "{%s} udf-sub-start", ns->name);
+		sprintf(hist_name, "{%s}-udf-sub-start", ns->name);
 		create_and_check_hist(&ns->udf_sub_start_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-sub-restart", ns->name);
+		sprintf(hist_name, "{%s}-udf-sub-restart", ns->name);
 		create_and_check_hist(&ns->udf_sub_restart_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-sub-dup-res", ns->name);
+		sprintf(hist_name, "{%s}-udf-sub-dup-res", ns->name);
 		create_and_check_hist(&ns->udf_sub_dup_res_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-sub-master", ns->name);
+		sprintf(hist_name, "{%s}-udf-sub-master", ns->name);
 		create_and_check_hist(&ns->udf_sub_master_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-sub-repl-write", ns->name);
+		sprintf(hist_name, "{%s}-udf-sub-repl-write", ns->name);
 		create_and_check_hist(&ns->udf_sub_repl_write_hist, hist_name, HIST_MILLISECONDS);
-		sprintf(hist_name, "{%s} udf-sub-response", ns->name);
+		sprintf(hist_name, "{%s}-udf-sub-response", ns->name);
 		create_and_check_hist(&ns->udf_sub_response_hist, hist_name, HIST_MILLISECONDS);
 
 		// Linear 'nsup' histograms.

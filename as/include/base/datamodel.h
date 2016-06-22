@@ -1067,17 +1067,17 @@ struct as_namespace_s {
 	PAD_BOOL		ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
 	PAD_BOOL		ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
 
-	PAD_BOOL		batch_sub_benchmarks_active;
-	PAD_BOOL		proxy_hist_active;
-	PAD_BOOL		read_benchmarks_active;
-	PAD_BOOL		storage_benchmarks_active; // histograms are per-drive
-	PAD_BOOL		udf_benchmarks_active;
-	PAD_BOOL		udf_sub_benchmarks_active;
-	PAD_BOOL		write_benchmarks_active;
 	uint32_t		cold_start_evict_ttl;
 	conflict_resolution_pol conflict_resolution_policy;
 	PAD_BOOL		data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
 	PAD_BOOL		disallow_null_setname;
+	PAD_BOOL		batch_sub_benchmarks_enabled;
+	PAD_BOOL		read_benchmarks_enabled;
+	PAD_BOOL		storage_benchmarks_enabled; // histograms are per-drive
+	PAD_BOOL		udf_benchmarks_enabled;
+	PAD_BOOL		udf_sub_benchmarks_enabled;
+	PAD_BOOL		write_benchmarks_enabled;
+	PAD_BOOL		proxy_hist_enabled;
 	uint32_t		evict_hist_buckets;
 	uint32_t		evict_tenths_pct;
 	float			hwm_disk;

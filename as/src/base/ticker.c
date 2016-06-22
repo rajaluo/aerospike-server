@@ -637,11 +637,11 @@ dump_global_histograms()
 		histogram_dump(g_stats.batch_index_hist);
 	}
 
-	if (g_config.info_hist_active) {
+	if (g_config.info_hist_enabled) {
 		histogram_dump(g_stats.info_hist);
 	}
 
-	if (g_config.svc_benchmarks_active) {
+	if (g_config.svc_benchmarks_enabled) {
 		histogram_dump(g_stats.svc_demarshal_hist);
 		histogram_dump(g_stats.svc_queue_hist);
 	}
@@ -666,7 +666,7 @@ dump_namespace_histograms(as_namespace* ns)
 		cf_hist_track_dump(ns->read_hist);
 	}
 
-	if (ns->read_benchmarks_active) {
+	if (ns->read_benchmarks_enabled) {
 		histogram_dump(ns->read_start_hist);
 		histogram_dump(ns->read_restart_hist);
 		histogram_dump(ns->read_dup_res_hist);
@@ -678,7 +678,7 @@ dump_namespace_histograms(as_namespace* ns)
 		cf_hist_track_dump(ns->write_hist);
 	}
 
-	if (ns->write_benchmarks_active) {
+	if (ns->write_benchmarks_enabled) {
 		histogram_dump(ns->write_start_hist);
 		histogram_dump(ns->write_restart_hist);
 		histogram_dump(ns->write_dup_res_hist);
@@ -691,7 +691,7 @@ dump_namespace_histograms(as_namespace* ns)
 		cf_hist_track_dump(ns->udf_hist);
 	}
 
-	if (ns->udf_benchmarks_active) {
+	if (ns->udf_benchmarks_enabled) {
 		histogram_dump(ns->udf_start_hist);
 		histogram_dump(ns->udf_restart_hist);
 		histogram_dump(ns->udf_dup_res_hist);
@@ -708,11 +708,11 @@ dump_namespace_histograms(as_namespace* ns)
 		histogram_dump(ns->query_rec_count_hist);
 	}
 
-	if (ns->proxy_hist_active) {
+	if (ns->proxy_hist_enabled) {
 		histogram_dump(ns->proxy_hist);
 	}
 
-	if (ns->batch_sub_benchmarks_active) {
+	if (ns->batch_sub_benchmarks_enabled) {
 		histogram_dump(ns->batch_sub_start_hist);
 		histogram_dump(ns->batch_sub_restart_hist);
 		histogram_dump(ns->batch_sub_dup_res_hist);
@@ -720,7 +720,7 @@ dump_namespace_histograms(as_namespace* ns)
 		histogram_dump(ns->batch_sub_response_hist);
 	}
 
-	if (ns->udf_sub_benchmarks_active) {
+	if (ns->udf_sub_benchmarks_enabled) {
 		histogram_dump(ns->udf_sub_start_hist);
 		histogram_dump(ns->udf_sub_restart_hist);
 		histogram_dump(ns->udf_sub_dup_res_hist);
@@ -729,7 +729,7 @@ dump_namespace_histograms(as_namespace* ns)
 		histogram_dump(ns->udf_sub_response_hist);
 	}
 
-	if (ns->storage_benchmarks_active) {
+	if (ns->storage_benchmarks_enabled) {
 		as_storage_ticker_stats(ns);
 	}
 

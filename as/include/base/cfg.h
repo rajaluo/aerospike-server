@@ -92,8 +92,6 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
-	PAD_BOOL		svc_benchmarks_active;
-	PAD_BOOL		info_hist_active;
 	PAD_BOOL		allow_inline_transactions;
 	int				n_batch_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
@@ -101,6 +99,8 @@ typedef struct as_config_s {
 	uint32_t		batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
 	uint32_t		batch_priority; // number of records between an enforced context switch, used by old batch only
 	int				n_batch_index_threads;
+	PAD_BOOL		svc_benchmarks_enabled;
+	PAD_BOOL		info_hist_enabled;
 	int				n_fabric_workers;
 	PAD_BOOL		generation_disable;
 	uint32_t		hist_track_back; // total time span in seconds over which to cache data

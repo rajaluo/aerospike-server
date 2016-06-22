@@ -527,7 +527,7 @@ proxyer_handle_response(msg* m, uint32_t tid)
 	as_fabric_msg_put(pr.fab_msg);
 
 	// Note that this includes both origins.
-	if (pr.ns->proxy_hist_active) {
+	if (pr.ns->proxy_hist_enabled) {
 		histogram_insert_data_point(pr.ns->proxy_hist, pr.start_time);
 	}
 }

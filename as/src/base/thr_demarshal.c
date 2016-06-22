@@ -923,7 +923,7 @@ thr_demarshal(void *arg)
 					}
 
 					// For now only AS_MSG's contribute to this benchmark.
-					if (g_config.svc_benchmarks_active) {
+					if (g_config.svc_benchmarks_enabled) {
 						tr.benchmark_time = histogram_insert_data_point(g_stats.svc_demarshal_hist, now_ns);
 					}
 
