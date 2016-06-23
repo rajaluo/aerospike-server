@@ -212,33 +212,6 @@ typedef struct info_tree_s {
 	}
 
 
-//
-// This call is expensive, so put a cache in front of it
-//
-
-static as_partition_states g_ps_cache;
-pthread_mutex_t			g_ps_cache_LOCK = PTHREAD_MUTEX_INITIALIZER;
-uint64_t				g_ps_cache_lastms = 0;
-
-void
-info_partition_getstates(as_partition_states *ps)
-{
-	pthread_mutex_lock(&g_ps_cache_LOCK);
-
-	uint64_t	now = cf_getms();
-
-	if (g_ps_cache_lastms + 1000 < now) {
-		as_partition_getstates(&g_ps_cache);
-		g_ps_cache_lastms = now;
-	}
-
-	*ps = g_ps_cache;
-
-	pthread_mutex_unlock(&g_ps_cache_LOCK);
-	return;
-}
-
-
 int
 info_get_utilization(cf_dyn_buf *db)
 {
@@ -395,17 +368,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "migrate_progress_send", migrate_partitions_remaining);
 	info_append_uint64(db, "migrate_progress_recv", migrate_partitions_remaining);
 	info_append_uint64(db, "migrate_partitions_remaining", migrate_partitions_remaining);
-
-	as_partition_states ps;
-	info_partition_getstates(&ps);
-
-	info_append_int(db, "partition_actual", ps.sync_actual);
-	info_append_int(db, "partition_replica", ps.sync_replica);
-	info_append_int(db, "partition_desync", ps.desync);
-	info_append_int(db, "partition_absent", ps.absent);
-	info_append_int(db, "partition_zombie", ps.zombie);
-	info_append_int(db, "partition_object_count", ps.n_objects);
-	info_append_int(db, "partition_ref_count", ps.n_ref_count);
 
 	info_append_uint64(db, "fabric_msgs_sent", g_stats.fabric_msgs_sent);
 	info_append_uint64(db, "fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd);

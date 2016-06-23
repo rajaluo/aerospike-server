@@ -766,20 +766,6 @@ struct as_partition_reservation_s {
 	__rsv->cluster_key = 0;
 
 
-// This is a statistics function
-typedef struct as_partition_states_s {
-	int		sync_actual;
-	int		sync_replica;
-	int		desync;
-	int		zombie;
-	int		absent;
-	int		undef;
-	int		n_objects;
-	int		n_ref_count;
-	int		n_sub_objects;
-	int		n_sub_ref_count;
-} as_partition_states;
-
 /* Partition function declarations */
 extern void as_partition_init(as_partition *p, as_namespace *ns, int pid);
 extern void as_partition_reinit(as_partition *p, as_namespace *ns, int pid);
@@ -812,7 +798,6 @@ extern void as_partition_getreplica_write_str(cf_dyn_buf *db);
 extern void as_partition_getreplica_master_str(cf_dyn_buf *db);
 extern void as_partition_get_replicas_all_str(cf_dyn_buf *db);
 extern void as_partition_getinfo_str(cf_dyn_buf *db);
-extern void as_partition_getstates(as_partition_states *ps);
 extern uint64_t as_partition_remaining_migrations();
 
 extern void as_partition_balance();
