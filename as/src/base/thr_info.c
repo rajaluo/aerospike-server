@@ -212,57 +212,21 @@ typedef struct info_tree_s {
 	}
 
 
-int
-info_get_utilization(cf_dyn_buf *db)
+void
+info_get_aggregated_namespace_stats(cf_dyn_buf *db)
 {
-	uint64_t	total_number_objects    = 0;
-	uint64_t	total_number_objects_sub= 0;
-	uint64_t	used_disk_size          = 0;
-	uint64_t	total_disk_size         = 0;
-	uint64_t	total_memory_size       = 0;
-	uint64_t    disk_free_pct           = 0;
-	uint64_t    mem_free_pct            = 0;
-	uint64_t    used_memory_size        = 0;
-	uint64_t    used_data_memory        = 0;
-	uint64_t    used_pindex_memory      = 0;
-	uint64_t    used_sindex_memory      = 0;
+	uint64_t total_objects = 0;
+	uint64_t total_sub_objects = 0;
 
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
-		total_number_objects    += ns->n_objects;
-		total_number_objects_sub += ns->n_sub_objects;
-		total_disk_size         += ns->ssd_size;
-		total_memory_size       += ns->memory_size;
-		used_data_memory        += ns->n_bytes_memory;
-		used_pindex_memory      += as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
-		used_sindex_memory      += cf_atomic64_get(ns->sindex_data_memory_used);
-
-		uint64_t inuse_disk_bytes = 0;
-		as_storage_stats(ns, 0, &inuse_disk_bytes);
-		used_disk_size          += inuse_disk_bytes;
+		total_objects += ns->n_objects;
+		total_sub_objects += ns->n_sub_objects;
 	}
-	// total used memory = memory used by (data + primary index + secondary index)
-	used_memory_size = used_data_memory + used_pindex_memory + used_sindex_memory;
-	disk_free_pct    = (total_disk_size && (total_disk_size > used_disk_size))
-					   ? (((total_disk_size - used_disk_size) * 100L) / total_disk_size)
-					   : 0;
-	mem_free_pct     =  (total_memory_size && (total_memory_size > used_memory_size))
-						? (((total_memory_size - used_memory_size) * 100L) / total_memory_size)
-						: 0;
 
-	info_append_uint64(db, "objects", total_number_objects);
-	info_append_uint64(db, "sub_objects", total_number_objects_sub);
-	info_append_uint64(db, "memory_used_bytes", used_memory_size);
-	info_append_uint64(db, "memory_used_data_bytes", used_data_memory);
-	info_append_uint64(db, "memory_used_index_bytes", used_pindex_memory);
-	info_append_uint64(db, "memory_used_sindex_bytes", used_sindex_memory);
-	info_append_uint64(db, "memory_free_pct", mem_free_pct);
-	info_append_uint64(db, "drive_total_bytes", total_disk_size);
-	info_append_uint64(db, "drive_used_bytes", used_disk_size);
-	info_append_uint64(db, "drive_free_pct", disk_free_pct);
-
-	return 0;
+	info_append_uint64(db, "objects", total_objects);
+	info_append_uint64(db, "sub_objects", total_sub_objects);
 }
 
 // #define INFO_SEGV_TEST 1
@@ -293,7 +257,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_int(db, "system_free_mem_pct", freepct);
 	info_append_bool(db, "system_swapping", swapping);
 
-	info_get_utilization(db); // aggregated from namespace stats
+	info_get_aggregated_namespace_stats(db);
 
 	info_append_int(db, "tsvc_queue", thr_tsvc_queue_get_size());
 	info_append_int(db, "info_queue", as_info_queue_get_size());
