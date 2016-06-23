@@ -279,16 +279,15 @@ info_get_utilization(cf_dyn_buf *db)
 						: 0;
 
 	info_append_uint64(db, "objects", total_number_objects);
-	info_append_uint64(db, "sub-records", total_number_objects_sub);
-	info_append_uint64(db, "total-bytes-disk", total_disk_size);
-	info_append_uint64(db, "used-bytes-disk", used_disk_size);
-	info_append_uint64(db, "free-pct-disk", disk_free_pct);
-	info_append_uint64(db, "total-bytes-memory", total_memory_size);
-	info_append_uint64(db, "used-bytes-memory", used_memory_size);
-	info_append_uint64(db, "data-used-bytes-memory", used_data_memory);
-	info_append_uint64(db, "index-used-bytes-memory", used_pindex_memory);
-	info_append_uint64(db, "sindex-used-bytes-memory", used_sindex_memory);
-	info_append_uint64(db, "free-pct-memory", mem_free_pct);
+	info_append_uint64(db, "sub_objects", total_number_objects_sub);
+	info_append_uint64(db, "memory_used_bytes", used_memory_size);
+	info_append_uint64(db, "memory_used_data_bytes", used_data_memory);
+	info_append_uint64(db, "memory_used_index_bytes", used_pindex_memory);
+	info_append_uint64(db, "memory_used_sindex_bytes", used_sindex_memory);
+	info_append_uint64(db, "memory_free_pct", mem_free_pct);
+	info_append_uint64(db, "drive_total_bytes", total_disk_size);
+	info_append_uint64(db, "drive_used_bytes", used_disk_size);
+	info_append_uint64(db, "drive_free_pct", disk_free_pct);
 
 	return 0;
 }
@@ -308,7 +307,6 @@ info_segv_test(char *name, cf_dyn_buf *db)
 int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
-	// TODO - do we want the node-id?
 	info_append_int(db, "cluster_size", g_paxos->cluster_size);
 	info_append_uint64_x(db, "cluster_key", as_paxos_get_cluster_key()); // not in ticker
 	info_append_bool(db, "cluster_integrity", as_paxos_get_cluster_integrity(g_paxos)); // not in ticker
@@ -324,32 +322,33 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_get_utilization(db); // aggregated from namespace stats
 
-	info_append_int(db, "queue", thr_tsvc_queue_get_size());
+	info_append_int(db, "tsvc_queue", thr_tsvc_queue_get_size());
 	info_append_int(db, "info_queue", as_info_queue_get_size());
 	info_append_int(db, "delete_queue", as_nsup_queue_get_size());
-	// TODO - why no rw_request hash count?
-	info_append_int(db, "proxy_in_progress", as_proxy_hash_count());
+	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
+	info_append_uint32(db, "proxy_in_progress", as_proxy_hash_count());
 	info_append_uint64(db, "record_refs", g_stats.global_record_ref_count);
 
-	// TODO - why no heartbeat or fabric connections?
 	info_append_uint64(db, "client_connections", g_stats.proto_connections_opened - g_stats.proto_connections_closed);
+	info_append_uint64(db, "heartbeat_connections", g_stats.heartbeat_connections_opened - g_stats.heartbeat_connections_closed);
+	info_append_uint64(db, "fabric_connections", g_stats.fabric_connections_opened - g_stats.fabric_connections_closed);
 
 	info_append_uint64(db, "heartbeat_received_self", g_stats.heartbeat_received_self);
 	info_append_uint64(db, "heartbeat_received_foreign", g_stats.heartbeat_received_foreign);
 
-	info_append_uint64(db, "transactions", g_stats.proto_transactions); // not in ticker
 	info_append_uint64(db, "reaped_fds", g_stats.reaper_count); // not in ticker
+
+	info_append_uint64(db, "info_complete", g_stats.info_complete); // not in ticker
 
 	info_append_uint64(db, "proxy_retry", g_stats.proxy_retry); // not in ticker
 
-	info_append_uint64(db, "demarshal-error", g_stats.n_demarshal_error);
-	info_append_uint64(db, "tsvc-client-error", g_stats.n_tsvc_client_error);
-	info_append_uint64(db, "tsvc-batch-sub-error", g_stats.n_tsvc_batch_sub_error);
-	info_append_uint64(db, "tsvc-udf-sub-error", g_stats.n_tsvc_udf_sub_error);
+	info_append_uint64(db, "demarshal_error", g_stats.n_demarshal_error);
+	info_append_uint64(db, "tsvc_client_error", g_stats.n_tsvc_client_error);
+	info_append_uint64(db, "tsvc_batch_sub_error", g_stats.n_tsvc_batch_sub_error);
+	info_append_uint64(db, "tsvc_udf_sub_error", g_stats.n_tsvc_udf_sub_error);
 
 	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
 
-	// TODO - bury everything in the helper?
 	cf_dyn_buf_append_string(db, "batch_index_queue=");
 	as_batch_queues_info(db); // not in ticker
 	cf_dyn_buf_append_char(db, ';');
@@ -367,8 +366,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_uint64(db, "batch_initiate", g_stats.batch_initiate);
 	info_append_int(db, "batch_queue", as_batch_direct_queue_size());
-	info_append_uint64(db, "batch_timeout", g_stats.batch_timeout);
 	info_append_uint64(db, "batch_errors", g_stats.batch_errors);
+	info_append_uint64(db, "batch_timeout", g_stats.batch_timeout);
 
 	info_append_int(db, "scans_active", as_scan_get_active_job_count());
 
@@ -3655,7 +3654,7 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 
 			char* hist_name = ns_name_end + 1;
 
-			if (*hist_name++ != ' ') {
+			if (*hist_name++ != '-') {
 				cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
 				cf_dyn_buf_append_string(db, "error-bad-hist-name");
 				return 0;
@@ -3808,6 +3807,8 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			cf_hist_track_get_info(ns->query_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 		}
 	}
+
+	cf_dyn_buf_chomp(db);
 
 	return 0;
 }
@@ -4160,6 +4161,7 @@ thr_info_fn(void *unused)
 		}
 
 		G_HIST_INSERT_DATA_POINT(info_hist, it.start_time);
+		cf_atomic64_incr(&g_stats.info_complete);
 	}
 
 	return NULL;
@@ -5147,30 +5149,30 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// Object counts.
 
 	info_append_uint64(db, "objects", ns->n_objects);
-	info_append_uint64(db, "sub-objects", ns->n_sub_objects);
+	info_append_uint64(db, "sub_objects", ns->n_sub_objects);
 
 	as_master_prole_stats mp;
 	as_partition_get_master_prole_stats(ns, &mp);
 
-	info_append_uint64(db, "master-objects", mp.n_master_records);
-	info_append_uint64(db, "master-sub-objects", mp.n_master_sub_records);
-	info_append_uint64(db, "prole-objects", mp.n_prole_records);
-	info_append_uint64(db, "prole-sub-objects", mp.n_prole_sub_records);
+	info_append_uint64(db, "master_objects", mp.n_master_records);
+	info_append_uint64(db, "master_sub_objects", mp.n_master_sub_records);
+	info_append_uint64(db, "prole_objects", mp.n_prole_records);
+	info_append_uint64(db, "prole_sub_objects", mp.n_prole_sub_records);
 
 	// Expiration & eviction (nsup) stats.
 
-	info_append_bool(db, "stop-writes", ns->stop_writes != 0);
-	info_append_bool(db, "hwm-breached", ns->hwm_breached != 0);
+	info_append_bool(db, "stop_writes", ns->stop_writes != 0);
+	info_append_bool(db, "hwm_breached", ns->hwm_breached != 0);
 
-	info_append_uint64(db, "current-time", as_record_void_time_get());
-	info_append_uint64(db, "max-void-time", ns->max_void_time);
-	info_append_uint64(db, "non-expirable-objects", ns->non_expirable_objects);
-	info_append_uint64(db, "expired-objects", ns->n_expired_objects);
-	info_append_uint64(db, "evicted-objects", ns->n_evicted_objects);
-	info_append_uint64(db, "set-deleted-objects", ns->n_deleted_set_objects);
-	info_append_uint64(db, "evict-ttl", ns->evict_ttl);
-	info_append_uint32(db, "nsup-cycle-duration", ns->nsup_cycle_duration);
-	info_append_uint32(db, "nsup-cycle-sleep-pct", ns->nsup_cycle_sleep_pct);
+	info_append_uint64(db, "current_time", as_record_void_time_get());
+	info_append_uint64(db, "max_void_time", ns->max_void_time);
+	info_append_uint64(db, "non_expirable_objects", ns->non_expirable_objects);
+	info_append_uint64(db, "expired_objects", ns->n_expired_objects);
+	info_append_uint64(db, "evicted_objects", ns->n_evicted_objects);
+	info_append_uint64(db, "set_deleted_objects", ns->n_deleted_set_objects);
+	info_append_uint64(db, "evict_ttl", ns->evict_ttl);
+	info_append_uint32(db, "nsup_cycle_duration", ns->nsup_cycle_duration);
+	info_append_uint32(db, "nsup_cycle_sleep_pct", ns->nsup_cycle_sleep_pct);
 
 	// Memory usage stats.
 
@@ -5179,19 +5181,19 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	uint64_t sindex_memory = ns->sindex_data_memory_used;
 	uint64_t used_memory = data_memory + index_memory + sindex_memory;
 
-	info_append_uint64(db, "used-bytes-memory", used_memory);
-	info_append_uint64(db, "data-used-bytes-memory", data_memory);
-	info_append_uint64(db, "index-used-bytes-memory", index_memory);
-	info_append_uint64(db, "sindex-used-bytes-memory", sindex_memory);
+	info_append_uint64(db, "memory_used_bytes", used_memory);
+	info_append_uint64(db, "memory_used_data_bytes", data_memory);
+	info_append_uint64(db, "memory_used_index_bytes", index_memory);
+	info_append_uint64(db, "memory_used_sindex_bytes", sindex_memory);
 
 	uint64_t free_pct = (ns->memory_size != 0 && (ns->memory_size > used_memory)) ?
 			((ns->memory_size - used_memory) * 100L) / ns->memory_size : 0;
 
-	info_append_uint64(db, "free-pct-memory", free_pct);
+	info_append_uint64(db, "memory_free_pct", free_pct);
 
 	// Remaining bin-name slots (yes, this can be negative).
 	if (! ns->single_bin) {
-		info_append_int(db, "available-bin-names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
+		info_append_int(db, "available_bin_names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
 	}
 
 	// Persistent storage stats.
@@ -5201,126 +5203,123 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		uint64_t inuse_disk_bytes = 0;
 		as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
 
-		info_append_uint64(db, "total-bytes-disk", ns->ssd_size);
-		info_append_uint64(db, "used-bytes-disk", inuse_disk_bytes);
+		info_append_uint64(db, "drive_total_bytes", ns->ssd_size);
+		info_append_uint64(db, "drive_used_bytes", inuse_disk_bytes);
 
 		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > inuse_disk_bytes)) ?
 				((ns->ssd_size - inuse_disk_bytes) * 100L) / ns->ssd_size : 0;
 
-		info_append_uint64(db, "free-pct-disk", free_pct);
-		info_append_int(db, "available_pct", available_pct); // TODO - underscore???
+		info_append_uint64(db, "drive_free_pct", free_pct);
+		info_append_int(db, "drive_available_pct", available_pct);
 
 		if (! ns->storage_data_in_memory) {
-			info_append_int(db, "cache-read-pct", (int)(ns->cache_read_pct + 0.5));
+			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 		}
-
-		info_append_uint64(db, "err_storage_queue_full", ns->err_storage_queue_full);
-		info_append_uint64(db, "storage_defrag_corrupt_record", ns->err_storage_defrag_corrupt_record);
 	}
 
 	// Not bothering with AS_STORAGE_ENGINE_KV.
 
 	// Migration stats.
 
-	info_append_uint64(db, "migrate-tx-partitions-imbalance", ns->migrate_tx_partitions_imbalance);
+	info_append_uint64(db, "migrate_tx_partitions_imbalance", ns->migrate_tx_partitions_imbalance);
 
-	info_append_uint64(db, "migrate-tx-instance-count", ns->migrate_tx_instance_count);
-	info_append_uint64(db, "migrate-rx-instance-count", ns->migrate_rx_instance_count);
+	info_append_uint64(db, "migrate_tx_instances", ns->migrate_tx_instance_count);
+	info_append_uint64(db, "migrate_rx_instances", ns->migrate_rx_instance_count);
 
-	info_append_uint64(db, "migrate-tx-partitions-active", ns->migrate_tx_partitions_active);
-	info_append_uint64(db, "migrate-rx-partitions-active", ns->migrate_rx_partitions_active);
+	info_append_uint64(db, "migrate_tx_partitions_active", ns->migrate_tx_partitions_active);
+	info_append_uint64(db, "migrate_rx_partitions_active", ns->migrate_rx_partitions_active);
 
-	info_append_uint64(db, "migrate-tx-partitions-initial", ns->migrate_tx_partitions_initial);
-	info_append_uint64(db, "migrate-tx-partitions-remaining", ns->migrate_tx_partitions_remaining);
+	info_append_uint64(db, "migrate_tx_partitions_initial", ns->migrate_tx_partitions_initial);
+	info_append_uint64(db, "migrate_tx_partitions_remaining", ns->migrate_tx_partitions_remaining);
 
-	info_append_uint64(db, "migrate-rx-partitions-initial", ns->migrate_rx_partitions_initial);
-	info_append_uint64(db, "migrate-rx-partitions-remaining", ns->migrate_rx_partitions_remaining);
+	info_append_uint64(db, "migrate_rx_partitions_initial", ns->migrate_rx_partitions_initial);
+	info_append_uint64(db, "migrate_rx_partitions_remaining", ns->migrate_rx_partitions_remaining);
 
-	info_append_uint64(db, "migrate-records-skipped", ns->migrate_records_skipped);
-	info_append_uint64(db, "migrate-records-transmitted", ns->migrate_records_transmitted);
-	info_append_uint64(db, "migrate-record-retransmits", ns->migrate_record_retransmits);
-	info_append_uint64(db, "migrate-record-receives", ns->migrate_record_receives);
+	info_append_uint64(db, "migrate_records_skipped", ns->migrate_records_skipped);
+	info_append_uint64(db, "migrate_records_transmitted", ns->migrate_records_transmitted);
+	info_append_uint64(db, "migrate_record_retransmits", ns->migrate_record_retransmits);
+	info_append_uint64(db, "migrate_record_receives", ns->migrate_record_receives);
 
 	// tsvc-stage error counters.
 
-	info_append_uint64(db, "tsvc-client-error", ns->n_tsvc_client_error);
-	info_append_uint64(db, "tsvc-client-timeout", ns->n_tsvc_client_timeout);
+	info_append_uint64(db, "tsvc_client_error", ns->n_tsvc_client_error);
+	info_append_uint64(db, "tsvc_client_timeout", ns->n_tsvc_client_timeout);
 
-	info_append_uint64(db, "tsvc-batch-sub-error", ns->n_tsvc_batch_sub_error);
-	info_append_uint64(db, "tsvc-batch-sub-timeout", ns->n_tsvc_batch_sub_timeout);
+	info_append_uint64(db, "tsvc_batch_sub_error", ns->n_tsvc_batch_sub_error);
+	info_append_uint64(db, "tsvc_batch_sub_timeout", ns->n_tsvc_batch_sub_timeout);
 
-	info_append_uint64(db, "tsvc-udf-sub-error", ns->n_tsvc_udf_sub_error);
-	info_append_uint64(db, "tsvc-udf-sub-timeout", ns->n_tsvc_udf_sub_timeout);
+	info_append_uint64(db, "tsvc_udf_sub_error", ns->n_tsvc_udf_sub_error);
+	info_append_uint64(db, "tsvc_udf_sub_timeout", ns->n_tsvc_udf_sub_timeout);
 
 	// From-client transaction stats.
 
-	info_append_uint64(db, "client-proxy-complete", ns->n_client_proxy_complete);
-	info_append_uint64(db, "client-proxy-error", ns->n_client_proxy_error);
-	info_append_uint64(db, "client-proxy-timeout", ns->n_client_proxy_timeout);
+	info_append_uint64(db, "client_proxy_complete", ns->n_client_proxy_complete);
+	info_append_uint64(db, "client_proxy_error", ns->n_client_proxy_error);
+	info_append_uint64(db, "client_proxy_timeout", ns->n_client_proxy_timeout);
 
-	info_append_uint64(db, "client-read-success", ns->n_client_read_success);
-	info_append_uint64(db, "client-read-error", ns->n_client_read_error);
-	info_append_uint64(db, "client-read-timeout", ns->n_client_read_timeout);
-	info_append_uint64(db, "client-read-not-found", ns->n_client_read_not_found);
+	info_append_uint64(db, "client_read_success", ns->n_client_read_success);
+	info_append_uint64(db, "client_read_error", ns->n_client_read_error);
+	info_append_uint64(db, "client_read_timeout", ns->n_client_read_timeout);
+	info_append_uint64(db, "client_read_not_found", ns->n_client_read_not_found);
 
-	info_append_uint64(db, "client-write-success", ns->n_client_write_success);
-	info_append_uint64(db, "client-write-error", ns->n_client_write_error);
-	info_append_uint64(db, "client-write-timeout", ns->n_client_write_timeout);
+	info_append_uint64(db, "client_write_success", ns->n_client_write_success);
+	info_append_uint64(db, "client_write_error", ns->n_client_write_error);
+	info_append_uint64(db, "client_write_timeout", ns->n_client_write_timeout);
 
-	info_append_uint64(db, "client-delete-success", ns->n_client_delete_success);
-	info_append_uint64(db, "client-delete-error", ns->n_client_delete_error);
-	info_append_uint64(db, "client-delete-timeout", ns->n_client_delete_timeout);
-	info_append_uint64(db, "client-delete-not-found", ns->n_client_delete_not_found);
+	info_append_uint64(db, "client_delete_success", ns->n_client_delete_success);
+	info_append_uint64(db, "client_delete_error", ns->n_client_delete_error);
+	info_append_uint64(db, "client_delete_timeout", ns->n_client_delete_timeout);
+	info_append_uint64(db, "client_delete_not_found", ns->n_client_delete_not_found);
 
-	info_append_uint64(db, "client-udf-complete", ns->n_client_udf_complete);
-	info_append_uint64(db, "client-udf-error", ns->n_client_udf_error);
-	info_append_uint64(db, "client-udf-timeout", ns->n_client_udf_timeout);
+	info_append_uint64(db, "client_udf_complete", ns->n_client_udf_complete);
+	info_append_uint64(db, "client_udf_error", ns->n_client_udf_error);
+	info_append_uint64(db, "client_udf_timeout", ns->n_client_udf_timeout);
 
-	info_append_uint64(db, "client-lua-read-success", ns->n_client_lua_read_success);
-	info_append_uint64(db, "client-lua-write-success", ns->n_client_lua_write_success);
-	info_append_uint64(db, "client-lua-delete-success", ns->n_client_lua_delete_success);
-	info_append_uint64(db, "client-lua-error", ns->n_client_lua_error);
+	info_append_uint64(db, "client_lua_read_success", ns->n_client_lua_read_success);
+	info_append_uint64(db, "client_lua_write_success", ns->n_client_lua_write_success);
+	info_append_uint64(db, "client_lua_delete_success", ns->n_client_lua_delete_success);
+	info_append_uint64(db, "client_lua_error", ns->n_client_lua_error);
 
-	info_append_uint64(db, "xdr-read-success", ns->n_xdr_read_success);
-	info_append_uint64(db, "xdr-write-success", ns->n_xdr_write_success);
+	info_append_uint64(db, "xdr_read_success", ns->n_xdr_read_success);
+	info_append_uint64(db, "xdr_write_success", ns->n_xdr_write_success);
 
-	info_append_uint64(db, "client-trans-fail-xdr-forbidden", ns->n_client_trans_fail_xdr_forbidden);
-	info_append_uint64(db, "client-trans-fail-key-busy", ns->n_client_trans_fail_key_busy);
-	info_append_uint64(db, "client-write-fail-generation", ns->n_client_write_fail_generation);
-	info_append_uint64(db, "client-write-fail-record-too-big", ns->n_client_write_fail_record_too_big);
+	info_append_uint64(db, "client_trans_fail_xdr_forbidden", ns->n_client_trans_fail_xdr_forbidden);
+	info_append_uint64(db, "client_trans_fail_key_busy", ns->n_client_trans_fail_key_busy);
+	info_append_uint64(db, "client_write_fail_generation", ns->n_client_write_fail_generation);
+	info_append_uint64(db, "client_write_fail_record_too_big", ns->n_client_write_fail_record_too_big);
 
 	// Batch sub-transaction stats.
 
-	info_append_uint64(db, "batch-sub-proxy-complete", ns->n_batch_sub_proxy_complete);
-	info_append_uint64(db, "batch-sub-proxy-error", ns->n_batch_sub_proxy_error);
-	info_append_uint64(db, "batch-sub-proxy-timeout", ns->n_batch_sub_proxy_timeout);
+	info_append_uint64(db, "batch_sub_proxy_complete", ns->n_batch_sub_proxy_complete);
+	info_append_uint64(db, "batch_sub_proxy_error", ns->n_batch_sub_proxy_error);
+	info_append_uint64(db, "batch_sub_proxy_timeout", ns->n_batch_sub_proxy_timeout);
 
-	info_append_uint64(db, "batch-sub-read-success", ns->n_batch_sub_read_success);
-	info_append_uint64(db, "batch-sub-read-error", ns->n_batch_sub_read_error);
-	info_append_uint64(db, "batch-sub-read-timeout", ns->n_batch_sub_read_timeout);
-	info_append_uint64(db, "batch-sub-read-not-found", ns->n_batch_sub_read_not_found);
+	info_append_uint64(db, "batch_sub_read_success", ns->n_batch_sub_read_success);
+	info_append_uint64(db, "batch_sub_read_error", ns->n_batch_sub_read_error);
+	info_append_uint64(db, "batch_sub_read_timeout", ns->n_batch_sub_read_timeout);
+	info_append_uint64(db, "batch_sub_read_not_found", ns->n_batch_sub_read_not_found);
 
 	// Internal-UDF sub-transaction stats.
 
-	info_append_uint64(db, "udf-sub-udf-complete", ns->n_udf_sub_udf_complete);
-	info_append_uint64(db, "udf-sub-udf-error", ns->n_udf_sub_udf_error);
-	info_append_uint64(db, "udf-sub-udf-timeout", ns->n_udf_sub_udf_timeout);
+	info_append_uint64(db, "udf_sub_udf_complete", ns->n_udf_sub_udf_complete);
+	info_append_uint64(db, "udf_sub_udf_error", ns->n_udf_sub_udf_error);
+	info_append_uint64(db, "udf_sub_udf_timeout", ns->n_udf_sub_udf_timeout);
 
-	info_append_uint64(db, "udf-sub-lua-read-success", ns->n_udf_sub_lua_read_success);
-	info_append_uint64(db, "udf-sub-lua-write-success", ns->n_udf_sub_lua_write_success);
-	info_append_uint64(db, "udf-sub-lua-delete-success", ns->n_udf_sub_lua_delete_success);
-	info_append_uint64(db, "udf-sub-lua-error", ns->n_udf_sub_lua_error);
+	info_append_uint64(db, "udf_sub_lua_read_success", ns->n_udf_sub_lua_read_success);
+	info_append_uint64(db, "udf_sub_lua_write_success", ns->n_udf_sub_lua_write_success);
+	info_append_uint64(db, "udf_sub_lua_delete_success", ns->n_udf_sub_lua_delete_success);
+	info_append_uint64(db, "udf_sub_lua_error", ns->n_udf_sub_lua_error);
 
 	// Scan stats.
 
-	info_append_uint64(db, "basic-scan-success", ns->n_basic_scan_success);
-	info_append_uint64(db, "basic-scan-failure", ns->n_basic_scan_failure);
+	info_append_uint64(db, "basic_scan_success", ns->n_basic_scan_success);
+	info_append_uint64(db, "basic_scan_failure", ns->n_basic_scan_failure);
 
-	info_append_uint64(db, "aggr-scan-success", ns->n_aggr_scan_success);
-	info_append_uint64(db, "aggr-scan-failure", ns->n_aggr_scan_failure);
+	info_append_uint64(db, "aggr_scan_success", ns->n_aggr_scan_success);
+	info_append_uint64(db, "aggr_scan_failure", ns->n_aggr_scan_failure);
 
-	info_append_uint64(db, "udf-bg-scan-success", ns->n_udf_bg_scan_success);
-	info_append_uint64(db, "udf-bg-scan-failure", ns->n_udf_bg_scan_failure);
+	info_append_uint64(db, "udf_bg_scan_success", ns->n_udf_bg_scan_success);
+	info_append_uint64(db, "udf_bg_scan_failure", ns->n_udf_bg_scan_failure);
 
 	// Query stats.
 
@@ -5359,11 +5358,11 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "query_lookup_abort", lkup_abort);
 	info_append_uint64(db, "query_lookup_avg_rec_count", lkup ? lkup_records / lkup : 0);
 
-	info_append_uint64(db, "udf-bg-query-success", ns->n_udf_bg_query_success);
-	info_append_uint64(db, "udf-bg-query-failure", ns->n_udf_bg_query_failure);
+	info_append_uint64(db, "udf_bg_query_success", ns->n_udf_bg_query_success);
+	info_append_uint64(db, "udf_bg_query_failure", ns->n_udf_bg_query_failure);
 
 	// Geospatial query stats:
-	info_append_uint64(db, "geo_region_query_count", ns->geo_region_query_count);
+	info_append_uint64(db, "geo_region_query_reqs", ns->geo_region_query_count);
 	info_append_uint64(db, "geo_region_query_cells", ns->geo_region_query_cells);
 	info_append_uint64(db, "geo_region_query_points", ns->geo_region_query_points);
 	info_append_uint64(db, "geo_region_query_falsepos", ns->geo_region_query_falsepos);
@@ -5371,45 +5370,45 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// LDT stats.
 
 	if (ns->ldt_enabled) {
-		info_append_uint64(db, "ldt-reads", ns->lstats.ldt_read_reqs);
-		info_append_uint64(db, "ldt-read-success", ns->lstats.ldt_read_success);
-		info_append_uint64(db, "ldt-deletes", ns->lstats.ldt_delete_reqs);
-		info_append_uint64(db, "ldt-delete-success", ns->lstats.ldt_delete_success);
-		info_append_uint64(db, "ldt-writes", ns->lstats.ldt_write_reqs);
-		info_append_uint64(db, "ldt-write-success", ns->lstats.ldt_write_success);
-		info_append_uint64(db, "ldt-updates", ns->lstats.ldt_update_reqs);
+		info_append_uint64(db, "ldt_reads", ns->lstats.ldt_read_reqs);
+		info_append_uint64(db, "ldt_read_success", ns->lstats.ldt_read_success);
+		info_append_uint64(db, "ldt_deletes", ns->lstats.ldt_delete_reqs);
+		info_append_uint64(db, "ldt_delete_success", ns->lstats.ldt_delete_success);
+		info_append_uint64(db, "ldt_writes", ns->lstats.ldt_write_reqs);
+		info_append_uint64(db, "ldt_write_success", ns->lstats.ldt_write_success);
+		info_append_uint64(db, "ldt_updates", ns->lstats.ldt_update_reqs);
 
-		info_append_uint64(db, "ldt-gc-io", ns->lstats.ldt_gc_io);
-		info_append_uint64(db, "ldt-gc-cnt", ns->lstats.ldt_gc_cnt);
-		info_append_uint64(db, "ldt-randomizer-retry", ns->lstats.ldt_randomizer_retry);
+		info_append_uint64(db, "ldt_gc_io", ns->lstats.ldt_gc_io);
+		info_append_uint64(db, "ldt_gc_cnt", ns->lstats.ldt_gc_cnt);
+		info_append_uint64(db, "ldt_randomizer_retry", ns->lstats.ldt_randomizer_retry);
 
-		info_append_uint64(db, "ldt-errors", ns->lstats.ldt_errs);
+		info_append_uint64(db, "ldt_errors", ns->lstats.ldt_errs);
 
-		info_append_uint64(db, "ldt-err-toprec-notfound", ns->lstats.ldt_err_toprec_not_found);
-		info_append_uint64(db, "ldt-err-item-notfound", ns->lstats.ldt_err_item_not_found);
-		info_append_uint64(db, "ldt-err-internal", ns->lstats.ldt_err_internal);
-		info_append_uint64(db, "ldt-err-unique-key-violation", ns->lstats.ldt_err_unique_key_violation);
-		info_append_uint64(db, "ldt-err-insert-fail", ns->lstats.ldt_err_insert_fail);
-		info_append_uint64(db, "ldt-err-delete-fail", ns->lstats.ldt_err_delete_fail);
-		info_append_uint64(db, "ldt-err-search-fail", ns->lstats.ldt_err_search_fail);
-		info_append_uint64(db, "ldt-err-version-mismatch", ns->lstats.ldt_err_version_mismatch);
-		info_append_uint64(db, "ldt-err-capacity-exceeded", ns->lstats.ldt_err_capacity_exceeded);
-		info_append_uint64(db, "ldt-err-param", ns->lstats.ldt_err_param);
-		info_append_uint64(db, "ldt-err-op-bintype-mismatch", ns->lstats.ldt_err_op_bintype_mismatch);
-		info_append_uint64(db, "ldt-err-too-many-open-subrec", ns->lstats.ldt_err_too_many_open_subrec);
-		info_append_uint64(db, "ldt-err-subrec-not-found", ns->lstats.ldt_err_subrec_not_found);
-		info_append_uint64(db, "ldt-err-bin-does-not-exist", ns->lstats.ldt_err_bin_does_not_exist);
-		info_append_uint64(db, "ldt-err-bin-exits", ns->lstats.ldt_err_bin_exits);
-		info_append_uint64(db, "ldt-err-bin-damaged", ns->lstats.ldt_err_bin_damaged);
-		info_append_uint64(db, "ldt-err-toprec-internal", ns->lstats.ldt_err_toprec_internal);
-		info_append_uint64(db, "ldt-err-subrec-internal", ns->lstats.ldt_err_subrec_internal);
-		info_append_uint64(db, "ldt-err-filer", ns->lstats.ldt_err_filter);
-		info_append_uint64(db, "ldt-err-key", ns->lstats.ldt_err_key);
-		info_append_uint64(db, "ldt-err-createspec", ns->lstats.ldt_err_createspec);
-		info_append_uint64(db, "ldt-err-usermodule", ns->lstats.ldt_err_usermodule);
-		info_append_uint64(db, "ldt-err-input-too-large", ns->lstats.ldt_err_input_too_large);
-		info_append_uint64(db, "ldt-err-ldt-not-enabled", ns->lstats.ldt_err_ldt_not_enabled);
-		info_append_uint64(db, "ldt-err-unknown", ns->lstats.ldt_err_unknown);
+		info_append_uint64(db, "ldt_err_toprec_notfound", ns->lstats.ldt_err_toprec_not_found);
+		info_append_uint64(db, "ldt_err_item_notfound", ns->lstats.ldt_err_item_not_found);
+		info_append_uint64(db, "ldt_err_internal", ns->lstats.ldt_err_internal);
+		info_append_uint64(db, "ldt_err_unique_key_violation", ns->lstats.ldt_err_unique_key_violation);
+		info_append_uint64(db, "ldt_err_insert_fail", ns->lstats.ldt_err_insert_fail);
+		info_append_uint64(db, "ldt_err_delete_fail", ns->lstats.ldt_err_delete_fail);
+		info_append_uint64(db, "ldt_err_search_fail", ns->lstats.ldt_err_search_fail);
+		info_append_uint64(db, "ldt_err_version_mismatch", ns->lstats.ldt_err_version_mismatch);
+		info_append_uint64(db, "ldt_err_capacity_exceeded", ns->lstats.ldt_err_capacity_exceeded);
+		info_append_uint64(db, "ldt_err_param", ns->lstats.ldt_err_param);
+		info_append_uint64(db, "ldt_err_op_bintype_mismatch", ns->lstats.ldt_err_op_bintype_mismatch);
+		info_append_uint64(db, "ldt_err_too_many_open_subrec", ns->lstats.ldt_err_too_many_open_subrec);
+		info_append_uint64(db, "ldt_err_subrec_not_found", ns->lstats.ldt_err_subrec_not_found);
+		info_append_uint64(db, "ldt_err_bin_does_not_exist", ns->lstats.ldt_err_bin_does_not_exist);
+		info_append_uint64(db, "ldt_err_bin_exits", ns->lstats.ldt_err_bin_exits);
+		info_append_uint64(db, "ldt_err_bin_damaged", ns->lstats.ldt_err_bin_damaged);
+		info_append_uint64(db, "ldt_err_toprec_internal", ns->lstats.ldt_err_toprec_internal);
+		info_append_uint64(db, "ldt_err_subrec_internal", ns->lstats.ldt_err_subrec_internal);
+		info_append_uint64(db, "ldt_err_filer", ns->lstats.ldt_err_filter);
+		info_append_uint64(db, "ldt_err_key", ns->lstats.ldt_err_key);
+		info_append_uint64(db, "ldt_err_createspec", ns->lstats.ldt_err_createspec);
+		info_append_uint64(db, "ldt_err_usermodule", ns->lstats.ldt_err_usermodule);
+		info_append_uint64(db, "ldt_err_input_too_large", ns->lstats.ldt_err_input_too_large);
+		info_append_uint64(db, "ldt_err_ldt_not_enabled", ns->lstats.ldt_err_ldt_not_enabled);
+		info_append_uint64(db, "ldt_err_unknown", ns->lstats.ldt_err_unknown);
 	}
 }
 
@@ -5427,7 +5426,6 @@ info_get_tree_namespace(char *name, char *subtree, cf_dyn_buf *db)
 		return 0;
 	}
 
-	// TODO - config before stats?
 	info_get_namespace_info(ns, db);
 	info_namespace_config_get(ns->name, db);
 

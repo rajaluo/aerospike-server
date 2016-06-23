@@ -1168,9 +1168,6 @@ struct as_namespace_s {
 
 	float			cache_read_pct;
 
-	cf_atomic64		err_storage_queue_full;
-	cf_atomic64		err_storage_defrag_corrupt_record;
-
 	// Migration stats.
 
 	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only

@@ -53,8 +53,10 @@ typedef struct as_stats_s {
 	cf_atomic64		heartbeat_received_foreign;
 
 	// Demarshal stats.
-	cf_atomic64		proto_transactions; // not in ticker
 	uint64_t		reaper_count; // not in ticker - incremented only in reaper thread
+
+	// Info stats.
+	cf_atomic64		info_complete;
 
 	// Proxy stats.
 	uint64_t		proxy_retry; // not in ticker - incremented only in proxy retransmit thread
@@ -78,8 +80,8 @@ typedef struct as_stats_s {
 
 	// "Old" batch stats.
 	cf_atomic64		batch_initiate; // not in ticker
-	cf_atomic64		batch_timeout; // not in ticker
 	cf_atomic64		batch_errors; // not in ticker
+	cf_atomic64		batch_timeout; // not in ticker
 
 	// Query & secondary index stats.
 	cf_atomic64		query_false_positives;

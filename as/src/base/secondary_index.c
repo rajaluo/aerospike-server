@@ -1280,52 +1280,37 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	SINDEX_RLOCK(&si->imd->slock);
 	uint64_t n_keys      = ai_btree_get_numkeys(si->imd);
 	SINDEX_UNLOCK(&si->imd->slock);
-	cf_dyn_buf_append_string(db, "keys=");
-	cf_dyn_buf_append_uint64(db,  n_keys);
-	cf_dyn_buf_append_string(db, ";entries=");
-	cf_dyn_buf_append_uint64(db,  si_objects);
+	info_append_uint64(db, "keys", n_keys);
+	info_append_uint64(db, "entries", si_objects);
 	SINDEX_RLOCK(&si->imd->slock);
 	uint64_t i_size      = ai_btree_get_isize(si->imd);
 	uint64_t n_size      = ai_btree_get_nsize(si->imd);
 	SINDEX_UNLOCK(&si->imd->slock);
-	cf_dyn_buf_append_string(db, ";ibtr_memory_used=");
-	cf_dyn_buf_append_uint64(db,  i_size);
-	cf_dyn_buf_append_string(db, ";nbtr_memory_used=");
-	cf_dyn_buf_append_uint64(db,  n_size);
-	cf_dyn_buf_append_string(db, ";si_accounted_memory=");
-	cf_dyn_buf_append_uint64(db,  si_memory);
-	cf_dyn_buf_append_string(db, ";load_pct=");
+	info_append_uint64(db, "ibtr_memory_used", i_size);
+	info_append_uint64(db, "nbtr_memory_used", n_size);
+	info_append_uint64(db, "si_accounted_memory", si_memory);
 	if (si->flag & AS_SINDEX_FLAG_RACTIVE) {
-		cf_dyn_buf_append_string(db, "100");
+		info_append_string(db, "load_pct", "100");
 	} else {
 		if (pending > ns_objects || pending < 0) {
-			cf_dyn_buf_append_uint64(db, 100);
+			info_append_uint64(db, "load_pct", 100);
 		} else {
-			cf_dyn_buf_append_uint64(db, (ns_objects == 0) ? 100 : 100 - ((100 * pending) / ns_objects));
+			info_append_uint64(db, "load_pct", (ns_objects == 0) ? 100 : 100 - ((100 * pending) / ns_objects));
 		}
 	}
 
-	cf_dyn_buf_append_string(db, ";loadtime=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.loadtime));
+	info_append_uint64(db, "loadtime", cf_atomic64_get(si->stats.loadtime));
 	// writes
-	cf_dyn_buf_append_string(db, ";stat_write_reqs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.n_writes));
-	cf_dyn_buf_append_string(db, ";stat_write_success=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.n_writes) - cf_atomic64_get(si->stats.write_errs));
-	cf_dyn_buf_append_string(db, ";stat_write_errs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.write_errs));
+	info_append_uint64(db, "stat_write_reqs", cf_atomic64_get(si->stats.n_writes));
+	info_append_uint64(db, "stat_write_success", cf_atomic64_get(si->stats.n_writes) - cf_atomic64_get(si->stats.write_errs));
+	info_append_uint64(db, "stat_write_errs", cf_atomic64_get(si->stats.write_errs));
 	// delete
-	cf_dyn_buf_append_string(db, ";stat_delete_reqs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.n_deletes));
-	cf_dyn_buf_append_string(db, ";stat_delete_success=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.n_deletes) - cf_atomic64_get(si->stats.delete_errs));
-	cf_dyn_buf_append_string(db, ";stat_delete_errs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.delete_errs));
+	info_append_uint64(db, "stat_delete_reqs", cf_atomic64_get(si->stats.n_deletes));
+	info_append_uint64(db, "stat_delete_success", cf_atomic64_get(si->stats.n_deletes) - cf_atomic64_get(si->stats.delete_errs));
+	info_append_uint64(db, "stat_delete_errs", cf_atomic64_get(si->stats.delete_errs));
 	// defrag
-	cf_dyn_buf_append_string(db, ";stat_gc_recs=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.n_defrag_records));
-	cf_dyn_buf_append_string(db, ";stat_gc_time=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(si->stats.defrag_time));
+	info_append_uint64(db, "stat_gc_recs", cf_atomic64_get(si->stats.n_defrag_records));
+	info_append_uint64(db, "stat_gc_time", cf_atomic64_get(si->stats.defrag_time));
 
 	// Cache values
 	uint64_t agg        = cf_atomic64_get(si->stats.n_aggregation);
@@ -1339,43 +1324,31 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	uint64_t query_size = agg_size + lkup_size;
 
 	// Query
-	cf_dyn_buf_append_string(db, ";query_reqs=");
-	cf_dyn_buf_append_uint64(db,   query);
-	cf_dyn_buf_append_string(db, ";query_avg_rec_count=");
-	cf_dyn_buf_append_uint64(db,   query     ? query_rec  / query     : 0);
-	cf_dyn_buf_append_string(db, ";query_avg_record_size=");
-	cf_dyn_buf_append_uint64(db,   query_rec ? query_size / query_rec : 0);
+	info_append_uint64(db, "query_reqs", query);
+	info_append_uint64(db, "query_avg_rec_count", query ? query_rec / query : 0);
+	info_append_uint64(db, "query_avg_record_size", query_rec ? query_size / query_rec : 0);
 	// Aggregation
-	cf_dyn_buf_append_string(db, ";query_agg=");
-	cf_dyn_buf_append_uint64(db,   agg);
-	cf_dyn_buf_append_string(db, ";query_agg_avg_rec_count=");
-	cf_dyn_buf_append_uint64(db,   agg       ? agg_rec    / agg       : 0);
-	cf_dyn_buf_append_string(db, ";query_agg_avg_record_size=");
-	cf_dyn_buf_append_uint64(db,   agg_rec   ? agg_size   / agg_rec   : 0);
+	info_append_uint64(db, "query_agg", agg);
+	info_append_uint64(db, "query_agg_avg_rec_count", agg ? agg_rec / agg : 0);
+	info_append_uint64(db, "query_agg_avg_record_size", agg_rec ? agg_size / agg_rec : 0);
 	//Lookup
-	cf_dyn_buf_append_string(db, ";query_lookups=");
-	cf_dyn_buf_append_uint64(db,   lkup);
-	cf_dyn_buf_append_string(db, ";query_lookup_avg_rec_count=");
-	cf_dyn_buf_append_uint64(db,   lkup      ? lkup_rec   / lkup      : 0);
-	cf_dyn_buf_append_string(db, ";query_lookup_avg_record_size=");
-	cf_dyn_buf_append_uint64(db,   lkup_rec  ? lkup_size  / lkup_rec  : 0);
+	info_append_uint64(db, "query_lookups", lkup);
+	info_append_uint64(db, "query_lookup_avg_rec_count", lkup ? lkup_rec / lkup : 0);
+	info_append_uint64(db, "query_lookup_avg_record_size", lkup_rec ? lkup_size / lkup_rec : 0);
 
 	//CONFIG
-	cf_dyn_buf_append_string(db, ";gc-period=");
-	cf_dyn_buf_append_uint64(db, si->config.defrag_period);
-	cf_dyn_buf_append_string(db, ";gc-max-units=");
-	cf_dyn_buf_append_uint32(db, si->config.defrag_max_units);
-	cf_dyn_buf_append_string(db, ";data-max-memory=");
+	info_append_uint64(db, "gc-period", si->config.defrag_period);
+	info_append_uint32(db, "gc-max-units", si->config.defrag_max_units);
 	if (si->config.data_max_memory != ULONG_MAX) {
-		cf_dyn_buf_append_uint64(db, si->config.data_max_memory);
+		info_append_uint64(db, "data-max-memory", si->config.data_max_memory);
 	} else {
-		cf_dyn_buf_append_string(db, "ULONG_MAX");
+		info_append_string(db, "data-max-memory", "ULONG_MAX");
 	}
 
-	cf_dyn_buf_append_string(db, ";histogram=");
-	cf_dyn_buf_append_string(db, si->enable_histogram ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";ignore-not-sync=");
-	cf_dyn_buf_append_string(db, (si->config.flag & AS_SINDEX_CONFIG_IGNORE_ON_DESYNC) ? "true" : "false");
+	info_append_bool(db, "histogram", si->enable_histogram);
+	info_append_bool(db, "ignore-not-sync", (si->config.flag & AS_SINDEX_CONFIG_IGNORE_ON_DESYNC) != 0);
+
+	cf_dyn_buf_chomp(db);
 
 	AS_SINDEX_RELEASE(si);
 	// Release reference

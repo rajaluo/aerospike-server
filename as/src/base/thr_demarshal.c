@@ -848,7 +848,6 @@ thr_demarshal(void *arg)
 						as_info_transaction it = { fd_h, proto_p, now_ns };
 
 						as_info(&it);
-						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -866,7 +865,6 @@ thr_demarshal(void *arg)
 						// may not do any good to send back an as_msg error, but
 						// it's the best we can do. At least we can keep the fd.
 						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -881,7 +879,6 @@ thr_demarshal(void *arg)
 							cf_warning(AS_DEMARSHAL, "as_proto decompression failed! (rv %d)", rv);
 							cf_warning_binary(AS_DEMARSHAL, proto_p, sizeof(as_proto) + proto_p->sz, CF_DISPLAY_HEX_SPACED, "compressed proto_p");
 							as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-							cf_atomic64_incr(&g_stats.proto_transactions);
 							goto NextEvent;
 						}
 
@@ -897,7 +894,6 @@ thr_demarshal(void *arg)
 							cf_warning(AS_DEMARSHAL, "decompressed unusable proto: version %u, type %u, sz %lu [%lu]",
 									tr.msgp->proto.version, tr.msgp->proto.type, (uint64_t)tr.msgp->proto.sz, decompressed_buf_size);
 							as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-							cf_atomic64_incr(&g_stats.proto_transactions);
 							goto NextEvent;
 						}
 					}
@@ -918,7 +914,6 @@ thr_demarshal(void *arg)
 					// Security protocol transactions.
 					if (tr.msgp->proto.type == PROTO_TYPE_SECURITY) {
 						as_security_transact(&tr);
-						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -930,7 +925,6 @@ thr_demarshal(void *arg)
 					// Fast path for batch requests.
 					if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
 						as_batch_queue_task(&tr);
-						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -938,7 +932,6 @@ thr_demarshal(void *arg)
 					// which fields are present, to reduce re-parsing.
 					if (! as_transaction_demarshal_prepare(&tr)) {
 						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_PARAMETER);
-						cf_atomic64_incr(&g_stats.proto_transactions);
 						goto NextEvent;
 					}
 
@@ -949,9 +942,6 @@ thr_demarshal(void *arg)
 					if (0 != thr_tsvc_process_or_enqueue(&tr)) {
 						cf_warning(AS_DEMARSHAL, "Failed to queue transaction to the service thread");
 						goto NextEvent_FD_Cleanup;
-					}
-					else {
-						cf_atomic64_incr(&g_stats.proto_transactions);
 					}
 				}
 

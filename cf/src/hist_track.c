@@ -375,7 +375,7 @@ cf_hist_track_get_info(cf_hist_track* this, uint32_t back_sec,
 	pthread_mutex_lock(&this->rows_lock);
 
 	if (! this->rows) {
-		cf_dyn_buf_append_string(db_p, "error-not-tracking");
+		cf_dyn_buf_append_string(db_p, "error-not-tracking;");
 		pthread_mutex_unlock(&this->rows_lock);
 		return;
 	}
@@ -383,7 +383,7 @@ cf_hist_track_get_info(cf_hist_track* this, uint32_t back_sec,
 	uint32_t start_row_n = get_start_row_n(this, back_sec);
 
 	if (start_row_n == -1) {
-		cf_dyn_buf_append_string(db_p, "error-run-too-short-or-back-too-small");
+		cf_dyn_buf_append_string(db_p, "error-no-data-yet-or-back-too-small;");
 		pthread_mutex_unlock(&this->rows_lock);
 		return;
 	}
@@ -429,7 +429,8 @@ cf_hist_track_get_info(cf_hist_track* this, uint32_t back_sec,
 	}
 
 	if (no_slices) {
-		cf_dyn_buf_append_string(db_p, "error-slice-too-big-or-back-too-small");
+		cf_dyn_buf_append_string(db_p,
+				"error-slice-too-big-or-back-too-small;");
 	}
 
 	pthread_mutex_unlock(&this->rows_lock);
