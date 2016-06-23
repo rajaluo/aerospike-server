@@ -682,7 +682,7 @@ basic_scan_job_finish(as_job* _job)
 	conn_scan_job_finish((conn_scan_job*)_job);
 
 	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&_job->ns->n_basic_scan_success : &_job->ns->n_basic_scan_failure);
+			&_job->ns->n_scan_basic_success : &_job->ns->n_scan_basic_failure);
 
 	cf_info(AS_SCAN, "finished basic scan job %lu (%d)", _job->trid,
 			_job->abandoned);
@@ -1002,7 +1002,7 @@ aggr_scan_job_finish(as_job* _job)
 	job->msgp = NULL;
 
 	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&_job->ns->n_aggr_scan_success : &_job->ns->n_aggr_scan_failure);
+			&_job->ns->n_scan_aggr_success : &_job->ns->n_scan_aggr_failure);
 
 	cf_info(AS_SCAN, "finished aggregation scan job %lu (%d)", _job->trid,
 			_job->abandoned);
@@ -1279,8 +1279,8 @@ udf_bg_scan_job_finish(as_job* _job)
 	job->msgp = NULL;
 
 	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&_job->ns->n_udf_bg_scan_success :
-			&_job->ns->n_udf_bg_scan_failure);
+			&_job->ns->n_scan_udf_bg_success :
+			&_job->ns->n_scan_udf_bg_failure);
 
 	cf_info(AS_SCAN, "finished udf-bg scan job %lu (%d)", _job->trid,
 			_job->abandoned);

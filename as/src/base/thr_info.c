@@ -5238,14 +5238,14 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Scan stats.
 
-	info_append_uint64(db, "basic_scan_success", ns->n_basic_scan_success);
-	info_append_uint64(db, "basic_scan_failure", ns->n_basic_scan_failure);
+	info_append_uint64(db, "scan_basic_success", ns->n_scan_basic_success);
+	info_append_uint64(db, "scan_basic_failure", ns->n_scan_basic_failure);
 
-	info_append_uint64(db, "aggr_scan_success", ns->n_aggr_scan_success);
-	info_append_uint64(db, "aggr_scan_failure", ns->n_aggr_scan_failure);
+	info_append_uint64(db, "scan_aggr_success", ns->n_scan_aggr_success);
+	info_append_uint64(db, "scan_aggr_failure", ns->n_scan_aggr_failure);
 
-	info_append_uint64(db, "udf_bg_scan_success", ns->n_udf_bg_scan_success);
-	info_append_uint64(db, "udf_bg_scan_failure", ns->n_udf_bg_scan_failure);
+	info_append_uint64(db, "scan_udf_bg_success", ns->n_scan_udf_bg_success);
+	info_append_uint64(db, "scan_udf_bg_failure", ns->n_scan_udf_bg_failure);
 
 	// Query stats.
 
@@ -5284,8 +5284,8 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "query_lookup_abort", lkup_abort);
 	info_append_uint64(db, "query_lookup_avg_rec_count", lkup ? lkup_records / lkup : 0);
 
-	info_append_uint64(db, "udf_bg_query_success", ns->n_udf_bg_query_success);
-	info_append_uint64(db, "udf_bg_query_failure", ns->n_udf_bg_query_failure);
+	info_append_uint64(db, "query_udf_bg_success", ns->n_query_udf_bg_success);
+	info_append_uint64(db, "query_udf_bg_failure", ns->n_query_udf_bg_failure);
 
 	// Geospatial query stats:
 	info_append_uint64(db, "geo_region_query_reqs", ns->geo_region_query_count);

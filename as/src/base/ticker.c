@@ -559,12 +559,12 @@ log_line_batch_sub(as_namespace* ns)
 void
 log_line_scan(as_namespace* ns)
 {
-	uint64_t n_basic_success = ns->n_basic_scan_success;
-	uint64_t n_basic_failure = ns->n_basic_scan_failure;
-	uint64_t n_aggr_success = ns->n_aggr_scan_success;
-	uint64_t n_aggr_failure = ns->n_aggr_scan_failure;
-	uint64_t n_udf_bg_success = ns->n_udf_bg_scan_success;
-	uint64_t n_udf_bg_failure = ns->n_udf_bg_scan_failure;
+	uint64_t n_basic_success = ns->n_scan_basic_success;
+	uint64_t n_basic_failure = ns->n_scan_basic_failure;
+	uint64_t n_aggr_success = ns->n_scan_aggr_success;
+	uint64_t n_aggr_failure = ns->n_scan_aggr_failure;
+	uint64_t n_udf_bg_success = ns->n_scan_udf_bg_success;
+	uint64_t n_udf_bg_failure = ns->n_scan_udf_bg_failure;
 
 	if ((n_basic_success | n_basic_failure |
 			n_aggr_success | n_aggr_failure |
@@ -588,8 +588,8 @@ log_line_query(as_namespace* ns)
 	uint64_t n_basic_failure = ns->n_lookup_errs + ns->n_lookup_abort;
 	uint64_t n_aggr_success = ns->n_agg_success;
 	uint64_t n_aggr_failure = ns->n_agg_errs + ns->n_agg_abort;
-	uint64_t n_udf_bg_success = ns->n_udf_bg_query_success;
-	uint64_t n_udf_bg_failure = ns->n_udf_bg_query_failure;
+	uint64_t n_udf_bg_success = ns->n_query_udf_bg_success;
+	uint64_t n_udf_bg_failure = ns->n_query_udf_bg_failure;
 
 	if ((n_basic_success | n_basic_failure |
 			n_aggr_success | n_aggr_failure |

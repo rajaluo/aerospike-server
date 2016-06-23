@@ -1245,14 +1245,14 @@ struct as_namespace_s {
 
 	// Scan stats.
 
-	cf_atomic64		n_basic_scan_success;
-	cf_atomic64		n_basic_scan_failure;
+	cf_atomic64		n_scan_basic_success;
+	cf_atomic64		n_scan_basic_failure;
 
-	cf_atomic64		n_aggr_scan_success;
-	cf_atomic64		n_aggr_scan_failure;
+	cf_atomic64		n_scan_aggr_success;
+	cf_atomic64		n_scan_aggr_failure;
 
-	cf_atomic64		n_udf_bg_scan_success;
-	cf_atomic64		n_udf_bg_scan_failure;
+	cf_atomic64		n_scan_udf_bg_success;
+	cf_atomic64		n_scan_udf_bg_failure;
 
 	// Query stats.
 
@@ -1277,8 +1277,8 @@ struct as_namespace_s {
 	cf_atomic64		agg_response_size;
 	cf_atomic64		agg_num_records;
 
-	cf_atomic64		n_udf_bg_query_success;
-	cf_atomic64		n_udf_bg_query_failure;
+	cf_atomic64		n_query_udf_bg_success;
+	cf_atomic64		n_query_udf_bg_failure;
 
 	// Geospatial query stats:
 	cf_atomic64		geo_region_query_count;		// number of region queries

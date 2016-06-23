@@ -722,9 +722,9 @@ query_update_stats(as_query_transaction *qtr)
 
 		case QUERY_TYPE_UDF_BG:
 			if (qtr_failed(qtr)) {
-				cf_atomic64_incr(&qtr->ns->n_udf_bg_query_failure);
+				cf_atomic64_incr(&qtr->ns->n_query_udf_bg_failure);
 			} else {
-				cf_atomic64_incr(&qtr->ns->n_udf_bg_query_success);
+				cf_atomic64_incr(&qtr->ns->n_query_udf_bg_success);
 			}
 			break;
 
