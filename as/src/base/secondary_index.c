@@ -1301,13 +1301,11 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 
 	info_append_uint64(db, "loadtime", cf_atomic64_get(si->stats.loadtime));
 	// writes
-	info_append_uint64(db, "stat_write_reqs", cf_atomic64_get(si->stats.n_writes));
-	info_append_uint64(db, "stat_write_success", cf_atomic64_get(si->stats.n_writes) - cf_atomic64_get(si->stats.write_errs));
-	info_append_uint64(db, "stat_write_errs", cf_atomic64_get(si->stats.write_errs));
+	info_append_uint64(db, "write_success", cf_atomic64_get(si->stats.n_writes) - cf_atomic64_get(si->stats.write_errs));
+	info_append_uint64(db, "write_error", cf_atomic64_get(si->stats.write_errs));
 	// delete
-	info_append_uint64(db, "stat_delete_reqs", cf_atomic64_get(si->stats.n_deletes));
-	info_append_uint64(db, "stat_delete_success", cf_atomic64_get(si->stats.n_deletes) - cf_atomic64_get(si->stats.delete_errs));
-	info_append_uint64(db, "stat_delete_errs", cf_atomic64_get(si->stats.delete_errs));
+	info_append_uint64(db, "delete_success", cf_atomic64_get(si->stats.n_deletes) - cf_atomic64_get(si->stats.delete_errs));
+	info_append_uint64(db, "delete_error", cf_atomic64_get(si->stats.delete_errs));
 	// defrag
 	info_append_uint64(db, "stat_gc_recs", cf_atomic64_get(si->stats.n_defrag_records));
 	info_append_uint64(db, "stat_gc_time", cf_atomic64_get(si->stats.defrag_time));

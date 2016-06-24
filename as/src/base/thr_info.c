@@ -5252,21 +5252,18 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	uint64_t agg			= ns->n_aggregation;
 	uint64_t agg_success	= ns->n_agg_success;
 	uint64_t agg_err		= ns->n_agg_errs;
-	uint64_t agg_records	= ns->agg_num_records;
 	uint64_t agg_abort		= ns->n_agg_abort;
+	uint64_t agg_records	= ns->agg_num_records;
 
 	uint64_t lkup			= ns->n_lookup;
 	uint64_t lkup_success	= ns->n_lookup_success;
 	uint64_t lkup_err		= ns->n_lookup_errs;
-	uint64_t lkup_records	= ns->lookup_num_records;
 	uint64_t lkup_abort		= ns->n_lookup_abort;
+	uint64_t lkup_records	= ns->lookup_num_records;
 
 	info_append_uint64(db, "query_reqs", ns->query_reqs);
-	info_append_uint64(db, "query_success", agg_success + lkup_success);
-	info_append_uint64(db, "query_fail", ns->query_fail + lkup_err + agg_err);
-	info_append_uint64(db, "query_abort", agg_abort + lkup_abort);
+	info_append_uint64(db, "query_fail", ns->query_fail);
 
-	info_append_uint64(db, "query_avg_rec_count", (agg + lkup) ? (agg_records + lkup_records) / (agg + lkup) : 0);
 	info_append_uint64(db, "query_short_queue_full", ns->query_short_queue_full);
 	info_append_uint64(db, "query_long_queue_full", ns->query_long_queue_full);
 	info_append_uint64(db, "query_short_reqs", ns->query_short_reqs);
@@ -5274,13 +5271,13 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64(db, "query_agg", agg);
 	info_append_uint64(db, "query_agg_success", agg_success);
-	info_append_uint64(db, "query_agg_err", agg_err);
+	info_append_uint64(db, "query_agg_error", agg_err);
 	info_append_uint64(db, "query_agg_abort", agg_abort);
 	info_append_uint64(db, "query_agg_avg_rec_count", agg ? agg_records / agg : 0);
 
 	info_append_uint64(db, "query_lookups", lkup);
 	info_append_uint64(db, "query_lookup_success", lkup_success);
-	info_append_uint64(db, "query_lookup_err", lkup_err);
+	info_append_uint64(db, "query_lookup_error", lkup_err);
 	info_append_uint64(db, "query_lookup_abort", lkup_abort);
 	info_append_uint64(db, "query_lookup_avg_rec_count", lkup ? lkup_records / lkup : 0);
 
