@@ -726,7 +726,7 @@ as_namespace_get_set_info(as_namespace *ns, const char *set_name, cf_dyn_buf *db
 
 	for (uint32_t idx = 0; idx < cf_vmapx_count(ns->p_sets_vmap); idx++) {
 		if (cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set) == CF_VMAPX_OK) {
-			cf_dyn_buf_append_string(db, "namespace=");
+			cf_dyn_buf_append_string(db, "ns=");
 			cf_dyn_buf_append_string(db, ns->name);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_string(db, "set=");
