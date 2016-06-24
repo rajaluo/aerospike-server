@@ -1850,7 +1850,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string(db, "work-directory", g_config.work_directory ? g_config.work_directory : "null");
 	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 
-	info_append_bool(db, "asmalloc_enabled", g_config.asmalloc_enabled);
+	info_append_bool(db, "asmalloc-enabled", g_config.asmalloc_enabled);
 	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
 	info_append_int(db, "max-msgs-per-type", (int)g_config.max_msgs_per_type);
 	info_append_bool(db, "memory-accounting", g_config.memory_accounting);
