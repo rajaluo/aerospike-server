@@ -1764,7 +1764,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "service-threads", g_config.n_service_threads);
 	info_append_int(db, "transaction-queues", g_config.n_transaction_queues);
 	info_append_int(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
-	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max); // TODO - rename to client-fd-max?
+	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
 
 	info_append_bool(db, "allow-inline-transactions", g_config.allow_inline_transactions);
 	info_append_int(db, "batch-threads", g_config.n_batch_threads);
@@ -1847,7 +1847,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "transaction-repeatable-read", g_config.transaction_repeatable_read);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
 	info_append_bool(db, "use-queue-per-device", g_config.use_queue_per_device);
-	// TODO - why no work-directory?
+	info_append_string(db, "work-directory", g_config.work_directory ? g_config.work_directory : "null");
 	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 
 	info_append_bool(db, "asmalloc_enabled", g_config.asmalloc_enabled);
