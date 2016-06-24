@@ -11,12 +11,22 @@ OPT_AS = $(BUILD_ROOT)/opt/aerospike
 REV = $(shell $(DEPTH)/build/version)
 OS = $(shell $(DEPTH)/build/os_version)
 SIZE = $(shell du -k $(BIN_DIR)/asd | cut -f1)
-DEPS = ", logrotate"
+DEPS = 
+
+comma:= ,
+empty:=
+space:= $(empty) $(empty)
 
 ifeq ($(OS),$(filter $(OS),debian8 ubuntu16.04))
-  USE_SYSTEMD = 1
-  CONF_VERSION = _systemd
-  DEPS =
+	USE_SYSTEMD = 1
+	CONF_VERSION = _systemd
+	DEPS = 
+else
+	DEPS = logrotate
+endif
+
+ifeq ($(EDITION),community)
+  DEPS += python
 endif
 
 DEB = $(PKG)/packages/aerospike-server-$(EDITION)-$(REV).$(OS).x86_64.deb
@@ -118,7 +128,7 @@ endif
 	sed 's/@VERSION@/'$(REV)'/g' < $(PKG)/deb/server-64 > $(BUILD_ROOT)/DEBIAN/control
 	sed -i 's/@EDITION@/'$(EDITION)'/g' $(BUILD_ROOT)/DEBIAN/control
 	sed -i 's/@SIZE@/'$(SIZE)'/g' $(BUILD_ROOT)/DEBIAN/control
-	sed -i 's/@DEPS@/'$(DEPS)'/g' $(BUILD_ROOT)/DEBIAN/control
+	sed -i 's/@DEPS@/$(addprefix $(comma), $(subst $(space),$(comma),$(strip $(DEPS))))/g' $(BUILD_ROOT)/DEBIAN/control
 
 package:
 	fakeroot dpkg-deb --build $(BUILD_ROOT) $(DEB)
