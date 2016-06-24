@@ -124,7 +124,7 @@ cfg_set_defaults()
 	c->batch_priority = 200; // # of rows between a quick context switch?
 	c->n_batch_index_threads = 4;
 	c->n_fabric_workers = 16;
-	c->hist_track_back = 1800;
+	c->hist_track_back = 300;
 	c->hist_track_slice = 10;
 	c->n_info_threads = 16;
 	c->ldt_benchmarks = false;
