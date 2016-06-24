@@ -1850,10 +1850,14 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string(db, "work-directory", g_config.work_directory ? g_config.work_directory : "null");
 	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 
+#ifdef USE_ASM
 	info_append_bool(db, "asmalloc-enabled", g_config.asmalloc_enabled);
+#endif
 	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
 	info_append_int(db, "max-msgs-per-type", (int)g_config.max_msgs_per_type);
+#ifdef MEM_COUNT
 	info_append_bool(db, "memory-accounting", g_config.memory_accounting);
+#endif
 	info_append_uint32(db, "prole-extra-ttl", g_config.prole_extra_ttl);
 	info_append_bool(db, "non-master-sets-delete", g_config.non_master_sets_delete); // dynamic only
 }
