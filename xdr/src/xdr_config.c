@@ -65,15 +65,15 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-hotkey-time-ms",				XDR_CASE_HOTKEY_TIME_MS },
 		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
 		{ "xdr-client-threads",				XDR_CASE_CLIENT_THREADS },
-		{ "timeout",						XDR_CASE_TIMEOUT },							// not exposed to users
+		{ "xdr-write-timeout",				XDR_CASE_WRITE_TIMEOUT },
 		{ "xdr-delete-shipping-enabled",	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
 		{ "xdr-ship-bins",					XDR_CASE_XDR_SHIP_BINS },
 		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
 		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
 		{ "xdr-info-timeout",				XDR_CASE_XDR_INFO_TIMEOUT },
 		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
-		{ "xdr-read-batch-size",			XDR_CASE_XDR_READ_BATCH_SIZE },
-		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },
+		{ "xdr-read-batch-size",			XDR_CASE_XDR_READ_BATCH_SIZE },				// deprecated (3.8.0)
+		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },					// hidden
 		{ "xdr-read-threads",				XDR_CASE_XDR_READ_THREADS},
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
@@ -130,7 +130,7 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_max_ship_bandwidth = 0;		// XDR bandwidth limit
 	c->xdr_hotkey_time_ms = 100;		// Expiration time for the de-duplication cache
 	c->xdr_read_threads = 4;			// Number of XDR read threads.
-	c->xdr_timeout = 10000;				// Timeout for each element that is shipped.
+	c->xdr_write_timeout = 10000;		// Timeout for each element that is shipped.
 	c->xdr_client_threads = 3;			// Number of async client threads (event loops)
 	c->xdr_forward_xdrwrites = false;	// If the writes due to xdr should be forwarded
 	c->xdr_nsup_deletes_enabled = false;// Shall XDR ship deletes of evictions or expiration
@@ -139,6 +139,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_shipping_enabled = true;
 	c->xdr_delete_shipping_enabled = true;
 	c->xdr_ship_bins = false;
-	c->xdr_info_request_timeout_ms = 500;
+	c->xdr_info_request_timeout_ms = 10000;
 	c->xdr_compression_threshold = 0; 	// 0 disables compressed shipping, > 0 specifies minimum request size for compression
 }

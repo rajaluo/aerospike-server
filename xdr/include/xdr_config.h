@@ -81,7 +81,7 @@ typedef enum {
 	XDR_CASE_HOTKEY_TIME_MS,
 	XDR_CASE_FORWARD_XDR_WRITES,
 	XDR_CASE_CLIENT_THREADS,
-	XDR_CASE_TIMEOUT,
+	XDR_CASE_WRITE_TIMEOUT,
 	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED,
 	XDR_CASE_XDR_CHECK_DATA_BEFORE_DELETE,
 	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
@@ -171,7 +171,7 @@ typedef struct xdr_config {
 	int	xdr_max_ship_bandwidth;
 	int	xdr_hotkey_time_ms;
 	int	xdr_read_threads;       // Number threads which will read from server and ship records.
-	int	xdr_timeout;
+	int	xdr_write_timeout;
 	int	xdr_client_threads;
 	int	xdr_forward_xdrwrites;
 	int xdr_internal_shipping_delay;
