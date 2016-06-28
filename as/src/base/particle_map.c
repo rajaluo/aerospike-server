@@ -3856,6 +3856,11 @@ packed_map_op_get_remove_by_key_interval(packed_map_op *op, as_bin *b, rollback_
 static int
 packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, rollback_alloc *alloc_buf, uint32_t index, uint32_t count, cdt_result_data *result)
 {
+	if (result_data_is_return_rank_range(result)) {
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() result_type %d not supported", result->type);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	if (count == 0) {
 		result_data_set_key_not_found(result, index);
 		return AS_PROTO_RESULT_OK;
@@ -3863,11 +3868,6 @@ packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, roll
 
 	if (! has_offidx(op)) {
 		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() offset_index needs to be valid");
-	}
-
-	if (result_data_is_return_rank_range(result)) {
-		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() result_type %d not supported", result->type);
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	offset_index *offidx = (offset_index *)&op->pmi.offset_idx;
@@ -7753,6 +7753,12 @@ cdt_process_state_packed_map_read_optype(cdt_process_state *state, cdt_read_data
 
 		// User specifically asked for 0 count.
 		if (state->ele_count == 3 && count == 0) {
+			if (result_data_is_return_rank_range(&result_data)) {
+				cf_warning(AS_PARTICLE, "AS_CDT_OP_MAP_GET_BY_INDEX_RANGE: result_type %d not supported", result_data.type);
+				cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+				return false;
+			}
+
 			result_data_set_key_not_found(&result_data, index);
 			break;
 		}
@@ -7782,6 +7788,12 @@ cdt_process_state_packed_map_read_optype(cdt_process_state *state, cdt_read_data
 
 		// User specifically asked for 0 count.
 		if (state->ele_count == 3 && count == 0) {
+			if (result_data_is_return_index_range(&result_data)) {
+				cf_warning(AS_PARTICLE, "AS_CDT_OP_MAP_GET_BY_RANK_RANGE: result_type %d not supported", result_data.type);
+				cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+				return false;
+			}
+
 			result_data_set_value_not_found(&result_data, rank);
 			break;
 		}
