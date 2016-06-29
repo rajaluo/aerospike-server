@@ -5210,7 +5210,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_lua_delete_success", ns->n_client_lua_delete_success);
 	info_append_uint64(db, "client_lua_error", ns->n_client_lua_error);
 
-	info_append_uint64(db, "xdr_read_success", ns->n_xdr_read_success);
 	info_append_uint64(db, "xdr_write_success", ns->n_xdr_write_success);
 
 	info_append_uint64(db, "client_trans_fail_xdr_forbidden", ns->n_client_trans_fail_xdr_forbidden);

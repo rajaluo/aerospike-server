@@ -1212,8 +1212,7 @@ struct as_namespace_s {
 	cf_atomic64		n_client_lua_error;
 
 	// Special stats that deserve their own counters:
-	cf_atomic64		n_xdr_read_success; // incremented in EE code
-	cf_atomic64		n_xdr_write_success;
+	cf_atomic64		n_xdr_write_success; // subset of n_client_write_success
 
 	// Special errors that deserve their own counters:
 	cf_atomic64		n_client_trans_fail_xdr_forbidden;
