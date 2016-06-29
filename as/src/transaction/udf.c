@@ -1288,6 +1288,7 @@ process_udf_failure(udf_call* call, const as_string* s, cf_dyn_buf* db)
 			error_code != AS_PROTO_RESULT_FAIL_COLLECTION_ITEM_NOT_FOUND) {
 		call->tr->result_code = AS_PROTO_RESULT_FAIL_UDF_EXECUTION;
 		process_failure(call, as_string_toval(s), db);
+		return;
 	}
 
 	call->tr->result_code = (uint8_t)error_code;
