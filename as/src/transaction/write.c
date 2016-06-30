@@ -704,8 +704,7 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	// Do an XDR write if the write is a non-XDR write or is an XDR write with
 	// forwarding enabled.
-	if (as_msg_is_xdr(m) ||
-			is_xdr_forwarding_enabled() ||
+	if (! as_msg_is_xdr(m) || is_xdr_forwarding_enabled() ||
 			ns->ns_forward_xdr_writes) {
 		xdr_write(ns, tr->keyd, tr->generation, 0, is_delete, set_id,
 				&dirty_bins);
