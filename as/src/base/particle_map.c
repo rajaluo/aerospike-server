@@ -327,6 +327,20 @@ typedef struct result_data_s {
 		order_index_init(__idx_ptr, NULL, __ele_count); \
 		(__idx_ptr)->_.ptr = alloca(order_index_size(__idx_ptr));
 
+#define order_index_inita2(__idx_ptr, __ele_count, __ele_alloc) \
+		order_index_init(__idx_ptr, NULL, __ele_count); \
+		(__idx_ptr)->_.ptr = alloca((__idx_ptr)->_.ele_size * __ele_alloc); \
+		(__idx_ptr)->_.ele_count = __ele_alloc
+
+#define order_index_inita_copy(__idx_ptr, __src_ptr) { \
+		uint32_t ele_count = (__src_ptr)->_.ele_count; \
+		(__idx_ptr)->_.ele_size = (__src_ptr)->_.ele_size; \
+		size_t sorted_size = (__idx_ptr)->_.ele_size * ele_count; \
+		(__idx_ptr)->_.ptr = alloca(sorted_size);	\
+		(__idx_ptr)->_.ele_count = ele_count; \
+		memcpy((__idx_ptr)->_.ptr, order_index_get_mem(__src_ptr, 0), sorted_size);	\
+}
+
 #define order_heap_inita(__idx_ptr, __ele_count, __op_ptr, __cmp, __is_key) \
 		order_heap_init(__idx_ptr, NULL, __ele_count, __op_ptr, __cmp, __is_key);	\
 		(__idx_ptr)->_._.ptr = alloca(order_heap_size(__idx_ptr));
@@ -556,6 +570,7 @@ static inline bool order_index_set_sorted(order_index *ordidx, const offset_inde
 static bool order_index_set_sorted_with_offsets(order_index *ordidx, const offset_index *offsets, sort_by_t sort_by);
 static void order_index_remove_dup_idx(order_index *ordidx, uint32_t x);
 static uint32_t order_index_sorted_remove_dups(order_index *ordidx);
+static bool order_index_remove_dups(order_index *ordidx, const order_index *sorted_hint);
 
 static uint32_t order_index_find_idx(const order_index *ordidx, uint32_t idx, uint32_t start, uint32_t len);
 static bool order_index_sorted_has_dups(const order_index *ordidx);
@@ -2499,11 +2514,18 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 	order_index rem_idx;
 	order_index *rem_ranks = NULL;
 
-	order_index_inita(&rem_idx, op.ele_count);
+	// Over allocate array to deal with possible dup parameters.
+	order_index_inita2(&rem_idx, op.ele_count, 2 * op.ele_count);
 
 	if (return_rank) {
 		rem_ranks = (order_index *)alloca(sizeof(order_index));
 		order_index_inita(rem_ranks, op.ele_count);
+	}
+
+	order_index find_idx;
+
+	if (! order_index_is_valid(&op.pmi.value_idx)) {
+		order_index_inita(&find_idx, op.ele_count);
 	}
 
 	for (int64_t i = 0; i < items_count; i++) {
@@ -2537,9 +2559,6 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 			}
 		}
 		else {
-			order_index find_idx;
-			order_index_inita(&find_idx, op.ele_count);
-
 			if (! packed_map_op_find_rank_range_by_value_interval_unordered(&op, &value, &value, &rank, &count, &find_idx)) {
 				return -AS_PROTO_RESULT_FAIL_PARAMETER;
 			}
@@ -2548,6 +2567,18 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 				uint32_t idx = order_index_get(&find_idx, j);
 				order_index_set(&rem_idx, rem_idx_count++, idx);
 			}
+		}
+
+		// Must have encountered dups when rem_idx grows beyond op.ele_count.
+		if (rem_idx_count > op.ele_count) {
+			cf_detail(AS_PARTICLE, "packed_map_remove_all_value_items() dup list items reduces performance, i=%ld rem_idx_count=%u ele_count=%u", i, rem_idx_count, op.ele_count);
+			rem_idx._.ele_count = rem_idx_count;
+
+			if (! order_index_remove_dups(&rem_idx, NULL)) {
+				return -AS_PROTO_RESULT_FAIL_PARAMETER;
+			}
+
+			rem_idx_count = rem_idx._.ele_count;
 		}
 
 		if (return_rank) {
@@ -2561,15 +2592,10 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 		}
 	}
 
+	rem_idx._.ele_count = rem_idx_count;
+
 	order_index sorted;
-
-	sorted._.ele_size = rem_idx._.ele_size;
-
-	size_t sorted_size = sorted._.ele_size * rem_idx_count;
-
-	sorted._.ptr = alloca(sorted_size);
-	sorted._.ele_count = rem_idx_count;
-	memcpy(sorted._.ptr, order_index_get_mem(&rem_idx, 0), sorted_size);
+	order_index_inita_copy(&sorted, &rem_idx);
 
 	if (! order_index_sort(&sorted, NULL, NULL, 0, SORT_BY_IDX)) {
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
@@ -2578,26 +2604,7 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 	if (order_index_sorted_has_dups(&sorted)) {
 		// Remove duplicates.
 		if (result_data_is_return_elements(result)) {
-			rem_idx._.ele_count = rem_idx_count;
-
-			uint32_t prev = op.ele_count;
-			bool is_prev = false;
-
-			for (uint32_t i = 0; i < rem_idx_count; i++) {
-				uint32_t idx = order_index_get(&sorted, i);
-
-				if (idx == prev) {
-					if (! is_prev) {
-						order_index_remove_dup_idx(&rem_idx, idx);
-					}
-
-					is_prev = true;
-					continue;
-				}
-
-				prev = idx;
-				is_prev = false;
-			}
+			order_index_remove_dups(&rem_idx, &sorted);
 		}
 
 		rem_idx_count = order_index_sorted_remove_dups(&sorted);
@@ -3856,6 +3863,11 @@ packed_map_op_get_remove_by_key_interval(packed_map_op *op, as_bin *b, rollback_
 static int
 packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, rollback_alloc *alloc_buf, uint32_t index, uint32_t count, cdt_result_data *result)
 {
+	if (result_data_is_return_rank_range(result)) {
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() result_type %d not supported", result->type);
+		return -AS_PROTO_RESULT_FAIL_PARAMETER;
+	}
+
 	if (count == 0) {
 		result_data_set_key_not_found(result, index);
 		return AS_PROTO_RESULT_OK;
@@ -3863,11 +3875,6 @@ packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, roll
 
 	if (! has_offidx(op)) {
 		cf_crash(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() offset_index needs to be valid");
-	}
-
-	if (result_data_is_return_rank_range(result)) {
-		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_index_range() result_type %d not supported", result->type);
-		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
 	offset_index *offidx = (offset_index *)&op->pmi.offset_idx;
@@ -6241,6 +6248,7 @@ order_index_remove_dup_idx(order_index *ordidx, uint32_t x)
 	ordidx->_.ele_count = ele_count;
 }
 
+// Remove dups in a sorted order_index.
 static uint32_t
 order_index_sorted_remove_dups(order_index *ordidx)
 {
@@ -6273,6 +6281,45 @@ order_index_sorted_remove_dups(order_index *ordidx)
 	ordidx->_.ele_count = ret_count;
 
 	return ret_count;
+}
+
+// Remove dups while keeping the order intact.
+static bool
+order_index_remove_dups(order_index *ordidx, const order_index *sorted_hint)
+{
+	order_index sorted_temp;
+
+	if (! sorted_hint) {
+		order_index_inita_copy(&sorted_temp, ordidx);
+
+		if (! order_index_sort(&sorted_temp, NULL, NULL, 0, SORT_BY_IDX)) {
+			return false;
+		}
+
+		sorted_hint = &sorted_temp;
+	}
+
+	uint32_t ele_count = ordidx->_.ele_count;
+	uint32_t prev = ele_count;
+	bool is_prev = false;
+
+	for (uint32_t i = 0; i < ele_count; i++) {
+		uint32_t idx = order_index_get(sorted_hint, i);
+
+		if (idx == prev) {
+			if (! is_prev) {
+				order_index_remove_dup_idx(ordidx, idx);
+			}
+
+			is_prev = true;
+			continue;
+		}
+
+		prev = idx;
+		is_prev = false;
+	}
+
+	return true;
 }
 
 static uint32_t
@@ -7753,6 +7800,12 @@ cdt_process_state_packed_map_read_optype(cdt_process_state *state, cdt_read_data
 
 		// User specifically asked for 0 count.
 		if (state->ele_count == 3 && count == 0) {
+			if (result_data_is_return_rank_range(&result_data)) {
+				cf_warning(AS_PARTICLE, "AS_CDT_OP_MAP_GET_BY_INDEX_RANGE: result_type %d not supported", result_data.type);
+				cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+				return false;
+			}
+
 			result_data_set_key_not_found(&result_data, index);
 			break;
 		}
@@ -7782,6 +7835,12 @@ cdt_process_state_packed_map_read_optype(cdt_process_state *state, cdt_read_data
 
 		// User specifically asked for 0 count.
 		if (state->ele_count == 3 && count == 0) {
+			if (result_data_is_return_index_range(&result_data)) {
+				cf_warning(AS_PARTICLE, "AS_CDT_OP_MAP_GET_BY_RANK_RANGE: result_type %d not supported", result_data.type);
+				cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+				return false;
+			}
+
 			result_data_set_value_not_found(&result_data, rank);
 			break;
 		}
