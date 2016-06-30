@@ -49,9 +49,6 @@ void repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb 
 void repl_write_handle_op(cf_node node, msg* m);
 void repl_write_handle_ack(cf_node node, msg* m);
 
-int as_journal_start(as_namespace* ns, as_partition_id pid);
-int as_journal_apply(as_partition_reservation* rsv);
-
 // For LDTs only:
 void repl_write_ldt_make_message(msg* m, as_transaction* tr,
 		uint8_t** p_pickled_buf, size_t pickled_sz,

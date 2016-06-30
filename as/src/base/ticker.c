@@ -471,7 +471,7 @@ log_line_tsvc_fail(as_namespace* ns)
 	uint64_t n_udf_sub_error = ns->n_tsvc_udf_sub_error;
 	uint64_t n_udf_sub_timeout = ns->n_tsvc_udf_sub_timeout;
 
-	if ((n_client_error |n_client_timeout |
+	if ((n_client_error | n_client_timeout |
 			n_batch_sub_error | n_batch_sub_timeout |
 			n_udf_sub_error | n_udf_sub_timeout) == 0) {
 		return;

@@ -293,8 +293,8 @@ xdr_must_ship_delete(as_namespace* ns, bool is_nsup_delete, bool is_xdr_op)
 		return false;
 	}
 
-	return (! is_xdr_op ||
+	return ! is_xdr_op ||
 			// If this delete is a result of XDR shipping, don't ship it unless
 			// configured to do so.
-			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes);
+			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes;
 }

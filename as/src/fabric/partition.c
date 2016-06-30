@@ -20,129 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- *  Overview
- *  ========
- *
- *  Whenever cluster state change, node assignments of the partition changes.
- *  This leads to movement of the partition from one node to another, this is
- *  called partition migration.  For example
- *
- *  Cluster: [N1, N2]
- *  P1       : Master N1 and Replica N2
- *  Cluster: [N1, N2, N3]
- *  P1       : Master N3 and replica N1
- *  Partition P1 has to be moved to N3 which has the master copy of partition in
- *  the new cluster view.
- *
- *  Following keywords are used while describing the whole partition migration
- *  logic
- *
- *  - Partition Node hash list:	[p->replica]
- *    The hash value list with the nodes ordered. Master comes first followed
- *    by replica in current cluster view and then all other nodes.
- *
- *  - Primary Version: [p->primary_version_info]
- *    In partition node hash list, version of partition on the, first node with
- *    some valid version of data. (We need to maintain only first node
- *    information)
- *
- *  - First Non Primary Versions: [p->dupl, p->dupl_vinfo]
- *    In partition node hash list all the first nodes with the version not
- *    matching primary version (This maintains array of nodes along with the
- *    version as there could be multiple versions). Data is maintained only in
- *    first node all subsequent node with copy of duplicate version is dropped
- *
- *  - Write Journal :
- *    -- When normal writes come in, journal is written when the writes are not
- *       applied. Any DESYNC node (desync is always in replica	list) receiving
- *       incoming migration does not apply write to the record but log the
- *       operation in write_journal.
- *
- *    -- All the nodes in the replica list which has primary sync copy take the
- *       writes and apply it.
- *
- *    -- All the nodes in the replica list which has non primary sync copy reject
- *       writes.
- *
- *    -- All the nodes with DESYNC partition take writes as long as nothing is
- *       migrated into it.  Once master has received data from all the duplicates
- *       it transfers data to all nodes in replica list at that time all DESYNC
- *       nodes will write journal.
- *
- *    Golden rule is at any point of time DESYNC partition receives data from
- *    only one source. Once it has become SYNC it can get from multiple sources
- *    and merge ? Why is it needed  ?????
- *
- *  - Replication Factor: [p->p_repl_factor]
- *    The number of replica system maintain. All the nodes in the replica list
- *    after replication factor does not have partition in stable cluster view.
- *
- *  - Replica List : [p->replica up to N where N < p->p_repl_factor]
- *    List of master and replica nodes in the new cluster view. All the nodes
- *    within replication factor in the nodes hash list is replica list
- *
- *  - DESYNC Partition:
- *    Partition on a node in the replica list is DESYNC state if it has no data.
- *    replica[0] is master
- *
- *  - SYNC PARTITION:
- *    Partition on a node in the replica list is put in SYNC state if it has
- *    some version of data for that partition with it.
- *
- *  - ZOMBIE:
- *    Partition on nodes outside the replica list is put in ZOMBIE state if it
- *    has some version of data for that partition with it.	 \
- *
- *  - WAIT:
- *    Partition is put into wait state while moving from SYNC or ZOMBIE to
- *    ABSENT. This state is stage is reached when there are pending writes
- *    are there. And is needed to make sure any new writes, while last few
- *    writes are getting flushed is not allowed.
- *
- *    NB: this today is done after indicating to master that migration is done
- *        but ideally should be done after that (see order of DoneMigrate:
- *        and CompletedMigrate: in migrate_xmit_fn in migrate.c)
- *
- *  - ABSENT:
- *    Partition on the nodes outside the replica list put in the ABSENT state
- *    if it has no data.
- *
- *  ALGORITHM
- *  =========
- *
- *  - Master or acting master are the only nodes where all the data is merged
- *    and duplicates are resolved
- *
- *  - Master if DESYNC gets data from the First Primary Version node AKA origin
- *    (This is acting master while master id desync and does the merge).
- *
- *  - Writes which come in while migration was going on and master is DESYNC
- *    is proxied to the origin which does merge/apply write and replicate to
- *    the replica list.
- *
- *  - Merge is duplicate resolution. Bring in all the duplicates to the master
- *    /acting master to apply writes. And replicate it to all the nodes in the
- *    replica set.
- *
- *  - On receiving replicate request, DESYNC nodes in replica list write
- *    journals (including master). SYNC node in replica list reject write while
- *    merge is going on.
- *
- *  - Master becomes SYNC once it has received data from acting master. Before
- *    turning into SYNC after migration is finished master applies the write
- *    journal.
- *
- *  - SYNC master requests data from all the duplicates. Once it has got data
- *    from all the nodes. It ships back the final value to all the nodes in
- *    the replica list.
- *
- * NB: Please note that write journalling and write rejection is
- *     primarily relevant only in the world where replication was delta
- *     replication. But current (5/13) we do not do delta replication but we
- *     ship the entire record. So write_journal and write rejection in current
- *     world is not relevant. Revisit and fix comment
- */
 
 #include <errno.h>
 #include <pthread.h>
@@ -1567,22 +1444,6 @@ partition_migrate_record_fill(partition_migrate_record *pmr, cf_node dest,
 
 
 void
-apply_write_journal(as_namespace *ns, size_t pid)
-{
-	as_partition_reservation prsv;
-
-	as_partition_reserve_lockfree(ns, pid, &prsv);
-
-	if (0 != as_journal_apply(&prsv)) {
-		cf_warning(AS_PARTITION, "{%s:%zu} couldn't apply write journal",
-				ns->name, pid);
-	}
-
-	as_partition_release_lockfree(&prsv);
-}
-
-
-void
 as_partition_emigrate_done(as_migrate_state s, as_namespace *ns,
 		as_partition_id pid, uint64_t orig_cluster_key, uint32_t tx_flags)
 {
@@ -1706,10 +1567,6 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 		rv = AS_MIGRATE_ALREADY_DONE;
 		break;
 	case AS_PARTITION_STATE_DESYNC:
-		if (0 != as_journal_start(ns, pid)) {
-			cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - could not start journal, continuing",
-					ns->name, pid);
-		}
 		rv = AS_MIGRATE_OK;
 		break;
 	case AS_PARTITION_STATE_SYNC:
@@ -1793,11 +1650,6 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 
 			// The only place we switch to DESYNC outside of re-balance.
 			p->state = AS_PARTITION_STATE_DESYNC;
-
-			if (0 != as_journal_start(ns, pid)) {
-				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - could not start journal, continuing",
-						ns->name, pid);
-			}
 		}
 		else {
 			if (p->origin != (cf_node)0) {
@@ -1909,8 +1761,6 @@ as_partition_immigrate_done(as_namespace *ns, as_partition_id pid,
 		}
 
 		p->origin = 0;
-
-		apply_write_journal(ns, pid);
 
 		set_partition_sync_lockfree(p, pid, ns, true);
 
@@ -2647,14 +2497,12 @@ as_partition_balance()
 				}
 			}
 
-			// Detect if there is a write journal and apply it here.
 			// TODO - yes, this happens... try to understand it better.
 			if (p->state == AS_PARTITION_STATE_DESYNC &&
 					! is_partition_null(&p->version_info)) {
-				cf_info(AS_PARTITION, "{%s:%d} applying write journal from previous rebalance",
+				cf_info(AS_PARTITION, "{%s:%d} partition version is not null, setting state from DESYNC to SYNC",
 						ns->name, j);
 
-				apply_write_journal(ns, j);
 				p->state = AS_PARTITION_STATE_SYNC;
 			}
 
@@ -3223,6 +3071,7 @@ as_partition_balance_is_multi_node_cluster()
 // A partition is queryable only when the node is master or origin
 // BEWARE. No partition lock is being taken here.
 // This is done to avoid a deadlock between sindex and apply journal
+// TODO - journal has been removed - can we or should we now change this?
 bool
 as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p)
 {

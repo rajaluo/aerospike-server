@@ -133,12 +133,6 @@ as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, 
 
 	if (rv == 0) {
 		cf_detail(AS_RECORD, "record get_create: digest %"PRIx64" found record %p", *(uint64_t *)keyd , r_ref->r);
-
-		if (r_ref->r->storage_key.ssd.rblock_id == 0) {
-			cf_debug_digest(AS_RECORD, keyd, "fail as_record_get_create(): rblock_id 0 ");
-			as_record_done(r_ref, ns);
-			rv = -1;
-		}
 	}
 	else if (rv == 1) {
 		cf_detail(AS_RECORD, "record get_create: digest %"PRIx64" new record %p", *(uint64_t *)keyd, r_ref->r);
@@ -240,12 +234,6 @@ as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_name
 
 	if (rv == 0) {
 		cf_detail(AS_RECORD, "record get: digest %"PRIx64" found record %p", *(uint64_t *)keyd, r_ref->r);
-
-		if (r_ref->r->storage_key.ssd.rblock_id == 0) {
-			cf_debug_digest(AS_RECORD, keyd, "fail as_record_get(): rblock_id 0 ");
-			as_record_done(r_ref, ns);
-			rv = -1; // masquerade as a not-found, which is handled everywhere
-		}
 	}
 	else if (rv == -1) {
 		cf_detail(AS_RECORD, "record get: digest %"PRIx64" not found", *(uint64_t *)keyd);

@@ -34,8 +34,6 @@
 
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
-#include "citrusleaf/cf_queue.h"
-#include "citrusleaf/cf_shash.h"
 
 #include "fault.h"
 #include "msg.h"
@@ -67,18 +65,6 @@ typedef struct ldt_prole_info_s {
 	bool		ldt_prole_version_set;
 } ldt_prole_info;
 
-typedef struct journal_hash_key_s {
-	as_namespace_id ns_id; // TODO - don't need 4 bytes!
-	as_partition_id pid;
-} __attribute__ ((__packed__)) journal_hash_key;
-
-typedef struct journal_queue_element_s {
-	cf_digest digest;
-	bool is_subrec;
-	bool is_nsup_delete;
-	bool is_xdr_op;
-} journal_queue_element;
-
 
 //==========================================================
 // Forward declarations.
@@ -99,30 +85,12 @@ void ldt_set_prole_subrec_version(uint32_t info, const ldt_prole_info* linfo,
 
 int delete_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		bool is_subrec, bool is_nsup_delete, bool is_xdr_op, cf_node master);
-void journal_delete(as_partition_reservation* rsv, cf_digest* keyd,
-		bool is_subrec, bool is_nsup_delete, bool is_xdr_op);
-void apply_journaled_delete(as_namespace* ns, as_index_tree* tree,
-		cf_digest* keyd, bool is_nsup_delete, bool is_xdr_op);
 
 int write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		uint8_t* pickled_buf, size_t pickled_sz,
 		const as_rec_props* p_rec_props, as_generation generation,
 		uint32_t void_time, uint64_t last_update_time, cf_node master,
 		uint32_t info, ldt_prole_info* linfo);
-
-static inline uint32_t
-journal_hash_fn(void* value)
-{
-	return (uint32_t)((journal_hash_key*)value)->pid;
-}
-
-
-//==========================================================
-// Globals.
-//
-
-static shash* g_journal_hash = NULL;
-static pthread_mutex_t g_journal_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 //==========================================================
@@ -511,73 +479,6 @@ repl_write_handle_ack(cf_node node, msg* m)
 	rw_request_hash_delete(&hkey);
 	rw_request_release(rw);
 	as_fabric_msg_put(m);
-}
-
-
-int
-as_journal_start(as_namespace* ns, as_partition_id pid)
-{
-	pthread_mutex_lock(&g_journal_lock);
-
-	if (! g_journal_hash) {
-		shash_create(&g_journal_hash, journal_hash_fn, sizeof(journal_hash_key),
-				sizeof(cf_queue*), 1024, 0);
-	}
-
-	journal_hash_key jhk = { ns->id, pid };
-	cf_queue* journal_q;
-
-	if (shash_get_and_delete(g_journal_hash, &jhk, &journal_q) == SHASH_OK) {
-		cf_queue_destroy(journal_q);
-	}
-
-	journal_q = cf_queue_create(sizeof(journal_queue_element), false);
-
-	if (shash_put_unique(g_journal_hash, &jhk, (void*)&journal_q) != SHASH_OK) {
-		cf_queue_destroy(journal_q);
-		pthread_mutex_unlock(&g_journal_lock);
-		return -1;
-	}
-
-	pthread_mutex_unlock(&g_journal_lock);
-
-	return 0;
-}
-
-
-int
-as_journal_apply(as_partition_reservation* rsv)
-{
-	pthread_mutex_lock(&g_journal_lock);
-
-	if (! g_journal_hash) {
-		pthread_mutex_unlock(&g_journal_lock);
-		return -1;
-	}
-
-	journal_hash_key jhk = { rsv->ns->id, rsv->pid };
-	cf_queue* journal_q;
-
-	if (shash_get_and_delete(g_journal_hash, &jhk, &journal_q) != SHASH_OK) {
-		cf_warning(AS_RW, "{%s:%d} journal apply on non-existent journal",
-				rsv->ns->name, (int)rsv->pid);
-		pthread_mutex_unlock(&g_journal_lock);
-		return -1;
-	}
-
-	pthread_mutex_unlock(&g_journal_lock);
-
-	journal_queue_element jqe;
-
-	while (cf_queue_pop(journal_q, &jqe, CF_QUEUE_NOWAIT) == CF_QUEUE_OK) {
-		apply_journaled_delete(rsv->ns,
-				jqe.is_subrec ? rsv->sub_tree : rsv->tree, &jqe.digest,
-				jqe.is_nsup_delete, jqe.is_xdr_op);
-	}
-
-	cf_queue_destroy(journal_q);
-
-	return 0;
 }
 
 
@@ -1023,11 +924,6 @@ int
 delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 		bool is_nsup_delete, bool is_xdr_op, cf_node master)
 {
-	if (AS_PARTITION_STATE_SYNC != rsv->state) {
-		journal_delete(rsv, keyd, is_subrec, is_nsup_delete, is_xdr_op);
-		return AS_PROTO_RESULT_OK;
-	}
-
 	// Shortcut pointers & flags.
 	as_namespace* ns = rsv->ns;
 	as_index_tree* tree = is_subrec ? rsv->sub_tree : rsv->tree;
@@ -1060,68 +956,6 @@ delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 	}
 
 	return AS_PROTO_RESULT_OK;
-}
-
-
-void
-journal_delete(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
-		bool is_nsup_delete, bool is_xdr_op)
-{
-	if (! g_journal_hash) {
-		// Is this not unusual ???
-		return;
-	}
-
-	journal_hash_key jhk = { rsv->ns->id, rsv->pid };
-	cf_queue* journal_q;
-
-	pthread_mutex_lock(&g_journal_lock);
-
-	if (shash_get(g_journal_hash, &jhk, &journal_q) != SHASH_OK) {
-		pthread_mutex_unlock(&g_journal_lock);
-		return;
-	}
-
-	journal_queue_element jqe = { *keyd, is_subrec, is_nsup_delete, is_xdr_op };
-
-	cf_queue_push(journal_q, &jqe);
-
-	pthread_mutex_unlock(&g_journal_lock);
-}
-
-
-void
-apply_journaled_delete(as_namespace* ns, as_index_tree* tree, cf_digest* keyd,
-		bool is_nsup_delete, bool is_xdr_op)
-{
-	as_index_ref r_ref;
-	r_ref.skip_lock = false;
-
-	if (as_record_get(tree, keyd, &r_ref, ns) != 0) {
-		return;
-	}
-
-	as_record* r = r_ref.r;
-
-	if (ns->storage_data_in_memory) {
-		as_storage_rd rd;
-		as_storage_record_open(ns, r, &rd, keyd);
-		delete_adjust_sindex(&rd);
-		as_storage_record_close(r, &rd);
-	}
-
-	// Save the set-ID and generation for XDR.
-	uint16_t set_id = as_index_get_set_id(r);
-	uint16_t generation = r->generation;
-
-	as_index_delete(tree, keyd);
-	as_record_done(&r_ref, ns);
-
-	if (xdr_must_ship_delete(ns, is_nsup_delete, is_xdr_op)) {
-		xdr_write(ns, *keyd, generation, 0, true, set_id, NULL);
-		// Note - journaled deletes assume we're the master node when they're
-		// applied. This is not necessarily true!
-	}
 }
 
 
@@ -1271,8 +1105,6 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		// binless pickle that ends up here.
 		is_delete = true;
 		as_index_delete(tree, keyd);
-		// TODO - should we journal a delete here? The regular replica delete
-		// code path does so.
 	}
 
 	as_storage_record_write(r, &rd);

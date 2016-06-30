@@ -129,6 +129,18 @@ void as_index_clear_record_info(as_index *index) {
 	*p_clear	= 0;
 }
 
+// Generation 0 is never written, and generation plays no role in record
+// destruction, so it works to flag both "half created" and deleted records.
+static inline
+void as_index_invalidate_record(as_index *index) {
+	index->generation = 0;
+}
+
+static inline
+bool as_index_is_valid_record(as_index *index) {
+	return index->generation != 0;
+}
+
 
 //------------------------------------------------
 // Flex bits - flags.
