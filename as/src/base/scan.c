@@ -681,8 +681,19 @@ basic_scan_job_finish(as_job* _job)
 {
 	conn_scan_job_finish((conn_scan_job*)_job);
 
-	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&_job->ns->n_scan_basic_success : &_job->ns->n_scan_basic_failure);
+	switch (_job->abandoned) {
+	case 0:
+		cf_atomic_int_incr(&_job->ns->n_scan_basic_complete);
+		break;
+	case AS_JOB_FAIL_USER_ABORT:
+		cf_atomic_int_incr(&_job->ns->n_scan_basic_abort);
+		break;
+	case AS_JOB_FAIL_UNKNOWN:
+	case AS_JOB_FAIL_CLUSTER_KEY:
+	default:
+		cf_atomic_int_incr(&_job->ns->n_scan_basic_error);
+		break;
+	}
 
 	cf_info(AS_SCAN, "finished basic scan job %lu (%d)", _job->trid,
 			_job->abandoned);
@@ -1001,8 +1012,19 @@ aggr_scan_job_finish(as_job* _job)
 	cf_free(job->msgp);
 	job->msgp = NULL;
 
-	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&_job->ns->n_scan_aggr_success : &_job->ns->n_scan_aggr_failure);
+	switch (_job->abandoned) {
+	case 0:
+		cf_atomic_int_incr(&_job->ns->n_scan_aggr_complete);
+		break;
+	case AS_JOB_FAIL_USER_ABORT:
+		cf_atomic_int_incr(&_job->ns->n_scan_aggr_abort);
+		break;
+	case AS_JOB_FAIL_UNKNOWN:
+	case AS_JOB_FAIL_CLUSTER_KEY:
+	default:
+		cf_atomic_int_incr(&_job->ns->n_scan_aggr_error);
+		break;
+	}
 
 	cf_info(AS_SCAN, "finished aggregation scan job %lu (%d)", _job->trid,
 			_job->abandoned);
@@ -1278,9 +1300,19 @@ udf_bg_scan_job_finish(as_job* _job)
 	cf_free(job->msgp);
 	job->msgp = NULL;
 
-	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&_job->ns->n_scan_udf_bg_success :
-			&_job->ns->n_scan_udf_bg_failure);
+	switch (_job->abandoned) {
+	case 0:
+		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_complete);
+		break;
+	case AS_JOB_FAIL_USER_ABORT:
+		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_abort);
+		break;
+	case AS_JOB_FAIL_UNKNOWN:
+	case AS_JOB_FAIL_CLUSTER_KEY:
+	default:
+		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_error);
+		break;
+	}
 
 	cf_info(AS_SCAN, "finished udf-bg scan job %lu (%d)", _job->trid,
 			_job->abandoned);

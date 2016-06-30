@@ -1244,14 +1244,17 @@ struct as_namespace_s {
 
 	// Scan stats.
 
-	cf_atomic64		n_scan_basic_success;
-	cf_atomic64		n_scan_basic_failure;
+	cf_atomic64		n_scan_basic_complete;
+	cf_atomic64		n_scan_basic_error;
+	cf_atomic64		n_scan_basic_abort;
 
-	cf_atomic64		n_scan_aggr_success;
-	cf_atomic64		n_scan_aggr_failure;
+	cf_atomic64		n_scan_aggr_complete;
+	cf_atomic64		n_scan_aggr_error;
+	cf_atomic64		n_scan_aggr_abort;
 
-	cf_atomic64		n_scan_udf_bg_success;
-	cf_atomic64		n_scan_udf_bg_failure;
+	cf_atomic64		n_scan_udf_bg_complete;
+	cf_atomic64		n_scan_udf_bg_error;
+	cf_atomic64		n_scan_udf_bg_abort;
 
 	// Query stats.
 

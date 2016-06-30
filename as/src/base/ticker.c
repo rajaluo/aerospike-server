@@ -83,12 +83,12 @@ void log_line_batch_index();
 
 void log_line_objects(as_namespace* ns, uint64_t n_objects,
 		uint64_t n_sub_objects);
-void log_line_drive_usage(as_namespace* ns);
+void log_line_migrations(as_namespace* ns);
 void log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 		size_t sindex_mem, size_t data_mem);
+void log_line_drive_usage(as_namespace* ns);
 void log_line_ldt_gc(as_namespace* ns);
 
-void log_line_migrations(as_namespace* ns);
 void log_line_tsvc_fail(as_namespace* ns);
 void log_line_client(as_namespace* ns);
 void log_line_batch_sub(as_namespace* ns);
@@ -345,6 +345,60 @@ log_line_objects(as_namespace* ns, uint64_t n_objects, uint64_t n_sub_objects)
 
 
 void
+log_line_migrations(as_namespace* ns)
+{
+	int64_t initial_rx = (int64_t)ns->migrate_rx_partitions_initial;
+	int64_t initial_tx = (int64_t)ns->migrate_tx_partitions_initial;
+	int64_t remaining_rx = (int64_t)ns->migrate_rx_partitions_remaining;
+	int64_t remaining_tx = (int64_t)ns->migrate_tx_partitions_remaining;
+	int64_t initial = initial_rx + initial_tx;
+	int64_t remaining = remaining_rx + remaining_tx;
+
+	if (initial > 0 && remaining > 0) {
+		float complete_pct = (1 - ((float)remaining / (float)initial)) * 100;
+
+		cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld) active (%ld,%ld) complete-pct %0.2f",
+				ns->name,
+				remaining_tx, remaining_rx,
+				ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active,
+				complete_pct
+				);
+	}
+	else {
+		cf_info(AS_INFO, "{%s} migrations: complete", ns->name);
+	}
+}
+
+
+void
+log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
+		size_t sindex_mem, size_t data_mem)
+{
+	double mem_used_pct = (double)(total_mem * 100) / (double)ns->memory_size;
+
+	if (ns->storage_data_in_memory) {
+		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu sindex-bytes %lu data-bytes %lu used-pct %.2lf",
+				ns->name,
+				total_mem,
+				index_mem,
+				sindex_mem,
+				data_mem,
+				mem_used_pct
+				);
+	}
+	else {
+		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu sindex-bytes %lu used-pct %.2lf",
+				ns->name,
+				total_mem,
+				index_mem,
+				sindex_mem,
+				mem_used_pct
+				);
+	}
+}
+
+
+void
 log_line_drive_usage(as_namespace* ns)
 {
 	if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
@@ -384,34 +438,6 @@ log_line_drive_usage(as_namespace* ns)
 
 
 void
-log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
-		size_t sindex_mem, size_t data_mem)
-{
-	double mem_used_pct = (double)(total_mem * 100) / (double)ns->memory_size;
-
-	if (ns->storage_data_in_memory) {
-		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu sindex-bytes %lu data-bytes %lu used-pct %.2lf",
-				ns->name,
-				total_mem,
-				index_mem,
-				sindex_mem,
-				data_mem,
-				mem_used_pct
-				);
-	}
-	else {
-		cf_info(AS_INFO, "{%s} memory-usage: total-bytes %lu index-bytes %lu sindex-bytes %lu used-pct %.2lf",
-				ns->name,
-				total_mem,
-				index_mem,
-				sindex_mem,
-				mem_used_pct
-				);
-	}
-}
-
-
-void
 log_line_ldt_gc(as_namespace* ns)
 {
 	if (! ns->ldt_enabled) {
@@ -432,32 +458,6 @@ log_line_ldt_gc(as_namespace* ns)
 			gc,
 			no_esr, no_parent, version_mismatch
 			);
-}
-
-
-void
-log_line_migrations(as_namespace* ns)
-{
-	int64_t initial_rx = (int64_t)ns->migrate_rx_partitions_initial;
-	int64_t initial_tx = (int64_t)ns->migrate_tx_partitions_initial;
-	int64_t remaining_rx = (int64_t)ns->migrate_rx_partitions_remaining;
-	int64_t remaining_tx = (int64_t)ns->migrate_tx_partitions_remaining;
-	int64_t initial = initial_rx + initial_tx;
-	int64_t remaining = remaining_rx + remaining_tx;
-
-	if (initial > 0 && remaining > 0) {
-		float complete_pct = (1 - ((float)remaining / (float)initial)) * 100;
-
-		cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld) active (%ld,%ld) complete-pct %0.2f",
-				ns->name,
-				remaining_tx, remaining_rx,
-				ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active,
-				complete_pct
-				);
-	}
-	else {
-		cf_info(AS_INFO, "{%s} migrations: complete", ns->name);
-	}
 }
 
 
@@ -559,24 +559,27 @@ log_line_batch_sub(as_namespace* ns)
 void
 log_line_scan(as_namespace* ns)
 {
-	uint64_t n_basic_success = ns->n_scan_basic_success;
-	uint64_t n_basic_failure = ns->n_scan_basic_failure;
-	uint64_t n_aggr_success = ns->n_scan_aggr_success;
-	uint64_t n_aggr_failure = ns->n_scan_aggr_failure;
-	uint64_t n_udf_bg_success = ns->n_scan_udf_bg_success;
-	uint64_t n_udf_bg_failure = ns->n_scan_udf_bg_failure;
+	uint64_t n_basic_complete = ns->n_scan_basic_complete;
+	uint64_t n_basic_error = ns->n_scan_basic_error;
+	uint64_t n_basic_abort = ns->n_scan_basic_abort;
+	uint64_t n_aggr_complete = ns->n_scan_aggr_complete;
+	uint64_t n_aggr_error = ns->n_scan_aggr_error;
+	uint64_t n_aggr_abort = ns->n_scan_aggr_abort;
+	uint64_t n_udf_bg_complete = ns->n_scan_udf_bg_complete;
+	uint64_t n_udf_bg_error = ns->n_scan_udf_bg_error;
+	uint64_t n_udf_bg_abort = ns->n_scan_udf_bg_abort;
 
-	if ((n_basic_success | n_basic_failure |
-			n_aggr_success | n_aggr_failure |
-			n_udf_bg_success | n_udf_bg_failure) == 0) {
+	if ((n_basic_complete | n_basic_error | n_basic_abort |
+			n_aggr_complete | n_aggr_error | n_aggr_abort |
+			n_udf_bg_complete | n_udf_bg_error | n_udf_bg_abort) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu) aggr (%lu,%lu) udf-bg (%lu,%lu)",
+	cf_info(AS_INFO, "{%s} scan: basic (%lu,%lu,%lu) aggr (%lu,%lu,%lu) udf-bg (%lu,%lu,%lu)",
 			ns->name,
-			n_basic_success, n_basic_failure,
-			n_aggr_success, n_aggr_failure,
-			n_udf_bg_success, n_udf_bg_failure
+			n_basic_complete, n_basic_error, n_basic_abort,
+			n_aggr_complete, n_aggr_error, n_aggr_abort,
+			n_udf_bg_complete, n_udf_bg_error, n_udf_bg_abort
 			);
 }
 

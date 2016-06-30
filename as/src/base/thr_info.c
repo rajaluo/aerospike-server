@@ -5241,14 +5241,17 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Scan stats.
 
-	info_append_uint64(db, "scan_basic_success", ns->n_scan_basic_success);
-	info_append_uint64(db, "scan_basic_failure", ns->n_scan_basic_failure);
+	info_append_uint64(db, "scan_basic_complete", ns->n_scan_basic_complete);
+	info_append_uint64(db, "scan_basic_error", ns->n_scan_basic_error);
+	info_append_uint64(db, "scan_basic_abort", ns->n_scan_basic_abort);
 
-	info_append_uint64(db, "scan_aggr_success", ns->n_scan_aggr_success);
-	info_append_uint64(db, "scan_aggr_failure", ns->n_scan_aggr_failure);
+	info_append_uint64(db, "scan_aggr_complete", ns->n_scan_aggr_complete);
+	info_append_uint64(db, "scan_aggr_error", ns->n_scan_aggr_error);
+	info_append_uint64(db, "scan_aggr_abort", ns->n_scan_aggr_abort);
 
-	info_append_uint64(db, "scan_udf_bg_success", ns->n_scan_udf_bg_success);
-	info_append_uint64(db, "scan_udf_bg_failure", ns->n_scan_udf_bg_failure);
+	info_append_uint64(db, "scan_udf_bg_complete", ns->n_scan_udf_bg_complete);
+	info_append_uint64(db, "scan_udf_bg_error", ns->n_scan_udf_bg_error);
+	info_append_uint64(db, "scan_udf_bg_abort", ns->n_scan_udf_bg_abort);
 
 	// Query stats.
 
