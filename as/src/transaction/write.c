@@ -444,8 +444,7 @@ write_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
-		// TODO - should we have a write_dup_res_hist/write_repl_write_hist entry here?
-//		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, write_hist);
+		// Timeouts aren't included in histograms.
 		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:

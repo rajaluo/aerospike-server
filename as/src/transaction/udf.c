@@ -311,6 +311,7 @@ as_udf_start(as_transaction* tr)
 	BENCHMARK_NEXT_DATA_POINT(tr, udf, master);
 	BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, master);
 
+	// If error or UDF was a read, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
 		send_udf_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey);
@@ -568,7 +569,7 @@ udf_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
-//		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, udf_hist);
+		// Timeouts aren't included in histograms.
 		client_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
@@ -576,7 +577,7 @@ udf_timeout_cb(rw_request* rw)
 	case FROM_IUDF:
 		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata,
 				AS_PROTO_RESULT_FAIL_TIMEOUT);
-		// TODO - histograms?
+		// Timeouts aren't included in histograms.
 		udf_sub_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_BATCH:

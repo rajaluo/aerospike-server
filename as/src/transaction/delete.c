@@ -142,7 +142,7 @@ as_delete_start(as_transaction* tr)
 	}
 	// else - no duplicate resolution phase, apply operation to master.
 
-	// If error or UDF was a read, transaction is finished.
+	// If error, transaction is finished.
 	if ((status = delete_master(tr)) != TRANS_IN_PROGRESS) {
 		rw_request_hash_delete(&hkey);
 		send_delete_response(tr);
@@ -156,8 +156,8 @@ as_delete_start(as_transaction* tr)
 	// If we don't need replica writes, transaction is finished.
 	// TODO - consider a single-node fast path bypassing hash?
 	if (rw->n_dest_nodes == 0) {
-		send_delete_response(tr);
 		rw_request_hash_delete(&hkey);
+		send_delete_response(tr);
 		return TRANS_DONE_SUCCESS;
 	}
 

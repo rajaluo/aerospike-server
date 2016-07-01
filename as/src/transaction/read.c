@@ -225,7 +225,6 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		// TODO - philosophical choice as to what this should include.
 		BENCHMARK_NEXT_DATA_POINT(tr, read, local);
 		if (db && db->used_sz != 0) {
 			as_msg_send_ops_reply(tr->from.proto_fd_h, db);
@@ -255,7 +254,6 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, read_local);
 		as_batch_add_result(tr, set_name, tr->generation, tr->void_time, n_bins,
 				response_bins, ops);
-		// TODO - is it worth it?
 		BENCHMARK_NEXT_DATA_POINT(tr, batch_sub, response);
 		batch_sub_read_update_stats(tr->rsv.ns, tr->result_code);
 		break;
@@ -281,8 +279,7 @@ read_timeout_cb(rw_request* rw)
 	switch (rw->origin) {
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
-		// TODO - should we have a read_dup_res_hist entry here?
-//		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(rw, read_hist);
+		// Timeouts aren't included in histograms.
 		client_read_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_PROXY:
@@ -290,7 +287,7 @@ read_timeout_cb(rw_request* rw)
 	case FROM_BATCH:
 		as_batch_add_error(rw->from.batch_shared, rw->from_data.batch_index,
 				AS_PROTO_RESULT_FAIL_TIMEOUT);
-		// TODO - histograms?
+		// Timeouts aren't included in histograms.
 		batch_sub_read_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
 	case FROM_IUDF:
