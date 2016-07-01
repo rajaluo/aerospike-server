@@ -797,8 +797,9 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 cf_vector*
 bin_names_from_op(as_msg* m, int* result)
 {
+	*result = AS_PROTO_RESULT_OK;
+
 	if (m->n_ops == 0) {
-		*result = AS_PROTO_RESULT_OK;
 		return NULL;
 	}
 
@@ -810,8 +811,8 @@ bin_names_from_op(as_msg* m, int* result)
 	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
 		if (op->name_sz >= AS_ID_BIN_SZ) {
 			cf_warning(AS_SCAN, "basic scan job bin name too long");
-			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
 			cf_vector_destroy(v);
+			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
 			return NULL;
 		}
 
