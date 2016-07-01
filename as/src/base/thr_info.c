@@ -5133,14 +5133,14 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 		uint64_t inuse_disk_bytes = 0;
 		as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
 
-		info_append_uint64(db, "drive_total_bytes", ns->ssd_size);
-		info_append_uint64(db, "drive_used_bytes", inuse_disk_bytes);
+		info_append_uint64(db, "device_total_bytes", ns->ssd_size);
+		info_append_uint64(db, "device_used_bytes", inuse_disk_bytes);
 
 		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > inuse_disk_bytes)) ?
 				((ns->ssd_size - inuse_disk_bytes) * 100L) / ns->ssd_size : 0;
 
-		info_append_uint64(db, "drive_free_pct", free_pct);
-		info_append_int(db, "drive_available_pct", available_pct);
+		info_append_uint64(db, "device_free_pct", free_pct);
+		info_append_int(db, "device_available_pct", available_pct);
 
 		if (! ns->storage_data_in_memory) {
 			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
