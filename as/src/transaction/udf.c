@@ -312,8 +312,8 @@ as_udf_start(as_transaction* tr)
 	BENCHMARK_NEXT_DATA_POINT(tr, udf_sub, master);
 
 	if (status != TRANS_IN_PROGRESS) {
-		rw_request_hash_delete(&hkey);
 		send_udf_response(tr, &rw->response_db);
+		rw_request_hash_delete(&hkey);
 		return status;
 	}
 
