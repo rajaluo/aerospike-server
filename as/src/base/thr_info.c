@@ -291,7 +291,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, ';');
 
 	info_append_uint64(db, "batch_index_complete", g_stats.batch_index_complete);
-	info_append_uint64(db, "batch_index_errors", g_stats.batch_index_errors);
+	info_append_uint64(db, "batch_index_error", g_stats.batch_index_errors);
 	info_append_uint64(db, "batch_index_timeout", g_stats.batch_index_timeout);
 
 	// Everything below is not in ticker...
@@ -303,7 +303,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_append_uint64(db, "batch_initiate", g_stats.batch_initiate);
 	info_append_int(db, "batch_queue", as_batch_direct_queue_size());
-	info_append_uint64(db, "batch_errors", g_stats.batch_errors);
+	info_append_uint64(db, "batch_error", g_stats.batch_errors);
 	info_append_uint64(db, "batch_timeout", g_stats.batch_timeout);
 
 	info_append_int(db, "scans_active", as_scan_get_active_job_count());
@@ -5193,6 +5193,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_read_not_found", ns->n_client_read_not_found);
 
 	info_append_uint64(db, "client_write_success", ns->n_client_write_success);
+	info_append_uint64(db, "xdr_write_success", ns->n_xdr_write_success);
 	info_append_uint64(db, "client_write_error", ns->n_client_write_error);
 	info_append_uint64(db, "client_write_timeout", ns->n_client_write_timeout);
 
@@ -5209,8 +5210,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_lua_write_success", ns->n_client_lua_write_success);
 	info_append_uint64(db, "client_lua_delete_success", ns->n_client_lua_delete_success);
 	info_append_uint64(db, "client_lua_error", ns->n_client_lua_error);
-
-	info_append_uint64(db, "xdr_write_success", ns->n_xdr_write_success);
 
 	info_append_uint64(db, "client_trans_fail_xdr_forbidden", ns->n_client_trans_fail_xdr_forbidden);
 	info_append_uint64(db, "client_trans_fail_key_busy", ns->n_client_trans_fail_key_busy);

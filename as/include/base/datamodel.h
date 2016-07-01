@@ -1194,6 +1194,7 @@ struct as_namespace_s {
 	cf_atomic64		n_client_read_not_found;
 
 	cf_atomic64		n_client_write_success;
+	cf_atomic64		n_xdr_write_success; // subset of n_client_write_success
 	cf_atomic64		n_client_write_error;
 	cf_atomic64		n_client_write_timeout;
 
@@ -1210,9 +1211,6 @@ struct as_namespace_s {
 	cf_atomic64		n_client_lua_write_success;
 	cf_atomic64		n_client_lua_delete_success;
 	cf_atomic64		n_client_lua_error;
-
-	// Special stats that deserve their own counters:
-	cf_atomic64		n_xdr_write_success; // subset of n_client_write_success
 
 	// Special errors that deserve their own counters:
 	cf_atomic64		n_client_trans_fail_xdr_forbidden;
