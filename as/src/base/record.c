@@ -189,9 +189,12 @@ as_record_destroy(as_record *r, as_namespace *ns)
 		as_storage_record_drop_from_mem_stats(&rd);
 
 		as_record_clean_bins(&rd);
+
 		if (! ns->single_bin) {
-			if (rd.n_bins) {
-				cf_free((void*)as_index_get_bin_space(r));
+			as_bin_space *bin_space = as_index_get_bin_space(r);
+
+			if (bin_space) {
+				cf_free((void*)bin_space);
 				as_index_set_bin_space(r, NULL);
 			}
 
