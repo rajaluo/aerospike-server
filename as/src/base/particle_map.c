@@ -335,10 +335,10 @@ typedef struct result_data_s {
 #define order_index_inita_copy(__idx_ptr, __src_ptr) { \
 		uint32_t ele_count = (__src_ptr)->_.ele_count; \
 		(__idx_ptr)->_.ele_size = (__src_ptr)->_.ele_size; \
-		size_t sorted_size = (__idx_ptr)->_.ele_size * ele_count; \
-		(__idx_ptr)->_.ptr = alloca(sorted_size);	\
+		size_t alloc_size = (__idx_ptr)->_.ele_size * ele_count; \
+		(__idx_ptr)->_.ptr = alloca(alloc_size);	\
 		(__idx_ptr)->_.ele_count = ele_count; \
-		memcpy((__idx_ptr)->_.ptr, order_index_get_mem(__src_ptr, 0), sorted_size);	\
+		memcpy((__idx_ptr)->_.ptr, order_index_get_mem(__src_ptr, 0), alloc_size);	\
 }
 
 #define order_heap_inita(__idx_ptr, __ele_count, __op_ptr, __cmp, __is_key) \
@@ -2393,12 +2393,7 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 		order_index ret_idx;
 		uint32_t ret_idx_count = 0;
 
-		ret_idx._.ele_size = rem_idx._.ele_size;
-
-		size_t sorted_size = rem_idx._.ele_size * ele_removed;
-
-		ret_idx._.ptr = alloca(sorted_size);
-		ret_idx._.ele_count = ele_removed;
+		order_index_inita2(&ret_idx, op.ele_count, ele_removed);
 
 		for (int64_t i = 0; i < ele_found; i++) {
 			uint32_t idx = return_array[2 * i];
@@ -2424,12 +2419,7 @@ packed_map_remove_all_key_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_
 		order_index ret_index;
 		uint32_t ret_index_count = 0;
 
-		ret_index._.ele_size = rem_idx._.ele_size;
-
-		size_t sorted_size = rem_idx._.ele_size * ele_removed;
-
-		ret_index._.ptr = alloca(sorted_size);
-		ret_index._.ele_count = ele_removed;
+		order_index_inita2(&ret_index, op.ele_count, ele_removed);
 
 		for (int64_t i = 0; i < ele_found; i++) {
 			uint32_t index = return_array[2 * i];
@@ -2509,17 +2499,19 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 	offset_index_inita_from_op_if_invalid(&op.pmi.offset_idx, &op);
 
 	uint32_t rem_idx_count = 0;
-	uint32_t rank_count = 0;
 	bool return_rank = result_data_is_return_rank(result);
 	order_index rem_idx;
 	order_index *rem_ranks = NULL;
+	order_index *rem_rank_counts = NULL;
 
 	// Over allocate array to deal with possible dup parameters.
 	order_index_inita2(&rem_idx, op.ele_count, 2 * op.ele_count);
 
 	if (return_rank) {
 		rem_ranks = (order_index *)alloca(sizeof(order_index));
-		order_index_inita(rem_ranks, op.ele_count);
+		order_index_inita2(rem_ranks, op.ele_count, items_count);
+		rem_rank_counts = (order_index *)alloca(sizeof(order_index));
+		order_index_inita2(rem_rank_counts, op.ele_count, items_count);
 	}
 
 	order_index find_idx;
@@ -2527,6 +2519,8 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 	if (! order_index_is_valid(&op.pmi.value_idx)) {
 		order_index_inita(&find_idx, op.ele_count);
 	}
+
+	bool has_dups = false;
 
 	for (int64_t i = 0; i < items_count; i++) {
 		cdt_payload value = {
@@ -2579,16 +2573,12 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 			}
 
 			rem_idx_count = rem_idx._.ele_count;
+			has_dups = true;
 		}
 
 		if (return_rank) {
-			if (result->type == RESULT_TYPE_REVRANK) {
-				rank = op.ele_count - rank - count;
-			}
-
-			for (uint32_t j = 0; j < count; j++) {
-				order_index_set(rem_ranks, rank_count++, rank + j);
-			}
+			order_index_set(rem_ranks, (size_t)i, rank);
+			order_index_set(rem_rank_counts, (size_t)i, count);
 		}
 	}
 
@@ -2608,6 +2598,7 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 		}
 
 		rem_idx_count = order_index_sorted_remove_dups(&sorted);
+		has_dups = true;
 	}
 
 	uint32_t removed_count;
@@ -2629,11 +2620,58 @@ packed_map_remove_all_value_items(as_bin *b, rollback_alloc *alloc_buf, const cd
 		break;
 	}
 	case RESULT_TYPE_REVRANK:
-	case RESULT_TYPE_RANK:
-		if (! result_data_set_ordered_list(result, rem_ranks, rank_count)) {
+	case RESULT_TYPE_RANK: {
+		if (has_dups) {
+			for (uint32_t i = 0; i < items_count - 1; i++) {
+				uint32_t rank = order_index_get(rem_ranks, i);
+
+				if (rank == op.ele_count) {
+					continue;
+				}
+
+				for (uint32_t j = i + 1; j < items_count; j++) {
+					if (rank == order_index_get(rem_ranks, j)) {
+						order_index_set(rem_ranks, j, op.ele_count);
+						order_index_set(rem_rank_counts, j, 0);
+					}
+				}
+			}
+		}
+
+		uint32_t rank_count_total = 0;
+
+		for (uint32_t i = 0; i < items_count; i++) {
+			rank_count_total += order_index_get(rem_rank_counts, i);
+		}
+
+		order_index rem_rank_out;
+		uint32_t rem_rank_out_count = 0;
+
+		order_index_inita2(&rem_rank_out, op.ele_count, rank_count_total);
+
+		for (uint32_t i = 0; i < items_count; i++) {
+			uint32_t rank = order_index_get(rem_ranks, i);
+
+			if (rank == op.ele_count) {
+				continue;
+			}
+
+			uint32_t count = order_index_get(rem_rank_counts, i);
+
+			if (result->type == RESULT_TYPE_REVRANK) {
+				rank = op.ele_count - rank - count;
+			}
+
+			for (uint32_t j = 0; j < count; j++) {
+				order_index_set(&rem_rank_out, rem_rank_out_count++, rank + j);
+			}
+		}
+
+		if (! result_data_set_ordered_list(result, &rem_rank_out, rank_count_total)) {
 			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 		break;
+	}
 	case RESULT_TYPE_COUNT:
 		as_bin_set_int(result->result, removed_count);
 		break;
