@@ -86,7 +86,7 @@ void log_line_objects(as_namespace* ns, uint64_t n_objects,
 void log_line_migrations(as_namespace* ns);
 void log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 		size_t sindex_mem, size_t data_mem);
-void log_line_drive_usage(as_namespace* ns);
+void log_line_device_usage(as_namespace* ns);
 void log_line_ldt_gc(as_namespace* ns);
 
 void log_line_tsvc_fail(as_namespace* ns);
@@ -191,7 +191,7 @@ log_ticker_frame()
 		log_line_objects(ns, n_objects, n_sub_objects);
 		log_line_migrations(ns);
 		log_line_memory_usage(ns, total_mem, index_mem, sindex_mem, data_mem);
-		log_line_drive_usage(ns);
+		log_line_device_usage(ns);
 		log_line_ldt_gc(ns);
 
 		log_line_tsvc_fail(ns);
@@ -399,7 +399,7 @@ log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 
 
 void
-log_line_drive_usage(as_namespace* ns)
+log_line_device_usage(as_namespace* ns)
 {
 	if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
 		return;
@@ -410,7 +410,7 @@ log_line_drive_usage(as_namespace* ns)
 	as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
 
 	if (ns->storage_data_in_memory) {
-		cf_info(AS_INFO, "{%s} drive-usage: used-bytes %lu avail-pct %d",
+		cf_info(AS_INFO, "{%s} device-usage: used-bytes %lu avail-pct %d",
 				ns->name,
 				inuse_disk_bytes,
 				available_pct
@@ -427,7 +427,7 @@ log_line_drive_usage(as_namespace* ns)
 				(float)(100 * n_reads_from_cache) /
 				(float)(n_total_reads == 0 ? 1 : n_total_reads);
 
-		cf_info(AS_INFO, "{%s} drive-usage: used-bytes %lu avail-pct %d cache-read-pct %.2f",
+		cf_info(AS_INFO, "{%s} device-usage: used-bytes %lu avail-pct %d cache-read-pct %.2f",
 				ns->name,
 				inuse_disk_bytes,
 				available_pct,
