@@ -2580,10 +2580,10 @@ as_partition_balance()
 				}
 			}
 
-			bool partition_is_lost = false;
+			int partition_is_lost = 0;
 
 			if (n_found == 0) {
-				partition_is_lost = true;
+				partition_is_lost = 1;
 				n_lost++;
 			}
 			else if (n_found == 1) {
@@ -2598,7 +2598,7 @@ as_partition_balance()
 			// create new versions of this partition using the version number
 			// derived from the cluster key.
 			if (partition_is_lost) {
-				partition_is_lost = false;
+				partition_is_lost = 0;
 				n_recreate++;
 
 				int loop_end = cluster_size < p->p_repl_factor ?
@@ -2678,14 +2678,14 @@ as_partition_balance()
 						ns->name, j, self);
 			}
 
-			if (first_sync_node < 0 && ! partition_is_lost) {
+			if (first_sync_node < 0 && partition_is_lost == 0) {
 				cf_warning(AS_PARTITION, "{%s:%d} State Error. Cannot find first sync node for resident partition %"PRIx64,
 						ns->name, j, self);
 			}
 
 			// Create migration requests as needed.
 			switch (partition_is_lost) {
-			case false:
+			case 0:
 
 				// Master
 				//  If not sync switch to desync and wait for migration for
@@ -2874,7 +2874,7 @@ as_partition_balance()
 
 				break;
 
-			case true:
+			case 1:
 			default:
 				cf_crash(AS_PARTITION, "{%s:%d} State Error.", ns->name, j);
 				break;

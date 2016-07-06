@@ -361,13 +361,13 @@ const char *
 as_hb_stats(bool verbose)
 {
 	char msg[MAX_LINE_LEN];
-	int pos = 0;
-	g_line[pos] = '\0';
+
+	g_line[0] = '\0';
 
 	for (int i = 0; i < AS_HB_ERR_MAX_TYPE; i++) {
 		msg[0] = '\0';
 		snprintf(msg, sizeof(msg), "%s %lu ", as_hb_error_msg[i][verbose ? LONG_FORMAT : SHORT_FORMAT], as_hb_error_count[i]);
-		strncat(g_line, msg, sizeof(g_line) - pos);
+		strncat(g_line, msg, sizeof(g_line) - strlen(g_line) - 1);
 	}
 
 	return g_line;

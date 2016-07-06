@@ -1363,7 +1363,9 @@ fabric_worker_fn(void *argv)
 					// read the notification byte out
 					byte note_byte;
 
-					read(note_fd, &note_byte, sizeof(note_byte));
+					if (-1 == read(note_fd, &note_byte, sizeof(note_byte))) {
+						// Suppress GCC warning for unused return value.
+					}
 
 					// Got some kind of notification - check my queue
 					worker_queue_element wqe;
