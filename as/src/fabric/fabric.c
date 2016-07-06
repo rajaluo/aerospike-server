@@ -969,20 +969,11 @@ as_fabric_msg_get(msg_type type)
 void
 as_fabric_msg_put(msg *m)
 {
-	// Debug: validate that there was a reference count held before decrementing
-	cf_atomic_int_t d_cnt = cf_rc_count(m);
-	if (d_cnt <= 0) {
-		cf_debug(AS_FABRIC, "as_fabric_msg_put:  bad scene, ref count already low: m %p cnt %"PRIu64, m, d_cnt);
-		return;
-	}
+	int cnt = cf_rc_release(m);
 
-	// when it's in the queue, it has a reference count of 0
-	// thus, you can pull a message off and directly free it
-//	cf_debug(AS_FABRIC,"fabric_msg_put: check the use count %p %d",m,m->type);
-	cf_atomic_int_t	 cnt = cf_rc_release(m);
 	if (cnt == 0) {
-//		cf_debug(AS_FABRIC,"fabric_msg_put: resetting %p and adding to queue type %d",m,m->type);
 		msg_reset(m);
+
 		if (cf_queue_sz(g_fabric_args->msg_pool_queue[m->type]) > 128) {
 			msg_put(m);
 		}
@@ -990,9 +981,10 @@ as_fabric_msg_put(msg *m)
 			cf_queue_push(g_fabric_args->msg_pool_queue[m->type], &m);
 		}
 	}
-//	else {
-//		cf_debug(AS_FABRIC,"fabric_msg_put: decr %p to %d",m,cnt);
-//	}
+	else if (cnt < 0) {
+		msg_dump(m, "extra put");
+		cf_crash(AS_FABRIC, "extra put for msg type %d", m->type);
+	}
 }
 
 void
