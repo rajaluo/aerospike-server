@@ -3907,7 +3907,10 @@ packed_map_op_get_remove_by_index_range(const packed_map_op *op, as_bin *b, roll
 	}
 
 	if (count == 0) {
-		result_data_set_key_not_found(result, index);
+		if (! result_data_set_key_not_found(result, index)) {
+			return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		}
+
 		return AS_PROTO_RESULT_OK;
 	}
 
@@ -4117,7 +4120,9 @@ packed_map_op_get_remove_by_value_interval(const packed_map_op *op, as_bin *b, r
 		}
 
 		if (count == 0) {
-			result_data_set_value_not_found(result, rank);
+			if (! result_data_set_value_not_found(result, rank)) {
+				return -AS_PROTO_RESULT_FAIL_PARAMETER;
+			}
 		}
 		else {
 			if (! result->is_multi) {
@@ -6862,7 +6867,7 @@ result_data_set_key_not_found(cdt_result_data *rd, int64_t index)
 	switch (rd->type) {
 	case RESULT_TYPE_RANK_RANGE:
 	case RESULT_TYPE_REVRANK_RANGE:
-		return result_data_set_not_found(rd, -1);
+		return false;
 	default:
 		return result_data_set_not_found(rd, index);
 	}
@@ -6876,7 +6881,7 @@ result_data_set_value_not_found(cdt_result_data *rd, int64_t rank)
 	switch (rd->type) {
 	case RESULT_TYPE_REVINDEX_RANGE:
 	case RESULT_TYPE_INDEX_RANGE:
-		return result_data_set_not_found(rd, -1);
+		return false;
 	default:
 		return result_data_set_not_found(rd, rank);
 	}
@@ -7506,7 +7511,11 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state, cdt_modify_
 
 		// User specifically asked for 0 count.
 		if (state->ele_count == 3 && count == 0) {
-			result_data_set_key_not_found(&result_data, index);
+			if (! result_data_set_key_not_found(&result_data, index)) {
+				cf_warning(AS_PARTICLE, "REMOVE_BY_INDEX_RANGE: result_type %d not supported", result_data.type);
+				cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+				return false;
+			}
 			break;
 		}
 
@@ -7577,7 +7586,12 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state, cdt_modify_
 
 		// User specifically asked for 0 count.
 		if (state->ele_count == 3 && count == 0) {
-			result_data_set_value_not_found(&result_data, rank);
+			if (! result_data_set_value_not_found(&result_data, rank)) {
+				cf_warning(AS_PARTICLE, "REMOVE_BY_RANK_RANGE: result_type %d not supported", result_data.type);
+				cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
+				return false;
+			}
+
 			break;
 		}
 
@@ -7838,13 +7852,11 @@ cdt_process_state_packed_map_read_optype(cdt_process_state *state, cdt_read_data
 
 		// User specifically asked for 0 count.
 		if (state->ele_count == 3 && count == 0) {
-			if (result_data_is_return_rank_range(&result_data)) {
-				cf_warning(AS_PARTICLE, "AS_CDT_OP_MAP_GET_BY_INDEX_RANGE: result_type %d not supported", result_data.type);
+			if (! result_data_set_key_not_found(&result_data, index)) {
+				cf_warning(AS_PARTICLE, "GET_BY_INDEX_RANGE: result_type %d not supported", result_data.type);
 				cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
 				return false;
 			}
-
-			result_data_set_key_not_found(&result_data, index);
 			break;
 		}
 
@@ -7873,13 +7885,12 @@ cdt_process_state_packed_map_read_optype(cdt_process_state *state, cdt_read_data
 
 		// User specifically asked for 0 count.
 		if (state->ele_count == 3 && count == 0) {
-			if (result_data_is_return_index_range(&result_data)) {
+			if (! result_data_set_value_not_found(&result_data, rank)) {
 				cf_warning(AS_PARTICLE, "AS_CDT_OP_MAP_GET_BY_RANK_RANGE: result_type %d not supported", result_data.type);
 				cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_PARAMETER;
 				return false;
 			}
 
-			result_data_set_value_not_found(&result_data, rank);
 			break;
 		}
 
