@@ -428,13 +428,14 @@ dup_res_handle_ack(cf_node node, msg* m)
 	}
 
 	bool is_ldt_ship_op = apply_winner(rw);
+	// Note - apply_winner() puts all rw->dup_msg[]s including m, so don't call
+	// as_fabric_msg_put(m) afterwards.
 
 	rw->dup_res_complete = true;
 
 	if (is_ldt_ship_op) {
 		pthread_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
-		as_fabric_msg_put(m);
 		return;
 	}
 
@@ -444,7 +445,6 @@ dup_res_handle_ack(cf_node node, msg* m)
 	if (! rw->from.any) {
 		pthread_mutex_unlock(&rw->lock);
 		rw_request_release(rw);
-		as_fabric_msg_put(m);
 		return;
 	}
 
@@ -457,7 +457,6 @@ dup_res_handle_ack(cf_node node, msg* m)
 	}
 
 	rw_request_release(rw);
-	as_fabric_msg_put(m);
 }
 
 
