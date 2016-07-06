@@ -22,6 +22,7 @@ build:
   - name: community
     environment:
       EEREPO:
+      AS_CFLAGS: -Werror
     script:
       - make
       - make $PKG
@@ -34,6 +35,7 @@ build:
   - name: enterprise
     environment:
       EEREPO: /work/source/$EEREPO
+      AS_CFLAGS: -Werror
     script:
       - make +ee
       - make $PKG+ee
@@ -43,6 +45,7 @@ build:
   - name: enterprise+asm
     environment:
       EEREPO: /work/source/$EEREPO
+      AS_CFLAGS: -Werror
     script:
       - make asm+ee
       - make $PKG+ee USE_ASM=1
