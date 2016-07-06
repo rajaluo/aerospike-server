@@ -1,7 +1,7 @@
 /*
  * transaction.h
  *
- * Copyright (C) 2008-2015 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -40,76 +40,49 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/proto.h"
+#include "base/stats.h"
 #include "storage/storage.h"
 
 
 //==========================================================
-// Microbenchmark macros.
+// Histogram macros.
 //
 
-#define MICROBENCHMARK_SET_TO_START() \
+#define G_HIST_INSERT_DATA_POINT(name, start_time) \
 { \
-	if (g_config.microbenchmarks) { \
-		tr.microbenchmark_time = tr.start_time; \
+	if (g_config.name##_enabled) { \
+		histogram_insert_data_point(g_stats.name, start_time); \
 	} \
 }
 
-#define MICROBENCHMARK_SET_TO_START_P() \
+#define G_HIST_ACTIVATE_INSERT_DATA_POINT(name, start_time) \
 { \
-	if (g_config.microbenchmarks) { \
-		tr->microbenchmark_time = tr->start_time; \
-	} \
+	g_stats.name##_active = true; \
+	histogram_insert_data_point(g_stats.name, start_time); \
 }
 
-#define MICROBENCHMARK_HIST_INSERT(__hist_name) \
+#define HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(trw, name) \
 { \
-	if (g_config.microbenchmarks && tr.microbenchmark_time != 0) { \
-		histogram_insert_data_point(g_config.__hist_name, tr.microbenchmark_time); \
-	} \
+	trw->rsv.ns->name##_active = true; \
+	cf_hist_track_insert_data_point(trw->rsv.ns->name, trw->start_time); \
 }
 
-#define MICROBENCHMARK_HIST_INSERT_P(__hist_name) \
+#define BENCHMARK_START(tr, name, orig) \
 { \
-	if (g_config.microbenchmarks && tr->microbenchmark_time != 0) { \
-		histogram_insert_data_point(g_config.__hist_name, tr->microbenchmark_time); \
-	} \
-}
-
-#define MICROBENCHMARK_RESET() \
-{ \
-	if (g_config.microbenchmarks) { \
-		tr.microbenchmark_time = cf_getns(); \
-	} \
-}
-
-#define MICROBENCHMARK_RESET_P() \
-{ \
-	if (g_config.microbenchmarks) { \
-		tr->microbenchmark_time = cf_getns(); \
-	} \
-}
-
-#define MICROBENCHMARK_HIST_INSERT_AND_RESET(__hist_name) \
-{ \
-	if (g_config.microbenchmarks) { \
-		if (tr.microbenchmark_time != 0) { \
-			tr.microbenchmark_time = histogram_insert_data_point(g_config.__hist_name, tr.microbenchmark_time); \
+	if (tr->rsv.ns->name##_benchmarks_enabled && tr->origin == orig) { \
+		if (tr->benchmark_time == 0) { \
+			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_start_hist, tr->start_time); \
 		} \
 		else { \
-			tr.microbenchmark_time = cf_getns(); \
+			tr->benchmark_time = histogram_insert_data_point(tr->rsv.ns->name##_restart_hist, tr->benchmark_time); \
 		} \
 	} \
 }
 
-#define MICROBENCHMARK_HIST_INSERT_AND_RESET_P(__hist_name) \
+#define BENCHMARK_NEXT_DATA_POINT(trw, name, tok) \
 { \
-	if (g_config.microbenchmarks) { \
-		if (tr->microbenchmark_time != 0) { \
-			tr->microbenchmark_time = histogram_insert_data_point(g_config.__hist_name, tr->microbenchmark_time); \
-		} \
-		else { \
-			tr->microbenchmark_time = cf_getns(); \
-		} \
+	if (trw->rsv.ns->name##_benchmarks_enabled && trw->benchmark_time != 0) { \
+		trw->benchmark_time = histogram_insert_data_point(trw->rsv.ns->name##_##tok##_hist, trw->benchmark_time); \
 	} \
 }
 
@@ -145,6 +118,13 @@ void as_end_of_transaction_force_close(as_file_handle *proto_fd_h);
 // Transaction.
 //
 
+typedef enum {
+	TRANS_DONE_ERROR	= -1, // tsvc frees msgp & reservation, response was sent to origin
+	TRANS_DONE_SUCCESS	=  0, // tsvc frees msgp & reservation, response was sent to origin
+	TRANS_IN_PROGRESS	=  1, // tsvc leaves msgp & reservation alone, rw_request now owns them
+	TRANS_WAITING		=  2  // tsvc leaves msgp alone but frees reservation
+} transaction_status;
+
 // How to interpret the 'from' union.
 //
 // NOT a generic transaction type flag, e.g. batch sub-transactions that proxy
@@ -179,8 +159,7 @@ typedef struct as_transaction_s {
 	uint8_t		origin;
 	uint8_t		from_flags;
 
-	bool		microbenchmark_is_resolve; // will soon be gone
-	// Spare byte.
+	// 2 spare bytes.
 
 	union {
 		void*						any;
@@ -199,7 +178,7 @@ typedef struct as_transaction_s {
 	cf_digest	keyd; // only batch sub-transactions require this on queue
 
 	uint64_t	start_time;
-	uint64_t	microbenchmark_time;
+	uint64_t	benchmark_time;
 
 	//<><><><><><><><><><><> 64 bytes <><><><><><><><><><><>
 
@@ -224,6 +203,7 @@ typedef struct as_transaction_s {
 #define FROM_FLAG_NSUP_DELETE	0x0001
 #define FROM_FLAG_BATCH_SUB		0x0002
 #define FROM_FLAG_SHIPPED_OP	0x0004
+#define FROM_FLAG_RESTART		0x0008
 
 // 'flags' bits - set in transaction body after queuing:
 #define AS_TRANSACTION_FLAG_SINDEX_TOUCHED	0x0001
@@ -234,9 +214,20 @@ void as_transaction_init_body(as_transaction *tr);
 
 void as_transaction_copy_head(as_transaction *to, const as_transaction *from);
 
+struct rw_request_s;
+
+void as_transaction_init_from_rw(as_transaction *tr, struct rw_request_s *rw);
+void as_transaction_init_head_from_rw(as_transaction *tr, struct rw_request_s *rw);
+
 bool as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type);
 bool as_transaction_demarshal_prepare(as_transaction *tr);
 void as_transaction_proxyee_prepare(as_transaction *tr);
+
+static inline bool
+as_transaction_is_restart(const as_transaction *tr)
+{
+	return (tr->from_flags & FROM_FLAG_RESTART) != 0;
+}
 
 static inline bool
 as_transaction_is_batch_sub(const as_transaction *tr)
@@ -321,7 +312,33 @@ as_transaction_trid(const as_transaction *tr)
 	return cf_swap_from_be64(*(uint64_t*)f->data);
 }
 
+static inline bool
+as_transaction_is_delete(as_transaction *tr)
+{
+	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0;
+}
+
+// TODO - where should this go?
+static inline bool
+as_msg_is_xdr(as_msg *m)
+{
+	return (m->info1 & AS_MSG_INFO1_XDR) != 0;
+}
+
+static inline bool
+as_transaction_is_xdr(as_transaction *tr)
+{
+	return (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0;
+}
+
+// TODO - just use origin and deprecate FROM_FLAG_NSUP_DELETE?
+static inline bool
+as_transaction_is_nsup_delete(as_transaction *tr)
+{
+	return (tr->from_flags & FROM_FLAG_NSUP_DELETE) != 0;
+}
+
 int as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd);
 
 void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
-void as_transaction_error(as_transaction* tr, uint32_t error_code);
+void as_transaction_error(as_transaction* tr, as_namespace *ns, uint32_t error_code);

@@ -64,6 +64,7 @@
 #include "base/cfg.h"
 #include "base/index.h"
 #include "base/ldt.h"
+#include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/secondary_index.h"
 
@@ -630,7 +631,6 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 	as_partition_id pid = as_partition_getid(block->keyd);
 
 	as_partition_reserve_migrate(ns, pid, &rsv, 0);
-	cf_atomic_int_incr(&g_config.ssdr_tree_count);
 
 	int rv;
 	as_index_ref r_ref;
@@ -676,7 +676,6 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 	}
 
 	as_partition_release(&rsv);
-	cf_atomic_int_decr(&g_config.ssdr_tree_count);
 
 	return rv;
 }
@@ -728,7 +727,6 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 	int record_count = 0;
 	int num_old_records = 0;
 	int num_deleted_records = 0;
-	int record_err_count = 0;
 
 	ssd_wblock_state* p_wblock_state = &ssd->alloc_table->wblock_state[wblock_id];
 
@@ -739,7 +737,7 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 	int fd = ssd_fd_get(ssd);
 	uint64_t file_offset = WBLOCK_ID_TO_BYTES(ssd, wblock_id);
 
-	uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (lseek(fd, (off_t)file_offset, SEEK_SET) != (off_t)file_offset) {
 		cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
@@ -810,10 +808,6 @@ ssd_defrag_wblock(drv_ssd *ssd, uint32_t wblock_id, uint8_t *read_buf)
 		else if (rv == -2) {
 			num_deleted_records++;
 		}
-		else if (rv == -3) {
-			cf_atomic_int_incr(&g_config.err_storage_defrag_corrupt_record);
-			record_err_count++;
-		}
 
 		wblock_offset = next_wblock_offset;
 	}
@@ -825,17 +819,9 @@ Finished:
 	// may have found deleted records in the wblock whose used-size contribution
 	// has not yet been subtracted.
 
-	if (record_err_count > 0) {
-		cf_warning(AS_DRV_SSD, "device %s: wblock-id %u defragged, final in-use-sz %d records (%d:%d:%d:%d)",
-				ssd->name, wblock_id, cf_atomic32_get(p_wblock_state->inuse_sz),
-				record_count, num_old_records, num_deleted_records,
-				record_err_count);
-	}
-	else {
-		cf_detail(AS_DRV_SSD, "device %s: wblock-id %u defragged, final in-use-sz %d records (%d:%d:%d)",
-				ssd->name, wblock_id, cf_atomic32_get(p_wblock_state->inuse_sz),
-				record_count, num_old_records, num_deleted_records);
-	}
+	cf_detail(AS_DRV_SSD, "device %s: wblock-id %u defragged, final in-use-sz %d records (%d:%d:%d)",
+			ssd->name, wblock_id, cf_atomic32_get(p_wblock_state->inuse_sz),
+			record_count, num_old_records, num_deleted_records);
 
 	// Sanity checks.
 	if (p_wblock_state->swb) {
@@ -1191,7 +1177,7 @@ as_storage_record_read_ssd(as_storage_rd *rd)
 
 		int fd = ssd_fd_get(ssd);
 
-		uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+		uint64_t start_ns = rd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 		if (lseek(fd, (off_t)read_offset, SEEK_SET) != (off_t)read_offset) {
 			cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
@@ -1316,7 +1302,7 @@ ssd_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	int fd = ssd_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id);
 
-	uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (lseek(fd, write_offset, SEEK_SET) != write_offset) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: offset %ld: errno %d (%s)",
@@ -1344,7 +1330,7 @@ ssd_shadow_flush_swb(drv_ssd *ssd, ssd_write_buf *swb)
 	int fd = ssd_shadow_fd_get(ssd);
 	off_t write_offset = (off_t)WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id);
 
-	uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	if (lseek(fd, write_offset, SEEK_SET) != write_offset) {
 		cf_crash(AS_DRV_SSD, "%s: DEVICE FAILED seek: offset %ld: errno %d (%s)",
@@ -1996,7 +1982,6 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 		as_partition_reservation rsv;
 
 		as_partition_reserve_migrate(ns, pid, &rsv, 0);
-		cf_atomic_int_incr(&g_config.ssdr_tree_count);
 
 		as_index_ref r_ref;
 		r_ref.skip_lock = false;
@@ -2025,7 +2010,6 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 		// else it was deleted (?) so call it a zombie...
 
 		as_partition_release(&rsv);
-		cf_atomic_int_decr(&g_config.ssdr_tree_count);
 
 		if (living) {
 			living_populations[pid]++;
@@ -2220,7 +2204,7 @@ ssd_fsync(drv_ssd *ssd)
 {
 	int fd = ssd_fd_get(ssd);
 
-	uint64_t start_ns = g_config.storage_benchmarks ? cf_getns() : 0;
+	uint64_t start_ns = ssd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 	fsync(fd);
 
@@ -3914,33 +3898,33 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 
 		char histname[HISTOGRAM_NAME_SIZE];
 
-		snprintf(histname, sizeof(histname), "SSD_READ_%d %s", i, ssd->name);
+		snprintf(histname, sizeof(histname), "{%s}-%s-read", ns->name, ssd->name);
 
 		if (! (ssd->hist_read = histogram_create(histname, HIST_MILLISECONDS))) {
 			cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
 		}
 
-		snprintf(histname, sizeof(histname), "SSD_LARGE_BLOCK_READ_%d %s", i, ssd->name);
+		snprintf(histname, sizeof(histname), "{%s}-%s-large-block-read", ns->name, ssd->name);
 
 		if (! (ssd->hist_large_block_read = histogram_create(histname, HIST_MILLISECONDS))) {
 			cf_crash(AS_DRV_SSD,"cannot create histogram %s", histname);
 		}
 
-		snprintf(histname, sizeof(histname), "SSD_WRITE_%d %s", i, ssd->name);
+		snprintf(histname, sizeof(histname), "{%s}-%s-write", ns->name, ssd->name);
 
 		if (! (ssd->hist_write = histogram_create(histname, HIST_MILLISECONDS))) {
 			cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
 		}
 
 		if (ssd->shadow_name) {
-			snprintf(histname, sizeof(histname), "SSD_SHADOW_WRITE_%d %s", i, ssd->name);
+			snprintf(histname, sizeof(histname), "{%s}-%s-shadow-write", ns->name, ssd->name);
 
 			if (! (ssd->hist_shadow_write = histogram_create(histname, HIST_MILLISECONDS))) {
 				cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
 			}
 		}
 
-		snprintf(histname, sizeof(histname), "SSD_FSYNC_%d %s", i, ssd->name);
+		snprintf(histname, sizeof(histname), "{%s}-%s-fsync", ns->name, ssd->name);
 
 		if (! (ssd->hist_fsync = histogram_create(histname, HIST_MILLISECONDS))) {
 			cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
@@ -4171,7 +4155,6 @@ as_storage_overloaded_ssd(as_namespace *ns)
 		int qsz = cf_queue_sz(ssd->swb_write_q);
 
 		if (qsz > max_write_q) {
-			cf_atomic_int_incr(&g_config.err_storage_queue_full);
 			cf_warning(AS_DRV_SSD, "{%s} write fail: queue too deep: q %d, max %d",
 					ns->name, qsz, max_write_q);
 			return true;
@@ -4181,7 +4164,6 @@ as_storage_overloaded_ssd(as_namespace *ns)
 			qsz = cf_queue_sz(ssd->swb_shadow_q);
 
 			if (qsz > max_write_q) {
-				cf_atomic_int_incr(&g_config.err_storage_queue_full);
 				cf_warning(AS_DRV_SSD, "{%s} write fail: shadow queue too deep: q %d, max %d",
 						ns->name, qsz, max_write_q);
 				return true;

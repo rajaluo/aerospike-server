@@ -30,7 +30,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <netinet/in.h>
-#include <sys/param.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -46,6 +45,7 @@
 #include "base/ldt.h"
 #include "base/rec_props.h"
 #include "base/secondary_index.h"
+#include "base/stats.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
 
@@ -133,12 +133,6 @@ as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, 
 
 	if (rv == 0) {
 		cf_detail(AS_RECORD, "record get_create: digest %"PRIx64" found record %p", *(uint64_t *)keyd , r_ref->r);
-
-		if (r_ref->r->storage_key.ssd.rblock_id == 0) {
-			cf_debug_digest(AS_RECORD, keyd, "fail as_record_get_create(): rblock_id 0 ");
-			as_record_done(r_ref, ns);
-			rv = -1;
-		}
 	}
 	else if (rv == 1) {
 		cf_detail(AS_RECORD, "record get_create: digest %"PRIx64" new record %p", *(uint64_t *)keyd, r_ref->r);
@@ -195,9 +189,12 @@ as_record_destroy(as_record *r, as_namespace *ns)
 		as_storage_record_drop_from_mem_stats(&rd);
 
 		as_record_clean_bins(&rd);
+
 		if (! ns->single_bin) {
-			if (rd.n_bins) {
-				cf_free((void*)as_index_get_bin_space(r));
+			as_bin_space *bin_space = as_index_get_bin_space(r);
+
+			if (bin_space) {
+				cf_free((void*)bin_space);
 				as_index_set_bin_space(r, NULL);
 			}
 
@@ -240,12 +237,6 @@ as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_name
 
 	if (rv == 0) {
 		cf_detail(AS_RECORD, "record get: digest %"PRIx64" found record %p", *(uint64_t *)keyd, r_ref->r);
-
-		if (r_ref->r->storage_key.ssd.rblock_id == 0) {
-			cf_debug_digest(AS_RECORD, keyd, "fail as_record_get(): rblock_id 0 ");
-			as_record_done(r_ref, ns);
-			rv = -1; // masquerade as a not-found, which is handled everywhere
-		}
 	}
 	else if (rv == -1) {
 		cf_detail(AS_RECORD, "record get: digest %"PRIx64" not found", *(uint64_t *)keyd);
@@ -289,7 +280,6 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 	int rv = 0;
 	if (!r_ref->skip_lock) {
 		rv = pthread_mutex_unlock(r_ref->olock);
-		cf_atomic_int_decr(&g_config.global_record_lock_count);
 	}
 	if (0 != rv)
 		cf_crash(AS_RECORD, "couldn't release lock: %s", cf_strerror(rv));
@@ -299,9 +289,8 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 		as_record_destroy(r_ref->r, ns);
 		cf_arenax_free(ns->arena, r_ref->r_h);
 	}
-	cf_atomic_int_decr(&g_config.global_record_ref_count);
 
-	return;
+	cf_atomic64_decr(&g_stats.global_record_ref_count);
 }
 
 // Called only for data-in-memory multi-bin, with no key currently stored.

@@ -49,10 +49,11 @@
 #include "base/datamodel.h"
 #include "base/ldt.h"
 #include "base/ldt_record.h"
-#include "base/thr_rw_internal.h"
 #include "base/transaction.h"
 #include "base/udf_record.h"
 #include "fabric/fabric.h"
+#include "transaction/udf.h"
+
 
 /* GLOBALS */
 as_aerospike g_ldt_aerospike; // Only instantiation is enough
@@ -322,8 +323,7 @@ slot_init(ldt_slot *lslotp, ldt_record *lrecord)
 	c_tr->msgp                 = h_tr->msgp;
 
 	// We do not track microbenchmark or time for chunk today
-	c_tr->microbenchmark_time  = 0;
-	c_tr->microbenchmark_is_resolve = false;
+	c_tr->benchmark_time  = 0;
 	c_tr->start_time           = h_tr->start_time;
 	c_tr->end_time             = h_tr->end_time;
 
@@ -517,7 +517,6 @@ crec_create(ldt_record *lrecord)
  * lrecord init and cleanup funtions
  */
 // **************************************************************************************************
-extern as_aerospike g_as_aerospike;
 void
 ldt_record_init(ldt_record *lrecord)
 {

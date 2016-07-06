@@ -52,7 +52,9 @@
 #include "util.h"
 
 #include "base/cfg.h"
+#include "base/stats.h"
 #include "fabric/fabric.h"
+#include "fabric/paxos.h"
 
 
 /* SYNOPSIS
@@ -354,17 +356,18 @@ as_hb_error(as_hb_err_type type)
  *  Return a string summarizing the number of heartbeat-related errors of each type.
  *  Use long format messages if "verbose" is true, otherwise use short format messages.
  */
+// TODO - unused (was in log ticker), can make available via info if necessary.
 const char *
 as_hb_stats(bool verbose)
 {
 	char msg[MAX_LINE_LEN];
-	int pos = 0;
-	g_line[pos] = '\0';
+
+	g_line[0] = '\0';
 
 	for (int i = 0; i < AS_HB_ERR_MAX_TYPE; i++) {
 		msg[0] = '\0';
 		snprintf(msg, sizeof(msg), "%s %lu ", as_hb_error_msg[i][verbose ? LONG_FORMAT : SHORT_FORMAT], as_hb_error_count[i]);
-		strncat(g_line, msg, sizeof(g_line) - pos);
+		strncat(g_line, msg, sizeof(g_line) - strlen(g_line) - 1);
 	}
 
 	return g_line;
@@ -1077,7 +1080,7 @@ void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 				as_hb_error(AS_HB_ERR_MESH_CONNECT_FAIL);
 				cf_debug(AS_HB, "failed - initiated connection to mesh host at %s:%d socket %d from %s:%d", e->host, e->port, s.sock,some_addr, ntohs(addr_in.sin_port));
 			}
-			cf_atomic_int_incr(&g_config.heartbeat_connections_opened);
+			cf_atomic64_incr(&g_stats.heartbeat_connections_opened);
 
 			// simply adds the socket to the epoll list
 			// if this call fails, sock has been eaten.
@@ -1569,7 +1572,7 @@ as_hb_endpoint_add(int socket, bool isudp, cf_node node_id)
 	/* Make the socket nonblocking */
 	if (-1 == cf_socket_set_nonblocking(socket)) {
 		cf_info(AS_HB, "unable to set client socket %d to nonblocking mode: %s", socket, cf_strerror(errno));
-		cf_atomic_int_incr(&g_config.heartbeat_connections_closed);
+		cf_atomic64_incr(&g_stats.heartbeat_connections_closed);
 		return(-1);
 	}
 	cf_socket_set_nodelay(socket);
@@ -1728,7 +1731,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 			}
 
 			if (node == g_config.self_node) {
-				cf_atomic_int_incr(&g_config.heartbeat_received_self);
+				cf_atomic64_incr(&g_stats.heartbeat_received_self);
 				return;
 			}
 
@@ -1770,7 +1773,7 @@ as_hb_rx_process(msg *m, cf_sockaddr so, int fd)
 				}
 			}
 
-			cf_atomic_int_incr(&g_config.heartbeat_received_foreign);
+			cf_atomic64_incr(&g_stats.heartbeat_received_foreign);
 
 			// If this node encounters other nodes at startup, prevent it from
 			// switching to a single-node cluster.
@@ -2184,7 +2187,7 @@ as_hb_thr(void *arg)
 
 				cf_debug(AS_HB, "new connection from %s:%d", cpaddr, caddr.sin_port);
 
-				cf_atomic_int_incr(&g_config.heartbeat_connections_opened);
+				cf_atomic64_incr(&g_stats.heartbeat_connections_opened);
 				if (0 != as_hb_endpoint_add(csock, false /*is not udp*/, 0 /*node id unknown until pulse arrives*/)) {
 					close(csock);
 					continue;
@@ -2201,7 +2204,7 @@ CloseSocket:
 						as_hb_nodes_discovered_hash_del_conn(g_hb.endpoint_txlist_node_id[fd], fd);
 					}
 					g_hb.endpoint_txlist_node_id[fd] = 0;
-					cf_atomic_int_incr(&g_config.heartbeat_connections_closed);
+					cf_atomic64_incr(&g_stats.heartbeat_connections_closed);
 					mesh_host_list_remove_fd(fd);
 					// reusing ev as it is ignored for EPOLL_CTL_DEL
 					if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, fd, &ev)) {
@@ -2251,7 +2254,7 @@ CloseSocket:
 					cf_crash(AS_HB, "Failed to set ANV length in heartbeat protocol v2 message.");
 
 			/* Fill in the current adjacency list and bufferize the message */
-			msg_set_buf(mt, AS_HB_MSG_ANV, (byte *) g_config.paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
+			msg_set_buf(mt, AS_HB_MSG_ANV, (byte *) g_paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
 			/* cf_info(AS_HB, "PUT HEARTBEAT PULSE PRINCIPAL is %"PRIx64"", g_config.paxos->succession[0]); */
 			size_t n = sizeof(buft);
 			if (0 != msg_fillbuf(mt, buft, &n)) {
@@ -2470,7 +2473,7 @@ as_hb_monitor_reduce(void *key, void *data, void *udata)
 	 * Check if this node's succession list is in sync with ours
 	 */
 	bool slists_match = true;
-	as_paxos *px = g_config.paxos;
+	as_paxos *px = g_paxos;
 	char *same_diff = (px->succession[0] == p->anv[0] ? "same" : "different");
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {

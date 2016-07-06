@@ -671,15 +671,26 @@ as_namespace_init_set(as_namespace *ns, const char *set_name)
 static void
 append_set_props(as_set *p_set, cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "n_objects=");
+	// Statistics:
+
+	cf_dyn_buf_append_string(db, "objects=");
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->num_elements));
 	cf_dyn_buf_append_char(db, ':');
-	cf_dyn_buf_append_string(db, "n-bytes-memory=");
+
+	cf_dyn_buf_append_string(db, "memory_data_bytes=");
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_bytes_memory));
 	cf_dyn_buf_append_char(db, ':');
+
+	cf_dyn_buf_append_string(db, "deleting=");
+	cf_dyn_buf_append_string(db, IS_SET_DELETED(p_set) ? "true" : "false");
+	cf_dyn_buf_append_char(db, ':');
+
+	// Configuration:
+
 	cf_dyn_buf_append_string(db, "stop-writes-count=");
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->stop_writes_count));
 	cf_dyn_buf_append_char(db, ':');
+
 	cf_dyn_buf_append_string(db, "set-enable-xdr=");
 	if (cf_atomic32_get(p_set->enable_xdr) == AS_SET_ENABLE_XDR_TRUE) {
 		cf_dyn_buf_append_string(db, "true");
@@ -694,21 +705,9 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 		cf_dyn_buf_append_uint32(db, cf_atomic32_get(p_set->enable_xdr));
 	}
 	cf_dyn_buf_append_char(db, ':');
+
 	cf_dyn_buf_append_string(db, "disable-eviction=");
-	if (IS_SET_EVICTION_DISABLED(p_set)) {
-		cf_dyn_buf_append_string(db, "true");
-	}
-	else {
-		cf_dyn_buf_append_string(db, "false");
-	}
-	cf_dyn_buf_append_char(db, ':');
-	cf_dyn_buf_append_string(db, "set-delete=");
-	if (IS_SET_DELETED(p_set)) {
-		cf_dyn_buf_append_string(db, "true");
-	}
-	else {
-		cf_dyn_buf_append_string(db, "false");
-	}
+	cf_dyn_buf_append_string(db, IS_SET_EVICTION_DISABLED(p_set) ? "true" : "false");
 	cf_dyn_buf_append_char(db, ';');
 }
 
@@ -727,10 +726,10 @@ as_namespace_get_set_info(as_namespace *ns, const char *set_name, cf_dyn_buf *db
 
 	for (uint32_t idx = 0; idx < cf_vmapx_count(ns->p_sets_vmap); idx++) {
 		if (cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set) == CF_VMAPX_OK) {
-			cf_dyn_buf_append_string(db, "ns_name=");
+			cf_dyn_buf_append_string(db, "ns=");
 			cf_dyn_buf_append_string(db, ns->name);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_string(db, "set_name=");
+			cf_dyn_buf_append_string(db, "set=");
 			cf_dyn_buf_append_string(db, p_set->name);
 			cf_dyn_buf_append_char(db, ':');
 			append_set_props(p_set, db);
@@ -790,9 +789,9 @@ as_namespace_get_bins_info(as_namespace *ns, cf_dyn_buf *db, bool show_ns)
 	else {
 		uint32_t bin_count = cf_vmapx_count(ns->p_bin_name_vmap);
 
-		cf_dyn_buf_append_string(db, "num-bin-names=");
+		cf_dyn_buf_append_string(db, "bin_names=");
 		cf_dyn_buf_append_uint32(db, bin_count);
-		cf_dyn_buf_append_string(db, ",bin-names-quota=");
+		cf_dyn_buf_append_string(db, ",bin_names_quota=");
 		cf_dyn_buf_append_uint32(db, BIN_NAMES_QUOTA);
 
 		for (uint32_t i = 0; i < bin_count; i++) {

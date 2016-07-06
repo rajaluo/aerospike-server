@@ -43,9 +43,12 @@
 #include "base/proto.h"
 #include "base/scan.h"
 #include "base/security.h"
+#include "base/stats.h"
 #include "base/thr_demarshal.h"
-#include "base/thr_proxy.h"
-#include "base/udf_rw.h"
+#include "transaction/proxy.h"
+#include "transaction/rw_request.h"
+#include "transaction/rw_utils.h"
+#include "transaction/udf.h"
 
 
 void
@@ -57,15 +60,13 @@ as_transaction_init_head(as_transaction *tr, cf_digest *keyd, cl_msg *msgp)
 	tr->origin				= 0;
 	tr->from_flags			= 0;
 
-	tr->microbenchmark_is_resolve = false; // will soon be gone
-
 	tr->from.any			= NULL;
 	tr->from_data.any		= 0;
 
 	tr->keyd				= keyd ? *keyd : cf_digest_zero;
 
 	tr->start_time			= 0;
-	tr->microbenchmark_time	= 0;
+	tr->benchmark_time		= 0;
 }
 
 void
@@ -90,15 +91,46 @@ as_transaction_copy_head(as_transaction *to, const as_transaction *from)
 	to->origin				= from->origin;
 	to->from_flags			= from->from_flags;
 
-	to->microbenchmark_is_resolve = false; // will soon be gone
-
 	to->from.any			= from->from.any;
 	to->from_data.any		= from->from_data.any;
 
 	to->keyd				= from->keyd;
 
 	to->start_time			= from->start_time;
-	to->microbenchmark_time	= from->microbenchmark_time;
+	to->benchmark_time		= from->benchmark_time;
+}
+
+void
+as_transaction_init_from_rw(as_transaction *tr, rw_request *rw)
+{
+	as_transaction_init_head_from_rw(tr, rw);
+	// Note - we don't clear rw->msgp, destructor will free it.
+
+	as_partition_reservation_copy(&tr->rsv, &rw->rsv);
+	// Note - destructor will still release the reservation.
+
+	tr->end_time = rw->end_time;
+	tr->result_code = AS_PROTO_RESULT_OK;
+	tr->flags = 0;
+	tr->generation = rw->generation;
+	tr->void_time = rw->void_time;
+}
+
+void
+as_transaction_init_head_from_rw(as_transaction *tr, rw_request *rw)
+{
+	tr->msgp				= rw->msgp;
+	tr->msg_fields			= rw->msg_fields;
+	tr->origin				= rw->origin;
+	tr->from_flags			= rw->from_flags;
+	tr->from.any			= rw->from.any;
+	tr->from_data.any		= rw->from_data.any;
+	tr->keyd				= rw->keyd;
+	tr->start_time			= rw->start_time;
+	tr->benchmark_time		= rw->benchmark_time;
+
+	rw->from.any = NULL;
+	// Note - we don't clear rw->msgp, destructor will free it.
 }
 
 bool
@@ -282,7 +314,7 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 	uint8_t *b = (uint8_t *)msgp;
 
 	b = as_msg_write_header(b, msg_sz, 0, AS_MSG_INFO2_WRITE, 0, 0, 0, 0, 2, 0);
-	b = as_msg_write_fields(b, ns->name, ns_len, NULL, 0, keyd, 0, 0, 0, 0);
+	b = as_msg_write_fields(b, ns->name, ns_len, NULL, 0, keyd, 0);
 
 	as_transaction_init_head(tr, NULL, msgp);
 
@@ -294,7 +326,6 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 
 	// Do this last, to exclude the setup time in this function.
 	tr->start_time = cf_getns();
-	MICROBENCHMARK_SET_TO_START_P();
 
 	return 0;
 }
@@ -302,15 +333,30 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 void
 as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 {
-	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+	as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, 0, NULL);
 	tr->from.proto_fd_h = NULL;
 
 	cf_free(tr->msgp);
 	tr->msgp = NULL;
+
+	cf_atomic64_incr(&g_stats.n_demarshal_error);
 }
 
+#define UPDATE_ERROR_STATS(name) \
+	if (ns) { \
+		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) { \
+			cf_atomic64_incr(&ns->n_tsvc_##name##_timeout); \
+		} \
+		else { \
+			cf_atomic64_incr(&ns->n_tsvc_##name##_error); \
+		} \
+	} \
+	else { \
+		cf_atomic64_incr(&g_stats.n_tsvc_##name##_error); \
+	}
+
 void
-as_transaction_error(as_transaction* tr, uint32_t error_code)
+as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 {
 	if (error_code == 0) {
 		cf_warning(AS_PROTO, "converting error code 0 to 1 (unknown)");
@@ -326,14 +372,10 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (tr->from.proto_fd_h) {
-			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, NULL, as_transaction_trid(tr), NULL);
+			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
 			tr->from.proto_fd_h = NULL; // pattern, not needed
 		}
-		MICROBENCHMARK_HIST_INSERT_P(error_hist);
-		cf_atomic_int_incr(&g_config.err_tsvc_requests);
-		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) {
-			cf_atomic_int_incr(&g_config.err_tsvc_requests_timeout);
-		}
+		UPDATE_ERROR_STATS(client);
 		break;
 	case FROM_PROXY:
 		if (tr->from.proxy_node != 0) {
@@ -347,12 +389,14 @@ as_transaction_error(as_transaction* tr, uint32_t error_code)
 			tr->from.batch_shared = NULL; // pattern, not needed
 			tr->msgp = NULL; // pattern, not needed
 		}
+		UPDATE_ERROR_STATS(batch_sub);
 		break;
 	case FROM_IUDF:
 		if (tr->from.iudf_orig) {
 			tr->from.iudf_orig->cb(tr->from.iudf_orig->udata, error_code);
 			tr->from.iudf_orig = NULL; // pattern, not needed
 		}
+		UPDATE_ERROR_STATS(udf_sub);
 		break;
 	case FROM_NSUP:
 		break;
@@ -398,7 +442,7 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 	}
 
 	cf_rc_free(proto_fd_h);
-	cf_atomic_int_incr(&g_config.proto_connections_closed);
+	cf_atomic64_incr(&g_stats.proto_connections_closed);
 }
 
 void

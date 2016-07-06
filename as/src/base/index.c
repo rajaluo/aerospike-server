@@ -44,6 +44,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/stats.h"
 
 
 
@@ -84,6 +85,8 @@ typedef struct as_index_ele_s {
 // Forward declarations.
 //
 
+bool as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref);
+void as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);
 void as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);
 void as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h, cf_arenax_handle sentinel_h, as_index_ph_array *v_a);
 void as_index_reduce_sync_traverse(as_index_tree *tree, as_index *r, cf_arenax_handle sentinel_h, as_index_reduce_sync_fn cb, void *udata);
@@ -314,8 +317,12 @@ as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count,
 		r_ref.r = v_a->indexes[i].r;
 		r_ref.r_h = v_a->indexes[i].r_h;
 
-		olock_vlock(g_config.record_locks, &r_ref.r->key, &r_ref.olock);
-		cf_atomic_int_incr(&g_config.global_record_lock_count);
+		olock_vlock(g_record_locks, &r_ref.r->key, &r_ref.olock);
+
+		// Ignore this record if it's "half created" or deleted.
+		if (as_index_invalid_record_done(tree, &r_ref)) {
+			continue;
+		}
 
 		// Callback MUST call as_record_done() to unlock and release record.
 		cb(&r_ref, udata);
@@ -387,13 +394,17 @@ as_index_get_vlock(as_index_tree *tree, cf_digest *keyd,
 	}
 
 	as_index_reserve(index_ref->r);
-	cf_atomic_int_incr(&g_config.global_record_ref_count);
+	cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 	pthread_mutex_unlock(&tree->lock);
 
 	if (! index_ref->skip_lock) {
-		olock_vlock(g_config.record_locks, keyd, &index_ref->olock);
-		cf_atomic_int_incr(&g_config.global_record_lock_count);
+		olock_vlock(g_record_locks, keyd, &index_ref->olock);
+	}
+
+	// Treat record as not found if it's "half created" or deleted.
+	if (as_index_invalid_record_done(tree, index_ref)) {
+		return -1;
 	}
 
 	return 0;
@@ -408,7 +419,7 @@ as_index_get_vlock(as_index_tree *tree, cf_digest *keyd,
 // Returns:
 //		 1 - created and inserted (reference returned in index_ref)
 //		 0 - found already existing (reference returned in index_ref)
-//		-1 - error (index_ref untouched)
+//		-1 - error
 int
 as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 		as_index_ref *index_ref)
@@ -444,17 +455,21 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 				// The element already exists, simply return it.
 
 				as_index_reserve(t);
-				cf_atomic_int_incr(&g_config.global_record_ref_count);
+				cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 				pthread_mutex_unlock(&tree->lock);
 
 				if (! index_ref->skip_lock) {
-					olock_vlock(g_config.record_locks, keyd, &index_ref->olock);
-					cf_atomic_int_incr(&g_config.global_record_lock_count);
+					olock_vlock(g_record_locks, keyd, &index_ref->olock);
 				}
 
 				index_ref->r = t;
 				index_ref->r_h = t_h;
+
+				// Fail if the record is "half created" or deleted.
+				if (as_index_invalid_record_done(tree, index_ref)) {
+					return -1;
+				}
 
 				return 0;
 			}
@@ -496,7 +511,7 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 	as_index *n = RESOLVE_H(n_h);
 
 	n->rc = 2; // one for create (eventually balanced by delete), one for caller
-	cf_atomic_int_add(&g_config.global_record_ref_count, 2);
+	cf_atomic64_add(&g_stats.global_record_ref_count, 2);
 
 	n->key = *keyd;
 
@@ -528,8 +543,7 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 	pthread_mutex_unlock(&tree->lock);
 
 	if (! index_ref->skip_lock) {
-		olock_vlock(g_config.record_locks, keyd, &index_ref->olock);
-		cf_atomic_int_incr(&g_config.global_record_lock_count);
+		olock_vlock(g_record_locks, keyd, &index_ref->olock);
 	}
 
 	index_ref->r = n;
@@ -676,16 +690,11 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 		}
 	}
 
+	// Flag record as deleted.
+	as_index_invalidate_record(r);
+
 	// We may now destroy r, which is no longer in the tree.
-	if (0 == as_index_release(r)) {
-		if (tree->destructor) {
-			tree->destructor(r, tree->destructor_udata);
-		}
-
-		cf_arenax_free(tree->arena, r_h);
-	}
-
-	cf_atomic_int_decr(&g_config.global_record_ref_count);
+	as_index_done(tree, r, r_h);
 
 	tree->elements--;
 
@@ -700,6 +709,36 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 //==========================================================
 // Local helpers.
 //
+
+bool
+as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref)
+{
+	if (as_index_is_valid_record(index_ref->r)) {
+		return false;
+	}
+
+	if (! index_ref->skip_lock) {
+		pthread_mutex_unlock(index_ref->olock);
+	}
+
+	as_index_done(tree, index_ref->r, index_ref->r_h);
+
+	return true;
+}
+
+void
+as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
+{
+	if (0 == as_index_release(r)) {
+		if (tree->destructor) {
+			tree->destructor(r, tree->destructor_udata);
+		}
+
+		cf_arenax_free(tree->arena, r_h);
+	}
+
+	cf_atomic64_decr(&g_stats.global_record_ref_count);
+}
 
 void
 as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
@@ -720,7 +759,7 @@ as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
 		cf_arenax_free(tree->arena, r_h);
 	}
 
-	cf_atomic_int_decr(&g_config.global_record_ref_count);
+	cf_atomic64_decr(&g_stats.global_record_ref_count);
 }
 
 
@@ -739,7 +778,7 @@ as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h,
 	}
 
 	as_index_reserve(r);
-	cf_atomic_int_incr(&g_config.global_record_ref_count);
+	cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 	v_a->indexes[v_a->pos].r = r;
 	v_a->indexes[v_a->pos].r_h = r_h;
