@@ -880,8 +880,8 @@ cf_socket_mcast_close(cf_socket_mcast_cfg *mconf)
 	safe_close(conf->sock.fd);
 }
 
-int32_t
-cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
+static int32_t
+inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size, bool allow_v6)
 {
 	int32_t res = -1;
 	struct ifaddrs *ias;
@@ -908,6 +908,12 @@ cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t si
 
 		cf_sock_addr tmp;
 		cf_sock_addr_from_native(in->ifa_addr, &tmp);
+
+		if (!allow_v6 && cf_ip_addr_is_v6(&tmp.addr)) {
+			in = in->ifa_next;
+			continue;
+		}
+
 		out[count] = tmp.addr;
 
 		in = in->ifa_next;
@@ -921,4 +927,14 @@ cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t si
 cleanup1:
 	freeifaddrs(ias);
 	return res;
+}
+
+int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
+{
+	return inter_get_addr(addrs, n_addrs, buff, size, false);
+}
+
+int32_t cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
+{
+	return inter_get_addr(addrs, n_addrs, buff, size, true);
 }

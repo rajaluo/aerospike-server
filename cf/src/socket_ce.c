@@ -137,6 +137,12 @@ cf_ip_addr_is_loopback(const cf_ip_addr *addr)
 	return (ntohl(addr->s_addr) & 0xff000000) == 0x7f000000;
 }
 
+bool
+cf_ip_addr_is_v6(const cf_ip_addr *addr)
+{
+	return false;
+}
+
 int32_t
 cf_sock_addr_from_string(const char *string, cf_sock_addr *addr)
 {
