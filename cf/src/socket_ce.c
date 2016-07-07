@@ -126,6 +126,18 @@ cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
 }
 
 int32_t
+cf_ip_addr_compare(const cf_ip_addr *lhs, const cf_ip_addr *rhs)
+{
+	return memcmp(&lhs->s_addr, &rhs->s_addr, 4);
+}
+
+bool
+cf_ip_addr_is_loopback(const cf_ip_addr *addr)
+{
+	return (ntohl(addr->s_addr) & 0xff000000) == 0x7f000000;
+}
+
+int32_t
 cf_sock_addr_from_string(const char *string, cf_sock_addr *addr)
 {
 	int32_t res = -1;
@@ -280,4 +292,24 @@ cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_
 	}
 
 	return 0;
+}
+
+size_t
+cf_socket_addr_len(const struct sockaddr *sa)
+{
+	switch (sa->sa_family) {
+	case AF_INET:
+		return sizeof (struct sockaddr_in);
+
+	default:
+		cf_crash(CF_SOCKET, "Invalid address family: %d", sa->sa_family);
+		// XXX - Find a way to mark cf_crash() as "noreturn".
+		return 0;
+	}
+}
+
+bool
+cf_socket_addr_valid(const struct sockaddr *sa)
+{
+	return sa->sa_family == AF_INET;
 }

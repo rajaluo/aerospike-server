@@ -4346,34 +4346,6 @@ as_info_set(const char *name, const char *value, bool def)
 // makes sure that the distributed key system is properly distributed
 //
 
-int
-interfaces_compar(const void *a, const void *b)
-{
-	cf_ifaddr		*if_a = (cf_ifaddr *) a;
-	cf_ifaddr		*if_b = (cf_ifaddr *) b;
-
-	if (if_a->family != if_b->family) {
-		if (if_a->family < if_b->family)	return(-1);
-		else								return(1);
-	}
-
-	if (if_a->family == AF_INET) {
-		struct sockaddr_in	*in_a = (struct sockaddr_in *) &if_a->sa;
-		struct sockaddr_in  *in_b = (struct sockaddr_in *) &if_b->sa;
-
-		return( memcmp( &in_a->sin_addr, &in_b->sin_addr, sizeof(in_a->sin_addr) ) );
-	}
-	else if (if_a->family == AF_INET6) {
-		struct sockaddr_in6	*in_a = (struct sockaddr_in6 *) &if_a->sa;
-		struct sockaddr_in6 *in_b = (struct sockaddr_in6 *) &if_b->sa;
-
-		return( memcmp( &in_a->sin6_addr, &in_b->sin6_addr, sizeof(in_a->sin6_addr) ) );
-	}
-
-	cf_warning(AS_INFO, " interfaces compare: unknown families");
-	return(0);
-}
-
 static pthread_mutex_t		g_service_lock = PTHREAD_MUTEX_INITIALIZER;
 char 		*g_service_str = 0;
 uint32_t	g_service_generation = 0;
@@ -4404,97 +4376,91 @@ shash *g_info_node_info_hash = 0;
 
 int info_node_info_reduce_fn(void *key, void *data, void *udata);
 
-
 void
-build_service_list(cf_ifaddr * ifaddr, int ifaddr_sz, cf_dyn_buf *db) {
-	for (int i = 0; i < ifaddr_sz; i++) {
+build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db) {
+	for (int32_t i = 0; i < n_addrs; ++i) {
+		if (cf_ip_addr_is_loopback(&addrs[i])) {
+			continue;
+		}
 
-		if (ifaddr[i].family == AF_INET) {
-			struct sockaddr_in *sin = (struct sockaddr_in *) & (ifaddr[i].sa);
-			char    addr_str[50];
+		cf_sock_addr tmp;
+		cf_sock_addr_from_addr_port(&addrs[i], g_config.socket.port, &tmp);
 
-			inet_ntop(AF_INET, &sin->sin_addr, addr_str, sizeof(addr_str));
-			// Match with any 127.0.0.*. Ideally, 127.*.*.* is legal loopback
-			// address range but thats too wide. Keep it a bit tighter for now.
-			if ( strncmp(addr_str, "127.0.0.", 8) == 0) {
-				continue;
-			}
+		char string[1000];
+		cf_sock_addr_to_string(&tmp, string, sizeof string);
+		cf_dyn_buf_append_string(db, string);
 
-			cf_dyn_buf_append_string(db, addr_str);
-			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_int(db, g_config.socket.port);
+		if (i < n_addrs - 1) {
 			cf_dyn_buf_append_char(db, ';');
 		}
 	}
-
-	// take off the last ';' if there was any string there
-	if (db->used_sz > 0)
-		cf_dyn_buf_chomp(db);
 }
-
 
 //
 // Note: if all my interfaces go down, service_str will be 0
 //
+
+static int32_t
+inter_comp(const void *lhs, const void *rhs)
+{
+	return cf_ip_addr_compare(lhs, rhs);
+}
+
 void *
 info_interfaces_fn(void *unused)
 {
+	cf_ip_addr known[100];
+	int32_t n_known = 0;
 
-	uint8_t	buf[512];
+	while (true) {
+		uint8_t buffer[1000];
+		cf_ip_addr *curr;
+		int32_t n_curr;
 
-	// currently known set
-	cf_ifaddr		known_ifs[100];
-	int				known_ifs_sz = 0;
+		if (cf_inter_get_addr(&curr, &n_curr, buffer, sizeof buffer) < 0) {
+			cf_crash(AS_CFG, "Error while getting interface addresses");
+		}
 
-	while (1) {
+		qsort(curr, n_curr, sizeof (cf_ip_addr), inter_comp);
+		bool change = false;
 
-		cf_ifaddr *ifaddr;
-		int			ifaddr_sz;
-		cf_ifaddr_get(&ifaddr, &ifaddr_sz, buf, sizeof(buf));
-
-		bool changed = false;
-		if (ifaddr_sz == known_ifs_sz) {
-			// sort it
-			qsort(ifaddr, ifaddr_sz, sizeof(cf_ifaddr), interfaces_compar);
-
-			// Compare to the old list
-			for (int i = 0; i < ifaddr_sz; i++) {
-				if (0 != interfaces_compar( &known_ifs[i], &ifaddr[i])) {
-					changed = true;
+		if (n_curr != n_known) {
+			change = true;
+		}
+		else {
+			for (int32_t i = 0; i < n_curr; ++i) {
+				if (inter_comp(&known[i], &curr[i]) != 0) {
+					change = true;
 					break;
 				}
 			}
-		} else {
-			changed = true;
 		}
 
-		if (changed == true) {
-
-			cf_dyn_buf_define(service_db);
-
-			build_service_list(ifaddr, ifaddr_sz, &service_db);
-
-			memcpy(known_ifs, ifaddr, sizeof(cf_ifaddr) * ifaddr_sz);
-			known_ifs_sz = ifaddr_sz;
+		if (change) {
+			cf_dyn_buf_define(services);
+			build_service_list(curr, n_curr, &services);
 
 			pthread_mutex_lock(&g_service_lock);
 
-			if (g_service_str)	cf_free(g_service_str);
-			g_service_str = cf_dyn_buf_strdup(&service_db);
+			if (g_service_str != NULL)
+				cf_free(g_service_str);
 
+			g_service_str = cf_dyn_buf_strdup(&services);
 			g_service_generation++;
 
 			pthread_mutex_unlock(&g_service_lock);
+			cf_dyn_buf_free(&services);
 
+			memcpy(known, curr, sizeof (cf_ip_addr) * n_curr);
+			n_known = n_curr;
 		}
 
 		// reduce the info_node hash to apply any transmits
 		shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
-
 		sleep(2);
-
 	}
-	return(0);
+
+	return NULL;
 }
 
 //

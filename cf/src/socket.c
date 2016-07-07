@@ -20,10 +20,12 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#define CF_SOCKET_PRIVATE
 #include "socket.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -101,6 +103,13 @@ cf_sock_addr_from_host_port(const char *host, cf_ip_port port, cf_sock_addr *add
 
 	addr->port = port;
 	return 0;
+}
+
+void
+cf_sock_addr_from_addr_port(const cf_ip_addr *ip_addr, cf_ip_port port, cf_sock_addr *addr)
+{
+	addr->addr = *ip_addr;
+	addr->port = port;
 }
 
 int32_t
@@ -313,23 +322,6 @@ void cf_socket_set_window(cf_socket sock, int32_t size)
 	safe_setsockopt(sock.fd, SOL_TCP, TCP_WINDOW_CLAMP, &size, sizeof size);
 }
 
-static size_t
-addr_len(const struct sockaddr *sa)
-{
-	switch (sa->sa_family) {
-	case AF_INET:
-		return sizeof (struct sockaddr_in);
-
-	case AF_INET6:
-		return sizeof (struct sockaddr_in6);
-
-	default:
-		cf_crash(CF_SOCKET, "Invalid address family: %d", sa->sa_family);
-		// XXX - Find a way to mark cf_crash() as "noreturn".
-		return 0;
-	}
-}
-
 static int32_t
 config_address(const cf_socket_cfg *conf, struct sockaddr *sa, cf_sock_addr *addr)
 {
@@ -388,7 +380,8 @@ cf_socket_init_server(cf_socket_cfg *conf)
 	// XXX - Why are we doing this?
 	safe_fcntl(sock.fd, F_SETFD, FD_CLOEXEC);
 
-	while (bind(sock.fd, (struct sockaddr *)&sas, addr_len((struct sockaddr *)&sas)) < 0) {
+	while (bind(sock.fd, (struct sockaddr *)&sas,
+			cf_socket_addr_len((struct sockaddr *)&sas)) < 0) {
 		if (errno != EADDRINUSE) {
 			cf_warning(CF_SOCKET, "Error while binding to %s:%d: %d (%s)",
 					conf->addr, conf->port, errno, cf_strerror(errno));
@@ -425,7 +418,7 @@ connect_socket(cf_socket sock, struct sockaddr *sa, int32_t timeout)
 	int32_t res = -1;
 
 	cf_socket_disable_blocking(sock);
-	int32_t rv = connect(sock.fd, sa, addr_len(sa));
+	int32_t rv = connect(sock.fd, sa, cf_socket_addr_len(sa));
 
 	if (rv == 0) {
 		cf_debug(CF_SOCKET, "FD %d connected [1]", sock.fd);
@@ -555,7 +548,8 @@ cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock)
 
 	cf_socket_disable_blocking(_sock);
 
-	if (connect(_sock.fd, (struct sockaddr *)&sas, addr_len((struct sockaddr *)&sas)) < 0) {
+	if (connect(_sock.fd, (struct sockaddr *)&sas,
+			cf_socket_addr_len((struct sockaddr *)&sas)) < 0) {
 		if (errno != EINPROGRESS) {
 			cf_warning(CF_SOCKET, "Error while connecting socket to %s: %d (%s)",
 					friendly, errno, cf_strerror(errno));
@@ -654,7 +648,7 @@ cf_socket_send_to(cf_socket sock, void *buff, size_t size, int32_t flags, cf_soc
 	if (addr != NULL) {
 		cf_sock_addr_to_native(addr, (struct sockaddr *)&sas);
 		sa = (struct sockaddr *)&sas;
-		sa_len = addr_len((struct sockaddr *)&sas);
+		sa_len = cf_socket_addr_len((struct sockaddr *)&sas);
 	}
 
 	int32_t res = sendto(sock.fd, buff, size, flags | MSG_NOSIGNAL, sa, sa_len);
@@ -847,7 +841,8 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 		safe_setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
 	}
 
-	while (bind(sock.fd, (struct sockaddr *)&sas, addr_len((struct sockaddr *)&sas)) < 0) {
+	while (bind(sock.fd, (struct sockaddr *)&sas,
+			cf_socket_addr_len((struct sockaddr *)&sas)) < 0) {
 		if (errno != EADDRINUSE) {
 			cf_warning(CF_SOCKET, "Error while binding to %s:%d: %d (%s)",
 					conf->addr, conf->port, errno, cf_strerror(errno));
@@ -885,84 +880,45 @@ cf_socket_mcast_close(cf_socket_mcast_cfg *mconf)
 	safe_close(conf->sock.fd);
 }
 
-// -------------------- OLD CODE --------------------
-
-#include <errno.h>
-#include <fcntl.h>
-#include <ifaddrs.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <asm-generic/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/epoll.h>
-#include <sys/socket.h>
-
-#include <citrusleaf/cf_clock.h>
-#include <citrusleaf/cf_types.h>
-
-#include "fault.h"
-
-/* cf_svcmsocket_init
- * Initialize a multicast service/receive socket
- * Bind is done to INADDR_ANY - all interfaces
- *  */
-//
-// get information about the interfaces and what their addresses are
-//
-
-// Pass in a buffer that you think is big enough, and it'll get filled out
-// error will return if you haven't passed in enough data
-// ordering not guaranteed
-
-int
-cf_ifaddr_get( cf_ifaddr **ifaddr, int *ifaddr_sz, uint8_t *buf, size_t bufsz)
+int32_t
+cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
 {
-	struct ifaddrs *ifa;
-	int rv = getifaddrs(&ifa);
-	if (rv != 0) {
-		cf_info(CF_SOCKET, " could not get interface information: return value %d errno %d",rv,errno);
-		return(-1);
-	}
-	struct ifaddrs *ifa_orig = ifa;
+	int32_t res = -1;
+	struct ifaddrs *ias;
 
-	// currently, return ipv4 only (?)
-	int n_ifs = 0;
-	while (ifa) {
-		if ((ifa->ifa_addr) && (ifa->ifa_addr->sa_family == AF_INET)) {
-			n_ifs++;
+	if (getifaddrs(&ias) < 0) {
+		cf_crash(CF_SOCKET, "Error while getting interface addresses: %d (%s)",
+				errno, cf_strerror(errno));
+	}
+
+	struct ifaddrs *in = ias;
+	cf_ip_addr *out = (cf_ip_addr *)buff;
+	int32_t count = 0;
+
+	while (in != NULL) {
+		if (in->ifa_addr == NULL || !cf_socket_addr_valid(in->ifa_addr)) {
+			in = in->ifa_next;
+			continue;
 		}
-		ifa = ifa->ifa_next;
-	}
 
-	if (bufsz < sizeof(cf_ifaddr) * n_ifs) {
-		freeifaddrs(ifa_orig);
-		return(-2);
-	}
-
-	*ifaddr_sz = n_ifs;
-	*ifaddr = (cf_ifaddr *) buf;
-	ifa = ifa_orig;
-	int i = 0;
-	while (ifa) {
-
-		if ((ifa->ifa_addr) && (ifa->ifa_addr->sa_family == AF_INET))
-		{
-
-			(*ifaddr)[i].flags = ifa->ifa_flags;
-			(*ifaddr)[i].family = ifa->ifa_addr->sa_family;
-			memcpy( &((*ifaddr)[i].sa), ifa->ifa_addr, sizeof(struct sockaddr) );
-
-			i++;
+		if ((uint8_t *)&out[count + 1] > buff + size) {
+			cf_warning(CF_SOCKET, "Buffer overflow while parsing interface addresses");
+			goto cleanup1;
 		}
-		ifa = ifa->ifa_next;
+
+		cf_sock_addr tmp;
+		cf_sock_addr_from_native(in->ifa_addr, &tmp);
+		out[count] = tmp.addr;
+
+		in = in->ifa_next;
+		++count;
 	}
 
-	freeifaddrs(ifa_orig);
-	return(0);
+	*addrs = (cf_ip_addr *)buff;
+	*n_addrs = count;
+	res = 0;
+
+cleanup1:
+	freeifaddrs(ias);
+	return res;
 }

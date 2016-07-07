@@ -1330,7 +1330,11 @@ mesh_host_list_add(char *host, int port, bool is_seed)
 		cf_warning(AS_HB, "rejected tip for self: %s:%d", host, port);
 		return(-1);
 	}
-	if ((0 == strcmp("127.0.0.1", host)) && (g_config.hb_port == port)) {
+
+	cf_ip_addr tmp;
+
+	if (cf_ip_addr_from_string(host, &tmp) >= 0 && cf_ip_addr_is_loopback(&tmp) &&
+			g_config.hb_port == port) {
 		cf_warning(AS_HB, "rejected tip for self2: %s:%d", host, port);
 		return(-1);
 	}

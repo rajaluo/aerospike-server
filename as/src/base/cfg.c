@@ -3359,24 +3359,27 @@ as_config_post_process(as_config *c, const char *config_file)
 
 	if (g_config.external_address && ! g_config.is_external_address_virtual) {
 		// Check if external address matches any address in service list.
-		uint8_t buf[512];
-		cf_ifaddr *ifaddr;
-		int	ifaddr_sz;
-		cf_ifaddr_get(&ifaddr, &ifaddr_sz, buf, sizeof(buf));
+		uint8_t buffer[1000];
+		cf_ip_addr *addrs;
+		int32_t n_addrs;
 
-		cf_dyn_buf_define(temp_service_db);
-		build_service_list(ifaddr, ifaddr_sz, &temp_service_db);
-
-		char *service_str = cf_dyn_buf_strdup(&temp_service_db);
-
-		if (! (service_str && strstr(service_str, g_config.external_address))) {
-			cf_crash_nostack(AS_CFG, "external address '%s' does not match service addresses '%s'",
-					g_config.external_address,
-					service_str ? service_str : "null");
+		if (cf_inter_get_addr(&addrs, &n_addrs, buffer, sizeof buffer) < 0) {
+			cf_crash(AS_CFG, "Error while getting interface addresses");
 		}
 
-		cf_dyn_buf_free(&temp_service_db);
-		cf_free(service_str);
+		cf_dyn_buf_define(services);
+		build_service_list(addrs, n_addrs, &services);
+
+		char *string = cf_dyn_buf_strdup(&services);
+
+		if (string == NULL || strstr(string, g_config.external_address) == NULL) {
+			cf_crash_nostack(AS_CFG, "external address '%s' does not match service addresses '%s'",
+					g_config.external_address,
+					string != NULL ? string : "null");
+		}
+
+		cf_dyn_buf_free(&services);
+		cf_free(string);
 	}
 
 	//--------------------------------------------

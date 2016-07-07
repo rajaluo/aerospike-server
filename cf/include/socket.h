@@ -78,6 +78,8 @@ int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
 int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size);
 int32_t cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size);
+int32_t cf_ip_addr_compare(const cf_ip_addr *lhs, const cf_ip_addr *rhs);
+bool cf_ip_addr_is_loopback(const cf_ip_addr *addr);
 
 int32_t cf_ip_port_from_string(const char *string, cf_ip_port *port);
 int32_t cf_ip_port_to_string(cf_ip_port port, char *string, size_t size);
@@ -85,6 +87,7 @@ int32_t cf_ip_port_from_binary(const uint8_t *binary, cf_ip_port *port, size_t s
 int32_t cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size);
 
 int32_t cf_sock_addr_from_host_port(const char *host, cf_ip_port port, cf_sock_addr *addr);
+void cf_sock_addr_from_addr_port(const cf_ip_addr *ip_addr, cf_ip_port port, cf_sock_addr *addr);
 int32_t cf_sock_addr_from_string(const char *string, cf_sock_addr *addr);
 int32_t cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size);
 int32_t cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size);
@@ -131,25 +134,9 @@ int32_t cf_socket_mcast_set_inter(cf_socket sock, const cf_ip_addr *iaddr);
 int32_t cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr);
 void cf_socket_mcast_close(cf_socket_mcast_cfg *mconf);
 
-// -------------------- OLD CODE --------------------
+int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
 
-/*
-** get information about all interfaces
-** currently returns ipv4 only - but does return loopback
-**
-** example:
-**
-** uint8_t buf[512];
-** cf_ifaddr *ifaddr;
-** int        ifaddr_sz;
-** cf_ifaddr_get(&ifaddr, &ifaddr_sz, buf, sizeof(buf));
-**
-*/
-
-typedef struct cf_ifaddr_s {
-	uint32_t		flags;
-	unsigned short	family;
-	struct sockaddr sa;
-} cf_ifaddr;
-
-extern int cf_ifaddr_get(cf_ifaddr **ifaddr, int *ifaddr_sz, uint8_t *buf, size_t buf_sz);
+#if defined CF_SOCKET_PRIVATE
+size_t cf_socket_addr_len(const struct sockaddr *sa);
+bool cf_socket_addr_valid(const struct sockaddr *sa);
+#endif
