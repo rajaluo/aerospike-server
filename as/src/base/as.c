@@ -51,19 +51,21 @@
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/system_metadata.h"
+#include "base/stats.h"
 #include "base/thr_batch.h"
 #include "base/thr_info.h"
-#include "base/thr_proxy.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
-#include "base/thr_write.h"
-#include "base/udf_rw.h"
+#include "base/ticker.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/paxos.h"
 #include "storage/storage.h"
+#include "transaction/proxy.h"
+#include "transaction/rw_request_hash.h"
+#include "transaction/udf.h"
 
 
 //==========================================================
@@ -241,6 +243,8 @@ validate_smd_directory()
 int
 main(int argc, char **argv)
 {
+	g_start_ms = cf_getms();
+
 #ifdef USE_ASM
 	as_mallocation_t asm_array[MAX_NUM_MALLOCATIONS];
 
@@ -270,6 +274,9 @@ main(int argc, char **argv)
 
 	// Initialize the Jansson JSON API.
 	as_json_init();
+
+	// Start global stats at 0.
+	as_stats_init();
 
 	int i;
 	int cmd_optidx;
@@ -469,9 +476,9 @@ main(int argc, char **argv)
 	as_paxos_init();			// cluster consensus algorithm
 	as_migrate_init();			// move data between nodes
 	as_proxy_init();			// do work on behalf of others
-	as_write_init();			// write service
+	as_rw_init();				// read & write service
 	as_query_init();			// query transaction handling
-	as_udf_rw_init();			// apply user-defined functions
+	as_udf_init();				// user-defined functions
 	as_scan_init();				// scan a namespace or set
 	as_batch_init();			// batch transaction handling
 	as_batch_direct_init();		// low priority transaction handling        
@@ -485,7 +492,7 @@ main(int argc, char **argv)
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
-	as_smd_start(c->smd);		// enables receiving paxos state change events
+	as_smd_start(g_smd);		// enables receiving paxos state change events
 	as_fabric_start();			// may send & receive fabric messages
 	as_xdr_start();				// XDR should start before it joins other nodes
 	as_hb_start();				// start inter-node heatbeat
@@ -493,7 +500,7 @@ main(int argc, char **argv)
 	as_nsup_start();			// may send delete transactions to other nodes
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions
-	info_debug_ticker_start();	// only after everything else is started
+	as_ticker_start();			// only after everything else is started
 
 	// Log a service-ready message.
 	cf_info(AS_AS, "service ready: soon there will be cake!");
@@ -524,7 +531,7 @@ main(int argc, char **argv)
 
 	as_storage_shutdown();
 	as_xdr_shutdown();
-	as_smd_shutdown(c->smd);
+	as_smd_shutdown(g_smd);
 
 	cf_info(AS_AS, "finished clean shutdown - exiting");
 

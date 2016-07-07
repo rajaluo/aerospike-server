@@ -42,22 +42,16 @@
 #include "arenax.h"
 #include "dynbuf.h"
 #include "hist.h"
+#include "hist_track.h"
 #include "linear_hist.h"
 #include "util.h"
 #include "vmapx.h"
 
+#include "base/cfg.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/transaction_policy.h"
 
-
-/* AS_CLUSTER_SZ, AS_CLUSTER_SZ_MASK[P,N]
- * The instantaneous maximum number of cluster participants, represented as
- * an integer and as a positive and negative mask */
-#define AS_CLUSTER_SZ 128
-#define AS_CLUSTER_SZ_MASKP ((uint64_t)(1 - (AS_CLUSTER_SZ + 1)))
-#define AS_CLUSTER_SZ_MASKN ((uint64_t)(AS_CLUSTER_SZ - 1))
-#define UNUSED 	-1
 
 #define SINDEX 1
 
@@ -72,11 +66,6 @@
  * [Note:  The legacy size is used for backward-compatibility with previous releases.]
  */
 #define AS_CLUSTER_DEFAULT_SZ (AS_CLUSTER_LEGACY_SZ)
-
-/* AS_NAMESPACE_SZ
- * The maximum number of namespaces that can exist at any one moment
- */
-#define AS_NAMESPACE_SZ 32
 
 #define AS_STORAGE_MAX_DEVICES 32 // maximum devices per namespace
 #define AS_STORAGE_MAX_FILES 32 // maximum files per namespace
@@ -634,6 +623,12 @@ extern int as_record_replace(as_partition_reservation *rsv, cf_digest *keyd,
 bool as_record_is_expired(as_record *r); // TODO - eventually inline
 
 
+// Counter that tells clients partition ownership has changed.
+extern cf_atomic32 g_partition_generation;
+
+// Counter for receiver-side migration flow control.
+extern cf_atomic_int g_migrate_num_incoming;
+
 /* as_partition_id
  * A generic type for partition identifiers */
 typedef uint16_t as_partition_id;
@@ -771,20 +766,6 @@ struct as_partition_reservation_s {
 	__rsv->cluster_key = 0;
 
 
-// This is a statistics function
-typedef struct as_partition_states_s {
-	int		sync_actual;
-	int		sync_replica;
-	int		desync;
-	int		zombie;
-	int		absent;
-	int		undef;
-	int		n_objects;
-	int		n_ref_count;
-	int		n_sub_objects;
-	int		n_sub_ref_count;
-} as_partition_states;
-
 /* Partition function declarations */
 extern void as_partition_init(as_partition *p, as_namespace *ns, int pid);
 extern void as_partition_reinit(as_partition *p, as_namespace *ns, int pid);
@@ -803,12 +784,9 @@ extern int as_partition_reserve_write(as_namespace *ns, as_partition_id pid, as_
 extern void as_partition_reserve_migrate(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node);
 extern int as_partition_reserve_migrate_timeout(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, int timeout_ms );
 extern int as_partition_reserve_xdr_read(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
-
 // reserve_read - 
 extern int as_partition_reserve_read(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
 
-// moves the reservation -
-extern void as_partition_reservation_move(as_partition_reservation *dst, as_partition_reservation *src);
 extern void as_partition_reservation_copy(as_partition_reservation *dst, as_partition_reservation *src);
 extern void as_partition_release(as_partition_reservation *rsv);
 
@@ -820,7 +798,6 @@ extern void as_partition_getreplica_write_str(cf_dyn_buf *db);
 extern void as_partition_getreplica_master_str(cf_dyn_buf *db);
 extern void as_partition_get_replicas_all_str(cf_dyn_buf *db);
 extern void as_partition_getinfo_str(cf_dyn_buf *db);
-extern void as_partition_getstates(as_partition_states *ps);
 extern uint64_t as_partition_remaining_migrations();
 
 extern void as_partition_balance();
@@ -966,134 +943,218 @@ extern bool client_replica_maps_update(as_namespace* ns, as_partition_id pid);
 
 
 struct as_namespace_s {
-	/* Namespaces are internally assigned monotonic identifiers, but these
-	 * are not portable across node boundaries; to identify a namespace
-	 * canonically, you need to use the namespace name */
+
 	char name[AS_ID_NAMESPACE_SZ];
 	as_namespace_id id;
 
-	// If true, read storage devices to build index at startup.
-	bool cold_start;
+	//--------------------------------------------
+	// Persistent memory.
+	//
 
 	// Pointer to the persistent memory "base" block.
-	uint8_t* p_xmem_base;
+	uint8_t*		p_xmem_base;
 
 	// Pointer to array of partition tree info in persistent memory base block.
-	as_treex* tree_roots;
-	as_treex* sub_tree_roots;
+	as_treex*		tree_roots;
+	as_treex*		sub_tree_roots;
 
 	// Pointer to arena structure (not stages) in persistent memory base block.
-	cf_arenax* arena;
+	cf_arenax*		arena;
+
+	// Pointer to bin name vmap in persistent memory.
+	cf_vmapx*		p_bin_name_vmap;
+
+	// Pointer to set information vmap in persistent memory.
+	cf_vmapx*		p_sets_vmap;
+
+	// Temporary array of sets to hold config values until sets vmap is ready.
+	as_set*			sets_cfg_array;
+	uint32_t		sets_cfg_count;
+
+	//--------------------------------------------
+	// Cold-start.
+	//
+
+	// If true, read storage devices to build index at startup.
+	bool			cold_start;
+
+	// Flag for cold-start ticker and eviction threshold check.
+	bool			cold_start_loading;
+
+	// For cold-start eviction.
+	pthread_mutex_t	cold_start_evict_lock;
+	uint32_t		cold_start_record_add_count;
+	cf_atomic32		cold_start_threshold_void_time;
+	uint32_t		cold_start_max_void_time;
+
+	//--------------------------------------------
+	// Memory management.
+	//
 
 #ifdef USE_JEM
 	// JEMalloc arena to be used for long-term storage in this namespace (-1 if nonexistent.)
 	int jem_arena;
 #endif
 
-	/* Replication management */
-	uint32_t					migrate_order;
-	uint32_t					migrate_sleep;
-	uint16_t					replication_factor;
-	uint16_t					cfg_replication_factor;
-	client_replica_map			*replica_maps;
-	conflict_resolution_pol		conflict_resolution_policy;
-	bool						single_bin;		// restrict the namespace to objects with exactly one bin
-	bool						data_in_index;	// with single-bin, allows warm restart for data-in-memory (with storage-engine device)
-	bool 						disallow_null_setname;
-	bool                        ldt_enabled;
-	uint32_t                    ldt_page_size;
-	uint32_t					ldt_gc_sleep_us;
+	// Cached partition ownership info for clients.
+	client_replica_map* replica_maps;
 
-	/* XDR */
-	bool						enable_xdr;
-	bool 						sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping.
-	bool 						ns_forward_xdr_writes; // namespace-level flag to enable forwarding of xdr writes
-	bool 						ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
-	bool 						ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
+	//--------------------------------------------
+	// Storage management.
+	//
 
-	/* The server default read consistency level for this namespace. */
-	as_policy_consistency_level read_consistency_level;
+	// This is typecast to (drv_ssds*) in storage code.
+	void*			storage_private;
 
-	/* Should the optional client-supplied, per-transaction read consistency level
-	   be overriden by the server default on this namespace? */
-	bool read_consistency_level_override;
+	uint64_t		ssd_size; // discovered (and rounded) size of drive
+	int				storage_min_free_wblocks; // the number of wblocks per device to "reserve"
+	int				storage_last_avail_pct; // most recently calculated available percent
+	int				storage_max_write_q; // storage_max_write_cache is converted to this
+	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done
+	uint32_t		defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
 
-	/* The server default write commit level for this namespace. */
-	as_policy_commit_level write_commit_level;
-
-	/* Should the optional client-supplied, per-transaction write commit level
-	   be overriden by the server default on this namespace? */
-	bool write_commit_level_override;
-
-	/* Storage engine configuration - and per storage engine variables -
-	** 'private' is managed by the storage engine in question */
-	as_storage_type storage_type;
-	char *storage_path;
-	char *storage_devices[AS_STORAGE_MAX_DEVICES];
-	char *storage_shadows[AS_STORAGE_MAX_DEVICES];
-	char *storage_files[AS_STORAGE_MAX_FILES];
-	char *storage_scheduler_mode; // relevant for devices only, not files
-	off_t		storage_filesize;
-	uint32_t	storage_blocksize;
-	uint32_t	storage_write_threads;
-	uint64_t	storage_max_write_cache;
-	uint32_t	storage_read_block_size;
-	uint32_t	storage_write_block_size;
-	uint32_t	storage_num_write_blocks;
-	bool		storage_data_in_memory;    // true if the DRAM copy is always kept
-	bool		storage_cold_start_empty;
-	bool		storage_disable_odirect;
-	bool		storage_enable_osync;
-	uint32_t	storage_defrag_lwm_pct;
-	uint32_t	storage_defrag_queue_min;
-	uint32_t	storage_defrag_sleep;
-	int			storage_defrag_startup_minimum;
-	uint64_t	storage_flush_max_us;
-	uint64_t	storage_fsync_max_us;
-	uint32_t	storage_min_avail_pct;
-
-	// For data-not-in-memory, optionally cache swbs after writing to device.
-	cf_atomic32 storage_post_write_queue; // number of swbs/device held after writing to device
-	// To track fraction of reads from cache:
-	cf_atomic32 n_reads_from_cache;
-	cf_atomic32 n_reads_from_device;
-	float cache_read_pct;
-
-	void *storage_private;
+	uint64_t		kv_size;
 
 	// TODO - could use n_devices in general, if we set it during config parse.
-	int n_devices; // if using queue-per-device, store the number of devices used by this namespace
-	int dev_q_offset; // if using queue-per-device, where this namespace's transaction queues are
+	int				n_devices; // if using queue-per-device, store the number of devices used by this namespace
+	int				dev_q_offset; // if using queue-per-device, where this namespace's transaction queues are
 
-	/* data store management */
-	uint64_t	memory_size;
-	uint64_t	ssd_size;
-	uint64_t	kv_size;
-	bool		cond_write;  // true if writing uniqueness is to be enforced by the KV store.
-	float		hwm_disk, hwm_memory;
-	float   	stop_writes_pct;
-	uint32_t	evict_hist_buckets;
-	uint32_t	evict_tenths_pct;
-	uint64_t	default_ttl;
-	uint64_t	max_ttl;
-	int			auto_hwm_last_free;
-	int			storage_min_free_wblocks; // the number of wblocks per device to "reserve"
-	int			storage_last_avail_pct; // most recently calculated available percent
-	int			storage_max_write_q; // storage_max_write_cache is converted to this
-	uint32_t	saved_defrag_sleep; // restore after defrag at startup is done
-	uint32_t	defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
+	// For data-not-in-memory, we optionally cache swbs after writing to device.
+	// To track fraction of reads from cache:
+	cf_atomic32		n_reads_from_cache;
+	cf_atomic32		n_reads_from_device;
 
-	/* very interesting counters */
+	//--------------------------------------------
+	// Secondary index.
+	//
+
+	int				sindex_cnt;
+	struct as_sindex_s* sindex; // array with AS_MAX_SINDEX metadata
+	shash*			sindex_set_binid_hash;
+	shash*			sindex_iname_hash;
+	uint32_t		binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
+
+	// Temporary structure to hold si config values until smd-bootup is done.
+	shash*			sindex_cfg_var_hash;
+
+	//--------------------------------------------
+	// Configuration.
+	//
+
+	uint16_t		cfg_replication_factor;
+	uint16_t		replication_factor; // indirect config - can become less than cfg_replication_factor
+	uint64_t		memory_size;
+	uint64_t		default_ttl;
+
+	PAD_BOOL		enable_xdr;
+	PAD_BOOL		sets_enable_xdr; // namespace-level flag to enable set-based xdr shipping
+	PAD_BOOL		ns_forward_xdr_writes; // namespace-level flag to enable forwarding of xdr writes
+	PAD_BOOL		ns_allow_nonxdr_writes; // namespace-level flag to allow nonxdr writes or not
+	PAD_BOOL		ns_allow_xdr_writes; // namespace-level flag to allow xdr writes or not
+
+	uint32_t		cold_start_evict_ttl;
+	conflict_resolution_pol conflict_resolution_policy;
+	PAD_BOOL		data_in_index; // with single-bin, allows warm restart for data-in-memory (with storage-engine device)
+	PAD_BOOL		disallow_null_setname;
+	PAD_BOOL		batch_sub_benchmarks_enabled;
+	PAD_BOOL		read_benchmarks_enabled;
+	PAD_BOOL		storage_benchmarks_enabled; // histograms are per-drive
+	PAD_BOOL		udf_benchmarks_enabled;
+	PAD_BOOL		udf_sub_benchmarks_enabled;
+	PAD_BOOL		write_benchmarks_enabled;
+	PAD_BOOL		proxy_hist_enabled;
+	uint32_t		evict_hist_buckets;
+	uint32_t		evict_tenths_pct;
+	float			hwm_disk;
+	float			hwm_memory;
+	PAD_BOOL		ldt_enabled;
+	uint32_t		ldt_gc_sleep_us;
+	uint32_t		ldt_page_size;
+	uint64_t		max_ttl;
+	uint32_t		migrate_order;
+	uint32_t		migrate_sleep;
+	cf_atomic32		obj_size_hist_max; // TODO - doesn't need to be atomic, really.
+	as_policy_consistency_level read_consistency_level;
+	PAD_BOOL		read_consistency_level_override;
+	PAD_BOOL		single_bin; // restrict the namespace to objects with exactly one bin
+	float			stop_writes_pct;
+	as_policy_commit_level write_commit_level;
+	PAD_BOOL		write_commit_level_override;
+
+	as_storage_type storage_type;
+
+	char*			storage_devices[AS_STORAGE_MAX_DEVICES];
+	char*			storage_shadows[AS_STORAGE_MAX_DEVICES];
+	char*			storage_files[AS_STORAGE_MAX_FILES];
+	off_t			storage_filesize;
+	char*			storage_scheduler_mode; // relevant for devices only, not files
+	uint32_t		storage_write_block_size;
+	PAD_BOOL		storage_data_in_memory;
+	PAD_BOOL		storage_cold_start_empty;
+	uint32_t		storage_defrag_lwm_pct;
+	uint32_t		storage_defrag_queue_min;
+	uint32_t		storage_defrag_sleep;
+	int				storage_defrag_startup_minimum;
+	PAD_BOOL		storage_disable_odirect;
+	PAD_BOOL		storage_enable_osync;
+	uint64_t		storage_flush_max_us;
+	uint64_t		storage_fsync_max_us;
+	uint64_t		storage_max_write_cache;
+	uint32_t		storage_min_avail_pct;
+	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
+	uint32_t		storage_write_threads;
+
+	uint32_t		storage_read_block_size;
+	uint32_t		storage_num_write_blocks;
+	PAD_BOOL		cond_write; // true if writing uniqueness is to be enforced by the KV store
+
+	uint64_t		sindex_data_max_memory;
+	uint32_t		sindex_num_partitions;
+
+	PAD_BOOL		geo2dsphere_within_strict;
+	uint16_t		geo2dsphere_within_min_level;
+	uint16_t		geo2dsphere_within_max_level;
+	uint16_t		geo2dsphere_within_max_cells;
+	uint16_t		geo2dsphere_within_level_mod;
+	uint32_t		geo2dsphere_within_earth_radius_meters;
+
+	//--------------------------------------------
+	// Statistics and histograms.
+	//
+
+	// Object counts.
+
 	cf_atomic_int	n_objects;
 	cf_atomic_int	n_sub_objects;
-	cf_atomic_int	n_bytes_memory;
-	cf_atomic_int	n_absent_partitions;
-	cf_atomic_int	n_actual_partitions;
-	cf_atomic_int	n_expired_objects;
-	cf_atomic_int	n_evicted_objects;
-	cf_atomic_int	n_deleted_set_objects;
 
-	// migration counters
+	// Expiration & eviction (nsup) stats.
+
+	cf_atomic32		stop_writes;
+	cf_atomic32		hwm_breached;
+
+	cf_atomic_int	max_void_time;
+	uint64_t		non_expirable_objects;
+
+	cf_atomic64		n_expired_objects;
+	cf_atomic64		n_evicted_objects;
+	cf_atomic64		n_deleted_set_objects;
+
+	cf_atomic64		evict_ttl;
+
+	uint32_t		nsup_cycle_duration; // seconds taken for most recent nsup cycle
+	uint32_t		nsup_cycle_sleep_pct; // fraction of most recent nsup cycle that was spent sleeping
+
+	// Memory usage stats.
+
+	cf_atomic_int	n_bytes_memory;
+	cf_atomic64		sindex_data_memory_used;
+
+	// Persistent storage stats.
+
+	float			cache_read_pct;
+
+	// Migration stats.
+
 	cf_atomic_int	migrate_tx_partitions_imbalance; // debug only
 	cf_atomic_int	migrate_tx_instance_count; // debug only
 	cf_atomic_int	migrate_rx_instance_count; // debug only
@@ -1104,81 +1165,197 @@ struct as_namespace_s {
 	cf_atomic_int	migrate_rx_partitions_initial;
 	cf_atomic_int	migrate_rx_partitions_remaining;
 
-	// migration per-record stats
+	// Per-record migration stats:
 	cf_atomic_int	migrate_records_skipped; // relevant only for enterprise edition
 	cf_atomic_int	migrate_records_transmitted;
 	cf_atomic_int	migrate_record_retransmits;
 	cf_atomic_int	migrate_record_receives;
 
-	// the maximum void time of all records in the namespace
-	cf_atomic_int max_void_time;
+	// tsvc-stage error counters.
 
-	// Number of 0-void-time objects. TODO - should be atomic.
-	uint64_t non_expirable_objects;
+	cf_atomic64		n_tsvc_client_error;
+	cf_atomic64		n_tsvc_client_timeout;
 
-	uint32_t	nsup_cycle_duration; // seconds taken for most recent nsup cycle
-	uint32_t	nsup_cycle_sleep_pct; // fraction of most recent nsup cycle that was spent sleeping
+	cf_atomic64		n_tsvc_batch_sub_error;
+	cf_atomic64		n_tsvc_batch_sub_timeout;
 
-	// Pointer to bin name vmap in persistent memory.
-	cf_vmapx		*p_bin_name_vmap;
+	cf_atomic64		n_tsvc_udf_sub_error;
+	cf_atomic64		n_tsvc_udf_sub_timeout;
 
-	// Pointer to set information vmap in persistent memory.
-	cf_vmapx		*p_sets_vmap;
+	// From-client transaction stats.
 
-	// Temporary array of sets to hold config values until sets vmap is ready.
-	as_set			*sets_cfg_array;
-	uint32_t		sets_cfg_count;
+	cf_atomic64		n_client_proxy_complete;
+	cf_atomic64		n_client_proxy_error;
+	cf_atomic64		n_client_proxy_timeout;
 
-	// Temporary structure to hold si config values until smd-bootup is done.
-	// shash entry for si name comparison btwn cfg and smd data
-	shash *sindex_cfg_var_hash;
+	cf_atomic64		n_client_read_success;
+	cf_atomic64		n_client_read_error;
+	cf_atomic64		n_client_read_timeout;
+	cf_atomic64		n_client_read_not_found;
 
-	// SINDEX
-	int					sindex_cnt;
-	struct as_sindex_s	*sindex;  // array with AS_MAX_SINDEX meta data
-	uint64_t			sindex_data_max_memory;
-	cf_atomic64		    sindex_data_memory_used;
-	shash               *sindex_set_binid_hash;
-	shash				*sindex_iname_hash;
-	uint32_t			binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
-	uint32_t			sindex_num_partitions;
+	cf_atomic64		n_client_write_success;
+	cf_atomic64		n_xdr_write_success; // subset of n_client_write_success
+	cf_atomic64		n_client_write_error;
+	cf_atomic64		n_client_write_timeout;
 
-	// Geospatial query within parameters.
-	bool			geo2dsphere_within_strict;
-	uint16_t		geo2dsphere_within_min_level;
-	uint16_t		geo2dsphere_within_max_level;
-	uint16_t		geo2dsphere_within_max_cells;
-	uint16_t		geo2dsphere_within_level_mod;
-	uint32_t		geo2dsphere_within_earth_radius_meters;
+	cf_atomic64		n_client_delete_success;
+	cf_atomic64		n_client_delete_error;
+	cf_atomic64		n_client_delete_timeout;
+	cf_atomic64		n_client_delete_not_found;
 
-	// Current state of threshold breaches.
-	cf_atomic32		hwm_breached;
-	cf_atomic32		stop_writes;
+	cf_atomic64		n_client_udf_complete;
+	cf_atomic64		n_client_udf_error;
+	cf_atomic64		n_client_udf_timeout;
 
-	// Flag for cold-start ticker and eviction threshold check.
-	bool			cold_start_loading;
+	cf_atomic64		n_client_lua_read_success;
+	cf_atomic64		n_client_lua_write_success;
+	cf_atomic64		n_client_lua_delete_success;
+	cf_atomic64		n_client_lua_error;
 
-	// For cold-start eviction.
-	pthread_mutex_t	cold_start_evict_lock;
-	uint32_t		cold_start_record_add_count;
-	uint32_t		cold_start_evict_ttl;
-	cf_atomic32		cold_start_threshold_void_time;
-	uint32_t		cold_start_max_void_time;
+	// Special errors that deserve their own counters:
+	cf_atomic64		n_client_trans_fail_xdr_forbidden;
+	cf_atomic64		n_client_trans_fail_key_busy;
+	cf_atomic64		n_client_write_fail_generation;
+	cf_atomic64		n_client_write_fail_record_too_big;
+
+	// Batch sub-transaction stats.
+
+	cf_atomic64		n_batch_sub_proxy_complete;
+	cf_atomic64		n_batch_sub_proxy_error;
+	cf_atomic64		n_batch_sub_proxy_timeout;
+
+	cf_atomic64		n_batch_sub_read_success;
+	cf_atomic64		n_batch_sub_read_error;
+	cf_atomic64		n_batch_sub_read_timeout;
+	cf_atomic64		n_batch_sub_read_not_found;
+
+	// Internal-UDF sub-transaction stats.
+
+	cf_atomic64		n_udf_sub_udf_complete;
+	cf_atomic64		n_udf_sub_udf_error;
+	cf_atomic64		n_udf_sub_udf_timeout;
+
+	cf_atomic64		n_udf_sub_lua_read_success;
+	cf_atomic64		n_udf_sub_lua_write_success;
+	cf_atomic64		n_udf_sub_lua_delete_success;
+	cf_atomic64		n_udf_sub_lua_error;
+
+	// Scan stats.
+
+	cf_atomic64		n_scan_basic_complete;
+	cf_atomic64		n_scan_basic_error;
+	cf_atomic64		n_scan_basic_abort;
+
+	cf_atomic64		n_scan_aggr_complete;
+	cf_atomic64		n_scan_aggr_error;
+	cf_atomic64		n_scan_aggr_abort;
+
+	cf_atomic64		n_scan_udf_bg_complete;
+	cf_atomic64		n_scan_udf_bg_error;
+	cf_atomic64		n_scan_udf_bg_abort;
+
+	// Query stats.
+
+	cf_atomic64		query_reqs;
+	cf_atomic64		query_fail;
+	cf_atomic64		query_short_queue_full;
+	cf_atomic64		query_long_queue_full;
+	cf_atomic64		query_short_reqs;
+	cf_atomic64		query_long_reqs;
+
+	cf_atomic64		n_lookup;
+	cf_atomic64		n_lookup_success;
+	cf_atomic64		n_lookup_abort;
+	cf_atomic64		n_lookup_errs;
+	cf_atomic64		lookup_response_size;
+	cf_atomic64		lookup_num_records;
+
+	cf_atomic64		n_aggregation;
+	cf_atomic64		n_agg_success;
+	cf_atomic64		n_agg_abort;
+	cf_atomic64		n_agg_errs;
+	cf_atomic64		agg_response_size;
+	cf_atomic64		agg_num_records;
+
+	cf_atomic64		n_query_udf_bg_success;
+	cf_atomic64		n_query_udf_bg_failure;
+
+	// Geospatial query stats:
+	cf_atomic64		geo_region_query_count;		// number of region queries
+	cf_atomic64		geo_region_query_cells;		// number of cells used by region queries
+	cf_atomic64		geo_region_query_points;	// number of valid points found
+	cf_atomic64		geo_region_query_falsepos;	// number of false positives found
+
+	// LDT stats.
+
+	ns_ldt_stats	lstats;
+
+	// One-way automatically activated histograms.
+
+	cf_hist_track*	read_hist;
+	cf_hist_track*	write_hist;
+	cf_hist_track*	udf_hist;
+	cf_hist_track*	query_hist;
+	histogram*		query_rec_count_hist;
+
+	PAD_BOOL		read_hist_active;
+	PAD_BOOL		write_hist_active;
+	PAD_BOOL		udf_hist_active;
+	PAD_BOOL		query_hist_active;
+	PAD_BOOL		query_rec_count_hist_active;
+
+	// Activate-by-config histograms.
+
+	histogram*		proxy_hist;
+
+	histogram*		read_start_hist;
+	histogram*		read_restart_hist;
+	histogram*		read_dup_res_hist;
+	histogram*		read_local_hist;
+	histogram*		read_response_hist;
+
+	histogram*		write_start_hist;
+	histogram*		write_restart_hist;
+	histogram*		write_dup_res_hist;
+	histogram*		write_master_hist; // split this?
+	histogram*		write_repl_write_hist;
+	histogram*		write_response_hist;
+
+	histogram*		udf_start_hist;
+	histogram*		udf_restart_hist;
+	histogram*		udf_dup_res_hist;
+	histogram*		udf_master_hist; // split this?
+	histogram*		udf_repl_write_hist;
+	histogram*		udf_response_hist;
+
+	histogram*		batch_sub_start_hist;
+	histogram*		batch_sub_restart_hist;
+	histogram*		batch_sub_dup_res_hist;
+	histogram*		batch_sub_read_local_hist;
+	histogram*		batch_sub_response_hist;
+
+	histogram*		udf_sub_start_hist;
+	histogram*		udf_sub_restart_hist;
+	histogram*		udf_sub_dup_res_hist;
+	histogram*		udf_sub_master_hist; // split this?
+	histogram*		udf_sub_repl_write_hist;
+	histogram*		udf_sub_response_hist;
 
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)
-	linear_hist 		*obj_size_hist;
-	linear_hist 		*set_obj_size_hists[AS_SET_MAX_COUNT + 1];
-	cf_atomic32			obj_size_hist_max;
+	linear_hist*	obj_size_hist;
+	linear_hist*	set_obj_size_hists[AS_SET_MAX_COUNT + 1];
 
 	// Histograms used for general eviction and expiration.
-	linear_hist 		*evict_hist;
-	linear_hist 		*ttl_hist;
-	linear_hist 		*set_ttl_hists[AS_SET_MAX_COUNT + 1]; // only for info
+	linear_hist*	evict_hist; // not just for info
+	linear_hist*	ttl_hist;
+	linear_hist*	set_ttl_hists[AS_SET_MAX_COUNT + 1];
+
+	//--------------------------------------------
+	// Data partitions.
+	//
 
 	as_partition partitions[AS_PARTITIONS];
-
-	ns_ldt_stats        lstats;
 };
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator

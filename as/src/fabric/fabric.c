@@ -38,7 +38,6 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
-#include <sys/socket.h>
 #include <sys/un.h>
 
 #include "citrusleaf/alloc.h"
@@ -55,7 +54,9 @@
 #include "util.h"
 
 #include "base/cfg.h"
+#include "base/stats.h"
 #include "fabric/hb.h"
+#include "fabric/paxos.h"
 
 
 // #define EXTRA_CHECKS 1
@@ -565,7 +566,7 @@ fabric_buffer_release(fabric_buffer *fb)
 
 		cf_socket_close(fb->sock);
 		SFD(fb->sock) = -1;
-		cf_atomic_int_incr(&g_config.fabric_connections_closed);
+		cf_atomic64_incr(&g_stats.fabric_connections_closed);
 
 		// No longer assigned to a worker.
 		fb->worker_id = -1;
@@ -625,7 +626,7 @@ fabric_buffer_write_fill( fabric_buffer *fb )
 					cf_debug(AS_FABRIC, "msg fillbuf returned fail, allocating new size %zu", remain);
 					fb->w_buf = cf_malloc(remain);
 					if (fb->w_buf) {
-						cf_atomic_int_incr(&g_config.fabric_msgs_sent);
+						cf_atomic64_incr(&g_stats.fabric_msgs_sent);
 						msg_fillbuf(m, fb->w_buf, &remain);
 						fb->w_in_place = false;
 						fb->w_total_len = remain;
@@ -643,7 +644,7 @@ fabric_buffer_write_fill( fabric_buffer *fb )
 
 				return(true);
 			}
-			cf_atomic_int_incr(&g_config.fabric_msgs_sent);
+			cf_atomic64_incr(&g_stats.fabric_msgs_sent);
 			fb->w_total_len += remain;
 			as_fabric_msg_put(m);
 		}
@@ -663,7 +664,7 @@ bool
 fabric_buffer_set_write_msg( fabric_buffer *fb, msg *m )
 {
 	// statistic - doesn't really show the message went out, though
-	cf_atomic_int_incr(&g_config.fabric_msgs_sent);
+	cf_atomic64_incr(&g_stats.fabric_msgs_sent);
 
 	// Parse out the message to the inplace buffer
 	fb->w_len = 0;
@@ -757,7 +758,7 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 		return(-1);
 	}
 
-	cf_atomic_int_incr(&g_config.fabric_connections_opened);
+	cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
 	// Create a fabric buffer to go along with the file descriptor
 	fabric_buffer *fb = fabric_buffer_create(sock);
@@ -785,7 +786,7 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 			cf_sock_addr_to_fabric(&addr, m);
 		}
 	}
-	msg_set_buf(m, FS_ANV, (byte *)g_config.paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
+	msg_set_buf(m, FS_ANV, (byte *)g_paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
 
 	fabric_buffer_set_write_msg(fb, m);
 
@@ -864,12 +865,6 @@ fabric_process_writable(fabric_buffer *fb)
 	fabric_buffer_write_fill(fb);
 
 	uint32_t w_len = fb->w_total_len - fb->w_len;
-	if (w_len < 500)
-		cf_atomic_int_incr(&g_config.fabric_write_short);
-	else if (w_len < (4 * 1024))
-		cf_atomic_int_incr(&g_config.fabric_write_medium);
-	else
-		cf_atomic_int_incr(&g_config.fabric_write_long);
 
 	if (fb->nodelay_isset == false) {
 		cf_socket_disable_nagle(fb->sock);
@@ -951,20 +946,11 @@ as_fabric_msg_get(msg_type type)
 void
 as_fabric_msg_put(msg *m)
 {
-	// Debug: validate that there was a reference count held before decrementing
-	cf_atomic_int_t d_cnt = cf_rc_count(m);
-	if (d_cnt <= 0) {
-		cf_debug(AS_FABRIC, "as_fabric_msg_put:  bad scene, ref count already low: m %p cnt %"PRIu64, m, d_cnt);
-		return;
-	}
+	int cnt = cf_rc_release(m);
 
-	// when it's in the queue, it has a reference count of 0
-	// thus, you can pull a message off and directly free it
-//	cf_debug(AS_FABRIC,"fabric_msg_put: check the use count %p %d",m,m->type);
-	cf_atomic_int_t	 cnt = cf_rc_release(m);
 	if (cnt == 0) {
-//		cf_debug(AS_FABRIC,"fabric_msg_put: resetting %p and adding to queue type %d",m,m->type);
 		msg_reset(m);
+
 		if (cf_queue_sz(g_fabric_args->msg_pool_queue[m->type]) > 128) {
 			msg_put(m);
 		}
@@ -972,9 +958,10 @@ as_fabric_msg_put(msg *m)
 			cf_queue_push(g_fabric_args->msg_pool_queue[m->type], &m);
 		}
 	}
-//	else {
-//		cf_debug(AS_FABRIC,"fabric_msg_put: decr %p to %d",m,cnt);
-//	}
+	else if (cnt < 0) {
+		msg_dump(m, "extra put");
+		cf_crash(AS_FABRIC, "extra put for msg type %d", m->type);
+	}
 }
 
 void
@@ -1123,7 +1110,7 @@ Next:
 		cf_detail(AS_FABRIC, "msg_read: received msg: type %d node %"PRIx64, m->type, fb->fne->node);
 
 		// statistic - received a message.
-		cf_atomic_int_incr(&g_config.fabric_msgs_rcvd);
+		cf_atomic64_incr(&g_stats.fabric_msgs_rcvd);
 		// and it was a good read
 		fb->fne->good_read_counter = 0;
 
@@ -1177,13 +1164,6 @@ fabric_process_readable(fabric_buffer *fb)
 	while (fabric_process_read_msg(fb)) {
 		;
 	}
-
-	if (rsz < 500)
-		cf_atomic_int_incr(&g_config.fabric_read_short);
-	else if (rsz < (4 * 1024))
-		cf_atomic_int_incr(&g_config.fabric_read_medium);
-	else
-		cf_atomic_int_incr(&g_config.fabric_read_long);
 
 	return 0;
 }
@@ -1350,7 +1330,9 @@ fabric_worker_fn(void *argv)
 					// read the notification byte out
 					byte note_byte;
 
-					read(note_fd, &note_byte, sizeof(note_byte));
+					if (-1 == read(note_fd, &note_byte, sizeof(note_byte))) {
+						// Suppress GCC warning for unused return value.
+					}
 
 					// Got some kind of notification - check my queue
 					worker_queue_element wqe;
@@ -1497,7 +1479,7 @@ fabric_accept_fn(void *argv)
 		/* Set the socket to nonblocking */
 		cf_socket_disable_blocking(csock);
 
-		cf_atomic_int_incr(&g_config.fabric_connections_opened);
+		cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
 		/* Create new fabric buffer, but don't yet know
 		   the remote endpoint, so the FNE is not associated yet */
@@ -1541,7 +1523,7 @@ fabric_note_server_fn(void *argv)
 		/* Set the socket to nonblocking */
 		cf_socket_disable_blocking(WSFD(fd));
 
-		cf_atomic_int_incr(&g_config.fabric_connections_opened);
+		cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
 		cf_debug(AS_FABRIC, "Notification server: received connect from index %d", fd_idx);
 
@@ -1909,9 +1891,6 @@ as_fabric_send(cf_node node, msg *m, int priority )
 
 	// Short circuit for self!
 	if (g_config.self_node == node) {
-
-		// statistic!
-		cf_atomic_int_incr(&g_config.fabric_msgs_selfsend);
 
 		// if not, just deliver raw message
 		if (g_fabric_args->msg_cb[m->type]) {

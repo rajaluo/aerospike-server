@@ -45,12 +45,12 @@
 #include "base/index.h"
 #include "base/ldt.h"
 #include "base/secondary_index.h"
-#include "base/thr_rw_internal.h"
 #include "base/transaction.h"
 #include "base/udf_record.h"
-#include "base/udf_rw.h"
 #include "base/xdr_serverside.h"
 #include "storage/storage.h"
+#include "transaction/rw_utils.h"
+#include "transaction/udf.h"
 
 
 static int udf_aerospike_rec_remove(const as_aerospike *, const as_rec *);
@@ -850,7 +850,7 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 		// Set the set name to index and close record if the setting the set name
 		// is not successful
 		int rv_set = as_transaction_has_set(tr) ?
-				as_record_set_set_from_msg(r_ref->r, tr->rsv.ns, &tr->msgp->msg) : 0;
+				set_set_from_msg(r_ref->r, tr->rsv.ns, &tr->msgp->msg) : 0;
 		if (rv_set != 0) {
 			cf_warning(AS_UDF, "udf_aerospike_rec_create: Failed to set setname");
 			if (is_create) {

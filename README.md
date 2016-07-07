@@ -220,5 +220,5 @@ or, equivalently:
 Please refer to the full documentation on the Aerospike web site,
 [`http://aerospike.com/docs/`](http://aerospike.com/docs/), for more
 detailed information about configuring and running the Aerospike
-Database Server, as well as the about the Aerospike client API packages
+Database Server, as well as about the Aerospike client API packages
 for popular programming languages.

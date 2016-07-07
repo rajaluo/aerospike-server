@@ -60,6 +60,7 @@
 #include "base/thr_info.h"
 #include "base/thr_query.h"
 #include "base/thr_sindex.h"
+#include "base/thr_tsvc.h"
 #include "base/transaction_policy.h"
 #include "fabric/migrate.h"
 
@@ -90,6 +91,8 @@ void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
 void cfg_init_si_var(as_namespace* ns);
 uint32_t cfg_obj_size_hist_max(uint32_t hist_max);
+void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
+void create_and_check_hist(histogram** h, const char* name, histogram_scale scale);
 void cfg_create_all_histograms();
 int cfg_reset_self_node(as_config* config_p);
 char* cfg_set_addr(const char* name);
@@ -121,11 +124,10 @@ cfg_set_defaults()
 	c->batch_priority = 200; // # of rows between a quick context switch?
 	c->n_batch_index_threads = 4;
 	c->n_fabric_workers = 16;
-	c->hist_track_back = 1800;
+	c->hist_track_back = 300;
 	c->hist_track_slice = 10;
 	c->n_info_threads = 16;
 	c->ldt_benchmarks = false;
-	c->microbenchmarks = false;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
 	c->migrate_rx_lifetime_ms = AS_MIGRATE_DEFAULT_RX_LIFETIME_MS; // for debouncing re-transmitted migrate start messages
 	c->n_migrate_threads = 1;
@@ -143,7 +145,6 @@ cfg_set_defaults()
 	c->scan_max_done = 100;
 	c->scan_max_udf_transactions = 32;
 	c->scan_threads = 4;
-	c->storage_benchmarks = false;
 	c->ticker_interval = 10;
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_pending_limit = 20;
@@ -211,12 +212,6 @@ cfg_set_defaults()
 	// TODO - security set default config API?
 	c->sec_cfg.privilege_refresh_period = 60 * 5; // refresh socket privileges every 5 minutes
 	c->sec_cfg.syslog_local = AS_SYSLOG_NONE;
-
-	// TODO - not sure why these are in configuration - just to be global?
-	c->start_ms = cf_getms();
-	c->record_locks = olock_create(16 * 1024, true); // TODO - configurable number of locks?
-
-	c->n_namespaces = 0;
 }
 
 
@@ -265,6 +260,8 @@ typedef enum {
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
 	CASE_SERVICE_BATCH_PRIORITY,
 	CASE_SERVICE_BATCH_INDEX_THREADS,
+	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
+	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FABRIC_WORKERS,
 	CASE_SERVICE_GENERATION_DISABLE,
 	CASE_SERVICE_HIST_TRACK_BACK,
@@ -273,7 +270,6 @@ typedef enum {
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_LDT_BENCHMARKS,
 	CASE_SERVICE_LOG_LOCAL_TIME,
-	CASE_SERVICE_MICROBENCHMARKS,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
 	CASE_SERVICE_MIGRATE_RX_LIFETIME_MS,
 	CASE_SERVICE_MIGRATE_THREADS,
@@ -300,7 +296,6 @@ typedef enum {
 	CASE_SERVICE_QUERY_THRESHOLD,
 	CASE_SERVICE_QUERY_UNTRACKED_TIME_MS,
 	CASE_SERVICE_QUERY_WORKER_THREADS,
-	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
 	CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION,
 	CASE_SERVICE_RUN_AS_DAEMON,
 	CASE_SERVICE_SCAN_MAX_ACTIVE,
@@ -310,14 +305,11 @@ typedef enum {
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_DATA_MAX_MEMORY,
 	CASE_SERVICE_SNUB_NODES,
-	CASE_SERVICE_STORAGE_BENCHMARKS,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
-	CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY,
-	CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY,
 	CASE_SERVICE_USE_QUEUE_PER_DEVICE,
 	CASE_SERVICE_WORK_DIRECTORY,
 	CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE,
@@ -357,6 +349,7 @@ typedef enum {
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
 	CASE_SERVICE_NSUP_THREADS,
+	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
 	CASE_SERVICE_SCAN_MEMORY,
 	CASE_SERVICE_SCAN_PRIORITY,
 	CASE_SERVICE_SCAN_RETRANSMIT,
@@ -364,6 +357,8 @@ typedef enum {
 	CASE_SERVICE_SCHEDULER_TYPE,
 	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS,
 	CASE_SERVICE_TRIAL_ACCOUNT_KEY,
+	CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY,
+	CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY,
 
 	// Service paxos protocol options (value tokens):
 	CASE_SERVICE_PAXOS_PROTOCOL_V1,
@@ -474,6 +469,13 @@ typedef enum {
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY,
 	CASE_NAMESPACE_DATA_IN_INDEX,
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_READ,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE, // TODO - should this be in storage scope?
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB,
+	CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE,
+	CASE_NAMESPACE_ENABLE_HIST_PROXY,
 	CASE_NAMESPACE_EVICT_HIST_BUCKETS,
 	CASE_NAMESPACE_EVICT_TENTHS_PCT,
 	CASE_NAMESPACE_HIGH_WATER_DISK_PCT,
@@ -672,6 +674,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
 		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
 		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
+		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
+		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
 		{ "generation-disable",				CASE_SERVICE_GENERATION_DISABLE },
 		{ "hist-track-back",				CASE_SERVICE_HIST_TRACK_BACK },
@@ -680,17 +684,9 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
-		{ "microbenchmarks",				CASE_SERVICE_MICROBENCHMARKS },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
-		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
-		{ "migrate-read-sleep",				CASE_SERVICE_MIGRATE_READ_SLEEP },
 		{ "migrate-rx-lifetime-ms",			CASE_SERVICE_MIGRATE_RX_LIFETIME_MS },
 		{ "migrate-threads",				CASE_SERVICE_MIGRATE_THREADS },
-		{ "migrate-xmit-hwm",				CASE_SERVICE_MIGRATE_XMIT_HWM },
-		{ "migrate-xmit-lwm",				CASE_SERVICE_MIGRATE_XMIT_LWM },
-		{ "migrate-priority",				CASE_SERVICE_MIGRATE_PRIORITY },
-		{ "migrate-xmit-priority",			CASE_SERVICE_MIGRATE_XMIT_PRIORITY },
-		{ "migrate-xmit-sleep",				CASE_SERVICE_MIGRATE_XMIT_SLEEP },
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
@@ -714,7 +710,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "query-threshold", 				CASE_SERVICE_QUERY_THRESHOLD },
 		{ "query-untracked-time-ms",		CASE_SERVICE_QUERY_UNTRACKED_TIME_MS },
 		{ "query-worker-threads",			CASE_SERVICE_QUERY_WORKER_THREADS },
-		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
 		{ "respond-client-on-master-completion", CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION },
 		{ "run-as-daemon",					CASE_SERVICE_RUN_AS_DAEMON },
 		{ "scan-max-active",				CASE_SERVICE_SCAN_MAX_ACTIVE },
@@ -724,14 +719,11 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-data-max-memory",			CASE_SERVICE_SINDEX_DATA_MAX_MEMORY },
 		{ "snub-nodes",						CASE_SERVICE_SNUB_NODES },
-		{ "storage-benchmarks",				CASE_SERVICE_STORAGE_BENCHMARKS },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
-		{ "udf-runtime-max-gmemory",		CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY },
-		{ "udf-runtime-max-memory",			CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY },
 		{ "use-queue-per-device",			CASE_SERVICE_USE_QUEUE_PER_DEVICE },
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "write-duplicate-resolution-disable", CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE },
@@ -753,6 +745,13 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "fb-health-good-pct",				CASE_SERVICE_FB_HEALTH_GOOD_PCT },
 		{ "fb-health-msg-per-burst",		CASE_SERVICE_FB_HEALTH_MSG_PER_BURST },
 		{ "fb-health-msg-timeout",			CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT },
+		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
+		{ "migrate-read-sleep",				CASE_SERVICE_MIGRATE_READ_SLEEP },
+		{ "migrate-xmit-hwm",				CASE_SERVICE_MIGRATE_XMIT_HWM },
+		{ "migrate-xmit-lwm",				CASE_SERVICE_MIGRATE_XMIT_LWM },
+		{ "migrate-priority",				CASE_SERVICE_MIGRATE_PRIORITY },
+		{ "migrate-xmit-priority",			CASE_SERVICE_MIGRATE_XMIT_PRIORITY },
+		{ "migrate-xmit-sleep",				CASE_SERVICE_MIGRATE_XMIT_SLEEP },
 		{ "nsup-auto-hwm",					CASE_SERVICE_NSUP_AUTO_HWM },
 		{ "nsup-auto-hwm-pct",				CASE_SERVICE_NSUP_AUTO_HWM_PCT },
 		{ "nsup-max-deletes",				CASE_SERVICE_NSUP_MAX_DELETES },
@@ -762,6 +761,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
 		{ "nsup-threads",					CASE_SERVICE_NSUP_THREADS },
+		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
 		{ "scan-memory",					CASE_SERVICE_SCAN_MEMORY },
 		{ "scan-priority",					CASE_SERVICE_SCAN_PRIORITY },
 		{ "scan-retransmit",				CASE_SERVICE_SCAN_RETRANSMIT },
@@ -769,6 +769,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scheduler-type",					CASE_SERVICE_SCHEDULER_TYPE },
 		{ "transaction-duplicate-threads",	CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS },
 		{ "trial-account-key",				CASE_SERVICE_TRIAL_ACCOUNT_KEY },
+		{ "udf-runtime-max-gmemory",		CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY },
+		{ "udf-runtime-max-memory",			CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -883,6 +885,13 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "conflict-resolution-policy",		CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY },
 		{ "data-in-index",					CASE_NAMESPACE_DATA_IN_INDEX },
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
+		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
+		{ "enable-benchmarks-read",			CASE_NAMESPACE_ENABLE_BENCHMARKS_READ },
+		{ "enable-benchmarks-storage",		CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE },
+		{ "enable-benchmarks-udf",			CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF },
+		{ "enable-benchmarks-udf-sub",		CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB },
+		{ "enable-benchmarks-write",		CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE },
+		{ "enable-hist-proxy",				CASE_NAMESPACE_ENABLE_HIST_PROXY },
 		{ "evict-hist-buckets",				CASE_NAMESPACE_EVICT_HIST_BUCKETS },
 		{ "evict-tenths-pct",				CASE_NAMESPACE_EVICT_TENTHS_PCT },
 		{ "high-water-disk-pct",			CASE_NAMESPACE_HIGH_WATER_DISK_PCT },
@@ -1783,7 +1792,6 @@ as_config_init(const char *config_file)
 	as_set* p_set = NULL; // local variable used for set initialization
 	as_sindex_config_var si_cfg;
 
-	uint64_t config_val = 0;
 	cc_group_t cluster_group_id = 0; // hold the group name while we process nodes (0 not a valid ID #)
 	cc_node_t cluster_node_id; // capture the node id in a group
 
@@ -1944,6 +1952,12 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_BATCH_INDEX_THREADS:
 				c->n_batch_index_threads = cfg_int(&line, 1, MAX_BATCH_THREADS);
 				break;
+			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
+				c->svc_benchmarks_enabled = cfg_bool(&line);
+				break;
+			case CASE_SERVICE_ENABLE_HIST_INFO:
+				c->info_hist_enabled = cfg_bool(&line);
+				break;
 			case CASE_SERVICE_FABRIC_WORKERS:
 				c->n_fabric_workers = cfg_int(&line, 1, MAX_FABRIC_WORKERS);
 				break;
@@ -1968,9 +1982,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_LOG_LOCAL_TIME:
 				cf_fault_use_local_time(cfg_bool(&line));
-				break;
-			case CASE_SERVICE_MICROBENCHMARKS:
-				c->microbenchmarks = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING:
 				c->migrate_max_num_incoming = cfg_int(&line, 0, INT_MAX);
@@ -2084,9 +2095,6 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_QUERY_WORKER_THREADS:
 				c->query_worker_threads = cfg_u32(&line, 1, AS_QUERY_MAX_WORKER_THREADS);
 				break;
-			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
-				c->replication_fire_and_forget = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_RESPOND_CLIENT_ON_MASTER_COMPLETION:
 				c->respond_client_on_master_completion = cfg_bool(&line);
 				break;
@@ -2109,21 +2117,10 @@ as_config_init(const char *config_file)
 				c->sindex_builder_threads = cfg_u32(&line, 1, MAX_SINDEX_BUILDER_THREADS);
 				break;
 			case CASE_SERVICE_SINDEX_DATA_MAX_MEMORY:
-				config_val = cfg_u64_no_checks(&line);
-				if (config_val <  cf_atomic64_get(c->sindex_data_memory_used)) {
-					cf_warning(AS_CFG, "sindex-data-max-memory must"
-							" be greater than existing used memory %ld (line %d)",
-							cf_atomic64_get(c->sindex_data_memory_used), line_num);
-				}
-				else {
-					c->sindex_data_max_memory = config_val; // this is in addition to namespace memory
-				}
+				c->sindex_data_max_memory = cfg_u64_no_checks(&line);
 				break;
 			case CASE_SERVICE_SNUB_NODES:
 				c->snub_nodes = cfg_bool(&line);
-				break;
-			case CASE_SERVICE_STORAGE_BENCHMARKS:
-				c->storage_benchmarks = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
@@ -2139,18 +2136,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_TRANSACTION_RETRY_MS:
 				c->transaction_retry_ms = cfg_u32_no_checks(&line);
-				break;
-			case CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY:
-				config_val = cfg_u64_no_checks(&line);
-				if (config_val < c->udf_runtime_gmemory_used) {
-					cf_crash_nostack(AS_CFG, "udf-runtime-max-gmemory must"
-							" be greater than existing used memory %ld (line %d)",
-							cf_atomic_int_get(c->udf_runtime_gmemory_used), line_num);
-				}
-				c->udf_runtime_max_gmemory = config_val;
-				break;
-			case CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY:
-				config_val = cfg_u64_no_checks(&line);
 				break;
 			case CASE_SERVICE_USE_QUEUE_PER_DEVICE:
 				c->use_queue_per_device = cfg_bool(&line);
@@ -2206,6 +2191,7 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
 			case CASE_SERVICE_NSUP_THREADS:
+			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
 			case CASE_SERVICE_SCAN_MEMORY:
 			case CASE_SERVICE_SCAN_PRIORITY:
 			case CASE_SERVICE_SCAN_RETRANSMIT:
@@ -2213,6 +2199,8 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_SCHEDULER_TYPE:
 			case CASE_SERVICE_TRANSACTION_DUPLICATE_THREADS:
 			case CASE_SERVICE_TRIAL_ACCOUNT_KEY:
+			case CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY:
+			case CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY:
 				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
@@ -2564,6 +2552,9 @@ as_config_init(const char *config_file)
 					cfg_not_supported(&line, "XDR");
 				}
 				break;
+			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
+				// The server isn't interested in this, but the XDR module is!
+				break;
 			case CASE_NAMESPACE_ALLOW_NONXDR_WRITES:
 				ns->ns_allow_nonxdr_writes = cfg_bool(&line);
 				if (ns->ns_allow_nonxdr_writes && ! g_xdr_supported) {
@@ -2575,9 +2566,6 @@ as_config_init(const char *config_file)
 				if (ns->ns_allow_xdr_writes && ! g_xdr_supported) {
 					cfg_not_supported(&line, "XDR");
 				}
-				break;
-			case CASE_NAMESPACE_XDR_REMOTE_DATACENTER:
-				// The server isn't interested in this, but the XDR module is!
 				break;
 			case CASE_NAMESPACE_COLD_START_EVICT_TTL:
 				ns->cold_start_evict_ttl = cfg_u32_no_checks(&line);
@@ -2601,6 +2589,27 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_DISALLOW_NULL_SETNAME:
 				ns->disallow_null_setname = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB:
+				ns->batch_sub_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_READ:
+				ns->read_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE:
+				ns->storage_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF:
+				ns->udf_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB:
+				ns->udf_sub_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE:
+				ns->write_benchmarks_enabled = true;
+				break;
+			case CASE_NAMESPACE_ENABLE_HIST_PROXY:
+				ns->proxy_hist_enabled = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_EVICT_HIST_BUCKETS:
 				ns->evict_hist_buckets = cfg_u32(&line, 100, 10000000);
@@ -2900,7 +2909,7 @@ as_config_init(const char *config_file)
 		case NAMESPACE_SI:
 			switch(cfg_find_tok(line.name_tok, NAMESPACE_SI_OPTS, NUM_NAMESPACE_SI_OPTS)) {
 			case CASE_NAMESPACE_SI_GC_PERIOD:
-				si_cfg.defrag_period= cfg_u64_no_checks(&line);
+				si_cfg.defrag_period = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SI_GC_MAX_UNITS:
 				si_cfg.defrag_max_units = cfg_u32_no_checks(&line);
@@ -2933,15 +2942,7 @@ as_config_init(const char *config_file)
 		case NAMESPACE_SINDEX:
 			switch(cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
 			case CASE_NAMESPACE_SINDEX_DATA_MAX_MEMORY:
-				config_val = cfg_u64_no_checks(&line);
-				if (config_val < cf_atomic64_get(ns->sindex_data_memory_used)) {
-					cf_warning(AS_CFG, "sindex-data-max-memory must"
-							" be greater than existing used memory %ld (line %d)",
-							cf_atomic64_get(ns->sindex_data_memory_used), line_num);
-				}
-				else {
-					ns->sindex_data_max_memory = config_val; // this is in addition to namespace memory
-				}
+				ns->sindex_data_max_memory = cfg_u64_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_SINDEX_NUM_PARTITIONS:
 				// FIXME - minimum should be 1, but currently crashes.
@@ -3285,6 +3286,10 @@ as_config_post_process(as_config *c, const char *config_file)
 
 	cf_info(AS_CFG, "system file descriptor limit: %lu, proto-fd-max: %d", fd_limit.rlim_cur, c->n_proto_fd_max);
 
+	// Allocate and initialize the record locks (olocks). Maybe not the best
+	// place for this, unless we make number of locks configurable.
+	g_record_locks = olock_create(16 * 1024, true);
+
 	// Setup performance metrics histograms.
 	cfg_create_all_histograms();
 
@@ -3384,6 +3389,91 @@ as_config_post_process(as_config *c, const char *config_file)
 		client_replica_maps_create(ns);
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
+
+		// One-way activated histograms (may be tracked histograms).
+
+		sprintf(hist_name, "{%s}-read", ns->name);
+		create_and_check_hist_track(&ns->read_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-write", ns->name);
+		create_and_check_hist_track(&ns->write_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-udf", ns->name);
+		create_and_check_hist_track(&ns->udf_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-query", ns->name);
+		create_and_check_hist_track(&ns->query_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-query-rec-count", ns->name);
+		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_RAW);
+
+		// Activate-by-config histograms (can't be tracked histograms).
+
+		sprintf(hist_name, "{%s}-proxy", ns->name);
+		create_and_check_hist(&ns->proxy_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-read-start", ns->name);
+		create_and_check_hist(&ns->read_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-read-restart", ns->name);
+		create_and_check_hist(&ns->read_restart_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-read-dup-res", ns->name);
+		create_and_check_hist(&ns->read_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-read-local", ns->name);
+		create_and_check_hist(&ns->read_local_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-read-response", ns->name);
+		create_and_check_hist(&ns->read_response_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-write-start", ns->name);
+		create_and_check_hist(&ns->write_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-write-restart", ns->name);
+		create_and_check_hist(&ns->write_restart_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-write-dup-res", ns->name);
+		create_and_check_hist(&ns->write_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-write-master", ns->name);
+		create_and_check_hist(&ns->write_master_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-write-repl-write", ns->name);
+		create_and_check_hist(&ns->write_repl_write_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-write-response", ns->name);
+		create_and_check_hist(&ns->write_response_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-udf-start", ns->name);
+		create_and_check_hist(&ns->udf_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-restart", ns->name);
+		create_and_check_hist(&ns->udf_restart_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-dup-res", ns->name);
+		create_and_check_hist(&ns->udf_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-master", ns->name);
+		create_and_check_hist(&ns->udf_master_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-repl-write", ns->name);
+		create_and_check_hist(&ns->udf_repl_write_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-response", ns->name);
+		create_and_check_hist(&ns->udf_response_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-batch-sub-start", ns->name);
+		create_and_check_hist(&ns->batch_sub_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-batch-sub-restart", ns->name);
+		create_and_check_hist(&ns->batch_sub_restart_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-batch-sub-dup-res", ns->name);
+		create_and_check_hist(&ns->batch_sub_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-batch-sub-read-local", ns->name);
+		create_and_check_hist(&ns->batch_sub_read_local_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-batch-sub-response", ns->name);
+		create_and_check_hist(&ns->batch_sub_response_hist, hist_name, HIST_MILLISECONDS);
+
+		sprintf(hist_name, "{%s}-udf-sub-start", ns->name);
+		create_and_check_hist(&ns->udf_sub_start_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-sub-restart", ns->name);
+		create_and_check_hist(&ns->udf_sub_restart_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-sub-dup-res", ns->name);
+		create_and_check_hist(&ns->udf_sub_dup_res_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-sub-master", ns->name);
+		create_and_check_hist(&ns->udf_sub_master_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-sub-repl-write", ns->name);
+		create_and_check_hist(&ns->udf_sub_repl_write_hist, hist_name, HIST_MILLISECONDS);
+		sprintf(hist_name, "{%s}-udf-sub-response", ns->name);
+		create_and_check_hist(&ns->udf_sub_response_hist, hist_name, HIST_MILLISECONDS);
+
+		// Linear 'nsup' histograms.
 		// Note - histograms' ranges MUST be set before use.
 
 		sprintf(hist_name, "%s object size histogram", ns->name);
@@ -3507,7 +3597,7 @@ cfg_obj_size_hist_max(uint32_t hist_max)
 // Other (non-item-specific) utilities.
 //
 
-static void
+void
 create_and_check_hist_track(cf_hist_track** h, const char* name,
 		histogram_scale scale)
 {
@@ -3523,7 +3613,7 @@ create_and_check_hist_track(cf_hist_track** h, const char* name,
 	}
 }
 
-static void
+void
 create_and_check_hist(histogram** h, const char* name, histogram_scale scale)
 {
 	if (NULL == (*h = histogram_create(name, scale))) {
@@ -3531,66 +3621,20 @@ create_and_check_hist(histogram** h, const char* name, histogram_scale scale)
 	}
 }
 
+// TODO - not really a config method any more, reorg needed.
 void
 cfg_create_all_histograms()
 {
-	as_config* c = &g_config;
+	create_and_check_hist(&g_stats.batch_index_hist, "batch-index", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.info_hist, "info", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.svc_demarshal_hist, "svc-demarshal", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.svc_queue_hist, "svc-queue", HIST_MILLISECONDS);
 
-	create_and_check_hist_track(&c->rt_hist, "reads", HIST_MILLISECONDS);
-	create_and_check_hist_track(&c->q_hist, "query", HIST_MILLISECONDS);
-	create_and_check_hist_track(&c->q_rcnt_hist, "query_rec_count", HIST_RAW);
-	create_and_check_hist_track(&c->ut_hist, "udf", HIST_MILLISECONDS);
-	create_and_check_hist_track(&c->wt_hist, "writes_master", HIST_MILLISECONDS);
-	create_and_check_hist_track(&c->px_hist, "proxy", HIST_MILLISECONDS);
-
-	create_and_check_hist(&c->rt_cleanup_hist, "reads_cleanup", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_net_hist, "reads_net", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_net_hist, "writes_net", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_storage_read_hist, "reads_storage_read", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_storage_open_hist, "reads_storage_open", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_tree_hist, "reads_tree", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_internal_hist, "reads_internal", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_internal_hist, "writes_internal", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_start_hist, "reads_start", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_start_hist, "writes_start", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_q_process_hist, "reads_q_process", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_q_process_hist, "writes_q_process", HIST_MILLISECONDS);
-	create_and_check_hist(&c->q_wait_hist, "q_wait", HIST_MILLISECONDS);
-	create_and_check_hist(&c->demarshal_hist, "demarshal_hist", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_master_wait_prole_hist, "wt_master_wait_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_prole_hist, "writes_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_resolve_hist, "reads_resolve", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_resolve_hist, "writes_resolve", HIST_MILLISECONDS);
-	create_and_check_hist(&c->rt_resolve_wait_hist, "reads_resolve_wait", HIST_MILLISECONDS);
-	create_and_check_hist(&c->wt_resolve_wait_hist, "writes_resolve_wait", HIST_MILLISECONDS);
-	create_and_check_hist(&c->error_hist, "error", HIST_MILLISECONDS);
-	create_and_check_hist(&c->batch_index_reads_hist, "batch_index_reads", HIST_MILLISECONDS);
-	create_and_check_hist(&c->batch_q_process_hist, "batch_q_process", HIST_MILLISECONDS);
-	create_and_check_hist(&c->info_q_wait_hist, "info_q_wait", HIST_MILLISECONDS);
-	create_and_check_hist(&c->info_post_lock_hist, "info_post_lock", HIST_MILLISECONDS);
-	create_and_check_hist(&c->info_fulfill_hist, "info_fulfill", HIST_MILLISECONDS);
-	create_and_check_hist(&c->write_storage_close_hist, "write_storage_close", HIST_MILLISECONDS);
-	create_and_check_hist(&c->write_sindex_hist, "write_sindex", HIST_MILLISECONDS);
-	create_and_check_hist(&c->prole_fabric_send_hist, "prole_fabric_send", HIST_MILLISECONDS);
-
-	create_and_check_hist(&c->ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&c->ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);
-	create_and_check_hist(&c->ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
-	create_and_check_hist(&c->ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_RAW);
-	create_and_check_hist(&c->ldt_hist, "ldt", HIST_MILLISECONDS);
-
-#ifdef HISTOGRAM_OBJECT_LATENCY
-	create_and_check_hist(&c->read0_hist, "read_0bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read1_hist, "read_1bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read2_hist, "read_2bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read3_hist, "read_3bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read4_hist, "read_4bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read5_hist, "read_5bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read6_hist, "read_6bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read7_hist, "read_7bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read8_hist, "read_8bucket", HIST_MILLISECONDS);
-	create_and_check_hist(&c->read9_hist, "read_9bucket", HIST_MILLISECONDS);
-#endif
+	create_and_check_hist(&g_stats.ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);
+	create_and_check_hist(&g_stats.ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
+	create_and_check_hist(&g_stats.ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_RAW);
+	create_and_check_hist(&g_stats.ldt_hist, "ldt", HIST_MILLISECONDS);
 }
 
 /**

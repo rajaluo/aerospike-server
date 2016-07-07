@@ -93,7 +93,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_META_SEQUENCE_FINAL, M_FT_UINT32 }
 };
 
-COMPILER_ASSERT(sizeof(migrate_mt) / sizeof (msg_template) == NUM_MIG_FIELDS);
+COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 
 #define MIG_MSG_SCRATCH_SIZE 128
 
@@ -303,7 +303,6 @@ as_migrate_emigrate(const partition_migrate_record *pmr)
 
 	AS_PARTITION_RESERVATION_INIT(emig->rsv);
 	as_partition_reserve_migrate(pmr->ns, pmr->pid, &emig->rsv, NULL);
-	cf_atomic_int_incr(&g_config.migtx_tree_count);
 
 	cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_instance_count);
 
@@ -464,7 +463,6 @@ emigration_destroy(void *parm)
 		cf_atomic_int_decr(&emig->rsv.ns->migrate_tx_instance_count);
 
 		as_partition_release(&emig->rsv);
-		cf_atomic_int_decr(&g_config.migtx_tree_count);
 	}
 }
 
@@ -504,7 +502,6 @@ immigration_destroy(void *parm)
 		cf_atomic_int_decr(&immig->rsv.ns->migrate_rx_instance_count);
 
 		as_partition_release(&immig->rsv);
-		cf_atomic_int_decr(&g_config.migrx_tree_count);
 	}
 
 	shash_delete(g_immigration_ldt_version_hash, &ldtv);
@@ -979,10 +976,8 @@ emigration_send_start(emigration *emig)
 		if (start_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
 			cf_rc_reserve(m);
 
-			int rv;
-
-			if ((rv = as_fabric_send(emig->dest, m,
-					AS_FABRIC_PRIORITY_MEDIUM)) != AS_FABRIC_SUCCESS) {
+			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+					AS_FABRIC_SUCCESS) {
 				as_fabric_msg_put(m);
 			}
 
@@ -1308,7 +1303,6 @@ immigration_handle_start_request(cf_node src, msg *m) {
 	uint32_t mig_features_in_use = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
 
 	as_partition_reserve_migrate(ns, pid, &immig->rsv, NULL);
-	cf_atomic_int_incr(&g_config.migrx_tree_count);
 
 	cf_atomic_int_incr(&immig->rsv.ns->migrate_rx_instance_count);
 

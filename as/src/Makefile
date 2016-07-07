@@ -24,22 +24,22 @@ endif
 BASE_HEADERS += aggr.h asm.h batch.h cdt.h cfg.h cluster_config.h datamodel.h index.h job_manager.h json_init.h
 BASE_HEADERS += ldt.h ldt_aerospike.h ldt_record.h monitor.h packet_compression.h
 BASE_HEADERS += particle.h particle_blob.h particle_integer.h
-BASE_HEADERS += proto.h rec_props.h scan.h secondary_index.h security.h security_config.h system_metadata.h
-BASE_HEADERS += thr_batch.h thr_info.h thr_proxy.h thr_query.h thr_rw_internal.h thr_sindex.h
-BASE_HEADERS += thr_tsvc.h thr_write.h transaction.h transaction_policy.h
+BASE_HEADERS += proto.h rec_props.h scan.h secondary_index.h security.h security_config.h stats.h system_metadata.h
+BASE_HEADERS += thr_batch.h thr_info.h thr_query.h thr_sindex.h
+BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h
 BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h
-BASE_HEADERS += udf_memtracker.h udf_record.h udf_rw.h udf_timer.h
-BASE_HEADERS += write_request.h xdr_serverside.h
+BASE_HEADERS += udf_memtracker.h udf_record.h udf_timer.h
+BASE_HEADERS += xdr_serverside.h
 
 BASE_SOURCES += aggr.c as.c asm.c batch.c bin.c cdt.c cfg.c cluster_config.c index.c job_manager.c json_init.c
 BASE_SOURCES += ldt.c ldt_record.c ldt_aerospike.c monitor.c namespace.c packet_compression.c
 BASE_SOURCES += particle.c particle_blob.c particle_float.c particle_geojson.c particle_integer.c
 BASE_SOURCES += particle_list.c particle_map.c particle_string.c
 BASE_SOURCES += proto.c rec_props.c record.c scan.c signal.c secondary_index.c system_metadata.c
-BASE_SOURCES += thr_batch.c thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.c thr_proxy.c
-BASE_SOURCES += thr_query.c thr_rw.c thr_sindex.c thr_tsvc.c transaction.c
+BASE_SOURCES += thr_batch.c thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.c
+BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
 BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
-BASE_SOURCES += udf_memtracker.c udf_record.c udf_rw.c udf_timer.c
+BASE_SOURCES += udf_memtracker.c udf_record.c udf_timer.c
 ifneq ($(USE_XDR),1)
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
@@ -65,8 +65,11 @@ ifneq ($(USE_WARM),1)
   STORAGE_SOURCES += drv_ssd_ce.c
 endif
 
-HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%) $(GEOSPATIAL_HEADERS:%=geospatial/%)
-SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCES:%=storage/%) $(GEOSPATIAL_SOURCES:%=geospatial/%)
+TRANSACTION_HEADERS += delete.h duplicate_resolve.h proxy.h read.h replica_write.h rw_request_hash.h rw_request.h rw_utils.h udf.h write.h
+TRANSACTION_SOURCES += delete.c duplicate_resolve.c proxy.c read.c replica_write.c rw_request_hash.c rw_request.c rw_utils.c udf.c write.c
+
+HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%) $(GEOSPATIAL_HEADERS:%=geospatial/%) $(TRANSACTION_HEADERS:%=transaction/%)
+SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCES:%=storage/%) $(GEOSPATIAL_SOURCES:%=geospatial/%) $(TRANSACTION_SOURCES:%=transaction/%)
 
 SERVER = $(BIN_DIR)/asd
 

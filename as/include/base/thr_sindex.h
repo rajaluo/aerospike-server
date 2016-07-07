@@ -49,8 +49,8 @@ do {                                                                            
 
 #define SINDEX_GC_HIST_INSERT_DATA_POINT(type, start_time_ns)                             \
 do {                                                                                      \
-	if (start_time_ns != 0 && g_config.sindex_gc_enable_histogram && g_config._ ##type) { \
-		histogram_insert_data_point(g_config._ ##type, start_time_ns);                    \
+	if (start_time_ns != 0 && g_config.sindex_gc_enable_histogram && g_stats._ ##type) {  \
+		histogram_insert_data_point(g_stats._ ##type, start_time_ns);                     \
 	}                                                                                     \
 } while(0);
 

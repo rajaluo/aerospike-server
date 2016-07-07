@@ -270,7 +270,7 @@ msg_fillbuf(const msg *m, uint8_t *buf, size_t *buflen)
 //
 
 int
-msg_parse(msg *m, const uint8_t *buf, const size_t buflen)
+msg_parse(msg *m, const uint8_t *buf, size_t buflen)
 {
 	if (buflen < 6) {
 		return -2;

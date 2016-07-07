@@ -72,7 +72,6 @@ info_port_state_free(info_port_state *ips)
 	if (ips->xmit_buf) cf_free(ips->xmit_buf);
 	if (CSFD(ips->sock) != -1) {
 		cf_socket_close(ips->sock);
-		cf_atomic_int_incr(&g_config.info_connections_closed);
 	}
 	memset(ips, -1, sizeof(info_port_state));
 	cf_free(ips);
@@ -308,8 +307,6 @@ thr_info_port_fn(void *arg)
 					cf_free(ips->xmit_buf);
 					cf_free(ips);
 				}
-				cf_atomic_int_incr(&g_config.info_connections_opened);
-
 			}
 			else {
 				// A regular working socket.

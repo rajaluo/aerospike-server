@@ -251,6 +251,9 @@ typedef struct as_paxos_t {
 	int num_sync_attempts;       // Number of times sync was attempted during current paxos round
 } as_paxos;
 
+// The singleton paxos object.
+extern as_paxos *g_paxos;
+
 /* as_paxos_petition_type
  * What sorts of changes can be requested */
 typedef enum {

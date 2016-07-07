@@ -169,8 +169,8 @@ extern void as_storage_save_evict_void_time(as_namespace *ns, uint32_t evict_voi
 
 // Statistics.
 extern int as_storage_stats(as_namespace *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
-extern int as_storage_ticker_stats(); // prints SSD histograms to the info ticker
-extern int as_storage_histogram_clear_all(); // clears all SSD histograms
+extern int as_storage_ticker_stats(as_namespace *ns); // prints SSD histograms to the info ticker
+extern int as_storage_histogram_clear_all(as_namespace *ns); // clears all SSD histograms
 
 
 //------------------------------------------------

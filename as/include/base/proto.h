@@ -504,7 +504,7 @@ extern void as_msg_swap_op(as_msg_op *op);
 extern int as_msg_send_reply(struct as_file_handle_s *fd_h, uint32_t result_code,
 		uint32_t generation, uint32_t void_time, as_msg_op **ops,
 		struct as_bin_s **bins, uint16_t bin_count, struct as_namespace_s *ns,
-		uint *written_sz, uint64_t trid, const char *setname);
+		uint64_t trid, const char *setname);
 extern int as_msg_send_ops_reply(struct as_file_handle_s *fd_h, cf_dyn_buf *db);
 
 extern cl_msg *as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
@@ -538,8 +538,7 @@ typedef struct {
 extern void as_msg_peek(const struct as_transaction_s *tr, proto_peek *peek);
 
 extern uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
-		const char *set, int set_len, const cf_digest *d, cf_digest *d_ret,
-		uint64_t trid, as_msg_field *scan_param_field, void * call);
+		const char *set, int set_len, const cf_digest *d, uint64_t trid);
 
 extern uint8_t * as_msg_write_header(uint8_t *buf, size_t msg_sz, uint info1,
 		uint info2, uint info3, uint32_t generation, uint32_t record_ttl,

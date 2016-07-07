@@ -20,129 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- *  Overview
- *  ========
- *
- *  Whenever cluster state change, node assignments of the partition changes.
- *  This leads to movement of the partition from one node to another, this is
- *  called partition migration.  For example
- *
- *  Cluster: [N1, N2]
- *  P1       : Master N1 and Replica N2
- *  Cluster: [N1, N2, N3]
- *  P1       : Master N3 and replica N1
- *  Partition P1 has to be moved to N3 which has the master copy of partition in
- *  the new cluster view.
- *
- *  Following keywords are used while describing the whole partition migration
- *  logic
- *
- *  - Partition Node hash list:	[p->replica]
- *    The hash value list with the nodes ordered. Master comes first followed
- *    by replica in current cluster view and then all other nodes.
- *
- *  - Primary Version: [p->primary_version_info]
- *    In partition node hash list, version of partition on the, first node with
- *    some valid version of data. (We need to maintain only first node
- *    information)
- *
- *  - First Non Primary Versions: [p->dupl, p->dupl_vinfo]
- *    In partition node hash list all the first nodes with the version not
- *    matching primary version (This maintains array of nodes along with the
- *    version as there could be multiple versions). Data is maintained only in
- *    first node all subsequent node with copy of duplicate version is dropped
- *
- *  - Write Journal :
- *    -- When normal writes come in, journal is written when the writes are not
- *       applied. Any DESYNC node (desync is always in replica	list) receiving
- *       incoming migration does not apply write to the record but log the
- *       operation in write_journal.
- *
- *    -- All the nodes in the replica list which has primary sync copy take the
- *       writes and apply it.
- *
- *    -- All the nodes in the replica list which has non primary sync copy reject
- *       writes.
- *
- *    -- All the nodes with DESYNC partition take writes as long as nothing is
- *       migrated into it.  Once master has received data from all the duplicates
- *       it transfers data to all nodes in replica list at that time all DESYNC
- *       nodes will write journal.
- *
- *    Golden rule is at any point of time DESYNC partition receives data from
- *    only one source. Once it has become SYNC it can get from multiple sources
- *    and merge ? Why is it needed  ?????
- *
- *  - Replication Factor: [p->p_repl_factor]
- *    The number of replica system maintain. All the nodes in the replica list
- *    after replication factor does not have partition in stable cluster view.
- *
- *  - Replica List : [p->replica up to N where N < p->p_repl_factor]
- *    List of master and replica nodes in the new cluster view. All the nodes
- *    within replication factor in the nodes hash list is replica list
- *
- *  - DESYNC Partition:
- *    Partition on a node in the replica list is DESYNC state if it has no data.
- *    replica[0] is master
- *
- *  - SYNC PARTITION:
- *    Partition on a node in the replica list is put in SYNC state if it has
- *    some version of data for that partition with it.
- *
- *  - ZOMBIE:
- *    Partition on nodes outside the replica list is put in ZOMBIE state if it
- *    has some version of data for that partition with it.	 \
- *
- *  - WAIT:
- *    Partition is put into wait state while moving from SYNC or ZOMBIE to
- *    ABSENT. This state is stage is reached when there are pending writes
- *    are there. And is needed to make sure any new writes, while last few
- *    writes are getting flushed is not allowed.
- *
- *    NB: this today is done after indicating to master that migration is done
- *        but ideally should be done after that (see order of DoneMigrate:
- *        and CompletedMigrate: in migrate_xmit_fn in migrate.c)
- *
- *  - ABSENT:
- *    Partition on the nodes outside the replica list put in the ABSENT state
- *    if it has no data.
- *
- *  ALGORITHM
- *  =========
- *
- *  - Master or acting master are the only nodes where all the data is merged
- *    and duplicates are resolved
- *
- *  - Master if DESYNC gets data from the First Primary Version node AKA origin
- *    (This is acting master while master id desync and does the merge).
- *
- *  - Writes which come in while migration was going on and master is DESYNC
- *    is proxied to the origin which does merge/apply write and replicate to
- *    the replica list.
- *
- *  - Merge is duplicate resolution. Bring in all the duplicates to the master
- *    /acting master to apply writes. And replicate it to all the nodes in the
- *    replica set.
- *
- *  - On receiving replicate request, DESYNC nodes in replica list write
- *    journals (including master). SYNC node in replica list reject write while
- *    merge is going on.
- *
- *  - Master becomes SYNC once it has received data from acting master. Before
- *    turning into SYNC after migration is finished master applies the write
- *    journal.
- *
- *  - SYNC master requests data from all the duplicates. Once it has got data
- *    from all the nodes. It ships back the final value to all the nodes in
- *    the replica list.
- *
- * NB: Please note that write journalling and write rejection is
- *     primarily relevant only in the world where replication was delta
- *     replication. But current (5/13) we do not do delta replication but we
- *     ship the entire record. So write_journal and write rejection in current
- *     world is not relevant. Revisit and fix comment
- */
 
 #include <errno.h>
 #include <pthread.h>
@@ -167,15 +44,23 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/ldt.h"
-#include "base/thr_write.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h"
 #include "fabric/paxos.h"
 #include "storage/storage.h"
+#include "transaction/replica_write.h"
 
 
 // #define PARTITION_INFO_CHECK 1
 
+// The instantaneous maximum number of cluster participants, represented as a
+// positive and negative mask.
+#define AS_CLUSTER_SZ_MASKP ((uint64_t)(1 - (AS_CLUSTER_SZ + 1)))
+#define AS_CLUSTER_SZ_MASKN ((uint64_t)(AS_CLUSTER_SZ - 1))
+
+cf_atomic32 g_partition_generation = 0;
+
+cf_atomic_int g_migrate_num_incoming = 0;
 
 // Using int for 4-byte size, but maintaining bool semantics.
 static volatile int g_allow_migrations = true;
@@ -546,82 +431,6 @@ as_partition_init(as_partition *p, as_namespace *ns, int pid)
 }
 
 
-// Summarize the partition states, populating the supplied structure.
-void
-as_partition_getstates(as_partition_states *ps)
-{
-	size_t active_partition_count = 0;
-
-	memset(ps, 0, sizeof(as_partition_states));
-
-	for (int i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-		size_t ns_absent_partitions = 0;
-
-		for (int j = 0; j < AS_PARTITIONS; j++) {
-			as_partition *p = &ns->partitions[j];
-
-			pthread_mutex_lock(&p->lock);
-
-			switch (p->state) {
-			case AS_PARTITION_STATE_UNDEF:
-				ps->undef++;
-				break;
-			case AS_PARTITION_STATE_SYNC:
-			{
-				cf_node n;
-
-				if (0 == p->target) {
-					n = p->origin != (cf_node)0 ? p->origin : p->replica[0];
-				}
-				else {
-					n = p->origin != (cf_node)0 ? p->origin : g_config.self_node;
-				}
-
-				if (g_config.self_node == n) {
-					ps->sync_actual++;
-				}
-				else {
-					ps->sync_replica++;
-				}
-			}
-			break;
-
-			case AS_PARTITION_STATE_DESYNC:
-				ps->desync++;
-				break;
-			case AS_PARTITION_STATE_ZOMBIE:
-				ps->zombie++;
-				break;
-			case AS_PARTITION_STATE_ABSENT:
-				ps->absent++;
-				ns_absent_partitions++;
-				break;
-			default:
-				cf_crash(AS_PARTITION, "{%s:%d} in illegal state %d",
-						ns->name, j, (int)p->state);
-			}
-
-
-			if (p->pending_migrate_tx != 0 || p->pending_migrate_rx != 0 ||
-					p->origin != 0 || p->n_dupl != 0) {
-				active_partition_count++;
-			}
-
-			ps->n_objects += p->vp->elements;
-			ps->n_ref_count += cf_rc_count(p->vp);
-			ps->n_sub_objects += p->sub_vp->elements;
-			ps->n_sub_ref_count += cf_rc_count(p->sub_vp);
-
-			pthread_mutex_unlock(&p->lock);
-		}
-
-		cf_atomic_int_set(&ns->n_absent_partitions, ns_absent_partitions);
-		cf_atomic_int_set(&ns->n_actual_partitions, ps->sync_actual);
-	}
-}
-
-
 static int
 find_in_replica_list(as_partition *p, cf_node self)
 {
@@ -689,7 +498,6 @@ as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p,
 				&& as_partition_balance_is_init_resolved()) {
 			cf_warning(AS_PARTITION, "{%s:%zu} Detected state error. Replica list contains null node at position %d",
 					ns->name, pid, i);
-			cf_atomic_int_incr(&g_config.err_replica_null_node);
 		}
 	}
 
@@ -697,7 +505,6 @@ as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p,
 		if (p->replica[i] != (cf_node)0) {
 			cf_warning(AS_PARTITION, "{%s:%zu} Detected state error. Replica list contains non null node %"PRIx64" at position %d",
 					ns->name, pid, p->replica[i], i);
-			cf_atomic_int_incr(&g_config.err_replica_non_null_node);
 		}
 	}
 }
@@ -758,7 +565,6 @@ find_sync_copy(as_namespace *ns, size_t pid, as_partition *p, bool is_read)
 	if (n == 0 && as_partition_balance_is_init_resolved()) {
 		cf_warning(AS_PARTITION, "{%s:%zu} Returning null node, could not find sync copy of this partition my_index %d, master %"PRIx64" replica %"PRIx64" origin %"PRIx64,
 				ns->name, pid, my_index, p->replica[0], p->replica[1], p->origin);
-		cf_atomic_int_incr(&g_config.err_sync_copy_null_master);
 	}
 
 	return n;
@@ -801,15 +607,6 @@ as_partition_reservation_copy(as_partition_reservation *dst, as_partition_reserv
 	memcpy(dst->dupl_nodes, src->dupl_nodes, sizeof(cf_node) * dst->n_dupl);
 	dst->cluster_key = src->cluster_key;
 	memcpy(&dst->vinfo, &src->vinfo, sizeof(as_partition_vinfo));
-}
-
-
-// Simply moves the reservation from one structure to the other.
-void
-as_partition_reservation_move(as_partition_reservation *dst, as_partition_reservation *src)
-{
-	as_partition_reservation_copy(dst, src);
-	memset(src, 0, sizeof(as_partition_reservation));
 }
 
 
@@ -1647,22 +1444,6 @@ partition_migrate_record_fill(partition_migrate_record *pmr, cf_node dest,
 
 
 void
-apply_write_journal(as_namespace *ns, size_t pid)
-{
-	as_partition_reservation prsv;
-
-	as_partition_reserve_lockfree(ns, pid, &prsv);
-
-	if (0 != as_write_journal_apply(&prsv)) {
-		cf_warning(AS_PARTITION, "{%s:%zu} couldn't apply write journal",
-				ns->name, pid);
-	}
-
-	as_partition_release_lockfree(&prsv);
-}
-
-
-void
 as_partition_emigrate_done(as_migrate_state s, as_namespace *ns,
 		as_partition_id pid, uint64_t orig_cluster_key, uint32_t tx_flags)
 {
@@ -1734,7 +1515,7 @@ as_partition_emigrate_done(as_migrate_state s, as_namespace *ns,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic_int_incr(&g_config.partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -1760,10 +1541,10 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 		return AS_MIGRATE_AGAIN;
 	}
 
-	int64_t num_incoming = cf_atomic_int_incr(&g_config.migrate_num_incoming);
+	int64_t num_incoming = cf_atomic_int_incr(&g_migrate_num_incoming);
 
 	if (num_incoming > g_config.migrate_max_num_incoming) {
-		cf_atomic_int_decr(&g_config.migrate_num_incoming);
+		cf_atomic_int_decr(&g_migrate_num_incoming);
 		pthread_mutex_unlock(&p->lock);
 		return AS_MIGRATE_AGAIN;
 	}
@@ -1786,10 +1567,6 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 		rv = AS_MIGRATE_ALREADY_DONE;
 		break;
 	case AS_PARTITION_STATE_DESYNC:
-		if (0 != as_write_journal_start(ns, pid)) {
-			cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - could not start journal, continuing",
-					ns->name, pid);
-		}
 		rv = AS_MIGRATE_OK;
 		break;
 	case AS_PARTITION_STATE_SYNC:
@@ -1873,11 +1650,6 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 
 			// The only place we switch to DESYNC outside of re-balance.
 			p->state = AS_PARTITION_STATE_DESYNC;
-
-			if (0 != as_write_journal_start(ns, pid)) {
-				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start - could not start journal, continuing",
-						ns->name, pid);
-			}
 		}
 		else {
 			if (p->origin != (cf_node)0) {
@@ -1910,11 +1682,11 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 
 	if (rv != AS_MIGRATE_OK) {
 		// Migration has been rejected, incoming migration not expected.
-		cf_atomic_int_decr(&g_config.migrate_num_incoming);
+		cf_atomic_int_decr(&g_migrate_num_incoming);
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic_int_incr(&g_config.partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -1989,8 +1761,6 @@ as_partition_immigrate_done(as_namespace *ns, as_partition_id pid,
 		}
 
 		p->origin = 0;
-
-		apply_write_journal(ns, pid);
 
 		set_partition_sync_lockfree(p, pid, ns, true);
 
@@ -2111,7 +1881,7 @@ as_partition_immigrate_done(as_namespace *ns, as_partition_id pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic_int_incr(&g_config.partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -2125,7 +1895,7 @@ as_partition_immigrate_done(as_namespace *ns, as_partition_id pid,
 	cf_queue_destroy(&mq);
 
 	// For receiver-side migration flow control.
-	cf_atomic_int_decr(&g_config.migrate_num_incoming);
+	cf_atomic_int_decr(&g_migrate_num_incoming);
 
 	return rv;
 }
@@ -2197,7 +1967,7 @@ as_partition_adjust_hv_and_slindex(const as_partition *ptn, cf_node hv_ptr[],
 {
 	const uint rf = ptn->p_repl_factor;
 	const uint16_t pid = ptn->partition_id;
-	const uint64_t cluster_size = g_config.paxos->cluster_size;
+	const uint64_t cluster_size = g_paxos->cluster_size;
 	const uint16_t n_groups = g_config.cluster.group_count;
 	const uint16_t n_needed = n_groups < rf ? n_groups : rf;
 
@@ -2260,7 +2030,7 @@ as_partition_adjust_hv_and_slindex(const as_partition *ptn, cf_node hv_ptr[],
 void
 as_partition_cluster_topology_info(const as_paxos *paxos_p) {
 	const cf_node * succession = paxos_p->succession;
-	const uint64_t cluster_size = g_config.paxos->cluster_size;
+	const uint64_t cluster_size = g_paxos->cluster_size;
 
 	uint32_t distinct_groups = 0;
 	cluster_config_t cc; // structure to hold state of the group
@@ -2314,7 +2084,7 @@ void
 as_partition_balance()
 {
 	// Shortcut pointers.
-	as_paxos *paxos = g_config.paxos;
+	as_paxos *paxos = g_paxos;
 	cf_node *succession = paxos->succession;
 	bool *alive = paxos->alive;
 	cf_node self = g_config.self_node;
@@ -2727,14 +2497,12 @@ as_partition_balance()
 				}
 			}
 
-			// Detect if there is a write journal and apply it here.
 			// TODO - yes, this happens... try to understand it better.
 			if (p->state == AS_PARTITION_STATE_DESYNC &&
 					! is_partition_null(&p->version_info)) {
-				cf_info(AS_PARTITION, "{%s:%d} applying write journal from previous rebalance",
+				cf_info(AS_PARTITION, "{%s:%d} partition version is not null, setting state from DESYNC to SYNC",
 						ns->name, j);
 
-				apply_write_journal(ns, j);
 				p->state = AS_PARTITION_STATE_SYNC;
 			}
 
@@ -2812,10 +2580,10 @@ as_partition_balance()
 				}
 			}
 
-			bool partition_is_lost = false;
+			int partition_is_lost = 0;
 
 			if (n_found == 0) {
-				partition_is_lost = true;
+				partition_is_lost = 1;
 				n_lost++;
 			}
 			else if (n_found == 1) {
@@ -2830,7 +2598,7 @@ as_partition_balance()
 			// create new versions of this partition using the version number
 			// derived from the cluster key.
 			if (partition_is_lost) {
-				partition_is_lost = false;
+				partition_is_lost = 0;
 				n_recreate++;
 
 				int loop_end = cluster_size < p->p_repl_factor ?
@@ -2906,18 +2674,19 @@ as_partition_balance()
 			} // end for each node in cluster
 
 			if (my_index_in_hvlist < 0) {
-				cf_warning(AS_PARTITION, "{%s:%d} State Error. Cannot find self in hash value list %"PRIx64,
+				cf_crash(AS_PARTITION, "{%s:%d} State Error. Cannot find self in hash value list %"PRIx64,
 						ns->name, j, self);
+				my_index_in_hvlist = 0; // Suppress GCC warning.
 			}
 
-			if (first_sync_node < 0 && ! partition_is_lost) {
+			if (first_sync_node < 0 && partition_is_lost == 0) {
 				cf_warning(AS_PARTITION, "{%s:%d} State Error. Cannot find first sync node for resident partition %"PRIx64,
 						ns->name, j, self);
 			}
 
 			// Create migration requests as needed.
 			switch (partition_is_lost) {
-			case false:
+			case 0:
 
 				// Master
 				//  If not sync switch to desync and wait for migration for
@@ -3106,7 +2875,7 @@ as_partition_balance()
 
 				break;
 
-			case true:
+			case 1:
 			default:
 				cf_crash(AS_PARTITION, "{%s:%d} State Error.", ns->name, j);
 				break;
@@ -3143,7 +2912,7 @@ as_partition_balance()
 
 	// Note - if we decide this is the best place to first increment this
 	// counter, we could get rid of g_balance_init and just use this instead.
-	cf_atomic_int_incr(&g_config.partition_generation);
+	cf_atomic32_incr(&g_partition_generation);
 
 	cf_info(AS_PAXOS, "global partition state: total %zu lost %zu unique %zu duplicate %zu",
 			n_total, n_lost, n_unique, n_duplicate);
@@ -3181,8 +2950,8 @@ as_partition_balance()
 void
 as_partition_balance_init()
 {
-	g_config.paxos->cluster_size = 1;
-	as_paxos_set_cluster_integrity(g_config.paxos, true);
+	g_paxos->cluster_size = 1;
+	as_paxos_set_cluster_integrity(g_paxos, true);
 
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
@@ -3257,7 +3026,7 @@ as_partition_balance_init_single_node_cluster()
 
 				p->version_info = new_vinfo;
 				p->primary_version_info = new_vinfo;
-				g_config.paxos->c_partition_vinfo[i][0][j] = new_vinfo;
+				g_paxos->c_partition_vinfo[i][0][j] = new_vinfo;
 				set_partition_version_in_storage(ns, j, &new_vinfo, false);
 
 				client_replica_maps_update(ns, j);
@@ -3279,7 +3048,7 @@ as_partition_balance_init_single_node_cluster()
 	// Ok to allow transactions.
 	g_balance_init = BALANCE_INIT_RESOLVED;
 
-	cf_atomic_int_incr(&g_config.partition_generation);
+	cf_atomic32_incr(&g_partition_generation);
 }
 
 
@@ -3303,6 +3072,7 @@ as_partition_balance_is_multi_node_cluster()
 // A partition is queryable only when the node is master or origin
 // BEWARE. No partition lock is being taken here.
 // This is done to avoid a deadlock between sindex and apply journal
+// TODO - journal has been removed - can we or should we now change this?
 bool
 as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p)
 {

@@ -60,7 +60,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/udf_memtracker.h"
-#include "base/udf_rw.h"
+#include "transaction/udf.h"
 
 
 
@@ -661,8 +661,19 @@ basic_scan_job_finish(as_job* _job)
 {
 	conn_scan_job_finish((conn_scan_job*)_job);
 
-	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&g_config.basic_scans_succeeded : &g_config.basic_scans_failed);
+	switch (_job->abandoned) {
+	case 0:
+		cf_atomic_int_incr(&_job->ns->n_scan_basic_complete);
+		break;
+	case AS_JOB_FAIL_USER_ABORT:
+		cf_atomic_int_incr(&_job->ns->n_scan_basic_abort);
+		break;
+	case AS_JOB_FAIL_UNKNOWN:
+	case AS_JOB_FAIL_CLUSTER_KEY:
+	default:
+		cf_atomic_int_incr(&_job->ns->n_scan_basic_error);
+		break;
+	}
 
 	cf_info(AS_SCAN, "finished basic scan job %lu (%d)", _job->trid,
 			_job->abandoned);
@@ -766,8 +777,9 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 cf_vector*
 bin_names_from_op(as_msg* m, int* result)
 {
+	*result = AS_PROTO_RESULT_OK;
+
 	if (m->n_ops == 0) {
-		*result = AS_PROTO_RESULT_OK;
 		return NULL;
 	}
 
@@ -779,8 +791,8 @@ bin_names_from_op(as_msg* m, int* result)
 	while ((op = as_msg_op_iterate(m, op, &n)) != NULL) {
 		if (op->name_sz >= AS_ID_BIN_SZ) {
 			cf_warning(AS_SCAN, "basic scan job bin name too long");
-			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
 			cf_vector_destroy(v);
+			*result = AS_PROTO_RESULT_FAIL_BIN_NAME;
 			return NULL;
 		}
 
@@ -981,8 +993,19 @@ aggr_scan_job_finish(as_job* _job)
 	cf_free(job->msgp);
 	job->msgp = NULL;
 
-	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&g_config.aggr_scans_succeeded : &g_config.aggr_scans_failed);
+	switch (_job->abandoned) {
+	case 0:
+		cf_atomic_int_incr(&_job->ns->n_scan_aggr_complete);
+		break;
+	case AS_JOB_FAIL_USER_ABORT:
+		cf_atomic_int_incr(&_job->ns->n_scan_aggr_abort);
+		break;
+	case AS_JOB_FAIL_UNKNOWN:
+	case AS_JOB_FAIL_CLUSTER_KEY:
+	default:
+		cf_atomic_int_incr(&_job->ns->n_scan_aggr_error);
+		break;
+	}
 
 	cf_info(AS_SCAN, "finished aggregation scan job %lu (%d)", _job->trid,
 			_job->abandoned);
@@ -1204,7 +1227,6 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	job->origin.type = UDF_SCAN_REQUEST;
 	job->origin.cb = udf_bg_scan_tr_complete;
 	job->origin.udata = (void*)job;
 
@@ -1259,8 +1281,19 @@ udf_bg_scan_job_finish(as_job* _job)
 	cf_free(job->msgp);
 	job->msgp = NULL;
 
-	cf_atomic_int_incr(_job->abandoned == 0 ?
-			&g_config.udf_bg_scans_succeeded : &g_config.udf_bg_scans_failed);
+	switch (_job->abandoned) {
+	case 0:
+		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_complete);
+		break;
+	case AS_JOB_FAIL_USER_ABORT:
+		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_abort);
+		break;
+	case AS_JOB_FAIL_UNKNOWN:
+	case AS_JOB_FAIL_CLUSTER_KEY:
+	default:
+		cf_atomic_int_incr(&_job->ns->n_scan_udf_bg_error);
+		break;
+	}
 
 	cf_info(AS_SCAN, "finished udf-bg scan job %lu (%d)", _job->trid,
 			_job->abandoned);

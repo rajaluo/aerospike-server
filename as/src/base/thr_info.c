@@ -35,7 +35,6 @@
 #include <mcheck.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
-#include <sys/param.h>
 #include <sys/resource.h>
 #include <time.h>
 #include <unistd.h>
@@ -62,14 +61,13 @@
 #include "base/monitor.h"
 #include "base/scan.h"
 #include "base/thr_batch.h"
-#include "base/thr_proxy.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
-#include "base/thr_write.h"
 #include "base/transaction.h"
 #include "base/xdr_serverside.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
+#include "base/stats.h"
 #include "base/system_metadata.h"
 #include "base/udf_cask.h"
 #include "base/xdr_serverside.h"
@@ -77,6 +75,8 @@
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
 #include "fabric/paxos.h"
+#include "transaction/proxy.h"
+#include "transaction/rw_request_hash.h"
 
 #define STR_NS              "ns"
 #define STR_SET             "set"
@@ -93,21 +93,14 @@
 #define STR_BINTYPE         "bintype"
 
 extern int as_nsup_queue_get_size();
-extern bool g_shutdown_started;
-
-// Use the following macro to enforce locking around Info requests at run-time.
-// (Warning:  This will unnecessarily increase contention and Info request timeouts!)
-// #define USE_INFO_LOCK
 
 // Acceptable timediffs in XDR lastship times.
 // (Print warning only if time went back by at least 5 minutes.)
 #define XDR_ACCEPTABLE_TIMEDIFF XDR_TIME_ADJUST
 
 
-static int as_info_queue_get_size(void);
 int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
 int info_get_objects(char *name, cf_dyn_buf *db);
-void clear_microbenchmark_histograms();
 void clear_ldt_histograms();
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db);
@@ -115,6 +108,26 @@ int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
 void as_storage_show_wblock_stats(as_namespace *ns);
 void as_storage_summarize_wblock_stats(as_namespace *ns);
 int as_storage_analyze_wblock(as_namespace* ns, int device_index, uint32_t wblock_id);
+
+
+//------------------------------------------------
+// This is here for now, until such time as a
+// separate .c file is worth it.
+//
+
+as_stats g_stats;
+
+void
+as_stats_init()
+{
+	memset((void*)&g_stats, 0, sizeof(g_stats));
+}
+
+//
+// END - provisional stats.c
+//------------------------------------------------
+
+uint64_t g_start_ms; // start time of the server
 
 static cf_queue *g_info_work_q = 0;
 
@@ -143,7 +156,7 @@ msg_template info_mt[] = {
 #define INFO_MSG_SCRATCH_SIZE 128
 
 // Is dumping GLibC-level memory stats enabled?
-static bool g_mstats_enabled = false;
+bool g_mstats_enabled = false;
 
 // Is GLibC-level memory tracing enabled?
 static bool g_mtrace_enabled = false;
@@ -198,108 +211,21 @@ typedef struct info_tree_s {
 	}
 
 
-//
-// This call is expensive, so put a cache in front of it
-//
-
-static as_partition_states g_ps_cache;
-pthread_mutex_t			g_ps_cache_LOCK = PTHREAD_MUTEX_INITIALIZER;
-uint64_t				g_ps_cache_lastms = 0;
-
 void
-info_partition_getstates(as_partition_states *ps)
+info_get_aggregated_namespace_stats(cf_dyn_buf *db)
 {
-	pthread_mutex_lock(&g_ps_cache_LOCK);
+	uint64_t total_objects = 0;
+	uint64_t total_sub_objects = 0;
 
-	uint64_t	now = cf_getms();
-
-	if (g_ps_cache_lastms + 1000 < now) {
-		as_partition_getstates(&g_ps_cache);
-		g_ps_cache_lastms = now;
-	}
-
-	*ps = g_ps_cache;
-
-	pthread_mutex_unlock(&g_ps_cache_LOCK);
-	return;
-}
-
-//
-// DYNAMIC FUNCTIONS
-// These functions are internal bits that allow us to gather some basic
-// statistics
-//
-
-#if SIZEOF_ATOMIC_INT == 4
-#define APPEND_STAT_COUNTER(__db, __stat)  cf_dyn_buf_append_uint32(__db, __stat)
-#elif SIZEOF_ATOMIC_INT == 8
-#define APPEND_STAT_COUNTER(__db, __stat)  cf_dyn_buf_append_uint64(__db, __stat)
-#else
-#define APPEND_STAT_COUNTER(__db, __stat)  STATS_MUST_BE_4_OR_8_BYTES
-#endif
-
-
-void info_append_uint64(char *name, char *stats_name, uint64_t value, cf_dyn_buf *db)
-{
-	cf_dyn_buf_append_string(db, ";");
-	cf_dyn_buf_append_string(db, name);
-	cf_dyn_buf_append_string(db, stats_name);
-	cf_dyn_buf_append_string(db, "=");
-	cf_dyn_buf_append_uint64(db, value);
-}
-
-int
-info_get_utilization(cf_dyn_buf *db)
-{
-	uint64_t	total_number_objects    = 0;
-	uint64_t	total_number_objects_sub= 0;
-	uint64_t	used_disk_size          = 0;
-	uint64_t	total_disk_size         = 0;
-	uint64_t	total_memory_size       = 0;
-	uint64_t    disk_free_pct           = 0;
-	uint64_t    mem_free_pct            = 0;
-	uint64_t    used_memory_size        = 0;
-	uint64_t    used_data_memory        = 0;
-	uint64_t    used_pindex_memory      = 0;
-	uint64_t    used_sindex_memory      = 0;
-
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
-		total_number_objects    += ns->n_objects;
-		total_number_objects_sub += ns->n_sub_objects;
-		total_disk_size         += ns->ssd_size;
-		total_memory_size       += ns->memory_size;
-		used_data_memory        += ns->n_bytes_memory;
-		used_pindex_memory      += as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
-		used_sindex_memory      += cf_atomic64_get(ns->sindex_data_memory_used);
-
-		uint64_t inuse_disk_bytes = 0;
-		as_storage_stats(ns, 0, &inuse_disk_bytes);
-		used_disk_size          += inuse_disk_bytes;
+		total_objects += ns->n_objects;
+		total_sub_objects += ns->n_sub_objects;
 	}
-	// total used memory = memory used by (data + primary index + secondary index)
-	used_memory_size = used_data_memory + used_pindex_memory + used_sindex_memory;
-	disk_free_pct    = (total_disk_size && (total_disk_size > used_disk_size))
-					   ? (((total_disk_size - used_disk_size) * 100L) / total_disk_size)
-					   : 0;
-	mem_free_pct     =  (total_memory_size && (total_memory_size > used_memory_size))
-						? (((total_memory_size - used_memory_size) * 100L) / total_memory_size)
-						: 0;
 
-
-	info_append_uint64("", "objects",                  total_number_objects, db);
-	info_append_uint64("", "sub-records",              total_number_objects_sub, db);
-	info_append_uint64("", "total-bytes-disk",         total_disk_size,      db);
-	info_append_uint64("", "used-bytes-disk",          used_disk_size,       db);
-	info_append_uint64("", "free-pct-disk",            disk_free_pct,        db);
-	info_append_uint64("", "total-bytes-memory",       total_memory_size,    db);
-	info_append_uint64("", "used-bytes-memory",        used_memory_size,     db);
-	info_append_uint64("", "data-used-bytes-memory",   used_data_memory,     db);
-	info_append_uint64("", "index-used-bytes-memory",  used_pindex_memory,   db);
-	info_append_uint64("", "sindex-used-bytes-memory", used_sindex_memory,   db);
-	info_append_uint64("", "free-pct-memory",          mem_free_pct,         db);
-	return(0);
+	info_append_uint64(db, "objects", total_objects);
+	info_append_uint64(db, "sub_objects", total_sub_objects);
 }
 
 // #define INFO_SEGV_TEST 1
@@ -317,397 +243,103 @@ info_segv_test(char *name, cf_dyn_buf *db)
 int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
-	cf_debug(AS_INFO, "info_get_stats");
+	info_append_int(db, "cluster_size", g_paxos->cluster_size);
+	info_append_uint64_x(db, "cluster_key", as_paxos_get_cluster_key()); // not in ticker
+	info_append_bool(db, "cluster_integrity", as_paxos_get_cluster_integrity(g_paxos)); // not in ticker
 
-	cf_dyn_buf_append_string(db, "cluster_size=");
-	cf_dyn_buf_append_int(db, g_config.paxos->cluster_size);
-	cf_dyn_buf_append_string(db, ";cluster_key=");
-	cf_dyn_buf_append_uint64_x(db, as_paxos_get_cluster_key());
-	cf_dyn_buf_append_string(db, ";cluster_integrity=");
-	cf_dyn_buf_append_string(db, (as_paxos_get_cluster_integrity(g_config.paxos) ? "true" : "false"));
+	info_append_uint64(db, "uptime", (cf_getms() - g_start_ms) / 1000); // not in ticker
 
-	info_get_utilization(db);
-
-	cf_dyn_buf_append_string(db, ";stat_read_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_reqs);
-	cf_dyn_buf_append_string(db, ";stat_read_reqs_xdr=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_reqs_xdr);
-	cf_dyn_buf_append_string(db, ";stat_read_success=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_success);
-	cf_dyn_buf_append_string(db, ";stat_read_errs_notfound=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_errs_notfound);
-	cf_dyn_buf_append_string(db, ";stat_read_errs_other=");
-	APPEND_STAT_COUNTER(db, g_config.stat_read_errs_other);
-
-
-	cf_dyn_buf_append_string(db, ";stat_write_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_reqs);
-	cf_dyn_buf_append_string(db, ";stat_write_reqs_xdr=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_reqs_xdr);
-	cf_dyn_buf_append_string(db, ";stat_write_success=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_success);
-	cf_dyn_buf_append_string(db, ";stat_write_errs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_errs);
-
-	cf_dyn_buf_append_string(db, ";stat_delete_success=");
-	APPEND_STAT_COUNTER(db, g_config.stat_delete_success);
-	cf_dyn_buf_append_string(db, ";stat_rw_timeout=");
-	APPEND_STAT_COUNTER(db, g_config.stat_rw_timeout);
-
-	cf_dyn_buf_append_string(db, ";udf_read_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_read_reqs);
-	cf_dyn_buf_append_string(db, ";udf_read_success=");
-	APPEND_STAT_COUNTER(db, g_config.udf_read_success);
-	cf_dyn_buf_append_string(db, ";udf_read_errs_other=");
-	APPEND_STAT_COUNTER(db, g_config.udf_read_errs_other);
-
-	cf_dyn_buf_append_string(db, ";udf_write_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_write_reqs);
-	cf_dyn_buf_append_string(db, ";udf_write_success=");
-	APPEND_STAT_COUNTER(db, g_config.udf_write_success);
-	cf_dyn_buf_append_string(db, ";udf_write_err_others=");
-	APPEND_STAT_COUNTER(db, g_config.udf_write_errs_other);
-
-	cf_dyn_buf_append_string(db, ";udf_delete_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_delete_reqs);
-	cf_dyn_buf_append_string(db, ";udf_delete_success=");
-	APPEND_STAT_COUNTER(db, g_config.udf_delete_success);
-	cf_dyn_buf_append_string(db, ";udf_delete_err_others=");
-	APPEND_STAT_COUNTER(db, g_config.udf_delete_errs_other);
-
-	cf_dyn_buf_append_string(db, ";udf_lua_errs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_lua_errs);
-
-	cf_dyn_buf_append_string(db, ";udf_scan_rec_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_scan_rec_reqs);
-
-	cf_dyn_buf_append_string(db, ";udf_query_rec_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.udf_query_rec_reqs);
-
-	cf_dyn_buf_append_string(db, ";udf_replica_writes=");
-	APPEND_STAT_COUNTER(db, g_config.udf_replica_writes);
-
-	cf_dyn_buf_append_string(db, ";stat_proxy_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_proxy_reqs);
-	cf_dyn_buf_append_string(db, ";stat_proxy_reqs_xdr=");
-	APPEND_STAT_COUNTER(db, g_config.stat_proxy_reqs_xdr);
-	cf_dyn_buf_append_string(db, ";stat_proxy_success=");
-	APPEND_STAT_COUNTER(db, g_config.stat_proxy_success);
-	cf_dyn_buf_append_string(db, ";stat_proxy_errs=");
-	APPEND_STAT_COUNTER(db, g_config.stat_proxy_errs);
-	cf_dyn_buf_append_string(db, ";stat_ldt_proxy=");
-	APPEND_STAT_COUNTER(db, g_config.ldt_proxy_initiate);
-
-	cf_dyn_buf_append_string(db,   ";stat_cluster_key_err_ack_dup_trans_reenqueue=");
-	APPEND_STAT_COUNTER(db, g_config.stat_cluster_key_err_ack_dup_trans_reenqueue);
-
-	cf_dyn_buf_append_string(db, ";stat_expired_objects=");
-	APPEND_STAT_COUNTER(db, g_config.stat_expired_objects);
-	cf_dyn_buf_append_string(db, ";stat_evicted_objects=");
-	APPEND_STAT_COUNTER(db, g_config.stat_evicted_objects);
-	cf_dyn_buf_append_string(db, ";stat_deleted_set_objects=");
-	APPEND_STAT_COUNTER(db, g_config.stat_deleted_set_objects);
-	cf_dyn_buf_append_string(db, ";stat_evicted_objects_time=");
-	APPEND_STAT_COUNTER(db, g_config.stat_evicted_objects_time);
-	cf_dyn_buf_append_string(db, ";stat_zero_bin_records=");
-	APPEND_STAT_COUNTER(db, g_config.stat_zero_bin_records);
-	cf_dyn_buf_append_string(db, ";stat_nsup_deletes_not_shipped=");
-	APPEND_STAT_COUNTER(db, g_config.stat_nsup_deletes_not_shipped);
-
-	cf_dyn_buf_append_string(db, ";stat_compressed_pkts_received=");
-	APPEND_STAT_COUNTER(db, g_config.stat_compressed_pkts_received);
-
-	cf_dyn_buf_append_string(db, ";err_tsvc_requests=");
-	APPEND_STAT_COUNTER(db, g_config.err_tsvc_requests);
-	cf_dyn_buf_append_string(db, ";err_tsvc_requests_timeout=");
-	APPEND_STAT_COUNTER(db, g_config.err_tsvc_requests_timeout);
-	cf_dyn_buf_append_string(db, ";err_out_of_space=");
-	APPEND_STAT_COUNTER(db, g_config.err_out_of_space);
-	cf_dyn_buf_append_string(db, ";err_duplicate_proxy_request=");
-	APPEND_STAT_COUNTER(db, g_config.err_duplicate_proxy_request);
-	cf_dyn_buf_append_string(db, ";err_rw_request_not_found=");
-	APPEND_STAT_COUNTER(db, g_config.err_rw_request_not_found);
-	cf_dyn_buf_append_string(db, ";err_rw_pending_limit=");
-	APPEND_STAT_COUNTER(db, g_config.err_rw_pending_limit);
-	cf_dyn_buf_append_string(db, ";err_rw_cant_put_unique=");
-	APPEND_STAT_COUNTER(db, g_config.err_rw_cant_put_unique);
-
-	cf_dyn_buf_append_string(db, ";geo_region_query_count=");
-	APPEND_STAT_COUNTER(db, g_config.geo_region_query_count);
-	cf_dyn_buf_append_string(db, ";geo_region_query_cells=");
-	APPEND_STAT_COUNTER(db, g_config.geo_region_query_cells);
-	cf_dyn_buf_append_string(db, ";geo_region_query_points=");
-	APPEND_STAT_COUNTER(db, g_config.geo_region_query_points);
-	cf_dyn_buf_append_string(db, ";geo_region_query_falsepos=");
-	APPEND_STAT_COUNTER(db, g_config.geo_region_query_falsepos);
-
-	cf_dyn_buf_append_string(db, ";fabric_msgs_sent=");
-	APPEND_STAT_COUNTER(db, g_config.fabric_msgs_sent);
-
-	cf_dyn_buf_append_string(db, ";fabric_msgs_rcvd=");
-	APPEND_STAT_COUNTER(db, g_config.fabric_msgs_rcvd);
-
-	cf_dyn_buf_append_string(db, ";paxos_principal=");
-	char paxos_principal[19];
-	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
-	cf_dyn_buf_append_string(db, paxos_principal);
-
-	cf_dyn_buf_append_string(db, ";migrate_allowed=");
-	cf_dyn_buf_append_string(db, as_partition_get_migration_flag() ?
-			"true" : "false");
-
-	uint64_t migrate_partitions_remaining = as_partition_remaining_migrations();
-	cf_dyn_buf_append_string(db, ";migrate_progress_send=");
-	APPEND_STAT_COUNTER(db, migrate_partitions_remaining);
-	cf_dyn_buf_append_string(db, ";migrate_progress_recv=");
-	APPEND_STAT_COUNTER(db, migrate_partitions_remaining);
-	cf_dyn_buf_append_string(db, ";migrate_partitions_remaining=");
-	APPEND_STAT_COUNTER(db, migrate_partitions_remaining);
-
-	cf_dyn_buf_append_string(db, ";queue=");
-	cf_dyn_buf_append_int(db, thr_tsvc_queue_get_size() );
-
-	cf_dyn_buf_append_string(db, ";transactions=");
-	APPEND_STAT_COUNTER(db, g_config.proto_transactions);
-
-	cf_dyn_buf_append_string(db, ";reaped_fds=");
-	APPEND_STAT_COUNTER(db, g_config.reaper_count);
-
-	cf_dyn_buf_append_string(db, ";scans_active=");
-	APPEND_STAT_COUNTER(db, as_scan_get_active_job_count());
-
-	cf_dyn_buf_append_string(db, ";basic_scans_succeeded=");
-	APPEND_STAT_COUNTER(db, g_config.basic_scans_succeeded);
-	cf_dyn_buf_append_string(db, ";basic_scans_failed=");
-	APPEND_STAT_COUNTER(db, g_config.basic_scans_failed);
-	cf_dyn_buf_append_string(db, ";aggr_scans_succeeded=");
-	APPEND_STAT_COUNTER(db, g_config.aggr_scans_succeeded);
-	cf_dyn_buf_append_string(db, ";aggr_scans_failed=");
-	APPEND_STAT_COUNTER(db, g_config.aggr_scans_failed);
-	cf_dyn_buf_append_string(db, ";udf_bg_scans_succeeded=");
-	APPEND_STAT_COUNTER(db, g_config.udf_bg_scans_succeeded);
-	cf_dyn_buf_append_string(db, ";udf_bg_scans_failed=");
-	APPEND_STAT_COUNTER(db, g_config.udf_bg_scans_failed);
-
-	cf_dyn_buf_append_string(db, ";batch_index_initiate=");
-	APPEND_STAT_COUNTER(db, g_config.batch_index_initiate);
-	cf_dyn_buf_append_string(db, ";batch_index_queue=");
-	as_batch_queues_info(db);
-	cf_dyn_buf_append_string(db, ";batch_index_complete=");
-	APPEND_STAT_COUNTER(db, g_config.batch_index_complete);
-	cf_dyn_buf_append_string(db, ";batch_index_timeout=");
-	APPEND_STAT_COUNTER(db, g_config.batch_index_timeout);
-	cf_dyn_buf_append_string(db, ";batch_index_errors=");
-	APPEND_STAT_COUNTER(db, g_config.batch_index_errors);
-	cf_dyn_buf_append_string(db, ";batch_index_unused_buffers=");
-	cf_dyn_buf_append_int(db, as_batch_unused_buffers());
-	cf_dyn_buf_append_string(db, ";batch_index_huge_buffers=");
-	APPEND_STAT_COUNTER(db, g_config.batch_index_huge_buffers);
-	cf_dyn_buf_append_string(db, ";batch_index_created_buffers=");
-	APPEND_STAT_COUNTER(db, g_config.batch_index_created_buffers);
-	cf_dyn_buf_append_string(db, ";batch_index_destroyed_buffers=");
-	APPEND_STAT_COUNTER(db, g_config.batch_index_destroyed_buffers);
-
-	cf_dyn_buf_append_string(db, ";batch_initiate=");
-	APPEND_STAT_COUNTER(db, g_config.batch_initiate);
-	cf_dyn_buf_append_string(db, ";batch_queue=");
-	cf_dyn_buf_append_int(db, as_batch_direct_queue_size());
-	cf_dyn_buf_append_string(db, ";batch_tree_count=");
-	APPEND_STAT_COUNTER(db, g_config.batch_tree_count);
-	cf_dyn_buf_append_string(db, ";batch_timeout=");
-	APPEND_STAT_COUNTER(db, g_config.batch_timeout);
-	cf_dyn_buf_append_string(db, ";batch_errors=");
-	APPEND_STAT_COUNTER(db, g_config.batch_errors);
-
-	cf_dyn_buf_append_string(db, ";info_queue=");
-	cf_dyn_buf_append_int(db, as_info_queue_get_size());
-
-	cf_dyn_buf_append_string(db, ";delete_queue=");
-	APPEND_STAT_COUNTER(db, as_nsup_queue_get_size());
-
-	cf_dyn_buf_append_string(db, ";proxy_in_progress=");
-	APPEND_STAT_COUNTER(db, as_proxy_inprogress());
-	cf_dyn_buf_append_string(db, ";proxy_initiate=");
-	APPEND_STAT_COUNTER(db, g_config.proxy_initiate);
-	cf_dyn_buf_append_string(db, ";proxy_action=");
-	APPEND_STAT_COUNTER(db, g_config.proxy_action);
-	cf_dyn_buf_append_string(db, ";proxy_retry=");
-	APPEND_STAT_COUNTER(db, g_config.proxy_retry);
-	cf_dyn_buf_append_string(db, ";proxy_retry_q_full=");
-	APPEND_STAT_COUNTER(db, g_config.proxy_retry_q_full);
-	cf_dyn_buf_append_string(db, ";proxy_unproxy=");
-	APPEND_STAT_COUNTER(db, g_config.proxy_unproxy);
-	cf_dyn_buf_append_string(db, ";proxy_retry_same_dest=");
-	APPEND_STAT_COUNTER(db, g_config.proxy_retry_same_dest);
-	cf_dyn_buf_append_string(db, ";proxy_retry_new_dest=");
-	APPEND_STAT_COUNTER(db, g_config.proxy_retry_new_dest);
-
-	cf_dyn_buf_append_string(db, ";write_master=");
-	APPEND_STAT_COUNTER(db, g_config.write_master);
-	cf_dyn_buf_append_string(db, ";write_prole=");
-	APPEND_STAT_COUNTER(db, g_config.write_prole);
-
-	cf_dyn_buf_append_string(db, ";read_dup_prole=");
-	APPEND_STAT_COUNTER(db, g_config.read_dup_prole);
-	cf_dyn_buf_append_string(db, ";rw_err_dup_internal=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_dup_internal);
-	cf_dyn_buf_append_string(db, ";rw_err_dup_cluster_key=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_dup_cluster_key);
-	cf_dyn_buf_append_string(db, ";rw_err_dup_send=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_dup_send);
-
-	cf_dyn_buf_append_string(db, ";rw_err_write_internal=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_write_internal);
-	cf_dyn_buf_append_string(db, ";rw_err_write_cluster_key=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_write_cluster_key);
-	cf_dyn_buf_append_string(db, ";rw_err_write_send=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_write_send);
-
-	cf_dyn_buf_append_string(db, ";rw_err_ack_internal=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_ack_internal);
-	cf_dyn_buf_append_string(db, ";rw_err_ack_nomatch=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_ack_nomatch);
-	cf_dyn_buf_append_string(db, ";rw_err_ack_badnode=");
-	APPEND_STAT_COUNTER(db, g_config.rw_err_ack_badnode);
-
-	cf_dyn_buf_append_string(db, ";client_connections=");
-	cf_dyn_buf_append_int(db, (g_config.proto_connections_opened - g_config.proto_connections_closed));
-
-	cf_dyn_buf_append_string(db, ";waiting_transactions=");
-	APPEND_STAT_COUNTER(db, g_config.n_waiting_transactions);
-
-	cf_dyn_buf_append_string(db, ";tree_count=");
-	APPEND_STAT_COUNTER(db, g_config.global_tree_count);
-
-	cf_dyn_buf_append_string(db, ";record_refs=");
-	APPEND_STAT_COUNTER(db, g_config.global_record_ref_count);
-
-	cf_dyn_buf_append_string(db, ";record_locks=");
-	APPEND_STAT_COUNTER(db, g_config.global_record_lock_count);
-
-	cf_dyn_buf_append_string(db, ";ongoing_write_reqs=");
-	APPEND_STAT_COUNTER(db, g_config.write_req_object_count);
-
-	cf_dyn_buf_append_string(db, ";err_storage_queue_full=");
-	APPEND_STAT_COUNTER(db, g_config.err_storage_queue_full);
-
-	as_partition_states ps;
-	info_partition_getstates(&ps);
-	cf_dyn_buf_append_string(db, ";partition_actual=");
-	cf_dyn_buf_append_int(db, ps.sync_actual);
-	cf_dyn_buf_append_string(db, ";partition_replica=");
-	cf_dyn_buf_append_int(db, ps.sync_replica);
-	cf_dyn_buf_append_string(db, ";partition_desync=");
-	cf_dyn_buf_append_int(db, ps.desync);
-	cf_dyn_buf_append_string(db, ";partition_absent=");
-	cf_dyn_buf_append_int(db, ps.absent);
-	cf_dyn_buf_append_string(db, ";partition_zombie=");
-	cf_dyn_buf_append_int(db, ps.zombie);
-	cf_dyn_buf_append_string(db, ";partition_object_count=");
-	cf_dyn_buf_append_int(db, ps.n_objects);
-	cf_dyn_buf_append_string(db, ";partition_ref_count=");
-	cf_dyn_buf_append_int(db, ps.n_ref_count);
-
-	// get the system wide info
 	int freepct;
 	bool swapping;
-	cf_meminfo(0, 0, &freepct, &swapping);
-	cf_dyn_buf_append_string(db, ";system_free_mem_pct=");
-	cf_dyn_buf_append_int(db, freepct);
 
-	cf_dyn_buf_append_string(db, ";sindex_ucgarbage_found=");
-	APPEND_STAT_COUNTER(db, g_config.query_false_positives);
+	cf_meminfo(NULL, NULL, &freepct, &swapping);
+	info_append_int(db, "system_free_mem_pct", freepct);
+	info_append_bool(db, "system_swapping", swapping);
 
-	cf_dyn_buf_append_string(db, ";sindex_gc_locktimedout=");
-	APPEND_STAT_COUNTER(db, g_config.sindex_gc_timedout);
+	info_get_aggregated_namespace_stats(db);
 
-	cf_dyn_buf_append_string(db, ";sindex_gc_inactivity_dur=");
-	APPEND_STAT_COUNTER(db, g_config.sindex_gc_inactivity_dur);
+	info_append_int(db, "tsvc_queue", thr_tsvc_queue_get_size());
+	info_append_int(db, "info_queue", as_info_queue_get_size());
+	info_append_int(db, "delete_queue", as_nsup_queue_get_size());
+	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
+	info_append_uint32(db, "proxy_in_progress", as_proxy_hash_count());
+	info_append_uint64(db, "record_refs", g_stats.global_record_ref_count);
 
-	cf_dyn_buf_append_string(db, ";sindex_gc_activity_dur=");
-	APPEND_STAT_COUNTER(db, g_config.sindex_gc_activity_dur);
+	info_append_uint64(db, "client_connections", g_stats.proto_connections_opened - g_stats.proto_connections_closed);
+	info_append_uint64(db, "heartbeat_connections", g_stats.heartbeat_connections_opened - g_stats.heartbeat_connections_closed);
+	info_append_uint64(db, "fabric_connections", g_stats.fabric_connections_opened - g_stats.fabric_connections_closed);
 
-	cf_dyn_buf_append_string(db, ";sindex_gc_list_creation_time=");
-	APPEND_STAT_COUNTER(db, g_config.sindex_gc_list_creation_time);
+	info_append_uint64(db, "heartbeat_received_self", g_stats.heartbeat_received_self);
+	info_append_uint64(db, "heartbeat_received_foreign", g_stats.heartbeat_received_foreign);
 
-	cf_dyn_buf_append_string(db, ";sindex_gc_list_deletion_time=");
-	APPEND_STAT_COUNTER(db, g_config.sindex_gc_list_deletion_time);
+	info_append_uint64(db, "reaped_fds", g_stats.reaper_count); // not in ticker
 
-	cf_dyn_buf_append_string(db, ";sindex_gc_objects_validated=");
-	APPEND_STAT_COUNTER(db, g_config.sindex_gc_objects_validated);
+	info_append_uint64(db, "info_complete", g_stats.info_complete); // not in ticker
 
-	cf_dyn_buf_append_string(db, ";sindex_gc_garbage_found=");
-	APPEND_STAT_COUNTER(db, g_config.sindex_gc_garbage_found);
+	info_append_uint64(db, "proxy_retry", g_stats.proxy_retry); // not in ticker
 
-	cf_dyn_buf_append_string(db, ";sindex_gc_garbage_cleaned=");
-	APPEND_STAT_COUNTER(db, g_config.sindex_gc_garbage_cleaned);
+	info_append_uint64(db, "demarshal_error", g_stats.n_demarshal_error);
+	info_append_uint64(db, "early_tsvc_client_error", g_stats.n_tsvc_client_error);
+	info_append_uint64(db, "early_tsvc_batch_sub_error", g_stats.n_tsvc_batch_sub_error);
+	info_append_uint64(db, "early_tsvc_udf_sub_error", g_stats.n_tsvc_udf_sub_error);
 
-	cf_dyn_buf_append_string(db, ";system_swapping=");
-	cf_dyn_buf_append_string(db, swapping ? "true" : "false");
+	info_append_uint64(db, "batch_index_initiate", g_stats.batch_index_initiate); // not in ticker
 
-	cf_dyn_buf_append_string(db, ";err_replica_null_node=");
-	APPEND_STAT_COUNTER(db, g_config.err_replica_null_node);
-	cf_dyn_buf_append_string(db, ";err_replica_non_null_node=");
-	APPEND_STAT_COUNTER(db, g_config.err_replica_non_null_node);
-	cf_dyn_buf_append_string(db, ";err_sync_copy_null_master=");
-	APPEND_STAT_COUNTER(db, g_config.err_sync_copy_null_master);
+	cf_dyn_buf_append_string(db, "batch_index_queue=");
+	as_batch_queues_info(db); // not in ticker
+	cf_dyn_buf_append_char(db, ';');
 
-	cf_dyn_buf_append_string(db, ";storage_defrag_corrupt_record=");
-	APPEND_STAT_COUNTER(db, g_config.err_storage_defrag_corrupt_record);
-	cf_dyn_buf_append_string(db, ";err_write_fail_prole_unknown=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_unknown);
-	cf_dyn_buf_append_string(db, ";err_write_fail_prole_generation=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_generation);
-	cf_dyn_buf_append_string(db, ";err_write_fail_unknown=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_unknown);
-	cf_dyn_buf_append_string(db, ";err_write_fail_key_exists=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_key_exists);
-	cf_dyn_buf_append_string(db, ";err_write_fail_generation=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_generation);
-	cf_dyn_buf_append_string(db, ";err_write_fail_bin_exists=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_exists);
-	cf_dyn_buf_append_string(db, ";err_write_fail_parameter=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_parameter);
-	cf_dyn_buf_append_string(db, ";err_write_fail_incompatible_type=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_incompatible_type);
-	cf_dyn_buf_append_string(db, ";err_write_fail_prole_delete=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_prole_delete);
-	cf_dyn_buf_append_string(db, ";err_write_fail_not_found=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_not_found);
-	cf_dyn_buf_append_string(db, ";err_write_fail_key_mismatch=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_key_mismatch);
-	cf_dyn_buf_append_string(db, ";err_write_fail_record_too_big=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_record_too_big);
-	cf_dyn_buf_append_string(db, ";err_write_fail_bin_name=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_name);
-	cf_dyn_buf_append_string(db, ";err_write_fail_bin_not_found=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_bin_not_found);
-	cf_dyn_buf_append_string(db, ";err_write_fail_forbidden=");
-	APPEND_STAT_COUNTER(db, g_config.err_write_fail_forbidden);
-	cf_dyn_buf_append_string(db, ";stat_duplicate_operation=");
-	APPEND_STAT_COUNTER(db, g_config.stat_duplicate_operation);
-	cf_dyn_buf_append_string(db, ";uptime=");
-	APPEND_STAT_COUNTER(db, ((cf_getms() - g_config.start_ms) / 1000) );
+	info_append_uint64(db, "batch_index_complete", g_stats.batch_index_complete);
+	info_append_uint64(db, "batch_index_error", g_stats.batch_index_errors);
+	info_append_uint64(db, "batch_index_timeout", g_stats.batch_index_timeout);
 
-	// Write errors are now split into write_errs_notfound and write_errs_other
-	cf_dyn_buf_append_string(db, ";stat_write_errs_notfound=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_errs_notfound);
-	cf_dyn_buf_append_string(db, ";stat_write_errs_other=");
-	APPEND_STAT_COUNTER(db, g_config.stat_write_errs_other);
+	// Everything below is not in ticker...
 
-	cf_dyn_buf_append_string(db, ";heartbeat_received_self=");
-	cf_dyn_buf_append_uint64(db, g_config.heartbeat_received_self);
-	cf_dyn_buf_append_string(db, ";heartbeat_received_foreign=");
-	cf_dyn_buf_append_uint64(db, g_config.heartbeat_received_foreign);
+	info_append_int(db, "batch_index_unused_buffers", as_batch_unused_buffers());
+	info_append_uint64(db, "batch_index_huge_buffers", g_stats.batch_index_huge_buffers);
+	info_append_uint64(db, "batch_index_created_buffers", g_stats.batch_index_created_buffers);
+	info_append_uint64(db, "batch_index_destroyed_buffers", g_stats.batch_index_destroyed_buffers);
 
-	// Query stats. Aggregation + Lookups
-	cf_dyn_buf_append_string(db, ";");
-	as_query_stat(name, db);
+	info_append_uint64(db, "batch_initiate", g_stats.batch_initiate);
+	info_append_int(db, "batch_queue", as_batch_direct_queue_size());
+	info_append_uint64(db, "batch_error", g_stats.batch_errors);
+	info_append_uint64(db, "batch_timeout", g_stats.batch_timeout);
 
-	cf_dyn_buf_append_string(db, ";");
+	info_append_int(db, "scans_active", as_scan_get_active_job_count());
+
+	info_append_uint32(db, "query_short_running", g_query_short_running);
+	info_append_uint32(db, "query_long_running", g_query_long_running);
+
+	info_append_uint64(db, "sindex_ucgarbage_found", g_stats.query_false_positives);
+	info_append_uint64(db, "sindex_gc_locktimedout", g_stats.sindex_gc_timedout);
+	info_append_uint64(db, "sindex_gc_inactivity_dur", g_stats.sindex_gc_inactivity_dur);
+	info_append_uint64(db, "sindex_gc_activity_dur", g_stats.sindex_gc_activity_dur);
+	info_append_uint64(db, "sindex_gc_list_creation_time", g_stats.sindex_gc_list_creation_time);
+	info_append_uint64(db, "sindex_gc_list_deletion_time", g_stats.sindex_gc_list_deletion_time);
+	info_append_uint64(db, "sindex_gc_objects_validated", g_stats.sindex_gc_objects_validated);
+	info_append_uint64(db, "sindex_gc_garbage_found", g_stats.sindex_gc_garbage_found);
+	info_append_uint64(db, "sindex_gc_garbage_cleaned", g_stats.sindex_gc_garbage_cleaned);
+
+	char paxos_principal[19];
+	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
+	info_append_string(db, "paxos_principal", paxos_principal);
+
+	info_append_bool(db, "migrate_allowed", as_partition_get_migration_flag());
+
+	uint64_t migrate_partitions_remaining = as_partition_remaining_migrations();
+
+	info_append_uint64(db, "migrate_progress_send", migrate_partitions_remaining);
+	info_append_uint64(db, "migrate_progress_recv", migrate_partitions_remaining);
+	info_append_uint64(db, "migrate_partitions_remaining", migrate_partitions_remaining);
+
+	info_append_uint64(db, "fabric_msgs_sent", g_stats.fabric_msgs_sent);
+	info_append_uint64(db, "fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd);
+
 	as_xdr_get_stats(name, db);
 
-	return(0);
+	cf_dyn_buf_chomp(db);
+
+	return 0;
 }
 
 
@@ -725,7 +357,7 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 int
 info_get_partition_generation(char *name, cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_int(db, g_config.partition_generation);
+	cf_dyn_buf_append_int(db, (int)g_partition_generation);
 
 	return(0);
 }
@@ -1345,9 +977,9 @@ info_command_dump_wb_summary(char *name, char *params, cf_dyn_buf *db)
 }
 
 int
-info_command_dump_wr(char *name, char *params, cf_dyn_buf *db)
+info_command_dump_rw_request_hash(char *name, char *params, cf_dyn_buf *db)
 {
-	as_dump_wr();
+	rw_request_hash_dump();
 	cf_dyn_buf_append_string(db, "ok");
 	return(0);
 }
@@ -1525,7 +1157,7 @@ info_command_mem(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
-static void
+void
 info_log_with_datestamp(void (*log_fn)(void))
 {
 	char datestamp[1024];
@@ -2073,466 +1705,401 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 
 
 
-int
+void
 info_service_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "transaction-queues=");
-	cf_dyn_buf_append_int(db, g_config.n_transaction_queues);
-	cf_dyn_buf_append_string(db, ";transaction-threads-per-queue=");
-	cf_dyn_buf_append_int(db, g_config.n_transaction_threads_per_queue);
-	cf_dyn_buf_append_string(db, ";transaction-pending-limit=");
-	cf_dyn_buf_append_int(db, g_config.transaction_pending_limit);
-	cf_dyn_buf_append_string(db, ";migrate-threads=");
-	cf_dyn_buf_append_int(db, g_config.n_migrate_threads);
-	cf_dyn_buf_append_string(db, ";migrate-max-num-incoming=");
-	cf_dyn_buf_append_int(db, g_config.migrate_max_num_incoming);
-	cf_dyn_buf_append_string(db, ";migrate-rx-lifetime-ms=");
-	cf_dyn_buf_append_int(db, g_config.migrate_rx_lifetime_ms);
-	cf_dyn_buf_append_string(db, ";proto-fd-max=");
-	cf_dyn_buf_append_int(db, g_config.n_proto_fd_max);
-	cf_dyn_buf_append_string(db, ";proto-fd-idle-ms=");
-	cf_dyn_buf_append_int(db, g_config.proto_fd_idle_ms);
-	cf_dyn_buf_append_string(db, ";proto-slow-netio-sleep-ms=");
-	cf_dyn_buf_append_int(db, g_config.proto_slow_netio_sleep_ms);
-	cf_dyn_buf_append_string(db, ";transaction-retry-ms=");
-	cf_dyn_buf_append_int(db, g_config.transaction_retry_ms);
-	cf_dyn_buf_append_string(db, ";transaction-max-ms=");
-	cf_dyn_buf_append_int(db, (int)(g_config.transaction_max_ns / 1000000));
-	cf_dyn_buf_append_string(db, ";transaction-repeatable-read=");
-	cf_dyn_buf_append_string(db, g_config.transaction_repeatable_read ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";ticker-interval=");
-	cf_dyn_buf_append_int(db, g_config.ticker_interval);
-	cf_dyn_buf_append_string(db, ";log-local-time=");
-	cf_dyn_buf_append_string(db, cf_fault_is_using_local_time() ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";microbenchmarks=");
-	cf_dyn_buf_append_string(db, g_config.microbenchmarks ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";storage-benchmarks=");
-	cf_dyn_buf_append_string(db, g_config.storage_benchmarks ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";ldt-benchmarks=");
-	cf_dyn_buf_append_string(db, g_config.ldt_benchmarks ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";scan-max-active=");
-	cf_dyn_buf_append_int(db, g_config.scan_max_active);
-	cf_dyn_buf_append_string(db, ";scan-max-done=");
-	cf_dyn_buf_append_int(db, g_config.scan_max_done);
-	cf_dyn_buf_append_string(db, ";scan-max-udf-transactions=");
-	cf_dyn_buf_append_int(db, g_config.scan_max_udf_transactions);
-	cf_dyn_buf_append_string(db, ";scan-threads=");
-	cf_dyn_buf_append_int(db, g_config.scan_threads);
+	// Note - no user, group.
+	info_append_uint32(db, "paxos-single-replica-limit", g_config.paxos_single_replica_limit);
+	info_append_string(db, "pidfile", g_config.pidfile ? g_config.pidfile : "null");
+	info_append_int(db, "service-threads", g_config.n_service_threads);
+	info_append_int(db, "transaction-queues", g_config.n_transaction_queues);
+	info_append_int(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
+	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
 
-	cf_dyn_buf_append_string(db, ";batch-index-threads=");
-	cf_dyn_buf_append_int(db, g_config.n_batch_index_threads);
-	cf_dyn_buf_append_string(db, ";batch-threads=");
-	cf_dyn_buf_append_int(db, g_config.n_batch_threads);
-	cf_dyn_buf_append_string(db, ";batch-max-requests=");
-	cf_dyn_buf_append_uint32(db, g_config.batch_max_requests);
-	cf_dyn_buf_append_string(db, ";batch-max-buffers-per-queue=");
-	cf_dyn_buf_append_uint32(db, g_config.batch_max_buffers_per_queue);
-	cf_dyn_buf_append_string(db, ";batch-max-unused-buffers=");
-	cf_dyn_buf_append_uint32(db, g_config.batch_max_unused_buffers);
-	cf_dyn_buf_append_string(db, ";batch-priority=");
-	cf_dyn_buf_append_uint32(db, g_config.batch_priority);
+	info_append_bool(db, "allow-inline-transactions", g_config.allow_inline_transactions);
+	info_append_int(db, "batch-threads", g_config.n_batch_threads);
+	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
+	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
+	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
+	info_append_uint32(db, "batch-priority", g_config.batch_priority);
+	info_append_int(db, "batch-index-threads", g_config.n_batch_index_threads);
+	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
+	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
+	info_append_int(db, "fabric-workers", g_config.n_fabric_workers);
+	info_append_bool(db, "generation-disable", g_config.generation_disable);
+	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
+	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
+	info_append_string(db, "hist-track-thresholds", g_config.hist_track_thresholds ? g_config.hist_track_thresholds : "null");
+	info_append_int(db, "info-threads", g_config.n_info_threads);
+	info_append_bool(db, "ldt-benchmarks", g_config.ldt_benchmarks);
+	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
+	info_append_int(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
+	info_append_int(db, "migrate-rx-lifetime-ms", g_config.migrate_rx_lifetime_ms);
+	info_append_int(db, "migrate-threads", g_config.n_migrate_threads);
+	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
+	info_append_uint32(db, "nsup-period", g_config.nsup_period);
+	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
+	info_append_uint64(db, "paxos-max-cluster-size", g_config.paxos_max_cluster_size);
 
-	cf_dyn_buf_append_string(db, ";nsup-delete-sleep=");
-	cf_dyn_buf_append_int(db, g_config.nsup_delete_sleep);
-	cf_dyn_buf_append_string(db, ";nsup-period=");
-	cf_dyn_buf_append_int(db, g_config.nsup_period);
-	cf_dyn_buf_append_string(db, ";nsup-startup-evict=");
-	cf_dyn_buf_append_string(db, g_config.nsup_startup_evict ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";paxos-retransmit-period=");
-	cf_dyn_buf_append_int(db, g_config.paxos_retransmit_period);
-	cf_dyn_buf_append_string(db, ";paxos-single-replica-limit=");
-	cf_dyn_buf_append_int(db, g_config.paxos_single_replica_limit);
-	cf_dyn_buf_append_string(db, ";paxos-max-cluster-size=");
-	cf_dyn_buf_append_int(db, g_config.paxos_max_cluster_size);
-	cf_dyn_buf_append_string(db, ";paxos-protocol=");
-	cf_dyn_buf_append_string(db, (AS_PAXOS_PROTOCOL_V1 == g_config.paxos_protocol ? "v1" :
-								  (AS_PAXOS_PROTOCOL_V2 == g_config.paxos_protocol ? "v2" :
-								   (AS_PAXOS_PROTOCOL_V3 == g_config.paxos_protocol ? "v3" :
-									(AS_PAXOS_PROTOCOL_V4 == g_config.paxos_protocol ? "v4" :
-									 (AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined"))))));
-	cf_dyn_buf_append_string(db, ";paxos-recovery-policy=");
-	cf_dyn_buf_append_string(db, (AS_PAXOS_RECOVERY_POLICY_MANUAL == g_config.paxos_recovery_policy ? "manual" :
-								  (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER == g_config.paxos_recovery_policy ? "auto-dun-master" :
-								   (AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL == g_config.paxos_recovery_policy ? "auto-dun-all" : 
-								     (AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined")))));
-	cf_dyn_buf_append_string(db, ";write-duplicate-resolution-disable=");
-	cf_dyn_buf_append_string(db, g_config.write_duplicate_resolution_disable ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";respond-client-on-master-completion=");
-	cf_dyn_buf_append_string(db, g_config.respond_client_on_master_completion ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";replication-fire-and-forget=");
-	cf_dyn_buf_append_string(db, g_config.replication_fire_and_forget ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";info-threads=");
-	cf_dyn_buf_append_int(db, g_config.n_info_threads);
-	cf_dyn_buf_append_string(db, ";allow-inline-transactions=");
-	cf_dyn_buf_append_string(db, g_config.allow_inline_transactions ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";use-queue-per-device=");
-	cf_dyn_buf_append_string(db, g_config.use_queue_per_device ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";snub-nodes=");
-	cf_dyn_buf_append_string(db, g_config.snub_nodes ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";prole-extra-ttl=");
-	cf_dyn_buf_append_int(db, g_config.prole_extra_ttl);
-	cf_dyn_buf_append_string(db, ";max-msgs-per-type=");
-	cf_dyn_buf_append_int(db, g_config.max_msgs_per_type);
-	cf_dyn_buf_append_string(db, ";service-threads=");
-	cf_dyn_buf_append_int(db, g_config.n_service_threads);
-	cf_dyn_buf_append_string(db, ";fabric-workers=");
-	cf_dyn_buf_append_int(db, g_config.n_fabric_workers);
+	info_append_string(db, "paxos-protocol",
+			(AS_PAXOS_PROTOCOL_V1 == g_config.paxos_protocol ? "v1" :
+				(AS_PAXOS_PROTOCOL_V2 == g_config.paxos_protocol ? "v2" :
+					(AS_PAXOS_PROTOCOL_V3 == g_config.paxos_protocol ? "v3" :
+						(AS_PAXOS_PROTOCOL_V4 == g_config.paxos_protocol ? "v4" :
+							(AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined"))))));
 
-	if (g_config.pidfile) {
-		cf_dyn_buf_append_string(db, ";pidfile=");
-		cf_dyn_buf_append_string(db, g_config.pidfile);
-	}
-	if (g_config.generation_disable) {
-		cf_dyn_buf_append_string(db, ";generation-disable=");
-		cf_dyn_buf_append_string(db, g_config.generation_disable ? "true" : "false");
-	}
-#ifdef MEM_COUNT
-	cf_dyn_buf_append_string(db, ";memory-accounting=");
-	cf_dyn_buf_append_string(db, g_config.memory_accounting ? "true" : "false");
-#endif
+	info_append_string(db, "paxos-recovery-policy",
+			(AS_PAXOS_RECOVERY_POLICY_MANUAL == g_config.paxos_recovery_policy ? "manual" :
+				(AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER == g_config.paxos_recovery_policy ? "auto-dun-master" :
+					(AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL == g_config.paxos_recovery_policy ? "auto-dun-all" :
+						(AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined")))));
 
-#ifdef USE_ASM
-	cf_dyn_buf_append_string(db, ";asmalloc_enabled=");
-	cf_dyn_buf_append_string(db, g_config.asmalloc_enabled ? "true" : "false");
-#endif
+	info_append_uint32(db, "paxos-retransmit-period", g_config.paxos_retransmit_period);
+	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
+	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
+	info_append_uint32(db, "query-batch-size", g_config.query_bsize);
+	info_append_uint32(db, "query-buf-size", g_config.query_buf_size); // dynamic only
+	info_append_uint32(db, "query-bufpool-size", g_config.query_bufpool_size);
+	info_append_bool(db, "query-in-transaction-thread", g_config.query_in_transaction_thr);
+	info_append_uint32(db, "query-long-q-max-size", g_config.query_long_q_max_size);
+	info_append_bool(db, "query-microbenchmark", g_config.query_enable_histogram); // dynamic only
+	info_append_bool(db, "query-pre-reserve-partitions", g_config.partitions_pre_reserved);
+	info_append_uint32(db, "query-priority", g_config.query_priority);
+	info_append_uint64(db, "query-priority-sleep-us", g_config.query_sleep_us);
+	info_append_uint64(db, "query-rec-count-bound", g_config.query_rec_count_bound);
+	info_append_bool(db, "query-req-in-query-thread", g_config.query_req_in_query_thread);
+	info_append_uint32(db, "query-req-max-inflight", g_config.query_req_max_inflight);
+	info_append_uint32(db, "query-short-q-max-size", g_config.query_short_q_max_size);
+	info_append_uint32(db, "query-threads", g_config.query_threads);
+	info_append_uint32(db, "query-threshold", g_config.query_threshold);
+	info_append_uint64(db, "query-untracked-time-ms", g_config.query_untracked_time_ms);
+	info_append_uint32(db, "query-worker-threads", g_config.query_worker_threads);
+	info_append_bool(db, "respond-client-on-master-completion", g_config.respond_client_on_master_completion);
+	info_append_bool(db, "run-as-daemon", g_config.run_as_daemon);
+	info_append_uint32(db, "scan-max-active", g_config.scan_max_active);
+	info_append_uint32(db, "scan-max-done", g_config.scan_max_done);
+	info_append_uint32(db, "scan-max-udf-transactions", g_config.scan_max_udf_transactions);
+	info_append_uint32(db, "scan-threads", g_config.scan_threads);
+	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 
-	cf_dyn_buf_append_string(db, ";udf-runtime-gmax-memory=");
-	cf_dyn_buf_append_uint64(db, g_config.udf_runtime_max_gmemory);
-	cf_dyn_buf_append_string(db, ";udf-runtime-max-memory=");
-	cf_dyn_buf_append_uint64(db, g_config.udf_runtime_max_memory);
-
-	cf_dyn_buf_append_string(db, ";sindex-builder-threads=");
-	cf_dyn_buf_append_uint64(db, g_config.sindex_builder_threads);
-	cf_dyn_buf_append_string(db, ";sindex-data-max-memory=");
 	if (g_config.sindex_data_max_memory != ULONG_MAX) {
-		cf_dyn_buf_append_uint64(db, g_config.sindex_data_max_memory);
-	} else {
-		cf_dyn_buf_append_string(db, "ULONG_MAX");
-	}
-
-	cf_dyn_buf_append_string(db, ";query-threads=");
-	cf_dyn_buf_append_int(db, g_config.query_threads);
-	cf_dyn_buf_append_string(db, ";query-worker-threads=");
-	cf_dyn_buf_append_int(db, g_config.query_worker_threads);
-	cf_dyn_buf_append_string(db, ";query-priority=");
-	cf_dyn_buf_append_uint64(db, g_config.query_priority);
-	cf_dyn_buf_append_string(db, ";query-in-transaction-thread=");
-	cf_dyn_buf_append_uint64(db, g_config.query_in_transaction_thr);
-	cf_dyn_buf_append_string(db, ";query-req-in-query-thread=");
-	cf_dyn_buf_append_uint64(db, g_config.query_req_in_query_thread);
-	cf_dyn_buf_append_string(db, ";query-req-max-inflight=");
-	cf_dyn_buf_append_uint64(db, g_config.query_req_max_inflight);
-	cf_dyn_buf_append_string(db, ";query-bufpool-size=");
-	cf_dyn_buf_append_uint64(db, g_config.query_bufpool_size);
-	cf_dyn_buf_append_string(db, ";query-batch-size=");
-	cf_dyn_buf_append_uint64(db, g_config.query_bsize);
-	cf_dyn_buf_append_string(db, ";query-priority-sleep-us=");
-	cf_dyn_buf_append_uint64(db, g_config.query_sleep_us);	// Show uSec
-	cf_dyn_buf_append_string(db, ";query-short-q-max-size=");
-	cf_dyn_buf_append_uint64(db, g_config.query_short_q_max_size);
-	cf_dyn_buf_append_string(db, ";query-long-q-max-size=");
-	cf_dyn_buf_append_uint64(db, g_config.query_long_q_max_size);
-	cf_dyn_buf_append_string(db, ";query-rec-count-bound=");
-	cf_dyn_buf_append_uint64(db, g_config.query_rec_count_bound);
-	cf_dyn_buf_append_string(db, ";query-threshold=");
-	cf_dyn_buf_append_uint64(db, g_config.query_threshold);
-	cf_dyn_buf_append_string(db, ";query-untracked-time-ms=");
-	cf_dyn_buf_append_uint64(db, g_config.query_untracked_time_ms); // Show it in ms seconds
-	cf_dyn_buf_append_string(db, ";query-pre-reserve-partitions=");
-	cf_dyn_buf_append_string(db, (g_config.partitions_pre_reserved) ? "true" : "false");
-
-	return(0);
-}
-
-
-int
-info_namespace_config_get(char* context, cf_dyn_buf *db)
-{
-	as_namespace *ns = as_namespace_get_byname(context);
-	if (!ns) {
-		cf_dyn_buf_append_string(db, "Namespace not found");
-		return -1;
-	}
-
-	cf_dyn_buf_append_string(db, "memory-size=");
-	cf_dyn_buf_append_uint64(db, ns->memory_size);
-
-	cf_dyn_buf_append_string(db, ";high-water-disk-pct=");
-	cf_dyn_buf_append_int(db, ns->hwm_disk * 100);
-
-	cf_dyn_buf_append_string(db, ";high-water-memory-pct=");
-	cf_dyn_buf_append_int(db, ns->hwm_memory * 100);
-
-	cf_dyn_buf_append_string(db, ";evict-tenths-pct=");
-	cf_dyn_buf_append_uint32(db, ns->evict_tenths_pct);
-
-	cf_dyn_buf_append_string(db, ";evict-hist-buckets=");
-	cf_dyn_buf_append_uint32(db, ns->evict_hist_buckets);
-
-	cf_dyn_buf_append_string(db, ";stop-writes-pct=");
-	cf_dyn_buf_append_int(db, ns->stop_writes_pct * 100);
-
-	cf_dyn_buf_append_string(db, ";cold-start-evict-ttl=");
-	cf_dyn_buf_append_uint32(db, ns->cold_start_evict_ttl);
-
-	cf_dyn_buf_append_string(db, ";repl-factor=");
-	cf_dyn_buf_append_uint32(db, ns->replication_factor);
-
-	cf_dyn_buf_append_string(db, ";default-ttl=");
-	cf_dyn_buf_append_uint64(db, ns->default_ttl);
-
-	cf_dyn_buf_append_string(db, ";max-ttl=");
-	cf_dyn_buf_append_uint64(db, ns->max_ttl);
-
-	cf_dyn_buf_append_string(db, ";conflict-resolution-policy=");
-	if(ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
-		cf_dyn_buf_append_string(db, "generation");
-	}
-	else if(ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME) {
-		cf_dyn_buf_append_string(db, "last-update-time");
+		info_append_uint64(db, "sindex-data-max-memory", g_config.sindex_data_max_memory);
 	}
 	else {
-		cf_dyn_buf_append_string(db, "undefined");
+		info_append_string(db, "sindex-data-max-memory", "ULONG_MAX");
 	}
 
-	cf_dyn_buf_append_string(db, ";single-bin=");
-	cf_dyn_buf_append_string(db, ns->single_bin ? "true" : "false");
+	info_append_bool(db, "sindex-gc-enable-histogram", g_config.sindex_gc_enable_histogram); // dynamic only
+	info_append_bool(db, "snub-nodes", g_config.snub_nodes);
+	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
+	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
+	info_append_uint32(db, "transaction-pending-limit", g_config.transaction_pending_limit);
+	info_append_bool(db, "transaction-repeatable-read", g_config.transaction_repeatable_read);
+	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
+	info_append_bool(db, "use-queue-per-device", g_config.use_queue_per_device);
+	info_append_string(db, "work-directory", g_config.work_directory ? g_config.work_directory : "null");
+	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 
-	cf_dyn_buf_append_string(db, ";ldt-enabled=");
-	cf_dyn_buf_append_string(db, ns->ldt_enabled ? "true" : "false");
-
-	cf_dyn_buf_append_string(db, ";ldt-page-size=");
-	cf_dyn_buf_append_uint64(db, ns->ldt_page_size);
-
-	cf_dyn_buf_append_string(db, ";enable-xdr=");
-	cf_dyn_buf_append_string(db, ns->enable_xdr ? "true" : "false");
-
-	cf_dyn_buf_append_string(db, ";sets-enable-xdr=");
-	cf_dyn_buf_append_string(db, ns->sets_enable_xdr ? "true" : "false");
-
-	cf_dyn_buf_append_string(db, ";ns-forward-xdr-writes=");
-	cf_dyn_buf_append_string(db, ns->ns_forward_xdr_writes ? "true" : "false");
-
-	cf_dyn_buf_append_string(db, ";allow-nonxdr-writes=");
-	cf_dyn_buf_append_string(db, ns->ns_allow_nonxdr_writes ? "true" : "false");
-
-	cf_dyn_buf_append_string(db, ";allow-xdr-writes=");
-	cf_dyn_buf_append_string(db, ns->ns_allow_xdr_writes ? "true" : "false");
-
-	cf_dyn_buf_append_string(db, ";disallow-null-setname=");
-	cf_dyn_buf_append_string(db, ns->disallow_null_setname ? "true" : "false");
-
-	cf_dyn_buf_append_string(db, ";total-bytes-memory=");
-	cf_dyn_buf_append_uint64(db, ns->memory_size);
-
-	cf_dyn_buf_append_string(db, ";read-consistency-level-override=");
-	cf_dyn_buf_append_string(db, NS_READ_CONSISTENCY_LEVEL_NAME());
-
-	cf_dyn_buf_append_string(db, ";write-commit-level-override=");
-	cf_dyn_buf_append_string(db, NS_WRITE_COMMIT_LEVEL_NAME());
-
-	cf_dyn_buf_append_string(db, ";migrate-order=");
-	cf_dyn_buf_append_uint32(db, ns->migrate_order);
-
-	cf_dyn_buf_append_string(db, ";migrate-sleep=");
-	cf_dyn_buf_append_uint32(db, ns->migrate_sleep);
-
-	// if storage, lots of information about the storage
-	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-
-		info_append_uint64("", "total-bytes-disk", ns->ssd_size, db);
-		info_append_uint64("", "defrag-lwm-pct", ns->storage_defrag_lwm_pct, db);
-		info_append_uint64("", "defrag-queue-min", ns->storage_defrag_queue_min, db);
-		info_append_uint64("", "defrag-sleep", ns->storage_defrag_sleep, db);
-		info_append_uint64("", "defrag-startup-minimum", ns->storage_defrag_startup_minimum, db);
-		info_append_uint64("", "flush-max-ms", ns->storage_flush_max_us / 1000, db);
-		info_append_uint64("", "fsync-max-sec", ns->storage_fsync_max_us / 1000000, db);
-		info_append_uint64("", "max-write-cache", ns->storage_max_write_cache, db);
-		info_append_uint64("", "min-avail-pct", ns->storage_min_avail_pct, db);
-		info_append_uint64("", "post-write-queue", (uint64_t)ns->storage_post_write_queue, db);
-
-		if (ns->storage_data_in_memory)
-			cf_dyn_buf_append_string(db, ";data-in-memory=true");
-		else
-			cf_dyn_buf_append_string(db, ";data-in-memory=false");
-
-		for (uint i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
-			if (ns->storage_devices[i] == 0)        break;
-			cf_dyn_buf_append_string(db, ";dev=");
-			cf_dyn_buf_append_string(db, ns->storage_devices[i]);
-		}
-		for (uint i = 0; i < AS_STORAGE_MAX_FILES; i++) {
-			if (ns->storage_files[i] == 0)        break;
-			cf_dyn_buf_append_string(db, ";file=");
-			cf_dyn_buf_append_string(db, ns->storage_files[i]);
-		}
-		if         (ns->storage_filesize != 0) {
-			cf_dyn_buf_append_string(db, ";filesize=");
-			cf_dyn_buf_append_uint64(db, ns->storage_filesize);
-		}
-		if (ns->storage_blocksize != 0) {
-			cf_dyn_buf_append_string(db, ";blocksize=");
-			cf_dyn_buf_append_uint32(db, ns->storage_blocksize);
-		}
-		if (ns->storage_write_threads != 0) {
-			cf_dyn_buf_append_string(db, ";writethreads=");
-			cf_dyn_buf_append_uint32(db, ns->storage_write_threads);
-		}
-		if (ns->storage_max_write_cache != 0) {
-			cf_dyn_buf_append_string(db, ";writecache=");
-			cf_dyn_buf_append_uint64(db, ns->storage_max_write_cache);
-		}
-
-		cf_dyn_buf_append_string(db, ";obj-size-hist-max=");
-		cf_dyn_buf_append_uint32(db, ns->obj_size_hist_max);
-	} // SSD
-
-	// Info. about KV stores.
-	if (ns->storage_type == AS_STORAGE_ENGINE_KV) {
-
-		info_append_uint64("", "total-bytes-disk", ns->kv_size, db);
-
-		for (uint i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
-			if (!(ns->storage_devices[i]))
-				break;
-			cf_dyn_buf_append_string(db, ";dev=");
-			cf_dyn_buf_append_string(db, ns->storage_devices[i]);
-		}
-
-		if (ns->storage_filesize) {
-			cf_dyn_buf_append_string(db, ";filesize=");
-			cf_dyn_buf_append_uint64(db, ns->storage_filesize);
-		}
-	} // KV
-
-	return (0);
+#ifdef USE_ASM
+	info_append_bool(db, "asmalloc-enabled", g_config.asmalloc_enabled);
+#endif
+	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
+	info_append_int(db, "max-msgs-per-type", (int)g_config.max_msgs_per_type);
+#ifdef MEM_COUNT
+	info_append_bool(db, "memory-accounting", g_config.memory_accounting);
+#endif
+	info_append_uint32(db, "prole-extra-ttl", g_config.prole_extra_ttl);
+	info_append_bool(db, "non-master-sets-delete", g_config.non_master_sets_delete); // dynamic only
 }
+
+
 void
-info_network_info_config_get(cf_dyn_buf *db)
+info_network_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "service-address=");
-	cf_dyn_buf_append_string(db, g_config.socket.addr);
-	cf_dyn_buf_append_string(db, ";service-port=");
-	cf_dyn_buf_append_int(db, g_config.socket.port);
+	// Service:
+
+	info_append_string(db, "service.address", g_config.socket.addr);
+	info_append_int(db, "service.port", g_config.socket.port);
+
+	if (g_config.external_address) {
+		info_append_string(db, "service.access-address", g_config.external_address);
+		info_append_bool(db, "virtual", g_config.is_external_address_virtual); // TODO - how to present?
+	}
+
+	if (g_config.alternate_address) {
+		info_append_string(db, "service.alternate-address", g_config.alternate_address);
+	}
+
+	if (g_config.network_interface_name) {
+		info_append_string(db, "service.network-interface-name", g_config.network_interface_name);
+	}
+
+	info_append_bool(db, "service.reuse-address", g_config.socket_reuse_addr);
+
+	// Heartbeat:
+
+	info_append_string(db, "heartbeat.mode",
+			(g_config.hb_mode == AS_HB_MODE_MCAST ? "multicast" :
+				(g_config.hb_mode == AS_HB_MODE_MESH ? "mesh" : "UNKNOWN")));
+
+	info_append_string(db, "heartbeat.address", g_config.hb_addr);
+	info_append_int(db, "heartbeat.port", g_config.hb_port);
 
 	if (g_config.hb_mode == AS_HB_MODE_MESH) {
 		if (g_config.hb_init_addr) {
-			cf_dyn_buf_append_string(db, ";mesh-address=");
-			cf_dyn_buf_append_string(db, g_config.hb_init_addr);
+			info_append_string(db, "heartbeat.mesh-address", g_config.hb_init_addr);
+
 			if (g_config.hb_init_port) {
-				cf_dyn_buf_append_string(db, ";mesh-port=");
-				cf_dyn_buf_append_int(db, g_config.hb_init_port);
+				info_append_int(db, "heartbeat.mesh-port", g_config.hb_init_port);
 			}
-		} else {
+		}
+		else {
 			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 				if (g_config.hb_mesh_seed_addrs[i]) {
-					cf_dyn_buf_append_string(db, ";mesh-seed-address-port=");
+					cf_dyn_buf_append_string(db, "heartbeat.mesh-seed-address-port=");
 					cf_dyn_buf_append_string(db, g_config.hb_mesh_seed_addrs[i]);
-					cf_dyn_buf_append_string(db, ":");
+					cf_dyn_buf_append_char(db, ':');
 					cf_dyn_buf_append_int(db, g_config.hb_mesh_seed_ports[i]);
-				} else {
+					cf_dyn_buf_append_char(db, ';');
+				}
+				else {
 					break;
 				}
 			}
 		}
 	}
 
-	if (g_config.network_interface_name) {
-		cf_dyn_buf_append_string(db, ";network-interface-name=");
-		cf_dyn_buf_append_string(db, g_config.network_interface_name);
-	}
-	if (g_config.external_address) {
-		cf_dyn_buf_append_string(db, ";access-address=");
-		cf_dyn_buf_append_string(db, g_config.external_address);
-	}
-	if (g_config.alternate_address) {
-		cf_dyn_buf_append_string(db, ";alternate-address=");
-		cf_dyn_buf_append_string(db, g_config.alternate_address);
-	}
-	cf_dyn_buf_append_string(db, ";reuse-address=");
-	cf_dyn_buf_append_string(db, g_config.socket_reuse_addr ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";fabric-port=");
-	cf_dyn_buf_append_int(db, g_config.fabric_port);
+	info_append_uint32(db, "heartbeat.interval", g_config.hb_interval);
+	info_append_uint32(db, "heartbeat.timeout", g_config.hb_timeout);
+	info_append_string(db, "heartbeat.interface-address", g_config.hb_tx_addr ? g_config.hb_tx_addr : "null");
+	// Note - no heartbeat.mcast-ttl or heartbeat.mesh-rw-retry-timeout ...
 
-	cf_dyn_buf_append_string(db, ";fabric-keepalive-enabled=");
-	cf_dyn_buf_append_string(db, g_config.fabric_keepalive_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";fabric-keepalive-time=");
-	cf_dyn_buf_append_int(db, g_config.fabric_keepalive_time);
-	cf_dyn_buf_append_string(db, ";fabric-keepalive-intvl=");
-	cf_dyn_buf_append_int(db, g_config.fabric_keepalive_intvl);
-	cf_dyn_buf_append_string(db, ";fabric-keepalive-probes=");
-	cf_dyn_buf_append_int(db, g_config.fabric_keepalive_probes);
+	info_append_string(db, "heartbeat.protocol",
+			(AS_HB_PROTOCOL_V1 == g_config.hb_protocol ? "v1" :
+				(AS_HB_PROTOCOL_V2 == g_config.hb_protocol ? "v2" :
+					(AS_HB_PROTOCOL_RESET == g_config.hb_protocol ? "reset" :
+						(AS_HB_PROTOCOL_NONE == g_config.hb_protocol ? "none" : "undefined")))));
 
-// network-info-port is the asd info port variable/output, This was chosen because info-port conflicts with XDR config parameter.
-// Ideally XDR should use xdr-info-port and asd should use info-port.
-	cf_dyn_buf_append_string(db, ";network-info-port=");
-	cf_dyn_buf_append_int(db, g_config.info_port);
+	// Fabric:
+
+	info_append_int(db, "fabric.port", g_config.fabric_port);
+	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
+	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
+	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
+	info_append_int(db, "fabric.keepalive-probes", g_config.fabric_keepalive_probes);
+
+	// Info:
+
+	// network.info.port is the asd info port variable/output, This was chosen
+	// because info.port conflicts with XDR config parameter. Ideally XDR should
+	// use xdr.info.port and asd should use info.port.
+	info_append_int(db, "info.port", g_config.info_port);
 }
+
 
 void
-info_network_heartbeat_config_get(cf_dyn_buf *db)
+info_namespace_config_get(char* context, cf_dyn_buf *db)
 {
-	if (g_config.hb_mode == AS_HB_MODE_MCAST) {
-		cf_dyn_buf_append_string(db, "heartbeat-mode=multicast");
+	as_namespace *ns = as_namespace_get_byname(context);
+
+	if (! ns) {
+		cf_dyn_buf_append_string(db, "namespace not found;"); // TODO - start with "error"?
+		return;
 	}
-	else if (g_config.hb_mode == AS_HB_MODE_MESH) {
-		cf_dyn_buf_append_string(db, "heartbeat-mode=mesh");
+
+	info_append_uint32(db, "repl-factor", (uint32_t)ns->replication_factor);
+	info_append_uint64(db, "memory-size", ns->memory_size);
+	info_append_uint64(db, "default-ttl", ns->default_ttl);
+
+	info_append_bool(db, "enable-xdr", ns->enable_xdr);
+	info_append_bool(db, "sets-enable-xdr", ns->sets_enable_xdr);
+	info_append_bool(db, "ns-forward-xdr-writes", ns->ns_forward_xdr_writes);
+	info_append_bool(db, "allow-nonxdr-writes", ns->ns_allow_nonxdr_writes);
+	info_append_bool(db, "allow-xdr-writes", ns->ns_allow_xdr_writes);
+
+	// Not true config, but act as config overrides:
+	cf_hist_track_get_settings(ns->read_hist, db);
+	cf_hist_track_get_settings(ns->query_hist, db);
+	cf_hist_track_get_settings(ns->udf_hist, db);
+	cf_hist_track_get_settings(ns->write_hist, db);
+
+	info_append_uint32(db, "cold-start-evict-ttl", ns->cold_start_evict_ttl);
+
+	if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION) {
+		info_append_string(db, "conflict-resolution-policy", "generation");
+	}
+	else if (ns->conflict_resolution_policy == AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_LAST_UPDATE_TIME) {
+		info_append_string(db, "conflict-resolution-policy", "last-update-time");
 	}
 	else {
-		cf_dyn_buf_append_string(db, "heartbeat-mode=UNKNOWN");
+		info_append_string(db, "conflict-resolution-policy", "undefined");
 	}
 
-	if (g_config.hb_tx_addr) {
-		cf_dyn_buf_append_string(db, ";heartbeat-interface-address=");
-		cf_dyn_buf_append_string(db, g_config.hb_tx_addr);
+	info_append_bool(db, "data-in-index", ns->data_in_index);
+	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
+	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-read", ns->read_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-storage", ns->storage_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-udf", ns->udf_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-udf-sub", ns->udf_sub_benchmarks_enabled);
+	info_append_bool(db, "enable-benchmarks-write", ns->write_benchmarks_enabled);
+	info_append_bool(db, "enable-hist-proxy", ns->proxy_hist_enabled);
+	info_append_uint32(db, "evict-hist-buckets", ns->evict_hist_buckets);
+	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
+	info_append_int(db, "high-water-disk-pct", (int)(ns->hwm_disk * 100));
+	info_append_int(db, "high-water-memory-pct", (int)(ns->hwm_memory * 100));
+	info_append_bool(db, "ldt-enabled", ns->ldt_enabled);
+	info_append_uint32(db, "ldt-gc-rate", ns->ldt_gc_sleep_us / 1000000);
+	info_append_uint32(db, "ldt-page-size", ns->ldt_page_size);
+	info_append_uint64(db, "max-ttl", ns->max_ttl);
+	info_append_uint32(db, "migrate-order", ns->migrate_order);
+	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
+	// Note - no obj-size-hist-max, too much to reverse rounding algorithm.
+	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
+	info_append_bool(db, "single-bin", ns->single_bin);
+	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));
+	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
+
+	info_append_string(db, "storage-engine",
+			(ns->storage_type == AS_STORAGE_ENGINE_MEMORY ? "memory" :
+				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" :
+					(ns->storage_type == AS_STORAGE_ENGINE_KV ? "kv" : "illegal"))));
+
+	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
+			if (! ns->storage_devices[i]) {
+				break;
+			}
+
+			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
+		}
+
+		for (int i = 0; i < AS_STORAGE_MAX_FILES; i++) {
+			if (! ns->storage_files[i]) {
+				break;
+			}
+
+			info_append_string(db, "storage-engine.file", ns->storage_files[i]);
+		}
+
+		// TODO - how to report the shadows?
+
+		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
+		info_append_string(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode ? ns->storage_scheduler_mode : "null");
+		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
+		info_append_bool(db, "storage-engine.data-in-memory", ns->storage_data_in_memory);
+		info_append_bool(db, "storage-engine.cold-start-empty", ns->storage_cold_start_empty);
+		info_append_uint32(db, "storage-engine.defrag-lwm-pct", ns->storage_defrag_lwm_pct);
+		info_append_uint32(db, "storage-engine.defrag-queue-min", ns->storage_defrag_queue_min);
+		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
+		info_append_int(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
+		info_append_bool(db, "storage-engine.disable-odirect", ns->storage_disable_odirect);
+		info_append_bool(db, "storage-engine.enable-osync", ns->storage_enable_osync);
+		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
+		info_append_uint64(db, "storage-engine.fsync-max-sec", ns->storage_fsync_max_us / 1000000);
+		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
+		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
+		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
+		info_append_uint32(db, "storage-engine.write-threads", ns->storage_write_threads);
 	}
 
-	cf_dyn_buf_append_string(db, ";heartbeat-protocol=");
-	cf_dyn_buf_append_string(db, (AS_HB_PROTOCOL_V1 == g_config.hb_protocol ? "v1" :
-								  (AS_HB_PROTOCOL_V2 == g_config.hb_protocol ? "v2" :
-								   (AS_HB_PROTOCOL_RESET == g_config.hb_protocol ? "reset" :
-									(AS_HB_PROTOCOL_NONE == g_config.hb_protocol ? "none" : "undefined")))));
-	cf_dyn_buf_append_string(db, ";heartbeat-address=");
-	cf_dyn_buf_append_string(db, g_config.hb_addr);
-	cf_dyn_buf_append_string(db, ";heartbeat-port=");
-	cf_dyn_buf_append_int(db, g_config.hb_port);
-	cf_dyn_buf_append_string(db, ";heartbeat-interval=");
-	cf_dyn_buf_append_int(db, g_config.hb_interval);
-	cf_dyn_buf_append_string(db, ";heartbeat-timeout=");
-	cf_dyn_buf_append_int(db, g_config.hb_timeout);
+	if (ns->storage_type == AS_STORAGE_ENGINE_KV) {
+		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
+			if (! ns->storage_devices[i]) {
+				break;
+			}
+
+			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
+		}
+
+		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
+		info_append_uint32(db, "storage-engine.read-block-size", ns->storage_read_block_size);
+		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
+		info_append_uint32(db, "storage-engine.num-write-blocks", ns->storage_num_write_blocks);
+		info_append_bool(db, "storage-engine.cond-write", ns->cond_write);
+	}
+
+	if (ns->sindex_data_max_memory != ULONG_MAX) {
+		info_append_uint64(db, "sindex.data-max-memory", ns->sindex_data_max_memory);
+	}
+	else {
+		info_append_string(db, "sindex.data-max-memory", "ULONG_MAX");
+	}
+
+	info_append_uint32(db, "sindex.num-partitions", ns->sindex_num_partitions);
+
+	info_append_bool(db, "geo2dsphere-within.strict", ns->geo2dsphere_within_strict);
+	info_append_uint32(db, "geo2dsphere-within.min-level", (uint32_t)ns->geo2dsphere_within_min_level);
+	info_append_uint32(db, "geo2dsphere-within.max-level", (uint32_t)ns->geo2dsphere_within_max_level);
+	info_append_uint32(db, "geo2dsphere-within.max-cells", (uint32_t)ns->geo2dsphere_within_max_cells);
+	info_append_uint32(db, "geo2dsphere-within.level-mod", (uint32_t)ns->geo2dsphere_within_level_mod);
+	info_append_uint32(db, "geo2dsphere-within.earth-radius-meters", ns->geo2dsphere_within_earth_radius_meters);
 }
+
+
+void
+info_cluster_config_get(cf_dyn_buf *db)
+{
+	info_append_string(db, "mode", cc_mode_str[g_config.cluster_mode]);
+	info_append_uint32(db, "self-group-id", (uint32_t)g_config.cluster.cl_self_group);
+	info_append_uint32(db, "self-node-id", g_config.cluster.cl_self_node);
+}
+
 
 // TODO - security API?
 void
 info_security_config_get(cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "enable-security=");
-	cf_dyn_buf_append_string(db, g_config.sec_cfg.security_enabled ? "true" : "false");
-	cf_dyn_buf_append_string(db, ";privilege-refresh-period=");
-	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.privilege_refresh_period);
-	cf_dyn_buf_append_string(db, ";report-authentication-sinks=");
-	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.authentication);
-	cf_dyn_buf_append_string(db, ";report-data-op-sinks=");
-	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.data_op);
-	cf_dyn_buf_append_string(db, ";report-sys-admin-sinks=");
-	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.sys_admin);
-	cf_dyn_buf_append_string(db, ";report-user-admin-sinks=");
-	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.user_admin);
-	cf_dyn_buf_append_string(db, ";report-violation-sinks=");
-	cf_dyn_buf_append_uint32(db, g_config.sec_cfg.report.violation);
-	cf_dyn_buf_append_string(db, ";syslog-local=");
-	cf_dyn_buf_append_int(db, g_config.sec_cfg.syslog_local);
+	info_append_bool(db, "enable-security", g_config.sec_cfg.security_enabled);
+	info_append_uint32(db, "privilege-refresh-period", g_config.sec_cfg.privilege_refresh_period);
+	info_append_uint32(db, "report-authentication-sinks", g_config.sec_cfg.report.authentication);
+	info_append_uint32(db, "report-data-op-sinks", g_config.sec_cfg.report.data_op);
+	info_append_uint32(db, "report-sys-admin-sinks", g_config.sec_cfg.report.sys_admin);
+	info_append_uint32(db, "report-user-admin-sinks", g_config.sec_cfg.report.user_admin);
+	info_append_uint32(db, "report-violation-sinks", g_config.sec_cfg.report.violation);
+	info_append_int(db, "syslog-local", g_config.sec_cfg.syslog_local);
 }
 
+
 void
-info_cluster_config_get(cf_dyn_buf *db)
+info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
 {
-	cf_dyn_buf_append_string(db, "mode=");
-	cf_dyn_buf_append_string(db, cc_mode_str[g_config.cluster_mode]);
-	cf_dyn_buf_append_string(db, ";self-group-id=");
-	cf_dyn_buf_append_uint32(db, g_config.cluster.cl_self_group);
-	cf_dyn_buf_append_string(db, ";self-node-id=");
-	cf_dyn_buf_append_uint32(db, g_config.cluster.cl_self_node);
+	char context[1024];
+	int context_len = sizeof(context);
+
+	if (as_info_parameter_get(params, "context", context, &context_len) != 0) {
+		cf_dyn_buf_append_string(db, "Error: Invalid get-config parameter;");
+		return;
+	}
+
+	if (strcmp(context, "service") == 0) {
+		info_service_config_get(db);
+	}
+	else if (strcmp(context, "network") == 0) {
+		info_network_config_get(db);
+	}
+	else if (strcmp(context, "namespace") == 0) {
+		context_len = sizeof(context);
+
+		if (as_info_parameter_get(params, "id", context, &context_len) != 0) {
+			cf_dyn_buf_append_string(db, "Error:invalid id;");
+			return;
+		}
+
+		info_namespace_config_get(context, db);
+	}
+	else if (strcmp(context, "cluster") == 0) {
+		info_cluster_config_get(db);
+	}
+	else if (strcmp(context, "security") == 0) {
+		info_security_config_get(db);
+	}
+	else if (strcmp(context, "xdr") == 0) {
+		as_xdr_get_config(db);
+	}
+	else {
+		cf_dyn_buf_append_string(db, "Error:Invalid context;");
+	}
 }
 
 
@@ -2541,75 +2108,22 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "config-get command received: params %s", params);
 
-	if(params) {
-
-		char context[1024];
-		int context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "context", context, &context_len)) {
-			if (strcmp(context, "cluster") == 0) {
-				info_cluster_config_get(db);
-				return 0;
-			}
-			else if (strcmp(context, "namespace") == 0) {
-				context_len = sizeof(context);
-				if (0 != as_info_parameter_get(params, "id", context, &context_len)) {
-					cf_dyn_buf_append_string(db, "Error:invalid id");
-					return(0);
-				}
-				info_namespace_config_get(context, db);
-				return(0);
-			}
-			else if (strcmp(context, "network.heartbeat") == 0) {
-				info_network_heartbeat_config_get(db);
-				return(0);
-			}
-			else if (strcmp(context, "network.info") == 0) {
-				info_network_info_config_get(db);
-				return(0);
-			}
-			else if (strcmp(context, "security") == 0) {
-				info_security_config_get(db);
-				return(0);
-			}
-			else if (strcmp(context, "service") == 0) {
-				info_service_config_get(db);
-				return(0);
-			}
-			else if (strcmp(context, "xdr") == 0) {
-				as_xdr_get_config(db);
-				return(0);
-			}
-			else {
-				cf_dyn_buf_append_string(db, "Error:Invalid context");
-				return(0);
-			}
-		} else if (strcmp(params, "") != 0) {
-			cf_dyn_buf_append_string(db, "Error: Invalid get-config parameter");
-			return(0);
-		}
+	if (params && *params != 0) {
+		info_command_config_get_with_params(name, params, db);
+		cf_dyn_buf_chomp(db);
+		return 0;
 	}
 
 	// We come here when context is not mentioned.
 	// In that case we want to print everything.
 	info_service_config_get(db);
-	cf_dyn_buf_append_char(db, ';');
-	info_network_info_config_get(db);
-	cf_dyn_buf_append_char(db, ';');
-	info_network_heartbeat_config_get(db);
-	cf_dyn_buf_append_char(db, ';');
+	info_network_config_get(db);
 	info_security_config_get(db);
-	cf_dyn_buf_append_char(db, ';');
 	as_xdr_get_config(db);
 
-	// Add the current histogram tracking settings.
-	cf_hist_track_get_settings(g_config.rt_hist, db);
-	cf_hist_track_get_settings(g_config.wt_hist, db);
-	cf_hist_track_get_settings(g_config.px_hist, db);
-	cf_hist_track_get_settings(g_config.ut_hist, db);
-	cf_hist_track_get_settings(g_config.q_hist, db);
-	cf_hist_track_get_settings(g_config.q_rcnt_hist, db);
+	cf_dyn_buf_chomp(db);
 
-	return(0);
+	return 0;
 }
 
 
@@ -2670,32 +2184,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of ticker-interval from %d to %d ", g_config.ticker_interval, val);
 			g_config.ticker_interval = val;
-		}
-		else if (0 == as_info_parameter_get(params, "microbenchmarks", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				clear_microbenchmark_histograms();
-				cf_info(AS_INFO, "Changing value of microbenchmarks from %s to %s", bool_val[g_config.microbenchmarks], context);
-				g_config.microbenchmarks = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of microbenchmarks from %s to %s", bool_val[g_config.microbenchmarks], context);
-				g_config.microbenchmarks = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "storage-benchmarks", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				as_storage_histogram_clear_all();
-				cf_info(AS_INFO, "Changing value of storage-benchmarks from %s to %s", bool_val[g_config.storage_benchmarks], context);
-				g_config.storage_benchmarks = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of storage-benchmarks from %s to %s", bool_val[g_config.storage_benchmarks], context);
-				g_config.storage_benchmarks = false;
-			}
-			else
-				goto Error;
 		}
 		else if (0 == as_info_parameter_get(params, "ldt-benchmarks", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -2903,18 +2391,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else
 				goto Error;
 		}
-		else if (0 == as_info_parameter_get(params, "replication-fire-and-forget", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of replication-fire-and-forget from %s to %s", bool_val[g_config.replication_fire_and_forget], context);
-				g_config.replication_fire_and_forget = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of replication-fire-and-forget from %s to %s", bool_val[g_config.replication_fire_and_forget], context);
-				g_config.replication_fire_and_forget = false;
-			}
-			else
-				goto Error;
-		}
 		else if (0 == as_info_parameter_get(params, "use-queue-per-device", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
 				cf_info(AS_INFO, "Changing value of use-queue-per-device from %s to %s", bool_val[g_config.use_queue_per_device], context);
@@ -2992,28 +2468,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 		}
 #endif
-		else if (0 == as_info_parameter_get(params, "udf-runtime-gmax-memory", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "global udf-runtime-max-memory = %"PRIu64"", val);
-			if (val > g_config.udf_runtime_max_gmemory)
-				g_config.udf_runtime_max_gmemory = val;
-			if (val < (g_config.udf_runtime_max_gmemory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of udf-runtime-gmax-memory from %"PRIu64" to %"PRIu64, g_config.udf_runtime_max_gmemory, val);
-			g_config.udf_runtime_max_gmemory = val;
-		}
-		else if (0 == as_info_parameter_get(params, "udf-runtime-max-memory", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "udf-runtime-max-memory = %"PRIu64"", val);
-			if (val > g_config.udf_runtime_max_memory)
-				g_config.udf_runtime_max_memory = val;
-			if (val < (g_config.udf_runtime_max_memory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of udf-runtime-max-memory from %"PRIu64" to %"PRIu64, g_config.udf_runtime_max_memory, val);
-			g_config.udf_runtime_max_memory = val;
-		}
 		else if (0 == as_info_parameter_get(params, "query-buf-size", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-buf-size = %"PRIu64"", val);
@@ -3199,6 +2653,29 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of query-longq-max-size from %d to %"PRIu64, g_config.query_long_q_max_size, val);
 			g_config.query_long_q_max_size = val;
+		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-svc", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-svc to %s", context);
+				g_config.svc_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-svc to %s", context);
+				g_config.svc_benchmarks_enabled = false;
+				histogram_clear(g_stats.svc_demarshal_hist);
+				histogram_clear(g_stats.svc_queue_hist);
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "enable-hist-info", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-hist-info to %s", context);
+				g_config.info_hist_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-hist-info to %s", context);
+				g_config.info_hist_enabled = false;
+				histogram_clear(g_stats.info_hist);
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "sindex-gc-enable-histogram", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -3604,6 +3081,127 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-batch-sub", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-batch-sub of ns %s from %s to %s", ns->name, bool_val[ns->batch_sub_benchmarks_enabled], context);
+				ns->batch_sub_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-batch-sub of ns %s from %s to %s", ns->name, bool_val[ns->batch_sub_benchmarks_enabled], context);
+				ns->batch_sub_benchmarks_enabled = false;
+				histogram_clear(ns->batch_sub_start_hist);
+				histogram_clear(ns->batch_sub_restart_hist);
+				histogram_clear(ns->batch_sub_dup_res_hist);
+				histogram_clear(ns->batch_sub_read_local_hist);
+				histogram_clear(ns->batch_sub_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-read", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-read of ns %s from %s to %s", ns->name, bool_val[ns->read_benchmarks_enabled], context);
+				ns->read_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-read of ns %s from %s to %s", ns->name, bool_val[ns->read_benchmarks_enabled], context);
+				ns->read_benchmarks_enabled = false;
+				histogram_clear(ns->read_start_hist);
+				histogram_clear(ns->read_restart_hist);
+				histogram_clear(ns->read_dup_res_hist);
+				histogram_clear(ns->read_local_hist);
+				histogram_clear(ns->read_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-storage", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-storage of ns %s from %s to %s", ns->name, bool_val[ns->storage_benchmarks_enabled], context);
+				ns->storage_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-storage of ns %s from %s to %s", ns->name, bool_val[ns->storage_benchmarks_enabled], context);
+				ns->storage_benchmarks_enabled = false;
+				as_storage_histogram_clear_all(ns);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-udf", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-udf of ns %s from %s to %s", ns->name, bool_val[ns->udf_benchmarks_enabled], context);
+				ns->udf_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-udf of ns %s from %s to %s", ns->name, bool_val[ns->udf_benchmarks_enabled], context);
+				ns->udf_benchmarks_enabled = false;
+				histogram_clear(ns->udf_start_hist);
+				histogram_clear(ns->udf_restart_hist);
+				histogram_clear(ns->udf_dup_res_hist);
+				histogram_clear(ns->udf_master_hist);
+				histogram_clear(ns->udf_repl_write_hist);
+				histogram_clear(ns->udf_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-udf-sub", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-udf-sub of ns %s from %s to %s", ns->name, bool_val[ns->udf_sub_benchmarks_enabled], context);
+				ns->udf_sub_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-udf-sub of ns %s from %s to %s", ns->name, bool_val[ns->udf_sub_benchmarks_enabled], context);
+				ns->udf_sub_benchmarks_enabled = false;
+				histogram_clear(ns->udf_sub_start_hist);
+				histogram_clear(ns->udf_sub_restart_hist);
+				histogram_clear(ns->udf_sub_dup_res_hist);
+				histogram_clear(ns->udf_sub_master_hist);
+				histogram_clear(ns->udf_sub_repl_write_hist);
+				histogram_clear(ns->udf_sub_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-write", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-write of ns %s from %s to %s", ns->name, bool_val[ns->write_benchmarks_enabled], context);
+				ns->write_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-write of ns %s from %s to %s", ns->name, bool_val[ns->write_benchmarks_enabled], context);
+				ns->write_benchmarks_enabled = false;
+				histogram_clear(ns->write_start_hist);
+				histogram_clear(ns->write_restart_hist);
+				histogram_clear(ns->write_dup_res_hist);
+				histogram_clear(ns->write_master_hist);
+				histogram_clear(ns->write_repl_write_hist);
+				histogram_clear(ns->write_response_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "enable-hist-proxy", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-hist-proxy of ns %s from %s to %s", ns->name, bool_val[ns->proxy_hist_enabled], context);
+				ns->proxy_hist_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-hist-proxy of ns %s from %s to %s", ns->name, bool_val[ns->proxy_hist_enabled], context);
+				ns->proxy_hist_enabled = false;
+				histogram_clear(ns->proxy_hist);
+			}
+			else {
+				goto Error;
+			}
+		}
 		else if (0 == as_info_parameter_get(params, "max-write-cache", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
@@ -3923,20 +3521,42 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		cf_debug(AS_INFO, "hist track %s command: no histogram specified - doing all", name);
 	}
 	else {
-		if (0 == strcmp(value_str, "reads")) {
-			hist_p = g_config.rt_hist;
-		}
-		else if (0 == strcmp(value_str, "writes") || 0 == strcmp(value_str, "writes_master")) {
-			hist_p = g_config.wt_hist;
-		}
-		else if (0 == strcmp(value_str, "proxy")) {
-			hist_p = g_config.px_hist;
-		}
-		else if (0 == strcmp(value_str, "udf")) {
-			hist_p = g_config.ut_hist;
-		}
-		else if (0 == strcmp(value_str, "query")) {
-			hist_p = g_config.q_hist;
+		if (*value_str == '{') {
+			char* ns_name = value_str + 1;
+			char* ns_name_end = strchr(ns_name, '}');
+			as_namespace* ns = as_namespace_get_bybuf((uint8_t*)ns_name, ns_name_end - ns_name);
+
+			if (! ns) {
+				cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
+				cf_dyn_buf_append_string(db, "error-bad-hist-name");
+				return 0;
+			}
+
+			char* hist_name = ns_name_end + 1;
+
+			if (*hist_name++ != '-') {
+				cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
+				cf_dyn_buf_append_string(db, "error-bad-hist-name");
+				return 0;
+			}
+
+			if (0 == strcmp(hist_name, "read")) {
+				hist_p = ns->read_hist;
+			}
+			else if (0 == strcmp(hist_name, "write")) {
+				hist_p = ns->write_hist;
+			}
+			else if (0 == strcmp(hist_name, "udf")) {
+				hist_p = ns->udf_hist;
+			}
+			else if (0 == strcmp(hist_name, "query")) {
+				hist_p = ns->query_hist;
+			}
+			else {
+				cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
+				cf_dyn_buf_append_string(db, "error-bad-hist-name");
+				return 0;
+			}
 		}
 		else {
 			cf_info(AS_INFO, "hist track %s command: unrecognized histogram: %s", name, value_str);
@@ -3950,12 +3570,14 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			cf_hist_track_stop(hist_p);
 		}
 		else {
-			cf_hist_track_stop(g_config.rt_hist);
-			cf_hist_track_stop(g_config.wt_hist);
-			cf_hist_track_stop(g_config.px_hist);
-			cf_hist_track_stop(g_config.ut_hist);
-			cf_hist_track_stop(g_config.q_rcnt_hist);
-			cf_hist_track_stop(g_config.q_hist);
+			for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+				as_namespace* ns = g_config.namespaces[i];
+
+				cf_hist_track_stop(ns->read_hist);
+				cf_hist_track_stop(ns->write_hist);
+				cf_hist_track_stop(ns->udf_hist);
+				cf_hist_track_stop(ns->query_hist);
+			}
 		}
 
 		cf_dyn_buf_append_string(db, "ok");
@@ -4013,18 +3635,20 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 			}
 		}
 		else {
-			if (cf_hist_track_start(g_config.rt_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.wt_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.px_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.q_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.q_rcnt_hist, back_sec, slice_sec, thresholds) &&
-				cf_hist_track_start(g_config.ut_hist, back_sec, slice_sec, thresholds)) {
+			for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+				as_namespace* ns = g_config.namespaces[i];
 
-				cf_dyn_buf_append_string(db, "ok");
+				if ( ! (cf_hist_track_start(ns->read_hist, back_sec, slice_sec, thresholds) &&
+						cf_hist_track_start(ns->write_hist, back_sec, slice_sec, thresholds) &&
+						cf_hist_track_start(ns->udf_hist, back_sec, slice_sec, thresholds) &&
+						cf_hist_track_start(ns->query_hist, back_sec, slice_sec, thresholds))) {
+
+					cf_dyn_buf_append_string(db, "error-bad-start-params");
+					return 0;
+				}
 			}
-			else {
-				cf_dyn_buf_append_string(db, "error-bad-start-params");
-			}
+
+			cf_dyn_buf_append_string(db, "ok");
 		}
 
 		return 0;
@@ -4054,12 +3678,17 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 		cf_hist_track_get_info(hist_p, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
 	}
 	else {
-		cf_hist_track_get_info(g_config.rt_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-		cf_hist_track_get_info(g_config.wt_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-		cf_hist_track_get_info(g_config.px_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-		cf_hist_track_get_info(g_config.ut_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
-		cf_hist_track_get_info(g_config.q_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
+		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+			as_namespace* ns = g_config.namespaces[i];
+
+			cf_hist_track_get_info(ns->read_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
+			cf_hist_track_get_info(ns->write_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
+			cf_hist_track_get_info(ns->udf_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
+			cf_hist_track_get_info(ns->query_hist, back_sec, duration_sec, slice_sec, throughput_only, CF_HIST_TRACK_FMT_PACKED, db);
+		}
 	}
+
+	cf_dyn_buf_chomp(db);
 
 	return 0;
 }
@@ -4327,11 +3956,6 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 int
 as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp)
 {
-
-#ifdef USE_INFO_LOCK
-	pthread_mutex_lock(&g_info_lock);
-#endif
-
 	// Either we'e doing all, or doing some
 	if (req_buf_len == 0) {
 		info_all(NULL, rsp);
@@ -4339,10 +3963,6 @@ as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp)
 	else {
 		info_some((char *)req_buf, (char *)(req_buf + req_buf_len), NULL, rsp);
 	}
-
-#ifdef USE_INFO_LOCK
-	pthread_mutex_unlock(&g_info_lock);
-#endif
 
 	return(0);
 }
@@ -4358,26 +3978,20 @@ thr_info_fn(void *unused)
 {
 	for ( ; ; ) {
 
-		as_info_transaction tr; // 'tr' so we can share microbenchmark macros
+		as_info_transaction it;
 
-		if (0 != cf_queue_pop(g_info_work_q, &tr, CF_QUEUE_FOREVER)) {
+		if (0 != cf_queue_pop(g_info_work_q, &it, CF_QUEUE_FOREVER)) {
 			cf_crash(AS_TSVC, "unable to pop from info work queue");
 		}
 
-		as_file_handle *fd_h = tr.fd_h;
-		as_proto *pr = tr.proto;
-
-		MICROBENCHMARK_HIST_INSERT_AND_RESET(info_q_wait_hist);
+		as_file_handle *fd_h = it.fd_h;
+		as_proto *pr = it.proto;
 
 		// Allocate an output buffer sufficiently large to avoid ever resizing
 		cf_dyn_buf_define_size(db, 128 * 1024);
 		// write space for the header
 		uint64_t	h = 0;
 		cf_dyn_buf_append_buf(&db, (uint8_t *) &h, sizeof(h));
-
-#ifdef USE_INFO_LOCK
-		pthread_mutex_lock(&g_info_lock);
-#endif
 
 		// Either we'e doing all, or doing some
 		if (pr->sz == 0) {
@@ -4386,12 +4000,6 @@ thr_info_fn(void *unused)
 		else {
 			info_some((char *)pr->data, (char *)pr->data + pr->sz, fd_h, &db);
 		}
-
-#ifdef USE_INFO_LOCK
-		pthread_mutex_unlock(&g_info_lock);
-#endif
-
-		MICROBENCHMARK_HIST_INSERT_AND_RESET(info_post_lock_hist);
 
 		// write the proto header in the space we pre-wrote
 		db.buf[0] = 2;
@@ -4432,7 +4040,8 @@ thr_info_fn(void *unused)
 			fd_h = NULL;
 		}
 
-		MICROBENCHMARK_HIST_INSERT(info_fulfill_hist);
+		G_HIST_INSERT_DATA_POINT(info_hist, it.start_time);
+		cf_atomic64_incr(&g_stats.info_complete);
 	}
 
 	return NULL;
@@ -4460,7 +4069,7 @@ as_info(as_info_transaction *it)
 }
 
 // Return the number of pending Info requests in the queue.
-static int
+int
 as_info_queue_get_size()
 {
 	return cf_queue_sz(g_info_work_q);
@@ -4718,387 +4327,6 @@ as_info_set(const char *name, const char *value, bool def)
 {
 	return(as_info_set_buf(name, (const uint8_t *) value, strlen(value), def ) );
 }
-
-void *
-info_debug_ticker_fn(void *unused)
-{
-	size_t total_ns_memory_inuse = 0;
-	uint32_t ticker_cycles = 0;
-
-	// Helps to know how many messages are going in an out, some general status
-	do {
-		struct timespec delay = { g_config.ticker_interval, 0 }; // this is the time between log lines - should be a config parameter
-		nanosleep(&delay, NULL);
-
-		if ((g_config.paxos == 0) || (g_config.paxos->ready == false)) {
-			cf_info(AS_INFO, " fabric: cluster not ready yet");
-		} else if (g_shutdown_started) {
-			cf_debug(AS_INFO, "Shutdown in progress. Skipping info ticker");
-		} else {
-
-			uint64_t freemem;
-			int		 freepct;
-			bool     swapping = false;
-			cf_meminfo(0, &freemem, &freepct, &swapping);
-			cf_info(AS_INFO, " system memory: free %"PRIu64"kb ( %d percent free ) %s",
-					freemem / 1024,
-					freepct,
-					(swapping == true) ? "SWAPPING!" : ""
-					);
-
-			cf_info(AS_INFO, " ClusterSize %zd ::: objects %"PRIu64" ::: sub_objects %"PRIu64,
-					g_config.paxos->cluster_size,  // add real cluster size when srini has it
-					thr_info_get_object_count(),
-					thr_info_get_subobject_count()
-					);
-
-			cf_info(AS_INFO, " rec refs %"PRIu64" ::: rec locks %"PRIu64" ::: trees %"PRIu64" ::: wr reqs %"PRIu64,
-					cf_atomic_int_get(g_config.global_record_ref_count),
-					cf_atomic_int_get(g_config.global_record_lock_count),
-					cf_atomic_int_get(g_config.global_tree_count),
-					cf_atomic_int_get(g_config.write_req_object_count)
-				 	);
-
-			cf_info(AS_INFO, " replica errs :: null %"PRIu64" non-null %"PRIu64" ::: sync copy errs :: master %"PRIu64" ",
-					cf_atomic_int_get(g_config.err_replica_null_node),
-					cf_atomic_int_get(g_config.err_replica_non_null_node),
-					cf_atomic_int_get(g_config.err_sync_copy_null_master)
-					);
-
-			cf_info(AS_INFO, "   trans_in_progress: wr %d prox %d wait %"PRIu64" ::: q %d ::: iq %d ::: dq %d : fds - proto (%"PRIu64", %"PRIu64", %"PRIu64") : hb (%"PRIu64", %"PRIu64", %"PRIu64") : fab (%"PRIu64", %"PRIu64", %"PRIu64")",
-					as_write_inprogress(), as_proxy_inprogress(), g_config.n_waiting_transactions, thr_tsvc_queue_get_size(), as_info_queue_get_size(), as_nsup_queue_get_size(),
-					g_config.proto_connections_opened - g_config.proto_connections_closed,
-					g_config.proto_connections_opened, g_config.proto_connections_closed,
-					g_config.heartbeat_connections_opened - g_config.heartbeat_connections_closed,
-					g_config.heartbeat_connections_opened, g_config.heartbeat_connections_closed,
-					g_config.fabric_connections_opened - g_config.fabric_connections_closed,
-					g_config.fabric_connections_opened, g_config.fabric_connections_closed
-					);
-
-			cf_info(AS_INFO, "   heartbeat_received: self %lu : foreign %lu", g_config.heartbeat_received_self, g_config.heartbeat_received_foreign);
-			cf_info(AS_INFO, "   heartbeat_stats: %s", as_hb_stats(false));
-
-			cf_info(AS_INFO, "   tree_counts: nsup %"PRIu64" scan %"PRIu64" dup %"PRIu64" wprocess %"PRIu64" migrx %"PRIu64" migtx %"PRIu64" ssdr %"PRIu64" ssdw %"PRIu64" rw %"PRIu64"",
-					cf_atomic_int_get(g_config.nsup_tree_count),
-					cf_atomic_int_get(g_config.scan_tree_count),
-					cf_atomic_int_get(g_config.dup_tree_count),
-					cf_atomic_int_get(g_config.wprocess_tree_count),
-					cf_atomic_int_get(g_config.migrx_tree_count),
-					cf_atomic_int_get(g_config.migtx_tree_count),
-					cf_atomic_int_get(g_config.ssdr_tree_count),
-					cf_atomic_int_get(g_config.ssdw_tree_count),
-					cf_atomic_int_get(g_config.rw_tree_count)
-					);
-
-			// namespace disk and memory size and ldt gc stats
-			total_ns_memory_inuse = 0;
-
-			for (int i = 0; i < g_config.n_namespaces; i++) {
-				as_namespace *ns = g_config.namespaces[i];
-				int available_pct;
-				uint64_t inuse_disk_bytes;
-				as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
-				size_t ns_index_mem = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
-				size_t ns_sindex_mem = ns->sindex_data_memory_used;
-				size_t ns_total_mem = ns_index_mem + ns_sindex_mem + ns->n_bytes_memory;
-				double mem_used_pct = (double)(ns_total_mem * 100) / (double)ns->memory_size;
-
-				if (ns->storage_data_in_memory) {
-					cf_info(AS_INFO, "{%s} disk bytes used %"PRIu64" : avail pct %d",
-							ns->name, inuse_disk_bytes, available_pct);
-					cf_info(AS_INFO, "{%s} memory bytes used %"PRIu64" (index %"PRIu64" : sindex %"PRIu64" : data %"PRIu64") : used pct %.2lf",
-							ns->name, ns_total_mem, ns_index_mem, ns_sindex_mem, ns->n_bytes_memory, mem_used_pct);
-				}
-				else {
-					uint32_t n_reads_from_cache = cf_atomic32_get(ns->n_reads_from_cache);
-					uint32_t n_total_reads = cf_atomic32_get(ns->n_reads_from_device) + n_reads_from_cache;
-					cf_atomic32_set(&ns->n_reads_from_device, 0);
-					cf_atomic32_set(&ns->n_reads_from_cache, 0);
-					ns->cache_read_pct = (float)(100 * n_reads_from_cache) / (float)(n_total_reads == 0 ? 1 : n_total_reads);
-
-					cf_info(AS_INFO, "{%s} disk bytes used %"PRIu64" : avail pct %d : cache-read pct %.2f",
-							ns->name, inuse_disk_bytes, available_pct, ns->cache_read_pct);
-					cf_info(AS_INFO, "{%s} memory bytes used %"PRIu64" (index %"PRIu64" : sindex %"PRIu64") : used pct %.2lf",
-							ns->name, ns_total_mem, ns_index_mem, ns_sindex_mem, mem_used_pct);
-				}
-
-				if (ns->ldt_enabled) {
-					uint64_t cnt              = cf_atomic_int_get(ns->lstats.ldt_gc_processed);
-					uint64_t io               = cf_atomic_int_get(ns->lstats.ldt_gc_io);
-					uint64_t gc               = cf_atomic_int_get(ns->lstats.ldt_gc_cnt);
-					uint64_t no_esr           = cf_atomic_int_get(ns->lstats.ldt_gc_no_esr_cnt);
-					uint64_t no_parent        = cf_atomic_int_get(ns->lstats.ldt_gc_no_parent_cnt);
-					uint64_t version_mismatch = cf_atomic_int_get(ns->lstats.ldt_gc_parent_version_mismatch_cnt);
-					cf_info(AS_INFO, "{%s} ldt_gc: cnt %"PRIu64" io %"PRIu64" gc %"PRIu64" (%"PRIu64", %"PRIu64", %"PRIu64")",
-							ns->name, cnt, io, gc, no_esr, no_parent, version_mismatch);
-				}
-
-				total_ns_memory_inuse += ns_total_mem;
-				as_sindex_histogram_dumpall(ns);
-
-				int64_t initial_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_initial);
-				int64_t initial_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_initial);
-				int64_t remaining_rx_migrations = cf_atomic_int_get(ns->migrate_rx_partitions_remaining);
-				int64_t remaining_tx_migrations = cf_atomic_int_get(ns->migrate_tx_partitions_remaining);
-				int64_t initial_migrations = initial_rx_migrations + initial_tx_migrations;
-				int64_t remaining_migrations = remaining_rx_migrations + remaining_tx_migrations;
-
-				if (initial_migrations > 0 && remaining_migrations > 0) {
-					float migrations_pct_complete = (1 - ((float)remaining_migrations / (float)initial_migrations)) * 100;
-
-					cf_info(AS_INFO, "{%s} migrations - remaining (%ld tx, %ld rx), active (%ld tx, %ld rx), %0.2f%% complete",
-							ns->name,
-							remaining_tx_migrations,
-							remaining_rx_migrations,
-							cf_atomic_int_get(ns->migrate_tx_partitions_active),
-							cf_atomic_int_get(ns->migrate_rx_partitions_active),
-							migrations_pct_complete
-							);
-				} else {
-					cf_info(AS_INFO, "{%s} migrations - complete", ns->name);
-				}
-			}
-
-			as_partition_states ps;
-			info_partition_getstates(&ps);
-			cf_info(AS_INFO, "   partitions: actual %d sync %d desync %d zombie %d absent %d",
-					ps.sync_actual, ps.sync_replica, ps.desync, ps.zombie, ps.absent);
-
-			if (g_config.rt_hist)
-				cf_hist_track_dump(g_config.rt_hist);
-			if (g_config.wt_hist)
-				cf_hist_track_dump(g_config.wt_hist);
-			if (g_config.px_hist)
-				cf_hist_track_dump(g_config.px_hist);
-			if (g_config.ut_hist)
-				cf_hist_track_dump(g_config.ut_hist);
-			if (g_config.q_hist)
-				cf_hist_track_dump(g_config.q_hist);
-			if (g_config.q_rcnt_hist)
-				cf_hist_track_dump(g_config.q_rcnt_hist);
-
-			as_query_histogram_dumpall();
-			as_sindex_gc_histogram_dumpall();
-
-			if (g_config.microbenchmarks) {
-				if (g_config.rt_cleanup_hist)
-					histogram_dump(g_config.rt_cleanup_hist);
-				if (g_config.rt_net_hist)
-					histogram_dump(g_config.rt_net_hist);
-				if (g_config.wt_net_hist)
-					histogram_dump(g_config.wt_net_hist);
-				if (g_config.rt_storage_read_hist)
-					histogram_dump(g_config.rt_storage_read_hist);
-				if (g_config.rt_storage_open_hist)
-					histogram_dump(g_config.rt_storage_open_hist);
-				if (g_config.rt_tree_hist)
-					histogram_dump(g_config.rt_tree_hist);
-				if (g_config.rt_internal_hist)
-					histogram_dump(g_config.rt_internal_hist);
-				if (g_config.wt_internal_hist)
-					histogram_dump(g_config.wt_internal_hist);
-				if (g_config.rt_start_hist)
-					histogram_dump(g_config.rt_start_hist);
-				if (g_config.wt_start_hist)
-					histogram_dump(g_config.wt_start_hist);
-				if (g_config.rt_q_process_hist)
-					histogram_dump(g_config.rt_q_process_hist);
-				if (g_config.wt_q_process_hist)
-					histogram_dump(g_config.wt_q_process_hist);
-				if (g_config.q_wait_hist)
-					histogram_dump(g_config.q_wait_hist);
-				if (g_config.demarshal_hist)
-					histogram_dump(g_config.demarshal_hist);
-				if (g_config.wt_master_wait_prole_hist)
-					histogram_dump(g_config.wt_master_wait_prole_hist);
-				if (g_config.wt_prole_hist)
-					histogram_dump(g_config.wt_prole_hist);
-				if (g_config.rt_resolve_hist)
-					histogram_dump(g_config.rt_resolve_hist);
-				if (g_config.wt_resolve_hist)
-					histogram_dump(g_config.wt_resolve_hist);
-				if (g_config.rt_resolve_wait_hist)
-					histogram_dump(g_config.rt_resolve_wait_hist);
-				if (g_config.wt_resolve_wait_hist)
-					histogram_dump(g_config.wt_resolve_wait_hist);
-				if (g_config.error_hist)
-					histogram_dump(g_config.error_hist);
-				if (g_config.batch_index_reads_hist)
-					histogram_dump(g_config.batch_index_reads_hist);
-				if (g_config.batch_q_process_hist)
-					histogram_dump(g_config.batch_q_process_hist);
-				if (g_config.info_q_wait_hist)
-					histogram_dump(g_config.info_q_wait_hist);
-				if (g_config.info_post_lock_hist)
-					histogram_dump(g_config.info_post_lock_hist);
-				if (g_config.info_fulfill_hist)
-					histogram_dump(g_config.info_fulfill_hist);
-				if (g_config.write_storage_close_hist)
-					histogram_dump(g_config.write_storage_close_hist);
-				if (g_config.write_sindex_hist)
-					histogram_dump(g_config.write_sindex_hist);
-				if (g_config.prole_fabric_send_hist)
-					histogram_dump(g_config.prole_fabric_send_hist);
-			}
-
-			if (g_config.storage_benchmarks) {
-				as_storage_ticker_stats();
-			}
-
-			if (g_config.ldt_benchmarks) {
-				histogram_dump(g_config.ldt_multiop_prole_hist);
-				histogram_dump(g_config.ldt_update_record_cnt_hist);
-				histogram_dump(g_config.ldt_io_record_cnt_hist);
-				histogram_dump(g_config.ldt_update_io_bytes_hist);
-				histogram_dump(g_config.ldt_hist);
-			}
-#ifdef HISTOGRAM_OBJECT_LATENCY
-			if (g_config.read0_hist)
-				histogram_dump(g_config.read0_hist);
-			if (g_config.read1_hist)
-				histogram_dump(g_config.read1_hist);
-			if (g_config.read2_hist)
-				histogram_dump(g_config.read2_hist);
-			if (g_config.read3_hist)
-				histogram_dump(g_config.read3_hist);
-			if (g_config.read4_hist)
-				histogram_dump(g_config.read4_hist);
-			if (g_config.read5_hist)
-				histogram_dump(g_config.read5_hist);
-			if (g_config.read6_hist)
-				histogram_dump(g_config.read6_hist);
-			if (g_config.read7_hist)
-				histogram_dump(g_config.read7_hist);
-			if (g_config.read8_hist)
-				histogram_dump(g_config.read8_hist);
-			if (g_config.read9_hist)
-				histogram_dump(g_config.read9_hist);
-#endif
-
-#ifdef MEM_COUNT
-			if (g_config.memory_accounting) {
-				mem_count_stats();
-			}
-#endif
-
-#ifdef USE_ASM
-			if (g_asm_hook_enabled) {
-				static uint64_t iter = 0;
-				static asm_stats_t *asm_stats = NULL;
-				static vm_stats_t *vm_stats = NULL;
-				size_t vm_size = 0;
-				size_t total_accounted_memory = 0;
-
-				as_asm_hook((void *) iter++, &asm_stats, &vm_stats);
-
-				if (asm_stats) {
-#ifdef DEBUG_ASM
-					fprintf(stderr, "***THR_INFO:  asm:  mem_count: %lu ; net_mmaps: %lu ; net_shm: %lu***\n",
-							asm_stats->mem_count, asm_stats->net_mmaps, asm_stats->net_shm);
-#endif
-					total_accounted_memory = asm_stats->mem_count + asm_stats->net_mmaps + asm_stats->net_shm;
-				}
-
-				if (vm_stats) {
-					// N.B.:  The VM stats description is used implicitly by the accessor "vm_stats_*()" macros!
-					vm_stats_desc_t *vm_stats_desc = vm_stats->desc;
-					vm_size = vm_stats_get_key_value(vm_stats, VM_SIZE);
-#ifdef DEBUG_ASM
-					fprintf(stderr, "***THR_INFO:  vm:  %s: %lu KB; %s: %lu KB ; %s: %lu KB ; %s: %lu KB***\n",
-							vm_stats_key_name(VM_PEAK),
-							vm_stats_get_key_value(vm_stats, VM_PEAK),
-							vm_stats_key_name(VM_SIZE),
-							vm_size,
-							vm_stats_key_name(VM_RSS),
-							vm_stats_get_key_value(vm_stats, VM_RSS),
-							vm_stats_key_name(VM_DATA),
-							vm_stats_get_key_value(vm_stats, VM_DATA));
-#endif
-
-					// Convert from KB to B.
-					vm_size *= 1024;
-
-					// Calculate the storage efficiency percentages.
-					double dynamic_eff = ((double) total_accounted_memory / (double) MAX(vm_size, 1)) * 100.0;
-					double obj_eff = ((double) total_ns_memory_inuse / (double) MAX(vm_size, 1)) * 100.0;
-
-#ifdef DEBUG_ASM
-					fprintf(stderr, "VM size: %lu ; Total Accounted Memory: %lu (%.3f%%) ; Total NS Memory in use: %lu (%.3f%%)\n",
-							vm_size, total_accounted_memory, dynamic_eff, total_ns_memory_inuse, obj_eff);
-#endif
-					cf_info(AS_INFO, "VM size: %lu ; Total Accounted Memory: %lu (%.3f%%) ; Total NS Memory in use: %lu (%.3f%%)",
-							vm_size, total_accounted_memory, dynamic_eff, total_ns_memory_inuse, obj_eff);
-				}
-			}
-#endif // defined(USE_ASM)
-
-			if (g_mstats_enabled) {
-				info_log_with_datestamp(malloc_stats);
-			}
-
-			if (g_config.fabric_dump_msgs) {
-				as_fabric_msg_queue_dump();
-			}
-
-			// Dump some stats every 30 ticker cycles (default 5 minutes).
-			if ((ticker_cycles++ % 30) == 0) {
-				cf_info(AS_INFO, "node id %"PRIx64"", g_config.self_node);
-				// Various transaction & error counters
-				cf_info(AS_INFO, "reads %"PRIu64",%"PRIu64" : writes %"PRIu64",%"PRIu64"",
-						g_config.stat_read_success, g_config.stat_read_errs_notfound + g_config.stat_read_errs_other,
-						g_config.stat_write_success, g_config.stat_write_errs);
-				cf_info(AS_INFO, "udf reads %"PRIu64",%"PRIu64" : udf writes %"PRIu64",%"PRIu64" : udf deletes %"PRIu64",%"PRIu64" : lua errors %"PRIu64"",
-						g_config.udf_read_success, g_config.udf_read_errs_other,
-						g_config.udf_write_success, g_config.udf_write_errs_other,
-						g_config.udf_delete_success, g_config.udf_delete_errs_other, g_config.udf_lua_errs);
-				cf_info(AS_INFO, "basic scans %"PRIu64",%"PRIu64" : aggregation scans %"PRIu64",%"PRIu64" : udf background scans %"PRIu64",%"PRIu64" :: active scans %d",
-						g_config.basic_scans_succeeded, g_config.basic_scans_failed, g_config.aggr_scans_succeeded, g_config.aggr_scans_failed,
-						g_config.udf_bg_scans_succeeded, g_config.udf_bg_scans_failed, as_scan_get_active_job_count());
-				uint64_t batch_failures = cf_atomic64_get(g_config.batch_timeout) + cf_atomic64_get(g_config.batch_errors);
-				cf_info(AS_INFO, "index (new) batches %"PRIu64",%"PRIu64" : direct (old) batches %"PRIu64",%"PRIu64"",
-						g_config.batch_index_complete, g_config.batch_index_timeout + g_config.batch_index_errors,
-						g_config.batch_initiate - batch_failures, batch_failures);
-				uint64_t agg_failures = cf_atomic64_get(g_config.n_agg_errs) + cf_atomic64_get(g_config.n_agg_abort);
-				uint64_t lookup_failures = cf_atomic64_get(g_config.n_lookup_errs) + cf_atomic64_get(g_config.n_lookup_abort);
-				cf_info(AS_INFO, "aggregation queries %"PRIu64",%"PRIu64" : lookup queries %"PRIu64",%"PRIu64"",
-						cf_atomic64_get(g_config.n_agg_success), agg_failures, cf_atomic64_get(g_config.n_lookup_success), lookup_failures);
-				cf_info(AS_INFO, "proxies %"PRIu64",%"PRIu64"",
-						g_config.stat_proxy_success, g_config.stat_proxy_errs);
-
-				// Namespace stats
-				for (uint idx = 0; idx < g_config.n_namespaces; idx++) {
-					as_namespace *ns = g_config.namespaces[idx];
-					as_master_prole_stats mp;
-					as_partition_get_master_prole_stats(ns, &mp);
-
-					cf_info(AS_INFO, "{%s} objects %"PRIu64" : sub-objects %"PRIu64" : master objects %"PRIu64" : master sub-objects %"PRIu64" : prole objects %"PRIu64" : prole sub-objects %"PRIu64"",
-							ns->name, ns->n_objects, ns->n_sub_objects, mp.n_master_records, mp.n_master_sub_records, mp.n_prole_records, mp.n_prole_sub_records);
-				}
-			}
-		}
-
-	} while(1);
-
-	return(0);
-}
-
-// This function is meant to kick-start the info debug ticker that prints
-// system statistics. It should start only when the system is booted-up
-// fully and is ready to take reads and writes. It should wait for
-// the boot-time secondary index loading to be done.
-void
-info_debug_ticker_start()
-{
-	// Create a debug thread to pump out some statistics
-	if (g_config.ticker_interval) {
-		pthread_attr_t thr_attr;
-		pthread_attr_init(&thr_attr);
-		pthread_attr_setdetachstate(&thr_attr, PTHREAD_CREATE_DETACHED);
-		pthread_t info_debug_ticker_th;
-		pthread_create(&info_debug_ticker_th, &thr_attr, info_debug_ticker_fn, 0);
-	}
-}
-
 
 //
 //
@@ -5794,237 +5022,272 @@ info_get_sindexes(char *name, cf_dyn_buf *db)
 	return info_get_tree_sindexes(name, "", db);
 }
 
-uint64_t
-thr_info_get_object_count()
-{
-	uint64_t objects = 0;
-
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
-		objects += g_config.namespaces[i]->n_objects;
-	}
-
-	return objects;
-}
-
-uint64_t
-thr_info_get_subobject_count()
-{
-	uint64_t sub_objects = 0;
-
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
-		sub_objects += g_config.namespaces[i]->n_sub_objects;
-	}
-
-	return sub_objects;
-}
-
 
 void
 info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 {
-	uint64_t free_pct;
-	uint64_t data_memory;
-	uint64_t pindex_memory;
-	uint64_t sindex_memory;
-	uint64_t used_memory;
+	// Object counts.
+
+	info_append_uint64(db, "objects", ns->n_objects);
+	info_append_uint64(db, "sub_objects", ns->n_sub_objects);
 
 	as_master_prole_stats mp;
 	as_partition_get_master_prole_stats(ns, &mp);
 
-	// what everyone wants to know: the number of objects and size
-	info_append_uint64("", "objects",  ns->n_objects, db);
-	info_append_uint64("", "sub-objects",  ns->n_sub_objects, db);
-	info_append_uint64("", "master-objects", mp.n_master_records, db);
-	info_append_uint64("", "master-sub-objects", mp.n_master_sub_records, db);
-	info_append_uint64("", "prole-objects", mp.n_prole_records, db);
-	info_append_uint64("", "prole-sub-objects", mp.n_prole_sub_records, db);
-	info_append_uint64("", "expired-objects",  ns->n_expired_objects, db);
-	info_append_uint64("", "evicted-objects",  ns->n_evicted_objects, db);
-	info_append_uint64("", "set-deleted-objects", ns->n_deleted_set_objects, db);
-	info_append_uint64("", "nsup-cycle-duration", (uint64_t)ns->nsup_cycle_duration, db);
-	info_append_uint64("", "nsup-cycle-sleep-pct", (uint64_t)ns->nsup_cycle_sleep_pct, db);
+	info_append_uint64(db, "master_objects", mp.n_master_records);
+	info_append_uint64(db, "master_sub_objects", mp.n_master_sub_records);
+	info_append_uint64(db, "prole_objects", mp.n_prole_records);
+	info_append_uint64(db, "prole_sub_objects", mp.n_prole_sub_records);
 
-	// total used memory =  data memory + primary index memory + secondary index memory
-	data_memory   = ns->n_bytes_memory;
-	pindex_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
-	sindex_memory = cf_atomic64_get(ns->sindex_data_memory_used);
-	used_memory   = data_memory + pindex_memory + sindex_memory;
+	// Expiration & eviction (nsup) stats.
 
-	info_append_uint64("", "used-bytes-memory",        used_memory,     db);
-	info_append_uint64("", "data-used-bytes-memory",   data_memory,     db);
-	info_append_uint64("", "index-used-bytes-memory", pindex_memory,   db);
-	info_append_uint64("", "sindex-used-bytes-memory", sindex_memory,   db);
+	info_append_bool(db, "stop_writes", ns->stop_writes != 0);
+	info_append_bool(db, "hwm_breached", ns->hwm_breached != 0);
 
-	free_pct = (ns->memory_size && (ns->memory_size > used_memory))
-			   ? (((ns->memory_size - used_memory) * 100L) / ns->memory_size)
-			   : 0;
+	info_append_uint64(db, "current_time", as_record_void_time_get());
+	info_append_uint64(db, "max_void_time", ns->max_void_time);
+	info_append_uint64(db, "non_expirable_objects", ns->non_expirable_objects);
+	info_append_uint64(db, "expired_objects", ns->n_expired_objects);
+	info_append_uint64(db, "evicted_objects", ns->n_evicted_objects);
+	info_append_uint64(db, "set_deleted_objects", ns->n_deleted_set_objects);
+	info_append_uint64(db, "evict_ttl", ns->evict_ttl);
+	info_append_uint32(db, "nsup_cycle_duration", ns->nsup_cycle_duration);
+	info_append_uint32(db, "nsup_cycle_sleep_pct", ns->nsup_cycle_sleep_pct);
 
-	info_append_uint64("", "free-pct-memory",  free_pct, db);
-	info_append_uint64("", "max-void-time",  ns->max_void_time, db);
-	info_append_uint64("", "non-expirable-objects", ns->non_expirable_objects, db);
-	info_append_uint64("", "current-time",  as_record_void_time_get(), db);
+	// Memory usage stats.
 
-	cf_dyn_buf_append_string(db, ";stop-writes=");
-	cf_dyn_buf_append_string(db, cf_atomic32_get(ns->stop_writes) != 0 ? "true" : "false");
+	uint64_t data_memory = ns->n_bytes_memory;
+	uint64_t index_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
+	uint64_t sindex_memory = ns->sindex_data_memory_used;
+	uint64_t used_memory = data_memory + index_memory + sindex_memory;
 
-	cf_dyn_buf_append_string(db, ";hwm-breached=");
-	cf_dyn_buf_append_string(db, cf_atomic32_get(ns->hwm_breached) != 0 ? "true" : "false");
+	info_append_uint64(db, "memory_used_bytes", used_memory);
+	info_append_uint64(db, "memory_used_data_bytes", data_memory);
+	info_append_uint64(db, "memory_used_index_bytes", index_memory);
+	info_append_uint64(db, "memory_used_sindex_bytes", sindex_memory);
 
-	// remaining bin-name slots (yes, this can be negative)
+	uint64_t free_pct = (ns->memory_size != 0 && (ns->memory_size > used_memory)) ?
+			((ns->memory_size - used_memory) * 100L) / ns->memory_size : 0;
+
+	info_append_uint64(db, "memory_free_pct", free_pct);
+
+	// Remaining bin-name slots (yes, this can be negative).
 	if (! ns->single_bin) {
-		cf_dyn_buf_append_string(db, ";available-bin-names=");
-		cf_dyn_buf_append_int(db, BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
+		info_append_int(db, "available_bin_names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
 	}
 
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-imbalance=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_imbalance);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-instance-count=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_instance_count);
-
-	cf_dyn_buf_append_string(db, ";migrate-rx-instance-count=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_rx_instance_count);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-active=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_active);
-
-	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-active=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_active);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-initial=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_initial);
-
-	cf_dyn_buf_append_string(db, ";migrate-tx-partitions-remaining=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_tx_partitions_remaining);
-
-	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-initial=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_initial);
-
-	cf_dyn_buf_append_string(db, ";migrate-rx-partitions-remaining=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_rx_partitions_remaining);
-
-	cf_dyn_buf_append_string(db, ";migrate-records-skipped=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_records_skipped);
-
-	cf_dyn_buf_append_string(db, ";migrate-records-transmitted=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_records_transmitted);
-
-	cf_dyn_buf_append_string(db, ";migrate-record-retransmits=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_record_retransmits);
-
-	cf_dyn_buf_append_string(db, ";migrate-record-receives=");
-	cf_dyn_buf_append_uint64(db, ns->migrate_record_receives);
-
-	// LDT operational statistics
-	//
-	// print only if LDT is enabled
-	if (ns->ldt_enabled) {
-		cf_dyn_buf_append_string(db, ";ldt-reads=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_reqs));
-		cf_dyn_buf_append_string(db, ";ldt-read-success=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_read_success));
-		cf_dyn_buf_append_string(db, ";ldt-deletes=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_reqs));
-		cf_dyn_buf_append_string(db, ";ldt-delete-success=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_delete_success));
-		cf_dyn_buf_append_string(db, ";ldt-writes=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_reqs));
-		cf_dyn_buf_append_string(db, ";ldt-write-success=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_write_success));
-		cf_dyn_buf_append_string(db, ";ldt-updates=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_update_reqs));
-
-		cf_dyn_buf_append_string(db, ";ldt-gc-io=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_io));
-		cf_dyn_buf_append_string(db, ";ldt-gc-cnt=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_gc_cnt));
-		cf_dyn_buf_append_string(db, ";ldt-randomizer-retry=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_randomizer_retry));
-
-		cf_dyn_buf_append_string(db, ";ldt-errors=");
-		cf_dyn_buf_append_uint32(db, ns->lstats.ldt_errs);
-
-		cf_dyn_buf_append_string(db, ";ldt-err-toprec-notfound=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_not_found));
-		cf_dyn_buf_append_string(db, ";ldt-err-item-notfound=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_item_not_found));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-internal=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_internal));
-		cf_dyn_buf_append_string(db, ";ldt-err-unique-key-violation=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unique_key_violation));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-insert-fail=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_insert_fail));
-		cf_dyn_buf_append_string(db, ";ldt-err-delete-fail=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_delete_fail));
-		cf_dyn_buf_append_string(db, ";ldt-err-search-fail=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_search_fail));
-		cf_dyn_buf_append_string(db, ";ldt-err-version-mismatch=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_version_mismatch));
-
-
-		cf_dyn_buf_append_string(db, ";ldt-err-capacity-exceeded=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_capacity_exceeded));
-		cf_dyn_buf_append_string(db, ";ldt-err-param=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_param));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-op-bintype-mismatch=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_op_bintype_mismatch));
-		cf_dyn_buf_append_string(db, ";ldt-err-too-many-open-subrec=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_too_many_open_subrec));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-subrec-not-found=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_not_found));
-		cf_dyn_buf_append_string(db, ";ldt-err-bin-does-not-exist=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_does_not_exist));
-		cf_dyn_buf_append_string(db, ";ldt-err-bin-exits=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_exits));
-		cf_dyn_buf_append_string(db, ";ldt-err-bin-damaged=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_bin_damaged));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-toprec-internal=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_toprec_internal));
-		cf_dyn_buf_append_string(db, ";ldt-err-subrec-internal=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_subrec_internal));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-filer=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_filter));
-		cf_dyn_buf_append_string(db, ";ldt-err-key=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_key));
-		cf_dyn_buf_append_string(db, ";ldt-err-createspec=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_createspec));
-		cf_dyn_buf_append_string(db, ";ldt-err-usermodule=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_usermodule));
-		cf_dyn_buf_append_string(db, ";ldt-err-input-too-large=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_input_too_large));
-		cf_dyn_buf_append_string(db, ";ldt-err-ldt-not-enabled=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_ldt_not_enabled));
-
-		cf_dyn_buf_append_string(db, ";ldt-err-unknown=");
-		cf_dyn_buf_append_uint32(db, cf_atomic_int_get(ns->lstats.ldt_err_unknown));
-	}
-
-
-	// if storage, lots of information about the storage
-	//
+	// Persistent storage stats.
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
-
 		int available_pct = 0;
 		uint64_t inuse_disk_bytes = 0;
 		as_storage_stats(ns, &available_pct, &inuse_disk_bytes);
 
-		info_append_uint64("", "used-bytes-disk",  inuse_disk_bytes, db);
-		free_pct = (ns->ssd_size && (ns->ssd_size > inuse_disk_bytes)) ? (((ns->ssd_size - inuse_disk_bytes) * 100L) / ns->ssd_size) : 0;
-		info_append_uint64("", "free-pct-disk",  free_pct, db);
-		info_append_uint64("", "available_pct",  available_pct, db); // the underscore is an unfortunate legacy
+		info_append_uint64(db, "device_total_bytes", ns->ssd_size);
+		info_append_uint64(db, "device_used_bytes", inuse_disk_bytes);
+
+		free_pct = (ns->ssd_size != 0 && (ns->ssd_size > inuse_disk_bytes)) ?
+				((ns->ssd_size - inuse_disk_bytes) * 100L) / ns->ssd_size : 0;
+
+		info_append_uint64(db, "device_free_pct", free_pct);
+		info_append_int(db, "device_available_pct", available_pct);
 
 		if (! ns->storage_data_in_memory) {
-			cf_dyn_buf_append_string(db, ";cache-read-pct=");
-			cf_dyn_buf_append_int(db, (int)(ns->cache_read_pct + 0.5));
+			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 		}
-	} // SSD
+	}
+
+	// Not bothering with AS_STORAGE_ENGINE_KV.
+
+	// Migration stats.
+
+	info_append_uint64(db, "migrate_tx_partitions_imbalance", ns->migrate_tx_partitions_imbalance);
+
+	info_append_uint64(db, "migrate_tx_instances", ns->migrate_tx_instance_count);
+	info_append_uint64(db, "migrate_rx_instances", ns->migrate_rx_instance_count);
+
+	info_append_uint64(db, "migrate_tx_partitions_active", ns->migrate_tx_partitions_active);
+	info_append_uint64(db, "migrate_rx_partitions_active", ns->migrate_rx_partitions_active);
+
+	info_append_uint64(db, "migrate_tx_partitions_initial", ns->migrate_tx_partitions_initial);
+	info_append_uint64(db, "migrate_tx_partitions_remaining", ns->migrate_tx_partitions_remaining);
+
+	info_append_uint64(db, "migrate_rx_partitions_initial", ns->migrate_rx_partitions_initial);
+	info_append_uint64(db, "migrate_rx_partitions_remaining", ns->migrate_rx_partitions_remaining);
+
+	info_append_uint64(db, "migrate_records_skipped", ns->migrate_records_skipped);
+	info_append_uint64(db, "migrate_records_transmitted", ns->migrate_records_transmitted);
+	info_append_uint64(db, "migrate_record_retransmits", ns->migrate_record_retransmits);
+	info_append_uint64(db, "migrate_record_receives", ns->migrate_record_receives);
+
+	// tsvc-stage error counters.
+
+	info_append_uint64(db, "tsvc_client_error", ns->n_tsvc_client_error);
+	info_append_uint64(db, "tsvc_client_timeout", ns->n_tsvc_client_timeout);
+
+	info_append_uint64(db, "tsvc_batch_sub_error", ns->n_tsvc_batch_sub_error);
+	info_append_uint64(db, "tsvc_batch_sub_timeout", ns->n_tsvc_batch_sub_timeout);
+
+	info_append_uint64(db, "tsvc_udf_sub_error", ns->n_tsvc_udf_sub_error);
+	info_append_uint64(db, "tsvc_udf_sub_timeout", ns->n_tsvc_udf_sub_timeout);
+
+	// From-client transaction stats.
+
+	info_append_uint64(db, "client_proxy_complete", ns->n_client_proxy_complete);
+	info_append_uint64(db, "client_proxy_error", ns->n_client_proxy_error);
+	info_append_uint64(db, "client_proxy_timeout", ns->n_client_proxy_timeout);
+
+	info_append_uint64(db, "client_read_success", ns->n_client_read_success);
+	info_append_uint64(db, "client_read_error", ns->n_client_read_error);
+	info_append_uint64(db, "client_read_timeout", ns->n_client_read_timeout);
+	info_append_uint64(db, "client_read_not_found", ns->n_client_read_not_found);
+
+	info_append_uint64(db, "client_write_success", ns->n_client_write_success);
+	info_append_uint64(db, "xdr_write_success", ns->n_xdr_write_success);
+	info_append_uint64(db, "client_write_error", ns->n_client_write_error);
+	info_append_uint64(db, "client_write_timeout", ns->n_client_write_timeout);
+
+	info_append_uint64(db, "client_delete_success", ns->n_client_delete_success);
+	info_append_uint64(db, "client_delete_error", ns->n_client_delete_error);
+	info_append_uint64(db, "client_delete_timeout", ns->n_client_delete_timeout);
+	info_append_uint64(db, "client_delete_not_found", ns->n_client_delete_not_found);
+
+	info_append_uint64(db, "client_udf_complete", ns->n_client_udf_complete);
+	info_append_uint64(db, "client_udf_error", ns->n_client_udf_error);
+	info_append_uint64(db, "client_udf_timeout", ns->n_client_udf_timeout);
+
+	info_append_uint64(db, "client_lua_read_success", ns->n_client_lua_read_success);
+	info_append_uint64(db, "client_lua_write_success", ns->n_client_lua_write_success);
+	info_append_uint64(db, "client_lua_delete_success", ns->n_client_lua_delete_success);
+	info_append_uint64(db, "client_lua_error", ns->n_client_lua_error);
+
+	info_append_uint64(db, "client_trans_fail_xdr_forbidden", ns->n_client_trans_fail_xdr_forbidden);
+	info_append_uint64(db, "client_trans_fail_key_busy", ns->n_client_trans_fail_key_busy);
+	info_append_uint64(db, "client_write_fail_generation", ns->n_client_write_fail_generation);
+	info_append_uint64(db, "client_write_fail_record_too_big", ns->n_client_write_fail_record_too_big);
+
+	// Batch sub-transaction stats.
+
+	info_append_uint64(db, "batch_sub_proxy_complete", ns->n_batch_sub_proxy_complete);
+	info_append_uint64(db, "batch_sub_proxy_error", ns->n_batch_sub_proxy_error);
+	info_append_uint64(db, "batch_sub_proxy_timeout", ns->n_batch_sub_proxy_timeout);
+
+	info_append_uint64(db, "batch_sub_read_success", ns->n_batch_sub_read_success);
+	info_append_uint64(db, "batch_sub_read_error", ns->n_batch_sub_read_error);
+	info_append_uint64(db, "batch_sub_read_timeout", ns->n_batch_sub_read_timeout);
+	info_append_uint64(db, "batch_sub_read_not_found", ns->n_batch_sub_read_not_found);
+
+	// Internal-UDF sub-transaction stats.
+
+	info_append_uint64(db, "udf_sub_udf_complete", ns->n_udf_sub_udf_complete);
+	info_append_uint64(db, "udf_sub_udf_error", ns->n_udf_sub_udf_error);
+	info_append_uint64(db, "udf_sub_udf_timeout", ns->n_udf_sub_udf_timeout);
+
+	info_append_uint64(db, "udf_sub_lua_read_success", ns->n_udf_sub_lua_read_success);
+	info_append_uint64(db, "udf_sub_lua_write_success", ns->n_udf_sub_lua_write_success);
+	info_append_uint64(db, "udf_sub_lua_delete_success", ns->n_udf_sub_lua_delete_success);
+	info_append_uint64(db, "udf_sub_lua_error", ns->n_udf_sub_lua_error);
+
+	// Scan stats.
+
+	info_append_uint64(db, "scan_basic_complete", ns->n_scan_basic_complete);
+	info_append_uint64(db, "scan_basic_error", ns->n_scan_basic_error);
+	info_append_uint64(db, "scan_basic_abort", ns->n_scan_basic_abort);
+
+	info_append_uint64(db, "scan_aggr_complete", ns->n_scan_aggr_complete);
+	info_append_uint64(db, "scan_aggr_error", ns->n_scan_aggr_error);
+	info_append_uint64(db, "scan_aggr_abort", ns->n_scan_aggr_abort);
+
+	info_append_uint64(db, "scan_udf_bg_complete", ns->n_scan_udf_bg_complete);
+	info_append_uint64(db, "scan_udf_bg_error", ns->n_scan_udf_bg_error);
+	info_append_uint64(db, "scan_udf_bg_abort", ns->n_scan_udf_bg_abort);
+
+	// Query stats.
+
+	uint64_t agg			= ns->n_aggregation;
+	uint64_t agg_success	= ns->n_agg_success;
+	uint64_t agg_err		= ns->n_agg_errs;
+	uint64_t agg_abort		= ns->n_agg_abort;
+	uint64_t agg_records	= ns->agg_num_records;
+
+	uint64_t lkup			= ns->n_lookup;
+	uint64_t lkup_success	= ns->n_lookup_success;
+	uint64_t lkup_err		= ns->n_lookup_errs;
+	uint64_t lkup_abort		= ns->n_lookup_abort;
+	uint64_t lkup_records	= ns->lookup_num_records;
+
+	info_append_uint64(db, "query_reqs", ns->query_reqs);
+	info_append_uint64(db, "query_fail", ns->query_fail);
+
+	info_append_uint64(db, "query_short_queue_full", ns->query_short_queue_full);
+	info_append_uint64(db, "query_long_queue_full", ns->query_long_queue_full);
+	info_append_uint64(db, "query_short_reqs", ns->query_short_reqs);
+	info_append_uint64(db, "query_long_reqs", ns->query_long_reqs);
+
+	info_append_uint64(db, "query_agg", agg);
+	info_append_uint64(db, "query_agg_success", agg_success);
+	info_append_uint64(db, "query_agg_error", agg_err);
+	info_append_uint64(db, "query_agg_abort", agg_abort);
+	info_append_uint64(db, "query_agg_avg_rec_count", agg ? agg_records / agg : 0);
+
+	info_append_uint64(db, "query_lookups", lkup);
+	info_append_uint64(db, "query_lookup_success", lkup_success);
+	info_append_uint64(db, "query_lookup_error", lkup_err);
+	info_append_uint64(db, "query_lookup_abort", lkup_abort);
+	info_append_uint64(db, "query_lookup_avg_rec_count", lkup ? lkup_records / lkup : 0);
+
+	info_append_uint64(db, "query_udf_bg_success", ns->n_query_udf_bg_success);
+	info_append_uint64(db, "query_udf_bg_failure", ns->n_query_udf_bg_failure);
+
+	// Geospatial query stats:
+	info_append_uint64(db, "geo_region_query_reqs", ns->geo_region_query_count);
+	info_append_uint64(db, "geo_region_query_cells", ns->geo_region_query_cells);
+	info_append_uint64(db, "geo_region_query_points", ns->geo_region_query_points);
+	info_append_uint64(db, "geo_region_query_falsepos", ns->geo_region_query_falsepos);
+
+	// LDT stats.
+
+	if (ns->ldt_enabled) {
+		info_append_uint64(db, "ldt_reads", ns->lstats.ldt_read_reqs);
+		info_append_uint64(db, "ldt_read_success", ns->lstats.ldt_read_success);
+		info_append_uint64(db, "ldt_deletes", ns->lstats.ldt_delete_reqs);
+		info_append_uint64(db, "ldt_delete_success", ns->lstats.ldt_delete_success);
+		info_append_uint64(db, "ldt_writes", ns->lstats.ldt_write_reqs);
+		info_append_uint64(db, "ldt_write_success", ns->lstats.ldt_write_success);
+		info_append_uint64(db, "ldt_updates", ns->lstats.ldt_update_reqs);
+
+		info_append_uint64(db, "ldt_gc_io", ns->lstats.ldt_gc_io);
+		info_append_uint64(db, "ldt_gc_cnt", ns->lstats.ldt_gc_cnt);
+		info_append_uint64(db, "ldt_randomizer_retry", ns->lstats.ldt_randomizer_retry);
+
+		info_append_uint64(db, "ldt_errors", ns->lstats.ldt_errs);
+
+		info_append_uint64(db, "ldt_err_toprec_notfound", ns->lstats.ldt_err_toprec_not_found);
+		info_append_uint64(db, "ldt_err_item_notfound", ns->lstats.ldt_err_item_not_found);
+		info_append_uint64(db, "ldt_err_internal", ns->lstats.ldt_err_internal);
+		info_append_uint64(db, "ldt_err_unique_key_violation", ns->lstats.ldt_err_unique_key_violation);
+		info_append_uint64(db, "ldt_err_insert_fail", ns->lstats.ldt_err_insert_fail);
+		info_append_uint64(db, "ldt_err_delete_fail", ns->lstats.ldt_err_delete_fail);
+		info_append_uint64(db, "ldt_err_search_fail", ns->lstats.ldt_err_search_fail);
+		info_append_uint64(db, "ldt_err_version_mismatch", ns->lstats.ldt_err_version_mismatch);
+		info_append_uint64(db, "ldt_err_capacity_exceeded", ns->lstats.ldt_err_capacity_exceeded);
+		info_append_uint64(db, "ldt_err_param", ns->lstats.ldt_err_param);
+		info_append_uint64(db, "ldt_err_op_bintype_mismatch", ns->lstats.ldt_err_op_bintype_mismatch);
+		info_append_uint64(db, "ldt_err_too_many_open_subrec", ns->lstats.ldt_err_too_many_open_subrec);
+		info_append_uint64(db, "ldt_err_subrec_not_found", ns->lstats.ldt_err_subrec_not_found);
+		info_append_uint64(db, "ldt_err_bin_does_not_exist", ns->lstats.ldt_err_bin_does_not_exist);
+		info_append_uint64(db, "ldt_err_bin_exits", ns->lstats.ldt_err_bin_exits);
+		info_append_uint64(db, "ldt_err_bin_damaged", ns->lstats.ldt_err_bin_damaged);
+		info_append_uint64(db, "ldt_err_toprec_internal", ns->lstats.ldt_err_toprec_internal);
+		info_append_uint64(db, "ldt_err_subrec_internal", ns->lstats.ldt_err_subrec_internal);
+		info_append_uint64(db, "ldt_err_filer", ns->lstats.ldt_err_filter);
+		info_append_uint64(db, "ldt_err_key", ns->lstats.ldt_err_key);
+		info_append_uint64(db, "ldt_err_createspec", ns->lstats.ldt_err_createspec);
+		info_append_uint64(db, "ldt_err_usermodule", ns->lstats.ldt_err_usermodule);
+		info_append_uint64(db, "ldt_err_input_too_large", ns->lstats.ldt_err_input_too_large);
+		info_append_uint64(db, "ldt_err_ldt_not_enabled", ns->lstats.ldt_err_ldt_not_enabled);
+		info_append_uint64(db, "ldt_err_unknown", ns->lstats.ldt_err_unknown);
+	}
 }
 
 //
@@ -6034,35 +5297,18 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 int
 info_get_tree_namespace(char *name, char *subtree, cf_dyn_buf *db)
 {
-
 	as_namespace *ns = as_namespace_get_byname(subtree);
-	if (!ns)   {
-		cf_dyn_buf_append_string(db, "type=unknown");
-		return(0);
-	}
 
-	switch (ns->storage_type) {
-		case AS_STORAGE_ENGINE_UNDEF:
-		default:
-			cf_dyn_buf_append_string(db, "type=illegal");
-			goto Done;
-
-		case AS_STORAGE_ENGINE_SSD:
-			cf_dyn_buf_append_string(db, "type=device");
-			break;
-		case AS_STORAGE_ENGINE_MEMORY:
-			cf_dyn_buf_append_string(db, "type=memory");
-			break;
-		case AS_STORAGE_ENGINE_KV:
-			cf_dyn_buf_append_string(db, "type=kv");
-			break;
+	if (! ns)   {
+		cf_dyn_buf_append_string(db, "type=unknown"); // TODO - better message?
+		return 0;
 	}
 
 	info_get_namespace_info(ns, db);
-	cf_dyn_buf_append_string(db, ";");
 	info_namespace_config_get(ns->name, db);
 
-Done:
+	cf_dyn_buf_chomp(db);
+
 	return 0;
 }
 
@@ -6277,45 +5523,11 @@ info_get_service(char *name, cf_dyn_buf *db)
 void
 clear_ldt_histograms()
 {
-	histogram_clear(g_config.ldt_multiop_prole_hist);
-	histogram_clear(g_config.ldt_update_record_cnt_hist);
-	histogram_clear(g_config.ldt_io_record_cnt_hist);
-	histogram_clear(g_config.ldt_update_io_bytes_hist);
-	histogram_clear(g_config.ldt_hist);
-}
-
-void
-clear_microbenchmark_histograms()
-{
-	histogram_clear(g_config.rt_cleanup_hist);
-	histogram_clear(g_config.rt_net_hist);
-	histogram_clear(g_config.wt_net_hist);
-	histogram_clear(g_config.rt_storage_read_hist);
-	histogram_clear(g_config.rt_storage_open_hist);
-	histogram_clear(g_config.rt_tree_hist);
-	histogram_clear(g_config.rt_internal_hist);
-	histogram_clear(g_config.wt_internal_hist);
-	histogram_clear(g_config.rt_start_hist);
-	histogram_clear(g_config.wt_start_hist);
-	histogram_clear(g_config.rt_q_process_hist);
-	histogram_clear(g_config.wt_q_process_hist);
-	histogram_clear(g_config.q_wait_hist);
-	histogram_clear(g_config.demarshal_hist);
-	histogram_clear(g_config.wt_master_wait_prole_hist);
-	histogram_clear(g_config.wt_prole_hist);
-	histogram_clear(g_config.rt_resolve_hist);
-	histogram_clear(g_config.wt_resolve_hist);
-	histogram_clear(g_config.rt_resolve_wait_hist);
-	histogram_clear(g_config.wt_resolve_wait_hist);
-	histogram_clear(g_config.error_hist);
-	histogram_clear(g_config.batch_index_reads_hist);
-	histogram_clear(g_config.batch_q_process_hist);
-	histogram_clear(g_config.info_q_wait_hist);
-	histogram_clear(g_config.info_post_lock_hist);
-	histogram_clear(g_config.info_fulfill_hist);
-	histogram_clear(g_config.write_storage_close_hist);
-	histogram_clear(g_config.write_sindex_hist);
-	histogram_clear(g_config.prole_fabric_send_hist);
+	histogram_clear(g_stats.ldt_multiop_prole_hist);
+	histogram_clear(g_stats.ldt_update_record_cnt_hist);
+	histogram_clear(g_stats.ldt_io_record_cnt_hist);
+	histogram_clear(g_stats.ldt_update_io_bytes_hist);
+	histogram_clear(g_stats.ldt_hist);
 }
 
 // SINDEX wire protocol examples:
@@ -7028,7 +6240,7 @@ as_info_init()
 	as_info_set_command("dump-smd", info_command_dump_smd, PERM_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.
 	as_info_set_command("dump-wb", info_command_dump_wb, PERM_LOGGING_CTRL);                  // Print debug information about Write Bocks (WB) to the log file.
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.
-	as_info_set_command("dump-wr", info_command_dump_wr, PERM_LOGGING_CTRL);                  // Print debug information about transaction hash table to the log file.
+	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
 	as_info_set_command("dun", info_command_dun, PERM_SERVICE_CTRL);                          // Instruct this server to ignore another node.
 	as_info_set_command("get-config", info_command_config_get, PERM_NONE);                    // Returns running config for all or a particular context.
 	as_info_set_command("get-sl", info_command_get_sl, PERM_NONE);                            // Get the Paxos succession list.
@@ -7077,7 +6289,6 @@ as_info_init()
 
 	as_info_set_dynamic("query-list", as_query_list, false);
 	as_info_set_command("query-kill", info_command_query_kill, PERM_QUERY_MANAGE);
-	as_info_set_dynamic("query-stat", as_query_stat, false);
 	as_info_set_command("scan-abort", info_command_abort_scan, PERM_SCAN_MANAGE);            // Abort a scan with a given id.
 	as_info_set_command("scan-abort-all", info_command_abort_all_scans, PERM_SCAN_MANAGE);   // Abort all scans.
 	as_info_set_dynamic("scan-list", as_scan_list, false);                                   // List info for all scan jobs.
