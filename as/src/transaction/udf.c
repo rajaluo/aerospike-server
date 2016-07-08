@@ -1183,18 +1183,18 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 	case FROM_CLIENT:
 		if (ret == 0 && is_success) {
 			if (UDF_OP_IS_READ(op)) {
-				cf_atomic_int_incr(&ns->n_client_lua_read_success);
+				cf_atomic_int_incr(&ns->n_client_lang_read_success);
 			}
 			else if (UDF_OP_IS_DELETE(op)) {
-				cf_atomic_int_incr(&ns->n_client_lua_delete_success);
+				cf_atomic_int_incr(&ns->n_client_lang_delete_success);
 			}
 			else if (UDF_OP_IS_WRITE (op)) {
-				cf_atomic_int_incr(&ns->n_client_lua_write_success);
+				cf_atomic_int_incr(&ns->n_client_lang_write_success);
 			}
 		}
 		else {
 			cf_info(AS_UDF, "lua error, ret:%d", ret);
-			cf_atomic_int_incr(&ns->n_client_lua_error);
+			cf_atomic_int_incr(&ns->n_client_lang_error);
 		}
 		break;
 	case FROM_PROXY:
@@ -1205,18 +1205,18 @@ update_lua_complete_stats(uint8_t origin, as_namespace* ns, udf_optype op,
 			if (UDF_OP_IS_READ(op)) {
 				// Note - this would be weird, since there's nowhere for a
 				// response to go in our current UDF scans & queries.
-				cf_atomic_int_incr(&ns->n_udf_sub_lua_read_success);
+				cf_atomic_int_incr(&ns->n_udf_sub_lang_read_success);
 			}
 			else if (UDF_OP_IS_DELETE(op)) {
-				cf_atomic_int_incr(&ns->n_udf_sub_lua_delete_success);
+				cf_atomic_int_incr(&ns->n_udf_sub_lang_delete_success);
 			}
 			else if (UDF_OP_IS_WRITE (op)) {
-				cf_atomic_int_incr(&ns->n_udf_sub_lua_write_success);
+				cf_atomic_int_incr(&ns->n_udf_sub_lang_write_success);
 			}
 		}
 		else {
 			cf_info(AS_UDF, "lua error, ret:%d", ret);
-			cf_atomic_int_incr(&ns->n_udf_sub_lua_error);
+			cf_atomic_int_incr(&ns->n_udf_sub_lang_error);
 		}
 		break;
 	case FROM_BATCH:

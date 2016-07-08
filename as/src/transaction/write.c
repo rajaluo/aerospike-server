@@ -131,17 +131,26 @@ void write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins,
 		uint32_t n_cleanup_bins);
 
 static inline void
-client_write_update_stats(as_namespace* ns, uint8_t result_code)
+client_write_update_stats(as_namespace* ns, uint8_t result_code, bool is_xdr_op)
 {
 	switch (result_code) {
 	case AS_PROTO_RESULT_OK:
 		cf_atomic64_incr(&ns->n_client_write_success);
+		if (is_xdr_op) {
+			cf_atomic64_incr(&ns->n_xdr_write_success);
+		}
 		break;
 	case AS_PROTO_RESULT_FAIL_TIMEOUT:
 		cf_atomic64_incr(&ns->n_client_write_timeout);
+		if (is_xdr_op) {
+			cf_atomic64_incr(&ns->n_xdr_write_timeout);
+		}
 		break;
 	default:
 		cf_atomic64_incr(&ns->n_client_write_error);
+		if (is_xdr_op) {
+			cf_atomic64_incr(&ns->n_xdr_write_error);
+		}
 		break;
 	}
 }
@@ -404,10 +413,8 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		}
 		BENCHMARK_NEXT_DATA_POINT(tr, write, response);
 		HIST_TRACK_ACTIVATE_INSERT_DATA_POINT(tr, write_hist);
-		client_write_update_stats(tr->rsv.ns, tr->result_code);
-		if (tr->result_code == 0 && as_transaction_is_xdr(tr)) {
-			cf_atomic64_incr(&tr->rsv.ns->n_xdr_write_success);
-		}
+		client_write_update_stats(tr->rsv.ns, tr->result_code,
+				as_transaction_is_xdr(tr));
 		break;
 	case FROM_PROXY:
 		if (db && db->used_sz != 0) {
@@ -445,7 +452,8 @@ write_timeout_cb(rw_request* rw)
 	case FROM_CLIENT:
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		// Timeouts aren't included in histograms.
-		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
+		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT,
+				as_msg_is_xdr(&rw->msgp->msg));
 		break;
 	case FROM_PROXY:
 		break;
@@ -732,10 +740,10 @@ write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 
 	switch (result_code) {
 	case AS_PROTO_RESULT_FAIL_GENERATION:
-		cf_atomic64_incr(&tr->rsv.ns->n_client_write_fail_generation);
+		cf_atomic64_incr(&tr->rsv.ns->n_fail_generation);
 		break;
 	case AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG:
-		cf_atomic64_incr(&tr->rsv.ns->n_client_write_fail_record_too_big);
+		cf_atomic64_incr(&tr->rsv.ns->n_fail_record_too_big);
 		break;
 	default:
 		// These either log warnings or aren't interesting enough to count.
