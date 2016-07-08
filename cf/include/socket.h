@@ -80,7 +80,6 @@ int32_t cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t s
 int32_t cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size);
 int32_t cf_ip_addr_compare(const cf_ip_addr *lhs, const cf_ip_addr *rhs);
 bool cf_ip_addr_is_loopback(const cf_ip_addr *addr);
-bool cf_ip_addr_is_v6(const cf_ip_addr *addr);
 
 int32_t cf_ip_port_from_string(const char *string, cf_ip_port *port);
 int32_t cf_ip_port_to_string(cf_ip_port port, char *string, size_t size);
@@ -140,5 +139,6 @@ int32_t cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff
 
 #if defined CF_SOCKET_PRIVATE
 size_t cf_socket_addr_len(const struct sockaddr *sa);
-bool cf_socket_addr_valid(const struct sockaddr *sa);
+int32_t cf_socket_parse_netlink(bool allow_v6, uint32_t family, uint32_t flags,
+		void *data, size_t len, cf_ip_addr *addr);
 #endif

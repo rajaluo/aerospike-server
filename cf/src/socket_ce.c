@@ -137,12 +137,6 @@ cf_ip_addr_is_loopback(const cf_ip_addr *addr)
 	return (ntohl(addr->s_addr) & 0xff000000) == 0x7f000000;
 }
 
-bool
-cf_ip_addr_is_v6(const cf_ip_addr *addr)
-{
-	return false;
-}
-
 int32_t
 cf_sock_addr_from_string(const char *string, cf_sock_addr *addr)
 {
@@ -314,8 +308,17 @@ cf_socket_addr_len(const struct sockaddr *sa)
 	}
 }
 
-bool
-cf_socket_addr_valid(const struct sockaddr *sa)
+int32_t
+cf_socket_parse_netlink(bool allow_ipv6, uint32_t family, uint32_t flags,
+		void *data, size_t len, cf_ip_addr *addr)
 {
-	return sa->sa_family == AF_INET;
+	(void)allow_ipv6;
+	(void)flags;
+
+	if (family != AF_INET || len != 4) {
+		return -1;
+	}
+
+	memcpy(&addr->s_addr, data, 4);
+	return 0;
 }

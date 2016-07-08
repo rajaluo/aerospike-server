@@ -25,13 +25,15 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <ifaddrs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
 
+#include <asm/types.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 #include <netinet/tcp.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
@@ -39,6 +41,8 @@
 #include <sys/types.h>
 
 #include "fault.h"
+
+#include "citrusleaf/alloc.h"
 
 int32_t
 cf_ip_port_from_string(const char *string, cf_ip_port *port)
@@ -880,53 +884,375 @@ cf_socket_mcast_close(cf_socket_mcast_cfg *mconf)
 	safe_close(conf->sock.fd);
 }
 
+#define RESP_SIZE (2 * 1024 * 1024)
+#define MAX_INTERS 50
+#define MAX_ADDRS 50
+
+typedef struct {
+	uint32_t index;
+	char name[100];
+	uint8_t mac_addr[100];
+	uint32_t n_addrs;
+	cf_ip_addr addrs[MAX_ADDRS];
+} inter_entry;
+
+typedef struct {
+	uint32_t n_inters;
+	inter_entry inters[MAX_INTERS];
+} inter_info;
+
+typedef struct {
+	bool has_address;
+	bool has_local;
+	bool allow_v6;
+	inter_info *inter;
+} cb_context;
+
+typedef void (*reset_cb)(cb_context *cont);
+typedef void (*data_cb)(cb_context *cont, void *info, int32_t type, void *data, size_t len);
+
+static int32_t
+netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, size_t size,
+		reset_cb reset_fn, data_cb data_fn, cb_context *cont)
+{
+	int32_t res = -1;
+	int32_t nls = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+
+	if (nls < 0) {
+		cf_warning(CF_SOCKET, "Error while creating netlink socket: %d (%s)",
+				errno, cf_strerror(errno));
+		goto cleanup0;
+	}
+
+	struct sockaddr_nl loc;
+	memset(&loc, 0, sizeof loc);
+	loc.nl_family = AF_NETLINK;
+	loc.nl_pid = getpid();
+
+	if (bind(nls, (struct sockaddr *)&loc, sizeof loc) < 0) {
+		cf_warning(CF_SOCKET, "Error while binding netlink socket: %d (%s)",
+				errno, cf_strerror(errno));
+		goto cleanup1;
+	}
+
+	static cf_atomic32 seq = 0;
+	struct {
+		struct nlmsghdr h;
+		struct rtgenmsg m;
+	} req;
+
+	memset(&req, 0, sizeof req);
+	req.h.nlmsg_len = NLMSG_LENGTH(sizeof req.m);
+	req.h.nlmsg_type = type;
+	req.h.nlmsg_flags = NLM_F_REQUEST | NLM_F_ROOT;
+	req.h.nlmsg_seq = cf_atomic32_add(&seq, 1);
+	req.h.nlmsg_pid = getpid();
+	req.m.rtgen_family = PF_UNSPEC;
+
+	struct sockaddr_nl rem;
+	memset(&rem, 0, sizeof rem);
+	rem.nl_family = AF_NETLINK;
+
+	struct iovec iov;
+	memset(&iov, 0, sizeof iov);
+	iov.iov_base = &req;
+	iov.iov_len = req.h.nlmsg_len;
+
+	struct msghdr msg;
+	memset(&msg, 0, sizeof msg);
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	msg.msg_name = &rem;
+	msg.msg_namelen = sizeof rem;
+
+	if (sendmsg(nls, &msg, 0) < 0) {
+		cf_warning(CF_SOCKET, "Error while sending netlink request: %d (%s)",
+				errno, cf_strerror(errno));
+		goto cleanup1;
+	}
+
+	uint8_t *resp = cf_malloc(RESP_SIZE);
+
+	if (resp == NULL) {
+		cf_crash(CF_SOCKET, "Out of memory");
+		goto cleanup1;
+	}
+
+	memset(resp, 0, RESP_SIZE);
+	bool done = false;
+
+	while (!done) {
+		memset(&rem, 0, sizeof rem);
+		memset(&iov, 0, sizeof iov);
+		iov.iov_base = resp;
+		iov.iov_len = RESP_SIZE;
+
+		memset(&msg, 0, sizeof msg);
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_name = &rem;
+		msg.msg_namelen = sizeof rem;
+
+		ssize_t len = recvmsg(nls, &msg, 0);
+
+		if (len < 0) {
+			cf_warning(CF_SOCKET, "Error while receiving netlink response: %d (%s)",
+					errno, cf_strerror(errno));
+			goto cleanup2;
+		}
+
+		if ((msg.msg_flags & MSG_TRUNC) != 0) {
+			cf_warning(CF_SOCKET, "Received truncated netlink message");
+			goto cleanup2;
+		}
+
+		struct nlmsghdr *h = (struct nlmsghdr *)resp;
+
+		while (NLMSG_OK(h, len)) {
+			if (h->nlmsg_type == NLMSG_NOOP) {
+				h = NLMSG_NEXT(h, len);
+				continue;
+			}
+
+			if (h->nlmsg_type == NLMSG_ERROR) {
+				cf_warning(CF_SOCKET, "Received netlink error message");
+				goto cleanup2;
+			}
+
+			if (h->nlmsg_type == NLMSG_DONE) {
+				done = true;
+				break;
+			}
+
+			if (h->nlmsg_type == NLMSG_OVERRUN) {
+				cf_warning(CF_SOCKET, "Received netlink overrun message");
+				goto cleanup2;
+			}
+
+			if (h->nlmsg_type == filter1) {
+				if (reset_fn != NULL) {
+					reset_fn(cont);
+				}
+
+				void *info = NLMSG_DATA(h);
+				uint32_t a_len = h->nlmsg_len - NLMSG_LENGTH(size);
+				struct rtattr *a = (struct rtattr *)((uint8_t *)info + NLMSG_ALIGN(size));
+
+				while (RTA_OK(a, a_len)) {
+					if (a->rta_type == filter2a || a->rta_type == filter2b) {
+						data_fn(cont, info, a->rta_type, RTA_DATA(a), RTA_PAYLOAD(a));
+					}
+
+					a = RTA_NEXT(a, a_len);
+				}
+			}
+
+			if ((h->nlmsg_flags & NLM_F_MULTI) == 0) {
+				done = true;
+				break;
+			}
+
+			h = NLMSG_NEXT(h, len);
+		}
+	}
+
+	res = 0;
+
+cleanup2:
+	free(resp);
+
+cleanup1:
+	close(nls);
+
+cleanup0:
+	return res;
+}
+
+static void
+reset_fn(cb_context *cont)
+{
+	cont->has_address = false;
+	cont->has_local = false;
+}
+
+static void
+link_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
+{
+	struct ifinfomsg *info = info_;
+	inter_info *inter = cont->inter;
+	inter_entry *entry = NULL;
+
+	for (uint32_t i = 0; i < inter->n_inters; ++i) {
+		if (inter->inters[i].index == info->ifi_index) {
+			entry = &inter->inters[i];
+			break;
+		}
+	}
+
+	if (entry == NULL) {
+		uint32_t i = inter->n_inters;
+
+		if (i >= MAX_INTERS) {
+			cf_crash(CF_SOCKET, "Too many interfaces");
+		}
+
+		entry = &inter->inters[i];
+		++inter->n_inters;
+
+		entry->index = info->ifi_index;
+	}
+
+	if (type == IFLA_IFNAME) {
+		if (len > sizeof entry->name) {
+			cf_crash(CF_SOCKET, "Interface name too long: %s", (char *)data);
+		}
+
+		// Length includes terminating NUL.
+		memcpy(entry->name, data, len);
+	}
+	else if (type == IFLA_ADDRESS) {
+		if (len > sizeof entry->mac_addr) {
+			cf_crash(CF_SOCKET, "MAC address too long");
+		}
+
+		memcpy(entry->mac_addr, data, len);
+	}
+}
+
+static void
+addr_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
+{
+	struct ifaddrmsg *info = info_;
+	inter_info *inter = cont->inter;
+	inter_entry *entry = NULL;
+
+	for (uint32_t i = 0; i < inter->n_inters; ++i) {
+		if (inter->inters[i].index == info->ifa_index) {
+			entry = &inter->inters[i];
+			break;
+		}
+	}
+
+	if (entry == NULL) {
+		cf_crash(CF_SOCKET, "Invalid interface index: %u", info->ifa_index);
+	}
+
+	// IFA_LOCAL takes precedence over IFA_ADDRESS.
+	// Case 1: We're seeing an IFA_ADDRESS after an IFA_LOCAL. Skip it.
+	if (type == IFA_ADDRESS) {
+		cont->has_address = true;
+
+		if (cont->has_local) {
+			return;
+		}
+	}
+
+	// Case 2: We're seeing an IFA_LOCAL after an IFA_ADDRESS. Overwrite the IFA_ADDRESS.
+	if (type == IFA_LOCAL) {
+		cont->has_local = true;
+
+		if (cont->has_address) {
+			--entry->n_addrs;
+		}
+	}
+
+	uint32_t i = entry->n_addrs;
+
+	if (i >= MAX_ADDRS) {
+		cf_crash(CF_SOCKET, "Too many addresses for interface %s", entry->name);
+	}
+
+	cf_ip_addr *addr = &entry->addrs[i];
+
+	if (cf_socket_parse_netlink(cont->allow_v6, info->ifa_family, info->ifa_flags,
+			data, len, addr) < 0) {
+		return;
+	}
+
+	++entry->n_addrs;
+
+	char tmp[1000];
+	cf_ip_addr_to_string(addr, tmp, sizeof tmp);
+	cf_detail(CF_SOCKET, "Collected interface address %s -> %s", entry->name, tmp);
+}
+
+static int32_t
+enumerate_inter(inter_info *inter, bool allow_v6)
+{
+	cb_context cont;
+	memset(&cont, 0, sizeof cont);
+	cont.inter = inter;
+	cont.allow_v6 = allow_v6;
+
+	reset_fn(&cont);
+
+	if (netlink_dump(RTM_GETLINK, RTM_NEWLINK, IFLA_IFNAME, IFLA_ADDRESS,
+			sizeof (struct ifinfomsg), NULL, link_fn, &cont) < 0) {
+		cf_warning(CF_SOCKET, "Error while enumerating network links");
+		return -1;
+	}
+
+	if (netlink_dump(RTM_GETADDR, RTM_NEWADDR, IFA_ADDRESS, IFA_LOCAL,
+			sizeof (struct ifaddrmsg), reset_fn, addr_fn, &cont) < 0) {
+		cf_warning(CF_SOCKET, "Error while enumerating network addresses");
+		return -1;
+	}
+
+	if (cf_fault_filter[CF_SOCKET] >= CF_DETAIL) {
+		cf_detail(CF_SOCKET, "%d interface(s)", inter->n_inters);
+
+		for (uint32_t i = 0; i < inter->n_inters; ++i) {
+			inter_entry *entry = &inter->inters[i];
+			cf_detail(CF_SOCKET, "Name = %s", entry->name);
+			cf_detail(CF_SOCKET, "MAC address = %02x:%02x:%02x:%02x:%02x:%02x",
+					entry->mac_addr[0], entry->mac_addr[1], entry->mac_addr[2],
+					entry->mac_addr[3], entry->mac_addr[4], entry->mac_addr[5]);
+
+			for (int32_t k = 0; k < entry->n_addrs; ++k) {
+				cf_ip_addr *addr = &entry->addrs[k];
+				char tmp[1000];
+				cf_ip_addr_to_string(addr, tmp, sizeof tmp);
+				cf_detail(CF_SOCKET, "Address = %s", tmp);
+			}
+		}
+	}
+
+	return 0;
+}
+
 static int32_t
 inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size, bool allow_v6)
 {
-	int32_t res = -1;
-	struct ifaddrs *ias;
+	inter_info inter;
+	memset(&inter, 0, sizeof inter);
 
-	if (getifaddrs(&ias) < 0) {
-		cf_crash(CF_SOCKET, "Error while getting interface addresses: %d (%s)",
-				errno, cf_strerror(errno));
+	if (enumerate_inter(&inter, allow_v6) < 0) {
+		cf_warning(CF_SOCKET, "Error while enumerating network interfaces");
+		return -1;
 	}
 
-	struct ifaddrs *in = ias;
 	cf_ip_addr *out = (cf_ip_addr *)buff;
 	int32_t count = 0;
 
-	while (in != NULL) {
-		if (in->ifa_addr == NULL || !cf_socket_addr_valid(in->ifa_addr)) {
-			in = in->ifa_next;
-			continue;
+	for (uint32_t i = 0; i < inter.n_inters; ++i) {
+		inter_entry *entry = &inter.inters[i];
+
+		for (uint32_t k = 0; k < entry->n_addrs; ++k) {
+			cf_ip_addr *addr = &entry->addrs[k];
+
+			if ((uint8_t *)&out[count + 1] > buff + size) {
+				cf_warning(CF_SOCKET, "Buffer overflow while enumerating interface addresses");
+				return -1;
+			}
+
+			out[count] = *addr;
+			++count;
 		}
-
-		if ((uint8_t *)&out[count + 1] > buff + size) {
-			cf_warning(CF_SOCKET, "Buffer overflow while parsing interface addresses");
-			goto cleanup1;
-		}
-
-		cf_sock_addr tmp;
-		cf_sock_addr_from_native(in->ifa_addr, &tmp);
-
-		if (!allow_v6 && cf_ip_addr_is_v6(&tmp.addr)) {
-			in = in->ifa_next;
-			continue;
-		}
-
-		out[count] = tmp.addr;
-
-		in = in->ifa_next;
-		++count;
 	}
 
 	*addrs = (cf_ip_addr *)buff;
 	*n_addrs = count;
-	res = 0;
-
-cleanup1:
-	freeifaddrs(ias);
-	return res;
+	return 0;
 }
 
 int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
