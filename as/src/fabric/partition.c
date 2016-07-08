@@ -2674,8 +2674,9 @@ as_partition_balance()
 			} // end for each node in cluster
 
 			if (my_index_in_hvlist < 0) {
-				cf_warning(AS_PARTITION, "{%s:%d} State Error. Cannot find self in hash value list %"PRIx64,
+				cf_crash(AS_PARTITION, "{%s:%d} State Error. Cannot find self in hash value list %"PRIx64,
 						ns->name, j, self);
+				my_index_in_hvlist = 0; // Suppress GCC warning.
 			}
 
 			if (first_sync_node < 0 && partition_is_lost == 0) {

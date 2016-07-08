@@ -5170,18 +5170,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "migrate_record_retransmits", ns->migrate_record_retransmits);
 	info_append_uint64(db, "migrate_record_receives", ns->migrate_record_receives);
 
-	// tsvc-stage error counters.
-
-	info_append_uint64(db, "tsvc_client_error", ns->n_tsvc_client_error);
-	info_append_uint64(db, "tsvc_client_timeout", ns->n_tsvc_client_timeout);
-
-	info_append_uint64(db, "tsvc_batch_sub_error", ns->n_tsvc_batch_sub_error);
-	info_append_uint64(db, "tsvc_batch_sub_timeout", ns->n_tsvc_batch_sub_timeout);
-
-	info_append_uint64(db, "tsvc_udf_sub_error", ns->n_tsvc_udf_sub_error);
-	info_append_uint64(db, "tsvc_udf_sub_timeout", ns->n_tsvc_udf_sub_timeout);
-
 	// From-client transaction stats.
+
+	info_append_uint64(db, "client_tsvc_error", ns->n_client_tsvc_error);
+	info_append_uint64(db, "client_tsvc_timeout", ns->n_client_tsvc_timeout);
 
 	info_append_uint64(db, "client_proxy_complete", ns->n_client_proxy_complete);
 	info_append_uint64(db, "client_proxy_error", ns->n_client_proxy_error);
@@ -5193,9 +5185,13 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_read_not_found", ns->n_client_read_not_found);
 
 	info_append_uint64(db, "client_write_success", ns->n_client_write_success);
-	info_append_uint64(db, "xdr_write_success", ns->n_xdr_write_success);
 	info_append_uint64(db, "client_write_error", ns->n_client_write_error);
 	info_append_uint64(db, "client_write_timeout", ns->n_client_write_timeout);
+
+	// Subset of n_client_write_... above, respectively.
+	info_append_uint64(db, "xdr_write_success", ns->n_xdr_write_success);
+	info_append_uint64(db, "xdr_write_error", ns->n_xdr_write_error);
+	info_append_uint64(db, "xdr_write_timeout", ns->n_xdr_write_timeout);
 
 	info_append_uint64(db, "client_delete_success", ns->n_client_delete_success);
 	info_append_uint64(db, "client_delete_error", ns->n_client_delete_error);
@@ -5206,17 +5202,15 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "client_udf_error", ns->n_client_udf_error);
 	info_append_uint64(db, "client_udf_timeout", ns->n_client_udf_timeout);
 
-	info_append_uint64(db, "client_lua_read_success", ns->n_client_lua_read_success);
-	info_append_uint64(db, "client_lua_write_success", ns->n_client_lua_write_success);
-	info_append_uint64(db, "client_lua_delete_success", ns->n_client_lua_delete_success);
-	info_append_uint64(db, "client_lua_error", ns->n_client_lua_error);
-
-	info_append_uint64(db, "client_trans_fail_xdr_forbidden", ns->n_client_trans_fail_xdr_forbidden);
-	info_append_uint64(db, "client_trans_fail_key_busy", ns->n_client_trans_fail_key_busy);
-	info_append_uint64(db, "client_write_fail_generation", ns->n_client_write_fail_generation);
-	info_append_uint64(db, "client_write_fail_record_too_big", ns->n_client_write_fail_record_too_big);
+	info_append_uint64(db, "client_lang_read_success", ns->n_client_lang_read_success);
+	info_append_uint64(db, "client_lang_write_success", ns->n_client_lang_write_success);
+	info_append_uint64(db, "client_lang_delete_success", ns->n_client_lang_delete_success);
+	info_append_uint64(db, "client_lang_error", ns->n_client_lang_error);
 
 	// Batch sub-transaction stats.
+
+	info_append_uint64(db, "batch_sub_tsvc_error", ns->n_batch_sub_tsvc_error);
+	info_append_uint64(db, "batch_sub_tsvc_timeout", ns->n_batch_sub_tsvc_timeout);
 
 	info_append_uint64(db, "batch_sub_proxy_complete", ns->n_batch_sub_proxy_complete);
 	info_append_uint64(db, "batch_sub_proxy_error", ns->n_batch_sub_proxy_error);
@@ -5229,14 +5223,17 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	// Internal-UDF sub-transaction stats.
 
+	info_append_uint64(db, "udf_sub_tsvc_error", ns->n_udf_sub_tsvc_error);
+	info_append_uint64(db, "udf_sub_tsvc_timeout", ns->n_udf_sub_tsvc_timeout);
+
 	info_append_uint64(db, "udf_sub_udf_complete", ns->n_udf_sub_udf_complete);
 	info_append_uint64(db, "udf_sub_udf_error", ns->n_udf_sub_udf_error);
 	info_append_uint64(db, "udf_sub_udf_timeout", ns->n_udf_sub_udf_timeout);
 
-	info_append_uint64(db, "udf_sub_lua_read_success", ns->n_udf_sub_lua_read_success);
-	info_append_uint64(db, "udf_sub_lua_write_success", ns->n_udf_sub_lua_write_success);
-	info_append_uint64(db, "udf_sub_lua_delete_success", ns->n_udf_sub_lua_delete_success);
-	info_append_uint64(db, "udf_sub_lua_error", ns->n_udf_sub_lua_error);
+	info_append_uint64(db, "udf_sub_lang_read_success", ns->n_udf_sub_lang_read_success);
+	info_append_uint64(db, "udf_sub_lang_write_success", ns->n_udf_sub_lang_write_success);
+	info_append_uint64(db, "udf_sub_lang_delete_success", ns->n_udf_sub_lang_delete_success);
+	info_append_uint64(db, "udf_sub_lang_error", ns->n_udf_sub_lang_error);
 
 	// Scan stats.
 
@@ -5294,6 +5291,13 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "geo_region_query_cells", ns->geo_region_query_cells);
 	info_append_uint64(db, "geo_region_query_points", ns->geo_region_query_points);
 	info_append_uint64(db, "geo_region_query_falsepos", ns->geo_region_query_falsepos);
+
+	// Special errors that deserve their own counters:
+
+	info_append_uint64(db, "fail_xdr_forbidden", ns->n_fail_xdr_forbidden);
+	info_append_uint64(db, "fail_key_busy", ns->n_fail_key_busy);
+	info_append_uint64(db, "fail_generation", ns->n_fail_generation);
+	info_append_uint64(db, "fail_record_too_big", ns->n_fail_record_too_big);
 
 	// LDT stats.
 

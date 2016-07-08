@@ -122,7 +122,9 @@ process_transaction(as_transaction *tr)
 	if (! as_partition_balance_is_init_resolved() &&
 			! as_transaction_is_nsup_delete(tr)) {
 		cf_debug(AS_TSVC, "rejecting transaction - initial partition balance unresolved");
-		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		as_transaction_error(tr, NULL, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		// Note that we forfeited namespace info above so scan & query don't get
+		// counted as single-record error.
 		goto Cleanup;
 	}
 
@@ -142,12 +144,12 @@ process_transaction(as_transaction *tr)
 		if (as_transaction_is_batch_direct(tr)) {
 			// Old batch.
 			if (! as_security_check_data_op(tr, ns, PERM_READ)) {
-				as_transaction_error(tr, ns, tr->result_code);
+				as_multi_rec_transaction_error(tr, tr->result_code);
 				goto Cleanup;
 			}
 
 			if ((rv = as_batch_direct_queue_task(tr, ns)) != 0) {
-				as_transaction_error(tr, ns, rv);
+				as_multi_rec_transaction_error(tr, rv);
 				cf_atomic64_incr(&g_stats.batch_errors);
 			}
 		}
@@ -157,7 +159,7 @@ process_transaction(as_transaction *tr)
 
 			if (! as_security_check_data_op(tr, ns,
 					as_transaction_is_udf(tr) ? PERM_UDF_QUERY : PERM_QUERY)) {
-				as_transaction_error(tr, ns, tr->result_code);
+				as_multi_rec_transaction_error(tr, tr->result_code);
 				goto Cleanup;
 			}
 
@@ -166,14 +168,14 @@ process_transaction(as_transaction *tr)
 			}
 			else {
 				cf_atomic64_incr(&ns->query_fail);
-				as_transaction_error(tr, ns, tr->result_code);
+				as_multi_rec_transaction_error(tr, tr->result_code);
 			}
 		}
 		else {
 			// Scan.
 			if (! as_security_check_data_op(tr, ns,
 					as_transaction_is_udf(tr) ? PERM_UDF_SCAN : PERM_SCAN)) {
-				as_transaction_error(tr, ns, tr->result_code);
+				as_multi_rec_transaction_error(tr, tr->result_code);
 				goto Cleanup;
 			}
 
@@ -181,7 +183,7 @@ process_transaction(as_transaction *tr)
 				free_msgp = false;
 			}
 			else {
-				as_transaction_error(tr, ns, rv);
+				as_multi_rec_transaction_error(tr, rv);
 			}
 		}
 

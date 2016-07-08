@@ -1171,18 +1171,10 @@ struct as_namespace_s {
 	cf_atomic_int	migrate_record_retransmits;
 	cf_atomic_int	migrate_record_receives;
 
-	// tsvc-stage error counters.
-
-	cf_atomic64		n_tsvc_client_error;
-	cf_atomic64		n_tsvc_client_timeout;
-
-	cf_atomic64		n_tsvc_batch_sub_error;
-	cf_atomic64		n_tsvc_batch_sub_timeout;
-
-	cf_atomic64		n_tsvc_udf_sub_error;
-	cf_atomic64		n_tsvc_udf_sub_timeout;
-
 	// From-client transaction stats.
+
+	cf_atomic64		n_client_tsvc_error;
+	cf_atomic64		n_client_tsvc_timeout;
 
 	cf_atomic64		n_client_proxy_complete;
 	cf_atomic64		n_client_proxy_error;
@@ -1194,9 +1186,13 @@ struct as_namespace_s {
 	cf_atomic64		n_client_read_not_found;
 
 	cf_atomic64		n_client_write_success;
-	cf_atomic64		n_xdr_write_success; // subset of n_client_write_success
 	cf_atomic64		n_client_write_error;
 	cf_atomic64		n_client_write_timeout;
+
+	// Subset of n_client_write_... above, respectively.
+	cf_atomic64		n_xdr_write_success;
+	cf_atomic64		n_xdr_write_error;
+	cf_atomic64		n_xdr_write_timeout;
 
 	cf_atomic64		n_client_delete_success;
 	cf_atomic64		n_client_delete_error;
@@ -1207,18 +1203,15 @@ struct as_namespace_s {
 	cf_atomic64		n_client_udf_error;
 	cf_atomic64		n_client_udf_timeout;
 
-	cf_atomic64		n_client_lua_read_success;
-	cf_atomic64		n_client_lua_write_success;
-	cf_atomic64		n_client_lua_delete_success;
-	cf_atomic64		n_client_lua_error;
-
-	// Special errors that deserve their own counters:
-	cf_atomic64		n_client_trans_fail_xdr_forbidden;
-	cf_atomic64		n_client_trans_fail_key_busy;
-	cf_atomic64		n_client_write_fail_generation;
-	cf_atomic64		n_client_write_fail_record_too_big;
+	cf_atomic64		n_client_lang_read_success;
+	cf_atomic64		n_client_lang_write_success;
+	cf_atomic64		n_client_lang_delete_success;
+	cf_atomic64		n_client_lang_error;
 
 	// Batch sub-transaction stats.
+
+	cf_atomic64		n_batch_sub_tsvc_error;
+	cf_atomic64		n_batch_sub_tsvc_timeout;
 
 	cf_atomic64		n_batch_sub_proxy_complete;
 	cf_atomic64		n_batch_sub_proxy_error;
@@ -1231,14 +1224,17 @@ struct as_namespace_s {
 
 	// Internal-UDF sub-transaction stats.
 
+	cf_atomic64		n_udf_sub_tsvc_error;
+	cf_atomic64		n_udf_sub_tsvc_timeout;
+
 	cf_atomic64		n_udf_sub_udf_complete;
 	cf_atomic64		n_udf_sub_udf_error;
 	cf_atomic64		n_udf_sub_udf_timeout;
 
-	cf_atomic64		n_udf_sub_lua_read_success;
-	cf_atomic64		n_udf_sub_lua_write_success;
-	cf_atomic64		n_udf_sub_lua_delete_success;
-	cf_atomic64		n_udf_sub_lua_error;
+	cf_atomic64		n_udf_sub_lang_read_success;
+	cf_atomic64		n_udf_sub_lang_write_success;
+	cf_atomic64		n_udf_sub_lang_delete_success;
+	cf_atomic64		n_udf_sub_lang_error;
 
 	// Scan stats.
 
@@ -1285,6 +1281,13 @@ struct as_namespace_s {
 	cf_atomic64		geo_region_query_cells;		// number of cells used by region queries
 	cf_atomic64		geo_region_query_points;	// number of valid points found
 	cf_atomic64		geo_region_query_falsepos;	// number of false positives found
+
+	// Special errors that deserve their own counters:
+
+	cf_atomic64		n_fail_xdr_forbidden;
+	cf_atomic64		n_fail_key_busy;
+	cf_atomic64		n_fail_generation;
+	cf_atomic64		n_fail_record_too_big;
 
 	// LDT stats.
 
