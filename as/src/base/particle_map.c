@@ -6276,7 +6276,9 @@ order_index_remove_dup_idx(order_index *ordidx, uint32_t x)
 		}
 	}
 
-	for (i++; i < ele_count; i++) {
+	i++;
+
+	while (i < ele_count) {
 		if (order_index_get(ordidx, i) == x) {
 			ele_count--;
 
@@ -6285,6 +6287,9 @@ order_index_remove_dup_idx(order_index *ordidx, uint32_t x)
 
 				order_index_set(ordidx, j, temp);
 			}
+		}
+		else {
+			i++;
 		}
 	}
 
