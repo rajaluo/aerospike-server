@@ -1,7 +1,7 @@
 /*
  * id.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,56 +20,31 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#include "util.h" // we don't have our own header file
+#include "util.h" // We don't have our own header file.
 
-#include <errno.h>
-#include <ifaddrs.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <net/if.h>
-#include <netinet/in.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-
-#include <citrusleaf/cf_digest.h>
-#include <citrusleaf/cf_types.h>
-#include <citrusleaf/alloc.h>
-
-#include "fault.h"
 
 /*
-** need a spot for this
+** This has nowhere else to go.
 */
 
-cf_digest cf_digest_zero = { { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 } };
+cf_digest cf_digest_zero = { .digest = { 0 } };
 
 /*
-** nodeids are great things to use as keys in the hash table
+** Node IDs are great things to use as keys in the hash table.
 */
 
 uint32_t
 cf_nodeid_shash_fn(void *value)
 {
-	uint32_t *b = value;
-	uint32_t acc = 0;
-	for (int i=0;i<sizeof(cf_node);i++) {
-		acc += *b;
-	}
-	return(acc);
+	cf_node id = *(cf_node *)value;
+	return (uint32_t)(id >> 32) | (uint32_t)id;
 }
 
 uint32_t
-cf_nodeid_rchash_fn(void *value, uint32_t value_len)
+cf_nodeid_rchash_fn(void *value, uint32_t len)
 {
-	uint32_t *b = value;
-	uint32_t acc = 0;
-	for (int i=0;i<sizeof(cf_node);i++) {
-		acc += *b;
-	}
-	return(acc);
+	(void)len;
+	return cf_nodeid_shash_fn(value);
 }
