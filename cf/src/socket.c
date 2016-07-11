@@ -1294,6 +1294,11 @@ cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t
 	return inter_get_addr(addrs, n_addrs, buff, size, true);
 }
 
+static const char *if_in_order[] = {
+	"eth", "bond", "wlan",
+	NULL
+};
+
 static const char *if_default[] = {
 	"^eth[[:digit:]]+$", "^bond[[:digit:]]+$", "^wlan[[:digit:]]+$",
 	"^em[[:digit:]]+_[[:digit:]]+$", "^p[[:digit:]]+p[[:digit:]]+_[[:digit:]]+$",
@@ -1405,6 +1410,20 @@ cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr
 		cf_warning(CF_SOCKET, "Unable to find interface %s specified in configuration file",
 				if_hint);
 		return -1;
+	}
+
+	cf_debug(CF_SOCKET, "Trying default interfaces in order");
+
+	for (int32_t i = 0; if_in_order[i] != NULL; ++i) {
+		for (int32_t k = 0; k < 11; ++k) {
+			char tmp[100];
+			snprintf(tmp, sizeof tmp, "%s%d", if_in_order[i], k);
+			entry = find_inter(&inter, tmp);
+
+			if (entry != NULL) {
+				goto success;
+			}
+		}
 	}
 
 	cf_debug(CF_SOCKET, "Trying default interfaces");
