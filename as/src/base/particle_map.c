@@ -2223,7 +2223,7 @@ packed_map_remove_by_value_interval(as_bin *b, rollback_alloc *alloc_buf, const 
 	offset_index_inita_from_op_if_invalid(offidx, &op);
 
 	// Pre-populate index.
-	if (offset_index_fill(offidx, op.ele_count) < 0) {
+	if (! offset_index_fill(offidx, op.ele_count)) {
 		cf_warning(AS_PARTICLE, "packed_map_remove_by_value_interval() invalid packed map");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -2253,7 +2253,7 @@ packed_map_remove_by_rank_range(as_bin *b, rollback_alloc *alloc_buf, int64_t ra
 
 	offset_index_inita_from_op_if_invalid(offidx, &op);
 
-	if (offset_index_fill(offidx, op.ele_count) < 0) {
+	if (! offset_index_fill(offidx, op.ele_count)) {
 		cf_warning(AS_PARTICLE, "packed_map_remove_by_rank_range() invalid packed map");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -2787,7 +2787,7 @@ packed_map_get_by_value_interval(const as_bin *b, const cdt_payload *value_start
 	offset_index_inita_from_op_if_invalid(offidx, &op);
 
 	// Pre-populate index.
-	if (offset_index_fill(offidx, op.ele_count) < 0) {
+	if (! offset_index_fill(offidx, op.ele_count)) {
 		cf_warning(AS_PARTICLE, "packed_map_get_by_value_interval() invalid packed map");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -2819,7 +2819,7 @@ packed_map_get_by_rank_range(const as_bin *b, int64_t rank, uint64_t count, cdt_
 
 	offset_index_inita_from_op_if_invalid(offidx, &op);
 
-	if (offset_index_fill(offidx, op.ele_count) < 0) {
+	if (! offset_index_fill(offidx, op.ele_count)) {
 		cf_warning(AS_PARTICLE, "packed_map_get_by_rank_range() invalid packed map");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -4441,7 +4441,7 @@ packed_map_op_build_rank_result_by_index_range(const packed_map_op *op, uint32_t
 	}
 
 	// Preset offsets if necessary.
-	if (offset_index_fill(offidx, op->ele_count) < 0) {
+	if (! offset_index_fill(offidx, op->ele_count)) {
 		cf_warning(AS_PARTICLE, "packed_map_op_build_rank_range_result_by_index_range() invalid packed map");
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
