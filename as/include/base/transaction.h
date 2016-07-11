@@ -342,3 +342,4 @@ int as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *ke
 
 void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
 void as_transaction_error(as_transaction* tr, as_namespace *ns, uint32_t error_code);
+void as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code);

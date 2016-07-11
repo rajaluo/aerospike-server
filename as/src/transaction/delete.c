@@ -393,6 +393,7 @@ delete_master(as_transaction* tr)
 			 ((m->info2 & AS_MSG_INFO2_GENERATION_GT) != 0 &&
 					m->generation <= r->generation))) {
 		as_record_done(&r_ref, ns);
+		cf_atomic64_incr(&ns->n_fail_generation);
 		tr->result_code = AS_PROTO_RESULT_FAIL_GENERATION;
 		return TRANS_DONE_ERROR;
 	}

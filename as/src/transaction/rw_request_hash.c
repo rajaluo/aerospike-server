@@ -243,7 +243,7 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 	else if (g_config.transaction_pending_limit != 0 &&
 			rw_request_wait_q_depth(rw0) > g_config.transaction_pending_limit) {
 		// If we're over the hot key pending limit, fail this transaction.
-		cf_atomic64_incr(&tr->rsv.ns->n_client_trans_fail_key_busy);
+		cf_atomic64_incr(&tr->rsv.ns->n_fail_key_busy);
 		tr->result_code = AS_PROTO_RESULT_FAIL_KEY_BUSY;
 
 		return TRANS_DONE_ERROR;

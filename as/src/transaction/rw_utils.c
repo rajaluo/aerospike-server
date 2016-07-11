@@ -67,7 +67,7 @@ xdr_allows_write(as_transaction* tr)
 		}
 	}
 
-	cf_atomic_int_incr(&tr->rsv.ns->n_client_trans_fail_xdr_forbidden);
+	cf_atomic_int_incr(&tr->rsv.ns->n_fail_xdr_forbidden);
 
 	return false;
 }

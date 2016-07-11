@@ -345,10 +345,10 @@ as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code)
 #define UPDATE_ERROR_STATS(name) \
 	if (ns) { \
 		if (error_code == AS_PROTO_RESULT_FAIL_TIMEOUT) { \
-			cf_atomic64_incr(&ns->n_tsvc_##name##_timeout); \
+			cf_atomic64_incr(&ns->n_##name##_tsvc_timeout); \
 		} \
 		else { \
-			cf_atomic64_incr(&ns->n_tsvc_##name##_error); \
+			cf_atomic64_incr(&ns->n_##name##_tsvc_error); \
 		} \
 	} \
 	else { \
@@ -400,6 +400,35 @@ as_transaction_error(as_transaction* tr, as_namespace* ns, uint32_t error_code)
 		break;
 	case FROM_NSUP:
 		break;
+	default:
+		cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
+		break;
+	}
+}
+
+// TODO - temporary, until scan & query can do their own synchronous failure
+// responses. (Here we forfeit namespace info and add to global-scope error.)
+void
+as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code)
+{
+	if (error_code == 0) {
+		cf_warning(AS_PROTO, "converting error code 0 to 1 (unknown)");
+		error_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
+	}
+
+	switch (tr->origin) {
+	case FROM_CLIENT:
+		if (tr->from.proto_fd_h) {
+			as_msg_send_reply(tr->from.proto_fd_h, error_code, 0, 0, NULL, NULL, 0, NULL, as_transaction_trid(tr), NULL);
+			tr->from.proto_fd_h = NULL; // pattern, not needed
+		}
+		cf_atomic64_incr(&g_stats.n_tsvc_client_error);
+		break;
+	case FROM_PROXY:
+	case FROM_BATCH:
+	case FROM_IUDF:
+	case FROM_NSUP:
+		// It should be impossible for non-client origins to get here.
 	default:
 		cf_crash(AS_PROTO, "unexpected transaction origin %u", tr->origin);
 		break;
