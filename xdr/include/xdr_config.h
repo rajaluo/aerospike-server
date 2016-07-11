@@ -182,7 +182,9 @@ typedef struct xdr_config {
 	bool	xdr_nsup_deletes_enabled;
 	bool	xdr_ship_bins;
 	int		xdr_info_request_timeout_ms;
-	int     xdr_compression_threshold;
+	int		xdr_compression_threshold;
+	bool	xdr_handle_failednode;
+	bool	xdr_handle_linkdown;
 } xdr_config;
 
 // XDR states

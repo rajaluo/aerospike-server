@@ -141,4 +141,6 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_ship_bins = false;
 	c->xdr_info_request_timeout_ms = 10000;
 	c->xdr_compression_threshold = 0; 	// 0 disables compressed shipping, > 0 specifies minimum request size for compression
+	c->xdr_handle_failednode = true;
+	c->xdr_handle_linkdown = true;
 }
