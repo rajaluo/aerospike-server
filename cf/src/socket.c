@@ -1193,6 +1193,13 @@ addr_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
 
 	if (cf_socket_parse_netlink(cont->allow_v6, info->ifa_family, info->ifa_flags,
 			data, len, addr) < 0) {
+		if (type == IFA_ADDRESS) {
+			cont->has_address = false;
+		}
+		else if (type == IFA_LOCAL) {
+			cont->has_local = false;
+		}
+
 		return;
 	}
 
