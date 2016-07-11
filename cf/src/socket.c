@@ -102,7 +102,7 @@ void
 cf_ip_port_from_node_id(cf_node id, cf_ip_port *port)
 {
 	uint8_t *buff = (uint8_t *)&id;
-	memcpy(&port, buff + 6, 2);
+	memcpy(port, buff + 6, 2);
 }
 
 int32_t
