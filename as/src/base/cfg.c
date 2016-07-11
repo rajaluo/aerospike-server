@@ -3725,18 +3725,13 @@ cfg_set_addr(const char* name)
 void
 cfg_use_hardware_values(as_config* c)
 {
-	// Use this array if interface name is configured in config file.
-	const char *config_interface_names[] = { 0, 0 };
-
 	if (c->self_node == 0) {
-		const char **interface_names = NULL;
-		if (c->network_interface_name) {
-			// Use network interface name provided in the configuration.
-			config_interface_names[0] = c->network_interface_name;
-			interface_names = config_interface_names;
+		if (cf_node_id_get(c->fabric_port, c->network_interface_name, &c->self_node, &c->node_ip) < 0) {
+			cf_crash_nostack(AS_CFG, "Could not get node ID and/or IP address");
 		}
-		if (0 > (cf_nodeid_get(c->fabric_port, &(c->self_node), &(c->node_ip), c->hb_mode, &(c->hb_addr), interface_names))) {
-			cf_crash_nostack(AS_CFG, "could not get unique id and/or ip address");
+
+		if (c->hb_mode == AS_HB_MODE_MESH && c->hb_addr == NULL) {
+			c->hb_addr = cf_strdup(c->node_ip);
 		}
 	}
 }

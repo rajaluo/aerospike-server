@@ -410,8 +410,7 @@ as_hb_getaddr(cf_node node, cf_sock_addr *addr)
 
 	*addr = a_p_pulse->addr;
 
-	// XXX - Why is the real port to be used in the node ID?
-	addr->port = cf_nodeid_get_port(node);
+	cf_ip_port_from_node_id(node, &addr->port);
 	return(0);
 }
 

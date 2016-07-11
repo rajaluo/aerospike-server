@@ -25,6 +25,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <regex.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -73,7 +74,7 @@ cf_ip_port_to_string(cf_ip_port port, char *string, size_t size)
 }
 
 int32_t
-cf_ip_port_from_binary(const uint8_t *binary, cf_ip_port *port, size_t size)
+cf_ip_port_from_binary(const uint8_t *binary, size_t size, cf_ip_port *port)
 {
 	if (size < 2) {
 		cf_warning(CF_SOCKET, "Input buffer underflow");
@@ -97,23 +98,11 @@ cf_ip_port_to_binary(cf_ip_port port, uint8_t *binary, size_t size)
 	return 2;
 }
 
-int32_t
-cf_sock_addr_from_host_port(const char *host, cf_ip_port port, cf_sock_addr *addr)
-{
-	if (cf_ip_addr_from_string(host, &addr->addr) < 0) {
-		cf_warning(CF_SOCKET, "Invalid host address '%s'", host);
-		return -1;
-	}
-
-	addr->port = port;
-	return 0;
-}
-
 void
-cf_sock_addr_from_addr_port(const cf_ip_addr *ip_addr, cf_ip_port port, cf_sock_addr *addr)
+cf_ip_port_from_node_id(cf_node id, cf_ip_port *port)
 {
-	addr->addr = *ip_addr;
-	addr->port = port;
+	uint8_t *buff = (uint8_t *)&id;
+	memcpy(&port, buff + 6, 2);
 }
 
 int32_t
@@ -147,17 +136,17 @@ cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
 }
 
 int32_t
-cf_sock_addr_from_binary(const uint8_t *binary, cf_sock_addr *addr, size_t size)
+cf_sock_addr_from_binary(const uint8_t *binary, size_t size, cf_sock_addr *addr)
 {
 	int32_t total = 0;
-	int32_t count = cf_ip_addr_from_binary(binary, &addr->addr, size);
+	int32_t count = cf_ip_addr_from_binary(binary, size, &addr->addr);
 
 	if (count < 0) {
 		return -1;
 	}
 
 	total += count;
-	count = cf_ip_port_from_binary(binary + total, &addr->port, size - total);
+	count = cf_ip_port_from_binary(binary + total, size - total, &addr->port);
 
 	if (count < 0) {
 		return -1;
@@ -186,6 +175,42 @@ cf_sock_addr_to_binary(const cf_sock_addr *addr, uint8_t *binary, size_t size)
 
 	total += count;
 	return total;
+}
+
+int32_t
+cf_sock_addr_from_host_port(const char *host, cf_ip_port port, cf_sock_addr *addr)
+{
+	if (cf_ip_addr_from_string(host, &addr->addr) < 0) {
+		cf_warning(CF_SOCKET, "Invalid host address '%s'", host);
+		return -1;
+	}
+
+	addr->port = port;
+	return 0;
+}
+
+void
+cf_sock_addr_from_addr_port(const cf_ip_addr *ip_addr, cf_ip_port port, cf_sock_addr *addr)
+{
+	addr->addr = *ip_addr;
+	addr->port = port;
+}
+
+int32_t cf_sock_addr_compare(const cf_sock_addr *lhs, const cf_sock_addr *rhs)
+{
+	int32_t res = cf_ip_addr_compare(&lhs->addr, &rhs->addr);
+
+	if (res == 0) {
+		res = memcmp(&lhs->port, &rhs->port, 2);
+	}
+
+	return res;
+}
+
+void cf_sock_addr_copy(const cf_sock_addr *from, cf_sock_addr *to)
+{
+	cf_ip_addr_copy(&from->addr, &to->addr);
+	to->port = from->port;
 }
 
 static int32_t
@@ -891,6 +916,7 @@ cf_socket_mcast_close(cf_socket_mcast_cfg *mconf)
 typedef struct {
 	uint32_t index;
 	char name[100];
+	uint32_t mac_addr_len;
 	uint8_t mac_addr[100];
 	uint32_t n_addrs;
 	cf_ip_addr addrs[MAX_ADDRS];
@@ -1115,6 +1141,7 @@ link_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
 			cf_crash(CF_SOCKET, "MAC address too long");
 		}
 
+		entry->mac_addr_len = (uint32_t)len;
 		memcpy(entry->mac_addr, data, len);
 	}
 }
@@ -1255,12 +1282,158 @@ inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size,
 	return 0;
 }
 
-int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
+int32_t
+cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
 {
 	return inter_get_addr(addrs, n_addrs, buff, size, false);
 }
 
-int32_t cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
+int32_t
+cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
 {
 	return inter_get_addr(addrs, n_addrs, buff, size, true);
+}
+
+static const char *if_default[] = {
+	"^eth[[:digit:]]+$", "^bond[[:digit:]]+$", "^wlan[[:digit:]]+$",
+	"^em[[:digit:]]+_[[:digit:]]+$", "^p[[:digit:]]+p[[:digit:]]+_[[:digit:]]+$",
+	"^em[[:digit:]]+$", "^p[[:digit:]]+p[[:digit:]]+$",
+	NULL
+};
+
+static const char *if_any[] = {
+	"^.*$",
+	NULL
+};
+
+static bool
+validate_inter(inter_entry *entry)
+{
+	cf_debug(CF_SOCKET, "Validating interface %s", entry->name);
+
+	if (entry->n_addrs == 0) {
+		cf_debug(CF_SOCKET, "No IP addresses");
+		return false;
+	}
+
+	if (entry->mac_addr_len != 6) {
+		cf_debug(CF_SOCKET, "Invalid MAC address length: %d", entry->mac_addr_len);
+		return false;
+	}
+
+	static const uint8_t all0[6] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+	static const uint8_t all1[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+
+	if (memcmp(entry->mac_addr, all0, 6) == 0 || memcmp(entry->mac_addr, all1, 6) == 0) {
+		cf_debug(CF_SOCKET, "Invalid MAC address: %02x:%02x:%02x:%02x:%02x:%02x",
+				entry->mac_addr[0], entry->mac_addr[1], entry->mac_addr[2],
+				entry->mac_addr[3], entry->mac_addr[4], entry->mac_addr[5]);
+		return false;
+	}
+
+	cf_debug(CF_SOCKET, "Interface OK");
+	return true;
+}
+
+static inter_entry *
+find_inter(inter_info *inter, const char *name)
+{
+	cf_debug(CF_SOCKET, "Looking for %s", name);
+
+	for (uint32_t i = 0; i < inter->n_inters; ++i) {
+		inter_entry *entry = &inter->inters[i];
+		cf_debug(CF_SOCKET, "Checking %s", entry->name);
+
+		if (strcmp(entry->name, name) == 0 && validate_inter(entry)) {
+			return entry;
+		}
+	}
+
+	return NULL;
+}
+
+static inter_entry *
+match_inter(inter_info *inter, const char **patterns)
+{
+	regex_t rex;
+
+	for (int32_t i = 0; patterns[i] != NULL; ++i) {
+		cf_debug(CF_SOCKET, "Matching with %s", patterns[i]);
+
+		if (regcomp(&rex, patterns[i], REG_EXTENDED | REG_NOSUB) != 0) {
+			cf_crash(CF_SOCKET, "Error while compiling regular expression %s", patterns[i]);
+		}
+
+		for (uint32_t k = 0; k < inter->n_inters; ++k) {
+			inter_entry *entry = &inter->inters[k];
+			cf_debug(CF_SOCKET, "Matching %s", entry->name);
+
+			if (regexec(&rex, entry->name, 0, NULL, 0) == 0 && validate_inter(entry)) {
+				regfree(&rex);
+				return entry;
+			}
+		}
+
+		regfree(&rex);
+	}
+
+	return NULL;
+}
+
+int32_t
+cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr)
+{
+	cf_debug(CF_SOCKET, "Getting node ID");
+	inter_info inter;
+	memset(&inter, 0, sizeof inter);
+
+	if (enumerate_inter(&inter, true) < 0) {
+		cf_warning(CF_SOCKET, "Error while enumerating network interfaces");
+		return -1;
+	}
+
+	inter_entry *entry;
+
+	if (if_hint != NULL) {
+		cf_debug(CF_SOCKET, "Checking user-specified interface %s", if_hint);
+		entry = find_inter(&inter, if_hint);
+
+		if (entry != NULL) {
+			goto success;
+		}
+
+		cf_warning(CF_SOCKET, "Unable to find interface %s specified in configuration file",
+				if_hint);
+		return -1;
+	}
+
+	cf_debug(CF_SOCKET, "Trying default interfaces");
+	entry = match_inter(&inter, if_default);
+
+	if (entry != NULL) {
+		goto success;
+	}
+
+	cf_debug(CF_SOCKET, "Trying any interface");
+	entry = match_inter(&inter, if_any);
+
+	if (entry != NULL) {
+		goto success;
+	}
+
+	cf_warning(CF_SOCKET, "Unable to find any suitable network device for node ID");
+	return -1;
+
+success:
+	;
+	uint8_t *buff = (uint8_t *)id;
+	memcpy(buff, entry->mac_addr, 6);
+	memcpy(buff + 6, &port, 2);
+
+	char tmp[1000];
+	cf_ip_addr_to_string(&entry->addrs[0], tmp, sizeof tmp);
+	*ip_addr = cf_strdup(tmp);
+
+	cf_info(CF_SOCKET, "Node port %d, node ID %" PRIx64 ", node IP address %s", port, *id, tmp);
+	return 0;
 }

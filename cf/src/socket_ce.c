@@ -85,7 +85,7 @@ cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size)
 }
 
 int32_t
-cf_ip_addr_from_binary(const uint8_t *binary, cf_ip_addr *addr, size_t size)
+cf_ip_addr_from_binary(const uint8_t *binary, size_t size, cf_ip_addr *addr)
 {
 	if (size < 16) {
 		cf_warning(CF_SOCKET, "Input buffer underflow");
@@ -129,6 +129,12 @@ int32_t
 cf_ip_addr_compare(const cf_ip_addr *lhs, const cf_ip_addr *rhs)
 {
 	return memcmp(&lhs->s_addr, &rhs->s_addr, 4);
+}
+
+void
+cf_ip_addr_copy(const cf_ip_addr *from, cf_ip_addr *to)
+{
+	to->s_addr = from->s_addr;
 }
 
 bool
