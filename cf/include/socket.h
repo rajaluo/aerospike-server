@@ -92,6 +92,9 @@ CF_MUST_CHECK int32_t cf_ip_addr_compare(const cf_ip_addr *lhs, const cf_ip_addr
 void cf_ip_addr_copy(const cf_ip_addr *from, cf_ip_addr *to);
 CF_MUST_CHECK bool cf_ip_addr_is_loopback(const cf_ip_addr *addr);
 
+void cf_ip_addr_set_zero(cf_ip_addr *addr);
+CF_MUST_CHECK bool cf_ip_addr_is_zero(const cf_ip_addr *addr);
+
 CF_MUST_CHECK int32_t cf_ip_port_from_string(const char *string, cf_ip_port *port);
 CF_MUST_CHECK int32_t cf_ip_port_to_string(cf_ip_port port, char *string, size_t size);
 void cf_ip_port_to_string_safe(cf_ip_port port, char *string, size_t size);
@@ -118,6 +121,9 @@ void cf_sock_addr_copy(const cf_sock_addr *from, cf_sock_addr *to);
 
 void cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr);
 void cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native);
+
+void cf_sock_addr_set_zero(cf_sock_addr *addr);
+CF_MUST_CHECK bool cf_sock_addr_is_zero(const cf_sock_addr *addr);
 
 void cf_socket_disable_blocking(cf_socket sock);
 void cf_socket_enable_blocking(cf_socket sock);

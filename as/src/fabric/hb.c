@@ -211,7 +211,8 @@ static const msg_template as_hb_msg_template[] = {
 	{ AS_HB_MSG_ADDR, M_FT_UINT32 },
 	{ AS_HB_MSG_PORT, M_FT_UINT32 },
 	{ AS_HB_MSG_ANV, M_FT_BUF },
-	{ AS_HB_MSG_ANV_LENGTH, M_FT_UINT32 }
+	{ AS_HB_MSG_ANV_LENGTH, M_FT_UINT32 },
+	{ AS_HB_MSG_ADDR_EX, M_FT_BUF }
 };
 
 #define AS_HB_MSG_SCRATCH_SIZE 512 // accommodate 64-node cluster
@@ -1956,7 +1957,7 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 
 				if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse)) {
 //                    fprintf(stderr, "Request: Node %"PRIx64" not found!", node);
-					memset(&tmp_addr, 0, sizeof(tmp_addr));
+					cf_sock_addr_set_zero(&tmp_addr);
 					cf_sock_addr_to_heartbeat(&tmp_addr, mt);
 				} else {
 					cf_sock_addr_to_heartbeat(&a_p_pulse->addr, mt);

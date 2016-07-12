@@ -190,7 +190,8 @@ cf_sock_addr_from_addr_port(const cf_ip_addr *ip_addr, cf_ip_port port, cf_sock_
 	addr->port = port;
 }
 
-int32_t cf_sock_addr_compare(const cf_sock_addr *lhs, const cf_sock_addr *rhs)
+int32_t
+cf_sock_addr_compare(const cf_sock_addr *lhs, const cf_sock_addr *rhs)
 {
 	int32_t res = cf_ip_addr_compare(&lhs->addr, &rhs->addr);
 
@@ -205,10 +206,24 @@ int32_t cf_sock_addr_compare(const cf_sock_addr *lhs, const cf_sock_addr *rhs)
 	return (int32_t)lhs->port - (int32_t)rhs->port;
 }
 
-void cf_sock_addr_copy(const cf_sock_addr *from, cf_sock_addr *to)
+void
+cf_sock_addr_copy(const cf_sock_addr *from, cf_sock_addr *to)
 {
 	cf_ip_addr_copy(&from->addr, &to->addr);
 	to->port = from->port;
+}
+
+void
+cf_sock_addr_set_zero(cf_sock_addr *addr)
+{
+	cf_ip_addr_set_zero(&addr->addr);
+	addr->port = 0;
+}
+
+bool
+cf_sock_addr_is_zero(const cf_sock_addr *addr)
+{
+	return cf_ip_addr_is_zero(&addr->addr) && addr->port == 0;
 }
 
 static int32_t
@@ -344,7 +359,8 @@ cf_socket_set_receive_buffer(cf_socket sock, int32_t size)
 	safe_setsockopt(sock.fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 }
 
-void cf_socket_set_window(cf_socket sock, int32_t size)
+void
+cf_socket_set_window(cf_socket sock, int32_t size)
 {
 	safe_setsockopt(sock.fd, SOL_TCP, TCP_WINDOW_CLAMP, &size, sizeof(size));
 }
@@ -595,7 +611,8 @@ cleanup0:
 	return res;
 }
 
-int32_t cf_socket_accept(cf_socket lsock, cf_socket *sock, cf_sock_addr *addr)
+int32_t
+cf_socket_accept(cf_socket lsock, cf_socket *sock, cf_sock_addr *addr)
 {
 	int32_t res = -1;
 

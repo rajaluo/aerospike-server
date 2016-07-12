@@ -345,7 +345,8 @@ msg_template fabric_mt[] = {
 	{ FS_FIELD_NODE, M_FT_UINT64 },
 	{ FS_ADDR, M_FT_UINT32 },
 	{ FS_PORT, M_FT_UINT32 },
-	{ FS_ANV, M_FT_BUF }
+	{ FS_ANV, M_FT_BUF },
+	{ FS_ADDR_EX, M_FT_BUF }
 };
 
 #define FS_MSG_SCRATCH_SIZE 512 // accommodate 64-node cluster

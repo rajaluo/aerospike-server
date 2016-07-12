@@ -143,6 +143,18 @@ cf_ip_addr_is_loopback(const cf_ip_addr *addr)
 	return (ntohl(addr->s_addr) & 0xff000000) == 0x7f000000;
 }
 
+void
+cf_ip_addr_set_zero(cf_ip_addr *addr)
+{
+	addr->s_addr = 0;
+}
+
+bool
+cf_ip_addr_is_zero(const cf_ip_addr *addr)
+{
+	return addr->s_addr == 0;
+}
+
 int32_t
 cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
 {
@@ -212,7 +224,7 @@ from_x(const msg *msg, cf_sock_addr *addr, int32_t addr_id, int32_t port_id)
 	uint32_t v4;
 
 	if (msg_get_uint32(msg, addr_id, &v4) < 0) {
-		cf_crash(CF_SOCKET, "Heartbeat message without IPv4 address field (AS_HB_MSG_ADDR)");
+		cf_crash(CF_SOCKET, "Message without IPv4 address field");
 	}
 
 	if (v4 != 0) {
@@ -222,7 +234,7 @@ from_x(const msg *msg, cf_sock_addr *addr, int32_t addr_id, int32_t port_id)
 	uint32_t port;
 
 	if (msg_get_uint32(msg, port_id, &port) < 0) {
-		cf_crash(CF_SOCKET, "Heartbeat message without port field (AS_HB_MSG_PORT)");
+		cf_crash(CF_SOCKET, "Message without port field");
 	}
 
 	if (port != 0) {
@@ -251,23 +263,25 @@ to_x(cf_sock_addr *addr, msg *msg, int32_t addr_id, int32_t port_id)
 {
 	uint32_t v4 = addr->addr.s_addr;
 
-	if (msg_set_uint32(msg, addr_id, v4)) {
-		cf_crash(CF_SOCKET, "Error while adding IPv4 address field (AS_HB_MSG_ADDR) to heartbeat.");
+	if (msg_set_uint32(msg, addr_id, v4) != 0) {
+		cf_crash(CF_SOCKET, "Error while adding IPv4 address field to message.");
 	}
 
 	uint32_t port = addr->port;
 
-	if (msg_set_uint32(msg, port_id, port)) {
-		cf_crash(CF_SOCKET, "Error while adding port field (AS_HB_MSG_PORT) to heartbeat.");
+	if (msg_set_uint32(msg, port_id, port) != 0) {
+		cf_crash(CF_SOCKET, "Error while adding port field to message.");
 	}
 }
 
-void cf_sock_addr_to_heartbeat(cf_sock_addr *addr, msg *msg)
+void
+cf_sock_addr_to_heartbeat(cf_sock_addr *addr, msg *msg)
 {
 	to_x(addr, msg, AS_HB_MSG_ADDR, AS_HB_MSG_PORT);
 }
 
-void cf_sock_addr_to_fabric(cf_sock_addr *addr, msg *msg)
+void
+cf_sock_addr_to_fabric(cf_sock_addr *addr, msg *msg)
 {
 	to_x(addr, msg, FS_ADDR, FS_PORT);
 }
