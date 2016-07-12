@@ -37,6 +37,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "fault.h"
+#include "socket.h"
 
 #include "base/batch.h"
 #include "base/datamodel.h"

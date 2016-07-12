@@ -43,6 +43,7 @@
 #include "dynbuf.h"
 #include "fault.h"
 #include "jem.h"
+#include "socket.h"
 
 #include "base/as_stap.h"
 #include "base/datamodel.h"

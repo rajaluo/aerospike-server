@@ -196,7 +196,7 @@ from_x(const msg *msg, cf_sock_addr *addr, int32_t addr_id, int32_t port_id)
 	}
 
 	if (port != 0) {
-		++port;
+		++res;
 	}
 
 	addr->addr.s_addr = v4;
@@ -204,12 +204,14 @@ from_x(const msg *msg, cf_sock_addr *addr, int32_t addr_id, int32_t port_id)
 	return res;
 }
 
-int32_t cf_sock_addr_from_heartbeat(const msg *msg, cf_sock_addr *addr)
+int32_t
+cf_sock_addr_from_heartbeat(const msg *msg, cf_sock_addr *addr)
 {
 	return from_x(msg, addr, AS_HB_MSG_ADDR, AS_HB_MSG_PORT);
 }
 
-int32_t cf_sock_addr_from_fabric(const msg *msg, cf_sock_addr *addr)
+int32_t
+cf_sock_addr_from_fabric(const msg *msg, cf_sock_addr *addr)
 {
 	return from_x(msg, addr, FS_ADDR, FS_PORT);
 }

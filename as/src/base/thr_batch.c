@@ -40,6 +40,7 @@
 #include "dynbuf.h"
 #include "hist.h"
 #include "util.h"
+#include "socket.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"

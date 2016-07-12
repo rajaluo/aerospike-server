@@ -48,6 +48,7 @@
 
 #include "dynbuf.h"
 #include "fault.h"
+#include "socket.h"
 
 #include "base/aggr.h"
 #include "base/cfg.h"

@@ -45,6 +45,14 @@
 
 #include "citrusleaf/alloc.h"
 
+void
+cf_ip_addr_to_string_safe(const cf_ip_addr *addr, char *string, size_t size)
+{
+	if (cf_ip_addr_to_string(addr, string, size) < 0) {
+		cf_crash(CF_SOCKET, "String buffer overflow");
+	}
+}
+
 int32_t
 cf_ip_port_from_string(const char *string, cf_ip_port *port)
 {
@@ -71,6 +79,14 @@ cf_ip_port_to_string(cf_ip_port port, char *string, size_t size)
 	}
 
 	return count;
+}
+
+void
+cf_ip_port_to_string_safe(cf_ip_port port, char *string, size_t size)
+{
+	if (cf_ip_port_to_string(port, string, size) < 0) {
+		cf_crash(CF_SOCKET, "String buffer overflow");
+	}
 }
 
 int32_t
@@ -133,6 +149,14 @@ cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
 
 	total += count;
 	return total;
+}
+
+void
+cf_sock_addr_to_string_safe(const cf_sock_addr *addr, char *string, size_t size)
+{
+	if (cf_sock_addr_to_string(addr, string, size) < 0) {
+		cf_crash(CF_SOCKET, "String buffer overflow");
+	}
 }
 
 int32_t
@@ -559,7 +583,7 @@ cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock)
 	cf_sock_addr_to_native(addr, (struct sockaddr *)&sas);
 
 	char friendly[1000];
-	cf_sock_addr_to_string(addr, friendly, sizeof friendly);
+	cf_sock_addr_to_string_safe(addr, friendly, sizeof friendly);
 
 	int32_t fd = socket(sas.ss_family, SOCK_STREAM, 0);
 
@@ -854,7 +878,7 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 
 	if (iaddr != NULL) {
 		char tmp[1000];
-		cf_ip_addr_to_string(iaddr, tmp, sizeof tmp);
+		cf_ip_addr_to_string_safe(iaddr, tmp, sizeof tmp);
 		cf_info(CF_SOCKET, "Setting multicast interface address: %s", tmp);
 
 		if (cf_socket_mcast_set_inter(sock, iaddr) < 0) {
@@ -883,7 +907,7 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 	}
 
 	char tmp[1000];
-	cf_ip_addr_to_string(&addr.addr, tmp, sizeof tmp);
+	cf_ip_addr_to_string_safe(&addr.addr, tmp, sizeof tmp);
 	cf_info(CF_SOCKET, "Joining multicast group: %s", tmp);
 
 	if (cf_socket_mcast_join_group(sock, iaddr, &addr.addr) < 0) {
@@ -1206,7 +1230,7 @@ addr_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
 	++entry->n_addrs;
 
 	char tmp[1000];
-	cf_ip_addr_to_string(addr, tmp, sizeof tmp);
+	cf_ip_addr_to_string_safe(addr, tmp, sizeof tmp);
 	cf_detail(CF_SOCKET, "Collected interface address %s -> %s", entry->name, tmp);
 }
 
@@ -1245,7 +1269,7 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 			for (int32_t k = 0; k < entry->n_addrs; ++k) {
 				cf_ip_addr *addr = &entry->addrs[k];
 				char tmp[1000];
-				cf_ip_addr_to_string(addr, tmp, sizeof tmp);
+				cf_ip_addr_to_string_safe(addr, tmp, sizeof tmp);
 				cf_detail(CF_SOCKET, "Address = %s", tmp);
 			}
 		}
@@ -1457,7 +1481,7 @@ success:
 	memcpy(buff + 6, &port, 2);
 
 	char tmp[1000];
-	cf_ip_addr_to_string(&entry->addrs[0], tmp, sizeof tmp);
+	cf_ip_addr_to_string_safe(&entry->addrs[0], tmp, sizeof tmp);
 	*ip_addr = cf_strdup(tmp);
 
 	cf_info(CF_SOCKET, "Node port %d, node ID %" PRIx64 ", node IP address %s", port, *id, tmp);

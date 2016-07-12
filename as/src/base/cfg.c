@@ -49,6 +49,7 @@
 #include "hist_track.h"
 #include "msg.h"
 #include "olock.h"
+#include "socket.h"
 #include "util.h"
 
 #include "base/cluster_config.h"

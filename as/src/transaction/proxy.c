@@ -42,6 +42,7 @@
 #include "dynbuf.h"
 #include "fault.h"
 #include "msg.h"
+#include "socket.h"
 #include "util.h"
 
 #include "base/batch.h"

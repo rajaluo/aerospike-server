@@ -37,6 +37,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "jem.h"
+#include "socket.h"
 #include <errno.h>
 
 //---------------------------------------------------------

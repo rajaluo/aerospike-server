@@ -34,6 +34,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "msg.h"
+#include "socket.h"
 #include "util.h"
 
 #include "base/cfg.h"

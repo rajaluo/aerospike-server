@@ -277,7 +277,7 @@ thr_info_port_fn(void *arg)
 				}
 
 				char sa_str[1000];
-				cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
+				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof sa_str);
 				cf_detail(AS_INFO_PORT, "new connection: %s", sa_str);
 
 				// Set the socket to nonblocking.

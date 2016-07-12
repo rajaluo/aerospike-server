@@ -529,7 +529,7 @@ thr_demarshal(void *arg)
 				}
 
 				char sa_str[sizeof ((as_file_handle *)NULL)->client];
-				cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
+				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof sa_str);
 				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", sa_str, CSFD(csock));
 
 				// Validate the limit of protocol connections we allow.

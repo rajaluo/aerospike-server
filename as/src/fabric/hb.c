@@ -285,6 +285,7 @@ typedef enum as_hb_err_type_e
 	AS_HB_ERR_SEND_TO_FAIL_4,
 	AS_HB_ERR_SEND_TO_FAIL_5,
 	AS_HB_ERR_SEND_TO_FAIL_6,
+	AS_HB_ERR_SEND_TO_FAIL_7,
 	AS_HB_ERR_MISSING_FIELD,
 	AS_HB_ERR_EXPIRE_HB,
 	AS_HB_ERR_EXPIRE_FAB_DEAD,
@@ -618,7 +619,7 @@ as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr *addr,
 
 	if (cf_fault_filter[AS_HB] >= CF_DEBUG) {
 		char tmp[1000];
-		cf_sock_addr_to_string(addr, tmp, sizeof tmp);
+		cf_sock_addr_to_string_safe(addr, tmp, sizeof tmp);
 		cf_debug(AS_HB, "HB fabric (%"PRIx64"+%"PRIu64"): %s", node, p_pulse->last, tmp);
 	}
 
@@ -1053,13 +1054,13 @@ void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 			// Otherwise, fall back to generic log message.
 			if (cf_socket_remote_name(s.sock, &sa) == 0) {
 				char sa_str[1000];
-				cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
+				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof sa_str);
 
 				cf_sock_addr sa2;
 
 				if (cf_socket_local_name(s.sock, &sa2) == 0) {
 					char sa2_str[1000];
-					cf_sock_addr_to_string(&sa2, sa2_str, sizeof sa2_str);
+					cf_sock_addr_to_string_safe(&sa2, sa2_str, sizeof sa2_str);
 
 					cf_info(AS_HB, "initiated connection to mesh %sseed host at %s (%s:%d) via socket %d from %s",
 							(is_seed ? "" : "non-"), sa_str, e->host, e->port, CSFD(s.sock), sa2_str);
@@ -1135,7 +1136,7 @@ mesh_list_service_fn(void *arg)
 				  cf_sock_addr *walker = mhqe.list;
 				  for (int i = 0; i < mhqe.list_len; i++) {
 					  char host[1000];
-					  cf_ip_addr_to_string(&walker->addr, host, sizeof host);
+					  cf_ip_addr_to_string_safe(&walker->addr, host, sizeof host);
 
 					  e = g_hb.mesh_seed_host_list;
 					  while (e) {
@@ -1812,7 +1813,7 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 
 				if (cf_fault_filter[AS_HB] >= CF_DETAIL) {
 					char tmp[1000];
-					cf_sock_addr_to_string(&p_pulse->addr, tmp, sizeof tmp);
+					cf_sock_addr_to_string_safe(&p_pulse->addr, tmp, sizeof tmp);
 					cf_detail(AS_HB, "Got heartbeat pulse from node identifying itself as %s", tmp);
 				}
 			}
@@ -1841,7 +1842,7 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 				int rv = shash_put_unique(g_hb.adjacencies, &node, p_pulse);
 				if (rv == SHASH_ERR_FOUND) {
 					char tmp[1000];
-					cf_sock_addr_to_string(&p_pulse->addr, tmp, sizeof tmp);
+					cf_sock_addr_to_string_safe(&p_pulse->addr, tmp, sizeof tmp);
 					cf_warning(AS_HB, "reprocessing HB msg, ppaddr %s ppfd %d fd %d", tmp, CSFD(p_pulse->sock), CSFD(sock));
 #ifdef FAIL_FAST
 					cf_crash(AS_HB, "declining to recurse");
@@ -2029,12 +2030,12 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 			} else {
 				if (cf_fault_filter[AS_HB] >= CF_DEBUG) {
 					char tmp[1000];
-					cf_sock_addr_to_string(from, tmp, sizeof tmp);
+					cf_sock_addr_to_string_safe(from, tmp, sizeof tmp);
 					cf_debug(AS_HB, "connecting to remote heartbeat service: %s", tmp);
 				}
 
 				char host[1000];
-				cf_ip_addr_to_string(&tmp_addr.addr, host, sizeof host);
+				cf_ip_addr_to_string_safe(&tmp_addr.addr, host, sizeof host);
 
 				// could be both seed and non-seed but we are passing is_seed = 0, 
 				// as mesh_list_service_fn will take care of duplicates
@@ -2172,7 +2173,7 @@ as_hb_thr(void *arg)
 				}
 
 				char sa_str[1000];
-				cf_sock_addr_to_string(&sa, sa_str, sizeof sa_str);
+				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof sa_str);
 				cf_debug(AS_HB, "new connection from %s", sa_str);
 
 				cf_atomic64_incr(&g_stats.heartbeat_connections_opened);
@@ -2253,17 +2254,20 @@ CloseSocket:
 					if (true == g_hb.endpoint_txlist_isudp[i]) {
 						cf_detail(AS_HB, "sending udp heartbeat to index %d : msg size %zu", i, n);
 						cf_sock_addr dest;
-						cf_sock_addr_from_host_port(g_config.hb_addr, g_config.hb_port, &dest);
 
-						if (0 > cf_socket_send_to(WSFD(i), buft, n, 0, &dest)) {
-							cf_detail(AS_HB, "cf_socket_send_to() failed 5");
+						if (cf_sock_addr_from_host_port(g_config.hb_addr, g_config.hb_port, &dest) < 0) {
+							cf_detail(AS_HB, "Invalid hearbeat address %s:%d", g_config.hb_addr, g_config.hb_port);
 							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_5);
+						}
+						else if (0 > cf_socket_send_to(WSFD(i), buft, n, 0, &dest)) {
+							cf_detail(AS_HB, "cf_socket_send_to() failed 5");
+							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_6);
 						}
 					} else { // tcp
 						cf_detail(AS_HB, "sending tcp heartbeat to index %d : msg size %zu", i, n);
 						if (0 > as_hb_tcp_send(WSFD(i), buft, n)) {
 							cf_detail(AS_HB, "as_hb_tcp_send() fd %d failed 6", i);
-							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_6);
+							as_hb_error(AS_HB_ERR_SEND_TO_FAIL_7);
 						}
 					}
 				}
@@ -2743,7 +2747,7 @@ static void
 as_hb_dump_pulse(as_hb_pulse *pulse)
 {
 	char tmp[1000];
-	cf_sock_addr_to_string(&pulse->addr, tmp, sizeof tmp);
+	cf_sock_addr_to_string_safe(&pulse->addr, tmp, sizeof tmp);
 
 	cf_info(AS_HB, " last %lu", pulse->last);
 	cf_info(AS_HB, " addr %s", tmp);

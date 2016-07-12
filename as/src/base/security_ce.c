@@ -33,6 +33,7 @@
 #include "citrusleaf/alloc.h"
 
 #include "fault.h"
+#include "socket.h"
 
 #include "base/proto.h"
 #include "base/transaction.h"
