@@ -144,6 +144,36 @@ cf_ip_addr_is_loopback(const cf_ip_addr *addr)
 }
 
 int32_t
+cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
+{
+	int32_t total = 0;
+	int32_t count = cf_ip_addr_to_string(&addr->addr, string, size);
+
+	if (count < 0) {
+		return -1;
+	}
+
+	total += count;
+
+	if (size - total < 2) {
+		cf_warning(CF_SOCKET, "Output buffer overflow");
+		return -1;
+	}
+
+	string[total++] = ':';
+	string[total] = 0;
+
+	count = cf_ip_port_to_string(addr->port, string + total, size - total);
+
+	if (count < 0) {
+		return -1;
+	}
+
+	total += count;
+	return total;
+}
+
+int32_t
 cf_sock_addr_from_string(const char *string, cf_sock_addr *addr)
 {
 	int32_t res = -1;
@@ -245,12 +275,11 @@ void cf_sock_addr_to_fabric(cf_sock_addr *addr, msg *msg)
 void
 cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr)
 {
-	struct sockaddr_in *sai = (struct sockaddr_in *)native;
-
-	if (sai->sin_family != AF_INET) {
-		cf_crash(CF_SOCKET, "Invalid address family: %d", sai->sin_family);
+	if (native->sa_family != AF_INET) {
+		cf_crash(CF_SOCKET, "Invalid address family: %d", native->sa_family);
 	}
 
+	struct sockaddr_in *sai = (struct sockaddr_in *)native;
 	addr->addr = sai->sin_addr;
 	addr->port = ntohs(sai->sin_port);
 }
@@ -311,7 +340,6 @@ cf_socket_addr_len(const struct sockaddr *sa)
 
 	default:
 		cf_crash(CF_SOCKET, "Invalid address family: %d", sa->sa_family);
-		// XXX - Find a way to mark cf_crash() as "noreturn".
 		return 0;
 	}
 }

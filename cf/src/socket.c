@@ -121,36 +121,6 @@ cf_ip_port_from_node_id(cf_node id, cf_ip_port *port)
 	memcpy(port, buff + 6, 2);
 }
 
-int32_t
-cf_sock_addr_to_string(const cf_sock_addr *addr, char *string, size_t size)
-{
-	int32_t total = 0;
-	int32_t count = cf_ip_addr_to_string(&addr->addr, string, size);
-
-	if (count < 0) {
-		return -1;
-	}
-
-	total += count;
-
-	if (size - total < 2) {
-		cf_warning(CF_SOCKET, "Output buffer overflow");
-		return -1;
-	}
-
-	string[total++] = ':';
-	string[total] = 0;
-
-	count = cf_ip_port_to_string(addr->port, string + total, size - total);
-
-	if (count < 0) {
-		return -1;
-	}
-
-	total += count;
-	return total;
-}
-
 void
 cf_sock_addr_to_string_safe(const cf_sock_addr *addr, char *string, size_t size)
 {
