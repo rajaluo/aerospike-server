@@ -102,7 +102,8 @@ scan_type_str(scan_type type)
 
 int basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
 int aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
-int udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id);
+int udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns,
+		uint16_t set_id);
 
 //----------------------------------------------------------
 // Non-class-specific utilities.
@@ -848,7 +849,8 @@ typedef struct aggr_scan_slice_s {
 bool aggr_scan_init(as_aggr_call* call, const as_transaction* tr);
 void aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd);
-as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns, as_partition_id pid, as_partition_reservation* rsv);
+as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns,
+		as_partition_id pid, as_partition_reservation* rsv);
 as_stream_status aggr_scan_ostream_write(void* udata, as_val* val);
 
 const as_aggr_hooks scan_aggr_hooks = {
@@ -859,7 +861,8 @@ const as_aggr_hooks scan_aggr_hooks = {
 	.pre_check     = NULL
 };
 
-void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val, bool success);
+void aggr_scan_add_val_response(aggr_scan_slice* slice, const as_val* val,
+		bool success);
 
 //----------------------------------------------------------
 // aggr_scan_job public API.

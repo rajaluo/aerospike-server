@@ -549,7 +549,8 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 	size_t pos = 0;
 
 	while (pos < proto_sz) {
-		int rv = cf_socket_send(fd_h->sock, proto + pos, proto_sz - pos, MSG_NOSIGNAL);
+		int rv = cf_socket_send(fd_h->sock, proto + pos, proto_sz - pos,
+				MSG_NOSIGNAL);
 
 		if (rv > 0) {
 			pos += rv;
@@ -1110,7 +1111,8 @@ shipop_handle_client_response(msg* m, rw_request* rw)
 	size_t pos = 0;
 
 	while (pos < proto_sz) {
-		int rv = cf_socket_send(fd_h->sock, proto + pos, proto_sz - pos, MSG_NOSIGNAL);
+		int rv = cf_socket_send(fd_h->sock, proto + pos, proto_sz - pos,
+				MSG_NOSIGNAL);
 
 		if (rv > 0) {
 			pos += rv;
