@@ -207,7 +207,8 @@ repl_write_setup_rw(rw_request* rw, as_transaction* tr,
 	// Hereafter, rw_request must release reservation - happens in destructor.
 
 	rw->end_time = tr->end_time;
-	// Note - don't need as_transaction's other 'container' members.
+	rw->generation = tr->generation;
+	rw->void_time = tr->void_time;
 
 	rw->repl_write_cb = repl_write_cb;
 	rw->timeout_cb = timeout_cb;
