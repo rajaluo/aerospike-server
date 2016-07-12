@@ -224,11 +224,15 @@ int32_t cf_sock_addr_compare(const cf_sock_addr *lhs, const cf_sock_addr *rhs)
 {
 	int32_t res = cf_ip_addr_compare(&lhs->addr, &rhs->addr);
 
-	if (res == 0) {
-		res = memcmp(&lhs->port, &rhs->port, 2);
+	if (res != 0) {
+		return res;
 	}
 
-	return res;
+	if (lhs->port == rhs->port) {
+		return 0;
+	}
+
+	return (int32_t)lhs->port - (int32_t)rhs->port;
 }
 
 void cf_sock_addr_copy(const cf_sock_addr *from, cf_sock_addr *to)
