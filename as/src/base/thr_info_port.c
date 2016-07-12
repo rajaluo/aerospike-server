@@ -232,7 +232,7 @@ thr_info_port_fn(void *arg)
 	if (-1 == (epoll_fd = epoll_create(EPOLL_SZ))) {
 		cf_crash(AS_INFO_PORT, "epoll_create(): %s", cf_strerror(errno));
 	}
-	memset(&ev, 0, sizeof (ev));
+	memset(&ev, 0, sizeof(ev));
 	ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
 	ev.data.fd = CSFD(s->sock);
 	if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(s->sock), &ev)) {
@@ -277,7 +277,7 @@ thr_info_port_fn(void *arg)
 				}
 
 				char sa_str[1000];
-				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof sa_str);
+				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof(sa_str));
 				cf_detail(AS_INFO_PORT, "new connection: %s", sa_str);
 
 				// Set the socket to nonblocking.
@@ -298,7 +298,7 @@ thr_info_port_fn(void *arg)
 				ips->sock = csock;
 
 				// Place the client socket in the event queue.
-				memset(&ev, 0, sizeof (ev));
+				memset(&ev, 0, sizeof(ev));
 				ev.events = EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP ;
 				ev.data.ptr = ips;
 				if (0 > (n = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(csock), &ev))) {

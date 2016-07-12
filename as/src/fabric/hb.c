@@ -619,7 +619,7 @@ as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr *addr,
 
 	if (cf_fault_filter[AS_HB] >= CF_DEBUG) {
 		char tmp[1000];
-		cf_sock_addr_to_string_safe(addr, tmp, sizeof tmp);
+		cf_sock_addr_to_string_safe(addr, tmp, sizeof(tmp));
 		cf_debug(AS_HB, "HB fabric (%"PRIx64"+%"PRIu64"): %s", node, p_pulse->last, tmp);
 	}
 
@@ -1054,13 +1054,13 @@ void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 			// Otherwise, fall back to generic log message.
 			if (cf_socket_remote_name(s.sock, &sa) == 0) {
 				char sa_str[1000];
-				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof sa_str);
+				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof(sa_str));
 
 				cf_sock_addr sa2;
 
 				if (cf_socket_local_name(s.sock, &sa2) == 0) {
 					char sa2_str[1000];
-					cf_sock_addr_to_string_safe(&sa2, sa2_str, sizeof sa2_str);
+					cf_sock_addr_to_string_safe(&sa2, sa2_str, sizeof(sa2_str));
 
 					cf_info(AS_HB, "initiated connection to mesh %sseed host at %s (%s:%d) via socket %d from %s",
 							(is_seed ? "" : "non-"), sa_str, e->host, e->port, CSFD(s.sock), sa2_str);
@@ -1136,7 +1136,7 @@ mesh_list_service_fn(void *arg)
 				  cf_sock_addr *walker = mhqe.list;
 				  for (int i = 0; i < mhqe.list_len; i++) {
 					  char host[1000];
-					  cf_ip_addr_to_string_safe(&walker->addr, host, sizeof host);
+					  cf_ip_addr_to_string_safe(&walker->addr, host, sizeof(host));
 
 					  e = g_hb.mesh_seed_host_list;
 					  while (e) {
@@ -1397,7 +1397,7 @@ as_hb_tip_clear(cf_sock_addr *addr_list, int addr_list_len)
 		cf_debug(AS_HB, "Removing %d mesh host entries:", addr_list_len);
 
 		mhqe.op = MH_OP_REMOVE_LIST;
-		size_t list_sz = addr_list_len * sizeof (cf_sock_addr);
+		size_t list_sz = addr_list_len * sizeof(cf_sock_addr);
 		memcpy(mhqe.list, addr_list, list_sz);
 		mhqe.list_len = addr_list_len;
 	}
@@ -1813,7 +1813,7 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 
 				if (cf_fault_filter[AS_HB] >= CF_DETAIL) {
 					char tmp[1000];
-					cf_sock_addr_to_string_safe(&p_pulse->addr, tmp, sizeof tmp);
+					cf_sock_addr_to_string_safe(&p_pulse->addr, tmp, sizeof(tmp));
 					cf_detail(AS_HB, "Got heartbeat pulse from node identifying itself as %s", tmp);
 				}
 			}
@@ -1842,7 +1842,7 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 				int rv = shash_put_unique(g_hb.adjacencies, &node, p_pulse);
 				if (rv == SHASH_ERR_FOUND) {
 					char tmp[1000];
-					cf_sock_addr_to_string_safe(&p_pulse->addr, tmp, sizeof tmp);
+					cf_sock_addr_to_string_safe(&p_pulse->addr, tmp, sizeof(tmp));
 					cf_warning(AS_HB, "reprocessing HB msg, ppaddr %s ppfd %d fd %d", tmp, CSFD(p_pulse->sock), CSFD(sock));
 #ifdef FAIL_FAST
 					cf_crash(AS_HB, "declining to recurse");
@@ -1956,7 +1956,7 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 
 				if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse)) {
 //                    fprintf(stderr, "Request: Node %"PRIx64" not found!", node);
-					memset(&tmp_addr, 0, sizeof tmp_addr);
+					memset(&tmp_addr, 0, sizeof(tmp_addr));
 					cf_sock_addr_to_heartbeat(&tmp_addr, mt);
 				} else {
 					cf_sock_addr_to_heartbeat(&a_p_pulse->addr, mt);
@@ -2030,12 +2030,12 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 			} else {
 				if (cf_fault_filter[AS_HB] >= CF_DEBUG) {
 					char tmp[1000];
-					cf_sock_addr_to_string_safe(from, tmp, sizeof tmp);
+					cf_sock_addr_to_string_safe(from, tmp, sizeof(tmp));
 					cf_debug(AS_HB, "connecting to remote heartbeat service: %s", tmp);
 				}
 
 				char host[1000];
-				cf_ip_addr_to_string_safe(&tmp_addr.addr, host, sizeof host);
+				cf_ip_addr_to_string_safe(&tmp_addr.addr, host, sizeof(host));
 
 				// could be both seed and non-seed but we are passing is_seed = 0, 
 				// as mesh_list_service_fn will take care of duplicates
@@ -2173,7 +2173,7 @@ as_hb_thr(void *arg)
 				}
 
 				char sa_str[1000];
-				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof sa_str);
+				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof(sa_str));
 				cf_debug(AS_HB, "new connection from %s", sa_str);
 
 				cf_atomic64_incr(&g_stats.heartbeat_connections_opened);
@@ -2211,7 +2211,7 @@ CloseSocket:
 						r = cf_socket_recv_from(esock, bufr, sizeof(bufr), 0, &from);
 					} else {
 						r = as_hb_tcp_recv(esock, bufr, sizeof(bufr));
-						memset(&from, 0, sizeof from);
+						memset(&from, 0, sizeof(from));
 					}
 					cf_detail(AS_HB, "received %d bytes, calling msg_parse", r);
 					if (r > 0) {
@@ -2747,7 +2747,7 @@ static void
 as_hb_dump_pulse(as_hb_pulse *pulse)
 {
 	char tmp[1000];
-	cf_sock_addr_to_string_safe(&pulse->addr, tmp, sizeof tmp);
+	cf_sock_addr_to_string_safe(&pulse->addr, tmp, sizeof(tmp));
 
 	cf_info(AS_HB, " last %lu", pulse->last);
 	cf_info(AS_HB, " addr %s", tmp);

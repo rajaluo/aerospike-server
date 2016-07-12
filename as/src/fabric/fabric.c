@@ -1039,7 +1039,7 @@ fabric_process_read_msg(fabric_buffer *fb)
 
 			if (cf_fault_filter[AS_FABRIC] >= CF_DEBUG) {
 				char tmp[1000];
-				cf_sock_addr_to_string_safe(&addr, tmp, sizeof tmp);
+				cf_sock_addr_to_string_safe(&addr, tmp, sizeof(tmp));
 				cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)", tmp, node, CSFD(fb->sock));
 			}
 		} else if (AS_HB_MODE_MESH == g_config.hb_mode) {

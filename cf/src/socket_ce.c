@@ -259,7 +259,7 @@ void
 cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native)
 {
 	struct sockaddr_in *sai = (struct sockaddr_in *)native;
-	memset(sai, 0, sizeof (struct sockaddr_in));
+	memset(sai, 0, sizeof(struct sockaddr_in));
 	sai->sin_family = AF_INET;
 	sai->sin_addr = addr->addr;
 	sai->sin_port = htons(addr->port);
@@ -269,10 +269,10 @@ int32_t
 cf_socket_mcast_set_inter(cf_socket sock, const cf_ip_addr *iaddr)
 {
 	struct ip_mreqn mr;
-	memset(&mr, 0, sizeof mr);
+	memset(&mr, 0, sizeof(mr));
 	mr.imr_address = *iaddr;
 
-	if (setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_IF, &mr, sizeof mr) < 0) {
+	if (setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_IF, &mr, sizeof(mr)) < 0) {
 		cf_warning(CF_SOCKET, "setsockopt(IP_MULTICAST_IF) failed on FD %d: %d (%s)",
 				sock.fd, errno, cf_strerror(errno));
 		return -1;
@@ -285,7 +285,7 @@ int32_t
 cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr)
 {
 	struct ip_mreqn mr;
-	memset(&mr, 0, sizeof mr);
+	memset(&mr, 0, sizeof(mr));
 
 	if (iaddr != NULL) {
 		mr.imr_address = *iaddr;
@@ -293,7 +293,7 @@ cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_
 
 	mr.imr_multiaddr = *gaddr;
 
-	if (setsockopt(sock.fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof mr) < 0) {
+	if (setsockopt(sock.fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof(mr)) < 0) {
 		cf_warning(CF_SOCKET, "setsockopt(IP_ADD_MEMBERSHIP) failed on FD %d: %d (%s)",
 				sock.fd, errno, cf_strerror(errno));
 		return -1;
@@ -307,7 +307,7 @@ cf_socket_addr_len(const struct sockaddr *sa)
 {
 	switch (sa->sa_family) {
 	case AF_INET:
-		return sizeof (struct sockaddr_in);
+		return sizeof(struct sockaddr_in);
 
 	default:
 		cf_crash(CF_SOCKET, "Invalid address family: %d", sa->sa_family);

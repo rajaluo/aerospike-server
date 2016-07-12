@@ -3364,7 +3364,7 @@ as_config_post_process(as_config *c, const char *config_file)
 		cf_ip_addr *addrs;
 		int32_t n_addrs;
 
-		if (cf_inter_get_addr(&addrs, &n_addrs, buffer, sizeof buffer) < 0) {
+		if (cf_inter_get_addr(&addrs, &n_addrs, buffer, sizeof(buffer)) < 0) {
 			cf_crash(AS_CFG, "Error while getting interface addresses");
 		}
 

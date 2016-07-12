@@ -667,7 +667,7 @@ info_command_tip_clear(char *name, char *params, cf_dyn_buf *db)
 	int32_t count = 0;
 
 	char buff[3000];
-	int32_t buff_len = (int32_t)sizeof buff;
+	int32_t buff_len = (int32_t)sizeof(buff);
 
 	if (*params == 0) {
 		buff[0] = 0;
@@ -4388,7 +4388,7 @@ build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db) {
 		cf_sock_addr_from_addr_port(&addrs[i], g_config.socket.port, &tmp);
 
 		char string[1000];
-		cf_sock_addr_to_string_safe(&tmp, string, sizeof string);
+		cf_sock_addr_to_string_safe(&tmp, string, sizeof(string));
 		cf_dyn_buf_append_string(db, string);
 
 		if (i < n_addrs - 1) {
@@ -4418,11 +4418,11 @@ info_interfaces_fn(void *unused)
 		cf_ip_addr *curr;
 		int32_t n_curr;
 
-		if (cf_inter_get_addr(&curr, &n_curr, buffer, sizeof buffer) < 0) {
+		if (cf_inter_get_addr(&curr, &n_curr, buffer, sizeof(buffer)) < 0) {
 			cf_crash(AS_CFG, "Error while getting interface addresses");
 		}
 
-		qsort(curr, n_curr, sizeof (cf_ip_addr), inter_comp);
+		qsort(curr, n_curr, sizeof(cf_ip_addr), inter_comp);
 		bool change = false;
 
 		if (n_curr != n_known) {
@@ -4452,7 +4452,7 @@ info_interfaces_fn(void *unused)
 			pthread_mutex_unlock(&g_service_lock);
 			cf_dyn_buf_free(&services);
 
-			memcpy(known, curr, sizeof (cf_ip_addr) * n_curr);
+			memcpy(known, curr, sizeof(cf_ip_addr) * n_curr);
 			n_known = n_curr;
 		}
 

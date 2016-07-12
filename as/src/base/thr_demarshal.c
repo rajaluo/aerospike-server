@@ -98,7 +98,7 @@ int
 epoll_ctl_modify(as_file_handle *fd_h, uint32_t events)
 {
 	struct epoll_event ev;
-	memset(&ev, 0, sizeof (ev));
+	memset(&ev, 0, sizeof(ev));
 	ev.events = events;
 	ev.data.ptr = fd_h;
 	return epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_MOD, CSFD(fd_h->sock), &ev);
@@ -288,7 +288,7 @@ thr_demarshal_read_integer(const char *path, int *value)
 {
 	char buffer[21];
 
-	if (thr_demarshal_read_file(path, buffer, sizeof buffer) < 0) {
+	if (thr_demarshal_read_file(path, buffer, sizeof(buffer)) < 0) {
 		return -1;
 	}
 
@@ -444,7 +444,7 @@ thr_demarshal(void *arg)
 			cf_crash(AS_DEMARSHAL, "epoll_create(): %s", cf_strerror(errno));
 		}
 
-		memset(&ev, 0, sizeof (ev));
+		memset(&ev, 0, sizeof(ev));
 		ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
 		ev.data.fd = CSFD(s->sock);
 
@@ -528,8 +528,8 @@ thr_demarshal(void *arg)
 					cf_crash(AS_DEMARSHAL, "accept: %s (errno %d)", cf_strerror(errno), errno);
 				}
 
-				char sa_str[sizeof ((as_file_handle *)NULL)->client];
-				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof sa_str);
+				char sa_str[sizeof(((as_file_handle *)NULL)->client)];
+				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof(sa_str));
 				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", sa_str, CSFD(csock));
 
 				// Validate the limit of protocol connections we allow.
