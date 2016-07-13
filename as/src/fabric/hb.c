@@ -1807,7 +1807,7 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 			p_pulse->sock = sock;
 
 			if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-				p_pulse->addr = *from;
+				cf_sock_addr_copy(from, &p_pulse->addr);
 			}
 			else {
 				cf_sock_addr_from_heartbeat(m, &p_pulse->addr);
@@ -2212,7 +2212,7 @@ CloseSocket:
 						r = cf_socket_recv_from(esock, bufr, sizeof(bufr), 0, &from);
 					} else {
 						r = as_hb_tcp_recv(esock, bufr, sizeof(bufr));
-						memset(&from, 0, sizeof(from));
+						cf_sock_addr_set_zero(&from);
 					}
 					cf_detail(AS_HB, "received %d bytes, calling msg_parse", r);
 					if (r > 0) {
