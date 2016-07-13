@@ -32,6 +32,7 @@
 // TODO - as_ .c files depend on this:
 #include <asm/byteorder.h>
 
+#define CF_MUST_CHECK __attribute__((warn_unused_result))
 
 /* cf_hash_fnv
  * The 64-bit Fowler-Noll-Vo hash function (FNV-1a) */

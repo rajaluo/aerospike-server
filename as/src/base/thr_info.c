@@ -36,7 +36,6 @@
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
-#include <arpa/inet.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -51,6 +50,7 @@
 #include "fault.h"
 #include "jem.h"
 #include "meminfo.h"
+#include "socket.h"
 
 #include "ai_obj.h"
 #include "ai_btree.h"
@@ -100,7 +100,6 @@ extern int as_nsup_queue_get_size();
 #define XDR_ACCEPTABLE_TIMEDIFF XDR_TIME_ADJUST
 
 
-int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
 int info_get_objects(char *name, cf_dyn_buf *db);
 void clear_ldt_histograms();
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
@@ -653,120 +652,71 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 	return(0);
 }
 
-typedef enum as_hpl_state_e {
-	AS_HPL_STATE_HOST,
-	AS_HPL_STATE_PORT
-} as_hpl_state;
+/*
+ *  Command Format:  "tip-clear:{host-port-list=<hpl>}" [the "host-port-list" argument is optional]
+ *
+ *  where <hpl> is either "all" or else a comma-separated list of items of the form: <HostIPAddr>:<PortNum>
+ */
 
-int
+int32_t
 info_command_tip_clear(char *name, char *params, cf_dyn_buf *db)
 {
-	cf_debug(AS_INFO, "tip clear command received: params %s", params);
+	cf_debug(AS_INFO, "tip-clear command with parameters \"%s\"", params);
+	cf_sock_addr addrs[AS_CLUSTER_SZ];
+	int32_t count = 0;
 
-	char host_port_list[3000];
-	int host_port_list_len = sizeof(host_port_list);
-	bool clear_all = true; // By default, clear all host tips.
+	char buff[3000];
+	int32_t buff_len = (int32_t)sizeof(buff);
 
-	/*
-	 *  Command Format:  "tip-clear:{host-port-list=<hpl>}" [the "host-port-list" argument is optional]
-	 *
-	 *  where <hpl> is either "all" or else a comma-separated list of items of the form: <HostIPAddr>:<PortNum>
-	 */
-	host_port_list[0] = '\0';
-	int hapl_len = 0;
-	as_hb_host_addr_port host_addr_port_list[AS_CLUSTER_SZ];
-	if (!as_info_parameter_get(params, "host-port-list", host_port_list, &host_port_list_len)) {
-		if (0 != strcmp(host_port_list, "all")) {
-			clear_all = false;
-			char *c_p = host_port_list;
-			int pos = 0;
-			char host[16]; // "WWW.XXX.YYY.ZZZ\0"
-			char *host_p = host;
-			int host_len = 0;
-			bool valid = true, item_complete = false;
-			as_hpl_state state = AS_HPL_STATE_HOST;
-			as_hb_host_addr_port *hapl = host_addr_port_list;
-			while (valid && (pos < host_port_list_len)) {
-				switch (state) {
-				  case AS_HPL_STATE_HOST:
-					  if ((isdigit(*c_p)) || ('.' == *c_p)) {
-						  // (Doesn't really scan only valid IP addresses here ~~ it simply accumulates allowable characters.)
-						  *host_p++ = *c_p;
-						  if (++host_len >= sizeof(host)) {
-							  cf_warning(AS_INFO, "Error!  Too many characters: '%c' @ pos = %d in host IP address!", *c_p, pos);
-							  valid = false;
-							  continue;
-						  }
-					  } else if (':' == *c_p) {
-						  *host_p = '\0';
-						  // Verify IP address validity.
-						  if (1 == inet_pton(AF_INET, host, &(hapl->ip_addr))) {
-							  hapl_len++;
-							  hapl->port = 0;
-							  state = AS_HPL_STATE_PORT;
-						  } else {
-							  cf_warning(AS_INFO, "Error!  Cannot parse host \"%s\" into an IP address!", host);
-							  valid = false;
-							  continue;
-						  }
-					  } else {
-						  cf_warning(AS_INFO, "Error!  Bad character: '%c' @ pos = %d in host address!", *c_p, pos);
-						  valid = false;
-						  continue;
-					  }
-					  break;
+	if (*params == 0) {
+		buff[0] = 0;
+	}
+	else if (as_info_parameter_get(params, "host-port-list", buff, &buff_len) < 0) {
+		cf_info(AS_INFO, "The tip-clear command only takes an (optional) host-port-list argument");
+		cf_dyn_buf_append_string(db, "error");
+		return 0;
+	}
 
-				  case AS_HPL_STATE_PORT:
-					  if (isdigit(*c_p)) {
-						  if (hapl->port) {
-							  hapl->port *= 10;
-						  }
-						  hapl->port += (*c_p - '0');
-						  if (hapl->port >= (1 << 16)) {
-							  cf_warning(AS_INFO, "Error!  Invalid port %d >= %d!", hapl->port, (1 << 16));
-							  valid = false;
-							  continue;
-						  }
-						  // At least one non-zero port digit has been scanned.
-						  item_complete = (hapl->port > 0);
-					  } else if (',' == *c_p) {
-						  host_p = host;
-						  host_len = 0;
-						  hapl++;
-						  state = AS_HPL_STATE_HOST;
-						  item_complete = false;
-					  } else {
-						  cf_warning(AS_INFO, "Error!  Non-digit character: '%c' @ pos = %d in port!", *c_p, pos);
-						  valid = false;
-						  continue;
-					  }
-					  break;
+	if (strcmp(buff, "all") == 0) {
+		buff[0] = 0;
+	}
 
-				  default:
-					  valid = false;
-					  continue;
-				}
-				c_p++;
-				pos++;
-			}
-			if (!(valid && item_complete)) {
-				cf_warning(AS_INFO, "The \"%s:\" command argument \"host-port-list\" value must be a comma-separated list of items of the form <HostIPAddr>:<PortNum>, not \"%s\"", name, host_port_list);
+	char *walker = buff;
+	char *start = walker;
+
+	while (buff[0] != 0) {
+		bool end = *walker == 0;
+
+		if (*walker == ',' || end) {
+			*walker = 0;
+
+			if (cf_sock_addr_from_string(start, &addrs[count]) < 0) {
+				cf_info(AS_INFO, "Invalid host or port in tip-clear command: %s", start);
 				cf_dyn_buf_append_string(db, "error");
 				return 0;
 			}
+
+			++count;
+			start = walker + 1;
+
+			if (end) {
+				break;
+			}
 		}
-	} else if (params && (0 < strlen(params))) {
-		cf_info(AS_INFO, "The \"%s:\" command only supports the optional argument \"host-port-list\", not \"%s\"", name, params);
-		cf_dyn_buf_append_string(db, "error");
-		return(0);
+
+		++walker;
 	}
 
-	as_hb_tip_clear((clear_all ? NULL : host_addr_port_list), (clear_all ? 0 : hapl_len));
+	if (count > 0) {
+		as_hb_tip_clear(addrs, count);
+	}
+	else {
+		as_hb_tip_clear(NULL, 0);
+	}
 
-	cf_info(AS_INFO, "tip clear command executed: params %s", params);
+	cf_info(AS_INFO, "tip-clear command executed with parameters %s", params);
 	cf_dyn_buf_append_string(db, "ok");
-
-	return(0);
+	return 0;
 }
 
 int
@@ -4064,12 +4014,12 @@ thr_info_fn(void *unused)
 		uint8_t	*b = db.buf;
 		uint8_t	*lim = db.buf + db.used_sz;
 		while (b < lim) {
-			int rv = send(fd_h->fd, b, lim - b, MSG_NOSIGNAL);
+			int rv = cf_socket_send(fd_h->sock, b, lim - b, MSG_NOSIGNAL);
 			if ((rv < 0) && (errno != EAGAIN) ) {
 				if (errno == EPIPE) {
-					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", fd_h->fd);
+					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", CSFD(fd_h->sock));
 				} else {
-					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", fd_h->fd, errno);
+					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", CSFD(fd_h->sock), errno);
 				}
 				as_end_of_transaction_force_close(fd_h);
 				fd_h = NULL;
@@ -4396,34 +4346,6 @@ as_info_set(const char *name, const char *value, bool def)
 // makes sure that the distributed key system is properly distributed
 //
 
-int
-interfaces_compar(const void *a, const void *b)
-{
-	cf_ifaddr		*if_a = (cf_ifaddr *) a;
-	cf_ifaddr		*if_b = (cf_ifaddr *) b;
-
-	if (if_a->family != if_b->family) {
-		if (if_a->family < if_b->family)	return(-1);
-		else								return(1);
-	}
-
-	if (if_a->family == AF_INET) {
-		struct sockaddr_in	*in_a = (struct sockaddr_in *) &if_a->sa;
-		struct sockaddr_in  *in_b = (struct sockaddr_in *) &if_b->sa;
-
-		return( memcmp( &in_a->sin_addr, &in_b->sin_addr, sizeof(in_a->sin_addr) ) );
-	}
-	else if (if_a->family == AF_INET6) {
-		struct sockaddr_in6	*in_a = (struct sockaddr_in6 *) &if_a->sa;
-		struct sockaddr_in6 *in_b = (struct sockaddr_in6 *) &if_b->sa;
-
-		return( memcmp( &in_a->sin6_addr, &in_b->sin6_addr, sizeof(in_a->sin6_addr) ) );
-	}
-
-	cf_warning(AS_INFO, " interfaces compare: unknown families");
-	return(0);
-}
-
 static pthread_mutex_t		g_service_lock = PTHREAD_MUTEX_INITIALIZER;
 char 		*g_service_str = 0;
 uint32_t	g_service_generation = 0;
@@ -4454,97 +4376,91 @@ shash *g_info_node_info_hash = 0;
 
 int info_node_info_reduce_fn(void *key, void *data, void *udata);
 
-
 void
-build_service_list(cf_ifaddr * ifaddr, int ifaddr_sz, cf_dyn_buf *db) {
-	for (int i = 0; i < ifaddr_sz; i++) {
+build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db) {
+	for (int32_t i = 0; i < n_addrs; ++i) {
+		if (cf_ip_addr_is_loopback(&addrs[i])) {
+			continue;
+		}
 
-		if (ifaddr[i].family == AF_INET) {
-			struct sockaddr_in *sin = (struct sockaddr_in *) & (ifaddr[i].sa);
-			char    addr_str[50];
+		cf_sock_addr tmp;
+		cf_sock_addr_from_addr_port(&addrs[i], g_config.socket.port, &tmp);
 
-			inet_ntop(AF_INET, &sin->sin_addr, addr_str, sizeof(addr_str));
-			// Match with any 127.0.0.*. Ideally, 127.*.*.* is legal loopback
-			// address range but thats too wide. Keep it a bit tighter for now.
-			if ( strncmp(addr_str, "127.0.0.", 8) == 0) {
-				continue;
-			}
+		char string[1000];
+		cf_sock_addr_to_string_safe(&tmp, string, sizeof(string));
+		cf_dyn_buf_append_string(db, string);
 
-			cf_dyn_buf_append_string(db, addr_str);
-			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_int(db, g_config.socket.port);
+		if (i < n_addrs - 1) {
 			cf_dyn_buf_append_char(db, ';');
 		}
 	}
-
-	// take off the last ';' if there was any string there
-	if (db->used_sz > 0)
-		cf_dyn_buf_chomp(db);
 }
-
 
 //
 // Note: if all my interfaces go down, service_str will be 0
 //
+
+static int32_t
+inter_comp(const void *lhs, const void *rhs)
+{
+	return cf_ip_addr_compare(lhs, rhs);
+}
+
 void *
 info_interfaces_fn(void *unused)
 {
+	cf_ip_addr known[100];
+	int32_t n_known = 0;
 
-	uint8_t	buf[512];
+	while (true) {
+		uint8_t buffer[1000];
+		cf_ip_addr *curr;
+		int32_t n_curr;
 
-	// currently known set
-	cf_ifaddr		known_ifs[100];
-	int				known_ifs_sz = 0;
+		if (cf_inter_get_addr(&curr, &n_curr, buffer, sizeof(buffer)) < 0) {
+			cf_crash(AS_CFG, "Error while getting interface addresses");
+		}
 
-	while (1) {
+		qsort(curr, n_curr, sizeof(cf_ip_addr), inter_comp);
+		bool change = false;
 
-		cf_ifaddr *ifaddr;
-		int			ifaddr_sz;
-		cf_ifaddr_get(&ifaddr, &ifaddr_sz, buf, sizeof(buf));
-
-		bool changed = false;
-		if (ifaddr_sz == known_ifs_sz) {
-			// sort it
-			qsort(ifaddr, ifaddr_sz, sizeof(cf_ifaddr), interfaces_compar);
-
-			// Compare to the old list
-			for (int i = 0; i < ifaddr_sz; i++) {
-				if (0 != interfaces_compar( &known_ifs[i], &ifaddr[i])) {
-					changed = true;
+		if (n_curr != n_known) {
+			change = true;
+		}
+		else {
+			for (int32_t i = 0; i < n_curr; ++i) {
+				if (inter_comp(&known[i], &curr[i]) != 0) {
+					change = true;
 					break;
 				}
 			}
-		} else {
-			changed = true;
 		}
 
-		if (changed == true) {
-
-			cf_dyn_buf_define(service_db);
-
-			build_service_list(ifaddr, ifaddr_sz, &service_db);
-
-			memcpy(known_ifs, ifaddr, sizeof(cf_ifaddr) * ifaddr_sz);
-			known_ifs_sz = ifaddr_sz;
+		if (change) {
+			cf_dyn_buf_define(services);
+			build_service_list(curr, n_curr, &services);
 
 			pthread_mutex_lock(&g_service_lock);
 
-			if (g_service_str)	cf_free(g_service_str);
-			g_service_str = cf_dyn_buf_strdup(&service_db);
+			if (g_service_str != NULL)
+				cf_free(g_service_str);
 
+			g_service_str = cf_dyn_buf_strdup(&services);
 			g_service_generation++;
 
 			pthread_mutex_unlock(&g_service_lock);
+			cf_dyn_buf_free(&services);
 
+			memcpy(known, curr, sizeof(cf_ip_addr) * n_curr);
+			n_known = n_curr;
 		}
 
 		// reduce the info_node hash to apply any transmits
 		shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
-
 		sleep(2);
-
 	}
-	return(0);
+
+	return NULL;
 }
 
 //
