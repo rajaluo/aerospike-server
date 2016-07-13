@@ -57,6 +57,8 @@ extern int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
 // For commands - you will be called with the parameters.
 extern int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
+int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
+
 extern void as_info_paxos_event(as_paxos_generation gen,
 		as_paxos_change *change, cf_node succession[], void *udata);
 

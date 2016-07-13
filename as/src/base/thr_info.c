@@ -100,7 +100,6 @@ extern int as_nsup_queue_get_size();
 #define XDR_ACCEPTABLE_TIMEDIFF XDR_TIME_ADJUST
 
 
-int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
 int info_get_objects(char *name, cf_dyn_buf *db);
 void clear_ldt_histograms();
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
