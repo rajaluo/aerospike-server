@@ -162,11 +162,13 @@ void cf_socket_drain_close(cf_socket sock);
 
 CF_MUST_CHECK int32_t cf_socket_mcast_init(cf_socket_mcast_cfg *mconf);
 CF_MUST_CHECK int32_t cf_socket_mcast_set_inter(cf_socket sock, const cf_ip_addr *iaddr);
+CF_MUST_CHECK int32_t cf_socket_mcast_set_ttl(cf_socket sock, int32_t ttl);
 CF_MUST_CHECK int32_t cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr);
 void cf_socket_mcast_close(cf_socket_mcast_cfg *mconf);
 
 CF_MUST_CHECK int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
 CF_MUST_CHECK int32_t cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
+CF_MUST_CHECK int32_t cf_inter_addr_to_index(const cf_ip_addr *addr, char **name);
 
 CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr);
 

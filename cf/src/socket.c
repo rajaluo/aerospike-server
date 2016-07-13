@@ -45,6 +45,18 @@
 
 #include "citrusleaf/alloc.h"
 
+static char *
+safe_strdup(const char *string)
+{
+	char *res = cf_strdup(string);
+
+	if (res == NULL) {
+		cf_crash(CF_SOCKET, "Out of memory");
+	}
+
+	return res;
+}
+
 void
 cf_ip_addr_to_string_safe(const cf_ip_addr *addr, char *string, size_t size)
 {
@@ -420,9 +432,6 @@ cf_socket_init_server(cf_socket_cfg *conf)
 		safe_setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
 	}
 
-	// XXX - Why are we doing this?
-	safe_fcntl(sock.fd, F_SETFD, FD_CLOEXEC);
-
 	while (bind(sock.fd, (struct sockaddr *)&sas,
 			cf_socket_addr_len((struct sockaddr *)&sas)) < 0) {
 		if (errno != EADDRINUSE) {
@@ -526,10 +535,15 @@ cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout)
 {
 	int32_t res = -1;
 	struct sockaddr_storage sas;
+	cf_sock_addr addr;
 
-	if (config_address(conf, (struct sockaddr *)&sas, NULL) < 0) {
+	if (config_address(conf, (struct sockaddr *)&sas, &addr) < 0) {
 		goto cleanup0;
 	}
+
+	char friendly[1000];
+	cf_sock_addr_to_string_safe(&addr, friendly, sizeof(friendly));
+	cf_debug(CF_SOCKET, "Initializing client for %s", friendly);
 
 	int32_t fd = socket(sas.ss_family, conf->type, 0);
 
@@ -541,9 +555,6 @@ cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout)
 
 	cf_socket sock = (cf_socket){ .fd = fd };
 	fd = -1;
-
-	// XXX - Why are we doing this?
-	safe_fcntl(sock.fd, F_SETFD, FD_CLOEXEC);
 
 	if (connect_socket(sock, (struct sockaddr *)&sas, timeout) < 0) {
 		cf_warning(CF_SOCKET, "Error while connecting socket to %s:%d",
@@ -574,6 +585,7 @@ cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock)
 
 	char friendly[1000];
 	cf_sock_addr_to_string_safe(addr, friendly, sizeof(friendly));
+	cf_debug(CF_SOCKET, "Initializing non-blocking client for %s", friendly);
 
 	int32_t fd = socket(sas.ss_family, SOCK_STREAM, 0);
 
@@ -585,9 +597,6 @@ cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock)
 
 	cf_socket _sock = (cf_socket){ .fd = fd };
 	fd = -1;
-
-	// XXX - Why are we doing this?
-	safe_fcntl(_sock.fd, F_SETFD, FD_CLOEXEC);
 
 	cf_socket_disable_blocking(_sock);
 
@@ -819,7 +828,6 @@ int32_t
 cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 {
 	static const int32_t yes = 1;
-	static const int32_t no = 0;
 
 	int32_t res = -1;
 
@@ -856,17 +864,6 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 
 	safe_setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
-	// XXX - Why are we doing this?
-	safe_fcntl(sock.fd, F_SETFD, FD_CLOEXEC);
-
-#ifdef IP_MULTICAST_ALL
-	// [FYI:  This socket option has existed since the Linux 2.6.31 kernel.]
-
-	// Only receive traffic from multicast groups this socket actually joins.
-	// [Note:  Bind address filtering takes precedence, so this is simply an extra level of restriction.]
-	safe_setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_ALL, &no, sizeof(no));
-#endif
-
 	if (iaddr != NULL) {
 		char tmp[1000];
 		cf_ip_addr_to_string_safe(iaddr, tmp, sizeof(tmp));
@@ -882,7 +879,11 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 
 	if (ttl > 0) {
 		cf_info(CF_SOCKET, "Setting multicast TTL: %d", ttl);
-		safe_setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+
+		if (cf_socket_mcast_set_ttl(sock, ttl) < 0) {
+			cf_warning(CF_SOCKET, "Error while setting multicast TTL");
+			goto cleanup1;
+		}
 	}
 
 	while (bind(sock.fd, (struct sockaddr *)&sas,
@@ -1314,6 +1315,34 @@ int32_t
 cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
 {
 	return inter_get_addr(addrs, n_addrs, buff, size, true);
+}
+
+int32_t
+cf_inter_addr_to_index(const cf_ip_addr *addr, char **name)
+{
+	inter_info inter;
+	memset(&inter, 0, sizeof(inter));
+
+	if (enumerate_inter(&inter, true) < 0) {
+		cf_warning(CF_SOCKET, "Error while enumerating network interfaces");
+		return -1;
+	}
+
+	for (uint32_t i = 0; i < inter.n_inters; ++i) {
+		inter_entry *entry = &inter.inters[i];
+
+		for (uint32_t k = 0; k < entry->n_addrs; ++k) {
+			if (cf_ip_addr_compare(&entry->addrs[k], addr) == 0) {
+				if (name != NULL) {
+					*name = safe_strdup(entry->name);
+				}
+
+				return (int32_t)entry->index;
+			}
+		}
+	}
+
+	return -1;
 }
 
 static const char *if_in_order[] = {

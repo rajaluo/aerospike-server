@@ -20,6 +20,7 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#define CF_SOCKET_PRIVATE
 #include "socket.h"
 
 #include <errno.h>
@@ -325,6 +326,18 @@ cf_socket_mcast_set_inter(cf_socket sock, const cf_ip_addr *iaddr)
 }
 
 int32_t
+cf_socket_mcast_set_ttl(cf_socket sock, int32_t ttl)
+{
+	if (setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) < 0) {
+		cf_warning(CF_SOCKET, "setsockopt(IP_MULTICAST_TTL) failed on FD %d: %d (%s)",
+				sock.fd, errno, cf_strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+int32_t
 cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr)
 {
 	struct ip_mreqn mr;
@@ -341,6 +354,19 @@ cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_
 				sock.fd, errno, cf_strerror(errno));
 		return -1;
 	}
+
+#ifdef IP_MULTICAST_ALL
+	// Only receive traffic from multicast groups this socket actually joins.
+	// Note: Bind address filtering takes precedence, so this is simply an extra level of
+	// restriction.
+	static const int32_t no = 0;
+
+	if (setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_ALL, &no, sizeof(no)) < 0) {
+		cf_warning(CF_SOCKET, "setsockopt(IP_MULTICAST_ALL) failed on FD %d: %d (%s)",
+				sock.fd, errno, cf_strerror(errno));
+		return -1;
+	}
+#endif
 
 	return 0;
 }
