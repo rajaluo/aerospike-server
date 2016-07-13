@@ -20,7 +20,6 @@ ifneq ($(USE_WARM),1)
   SOURCES += arenax_ce.c
 endif
 ifneq ($(USE_IPV6),1)
-  HEADERS += socket_ce.h
   SOURCES += socket_ce.c
 endif
 

@@ -22,12 +22,6 @@
 
 #pragma once
 
-#if defined USE_IPV6
-#include "socket_ee.h"
-#else
-#include "socket_ce.h"
-#endif
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,6 +31,19 @@
 
 #include "msg.h"
 #include "util.h"
+
+#if !defined USE_IPV6
+typedef struct in_addr cf_ip_addr;
+#else
+typedef struct {
+	sa_family_t family;
+
+	union {
+		struct in_addr v4;
+		struct in6_addr v6;
+	};
+} cf_ip_addr;
+#endif
 
 typedef in_port_t cf_ip_port;
 

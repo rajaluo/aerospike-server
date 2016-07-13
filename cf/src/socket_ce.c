@@ -1,5 +1,5 @@
 /*
- * socket_ce.h
+ * socket_ce.c
  *
  * Copyright (C) 2016 Aerospike, Inc.
  *
