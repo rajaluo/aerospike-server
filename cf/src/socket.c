@@ -865,6 +865,7 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 	cf_socket sock = (cf_socket){ .fd = fd };
 	fd = -1;
 
+	cf_socket_fix_client(sock);
 	safe_setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
 	if (iaddr != NULL) {
