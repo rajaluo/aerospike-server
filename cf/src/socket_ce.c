@@ -398,3 +398,9 @@ cf_socket_parse_netlink(bool allow_ipv6, uint32_t family, uint32_t flags,
 	memcpy(&addr->s_addr, data, 4);
 	return 0;
 }
+
+void
+cf_socket_fix_client(cf_socket sock)
+{
+	(void)sock;
+}

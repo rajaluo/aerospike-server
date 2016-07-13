@@ -176,4 +176,5 @@ CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_no
 CF_MUST_CHECK size_t cf_socket_addr_len(const struct sockaddr *sa);
 CF_MUST_CHECK int32_t cf_socket_parse_netlink(bool allow_v6, uint32_t family, uint32_t flags,
 		void *data, size_t len, cf_ip_addr *addr);
+void cf_socket_fix_client(cf_socket sock);
 #endif

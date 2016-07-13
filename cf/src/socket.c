@@ -556,6 +556,8 @@ cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout)
 	cf_socket sock = (cf_socket){ .fd = fd };
 	fd = -1;
 
+	cf_socket_fix_client(sock);
+
 	if (connect_socket(sock, (struct sockaddr *)&sas, timeout) < 0) {
 		cf_warning(CF_SOCKET, "Error while connecting socket to %s:%d",
 				conf->addr, conf->port);
@@ -598,6 +600,7 @@ cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock)
 	cf_socket _sock = (cf_socket){ .fd = fd };
 	fd = -1;
 
+	cf_socket_fix_client(_sock);
 	cf_socket_disable_blocking(_sock);
 
 	if (connect(_sock.fd, (struct sockaddr *)&sas,
