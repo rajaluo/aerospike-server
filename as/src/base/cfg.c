@@ -49,6 +49,7 @@
 #include "hist_track.h"
 #include "msg.h"
 #include "olock.h"
+#include "socket.h"
 #include "util.h"
 
 #include "base/cluster_config.h"
@@ -159,9 +160,9 @@ cfg_set_defaults()
 	c->asmalloc_enabled = true;
 
 	// Network service defaults.
-	c->socket.proto = SOCK_STREAM; // not configurable, but addr and port are
-	c->localhost_socket.proto = SOCK_STREAM; // not configurable
-	c->xdr_socket.proto = SOCK_STREAM;
+	c->socket.type = SOCK_STREAM; // not configurable, but addr and port are
+	c->localhost_socket.type = SOCK_STREAM; // not configurable
+	c->xdr_socket.type = SOCK_STREAM;
 	c->socket.addr = (char*)IPV4_ANY_ADDR; // by default listen on any IPv4 address
 	c->xdr_socket.addr = (char*)IPV4_ANY_ADDR;
 	c->socket_reuse_addr = true;
@@ -3359,24 +3360,27 @@ as_config_post_process(as_config *c, const char *config_file)
 
 	if (g_config.external_address && ! g_config.is_external_address_virtual) {
 		// Check if external address matches any address in service list.
-		uint8_t buf[512];
-		cf_ifaddr *ifaddr;
-		int	ifaddr_sz;
-		cf_ifaddr_get(&ifaddr, &ifaddr_sz, buf, sizeof(buf));
+		uint8_t buffer[1000];
+		cf_ip_addr *addrs;
+		int32_t n_addrs;
 
-		cf_dyn_buf_define(temp_service_db);
-		build_service_list(ifaddr, ifaddr_sz, &temp_service_db);
-
-		char *service_str = cf_dyn_buf_strdup(&temp_service_db);
-
-		if (! (service_str && strstr(service_str, g_config.external_address))) {
-			cf_crash_nostack(AS_CFG, "external address '%s' does not match service addresses '%s'",
-					g_config.external_address,
-					service_str ? service_str : "null");
+		if (cf_inter_get_addr_ex(&addrs, &n_addrs, buffer, sizeof(buffer)) < 0) {
+			cf_crash(AS_CFG, "Error while getting interface addresses");
 		}
 
-		cf_dyn_buf_free(&temp_service_db);
-		cf_free(service_str);
+		cf_dyn_buf_define(services);
+		build_service_list(addrs, n_addrs, &services);
+
+		char *string = cf_dyn_buf_strdup(&services);
+
+		if (string == NULL || strstr(string, g_config.external_address) == NULL) {
+			cf_crash_nostack(AS_CFG, "external address '%s' does not match service addresses '%s'",
+					g_config.external_address,
+					string != NULL ? string : "null");
+		}
+
+		cf_dyn_buf_free(&services);
+		cf_free(string);
 	}
 
 	//--------------------------------------------
@@ -3722,18 +3726,13 @@ cfg_set_addr(const char* name)
 void
 cfg_use_hardware_values(as_config* c)
 {
-	// Use this array if interface name is configured in config file.
-	const char *config_interface_names[] = { 0, 0 };
-
 	if (c->self_node == 0) {
-		const char **interface_names = NULL;
-		if (c->network_interface_name) {
-			// Use network interface name provided in the configuration.
-			config_interface_names[0] = c->network_interface_name;
-			interface_names = config_interface_names;
+		if (cf_node_id_get(c->fabric_port, c->network_interface_name, &c->self_node, &c->node_ip) < 0) {
+			cf_crash_nostack(AS_CFG, "Could not get node ID and/or IP address");
 		}
-		if (0 > (cf_nodeid_get(c->fabric_port, &(c->self_node), &(c->node_ip), c->hb_mode, &(c->hb_addr), interface_names))) {
-			cf_crash_nostack(AS_CFG, "could not get unique id and/or ip address");
+
+		if (c->hb_mode == AS_HB_MODE_MESH && c->hb_addr == NULL) {
+			c->hb_addr = cf_strdup(c->node_ip);
 		}
 	}
 }

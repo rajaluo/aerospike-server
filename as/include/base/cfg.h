@@ -177,7 +177,7 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
-	char*			external_address; // host name that clients will connect on
+	const char*			external_address; // host name that clients will connect on
 	PAD_BOOL		is_external_address_virtual;
 	char*			alternate_address; // alternate service address (could be DNS)
 	char*			network_interface_name; // network_interface_name to use on this machine for generating the IP addresses
