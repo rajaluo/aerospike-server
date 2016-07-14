@@ -110,6 +110,7 @@
 #include "base/stats.h"
 #include "base/system_metadata.h"
 #include "base/thr_sindex.h"
+#include "base/thr_info.h"
 #include "geospatial/geospatial.h"
 #include "transaction/udf.h"
 
@@ -1398,8 +1399,6 @@ as_sindex_histogram_enable(as_namespace *ns, char * iname, bool enable)
 	AS_SINDEX_RELEASE(si);
 	return AS_SINDEX_OK;
 }
-
-extern int as_info_parameter_get(char *param_str, char *param, char *value, int  *value_len);
 
 /*
  * Client API function to set configuration parameters for secondary indexes
