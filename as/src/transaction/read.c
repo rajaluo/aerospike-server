@@ -418,15 +418,15 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 						return TRANS_DONE_ERROR;
 					}
 
-					if (as_bin_inuse(rb)) {
-						b = rb;
+					if (as_bin_inuse(rb) || respond_all_ops) {
 						n_result_bins++;
+						ops[n_bins] = op;
+						response_bins[n_bins++] = rb;
 					}
 				}
-
-				if (b || respond_all_ops) {
+				else if (respond_all_ops) {
 					ops[n_bins] = op;
-					response_bins[n_bins++] = b;
+					response_bins[n_bins++] = NULL;
 				}
 			}
 			else {
