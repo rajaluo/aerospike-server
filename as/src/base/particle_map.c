@@ -4725,6 +4725,9 @@ packed_map_op_build_ele_result_by_ele_idx(const packed_map_op *op, const order_i
 				return false;
 			}
 		}
+		else if (count == 0) {
+			return true;
+		}
 		else {
 			uint32_t index = order_index_get(ele_idx, start);
 			cdt_payload packed;
