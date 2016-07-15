@@ -6738,6 +6738,11 @@ result_data_set_index_rank_count(cdt_result_data *rd, uint32_t start, uint32_t c
 	case RESULT_TYPE_INDEX:
 	case RESULT_TYPE_RANK: {
 		if (! rd->is_multi) {
+			if (count == 0) {
+				as_bin_set_int(rd->result, -1);
+				break;
+			}
+
 			if (is_reverse) {
 				start = ele_count - start - 1;
 			}
