@@ -4568,6 +4568,14 @@ packed_map_op_get_pair_by_idx(const packed_map_op *op, cdt_payload *value, uint3
 static int
 packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order_index *ele_idx, uint32_t start, uint32_t count, cdt_result_data *result)
 {
+	if (count == 0) {
+		if (! result_data_set_not_found(result, start)) {
+			return -AS_PROTO_RESULT_FAIL_PARAMETER;
+		}
+
+		return AS_PROTO_RESULT_OK;
+	}
+
 	if (! result->is_multi) {
 		uint32_t index = order_index_get(ele_idx, start);
 
