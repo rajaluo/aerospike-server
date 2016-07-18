@@ -658,10 +658,9 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 	// TODO - guts don't check buf_builder realloc failures rigorously.
 	cf_buf_builder_free(bb);
 
-	uint64_t slice_end = cf_getms();
-	cf_debug(AS_SCAN, "Scan of %s:%u with jobid %lu execcuted by thread %lu took %lu ms",
+	cf_detail(AS_SCAN, "%s:%u basic scan job %lu in thread %lu took %lu ms",
 			rsv->ns->name, rsv->p->partition_id, _job->trid, pthread_self(),
-			(slice_end - slice_start));
+			cf_getms() - slice_start);
 }
 
 void
