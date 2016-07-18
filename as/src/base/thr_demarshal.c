@@ -28,7 +28,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/param.h>	// for MIN()
 #include <sys/resource.h>
@@ -61,12 +60,7 @@
 #include "base/datamodel.h"
 #endif
 
-#define EPOLL_SZ	1024
-// Workaround for platforms that don't have EPOLLRDHUP yet.
-#ifndef EPOLLRDHUP
-#define EPOLLRDHUP EPOLLHUP
-#endif
-
+#define POLL_SZ 1024
 
 #define XDR_WRITE_BUFFER_SIZE (5 * 1024 * 1024)
 #define XDR_READ_BUFFER_SIZE (15 * 1024 * 1024)
@@ -74,7 +68,7 @@
 extern void *thr_demarshal(void *arg);
 
 typedef struct {
-	unsigned int	epoll_fd[MAX_DEMARSHAL_THREADS];
+	cf_poll			polls[MAX_DEMARSHAL_THREADS];
 	unsigned int	num_threads;
 	pthread_t	dm_th[MAX_DEMARSHAL_THREADS];
 } demarshal_args;
@@ -94,16 +88,6 @@ pthread_t		g_demarshal_reaper_th;
 void *thr_demarshal_reaper_fn(void *arg);
 static cf_queue *g_freeslot = 0;
 
-int
-epoll_ctl_modify(as_file_handle *fd_h, uint32_t events)
-{
-	struct epoll_event ev;
-	memset(&ev, 0, sizeof(ev));
-	ev.events = events;
-	ev.data.ptr = fd_h;
-	return epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_MOD, CSFD(fd_h->sock), &ev);
-}
-
 void
 thr_demarshal_pause(as_file_handle *fd_h)
 {
@@ -119,16 +103,10 @@ thr_demarshal_resume(as_file_handle *fd_h)
 	// Writing to an FD's event mask makes the epoll instance re-check for
 	// data, even when edge-triggered. If there is data, the demarshal thread
 	// gets EPOLLIN for this FD.
-	if (epoll_ctl_modify(fd_h, EPOLLIN | EPOLLET | EPOLLRDHUP) < 0) {
-		if (errno == ENOENT) {
-			// Happens, when we reached NextEvent_FD_Cleanup (e.g, because the
-			// client disconnected) while the transaction was still ongoing.
-			return;
-		}
 
-		cf_crash(AS_DEMARSHAL, "unable to resume socket FD %d on epoll instance FD %d: %d (%s)",
-				CSFD(fd_h->sock), fd_h->epoll_fd, errno, cf_strerror(errno));
-	}
+	// This causes ENOENT, when we reached NextEvent_FD_Cleanup (e.g, because
+	// the client disconnected) while the transaction was still ongoing.
+	cf_poll_modify_socket(fd_h->poll, fd_h->sock, EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h);
 }
 
 void
@@ -398,9 +376,8 @@ void *
 thr_demarshal(void *arg)
 {
 	cf_socket_cfg *s, *ls, *xs;
-	// Create my epoll fd, register in the global list.
-	struct epoll_event ev;
-	int nevents, i, n, epoll_fd;
+	cf_poll poll;
+	int nevents, i, n;
 	cf_clock last_fd_print = 0;
 
 #if defined(USE_SYSTEMTAP)
@@ -435,67 +412,38 @@ thr_demarshal(void *arg)
 		return(0);
 	}
 
+	cf_poll_create(&poll);
+
 	// First thread accepts new connection at interface socket.
 	if (thr_id == 0) {
 		demarshal_file_handle_init();
-		epoll_fd = epoll_create(EPOLL_SZ);
 
-		if (epoll_fd == -1) {
-			cf_crash(AS_DEMARSHAL, "epoll_create(): %s", cf_strerror(errno));
-		}
-
-		memset(&ev, 0, sizeof(ev));
-		ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-		ev.data.fd = CSFD(s->sock);
-
-		if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(s->sock), &ev)) {
-			cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
-		}
-
+		cf_poll_add_socket(poll, s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
 		cf_info(AS_DEMARSHAL, "Service started: socket %s:%d", s->addr, s->port);
 
 		if (CSFD(ls->sock)) {
-			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-			ev.data.fd = CSFD(ls->sock);
-
-			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(ls->sock), &ev)) {
-				cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
-			}
-
+			cf_poll_add_socket(poll, ls->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &ls->sock);
 			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
 		}
 
 		if (CSFD(xs->sock)) {
-			ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-			ev.data.fd = CSFD(xs->sock);
-
-			if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(xs->sock), &ev)) {
-				cf_crash(AS_DEMARSHAL, "epoll_ctl(): %s", cf_strerror(errno));
-			}
-
+			cf_poll_add_socket(poll, xs->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &xs->sock);
 			cf_info(AS_DEMARSHAL, "Service also listening on XDR info socket %s:%d", xs->addr, xs->port);
 		}
 	}
-	else {
-		epoll_fd = epoll_create(EPOLL_SZ);
 
-		if (epoll_fd == -1) {
-			cf_crash(AS_DEMARSHAL, "epoll_create(): %s", cf_strerror(errno));
-		}
-	}
-
-	g_demarshal_args->epoll_fd[thr_id] = epoll_fd;
+	g_demarshal_args->polls[thr_id] = poll;
 	cf_detail(AS_DEMARSHAL, "demarshal thread started: id %d", thr_id);
 
 	int id_cntr = 0;
 
 	// Demarshal transactions from the socket.
 	for ( ; ; ) {
-		struct epoll_event events[EPOLL_SZ];
+		cf_poll_event events[POLL_SZ];
 
 		cf_detail(AS_DEMARSHAL, "calling epoll");
 
-		nevents = epoll_wait(epoll_fd, events, EPOLL_SZ, -1);
+		nevents = cf_poll_wait(poll, events, POLL_SZ, -1);
 
 		if (0 > nevents) {
 			cf_debug(AS_DEMARSHAL, "epoll_wait() returned %d ; errno = %d (%s)", nevents, errno, cf_strerror(errno));
@@ -508,12 +456,14 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			if ((CSFD(s->sock) == events[i].data.fd) || (CSFD(ls->sock) == events[i].data.fd) || (CSFD(xs->sock) == events[i].data.fd)) {
+			cf_socket *ssock = events[i].data;
+
+			if (ssock == &s->sock || ssock == &ls->sock || ssock == &xs->sock) {
 				// Accept new connections on the service socket.
 				cf_socket csock;
 				cf_sock_addr sa;
 
-				if (cf_socket_accept(WSFD(events[i].data.fd), &csock, &sa) < 0) {
+				if (cf_socket_accept(*ssock, &csock, &sa) < 0) {
 					// This means we're out of file descriptors - could be a SYN
 					// flood attack or misbehaving client. Eventually we'd like
 					// to make the reaper fairer, but for now we'll just have to
@@ -534,7 +484,7 @@ thr_demarshal(void *arg)
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_stats.proto_connections_opened - g_stats.proto_connections_closed;
-				if (CSFD(xs->sock) != events[i].data.fd && conns_open > g_config.n_proto_fd_max) {
+				if (ssock != &xs->sock && conns_open > g_config.n_proto_fd_max) {
 					if ((last_fd_print + 5000L) < cf_getms()) { // no more than 5 secs
 						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
 						last_fd_print = cf_getms();
@@ -592,32 +542,19 @@ thr_demarshal(void *arg)
 					cf_rc_free(fd_h); // will free even with ref-count of 2
 				}
 				else {
-					// Place the client socket in the event queue.
-					memset(&ev, 0, sizeof(ev));
-					ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP ;
-					ev.data.ptr = fd_h;
-
 					// Round-robin pick up demarshal thread epoll_fd and add
 					// this new connection to epoll.
 					int id = (id_cntr++) % g_demarshal_args->num_threads;
-					fd_h->epoll_fd = g_demarshal_args->epoll_fd[id];
+					fd_h->poll = g_demarshal_args->polls[id];
 
-					if (0 > (n = epoll_ctl(fd_h->epoll_fd, EPOLL_CTL_ADD, CSFD(csock), &ev))) {
-						cf_info(AS_DEMARSHAL, "unable to add socket to event queue of demarshal thread %d %d", id, g_demarshal_args->num_threads);
-						pthread_mutex_lock(&g_file_handle_a_LOCK);
-						fd_h->reap_me = true;
-						as_release_file_handle(fd_h);
-						fd_h = 0;
-						pthread_mutex_unlock(&g_file_handle_a_LOCK);
-					}
-					else {
-						cf_atomic64_incr(&g_stats.proto_connections_opened);
-					}
+					// Place the client socket in the event queue.
+					cf_poll_add_socket(fd_h->poll, csock, EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h);
+					cf_atomic64_incr(&g_stats.proto_connections_opened);
 				}
 			}
 			else {
 				bool has_extra_ref   = false;
-				as_file_handle *fd_h = events[i].data.ptr;
+				as_file_handle *fd_h = events[i].data;
 				if (fd_h == 0) {
 					cf_info(AS_DEMARSHAL, "event with null handle, continuing");
 					goto NextEvent;
@@ -925,10 +862,7 @@ NextEvent_FD_Cleanup:
 					cf_rc_release(fd_h);
 				}
 				// Remove the fd from the events list.
-				if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(sock), 0) < 0) {
-					cf_crash(AS_DEMARSHAL, "unable to remove socket FD %d from epoll instance FD %d: %d (%s)",
-							CSFD(sock), epoll_fd, errno, cf_strerror(errno));
-				}
+				cf_poll_delete_socket(poll, sock);
 				pthread_mutex_lock(&g_file_handle_a_LOCK);
 				fd_h->reap_me = true;
 				as_release_file_handle(fd_h);
@@ -1002,7 +936,7 @@ as_demarshal_start()
 	}
 
 	for (i = 1; i < dm->num_threads; i++) {
-		while (dm->epoll_fd[i] == 0) {
+		while (SFD(dm->polls[i]) == 0) {
 			sleep(1);
 			cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads ...");
 		}
@@ -1013,7 +947,7 @@ as_demarshal_start()
 	if (0 != pthread_create(&(dm->dm_th[0]), 0, thr_demarshal, &g_config.socket)) {
 		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
 	}
-	while (dm->epoll_fd[0] == 0) {
+	while (SFD(dm->polls[0]) == 0) {
 		sleep(1);
 	}
 

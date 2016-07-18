@@ -22,11 +22,13 @@
 
 #pragma once
 
+#include <alloca.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include <netinet/in.h>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 
 #include "msg.h"
@@ -64,6 +66,16 @@ typedef struct {
 	cf_socket sock;
 } cf_socket_cfg;
 
+typedef struct {
+	int32_t fd;
+} __attribute__((packed)) cf_poll;
+
+// This precisely matches the epoll_event struct.
+typedef struct {
+	uint32_t events;
+	void *data;
+} __attribute__((packed)) cf_poll_event;
+
 // Accesses the socket file descriptor as an lvalue, i.e., the socket file descriptor
 // can be modified.
 #define SFD(sock) ((sock).fd)
@@ -89,6 +101,24 @@ typedef struct {
 #define FS_ADDR 1
 #define FS_PORT 2
 #define FS_ADDR_EX 4
+
+#define cf_ip_addr_print(addr) ({ \
+	char *_tmp = alloca(250); \
+	cf_ip_addr_to_string_safe(addr, _tmp, 250); \
+	_tmp; \
+})
+
+#define cf_ip_port_print(port) ({ \
+	char *_tmp = alloca(25); \
+	cf_ip_port_to_string_safe(addr, _tmp, 25); \
+	_tmp; \
+})
+
+#define cf_sock_addr_print(addr) ({ \
+	char *_tmp = alloca(250); \
+	cf_sock_addr_to_string_safe(addr, _tmp, 250); \
+	_tmp; \
+})
 
 CF_MUST_CHECK int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 CF_MUST_CHECK int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);
@@ -166,9 +196,17 @@ CF_MUST_CHECK int32_t cf_socket_mcast_set_ttl(cf_socket sock, int32_t ttl);
 CF_MUST_CHECK int32_t cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr);
 void cf_socket_mcast_close(cf_socket_mcast_cfg *mconf);
 
+void cf_poll_create(cf_poll *poll);
+void cf_poll_add_socket(cf_poll poll, cf_socket sock, uint32_t events, void *data);
+void cf_poll_modify_socket(cf_poll poll, cf_socket sock, uint32_t events, void *data);
+void cf_poll_delete_socket(cf_poll poll, cf_socket sock);
+CF_MUST_CHECK int32_t cf_poll_wait(cf_poll poll, cf_poll_event *events, int32_t limit, int32_t timeout);
+void cf_poll_destroy(cf_poll poll);
+
 CF_MUST_CHECK int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
 CF_MUST_CHECK int32_t cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
 CF_MUST_CHECK int32_t cf_inter_addr_to_index(const cf_ip_addr *addr, char **name);
+CF_MUST_CHECK int32_t cf_inter_min_mtu(void);
 
 CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr);
 

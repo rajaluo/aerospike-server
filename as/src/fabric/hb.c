@@ -35,7 +35,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/epoll.h>
 #include <sys/param.h>  // For MAX().
 
 #include "citrusleaf/alloc.h"
@@ -65,16 +64,7 @@
  * Heartbeat transport modes are: 1). Multicast (UDP) and 2). Mesh (TCP.)
  */
 
-
-/*
- *  Size of the epoll descriptor events set.
- */
-#define EPOLL_SZ (1024)
-
-// Workaround for platforms that don't have EPOLLRDHUP yet
-#ifndef EPOLLRDHUP
-#define EPOLLRDHUP EPOLLHUP
-#endif
+#define POLL_SZ 1024
 
 /* AS_HB_PROTOCOL_IDENTIFIER
  * Select the appropriate message identifier for the active heartbeat protocol. */
@@ -154,7 +144,7 @@ typedef struct as_hb_s {
 	bool endpoint_txlist_isudp[AS_HB_TXLIST_SZ];
 	cf_node endpoint_txlist_node_id[AS_HB_TXLIST_SZ]; // Node ID associated with a given mesh fd.
 
-	int efd;
+	cf_poll poll;
 
 	union {
 		cf_socket_mcast_cfg socket_mcast;
@@ -410,8 +400,7 @@ as_hb_getaddr(cf_node node, cf_sock_addr *addr)
 	if (SHASH_ERR_NOTFOUND == shash_get(g_hb.adjacencies, &node, a_p_pulse))
 		return(-1);
 
-	*addr = a_p_pulse->addr;
-
+	cf_sock_addr_copy(&a_p_pulse->addr, addr);
 	cf_ip_port_from_node_id(node, &addr->port);
 	return(0);
 }
@@ -617,12 +606,8 @@ as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr *addr,
 	}
 
 	p_pulse->last = cf_getms();
-
-	if (cf_fault_filter[AS_HB] >= CF_DEBUG) {
-		char tmp[1000];
-		cf_sock_addr_to_string_safe(addr, tmp, sizeof(tmp));
-		cf_debug(AS_HB, "HB fabric (%"PRIx64"+%"PRIu64"): %s", node, p_pulse->last, tmp);
-	}
+	cf_debug(AS_HB, "HB fabric (%"PRIx64"+%"PRIu64"): %s",
+			node, p_pulse->last, cf_sock_addr_print(addr));
 
 	// Don't steal or remember the file descriptor from fabric. Fabric is using it,
 	// and pain breaks out if we use it.
@@ -636,7 +621,7 @@ as_hb_process_fabric_heartbeat(cf_node node, cf_socket sock, cf_sock_addr *addr,
 	// If this is a new pulse message, we will keep track of the socket and addr.
 	// Not sure that keeping the socket is safe for MCAST, but going to try it for now.
 	if (p_pulse->new) {
-		p_pulse->addr = *addr;
+		cf_sock_addr_copy(addr, &p_pulse->addr);
 	}
 
 	// copy the succession list into the pulse structure
@@ -1054,17 +1039,12 @@ void as_hb_try_connecting_remote(mesh_host_list_element *e, bool is_seed)
 			// Try to get the client details for better logging.
 			// Otherwise, fall back to generic log message.
 			if (cf_socket_remote_name(s.sock, &sa) == 0) {
-				char sa_str[1000];
-				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof(sa_str));
-
 				cf_sock_addr sa2;
 
 				if (cf_socket_local_name(s.sock, &sa2) == 0) {
-					char sa2_str[1000];
-					cf_sock_addr_to_string_safe(&sa2, sa2_str, sizeof(sa2_str));
-
 					cf_info(AS_HB, "initiated connection to mesh %sseed host at %s (%s:%d) via socket %d from %s",
-							(is_seed ? "" : "non-"), sa_str, e->host, e->port, CSFD(s.sock), sa2_str);
+							(is_seed ? "" : "non-"), cf_sock_addr_print(&sa), e->host, e->port,
+							CSFD(s.sock), cf_sock_addr_print(&sa2));
 				}
 			} else {
 				as_hb_error(AS_HB_ERR_MESH_CONNECT_FAIL);
@@ -1396,10 +1376,12 @@ as_hb_tip_clear(cf_sock_addr *addr_list, int addr_list_len)
 		mhqe.op = MH_OP_REMOVE_ALL;
 	} else {
 		cf_debug(AS_HB, "Removing %d mesh host entries:", addr_list_len);
-
 		mhqe.op = MH_OP_REMOVE_LIST;
-		size_t list_sz = addr_list_len * sizeof(cf_sock_addr);
-		memcpy(mhqe.list, addr_list, list_sz);
+
+		for (int32_t i = 0; i < addr_list_len; ++i) {
+			cf_sock_addr_copy(&addr_list[i], &mhqe.list[i]);
+		}
+
 		mhqe.list_len = addr_list_len;
 	}
 
@@ -1438,13 +1420,14 @@ as_hb_start_receiving(cf_socket sock, int was_udp, cf_node node_id)
 	if (!g_hb.adjacencies)
 		as_hb_adjacencies_create();
 
-	struct epoll_event ev;
-	memset(&ev, 0, sizeof(struct epoll_event));
-	ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP;  // level-triggered!
-	ev.data.fd = CSFD(sock);
+	cf_socket *wrap = cf_malloc(sizeof(cf_socket));
 
-	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_ADD, CSFD(sock), &ev))
-		cf_crash(AS_HB,  "unable to add socket %d to epoll fd list: %s", CSFD(sock), cf_strerror(errno));
+	if (wrap == NULL) {
+		cf_crash(AS_HB, "Out of memory");
+	}
+
+	*wrap = sock;
+	cf_poll_add_socket(g_hb.poll, sock, EPOLLIN | EPOLLERR | EPOLLRDHUP, wrap);
 
 	g_hb.endpoint_txlist[CSFD(sock)] = true;
 	g_hb.endpoint_txlist_isudp[CSFD(sock)] = was_udp;
@@ -1463,12 +1446,7 @@ as_hb_stop_receiving()
 	cf_socket sock = g_hb.socket_mcast.conf.sock;
 
 	cf_debug(AS_HB, "Heartbeat: stopping packet receive on socket fd %d", CSFD(sock));
-
-	// creating a dummy epoll_event to support kernel version < 2.6.9. EPOLL_CTL_DEL ignores event.
-	struct epoll_event dummy_ev;
-	memset(&dummy_ev, 0, sizeof(struct epoll_event));
-	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, CSFD(sock), &dummy_ev))
-		cf_crash(AS_HB,  "unable to remove socket %d from epoll fd list: %s", CSFD(sock), cf_strerror(errno));
+	cf_poll_delete_socket(g_hb.poll, sock);
 
 	g_hb.endpoint_txlist[CSFD(sock)] = false;
 	bool was_udp = g_hb.endpoint_txlist_isudp[CSFD(sock)];
@@ -1811,12 +1789,8 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 			}
 			else {
 				cf_sock_addr_from_heartbeat(m, &p_pulse->addr);
-
-				if (cf_fault_filter[AS_HB] >= CF_DETAIL) {
-					char tmp[1000];
-					cf_sock_addr_to_string_safe(&p_pulse->addr, tmp, sizeof(tmp));
-					cf_detail(AS_HB, "Got heartbeat pulse from node identifying itself as %s", tmp);
-				}
+				cf_detail(AS_HB, "Got heartbeat pulse from node identifying itself as %s",
+						cf_sock_addr_print(&p_pulse->addr));
 			}
 
 			/* Get the succession list from the pulse message */
@@ -1842,9 +1816,8 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 			} else {
 				int rv = shash_put_unique(g_hb.adjacencies, &node, p_pulse);
 				if (rv == SHASH_ERR_FOUND) {
-					char tmp[1000];
-					cf_sock_addr_to_string_safe(&p_pulse->addr, tmp, sizeof(tmp));
-					cf_warning(AS_HB, "reprocessing HB msg, ppaddr %s ppfd %d fd %d", tmp, CSFD(p_pulse->sock), CSFD(sock));
+					cf_warning(AS_HB, "reprocessing HB msg, ppaddr %s ppfd %d fd %d",
+							cf_sock_addr_print(&p_pulse->addr), CSFD(p_pulse->sock), CSFD(sock));
 #ifdef FAIL_FAST
 					cf_crash(AS_HB, "declining to recurse");
 #endif
@@ -2029,11 +2002,8 @@ as_hb_rx_process(msg *m, cf_sock_addr *from, cf_socket sock)
 				cf_detail(AS_HB, "as_hb_rx_process node already connected, returning");
 				return;
 			} else {
-				if (cf_fault_filter[AS_HB] >= CF_DEBUG) {
-					char tmp[1000];
-					cf_sock_addr_to_string_safe(from, tmp, sizeof(tmp));
-					cf_debug(AS_HB, "connecting to remote heartbeat service: %s", tmp);
-				}
+				cf_debug(AS_HB, "connecting to remote heartbeat service: %s",
+						cf_sock_addr_print(from));
 
 				char host[1000];
 				cf_ip_addr_to_string_safe(&tmp_addr.addr, host, sizeof(host));
@@ -2060,7 +2030,7 @@ as_hb_thr(void *arg)
 {
 	byte buft[2048], bufr[2048];
 	msg *mt, *mr;
-	struct epoll_event events[EPOLL_SZ];
+	cf_poll_event events[POLL_SZ];
 	int nevents;
 	cf_socket sock;
 	cf_clock last_fd_print = 0;
@@ -2105,17 +2075,16 @@ as_hb_thr(void *arg)
 	/* Create something for inbound heartbeat messages */
 	mr = as_fabric_msg_get(M_TYPE_HEARTBEAT);
 
-	/* Configure epoll */
-	if (-1 == (g_hb.efd = epoll_create(EPOLL_SZ)))
-		cf_crash(AS_HB, "unable to create epoll fd: %s", cf_strerror(errno));
+	cf_poll_create(&g_hb.poll);
 
-	struct epoll_event ev;
-	memset(&ev, 0, sizeof(struct epoll_event));
-	ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP;  // level-triggered!
-	ev.data.fd = CSFD(sock);
+	cf_socket *wrap = cf_malloc(sizeof(cf_socket));
 
-	if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_ADD, CSFD(sock), &ev))
-		cf_crash(AS_HB,  "unable to add socket %d to epoll fd list: %s", CSFD(sock), cf_strerror(errno));
+	if (wrap == NULL) {
+		cf_crash(AS_HB, "Out of memory");
+	}
+
+	*wrap = sock;
+	cf_poll_add_socket(g_hb.poll, sock, EPOLLIN | EPOLLERR | EPOLLRDHUP, wrap);
 
 	/* Mesh-topology systems allow config-file bootstraping; connect to the provided node */
 	if ((AS_HB_MODE_MESH == g_config.hb_mode)) {
@@ -2144,16 +2113,13 @@ as_hb_thr(void *arg)
 
 	/* Iterate over events */
 	do {
-		nevents = epoll_wait(g_hb.efd, events, EPOLL_SZ, MAX(g_config.hb_interval / 3, 1));
-
-		if (0 > nevents)
-			cf_debug(AS_HB, "epoll_wait() returned %d ; errno = %d (%s)", nevents, errno, cf_strerror(errno));
+		nevents = cf_poll_wait(g_hb.poll, events, POLL_SZ, MAX(g_config.hb_interval / 3, 1));
 
 		for (int i = 0; i < nevents; i++) {
-			cf_socket esock = WSFD(events[i].data.fd);
+			cf_socket *esock = events[i].data;
 
 			/* Accept a new connection */
-			if (CSFD(esock) == CSFD(sock) && (AS_HB_MODE_MESH == g_config.hb_mode)) {
+			if (esock == wrap && (AS_HB_MODE_MESH == g_config.hb_mode)) {
 				cf_socket csock;
 				cf_sock_addr sa;
 
@@ -2173,9 +2139,7 @@ as_hb_thr(void *arg)
 					}
 				}
 
-				char sa_str[1000];
-				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof(sa_str));
-				cf_debug(AS_HB, "new connection from %s", sa_str);
+				cf_debug(AS_HB, "new connection from %s", cf_sock_addr_print(&sa));
 
 				cf_atomic64_incr(&g_stats.heartbeat_connections_opened);
 				if (0 != as_hb_endpoint_add(csock, false /*is not udp*/, 0 /*node id unknown until pulse arrives*/)) {
@@ -2187,20 +2151,18 @@ as_hb_thr(void *arg)
 				if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
 CloseSocket:
 					as_hb_error(AS_HB_ERR_REMOTE_CLOSE);
-					cf_debug(AS_HB, "remote close: fd %d event %x", CSFD(esock), events[i].events);
-					g_hb.endpoint_txlist[CSFD(esock)] = false;
+					cf_debug(AS_HB, "remote close: fd %d event %x", CSFD(*esock), events[i].events);
+					g_hb.endpoint_txlist[CSFD(*esock)] = false;
 					// Remove node from the discovered list.
-					if (g_hb.endpoint_txlist_node_id[CSFD(esock)]) {
-						as_hb_nodes_discovered_hash_del_conn(g_hb.endpoint_txlist_node_id[CSFD(esock)], esock);
+					if (g_hb.endpoint_txlist_node_id[CSFD(*esock)]) {
+						as_hb_nodes_discovered_hash_del_conn(g_hb.endpoint_txlist_node_id[CSFD(*esock)], *esock);
 					}
-					g_hb.endpoint_txlist_node_id[CSFD(esock)] = 0;
+					g_hb.endpoint_txlist_node_id[CSFD(*esock)] = 0;
 					cf_atomic64_incr(&g_stats.heartbeat_connections_closed);
-					mesh_host_list_remove_fd(esock);
-					// reusing ev as it is ignored for EPOLL_CTL_DEL
-					if (0 > epoll_ctl(g_hb.efd, EPOLL_CTL_DEL, CSFD(esock), &ev)) {
-						cf_warning(AS_HB, "unable to remove socket %d from epoll fd list: %s", CSFD(esock), cf_strerror(errno));
-					}
-					cf_socket_close(esock);
+					mesh_host_list_remove_fd(*esock);
+					cf_poll_delete_socket(g_hb.poll, *esock);
+					cf_socket_close(*esock);
+					cf_free(esock);
 					continue;
 				}
 
@@ -2209,9 +2171,9 @@ CloseSocket:
 					int r = 0;
 
 					if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-						r = cf_socket_recv_from(esock, bufr, sizeof(bufr), 0, &from);
+						r = cf_socket_recv_from(*esock, bufr, sizeof(bufr), 0, &from);
 					} else {
-						r = as_hb_tcp_recv(esock, bufr, sizeof(bufr));
+						r = as_hb_tcp_recv(*esock, bufr, sizeof(bufr));
 						cf_sock_addr_set_zero(&from);
 					}
 					cf_detail(AS_HB, "received %d bytes, calling msg_parse", r);
@@ -2220,7 +2182,7 @@ CloseSocket:
 							cf_detail(AS_HB, "unable to parse heartbeat message");
 							as_hb_error(AS_HB_ERR_UNPARSABLE_MSG);
 						} else {
-							as_hb_rx_process(mr, &from, esock);
+							as_hb_rx_process(mr, &from, *esock);
 						}
 						msg_reset(mr);
 					} else {
@@ -2747,11 +2709,8 @@ static bool g_log_items = false;
 static void
 as_hb_dump_pulse(as_hb_pulse *pulse)
 {
-	char tmp[1000];
-	cf_sock_addr_to_string_safe(&pulse->addr, tmp, sizeof(tmp));
-
 	cf_info(AS_HB, " last %lu", pulse->last);
-	cf_info(AS_HB, " addr %s", tmp);
+	cf_info(AS_HB, " addr %s", cf_sock_addr_print(&pulse->addr));
 	cf_info(AS_HB, " fd %d", CSFD(pulse->sock));
 	cf_info(AS_HB, " new %d updated %d dunned %d", pulse->new, pulse->updated, pulse->dunned);
 	cf_info(AS_HB, " last detected %lu", pulse->last_detected);
