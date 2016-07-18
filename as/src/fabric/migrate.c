@@ -499,14 +499,14 @@ immigration_destroy(void *parm)
 	ldtv.pid = immig->pid;
 
 	if (immig->rsv.p) {
-		cf_atomic_int_decr(&immig->rsv.ns->migrate_rx_instance_count);
-
 		as_partition_release(&immig->rsv);
 	}
 
 	shash_delete(g_immigration_ldt_version_hash, &ldtv);
 
 	immig_meta_q_destroy(&immig->meta_q);
+
+	cf_atomic_int_decr(&immig->stats->migrate_rx_instance_count);
 }
 
 
@@ -1103,7 +1103,8 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 					cf_getms() > immig->done_recv_ms +
 								g_config.migrate_rx_lifetime_ms)) {
 
-		if (cf_atomic32_get(immig->done_recv) == 0) {
+		if (immig->start_result == AS_MIGRATE_OK &&
+				cf_atomic32_get(immig->done_recv) == 0) {
 			// No outstanding readers of hkey and hasn't yet completed means
 			// that we haven't already decremented migrate_rx_partitions_active.
 
@@ -1251,23 +1252,81 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 	msg_preserve_fields(m, 1, MIG_FIELD_EMIG_ID);
 
-	as_migrate_result rv = as_partition_immigrate_start(ns, pid, cluster_key,
-			start_type, src);
+	immigration *immig = cf_rc_alloc(sizeof(immigration));
 
-	switch (rv) {
+	cf_assert(immig, AS_MIGRATE, CF_CRITICAL, "malloc");
+
+	cf_atomic_int_incr(&ns->migrate_rx_instance_count);
+
+	immig->src = src;
+	immig->cluster_key = cluster_key;
+	immig->pid = pid;
+	immig->rx_state = AS_MIGRATE_RX_STATE_SUBRECORD; // always starts this way
+	immig->incoming_ldt_version = incoming_ldt_version;
+	immig->start_recv_ms = 0;
+	immig->done_recv = 0;
+	immig->done_recv_ms = 0;
+	immig->emig_id = emig_id;
+	immig_meta_q_init(&immig->meta_q);
+	immig->features = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
+	immig->stats = ns;
+	immig->rsv.p = NULL;
+
+	immigration_hkey hkey;
+
+	hkey.src = src;
+	hkey.emig_id = emig_id;
+
+	while (true) {
+		if (rchash_put_unique(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+				(void *)immig) == RCHASH_OK) {
+			cf_rc_reserve(immig); // to disambiguate put from get case
+
+			immig->start_result = as_partition_immigrate_start(ns, pid,
+					cluster_key, start_type, src);
+			break;
+		}
+
+		immigration *immig0 = NULL;
+
+		if (rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+				(void *)&immig0) == RCHASH_OK) {
+			immigration_release(immig);
+
+			if (immig0->start_recv_ms == 0) {
+				immigration_release(immig0);
+				return; // Allow first thread to respond.
+			}
+
+			immig = immig0;
+			break;
+		}
+	}
+
+	switch (immig->start_result) {
+	case AS_MIGRATE_OK:
+		break;
 	case AS_MIGRATE_FAIL:
 		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_FAIL);
 		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(m);
 		}
+
+		immig->start_recv_ms = cf_getms(); // permits reaping
+		immigration_release(immig);
 		return;
 	case AS_MIGRATE_AGAIN:
+		// Remove from hash so that the immig can be tried again.
+		rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
+
 		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_EAGAIN);
 		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(m);
 		}
+
+		immigration_release(immig);
 		return;
 	case AS_MIGRATE_ALREADY_DONE:
 		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_ALREADY_DONE);
@@ -1275,43 +1334,17 @@ immigration_handle_start_request(cf_node src, msg *m) {
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(m);
 		}
+
+		immig->start_recv_ms = cf_getms(); // permits reaping
+		immigration_release(immig);
 		return;
-	case AS_MIGRATE_OK:
-		break;
 	default:
 		cf_crash(AS_MIGRATE, "unexpected as_partition_immigrate_start result");
 		break;
 	}
 
-	immigration *immig = cf_rc_alloc(sizeof(immigration));
-
-	cf_assert(immig, AS_MIGRATE, CF_CRITICAL, "malloc");
-
-	immig->src = src;
-	immig->cluster_key = cluster_key;
-	immig->pid = pid;
-	immig->rx_state = AS_MIGRATE_RX_STATE_SUBRECORD; // always starts this way
-	immig->incoming_ldt_version = incoming_ldt_version;
-	immig->done_recv = 0;
-	immig->start_recv_ms = 0;
-	immig->done_recv_ms = 0;
-	immig->emig_id = emig_id;
-
-	immig_meta_q_init(&immig->meta_q);
-
-	uint32_t mig_features_in_use = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
-
-	as_partition_reserve_migrate(ns, pid, &immig->rsv, NULL);
-
-	cf_atomic_int_incr(&immig->rsv.ns->migrate_rx_instance_count);
-
-	immigration_hkey hkey;
-
-	hkey.src = src;
-	hkey.emig_id = emig_id;
-
-	if (rchash_put_unique(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-			(void *)immig) == RCHASH_OK) {
+	if (immig->start_recv_ms == 0) {
+		as_partition_reserve_migrate(ns, pid, &immig->rsv, NULL);
 		cf_atomic_int_incr(&immig->rsv.ns->migrate_rx_partitions_active);
 
 		immigration_ldt_version ldtv;
@@ -1323,17 +1356,16 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 		if (! immigration_start_meta_sender(immig, emig_features,
 				emig_n_recs)) {
-				mig_features_in_use &= ~MIG_FEATURE_MERGE;
+			immig->features &= ~MIG_FEATURE_MERGE;
 		}
 
 		immig->start_recv_ms = cf_getms(); // permits reaping
 	}
-	else {
-		immigration_release(immig);
-	}
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_OK);
-	msg_set_uint32(m, MIG_FIELD_FEATURES, mig_features_in_use);
+	msg_set_uint32(m, MIG_FIELD_FEATURES, immig->features);
+
+	immigration_release(immig);
 
 	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 			AS_FABRIC_SUCCESS) {
