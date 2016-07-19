@@ -36,7 +36,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/un.h>
 
@@ -73,12 +72,6 @@ typedef enum op_xmit_transaction_e {
 #ifdef EXTRA_CHECKS
 void as_fabric_dump();
 #endif
-
-// Workaround for platforms that don't have EPOLLRDHUP yet
-#ifndef EPOLLRDHUP
-#define EPOLLRDHUP EPOLLHUP
-#endif
-
 
 /*
 **                                      Fabric Theory of Operation
@@ -197,7 +190,7 @@ typedef struct {
 	int			num_workers;
 	pthread_t	workers_th[MAX_FABRIC_WORKERS];
 	cf_queue	*workers_queue[MAX_FABRIC_WORKERS]; // messages to workers - type worker_queue_element
-	int			workers_epoll_fd[MAX_FABRIC_WORKERS]; // have workers export the epoll fd
+	cf_poll		workers_poll[MAX_FABRIC_WORKERS]; // have workers export the epoll fd
 
 	pthread_t	accept_th;
 
@@ -1038,11 +1031,8 @@ fabric_process_read_msg(fabric_buffer *fb)
 				goto Next;
 			}
 
-			if (cf_fault_filter[AS_FABRIC] >= CF_DEBUG) {
-				char tmp[1000];
-				cf_sock_addr_to_string_safe(&addr, tmp, sizeof(tmp));
-				cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)", tmp, node, CSFD(fb->sock));
-			}
+			cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)",
+					cf_sock_addr_print(&addr), node, CSFD(fb->sock));
 		} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
 			cf_sock_addr_from_fabric(m, &addr);
 		}
@@ -1179,16 +1169,13 @@ void
 fabric_buffer_set_epoll_state(fabric_buffer *fb)
 {
 	fb->status = FB_STATUS_IDLE;
+	uint32_t events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
 
-	struct epoll_event ev;
-	memset(&ev, 0, sizeof(struct epoll_event));
-	ev.data.ptr = fb;
-	ev.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
 	if (fb->w_total_len > fb->w_len) {
-		ev.events |= EPOLLOUT;
+		events |= EPOLLOUT;
 	}
 
-	epoll_ctl( g_fabric_args->workers_epoll_fd[ fb->worker_id ], EPOLL_CTL_MOD, CSFD(fb->sock), &ev);
+	cf_poll_modify_socket(g_fabric_args->workers_poll[fb->worker_id], fb->sock, events, fb);
 }
 
 //
@@ -1278,10 +1265,9 @@ fabric_worker_fn(void *argv)
 	cf_debug(AS_FABRIC, "fabric worker created: index %d", worker_id);
 
 	// Create my epoll fd, register in the global list
-	// TODO: something fancier than the 512 here
-	int epoll_fd;
-	epoll_fd = epoll_create(512);
-	fa->workers_epoll_fd[worker_id] = epoll_fd;
+	cf_poll poll;
+	cf_poll_create(&poll);
+	fa->workers_poll[worker_id] = poll;
 
 	// Connect to the notification socket
 	struct sockaddr_un note_so;
@@ -1309,22 +1295,18 @@ fabric_worker_fn(void *argv)
 	}
 
 	// File my notification information
-	struct epoll_event ev;
-	memset(&ev, 0, sizeof(ev));
-	ev.data.fd = note_fd;
-	ev.events = EPOLLIN | EPOLLERR ; // will be receiving 1 byte reads
-	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, note_fd, &ev);
+	cf_poll_add_socket(poll, WSFD(note_fd), EPOLLIN | EPOLLERR, &note_fd);
 
 	/* Demarshal transactions from the socket */
 	for ( ; ; ) {
-		struct epoll_event events[64];
-		memset(&events[0], 0, sizeof(events));
-		int nevents = epoll_wait(epoll_fd, events, 64, -1);
+		cf_poll_event events[64];
+		memset(events, 0, sizeof(events));
+		int nevents = cf_poll_wait(poll, events, 64, -1);
 
 		/* Iterate over all events */
 		for (int i = 0; i < nevents; i++) {
 
-			if (events[i].data.fd == note_fd) {
+			if (events[i].data == &note_fd) {
 
 				if (events[i].events & EPOLLIN) {
 
@@ -1341,17 +1323,13 @@ fabric_worker_fn(void *argv)
 
 						// Got an element - probably a new FD to look after, what else?
 						if (wqe.type == NEW_FABRIC_BUFFER) {
-
 							fabric_buffer *fb = wqe.fb;
+							uint32_t events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
 
-							struct epoll_event ev;
-							memset(&ev, 0, sizeof(ev));
-							ev.data.ptr = fb;
-							ev.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-							if (fb->w_total_len > fb->w_len) ev.events |= EPOLLOUT;
-							if (0 != epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(fb->sock), &ev)) {
-								cf_debug(AS_FABRIC, "fabric_worker_fn: epoll_ctl failed %s", cf_strerror(errno));
-							}
+							if (fb->w_total_len > fb->w_len)
+								events |= EPOLLOUT;
+
+							cf_poll_add_socket(poll, fb->sock, events, fb);
 						} else if (DELETE_FABRIC_BUFFER == wqe.type) {
 							fabric_buffer *fb = wqe.fb;
 
@@ -1378,7 +1356,7 @@ fabric_worker_fn(void *argv)
 
 				// It's one of my worker FBs. Do something cool.
 
-				fabric_buffer *fb = events[i].data.ptr;
+				fabric_buffer *fb = events[i].data;
 
 				cf_detail(AS_FABRIC, "epoll trigger: fd %d events %x", CSFD(fb->sock), events[i].events);
 
@@ -1386,7 +1364,7 @@ fabric_worker_fn(void *argv)
 
 					fb->failed = true;
 
-					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(fb->sock), 0);
+					cf_poll_delete_socket(poll, fb->sock);
 					fabric_buffer_release(fb);
 					fb = 0;
 					continue;
@@ -1397,7 +1375,7 @@ fabric_worker_fn(void *argv)
 					fb->failed = true;
 
 					cf_debug(AS_FABRIC, "epoll : error, will close: fb %p fd %d errno %d", fb, CSFD(fb->sock), errno);
-					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(fb->sock), 0);
+					cf_poll_delete_socket(poll, fb->sock);
 					fabric_buffer_release(fb);
 					fb = 0;
 					continue;
@@ -1409,7 +1387,7 @@ fabric_worker_fn(void *argv)
 					fb->status = FB_STATUS_READ;
 
 					if (fabric_process_readable(fb) < 0) {
-						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(fb->sock), 0);
+						cf_poll_delete_socket(poll, fb->sock);
 						fabric_buffer_release(fb);
 						fb = 0;
 						continue;
@@ -1422,7 +1400,7 @@ fabric_worker_fn(void *argv)
 					fb->status = FB_STATUS_WRITE;
 
 					if (fabric_process_writable(fb) < 0) {
-						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(fb->sock), 0);
+						cf_poll_delete_socket(poll, fb->sock);
 						fabric_buffer_release(fb);
 						fb = 0;
 						continue;

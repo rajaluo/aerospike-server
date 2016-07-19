@@ -27,7 +27,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/epoll.h>
 #include <sys/ioctl.h>
 
 #include "citrusleaf/alloc.h"
@@ -41,13 +40,7 @@
 #include "base/cfg.h"
 #include "base/thr_info.h"
 
-
-#define EPOLL_SZ	64
-// Workaround for platforms that don't have EPOLLRDHUP yet.
-#ifndef EPOLLRDHUP
-#define EPOLLRDHUP EPOLLHUP
-#endif
-
+#define POLL_SZ 1024
 
 // State for any open info port.
 typedef struct {
@@ -206,8 +199,8 @@ void *
 thr_info_port_fn(void *arg)
 {
 	cf_socket_cfg *s;
-	struct epoll_event ev;
-	int nevents, i, n, epoll_fd;
+	cf_poll poll;
+	int nevents, i;
 	int err_count = 0;
 
 	cf_debug(AS_INFO_PORT, "info-port process started");
@@ -229,30 +222,25 @@ thr_info_port_fn(void *arg)
 
 	// Create the epoll file descriptor and set up the epoll structure to listen
 	// to the socket.
-	if (-1 == (epoll_fd = epoll_create(EPOLL_SZ))) {
-		cf_crash(AS_INFO_PORT, "epoll_create(): %s", cf_strerror(errno));
-	}
-	memset(&ev, 0, sizeof(ev));
-	ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-	ev.data.fd = CSFD(s->sock);
-	if (0 > epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(s->sock), &ev)) {
-		cf_crash(AS_INFO_PORT, "epoll_ctl(): %s", cf_strerror(errno));
-	}
+
+	cf_poll_create(&poll);
+	cf_poll_add_socket(poll, s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
 
 	// Demarshal transactions from the socket.
 	for ( ; ; ) {
-		struct epoll_event events[EPOLL_SZ];
+		cf_poll_event events[POLL_SZ];
 
 		cf_debug(AS_INFO_PORT, "calling epoll");
 
-		nevents = epoll_wait(epoll_fd, events, EPOLL_SZ, -1);
+		nevents = cf_poll_wait(poll, events, POLL_SZ, -1);
 
 		cf_debug(AS_INFO_PORT, "epoll event received: nevents %d", nevents);
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
+			cf_socket *ssock = events[i].data;
 
-			if (CSFD(s->sock) == events[i].data.fd) {
+			if (ssock == &s->sock) {
 
 				// Accept new connections on the service socket.
 				cf_socket csock;
@@ -276,9 +264,7 @@ thr_info_port_fn(void *arg)
 					cf_crash(AS_INFO_PORT, "cf_socket_accept: %s (errno %d)", cf_strerror(errno), errno);
 				}
 
-				char sa_str[1000];
-				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof(sa_str));
-				cf_detail(AS_INFO_PORT, "new connection: %s", sa_str);
+				cf_detail(AS_INFO_PORT, "new connection: %s", cf_sock_addr_print(&sa));
 
 				// Set the socket to nonblocking.
 				cf_socket_disable_blocking(csock);
@@ -297,21 +283,12 @@ thr_info_port_fn(void *arg)
 
 				ips->sock = csock;
 
-				// Place the client socket in the event queue.
-				memset(&ev, 0, sizeof(ev));
-				ev.events = EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP ;
-				ev.data.ptr = ips;
-				if (0 > (n = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, CSFD(csock), &ev))) {
-					cf_debug(AS_INFO_PORT, "unable to add socket to event queue");
-					cf_free(ips->recv_buf);
-					cf_free(ips->xmit_buf);
-					cf_free(ips);
-				}
+				cf_poll_add_socket(poll, csock, EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
 			}
 			else {
 				// A regular working socket.
 
-				info_port_state *ips = events[i].data.ptr;
+				info_port_state *ips = events[i].data;
 				if (ips == 0) {
 					cf_debug(AS_INFO_PORT, "event with null handle, continuing");
 					continue;
@@ -322,7 +299,7 @@ thr_info_port_fn(void *arg)
 				if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
 					cf_detail(AS_INFO_PORT, "proto socket: remote close: fd %d event %x", CSFD(ips->sock), events[i].events);
 					// no longer in use: out of epoll etc
-					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(ips->sock), 0);
+					cf_poll_delete_socket(poll, ips->sock);
 					info_port_state_free(ips);
 					continue;
 				}
@@ -330,7 +307,7 @@ thr_info_port_fn(void *arg)
 
 				if (events[i].events & EPOLLIN) {
 					if (0 != thr_info_port_readable(ips)) {
-						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(ips->sock), 0);
+						cf_poll_delete_socket(poll, ips->sock);
 						info_port_state_free(ips);
 						goto NextEvent;
 					}
@@ -339,7 +316,7 @@ thr_info_port_fn(void *arg)
 
 				if (events[i].events & EPOLLOUT) {
 					if (0 != thr_info_port_writable(ips)) {
-						epoll_ctl(epoll_fd, EPOLL_CTL_DEL, CSFD(ips->sock), 0);
+						cf_poll_delete_socket(poll, ips->sock);
 						info_port_state_free(ips);
 						goto NextEvent;
 					}

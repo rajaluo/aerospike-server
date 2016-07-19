@@ -33,7 +33,6 @@
 #include <limits.h>
 #include <malloc.h>
 #include <mcheck.h>
-#include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <time.h>
@@ -4385,10 +4384,7 @@ build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db) {
 
 		cf_sock_addr tmp;
 		cf_sock_addr_from_addr_port(&addrs[i], g_config.socket.port, &tmp);
-
-		char string[1000];
-		cf_sock_addr_to_string_safe(&tmp, string, sizeof(string));
-		cf_dyn_buf_append_string(db, string);
+		cf_dyn_buf_append_string(db, cf_sock_addr_print(&tmp));
 
 		if (i < n_addrs - 1) {
 			cf_dyn_buf_append_char(db, ';');
