@@ -41,9 +41,9 @@ BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
 BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
 BASE_SOURCES += udf_memtracker.c udf_record.c udf_timer.c
 ifneq ($(USE_EE),1)
-  BASE_SOURCES += xdr_serverside_stubs.c
   BASE_SOURCES += namespace_ce.c
   BASE_SOURCES += security_ce.c
+  BASE_SOURCES += xdr_serverside_stubs.c
 endif
 
 FABRIC_HEADERS += hb.h fabric.h migrate.h paxos.h
