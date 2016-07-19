@@ -16,7 +16,7 @@ ifeq ($(OS),el7)
   CONF_VERSION = _systemd
 endif
 
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
 all:	dist-xdr package clean
 else
 all:	dist package clean
@@ -121,7 +121,7 @@ endif
 ifeq ($(USE_ASM),1)
 	cat $(PKG)/rpm/asm-files >> $(PKG)/rpm/aerospike.spec
 endif
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
 	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
 endif
 	cat $(PKG)/rpm/server-spec-config >> $(PKG)/rpm/aerospike.spec
@@ -152,6 +152,6 @@ ifeq ($(USE_SYSTEMD),1)
 endif
 	rm -rf $(SOURCE_ROOT)/*
 
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
   include $(EEREPO)/xdr/make_in/Makefile.rpm.in
 endif

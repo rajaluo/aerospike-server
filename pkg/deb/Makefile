@@ -31,7 +31,7 @@ endif
 
 DEB = $(PKG)/packages/aerospike-server-$(EDITION)-$(REV).$(OS).x86_64.deb
 
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
 all:	dist-xdr package clean
 else
 all:	dist package clean
@@ -139,6 +139,6 @@ ifeq ($(USE_SYSTEMD),1)
 	rm -rf $(PKG)/deb/aerospike.service
 endif
 
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
   include $(XDR)/make_in/Makefile.deb.in
 endif
