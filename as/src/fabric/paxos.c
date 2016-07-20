@@ -921,18 +921,23 @@ as_paxos_succession_insert(cf_node n)
 		}
 		// Found where this node belongs - Shift the other nodes down and insert node here.
 		if (n > p->succession[i]) {
-			memmove(&p->succession[i + 1], &p->succession[i], (g_config.paxos_max_cluster_size - i) * sizeof(cf_node));
-			memmove(&p->alive[i + 1], &p->alive[i], (g_config.paxos_max_cluster_size - i) * sizeof(bool));
+			// We can only shift N-i-1 elements without overflowing memmory
+			memmove(&p->succession[i + 1], &p->succession[i], (g_config.paxos_max_cluster_size - i - 1) * sizeof(cf_node));
+			memmove(&p->alive[i + 1], &p->alive[i], (g_config.paxos_max_cluster_size - i - 1) * sizeof(bool));
 			p->succession[i] = n;
 			p->alive[i] = true;
 			break;
 		}
 	}
 
-	if (g_config.paxos_max_cluster_size == i)
+	if (g_config.paxos_max_cluster_size == i) {
 		return(-1);
-	else
+	} else {
+		if (p->succession[g_config.paxos_max_cluster_size - 1] != 0) {
+			cf_info(AS_PAXOS, "Lost zero sentinal element in paxos succession list");
+		}
 		return(0);
+	}
 }
 
 /* as_paxos_succession_remove
@@ -964,6 +969,9 @@ as_paxos_succession_remove(cf_node n)
 	} else {
 		memmove(&p->succession[i], &p->succession[i + 1], ((g_config.paxos_max_cluster_size - i) - 1) * sizeof(cf_node));
 		memmove(&p->alive[i], &p->alive[i + 1], ((g_config.paxos_max_cluster_size - i) - 1) * sizeof(bool));
+		// zero-out the element at the end of the array which will be old value
+		p->succession[g_config.paxos_max_cluster_size-1] = 0;
+		p->alive[g_config.paxos_max_cluster_size-1] = false;
 	}
 
 	/* Fix up any votes in progress, since vote-keeping is indexed on
