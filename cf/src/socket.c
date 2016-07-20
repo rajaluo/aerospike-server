@@ -1071,7 +1071,7 @@ netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, 
 	struct sockaddr_nl loc;
 	memset(&loc, 0, sizeof(loc));
 	loc.nl_family = AF_NETLINK;
-	loc.nl_pid = getpid();
+	loc.nl_pid = 0;
 
 	if (bind(nls, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
 		cf_warning(CF_SOCKET, "Error while binding netlink socket: %d (%s)",
@@ -1090,7 +1090,7 @@ netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, 
 	req.h.nlmsg_type = type;
 	req.h.nlmsg_flags = NLM_F_REQUEST | NLM_F_ROOT;
 	req.h.nlmsg_seq = cf_atomic32_add(&seq, 1);
-	req.h.nlmsg_pid = getpid();
+	req.h.nlmsg_pid = 0;
 	req.m.rtgen_family = PF_UNSPEC;
 
 	struct sockaddr_nl rem;
