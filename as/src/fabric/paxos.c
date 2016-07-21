@@ -2072,7 +2072,8 @@ as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 int
 as_paxos_event(int nevents, as_fabric_event_node *events, void *udata)
 {
-	if ((1 > nevents) || (g_config.paxos_max_cluster_size < nevents) || !events) {
+	// Leave one extra room for RESET event on top of node events
+	if ((1 > nevents) || ((g_config.paxos_max_cluster_size + 1) < nevents) || !events) {
 		cf_warning(AS_PAXOS, "Illegal state in as_paxos_event, node events is: %d", nevents);
 		return (0);
 	}
@@ -2222,7 +2223,7 @@ as_paxos_process_heartbeat_event(msg *m)
 			case FABRIC_RESET:
 				break;
 			default:
-				cf_warning(AS_PAXOS, "unknown event type received in as_paxos_event() - aborting");
+				cf_warning(AS_PAXOS, "unknown event type received in as_paxos_process_heartbeat_event() - aborting");
 				return;
 		}
 
@@ -2276,7 +2277,7 @@ as_paxos_process_heartbeat_event(msg *m)
 			case FABRIC_RESET:
 				break;
 			default:
-				cf_warning(AS_PAXOS, "unknown event type received in as_paxos_event() - aborting");
+				cf_warning(AS_PAXOS, "unknown event type received in as_paxos_process_heartbeat_event() - aborting");
 				return;
 		}
 
@@ -2350,7 +2351,7 @@ as_paxos_retransmit_check()
 	}
 
 	if (NULL == (m = as_fabric_msg_get(M_TYPE_PAXOS))) {
-		cf_warning(AS_PAXOS, "as_paxos_event: unable to get a fabric message");
+		cf_warning(AS_PAXOS, "as_paxos_retransmit_check: unable to get a fabric message");
 		return(0);
 	}
 
@@ -2583,7 +2584,8 @@ as_paxos_process_retransmit_check()
 
 	cf_node p_node = as_paxos_succession_getprincipal();
 
-	// check for succession list fault
+	// check for succession list fault. We need space for AS_CLUSTER_SZ+1
+	// elements as there will be RESET event on top of nodes events.
 	as_fabric_event_node corrective_events[AS_CLUSTER_SZ + 1];
 	memset(corrective_events, 0, sizeof(corrective_events));
 
