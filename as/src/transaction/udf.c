@@ -1012,11 +1012,12 @@ udf_post_processing(udf_record* urecord, udf_optype* urecord_op,
 	}
 
 	if (udf_zero_bins_left(urecord)) {
+		// Note - record delete via aerospike:remove() does not get here.
 		// Not applicable to sub-records unless requested by UDF - orphaned sub-
 		// records are eventually overwritten by defrag.
 		as_index_delete(tr->rsv.tree, &tr->keyd);
-		urecord->starting_memory_bytes = 0;
 		*urecord_op = UDF_OPTYPE_DELETE;
+		as_storage_record_adjust_mem_stats(rd, urecord->starting_memory_bytes);
 	}
 	else if (*urecord_op == UDF_OPTYPE_WRITE) {
 		size_t rec_props_data_size = as_storage_record_rec_props_size(rd);
