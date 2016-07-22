@@ -105,7 +105,8 @@ cf_ip_addr_from_binary(const uint8_t *binary, size_t size, cf_ip_addr *addr)
 		return -1;
 	}
 
-	memcpy(&addr->s_addr, binary + 12, 4);
+	uint32_t s_addr = ntohl(*(uint32_t*)(binary + 12));
+	memcpy(&addr->s_addr, &s_addr, 4);
 	return 16;
 }
 
@@ -122,7 +123,8 @@ cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
 	}
 
 	binary[10] = binary[11] = 0xff;
-	memcpy(binary + 12, &addr->s_addr, 4);
+	uint32_t s_addr = htonl(*(uint32_t*)&addr->s_addr);
+	memcpy(binary + 12, &s_addr, 4);
 	return 16;
 }
 
@@ -216,75 +218,6 @@ cleanup1:
 
 cleanup0:
 	return res;
-}
-
-static int32_t
-from_x(const msg *msg, cf_sock_addr *addr, int32_t addr_id, int32_t port_id)
-{
-	int32_t res = 0;
-	uint32_t v4;
-
-	if (msg_get_uint32(msg, addr_id, &v4) < 0) {
-		cf_crash(CF_SOCKET, "Message without IPv4 address field");
-	}
-
-	if (v4 != 0) {
-		++res;
-	}
-
-	uint32_t port;
-
-	if (msg_get_uint32(msg, port_id, &port) < 0) {
-		cf_crash(CF_SOCKET, "Message without port field");
-	}
-
-	if (port != 0) {
-		++res;
-	}
-
-	addr->addr.s_addr = v4;
-	addr->port = (cf_ip_port)port;
-	return res;
-}
-
-int32_t
-cf_sock_addr_from_heartbeat(const msg *msg, cf_sock_addr *addr)
-{
-	return from_x(msg, addr, AS_HB_MSG_ADDR, AS_HB_MSG_PORT);
-}
-
-int32_t
-cf_sock_addr_from_fabric(const msg *msg, cf_sock_addr *addr)
-{
-	return from_x(msg, addr, FS_ADDR, FS_PORT);
-}
-
-static void
-to_x(cf_sock_addr *addr, msg *msg, int32_t addr_id, int32_t port_id)
-{
-	uint32_t v4 = addr->addr.s_addr;
-
-	if (msg_set_uint32(msg, addr_id, v4) != 0) {
-		cf_crash(CF_SOCKET, "Error while adding IPv4 address field to message.");
-	}
-
-	uint32_t port = addr->port;
-
-	if (msg_set_uint32(msg, port_id, port) != 0) {
-		cf_crash(CF_SOCKET, "Error while adding port field to message.");
-	}
-}
-
-void
-cf_sock_addr_to_heartbeat(cf_sock_addr *addr, msg *msg)
-{
-	to_x(addr, msg, AS_HB_MSG_ADDR, AS_HB_MSG_PORT);
-}
-
-void
-cf_sock_addr_to_fabric(cf_sock_addr *addr, msg *msg)
-{
-	to_x(addr, msg, FS_ADDR, FS_PORT);
 }
 
 void

@@ -93,11 +93,6 @@ typedef struct {
 	uint8_t ttl;
 } cf_socket_mcast_cfg;
 
-// XXX - Cleanly share the following with hb.c and fabric.c.
-#define AS_HB_MSG_ADDR 3
-#define AS_HB_MSG_PORT 4
-#define AS_HB_MSG_ADDR_EX 7
-
 #define FS_ADDR 1
 #define FS_PORT 2
 #define FS_ADDR_EX 4
@@ -206,12 +201,14 @@ void cf_poll_destroy(cf_poll poll);
 CF_MUST_CHECK int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
 CF_MUST_CHECK int32_t cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
 CF_MUST_CHECK int32_t cf_inter_addr_to_index(const cf_ip_addr *addr, char **name);
+CF_MUST_CHECK int32_t cf_inter_mtu(cf_ip_addr *inter_addr);
 CF_MUST_CHECK int32_t cf_inter_min_mtu(void);
 
 CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr);
+CF_MUST_CHECK int32_t cf_socket_get_min_mtu(cf_socket sock, const cf_ip_addr* device_ip_addr);
 
 #if defined CF_SOCKET_PRIVATE
-CF_MUST_CHECK size_t cf_socket_addr_len(const struct sockaddr *sa);
+CF_MUST_CHECK size_t cf_socket_addr_len(const struct sockaddr* sa);
 CF_MUST_CHECK int32_t cf_socket_parse_netlink(bool allow_v6, uint32_t family, uint32_t flags,
 		void *data, size_t len, cf_ip_addr *addr);
 void cf_socket_fix_client(cf_socket sock);
