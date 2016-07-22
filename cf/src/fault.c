@@ -75,6 +75,7 @@ char *cf_fault_context_strings[] = {
 		"fabric",
 		"geo",
 		"hb",
+		"hlc",
 		"index",
 		"info",
 		"info-port",
