@@ -121,7 +121,8 @@ as_delete_start(as_transaction* tr)
 	}
 	// else - rw_request is now in hash, continue...
 
-	if (g_config.write_duplicate_resolution_disable) {
+	if (g_config.write_duplicate_resolution_disable ||
+			as_transaction_is_nsup_delete(tr)) {
 		// Note - preventing duplicate resolution this way allows
 		// rw_request_destroy() to handle dup_msg[] cleanup correctly.
 		tr->rsv.n_dupl = 0;
@@ -129,7 +130,7 @@ as_delete_start(as_transaction* tr)
 
 	// If there are duplicates to resolve, start doing so.
 	// TODO - should we bother if there's no generation check?
-	if (tr->rsv.n_dupl != 0 && ! as_transaction_is_nsup_delete(tr)) {
+	if (tr->rsv.n_dupl != 0) {
 		if (! start_delete_dup_res(rw, tr)) {
 			rw_request_hash_delete(&hkey);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
