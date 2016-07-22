@@ -4689,12 +4689,12 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 	}
 
 	as_sindex_metadata imd;
-	memset((void *)&imd, 0, sizeof(imd));
 	char         * params = NULL;
 	as_namespace * ns     = NULL;
-	imd.post_op = 0;
 
 	for (int i = 0; i < items->num_items; i++) {
+		memset((void *)&imd, 0, sizeof(imd));
+
 		params = items->item[i]->value;
 		switch (items->item[i]->action) {
 			// TODO: Better handling of failure of the action items list
@@ -4766,6 +4766,8 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				break;
 			}
 		}
+
+		as_sindex_imd_free(&imd);
 	}
 
 	// Check if the incoming operation is merge. If it's merge
@@ -4820,8 +4822,6 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 			}
 		}
 	}
-
-	as_sindex_imd_free(&imd);
 
 	return(0);
 }

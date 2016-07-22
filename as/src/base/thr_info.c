@@ -5652,6 +5652,10 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 
 	char set_str[AS_SET_NAME_MAX_SIZE];
 	int set_len  = sizeof(set_str);
+	if (imd->set) {
+		cf_free(imd->set);
+		imd->set = NULL;
+	}
 	ret = as_info_parameter_get(params, STR_SET, set_str, &set_len);
 	if (!ret) {
 		imd->set = cf_strdup(set_str);
