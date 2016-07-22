@@ -25,6 +25,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
 #include <inttypes.h>
 #include <regex.h>
 #include <stdbool.h>
@@ -33,9 +34,12 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include <arpa/inet.h>
+#include <asm-generic/socket.h>
 #include <asm/types.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/epoll.h>
@@ -1446,6 +1450,32 @@ cf_inter_addr_to_index(const cf_ip_addr *addr, char **name)
 				}
 
 				return (int32_t)entry->index;
+			}
+		}
+	}
+
+	return -1;
+}
+
+int32_t
+cf_inter_mtu(cf_ip_addr* inter_addr)
+{
+	inter_info inter;
+	memset(&inter, 0, sizeof(inter));
+
+	if (enumerate_inter(&inter, true) < 0) {
+		cf_warning(CF_SOCKET,
+			   "Error while enumerating network interfaces");
+		return -1;
+	}
+
+	for (uint32_t i = 0; i < inter.n_inters; ++i) {
+		inter_entry* entry = &inter.inters[i];
+
+		for (uint32_t k = 0; k < entry->n_addrs; ++k) {
+			cf_ip_addr* entry_addr = &entry->addrs[k];
+			if (cf_ip_addr_compare(inter_addr, entry_addr)) {
+				return entry->mtu;
 			}
 		}
 	}

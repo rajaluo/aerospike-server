@@ -173,9 +173,6 @@ void as_fabric_dump();
 
 typedef struct {
 
-	as_fabric_event_fn 	event_cb;
-	void 				*event_udata;
-
 	// Arguably, these first two should be pushed into the msg system
 	const msg_template 	*mt[M_TYPE_MAX];
 	size_t 				mt_sz[M_TYPE_MAX];
@@ -737,12 +734,15 @@ int
 fabric_connect(fabric_args *fa, fabric_node_element *fne)
 {
 
-	// Get the address of the remote endpoint
+	// Get the ip address of the remote endpoint
 	cf_sock_addr addr;
-	if (0 > as_hb_getaddr(fne->node, &addr)) {
+	if (0 > as_hb_getaddr(fne->node, &addr.addr)) {
 		cf_debug(AS_FABRIC, "fabric_connect: unknown remote endpoint %"PRIx64, fne->node);
 		return(-1);
 	}
+
+	// Get fabric port of the remote endpoint
+	cf_ip_port_from_node_id(fne->node, &addr.port);
 
 	// Initiate the connect to the remote endpoint
 	cf_socket sock;
@@ -766,21 +766,6 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	}
 
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node); // identifies self to remote
-	if (AS_HB_MODE_MESH == g_config.hb_mode) {
-		cf_debug(AS_FABRIC, "Sending %s as the IP address for receiving heartbeats", g_config.hb_addr_to_use);
-		if (!g_config.hb_addr_to_use) {
-			cf_crash(AS_FABRIC, "hb_addr_to_use not initialized");
-		}
-
-		cf_sock_addr addr;
-
-		if (cf_sock_addr_from_host_port(g_config.hb_addr_to_use, g_config.hb_port, &addr) < 0) {
-			cf_warning(AS_FABRIC, "Invalid heartbeat IP address: %s", g_config.hb_addr_to_use);
-		} else {
-			cf_sock_addr_to_fabric(&addr, m);
-		}
-	}
-	msg_set_buf(m, FS_ANV, (byte *)g_paxos->succession, sizeof(cf_node) * g_config.paxos_max_cluster_size, MSG_SET_COPY);
 
 	fabric_buffer_set_write_msg(fb, m);
 
@@ -1017,38 +1002,13 @@ fabric_process_read_msg(fabric_buffer *fb)
 
 		int rv;
 
-		// create as_hb_pulse - code copied from as_hb_rx_process
 		cf_node node;
-		cf_sock_addr addr;
-		cf_node *buf;
-		size_t bufsz;
-
-		if (0 != msg_get_uint64(m, FS_FIELD_NODE, &node))
-			goto Next;
-
-		if (AS_HB_MODE_MCAST == g_config.hb_mode) {
-			if (cf_socket_remote_name(fb->sock, &addr) < 0) {
-				goto Next;
-			}
-
-			cf_debug(AS_FABRIC, "getpeername | %s (node = %"PRIx64", fd = %d)",
-					cf_sock_addr_print(&addr), node, CSFD(fb->sock));
-		} else if (AS_HB_MODE_MESH == g_config.hb_mode) {
-			cf_sock_addr_from_fabric(m, &addr);
+		if (0 != msg_get_uint64(m, FS_FIELD_NODE, &node)) {
+			// Node is is missing in first message. Should never
+			// happen. Abandon this connection.
+			return false;
 		}
 
-		// Get the succession list from the pulse message
-		if (0 != msg_get_buf(m, FS_ANV, (byte **)&buf, &bufsz, MSG_GET_DIRECT))
-			goto Next;
-
-		if (bufsz != (g_config.paxos_max_cluster_size * sizeof(cf_node))) {
-			cf_warning(AS_FABRIC, "Corrupted data? The size of anv is inaccurate. Received: %zu ; Expected: %lu", bufsz, (g_config.paxos_max_cluster_size * sizeof(cf_node)));
-			goto Next;
-		}
-
-		as_hb_process_fabric_heartbeat(node, fb->sock, &addr, buf, bufsz);
-
-Next:
 		as_fabric_msg_put(m);
 
 		cf_debug(AS_FABRIC, "received and parse connection start message: from node %"PRIx64, node);
@@ -1417,7 +1377,6 @@ fabric_worker_fn(void *argv)
 	return(0);
 }
 
-
 // Do the network accepts here, and allocate a file descriptor to
 // an epoll worker thread
 
@@ -1631,7 +1590,6 @@ fabric_node_disconnect(cf_node node)
 static void
 fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 {
-	fabric_args *fa = udata;
 
 	if ((nevents < 1) || (nevents > g_config.paxos_max_cluster_size) || !events)
 	{
@@ -1639,12 +1597,8 @@ fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 		return;
 	}
 
-	as_fabric_event_node fabric_events[AS_CLUSTER_SZ];
-	memset(fabric_events, 0, sizeof(as_fabric_event_node) * g_config.paxos_max_cluster_size);
-
 	for (int i = 0; i < nevents; i++)
 	{
-		fabric_events[i].nodeid = events[i].nodeid;
 		switch (events[i].evt)
 		{
 			case AS_HB_NODE_ARRIVE:
@@ -1661,23 +1615,11 @@ fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 					fne_release(fne);
 				}
 				cf_info(AS_FABRIC, "fabric: node %"PRIx64" arrived", events[i].nodeid);
-				fabric_events[i].evt = FABRIC_NODE_ARRIVE;
-				fabric_events[i].p_node = events[i].p_node;
 				break;
 			}
 			case AS_HB_NODE_DEPART:
 				cf_info(AS_FABRIC, "fabric: node %"PRIx64" departed", events[i].nodeid);
 				fabric_node_disconnect(events[i].nodeid);
-				fabric_events[i].evt = FABRIC_NODE_DEPART;
-				break;
-			case AS_HB_NODE_UNDUN:
-				cf_info(AS_FABRIC, "fabric: node %"PRIx64" undunned", events[i].nodeid);
-				fabric_events[i].evt = FABRIC_NODE_UNDUN;
-				fabric_events[i].p_node = events[i].p_node;
-				break;
-			case AS_HB_NODE_DUN:
-				cf_info(AS_FABRIC, "fabric: node %"PRIx64" dunned", events[i].nodeid);
-				fabric_events[i].evt = FABRIC_NODE_DUN;
 				break;
 			default:
 				cf_warning(AS_FABRIC, "fabric: received unknown event type %d %"PRIx64"", i, events[i].nodeid);
@@ -1689,22 +1631,6 @@ fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 	as_fabric_dump();
 #endif
 
-	// Notify whoever above who might care
-	if (fa->event_cb)
-	{
-		(*fa->event_cb) (nevents, fabric_events, fa->event_udata);
-	}
-	else
-		cf_warning(AS_FABRIC, "fabric_heartbeat_event: got %d events from heartbeat system, no handler registered", nevents);
-
-}
-
-int
-as_fabric_register_event_fn( as_fabric_event_fn event_cb, void *event_udata )
-{
-	g_fabric_args->event_udata = event_udata;
-	g_fabric_args->event_cb = event_cb;
-	return(0);
 }
 
 int
@@ -1842,7 +1768,7 @@ as_fabric_start()
 	}
 
 	// Register a callback with the heartbeat mechanism
-	as_hb_register(fabric_heartbeat_event, fa);
+	as_hb_register_listener(fabric_heartbeat_event, fa);
 
 	return(0);
 }
