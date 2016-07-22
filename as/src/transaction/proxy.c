@@ -1043,46 +1043,47 @@ shipop_response_handler(msg* m, proxy_request* pr)
 
 	rw_request* rw = pr->rw;
 
-	cf_assert(rw->from.any, AS_PROXY, CF_CRITICAL,
-			"ship-op rw origin %u has null 'from'", rw->origin);
+	pthread_mutex_lock(&rw->lock);
+
+	if (! rw->from.any) {
+		// Lost race against timeout.
+		pthread_mutex_unlock(&rw->lock);
+		rw_request_release(rw);
+		return;
+	}
 
 	// This node is the resolving node (node @ which duplicate resolution was
-	// triggered). It could be:
-	//
-	// 1. Originating node [where the request was sent from the client] - in
-	//    that case send response back to the client directly.
-	// 2. Non-originating node [where the request arrived as a regular proxy] -
-	//    in that case send response back to the proxy originating node.
+	// triggered) - respond to various possible origins.
 
-	// Case 2.
-	if (rw->origin == FROM_PROXY) {
+	switch (rw->origin) {
+	case FROM_CLIENT:
+		shipop_handle_client_response(m, rw);
+		break;
+	case FROM_PROXY:
 		msg_preserve_fields(m, 2, PROXY_FIELD_OP, PROXY_FIELD_AS_PROTO);
-
 		// Fake the ORIGINATING proxy tid.
 		msg_set_uint32(m, PROXY_FIELD_TID, rw->from_data.proxy_tid);
-
 		msg_incr_ref(m);
-
 		if (as_fabric_send(rw->from.proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(pr->fab_msg);
 		}
+		break;
+	case FROM_IUDF:
+		rw->from.iudf_orig->cb(rw->from.iudf_orig->udata, 0);
+		break;
+	case FROM_BATCH:
+	case FROM_NSUP:
+		// Should be impossible for batch reads and nsup deletes to get here.
+	default:
+		cf_crash(AS_PROXY, "unexpected transaction origin %u", rw->origin);
+		break;
 	}
-	// Case 1.
-	else {
-		pthread_mutex_lock(&rw->lock);
 
-		if (rw->origin == FROM_CLIENT) {
-			shipop_handle_client_response(m, rw);
-		}
-		else if (rw->origin == FROM_IUDF) {
-			rw->from.iudf_orig->cb(rw->from.iudf_orig->udata, 0);
-		}
+	// Signal to destructor and timeout that origin response is handled.
+	rw->from.any = NULL;
 
-		rw->from.any = NULL; // pattern, not needed
-
-		pthread_mutex_unlock(&rw->lock);
-	}
+	pthread_mutex_unlock(&rw->lock);
 
 	// This node is the ship-op initiator - remove rw_request from hash.
 
@@ -1139,16 +1140,18 @@ shipop_handle_client_response(msg* m, rw_request* rw)
 void
 shipop_timeout_handler(proxy_request* pr)
 {
-	pthread_mutex_lock(&pr->rw->lock);
+	rw_request* rw = pr->rw;
 
-	if (pr->rw->origin == FROM_IUDF) {
-		pr->rw->from.iudf_orig->cb(pr->rw->from.iudf_orig->udata,
-				AS_PROTO_RESULT_FAIL_TIMEOUT);
-		pr->rw->from.iudf_orig = NULL;
-	}
+	pthread_mutex_lock(&rw->lock);
 
-	pthread_mutex_unlock(&pr->rw->lock);
+	// Invoke the "original" timeout handler - it knows which stats to affect.
+	rw->timeout_cb(rw);
 
-	rw_request_release(pr->rw);
+	pthread_mutex_unlock(&rw->lock);
+
+	rw_request_hkey hkey = { rw->rsv.ns->id, rw->keyd };
+
+	rw_request_hash_delete(&hkey);
+	rw_request_release(rw);
 	pr->rw = NULL;
 }
