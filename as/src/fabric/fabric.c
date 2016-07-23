@@ -274,7 +274,7 @@ typedef struct {
 
 	fabric_node_element *fne;
 
-	uint32_t connected;             // 0 = not connected, 1 = connected, uint32_t for atomic compare and set.
+	cf_atomic32 connected;          // 0 = not connected, 1 = connected, uint32_t for atomic compare and set.
 	fb_status status;
 	bool failed;                    // This fb has failed and is unusable
 
