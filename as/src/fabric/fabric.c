@@ -494,7 +494,7 @@ fabric_buffer_disconnect(fabric_buffer *fb)
 	fb->failed = true;
 
 	// MT safe connected check.
-	if (ck_pr_cas_32(&fb->connected, 1, 0)) {
+	if (cf_atomic32_decr(&fb->connected) == 0) {
 		cf_atomic32_decr(&(fb->fne->fd_counter));
 
 		if (shash_delete(fb->fne->connected_fb_hash, &fb) != SHASH_OK) {
@@ -506,6 +506,7 @@ fabric_buffer_disconnect(fabric_buffer *fb)
 
 		cf_socket_shutdown(fb->sock);
 	}
+	// else - 2nd disconnect leaves -1.
 }
 
 static void
@@ -668,23 +669,25 @@ fabric_disconnect_reduce_fn(void *key, void *data, void *udata)
 
 	if (! fb) {
 		cf_warning(AS_FABRIC, "fb == NULL");
-		goto out;
+		fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
+		return SHASH_REDUCE_DELETE;
 	}
 
 	if (fb->status != FB_STATUS_IDLE) {
 		cf_warning(AS_FABRIC, "not shutting down in-flight FB %p (status %d)", fb, fb->status);
-		goto out;
+		fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
+		return SHASH_REDUCE_DELETE;
 	}
 
 	if (fb->worker_id == -1) {
 		cf_warning(AS_FABRIC, "fb %p has no worker_id ~~ Ignoring it!", fb);
-		goto out;
+		fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
+		return SHASH_REDUCE_DELETE;
 	}
 
 	cf_socket_shutdown(fb->sock);
 
-out:
-	fabric_buffer_release(fb);	// For delete from fne->connected_fb_hash
+	fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
 	return SHASH_REDUCE_DELETE;
 }
 
@@ -718,14 +721,16 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	// Don't create too many conns because you'll just get small packets.
 	uint32_t fds = cf_atomic32_incr(&(fne->fd_counter));
 	if (fds >= FABRIC_MAX_FDS) {
-		goto error_out;
+		cf_atomic32_decr(&fne->fd_counter);
+		return -1;
 	}
 
 	// Get the ip address of the remote endpoint.
 	cf_sock_addr addr;
 	if (0 > as_hb_getaddr(fne->node, &addr.addr)) {
 		cf_debug(AS_FABRIC, "fabric_connect: unknown remote endpoint %"PRIx64, fne->node);
-		goto error_out;
+		cf_atomic32_decr(&fne->fd_counter);
+		return -1;
 	}
 
 	// Get fabric port of the remote endpoint
@@ -736,7 +741,8 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 
 	if (cf_socket_init_client_nb(&addr, &sock) < 0) {
 		cf_debug(AS_FABRIC, "fabric connect could not create connect");
-		goto error_out;
+		cf_atomic32_decr(&fne->fd_counter);
+		return -1;
 	}
 
 	cf_atomic64_incr(&g_stats.fabric_connections_opened);
@@ -749,7 +755,8 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	msg *m = as_fabric_msg_get(M_TYPE_FABRIC);
 	if (! m) {
 		fabric_buffer_release(fb);
-		goto error_out;
+		cf_atomic32_decr(&fne->fd_counter);
+		return -1;
 	}
 
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node); // identifies self to remote
@@ -769,11 +776,6 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	fabric_worker_add(fa, fb);
 
 	return 0;
-
-error_out:
-	cf_atomic32_decr(&fne->fd_counter);
-
-	return -1;
 }
 
 // Called when a message has written a few bytes
