@@ -673,6 +673,8 @@ fabric_disconnect_reduce_fn(void *key, void *data, void *udata)
 		return SHASH_REDUCE_DELETE;
 	}
 
+	fb->connected = 0;
+
 	if (fb->status != FB_STATUS_IDLE) {
 		cf_warning(AS_FABRIC, "not shutting down in-flight FB %p (status %d)", fb, fb->status);
 		fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
