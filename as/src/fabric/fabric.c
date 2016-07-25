@@ -274,7 +274,7 @@ typedef struct {
 
 	fabric_node_element *fne;
 
-	cf_atomic32 connected;          // 0 = not connected, 1 = connected, uint32_t for atomic compare and set.
+	bool is_connect;				// true: from connect, false: from accept
 	fb_status status;
 	bool failed;                    // This fb has failed and is unusable
 
@@ -446,7 +446,7 @@ fabric_buffer_create(cf_socket sock)
 	fb->nodelay_isset = false;
 	fb->keepalive_isset = false;
 	fb->fne = NULL;
-	fb->connected = 0;
+	fb->is_connect = false;
 	fb->status = FB_STATUS_IDLE;
 	fb->failed = false;
 
@@ -493,20 +493,15 @@ fabric_buffer_disconnect(fabric_buffer *fb)
 {
 	fb->failed = true;
 
-	// MT safe connected check.
-	if (cf_atomic32_decr(&fb->connected) == 0) {
-		cf_atomic32_decr(&(fb->fne->fd_counter));
-
-		if (shash_delete(fb->fne->connected_fb_hash, &fb) != SHASH_OK) {
-			cf_crash(AS_FABRIC, "fb %p is connected to fne %p but not in connected_fb_hash", fb, fb->fne);
-		}
-
-		cf_debug(AS_FABRIC, "removed fb %p from connected_fb_hash", fb);
-		cf_rc_release(fb);	// For delete from fne->connected_fb_hash
-
-		cf_socket_shutdown(fb->sock);
+	if (shash_delete(fb->fne->connected_fb_hash, &fb) != SHASH_OK) {
+		cf_warning(AS_FABRIC, "fb %p is not in (fne %p)->connected_fb_hash", fb, fb->fne);
+		return;
 	}
-	// else - 2nd disconnect leaves -1.
+
+	cf_debug(AS_FABRIC, "removed fb %p from connected_fb_hash", fb);
+	cf_rc_release(fb);	// For delete from fne->connected_fb_hash
+
+	cf_socket_shutdown(fb->sock);
 }
 
 static void
@@ -669,25 +664,18 @@ fabric_disconnect_reduce_fn(void *key, void *data, void *udata)
 
 	if (! fb) {
 		cf_warning(AS_FABRIC, "fb == NULL");
-		fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
 		return SHASH_REDUCE_DELETE;
 	}
-
-	fb->connected = 0;
 
 	if (fb->status != FB_STATUS_IDLE) {
 		cf_warning(AS_FABRIC, "not shutting down in-flight FB %p (status %d)", fb, fb->status);
-		fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
-		return SHASH_REDUCE_DELETE;
 	}
-
-	if (fb->worker_id == -1) {
-		cf_warning(AS_FABRIC, "fb %p has no worker_id ~~ Ignoring it!", fb);
-		fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
-		return SHASH_REDUCE_DELETE;
+	else if (fb->worker_id == -1) {
+		cf_warning(AS_FABRIC, "fb %p has no worker_id", fb);
 	}
-
-	cf_socket_shutdown(fb->sock);
+	else {
+		cf_socket_shutdown(fb->sock);
+	}
 
 	fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
 	return SHASH_REDUCE_DELETE;
@@ -702,8 +690,6 @@ fabric_disconnect(fabric_args *fa, fabric_node_element *fne)
 
 	if (num_fbs > num_fds) {
 		cf_warning(AS_FABRIC, "number of fabric buffers (%d) > number of open file descriptors (%d) for fne %p", num_fbs, num_fds, fne);
-		// Shouldn't need to halt on this case, just warn.
-//		cf_crash(AS_FABRIC, "number of fabric buffers (%d) > number of open file descriptors (%d) for fne %p", num_fbs, num_fds, fne);
 	}
 	else if (num_fbs < num_fds) {
 		cf_warning(AS_FABRIC, "number of fabric buffers (%d) < number of open file descriptors (%d) for fne %p", num_fbs, num_fds, fne);
@@ -711,7 +697,7 @@ fabric_disconnect(fabric_args *fa, fabric_node_element *fne)
 
 	shash_reduce_delete(fne->connected_fb_hash, fabric_disconnect_reduce_fn, fa);
 
-	return(0);
+	return 0;
 }
 
 // Create a connection to the remote node. This creates a non-blocking
@@ -751,6 +737,8 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 
 	// Create a fabric buffer to go along with the file descriptor
 	fabric_buffer *fb = fabric_buffer_create(sock);
+
+	fb->is_connect = true;
 	fabric_buffer_associate(fb, fne);
 
 	// Grab a start message, send it to the remote endpoint so it knows me
@@ -774,7 +762,6 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 		cf_crash(AS_FABRIC, "failed to add unique fb %p to fne %p connected_fb_hash -- rv %d", fb, fne, rv);
 	}
 
-	fb->connected = 1;
 	fabric_worker_add(fa, fb);
 
 	return 0;
@@ -2288,7 +2275,7 @@ fb_hash_dump_reduce_fn(void *key, void *data, void *udata)
 	int *item_num = (int *)udata;
 	int count = cf_rc_count(fb);
 
-	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %"PRIx64": %s); fd: %d (%s) ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), CSFD(fb->sock), fb->failed ? "failed" : "healthy", fb->worker_id, count, (fb->connected ? "outbound" : "inbound"));
+	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %"PRIx64": %s); fd: %d (%s) ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), CSFD(fb->sock), fb->failed ? "failed" : "healthy", fb->worker_id, count, (fb->is_connect ? "outbound" : "inbound"));
 	*item_num += 1;
 
 	return 0;
