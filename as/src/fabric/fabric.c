@@ -274,7 +274,6 @@ typedef struct {
 
 	fabric_node_element *fne;
 
-	bool is_connect;				// true: from connect, false: from accept
 	fb_status status;
 	bool failed;                    // This fb has failed and is unusable
 
@@ -337,17 +336,12 @@ msg_template fabric_mt[] = {
 
 #define FS_MSG_SCRATCH_SIZE 512 // accommodate 64-node cluster
 
-// Hash table of all fabric buffers.
-//  Key: fabric_buffer * ; Value: 0 (Arbitrary & unused.)
-//  (Used to supporting logging information about the fabric resources via the "dump_fabric" command.)
-static shash *g_fb_hash;
-
-// regrettably, this may be called simultaneously from multiple nodes
+// Regrettably, this may be called simultaneously from multiple nodes
 // Reference counting system works like this:
 // 'create' takes refcount to 1, and you can have no TCP connections
 // but still a refcount
 // Every buffer holds a reference count, since it has a pointer to the
-// fne. Even buffers in the epoll code
+// fne. Even buffers in the epoll code.
 fabric_node_element *
 fne_create(cf_node node)
 {
@@ -446,7 +440,6 @@ fabric_buffer_create(cf_socket sock)
 	fb->nodelay_isset = false;
 	fb->keepalive_isset = false;
 	fb->fne = NULL;
-	fb->is_connect = false;
 	fb->status = FB_STATUS_IDLE;
 	fb->failed = false;
 
@@ -462,21 +455,7 @@ fabric_buffer_create(cf_socket sock)
 	fb->r_parse = fb->r_buf;
 	fb->r_end = fb->r_buf + FB_INPLACE_SZ;
 
-	int value = 0; // (Arbitrary & unused.)
-#ifdef CONNECTED_FB_HASH_USE_PUT_UNIQUE
-	if (SHASH_OK != shash_put_unique(g_fb_hash, &fb, &value)) {
-		cf_crash(AS_FABRIC, "failed to put unique in hash fb %p", fb);
-	}
-#else
-	if (SHASH_OK == shash_get(g_fb_hash, &fb, &value)) {
-		cf_warning(AS_FABRIC, "fbc(%d): fb %p unexpectedly found in g_fb_hash", CSFD(sock), fb);
-	}
-	else if (SHASH_OK != shash_put(g_fb_hash, &fb, &value)) {
-		cf_crash(AS_FABRIC, "failed to shash_put() into hash fb %p", fb);
-	}
-#endif
-
-	return(fb);
+	return fb;
 }
 
 void
@@ -510,20 +489,6 @@ fabric_buffer_release(fabric_buffer *fb)
 	fb->status = FB_STATUS_IDLE;
 
 	if (0 == cf_rc_release(fb)) {
-#if 0		// super deep debug
-		if (fb->fne) {
-			if (fb->fne->xmit_buffer_queue)
-				cf_debug(AS_FABRIC, "fabric buffer destroy fb %p fb-fne %p fb-fne-xmitbuf %p", fb, fb->fne, fb->fne->xmit_buffer_queue);
-			else
-				cf_debug(AS_FABRIC, "fabric buffer destroy fb %p fb-fne %p ", fb, fb->fne);
-		}
-		else {
-			cf_debug(AS_FABRIC, "fabric buffer destroy fb %p no attached fne ", fb);
-		}
-#endif
-
-//		cf_debug(AS_FABRIC, "fabric buffer destruction! fb %p fd %d",fb,fb->fd);
-
 		if (fb->fne) {
 			fabric_buffer_disconnect(fb);
 			fne_release(fb->fne);
@@ -550,15 +515,6 @@ fabric_buffer_release(fabric_buffer *fb)
 
 		if (fb->w_in_place == false && fb->w_buf) {
 			cf_free(fb->w_buf);
-		}
-
-#ifdef EXTRA_CHECKS
-		// DEBUG - this is a large memset - not good for production
-		memset(fb, 0xff, sizeof(fabric_buffer));
-#endif
-
-		if (SHASH_OK != shash_delete(g_fb_hash, &fb)) {
-			cf_crash(AS_FABRIC, "failed to fb %p delete from hash table", fb);
 		}
 
 		cf_rc_free(fb);
@@ -737,8 +693,6 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 
 	// Create a fabric buffer to go along with the file descriptor
 	fabric_buffer *fb = fabric_buffer_create(sock);
-
-	fb->is_connect = true;
 	fabric_buffer_associate(fb, fne);
 
 	// Grab a start message, send it to the remote endpoint so it knows me
@@ -1561,10 +1515,6 @@ static int as_fabric_transact_init(void);
 int
 as_fabric_init()
 {
-	if (SHASH_OK != shash_create(&g_fb_hash, ptr_hash_fn, sizeof(void *), sizeof(int), 1000, SHASH_CR_MT_BIGLOCK)) {
-		cf_crash(AS_FABRIC, "Failed to allocate FB hash");
-	}
-
 	fabric_args *fa = cf_malloc(sizeof(fabric_args));
 	memset(fa, 0, sizeof(fabric_args));
 	g_fabric_args = fa;
@@ -2268,19 +2218,6 @@ Cleanup:
 	return(rv);
 }
 
-static int
-fb_hash_dump_reduce_fn(void *key, void *data, void *udata)
-{
-	fabric_buffer *fb = *(fabric_buffer **)key;
-	int *item_num = (int *)udata;
-	int count = cf_rc_count(fb);
-
-	cf_info(AS_FABRIC, "\tFB[%d] fb(%p): fne: %p (node %"PRIx64": %s); fd: %d (%s) ; wid: %d ; rc: %d ; polarity: %s", *item_num, fb, fb->fne, fb->fne->node, (fb->fne->live ? "live" : "dead"), CSFD(fb->sock), fb->failed ? "failed" : "healthy", fb->worker_id, count, (fb->is_connect ? "outbound" : "inbound"));
-	*item_num += 1;
-
-	return 0;
-}
-
 // Debug routine that dumps out everything known by fabric, like what the node lists really are
 //   and all the fabric buffers.
 //   Add more info as you need it....
@@ -2308,11 +2245,5 @@ as_fabric_dump(bool verbose)
 					fne->fd_counter, fne->live, fne->good_write_counter, fne->good_read_counter, cf_queue_priority_sz(fne->xmit_msg_queue));
 			fne_release(fne);
 		}
-	}
-
-	if (verbose) {
-		cf_info(AS_FABRIC, " All Fabric Buffers in the FB hash:");
-		int item_num = 0;
-		shash_reduce(g_fb_hash, fb_hash_dump_reduce_fn, &item_num);
 	}
 }
