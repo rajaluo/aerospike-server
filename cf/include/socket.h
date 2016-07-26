@@ -202,14 +202,12 @@ void cf_poll_destroy(cf_poll poll);
 
 static inline void cf_poll_modify_socket(cf_poll poll, cf_socket *sock, uint32_t events, void *data)
 {
-	int32_t err = cf_poll_modify_socket_forgiving(poll, sock, events, data, 0, NULL);
-	(void)err;
+	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(poll, sock, events, data, 0, NULL));
 }
 
 static inline void cf_poll_delete_socket(cf_poll poll, cf_socket *sock)
 {
-	int32_t err = cf_poll_delete_socket_forgiving(poll, sock, 0, NULL);
-	(void)err;
+	CF_IGNORE_ERROR(cf_poll_delete_socket_forgiving(poll, sock, 0, NULL));
 }
 
 CF_MUST_CHECK int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);

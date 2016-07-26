@@ -108,9 +108,9 @@ thr_demarshal_resume(as_file_handle *fd_h)
 	// the client disconnected) while the transaction was still ongoing.
 
 	static int32_t err_ok[] = { ENOENT };
-	int32_t err = cf_poll_modify_socket_forgiving(fd_h->poll, fd_h->sock,
-			EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h, sizeof(err_ok) / sizeof(int32_t), err_ok);
-	(void)err;
+	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(fd_h->poll, fd_h->sock,
+			EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h,
+			sizeof(err_ok) / sizeof(int32_t), err_ok));
 }
 
 void
