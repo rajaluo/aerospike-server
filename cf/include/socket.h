@@ -205,6 +205,7 @@ CF_MUST_CHECK int32_t cf_inter_mtu(cf_ip_addr *inter_addr);
 CF_MUST_CHECK int32_t cf_inter_min_mtu(void);
 
 CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr);
+CF_MUST_CHECK int32_t cf_socket_get_min_mtu(cf_socket sock, const cf_ip_addr* device_ip_addr);
 
 #if defined CF_SOCKET_PRIVATE
 CF_MUST_CHECK size_t cf_socket_addr_len(const struct sockaddr* sa);

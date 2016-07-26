@@ -213,7 +213,7 @@ as_write_start(as_transaction* tr)
 	// If there are duplicates to resolve, start doing so.
 	if (tr->rsv.n_dupl != 0) {
 		if (! start_write_dup_res(rw, tr)) {
-			rw_request_hash_delete(&hkey);
+			rw_request_hash_delete(&hkey, rw);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 			send_write_response(tr, NULL);
 			return TRANS_DONE_ERROR;
@@ -230,7 +230,7 @@ as_write_start(as_transaction* tr)
 
 	// If error, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		send_write_response(tr, NULL);
 		return status;
 	}
@@ -243,12 +243,12 @@ as_write_start(as_transaction* tr)
 	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
 		send_write_response(tr, &rw->response_db);
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		return TRANS_DONE_SUCCESS;
 	}
 
 	if (! start_write_repl_write(rw, tr)) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_write_response(tr, NULL);
 		return TRANS_DONE_ERROR;

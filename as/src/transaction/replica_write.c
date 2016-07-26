@@ -477,7 +477,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 
 	pthread_mutex_unlock(&rw->lock);
 
-	rw_request_hash_delete(&hkey);
+	rw_request_hash_delete(&hkey, rw);
 	rw_request_release(rw);
 	as_fabric_msg_put(m);
 }
