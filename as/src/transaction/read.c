@@ -157,7 +157,7 @@ as_read_start(as_transaction* tr)
 	// else - rw_request is now in hash, continue...
 
 	if (! start_read_dup_res(rw, tr, send_metadata)) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_read_response(tr, NULL, NULL, 0, NULL, NULL);
 		return TRANS_DONE_ERROR;
