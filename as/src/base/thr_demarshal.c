@@ -106,7 +106,11 @@ thr_demarshal_resume(as_file_handle *fd_h)
 
 	// This causes ENOENT, when we reached NextEvent_FD_Cleanup (e.g, because
 	// the client disconnected) while the transaction was still ongoing.
-	cf_poll_modify_socket(fd_h->poll, fd_h->sock, EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h);
+
+	static int32_t err_ok[] = { ENOENT };
+	int32_t err = cf_poll_modify_socket_forgiving(fd_h->poll, fd_h->sock,
+			EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h, sizeof(err_ok) / sizeof(int32_t), err_ok);
+	(void)err;
 }
 
 void
@@ -288,7 +292,7 @@ typedef enum {
 } buffer_type;
 
 int
-thr_demarshal_set_buffer(cf_socket sock, buffer_type type, int size)
+thr_demarshal_set_buffer(cf_socket *sock, buffer_type type, int size)
 {
 	static int rcv_max = -1;
 	static int snd_max = -1;
@@ -343,7 +347,7 @@ thr_demarshal_set_buffer(cf_socket sock, buffer_type type, int size)
 }
 
 int
-thr_demarshal_config_xdr(cf_socket sock)
+thr_demarshal_config_xdr(cf_socket *sock)
 {
 	if (thr_demarshal_set_buffer(sock, BUFFER_TYPE_RECEIVE, XDR_READ_BUFFER_SIZE) < 0) {
 		return -1;
@@ -421,12 +425,12 @@ thr_demarshal(void *arg)
 		cf_poll_add_socket(poll, s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
 		cf_info(AS_DEMARSHAL, "Service started: socket %s:%d", s->addr, s->port);
 
-		if (CSFD(ls->sock)) {
+		if (ls->sock) {
 			cf_poll_add_socket(poll, ls->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &ls->sock);
 			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
 		}
 
-		if (CSFD(xs->sock)) {
+		if (xs->sock) {
 			cf_poll_add_socket(poll, xs->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &xs->sock);
 			cf_info(AS_DEMARSHAL, "Service also listening on XDR info socket %s:%d", xs->addr, xs->port);
 		}
@@ -456,11 +460,11 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			cf_socket *ssock = events[i].data;
+			cf_socket **ssock = events[i].data;
 
 			if (ssock == &s->sock || ssock == &ls->sock || ssock == &xs->sock) {
 				// Accept new connections on the service socket.
-				cf_socket csock;
+				cf_socket *csock;
 				cf_sock_addr sa;
 
 				if (cf_socket_accept(*ssock, &csock, &sa) < 0) {
@@ -566,7 +570,7 @@ thr_demarshal(void *arg)
 				// activity on an already existing transaction, so we have some
 				// state to manage.
 				as_proto *proto_p = 0;
-				cf_socket sock = fd_h->sock;
+				cf_socket *sock = fd_h->sock;
 
 				if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
 					cf_detail(AS_DEMARSHAL, "proto socket: remote close: fd %d event %x", CSFD(sock), events[i].events);
@@ -936,7 +940,7 @@ as_demarshal_start()
 	}
 
 	for (i = 1; i < dm->num_threads; i++) {
-		while (SFD(dm->polls[i]) == 0) {
+		while (CEFD(dm->polls[i]) == 0) {
 			sleep(1);
 			cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads ...");
 		}
@@ -947,7 +951,7 @@ as_demarshal_start()
 	if (0 != pthread_create(&(dm->dm_th[0]), 0, thr_demarshal, &g_config.socket)) {
 		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
 	}
-	while (SFD(dm->polls[0]) == 0) {
+	while (CEFD(dm->polls[0]) == 0) {
 		sleep(1);
 	}
 

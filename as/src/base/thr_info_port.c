@@ -53,7 +53,7 @@ typedef struct {
 	int			xmit_alloc;
 	uint8_t		*xmit_buf;
 
-	cf_socket	sock;
+	cf_socket	*sock;
 
 } info_port_state;
 
@@ -63,9 +63,7 @@ info_port_state_free(info_port_state *ips)
 {
 	if (ips->recv_buf) cf_free(ips->recv_buf);
 	if (ips->xmit_buf) cf_free(ips->xmit_buf);
-	if (CSFD(ips->sock) != -1) {
-		cf_socket_close(ips->sock);
-	}
+	cf_socket_close(ips->sock);
 	memset(ips, -1, sizeof(info_port_state));
 	cf_free(ips);
 }
@@ -238,12 +236,12 @@ thr_info_port_fn(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			cf_socket *ssock = events[i].data;
+			cf_socket **ssock = events[i].data;
 
 			if (ssock == &s->sock) {
 
 				// Accept new connections on the service socket.
-				cf_socket csock;
+				cf_socket *csock;
 				cf_sock_addr sa;
 
 				if (cf_socket_accept(s->sock, &csock, &sa) < 0) {
