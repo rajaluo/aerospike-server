@@ -295,7 +295,7 @@ as_udf_start(as_transaction* tr)
 	// If there are duplicates to resolve, start doing so.
 	if (tr->rsv.n_dupl != 0) {
 		if (! start_udf_dup_res(rw, tr)) {
-			rw_request_hash_delete(&hkey);
+			rw_request_hash_delete(&hkey, rw);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 			send_udf_response(tr, NULL);
 			return TRANS_DONE_ERROR;
@@ -314,7 +314,7 @@ as_udf_start(as_transaction* tr)
 	// If error or UDF was a read, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
 		send_udf_response(tr, &rw->response_db);
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		return status;
 	}
 
@@ -326,12 +326,12 @@ as_udf_start(as_transaction* tr)
 	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
 		send_udf_response(tr, &rw->response_db);
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		return TRANS_DONE_SUCCESS;
 	}
 
 	if (! start_udf_repl_write(rw, tr)) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_udf_response(tr, NULL);
 		return TRANS_DONE_ERROR;

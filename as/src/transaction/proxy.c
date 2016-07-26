@@ -1089,7 +1089,7 @@ shipop_response_handler(msg* m, proxy_request* pr)
 
 	rw_request_hkey hkey = { rw->rsv.ns->id, rw->keyd };
 
-	rw_request_hash_delete(&hkey);
+	rw_request_hash_delete(&hkey, rw);
 	rw_request_release(rw);
 	pr->rw = NULL;
 }
@@ -1151,7 +1151,7 @@ shipop_timeout_handler(proxy_request* pr)
 
 	rw_request_hkey hkey = { rw->rsv.ns->id, rw->keyd };
 
-	rw_request_hash_delete(&hkey);
+	rw_request_hash_delete(&hkey, rw);
 	rw_request_release(rw);
 	pr->rw = NULL;
 }
