@@ -105,7 +105,7 @@ cf_ip_addr_from_binary(const uint8_t *binary, size_t size, cf_ip_addr *addr)
 		return -1;
 	}
 
-	uint32_t s_addr = ntohl(*(uint32_t*)(binary + 12));
+	uint32_t s_addr = *(uint32_t*)(binary + 12);
 	memcpy(&addr->s_addr, &s_addr, 4);
 	return 16;
 }
@@ -123,7 +123,7 @@ cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
 	}
 
 	binary[10] = binary[11] = 0xff;
-	uint32_t s_addr = htonl(*(uint32_t*)&addr->s_addr);
+	uint32_t s_addr = *(uint32_t*)&addr->s_addr;
 	memcpy(binary + 12, &s_addr, 4);
 	return 16;
 }

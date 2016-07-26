@@ -1174,7 +1174,10 @@ static msg_template g_hb_v2_msg_template[] = {
  */
 #define MSG_BUFFER_MAX_SIZE() (10 * 1024 * 1024)
 
-#define ASC() (2 << 4)
+
+#ifndef ASC
+#define ASC (2 << 4)
+#endif
 
 /**
  * Maximum memory size allocated on the call stack.
@@ -1625,42 +1628,47 @@ as_hb_init()
 
 	// Add the mesh seed nodes.
 	// Using one time seed config outside the config module.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (g_config.hb_config.hb_mesh_seed_addrs[i]) {
+	if (IS_MESH()) {
+		for (int i = 0; i < AS_CLUSTER_SZ; i++) {
+			if (g_config.hb_config.hb_mesh_seed_addrs[i]) {
 
-			int rv =
-			  mesh_tip(g_config.hb_config.hb_mesh_seed_addrs[i],
-				   g_config.hb_config.hb_mesh_seed_ports[i]);
+				int rv = mesh_tip(
+				  g_config.hb_config.hb_mesh_seed_addrs[i],
+				  g_config.hb_config.hb_mesh_seed_ports[i]);
 
-			switch (rv) {
-				case SHASH_OK:
-					INFO("Added mesh seed node from config "
-					     "%s:%d",
-					     g_config.hb_config
-					       .hb_mesh_seed_addrs[i],
-					     g_config.hb_config
-					       .hb_mesh_seed_ports[i]);
-					break;
-				case SHASH_ERR_FOUND:
-					INFO("Duplicate mesh seed node from "
-					     "config %s:%d",
-					     g_config.hb_config
-					       .hb_mesh_seed_addrs[i],
-					     g_config.hb_config
-					       .hb_mesh_seed_ports[i]);
-					break;
-				case SHASH_ERR:
-					WARNING("Error adding mesh seed node "
-						"from config %s:%d",
-						g_config.hb_config
-						  .hb_mesh_seed_addrs[i],
-						g_config.hb_config
-						  .hb_mesh_seed_ports[i]);
-					break;
+				switch (rv) {
+					case SHASH_OK:
+						INFO("Added mesh seed node "
+						     "from config "
+						     "%s:%d",
+						     g_config.hb_config
+						       .hb_mesh_seed_addrs[i],
+						     g_config.hb_config
+						       .hb_mesh_seed_ports[i]);
+						break;
+					case SHASH_ERR_FOUND:
+						INFO("Duplicate mesh seed node "
+						     "from "
+						     "config %s:%d",
+						     g_config.hb_config
+						       .hb_mesh_seed_addrs[i],
+						     g_config.hb_config
+						       .hb_mesh_seed_ports[i]);
+						break;
+					case SHASH_ERR:
+						WARNING(
+						  "Error adding mesh seed node "
+						  "from config %s:%d",
+						  g_config.hb_config
+						    .hb_mesh_seed_addrs[i],
+						  g_config.hb_config
+						    .hb_mesh_seed_ports[i]);
+						break;
+				}
+
+			} else {
+				break;
 			}
-
-		} else {
-			break;
 		}
 	}
 }
@@ -1885,6 +1893,10 @@ as_hb_config_validate()
 		      (IS_MESH()) ? "MESH" : "MULTICAST",
 		      config_hb_listen_port_get());
 	}
+	if (!IS_MESH() && g_config.hb_config.hb_mesh_seed_addrs[0]) {
+		CRASH("Invalid config option. mesh-seed-address-port not "
+		      "supported for multicast mode.");
+	}
 }
 
 /**
@@ -2031,6 +2043,11 @@ as_hb_max_cluster_size_isvalid(uint32_t max_cluster_size)
 int
 as_hb_mesh_tip(char* host, int port)
 {
+	if (!IS_MESH()) {
+		WARNING("Tip not applicable for multicast.");
+		return (-1);
+	}
+
 	return mesh_tip(host, port);
 }
 
@@ -2038,13 +2055,15 @@ as_hb_mesh_tip(char* host, int port)
  * Remove an aerospike seed entry from the mesh seed list.
  */
 int
-as_hb_mesh_tip_clear(char* host, char* port)
+as_hb_mesh_tip_clear(char* host, int port)
 {
 	if (!IS_MESH()) {
 		WARNING("Tip clear not applicable for multicast.");
 		return (-1);
 	}
-	if (host == NULL || host[0] == '\0' || port == NULL) {
+
+	if (host == NULL || host[0] == '\0' ||
+	    strnlen(host, HOST_NAME_MAX) == HOST_NAME_MAX) {
 		WARNING("Incorrect host or port");
 		return (-1);
 	}
@@ -2053,7 +2072,7 @@ as_hb_mesh_tip_clear(char* host, char* port)
 
 	as_hb_mesh_tip_clear_udata mesh_tip_clear_reduce_udata;
 	strncpy(mesh_tip_clear_reduce_udata.host, host, HOST_NAME_MAX);
-	mesh_tip_clear_reduce_udata.port = atoi(port);
+	mesh_tip_clear_reduce_udata.port = port;
 	shash_reduce_delete(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
 			    mesh_tip_clear_reduce,
 			    &mesh_tip_clear_reduce_udata);
@@ -2602,9 +2621,9 @@ as_hb_ipaddr_is_specified(const as_hb_ipaddr* addr)
 }
 
 /**
- * Convert a host ordered IPv4 address to an IPv6 address as IPv4-mapped IPv6
+ * Convert a network ordered IPv4 address to an IPv6 address as IPv4-mapped IPv6
  * address.
- * @param v4_addr source ipv4 address in HOST order.
+ * @param v4_addr source ipv4 address in network order.
  * @param v6_addr destination ipv6 address.
  */
 static void
@@ -2618,23 +2637,22 @@ as_hb_ipaddr_from_ipv4(uint32_t v4_addr, as_hb_ipaddr* v6_addr)
 	};
 	v6_addr->addr.qword[0] = v4_to_v6_template.addr.qword[0];
 	v6_addr->addr.qword[1] = v4_to_v6_template.addr.qword[1];
-	v6_addr->addr.dword[3] = htonl(v4_addr);
+	v6_addr->addr.dword[3] = v4_addr;
 }
 
 /**
- * Convert an as_hb_ipaddr to host ordered ipv4 address.
- * @param v4_addr ipv4 address in HOST order.
- * @param v ipv6 address.
+ * Convert an as_hb_ipaddr to network ordered ipv4 address.
+ * @param v6_addr v6 address in network order.
  */
 static uint32_t
 as_hb_ipaddr_to_ipv4h(const as_hb_ipaddr* v6_addr)
 {
-	return ntohl(v6_addr->addr.dword[3]);
+	return v6_addr->addr.dword[3];
 }
 
 /**
- * Convert an as_hb_ipaddr to host ordered ipv4 address.
- * @param v4_addr ipv4 address in HOST order.
+ * Convert an as_hb_ipaddr to network ordered ipv4 address.
+ * @param v4_addr ipv4 address in network order.
  * @param v ipv6 address.
  */
 static uint32_t
@@ -2719,7 +2737,7 @@ msg_endpoint_get(msg* msg, as_hb_endpoint* endpoint)
 			WARNING("Error reading ip address form message.");
 			return -1;
 		}
-		// v2 sends addresses in host order over the wire.
+		// v2 sends addresses in network order over the wire.
 		as_hb_ipaddr_from_ipv4(addr_temp, &endpoint->addr);
 	}
 
@@ -3201,9 +3219,7 @@ config_mcsize()
 
 	// Ensure we are always upper bounded by the absolute max cluster size.
 	int supported_cluster_size =
-	  MIN(AS_CLUSTER_SZ,
-	      MIN(ASC(),
-		  MIN(g_config.paxos_max_cluster_size, mode_cluster_size)));
+	  MIN(ASC, MIN(g_config.paxos_max_cluster_size, mode_cluster_size));
 
 	DETAIL("Supported cluster size %d", supported_cluster_size);
 	return supported_cluster_size;
@@ -5995,6 +6011,12 @@ mesh_endpoint_search_reduce(void* key, void* data, void* udata)
 static int
 mesh_node_endpoint_find(as_hb_endpoint* endpoint, as_hb_mesh_node_key* key)
 {
+
+	if (!as_hb_endpoint_is_specified(endpoint)) {
+		// Null / empty endpoint.
+		return -1;
+	}
+
 	// Linear search. This will in practice not be a very frequent
 	// operation.
 	as_hb_mesh_endpoint_reduce_udata udata;
@@ -7606,7 +7628,7 @@ hb_plugin_set_fn(msg* msg)
 		// Set cluster id
 		char cluster_id[AS_CLUSTER_ID_SZ];
 		as_config_cluster_id_get(cluster_id);
-		if (strlen(cluster_id) != 0 &&
+		if (cluster_id[0] != 0 &&
 		    msg_set_str(msg, AS_HB_MSG_CLUSTER_ID, cluster_id,
 				MSG_SET_COPY) != 0) {
 			CRASH("Error setting cluster id on msg.");
@@ -8168,11 +8190,11 @@ hb_start()
 	// Start the mode submodule
 	hb_mode_start();
 
-	// Start heart beat adjacency tender.
-	hb_adjacency_tender_start();
-
 	// Start heart beat transmitter.
 	hb_tx_start();
+
+	// Start heart beat adjacency tender.
+	hb_adjacency_tender_start();
 
 	HB_UNLOCK();
 }
@@ -8183,7 +8205,9 @@ hb_start()
 static void
 hb_plugin_register(as_hb_plugin* plugin)
 {
+	HB_LOCK();
 	memcpy(&g_hb.plugins[plugin->id], plugin, sizeof(as_hb_plugin));
+	HB_UNLOCK();
 }
 
 /**
