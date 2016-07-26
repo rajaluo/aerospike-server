@@ -132,7 +132,7 @@ as_delete_start(as_transaction* tr)
 	// TODO - should we bother if there's no generation check?
 	if (tr->rsv.n_dupl != 0) {
 		if (! start_delete_dup_res(rw, tr)) {
-			rw_request_hash_delete(&hkey);
+			rw_request_hash_delete(&hkey, rw);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 			send_delete_response(tr);
 			return TRANS_DONE_ERROR;
@@ -145,7 +145,7 @@ as_delete_start(as_transaction* tr)
 
 	// If error, transaction is finished.
 	if ((status = delete_master(tr)) != TRANS_IN_PROGRESS) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		send_delete_response(tr);
 		return status;
 	}
@@ -157,13 +157,13 @@ as_delete_start(as_transaction* tr)
 	// If we don't need replica writes, transaction is finished.
 	// TODO - consider a single-node fast path bypassing hash?
 	if (rw->n_dest_nodes == 0) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		send_delete_response(tr);
 		return TRANS_DONE_SUCCESS;
 	}
 
 	if (! start_delete_repl_write(rw, tr)) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_delete_response(tr);
 		return TRANS_DONE_ERROR;
