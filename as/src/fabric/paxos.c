@@ -1032,6 +1032,12 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 	}
 
 	switch (protocol) {
+		case AS_PAXOS_PROTOCOL_V4:
+			if (CL_MODE_NO_TOPOLOGY == g_config.cluster_mode) {
+				cf_warning(AS_PAXOS, "Rack Aware not enabled ~~ cannot dynamically set Paxos protocol to version %d", AS_PAXOS_PROTOCOL_VERSION_NUMBER(protocol));
+				return(-1);
+			}
+			// [NB:  Else, simply fall through.]
 		case AS_PAXOS_PROTOCOL_V1:
 		case AS_PAXOS_PROTOCOL_V2:
 		case AS_PAXOS_PROTOCOL_V3:
@@ -1045,9 +1051,6 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 			as_partition_allow_migrations();
 			g_config.paxos_protocol = protocol;
 			break;
-		case AS_PAXOS_PROTOCOL_V4:
-			cf_warning(AS_PAXOS, "cannot dynamically set Paxos protocol to version %d", AS_PAXOS_PROTOCOL_VERSION_NUMBER(protocol));
-			return(-1);
 		case AS_PAXOS_PROTOCOL_NONE:
 			cf_info(AS_PAXOS, "disabling Paxos messaging");
 			as_partition_disallow_migrations();
