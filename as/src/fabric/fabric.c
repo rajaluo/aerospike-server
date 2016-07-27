@@ -67,7 +67,7 @@ typedef enum op_xmit_transaction_e {
 } op_xmit_transaction;
 
 // An alternative way to keep track of FBs
-// #define CONNECTED_FB_HASH_USE_PUT_UNIQUE 1
+// #define OUTBOUND_FB_HASH_USE_PUT_UNIQUE 1
 
 #ifdef EXTRA_CHECKS
 void as_fabric_dump();
@@ -163,7 +163,7 @@ void as_fabric_dump();
 **
 **   Holders of FB references:
 **     * fne->xmit_buffer_queue
-**     * fne->connected_fb_hash
+**     * fne->outbound_fb_hash
 **     * (worker_queue_element wqe).fb
 **     * (epoll_event ev).data.ptr
 **
@@ -236,7 +236,8 @@ typedef struct {
 	cf_node 	node;   // when coming from a fd, we want to know the source node
 
 	cf_atomic32 fd_counter;         // Count of open outbound FDs.
-	shash      *connected_fb_hash;  // All connected outbound FBs attached to this FNE:
+	shash      *outbound_fb_hash;  // All connected outbound
+									// FBs attached to this FNE:
 	// Key: fabric_buffer * ; Value: 0 (Arbitrary & unused.)
 	// Holds references to fb(s) in the hash
 
@@ -274,6 +275,7 @@ typedef struct {
 
 	fabric_node_element *fne;
 
+	bool is_outbound;
 	fb_status status;
 	bool failed;                    // This fb has failed and is unusable
 
@@ -357,8 +359,8 @@ fne_create(cf_node node)
 	fne->live = true;
 	fne->xmit_buffer_queue = cf_queue_create(sizeof(fabric_buffer *), true);
 	fne->xmit_msg_queue = cf_queue_priority_create(sizeof(msg *), true);
-	if (SHASH_OK != shash_create(&(fne->connected_fb_hash), ptr_hash_fn, sizeof(fabric_buffer *), sizeof(int), 100, SHASH_CR_MT_BIGLOCK)) {
-		cf_crash(AS_FABRIC, "failed to create connected_fb_hash for fne %p", fne);
+	if (SHASH_OK != shash_create(&(fne->outbound_fb_hash), ptr_hash_fn, sizeof(fabric_buffer *), sizeof(int), 100, SHASH_CR_MT_BIGLOCK)) {
+		cf_crash(AS_FABRIC, "failed to create outbound_fb_hash for fne %p", fne);
 	}
 
 #ifdef EXTRA_CHECKS
@@ -370,7 +372,7 @@ fne_create(cf_node node)
 		cf_info(AS_FABRIC, " received second notification of already extant node: %"PRIx64, node);
 		cf_queue_destroy(fne->xmit_buffer_queue);
 		cf_queue_priority_destroy(fne->xmit_msg_queue);
-		shash_destroy(fne->connected_fb_hash);
+		shash_destroy(fne->outbound_fb_hash);
 		cf_rc_releaseandfree( fne );
 		return NULL;
 	}
@@ -414,11 +416,11 @@ fne_destructor(void *fne_o)
 
 	cf_queue_priority_destroy(fne->xmit_msg_queue);
 
-	if (shash_get_size(fne->connected_fb_hash) != 0) {
-		cf_crash(AS_FABRIC, "connected_fb_hash not empty as expected");
+	if (shash_get_size(fne->outbound_fb_hash) != 0) {
+		cf_crash(AS_FABRIC, "outbound_fb_hash not empty as expected");
 	}
 
-	shash_destroy(fne->connected_fb_hash);
+	shash_destroy(fne->outbound_fb_hash);
 }
 
 inline static void
@@ -440,6 +442,7 @@ fabric_buffer_create(cf_socket sock)
 	fb->nodelay_isset = false;
 	fb->keepalive_isset = false;
 	fb->fne = NULL;
+	fb->is_outbound = false;
 	fb->status = FB_STATUS_IDLE;
 	fb->failed = false;
 
@@ -463,7 +466,6 @@ fabric_buffer_associate(fabric_buffer *fb, fabric_node_element *fne)
 {
 	cf_rc_reserve(fne);
 	fb->fne = fne;
-
 //    cf_debug(AS_FABRIC, "associate: fne %p to fb %p (fne ref now %d)",fne,fb,cf_rc_count(fne));
 }
 
@@ -472,13 +474,21 @@ fabric_buffer_disconnect(fabric_buffer *fb)
 {
 	fb->failed = true;
 
-	if (shash_delete(fb->fne->connected_fb_hash, &fb) != SHASH_OK) {
-		cf_warning(AS_FABRIC, "fb %p is not in (fne %p)->connected_fb_hash", fb, fb->fne);
+	if(!fb->is_outbound) {
+		// inbound accepted connection. Does not requires a reference
+		// release for the outbound fd hash.
 		return;
 	}
 
-	cf_debug(AS_FABRIC, "removed fb %p from connected_fb_hash", fb);
-	cf_rc_release(fb);	// For delete from fne->connected_fb_hash
+	if (shash_delete(fb->fne->outbound_fb_hash, &fb) != SHASH_OK) {
+		cf_warning(AS_FABRIC, "fb %p is not in (fne %p)->outbound_fb_hash", fb, fb->fne);
+		return;
+	}
+
+
+	cf_atomic32_decr(&fb->fne->fd_counter);
+	cf_debug(AS_FABRIC, "removed fb %p from outbound_fb_hash", fb);
+	cf_rc_release(fb);	// For delete from fne->outbound_fb_hash
 
 	cf_socket_shutdown(fb->sock);
 }
@@ -490,7 +500,6 @@ fabric_buffer_release(fabric_buffer *fb)
 
 	if (0 == cf_rc_release(fb)) {
 		if (fb->fne) {
-			fabric_buffer_disconnect(fb);
 			fne_release(fb->fne);
 			fb->fne = 0;
 		}
@@ -641,7 +650,7 @@ fabric_disconnect_reduce_fn(void *key, void *data, void *udata)
 int
 fabric_disconnect(fabric_args *fa, fabric_node_element *fne)
 {
-	int num_fbs = shash_get_size(fne->connected_fb_hash);
+	int num_fbs = shash_get_size(fne->outbound_fb_hash);
 	int num_fds = cf_atomic32_get(fne->fd_counter);
 
 	if (num_fbs > num_fds) {
@@ -651,7 +660,7 @@ fabric_disconnect(fabric_args *fa, fabric_node_element *fne)
 		cf_warning(AS_FABRIC, "number of fabric buffers (%d) < number of open file descriptors (%d) for fne %p", num_fbs, num_fds, fne);
 	}
 
-	shash_reduce_delete(fne->connected_fb_hash, fabric_disconnect_reduce_fn, fa);
+	shash_reduce_delete(fne->outbound_fb_hash, fabric_disconnect_reduce_fn, fa);
 
 	return 0;
 }
@@ -693,6 +702,7 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 
 	// Create a fabric buffer to go along with the file descriptor
 	fabric_buffer *fb = fabric_buffer_create(sock);
+	fb->is_outbound = true;
 	fabric_buffer_associate(fb, fne);
 
 	// Grab a start message, send it to the remote endpoint so it knows me
@@ -710,10 +720,10 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	int value = 0; // (Arbitrary & unused.)
 	int rv = 0;
 
-	cf_rc_reserve(fb);	// For put into fne->connected_fb_hash
+	cf_rc_reserve(fb);	// For put into fne->outbound_fb_hash
 
-	if (SHASH_OK != (rv = shash_put_unique(fne->connected_fb_hash, &fb, &value))) {
-		cf_crash(AS_FABRIC, "failed to add unique fb %p to fne %p connected_fb_hash -- rv %d", fb, fne, rv);
+	if (SHASH_OK != (rv = shash_put_unique(fne->outbound_fb_hash, &fb, &value))) {
+		cf_crash(AS_FABRIC, "failed to add unique fb %p to fne %p outbound_fb_hash -- rv %d", fb, fne, rv);
 	}
 
 	fabric_worker_add(fa, fb);
