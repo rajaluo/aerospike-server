@@ -58,7 +58,7 @@ struct as_namespace_s;
 //
 
 #define AS_NAMESPACE_SZ 32
-#define AS_CLUSTER_ID_SZ 16
+#define AS_CLUSTER_ID_SZ 65
 
 #define MAX_DEMARSHAL_THREADS 256
 #define MAX_FABRIC_WORKERS 128
