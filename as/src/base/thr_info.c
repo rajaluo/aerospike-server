@@ -1980,6 +1980,7 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	// In that case we want to print everything.
 	info_service_config_get(db);
 	info_network_config_get(db);
+	info_cluster_config_get(db);
 	info_security_config_get(db);
 	as_xdr_get_config(db);
 
