@@ -661,7 +661,7 @@ int as_hb_mesh_tip(char* host, int port);
 /**
  * Remove an aerospike instance from the mesh seed list.
  */
-int as_hb_mesh_tip_clear(char* host, char* port);
+int as_hb_mesh_tip_clear(char* host, int port);
 
 /**
  * Clear the seed list.

@@ -1032,6 +1032,12 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 	}
 
 	switch (protocol) {
+		case AS_PAXOS_PROTOCOL_V4:
+			if (CL_MODE_NO_TOPOLOGY == g_config.cluster_mode) {
+				cf_warning(AS_PAXOS, "Rack Aware not enabled ~~ cannot dynamically set Paxos protocol to version %d", AS_PAXOS_PROTOCOL_VERSION_NUMBER(protocol));
+				return(-1);
+			}
+			// [NB:  Else, simply fall through.]
 		case AS_PAXOS_PROTOCOL_V1:
 		case AS_PAXOS_PROTOCOL_V2:
 		case AS_PAXOS_PROTOCOL_V3:
@@ -1045,9 +1051,6 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 			as_partition_allow_migrations();
 			g_config.paxos_protocol = protocol;
 			break;
-		case AS_PAXOS_PROTOCOL_V4:
-			cf_warning(AS_PAXOS, "cannot dynamically set Paxos protocol to version %d", AS_PAXOS_PROTOCOL_VERSION_NUMBER(protocol));
-			return(-1);
 		case AS_PAXOS_PROTOCOL_NONE:
 			cf_info(AS_PAXOS, "disabling Paxos messaging");
 			as_partition_disallow_migrations();
@@ -2503,7 +2506,7 @@ void as_paxos_auto_reset_master(bool reset_cluster,
 }
 
 void
-as_paxos_process_retransmit_check()
+as_paxos_check_integrity()
 {
 	as_paxos* p = g_paxos;
 
@@ -2511,6 +2514,9 @@ as_paxos_process_retransmit_check()
 	// the list that heart beat thinks is correct. First get a copy of the
 	// heartbeat's compiled list for each node in our succession list.
 	cf_node other_succession_list[AS_CLUSTER_SZ];
+	cf_node node_succession_list[AS_CLUSTER_SZ];
+
+	memcpy(node_succession_list, p->succession, sizeof(p->succession));
 
 	// For each node in the succession list compare the node's succession
 	// list with this server's succession list.
@@ -2519,47 +2525,48 @@ as_paxos_process_retransmit_check()
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 
-		if (p->succession[i] == 0) {
+		if (node_succession_list[i] == 0) {
 			break;
 		}
 
-		if (p->succession[i] == g_config.self_node) {
+		if (node_succession_list[i] == g_config.self_node) {
 			continue;
 		}
 
 		cf_debug(AS_PAXOS,
 			 "Cluster Integrity Check against node:  %" PRIx64 "",
-			 p->succession[i]);
+			 node_succession_list[i]);
 
 		memset(other_succession_list, 0, sizeof(other_succession_list));
-		as_paxos_hb_get_succession_list(p->succession[i],
+		as_paxos_hb_get_succession_list(node_succession_list[i],
 						other_succession_list);
 
-        // 8byte nodeid will need 16 hex chars + space = 17
+		// 8byte nodeid will need 16 hex chars + space = 17
 		char sbuf[(AS_CLUSTER_SZ * 17) + 28];
-		snprintf(sbuf, 28, "HEARTBEAT %" PRIx64 ": ", p->succession[i]);
+		snprintf(sbuf, 28, "HEARTBEAT %" PRIx64 ": ",
+			 node_succession_list[i]);
 		for (int j = 0; j < g_config.paxos_max_cluster_size; j++) {
 			if ((cf_node)0 != other_succession_list[j]) {
 				snprintf(sbuf + strlen(sbuf), 18,
 					 "%" PRIx64 " ",
 					 other_succession_list[j]);
 			} else {
-                break;
-            }
+				break;
+			}
 		}
 
-		cf_debug(AS_PAXOS,"%s", sbuf);
+		cf_debug(AS_PAXOS, "%s", sbuf);
 
-		if (memcmp(p->succession, other_succession_list,
+		if (memcmp(node_succession_list, other_succession_list,
 			   sizeof(other_succession_list)) != 0) {
 			cf_info(AS_PAXOS,
 				"Cluster Integrity Check: Detected "
 				"succession list discrepancy between "
 				"node %" PRIx64 " and self %" PRIx64 "",
-				p->succession[i], g_config.self_node);
+				node_succession_list[i], g_config.self_node);
 
 			as_paxos_log_succession_list(
-			  "Paxos List", p->succession, AS_CLUSTER_SZ);
+			  "Paxos List", node_succession_list, AS_CLUSTER_SZ);
 			as_paxos_log_succession_list(
 			  "Node List", other_succession_list, AS_CLUSTER_SZ);
 
@@ -2567,7 +2574,13 @@ as_paxos_process_retransmit_check()
 		}
 	} // end for each node
 
-	cf_node p_node = as_paxos_succession_getprincipal();
+	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
+}
+
+void
+as_paxos_process_retransmit_check()
+{
+	as_paxos* p = g_paxos;
 
 	// check for succession list fault. We need space for AS_CLUSTER_SZ+1
 	// elements as there will be RESET event on top of nodes events.
@@ -2578,7 +2591,7 @@ as_paxos_process_retransmit_check()
 	  AS_CLUSTER_SZ);
 	bool succession_list_fault = corrective_event_count > 0;
 
-	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
+	bool cluster_integrity_fault = !as_paxos_get_cluster_integrity(p);
 
 	// Second phase failed if migrations are disallowed and we have
 	// attempted sync more than the threshold number of times.
@@ -2606,7 +2619,9 @@ as_paxos_process_retransmit_check()
 
 			default:
 				// defensive code. Should never happen.
-				cf_crash(AS_PAXOS, "unknown Paxos recovery policy %d", g_config.paxos_recovery_policy);
+				cf_crash(AS_PAXOS,
+					 "unknown Paxos recovery policy %d",
+					 g_config.paxos_recovery_policy);
 		}
 	}
 
@@ -2616,14 +2631,28 @@ as_paxos_process_retransmit_check()
 		return;
 	}
 
-	// Otherwise, we are in the middle of a Paxos reconfiguration of the cluster:
-	//   - Principal sends a SYNC message to all cluster nodes (including itself.)
-	//   - Non-principals send a PARTITION_SYNC_REQUEST message to the principal.
-	if (g_config.self_node == as_paxos_succession_getprincipal()) {
-		cf_info(AS_PAXOS, "as_paxos_retransmit_check: principal %"PRIx64" retransmitting sync messages to nodes that have not responded yet ... ", p_node);
+	cf_node p_node = as_paxos_succession_getprincipal();
+
+	// Otherwise, we are in the middle of a Paxos reconfiguration of the
+	// cluster:
+	//   - Principal sends a SYNC message to all cluster nodes (including
+	//   itself.)
+	//   - Non-principals send a PARTITION_SYNC_REQUEST message to the
+	//   principal.
+	if (g_config.self_node == p_node) {
+		cf_info(AS_PAXOS,
+			"as_paxos_retransmit_check: principal %" PRIx64
+			" retransmitting sync messages to nodes that have not "
+			"responded yet ... ",
+			p_node);
 		as_paxos_send_sync_messages();
 	} else {
-		cf_info(AS_PAXOS, "as_paxos_retransmit_check: node %"PRIx64" retransmitting partition sync request to principal %"PRIx64" ... ", g_config.self_node, p_node);
+		cf_info(
+		  AS_PAXOS,
+		  "as_paxos_retransmit_check: node %" PRIx64
+		  " retransmitting partition sync request to principal %" PRIx64
+		  " ... ",
+		  g_config.self_node, p_node);
 		as_paxos_send_partition_sync_request(p_node);
 	}
 }
@@ -3690,11 +3719,15 @@ as_paxos_deregister_change_callback(as_paxos_change_callback cb, void *udata)
 
 /* as_paxos_sup_thr
  * paxos supervisor logic for retransmission */
-void *
-as_paxos_sup_thr(void *arg)
+void*
+as_paxos_sup_thr(void* arg)
 {
 	cf_info(AS_PAXOS, "paxos supervisor thread started");
 
+	// Run at twice the retransmit rate and update cluster integrity along
+	// the way. This ensure after a fix the integrity flag will not wait for
+	// a full next cycle.
+	cf_clock next_retransmit_ts = 0;
 	for (;;) {
 
 		as_paxos* p = g_paxos;
@@ -3707,14 +3740,23 @@ as_paxos_sup_thr(void *arg)
 
 		// For larger clusters allow more time for partition rebalance
 		// to finish.
-		uint32_t retransmit_period = MAX(
-		  (int)(cluster_size * 0.5), g_config.paxos_retransmit_period);
+		uint32_t retransmit_period_s =
+		  MIN(2, MAX((int)(cluster_size * 0.5),
+			     g_config.paxos_retransmit_period));
 
-		struct timespec delay = { retransmit_period, 0 };
+		struct timespec delay = { retransmit_period_s / 2, 0 };
 		nanosleep(&delay, NULL);
 
-		// drop a retransmit check paxos message into the paxos message queue.
-		as_paxos_retransmit_check();
+		cf_clock now = cf_getms();
+		if (now >= next_retransmit_ts) {
+			// drop a retransmit check paxos message into the paxos
+			// message queue.
+			as_paxos_retransmit_check();
+			next_retransmit_ts = now + retransmit_period_s * 1000;
+		} else {
+			// Update cluster integrity.
+			as_paxos_check_integrity();
+		}
 	}
 
 	return (NULL);
@@ -3725,14 +3767,19 @@ as_paxos_sup_thr(void *arg)
 void
 as_paxos_start()
 {
-	uint32_t wait_ms = g_config.hb_config.hb_max_intervals_missed * g_config.hb_config.hb_tx_interval * 2;
-	uint32_t wait_intervals = wait_ms < 100 ? 1 : wait_ms / 100;
+	int32_t wait_ms = g_config.hb_config.hb_max_intervals_missed * g_config.hb_config.hb_tx_interval * 2;
+
+	// Wait at least 2 hb intervals to ensure we receive heartbeats and also
+	// give the hb subsystem time to send out our heartbeats before starting
+	// a new paxos round.
+	uint32_t wait_interval_ms = MAX(wait_ms < 100 ? 100 : wait_ms / 100,
+					2 * g_config.hb_config.hb_tx_interval);
 
 	cf_info(AS_PAXOS, "listening for other nodes (max %u milliseconds) ...",
 			wait_ms);
 
-	while (wait_intervals > 0) {
-		usleep(100000);
+	while (wait_ms > 0) {
+		usleep(wait_interval_ms * 1000);
 
 		if (as_partition_balance_is_multi_node_cluster()) {
 			// Heartbeats have been received from other node(s) - we'll be in a
@@ -3741,10 +3788,10 @@ as_paxos_start()
 			break;
 		}
 
-		wait_intervals--;
+		wait_ms -= wait_interval_ms;
 	}
 
-	if (wait_intervals == 0) {
+	if (wait_ms <= 0) {
 		// Didn't hear from other nodes, assume we'll be a single node cluster.
 		cf_info(AS_PAXOS, "... no other nodes detected - node will operate as a single-node cluster");
 

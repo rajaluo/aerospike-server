@@ -462,18 +462,18 @@ info_command_tip(char *name, char *params, cf_dyn_buf *db)
 	 */
 
 	if (0 != as_info_parameter_get(params, "host", host_str, &host_str_len)) {
-		cf_info(AS_INFO, "tip command: no host, must add a host parameter");
+		cf_warning(AS_INFO, "tip command: no host, must add a host parameter");
 		return(0);
 	}
 
 	if (0 != as_info_parameter_get(params, "port", port_str, &port_str_len)) {
-		cf_info(AS_INFO, "tip command: no port, must have port");
+		cf_warning(AS_INFO, "tip command: no port, must have port");
 		return(0);
 	}
 
 	int port = 0;
 	if (0 != cf_str_atoi(port_str, &port)) {
-		cf_info(AS_INFO, "tip command: port must be an integer, is: %s", port_str);
+		cf_warning(AS_INFO, "tip command: port must be an integer in: %s", port_str);
 		return(0);
 	}
 
@@ -524,13 +524,33 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 	if (as_info_parameter_get(params, "host-port-list", host_port_list,
 				  &host_port_list_len) == 0) {
 		if (0 != strcmp(host_port_list, "all")) {
-			char *save_ptr = NULL, *host = NULL, *port = NULL;
+			char* save_ptr = NULL;
+			int port = -1;
 			char* host_port =
 			  strtok_r(host_port_list, ",", &save_ptr);
 
 			while (host_port != NULL) {
-				host = strtok(host_port, ":");
-				port = strtok(NULL, ":");
+				char* host_port_save_ptr = NULL;
+				char* host =
+				  strtok_r(host_port, ":", &host_port_save_ptr);
+
+				if (host == NULL) {
+					cf_warning(AS_INFO,
+						   "tip clear command: invalid host:port string: %s",
+						   host_port);
+					return (0);
+				}
+
+				char* port_str =
+				  strtok_r(NULL, ":", &host_port_save_ptr);
+				if (port_str == NULL ||
+				    0 != cf_str_atoi(port_str, &port)) {
+					cf_warning(AS_INFO,
+						   "tip clear command: port must be an integer in: %s",
+						   port_str);
+					return (0);
+				}
+
 				if (as_hb_mesh_tip_clear(host, port) == -1) {
 					success = false;
 					break;
@@ -1960,6 +1980,7 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	// In that case we want to print everything.
 	info_service_config_get(db);
 	info_network_config_get(db);
+	info_cluster_config_get(db);
 	info_security_config_get(db);
 	as_xdr_get_config(db);
 
