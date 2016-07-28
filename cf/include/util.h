@@ -33,6 +33,7 @@
 #include <asm/byteorder.h>
 
 #define CF_MUST_CHECK __attribute__((warn_unused_result))
+#define CF_IGNORE_ERROR(x) ((void)((x) == 12345))
 
 /* cf_hash_fnv
  * The 64-bit Fowler-Noll-Vo hash function (FNV-1a) */

@@ -319,68 +319,68 @@ safe_close(int32_t fd)
 }
 
 void
-cf_socket_disable_blocking(cf_socket sock)
+cf_socket_disable_blocking(cf_socket *sock)
 {
-	int32_t flags = safe_fcntl(sock.fd, F_GETFL, 0);
-	safe_fcntl(sock.fd, F_SETFL, flags | O_NONBLOCK);
+	int32_t flags = safe_fcntl(sock->fd, F_GETFL, 0);
+	safe_fcntl(sock->fd, F_SETFL, flags | O_NONBLOCK);
 }
 
 void
-cf_socket_enable_blocking(cf_socket sock)
+cf_socket_enable_blocking(cf_socket *sock)
 {
-	int32_t flags = safe_fcntl(sock.fd, F_GETFL, 0);
-	safe_fcntl(sock.fd, F_SETFL, flags & ~O_NONBLOCK);
+	int32_t flags = safe_fcntl(sock->fd, F_GETFL, 0);
+	safe_fcntl(sock->fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 
 void
-cf_socket_disable_nagle(cf_socket sock)
+cf_socket_disable_nagle(cf_socket *sock)
 {
 	static const int32_t flag = 1;
-	safe_setsockopt(sock.fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
+	safe_setsockopt(sock->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
 }
 
 void
-cf_socket_enable_nagle(cf_socket sock)
+cf_socket_enable_nagle(cf_socket *sock)
 {
 	static const int32_t flag = 0;
-	safe_setsockopt(sock.fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
+	safe_setsockopt(sock->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
 }
 
 void
-cf_socket_keep_alive(cf_socket sock, int32_t idle, int32_t interval, int32_t count)
+cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t count)
 {
 	static const int32_t flag = 1;
-	safe_setsockopt(sock.fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
+	safe_setsockopt(sock->fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
 
 	if (idle > 0) {
-		safe_setsockopt(sock.fd, SOL_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+		safe_setsockopt(sock->fd, SOL_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
 	}
 
 	if (interval > 0) {
-		safe_setsockopt(sock.fd, SOL_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+		safe_setsockopt(sock->fd, SOL_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
 	}
 
 	if (count > 0) {
-		safe_setsockopt(sock.fd, SOL_TCP, TCP_KEEPCNT, &count, sizeof(count));
+		safe_setsockopt(sock->fd, SOL_TCP, TCP_KEEPCNT, &count, sizeof(count));
 	}
 }
 
 void
-cf_socket_set_send_buffer(cf_socket sock, int32_t size)
+cf_socket_set_send_buffer(cf_socket *sock, int32_t size)
 {
-	safe_setsockopt(sock.fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
+	safe_setsockopt(sock->fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
 }
 
 void
-cf_socket_set_receive_buffer(cf_socket sock, int32_t size)
+cf_socket_set_receive_buffer(cf_socket *sock, int32_t size)
 {
-	safe_setsockopt(sock.fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
+	safe_setsockopt(sock->fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 }
 
 void
-cf_socket_set_window(cf_socket sock, int32_t size)
+cf_socket_set_window(cf_socket *sock, int32_t size)
 {
-	safe_setsockopt(sock.fd, SOL_TCP, TCP_WINDOW_CLAMP, &size, sizeof(size));
+	safe_setsockopt(sock->fd, SOL_TCP, TCP_WINDOW_CLAMP, &size, sizeof(size));
 }
 
 static int32_t
@@ -430,15 +430,21 @@ cf_socket_init_server(cf_socket_cfg *conf)
 		goto cleanup0;
 	}
 
-	cf_socket sock = (cf_socket){ .fd = fd };
+	cf_socket *sock = cf_malloc(sizeof(cf_socket));
+
+	if (sock == NULL) {
+		cf_crash(CF_SOCKET, "Out of memory");
+	}
+
+	sock->fd = fd;
 	fd = -1;
 
 	if (conf->reuse_addr) {
 		static const int32_t flag = 1;
-		safe_setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
+		safe_setsockopt(sock->fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
 	}
 
-	while (bind(sock.fd, (struct sockaddr *)&sas,
+	while (bind(sock->fd, (struct sockaddr *)&sas,
 			cf_socket_addr_len((struct sockaddr *)&sas)) < 0) {
 		if (errno != EADDRINUSE) {
 			cf_warning(CF_SOCKET, "Error while binding to %s:%d: %d (%s)",
@@ -450,7 +456,7 @@ cf_socket_init_server(cf_socket_cfg *conf)
 		usleep(5 * 1000 * 1000);
 	}
 
-	if (conf->type == SOCK_STREAM && listen(sock.fd, 512) < 0) {
+	if (conf->type == SOCK_STREAM && listen(sock->fd, 512) < 0) {
 		cf_warning(CF_SOCKET, "Error while listening on %s:%d: %d (%s)",
 				conf->addr, conf->port, errno, cf_strerror(errno));
 		goto cleanup1;
@@ -463,30 +469,31 @@ cf_socket_init_server(cf_socket_cfg *conf)
 	goto cleanup0;
 
 cleanup1:
-	safe_close(sock.fd);
+	safe_close(sock->fd);
+	cf_free(sock);
 
 cleanup0:
 	return res;
 }
 
 static int32_t
-connect_socket(cf_socket sock, struct sockaddr *sa, int32_t timeout)
+connect_socket(cf_socket *sock, struct sockaddr *sa, int32_t timeout)
 {
-	cf_debug(CF_SOCKET, "Connecting FD %d", sock.fd);
+	cf_debug(CF_SOCKET, "Connecting FD %d", sock->fd);
 	int32_t res = -1;
 
 	cf_socket_disable_blocking(sock);
-	int32_t rv = connect(sock.fd, sa, cf_socket_addr_len(sa));
+	int32_t rv = connect(sock->fd, sa, cf_socket_addr_len(sa));
 
 	if (rv == 0) {
-		cf_debug(CF_SOCKET, "FD %d connected [1]", sock.fd);
+		cf_debug(CF_SOCKET, "FD %d connected [1]", sock->fd);
 		res = 0;
 		goto cleanup1;
 	}
 
 	if (errno != EINPROGRESS) {
 		cf_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 		goto cleanup1;
 	}
 
@@ -496,37 +503,37 @@ connect_socket(cf_socket sock, struct sockaddr *sa, int32_t timeout)
 		cf_crash(CF_SOCKET, "epoll_create() failed: %d (%s)", errno, cf_strerror(errno));
 	}
 
-	struct epoll_event event = { .data.fd = sock.fd, .events = EPOLLOUT };
+	struct epoll_event event = { .data.fd = sock->fd, .events = EPOLLOUT };
 
-	if (epoll_ctl(efd, EPOLL_CTL_ADD, sock.fd, &event) < 0) {
+	if (epoll_ctl(efd, EPOLL_CTL_ADD, sock->fd, &event) < 0) {
 		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 	}
 
 	int32_t count = safe_wait(efd, &event, 1, timeout);
 
 	if (count == 0) {
-		cf_warning(CF_SOCKET, "Timeout while connecting FD %d", sock.fd);
+		cf_warning(CF_SOCKET, "Timeout while connecting FD %d", sock->fd);
 		goto cleanup2;
 	}
 
 	int32_t err;
 	socklen_t err_len = sizeof(err);
-	safe_getsockopt(sock.fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
+	safe_getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
 
 	if (err != 0) {
 		cf_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)",
-				sock.fd, err, cf_strerror(err));
+				sock->fd, err, cf_strerror(err));
 		goto cleanup2;
 	}
 
-	cf_debug(CF_SOCKET, "FD %d connected [2]", sock.fd);
+	cf_debug(CF_SOCKET, "FD %d connected [2]", sock->fd);
 	res = 0;
 
 cleanup2:
-	if (epoll_ctl(efd, EPOLL_CTL_DEL, sock.fd, NULL) < 0) {
+	if (epoll_ctl(efd, EPOLL_CTL_DEL, sock->fd, NULL) < 0) {
 		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 	}
 
 	safe_close(efd);
@@ -556,7 +563,13 @@ cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout)
 		goto cleanup0;
 	}
 
-	cf_socket sock = (cf_socket){ .fd = fd };
+	cf_socket *sock = cf_malloc(sizeof(cf_socket));
+
+	if (sock == NULL) {
+		cf_crash(CF_SOCKET, "Out of memory");
+	}
+
+	sock->fd = fd;
 	fd = -1;
 
 	cf_socket_fix_client(sock);
@@ -574,14 +587,15 @@ cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout)
 	goto cleanup0;
 
 cleanup1:
-	safe_close(sock.fd);
+	safe_close(sock->fd);
+	cf_free(sock);
 
 cleanup0:
 	return res;
 }
 
 int32_t
-cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock)
+cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket **sock)
 {
 	int32_t res = -1;
 
@@ -598,13 +612,19 @@ cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock)
 		goto cleanup0;
 	}
 
-	cf_socket _sock = (cf_socket){ .fd = fd };
+	cf_socket *_sock = cf_malloc(sizeof(cf_socket));
+
+	if (_sock == NULL) {
+		cf_crash(CF_SOCKET, "Out of memory");
+	}
+
+	_sock->fd = fd;
 	fd = -1;
 
 	cf_socket_fix_client(_sock);
 	cf_socket_disable_blocking(_sock);
 
-	if (connect(_sock.fd, (struct sockaddr *)&sas,
+	if (connect(_sock->fd, (struct sockaddr *)&sas,
 			cf_socket_addr_len((struct sockaddr *)&sas)) < 0) {
 		if (errno != EINPROGRESS) {
 			cf_warning(CF_SOCKET, "Error while connecting socket to %s: %d (%s)",
@@ -618,14 +638,15 @@ cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock)
 	goto cleanup0;
 
 cleanup1:
-	safe_close(_sock.fd);
+	safe_close(_sock->fd);
+	cf_free(_sock);
 
 cleanup0:
 	return res;
 }
 
 int32_t
-cf_socket_accept(cf_socket lsock, cf_socket *sock, cf_sock_addr *addr)
+cf_socket_accept(cf_socket *lsock, cf_socket **sock, cf_sock_addr *addr)
 {
 	int32_t res = -1;
 
@@ -638,11 +659,11 @@ cf_socket_accept(cf_socket lsock, cf_socket *sock, cf_sock_addr *addr)
 		sa_len = sizeof(sas);
 	}
 
-	int32_t fd = accept(lsock.fd, sa, &sa_len);
+	int32_t fd = accept(lsock->fd, sa, &sa_len);
 
 	if (fd < 0) {
 		cf_debug(CF_SOCKET, "Error while accepting from FD %d: %d (%s)",
-				lsock.fd, errno, cf_strerror(errno));
+				lsock->fd, errno, cf_strerror(errno));
 		goto cleanup0;
 	}
 
@@ -650,7 +671,16 @@ cf_socket_accept(cf_socket lsock, cf_socket *sock, cf_sock_addr *addr)
 		cf_sock_addr_from_native(sa, addr);
 	}
 
-	*sock = (cf_socket){ .fd = fd };
+	cf_socket *_sock = cf_malloc(sizeof(cf_socket));
+
+	if (_sock == NULL) {
+		cf_crash(CF_SOCKET, "Out of memory");
+	}
+
+	_sock->fd = fd;
+	fd = -1;
+
+	*sock = _sock;
 	res = 0;
 
 cleanup0:
@@ -676,27 +706,27 @@ x_name(name_func func, const char *which, int32_t fd, cf_sock_addr *addr)
 }
 
 int32_t
-cf_socket_remote_name(cf_socket sock, cf_sock_addr *addr)
+cf_socket_remote_name(cf_socket *sock, cf_sock_addr *addr)
 {
-	return x_name(getpeername, "remote", sock.fd, addr);
+	return x_name(getpeername, "remote", sock->fd, addr);
 }
 
 int32_t
-cf_socket_local_name(cf_socket sock, cf_sock_addr *addr)
+cf_socket_local_name(cf_socket *sock, cf_sock_addr *addr)
 {
-	return x_name(getsockname, "local", sock.fd, addr);
+	return x_name(getsockname, "local", sock->fd, addr);
 }
 
 int32_t
-cf_socket_available(cf_socket sock)
+cf_socket_available(cf_socket *sock)
 {
 	int32_t size;
-	safe_ioctl(sock.fd, FIONREAD, &size);
+	safe_ioctl(sock->fd, FIONREAD, &size);
 	return size;
 }
 
 int32_t
-cf_socket_send_to(cf_socket sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
+cf_socket_send_to(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
 {
 	struct sockaddr_storage sas;
 	struct sockaddr *sa = NULL;
@@ -708,24 +738,24 @@ cf_socket_send_to(cf_socket sock, void *buff, size_t size, int32_t flags, cf_soc
 		sa_len = cf_socket_addr_len((struct sockaddr *)&sas);
 	}
 
-	int32_t res = sendto(sock.fd, buff, size, flags | MSG_NOSIGNAL, sa, sa_len);
+	int32_t res = sendto(sock->fd, buff, size, flags | MSG_NOSIGNAL, sa, sa_len);
 
 	if (res < 0) {
 		cf_debug(CF_SOCKET, "Error while sending on FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 	}
 
 	return res;
 }
 
 int32_t
-cf_socket_send(cf_socket sock, void *buff, size_t size, int32_t flags)
+cf_socket_send(cf_socket *sock, void *buff, size_t size, int32_t flags)
 {
 	return cf_socket_send_to(sock, buff, size, flags, NULL);
 }
 
 int32_t
-cf_socket_recv_from(cf_socket sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
+cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
 {
 	struct sockaddr_storage sas;
 	struct sockaddr *sa = NULL;
@@ -736,11 +766,11 @@ cf_socket_recv_from(cf_socket sock, void *buff, size_t size, int32_t flags, cf_s
 		sa_len = sizeof(sas);
 	}
 
-	int32_t res = recvfrom(sock.fd, buff, size, flags | MSG_NOSIGNAL, sa, &sa_len);
+	int32_t res = recvfrom(sock->fd, buff, size, flags | MSG_NOSIGNAL, sa, &sa_len);
 
 	if (res < 0) {
 		cf_debug(CF_SOCKET, "Error while receiving on FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 	}
 	else if (addr != NULL) {
 		cf_sock_addr_from_native(sa, addr);
@@ -750,78 +780,80 @@ cf_socket_recv_from(cf_socket sock, void *buff, size_t size, int32_t flags, cf_s
 }
 
 int32_t
-cf_socket_recv(cf_socket sock, void *buff, size_t size, int32_t flags)
+cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags)
 {
 	return cf_socket_recv_from(sock, buff, size, flags, NULL);
 }
 
 static void
-x_shutdown(cf_socket sock, int32_t how)
+x_shutdown(cf_socket *sock, int32_t how)
 {
-	if (shutdown(sock.fd, how) < 0) {
+	if (shutdown(sock->fd, how) < 0) {
 		if (errno != ENOTCONN) {
 			cf_crash(CF_SOCKET, "shutdown() failed on FD %d: %d (%s)",
-					sock.fd, errno, cf_strerror(errno));
+					sock->fd, errno, cf_strerror(errno));
 		}
 		else {
 			cf_warning(CF_SOCKET, "shutdown() on disconnected FD %d: %d (%s)",
-					sock.fd, errno, cf_strerror(errno));
+					sock->fd, errno, cf_strerror(errno));
 		}
 	}
 }
 
 void
-cf_socket_write_shutdown(cf_socket sock)
+cf_socket_write_shutdown(cf_socket *sock)
 {
-	cf_debug(CF_SOCKET, "Shutting down write channel of FD %d", sock.fd);
+	cf_debug(CF_SOCKET, "Shutting down write channel of FD %d", sock->fd);
 	x_shutdown(sock, SHUT_WR);
 }
 
 void
-cf_socket_shutdown(cf_socket sock)
+cf_socket_shutdown(cf_socket *sock)
 {
-	cf_debug(CF_SOCKET, "Shutting down FD %d", sock.fd);
+	cf_debug(CF_SOCKET, "Shutting down FD %d", sock->fd);
 	x_shutdown(sock, SHUT_RDWR);
 }
 
 void
-cf_socket_close(cf_socket sock)
+cf_socket_close(cf_socket *sock)
 {
-	cf_debug(CF_SOCKET, "Closing FD %d", sock.fd);
-	safe_close(sock.fd);
+	cf_debug(CF_SOCKET, "Closing FD %d", sock->fd);
+	safe_close(sock->fd);
+	sock->fd = -1;
+	cf_free(sock);
 }
 
 void
-cf_socket_drain_close(cf_socket sock)
+cf_socket_drain_close(cf_socket *sock)
 {
-	cf_debug(CF_SOCKET, "Draining and closing FD %d", sock.fd);
+	cf_debug(CF_SOCKET, "Draining and closing FD %d", sock->fd);
 	int32_t efd = epoll_create(1);
 
 	if (efd < 0) {
 		cf_crash(CF_SOCKET, "epoll_create() failed: %d (%s)", errno, cf_strerror(errno));
 	}
 
-	struct epoll_event event = { .data.fd = sock.fd, .events = EPOLLRDHUP };
+	struct epoll_event event = { .data.fd = sock->fd, .events = EPOLLRDHUP };
 
-	if (epoll_ctl(efd, EPOLL_CTL_ADD, sock.fd, &event) < 0) {
+	if (epoll_ctl(efd, EPOLL_CTL_ADD, sock->fd, &event) < 0) {
 		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 	}
 
 	cf_socket_shutdown(sock);
 	int32_t count = safe_wait(efd, &event, 1, 5000);
 
 	if (count == 0) {
-		cf_warning(CF_SOCKET, "Timeout while waiting for FD %d to drain", sock.fd);
+		cf_warning(CF_SOCKET, "Timeout while waiting for FD %d to drain", sock->fd);
 		goto cleanup1;
 	}
 
-	cf_debug(CF_SOCKET, "FD %d drained", sock.fd);
+	cf_debug(CF_SOCKET, "FD %d drained", sock->fd);
 
 cleanup1:
-	if (epoll_ctl(efd, EPOLL_CTL_DEL, sock.fd, NULL) < 0) {
+	if (epoll_ctl(efd, EPOLL_CTL_DEL, sock->fd, NULL) < 0) {
 		cf_crash(CF_SOCKET, "epoll_ctl() failed for FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 	}
 
 	safe_close(efd);
@@ -863,11 +895,17 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 		goto cleanup0;
 	}
 
-	cf_socket sock = (cf_socket){ .fd = fd };
+	cf_socket *sock = cf_malloc(sizeof(cf_socket));
+
+	if (sock == NULL) {
+		cf_crash(CF_SOCKET, "Out of memory");
+	}
+
+	sock->fd = fd;
 	fd = -1;
 
 	cf_socket_fix_client(sock);
-	safe_setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+	safe_setsockopt(sock->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
 	if (iaddr != NULL) {
 		cf_info(CF_SOCKET, "Setting multicast interface address: %s", cf_ip_addr_print(iaddr));
@@ -889,7 +927,7 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 		}
 	}
 
-	while (bind(sock.fd, (struct sockaddr *)&sas,
+	while (bind(sock->fd, (struct sockaddr *)&sas,
 			cf_socket_addr_len((struct sockaddr *)&sas)) < 0) {
 		if (errno != EADDRINUSE) {
 			cf_warning(CF_SOCKET, "Error while binding to %s:%d: %d (%s)",
@@ -914,7 +952,8 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 	goto cleanup0;
 
 cleanup1:
-	safe_close(sock.fd);
+	safe_close(sock->fd);
+	cf_free(sock);
 
 cleanup0:
 	return res;
@@ -924,7 +963,9 @@ void
 cf_socket_mcast_close(cf_socket_mcast_cfg *mconf)
 {
 	cf_socket_cfg *conf = &mconf->conf;
-	safe_close(conf->sock.fd);
+	safe_close(conf->sock->fd);
+	conf->sock->fd = -1;
+	cf_free(conf->sock);
 }
 
 // #define VERY_CHATTY
@@ -944,20 +985,21 @@ cf_poll_create(cf_poll *poll)
 }
 
 void
-cf_poll_add_socket(cf_poll poll, cf_socket sock, uint32_t events, void *data)
+cf_poll_add_socket(cf_poll poll, cf_socket *sock, uint32_t events, void *data)
 {
 	cf_debug(CF_SOCKET, "Adding FD %d to epoll instance with FD %d, events = 0x%x",
-			sock.fd, poll.fd, events);
+			sock->fd, poll.fd, events);
 	struct epoll_event ev = { .events = events, .data.ptr = data };
 
-	if (epoll_ctl(poll.fd, EPOLL_CTL_ADD, sock.fd, &ev) < 0) {
+	if (epoll_ctl(poll.fd, EPOLL_CTL_ADD, sock->fd, &ev) < 0) {
 		cf_crash(CF_SOCKET, "Error while adding FD %d to epoll instance %d: %d (%s)",
-				sock.fd, poll.fd, errno, cf_strerror(errno));
+				sock->fd, poll.fd, errno, cf_strerror(errno));
 	}
 }
 
-void
-cf_poll_modify_socket(cf_poll poll, cf_socket sock, uint32_t events, void *data)
+int32_t
+cf_poll_modify_socket_forgiving(cf_poll poll, cf_socket *sock, uint32_t events, void *data,
+		int32_t n_err_ok, int32_t *err_ok)
 {
 #if defined VERY_CHATTY
 	cf_detail(CF_SOCKET, "Modifying FD %d in epoll instance with FD %d, events = 0x%x",
@@ -966,24 +1008,37 @@ cf_poll_modify_socket(cf_poll poll, cf_socket sock, uint32_t events, void *data)
 
 	struct epoll_event ev = { .events = events, .data.ptr = data };
 
-	if (epoll_ctl(poll.fd, EPOLL_CTL_MOD, sock.fd, &ev) < 0) {
-		// XXX - ENOENT can legitimately happen in thr_demarshal_resume().
-		if (errno != ENOENT) {
-			cf_crash(CF_SOCKET, "Error while modifying FD %d in epoll instance %d: %d (%s)",
-					sock.fd, poll.fd, errno, cf_strerror(errno));
+	if (epoll_ctl(poll.fd, EPOLL_CTL_MOD, sock->fd, &ev) < 0) {
+		for (int32_t i = 0; i < n_err_ok; ++i) {
+			if (errno == err_ok[i]) {
+				return errno;
+			}
 		}
+
+		cf_crash(CF_SOCKET, "Error while modifying FD %d in epoll instance %d: %d (%s)",
+				sock->fd, poll.fd, errno, cf_strerror(errno));
 	}
+
+	return 0;
 }
 
-void
-cf_poll_delete_socket(cf_poll poll, cf_socket sock)
+int32_t
+cf_poll_delete_socket_forgiving(cf_poll poll, cf_socket *sock, int32_t n_err_ok, int32_t *err_ok)
 {
-	cf_debug(CF_SOCKET, "Deleting FD %d from epoll instance with FD %d", sock.fd, poll.fd);
+	cf_debug(CF_SOCKET, "Deleting FD %d from epoll instance with FD %d", sock->fd, poll.fd);
 
-	if (epoll_ctl(poll.fd, EPOLL_CTL_DEL, sock.fd, NULL) < 0) {
+	if (epoll_ctl(poll.fd, EPOLL_CTL_DEL, sock->fd, NULL) < 0) {
+		for (int32_t i = 0; i < n_err_ok; ++i) {
+			if (errno == err_ok[i]) {
+				return errno;
+			}
+		}
+
 		cf_crash(CF_SOCKET, "Error while deleting FD %d from epoll instance %d: %d (%s)",
-				sock.fd, poll.fd, errno, cf_strerror(errno));
+				sock->fd, poll.fd, errno, cf_strerror(errno));
 	}
+
+	return 0;
 }
 
 int32_t

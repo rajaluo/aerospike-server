@@ -267,7 +267,7 @@ typedef enum fb_status_e {
 // Tells you everything about what's currently pending to read and write
 // on this descriptor, so you can call read and write
 typedef struct {
-	cf_socket sock;
+	cf_socket *sock;
 	int worker_id;
 
 	bool nodelay_isset;
@@ -433,7 +433,7 @@ fne_release(fabric_node_element *fne)
 }
 
 fabric_buffer *
-fabric_buffer_create(cf_socket sock)
+fabric_buffer_create(cf_socket *sock)
 {
 	fabric_buffer *fb = cf_rc_alloc(sizeof(fabric_buffer));
 
@@ -508,7 +508,7 @@ fabric_buffer_release(fabric_buffer *fb)
 		}
 
 		cf_socket_close(fb->sock);
-		SFD(fb->sock) = -1;
+		fb->sock = NULL;
 		cf_atomic64_incr(&g_stats.fabric_connections_closed);
 
 		// No longer assigned to a worker.
@@ -690,7 +690,7 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	cf_ip_port_from_node_id(fne->node, &addr.port);
 
 	// Initiate the connect to the remote endpoint
-	cf_socket sock;
+	cf_socket *sock;
 
 	if (cf_socket_init_client_nb(&addr, &sock) < 0) {
 		cf_debug(AS_FABRIC, "fabric connect could not create connect");
@@ -1269,7 +1269,7 @@ fabric_accept_fn(void *argv)
 
 	do {
 		/* Accept new connections on the service socket */
-		cf_socket csock;
+		cf_socket *csock;
 		cf_sock_addr sa;
 
 		if (cf_socket_accept(sc.sock, &csock, &sa) < 0) {
@@ -1661,7 +1661,7 @@ as_fabric_send(cf_node node, msg *m, int priority)
 	fabric_buffer *fb = 0;
 	do {
 		rv = cf_queue_pop(fne->xmit_buffer_queue, &fb, CF_QUEUE_NOWAIT);
-		if ((CF_QUEUE_OK == rv) && (CSFD(fb->sock) == -1 || fb->failed)) {
+		if ((CF_QUEUE_OK == rv) && (fb->sock == NULL || fb->failed)) {
 			cf_detail(AS_FABRIC, "releasing fb: %p with fne: %p and fd: %d (%s)", fb, fb->fne, CSFD(fb->sock), fb->failed ? "Failed" : "Missing");
 			fabric_buffer_release(fb);
 			fb = 0;

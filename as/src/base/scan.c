@@ -119,8 +119,8 @@ typedef struct scan_options_s {
 int get_scan_set_id(as_transaction* tr, as_namespace* ns, uint16_t* p_set_id);
 scan_type get_scan_type(as_transaction* tr);
 bool get_scan_options(as_transaction* tr, scan_options* options);
-size_t send_blocking_response_chunk(cf_socket sock, uint8_t* buf, size_t size);
-size_t send_blocking_response_fin(cf_socket sock, int result_code);
+size_t send_blocking_response_chunk(cf_socket *sock, uint8_t* buf, size_t size);
+size_t send_blocking_response_fin(cf_socket *sock, int result_code);
 static inline bool excluded_set(as_index* r, uint16_t set_id);
 
 
@@ -322,7 +322,7 @@ get_scan_options(as_transaction* tr, scan_options* options)
 }
 
 size_t
-send_blocking_response_chunk(cf_socket sock, uint8_t* buf, size_t size)
+send_blocking_response_chunk(cf_socket *sock, uint8_t* buf, size_t size)
 {
 	as_proto proto;
 
@@ -350,7 +350,7 @@ send_blocking_response_chunk(cf_socket sock, uint8_t* buf, size_t size)
 }
 
 size_t
-send_blocking_response_fin(cf_socket sock, int result_code)
+send_blocking_response_fin(cf_socket *sock, int result_code)
 {
 	cl_msg m;
 

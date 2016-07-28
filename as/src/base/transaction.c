@@ -452,7 +452,7 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 
 	cf_socket_close(proto_fd_h->sock);
 	proto_fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
-	SFD(proto_fd_h->sock) = -1;
+	proto_fd_h->sock = NULL;
 
 	if (proto_fd_h->proto)	{
 		as_proto *p = proto_fd_h->proto;
