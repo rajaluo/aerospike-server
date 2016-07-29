@@ -794,7 +794,7 @@ x_shutdown(cf_socket *sock, int32_t how)
 					sock->fd, errno, cf_strerror(errno));
 		}
 		else {
-			cf_warning(CF_SOCKET, "shutdown() on disconnected FD %d: %d (%s)",
+			cf_debug(CF_SOCKET, "shutdown() on disconnected FD %d: %d (%s)",
 					sock->fd, errno, cf_strerror(errno));
 		}
 	}
