@@ -2170,7 +2170,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			g_config.paxos_retransmit_period = val;
 		}
 		else if (0 == as_info_parameter_get(params, "paxos-max-cluster-size", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || (1 >= val) ||
+			if (0 != cf_str_atoi(context, &val) || (1 > val) ||
 			    (val > AS_CLUSTER_SZ) ||
 			    !as_hb_max_cluster_size_isvalid(val))
 				goto Error;

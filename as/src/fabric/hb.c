@@ -2021,8 +2021,7 @@ as_hb_max_cluster_size_isvalid(uint32_t max_cluster_size)
 
 	uint32_t adjacency_size = shash_get_size(g_hb.adjacency) + 1;
 
-	// Note: Accounting for the NULL terminator with a '>' check.
-	bool isvalid = max_cluster_size > adjacency_size;
+	bool isvalid = max_cluster_size >= adjacency_size;
 	if (!isvalid) {
 		WARNING("Rejected new max cluster size %d which is less than "
 			"or equal to adjacency size %d.",

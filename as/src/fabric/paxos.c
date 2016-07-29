@@ -252,18 +252,19 @@ void as_paxos_log_succession_list(char *msg, cf_node slist[], int list_max_lengt
 	int used = 0;
 	used += snprintf(buff, print_buff_capacity, "%s [", msg);
 
+	int num_printed = 0;
 	for (int i = 0; i < list_max_length && used < print_buff_capacity; i++) {
 		if (slist[i] == (cf_node)0) {
 			// End of list.
 			break;
-		} else {
-			used += snprintf(buff + used, print_buff_capacity - used,
-							 "%" PRIx64 ",", slist[i]);
 		}
+		used += snprintf(buff + used, print_buff_capacity - used,
+				 "%" PRIx64 ",", slist[i]);
+		num_printed++;
 	}
 
 	// Trim comma after the last node
-	if (used - 1 < print_buff_capacity) {
+	if (num_printed && (used - 1 < print_buff_capacity)) {
 		snprintf(buff + used - 1, print_buff_capacity - used, "]");
 	}
 
@@ -2591,6 +2592,7 @@ as_paxos_process_retransmit_check()
 	  AS_CLUSTER_SZ);
 	bool succession_list_fault = corrective_event_count > 0;
 
+	as_paxos_check_integrity();
 	bool cluster_integrity_fault = !as_paxos_get_cluster_integrity(p);
 
 	// Second phase failed if migrations are disallowed and we have
@@ -3497,8 +3499,11 @@ as_paxos_hb_get_succession_list(cf_node nodeid, cf_node* succession)
 		goto Exit;
 	}
 
+	// v3 does not send zero as the last element. Ensure the succession list
+	// is zero terminated, assuming succession to be of the size
+	// AS_CLUSTER_SZ.
+	memset(succession, 0, AS_CLUSTER_SZ * sizeof(cf_node));
 	memcpy(succession, src, succession_size * sizeof(cf_node));
-	succession[succession_size] = 0;
 
 Exit:
 	if (plugin_data) {
