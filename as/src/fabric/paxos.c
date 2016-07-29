@@ -3499,10 +3499,11 @@ as_paxos_hb_get_succession_list(cf_node nodeid, cf_node* succession)
 		goto Exit;
 	}
 
+	// v3 does not send zero as the last element. Ensure the succession list
+	// is zero terminated, assuming succession to be of the size
+	// AS_CLUSTER_SZ.
+	memset(succession, 0, AS_CLUSTER_SZ * sizeof(cf_node));
 	memcpy(succession, src, succession_size * sizeof(cf_node));
-	if (succession_size < AS_CLUSTER_SZ) {
-		succession[succession_size] = 0;
-	}
 
 Exit:
 	if (plugin_data) {
