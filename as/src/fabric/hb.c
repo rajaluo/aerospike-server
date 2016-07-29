@@ -3655,7 +3655,7 @@ channel_socket_close(cf_socket* socket, bool remote_close, bool raise_close_even
 		// Will only happen if we are closing this socket twice. Cannot
 		// deference the underlying fd because the socket has been
 		// freed.
-		WARNING("Found a fd %p without an "
+		WARNING("Found a socket %p without an "
 			"associated channel.",
 				socket);
 		goto Exit;
@@ -5188,7 +5188,7 @@ channel_mesh_msg_send(cf_socket* socket, byte* buff, size_t buffer_length)
 	do {
 		DETAIL(
 		  "Sending mesh message on fd %d retry count:%d msg_size:%zu",
-		  (*socket).fd, retry, buffer_length);
+		  CSFD(socket), retry, buffer_length);
 
 		int ret = cf_socket_send_to(socket, buff, buffer_length, 0, 0);
 		if ((ret < 0) &&
