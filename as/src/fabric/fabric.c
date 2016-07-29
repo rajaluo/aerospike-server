@@ -1067,7 +1067,9 @@ fabric_buffer_set_epoll_state(fabric_buffer *fb)
 		events |= EPOLLOUT;
 	}
 
-	cf_poll_modify_socket(g_fabric_args->workers_poll[fb->worker_id], fb->sock, events, fb);
+	static int32_t err_ok[] = { ENOENT };
+	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(g_fabric_args->workers_poll[fb->worker_id],
+			fb->sock, events, fb, sizeof(err_ok) / sizeof(int32_t), err_ok));
 }
 
 // Assign fb to a worker thread.
