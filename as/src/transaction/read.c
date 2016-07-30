@@ -223,6 +223,9 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		return;
 	}
 
+	// Note - if tr was setup from rw, rw->from.any has been set null and
+	// informs timeout it lost the race.
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		BENCHMARK_NEXT_DATA_POINT(tr, read, local);
@@ -265,7 +268,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		break;
 	}
 
-	tr->from.any = NULL; // inform timeout it lost the race
+	tr->from.any = NULL; // pattern, not needed
 }
 
 
@@ -299,8 +302,7 @@ read_timeout_cb(rw_request* rw)
 		break;
 	}
 
-	// Paranoia - shouldn't need this to inform other callback it lost race.
-	rw->from.any = NULL;
+	rw->from.any = NULL; // inform other callback it lost the race
 }
 
 
