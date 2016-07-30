@@ -228,6 +228,10 @@ repl_write_setup_rw(rw_request* rw, as_transaction* tr,
 void
 repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
 {
+	// Reset rw->from.any which was set null in tr setup. (Note that it's null
+	// if we responded on master complete.)
+	rw->from.any = tr->from.any;
+
 	rw->repl_write_cb = cb;
 
 	// TODO - is this better than not resetting? Note - xmit_ms not volatile.
