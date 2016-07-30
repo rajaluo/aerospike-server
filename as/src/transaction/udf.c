@@ -407,8 +407,8 @@ start_udf_repl_write(rw_request* rw, as_transaction* tr)
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_udf_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_udf_response() again.
 		send_udf_response(tr, &rw->response_db);
 	}
 
@@ -474,8 +474,8 @@ udf_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	}
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_udf_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_udf_response() again.
 		send_udf_response(tr, &rw->response_db);
 	}
 
@@ -513,6 +513,9 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		cf_warning(AS_RW, "transaction origin %u has null 'from'", tr->origin);
 		return;
 	}
+
+	// Note - if tr was setup from rw, rw->from.any has been set null and
+	// informs timeout it lost the race.
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
@@ -555,7 +558,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		break;
 	}
 
-	tr->from.any = NULL; // inform timeout it lost the race
+	tr->from.any = NULL; // needed only for respond-on-master-complete
 }
 
 
@@ -588,8 +591,7 @@ udf_timeout_cb(rw_request* rw)
 		break;
 	}
 
-	// Paranoia - shouldn't need this to inform other callback it lost race.
-	rw->from.any = NULL;
+	rw->from.any = NULL; // inform other callback it lost the race
 }
 
 
