@@ -114,8 +114,6 @@ const bool g_xdr_supported;
 
 void xdr_config_defaults(xdr_config *c)
 {
-	int index;
-
 	c->xdr_global_enabled = false;		// This config option overrides the enable-xdr setting of the namespace(s)
 
 	c->xdr_digestlog_path = NULL;	// Path where the digest information is written to the disk
