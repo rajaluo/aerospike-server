@@ -30,7 +30,6 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <stdio.h>
-#include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/param.h> // For MAX() and MIN().
 #include <sys/socket.h>
@@ -487,9 +486,9 @@ typedef struct
 	bool found;
 
 	/**
-	 * The matching fd, if found.
+	 * The matching socket, if found.
 	 */
-	cf_socket fd;
+	cf_socket* socket;
 
 } as_hb_channel_endpoint_reduce_udata;
 
@@ -542,10 +541,10 @@ typedef struct as_hb_channel_s
 	cf_clock last_received;
 
 	/**
-	 * Time when this channel won a fd resolution. Zero if this channel
+	 * Time when this channel won a socket resolution. Zero if this channel
 	 * never won resolution. In compatibility mode with older code its
-	 * possible we will keep allowing the same fd to win and enter an
-	 * infinite loop of closing the fds.
+	 * possible we will keep allowing the same socket to win and enter an
+	 * infinite loop of closing the sockets.
 	 */
 	cf_clock resolution_win_ts;
 
@@ -557,10 +556,11 @@ typedef struct as_hb_channel_s
 typedef struct as_hb_channel_state_s
 {
 	/**
-	 * The epoll fd. All IO wait across all heartbeat connections happens on
-	 * this fd.
+	 * The poll handle. All IO wait across all heartbeat connections happens
+	 * on
+	 * this handle.
 	 */
-	int efd;
+	cf_poll poll;
 
 	/**
 	 * Channel status.
@@ -568,9 +568,9 @@ typedef struct as_hb_channel_state_s
 	as_hb_status status;
 
 	/**
-	 * Maps a file descriptor to a as_hb_channel.
+	 * Maps a socket to an as_hb_channel.
 	 */
-	shash* fd_to_channel;
+	shash* socket_to_channel;
 
 	/**
 	 * Maps a nodeid to a channel specific node data structure. This
@@ -578,12 +578,18 @@ typedef struct as_hb_channel_state_s
 	 * only on receiving the first heartbeat message from the node on a
 	 * channel.
 	 */
-	shash* nodeid_to_fd;
+	shash* nodeid_to_socket;
+
+	/**
+	 * Sockets accumulated by the channel tender to close at the end of every
+	 * epoll loop.
+	 */
+	cf_queue socket_close_queue;
 
 	/**
 	 * The socket on which heartbeart subsystem listens to.
 	 */
-	cf_socket listening_socket;
+	cf_socket* listening_socket;
 
 	/**
 	 * Enables / disables publishing channel events. Events should be
@@ -601,11 +607,30 @@ typedef struct as_hb_channel_state_s
 	cf_queue events_queue;
 
 	/**
-	 * Thread id for the fd tender thread.
+	 * Thread id for the socket tender thread.
 	 */
 	pthread_t channel_tender_tid;
 
 } as_hb_channel_state;
+
+/**
+ * Entry queued up for socket close.
+ */
+typedef struct as_hb_channel_socket_close_entry_s
+{
+	/**
+	 * The node for which this event was generated.
+	 */
+	cf_socket* socket;
+	/**
+	 * Inidicates if this close is a remote close.
+	 */
+	bool is_remote;
+	/**
+	 * True if close of this entry should generate a disconnect event.
+	 */
+	bool raise_close_event;
+} as_hb_channel_socket_close_entry;
 
 /**
  * The type of a channel event.
@@ -920,20 +945,20 @@ typedef struct as_hb_adjacency_tender_udata_s
 } as_hb_adjacency_tender_udata;
 
 /**
- * Udata for finding fds open in channel.
+ * Udata for finding sockets open in channel.
  */
-typedef struct as_hb_fds_udata_s
+typedef struct as_hb_sockets_udata_s
 {
 	/**
-	 * List of fds.
+	 * List of sockets.
 	 */
-	cf_vector fds;
+	cf_vector socketss;
 
 	/**
-	 * count of elements in the fd list.
+	 * count of elements in the socket list.
 	 */
-	int fds_count;
-} as_hb_fds_udata;
+	int sockets_count;
+} as_hb_sockets_udata;
 
 /**
  * Udata for tip clear.
@@ -1091,14 +1116,9 @@ pthread_mutex_t config_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 pthread_mutex_t set_protocol_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 /*
- *  Size of the epoll descriptor events set.
+ *  Size of the poll events set.
  */
-#define EPOLL_SZ (1024)
-
-// Workaround for platforms that don't have EPOLLRDHUP yet
-#ifndef EPOLLRDHUP
-#define EPOLLRDHUP EPOLLHUP
-#endif
+#define POLL_SZ (1024)
 
 /**
  * The default MTU for multicast in case device discovery fails.
@@ -1174,7 +1194,9 @@ static msg_template g_hb_v2_msg_template[] = {
  */
 #define MSG_BUFFER_MAX_SIZE() (10 * 1024 * 1024)
 
-#define ASC() (2 << 4)
+#ifndef ASC
+#define ASC (2 << 4)
+#endif
 
 /**
  * Maximum memory size allocated on the call stack.
@@ -1233,8 +1255,8 @@ static msg_template g_hb_v2_msg_template[] = {
 #define CHANNEL_UNLOCK() (pthread_mutex_unlock(&channel_lock))
 
 /**
- * Keep a winning fd as a winner for at least this amount of time to prevent
- * constant flip flopping and give the winning fd a chance to send heartbeats.
+ * Keep a winning socket as a winner for at least this amount of time to prevent
+ * constant flip flopping and give the winning socket a chance to send heartbeats.
  */
 #define CHANNEL_WIN_GRACE_MS() (3 * config_hb_tx_interval_get())
 
@@ -1521,27 +1543,6 @@ static msg_template g_hb_v2_msg_template[] = {
 		retval;                                                        \
 	})
 
-/*----- cf_socket related kludges -----*/
-/**
- * Convert cf_socket* to int fd .
- */
-#define CSFD_P(sock_p) ((int32_t)sock_p->fd)
-
-/**
- * Clone a cf_socket
- */
-#define WSFD_CLONE(sock_p) (WSFD(CSFD_P(sock_p)))
-
-/**
- * Clone a cf_socket using a source and destination pointer.
- */
-#define WSFD_COPY(sock_dest_p, sock_src_p)                                     \
-	({                                                                     \
-		if (!memcpy(sock_dest_p, sock_src_p, sizeof(*sock_dest_p))) {  \
-			CRASH("Error copying cf_sockets.");                    \
-		}                                                              \
-	})
-
 /*----------------------------------------------------------------------------
  * Private internal function forward declarations.
  *----------------------------------------------------------------------------*/
@@ -1625,42 +1626,47 @@ as_hb_init()
 
 	// Add the mesh seed nodes.
 	// Using one time seed config outside the config module.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (g_config.hb_config.hb_mesh_seed_addrs[i]) {
+	if (IS_MESH()) {
+		for (int i = 0; i < AS_CLUSTER_SZ; i++) {
+			if (g_config.hb_config.hb_mesh_seed_addrs[i]) {
 
-			int rv =
-			  mesh_tip(g_config.hb_config.hb_mesh_seed_addrs[i],
-				   g_config.hb_config.hb_mesh_seed_ports[i]);
+				int rv = mesh_tip(
+				  g_config.hb_config.hb_mesh_seed_addrs[i],
+				  g_config.hb_config.hb_mesh_seed_ports[i]);
 
-			switch (rv) {
-				case SHASH_OK:
-					INFO("Added mesh seed node from config "
-					     "%s:%d",
-					     g_config.hb_config
-					       .hb_mesh_seed_addrs[i],
-					     g_config.hb_config
-					       .hb_mesh_seed_ports[i]);
-					break;
-				case SHASH_ERR_FOUND:
-					INFO("Duplicate mesh seed node from "
-					     "config %s:%d",
-					     g_config.hb_config
-					       .hb_mesh_seed_addrs[i],
-					     g_config.hb_config
-					       .hb_mesh_seed_ports[i]);
-					break;
-				case SHASH_ERR:
-					WARNING("Error adding mesh seed node "
-						"from config %s:%d",
-						g_config.hb_config
-						  .hb_mesh_seed_addrs[i],
-						g_config.hb_config
-						  .hb_mesh_seed_ports[i]);
-					break;
+				switch (rv) {
+					case SHASH_OK:
+						INFO("Added mesh seed node "
+						     "from config "
+						     "%s:%d",
+						     g_config.hb_config
+						       .hb_mesh_seed_addrs[i],
+						     g_config.hb_config
+						       .hb_mesh_seed_ports[i]);
+						break;
+					case SHASH_ERR_FOUND:
+						INFO("Duplicate mesh seed node "
+						     "from "
+						     "config %s:%d",
+						     g_config.hb_config
+						       .hb_mesh_seed_addrs[i],
+						     g_config.hb_config
+						       .hb_mesh_seed_ports[i]);
+						break;
+					case SHASH_ERR:
+						WARNING(
+						  "Error adding mesh seed node "
+						  "from config %s:%d",
+						  g_config.hb_config
+						    .hb_mesh_seed_addrs[i],
+						  g_config.hb_config
+						    .hb_mesh_seed_ports[i]);
+						break;
+				}
+
+			} else {
+				break;
 			}
-
-		} else {
-			break;
 		}
 	}
 }
@@ -1885,6 +1891,10 @@ as_hb_config_validate()
 		      (IS_MESH()) ? "MESH" : "MULTICAST",
 		      config_hb_listen_port_get());
 	}
+	if (!IS_MESH() && g_config.hb_config.hb_mesh_seed_addrs[0]) {
+		CRASH("Invalid config option. mesh-seed-address-port not "
+		      "supported for multicast mode.");
+	}
 }
 
 /**
@@ -2011,8 +2021,7 @@ as_hb_max_cluster_size_isvalid(uint32_t max_cluster_size)
 
 	uint32_t adjacency_size = shash_get_size(g_hb.adjacency) + 1;
 
-	// Note: Accounting for the NULL terminator with a '>' check.
-	bool isvalid = max_cluster_size > adjacency_size;
+	bool isvalid = max_cluster_size >= adjacency_size;
 	if (!isvalid) {
 		WARNING("Rejected new max cluster size %d which is less than "
 			"or equal to adjacency size %d.",
@@ -2031,6 +2040,11 @@ as_hb_max_cluster_size_isvalid(uint32_t max_cluster_size)
 int
 as_hb_mesh_tip(char* host, int port)
 {
+	if (!IS_MESH()) {
+		WARNING("Tip not applicable for multicast.");
+		return (-1);
+	}
+
 	return mesh_tip(host, port);
 }
 
@@ -2038,13 +2052,15 @@ as_hb_mesh_tip(char* host, int port)
  * Remove an aerospike seed entry from the mesh seed list.
  */
 int
-as_hb_mesh_tip_clear(char* host, char* port)
+as_hb_mesh_tip_clear(char* host, int port)
 {
 	if (!IS_MESH()) {
 		WARNING("Tip clear not applicable for multicast.");
 		return (-1);
 	}
-	if (host == NULL || host[0] == '\0' || port == NULL) {
+
+	if (host == NULL || host[0] == '\0' ||
+	    strnlen(host, HOST_NAME_MAX) == HOST_NAME_MAX) {
 		WARNING("Incorrect host or port");
 		return (-1);
 	}
@@ -2053,7 +2069,7 @@ as_hb_mesh_tip_clear(char* host, char* port)
 
 	as_hb_mesh_tip_clear_udata mesh_tip_clear_reduce_udata;
 	strncpy(mesh_tip_clear_reduce_udata.host, host, HOST_NAME_MAX);
-	mesh_tip_clear_reduce_udata.port = atoi(port);
+	mesh_tip_clear_reduce_udata.port = port;
 	shash_reduce_delete(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
 			    mesh_tip_clear_reduce,
 			    &mesh_tip_clear_reduce_udata);
@@ -2511,12 +2527,10 @@ as_hb_mesh_node_key_hash_fn(void* value)
  * Generate a hash code for a cf_socket.
  */
 static uint32_t
-as_hb_fd_hash_fn(void* value)
+as_hb_socket_hash_fn(void* value)
 {
-	cf_socket* socket = (cf_socket*)value;
-	// TODO: Have a API method to get the hash of fd from a socket pointer.
-	int fd = CSFD_P(socket);
-	return as_hb_blob_hash((uint8_t*)&fd, sizeof(fd));
+	cf_socket** socket = (cf_socket**)value;
+	return as_hb_blob_hash((uint8_t*)socket, sizeof(cf_socket*));
 }
 
 /**
@@ -2602,9 +2616,9 @@ as_hb_ipaddr_is_specified(const as_hb_ipaddr* addr)
 }
 
 /**
- * Convert a host ordered IPv4 address to an IPv6 address as IPv4-mapped IPv6
+ * Convert a network ordered IPv4 address to an IPv6 address as IPv4-mapped IPv6
  * address.
- * @param v4_addr source ipv4 address in HOST order.
+ * @param v4_addr source ipv4 address in network order.
  * @param v6_addr destination ipv6 address.
  */
 static void
@@ -2618,23 +2632,22 @@ as_hb_ipaddr_from_ipv4(uint32_t v4_addr, as_hb_ipaddr* v6_addr)
 	};
 	v6_addr->addr.qword[0] = v4_to_v6_template.addr.qword[0];
 	v6_addr->addr.qword[1] = v4_to_v6_template.addr.qword[1];
-	v6_addr->addr.dword[3] = htonl(v4_addr);
+	v6_addr->addr.dword[3] = v4_addr;
 }
 
 /**
- * Convert an as_hb_ipaddr to host ordered ipv4 address.
- * @param v4_addr ipv4 address in HOST order.
- * @param v ipv6 address.
+ * Convert an as_hb_ipaddr to network ordered ipv4 address.
+ * @param v6_addr v6 address in network order.
  */
 static uint32_t
 as_hb_ipaddr_to_ipv4h(const as_hb_ipaddr* v6_addr)
 {
-	return ntohl(v6_addr->addr.dword[3]);
+	return v6_addr->addr.dword[3];
 }
 
 /**
- * Convert an as_hb_ipaddr to host ordered ipv4 address.
- * @param v4_addr ipv4 address in HOST order.
+ * Convert an as_hb_ipaddr to network ordered ipv4 address.
+ * @param v4_addr ipv4 address in network order.
  * @param v ipv6 address.
  */
 static uint32_t
@@ -2719,7 +2732,7 @@ msg_endpoint_get(msg* msg, as_hb_endpoint* endpoint)
 			WARNING("Error reading ip address form message.");
 			return -1;
 		}
-		// v2 sends addresses in host order over the wire.
+		// v2 sends addresses in network order over the wire.
 		as_hb_ipaddr_from_ipv4(addr_temp, &endpoint->addr);
 	}
 
@@ -3201,9 +3214,7 @@ config_mcsize()
 
 	// Ensure we are always upper bounded by the absolute max cluster size.
 	int supported_cluster_size =
-	  MIN(AS_CLUSTER_SZ,
-	      MIN(ASC(),
-		  MIN(g_config.paxos_max_cluster_size, mode_cluster_size)));
+	  MIN(ASC, MIN(g_config.paxos_max_cluster_size, mode_cluster_size));
 
 	DETAIL("Supported cluster size %d", supported_cluster_size);
 	return supported_cluster_size;
@@ -3536,21 +3547,21 @@ channel_event_publish_pending()
 }
 
 /**
- * Return the endpoint associated with this file descriptor if it exists.
+ * Return the endpoint associated with this socket if it exists.
 
- * @param fd the file descriptor to query for.
+ * @param socket the socket to query for.
  * @param result the output result.
- * @return 0 if the fd was found and the result value is filled. -1 if a mapping
- for the fd coud not be found.
+ * @return 0 if the socket was found and the result value is filled. -1 if a mapping
+ for the socket coud not be found.
 */
 static int
-channel_get_channel(cf_socket* fd, as_hb_channel* result)
+channel_get_channel(cf_socket* socket, as_hb_channel* result)
 {
 	int status;
 	CHANNEL_LOCK();
 
 	if (SHASH_OK ==
-	    shash_get(g_hb.channel_state.fd_to_channel, fd, result)) {
+	    shash_get(g_hb.channel_state.socket_to_channel, &socket, result)) {
 		status = 0;
 	} else {
 		status = -1;
@@ -3561,25 +3572,25 @@ channel_get_channel(cf_socket* fd, as_hb_channel* result)
 }
 
 /**
- * Shutdown a channel fd without closing, forcing the channel tender to cleanup
+ * Shutdown a channel socket without closing, forcing the channel tender to cleanup
  * associated data structures.
  */
 static void
-channel_fd_shutdown(cf_socket* fd)
+channel_socket_shutdown(cf_socket* socket)
 {
-	cf_socket_shutdown(*fd);
+	cf_socket_shutdown(socket);
 }
 
 /**
- * Return the file descriptor associated with this node.
- * Returns 0 on success and -1 if there is no fd attached to this node.
+ * Return the socket associated with this node.
+ * Returns 0 on success and -1 if there is no socket attached to this node.
  */
 static int
-channel_fd_get(cf_node nodeid, cf_socket* fd)
+channel_socket_get(cf_node nodeid, cf_socket** socket)
 {
 	int rv = -1;
 	CHANNEL_LOCK();
-	if (SHASH_GET_OR_DIE(g_hb.channel_state.nodeid_to_fd, &nodeid, fd,
+	if (SHASH_GET_OR_DIE(g_hb.channel_state.nodeid_to_socket, &nodeid, socket,
 			     "Error get channel information for node %" PRIX64,
 			     nodeid) == SHASH_ERR_NOTFOUND) {
 		rv = -1;
@@ -3592,33 +3603,33 @@ channel_fd_get(cf_node nodeid, cf_socket* fd)
 }
 
 /**
- * Close a channel file descriptor. Precondition is that the fd is registerd
- * with the channel module using channel_fd_register.
+ * Close a channel socket. Precondition is that the socket is registerd
+ * with the channel module using channel_socket_register.
  */
 static void
-channel_fd_close(cf_socket* fd, bool remote_close)
+channel_socket_close(cf_socket* socket, bool remote_close, bool raise_close_event)
 {
 	if (remote_close) {
 		stats_error_count(AS_HB_ERR_REMOTE_CLOSE);
-		DEBUG("Remote close: fd %d event.", CSFD_P(fd));
+		DEBUG("Remote close: fd %d event.", CSFD(socket));
 	}
 
 	CHANNEL_LOCK();
 
 	// clean up data structures.
 	as_hb_channel channel;
-	int status = channel_get_channel(fd, &channel);
+	int status = channel_get_channel(socket, &channel);
 
 	if (status == 0) {
 
 		if (channel.nodeid != 0) {
 
 			SHASH_DELETE_OR_DIE(
-			  g_hb.channel_state.nodeid_to_fd, &channel.nodeid,
+			  g_hb.channel_state.nodeid_to_socket, &channel.nodeid,
 			  "Error deleting fd associated with %" PRIx64,
 			  channel.nodeid);
 
-			if (!channel.is_multicast) {
+			if (!channel.is_multicast && raise_close_event) {
 				as_hb_channel_event event;
 				// Notify others that this node is no longer
 				// connected.
@@ -3632,92 +3643,121 @@ channel_fd_close(cf_socket* fd, bool remote_close)
 
 		DETAIL(
 		  "Removed channel associated with fd %d Polarity %s Type: %s",
-		  CSFD_P(fd), channel.is_inbound ? "inbound" : "outbound",
+		  CSFD(socket), channel.is_inbound ? "inbound" : "outbound",
 		  channel.is_multicast ? "multicast" : "mesh");
 		// Remove associated channel.
-		SHASH_DELETE_OR_DIE(g_hb.channel_state.fd_to_channel, fd,
+		SHASH_DELETE_OR_DIE(g_hb.channel_state.socket_to_channel, &socket,
 				    "Error deleting channel for fd %d",
-				    CSFD_P(fd));
+				    CSFD(socket));
 
 	} else {
-		// Will only happen if we are closing this fd twice.
-		DEBUG("Found a file descriptor %d without an "
-		      "associated channel.",
-		      CSFD_P(fd));
+		// Will only happen if we are closing this socket twice. Cannot
+		// deference the underlying fd because the socket has been
+		// freed.
+		WARNING("Found a socket %p without an "
+			"associated channel.",
+				socket);
 		goto Exit;
 	}
 
-	struct epoll_event dummy_ev;
-	memset(&dummy_ev, 0, sizeof(struct epoll_event));
+	static int32_t err_ok[] = { ENOENT, EBADF, EPERM };
+	int32_t err = cf_poll_delete_socket_forgiving(
+	  g_hb.channel_state.poll, socket, sizeof(err_ok) / sizeof(int32_t),
+	  err_ok);
 
-	if (0 > epoll_ctl(g_hb.channel_state.efd, EPOLL_CTL_DEL, CSFD_P(fd),
-			  &dummy_ev)) {
-		WARNING("Unable to remove socket %d from epoll fd list: %s",
-			CSFD_P(fd), cf_strerror(errno));
-		if (errno == ENOENT || errno == EBADF || errno == EPERM) {
-			// Most likely this node closed this fd (via fd_resolve)
-			// before. In the same epoll event batch, which
-			// contained
-			// a remote hup. Essentially we are trying to closing
-			// this fd twice. There is no valid code path where
-			// epoll ctl should fail. Bail out. Closing this fd
-			// might close a newly acquired fd.
-			goto Exit;
-		}
+	if (err == ENOENT) {
+		// There is no valid code path where epoll ctl should fail
+		CRASH("Unable to remove fd %d from epoll fd list: %s",
+		      CSFD(socket), cf_strerror(errno));
+		// might close a newly acquired socket.
+		goto Exit;
 	}
 
 	cf_atomic_int_incr(&g_stats.heartbeat_connections_closed);
+	DEBUG("Closing channel with fd %d", CSFD(socket));
 
-	if (CSFD_P(fd) != CSFD(g_hb.channel_state.listening_socket)) {
+	if (socket != g_hb.channel_state.listening_socket) {
 		// Listening sockets will be closed by the mode (mesh/multicast
 		// ) modules.
-		cf_socket_close(WSFD_CLONE(fd));
+		cf_socket_close(socket);
 	}
-
-	DEBUG("Channel closed with fd %d", CSFD_P(fd));
 
 Exit:
 	CHANNEL_UNLOCK();
 }
 
 /**
- * Close multiple the fds.
- * @param fds the vector consisting of fds to be closed.
+ * Close multiple sockets. Should be invoked only by channel stop.
+ * @param sockets the vector consisting of sockets to be closed.
  */
 static void
-channel_fds_close(cf_vector* fds)
+channel_sockets_close(cf_vector* sockets)
 {
-	uint32_t fds_count = cf_vector_size(fds);
-	for (int index = 0; index < fds_count; index++) {
-		cf_socket fd;
-		if (cf_vector_get(fds, index, &fd) != 0) {
+	uint32_t socket_count = cf_vector_size(sockets);
+	for (int index = 0; index < socket_count; index++) {
+		cf_socket* socket;
+		if (cf_vector_get(sockets, index, &socket) != 0) {
 			WARNING("Error finding the fd %d to be deleted.",
-				CSFD(fd));
+				CSFD(socket));
 			continue;
 		}
-		channel_fd_close(&fd, false);
+		channel_socket_close(socket, false, true);
 	}
 }
 
 /**
- * Register a new fd.
+ * Queues a socket for closing by the channel tender. Should be used by all code
+ * paths other than the channel stop code path.
+ */
+static void
+channel_socket_close_queue(cf_socket* socket, bool is_remote_close,
+		       bool raise_close_event)
+{
+
+	as_hb_channel_socket_close_entry close_entry = { socket, is_remote_close,
+						     raise_close_event };
+	DETAIL("Queuing close of fd %d", CSFD(socket));
+	if (cf_queue_push(&g_hb.channel_state.socket_close_queue, &close_entry) !=
+	    0) {
+		CRASH("Error queuing up close of fd %d", CSFD(socket));
+	}
+}
+
+/**
+ * Closed queued up sockets.
+ */
+static void
+channel_socket_close_pending()
+{
+	// No channel lock required here.
+	as_hb_channel_socket_close_entry close_entry;
+	while (cf_queue_pop(&g_hb.channel_state.socket_close_queue, &close_entry,
+			    0) == CF_QUEUE_OK) {
+
+		channel_socket_close(close_entry.socket, close_entry.is_remote,
+				 close_entry.raise_close_event);
+	}
+}
+
+/**
+ * Register a new socket.
  *
- * @param fd the file descriptor.
- * @param is_multicast indicates if this fd is a multicast fd.
- * @param is_inbound indicates if this fd is an inbound / outbound.
+ * @param socket the socket.
+ * @param is_multicast indicates if this socket is a multicast socket.
+ * @param is_inbound indicates if this socket is an inbound / outbound.
  * @param endpoint connected endpoint to. Can be NULL.
  */
 static void
-channel_fd_register(cf_socket* fd, bool is_multicast, bool is_inbound,
+channel_socket_register(cf_socket* socket, bool is_multicast, bool is_inbound,
 		    as_hb_endpoint* endpoint)
 {
 	CHANNEL_LOCK();
 
 	as_hb_channel channel;
 
-	// This fd should not be part of the fd to channel map.
-	ASSERT(channel_get_channel(fd, &channel) == -1,
-	       "Error the channel already exists for fd %d", CSFD_P(fd));
+	// This socket should not be part of the socket to channel map.
+	ASSERT(channel_get_channel(socket, &channel) == -1,
+	       "Error the channel already exists for fd %d", CSFD(socket));
 
 	memset(&channel, 0, sizeof(channel));
 	channel.is_multicast = is_multicast;
@@ -3728,24 +3768,14 @@ channel_fd_register(cf_socket* fd, bool is_multicast, bool is_inbound,
 		memcpy(&channel.endpoint, endpoint, sizeof(as_hb_endpoint));
 	}
 
-	// Add fd to epoll list
-	struct epoll_event ev;
-	memset(&ev, 0, sizeof(struct epoll_event));
+	// Add socket to poll list
+	cf_poll_add_socket(g_hb.channel_state.poll, socket,
+			   EPOLLIN | EPOLLERR | EPOLLRDHUP, socket);
 
-	ev.events = EPOLLIN | EPOLLERR | EPOLLRDHUP; // level-triggered!
-	ev.data.fd = CSFD_P(fd);
+	SHASH_PUT_OR_DIE(g_hb.channel_state.socket_to_channel, &socket, &channel,
+			 "Error allocating memory for channel fd %d", CSFD(socket));
 
-	if (0 >
-	    epoll_ctl(g_hb.channel_state.efd, EPOLL_CTL_ADD, ev.data.fd, &ev)) {
-		CRASH("Unable to add socket %d to epoll fd list: %s",
-		      ev.data.fd, cf_strerror(errno));
-	}
-
-	SHASH_PUT_OR_DIE(g_hb.channel_state.fd_to_channel, fd, &channel,
-			 "Error allocating memory for channel fd %d",
-			 ev.data.fd);
-
-	DEBUG("Channel created for fd %d. Polarity %s Type: %s", ev.data.fd,
+	DEBUG("Channel created for fd %d. Polarity %s Type: %s", CSFD(socket),
 	      channel.is_inbound ? "inbound" : "outbound",
 	      channel.is_multicast ? "multicast" : "mesh");
 
@@ -3768,7 +3798,7 @@ channel_accept_connection()
 	// frequent. Print only once per second.
 	static cf_clock last_accept_fail_print = 0;
 
-	cf_socket csock;
+	cf_socket* csock;
 	cf_sock_addr caddr;
 
 	if (cf_socket_accept(g_hb.channel_state.listening_socket, &csock,
@@ -3808,8 +3838,8 @@ channel_accept_connection()
 	cf_socket_disable_blocking(csock);
 	cf_socket_disable_nagle(csock);
 
-	// Register this fd with the channel subsystem.
-	channel_fd_register(&csock, false, true, NULL);
+	// Register this socket with the channel subsystem.
+	channel_socket_register(csock, false, true, NULL);
 }
 
 /**
@@ -3942,7 +3972,7 @@ static int
 channel_endpoint_search_reduce(void* key, void* data, void* udata)
 {
 
-	cf_socket* fd = (cf_socket*)key;
+	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
 	as_hb_channel_endpoint_reduce_udata* endpoint_reduce_udata =
 	  (as_hb_channel_endpoint_reduce_udata*)udata;
@@ -3950,20 +3980,20 @@ channel_endpoint_search_reduce(void* key, void* data, void* udata)
 	if (memcmp(&channel->endpoint, endpoint_reduce_udata->endpoint,
 		   sizeof(as_hb_endpoint)) == 0) {
 		endpoint_reduce_udata->found = true;
-		WSFD_COPY(&endpoint_reduce_udata->fd, fd);
+		endpoint_reduce_udata->socket = *socket;
 	}
 
 	return SHASH_OK;
 }
 
 /**
- * Populate the fds.
+ * Get all sockets.
  */
 static int
-channel_fds_get_reduce(void* key, void* data, void* udata)
+channel_sockets_get_reduce(void* key, void* data, void* udata)
 {
-	cf_vector* fds = (cf_vector*)udata;
-	cf_vector_append(fds, key);
+	cf_vector* sockets = (cf_vector*)udata;
+	cf_vector_append(sockets, key);
 	return SHASH_OK;
 }
 
@@ -3982,7 +4012,7 @@ channel_endpoint_is_connected(as_hb_endpoint* endpoint)
 	memset(&udata, 0, sizeof(udata));
 	udata.endpoint = endpoint;
 
-	shash_reduce(g_hb.channel_state.fd_to_channel,
+	shash_reduce(g_hb.channel_state.socket_to_channel,
 		     channel_endpoint_search_reduce, &udata);
 
 	CHANNEL_UNLOCK();
@@ -3990,15 +4020,15 @@ channel_endpoint_is_connected(as_hb_endpoint* endpoint)
 }
 
 /**
- * Read a message from the multicast file descriptor.
+ * Read a message from the multicast socket.
  *
- * @param fd the multicast fd to read from.
+ * @param socket the multicast socket to read from.
  * @param msg the message to read into.
  *
  * @return the status the read operation.
  */
 static as_hb_channel_msg_read_status
-channel_multicast_msg_read(cf_socket* fd, msg* msg)
+channel_multicast_msg_read(cf_socket* socket, msg* msg)
 {
 	CHANNEL_LOCK();
 
@@ -4010,16 +4040,16 @@ channel_multicast_msg_read(cf_socket* fd, msg* msg)
 	if (!buffer) {
 		WARNING("Error allocating space for multicast recv buffer of "
 			"size %d on fd %d",
-			buffer_len, CSFD_P(fd));
+			buffer_len, CSFD(socket));
 		goto Exit;
 	}
 
 	cf_sock_addr from;
 
-	int num_rcvd = cf_socket_recv_from(*fd, buffer, buffer_len, 0, &from);
+	int num_rcvd = cf_socket_recv_from(socket, buffer, buffer_len, 0, &from);
 
 	if (num_rcvd <= 0) {
-		DEBUG("Multicast packed read failed on fd %d", CSFD_P(fd));
+		DEBUG("Multicast packed read failed on fd %d", CSFD(socket));
 		rv = AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
 		goto Exit;
 	}
@@ -4053,15 +4083,15 @@ Exit:
 }
 
 /**
- * Read a message from the a tcp mesh file descriptor.
+ * Read a message from the a tcp mesh socket.
  *
- * @param fd the tcp fd to read from.
+ * @param socket the tcp socket to read from.
  * @param msg the message to read into.
  *
  * @return status of the read operation.
  */
 static as_hb_channel_msg_read_status
-channel_mesh_msg_read(cf_socket* fd, msg* msg)
+channel_mesh_msg_read(cf_socket* socket, msg* msg)
 {
 	CHANNEL_LOCK();
 
@@ -4073,8 +4103,8 @@ channel_mesh_msg_read(cf_socket* fd, msg* msg)
 	uint8_t len_buff[MSG_WIRE_LENGTH_SIZE];
 
 	if (MSG_WIRE_LENGTH_SIZE >
-	    cf_socket_recv(*fd, len_buff, MSG_WIRE_LENGTH_SIZE, flags)) {
-		WARNING("On fd %d recv peek error", CSFD_P(fd));
+	    cf_socket_recv(socket, len_buff, MSG_WIRE_LENGTH_SIZE, flags)) {
+		WARNING("On fd %d recv peek error", CSFD(socket));
 		rv = AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
 		goto Exit;
 	}
@@ -4088,7 +4118,7 @@ channel_mesh_msg_read(cf_socket* fd, msg* msg)
 	if (!buffer) {
 		WARNING("Error allocating space for multicast recv buffer of "
 			"size %d on fd %d",
-			buffer_len, CSFD_P(fd));
+			buffer_len, CSFD(socket));
 		goto Exit;
 	}
 
@@ -4099,17 +4129,17 @@ channel_mesh_msg_read(cf_socket* fd, msg* msg)
 
 	do {
 
-		DETAIL("reading from tcp fd %d try %d remaining %d", CSFD_P(fd),
+		DETAIL("reading from tcp fd %d try %d remaining %d", CSFD(socket),
 		       try_num, buffer_len - read_so_far);
 
 		int ret =
-		  cf_socket_recv(*fd, (buffer + read_so_far),
+		  cf_socket_recv(socket, (buffer + read_so_far),
 				 buffer_len - read_so_far, MSG_NOSIGNAL);
 
 		if (ret < 0 && (errno != EAGAIN && errno != EWOULDBLOCK)) {
 			// Channel failure.
 			DEBUG("Channel failure reading message on fd %d",
-			      CSFD_P(fd));
+			      CSFD(socket));
 			break;
 		}
 
@@ -4128,12 +4158,12 @@ channel_mesh_msg_read(cf_socket* fd, msg* msg)
 	if (read_so_far < buffer_len) {
 		// Recv incomplete.
 		DETAIL("mesh recv failed fd %d try %d message size %d",
-		       CSFD_P(fd), try_num, buffer_len);
+		       CSFD(socket), try_num, buffer_len);
 		rv = AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
 		goto Exit;
 	}
 
-	DETAIL("mesh recv success fd %d try %d message size %d", CSFD_P(fd),
+	DETAIL("mesh recv success fd %d try %d message size %d", CSFD(socket),
 	       try_num, buffer_len);
 
 	rv = channel_message_parse(msg, buffer, buffer_len);
@@ -4146,24 +4176,24 @@ Exit:
 }
 
 /**
- * Associate a fd with a nodeid and notify listeners about a node being
+ * Associate a socket with a nodeid and notify listeners about a node being
  * connected, effective only for mesh channels.
  *
  * For multicast channels this function is a no-op. The reason being additional
  * machinery would be required to clean up the node to channel mapping on node
  * expiry.
  *
- * @param fd the fd.
+ * @param socket the socket.
  * @param channel the channel to associate.
- * @param nodeid the nodeid assocaited with this fd.
+ * @param nodeid the nodeid assocaited with this socket.
  * @param endpoint the node's endpoint.
  */
 static void
-channel_node_attach(cf_socket* fd, as_hb_channel* channel, cf_node nodeid,
+channel_node_attach(cf_socket* socket, as_hb_channel* channel, cf_node nodeid,
 		    as_hb_endpoint* endpoint)
 {
 
-	// For now node to fd mapping is not maintained for
+	// For now node to socket mapping is not maintained for
 	// multicast channels.
 	if (channel->is_multicast) {
 		return;
@@ -4176,21 +4206,21 @@ channel_node_attach(cf_socket* fd, as_hb_channel* channel, cf_node nodeid,
 	// This is the first time this node has a connection. Record the
 	// mapping.
 
-	SHASH_PUT_OR_DIE(g_hb.channel_state.nodeid_to_fd, &nodeid, fd,
+	SHASH_PUT_OR_DIE(g_hb.channel_state.nodeid_to_socket, &nodeid, &socket,
 			 "Error associating node %" PRIX64 " with fd %d",
-			 nodeid, CSFD_P(fd));
+			 nodeid, CSFD(socket));
 
 	channel->nodeid = nodeid;
 	if (endpoint) {
 		memcpy(&channel->endpoint, endpoint, sizeof(as_hb_endpoint));
 	}
 
-	SHASH_PUT_OR_DIE(g_hb.channel_state.fd_to_channel, fd, channel,
+	SHASH_PUT_OR_DIE(g_hb.channel_state.socket_to_channel, &socket, channel,
 			 "Error saving nodeid %" PRIx64
 			 " to channel hash for fd %d",
-			 nodeid, CSFD_P(fd));
+			 nodeid, CSFD(socket));
 
-	DEBUG("Attached fd %d to node %" PRIx64, CSFD_P(fd), nodeid);
+	DEBUG("Attached fd %d to node %" PRIx64, CSFD(socket), nodeid);
 
 	CHANNEL_UNLOCK();
 
@@ -4208,60 +4238,60 @@ channel_node_attach(cf_socket* fd, as_hb_channel* channel, cf_node nodeid,
  * of a winning grace period.
  */
 static bool
-channel_fd_should_live(cf_socket* fd, as_hb_channel* channel)
+channel_socket_should_live(cf_socket* socket, as_hb_channel* channel)
 {
 	if (channel->resolution_win_ts > 0 &&
 	    channel->resolution_win_ts + CHANNEL_WIN_GRACE_MS() > cf_getms()) {
-		// Losing fd was a previous winner. Allow the it time to do some
+		// Losing socket was a previous winner. Allow it time to do some
 		// work before knocking it off.
-		INFO("Giving %d unresolved fd some grace time.", CSFD_P(fd));
+		INFO("Giving %d unresolved fd some grace time.", CSFD(socket));
 		return true;
 	}
 	return false;
 }
 
 /**
- * Selects one out give two fds connected to same remote node. The
+ * Selects one out give two sockets connected to same remote node. The
  * algorithm is
- * deterministic and ensures the remote node also chooses a fd that
+ * deterministic and ensures the remote node also chooses a socket that
  * drops the
  * same connection.
  *
- * @param fd1 one of the fds
- * @param fd2 one of the fds
- * @return resolved fd  on success, NULL if resolution fails.
+ * @param socket1 one of the sockets
+ * @param socket2 one of the sockets
+ * @return resolved socket on success, NULL if resolution fails.
  */
 static cf_socket*
-channel_fd_resolve(cf_socket* fd1, cf_socket* fd2)
+channel_socket_resolve(cf_socket* socket1, cf_socket* socket2)
 {
 	cf_socket* rv = NULL;
 	CHANNEL_LOCK();
 
-	DEBUG("Resolving between fd %d and %d", CSFD_P(fd1), CSFD_P(fd2));
+	DEBUG("Resolving between fd %d and %d", CSFD(socket1), CSFD(socket2));
 
 	as_hb_channel channel1;
-	if (channel_get_channel(fd1, &channel1) < 0) {
+	if (channel_get_channel(socket1, &channel1) < 0) {
 		// Should not happen in practise.
-		WARNING("Resolving fd %d without channel", CSFD_P(fd1));
-		rv = fd2;
+		WARNING("Resolving fd %d without channel", CSFD(socket1));
+		rv = socket2;
 		goto Exit;
 	}
 
 	as_hb_channel channel2;
-	if (channel_get_channel(fd2, &channel2) < 0) {
+	if (channel_get_channel(socket2, &channel2) < 0) {
 		// Should not happen in practise.
-		WARNING("Resolving fd %d without channel", CSFD_P(fd2));
-		rv = fd1;
+		WARNING("Resolving fd %d without channel", CSFD(socket2));
+		rv = socket1;
 		goto Exit;
 	}
 
-	if (channel_fd_should_live(fd1, &channel1)) {
-		rv = fd1;
+	if (channel_socket_should_live(socket1, &channel1)) {
+		rv = socket1;
 		goto Exit;
 	}
 
-	if (channel_fd_should_live(fd2, &channel2)) {
-		rv = fd2;
+	if (channel_socket_should_live(socket2, &channel2)) {
+		rv = socket2;
 		goto Exit;
 	}
 
@@ -4270,39 +4300,39 @@ channel_fd_resolve(cf_socket* fd1, cf_socket* fd2)
 
 	if (remote_nodeid == 0) {
 		// Should not happen in practise.
-		WARNING("Remote node id unknown for fds %d and %d", CSFD_P(fd1),
-			CSFD_P(fd2));
+		WARNING("Remote node id unknown for fds %d and %d", CSFD(socket1),
+			CSFD(socket2));
 		rv = NULL;
 		goto Exit;
 	}
 
-	// Choose the fd with the highest acceptor nodeid.
+	// Choose the socket with the highest acceptor nodeid.
 	cf_node acceptor_nodeid1 =
 	  channel1.is_inbound ? config_self_nodeid_get() : remote_nodeid;
 	cf_node acceptor_nodeid2 =
 	  channel2.is_inbound ? config_self_nodeid_get() : remote_nodeid;
 
 	as_hb_channel* winner_channel = NULL;
-	cf_socket* winner_fd = NULL;
+	cf_socket* winner_socket = NULL;
 	if (acceptor_nodeid1 > acceptor_nodeid2) {
 		winner_channel = &channel1;
-		winner_fd = fd1;
+		winner_socket = socket1;
 	} else if (acceptor_nodeid1 < acceptor_nodeid2) {
 		winner_channel = &channel2;
-		winner_fd = fd2;
+		winner_socket = socket2;
 	} else {
 		// Both connections have the same acceptor. Should not happen in
 		// practise. Despair and report resolution fauilure.
 		INFO("Found duplicate connections to same node that cannot "
 		     "be resolved with fds %d %d. Choosing at random.",
-		     CSFD_P(fd1), CSFD_P(fd2));
+		     CSFD(socket1), CSFD(socket2));
 
 		if (cf_getms() % 2 == 0) {
 			winner_channel = &channel1;
-			winner_fd = fd1;
+			winner_socket = socket1;
 		} else {
 			winner_channel = &channel2;
-			winner_fd = fd2;
+			winner_socket = socket2;
 		}
 	}
 
@@ -4311,10 +4341,9 @@ channel_fd_resolve(cf_socket* fd1, cf_socket* fd2)
 		winner_channel->resolution_win_ts = now;
 		// Update the winning count of the winning channel in the
 		// channel data structures.
-		SHASH_PUT_OR_DIE(g_hb.channel_state.fd_to_channel, winner_fd,
-				 winner_channel,
-				 "Error allocating memory for channel fd %d",
-				 CSFD_P(winner_fd));
+		SHASH_PUT_OR_DIE(
+		  g_hb.channel_state.socket_to_channel, &winner_socket, winner_channel,
+		  "Error allocating memory for channel fd %d", CSFD(winner_socket));
 	}
 
 	if (winner_channel->resolution_win_ts > now + CHANNEL_WIN_GRACE_MS()) {
@@ -4329,15 +4358,15 @@ channel_fd_resolve(cf_socket* fd1, cf_socket* fd2)
 		//
 		// Break the cycle here and choose the loosing channel
 		// as the winner.
-		INFO("Breaking fd resolve loop dropping "
+		INFO("Breaking socket resolve loop dropping "
 		     "winning fd %d",
-		     CSFD_P(winner_fd));
+		     CSFD(winner_socket));
 		winner_channel =
 		  (winner_channel == &channel1) ? &channel2 : &channel1;
-		winner_fd = (fd1 == winner_fd) ? fd2 : fd1;
+		winner_socket = (socket1 == winner_socket) ? socket2 : socket1;
 	}
 
-	rv = winner_fd;
+	rv = winner_socket;
 
 Exit:
 	CHANNEL_UNLOCK();
@@ -4493,18 +4522,18 @@ channel_msg_sanity_check(msg* msg)
 /**
  * Process incoming message to possibly update channel state.
  *
- * @param fd the fd on which the message is received.
+ * @param socket the socket on which the message is received.
  * @param event the message warpped around in a channel event.
  * @return 0 if the message can be further processed, -1 if the message should
  * be discarded.
  */
 static int
-channel_msg_event_process(cf_socket* fd, as_hb_channel_event* event)
+channel_msg_event_process(cf_socket* socket, as_hb_channel_event* event)
 {
 
 	// Basic sanity check for the inbound message.
 	if (channel_msg_sanity_check(event->msg) != 0) {
-		DETAIL("Sanity check failed for message on fd %d", CSFD_P(fd));
+		DETAIL("Sanity check failed for message on fd %d", CSFD(socket));
 		return -1;
 	}
 
@@ -4512,13 +4541,13 @@ channel_msg_event_process(cf_socket* fd, as_hb_channel_event* event)
 	CHANNEL_LOCK();
 
 	as_hb_channel channel;
-	if (channel_get_channel(fd, &channel) < 0) {
+	if (channel_get_channel(socket, &channel) < 0) {
 		// This is a bug and should not happen. Be paranoid and
 		// try fixing it ?
 		WARNING("Received a message on an unregistered fd %d. "
 			"Closing the fd.",
-			CSFD_P(fd));
-		channel_fd_close(fd, false);
+			CSFD(socket));
+		channel_socket_close_queue(socket, false, true);
 		rv = -1;
 		goto Exit;
 	}
@@ -4531,7 +4560,7 @@ channel_msg_event_process(cf_socket* fd, as_hb_channel_event* event)
 		WARNING("Received a message from node with incorrect "
 			"nodeid. Expected %" PRIx64 " received %" PRIx64
 			" on fd %d",
-			channel.nodeid, nodeid, CSFD_P(fd));
+			channel.nodeid, nodeid, CSFD(socket));
 		rv = -1;
 		goto Exit;
 	}
@@ -4539,39 +4568,39 @@ channel_msg_event_process(cf_socket* fd, as_hb_channel_event* event)
 	// Update the last received time for this node
 	channel.last_received = cf_getms();
 
-	SHASH_PUT_OR_DIE(g_hb.channel_state.fd_to_channel, fd, &channel,
+	SHASH_PUT_OR_DIE(g_hb.channel_state.socket_to_channel, &socket, &channel,
 			 "Error updating node %" PRIX64 " with fd %d", nodeid,
-			 CSFD_P(fd));
+			 CSFD(socket));
 
 	as_hb_endpoint node_endpoint;
 
 	msg_endpoint_get(event->msg, &node_endpoint);
 
-	cf_socket existing_fd;
+	cf_socket* existing_socket;
 	int get_result =
-	  SHASH_GET_OR_DIE(g_hb.channel_state.nodeid_to_fd, &nodeid,
-			   &existing_fd, "Error reading from channel hash.");
+	  SHASH_GET_OR_DIE(g_hb.channel_state.nodeid_to_socket, &nodeid,
+			   &existing_socket, "Error reading from channel hash.");
 
 	if (get_result == SHASH_ERR_NOTFOUND) {
-		// Assoicate this fd with the node.
-		channel_node_attach(fd, &channel, nodeid, &node_endpoint);
-	} else if (CSFD(existing_fd) != CSFD_P(fd)) {
+		// Assoicate this socket with the node.
+		channel_node_attach(socket, &channel, nodeid, &node_endpoint);
+	} else if (existing_socket != socket) {
 
 		// Somehow the other node and this node discovered each
 		// other together both connected via two tcp connections.
 		// Choose one and close the other.
-		cf_socket* resolved = channel_fd_resolve(fd, &existing_fd);
+		cf_socket* resolved = channel_socket_resolve(socket, existing_socket);
 
 		if (!resolved) {
 			DEBUG("Resolving between fd %d and %d failed. "
 			      "Closing both connections.",
-			      CSFD_P(fd), CSFD(existing_fd));
+			      CSFD(socket), CSFD(existing_socket));
 
 			// Resolution failed. Should not happen but there is a
 			// window where the same node initiated two connections.
 			// Close both connections and try again.
-			channel_fd_close(fd, false);
-			channel_fd_close(&existing_fd, false);
+			channel_socket_close_queue(socket, false, true);
+			channel_socket_close_queue(existing_socket, false, true);
 
 			// Nothing wrong with the message. Let it through.
 			rv = 0;
@@ -4580,27 +4609,23 @@ channel_msg_event_process(cf_socket* fd, as_hb_channel_event* event)
 
 		DEBUG("Resolved fd %d between redundant fd %d and %d for node "
 		      "%" PRIx64,
-		      CSFD_P(resolved), CSFD_P(fd), CSFD(existing_fd), nodeid);
+		      CSFD(resolved), CSFD(socket), CSFD(existing_socket), nodeid);
 
-		if (resolved == &existing_fd) {
-			// The node to fd mapping is correct, just close
-			// this fd and this node will  still be connected to the
-			// remote node.
-			channel_events_enabled_set(false);
-			channel_fd_close(fd, false);
-			channel_events_enabled_set(true);
+		if (resolved == existing_socket) {
+			// The node to socket mapping is correct, just close
+			// this socket and this node will  still be connected to the
+			// remote node. Do not raise any event for this closure.
+			channel_socket_close_queue(socket, false, false);
 		} else {
 
-			// We need to close the existing fd. Disable
+			// We need to close the existing socket. Disable
 			// channel events because we make the node appear to be
-			// not connected.
-			channel_events_enabled_set(false);
-			channel_fd_close(&existing_fd, false);
-			// Assoicate this fd with the node.
-			channel_node_attach(fd, &channel, nodeid,
+			// not connected. Do not raise any event for this
+			// closure.
+			channel_socket_close_queue(existing_socket, false, false);
+			// Assoicate this socket with the node.
+			channel_node_attach(socket, &channel, nodeid,
 					    &node_endpoint);
-
-			channel_events_enabled_set(true);
 		}
 	}
 
@@ -4614,12 +4639,12 @@ Exit:
 /**
  * Convert the M_TYPE_HEARTBEAT_V2 type info message to M_TYPE_HEARTBEAT info
  * massage.
- * @param fd the source fd
+ * @param socket the source socket
  * @param msg the incoming message
  * @return true if the message could be made compatible, else false.
  */
 static bool
-channel_msg_make_compatible(cf_socket* fd, msg* msg)
+channel_msg_make_compatible(cf_socket* socket, msg* msg)
 {
 	as_hb_msg_type msg_type = -1;
 	msg_type_get(msg, &msg_type);
@@ -4649,7 +4674,7 @@ channel_msg_make_compatible(cf_socket* fd, msg* msg)
 		// The node id, end point are not reliable, because mesh info
 		// reply/requests used the nodeid field for the query node id
 		// instead of their nodeids.
-		if (channel_get_channel(fd, &channel) == 0) {
+		if (channel_get_channel(socket, &channel) == 0) {
 			if (channel.nodeid == 0) {
 			}
 			msg_set_uint64(msg, AS_HB_MSG_NODE, channel.nodeid);
@@ -4666,11 +4691,11 @@ channel_msg_make_compatible(cf_socket* fd, msg* msg)
 }
 
 /**
- * Read a message from a file descriptor that has data.
- * @param fd the file descriptor having data to be ready.
+ * Read a message from a socket that has data.
+ * @param socket the socket having data to be read.
  */
 static void
-channel_msg_read(cf_socket* fd)
+channel_msg_read(cf_socket* socket)
 {
 
 	CHANNEL_LOCK();
@@ -4682,16 +4707,16 @@ channel_msg_read(cf_socket* fd)
 
 	msg* msg = hb_msg_get();
 
-	if (channel_get_channel(fd, &channel) != 0) {
+	if (channel_get_channel(socket, &channel) != 0) {
 		// Would happen if the channel was closed in the same epoll oop.
-		DEBUG("Error the channel does not exist for fd %d", CSFD_P(fd));
+		DEBUG("Error the channel does not exist for fd %d", CSFD(socket));
 		goto Exit;
 	}
 
 	if (channel.is_multicast) {
-		status = channel_multicast_msg_read(fd, msg);
+		status = channel_multicast_msg_read(socket, msg);
 	} else {
-		status = channel_mesh_msg_read(fd, msg);
+		status = channel_mesh_msg_read(socket, msg);
 	}
 
 	switch (status) {
@@ -4701,7 +4726,7 @@ channel_msg_read(cf_socket* fd)
 
 		case AS_HB_CHANNEL_MSG_PARSE_FAIL: {
 			DETAIL("unable to parse heartbeat message on fd %d",
-			       CSFD_P(fd));
+			       CSFD(socket));
 			stats_error_count(AS_HB_ERR_UNPARSABLE_MSG);
 			goto Exit;
 		}
@@ -4716,10 +4741,10 @@ channel_msg_read(cf_socket* fd)
 		case AS_HB_CHANNEL_MSG_CHANNEL_FAIL:
 		// Falling through
 		default: {
-			DEBUG("Could not read message from fd %d", CSFD_P(fd));
+			DEBUG("Could not read message from fd %d", CSFD(socket));
 			if (!channel.is_multicast) {
-				// Shut down only mesh fd.
-				channel_fd_shutdown(fd);
+				// Shut down only mesh socket.
+				channel_socket_shutdown(socket);
 			}
 			goto Exit;
 		}
@@ -4727,7 +4752,7 @@ channel_msg_read(cf_socket* fd)
 
 	// Transform the incoming legacy info message to the new
 	// message.
-	if (!channel_msg_make_compatible(fd, msg)) {
+	if (!channel_msg_make_compatible(socket, msg)) {
 		WARNING("Received message without associated channel.");
 		goto Exit;
 	}
@@ -4738,7 +4763,7 @@ channel_msg_read(cf_socket* fd)
 		// Node id missing from the message. Assume this message
 		// to be corrupt.
 		DEBUG("Message with invalid nodeid received on fd %d",
-		      CSFD_P(fd));
+		      CSFD(socket));
 		stats_error_count(AS_HB_ERR_NO_SRC_NODE);
 		goto Exit;
 	}
@@ -4754,7 +4779,7 @@ channel_msg_read(cf_socket* fd)
 	as_hlc_timestamp_update(event.nodeid, send_ts, &event.msg_hlc_ts);
 
 	// Process received message to update channel state.
-	if (channel_msg_event_process(fd, &event) == 0) {
+	if (channel_msg_event_process(socket, &event) == 0) {
 		// The message needs to be deliverd to the listeners. Prevent a
 		// free.
 		free_msg = false;
@@ -4771,24 +4796,24 @@ Exit:
 }
 
 /**
- * Reduce function to remove faulty channels / nodes. Shutdown associated fd to
+ * Reduce function to remove faulty channels / nodes. Shutdown associated socket to
  * have channel tender cleanup.
  */
 static int
 channel_channels_tend_reduce(void* key, void* data, void* udata)
 {
-	cf_socket* fd = (cf_socket*)key;
+	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
 
 	if (channel->last_received + CHANNEL_NODE_READ_IDLE_TIMEOUT() <
 	    cf_getms()) {
-		// Shutdown associated fd if it is not a multicast fd.
+		// Shutdown associated socket if it is not a multicast socket.
 		if (!channel->is_multicast) {
 			DEBUG(
 			  "Channel shutting down idle fd %d associated with "
 			  "node %" PRIx64 ". Last received %" PRIu64 ".",
-			  CSFD_P(fd), channel->nodeid, channel->last_received);
-			channel_fd_shutdown(fd);
+			  CSFD(*socket), channel->nodeid, channel->last_received);
+			channel_socket_shutdown(*socket);
 		}
 	}
 
@@ -4804,14 +4829,14 @@ channel_channels_tend()
 {
 	CHANNEL_LOCK();
 
-	shash_reduce(g_hb.channel_state.fd_to_channel,
+	shash_reduce(g_hb.channel_state.socket_to_channel,
 		     channel_channels_tend_reduce, NULL);
 
 	CHANNEL_UNLOCK();
 }
 
 /**
- * File descriptor tending thread. Manages hearbeat receive as well.
+ * Socket tending thread. Manages hearbeat receive as well.
  */
 static void*
 channel_tender(void* arg)
@@ -4819,10 +4844,10 @@ channel_tender(void* arg)
 
 	DETAIL("Channel tender started.");
 	while (CHANNEL_IS_RUNNING()) {
-		struct epoll_event events[EPOLL_SZ];
+		cf_poll_event events[POLL_SZ];
 		int nevents =
-		  epoll_wait(g_hb.channel_state.efd, events, EPOLL_SZ,
-			     MAX(config_hb_tx_interval_get() / 3, 1));
+		  cf_poll_wait(g_hb.channel_state.poll, events, POLL_SZ,
+			       MAX(config_hb_tx_interval_get() / 3, 1));
 
 		DETAIL("Tending channel");
 
@@ -4837,27 +4862,28 @@ channel_tender(void* arg)
 		}
 
 		for (int i = 0; i < nevents; i++) {
-			int fd = events[i].data.fd;
-			cf_socket wfd = WSFD(fd);
-			if (fd == CSFD(g_hb.channel_state.listening_socket) &&
+			cf_socket* socket = events[i].data;
+			if (socket == g_hb.channel_state.listening_socket &&
 			    IS_MESH()) {
-
 				// Accept a new connection.
 				channel_accept_connection();
 			} else if (events[i].events &
 				   (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
 
-				channel_fd_close(&wfd, true);
+				channel_socket_close_queue(socket, true, true);
 
 			} else if (events[i].events & EPOLLIN) {
-				// Read a message for the descriptor that is
+				// Read a message for the socket that is
 				// ready.
-				channel_msg_read(&wfd);
+				channel_msg_read(socket);
 			}
 		}
 
 		// Tend channels to discard stale channels.
 		channel_channels_tend();
+
+		// Close queued up socket.
+		channel_socket_close_pending();
 
 		// Publish pending events. Should be outside channel lock.
 		channel_event_publish_pending();
@@ -4906,7 +4932,7 @@ channel_mesh_channel_establish(as_hb_endpoint* endpoints, int endpoint_count)
 		if (cf_socket_init_client(&s, CONNECT_TIMEOUT()) == 0) {
 			cf_atomic_int_incr(
 			  &g_stats.heartbeat_connections_opened);
-			channel_fd_register(&s.sock, false, false,
+			channel_socket_register(s.sock, false, false,
 					    &endpoints[i]);
 			connected = true;
 		} else {
@@ -4934,8 +4960,8 @@ channel_node_disconnect(cf_node nodeid)
 
 	CHANNEL_LOCK();
 
-	cf_socket fd;
-	if (channel_fd_get(nodeid, &fd) != 0) {
+	cf_socket* socket;
+	if (channel_socket_get(nodeid, &socket) != 0) {
 		// not found
 		rv = -1;
 		goto Exit;
@@ -4943,7 +4969,7 @@ channel_node_disconnect(cf_node nodeid)
 
 	DEBUG("Disconnecting the channel attached to node %" PRIx64, nodeid);
 
-	channel_fd_close(&fd, false);
+	channel_socket_close_queue(socket, false, true);
 
 	rv = 0;
 
@@ -4957,75 +4983,50 @@ Exit:
  * Register mesh listening socket.
  */
 static void
-channel_mesh_listening_sock_register(cf_socket* fd)
+channel_mesh_listening_sock_register(cf_socket* socket)
 {
-	WSFD_COPY(&g_hb.channel_state.listening_socket, fd);
+	g_hb.channel_state.listening_socket = socket;
 
-	struct epoll_event ev;
-	memset(&ev, 0, sizeof(ev));
-	ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-	ev.data.fd = CSFD(g_hb.channel_state.listening_socket);
-	if (0 > epoll_ctl(g_hb.channel_state.efd, EPOLL_CTL_ADD,
-			  CSFD(g_hb.channel_state.listening_socket), &ev)) {
-		DEBUG("Write the g_hb.channel_state.efd %d",
-		      g_hb.channel_state.efd);
-		CRASH("Unable to add hb listening socket %d to epoll "
-		      "fd list: %s",
-		      CSFD(g_hb.channel_state.listening_socket),
-		      cf_strerror(errno));
-	}
+	cf_poll_add_socket(g_hb.channel_state.poll, socket,
+			   EPOLLIN | EPOLLERR | EPOLLHUP, socket);
 
-	// We do not need a separate channel to cover this fd because IO will
-	// not happen on this fd.
+	// We do not need a separate channel to cover this socket because IO will
+	// not happen on this socket.
 }
 
 /**
  * Deregister mesh listening socket from epoll event.
- * @param fd the listening socket fd.
+ * @param socket the listening socket socket.
  */
 static void
-channel_mesh_listening_sock_deregister(cf_socket* fd)
+channel_mesh_listening_sock_deregister(cf_socket* socket)
 {
-	struct epoll_event dummy_ev;
-	memset(&dummy_ev, 0, sizeof(struct epoll_event));
-
-	if (0 > epoll_ctl(g_hb.channel_state.efd, EPOLL_CTL_DEL, CSFD_P(fd),
-			  &dummy_ev)) {
-		WARNING("Unable to remove socket %d from epoll fd list: %s",
-			CSFD_P(fd), cf_strerror(errno));
-	}
+	cf_poll_delete_socket(g_hb.channel_state.poll, socket);
 }
 
 /**
  * Register the multicast listening socket.
- * @param fd the listening socket fd.
+ * @param socket the listening socket.
  * @param endpoint the endpoint on which multicast io happens.
  */
 static void
-channel_multicast_listening_sock_register(cf_socket* fd,
+channel_multicast_listening_sock_register(cf_socket* socket,
 					  as_hb_endpoint* endpoint)
 {
 
-	WSFD_COPY(&g_hb.channel_state.listening_socket, fd);
+	g_hb.channel_state.listening_socket = socket;
 	// Create a new multicast channel.
-	channel_fd_register(fd, true, false, endpoint);
+	channel_socket_register(socket, true, false, endpoint);
 }
 
 /**
  * Deregister multicast listening socket from epoll event.
- * @param fd the listening socket fd.
+ * @param socket the listening socket socket.
  */
 static void
-channel_multicast_listening_sock_deregister(cf_socket* fd)
+channel_multicast_listening_sock_deregister(cf_socket* socket)
 {
-	struct epoll_event dummy_ev;
-	memset(&dummy_ev, 0, sizeof(struct epoll_event));
-
-	if (0 > epoll_ctl(g_hb.channel_state.efd, EPOLL_CTL_DEL, CSFD_P(fd),
-			  &dummy_ev)) {
-		WARNING("Unable to remove socket %d from epoll fd list: %s",
-			CSFD_P(fd), cf_strerror(errno));
-	}
+	cf_poll_delete_socket(g_hb.channel_state.poll, socket);
 }
 
 /**
@@ -5047,18 +5048,25 @@ channel_init()
 		CRASH("Error creating channel event queue.");
 	}
 
-	// Initialize the nodeid to fd hash.
+	// Initialize sockets to close queue.
+	if (!cf_queue_init(&g_hb.channel_state.socket_close_queue,
+			   sizeof(as_hb_channel_socket_close_entry),
+			   AS_HB_CLUSTER_MAX_SIZE_SOFT, true)) {
+		CRASH("Error creating fd close queue.");
+	}
+
+	// Initialize the nodeid to socket hash.
 	if (SHASH_OK !=
-	    shash_create(&g_hb.channel_state.nodeid_to_fd, cf_nodeid_shash_fn,
-			 sizeof(cf_node), sizeof(cf_socket),
+	    shash_create(&g_hb.channel_state.nodeid_to_socket, cf_nodeid_shash_fn,
+			 sizeof(cf_node), sizeof(cf_socket*),
 			 AS_HB_CLUSTER_MAX_SIZE_SOFT, SHASH_CR_MT_BIGLOCK)) {
 		CRASH("Error creating nodeid to fd hash.");
 	}
 
-	// Initialize the fd to channel state hash.
+	// Initialize the socket to channel state hash.
 	if (SHASH_OK !=
-	    shash_create(&g_hb.channel_state.fd_to_channel, as_hb_fd_hash_fn,
-			 sizeof(cf_socket), sizeof(as_hb_channel),
+	    shash_create(&g_hb.channel_state.socket_to_channel, as_hb_socket_hash_fn,
+			 sizeof(cf_socket*), sizeof(as_hb_channel),
 			 AS_HB_CLUSTER_MAX_SIZE_SOFT, SHASH_CR_MT_BIGLOCK)) {
 		CRASH("Error creating fd to channel hash.");
 	}
@@ -5083,12 +5091,10 @@ channel_start()
 		goto Exit;
 	}
 
-	// create the epoll fd.
-	if (-1 == (g_hb.channel_state.efd = epoll_create(EPOLL_SZ))) {
-		CRASH("Unable to create epoll fd: %s", cf_strerror(errno));
-	}
+	// create the epoll socket.
+	cf_poll_create(&g_hb.channel_state.poll);
 
-	DEBUG("Created epoll fd %d", g_hb.channel_state.efd);
+	DEBUG("Created epoll fd %d", CEFD(g_hb.channel_state.poll));
 
 	// Disable events till initialization is complete.
 	channel_events_enabled_set(false);
@@ -5133,24 +5139,24 @@ channel_stop()
 
 	CHANNEL_LOCK();
 
-	cf_vector fds;
-	cf_socket buff[shash_get_size(g_hb.channel_state.fd_to_channel)];
-	cf_vector_init_smalloc(&fds, sizeof(cf_socket), (uint8_t*)buff,
+	cf_vector sockets;
+	cf_socket buff[shash_get_size(g_hb.channel_state.socket_to_channel)];
+	cf_vector_init_smalloc(&sockets, sizeof(cf_socket*), (uint8_t*)buff,
 			       sizeof(buff), VECTOR_FLAG_INITZERO);
 
-	shash_reduce(g_hb.channel_state.fd_to_channel, channel_fds_get_reduce,
-		     &fds);
+	shash_reduce(g_hb.channel_state.socket_to_channel, channel_sockets_get_reduce,
+		     &sockets);
 
-	channel_fds_close(&fds);
+	channel_sockets_close(&sockets);
 
 	// Disable events.
 	channel_events_enabled_set(false);
 
-	cf_vector_destroy(&fds);
+	cf_vector_destroy(&sockets);
 
-	// Close epoll fd.
-	close(g_hb.channel_state.efd);
-	g_hb.channel_state.efd = -1;
+	// Close epoll socket.
+	cf_poll_destroy(g_hb.channel_state.poll);
+	EFD(g_hb.channel_state.poll) = -1;
 
 	// Disable the channel thread.
 	g_hb.channel_state.status = AS_HB_STATUS_STOPPED;
@@ -5162,13 +5168,13 @@ channel_stop()
 
 /**
  * Send heartbeat protocol message retries in case of EAGAIN and EWOULDBLOCK
- * @param fd the fd to send the buffer over.
+ * @param socket the socket to send the buffer over.
  * @param buff the data buffer.
  * @param buffer_length the number of bytes in the buffer to send.
  * @return 0 on successful send -1 on failure
  */
 static int
-channel_mesh_msg_send(cf_socket* fd, byte* buff, size_t buffer_length)
+channel_mesh_msg_send(cf_socket* socket, byte* buff, size_t buffer_length)
 {
 
 	CHANNEL_LOCK();
@@ -5181,9 +5187,9 @@ channel_mesh_msg_send(cf_socket* fd, byte* buff, size_t buffer_length)
 	do {
 		DETAIL(
 		  "Sending mesh message on fd %d retry count:%d msg_size:%zu",
-		  (*fd).fd, retry, buffer_length);
+		  CSFD(socket), retry, buffer_length);
 
-		int ret = cf_socket_send_to(*fd, buff, buffer_length, 0, 0);
+		int ret = cf_socket_send_to(socket, buff, buffer_length, 0, 0);
 		if ((ret < 0) &&
 		    ((errno != EAGAIN) || (errno != EWOULDBLOCK))) {
 			break;
@@ -5199,7 +5205,7 @@ channel_mesh_msg_send(cf_socket* fd, byte* buff, size_t buffer_length)
 			DETAIL("Sent mesh message fd %d retry "
 			       "count:%d msg_size:%zu complete msg "
 			       "sent",
-			       CSFD_P(fd), retry, buffer_length);
+			       CSFD(socket), retry, buffer_length);
 			rv = 0;
 			break;
 		}
@@ -5211,14 +5217,14 @@ channel_mesh_msg_send(cf_socket* fd, byte* buff, size_t buffer_length)
 			WARNING(
 			  "Fd %d incomplete mesh msg sent. %zu bytes left "
 			  "out of %zu bytes.",
-			  CSFD_P(fd), buffer_length, orig_size);
+			  CSFD(socket), buffer_length, orig_size);
 		} else {
 			WARNING("Sending mesh message on fd %d failed : %s",
-				CSFD_P(fd), cf_strerror(errno));
+				CSFD(socket), cf_strerror(errno));
 		}
 
-		// Initiate a shutdown of the fd by blocking all read and write.
-		channel_fd_shutdown(fd);
+		// Initiate a shutdown of the socket by blocking all read and write.
+		channel_socket_shutdown(socket);
 		rv = -1;
 	}
 
@@ -5228,17 +5234,17 @@ channel_mesh_msg_send(cf_socket* fd, byte* buff, size_t buffer_length)
 
 /**
  * Send heartbeat protocol message retries in case of EAGAIN and EWOULDBLOCK
- * @param fd the fd to send the buffer over.
+ * @param socket the socket to send the buffer over.
  * @param buff the data buffer.
  * @param buffer_length the number of bytes in the buffer to send.
  * @return 0 on successful send -1 on failure
  */
 static int
-channel_multicast_msg_send(cf_socket* fd, byte* buff, size_t buffer_length)
+channel_multicast_msg_send(cf_socket* socket, byte* buff, size_t buffer_length)
 {
 	CHANNEL_LOCK();
 	int rv = 0;
-	DETAIL("Sending udp heartbeat to fd %d: msg size %zu", CSFD_P(fd),
+	DETAIL("Sending udp heartbeat to fd %d: msg size %zu", CSFD(socket),
 	       buffer_length);
 
 	int mtu = MTU();
@@ -5246,7 +5252,7 @@ channel_multicast_msg_send(cf_socket* fd, byte* buff, size_t buffer_length)
 		DETAIL(
 		  "MTU breach, sending udp heartbeat to fd %d: msg size %zu "
 		  "mtu %d",
-		  CSFD_P(fd), buffer_length, mtu);
+		  CSFD(socket), buffer_length, mtu);
 		stats_error_count(AS_HB_ERR_MTU_BREACH);
 	}
 
@@ -5262,8 +5268,8 @@ channel_multicast_msg_send(cf_socket* fd, byte* buff, size_t buffer_length)
 		goto Exit;
 	}
 
-	if (0 > cf_socket_send_to(*fd, buff, buffer_length, 0, &dest)) {
-		DETAIL("Multicast message send failed on fd %d %s", CSFD_P(fd),
+	if (0 > cf_socket_send_to(socket, buff, buffer_length, 0, &dest)) {
+		DETAIL("Multicast message send failed on fd %d %s", CSFD(socket),
 		       cf_strerror(errno));
 		rv = -1;
 	}
@@ -5385,9 +5391,9 @@ channel_msg_unicast(cf_node dest, msg* msg)
 	CHANNEL_LOCK();
 
 	int rv = -1;
-	cf_socket connected_fd;
+	cf_socket* connected_socket;
 
-	if (channel_fd_get(dest, &connected_fd)) {
+	if (channel_socket_get(dest, &connected_socket)) {
 		DEBUG("Failing message send to disconnected node %" PRIx64,
 		      dest);
 		rv = -1;
@@ -5413,7 +5419,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 	}
 
 	// Send over the buffer.
-	rv = channel_mesh_msg_send(&connected_fd, buffer, msg_size);
+	rv = channel_mesh_msg_send(connected_socket, buffer, msg_size);
 
 Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
@@ -5422,7 +5428,7 @@ Exit:
 }
 
 /**
- * Shash reduce funtion to walk over the fd to channel hash and broadcast the
+ * Shash reduce funtion to walk over the socket to channel hash and broadcast the
  * message in udata.
  */
 static int
@@ -5430,7 +5436,7 @@ channel_msg_broadcast_reduce(void* key, void* data, void* udata)
 {
 
 	CHANNEL_LOCK();
-	cf_socket* fd = (cf_socket*)key;
+	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
 	as_hb_channel_buffer_udata* buffer_udata =
 	  (as_hb_channel_buffer_udata*)udata;
@@ -5439,15 +5445,15 @@ channel_msg_broadcast_reduce(void* key, void* data, void* udata)
 		DETAIL("Broadcasting message of length %zu on channel %d "
 		       "assigned to "
 		       "node %" PRIx64,
-		       buffer_udata->buffer_len, CSFD_P(fd), channel->nodeid);
-		if (channel_mesh_msg_send(fd, buffer_udata->buffer,
+		       buffer_udata->buffer_len, CSFD(*socket), channel->nodeid);
+		if (channel_mesh_msg_send(*socket, buffer_udata->buffer,
 					  buffer_udata->buffer_len) != 0) {
 			stats_error_count(AS_HB_ERR_SEND_BROADCAST_FAIL);
 		}
 	} else {
 		DETAIL("Broadcasting message of length %zu on channel %d",
-		       buffer_udata->buffer_len, CSFD_P(fd));
-		if (channel_multicast_msg_send(fd, buffer_udata->buffer,
+		       buffer_udata->buffer_len, CSFD(*socket));
+		if (channel_multicast_msg_send(*socket, buffer_udata->buffer,
 					       buffer_udata->buffer_len) != 0) {
 			stats_error_count(AS_HB_ERR_SEND_BROADCAST_FAIL);
 		}
@@ -5492,7 +5498,7 @@ channel_msg_broadcast(msg* msg)
 	// Note this is the length of buffer to send.
 	udata.buffer_len = msg_size;
 
-	shash_reduce(g_hb.channel_state.fd_to_channel,
+	shash_reduce(g_hb.channel_state.socket_to_channel,
 		     channel_msg_broadcast_reduce, &udata);
 
 Exit:
@@ -5519,12 +5525,12 @@ channel_clear()
 	// Free the unpublished event queue.
 	cf_queue_delete_all(&g_hb.channel_state.events_queue);
 
-	// Delete nodeid to fd hash.
-	shash_reduce_delete(g_hb.channel_state.nodeid_to_fd,
+	// Delete nodeid to socket hash.
+	shash_reduce_delete(g_hb.channel_state.nodeid_to_socket,
 			    as_hb_delete_all_reduce, NULL);
 
-	// Delete the fd_to_channel hash.
-	shash_reduce_delete(g_hb.channel_state.fd_to_channel,
+	// Delete the socket_to_channel hash.
+	shash_reduce_delete(g_hb.channel_state.socket_to_channel,
 			    as_hb_delete_all_reduce, NULL);
 
 	DETAIL("Cleared channel information.");
@@ -5538,13 +5544,13 @@ static int
 channel_dump_reduce(void* key, void* data, void* udata)
 {
 
-	cf_socket* fd = (cf_socket*)key;
+	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
 
 	INFO("HB Channel (%s): Node %" PRIx64 " Fd %d"
 	     " Endpoint %s:%d Polarity %s Last Received %" PRIu64,
 	     channel->is_multicast ? "multicast" : "mesh", channel->nodeid,
-	     CSFD_P(fd), IPADDR_TO_STRING(&channel->endpoint.addr),
+	     CSFD(*socket), IPADDR_TO_STRING(&channel->endpoint.addr),
 	     channel->endpoint.port,
 	     channel->is_inbound ? "inbound" : "outbound",
 	     channel->last_received);
@@ -5563,10 +5569,10 @@ channel_dump(bool verbose)
 	CHANNEL_LOCK();
 
 	INFO("HB Channel Count %d",
-	     shash_get_size(g_hb.channel_state.fd_to_channel));
+	     shash_get_size(g_hb.channel_state.socket_to_channel));
 
 	if (verbose) {
-		shash_reduce(g_hb.channel_state.fd_to_channel,
+		shash_reduce(g_hb.channel_state.socket_to_channel,
 			     channel_dump_reduce, NULL);
 	}
 
@@ -5751,7 +5757,7 @@ mesh_stop()
 	MESH_LOCK();
 
 	channel_mesh_listening_sock_deregister(
-	  &g_hb.mode_state.mesh_state.socket.sock);
+	  g_hb.mode_state.mesh_state.socket.sock);
 
 	mesh_listening_socket_close();
 
@@ -5995,6 +6001,12 @@ mesh_endpoint_search_reduce(void* key, void* data, void* udata)
 static int
 mesh_node_endpoint_find(as_hb_endpoint* endpoint, as_hb_mesh_node_key* key)
 {
+
+	if (!as_hb_endpoint_is_specified(endpoint)) {
+		// Null / empty endpoint.
+		return -1;
+	}
+
 	// Linear search. This will in practice not be a very frequent
 	// operation.
 	as_hb_mesh_endpoint_reduce_udata udata;
@@ -7092,7 +7104,7 @@ mesh_clear()
  *
  */
 static void
-mesh_listening_socket_open(cf_socket* listening_socket)
+mesh_listening_socket_open(cf_socket** listening_socket)
 {
 
 	INFO("Initializing mesh heartbeat socket : %s:%d",
@@ -7137,8 +7149,7 @@ mesh_listening_socket_open(cf_socket* listening_socket)
 
 	MESH_UNLOCK();
 
-	return WSFD_COPY(listening_socket,
-			 &g_hb.mode_state.mesh_state.socket.sock);
+	*listening_socket = g_hb.mode_state.mesh_state.socket.sock;
 }
 
 /**
@@ -7154,9 +7165,9 @@ mesh_start()
 
 	MESH_LOCK();
 
-	cf_socket listening_socket;
+	cf_socket* listening_socket;
 	mesh_listening_socket_open(&listening_socket);
-	channel_mesh_listening_sock_register(&listening_socket);
+	channel_mesh_listening_sock_register(listening_socket);
 
 	g_hb.mode_state.mesh_state.status = AS_HB_STATUS_RUNNING;
 
@@ -7247,7 +7258,7 @@ multicast_clear()
  * @return the socket multicast mode listens on.
  */
 static void
-multicast_listening_socket_open(cf_socket* listening_socket)
+multicast_listening_socket_open(cf_socket** listening_socket)
 {
 	INFO("Initializing multicast heartbeat socket : %s:%d",
 	     config_hb_listen_addr_s_get(), config_hb_listen_port_get());
@@ -7270,8 +7281,7 @@ multicast_listening_socket_open(cf_socket* listening_socket)
 
 	DEBUG("Opened multicast socket %d",
 	      CSFD(g_hb.mode_state.multicast_state.socket.conf.sock));
-	WSFD_COPY(listening_socket,
-		  &g_hb.mode_state.multicast_state.socket.conf.sock);
+	*listening_socket = g_hb.mode_state.multicast_state.socket.conf.sock;
 
 	// Compute the mtu size here and compute the maximum cluster size.
 	// Compute the mtu size here and compute the maximum cluster size.
@@ -7305,7 +7315,7 @@ multicast_listening_socket_open(cf_socket* listening_socket)
 static void
 multicast_start()
 {
-	cf_socket listening_socket;
+	cf_socket* listening_socket;
 	multicast_listening_socket_open(&listening_socket);
 
 	as_hb_endpoint endpoint;
@@ -7314,7 +7324,7 @@ multicast_start()
 	memcpy(&endpoint.addr, config_hb_listen_addr_get(),
 	       sizeof(endpoint.addr));
 
-	channel_multicast_listening_sock_register(&listening_socket, &endpoint);
+	channel_multicast_listening_sock_register(listening_socket, &endpoint);
 }
 
 /**
@@ -7339,7 +7349,7 @@ static void
 multicast_stop()
 {
 	channel_multicast_listening_sock_deregister(
-	  &g_hb.mode_state.multicast_state.socket.conf.sock);
+	  g_hb.mode_state.multicast_state.socket.conf.sock);
 
 	multicast_listening_socket_close();
 }
@@ -7606,7 +7616,7 @@ hb_plugin_set_fn(msg* msg)
 		// Set cluster id
 		char cluster_id[AS_CLUSTER_ID_SZ];
 		as_config_cluster_id_get(cluster_id);
-		if (strlen(cluster_id) != 0 &&
+		if (cluster_id[0] != 0 &&
 		    msg_set_str(msg, AS_HB_MSG_CLUSTER_ID, cluster_id,
 				MSG_SET_COPY) != 0) {
 			CRASH("Error setting cluster id on msg.");
@@ -8168,11 +8178,11 @@ hb_start()
 	// Start the mode submodule
 	hb_mode_start();
 
-	// Start heart beat adjacency tender.
-	hb_adjacency_tender_start();
-
 	// Start heart beat transmitter.
 	hb_tx_start();
+
+	// Start heart beat adjacency tender.
+	hb_adjacency_tender_start();
 
 	HB_UNLOCK();
 }
@@ -8183,7 +8193,9 @@ hb_start()
 static void
 hb_plugin_register(as_hb_plugin* plugin)
 {
+	HB_LOCK();
 	memcpy(&g_hb.plugins[plugin->id], plugin, sizeof(as_hb_plugin));
+	HB_UNLOCK();
 }
 
 /**

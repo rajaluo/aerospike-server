@@ -122,7 +122,7 @@ static int batch_buffer_arena_huge;
 //---------------------------------------------------------
 
 static int
-as_batch_send(cf_socket sock, uint8_t* buf, size_t len, int flags)
+as_batch_send(cf_socket *sock, uint8_t* buf, size_t len, int flags)
 {
 	// Send response to client socket.
 	int rv;

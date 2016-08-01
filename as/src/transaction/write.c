@@ -297,8 +297,8 @@ start_write_repl_write(rw_request* rw, as_transaction* tr)
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_write_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_write_response() again.
 		send_write_response(tr, &rw->response_db);
 	}
 
@@ -362,8 +362,8 @@ write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	}
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_write_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_write_response() again.
 		send_write_response(tr, &rw->response_db);
 	}
 
@@ -401,6 +401,9 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		return;
 	}
 
+	// Note - if tr was setup from rw, rw->from.any has been set null and
+	// informs timeout it lost the race.
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (db && db->used_sz != 0) {
@@ -437,7 +440,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		break;
 	}
 
-	tr->from.any = NULL; // inform timeout it lost the race
+	tr->from.any = NULL; // needed only for respond-on-master-complete
 }
 
 
@@ -453,7 +456,7 @@ write_timeout_cb(rw_request* rw)
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		// Timeouts aren't included in histograms.
 		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT,
-				as_msg_is_xdr(&rw->msgp->msg));
+				rw->msgp ? as_msg_is_xdr(&rw->msgp->msg) : false);
 		break;
 	case FROM_PROXY:
 		break;
@@ -467,8 +470,7 @@ write_timeout_cb(rw_request* rw)
 		break;
 	}
 
-	// Paranoia - shouldn't need this to inform other callback it lost race.
-	rw->from.any = NULL;
+	rw->from.any = NULL; // inform other callback it lost the race
 }
 
 
