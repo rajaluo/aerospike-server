@@ -1669,7 +1669,7 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 			}
 
 			if (! dupl_node_found) {
-				cf_detail(AS_PARTITION, "{%s:%d} immigrate_start aborted - sync master receiving migrate from node not in duplicate list",
+				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start aborted - sync master receiving migrate from node not in duplicate list",
 						ns->name, pid);
 				rv = AS_MIGRATE_FAIL;
 				break;
