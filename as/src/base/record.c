@@ -379,29 +379,6 @@ as_record_pickle(as_record *r, as_storage_rd *rd, byte **buf_r, size_t *len_r)
 	return(0);
 }
 
-int
-as_record_pickle_a_delete(byte **buf_r, size_t *len_r)
-{
-	// Determine size
-	uint32_t sz = 2;
-
-	// only pickle the n_bins in use
-	uint16_t n_bins_inuse = 0;
-
-	byte *buf = cf_malloc(sz);
-	if (!buf) {
-		*buf_r = 0;
-		*len_r = 0;
-		return(-1);
-	}
-
-	*len_r = sz;
-	*buf_r = buf;
-
-	(*(uint16_t *)buf) = htons(n_bins_inuse); // number of bins
-	return(0);
-}
-
 uint32_t
 as_record_buf_get_stack_particles_sz(uint8_t *buf) {
 	uint32_t stack_particles_sz = 0;
