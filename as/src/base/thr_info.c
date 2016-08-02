@@ -325,12 +325,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_string(db, "paxos_principal", paxos_principal);
 
 	info_append_bool(db, "migrate_allowed", as_partition_get_migration_flag());
-
-	uint64_t migrate_partitions_remaining = as_partition_remaining_migrations();
-
-	info_append_uint64(db, "migrate_progress_send", migrate_partitions_remaining);
-	info_append_uint64(db, "migrate_progress_recv", migrate_partitions_remaining);
-	info_append_uint64(db, "migrate_partitions_remaining", migrate_partitions_remaining);
+	info_append_uint64(db, "migrate_partitions_remaining", as_partition_remaining_migrations());
 
 	info_append_uint64(db, "fabric_msgs_sent", g_stats.fabric_msgs_sent);
 	info_append_uint64(db, "fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd);
