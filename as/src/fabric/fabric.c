@@ -66,9 +66,6 @@ typedef enum op_xmit_transaction_e {
 	OP_TRANS_RETRANSMIT = 2,            // Retransmit the message.
 } op_xmit_transaction;
 
-// An alternative way to keep track of FBs
-// #define OUTBOUND_FB_HASH_USE_PUT_UNIQUE 1
-
 #ifdef EXTRA_CHECKS
 void as_fabric_dump();
 #endif
@@ -184,12 +181,6 @@ void as_fabric_dump();
 **   The state of the fabric (all FNEs and FBs) can be logged using the "dump-fabric:" Info command.
 */
 
-
-/*
-** Statics
-** Right now we support only one callback for arrival of events and messages
-*/
-
 // #define DEBUG 1
 // #define DEBUG_VERBOSE 1
 
@@ -203,7 +194,6 @@ typedef struct {
 	void 				*msg_udata[M_TYPE_MAX];
 
 	cf_queue    *msg_pool_queue[M_TYPE_MAX];   // A pool of unused messages, better than calling create
-
 
 	int			num_workers;
 	pthread_t	workers_th[MAX_FABRIC_WORKERS];
@@ -226,6 +216,8 @@ typedef struct {
 // key is cf_node, value is a *pointer* to a fabric_node_element
 rchash *g_fabric_node_element_hash;
 
+#define FNE_QUEUE_LOW_PRI_SZ_LIMIT	50000
+
 // A fabric_node_element is one-per-remote-endpoint
 // it is stored in the fabric_node_element_hash, keyed by the node, so when a message_send
 // is called we can find the queues, and it's linked from the fabric buffer which is
@@ -233,34 +225,22 @@ rchash *g_fabric_node_element_hash;
 //
 // A fabric buffer sunk in an epoll holds a reference count on this object
 typedef struct {
-	cf_node 	node;   // when coming from a fd, we want to know the source node
+	cf_node 	node;	// when coming from a fd, we want to know the source node
 
-	cf_atomic32 fd_counter;         // Count of open outbound FDs.
-	shash      *outbound_fb_hash;  // All connected outbound
-									// FBs attached to this FNE:
-	// Key: fabric_buffer * ; Value: 0 (Arbitrary & unused.)
-	// Holds references to fb(s) in the hash
+	cf_atomic32 outbound_fd_counter;
+	shash		*outbound_fb_hash;			// Key: fabric_buffer * ; Value: 0 (Arbitrary & unused.)
+											// Holds references to fb(s) in the hash
+	bool		live;						// set to false on shutdown
 
-	bool        live;  // set to false on shutdown to prevent confusing incoming messages
+	uint64_t	good_write_counter;
+	uint64_t	good_read_counter;
 
-	uint64_t    good_write_counter;
-	uint64_t    good_read_counter;
-
-	cf_queue 	*xmit_buffer_queue; // queue of currently unused fabric_buffers that can be written to
-	// Queue contains: fabric_buffer *
-	cf_queue_priority    *xmit_msg_queue; 	// queue of messages to be sent
-	// 	queue contains: msg *
+	pthread_mutex_t		outbound_idle_fb_queue_lock;
+	cf_queue			outbound_idle_fb_queue;
+	cf_queue_priority	*outbound_msg_queue;
 } fabric_node_element;
 
-// Current state of a fabric buffer, idle or in-flight.
-typedef enum fb_status_e {
-	FB_STATUS_IDLE,
-	FB_STATUS_READ,
-	FB_STATUS_WRITE,
-} fb_status;
-
-// Inplace size
-#define FB_INPLACE_SZ (1024 * 128)
+#define FB_BUF_MEM_SZ		(1024 * 1024)
 
 // When we get notification about a socket, this is the structure
 // that's in the data portion
@@ -270,30 +250,26 @@ typedef struct {
 	cf_socket *sock;
 	int worker_id;
 
-	bool nodelay_isset;
-	bool keepalive_isset;
-
 	fabric_node_element *fne;
 
 	bool is_outbound;
-	fb_status status;
 	bool failed;                    // This fb has failed and is unusable
 
+	uint8_t		membuf[FB_BUF_MEM_SZ];
+
 	// This is the write section.
-	size_t		w_total_len;		// total size to write
-	size_t		w_len;				// current size we've written
-	bool		w_in_place;
-	byte		w_data[ FB_INPLACE_SZ ];
-	byte		*w_buf;
+	uint8_t		*w_buf;
+	size_t		w_buf_sz;
+	size_t		w_buf_written;
+	msg			*w_msg_in_progress;
 
 	// This is the read section.
 	uint32_t	r_msg_size; 		// size of the incoming message
 	msg_type	r_type;             // type of the incoming message
-	byte		*r_append;			// read from socket to here
-	byte		*r_parse;			// parse from here
-	byte		*r_end;				// the end of r_buf
-	byte 		r_stack_buf[ FB_INPLACE_SZ ];
-	byte 		*r_buf;				// may be r_stack_buf or allocated big buffer
+	uint8_t		*r_append;			// read from socket to here
+	uint8_t		*r_parse;			// parse from here
+	uint8_t		*r_end;				// the end of r_buf
+	uint8_t 	*r_buf;				// may be r_stack_buf or allocated big buffer
 } fabric_buffer;
 
 // Worker queue
@@ -307,7 +283,8 @@ typedef struct {
 	fabric_buffer *fb;
 } worker_queue_element;
 
-// A few select forward references.
+inline static void fne_release(fabric_node_element *fne);
+
 static void fabric_worker_add(fabric_args *fa, fabric_buffer *fb);
 static void fabric_buffer_set_epoll_state(fabric_buffer *fb);
 static void fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata);
@@ -328,7 +305,7 @@ static fabric_args *g_fabric_args = 0;
 #define FS_ADDR_EX       4
 
 // Special message at the front to describe my node ID
-msg_template fabric_mt[] = {
+static msg_template fabric_mt[] = {
 	{ FS_FIELD_NODE, M_FT_UINT64 },
 	{ FS_ADDR, M_FT_UINT32 },
 	{ FS_PORT, M_FT_UINT32 },
@@ -338,42 +315,41 @@ msg_template fabric_mt[] = {
 
 #define FS_MSG_SCRATCH_SIZE 512 // accommodate 64-node cluster
 
-// Regrettably, this may be called simultaneously from multiple nodes
-// Reference counting system works like this:
-// 'create' takes refcount to 1, and you can have no TCP connections
-// but still a refcount
-// Every buffer holds a reference count, since it has a pointer to the
-// fne. Even buffers in the epoll code.
-fabric_node_element *
+static fabric_node_element *
 fne_create(cf_node node)
 {
 	fabric_node_element *fne = cf_rc_alloc(sizeof(fabric_node_element));
 
 	if (! fne) {
-		return 0;
+		return NULL;
 	}
 
 	memset(fne, 0, sizeof(fabric_node_element));
 
 	fne->node = node;
 	fne->live = true;
-	fne->xmit_buffer_queue = cf_queue_create(sizeof(fabric_buffer *), true);
-	fne->xmit_msg_queue = cf_queue_priority_create(sizeof(msg *), true);
-	if (SHASH_OK != shash_create(&(fne->outbound_fb_hash), ptr_hash_fn, sizeof(fabric_buffer *), sizeof(int), 100, SHASH_CR_MT_BIGLOCK)) {
-		cf_crash(AS_FABRIC, "failed to create outbound_fb_hash for fne %p", fne);
+
+	if (pthread_mutex_init(&fne->outbound_idle_fb_queue_lock, NULL) != 0) {
+		cf_crash(AS_FABRIC, "failed to init xmit_buffer_queue_lock for fne %p", fne);
 	}
 
-#ifdef EXTRA_CHECKS
-	as_fabric_dump();
-#endif
+	if (! cf_queue_init(&fne->outbound_idle_fb_queue, sizeof(fabric_buffer *), CF_QUEUE_ALLOCSZ, false)) {
+		cf_crash(AS_FABRIC, "failed to create xmit_buffer_queue for fne %p", fne);
+	}
 
-	if (RCHASH_OK != rchash_put_unique(g_fabric_node_element_hash, &node, sizeof(node), fne)) {
-		// already have this node, not really an error, hope this kind of thing doesn't happen often though
+	fne->outbound_msg_queue = cf_queue_priority_create(sizeof(msg *), true);
+
+	if (! fne->outbound_msg_queue) {
+		cf_crash(AS_FABRIC, "failed to create xmit_msg_queue for fne %p", fne);
+	}
+
+	if (shash_create(&(fne->outbound_fb_hash), ptr_hash_fn, sizeof(fabric_buffer *), sizeof(uint8_t), 100, SHASH_CR_MT_BIGLOCK) != SHASH_OK) {
+		cf_crash(AS_FABRIC, "failed to create connected_fb_hash for fne %p", fne);
+	}
+
+	if (rchash_put_unique(g_fabric_node_element_hash, &node, sizeof(node), fne) != RCHASH_OK) {
 		cf_info(AS_FABRIC, " received second notification of already extant node: %"PRIx64, node);
-		cf_queue_destroy(fne->xmit_buffer_queue);
-		cf_queue_priority_destroy(fne->xmit_msg_queue);
-		shash_destroy(fne->outbound_fb_hash);
-		cf_rc_releaseandfree( fne );
+		fne_release(fne);
 		return NULL;
 	}
 
@@ -386,26 +362,25 @@ fne_create(cf_node node)
 	return fne;
 }
 
-void
+static void
 fne_destructor(void *fne_o)
 {
 	fabric_node_element *fne = (fabric_node_element *)fne_o;
 	cf_debug(AS_FABRIC, "destroy FNE: fne %p", fne);
 
-	if (fne->xmit_buffer_queue) {
-		if (cf_queue_sz(fne->xmit_buffer_queue) != 0) {
-			cf_crash(AS_FABRIC, "xmit_buffer_queue not empty as expected");
-		}
-
-		cf_queue_destroy(fne->xmit_buffer_queue);
-		fne->xmit_buffer_queue = NULL;
+	// xmit_buffer_queue section.
+	if (cf_queue_sz(&fne->outbound_idle_fb_queue) != 0) {
+		cf_crash(AS_FABRIC, "xmit_buffer_queue not empty as expected");
 	}
 
+	cf_queue_destroy(&fne->outbound_idle_fb_queue);
+	pthread_mutex_destroy(&fne->outbound_idle_fb_queue_lock);
+
+	// xmit_msg_queue section.
 	while (true) {
 		msg *m;
-		int rv = cf_queue_priority_pop(fne->xmit_msg_queue, &m, CF_QUEUE_NOWAIT);
 
-		if (rv != CF_QUEUE_OK) {
+		if (cf_queue_priority_pop(fne->outbound_msg_queue, &m, CF_QUEUE_NOWAIT) != CF_QUEUE_OK) {
 			cf_debug(AS_FABRIC, "fne_destructor(%p): xmit msg queue empty", fne);
 			break;
 		}
@@ -414,8 +389,9 @@ fne_destructor(void *fne_o)
 		as_fabric_msg_put(m);
 	}
 
-	cf_queue_priority_destroy(fne->xmit_msg_queue);
+	cf_queue_priority_destroy(fne->outbound_msg_queue);
 
+	// connected_fb_hash section.
 	if (shash_get_size(fne->outbound_fb_hash) != 0) {
 		cf_crash(AS_FABRIC, "outbound_fb_hash not empty as expected");
 	}
@@ -439,34 +415,29 @@ fabric_buffer_create(cf_socket *sock)
 
 	fb->sock = sock;
 	fb->worker_id = -1; // no worker assigned yet
-	fb->nodelay_isset = false;
-	fb->keepalive_isset = false;
 	fb->fne = NULL;
 	fb->is_outbound = false;
-	fb->status = FB_STATUS_IDLE;
 	fb->failed = false;
 
-	fb->w_total_len = 0;
-	fb->w_len = 0;
-	fb->w_in_place = true;
 	fb->w_buf = NULL;
+	fb->w_msg_in_progress = NULL;
 
 	fb->r_msg_size = 0;
 	fb->r_type = M_TYPE_FABRIC; // since we don't have an "invalid"
-	fb->r_buf = fb->r_stack_buf;
+	fb->r_buf = fb->membuf;
 	fb->r_append = fb->r_buf;
 	fb->r_parse = fb->r_buf;
-	fb->r_end = fb->r_buf + FB_INPLACE_SZ;
+	fb->r_end = fb->r_buf + FB_BUF_MEM_SZ;
 
 	return fb;
 }
 
-void
+static void
 fabric_buffer_associate(fabric_buffer *fb, fabric_node_element *fne)
 {
 	cf_rc_reserve(fne);
 	fb->fne = fne;
-//    cf_debug(AS_FABRIC, "associate: fne %p to fb %p (fne ref now %d)",fne,fb,cf_rc_count(fne));
+//	cf_debug(AS_FABRIC, "associate: fne %p to fb %p (fne ref now %d)",fne,fb,cf_rc_count(fne));
 }
 
 static void
@@ -474,19 +445,18 @@ fabric_buffer_disconnect(fabric_buffer *fb)
 {
 	fb->failed = true;
 
-	if(!fb->is_outbound) {
+	if (! fb->is_outbound) {
 		// inbound accepted connection. Does not requires a reference
 		// release for the outbound fd hash.
 		return;
 	}
 
 	if (shash_delete(fb->fne->outbound_fb_hash, &fb) != SHASH_OK) {
-		cf_warning(AS_FABRIC, "fb %p is not in (fne %p)->outbound_fb_hash", fb, fb->fne);
+		cf_detail(AS_FABRIC, "fb %p is not in (fne %p)->outbound_fb_hash", fb, fb->fne);
 		return;
 	}
 
-
-	cf_atomic32_decr(&fb->fne->fd_counter);
+	cf_atomic32_decr(&fb->fne->outbound_fd_counter);
 	cf_debug(AS_FABRIC, "removed fb %p from outbound_fb_hash", fb);
 	cf_rc_release(fb);	// For delete from fne->outbound_fb_hash
 
@@ -496,9 +466,22 @@ fabric_buffer_disconnect(fabric_buffer *fb)
 static void
 fabric_buffer_release(fabric_buffer *fb)
 {
-	fb->status = FB_STATUS_IDLE;
+	int cnt = cf_rc_release(fb);
 
-	if (0 == cf_rc_release(fb)) {
+	if (cnt < 0) {
+		cf_crash(AS_FABRIC, "extra fabric_buffer_release %p", fb);
+	}
+
+	if (cnt == 0) {
+		if (fb->w_msg_in_progress) {
+			if (fb->fne) {
+				cf_queue_priority_push(fb->fne->outbound_msg_queue, &fb->w_msg_in_progress, CF_QUEUE_PRIORITY_HIGH);
+			}
+			else {
+				as_fabric_msg_put(fb->w_msg_in_progress);
+			}
+		}
+
 		if (fb->fne) {
 			fne_release(fb->fne);
 			fb->fne = 0;
@@ -514,112 +497,16 @@ fabric_buffer_release(fabric_buffer *fb)
 		// No longer assigned to a worker.
 		fb->worker_id = -1;
 
-		if (fb->w_total_len != fb->w_len) {
-			cf_debug(AS_FABRIC, "dropping message: TCP connection close with writable bytes %zu", fb->w_total_len - fb->w_len);
-		}
-
-		if (fb->r_buf != fb->r_stack_buf) {
+		if (fb->r_buf != fb->membuf) {
 			cf_free(fb->r_buf);
 		}
 
-		if (fb->w_in_place == false && fb->w_buf) {
+		if (fb->w_buf && fb->w_buf != fb->membuf) {
 			cf_free(fb->w_buf);
 		}
 
 		cf_rc_free(fb);
 	}
-}
-
-// Fill the write buffer from the fabric node element's stash
-// return false if there's nothing in this buffer
-// true if there's still data to send
-bool
-fabric_buffer_write_fill(fabric_buffer *fb)
-{
-	fabric_node_element *fne = fb->fne;
-
-	// Check for fullness.
-	if (fb->w_total_len >= FB_INPLACE_SZ) {
-		return(true);
-	}
-
-	// See if we can fit any more.
-	int q_rv;
-	do {
-		msg *m;
-		q_rv = cf_queue_priority_pop(fne->xmit_msg_queue, &m, CF_QUEUE_NOWAIT);
-		if (q_rv == 0) {
-			size_t	remain = FB_INPLACE_SZ - fb->w_total_len;
-			if (0 != msg_fillbuf(m, &fb->w_data[fb->w_total_len], &remain)) {
-
-				// This is OK in normal operation. It's the way we tell there's not enough
-				// data left in the buffer.
-				cf_detail(AS_FABRIC, "write fill: fb %p return bad, either malloc or push back", fb);
-
-				// Not enough room left. If it's the first part of a message,
-				// then malloc a new buffer.
-				if (remain > FB_INPLACE_SZ && fb->w_total_len == 0) {
-					cf_debug(AS_FABRIC, "msg fillbuf returned fail, allocating new size %zu", remain);
-					fb->w_buf = cf_malloc(remain);
-					if (fb->w_buf) {
-						cf_atomic64_incr(&g_stats.fabric_msgs_sent);
-						msg_fillbuf(m, fb->w_buf, &remain);
-						fb->w_in_place = false;
-						fb->w_total_len = remain;
-					}
-					as_fabric_msg_put(m); // this will drop, but we're out of memory
-				}
-				else {
-					// A partially full buffer, kick it out and let this large one hit
-					// an empty case. Hope that's OK.
-					// put it back on the queue - don't know the priority, make it high.
-					cf_queue_priority_push(fne->xmit_msg_queue, &m, CF_QUEUE_PRIORITY_HIGH);
-				}
-
-				cf_detail(AS_FABRIC, "+ tot %zu len %zu", fb->w_total_len, fb->w_len);
-
-				return(true);
-			}
-			cf_atomic64_incr(&g_stats.fabric_msgs_sent);
-			fb->w_total_len += remain;
-			as_fabric_msg_put(m);
-		}
-	} while(q_rv == 0 );
-
-	cf_detail(AS_FABRIC, "fabric_buffer_write_fill: fb %p inplace %d ( %zu : %zu )", fb, fb->w_in_place, fb->w_total_len, fb->w_len);
-
-	return ( (fb->w_total_len == fb->w_len) ? false : true );
-}
-
-// Copies the contents of the message into the beginning of the linear store
-// write buffer and returns the message to the queue for reuse
-bool
-fabric_buffer_set_write_msg(fabric_buffer *fb, msg *m)
-{
-	// Statistic - doesn't really show the message went out, though.
-	cf_atomic64_incr(&g_stats.fabric_msgs_sent);
-
-	// Parse out the message to the inplace buffer.
-	fb->w_len = 0;
-	fb->w_total_len = FB_INPLACE_SZ; // set the maximum for msg_fillbuf
-	if (0 != msg_fillbuf(m, &fb->w_data[0], &fb->w_total_len)) {
-		// msg_fillbuf says we don't have enough data, but has graciously suggested
-		// the real amount of size we need.
-		cf_detail(AS_FABRIC, "msg fillbuf returned long buffer: allocating not-in-place %zu", fb->w_total_len);
-
-		if (! (fb->w_buf = cf_malloc(fb->w_total_len))) {
-			return(false);
-		}
-		msg_fillbuf(m, fb->w_buf, &fb->w_total_len);
-		fb->w_in_place = false;
-	}
-	else {
-		fb->w_in_place = true;
-		fb->w_buf = 0;
-		fb->status = FB_STATUS_WRITE;
-	}
-	as_fabric_msg_put(m);
-	return(true);
 }
 
 static int
@@ -628,21 +515,16 @@ fabric_disconnect_reduce_fn(void *key, void *data, void *udata)
 	fabric_buffer *fb = *(fabric_buffer **)key;
 
 	if (! fb) {
-		cf_warning(AS_FABRIC, "fb == NULL");
-		return SHASH_REDUCE_DELETE;
+		cf_crash(AS_FABRIC, "fb == NULL, don't pull NULLs into outbound_fb_hash");
 	}
 
-	if (fb->status != FB_STATUS_IDLE) {
-		cf_warning(AS_FABRIC, "not shutting down in-flight FB %p (status %d)", fb, fb->status);
-	}
-	else if (fb->worker_id == -1) {
+	if (fb->worker_id == -1) {
 		cf_warning(AS_FABRIC, "fb %p has no worker_id", fb);
 	}
-	else {
-		cf_socket_shutdown(fb->sock);
-	}
 
+	cf_socket_shutdown(fb->sock);
 	fabric_buffer_release(fb);	// for delete from fne->connected_fb_hash
+
 	return SHASH_REDUCE_DELETE;
 }
 
@@ -651,7 +533,7 @@ int
 fabric_disconnect(fabric_args *fa, fabric_node_element *fne)
 {
 	int num_fbs = shash_get_size(fne->outbound_fb_hash);
-	int num_fds = cf_atomic32_get(fne->fd_counter);
+	int num_fds = cf_atomic32_get(fne->outbound_fd_counter);
 
 	if (num_fbs > num_fds) {
 		cf_warning(AS_FABRIC, "number of fabric buffers (%d) > number of open file descriptors (%d) for fne %p", num_fbs, num_fds, fne);
@@ -665,148 +547,193 @@ fabric_disconnect(fabric_args *fa, fabric_node_element *fne)
 	return 0;
 }
 
+static void
+fabric_buffer_set_keepalive_options(fabric_buffer *fb)
+{
+	if (g_config.fabric_keepalive_enabled) {
+		cf_socket_keep_alive(fb->sock, g_config.fabric_keepalive_time, g_config.fabric_keepalive_intvl, g_config.fabric_keepalive_probes);
+	}
+}
+
 // Create a connection to the remote node. This creates a non-blocking
 // connection and adds it to the worker queue only, when the socket becomes
-// writable, messages can start flowing
-static int
+// writable, messages can start flowing.
+static fabric_buffer *
 fabric_connect(fabric_args *fa, fabric_node_element *fne)
 {
 	// Don't create too many conns because you'll just get small packets.
-	uint32_t fds = cf_atomic32_incr(&(fne->fd_counter));
+	uint32_t fds = cf_atomic32_incr(&(fne->outbound_fd_counter));
 	if (fds >= FABRIC_MAX_FDS) {
-		cf_atomic32_decr(&fne->fd_counter);
-		return -1;
+		cf_atomic32_decr(&fne->outbound_fd_counter);
+		return NULL;
 	}
 
 	// Get the ip address of the remote endpoint.
 	cf_sock_addr addr;
-	if (0 > as_hb_getaddr(fne->node, &addr.addr)) {
+	if (as_hb_getaddr(fne->node, &addr.addr) < 0) {
 		cf_debug(AS_FABRIC, "fabric_connect: unknown remote endpoint %"PRIx64, fne->node);
-		cf_atomic32_decr(&fne->fd_counter);
-		return -1;
+		cf_atomic32_decr(&fne->outbound_fd_counter);
+		return NULL;
 	}
 
-	// Get fabric port of the remote endpoint
+	// Get fabric port of the remote endpoint.
 	cf_ip_port_from_node_id(fne->node, &addr.port);
 
-	// Initiate the connect to the remote endpoint
+	// Initiate the connect to the remote endpoint.
 	cf_socket *sock;
 
 	if (cf_socket_init_client_nb(&addr, &sock) < 0) {
 		cf_debug(AS_FABRIC, "fabric connect could not create connect");
-		cf_atomic32_decr(&fne->fd_counter);
-		return -1;
+		cf_atomic32_decr(&fne->outbound_fd_counter);
+		return NULL;
 	}
 
 	cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
-	// Create a fabric buffer to go along with the file descriptor
+	// Create a fabric buffer to go along with the file descriptor.
 	fabric_buffer *fb = fabric_buffer_create(sock);
+
+	cf_socket_disable_nagle(fb->sock);
+	fabric_buffer_set_keepalive_options(fb);
 	fb->is_outbound = true;
 	fabric_buffer_associate(fb, fne);
 
-	// Grab a start message, send it to the remote endpoint so it knows me
+	// Grab a start message, send it to the remote endpoint so it knows me.
 	msg *m = as_fabric_msg_get(M_TYPE_FABRIC);
 	if (! m) {
 		fabric_buffer_release(fb);
-		cf_atomic32_decr(&fne->fd_counter);
-		return -1;
+		cf_atomic32_decr(&fne->outbound_fd_counter);
+		return NULL;
 	}
 
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node); // identifies self to remote
 
-	fabric_buffer_set_write_msg(fb, m);
+	fb->w_msg_in_progress = m;
+	cf_rc_reserve(fb);	// for put into fne->outbound_fb_hash
 
-	int value = 0; // (Arbitrary & unused.)
-	int rv = 0;
+	uint8_t value = 0;
+	int rv = shash_put_unique(fne->outbound_fb_hash, &fb, &value);
 
-	cf_rc_reserve(fb);	// For put into fne->outbound_fb_hash
-
-	if (SHASH_OK != (rv = shash_put_unique(fne->outbound_fb_hash, &fb, &value))) {
+	if (rv != SHASH_OK) {
 		cf_crash(AS_FABRIC, "failed to add unique fb %p to fne %p outbound_fb_hash -- rv %d", fb, fne, rv);
 	}
 
-	fabric_worker_add(fa, fb);
-
-	return 0;
+	return fb;
 }
 
-// Called when a message has written a few bytes
-void
-fabric_write_complete(fabric_buffer *fb)
+static void
+fabric_buffer_send_progress(fabric_buffer *fb, bool is_last)
 {
-#ifdef DEBUG_VERBOSE
-	cf_debug(AS_FABRIC, "fabric_write_complete: fb %p", fb);
-#endif
+	uint8_t *send_buf;
+	size_t send_sz;
 
-	// if we still have bytes to write, don't add more to the buffer
-	// todo: make this cooler
-	if (fb->w_len != fb->w_total_len) {
-		return;
+	if (fb->w_buf) {
+		// Partially sent msg.
+		send_buf = fb->w_buf + fb->w_buf_written;
+		send_sz = fb->w_buf_sz - fb->w_buf_written;
+	}
+	else {
+		// Fresh msg.
+		msg *m = fb->w_msg_in_progress;
+
+		send_sz = msg_get_wire_size(m);
+
+		if (send_sz > FB_BUF_MEM_SZ) {
+			send_buf = (uint8_t *)cf_malloc(send_sz);
+		}
+		else {
+			send_buf = fb->membuf;
+		}
+
+		fb->w_buf = send_buf;
+		msg_fillbuf(m, send_buf, &send_sz);
+		fb->w_buf_sz = send_sz;
+		fb->w_buf_written = 0;
 	}
 
-	// Reset the write components
-	fb->w_len = 0;
-	fb->w_total_len = 0;
-	fb->w_in_place = true;
-	if (fb->w_buf) {
-		cf_free(fb->w_buf);
-		fb->w_buf = 0;
+	int32_t flags = MSG_NOSIGNAL | (is_last ? 0 : MSG_MORE);
+	int32_t w_sz = cf_socket_send(fb->sock, send_buf, send_sz, flags);
+
+	if (w_sz < 0) {
+		if (errno != EAGAIN && errno != EWOULDBLOCK) {
+			fb->failed = true;
+			cf_socket_write_shutdown(fb->sock);
+			return;
+		}
+
+		w_sz = 0;	// treat as sending 0
+	}
+	else {
+		fb->fne->good_write_counter = 0;
+	}
+
+	if ((size_t)w_sz == send_sz) {
+		// Complete send.
+		as_fabric_msg_put(fb->w_msg_in_progress);
+		fb->w_msg_in_progress = NULL;
+
+		if (fb->w_buf != fb->membuf) {
+			cf_free(fb->w_buf);
+		}
+
+		fb->w_buf = NULL;
+		cf_atomic64_incr(&g_stats.fabric_msgs_sent);
+	}
+	else {
+		// Partial send.
+		fb->w_buf_written += w_sz;
+	}
+}
+
+static int
+fabric_buffer_process_writable(fabric_buffer *fb)
+{
+	// Strategy with MSG_MORE to prevent small packets during migration.
+	// Case 1 - socket buffer not full:
+	//    Send all messages except last with MSG_MORE. Last message flushes
+	//    buffer.
+	// Case 2 - socket buffer full:
+	//    All messages get sent with MSG_MORE but because buffer full, small
+	//    packets still won't happen.
+	fabric_node_element *fne = fb->fne;
+
+	// Try first without extra locking.
+	if (! fb->w_msg_in_progress) {
+		cf_queue_priority_pop(fne->outbound_msg_queue, &fb->w_msg_in_progress, CF_QUEUE_NOWAIT);
+	}
+
+	while (fb->w_msg_in_progress) {
+		msg *pending = NULL;
+
+		cf_queue_priority_pop(fne->outbound_msg_queue, &pending, CF_QUEUE_NOWAIT);
+		fabric_buffer_send_progress(fb, ! pending);
+
+		if (fb->w_msg_in_progress) {
+			if (pending) {
+				// w_msg_inprogress not done so put it back.
+				cf_queue_priority_push(fne->outbound_msg_queue, &pending, CF_QUEUE_PRIORITY_HIGH);
+			}
+
+			return 0;
+		}
+
+		fb->w_msg_in_progress = pending;
 	}
 
 	if (! fb->fne->live) {
 		fabric_buffer_disconnect(fb);
-		return;
 	}
+	else if (! fb->w_msg_in_progress) {
+		// Try with bigger lock block to sync with as_fabric_send().
+		pthread_mutex_lock(&fne->outbound_idle_fb_queue_lock);
 
-	// Is there a message waiting that I can send?
-	if (! fabric_buffer_write_fill(fb)) {
-		cf_detail(AS_FABRIC, "fabric_write_complete: no buffers extant, sleeping %p", fb);
+		if (cf_queue_priority_pop(fne->outbound_msg_queue, &fb->w_msg_in_progress, CF_QUEUE_NOWAIT) == CF_QUEUE_EMPTY) {
+			fabric_buffer_set_epoll_state(fb);
+			cf_rc_reserve(fb);
+			cf_queue_push(&fne->outbound_idle_fb_queue, &fb);
+		}
 
-		// patch up epoll state - no longer writable
-		fabric_buffer_set_epoll_state(fb);
-
-		cf_rc_reserve(fb);
-		cf_queue_push(fb->fne->xmit_buffer_queue, &fb);
-	}
-}
-
-static void
-fabric_set_keepalive_options(fabric_buffer *fb)
-{
-	if (!fb->keepalive_isset && g_config.fabric_keepalive_enabled) {
-		cf_socket_keep_alive(fb->sock, g_config.fabric_keepalive_time,
-				g_config.fabric_keepalive_intvl, g_config.fabric_keepalive_probes);
-		fb->keepalive_isset = true;
-	}
-}
-
-int
-fabric_process_writable(fabric_buffer *fb)
-{
-	fabric_buffer_write_fill(fb);
-
-	uint32_t w_len = fb->w_total_len - fb->w_len;
-
-	if (fb->nodelay_isset == false) {
-		cf_socket_disable_nagle(fb->sock);
-		fb->nodelay_isset = true;
-	}
-
-	fabric_set_keepalive_options(fb);
-
-	byte *send_buf = fb->w_in_place ? fb->w_data : fb->w_buf;
-	int w_sz = cf_socket_send(fb->sock, send_buf + fb->w_len, w_len, MSG_NOSIGNAL);
-
-	if (w_sz < 0) {
-		return (errno == EAGAIN) ? 0 : -1;
-	}
-
-	fb->fne->good_write_counter = 0;
-	fb->w_len += w_sz;
-
-	if (fb->w_len == fb->w_total_len) {
-		fabric_write_complete(fb);
+		pthread_mutex_unlock(&fne->outbound_idle_fb_queue_lock);
 	}
 
 	return 0;
@@ -884,7 +811,7 @@ as_fabric_msg_put(msg *m)
 	}
 }
 
-void
+static void
 fabric_buffer_shift(fabric_buffer *fb, uint32_t parsable_size)
 {
 	if (fb->r_parse != fb->r_buf) {
@@ -895,34 +822,32 @@ fabric_buffer_shift(fabric_buffer *fb, uint32_t parsable_size)
 	}
 }
 
-// Helper function
-// Return true if you need to be called again on this buffer
-// because there might be more messages
-bool
+// Return true if we're done.
+static bool
 fabric_process_read_msg(fabric_buffer *fb)
 {
 	uint32_t parsable_size = (uint32_t)(fb->r_append - fb->r_parse);
 
 	if (fb->r_msg_size == 0) {
-		if (0 != msg_get_initial(&fb->r_msg_size, &fb->r_type, fb->r_parse, parsable_size)) {
+		if (msg_get_initial(&fb->r_msg_size, &fb->r_type, fb->r_parse, parsable_size) != 0) {
 			fabric_buffer_shift(fb, parsable_size);
-			return false;
+			return true;
 		}
 
 		cf_detail(AS_FABRIC, "length required: %u", fb->r_msg_size);
 
-		if (fb->r_msg_size > FB_INPLACE_SZ) {
+		if (fb->r_msg_size > FB_BUF_MEM_SZ) {
 			fb->r_buf = cf_malloc(fb->r_msg_size);
 			fb->r_end = fb->r_buf + fb->r_msg_size;
 			fabric_buffer_shift(fb, parsable_size);
-			return false;
+			return true;
 		}
 	}
 
 	// Return quick if we can't parse a full message.
 	if (fb->r_msg_size > parsable_size) {
 		fabric_buffer_shift(fb, parsable_size);
-		return false;
+		return true;
 	}
 
 	if (! fb->fne) {
@@ -935,14 +860,14 @@ fabric_process_read_msg(fabric_buffer *fb)
 			cf_warning(AS_FABRIC, "fabric_process_read: msg_parse failed fabric msg");
 			// TODO: Should never happen, because the first message in a connection should be short
 			// abandon this connection is OK
-			return false;
+			return true;
 		}
 
 		cf_node node;
-		if (0 != msg_get_uint64(m, FS_FIELD_NODE, &node)) {
+		if (msg_get_uint64(m, FS_FIELD_NODE, &node) != 0) {
 			// Node is is missing in first message. Should never
 			// happen. Abandon this connection.
-			return false;
+			return true;
 		}
 
 		as_fabric_msg_put(m);
@@ -950,26 +875,22 @@ fabric_process_read_msg(fabric_buffer *fb)
 
 		// Have node, attach this read buffer to a fne.
 		fabric_node_element *fne;
-		int rv = rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne );
 
-		if (RCHASH_OK != rv) {
+		if (rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **)&fne) != RCHASH_OK) {
 			// This happens sometimes. I might get a connection request before I get a ping
 			// stating that anything exists. So make, then try again.
 			fne = fne_create(node);
-
 			cf_debug(AS_FABRIC, "created an FNE %p for node %"PRIx64" the weird way from incoming fabric msg!", fne, node);
 
-			rv = rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne );
-			if (RCHASH_OK != rv) {
-				// I get a connection.
-				cf_debug(AS_FABRIC, "fabric_process_read_msg: cf_node unknown, can't create new endpoint descriptor odd %d", rv);
-				return false;
+			int rv = rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **)&fne);
+
+			if (rv != RCHASH_OK) {
+				cf_crash(AS_FABRIC, "fabric_process_read_msg: cf_node unknown, can't create new endpoint descriptor odd %d", rv);
 			}
 		}
 
 		fabric_buffer_associate(fb, fne);
 		fne_release(fne);
-		fb->status = FB_STATUS_IDLE;
 	}
 	else {
 		// Standard path - parse into a regular message.
@@ -981,13 +902,13 @@ fabric_process_read_msg(fabric_buffer *fb)
 			// the error paths take care of it
 			cf_warning(AS_FABRIC, "msg_parse could not parse message, for type %d", fb->r_type);
 			cf_socket_write_shutdown(fb->sock);
-			return false;
+			return true;
 		}
 
 		if (msg_parse(m, fb->r_parse, fb->r_msg_size) != 0) {
 			cf_warning(AS_FABRIC, "msg_parse failed regular message, not supposed to happen: fb %p", fb);
 			cf_socket_write_shutdown(fb->sock);
-			return false;
+			return true;
 		}
 
 		// todo: have a full message, call the callback with the message
@@ -1001,10 +922,10 @@ fabric_process_read_msg(fabric_buffer *fb)
 
 		// deliver to registered guy
 		if (g_fabric_args->msg_cb[m->type]) {
-			(*g_fabric_args->msg_cb[m->type]) (fb->fne->node, m, g_fabric_args->msg_udata[m->type]);
+			(*g_fabric_args->msg_cb[m->type])(fb->fne->node, m, g_fabric_args->msg_udata[m->type]);
 		}
 		else {
-			cf_info(AS_FABRIC, "msg_read: could not deliver message type %d", m->type);
+			cf_warning(AS_FABRIC, "msg_read: could not deliver message type %d", m->type);
 			as_fabric_msg_put(m);
 		}
 	}
@@ -1013,40 +934,37 @@ fabric_process_read_msg(fabric_buffer *fb)
 	fb->r_msg_size = 0;
 
 	if (fb->r_parse < fb->r_append) {
-		// This wasn't the last message in available bytes. (Note - can't get
-		// here with an allocated big buffer.)
-		return true;
+		// Not the last message.
+		return false;
 	}
-
-	fb->status = FB_STATUS_IDLE;
 
 	// If we used an allocated big buffer, we're done with it here - free it and
 	// restore stack buffer mode.
-	if (fb->r_buf != fb->r_stack_buf) {
+	if (fb->r_buf != fb->membuf) {
 		cf_free(fb->r_buf);
-		fb->r_buf = fb->r_stack_buf;
-		fb->r_end = fb->r_buf + FB_INPLACE_SZ;
+		fb->r_buf = fb->membuf;
+		fb->r_end = fb->r_buf + FB_BUF_MEM_SZ;
 	}
 
 	fb->r_append = fb->r_buf;
 	fb->r_parse = fb->r_buf;
 
-	return false;
+	return true;
 }
 
-int
+static int
 fabric_process_readable(fabric_buffer *fb)
 {
-	int32_t	rsz;
+	int32_t	rsz = cf_socket_recv(fb->sock, fb->r_append, fb->r_end - fb->r_append, 0);
 
-	if (0 >= (rsz = cf_socket_recv(fb->sock, fb->r_append, fb->r_end - fb->r_append, 0))) {
+	if (rsz <= 0) {
 		cf_debug(AS_FABRIC, "read returned %d, broken connection? %d %s", rsz, errno, cf_strerror(errno));
 		return -1;
 	}
 
 	fb->r_append += rsz;
 
-	while (fabric_process_read_msg(fb)) {
+	while (! fabric_process_read_msg(fb)) {
 		;
 	}
 
@@ -1060,10 +978,9 @@ fabric_process_readable(fabric_buffer *fb)
 static void
 fabric_buffer_set_epoll_state(fabric_buffer *fb)
 {
-	fb->status = FB_STATUS_IDLE;
 	uint32_t events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
 
-	if (fb->w_total_len > fb->w_len) {
+	if (fb->w_msg_in_progress) {
 		events |= EPOLLOUT;
 	}
 
@@ -1094,7 +1011,7 @@ fabric_worker_add(fabric_args *fa, fabric_buffer *fb)
 	cf_queue_push(fa->workers_queue[worker], &e);
 
 	// Write a byte to his file descriptor too.
-	byte note_byte = 1;
+	uint8_t note_byte = 1;
 	cf_assert(fa->note_fd[worker], AS_FABRIC, CF_WARNING, "attempted write to fd 0");
 	if (1 != send(fa->note_fd[worker], &note_byte, sizeof(note_byte), MSG_NOSIGNAL)) {
 		// TODO!
@@ -1107,44 +1024,46 @@ fabric_worker_fn(void *argv)
 {
 	fabric_args *fa = (fabric_args *)argv;
 
-	// Figure out my thread index.
+	// Setup worker_id.
 	pthread_t self = pthread_self();
 	int worker_id;
+
 	for (worker_id = 0; worker_id < MAX_FABRIC_WORKERS; worker_id++) {
-		if (pthread_equal(fa->workers_th[worker_id], self) != 0)
+		if (pthread_equal(fa->workers_th[worker_id], self) != 0) {
 			break;
+		}
 	}
+
 	if (worker_id == MAX_FABRIC_WORKERS) {
-		cf_debug(AS_FABRIC, "fabric_worker_thread: could not figure own ID, bogus, exit, fu!");
-		return(0);
+		cf_crash(AS_FABRIC, "thread setup failure");
 	}
 
-	cf_debug(AS_FABRIC, "fabric worker created: index %d", worker_id);
+	cf_debug(AS_FABRIC, "fabric_worker_fn() created index %d", worker_id);
 
-	// Create my epoll fd, register in the global list.
+	// Setup epoll.
 	cf_poll poll;
 	cf_poll_create(&poll);
 	fa->workers_poll[worker_id] = poll;
 
-	// Connect to the notification socket.
+	// Setup note socket.
 	struct sockaddr_un note_so;
 	memset(&note_so, 0, sizeof(note_so));
 	int note_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (note_fd < 0) {
 		cf_debug(AS_FABRIC, "Could not create socket for notification thread");
-		return(0);
+		return 0;
 	}
 	note_so.sun_family = AF_UNIX;
 	strcpy(note_so.sun_path, fa->note_sockname);
 	int len = sizeof(note_so.sun_family) + strlen(note_so.sun_path) + 1;
 	// Use an abstract Unix domain socket [Note:  Linux-specific!] by setting the first path character to NUL.
 	note_so.sun_path[0] = '\0';
-	if (connect(note_fd, (struct sockaddr *) &note_so, len) == -1) {
+	if (connect(note_fd, (struct sockaddr *)&note_so, len) == -1) {
 		cf_crash(AS_FABRIC, "could not connect to notification socket");
-		return(0);
+		return 0;
 	}
 	// Write the one byte that is my index.
-	byte fd_idx = worker_id;
+	uint8_t fd_idx = worker_id;
 	cf_assert(note_fd, AS_FABRIC, CF_WARNING, "attempted write to fd 0");
 	if (1 != send(note_fd, &fd_idx, sizeof(fd_idx), MSG_NOSIGNAL)) {
 		// TODO
@@ -1154,18 +1073,18 @@ fabric_worker_fn(void *argv)
 	// File my notification information.
 	cf_poll_add_socket(poll, WSFD(note_fd), EPOLLIN | EPOLLERR, &note_fd);
 
-	/* Demarshal transactions from the socket */
-	for ( ; ; ) {
+	while (true) {
+		// We should never be canceled externally, but just in case.
+		pthread_testcancel();
+
 		cf_poll_event events[64];
 		memset(events, 0, sizeof(events));
 		int nevents = cf_poll_wait(poll, events, 64, -1);
 
-		/* Iterate over all events */
 		for (int i = 0; i < nevents; i++) {
 			if (events[i].data == &note_fd) {
 				if (events[i].events & EPOLLIN) {
-					// read the notification byte out
-					byte note_byte;
+					uint8_t note_byte;
 
 					if (-1 == read(note_fd, &note_byte, sizeof(note_byte))) {
 						// Suppress GCC warning for unused return value.
@@ -1173,14 +1092,12 @@ fabric_worker_fn(void *argv)
 
 					// Got some kind of notification - check my queue.
 					worker_queue_element wqe;
-					if (0 == cf_queue_pop(fa->workers_queue[worker_id], &wqe, 0)) {
-
-						// Got an element - probably a new FD to look after, what else?
+					if (cf_queue_pop(fa->workers_queue[worker_id], &wqe, 0) == CF_QUEUE_OK) {
 						if (wqe.type == NEW_FABRIC_BUFFER) {
 							fabric_buffer *fb = wqe.fb;
 							uint32_t events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
 
-							if (fb->w_total_len > fb->w_len) {
+							if (fb->w_msg_in_progress) {
 								events |= EPOLLOUT;
 							}
 
@@ -1191,67 +1108,60 @@ fabric_worker_fn(void *argv)
 						}
 					}
 				}
+
+				continue;
 			}
-			else {
-				// It's one of my worker FBs. Do something cool.
 
-				fabric_buffer *fb = events[i].data;
+			fabric_buffer *fb = events[i].data;
+			cf_detail(AS_FABRIC, "epoll trigger: fd %d events %x", CSFD(fb->sock), events[i].events);
 
-				cf_detail(AS_FABRIC, "epoll trigger: fd %d events %x", CSFD(fb->sock), events[i].events);
+			if (fb->fne && (fb->fne->live == false)) {
+				cf_poll_delete_socket(poll, fb->sock);
+				fabric_buffer_disconnect(fb);
+				fabric_buffer_release(fb);
+				continue;
+			}
 
-				if (fb->fne && (fb->fne->live == false)) {
+			// Handle remote close, socket errors.
+			// Also triggered by call to cf_socket_shutdown(fb->sock), but only first call.
+			// Not triggered by cf_socket_close(fb->sock), which automatically EPOLL_CTL_DEL.
+			if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+				cf_debug(AS_FABRIC, "epoll : error, will close: fb %p fd %d errno %d", fb, CSFD(fb->sock), errno);
+				cf_poll_delete_socket(poll, fb->sock);
+				fabric_buffer_disconnect(fb);
+				fabric_buffer_release(fb);
+				continue;
+			}
+
+			if (events[i].events & EPOLLIN) {
+				cf_detail(AS_FABRIC, "fabric_buffer_readable %p", fb);
+
+				if (fabric_process_readable(fb) < 0) {
 					cf_poll_delete_socket(poll, fb->sock);
 					fabric_buffer_disconnect(fb);
 					fabric_buffer_release(fb);
 					continue;
 				}
+			}
 
-				// Handle remote close, socket errors.
-				// Also triggered by call to cf_socket_shutdown(fb->sock), but only first call.
-				// Not triggered by cf_socket_close(fb->sock), which automatically EPOLL_CTL_DEL.
-				if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
-					cf_debug(AS_FABRIC, "epoll : error, will close: fb %p fd %d errno %d", fb, CSFD(fb->sock), errno);
+			if (events[i].events & EPOLLOUT) {
+				cf_detail(AS_FABRIC, "fabric_buffer_writable: %p", fb);
+
+				if (fabric_buffer_process_writable(fb) < 0) {
 					cf_poll_delete_socket(poll, fb->sock);
 					fabric_buffer_disconnect(fb);
 					fabric_buffer_release(fb);
 					continue;
 				}
-
-				if (events[i].events & EPOLLIN) {
-					cf_detail(AS_FABRIC, "fabric_buffer_readable %p", fb);
-					fb->status = FB_STATUS_READ;
-
-					if (fabric_process_readable(fb) < 0) {
-						cf_poll_delete_socket(poll, fb->sock);
-						fabric_buffer_disconnect(fb);
-						fabric_buffer_release(fb);
-						continue;
-					}
-				}
-
-				if (events[i].events & EPOLLOUT) {
-					cf_detail(AS_FABRIC, "fabric_buffer_writable: %p", fb);
-					fb->status = FB_STATUS_WRITE;
-
-					if (fabric_process_writable(fb) < 0) {
-						cf_poll_delete_socket(poll, fb->sock);
-						fabric_buffer_disconnect(fb);
-						fabric_buffer_release(fb);
-						continue;
-					}
-				}
 			}
-
-			/* We should never be canceled externally, but just in case... */
-			pthread_testcancel();
 		}
 	}
 
-	return(0);
+	return 0;
 }
 
-// Do the network accepts here, and allocate a file descriptor to
-// an epoll worker thread
+// Do the network accepts here, and allocate a file descriptor to an epoll
+// worker thread.
 static void *
 fabric_accept_fn(void *argv)
 {
@@ -1269,14 +1179,14 @@ fabric_accept_fn(void *argv)
 
 	cf_debug(AS_FABRIC, "fabric_accept: creating listener");
 
-	do {
-		/* Accept new connections on the service socket */
+	while (true) {
+		// Accept new connections on the service socket.
 		cf_socket *csock;
 		cf_sock_addr sa;
 
 		if (cf_socket_accept(sc.sock, &csock, &sa) < 0) {
 			if (errno == EMFILE) {
-				cf_info(AS_FABRIC, " warning : low on file descriptors ");
+				cf_info(AS_FABRIC, "warning: low on file descriptors");
 				continue;
 			}
 			else {
@@ -1286,60 +1196,51 @@ fabric_accept_fn(void *argv)
 
 		cf_debug(AS_FABRIC, "fabric_accept: accepting new sock %d", CSFD(csock));
 
-		/* Set the socket to nonblocking */
+		// Set the socket to nonblocking.
 		cf_socket_disable_blocking(csock);
-
 		cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
-		/* Create new fabric buffer, but don't yet know
-		   the remote endpoint, so the FNE is not associated yet */
 		fabric_buffer *fb = fabric_buffer_create(csock);
-
 		fabric_worker_add(fa, fb);
-	} while(1);
+	}
 
-	return(0);
+	return 0;
 }
 
-// Accept connections to the notification function here
+// Accept connections to the notification function here.
 static void *
 fabric_note_server_fn(void *argv)
 {
-	fabric_args *fa = (fabric_args *) argv;
+	fabric_args *fa = (fabric_args *)argv;
 
-	do {
-		int fd;
-		struct sockaddr_un caddr;
-		socklen_t clen = sizeof(caddr);
+	while (true) {
+		struct sockaddr_un addr;
+		socklen_t addr_sz = sizeof(addr);
+		int fd = accept(fa->note_server_fd, (struct sockaddr *)&addr, &addr_sz);
 
-		/* Accept new connections on the notification socket */
-		if (-1 == (fd = accept(fa->note_server_fd, (struct sockaddr *)&caddr, &clen))) {
-			cf_debug(AS_FABRIC, "note_server: accept failed: fd %d clen %d : %s", fa->note_server_fd, clen,
-					 cf_strerror(errno));
-			return(0);
+		if (fd == -1) {
+			cf_debug(AS_FABRIC, "note_server: accept failed: fd %d addr_sz %d : %s", fa->note_server_fd, addr_sz, cf_strerror(errno));
+			return 0;
 		}
 
 		// Wait for the single byte which tell me which index this is.
-		byte fd_idx;
-		if (1 != read(fd, &fd_idx, sizeof(fd_idx))) {
+		uint8_t fd_idx;
+		if (read(fd, &fd_idx, sizeof(fd_idx)) != (ssize_t)sizeof(fd_idx)) {
 			cf_debug(AS_FABRIC, "note_server: could not read index of fd");
 			close(fd);
 			continue;
 		}
 
-		/* Set the socket to nonblocking */
 		cf_socket_disable_blocking(WSFD(fd));
-
 		cf_atomic64_incr(&g_stats.fabric_connections_opened);
-
 		cf_debug(AS_FABRIC, "Notification server: received connect from index %d", fd_idx);
 
-		/* file this worker in the list */
+		// File this worker in the list.
 		fa->note_fd[fd_idx] = fd;
 		fa->note_clients++;
-	} while(1);
+	}
 
-	return(0);
+	return 0;
 }
 
 int
@@ -1347,8 +1248,8 @@ as_fabric_get_node_lasttime(cf_node node, uint64_t *lasttime)
 {
 	// Look up the node's FNE.
 	fabric_node_element *fne;
-	if (RCHASH_OK != rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **) &fne)) {
-		return(-1);
+	if (RCHASH_OK != rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **)&fne)) {
+		return -1;
 	}
 
 	// Get the last time read.
@@ -1359,7 +1260,7 @@ as_fabric_get_node_lasttime(cf_node node, uint64_t *lasttime)
 
 	fne_release(fne);
 
-	return(0);
+	return 0;
 }
 
 // The node health function:
@@ -1375,7 +1276,7 @@ fabric_node_health_reduce_fn(void *key, uint32_t keylen, void *data, void *udata
 
 	fne->good_write_counter += incr;
 	fne->good_read_counter += incr;
-	return(0);
+	return 0;
 }
 
 #define FABRIC_HEALTH_INTERVAL 40   // ms
@@ -1383,7 +1284,7 @@ fabric_node_health_reduce_fn(void *key, uint32_t keylen, void *data, void *udata
 void *
 fabric_node_health_fn(void *argv)
 {
-	do {
+	while (true) {
 		uint64_t start = cf_getms();
 
 		usleep(FABRIC_HEALTH_INTERVAL * 1000);
@@ -1391,9 +1292,9 @@ fabric_node_health_fn(void *argv)
 		uint32_t ms = cf_getms() - start;
 
 		rchash_reduce(g_fabric_node_element_hash, fabric_node_health_reduce_fn, &ms);
-	} while (1);
+	}
 
-	return(0);
+	return 0;
 }
 
 static void
@@ -1416,7 +1317,11 @@ fabric_node_disconnect(cf_node node)
 	while (true) {
 		fabric_buffer *fb;
 
-		if (cf_queue_pop(fne->xmit_buffer_queue, &fb, CF_QUEUE_NOWAIT) != CF_QUEUE_OK) {
+		pthread_mutex_lock(&fne->outbound_idle_fb_queue_lock);
+		int rv = cf_queue_pop(&fne->outbound_idle_fb_queue, &fb, CF_QUEUE_NOWAIT);
+		pthread_mutex_unlock(&fne->outbound_idle_fb_queue_lock);
+
+		if (rv != CF_QUEUE_OK) {
 			cf_debug(AS_FABRIC, "fabric_node_disconnect(%"PRIx64"): fne: %p : xmit buffer queue empty", node, fne);
 			break;
 		}
@@ -1427,7 +1332,7 @@ fabric_node_disconnect(cf_node node)
 	while (true) {
 		msg *m;
 
-		if (cf_queue_priority_pop(fne->xmit_msg_queue, &m, CF_QUEUE_NOWAIT) != CF_QUEUE_OK) {
+		if (cf_queue_priority_pop(fne->outbound_msg_queue, &m, CF_QUEUE_NOWAIT) != CF_QUEUE_OK) {
 			cf_debug(AS_FABRIC, "fabric_node_disconnect(%"PRIx64"): fne: %p : xmit msg queue empty", node, fne);
 			break;
 		}
@@ -1457,7 +1362,7 @@ fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 				fabric_node_element *fne;
 
 				// Create corresponding fabric node element - add it to the hash table.
-				if (RCHASH_OK != rchash_get(g_fabric_node_element_hash, &(events[i].nodeid), sizeof(cf_node), (void **) &fne)) {
+				if (RCHASH_OK != rchash_get(g_fabric_node_element_hash, &(events[i].nodeid), sizeof(cf_node), (void **)&fne)) {
 					fne = fne_create(events[i].nodeid);
 					cf_debug(AS_FABRIC, "fhe(): created an FNE %p for node %"PRIx64" from HB_NODE_ARRIVE", fne, events[i].nodeid);
 				}
@@ -1496,7 +1401,7 @@ as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz,
 	g_fabric_args->scratch_sz[type] = scratch_sz;
 	g_fabric_args->msg_cb[type] = msg_cb;
 	g_fabric_args->msg_udata[type] = msg_udata;
-	return(0);
+	return 0;
 }
 
 // Print out all the known nodes, connections, queue states
@@ -1508,18 +1413,19 @@ fabric_status_node_reduce_fn(void *key, uint32_t keylen, void *data, void *udata
 
 	cf_info(AS_FABRIC, "fabric status: fne %p node %"PRIx64" refcount %d", fne, *(uint64_t *)keyd, cf_rc_count(fne));
 
-	return(0);
+	return 0;
 }
 
 void *
 fabric_status_ticker_fn(void *i_hate_gcc)
 {
-	do {
+	while (true) {
 		cf_info(AS_FABRIC, "fabric status ticker: %d nodes", rchash_get_size(g_fabric_node_element_hash));
 		rchash_reduce( g_fabric_node_element_hash, fabric_status_node_reduce_fn, 0);
 		sleep(7);
-	} while (1);
-	return(0);
+	}
+
+	return NULL;
 }
 
 static int as_fabric_transact_init(void);
@@ -1551,7 +1457,7 @@ as_fabric_init()
 
 	as_fabric_transact_init();
 
-	return(0);
+	return 0;
 }
 
 int
@@ -1562,9 +1468,10 @@ as_fabric_start()
 	// Create a unix domain socket that all workers can connect to, then be written to
 	// in order to wakeup from epoll wait.
 	// Create a listener for the notification socket.
-	if (0 > (fa->note_server_fd = socket(AF_UNIX, SOCK_STREAM, 0))) {
+	if ((fa->note_server_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
 		cf_crash(AS_FABRIC, "could not create note server fd: %d %s", errno, cf_strerror(errno));
 	}
+
 	struct sockaddr_un ns_so;
 	memset(&ns_so, 0, sizeof(ns_so));
 	ns_so.sun_family = AF_UNIX;
@@ -1573,24 +1480,33 @@ as_fabric_start()
 	int ns_so_len = sizeof(ns_so.sun_family) + strlen(ns_so.sun_path) + 1;
 	// Use an abstract Unix domain socket [Note:  Linux-specific!] by setting the first path character to NUL.
 	ns_so.sun_path[0] = '\0';
-	if (0 > bind(fa->note_server_fd, (struct sockaddr *)&ns_so, ns_so_len)) {
-		cf_crash(AS_FABRIC,
-				 "could not bind note server name %s: %d %s", ns_so.sun_path, errno, cf_strerror(errno));
+
+	if (bind(fa->note_server_fd, (struct sockaddr *)&ns_so, ns_so_len) < 0) {
+		cf_crash(AS_FABRIC, "Could not bind note server name %s: %d %s", ns_so.sun_path, errno, cf_strerror(errno));
 	}
 
-	if (0 > listen(fa->note_server_fd, 5)) {
+	if (listen(fa->note_server_fd, 5) < 0) {
 		cf_crash(AS_FABRIC, "listen: %s", cf_strerror(errno));
 	}
 
-	// todo: handle errors
-	// Create thread for accepting and filing notification fds.
-	pthread_create(&(fa->note_server_th), 0, fabric_note_server_fn, fa);
+	pthread_attr_t thr_attr;
+	pthread_attr_init(&thr_attr);
+	pthread_attr_setdetachstate(&thr_attr, PTHREAD_CREATE_DETACHED);
+
+	// Create thread for accepting and filling notification fds.
+	if (pthread_create(&(fa->note_server_th), &thr_attr, fabric_note_server_fn, fa) != 0) {
+		cf_crash(AS_FABRIC, "Failed to create fabric_note_server_fn() thread");
+	}
 
 	// Create a set of workers for data motion.
 	for (int i = 0; i < fa->num_workers; i++) {
-		// todo: handle errors
-		fa->workers_queue[i] = cf_queue_create(sizeof(worker_queue_element), true);
-		pthread_create(&(fa->workers_th[i]), 0, fabric_worker_fn, fa);
+		if (! (fa->workers_queue[i] = cf_queue_create(sizeof(worker_queue_element), true))) {
+			cf_crash(AS_FABRIC, "Failed to create queue %d/%d", i, fa->num_workers);
+		}
+
+		if (pthread_create(&(fa->workers_th[i]), &thr_attr, fabric_worker_fn, fa) != 0) {
+			cf_crash(AS_FABRIC, "Failed to create fabric_worker_fn() thread %d/%d", i, fa->num_workers);
+		}
 	}
 
 	// We want all workers to be available before starting the accept thread.
@@ -1601,15 +1517,14 @@ as_fabric_start()
 	}
 
 	// Create the Accept thread.
-	if (0 != pthread_create(&(fa->accept_th), 0, fabric_accept_fn, fa)) {
-		cf_crash(AS_FABRIC, "could not create thread to receive heartbeat");
-		return(0);
+	if (pthread_create(&(fa->accept_th), &thr_attr, fabric_accept_fn, fa) != 0) {
+		cf_crash(AS_FABRIC, "Could not create thread to receive heartbeat");
 	}
 
 	// Register a callback with the heartbeat mechanism.
 	as_hb_register_listener(fabric_heartbeat_event, fa);
 
-	return(0);
+	return 0;
 }
 
 int
@@ -1617,109 +1532,114 @@ as_fabric_send(cf_node node, msg *m, int priority)
 {
 	if (g_fabric_args == 0) {
 		cf_debug(AS_FABRIC, "fabric send without initialized fabric, BOO!");
-		return(AS_FABRIC_ERR_UNINITIALIZED);
+		return AS_FABRIC_ERR_UNINITIALIZED;
 	}
-
-#ifdef EXTRA_CHECKS
-// this is debug and a little expensive but has been seriously useful so far
-	if (cf_rc_count(m) <= 0) {
-		cf_info(AS_FABRIC, "fabric send with bad ref count: m %p", m);
-		return(-1);
-	}
-#endif
 
 	cf_detail(AS_FABRIC, "fabric send: m %p to node %"PRIx64, m, node);
 
 	// Short circuit for self!
 	if (g_config.self_node == node) {
-		// If not, just deliver raw message.
 		if (g_fabric_args->msg_cb[m->type]) {
-			(*g_fabric_args->msg_cb[m->type]) (node, m, g_fabric_args->msg_udata[m->type]);
+			(*g_fabric_args->msg_cb[m->type])(node, m, g_fabric_args->msg_udata[m->type]);
+			return AS_FABRIC_SUCCESS;
 		}
-		else {
-			cf_debug(AS_FABRIC, "msg: self send to unregistered type: %d", m->type);
-			return(AS_FABRIC_ERR_BAD_MSG);
-		}
-		return(0);
+
+		cf_debug(AS_FABRIC, "msg: self send to unregistered type: %d", m->type);
+		return AS_FABRIC_ERR_BAD_MSG;
 	}
 
-	// Look up the cf_node in the hash table - get the fne.
 	fabric_node_element *fne;
 	int rv = rchash_get(g_fabric_node_element_hash, &node, sizeof(node), (void **)&fne);
 
-	if (RCHASH_OK != rv) {
+	if (rv != RCHASH_OK) {
 		if (rv == RCHASH_ERR_NOTFOUND) {
 			cf_debug(AS_FABRIC, "fabric send to unknown node %"PRIx64, node);
-			return(AS_FABRIC_ERR_NO_NODE);
+			return AS_FABRIC_ERR_NO_NODE;
 		}
-		else {
-			return(AS_FABRIC_ERR_UNKNOWN);
-		}
+
+		return AS_FABRIC_ERR_UNKNOWN;
 	}
 
-	// The FNE has a pool of file descriptors / buffers just hanging out - grab one
-	// the one we grab may have gone bad for some reason, in which case we decr the reference
-	// count and move on.
-	fabric_buffer *fb = 0;
-	do {
-		rv = cf_queue_pop(fne->xmit_buffer_queue, &fb, CF_QUEUE_NOWAIT);
-		if ((CF_QUEUE_OK == rv) && (fb->sock == NULL || fb->failed)) {
+	if (! fne->live) {
+		fne_release(fne);	// rchash_get
+		return AS_FABRIC_ERR_NO_NODE;
+	}
+
+	fabric_buffer *fb;
+
+	while (true) {
+		pthread_mutex_lock(&fne->outbound_idle_fb_queue_lock);
+		rv = cf_queue_pop(&fne->outbound_idle_fb_queue, &fb, CF_QUEUE_NOWAIT);
+		pthread_mutex_unlock(&fne->outbound_idle_fb_queue_lock);
+
+		if (rv != CF_QUEUE_OK) {
+			fb = NULL;
+			break;
+		}
+
+		if (fb->sock == NULL || fb->failed) {
 			cf_detail(AS_FABRIC, "releasing fb: %p with fne: %p and fd: %d (%s)", fb, fb->fne, CSFD(fb->sock), fb->failed ? "Failed" : "Missing");
 			fabric_buffer_release(fb);
-			fb = 0;
+			continue;
 		}
-	} while ((CF_QUEUE_OK == rv) && (! fb));
+
+		break;
+	}
 
 	if (! fb) {
-		// Queue the message, and consider creating a new connection to the endpoint.
-		cf_detail(AS_FABRIC, "fabric_send: no connection, queueing message fne %p q %p m %p", fne, fne->xmit_msg_queue, m);
-
-		// Queue it:
-		// check whether we've really got enough space on the xmit queue.
-		if ( (priority == AS_FABRIC_PRIORITY_LOW) && (cf_queue_priority_sz(fne->xmit_msg_queue) > 50000) ) {
-			fne_release(fne);
-			return(AS_FABRIC_ERR_QUEUE_FULL);
+		if (priority == AS_FABRIC_PRIORITY_LOW && cf_queue_priority_sz(fne->outbound_msg_queue) > FNE_QUEUE_LOW_PRI_SZ_LIMIT) {
+			fne_release(fne);	// rchash_get
+			return AS_FABRIC_ERR_QUEUE_FULL;
 		}
 
-		cf_queue_priority_push(fne->xmit_msg_queue, &m, priority);
-
-		static uint qs_counter = 0;
-
-		if (qs_counter++ % 50000 == 0) {
-			cf_debug(AS_FABRIC, "xmit-msg-queue: %d -- node %"PRIx64, cf_queue_priority_sz(fne->xmit_msg_queue), node);
+		if ((fb = fabric_connect(g_fabric_args, fne)) != NULL) {
+			cf_queue_priority_push(fne->outbound_msg_queue, &m, priority);
+			fabric_worker_add(g_fabric_args, fb);
 		}
+		else {
+			// Sync with fabric_buffer_process_writable() to avoid non-empty
+			// xmit_msg_queue with every fb being in xmit_buffer_queue.
+			pthread_mutex_lock(&fne->outbound_idle_fb_queue_lock);
 
-		fabric_connect(g_fabric_args, fne);
+			cf_queue_pop(&fne->outbound_idle_fb_queue, &fb, CF_QUEUE_NOWAIT);
+
+			if (! fb) {
+				cf_queue_priority_push(fne->outbound_msg_queue, &m, priority);
+			}
+
+			pthread_mutex_unlock(&fne->outbound_idle_fb_queue_lock);
+
+			if (fb) {
+				// Wake up.
+				fb->w_msg_in_progress = m;
+				fabric_buffer_set_epoll_state(fb);
+				fabric_buffer_release(fb);	// xmit_buffer_queue
+			}
+		}
 	}
-	// Got an xmit buffer - can do an immediate send (or close anyway).
 	else {
-		// Write the message into the buffer.
-		fabric_buffer_set_write_msg(fb, m);
-
-		// This function will patch up the epoll state.
+		// Wake up.
+		fb->w_msg_in_progress = m;
 		fabric_buffer_set_epoll_state(fb);
-
-		// Since the fabric buffer is no longer on the queue, decrease its ref count.
-		fabric_buffer_release(fb);
+		fabric_buffer_release(fb);	// xmit_buffer_queue
 	}
 
-	fne_release(fne);
+	fne_release(fne);	// rchash_get
 
-	return 0;
+	return AS_FABRIC_SUCCESS;
 }
 
 int
 fabric_get_node_list_fn(void *key, uint32_t keylen, void *data, void *udata)
 {
-//	cf_debug(AS_FABRIC,"get_node_list_fn");
-	as_node_list *nl = udata;
+	as_node_list *nl = (as_node_list *)udata;
 	if (nl->sz == nl->alloc_sz)	{
-		return(0);
+		return 0;
 	}
 	nl->nodes[nl->sz] = *(cf_node *)key;
 //	cf_debug(AS_FABRIC,"nl_nodes %d : %"PRIx64,nl->sz,nl->nodes[nl->sz]);
 	nl->sz++;
-	return(0);
+	return 0;
 }
 
 static rchash *g_fabric_transact_xmit_hash = 0;
@@ -1731,16 +1651,16 @@ typedef struct {
 } __attribute__ ((__packed__)) transact_recv_key;
 
 uint32_t
-fabric_tranact_xmit_hash_fn (void *value, uint32_t value_len)
+fabric_tranact_xmit_hash_fn(void *value, uint32_t value_len)
 {
 	// Todo: the input is a transaction id which really is just used directly,
 	// but is depends on the size and whether we've got "masking bits"
 	if (value_len != sizeof(uint64_t)) {
 		cf_warning(AS_FABRIC, "transact hash fn received wrong size");
-		return(0);
+		return 0;
 	}
 
-	return((uint32_t)( *(uint64_t *)value) );
+	return (uint32_t)(*(uint64_t *)value);
 }
 
 uint32_t
@@ -1754,7 +1674,7 @@ fabric_tranact_recv_hash_fn (void *value, uint32_t value_len)
 	}
 	transact_recv_key *trk = (transact_recv_key *)value;
 
-	return((uint32_t) trk->tid);
+	return (uint32_t)trk->tid;
 }
 
 static cf_atomic64 g_fabric_transact_tid = 0;
@@ -1788,19 +1708,19 @@ typedef struct {
 static inline int
 tid_code_get(uint64_t tid)
 {
-	return( tid >> 56 );
+	return tid >> 56;
 }
 
 static inline uint64_t
 tid_code_set(uint64_t tid, int code)
 {
-	return(tid | ((((uint64_t) code)) << 56));
+	return tid | (((uint64_t) code) << 56);
 }
 
 static inline uint64_t
 tid_code_clear(uint64_t tid)
 {
-	return(tid & 0xffffffffffffff);
+	return tid & 0xffffffffffffff;
 }
 
 #define TRANSACT_CODE_REQUEST 1
@@ -1815,7 +1735,7 @@ tid_code_clear(uint64_t tid)
 // rchash destructors always free the internals but not the thing itself: thus to
 // release, always call the _release function below, don't call this directly
 void
-fabric_transact_xmit_destructor (void *object)
+fabric_transact_xmit_destructor(void *object)
 {
 	fabric_transact_xmit *ft = object;
 	as_fabric_msg_put(ft->m);
@@ -1830,12 +1750,10 @@ fabric_transact_xmit_release(fabric_transact_xmit *ft)
 	}
 }
 
-void
+static void
 fabric_transact_recv_destructor(void *object)
 {
-	fabric_transact_recv *ft = object;
-	// Suppress warning
-	(void)ft;
+//	(fabric_transact_recv *)object;
 }
 
 void
@@ -1852,21 +1770,15 @@ as_fabric_transact_reply(msg *m, void *transact_data)
 {
 	fabric_transact_recv *ftr = (fabric_transact_recv *)transact_data;
 
-	// cf_info(AS_FABRIC, "fabric: transact: sending reply tid %"PRIu64,ftr->tid);
-
 	// This is a response - overwrite tid with response code etc.
 	uint64_t xmit_tid = tid_code_set(ftr->tid, TRANSACT_CODE_RESPONSE);
 	msg_set_uint64(m, 0, xmit_tid);
 
-	// TODO: make sure it's in the outbound hash?
-
-	// Send the response for the first time.
-	int rv = 0;
-	if ((rv = as_fabric_send(ftr->node, m, AS_FABRIC_PRIORITY_MEDIUM)) != 0) {
+	if (as_fabric_send(ftr->node, m, AS_FABRIC_PRIORITY_MEDIUM) != 0) {
 		as_fabric_msg_put(m);
 	}
 
-	return(0);
+	return 0;
 }
 
 void
@@ -1877,14 +1789,14 @@ as_fabric_transact_start(cf_node dest, msg *m, int timeout_ms, as_fabric_transac
 	if (m->f[0].type != M_FT_UINT64) {
 		// error
 		cf_warning(AS_FABRIC, "as_fabric_transact: first field must be int64");
-		(*cb) (0, udata, AS_FABRIC_ERR_UNKNOWN);
+		(*cb)(0, udata, AS_FABRIC_ERR_UNKNOWN);
 		return;
 	}
 
 	fabric_transact_xmit *ft = cf_rc_alloc(sizeof(fabric_transact_xmit));
 	if (! ft) {
 		cf_warning(AS_FABRIC, "as_fabric_transact: can't malloc");
-		(*cb) (0, udata, AS_FABRIC_ERR_UNKNOWN);
+		(*cb)(0, udata, AS_FABRIC_ERR_UNKNOWN);
 		return;
 	}
 
@@ -1945,7 +1857,7 @@ fabric_transact_msg_fn(cf_node node, msg *m, void *udata)
 	if (fabric_transact_recv_cb[m->type] == 0) {
 		cf_warning(AS_FABRIC, "transact: received message for transact with bad type %d, internal error", m->type);
 		as_fabric_msg_put(m); // return to pool unexamined
-		return(0);
+		return 0;
 	}
 
 	// Check to see that we have an outstanding request (only cb once!).
@@ -1953,7 +1865,7 @@ fabric_transact_msg_fn(cf_node node, msg *m, void *udata)
 	if (0 != msg_get_uint64(m, 0 /*field_id*/, &tid)) {
 		cf_warning(AS_FABRIC, "transact: received message with no tid");
 		as_fabric_msg_put(m);
-		return(0);
+		return 0;
 	}
 
 	int code = tid_code_get(tid);
@@ -1964,11 +1876,11 @@ fabric_transact_msg_fn(cf_node node, msg *m, void *udata)
 		// cf_info(AS_FABRIC, "transact: received response");
 
 		fabric_transact_xmit *ft;
-		int rv = rchash_get(g_fabric_transact_xmit_hash, &tid, sizeof(tid), (void **) &ft);
+		int rv = rchash_get(g_fabric_transact_xmit_hash, &tid, sizeof(tid), (void **)&ft);
 		if (rv != 0) {
 			cf_warning(AS_FABRIC, "No fabric transmit structure in global hash for fabric transaction-id %"PRIu64"", tid);
 			as_fabric_msg_put(m);
-			return(0);
+			return 0;
 		}
 
 		pthread_mutex_lock(&ft->LOCK);
@@ -1982,19 +1894,19 @@ fabric_transact_msg_fn(cf_node node, msg *m, void *udata)
 		pthread_mutex_unlock(&ft->LOCK);
 
 		// Ok if this happens twice....
-		rchash_delete(g_fabric_transact_xmit_hash, &tid, sizeof(tid) );
+		rchash_delete(g_fabric_transact_xmit_hash, &tid, sizeof(tid));
 
 		// This will often be the final release.
 		fabric_transact_xmit_release(ft);
 	}
 	else if (code == TRANSACT_CODE_REQUEST) {
-		fabric_transact_recv *ftr = cf_malloc( sizeof(fabric_transact_recv) );
+		fabric_transact_recv *ftr = cf_malloc(sizeof(fabric_transact_recv));
 
 		ftr->tid = tid; // has already been cleared
 		ftr->node = node;
 
 		// Notify caller - they will likely respond inline.
-		(*fabric_transact_recv_cb[m->type]) (node, m, ftr, fabric_transact_recv_udata[m->type]);
+		(*fabric_transact_recv_cb[m->type])(node, m, ftr, fabric_transact_recv_udata[m->type]);
 		cf_free(ftr);
 	}
 	else {
@@ -2002,7 +1914,7 @@ fabric_transact_msg_fn(cf_node node, msg *m, void *udata)
 		as_fabric_msg_put(m);
 	}
 
-	return(0);
+	return 0;
 }
 
 // registers all of this message type as a
@@ -2016,10 +1928,9 @@ as_fabric_transact_register(msg_type type, const msg_template *mt, size_t mt_sz,
 	fabric_transact_recv_udata[type] = udata;
 
 	// Register my internal callback with the main message callback.
-	as_fabric_register_msg_fn(type, mt, mt_sz, scratch_sz,
-			fabric_transact_msg_fn, 0);
+	as_fabric_register_msg_fn(type, mt, mt_sz, scratch_sz, fabric_transact_msg_fn, 0);
 
-	return(0);
+	return 0;
 }
 
 // Transaction maintenance threads
@@ -2078,7 +1989,7 @@ fabric_transact_xmit_reduce_fn(void *key, uint32_t keylen, void *o, void *udata)
 		cf_ll_append(ll_fabric_transact_xmit, (cf_ll_element *)ll_ftx_ele);
 	}
 	pthread_mutex_unlock(&ftx->LOCK);
-	return(0);
+	return 0;
 }
 
 int
@@ -2133,11 +2044,11 @@ ll_ftx_reduce_fn(cf_ll_element *le, void *udata)
 		fabric_transact_xmit_release(ftx);
 	}
 	// Remove it from link list.
-	return (CF_LL_REDUCE_DELETE);
+	return CF_LL_REDUCE_DELETE;
 }
 
 // Function to delete node in linked list
-void
+static void
 ll_ftx_destructor_fn(cf_ll_element *e)
 {
 	cf_free(e);
@@ -2152,8 +2063,8 @@ fabric_transact_fn(void *argv)
 	// Initialize list to empty list.
 	// This list is processed by single thread. No need of a lock.
 	cf_ll_init(&ll_fabric_transact_xmit, &ll_ftx_destructor_fn, false);
-	do {
-		usleep( 10000); // 10 ms for now
+	while (true) {
+		usleep(10000); // 10 ms for now
 
 		// Visit each entry in g_fabric_transact_xmit_hash and select entries to be retransmitted or timed out.
 		// Add that transaction id (tid) in the link list 'll_fabric_transact_xmit'.
@@ -2164,13 +2075,11 @@ fabric_transact_fn(void *argv)
 			// Process each transaction in list.
 			cf_ll_reduce(&ll_fabric_transact_xmit, true /*forward*/, ll_ftx_reduce_fn, NULL);
 		}
-	} while (1);
+	}
 
-	return(0);
+	return 0;
 }
 
-// Transaction init -- hooked from the main fabric init,
-// sets up the hash table and threads
 static int
 as_fabric_transact_init()
 {
@@ -2184,7 +2093,7 @@ as_fabric_transact_init()
 	// Create a thread for monitoring transactions.
 	pthread_create(&g_fabric_transact_th, 0, fabric_transact_fn, 0);
 
-	return(0);
+	return 0;
 }
 
 // To send to all nodes, simply set the nodes pointer to 0 (and we'll just fetch
@@ -2201,7 +2110,7 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 	}
 
 	if (nodes_sz == 1) {
-		return(as_fabric_send(nodes[0], m, priority));
+		return as_fabric_send(nodes[0], m, priority);
 	}
 
 	cf_debug(AS_FABRIC, "as_fabric_send_list sending: m %p", m);
@@ -2209,8 +2118,8 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 		cf_debug(AS_FABRIC, "  destination: %"PRIx64"\n", nodes[j]);
 	}
 
-	// careful with the ref count here: need to increment before every
-	// send except the last
+	// Careful with the ref count here: need to increment before every
+	// send except the last.
 	int rv = 0;
 	int index;
 	for (index = 0; index < nodes_sz; index++) {
@@ -2222,17 +2131,17 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 			goto Cleanup;
 		}
 	}
-	return(0);
+
+	return 0;
+
 Cleanup:
 	if (index != nodes_sz - 1) {
 		as_fabric_msg_put(m);
 	}
-	return(rv);
+
+	return rv;
 }
 
-// Debug routine that dumps out everything known by fabric, like what the node lists really are
-//   and all the fabric buffers.
-//   Add more info as you need it....
 void
 as_fabric_dump(bool verbose)
 {
@@ -2246,15 +2155,15 @@ as_fabric_dump(bool verbose)
 			continue;
 		}
 
-		// not self, check it out
 		fabric_node_element *fne;
 		int rv = rchash_get(g_fabric_node_element_hash, &nl.nodes[i], sizeof(cf_node), (void **)&fne);
+
 		if (rv != RCHASH_OK) {
 			cf_info(AS_FABRIC, "   %"PRIx64" node not found in hash although reported available", nl.nodes[i]);
 		}
 		else {
 			cf_info(AS_FABRIC, "    %"PRIx64" fds %d live %d goodwrite %"PRIu64" goodread %"PRIu64" q %d", fne->node,
-					fne->fd_counter, fne->live, fne->good_write_counter, fne->good_read_counter, cf_queue_priority_sz(fne->xmit_msg_queue));
+					fne->outbound_fd_counter, fne->live, fne->good_write_counter, fne->good_read_counter, cf_queue_priority_sz(fne->outbound_msg_queue));
 			fne_release(fne);
 		}
 	}
