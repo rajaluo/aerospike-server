@@ -1289,6 +1289,10 @@ struct as_namespace_s {
 	cf_atomic64		n_fail_generation;
 	cf_atomic64		n_fail_record_too_big;
 
+	// Special non-error counters:
+
+	cf_atomic64		n_deleted_last_bin;
+
 	// LDT stats.
 
 	ns_ldt_stats	lstats;

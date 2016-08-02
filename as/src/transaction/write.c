@@ -695,7 +695,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	// If we ended up with no bins, delete the record.
 	if (is_delete) {
 		as_index_delete(tree, &tr->keyd);
-		// TODO - maybe this needs a special counter?
+		cf_atomic64_incr(&ns->n_deleted_last_bin);
 	}
 	// Or (normally) adjust max void-times.
 	else if (r->void_time != 0) {

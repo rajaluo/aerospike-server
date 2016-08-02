@@ -1020,6 +1020,7 @@ udf_post_processing(udf_record* urecord, udf_optype* urecord_op,
 		as_index_delete(tr->rsv.tree, &tr->keyd);
 		*urecord_op = UDF_OPTYPE_DELETE;
 		as_storage_record_adjust_mem_stats(rd, urecord->starting_memory_bytes);
+		cf_atomic64_incr(&tr->rsv.ns->n_deleted_last_bin);
 	}
 	else if (*urecord_op == UDF_OPTYPE_WRITE) {
 		size_t rec_props_data_size = as_storage_record_rec_props_size(rd);

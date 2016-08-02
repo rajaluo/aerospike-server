@@ -5080,6 +5080,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "fail_generation", ns->n_fail_generation);
 	info_append_uint64(db, "fail_record_too_big", ns->n_fail_record_too_big);
 
+	// Special non-error counters:
+
+	info_append_uint64(db, "deleted_last_bin", ns->n_deleted_last_bin);
+
 	// LDT stats.
 
 	if (ns->ldt_enabled) {
