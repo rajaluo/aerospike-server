@@ -262,6 +262,7 @@ typedef struct {
 	size_t		w_buf_sz;
 	size_t		w_buf_written;
 	msg			*w_msg_in_progress;
+	size_t		w_count;
 
 	// This is the read section.
 	uint32_t	r_msg_size; 		// size of the incoming message
@@ -419,6 +420,7 @@ fabric_buffer_create(cf_socket *sock)
 	fb->is_outbound = false;
 	fb->failed = false;
 
+	fb->w_count = 0;
 	fb->w_buf = NULL;
 	fb->w_msg_in_progress = NULL;
 
@@ -474,7 +476,8 @@ fabric_buffer_release(fabric_buffer *fb)
 
 	if (cnt == 0) {
 		if (fb->w_msg_in_progress) {
-			if (fb->fne) {
+			// First message (w_count == 0) is initial M_TYPE_FABRIC message and does not need to be saved.
+			if (fb->fne && fb->w_count > 0) {
 				cf_queue_priority_push(fb->fne->outbound_msg_queue, &fb->w_msg_in_progress, CF_QUEUE_PRIORITY_HIGH);
 			}
 			else {
@@ -677,6 +680,7 @@ fabric_buffer_send_progress(fabric_buffer *fb, bool is_last)
 		}
 
 		fb->w_buf = NULL;
+		fb->w_count++;
 		cf_atomic64_incr(&g_stats.fabric_msgs_sent);
 	}
 	else {
@@ -768,17 +772,17 @@ as_fabric_msg_get(msg_type type)
 {
 	// What's coming in is actually a network value, so should be validated a bit.
 	if (type >= M_TYPE_MAX) {
-		return(0);
+		return 0;
 	}
 	if (g_fabric_args->mt[type] == 0) {
-		return(0);
+		return 0;
 	}
 
 	msg *m = 0;
 	cf_queue *q = g_fabric_args->msg_pool_queue[type];
 
-	if (0 != cf_queue_pop(q, &m, CF_QUEUE_NOWAIT)) {
-		msg_create(&m, 	type, g_fabric_args->mt[type],
+	if (cf_queue_pop(q, &m, CF_QUEUE_NOWAIT) != 0) {
+		msg_create(&m, type, g_fabric_args->mt[type],
 				g_fabric_args->mt_sz[type], g_fabric_args->scratch_sz[type]);
 	}
 	else {
@@ -787,7 +791,7 @@ as_fabric_msg_get(msg_type type)
 
 //	cf_debug(AS_FABRIC,"fabric_msg_get: m %p count %d",m,cf_rc_count(m));
 
-	return(m);
+	return m;
 }
 
 void
@@ -1165,7 +1169,7 @@ fabric_worker_fn(void *argv)
 static void *
 fabric_accept_fn(void *argv)
 {
-	fabric_args *fa = (fabric_args *) argv;
+	fabric_args *fa = (fabric_args *)argv;
 
 	// Create listener socket.
 	cf_socket_cfg sc;
