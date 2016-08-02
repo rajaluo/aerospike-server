@@ -772,17 +772,17 @@ as_fabric_msg_get(msg_type type)
 {
 	// What's coming in is actually a network value, so should be validated a bit.
 	if (type >= M_TYPE_MAX) {
-		return(0);
+		return 0;
 	}
 	if (g_fabric_args->mt[type] == 0) {
-		return(0);
+		return 0;
 	}
 
 	msg *m = 0;
 	cf_queue *q = g_fabric_args->msg_pool_queue[type];
 
-	if (0 != cf_queue_pop(q, &m, CF_QUEUE_NOWAIT)) {
-		msg_create(&m, 	type, g_fabric_args->mt[type],
+	if (cf_queue_pop(q, &m, CF_QUEUE_NOWAIT) != 0) {
+		msg_create(&m, type, g_fabric_args->mt[type],
 				g_fabric_args->mt_sz[type], g_fabric_args->scratch_sz[type]);
 	}
 	else {
@@ -791,7 +791,7 @@ as_fabric_msg_get(msg_type type)
 
 //	cf_debug(AS_FABRIC,"fabric_msg_get: m %p count %d",m,cf_rc_count(m));
 
-	return(m);
+	return m;
 }
 
 void
