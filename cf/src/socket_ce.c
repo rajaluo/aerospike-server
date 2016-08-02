@@ -105,7 +105,8 @@ cf_ip_addr_from_binary(const uint8_t *binary, size_t size, cf_ip_addr *addr)
 		return -1;
 	}
 
-	memcpy(&addr->s_addr, binary + 12, 4);
+	uint32_t s_addr = *(uint32_t*)(binary + 12);
+	memcpy(&addr->s_addr, &s_addr, 4);
 	return 16;
 }
 
@@ -122,7 +123,8 @@ cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
 	}
 
 	binary[10] = binary[11] = 0xff;
-	memcpy(binary + 12, &addr->s_addr, 4);
+	uint32_t s_addr = *(uint32_t*)&addr->s_addr;
+	memcpy(binary + 12, &s_addr, 4);
 	return 16;
 }
 
@@ -218,75 +220,6 @@ cleanup0:
 	return res;
 }
 
-static int32_t
-from_x(const msg *msg, cf_sock_addr *addr, int32_t addr_id, int32_t port_id)
-{
-	int32_t res = 0;
-	uint32_t v4;
-
-	if (msg_get_uint32(msg, addr_id, &v4) < 0) {
-		cf_crash(CF_SOCKET, "Message without IPv4 address field");
-	}
-
-	if (v4 != 0) {
-		++res;
-	}
-
-	uint32_t port;
-
-	if (msg_get_uint32(msg, port_id, &port) < 0) {
-		cf_crash(CF_SOCKET, "Message without port field");
-	}
-
-	if (port != 0) {
-		++res;
-	}
-
-	addr->addr.s_addr = v4;
-	addr->port = (cf_ip_port)port;
-	return res;
-}
-
-int32_t
-cf_sock_addr_from_heartbeat(const msg *msg, cf_sock_addr *addr)
-{
-	return from_x(msg, addr, AS_HB_MSG_ADDR, AS_HB_MSG_PORT);
-}
-
-int32_t
-cf_sock_addr_from_fabric(const msg *msg, cf_sock_addr *addr)
-{
-	return from_x(msg, addr, FS_ADDR, FS_PORT);
-}
-
-static void
-to_x(cf_sock_addr *addr, msg *msg, int32_t addr_id, int32_t port_id)
-{
-	uint32_t v4 = addr->addr.s_addr;
-
-	if (msg_set_uint32(msg, addr_id, v4) != 0) {
-		cf_crash(CF_SOCKET, "Error while adding IPv4 address field to message.");
-	}
-
-	uint32_t port = addr->port;
-
-	if (msg_set_uint32(msg, port_id, port) != 0) {
-		cf_crash(CF_SOCKET, "Error while adding port field to message.");
-	}
-}
-
-void
-cf_sock_addr_to_heartbeat(cf_sock_addr *addr, msg *msg)
-{
-	to_x(addr, msg, AS_HB_MSG_ADDR, AS_HB_MSG_PORT);
-}
-
-void
-cf_sock_addr_to_fabric(cf_sock_addr *addr, msg *msg)
-{
-	to_x(addr, msg, FS_ADDR, FS_PORT);
-}
-
 void
 cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr)
 {
@@ -310,15 +243,15 @@ cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native)
 }
 
 int32_t
-cf_socket_mcast_set_inter(cf_socket sock, const cf_ip_addr *iaddr)
+cf_socket_mcast_set_inter(cf_socket *sock, const cf_ip_addr *iaddr)
 {
 	struct ip_mreqn mr;
 	memset(&mr, 0, sizeof(mr));
 	mr.imr_address = *iaddr;
 
-	if (setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_IF, &mr, sizeof(mr)) < 0) {
+	if (setsockopt(sock->fd, IPPROTO_IP, IP_MULTICAST_IF, &mr, sizeof(mr)) < 0) {
 		cf_warning(CF_SOCKET, "setsockopt(IP_MULTICAST_IF) failed on FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 		return -1;
 	}
 
@@ -326,11 +259,11 @@ cf_socket_mcast_set_inter(cf_socket sock, const cf_ip_addr *iaddr)
 }
 
 int32_t
-cf_socket_mcast_set_ttl(cf_socket sock, int32_t ttl)
+cf_socket_mcast_set_ttl(cf_socket *sock, int32_t ttl)
 {
-	if (setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) < 0) {
+	if (setsockopt(sock->fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) < 0) {
 		cf_warning(CF_SOCKET, "setsockopt(IP_MULTICAST_TTL) failed on FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 		return -1;
 	}
 
@@ -338,7 +271,7 @@ cf_socket_mcast_set_ttl(cf_socket sock, int32_t ttl)
 }
 
 int32_t
-cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr)
+cf_socket_mcast_join_group(cf_socket *sock, const cf_ip_addr *iaddr, const cf_ip_addr *gaddr)
 {
 	struct ip_mreqn mr;
 	memset(&mr, 0, sizeof(mr));
@@ -349,9 +282,9 @@ cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_
 
 	mr.imr_multiaddr = *gaddr;
 
-	if (setsockopt(sock.fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof(mr)) < 0) {
+	if (setsockopt(sock->fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof(mr)) < 0) {
 		cf_warning(CF_SOCKET, "setsockopt(IP_ADD_MEMBERSHIP) failed on FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 		return -1;
 	}
 
@@ -361,9 +294,9 @@ cf_socket_mcast_join_group(cf_socket sock, const cf_ip_addr *iaddr, const cf_ip_
 	// restriction.
 	static const int32_t no = 0;
 
-	if (setsockopt(sock.fd, IPPROTO_IP, IP_MULTICAST_ALL, &no, sizeof(no)) < 0) {
+	if (setsockopt(sock->fd, IPPROTO_IP, IP_MULTICAST_ALL, &no, sizeof(no)) < 0) {
 		cf_warning(CF_SOCKET, "setsockopt(IP_MULTICAST_ALL) failed on FD %d: %d (%s)",
-				sock.fd, errno, cf_strerror(errno));
+				sock->fd, errno, cf_strerror(errno));
 		return -1;
 	}
 #endif
@@ -400,7 +333,7 @@ cf_socket_parse_netlink(bool allow_ipv6, uint32_t family, uint32_t flags,
 }
 
 void
-cf_socket_fix_client(cf_socket sock)
+cf_socket_fix_client(cf_socket *sock)
 {
 	(void)sock;
 }

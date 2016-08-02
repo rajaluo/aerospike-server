@@ -231,8 +231,8 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 {
 	int rv = 0;
 
-	if (CSFD(fd_h->sock) == 0) {
-		cf_crash(AS_PROTO, "fd is 0");
+	if (fd_h->sock == NULL) {
+		cf_crash(AS_PROTO, "fd is NULL");
 	}
 
 	uint8_t *msgp = db->buf;
@@ -689,9 +689,9 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 
 	if (!msgp)	return(-1);
 
-	if (CSFD(fd_h->sock) == 0) {
-		cf_warning(AS_PROTO, "write to fd 0 internal error");
-		cf_crash(AS_PROTO, "send reply: can't write to fd 0");
+	if (fd_h->sock == NULL) {
+		cf_warning(AS_PROTO, "write to NULL fd internal error");
+		cf_crash(AS_PROTO, "send reply: can't write to NULL fd");
 	}
 
 //	cf_detail(AS_PROTO, "write fd %d",fd);
@@ -924,7 +924,7 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, in
 }
 
 int
-as_msg_send_response(cf_socket sock, uint8_t* buf, size_t len, int flags)
+as_msg_send_response(cf_socket *sock, uint8_t* buf, size_t len, int flags)
 {
 	int rv;
 	int pos = 0;
@@ -946,7 +946,7 @@ as_msg_send_response(cf_socket sock, uint8_t* buf, size_t len, int flags)
 }
 
 int
-as_msg_send_fin(cf_socket sock, uint32_t result_code)
+as_msg_send_fin(cf_socket *sock, uint32_t result_code)
 {
 	cl_msg m;
 	m.proto.version = PROTO_VERSION;

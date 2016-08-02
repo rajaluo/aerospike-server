@@ -228,6 +228,10 @@ repl_write_setup_rw(rw_request* rw, as_transaction* tr,
 void
 repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
 {
+	// Reset rw->from.any which was set null in tr setup. (And note that
+	// tr->from.any will be null here in respond-on-master-complete mode.)
+	rw->from.any = tr->from.any;
+
 	rw->repl_write_cb = cb;
 
 	// TODO - is this better than not resetting? Note - xmit_ms not volatile.
@@ -477,7 +481,7 @@ repl_write_handle_ack(cf_node node, msg* m)
 
 	pthread_mutex_unlock(&rw->lock);
 
-	rw_request_hash_delete(&hkey);
+	rw_request_hash_delete(&hkey, rw);
 	rw_request_release(rw);
 	as_fabric_msg_put(m);
 }
