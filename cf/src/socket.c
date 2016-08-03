@@ -1529,7 +1529,8 @@ cf_inter_mtu(cf_ip_addr* inter_addr)
 
 		for (uint32_t k = 0; k < entry->n_addrs; ++k) {
 			cf_ip_addr* entry_addr = &entry->addrs[k];
-			if (cf_ip_addr_compare(inter_addr, entry_addr)) {
+
+			if (cf_ip_addr_compare(inter_addr, entry_addr) == 0) {
 				return entry->mtu;
 			}
 		}
