@@ -232,6 +232,10 @@ repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb)
 	// tr->from.any will be null here in respond-on-master-complete mode.)
 	rw->from.any = tr->from.any;
 
+	// Needed for response to origin.
+	rw->generation = tr->generation;
+	rw->void_time = tr->void_time;
+
 	rw->repl_write_cb = cb;
 
 	// TODO - is this better than not resetting? Note - xmit_ms not volatile.
