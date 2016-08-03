@@ -4530,7 +4530,6 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 		pthread_mutex_unlock(&g_service_lock);
 
 		if ((rv = as_fabric_send(*node, m, AS_FABRIC_PRIORITY_MEDIUM))) {
-			cf_warning(AS_INFO, "failed to send msg %p type %d to node %"PRIu64" (rv %d)", m, m->type, *node, rv);
 			as_fabric_msg_put(m);
 		}
 	}
