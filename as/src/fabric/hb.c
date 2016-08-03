@@ -792,9 +792,9 @@ typedef struct as_hb_adjacent_node_s
 	int plugin_data_cycler;
 
 	/**
-	 * Plugin specific data accumulated for by the heartbeat subsystem. The
+	 * Plugin specific data accumulated by the heartbeat subsystem. The
 	 * data  is heap allocated and should be destroyed the moment this
-	 * element entry is unused. There are two copies of the plugni data, one
+	 * element entry is unused. There are two copies of the plugin data, one
 	 * the current copy and one the previous copy. Previous copy is used to
 	 * generate data change notifications.
 	 */
@@ -2352,10 +2352,10 @@ hb_new_nodes_find_reduce(void* key, void* data, void* udata)
  * the adjacency list will generate a NODE_DEPART event.
  *
  * @param succession the succession list to correct. This should be large
- * enough to hold g_config.paxos_max_cluster_size events.
+ * enough to hold AS_CLUSTER_SZ events.
  * @param succcession_size the size of the succession list.
  * @param events the output events. This should be large enough to hold
- * g_config.paxos_max_cluster_size events.
+ * AS_CLUSTER_SZ events.
  * @param max_events the maximum number of events to generate, should be the
  * allocated size of events array.
  * @return the number of corrective events generated.
@@ -3000,9 +3000,8 @@ msg_src_fields_fill(msg* msg)
 		CRASH("Error setting heartbeat port on msg.");
 	}
 
-	// Include the ANV length in all heartbeat protocol v2 and
-	// greater messages.
-	if (config_protocol_get() != AS_HB_PROTOCOL_V1) {
+	// Include the ANV length in heartbeat protocol v2
+	if (config_protocol_get() == AS_HB_PROTOCOL_V2) {
 		if (0 >
 		    msg_set_uint32(msg, AS_HB_MSG_MAX_CLUSTER_SIZE,
 				   (uint32_t)g_config.paxos_max_cluster_size))
@@ -3190,8 +3189,12 @@ config_mcsize()
 	}
 
 	// Ensure we are always upper bounded by the absolute max cluster size.
-	int supported_cluster_size =
-	  MIN(ASC, MIN(g_config.paxos_max_cluster_size, mode_cluster_size));
+	int supported_cluster_size = MIN(ASC, mode_cluster_size);
+
+	if (config_protocol_get() == AS_HB_PROTOCOL_V2) {
+		supported_cluster_size = MIN(supported_cluster_size, 
+									g_config.paxos_max_cluster_size);
+	}
 
 	DETAIL("Supported cluster size %d", supported_cluster_size);
 	return supported_cluster_size;
@@ -4401,7 +4404,7 @@ channel_msg_sanity_check(msg* msg)
 		rv = -1;
 	}
 
-	if (config_protocol_get() != AS_HB_PROTOCOL_V1) {
+	if (config_protocol_get() == AS_HB_PROTOCOL_V2) {
 		uint32_t max_cluster_size = 0;
 		if (msg_max_cluster_size_get(msg, &max_cluster_size) != 0) {
 			DEBUG(

@@ -1341,7 +1341,7 @@ fabric_node_disconnect(cf_node node)
 static void
 fabric_heartbeat_event(int nevents, as_hb_event_node *events, void *udata)
 {
-	if ((nevents < 1) || (nevents > g_config.paxos_max_cluster_size) || !events) {
+	if ((nevents < 1) || (nevents > AS_CLUSTER_SZ) || !events) {
 		cf_warning(AS_FABRIC, "fabric: received event count of %d", nevents);
 		return;
 	}

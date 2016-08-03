@@ -159,7 +159,11 @@ increase_partition_version_tree_path(as_partition_vinfo *vinfo, cf_node fsn, cf_
 	size_t old_fsn_index;
 	bool found = false;
 
-	for (int k = 0; k < g_config.paxos_max_cluster_size; k++) {
+	for (int k = 0; k < AS_CLUSTER_SZ; k++) {
+		if (old_sl[k] == (cf_node)0) {
+			break;
+		}
+
 		if (old_sl[k] == fsn) {
 			old_fsn_index = k;
 			found = true;
@@ -251,7 +255,7 @@ as_partition_reinit(as_partition *p, as_namespace *ns, int pid)
 {
 	cf_assert(p, AS_PARTITION, CF_CRITICAL, "invalid partition");
 
-	memset(p->replica, 0, sizeof(cf_node) * g_config.paxos_max_cluster_size);
+	memset(p->replica, 0, sizeof(p->replica));
 	p->origin = 0;
 	p->target = 0;
 	p->state = AS_PARTITION_STATE_ABSENT;
@@ -436,7 +440,7 @@ find_in_replica_list(as_partition *p, cf_node self)
 {
 	int my_index = -1;
 
-	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 		if (p->replica[i] == (cf_node)0) {
 			break;
 		}
@@ -501,7 +505,7 @@ as_partition_health_check(as_namespace *ns, size_t pid, as_partition *p,
 		}
 	}
 
-	for (int i = p->p_repl_factor; i < g_config.paxos_max_cluster_size; i++) {
+	for (int i = p->p_repl_factor; i < AS_CLUSTER_SZ; i++) {
 		if (p->replica[i] != (cf_node)0) {
 			cf_warning(AS_PARTITION, "{%s:%zu} Detected state error. Replica list contains non null node %"PRIx64" at position %d",
 					ns->name, pid, p->replica[i], i);
@@ -982,7 +986,7 @@ as_partition_getreplica_readall(as_namespace *ns, as_partition_id pid, cf_node *
 
 	pthread_mutex_lock(&p->lock);
 
-	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 		// Break at the end of the list.
 		if ((cf_node)0 == p->replica[i]) {
 			break;
@@ -1298,7 +1302,7 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 			// Find myself in the replica list.
 			int replica_idx;
 
-			for (replica_idx = 0; replica_idx < g_config.paxos_max_cluster_size; replica_idx++) {
+			for (replica_idx = 0; replica_idx < AS_CLUSTER_SZ; replica_idx++) {
 				if (p->replica[replica_idx] == (cf_node)0) {
 					break;
 				}
@@ -1879,7 +1883,7 @@ as_partition_immigrate_done(as_namespace *ns, as_partition_id pid,
 		}
 		// else - received all expected, send anything pending as needed.
 
-		for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+		for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 			if (p->replica_tx_onsync[i]) {
 				p->replica_tx_onsync[i] = false;
 				p->pending_migrate_tx++;
@@ -1943,8 +1947,8 @@ as_partition_set_ns_replication_factor(int new_cluster_size)
 
 
 // Define the macros for accessing the HV and hv_slindex arrays.
-#define HV(x, y) hv_ptr[(x * g_config.paxos_max_cluster_size) + y]
-#define HV_SLINDEX(x, y) hv_slindex_ptr[(x * g_config.paxos_max_cluster_size) + y]
+#define HV(x, y) hv_ptr[(x * AS_CLUSTER_SZ) + y]
+#define HV_SLINDEX(x, y) hv_slindex_ptr[(x * AS_CLUSTER_SZ) + y]
 
 
 // Returns true if group_id is unique within nodes list indices less than n.
@@ -2117,10 +2121,10 @@ as_partition_balance()
 	bool found_error = false;
 	size_t cluster_size = 0;
 
-	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 		if (succession[i] == (cf_node)0) {
 			// Make sure that rest of succession list is empty.
-			for (int j = i; j < g_config.paxos_max_cluster_size; j++) {
+			for (int j = i; j < AS_CLUSTER_SZ; j++) {
 				if (succession[j] != (cf_node)0) {
 					found_error = true;
 				}
@@ -2363,10 +2367,10 @@ as_partition_balance()
 	//
 	// This section builds the 2 dim packed byte array;
 	// For each partition, it creates a row of cluster nodes, randomized.
-	int hv_ptr_sz = AS_PARTITIONS * g_config.paxos_max_cluster_size * sizeof(cf_node);
+	int hv_ptr_sz = AS_PARTITIONS * AS_CLUSTER_SZ * sizeof(cf_node);
 	cf_node *hv_ptr = cf_malloc(hv_ptr_sz);
 
-	int hv_slindex_ptr_sz = AS_PARTITIONS * g_config.paxos_max_cluster_size * sizeof(int);
+	int hv_slindex_ptr_sz = AS_PARTITIONS * AS_CLUSTER_SZ * sizeof(int);
 	int *hv_slindex_ptr = cf_malloc(hv_slindex_ptr_sz);
 
 	if (! hv_slindex_ptr || ! hv_ptr) {
@@ -2406,7 +2410,7 @@ as_partition_balance()
 		// into node IDs (mask everything out except our node index id bits).
 		// Then, Use the ID to get the original node values out of the
 		// succession list, but save the index bits for the SL Index array.
-		qsort(&hv_ptr[i * g_config.paxos_max_cluster_size], cluster_size,
+		qsort(&hv_ptr[i * AS_CLUSTER_SZ], cluster_size,
 				sizeof(cf_node), cf_compare_uint64ptr);
 		for (int j = 0; j < cluster_size; j++) {
 			if (0 == HV(i, j)) {
@@ -2469,8 +2473,8 @@ as_partition_balance()
 				as_partition_adjust_hv_and_slindex(p, hv_ptr, hv_slindex_ptr);
 			}
 
-			memset(p->replica, 0, g_config.paxos_max_cluster_size * sizeof(cf_node));
-			memcpy(p->replica, &hv_ptr[j * g_config.paxos_max_cluster_size], p->p_repl_factor * sizeof(cf_node));
+			memset(p->replica, 0, AS_CLUSTER_SZ * sizeof(cf_node));
+			memcpy(p->replica, &hv_ptr[j * AS_CLUSTER_SZ], p->p_repl_factor * sizeof(cf_node));
 
 			p->origin = 0;
 			p->target = 0;
@@ -2626,8 +2630,8 @@ as_partition_balance()
 						// within the cluster and this node is a replica, so
 						// reinitialize a valid empty partition.
 						as_partition_reinit(p, ns, j);
-						memset(p->replica, 0, g_config.paxos_max_cluster_size * sizeof(cf_node));
-						memcpy(p->replica, &hv_ptr[j * g_config.paxos_max_cluster_size],
+						memset(p->replica, 0, AS_CLUSTER_SZ * sizeof(cf_node));
+						memcpy(p->replica, &hv_ptr[j * AS_CLUSTER_SZ],
 								p->p_repl_factor * sizeof(cf_node));
 						memcpy(&p->primary_version_info,
 								&new_version_for_lost_partitions,
@@ -2895,8 +2899,8 @@ as_partition_balance()
 			}
 
 			// Copy the new succession list over the old succession list.
-			memcpy(p->old_sl, &hv_ptr[j * g_config.paxos_max_cluster_size],
-					sizeof(cf_node) * g_config.paxos_max_cluster_size);
+			memcpy(p->old_sl, &hv_ptr[j * AS_CLUSTER_SZ],
+					sizeof(cf_node) * AS_CLUSTER_SZ);
 
 			p->cluster_key = orig_cluster_key;
 

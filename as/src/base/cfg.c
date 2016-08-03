@@ -177,7 +177,7 @@ cfg_set_defaults()
 	c->hb_config.hb_mode = AS_HB_MODE_UNDEF;
 	c->hb_config.hb_tx_interval = 150;
 	c->hb_config.hb_max_intervals_missed = 10;
-	c->hb_config.hb_fabric_grace_factor = -1; // Inifinite fabric grace period.
+	c->hb_config.hb_fabric_grace_factor = -1; // Infinite fabric grace period.
 	c->hb_config.hb_protocol = AS_HB_PROTOCOL_V2;
 	c->hb_config.override_mtu = 0;
 
@@ -188,7 +188,7 @@ cfg_set_defaults()
 	c->fabric_keepalive_probes = 10; // tries
 
 	// XDR defaults.
-	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+	for (int i = 0; i < AS_CLUSTER_SZ ; i++) {
 		c->xdr_lastship[i].node = 0;
 
 		for (int j = 0; j < DC_MAX_NUM; j++) {
@@ -2018,7 +2018,7 @@ as_config_init(const char *config_file)
 				c->nsup_startup_evict = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE:
-				c->paxos_max_cluster_size = cfg_u64(&line, 2, AS_CLUSTER_SZ);
+				c->paxos_max_cluster_size = cfg_u64(&line, 1, AS_CLUSTER_SZ);
 				break;
 			case CASE_SERVICE_PAXOS_PROTOCOL:
 				switch(cfg_find_tok(line.val_tok_1, SERVICE_PAXOS_PROTOCOL_OPTS, NUM_SERVICE_PAXOS_PROTOCOL_OPTS)) {
