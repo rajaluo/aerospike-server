@@ -326,7 +326,7 @@ write_dup_res_cb(rw_request* rw)
 	BENCHMARK_NEXT_DATA_POINT((&tr), write, master);
 
 	if (status == TRANS_DONE_ERROR) {
-		send_write_response(&tr, &rw->response_db);
+		send_write_response(&tr, NULL);
 		return true;
 	}
 
