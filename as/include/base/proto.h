@@ -72,6 +72,8 @@ struct as_transaction_s;
 #define AS_PROTO_RESULT_FAIL_NAMESPACE				20
 #define AS_PROTO_RESULT_FAIL_BIN_NAME				21
 #define AS_PROTO_RESULT_FAIL_FORBIDDEN				22	// operation (perhaps temporarily) not possible
+#define AS_PROTO_RESULT_FAIL_ELEMENT_NOT_FOUND		23
+#define AS_PROTO_RESULT_FAIL_ELEMENT_EXISTS			24
 
 // Security result codes. Must be <= 255, to fit in one byte. Defined here to
 // ensure no overlap with other result codes.
