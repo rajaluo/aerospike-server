@@ -946,6 +946,9 @@ msg_get_buf(const msg *m, int field_id, uint8_t **r, size_t *len,
 bool
 msg_is_set(const msg* m, int field_id)
 {
+	if (field_id >= m->n_fields) {
+		return false;
+	}
 	return m->f[field_id].is_valid && m->f[field_id].is_set;
 }
 

@@ -3947,7 +3947,8 @@ channel_message_parse(msg* msg, void* buffer, int buffer_content_len)
 
 	if (parsed) {
 
-		if (msg_is_set(msg, AS_HB_MSG_COMPRESSED_PAYLOAD)) {
+		if (!HB_IS_MSG_LEGACY(msg) &&
+		    msg_is_set(msg, AS_HB_MSG_COMPRESSED_PAYLOAD)) {
 			// This is a compressed message.
 			return channel_compressed_message_parse(
 			  msg, buffer, buffer_content_len);
@@ -7136,8 +7137,9 @@ mesh_listening_socket_open(cf_socket** listening_socket)
 		}
 	}
 
-	int min_mtu =
-	  binding_addr_p ? cf_inter_mtu(binding_addr_p) : cf_inter_min_mtu();
+	int min_mtu = binding_addr_p && !cf_ip_addr_is_zero(binding_addr_p)
+			? cf_inter_mtu(binding_addr_p)
+			: cf_inter_min_mtu();
 
 	if (min_mtu == -1) {
 		WARNING("Error getting the min MTU. Using the default %d",
@@ -7295,8 +7297,9 @@ multicast_listening_socket_open(cf_socket** listening_socket)
 		}
 	}
 
-	int min_mtu =
-	  binding_addr_p ? cf_inter_mtu(binding_addr_p) : cf_inter_min_mtu();
+	int min_mtu = binding_addr_p && !cf_ip_addr_is_zero(binding_addr_p)
+			? cf_inter_mtu(binding_addr_p)
+			: cf_inter_min_mtu();
 
 	if (min_mtu == -1) {
 		WARNING("Error getting the min MTU. Using the default %d",
