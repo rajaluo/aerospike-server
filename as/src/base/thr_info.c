@@ -4246,6 +4246,8 @@ int info_node_info_reduce_fn(void *key, void *data, void *udata);
 
 void
 build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db) {
+	bool empty = true;
+
 	for (int32_t i = 0; i < n_addrs; ++i) {
 		if (cf_ip_addr_is_loopback(&addrs[i])) {
 			continue;
@@ -4254,10 +4256,12 @@ build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db) {
 		cf_sock_addr tmp;
 		cf_sock_addr_from_addr_port(&addrs[i], g_config.socket.port, &tmp);
 		cf_dyn_buf_append_string(db, cf_sock_addr_print(&tmp));
+		cf_dyn_buf_append_char(db, ';');
+		empty = false;
+	}
 
-		if (i < n_addrs - 1) {
-			cf_dyn_buf_append_char(db, ';');
-		}
+	if (!empty) {
+		cf_dyn_buf_chomp(db);
 	}
 }
 
