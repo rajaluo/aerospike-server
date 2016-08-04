@@ -443,6 +443,7 @@ static void
 fabric_buffer_disconnect(fabric_buffer *fb)
 {
 	fb->failed = true;
+	cf_socket_shutdown(fb->sock);
 
 	if (! fb->is_outbound) {
 		// inbound accepted connection. Does not requires a reference
@@ -458,8 +459,6 @@ fabric_buffer_disconnect(fabric_buffer *fb)
 	cf_atomic32_decr(&fb->fne->outbound_fd_counter);
 	cf_debug(AS_FABRIC, "removed fb %p from outbound_fb_hash", fb);
 	cf_rc_release(fb);	// For delete from fne->outbound_fb_hash
-
-	cf_socket_shutdown(fb->sock);
 }
 
 static void
@@ -889,11 +888,28 @@ fabric_buffer_process_msg(fabric_buffer *fb)
 	return true;
 }
 
+extern int generate_packed_hex_string(void *mem_ptr, uint len, char* output);
+
 static bool
 fabric_buffer_process_readable(fabric_buffer *fb)
 {
 	if (fb->is_outbound) {
-		cf_crash(AS_FABRIC, "fabric_buffer_process_readable() tried to read on outbound fb %p", fb);
+		size_t recv_full = 1024;
+		uint8_t recv_buf[recv_full];
+		int32_t	recv_sz = cf_socket_recv(fb->sock, recv_buf, recv_full, 0);
+
+		if (recv_sz < 0) {
+			cf_warning(AS_FABRIC, "fabric_buffer_process_readable() outbound recv_sz %d errno %d %s", recv_sz, errno, cf_strerror(errno));
+			return false;
+		}
+
+		if (recv_sz > 0) {
+			char print_buf[recv_full * 2 + 3];
+			generate_packed_hex_string(recv_buf, recv_sz, print_buf);
+			cf_warning(AS_FABRIC, "fabric_buffer_process_readable() outbound recv[%d] %s", recv_sz, print_buf);
+		}
+
+		return true;
 	}
 
 	while (true) {
@@ -901,12 +917,12 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 		int32_t	recv_sz = cf_socket_recv(fb->sock, fb->r_append, recv_full, 0);
 
 		if (recv_sz < 0) {
-			cf_detail(AS_FABRIC, "fabric_buffer_process_readable() rsz %d errno %d %s", recv_sz, errno, cf_strerror(errno));
+			cf_detail(AS_FABRIC, "fabric_buffer_process_readable() recv_sz %d errno %d %s", recv_sz, errno, cf_strerror(errno));
 			return false;
 		}
 
 		if (recv_sz == 0) {
-			return true;
+			break;
 		}
 
 		fb->r_append += recv_sz;
