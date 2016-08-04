@@ -900,9 +900,13 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 		size_t recv_full = fb->r_end - fb->r_append;
 		int32_t	recv_sz = cf_socket_recv(fb->sock, fb->r_append, recv_full, 0);
 
-		if (recv_sz <= 0) {
+		if (recv_sz < 0) {
 			cf_detail(AS_FABRIC, "fabric_buffer_process_readable() rsz %d errno %d %s", recv_sz, errno, cf_strerror(errno));
 			return false;
+		}
+
+		if (recv_sz == 0) {
+			return true;
 		}
 
 		fb->r_append += recv_sz;
