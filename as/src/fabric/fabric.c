@@ -935,6 +935,7 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 
 			fb->r_end = fb->r_buf + sizeof(msg_hdr);
 			fb->r_append = fb->r_buf;
+			fb->r_msg_size = 0;
 		}
 		else {
 			return false;
