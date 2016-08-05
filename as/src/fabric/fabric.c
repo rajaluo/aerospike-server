@@ -898,7 +898,7 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 		uint8_t recv_buf[recv_full];
 		int32_t	recv_sz = cf_socket_recv(fb->sock, recv_buf, recv_full, 0);
 
-		if (recv_sz < 0) {
+		if (recv_sz <= 0) {
 			cf_warning(AS_FABRIC, "fabric_buffer_process_readable() outbound recv_sz %d errno %d %s", recv_sz, errno, cf_strerror(errno));
 			return false;
 		}
@@ -922,7 +922,8 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 		}
 
 		if (recv_sz == 0) {
-			break;
+			cf_warning(AS_FABRIC, "fabric_buffer_process_readable() recv_sz %d", recv_sz);
+			return false;
 		}
 
 		fb->r_append += recv_sz;
