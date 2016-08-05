@@ -5782,7 +5782,9 @@ offset_index_get_const(const offset_index *offidx, size_t idx)
 	}
 
 	if (idx >= offset_index_get_filled(offidx)) {
-		cf_crash(AS_PARTICLE, "offset_index_get_const() idx=%zu >= filled=%u", idx, offset_index_get_filled(offidx));
+		offset_index_print(offidx, "offset_index_get_const() offidx");
+		print_packed(offidx->ele_start, offidx->tot_ele_sz, "offset_index_get_const() offidx->ele_start");
+		cf_crash(AS_PARTICLE, "offset_index_get_const() idx=%zu >= filled=%u ele_count=%u", idx, offset_index_get_filled(offidx), offidx->_.ele_count);
 	}
 
 	return msgpacked_index_get((const msgpacked_index *)offidx, idx);
