@@ -898,16 +898,18 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 		uint8_t recv_buf[recv_full];
 		int32_t	recv_sz = cf_socket_recv(fb->sock, recv_buf, recv_full, 0);
 
-		if (recv_sz <= 0) {
+		if (recv_sz == 0) {
+			return false;
+		}
+
+		if (recv_sz < 0) {
 			cf_warning(AS_FABRIC, "fabric_buffer_process_readable() outbound recv_sz %d errno %d %s", recv_sz, errno, cf_strerror(errno));
 			return false;
 		}
 
-		if (recv_sz > 0) {
-			char print_buf[recv_full * 2 + 3];
-			generate_packed_hex_string(recv_buf, recv_sz, print_buf);
-			cf_warning(AS_FABRIC, "fabric_buffer_process_readable() outbound recv[%d] %s", recv_sz, print_buf);
-		}
+		char print_buf[recv_full * 2 + 3];
+		generate_packed_hex_string(recv_buf, recv_sz, print_buf);
+		cf_warning(AS_FABRIC, "fabric_buffer_process_readable() outbound recv[%d] %s", recv_sz, print_buf);
 
 		return true;
 	}
@@ -917,12 +919,15 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 		int32_t	recv_sz = cf_socket_recv(fb->sock, fb->r_append, recv_full, 0);
 
 		if (recv_sz < 0) {
-			cf_detail(AS_FABRIC, "fabric_buffer_process_readable() recv_sz %d errno %d %s", recv_sz, errno, cf_strerror(errno));
-			return false;
+			if (errno != EAGAIN && errno != EWOULDBLOCK) {
+				cf_detail(AS_FABRIC, "fabric_buffer_process_readable() recv_sz %d errno %d %s", recv_sz, errno, cf_strerror(errno));
+				return false;
+			}
+
+			return true;
 		}
 
 		if (recv_sz == 0) {
-			cf_warning(AS_FABRIC, "fabric_buffer_process_readable() recv_sz %d", recv_sz);
 			return false;
 		}
 
