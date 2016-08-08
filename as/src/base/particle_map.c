@@ -1582,7 +1582,7 @@ map_packer_copy_index(map_packer *pk, const packed_map_op *op, map_ele_find *rem
 		}
 
 		if (! packed_map_op_write_dv_index(op, remove_info, add_info, &pk->value_idx)
-				&& ! map_packer_fill_v_index(pk, pk->ele_start_ptr, (uint32_t)(pk->write_ptr - pk->ele_start_ptr))) {
+				&& ! map_packer_fill_v_index(pk, pk->ele_start_ptr, pk->content_size)) {
 			return false;
 		}
 	}
@@ -1695,7 +1695,7 @@ packed_map_set_flags(as_bin *b, rollback_alloc *alloc_buf, as_bin *result, uint8
 	}
 
 	if (order_index_is_valid(&mpk.value_idx)) {
-		if (order_index_is_valid(&op.pmi.value_idx)) {
+		if (order_index_is_filled(&op.pmi.value_idx)) {
 			order_index_copy(&mpk.value_idx, &op.pmi.value_idx, 0, 0, ele_count, NULL);
 		}
 		else {
@@ -2140,7 +2140,13 @@ packed_map_remove_idxs(as_bin *b, const packed_map_op *op, rollback_alloc *alloc
 	}
 
 	if (order_index_is_valid(&mpk.value_idx)) {
-		order_index_op_remove_indexes(&mpk.value_idx, &op->pmi.value_idx, remove_idxs, count);
+		if (order_index_is_filled(&op->pmi.value_idx)) {
+			order_index_op_remove_indexes(&mpk.value_idx, &op->pmi.value_idx, remove_idxs, count);
+		}
+		else if (! order_index_set_sorted(&mpk.value_idx, &mpk.offset_idx, mpk.ele_start_ptr, mpk.content_size, SORT_BY_VALUE)) {
+			cf_warning(AS_PARTICLE, "packed_map_remove_indexes() failed to sort new value_idex");
+			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
 	}
 
 	return AS_PROTO_RESULT_OK;
@@ -4603,7 +4609,7 @@ packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order
 	}
 	else {
 		offset_index *offidx = (offset_index *)&op->pmi.offset_idx;
-		order_index *ordidx = (order_index *)&op->pmi.value_idx;
+		order_index keyordidx;
 
 		// Preset offsets if necessary.
 		if (offset_index_get(offidx, op->ele_count) < 0) {
@@ -4612,12 +4618,12 @@ packed_map_op_build_index_result_by_ele_idx(const packed_map_op *op, const order
 		}
 
 		// Make order index on stack.
-		order_index_inita(ordidx, op->ele_count);
-		order_index_set_sorted(ordidx, offidx, op->packed + op->ele_start, op->packed_sz - op->ele_start, SORT_BY_KEY);
+		order_index_inita(&keyordidx, op->ele_count);
+		order_index_set_sorted(&keyordidx, offidx, op->packed + op->ele_start, op->packed_sz - op->ele_start, SORT_BY_KEY);
 
 		for (uint32_t i = 0; i < count; i++) {
 			uint32_t idx = order_index_get(ele_idx, start + i);
-			uint32_t index = order_index_find_idx(ordidx, idx, 0, op->ele_count);
+			uint32_t index = order_index_find_idx(&keyordidx, idx, 0, op->ele_count);
 
 			if (index >= op->ele_count) {
 				return -AS_PROTO_RESULT_FAIL_PARAMETER;
