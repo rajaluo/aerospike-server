@@ -3771,7 +3771,7 @@ packed_map_op_get_remove_by_key(packed_map_op *op, as_bin *b, rollback_alloc *al
 
 	if (! find_key.found_key) {
 		if (! result_data_set_key_not_found(result, -1)) {
-			cf_warning(AS_PARTICLE, "packed_map_remove_by_key() invalid result_type %d", result->type);
+			cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key() invalid result_type %d", result->type);
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
 
@@ -3785,7 +3785,7 @@ packed_map_op_get_remove_by_key(packed_map_op *op, as_bin *b, rollback_alloc *al
 		int32_t new_size = packed_map_op_remove(op, &find_key, count, remove_sz);
 
 		if (new_size < 0) {
-			cf_warning(AS_PARTICLE, "packed_map_remove_by_key() packed_map_transform_remove_key failed with ret=%d, ele_count=%d", new_size, op->ele_count);
+			cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key() packed_map_transform_remove_key failed with ret=%d, ele_count=%d", new_size, op->ele_count);
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
 		}
 
@@ -3793,7 +3793,7 @@ packed_map_op_get_remove_by_key(packed_map_op *op, as_bin *b, rollback_alloc *al
 		map_packer_init(&mpk, op->new_ele_count, op->pmi.flags, (uint32_t)new_size);
 
 		if (! map_packer_setup_bin(&mpk, b, alloc_buf)) {
-			cf_warning(AS_PARTICLE, "packed_map_remove_by_key() failed to alloc map particle");
+			cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key() failed to alloc map particle");
 			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 
@@ -3802,7 +3802,7 @@ packed_map_op_get_remove_by_key(packed_map_op *op, as_bin *b, rollback_alloc *al
 		map_packer_write_seg2(&mpk, op);
 
 		if (! map_packer_copy_index(&mpk, op, &find_key, NULL, 0)) {
-			cf_warning(AS_PARTICLE, "packed_map_remove_by_key() copy index failed");
+			cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key() copy index failed");
 			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 	}
@@ -3810,10 +3810,10 @@ packed_map_op_get_remove_by_key(packed_map_op *op, as_bin *b, rollback_alloc *al
 #ifdef MAP_DEBUG_VERIFY
 	if (b && ! as_bin_verify(b)) {
 		const map_mem *p = (const map_mem *)b->particle;
-		cf_warning(AS_PARTICLE, "packed_map_remove_by_key(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key(): data=%p sz=%u type=%d", p->data, p->sz, p->type);
 		char buf[4096];
 		print_hex(p->data, p->sz, buf, 4096);
-		cf_warning(AS_PARTICLE, "packed_map_remove_by_key(): buf=%s", buf);
+		cf_warning(AS_PARTICLE, "packed_map_op_get_remove_by_key(): buf=%s", buf);
 	}
 #endif
 
