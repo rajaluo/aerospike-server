@@ -1684,7 +1684,7 @@ packed_map_set_flags(as_bin *b, rollback_alloc *alloc_buf, as_bin *result, uint8
 		memcpy(mpk.write_ptr, op.packed + op.ele_start, content_length);
 
 		if (offset_index_is_valid(&mpk.offset_idx)) {
-			if (offset_index_is_valid(&op.pmi.offset_idx)) {
+			if (offset_index_is_full(&op.pmi.offset_idx)) {
 				offset_index_copy(&mpk.offset_idx, &op.pmi.offset_idx, 0, 0, ele_count, 0);
 			}
 			else if (! map_packer_fill_offset_index(&mpk)) {
@@ -2959,6 +2959,13 @@ packed_map_op_ensure_ordidx_filled(const packed_map_op *op)
 	order_index *ordidx = (order_index *)&op->pmi.value_idx;
 
 	if (! order_index_is_filled(ordidx)) {
+		offset_index *offidx = (offset_index *)&op->pmi.offset_idx;
+
+		if (! offset_index_fill(offidx, op->ele_count)) {
+			cf_warning(AS_PARTICLE, "packed_map_op_ensure_ordidx_filled() failed to fill offset_idx");
+			return false;
+		}
+
 		return order_index_set_sorted(ordidx, &op->pmi.offset_idx, op->packed + op->ele_start, op->packed_sz - op->ele_start, SORT_BY_VALUE);
 	}
 
