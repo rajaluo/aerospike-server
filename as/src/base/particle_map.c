@@ -201,7 +201,7 @@ typedef struct packed_map_op_s {
 	uint32_t packed_sz;
 	as_packed_map_index pmi;
 
-	uint32_t ele_count;
+	uint32_t ele_count;	// excludes ext pair
 	uint32_t new_ele_count;
 
 	uint32_t ele_removed;
@@ -737,6 +737,19 @@ map_from_wire(as_particle_type wire_type, const uint8_t *wire_value, uint32_t va
 	as_pack_val(&pk, (const as_val *)&as_nil);
 	memcpy(pk.buffer + pk.offset, op.packed + op.ele_start, op.packed_sz - op.ele_start);
 	p_map_mem->sz = value_size + ext_content_sz + extra_sz;
+
+#ifdef MAP_DEBUG_VERIFY
+	{
+		as_bin b;
+		b.particle = *pp;
+		as_bin_state_set_from_type(&b, AS_PARTICLE_TYPE_MAP);
+
+		if (! as_bin_verify(&b)) {
+			offset_index_print(&op.pmi.offset_idx, "verify");
+			cf_warning(AS_PARTICLE, "map_from_wire: pp=%p wire_value=%p", pp, wire_value);
+		}
+	}
+#endif
 
 	return 0;
 }
@@ -1675,6 +1688,8 @@ packed_map_set_flags(as_bin *b, rollback_alloc *alloc_buf, as_bin *result, uint8
 	map_packer_write_hdridx(&mpk);
 
 	if (reorder) {
+		offset_index_inita_from_op_if_invalid(&op.pmi.offset_idx, &op);
+
 		if (! packed_map_op_write_k_ordered(&op, mpk.write_ptr, &mpk.offset_idx)) {
 			cf_warning(AS_PARTICLE, "packed_map_set_flags() sort on key failed, set_flags = 0x%x", set_flags);
 			return -AS_PROTO_RESULT_FAIL_PARAMETER;
@@ -2880,8 +2895,7 @@ packed_map_op_unpack_hdridx(packed_map_op *op)
 	};
 
 	if (op->packed_sz == 0) {
-		op->ele_count = 0;
-		return true;
+		return false;
 	}
 
 	int64_t ele_count = as_unpack_map_header_element_count(&pk);
@@ -2895,10 +2909,6 @@ packed_map_op_unpack_hdridx(packed_map_op *op)
 	as_packed_map_index *pmi = &op->pmi;
 
 	if (ele_count > 0 && as_unpack_peek_is_ext(&pk)) {
-		if (op->ele_count == 0) {
-			return false;
-		}
-
 		as_msgpack_ext ext;
 
 		if (as_unpack_ext(&pk, &ext) != 0) {
@@ -5610,7 +5620,6 @@ static inline void
 offset_index_set_ptr(offset_index *offidx, uint8_t *idx_mem, const uint8_t *packed_mem)
 {
 	msgpacked_index_set_ptr((msgpacked_index *)offidx, idx_mem);
-	offset_index_set_filled(offidx, offidx->_.ele_count);
 	offidx->ele_start = packed_mem;
 }
 
@@ -8022,16 +8031,27 @@ as_bin_verify(const as_bin *b)
 
 	offset_index_inita_from_op_if_invalid(offidx, &op);
 
+	uint32_t filled = offset_index_get_filled(offidx);
+	offset_index temp_offidx;
+
+	offset_index_inita(&temp_offidx, NULL, offidx->tot_ele_sz, offidx->_.ele_count);
+	offset_index_copy(&temp_offidx, offidx, 0, 0, filled, 0);
+
 	// Check offsets.
 	for (uint32_t i = 0; i < op.ele_count; i++) {
 		uint32_t offset;
 
 		if (check_offidx) {
-			offset = offset_index_get_const(offidx, i);
+			if (i < filled) {
+				offset = offset_index_get_const(offidx, i);
 
-			if (pk.offset != offset) {
-				cf_warning(AS_PARTICLE, "as_bin_verify() i=%u offset=%u expected=%d", i, offset, pk.offset);
-				return false;
+				if (pk.offset != offset) {
+					cf_warning(AS_PARTICLE, "as_bin_verify() i=%u offset=%u expected=%d", i, offset, pk.offset);
+					return false;
+				}
+			}
+			else {
+				offset_index_set(&temp_offidx, i, pk.offset);
 			}
 		}
 		else {
@@ -8051,6 +8071,10 @@ as_bin_verify(const as_bin *b)
 			cf_warning(AS_PARTICLE, "as_bin_verify() i=%u offset=%u pk.offset=%d invalid value", i, offset, pk.offset);
 			return false;
 		}
+	}
+
+	if (check_offidx && filled < op.ele_count) {
+		offidx->_.ptr = temp_offidx._.ptr;
 	}
 
 	// Check packed size.
