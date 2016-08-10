@@ -549,7 +549,7 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 	size_t pos = 0;
 
 	while (pos < proto_sz) {
-		int rv = cf_socket_send(fd_h->sock, proto + pos, proto_sz - pos,
+		int rv = cf_socket_send(&fd_h->sock, proto + pos, proto_sz - pos,
 				MSG_NOSIGNAL);
 
 		if (rv > 0) {
@@ -566,7 +566,7 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 		}
 		else {
 			cf_warning(AS_PROTO, "send returned 0: fd %d sz %zu pos %zu ",
-					CSFD(fd_h->sock), proto_sz, pos);
+					CSFD(&fd_h->sock), proto_sz, pos);
 			as_end_of_transaction_force_close(fd_h);
 			return AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
@@ -1112,7 +1112,7 @@ shipop_handle_client_response(msg* m, rw_request* rw)
 	size_t pos = 0;
 
 	while (pos < proto_sz) {
-		int rv = cf_socket_send(fd_h->sock, proto + pos, proto_sz - pos,
+		int rv = cf_socket_send(&fd_h->sock, proto + pos, proto_sz - pos,
 				MSG_NOSIGNAL);
 
 		if (rv > 0) {
@@ -1129,7 +1129,7 @@ shipop_handle_client_response(msg* m, rw_request* rw)
 		}
 		else {
 			cf_warning(AS_PROTO, "send returned 0: fd %d sz %zu pos %zu ",
-					CSFD(fd_h->sock), proto_sz, pos);
+					CSFD(&fd_h->sock), proto_sz, pos);
 			as_end_of_transaction_force_close(fd_h);
 			return;
 		}

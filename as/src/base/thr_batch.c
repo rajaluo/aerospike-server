@@ -266,7 +266,7 @@ batch_process_request(batch_transaction* btr)
 	cf_buf_builder* bb = 0;
 	batch_build_response(btr, &bb);
 
-	cf_socket *sock = btr->fd_h->sock;
+	cf_socket *sock = &btr->fd_h->sock;
 	int brv;
 
 	if (bb) {

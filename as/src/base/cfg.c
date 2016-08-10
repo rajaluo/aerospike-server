@@ -111,6 +111,10 @@ cfg_set_defaults()
 
 	memset(c, 0, sizeof(as_config));
 
+	cf_socket_init(&g_config.socket.sock);
+	cf_socket_init(&g_config.localhost_socket.sock);
+	cf_socket_init(&g_config.xdr_socket.sock);
+
 	// Service defaults.
 	c->paxos_single_replica_limit = 1; // by default all clusters obey replication counts
 	c->n_service_threads = 4;
