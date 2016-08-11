@@ -1887,13 +1887,13 @@ packed_map_add(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *key, con
 	if (find_key_to_remove.found_key) {
 		// ADD for [unique] & [key exist].
 		if (! control->allow_overwrite) {
-			return -AS_PROTO_RESULT_FAIL_ELEMENT_NOT_FOUND;
+			return -AS_PROTO_RESULT_FAIL_ELEMENT_EXISTS;
 		}
 	}
 	else {
 		// REPLACE for ![key exist].
 		if (! control->allow_create) {
-			return -AS_PROTO_RESULT_FAIL_ELEMENT_EXISTS;
+			return -AS_PROTO_RESULT_FAIL_ELEMENT_NOT_FOUND;
 		}
 
 		// Normal cases handled by packed_map_op_add():
