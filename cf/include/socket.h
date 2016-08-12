@@ -182,6 +182,9 @@ CF_MUST_CHECK int32_t cf_socket_recv(cf_socket *sock, void *buff, size_t size, i
 CF_MUST_CHECK int32_t cf_socket_send_to(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_send(cf_socket *sock, void *buff, size_t size, int32_t flags);
 
+CF_MUST_CHECK int32_t cf_socket_send_to_blocking(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_send_blocking(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout);
+
 void cf_socket_write_shutdown(cf_socket *sock);
 void cf_socket_shutdown(cf_socket *sock);
 void cf_socket_close(cf_socket *sock);
