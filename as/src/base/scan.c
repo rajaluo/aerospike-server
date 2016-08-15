@@ -131,7 +131,6 @@ static inline bool excluded_set(as_index* r, uint16_t set_id);
 
 const size_t INIT_BUF_BUILDER_SIZE = 1024 * 1024 * 2;
 const size_t SCAN_CHUNK_LIMIT = 1024 * 1024;
-const int32_t SCAN_SEND_TIMEOUT = 10000;
 
 
 
@@ -333,7 +332,7 @@ send_blocking_response_chunk(cf_socket *sock, uint8_t* buf, size_t size)
 	as_proto_swap(&proto);
 
 	int rv = cf_socket_send_blocking(sock, (uint8_t*)&proto, sizeof(as_proto),
-			MSG_NOSIGNAL | MSG_MORE, SCAN_SEND_TIMEOUT);
+			MSG_NOSIGNAL | MSG_MORE, CF_SOCKET_TIMEOUT);
 
 	if (rv != sizeof(as_proto)) {
 		cf_warning(AS_SCAN, "send error - fd %d rv %d %s", CSFD(sock), rv,
@@ -342,7 +341,7 @@ send_blocking_response_chunk(cf_socket *sock, uint8_t* buf, size_t size)
 	}
 
 	if ((rv = cf_socket_send_blocking(sock, buf, size,
-			MSG_NOSIGNAL, SCAN_SEND_TIMEOUT)) != size) {
+			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT)) != size) {
 		cf_warning(AS_SCAN, "send error - fd %d sz %lu rv %d %s", CSFD(sock),
 				size, rv, rv < 0 ? cf_strerror(errno) : "");
 		return 0;
@@ -375,7 +374,7 @@ send_blocking_response_fin(cf_socket *sock, int result_code)
 	as_msg_swap_header(&m.msg);
 
 	int rv = cf_socket_send_blocking(sock, (uint8_t*)&m, sizeof(cl_msg),
-			MSG_NOSIGNAL, SCAN_SEND_TIMEOUT);
+			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT);
 
 	if (rv != sizeof(cl_msg)) {
 		cf_warning(AS_SCAN, "send error - fd %d rv %d %s", CSFD(sock), rv,

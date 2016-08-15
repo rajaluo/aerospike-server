@@ -34,6 +34,8 @@
 #include "msg.h"
 #include "util.h"
 
+#define CF_SOCKET_TIMEOUT 10000
+
 #if !defined USE_IPV6
 typedef struct in_addr cf_ip_addr;
 #else
@@ -179,11 +181,13 @@ CF_MUST_CHECK int32_t cf_socket_available(cf_socket *sock);
 
 CF_MUST_CHECK int32_t cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags);
-CF_MUST_CHECK int32_t cf_socket_send_to(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_socket_send(cf_socket *sock, void *buff, size_t size, int32_t flags);
+CF_MUST_CHECK int32_t cf_socket_send_to(cf_socket *sock, const void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags);
 
-CF_MUST_CHECK int32_t cf_socket_send_to_blocking(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr, int32_t timeout);
-CF_MUST_CHECK int32_t cf_socket_send_blocking(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_recv_from_blocking(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_recv_blocking(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_send_to_blocking(cf_socket *sock, const void *buff, size_t size, int32_t flags, cf_sock_addr *addr, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_send_blocking(cf_socket *sock, const void *buff, size_t size, int32_t flags, int32_t timeout);
 
 void cf_socket_write_shutdown(cf_socket *sock);
 void cf_socket_shutdown(cf_socket *sock);
