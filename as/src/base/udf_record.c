@@ -722,7 +722,7 @@ udf_record_get(const as_rec * rec, const char * name)
 	// We have a value, so we will cache it.
 	// DO NOT remove this. We need to cache copy to makes sure ref count 
 	// gets decremented post handing this as_val over to the lua world
-	if ( urecord && value ) {
+	if (value) {
 		udf_record_cache_set(urecord, name, value, false);
 	}
 
@@ -761,12 +761,14 @@ udf_record_set_flags(const as_rec * rec, const char * name, uint8_t flags)
 	}
 
 	udf_record * urecord = (udf_record *) as_rec_source(rec);
-	if (!(urecord->flag & UDF_RECORD_FLAG_ALLOW_UPDATES)) {
+	if (!urecord || !(urecord->flag & UDF_RECORD_FLAG_ALLOW_UPDATES)) {
 		return -1;
 	}
 
-	if ( urecord && name ) {
-		if (flags & LDT_FLAG_HIDDEN_BIN || flags & LDT_FLAG_LDT_BIN || flags & LDT_FLAG_CONTROL_BIN ) {
+	if (name) {
+		if ((flags & LDT_FLAG_HIDDEN_BIN) != 0 ||
+				(flags & LDT_FLAG_LDT_BIN) != 0 ||
+				(flags & LDT_FLAG_CONTROL_BIN) != 0) {
 			cf_debug(AS_UDF, "LDT flag(%d) Designates Hidden Bin", flags);
 			udf_record_cache_sethidden(urecord, name);
 		} else {

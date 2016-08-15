@@ -404,7 +404,7 @@ main(int argc, char **argv)
 
 #ifdef USE_ASM
 	// Log the main thread's Linux Task ID (pre- and post-fork) to the console.
-	fprintf(stderr, "Initial main thread tid: %lu\n", initial_tid);
+	fprintf(stderr, "Initial main thread tid: %ld\n", initial_tid);
 
 	if (! run_in_foreground && c->run_as_daemon) {
 		fprintf(stderr, "Post-daemonize main thread tid: %lu\n",

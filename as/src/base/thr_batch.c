@@ -124,7 +124,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 						// response for this record has been built, since in the
 						// get data w/ record on device case, it's copied by
 						// reference directly into the record descriptor.
-						as_bin stack_bins[!get_data || rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
+						as_bin stack_bins[!get_data || ns->storage_data_in_memory ? 0 : rd.n_bins];
 
 						if (get_data) {
 							// Figure out which bins you want - for now, all.

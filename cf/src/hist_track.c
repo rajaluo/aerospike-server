@@ -466,7 +466,7 @@ cf_hist_track_get_settings(cf_hist_track* this, cf_dyn_buf* db_p)
 
 	for (int i = 0; i < this->num_cols; i++) {
 		write_p += snprintf(write_p, end_p - write_p, "%u,",
-				1 << this->buckets[i]);
+				(uint32_t)1 << this->buckets[i]);
 	}
 
 	if (this->num_cols > 0) {

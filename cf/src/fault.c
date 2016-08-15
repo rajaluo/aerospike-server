@@ -512,7 +512,7 @@ generate_packed_hex_string(void *mem_ptr, uint len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
-	void * startp = p; // Remember where we started.
+	char* startp = p; // Remember where we started.
 
 	*p++ = '0';
 	*p++ = 'x';
@@ -522,7 +522,7 @@ generate_packed_hex_string(void *mem_ptr, uint len, char* output)
 		p += 2;
 	}
 	*p++ = 0; // Null terminate the output buffer.
-	return (int) ((void *)p - startp); // show how much space we used.
+	return (int) (p - startp); // show how much space we used.
 } // end generate_packed_hex_string()
 
 
@@ -535,14 +535,14 @@ generate_spaced_hex_string(void *mem_ptr, uint len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
-	void * startp = p; // Remember where we started.
+	char* startp = p; // Remember where we started.
 
 	for (int i = 0; i < len; i++) {
 		sprintf(p, "%02x ", d[i]); // Notice the space after the 02x.
 		p += 3;
 	}
 	*p++ = 0; // Null terminate the output buffer.
-	return (int) ((void *)p - startp); // show how much space we used.
+	return (int) (p - startp); // show how much space we used.
 } // end generate_spaced_hex_string()
 
 
@@ -559,7 +559,7 @@ generate_column_hex_string(void *mem_ptr, uint len, char* output)
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
 	int i;
-	void * startp = p; // Remember where we started.
+	char* startp = p; // Remember where we started.
 
 	*p++ = '\n'; // Start out on a new line
 
@@ -572,7 +572,7 @@ generate_column_hex_string(void *mem_ptr, uint len, char* output)
 	}
 	*p++ = '\n'; // Finish with a new line
 	*p++ = 0; // Null terminate the output buffer.
-	return (int) ((void *)p - startp); // show how much space we used.
+	return (int) (p - startp); // show how much space we used.
 } // end generate_column_hex_string()
 
 
@@ -612,7 +612,7 @@ int generate_4spaced_bits_string(void *mem_ptr, uint len, char* output)
 	char* p = output;
 	uint8_t uint_val;
 	uint8_t mask = 0x80; // largest single bit value in a byte
-	void * startp = p; // Remember where we started.
+	char* startp = p; // Remember where we started.
 
 	// For each byte in the string
 	for (int i = 0; i < len; i++) {
@@ -625,7 +625,7 @@ int generate_4spaced_bits_string(void *mem_ptr, uint len, char* output)
 		}
 	}
 	*p++ = 0; // Null terminate the output buffer.
-	return (int) ((void *)p - startp); // show how much space we used.
+	return (int) (p - startp); // show how much space we used.
 } // end generate_4spaced_bits_string()
 
 /**
@@ -639,7 +639,7 @@ int generate_column_bits_string(void *mem_ptr, uint len, char* output)
 	char* p = output;
 	uint8_t uint_val;
 	uint8_t mask = 0x80; // largest single bit value in a byte
-	void * startp = p; // Remember where we started.
+	char* startp = p; // Remember where we started.
 
 	// Start on a new line
 	*p++ = '\n';
@@ -657,7 +657,7 @@ int generate_column_bits_string(void *mem_ptr, uint len, char* output)
 		if ((i + 1) % 4 == 0) *p++ = '\n';
 	}
 	*p++ = 0; // Null terminate the output buffer.
-	return (int) ((void *)p - startp); // show how much space we used.
+	return (int) (p - startp); // show how much space we used.
 } // end generate_column_bits_string()
 
 

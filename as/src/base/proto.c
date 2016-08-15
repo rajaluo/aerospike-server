@@ -648,6 +648,7 @@ as_msg_make_error_response_bufbuilder(cf_digest *keyd, int result_code, cf_buf_b
 	mf->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
 	memcpy(mf->data, keyd, sizeof(cf_digest));
 	as_msg_swap_field(mf);
+
 	buf += sizeof(as_msg_field) + sizeof(cf_digest);
 
 	mf = (as_msg_field *) buf;
@@ -655,7 +656,6 @@ as_msg_make_error_response_bufbuilder(cf_digest *keyd, int result_code, cf_buf_b
 	mf->type = AS_MSG_FIELD_TYPE_NAMESPACE;
 	memcpy(mf->data, nsname, ns_len);
 	as_msg_swap_field(mf);
-	buf += sizeof(as_msg_field) + ns_len;
 
 	return(0);
 }
