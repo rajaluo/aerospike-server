@@ -296,7 +296,6 @@ read_timeout_cb(rw_request* rw)
 	case FROM_IUDF:
 	case FROM_NSUP:
 		// Should be impossible for internal UDFs and nsup deletes to get here.
-		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
