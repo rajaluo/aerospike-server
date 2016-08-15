@@ -3683,6 +3683,7 @@ channel_socket_close(cf_socket* socket, bool remote_close,
 		// ) modules.
 		cf_socket_close(socket);
 		cf_socket_term(socket);
+		cf_free(socket);
 	}
 
 Exit:
@@ -3832,6 +3833,11 @@ channel_accept_connection()
 		}
 	}
 
+	// Allocate a new socket.
+	cf_socket* sock = cf_malloc(sizeof(cf_socket));
+	cf_socket_init(sock);
+	cf_socket_copy(sock, &csock);
+
 	// Update the stats to reflect to a new connection opened.
 	cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
 
@@ -3840,11 +3846,11 @@ channel_accept_connection()
 	DEBUG("New connection from %s", caddr_str);
 
 	// Make the socket nonblocking.
-	cf_socket_disable_blocking(&csock);
-	cf_socket_disable_nagle(&csock);
+	cf_socket_disable_blocking(sock);
+	cf_socket_disable_nagle(sock);
 
 	// Register this socket with the channel subsystem.
-	channel_socket_register(&csock, false, true, NULL);
+	channel_socket_register(sock, false, true, NULL);
 }
 
 /**
@@ -4947,10 +4953,14 @@ channel_mesh_channel_establish(as_hb_endpoint* endpoints, int endpoint_count)
 		      endpoint_host_str, endpoints[i].port);
 
 		if (cf_socket_init_client(&s, CONNECT_TIMEOUT()) == 0) {
-			cf_atomic_int_incr(
-			  &g_stats.heartbeat_connections_opened);
-			channel_socket_register(&s.sock, false, false,
-					    &endpoints[i]);
+			cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
+
+			// Allocate a socket for this channel.
+			cf_socket* sock = cf_malloc(sizeof(cf_socket));
+			cf_socket_init(sock);
+			cf_socket_copy(sock, &s.sock);
+			
+			channel_socket_register(sock, false, false, &endpoints[i]);
 			connected = true;
 		} else {
 			DEBUG(
@@ -5003,8 +5013,10 @@ static void
 channel_mesh_listening_sock_register(cf_socket* socket)
 {
 	cf_socket_copy(&g_hb.channel_state.listening_socket, socket);
-	cf_poll_add_socket(g_hb.channel_state.poll, socket,
-			   EPOLLIN | EPOLLERR | EPOLLHUP, socket);
+	cf_poll_add_socket(g_hb.channel_state.poll,
+					   &g_hb.channel_state.listening_socket,
+					   EPOLLIN | EPOLLERR | EPOLLHUP,
+					   &g_hb.channel_state.listening_socket);
 
 	// We do not need a separate channel to cover this socket because IO
 	// will not happen on this socket.
@@ -5032,7 +5044,8 @@ channel_multicast_listening_sock_register(cf_socket* socket,
 
 	cf_socket_copy(&g_hb.channel_state.listening_socket, socket);
 	// Create a new multicast channel.
-	channel_socket_register(socket, true, false, endpoint);
+	channel_socket_register(&g_hb.channel_state.listening_socket,
+							true, false, endpoint);
 }
 
 /**
