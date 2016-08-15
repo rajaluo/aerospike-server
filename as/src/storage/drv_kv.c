@@ -684,7 +684,7 @@ kv_init_devices(as_namespace *ns, drv_kvs **kvs_p)
 	int n_kvs = i;
 	if (!(kvs = cf_malloc(sizeof(drv_kvs) + (n_kvs * sizeof(drv_kv)))))
 	  return(-1);
-	memset(kvs, 0, sizeof(sizeof(drv_kvs) + (n_kvs * sizeof(drv_kv))));
+	memset(kvs, 0, sizeof(drv_kvs) + (n_kvs * sizeof(drv_kv)));
 	kvs->n_kvs = n_kvs;
 
 	cf_rc_reserve(ns);
