@@ -1229,7 +1229,7 @@ static void
 query_send_bg_udf_response(as_transaction *tr)
 {
 	cf_detail(AS_QUERY, "Send Fin for Background UDF");
-	bool force_close = as_msg_send_fin(tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK);
+	bool force_close = as_msg_send_fin(tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) != 0;
 	// Note: should be inside release file handle ?
 	tr->from.proto_fd_h->last_used = cf_getms();
 	as_end_of_transaction(tr->from.proto_fd_h, force_close);
