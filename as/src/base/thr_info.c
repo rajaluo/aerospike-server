@@ -3881,12 +3881,12 @@ thr_info_fn(void *unused)
 		uint8_t	*b = db.buf;
 		uint8_t	*lim = db.buf + db.used_sz;
 		while (b < lim) {
-			int rv = cf_socket_send(fd_h->sock, b, lim - b, MSG_NOSIGNAL);
+			int rv = cf_socket_send(&fd_h->sock, b, lim - b, MSG_NOSIGNAL);
 			if ((rv < 0) && (errno != EAGAIN) ) {
 				if (errno == EPIPE) {
-					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", CSFD(fd_h->sock));
+					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", CSFD(&fd_h->sock));
 				} else {
-					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", CSFD(fd_h->sock), errno);
+					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", CSFD(&fd_h->sock), errno);
 				}
 				as_end_of_transaction_force_close(fd_h);
 				fd_h = NULL;

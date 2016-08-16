@@ -127,7 +127,7 @@ as_security_transact(as_transaction* tr)
 	// Send the complete response.
 	uint8_t* p_write = resp;
 	uint8_t* p_end = resp + resp_size;
-	cf_socket *sock = tr->from.proto_fd_h->sock;
+	cf_socket *sock = &tr->from.proto_fd_h->sock;
 
 	while (p_write < p_end) {
 		int rv = cf_socket_send(sock, (void*)p_write, p_end - p_write, MSG_NOSIGNAL);
