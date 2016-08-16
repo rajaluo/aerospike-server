@@ -944,22 +944,6 @@ typedef struct as_hb_adjacency_tender_udata_s
 } as_hb_adjacency_tender_udata;
 
 /**
- * Udata for finding sockets open in channel.
- */
-typedef struct as_hb_sockets_udata_s
-{
-	/**
-	 * List of sockets.
-	 */
-	cf_vector socketss;
-
-	/**
-	 * count of elements in the socket list.
-	 */
-	int sockets_count;
-} as_hb_sockets_udata;
-
-/**
  * Udata for tip clear.
  **/
 typedef struct as_hb_mesh_tip_clear_udata_s
@@ -1129,14 +1113,14 @@ pthread_mutex_t set_protocol_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
  */
 #define MTU()                                                                  \
 	({                                                                     \
-		int mtu = config_override_mtu_get();                           \
-		if (!mtu) {                                                    \
-			mtu = IS_MESH()                                        \
+		int __mtu = config_override_mtu_get();                           \
+		if (!__mtu) {                                                    \
+			__mtu = IS_MESH()                                        \
 				? g_hb.mode_state.mesh_state.min_mtu           \
 				: g_hb.mode_state.multicast_state.min_mtu;     \
-			mtu = mtu > 0 ? mtu : DEFAULT_MIN_MTU;                 \
+			__mtu = __mtu > 0 ? __mtu : DEFAULT_MIN_MTU;                 \
 		}                                                              \
-		mtu;                                                           \
+		__mtu;                                                           \
 	})
 
 /**
@@ -2321,7 +2305,7 @@ as_hb_dump(bool verbose)
 bool
 as_hb_is_alive(cf_node nodeid)
 {
-	bool is_alive = false;
+	bool is_alive;
 	HB_LOCK();
 
 	as_hb_adjacent_node adjacent_node;
@@ -4126,14 +4110,14 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 
 	buffer = MSG_BUFF_ALLOC(buffer_len);
 
-	memcpy(buffer, len_buff, MSG_WIRE_LENGTH_SIZE);
-
 	if (!buffer) {
 		WARNING("Error allocating space for multicast recv buffer of "
 			"size %d on fd %d",
 			buffer_len, CSFD(socket));
 		goto Exit;
 	}
+
+	memcpy(buffer, len_buff, MSG_WIRE_LENGTH_SIZE);
 
 	int try_num = MSG_READ_RETRY_MAX;
 	// Note: Buffer length includes the length as well.
@@ -5439,7 +5423,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 		      "message to node %" PRIx64,
 	  buffer_len, dest);
 
-	size_t msg_size = 0;
+	int msg_size;
 	if ((msg_size = channel_msg_buffer_fill(msg, wire_size, mtu, buffer,
 						buffer_len)) <= 0) {
 		WARNING("Error writing message to buffer for node %" PRIx64,
@@ -5449,7 +5433,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 	}
 
 	// Send over the buffer.
-	rv = channel_mesh_msg_send(connected_socket, buffer, msg_size);
+	rv = channel_mesh_msg_send(connected_socket, buffer, (size_t)msg_size);
 
 Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
@@ -5516,7 +5500,7 @@ channel_msg_broadcast(msg* msg)
 	  "Error allocating memory size %zu for sending broadcast message.",
 	  buffer_len);
 
-	size_t msg_size = 0;
+	int msg_size = 0;
 	if ((msg_size = channel_msg_buffer_fill(msg, wire_size, mtu, buffer,
 						buffer_len)) <= 0) {
 		WARNING("Error writing message to buffer for broadcast");
@@ -5528,7 +5512,7 @@ channel_msg_broadcast(msg* msg)
 	udata.buffer = buffer;
 
 	// Note this is the length of buffer to send.
-	udata.buffer_len = msg_size;
+	udata.buffer_len = (size_t)msg_size;
 
 	shash_reduce(g_hb.channel_state.socket_to_channel,
 		     channel_msg_broadcast_reduce, &udata);
@@ -7231,9 +7215,7 @@ mesh_dump_reduce(void* key, void* data, void* udata)
 	     IPADDR_TO_STRING(&mesh_node->endpoint.addr),
 	     mesh_node->endpoint.port,
 	     mesh_node_status_string(mesh_node->status),
-	     mesh_node->status == AS_HB_MESH_NODE_CHANNEL_INACTIVE
-	       ? mesh_node->last_status_updated
-	       : mesh_node->last_status_updated);
+	     mesh_node->last_status_updated);
 
 	return SHASH_OK;
 }

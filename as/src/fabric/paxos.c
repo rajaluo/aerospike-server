@@ -2122,13 +2122,17 @@ as_paxos_process_set_succession_list(cf_node *nodes)
 {
 	cf_debug(AS_PAXOS, "Paxos thread processing Set Succession List event:");
 
-	if (nodes) {
-		cf_node node, *nodes_p = nodes;
-		int i = 0;
-		while ((node = *nodes_p++)) {
-			cf_debug(AS_PAXOS, "SLNode[%d] = %"PRIx64"", i, node);
-			i++;
-		}
+	if (! nodes) {
+		cf_warning(AS_PAXOS, "set_succession_list called but nodes is NULL");
+
+		return;
+	}
+
+	cf_node node, *nodes_p = nodes;
+	int i = 0;
+	while ((node = *nodes_p++)) {
+		cf_debug(AS_PAXOS, "SLNode[%d] = %"PRIx64"", i, node);
+		i++;
 	}
 
 	// Halt migrations before forcibly modifying the succession list.
@@ -2137,7 +2141,7 @@ as_paxos_process_set_succession_list(cf_node *nodes)
 
 	as_paxos *p = g_paxos;
 	bool list_end = false;
-	cf_node *nodes_p = nodes;
+	nodes_p = nodes;
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (!list_end) {
 			if (!(p->succession[i] = *nodes_p++)) {
@@ -3476,9 +3480,9 @@ as_paxos_hb_get_succession_list(cf_node nodeid, cf_node* succession)
 	// initialize to an empty list.
 	succession[0] = 0;
 
-	void* plugin_data = NULL;
-	as_hb_plugin_data_get(nodeid, AS_HB_PLUGIN_PAXOS, &plugin_data, NULL,
-			      NULL);
+	uint8_t* plugin_data = NULL;
+	as_hb_plugin_data_get(nodeid, AS_HB_PLUGIN_PAXOS, (void**)&plugin_data,
+			      NULL, NULL);
 
 	if (plugin_data == NULL) {
 		// This node is no longer in heartbeat adjacency list.
