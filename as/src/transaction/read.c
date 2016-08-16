@@ -296,7 +296,6 @@ read_timeout_cb(rw_request* rw)
 	case FROM_IUDF:
 	case FROM_NSUP:
 		// Should be impossible for internal UDFs and nsup deletes to get here.
-		break;
 	default:
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
@@ -420,10 +419,14 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 						return TRANS_DONE_ERROR;
 					}
 
-					if (as_bin_inuse(rb) || respond_all_ops) {
+					if (as_bin_inuse(rb)) {
 						n_result_bins++;
 						ops[n_bins] = op;
 						response_bins[n_bins++] = rb;
+					}
+					else if (respond_all_ops) {
+						ops[n_bins] = op;
+						response_bins[n_bins++] = NULL;
 					}
 				}
 				else if (respond_all_ops) {

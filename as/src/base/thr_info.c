@@ -2334,7 +2334,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "query-threshold", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-threshold = %"PRIu64"", val);
-			if (val <= 0) {
+			if ((int64_t)val <= 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of query-threshold from %u to %"PRIu64, g_config.query_threshold, val);
@@ -2343,7 +2343,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "query-untracked-time-ms", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-untracked-time = %"PRIu64" milli seconds", val);
-			if (val < 0) {
+			if ((int64_t)val < 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of query-untracked-time from %"PRIu64" milli seconds to %"PRIu64" milli seconds",
@@ -2353,7 +2353,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "query-rec-count-bound", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-rec-count-bound = %"PRIu64"", val);
-			if (val <= 0) {
+			if ((int64_t)val <= 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of query-rec-count-bound from %"PRIu64" to %"PRIu64" ", g_config.query_rec_count_bound, val);
@@ -3755,7 +3755,6 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 							cf_dyn_buf_append_char(db, SEP );
 							t->tree_fn(t->name, branch, db);
 							cf_dyn_buf_append_char(db, EOL);
-							handled = true;
 							break;
 						}
 						t = t->next;
@@ -3882,12 +3881,12 @@ thr_info_fn(void *unused)
 		uint8_t	*b = db.buf;
 		uint8_t	*lim = db.buf + db.used_sz;
 		while (b < lim) {
-			int rv = cf_socket_send(fd_h->sock, b, lim - b, MSG_NOSIGNAL);
+			int rv = cf_socket_send(&fd_h->sock, b, lim - b, MSG_NOSIGNAL);
 			if ((rv < 0) && (errno != EAGAIN) ) {
 				if (errno == EPIPE) {
-					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", CSFD(fd_h->sock));
+					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", CSFD(&fd_h->sock));
 				} else {
-					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", CSFD(fd_h->sock), errno);
+					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", CSFD(&fd_h->sock), errno);
 				}
 				as_end_of_transaction_force_close(fd_h);
 				fd_h = NULL;
@@ -4501,7 +4500,6 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 {
 	cf_node *node = (cf_node *)key;
 	info_node_info *infop = (info_node_info *) data;
-	int rv;
 
 	if (infop->generation < g_service_generation) {
 
@@ -4529,7 +4527,8 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 
 		pthread_mutex_unlock(&g_service_lock);
 
-		if ((rv = as_fabric_send(*node, m, AS_FABRIC_PRIORITY_MEDIUM))) {
+		if (as_fabric_send(*node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(m);
 		}
 	}
@@ -5924,23 +5923,24 @@ int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 	}
 
 	if (listall) {
-		bool found = 0;
+		bool found = false;
 		for (int i = 0; i < g_config.n_namespaces; i++) {
 			as_namespace *ns = g_config.namespaces[i];
 			if (ns) {
 				if (!as_sindex_list_str(ns, db)) {
-					found++;
+					found = true;
 				}
 				else {
 					cf_detail(AS_INFO, "No indexes for namespace %s", ns->name);
 				}
 			}
 		}
-		if (found == 0) {
-			cf_dyn_buf_append_string(db, "Empty");
+
+		if (found) {
+			cf_dyn_buf_chomp(db);
 		}
 		else {
-			cf_dyn_buf_chomp(db);
+			cf_dyn_buf_append_string(db, "Empty");
 		}
 	}
 	else {

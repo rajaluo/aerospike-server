@@ -450,9 +450,9 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 		return;
 	}
 
-	cf_socket_close(proto_fd_h->sock);
+	cf_socket_close(&proto_fd_h->sock);
+	cf_socket_term(&proto_fd_h->sock);
 	proto_fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
-	proto_fd_h->sock = NULL;
 
 	if (proto_fd_h->proto)	{
 		as_proto *p = proto_fd_h->proto;
@@ -481,7 +481,7 @@ as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
 	thr_demarshal_resume(proto_fd_h);
 
 	if (force_close) {
-		cf_socket_shutdown(proto_fd_h->sock);
+		cf_socket_shutdown(&proto_fd_h->sock);
 	}
 
 	as_release_file_handle(proto_fd_h);

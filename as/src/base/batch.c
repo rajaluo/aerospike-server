@@ -167,7 +167,7 @@ as_batch_send_error(as_transaction* btr, int result_code)
 	m.msg.n_ops = 0;
 	as_msg_swap_header(&m.msg);
 
-	int status = as_batch_send(btr->from.proto_fd_h->sock, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
+	int status = as_batch_send(&btr->from.proto_fd_h->sock, (uint8_t*)&m, sizeof(m), MSG_NOSIGNAL);
 
 	as_end_of_transaction(btr->from.proto_fd_h, status != 0);
 	btr->from.proto_fd_h = NULL;
@@ -198,7 +198,7 @@ as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 	buffer->proto.sz = buffer->size;
 	as_proto_swap(&buffer->proto);
 
-	int status = as_batch_send(shared->fd_h->sock, (uint8_t*)&buffer->proto, sizeof(as_proto) + buffer->size, MSG_NOSIGNAL | MSG_MORE);
+	int status = as_batch_send(&shared->fd_h->sock, (uint8_t*)&buffer->proto, sizeof(as_proto) + buffer->size, MSG_NOSIGNAL | MSG_MORE);
 
 	if (status) {
 		// Socket error. Close socket.
@@ -234,7 +234,7 @@ as_batch_send_final(as_batch_shared* shared)
 	m.msg.n_ops = 0;
 	as_msg_swap_header(&m.msg);
 
-	int status = as_batch_send(shared->fd_h->sock, (uint8_t*) &m, sizeof(m), MSG_NOSIGNAL);
+	int status = as_batch_send(&shared->fd_h->sock, (uint8_t*) &m, sizeof(m), MSG_NOSIGNAL);
 
 	as_end_of_transaction(shared->fd_h, status != 0);
 	shared->fd_h = 0;

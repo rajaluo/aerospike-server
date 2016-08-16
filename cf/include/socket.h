@@ -58,12 +58,17 @@ typedef struct {
 	int32_t fd;
 } cf_socket;
 
+static inline void cf_socket_copy(cf_socket *dst, cf_socket *src)
+{
+	dst->fd = src->fd;
+}
+
 typedef struct {
 	const char *addr;
 	cf_ip_port port;
 	bool reuse_addr;
 	int32_t type;
-	cf_socket *sock;
+	cf_socket sock;
 } cf_socket_cfg;
 
 typedef struct {
@@ -78,10 +83,7 @@ typedef struct {
 
 // Accesses the socket file descriptor as an rvalue, i.e., the socket file descriptor
 // cannot be modified.
-#define CSFD(sock) ((int32_t)(sock)->fd)
-
-// Wraps a socket file descriptor.
-#define WSFD(_fd) (&(cf_socket){ .fd = _fd })
+#define CSFD(sock) ((int32_t)((sock)->fd))
 
 // CSFD() for epoll file descriptors.
 #define CEFD(poll) ((int32_t)(poll).fd)
@@ -159,6 +161,8 @@ void cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native);
 void cf_sock_addr_set_zero(cf_sock_addr *addr);
 CF_MUST_CHECK bool cf_sock_addr_is_zero(const cf_sock_addr *addr);
 
+void cf_disable_blocking(int fd);
+
 void cf_socket_disable_blocking(cf_socket *sock);
 void cf_socket_enable_blocking(cf_socket *sock);
 void cf_socket_disable_nagle(cf_socket *sock);
@@ -170,9 +174,9 @@ void cf_socket_set_window(cf_socket *sock, int32_t size);
 
 CF_MUST_CHECK int32_t cf_socket_init_server(cf_socket_cfg *conf);
 CF_MUST_CHECK int32_t cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout);
-CF_MUST_CHECK int32_t cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket **sock);
+CF_MUST_CHECK int32_t cf_socket_init_client_nb(cf_sock_addr *addr, cf_socket *sock);
 
-CF_MUST_CHECK int32_t cf_socket_accept(cf_socket *lsock, cf_socket **sock, cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_remote_name(cf_socket *sock, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_local_name(cf_socket *sock, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_available(cf_socket *sock);
@@ -185,6 +189,9 @@ CF_MUST_CHECK int32_t cf_socket_send(cf_socket *sock, void *buff, size_t size, i
 void cf_socket_write_shutdown(cf_socket *sock);
 void cf_socket_shutdown(cf_socket *sock);
 void cf_socket_close(cf_socket *sock);
+void cf_socket_init(cf_socket *sock);
+void cf_socket_term(cf_socket *sock);
+bool cf_socket_exists(cf_socket *sock);
 void cf_socket_drain_close(cf_socket *sock);
 
 CF_MUST_CHECK int32_t cf_socket_mcast_init(cf_socket_mcast_cfg *mconf);
@@ -194,6 +201,7 @@ CF_MUST_CHECK int32_t cf_socket_mcast_join_group(cf_socket *sock, const cf_ip_ad
 void cf_socket_mcast_close(cf_socket_mcast_cfg *mconf);
 
 void cf_poll_create(cf_poll *poll);
+void cf_poll_add_fd(cf_poll poll, int fd, uint32_t events, void *data);
 void cf_poll_add_socket(cf_poll poll, cf_socket *sock, uint32_t events, void *data);
 CF_MUST_CHECK int32_t cf_poll_modify_socket_forgiving(cf_poll poll, cf_socket *sock, uint32_t events, void *data, int32_t n_err_ok, int32_t *err_ok);
 CF_MUST_CHECK int32_t cf_poll_delete_socket_forgiving(cf_poll poll, cf_socket *sock, int32_t n_err_ok, int32_t *err_ok);
