@@ -3480,9 +3480,9 @@ as_paxos_hb_get_succession_list(cf_node nodeid, cf_node* succession)
 	// initialize to an empty list.
 	succession[0] = 0;
 
-	void* plugin_data = NULL;
-	as_hb_plugin_data_get(nodeid, AS_HB_PLUGIN_PAXOS, &plugin_data, NULL,
-			      NULL);
+	uint8_t* plugin_data = NULL;
+	as_hb_plugin_data_get(nodeid, AS_HB_PLUGIN_PAXOS, (void**)&plugin_data,
+			      NULL, NULL);
 
 	if (plugin_data == NULL) {
 		// This node is no longer in heartbeat adjacency list.

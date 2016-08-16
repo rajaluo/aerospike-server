@@ -5410,7 +5410,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 		      "message to node %" PRIx64,
 	  buffer_len, dest);
 
-	size_t msg_size;
+	int msg_size;
 	if ((msg_size = channel_msg_buffer_fill(msg, wire_size, mtu, buffer,
 						buffer_len)) <= 0) {
 		WARNING("Error writing message to buffer for node %" PRIx64,
@@ -5420,7 +5420,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 	}
 
 	// Send over the buffer.
-	rv = channel_mesh_msg_send(connected_socket, buffer, msg_size);
+	rv = channel_mesh_msg_send(connected_socket, buffer, (size_t)msg_size);
 
 Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
