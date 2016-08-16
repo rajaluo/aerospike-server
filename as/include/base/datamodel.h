@@ -935,6 +935,7 @@ typedef struct client_replica_map_s {
 
 extern void client_replica_maps_create(as_namespace* ns);
 extern bool client_replica_maps_update(as_namespace* ns, as_partition_id pid);
+extern bool client_replica_maps_ptn_queryable_lockless(as_namespace* ns, as_partition_id pid);
 
 
 struct as_namespace_s {

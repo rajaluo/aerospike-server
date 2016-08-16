@@ -1108,6 +1108,19 @@ client_replica_maps_update(as_namespace* ns, as_partition_id pid)
 }
 
 
+bool
+client_replica_maps_ptn_queryable_lockless(as_namespace* ns, as_partition_id pid)
+{
+	uint32_t byte_i = pid >> 3;
+
+	client_replica_map* repl_map = ns->replica_maps;
+	volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
+
+	uint8_t set_mask = 0x80 >> (pid & 0x7);
+	
+	return (*mbyte & set_mask) != 0;
+}
+
 // Reduce the entire set of write replicas I have into a particular dyn_buf
 // suitable for handing to an inquisitive client.
 void
