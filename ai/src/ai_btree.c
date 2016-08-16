@@ -728,9 +728,7 @@ add_recs_from_nbtr(as_sindex_metadata *imd, ai_obj *ikey, bt *nbtr, as_sindex_qc
 				break;
 			}
 			if (qctx->n_bdigs == qctx->bsize) {
-				if (ikey) {
-					ai_objClone(qctx->bkey, ikey);
-				}
+				ai_objClone(qctx->bkey, ikey);
 				cloneDigestFromai_obj(&qctx->bdig, akey);
 				break;
 			}

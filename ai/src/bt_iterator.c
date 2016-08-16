@@ -53,12 +53,6 @@
 #define CR8ITER8R(btr, asc, l, lrev, n, nrev) \
   btSIter *siter = createIterator(btr, asc ? l : lrev, asc ? n : nrev);
 
-
-typedef struct ll_btSIter_element_s {
-	cf_ll_element ele;
-	btSIter * value;
-} ll_btSIter_element;
-
 bt_ll_n *get_new_iter_child(btIterator *iter) { //printf("get_newiterchild\n");
 	assert(iter->num_nodes < MAX_BTREE_DEPTH);
 	bt_ll_n *nn = &(iter->nodes[iter->num_nodes]);

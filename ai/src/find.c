@@ -65,9 +65,9 @@ static bool icol_cmp(icol_t *ic1, icol_t *ic2)
 	bool ret =  (ic1->cmatch == ic2->cmatch ? 0 :
 				 ic1->cmatch >  ic2->cmatch ? 1 : -1);
 
-	if (!ic1->nlo && !ic1->nlo) {
+	if (!ic1->nlo && !ic2->nlo) {
 		return ret;
-	} else if (ic1->nlo && ic1->nlo) { // Compare "lo"
+	} else if (ic1->nlo && ic2->nlo) { // Compare "lo"
 		if (ic1->nlo != ic2->nlo) {
 			return ic1->nlo > ic2->nlo ? 1 : -1;
 		} else {
