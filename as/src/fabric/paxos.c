@@ -2122,13 +2122,17 @@ as_paxos_process_set_succession_list(cf_node *nodes)
 {
 	cf_debug(AS_PAXOS, "Paxos thread processing Set Succession List event:");
 
-	if (nodes) {
-		cf_node node, *nodes_p = nodes;
-		int i = 0;
-		while ((node = *nodes_p++)) {
-			cf_debug(AS_PAXOS, "SLNode[%d] = %"PRIx64"", i, node);
-			i++;
-		}
+	if (! nodes) {
+		cf_warning(AS_PAXOS, "set_succession_list called but nodes is NULL");
+
+		return;
+	}
+
+	cf_node node, *nodes_p = nodes;
+	int i = 0;
+	while ((node = *nodes_p++)) {
+		cf_debug(AS_PAXOS, "SLNode[%d] = %"PRIx64"", i, node);
+		i++;
 	}
 
 	// Halt migrations before forcibly modifying the succession list.
@@ -2137,7 +2141,7 @@ as_paxos_process_set_succession_list(cf_node *nodes)
 
 	as_paxos *p = g_paxos;
 	bool list_end = false;
-	cf_node *nodes_p = nodes;
+	nodes_p = nodes;
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (!list_end) {
 			if (!(p->succession[i] = *nodes_p++)) {
