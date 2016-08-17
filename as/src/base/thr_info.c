@@ -64,7 +64,6 @@
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/xdr_serverside.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/stats.h"
@@ -3209,50 +3208,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
-			// Dont print this command in logs as this happens every few seconds
-			// Ideally, this should not be done via config-set.
-			print_command = false;
-
-			uint64_t val[DC_MAX_NUM];
-			char * tmp_val;
-			char *  delim = {","};
-			int i = 0;
-
-			// We do not want junk values in val[]. This is LST array.
-			// Not doing that will lead to wrong LST time going back warnings from the code below.
-			memset(val, 0, sizeof(uint64_t) * DC_MAX_NUM);
-
-			tmp_val = strtok(context, (const char *) delim);
-			while(tmp_val) {
-				if(i >= DC_MAX_NUM) {
-					cf_warning(AS_INFO, "Suspicious \"xdr\" Info command \"lastshiptime\" value: \"%s\"", params);
-					break;
-				}
-				if (0 > cf_str_atoi_u64(tmp_val, &(val[i++]))) {
-					cf_warning(AS_INFO, "bad number in \"xdr\" Info command \"lastshiptime\": \"%s\" for DC %d ~~ Using 0", tmp_val, i - 1);
-					val[i - 1] = 0;
-				}
-				tmp_val = strtok(NULL, (const char *) delim);
-			}
-
-			for(i = 0; i < DC_MAX_NUM; i++) {
-				// Warning only if time went back by 5 mins or more
-				// We are doing subtraction of two uint64_t here. We should be more careful and first check
-				// if the first value is greater.
-				if ((g_config.xdr_self_lastshiptime[i] > val[i]) &&
-						((g_config.xdr_self_lastshiptime[i] - val[i]) > XDR_ACCEPTABLE_TIMEDIFF)) {
-					cf_warning(AS_INFO, "XDR last ship time of this node for DC %d went back to %"PRIu64" from %"PRIu64"",
-							i, val[i], g_config.xdr_self_lastshiptime[i]);
-					cf_debug(AS_INFO, "(Suspicious \"xdr\" Info command \"lastshiptime\" value: \"%s\".)", params);
-				}
-
-				g_config.xdr_self_lastshiptime[i] = val[i];
-			}
-
-			xdr_broadcast_lastshipinfo(val);
-		}
-		else if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
 			print_command = false;
 			cf_node nodeid = atoll(context);
 			xdr_handle_failednodeprocessingdone(nodeid);
