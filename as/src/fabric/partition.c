@@ -1109,7 +1109,7 @@ client_replica_maps_update(as_namespace* ns, as_partition_id pid)
 
 
 bool
-client_replica_maps_ptn_queryable_lockless(as_namespace* ns, as_partition_id pid)
+client_replica_maps_is_partition_queryable(as_namespace* ns, as_partition_id pid)
 {
 	uint32_t byte_i = pid >> 3;
 
@@ -3079,20 +3079,4 @@ bool
 as_partition_balance_is_multi_node_cluster()
 {
 	return g_multi_node;
-}
-
-
-// A partition is queryable only when the node is master or origin
-// BEWARE. No partition lock is being taken here.
-// This is done to avoid a deadlock between sindex and apply journal
-// TODO - journal has been removed - can we or should we now change this?
-bool
-as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p)
-{
-	cf_node self             = g_config.self_node;
-	bool is_sync             = (p->state == AS_PARTITION_STATE_SYNC);
-	bool migrating_to_master = (p->target != 0);
-	bool is_master           = (p->replica[0] == self);
-
-	return (is_master && is_sync) || migrating_to_master;
 }

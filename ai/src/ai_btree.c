@@ -652,7 +652,7 @@ btree_addsinglerec(as_sindex_metadata *imd, ai_obj * key, cf_digest *dig, cf_ll 
 		}
 	}
 	else {
-		if (! client_replica_maps_ptn_queryable_lockless(ns, pid)) {
+		if (! client_replica_maps_is_partition_queryable(ns, pid)) {
 			return 0;
 		}
 	}
