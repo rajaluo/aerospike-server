@@ -818,7 +818,6 @@ extern bool as_partition_get_migration_flag(void);
 // return number of partitions found in storage
 extern int  as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states);
 extern char as_partition_getstate_str(int state);
-extern bool as_partition_is_queryable_lockfree(as_namespace * ns, as_partition * p);
 // Print info. about the partition map to the log.
 void as_partition_map_dump();
 
@@ -935,6 +934,7 @@ typedef struct client_replica_map_s {
 
 extern void client_replica_maps_create(as_namespace* ns);
 extern bool client_replica_maps_update(as_namespace* ns, as_partition_id pid);
+extern bool client_replica_maps_is_partition_queryable(as_namespace* ns, as_partition_id pid);
 
 
 struct as_namespace_s {
