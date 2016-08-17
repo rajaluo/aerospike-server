@@ -3820,7 +3820,7 @@ channel_accept_connection()
 	// Allocate a new socket.
 	cf_socket* sock = cf_malloc(sizeof(cf_socket));
 	cf_socket_init(sock);
-	cf_socket_copy(sock, &csock);
+	cf_socket_copy(&csock, sock);
 
 	// Update the stats to reflect to a new connection opened.
 	cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
@@ -4942,7 +4942,7 @@ channel_mesh_channel_establish(as_hb_endpoint* endpoints, int endpoint_count)
 			// Allocate a socket for this channel.
 			cf_socket* sock = cf_malloc(sizeof(cf_socket));
 			cf_socket_init(sock);
-			cf_socket_copy(sock, &s.sock);
+			cf_socket_copy(&s.sock, sock);
 			
 			channel_socket_register(sock, false, false, &endpoints[i]);
 			connected = true;
@@ -4996,7 +4996,7 @@ Exit:
 static void
 channel_mesh_listening_sock_register(cf_socket* socket)
 {
-	cf_socket_copy(&g_hb.channel_state.listening_socket, socket);
+	cf_socket_copy(socket, &g_hb.channel_state.listening_socket);
 	cf_poll_add_socket(g_hb.channel_state.poll,
 					   &g_hb.channel_state.listening_socket,
 					   EPOLLIN | EPOLLERR | EPOLLHUP,
@@ -5026,7 +5026,7 @@ channel_multicast_listening_sock_register(cf_socket* socket,
 					  as_hb_endpoint* endpoint)
 {
 
-	cf_socket_copy(&g_hb.channel_state.listening_socket, socket);
+	cf_socket_copy(socket, &g_hb.channel_state.listening_socket);
 	// Create a new multicast channel.
 	channel_socket_register(&g_hb.channel_state.listening_socket,
 							true, false, endpoint);
@@ -7167,7 +7167,7 @@ mesh_listening_socket_open(cf_socket* listening_socket)
 
 	MESH_UNLOCK();
 
-	cf_socket_copy(listening_socket, &g_hb.mode_state.mesh_state.socket.sock);
+	cf_socket_copy(&g_hb.mode_state.mesh_state.socket.sock, listening_socket);
 }
 
 /**
@@ -7297,8 +7297,8 @@ multicast_listening_socket_open(cf_socket* listening_socket)
 
 	DEBUG("Opened multicast socket %d",
 	      CSFD(&g_hb.mode_state.multicast_state.socket.conf.sock));
-	cf_socket_copy(listening_socket,
-				   &g_hb.mode_state.multicast_state.socket.conf.sock);
+	cf_socket_copy(&g_hb.mode_state.multicast_state.socket.conf.sock,
+			listening_socket);
 
 	// Compute the mtu size here and compute the maximum cluster size.
 	// Compute the mtu size here and compute the maximum cluster size.
