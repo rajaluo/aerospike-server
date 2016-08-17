@@ -58,9 +58,9 @@ typedef struct {
 	int32_t fd;
 } cf_socket;
 
-static inline void cf_socket_copy(cf_socket *dst, cf_socket *src)
+static inline void cf_socket_copy(const cf_socket *from, cf_socket *to)
 {
-	dst->fd = src->fd;
+	to->fd = from->fd;
 }
 
 typedef struct {

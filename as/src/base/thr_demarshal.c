@@ -510,7 +510,7 @@ thr_demarshal(void *arg)
 				}
 
 				strcpy(fd_h->client, sa_str);
-				cf_socket_copy(&fd_h->sock, &csock);
+				cf_socket_copy(&csock, &fd_h->sock);
 
 				fd_h->last_used = cf_getms();
 				fd_h->reap_me = false;

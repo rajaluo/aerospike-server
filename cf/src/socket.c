@@ -468,7 +468,7 @@ cf_socket_init_server(cf_socket_cfg *conf)
 
 	// No Nagle here. It will be disabled for the accepted connections.
 
-	cf_socket_copy(&conf->sock, &sock);
+	cf_socket_copy(&sock, &conf->sock);
 	res = 0;
 	goto cleanup0;
 
@@ -582,7 +582,7 @@ cf_socket_init_client(cf_socket_cfg *conf, int32_t timeout)
 
 	cf_socket_disable_nagle(&sock);
 
-	cf_socket_copy(&conf->sock, &sock);
+	cf_socket_copy(&sock, &conf->sock);
 	res = 0;
 	goto cleanup0;
 
@@ -955,7 +955,7 @@ cf_socket_mcast_init(cf_socket_mcast_cfg *mconf)
 		goto cleanup1;
 	}
 
-	cf_socket_copy(&conf->sock, &sock);
+	cf_socket_copy(&sock, &conf->sock);
 	res = 0;
 	goto cleanup0;
 
