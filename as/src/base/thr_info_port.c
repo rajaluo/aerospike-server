@@ -280,7 +280,7 @@ thr_info_port_fn(void *arg)
 				ips->xmit_alloc = 100;
 				ips->xmit_buf = cf_malloc(100);
 				
-				cf_socket_copy(&ips->sock, &csock);
+				cf_socket_copy(&csock, &ips->sock);
 
 				cf_poll_add_socket(poll, &ips->sock, EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
 			}
