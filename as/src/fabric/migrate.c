@@ -188,6 +188,7 @@ int immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void 
 // Migrate fabric message handling.
 int migrate_receive_msg_cb(cf_node src, msg *m, void *udata);
 void immigration_handle_start_request(cf_node src, msg *m);
+void immigration_ack_start_request(cf_node src, msg *m, uint32_t op);
 void immigration_handle_insert_request(cf_node src, msg *m);
 void immigration_handle_done_request(cf_node src, msg *m);
 void emigration_handle_insert_ack(cf_node src, msg *m);
@@ -499,14 +500,14 @@ immigration_destroy(void *parm)
 	ldtv.pid = immig->pid;
 
 	if (immig->rsv.p) {
-		cf_atomic_int_decr(&immig->rsv.ns->migrate_rx_instance_count);
-
 		as_partition_release(&immig->rsv);
 	}
 
 	shash_delete(g_immigration_ldt_version_hash, &ldtv);
 
 	immig_meta_q_destroy(&immig->meta_q);
+
+	cf_atomic_int_decr(&immig->ns->migrate_rx_instance_count);
 }
 
 
@@ -1103,7 +1104,8 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 					cf_getms() > immig->done_recv_ms +
 								g_config.migrate_rx_lifetime_ms)) {
 
-		if (cf_atomic32_get(immig->done_recv) == 0) {
+		if (immig->start_result == AS_MIGRATE_OK &&
+				cf_atomic32_get(immig->done_recv) == 0) {
 			// No outstanding readers of hkey and hasn't yet completed means
 			// that we haven't already decremented migrate_rx_partitions_active.
 
@@ -1251,67 +1253,85 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 	msg_preserve_fields(m, 1, MIG_FIELD_EMIG_ID);
 
-	as_migrate_result rv = as_partition_immigrate_start(ns, pid, cluster_key,
-			start_type, src);
-
-	switch (rv) {
-	case AS_MIGRATE_FAIL:
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_FAIL);
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-		return;
-	case AS_MIGRATE_AGAIN:
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_EAGAIN);
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-		return;
-	case AS_MIGRATE_ALREADY_DONE:
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_ALREADY_DONE);
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-		return;
-	case AS_MIGRATE_OK:
-		break;
-	default:
-		cf_crash(AS_MIGRATE, "unexpected as_partition_immigrate_start result");
-		break;
-	}
-
 	immigration *immig = cf_rc_alloc(sizeof(immigration));
 
 	cf_assert(immig, AS_MIGRATE, CF_CRITICAL, "malloc");
+
+	cf_atomic_int_incr(&ns->migrate_rx_instance_count);
 
 	immig->src = src;
 	immig->cluster_key = cluster_key;
 	immig->pid = pid;
 	immig->rx_state = AS_MIGRATE_RX_STATE_SUBRECORD; // always starts this way
 	immig->incoming_ldt_version = incoming_ldt_version;
-	immig->done_recv = 0;
 	immig->start_recv_ms = 0;
+	immig->done_recv = 0;
 	immig->done_recv_ms = 0;
 	immig->emig_id = emig_id;
-
 	immig_meta_q_init(&immig->meta_q);
-
-	uint32_t mig_features_in_use = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
-
-	as_partition_reserve_migrate(ns, pid, &immig->rsv, NULL);
-
-	cf_atomic_int_incr(&immig->rsv.ns->migrate_rx_instance_count);
+	immig->features = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
+	immig->ns = ns;
+	immig->rsv.p = NULL;
 
 	immigration_hkey hkey;
 
 	hkey.src = src;
 	hkey.emig_id = emig_id;
 
-	if (rchash_put_unique(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-			(void *)immig) == RCHASH_OK) {
+	while (true) {
+		if (rchash_put_unique(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+				(void *)immig) == RCHASH_OK) {
+			cf_rc_reserve(immig); // so either put or get yields ref-count 2
+
+			// First start request (not a retransmit) for this pid this round,
+			// or we had ack'd previous start request with 'EAGAIN'.
+			immig->start_result = as_partition_immigrate_start(ns, pid,
+					cluster_key, start_type, src);
+			break;
+		}
+
+		immigration *immig0;
+
+		if (rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+				(void *)&immig0) == RCHASH_OK) {
+			immigration_release(immig); // free just-alloc'd immig ...
+
+			if (immig0->start_recv_ms == 0) {
+				immigration_release(immig0);
+				return; // allow previous thread to respond
+			}
+
+			immig = immig0; // ...  and use original
+			break;
+		}
+	}
+
+	switch (immig->start_result) {
+	case AS_MIGRATE_OK:
+		break;
+	case AS_MIGRATE_FAIL:
+		immig->start_recv_ms = cf_getms(); // permits reaping
+		immigration_release(immig);
+		immigration_ack_start_request(src, m, OPERATION_START_ACK_FAIL);
+		return;
+	case AS_MIGRATE_AGAIN:
+		// Remove from hash so that the immig can be tried again.
+		rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
+		immigration_release(immig);
+		immigration_ack_start_request(src, m, OPERATION_START_ACK_EAGAIN);
+		return;
+	case AS_MIGRATE_ALREADY_DONE:
+		immig->start_recv_ms = cf_getms(); // permits reaping
+		immigration_release(immig);
+		immigration_ack_start_request(src, m, OPERATION_START_ACK_ALREADY_DONE);
+		return;
+	default:
+		cf_crash(AS_MIGRATE, "unexpected as_partition_immigrate_start result");
+		break;
+	}
+
+	if (immig->start_recv_ms == 0) {
+		as_partition_reserve_migrate(ns, pid, &immig->rsv, NULL);
 		cf_atomic_int_incr(&immig->rsv.ns->migrate_rx_partitions_active);
 
 		immigration_ldt_version ldtv;
@@ -1323,17 +1343,23 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 		if (! immigration_start_meta_sender(immig, emig_features,
 				emig_n_recs)) {
-				mig_features_in_use &= ~MIG_FEATURE_MERGE;
+			immig->features &= ~MIG_FEATURE_MERGE;
 		}
 
 		immig->start_recv_ms = cf_getms(); // permits reaping
 	}
-	else {
-		immigration_release(immig);
-	}
 
-	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_OK);
-	msg_set_uint32(m, MIG_FIELD_FEATURES, mig_features_in_use);
+	msg_set_uint32(m, MIG_FIELD_FEATURES, immig->features);
+
+	immigration_release(immig);
+	immigration_ack_start_request(src, m, OPERATION_START_ACK_OK);
+}
+
+
+void
+immigration_ack_start_request(cf_node src, msg *m, uint32_t op)
+{
+	msg_set_uint32(m, MIG_FIELD_OP, op);
 
 	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 			AS_FABRIC_SUCCESS) {
