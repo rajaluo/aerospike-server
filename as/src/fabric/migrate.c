@@ -188,6 +188,7 @@ int immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void 
 // Migrate fabric message handling.
 int migrate_receive_msg_cb(cf_node src, msg *m, void *udata);
 void immigration_handle_start_request(cf_node src, msg *m);
+void immigration_ack_start_request(cf_node src, msg *m, uint32_t op);
 void immigration_handle_insert_request(cf_node src, msg *m);
 void immigration_handle_done_request(cf_node src, msg *m);
 void emigration_handle_insert_ack(cf_node src, msg *m);
@@ -506,7 +507,7 @@ immigration_destroy(void *parm)
 
 	immig_meta_q_destroy(&immig->meta_q);
 
-	cf_atomic_int_decr(&immig->stats->migrate_rx_instance_count);
+	cf_atomic_int_decr(&immig->ns->migrate_rx_instance_count);
 }
 
 
@@ -1269,7 +1270,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 	immig->emig_id = emig_id;
 	immig_meta_q_init(&immig->meta_q);
 	immig->features = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
-	immig->stats = ns;
+	immig->ns = ns;
 	immig->rsv.p = NULL;
 
 	immigration_hkey hkey;
@@ -1280,25 +1281,27 @@ immigration_handle_start_request(cf_node src, msg *m) {
 	while (true) {
 		if (rchash_put_unique(g_immigration_hash, (void *)&hkey, sizeof(hkey),
 				(void *)immig) == RCHASH_OK) {
-			cf_rc_reserve(immig); // to disambiguate put from get case
+			cf_rc_reserve(immig); // so either put or get yields ref-count 2
 
+			// First start request (not a retransmit) for this pid this round,
+			// or we had ack'd previous start request with 'EAGAIN'.
 			immig->start_result = as_partition_immigrate_start(ns, pid,
 					cluster_key, start_type, src);
 			break;
 		}
 
-		immigration *immig0 = NULL;
+		immigration *immig0;
 
 		if (rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
 				(void *)&immig0) == RCHASH_OK) {
-			immigration_release(immig);
+			immigration_release(immig); // free just-alloc'd immig ...
 
 			if (immig0->start_recv_ms == 0) {
 				immigration_release(immig0);
-				return; // Allow first thread to respond.
+				return; // allow previous thread to respond
 			}
 
-			immig = immig0;
+			immig = immig0; // ...  and use original
 			break;
 		}
 	}
@@ -1307,36 +1310,20 @@ immigration_handle_start_request(cf_node src, msg *m) {
 	case AS_MIGRATE_OK:
 		break;
 	case AS_MIGRATE_FAIL:
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_FAIL);
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-
 		immig->start_recv_ms = cf_getms(); // permits reaping
 		immigration_release(immig);
+		immigration_ack_start_request(src, m, OPERATION_START_ACK_FAIL);
 		return;
 	case AS_MIGRATE_AGAIN:
 		// Remove from hash so that the immig can be tried again.
 		rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
-
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_EAGAIN);
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-
 		immigration_release(immig);
+		immigration_ack_start_request(src, m, OPERATION_START_ACK_EAGAIN);
 		return;
 	case AS_MIGRATE_ALREADY_DONE:
-		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_ALREADY_DONE);
-		if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-				AS_FABRIC_SUCCESS) {
-			as_fabric_msg_put(m);
-		}
-
 		immig->start_recv_ms = cf_getms(); // permits reaping
 		immigration_release(immig);
+		immigration_ack_start_request(src, m, OPERATION_START_ACK_ALREADY_DONE);
 		return;
 	default:
 		cf_crash(AS_MIGRATE, "unexpected as_partition_immigrate_start result");
@@ -1362,10 +1349,17 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		immig->start_recv_ms = cf_getms(); // permits reaping
 	}
 
-	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START_ACK_OK);
 	msg_set_uint32(m, MIG_FIELD_FEATURES, immig->features);
 
 	immigration_release(immig);
+	immigration_ack_start_request(src, m, OPERATION_START_ACK_OK);
+}
+
+
+void
+immigration_ack_start_request(cf_node src, msg *m, uint32_t op)
+{
+	msg_set_uint32(m, MIG_FIELD_OP, op);
 
 	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 			AS_FABRIC_SUCCESS) {

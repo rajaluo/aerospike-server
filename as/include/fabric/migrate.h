@@ -226,8 +226,8 @@ typedef struct immigration_s {
 	immig_meta_q     meta_q;
 
 	as_migrate_result start_result;
-	uint32_t features;
-	as_namespace *stats;
+	uint32_t        features;
+	as_namespace    *ns; // for statistics only
 
 	as_partition_reservation rsv;
 } immigration;
