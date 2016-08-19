@@ -53,7 +53,7 @@ typedef struct {
 	int			xmit_alloc;
 	uint8_t		*xmit_buf;
 
-	cf_socket	*sock;
+	cf_socket	sock;
 
 } info_port_state;
 
@@ -63,7 +63,8 @@ info_port_state_free(info_port_state *ips)
 {
 	if (ips->recv_buf) cf_free(ips->recv_buf);
 	if (ips->xmit_buf) cf_free(ips->xmit_buf);
-	cf_socket_close(ips->sock);
+	cf_socket_close(&ips->sock);
+	cf_socket_term(&ips->sock);
 	memset(ips, -1, sizeof(info_port_state));
 	cf_free(ips);
 }
@@ -72,7 +73,7 @@ info_port_state_free(info_port_state *ips)
 int
 thr_info_port_readable(info_port_state *ips)
 {
-	int sz = cf_socket_available(ips->sock);
+	int sz = cf_socket_available(&ips->sock);
 
 	if (sz == 0) {
 		return 0;
@@ -88,7 +89,7 @@ thr_info_port_readable(info_port_state *ips)
 		ips->recv_alloc = new_sz;
 	}
 
-	int n = cf_socket_recv(ips->sock, ips->recv_buf + ips->recv_pos, ips->recv_alloc - ips->recv_pos, 0);
+	int n = cf_socket_recv(&ips->sock, ips->recv_buf + ips->recv_pos, ips->recv_alloc - ips->recv_pos, 0);
 	if (n < 0) {
 		if (errno != EAGAIN) {
 			cf_detail(AS_INFO_PORT, "info socket: read fail: error: rv %d sz was %d errno %d", n, ips->recv_alloc - ips->recv_pos, errno);
@@ -170,7 +171,7 @@ thr_info_port_writable(info_port_state *ips)
 	if (ips->xmit_limit > 0) {
 
 		// Write them!
-		int rv = cf_socket_send(ips->sock, ips->xmit_buf + ips->xmit_pos, ips->xmit_limit - ips->xmit_pos , MSG_NOSIGNAL);
+		int rv = cf_socket_send(&ips->sock, ips->xmit_buf + ips->xmit_pos, ips->xmit_limit - ips->xmit_pos , MSG_NOSIGNAL);
 		if (rv < 0) {
 			if (errno != EAGAIN) {
 				return -1;
@@ -214,7 +215,7 @@ thr_info_port_fn(void *arg)
 	if (0 != cf_socket_init_server(&info_socket)) {
 		cf_crash(AS_AS, "couldn't initialize service socket");
 	}
-	cf_socket_disable_blocking(info_socket.sock);
+	cf_socket_disable_blocking(&info_socket.sock);
 
 	s = &info_socket;
 
@@ -222,7 +223,7 @@ thr_info_port_fn(void *arg)
 	// to the socket.
 
 	cf_poll_create(&poll);
-	cf_poll_add_socket(poll, s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
+	cf_poll_add_socket(poll, &s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
 
 	// Demarshal transactions from the socket.
 	for ( ; ; ) {
@@ -236,15 +237,15 @@ thr_info_port_fn(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			cf_socket **ssock = events[i].data;
+			cf_socket *ssock = events[i].data;
 
 			if (ssock == &s->sock) {
 
 				// Accept new connections on the service socket.
-				cf_socket *csock;
+				cf_socket csock;
 				cf_sock_addr sa;
 
-				if (cf_socket_accept(s->sock, &csock, &sa) < 0) {
+				if (cf_socket_accept(&s->sock, &csock, &sa) < 0) {
 					// This means we're out of file descriptors - could be a SYN
 					// flood attack or misbehaving client. Eventually we'd like
 					// to make the reaper fairer, but for now we'll just have to
@@ -255,7 +256,7 @@ thr_info_port_fn(void *arg)
 					}
 					if (EINVAL == errno) {
 						if (!(err_count++ % 1000)) {
-							cf_warning(AS_INFO_PORT, "cf_socket_accept(%d) returned EINVAL ~~ Ignoring (err_count: %d)", CSFD(s->sock), err_count);
+							cf_warning(AS_INFO_PORT, "cf_socket_accept(%d) returned EINVAL ~~ Ignoring (err_count: %d)", CSFD(&s->sock), err_count);
 						}
 						continue;
 					}
@@ -265,7 +266,7 @@ thr_info_port_fn(void *arg)
 				cf_detail(AS_INFO_PORT, "new connection: %s", cf_sock_addr_print(&sa));
 
 				// Set the socket to nonblocking.
-				cf_socket_disable_blocking(csock);
+				cf_socket_disable_blocking(&csock);
 
 				info_port_state *ips = cf_malloc(sizeof(info_port_state));
 				if (!ips) {
@@ -278,10 +279,10 @@ thr_info_port_fn(void *arg)
 				ips->xmit_limit = ips->xmit_pos = 0;
 				ips->xmit_alloc = 100;
 				ips->xmit_buf = cf_malloc(100);
+				
+				cf_socket_copy(&csock, &ips->sock);
 
-				ips->sock = csock;
-
-				cf_poll_add_socket(poll, csock, EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
+				cf_poll_add_socket(poll, &ips->sock, EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
 			}
 			else {
 				// A regular working socket.
@@ -292,12 +293,12 @@ thr_info_port_fn(void *arg)
 					continue;
 				}
 
-				cf_detail(AS_INFO_PORT, "event: %x fd: %d", events[i].events, CSFD(ips->sock));
+				cf_detail(AS_INFO_PORT, "event: %x fd: %d", events[i].events, CSFD(&ips->sock));
 
 				if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
-					cf_detail(AS_INFO_PORT, "proto socket: remote close: fd %d event %x", CSFD(ips->sock), events[i].events);
+					cf_detail(AS_INFO_PORT, "proto socket: remote close: fd %d event %x", CSFD(&ips->sock), events[i].events);
 					// no longer in use: out of epoll etc
-					cf_poll_delete_socket(poll, ips->sock);
+					cf_poll_delete_socket(poll, &ips->sock);
 					info_port_state_free(ips);
 					continue;
 				}
@@ -305,7 +306,7 @@ thr_info_port_fn(void *arg)
 
 				if (events[i].events & EPOLLIN) {
 					if (0 != thr_info_port_readable(ips)) {
-						cf_poll_delete_socket(poll, ips->sock);
+						cf_poll_delete_socket(poll, &ips->sock);
 						info_port_state_free(ips);
 						goto NextEvent;
 					}
@@ -314,7 +315,7 @@ thr_info_port_fn(void *arg)
 
 				if (events[i].events & EPOLLOUT) {
 					if (0 != thr_info_port_writable(ips)) {
-						cf_poll_delete_socket(poll, ips->sock);
+						cf_poll_delete_socket(poll, &ips->sock);
 						info_port_state_free(ips);
 						goto NextEvent;
 					}

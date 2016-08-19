@@ -559,7 +559,7 @@ defrag_move_record(drv_ssd *ssd, drv_ssd_block *block, as_index *r)
 
 	if (! ssd) {
 		cf_warning(AS_DRV_SSD, "{%s} defrag_move_record: no drv_ssd for file_id %d",
-				ssd->ns->name, ssd_get_file_id(ssds, &block->keyd));
+				ssds->ns->name, ssd_get_file_id(ssds, &block->keyd));
 		return;
 	}
 

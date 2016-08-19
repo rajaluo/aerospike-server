@@ -125,7 +125,7 @@ as_security_transact(as_transaction* tr)
 	p_sec_msg->result = AS_SEC_ERR_NOT_SUPPORTED;
 
 	// Send the complete response.
-	cf_socket *sock = tr->from.proto_fd_h->sock;
+	cf_socket *sock = &tr->from.proto_fd_h->sock;
 
 	if (cf_socket_send_blocking(sock, resp, resp_size, MSG_NOSIGNAL,
 			CF_SOCKET_TIMEOUT) < 0) {

@@ -229,11 +229,11 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 int
 as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 {
-	if (fd_h->sock == NULL) {
+	if (! cf_socket_exists(&fd_h->sock)) {
 		cf_crash(AS_PROTO, "fd is NULL");
 	}
 
-	if (cf_socket_send_blocking(fd_h->sock, db->buf, db->used_sz, MSG_NOSIGNAL,
+	if (cf_socket_send_blocking(&fd_h->sock, db->buf, db->used_sz, MSG_NOSIGNAL,
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zu errno %d",
@@ -624,6 +624,7 @@ as_msg_make_error_response_bufbuilder(cf_digest *keyd, int result_code, cf_buf_b
 	mf->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
 	memcpy(mf->data, keyd, sizeof(cf_digest));
 	as_msg_swap_field(mf);
+
 	buf += sizeof(as_msg_field) + sizeof(cf_digest);
 
 	mf = (as_msg_field *) buf;
@@ -631,7 +632,6 @@ as_msg_make_error_response_bufbuilder(cf_digest *keyd, int result_code, cf_buf_b
 	mf->type = AS_MSG_FIELD_TYPE_NAMESPACE;
 	memcpy(mf->data, nsname, ns_len);
 	as_msg_swap_field(mf);
-	buf += sizeof(as_msg_field) + ns_len;
 
 	return(0);
 }
@@ -663,7 +663,7 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 
 	if (!msgp)	return(-1);
 
-	if (fd_h->sock == NULL) {
+	if (! cf_socket_exists(&fd_h->sock)) {
 		cf_warning(AS_PROTO, "write to NULL fd internal error");
 		cf_crash(AS_PROTO, "send reply: can't write to NULL fd");
 	}
@@ -671,11 +671,11 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 //	cf_detail(AS_PROTO, "write fd %d",fd);
 	int rv;
 
-	if (cf_socket_send_blocking(fd_h->sock, msgp, msg_sz, MSG_NOSIGNAL,
+	if (cf_socket_send_blocking(&fd_h->sock, msgp, msg_sz, MSG_NOSIGNAL,
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zu",
-				CSFD(fd_h->sock), msg_sz);
+				CSFD(&fd_h->sock), msg_sz);
 		as_end_of_transaction_force_close(fd_h);
 		rv = -1;
 	}
@@ -951,10 +951,10 @@ as_netio_send_packet(as_file_handle *fd_h, cf_buf_builder *bb_r, uint32_t *offse
 	int retry = 0;
 	cf_detail(AS_PROTO," Start At %p %d %d", buf, pos, len);
 	while (pos < len) {
-		rv = cf_socket_send(fd_h->sock, buf + pos, len - pos, MSG_NOSIGNAL);
+		rv = cf_socket_send(&fd_h->sock, buf + pos, len - pos, MSG_NOSIGNAL);
 		if (rv <= 0) {
 			if (errno != EAGAIN) {
-				cf_debug(AS_PROTO, "Packet send response error returned %d errno %d fd %d", rv, errno, CSFD(fd_h->sock));
+				cf_debug(AS_PROTO, "Packet send response error returned %d errno %d fd %d", rv, errno, CSFD(&fd_h->sock));
 				return AS_NETIO_IO_ERR;
 			}
 			if (!blocking && (retry > AS_NETIO_MAX_IO_RETRY)) {

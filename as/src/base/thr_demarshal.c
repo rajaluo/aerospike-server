@@ -108,7 +108,7 @@ thr_demarshal_resume(as_file_handle *fd_h)
 	// the client disconnected) while the transaction was still ongoing.
 
 	static int32_t err_ok[] = { ENOENT };
-	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(fd_h->poll, fd_h->sock,
+	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(fd_h->poll, &fd_h->sock,
 			EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h,
 			sizeof(err_ok) / sizeof(int32_t), err_ok));
 }
@@ -178,7 +178,7 @@ thr_demarshal_reaper_fn(void *arg)
 
 				// Reap, if asked to.
 				if (fd_h->reap_me) {
-					cf_debug(AS_DEMARSHAL, "Reaping FD %d as requested", CSFD(fd_h->sock));
+					cf_debug(AS_DEMARSHAL, "Reaping FD %d as requested", CSFD(&fd_h->sock));
 					g_file_handle_a[i] = 0;
 					cf_queue_push(g_freeslot, &i);
 					as_release_file_handle(fd_h);
@@ -187,13 +187,13 @@ thr_demarshal_reaper_fn(void *arg)
 				// Reap if past kill time.
 				else if ((0 != kill_ms) && (fd_h->last_used + kill_ms < now)) {
 					if (fd_h->fh_info & FH_INFO_DONOT_REAP) {
-						cf_debug(AS_DEMARSHAL, "Not reaping the fd %d as it has the protection bit set", CSFD(fd_h->sock));
+						cf_debug(AS_DEMARSHAL, "Not reaping the fd %d as it has the protection bit set", CSFD(&fd_h->sock));
 						inuse_cnt++;
 						continue;
 					}
 
-					cf_socket_shutdown(fd_h->sock); // will trigger epoll errors
-					cf_debug(AS_DEMARSHAL, "remove unused connection, fd %d", CSFD(fd_h->sock));
+					cf_socket_shutdown(&fd_h->sock); // will trigger epoll errors
+					cf_debug(AS_DEMARSHAL, "remove unused connection, fd %d", CSFD(&fd_h->sock));
 					g_file_handle_a[i] = 0;
 					cf_queue_push(g_freeslot, &i);
 					as_release_file_handle(fd_h);
@@ -422,16 +422,16 @@ thr_demarshal(void *arg)
 	if (thr_id == 0) {
 		demarshal_file_handle_init();
 
-		cf_poll_add_socket(poll, s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
+		cf_poll_add_socket(poll, &s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
 		cf_info(AS_DEMARSHAL, "Service started: socket %s:%d", s->addr, s->port);
 
-		if (ls->sock) {
-			cf_poll_add_socket(poll, ls->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &ls->sock);
+		if (cf_socket_exists(&ls->sock)) {
+			cf_poll_add_socket(poll, &ls->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &ls->sock);
 			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
 		}
 
-		if (xs->sock) {
-			cf_poll_add_socket(poll, xs->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &xs->sock);
+		if (cf_socket_exists(&xs->sock)) {
+			cf_poll_add_socket(poll, &xs->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &xs->sock);
 			cf_info(AS_DEMARSHAL, "Service also listening on XDR info socket %s:%d", xs->addr, xs->port);
 		}
 	}
@@ -460,14 +460,14 @@ thr_demarshal(void *arg)
 
 		// Iterate over all events.
 		for (i = 0; i < nevents; i++) {
-			cf_socket **ssock = events[i].data;
+			cf_socket *ssock = events[i].data;
 
 			if (ssock == &s->sock || ssock == &ls->sock || ssock == &xs->sock) {
 				// Accept new connections on the service socket.
-				cf_socket *csock;
+				cf_socket csock;
 				cf_sock_addr sa;
 
-				if (cf_socket_accept(*ssock, &csock, &sa) < 0) {
+				if (cf_socket_accept(ssock, &csock, &sa) < 0) {
 					// This means we're out of file descriptors - could be a SYN
 					// flood attack or misbehaving client. Eventually we'd like
 					// to make the reaper fairer, but for now we'll just have to
@@ -484,7 +484,7 @@ thr_demarshal(void *arg)
 
 				char sa_str[sizeof(((as_file_handle *)NULL)->client)];
 				cf_sock_addr_to_string_safe(&sa, sa_str, sizeof(sa_str));
-				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", sa_str, CSFD(csock));
+				cf_detail(AS_DEMARSHAL, "new connection: %s (fd %d)", sa_str, CSFD(&csock));
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_stats.proto_connections_opened - g_stats.proto_connections_closed;
@@ -493,13 +493,14 @@ thr_demarshal(void *arg)
 						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
 						last_fd_print = cf_getms();
 					}
-					cf_socket_shutdown(csock);
-					cf_socket_close(csock);
+					cf_socket_shutdown(&csock);
+					cf_socket_close(&csock);
+					cf_socket_term(&csock);
 					continue;
 				}
 
 				// Set the socket to nonblocking.
-				cf_socket_disable_blocking(csock);
+				cf_socket_disable_blocking(&csock);
 
 				// Create as_file_handle and queue it up in epoll_fd for further
 				// communication on one of the demarshal threads.
@@ -509,7 +510,7 @@ thr_demarshal(void *arg)
 				}
 
 				strcpy(fd_h->client, sa_str);
-				fd_h->sock = csock;
+				cf_socket_copy(&csock, &fd_h->sock);
 
 				fd_h->last_used = cf_getms();
 				fd_h->reap_me = false;
@@ -541,8 +542,9 @@ thr_demarshal(void *arg)
 
 				if (!inserted) {
 					cf_info(AS_DEMARSHAL, "unable to add socket to file handle table");
-					cf_socket_shutdown(csock);
-					cf_socket_close(csock);
+					cf_socket_shutdown(&csock);
+					cf_socket_close(&csock);
+					cf_socket_term(&csock);
 					cf_rc_free(fd_h); // will free even with ref-count of 2
 				}
 				else {
@@ -552,7 +554,7 @@ thr_demarshal(void *arg)
 					fd_h->poll = g_demarshal_args->polls[id];
 
 					// Place the client socket in the event queue.
-					cf_poll_add_socket(fd_h->poll, csock, EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h);
+					cf_poll_add_socket(fd_h->poll, &fd_h->sock, EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h);
 					cf_atomic64_incr(&g_stats.proto_connections_opened);
 				}
 			}
@@ -564,13 +566,13 @@ thr_demarshal(void *arg)
 					goto NextEvent;
 				}
 
-				cf_detail(AS_DEMARSHAL, "epoll connection event: fd %d, events 0x%x", CSFD(fd_h->sock), events[i].events);
+				cf_detail(AS_DEMARSHAL, "epoll connection event: fd %d, events 0x%x", CSFD(&fd_h->sock), events[i].events);
 
 				// Process data on an existing connection: this might be more
 				// activity on an already existing transaction, so we have some
 				// state to manage.
 				as_proto *proto_p = 0;
-				cf_socket *sock = fd_h->sock;
+				cf_socket *sock = &fd_h->sock;
 
 				if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
 					cf_detail(AS_DEMARSHAL, "proto socket: remote close: fd %d event %x", CSFD(sock), events[i].events);
@@ -807,7 +809,7 @@ thr_demarshal(void *arg)
 							as_transaction_is_xdr(&tr) &&
 							(fd_h->fh_info & FH_INFO_XDR) == 0) {
 						// ... modify them.
-						if (thr_demarshal_config_xdr(fd_h->sock) != 0) {
+						if (thr_demarshal_config_xdr(&fd_h->sock) != 0) {
 							cf_warning(AS_DEMARSHAL, "Failed to configure XDR connection");
 							goto NextEvent_FD_Cleanup;
 						}
@@ -905,7 +907,7 @@ as_demarshal_start()
 	if (0 != cf_socket_init_server(&g_config.socket)) {
 		cf_crash(AS_DEMARSHAL, "couldn't initialize service socket");
 	}
-	cf_socket_disable_blocking(g_config.socket.sock);
+	cf_socket_disable_blocking(&g_config.socket.sock);
 
 	// Note:  The localhost socket address will only be set if the main service socket
 	//        is not already (effectively) listening on the localhost address.
@@ -915,7 +917,7 @@ as_demarshal_start()
 		if (0 != cf_socket_init_server(&g_config.localhost_socket)) {
 			cf_crash(AS_DEMARSHAL, "couldn't initialize localhost service socket");
 		}
-		cf_socket_disable_blocking(g_config.localhost_socket.sock);
+		cf_socket_disable_blocking(&g_config.localhost_socket.sock);
 	}
 
 	g_config.xdr_socket.port = as_xdr_info_port();
@@ -928,7 +930,7 @@ as_demarshal_start()
 			cf_crash(AS_DEMARSHAL, "Couldn't initialize XDR service socket");
 		}
 
-		cf_socket_disable_blocking(g_config.xdr_socket.sock);
+		cf_socket_disable_blocking(&g_config.xdr_socket.sock);
 	}
 
 	// Create all the epoll_fds and wait for all the threads to come up.

@@ -588,7 +588,7 @@ typedef struct as_hb_channel_state_s
 	/**
 	 * The socket on which heartbeart subsystem listens to.
 	 */
-	cf_socket* listening_socket;
+	cf_socket listening_socket;
 
 	/**
 	 * Enables / disables publishing channel events. Events should be
@@ -944,22 +944,6 @@ typedef struct as_hb_adjacency_tender_udata_s
 } as_hb_adjacency_tender_udata;
 
 /**
- * Udata for finding sockets open in channel.
- */
-typedef struct as_hb_sockets_udata_s
-{
-	/**
-	 * List of sockets.
-	 */
-	cf_vector socketss;
-
-	/**
-	 * count of elements in the socket list.
-	 */
-	int sockets_count;
-} as_hb_sockets_udata;
-
-/**
  * Udata for tip clear.
  **/
 typedef struct as_hb_mesh_tip_clear_udata_s
@@ -1129,14 +1113,14 @@ pthread_mutex_t set_protocol_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
  */
 #define MTU()                                                                  \
 	({                                                                     \
-		int mtu = config_override_mtu_get();                           \
-		if (!mtu) {                                                    \
-			mtu = IS_MESH()                                        \
+		int __mtu = config_override_mtu_get();                           \
+		if (!__mtu) {                                                    \
+			__mtu = IS_MESH()                                        \
 				? g_hb.mode_state.mesh_state.min_mtu           \
 				: g_hb.mode_state.multicast_state.min_mtu;     \
-			mtu = mtu > 0 ? mtu : DEFAULT_MIN_MTU;                 \
+			__mtu = __mtu > 0 ? __mtu : DEFAULT_MIN_MTU;                 \
 		}                                                              \
-		mtu;                                                           \
+		__mtu;                                                           \
 	})
 
 /**
@@ -2314,7 +2298,7 @@ as_hb_dump(bool verbose)
 bool
 as_hb_is_alive(cf_node nodeid)
 {
-	bool is_alive = false;
+	bool is_alive;
 	HB_LOCK();
 
 	as_hb_adjacent_node adjacent_node;
@@ -3587,7 +3571,7 @@ channel_socket_get(cf_node nodeid, cf_socket** socket)
 }
 
 /**
- * Close a channel socket. Precondition is that the socket is registerd
+ * Close a channel socket. Precondition is that the socket is registered
  * with the channel module using channel_socket_register.
  */
 static void
@@ -3661,10 +3645,12 @@ channel_socket_close(cf_socket* socket, bool remote_close,
 	cf_atomic_int_incr(&g_stats.heartbeat_connections_closed);
 	DEBUG("Closing channel with fd %d", CSFD(socket));
 
-	if (socket != g_hb.channel_state.listening_socket) {
+	if (socket != &g_hb.channel_state.listening_socket) {
 		// Listening sockets will be closed by the mode (mesh/multicast
 		// ) modules.
 		cf_socket_close(socket);
+		cf_socket_term(socket);
+		cf_free(socket);
 	}
 
 Exit:
@@ -3785,10 +3771,10 @@ channel_accept_connection()
 	// frequent. Print only once per second.
 	static cf_clock last_accept_fail_print = 0;
 
-	cf_socket* csock;
+	cf_socket csock;
 	cf_sock_addr caddr;
 
-	if (cf_socket_accept(g_hb.channel_state.listening_socket, &csock,
+	if (cf_socket_accept(&g_hb.channel_state.listening_socket, &csock,
 			     &caddr) < 0) {
 		if ((errno == EMFILE) || (errno == ENFILE) ||
 		    (errno == ENOMEM) || (errno == ENOBUFS)) {
@@ -3814,6 +3800,11 @@ channel_accept_connection()
 		}
 	}
 
+	// Allocate a new socket.
+	cf_socket* sock = cf_malloc(sizeof(cf_socket));
+	cf_socket_init(sock);
+	cf_socket_copy(&csock, sock);
+
 	// Update the stats to reflect to a new connection opened.
 	cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
 
@@ -3822,11 +3813,11 @@ channel_accept_connection()
 	DEBUG("New connection from %s", caddr_str);
 
 	// Make the socket nonblocking.
-	cf_socket_disable_blocking(csock);
-	cf_socket_disable_nagle(csock);
+	cf_socket_disable_blocking(sock);
+	cf_socket_disable_nagle(sock);
 
 	// Register this socket with the channel subsystem.
-	channel_socket_register(csock, false, true, NULL);
+	channel_socket_register(sock, false, true, NULL);
 }
 
 /**
@@ -4102,14 +4093,14 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 
 	buffer = MSG_BUFF_ALLOC(buffer_len);
 
-	memcpy(buffer, len_buff, MSG_WIRE_LENGTH_SIZE);
-
 	if (!buffer) {
 		WARNING("Error allocating space for multicast recv buffer of "
 			"size %d on fd %d",
 			buffer_len, CSFD(socket));
 		goto Exit;
 	}
+
+	memcpy(buffer, len_buff, MSG_WIRE_LENGTH_SIZE);
 
 	if (cf_socket_recv_blocking(socket, buffer, buffer_len, MSG_NOSIGNAL,
 			MESH_RW_TIMEOUT) < 0) {
@@ -4829,7 +4820,7 @@ channel_tender(void* arg)
 
 		for (int i = 0; i < nevents; i++) {
 			cf_socket* socket = events[i].data;
-			if (socket == g_hb.channel_state.listening_socket &&
+			if (socket == &g_hb.channel_state.listening_socket &&
 			    IS_MESH()) {
 				// Accept a new connection.
 				channel_accept_connection();
@@ -4896,10 +4887,14 @@ channel_mesh_channel_establish(as_hb_endpoint* endpoints, int endpoint_count)
 		      endpoint_host_str, endpoints[i].port);
 
 		if (cf_socket_init_client(&s, CONNECT_TIMEOUT()) == 0) {
-			cf_atomic_int_incr(
-			  &g_stats.heartbeat_connections_opened);
-			channel_socket_register(s.sock, false, false,
-						&endpoints[i]);
+			cf_atomic_int_incr(&g_stats.heartbeat_connections_opened);
+
+			// Allocate a socket for this channel.
+			cf_socket* sock = cf_malloc(sizeof(cf_socket));
+			cf_socket_init(sock);
+			cf_socket_copy(&s.sock, sock);
+			
+			channel_socket_register(sock, false, false, &endpoints[i]);
 			connected = true;
 		} else {
 			DEBUG(
@@ -4951,10 +4946,11 @@ Exit:
 static void
 channel_mesh_listening_sock_register(cf_socket* socket)
 {
-	g_hb.channel_state.listening_socket = socket;
-
-	cf_poll_add_socket(g_hb.channel_state.poll, socket,
-			   EPOLLIN | EPOLLERR | EPOLLHUP, socket);
+	cf_socket_copy(socket, &g_hb.channel_state.listening_socket);
+	cf_poll_add_socket(g_hb.channel_state.poll,
+					   &g_hb.channel_state.listening_socket,
+					   EPOLLIN | EPOLLERR | EPOLLHUP,
+					   &g_hb.channel_state.listening_socket);
 
 	// We do not need a separate channel to cover this socket because IO
 	// will not happen on this socket.
@@ -4980,9 +4976,10 @@ channel_multicast_listening_sock_register(cf_socket* socket,
 					  as_hb_endpoint* endpoint)
 {
 
-	g_hb.channel_state.listening_socket = socket;
+	cf_socket_copy(socket, &g_hb.channel_state.listening_socket);
 	// Create a new multicast channel.
-	channel_socket_register(socket, true, false, endpoint);
+	channel_socket_register(&g_hb.channel_state.listening_socket,
+							true, false, endpoint);
 }
 
 /**
@@ -5337,7 +5334,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 		      "message to node %" PRIx64,
 	  buffer_len, dest);
 
-	size_t msg_size = 0;
+	int msg_size;
 	if ((msg_size = channel_msg_buffer_fill(msg, wire_size, mtu, buffer,
 						buffer_len)) <= 0) {
 		WARNING("Error writing message to buffer for node %" PRIx64,
@@ -5347,7 +5344,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 	}
 
 	// Send over the buffer.
-	rv = channel_mesh_msg_send(connected_socket, buffer, msg_size);
+	rv = channel_mesh_msg_send(connected_socket, buffer, (size_t)msg_size);
 
 Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
@@ -5414,7 +5411,7 @@ channel_msg_broadcast(msg* msg)
 	  "Error allocating memory size %zu for sending broadcast message.",
 	  buffer_len);
 
-	size_t msg_size = 0;
+	int msg_size = 0;
 	if ((msg_size = channel_msg_buffer_fill(msg, wire_size, mtu, buffer,
 						buffer_len)) <= 0) {
 		WARNING("Error writing message to buffer for broadcast");
@@ -5426,7 +5423,7 @@ channel_msg_broadcast(msg* msg)
 	udata.buffer = buffer;
 
 	// Note this is the length of buffer to send.
-	udata.buffer_len = msg_size;
+	udata.buffer_len = (size_t)msg_size;
 
 	shash_reduce(g_hb.channel_state.socket_to_channel,
 		     channel_msg_broadcast_reduce, &udata);
@@ -5620,7 +5617,8 @@ mesh_listening_socket_close()
 	     g_hb.mode_state.mesh_state.socket.addr,
 	     g_hb.mode_state.mesh_state.socket.port);
 
-	cf_socket_close(g_hb.mode_state.mesh_state.socket.sock);
+	cf_socket_close(&g_hb.mode_state.mesh_state.socket.sock);
+	cf_socket_term(&g_hb.mode_state.mesh_state.socket.sock);
 
 	DEBUG("Closed mesh heartbeat socket");
 	MESH_UNLOCK();
@@ -5687,7 +5685,7 @@ mesh_stop()
 	MESH_LOCK();
 
 	channel_mesh_listening_sock_deregister(
-	  g_hb.mode_state.mesh_state.socket.sock);
+	  &g_hb.mode_state.mesh_state.socket.sock);
 
 	mesh_listening_socket_close();
 
@@ -7034,7 +7032,7 @@ mesh_clear()
  *
  */
 static void
-mesh_listening_socket_open(cf_socket** listening_socket)
+mesh_listening_socket_open(cf_socket* listening_socket)
 {
 
 	INFO("Initializing mesh heartbeat socket : %s:%d",
@@ -7053,7 +7051,7 @@ mesh_listening_socket_open(cf_socket** listening_socket)
 	}
 
 	DEBUG("Opened mesh heartbeat socket: %d",
-	      CSFD(g_hb.mode_state.mesh_state.socket.sock));
+	      CSFD(&g_hb.mode_state.mesh_state.socket.sock));
 
 	// Compute the mtu size here and compute the maximum cluster size.
 	cf_ip_addr binding_addr;
@@ -7080,7 +7078,7 @@ mesh_listening_socket_open(cf_socket** listening_socket)
 
 	MESH_UNLOCK();
 
-	*listening_socket = g_hb.mode_state.mesh_state.socket.sock;
+	cf_socket_copy(&g_hb.mode_state.mesh_state.socket.sock, listening_socket);
 }
 
 /**
@@ -7096,9 +7094,9 @@ mesh_start()
 
 	MESH_LOCK();
 
-	cf_socket* listening_socket;
+	cf_socket listening_socket;
 	mesh_listening_socket_open(&listening_socket);
-	channel_mesh_listening_sock_register(listening_socket);
+	channel_mesh_listening_sock_register(&listening_socket);
 
 	g_hb.mode_state.mesh_state.status = AS_HB_STATUS_RUNNING;
 
@@ -7128,9 +7126,7 @@ mesh_dump_reduce(void* key, void* data, void* udata)
 	     IPADDR_TO_STRING(&mesh_node->endpoint.addr),
 	     mesh_node->endpoint.port,
 	     mesh_node_status_string(mesh_node->status),
-	     mesh_node->status == AS_HB_MESH_NODE_CHANNEL_INACTIVE
-	       ? mesh_node->last_status_updated
-	       : mesh_node->last_status_updated);
+	     mesh_node->last_status_updated);
 
 	return SHASH_OK;
 }
@@ -7182,7 +7178,7 @@ multicast_clear()
  * @return the socket multicast mode listens on.
  */
 static void
-multicast_listening_socket_open(cf_socket** listening_socket)
+multicast_listening_socket_open(cf_socket* listening_socket)
 {
 	INFO("Initializing multicast heartbeat socket : %s:%d",
 	     config_hb_listen_addr_s_get(), config_hb_listen_port_get());
@@ -7204,8 +7200,9 @@ multicast_listening_socket_open(cf_socket** listening_socket)
 	}
 
 	DEBUG("Opened multicast socket %d",
-	      CSFD(g_hb.mode_state.multicast_state.socket.conf.sock));
-	*listening_socket = g_hb.mode_state.multicast_state.socket.conf.sock;
+	      CSFD(&g_hb.mode_state.multicast_state.socket.conf.sock));
+	cf_socket_copy(&g_hb.mode_state.multicast_state.socket.conf.sock,
+			listening_socket);
 
 	// Compute the mtu size here and compute the maximum cluster size.
 	// Compute the mtu size here and compute the maximum cluster size.
@@ -7240,7 +7237,7 @@ multicast_listening_socket_open(cf_socket** listening_socket)
 static void
 multicast_start()
 {
-	cf_socket* listening_socket;
+	cf_socket listening_socket;
 	multicast_listening_socket_open(&listening_socket);
 
 	as_hb_endpoint endpoint;
@@ -7249,7 +7246,7 @@ multicast_start()
 	memcpy(&endpoint.addr, config_hb_listen_addr_get(),
 	       sizeof(endpoint.addr));
 
-	channel_multicast_listening_sock_register(listening_socket, &endpoint);
+	channel_multicast_listening_sock_register(&listening_socket, &endpoint);
 }
 
 /**
@@ -7274,7 +7271,7 @@ static void
 multicast_stop()
 {
 	channel_multicast_listening_sock_deregister(
-	  g_hb.mode_state.multicast_state.socket.conf.sock);
+	  &g_hb.mode_state.multicast_state.socket.conf.sock);
 
 	multicast_listening_socket_close();
 }

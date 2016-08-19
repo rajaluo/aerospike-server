@@ -64,7 +64,6 @@
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/xdr_serverside.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/stats.h"
@@ -361,6 +360,19 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 
 	return(0);
 }
+
+int
+info_get_cluster_id(char *name, cf_dyn_buf *db)
+{
+	char cluster_id[AS_CLUSTER_ID_SZ];
+	as_config_cluster_id_get(cluster_id);
+	if (cluster_id[0] != 0) {
+		cf_dyn_buf_append_string(db, cluster_id);
+	}
+
+	return 0;
+}
+
 
 int
 info_get_partition_generation(char *name, cf_dyn_buf *db)
@@ -2334,7 +2346,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "query-threshold", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-threshold = %"PRIu64"", val);
-			if (val <= 0) {
+			if ((int64_t)val <= 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of query-threshold from %u to %"PRIu64, g_config.query_threshold, val);
@@ -2343,7 +2355,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "query-untracked-time-ms", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-untracked-time = %"PRIu64" milli seconds", val);
-			if (val < 0) {
+			if ((int64_t)val < 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of query-untracked-time from %"PRIu64" milli seconds to %"PRIu64" milli seconds",
@@ -2353,7 +2365,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "query-rec-count-bound", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-rec-count-bound = %"PRIu64"", val);
-			if (val <= 0) {
+			if ((int64_t)val <= 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO, "Changing value of query-rec-count-bound from %"PRIu64" to %"PRIu64" ", g_config.query_rec_count_bound, val);
@@ -3209,50 +3221,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
-			// Dont print this command in logs as this happens every few seconds
-			// Ideally, this should not be done via config-set.
-			print_command = false;
-
-			uint64_t val[DC_MAX_NUM];
-			char * tmp_val;
-			char *  delim = {","};
-			int i = 0;
-
-			// We do not want junk values in val[]. This is LST array.
-			// Not doing that will lead to wrong LST time going back warnings from the code below.
-			memset(val, 0, sizeof(uint64_t) * DC_MAX_NUM);
-
-			tmp_val = strtok(context, (const char *) delim);
-			while(tmp_val) {
-				if(i >= DC_MAX_NUM) {
-					cf_warning(AS_INFO, "Suspicious \"xdr\" Info command \"lastshiptime\" value: \"%s\"", params);
-					break;
-				}
-				if (0 > cf_str_atoi_u64(tmp_val, &(val[i++]))) {
-					cf_warning(AS_INFO, "bad number in \"xdr\" Info command \"lastshiptime\": \"%s\" for DC %d ~~ Using 0", tmp_val, i - 1);
-					val[i - 1] = 0;
-				}
-				tmp_val = strtok(NULL, (const char *) delim);
-			}
-
-			for(i = 0; i < DC_MAX_NUM; i++) {
-				// Warning only if time went back by 5 mins or more
-				// We are doing subtraction of two uint64_t here. We should be more careful and first check
-				// if the first value is greater.
-				if ((g_config.xdr_self_lastshiptime[i] > val[i]) &&
-						((g_config.xdr_self_lastshiptime[i] - val[i]) > XDR_ACCEPTABLE_TIMEDIFF)) {
-					cf_warning(AS_INFO, "XDR last ship time of this node for DC %d went back to %"PRIu64" from %"PRIu64"",
-							i, val[i], g_config.xdr_self_lastshiptime[i]);
-					cf_debug(AS_INFO, "(Suspicious \"xdr\" Info command \"lastshiptime\" value: \"%s\".)", params);
-				}
-
-				g_config.xdr_self_lastshiptime[i] = val[i];
-			}
-
-			xdr_broadcast_lastshipinfo(val);
-		}
-		else if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
 			print_command = false;
 			cf_node nodeid = atoll(context);
 			xdr_handle_failednodeprocessingdone(nodeid);
@@ -3755,7 +3724,6 @@ info_some(char *buf, char *buf_lim, const as_file_handle* fd_h, cf_dyn_buf *db)
 							cf_dyn_buf_append_char(db, SEP );
 							t->tree_fn(t->name, branch, db);
 							cf_dyn_buf_append_char(db, EOL);
-							handled = true;
 							break;
 						}
 						t = t->next;
@@ -3879,10 +3847,10 @@ thr_info_fn(void *unused)
 		db.buf[7] = sz & 0xff;
 
 		// write the data buffer
-		if (cf_socket_send_blocking(fd_h->sock, db.buf, db.used_sz,
+		if (cf_socket_send_blocking(&fd_h->sock, db.buf, db.used_sz,
 				MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
 			cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d",
-					CSFD(fd_h->sock), errno);
+					CSFD(&fd_h->sock), errno);
 			as_end_of_transaction_force_close(fd_h);
 			fd_h = NULL;
 		}
@@ -4489,7 +4457,6 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 {
 	cf_node *node = (cf_node *)key;
 	info_node_info *infop = (info_node_info *) data;
-	int rv;
 
 	if (infop->generation < g_service_generation) {
 
@@ -4517,7 +4484,8 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 
 		pthread_mutex_unlock(&g_service_lock);
 
-		if ((rv = as_fabric_send(*node, m, AS_FABRIC_PRIORITY_MEDIUM))) {
+		if (as_fabric_send(*node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(m);
 		}
 	}
@@ -5912,23 +5880,24 @@ int info_command_sindex_list(char *name, char *params, cf_dyn_buf *db) {
 	}
 
 	if (listall) {
-		bool found = 0;
+		bool found = false;
 		for (int i = 0; i < g_config.n_namespaces; i++) {
 			as_namespace *ns = g_config.namespaces[i];
 			if (ns) {
 				if (!as_sindex_list_str(ns, db)) {
-					found++;
+					found = true;
 				}
 				else {
 					cf_detail(AS_INFO, "No indexes for namespace %s", ns->name);
 				}
 			}
 		}
-		if (found == 0) {
-			cf_dyn_buf_append_string(db, "Empty");
+
+		if (found) {
+			cf_dyn_buf_chomp(db);
 		}
 		else {
-			cf_dyn_buf_chomp(db);
+			cf_dyn_buf_append_string(db, "Empty");
 		}
 	}
 	else {
@@ -6002,7 +5971,7 @@ as_info_init()
 	as_info_set( hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
 	// All commands accepted by asinfo/telnet
-	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;config-get;config-set;"
+	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-id;config-get;config-set;"
 				"df;digests;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-rw;"
 				"dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
@@ -6010,8 +5979,7 @@ as_info_init()
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
-				"smd;statistics;status;tip;tip-clear;version;"
-				"xdr-min-lastshipinfo",
+				"smd;statistics;status;tip;tip-clear;version;",
 				false);
 	/*
 	 * help intentionally does not include the following:
@@ -6023,6 +5991,7 @@ as_info_init()
 	// Set up some dynamic functions
 	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
 	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true);     // Returns cluster generation.
+	as_info_set_dynamic("cluster-id", info_get_cluster_id, false);                    // Returns cluster id.
 	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
 	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
 	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.

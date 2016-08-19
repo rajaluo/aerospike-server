@@ -450,7 +450,7 @@ conn_scan_job_finish(conn_scan_job* job)
 	as_job* _job = (as_job*)job;
 
 	if (job->fd_h) {
-		size_t size_sent = send_blocking_response_fin(job->fd_h->sock,
+		size_t size_sent = send_blocking_response_fin(&job->fd_h->sock,
 				_job->abandoned);
 
 		job->net_io_bytes += size_sent;
@@ -473,7 +473,7 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 		return false;
 	}
 
-	size_t size_sent = send_blocking_response_chunk(job->fd_h->sock, buf, size);
+	size_t size_sent = send_blocking_response_chunk(&job->fd_h->sock, buf, size);
 
 	if (size_sent == 0) {
 		conn_scan_job_release_fd(job, true);
@@ -1252,7 +1252,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	if (as_msg_send_fin(tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) == 0) {
+	if (as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) == 0) {
 		tr->from.proto_fd_h->last_used = cf_getms();
 		as_end_of_transaction_ok(tr->from.proto_fd_h);
 	}
