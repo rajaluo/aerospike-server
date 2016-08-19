@@ -1822,7 +1822,7 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state, cdt_modify
 	}
 	case AS_CDT_OP_LIST_INCREMENT_BY:
 		// TODO - Support or remove these.
-		cdt_udata->ret_code = AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+		cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
 		return false;
 
 	// Misc
