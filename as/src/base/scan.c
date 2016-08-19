@@ -331,19 +331,17 @@ send_blocking_response_chunk(cf_socket *sock, uint8_t* buf, size_t size)
 	proto.sz = size;
 	as_proto_swap(&proto);
 
-	int rv = cf_socket_send_blocking(sock, (uint8_t*)&proto, sizeof(as_proto),
-			MSG_NOSIGNAL | MSG_MORE, CF_SOCKET_TIMEOUT);
-
-	if (rv != sizeof(as_proto)) {
-		cf_warning(AS_SCAN, "send error - fd %d rv %d %s", CSFD(sock), rv,
-				rv < 0 ? cf_strerror(errno) : "");
+	if (cf_socket_send_blocking(sock, (uint8_t*)&proto, sizeof(as_proto),
+			MSG_NOSIGNAL | MSG_MORE, CF_SOCKET_TIMEOUT) < 0) {
+		cf_warning(AS_SCAN, "send error - fd %d %s", CSFD(sock),
+				cf_strerror(errno));
 		return 0;
 	}
 
-	if ((rv = cf_socket_send_blocking(sock, buf, size,
-			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT)) != size) {
-		cf_warning(AS_SCAN, "send error - fd %d sz %lu rv %d %s", CSFD(sock),
-				size, rv, rv < 0 ? cf_strerror(errno) : "");
+	if (cf_socket_send_blocking(sock, buf, size,
+			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
+		cf_warning(AS_SCAN, "send error - fd %d sz %lu %s", CSFD(sock),
+				size, cf_strerror(errno));
 		return 0;
 	}
 
@@ -373,12 +371,10 @@ send_blocking_response_fin(cf_socket *sock, int result_code)
 	m.msg.n_ops = 0;
 	as_msg_swap_header(&m.msg);
 
-	int rv = cf_socket_send_blocking(sock, (uint8_t*)&m, sizeof(cl_msg),
-			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT);
-
-	if (rv != sizeof(cl_msg)) {
-		cf_warning(AS_SCAN, "send error - fd %d rv %d %s", CSFD(sock), rv,
-				rv < 0 ? cf_strerror(errno) : "");
+	if (cf_socket_send_blocking(sock, (uint8_t*)&m, sizeof(cl_msg),
+			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
+		cf_warning(AS_SCAN, "send error - fd %d %s", CSFD(sock),
+				cf_strerror(errno));
 		return 0;
 	}
 
