@@ -3847,7 +3847,7 @@ thr_info_fn(void *unused)
 		db.buf[7] = sz & 0xff;
 
 		// write the data buffer
-		if (cf_socket_send_blocking(&fd_h->sock, db.buf, db.used_sz,
+		if (cf_socket_send_all(&fd_h->sock, db.buf, db.used_sz,
 				MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
 			cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d",
 					CSFD(&fd_h->sock), errno);
