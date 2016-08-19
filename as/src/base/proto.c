@@ -237,7 +237,7 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zu errno %d",
-				CSFD(fd_h->sock), db->used_sz, errno);
+				CSFD(&fd_h->sock), db->used_sz, errno);
 		as_end_of_transaction_force_close(fd_h);
 		return -1;
 	}
