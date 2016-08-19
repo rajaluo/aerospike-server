@@ -806,7 +806,7 @@ socket_wait(cf_socket *sock, uint32_t events, int32_t timeout)
 }
 
 int32_t
-cf_socket_send_to_blocking(cf_socket *sock, const void *buff, size_t size, int32_t flags,
+cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t flags,
 		cf_sock_addr *addr, int32_t timeout)
 {
 	cf_detail(CF_SOCKET, "Blocking send on FD %d, size = %zu", sock->fd, size);
@@ -843,14 +843,14 @@ cf_socket_send_to_blocking(cf_socket *sock, const void *buff, size_t size, int32
 }
 
 int32_t
-cf_socket_send_blocking(cf_socket *sock, const void *buff, size_t size, int32_t flags,
+cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags,
 		int32_t timeout)
 {
-	return cf_socket_send_to_blocking(sock, buff, size, flags, NULL, timeout);
+	return cf_socket_send_to_all(sock, buff, size, flags, NULL, timeout);
 }
 
 int32_t
-cf_socket_recv_from_blocking(cf_socket *sock, void *buff, size_t size, int32_t flags,
+cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags,
 		cf_sock_addr *addr, int32_t timeout)
 {
 	cf_detail(CF_SOCKET, "Blocking receive on FD %d, size = %zu", sock->fd, size);
@@ -887,9 +887,9 @@ cf_socket_recv_from_blocking(cf_socket *sock, void *buff, size_t size, int32_t f
 }
 
 int32_t
-cf_socket_recv_blocking(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout)
+cf_socket_recv_all(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout)
 {
-	return cf_socket_recv_from_blocking(sock, buff, size, flags, NULL, timeout);
+	return cf_socket_recv_from_all(sock, buff, size, flags, NULL, timeout);
 }
 
 static void

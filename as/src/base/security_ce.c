@@ -127,7 +127,7 @@ as_security_transact(as_transaction* tr)
 	// Send the complete response.
 	cf_socket *sock = &tr->from.proto_fd_h->sock;
 
-	if (cf_socket_send_blocking(sock, resp, resp_size, MSG_NOSIGNAL,
+	if (cf_socket_send_all(sock, resp, resp_size, MSG_NOSIGNAL,
 			CF_SOCKET_TIMEOUT) < 0) {
 		cf_warning(AS_SECURITY, "fd %d send failed, errno %d",
 				CSFD(sock), errno);

@@ -233,7 +233,7 @@ as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 		cf_crash(AS_PROTO, "fd is NULL");
 	}
 
-	if (cf_socket_send_blocking(&fd_h->sock, db->buf, db->used_sz, MSG_NOSIGNAL,
+	if (cf_socket_send_all(&fd_h->sock, db->buf, db->used_sz, MSG_NOSIGNAL,
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zu errno %d",
@@ -671,7 +671,7 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 //	cf_detail(AS_PROTO, "write fd %d",fd);
 	int rv;
 
-	if (cf_socket_send_blocking(&fd_h->sock, msgp, msg_sz, MSG_NOSIGNAL,
+	if (cf_socket_send_all(&fd_h->sock, msgp, msg_sz, MSG_NOSIGNAL,
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zu",
@@ -888,7 +888,7 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, in
 int
 as_msg_send_response(cf_socket *sock, uint8_t* buf, size_t len, int flags)
 {
-	if (cf_socket_send_blocking(sock, buf, len, flags, CF_SOCKET_TIMEOUT) < 0) {
+	if (cf_socket_send_all(sock, buf, len, flags, CF_SOCKET_TIMEOUT) < 0) {
 		return -1;
 	}
 

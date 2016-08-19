@@ -547,7 +547,7 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 
 	as_file_handle* fd_h = pr->from.proto_fd_h;
 
-	if (cf_socket_send_blocking(&fd_h->sock, proto, proto_sz, MSG_NOSIGNAL,
+	if (cf_socket_send_all(&fd_h->sock, proto, proto_sz, MSG_NOSIGNAL,
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		as_end_of_transaction_force_close(fd_h);
@@ -1091,7 +1091,7 @@ shipop_handle_client_response(msg* m, rw_request* rw)
 
 	as_file_handle* fd_h = rw->from.proto_fd_h;
 
-	if (cf_socket_send_blocking(&fd_h->sock, proto, proto_sz, MSG_NOSIGNAL,
+	if (cf_socket_send_all(&fd_h->sock, proto, proto_sz, MSG_NOSIGNAL,
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		as_end_of_transaction_force_close(fd_h);

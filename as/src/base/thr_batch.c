@@ -175,7 +175,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 static int
 batch_send(cf_socket *sock, uint8_t* buf, size_t len, int flags)
 {
-	if (cf_socket_send_blocking(sock, buf, len, flags,
+	if (cf_socket_send_all(sock, buf, len, flags,
 			CF_SOCKET_TIMEOUT) < 0) {
 		// Common when a client aborts.
 		cf_debug(AS_BATCH, "batch send response error, errno %d fd %d",

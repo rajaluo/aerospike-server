@@ -4102,7 +4102,7 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 
 	memcpy(buffer, len_buff, MSG_WIRE_LENGTH_SIZE);
 
-	if (cf_socket_recv_blocking(socket, buffer, buffer_len, MSG_NOSIGNAL,
+	if (cf_socket_recv_all(socket, buffer, buffer_len, MSG_NOSIGNAL,
 			MESH_RW_TIMEOUT) < 0) {
 		DETAIL("mesh recv failed fd %d : %s",
 				CSFD(socket), cf_strerror(errno));
@@ -5142,7 +5142,7 @@ channel_mesh_msg_send(cf_socket* socket, byte* buff, size_t buffer_length)
 	CHANNEL_LOCK();
 	int rv;
 
-	if (cf_socket_send_to_blocking(socket, buff, buffer_length, 0, 0,
+	if (cf_socket_send_to_all(socket, buff, buffer_length, 0, 0,
 			MESH_RW_TIMEOUT) < 0) {
 		WARNING("Sending mesh message on fd %d failed : %s",
 			CSFD(socket), cf_strerror(errno));

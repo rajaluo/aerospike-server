@@ -331,14 +331,14 @@ send_blocking_response_chunk(cf_socket *sock, uint8_t* buf, size_t size)
 	proto.sz = size;
 	as_proto_swap(&proto);
 
-	if (cf_socket_send_blocking(sock, (uint8_t*)&proto, sizeof(as_proto),
+	if (cf_socket_send_all(sock, (uint8_t*)&proto, sizeof(as_proto),
 			MSG_NOSIGNAL | MSG_MORE, CF_SOCKET_TIMEOUT) < 0) {
 		cf_warning(AS_SCAN, "send error - fd %d %s", CSFD(sock),
 				cf_strerror(errno));
 		return 0;
 	}
 
-	if (cf_socket_send_blocking(sock, buf, size,
+	if (cf_socket_send_all(sock, buf, size,
 			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
 		cf_warning(AS_SCAN, "send error - fd %d sz %lu %s", CSFD(sock),
 				size, cf_strerror(errno));
@@ -371,7 +371,7 @@ send_blocking_response_fin(cf_socket *sock, int result_code)
 	m.msg.n_ops = 0;
 	as_msg_swap_header(&m.msg);
 
-	if (cf_socket_send_blocking(sock, (uint8_t*)&m, sizeof(cl_msg),
+	if (cf_socket_send_all(sock, (uint8_t*)&m, sizeof(cl_msg),
 			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
 		cf_warning(AS_SCAN, "send error - fd %d %s", CSFD(sock),
 				cf_strerror(errno));
