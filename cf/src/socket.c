@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <inttypes.h>
+#include <poll.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -776,21 +777,18 @@ cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags)
 }
 
 static bool
-socket_wait(cf_socket *sock, uint32_t events, int32_t timeout)
+socket_wait(cf_socket *sock, uint16_t events, int32_t timeout)
 {
-	cf_detail(CF_SOCKET, "Waiting on FD %d with timeout %d", sock->fd, timeout);
-	static __thread cf_poll poll = { .fd = -1 };
+	cf_detail(CF_SOCKET, "Waiting for events 0x%x on FD %d with timeout %d",
+			events, sock->fd, timeout);
 
-	if (CEFD(poll) < 0) {
-		cf_poll_create(&poll);
+	struct pollfd pfd = { .fd = sock->fd, .events = events | POLLRDHUP };
+	int32_t count = poll(&pfd, 1, timeout);
+
+	if (count < 0) {
+		cf_crash(CF_SOCKET, "Error while polling FD %d: %d (%s)",
+				pfd.fd, errno, cf_strerror(errno));
 	}
-
-	cf_poll_add_socket(poll, sock, events, NULL);
-
-	cf_poll_event evs[1];
-	int32_t count = cf_poll_wait(poll, evs, 1, timeout);
-
-	cf_poll_delete_socket(poll, sock);
 
 	if (count == 0) {
 		cf_detail(CF_SOCKET, "Timeout while waiting on FD %d", sock->fd);
@@ -798,7 +796,7 @@ socket_wait(cf_socket *sock, uint32_t events, int32_t timeout)
 	}
 
 	if (count == 1) {
-		cf_detail(CF_SOCKET, "Got events 0x%x on FD %d", evs[0].events, sock->fd);
+		cf_detail(CF_SOCKET, "Got events 0x%x on FD %d", pfd.revents, sock->fd);
 		return true;
 	}
 
@@ -823,7 +821,7 @@ cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t fl
 			if (errno == EAGAIN) {
 				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
 
-				if (socket_wait(sock, EPOLLOUT, timeout)) {
+				if (socket_wait(sock, POLLOUT, timeout)) {
 					continue;
 				}
 
@@ -867,7 +865,7 @@ cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags,
 			if (errno == EAGAIN) {
 				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
 
-				if (socket_wait(sock, EPOLLIN, timeout)) {
+				if (socket_wait(sock, POLLIN, timeout)) {
 					continue;
 				}
 
