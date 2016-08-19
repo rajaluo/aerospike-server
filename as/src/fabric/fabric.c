@@ -413,7 +413,7 @@ fabric_buffer_create(cf_socket *sock)
 {
 	fabric_buffer *fb = cf_rc_alloc(sizeof(fabric_buffer));
 
-	cf_socket_copy(&fb->sock, sock);
+	cf_socket_copy(sock, &fb->sock);
 
 	fb->worker_id = -1; // no worker assigned yet
 	fb->fne = NULL;

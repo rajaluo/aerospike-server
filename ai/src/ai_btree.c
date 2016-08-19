@@ -652,9 +652,9 @@ btree_addsinglerec(as_sindex_metadata *imd, ai_obj * key, cf_digest *dig, cf_ll 
 		}
 	}
 	else {
-		if (!as_partition_is_queryable_lockfree(ns, &ns->partitions[pid])) {
+		if (! client_replica_maps_is_partition_queryable(ns, pid)) {
 			return 0;
-		} 
+		}
 	}
 
 	bool create                     = (cf_ll_size(recl) == 0) ? true : false;

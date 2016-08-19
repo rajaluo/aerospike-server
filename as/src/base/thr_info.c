@@ -64,7 +64,6 @@
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "base/xdr_serverside.h"
 #include "base/secondary_index.h"
 #include "base/security.h"
 #include "base/stats.h"
@@ -361,6 +360,19 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 
 	return(0);
 }
+
+int
+info_get_cluster_id(char *name, cf_dyn_buf *db)
+{
+	char cluster_id[AS_CLUSTER_ID_SZ];
+	as_config_cluster_id_get(cluster_id);
+	if (cluster_id[0] != 0) {
+		cf_dyn_buf_append_string(db, cluster_id);
+	}
+
+	return 0;
+}
+
 
 int
 info_get_partition_generation(char *name, cf_dyn_buf *db)
@@ -3209,50 +3221,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (strcmp(context, "xdr") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "lastshiptime", context, &context_len)) {
-			// Dont print this command in logs as this happens every few seconds
-			// Ideally, this should not be done via config-set.
-			print_command = false;
-
-			uint64_t val[DC_MAX_NUM];
-			char * tmp_val;
-			char *  delim = {","};
-			int i = 0;
-
-			// We do not want junk values in val[]. This is LST array.
-			// Not doing that will lead to wrong LST time going back warnings from the code below.
-			memset(val, 0, sizeof(uint64_t) * DC_MAX_NUM);
-
-			tmp_val = strtok(context, (const char *) delim);
-			while(tmp_val) {
-				if(i >= DC_MAX_NUM) {
-					cf_warning(AS_INFO, "Suspicious \"xdr\" Info command \"lastshiptime\" value: \"%s\"", params);
-					break;
-				}
-				if (0 > cf_str_atoi_u64(tmp_val, &(val[i++]))) {
-					cf_warning(AS_INFO, "bad number in \"xdr\" Info command \"lastshiptime\": \"%s\" for DC %d ~~ Using 0", tmp_val, i - 1);
-					val[i - 1] = 0;
-				}
-				tmp_val = strtok(NULL, (const char *) delim);
-			}
-
-			for(i = 0; i < DC_MAX_NUM; i++) {
-				// Warning only if time went back by 5 mins or more
-				// We are doing subtraction of two uint64_t here. We should be more careful and first check
-				// if the first value is greater.
-				if ((g_config.xdr_self_lastshiptime[i] > val[i]) &&
-						((g_config.xdr_self_lastshiptime[i] - val[i]) > XDR_ACCEPTABLE_TIMEDIFF)) {
-					cf_warning(AS_INFO, "XDR last ship time of this node for DC %d went back to %"PRIu64" from %"PRIu64"",
-							i, val[i], g_config.xdr_self_lastshiptime[i]);
-					cf_debug(AS_INFO, "(Suspicious \"xdr\" Info command \"lastshiptime\" value: \"%s\".)", params);
-				}
-
-				g_config.xdr_self_lastshiptime[i] = val[i];
-			}
-
-			xdr_broadcast_lastshipinfo(val);
-		}
-		else if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
 			print_command = false;
 			cf_node nodeid = atoll(context);
 			xdr_handle_failednodeprocessingdone(nodeid);
@@ -6014,7 +5983,7 @@ as_info_init()
 	as_info_set( hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
 	// All commands accepted by asinfo/telnet
-	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;config-get;config-set;"
+	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-id;config-get;config-set;"
 				"df;digests;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-rw;"
 				"dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
@@ -6022,8 +5991,7 @@ as_info_init()
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
-				"smd;statistics;status;tip;tip-clear;version;"
-				"xdr-min-lastshipinfo",
+				"smd;statistics;status;tip;tip-clear;version;",
 				false);
 	/*
 	 * help intentionally does not include the following:
@@ -6035,6 +6003,7 @@ as_info_init()
 	// Set up some dynamic functions
 	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
 	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true);     // Returns cluster generation.
+	as_info_set_dynamic("cluster-id", info_get_cluster_id, false);                    // Returns cluster id.
 	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
 	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
 	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.

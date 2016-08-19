@@ -3250,7 +3250,6 @@ as_query_init()
 	}
 
 	g_config.query_enable_histogram	 = false;
-	g_config.partitions_pre_reserved = false;
 }
 
 /*
