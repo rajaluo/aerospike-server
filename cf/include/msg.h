@@ -127,6 +127,20 @@ typedef struct msg_t {
 	msg_field			f[];
 } msg;
 
+// msg header on wire.
+typedef struct msg_hdr_s {
+	uint32_t	size;
+	uint16_t	type;
+} __attribute__ ((__packed__)) msg_hdr;
+
+// msg field header on wire.
+typedef struct msg_field_hdr_s {
+	uint16_t	id;
+	uint8_t		type;
+	uint32_t	size;
+	uint8_t		content[];
+} __attribute__ ((__packed__)) msg_field_hdr;
+
 typedef enum {
 	MSG_GET_DIRECT,
 	MSG_GET_COPY_MALLOC
