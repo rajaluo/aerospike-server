@@ -901,6 +901,7 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 		int32_t	recv_sz = cf_socket_recv(&fb->sock, recv_buf, recv_full, 0);
 
 		if (recv_sz == 0) {
+			// Normal for outbound according to POSIX if remote end shutdown.
 			return false;
 		}
 
@@ -926,7 +927,7 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 				return false;
 			}
 
-			return true;
+			break;
 		}
 
 		if (recv_sz == 0) {
