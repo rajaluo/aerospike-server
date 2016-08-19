@@ -362,6 +362,19 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 }
 
 int
+info_get_cluster_id(char *name, cf_dyn_buf *db)
+{
+	char cluster_id[AS_CLUSTER_ID_SZ];
+	as_config_cluster_id_get(cluster_id);
+	if (cluster_id[0] != 0) {
+		cf_dyn_buf_append_string(db, cluster_id);
+	}
+
+	return 0;
+}
+
+
+int
 info_get_partition_generation(char *name, cf_dyn_buf *db)
 {
 	cf_dyn_buf_append_int(db, (int)g_partition_generation);
@@ -5970,7 +5983,7 @@ as_info_init()
 	as_info_set( hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
 	// All commands accepted by asinfo/telnet
-	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;config-get;config-set;"
+	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-id;config-get;config-set;"
 				"df;digests;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-rw;"
 				"dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
@@ -5978,8 +5991,7 @@ as_info_init()
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
-				"smd;statistics;status;tip;tip-clear;version;"
-				"xdr-min-lastshipinfo",
+				"smd;statistics;status;tip;tip-clear;version;",
 				false);
 	/*
 	 * help intentionally does not include the following:
@@ -5991,6 +6003,7 @@ as_info_init()
 	// Set up some dynamic functions
 	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
 	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true);     // Returns cluster generation.
+	as_info_set_dynamic("cluster-id", info_get_cluster_id, false);                    // Returns cluster id.
 	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
 	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
 	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.
