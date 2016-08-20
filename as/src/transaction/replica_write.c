@@ -45,6 +45,7 @@
 #include "base/ldt.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
+#include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h" // for LDTs
