@@ -1363,7 +1363,7 @@ static msg_template g_hb_v2_msg_template[] = {
  * Read write timeout (in ms).
  */
 
-#define MESH_RW_TIMEOUT 1
+#define MESH_RW_TIMEOUT 5
 
 /**
  * Mesh timeout for pending nodes.
