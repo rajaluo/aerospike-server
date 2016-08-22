@@ -281,33 +281,43 @@ msg_fillbuf(const msg *m, uint8_t *buf, size_t *buflen)
 int
 msg_parse(msg *m, const uint8_t *buf, size_t buflen)
 {
-	if (buflen < 6) {
-		return -2;
-	}
-
-	uint32_t len = cf_swap_from_be32(*(uint32_t *)buf);
-
-	if (buflen < len + 6) {
-		return -2;
-	}
-
-	buf += 4;
-
-	uint16_t type = cf_swap_from_be16(*(uint16_t *)buf);
-
-	if (m->type != type) {
-		cf_warning(CF_MSG, "parsed type %d for msg type %d", type, m->type);
+	if (buflen < sizeof(msg_hdr)) {
 		return -1;
 	}
 
-	buf += 2;
+	const msg_hdr *hdr = (const msg_hdr *)buf;
+	buf += sizeof(msg_hdr);
+
+	uint32_t len = cf_swap_from_be32(hdr->size);
+	uint16_t type = cf_swap_from_be16(hdr->type);
+
+	if (buflen < len + sizeof(msg_hdr)) {
+		return -2;
+	}
+
+	if (m->type != type) {
+		cf_warning(CF_MSG, "parsed type %d for msg type %d", type, m->type);
+		return -3;
+	}
 
 	const uint8_t *eob = buf + len;
+	size_t left = len;
 
-	while (buf < eob) {
-		uint32_t id = (buf[0] << 8) | buf[1];
+	while (left > 0) {
+		if (left < sizeof(msg_field_hdr)) {
+			return -4;
+		}
 
-		buf += 2;
+		const msg_field_hdr *fhdr = (const msg_field_hdr *)buf;
+		buf += sizeof(msg_field_hdr);
+
+		uint32_t id = (uint32_t)cf_swap_from_be16(fhdr->id);
+		msg_field_type ft = (msg_field_type)fhdr->type;
+		uint32_t flen = cf_swap_from_be32(fhdr->size);
+
+		if (left < sizeof(msg_field_hdr) + flen) {
+			return -5;
+		}
 
 		msg_field *mf;
 
@@ -322,14 +332,8 @@ msg_parse(msg *m, const uint8_t *buf, size_t buflen)
 			}
 		}
 
-		msg_field_type ft = (msg_field_type)*buf++;
-		uint32_t flen = cf_swap_from_be32(*(uint32_t *)buf);
-
-		buf += 4;
-
 		if (mf && ft != mf->type) {
-			cf_warning(CF_MSG, "msg type %d: parsed type %d for field type %d",
-					m->type, ft, mf->type);
+			cf_warning(CF_MSG, "msg type %d: parsed type %d for field type %d", m->type, ft, mf->type);
 			mf = NULL;
 		}
 
@@ -354,8 +358,7 @@ msg_parse(msg *m, const uint8_t *buf, size_t buflen)
 				mf->free = false;
 				break;
 			default:
-				cf_detail(CF_MSG, "msg_parse: field type %d not supported - skipping",
-						mf->type);
+				cf_detail(CF_MSG, "msg_parse: field type %d not supported - skipping", mf->type);
 				break;
 			}
 
@@ -363,6 +366,7 @@ msg_parse(msg *m, const uint8_t *buf, size_t buflen)
 		}
 
 		buf += flen;
+		left = eob - buf;
 	}
 
 	m->just_parsed = true;
@@ -370,25 +374,17 @@ msg_parse(msg *m, const uint8_t *buf, size_t buflen)
 	return 0;
 }
 
-
 int
-msg_get_initial(uint32_t *size_r, msg_type *type_r, const uint8_t *buf,
-		uint32_t buflen)
+msg_get_initial(uint32_t *size_r, msg_type *type_r, const uint8_t *buf, uint32_t buflen)
 {
-	if (buflen < 6) {
-		return -2;
+	if (buflen < sizeof(msg_hdr)) {
+		return -1;
 	}
 
-	uint32_t size = cf_swap_from_be32(*(uint32_t *)buf);
+	const msg_hdr *hdr = (const msg_hdr *)buf;
 
-	buf += 4;
-
-	size += 6; // size does not include this header
-	*size_r = size;
-
-	uint16_t type = cf_swap_from_be16(*(uint16_t *)buf);
-
-	*type_r = type;
+	*size_r = cf_swap_from_be32(hdr->size) + sizeof(msg_hdr);
+	*type_r = (msg_type)cf_swap_from_be16(hdr->type);
 
 	return 0;
 }
