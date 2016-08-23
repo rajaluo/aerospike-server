@@ -837,7 +837,7 @@ cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t fl
 	}
 
 	cf_detail(CF_SOCKET, "Blocking send on FD %d complete", sock->fd);
-	return size;
+	return 0;
 }
 
 int32_t
@@ -881,7 +881,7 @@ cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags,
 	}
 
 	cf_detail(CF_SOCKET, "Blocking receive on FD %d complete", sock->fd);
-	return size;
+	return 0;
 }
 
 int32_t
