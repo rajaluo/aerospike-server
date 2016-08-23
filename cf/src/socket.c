@@ -814,10 +814,6 @@ cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t fl
 		ssize_t count = cf_socket_send_to(sock, buff + off, size - off, flags, addr);
 
 		if (count < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-
 			if (errno == EAGAIN) {
 				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
 
@@ -858,10 +854,6 @@ cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags,
 		ssize_t count = cf_socket_recv_from(sock, buff + off, size - off, flags, addr);
 
 		if (count < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-
 			if (errno == EAGAIN) {
 				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
 
