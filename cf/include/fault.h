@@ -220,7 +220,7 @@ extern void cf_fault_event_nostack(const cf_fault_context,
 				(void)0 : \
 				cf_fault_event_nostack((context), (severity), __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
 #define cf_crash_nostack(context, __msg, ...) \
-		(cf_fault_event_nostack((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__), abort())
+		cf_fault_event_nostack((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__)
 
 #define MAX_BACKTRACE_DEPTH 50
 
@@ -250,7 +250,7 @@ do { \
 				cf_fault_event((context), severity, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
 
 #define cf_crash(context, __msg, ...) \
-		(cf_fault_event((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__), abort())
+		cf_fault_event((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__)
 
 #define cf_warning(...) __SEVLOG(CF_WARNING, ##__VA_ARGS__)
 #define cf_info(...) __SEVLOG(CF_INFO, ##__VA_ARGS__)
@@ -269,7 +269,7 @@ do { \
 				cf_fault_event2((context), severity, __FILENAME__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__))
 
 #define cf_crash_binary(context, ptr, len, DT, __msg, ...) \
-		(cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__), abort())
+		cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __LINE__, ptr, len, DT, (__msg), ##__VA_ARGS__)
 
 #define cf_warning_binary(...) __BINARY_SEVLOG(CF_WARNING, ##__VA_ARGS__)
 #define cf_info_binary(...) __BINARY_SEVLOG(CF_INFO, ##__VA_ARGS__)
@@ -283,7 +283,7 @@ do { \
 				cf_fault_event2((context), severity, __FILENAME__, __LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__))
 
 #define cf_crash_digest(context, ptr,__msg, ...) \
-		(cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__), abort())
+		cf_fault_event2((context), CF_CRITICAL, __FILENAME__, __LINE__, ptr, 20, CF_DISPLAY_HEX_DIGEST, (__msg), ##__VA_ARGS__)
 
 #define cf_warning_digest(...)  __DIGEST_SEVLOG(CF_WARNING, ##__VA_ARGS__)
 #define cf_info_digest(...)  __DIGEST_SEVLOG(CF_INFO, ##__VA_ARGS__)
