@@ -45,6 +45,7 @@
 #include "base/ldt.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
+#include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h" // for LDTs
@@ -1022,7 +1023,8 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		as_storage_record_open(ns, r, &rd, keyd);
 	}
 
-	bool has_sindex = (info & RW_INFO_SINDEX_TOUCHED) != 0 || (rv && as_sindex_ns_has_sindex(ns));
+	bool has_sindex = (info & RW_INFO_SINDEX_TOUCHED) != 0 ||
+			(is_create && as_sindex_ns_has_sindex(ns));
 
 	rd.ignore_record_on_device = ! has_sindex && ! is_ldt_parent;
 	rd.n_bins = as_bin_get_n_bins(r, &rd);

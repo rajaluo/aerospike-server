@@ -2417,6 +2417,9 @@ as_config_init(const char *config_file)
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V2:
 					c->hb_config.hb_protocol = AS_HB_PROTOCOL_V2;
 					break;
+				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V3:
+					c->hb_config.hb_protocol = AS_HB_PROTOCOL_V3;
+					break;
 				case CASE_NOT_FOUND:
 				default:
 					cfg_unknown_val_tok_1(&line);

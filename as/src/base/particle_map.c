@@ -7246,8 +7246,8 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state, cdt_modify_
 		}
 
 		if (! as_bin_inuse(b)) {
-			// no-op.
-			break;
+			cdt_udata->ret_code = -AS_PROTO_RESULT_FAIL_ELEMENT_NOT_FOUND;
+			return false;
 		}
 
 		map_add_control control = {

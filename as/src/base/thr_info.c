@@ -336,20 +336,6 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	return 0;
 }
 
-int
-info_command_set_hb_protocol_v3(char* name, cf_dyn_buf* db)
-{
-	hb_protocol_enum protocol = AS_HB_PROTOCOL_V3;
-	cf_info(AS_INFO, "Changing value of heartbeat protocol version to v3");
-	if (0 > as_hb_set_protocol(protocol))
-		cf_dyn_buf_append_string(db, "error");
-	else
-		cf_dyn_buf_append_string(db, "done");
-
-	return 0;
-}
-
-
 cf_atomic32	 g_node_info_generation = 0;
 
 
@@ -2614,9 +2600,10 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "heartbeat.protocol", context, &context_len)) {
 			hb_protocol_enum protocol = (!strcmp(context, "v1") ? AS_HB_PROTOCOL_V1 :
 										 (!strcmp(context, "v2") ? AS_HB_PROTOCOL_V2 :
+										  (!strcmp(context, "v3") ? AS_HB_PROTOCOL_V3 :
 										  (!strcmp(context, "reset") ? AS_HB_PROTOCOL_RESET :
 										   (!strcmp(context, "none") ? AS_HB_PROTOCOL_NONE :
-											AS_HB_PROTOCOL_UNDEF))));
+											AS_HB_PROTOCOL_UNDEF)))));
 			if (AS_HB_PROTOCOL_UNDEF == protocol)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of heartbeat protocol version to %s", context);
@@ -6012,7 +5999,6 @@ as_info_init()
 	as_info_set_dynamic("services-alumni-reset", info_services_alumni_reset, false);  // Reset the services alumni to equal services
 	as_info_set_dynamic("sets", info_get_sets, false);                                // Returns set statistics for all or a particular set.
 	as_info_set_dynamic("statistics", info_get_stats, true);                          // Returns system health and usage stats for this server.
-	as_info_set_dynamic("switch-hb-v3", info_command_set_hb_protocol_v3, false);      // Set heartbeat protocol to v3(Temporary for testing v3).
 
 #ifdef INFO_SEGV_TEST
 	as_info_set_dynamic("segvtest", info_segv_test, true);
