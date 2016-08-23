@@ -125,32 +125,15 @@ as_security_transact(as_transaction* tr)
 	p_sec_msg->result = AS_SEC_ERR_NOT_SUPPORTED;
 
 	// Send the complete response.
-	uint8_t* p_write = resp;
-	uint8_t* p_end = resp + resp_size;
 	cf_socket *sock = &tr->from.proto_fd_h->sock;
 
-	while (p_write < p_end) {
-		int rv = cf_socket_send(sock, (void*)p_write, p_end - p_write, MSG_NOSIGNAL);
-
-		if (rv > 0) {
-			p_write += rv;
-		}
-		else if (rv == 0) {
-			cf_warning(AS_SECURITY, "fd %d send returned 0", CSFD(sock));
-			as_end_of_transaction_force_close(tr->from.proto_fd_h);
-			tr->from.proto_fd_h = NULL;
-			return;
-		}
-		// rv < 0
-		else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			usleep(1);
-		}
-		else {
-			cf_warning(AS_SECURITY, "fd %d send failed, errno %d", CSFD(sock), errno);
-			as_end_of_transaction_force_close(tr->from.proto_fd_h);
-			tr->from.proto_fd_h = NULL;
-			return;
-		}
+	if (cf_socket_send_all(sock, resp, resp_size, MSG_NOSIGNAL,
+			CF_SOCKET_TIMEOUT) < 0) {
+		cf_warning(AS_SECURITY, "fd %d send failed, errno %d",
+				CSFD(sock), errno);
+		as_end_of_transaction_force_close(tr->from.proto_fd_h);
+		tr->from.proto_fd_h = NULL;
+		return;
 	}
 
 	as_end_of_transaction_ok(tr->from.proto_fd_h);

@@ -1168,11 +1168,6 @@ static msg_template g_hb_v2_msg_template[] = {
 #define MSG_WIRE_LENGTH_SIZE (4)
 
 /**
- * Maximum retries for reading a message.
- */
-#define MSG_READ_RETRY_MAX (3)
-
-/**
  * A hard limit on the buffer size for parsing incoming messages.
  */
 #define MSG_BUFFER_MAX_SIZE() (10 * 1024 * 1024)
@@ -1365,9 +1360,10 @@ static msg_template g_hb_v2_msg_template[] = {
 #define ADJACENCY_TEND_INTERVAL() (PULSE_TRANSMIT_INTERVAL())
 
 /**
- * Read write timeout.
+ * Read write timeout (in ms).
  */
-#define MESH_RW_TIMEOUT() (config_hb_mesh_rw_retry_timeout_get())
+
+#define MESH_RW_TIMEOUT 5
 
 /**
  * Mesh timeout for pending nodes.
@@ -1556,7 +1552,6 @@ static uint32_t config_hb_max_intervals_missed_get();
 static void config_hb_max_intervals_missed_set(uint32_t new_max);
 static int config_hb_fabric_grace_factor_get();
 static void config_hb_fabric_grace_factor_set(int new_factor);
-static uint32_t config_hb_mesh_rw_retry_timeout_get();
 static uint32_t config_override_mtu_get();
 static void config_override_mtu_set(uint32_t mtu);
 static unsigned char config_hb_mcast_ttl_get();
@@ -1971,8 +1966,6 @@ as_hb_info_config_get(cf_dyn_buf* db)
 	  config_hb_bind_interface_addr_s_get()); // TODO - empty string ok?
 	info_append_uint32(db, "heartbeat.mcast-ttl",
 			   config_hb_mcast_ttl_get());
-	info_append_uint32(db, "heartbeat.mesh-rw-retry-timeout",
-			   config_hb_mesh_rw_retry_timeout_get());
 	info_append_int(db, "heartbeat.mtu", MTU());
 
 	char protocol_s[AS_HB_PROTOCOL_STR_MAX_LEN()];
@@ -3394,16 +3387,6 @@ config_hb_fabric_grace_factor_set(int new_factor)
 }
 
 /**
- * Get the heartbeat pulse transmit interval.
- */
-static uint32_t
-config_hb_mesh_rw_retry_timeout_get()
-{
-	// Not protected by config_lock beacuse it is not changed.
-	return g_config.hb_config.hb_mesh_rw_retry_timeout;
-}
-
-/**
  * Return ttl for multicast packets. Set to zero for default TTL.
  */
 static unsigned char
@@ -4119,49 +4102,16 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 
 	memcpy(buffer, len_buff, MSG_WIRE_LENGTH_SIZE);
 
-	int try_num = MSG_READ_RETRY_MAX;
-	// Note: Buffer length includes the length as well.
-	int read_so_far = 0;
-	cf_clock start = cf_getus();
-
-	do {
-
-		DETAIL("reading from tcp fd %d try %d remaining %d",
-		       CSFD(socket), try_num, buffer_len - read_so_far);
-
-		int ret =
-		  cf_socket_recv(socket, (buffer + read_so_far),
-				 buffer_len - read_so_far, MSG_NOSIGNAL);
-
-		if (ret < 0 && (errno != EAGAIN && errno != EWOULDBLOCK)) {
-			// Channel failure.
-			DEBUG("Channel failure reading message on fd %d",
-			      CSFD(socket));
-			break;
-		}
-
-		read_so_far += ret > 0 ? ret : 0;
-
-		if (read_so_far == buffer_len) {
-			// Successful recv.
-			break;
-		}
-
-		// Wait for a while and retry.
-		usleep(MESH_RW_TIMEOUT() / MSG_READ_RETRY_MAX);
-
-	} while (--try_num > 0 && ((start + MESH_RW_TIMEOUT()) > cf_getus()));
-
-	if (read_so_far < buffer_len) {
-		// Recv incomplete.
-		DETAIL("mesh recv failed fd %d try %d message size %d",
-		       CSFD(socket), try_num, buffer_len);
+	if (cf_socket_recv_all(socket, buffer, buffer_len, MSG_NOSIGNAL,
+			MESH_RW_TIMEOUT) < 0) {
+		DETAIL("mesh recv failed fd %d : %s",
+				CSFD(socket), cf_strerror(errno));
 		rv = AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
 		goto Exit;
 	}
 
-	DETAIL("mesh recv success fd %d try %d message size %d", CSFD(socket),
-	       try_num, buffer_len);
+	DETAIL("mesh recv success fd %d message size %d",
+			CSFD(socket), buffer_len);
 
 	rv = channel_message_parse(msg, buffer, buffer_len);
 Exit:
@@ -5189,57 +5139,18 @@ channel_stop()
 static int
 channel_mesh_msg_send(cf_socket* socket, byte* buff, size_t buffer_length)
 {
-
 	CHANNEL_LOCK();
+	int rv;
 
-	int rv = -1;
-	int retry = 0;
-	const int max_retry = 3;
-	size_t orig_size = buffer_length;
-	cf_clock start = cf_getus();
-	do {
-		DETAIL(
-		  "Sending mesh message on fd %d retry count:%d msg_size:%zu",
-		  CSFD(socket), retry, buffer_length);
-
-		int ret = cf_socket_send_to(socket, buff, buffer_length, 0, 0);
-		if ((ret < 0) &&
-		    ((errno != EAGAIN) || (errno != EWOULDBLOCK))) {
-			break;
-		} else if (ret > 0) {
-			buff += ret;	  // incrementing buff pointer
-			buffer_length -= ret; // decreasing msg_size to be sent
-		}
-
-		if (buffer_length > 0) {
-			retry++;
-			usleep(MESH_RW_TIMEOUT() / 3);
-		} else {
-			DETAIL("Sent mesh message fd %d retry "
-			       "count:%d msg_size:%zu complete msg "
-			       "sent",
-			       CSFD(socket), retry, buffer_length);
-			rv = 0;
-			break;
-		}
-	} while (((start + MESH_RW_TIMEOUT()) > cf_getus()) &&
-		 (retry < max_retry));
-
-	if (buffer_length != 0) {
-		if (buffer_length != orig_size) {
-			WARNING(
-			  "Fd %d incomplete mesh msg sent. %zu bytes left "
-			  "out of %zu bytes.",
-			  CSFD(socket), buffer_length, orig_size);
-		} else {
-			WARNING("Sending mesh message on fd %d failed : %s",
-				CSFD(socket), cf_strerror(errno));
-		}
-
-		// Initiate a shutdown of the socket by blocking all read and
-		// write.
+	if (cf_socket_send_to_all(socket, buff, buffer_length, 0, 0,
+			MESH_RW_TIMEOUT) < 0) {
+		WARNING("Sending mesh message on fd %d failed : %s",
+			CSFD(socket), cf_strerror(errno));
 		channel_socket_shutdown(socket);
 		rv = -1;
+	}
+	else {
+		rv = 0;
 	}
 
 	CHANNEL_UNLOCK();
@@ -7228,14 +7139,7 @@ static void
 mesh_dump(bool verbose)
 {
 
-	if (!IS_MESH()) {
-		return;
-	}
-
-	cf_info(AS_HB, "HB Mesh RW Retry Timeout:  %d",
-		config_hb_mesh_rw_retry_timeout_get());
-
-	if (!verbose) {
+	if (!IS_MESH() || !verbose) {
 		return;
 	}
 

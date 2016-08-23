@@ -3834,24 +3834,12 @@ thr_info_fn(void *unused)
 		db.buf[7] = sz & 0xff;
 
 		// write the data buffer
-		uint8_t	*b = db.buf;
-		uint8_t	*lim = db.buf + db.used_sz;
-		while (b < lim) {
-			int rv = cf_socket_send(&fd_h->sock, b, lim - b, MSG_NOSIGNAL);
-			if ((rv < 0) && (errno != EAGAIN) ) {
-				if (errno == EPIPE) {
-					cf_debug(AS_INFO, "thr_info: client request gave up while I was processing: fd %d", CSFD(&fd_h->sock));
-				} else {
-					cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d", CSFD(&fd_h->sock), errno);
-				}
-				as_end_of_transaction_force_close(fd_h);
-				fd_h = NULL;
-				break;
-			}
-			else if (rv > 0)
-				b += rv;
-			else
-				usleep(1);
+		if (cf_socket_send_all(&fd_h->sock, db.buf, db.used_sz,
+				MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
+			cf_info(AS_INFO, "thr_info: can't write all bytes, fd %d error %d",
+					CSFD(&fd_h->sock), errno);
+			as_end_of_transaction_force_close(fd_h);
+			fd_h = NULL;
 		}
 
 		cf_dyn_buf_free(&db);

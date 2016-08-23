@@ -124,25 +124,12 @@ static int batch_buffer_arena_huge;
 static int
 as_batch_send(cf_socket *sock, uint8_t* buf, size_t len, int flags)
 {
-	// Send response to client socket.
-	int rv;
-	int pos = 0;
-
-	while (pos < len) {
-		rv = cf_socket_send(sock, buf + pos, len - pos, flags);
-
-		if (rv <= 0) {
-			if (errno != EAGAIN) {
-				// This error may occur frequently if client is timing out transactions.
-				// Therefore, use debug level.
-				cf_debug(AS_BATCH, "Batch send response error returned %d errno %d fd %d", rv, errno, CSFD(sock));
-				return -1;
-			}
-		}
-		else {
-			pos += rv;
-		}
+	if (cf_socket_send_all(sock, buf, len, flags, CF_SOCKET_TIMEOUT) < 0) {
+		// Common when a client aborts.
+		cf_debug(AS_BATCH, "Batch send response error, errno %d fd %d", errno, CSFD(sock));
+		return -1;
 	}
+
 	return 0;
 }
 

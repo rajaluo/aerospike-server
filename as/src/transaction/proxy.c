@@ -546,34 +546,15 @@ proxyer_handle_client_response(msg* m, proxy_request* pr)
 	}
 
 	as_file_handle* fd_h = pr->from.proto_fd_h;
-	size_t pos = 0;
 
-	while (pos < proto_sz) {
-		int rv = cf_socket_send(&fd_h->sock, proto + pos, proto_sz - pos,
-				MSG_NOSIGNAL);
-
-		if (rv > 0) {
-			pos += rv;
-		}
-		else if (rv < 0) {
-			if (errno != EWOULDBLOCK) {
-				// Common when a client aborts.
-				as_end_of_transaction_force_close(fd_h);
-				return AS_PROTO_RESULT_FAIL_UNKNOWN;
-			}
-
-			usleep(1); // yield
-		}
-		else {
-			cf_warning(AS_PROTO, "send returned 0: fd %d sz %zu pos %zu ",
-					CSFD(&fd_h->sock), proto_sz, pos);
-			as_end_of_transaction_force_close(fd_h);
-			return AS_PROTO_RESULT_FAIL_UNKNOWN;
-		}
+	if (cf_socket_send_all(&fd_h->sock, proto, proto_sz, MSG_NOSIGNAL,
+			CF_SOCKET_TIMEOUT) < 0) {
+		// Common when a client aborts.
+		as_end_of_transaction_force_close(fd_h);
+		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
 	as_end_of_transaction_ok(fd_h);
-
 	return AS_PROTO_RESULT_OK;
 }
 
@@ -1109,30 +1090,12 @@ shipop_handle_client_response(msg* m, rw_request* rw)
 	}
 
 	as_file_handle* fd_h = rw->from.proto_fd_h;
-	size_t pos = 0;
 
-	while (pos < proto_sz) {
-		int rv = cf_socket_send(&fd_h->sock, proto + pos, proto_sz - pos,
-				MSG_NOSIGNAL);
-
-		if (rv > 0) {
-			pos += rv;
-		}
-		else if (rv < 0) {
-			if (errno != EWOULDBLOCK) {
-				// Common when a client aborts.
-				as_end_of_transaction_force_close(fd_h);
-				return;
-			}
-
-			usleep(1); // yield
-		}
-		else {
-			cf_warning(AS_PROTO, "send returned 0: fd %d sz %zu pos %zu ",
-					CSFD(&fd_h->sock), proto_sz, pos);
-			as_end_of_transaction_force_close(fd_h);
-			return;
-		}
+	if (cf_socket_send_all(&fd_h->sock, proto, proto_sz, MSG_NOSIGNAL,
+			CF_SOCKET_TIMEOUT) < 0) {
+		// Common when a client aborts.
+		as_end_of_transaction_force_close(fd_h);
+		return;
 	}
 
 	as_end_of_transaction_ok(fd_h);

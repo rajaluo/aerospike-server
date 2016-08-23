@@ -178,7 +178,6 @@ cfg_set_defaults()
 	c->hb_config.hb_tx_interval = 150;
 	c->hb_config.hb_max_intervals_missed = 10;
 	c->hb_config.hb_fabric_grace_factor = -1; // Inifinite fabric grace period.
-	c->hb_config.hb_mesh_rw_retry_timeout = 500;
 	c->hb_config.hb_protocol = AS_HB_PROTOCOL_V2;
 	c->hb_config.override_mtu = 0;
 
@@ -429,7 +428,6 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR,
 	CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS,
 	CASE_NETWORK_HEARTBEAT_MCAST_TTL,
-	CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT,
 	CASE_NETWORK_HEARTBEAT_MTU,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL,
 
@@ -844,7 +842,6 @@ const cfg_opt NETWORK_HEARTBEAT_OPTS[] = {
 		{ "fabric-grace-factor",			CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR },
 		{ "interface-address",				CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS },
 		{ "mcast-ttl",						CASE_NETWORK_HEARTBEAT_MCAST_TTL },
-		{ "mesh-rw-retry-timeout",			CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT },
 		{ "mtu",							CASE_NETWORK_HEARTBEAT_MTU },
 		{ "protocol",						CASE_NETWORK_HEARTBEAT_PROTOCOL },
 		{ "}",								CASE_CONTEXT_END }
@@ -2405,9 +2402,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NETWORK_HEARTBEAT_MCAST_TTL:
 				c->hb_config.hb_mcast_ttl = cfg_u8_no_checks(&line);
-				break;
-			case CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT:
-				c->hb_config.hb_mesh_rw_retry_timeout = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MTU:
 				c->hb_config.override_mtu = cfg_u32_no_checks(&line);

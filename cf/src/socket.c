@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <inttypes.h>
+#include <poll.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -716,7 +717,7 @@ cf_socket_available(cf_socket *sock)
 }
 
 int32_t
-cf_socket_send_to(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
+cf_socket_send_to(cf_socket *sock, const void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
 {
 	struct sockaddr_storage sas;
 	struct sockaddr *sa = NULL;
@@ -739,7 +740,7 @@ cf_socket_send_to(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_so
 }
 
 int32_t
-cf_socket_send(cf_socket *sock, void *buff, size_t size, int32_t flags)
+cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags)
 {
 	return cf_socket_send_to(sock, buff, size, flags, NULL);
 }
@@ -773,6 +774,119 @@ int32_t
 cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags)
 {
 	return cf_socket_recv_from(sock, buff, size, flags, NULL);
+}
+
+static bool
+socket_wait(cf_socket *sock, uint16_t events, int32_t timeout)
+{
+	cf_detail(CF_SOCKET, "Waiting for events 0x%x on FD %d with timeout %d",
+			events, sock->fd, timeout);
+
+	struct pollfd pfd = { .fd = sock->fd, .events = events | POLLRDHUP };
+
+	while (true) {
+		int32_t count = poll(&pfd, 1, timeout);
+
+		if (count < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+
+			cf_crash(CF_SOCKET, "Error while polling FD %d: %d (%s)",
+					pfd.fd, errno, cf_strerror(errno));
+		}
+
+		if (count > 1) {
+			cf_crash(CF_SOCKET, "Unexpected number of events on FD %d: %d", sock->fd, count);
+		}
+
+		if (count == 0) {
+			cf_detail(CF_SOCKET, "Timeout while waiting on FD %d", sock->fd);
+			return false;
+		}
+
+		cf_detail(CF_SOCKET, "Got events 0x%x on FD %d", pfd.revents, sock->fd);
+		return true;
+	}
+}
+
+int32_t
+cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t flags,
+		cf_sock_addr *addr, int32_t timeout)
+{
+	cf_detail(CF_SOCKET, "Blocking send on FD %d, size = %zu", sock->fd, size);
+	size_t off = 0;
+
+	while (off < size) {
+		ssize_t count = cf_socket_send_to(sock, buff + off, size - off, flags, addr);
+
+		if (count < 0) {
+			if (errno == EAGAIN) {
+				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
+
+				if (socket_wait(sock, POLLOUT, timeout)) {
+					continue;
+				}
+
+				cf_debug(CF_SOCKET, "Timeout during blocking send on FD %d", sock->fd);
+				errno = ETIMEDOUT;
+				return -1;
+			}
+
+			return -1;
+		}
+
+		off += count;
+	}
+
+	cf_detail(CF_SOCKET, "Blocking send on FD %d complete", sock->fd);
+	return 0;
+}
+
+int32_t
+cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags,
+		int32_t timeout)
+{
+	return cf_socket_send_to_all(sock, buff, size, flags, NULL, timeout);
+}
+
+int32_t
+cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags,
+		cf_sock_addr *addr, int32_t timeout)
+{
+	cf_detail(CF_SOCKET, "Blocking receive on FD %d, size = %zu", sock->fd, size);
+	size_t off = 0;
+
+	while (off < size) {
+		ssize_t count = cf_socket_recv_from(sock, buff + off, size - off, flags, addr);
+
+		if (count < 0) {
+			if (errno == EAGAIN) {
+				cf_debug(CF_SOCKET, "FD %d is blocking", sock->fd);
+
+				if (socket_wait(sock, POLLIN, timeout)) {
+					continue;
+				}
+
+				cf_debug(CF_SOCKET, "Timeout during blocking receive on FD %d", sock->fd);
+				errno = ETIMEDOUT;
+				return -1;
+			}
+
+			return -1;
+		}
+
+		off += count;
+	}
+
+	cf_detail(CF_SOCKET, "Blocking receive on FD %d complete", sock->fd);
+	return 0;
+}
+
+int32_t
+cf_socket_recv_all(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout)
+{
+	return cf_socket_recv_from_all(sock, buff, size, flags, NULL, timeout);
 }
 
 static void
@@ -1040,7 +1154,7 @@ cf_poll_modify_socket_forgiving(cf_poll poll, cf_socket *sock, uint32_t events, 
 int32_t
 cf_poll_delete_socket_forgiving(cf_poll poll, cf_socket *sock, int32_t n_err_ok, int32_t *err_ok)
 {
-	cf_debug(CF_SOCKET, "Deleting FD %d from epoll instance with FD %d", sock->fd, poll.fd);
+	cf_detail(CF_SOCKET, "Deleting FD %d from epoll instance with FD %d", sock->fd, poll.fd);
 
 	if (epoll_ctl(poll.fd, EPOLL_CTL_DEL, sock->fd, NULL) < 0) {
 		for (int32_t i = 0; i < n_err_ok; ++i) {

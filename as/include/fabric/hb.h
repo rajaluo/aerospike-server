@@ -113,11 +113,6 @@ typedef struct as_hb_config_s
 	int hb_fabric_grace_factor;
 
 	/**
-	 * The timeout for mesh message read / write.
-	 */
-	uint32_t hb_mesh_rw_retry_timeout;
-
-	/**
 	 * The ttl for multicast packets. Set to zero for default TTL.
 	 */
 	unsigned char hb_mcast_ttl;

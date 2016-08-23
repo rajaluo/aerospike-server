@@ -229,45 +229,21 @@ as_msg_make_response_msg(uint32_t result_code, uint32_t generation,
 int
 as_msg_send_ops_reply(as_file_handle *fd_h, cf_dyn_buf *db)
 {
-	int rv = 0;
-
 	if (! cf_socket_exists(&fd_h->sock)) {
 		cf_crash(AS_PROTO, "fd is NULL");
 	}
 
-	uint8_t *msgp = db->buf;
-	size_t msg_sz = db->used_sz;
-	size_t pos = 0;
-
-	while (pos < msg_sz) {
-		int result = cf_socket_send(&fd_h->sock, msgp + pos, msg_sz - pos, MSG_NOSIGNAL);
-
-		if (result > 0) {
-			pos += result;
-		}
-		else if (result < 0) {
-			if (errno != EWOULDBLOCK) {
-				// Common when a client aborts.
-				cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zd pos %zd rv %d errno %d", CSFD(&fd_h->sock), msg_sz, pos, rv, errno);
-				as_end_of_transaction_force_close(fd_h);
-				rv = -1;
-				goto Exit;
-			}
-
-			usleep(1); // yield
-		}
-		else {
-			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ", CSFD(&fd_h->sock), msg_sz, pos);
-			as_end_of_transaction_force_close(fd_h);
-			rv = -1;
-			goto Exit;
-		}
+	if (cf_socket_send_all(&fd_h->sock, db->buf, db->used_sz, MSG_NOSIGNAL,
+			CF_SOCKET_TIMEOUT) < 0) {
+		// Common when a client aborts.
+		cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zu errno %d",
+				CSFD(&fd_h->sock), db->used_sz, errno);
+		as_end_of_transaction_force_close(fd_h);
+		return -1;
 	}
 
 	as_end_of_transaction_ok(fd_h);
-
-Exit:
-	return rv;
+	return 0;
 }
 
 
@@ -676,8 +652,6 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 		uint32_t void_time, as_msg_op **ops, as_bin **bins, uint16_t bin_count,
 		as_namespace *ns, uint64_t trid, const char *setname)
 {
-	int rv = 0;
-
 	// most cases are small messages - try to stack alloc if we can
 	byte fb[MSG_STACK_BUFFER_SZ];
 	size_t msg_sz = sizeof(fb);
@@ -695,33 +669,21 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 	}
 
 //	cf_detail(AS_PROTO, "write fd %d",fd);
+	int rv;
 
-	size_t pos = 0;
-	while (pos < msg_sz) {
-		int rv = cf_socket_send(&fd_h->sock, msgp + pos, msg_sz - pos, MSG_NOSIGNAL);
-		if (rv > 0) {
-			pos += rv;
-		}
-		else if (rv < 0) {
-			if (errno != EWOULDBLOCK) {
-				// common message when a client aborts
-				cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zd pos %zd rv %d errno %d", CSFD(&fd_h->sock), msg_sz, pos, rv, errno);
-				as_end_of_transaction_force_close(fd_h);
-				rv = -1;
-				goto Exit;
-			}
-			usleep(1); // Yield
-		} else {
-			cf_info(AS_PROTO, "protocol write fail zero return: fd %d sz %zu pos %zu ", CSFD(&fd_h->sock), msg_sz, pos);
-			as_end_of_transaction_force_close(fd_h);
-			rv = -1;
-			goto Exit;
-		}
+	if (cf_socket_send_all(&fd_h->sock, msgp, msg_sz, MSG_NOSIGNAL,
+			CF_SOCKET_TIMEOUT) < 0) {
+		// Common when a client aborts.
+		cf_debug(AS_PROTO, "protocol write fail: fd %d sz %zu",
+				CSFD(&fd_h->sock), msg_sz);
+		as_end_of_transaction_force_close(fd_h);
+		rv = -1;
+	}
+	else {
+		as_end_of_transaction_ok(fd_h);
+		rv = 0;
 	}
 
-	as_end_of_transaction_ok(fd_h);
-
-Exit:
 	if ((uint8_t *)msgp != fb)
 		cf_free(msgp);
 
@@ -926,22 +888,10 @@ as_msg_make_val_response_bufbuilder(const as_val *val, cf_buf_builder **bb_r, in
 int
 as_msg_send_response(cf_socket *sock, uint8_t* buf, size_t len, int flags)
 {
-	int rv;
-	int pos = 0;
-
-	while (pos < len) {
-		rv = cf_socket_send(sock, buf + pos, len - pos, flags);
-
-		if (rv <= 0) {
-			if (errno != EAGAIN) {
-				cf_info(AS_PROTO, "send response error returned %d errno %d fd %d", rv, errno, CSFD(sock));
-				return -1;
-			}
-		}
-		else {
-			pos += rv;
-		}
+	if (cf_socket_send_all(sock, buf, len, flags, CF_SOCKET_TIMEOUT) < 0) {
+		return -1;
 	}
+
 	return 0;
 }
 
