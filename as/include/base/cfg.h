@@ -106,7 +106,6 @@ typedef struct as_config_s {
 	PAD_BOOL		svc_benchmarks_enabled;
 	PAD_BOOL		info_hist_enabled;
 	int				n_fabric_workers;
-	PAD_BOOL		generation_disable;
 	uint32_t		hist_track_back; // total time span in seconds over which to cache data
 	uint32_t		hist_track_slice; // period in seconds at which to cache histogram data
 	char*			hist_track_thresholds; // comma-separated bucket (ms) values to track

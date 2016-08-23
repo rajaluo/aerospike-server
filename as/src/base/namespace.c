@@ -132,6 +132,8 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->migrate_sleep = 1;
 	ns->obj_size_hist_max = OBJ_SIZE_HIST_NUM_BUCKETS;
 	ns->single_bin = false;
+	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
+	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
 	ns->stop_writes_pct = 0.9; // stop writes when 90% of either memory or disk is used
 
 	// Set default server policies which are used only when the corresponding override is true:
@@ -160,6 +162,7 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	ns->storage_post_write_queue = 256; // number of wblocks per device used as post-write cache
 	ns->storage_read_block_size = 64 * 1024; // size in bytes of read buffers to use with KV store devices
 	// [Note - current FusionIO maximum read buffer size is 1MB - 512B.]
+	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
 	ns->storage_write_threads = 1;
 
 	// SINDEX
@@ -395,11 +398,12 @@ as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_w
 
 	// compute memory size of namespace
 	// compute index size - index is always stored in memory
-	uint64_t index_sz = cf_atomic_int_get(ns->n_objects) * as_index_size_get(ns);
-	uint64_t sub_index_sz = cf_atomic_int_get(ns->n_sub_objects) * as_index_size_get(ns);
+	uint64_t index_sz = cf_atomic64_get(ns->n_objects) * as_index_size_get(ns);
+	uint64_t sub_index_sz = cf_atomic64_get(ns->n_sub_objects) * as_index_size_get(ns);
+	uint64_t tombstone_index_sz = cf_atomic64_get(ns->n_tombstones) * as_index_size_get(ns);
 	uint64_t sindex_sz = as_sindex_get_ns_memory_used(ns);
 	uint64_t data_in_memory_sz = cf_atomic_int_get(ns->n_bytes_memory);
-	uint64_t memory_sz = index_sz + sub_index_sz + data_in_memory_sz + sindex_sz;
+	uint64_t memory_sz = index_sz + sub_index_sz + tombstone_index_sz + data_in_memory_sz + sindex_sz;
 
 	// Possible reasons for eviction or stopping writes.
 	// (We don't use all combinations, but in case we change our minds...)
@@ -505,7 +509,7 @@ as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 			return INVALID_SET_ID;
 		}
 
-		set.num_elements = 0; // *not* adding an element
+		set.n_objects = 0; // *not* adding an element
 		result = cf_vmapx_put_unique(ns->p_sets_vmap, &set, &idx);
 
 		if (result == CF_VMAPX_ERR_NAME_EXISTS) {
@@ -571,7 +575,7 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t
 		memset(&set, 0, sizeof(set)); // paranoia - vmap null-terminates
 
 		memcpy(set.name, set_name, len);
-		set.num_elements = 1;
+		set.n_objects = 1;
 		result = cf_vmapx_put_unique_w_len(ns->p_sets_vmap, &set, len, &idx);
 
 		if (result == CF_VMAPX_ERR_NAME_EXISTS) {
@@ -607,8 +611,8 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t
 			return -2;
 		}
 
-		// The set passed all tests - need to increment its num_elements.
-		cf_atomic64_incr(&p_set->num_elements);
+		// The set passed all tests - need to increment its n_objects.
+		cf_atomic64_incr(&p_set->n_objects);
 	}
 
 	*p_set_id = (uint16_t)(idx + 1);
@@ -674,7 +678,11 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	// Statistics:
 
 	cf_dyn_buf_append_string(db, "objects=");
-	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->num_elements));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_objects));
+	cf_dyn_buf_append_char(db, ':');
+
+	cf_dyn_buf_append_string(db, "tombstones=");
+	cf_dyn_buf_append_uint32(db, cf_atomic32_get(p_set->n_tombstones));
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "memory_data_bytes=");
@@ -770,8 +778,8 @@ as_namespace_release_set_id(as_namespace *ns, uint16_t set_id)
 		return;
 	}
 
-	if (cf_atomic64_decr(&p_set->num_elements) < 0) {
-		cf_warning(AS_NAMESPACE, "set_id %u - num_elements went negative!", set_id);
+	if (cf_atomic64_decr(&p_set->n_objects) < 0) {
+		cf_warning(AS_NAMESPACE, "set_id %u - n_objects went negative!", set_id);
 	}
 }
 

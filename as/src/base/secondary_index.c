@@ -267,7 +267,8 @@ as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 	}
 
 	int rv = AS_SINDEX_GC_ERROR;
-	if (as_record_exists(rsv.tree, keyd, rsv.ns) != 0) {
+	// TODO - investigate if lockless check is ok/necessary.
+	if (as_record_exists_live(rsv.tree, keyd, rsv.ns, false) != 0) {
 		rv = AS_SINDEX_GC_OK;
 	}
 	as_partition_release(&rsv);
@@ -4861,7 +4862,7 @@ as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint
 			si_name          = "<all>";
 		}
 
-		uint64_t n_objects       = (uint64_t)cf_atomic_int_get(ns->n_objects);
+		uint64_t n_objects       = cf_atomic64_get(ns->n_objects);
 		uint64_t pct_obj_scanned = n_objects == 0 ? 100 : ((n_obj_scanned * 100) / n_objects);
 		uint64_t elapsed         = (cf_getms() - start_time);
 		uint64_t est_time        = (elapsed * n_objects)/n_obj_scanned - elapsed;

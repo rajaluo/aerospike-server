@@ -63,7 +63,8 @@ typedef struct as_index_s {
 	// Everything below here is used under the record lock.
 
 	// offset: 36
-	uint32_t reserved_bits: 2;
+	uint32_t tombstone: 1;
+	uint32_t cenotaph: 1;
 	uint32_t void_time: 30;
 
 	// offset: 40
@@ -318,26 +319,41 @@ typedef struct as_index_tree_s {
 // as_index_tree public API.
 //
 
-extern as_index_tree *as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
-extern as_index_tree *as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
-extern int as_index_tree_release(as_index_tree *tree, void *destructor_udata);
-extern uint32_t as_index_tree_size(as_index_tree *tree);
+as_index_tree *as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
+as_index_tree *as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
+int as_index_tree_release(as_index_tree *tree, void *destructor_udata);
+uint32_t as_index_tree_size(as_index_tree *tree);
 
 typedef void (*as_index_reduce_fn) (as_index_ref *value, void *udata);
 typedef void (*as_index_reduce_sync_fn) (as_index *value, void *udata);
 
-extern void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-extern void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
-extern void as_index_reduce_sync(as_index_tree *tree, as_index_reduce_sync_fn cb, void *udata);
+void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_sync(as_index_tree *tree, as_index_reduce_sync_fn cb, void *udata);
 
-extern int as_index_exists(as_index_tree *tree, cf_digest *keyd);
-extern int as_index_get_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref);
-extern int as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref);
-extern int as_index_delete(as_index_tree *tree, cf_digest *keyd);
+void as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_partial_live(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+
+int as_index_exists(as_index_tree *tree, cf_digest *keyd);
+int as_index_get_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref);
+int as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref);
+int as_index_delete(as_index_tree *tree, cf_digest *keyd);
 
 #define as_index_reserve(_r) cf_atomic32_incr(&(_r->rc))
 #define as_index_release(_r) cf_atomic32_decr(&(_r->rc))
 
 #ifdef USE_KV
-extern int as_index_ref_initialize(as_index_tree *tree, cf_digest *key, as_index_ref *index_ref, bool create_p, as_namespace *ns);
+int as_index_ref_initialize(as_index_tree *tree, cf_digest *key, as_index_ref *index_ref, bool create_p, as_namespace *ns);
 #endif
+
+
+//------------------------------------------------
+// Private API - for enterprise separation only.
+//
+
+#define RESOLVE_H(__h) ((as_index*)cf_arenax_resolve(tree->arena, __h))
+
+// Flag to indicate full index reduce.
+#define AS_REDUCE_ALL (-1)
+
+void as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);

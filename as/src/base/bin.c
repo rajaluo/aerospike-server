@@ -207,43 +207,28 @@ as_bin* safe_bins(const as_record *r) {
 	return bin_space ? bin_space->bins : NULL;
 }
 
-uint16_t
-as_bin_get_n_bins(as_record *r, as_storage_rd *rd)
+// - Seems like an as_storage_record method, but leaving it here for now.
+// - sets rd->n_bins!
+int
+as_storage_rd_load_n_bins(as_storage_rd *rd)
 {
 	if (rd->ns->single_bin) {
-		return (1);
+		rd->n_bins = 1;
+		return 0;
 	}
 
 	if (rd->ns->storage_data_in_memory) {
-		return safe_n_bins(r);
+		rd->n_bins = safe_n_bins(rd->r);
+		return 0;
 	}
+
+	rd->n_bins = 0;
 
 	if (rd->record_on_device && ! rd->ignore_record_on_device) {
-		if (! rd->have_device_block) {
-			as_storage_record_read(rd);
-		}
-
-		return (as_storage_record_get_n_bins(rd));
+		return as_storage_record_load_n_bins(rd); // sets rd->n_bins
 	}
 
-	return (0);
-}
-
-as_bin *
-as_bin_get_all(as_record *r, as_storage_rd *rd, as_bin *stack_bins)
-{
-	if (rd->ns->storage_data_in_memory) {
-		return rd->ns->single_bin ? as_index_get_single_bin(r) : safe_bins(r);
-	}
-
-	rd->bins = stack_bins;
-	as_bin_set_all_empty(rd);
-
-	if (rd->record_on_device && ! rd->ignore_record_on_device) {
-		as_storage_particle_read_all(rd);
-	}
-
-	return (stack_bins);
+	return 0;
 }
 
 // - Seems like an as_storage_record method, but leaving it here for now.
@@ -263,11 +248,7 @@ as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins)
 	as_bin_set_all_empty(rd);
 
 	if (rd->record_on_device && ! rd->ignore_record_on_device) {
-		int result = as_storage_particle_read_all_ssd(rd);
-
-		if (result < 0) {
-			return result;
-		}
+		return as_storage_record_load_bins(rd);
 	}
 
 	return 0;

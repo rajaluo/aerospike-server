@@ -298,7 +298,8 @@ as_transaction_proxyee_prepare(as_transaction *tr)
 // message with namespace and digest - no set for now, since these transactions
 // won't get security checked, and they can't create a record.
 int
-as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
+as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd,
+		iudf_origin* iudf_orig, bool is_durable_delete)
 {
 	size_t msg_sz = sizeof(cl_msg);
 	int ns_len = strlen(ns->name);
@@ -313,8 +314,10 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 	}
 
 	uint8_t *b = (uint8_t *)msgp;
+	uint8_t info2 = AS_MSG_INFO2_WRITE |
+			(is_durable_delete ? AS_MSG_INFO2_DURABLE_DELETE : 0);
 
-	b = as_msg_write_header(b, msg_sz, 0, AS_MSG_INFO2_WRITE, 0, 0, 0, 0, 2, 0);
+	b = as_msg_write_header(b, msg_sz, 0, info2, 0, 0, 0, 0, 2, 0);
 	b = as_msg_write_fields(b, ns->name, ns_len, NULL, 0, keyd, 0);
 
 	as_transaction_init_head(tr, NULL, msgp);
@@ -323,7 +326,7 @@ as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd)
 	as_transaction_set_msg_field_flag(tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
 	tr->origin = FROM_IUDF;
-	// Caller must set tr->from.iudf_orig immediately afterwards...
+	tr->from.iudf_orig = iudf_orig;
 
 	// Do this last, to exclude the setup time in this function.
 	tr->start_time = cf_getns();

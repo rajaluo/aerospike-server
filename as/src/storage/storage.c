@@ -99,6 +99,30 @@ as_storage_init()
 }
 
 //--------------------------------------
+// as_storage_start_tomb_raider
+//
+
+typedef void (*as_storage_start_tomb_raider_fn)(as_namespace *ns);
+static const as_storage_start_tomb_raider_fn as_storage_start_tomb_raider_table[AS_STORAGE_ENGINE_TYPES] = {
+	NULL,
+	as_storage_start_tomb_raider_memory,
+	as_storage_start_tomb_raider_ssd,
+	0  // kv doesn't tomb raid
+};
+
+void
+as_storage_start_tomb_raider()
+{
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+
+		if (as_storage_start_tomb_raider_table[ns->storage_type]) {
+			as_storage_start_tomb_raider_table[ns->storage_type](ns);
+		}
+	}
+}
+
+//--------------------------------------
 // as_storage_namespace_destroy
 //
 
@@ -234,9 +258,9 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_d
 	rd->n_bins = 0;
 	rd->record_on_device = false;
 	rd->ignore_record_on_device = false;
-	rd->have_device_block = false;
 	rd->key_size = 0;
 	rd->key = NULL;
+	rd->is_durable_delete = false;
 
 	if (as_storage_record_create_table[ns->storage_type]) {
 		return as_storage_record_create_table[ns->storage_type](ns, r, rd, keyd);
@@ -269,9 +293,9 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_dig
 	rd->n_bins = 0;
 	rd->record_on_device = true;
 	rd->ignore_record_on_device = false;
-	rd->have_device_block = false;
 	rd->key_size = 0;
 	rd->key = NULL;
+	rd->is_durable_delete = false;
 
 	if (as_storage_record_open_table[ns->storage_type]) {
 		return as_storage_record_open_table[ns->storage_type](ns, r, rd, keyd);
@@ -284,7 +308,7 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_dig
 // as_storage_record_close
 //
 
-typedef int (*as_storage_record_close_fn)(as_record *r, as_storage_rd *rd);
+typedef int (*as_storage_record_close_fn)(as_storage_rd *rd);
 static const as_storage_record_close_fn as_storage_record_close_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
 	0, // memory has no record close
@@ -293,76 +317,54 @@ static const as_storage_record_close_fn as_storage_record_close_table[AS_STORAGE
 };
 
 int
-as_storage_record_close(as_record *r, as_storage_rd *rd)
+as_storage_record_close(as_storage_rd *rd)
 {
 	if (as_storage_record_close_table[rd->storage_type]) {
-		return as_storage_record_close_table[rd->storage_type](r, rd);
+		return as_storage_record_close_table[rd->storage_type](rd);
 	}
 
 	return 0;
 }
 
 //--------------------------------------
-// as_storage_record_get_n_bins
+// as_storage_record_load_n_bins
 //
 
-typedef uint16_t (*as_storage_record_get_n_bins_fn)(as_storage_rd *rd);
-static const as_storage_record_get_n_bins_fn as_storage_record_get_n_bins_table[AS_STORAGE_ENGINE_TYPES] = {
+typedef int (*as_storage_record_load_n_bins_fn)(as_storage_rd *rd);
+static const as_storage_record_load_n_bins_fn as_storage_record_load_n_bins_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
-	0, // memory has no record get n bins
-	as_storage_record_get_n_bins_ssd,
-	as_storage_record_get_n_bins_kv,
-};
-
-uint16_t
-as_storage_record_get_n_bins(as_storage_rd *rd)
-{
-	if (as_storage_record_get_n_bins_table[rd->storage_type]) {
-		return as_storage_record_get_n_bins_table[rd->storage_type](rd);
-	}
-
-	return 0;
-}
-
-//--------------------------------------
-// as_storage_record_read
-//
-
-typedef int (*as_storage_record_read_fn)(as_storage_rd *rd);
-static const as_storage_record_read_fn as_storage_record_read_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no record read
-	as_storage_record_read_ssd,
-	as_storage_record_read_kv
+	0, // memory has no record load n bins
+	as_storage_record_load_n_bins_ssd,
+	as_storage_record_load_n_bins_kv,
 };
 
 int
-as_storage_record_read(as_storage_rd *rd)
+as_storage_record_load_n_bins(as_storage_rd *rd)
 {
-	if (as_storage_record_read_table[rd->storage_type]) {
-		return as_storage_record_read_table[rd->storage_type](rd);
+	if (as_storage_record_load_n_bins_table[rd->storage_type]) {
+		return as_storage_record_load_n_bins_table[rd->storage_type](rd);
 	}
 
 	return 0;
 }
 
 //--------------------------------------
-// as_storage_particle_read_all
+// as_storage_record_load_bins
 //
 
-typedef int (*as_storage_particle_read_all_fn)(as_storage_rd *rd);
-static const as_storage_particle_read_all_fn as_storage_particle_read_all_table[AS_STORAGE_ENGINE_TYPES] = {
+typedef int (*as_storage_record_load_bins_fn)(as_storage_rd *rd);
+static const as_storage_record_load_bins_fn as_storage_record_load_bins_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
-	0, // memory has no record read all
-	as_storage_particle_read_all_ssd,
-	as_storage_particle_read_all_kv
+	0, // memory has no record load bins
+	as_storage_record_load_bins_ssd,
+	as_storage_record_load_bins_kv
 };
 
 int
-as_storage_particle_read_all(as_storage_rd *rd)
+as_storage_record_load_bins(as_storage_rd *rd)
 {
-	if (as_storage_particle_read_all_table[rd->storage_type]) {
-		return as_storage_particle_read_all_table[rd->storage_type](rd);
+	if (as_storage_record_load_bins_table[rd->storage_type]) {
+		return as_storage_record_load_bins_table[rd->storage_type](rd);
 	}
 
 	return 0;
@@ -394,19 +396,19 @@ as_storage_record_size_and_check(as_storage_rd *rd)
 // as_storage_record_write
 //
 
-typedef int (*as_storage_record_write_fn)(as_record *r, as_storage_rd *rd);
+typedef int (*as_storage_record_write_fn)(as_storage_rd *rd);
 static const as_storage_record_write_fn as_storage_record_write_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
-	0, // memory has no record write
+	as_storage_record_write_memory,
 	as_storage_record_write_ssd,
 	as_storage_record_write_kv
 };
 
 int
-as_storage_record_write(as_record *r, as_storage_rd *rd)
+as_storage_record_write(as_storage_rd *rd)
 {
 	if (as_storage_record_write_table[rd->storage_type]) {
-		return as_storage_record_write_table[rd->storage_type](r, rd);
+		return as_storage_record_write_table[rd->storage_type](rd);
 	}
 
 	return 0;
@@ -665,11 +667,6 @@ as_storage_record_get_n_bytes_memory(as_storage_rd *rd)
 		return 0;
 	}
 
-	if (rd->n_bins == 0) {
-		// Don't count overhead in this case.
-		return 0;
-	}
-
 	uint64_t n_bytes_memory = 0;
 
 	for (uint16_t i = 0; i < rd->n_bins; i++) {
@@ -682,7 +679,10 @@ as_storage_record_get_n_bytes_memory(as_storage_rd *rd)
 					((as_rec_space*)rd->r->dim)->key_size;
 		}
 
-		n_bytes_memory += sizeof(as_bin_space) + (sizeof(as_bin) * rd->n_bins);
+		if (as_index_get_bin_space(rd->r)) {
+			n_bytes_memory += sizeof(as_bin_space) +
+					(sizeof(as_bin) * rd->n_bins);
+		}
 	}
 
 	return n_bytes_memory;

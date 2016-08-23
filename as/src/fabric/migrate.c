@@ -97,11 +97,6 @@ COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 
 #define MIG_MSG_SCRATCH_SIZE 128
 
-// If the bit is not set then it is normal record.
-#define MIG_INFO_LDT_PREC   0x0001
-#define MIG_INFO_LDT_SUBREC 0x0002
-#define MIG_INFO_LDT_ESR    0x0004
-
 #define MIGRATE_RETRANSMIT_MS (g_config.transaction_retry_ms)
 #define MIGRATE_RETRANSMIT_STARTDONE_MS (g_config.transaction_retry_ms)
 #define MAX_BYTES_EMIGRATING (16 * 1024 * 1024)
@@ -202,7 +197,7 @@ int immigration_dump_reduce_fn(void *key, uint32_t keylen, void *object, void *u
 bool as_ldt_precord_is_esr(const pickled_record *pr);
 bool as_ldt_precord_is_subrec(const pickled_record *pr);
 bool as_ldt_precord_is_parent(const pickled_record *pr);
-int as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr);
+int as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr, uint32_t *info);
 void as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, const emigration *emig);
 int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, msg *m, cf_digest *keyd);
 
@@ -778,17 +773,17 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	as_storage_record_open(ns, r, &rd, &r->key);
 
-	rd.n_bins = as_bin_get_n_bins(r, &rd);
+	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
 	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 
-	rd.bins = as_bin_get_all(r, &rd, stack_bins);
+	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 	pickled_record pr;
 
 	if (as_record_pickle(r, &rd, &pr.record_buf, &pr.record_len) != 0) {
 		cf_warning(AS_MIGRATE, "failed migrate record pickle");
-		as_storage_record_close(r, &rd);
+		as_storage_record_close(&rd);
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -809,7 +804,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	as_ldt_fill_precord(&pr, &rd, emig);
 
-	as_storage_record_close(r, &rd);
+	as_storage_record_close(&rd);
 	as_record_done(r_ref, ns);
 
 	//--------------------------------------------
@@ -827,12 +822,16 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 		return;
 	}
 
-	if (as_ldt_fill_mig_msg(emig, m, &pr) != 0) {
+	uint32_t info = 0;
+
+	if (as_ldt_fill_mig_msg(emig, m, &pr, &info) != 0) {
 		// Skipping stale version subrecord shipping.
 		as_fabric_msg_put(m);
 		pickled_record_destroy(&pr);
 		return;
 	}
+
+	emigration_flag_pickle(pr.record_buf, &info);
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT);
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
@@ -842,6 +841,10 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	msg_set_uint32(m, MIG_FIELD_VOID_TIME, pr.void_time);
 	msg_set_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, pr.last_update_time);
 	// Note - older versions handle missing MIG_FIELD_VINFOSET field.
+
+	if (info != 0) {
+		msg_set_uint32(m, MIG_FIELD_INFO, info);
+	}
 
 	// Note - after MSG_SET_HANDOFF_MALLOCs, no need to destroy pickled_record.
 
@@ -1460,23 +1463,20 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 			return;
 		}
 
-		// TODO - should have inline wrapper to peek pickled bin count.
-		if (*(uint16_t *)c.record_buf == 0) {
+		if (immigration_ignore_pickle(c.record_buf, m)) {
 			cf_warning_digest(AS_MIGRATE, keyd, "handle insert: binless pickle, dropping ");
 		}
 		else {
 			int winner_idx  = -1;
 			int rv = as_record_flatten(&immig->rsv, keyd, 1, &c, &winner_idx);
 
-			if (rv != 0) {
-				if (rv != -3) {
-					// -3 is not a failure. It is get_create failure inside
-					// as_record_flatten which is possible in case of race.
-					cf_warning_digest(AS_MIGRATE, keyd, "handle insert: record flatten failed %d ", rv);
-					immigration_release(immig);
-					as_fabric_msg_put(m);
-					return;
-				}
+			if (rv != 0 && rv != -3) {
+				// -3 is not a failure. It is get_create failure inside
+				// as_record_flatten which is possible in case of race.
+				cf_warning_digest(AS_MIGRATE, keyd, "handle insert: record flatten failed %d ", rv);
+				immigration_release(immig);
+				as_fabric_msg_put(m);
+				return;
 			}
 		}
 
@@ -1750,7 +1750,8 @@ as_ldt_precord_is_parent(const pickled_record *pr)
 // 3. Esr Digest
 // 4. Version
 int
-as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr)
+as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
+		uint32_t *info)
 {
 	if (! emig->rsv.ns->ldt_enabled) {
 		return 0;
@@ -1766,8 +1767,6 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr)
 	}
 
 	msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
-
-	uint32_t info = 0;
 
 	if (is_subrecord) {
 		as_index_ref r_ref;
@@ -1789,10 +1788,10 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr)
 				MSG_SET_COPY);
 
 		if (as_ldt_precord_is_esr(pr)) {
-			info |= MIG_INFO_LDT_ESR;
+			*info |= MIG_INFO_LDT_ESR;
 		}
 		else if (as_ldt_precord_is_subrec(pr)) {
-			info |= MIG_INFO_LDT_SUBREC;
+			*info |= MIG_INFO_LDT_SUBREC;
 			msg_set_buf(m, MIG_FIELD_EDIGEST, (void *)&pr->ekeyd,
 					sizeof(cf_digest), MSG_SET_COPY);
 		}
@@ -1801,10 +1800,8 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr)
 		}
 	}
 	else if (as_ldt_precord_is_parent(pr)) {
-		info |= MIG_INFO_LDT_PREC;
+		*info |= MIG_INFO_LDT_PREC;
 	}
-
-	msg_set_uint32(m, MIG_FIELD_INFO, info);
 
 	return 0;
 }

@@ -802,10 +802,21 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	udf_record * urecord  = (udf_record *) as_rec_source(rec);
 
 	// make sure record isn't already successfully read
-	if (urecord->flag & UDF_RECORD_FLAG_OPEN) {
-		cf_detail(AS_UDF, "udf_aerospike_rec_create: Record Already Exists");
-		return 1;
+	if ((urecord->flag & UDF_RECORD_FLAG_OPEN) != 0) {
+		if (as_bin_inuse_has(urecord->rd)) {
+			cf_detail(AS_UDF, "udf_aerospike_rec_create: Record Already Exists");
+			return 1;
+		}
+		// else - binless record ok...
+
+		if ((ret = udf_aerospike__execute_updates(urecord)) != 0) {
+			cf_warning(AS_UDF, "udf_aerospike_rec_create: failure executing record updates");
+			udf_aerospike_rec_remove(as, rec);
+		}
+
+		return ret;
 	}
+
 	as_transaction *tr    = urecord->tr;
 	as_index_ref   *r_ref = urecord->r_ref;
 	as_storage_rd  *rd    = urecord->rd;
@@ -818,7 +829,6 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	}
 
 	// make sure we got the record as a create
-	bool is_create = false;
 	int rv = as_record_get_create(tree, &tr->keyd, r_ref, tr->rsv.ns, is_subrec);
 	cf_detail_digest(AS_UDF, &tr->keyd, "Creating %sRecord",
 			(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "Sub" : "");
@@ -826,14 +836,13 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	// rv 0 means record exists, 1 means create, < 0 means fail
 	// TODO: Verify correct result codes.
 	if (rv == 1) {
-		is_create = true;
+		// Record created.
 	} else if (rv == 0) {
 		// If it's an expired record, pretend it's a fresh create.
 		if (as_record_is_expired(r_ref->r)) {
 			as_record_destroy(r_ref->r, tr->rsv.ns);
-			as_record_initialize(r_ref, tr->rsv.ns);
-			cf_atomic_int_incr(&tr->rsv.ns->n_objects);
-			is_create = true;
+			as_record_reinitialize(r_ref, tr->rsv.ns);
+			cf_atomic64_incr(&tr->rsv.ns->n_objects);
 		} else {
 			cf_warning(AS_UDF, "udf_aerospike_rec_create: Record Already Exists 2");
 			as_record_done(r_ref, tr->rsv.ns);
@@ -853,33 +862,21 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 				set_set_from_msg(r_ref->r, tr->rsv.ns, &tr->msgp->msg) : 0;
 		if (rv_set != 0) {
 			cf_warning(AS_UDF, "udf_aerospike_rec_create: Failed to set setname");
-			if (is_create) {
-				as_index_delete(tree, &tr->keyd);
-			}
+			as_index_delete(tree, &tr->keyd);
 			as_record_done(r_ref, tr->rsv.ns);
 			return 4;
 		}
 	}
 
-	urecord->flag |= UDF_RECORD_FLAG_OPEN;
-	cf_detail(AS_UDF, "Open %p %x %"PRIx64"", urecord, urecord->flag, *(uint64_t *)&tr->keyd);
-
-	as_index *r    = r_ref->r;
 	// open up storage
-	as_storage_record_create(urecord->tr->rsv.ns, urecord->r_ref->r,
-		urecord->rd, &urecord->tr->keyd);
-
-	cf_detail(AS_UDF, "as_storage_record_create: udf_aerospike_rec_create: r %p rd %p",
-		urecord->r_ref->r, urecord->rd);
+	as_storage_record_create(tr->rsv.ns, r_ref->r, rd, &tr->keyd);
 
 	// If the message has a key, apply it to the record.
 	if (! get_msg_key(tr, rd)) {
 		cf_warning(AS_UDF, "udf_aerospike_rec_create: Can't store key");
-		if (is_create) {
-			as_index_delete(tree, &tr->keyd);
-		}
+		as_storage_record_close(rd);
+		as_index_delete(tree, &tr->keyd);
 		as_record_done(r_ref, tr->rsv.ns);
-		urecord->flag &= ~UDF_RECORD_FLAG_OPEN;
 		return 4;
 	}
 
@@ -889,21 +886,25 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	}
 
 	// side effect: will set the unused bins to properly unused
-	rd->bins       = as_bin_get_all(r, rd, urecord->stack_bins);
-	urecord->flag |= UDF_RECORD_FLAG_STORAGE_OPEN;
+	as_storage_rd_load_bins(rd, urecord->stack_bins); // TODO - handle error returned
 
-	cf_detail(AS_UDF, "Storage Open %p %x %"PRIx64"", urecord, urecord->flag, *(uint64_t *)&tr->keyd);
-	cf_detail(AS_UDF, "udf_aerospike_rec_create: Record created %d", urecord->flag);
+	int rc = udf_aerospike__execute_updates(urecord);
 
-	int rc         = udf_aerospike__execute_updates(urecord);
-	if (rc) {
+	if (rc != 0) {
 		//  Creating the udf record failed, destroy the as_record
 		cf_warning(AS_UDF, "udf_aerospike_rec_create: failure executing record updates (%d)", rc);
-		if (!as_bin_inuse_has(urecord->rd)) {
-			udf_aerospike_rec_remove(as, rec);
-		}
+		udf_record_close(urecord); // handles particle data and cache only
+		as_storage_record_close(rd);
+		as_index_delete(tree, &tr->keyd);
+		as_record_done(r_ref, tr->rsv.ns);
+		return rc;
 	}
-	return rc;
+
+	// Success...
+
+	urecord->flag |= UDF_RECORD_FLAG_OPEN | UDF_RECORD_FLAG_STORAGE_OPEN;
+
+	return 0;
 }
 
 /**
@@ -1011,19 +1012,28 @@ udf_aerospike_rec_remove(const as_aerospike * as, const as_rec * rec)
 		return 1;
 	}
 
-	as_index_tree *tree  = urecord->tr->rsv.tree;
-	// remove index from tree. Will decrement ref count, but object still retains
-	if (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD)
-		tree = urecord->tr->rsv.sub_tree;
+	as_storage_rd* rd = urecord->rd;
 
-	// Reset starting memory bytes in case the same record is created again
-	// in the same UDF
-	as_index_delete(tree, &urecord->tr->keyd);
-	urecord->starting_memory_bytes = 0;
+	if (rd->ns->storage_data_in_memory && ! rd->ns->single_bin) {
+		delete_adjust_sindex(rd);
+	}
 
-	// Close the storage record associates with this UDF record
-	// do not release the reservation yet !!
-	udf_record_close(urecord);
+	as_record_clean_bins(rd);
+
+	if (rd->ns->storage_data_in_memory && ! rd->ns->single_bin) {
+		as_record_free_bin_space(rd->r);
+		rd->bins = NULL;
+		rd->n_bins = 0;
+	}
+
+	if (urecord->particle_data) {
+		cf_free(urecord->particle_data);
+		urecord->particle_data = NULL;
+	}
+
+	udf_record_cache_free(urecord);
+	urecord->flag |= UDF_RECORD_FLAG_HAS_UPDATES;
+
 	return 0;
 }
 

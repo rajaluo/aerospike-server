@@ -965,21 +965,21 @@ as_storage_record_open_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_
 }
 
 int
-as_storage_record_write_kv(as_record *r, as_storage_rd *rd)
+as_storage_record_write_kv(as_storage_rd *rd)
 {
-	cf_detail(AS_DRV_KV, "record write: r %p rd %p", r, rd);
+	cf_detail(AS_DRV_KV, "record write: r %p rd %p", rd->r, rd);
 
 	if (as_bin_inuse_has(rd)) {
-		kv_write(r, rd);
+		kv_write(rd->r, rd);
 	}
 
 	return 0;
 }
 
 int
-as_storage_record_close_kv(as_record *r, as_storage_rd *rd)
+as_storage_record_close_kv(as_storage_rd *rd)
 {
-	cf_detail(AS_DRV_KV, "record close: r %p rd %p", r, rd);
+	cf_detail(AS_DRV_KV, "record close: r %p rd %p", rd->r, rd);
 
 	if (rd->u.kv.block && rd->u.kv.must_free_block) {
 		cf_free(rd->u.kv.block);
@@ -1029,12 +1029,15 @@ kv_populate_bin(as_bin *bin, drv_kv_bin *kv_bin, uint8_t *block_head, bool singl
 	return (0);
 }
 
+// TODO - this is now broken, needs to be combined with
+// as_storage_record_read_kv().
 inline uint16_t
-as_storage_record_get_n_bins_kv(as_storage_rd *rd)
+as_storage_record_load_n_bins_kv(as_storage_rd *rd)
 {
 	return (rd->u.kv.block ? rd->u.kv.block->n_bins : 0);
 }
 
+// TODO - this is now gone, should combine with above function.
 int
 as_storage_record_read_kv(as_storage_rd *rd)
 {
@@ -1124,7 +1127,7 @@ as_storage_record_read_kv(as_storage_rd *rd)
 //
 
 int
-as_storage_particle_read_all_kv(as_storage_rd *rd)
+as_storage_record_load_bins_kv(as_storage_rd *rd)
 {
 	// if the first hasn't been read, read it
 	if (rd->u.kv.block == 0) {
@@ -1246,7 +1249,7 @@ as_storage_record_open_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_
 }
 
 int
-as_storage_record_write_kv(as_record *r, as_storage_rd *rd)
+as_storage_record_write_kv(as_storage_rd *rd)
 {
 	error_out();
 
@@ -1254,15 +1257,7 @@ as_storage_record_write_kv(as_record *r, as_storage_rd *rd)
 }
 
 int
-as_storage_record_close_kv(as_record *r, as_storage_rd *rd)
-{
-	error_out();
-
-	return 0;
-}
-
-uint16_t
-as_storage_record_get_n_bins_kv(as_storage_rd *rd)
+as_storage_record_close_kv(as_storage_rd *rd)
 {
 	error_out();
 
@@ -1270,7 +1265,7 @@ as_storage_record_get_n_bins_kv(as_storage_rd *rd)
 }
 
 int
-as_storage_record_read_kv(as_storage_rd *rd)
+as_storage_record_load_n_bins_kv(as_storage_rd *rd)
 {
 	error_out();
 
@@ -1278,7 +1273,7 @@ as_storage_record_read_kv(as_storage_rd *rd)
 }
 
 int
-as_storage_particle_read_all_kv(as_storage_rd *rd) 
+as_storage_record_load_bins_kv(as_storage_rd *rd)
 {
 	error_out();
 

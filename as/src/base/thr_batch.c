@@ -103,7 +103,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 			if (rv == 0) {
 				as_index_ref r_ref;
 				r_ref.skip_lock = false;
-				int rec_rv = as_record_get(rsv.tree, &bmd->keyd, &r_ref, ns);
+				int rec_rv = as_record_get_live(rsv.tree, &bmd->keyd, &r_ref, ns);
 
 				if (rec_rv == 0) {
 					as_index *r = r_ref.r;
@@ -117,7 +117,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 						as_storage_rd rd;
 						if (get_data) {
 							as_storage_record_open(ns, r, &rd, &r->key);
-							rd.n_bins = as_bin_get_n_bins(r, &rd);
+							as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 						}
 
 						// Note: this array must stay in scope until the
@@ -128,14 +128,14 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 
 						if (get_data) {
 							// Figure out which bins you want - for now, all.
-							rd.bins = as_bin_get_all(r, &rd, stack_bins);
+							as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 							rd.n_bins = as_bin_inuse_count(&rd);
 						}
 
 						as_msg_make_response_bufbuilder(r, (get_data ? &rd : NULL), bb_r, !get_data, (get_data ? NULL : ns->name), false, false, false, btr->binlist);
 
 						if (get_data) {
-							as_storage_record_close(r, &rd);
+							as_storage_record_close(&rd);
 						}
 					}
 					as_record_done(&r_ref, ns);

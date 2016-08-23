@@ -502,6 +502,9 @@ main(int argc, char **argv)
 	as_info_port_start();		// server will now receive info transactions
 	as_ticker_start();			// only after everything else is started
 
+	// Relevant for enterprise edition only.
+	as_storage_start_tomb_raider();
+
 	// Log a service-ready message.
 	cf_info(AS_AS, "service ready: soon there will be cake!");
 

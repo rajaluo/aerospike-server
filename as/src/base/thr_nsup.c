@@ -128,7 +128,7 @@ run_cold_start_evict_prep(void* udata)
 
 	while ((pid = (int)cf_atomic32_incr(p_info->p_pid)) < AS_PARTITIONS) {
 		// Don't bother with partition reservations - it's startup.
-		as_index_reduce(ns->partitions[pid].vp, cold_start_evict_prep_reduce_cb, &cb_info);
+		as_index_reduce_live(ns->partitions[pid].vp, cold_start_evict_prep_reduce_cb, &cb_info);
 	}
 
 	return NULL;
@@ -201,7 +201,7 @@ run_cold_start_evict(void* udata)
 		as_partition* p_partition = &ns->partitions[pid];
 
 		cb_info.p_partition = p_partition;
-		as_index_reduce(p_partition->vp, cold_start_evict_reduce_cb, &cb_info);
+		as_index_reduce_live(p_partition->vp, cold_start_evict_reduce_cb, &cb_info);
 	}
 
 	cf_atomic32_add(&p_info->total_evicted, cb_info.num_evicted);
@@ -474,7 +474,7 @@ garbage_collect_next_prole_partition(as_namespace* ns, int pid)
 			cb_info.num_deleted = 0;
 
 			// Reduce the partition, deleting long-expired records.
-			as_index_reduce(rsv.p->vp, garbage_collect_reduce_cb, &cb_info);
+			as_index_reduce_live(rsv.p->vp, garbage_collect_reduce_cb, &cb_info);
 
 			if (cb_info.num_deleted != 0) {
 				cf_info(AS_NSUP, "namespace %s pid %d: %u expired proles",
@@ -546,7 +546,7 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 			cb_info.num_deleted = 0;
 
 			// Reduce the partition, checking and deleting records.
-			as_index_reduce(rsv.p->vp, non_master_sets_delete_reduce_cb, &cb_info);
+			as_index_reduce_live(rsv.p->vp, non_master_sets_delete_reduce_cb, &cb_info);
 
 			if (cb_info.num_deleted != 0) {
 				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted proles",
@@ -567,7 +567,7 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 			cb_info.num_deleted = 0;
 
 			// Reduce the partition, checking and deleting records.
-			as_index_reduce(rsv.p->vp, non_master_sets_delete_reduce_cb, &cb_info);
+			as_index_reduce_live(rsv.p->vp, non_master_sets_delete_reduce_cb, &cb_info);
 
 			if (cb_info.num_deleted != 0) {
 				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, state %d, %u records remaining",
@@ -915,7 +915,7 @@ reduce_master_partitions(as_namespace* ns, as_index_reduce_fn cb, void* udata, u
 			continue;
 		}
 
-		as_index_reduce(rsv.p->vp, cb, udata);
+		as_index_reduce_live(rsv.p->vp, cb, udata);
 
 		as_partition_release(&rsv);
 
@@ -1217,7 +1217,7 @@ thr_nsup(void *arg)
 				}
 
 				if (IS_SET_DELETED(p_set)) {
-					if (cf_atomic64_get(p_set->num_elements) != 0) {
+					if (cf_atomic64_get(p_set->n_objects) != 0) {
 						sets_deleting[set_id] = true;
 						do_set_deletion = true;
 

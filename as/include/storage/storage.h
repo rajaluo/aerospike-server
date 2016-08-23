@@ -99,12 +99,13 @@ typedef struct as_storage_rd_s {
 	uint16_t		n_bins;
 	bool			record_on_device;			// if true, record exists on device
 	bool			ignore_record_on_device;	// if true, never read record off device (such as in replace case)
-	bool			have_device_block;			// if true, we have a storage block as part of the rd. if false, we must get one.
 	cf_digest		keyd;						// when doing a write, we'll need to stash this to do the "callback"
 
 	// Parameters used when handling key storage:
 	uint32_t		key_size;
 	uint8_t			*key;
+
+	bool			is_durable_delete;			// enterprise only
 
 	as_storage_type storage_type;
 
@@ -136,6 +137,7 @@ typedef struct {
 //
 
 extern void as_storage_init();
+extern void as_storage_start_tomb_raider();
 extern int as_storage_namespace_destroy(as_namespace *ns);
 extern int as_storage_namespace_attributes_get(as_namespace *ns, as_storage_attributes *attr);
 
@@ -146,14 +148,13 @@ extern int as_storage_record_destroy(as_namespace *ns, as_record *r); // not the
 // Start and finish an as_storage_rd usage cycle.
 extern int as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
 extern int as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_close(as_record *r, as_storage_rd *rd);
+extern int as_storage_record_close(as_storage_rd *rd);
 
 // Called within as_storage_rd usage cycle.
-extern uint16_t as_storage_record_get_n_bins(as_storage_rd *rd);
-extern int as_storage_record_read(as_storage_rd *rd);
-extern int as_storage_particle_read_all(as_storage_rd *rd);
+extern int as_storage_record_load_n_bins(as_storage_rd *rd);
+extern int as_storage_record_load_bins(as_storage_rd *rd);
 extern bool as_storage_record_size_and_check(as_storage_rd *rd);
-extern int as_storage_record_write(as_record *r, as_storage_rd *rd);
+extern int as_storage_record_write(as_storage_rd *rd);
 
 // Storage capacity monitoring.
 extern void as_storage_wait_for_defrag();
@@ -195,8 +196,11 @@ extern void as_storage_shutdown();
 //
 
 extern int as_storage_namespace_init_memory(as_namespace *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_start_tomb_raider_memory(as_namespace *ns);
 extern int as_storage_namespace_destroy_memory(as_namespace *ns);
 extern int as_storage_namespace_attributes_get_memory(as_namespace *ns, as_storage_attributes *attr);
+
+extern int as_storage_record_write_memory(as_storage_rd *rd);
 
 extern int as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes);
 
@@ -206,6 +210,7 @@ extern int as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_
 //
 
 extern int as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_start_tomb_raider_ssd(as_namespace *ns);
 extern void as_storage_cold_start_ticker_ssd(); // called directly by as_storage_init()
 extern int as_storage_namespace_destroy_ssd(as_namespace *ns);
 extern int as_storage_namespace_attributes_get_ssd(as_namespace *ns, as_storage_attributes *attr);
@@ -214,13 +219,12 @@ extern int as_storage_record_destroy_ssd(as_namespace *ns, as_record *r);
 
 extern int as_storage_record_create_ssd(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
 extern int as_storage_record_open_ssd(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_close_ssd(as_record *r, as_storage_rd *rd);
+extern int as_storage_record_close_ssd(as_storage_rd *rd);
 
-extern uint16_t as_storage_record_get_n_bins_ssd(as_storage_rd *rd);
-extern int as_storage_record_read_ssd(as_storage_rd *rd);
-extern int as_storage_particle_read_all_ssd(as_storage_rd *rd);
+extern int as_storage_record_load_n_bins_ssd(as_storage_rd *rd);
+extern int as_storage_record_load_bins_ssd(as_storage_rd *rd);
 extern bool as_storage_record_size_and_check_ssd(as_storage_rd *rd);
-extern int as_storage_record_write_ssd(as_record *r, as_storage_rd *rd);
+extern int as_storage_record_write_ssd(as_storage_rd *rd);
 
 extern void as_storage_wait_for_defrag_ssd(as_namespace *ns);
 extern bool as_storage_overloaded_ssd(as_namespace *ns);
@@ -254,11 +258,10 @@ extern int as_storage_record_exists_kv(as_namespace *ns, cf_digest *keyd);
 
 extern int as_storage_record_create_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
 extern int as_storage_record_open_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_close_kv(as_record *r, as_storage_rd *rd);
+extern int as_storage_record_close_kv(as_storage_rd *rd);
 
-extern uint16_t as_storage_record_get_n_bins_kv(as_storage_rd *rd);
-extern int as_storage_record_read_kv(as_storage_rd *rd);
-extern int as_storage_particle_read_all_kv(as_storage_rd *rd);
-extern int as_storage_record_write_kv(as_record *r, as_storage_rd *rd);
+extern int as_storage_record_load_n_bins_kv(as_storage_rd *rd);
+extern int as_storage_record_load_bins_kv(as_storage_rd *rd);
+extern int as_storage_record_write_kv(as_storage_rd *rd);
 
 extern int as_storage_stats_kv(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes);

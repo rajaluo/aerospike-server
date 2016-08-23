@@ -68,8 +68,6 @@ void delete_repl_write_cb(rw_request* rw);
 void send_delete_response(as_transaction* tr);
 void delete_timeout_cb(rw_request* rw);
 
-transaction_status delete_master(as_transaction* tr);
-
 static inline void
 client_delete_update_stats(as_namespace* ns, uint8_t result_code)
 {
@@ -100,6 +98,12 @@ as_delete_start(as_transaction* tr)
 	// Apply XDR filter.
 	if (! xdr_allows_write(tr)) {
 		tr->result_code = AS_PROTO_RESULT_FAIL_FORBIDDEN;
+		send_delete_response(tr);
+		return TRANS_DONE_ERROR;
+	}
+
+	if (delete_storage_overloaded(tr)) {
+		tr->result_code = AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD;
 		send_delete_response(tr);
 		return TRANS_DONE_ERROR;
 	}
@@ -144,7 +148,7 @@ as_delete_start(as_transaction* tr)
 	// else - no duplicate resolution phase, apply operation to master.
 
 	// If error, transaction is finished.
-	if ((status = delete_master(tr)) != TRANS_IN_PROGRESS) {
+	if ((status = delete_master(tr, rw)) != TRANS_IN_PROGRESS) {
 		rw_request_hash_delete(&hkey, rw);
 		send_delete_response(tr);
 		return status;
@@ -205,7 +209,7 @@ start_delete_repl_write(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw, construct and send repl-delete message.
 
-	if (! repl_write_make_message(rw, tr)) { // TODO - split this?
+	if (! repl_write_make_message(rw, tr)) {
 		return false;
 	}
 
@@ -234,7 +238,7 @@ delete_dup_res_cb(rw_request* rw)
 	as_transaction tr;
 	as_transaction_init_from_rw(&tr, rw);
 
-	transaction_status status = delete_master(&tr);
+	transaction_status status = delete_master(&tr, rw);
 
 	if (status == TRANS_DONE_ERROR) {
 		send_delete_response(&tr);
@@ -268,7 +272,7 @@ delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	// Recycle rw_request that was just used for duplicate resolution to now do
 	// replica writes. Note - we are under the rw_request lock here!
 
-	if (! repl_write_make_message(rw, tr)) { // TODO - split this?
+	if (! repl_write_make_message(rw, tr)) {
 		return false;
 	}
 
@@ -315,15 +319,14 @@ send_delete_response(as_transaction* tr)
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
-		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
-				tr->void_time, NULL, NULL, 0, NULL, as_transaction_trid(tr),
-				NULL);
+		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, 0, 0, NULL,
+				NULL, 0, NULL, as_transaction_trid(tr), NULL);
 		client_delete_update_stats(tr->rsv.ns, tr->result_code);
 		break;
 	case FROM_PROXY:
 		as_proxy_send_response(tr->from.proxy_node, tr->from_data.proxy_tid,
-				tr->result_code, tr->generation, tr->void_time, NULL, NULL, 0,
-				NULL, as_transaction_trid(tr), NULL);
+				tr->result_code, 0, 0, NULL, NULL, 0, NULL,
+				as_transaction_trid(tr), NULL);
 		break;
 	case FROM_NSUP:
 		break;
@@ -368,34 +371,20 @@ delete_timeout_cb(rw_request* rw)
 
 
 //==========================================================
-// Local helpers - delete.
+// Local helpers - delete master.
 //
 
 transaction_status
-delete_master(as_transaction* tr)
+drop_master(as_transaction* tr, as_index_ref* r_ref)
 {
-	// Shortcut pointers & flags.
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
-	as_index_tree* tree = tr->rsv.tree; // sub-records don't use delete_local()
-
-	as_index_ref r_ref;
-	r_ref.skip_lock = false;
-
-	if (0 != as_record_get(tree, &tr->keyd, &r_ref, ns)) {
-		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
-		return TRANS_DONE_ERROR;
-	}
-
-	as_record* r = r_ref.r;
+	as_index_tree* tree = tr->rsv.tree;
+	as_record* r = r_ref->r;
 
 	// Check generation requirement, if any.
-	if (! g_config.generation_disable &&
-			(((m->info2 & AS_MSG_INFO2_GENERATION) != 0 &&
-					m->generation != r->generation) ||
-			 ((m->info2 & AS_MSG_INFO2_GENERATION_GT) != 0 &&
-					m->generation <= r->generation))) {
-		as_record_done(&r_ref, ns);
+	if (! generation_check(r, m)) {
+		as_record_done(r_ref, ns);
 		cf_atomic64_incr(&ns->n_fail_generation);
 		tr->result_code = AS_PROTO_RESULT_FAIL_GENERATION;
 		return TRANS_DONE_ERROR;
@@ -411,8 +400,8 @@ delete_master(as_transaction* tr)
 		// Note - for data-not-in-memory a key check is expensive!
 		if (check_key && as_storage_record_get_key(&rd) &&
 				! check_msg_key(m, &rd)) {
-			as_storage_record_close(r, &rd);
-			as_record_done(&r_ref, ns);
+			as_storage_record_close(&rd);
+			as_record_done(r_ref, ns);
 			tr->result_code = AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
 			return TRANS_DONE_ERROR;
 		}
@@ -421,24 +410,18 @@ delete_master(as_transaction* tr)
 			delete_adjust_sindex(&rd);
 		}
 
-		as_storage_record_close(r, &rd);
+		as_storage_record_close(&rd);
 	}
 
 	// Save the set-ID for XDR.
 	uint16_t set_id = as_index_get_set_id(r);
 
-	// Save for XDR, and for ack to client. (These will also go to the prole,
-	// but the prole will ignore it.)
-	tr->generation = r->generation;
-	tr->void_time = r->void_time;
-	tr->last_update_time = r->last_update_time;
-
 	as_index_delete(tree, &tr->keyd);
-	as_record_done(&r_ref, ns);
+	as_record_done(r_ref, ns);
 
 	if (xdr_must_ship_delete(ns, as_transaction_is_nsup_delete(tr),
 			as_msg_is_xdr(m))) {
-		xdr_write(ns, tr->keyd, tr->generation, 0, true, set_id, NULL);
+		xdr_write(ns, tr->keyd, 0, 0, XDR_OP_TYPE_DROP, set_id, NULL);
 	}
 
 	return TRANS_IN_PROGRESS;

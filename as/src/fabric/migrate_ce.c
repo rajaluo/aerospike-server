@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "fault.h"
 #include "msg.h"
@@ -54,6 +55,11 @@ should_emigrate_record(emigration *emig, as_index_ref *r_ref)
 	return true;
 }
 
+void
+emigration_flag_pickle(const uint8_t *buf, uint32_t *info)
+{
+}
+
 emig_meta_q *
 emig_meta_q_create()
 {
@@ -66,15 +72,16 @@ emig_meta_q_destroy(emig_meta_q *emq)
 }
 
 void
-emig_meta_q_push_batch(emig_meta_q *emq, const meta_batch *batch)
-{
-}
-
-void
 emigration_handle_meta_batch_request(cf_node src, msg *m)
 {
 	cf_warning(AS_MIGRATE, "CE node received meta-batch request - unexpected");
 	as_fabric_msg_put(m);
+}
+
+bool
+immigration_ignore_pickle(const uint8_t *buf, const msg *m)
+{
+	return as_record_pickle_is_binless(buf);
 }
 
 void

@@ -272,7 +272,6 @@ typedef enum {
 	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FABRIC_WORKERS,
-	CASE_SERVICE_GENERATION_DISABLE,
 	CASE_SERVICE_HIST_TRACK_BACK,
 	CASE_SERVICE_HIST_TRACK_SLICE,
 	CASE_SERVICE_HIST_TRACK_THRESHOLDS,
@@ -341,6 +340,7 @@ typedef enum {
 	CASE_SERVICE_FB_HEALTH_GOOD_PCT,
 	CASE_SERVICE_FB_HEALTH_MSG_PER_BURST,
 	CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT,
+	CASE_SERVICE_GENERATION_DISABLE,
 	CASE_SERVICE_MIGRATE_READ_PRIORITY,
 	CASE_SERVICE_MIGRATE_READ_SLEEP,
 	CASE_SERVICE_MIGRATE_XMIT_HWM,
@@ -503,6 +503,8 @@ typedef enum {
 	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN,
 	CASE_NAMESPACE_SINGLE_BIN,
 	CASE_NAMESPACE_STOP_WRITES_PCT,
+	CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE,
+	CASE_NAMESPACE_TOMB_RAIDER_PERIOD,
 	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE,
 	// Deprecated:
 	CASE_NAMESPACE_ALLOW_VERSIONS,
@@ -553,6 +555,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE,
 	CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT,
 	CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE,
+	CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP,
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS,
 	// Deprecated:
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS,
@@ -688,7 +691,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
-		{ "generation-disable",				CASE_SERVICE_GENERATION_DISABLE },
 		{ "hist-track-back",				CASE_SERVICE_HIST_TRACK_BACK },
 		{ "hist-track-slice",				CASE_SERVICE_HIST_TRACK_SLICE },
 		{ "hist-track-thresholds",			CASE_SERVICE_HIST_TRACK_THRESHOLDS },
@@ -755,6 +757,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "fb-health-good-pct",				CASE_SERVICE_FB_HEALTH_GOOD_PCT },
 		{ "fb-health-msg-per-burst",		CASE_SERVICE_FB_HEALTH_MSG_PER_BURST },
 		{ "fb-health-msg-timeout",			CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT },
+		{ "generation-disable",				CASE_SERVICE_GENERATION_DISABLE },
 		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
 		{ "migrate-read-sleep",				CASE_SERVICE_MIGRATE_READ_SLEEP },
 		{ "migrate-xmit-hwm",				CASE_SERVICE_MIGRATE_XMIT_HWM },
@@ -918,6 +921,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "geo2dsphere-within",				CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN },
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
 		{ "stop-writes-pct",				CASE_NAMESPACE_STOP_WRITES_PCT },
+		{ "tomb-raider-eligible-age",		CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE },
+		{ "tomb-raider-period",				CASE_NAMESPACE_TOMB_RAIDER_PERIOD },
 		{ "write-commit-level-override",	CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE },
 		{ "allow-versions",					CASE_NAMESPACE_ALLOW_VERSIONS },
 		{ "demo-read-multiplier",			CASE_NAMESPACE_DEMO_READ_MULTIPLIER },
@@ -971,6 +976,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "max-write-cache",				CASE_NAMESPACE_STORAGE_DEVICE_MAX_WRITE_CACHE },
 		{ "min-avail-pct",					CASE_NAMESPACE_STORAGE_DEVICE_MIN_AVAIL_PCT },
 		{ "post-write-queue",				CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE },
+		{ "tomb-raider-sleep",				CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP },
 		{ "write-threads",					CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS },
 		{ "defrag-max-blocks",				CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_MAX_BLOCKS },
 		{ "defrag-period",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_PERIOD },
@@ -1977,9 +1983,6 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_FABRIC_WORKERS:
 				c->n_fabric_workers = cfg_int(&line, 1, MAX_FABRIC_WORKERS);
 				break;
-			case CASE_SERVICE_GENERATION_DISABLE:
-				c->generation_disable = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_HIST_TRACK_BACK:
 				c->hist_track_back = cfg_u32_no_checks(&line);
 				break;
@@ -2179,6 +2182,7 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_FB_HEALTH_GOOD_PCT:
 			case CASE_SERVICE_FB_HEALTH_MSG_PER_BURST:
 			case CASE_SERVICE_FB_HEALTH_MSG_TIMEOUT:
+			case CASE_SERVICE_GENERATION_DISABLE:
 			case CASE_SERVICE_MIGRATE_READ_PRIORITY:
 			case CASE_SERVICE_MIGRATE_READ_SLEEP:
 			case CASE_SERVICE_MIGRATE_XMIT_HWM:
@@ -2690,6 +2694,12 @@ as_config_init(const char *config_file)
 			case CASE_NAMESPACE_STOP_WRITES_PCT:
 				ns->stop_writes_pct = (float)cfg_pct_fraction(&line);
 				break;
+			case CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE:
+				ns->tomb_raider_eligible_age = cfg_seconds_no_checks(&line);
+				break;
+			case CASE_NAMESPACE_TOMB_RAIDER_PERIOD:
+				ns->tomb_raider_period = cfg_seconds_no_checks(&line);
+				break;
 			case CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE:
 				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_WRITE_COMMIT_OPTS, NUM_NAMESPACE_WRITE_COMMIT_OPTS)) {
 				case CASE_NAMESPACE_WRITE_COMMIT_ALL:
@@ -2807,6 +2817,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_POST_WRITE_QUEUE:
 				ns->storage_post_write_queue = cfg_u32(&line, 0, 2 * 1024);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP:
+				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS:
 				ns->storage_write_threads = cfg_u32_no_checks(&line);

@@ -233,6 +233,7 @@ typedef struct as_query_transaction_s {
 	struct ai_obj            bkey;
 	as_aggr_call             agg_call; // Stream UDF Details
 	iudf_origin              origin;   // Record UDF Details
+	bool                     is_durable_delete; // enterprise only
 	as_sindex_qctx           qctx;     // Secondary Index details
 	as_partition_reservation * rsv;
 } as_query_transaction;
@@ -1576,7 +1577,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
-	int rec_rv      = as_record_get(rsv->tree, dig, &r_ref, ns);
+	int rec_rv      = as_record_get_live(rsv->tree, dig, &r_ref, ns);
 
 	if (rec_rv == 0) {
 		as_index *r = r_ref.r;
@@ -1593,7 +1594,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		as_storage_rd rd;
 		as_storage_record_open(ns, r, &rd, &r->key);
 		qtr->n_read_success += 1;
-		rd.n_bins = as_bin_get_n_bins(r, &rd);
+		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
 		// Note: This array must stay in scope until the response
 		//       for this record has been built, since in the get
@@ -1602,11 +1603,11 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 
 		// Figure out which bins you want - for now, all
-		rd.bins   = as_bin_get_all(r, &rd, stack_bins);
+		as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 		rd.n_bins = as_bin_inuse_count(&rd);
 		// Call Back
 		if (!query_record_matches(qtr, &rd, skey)) {
-			as_storage_record_close(r, &rd);
+			as_storage_record_close(&rd);
 			as_record_done(&r_ref, ns);
 			query_release_partition(qtr, rsv);
 			cf_atomic64_incr(&g_stats.query_false_positives);
@@ -1616,14 +1617,14 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 
 		int ret = query_add_response(qtr, &r_ref, &rd);
 		if (ret != 0) {
-			as_storage_record_close(r, &rd);
+			as_storage_record_close(&rd);
 			as_record_done(&r_ref, ns);
 			qtr_set_err(qtr, AS_PROTO_RESULT_FAIL_QUERY_CBERROR, __FILE__, __LINE__);
 			query_release_partition(qtr, rsv);
 			ASD_QUERY_IO_ERROR(nodeid, qtr->trid);
 			return AS_QUERY_ERR;
 		}
-		as_storage_record_close(r, &rd);
+		as_storage_record_close(&rd);
 		as_record_done(&r_ref, ns);
 	} else {
 		// What do we do about empty records?
@@ -1821,12 +1822,10 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 {
 	as_transaction tr;
 
-	if (as_transaction_init_iudf(&tr, qtr->ns, keyd)) {
+	if (as_transaction_init_iudf(&tr, qtr->ns, keyd, &qtr->origin, qtr->is_durable_delete)) {
 		qtr_set_err(qtr, AS_PROTO_RESULT_FAIL_QUERY_CBERROR, __FILE__, __LINE__);
 		return AS_QUERY_OK;
 	}
-
-	tr.from.iudf_orig = &qtr->origin;
 
 	qtr_reserve(qtr, __FILE__, __LINE__);
 	cf_atomic32_incr(&qtr->n_udf_tr_queued);
@@ -2801,6 +2800,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	if (qtr->job_type == QUERY_TYPE_UDF_BG) {
 		qtr->origin.cb     = query_udf_bg_tr_complete;
 		qtr->origin.udata  = (void *)qtr;
+		qtr->is_durable_delete = as_transaction_is_durable_delete(tr);
 	}
 
 	// Consume everything from tr rest will be picked up in init

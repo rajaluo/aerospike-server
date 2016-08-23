@@ -41,7 +41,9 @@ BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
 BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
 BASE_SOURCES += udf_memtracker.c udf_record.c udf_timer.c
 ifneq ($(USE_EE),1)
+  BASE_SOURCES += index_ce.c
   BASE_SOURCES += namespace_ce.c
+  BASE_SOURCES += record_ce.c
   BASE_SOURCES += security_ce.c
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
@@ -58,11 +60,15 @@ GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
 STORAGE_HEADERS += storage.h drv_ssd.h
 STORAGE_SOURCES += storage.c drv_kv.c drv_memory.c drv_ssd.c
 ifneq ($(USE_EE),1)
+  STORAGE_SOURCES += drv_memory_ce.c
   STORAGE_SOURCES += drv_ssd_ce.c
 endif
 
 TRANSACTION_HEADERS += delete.h duplicate_resolve.h proxy.h read.h replica_write.h rw_request_hash.h rw_request.h rw_utils.h udf.h write.h
 TRANSACTION_SOURCES += delete.c duplicate_resolve.c proxy.c read.c replica_write.c rw_request_hash.c rw_request.c rw_utils.c udf.c write.c
+ifneq ($(USE_EE),1)
+  TRANSACTION_SOURCES += delete_ce.c rw_utils_ce.c
+endif
 
 HEADERS = $(BASE_HEADERS:%=base/%) $(FABRIC_HEADERS:%=fabric/%) $(STORAGE_HEADERS:%=storage/%) $(GEOSPATIAL_HEADERS:%=geospatial/%) $(TRANSACTION_HEADERS:%=transaction/%)
 SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCES:%=storage/%) $(GEOSPATIAL_SOURCES:%=geospatial/%) $(TRANSACTION_SOURCES:%=transaction/%)

@@ -1,5 +1,5 @@
 /*
- * delete.h
+ * index_ce.c
  *
  * Copyright (C) 2016 Aerospike, Inc.
  *
@@ -20,30 +20,41 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#pragma once
-
 //==========================================================
 // Includes.
 //
 
-#include <stdbool.h>
-
 #include "base/index.h"
-#include "base/transaction.h"
-#include "transaction/rw_request.h"
+
+#include "arenax.h"
+#include "fault.h"
+
+#include "base/datamodel.h"
 
 
 //==========================================================
 // Public API.
 //
 
-transaction_status as_delete_start(as_transaction* tr);
+as_index_tree *
+as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor,
+		void *destructor_udata, as_treex *p_treex)
+{
+	cf_crash(AS_INDEX, "CE code called as_index_tree_resume()");
+	return NULL;
+}
 
 
-//==========================================================
-// Private API - for enterprise separation only.
-//
+void
+as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata)
+{
+	as_index_reduce(tree, cb, udata);
+}
 
-bool delete_storage_overloaded(as_transaction* tr);
-transaction_status delete_master(as_transaction* tr, rw_request* rw);
-transaction_status drop_master(as_transaction* tr, as_index_ref* r_ref);
+
+void
+as_index_reduce_partial_live(as_index_tree *tree, uint32_t sample_count,
+		as_index_reduce_fn cb, void *udata)
+{
+	as_index_reduce_partial(tree, sample_count, cb, udata);
+}

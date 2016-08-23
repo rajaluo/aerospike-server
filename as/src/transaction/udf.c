@@ -116,8 +116,8 @@ int udf_apply_record(udf_call* call, as_rec* rec, as_result* result);
 uint64_t udf_end_time(time_tracker* tt);
 int udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 		uint16_t set_id);
-udf_optype udf_getop(udf_record* urecord);
-void udf_post_processing(udf_record* urecord, udf_optype* urecord_op,
+udf_optype udf_finish_op(udf_record* urecord);
+void udf_post_processing(udf_record* urecord, udf_optype urecord_op,
 		uint16_t set_id);
 void write_udf_post_processing(as_transaction* tr, as_storage_rd* rd,
 		uint8_t** pickled_buf, size_t* pickled_sz,
@@ -171,8 +171,7 @@ udf_sub_udf_update_stats(as_namespace* ns, uint8_t result_code)
 static inline bool
 udf_zero_bins_left(udf_record* urecord)
 {
-	return (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) == 0 &&
-			(urecord->flag & UDF_RECORD_FLAG_OPEN) != 0 &&
+	return (urecord->flag & UDF_RECORD_FLAG_OPEN) != 0 &&
 			! as_bin_inuse_has(urecord->rd);
 }
 
@@ -684,7 +683,8 @@ udf_master_apply(udf_call* call, rw_request* rw)
 		get_rv = -1;
 	}
 
-	if (get_rv == -1 && tr->origin == FROM_IUDF) {
+	if (tr->origin == FROM_IUDF &&
+			(get_rv == -1 || ! as_record_is_live(r_ref.r))) {
 		// Internal UDFs must not create records.
 		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
 		process_failure(call, NULL, &rw->response_db);
@@ -878,15 +878,18 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 	int subrec_count = 0;
 
 	udf_record* h_urecord = as_rec_source(lrecord->h_urec);
-	udf_optype h_urecord_op = udf_getop(h_urecord);
+	udf_optype h_urecord_op = udf_finish_op(h_urecord);
 
 	if (h_urecord_op == UDF_OPTYPE_DELETE) {
-		udf_post_processing(h_urecord, &h_urecord_op, set_id);
-
-		rw->pickled_buf = NULL;
-		rw->pickled_sz = 0;
-		as_rec_props_clear(&rw->pickled_rec_props);
 		*lrecord_op = UDF_OPTYPE_DELETE;
+
+		udf_post_processing(h_urecord, h_urecord_op, set_id);
+
+		rw->pickled_buf			= h_urecord->pickled_buf;
+		rw->pickled_sz			= h_urecord->pickled_sz;
+		rw->pickled_rec_props	= h_urecord->pickled_rec_props;
+
+		udf_record_cleanup(h_urecord, false);
 	}
 	else {
 		if (h_urecord_op == UDF_OPTYPE_WRITE) {
@@ -895,19 +898,19 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 
 		FOR_EACH_SUBRECORD(i, j, lrecord) {
 			udf_record* c_urecord = &lrecord->chunk[i].slots[j].c_urecord;
-			udf_optype c_urecord_op = udf_getop(c_urecord);
+			udf_optype c_urecord_op = udf_finish_op(c_urecord);
 
 			if (UDF_OP_IS_WRITE(c_urecord_op)) {
 				is_ldt = true;
 				subrec_count++;
 			}
 
-			udf_post_processing(c_urecord, &c_urecord_op, set_id);
+			udf_post_processing(c_urecord, c_urecord_op, set_id);
 		}
 
 		// Process the parent record last .. this is to make sure the lock is
 		// held until the end.
-		udf_post_processing(h_urecord, &h_urecord_op, set_id);
+		udf_post_processing(h_urecord, h_urecord_op, set_id);
 
 		if (is_ldt) {
 			// Create the multiop pickled buf.
@@ -921,6 +924,8 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 				// - failed to pack stuff up
 				udf_record_cleanup(c_urecord, true);
 			}
+
+			udf_record_cleanup(h_urecord, true);
 		}
 		else {
 			// Normal UDF case - pass on pickled buf created for the record.
@@ -931,8 +936,6 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 			udf_record_cleanup(h_urecord, false);
 		}
 	}
-
-	udf_record_cleanup(h_urecord, true);
 
 	if (UDF_OP_IS_WRITE(*lrecord_op) &&
 			(lrecord->udf_context & UDF_CONTEXT_LDT) != 0) {
@@ -957,46 +960,28 @@ udf_finish(ldt_record* lrecord, rw_request* rw, udf_optype* lrecord_op,
 
 
 udf_optype
-udf_getop(udf_record* urecord)
+udf_finish_op(udf_record* urecord)
 {
-	udf_optype optype;
+	if (udf_zero_bins_left(urecord)) {
+		// Amazingly, with respect to stored key, memory statistics work out
+		// correctly regardless of what this returns.
+		return udf_finish_delete(urecord);
+	}
 
 	if ((urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) != 0) {
-		if ((urecord->flag & UDF_RECORD_FLAG_OPEN) != 0) {
-			optype = UDF_OPTYPE_WRITE;
+		if ((urecord->flag & UDF_RECORD_FLAG_OPEN) == 0) {
+			cf_crash(AS_UDF, "updated record not open");
 		}
-		else {
-			// If the record has updates and it is not open, and if it pre-
-			// existed, it's an update followed by a delete.
-			if ((urecord->flag & UDF_RECORD_FLAG_PREEXISTS) != 0) {
-				optype = UDF_OPTYPE_DELETE;
-			}
-			// If the record did not pre-exist and has updates and it is not
-			// open, then it is create followed by delete - essentially a no-op.
-			else {
-				optype = UDF_OPTYPE_NONE;
-			}
-		}
-	}
-	else if ((urecord->flag & UDF_RECORD_FLAG_PREEXISTS) != 0 &&
-			(urecord->flag & UDF_RECORD_FLAG_OPEN) == 0) {
-		optype = UDF_OPTYPE_DELETE;
-	}
-	else {
-		optype = UDF_OPTYPE_READ;
+
+		return UDF_OPTYPE_WRITE;
 	}
 
-	if (udf_zero_bins_left(urecord)) {
-		optype = UDF_OPTYPE_DELETE;
-	}
-
-	return optype;
+	return UDF_OPTYPE_READ;
 }
 
 
 void
-udf_post_processing(udf_record* urecord, udf_optype* urecord_op,
-		uint16_t set_id)
+udf_post_processing(udf_record* urecord, udf_optype urecord_op, uint16_t set_id)
 {
 	as_storage_rd* rd	= urecord->rd;
 	as_transaction* tr	= urecord->tr;
@@ -1007,22 +992,11 @@ udf_post_processing(udf_record* urecord, udf_optype* urecord_op,
 	as_rec_props_clear(&urecord->pickled_rec_props);
 	bool udf_xdr_ship_op = false;
 
-	*urecord_op = udf_getop(urecord);
-
-	if (UDF_OP_IS_DELETE(*urecord_op) || UDF_OP_IS_WRITE(*urecord_op)) {
+	if (UDF_OP_IS_DELETE(urecord_op) || UDF_OP_IS_WRITE(urecord_op)) {
 		udf_xdr_ship_op = true;
 	}
 
-	if (udf_zero_bins_left(urecord)) {
-		// Note - record delete via aerospike:remove() does not get here.
-		// Not applicable to sub-records unless requested by UDF - orphaned sub-
-		// records are eventually overwritten by defrag.
-		as_index_delete(tr->rsv.tree, &tr->keyd);
-		*urecord_op = UDF_OPTYPE_DELETE;
-		as_storage_record_adjust_mem_stats(rd, urecord->starting_memory_bytes);
-		cf_atomic64_incr(&tr->rsv.ns->n_deleted_last_bin);
-	}
-	else if (*urecord_op == UDF_OPTYPE_WRITE) {
+	if (urecord_op == UDF_OPTYPE_WRITE || urecord_op == UDF_OPTYPE_DELETE) {
 		size_t rec_props_data_size = as_storage_record_rec_props_size(rd);
 		uint8_t rec_props_data[rec_props_data_size];
 
@@ -1064,12 +1038,12 @@ udf_post_processing(udf_record* urecord, udf_optype* urecord_op,
 		set_id = as_index_get_set_id(r_ref->r);
 	}
 
-	urecord->op = *urecord_op;
+	urecord->op = urecord_op;
 
 	xdr_dirty_bins dirty_bins;
 	xdr_clear_dirty_bins(&dirty_bins);
 
-	if (urecord->dirty && udf_xdr_ship_op && UDF_OP_IS_WRITE(*urecord_op)) {
+	if (urecord->dirty && udf_xdr_ship_op && UDF_OP_IS_WRITE(urecord_op)) {
 		xdr_copy_dirty_bins(urecord->dirty, &dirty_bins);
 	}
 
@@ -1078,12 +1052,15 @@ udf_post_processing(udf_record* urecord, udf_optype* urecord_op,
 
 	// Write to XDR pipe.
 	if (udf_xdr_ship_op) {
-		if (UDF_OP_IS_WRITE(*urecord_op)) {
-			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, false, set_id,
-					&dirty_bins);
+		if (UDF_OP_IS_WRITE(urecord_op)) {
+			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, XDR_OP_TYPE_WRITE,
+					set_id, &dirty_bins);
 		}
-		else if (UDF_OP_IS_DELETE(*urecord_op)) {
-			xdr_write(tr->rsv.ns, tr->keyd, generation, 0, true, set_id, NULL);
+		else if (UDF_OP_IS_DELETE(urecord_op)) {
+			xdr_write(tr->rsv.ns, tr->keyd, 0, 0,
+					as_transaction_is_durable_delete(tr) ?
+							XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP,
+					set_id, NULL);
 		}
 	}
 }

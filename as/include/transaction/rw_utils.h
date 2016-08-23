@@ -34,10 +34,13 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
+#include "base/udf_record.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
+#include "transaction/udf.h"
 
 
 //==========================================================
@@ -61,12 +64,16 @@ typedef struct rw_paxos_change_struct_t {
 
 bool xdr_allows_write(as_transaction* tr);
 void send_rw_messages(rw_request* rw);
+bool generation_check(const as_record* r, const as_msg* m);
 int set_set_from_msg(as_record* r, as_namespace* ns, as_msg* m);
+int set_delete_durablility(const as_transaction* tr, as_storage_rd* rd);
 bool check_msg_key(as_msg* m, as_storage_rd* rd);
 bool get_msg_key(as_transaction* tr, as_storage_rd* rd);
+int handle_msg_key(as_transaction* tr, as_storage_rd* rd);
 void update_metadata_in_index(as_transaction* tr, bool increment_generation, as_record* r);
 bool pickle_all(as_storage_rd* rd, rw_request* rw);
 void delete_adjust_sindex(as_storage_rd* rd);
+void remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd, as_bin* bins, uint32_t n_bins);
 bool xdr_must_ship_delete(as_namespace* ns, bool is_nsup_delete, bool is_xdr_op);
 
 
@@ -104,3 +111,30 @@ is_valid_ttl(as_namespace* ns, uint32_t ttl)
 	// Note - TTL 0 means "use namespace default", -1 means "never expire".
 	return ttl <= ns->max_ttl || ttl == 0xFFFFffff;
 }
+
+
+static inline void
+clear_delete_response_metadata(rw_request* rw, as_transaction* tr)
+{
+	// If write became delete, respond to origin with no metadata.
+	if (as_record_pickle_is_binless(rw->pickled_buf)) {
+		tr->generation = 0;
+		tr->void_time = 0;
+		tr->last_update_time = 0;
+	}
+}
+
+
+//==========================================================
+// Private API - for enterprise separation only.
+//
+
+bool create_only_check(const as_record* r, const as_msg* m);
+void write_delete_record(as_record* r, as_index_tree* tree);
+
+udf_optype udf_finish_delete(udf_record* urecord);
+
+void dup_res_flag_pickle(const uint8_t* buf, uint32_t* info);
+bool dup_res_ignore_pickle(const uint8_t* buf, const msg* m);
+
+void repl_write_flag_pickle(const as_transaction* tr, const uint8_t* buf, uint32_t* info);

@@ -79,6 +79,7 @@ typedef enum {
 #define RW_INFO_SINDEX_TOUCHED	0x0080 // sindex was touched
 #define RW_INFO_LDT				0x0100 // LDT multi-op message
 #define RW_INFO_UDF_WRITE		0x0200 // write is done from inside UDF
+#define RW_INFO_TOMBSTONE		0x0400 // enterprise only
 
 typedef struct rw_request_hkey_s {
 	as_namespace_id	ns_id;

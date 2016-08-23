@@ -1,5 +1,5 @@
 /*
- * delete.h
+ * drv_memory_ce.c
  *
  * Copyright (C) 2016 Aerospike, Inc.
  *
@@ -20,30 +20,19 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#pragma once
-
-//==========================================================
-// Includes.
-//
-
-#include <stdbool.h>
-
-#include "base/index.h"
-#include "base/transaction.h"
-#include "transaction/rw_request.h"
+#include "base/datamodel.h"
+#include "storage/storage.h"
 
 
-//==========================================================
-// Public API.
-//
+void
+as_storage_start_tomb_raider_memory(as_namespace* ns)
+{
+	// Tomb raider is for enterprise version only.
+}
 
-transaction_status as_delete_start(as_transaction* tr);
 
-
-//==========================================================
-// Private API - for enterprise separation only.
-//
-
-bool delete_storage_overloaded(as_transaction* tr);
-transaction_status delete_master(as_transaction* tr, rw_request* rw);
-transaction_status drop_master(as_transaction* tr, as_index_ref* r_ref);
+int
+as_storage_record_write_memory(as_storage_rd* rd)
+{
+	return 0;
+}

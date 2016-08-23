@@ -1148,7 +1148,7 @@ as_ldt_is_parent_and_version_match(uint64_t subrec_version, as_index_tree *tree,
 	as_index_ref  r_ref;
 	r_ref.skip_lock = true;
 
-	if (as_record_get(tree, keyd, &r_ref, ns)) {
+	if (as_record_get_live(tree, keyd, &r_ref, ns)) {
 		cf_warning(AS_LDT, "LDT_SUB_GC Could not find parent record");
 		return false;
 	}
@@ -1169,9 +1169,9 @@ as_ldt_is_parent_and_version_match(uint64_t subrec_version, as_index_tree *tree,
 		return false;
 	}
 	cf_atomic_int_incr(&ns->lstats.ldt_gc_io);
-	rd.n_bins = as_bin_get_n_bins(r, &rd);
+	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
-	rd.bins = as_bin_get_all(r, &rd, stack_bins);
+	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 	uint64_t parent_version = 0;
 	rv = as_ldt_parent_storage_get_version(&rd, &parent_version, false, __FILE__, __LINE__);
@@ -1189,7 +1189,7 @@ as_ldt_is_parent_and_version_match(uint64_t subrec_version, as_index_tree *tree,
 	}
 
 Cleanup:
-	as_storage_record_close(r, &rd);
+	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
 	if (rv) return false;
 	else    return true;
@@ -1281,9 +1281,9 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 		return;
 	}
 	cf_atomic_int_incr(&ns->lstats.ldt_gc_io);
-	rd.n_bins               = as_bin_get_n_bins(r, &rd);
+	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 	as_bin stack_bins[(!ns->storage_data_in_memory) ? rd.n_bins : 0];
-	rd.bins                 = as_bin_get_all(r, &rd, stack_bins);
+	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 	// Read Parent and ESR digest 
 	cf_digest esr_digest;
@@ -1301,7 +1301,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	}
 
 	as_ldt_subrec_storage_validate(&rd, "Defragging");
-	as_storage_record_close(r, &rd);
+	as_storage_record_close(&rd);
 
 	// STEP 2: Check if we should delete subrec
 	// a) Check if parent record exist (if not the record is deleted)
@@ -1314,7 +1314,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	if (check_esr && (rv = as_record_exists(p->sub_vp, &esr_digest, ns))) {
 		delete = true;
 		type   = LDT_SUB_GC_NO_ESR;
-	} else if ((rv = as_record_exists(p->vp, &parent_digest, ns))) {
+	} else if ((rv = as_record_exists_live(p->vp, &parent_digest, ns, true))) {
 		delete = true;
 		type   = LDT_SUB_GC_NO_PARENT;
 	} else if (!as_ldt_is_parent_and_version_match(subrec_version, p->vp, &parent_digest, ns)) {
@@ -1355,7 +1355,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	return;
 
 Cleanup:
-	as_storage_record_close(r, &rd);
+	as_storage_record_close(&rd);
 	as_record_done(r_ref, ns);
 	usleep(ns->ldt_gc_sleep_us);
 }
@@ -1379,7 +1379,7 @@ as_ldt_merge_component_is_candidate(as_partition_reservation *rsv, as_record_mer
 {
 	as_index_ref r_ref;
 	r_ref.skip_lock     = false;
-	if (as_record_get(rsv->tree, &c->pdigest, &r_ref, rsv->ns)) {
+	if (as_record_get_live(rsv->tree, &c->pdigest, &r_ref, rsv->ns)) {
 		return true;
 	}
 	as_index *r  = r_ref.r;
@@ -1679,7 +1679,7 @@ as_bin_get_llist(as_namespace *ns, as_storage_rd *rd, as_index_tree *sub_tree, a
 		as_index_ref   sub_r_ref; 
 		as_storage_rd  sub_rd;
 		sub_r_ref.skip_lock = true;
-		int rv = as_record_get(sub_tree, &keyd, &sub_r_ref, ns);
+		int rv = as_record_get_live(sub_tree, &keyd, &sub_r_ref, ns);
 		if (rv) {
 			cf_warning_digest(AS_LDT, &rd->keyd, " LDT stucture invalid %ld", ldt_version);
 			as_val_destroy(rl);
@@ -1689,10 +1689,10 @@ as_bin_get_llist(as_namespace *ns, as_storage_rd *rd, as_index_tree *sub_tree, a
 		as_record *sub_r = sub_r_ref.r;
 
 		as_storage_record_open(ns, sub_r, &sub_rd, &sub_r->key);
-		sub_rd.n_bins = as_bin_get_n_bins(sub_r, &sub_rd);
+		as_storage_rd_load_n_bins(&sub_rd); // TODO - handle error returned
 		// Have bound checks ...
 		as_bin stack_bins[(sub_r && !ns->storage_data_in_memory) ? sub_rd.n_bins : 0];
-		sub_rd.bins = as_bin_get_all(sub_r, &sub_rd, stack_bins);
+		as_storage_rd_load_bins(&sub_rd, stack_bins); // TODO - handle error returned
 
 		// 3. Scan the current leaf
 		as_list *sl = as_ldt_leaf_scan(&sub_rd); 
@@ -1710,7 +1710,7 @@ as_bin_get_llist(as_namespace *ns, as_storage_rd *rd, as_index_tree *sub_tree, a
 		curDigest = as_ldt_leaf_getNext(&sub_rd);
 		
 		// 5. Close Current
-		as_storage_record_close(sub_r, &sub_rd);
+		as_storage_record_close(&sub_rd);
 		as_record_done(&sub_r_ref, ns);
 	}
 	return (as_list *)rl;

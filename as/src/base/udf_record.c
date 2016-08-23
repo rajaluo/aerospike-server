@@ -43,6 +43,7 @@
 #include "base/rec_props.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
+#include "transaction/rw_utils.h"
 #include "transaction/udf.h"
 
 
@@ -87,11 +88,19 @@ udf_storage_record_open(udf_record *urecord)
 
 	as_storage_record_open(tr->rsv.ns, r, rd, &r->key);
 
-	rd->n_bins = as_bin_get_n_bins(r, rd);
+	// Deal with delete durability (enterprise only).
+	if ((urecord->flag & UDF_RECORD_FLAG_ALLOW_UPDATES) != 0 &&
+			(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) == 0 &&
+			set_delete_durablility(tr, rd) != 0) {
+		as_storage_record_close(rd);
+		return -1;
+	}
+
+	as_storage_rd_load_n_bins(rd); // TODO - handle error returned
 
 	if (rd->n_bins > UDF_RECORD_BIN_ULIMIT) {
 		cf_warning(AS_UDF, "record has too many bins (%d) for UDF processing", rd->n_bins);
-		as_storage_record_close(r, rd);
+		as_storage_record_close(rd);
 		return -1;
 	}
 
@@ -100,7 +109,7 @@ udf_storage_record_open(udf_record *urecord)
 		rd->n_bins = sizeof(urecord->stack_bins) / sizeof(as_bin);
 	}
 
-	rd->bins = as_bin_get_all(r, rd, urecord->stack_bins);
+	as_storage_rd_load_bins(rd, urecord->stack_bins); // TODO - handle error returned
 	urecord->starting_memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 
 	as_storage_record_get_key(rd);
@@ -156,20 +165,29 @@ udf_storage_record_close(udf_record *urecord)
 			}
 		}
 
-		if (!(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD)) {
+		bool is_subrec = (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) != 0;
+		bool has_bins = as_bin_inuse_has(rd);
+
+		if (! is_subrec) {
 			if (as_ldt_record_is_parent(rd->r)) {
 				cf_detail_digest(AS_LDT, &rd->keyd, "LDT_INDEXBIT Parent @ write: Digest:");
 			}
-		} else {
+		} else if (has_bins) {
 			as_ldt_subrec_storage_validate(rd, "Writing");
 		}
 
 		if (r_ref) {
 			if (urecord->flag & UDF_RECORD_FLAG_HAS_UPDATES) {
-				as_storage_record_write(r_ref->r, rd);
+				as_storage_record_write(rd);
 				urecord->flag &= ~UDF_RECORD_FLAG_HAS_UPDATES; // TODO - necessary?
 			}
-			as_storage_record_close(r_ref->r, rd);
+
+			if (! has_bins) {
+				write_delete_record(r_ref->r, is_subrec ?
+						urecord->tr->rsv.sub_tree : urecord->tr->rsv.tree);
+			}
+
+			as_storage_record_close(rd);
 		} else {
 			// Should never happen.
 			cf_warning(AS_UDF, "Unexpected Internal Error (null r_ref)");

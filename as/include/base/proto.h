@@ -65,7 +65,7 @@ struct as_transaction_s;
 #define AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG			13
 #define AS_PROTO_RESULT_FAIL_KEY_BUSY				14
 #define AS_PROTO_RESULT_FAIL_SCAN_ABORT				15
-#define AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE	16	// asked to do something we don't yet do (like scan+udf).
+#define AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE	16	// asked to do something we don't do for a particular configuration
 #define AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND			17
 #define AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD		18
 #define AS_PROTO_RESULT_FAIL_KEY_MISMATCH			19
@@ -74,6 +74,7 @@ struct as_transaction_s;
 #define AS_PROTO_RESULT_FAIL_FORBIDDEN				22	// operation (perhaps temporarily) not possible
 #define AS_PROTO_RESULT_FAIL_ELEMENT_NOT_FOUND		23
 #define AS_PROTO_RESULT_FAIL_ELEMENT_EXISTS			24
+#define AS_PROTO_RESULT_FAIL_ENTERPRISE_ONLY		25	// attempting enterprise functionality on community build
 
 // Security result codes. Must be <= 255, to fit in one byte. Defined here to
 // ensure no overlap with other result codes.
@@ -364,8 +365,8 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO2_WRITE				(1 << 0) // contains a write semantic
 #define AS_MSG_INFO2_DELETE				(1 << 1) // delete record
 #define AS_MSG_INFO2_GENERATION			(1 << 2) // pay attention to the generation
-#define AS_MSG_INFO2_GENERATION_GT		(1 << 3) // apply write if new generation >= old, good for restore
-// (Note:  Bit 4 is unused.)
+#define AS_MSG_INFO2_GENERATION_GT		(1 << 3) // apply write if new generation > old, good for restore
+#define AS_MSG_INFO2_DURABLE_DELETE		(1 << 4) // op resulting in record deletion leaves tombstone (Enterprise only)
 #define AS_MSG_INFO2_CREATE_ONLY		(1 << 5) // write record only if it doesn't exist
 #define AS_MSG_INFO2_BIN_CREATE_ONLY	(1 << 6) // write bin only if it doesn't exist
 #define AS_MSG_INFO2_RESPOND_ALL_OPS	(1 << 7) // all bin ops (read, write, or modify) require a response, in request order

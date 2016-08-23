@@ -33,6 +33,7 @@
 
 #include "citrusleaf/cf_atomic.h" // xdr_allows_write
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_digest.h"
 
 #include "fault.h"
 #include "msg.h"
@@ -144,8 +145,8 @@ get_msg_key(as_transaction* tr, as_storage_rd* rd)
 	as_msg_field* f = as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_KEY);
 
 	if (rd->ns->single_bin && rd->ns->storage_data_in_memory) {
-		// For now we just ignore the key - should we fail out of write_local()?
-		cf_warning(AS_RW, "can't store key if data-in-memory & single-bin");
+		cf_warning(AS_RW, "{%s} can't store key if data-in-memory & single-bin",
+				tr->rsv.ns->name);
 		return false;
 	}
 
@@ -153,6 +154,47 @@ get_msg_key(as_transaction* tr, as_storage_rd* rd)
 	rd->key = f->data;
 
 	return true;
+}
+
+
+int
+handle_msg_key(as_transaction* tr, as_storage_rd* rd)
+{
+	// Shortcut pointers.
+	as_msg* m = &tr->msgp->msg;
+	as_namespace* ns = tr->rsv.ns;
+
+	if (as_index_is_flag_set(rd->r, AS_INDEX_FLAG_KEY_STORED)) {
+		// Key stored for this record - be sure it gets rewritten.
+
+		// This will force a device read for non-data-in-memory, even if
+		// must_fetch_data is false! Since there's no advantage to using the
+		// loaded block after this if must_fetch_data is false, leave the
+		// subsequent code as-is.
+		if (! as_storage_record_get_key(rd)) {
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} can't get stored key ",
+					ns->name);
+			return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
+
+		// Check the client-sent key, if any, against the stored key.
+		if (as_transaction_has_key(tr) && ! check_msg_key(m, rd)) {
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} key mismatch ", ns->name);
+			return AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
+		}
+	}
+	// If we got a key without a digest, it's an old client, not a cue to store
+	// the key. (Remove this check when we're sure all old C clients are gone.)
+	else if (as_transaction_has_digest(tr)) {
+		// Key not stored for this record - store one if sent from client. For
+		// data-in-memory, don't allocate the key until we reach the point of no
+		// return. Also don't set AS_INDEX_FLAG_KEY_STORED flag until then.
+		if (! get_msg_key(tr, rd)) {
+			return AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+		}
+	}
+
+	return 0;
 }
 
 
@@ -242,13 +284,18 @@ delete_adjust_sindex(as_storage_rd* rd)
 		return;
 	}
 
-	as_record* r = rd->r;
+	as_storage_rd_load_n_bins(rd);
+	as_storage_rd_load_bins(rd, NULL);
 
-	rd->n_bins = as_bin_get_n_bins(r, rd);
-	rd->bins = as_bin_get_all(r, rd, NULL);
+	remove_from_sindex(ns, as_index_get_set_name(rd->r, ns), &rd->keyd,
+			rd->bins, rd->n_bins);
+}
 
-	const char* set_name = as_index_get_set_name(r, ns);
 
+void
+remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
+		as_bin* bins, uint32_t n_bins)
+{
 	SINDEX_GRLOCK();
 
 	SINDEX_BINS_SETUP(sbins, ns->sindex_cnt);
@@ -258,21 +305,20 @@ delete_adjust_sindex(as_storage_rd* rd)
 	int sbins_populated = 0;
 
 	// Reserve matching sindexes.
-	for (int i = 0; i < (int)rd->n_bins; i++) {
+	for (int i = 0; i < (int)n_bins; i++) {
 		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name,
-				rd->bins[i].id, &si_arr[si_arr_index]);
+				bins[i].id, &si_arr[si_arr_index]);
 	}
 
-	for (int i = 0; i < (int)rd->n_bins; i++) {
-		sbins_populated += as_sindex_sbins_from_bin(ns, set_name, &rd->bins[i],
+	for (int i = 0; i < (int)n_bins; i++) {
+		sbins_populated += as_sindex_sbins_from_bin(ns, set_name, &bins[i],
 				&sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 	}
 
 	SINDEX_GUNLOCK();
 
 	if (sbins_populated) {
-		as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated,
-				&rd->keyd);
+		as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated, keyd);
 		as_sindex_sbin_freeall(sbins, sbins_populated);
 	}
 

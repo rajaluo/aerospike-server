@@ -48,6 +48,7 @@
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
+#include "transaction/rw_utils.h"
 
 
 //==========================================================
@@ -247,20 +248,28 @@ dup_res_handle_request(cf_node node, msg* m)
 
 		as_storage_record_open(ns, r, &rd, keyd);
 
-		rd.n_bins = as_bin_get_n_bins(r, &rd);
+		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
 		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 
-		rd.bins = as_bin_get_all(r, &rd, stack_bins);
+		as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 		uint8_t* buf;
 		size_t buf_len;
 
 		if (0 != as_record_pickle(r, &rd, &buf, &buf_len)) {
-			as_storage_record_close(r, &rd);
+			as_storage_record_close(&rd);
 			done_handle_request(&rsv, &r_ref);
 			send_dup_res_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
 			return;
+		}
+
+		uint32_t info = 0;
+
+		dup_res_flag_pickle(buf, &info);
+
+		if (info != 0) {
+			msg_set_uint32(m, RW_FIELD_INFO, info);
 		}
 
 		as_storage_record_get_key(&rd);
@@ -274,7 +283,7 @@ dup_res_handle_request(cf_node node, msg* m)
 					rd.rec_props.size, MSG_SET_COPY);
 		}
 
-		as_storage_record_close(r, &rd);
+		as_storage_record_close(&rd);
 
 		msg_set_buf(m, RW_FIELD_RECORD, (void*)buf, buf_len,
 				MSG_SET_HANDOFF_MALLOC);
@@ -559,9 +568,7 @@ apply_winner(rw_request* rw)
 			continue;
 		}
 
-		// Paranoia only.
-		// TODO - should have inline wrapper to peek pickled bin count.
-		if (*(uint16_t*)dups[n].record_buf == 0) {
+		if (dup_res_ignore_pickle(dups[n].record_buf, m)) {
 			cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: binless pickle ");
 			continue;
 		}

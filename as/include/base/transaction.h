@@ -207,7 +207,7 @@ typedef struct as_transaction_s {
 #define FROM_FLAG_RESTART		0x0008
 
 // 'flags' bits - set in transaction body after queuing:
-#define AS_TRANSACTION_FLAG_SINDEX_TOUCHED	0x0001
+#define AS_TRANSACTION_FLAG_SINDEX_TOUCHED	0x01
 
 
 void as_transaction_init_head(as_transaction *tr, cf_digest *, cl_msg *);
@@ -314,32 +314,38 @@ as_transaction_trid(const as_transaction *tr)
 }
 
 static inline bool
-as_transaction_is_delete(as_transaction *tr)
+as_transaction_is_delete(const as_transaction *tr)
 {
 	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) != 0;
 }
 
+static inline bool
+as_transaction_is_durable_delete(const as_transaction *tr)
+{
+	return (tr->msgp->msg.info2 & AS_MSG_INFO2_DURABLE_DELETE) != 0;
+}
+
 // TODO - where should this go?
 static inline bool
-as_msg_is_xdr(as_msg *m)
+as_msg_is_xdr(const as_msg *m)
 {
 	return (m->info1 & AS_MSG_INFO1_XDR) != 0;
 }
 
 static inline bool
-as_transaction_is_xdr(as_transaction *tr)
+as_transaction_is_xdr(const as_transaction *tr)
 {
 	return (tr->msgp->msg.info1 & AS_MSG_INFO1_XDR) != 0;
 }
 
 // TODO - just use origin and deprecate FROM_FLAG_NSUP_DELETE?
 static inline bool
-as_transaction_is_nsup_delete(as_transaction *tr)
+as_transaction_is_nsup_delete(const as_transaction *tr)
 {
 	return (tr->from_flags & FROM_FLAG_NSUP_DELETE) != 0;
 }
 
-int as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd);
+int as_transaction_init_iudf(as_transaction *tr, as_namespace *ns, cf_digest *keyd, struct iudf_origin_s* iudf_orig, bool is_durable_delete);
 
 void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
 void as_transaction_error(as_transaction* tr, as_namespace *ns, uint32_t error_code);

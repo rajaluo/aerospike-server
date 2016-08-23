@@ -47,54 +47,22 @@
 #include "base/stats.h"
 #include "base/transaction.h"
 #include "storage/storage.h"
+#include "transaction/delete.h"
 
-
-// #define EXTRA_CHECKS
-// #define BREAK_VTP_ERROR
-
-#ifdef EXTRA_CHECKS
-#include <signal.h>
-#endif
 
 /* Used for debugging/tracing */
 static char * MOD = "partition.c::06/28/13";
 
 
-/* as_record_initialize
- * Initialize the record.
- * Called from as_record_get_create() and write_local()
- * record lock needs to be held before calling this function.
- */
-void as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
+// Called assuming record area of as_index has already been cleared.
+void
+as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
 {
-	if (!r_ref || !ns) {
-		cf_warning(AS_RECORD, "as_record_reinitialize: illegal params");
-		return;
-	}
+	as_record *r = r_ref->r;
 
-	as_index *r = r_ref->r;
-
-	as_index_clear_flags(r, AS_INDEX_ALL_FLAGS);
-
-	if (ns->single_bin) {
-		as_bin *b = as_index_get_single_bin(r);
-		as_bin_state_set(b, AS_BIN_STATE_UNUSED);
-		b->particle = 0;
-
-	}
-	else {
-		r->dim = NULL;
-	}
-
-	// clear everything owned by record
-	r->generation = 0;
-	r->void_time = 0;
-
-	// layer violation, refactor sometime
 	if (AS_STORAGE_ENGINE_SSD == ns->storage_type) {
 		r->storage_key.ssd.file_id = STORAGE_INVALID_FILE_ID;
 		r->storage_key.ssd.rblock_id = STORAGE_INVALID_RBLOCK;
-		r->storage_key.ssd.n_rblocks = 0;
 	}
 #ifdef USE_KV
 	else if (AS_STORAGE_ENGINE_KV == ns->storage_type) {
@@ -104,14 +72,18 @@ void as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
 	else if (AS_STORAGE_ENGINE_MEMORY == ns->storage_type) {
 		// The storage_key struct shouldn't be used, but for now is accessed
 		// when making the (useless for memory-only) object size histogram.
-		*(uint64_t*)&r->storage_key.ssd = 0;
 		r->storage_key.ssd.rblock_id = STORAGE_INVALID_RBLOCK;
 	}
 	else {
 		cf_crash(AS_RECORD, "unknown storage engine type: %d", ns->storage_type);
 	}
+}
 
-	as_index_set_set_id(r, 0);
+void
+as_record_reinitialize(as_index_ref *r_ref, as_namespace *ns)
+{
+	as_index_clear_record_info(r_ref->r);
+	as_record_initialize(r_ref, ns);
 }
 
 /* as_record_get_create
@@ -141,10 +113,10 @@ as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, 
 
 		// this is decremented by the destructor here, so best tracked on the constructor
 		if (is_subrec) {
-			cf_atomic_int_incr(&ns->n_sub_objects);
+			cf_atomic64_incr(&ns->n_sub_objects);
 		}
 		else {
-			cf_atomic_int_incr(&ns->n_objects);
+			cf_atomic64_incr(&ns->n_objects);
 		}
 	}
 
@@ -170,6 +142,17 @@ as_record_clean_bins(as_storage_rd *rd)
 	as_record_clean_bins_from(rd, 0);
 }
 
+void
+as_record_free_bin_space(as_record *r)
+{
+	as_bin_space *bin_space = as_index_get_bin_space(r);
+
+	if (bin_space) {
+		cf_free((void*)bin_space);
+		as_index_set_bin_space(r, NULL);
+	}
+}
+
 /* as_record_destroy
  * Destroy a record, when the refcount has gone to zero */
 void
@@ -182,20 +165,15 @@ as_record_destroy(as_record *r, as_namespace *ns)
 		as_storage_rd rd;
 		rd.r = r;
 		rd.ns = ns;
-		rd.n_bins = as_bin_get_n_bins(r, &rd);
-		rd.bins = as_bin_get_all(r, &rd, 0);
+		as_storage_rd_load_n_bins(&rd);
+		as_storage_rd_load_bins(&rd, NULL);
 
 		as_storage_record_drop_from_mem_stats(&rd);
 
 		as_record_clean_bins(&rd);
 
 		if (! ns->single_bin) {
-			as_bin_space *bin_space = as_index_get_bin_space(r);
-
-			if (bin_space) {
-				cf_free((void*)bin_space);
-				as_index_set_bin_space(r, NULL);
-			}
+			as_record_free_bin_space(r);
 
 			if (r->dim) {
 				cf_free(r->dim); // frees the key
@@ -203,16 +181,7 @@ as_record_destroy(as_record *r, as_namespace *ns)
 		}
 	}
 
-	// release from set
-	as_namespace_release_set_id(ns, as_index_get_set_id(r));
-
-	// TODO: LDT what if flag is not set ??
-	if (as_ldt_record_is_sub(r)) {
-		cf_atomic_int_decr(&ns->n_sub_objects);
-	}
-	else {
-		cf_atomic_int_decr(&ns->n_objects);
-	}
+	as_record_drop_stats(r, ns);
 
 	/* Destroy the storage and then free the memory-resident parts */
 	as_storage_record_destroy(ns, r);
@@ -234,13 +203,6 @@ as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_name
 #endif
 			as_index_get_vlock(tree, keyd, r_ref);
 
-	if (rv == 0) {
-		cf_detail(AS_RECORD, "record get: digest %"PRIx64" found record %p", *(uint64_t *)keyd, r_ref->r);
-	}
-	else if (rv == -1) {
-		cf_detail(AS_RECORD, "record get: digest %"PRIx64" not found", *(uint64_t *)keyd);
-	}
-
 	return rv;
 }
 
@@ -258,12 +220,7 @@ as_record_exists(as_index_tree *tree, cf_digest *keyd, as_namespace *ns)
 #endif
 			as_index_exists(tree, keyd);
 
-	if (rv == -1) {
-		cf_detail(AS_RECORD, "record get: digest %"PRIx64" not found", *(uint64_t *)keyd);
-
-		return(-1);
-	}
-	return(0);
+	return rv;
 }
 
 /* Done with this record - release and unlock
@@ -422,14 +379,14 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	if (has_sindex) {
 		SINDEX_GRLOCK();
 	}
-	
+
 	// To read the algorithm of upating sindex in bins check notes in ssd_record_add function.
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
 	as_sindex * si_arr[2 * ns->sindex_cnt];
 	int si_arr_index = 0;
 	const char* set_name = NULL;
 	set_name = as_index_get_set_name(rd->r, ns);
-	
+
 	// RESERVE SIs for old bins
 	// Cannot reserve SIs for new bins as we do not know the bin-id yet
 	if (has_sindex) {
@@ -437,7 +394,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 			si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(ns, set_name, rd->bins[i].id, &si_arr[si_arr_index]);
 		}
 	}
-	
+
 	if ((delta_bins < 0) && has_sindex) {
 		sbins_populated += as_sindex_sbins_from_rd(rd, newbins, old_n_bins, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 	}
@@ -627,8 +584,10 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 {
 	as_index *r = r_ref->r;
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
+
 	rd->ignore_record_on_device = true; // TODO - set to ! has_sindex
-	rd->n_bins = as_bin_get_n_bins(r, rd);
+	as_storage_rd_load_n_bins(rd); // TODO - handle error returned
+
 	uint16_t newbins = ntohs(*(uint16_t *)c->record_buf); // already checked that newbins can't be 0 here
 
 	if (! rd->ns->storage_data_in_memory && ! rd->ns->single_bin && newbins > rd->n_bins) {
@@ -637,7 +596,7 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 
 	as_bin stack_bins[rd->ns->storage_data_in_memory ? 0 : rd->n_bins];
 
-	rd->bins = as_bin_get_all(r, rd, stack_bins);
+	as_storage_rd_load_bins(rd, stack_bins); // TODO - handle error returned
 
 	uint64_t memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 
@@ -655,7 +614,7 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 	int rv = as_record_unpickle_replace(r, rd, c->record_buf, c->record_buf_sz, &p_stack_particles, has_sindex);
 	if (0 != rv) {
 		cf_warning_digest(AS_LDT, &rd->keyd, "Unpickled replace failed rv=%d",rv);
-		as_storage_record_close(r, rd);
+		as_storage_record_close(rd);
 		return rv;
     }
 
@@ -674,28 +633,11 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 		}
 	}
 
-	// cf_info(AS_RECORD, "flatten: key %"PRIx64" used incoming component %d generation %d",*(uint64_t *)keyd, idx,r->generation);
-
-#ifdef EXTRA_CHECKS
-	// an EXTRA CHECK - should have some bins
-	uint16_t n_bins_check = 0;
-	for (uint16_t i = 0; i < rd->n_bins; i++) {
-		if (as_bin_inuse(&rd->bins[i])) n_bins_check++;
-	}
-	if (n_bins_check == 0) cf_info(AS_RECORD, "merge: extra check: after write, no bins. peculiar.");
-#endif
-
-	if (! as_bin_inuse_has(rd)) {
-		cf_crash(AS_RECORD, "as_record_flatten_component() resulted in binless record");
-	}
-
+	as_record_apply_pickle(rd);
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
+	as_storage_record_close(rd);
 
-	// write record to device
-	as_storage_record_write(r, rd);
-	as_storage_record_close(r, rd);
-
-	return (0);
+	return 0;
 }
 
 // Returns -1 if left wins, 1 if right wins, and 0 for tie.
@@ -868,7 +810,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 			}
 		} else {
 			// In non-migration i.e duplicate resolution code path digest being
-			// operated on at current node is is always for non ldt record or 
+			// operated on at current node is is always for non ldt record or
 			// ldt parent record. is_subrec should always be false
 			is_subrec = false;
 		}
@@ -889,7 +831,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 	}
 	// DO NOT check for subrecord generation. If the parent generation wins
 	// (check above in *_merge_candidate) we should should have winner_idx
-	// set. 
+	// set.
 	// Note: In all likelihood the incoming SUBRECORD will not have a local
 	// copy because the digest comes with the migrate_ldt_version already stamped
 	// in it. Even if it matches just go ahead and write it down.

@@ -1,5 +1,5 @@
 /*
- * delete.h
+ * delete_ce.c
  *
  * Copyright (C) 2016 Aerospike, Inc.
  *
@@ -20,30 +20,50 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#pragma once
-
 //==========================================================
 // Includes.
 //
 
+#include "transaction/delete.h"
+
 #include <stdbool.h>
 
+#include "fault.h"
+
+#include "base/datamodel.h"
 #include "base/index.h"
+#include "base/proto.h"
 #include "base/transaction.h"
 #include "transaction/rw_request.h"
-
-
-//==========================================================
-// Public API.
-//
-
-transaction_status as_delete_start(as_transaction* tr);
 
 
 //==========================================================
 // Private API - for enterprise separation only.
 //
 
-bool delete_storage_overloaded(as_transaction* tr);
-transaction_status delete_master(as_transaction* tr, rw_request* rw);
-transaction_status drop_master(as_transaction* tr, as_index_ref* r_ref);
+bool
+delete_storage_overloaded(as_transaction* tr)
+{
+	return false;
+}
+
+
+transaction_status
+delete_master(as_transaction* tr, rw_request* rw)
+{
+	if (as_transaction_is_durable_delete(tr)) {
+		cf_warning(AS_RW, "durable delete is an enterprise feature");
+		tr->result_code = AS_PROTO_RESULT_FAIL_ENTERPRISE_ONLY;
+		return TRANS_DONE_ERROR;
+	}
+
+	as_index_ref r_ref;
+	r_ref.skip_lock = false;
+
+	if (0 != as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, tr->rsv.ns)) {
+		tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND;
+		return TRANS_DONE_ERROR;
+	}
+
+	return drop_master(tr, &r_ref);
+}

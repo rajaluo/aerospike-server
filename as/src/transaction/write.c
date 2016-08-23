@@ -92,7 +92,6 @@ int write_master_policies(as_transaction* tr, bool* p_must_not_create,
 		bool* p_record_level_replace, bool* p_must_fetch_data,
 		bool* p_increment_generation);
 bool check_msg_set_name(as_transaction* tr, const char* set_name);
-int write_master_handle_msg_key(as_transaction* tr, as_storage_rd* rd);
 
 int write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		bool record_created, bool increment_generation, rw_request* rw,
@@ -112,7 +111,8 @@ void write_master_update_index_metadata(as_transaction* tr,
 		bool increment_generation, index_metadata* old, as_record* r);
 int write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, xdr_dirty_bins* dirty_bins);
+		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins,
+		xdr_dirty_bins* dirty_bins);
 int write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		as_msg_op** ops, as_bin* response_bins, uint32_t* p_n_response_bins,
 		as_bin* result_bins, uint32_t* p_n_result_bins,
@@ -242,6 +242,7 @@ as_write_start(as_transaction* tr)
 	// If we don't need replica writes, transaction is finished.
 	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
+		clear_delete_response_metadata(rw, tr);
 		send_write_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey, rw);
 		return TRANS_DONE_SUCCESS;
@@ -336,6 +337,7 @@ write_dup_res_cb(rw_request* rw)
 
 	// If we don't need replica writes, transaction is finished.
 	if (rw->n_dest_nodes == 0) {
+		clear_delete_response_metadata(rw, &tr);
 		send_write_response(&tr, &rw->response_db);
 		return true;
 	}
@@ -526,7 +528,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	bool record_created = false;
 
 	if (must_not_create) {
-		if (0 != as_record_get(tree, &tr->keyd, &r_ref, ns)) {
+		if (0 != as_record_get_live(tree, &tr->keyd, &r_ref, ns)) {
 			write_master_failed(tr, 0, record_created, tree, 0, AS_PROTO_RESULT_FAIL_NOTFOUND);
 			return TRANS_DONE_ERROR;
 		}
@@ -553,24 +555,20 @@ write_master(rw_request* rw, as_transaction* tr)
 		// If it's an expired record, pretend it's a fresh create.
 		if (! record_created && as_record_is_expired(r)) {
 			as_record_destroy(r, ns);
-			as_record_initialize(&r_ref, ns);
-			cf_atomic_int_incr(&ns->n_objects);
+			as_record_reinitialize(&r_ref, ns);
+			cf_atomic64_incr(&ns->n_objects);
 			record_created = true;
 		}
 	}
 
 	// Enforce record-level create-only existence policy.
-	if ((m->info2 & AS_MSG_INFO2_CREATE_ONLY) && ! record_created) {
+	if (! record_created && ! create_only_check(r, m)) {
 		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_RECORD_EXISTS);
 		return TRANS_DONE_ERROR;
 	}
 
 	// Check generation requirement, if any.
-	if (! g_config.generation_disable &&
-			(((m->info2 & AS_MSG_INFO2_GENERATION) != 0 &&
-					m->generation != r->generation) ||
-			 ((m->info2 & AS_MSG_INFO2_GENERATION_GT) != 0 &&
-					m->generation <= r->generation))) {
+	if (! generation_check(r, m)) {
 		write_master_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_GENERATION);
 		return TRANS_DONE_ERROR;
 	}
@@ -614,8 +612,14 @@ write_master(rw_request* rw, as_transaction* tr)
 		as_storage_record_open(ns, r, &rd, &tr->keyd);
 	}
 
+	// Deal with delete durability (enterprise only).
+	if ((result = set_delete_durablility(tr, &rd)) != 0) {
+		write_master_failed(tr, &r_ref, record_created, tree, &rd, result);
+		return TRANS_DONE_ERROR;
+	}
+
 	// Deal with key storage as needed.
-	if (0 != (result = write_master_handle_msg_key(tr, &rd))) {
+	if ((result = handle_msg_key(tr, &rd)) != 0) {
 		write_master_failed(tr, &r_ref, record_created, tree, &rd, result);
 		return TRANS_DONE_ERROR;
 	}
@@ -644,7 +648,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	xdr_dirty_bins dirty_bins;
 	xdr_clear_dirty_bins(&dirty_bins);
 
-	bool is_delete;
+	bool is_delete = false;
 
 	if (ns->storage_data_in_memory) {
 		if (ns->single_bin) {
@@ -692,10 +696,18 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Get set-id before releasing.
 	uint16_t set_id = as_index_get_set_id(r_ref.r);
 
-	// If we ended up with no bins, delete the record.
+	// Collect more info for XDR.
+	uint16_t generation = tr->generation;
+	xdr_op_type op_type = XDR_OP_TYPE_WRITE;
+
+	// Handle deletion if appropriate.
 	if (is_delete) {
-		as_index_delete(tree, &tr->keyd);
+		write_delete_record(r_ref.r, tree);
 		cf_atomic64_incr(&ns->n_deleted_last_bin);
+
+		generation = 0;
+		op_type = as_transaction_is_durable_delete(tr) ?
+				XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP;
 	}
 	// Or (normally) adjust max void-times.
 	else if (r->void_time != 0) {
@@ -703,7 +715,7 @@ write_master(rw_request* rw, as_transaction* tr)
 		cf_atomic_int_setmax(&tr->rsv.p->max_void_time, r->void_time);
 	}
 
-	as_storage_record_close(r, &rd);
+	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
 
 	// Don't send an XDR delete if it's disallowed.
@@ -715,8 +727,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	// forwarding enabled.
 	if (! as_msg_is_xdr(m) || is_xdr_forwarding_enabled() ||
 			ns->ns_forward_xdr_writes) {
-		xdr_write(ns, tr->keyd, tr->generation, 0, is_delete, set_id,
-				&dirty_bins);
+		xdr_write(ns, tr->keyd, generation, 0, op_type, set_id, &dirty_bins);
 	}
 
 	return TRANS_IN_PROGRESS;
@@ -734,7 +745,7 @@ write_master_failed(as_transaction* tr, as_index_ref* r_ref,
 		}
 
 		if (rd) {
-			as_storage_record_close(r_ref->r, rd);
+			as_storage_record_close(rd);
 		}
 
 		as_record_done(r_ref, tr->rsv.ns);
@@ -969,49 +980,6 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 }
 
 
-int
-write_master_handle_msg_key(as_transaction* tr, as_storage_rd* rd)
-{
-	// Shortcut pointers.
-	as_msg* m = &tr->msgp->msg;
-	as_namespace* ns = tr->rsv.ns;
-
-	if (as_index_is_flag_set(rd->r, AS_INDEX_FLAG_KEY_STORED)) {
-		// Key stored for this record - be sure it gets rewritten.
-
-		// This will force a device read for non-data-in-memory, even if
-		// must_fetch_data is false! Since there's no advantage to using the
-		// loaded block after this if must_fetch_data is false, leave the
-		// subsequent code as-is.
-		// TODO - use client-sent key instead of device-stored key if available?
-		if (! as_storage_record_get_key(rd)) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: can't get stored key ", ns->name);
-			return AS_PROTO_RESULT_FAIL_UNKNOWN;
-		}
-
-		// Check the client-sent key, if any, against the stored key.
-		if (as_transaction_has_key(tr) && ! check_msg_key(m, rd)) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: key mismatch ", ns->name);
-			return AS_PROTO_RESULT_FAIL_KEY_MISMATCH;
-		}
-	}
-	// If we got a key without a digest, it's an old client, not a cue to store
-	// the key. (Remove this check when we're sure all old C clients are gone.)
-	else if (as_transaction_has_digest(tr)) {
-		// Key not stored for this record - store one if sent from client. For
-		// data-in-memory, don't allocate the key until we reach the point of no
-		// return. Also don't set AS_INDEX_FLAG_KEY_STORED flag until then.
-		if (! get_msg_key(tr, rd)) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: can't store key ", ns->name);
-			return AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
-		}
-	}
-
-	return 0;
-}
-
-
-
 //==========================================================
 // write_master() splits based on configuration -
 // data-in-memory & single-bin.
@@ -1057,6 +1025,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	//
 
 	as_bin old_bin = *rd->bins;
+	uint32_t n_old_bins = as_bin_inuse_has(rd) ? 1 : 0;
 
 	// Collect bins (old or intermediate versions) to destroy on cleanup.
 	as_bin cleanup_bins[m->n_ops];
@@ -1076,8 +1045,9 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	// the new record bin to write.
 	//
 
+	uint32_t n_new_bins = 0;
 	int result = write_master_bin_ops(tr, rd, NULL, cleanup_bins,
-			&n_cleanup_bins, &rw->response_db, dirty_bins);
+			&n_cleanup_bins, &rw->response_db, &n_new_bins, dirty_bins);
 
 	if (result != 0) {
 		write_master_index_metadata_unwind(&old_metadata, r);
@@ -1088,6 +1058,16 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	//------------------------------------------------------
 	// Created the new bin to write.
 	//
+
+	if (n_new_bins == 0) {
+		if (n_old_bins == 0) {
+			write_master_index_metadata_unwind(&old_metadata, r);
+			write_master_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
+			return AS_PROTO_RESULT_FAIL_NOTFOUND;
+		}
+
+		*is_delete = true;
+	}
 
 	// Pickle before writing - can't fail after.
 	if (! pickle_all(rd, rw)) {
@@ -1100,7 +1080,7 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	// Write the record to storage.
 	//
 
-	if ((result = as_storage_record_write(r, rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
 		write_master_index_metadata_unwind(&old_metadata, r);
 		write_master_dim_single_bin_unwind(&old_bin, rd->bins, cleanup_bins, n_cleanup_bins);
@@ -1114,7 +1094,6 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	destroy_stack_bins(cleanup_bins, n_cleanup_bins);
 
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-	*is_delete = ! as_bin_inuse_has(rd);
 
 	return 0;
 }
@@ -1130,8 +1109,9 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	as_namespace* ns = tr->rsv.ns;
 	as_record* r = rd->r;
 
+	// Set rd->n_bins!
 	// For data-in-memory - number of bins in existing record.
-	rd->n_bins = as_bin_get_n_bins(r, rd);
+	as_storage_rd_load_n_bins(rd);
 
 	// Set rd->bins!
 	// For data-in-memory:
@@ -1194,7 +1174,7 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	//
 
 	int result = write_master_bin_ops(tr, rd, NULL, cleanup_bins,
-			&n_cleanup_bins, &rw->response_db, dirty_bins);
+			&n_cleanup_bins, &rw->response_db, &n_new_bins, dirty_bins);
 
 	if (result != 0) {
 		write_master_index_metadata_unwind(&old_metadata, r);
@@ -1206,24 +1186,39 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// Created the new bins to write.
 	//
 
-	// Adjust - find the actual number of new bins.
-	rd->n_bins = as_bin_inuse_count(rd);
-	n_new_bins = (uint32_t)rd->n_bins;
-	new_bins_size = n_new_bins * sizeof(as_bin);
+	as_bin_space* new_bin_space = NULL;
 
-	as_bin_space* new_bin_space = (as_bin_space*)
-			cf_malloc(sizeof(as_bin_space) + new_bins_size);
+	// Adjust - the actual number of new bins.
+	rd->n_bins = n_new_bins;
 
-	if (! new_bin_space) {
-		cf_warning(AS_RW, "write_master: failed alloc new as_bin_space");
-		write_master_index_metadata_unwind(&old_metadata, r);
-		write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
-		return AS_PROTO_RESULT_FAIL_UNKNOWN;
+	if (n_new_bins != 0) {
+		new_bins_size = n_new_bins * sizeof(as_bin);
+		new_bin_space = (as_bin_space*)
+				cf_malloc(sizeof(as_bin_space) + new_bins_size);
+
+		if (! new_bin_space) {
+			cf_warning(AS_RW, "write_master: failed alloc new as_bin_space");
+			write_master_index_metadata_unwind(&old_metadata, r);
+			write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
+			return AS_PROTO_RESULT_FAIL_UNKNOWN;
+		}
+	}
+	else {
+		if (n_old_bins == 0) {
+			write_master_index_metadata_unwind(&old_metadata, r);
+			write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
+			return AS_PROTO_RESULT_FAIL_NOTFOUND;
+		}
+
+		*is_delete = true;
 	}
 
 	// Pickle before writing - can't fail after.
 	if (! pickle_all(rd, rw)) {
-		cf_free(new_bin_space);
+		if (new_bin_space) {
+			cf_free(new_bin_space);
+		}
+
 		write_master_index_metadata_unwind(&old_metadata, r);
 		write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
@@ -1233,9 +1228,13 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// Write the record to storage.
 	//
 
-	if ((result = as_storage_record_write(r, rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
-		cf_free(new_bin_space);
+
+		if (new_bin_space) {
+			cf_free(new_bin_space);
+		}
+
 		write_master_index_metadata_unwind(&old_metadata, r);
 		write_master_dim_unwind(old_bins, n_old_bins, new_bins, n_new_bins, cleanup_bins, n_cleanup_bins);
 		return -result;
@@ -1266,8 +1265,10 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	//
 
 	// Fill out new_bin_space.
-	new_bin_space->n_bins = rd->n_bins;
-	memcpy((void*)new_bin_space->bins, new_bins, new_bins_size);
+	if (n_new_bins != 0) {
+		new_bin_space->n_bins = rd->n_bins;
+		memcpy((void*)new_bin_space->bins, new_bins, new_bins_size);
+	}
 
 	// Swizzle the index element's as_bin_space pointer.
 	as_bin_space* old_bin_space = as_index_get_bin_space(r);
@@ -1286,7 +1287,6 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	}
 
 	as_storage_record_adjust_mem_stats(rd, memory_bytes);
-	*is_delete = ! as_bin_inuse_has(rd);
 
 	return 0;
 }
@@ -1320,6 +1320,8 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 		return -result;
 	}
 
+	uint32_t n_old_bins = as_bin_inuse_has(rd) ? 1 : 0;
+
 	//------------------------------------------------------
 	// Apply changes to metadata in as_index needed for
 	// response, pickling, and writing.
@@ -1336,8 +1338,10 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 
 	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
 
+	uint32_t n_new_bins = 0;
+
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
-			&rw->response_db, dirty_bins)) != 0) {
+			&rw->response_db, &n_new_bins, dirty_bins)) != 0) {
 		cf_ll_buf_free(&particles_llb);
 		write_master_index_metadata_unwind(&old_metadata, r);
 		return result;
@@ -1346,6 +1350,16 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	//------------------------------------------------------
 	// Created the new bin to write.
 	//
+
+	if (n_new_bins == 0) {
+		if (n_old_bins == 0) {
+			cf_ll_buf_free(&particles_llb);
+			write_master_index_metadata_unwind(&old_metadata, r);
+			return AS_PROTO_RESULT_FAIL_NOTFOUND;
+		}
+
+		*is_delete = true;
+	}
 
 	// Pickle before writing - bins may disappear on as_storage_record_close().
 	if (! pickle_all(rd, rw)) {
@@ -1358,7 +1372,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	// Write the record to storage.
 	//
 
-	if ((result = as_storage_record_write(r, rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
 		cf_ll_buf_free(&particles_llb);
 		write_master_index_metadata_unwind(&old_metadata, r);
@@ -1374,7 +1388,6 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 		as_index_set_flags(r, AS_INDEX_FLAG_KEY_STORED);
 	}
 
-	*is_delete = ! as_bin_inuse_has(rd);
 	cf_ll_buf_free(&particles_llb);
 
 	return 0;
@@ -1400,10 +1413,16 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 
 	rd->ignore_record_on_device = ! must_fetch_data;
 
+	// Set rd->n_bins!
 	// For non-data-in-memory:
 	// - if just created record, or must_fetch_data is false - 0
 	// - otherwise - number of bins in existing record
-	rd->n_bins = as_bin_get_n_bins(r, rd);
+	int result = as_storage_rd_load_n_bins(rd);
+
+	if (result < 0) {
+		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_rd_load_n_bins()", ns->name);
+		return -result;
+	}
 
 	uint32_t n_old_bins = (uint32_t)rd->n_bins;
 	uint32_t n_new_bins = n_old_bins + m->n_ops; // can't be more than this
@@ -1421,9 +1440,7 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	//		empty new_bins
 	// - otherwise - sets rd->bins to new_bins, reads existing record off device
 	//		and populates bins (including particle pointers into block buffer)
-	int result = as_storage_rd_load_bins(rd, new_bins);
-
-	if (result < 0) {
+	if ((result = as_storage_rd_load_bins(rd, new_bins)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_rd_load_bins()", ns->name);
 		return -result;
 	}
@@ -1459,7 +1476,7 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
 
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
-			&rw->response_db, dirty_bins)) != 0) {
+			&rw->response_db, &n_new_bins, dirty_bins)) != 0) {
 		cf_ll_buf_free(&particles_llb);
 		write_master_index_metadata_unwind(&old_metadata, r);
 		return result;
@@ -1469,9 +1486,18 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// Created the new bins to write.
 	//
 
-	// Adjust - find the actual number of new bins.
-	rd->n_bins = as_bin_inuse_count(rd);
-	n_new_bins = (uint32_t)rd->n_bins;
+	// Adjust - the actual number of new bins.
+	rd->n_bins = n_new_bins;
+
+	if (n_new_bins == 0) {
+		if (n_old_bins == 0) {
+			cf_ll_buf_free(&particles_llb);
+			write_master_index_metadata_unwind(&old_metadata, r);
+			return AS_PROTO_RESULT_FAIL_NOTFOUND;
+		}
+
+		*is_delete = true;
+	}
 
 	// Pickle before writing - bins may disappear on as_storage_record_close().
 	if (! pickle_all(rd, rw)) {
@@ -1484,7 +1510,7 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// Write the record to storage.
 	//
 
-	if ((result = as_storage_record_write(r, rd)) < 0) {
+	if ((result = as_storage_record_write(rd)) < 0) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_storage_record_write() ", ns->name);
 		cf_ll_buf_free(&particles_llb);
 		write_master_index_metadata_unwind(&old_metadata, r);
@@ -1510,7 +1536,6 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 		as_index_set_flags(r, AS_INDEX_FLAG_KEY_STORED);
 	}
 
-	*is_delete = ! as_bin_inuse_has(rd);
 	cf_ll_buf_free(&particles_llb);
 
 	return 0;
@@ -1536,7 +1561,8 @@ write_master_update_index_metadata(as_transaction* tr,
 int
 write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		cf_ll_buf* particles_llb, as_bin* cleanup_bins,
-		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, xdr_dirty_bins* dirty_bins)
+		uint32_t* p_n_cleanup_bins, cf_dyn_buf* db, uint32_t* p_n_final_bins,
+		xdr_dirty_bins* dirty_bins)
 {
 	// Shortcut pointers.
 	as_msg* m = &tr->msgp->msg;
@@ -1560,6 +1586,8 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		return result;
 	}
 
+	*p_n_final_bins = as_bin_inuse_count(rd);
+
 	if (n_response_bins == 0) {
 		// If 'ordered-ops' flag was not set, and there were no read ops or CDT
 		// ops with results, there's no response to build and send later.
@@ -1574,9 +1602,18 @@ write_master_bin_ops(as_transaction* tr, as_storage_rd* rd,
 		bins[i] = as_bin_inuse(b) ? b : NULL;
 	}
 
+	uint32_t generation = r->generation;
+	uint32_t void_time = r->void_time;
+
+	// Deletes don't return metadata.
+	if (*p_n_final_bins == 0) {
+		generation = 0;
+		void_time = 0;
+	}
+
 	size_t msg_sz = 0;
 	uint8_t* msgp = (uint8_t*)as_msg_make_response_msg(AS_PROTO_RESULT_OK,
-			r->generation, r->void_time, has_read_all_op ? NULL : ops, bins,
+			generation, void_time, has_read_all_op ? NULL : ops, bins,
 			(uint16_t)n_response_bins, ns, NULL, &msg_sz,
 			as_transaction_trid(tr), NULL);
 

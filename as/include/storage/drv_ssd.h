@@ -37,6 +37,7 @@
 #include "hist.h"
 
 #include "base/datamodel.h"
+#include "storage/storage.h"
 
 
 //==========================================================
@@ -160,9 +161,11 @@ typedef struct drv_ssd_s
 	cf_queue		*swb_free_q;		// pointers to swbs free and waiting
 	cf_queue		*post_write_q;		// pointers to swbs that have been written but are cached
 
-	cf_atomic_int	n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
-	cf_atomic_int	n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
-	cf_atomic_int	n_wblock_writes;		// total number of swbs added to the swb_write_q by writes
+	cf_atomic64		n_defrag_wblock_reads;	// total number of wblocks added to the defrag_wblock_q
+	cf_atomic64		n_defrag_wblock_writes;	// total number of swbs added to the swb_write_q by defrag
+	cf_atomic64		n_wblock_writes;		// total number of swbs added to the swb_write_q by writes
+
+	volatile uint64_t n_tomb_raider_reads;	// relevant for enterprise edition only
 
 	cf_atomic32		defrag_sweep;		// defrag sweep flag
 
@@ -229,7 +232,31 @@ typedef struct drv_ssds_s
 // Private API - for enterprise separation only
 //
 
+#define SSD_BLOCK_MAGIC		0x037AF200
+#define LENGTH_BASE			offsetof(struct drv_ssd_block_s, keyd)
+
+// Per-record metadata on device.
+typedef struct drv_ssd_block_s {
+	uint64_t		sig;			// deprecated
+	uint32_t		magic;
+	uint32_t		length;			// total after this field - this struct's pointer + 16
+	cf_digest		keyd;
+	as_generation	generation;
+	cf_clock		void_time;
+	uint32_t		bins_offset;	// offset to bins from data
+	uint32_t		n_bins;
+	uint64_t		last_update_time;
+	uint8_t			data[];
+} __attribute__ ((__packed__)) drv_ssd_block;
+
+
 void ssd_resume_devices(drv_ssds *ssds);
+bool ssd_cold_start_is_valid_n_bins(uint32_t n_bins);
+void ssd_cold_start_adjust_cenotaph(as_namespace* ns, const drv_ssd_block* block, as_record* r);
+void ssd_cold_start_transition_record(as_namespace* ns, const drv_ssd_block* block, as_record* r, bool is_create);
+void ssd_cold_start_drop_cenotaphs(as_namespace *ns);
+int ssd_write(as_storage_rd *rd);
+
 
 //
 // Conversions between bytes and rblocks.

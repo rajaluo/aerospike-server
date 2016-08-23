@@ -52,15 +52,10 @@
 // Typedefs and macros.
 //
 
-#define RESOLVE_H(__h) ((as_index*)cf_arenax_resolve(tree->arena, __h))
-
 typedef enum {
 	AS_BLACK	= 0,
 	AS_RED		= 1
 } as_index_color;
-
-// Flag to indicate full index reduce.
-#define AS_REDUCE_ALL (-1)
 
 typedef struct as_index_ph_s {
 	as_index			*r;
@@ -86,7 +81,6 @@ typedef struct as_index_ele_s {
 //
 
 bool as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref);
-void as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);
 void as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);
 void as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h, cf_arenax_handle sentinel_h, as_index_ph_array *v_a);
 void as_index_reduce_sync_traverse(as_index_tree *tree, as_index *r, cf_arenax_handle sentinel_h, as_index_reduce_sync_fn cb, void *udata);
@@ -156,51 +150,6 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 		p_treex->sentinel_h = tree->sentinel_h;
 		p_treex->root_h = tree->root_h;
 	}
-
-	return tree;
-}
-
-
-// Resume a red-black tree in persistent memory.
-// TODO - should really hide this in an EE version of as_index.c.
-as_index_tree *
-as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor,
-		void *destructor_udata, as_treex *p_treex)
-{
-	as_index_tree *tree = cf_rc_alloc(sizeof(as_index_tree));
-
-	if (! tree) {
-		return NULL;
-	}
-
-	pthread_mutex_init(&tree->lock, NULL);
-	pthread_mutex_init(&tree->reduce_lock, NULL);
-
-	tree->arena = arena;
-
-	// Resume the sentinel.
-	tree->sentinel_h = p_treex->sentinel_h;
-
-	if (tree->sentinel_h == 0) {
-		cf_rc_free(tree);
-		return NULL;
-	}
-
-	// Resume the fixed root.
-	tree->root_h = p_treex->root_h;
-
-	if (tree->root_h == 0) {
-		cf_rc_free(tree);
-		return NULL;
-	}
-
-	tree->root = RESOLVE_H(tree->root_h);
-
-	tree->destructor = destructor;
-	tree->destructor_udata = destructor_udata;
-
-	// We'll soon update this to its proper value by reducing the tree.
-	tree->elements = 0;
 
 	return tree;
 }
@@ -710,6 +659,21 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 // Local helpers.
 //
 
+void
+as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
+{
+	if (0 == as_index_release(r)) {
+		if (tree->destructor) {
+			tree->destructor(r, tree->destructor_udata);
+		}
+
+		cf_arenax_free(tree->arena, r_h);
+	}
+
+	cf_atomic64_decr(&g_stats.global_record_ref_count);
+}
+
+
 bool
 as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref)
 {
@@ -726,19 +690,6 @@ as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref)
 	return true;
 }
 
-void
-as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
-{
-	if (0 == as_index_release(r)) {
-		if (tree->destructor) {
-			tree->destructor(r, tree->destructor_udata);
-		}
-
-		cf_arenax_free(tree->arena, r_h);
-	}
-
-	cf_atomic64_decr(&g_stats.global_record_ref_count);
-}
 
 void
 as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
@@ -751,15 +702,7 @@ as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
 	as_index_tree_purge(tree, RESOLVE_H(r->left_h), r->left_h);
 	as_index_tree_purge(tree, RESOLVE_H(r->right_h), r->right_h);
 
-	if (0 == as_index_release(r)) {
-		if (tree->destructor) {
-			tree->destructor(r, tree->destructor_udata);
-		}
-
-		cf_arenax_free(tree->arena, r_h);
-	}
-
-	cf_atomic64_decr(&g_stats.global_record_ref_count);
+	as_index_done(tree, r, r_h);
 }
 
 

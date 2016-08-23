@@ -215,16 +215,19 @@ info_get_aggregated_namespace_stats(cf_dyn_buf *db)
 {
 	uint64_t total_objects = 0;
 	uint64_t total_sub_objects = 0;
+	uint64_t total_tombstones = 0;
 
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
 		total_objects += ns->n_objects;
 		total_sub_objects += ns->n_sub_objects;
+		total_tombstones += ns->n_tombstones;
 	}
 
 	info_append_uint64(db, "objects", total_objects);
 	info_append_uint64(db, "sub_objects", total_sub_objects);
+	info_append_uint64(db, "tombstones", total_tombstones);
 }
 
 // #define INFO_SEGV_TEST 1
@@ -1624,7 +1627,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
 	info_append_int(db, "fabric-workers", g_config.n_fabric_workers);
-	info_append_bool(db, "generation-disable", g_config.generation_disable);
 	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
 	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
 	info_append_string(db, "hist-track-thresholds", g_config.hist_track_thresholds ? g_config.hist_track_thresholds : "null");
@@ -1813,6 +1815,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));
+	info_append_uint32(db, "tomb-raider-eligible-age", ns->tomb_raider_eligible_age);
+	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
 
 	info_append_string(db, "storage-engine",
@@ -1855,6 +1859,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint64(db, "storage-engine.max-write-cache", ns->storage_max_write_cache);
 		info_append_uint32(db, "storage-engine.min-avail-pct", ns->storage_min_avail_pct);
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
+		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
 		info_append_uint32(db, "storage-engine.write-threads", ns->storage_write_threads);
 	}
 
@@ -2218,18 +2223,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of migrate-theads from %d to %d ", g_config.n_migrate_threads, val);
 			as_migrate_set_num_xmit_threads(val);
-		}
-		else if (0 == as_info_parameter_get(params, "generation-disable", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of generation-disable from %s to %s", bool_val[g_config.generation_disable], context);
-				g_config.generation_disable = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of generation-disable from %s to %s", bool_val[g_config.generation_disable], context);
-				g_config.generation_disable = false;
-			}
-			else
-				goto Error;
 		}
 		else if (0 == as_info_parameter_get(params, "write-duplicate-resolution-disable", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -2767,6 +2760,31 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of migrate-sleep of ns %s from %u to %d", ns->name, ns->migrate_sleep, val);
 			ns->migrate_sleep = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "tomb-raider-eligible-age", context, &context_len)) {
+			uint64_t val;
+			if (cf_str_atoi_seconds(context, &val) != 0) {
+				cf_warning(AS_INFO, "tomb-raider-eligible-age must be an unsigned number with time unit (s, m, h, or d)");
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of tomb-raider-eligible-age of ns %s from %u to %lu", ns->name, ns->tomb_raider_eligible_age, val);
+			ns->tomb_raider_eligible_age = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "tomb-raider-period", context, &context_len)) {
+			uint64_t val;
+			if (cf_str_atoi_seconds(context, &val) != 0) {
+				cf_warning(AS_INFO, "tomb-raider-period must be an unsigned number with time unit (s, m, h, or d)");
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of tomb-raider-period of ns %s from %u to %lu", ns->name, ns->tomb_raider_period, val);
+			ns->tomb_raider_period = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "tomb-raider-sleep", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of tomb-raider-sleep of ns %s from %u to %d", ns->name, ns->storage_tomb_raider_sleep, val);
+			ns->storage_tomb_raider_sleep = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "obj-size-hist-max", context, &context_len)) {
 			uint32_t hist_max = (uint32_t)atoi(context);
@@ -4807,14 +4825,17 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64(db, "objects", ns->n_objects);
 	info_append_uint64(db, "sub_objects", ns->n_sub_objects);
+	info_append_uint64(db, "tombstones", ns->n_tombstones);
 
-	as_master_prole_stats mp;
+	repl_stats mp;
 	as_partition_get_master_prole_stats(ns, &mp);
 
-	info_append_uint64(db, "master_objects", mp.n_master_records);
-	info_append_uint64(db, "master_sub_objects", mp.n_master_sub_records);
-	info_append_uint64(db, "prole_objects", mp.n_prole_records);
-	info_append_uint64(db, "prole_sub_objects", mp.n_prole_sub_records);
+	info_append_uint64(db, "master_objects", mp.n_master_objects);
+	info_append_uint64(db, "master_sub_objects", mp.n_master_sub_objects);
+	info_append_uint64(db, "master_tombstones", mp.n_master_tombstones);
+	info_append_uint64(db, "prole_objects", mp.n_prole_objects);
+	info_append_uint64(db, "prole_sub_objects", mp.n_prole_sub_objects);
+	info_append_uint64(db, "prole_tombstones", mp.n_prole_tombstones);
 
 	// Expiration & eviction (nsup) stats.
 
@@ -4834,7 +4855,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	// Memory usage stats.
 
 	uint64_t data_memory = ns->n_bytes_memory;
-	uint64_t index_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects);
+	uint64_t index_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects + ns->n_tombstones);
 	uint64_t sindex_memory = ns->sindex_data_memory_used;
 	uint64_t used_memory = data_memory + index_memory + sindex_memory;
 

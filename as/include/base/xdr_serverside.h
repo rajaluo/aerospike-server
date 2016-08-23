@@ -38,6 +38,12 @@
 #include "base/datamodel.h"
 #include "base/transaction.h"
 
+typedef enum {
+	XDR_OP_TYPE_WRITE,
+	XDR_OP_TYPE_DROP,
+	XDR_OP_TYPE_DURABLE_DELETE
+} xdr_op_type;
+
 typedef uint64_t xdr_dirty_bins[2];
 
 int as_xdr_init();
@@ -52,7 +58,7 @@ void xdr_clear_dirty_bins(xdr_dirty_bins *dirty);
 void xdr_fill_dirty_bins(xdr_dirty_bins *dirty);
 void xdr_copy_dirty_bins(xdr_dirty_bins *from, xdr_dirty_bins *to);
 void xdr_add_dirty_bin(as_namespace *ns, xdr_dirty_bins *dirty, const char *name, size_t name_len);
-void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, bool is_delete, uint16_t set_id, xdr_dirty_bins *dirty);
+void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, xdr_op_type op_type, uint16_t set_id, xdr_dirty_bins *dirty);
 void as_xdr_handle_txn(as_transaction *txn);
 
 void as_xdr_info_init(void);

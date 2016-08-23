@@ -49,6 +49,7 @@
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h" // for LDTs
+#include "transaction/delete.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
@@ -151,6 +152,9 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	if (rw->pickled_buf) {
 		// Replica writes.
 
+		clear_delete_response_metadata(rw, tr);
+		repl_write_flag_pickle(tr, rw->pickled_buf, &info);
+
 		bool is_sub;
 		bool is_parent;
 
@@ -180,6 +184,7 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 		info |= pack_ldt_info_bits(tr, false, false);
 	}
 
+	// TODO - add 0 check if older code handler doesn't require field.
 	msg_set_uint32(m, RW_FIELD_INFO, info);
 
 	return true;
@@ -951,18 +956,17 @@ delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 		as_storage_rd rd;
 		as_storage_record_open(ns, r, &rd, keyd);
 		delete_adjust_sindex(&rd);
-		as_storage_record_close(r, &rd);
+		as_storage_record_close(&rd);
 	}
 
-	// Save the set-ID and generation for XDR.
+	// Save the set-ID for XDR.
 	uint16_t set_id = as_index_get_set_id(r);
-	uint16_t generation = r->generation;
 
 	as_index_delete(tree, keyd);
 	as_record_done(&r_ref, ns);
 
 	if (xdr_must_ship_delete(ns, is_nsup_delete, is_xdr_op)) {
-		xdr_write(ns, *keyd, generation, master, true, set_id, NULL);
+		xdr_write(ns, *keyd, 0, master, XDR_OP_TYPE_DROP, set_id, NULL);
 	}
 
 	return AS_PROTO_RESULT_OK;
@@ -1027,7 +1031,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 			(is_create && as_sindex_ns_has_sindex(ns));
 
 	rd.ignore_record_on_device = ! has_sindex && ! is_ldt_parent;
-	rd.n_bins = as_bin_get_n_bins(r, &rd);
+	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
 	// TODO - we really need an inline utility for this!
 	uint16_t newbins = ntohs(*(uint16_t*)pickled_buf);
@@ -1039,7 +1043,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 
-	rd.bins = as_bin_get_all(r, &rd, stack_bins);
+	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 	uint32_t stack_particles_sz = rd.ns->storage_data_in_memory ?
 			0 : as_record_buf_get_stack_particles_sz(pickled_buf);
@@ -1052,17 +1056,14 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 			as_index_delete(tree, keyd);
 		}
 
-		as_storage_record_close(r, &rd);
+		as_storage_record_close(&rd);
 		as_record_done(&r_ref, ns);
 
 		return AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
-	uint64_t memory_bytes = 0;
-
-	if (! is_create) {
-		memory_bytes = as_storage_record_get_n_bytes_memory(&rd);
-	}
+	uint64_t memory_bytes = is_create ?
+			0 : as_storage_record_get_n_bytes_memory(&rd);
 
 	as_record_set_properties(&rd, p_rec_props);
 
@@ -1072,7 +1073,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 			as_index_delete(tree, keyd);
 		}
 
-		as_storage_record_close(r, &rd);
+		as_storage_record_close(&rd);
 		as_record_done(&r_ref, ns);
 
 		return AS_PROTO_RESULT_FAIL_UNKNOWN; // TODO - better granularity?
@@ -1081,8 +1082,6 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	r->generation = generation;
 	r->void_time = void_time;
 	r->last_update_time = last_update_time;
-
-	as_storage_record_adjust_mem_stats(&rd, memory_bytes);
 
 	uint64_t version_to_set = 0;
 	bool set_version = false;
@@ -1109,20 +1108,19 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		}
 	}
 
-	bool is_delete = false;
-
-	if (! as_bin_inuse_has(&rd)) {
-		// A master write that deletes a record by deleting (all) bins sends a
-		// binless pickle that ends up here.
-		is_delete = true;
-		as_index_delete(tree, keyd);
-	}
-
-	as_storage_record_write(r, &rd);
-	as_storage_record_close(r, &rd);
+	bool is_delete = as_record_apply_replica(&rd, info, tree);
 
 	uint16_t set_id = as_index_get_set_id(r);
+	xdr_op_type op_type = XDR_OP_TYPE_WRITE;
 
+	if (is_delete) {
+		generation = 0;
+		op_type = rd.is_durable_delete ?
+				XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP;
+	}
+
+	as_storage_record_adjust_mem_stats(&rd, memory_bytes);
+	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
 
 	// Don't send an XDR delete if it's disallowed.
@@ -1134,7 +1132,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	// Do XDR write if the write is a non-XDR write or forwarding is enabled.
 	if ((info & RW_INFO_XDR) == 0 ||
 			is_xdr_forwarding_enabled() || ns->ns_forward_xdr_writes) {
-		xdr_write(ns, *keyd, generation, master, is_delete, set_id, NULL);
+		xdr_write(ns, *keyd, generation, master, op_type, set_id, NULL);
 	}
 
 	return AS_PROTO_RESULT_OK;

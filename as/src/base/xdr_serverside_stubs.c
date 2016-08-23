@@ -70,7 +70,7 @@ void xdr_add_dirty_bin(as_namespace *ns, xdr_dirty_bins *dirty, const char *name
 {
 }
 
-void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, bool is_delete, uint16_t set_id, xdr_dirty_bins *dirty)
+void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_node masternode, xdr_op_type op_type, uint16_t set_id, xdr_dirty_bins *dirty)
 {
 }
 

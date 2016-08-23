@@ -328,15 +328,21 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 	}
 
 	as_record* r = r_ref.r;
-	as_storage_rd rd;
 
-	as_storage_record_open(ns, r, &rd, &tr->keyd);
+	if (! as_record_is_live(r)) {
+		read_local_done(tr, &r_ref, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
+		return TRANS_DONE_ERROR;
+	}
 
 	// Check if it's an expired record.
 	if (as_record_is_expired(r)) {
-		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_NOTFOUND);
+		read_local_done(tr, &r_ref, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return TRANS_DONE_ERROR;
 	}
+
+	as_storage_rd rd;
+
+	as_storage_record_open(ns, r, &rd, &tr->keyd);
 
 	// Check the key if required.
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!
@@ -355,15 +361,15 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 		return TRANS_DONE_SUCCESS;
 	}
 
-	rd.n_bins = as_bin_get_n_bins(r, &rd);
+	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
 	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
 
-	rd.bins = as_bin_get_all(r, &rd, stack_bins);
+	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 	if (! as_bin_inuse_has(&rd)) {
 		cf_warning_digest(AS_RW, &tr->keyd, "{%s} read_local: found record with no bins ", ns->name);
-		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_NOTFOUND);
+		read_local_done(tr, &r_ref, &rd, AS_PROTO_RESULT_FAIL_UNKNOWN);
 		return TRANS_DONE_ERROR;
 	}
 
@@ -476,7 +482,7 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 	}
 
 	destroy_stack_bins(result_bins, n_result_bins);
-	as_storage_record_close(r, &rd);
+	as_storage_record_close(&rd);
 	as_record_done(&r_ref, ns);
 
 	// Now that we're not under the record lock, send the message we just built.
@@ -497,7 +503,7 @@ read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 {
 	if (r_ref) {
 		if (rd) {
-			as_storage_record_close(r_ref->r, rd);
+			as_storage_record_close(rd);
 		}
 
 		as_record_done(r_ref, tr->rsv.ns);

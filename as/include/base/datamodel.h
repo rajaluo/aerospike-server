@@ -44,6 +44,7 @@
 #include "hist.h"
 #include "hist_track.h"
 #include "linear_hist.h"
+#include "msg.h"
 #include "util.h"
 #include "vmapx.h"
 
@@ -487,8 +488,7 @@ extern uint16_t as_bin_get_or_assign_id(as_namespace *ns, const char *name);
 extern uint16_t as_bin_get_or_assign_id_w_len(as_namespace *ns, const char *name, size_t len);
 extern const char* as_bin_get_name_from_id(as_namespace *ns, uint16_t id);
 extern bool as_bin_name_within_quota(as_namespace *ns, const char *name);
-extern uint16_t as_bin_get_n_bins(as_record *r, as_storage_rd *rd);
-extern as_bin *as_bin_get_all(as_record *r, as_storage_rd *rd, as_bin *stack_bins);
+extern int as_storage_rd_load_n_bins(as_storage_rd *rd);
 extern int as_storage_rd_load_bins(as_storage_rd *rd, as_bin *stack_bins);
 extern void as_bin_get_all_p(as_storage_rd *rd, as_bin **bin_ptrs);
 extern as_bin *as_bin_create(as_storage_rd *rd, const char *name);
@@ -532,29 +532,42 @@ typedef enum {
 } conflict_resolution_pol;
 
 /* Record function declarations */
-// special - get_create returns 1 if created, 0 if just gotten, -1 if fail
+extern bool as_record_is_live(const as_record *r);
 extern int as_record_get_create(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns, bool);
 extern int as_record_get(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
+extern int as_record_get_live(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
 extern int as_record_exists(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
-// initialize as_record
-extern void as_record_initialize(as_index_ref *r_ref, as_namespace *ns);
+extern int as_record_exists_live(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns, bool skip_lock);
+extern void as_record_reinitialize(as_index_ref *r_ref, as_namespace *ns);
 
 extern void as_record_clean_bins_from(as_storage_rd *rd, uint16_t from);
 extern void as_record_clean_bins(as_storage_rd *rd);
+extern void as_record_free_bin_space(as_record *r);
 
 extern void as_record_destroy(as_record *r, as_namespace *ns);
 extern void as_record_done(as_index_ref *r_ref, as_namespace *ns);
+
+void as_record_drop_stats(as_record* r, as_namespace* ns);
 
 extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);
 extern void as_record_remove_key(as_record* r);
 extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint32_t left_vt, uint16_t right_gen, uint64_t right_lut, uint32_t right_vt);
 extern int as_record_pickle(as_record *r, as_storage_rd *rd, uint8_t **buf_r, size_t *len_r);
-extern uint32_t as_record_buf_get_stack_particles_sz(uint8_t *buf);
 extern int as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t bufsz, uint8_t **stack_particles, bool has_sindex);
+extern void as_record_apply_pickle(as_storage_rd *rd);
+extern bool as_record_apply_replica(as_storage_rd *rd, uint32_t info, struct as_index_tree_s *tree);
 extern void as_record_apply_properties(as_record *r, as_namespace *ns, const as_rec_props *p_rec_props);
 extern void as_record_clear_properties(as_record *r, as_namespace *ns);
 extern void as_record_set_properties(as_storage_rd *rd, const as_rec_props *rec_props);
 extern int as_record_set_set_from_msg(as_record *r, as_namespace *ns, as_msg *m);
+
+static inline bool
+as_record_pickle_is_binless(const uint8_t *buf)
+{
+	return *(uint16_t *)buf == 0;
+}
+
+extern uint32_t as_record_buf_get_stack_particles_sz(uint8_t *buf);
 
 // Set in component if it is dummy (no data). This in
 // conjunction with LDT_REC is used to determine if merge
@@ -705,7 +718,8 @@ struct as_partition_s {
 	struct as_index_tree_s *vp;
 	struct as_index_tree_s *sub_vp;
 	as_partition_id partition_id;
-	uint p_repl_factor;
+	uint32_t p_repl_factor;
+	cf_atomic64 n_tombstones; // relevant only for enterprise edition
 
 	// Track ldt version in transit currently
 	uint64_t current_outgoing_ldt_version;
@@ -793,6 +807,8 @@ extern void as_partition_getreplica_write_str(cf_dyn_buf *db);
 extern void as_partition_getreplica_master_str(cf_dyn_buf *db);
 extern void as_partition_get_replicas_all_str(cf_dyn_buf *db);
 extern void as_partition_getinfo_str(cf_dyn_buf *db);
+
+extern int as_partition_remaining_immigrations(as_partition *p);
 extern uint64_t as_partition_remaining_migrations();
 
 extern void as_partition_balance();
@@ -802,14 +818,16 @@ extern void as_partition_balance_init_single_node_cluster();
 extern bool as_partition_balance_is_init_resolved();
 extern bool as_partition_balance_is_multi_node_cluster();
 
-typedef struct as_master_prole_stats_s {
-	uint64_t n_master_records;
-	uint64_t n_prole_records;
-	uint64_t n_master_sub_records;
-	uint64_t n_prole_sub_records;
-} as_master_prole_stats;
+typedef struct repl_stats_s {
+	uint64_t n_master_objects;
+	uint64_t n_prole_objects;
+	uint64_t n_master_sub_objects;
+	uint64_t n_prole_sub_objects;
+	uint64_t n_master_tombstones;
+	uint64_t n_prole_tombstones;
+} repl_stats;
 
-extern void as_partition_get_master_prole_stats(as_namespace* ns, as_master_prole_stats* p_stats);
+extern void as_partition_get_master_prole_stats(as_namespace* ns, repl_stats* p_stats);
 
 extern void as_partition_allow_migrations(void);
 extern void as_partition_disallow_migrations(void);
@@ -1073,6 +1091,8 @@ struct as_namespace_s {
 	PAD_BOOL		read_consistency_level_override;
 	PAD_BOOL		single_bin; // restrict the namespace to objects with exactly one bin
 	float			stop_writes_pct;
+	uint32_t		tomb_raider_eligible_age; // relevant only for enterprise edition
+	uint32_t		tomb_raider_period; // relevant only for enterprise edition
 	as_policy_commit_level write_commit_level;
 	PAD_BOOL		write_commit_level_override;
 
@@ -1097,6 +1117,7 @@ struct as_namespace_s {
 	uint64_t		storage_max_write_cache;
 	uint32_t		storage_min_avail_pct;
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
+	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
 	uint32_t		storage_write_threads;
 
 	uint32_t		storage_read_block_size;
@@ -1119,8 +1140,9 @@ struct as_namespace_s {
 
 	// Object counts.
 
-	cf_atomic_int	n_objects;
-	cf_atomic_int	n_sub_objects;
+	cf_atomic64		n_objects;
+	cf_atomic64		n_sub_objects;
+	cf_atomic64		n_tombstones; // relevant only for enterprise edition
 
 	// Expiration & eviction (nsup) stats.
 
@@ -1379,10 +1401,10 @@ typedef enum {
 
 struct as_set_s {
 	char			name[AS_SET_NAME_MAX_SIZE];
-	cf_atomic64		num_elements;
+	cf_atomic64		n_objects;
 	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
 	cf_atomic64		stop_writes_count;	// restrict number of records in a set
-	cf_atomic32		unused2;
+	cf_atomic32		n_tombstones;		// relevant only for enterprise edition
 	cf_atomic32		deleted;			// empty a set (triggered via info command only)
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
 	cf_atomic32		enable_xdr;			// white-list (AS_SET_ENABLE_XDR_TRUE) or black-list (AS_SET_ENABLE_XDR_FALSE) a set for XDR replication
@@ -1390,10 +1412,10 @@ struct as_set_s {
 
 static inline bool
 as_set_stop_writes(as_set *p_set) {
-	uint64_t num_elements = cf_atomic64_get(p_set->num_elements);
+	uint64_t n_objects = cf_atomic64_get(p_set->n_objects);
 	uint64_t stop_writes_count = cf_atomic64_get(p_set->stop_writes_count);
 
-	return stop_writes_count != 0 && num_elements >= stop_writes_count;
+	return stop_writes_count != 0 && n_objects >= stop_writes_count;
 }
 
 // These bin functions must be below definition of struct as_namespace_s:

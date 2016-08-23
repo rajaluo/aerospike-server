@@ -636,14 +636,14 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 	basic_scan_slice slice = { job, &bb };
 
 	if (job->sample_pct == 100) {
-		as_index_reduce(tree, basic_scan_job_reduce_cb, (void*)&slice);
+		as_index_reduce_live(tree, basic_scan_job_reduce_cb, (void*)&slice);
 	}
 	else {
 		uint32_t sample_count = (uint32_t)
 				(((uint64_t)tree->elements * (uint64_t)job->sample_pct) / 100);
 
-		as_index_reduce_partial(tree, sample_count, basic_scan_job_reduce_cb,
-				(void*)&slice);
+		as_index_reduce_partial_live(tree, sample_count,
+				basic_scan_job_reduce_cb, (void*)&slice);
 	}
 
 	if (bb->used_sz != 0) {
@@ -737,7 +737,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 			as_storage_record_open(ns, r, &rd, &r->key);
 			as_msg_make_response_bufbuilder(r, &rd, slice->bb_r, true, NULL,
 					job->include_ldt_data, true, true, NULL);
-			as_storage_record_close(r, &rd);
+			as_storage_record_close(&rd);
 		}
 		else {
 			as_msg_make_response_bufbuilder(r, NULL, slice->bb_r, true,
@@ -748,14 +748,14 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		as_storage_rd rd;
 
 		as_storage_record_open(ns, r, &rd, &r->key);
-		rd.n_bins = as_bin_get_n_bins(r, &rd);
+		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
 		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 
-		rd.bins = as_bin_get_all(r, &rd, stack_bins);
+		as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 		as_msg_make_response_bufbuilder(r, &rd, slice->bb_r, false, NULL,
 				job->include_ldt_data, true, true, job->bin_names);
-		as_storage_record_close(r, &rd);
+		as_storage_record_close(&rd);
 	}
 
 	as_record_done(r_ref, ns);
@@ -941,7 +941,7 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 
 	aggr_scan_slice slice = { job, &ll, &bb, rsv };
 
-	as_index_reduce(tree, aggr_scan_job_reduce_cb, (void*)&slice);
+	as_index_reduce_live(tree, aggr_scan_job_reduce_cb, (void*)&slice);
 
 	if (cf_ll_size(&ll) != 0) {
 		as_result result;
@@ -1173,6 +1173,7 @@ typedef struct udf_bg_scan_job_s {
 	// Derived class data:
 	cl_msg*			msgp;
 	iudf_origin		origin;
+	bool			is_durable_delete; // enterprise only
 	cf_atomic32		n_active_tr;
 
 	cf_atomic64		n_successful_tr;
@@ -1220,6 +1221,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 			as_transaction_trid(tr), ns, set_id, options.priority);
 
 	job->msgp = tr->msgp;
+	job->is_durable_delete = as_transaction_is_durable_delete(tr);
 	job->n_active_tr = 0;
 	job->n_successful_tr = 0;
 	job->n_failed_tr = 0;
@@ -1270,7 +1272,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 void
 udf_bg_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 {
-	as_index_reduce(rsv->p->vp, udf_bg_scan_job_reduce_cb, (void*)_job);
+	as_index_reduce_live(rsv->p->vp, udf_bg_scan_job_reduce_cb, (void*)_job);
 }
 
 void
@@ -1366,12 +1368,11 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_transaction tr;
 
-	if (as_transaction_init_iudf(&tr, ns, &d) != 0) {
+	if (as_transaction_init_iudf(&tr, ns, &d, &job->origin,
+			job->is_durable_delete) != 0) {
 		as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
 		return;
 	}
-
-	tr.from.iudf_orig = &job->origin;
 
 	cf_atomic64_incr(&_job->n_records_read);
 	cf_atomic32_incr(&job->n_active_tr);

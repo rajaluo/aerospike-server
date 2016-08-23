@@ -163,6 +163,11 @@ typedef enum {
 #define OPERATION_MERGE_META 11
 #define OPERATION_MERGE_META_ACK 12
 
+#define MIG_INFO_LDT_PREC   0x0001
+#define MIG_INFO_LDT_SUBREC 0x0002
+#define MIG_INFO_LDT_ESR    0x0004
+#define MIG_INFO_TOMBSTONE  0x0008 // enterprise only
+
 #define MIG_FEATURE_MERGE 0x00000001
 #define MIG_FEATURES_SEEN 0x80000000 // needed for backward compatibility
 extern const uint32_t MY_MIG_FEATURES;
@@ -249,14 +254,15 @@ void immigration_release(immigration *immig);
 
 // Emigration.
 bool should_emigrate_record(emigration *emig, as_index_ref *r_ref);
+void emigration_flag_pickle(const uint8_t *buf, uint32_t *info);
 
 // Emigration meta queue.
 emig_meta_q *emig_meta_q_create();
 void emig_meta_q_destroy(emig_meta_q *emq);
-void emig_meta_q_push_batch(emig_meta_q *emq, const meta_batch *batch);
 
 // Migrate fabric message handling.
 void emigration_handle_meta_batch_request(cf_node src, msg *m);
+bool immigration_ignore_pickle(const uint8_t *buf, const msg *m);
 void immigration_handle_meta_batch_ack(cf_node src, msg *m);
 
 // Meta sender.

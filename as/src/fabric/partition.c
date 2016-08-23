@@ -1285,9 +1285,9 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 {
 	size_t db_sz = db->used_sz;
 
-	cf_dyn_buf_append_string(db, "namespace:partition:state:n_dupl");
-	cf_dyn_buf_append_string(db, ":replica:origin:target:emigrates:immigrates");
-	cf_dyn_buf_append_string(db, ":records:sub_records:ldt_version:version;");
+	cf_dyn_buf_append_string(db, "namespace:partition:state:n_dupl:replica:"
+			"origin:target:emigrates:immigrates:records:sub_records:tombstones:"
+			"ldt_version:version;");
 
 	for (uint i = 0 ; i < g_config.n_namespaces ; i++ ) {
 		as_namespace *ns = g_config.namespaces[i];
@@ -1334,6 +1334,8 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, (uint64_t) p->sub_vp->elements);
 			cf_dyn_buf_append_char(db, ':');
+			cf_dyn_buf_append_uint64(db, p->n_tombstones);
+			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->current_outgoing_ldt_version);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->version_info.iid);
@@ -1352,6 +1354,20 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 	}
 }
 
+
+int
+as_partition_remaining_immigrations(as_partition *p)
+{
+	pthread_mutex_lock(&p->lock);
+
+	int n = p->pending_migrate_rx;
+
+	pthread_mutex_unlock(&p->lock);
+
+	return n;
+}
+
+
 uint64_t
 as_partition_remaining_migrations()
 {
@@ -1366,6 +1382,7 @@ as_partition_remaining_migrations()
 
 	return remaining_migrations;
 }
+
 
 #ifdef PARTITION_INFO_CHECK
 // Use this to dump out records from a partition -- especially records that
@@ -1386,13 +1403,14 @@ test_reduce_cb(as_index* r, void* udata)
 
 
 void
-as_partition_get_master_prole_stats(as_namespace* ns,
-		as_master_prole_stats* p_stats)
+as_partition_get_master_prole_stats(as_namespace* ns, repl_stats* p_stats)
 {
-	p_stats->n_master_records = 0;
-	p_stats->n_prole_records = 0;
-	p_stats->n_master_sub_records = 0;
-	p_stats->n_prole_sub_records = 0;
+	p_stats->n_master_objects = 0;
+	p_stats->n_prole_objects = 0;
+	p_stats->n_master_sub_objects = 0;
+	p_stats->n_prole_sub_objects = 0;
+	p_stats->n_master_tombstones = 0;
+	p_stats->n_prole_tombstones = 0;
 
 	cf_node self = g_config.self_node;
 
@@ -1405,12 +1423,20 @@ as_partition_get_master_prole_stats(as_namespace* ns,
 		bool am_master = (my_index == 0 && p->state == AS_PARTITION_STATE_SYNC) || p->target != 0;
 
 		if (am_master) {
-			p_stats->n_master_records += p->vp->elements;
-			p_stats->n_master_sub_records += p->sub_vp->elements;
+			int64_t n_tombstones = (int64_t)p->n_tombstones;
+			int64_t n_objects = (int64_t)p->vp->elements - n_tombstones;
+
+			p_stats->n_master_objects += n_objects > 0 ? (uint64_t)n_objects : 0;
+			p_stats->n_master_sub_objects += p->sub_vp->elements;
+			p_stats->n_master_tombstones += (uint64_t)n_tombstones;
 		}
 		else if (my_index > 0 && p->origin == 0) {
-			p_stats->n_prole_records += p->vp->elements;
-			p_stats->n_prole_sub_records += p->sub_vp->elements;
+			int64_t n_tombstones = (int64_t)p->n_tombstones;
+			int64_t n_objects = (int64_t)p->vp->elements - n_tombstones;
+
+			p_stats->n_prole_objects += n_objects > 0 ? (uint64_t)n_objects : 0;
+			p_stats->n_prole_sub_objects += p->sub_vp->elements;
+			p_stats->n_prole_tombstones += (uint64_t)n_tombstones;
 		}
 #ifdef PARTITION_INFO_CHECK
 		// else we don't own a copy of this partition...  but maybe we need

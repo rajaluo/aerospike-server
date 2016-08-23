@@ -82,7 +82,11 @@ void log_line_early_fail();
 void log_line_batch_index();
 
 void log_line_objects(as_namespace* ns, uint64_t n_objects,
-		uint64_t n_sub_objects);
+		repl_stats* mp);
+void log_line_sub_objects(as_namespace* ns, uint64_t n_sub_objects,
+		repl_stats* mp);
+void log_line_tombstones(as_namespace* ns, uint64_t n_tombstones,
+		repl_stats* mp);
 void log_line_migrations(as_namespace* ns);
 void log_line_memory_usage(as_namespace* ns, size_t total_mem, size_t index_mem,
 		size_t sindex_mem, size_t data_mem);
@@ -179,15 +183,22 @@ log_ticker_frame()
 
 		uint64_t n_objects = ns->n_objects;
 		uint64_t n_sub_objects = ns->n_sub_objects;
+		uint64_t n_tombstones = ns->n_tombstones;
 
-		size_t index_mem = as_index_size_get(ns) * (n_objects + n_sub_objects);
+		size_t index_mem = as_index_size_get(ns) *
+				(n_objects + n_sub_objects + n_tombstones);
 		size_t sindex_mem = ns->sindex_data_memory_used;
 		size_t data_mem = ns->n_bytes_memory;
 		size_t total_mem = index_mem + sindex_mem + data_mem;
 
 		total_ns_memory_inuse += total_mem;
 
-		log_line_objects(ns, n_objects, n_sub_objects);
+		repl_stats mp;
+		as_partition_get_master_prole_stats(ns, &mp);
+
+		log_line_objects(ns, n_objects, &mp);
+		log_line_sub_objects(ns, n_sub_objects, &mp);
+		log_line_tombstones(ns, n_tombstones, &mp);
 		log_line_migrations(ns);
 		log_line_memory_usage(ns, total_mem, index_mem, sindex_mem, data_mem);
 		log_line_device_usage(ns);
@@ -314,30 +325,50 @@ log_line_batch_index()
 
 
 void
-log_line_objects(as_namespace* ns, uint64_t n_objects, uint64_t n_sub_objects)
+log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp)
 {
-	as_master_prole_stats mp;
-	as_partition_get_master_prole_stats(ns, &mp);
-
 	// TODO - show if all 0's ???
 	cf_info(AS_INFO, "{%s} objects: all %lu master %lu prole %lu",
 			ns->name,
 			n_objects,
-			mp.n_master_records,
-			mp.n_prole_records
+			mp->n_master_objects,
+			mp->n_prole_objects
 			);
+}
 
+
+void
+log_line_sub_objects(as_namespace* ns, uint64_t n_sub_objects, repl_stats* mp)
+{
 	if ((n_sub_objects |
-			mp.n_master_sub_records |
-			mp.n_prole_sub_records) == 0) {
+			mp->n_master_sub_objects |
+			mp->n_prole_sub_objects) == 0) {
 		return;
 	}
 
 	cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu prole %lu",
 			ns->name,
 			n_sub_objects,
-			mp.n_master_sub_records,
-			mp.n_prole_sub_records
+			mp->n_master_sub_objects,
+			mp->n_prole_sub_objects
+			);
+}
+
+
+void
+log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
+{
+	if ((n_tombstones |
+			mp->n_master_tombstones |
+			mp->n_prole_tombstones) == 0) {
+		return;
+	}
+
+	cf_info(AS_INFO, "{%s} tombstones: all %lu master %lu prole %lu",
+			ns->name,
+			n_tombstones,
+			mp->n_master_tombstones,
+			mp->n_prole_tombstones
 			);
 }
 

@@ -738,7 +738,7 @@ sbld_job_create(as_namespace* ns, uint16_t set_id, as_sindex* si)
 void
 sbld_job_slice(as_job* _job, as_partition_reservation* rsv)
 {
-	as_index_reduce(rsv->p->vp, sbld_job_reduce_cb, (void*)_job);
+	as_index_reduce_live(rsv->p->vp, sbld_job_reduce_cb, (void*)_job);
 }
 
 void
@@ -823,9 +823,9 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_storage_rd rd;
 	as_storage_record_open(ns, r, &rd, &r->key);
-	rd.n_bins = as_bin_get_n_bins(r, &rd);
+	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
-	rd.bins = as_bin_get_all(r, &rd, stack_bins);
+	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 	if (job->si) {
 		as_sindex_put_rd(job->si, &rd);
@@ -834,7 +834,7 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		as_sindex_putall_rd(ns, &rd);
 	}
 
-	as_storage_record_close(r, &rd);
+	as_storage_record_close(&rd);
 	as_record_done(r_ref, ns);
 
 	cf_atomic64_incr(&_job->n_records_read);
