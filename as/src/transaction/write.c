@@ -1768,8 +1768,12 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 			if (! as_bin_inuse(b)) {
 				// TODO - could do better than finding index from name.
-				as_bin_set_empty_shift(rd, as_bin_get_index_from_buf(rd, op->name, op->name_sz));
-				xdr_fill_dirty_bins(dirty_bins);
+				int32_t index = as_bin_get_index_from_buf(rd, op->name, op->name_sz);
+
+				if (index >= 0) {
+					as_bin_set_empty_shift(rd, (uint32_t)index);
+					xdr_fill_dirty_bins(dirty_bins);
+				}
 			}
 			else {
 				xdr_add_dirty_bin(ns, dirty_bins, (const char*)op->name, op->name_sz);
