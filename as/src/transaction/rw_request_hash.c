@@ -339,24 +339,24 @@ on_paxos_change(as_paxos_generation gen, as_paxos_change* change,
 	rw_paxos_change_struct del;
 
 	memset(&del, 0, sizeof(rw_paxos_change_struct));
-	memcpy(del.succession, succession,
-			sizeof(cf_node) * g_config.paxos_max_cluster_size);
+	memcpy(del.succession, succession, sizeof(cf_node) * AS_CLUSTER_SZ);
 
 	// Update the XDR cluster map. Piggybacking on this callback instead of
 	// adding a new one.
-	xdr_clmap_update(AS_PAXOS_CHANGE_SYNC, succession,
-			g_config.paxos_max_cluster_size);
+	xdr_clmap_update(AS_PAXOS_CHANGE_SYNC, succession, AS_CLUSTER_SZ);
 
 	// Iterate through the hash table and find nodes that are not in the
 	// succession list. Remove these entries from the hash table.
 	rchash_reduce(g_rw_request_hash, paxos_change_reduce_fn, (void*)&del);
 
 	// If there are nodes to be deleted, execute the deletion algorithm.
-	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
-		if (del.deletions[i] != (cf_node)0) {
-			rchash_reduce(g_rw_request_hash, paxos_change_delete_reduce_fn,
-					(void*)&del.deletions[i]);
+	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
+		if (del.deletions[i] == (cf_node)0) {
+			break;
 		}
+
+		rchash_reduce(g_rw_request_hash, paxos_change_delete_reduce_fn,
+				(void*)&del.deletions[i]);
 	}
 }
 
@@ -372,7 +372,11 @@ paxos_change_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 		// Check if this key is in the succession list.
 		node_in_slist = false;
 
-		for (int j = 0; j < g_config.paxos_max_cluster_size; j++) {
+		for (int j = 0; j < AS_CLUSTER_SZ; j++) {
+			if (del->succession[j] == 0) {
+				break;
+			}
+
 			if (rw->dest_nodes[i] == del->succession[j]) {
 				node_in_slist = true;
 				break;
@@ -380,7 +384,7 @@ paxos_change_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 		}
 
 		if (! node_in_slist) {
-			for (int j = 0; j < g_config.paxos_max_cluster_size; j++) {
+			for (int j = 0; j < AS_CLUSTER_SZ; j++) {
 				// If an empty slot exists, then it means key is not there yet.
 				if (del->deletions[j] == (cf_node)0) {
 					del->deletions[j] = rw->dest_nodes[i];

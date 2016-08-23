@@ -465,10 +465,10 @@ cc_cluster_config_dump(const bool verbose)
 			bool self = false, principal = false;
 
 			cf_node principal_node = as_paxos_succession_getprincipal();
-			for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 				cf_node node = p->succession[i];
 				if ((cf_node)0 == node) {
-					continue;
+					break;
 				}
 				self = (node == g_config.self_node);
 				principal = (node == principal_node);

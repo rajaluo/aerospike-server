@@ -2508,11 +2508,11 @@ static int as_smd_apply_metadata_change(as_smd_t *smd, as_smd_module_t *module_o
 			//   The transaction recv function performs the accept metadata function locally.
 
 			// (Note:  Ideally this map-transaction-over-succession-list operation should be provided by Paxos.)
-			for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 				msg *msg = NULL;
 				cf_node node_id = g_paxos->succession[i];
 				if (!node_id) {
-					continue;
+					break;
 				}
 				as_smd_msg_op_t accept_op = AS_SMD_MSG_OP_ACCEPT_THIS_METADATA;
 				if (!(msg = as_smd_msg_get(accept_op, smd_msg->items->item, smd_msg->num_items, module_obj->module, AS_SMD_ACCEPT_OPT_API))) {
@@ -2687,13 +2687,13 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 	}
 
 	int list_num = 0;
-	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 		cf_node node_id = g_paxos->succession[i];
 
 		// Skip any non-existent nodes.
 		if (!node_id) {
-			cf_detail(AS_SMD, "[Skipping non-existent succession list item #%d.]", i);
-			continue;
+			cf_detail(AS_SMD, "[Skipping non-existent succession list items from #%d.]", i);
+			break;
 		}
 
 		shash *module_item_count_hash = NULL;
@@ -2790,11 +2790,11 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 	// Sent out a merged metadata msg via fabric transaction to every cluster node.
 	msg *msg = NULL;
 	as_smd_msg_op_t merge_op = AS_SMD_MSG_OP_ACCEPT_THIS_METADATA;
-	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
+	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
 		cf_node node_id = g_paxos->succession[i];
 		// Skip any non-existent nodes.
 		if (!node_id) {
-			continue;
+			break;
 		}
 		if (!(msg = as_smd_msg_get(merge_op, item_list_out->item, item_list_out->num_items, module, AS_SMD_ACCEPT_OPT_MERGE))) {
 			cf_crash(AS_SMD, "failed to get a System Metadata fabric msg for operation %s", AS_SMD_MSG_OP_NAME(merge_op));
