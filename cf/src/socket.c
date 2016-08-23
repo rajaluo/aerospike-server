@@ -783,24 +783,31 @@ socket_wait(cf_socket *sock, uint16_t events, int32_t timeout)
 			events, sock->fd, timeout);
 
 	struct pollfd pfd = { .fd = sock->fd, .events = events | POLLRDHUP };
-	int32_t count = poll(&pfd, 1, timeout);
 
-	if (count < 0) {
-		cf_crash(CF_SOCKET, "Error while polling FD %d: %d (%s)",
-				pfd.fd, errno, cf_strerror(errno));
+	while (true) {
+		int32_t count = poll(&pfd, 1, timeout);
+
+		if (count < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+
+			cf_crash(CF_SOCKET, "Error while polling FD %d: %d (%s)",
+					pfd.fd, errno, cf_strerror(errno));
+		}
+
+		if (count > 1) {
+			cf_crash(CF_SOCKET, "Unexpected number of events on FD %d: %d", sock->fd, count);
+		}
+
+		if (count == 0) {
+			cf_detail(CF_SOCKET, "Timeout while waiting on FD %d", sock->fd);
+			return false;
+		}
+
+		cf_detail(CF_SOCKET, "Got events 0x%x on FD %d", pfd.revents, sock->fd);
+		return true;
 	}
-
-	if (count > 1) {
-		cf_crash(CF_SOCKET, "Unexpected number of events on FD %d: %d", sock->fd, count);
-	}
-
-	if (count == 0) {
-		cf_detail(CF_SOCKET, "Timeout while waiting on FD %d", sock->fd);
-		return false;
-	}
-
-	cf_detail(CF_SOCKET, "Got events 0x%x on FD %d", pfd.revents, sock->fd);
-	return true;
 }
 
 int32_t
