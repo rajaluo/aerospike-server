@@ -27,13 +27,6 @@
 
 #include "storage/drv_ssd.h"
 
-// TODO - We have a #include loop - datamodel.h and storage.h include each
-// other. I'd love to untangle this mess, but can't right now. So this needs to
-// be here to allow compilation for now:
-#include "base/datamodel.h"
-
-#include "storage/storage.h"
-
 #include <fcntl.h>
 #include <errno.h>
 #include <pthread.h>
@@ -62,11 +55,14 @@
 
 #include "base/datamodel.h"
 #include "base/cfg.h"
+#include "base/datamodel.h"
 #include "base/index.h"
 #include "base/ldt.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/secondary_index.h"
+#include "fabric/partition.h"
+#include "storage/storage.h"
 
 
 //==========================================================
@@ -609,7 +605,7 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 {
 	as_namespace *ns = ssd->ns;
 	as_partition_reservation rsv;
-	as_partition_id pid = as_partition_getid(block->keyd);
+	uint32_t pid = as_partition_getid(block->keyd);
 
 	as_partition_reserve_migrate(ns, pid, &rsv, 0);
 
@@ -1966,7 +1962,7 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 		uint32_t n_rblocks = (uint32_t)BYTES_TO_RBLOCKS(next_offset - offset);
 
 		bool living = false;
-		as_partition_id pid = as_partition_getid(p_block->keyd);
+		uint32_t pid = as_partition_getid(p_block->keyd);
 		as_partition_reservation rsv;
 
 		as_partition_reserve_migrate(ns, pid, &rsv, 0);
@@ -2704,7 +2700,7 @@ int
 ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		uint64_t rblock_id, uint32_t n_rblocks)
 {
-	as_partition_id pid = as_partition_getid(block->keyd);
+	uint32_t pid = as_partition_getid(block->keyd);
 
 	// If this isn't a partition we're interested in, skip this record.
 	if (! ssds->get_state_from_storage[pid]) {
@@ -2817,8 +2813,8 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	}
 
 	// Update maximum void-times.
-	cf_atomic_int_setmax(&p_partition->max_void_time, r->void_time);
-	cf_atomic_int_setmax(&ns->max_void_time, r->void_time);
+	cf_atomic64_setmax(&p_partition->max_void_time, r->void_time);
+	cf_atomic64_setmax(&ns->max_void_time, r->void_time);
 
 	// If data is in memory, load bins and particles, adjust secondary index.
 	if (ns->storage_data_in_memory) {

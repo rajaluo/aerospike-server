@@ -40,7 +40,9 @@
 
 #include "base/index.h"
 #include "base/datamodel.h"
+#include "fabric/partition.h"
 
+struct as_namespace_s;
 
 // For receiver-side migration flow-control.
 // By default, allow up to 2 concurrent migrates from each member of the cluster.
@@ -96,8 +98,8 @@ typedef enum as_migrate_result_e {
 // A data structure for temporarily en-queuing partition migrations.
 typedef struct partition_migrate_record_s {
 	cf_node dest;
-	as_namespace *ns;
-	as_partition_id pid;
+	struct as_namespace_s *ns;
+	uint32_t pid;
 	uint64_t cluster_key;
 	uint32_t tx_flags;
 } partition_migrate_record;
@@ -105,13 +107,13 @@ typedef struct partition_migrate_record_s {
 // Public API.
 void as_migrate_init();
 void as_migrate_emigrate(const partition_migrate_record *pmr);
-bool as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id, int state);
+bool as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, uint32_t partition_id, int state);
 void as_migrate_set_num_xmit_threads(int n_threads);
 void as_migrate_dump(bool verbose);
 
-as_migrate_result as_partition_immigrate_start(as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, uint32_t start_type, cf_node source_node);
-as_migrate_result as_partition_immigrate_done(as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, cf_node source_node);
-void as_partition_emigrate_done(as_migrate_state s, as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, uint32_t tx_flags);
+void as_partition_emigrate_done(as_migrate_state s, struct as_namespace_s *ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t tx_flags);
+as_migrate_result as_partition_immigrate_start(struct as_namespace_s *ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t start_type, cf_node source_node);
+as_migrate_result as_partition_immigrate_done(struct as_namespace_s *ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
 
 
 //==========================================================
@@ -219,7 +221,7 @@ typedef struct immig_meta_q_s {
 typedef struct immigration_s {
 	cf_node          src;
 	uint64_t         cluster_key;
-	as_partition_id  pid;
+	uint32_t         pid;
 	as_partition_mig_rx_state rx_state; // really only for LDT
 	uint64_t         incoming_ldt_version;
 
@@ -232,7 +234,7 @@ typedef struct immigration_s {
 
 	as_migrate_result start_result;
 	uint32_t        features;
-	as_namespace    *ns; // for statistics only
+	struct as_namespace_s    *ns; // for statistics only
 
 	as_partition_reservation rsv;
 } immigration;

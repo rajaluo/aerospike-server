@@ -40,6 +40,7 @@
 #include "base/udf_arglist.h"
 #include "base/udf_memtracker.h"
 #include "base/udf_record.h"
+#include "fabric/partition.h"
 
 
 #define AS_AGGR_ERR  -1
@@ -67,7 +68,7 @@ typedef struct {
 } aggr_state;
 
 static as_partition_reservation *
-ptn_reserve(aggr_state *astate, as_partition_id pid, as_partition_reservation *rsv)
+ptn_reserve(aggr_state *astate, uint32_t pid, as_partition_reservation *rsv)
 {
 	as_aggr_call *call = astate->call;
 	if (call && call->aggr_hooks && call->aggr_hooks->ptn_reserve) {

@@ -45,7 +45,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/monitor.h"
-
+#include "fabric/partition.h"
 
 
 //==============================================================================

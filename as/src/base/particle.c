@@ -41,6 +41,7 @@
 #include "base/datamodel.h"
 #include "base/ldt.h"
 #include "base/proto.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 
 

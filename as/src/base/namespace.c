@@ -49,6 +49,7 @@
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/system_metadata.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 
 
@@ -216,11 +217,11 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 		}
 
 		// set partition id inside partition object.
-		for (uint i = 0; i < AS_PARTITIONS; i++) {
-			ns->partitions[i].partition_id = i;
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			ns->partitions[pid].partition_id = pid;
 		}
-		for (uint i = 0; i < AS_PARTITIONS; i++) {
-			as_partition_init(&ns->partitions[i], ns, i);
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition_init(&ns->partitions[pid], ns, pid);
 		}
 
 		as_sindex_init(ns);

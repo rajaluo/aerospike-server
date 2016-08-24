@@ -34,7 +34,6 @@
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
 
-#include "base/datamodel.h"
 #include "base/rec_props.h"
 
 
@@ -81,6 +80,9 @@ typedef enum {
 #define STORAGE_INVALID_RBLOCK	0x3FFFFffff // 34 bits
 
 // Forward declarations.
+struct as_bin_s;
+struct as_index_s;
+struct as_namespace_s;
 struct drv_ssd_s;
 struct drv_ssd_block_s;
 struct drv_kv_s;
@@ -88,10 +90,10 @@ struct drv_kv_block_s;
 
 // A record descriptor.
 typedef struct as_storage_rd_s {
-	as_record		*r;
-	as_namespace	*ns;						// the namespace, which contain all files
-	as_rec_props	rec_props;					// list of metadata name-value pairs, e.g. name of set
-	as_bin			*bins;						// pointer to the appropriate bin_space, which is either
+	struct as_index_s		*r;
+	struct as_namespace_s	*ns;				// the namespace, which contain all files
+	as_rec_props			rec_props;			// list of metadata name-value pairs, e.g. name of set
+	struct as_bin_s			*bins;				// pointer to the appropriate bin_space, which is either
 												// part of the record (single bin, data_in_memory == true),
 												// memalloc'd (multi-bin, data_in_memory == true), or
 												// temporary (data_in_memory == false)
@@ -138,16 +140,16 @@ typedef struct {
 
 extern void as_storage_init();
 extern void as_storage_start_tomb_raider();
-extern int as_storage_namespace_destroy(as_namespace *ns);
-extern int as_storage_namespace_attributes_get(as_namespace *ns, as_storage_attributes *attr);
+extern int as_storage_namespace_destroy(struct as_namespace_s *ns);
+extern int as_storage_namespace_attributes_get(struct as_namespace_s *ns, as_storage_attributes *attr);
 
-extern int as_storage_has_index(as_namespace *ns);
-extern int as_storage_record_exists(as_namespace *ns, cf_digest *keyd);
-extern int as_storage_record_destroy(as_namespace *ns, as_record *r); // not the counterpart of as_storage_record_create()
+extern int as_storage_has_index(struct as_namespace_s *ns);
+extern int as_storage_record_exists(struct as_namespace_s *ns, cf_digest *keyd);
+extern int as_storage_record_destroy(struct as_namespace_s *ns, struct as_index_s *r); // not the counterpart of as_storage_record_create()
 
 // Start and finish an as_storage_rd usage cycle.
-extern int as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_create(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_open(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
 extern int as_storage_record_close(as_storage_rd *rd);
 
 // Called within as_storage_rd usage cycle.
@@ -158,20 +160,20 @@ extern int as_storage_record_write(as_storage_rd *rd);
 
 // Storage capacity monitoring.
 extern void as_storage_wait_for_defrag();
-extern bool as_storage_overloaded(as_namespace *ns); // returns true if write queue is too backed up
-extern bool as_storage_has_space(as_namespace *ns);
-extern void as_storage_defrag_sweep(as_namespace *ns);
+extern bool as_storage_overloaded(struct as_namespace_s *ns); // returns true if write queue is too backed up
+extern bool as_storage_has_space(struct as_namespace_s *ns);
+extern void as_storage_defrag_sweep(struct as_namespace_s *ns);
 
 // Storage of generic data into device headers.
-extern int as_storage_info_set(as_namespace *ns, uint idx, uint8_t *buf, size_t len);
-extern int as_storage_info_get(as_namespace *ns, uint idx, uint8_t *buf, size_t *len);
-extern int as_storage_info_flush(as_namespace *ns);
-extern void as_storage_save_evict_void_time(as_namespace *ns, uint32_t evict_void_time);
+extern int as_storage_info_set(struct as_namespace_s *ns, uint32_t pid, uint8_t *buf, size_t len);
+extern int as_storage_info_get(struct as_namespace_s *ns, uint32_t pid, uint8_t *buf, size_t *len);
+extern int as_storage_info_flush(struct as_namespace_s *ns);
+extern void as_storage_save_evict_void_time(struct as_namespace_s *ns, uint32_t evict_void_time);
 
 // Statistics.
-extern int as_storage_stats(as_namespace *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
-extern int as_storage_ticker_stats(as_namespace *ns); // prints SSD histograms to the info ticker
-extern int as_storage_histogram_clear_all(as_namespace *ns); // clears all SSD histograms
+extern int as_storage_stats(struct as_namespace_s *ns, int *available_pct, uint64_t *inuse_disk_bytes); // available percent is that of worst device
+extern int as_storage_ticker_stats(struct as_namespace_s *ns); // prints SSD histograms to the info ticker
+extern int as_storage_histogram_clear_all(struct as_namespace_s *ns); // clears all SSD histograms
 
 
 //------------------------------------------------
@@ -195,30 +197,30 @@ extern void as_storage_shutdown();
 // AS_STORAGE_ENGINE_MEMORY functions.
 //
 
-extern int as_storage_namespace_init_memory(as_namespace *ns, cf_queue *complete_q, void *udata);
-extern void as_storage_start_tomb_raider_memory(as_namespace *ns);
-extern int as_storage_namespace_destroy_memory(as_namespace *ns);
-extern int as_storage_namespace_attributes_get_memory(as_namespace *ns, as_storage_attributes *attr);
+extern int as_storage_namespace_init_memory(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_start_tomb_raider_memory(struct as_namespace_s *ns);
+extern int as_storage_namespace_destroy_memory(struct as_namespace_s *ns);
+extern int as_storage_namespace_attributes_get_memory(struct as_namespace_s *ns, as_storage_attributes *attr);
 
 extern int as_storage_record_write_memory(as_storage_rd *rd);
 
-extern int as_storage_stats_memory(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes);
+extern int as_storage_stats_memory(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
 
 
 //------------------------------------------------
 // AS_STORAGE_ENGINE_SSD functions.
 //
 
-extern int as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q, void *udata);
-extern void as_storage_start_tomb_raider_ssd(as_namespace *ns);
+extern int as_storage_namespace_init_ssd(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
+extern void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
 extern void as_storage_cold_start_ticker_ssd(); // called directly by as_storage_init()
-extern int as_storage_namespace_destroy_ssd(as_namespace *ns);
-extern int as_storage_namespace_attributes_get_ssd(as_namespace *ns, as_storage_attributes *attr);
+extern int as_storage_namespace_destroy_ssd(struct as_namespace_s *ns);
+extern int as_storage_namespace_attributes_get_ssd(struct as_namespace_s *ns, as_storage_attributes *attr);
 
-extern int as_storage_record_destroy_ssd(as_namespace *ns, as_record *r);
+extern int as_storage_record_destroy_ssd(struct as_namespace_s *ns, struct as_index_s *r);
 
-extern int as_storage_record_create_ssd(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_open_ssd(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_create_ssd(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_open_ssd(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
 extern int as_storage_record_close_ssd(as_storage_rd *rd);
 
 extern int as_storage_record_load_n_bins_ssd(as_storage_rd *rd);
@@ -226,42 +228,42 @@ extern int as_storage_record_load_bins_ssd(as_storage_rd *rd);
 extern bool as_storage_record_size_and_check_ssd(as_storage_rd *rd);
 extern int as_storage_record_write_ssd(as_storage_rd *rd);
 
-extern void as_storage_wait_for_defrag_ssd(as_namespace *ns);
-extern bool as_storage_overloaded_ssd(as_namespace *ns);
-extern bool as_storage_has_space_ssd(as_namespace *ns);
-extern void as_storage_defrag_sweep_ssd(as_namespace *ns);
+extern void as_storage_wait_for_defrag_ssd(struct as_namespace_s *ns);
+extern bool as_storage_overloaded_ssd(struct as_namespace_s *ns);
+extern bool as_storage_has_space_ssd(struct as_namespace_s *ns);
+extern void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
-extern int as_storage_info_set_ssd(as_namespace *ns, uint idx, uint8_t *buf, size_t len);
-extern int as_storage_info_get_ssd(as_namespace *ns, uint idx, uint8_t *buf, size_t *len);
-extern int as_storage_info_flush_ssd(as_namespace *ns);
-extern void as_storage_save_evict_void_time_ssd(as_namespace *ns, uint32_t evict_void_time);
+extern int as_storage_info_set_ssd(struct as_namespace_s *ns, uint idx, uint8_t *buf, size_t len);
+extern int as_storage_info_get_ssd(struct as_namespace_s *ns, uint idx, uint8_t *buf, size_t *len);
+extern int as_storage_info_flush_ssd(struct as_namespace_s *ns);
+extern void as_storage_save_evict_void_time_ssd(struct as_namespace_s *ns, uint32_t evict_void_time);
 
-extern int as_storage_stats_ssd(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes);
-extern int as_storage_ticker_stats_ssd(as_namespace *ns);
-extern int as_storage_histogram_clear_ssd(as_namespace *ns);
+extern int as_storage_stats_ssd(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);
+extern int as_storage_ticker_stats_ssd(struct as_namespace_s *ns);
+extern int as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
 
 // Called by "base class" functions but not via table.
 extern bool as_storage_record_get_key_ssd(as_storage_rd *rd);
-extern void as_storage_shutdown_ssd(as_namespace *ns);
+extern void as_storage_shutdown_ssd(struct as_namespace_s *ns);
 
 
 //------------------------------------------------
 // AS_STORAGE_ENGINE_KV functions.
 //
 
-extern int as_storage_namespace_init_kv(as_namespace *ns, cf_queue *complete_q, void *udata);
-extern int as_storage_namespace_destroy_kv(as_namespace *ns);
-extern int as_storage_namespace_attributes_get_kv(as_namespace *ns, as_storage_attributes *attr);
+extern int as_storage_namespace_init_kv(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
+extern int as_storage_namespace_destroy_kv(struct as_namespace_s *ns);
+extern int as_storage_namespace_attributes_get_kv(struct as_namespace_s *ns, as_storage_attributes *attr);
 
-extern int as_storage_has_index_kv(as_namespace *ns);
-extern int as_storage_record_exists_kv(as_namespace *ns, cf_digest *keyd);
+extern int as_storage_has_index_kv(struct as_namespace_s *ns);
+extern int as_storage_record_exists_kv(struct as_namespace_s *ns, cf_digest *keyd);
 
-extern int as_storage_record_create_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_open_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_create_kv(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_open_kv(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
 extern int as_storage_record_close_kv(as_storage_rd *rd);
 
 extern int as_storage_record_load_n_bins_kv(as_storage_rd *rd);
 extern int as_storage_record_load_bins_kv(as_storage_rd *rd);
 extern int as_storage_record_write_kv(as_storage_rd *rd);
 
-extern int as_storage_stats_kv(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes);
+extern int as_storage_stats_kv(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);

@@ -40,7 +40,6 @@
 #include "msg.h"
 #include "util.h"
 
-#include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/transaction.h"
@@ -54,6 +53,7 @@
 struct rw_request_s;
 struct iudf_origin_s;
 struct as_batch_shared_s;
+struct as_partition_reservation_s;
 
 
 //==========================================================
@@ -102,7 +102,7 @@ typedef struct rw_request_s {
 	cf_clock			start_time;
 	cf_clock			benchmark_time;
 
-	as_partition_reservation rsv;
+	struct as_partition_reservation_s rsv;
 
 	cf_clock			end_time;
 	// Don't (yet) need result or flags.

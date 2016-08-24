@@ -712,7 +712,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	// Or (normally) adjust max void-times.
 	else if (r->void_time != 0) {
 		cf_atomic_int_setmax(&ns->max_void_time, r->void_time);
-		cf_atomic_int_setmax(&tr->rsv.p->max_void_time, r->void_time);
+		cf_atomic64_setmax(&tr->rsv.p->max_void_time, r->void_time);
 	}
 
 	as_storage_record_close(&rd);

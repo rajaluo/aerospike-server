@@ -39,6 +39,7 @@
 #include "util.h"
 
 #include "base/datamodel.h"
+#include "fabric/partition.h"
 
 /* SYNOPSIS
  * Paxos

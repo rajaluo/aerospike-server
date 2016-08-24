@@ -515,10 +515,10 @@ static const as_storage_info_set_fn as_storage_info_set_table[AS_STORAGE_ENGINE_
 };
 
 int
-as_storage_info_set(as_namespace *ns, uint idx, uint8_t *buf, size_t len)
+as_storage_info_set(as_namespace *ns, uint32_t pid, uint8_t *buf, size_t len)
 {
 	if (as_storage_info_set_table[ns->storage_type]) {
-		return as_storage_info_set_table[ns->storage_type](ns, idx, buf, len);
+		return as_storage_info_set_table[ns->storage_type](ns, pid, buf, len);
 	}
 
 	return 0;
@@ -528,7 +528,7 @@ as_storage_info_set(as_namespace *ns, uint idx, uint8_t *buf, size_t len)
 // as_storage_info_get
 //
 
-typedef int (*as_storage_info_get_fn)(as_namespace *ns, uint idx, uint8_t *buf, size_t *len);
+typedef int (*as_storage_info_get_fn)(as_namespace *ns, uint32_t pid, uint8_t *buf, size_t *len);
 static const as_storage_info_get_fn as_storage_info_get_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
 	0, // memory doesn't support info
@@ -537,10 +537,10 @@ static const as_storage_info_get_fn as_storage_info_get_table[AS_STORAGE_ENGINE_
 };
 
 int
-as_storage_info_get(as_namespace *ns, uint idx, uint8_t *buf, size_t *len)
+as_storage_info_get(as_namespace *ns, uint32_t pid, uint8_t *buf, size_t *len)
 {
 	if (as_storage_info_get_table[ns->storage_type]) {
-		return as_storage_info_get_table[ns->storage_type](ns, idx, buf, len);
+		return as_storage_info_get_table[ns->storage_type](ns, pid, buf, len);
 	}
 
 	return -1; // buf not filled - safer to return error

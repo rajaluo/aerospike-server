@@ -49,6 +49,7 @@
 #include "base/transaction.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h" // for LDTs
+#include "fabric/partition.h"
 #include "transaction/delete.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"

@@ -36,8 +36,7 @@
 
 #include "hist.h"
 
-#include "base/datamodel.h"
-#include "storage/storage.h"
+#include "fabric/partition.h"
 
 
 //==========================================================
@@ -60,6 +59,9 @@
 #define MAX_SSD_THREADS 20
 
 // Forward declaration.
+struct as_index_s;
+struct as_namespace_s;
+struct as_storage_rd_s;
 struct drv_ssd_s;
 
 
@@ -137,7 +139,7 @@ typedef enum {
 //
 typedef struct drv_ssd_s
 {
-	as_namespace	*ns;
+	struct as_namespace_s	*ns;
 
 	char			*name;				// this device's name
 	char			*shadow_name;		// this device's shadow's name, if any
@@ -216,8 +218,8 @@ typedef struct drv_ssd_s
 //
 typedef struct drv_ssds_s
 {
-	ssd_device_header	*header;
-	as_namespace		*ns;
+	ssd_device_header		*header;
+	struct as_namespace_s	*ns;
 
 	// Not a great place for this - used only at startup to determine whether to
 	// load a record.
@@ -241,7 +243,7 @@ typedef struct drv_ssd_block_s {
 	uint32_t		magic;
 	uint32_t		length;			// total after this field - this struct's pointer + 16
 	cf_digest		keyd;
-	as_generation	generation;
+	uint32_t		generation;
 	cf_clock		void_time;
 	uint32_t		bins_offset;	// offset to bins from data
 	uint32_t		n_bins;
@@ -252,10 +254,10 @@ typedef struct drv_ssd_block_s {
 
 void ssd_resume_devices(drv_ssds *ssds);
 bool ssd_cold_start_is_valid_n_bins(uint32_t n_bins);
-void ssd_cold_start_adjust_cenotaph(as_namespace* ns, const drv_ssd_block* block, as_record* r);
-void ssd_cold_start_transition_record(as_namespace* ns, const drv_ssd_block* block, as_record* r, bool is_create);
-void ssd_cold_start_drop_cenotaphs(as_namespace *ns);
-int ssd_write(as_storage_rd *rd);
+void ssd_cold_start_adjust_cenotaph(struct as_namespace_s* ns, const drv_ssd_block* block, struct as_index_s* r);
+void ssd_cold_start_transition_record(struct as_namespace_s* ns, const drv_ssd_block* block, struct as_index_s* r, bool is_create);
+void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
+int ssd_write(struct as_storage_rd_s *rd);
 
 
 //

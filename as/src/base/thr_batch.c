@@ -48,6 +48,7 @@
 #include "base/proto.h"
 #include "base/stats.h"
 #include "base/transaction.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 
 typedef struct {

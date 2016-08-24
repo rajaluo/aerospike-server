@@ -58,6 +58,7 @@
 #include "base/thr_tsvc.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
+#include "fabric/partition.h"
 #include "fabric/paxos.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
