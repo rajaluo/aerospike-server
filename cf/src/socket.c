@@ -757,7 +757,7 @@ cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_
 		sa_len = sizeof(sas);
 	}
 
-	int32_t res = recvfrom(sock->fd, buff, size, flags | MSG_NOSIGNAL, sa, &sa_len);
+	int32_t res = recvfrom(sock->fd, buff, size, flags, sa, &sa_len);
 
 	if (res < 0) {
 		cf_debug(CF_SOCKET, "Error while receiving on FD %d: %d (%s)",
@@ -873,6 +873,11 @@ cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags,
 				return -1;
 			}
 
+			return -1;
+		}
+
+		if (count == 0) {
+			errno = ENOTCONN;
 			return -1;
 		}
 
