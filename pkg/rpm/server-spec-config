@@ -1,7 +1,9 @@
-/etc/aerospike/sample/README.md
-/etc/aerospike/sample/aerospike_ssd.conf
-/etc/aerospike/sample/aerospike_mesh.conf
-%config(noreplace) /etc/aerospike/aerospike.conf
 %defattr(-,aerospike,aerospike)
 /opt/aerospike
 %defattr(-,root,root)
+%config(noreplace) /etc/aerospike/aerospike.conf
+%dir /etc/aerospike
+%dir /etc/aerospike/sample
+/etc/aerospike/sample/README.md
+/etc/aerospike/sample/aerospike_ssd.conf
+/etc/aerospike/sample/aerospike_mesh.conf
