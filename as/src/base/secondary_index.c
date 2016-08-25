@@ -267,8 +267,7 @@ as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 	}
 
 	int rv = AS_SINDEX_GC_ERROR;
-	// TODO - investigate if lockless check is ok/necessary.
-	if (as_record_exists_live(rsv.tree, keyd, rsv.ns, false) != 0) {
+	if (as_record_exists_live(rsv.tree, keyd, rsv.ns) != 0) {
 		rv = AS_SINDEX_GC_OK;
 	}
 	as_partition_release(&rsv);

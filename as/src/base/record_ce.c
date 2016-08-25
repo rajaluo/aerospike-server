@@ -58,8 +58,7 @@ as_record_get_live(as_index_tree* tree, cf_digest* keyd, as_index_ref* r_ref,
 
 
 int
-as_record_exists_live(as_index_tree* tree, cf_digest* keyd, as_namespace* ns,
-		bool skip_lock)
+as_record_exists_live(as_index_tree* tree, cf_digest* keyd, as_namespace* ns)
 {
 	return as_record_exists(tree, keyd, ns);
 }

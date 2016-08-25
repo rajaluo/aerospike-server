@@ -1314,7 +1314,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	if (check_esr && (rv = as_record_exists(p->sub_vp, &esr_digest, ns))) {
 		delete = true;
 		type   = LDT_SUB_GC_NO_ESR;
-	} else if ((rv = as_record_exists_live(p->vp, &parent_digest, ns, true))) {
+	} else if ((rv = as_record_exists_live(p->vp, &parent_digest, ns))) {
 		delete = true;
 		type   = LDT_SUB_GC_NO_PARENT;
 	} else if (!as_ldt_is_parent_and_version_match(subrec_version, p->vp, &parent_digest, ns)) {
