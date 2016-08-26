@@ -52,6 +52,7 @@
 #include "base/transaction.h"
 #include "base/stats.h"
 #include "fabric/fabric.h"
+#include "fabric/partition.h"
 #include "fabric/paxos.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
@@ -126,7 +127,7 @@ typedef struct proxy_request_s {
 	// The node we're diverting to.
 	cf_node			dest;
 
-	as_partition_id	pid; // TODO - is this worth it ???
+	uint32_t		pid; // TODO - is this worth it ???
 
 	as_namespace*	ns;
 
@@ -253,7 +254,7 @@ bool
 as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns,
 		uint64_t cluster_key)
 {
-	as_partition_id pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(tr->keyd);
 
 	// Get a fabric message and fill it out.
 
@@ -333,7 +334,7 @@ as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
 		return;
 	}
 
-	as_partition_id pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(tr->keyd);
 	cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
 
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
@@ -414,7 +415,7 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db)
 void
 as_proxy_shipop(cf_node dst, rw_request* rw)
 {
-	as_partition_id pid = as_partition_getid(rw->keyd);
+	uint32_t pid = as_partition_getid(rw->keyd);
 
 	// Get a fabric message and fill it out.
 

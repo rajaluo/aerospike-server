@@ -1,7 +1,7 @@
 /*
  * storage.c
  *
- * Copyright (C) 2009-2014 Aerospike, Inc.
+ * Copyright (C) 2009-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,14 +20,9 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * method-agnostic storage engine code
- */
-
-// TODO - We have a #include loop - datamodel.h and storage.h include each
-// other. I'd love to untangle this mess, but can't right now. So this needs to
-// be here to allow compilation for now:
-#include "base/datamodel.h"
+//==========================================================
+// Includes.
+//
 
 #include "storage/storage.h"
 
@@ -42,8 +37,8 @@
 #include "fault.h"
 #include "olock.h"
 
-#include "base/datamodel.h"
 #include "base/cfg.h"
+#include "base/datamodel.h"
 #include "base/index.h"
 #include "base/ldt.h"
 #include "base/rec_props.h"
@@ -515,10 +510,10 @@ static const as_storage_info_set_fn as_storage_info_set_table[AS_STORAGE_ENGINE_
 };
 
 int
-as_storage_info_set(as_namespace *ns, uint idx, uint8_t *buf, size_t len)
+as_storage_info_set(as_namespace *ns, uint32_t pid, uint8_t *buf, size_t len)
 {
 	if (as_storage_info_set_table[ns->storage_type]) {
-		return as_storage_info_set_table[ns->storage_type](ns, idx, buf, len);
+		return as_storage_info_set_table[ns->storage_type](ns, pid, buf, len);
 	}
 
 	return 0;
@@ -528,7 +523,7 @@ as_storage_info_set(as_namespace *ns, uint idx, uint8_t *buf, size_t len)
 // as_storage_info_get
 //
 
-typedef int (*as_storage_info_get_fn)(as_namespace *ns, uint idx, uint8_t *buf, size_t *len);
+typedef int (*as_storage_info_get_fn)(as_namespace *ns, uint32_t pid, uint8_t *buf, size_t *len);
 static const as_storage_info_get_fn as_storage_info_get_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
 	0, // memory doesn't support info
@@ -537,10 +532,10 @@ static const as_storage_info_get_fn as_storage_info_get_table[AS_STORAGE_ENGINE_
 };
 
 int
-as_storage_info_get(as_namespace *ns, uint idx, uint8_t *buf, size_t *len)
+as_storage_info_get(as_namespace *ns, uint32_t pid, uint8_t *buf, size_t *len)
 {
 	if (as_storage_info_get_table[ns->storage_type]) {
-		return as_storage_info_get_table[ns->storage_type](ns, idx, buf, len);
+		return as_storage_info_get_table[ns->storage_type](ns, pid, buf, len);
 	}
 
 	return -1; // buf not filled - safer to return error

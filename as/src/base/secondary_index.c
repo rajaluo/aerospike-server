@@ -111,6 +111,7 @@
 #include "base/system_metadata.h"
 #include "base/thr_sindex.h"
 #include "base/thr_info.h"
+#include "fabric/partition.h"
 #include "geospatial/geospatial.h"
 #include "transaction/udf.h"
 
@@ -258,7 +259,7 @@ as_sindex_gc_status
 as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 {
 	as_partition_reservation rsv;
-	as_partition_id pid = as_partition_getid(*keyd);
+	uint32_t pid = as_partition_getid(*keyd);
 
 	int timeout_ms = 2;
 	if (as_partition_reserve_migrate_timeout(ns, pid, &rsv, 0, timeout_ms) != 0 ) {

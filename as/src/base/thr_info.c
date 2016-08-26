@@ -74,6 +74,7 @@
 #include "fabric/hb.h"
 #include "fabric/hlc.h"
 #include "fabric/migrate.h"
+#include "fabric/partition.h"
 #include "fabric/paxos.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"

@@ -46,6 +46,7 @@
 #include "base/security.h"
 #include "base/stats.h"
 #include "base/thr_demarshal.h"
+#include "fabric/partition.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_utils.h"

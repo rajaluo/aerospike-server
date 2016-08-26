@@ -40,11 +40,11 @@
 #include "msg.h"
 #include "util.h"
 
-#include "base/datamodel.h"
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
+#include "fabric/partition.h"
 
 
 //==========================================================

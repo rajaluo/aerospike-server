@@ -52,9 +52,9 @@
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/transaction_policy.h"
+#include "fabric/partition.h"
+#include "storage/storage.h"
 
-
-#define SINDEX 1
 
 /*
  * AS_CLUSTER_LEGACY_SZ:  Historical hard-code maximum cluster size.
@@ -112,9 +112,6 @@
 
 /* Forward declarations */
 typedef struct as_namespace_s as_namespace;
-typedef struct as_partition_s as_partition;
-typedef struct as_partition_vinfo_s as_partition_vinfo;
-typedef struct as_partition_reservation_s as_partition_reservation;
 typedef struct as_index_s as_record;
 typedef struct as_bin_s as_bin;
 typedef struct as_index_ref_s as_index_ref;
@@ -122,12 +119,6 @@ typedef struct as_set_s as_set;
 typedef struct as_treex_s as_treex;
 
 struct as_index_tree_s;
-
-
-// TODO - We have a #include loop - datamodel.h and storage.h include each
-// other. I'd love to untangle this mess, but can't right now. So this needs to
-// be here to allow compilation for now:
-#include "storage/storage.h"
 
 
 /* AS_ID_[NAMESPACE,SET,BIN,INAME]_SZ
@@ -509,22 +500,6 @@ extern void as_bin_all_dump(as_storage_rd *rd, char *msg);
 
 extern void as_bin_init(as_namespace *ns, as_bin *b, const char *name);
 
-#define AS_PARTITION_MAX_VERSION 16
-
-/* as_partition_vinfo
- * A partition's version information */
-struct as_partition_vinfo_s {
-	uint64_t iid;								// iid is the identifier of the cluster at the time the partition was created
-	uint8_t vtp[AS_PARTITION_MAX_VERSION];      // vtp is the version string of the partition with the cluster's split-reforms
-};
-
-static inline bool
-as_partition_vinfo_same(as_partition_vinfo *v1, as_partition_vinfo *v2) {
-	if (v1->iid != v2->iid)		return (false);
-	if ( 0 != memcmp( v1->vtp, v2->vtp, AS_PARTITION_MAX_VERSION ) ) return (false);
-	return (true);
-}
-
 typedef enum {
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF = 0,
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION = 1,
@@ -630,218 +605,6 @@ extern int as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 #define as_record_void_time_get() cf_clepoch_seconds()
 bool as_record_is_expired(as_record *r); // TODO - eventually inline
 
-
-// Counter that tells clients partition ownership has changed.
-extern cf_atomic32 g_partition_generation;
-
-// Counter for receiver-side migration flow control.
-extern cf_atomic_int g_migrate_num_incoming;
-
-/* as_partition_id
- * A generic type for partition identifiers */
-typedef uint16_t as_partition_id;
-#define AS_PARTITION_ID_UNDEF ((uint16_t)0xFFFF)
-
-/* AS_PARTITIONS
- * The number of partitions in the system (and a mask for convenience) */
-#define AS_PARTITIONS 4096
-// #define AS_PARTITIONS 1024
-//#define AS_PARTITIONS 256
-// #define AS_PARTITIONS 64
-// #define AS_PARTITIONS 32
-// #define AS_PARTITIONS 16
-// #define AS_PARTITIONS 8
-#define AS_PARTITION_MASK (AS_PARTITIONS - 1)
-
-
-
-/* as_partition_state
- * The state of a partition
- *    SYNC: fully synchronized
- *    DESYNC: unsynchronized, but moving towards synchronization
- *    ZOMBIE: sync, but moving towards absent
- *    ABSENT: empty
- */
-#define AS_PARTITION_STATE_UNDEF 0
-#define AS_PARTITION_STATE_SYNC  1
-#define AS_PARTITION_STATE_DESYNC  2
-#define AS_PARTITION_STATE_ZOMBIE  3
-#define AS_PARTITION_STATE_ABSENT 5
-typedef uint8_t as_partition_state;
-
-#define AS_PARTITION_MIG_TX_STATE_NONE  0
-#define AS_PARTITION_MIG_TX_STATE_SUBRECORD 1
-#define AS_PARTITION_MIG_TX_STATE_RECORD 2
-typedef uint8_t as_partition_mig_tx_state;
-
-/* as_partition_getid
- * A brief utility function to derive the partition ID from a digest */
-static inline as_partition_id
-as_partition_getid(cf_digest d)
-{
-	return( (as_partition_id) cf_digest_gethash( &d, AS_PARTITION_MASK ) );
-//	return((as_partition_id)((*(as_partition_id *)&d.digest[0]) & AS_PARTITION_MASK));
-}
-
-
-
-
-
-/* as_partition
- * A partition */
-struct as_partition_s {
-	pthread_mutex_t lock;
-
-	cf_node replica[AS_CLUSTER_SZ];
-	/* origin: the node that is replicating to us. For master, origin could be "acting master" during migration.
-	 * target: an actual master that we're migrating to */
-	cf_node origin, target;
-	as_partition_state state;  // used to be consistency
-	int pending_migrate_tx, pending_migrate_rx;
-	bool replica_tx_onsync[AS_CLUSTER_SZ];
-
-	size_t n_dupl;
-	cf_node dupl_nodes[AS_CLUSTER_SZ];
-	bool has_master_wait; // TODO - deprecate in "six months"
-	bool has_migrate_tx_later;
-	as_partition_vinfo primary_version_info; // the version of the primary partition in the cluster
-	as_partition_vinfo version_info;         // the version of my partition here and now
-
-	cf_node old_sl[AS_CLUSTER_SZ];
-
-	uint64_t cluster_key;
-
-	// the maximum void time of all records in the tree below
-	cf_atomic_int max_void_time;
-
-	// the actual data
-	struct as_index_tree_s *vp;
-	struct as_index_tree_s *sub_vp;
-	as_partition_id partition_id;
-	uint32_t p_repl_factor;
-	cf_atomic64 n_tombstones; // relevant only for enterprise edition
-
-	// Track ldt version in transit currently
-	uint64_t current_outgoing_ldt_version;
-	uint64_t current_incoming_ldt_version;
-};
-
-#define AS_PARTITION_HAS_DATA(p)  ((p)->vp->elements || (p)->sub_vp->elements)
-
-/* as_partition_reservation
- * A structure to hold state on a reserved partition
- * NB: Structure elements are organized to make sure access to most
- *     common field is a single cache line access ... DO NOT DISTURB
- *     unless you what you are doing
- */
-struct as_partition_reservation_s {
-	as_namespace			*ns;
-	bool					is_write;
-	uint8_t					unused;
-	as_partition_state		state;
-	uint8_t					n_dupl;
-	as_partition_id			pid;
-	uint8_t					spare[2];
-	/************* 16 byte ******/
-	as_partition			*p;
-	struct as_index_tree_s	*tree;
-	uint64_t				cluster_key;
-	as_partition_vinfo		vinfo;
-
-	/************* 64 byte *****/
-	struct as_index_tree_s	*sub_tree;
-	cf_node					dupl_nodes[AS_CLUSTER_SZ];
-};
-
-
-#define AS_PARTITION_RESERVATION_INIT(__rsv)   \
-	__rsv.ns = NULL; \
-	__rsv.is_write = false; \
-	__rsv.pid = AS_PARTITION_ID_UNDEF; \
-	__rsv.p = 0; \
-	__rsv.state = AS_PARTITION_STATE_UNDEF; \
-	__rsv.tree = 0; \
-	__rsv.n_dupl = 0; \
-	__rsv.cluster_key = 0;
-
-#define AS_PARTITION_RESERVATION_INITP(__rsv)   \
-	__rsv->ns = NULL; \
-	__rsv->is_write = false; \
-	__rsv->pid = AS_PARTITION_ID_UNDEF; \
-	__rsv->p = 0; \
-	__rsv->state = AS_PARTITION_STATE_UNDEF; \
-	__rsv->tree = 0; \
-	__rsv->n_dupl = 0; \
-	__rsv->cluster_key = 0;
-
-
-/* Partition function declarations */
-extern void as_partition_init(as_partition *p, as_namespace *ns, int pid);
-extern void as_partition_reinit(as_partition *p, as_namespace *ns, int pid);
-extern bool is_partition_null(as_partition_vinfo *vinfo);
-extern cf_node as_partition_getreplica_read(as_namespace *ns, as_partition_id p);
-extern int as_partition_getreplica_readall(as_namespace *ns, as_partition_id p, cf_node *nv);
-extern cf_node as_partition_getreplica_write(as_namespace *ns, as_partition_id p);
-cf_node as_partition_proxyee_redirect(as_namespace *ns, as_partition_id pid);
-
-// reserve_query - 
-extern int as_partition_reserve_query(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
-extern int as_partition_prereserve_query(as_namespace * ns, bool can_partition_query[], as_partition_reservation rsv[]);
-// reserve_write - 
-extern int as_partition_reserve_write(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
-// reserve_migrate - 
-extern void as_partition_reserve_migrate(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node);
-extern int as_partition_reserve_migrate_timeout(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, int timeout_ms );
-extern int as_partition_reserve_xdr_read(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv);
-// reserve_read - 
-extern int as_partition_reserve_read(as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv, cf_node *node, uint64_t *cluster_key);
-
-extern void as_partition_reservation_copy(as_partition_reservation *dst, as_partition_reservation *src);
-extern void as_partition_release(as_partition_reservation *rsv);
-
-extern int as_partition_tree_release(struct as_index_tree_s *p);
-
-extern void as_partition_getreplica_read_str(cf_dyn_buf *db);
-extern void as_partition_getreplica_prole_str(cf_dyn_buf *db);
-extern void as_partition_getreplica_write_str(cf_dyn_buf *db);
-extern void as_partition_getreplica_master_str(cf_dyn_buf *db);
-extern void as_partition_get_replicas_all_str(cf_dyn_buf *db);
-extern void as_partition_getinfo_str(cf_dyn_buf *db);
-
-extern int as_partition_remaining_immigrations(as_partition *p);
-extern uint64_t as_partition_remaining_migrations();
-
-extern void as_partition_balance();
-extern void as_partition_balance_init();
-extern void as_partition_balance_init_multi_node_cluster();
-extern void as_partition_balance_init_single_node_cluster();
-extern bool as_partition_balance_is_init_resolved();
-extern bool as_partition_balance_is_multi_node_cluster();
-
-typedef struct repl_stats_s {
-	uint64_t n_master_objects;
-	uint64_t n_prole_objects;
-	uint64_t n_master_sub_objects;
-	uint64_t n_prole_sub_objects;
-	uint64_t n_master_tombstones;
-	uint64_t n_prole_tombstones;
-} repl_stats;
-
-extern void as_partition_get_master_prole_stats(as_namespace* ns, repl_stats* p_stats);
-
-extern void as_partition_allow_migrations(void);
-extern void as_partition_disallow_migrations(void);
-extern bool as_partition_get_migration_flag(void);
-
-// return number of partitions found in storage
-extern int  as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states);
-extern char as_partition_getstate_str(int state);
-// Print info. about the partition map to the log.
-void as_partition_map_dump();
-
-//#define NS_RWLOCK	 1   /* use a reader-writer lock */
-#define NS_RWLOCK    0   /* use a standard mutex */
-
 #define AS_SINDEX_MAX		256
 
 #define MIN_PARTITIONS_PER_INDEX 1
@@ -938,21 +701,6 @@ typedef struct ns_ldt_stats_s {
 	cf_atomic_int	ldt_randomizer_retry;
 
 } ns_ldt_stats;
-
-
-#define CLIENT_BITMAP_BYTES ((AS_PARTITIONS + 7) / 8)
-#define CLIENT_B64MAP_BYTES (((CLIENT_BITMAP_BYTES + 2) / 3) * 4)
-
-typedef struct client_replica_map_s {
-	pthread_mutex_t write_lock;
-
-	volatile uint8_t bitmap[CLIENT_BITMAP_BYTES];
-	volatile char b64map[CLIENT_B64MAP_BYTES];
-} client_replica_map;
-
-extern void client_replica_maps_create(as_namespace* ns);
-extern bool client_replica_maps_update(as_namespace* ns, as_partition_id pid);
-extern bool client_replica_maps_is_partition_queryable(as_namespace* ns, as_partition_id pid);
 
 
 struct as_namespace_s {
@@ -1149,7 +897,7 @@ struct as_namespace_s {
 	cf_atomic32		stop_writes;
 	cf_atomic32		hwm_breached;
 
-	cf_atomic_int	max_void_time;
+	cf_atomic64		max_void_time;
 	uint64_t		non_expirable_objects;
 
 	cf_atomic64		n_expired_objects;

@@ -269,19 +269,21 @@
  *    tree and sub record tree. If not found the record is candidate for defrag.
  */
 
-#include <base/datamodel.h>
-#include <base/ldt.h>
-#include <base/ldt_record.h>
-#include <fabric/fabric.h>
-#include <fabric/migrate.h>
+#include "base/ldt.h"
+
+#include "aerospike/as_msgpack.h"
+#include "aerospike/as_types.h"
+
+#include "base/datamodel.h"
+#include "base/ldt_record.h"
+#include "fabric/fabric.h"
+#include "fabric/migrate.h"
+#include "fabric/partition.h"
 #include "transaction/proxy.h"
 #include "transaction/replica_write.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/udf.h"
-
-#include "aerospike/as_types.h"
-#include "aerospike/as_msgpack.h"
 
 // Use this to turn on/off debug sections
 #define DEBUG false
@@ -588,9 +590,9 @@ as_ldt_subrec_storage_validate(as_storage_rd *rd, char *op)
 		cf_warning(AS_LDT, "as_ldt_subrec_storage_validate %s Parent or ESR digest not set in subrecord", op);
 	}
 
-	as_partition_id  esr_pid    = as_partition_getid(esr_digest);
-	as_partition_id  parent_pid = as_partition_getid(parent_digest);
-	as_partition_id  subrec_pid = as_partition_getid(rd->r->key);
+	uint32_t  esr_pid = as_partition_getid(esr_digest);
+	uint32_t  parent_pid = as_partition_getid(parent_digest);
+	uint32_t  subrec_pid = as_partition_getid(rd->r->key);
 	cf_detail(AS_LDT, "parent_pid = %d, esr_pid=%d subrec_pid=%d",
 			parent_pid, esr_pid, subrec_pid);
 

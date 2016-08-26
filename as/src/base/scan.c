@@ -61,6 +61,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/udf_memtracker.h"
+#include "fabric/partition.h"
 #include "transaction/udf.h"
 
 
@@ -850,7 +851,7 @@ bool aggr_scan_init(as_aggr_call* call, const as_transaction* tr);
 void aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata);
 bool aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd);
 as_partition_reservation* aggr_scan_ptn_reserve(void* udata, as_namespace* ns,
-		as_partition_id pid, as_partition_reservation* rsv);
+		uint32_t pid, as_partition_reservation* rsv);
 as_stream_status aggr_scan_ostream_write(void* udata, as_val* val);
 
 const as_aggr_hooks scan_aggr_hooks = {
@@ -1113,7 +1114,7 @@ aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd)
 }
 
 as_partition_reservation*
-aggr_scan_ptn_reserve(void* udata, as_namespace* ns, as_partition_id pid,
+aggr_scan_ptn_reserve(void* udata, as_namespace* ns, uint32_t pid,
 		as_partition_reservation* rsv)
 {
 	aggr_scan_slice* slice = (aggr_scan_slice*)udata;

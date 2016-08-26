@@ -32,6 +32,7 @@
 #include "base/proto.h"
 #include "base/system_metadata.h"
 #include "base/transaction.h"
+#include "fabric/partition.h"
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"

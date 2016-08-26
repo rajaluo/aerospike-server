@@ -50,6 +50,7 @@
 #include "base/transaction.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 #include "transaction/proxy.h"
@@ -251,7 +252,7 @@ process_transaction(as_transaction *tr)
 	// write reservation, replica writes, etc. Writes quickly get split into
 	// write, delete, or UDF after the reservation.
 
-	as_partition_id pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(tr->keyd);
 	cf_node dest;
 	uint64_t partition_cluster_key = 0;
 

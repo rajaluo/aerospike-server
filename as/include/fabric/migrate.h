@@ -38,9 +38,11 @@
 #include "rchash.h"
 #include "util.h"
 
-#include "base/index.h"
-#include "base/datamodel.h"
+#include "fabric/hb.h"
+#include "fabric/partition.h"
 
+struct as_index_ref_s;
+struct as_namespace_s;
 
 // For receiver-side migration flow-control.
 // By default, allow up to 2 concurrent migrates from each member of the cluster.
@@ -69,35 +71,15 @@
 #define MIG_TYPE_START_IS_NORMAL 1
 #define MIG_TYPE_START_IS_REQUEST 2
 
-typedef enum as_migrate_state_e {
-	AS_MIGRATE_STATE_DONE,
-	AS_MIGRATE_STATE_START,
-	AS_MIGRATE_STATE_ERROR,
-	AS_MIGRATE_STATE_EAGAIN
-} as_migrate_state;
-
 #define AS_MIGRATE_RX_STATE_SUBRECORD 1
 #define AS_MIGRATE_RX_STATE_RECORD 2
 typedef uint8_t as_partition_mig_rx_state;
 
-// an a 'START' notification, the callback may return a value.
-// If that value is -1, the migration will be abandoned (with 'ERROR' notification)
-// If the value is -2, the migration will be tried again later (a subsequent START notification
-// will be tried later)
-//
-
-typedef enum as_migrate_result_e {
-	AS_MIGRATE_OK,
-	AS_MIGRATE_FAIL,
-	AS_MIGRATE_AGAIN,
-	AS_MIGRATE_ALREADY_DONE
-} as_migrate_result;
-
 // A data structure for temporarily en-queuing partition migrations.
 typedef struct partition_migrate_record_s {
 	cf_node dest;
-	as_namespace *ns;
-	as_partition_id pid;
+	struct as_namespace_s *ns;
+	uint32_t pid;
 	uint64_t cluster_key;
 	uint32_t tx_flags;
 } partition_migrate_record;
@@ -105,13 +87,9 @@ typedef struct partition_migrate_record_s {
 // Public API.
 void as_migrate_init();
 void as_migrate_emigrate(const partition_migrate_record *pmr);
-bool as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, as_partition_id partition_id, int state);
+bool as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, uint32_t partition_id, int state);
 void as_migrate_set_num_xmit_threads(int n_threads);
 void as_migrate_dump(bool verbose);
-
-as_migrate_result as_partition_immigrate_start(as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, uint32_t start_type, cf_node source_node);
-as_migrate_result as_partition_immigrate_done(as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, cf_node source_node);
-void as_partition_emigrate_done(as_migrate_state s, as_namespace *ns, as_partition_id pid, uint64_t orig_cluster_key, uint32_t tx_flags);
 
 
 //==========================================================
@@ -172,6 +150,11 @@ typedef enum {
 #define MIG_FEATURES_SEEN 0x80000000 // needed for backward compatibility
 extern const uint32_t MY_MIG_FEATURES;
 
+#define AS_PARTITION_MIG_TX_STATE_NONE 0
+#define AS_PARTITION_MIG_TX_STATE_SUBRECORD 1
+#define AS_PARTITION_MIG_TX_STATE_RECORD 2
+typedef uint8_t as_partition_mig_tx_state;
+
 typedef struct meta_record_s {
 	cf_digest keyd;
 	uint16_t generation;
@@ -219,7 +202,7 @@ typedef struct immig_meta_q_s {
 typedef struct immigration_s {
 	cf_node          src;
 	uint64_t         cluster_key;
-	as_partition_id  pid;
+	uint32_t         pid;
 	as_partition_mig_rx_state rx_state; // really only for LDT
 	uint64_t         incoming_ldt_version;
 
@@ -232,7 +215,7 @@ typedef struct immigration_s {
 
 	as_migrate_result start_result;
 	uint32_t        features;
-	as_namespace    *ns; // for statistics only
+	struct as_namespace_s *ns; // for statistics only
 
 	as_partition_reservation rsv;
 } immigration;
@@ -253,7 +236,7 @@ void emigration_release(emigration *emig);
 void immigration_release(immigration *immig);
 
 // Emigration.
-bool should_emigrate_record(emigration *emig, as_index_ref *r_ref);
+bool should_emigrate_record(emigration *emig, struct as_index_ref_s *r_ref);
 void emigration_flag_pickle(const uint8_t *buf, uint32_t *info);
 
 // Emigration meta queue.

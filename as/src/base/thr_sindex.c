@@ -61,6 +61,7 @@
 #include "base/monitor.h"
 #include "base/secondary_index.h"
 #include "base/stats.h"
+#include "fabric/partition.h"
 
 
 int as_sbld_build(as_sindex* si);

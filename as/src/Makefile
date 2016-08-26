@@ -48,7 +48,7 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
 
-FABRIC_HEADERS += hb.h hlc.h fabric.h migrate.h paxos.h
+FABRIC_HEADERS += hb.h hlc.h fabric.h migrate.h partition.h paxos.h
 FABRIC_SOURCES += hb.c hlc.c fabric.c migrate.c partition.c paxos.c
 ifneq ($(USE_EE),1)
   FABRIC_SOURCES += migrate_ce.c

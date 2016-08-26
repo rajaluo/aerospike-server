@@ -43,6 +43,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
+#include "fabric/partition.h"
 
 
 //==========================================================

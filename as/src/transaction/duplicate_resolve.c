@@ -45,6 +45,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "fabric/fabric.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"

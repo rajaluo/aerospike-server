@@ -46,6 +46,7 @@
 #include "base/secondary_index.h"
 #include "base/stats.h"
 #include "base/transaction.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 

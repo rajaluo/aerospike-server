@@ -58,6 +58,7 @@
 #include "base/ldt.h"
 #include "base/rec_props.h"
 #include "fabric/fabric.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 
 
@@ -135,8 +136,8 @@ typedef struct emigration_reinsert_ctrl_s {
 } emigration_reinsert_ctrl;
 
 typedef struct immigration_ldt_version_s {
-	uint64_t        incoming_ldt_version;
-	as_partition_id pid;
+	uint64_t incoming_ldt_version;
+	uint16_t pid;
 } __attribute__((__packed__)) immigration_ldt_version;
 
 
@@ -336,7 +337,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr)
 //     False: if no matching incoming migration found
 bool
 as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version,
-		as_partition_id partition_id, int rx_state)
+		uint32_t partition_id, int rx_state)
 {
 	immigration *immig;
 	immigration_ldt_version ldtv;

@@ -123,6 +123,7 @@
 #include "base/udf_memtracker.h"
 #include "base/udf_record.h"
 #include "fabric/fabric.h"
+#include "fabric/partition.h"
 #include "geospatial/geospatial.h"
 #include "transaction/udf.h"
 
@@ -1000,7 +1001,7 @@ query_netio(as_query_transaction *qtr)
 //      if all the partitions are reserved upfront returns the rsv used for reserving the partition
 //      else reserves the partition and returns rsv
 as_partition_reservation *
-query_reserve_partition(as_namespace * ns, as_query_transaction * qtr, as_partition_id  pid, as_partition_reservation * rsv)
+query_reserve_partition(as_namespace * ns, as_query_transaction * qtr, uint32_t pid, as_partition_reservation * rsv)
 {
 	if (qtr->qctx.partitions_pre_reserved) {
 		if (!qtr->qctx.can_partition_query[pid]) {
@@ -1568,8 +1569,8 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 	// Attempt the query reservation here as well. If this partition is not
 	// query-able anymore then no need to return anything
 	// Since we are reserving all the partitions upfront, this is a defensive check
-	as_partition_id pid =  as_partition_getid(*dig);
-	rsv                 = query_reserve_partition(ns, qtr, pid, rsv);
+	uint32_t pid = as_partition_getid(*dig);
+	rsv = query_reserve_partition(ns, qtr, pid, rsv);
 	if (!rsv) {
 		return AS_QUERY_OK;
 	}
@@ -1752,7 +1753,7 @@ agg_ostream_write(void *udata, as_val *v)
 }
 
 static as_partition_reservation *
-agg_reserve_partition(void *udata, as_namespace *ns, as_partition_id pid, as_partition_reservation *rsv)
+agg_reserve_partition(void *udata, as_namespace *ns, uint32_t pid, as_partition_reservation *rsv)
 {
 	return query_reserve_partition(ns, (as_query_transaction *)udata, pid, rsv);
 }
