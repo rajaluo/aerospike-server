@@ -2774,6 +2774,9 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 		start->type = type;
 		end->type   = start->type;
 
+		// TODO - Refactor these into generic conversion from
+		// buffer to as_sindex_bin_data functions. Can be used
+		// by write code path as well.
 		if ((type == AS_PARTICLE_TYPE_INTEGER)) {
 			// get start point
 			uint32_t startl  = ntohl(*((uint32_t *)data));
@@ -2815,7 +2818,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			data              += startl;
 			srange->isrange    = FALSE;
 
-			if ((startl <= 0) || (startl >= AS_SINDEX_MAX_STRING_KSIZE)) {
+			if ((startl < 0) || (startl >= AS_SINDEX_MAX_STRING_KSIZE)) {
 				cf_warning(AS_SINDEX, "Out of bound query key size %u", startl);
 				goto Cleanup;
 			}
