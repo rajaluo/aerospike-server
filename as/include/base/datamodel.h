@@ -897,7 +897,7 @@ struct as_namespace_s {
 	cf_atomic32		stop_writes;
 	cf_atomic32		hwm_breached;
 
-	cf_atomic_int	max_void_time;
+	cf_atomic64		max_void_time;
 	uint64_t		non_expirable_objects;
 
 	cf_atomic64		n_expired_objects;

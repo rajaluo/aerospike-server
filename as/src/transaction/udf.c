@@ -61,6 +61,8 @@
 #include "base/udf_cask.h"
 #include "base/udf_record.h"
 #include "base/udf_timer.h"
+#include "fabric/partition.h"
+#include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/proxy.h"
 #include "transaction/replica_write.h"

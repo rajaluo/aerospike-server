@@ -3700,7 +3700,7 @@ as_paxos_init()
 					if (vinfo_len == sizeof(as_partition_vinfo)) {
 						cf_debug(AS_PAXOS, "{%s:%d} Partition version read from storage: iid %"PRIx64"", ns->name, j, vinfo.iid);
 						memcpy(&ns->partitions[j].version_info, &vinfo, sizeof(as_partition_vinfo));
-						if (as_is_partition_null(&vinfo))
+						if (as_partition_is_null(&vinfo))
 							n_null_storage++;
 						else {
 							cf_debug(AS_PAXOS, "{%s:%d} Partition successful revive from storage", ns->name, j);

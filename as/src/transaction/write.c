@@ -48,6 +48,7 @@
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/xdr_serverside.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/proxy.h"
@@ -711,7 +712,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	}
 	// Or (normally) adjust max void-times.
 	else if (r->void_time != 0) {
-		cf_atomic_int_setmax(&ns->max_void_time, r->void_time);
+		cf_atomic64_setmax(&ns->max_void_time, r->void_time);
 		cf_atomic64_setmax(&tr->rsv.p->max_void_time, r->void_time);
 	}
 

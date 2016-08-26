@@ -269,20 +269,21 @@
  *    tree and sub record tree. If not found the record is candidate for defrag.
  */
 
-#include <base/datamodel.h>
-#include <base/ldt.h>
-#include <base/ldt_record.h>
-#include <fabric/fabric.h>
-#include <fabric/migrate.h>
-#include <fabric/partition.h>
+#include "base/ldt.h"
+
+#include "aerospike/as_msgpack.h"
+#include "aerospike/as_types.h"
+
+#include "base/datamodel.h"
+#include "base/ldt_record.h"
+#include "fabric/fabric.h"
+#include "fabric/migrate.h"
+#include "fabric/partition.h"
 #include "transaction/proxy.h"
 #include "transaction/replica_write.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/udf.h"
-
-#include "aerospike/as_types.h"
-#include "aerospike/as_msgpack.h"
 
 // Use this to turn on/off debug sections
 #define DEBUG false

@@ -20,11 +20,6 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * Core storage structures and definitions
- *
- */
-
 #pragma once
 
 #include <stdbool.h>
@@ -35,31 +30,6 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "base/rec_props.h"
-
-
-/* SYNOPSIS
- * Data storage
- *
- * These functions are called by the main 'as' engine while reading and writing to store things
- * The abstraction is built so that 'malloc' is one of the storage engines
- * When creating a new record, pass the keyd in. Storage engines are helped by having such a unique
- * key that's easily hashable and such
- *
- * The code mates with as_record. There is a storage_key union which the storage engine is allowed
- * to use for its own nefarious purposes. It should be a union of whatever information all the currently
- * defined storage engines might need, thus is a HUGE UNPLEASANT HACK
- *
- * In use, the caller will allocate a stack record for the as_storage_rd (record descriptor) and
- * pass it in every time.
- * The caller will also stack allocate the as_storage_pd (particle descriptior) and pass it in.
- * The "flush" occurs when the record is closed.
- *
- * The particle descriptor contains a pointer to data the storage system just brought into memory.
- * There is no length required at this level (like Malloc, if in use). When the data is written,
- * the entire length of the particle is given to the storage engine.
- *
- * When a write occurs, it might be on the same pointer that
- */
 
 
 // The type of backing storage configured.

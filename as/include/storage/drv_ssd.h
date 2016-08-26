@@ -40,6 +40,16 @@
 
 
 //==========================================================
+// Forward declarations.
+//
+
+struct as_index_s;
+struct as_namespace_s;
+struct as_storage_rd_s;
+struct drv_ssd_s;
+
+
+//==========================================================
 // Typedefs & constants.
 //
 
@@ -57,12 +67,6 @@
 // 2 - minimum storage increment (RBLOCK_SIZE) from 512 to 128 bytes
 
 #define MAX_SSD_THREADS 20
-
-// Forward declaration.
-struct as_index_s;
-struct as_namespace_s;
-struct as_storage_rd_s;
-struct drv_ssd_s;
 
 
 //------------------------------------------------
@@ -139,7 +143,7 @@ typedef enum {
 //
 typedef struct drv_ssd_s
 {
-	struct as_namespace_s	*ns;
+	struct as_namespace_s *ns;
 
 	char			*name;				// this device's name
 	char			*shadow_name;		// this device's shadow's name, if any
@@ -254,8 +258,8 @@ typedef struct drv_ssd_block_s {
 
 void ssd_resume_devices(drv_ssds *ssds);
 bool ssd_cold_start_is_valid_n_bins(uint32_t n_bins);
-void ssd_cold_start_adjust_cenotaph(struct as_namespace_s* ns, const drv_ssd_block* block, struct as_index_s* r);
-void ssd_cold_start_transition_record(struct as_namespace_s* ns, const drv_ssd_block* block, struct as_index_s* r, bool is_create);
+void ssd_cold_start_adjust_cenotaph(struct as_namespace_s *ns, const drv_ssd_block *block, struct as_index_s *r);
+void ssd_cold_start_transition_record(struct as_namespace_s *ns, const drv_ssd_block *block, struct as_index_s *r, bool is_create);
 void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
 int ssd_write(struct as_storage_rd_s *rd);
 

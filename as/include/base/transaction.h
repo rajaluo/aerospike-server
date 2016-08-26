@@ -41,10 +41,11 @@
 #include "base/index.h"
 #include "base/proto.h"
 #include "base/stats.h"
+#include "fabric/partition.h"
 #include "storage/storage.h"
 
 struct as_namespace_s;
-struct as_partition_reservation_s;
+
 
 //==========================================================
 // Histogram macros.
@@ -188,7 +189,7 @@ typedef struct as_transaction_s {
 	// transaction 'body' - NOT copied onto queue.
 	//
 
-	struct as_partition_reservation_s rsv;
+	as_partition_reservation rsv;
 
 	uint64_t	end_time;
 	uint8_t		result_code;
@@ -346,8 +347,8 @@ as_transaction_is_nsup_delete(const as_transaction *tr)
 	return (tr->from_flags & FROM_FLAG_NSUP_DELETE) != 0;
 }
 
-int as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s* iudf_orig, bool is_durable_delete);
+int as_transaction_init_iudf(as_transaction *tr, struct as_namespace_s *ns, cf_digest *keyd, struct iudf_origin_s *iudf_orig, bool is_durable_delete);
 
-void as_transaction_demarshal_error(as_transaction* tr, uint32_t error_code);
-void as_transaction_error(as_transaction* tr, struct as_namespace_s *ns, uint32_t error_code);
-void as_multi_rec_transaction_error(as_transaction* tr, uint32_t error_code);
+void as_transaction_demarshal_error(as_transaction *tr, uint32_t error_code);
+void as_transaction_error(as_transaction *tr, struct as_namespace_s *ns, uint32_t error_code);
+void as_multi_rec_transaction_error(as_transaction *tr, uint32_t error_code);

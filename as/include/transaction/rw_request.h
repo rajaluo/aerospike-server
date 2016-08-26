@@ -44,6 +44,7 @@
 #include "base/rec_props.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
+#include "fabric/partition.h"
 
 
 //==========================================================
@@ -53,7 +54,6 @@
 struct rw_request_s;
 struct iudf_origin_s;
 struct as_batch_shared_s;
-struct as_partition_reservation_s;
 
 
 //==========================================================
@@ -102,7 +102,7 @@ typedef struct rw_request_s {
 	cf_clock			start_time;
 	cf_clock			benchmark_time;
 
-	struct as_partition_reservation_s rsv;
+	as_partition_reservation rsv;
 
 	cf_clock			end_time;
 	// Don't (yet) need result or flags.

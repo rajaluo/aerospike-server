@@ -1001,7 +1001,7 @@ query_netio(as_query_transaction *qtr)
 //      if all the partitions are reserved upfront returns the rsv used for reserving the partition
 //      else reserves the partition and returns rsv
 as_partition_reservation *
-query_reserve_partition(as_namespace * ns, as_query_transaction * qtr, uint32_t  pid, as_partition_reservation * rsv)
+query_reserve_partition(as_namespace * ns, as_query_transaction * qtr, uint32_t pid, as_partition_reservation * rsv)
 {
 	if (qtr->qctx.partitions_pre_reserved) {
 		if (!qtr->qctx.can_partition_query[pid]) {
@@ -1568,8 +1568,8 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 	// Attempt the query reservation here as well. If this partition is not
 	// query-able anymore then no need to return anything
 	// Since we are reserving all the partitions upfront, this is a defensive check
-	uint32_t pid =  as_partition_getid(*dig);
-	rsv                 = query_reserve_partition(ns, qtr, pid, rsv);
+	uint32_t pid = as_partition_getid(*dig);
+	rsv = query_reserve_partition(ns, qtr, pid, rsv);
 	if (!rsv) {
 		return AS_QUERY_OK;
 	}

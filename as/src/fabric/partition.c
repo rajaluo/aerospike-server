@@ -92,12 +92,12 @@ static cf_atomic32 g_partition_check_counter = 0;
 
 
 //==========================================================
-// Forward declarations and inlines.
+// Forward declarations.
 //
 
-static cf_node find_sync_copy(as_namespace *ns, uint32_t pid, as_partition *p, bool is_read);
-static int find_in_replica_list(as_partition *p, cf_node self);
-static void partition_health_check(as_namespace *ns, uint32_t pid, as_partition *p, int my_index);
+cf_node find_sync_copy(as_namespace *ns, uint32_t pid, as_partition *p, bool is_read);
+int find_in_replica_list(as_partition *p, cf_node self);
+void partition_health_check(as_namespace *ns, uint32_t pid, as_partition *p, int my_index);
 int partition_reserve_read_write(as_namespace *ns, uint32_t pid, as_partition_reservation *rsv, cf_node *node, bool is_read, uint64_t *cluster_key);
 void partition_reserve_lockfree(as_namespace *ns, uint32_t pid, as_partition_reservation *rsv);
 cf_node partition_getreplica_prole(as_namespace *ns, uint32_t pid);
@@ -105,8 +105,10 @@ char as_partition_getstate_str(int state);
 void clear_partition_version_in_storage(as_namespace *ns, uint32_t pid, bool flush);
 void set_partition_version_in_storage(as_namespace *ns, uint32_t pid, as_partition_vinfo *vinfo, bool flush);
 void generate_new_partition_version(as_partition_vinfo *new_vinfo);
-// FIXME - start rebalance
-void as_migrate_increment_all_tx_fail();
+
+int partition_get_replica_self_lockfree(as_namespace *ns, uint32_t pid);
+
+void increment_all_migrate_tx_imbalance();
 void print_partition_versions(const char* n, uint32_t pid, as_partition_vinfo *part1, const char *mess1, as_partition_vinfo *part2, const char *mess2);
 void partition_set_ns_replication_factor(int new_cluster_size);
 void partition_cluster_topology_info(const as_paxos *paxos_p);
@@ -118,12 +120,10 @@ void set_new_partition_version(as_partition_vinfo *dest, as_partition_vinfo *old
 void set_partition_desync_lockfree(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, uint32_t pid, bool flush);
 void partition_migrate_record_fill(partition_migrate_record *pmr, cf_node dest, as_namespace *ns, uint32_t pid, uint64_t cluster_key, uint32_t tx_flags);
 void set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo, as_namespace *ns, uint32_t pid, bool flush);
-// FIXME - end rebalance
-int partition_get_replica_self_lockfree(as_namespace *ns, uint32_t pid);
 
 
 //==========================================================
-// Public API. FIXME - from datamodel.h
+// Public API.
 //
 
 void
@@ -240,7 +240,7 @@ as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states)
 		// Find if the value has been set in storage.
 		if (as_storage_info_get(ns, j, (uint8_t *)&vinfo, &vinfo_len) == 0) {
 			if (vinfo_len == sizeof(as_partition_vinfo)) {
-				if (! as_is_partition_null(&vinfo)) {
+				if (! as_partition_is_null(&vinfo)) {
 					partition_states[j] = true;
 					n_found++;
 				}
@@ -255,7 +255,7 @@ as_partition_get_state_from_storage(as_namespace *ns, bool *partition_states)
 
 
 bool
-as_is_partition_null(as_partition_vinfo *new_vinfo)
+as_partition_is_null(as_partition_vinfo *new_vinfo)
 {
 	return 0 == new_vinfo->iid;
 }
@@ -464,83 +464,6 @@ as_partition_get_replicas_all_str(cf_dyn_buf *db)
 	if (db_sz != db->used_sz) {
 		cf_dyn_buf_chomp(db);
 	}
-}
-
-
-void
-client_replica_maps_create(as_namespace* ns)
-{
-	uint32_t size = sizeof(client_replica_map) * ns->cfg_replication_factor;
-
-	ns->replica_maps = cf_malloc(size);
-	memset(ns->replica_maps, 0, size);
-
-	for (uint16_t r = 0; r < ns->cfg_replication_factor; r++) {
-		client_replica_map* repl_map = ns->replica_maps + r;
-
-		pthread_mutex_init(&repl_map->write_lock, 0);
-
-		cf_b64_encode((uint8_t*)repl_map->bitmap,
-				(uint32_t)sizeof(repl_map->bitmap), (char*)repl_map->b64map);
-	}
-}
-
-
-bool
-client_replica_maps_update(as_namespace* ns, uint32_t pid)
-{
-	uint32_t byte_i = pid >> 3;
-	uint32_t byte_chunk = (byte_i / 3);
-	uint32_t chunk_bitmap_offset = byte_chunk * 3;
-	uint32_t chunk_b64map_offset = byte_chunk << 2;
-
-	uint32_t bytes_from_end = CLIENT_BITMAP_BYTES - chunk_bitmap_offset;
-	uint32_t input_size = bytes_from_end > 3 ? 3 : bytes_from_end;
-
-	int replica = partition_get_replica_self_lockfree(ns, pid);
-	uint8_t set_mask = 0x80 >> (pid & 0x7);
-	bool changed = false;
-
-	for (int r = 0; r < (int)ns->cfg_replication_factor; r++) {
-		client_replica_map* repl_map = ns->replica_maps + r;
-
-		volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
-		bool owned = replica == r;
-		bool is_set = (*mbyte & set_mask) != 0;
-		bool needs_update = (owned && ! is_set) || (! owned && is_set);
-
-		if (! needs_update) {
-			continue;
-		}
-
-		volatile uint8_t* bitmap_chunk = repl_map->bitmap + chunk_bitmap_offset;
-		volatile char* b64map_chunk = repl_map->b64map + chunk_b64map_offset;
-
-		pthread_mutex_lock(&repl_map->write_lock);
-
-		*mbyte ^= set_mask;
-		cf_b64_encode((uint8_t*)bitmap_chunk, input_size, (char*)b64map_chunk);
-
-		pthread_mutex_unlock(&repl_map->write_lock);
-
-		changed = true;
-	}
-
-	return changed;
-}
-
-
-bool
-client_replica_maps_is_partition_queryable(as_namespace* ns, uint32_t pid)
-{
-	uint32_t byte_i = pid >> 3;
-
-	client_replica_map* repl_map = ns->replica_maps;
-	volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
-
-	uint8_t set_mask = 0x80 >> (pid & 0x7);
-
-	return (*mbyte & set_mask) != 0;
 }
 
 
@@ -878,34 +801,90 @@ as_partition_getinfo_str(cf_dyn_buf *db)
 }
 
 
-int
-as_partition_remaining_immigrations(as_partition *p)
+//==========================================================
+// Public API - client view replica maps.
+//
+
+void
+client_replica_maps_create(as_namespace* ns)
 {
-	pthread_mutex_lock(&p->lock);
+	uint32_t size = sizeof(client_replica_map) * ns->cfg_replication_factor;
 
-	int n = p->pending_migrate_rx;
+	ns->replica_maps = cf_malloc(size);
+	memset(ns->replica_maps, 0, size);
 
-	pthread_mutex_unlock(&p->lock);
+	for (uint16_t r = 0; r < ns->cfg_replication_factor; r++) {
+		client_replica_map* repl_map = ns->replica_maps + r;
 
-	return n;
+		pthread_mutex_init(&repl_map->write_lock, 0);
+
+		cf_b64_encode((uint8_t*)repl_map->bitmap,
+				(uint32_t)sizeof(repl_map->bitmap), (char*)repl_map->b64map);
+	}
 }
 
 
-uint64_t
-as_partition_remaining_migrations()
+bool
+client_replica_maps_update(as_namespace* ns, uint32_t pid)
 {
-	uint64_t remaining_migrations = 0;
+	uint32_t byte_i = pid >> 3;
+	uint32_t byte_chunk = (byte_i / 3);
+	uint32_t chunk_bitmap_offset = byte_chunk * 3;
+	uint32_t chunk_b64map_offset = byte_chunk << 2;
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
+	uint32_t bytes_from_end = CLIENT_BITMAP_BYTES - chunk_bitmap_offset;
+	uint32_t input_size = bytes_from_end > 3 ? 3 : bytes_from_end;
 
-		remaining_migrations += ns->migrate_tx_partitions_remaining;
-		remaining_migrations += ns->migrate_rx_partitions_remaining;
+	int replica = partition_get_replica_self_lockfree(ns, pid);
+	uint8_t set_mask = 0x80 >> (pid & 0x7);
+	bool changed = false;
+
+	for (int r = 0; r < (int)ns->cfg_replication_factor; r++) {
+		client_replica_map* repl_map = ns->replica_maps + r;
+
+		volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
+		bool owned = replica == r;
+		bool is_set = (*mbyte & set_mask) != 0;
+		bool needs_update = (owned && ! is_set) || (! owned && is_set);
+
+		if (! needs_update) {
+			continue;
+		}
+
+		volatile uint8_t* bitmap_chunk = repl_map->bitmap + chunk_bitmap_offset;
+		volatile char* b64map_chunk = repl_map->b64map + chunk_b64map_offset;
+
+		pthread_mutex_lock(&repl_map->write_lock);
+
+		*mbyte ^= set_mask;
+		cf_b64_encode((uint8_t*)bitmap_chunk, input_size, (char*)b64map_chunk);
+
+		pthread_mutex_unlock(&repl_map->write_lock);
+
+		changed = true;
 	}
 
-	return remaining_migrations;
+	return changed;
 }
 
+
+bool
+client_replica_maps_is_partition_queryable(as_namespace* ns, uint32_t pid)
+{
+	uint32_t byte_i = pid >> 3;
+
+	client_replica_map* repl_map = ns->replica_maps;
+	volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
+
+	uint8_t set_mask = 0x80 >> (pid & 0x7);
+
+	return (*mbyte & set_mask) != 0;
+}
+
+
+//==========================================================
+// Public API - partition balance.
+//
 
 // Initially, every partition is either ABSENT, or a version was read from
 // storage and it is SYNC.
@@ -927,7 +906,7 @@ as_partition_balance_init()
 
 			p->p_repl_factor = 1;
 
-			if (! as_is_partition_null(&p->version_info)) {
+			if (! as_partition_is_null(&p->version_info)) {
 				memcpy(p->replica, &g_config.self_node, sizeof(cf_node));
 				p->primary_version_info = p->version_info;
 				n_stored++;
@@ -969,7 +948,7 @@ as_partition_balance_init_single_node_cluster()
 		for (uint32_t j = 0; j < AS_PARTITIONS; j++) {
 			as_partition *p = &ns->partitions[j];
 
-			if (as_is_partition_null(&p->version_info)) {
+			if (as_partition_is_null(&p->version_info)) {
 				// For nsup, which is allowed to operate while we're doing this.
 				pthread_mutex_lock(&p->lock);
 
@@ -1032,28 +1011,6 @@ as_partition_balance_is_multi_node_cluster()
 
 
 void
-as_partition_allow_migrations()
-{
-	cf_info(AS_PARTITION, "ALLOW MIGRATIONS");
-	g_allow_migrations = true;
-}
-
-
-void
-as_partition_disallow_migrations()
-{
-	cf_info(AS_PARTITION, "DISALLOW MIGRATIONS");
-	g_allow_migrations = false;
-}
-
-
-bool
-as_partition_get_migration_flag()
-{
-	return g_allow_migrations;
-}
-
-void
 as_partition_balance()
 {
 	// Shortcut pointers.
@@ -1064,13 +1021,13 @@ as_partition_balance()
 
 	if (! succession || ! alive) {
 		cf_warning(AS_PARTITION, "imbalance: succession list is uninitialized: couldn't start migrate");
-		as_migrate_increment_all_tx_fail();
+		increment_all_migrate_tx_imbalance();
 		return;
 	}
 
 	if ((cf_node)0 == self) {
 		cf_warning(AS_PARTITION, "imbalance: node value is uninitialized: couldn't start migrate");
-		as_migrate_increment_all_tx_fail();
+		increment_all_migrate_tx_imbalance();
 		return;
 	}
 
@@ -1094,7 +1051,7 @@ as_partition_balance()
 
 	if (found_error || cluster_size == 0) {
 		cf_warning(AS_PARTITION, "imbalance: succession list is corrupted: couldn't start migrate");
-		as_migrate_increment_all_tx_fail();
+		increment_all_migrate_tx_imbalance();
 		return;
 	}
 
@@ -1115,7 +1072,7 @@ as_partition_balance()
 
 	if (found_error) {
 		cf_warning(AS_PARTITION, "imbalance: can't find self in succession list: couldn't start migrate");
-		as_migrate_increment_all_tx_fail();
+		increment_all_migrate_tx_imbalance();
 		return;
 	}
 
@@ -1132,7 +1089,7 @@ as_partition_balance()
 
 	if (found_error) {
 		cf_warning(AS_PARTITION, "imbalance: global state is corrupted: couldn't start migrate");
-		as_migrate_increment_all_tx_fail();
+		increment_all_migrate_tx_imbalance();
 		as_paxos_set_cluster_integrity(paxos, false);
 		return;
 	}
@@ -1162,7 +1119,7 @@ as_partition_balance()
 
 	if (found_error) {
 		cf_warning(AS_PARTITION, "imbalance: global state is not identical to local state: couldn't start migrate");
-		as_migrate_increment_all_tx_fail();
+		increment_all_migrate_tx_imbalance();
 		return;
 	}
 
@@ -1392,7 +1349,7 @@ as_partition_balance()
 			sizeof(new_version_for_lost_partitions));
 	generate_new_partition_version(&new_version_for_lost_partitions);
 
-	if (as_is_partition_null(&new_version_for_lost_partitions)) {
+	if (as_partition_is_null(&new_version_for_lost_partitions)) {
 		// What do we do here?
 		cf_warning(AS_PAXOS, "null partition ID generated");
 	}
@@ -1473,7 +1430,7 @@ as_partition_balance()
 
 			// TODO - yes, this happens... try to understand it better.
 			if (p->state == AS_PARTITION_STATE_DESYNC &&
-					! as_is_partition_null(&p->version_info)) {
+					! as_partition_is_null(&p->version_info)) {
 				cf_info(AS_PARTITION, "{%s:%d} partition version is not null, setting state from DESYNC to SYNC",
 						ns->name, j);
 
@@ -1481,7 +1438,7 @@ as_partition_balance()
 			}
 
 			// Do some integrity checks on partition state.
-			if (as_is_partition_null(&ns->partitions[j].version_info)) {
+			if (as_partition_is_null(&ns->partitions[j].version_info)) {
 				bool ok = (p->state != AS_PARTITION_STATE_SYNC &&
 						p->state != AS_PARTITION_STATE_ZOMBIE);
 
@@ -1520,7 +1477,7 @@ as_partition_balance()
 				size_t n_index = HV_SLINDEX(j, k);
 				as_partition_vinfo *vinfo = &paxos->c_partition_vinfo[i][n_index][j];
 
-				if (as_is_partition_null(vinfo)) {
+				if (as_partition_is_null(vinfo)) {
 					continue;
 				}
 
@@ -1614,7 +1571,7 @@ as_partition_balance()
 			for (int k = 0; k < cluster_size; k++) {
 				int n_index = HV_SLINDEX(j, k);
 
-				is_sync[k] = ! as_is_partition_null(&paxos->c_partition_vinfo[i][n_index][j]);
+				is_sync[k] = ! as_partition_is_null(&paxos->c_partition_vinfo[i][n_index][j]);
 
 				if (is_sync[k] && first_sync_node < 0) {
 					first_sync_node = k;
@@ -1933,8 +1890,60 @@ as_partition_balance()
 
 
 //==========================================================
-// Public API. - FIXME - from migrate.h
+// Public API - migration.
 //
+
+int
+as_partition_remaining_immigrations(as_partition *p)
+{
+	pthread_mutex_lock(&p->lock);
+
+	int n = p->pending_migrate_rx;
+
+	pthread_mutex_unlock(&p->lock);
+
+	return n;
+}
+
+
+uint64_t
+as_partition_remaining_migrations()
+{
+	uint64_t remaining_migrations = 0;
+
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+
+		remaining_migrations += ns->migrate_tx_partitions_remaining;
+		remaining_migrations += ns->migrate_rx_partitions_remaining;
+	}
+
+	return remaining_migrations;
+}
+
+
+void
+as_partition_allow_migrations()
+{
+	cf_info(AS_PARTITION, "ALLOW MIGRATIONS");
+	g_allow_migrations = true;
+}
+
+
+void
+as_partition_disallow_migrations()
+{
+	cf_info(AS_PARTITION, "DISALLOW MIGRATIONS");
+	g_allow_migrations = false;
+}
+
+
+bool
+as_partition_get_migration_flag()
+{
+	return g_allow_migrations;
+}
+
 
 void
 as_partition_emigrate_done(as_migrate_state s, as_namespace *ns, uint32_t pid,
@@ -2395,12 +2404,11 @@ as_partition_immigrate_done(as_namespace *ns, uint32_t pid,
 
 
 //==========================================================
-// Local helpers - FIXME - local helpers start here
+// Local helpers.
 //
 
-
 // Find best node to handle read/write. Called within partition lock.
-static cf_node
+cf_node
 find_sync_copy(as_namespace *ns, uint32_t pid, as_partition *p, bool is_read)
 {
 	cf_assert(ns, AS_PARTITION, CF_CRITICAL, "invalid namespace");
@@ -2457,7 +2465,7 @@ find_sync_copy(as_namespace *ns, uint32_t pid, as_partition *p, bool is_read)
 }
 
 
-static int
+int
 find_in_replica_list(as_partition *p, cf_node self)
 {
 	int my_index = -1;
@@ -2477,7 +2485,7 @@ find_in_replica_list(as_partition *p, cf_node self)
 }
 
 
-static void
+void
 partition_health_check(as_namespace *ns, uint32_t pid, as_partition *p,
 		int my_index)
 {
@@ -2572,7 +2580,7 @@ partition_reserve_read_write(as_namespace *ns, uint32_t pid,
 			|| AS_PARTITION_STATE_ZOMBIE == p->state) {
 		rsv->ns = ns;
 		rsv->is_write = is_read ? false : true;
-		rsv->pid = pid;
+		rsv->pid = (uint16_t)pid;
 		rsv->p = p;
 
 		cf_rc_reserve(p->vp);
@@ -2626,7 +2634,7 @@ partition_reserve_lockfree(as_namespace *ns, uint32_t pid,
 
 	rsv->ns = ns;
 	rsv->is_write = false;
-	rsv->pid = pid;
+	rsv->pid = (uint16_t)pid;
 	rsv->p = p;
 
 	cf_rc_reserve(p->vp);
@@ -2641,7 +2649,7 @@ partition_reserve_lockfree(as_namespace *ns, uint32_t pid,
 
 	rsv->cluster_key = p->cluster_key;
 
-	if (! as_is_partition_null(&p->version_info)) {
+	if (! as_partition_is_null(&p->version_info)) {
 		memcpy(&rsv->vinfo, &p->version_info, sizeof(as_partition_vinfo));
 	}
 	else {
@@ -2748,9 +2756,32 @@ generate_new_partition_version(as_partition_vinfo *new_vinfo)
 }
 
 
-// FIXME - REBALANCE STUFF HERE
+int
+partition_get_replica_self_lockfree(as_namespace *ns, uint32_t pid)
+{
+	uint16_t n_repl = ns->replication_factor;
+	as_partition *p = &ns->partitions[pid];
+	cf_node self = g_config.self_node;
+
+	int my_index = find_in_replica_list(p, self); // -1 if node is not found
+	bool am_master = (my_index == 0 && p->state == AS_PARTITION_STATE_SYNC) ||
+			p->target != 0;
+
+	if (am_master) {
+		return 0;
+	}
+	else if (my_index > 0 && p->origin == 0 && my_index < n_repl) {
+		// Check my_index < n_repl only because n_repl could be out-of-sync with
+		// (less than) partition's replica list count
+		return my_index;
+	}
+
+	return -1; // not a replica
+}
+
+
 void
-as_migrate_increment_all_tx_fail()
+increment_all_migrate_tx_imbalance()
 {
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		// All namespaces will fail to migrate.
@@ -2949,7 +2980,7 @@ set_partition_sync_lockfree(as_partition *p, uint32_t pid, as_namespace *ns,
 	p->state = AS_PARTITION_STATE_SYNC;
 
 	// If the node is master and it partition_vinfo is already set, do nothing.
-	if  (g_config.self_node == p->replica[0] && ! as_is_partition_null(&p->version_info)) {
+	if  (g_config.self_node == p->replica[0] && ! as_partition_is_null(&p->version_info)) {
 		if (memcmp(&p->version_info, &p->primary_version_info, sizeof(as_partition_vinfo)) != 0) {
 			cf_warning(AS_PARTITION, "{%s:%u} Attempt to set a master sync partition to a non-primary version value",
 					ns->name, pid);
@@ -2958,7 +2989,7 @@ set_partition_sync_lockfree(as_partition *p, uint32_t pid, as_namespace *ns,
 		return;
 	}
 
-	if  (as_is_partition_null(&p->primary_version_info)) {
+	if  (as_partition_is_null(&p->primary_version_info)) {
 		cf_warning(AS_PARTITION, "{%s:%u} Failed: Attempt to set partition sync with primary version NULL",
 				ns->name, pid);
 		return;
@@ -3109,30 +3140,3 @@ set_partition_absent_lockfree(as_partition *p, as_partition_vinfo *vinfo,
 	clear_partition_version_in_storage(ns, pid, flush);
 	memset(vinfo, 0, sizeof(as_partition_vinfo));
 }
-
-// FIXME - END REBALANCE STUFF
-
-
-int
-partition_get_replica_self_lockfree(as_namespace *ns, uint32_t pid)
-{
-	uint16_t n_repl = ns->replication_factor;
-	as_partition *p = &ns->partitions[pid];
-	cf_node self = g_config.self_node;
-
-	int my_index = find_in_replica_list(p, self); // -1 if node is not found
-	bool am_master = (my_index == 0 && p->state == AS_PARTITION_STATE_SYNC) ||
-			p->target != 0;
-
-	if (am_master) {
-		return 0;
-	}
-	else if (my_index > 0 && p->origin == 0 && my_index < n_repl) {
-		// Check my_index < n_repl only because n_repl could be out-of-sync with
-		// (less than) partition's replica list count
-		return my_index;
-	}
-
-	return -1; // not a replica
-}
-

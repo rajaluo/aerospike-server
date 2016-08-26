@@ -1,7 +1,7 @@
 /*
  * storage.c
  *
- * Copyright (C) 2009-2014 Aerospike, Inc.
+ * Copyright (C) 2009-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -20,14 +20,9 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-/*
- * method-agnostic storage engine code
- */
-
-// TODO - We have a #include loop - datamodel.h and storage.h include each
-// other. I'd love to untangle this mess, but can't right now. So this needs to
-// be here to allow compilation for now:
-#include "base/datamodel.h"
+//==========================================================
+// Includes.
+//
 
 #include "storage/storage.h"
 
@@ -42,8 +37,8 @@
 #include "fault.h"
 #include "olock.h"
 
-#include "base/datamodel.h"
 #include "base/cfg.h"
+#include "base/datamodel.h"
 #include "base/index.h"
 #include "base/ldt.h"
 #include "base/rec_props.h"
