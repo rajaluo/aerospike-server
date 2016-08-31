@@ -1355,7 +1355,7 @@ static msg_template g_hb_v2_msg_template[] = {
 	(MAX(config_hb_tx_interval_get(), AS_HB_INTERVAL_MIN))
 
 /**
- * Intervals at which adjacecny tender runs.
+ * Intervals at which adjacency tender runs.
  */
 #define ADJACENCY_TEND_INTERVAL() (PULSE_TRANSMIT_INTERVAL())
 
@@ -1428,7 +1428,7 @@ static msg_template g_hb_v2_msg_template[] = {
 	})
 
 /**
- * Inidicates if mode is mesh.
+ * Indicates if mode is mesh.
  */
 #define IS_MESH() (config_mode_get() == AS_HB_MODE_MESH)
 
@@ -1811,7 +1811,7 @@ as_hb_getaddr(cf_node nodeid, cf_ip_addr* ip_addr)
 	int rv = -1;
 	if (!HB_IS_INITIALIZED()) {
 		WARNING(
-		  "Main heartbeat module unintialized. Address not found.");
+		  "Main heartbeat module uninitialized. Address not found.");
 		return rv;
 	}
 
@@ -1838,8 +1838,8 @@ void
 as_hb_register_listener(as_hb_event_fn event_callback, void* udata)
 {
 	if (!HB_IS_INITIALIZED()) {
-		WARNING("Main heartbeat module unintialized. Not registering "
-			"the listner.");
+		WARNING("Main heartbeat module uninitialized. Not registering "
+			"the listener.");
 		return;
 	}
 
@@ -3044,7 +3044,7 @@ msg_supported_nodes_get(int msg_buffer_size)
 		  g_hb_v2_msg_template,
 		  sizeof(g_hb_v2_msg_template) / sizeof(msg_template));
 
-		// Also accomodate for the terminating '0' nodeid.
+		// Also accommodate for the terminating '0' nodeid.
 		int supported_cluster_size =
 		  ((msg_buffer_size - UDP_HEADER_SIZE_MAX -
 		    fixed_payload_size) /
@@ -6118,7 +6118,7 @@ Exit:
 
 /**
  * Check and fix the case where we received a self incoming message probably
- * because one of our non loop back itnerfaces was used as a seed address.
+ * because one of our non loop back interfaces was used as a seed address.
  *
  * @return true if this message is a self message, false otherwise.
  */
@@ -6750,7 +6750,7 @@ mesh_channel_on_msg_rcvd(as_hb_channel_event* event)
 			mesh_channel_on_info_reply(event->msg);
 			break;
 		default:
-			WARNING("Recieved a message of unknown type from.");
+			WARNING("Received a message of unknown type from.");
 			// Ignore other messages.
 			break;
 	}
@@ -7003,7 +7003,7 @@ mesh_tip_clear_reduce(void* key, void* data, void* udata)
 	if (rv == SHASH_REDUCE_DELETE) {
 		if (channel_node_disconnect(nodeid) != 0) {
 			WARNING(
-			  "Unable to disconnet the channel to node %" PRIx64,
+			  "Unable to disconnect the channel to node %" PRIx64,
 			  nodeid);
 		}
 	}
@@ -7443,7 +7443,7 @@ hb_event_publish_pending()
 };
 
 /**
- * Delete the plugin data while itereating through the map.
+ * Delete the plugin data while iterating through the map.
  */
 static int
 hb_adjacency_free_plugin_data_reduce(void* key, void* data, void* udata)
@@ -7462,7 +7462,7 @@ hb_adjacency_free_plugin_data_reduce(void* key, void* data, void* udata)
 }
 
 /**
- * Clear the heartbeat datastructures.
+ * Clear the heartbeat data structures.
  */
 static void
 hb_clear()
@@ -7514,7 +7514,7 @@ hb_adjacency_iterate_reduce(void* key, void* data, void* udata)
 }
 
 /**
- * Plugin function to set heartbeat adjacency list into a pluse message.
+ * Plugin function to set heartbeat adjacency list into a pulse message.
  */
 static void
 hb_plugin_set_fn(msg* msg)
@@ -7812,7 +7812,7 @@ hb_adjacent_node_get(cf_node nodeid, as_hb_adjacent_node* adjacent_node)
 
 	if (SHASH_GET_OR_DIE(
 	      g_hb.adjacency, &nodeid, adjacent_node,
-	      "Error reading adjacecny information for node %" PRIx64,
+	      "Error reading adjacency information for node %" PRIx64,
 	      nodeid) == SHASH_OK) {
 		rv = 0;
 	}
@@ -7847,7 +7847,7 @@ hb_adjacent_node_plugin_data_get(as_hb_adjacent_node* adjacent_node,
 }
 
 /**
- * Inidicates if a give node has expired and should be removed from the
+ * Indicates if a give node has expired and should be removed from the
  * adjacency list.
  */
 static bool
@@ -8605,7 +8605,7 @@ hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict)
 }
 
 /**
- * Reduce function to iterate over plugin data for all adjacecnt nodes.
+ * Reduce function to iterate over plugin data for all adjacent nodes.
  */
 static int
 hb_plugin_data_iterate_reduce(void* key, void* data, void* udata)
@@ -8641,7 +8641,7 @@ hb_plugin_data_iterate_reduce(void* key, void* data, void* udata)
  * @param pluginid the plugin identifier.
  * @param iterate_fn the iterate function invoked for plugin data for every
  * node.
- * @param udata passed as is to the iterqte function. Useful for getting results
+ * @param udata passed as is to the iterate function. Useful for getting results
  * out of the iteration.
  * NULL if there is no plugin data.
  * @return the size of the plugin data. 0 if there is no plugin data.
