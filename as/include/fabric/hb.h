@@ -40,6 +40,16 @@
 #define AS_CLUSTER_SZ 128
 
 /**
+ * Minimum heartbeat interval.
+ */
+#define AS_HB_TX_INTERVAL_MS_MIN 50
+
+/**
+ * Maximum heartbeat interval. (10 mins)
+ */
+#define AS_HB_TX_INTERVAL_MS_MAX 600000
+
+/**
  * An ipv4 / ipv6 address. cf_sockaddr accounts for port as well and has that semantic
  * but does not deal with IPv6. Inventing a new packed type that will also hold
  * ipv6 addresses.
@@ -501,7 +511,7 @@ uint32_t as_hb_tx_interval_get();
 /**
  * Set the heartbeat pulse transmit interval.
  */
-void as_hb_tx_interval_set(uint32_t new_interval);
+int as_hb_tx_interval_set(uint32_t new_interval);
 
 /**
  * Set the maximum number of missed heartbeat intervals after which a node is
@@ -654,12 +664,12 @@ void as_hb_info_listen_addr_get(hb_mode_enum* mode, char* addr_port);
 int as_hb_mesh_tip(char* host, int port);
 
 /**
- * Remove an aerospike instance from the mesh seed list.
+ * Remove an aerospike instance from the mesh list.
  */
 int as_hb_mesh_tip_clear(char* host, int port);
 
 /**
- * Clear the seed list.
+ * Clear the entire mesh list.
  */
 int as_hb_mesh_tip_clear_all();
 
