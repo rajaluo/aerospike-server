@@ -51,6 +51,7 @@
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
+#include "fabric/partition_balance.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 #include "transaction/proxy.h"

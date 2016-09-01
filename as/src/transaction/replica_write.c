@@ -902,7 +902,7 @@ ldt_get_prole_version(as_partition_reservation* rsv, cf_digest* keyd,
 		}
 	}
 	else if (! as_migrate_is_incoming(keyd, linfo->ldt_source_version,
-			rsv->p->partition_id, AS_MIGRATE_RX_STATE_RECORD)) {
+			rsv->p->id, AS_MIGRATE_RX_STATE_RECORD)) {
 		// Should bail out way earlier than this.
 		return false;
 	}

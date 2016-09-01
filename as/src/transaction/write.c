@@ -237,7 +237,7 @@ as_write_start(as_transaction* tr)
 	}
 
 	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_getreplica_readall(tr->rsv.ns, tr->rsv.pid,
+	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
 			rw->dest_nodes);
 
 	// If we don't need replica writes, transaction is finished.
@@ -333,7 +333,7 @@ write_dup_res_cb(rw_request* rw)
 	}
 
 	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_getreplica_readall(tr.rsv.ns, tr.rsv.pid,
+	rw->n_dest_nodes = as_partition_get_other_replicas(tr.rsv.p,
 			rw->dest_nodes);
 
 	// If we don't need replica writes, transaction is finished.
@@ -802,11 +802,6 @@ write_master_preprocessing(as_transaction* tr)
 			write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARAMETER);
 			return false;
 		}
-	}
-
-	// TODO - when we're *sure* this never happens, remove:
-	if (AS_PARTITION_STATE_DESYNC == tr->rsv.state) {
-		cf_crash(AS_RW, "{%s:%d} write_master: partition is desync", ns->name, tr->rsv.pid);
 	}
 
 	return true;

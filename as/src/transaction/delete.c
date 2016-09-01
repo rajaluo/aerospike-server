@@ -156,7 +156,7 @@ as_delete_start(as_transaction* tr)
 	}
 
 	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_getreplica_readall(tr->rsv.ns, tr->rsv.pid,
+	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
 			rw->dest_nodes);
 
 	// If we don't need replica writes, transaction is finished.
@@ -247,7 +247,7 @@ delete_dup_res_cb(rw_request* rw)
 	}
 
 	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_getreplica_readall(tr.rsv.ns, tr.rsv.pid,
+	rw->n_dest_nodes = as_partition_get_other_replicas(tr.rsv.p,
 			rw->dest_nodes);
 
 	// If we don't need replica writes, transaction is finished.
