@@ -634,8 +634,13 @@ udf_cask_smd_accept_fn(char *module, as_smd_item_list_t *items, void *udata, uin
 
 		if (item->action == AS_SMD_ACTION_SET) {
 
-			json_error_t json_err;
-			json_t *item_obj = json_loads(item->value, 0 /*flags*/, &json_err);
+			json_error_t json_error;
+			json_t *item_obj = json_loads(item->value, 0 /*flags*/, &json_error);
+			if (!item_obj) {
+				cf_warning(AS_UDF, "failed to parse UDF \"%s\" with JSON error: %s ; source: %s ; line: %d ; column: %d ; position: %d",
+						   item->key, json_error.text, json_error.source, json_error.line, json_error.column, json_error.position);
+				continue;
+			}
 
 			/*item->key is name */
 			json_t *content64_obj = json_object_get(item_obj, "content64");
@@ -649,7 +654,6 @@ udf_cask_smd_accept_fn(char *module, as_smd_item_list_t *items, void *udata, uin
 			if (! cf_b64_validate_and_decode(content64_str, encoded_len, (uint8_t*)content_str, &decoded_len)) {
 				cf_info(AS_UDF, "invalid script on accept, will not register %s", item->key);
 				cf_free(content_str);
-				json_decref(content64_obj);
 				json_decref(item_obj);
 				continue;
 			}
@@ -663,7 +667,6 @@ udf_cask_smd_accept_fn(char *module, as_smd_item_list_t *items, void *udata, uin
 			unsigned char       content_gen[256]    = {0};
 			int e = file_write(item->key, (uint8_t *) content_str, decoded_len, content_gen);
 			cf_free(content_str);
-			json_decref(content64_obj);
 			json_decref(item_obj);
 			if ( e ) {
 				mod_lua_unlock(&mod_lua);
