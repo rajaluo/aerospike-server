@@ -140,6 +140,12 @@ cf_ip_addr_copy(const cf_ip_addr *from, cf_ip_addr *to)
 	to->s_addr = from->s_addr;
 }
 
+void
+cf_ip_addr_set_loopback(cf_ip_addr *addr)
+{
+	addr->s_addr = htonl(0x7f000001);
+}
+
 bool
 cf_ip_addr_is_loopback(const cf_ip_addr *addr)
 {

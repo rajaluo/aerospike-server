@@ -124,6 +124,8 @@ CF_MUST_CHECK int32_t cf_ip_addr_from_binary(const uint8_t *binary, size_t size,
 CF_MUST_CHECK int32_t cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size);
 CF_MUST_CHECK int32_t cf_ip_addr_compare(const cf_ip_addr *lhs, const cf_ip_addr *rhs);
 void cf_ip_addr_copy(const cf_ip_addr *from, cf_ip_addr *to);
+
+void cf_ip_addr_set_loopback(cf_ip_addr *addr);
 CF_MUST_CHECK bool cf_ip_addr_is_loopback(const cf_ip_addr *addr);
 
 void cf_ip_addr_set_zero(cf_ip_addr *addr);
@@ -210,14 +212,16 @@ static inline void cf_poll_delete_socket(cf_poll poll, cf_socket *sock)
 	CF_IGNORE_ERROR(cf_poll_delete_socket_forgiving(poll, sock, 0, NULL));
 }
 
-CF_MUST_CHECK int32_t cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
-CF_MUST_CHECK int32_t cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size);
-CF_MUST_CHECK int32_t cf_inter_addr_to_index(const cf_ip_addr *addr, char **name);
-CF_MUST_CHECK int32_t cf_inter_mtu(cf_ip_addr *inter_addr);
+CF_MUST_CHECK int32_t cf_inter_get_addr_all(cf_ip_addr *addrs, uint32_t *n_addrs);
+CF_MUST_CHECK int32_t cf_inter_get_addr_def(cf_ip_addr *addrs, uint32_t *n_addrs);
+CF_MUST_CHECK int32_t cf_inter_get_addr_def_legacy(cf_ip_addr *addrs, uint32_t *n_addrs);
+CF_MUST_CHECK int32_t cf_inter_get_addr_name(cf_ip_addr *addrs, uint32_t *n_addrs, const char *if_name);
+bool cf_inter_is_inter_name(const char *if_name);
+CF_MUST_CHECK int32_t cf_inter_addr_to_index_and_name(const cf_ip_addr *addr, int32_t *index, char **name);
+CF_MUST_CHECK int32_t cf_inter_mtu(const cf_ip_addr *inter_addr);
 CF_MUST_CHECK int32_t cf_inter_min_mtu(void);
 
 CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr);
-CF_MUST_CHECK int32_t cf_socket_get_min_mtu(cf_socket sock, const cf_ip_addr* device_ip_addr);
 
 #if defined CF_SOCKET_PRIVATE
 CF_MUST_CHECK size_t cf_socket_addr_len(const struct sockaddr* sa);

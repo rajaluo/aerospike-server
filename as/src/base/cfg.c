@@ -3362,11 +3362,10 @@ as_config_post_process(as_config *c, const char *config_file)
 
 	if (g_config.external_address && ! g_config.is_external_address_virtual) {
 		// Check if external address matches any address in service list.
-		uint8_t buffer[1000];
-		cf_ip_addr *addrs;
-		int32_t n_addrs;
+		cf_ip_addr addrs[100];
+		uint32_t n_addrs = 100;
 
-		if (cf_inter_get_addr_ex(&addrs, &n_addrs, buffer, sizeof(buffer)) < 0) {
+		if (cf_inter_get_addr_all(addrs, &n_addrs) < 0) {
 			cf_crash(AS_CFG, "Error while getting interface addresses");
 		}
 

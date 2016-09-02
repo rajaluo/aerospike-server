@@ -71,6 +71,35 @@ cf_ip_addr_to_string_safe(const cf_ip_addr *addr, char *string, size_t size)
 	}
 }
 
+void
+cf_ip_addr_sort(cf_ip_addr *addrs, uint32_t n_addrs)
+{
+	uint32_t n = n_addrs;
+
+	if (n == 0) {
+		return;
+	}
+
+	bool swapped;
+
+	do {
+		swapped = false;
+
+		for (uint32_t i = 0; i < n - 1; ++i) {
+			if (cf_ip_addr_compare(&addrs[i], &addrs[i + 1]) < 0) {
+				cf_ip_addr tmp;
+				cf_ip_addr_copy(&addrs[i], &tmp);
+				cf_ip_addr_copy(&addrs[i + 1], &addrs[i]);
+				cf_ip_addr_copy(&tmp, &addrs[i + 1]);
+				swapped = true;
+			}
+		}
+
+		--n;
+	}
+	while (swapped);
+}
+
 int32_t
 cf_ip_port_from_string(const char *string, cf_ip_port *port)
 {
@@ -1089,9 +1118,10 @@ cf_poll_destroy(cf_poll poll)
 #define MAX_INTERS 50
 #define MAX_ADDRS 50
 
-typedef struct {
+typedef struct inter_entry_s {
 	uint32_t index;
 	char name[100];
+	bool def_route;
 	uint32_t mtu;
 	uint32_t mac_addr_len;
 	uint8_t mac_addr[100];
@@ -1099,24 +1129,38 @@ typedef struct {
 	cf_ip_addr addrs[MAX_ADDRS];
 } inter_entry;
 
-typedef struct {
+typedef struct inter_info_s {
 	uint32_t n_inters;
 	inter_entry inters[MAX_INTERS];
 } inter_info;
 
-typedef struct {
+typedef struct inter_filter_s {
+	bool allow_v6;
+	bool def_route;
+	const char *if_name;
+} inter_filter;
+
+typedef struct cb_context_s {
+	bool has_label;
 	bool has_address;
 	bool has_local;
+	bool has_index;
+	bool has_priority;
+	char curr_label[100];
+	cf_ip_addr curr_address;
+	uint32_t curr_index;
+	uint32_t curr_priority;
 	bool allow_v6;
 	inter_info *inter;
 } cb_context;
 
 typedef void (*reset_cb)(cb_context *cont);
 typedef void (*data_cb)(cb_context *cont, void *info, int32_t type, void *data, size_t len);
+typedef void (*post_cb)(cb_context *cont);
 
 static int32_t
 netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, int32_t filter2c,
-		size_t size, reset_cb reset_fn, data_cb data_fn, cb_context *cont)
+		size_t size, reset_cb reset_fn, data_cb data_fn, post_cb post_fn, cb_context *cont)
 {
 	int32_t res = -1;
 	int32_t nls = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
@@ -1130,7 +1174,6 @@ netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, 
 	struct sockaddr_nl loc;
 	memset(&loc, 0, sizeof(loc));
 	loc.nl_family = AF_NETLINK;
-	loc.nl_pid = 0;
 
 	if (bind(nls, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
 		cf_warning(CF_SOCKET, "Error while binding netlink socket: %d (%s)",
@@ -1149,7 +1192,6 @@ netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, 
 	req.h.nlmsg_type = type;
 	req.h.nlmsg_flags = NLM_F_REQUEST | NLM_F_ROOT;
 	req.h.nlmsg_seq = cf_atomic32_add(&seq, 1);
-	req.h.nlmsg_pid = 0;
 	req.m.rtgen_family = PF_UNSPEC;
 
 	struct sockaddr_nl rem;
@@ -1249,6 +1291,10 @@ netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, 
 
 					a = RTA_NEXT(a, a_len);
 				}
+
+				if (post_fn != NULL) {
+					post_fn(cont);
+				}
 			}
 
 			if ((h->nlmsg_flags & NLM_F_MULTI) == 0) {
@@ -1275,8 +1321,15 @@ cleanup0:
 static void
 reset_fn(cb_context *cont)
 {
+	cont->has_label = false;
 	cont->has_address = false;
 	cont->has_local = false;
+	cont->has_index = false;
+	cont->has_priority = false;
+	memset(&cont->curr_label, 0, sizeof(cont->curr_label));
+	cf_ip_addr_set_zero(&cont->curr_address);
+	cont->curr_index = 0;
+	cont->curr_priority = 0;
 }
 
 static void
@@ -1337,39 +1390,100 @@ static void
 addr_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
 {
 	struct ifaddrmsg *info = info_;
+
+	if (cont->curr_index == 0) {
+		cont->curr_index = info->ifa_index;
+	}
+
+	if (type == IFA_LABEL) {
+		if (len > sizeof(cont->curr_label)) {
+			cf_crash(CF_SOCKET, "Interface label too long: %s", (char *)data);
+		}
+
+		// Length includes terminating NUL.
+		memcpy(cont->curr_label, data, len);
+		cont->has_label = true;
+		cf_detail(CF_SOCKET, "Collected interface label %s", cont->curr_label);
+	}
+	else if (type == IFA_ADDRESS) {
+		// IFA_LOCAL takes precedence over IFA_ADDRESS.
+		if (cont->has_local) {
+			cf_detail(CF_SOCKET, "Prioritizing local address");
+			return;
+		}
+
+		if (cf_socket_parse_netlink(cont->allow_v6, info->ifa_family, info->ifa_flags,
+				data, len, &cont->curr_address) < 0) {
+			return;
+		}
+
+		cont->has_address = true;
+		cf_detail(CF_SOCKET, "Considering interface address %s",
+				cf_ip_addr_print(&cont->curr_address));
+	}
+	else if (type == IFA_LOCAL) {
+		if (cf_socket_parse_netlink(cont->allow_v6, info->ifa_family, info->ifa_flags,
+				data, len, &cont->curr_address) < 0) {
+			return;
+		}
+
+		cont->has_local = true;
+		cf_detail(CF_SOCKET, "Considering local interface address %s",
+				cf_ip_addr_print(&cont->curr_address));
+	}
+}
+
+static void
+addr_fix_fn(cb_context *cont)
+{
+	if (!cont->has_address && !cont->has_local) {
+		return;
+	}
+
 	inter_info *inter = cont->inter;
-	inter_entry *entry = NULL;
+	inter_entry *by_index = NULL;
+	inter_entry *by_label = NULL;
 
 	for (uint32_t i = 0; i < inter->n_inters; ++i) {
-		if (inter->inters[i].index == info->ifa_index) {
-			entry = &inter->inters[i];
+		if (inter->inters[i].index == cont->curr_index) {
+			by_index = &inter->inters[i];
 			break;
 		}
 	}
 
-	if (entry == NULL) {
-		cf_crash(CF_SOCKET, "Invalid interface index: %u", info->ifa_index);
+	if (by_index == NULL) {
+		cf_crash(CF_SOCKET, "Invalid interface index: %u", cont->curr_index);
 	}
 
-	// IFA_LOCAL takes precedence over IFA_ADDRESS.
-	// Case 1: We're seeing an IFA_ADDRESS after an IFA_LOCAL. Skip it.
-	if (type == IFA_ADDRESS) {
-		cont->has_address = true;
+	if (cont->has_label) {
+		for (uint32_t i = 0; i < inter->n_inters; ++i) {
+			if (strcmp(inter->inters[i].name, cont->curr_label) == 0) {
+				by_label = &inter->inters[i];
+				break;
+			}
+		}
 
-		if (cont->has_local) {
-			return;
+		if (by_label == NULL) {
+			cf_detail(CF_SOCKET, "New interface for label %s", cont->curr_label);
+			uint32_t i = inter->n_inters;
+
+			if (i >= MAX_INTERS) {
+				cf_crash(CF_SOCKET, "Too many interfaces");
+			}
+
+			by_label = &inter->inters[i];
+			++inter->n_inters;
+
+			by_label->index = by_index->index;
+			memcpy(&by_label->mac_addr, &by_index->mac_addr, sizeof(by_label->mac_addr));
+			by_label->mac_addr_len = by_index->mac_addr_len;
+			by_label->mtu = by_index->mtu;
+
+			memcpy(&by_label->name, cont->curr_label, sizeof(by_label->name));
 		}
 	}
 
-	// Case 2: We're seeing an IFA_LOCAL after an IFA_ADDRESS. Overwrite the IFA_ADDRESS.
-	if (type == IFA_LOCAL) {
-		cont->has_local = true;
-
-		if (cont->has_address) {
-			--entry->n_addrs;
-		}
-	}
-
+	inter_entry *entry = by_label != NULL ? by_label : by_index;
 	uint32_t i = entry->n_addrs;
 
 	if (i >= MAX_ADDRS) {
@@ -1377,25 +1491,92 @@ addr_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
 	}
 
 	cf_ip_addr *addr = &entry->addrs[i];
-
-	if (cf_socket_parse_netlink(cont->allow_v6, info->ifa_family, info->ifa_flags,
-			data, len, addr) < 0) {
-		if (type == IFA_ADDRESS) {
-			cont->has_address = false;
-		}
-		else if (type == IFA_LOCAL) {
-			cont->has_local = false;
-		}
-
-		return;
-	}
+	cf_ip_addr_copy(&cont->curr_address, addr);
 
 	++entry->n_addrs;
 	cf_detail(CF_SOCKET, "Collected interface address %s -> %s",
 			entry->name, cf_ip_addr_print(addr));
 }
 
-static int32_t
+static void
+route_fn(cb_context *cont, void *info_, int32_t type, void *data, size_t len)
+{
+	struct rtmsg *info = info_;
+
+	// Ignore entries with RTM_F_CLONED, because they are route cache entries.
+	if ((info->rtm_flags & RTM_F_CLONED) != 0) {
+		return;
+	}
+
+	if (type == RTA_DST) {
+		if (cf_socket_parse_netlink(cont->allow_v6, info->rtm_family, 0,
+				data, len, &cont->curr_address) < 0) {
+			// If the address is not allowed, set to a non-zero address, because
+			// zero means default route.
+			cf_ip_addr_set_loopback(&cont->curr_address);
+		}
+
+		cont->has_address = true;
+	}
+	else if (type == RTA_OIF) {
+		if (len != 4) {
+			cf_detail(CF_SOCKET, "Invalid interface index");
+			return;
+		}
+
+		cont->curr_index = *(uint32_t *)data;
+		cont->has_index = true;
+	}
+	else if (type == RTA_PRIORITY) {
+		if (len != 4) {
+			cf_detail(CF_SOCKET, "Invalid route priority");
+			return;
+		}
+
+		cont->curr_priority = *(uint32_t *)data;
+		cont->has_priority = true;
+	}
+}
+
+static void
+route_fix_fn(cb_context *cont)
+{
+	// It's not a default route, if it has an address and the address isn't zero.
+	if (cont->has_address && !cf_ip_addr_is_zero(&cont->curr_address)) {
+		return;
+	}
+
+	// It's one of the catch-all entries.
+	if (cont->has_priority && cont->curr_priority == UINT32_MAX) {
+		return;
+	}
+
+	// It doesn't have an interface index.
+	if (!cont->has_index) {
+		return;
+	}
+
+	inter_info *inter = cont->inter;
+	bool found = false;
+
+	for (uint32_t i = 0; i < inter->n_inters; ++i) {
+		inter_entry *entry = &inter->inters[i];
+
+		if (inter->inters[i].index == cont->curr_index) {
+			found = true;
+			entry->def_route = true;
+			cf_detail(CF_SOCKET, "Collected default route %s -> %s",
+					entry->name, cf_ip_addr_print(&cont->curr_address));
+			// Don't stop after the first match. Aliases share the same index.
+		}
+	}
+
+	if (!found) {
+		cf_crash(CF_SOCKET, "Invalid interface index: %u", cont->curr_index);
+	}
+}
+
+static void
 enumerate_inter(inter_info *inter, bool allow_v6)
 {
 	cb_context cont;
@@ -1406,19 +1587,27 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 	reset_fn(&cont);
 
 	if (netlink_dump(RTM_GETLINK, RTM_NEWLINK, IFLA_IFNAME, IFLA_ADDRESS, IFLA_MTU,
-			sizeof(struct ifinfomsg), NULL, link_fn, &cont) < 0) {
-		cf_warning(CF_SOCKET, "Error while enumerating network links");
-		return -1;
+			sizeof(struct ifinfomsg), NULL, link_fn, NULL, &cont) < 0) {
+		cf_crash(CF_SOCKET, "Error while enumerating network links");
 	}
 
-	if (netlink_dump(RTM_GETADDR, RTM_NEWADDR, IFA_ADDRESS, IFA_LOCAL, -1,
-			sizeof(struct ifaddrmsg), reset_fn, addr_fn, &cont) < 0) {
-		cf_warning(CF_SOCKET, "Error while enumerating network addresses");
-		return -1;
+	if (netlink_dump(RTM_GETADDR, RTM_NEWADDR, IFA_LABEL, IFA_ADDRESS, IFA_LOCAL,
+			sizeof(struct ifaddrmsg), reset_fn, addr_fn, addr_fix_fn, &cont) < 0) {
+		cf_crash(CF_SOCKET, "Error while enumerating network addresses");
+	}
+
+	if (netlink_dump(RTM_GETROUTE, RTM_NEWROUTE, RTA_DST, RTA_OIF, RTA_PRIORITY,
+			sizeof(struct rtmsg), reset_fn, route_fn, route_fix_fn, &cont) < 0) {
+		cf_crash(CF_SOCKET, "Error while enumerating network routes");
+	}
+
+	for (int32_t i = 0; i < inter->n_inters; ++i) {
+		inter_entry *entry = &inter->inters[i];
+		cf_ip_addr_sort(entry->addrs, entry->n_addrs);
 	}
 
 	if (cf_fault_filter[CF_SOCKET] >= CF_DETAIL) {
-		cf_detail(CF_SOCKET, "%d interface(s)", inter->n_inters);
+		cf_detail(CF_SOCKET, "%u interface(s)", inter->n_inters);
 
 		for (uint32_t i = 0; i < inter->n_inters; ++i) {
 			inter_entry *entry = &inter->inters[i];
@@ -1426,6 +1615,8 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 			cf_detail(CF_SOCKET, "MAC address = %02x:%02x:%02x:%02x:%02x:%02x",
 					entry->mac_addr[0], entry->mac_addr[1], entry->mac_addr[2],
 					entry->mac_addr[3], entry->mac_addr[4], entry->mac_addr[5]);
+			cf_detail(CF_SOCKET, "Default route = %d", (int32_t)entry->def_route);
+			cf_detail(CF_SOCKET, "MTU = %u", entry->mtu);
 
 			for (int32_t k = 0; k < entry->n_addrs; ++k) {
 				cf_ip_addr *addr = &entry->addrs[k];
@@ -1434,66 +1625,162 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 		}
 	}
 
-	return 0;
+	// -------------------- BEGIN PARANOIA --------------------
+
+	// This double-checks that our new method returns interfaces in exactly the
+	// same order as does glibc.
+
+	struct ifaddrs *legacy;
+
+	if (getifaddrs(&legacy) < 0) {
+		cf_crash(CF_SOCKET, "Error while legacy-enumerating interfaces: %d (%s)",
+				errno, cf_strerror(errno));
+	}
+
+	uint32_t n = 0;
+
+	for (struct ifaddrs *it = legacy; it != NULL; it = it->ifa_next) {
+		cf_detail(CF_SOCKET, "Checking legacy-enumerated interface %s", it->ifa_name);
+		bool found = false;
+
+		for (uint32_t i = 0; i < n; ++i) {
+			inter_entry *entry = &inter->inters[i];
+
+			if (strcmp(entry->name, it->ifa_name) == 0) {
+				cf_detail(CF_SOCKET, "Interface name matches a previous name");
+				found = true;
+				break;
+			}
+		}
+
+		if (found) {
+			continue;
+		}
+
+		cf_detail(CF_SOCKET, "Encountered new interface name");
+
+		if (n == inter->n_inters) {
+			cf_crash(CF_SOCKET, "Missed legacy-enumerated interface %s", it->ifa_name);
+		}
+
+		inter_entry *entry = &inter->inters[n];
+		cf_detail(CF_SOCKET, "Expecting interface name %s", entry->name);
+
+		if (strcmp(entry->name, it->ifa_name) != 0) {
+			cf_crash(CF_SOCKET, "Unexpected legacy-enumerated interface %s", it->ifa_name);
+		}
+
+		++n;
+	}
+
+	if (n < inter->n_inters) {
+		inter_entry *entry = &inter->inters[n];
+		cf_crash(CF_SOCKET, "Extraneous interface %s", entry->name);
+	}
+
+	freeifaddrs(legacy);
+
+	// --------------------- END PARANOIA ---------------------
 }
 
 static int32_t
-inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size, bool allow_v6)
+inter_get_addr(cf_ip_addr *addrs, uint32_t *n_addrs, inter_filter *filter)
 {
 	inter_info inter;
 	memset(&inter, 0, sizeof(inter));
+	enumerate_inter(&inter, filter->allow_v6);
 
-	if (enumerate_inter(&inter, allow_v6) < 0) {
-		cf_warning(CF_SOCKET, "Error while enumerating network interfaces");
-		return -1;
-	}
-
-	cf_ip_addr *out = (cf_ip_addr *)buff;
-	int32_t count = 0;
+	uint32_t count = 0;
 
 	for (uint32_t i = 0; i < inter.n_inters; ++i) {
 		inter_entry *entry = &inter.inters[i];
 
+		if (filter->def_route && !entry->def_route) {
+			continue;
+		}
+
+		if (filter->if_name != NULL && strcmp(filter->if_name, entry->name) != 0) {
+			continue;
+		}
+
 		for (uint32_t k = 0; k < entry->n_addrs; ++k) {
 			cf_ip_addr *addr = &entry->addrs[k];
 
-			if ((uint8_t *)&out[count + 1] > buff + size) {
+			if (count >= *n_addrs) {
 				cf_warning(CF_SOCKET, "Buffer overflow while enumerating interface addresses");
 				return -1;
 			}
 
-			out[count] = *addr;
+			cf_ip_addr_copy(addr, &addrs[count]);
 			++count;
 		}
 	}
 
-	*addrs = (cf_ip_addr *)buff;
 	*n_addrs = count;
 	return 0;
 }
 
 int32_t
-cf_inter_get_addr(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
+cf_inter_get_addr_all(cf_ip_addr *addrs, uint32_t *n_addrs)
 {
-	return inter_get_addr(addrs, n_addrs, buff, size, false);
+	static inter_filter filter = {
+		.allow_v6 = true, .def_route = false, .if_name = NULL
+	};
+
+	return inter_get_addr(addrs, n_addrs, &filter);
 }
 
 int32_t
-cf_inter_get_addr_ex(cf_ip_addr **addrs, int32_t *n_addrs, uint8_t *buff, size_t size)
+cf_inter_get_addr_def(cf_ip_addr *addrs, uint32_t *n_addrs)
 {
-	return inter_get_addr(addrs, n_addrs, buff, size, true);
+	static inter_filter filter = {
+		.allow_v6 = true, .def_route = true, .if_name = NULL
+	};
+
+	return inter_get_addr(addrs, n_addrs, &filter);
 }
 
 int32_t
-cf_inter_addr_to_index(const cf_ip_addr *addr, char **name)
+cf_inter_get_addr_def_legacy(cf_ip_addr *addrs, uint32_t *n_addrs)
+{
+	static inter_filter filter = {
+		.allow_v6 = false, .def_route = true, .if_name = NULL
+	};
+
+	return inter_get_addr(addrs, n_addrs, &filter);
+}
+
+int32_t
+cf_inter_get_addr_name(cf_ip_addr *addrs, uint32_t *n_addrs, const char *if_name)
+{
+	inter_filter filter = {
+		.allow_v6 = true, .def_route = false, .if_name = if_name
+	};
+
+	return inter_get_addr(addrs, n_addrs, &filter);
+}
+
+bool cf_inter_is_inter_name(const char *if_name)
 {
 	inter_info inter;
 	memset(&inter, 0, sizeof(inter));
+	enumerate_inter(&inter, true);
 
-	if (enumerate_inter(&inter, true) < 0) {
-		cf_warning(CF_SOCKET, "Error while enumerating network interfaces");
-		return -1;
+	for (uint32_t i = 0; i < inter.n_inters; ++i) {
+		if (strcmp(inter.inters[i].name, if_name) == 0) {
+			return true;
+		}
 	}
+
+	return false;
+}
+
+int32_t
+cf_inter_addr_to_index_and_name(const cf_ip_addr *addr, int32_t *index, char **name)
+{
+	inter_info inter;
+	memset(&inter, 0, sizeof(inter));
+	enumerate_inter(&inter, true);
 
 	for (uint32_t i = 0; i < inter.n_inters; ++i) {
 		inter_entry *entry = &inter.inters[i];
@@ -1504,7 +1791,11 @@ cf_inter_addr_to_index(const cf_ip_addr *addr, char **name)
 					*name = safe_strdup(entry->name);
 				}
 
-				return (int32_t)entry->index;
+				if (index != NULL) {
+					*index = (int32_t)entry->index;
+				}
+
+				return 0;
 			}
 		}
 	}
@@ -1513,22 +1804,17 @@ cf_inter_addr_to_index(const cf_ip_addr *addr, char **name)
 }
 
 int32_t
-cf_inter_mtu(cf_ip_addr* inter_addr)
+cf_inter_mtu(const cf_ip_addr *inter_addr)
 {
 	inter_info inter;
 	memset(&inter, 0, sizeof(inter));
-
-	if (enumerate_inter(&inter, true) < 0) {
-		cf_warning(CF_SOCKET,
-			   "Error while enumerating network interfaces");
-		return -1;
-	}
+	enumerate_inter(&inter, true);
 
 	for (uint32_t i = 0; i < inter.n_inters; ++i) {
-		inter_entry* entry = &inter.inters[i];
+		inter_entry *entry = &inter.inters[i];
 
 		for (uint32_t k = 0; k < entry->n_addrs; ++k) {
-			cf_ip_addr* entry_addr = &entry->addrs[k];
+			cf_ip_addr *entry_addr = &entry->addrs[k];
 
 			if (cf_ip_addr_compare(inter_addr, entry_addr) == 0) {
 				return entry->mtu;
@@ -1545,11 +1831,7 @@ cf_inter_min_mtu(void)
 	uint32_t min = UINT32_MAX;
 	inter_info inter;
 	memset(&inter, 0, sizeof(inter));
-
-	if (enumerate_inter(&inter, true) < 0) {
-		cf_warning(CF_SOCKET, "Error while enumerating network interfaces");
-		return -1;
-	}
+	enumerate_inter(&inter, true);
 
 	for (uint32_t i = 0; i < inter.n_inters; ++i) {
 		inter_entry *entry = &inter.inters[i];
@@ -1570,8 +1852,11 @@ static const char *if_in_order[] = {
 static const char *if_default[] = {
 	"^eth[[:digit:]]+$", "^bond[[:digit:]]+$", "^wlan[[:digit:]]+$",
 	"^em[[:digit:]]+_[[:digit:]]+$", "^p[[:digit:]]+p[[:digit:]]+_[[:digit:]]+$",
-	"^em[[:digit:]]+$", "^p[[:digit:]]+p[[:digit:]]+$",
 	NULL
+};
+
+static const char *if_default2[] = {
+	"^em[[:digit:]]+$", "^p[[:digit:]]+p[[:digit:]]+$", NULL
 };
 
 static const char *if_any[] = {
@@ -1609,7 +1894,7 @@ validate_inter(inter_entry *entry)
 }
 
 static inter_entry *
-find_inter(inter_info *inter, const char *name)
+find_inter(inter_info *inter, const char *name, bool validate)
 {
 	cf_debug(CF_SOCKET, "Looking for %s", name);
 
@@ -1617,7 +1902,7 @@ find_inter(inter_info *inter, const char *name)
 		inter_entry *entry = &inter->inters[i];
 		cf_debug(CF_SOCKET, "Checking %s", entry->name);
 
-		if (strcmp(entry->name, name) == 0 && validate_inter(entry)) {
+		if (strcmp(entry->name, name) == 0 && (!validate || validate_inter(entry))) {
 			return entry;
 		}
 	}
@@ -1628,26 +1913,25 @@ find_inter(inter_info *inter, const char *name)
 static inter_entry *
 match_inter(inter_info *inter, const char **patterns)
 {
-	regex_t rex;
+	for (uint32_t i = 0; i < inter->n_inters; ++i) {
+		inter_entry *entry = &inter->inters[i];
+		cf_debug(CF_SOCKET, "Matching %s", entry->name);
 
-	for (int32_t i = 0; patterns[i] != NULL; ++i) {
-		cf_debug(CF_SOCKET, "Matching with %s", patterns[i]);
+		for (uint32_t k = 0; patterns[k] != NULL; ++k) {
+			cf_debug(CF_SOCKET, "Matching with %s", patterns[k]);
+			regex_t rex;
 
-		if (regcomp(&rex, patterns[i], REG_EXTENDED | REG_NOSUB) != 0) {
-			cf_crash(CF_SOCKET, "Error while compiling regular expression %s", patterns[i]);
-		}
+			if (regcomp(&rex, patterns[k], REG_EXTENDED | REG_NOSUB) != 0) {
+				cf_crash(CF_SOCKET, "Error while compiling regular expression %s", patterns[k]);
+			}
 
-		for (uint32_t k = 0; k < inter->n_inters; ++k) {
-			inter_entry *entry = &inter->inters[k];
-			cf_debug(CF_SOCKET, "Matching %s", entry->name);
+			bool ok = regexec(&rex, entry->name, 0, NULL, 0) == 0 && validate_inter(entry);
+			regfree(&rex);
 
-			if (regexec(&rex, entry->name, 0, NULL, 0) == 0 && validate_inter(entry)) {
-				regfree(&rex);
+			if (ok) {
 				return entry;
 			}
 		}
-
-		regfree(&rex);
 	}
 
 	return NULL;
@@ -1659,17 +1943,13 @@ cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr
 	cf_debug(CF_SOCKET, "Getting node ID");
 	inter_info inter;
 	memset(&inter, 0, sizeof(inter));
-
-	if (enumerate_inter(&inter, true) < 0) {
-		cf_warning(CF_SOCKET, "Error while enumerating network interfaces");
-		return -1;
-	}
+	enumerate_inter(&inter, true);
 
 	inter_entry *entry;
 
 	if (if_hint != NULL) {
 		cf_debug(CF_SOCKET, "Checking user-specified interface %s", if_hint);
-		entry = find_inter(&inter, if_hint);
+		entry = find_inter(&inter, if_hint, false);
 
 		if (entry != NULL) {
 			goto success;
@@ -1686,7 +1966,7 @@ cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr
 		for (int32_t k = 0; k < 11; ++k) {
 			char tmp[100];
 			snprintf(tmp, sizeof(tmp), "%s%d", if_in_order[i], k);
-			entry = find_inter(&inter, tmp);
+			entry = find_inter(&inter, tmp, true);
 
 			if (entry != NULL) {
 				goto success;
@@ -1696,6 +1976,13 @@ cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, char **ip_addr
 
 	cf_debug(CF_SOCKET, "Trying default interfaces");
 	entry = match_inter(&inter, if_default);
+
+	if (entry != NULL) {
+		goto success;
+	}
+
+	cf_debug(CF_SOCKET, "Trying secondary default interfaces");
+	entry = match_inter(&inter, if_default2);
 
 	if (entry != NULL) {
 		goto success;

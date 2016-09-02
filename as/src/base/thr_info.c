@@ -4282,11 +4282,10 @@ info_interfaces_fn(void *unused)
 	int32_t n_known = 0;
 
 	while (true) {
-		uint8_t buffer[1000];
-		cf_ip_addr *curr;
-		int32_t n_curr;
+		cf_ip_addr curr[100];
+		uint32_t n_curr = 100;
 
-		if (cf_inter_get_addr(&curr, &n_curr, buffer, sizeof(buffer)) < 0) {
+		if (cf_inter_get_addr_def_legacy(curr, &n_curr) < 0) {
 			cf_crash(AS_CFG, "Error while getting interface addresses");
 		}
 
