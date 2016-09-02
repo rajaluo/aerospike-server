@@ -2653,7 +2653,11 @@ as_hb_ipaddr_to_ipv4h(const as_hb_ipaddr* v6_addr)
 static uint32_t
 as_cf_ipaddr_to_ipv4h(const cf_ip_addr* ip_addr)
 {
+#if !defined USE_IPV6
 	return ip_addr->s_addr;
+#else
+	return ip_addr->v4.s_addr;
+#endif
 }
 
 /**
