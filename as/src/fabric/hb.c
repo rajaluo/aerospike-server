@@ -2612,7 +2612,16 @@ as_hb_ipaddr_is_specified(const as_hb_ipaddr* addr)
 		    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
 		  },
 	};
-	return as_hb_ipaddr_cmp(&null_addr, addr) != 0;
+
+	static const as_hb_ipaddr v4_to_v6_template = {
+		.addr.word =
+		  {
+		    0x0, 0x0, 0x0, 0x0, 0x0, 0xffff, 0x0, 0x0,
+		  },
+	};
+
+	return as_hb_ipaddr_cmp(&null_addr, addr) != 0 &&
+	       as_hb_ipaddr_cmp(&v4_to_v6_template, addr) != 0;
 }
 
 /**
@@ -3177,9 +3186,22 @@ config_init()
 			  g_config.hb_config.hb_publish_addr_s,
 			  sizeof(g_config.hb_config.hb_publish_addr_s));
 	} else {
-		// Use node ip as the publish ip.
-		strncpy(g_config.hb_config.hb_publish_addr_s, g_config.node_ip,
-			sizeof(g_config.hb_config.hb_publish_addr_s));
+
+		if (IS_MESH() && as_hb_ipaddr_is_specified(
+				   &g_config.hb_config.hb_listen_addr)) {
+			// Publish the listen address if it is specified and an
+			// interface address is not specified.
+			strncpy(g_config.hb_config.hb_publish_addr_s,
+				g_config.hb_config.hb_listen_addr_s,
+				sizeof(g_config.hb_config.hb_publish_addr_s));
+
+		} else {
+			// Use node ip as the publish ip in multicast mode or if
+			// the mesh listen address is not specified.
+			strncpy(g_config.hb_config.hb_publish_addr_s,
+				g_config.node_ip,
+				sizeof(g_config.hb_config.hb_publish_addr_s));
+		}
 	}
 
 	struct in_addr in_addr_to_publish;
