@@ -54,6 +54,7 @@
 #include "fabric/hlc.h"
 #include "fabric/migrate.h"
 #include "fabric/partition.h"
+#include "fabric/partition_balance.h"
 #include "storage/storage.h"
 
 
@@ -151,24 +152,8 @@ as_paxos_set_cluster_key(uint64_t cluster_key)
 	g_cluster_key = cluster_key;
 
 	cf_info(AS_PAXOS, "cluster_key set to 0x%"PRIx64"", g_cluster_key);
-	// Acquire and release each partition lock to ensure threads acquiring
-	// a partition lock after this loop will be forced to check the latest
-	// cluster key.
-	for (int i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
 
-		for (int j = 0; j < AS_PARTITIONS; j++) {
-			as_partition *p = &ns->partitions[j];
-
-			pthread_mutex_lock(&p->lock);
-			pthread_mutex_unlock(&p->lock);
-		}
-	}
-
-	// Prior migrations are unable to decrement migrate_num_incoming due to
-	// cluster_key checking. Additionally migrations originating from a
-	// departed node are unable to decrement this value for obvious reasons.
-	cf_atomic32_set(&g_migrate_num_incoming, 0);
+	as_partition_balance_synchronize_migrations();
 }
 
 // Get the cluster key
@@ -444,7 +429,7 @@ as_paxos_sync_msg_apply(msg *m)
 
 	// Disallow migration requests into this node until we complete partition
 	// rebalancing.
-	as_partition_disallow_migrations();
+	as_partition_balance_disallow_migrations();
 
 	// AER-4645 Important that setting cluster key follows disallow_migrations.
 	as_paxos_set_cluster_key(cluster_key);
@@ -833,7 +818,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 	/*
 	 * Check if the state of this node is correct for applying a partition sync message
 	 */
-	if (as_partition_get_migration_flag() == true) {
+	if (as_partition_balance_are_migrations_allowed() == true) {
 		cf_info(AS_PAXOS, "Node allows migrations. Ignoring duplicate partition sync message.");
 		return(-1);
 	}
@@ -1079,12 +1064,12 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 						   AS_CLUSTER_LEGACY_SZ, g_config.paxos_max_cluster_size);
 				return(-1);
 			}
-			as_partition_allow_migrations();
+			as_partition_balance_allow_migrations();
 			g_config.paxos_protocol = protocol;
 			break;
 		case AS_PAXOS_PROTOCOL_NONE:
 			cf_info(AS_PAXOS, "disabling Paxos messaging");
-			as_partition_disallow_migrations();
+			as_partition_balance_disallow_migrations();
 			g_config.paxos_protocol = protocol;
 			break;
 		default:
@@ -1605,7 +1590,7 @@ void as_paxos_start_second_phase()
 
 	// Disallow migration requests into this node until we complete partition
 	// rebalancing.
-	as_partition_disallow_migrations();
+	as_partition_balance_disallow_migrations();
 
 	// AER-4645 Important that setting cluster key follows disallow_migrations.
 	as_paxos_set_cluster_key(cluster_key);
@@ -2196,7 +2181,7 @@ as_paxos_process_set_succession_list(cf_node *nodes)
 
 	// Halt migrations before forcibly modifying the succession list.
 	// [Note:  This is also done on the principal when the second phase is started below.]
-	as_partition_disallow_migrations();
+	as_partition_balance_disallow_migrations();
 
 	as_paxos *p = g_paxos;
 	bool list_end = false;
@@ -2665,7 +2650,7 @@ as_paxos_process_retransmit_check()
 	// Second phase failed if migrations are disallowed and we have
 	// attempted sync more than the threshold number of times.
 	bool second_phase_failed =
-	  as_partition_get_migration_flag()
+	  as_partition_balance_are_migrations_allowed()
 	    ? false
 	    : (p->num_sync_attempts > AS_PAXOS_SYNC_ATTEMPTS_MAX);
 
@@ -2696,7 +2681,7 @@ as_paxos_process_retransmit_check()
 
 	// Second phase succeeded, we are already in a cluster, hence we are
 	// done or we started a new paxos round and should wait longer.
-	if (as_partition_get_migration_flag() || paxos_sparked) {
+	if (as_partition_balance_are_migrations_allowed() || paxos_sparked) {
 		return;
 	}
 
@@ -3931,7 +3916,7 @@ as_paxos_dump(bool verbose)
 
 	cf_info(AS_PAXOS, "Cluster State: Has Integrity %s", (p->cluster_has_integrity ? "" : "FAULT"));
 
-	cf_info(AS_PAXOS, "Migrations are%s allowed.", (as_partition_get_migration_flag() ? "" : " NOT"));
+	cf_info(AS_PAXOS, "Migrations are%s allowed.", (as_partition_balance_are_migrations_allowed() ? "" : " NOT"));
 
 	// Print the succession list.
 	cf_node principal_node = as_paxos_succession_getprincipal();

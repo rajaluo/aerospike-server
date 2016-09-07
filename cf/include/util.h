@@ -89,7 +89,7 @@ cf_hash_oneatatime(void *buf, size_t bufsz)
 /* cf_contains64
  * See if a vector of uint64s contains an certain value */
 static inline int
-cf_contains64(uint64_t *v, int vsz, uint64_t a)
+cf_contains64(const uint64_t *v, int vsz, uint64_t a)
 {
     for (int i = 0; i < vsz; i++) {
         if (v[i] == a)

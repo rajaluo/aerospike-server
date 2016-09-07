@@ -624,7 +624,7 @@ void
 basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 {
 	basic_scan_job* job = (basic_scan_job*)_job;
-	as_index_tree* tree = rsv->p->vp;
+	as_index_tree* tree = rsv->tree;
 	cf_buf_builder* bb = cf_buf_builder_create_size(INIT_BUF_BUILDER_SIZE);
 
 	if (! bb) {
@@ -655,7 +655,7 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 	cf_buf_builder_free(bb);
 
 	cf_detail(AS_SCAN, "%s:%u basic scan job %lu in thread %lu took %lu ms",
-			rsv->ns->name, rsv->p->partition_id, _job->trid, pthread_self(),
+			rsv->ns->name, rsv->p->id, _job->trid, pthread_self(),
 			cf_getms() - slice_start);
 }
 
@@ -928,7 +928,6 @@ void
 aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 {
 	aggr_scan_job* job = (aggr_scan_job*)_job;
-	as_index_tree* tree = rsv->p->vp;
 	cf_ll ll;
 	cf_buf_builder* bb = cf_buf_builder_create_size(INIT_BUF_BUILDER_SIZE);
 
@@ -942,7 +941,7 @@ aggr_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 
 	aggr_scan_slice slice = { job, &ll, &bb, rsv };
 
-	as_index_reduce_live(tree, aggr_scan_job_reduce_cb, (void*)&slice);
+	as_index_reduce_live(rsv->tree, aggr_scan_job_reduce_cb, (void*)&slice);
 
 	if (cf_ll_size(&ll) != 0) {
 		as_result result;
@@ -1273,7 +1272,7 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 void
 udf_bg_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 {
-	as_index_reduce_live(rsv->p->vp, udf_bg_scan_job_reduce_cb, (void*)_job);
+	as_index_reduce_live(rsv->tree, udf_bg_scan_job_reduce_cb, (void*)_job);
 }
 
 void

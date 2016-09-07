@@ -48,6 +48,7 @@
 #include "base/cfg.h"
 #include "base/stats.h"
 #include "fabric/fabric.h"
+#include "fabric/partition_balance.h"
 
 /*
  * Overview

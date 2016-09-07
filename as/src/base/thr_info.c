@@ -75,6 +75,7 @@
 #include "fabric/hlc.h"
 #include "fabric/migrate.h"
 #include "fabric/partition.h"
+#include "fabric/partition_balance.h"
 #include "fabric/paxos.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -327,8 +328,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
 	info_append_string(db, "paxos_principal", paxos_principal);
 
-	info_append_bool(db, "migrate_allowed", as_partition_get_migration_flag());
-	info_append_uint64(db, "migrate_partitions_remaining", as_partition_remaining_migrations());
+	info_append_bool(db, "migrate_allowed", as_partition_balance_are_migrations_allowed());
+	info_append_uint64(db, "migrate_partitions_remaining", as_partition_balance_remaining_migrations());
 
 	info_append_uint64(db, "fabric_msgs_sent", g_stats.fabric_msgs_sent);
 	info_append_uint64(db, "fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd);
@@ -380,26 +381,11 @@ info_get_partition_info(char *name, cf_dyn_buf *db)
 	return(0);
 }
 
-int
-info_get_replicas_read(char *name, cf_dyn_buf *db)
-{
-	as_partition_getreplica_read_str(db);
-
-	return(0);
-}
-
+// Deprecate in "six months".
 int
 info_get_replicas_prole(char *name, cf_dyn_buf *db)
 {
-	as_partition_getreplica_prole_str(db);
-
-	return(0);
-}
-
-int
-info_get_replicas_write(char *name, cf_dyn_buf *db)
-{
-	as_partition_getreplica_write_str(db);
+	as_partition_get_replicas_prole_str(db);
 
 	return(0);
 }
@@ -407,7 +393,7 @@ info_get_replicas_write(char *name, cf_dyn_buf *db)
 int
 info_get_replicas_master(char *name, cf_dyn_buf *db)
 {
-	as_partition_getreplica_master_str(db);
+	as_partition_get_replicas_master_str(db);
 
 	return(0);
 }
@@ -6007,8 +5993,6 @@ as_info_init()
 	as_info_set_dynamic("replicas-all", info_get_replicas_all, false);                // Base 64 encoded binary representation of partitions this node is replica for.
 	as_info_set_dynamic("replicas-master", info_get_replicas_master, false);          // Base 64 encoded binary representation of partitions this node is master (replica) for.
 	as_info_set_dynamic("replicas-prole", info_get_replicas_prole, false);            // Base 64 encoded binary representation of partitions this node is prole (replica) for.
-	as_info_set_dynamic("replicas-read", info_get_replicas_read, false);              //
-	as_info_set_dynamic("replicas-write", info_get_replicas_write, false);            //
 	as_info_set_dynamic("service", info_get_service, false);                          // IP address and server port for this node, expected to be a single.
 	                                                                                  // address/port per node, may be multiple address if this node is configured.
 	                                                                                  // to listen on multiple interfaces (typically not advised).

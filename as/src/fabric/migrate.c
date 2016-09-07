@@ -59,6 +59,7 @@
 #include "base/rec_props.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
+#include "fabric/partition_balance.h"
 #include "storage/storage.h"
 
 
@@ -558,7 +559,7 @@ run_emigration(void *arg)
 
 		as_migrate_state result = emigrate(emig);
 
-		as_partition_emigrate_done(result, emig->rsv.ns, emig->rsv.pid,
+		as_partition_emigrate_done(result, emig->rsv.ns, emig->rsv.p->id,
 				emig->cluster_key, emig->tx_flags);
 
 		emig->tx_state = AS_PARTITION_MIG_TX_STATE_NONE;
@@ -961,7 +962,7 @@ emigration_send_start(emigration *emig)
 	msg_set_uint64(m, MIG_FIELD_CLUSTER_KEY, emig->cluster_key);
 	msg_set_buf(m, MIG_FIELD_NAMESPACE, (byte *)ns->name,
 			strlen(ns->name), MSG_SET_COPY);
-	msg_set_uint32(m, MIG_FIELD_PARTITION, emig->rsv.pid);
+	msg_set_uint32(m, MIG_FIELD_PARTITION, emig->rsv.p->id);
 	msg_set_uint32(m, MIG_FIELD_TYPE, emig->tx_flags == TX_FLAGS_REQUEST ?
 			MIG_TYPE_START_IS_REQUEST : MIG_TYPE_START_IS_NORMAL);
 	msg_set_uint64(m, MIG_FIELD_LDT_VERSION,
@@ -1531,8 +1532,8 @@ immigration_handle_done_request(cf_node src, msg *m) {
 				cf_atomic_int_incr(&ns->migrate_rx_partitions_active);
 			}
 
-			as_partition_immigrate_done(ns, immig->rsv.pid, immig->cluster_key,
-					immig->src);
+			as_partition_immigrate_done(ns, immig->rsv.p->id,
+					immig->cluster_key, immig->src);
 
 			if (g_config.migrate_rx_lifetime_ms <= 0) {
 				rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
@@ -1764,7 +1765,7 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 		cf_assert((emig->tx_state == AS_PARTITION_MIG_TX_STATE_RECORD),
 				AS_PARTITION, CF_CRITICAL,
 				"unexpected partition migration state at source %d:%d",
-				emig->tx_state, emig->rsv.p->partition_id);
+				emig->tx_state, emig->rsv.p->id);
 	}
 
 	msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
@@ -1843,7 +1844,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 		cf_assert((emig->tx_state == AS_PARTITION_MIG_TX_STATE_RECORD),
 				AS_PARTITION, CF_CRITICAL,
 				"unexpected partition migration state at source %d:%d",
-				emig->tx_state, emig->rsv.p->partition_id);
+				emig->tx_state, emig->rsv.p->id);
 
 		if (as_ldt_precord_is_parent(pr)) {
 			is_parent = true;
@@ -1864,7 +1865,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 		cf_assert((emig->tx_state == AS_PARTITION_MIG_TX_STATE_SUBRECORD),
 				AS_PARTITION, CF_CRITICAL,
 				"unexpected partition migration state at source %d:%d",
-				emig->tx_state, emig->rsv.p->partition_id);
+				emig->tx_state, emig->rsv.p->id);
 
 		uint64_t old_version = as_ldt_subdigest_getversion(&pr->keyd);
 

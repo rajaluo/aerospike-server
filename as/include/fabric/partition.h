@@ -68,10 +68,12 @@ typedef struct as_partition_vinfo_s {
 	uint8_t vtp[AS_PARTITION_MAX_VERSION];
 } as_partition_vinfo;
 
+extern const as_partition_vinfo NULL_VINFO;
+
 typedef struct as_partition_s {
 	pthread_mutex_t lock;
 
-	uint32_t partition_id;
+	uint32_t id;
 
 	struct as_index_tree_s* vp;
 	struct as_index_tree_s* sub_vp;
@@ -81,7 +83,7 @@ typedef struct as_partition_s {
 
 	// Replica information.
 	uint32_t p_repl_factor;
-	cf_node replica[AS_CLUSTER_SZ];
+	cf_node replicas[AS_CLUSTER_SZ];
 
 	// Rebalance & migration related:
 
@@ -91,15 +93,14 @@ typedef struct as_partition_s {
 	as_partition_state state;
 
 	bool has_master_wait; // TODO - deprecate in "six months"
-	bool has_migrate_tx_later;
-	int pending_migrate_tx;
-	int pending_migrate_rx;
-	bool replica_tx_onsync[AS_CLUSTER_SZ];
+	int pending_emigrations;
+	int pending_immigrations;
+	bool replicas_delayed_emigrate[AS_CLUSTER_SZ];
 
 	cf_node origin;
 	cf_node target;
 
-	size_t n_dupl;
+	uint32_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
 
 	cf_node old_sl[AS_CLUSTER_SZ];
@@ -111,19 +112,13 @@ typedef struct as_partition_s {
 
 typedef struct as_partition_reservation_s {
 	struct as_namespace_s* ns;
-	bool is_write;
-	uint8_t unused;
-	as_partition_state state;
-	uint8_t n_dupl;
-	uint16_t pid;
-	uint8_t spare[2];
-	//---------------------------------- 16 bytes
 	as_partition* p;
 	struct as_index_tree_s* tree;
-	uint64_t cluster_key;
-	as_partition_vinfo vinfo;
-	//---------------------------------- 64 bytes (important!)
 	struct as_index_tree_s* sub_tree;
+	uint64_t cluster_key;
+	as_partition_state state;
+	// 3 unused bytes
+	uint32_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
 } as_partition_reservation;
 
@@ -169,56 +164,50 @@ typedef enum {
 
 #define AS_PARTITION_RESERVATION_INIT(__rsv) \
 	__rsv.ns = NULL; \
-	__rsv.is_write = false; \
-	__rsv.pid = AS_PARTITION_ID_UNDEF; \
 	__rsv.p = NULL; \
-	__rsv.state = AS_PARTITION_STATE_UNDEF; \
 	__rsv.tree = NULL; \
-	__rsv.n_dupl = 0; \
-	__rsv.cluster_key = 0;
+	__rsv.sub_tree = NULL; \
+	__rsv.cluster_key = 0; \
+	__rsv.state = AS_PARTITION_STATE_UNDEF; \
+	__rsv.n_dupl = 0;
 
 #define AS_PARTITION_RESERVATION_INITP(__rsv) \
 	__rsv->ns = NULL; \
-	__rsv->is_write = false; \
-	__rsv->pid = AS_PARTITION_ID_UNDEF; \
 	__rsv->p = NULL; \
-	__rsv->state = AS_PARTITION_STATE_UNDEF; \
 	__rsv->tree = NULL; \
-	__rsv->n_dupl = 0; \
-	__rsv->cluster_key = 0;
+	__rsv->sub_tree = NULL; \
+	__rsv->cluster_key = 0; \
+	__rsv->state = AS_PARTITION_STATE_UNDEF; \
+	__rsv->n_dupl = 0;
 
 
 //==========================================================
 // Public API.
 //
 
-void as_partition_init(as_partition* p, struct as_namespace_s* ns, uint32_t pid);
-void as_partition_reinit(as_partition* p, struct as_namespace_s* ns, uint32_t pid);
+void as_partition_init(struct as_namespace_s* ns, uint32_t pid);
+void as_partition_reinit(as_partition* p, struct as_namespace_s* ns);
 
 int as_partition_get_state_from_storage(struct as_namespace_s* ns, bool* partition_states);
 
-bool as_partition_is_null(as_partition_vinfo* vinfo);
-cf_node as_partition_getreplica_read(struct as_namespace_s* ns, uint32_t pid);
-int as_partition_getreplica_readall(struct as_namespace_s* ns, uint32_t pid, cf_node* nv);
-cf_node as_partition_getreplica_write(struct as_namespace_s* ns, uint32_t pid);
+uint32_t as_partition_get_other_replicas(as_partition* p, cf_node* nv);
 
-void as_partition_getreplica_read_str(cf_dyn_buf* db);
-void as_partition_getreplica_prole_str(cf_dyn_buf* db);
-void as_partition_getreplica_write_str(cf_dyn_buf* db);
-void as_partition_getreplica_master_str(cf_dyn_buf* db);
+cf_node as_partition_writable_node(struct as_namespace_s* ns, uint32_t pid);
+cf_node as_partition_proxyee_redirect(struct as_namespace_s* ns, uint32_t pid);
+
+void as_partition_get_replicas_prole_str(cf_dyn_buf* db); // deprecate in "six months"
+void as_partition_get_replicas_master_str(cf_dyn_buf* db);
 void as_partition_get_replicas_all_str(cf_dyn_buf* db);
 
 void as_partition_get_master_prole_stats(struct as_namespace_s* ns, repl_stats* p_stats);
 
-cf_node as_partition_proxyee_redirect(struct as_namespace_s* ns, uint32_t pid);
-
-int as_partition_prereserve_query(struct as_namespace_s* ns, bool can_partition_query[], as_partition_reservation rsv[]);
-int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, uint64_t* cluster_key);
+int as_partition_reserve_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, uint64_t* cluster_key);
 void as_partition_reserve_migrate(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node);
 int as_partition_reserve_migrate_timeout(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, int timeout_ms );
+int as_partition_prereserve_query(struct as_namespace_s* ns, bool can_partition_query[], as_partition_reservation rsv[]);
+int as_partition_reserve_query(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
 int as_partition_reserve_xdr_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv);
-int as_partition_reserve_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, uint64_t* cluster_key);
 void as_partition_reservation_copy(as_partition_reservation* dst, as_partition_reservation* src);
 
 void as_partition_release(as_partition_reservation* rsv);
@@ -226,7 +215,13 @@ void as_partition_release(as_partition_reservation* rsv);
 void as_partition_getinfo_str(cf_dyn_buf* db);
 
 static inline bool
-as_partition_vinfo_same(as_partition_vinfo* v1, as_partition_vinfo* v2)
+as_partition_is_null(const as_partition_vinfo* vinfo)
+{
+	return vinfo->iid == 0;
+}
+
+static inline bool
+as_partition_vinfo_same(const as_partition_vinfo* v1, const as_partition_vinfo* v2)
 {
 	if (v1->iid != v2->iid) {
 		return false;
@@ -236,7 +231,7 @@ as_partition_vinfo_same(as_partition_vinfo* v1, as_partition_vinfo* v2)
 }
 
 static inline uint32_t
-as_partition_getid(cf_digest d)
+as_partition_getid(const cf_digest d)
 {
 	return cf_digest_gethash(&d, AS_PARTITION_MASK);
 }
@@ -248,38 +243,4 @@ as_partition_getid(cf_digest d)
 
 void client_replica_maps_create(struct as_namespace_s* ns);
 bool client_replica_maps_update(struct as_namespace_s* ns, uint32_t pid);
-bool client_replica_maps_is_partition_queryable(struct as_namespace_s* ns, uint32_t pid);
-
-
-//==========================================================
-// Public API - partition balance.
-//
-
-void as_partition_balance_init();
-void as_partition_balance_init_single_node_cluster();
-void as_partition_balance_init_multi_node_cluster();
-bool as_partition_balance_is_init_resolved();
-bool as_partition_balance_is_multi_node_cluster();
-void as_partition_balance();
-
-
-//==========================================================
-// Public API - migration.
-//
-
-int as_partition_remaining_immigrations(as_partition* p);
-uint64_t as_partition_remaining_migrations();
-
-void as_partition_allow_migrations();
-void as_partition_disallow_migrations();
-bool as_partition_get_migration_flag();
-
-void as_partition_emigrate_done(as_migrate_state s, struct as_namespace_s *ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t tx_flags);
-as_migrate_result as_partition_immigrate_start(struct as_namespace_s *ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t start_type, cf_node source_node);
-as_migrate_result as_partition_immigrate_done(struct as_namespace_s *ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
-
-// Counter that tells clients partition ownership has changed.
-extern cf_atomic32 g_partition_generation;
-
-// Counter for receiver-side migration flow control.
-extern cf_atomic32 g_migrate_num_incoming;
+bool client_replica_maps_is_partition_queryable(const struct as_namespace_s* ns, uint32_t pid);

@@ -1262,7 +1262,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	// If there is incoming migration and subrecord is of incoming migration, then
 	// skip it. The parent may not have made it yet so garbage collecting this would
 	// be problem.
-	if (true == as_migrate_is_incoming(&subrec_digest, subrec_version, p->partition_id, 0)) {
+	if (true == as_migrate_is_incoming(&subrec_digest, subrec_version, p->id, 0)) {
 		cf_detail(AS_LDT, " LDT_SUB_GC Skipping Defrag for version %ld ", subrec_version);
 		as_record_done(r_ref, ns);
 		return;
@@ -1329,7 +1329,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 
 	if (delete) {
 		cf_detail_digest(AS_LDT, &subrec_digest, "LDT_SUB_GC Expiry of the SubRecord type=%d version=%ld for partition %d rv=%d",
-				type, subrec_version, p->partition_id, rv);
+				type, subrec_version, p->id, rv);
 		cf_detail_digest(AS_LDT, &subrec_digest, "Sub-Rec Digest: ");
 		cf_detail_digest(AS_LDT, &esr_digest, "ESR Digest: ");
 		cf_detail_digest(AS_LDT, &parent_digest, "Parent Digest: ");
@@ -1452,7 +1452,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 	// single-replica or single-node we don't need to do any replication.
 	cf_node dest_nodes_tmp[AS_CLUSTER_SZ];
 	memset(dest_nodes_tmp, 0, sizeof(dest_nodes_tmp));
-	int listsz = as_partition_getreplica_readall(h_tr->rsv.ns, h_tr->rsv.pid, dest_nodes_tmp);
+	int listsz = as_partition_get_other_replicas(h_tr->rsv.p, dest_nodes_tmp);
 	if (listsz == 0) {
 		return 0;
 	}

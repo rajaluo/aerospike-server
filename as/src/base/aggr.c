@@ -129,7 +129,6 @@ aopen(aggr_state *astate, cf_digest digest)
 	// TODO: Make such initialization Commodity
 	tr->rsv.ns          = astate->rsv->ns;
 	tr->rsv.state       = astate->rsv->state;
-	tr->rsv.pid         = astate->rsv->pid;
 	tr->rsv.p           = astate->rsv->p;
 	tr->rsv.tree        = astate->rsv->tree;
 	tr->rsv.cluster_key = astate->rsv->cluster_key;

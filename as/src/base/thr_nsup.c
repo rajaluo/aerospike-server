@@ -470,12 +470,12 @@ garbage_collect_next_prole_partition(as_namespace* ns, int pid)
 			garbage_collect_info cb_info;
 
 			cb_info.ns = ns;
-			cb_info.p_tree = rsv.p->vp;
+			cb_info.p_tree = rsv.tree;
 			cb_info.now = as_record_void_time_get();
 			cb_info.num_deleted = 0;
 
 			// Reduce the partition, deleting long-expired records.
-			as_index_reduce_live(rsv.p->vp, garbage_collect_reduce_cb, &cb_info);
+			as_index_reduce_live(rsv.tree, garbage_collect_reduce_cb, &cb_info);
 
 			if (cb_info.num_deleted != 0) {
 				cf_info(AS_NSUP, "namespace %s pid %d: %u expired proles",
@@ -543,11 +543,11 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 
 			cb_info.ns = ns;
 			cb_info.sets_deleting = sets_deleting;
-			cb_info.p_tree = rsv.p->vp;
+			cb_info.p_tree = rsv.tree;
 			cb_info.num_deleted = 0;
 
 			// Reduce the partition, checking and deleting records.
-			as_index_reduce_live(rsv.p->vp, non_master_sets_delete_reduce_cb, &cb_info);
+			as_index_reduce_live(rsv.tree, non_master_sets_delete_reduce_cb, &cb_info);
 
 			if (cb_info.num_deleted != 0) {
 				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted proles",
@@ -564,15 +564,15 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 
 			cb_info.ns = ns;
 			cb_info.sets_deleting = sets_deleting;
-			cb_info.p_tree = rsv.p->vp;
+			cb_info.p_tree = rsv.tree;
 			cb_info.num_deleted = 0;
 
 			// Reduce the partition, checking and deleting records.
-			as_index_reduce_live(rsv.p->vp, non_master_sets_delete_reduce_cb, &cb_info);
+			as_index_reduce_live(rsv.tree, non_master_sets_delete_reduce_cb, &cb_info);
 
 			if (cb_info.num_deleted != 0) {
 				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, state %d, %u records remaining",
-						ns->name, n, cb_info.num_deleted, rsv.state, rsv.p->vp->elements);
+						ns->name, n, cb_info.num_deleted, rsv.state, rsv.tree->elements);
 			}
 
 			as_partition_release(&rsv);
@@ -916,7 +916,7 @@ reduce_master_partitions(as_namespace* ns, as_index_reduce_fn cb, void* udata, u
 			continue;
 		}
 
-		as_index_reduce_live(rsv.p->vp, cb, udata);
+		as_index_reduce_live(rsv.tree, cb, udata);
 
 		as_partition_release(&rsv);
 
@@ -941,7 +941,7 @@ sub_reduce_partitions(as_namespace* ns, as_index_reduce_fn cb, void* udata, uint
 	for (int n = 0; n < AS_PARTITIONS; n++) {
 		as_partition_reserve_migrate(ns, n, &rsv, 0);
 
-		as_index_reduce(rsv.p->sub_vp, cb, udata);
+		as_index_reduce(rsv.sub_tree, cb, udata);
 
 		as_partition_release(&rsv);
 
