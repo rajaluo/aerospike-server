@@ -148,8 +148,8 @@ as_partition_balance_synchronize_migrations()
 {
 	// Acquire and release each partition lock to ensure threads acquiring a
 	// partition lock after this will be forced to check the latest cluster key.
-	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		as_namespace* ns = g_config.namespaces[ns_ix];
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace* ns = g_config.namespaces[i];
 
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
@@ -175,7 +175,7 @@ void
 as_partition_balance_init()
 {
 	// Cache hashed pids for all future rebalances.
-	for (int pid = 0; pid < AS_PARTITIONS; pid++) {
+	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		g_hashed_pids[pid] = cf_hash_fnv(&pid, sizeof(int));
 	}
 
@@ -189,19 +189,19 @@ as_partition_balance_init()
 
 		uint32_t n_stored = 0;
 
-		for (uint32_t j = 0; j < AS_PARTITIONS; j++) {
-			as_partition* p = &ns->partitions[j];
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition* p = &ns->partitions[pid];
 
 			p->p_repl_factor = 1;
 
 			if (! as_partition_is_null(&p->version_info)) {
-				memcpy(p->replicas, &g_config.self_node, sizeof(cf_node));
+				p->replicas[0] = g_config.self_node;
 				p->primary_version_info = p->version_info;
 				n_stored++;
 			}
 			else {
 				// Stores the vinfo length, even when the vinfo is zeroed.
-				set_partition_version_in_storage(ns, j, &NULL_VINFO, false);
+				set_partition_version_in_storage(ns, pid, &NULL_VINFO, false);
 			}
 
 			p->old_sl[0] = g_config.self_node;
@@ -225,7 +225,6 @@ as_partition_balance_init_single_node_cluster()
 {
 	as_partition_vinfo new_vinfo;
 
-	memset(&new_vinfo, 0, sizeof(new_vinfo));
 	generate_new_partition_version(&new_vinfo);
 
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
@@ -233,22 +232,22 @@ as_partition_balance_init_single_node_cluster()
 
 		uint32_t n_promoted = 0;
 
-		for (uint32_t j = 0; j < AS_PARTITIONS; j++) {
-			as_partition* p = &ns->partitions[j];
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition* p = &ns->partitions[pid];
 
 			if (as_partition_is_null(&p->version_info)) {
 				// For nsup, which is allowed to operate while we're doing this.
 				pthread_mutex_lock(&p->lock);
 
 				p->state = AS_PARTITION_STATE_SYNC;
-				memcpy(p->replicas, &g_config.self_node, sizeof(cf_node));
+				p->replicas[0] = g_config.self_node;
 
 				p->version_info = new_vinfo;
 				p->primary_version_info = new_vinfo;
-				g_paxos->c_partition_vinfo[i][0][j] = new_vinfo;
-				set_partition_version_in_storage(ns, j, &new_vinfo, false);
+				g_paxos->c_partition_vinfo[i][0][pid] = new_vinfo;
+				set_partition_version_in_storage(ns, pid, &new_vinfo, false);
 
-				client_replica_maps_update(ns, j);
+				client_replica_maps_update(ns, pid);
 
 				n_promoted++;
 
@@ -360,7 +359,7 @@ as_partition_balance()
 	cf_queue_init(&mq, sizeof(partition_migrate_record),
 			g_config.n_namespaces * AS_PARTITIONS, false);
 
-	for (int ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		// TODO - this is currently broken if namespaces have different
@@ -477,7 +476,7 @@ as_partition_balance()
 	// counter, we could get rid of g_balance_init and just use this instead.
 	cf_atomic32_incr(&g_partition_generation);
 
-	for (int i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_storage_info_flush(g_config.namespaces[i]);
 	}
 
@@ -841,7 +840,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 		set_partition_sync_lockfree(p, ns, true);
 
-		// If this is not the eventual master, we are done.
+		// If this is not the final master, we are done.
 		if (g_config.self_node != p->replicas[0]) {
 			if (p->pending_immigrations != 0) {
 				cf_warning(AS_PARTITION, "{%s:%d} immigrate_done aborted - rx %d is non zero",
@@ -1324,17 +1323,13 @@ void
 handle_lost_partition(as_partition* p, const cf_node* node_seq_table,
 		as_namespace* ns, uint32_t ns_ix, bool has_version[])
 {
-	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
 	uint32_t pid = p->id;
 
-	int loop_end = cluster_size < p->p_repl_factor ?
-			cluster_size : p->p_repl_factor;
-
-	for (int n = 0; n < loop_end; n++) {
+	for (uint32_t n = 0; n < p->p_repl_factor; n++) {
 		// Each replica initializes its partition version to the same new value.
 		if (NODE_SEQ(pid, n) == g_config.self_node) {
 			drop_trees(p, ns);
-			memcpy(p->replicas, &node_seq_table[pid * cluster_size],
+			memcpy(p->replicas, &NODE_SEQ(pid, 0),
 					p->p_repl_factor * sizeof(cf_node));
 			set_partition_sync_lockfree(p, ns, false);
 		}
@@ -1507,13 +1502,10 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 			p->pending_immigrations += n_dupl;
 		}
 
-		uint32_t n_replicas = cluster_size < p->p_repl_factor ?
-				cluster_size : p->p_repl_factor;
-
 		// If no expected immigrations, schedule emigrations to versionless
 		// replicas right away.
 		if (p->pending_immigrations == 0) {
-			for (int n = 1; n < n_replicas; n++) {
+			for (int n = 1; n < p->p_repl_factor; n++) {
 				if (! has_version[n]) {
 					partition_migrate_record_fill(&pmr, NODE_SEQ(pid, n), ns,
 							pid, cluster_key, TX_FLAGS_NONE);
@@ -1528,7 +1520,7 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 		// Expecting immigrations - schedule delayed emigrations of merged
 		// partition to all replicas (if there are duplicates) or versionless
 		// replicas (if there are no duplicates).
-		for (int n = 1; n < n_replicas; n++) {
+		for (int n = 1; n < p->p_repl_factor; n++) {
 			if (p->n_dupl != 0 || ! has_version[n]) {
 				p->replicas_delayed_emigrate[n] = true;
 				(*ns_delayed_emigrations)++;
