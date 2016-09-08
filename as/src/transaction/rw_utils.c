@@ -260,7 +260,6 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 		rw->pickled_rec_props.p_data = cf_malloc(rd->rec_props.size);
 
 		if (! rw->pickled_rec_props.p_data) {
-			cf_free(rw->pickled_buf);
 			return false;
 		}
 
