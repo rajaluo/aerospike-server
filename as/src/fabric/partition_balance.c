@@ -192,7 +192,7 @@ as_partition_balance_init()
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
 
-			p->p_repl_factor = 1;
+			p->n_replicas = 1;
 
 			if (! as_partition_is_null(&p->version_info)) {
 				p->replicas[0] = g_config.self_node;
@@ -376,12 +376,12 @@ as_partition_balance()
 
 			pthread_mutex_lock(&p->lock);
 
-			uint32_t old_repl_factor = p->p_repl_factor;
+			uint32_t old_repl_factor = p->n_replicas;
 
-			p->p_repl_factor = ns->replication_factor;
+			p->n_replicas = ns->replication_factor;
 			memset(p->replicas, 0, sizeof(p->replicas));
 			memcpy(p->replicas, &NODE_SEQ(pid, 0),
-					p->p_repl_factor * sizeof(cf_node));
+					p->n_replicas * sizeof(cf_node));
 
 			p->cluster_key = as_paxos_get_cluster_key();
 
@@ -691,8 +691,8 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		if (g_config.self_node != p->replicas[0]) {
 			bool is_replica = false;
 
-			for (int i = 1; i < p->p_repl_factor; i++) {
-				if (g_config.self_node == p->replicas[i]) {
+			for (uint32_t n = 1; n < p->n_replicas; n++) {
+				if (g_config.self_node == p->replicas[n]) {
 					is_replica = true;
 					break; // out of for loop
 				}
@@ -1325,12 +1325,12 @@ handle_lost_partition(as_partition* p, const cf_node* node_seq_table,
 {
 	uint32_t pid = p->id;
 
-	for (uint32_t n = 0; n < p->p_repl_factor; n++) {
+	for (uint32_t n = 0; n < p->n_replicas; n++) {
 		// Each replica initializes its partition version to the same new value.
 		if (NODE_SEQ(pid, n) == g_config.self_node) {
 			drop_trees(p, ns);
 			memcpy(p->replicas, &NODE_SEQ(pid, 0),
-					p->p_repl_factor * sizeof(cf_node));
+					p->n_replicas * sizeof(cf_node));
 			set_partition_sync_lockfree(p, ns, false);
 		}
 
@@ -1476,7 +1476,6 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 		cf_queue* mq, int* ns_delayed_emigrations)
 {
 	uint32_t pid = p->id;
-	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
 	uint64_t cluster_key = p->cluster_key;
 	partition_migrate_record pmr;
 
@@ -1505,7 +1504,7 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 		// If no expected immigrations, schedule emigrations to versionless
 		// replicas right away.
 		if (p->pending_immigrations == 0) {
-			for (int n = 1; n < p->p_repl_factor; n++) {
+			for (uint32_t n = 1; n < p->n_replicas; n++) {
 				if (! has_version[n]) {
 					partition_migrate_record_fill(&pmr, NODE_SEQ(pid, n), ns,
 							pid, cluster_key, TX_FLAGS_NONE);
@@ -1520,7 +1519,7 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 		// Expecting immigrations - schedule delayed emigrations of merged
 		// partition to all replicas (if there are duplicates) or versionless
 		// replicas (if there are no duplicates).
-		for (int n = 1; n < p->p_repl_factor; n++) {
+		for (uint32_t n = 1; n < p->n_replicas; n++) {
 			if (p->n_dupl != 0 || ! has_version[n]) {
 				p->replicas_delayed_emigrate[n] = true;
 				(*ns_delayed_emigrations)++;
@@ -1533,7 +1532,7 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 
 	// If this node has no version, nothing to emigrate.
 	if (! has_version[self_n]) {
-		if (self_n < p->p_repl_factor) {
+		if (self_n < p->n_replicas) {
 			// This node is a replica - expect immigration from final master.
 			p->origin = NODE_SEQ(pid, 0);
 			set_partition_desync_lockfree(p, ns, false);
@@ -1584,7 +1583,7 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 
 	// If this node is a replica and there are duplicates, expect immigration
 	// from final master.
-	if (self_n < p->p_repl_factor) {
+	if (self_n < p->n_replicas) {
 		if (n_dupl != 0) {
 			p->origin = NODE_SEQ(pid, 0);
 			p->pending_immigrations++;

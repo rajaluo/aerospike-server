@@ -105,7 +105,7 @@ as_partition_reinit(as_partition* p, as_namespace* ns)
 	// TODO - roll into as_partition_init()? (used in enterprise...)
 	// TODO - n_tombstones & max_void_time?
 
-	p->p_repl_factor = ns->replication_factor; // TODO - better to be 0?
+	p->n_replicas = ns->replication_factor; // TODO - better to be 0?
 	memset(p->replicas, 0, sizeof(p->replicas));
 
 	p->cluster_key = 0;
@@ -752,7 +752,7 @@ find_best_node(const as_partition* p, const as_namespace* ns, bool is_read)
 	bool is_sync = p->state == AS_PARTITION_STATE_SYNC;
 	bool is_desync = p->state == AS_PARTITION_STATE_DESYNC;
 	bool is_final_master = self_n == 0;
-	bool is_prole = self_n > 0 && self_n < p->p_repl_factor;
+	bool is_prole = self_n > 0 && self_n < p->n_replicas;
 	bool acting_master = p->target != 0;
 
 	if ((is_final_master && is_sync) || acting_master) {
@@ -806,7 +806,7 @@ partition_health_check(const as_partition* p, const as_namespace* ns,
 	bool is_desync = p->state == AS_PARTITION_STATE_DESYNC;
 	bool is_zombie = p->state == AS_PARTITION_STATE_ZOMBIE;
 	bool is_master = self_n == 0;
-	bool is_replica = self_n > 0 && self_n < p->p_repl_factor;
+	bool is_replica = self_n > 0 && self_n < p->n_replicas;
 	bool is_primary = as_partition_vinfo_same(pvinfo, &p->primary_version_info);
 	bool migrating_to_master = p->target != (cf_node)0;
 
@@ -839,7 +839,7 @@ partition_health_check(const as_partition* p, const as_namespace* ns,
 				ns->name, pid);
 	}
 
-	for (uint32_t n = 0; n < p->p_repl_factor; n++) {
+	for (uint32_t n = 0; n < p->n_replicas; n++) {
 		if (p->replicas[n] == (cf_node)0
 				&& as_partition_balance_is_init_resolved()) {
 			cf_warning(AS_PARTITION, "{%s:%u} detected state error - replica list contains null node at position %u",
@@ -847,7 +847,7 @@ partition_health_check(const as_partition* p, const as_namespace* ns,
 		}
 	}
 
-	for (uint32_t n = p->p_repl_factor; n < AS_CLUSTER_SZ; n++) {
+	for (uint32_t n = p->n_replicas; n < AS_CLUSTER_SZ; n++) {
 		if (p->replicas[n] != (cf_node)0) {
 			cf_warning(AS_PARTITION, "{%s:%u} detected state error - replica list contains non null node %lu at position %u",
 					ns->name, pid, p->replicas[n], n);

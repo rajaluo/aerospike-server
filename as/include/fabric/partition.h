@@ -82,7 +82,7 @@ typedef struct as_partition_s {
 	cf_atomic64 max_void_time; // TODO - convert to 32-bit ...
 
 	// Replica information.
-	uint32_t p_repl_factor;
+	uint32_t n_replicas;
 	cf_node replicas[AS_CLUSTER_SZ];
 
 	// Rebalance & migration related:
