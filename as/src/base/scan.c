@@ -36,6 +36,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "aerospike/as_list.h"
 #include "aerospike/as_module.h"
 #include "aerospike/as_string.h"
 #include "aerospike/as_val.h"
@@ -160,7 +161,7 @@ as_scan(as_transaction *tr, as_namespace *ns)
 	int result;
 	uint16_t set_id = INVALID_SET_ID;
 
-	if ((result = get_scan_set_id(tr, ns, &set_id)) != 0) {
+	if ((result = get_scan_set_id(tr, ns, &set_id)) != AS_PROTO_RESULT_OK) {
 		return result;
 	}
 
@@ -339,8 +340,8 @@ send_blocking_response_chunk(cf_socket *sock, uint8_t* buf, size_t size)
 		return 0;
 	}
 
-	if (cf_socket_send_all(sock, buf, size,
-			MSG_NOSIGNAL, CF_SOCKET_TIMEOUT) < 0) {
+	if (cf_socket_send_all(sock, buf, size, MSG_NOSIGNAL,
+			CF_SOCKET_TIMEOUT) < 0) {
 		cf_warning(AS_SCAN, "send error - fd %d sz %lu %s", CSFD(sock),
 				size, cf_strerror(errno));
 		return 0;
@@ -610,9 +611,6 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		return result;
 	}
 
-	// Normal scans don't need anything in the message beyond here.
-	cf_free(tr->msgp);
-
 	return AS_PROTO_RESULT_OK;
 }
 
@@ -824,7 +822,6 @@ typedef struct aggr_scan_job_s {
 	conn_scan_job	_base;
 
 	// Derived class data:
-	cl_msg*			msgp;
 	as_aggr_call	aggr_call;
 } aggr_scan_job;
 
@@ -890,11 +887,8 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	as_job_init(_job, &aggr_scan_job_vtable, &g_scan_manager, RSV_WRITE,
 			as_transaction_trid(tr), ns, set_id, options.priority);
 
-	job->msgp = tr->msgp;
-
 	if (! aggr_scan_init(&job->aggr_call, tr)) {
 		cf_warning(AS_SCAN, "aggregation scan job failed call init");
-		job->msgp = NULL;
 		as_job_destroy(_job);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -912,7 +906,6 @@ aggr_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 		cf_warning(AS_SCAN, "aggregation scan job %lu failed to start (%d)",
 				_job->trid, result);
 		conn_scan_job_disown_fd((conn_scan_job*)job);
-		job->msgp = NULL;
 		as_job_destroy(_job);
 		return result;
 	}
@@ -994,8 +987,10 @@ aggr_scan_job_finish(as_job* _job)
 
 	conn_scan_job_finish((conn_scan_job*)job);
 
-	cf_free(job->msgp);
-	job->msgp = NULL;
+	if (job->aggr_call.def.arglist) {
+		as_list_destroy(job->aggr_call.def.arglist);
+		job->aggr_call.def.arglist = NULL;
+	}
 
 	switch (_job->abandoned) {
 	case 0:
@@ -1020,8 +1015,8 @@ aggr_scan_job_destroy(as_job* _job)
 {
 	aggr_scan_job* job = (aggr_scan_job*)_job;
 
-	if (job->msgp) {
-		cf_free(job->msgp);
+	if (job->aggr_call.def.arglist) {
+		as_list_destroy(job->aggr_call.def.arglist);
 	}
 }
 
@@ -1171,7 +1166,6 @@ typedef struct udf_bg_scan_job_s {
 	as_job			_base;
 
 	// Derived class data:
-	cl_msg*			msgp;
 	iudf_origin		origin;
 	bool			is_durable_delete; // enterprise only
 	cf_atomic32		n_active_tr;
@@ -1220,7 +1214,6 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	as_job_init(_job, &udf_bg_scan_job_vtable, &g_scan_manager, RSV_WRITE,
 			as_transaction_trid(tr), ns, set_id, options.priority);
 
-	job->msgp = tr->msgp;
 	job->is_durable_delete = as_transaction_is_durable_delete(tr);
 	job->n_active_tr = 0;
 	job->n_successful_tr = 0;
@@ -1228,7 +1221,6 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 
 	if (! udf_def_init_from_msg(&job->origin.def, tr)) {
 		cf_warning(AS_SCAN, "udf-bg scan job failed def init");
-		job->msgp = NULL;
 		as_job_destroy(_job);
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
@@ -1245,7 +1237,6 @@ udf_bg_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	if (result != 0) {
 		cf_warning(AS_SCAN, "udf-bg scan job %lu failed to start (%d)",
 				_job->trid, result);
-		job->msgp = NULL;
 		as_job_destroy(_job);
 		return result;
 	}
@@ -1284,8 +1275,10 @@ udf_bg_scan_job_finish(as_job* _job)
 		usleep(100);
 	}
 
-	cf_free(job->msgp);
-	job->msgp = NULL;
+	if (job->origin.def.arglist) {
+		as_list_destroy(job->origin.def.arglist);
+		job->origin.def.arglist = NULL;
+	}
 
 	switch (_job->abandoned) {
 	case 0:
@@ -1310,8 +1303,8 @@ udf_bg_scan_job_destroy(as_job* _job)
 {
 	udf_bg_scan_job* job = (udf_bg_scan_job*)_job;
 
-	if (job->msgp) {
-		cf_free(job->msgp);
+	if (job->origin.def.arglist) {
+		as_list_destroy(job->origin.def.arglist);
 	}
 }
 

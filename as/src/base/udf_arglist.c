@@ -60,57 +60,22 @@ const as_list_hooks udf_arglist_hooks = {
  ******************************************************************************/
 
 static bool udf_arglist_foreach(const as_list * l, as_list_foreach_callback callback, void * context) {
-	as_msg_field * field = (as_msg_field *) l->data;
+	if (l) {
+		as_list_iterator list_iter;
+		as_iterator* iter = (as_iterator*) &list_iter;
+		as_list_iterator_init(&list_iter, l);
 
-	if ( field != NULL ) {
-		as_unpacker unpacker;
-		unpacker.buffer = (const unsigned char*)field->data;
-		unpacker.length = as_msg_field_get_value_sz(field);
-		unpacker.offset = 0;
-		if ( unpacker.length == 0 )
-			return true;
-
-		as_val* val = 0;
-		int ret = as_unpack_val(&unpacker, &val);
-
-		if (ret == 0 && as_val_type(val) == AS_LIST) {
-			as_list_iterator list_iter;
-			as_iterator* iter = (as_iterator*) &list_iter;
-			as_list_iterator_init(&list_iter, (as_list*)val);
-
-			while (as_iterator_has_next(iter)) {
-				const as_val* v = as_iterator_next(iter);
-				callback((as_val *) v, context);
-			}
-			as_iterator_destroy(iter);
+		while (as_iterator_has_next(iter)) {
+			const as_val* v = as_iterator_next(iter);
+			callback((as_val *) v, context);
 		}
-		as_val_destroy(val);
-		return ret == 0;
+		as_iterator_destroy(iter);
 	}
+
 	return true;
 }
 
 static as_val *udf_arglist_get(const as_list * l, const uint32_t idx) {
-	as_msg_field * field = (as_msg_field *) l->data;
-
-	if ( field != NULL ) {
-		as_unpacker unpacker;
-		unpacker.buffer = (const unsigned char*)field->data;
-		unpacker.length = as_msg_field_get_value_sz(field);
-		unpacker.offset = 0;
-		if ( unpacker.length == 0 )
-			return NULL;
-
-		as_val* item = 0;
-		as_val* val = 0;
-		int ret = as_unpack_val(&unpacker, &val);
-
-		if (ret == 0 && as_val_type(val) == AS_LIST) {
-			item = as_list_get((as_list*)val, idx);
-		}
-		as_val_destroy(val);
-		return item;
-	}
-	return NULL;
+	return as_list_get(l, idx);
 }
 
