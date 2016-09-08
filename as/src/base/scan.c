@@ -448,6 +448,7 @@ conn_scan_job_finish(conn_scan_job* job)
 	as_job* _job = (as_job*)job;
 
 	if (job->fd_h) {
+		// TODO - perhaps reflect in monitor if send fails?
 		size_t size_sent = send_blocking_response_fin(&job->fd_h->sock,
 				_job->abandoned);
 
@@ -471,13 +472,16 @@ conn_scan_job_send_response(conn_scan_job* job, uint8_t* buf, size_t size)
 		return false;
 	}
 
-	size_t size_sent = send_blocking_response_chunk(&job->fd_h->sock, buf, size);
+	size_t size_sent = send_blocking_response_chunk(&job->fd_h->sock, buf,
+			size);
 
 	if (size_sent == 0) {
+		int reason = errno == ETIMEDOUT ?
+				AS_JOB_FAIL_RESPONSE_TIMEOUT : AS_JOB_FAIL_RESPONSE_ERROR;
+
 		conn_scan_job_release_fd(job, true);
 		pthread_mutex_unlock(&job->fd_lock);
-		as_job_manager_abandon_job(_job->mgr, _job,
-				AS_PROTO_RESULT_FAIL_UNKNOWN);
+		as_job_manager_abandon_job(_job->mgr, _job, reason);
 		return false;
 	}
 
@@ -671,6 +675,8 @@ basic_scan_job_finish(as_job* _job)
 		break;
 	case AS_JOB_FAIL_UNKNOWN:
 	case AS_JOB_FAIL_CLUSTER_KEY:
+	case AS_JOB_FAIL_RESPONSE_ERROR:
+	case AS_JOB_FAIL_RESPONSE_TIMEOUT:
 	default:
 		cf_atomic_int_incr(&_job->ns->n_scan_basic_error);
 		break;
@@ -1001,6 +1007,8 @@ aggr_scan_job_finish(as_job* _job)
 		break;
 	case AS_JOB_FAIL_UNKNOWN:
 	case AS_JOB_FAIL_CLUSTER_KEY:
+	case AS_JOB_FAIL_RESPONSE_ERROR:
+	case AS_JOB_FAIL_RESPONSE_TIMEOUT:
 	default:
 		cf_atomic_int_incr(&_job->ns->n_scan_aggr_error);
 		break;

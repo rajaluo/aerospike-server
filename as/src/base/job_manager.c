@@ -78,6 +78,10 @@ job_result_str(int result_code)
 		return "abandoned-cluster-key";
 	case AS_JOB_FAIL_USER_ABORT:
 		return "user-aborted";
+	case AS_JOB_FAIL_RESPONSE_ERROR:
+		return "abandoned-response-error";
+	case AS_JOB_FAIL_RESPONSE_TIMEOUT:
+		return "abandoned-response-timeout";
 	default:
 		return "abandoned-?";
 	}
