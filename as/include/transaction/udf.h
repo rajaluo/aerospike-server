@@ -67,7 +67,7 @@ typedef enum {
 typedef struct udf_def_s {
 	char			filename[UDF_MAX_STRING_SZ];
 	char			function[UDF_MAX_STRING_SZ];
-	as_msg_field*	arglist;
+	as_list*		arglist;
 	uint8_t			type;
 } udf_def;
 

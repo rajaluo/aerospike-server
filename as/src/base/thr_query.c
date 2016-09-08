@@ -175,7 +175,6 @@ typedef struct as_query_transaction_s {
 	cf_vector              * binlist;
 	as_file_handle         * fd_h;      // ref counted nonetheless
 	/************************** Run Time Data *********************************/
-	cl_msg                 * msgp;
 	bool                     blocking;
 	uint32_t                 priority;
 	uint64_t                 start_time;               // Start time
@@ -802,7 +801,12 @@ query_teardown(as_query_transaction *qtr)
 	if (qtr->si)          AS_SINDEX_RELEASE(qtr->si);
 	if (qtr->binlist)     cf_vector_destroy(qtr->binlist);
 	if (qtr->setname)     cf_free(qtr->setname);
-	if (qtr->msgp)        cf_free(qtr->msgp);
+	if (qtr->job_type == QUERY_TYPE_AGGR && qtr->agg_call.def.arglist) {
+		as_list_destroy(qtr->agg_call.def.arglist);
+	}
+	else if (qtr->job_type == QUERY_TYPE_UDF_BG && qtr->origin.def.arglist) {
+		as_list_destroy(qtr->origin.def.arglist);
+	}
 	pthread_mutex_destroy(&qtr->slock);
 }
 
@@ -2813,7 +2817,6 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	qtr->binlist             = binlist;
 	qtr->start_time          = start_time;
 	qtr->end_time            = tr->end_time;
-	qtr->msgp                = tr->msgp;
 	qtr->rsv                 = NULL;
 
 	rv = AS_QUERY_OK;
@@ -2865,10 +2868,6 @@ as_query(as_transaction *tr, as_namespace *ns)
 		bool force_close = as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) != 0;
 		as_end_of_transaction(tr->from.proto_fd_h, force_close);
 		tr->from.proto_fd_h = NULL; // Paranoid
-		if (tr->msgp) {
-			cf_free(tr->msgp);
-			tr->msgp = NULL;
-		}
 		return AS_QUERY_OK;
 	} else if (rv == AS_QUERY_ERR) {
 		return AS_QUERY_ERR;
@@ -2882,9 +2881,8 @@ as_query(as_transaction *tr, as_namespace *ns)
 	} else {
 		if (query_qtr_enqueue(qtr, false)) {
 			// This error will be accounted by thr_tsvc layer. Thus
-			// reset fd_h and msgp before calling qtr release, let
-			// transaction deal with failure
-			qtr->msgp           = NULL;
+			// reset fd_h before calling qtr release, and let the
+			// transaction handler deal with the failure.
 			qtr->fd_h           = NULL;
 			qtr_release(qtr, __FILE__, __LINE__);
 			tr->result_code     = AS_PROTO_RESULT_FAIL_QUERY_QUEUEFULL;
@@ -2895,9 +2893,8 @@ as_query(as_transaction *tr, as_namespace *ns)
 			query_send_bg_udf_response(tr);
 		}
 	}
-	// Reset msgp to NULL in tr to avoid double free. And it is successful queuing
-	// of query to the query engine. It will reply as needed. Reset proto_fd_h.
-	tr->msgp       = NULL;
+
+	// Query engine will reply to queued query as needed.
 	tr->from.proto_fd_h = NULL;
 	return AS_QUERY_OK;
 }
