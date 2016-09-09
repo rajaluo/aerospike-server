@@ -90,6 +90,7 @@ static cf_queue g_gc_queue;
 //
 
 void *run_index_tree_gc(void *unused);
+void as_index_tree_destroy(as_index_tree *tree);
 bool as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref);
 void as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);
 void as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h, cf_arenax_handle sentinel_h, as_index_ph_array *v_a);
@@ -190,7 +191,7 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 // Destroy a red-black tree; return 0 if the tree was destroyed or 1 otherwise.
 // TODO - nobody cares about the return value, make it void?
 int
-as_index_tree_release(as_index_tree *tree, void *destructor_udata)
+as_index_tree_release(as_index_tree *tree)
 {
 	if (0 != cf_rc_release(tree)) {
 		return 1;
@@ -199,6 +200,20 @@ as_index_tree_release(as_index_tree *tree, void *destructor_udata)
 	if (cf_queue_push(&g_gc_queue, &tree) != CF_QUEUE_OK) {
 		cf_crash(AS_INDEX, "failed push to garbage collection queue");
 	}
+
+	return 0;
+}
+
+
+// Some (enterprise) callers require the tree purge to be synchronous.
+int
+as_index_tree_release_now(as_index_tree *tree)
+{
+	if (0 != cf_rc_release(tree)) {
+		return 1;
+	}
+
+	as_index_tree_destroy(tree);
 
 	return 0;
 }
@@ -689,20 +704,27 @@ run_index_tree_gc(void *unused)
 	as_index_tree *tree;
 
 	while (cf_queue_pop(&g_gc_queue, &tree, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
-		as_index_tree_purge(tree, RESOLVE_H(tree->root->left_h),
-				tree->root->left_h);
-
-		cf_arenax_free(tree->arena, tree->root_h);
-		cf_arenax_free(tree->arena, tree->sentinel_h);
-
-		pthread_mutex_destroy(&tree->lock);
-		pthread_mutex_destroy(&tree->reduce_lock);
-
-		memset(tree, 0, sizeof(as_index_tree)); // paranoia - for debugging only
-		cf_rc_free(tree);
+		as_index_tree_destroy(tree);
 	}
 
 	return NULL;
+}
+
+
+void
+as_index_tree_destroy(as_index_tree *tree)
+{
+	as_index_tree_purge(tree, RESOLVE_H(tree->root->left_h),
+			tree->root->left_h);
+
+	cf_arenax_free(tree->arena, tree->root_h);
+	cf_arenax_free(tree->arena, tree->sentinel_h);
+
+	pthread_mutex_destroy(&tree->lock);
+	pthread_mutex_destroy(&tree->reduce_lock);
+
+	memset(tree, 0, sizeof(as_index_tree)); // paranoia - for debugging only
+	cf_rc_free(tree);
 }
 
 

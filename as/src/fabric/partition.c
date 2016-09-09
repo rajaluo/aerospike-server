@@ -81,112 +81,33 @@ int partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid);
 void
 as_partition_init(as_namespace* ns, uint32_t pid)
 {
-	cf_assert(pid < AS_PARTITIONS, AS_PARTITION, CF_CRITICAL, "invalid pid");
-
 	as_partition* p = &ns->partitions[pid];
 
-	pthread_mutex_init(&p->lock, 0);
+	// Note - as_partition has been zeroed since it's a member of as_namespace.
+	// Set non-zero members.
+
+	pthread_mutex_init(&p->lock, NULL);
 
 	p->id = pid;
-	p->vp = NULL;
-	p->sub_vp = NULL;
-
-	as_partition_reinit(p, ns);
-}
-
-
-// Reinitialize an as_partition.
-// Should always be called while holding the partition lock.
-void
-as_partition_reinit(as_partition* p, as_namespace* ns)
-{
-	cf_assert(p, AS_PARTITION, CF_CRITICAL, "invalid partition");
-
-	// TODO - roll into as_partition_init()? (used in enterprise...)
-	// TODO - n_tombstones & max_void_time?
-
-	p->n_replicas = ns->replication_factor; // TODO - better to be 0?
-	memset(p->replicas, 0, sizeof(p->replicas));
-
-	p->cluster_key = 0;
-	p->primary_version_info = NULL_VINFO;
-	p->version_info = NULL_VINFO;
 	p->state = AS_PARTITION_STATE_ABSENT;
 
-	p->has_master_wait = false;
-	p->pending_emigrations = 0;
-	p->pending_immigrations = 0;
-	memset(p->replicas_delayed_emigrate, 0,
-			sizeof(p->replicas_delayed_emigrate));
-
-	p->origin = 0;
-	p->target = 0;
-
-	p->n_dupl = 0;
-	memset(p->dupl_nodes, 0, sizeof(p->dupl_nodes));
-
-	memset(p->old_sl, 0, sizeof(p->old_sl));
-
-	p->current_outgoing_ldt_version = 0;
-	// TODO - incoming_ldt_version?
-
-	as_index_tree* t = p->vp;
-	uint32_t pid = p->id;
-
-	// First initialization is the only time there's a null tree pointer.
-	if (! p->vp && ! ns->cold_start) {
-		if (! ns->tree_roots) {
-			cf_crash(AS_PARTITION, "ns %s pid %d has null tree roots", ns->name,
-					pid);
-		}
-
-		p->vp = as_index_tree_resume(ns->arena,
-				(as_index_value_destructor)&as_record_destroy, ns,
-				&ns->tree_roots[pid]);
-
-		// There's no going back to cold start now - do so the harsh way.
-		if (! p->vp) {
-			cf_crash(AS_PARTITION, "ns %s pid %d fail tree resume", ns->name,
-					pid);
-		}
-	}
-	else {
+	if (ns->cold_start) {
 		p->vp = as_index_tree_create(ns->arena,
 				(as_index_value_destructor)&as_record_destroy, ns,
 				ns->tree_roots ? &ns->tree_roots[pid] : NULL);
-	}
 
-	if (t) {
-		as_index_tree_release(t, ns);
-	}
-
-	as_index_tree* sub_t = p->sub_vp;
-
-	// First initialization is the only time there's a null tree pointer.
-	if (! p->sub_vp && ! ns->cold_start) {
-		if (! ns->sub_tree_roots) {
-			cf_crash(AS_PARTITION, "ns %s pid %d has null sub-tree roots",
-					ns->name, pid);
-		}
-
-		p->sub_vp = as_index_tree_resume(ns->arena,
-				(as_index_value_destructor)&as_record_destroy, ns,
-				&ns->sub_tree_roots[pid]);
-
-		// There's no going back to cold start now - do so the harsh way.
-		if (! p->sub_vp) {
-			cf_crash(AS_PARTITION, "ns %s pid %d fail tree resume", ns->name,
-					pid);
-		}
-	}
-	else {
 		p->sub_vp = as_index_tree_create(ns->arena,
 				(as_index_value_destructor)&as_record_destroy, ns,
 				ns->sub_tree_roots ? &ns->sub_tree_roots[pid] : NULL);
 	}
+	else {
+		p->vp = as_index_tree_resume(ns->arena,
+				(as_index_value_destructor)&as_record_destroy, ns,
+				&ns->tree_roots[pid]);
 
-	if (sub_t) {
-		as_index_tree_release(sub_t, ns);
+		p->sub_vp = as_index_tree_resume(ns->arena,
+				(as_index_value_destructor)&as_record_destroy, ns,
+				&ns->sub_tree_roots[pid]);
 	}
 }
 
@@ -511,9 +432,7 @@ as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 {
 	as_partition* p = &ns->partitions[pid];
 
-	if (pthread_mutex_lock(&p->lock) != 0) {
-		cf_crash(AS_PARTITION, "pthread_mutex_lock() failed");
-	}
+	pthread_mutex_lock(&p->lock);
 
 	int res;
 
@@ -526,9 +445,7 @@ as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 		res = -1;
 	}
 
-	if (pthread_mutex_unlock(&p->lock) != 0) {
-		cf_crash(AS_PARTITION, "pthread_mutex_unlock() failed");
-	}
+	pthread_mutex_unlock(&p->lock);
 
 	return res;
 }
@@ -552,15 +469,8 @@ as_partition_reservation_copy(as_partition_reservation* dst,
 void
 as_partition_release(as_partition_reservation* rsv)
 {
-	pthread_mutex_lock(&rsv->p->lock);
-
-	as_index_tree_release(rsv->tree, rsv->ns);
-	as_index_tree_release(rsv->sub_tree, rsv->ns);
-
-	pthread_mutex_unlock(&rsv->p->lock);
-
-	// Paranoia:
-	memset(rsv, 0, sizeof(*rsv));
+	as_index_tree_release(rsv->tree);
+	as_index_tree_release(rsv->sub_tree);
 }
 
 

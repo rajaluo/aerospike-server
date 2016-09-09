@@ -186,7 +186,6 @@ typedef enum {
 //
 
 void as_partition_init(struct as_namespace_s* ns, uint32_t pid);
-void as_partition_reinit(as_partition* p, struct as_namespace_s* ns);
 
 int as_partition_get_state_from_storage(struct as_namespace_s* ns, bool* partition_states);
 

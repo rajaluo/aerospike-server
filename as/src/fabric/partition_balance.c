@@ -1323,14 +1323,10 @@ void
 handle_lost_partition(as_partition* p, const cf_node* node_seq_table,
 		as_namespace* ns, uint32_t ns_ix, bool has_version[])
 {
-	uint32_t pid = p->id;
-
 	for (uint32_t n = 0; n < p->n_replicas; n++) {
 		// Each replica initializes its partition version to the same new value.
-		if (NODE_SEQ(pid, n) == g_config.self_node) {
+		if (NODE_SEQ(p->id, n) == g_config.self_node) {
 			drop_trees(p, ns);
-			memcpy(p->replicas, &NODE_SEQ(pid, 0),
-					p->n_replicas * sizeof(cf_node));
 			set_partition_sync_lockfree(p, ns, false);
 		}
 
@@ -1660,16 +1656,16 @@ drop_trees(as_partition* p, as_namespace* ns)
 	p->vp = as_index_tree_create(ns->arena,
 			(as_index_value_destructor)&as_record_destroy, ns,
 			ns->tree_roots ? &ns->tree_roots[pid] : NULL);
-	as_index_tree_release(temp, ns);
+	as_index_tree_release(temp);
 
 	as_index_tree* sub_temp = p->sub_vp;
 
 	p->sub_vp = as_index_tree_create(ns->arena,
 			(as_index_value_destructor)&as_record_destroy, ns,
 			ns->sub_tree_roots ? &ns->sub_tree_roots[pid] : NULL);
-	as_index_tree_release(sub_temp, ns);
+	as_index_tree_release(sub_temp);
 
-	// TOOD - consider p->n_tombstones?
+	// TODO - consider p->n_tombstones?
 	cf_atomic64_set(&p->max_void_time, 0);
 }
 
