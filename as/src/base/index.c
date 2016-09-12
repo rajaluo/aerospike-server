@@ -110,7 +110,7 @@ void as_index_rotate_right(as_index_tree *tree, as_index_ele *a, as_index_ele *b
 void
 as_index_tree_gc_init()
 {
-	cf_queue_init(&g_gc_queue, sizeof(as_index_tree*), 64, true);
+	cf_queue_init(&g_gc_queue, sizeof(as_index_tree*), 4096, true);
 
 	pthread_t thread;
 	pthread_attr_t attrs;
@@ -197,23 +197,11 @@ as_index_tree_release(as_index_tree *tree)
 		return 1;
 	}
 
+	// TODO - call as_index_tree_destroy() directly if tree is empty?
+
 	if (cf_queue_push(&g_gc_queue, &tree) != CF_QUEUE_OK) {
 		cf_crash(AS_INDEX, "failed push to garbage collection queue");
 	}
-
-	return 0;
-}
-
-
-// Some (enterprise) callers require the tree purge to be synchronous.
-int
-as_index_tree_release_now(as_index_tree *tree)
-{
-	if (0 != cf_rc_release(tree)) {
-		return 1;
-	}
-
-	as_index_tree_destroy(tree);
 
 	return 0;
 }

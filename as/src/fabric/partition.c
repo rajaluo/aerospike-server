@@ -462,7 +462,10 @@ as_partition_reservation_copy(as_partition_reservation* dst,
 	dst->cluster_key = src->cluster_key;
 	dst->state = src->state;
 	dst->n_dupl = src->n_dupl;
-	memcpy(dst->dupl_nodes, src->dupl_nodes, sizeof(cf_node) * dst->n_dupl);
+
+	if (dst->n_dupl != 0) {
+		memcpy(dst->dupl_nodes, src->dupl_nodes, sizeof(cf_node) * dst->n_dupl);
+	}
 }
 
 
@@ -812,7 +815,10 @@ partition_reserve_read_write(as_namespace* ns, uint32_t pid,
 	rsv->state = p->state;
 
 	rsv->n_dupl = p->n_dupl;
-	memcpy(rsv->dupl_nodes, p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
+
+	if (rsv->n_dupl != 0) {
+		memcpy(rsv->dupl_nodes, p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
+	}
 
 	pthread_mutex_unlock(&p->lock);
 
@@ -837,8 +843,10 @@ partition_reserve_lockfree(as_namespace* ns, uint32_t pid,
 	rsv->state = p->state;
 
 	rsv->n_dupl = p->n_dupl;
-	memcpy(rsv->dupl_nodes, p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
 
+	if (rsv->n_dupl != 0) {
+		memcpy(rsv->dupl_nodes, p->dupl_nodes, sizeof(cf_node) * rsv->n_dupl);
+	}
 }
 
 
