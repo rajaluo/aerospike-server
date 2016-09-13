@@ -57,6 +57,7 @@
 #include "base/asm.h"
 #include "base/batch.h"
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "base/ldt.h"
 #include "base/monitor.h"
 #include "base/scan.h"
@@ -267,7 +268,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_int(db, "delete_queue", as_nsup_queue_get_size());
 	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
 	info_append_uint32(db, "proxy_in_progress", as_proxy_hash_count());
-	info_append_uint64(db, "record_refs", g_stats.global_record_ref_count);
+	info_append_int(db, "tree_gc_queue", as_index_tree_gc_queue_size());
 
 	info_append_uint64(db, "client_connections", g_stats.proto_connections_opened - g_stats.proto_connections_closed);
 	info_append_uint64(db, "heartbeat_connections", g_stats.heartbeat_connections_opened - g_stats.heartbeat_connections_closed);

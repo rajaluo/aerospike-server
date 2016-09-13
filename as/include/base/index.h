@@ -320,6 +320,7 @@ typedef struct as_index_tree_s {
 //
 
 void as_index_tree_gc_init();
+int as_index_tree_gc_queue_size();
 
 as_index_tree *as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
 as_index_tree *as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);

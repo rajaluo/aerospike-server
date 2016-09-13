@@ -124,6 +124,13 @@ as_index_tree_gc_init()
 }
 
 
+int
+as_index_tree_gc_queue_size()
+{
+	return cf_queue_sz(&g_gc_queue);
+}
+
+
 
 //==========================================================
 // Public API - create/resume/destroy/size a tree.
@@ -137,7 +144,7 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 	as_index_tree *tree = cf_rc_alloc(sizeof(as_index_tree));
 
 	if (! tree) {
-		return NULL;
+		cf_crash(AS_INDEX, "failed to allocate tree");
 	}
 
 	pthread_mutex_init(&tree->lock, NULL);
@@ -149,8 +156,7 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 	tree->sentinel_h = cf_arenax_alloc(arena);
 
 	if (tree->sentinel_h == 0) {
-		cf_rc_free(tree);
-		return NULL;
+		cf_crash(AS_INDEX, "failed to allocate sentinel");
 	}
 
 	as_index *sentinel = RESOLVE_H(tree->sentinel_h);
@@ -163,9 +169,7 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 	tree->root_h = cf_arenax_alloc(arena);
 
 	if (tree->root_h == 0) {
-		cf_arenax_free(arena, tree->sentinel_h);
-		cf_rc_free(tree);
-		return NULL;
+		cf_crash(AS_INDEX, "failed to allocate root");
 	}
 
 	tree->root = RESOLVE_H(tree->root_h);
@@ -193,9 +197,13 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 int
 as_index_tree_release(as_index_tree *tree)
 {
-	if (0 != cf_rc_release(tree)) {
+	int rc = cf_rc_release(tree);
+
+	if (rc > 0) {
 		return 1;
 	}
+
+	cf_assert(rc == 0, AS_INDEX, CF_CRITICAL, "tree ref-count %d", rc);
 
 	// TODO - call as_index_tree_destroy() directly if tree is empty?
 
@@ -370,7 +378,6 @@ as_index_get_vlock(as_index_tree *tree, cf_digest *keyd,
 	}
 
 	as_index_reserve(index_ref->r);
-	cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 	pthread_mutex_unlock(&tree->lock);
 
@@ -431,7 +438,6 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 				// The element already exists, simply return it.
 
 				as_index_reserve(t);
-				cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 				pthread_mutex_unlock(&tree->lock);
 
@@ -487,7 +493,6 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 	as_index *n = RESOLVE_H(n_h);
 
 	n->rc = 2; // one for create (eventually balanced by delete), one for caller
-	cf_atomic64_add(&g_stats.global_record_ref_count, 2);
 
 	n->key = *keyd;
 
@@ -719,15 +724,19 @@ as_index_tree_destroy(as_index_tree *tree)
 void
 as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
 {
-	if (0 == as_index_release(r)) {
-		if (tree->destructor) {
-			tree->destructor(r, tree->destructor_udata);
-		}
+	int rc = as_index_release(r);
 
-		cf_arenax_free(tree->arena, r_h);
+	if (rc > 0) {
+		return;
 	}
 
-	cf_atomic64_decr(&g_stats.global_record_ref_count);
+	cf_assert(rc == 0, AS_INDEX, CF_CRITICAL, "index ref-count %d", rc);
+
+	if (tree->destructor) {
+		tree->destructor(r, tree->destructor_udata);
+	}
+
+	cf_arenax_free(tree->arena, r_h);
 }
 
 
@@ -778,7 +787,6 @@ as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h,
 	}
 
 	as_index_reserve(r);
-	cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 	v_a->indexes[v_a->pos].r = r;
 	v_a->indexes[v_a->pos].r_h = r_h;

@@ -229,25 +229,20 @@ as_record_exists(as_index_tree *tree, cf_digest *keyd, as_namespace *ns)
 void
 as_record_done(as_index_ref *r_ref, as_namespace *ns)
 {
-	if ((!r_ref->skip_lock)
-			&& (r_ref->olock == 0)) {
-		cf_crash(AS_RECORD, "calling done with null lock, illegal");
+	if (! r_ref->skip_lock) {
+		pthread_mutex_unlock(r_ref->olock);
 	}
 
-	int rv = 0;
-	if (!r_ref->skip_lock) {
-		rv = pthread_mutex_unlock(r_ref->olock);
-	}
-	if (0 != rv)
-		cf_crash(AS_RECORD, "couldn't release lock: %s", cf_strerror(rv));
+	int rc = as_index_release(r_ref->r);
 
-	if (0 == as_index_release(r_ref->r)) {
-		// cf_info(AS_RECORD, "index destroy 4 %p %x",r_ref->r,r_ref->r_h);
-		as_record_destroy(r_ref->r, ns);
-		cf_arenax_free(ns->arena, r_ref->r_h);
+	if (rc > 0) {
+		return;
 	}
 
-	cf_atomic64_decr(&g_stats.global_record_ref_count);
+	cf_assert(rc == 0, AS_RECORD, CF_CRITICAL, "index ref-count %d", rc);
+
+	as_record_destroy(r_ref->r, ns);
+	cf_arenax_free(ns->arena, r_ref->r_h);
 }
 
 // Called only for data-in-memory multi-bin, with no key currently stored.

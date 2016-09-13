@@ -39,8 +39,6 @@
 
 typedef struct as_stats_s {
 
-	cf_atomic64		global_record_ref_count; // TODO - can't we get rid of this?
-
 	// Connection stats.
 	cf_atomic64		proto_connections_opened; // not just a statistic
 	cf_atomic64		proto_connections_closed; // not just a statistic
