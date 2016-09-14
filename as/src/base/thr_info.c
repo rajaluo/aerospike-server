@@ -1484,6 +1484,82 @@ info_command_smd_cmd(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
+/*
+ *  Print out Secondary Index info.
+ */
+int
+info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
+{
+	cf_debug(AS_INFO, "dump-si command received: params %s", params);
+
+	char param_str[100];
+	int param_str_len = sizeof(param_str);
+	char *ns = NULL, *set = NULL, *file = NULL;
+	bool verbose = false;
+
+	/*
+	 *  Command Format:  "dump-si:ns=<string>;set=<string>;{file=<string>;verbose=<opt>}" [the "file" and "verbose" arguments are optional]
+	 *
+	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
+	 */
+	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
+	if (!as_info_parameter_get(params, "ns", param_str, &param_str_len)) {
+		ns = cf_strdup(param_str);
+	} else {
+		cf_warning(AS_INFO, "The \"%s:\" command requires an \"ns\" parameter", name);
+		cf_dyn_buf_append_string(db, "error");
+		goto cleanup;
+	}
+
+	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
+	if (!as_info_parameter_get(params, "set", param_str, &param_str_len)) {
+		set = cf_strdup(param_str);
+	} else {
+		cf_warning(AS_INFO, "The \"%s:\" command requires a \"set\" parameter", name);
+		cf_dyn_buf_append_string(db, "error");
+		goto cleanup;
+	}
+
+	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
+	if (!as_info_parameter_get(params, "file", param_str, &param_str_len)) {
+		file = cf_strdup(param_str);
+	}
+
+	param_str[0] = '\0';
+	if (!as_info_parameter_get(params, "verbose", param_str, &param_str_len)) {
+		if (!strncmp(param_str, "true", 5)) {
+			verbose = true;
+		} else if (!strncmp(param_str, "false", 6)) {
+			verbose = false;
+		} else {
+			cf_warning(AS_INFO, "The \"%s:\" command argument \"verbose\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
+			cf_dyn_buf_append_string(db, "error");
+			goto cleanup;
+		}
+	}
+
+	ai_btree_dump(ns, set, file, verbose);
+	cf_dyn_buf_append_string(db, "ok");
+
+ cleanup:
+	if (ns) {
+		cf_free(ns);
+	}
+
+	if (set) {
+		cf_free(set);
+	}
+
+	if (file) {
+		cf_free(file);
+	}
+
+	return 0;
+}
+
 int
 info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 {
@@ -5966,7 +6042,7 @@ as_info_init()
 	// All commands accepted by asinfo/telnet
 	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-id;config-get;config-set;"
 				"df;digests;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-rw;"
-				"dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
+				"dump-si;dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
 				"service;services;services-alumni;services-alumni-reset;set-config;"
@@ -6028,6 +6104,7 @@ as_info_init()
 	as_info_set_command("dump-paxos", info_command_dump_paxos, PERM_LOGGING_CTRL);            // Print debug information about Paxos state to the log file.
 	as_info_set_command("dump-ra", info_command_dump_ra, PERM_LOGGING_CTRL);                  // Print debug information about Rack Aware state.
 	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
+	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
 	as_info_set_command("dump-smd", info_command_dump_smd, PERM_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.
 	as_info_set_command("dump-wb", info_command_dump_wb, PERM_LOGGING_CTRL);                  // Print debug information about Write Bocks (WB) to the log file.
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.

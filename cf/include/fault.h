@@ -298,3 +298,5 @@ do { \
 extern bool cf_context_at_severity(const cf_fault_context context, const cf_fault_severity severity);
 
 extern void cf_fault_init();
+
+int generate_packed_hex_string(void *mem_ptr, uint len, char* output);

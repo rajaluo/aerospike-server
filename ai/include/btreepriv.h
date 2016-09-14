@@ -105,9 +105,6 @@ typedef struct {
 
 //NOTE: For Aerospike, not currently using EVICT, save one byte in bt_n
 //      This changes a 2049 allocation to 2048 -> which is IMPORTANT
-#define NO_NUM_DIRTY_BUILD
-
-//#define BTREE_DEBUG
 typedef struct btreenode { // 9 bytes -> 16 bytes
 	unsigned int   scion;       /* 4 billion max scion */
 	unsigned short n;           /* 65 thousand max entries (per bt_n)*/
@@ -115,12 +112,6 @@ typedef struct btreenode { // 9 bytes -> 16 bytes
 	// DIRTY: -1->CLEAN,
 	//         0->TreeDirty but BTN_clean, 1->ucharDR, 2->ushortDR, 3->uintDR
 	char           dirty;
-#ifndef NO_NUM_DIRTY_BUILD
-	unsigned char  ndirty;
-#endif
-#ifdef BTREE_DEBUG
-	unsigned long num;
-#endif
 } __attribute__ ((packed)) bt_n;
 
 // BTREE access of KEYs & NODEs via position in bt_n

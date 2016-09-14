@@ -59,7 +59,7 @@ uint ai_btree_remove_partition(as_sindex_metadata *imd, uint32_t partition_id, u
 
 uint64_t ai_btree_get_numkeys(as_sindex_metadata *imd);
 
-int ai_btree_dump(char *ns_name, char *setname, char *fname);
+int ai_btree_dump(char *ns_name, char *setname, char *fname, bool verbose);
 
 int ai_btree_get_simatch_byname(char *nsname, char *iname);
 

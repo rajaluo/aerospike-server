@@ -42,3 +42,5 @@ void ai_objClone(ai_obj *dest, ai_obj *src);
 bool ai_objEQ(ai_obj *a, ai_obj *b);
 
 void dump_ai_obj(FILE *fp, ai_obj *a);
+
+void dump_ai_obj_as_digest(FILE *fp, ai_obj *a);

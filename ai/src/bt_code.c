@@ -176,9 +176,6 @@ static void release_dirty_stream(bt *btr, bt_n *x) {      //DEBUG_BTF_BTN_DIRTY
     bt_decrement_used_memory(btr, get_dssize(btr, x->dirty));
     void **dsp = GET_DS(x, nsize); cf_free(dsp);          // FREED 108
     x->dirty   = 0;
-#ifndef NO_NUM_DIRTY_BUILD
-    x->ndirty  = 0;
-#endif
 }
 static void bt_free_btreenode(bt *btr, bt_n *x) {
     GET_BTN_SIZES(x->leaf, x->dirty) bt_decrement_used_memory(btr, msize);
@@ -394,13 +391,6 @@ static void __setDR(bt *btr, bt_n *x, int i, uint32 dr) {
         uint32   *ds = (uint32   *)dsp;
         odr = ds[i]; ds[i] = dr;
     } else assert(!"setDR ERROR");
-#ifndef NO_NUM_DIRTY_BUILD
-    if      (!odr && dr) x->ndirty++;
-    else if (odr && !dr) x->ndirty--;
-    if ((x->dirty > 0) && !x->ndirty) release_dirty_stream(btr, x);
-#else
-    (void) odr;	// silence compiler warnings
-#endif
 }
 static bt_n *setDR(bt *btr, bt_n *x, int i, uint32 dr, bt_n *p, int pi) {
     if (!dr)                return x;
