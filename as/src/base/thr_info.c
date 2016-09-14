@@ -354,12 +354,12 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 }
 
 int
-info_get_cluster_id(char *name, cf_dyn_buf *db)
+info_get_cluster_name(char *name, cf_dyn_buf *db)
 {
-	char cluster_id[AS_CLUSTER_ID_SZ];
-	as_config_cluster_id_get(cluster_id);
-	if (cluster_id[0] != 0) {
-		cf_dyn_buf_append_string(db, cluster_id);
+	char cluster_name[AS_CLUSTER_NAME_SZ];
+	as_config_cluster_name_get(cluster_name);
+	if (cluster_name[0] != 0) {
+		cf_dyn_buf_append_string(db, cluster_name);
 	}
 
 	return 0;
@@ -1681,11 +1681,11 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "batch-index-threads", g_config.n_batch_index_threads);
 	info_append_int(db, "clock-skew-max-ms", g_config.clock_skew_max_ms);
 
-	char cluster_id[AS_CLUSTER_ID_SZ];
-	as_config_cluster_id_get(cluster_id);
-	if (cluster_id[0]) {
-		// TODO: print none in v3.
-		info_append_string(db, "cluster-id", cluster_id);
+	char cluster_name[AS_CLUSTER_NAME_SZ];
+	as_config_cluster_name_get(cluster_name);
+	if (cluster_name[0]) {
+		// TODO: print none in v3?
+		info_append_string(db, "cluster-name", cluster_name);
 	}
 
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
@@ -2259,15 +2259,15 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of paxos-recovery-policy to %s", context);
 		}
-		else if (0 == as_info_parameter_get( params, "cluster-id", context, &context_len)){
-			char* cluster_id = context;
-			if (strcmp(cluster_id, "none") == 0) {
-				cluster_id = "";
+		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
+			char* cluster_name = context;
+			if (strcmp(cluster_name, "none") == 0) {
+				cluster_name = "";
 			}
-			if (!as_config_cluster_id_set(cluster_id)) {
+			if (!as_config_cluster_name_set(cluster_name)) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of cluster-id to '%s'", cluster_id);
+			cf_info(AS_INFO, "Changing value of cluster-name to '%s'", cluster_name);
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (0 > val))
@@ -6040,7 +6040,7 @@ as_info_init()
 	as_info_set( hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
 	// All commands accepted by asinfo/telnet
-	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-id;config-get;config-set;"
+	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-name;config-get;config-set;"
 				"df;digests;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-rw;"
 				"dump-si;dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
@@ -6060,7 +6060,7 @@ as_info_init()
 	// Set up some dynamic functions
 	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
 	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true);     // Returns cluster generation.
-	as_info_set_dynamic("cluster-id", info_get_cluster_id, false);                    // Returns cluster id.
+	as_info_set_dynamic("cluster-name", info_get_cluster_name, false);                // Returns cluster name.
 	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
 	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
 	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.

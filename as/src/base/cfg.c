@@ -268,7 +268,7 @@ typedef enum {
 	CASE_SERVICE_BATCH_PRIORITY,
 	CASE_SERVICE_BATCH_INDEX_THREADS,
 	CASE_SERVICE_CLOCK_SKEW_MAX_MS,
-	CASE_SERVICE_CLUSTER_ID,
+	CASE_SERVICE_CLUSTER_NAME,
 	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FABRIC_WORKERS,
@@ -687,7 +687,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
 		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
 		{ "clock-skew-max-ms",				CASE_SERVICE_CLOCK_SKEW_MAX_MS },
-		{ "cluster-id",						CASE_SERVICE_CLUSTER_ID },
+		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
 		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
@@ -1971,8 +1971,8 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_CLOCK_SKEW_MAX_MS:
 				c->clock_skew_max_ms = cfg_u32_no_checks(&line);
 				break;
-			case CASE_SERVICE_CLUSTER_ID:
-				cfg_strcpy(&line, c->cluster_id, AS_CLUSTER_ID_SZ);
+			case CASE_SERVICE_CLUSTER_NAME:
+				cfg_strcpy(&line, c->cluster_name, AS_CLUSTER_NAME_SZ);
 				break;
 			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
 				c->svc_benchmarks_enabled = cfg_bool(&line);
@@ -3399,9 +3399,9 @@ as_config_post_process(as_config *c, const char *config_file)
 		cf_free(string);
 	}
 
-	// "none" is a special value representing an empty cluster-id.
-	if (strncmp(g_config.cluster_id, "none", AS_CLUSTER_ID_SZ) == 0) {
-		memset(g_config.cluster_id, 0, sizeof(g_config.cluster_id));
+	// "none" is a special value representing an empty cluster-name.
+	if (strncmp(g_config.cluster_name, "none", AS_CLUSTER_NAME_SZ) == 0) {
+		memset(g_config.cluster_name, 0, sizeof(g_config.cluster_name));
 	}
 
 	// Validate heartbeat configuration.
@@ -3523,22 +3523,22 @@ as_config_post_process(as_config *c, const char *config_file)
 pthread_mutex_t g_config_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void
-as_config_cluster_id_get(char* cluster_id)
+as_config_cluster_name_get(char* cluster_name)
 {
 	pthread_mutex_lock(&g_config_lock);
-	strcpy(cluster_id, g_config.cluster_id);
+	strcpy(cluster_name, g_config.cluster_name);
 	pthread_mutex_unlock(&g_config_lock);
 }
 
 bool
-as_config_cluster_id_set(const char* cluster_id)
+as_config_cluster_name_set(const char* cluster_name)
 {
-	if (strlen(cluster_id) >= AS_CLUSTER_ID_SZ) {
+	if (strlen(cluster_name) >= AS_CLUSTER_NAME_SZ) {
 		return false;
 	}
 
 	pthread_mutex_lock(&g_config_lock);
-	strcpy(g_config.cluster_id, cluster_id);
+	strcpy(g_config.cluster_name, cluster_name);
 	pthread_mutex_unlock(&g_config_lock);
 
 	return true;

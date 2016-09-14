@@ -1134,7 +1134,7 @@ static msg_template g_hb_msg_template[] = {
 	{ AS_HB_MSG_NODE, M_FT_UINT64 },
 	{ AS_HB_MSG_ADDR, M_FT_BUF },
 	{ AS_HB_MSG_PORT, M_FT_UINT32 },
-	{ AS_HB_MSG_CLUSTER_ID, M_FT_STR },
+	{ AS_HB_MSG_CLUSTER_NAME, M_FT_STR },
 	{ AS_HB_MSG_HB_DATA, M_FT_BUF },
 	{ AS_HB_MSG_MAX_CLUSTER_SIZE, M_FT_UINT32 },
 	{ AS_HB_MSG_HLC_TIMESTAMP, M_FT_UINT64 },
@@ -2827,16 +2827,16 @@ msg_type_get(msg* msg, as_hb_msg_type* type)
 }
 
 /**
- * Read the cluster id.
+ * Read the cluster name.
  * @param msg the incoming message.
- * @param cluster id of the output message type.
- * @return 0 if the cluster id could be parsed -1 on failure.
+ * @param cluster name of the output message type.
+ * @return 0 if the cluster name could be parsed, -1 on failure.
  */
 static int
-msg_cluster_id_get(msg* msg, char** cluster_id)
+msg_cluster_name_get(msg* msg, char** cluster_name)
 {
 
-	if (msg_get_str(msg, AS_HB_MSG_CLUSTER_ID, cluster_id, NULL,
+	if (msg_get_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name, NULL,
 			MSG_GET_DIRECT) != 0) {
 		return -1;
 	}
@@ -3215,7 +3215,7 @@ config_mcsize()
 	int supported_cluster_size = MIN(ASC, mode_cluster_size);
 
 	if (config_protocol_get() == AS_HB_PROTOCOL_V2) {
-		supported_cluster_size = MIN(supported_cluster_size, 
+		supported_cluster_size = MIN(supported_cluster_size,
 									g_config.paxos_max_cluster_size);
 	}
 
@@ -4471,19 +4471,19 @@ channel_msg_sanity_check(msg* msg)
 	}
 
 	if (!HB_IS_MSG_LEGACY(msg) && type == AS_HB_MSG_TYPE_PULSE) {
-		char* remote_cluster_id = NULL;
+		char* remote_cluster_name = NULL;
 
-		if (msg_cluster_id_get(msg, &remote_cluster_id) != 0) {
-			remote_cluster_id = "";
+		if (msg_cluster_name_get(msg, &remote_cluster_name) != 0) {
+			remote_cluster_name = "";
 		}
 
-		char cluster_id[AS_CLUSTER_ID_SZ];
-		as_config_cluster_id_get(cluster_id);
+		char cluster_name[AS_CLUSTER_NAME_SZ];
+		as_config_cluster_name_get(cluster_name);
 
-		if (strcmp(remote_cluster_id, cluster_id) != 0) {
+		if (strcmp(remote_cluster_name, cluster_name) != 0) {
 			rv = -1;
 			DEBUG("Recieved message from a node with "
-			      "different cluster id. Ignoring!");
+			      "different cluster name. Ignoring!");
 		}
 	}
 
@@ -4919,7 +4919,7 @@ channel_mesh_channel_establish(as_hb_endpoint* endpoints, int endpoint_count)
 			cf_socket* sock = cf_malloc(sizeof(cf_socket));
 			cf_socket_init(sock);
 			cf_socket_copy(&s.sock, sock);
-			
+
 			channel_socket_register(sock, false, false, &endpoints[i]);
 			connected = true;
 		} else {
@@ -7561,13 +7561,13 @@ hb_plugin_set_fn(msg* msg)
 		msg_adjacency_set(msg, adj_list,
 				  adjacency_reduce_udata.adj_count);
 
-		// Set cluster id
-		char cluster_id[AS_CLUSTER_ID_SZ];
-		as_config_cluster_id_get(cluster_id);
-		if (cluster_id[0] != 0 &&
-		    msg_set_str(msg, AS_HB_MSG_CLUSTER_ID, cluster_id,
+		// Set cluster name
+		char cluster_name[AS_CLUSTER_NAME_SZ];
+		as_config_cluster_name_get(cluster_name);
+		if (cluster_name[0] != 0 &&
+		    msg_set_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name,
 				MSG_SET_COPY) != 0) {
-			CRASH("Error setting cluster id on msg.");
+			CRASH("Error setting cluster name on msg.");
 		}
 
 	} else {
