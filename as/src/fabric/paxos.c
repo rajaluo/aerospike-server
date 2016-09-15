@@ -284,9 +284,10 @@ dump_partition_state()
 
 		cf_debug(AS_PAXOS, " Node %"PRIx64"", g_paxos->succession[index]);
 		for (int i = 0; i < g_config.n_namespaces; i++) {
-			cf_debug(AS_PAXOS, " Name Space: %s", g_config.namespaces[i]->name);
+			as_namespace *ns = g_config.namespaces[i];
+			cf_debug(AS_PAXOS, " Name Space: %s", ns->name);
 			int k = 0;
-			as_partition_vinfo *parts = g_paxos->c_partition_vinfo[i][index];
+			as_partition_vinfo *parts = ns->cluster_vinfo[index];
 			if (NULL == parts) {
 				cf_debug(AS_PAXOS, " STATE is EMPTY");
 				continue;
@@ -586,22 +587,17 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 	 */
 	size_t elem = 0;
 	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+		memset(ns->cluster_vinfo[n_pos], 0, sizeof(as_partition_vinfo) * AS_PARTITIONS);
 		byte *bufp = NULL;
 		size_t bufsz = sizeof(as_partition_vinfo) * AS_PARTITIONS;
-		as_partition_vinfo *vi = p->c_partition_vinfo[i][n_pos];
-		if (NULL == vi) {
-			vi = cf_rc_alloc(bufsz);
-			cf_assert(vi, AS_PAXOS, CF_CRITICAL, "rc_alloc: %s", cf_strerror(errno));
-			p->c_partition_vinfo[i][n_pos] = vi;
-		}
-		memset(vi, 0, bufsz);
 		e += msg_get_buf_array(m, AS_PAXOS_MSG_PARTITION, elem, &bufp, &bufsz, MSG_GET_DIRECT);
 		elem++;
 		if ((0 > e) || (NULL == bufp)) {
 			cf_warning(AS_PAXOS, "unpacking partition sync request message failed");
 			return(-1);
 		}
-		memcpy(vi, bufp, sizeof(as_partition_vinfo) * AS_PARTITIONS);
+		memcpy(ns->cluster_vinfo[n_pos], bufp, sizeof(as_partition_vinfo) * AS_PARTITIONS);
 	}
 
 	/* Require the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC_REQUEST messages. */
@@ -694,21 +690,18 @@ as_paxos_partition_sync_msg_generate()
 	}
 
 	size_t n_elem = 0;
-	for (int i = 0; i < g_config.n_namespaces; i++)
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 		for (int j = 0; j < cluster_size; j++) {
-			as_partition_vinfo *vi = p->c_partition_vinfo[i][j];
-			if (NULL == vi) {
-				cf_warning(AS_PAXOS, "unable to generate partition sync message. no data for [ns=%d][node=%d]", i, j);
-				return (NULL);
-			}
 			cf_debug(AS_PAXOS, "writing element %zu", n_elem);
-			e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITION, n_elem, (uint8_t *)vi, elem_size);
+			e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITION, n_elem, (uint8_t *)ns->cluster_vinfo[j], elem_size);
 			if (0 > e) {
 				cf_warning(AS_PAXOS, "unable to generate sync message");
 				return(NULL);
 			}
 			n_elem++;
 		}
+	}
 	if (0 > e) {
 		cf_warning(AS_PAXOS, "unable to generate sync message");
 		return(NULL);
@@ -839,25 +832,21 @@ as_paxos_partition_sync_msg_apply(msg *m)
 	 * reset the values of this node's partition version in the global list
 	 */
 	size_t elem = 0;
-	for (int i = 0; i < g_config.n_namespaces; i++)
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
 		for (int j = 0; j < cluster_size; j++) {
+			memset(ns->cluster_vinfo[j], 0, sizeof(as_partition_vinfo) * AS_PARTITIONS);
 			byte *bufp = NULL;
 			bufsz = sizeof(as_partition_vinfo) * AS_PARTITIONS;
-			as_partition_vinfo *vi = p->c_partition_vinfo[i][j];
-			if (NULL == vi) {
-				vi = cf_rc_alloc(bufsz);
-				cf_assert(vi, AS_PAXOS, CF_CRITICAL, "rc_alloc: %s", cf_strerror(errno));
-				p->c_partition_vinfo[i][j] = vi;
-			}
-			memset(vi, 0, bufsz);
 			e += msg_get_buf_array(m, AS_PAXOS_MSG_PARTITION, elem, &bufp, &bufsz, MSG_GET_DIRECT);
 			elem++;
 			if ((0 > e) || (NULL == bufp)) {
 				cf_warning(AS_PAXOS, "unpacking partition sync message failed");
 				return(-1);
 			}
-			memcpy(vi, bufp, sizeof(as_partition_vinfo) * AS_PARTITIONS);
+			memcpy(ns->cluster_vinfo[j], bufp, sizeof(as_partition_vinfo) * AS_PARTITIONS);
 		}
+	}
 
 	/* Require the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC messages. */
 	if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
@@ -1606,16 +1595,11 @@ void as_paxos_start_second_phase()
 	 * Note that the index for the principal is 0 */
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
-		as_partition_vinfo *vi = p->c_partition_vinfo[i][0];
-		size_t vi_sz = sizeof(as_partition_vinfo) * AS_PARTITIONS;
-		if (NULL == vi) {
-			vi = cf_rc_alloc(sizeof(as_partition_vinfo) * AS_PARTITIONS);
-			cf_assert(vi, AS_PAXOS, CF_CRITICAL, "rc_alloc: %s", cf_strerror(errno));
-			p->c_partition_vinfo[i][0] = vi;
+		as_namespace *ns = g_config.namespaces[i];
+		memset(ns->cluster_vinfo[0], 0, sizeof(as_partition_vinfo) * AS_PARTITIONS);
+		for (int j = 0; j < AS_PARTITIONS; j++) {
+			ns->cluster_vinfo[0][j] = ns->partitions[j].version_info;
 		}
-		memset(vi, 0, vi_sz);
-		for (int j = 0; j < AS_PARTITIONS; j++)
-			memcpy(&vi[j], &g_config.namespaces[i]->partitions[j].version_info, sizeof(as_partition_vinfo));
 	}
 	p->partition_sync_state[0] = true; /* Principal's state is always local */
 	for (int i = 1; i < AS_CLUSTER_SZ; i++) {
@@ -3638,8 +3622,6 @@ as_paxos_init()
 	  M_TYPE_PAXOS, as_paxos_msg_template, sizeof(as_paxos_msg_template),
 	  AS_PAXOS_MSG_SCRATCH_SIZE, &as_paxos_msgq_push, NULL);
 
-	/* this may not be needed but just do it anyway */
-	memset(p->c_partition_vinfo, 0, sizeof(p->c_partition_vinfo));
 	/* Clean out the sync states array */
 	memset(p->partition_sync_state, 0, sizeof(p->partition_sync_state));
 
@@ -3704,13 +3686,10 @@ as_paxos_init()
 			} // end for
 		} // end if
 
-		/* Allocate and initialize the global partition state structure */
-		size_t vi_sz = sizeof(as_partition_vinfo) * AS_PARTITIONS;
-		as_partition_vinfo *vi = cf_rc_alloc(vi_sz);
-		cf_assert(vi, AS_PAXOS, CF_CRITICAL, "rc_alloc: %s", cf_strerror(errno));
-		for (int j = 0; j < AS_PARTITIONS; j++)
-			memcpy(&vi[j], &ns->partitions[j].version_info, sizeof(as_partition_vinfo));
-		p->c_partition_vinfo[i][0] = vi;
+		// Initialize the global partition state structure.
+		for (int j = 0; j < AS_PARTITIONS; j++) {
+			ns->cluster_vinfo[0][j] = ns->partitions[j].version_info;
+		}
 
 		/* Initialize the partition sizes array for sending in all Paxos protocol v3 or greater PARTITION_SYNC_REQUEST and PARTITION_SYNC messages. */
 		if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {

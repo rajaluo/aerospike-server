@@ -99,11 +99,11 @@ void partition_cluster_topology_info();
 void fill_node_sequence_table(cf_node* node_seq_table, int* succession_index_table);
 void adjust_node_sequence_table(cf_node* node_seq_table, int* succession_index_table, uint32_t repl_factor);
 bool is_group_distinct_before_n(uint32_t pid, const cf_node* node_seq_table, const int* succession_index_table, cc_node_t group_id, uint32_t n);
-int set_primary_version(as_partition* p, const cf_node* node_seq_table, const int* succession_index_table, uint32_t ns_ix, bool has_version[], int* self_n);
-void handle_lost_partition(as_partition* p, const cf_node* node_seq_table, as_namespace* ns, uint32_t ns_ix, bool has_version[]);
-uint32_t find_duplicates(const as_partition* p, const cf_node* node_seq_table, const int* succession_index_table, uint32_t ns_ix, cf_node dupl_nodes[]);
+int set_primary_version(as_partition* p, const cf_node* node_seq_table, const int* succession_index_table, as_namespace* ns, bool has_version[], int* self_n);
+void handle_lost_partition(as_partition* p, const cf_node* node_seq_table, as_namespace* ns, bool has_version[]);
+uint32_t find_duplicates(const as_partition* p, const cf_node* node_seq_table, const int* succession_index_table, const as_namespace* ns, cf_node dupl_nodes[]);
 bool should_advance_version(const as_partition* p, uint32_t old_repl_factor);
-void advance_version(as_partition* p, const cf_node* node_seq_table, const int* succession_index_table, as_namespace* ns, uint32_t ns_ix, int first_versioned_n);
+void advance_version(as_partition* p, const cf_node* node_seq_table, const int* succession_index_table, as_namespace* ns, int first_versioned_n);
 void queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 		as_namespace* ns, int self_n, int first_versioned_n,
 		const bool has_version[], uint32_t n_dupl, const cf_node dupl_nodes[],
@@ -243,7 +243,7 @@ as_partition_balance_init_single_node_cluster()
 
 				p->version_info = new_vinfo;
 				p->primary_version_info = new_vinfo;
-				g_paxos->c_partition_vinfo[i][0][pid] = new_vinfo;
+				ns->cluster_vinfo[0][pid] = new_vinfo;
 				set_partition_version_in_storage(ns, pid, &new_vinfo, false);
 
 				n_promoted++;
@@ -412,25 +412,24 @@ as_partition_balance()
 			bool has_version[cluster_size];
 			int self_n = -1;
 			int first_versioned_n = set_primary_version(p, node_seq_table,
-					succession_index_table, ns_ix, has_version, &self_n);
+					succession_index_table, ns, has_version, &self_n);
 
 			if (first_versioned_n == -1) {
 				first_versioned_n = 0;
 				p->primary_version_info = new_vinfo;
 
-				handle_lost_partition(p, node_seq_table, ns, ns_ix,
-						has_version);
+				handle_lost_partition(p, node_seq_table, ns, has_version);
 
 				// May advance the new partition version below - wasteful, but
 				// leaving it for backward compatibility.)
 			}
 			else {
 				n_dupl = find_duplicates(p, node_seq_table,
-						succession_index_table, ns_ix, dupl_nodes);
+						succession_index_table, ns, dupl_nodes);
 
 				if (should_advance_version(p, old_repl_factor)) {
 					advance_version(p, node_seq_table, succession_index_table,
-							ns, ns_ix, first_versioned_n);
+							ns, first_versioned_n);
 				}
 			}
 
@@ -1285,7 +1284,7 @@ is_group_distinct_before_n(uint32_t pid, const cf_node* node_seq_table,
 
 int
 set_primary_version(as_partition* p, const cf_node* node_seq_table,
-		const int* succession_index_table, uint32_t ns_ix, bool has_version[],
+		const int* succession_index_table, as_namespace* ns, bool has_version[],
 		int* self_n)
 {
 	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
@@ -1298,8 +1297,7 @@ set_primary_version(as_partition* p, const cf_node* node_seq_table,
 		}
 
 		int sl_ix = SL_IX(pid, n);
-		as_partition_vinfo* vinfo =
-				&g_paxos->c_partition_vinfo[ns_ix][sl_ix][pid];
+		as_partition_vinfo* vinfo = &ns->cluster_vinfo[sl_ix][pid];
 
 		if (as_partition_is_null(vinfo)) {
 			has_version[n] = false;
@@ -1320,7 +1318,7 @@ set_primary_version(as_partition* p, const cf_node* node_seq_table,
 
 void
 handle_lost_partition(as_partition* p, const cf_node* node_seq_table,
-		as_namespace* ns, uint32_t ns_ix, bool has_version[])
+		as_namespace* ns, bool has_version[])
 {
 	for (uint32_t n = 0; n < p->n_replicas; n++) {
 		// Each replica initializes its partition version to the same new value.
@@ -1336,7 +1334,8 @@ handle_lost_partition(as_partition* p, const cf_node* node_seq_table,
 
 uint32_t
 find_duplicates(const as_partition* p, const cf_node* node_seq_table,
-		const int* succession_index_table, uint32_t ns_ix, cf_node dupl_nodes[])
+		const int* succession_index_table, const as_namespace* ns,
+		cf_node dupl_nodes[])
 {
 	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
 	uint32_t pid = p->id;
@@ -1348,8 +1347,7 @@ find_duplicates(const as_partition* p, const cf_node* node_seq_table,
 
 	for (uint32_t n = 0; n < cluster_size; n++) {
 		int sl_ix = SL_IX(pid, n);
-		as_partition_vinfo* vinfo =
-				&g_paxos->c_partition_vinfo[ns_ix][sl_ix][pid];
+		const as_partition_vinfo* vinfo = &ns->cluster_vinfo[sl_ix][pid];
 
 		// If this partition version is unique, add to duplicates list.
 
@@ -1411,7 +1409,7 @@ should_advance_version(const as_partition* p, uint32_t old_repl_factor)
 
 void
 advance_version(as_partition* p, const cf_node* node_seq_table,
-		const int* succession_index_table, as_namespace* ns, uint32_t ns_ix,
+		const int* succession_index_table, as_namespace* ns,
 		int first_versioned_n)
 {
 	uint32_t pid = p->id;
@@ -1437,8 +1435,7 @@ advance_version(as_partition* p, const cf_node* node_seq_table,
 	}
 
 	int sl_ix = SL_IX(pid, first_versioned_n);
-	as_partition_vinfo adv_vinfo =
-			g_paxos->c_partition_vinfo[ns_ix][sl_ix][pid];
+	as_partition_vinfo adv_vinfo = ns->cluster_vinfo[sl_ix][pid];
 	int i;
 
 	for (i = 0; i < AS_PARTITION_MAX_VERSION; i++) {
@@ -1454,14 +1451,13 @@ advance_version(as_partition* p, const cf_node* node_seq_table,
 	}
 
 	if (as_partition_vinfo_same(&p->version_info,
-			&g_paxos->c_partition_vinfo[ns_ix][sl_ix][pid])) {
+			&ns->cluster_vinfo[sl_ix][pid])) {
 		set_partition_version_in_storage(ns, pid, &adv_vinfo, false);
 		p->version_info = adv_vinfo;
 	}
 
 	p->primary_version_info = adv_vinfo;
 }
-
 
 
 void

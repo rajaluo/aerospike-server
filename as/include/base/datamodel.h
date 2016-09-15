@@ -1128,6 +1128,12 @@ struct as_namespace_s {
 	//
 
 	as_partition partitions[AS_PARTITIONS];
+
+	//--------------------------------------------
+	// Information for rebalancing.
+	//
+
+	as_partition_vinfo cluster_vinfo[AS_CLUSTER_SZ][AS_PARTITIONS];
 };
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator
