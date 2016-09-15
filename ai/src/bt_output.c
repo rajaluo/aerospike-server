@@ -49,7 +49,7 @@ void printDWD(dwd_t dwd, bt *btr)
 	dump_ai_obj(stdout, &akey);
 }
 
-static void printKeyFromPtr(bt *btr, void *be) {
+void printKeyFromPtr(bt *btr, void *be) {
 	ai_obj akey;
 	convertStream2Key(be, &akey, btr);
 	dump_ai_obj(stdout, &akey);
