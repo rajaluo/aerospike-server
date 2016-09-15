@@ -193,9 +193,9 @@ as_partition_balance_init()
 			as_partition* p = &ns->partitions[pid];
 
 			p->n_replicas = 1;
+			p->replicas[0] = g_config.self_node;
 
 			if (! as_partition_is_null(&p->version_info)) {
-				p->replicas[0] = g_config.self_node;
 				p->primary_version_info = p->version_info;
 				n_stored++;
 			}
@@ -235,24 +235,23 @@ as_partition_balance_init_single_node_cluster()
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
 
-			if (as_partition_is_null(&p->version_info)) {
-				// For nsup, which is allowed to operate while we're doing this.
-				pthread_mutex_lock(&p->lock);
+			// For defrag, which is allowed to operate while we're doing this.
+			pthread_mutex_lock(&p->lock);
 
+			if (as_partition_is_null(&p->version_info)) {
 				p->state = AS_PARTITION_STATE_SYNC;
-				p->replicas[0] = g_config.self_node;
 
 				p->version_info = new_vinfo;
 				p->primary_version_info = new_vinfo;
 				g_paxos->c_partition_vinfo[i][0][pid] = new_vinfo;
 				set_partition_version_in_storage(ns, pid, &new_vinfo, false);
 
-				client_replica_maps_update(ns, pid);
-
 				n_promoted++;
-
-				pthread_mutex_unlock(&p->lock);
 			}
+
+			client_replica_maps_update(ns, pid);
+
+			pthread_mutex_unlock(&p->lock);
 		}
 
 		if (n_promoted != 0) {
