@@ -358,9 +358,7 @@ info_get_cluster_name(char *name, cf_dyn_buf *db)
 {
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	as_config_cluster_name_get(cluster_name);
-	if (cluster_name[0] != 0) {
-		cf_dyn_buf_append_string(db, cluster_name);
-	}
+	cf_dyn_buf_append_string(db, cluster_name);
 
 	return 0;
 }
@@ -1683,10 +1681,7 @@ info_service_config_get(cf_dyn_buf *db)
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];
 	as_config_cluster_name_get(cluster_name);
-	if (cluster_name[0]) {
-		// TODO: print none in v3?
-		info_append_string(db, "cluster-name", cluster_name);
-	}
+	info_append_string(db, "cluster-name", cluster_name);
 
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
@@ -2260,14 +2255,10 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of paxos-recovery-policy to %s", context);
 		}
 		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
-			char* cluster_name = context;
-			if (strcmp(cluster_name, "none") == 0) {
-				cluster_name = "";
-			}
-			if (!as_config_cluster_name_set(cluster_name)) {
+			if (!as_config_cluster_name_set(context)) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of cluster-name to '%s'", cluster_name);
+			cf_info(AS_INFO, "Changing value of cluster-name to '%s'", context);
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (0 > val))

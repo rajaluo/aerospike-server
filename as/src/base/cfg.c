@@ -1424,9 +1424,13 @@ cfg_strdup_one_of(const cfg_line* p_line, const char* toks[], int num_toks)
 void
 cfg_strcpy(const cfg_line* p_line, char* p_str, size_t max_size)
 {
-	// TODO - should we check for empty string?
+	size_t tok1_sz = strlen(p_line->val_tok_1);
+	if (tok1_sz == 0) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must have a value specified",
+				p_line->num, p_line->name_tok);
+	}
 
-	if (strlen(p_line->val_tok_1) >= max_size) {
+	if (tok1_sz >= max_size) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must be < %lu characters long, not %s",
 				p_line->num, p_line->name_tok, max_size, p_line->val_tok_1);
 	}
@@ -3298,7 +3302,7 @@ as_config_post_process(as_config *c, const char *config_file)
 	getrlimit(RLIMIT_NOFILE, &fd_limit);
 
 	if (c->n_proto_fd_max < 0 || (rlim_t)c->n_proto_fd_max > fd_limit.rlim_cur) {
-		cf_crash(AS_CFG, "%lu system file descriptors not enough, config specified %d", fd_limit.rlim_cur, c->n_proto_fd_max);
+		cf_crash_nostack(AS_CFG, "%lu system file descriptors not enough, config specified %d", fd_limit.rlim_cur, c->n_proto_fd_max);
 	}
 
 	cf_info(AS_CFG, "system file descriptor limit: %lu, proto-fd-max: %d", fd_limit.rlim_cur, c->n_proto_fd_max);
@@ -3381,7 +3385,7 @@ as_config_post_process(as_config *c, const char *config_file)
 		int32_t n_addrs;
 
 		if (cf_inter_get_addr_ex(&addrs, &n_addrs, buffer, sizeof(buffer)) < 0) {
-			cf_crash(AS_CFG, "Error while getting interface addresses");
+			cf_crash_nostack(AS_CFG, "Error while getting interface addresses");
 		}
 
 		cf_dyn_buf_define(services);
@@ -3399,9 +3403,9 @@ as_config_post_process(as_config *c, const char *config_file)
 		cf_free(string);
 	}
 
-	// "none" is a special value representing an empty cluster-name.
-	if (strncmp(g_config.cluster_name, "none", AS_CLUSTER_NAME_SZ) == 0) {
-		memset(g_config.cluster_name, 0, sizeof(g_config.cluster_name));
+	// "null" is a special value representing an empty cluster-name.
+	if (strncmp(g_config.cluster_name, "null", AS_CLUSTER_NAME_SZ) == 0) {
+		cf_crash_nostack(AS_CFG, "Cluster name \"null\" is not allowed.");
 	}
 
 	// Validate heartbeat configuration.
@@ -3528,12 +3532,22 @@ as_config_cluster_name_get(char* cluster_name)
 	pthread_mutex_lock(&g_config_lock);
 	strcpy(cluster_name, g_config.cluster_name);
 	pthread_mutex_unlock(&g_config_lock);
+	if (cluster_name[0] == '\0') {
+		strcpy(cluster_name, "null");
+	}
 }
 
 bool
 as_config_cluster_name_set(const char* cluster_name)
 {
+	if ((strcmp(cluster_name, "null") == 0) || (cluster_name[0] == '\0')) {
+		cf_warning(AS_CFG, "Cluster name \"%s\" is not allowed. Ignoring!", cluster_name);
+		return false;
+	}
+
 	if (strlen(cluster_name) >= AS_CLUSTER_NAME_SZ) {
+		cf_warning(AS_CFG, "Size of cluster name should not be greater than %d characters. Ignoring cluster name \"%s\"!",
+			AS_CLUSTER_NAME_SZ - 1, cluster_name);
 		return false;
 	}
 
