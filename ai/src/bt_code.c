@@ -391,6 +391,7 @@ static void __setDR(bt *btr, bt_n *x, int i, uint32 dr) {
         uint32   *ds = (uint32   *)dsp;
         odr = ds[i]; ds[i] = dr;
     } else assert(!"setDR ERROR");
+    (void) odr;        // silence compiler warnings
 }
 static bt_n *setDR(bt *btr, bt_n *x, int i, uint32 dr, bt_n *p, int pi) {
     if (!dr)                return x;
