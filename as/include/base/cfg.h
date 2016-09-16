@@ -58,7 +58,7 @@ struct as_namespace_s;
 //
 
 #define AS_NAMESPACE_SZ 32
-#define AS_CLUSTER_ID_SZ 65
+#define AS_CLUSTER_NAME_SZ 65
 
 #define MAX_DEMARSHAL_THREADS 256
 #define MAX_FABRIC_WORKERS 128
@@ -102,7 +102,7 @@ typedef struct as_config_s {
 	uint32_t		batch_priority; // number of records between an enforced context switch, used by old batch only
 	int				n_batch_index_threads;
 	int				clock_skew_max_ms; // maximum allowed skew between this node's physical clock and the physical component of its hybrid clock
-	char			cluster_id[AS_CLUSTER_ID_SZ];
+	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	PAD_BOOL		svc_benchmarks_enabled;
 	PAD_BOOL		info_hist_enabled;
 	int				n_fabric_workers;
@@ -261,8 +261,8 @@ typedef struct as_config_s {
 as_config* as_config_init(const char* config_file);
 void as_config_post_process(as_config* c, const char* config_file);
 
-void as_config_cluster_id_get(char* cluster_id);
-bool as_config_cluster_id_set(const char* cluster_id);
+void as_config_cluster_name_get(char* cluster_name);
+bool as_config_cluster_name_set(const char* cluster_name);
 
 extern as_config g_config;
 extern xdr_config g_xcfg;
