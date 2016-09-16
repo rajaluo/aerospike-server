@@ -129,7 +129,6 @@ aopen(aggr_state *astate, cf_digest digest)
 	// TODO: Make such initialization Commodity
 	tr->rsv.ns          = astate->rsv->ns;
 	tr->rsv.state       = astate->rsv->state;
-	tr->rsv.pid         = astate->rsv->pid;
 	tr->rsv.p           = astate->rsv->p;
 	tr->rsv.tree        = astate->rsv->tree;
 	tr->rsv.cluster_key = astate->rsv->cluster_key;
@@ -332,18 +331,12 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 	as_stream ostream;
 	as_stream_init(&ostream, &astate, &ostream_hooks);
 
-	// Argument list
-	as_list arglist;
-	as_list_init(&arglist, ag_call->def.arglist, &udf_arglist_hooks);
-
 	as_udf_context ctx = {
 		.as         = &as,
 		.timer      = NULL,
 		.memtracker = NULL
 	};
-	int ret = as_module_apply_stream(&mod_lua, &ctx, ag_call->def.filename, ag_call->def.function, &istream, &arglist, &ostream, ap_res);
-
-	as_list_destroy(&arglist);
+	int ret = as_module_apply_stream(&mod_lua, &ctx, ag_call->def.filename, ag_call->def.function, &istream, ag_call->def.arglist, &ostream, ap_res);
 
 	acleanup(&astate);
 	return ret;

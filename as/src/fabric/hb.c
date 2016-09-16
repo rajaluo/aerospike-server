@@ -48,6 +48,7 @@
 #include "base/cfg.h"
 #include "base/stats.h"
 #include "fabric/fabric.h"
+#include "fabric/partition_balance.h"
 
 /*
  * Overview
@@ -1133,7 +1134,7 @@ static msg_template g_hb_msg_template[] = {
 	{ AS_HB_MSG_NODE, M_FT_UINT64 },
 	{ AS_HB_MSG_ADDR, M_FT_BUF },
 	{ AS_HB_MSG_PORT, M_FT_UINT32 },
-	{ AS_HB_MSG_CLUSTER_ID, M_FT_STR },
+	{ AS_HB_MSG_CLUSTER_NAME, M_FT_STR },
 	{ AS_HB_MSG_HB_DATA, M_FT_BUF },
 	{ AS_HB_MSG_MAX_CLUSTER_SIZE, M_FT_UINT32 },
 	{ AS_HB_MSG_HLC_TIMESTAMP, M_FT_UINT64 },
@@ -1355,7 +1356,7 @@ static msg_template g_hb_v2_msg_template[] = {
 	(MAX(config_hb_tx_interval_get(), AS_HB_INTERVAL_MIN))
 
 /**
- * Intervals at which adjacecny tender runs.
+ * Intervals at which adjacency tender runs.
  */
 #define ADJACENCY_TEND_INTERVAL() (PULSE_TRANSMIT_INTERVAL())
 
@@ -1428,7 +1429,7 @@ static msg_template g_hb_v2_msg_template[] = {
 	})
 
 /**
- * Inidicates if mode is mesh.
+ * Indicates if mode is mesh.
  */
 #define IS_MESH() (config_mode_get() == AS_HB_MODE_MESH)
 
@@ -1812,7 +1813,7 @@ as_hb_getaddr(cf_node nodeid, cf_ip_addr* ip_addr)
 	int rv = -1;
 	if (!HB_IS_INITIALIZED()) {
 		WARNING(
-		  "Main heartbeat module unintialized. Address not found.");
+		  "Main heartbeat module uninitialized. Address not found.");
 		return rv;
 	}
 
@@ -1839,8 +1840,8 @@ void
 as_hb_register_listener(as_hb_event_fn event_callback, void* udata)
 {
 	if (!HB_IS_INITIALIZED()) {
-		WARNING("Main heartbeat module unintialized. Not registering "
-			"the listner.");
+		WARNING("Main heartbeat module uninitialized. Not registering "
+			"the listener.");
 		return;
 	}
 
@@ -2602,7 +2603,16 @@ as_hb_ipaddr_is_specified(const as_hb_ipaddr* addr)
 		    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
 		  },
 	};
-	return as_hb_ipaddr_cmp(&null_addr, addr) != 0;
+
+	static const as_hb_ipaddr v4_to_v6_template = {
+		.addr.word =
+		  {
+		    0x0, 0x0, 0x0, 0x0, 0x0, 0xffff, 0x0, 0x0,
+		  },
+	};
+
+	return as_hb_ipaddr_cmp(&null_addr, addr) != 0 &&
+	       as_hb_ipaddr_cmp(&v4_to_v6_template, addr) != 0;
 }
 
 /**
@@ -2830,16 +2840,16 @@ msg_type_get(msg* msg, as_hb_msg_type* type)
 }
 
 /**
- * Read the cluster id.
+ * Read the cluster name.
  * @param msg the incoming message.
- * @param cluster id of the output message type.
- * @return 0 if the cluster id could be parsed -1 on failure.
+ * @param cluster name of the output message type.
+ * @return 0 if the cluster name could be parsed, -1 on failure.
  */
 static int
-msg_cluster_id_get(msg* msg, char** cluster_id)
+msg_cluster_name_get(msg* msg, char** cluster_name)
 {
 
-	if (msg_get_str(msg, AS_HB_MSG_CLUSTER_ID, cluster_id, NULL,
+	if (msg_get_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name, NULL,
 			MSG_GET_DIRECT) != 0) {
 		return -1;
 	}
@@ -3057,7 +3067,7 @@ msg_supported_nodes_get(int msg_buffer_size)
 		  g_hb_v2_msg_template,
 		  sizeof(g_hb_v2_msg_template) / sizeof(msg_template));
 
-		// Also accomodate for the terminating '0' nodeid.
+		// Also accommodate for the terminating '0' nodeid.
 		int supported_cluster_size =
 		  ((msg_buffer_size - UDP_HEADER_SIZE_MAX -
 		    fixed_payload_size) /
@@ -3162,9 +3172,22 @@ config_init()
 			  g_config.hb_config.hb_publish_addr_s,
 			  sizeof(g_config.hb_config.hb_publish_addr_s));
 	} else {
-		// Use node ip as the publish ip.
-		strncpy(g_config.hb_config.hb_publish_addr_s, g_config.node_ip,
-			sizeof(g_config.hb_config.hb_publish_addr_s));
+
+		if (IS_MESH() && as_hb_ipaddr_is_specified(
+				   &g_config.hb_config.hb_listen_addr)) {
+			// Publish the listen address if it is specified and an
+			// interface address is not specified.
+			strncpy(g_config.hb_config.hb_publish_addr_s,
+				g_config.hb_config.hb_listen_addr_s,
+				sizeof(g_config.hb_config.hb_publish_addr_s));
+
+		} else {
+			// Use node ip as the publish ip in multicast mode or if
+			// the mesh listen address is not specified.
+			strncpy(g_config.hb_config.hb_publish_addr_s,
+				g_config.node_ip,
+				sizeof(g_config.hb_config.hb_publish_addr_s));
+		}
 	}
 
 	struct in_addr in_addr_to_publish;
@@ -4461,19 +4484,19 @@ channel_msg_sanity_check(msg* msg)
 	}
 
 	if (!HB_IS_MSG_LEGACY(msg) && type == AS_HB_MSG_TYPE_PULSE) {
-		char* remote_cluster_id = NULL;
+		char* remote_cluster_name = NULL;
 
-		if (msg_cluster_id_get(msg, &remote_cluster_id) != 0) {
-			remote_cluster_id = "";
+		if (msg_cluster_name_get(msg, &remote_cluster_name) != 0) {
+			remote_cluster_name = "";
 		}
 
-		char cluster_id[AS_CLUSTER_ID_SZ];
-		as_config_cluster_id_get(cluster_id);
+		char cluster_name[AS_CLUSTER_NAME_SZ];
+		as_config_cluster_name_get(cluster_name);
 
-		if (strcmp(remote_cluster_id, cluster_id) != 0) {
+		if (strcmp(remote_cluster_name, cluster_name) != 0) {
 			rv = -1;
 			DEBUG("Recieved message from a node with "
-			      "different cluster id. Ignoring!");
+			      "different cluster name. Ignoring!");
 		}
 	}
 
@@ -6137,7 +6160,7 @@ Exit:
 
 /**
  * Check and fix the case where we received a self incoming message probably
- * because one of our non loop back itnerfaces was used as a seed address.
+ * because one of our non loop back interfaces was used as a seed address.
  *
  * @return true if this message is a self message, false otherwise.
  */
@@ -6769,7 +6792,7 @@ mesh_channel_on_msg_rcvd(as_hb_channel_event* event)
 			mesh_channel_on_info_reply(event->msg);
 			break;
 		default:
-			WARNING("Recieved a message of unknown type from.");
+			WARNING("Received a message of unknown type from.");
 			// Ignore other messages.
 			break;
 	}
@@ -7022,7 +7045,7 @@ mesh_tip_clear_reduce(void* key, void* data, void* udata)
 	if (rv == SHASH_REDUCE_DELETE) {
 		if (channel_node_disconnect(nodeid) != 0) {
 			WARNING(
-			  "Unable to disconnet the channel to node %" PRIx64,
+			  "Unable to disconnect the channel to node %" PRIx64,
 			  nodeid);
 		}
 	}
@@ -7462,7 +7485,7 @@ hb_event_publish_pending()
 };
 
 /**
- * Delete the plugin data while itereating through the map.
+ * Delete the plugin data while iterating through the map.
  */
 static int
 hb_adjacency_free_plugin_data_reduce(void* key, void* data, void* udata)
@@ -7481,7 +7504,7 @@ hb_adjacency_free_plugin_data_reduce(void* key, void* data, void* udata)
 }
 
 /**
- * Clear the heartbeat datastructures.
+ * Clear the heartbeat data structures.
  */
 static void
 hb_clear()
@@ -7533,7 +7556,7 @@ hb_adjacency_iterate_reduce(void* key, void* data, void* udata)
 }
 
 /**
- * Plugin function to set heartbeat adjacency list into a pluse message.
+ * Plugin function to set heartbeat adjacency list into a pulse message.
  */
 static void
 hb_plugin_set_fn(msg* msg)
@@ -7557,13 +7580,13 @@ hb_plugin_set_fn(msg* msg)
 		msg_adjacency_set(msg, adj_list,
 				  adjacency_reduce_udata.adj_count);
 
-		// Set cluster id
-		char cluster_id[AS_CLUSTER_ID_SZ];
-		as_config_cluster_id_get(cluster_id);
-		if (cluster_id[0] != 0 &&
-		    msg_set_str(msg, AS_HB_MSG_CLUSTER_ID, cluster_id,
+		// Set cluster name
+		char cluster_name[AS_CLUSTER_NAME_SZ];
+		as_config_cluster_name_get(cluster_name);
+		if (cluster_name[0] != 0 &&
+		    msg_set_str(msg, AS_HB_MSG_CLUSTER_NAME, cluster_name,
 				MSG_SET_COPY) != 0) {
-			CRASH("Error setting cluster id on msg.");
+			CRASH("Error setting cluster name on msg.");
 		}
 
 	} else {
@@ -7824,9 +7847,10 @@ hb_transmitter(void* arg)
 		DETAIL("Done sending pulse message.");
 
 	Sleep:
-		usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
-			   (last_time + PULSE_TRANSMIT_INTERVAL()) - curr_time) *
-		       1000);
+		usleep(
+		  MIN(AS_HB_TX_INTERVAL_MS_MIN,
+		      (last_time + PULSE_TRANSMIT_INTERVAL()) - curr_time) *
+		  1000);
 	}
 
 	DETAIL("Heartbeat transmitter stopped.");
@@ -7847,7 +7871,7 @@ hb_adjacent_node_get(cf_node nodeid, as_hb_adjacent_node* adjacent_node)
 
 	if (SHASH_GET_OR_DIE(
 	      g_hb.adjacency, &nodeid, adjacent_node,
-	      "Error reading adjacecny information for node %" PRIx64,
+	      "Error reading adjacency information for node %" PRIx64,
 	      nodeid) == SHASH_OK) {
 		rv = 0;
 	}
@@ -7882,7 +7906,7 @@ hb_adjacent_node_plugin_data_get(as_hb_adjacent_node* adjacent_node,
 }
 
 /**
- * Inidicates if a give node has expired and should be removed from the
+ * Indicates if a give node has expired and should be removed from the
  * adjacency list.
  */
 static bool
@@ -8640,7 +8664,7 @@ hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict)
 }
 
 /**
- * Reduce function to iterate over plugin data for all adjacecnt nodes.
+ * Reduce function to iterate over plugin data for all adjacent nodes.
  */
 static int
 hb_plugin_data_iterate_reduce(void* key, void* data, void* udata)
@@ -8676,7 +8700,7 @@ hb_plugin_data_iterate_reduce(void* key, void* data, void* udata)
  * @param pluginid the plugin identifier.
  * @param iterate_fn the iterate function invoked for plugin data for every
  * node.
- * @param udata passed as is to the iterqte function. Useful for getting results
+ * @param udata passed as is to the iterate function. Useful for getting results
  * out of the iteration.
  * NULL if there is no plugin data.
  * @return the size of the plugin data. 0 if there is no plugin data.

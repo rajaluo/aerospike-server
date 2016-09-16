@@ -78,6 +78,10 @@ job_result_str(int result_code)
 		return "abandoned-cluster-key";
 	case AS_JOB_FAIL_USER_ABORT:
 		return "user-aborted";
+	case AS_JOB_FAIL_RESPONSE_ERROR:
+		return "abandoned-response-error";
+	case AS_JOB_FAIL_RESPONSE_TIMEOUT:
+		return "abandoned-response-timeout";
 	default:
 		return "abandoned-?";
 	}
@@ -499,12 +503,14 @@ as_job_manager_start_job(as_job_manager* mgr, as_job* _job)
 	pthread_mutex_lock(&mgr->lock);
 
 	if (cf_queue_sz(mgr->active_jobs) >= mgr->max_active) {
+		cf_warning(AS_JOB, "max of %u jobs currently active", mgr->max_active);
 		pthread_mutex_unlock(&mgr->lock);
 		return AS_JOB_FAIL_FORBIDDEN;
 	}
 
 	// Make sure trid is unique.
 	if (as_job_manager_find_any(mgr, _job->trid)) {
+		cf_warning(AS_JOB, "job with trid %lu already active", _job->trid);
 		pthread_mutex_unlock(&mgr->lock);
 		return AS_JOB_FAIL_PARAMETER;
 	}

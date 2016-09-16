@@ -130,7 +130,7 @@ static void memcpy_ai_objStoDumpBuf(char *dumpbuf, ai_obj *a)
 	dumpbuf[len] = '\0';
 }
 
-void dump_ai_obj(FILE *fp, ai_obj *a)
+static void dump_ai_obj_internal(FILE *fp, ai_obj *a, bool as_digest)
 {
 	char dumpbuf[1024];
 
@@ -175,8 +175,16 @@ void dump_ai_obj(FILE *fp, ai_obj *a)
 		fprintf(fp, "\n");
 	} else if (C_IS_Y(a->type)) {
 		fprintf(fp, "\tU160 ai_obj: mt: %d val: ", a->empty);
-		DEBUG_U160(fp, a->y);
-		fprintf(fp, "\n");
+		if (as_digest) {
+			const int len = 20;
+			char digest_str[2 + (len * 2) + 1];
+			digest_str[0] = '\0';
+			generate_packed_hex_string((uint8_t *) &(a->y), len, digest_str);
+			fprintf(fp, "%s\n", digest_str);
+		} else {
+			DEBUG_U160(fp, a->y);
+			fprintf(fp, "\n");
+		}
 	} else if (C_IS_F(a->type)) {
 		if (a->enc == COL_TYPE_INT) {
 			fprintf(fp, "\tFLOAT ai_obj: mt: %d val: %f\n", a->empty, a->f);
@@ -187,4 +195,14 @@ void dump_ai_obj(FILE *fp, ai_obj *a)
 	} else {
 		fprintf(fp, "\tUNINITIALISED ai_obj mt: %d\n", a->empty);
 	}
+}
+
+void dump_ai_obj(FILE *fp, ai_obj *a)
+{
+	dump_ai_obj_internal(fp, a, false);
+}
+
+void dump_ai_obj_as_digest(FILE *fp, ai_obj *a)
+{
+	dump_ai_obj_internal(fp, a, true);
 }

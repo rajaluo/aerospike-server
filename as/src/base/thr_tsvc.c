@@ -51,6 +51,7 @@
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
+#include "fabric/partition_balance.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
 #include "transaction/proxy.h"
@@ -164,10 +165,7 @@ process_transaction(as_transaction *tr)
 				goto Cleanup;
 			}
 
-			if (as_query(tr, ns) == 0) {
-				free_msgp = false;
-			}
-			else {
+			if (as_query(tr, ns) != 0) {
 				cf_atomic64_incr(&ns->query_fail);
 				as_multi_rec_transaction_error(tr, tr->result_code);
 			}
@@ -180,10 +178,7 @@ process_transaction(as_transaction *tr)
 				goto Cleanup;
 			}
 
-			if ((rv = as_scan(tr, ns)) == 0) {
-				free_msgp = false;
-			}
-			else {
+			if ((rv = as_scan(tr, ns)) != 0) {
 				as_multi_rec_transaction_error(tr, rv);
 			}
 		}

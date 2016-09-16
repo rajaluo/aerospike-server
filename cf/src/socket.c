@@ -836,6 +836,13 @@ cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t fl
 			return -1;
 		}
 
+		if (count == 0) {
+			// TODO - remove warning if this turns out to be normal.
+			cf_warning(CF_SOCKET, "Sent 0 bytes on FD %d", sock->fd);
+			errno = ENOTCONN;
+			return -1;
+		}
+
 		off += count;
 	}
 

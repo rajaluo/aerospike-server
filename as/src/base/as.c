@@ -45,6 +45,7 @@
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "base/json_init.h"
 #include "base/monitor.h"
 #include "base/scan.h"
@@ -449,6 +450,7 @@ main(int argc, char **argv)
 	// nodes or clients yet.)
 
 	as_smd_init();				// System Metadata first - others depend on it
+	as_index_tree_gc_init();	// thread to purge dropped index trees
 	ai_init();					// before as_storage_init() populates indexes
 	as_sindex_thr_init();		// defrag secondary index (ok during population)
 

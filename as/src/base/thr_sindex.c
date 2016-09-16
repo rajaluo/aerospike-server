@@ -739,7 +739,7 @@ sbld_job_create(as_namespace* ns, uint16_t set_id, as_sindex* si)
 void
 sbld_job_slice(as_job* _job, as_partition_reservation* rsv)
 {
-	as_index_reduce_live(rsv->p->vp, sbld_job_reduce_cb, (void*)_job);
+	as_index_reduce_live(rsv->tree, sbld_job_reduce_cb, (void*)_job);
 }
 
 void

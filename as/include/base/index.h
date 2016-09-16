@@ -319,9 +319,12 @@ typedef struct as_index_tree_s {
 // as_index_tree public API.
 //
 
+void as_index_tree_gc_init();
+int as_index_tree_gc_queue_size();
+
 as_index_tree *as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
 as_index_tree *as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
-int as_index_tree_release(as_index_tree *tree, void *destructor_udata);
+int as_index_tree_release(as_index_tree *tree);
 uint32_t as_index_tree_size(as_index_tree *tree);
 
 typedef void (*as_index_reduce_fn) (as_index_ref *value, void *udata);

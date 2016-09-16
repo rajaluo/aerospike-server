@@ -57,6 +57,7 @@
 #include "base/asm.h"
 #include "base/batch.h"
 #include "base/datamodel.h"
+#include "base/index.h"
 #include "base/ldt.h"
 #include "base/monitor.h"
 #include "base/scan.h"
@@ -75,6 +76,7 @@
 #include "fabric/hlc.h"
 #include "fabric/migrate.h"
 #include "fabric/partition.h"
+#include "fabric/partition_balance.h"
 #include "fabric/paxos.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -266,7 +268,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_int(db, "delete_queue", as_nsup_queue_get_size());
 	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
 	info_append_uint32(db, "proxy_in_progress", as_proxy_hash_count());
-	info_append_uint64(db, "record_refs", g_stats.global_record_ref_count);
+	info_append_int(db, "tree_gc_queue", as_index_tree_gc_queue_size());
 
 	info_append_uint64(db, "client_connections", g_stats.proto_connections_opened - g_stats.proto_connections_closed);
 	info_append_uint64(db, "heartbeat_connections", g_stats.heartbeat_connections_opened - g_stats.heartbeat_connections_closed);
@@ -327,8 +329,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
 	info_append_string(db, "paxos_principal", paxos_principal);
 
-	info_append_bool(db, "migrate_allowed", as_partition_get_migration_flag());
-	info_append_uint64(db, "migrate_partitions_remaining", as_partition_remaining_migrations());
+	info_append_bool(db, "migrate_allowed", as_partition_balance_are_migrations_allowed());
+	info_append_uint64(db, "migrate_partitions_remaining", as_partition_balance_remaining_migrations());
 
 	info_append_uint64(db, "fabric_msgs_sent", g_stats.fabric_msgs_sent);
 	info_append_uint64(db, "fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd);
@@ -352,13 +354,11 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 }
 
 int
-info_get_cluster_id(char *name, cf_dyn_buf *db)
+info_get_cluster_name(char *name, cf_dyn_buf *db)
 {
-	char cluster_id[AS_CLUSTER_ID_SZ];
-	as_config_cluster_id_get(cluster_id);
-	if (cluster_id[0] != 0) {
-		cf_dyn_buf_append_string(db, cluster_id);
-	}
+	char cluster_name[AS_CLUSTER_NAME_SZ];
+	as_config_cluster_name_get(cluster_name);
+	cf_dyn_buf_append_string(db, cluster_name);
 
 	return 0;
 }
@@ -380,26 +380,11 @@ info_get_partition_info(char *name, cf_dyn_buf *db)
 	return(0);
 }
 
-int
-info_get_replicas_read(char *name, cf_dyn_buf *db)
-{
-	as_partition_getreplica_read_str(db);
-
-	return(0);
-}
-
+// Deprecate in "six months".
 int
 info_get_replicas_prole(char *name, cf_dyn_buf *db)
 {
-	as_partition_getreplica_prole_str(db);
-
-	return(0);
-}
-
-int
-info_get_replicas_write(char *name, cf_dyn_buf *db)
-{
-	as_partition_getreplica_write_str(db);
+	as_partition_get_replicas_prole_str(db);
 
 	return(0);
 }
@@ -407,7 +392,7 @@ info_get_replicas_write(char *name, cf_dyn_buf *db)
 int
 info_get_replicas_master(char *name, cf_dyn_buf *db)
 {
-	as_partition_getreplica_master_str(db);
+	as_partition_get_replicas_master_str(db);
 
 	return(0);
 }
@@ -1497,6 +1482,82 @@ info_command_smd_cmd(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
+/*
+ *  Print out Secondary Index info.
+ */
+int
+info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
+{
+	cf_debug(AS_INFO, "dump-si command received: params %s", params);
+
+	char param_str[100];
+	int param_str_len = sizeof(param_str);
+	char *ns = NULL, *set = NULL, *file = NULL;
+	bool verbose = false;
+
+	/*
+	 *  Command Format:  "dump-si:ns=<string>;set=<string>;{file=<string>;verbose=<opt>}" [the "file" and "verbose" arguments are optional]
+	 *
+	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
+	 */
+	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
+	if (!as_info_parameter_get(params, "ns", param_str, &param_str_len)) {
+		ns = cf_strdup(param_str);
+	} else {
+		cf_warning(AS_INFO, "The \"%s:\" command requires an \"ns\" parameter", name);
+		cf_dyn_buf_append_string(db, "error");
+		goto cleanup;
+	}
+
+	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
+	if (!as_info_parameter_get(params, "set", param_str, &param_str_len)) {
+		set = cf_strdup(param_str);
+	} else {
+		cf_warning(AS_INFO, "The \"%s:\" command requires a \"set\" parameter", name);
+		cf_dyn_buf_append_string(db, "error");
+		goto cleanup;
+	}
+
+	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
+	if (!as_info_parameter_get(params, "file", param_str, &param_str_len)) {
+		file = cf_strdup(param_str);
+	}
+
+	param_str[0] = '\0';
+	if (!as_info_parameter_get(params, "verbose", param_str, &param_str_len)) {
+		if (!strncmp(param_str, "true", 5)) {
+			verbose = true;
+		} else if (!strncmp(param_str, "false", 6)) {
+			verbose = false;
+		} else {
+			cf_warning(AS_INFO, "The \"%s:\" command argument \"verbose\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
+			cf_dyn_buf_append_string(db, "error");
+			goto cleanup;
+		}
+	}
+
+	ai_btree_dump(ns, set, file, verbose);
+	cf_dyn_buf_append_string(db, "ok");
+
+ cleanup:
+	if (ns) {
+		cf_free(ns);
+	}
+
+	if (set) {
+		cf_free(set);
+	}
+
+	if (file) {
+		cf_free(file);
+	}
+
+	return 0;
+}
+
 int
 info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 {
@@ -1618,12 +1679,9 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "batch-index-threads", g_config.n_batch_index_threads);
 	info_append_int(db, "clock-skew-max-ms", g_config.clock_skew_max_ms);
 
-	char cluster_id[AS_CLUSTER_ID_SZ];
-	as_config_cluster_id_get(cluster_id);
-	if (cluster_id[0]) {
-		// TODO: print none in v3.
-		info_append_string(db, "cluster-id", cluster_id);
-	}
+	char cluster_name[AS_CLUSTER_NAME_SZ];
+	as_config_cluster_name_get(cluster_name);
+	info_append_string(db, "cluster-name", cluster_name);
 
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
@@ -2196,15 +2254,11 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of paxos-recovery-policy to %s", context);
 		}
-		else if (0 == as_info_parameter_get( params, "cluster-id", context, &context_len)){
-			char* cluster_id = context;
-			if (strcmp(cluster_id, "none") == 0) {
-				cluster_id = "";
-			}
-			if (!as_config_cluster_id_set(cluster_id)) {
+		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
+			if (!as_config_cluster_name_set(context)) {
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of cluster-id to '%s'", cluster_id);
+			cf_info(AS_INFO, "Changing value of cluster-name to '%s'", context);
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (0 > val))
@@ -2574,7 +2628,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
 			if ( 0 > as_hb_tx_interval_set(val)) {
-					goto Error;
+				goto Error;
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "heartbeat.timeout", context, &context_len)) {
@@ -5979,9 +6033,9 @@ as_info_init()
 	as_info_set( hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
 	// All commands accepted by asinfo/telnet
-	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-id;config-get;config-set;"
+	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-name;config-get;config-set;"
 				"df;digests;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-rw;"
-				"dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
+				"dump-si;dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
 				"service;services;services-alumni;services-alumni-reset;set-config;"
@@ -5999,7 +6053,7 @@ as_info_init()
 	// Set up some dynamic functions
 	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
 	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true);     // Returns cluster generation.
-	as_info_set_dynamic("cluster-id", info_get_cluster_id, false);                    // Returns cluster id.
+	as_info_set_dynamic("cluster-name", info_get_cluster_name, false);                // Returns cluster name.
 	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
 	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
 	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.
@@ -6009,8 +6063,6 @@ as_info_init()
 	as_info_set_dynamic("replicas-all", info_get_replicas_all, false);                // Base 64 encoded binary representation of partitions this node is replica for.
 	as_info_set_dynamic("replicas-master", info_get_replicas_master, false);          // Base 64 encoded binary representation of partitions this node is master (replica) for.
 	as_info_set_dynamic("replicas-prole", info_get_replicas_prole, false);            // Base 64 encoded binary representation of partitions this node is prole (replica) for.
-	as_info_set_dynamic("replicas-read", info_get_replicas_read, false);              //
-	as_info_set_dynamic("replicas-write", info_get_replicas_write, false);            //
 	as_info_set_dynamic("service", info_get_service, false);                          // IP address and server port for this node, expected to be a single.
 	                                                                                  // address/port per node, may be multiple address if this node is configured.
 	                                                                                  // to listen on multiple interfaces (typically not advised).
@@ -6045,6 +6097,7 @@ as_info_init()
 	as_info_set_command("dump-paxos", info_command_dump_paxos, PERM_LOGGING_CTRL);            // Print debug information about Paxos state to the log file.
 	as_info_set_command("dump-ra", info_command_dump_ra, PERM_LOGGING_CTRL);                  // Print debug information about Rack Aware state.
 	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
+	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
 	as_info_set_command("dump-smd", info_command_dump_smd, PERM_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.
 	as_info_set_command("dump-wb", info_command_dump_wb, PERM_LOGGING_CTRL);                  // Print debug information about Write Bocks (WB) to the log file.
 	as_info_set_command("dump-wb-summary", info_command_dump_wb_summary, PERM_LOGGING_CTRL);  // Print summary information about all Write Blocks (WB) on a device to the log file.

@@ -34,6 +34,7 @@
 #include "aerospike/as_aerospike.h"
 #include "aerospike/as_buffer.h"
 #include "aerospike/as_log.h"
+#include "aerospike/as_list.h"
 #include "aerospike/as_module.h"
 #include "aerospike/as_msgpack.h"
 #include "aerospike/as_serializer.h"
@@ -216,6 +217,8 @@ as_udf_init()
 udf_def*
 udf_def_init_from_msg(udf_def* def, const as_transaction* tr)
 {
+	def->arglist = NULL;
+
 	as_msg* m = &tr->msgp->msg;
 	as_msg_field* filename =
 			as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_FILENAME);
@@ -239,7 +242,21 @@ udf_def_init_from_msg(udf_def* def, const as_transaction* tr)
 
 	as_msg_field_get_strncpy(filename, def->filename, sizeof(def->filename));
 	as_msg_field_get_strncpy(function, def->function, sizeof(def->function));
-	def->arglist = arglist;
+
+	as_unpacker unpacker;
+
+	unpacker.buffer = (const unsigned char*)arglist->data;
+	unpacker.length = as_msg_field_get_value_sz(arglist);
+	unpacker.offset = 0;
+
+	if (unpacker.length > 0) {
+		as_val* val = NULL;
+		int ret = as_unpack_val(&unpacker, &val);
+
+		if (ret == 0 && as_val_type(val) == AS_LIST) {
+			def->arglist = (as_list*)val;
+		}
+	}
 
 	as_msg_field* op = as_transaction_has_udf_op(tr) ?
 			as_msg_field_get(m, AS_MSG_FIELD_TYPE_UDF_OP) : NULL;
@@ -320,7 +337,7 @@ as_udf_start(as_transaction* tr)
 	}
 
 	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_getreplica_readall(tr->rsv.ns, tr->rsv.pid,
+	rw->n_dest_nodes = as_partition_get_other_replicas(tr->rsv.p,
 			rw->dest_nodes);
 
 	// If we don't need replica writes, transaction is finished.
@@ -444,7 +461,7 @@ udf_dup_res_cb(rw_request* rw)
 	}
 
 	// Set up the nodes to which we'll write replicas.
-	rw->n_dest_nodes = as_partition_getreplica_readall(tr.rsv.ns, tr.rsv.pid,
+	rw->n_dest_nodes = as_partition_get_other_replicas(tr.rsv.p,
 			rw->dest_nodes);
 
 	// If we don't need replica writes, transaction is finished.
@@ -618,6 +635,10 @@ udf_master(rw_request* rw, as_transaction* tr)
 	}
 
 	udf_optype optype = udf_master_apply(&call, rw);
+
+	if (tr->origin != FROM_IUDF && call.def->arglist) {
+		as_list_destroy(call.def->arglist);
+	}
 
 	if (UDF_OP_IS_READ(optype) || optype == UDF_OPTYPE_NONE) {
 		// UDF is done, no replica writes needed.
@@ -811,9 +832,6 @@ udf_master_apply(udf_call* call, rw_request* rw)
 int
 udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 {
-	as_list arglist;
-	as_list_init(&arglist, call->def->arglist, &udf_arglist_hooks);
-
 	time_tracker udf_timer_tracker = {
 		.udata		= as_rec_source(rec),
 		.end_time	= udf_end_time
@@ -833,7 +851,7 @@ udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 	uint64_t start_time = g_config.ldt_benchmarks ? cf_getns() : 0;
 
 	int apply_rv = as_module_apply_record(&mod_lua, &ctx, call->def->filename,
-			call->def->function, rec, &arglist, result);
+			call->def->function, rec, call->def->arglist, result);
 
 	if (start_time != 0) {
 		ldt_record* lrecord = (ldt_record*)as_rec_source(rec);
@@ -844,7 +862,6 @@ udf_apply_record(udf_call* call, as_rec* rec, as_result* result)
 	}
 
 	udf_timer_cleanup();
-	as_list_destroy(&arglist);
 
 	return apply_rv;
 }

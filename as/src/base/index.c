@@ -37,6 +37,7 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
+#include "citrusleaf/cf_queue.h"
 
 #include "arenax.h"
 #include "fault.h"
@@ -77,9 +78,19 @@ typedef struct as_index_ele_s {
 
 
 //==========================================================
+// Globals.
+//
+
+static cf_queue g_gc_queue;
+
+
+
+//==========================================================
 // Forward declarations.
 //
 
+void *run_index_tree_gc(void *unused);
+void as_index_tree_destroy(as_index_tree *tree);
 bool as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref);
 void as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);
 void as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h, cf_arenax_handle sentinel_h, as_index_ph_array *v_a);
@@ -89,6 +100,35 @@ void as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele);
 void as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele);
 void as_index_rotate_left(as_index_tree *tree, as_index_ele *a, as_index_ele *b);
 void as_index_rotate_right(as_index_tree *tree, as_index_ele *a, as_index_ele *b);
+
+
+
+//==========================================================
+// Public API - initialize garbage collection system.
+//
+
+void
+as_index_tree_gc_init()
+{
+	cf_queue_init(&g_gc_queue, sizeof(as_index_tree*), 4096, true);
+
+	pthread_t thread;
+	pthread_attr_t attrs;
+
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
+
+	if (pthread_create(&thread, &attrs, run_index_tree_gc, NULL) != 0) {
+		cf_crash(AS_INDEX, "failed to create garbage collection thread");
+	}
+}
+
+
+int
+as_index_tree_gc_queue_size()
+{
+	return cf_queue_sz(&g_gc_queue);
+}
 
 
 
@@ -104,7 +144,7 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 	as_index_tree *tree = cf_rc_alloc(sizeof(as_index_tree));
 
 	if (! tree) {
-		return NULL;
+		cf_crash(AS_INDEX, "failed to allocate tree");
 	}
 
 	pthread_mutex_init(&tree->lock, NULL);
@@ -116,8 +156,7 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 	tree->sentinel_h = cf_arenax_alloc(arena);
 
 	if (tree->sentinel_h == 0) {
-		cf_rc_free(tree);
-		return NULL;
+		cf_crash(AS_INDEX, "failed to allocate sentinel");
 	}
 
 	as_index *sentinel = RESOLVE_H(tree->sentinel_h);
@@ -130,9 +169,7 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 	tree->root_h = cf_arenax_alloc(arena);
 
 	if (tree->root_h == 0) {
-		cf_arenax_free(arena, tree->sentinel_h);
-		cf_rc_free(tree);
-		return NULL;
+		cf_crash(AS_INDEX, "failed to allocate root");
 	}
 
 	tree->root = RESOLVE_H(tree->root_h);
@@ -158,23 +195,21 @@ as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
 // Destroy a red-black tree; return 0 if the tree was destroyed or 1 otherwise.
 // TODO - nobody cares about the return value, make it void?
 int
-as_index_tree_release(as_index_tree *tree, void *destructor_udata)
+as_index_tree_release(as_index_tree *tree)
 {
-	if (0 != cf_rc_release(tree)) {
+	int rc = cf_rc_release(tree);
+
+	if (rc > 0) {
 		return 1;
 	}
 
-	as_index_tree_purge(tree, RESOLVE_H(tree->root->left_h),
-			tree->root->left_h);
+	cf_assert(rc == 0, AS_INDEX, CF_CRITICAL, "tree ref-count %d", rc);
 
-	cf_arenax_free(tree->arena, tree->root_h);
-	cf_arenax_free(tree->arena, tree->sentinel_h);
+	// TODO - call as_index_tree_destroy() directly if tree is empty?
 
-	pthread_mutex_destroy(&tree->lock);
-	pthread_mutex_destroy(&tree->reduce_lock);
-
-	memset(tree, 0, sizeof(as_index_tree)); // paranoia - for debugging only
-	cf_rc_free(tree);
+	if (cf_queue_push(&g_gc_queue, &tree) != CF_QUEUE_OK) {
+		cf_crash(AS_INDEX, "failed push to garbage collection queue");
+	}
 
 	return 0;
 }
@@ -343,7 +378,6 @@ as_index_get_vlock(as_index_tree *tree, cf_digest *keyd,
 	}
 
 	as_index_reserve(index_ref->r);
-	cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 	pthread_mutex_unlock(&tree->lock);
 
@@ -404,7 +438,6 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 				// The element already exists, simply return it.
 
 				as_index_reserve(t);
-				cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 				pthread_mutex_unlock(&tree->lock);
 
@@ -460,7 +493,6 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 	as_index *n = RESOLVE_H(n_h);
 
 	n->rc = 2; // one for create (eventually balanced by delete), one for caller
-	cf_atomic64_add(&g_stats.global_record_ref_count, 2);
 
 	n->key = *keyd;
 
@@ -659,18 +691,52 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 // Local helpers.
 //
 
+void *
+run_index_tree_gc(void *unused)
+{
+	as_index_tree *tree;
+
+	while (cf_queue_pop(&g_gc_queue, &tree, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
+		as_index_tree_destroy(tree);
+	}
+
+	return NULL;
+}
+
+
+void
+as_index_tree_destroy(as_index_tree *tree)
+{
+	as_index_tree_purge(tree, RESOLVE_H(tree->root->left_h),
+			tree->root->left_h);
+
+	cf_arenax_free(tree->arena, tree->root_h);
+	cf_arenax_free(tree->arena, tree->sentinel_h);
+
+	pthread_mutex_destroy(&tree->lock);
+	pthread_mutex_destroy(&tree->reduce_lock);
+
+	memset(tree, 0, sizeof(as_index_tree)); // paranoia - for debugging only
+	cf_rc_free(tree);
+}
+
+
 void
 as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
 {
-	if (0 == as_index_release(r)) {
-		if (tree->destructor) {
-			tree->destructor(r, tree->destructor_udata);
-		}
+	int rc = as_index_release(r);
 
-		cf_arenax_free(tree->arena, r_h);
+	if (rc > 0) {
+		return;
 	}
 
-	cf_atomic64_decr(&g_stats.global_record_ref_count);
+	cf_assert(rc == 0, AS_INDEX, CF_CRITICAL, "index ref-count %d", rc);
+
+	if (tree->destructor) {
+		tree->destructor(r, tree->destructor_udata);
+	}
+
+	cf_arenax_free(tree->arena, r_h);
 }
 
 
@@ -721,7 +787,6 @@ as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h,
 	}
 
 	as_index_reserve(r);
-	cf_atomic64_incr(&g_stats.global_record_ref_count);
 
 	v_a->indexes[v_a->pos].r = r;
 	v_a->indexes[v_a->pos].r_h = r_h;

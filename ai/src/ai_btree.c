@@ -1376,7 +1376,7 @@ ai_btree_destroy(as_sindex_metadata *imd)
 }
 
 int
-ai_btree_dump(char *ns_name, char *setname, char *filename)
+ai_btree_dump(char *ns_name, char *setname, char *filename, bool verbose)
 {
 	char *tname;
 
@@ -1386,7 +1386,7 @@ ai_btree_dump(char *ns_name, char *setname, char *filename)
 
 	AI_GRLOCK();
 
-	int retval = dump_btree(tname, (filename ? filename : DEFAULT_BTREE_DUMP_FILENAME));
+	int retval = dump_btree(tname, (filename ? filename : DEFAULT_BTREE_DUMP_FILENAME), verbose);
 
 	AI_UNLOCK();
 

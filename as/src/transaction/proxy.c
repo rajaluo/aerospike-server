@@ -127,7 +127,7 @@ typedef struct proxy_request_s {
 	// The node we're diverting to.
 	cf_node			dest;
 
-	uint32_t		pid; // TODO - is this worth it ???
+	uint32_t		pid;
 
 	as_namespace*	ns;
 
@@ -844,7 +844,7 @@ proxy_retransmit_send(proxy_request* pr)
 		// The node I'm proxying to is no longer up. Find another node. (Easier
 		// to just send to the master and not pay attention to whether it's read
 		// or write.)
-		cf_node new_dst = as_partition_getreplica_write(pr->ns, pr->pid);
+		cf_node new_dst = as_partition_writable_node(pr->ns, pr->pid);
 
 		// Destination is self - abandon proxy and try local transaction.
 		if (new_dst == g_config.self_node) {

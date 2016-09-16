@@ -48,6 +48,7 @@ void printDWD(dwd_t dwd, bt *btr)
 	convertStream2Key(be, &akey, btr);
 	dump_ai_obj(stdout, &akey);
 }
+
 void printKeyFromPtr(bt *btr, void *be) {
 	ai_obj akey;
 	convertStream2Key(be, &akey, btr);
@@ -79,7 +80,7 @@ static int treeheight(bt *btr)
 	}
 
 	int ret = 0;
-	while (!x->leaf) {
+	while (x && !x->leaf) {
 		x = NODES(btr, x)[0];
 		ret++;
 	}
@@ -102,41 +103,47 @@ void bt_dump_info(FILE *fp, bt *btr)
 	DEBUG_BT_TYPE(fp, btr);
 }
 
-static void dump_tree_node(FILE *fp, bt *btr, bt_n *x, int depth, bool is_index, int slot, bool is_inode)
+static void bt_dump_array(FILE *fp, ai_arr *arr, bool verbose)
+{
+	fprintf(fp, "Array:  capacity: %d used: %d\n", arr->capacity, arr->used);
+	if (verbose) {
+		for (int i = 0; i < arr->used; i++) {
+			const int len = 20;
+			char digest_str[2 + (len * 2) + 1];
+			digest_str[0] = '\0';
+			generate_packed_hex_string((uint8_t *) &arr->data[i * CF_DIGEST_KEY_SZ], len, digest_str);
+			fprintf(fp, "\tData[%d]: %s\n", i, digest_str);
+		}
+	}
+}
+
+static void bt_dump_nbtr(FILE *fp, ai_nbtr *nbtr, bool is_index, bool verbose)
+{
+	if (nbtr->is_btree) {
+		bt_dumptree(fp, nbtr->u.nbtr, is_index, verbose);
+	} else {
+		bt_dump_array(fp, nbtr->u.arr, verbose);
+	}
+}
+
+static void dump_tree_node(FILE *fp, bt *btr, bt_n *x, int depth, bool is_index, int slot, bool verbose)
 {
 	if (!x->leaf) {
-#ifdef BTREE_DEBUG
-		fprintf(fp, "%d: NODE[%d]: ", depth, x->num);
-#else
 		fprintf(fp, "%d: NODE: ",     depth);
-#endif
 		if (x->dirty > 0) {
 			GET_BTN_SIZE(x->leaf);
 			void *ds = GET_DS(x, nsize);
-			fprintf(fp, "slot: %d n: %d scion: %d -> "
-					"(%p) ds: %p dirty: %u ndirty: %d\n",
-					slot, x->n, x->scion, (void *)x, ds, x->dirty,
-#ifdef NO_NUM_DIRTY_BUILD
-					0);
-#else
-					x->ndirty);
-#endif
+			fprintf(fp, "slot: %d n: %d scion: %d -> (%p) ds: %p dirty: %u\n",
+					slot, x->n, x->scion, (void *)x, ds, x->dirty);
 		} else {
 			fprintf(fp, "slot: %d n: %d scion: %d -> (%p)\n",
 					slot, x->n, x->scion, (void *) x);
 		}
-	} else {
+	} else if (verbose) {
 		if (x->dirty > 0) {
 			GET_BTN_SIZE(x->leaf) void *ds = GET_DS(x, nsize);
-			fprintf(fp, "%d: LEAF: slot: %d n: %d scion: %d -> " \
-					"(%p) ds: %p dirty: %u ndirty: %d\n",
-					depth, slot, x->n, x->scion, (void *)x, ds,
-					x->dirty,
-#ifdef NO_NUM_DIRTY_BUILD
-					0);
-#else
-					x->ndirty);
-#endif
+			fprintf(fp, "%d: LEAF: slot: %d n: %d scion: %d -> (%p) ds: %p dirty: %u\n",
+					depth, slot, x->n, x->scion, (void *)x, ds, x->dirty);
 		} else {
 			fprintf(fp, "%d: LEAF: slot: %d n: %d scion: %d -> (%p)\n",
 					depth, slot, x->n, x->scion, (void *)x);
@@ -144,12 +151,8 @@ static void dump_tree_node(FILE *fp, bt *btr, bt_n *x, int depth, bool is_index,
 		if (btr->dirty_left) {
 			if (findminnode(btr, btr->root) == x) {
 #ifdef PRINT_EVICTED_KEYS
-				if (is_inode)
-					fprintf(fp, "\t\tDL: %u\n", btr->dirty_left);
-				else {
-					for (uint32 i = 1; i <= btr->dirty_left; i++) {
-						fprintf(fp, "\t\t\t\t\tEVICTED KEY:\t\t\t%u\n", i);
-					}
+				for (uint32 i = 1; i <= btr->dirty_left; i++) {
+					fprintf(fp, "\t\t\t\t\tEVICTED KEY:\t\t\t%u\n", i);
 				}
 #else
 				fprintf(fp, "\t\tDL: %u\n", btr->dirty_left);
@@ -165,12 +168,12 @@ static void dump_tree_node(FILE *fp, bt *btr, bt_n *x, int depth, bool is_index,
 		void *rrow = parseStream(be, btr);
 		if (is_index) {
 			fprintf(fp, "\tINDEX-KEY: ");
-			dump_ai_obj(fp, &akey);
+			dump_ai_obj_as_digest(fp, &akey);
 			if (!SIMP_UNIQ(btr)) {
 				if (!rrow) fprintf(fp, "\t\tTOTAL EVICTION\n");
-				else       bt_dumptree(fp, (bt *)rrow, 0, 0);
+				else       bt_dump_nbtr(fp, (ai_nbtr *) rrow, 0, verbose);
 			}
-		} else {
+		} else if (verbose) {
 			bool key_printed = 0;
 			if        UU(btr) {
 				key_printed = 1;
@@ -245,12 +248,12 @@ static void dump_tree_node(FILE *fp, bt *btr, bt_n *x, int depth, bool is_index,
 			}
 			if (!key_printed) {
 				fprintf(fp, "KEY: ");
-				dump_ai_obj(fp, &akey);
+				dump_ai_obj_as_digest(fp, &akey);
 			}
 			if (x->dirty > 0) {
 #ifdef PRINT_EVICTED_KEYS
 				uint32 dr = getDR(btr, x, i);
-				if (is_inode && dr) fprintf(fp, "\t\t\t\tDR: %d\n", dr);
+				if (dr) fprintf(fp, "\t\t\t\tDR: %d\n", dr);
 				else {
 					ulong beg = C_IS_I(btr->s.ktype) ? akey.i : akey.l;
 					for (ulong j = 1; j <= (ulong)dr; j++) {
@@ -263,31 +266,45 @@ static void dump_tree_node(FILE *fp, bt *btr, bt_n *x, int depth, bool is_index,
 			}
 		}
 	}
-	if (!x->leaf) {
+	if (!x->leaf && verbose) {
 		depth++;
 		for (int i = 0; i <= x->n; i++) {
 			fprintf(fp, "\t\tNPTR[%d]: %p\n", i, NODES(btr, x)[i]);
-		}
-		for (int i = 0; i <= x->n; i++) {
-			dump_tree_node(fp, btr, NODES(btr, x)[i], depth, is_index, i, is_inode);
+			dump_tree_node(fp, btr, NODES(btr, x)[i], depth, is_index, i, verbose);
 		}
 	}
 }
 
-void bt_dumptree(FILE *fp, bt *btr, bool is_index, bool is_inode)
+void bt_dumptree(FILE *fp, bt *btr, bool is_index, bool verbose)
 {
 	bt_dump_info(fp, btr);
 	if (btr->root && btr->numkeys > 0) {
-		dump_tree_node(fp, btr, btr->root, 0, is_index, 0, is_inode);
+		dump_tree_node(fp, btr, btr->root, 0, is_index, 0, verbose);
 	}
 	fprintf(fp, "\n");
+}
+
+static char const *col_type_str(uchar type)
+{
+	switch (type) {
+	  case COL_TYPE_LONG:
+		  return "NUMERIC";
+	  case COL_TYPE_STRING:
+		  return "TEXT";
+	  case COL_TYPE_U160:
+		  return "DIGEST";
+	  case COL_TYPE_GEOJSON:
+		  return "GEOJSON";
+	  default:
+		  return "??????";
+	}
 }
 
 /*
  *  Print out the structure and contents of a B-Tree.
  *  Return 0 if successful, -1 otherwise.
  */
-int dump_btree(char *tbl_name, char *filename)
+int dump_btree(char *tbl_name, char *filename, bool verbose)
 {
 	int tmatch = -1;
 
@@ -303,13 +320,12 @@ int dump_btree(char *tbl_name, char *filename)
 	r_tbl_t *rt = &Tbl[tmatch];
 	fprintf(fp, "Table: %s columns\n", rt->name);
 	for (int j = 0; j < rt->col_count; j++) {
-		fprintf(fp, "\t%s | %s\n", rt->col[j].name,
-				as_sindex_ktype_str((as_sindex_ktype) rt->col[j].type));
+		fprintf(fp, "\t%s | %s\n", rt->col[j].name, col_type_str((as_sindex_ktype) rt->col[j].type));
 	}
 	MATCH_INDICES(tmatch);
 	bt *btr = getBtr(tmatch);
 
-	bt_dumptree(fp, btr, 0, 0);
+	bt_dumptree(fp, btr, 0, verbose);
 
 	if (matches) {
 		for (int i = 0; i < matches; i++) {
@@ -317,7 +333,7 @@ int dump_btree(char *tbl_name, char *filename)
 			bt *ibtr = getIBtr(j);
 			fprintf(fp, "INDEX: name: %s imatch: %d (%p)\n", Index[j].name, inds[i], (void *) ibtr);
 			if (ibtr) {
-				bt_dumptree(fp, ibtr, 1, 0);
+				bt_dumptree(fp, ibtr, 1, verbose);
 			}
 		}
 	}

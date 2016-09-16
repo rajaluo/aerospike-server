@@ -380,9 +380,9 @@ typedef enum {
 	AS_HB_MSG_PAXOS_DATA,
 
 	/**
-	 * Cluster id.
+	 * Cluster Name.
 	 */
-	AS_HB_MSG_CLUSTER_ID,
+	AS_HB_MSG_CLUSTER_NAME,
 
 	/**
 	 * Payload for compressed messages.

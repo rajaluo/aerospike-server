@@ -95,6 +95,10 @@ typedef enum {
 #define AS_JOB_FAIL_USER_ABORT	AS_PROTO_RESULT_FAIL_SCAN_ABORT
 #define AS_JOB_FAIL_FORBIDDEN	AS_PROTO_RESULT_FAIL_FORBIDDEN
 
+// These result codes can't make it back to the client, but show in monitor:
+#define AS_JOB_FAIL_RESPONSE_ERROR		(-1)
+#define AS_JOB_FAIL_RESPONSE_TIMEOUT	(-2)
+
 typedef struct as_job_s {
 	// Mandatory interface for derived classes:
 	as_job_vtable				vtable;

@@ -216,13 +216,8 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 			cf_free(ns->sets_cfg_array);
 		}
 
-		// Set partition id inside partition object.
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-			ns->partitions[pid].partition_id = pid;
-		}
-
-		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-			as_partition_init(&ns->partitions[pid], ns, pid);
+			as_partition_init(ns, pid);
 		}
 
 		as_sindex_init(ns);
