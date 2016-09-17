@@ -272,8 +272,8 @@ histogram_insert_data_point(histogram *h, uint64_t start_ns)
 		if (start_ns > end_ns) {
 			// Either the clock went backwards, or wrapped. (Assume the former,
 			// since it takes ~580 years from 0 to wrap.)
-			cf_warning(AS_INFO, "clock went backwards: start %lu end %lu",
-					start_ns, end_ns);
+			cf_warning(AS_INFO, "%s - clock went backwards: start %lu end %lu",
+					h->name, start_ns, end_ns);
 			bucket = 0;
 		}
 	}
