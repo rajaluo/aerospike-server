@@ -3646,62 +3646,8 @@ as_paxos_init()
 	as_paxos_set_cluster_key(cluster_key);
 	as_paxos_print_cluster_key("IGNITION");
 
-	size_t successful_storage_reads = 0;
-	size_t failed_storage_reads = 0;
-	size_t n_null_storage = 0;
-	size_t n_found_storage = 0;
-	size_t n_uninit_storage = 0;
-	/* Mark all partitions in all namespaces as lost unless there is partition data in storage*/
-	for (int i = 0; i < g_config.n_namespaces; i++) {
-		/* Initialize every partition's iid and vtp values */
-		as_namespace *ns = g_config.namespaces[i];
-
-		if (NAMESPACE_HAS_PERSISTENCE(ns)) { // skip loop if no persistent storage
-			for (int j = 0; j < AS_PARTITIONS; j++) {
-				as_partition_vinfo vinfo;
-				size_t vinfo_len = sizeof(vinfo);
-
-				// Find if the value has been set in storage
-				if (0 == as_storage_info_get(ns, j, (uint8_t *)&vinfo, &vinfo_len)) {
-					successful_storage_reads++;
-					if (vinfo_len == sizeof(as_partition_vinfo)) {
-						cf_debug(AS_PAXOS, "{%s:%d} Partition version read from storage: iid %"PRIx64"", ns->name, j, vinfo.iid);
-						memcpy(&ns->partitions[j].version_info, &vinfo, sizeof(as_partition_vinfo));
-						if (as_partition_is_null(&vinfo))
-							n_null_storage++;
-						else {
-							cf_debug(AS_PAXOS, "{%s:%d} Partition successful revive from storage", ns->name, j);
-							ns->partitions[j].state = AS_PARTITION_STATE_SYNC;
-							n_found_storage++;
-						}
-					}
-					else { // treat partition as lost - common on startup
-						cf_debug(AS_PAXOS, "{%s:%d} Error getting info from storage, got len %zu; partition will be treated as lost", ns->name, j, vinfo_len);
-						n_uninit_storage++;
-					}
-				}
-				else {
-					failed_storage_reads++;
-				}
-			} // end for
-		} // end if
-
-		// Initialize the global partition state structure.
-		for (int j = 0; j < AS_PARTITIONS; j++) {
-			ns->cluster_vinfo[0][j] = ns->partitions[j].version_info;
-		}
-
-		/* Initialize the partition sizes array for sending in all Paxos protocol v3 or greater PARTITION_SYNC_REQUEST and PARTITION_SYNC messages. */
-		if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
-			for (int j = 0; j < AS_PARTITIONS; j++) {
-				p->c_partition_size[i][0][j] = ns->partitions[j].vp ? ns->partitions[j].vp->elements : 0;
-				p->c_partition_size[i][0][j] += ns->partitions[j].sub_vp ? ns->partitions[j].sub_vp->elements : 0;
-			}
-		}
-	}
-
-	cf_debug(AS_PAXOS, "storage info reads: total %zu successful %zu failed %zu", successful_storage_reads + failed_storage_reads, successful_storage_reads, failed_storage_reads);
-	cf_info(AS_PAXOS, "partitions from storage: total %zu found %zu lost(set) %zu lost(unset) %zu", n_found_storage + n_null_storage + n_uninit_storage, n_found_storage, n_null_storage, n_uninit_storage);
+	g_paxos->cluster_size = 1;
+	as_paxos_set_cluster_integrity(g_paxos, true);
 
 	as_partition_balance_init();
 

@@ -120,15 +120,15 @@ as_partition_get_state_from_storage(as_namespace* ns, bool* partition_states)
 
 	int n_found = 0;
 
-	for (int j = 0; j < AS_PARTITIONS; j++) {
+	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition_vinfo vinfo;
 		size_t vinfo_len = sizeof(vinfo);
 
 		// Find if the value has been set in storage.
-		if (as_storage_info_get(ns, j, (uint8_t*)&vinfo, &vinfo_len) == 0) {
+		if (as_storage_info_get(ns, pid, (uint8_t*)&vinfo, &vinfo_len) == 0) {
 			if (vinfo_len == sizeof(as_partition_vinfo)) {
 				if (! as_partition_is_null(&vinfo)) {
-					partition_states[j] = true;
+					partition_states[pid] = true;
 					n_found++;
 				}
 			}
@@ -150,19 +150,20 @@ as_partition_get_other_replicas(as_partition* p, cf_node* nv)
 
 	pthread_mutex_lock(&p->lock);
 
-	for (uint32_t n = 0; n < AS_CLUSTER_SZ; n++) {
+	// FIXME - just use p->n_replicas?
+	for (uint32_t repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
 		// Break at the end of the list.
-		if (p->replicas[n] == (cf_node)0) {
+		if (p->replicas[repl_ix] == (cf_node)0) {
 			break;
 		}
 
 		// Don't ever include yourself.
-		if (p->replicas[n] == g_config.self_node) {
+		if (p->replicas[repl_ix] == g_config.self_node) {
 			continue;
 		}
 
 		// Copy the node ID into the user-supplied vector.
-		nv[n_other_replicas++] = p->replicas[n];
+		nv[n_other_replicas++] = p->replicas[repl_ix];
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -178,11 +179,11 @@ as_partition_writable_node(as_namespace* ns, uint32_t pid)
 
 	pthread_mutex_lock(&p->lock);
 
-	cf_node n = find_best_node(p, ns, false);
+	cf_node best_node = find_best_node(p, ns, false);
 
 	pthread_mutex_unlock(&p->lock);
 
-	return n;
+	return best_node;
 }
 
 
@@ -214,16 +215,16 @@ as_partition_get_replicas_prole_str(cf_dyn_buf* db)
 
 	size_t db_sz = db->used_sz;
 
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		memset(prole_bitmap, 0, sizeof(uint8_t) * CLIENT_BITMAP_BYTES);
 		cf_dyn_buf_append_string(db, ns->name);
 		cf_dyn_buf_append_char(db, ':');
 
-		for (uint j = 0; j < AS_PARTITIONS; j++) {
-			if (g_config.self_node == partition_getreplica_prole(ns, j) ) {
-				prole_bitmap[j >> 3] |= (0x80 >> (j & 7));
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			if (g_config.self_node == partition_getreplica_prole(ns, pid) ) {
+				prole_bitmap[pid >> 3] |= (0x80 >> (pid & 7));
 			}
 		}
 
@@ -243,8 +244,8 @@ as_partition_get_replicas_master_str(cf_dyn_buf* db)
 {
 	size_t db_sz = db->used_sz;
 
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		cf_dyn_buf_append_string(db, ns->name);
 		cf_dyn_buf_append_char(db, ':');
@@ -264,20 +265,21 @@ as_partition_get_replicas_all_str(cf_dyn_buf* db)
 {
 	size_t db_sz = db->used_sz;
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		cf_dyn_buf_append_string(db, ns->name);
 		cf_dyn_buf_append_char(db, ':');
 
-		int n_repl = (int)ns->replication_factor;
+		uint32_t repl_factor = ns->replication_factor;
 
-		cf_dyn_buf_append_int(db, n_repl);
+		cf_dyn_buf_append_uint32(db, repl_factor);
 
-		for (int n = 0; n < n_repl; n++) {
+		for (uint32_t repl_ix = 0; repl_ix < repl_factor; repl_ix++) {
 			cf_dyn_buf_append_char(db, ',');
-			cf_dyn_buf_append_buf(db, (uint8_t*)&ns->replica_maps[n].b64map,
-					sizeof(ns->replica_maps[n].b64map));
+			cf_dyn_buf_append_buf(db,
+					(uint8_t*)&ns->replica_maps[repl_ix].b64map,
+					sizeof(ns->replica_maps[repl_ix].b64map));
 		}
 
 		cf_dyn_buf_append_char(db, ';');
@@ -299,14 +301,12 @@ as_partition_get_master_prole_stats(as_namespace* ns, repl_stats* p_stats)
 	p_stats->n_master_tombstones = 0;
 	p_stats->n_prole_tombstones = 0;
 
-	cf_node self = g_config.self_node;
-
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition* p = &ns->partitions[pid];
 
 		pthread_mutex_lock(&p->lock);
 
-		int self_n = find_in_replica_list(p, self); // -1 if node is not found
+		int self_n = find_in_replica_list(p, g_config.self_node); // -1 if not
 		bool am_master = (self_n == 0 && p->state == AS_PARTITION_STATE_SYNC) ||
 				p->target != (cf_node)0;
 
@@ -486,8 +486,8 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			"origin:target:emigrates:immigrates:records:sub_records:tombstones:"
 			"ldt_version:version;");
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
@@ -497,14 +497,15 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			char state_c = partition_getstate_str(p->state);
 
 			// Find myself in the replica list.
-			int replica_idx;
+			uint32_t repl_ix;
 
-			for (replica_idx = 0; replica_idx < AS_CLUSTER_SZ; replica_idx++) {
-				if (p->replicas[replica_idx] == (cf_node)0) {
+			// FIXME - just use p->n_replicas?
+			for (repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
+				if (p->replicas[repl_ix] == (cf_node)0) {
 					break;
 				}
 
-				if (p->replicas[replica_idx] == g_config.self_node) {
+				if (p->replicas[repl_ix] == g_config.self_node) {
 					break;
 				}
 			}
@@ -517,7 +518,7 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint32(db, p->n_dupl);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_int(db, replica_idx);
+			cf_dyn_buf_append_uint32(db, repl_ix);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64_x(db, p->origin);
 			cf_dyn_buf_append_char(db, ':');
@@ -564,10 +565,11 @@ client_replica_maps_create(as_namespace* ns)
 	ns->replica_maps = cf_malloc(size);
 	memset(ns->replica_maps, 0, size);
 
-	for (uint16_t r = 0; r < ns->cfg_replication_factor; r++) {
-		client_replica_map* repl_map = ns->replica_maps + r;
+	for (uint32_t repl_ix = 0; repl_ix < ns->cfg_replication_factor;
+			repl_ix++) {
+		client_replica_map* repl_map = &ns->replica_maps[repl_ix];
 
-		pthread_mutex_init(&repl_map->write_lock, 0);
+		pthread_mutex_init(&repl_map->write_lock, NULL);
 
 		cf_b64_encode((uint8_t*)repl_map->bitmap,
 				(uint32_t)sizeof(repl_map->bitmap), (char*)repl_map->b64map);
@@ -586,15 +588,16 @@ client_replica_maps_update(as_namespace* ns, uint32_t pid)
 	uint32_t bytes_from_end = CLIENT_BITMAP_BYTES - chunk_bitmap_offset;
 	uint32_t input_size = bytes_from_end > 3 ? 3 : bytes_from_end;
 
-	int replica = partition_get_replica_self_lockfree(ns, pid);
+	int replica = partition_get_replica_self_lockfree(ns, pid); // -1 if not
 	uint8_t set_mask = 0x80 >> (pid & 0x7);
 	bool changed = false;
 
-	for (int r = 0; r < (int)ns->cfg_replication_factor; r++) {
-		client_replica_map* repl_map = ns->replica_maps + r;
+	for (int repl_ix = 0; repl_ix < (int)ns->cfg_replication_factor;
+			repl_ix++) {
+		client_replica_map* repl_map = &ns->replica_maps[repl_ix];
 
 		volatile uint8_t* mbyte = repl_map->bitmap + byte_i;
-		bool owned = replica == r;
+		bool owned = replica == repl_ix;
 		bool is_set = (*mbyte & set_mask) != 0;
 		bool needs_update = (owned && ! is_set) || (! owned && is_set);
 
@@ -641,10 +644,8 @@ client_replica_maps_is_partition_queryable(const as_namespace* ns, uint32_t pid)
 cf_node
 find_best_node(const as_partition* p, const as_namespace* ns, bool is_read)
 {
-	cf_node node = (cf_node)0;
-	cf_node self = g_config.self_node;
 	// Find location of self in replica list, returns -1 if not found.
-	int self_n = find_in_replica_list(p, self);
+	int self_n = find_in_replica_list(p, g_config.self_node);
 
 	// Do health check occasionally (expensive to do for every read/write).
 	if ((cf_atomic32_incr(&g_partition_check_counter) & 0x0FFF) == 0) {
@@ -668,39 +669,42 @@ find_best_node(const as_partition* p, const as_namespace* ns, bool is_read)
 	bool is_prole = self_n > 0 && self_n < p->n_replicas;
 	bool acting_master = p->target != 0;
 
+	cf_node best_node = (cf_node)0;
+
 	if ((is_final_master && is_sync) || acting_master) {
-		node = self;
+		best_node = g_config.self_node;
 	}
 	else if (is_final_master && is_desync) {
-		node = p->origin;
+		best_node = p->origin;
 	}
 	else if (is_read && is_prole && p->origin == (cf_node)0) {
-		node = self;
+		best_node = g_config.self_node;
 	}
 	else {
-		node = p->replicas[0];
+		best_node = p->replicas[0];
 	}
 
-	if (node == (cf_node)0 && as_partition_balance_is_init_resolved()) {
+	if (best_node == (cf_node)0 && as_partition_balance_is_init_resolved()) {
 		cf_warning(AS_PARTITION, "{%s:%u} could not find sync copy, my index %d master %lu replica %lu origin %lu",
 				ns->name, p->id, self_n, p->replicas[0], p->replicas[1],
 				p->origin);
 	}
 
-	return node;
+	return best_node;
 }
 
 
 int
 find_in_replica_list(const as_partition* p, cf_node node)
 {
-	for (int n = 0; n < AS_CLUSTER_SZ; n++) {
-		if (p->replicas[n] == (cf_node)0) {
+	// FIXME - just use p->n_replicas?
+	for (uint32_t repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
+		if (p->replicas[repl_ix] == (cf_node)0) {
 			break;
 		}
 
-		if (p->replicas[n] == node) {
-			return n;
+		if (p->replicas[repl_ix] == node) {
+			return repl_ix;
 		}
 	}
 
@@ -778,30 +782,26 @@ partition_reserve_read_write(as_namespace* ns, uint32_t pid,
 
 	pthread_mutex_lock(&p->lock);
 
-	uint64_t ck = p->cluster_key;
-	cf_node n = find_best_node(p, ns, is_read);
+	cf_node best_node = find_best_node(p, ns, is_read);
 
 	if (node) {
-		*node = n;
+		*node = best_node;
 	}
 
 	if (cluster_key) {
-		*cluster_key = ck;
+		*cluster_key = p->cluster_key;
 	}
 
 	// If this node is not the appropriate one, return.
-	if (n != g_config.self_node) {
+	if (best_node != g_config.self_node) {
 		pthread_mutex_unlock(&p->lock);
 		return -1;
 	}
 
 	if (p->state != AS_PARTITION_STATE_SYNC &&
 			p->state != AS_PARTITION_STATE_ZOMBIE) {
-		cf_warning(AS_PARTITION, "{%s:%u} %s reserve - state %u unexpected",
+		cf_crash(AS_PARTITION, "{%s:%u} %s reserve - state %u unexpected",
 				ns->name, pid, is_read ? "read" : "write", p->state);
-		memset(rsv, 0, sizeof(*rsv)); // paranoia
-		pthread_mutex_unlock(&p->lock);
-		return -1;
 	}
 
 	cf_rc_reserve(p->vp);
@@ -859,20 +859,20 @@ partition_getreplica_prole(as_namespace* ns, uint32_t pid)
 	pthread_mutex_lock(&p->lock);
 
 	// Check is this is a master node.
-	cf_node n = find_best_node(p, ns, false);
+	cf_node best_node = find_best_node(p, ns, false);
 
-	if (n == g_config.self_node) {
+	if (best_node == g_config.self_node) {
 		// It's a master, return 0.
-		n = (cf_node)0;
+		best_node = (cf_node)0;
 	}
 	else {
 		// Not a master, see if it's a prole.
-		n = find_best_node(p, ns, true);
+		best_node = find_best_node(p, ns, true);
 	}
 
 	pthread_mutex_unlock(&p->lock);
 
-	return n;
+	return best_node;
 }
 
 
@@ -901,20 +901,20 @@ partition_getstate_str(int state)
 int
 partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid)
 {
-	uint16_t n_repl = ns->replication_factor;
 	const as_partition* p = &ns->partitions[pid];
-	cf_node self = g_config.self_node;
 
-	int self_n = find_in_replica_list(p, self); // -1 if node is not found
+	int self_n = find_in_replica_list(p, g_config.self_node); // -1 if not
 	bool am_master = (self_n == 0 && p->state == AS_PARTITION_STATE_SYNC) ||
 			p->target != (cf_node)0;
 
 	if (am_master) {
 		return 0;
 	}
-	else if (self_n > 0 && p->origin == 0 && self_n < n_repl) {
-		// Check self_n < n_repl only because n_repl could be out-of-sync with
-		// (less than) partition's replica list count.
+
+	if (self_n > 0 && p->origin == 0 &&
+			// Check self_n < n_repl only because n_repl could be out-of-sync
+			// with (less than) partition's replica list count.
+			self_n < (int)ns->replication_factor) {
 		return self_n;
 	}
 

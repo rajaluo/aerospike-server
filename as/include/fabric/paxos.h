@@ -235,7 +235,6 @@ typedef struct as_paxos_t {
 	as_paxos_change_callback cb[MAX_CHANGE_CALLBACKS];
 	void *cb_udata[MAX_CHANGE_CALLBACKS];
 
-	as_partition_vinfo *c_partition_vinfo[AS_NAMESPACE_SZ][AS_CLUSTER_SZ];
 	uint64_t c_partition_size[AS_NAMESPACE_SZ][AS_CLUSTER_SZ][AS_PARTITIONS];
 
 	as_paxos_transaction pending[AS_PAXOS_ALPHA];
