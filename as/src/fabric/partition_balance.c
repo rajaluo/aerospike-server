@@ -200,9 +200,8 @@ as_partition_balance_init()
 			}
 
 			as_partition_vinfo vinfo;
-			size_t vinfo_len = sizeof(vinfo);
 
-			as_storage_info_get(ns, pid, (uint8_t*)&vinfo, &vinfo_len);
+			as_storage_info_get(ns, pid, &vinfo);
 
 			if (as_partition_is_null(&vinfo)) {
 				// Stores the vinfo length, even when the vinfo is zeroed.
@@ -1010,11 +1009,7 @@ void
 set_partition_version_in_storage(as_namespace* ns, uint32_t pid,
 		const as_partition_vinfo* vinfo, bool flush)
 {
-	if (as_storage_info_set(ns, pid, (uint8_t*)vinfo, sizeof(as_partition_vinfo)) != 0) {
-		cf_warning(AS_PARTITION, "{%s:%u} failed to set version %lu in storage",
-				ns->name, pid, vinfo->iid);
-		return;
-	}
+	as_storage_info_set(ns, pid, vinfo);
 
 	if (flush) {
 		as_storage_info_flush(ns);

@@ -122,19 +122,14 @@ as_partition_get_state_from_storage(as_namespace* ns, bool* partition_states)
 
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition_vinfo vinfo;
-		size_t vinfo_len = sizeof(vinfo);
 
 		// Find if the value has been set in storage.
-		if (as_storage_info_get(ns, pid, (uint8_t*)&vinfo, &vinfo_len) == 0) {
-			if (vinfo_len == sizeof(as_partition_vinfo)) {
-				if (! as_partition_is_null(&vinfo)) {
-					partition_states[pid] = true;
-					n_found++;
-				}
-			}
-			// else - treat partition as lost - common on startup
+		as_storage_info_get(ns, pid, &vinfo);
+
+		if (! as_partition_is_null(&vinfo)) {
+			partition_states[pid] = true;
+			n_found++;
 		}
-		// else - TODO - is this serious?
 	}
 
 	return n_found;

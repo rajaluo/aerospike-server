@@ -52,6 +52,7 @@ typedef enum {
 // Forward declarations.
 struct as_bin_s;
 struct as_index_s;
+struct as_partition_vinfo_s;
 struct as_namespace_s;
 struct drv_ssd_s;
 struct drv_ssd_block_s;
@@ -135,8 +136,8 @@ extern bool as_storage_has_space(struct as_namespace_s *ns);
 extern void as_storage_defrag_sweep(struct as_namespace_s *ns);
 
 // Storage of generic data into device headers.
-extern int as_storage_info_set(struct as_namespace_s *ns, uint32_t pid, uint8_t *buf, size_t len);
-extern int as_storage_info_get(struct as_namespace_s *ns, uint32_t pid, uint8_t *buf, size_t *len);
+extern void as_storage_info_set(struct as_namespace_s *ns, uint32_t pid, const struct as_partition_vinfo_s *vinfo);
+extern void as_storage_info_get(struct as_namespace_s *ns, uint32_t pid, struct as_partition_vinfo_s *vinfo);
 extern int as_storage_info_flush(struct as_namespace_s *ns);
 extern void as_storage_save_evict_void_time(struct as_namespace_s *ns, uint32_t evict_void_time);
 
@@ -203,8 +204,8 @@ extern bool as_storage_overloaded_ssd(struct as_namespace_s *ns);
 extern bool as_storage_has_space_ssd(struct as_namespace_s *ns);
 extern void as_storage_defrag_sweep_ssd(struct as_namespace_s *ns);
 
-extern int as_storage_info_set_ssd(struct as_namespace_s *ns, uint idx, uint8_t *buf, size_t len);
-extern int as_storage_info_get_ssd(struct as_namespace_s *ns, uint idx, uint8_t *buf, size_t *len);
+extern void as_storage_info_set_ssd(struct as_namespace_s *ns, uint32_t pid, const struct as_partition_vinfo_s *vinfo);
+extern void as_storage_info_get_ssd(struct as_namespace_s *ns, uint32_t pid, struct as_partition_vinfo_s *vinfo);
 extern int as_storage_info_flush_ssd(struct as_namespace_s *ns);
 extern void as_storage_save_evict_void_time_ssd(struct as_namespace_s *ns, uint32_t evict_void_time);
 

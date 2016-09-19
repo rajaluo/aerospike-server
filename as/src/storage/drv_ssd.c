@@ -85,8 +85,7 @@ extern bool as_cold_start_evict_if_needed(as_namespace* ns);
 // could render the rounding ineffective. (There are backward compatibility
 // issues anyway if we think we need to change SSD_DEFAULT_HEADER_LENGTH...)
 #define SSD_DEFAULT_HEADER_LENGTH	(1024 * 1024)
-#define SSD_DEFAULT_INFO_NUMBER		(1024 * 4)
-#define SSD_DEFAULT_INFO_LENGTH		(128)
+#define SSD_HEADER_INFO_STRIDE		(128)
 
 #define DEFRAG_STARTUP_RESERVE	4
 #define DEFRAG_RUNTIME_RESERVE	4
@@ -97,10 +96,10 @@ extern bool as_cold_start_evict_if_needed(as_namespace* ns);
 //
 
 // Info slice in device header block.
-typedef struct {
-	uint32_t	len;
-	uint8_t		data[];
-} info_buf;
+typedef struct info_buf_s {
+	uint32_t len;
+	as_partition_vinfo vinfo;
+} __attribute__ ((__packed__)) info_buf;
 
 
 //------------------------------------------------
@@ -2534,8 +2533,8 @@ as_storage_init_header(as_namespace *ns)
 	h->header_length = SSD_DEFAULT_HEADER_LENGTH;
 	memset(h->namespace, 0, sizeof(h->namespace));
 	strcpy(h->namespace, ns->name);
-	h->info_n = 4096;
-	h->info_stride = 128;
+	h->info_n = AS_PARTITIONS;
+	h->info_stride = SSD_HEADER_INFO_STRIDE;
 
 	return h;
 }
@@ -4182,67 +4181,28 @@ as_storage_defrag_sweep_ssd(as_namespace *ns)
 // Storage API implementation: data in device headers.
 //
 
-int
-as_storage_info_set_ssd(as_namespace *ns, uint idx, uint8_t *buf, size_t len)
+void
+as_storage_info_set_ssd(as_namespace *ns, uint32_t pid,
+		const as_partition_vinfo *vinfo)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
-
-	if (ssds == 0 || ssds->header == 0 || ssds->header->info_data == 0) {
-		cf_info(AS_DRV_SSD, "illegal ssd header in namespace %s", ns->name);
-		return -1;
-	}
-
-	if (idx > ssds->header->info_n)	{
-		cf_info(AS_DRV_SSD, "storage info set failed: idx %d", idx);
-		return -1;
-	}
-	if (len > ssds->header->info_stride - sizeof(info_buf)) {
-		cf_info(AS_DRV_SSD, "storage info set failed: bad length %zu", len);
-		return -1;
-	}
-
 	info_buf *b = (info_buf*)
-			(ssds->header->info_data + (ssds->header->info_stride * idx));
+			(ssds->header->info_data + (SSD_HEADER_INFO_STRIDE * pid));
 
-	b->len = len;
-	memcpy(b->data, buf, len);
-
-	return 0;
+	b->len = (uint32_t)sizeof(as_partition_vinfo);
+	b->vinfo = *vinfo;
 }
 
 
-int
-as_storage_info_get_ssd(as_namespace *ns, uint idx, uint8_t *buf, size_t *len)
+void
+as_storage_info_get_ssd(as_namespace *ns, uint32_t pid,
+		as_partition_vinfo *vinfo)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
-
-	if (ssds == 0 || ssds->header == 0 || ssds->header->info_data == 0) {
-		cf_info(AS_DRV_SSD, "illegal ssd header in namespace %s", ns->name);
-		return -1;
-	}
-
-	if (idx > ssds->header->info_n)	{
-		cf_info(AS_DRV_SSD, "storage info get ssd: failed: idx %d too large",
-				idx);
-		return -1;
-	}
-
 	info_buf *b = (info_buf*)
-			(ssds->header->info_data + (ssds->header->info_stride * idx));
+			(ssds->header->info_data + (SSD_HEADER_INFO_STRIDE * pid));
 
-	if (b->len > *len || b->len > ssds->header->info_stride) {
-		cf_info(AS_DRV_SSD, "storage info get ssd: bad length: from disk %d input %zu stride %d",
-			b->len, *len, ssds->header->info_stride);
-		return -1;
-	}
-
-	*len = b->len;
-
-	if (b->len) {
-		memcpy(buf, b->data, b->len);
-	}
-
-	return 0;
+	*vinfo = b->vinfo;
 }
 
 
