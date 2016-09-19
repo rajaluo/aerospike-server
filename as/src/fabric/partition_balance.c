@@ -70,8 +70,8 @@
 #define SL_IX(x, y) succession_index_table[(x * g_paxos->cluster_size) + y]
 
 typedef struct inter_hash_s {
-	uint64_t hashed_pid;
 	uint64_t hashed_node;
+	uint64_t hashed_pid;
 } inter_hash;
 
 

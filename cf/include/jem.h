@@ -80,8 +80,7 @@ int jem_enable_tcache(bool enabled);
 void *jem_allocate_in_arena(int arena, size_t size, bool use_allocm);
 
 /*
- *  Log information about the state of JEMalloc.
- *
- *  XXX -- Should be able to set the output stream as desired.
+ *  Log information about the state of JEMalloc to a file with the given options.
+ *  Pass NULL for file or options to get the default behavior, e.g., logging to stderr.
  */
-void jem_log_stats(void);
+void jem_log_stats(char *file, char *options);

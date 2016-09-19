@@ -27,12 +27,14 @@
 #include "jem.h"
 
 #include <errno.h>
+#include <jemalloc/jemalloc.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <jemalloc/jemalloc.h>
 #include <sys/syscall.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "fault.h"
 
@@ -254,13 +256,43 @@ void *jem_allocate_in_arena(int arena, size_t size, bool use_allocm)
 }
 
 /*
- *  Log information about the state of JEMalloc.
- *
- *  XXX -- Should be able to set the output stream as desired.
+ *  Callback function for logging JEMalloc stats to an output file.
  */
-void jem_log_stats(void)
+static void my_malloc_message(void *cbopaque, const char *s)
+{
+	FILE *outfile = (FILE *) cbopaque;
+
+	fprintf(outfile, "%s", s);
+}
+
+/*
+ *  Log information about the state of JEMalloc to a file with the given options.
+ *  Pass NULL for file or options to get the default behavior, e.g., logging to stderr.
+ */
+void jem_log_stats(char *file, char *options)
 {
 	if (jem_enabled) {
-		malloc_stats_print(NULL, NULL, NULL);
+		if (!file) {
+			malloc_stats_print(NULL, NULL, options);
+		} else {
+			FILE *outfile;
+
+			if (!(outfile = fopen(file, "a"))) {
+				cf_warning(CF_JEM, "Cannot write JEMalloc stats to file \"%s\"! (errno %d)", file, errno);
+				return;
+			}
+
+			char datestamp[1024];
+			struct tm nowtm;
+			time_t now = time(NULL);
+			gmtime_r(&now, &nowtm);
+			strftime(datestamp, sizeof(datestamp), "%b %d %Y %T %Z:\n", &nowtm);
+
+			fprintf(outfile, "%s", datestamp);
+			malloc_stats_print(my_malloc_message, outfile, options);
+			fprintf(outfile, "\n");
+
+			fclose(outfile);
+		}
 	}
 }
