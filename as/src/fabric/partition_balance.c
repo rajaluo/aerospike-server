@@ -967,8 +967,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		}
 		// else - received all expected, send anything pending as needed.
 
-		// FIXME - shorten this loop?
-		for (uint32_t repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
+		for (uint32_t repl_ix = 1; repl_ix < p->n_replicas; repl_ix++) {
 			if (p->replicas_delayed_emigrate[repl_ix]) {
 				p->replicas_delayed_emigrate[repl_ix] = false;
 				p->pending_emigrations++;

@@ -150,13 +150,7 @@ as_partition_get_other_replicas(as_partition* p, cf_node* nv)
 
 	pthread_mutex_lock(&p->lock);
 
-	// FIXME - just use p->n_replicas?
-	for (uint32_t repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
-		// Break at the end of the list.
-		if (p->replicas[repl_ix] == (cf_node)0) {
-			break;
-		}
-
+	for (uint32_t repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {
 		// Don't ever include yourself.
 		if (p->replicas[repl_ix] == g_config.self_node) {
 			continue;
@@ -499,12 +493,7 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			// Find myself in the replica list.
 			uint32_t repl_ix;
 
-			// FIXME - just use p->n_replicas?
-			for (repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
-				if (p->replicas[repl_ix] == (cf_node)0) {
-					break;
-				}
-
+			for (repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {
 				if (p->replicas[repl_ix] == g_config.self_node) {
 					break;
 				}
@@ -697,12 +686,7 @@ find_best_node(const as_partition* p, const as_namespace* ns, bool is_read)
 int
 find_in_replica_list(const as_partition* p, cf_node node)
 {
-	// FIXME - just use p->n_replicas?
-	for (uint32_t repl_ix = 0; repl_ix < AS_CLUSTER_SZ; repl_ix++) {
-		if (p->replicas[repl_ix] == (cf_node)0) {
-			break;
-		}
-
+	for (uint32_t repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {
 		if (p->replicas[repl_ix] == node) {
 			return repl_ix;
 		}
