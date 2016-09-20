@@ -1424,13 +1424,13 @@ cfg_strdup_one_of(const cfg_line* p_line, const char* toks[], int num_toks)
 void
 cfg_strcpy(const cfg_line* p_line, char* p_str, size_t max_size)
 {
-	size_t tok1_sz = strlen(p_line->val_tok_1);
-	if (tok1_sz == 0) {
+	size_t tok1_len = strlen(p_line->val_tok_1);
+	if (tok1_len == 0) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must have a value specified",
 				p_line->num, p_line->name_tok);
 	}
 
-	if (tok1_sz >= max_size) {
+	if (tok1_len >= max_size) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must be < %lu characters long, not %s",
 				p_line->num, p_line->name_tok, max_size, p_line->val_tok_1);
 	}
@@ -2397,7 +2397,7 @@ as_config_init(const char *config_file)
 				cfg_add_mesh_seed_addr_port(cfg_strdup_no_checks(&line), cfg_port_val2(&line));
 				break;
 			case CASE_NETWORK_HEARTBEAT_INTERVAL:
-				c->hb_config.hb_tx_interval = cfg_u32_no_checks(&line);
+				c->hb_config.hb_tx_interval = cfg_u32(&line, AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX);
 				break;
 			case CASE_NETWORK_HEARTBEAT_TIMEOUT:
 				c->hb_config.hb_max_intervals_missed = cfg_u32_no_checks(&line);
