@@ -103,7 +103,7 @@ typedef struct as_partition_s {
 	uint32_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
 
-	cf_node old_sl[AS_CLUSTER_SZ];
+	cf_node old_node_seq[AS_CLUSTER_SZ];
 
 	// LDT related.
 	uint64_t current_outgoing_ldt_version;

@@ -62,9 +62,6 @@
 #define AS_CLUSTER_SZ_MASKP ((uint64_t)(1 - (AS_CLUSTER_SZ + 1)))
 #define AS_CLUSTER_SZ_MASKN ((uint64_t)(AS_CLUSTER_SZ - 1))
 
-#define BALANCE_INIT_UNRESOLVED 0
-#define BALANCE_INIT_RESOLVED   1
-
 // Define the macros for accessing the HV and hv_slindex arrays.
 #define NODE_SEQ(x, y) node_seq_table[(x * g_paxos->cluster_size) + y]
 #define SL_IX(x, y) succession_index_table[(x * g_paxos->cluster_size) + y]
@@ -79,7 +76,7 @@ typedef struct inter_hash_s {
 // Globals.
 //
 
-cf_atomic32 g_partition_generation = 0;
+cf_atomic64 g_partition_generation = 0;
 
 static cf_atomic32 g_migrate_num_incoming = 0;
 
@@ -87,7 +84,6 @@ static cf_atomic32 g_migrate_num_incoming = 0;
 static volatile int g_allow_migrations = true;
 static volatile int g_multi_node = false;
 
-static volatile int g_balance_init = BALANCE_INIT_UNRESOLVED;
 static uint64_t g_hashed_pids[AS_PARTITIONS];
 
 
@@ -193,7 +189,7 @@ as_partition_balance_init()
 			as_partition* p = &ns->partitions[pid];
 
 			p->cluster_key = as_paxos_get_cluster_key();
-			p->old_sl[0] = g_config.self_node;
+			p->old_node_seq[0] = g_config.self_node;
 
 			if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
 				continue;
@@ -286,9 +282,7 @@ as_partition_balance_init_single_node_cluster()
 	}
 
 	// Ok to allow transactions.
-	g_balance_init = BALANCE_INIT_RESOLVED;
-
-	cf_atomic32_incr(&g_partition_generation);
+	cf_atomic64_incr(&g_partition_generation);
 }
 
 
@@ -307,7 +301,7 @@ as_partition_balance_init_multi_node_cluster()
 bool
 as_partition_balance_is_init_resolved()
 {
-	return g_balance_init == BALANCE_INIT_RESOLVED;
+	return g_partition_generation != 0;
 }
 
 
@@ -442,9 +436,6 @@ as_partition_balance()
 				p->primary_version_info = new_vinfo;
 
 				handle_lost_partition(p, node_seq_table, ns, has_version);
-
-				// May advance the new partition version below - wasteful, but
-				// leaving it for backward compatibility.)
 			}
 			else {
 				n_dupl = find_duplicates(p, node_seq_table,
@@ -460,9 +451,9 @@ as_partition_balance()
 					first_versioned_n, has_version, n_dupl, dupl_nodes, &mq,
 					&ns_delayed_emigrations);
 
-			// Copy the new succession list over the old succession list.
-			memset(p->old_sl, 0, sizeof(p->old_sl));
-			memcpy(p->old_sl, &NODE_SEQ(pid, 0),
+			// Copy the new node sequence over the old node sequence.
+			memset(p->old_node_seq, 0, sizeof(p->old_node_seq));
+			memcpy(p->old_node_seq, &NODE_SEQ(pid, 0),
 					sizeof(cf_node) * cluster_size);
 
 			ns_pending_immigrations += p->pending_immigrations;
@@ -479,23 +470,15 @@ as_partition_balance()
 		cf_info(AS_PARTITION, "{%s} re-balanced, expected migrations - (%d tx, %d rx)",
 				ns->name, ns_all_pending_emigrations, ns_pending_immigrations);
 
-		cf_atomic_int_set(&ns->migrate_tx_partitions_initial,
-				ns_all_pending_emigrations);
-		cf_atomic_int_set(&ns->migrate_tx_partitions_remaining,
-				ns_all_pending_emigrations);
+		ns->migrate_tx_partitions_initial = ns_all_pending_emigrations;
+		ns->migrate_tx_partitions_remaining = ns_all_pending_emigrations;
 
-		cf_atomic_int_set(&ns->migrate_rx_partitions_initial,
-				ns_pending_immigrations);
-		cf_atomic_int_set(&ns->migrate_rx_partitions_remaining,
-				ns_pending_immigrations);
+		ns->migrate_rx_partitions_initial = ns_pending_immigrations;
+		ns->migrate_rx_partitions_remaining = ns_pending_immigrations;
 	}
 
 	// All partitions now have replicas assigned, ok to allow transactions.
-	g_balance_init = BALANCE_INIT_RESOLVED;
-
-	// Note - if we decide this is the best place to first increment this
-	// counter, we could get rid of g_balance_init and just use this instead.
-	cf_atomic32_incr(&g_partition_generation);
+	cf_atomic64_incr(&g_partition_generation);
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_storage_info_flush(g_config.namespaces[ns_ix]);
@@ -555,7 +538,7 @@ as_partition_emigrate_done(as_migrate_state s, as_namespace* ns, uint32_t pid,
 		uint64_t orig_cluster_key, uint32_t tx_flags)
 {
 	// TODO - better handled outside?
-	if (AS_MIGRATE_STATE_DONE != s) {
+	if (s != AS_MIGRATE_STATE_DONE) {
 		if (s == AS_MIGRATE_STATE_ERROR) {
 			if (orig_cluster_key == as_paxos_get_cluster_key()) {
 				cf_warning(AS_PARTITION, "{%s:%d} emigrate done: failed with error and cluster key is current",
@@ -605,6 +588,13 @@ as_partition_emigrate_done(as_migrate_state s, as_namespace* ns, uint32_t pid,
 
 	p->pending_emigrations--;
 
+	if (p->pending_emigrations != 0 && g_config.self_node != p->replicas[0]) {
+		cf_warning(AS_PARTITION, "{%s:%d} emigrate done: not final master - should have done exactly 1 emigration, but %d remain",
+				ns->name, pid, p->pending_emigrations);
+		pthread_mutex_unlock(&p->lock);
+		return;
+	}
+
 	if (! migration_request) {
 		int64_t migrates_tx_remaining = cf_atomic_int_decr(
 				&ns->migrate_tx_partitions_remaining);
@@ -618,18 +608,15 @@ as_partition_emigrate_done(as_migrate_state s, as_namespace* ns, uint32_t pid,
 
 	p->current_outgoing_ldt_version = 0;
 
-	// FIXME - shouldn't pending_emigrations always be 0 here for zombies?
-	if (p->state == AS_PARTITION_STATE_ZOMBIE && p->pending_emigrations == 0) {
+	if (p->state == AS_PARTITION_STATE_ZOMBIE) {
 		set_partition_absent_lockfree(p, ns, true);
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic32_incr(&g_partition_generation);
+		cf_atomic64_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
-
-	return;
 }
 
 
@@ -784,7 +771,7 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic32_incr(&g_partition_generation);
+		cf_atomic64_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -841,7 +828,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		rv = AS_MIGRATE_FAIL;
 		break;
 	case AS_PARTITION_STATE_DESYNC:
-		if (p->origin != source_node || p->pending_immigrations == 0) {
+		if (p->origin != source_node) {
 			cf_warning(AS_PARTITION, "{%s:%d} immigrate_done aborted - state error for desync partition",
 					ns->name, pid);
 			rv = AS_MIGRATE_FAIL;
@@ -855,7 +842,8 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 		if (migrates_rx_remaining < 0) {
 			cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) immigrate_done - partitions schedule exceeded, possibly a race with prior migration",
-					ns->name, pid, p->pending_immigrations, migrates_rx_remaining);
+					ns->name, pid, p->pending_immigrations,
+					migrates_rx_remaining);
 		}
 
 		p->origin = 0;
@@ -910,7 +898,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 			break;
 		}
 
-		if (p->n_dupl > 0) {
+		if (p->n_dupl != 0) {
 			bool found = false;
 			uint32_t dupl_ix;
 
@@ -940,7 +928,8 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 				if (migrates_rx_remaining < 0) {
 					cf_warning(AS_PARTITION, "{%s:%d} (p%d, g%ld) immigrate_done - partitions schedule exceeded, possibly a race with prior migration",
-							ns->name, pid, p->pending_immigrations, migrates_rx_remaining);
+							ns->name, pid, p->pending_immigrations,
+							migrates_rx_remaining);
 				}
 			}
 			else {
@@ -981,7 +970,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic32_incr(&g_partition_generation);
+		cf_atomic64_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -1239,48 +1228,50 @@ adjust_node_sequence_table(cf_node* node_seq_table, int* succession_index_table,
 			}
 
 			// If cur_group is unique for nodes < cur_i, continue to next node.
-			if (! is_group_distinct_before_n(pid, node_seq_table,
+			if (is_group_distinct_before_n(pid, node_seq_table,
 					succession_index_table, cur_group_id, cur_n)) {
-				// Find group after cur_i that's unique for groups before cur_i.
-				uint32_t swap_n = cur_n; // if swap cannot be found then no change
-
-				while (next_n < cluster_size) {
-					cf_node next_node = NODE_SEQ(pid, next_n);
-					cc_group_t next_group_id = cc_compute_group_id(next_node);
-
-					if (next_node == (cf_node)0) {
-						cf_crash(AS_PARTITION, "null node found within cluster_size");
-					}
-
-					if (is_group_distinct_before_n(pid, node_seq_table,
-							succession_index_table, next_group_id, cur_n)) {
-						swap_n = next_n;
-						next_n++;
-						break;
-					}
-
-					next_n++;
-				}
-
-				if (swap_n == cur_n) {
-					// No other distinct groups found - shouldn't be possible.
-					// We should reach n_needed first.
-					cf_crash(AS_PARTITION, "can't find a diff cur:%u swap:%u repl:%u clsz:%u ptn:%u",
-							cur_n, swap_n, repl_factor, cluster_size, pid);
-				}
-
-				// Now swap cur_n with swap_n.
-
-				// Swap node.
-				NODE_SEQ(pid, cur_n) ^= NODE_SEQ(pid, swap_n);
-				NODE_SEQ(pid, swap_n) = NODE_SEQ(pid, cur_n) ^ NODE_SEQ(pid, swap_n);
-				NODE_SEQ(pid, cur_n) ^= NODE_SEQ(pid, swap_n);
-
-				// Swap succession list index.
-				SL_IX(pid, cur_n) ^= SL_IX(pid, swap_n);
-				SL_IX(pid, swap_n) = SL_IX(pid, cur_n) ^ SL_IX(pid, swap_n);
-				SL_IX(pid, cur_n) ^= SL_IX(pid, swap_n);
+				continue;
 			}
+
+			// Find group after cur_i that's unique for groups before cur_i.
+			uint32_t swap_n = cur_n; // if swap cannot be found then no change
+
+			while (next_n < cluster_size) {
+				cf_node next_node = NODE_SEQ(pid, next_n);
+				cc_group_t next_group_id = cc_compute_group_id(next_node);
+
+				if (next_node == (cf_node)0) {
+					cf_crash(AS_PARTITION, "null node found within cluster_size");
+				}
+
+				if (is_group_distinct_before_n(pid, node_seq_table,
+						succession_index_table, next_group_id, cur_n)) {
+					swap_n = next_n;
+					next_n++;
+					break;
+				}
+
+				next_n++;
+			}
+
+			if (swap_n == cur_n) {
+				// No other distinct groups found - shouldn't be possible.
+				// We should reach n_needed first.
+				cf_crash(AS_PARTITION, "can't find a diff cur:%u swap:%u repl:%u clsz:%u ptn:%u",
+						cur_n, swap_n, repl_factor, cluster_size, pid);
+			}
+
+			// Now swap cur_n with swap_n.
+
+			// Swap node.
+			NODE_SEQ(pid, cur_n) ^= NODE_SEQ(pid, swap_n);
+			NODE_SEQ(pid, swap_n) = NODE_SEQ(pid, cur_n) ^ NODE_SEQ(pid, swap_n);
+			NODE_SEQ(pid, cur_n) ^= NODE_SEQ(pid, swap_n);
+
+			// Swap succession list index.
+			SL_IX(pid, cur_n) ^= SL_IX(pid, swap_n);
+			SL_IX(pid, swap_n) = SL_IX(pid, cur_n) ^ SL_IX(pid, swap_n);
+			SL_IX(pid, cur_n) ^= SL_IX(pid, swap_n);
 		}
 	}
 }
@@ -1398,7 +1389,7 @@ find_duplicates(const as_partition* p, const cf_node* node_seq_table,
 }
 
 
-// For this partition, check if any replicas in the old succession list are
+// For this partition, check if any replicas in the old node sequence are
 // missing from the new succession list.
 bool
 should_advance_version(const as_partition* p, uint32_t old_repl_factor)
@@ -1407,14 +1398,14 @@ should_advance_version(const as_partition* p, uint32_t old_repl_factor)
 	cf_node* succession = g_paxos->succession;
 
 	for (uint32_t repl_ix = 0; repl_ix < old_repl_factor; repl_ix++) {
-		if (p->old_sl[repl_ix] == 0) {
+		if (p->old_node_seq[repl_ix] == 0) {
 			return false;
 		}
 
 		uint32_t n;
 
 		for (n = 0; n < cluster_size; n++) {
-			if (p->old_sl[repl_ix] == succession[n]) {
+			if (p->old_node_seq[repl_ix] == succession[n]) {
 				break;
 			}
 		}
@@ -1436,22 +1427,22 @@ advance_version(as_partition* p, const cf_node* node_seq_table,
 {
 	uint32_t pid = p->id;
 
-	// Find the first versioned node in the old succession list.
+	// Find the first versioned node in the old node sequence.
 	cf_node first_versioned_node = NODE_SEQ(pid, first_versioned_n);
 	int n;
 
 	for (n = 0; n < AS_CLUSTER_SZ; n++) {
-		if (p->old_sl[n] == (cf_node)0) {
+		if (p->old_node_seq[n] == (cf_node)0) {
 			return;
 		}
 
-		if (p->old_sl[n] == first_versioned_node) {
-			// n is first versioned node's index in old succession list.
+		if (p->old_node_seq[n] == first_versioned_node) {
+			// n is first versioned node's index in old node sequence.
 			break;
 		}
 	}
 
-	// First versioned node not in old succession list - leave version as is.
+	// First versioned node not in old node sequence - leave version as is.
 	if (n == AS_CLUSTER_SZ) {
 		return;
 	}
