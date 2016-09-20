@@ -511,7 +511,7 @@ uint32_t as_hb_tx_interval_get();
 /**
  * Set the heartbeat pulse transmit interval.
  */
-int as_hb_tx_interval_set(uint32_t new_interval);
+bool as_hb_tx_interval_set(uint32_t new_interval);
 
 /**
  * Set the maximum number of missed heartbeat intervals after which a node is

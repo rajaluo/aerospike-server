@@ -175,7 +175,7 @@ cfg_set_defaults()
 
 	// Network heartbeat defaults.
 	c->hb_config.hb_mode = AS_HB_MODE_UNDEF;
-	c->hb_config.hb_tx_interval = 150; // Should not be less than AS_HB_TX_INTERVAL_MS_MIN (50 ms).
+	c->hb_config.hb_tx_interval = 150;
 	c->hb_config.hb_max_intervals_missed = 10;
 	c->hb_config.hb_fabric_grace_factor = -1; // Infinite fabric grace period.
 	c->hb_config.hb_protocol = AS_HB_PROTOCOL_V2;

@@ -2661,7 +2661,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		if (0 == as_info_parameter_get(params, "heartbeat.interval", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
-			if ( 0 > as_hb_tx_interval_set(val)) {
+			if (!as_hb_tx_interval_set(val)) {
 				goto Error;
 			}
 		}

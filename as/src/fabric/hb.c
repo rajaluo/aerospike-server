@@ -1903,7 +1903,7 @@ as_hb_tx_interval_get()
 /**
  * Set the heartbeat pulse transmit interval.
  */
-int
+bool
 as_hb_tx_interval_set(uint32_t new_interval)
 {
 	if (new_interval < AS_HB_TX_INTERVAL_MS_MIN ||
@@ -1911,10 +1911,10 @@ as_hb_tx_interval_set(uint32_t new_interval)
 		WARNING("Heartbeat interval must be >= %u and <= %u. Ignoring %u.",
 			AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX,
 			new_interval);
-		return (-1);
+		return false;
 	}
 	config_hb_tx_interval_set(new_interval);
-	return (0);
+	return true;
 }
 
 /**
@@ -7823,7 +7823,11 @@ hb_transmitter(void* arg)
 
 		if ((curr_time - last_time) < PULSE_TRANSMIT_INTERVAL()) {
 			// Interval has not been reached for sending heartbeats
-			goto Sleep;
+			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
+				   (last_time + PULSE_TRANSMIT_INTERVAL()) -
+				     curr_time) *
+			       1000);
+			continue;
 		}
 
 		last_time = curr_time;
@@ -7845,12 +7849,6 @@ hb_transmitter(void* arg)
 		hb_msg_return(msg);
 
 		DETAIL("Done sending pulse message.");
-
-	Sleep:
-		usleep(
-		  MIN(AS_HB_TX_INTERVAL_MS_MIN,
-		      (last_time + PULSE_TRANSMIT_INTERVAL()) - curr_time) *
-		  1000);
 	}
 
 	DETAIL("Heartbeat transmitter stopped.");
