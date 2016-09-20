@@ -1143,6 +1143,12 @@ info_command_mtrace(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
+static void
+info_log_jem_stats()
+{
+	jem_log_stats(NULL, NULL);
+}
+
 int
 info_command_jem_stats(char *name, char *params, cf_dyn_buf *db)
 {
@@ -1150,11 +1156,39 @@ info_command_jem_stats(char *name, char *params, cf_dyn_buf *db)
 
 #ifdef USE_JEM
 	/*
-	 *	Command Format:	 "jem-stats:"
+	 *	Command Format:	 "jem-stats:{file=<string>;options=<string>}" [the "file" and "options" arguments are optional]
 	 *
-	 *  Logs the JEMalloc statistics to the console.
+	 *  Logs the JEMalloc statistics to the console or an optionally-specified file pathname.
+	 *  Options may be a string containing any of the characters "gmablh", as defined by jemalloc(3) man page.
+	 *  [Note:  Any options are only used if an output file is specified.]
 	 */
-	info_log_with_datestamp(jem_log_stats);
+
+	char param_str[100];
+	int param_str_len = sizeof(param_str);
+	char *file = NULL, *options = NULL;
+
+	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
+	if (!as_info_parameter_get(params, "file", param_str, &param_str_len)) {
+		file = cf_strdup(param_str);
+	}
+
+	param_str[0] = '\0';
+	if (!as_info_parameter_get(params, "options", param_str, &param_str_len)) {
+		options = cf_strdup(param_str);
+	}
+
+	if (file) {
+		jem_log_stats(file, options);
+		cf_free(file);
+	} else {
+		info_log_with_datestamp(info_log_jem_stats);
+	}
+
+	if (options) {
+		cf_free(options);
+	}
+
 	cf_dyn_buf_append_string(db, "ok");
 #else
 	cf_warning(AS_INFO, "JEMalloc interface not compiled into build ~~ rebuild with \"USE_JEM=1\" to use");
@@ -1496,7 +1530,7 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 	bool verbose = false;
 
 	/*
-	 *  Command Format:  "dump-si:ns=<string>;set=<string>;{file=<string>;verbose=<opt>}" [the "file" and "verbose" arguments are optional]
+	 *  Command Format:  "dump-si:ns=<string>;set=<string>{;file=<string>;verbose=<opt>}" [the "file" and "verbose" arguments are optional]
 	 *
 	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
 	 */

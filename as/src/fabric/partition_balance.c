@@ -54,6 +54,9 @@
 // Constants and typedefs.
 //
 
+// TODO - same as in paxos.c, to be deprecated.
+#define AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(n) ((((int)(g_config.paxos_protocol) - AS_PAXOS_PROTOCOL_V ## n)) >= 0)
+
 // The instantaneous maximum number of cluster participants, represented as a
 // positive and negative mask.
 #define AS_CLUSTER_SZ_MASKP ((uint64_t)(1 - (AS_CLUSTER_SZ + 1)))
@@ -67,8 +70,8 @@
 #define SL_IX(x, y) succession_index_table[(x * g_paxos->cluster_size) + y]
 
 typedef struct inter_hash_s {
-	uint64_t hashed_pid;
 	uint64_t hashed_node;
+	uint64_t hashed_pid;
 } inter_hash;
 
 
@@ -94,7 +97,7 @@ static uint64_t g_hashed_pids[AS_PARTITIONS];
 
 void set_partition_version_in_storage(as_namespace* ns, uint32_t pid, const as_partition_vinfo* vinfo, bool flush);
 void generate_new_partition_version(as_partition_vinfo* new_vinfo);
-void apply_single_replica_limit(int new_cluster_size);
+void apply_single_replica_limit(int cluster_size);
 void partition_cluster_topology_info();
 void fill_node_sequence_table(cf_node* node_seq_table, int* succession_index_table);
 void adjust_node_sequence_table(cf_node* node_seq_table, int* succession_index_table, uint32_t repl_factor);
@@ -148,8 +151,8 @@ as_partition_balance_synchronize_migrations()
 {
 	// Acquire and release each partition lock to ensure threads acquiring a
 	// partition lock after this will be forced to check the latest cluster key.
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
@@ -176,14 +179,11 @@ as_partition_balance_init()
 {
 	// Cache hashed pids for all future rebalances.
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		g_hashed_pids[pid] = cf_hash_fnv(&pid, sizeof(int));
+		g_hashed_pids[pid] = cf_hash_fnv(&pid, sizeof(uint32_t));
 	}
 
-	g_paxos->cluster_size = 1;
-	as_paxos_set_cluster_integrity(g_paxos, true);
-
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		ns->replication_factor = 1;
 
@@ -192,20 +192,39 @@ as_partition_balance_init()
 		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 			as_partition* p = &ns->partitions[pid];
 
-			p->n_replicas = 1;
-			p->replicas[0] = g_config.self_node;
+			p->cluster_key = as_paxos_get_cluster_key();
+			p->old_sl[0] = g_config.self_node;
 
-			if (! as_partition_is_null(&p->version_info)) {
-				p->primary_version_info = p->version_info;
-				n_stored++;
+			if (ns->storage_type != AS_STORAGE_ENGINE_SSD) {
+				continue;
 			}
-			else {
+
+			as_partition_vinfo vinfo;
+
+			as_storage_info_get(ns, pid, &vinfo);
+
+			if (as_partition_is_null(&vinfo)) {
 				// Stores the vinfo length, even when the vinfo is zeroed.
 				set_partition_version_in_storage(ns, pid, &NULL_VINFO, false);
 			}
+			else {
+				p->n_replicas = 1;
+				p->replicas[0] = g_config.self_node;
 
-			p->old_sl[0] = g_config.self_node;
-			p->cluster_key = as_paxos_get_cluster_key();
+				p->primary_version_info = vinfo;
+				p->version_info = vinfo;
+				p->state = AS_PARTITION_STATE_SYNC;
+
+				ns->cluster_vinfo[0][pid] = vinfo;
+
+				// TODO - deprecate this.
+				if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
+					g_paxos->c_partition_size[ns_ix][0][pid] =
+							p->vp->elements + p->sub_vp->elements;
+				}
+
+				n_stored++;
+			}
 		}
 
 		if (n_stored < AS_PARTITIONS) {
@@ -227,8 +246,8 @@ as_partition_balance_init_single_node_cluster()
 
 	generate_new_partition_version(&new_vinfo);
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		uint32_t n_promoted = 0;
 
@@ -239,11 +258,15 @@ as_partition_balance_init_single_node_cluster()
 			pthread_mutex_lock(&p->lock);
 
 			if (as_partition_is_null(&p->version_info)) {
+				p->n_replicas = 1;
+				p->replicas[0] = g_config.self_node;
+
+				p->primary_version_info = new_vinfo;
+				p->version_info = new_vinfo;
 				p->state = AS_PARTITION_STATE_SYNC;
 
-				p->version_info = new_vinfo;
-				p->primary_version_info = new_vinfo;
 				ns->cluster_vinfo[0][pid] = new_vinfo;
+
 				set_partition_version_in_storage(ns, pid, &new_vinfo, false);
 
 				n_promoted++;
@@ -474,8 +497,8 @@ as_partition_balance()
 	// counter, we could get rid of g_balance_init and just use this instead.
 	cf_atomic32_incr(&g_partition_generation);
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_storage_info_flush(g_config.namespaces[i]);
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_storage_info_flush(g_config.namespaces[ns_ix]);
 	}
 
 	as_partition_balance_allow_migrations();
@@ -498,8 +521,8 @@ as_partition_balance_remaining_migrations()
 {
 	uint64_t remaining_migrations = 0;
 
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
 
 		remaining_migrations += ns->migrate_tx_partitions_remaining;
 		remaining_migrations += ns->migrate_rx_partitions_remaining;
@@ -595,7 +618,8 @@ as_partition_emigrate_done(as_migrate_state s, as_namespace* ns, uint32_t pid,
 
 	p->current_outgoing_ldt_version = 0;
 
-	if (AS_PARTITION_STATE_ZOMBIE == p->state && 0 == p->pending_emigrations) {
+	// FIXME - shouldn't pending_emigrations always be 0 here for zombies?
+	if (p->state == AS_PARTITION_STATE_ZOMBIE && p->pending_emigrations == 0) {
 		set_partition_absent_lockfree(p, ns, true);
 	}
 
@@ -689,8 +713,8 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		if (g_config.self_node != p->replicas[0]) {
 			bool is_replica = false;
 
-			for (uint32_t n = 1; n < p->n_replicas; n++) {
-				if (g_config.self_node == p->replicas[n]) {
+			for (uint32_t repl_ix = 1; repl_ix < p->n_replicas; repl_ix++) {
+				if (g_config.self_node == p->replicas[repl_ix]) {
 					is_replica = true;
 					break; // out of for loop
 				}
@@ -888,22 +912,24 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 		if (p->n_dupl > 0) {
 			bool found = false;
-			uint32_t i = 0;
+			uint32_t dupl_ix;
 
-			for (i = 0; i < p->n_dupl; i++) {
-				if (p->dupl_nodes[i] == source_node) {
+			for (dupl_ix = 0; dupl_ix < p->n_dupl; dupl_ix++) {
+				if (p->dupl_nodes[dupl_ix] == source_node) {
 					found = true;
 					break;
 				}
 			}
 
 			if (found) {
-				if (i == (p->n_dupl - 1)) { // delete last entry
-					p->dupl_nodes[i] = (cf_node)0;
+				uint32_t last_dupl_ix = p->n_dupl - 1;
+
+				if (dupl_ix == last_dupl_ix) { // delete last entry
+					p->dupl_nodes[dupl_ix] = (cf_node)0;
 				}
 				else { // copy last entry into deleted entry
-					p->dupl_nodes[i] = p->dupl_nodes[p->n_dupl - 1];
-					p->dupl_nodes[p->n_dupl - 1] = (cf_node)0;
+					p->dupl_nodes[dupl_ix] = p->dupl_nodes[last_dupl_ix];
+					p->dupl_nodes[last_dupl_ix] = (cf_node)0;
 				}
 
 				p->n_dupl--;
@@ -940,13 +966,13 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 		}
 		// else - received all expected, send anything pending as needed.
 
-		for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-			if (p->replicas_delayed_emigrate[i]) {
-				p->replicas_delayed_emigrate[i] = false;
+		for (uint32_t repl_ix = 1; repl_ix < p->n_replicas; repl_ix++) {
+			if (p->replicas_delayed_emigrate[repl_ix]) {
+				p->replicas_delayed_emigrate[repl_ix] = false;
 				p->pending_emigrations++;
 
 				partition_migrate_record r;
-				partition_migrate_record_fill(&r, p->replicas[i],
+				partition_migrate_record_fill(&r, p->replicas[repl_ix],
 						ns, pid, orig_cluster_key, TX_FLAGS_NONE);
 
 				cf_queue_push(&mq, &r);
@@ -983,11 +1009,7 @@ void
 set_partition_version_in_storage(as_namespace* ns, uint32_t pid,
 		const as_partition_vinfo* vinfo, bool flush)
 {
-	if (as_storage_info_set(ns, pid, (uint8_t*)vinfo, sizeof(as_partition_vinfo)) != 0) {
-		cf_warning(AS_PARTITION, "{%s:%u} failed to set version %lu in storage",
-				ns->name, pid, vinfo->iid);
-		return;
-	}
+	as_storage_info_set(ns, pid, vinfo);
 
 	if (flush) {
 		as_storage_info_flush(ns);
@@ -1007,26 +1029,26 @@ generate_new_partition_version(as_partition_vinfo* new_vinfo)
 // Reduce the replication factor to 1 if the cluster size is less than or equal
 // to the specified limit.
 void
-apply_single_replica_limit(int new_cluster_size)
+apply_single_replica_limit(int cluster_size)
 {
 	bool reduce_repl = false;
 
 	cf_info(AS_PARTITION, "setting replication factors: cluster size %d, paxos single replica limit %d",
-			new_cluster_size, g_config.paxos_single_replica_limit);
+			cluster_size, g_config.paxos_single_replica_limit);
 
-	if (new_cluster_size <= g_config.paxos_single_replica_limit) {
+	if (cluster_size <= g_config.paxos_single_replica_limit) {
 		reduce_repl = true;
 	}
 
 	// Normal case - set replication factor.
-	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace* ns = g_config.namespaces[i];
-		uint16_t max_repl = ns->cfg_replication_factor > new_cluster_size ?
-				new_cluster_size : ns->cfg_replication_factor;
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
+		uint16_t repl_factor = ns->cfg_replication_factor > cluster_size ?
+				cluster_size : ns->cfg_replication_factor;
 
-		ns->replication_factor = reduce_repl ? 1 : max_repl;
+		ns->replication_factor = reduce_repl ? 1 : repl_factor;
 
-		cf_info(AS_PARTITION, "{%s} replication factor is %d", ns->name,
+		cf_info(AS_PARTITION, "{%s} replication factor is %u", ns->name,
 				ns->replication_factor);
 	}
 }
@@ -1146,7 +1168,7 @@ fill_node_sequence_table(cf_node* node_seq_table, int* succession_index_table)
 		}
 
 		// Sort the hashed node values.
-		qsort(&node_seq_table[pid*  cluster_size], cluster_size,
+		qsort(&node_seq_table[pid * cluster_size], cluster_size,
 				sizeof(cf_node), cf_compare_uint64ptr);
 
 		// Overwrite the sorted hash values with the original node IDs.
@@ -1320,14 +1342,14 @@ void
 handle_lost_partition(as_partition* p, const cf_node* node_seq_table,
 		as_namespace* ns, bool has_version[])
 {
-	for (uint32_t n = 0; n < p->n_replicas; n++) {
+	for (uint32_t repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {
 		// Each replica initializes its partition version to the same new value.
-		if (NODE_SEQ(p->id, n) == g_config.self_node) {
+		if (NODE_SEQ(p->id, repl_ix) == g_config.self_node) {
 			drop_trees(p, ns);
 			set_partition_sync_lockfree(p, ns, false);
 		}
 
-		has_version[n] = true;
+		has_version[repl_ix] = true;
 	}
 }
 
@@ -1356,15 +1378,15 @@ find_duplicates(const as_partition* p, const cf_node* node_seq_table,
 			continue;
 		}
 
-		uint32_t d;
+		uint32_t dupl_ix;
 
-		for (d = 0; d < n_dupl; d++) {
-			if (as_partition_vinfo_same(&dupl_pvinfo[d], vinfo)) {
+		for (dupl_ix = 0; dupl_ix < n_dupl; dupl_ix++) {
+			if (as_partition_vinfo_same(&dupl_pvinfo[dupl_ix], vinfo)) {
 				break;
 			}
 		}
 
-		if (d == n_dupl) {
+		if (dupl_ix == n_dupl) {
 			// Unique - didn't match primary version or any duplicate.
 			dupl_nodes[n_dupl] = NODE_SEQ(pid, n);
 			dupl_pvinfo[n_dupl] = *vinfo;
@@ -1384,15 +1406,15 @@ should_advance_version(const as_partition* p, uint32_t old_repl_factor)
 	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
 	cf_node* succession = g_paxos->succession;
 
-	for (uint32_t k = 0; k < old_repl_factor; k++) {
-		if (p->old_sl[k] == 0) {
+	for (uint32_t repl_ix = 0; repl_ix < old_repl_factor; repl_ix++) {
+		if (p->old_sl[repl_ix] == 0) {
 			return false;
 		}
 
 		uint32_t n;
 
 		for (n = 0; n < cluster_size; n++) {
-			if (p->old_sl[k] == succession[n]) {
+			if (p->old_sl[repl_ix] == succession[n]) {
 				break;
 			}
 		}
@@ -1436,17 +1458,17 @@ advance_version(as_partition* p, const cf_node* node_seq_table,
 
 	int sl_ix = SL_IX(pid, first_versioned_n);
 	as_partition_vinfo adv_vinfo = ns->cluster_vinfo[sl_ix][pid];
-	int i;
+	int vtp_ix;
 
-	for (i = 0; i < AS_PARTITION_MAX_VERSION; i++) {
-		if (adv_vinfo.vtp[i] == 0) {
-			adv_vinfo.vtp[i] = (uint8_t)n + 1;
+	for (vtp_ix = 0; vtp_ix < AS_PARTITION_MAX_VERSION; vtp_ix++) {
+		if (adv_vinfo.vtp[vtp_ix] == 0) {
+			adv_vinfo.vtp[vtp_ix] = (uint8_t)n + 1;
 			break;
 		}
 	}
 
 	// If we run out of space generate a completely new version.
-	if (i == AS_PARTITION_MAX_VERSION) {
+	if (vtp_ix == AS_PARTITION_MAX_VERSION) {
 		generate_new_partition_version(&adv_vinfo);
 	}
 
@@ -1495,10 +1517,10 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 		// If no expected immigrations, schedule emigrations to versionless
 		// replicas right away.
 		if (p->pending_immigrations == 0) {
-			for (uint32_t n = 1; n < p->n_replicas; n++) {
-				if (! has_version[n]) {
-					partition_migrate_record_fill(&pmr, NODE_SEQ(pid, n), ns,
-							pid, cluster_key, TX_FLAGS_NONE);
+			for (uint32_t repl_ix = 1; repl_ix < p->n_replicas; repl_ix++) {
+				if (! has_version[repl_ix]) {
+					partition_migrate_record_fill(&pmr, NODE_SEQ(pid, repl_ix),
+							ns, pid, cluster_key, TX_FLAGS_NONE);
 					cf_queue_push(mq, &pmr);
 					p->pending_emigrations++;
 				}
@@ -1510,9 +1532,9 @@ queue_namespace_migrations(as_partition* p, const cf_node* node_seq_table,
 		// Expecting immigrations - schedule delayed emigrations of merged
 		// partition to all replicas (if there are duplicates) or versionless
 		// replicas (if there are no duplicates).
-		for (uint32_t n = 1; n < p->n_replicas; n++) {
-			if (p->n_dupl != 0 || ! has_version[n]) {
-				p->replicas_delayed_emigrate[n] = true;
+		for (uint32_t repl_ix = 1; repl_ix < p->n_replicas; repl_ix++) {
+			if (p->n_dupl != 0 || ! has_version[repl_ix]) {
+				p->replicas_delayed_emigrate[repl_ix] = true;
 				(*ns_delayed_emigrations)++;
 			}
 		}
