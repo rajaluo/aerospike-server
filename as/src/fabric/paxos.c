@@ -3234,14 +3234,16 @@ as_paxos_thr(void *arg)
 								}
 							}
 						}
-						/* Do not cleanout the sync states array - allow for retransmits*/
-						// memset(p->partition_sync_state, 0, sizeof(p->partition_sync_state));
+
 						/*
-						* The principal can now balance its partitions
-						* Should we have another phase to the synchronizations to make sure that every
-						* cluster node has had its state updated before starting partition rebalance?
-						* Currently, the answer to this question is "no."
-						*/
+						 * Check if the state of this node is correct for applying a partition sync message
+						 */
+						if (as_partition_balance_are_migrations_allowed()) {
+							cf_info(AS_PAXOS, "principal node allows migrations - ignoring duplicate partition sync message");
+
+							break;
+						}
+
 						as_partition_balance();
 
 						if (p->cb) {
