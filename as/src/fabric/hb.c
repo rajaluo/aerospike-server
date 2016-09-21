@@ -4834,7 +4834,7 @@ channel_channels_tend()
 /**
  * Socket tending thread. Manages hearbeat receive as well.
  */
-static void*
+void*
 channel_tender(void* arg)
 {
 
@@ -5894,7 +5894,7 @@ Exit:
  * Tends the mesh host list, to discover and remove nodes. Should never
  * invoke a channel call while holding a mesh lock.
  */
-static void*
+void*
 mesh_tender(void* arg)
 {
 	DETAIL("Mesh tender started.");
@@ -7810,7 +7810,7 @@ hb_plugin_init()
 /**
  * Transmits heartbeats at fixed intervals.
  */
-static void*
+void*
 hb_transmitter(void* arg)
 {
 	DETAIL("Heartbeat transmitter started.");
@@ -8020,7 +8020,7 @@ hb_adjacency_tend_reduce(void* key, void* data, void* udata)
 /**
  * Tends the adjacency list. Removes nodes that expire.
  */
-static void*
+void*
 hb_adjacency_tender(void* arg)
 {
 

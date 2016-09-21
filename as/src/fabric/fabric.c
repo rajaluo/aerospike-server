@@ -1151,7 +1151,7 @@ run_fabric_worker(void *arg)
 
 // Do the network accepts here, and allocate a file descriptor to an epoll
 // worker thread.
-static void *
+void *
 run_fabric_accept(void *argv)
 {
 	fabric_args *fa = g_fabric_args;
@@ -1197,7 +1197,7 @@ run_fabric_accept(void *argv)
 }
 
 // Accept connections to the notification function here.
-static void *
+void *
 run_fabric_note_server(void *argv)
 {
 	fabric_args *fa = g_fabric_args;
@@ -1271,7 +1271,7 @@ fabric_node_health_reduce_fn(void *key, uint32_t keylen, void *data, void *udata
 
 #define FABRIC_HEALTH_INTERVAL 40   // ms
 
-static void *
+void *
 run_fabric_node_health(void *argv)
 {
 	while (true) {
@@ -2049,7 +2049,7 @@ ll_ftx_destructor_fn(cf_ll_element *e)
 }
 
 // long running thread for tranaction maintance
-static void *
+void *
 run_fabric_transact(void *argv)
 {
 	// Create a list of transactions to be processed in each pass.
