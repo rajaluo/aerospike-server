@@ -949,8 +949,8 @@ typedef struct as_hb_adjacency_tender_udata_s
  **/
 typedef struct as_hb_mesh_tip_clear_udata_s
 {
-	char host[HOST_NAME_MAX];
-	int port;
+	char host_name[HOST_NAME_MAX];
+	as_hb_endpoint endpoint;
 } as_hb_mesh_tip_clear_udata;
 
 /*----------------------------------------------------------------------------
@@ -1561,6 +1561,7 @@ static void channel_dump(bool verbose);
 static void channel_clear();
 
 static void mesh_seed_host_list_get(cf_dyn_buf* db);
+static int mesh_get_ip_from_hostname(char* host_name, as_hb_ipaddr* ip_addr);
 static void mesh_channel_event_process(as_hb_channel_event* event);
 static int mesh_tip(char* host, int port);
 static int mesh_tip_clear_reduce(void* key, void* data, void* udata);
@@ -1902,10 +1903,18 @@ as_hb_tx_interval_get()
 /**
  * Set the heartbeat pulse transmit interval.
  */
-void
+bool
 as_hb_tx_interval_set(uint32_t new_interval)
 {
+	if (new_interval < AS_HB_TX_INTERVAL_MS_MIN ||
+	    new_interval > AS_HB_TX_INTERVAL_MS_MAX) {
+		WARNING("Heartbeat interval must be >= %u and <= %u. Ignoring %u.",
+			AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX,
+			new_interval);
+		return false;
+	}
 	config_hb_tx_interval_set(new_interval);
+	return true;
 }
 
 /**
@@ -2031,7 +2040,7 @@ as_hb_mesh_tip(char* host, int port)
 }
 
 /**
- * Remove an aerospike seed entry from the mesh seed list.
+ * Remove a mesh node instance from the mesh list.
  */
 int
 as_hb_mesh_tip_clear(char* host, int port)
@@ -2050,8 +2059,15 @@ as_hb_mesh_tip_clear(char* host, int port)
 	MESH_LOCK();
 
 	as_hb_mesh_tip_clear_udata mesh_tip_clear_reduce_udata;
-	strncpy(mesh_tip_clear_reduce_udata.host, host, HOST_NAME_MAX);
-	mesh_tip_clear_reduce_udata.port = port;
+	memset(&mesh_tip_clear_reduce_udata, 0,
+	       sizeof(mesh_tip_clear_reduce_udata));
+	strncpy(mesh_tip_clear_reduce_udata.host_name, host, HOST_NAME_MAX);
+
+	// If name resolution fails, the endpoint ip address will be all zeros
+	// AKA unspecified.
+	mesh_get_ip_from_hostname(host,
+				  &mesh_tip_clear_reduce_udata.endpoint.addr);
+	mesh_tip_clear_reduce_udata.endpoint.port = port;
 	shash_reduce_delete(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
 			    mesh_tip_clear_reduce,
 			    &mesh_tip_clear_reduce_udata);
@@ -2061,7 +2077,7 @@ as_hb_mesh_tip_clear(char* host, int port)
 }
 
 /**
- * Forget all the seed nodes.
+ * Clear the entire mesh list.
  */
 int
 as_hb_mesh_tip_clear_all()
@@ -2072,11 +2088,8 @@ as_hb_mesh_tip_clear_all()
 	}
 
 	MESH_LOCK();
-	as_hb_mesh_tip_clear_udata mesh_tip_clear_reduce_udata;
-	mesh_tip_clear_reduce_udata.host[0] = '\0';
 	shash_reduce_delete(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
-			    mesh_tip_clear_reduce,
-			    &mesh_tip_clear_reduce_udata);
+			    mesh_tip_clear_reduce, NULL);
 	MESH_UNLOCK();
 	return (0);
 }
@@ -3215,8 +3228,8 @@ config_mcsize()
 	int supported_cluster_size = MIN(ASC, mode_cluster_size);
 
 	if (config_protocol_get() == AS_HB_PROTOCOL_V2) {
-		supported_cluster_size = MIN(supported_cluster_size,
-									g_config.paxos_max_cluster_size);
+		supported_cluster_size =
+		  MIN(supported_cluster_size, g_config.paxos_max_cluster_size);
 	}
 
 	DETAIL("Supported cluster size %d", supported_cluster_size);
@@ -4821,7 +4834,7 @@ channel_channels_tend()
 /**
  * Socket tending thread. Manages hearbeat receive as well.
  */
-static void*
+void*
 channel_tender(void* arg)
 {
 
@@ -5726,33 +5739,34 @@ mesh_stop()
  *   - if that fails use the last computed endpoint.
  *   - if there is no last computed endpoint fail endpoint computation.
  *
- * @param mesh_node the mesh node
+ * @param host_name the host name
+ * @param ip_addr the computed ip address
  * @return 0 on success. -1 if the mesh host name could not be resolved to a
  * valid ip address.
  */
 static int
-mesh_node_compute_endpoint(as_hb_mesh_node* mesh_node)
+mesh_get_ip_from_hostname(char* host_name, as_hb_ipaddr* ip_addr)
 {
 
-	int hostname_len = strnlen(mesh_node->mesh_host_name, HOST_NAME_MAX);
+	int rv = -1;
+	int hostname_len = strnlen(host_name, HOST_NAME_MAX);
 
 	if (hostname_len > 0 && hostname_len != HOST_NAME_MAX) {
 
 		struct addrinfo* result = NULL;
 
-		if (getaddrinfo(mesh_node->mesh_host_name, NULL, NULL,
-				&result) == 0) {
+		rv = getaddrinfo(host_name, NULL, NULL, &result);
+		if (rv == 0) {
 			if (result) {
 				// Pick the first ip address.
 				as_hb_ipaddr_from_ipv4(
 				  *(uint32_t*)&(
 				    ((struct sockaddr_in*)result->ai_addr)
 				      ->sin_addr),
-				  &mesh_node->endpoint.addr);
+				  ip_addr);
 			}
 		} else {
-			// Fall through and see if the last computed ip address
-			// can be used.
+			rv = -1;
 		}
 
 		if (result) {
@@ -5760,13 +5774,12 @@ mesh_node_compute_endpoint(as_hb_mesh_node* mesh_node)
 		}
 	}
 
-	char* endpoint_host_str = IPADDR_TO_STRING(&mesh_node->endpoint.addr);
+	char* endpoint_host_str = IPADDR_TO_STRING(ip_addr);
 
-	DETAIL("Resolved mesh node hostname %s to %s",
-	       mesh_node->mesh_host_name,
+	DETAIL("Resolved mesh node hostname %s to %s", host_name,
 	       endpoint_host_str != NULL ? endpoint_host_str : "unknown");
 
-	return as_hb_ipaddr_is_specified(&mesh_node->endpoint.addr) ? 0 : -1;
+	return rv;
 }
 
 /**
@@ -5842,9 +5855,6 @@ mesh_tend_reduce(void* key, void* data, void* udata)
 	// Channel for this node is inactive. Create an endpoint and prompt the
 	// channel submodule to connect to this node.
 
-	// Compute the actual ipaddress and port for this mesh host.
-	mesh_node_compute_endpoint(mesh_node);
-
 	if (tend_reduce_udata->to_connect_count >=
 	    tend_reduce_udata->to_connect_capacity) {
 		// New nodes found but we are out of capacity. Ultra defensive
@@ -5855,14 +5865,23 @@ mesh_tend_reduce(void* key, void* data, void* udata)
 		goto Exit;
 	}
 
-	memcpy(
-	  &tend_reduce_udata->to_connect[tend_reduce_udata->to_connect_count],
-	  &mesh_node->endpoint, sizeof(as_hb_endpoint));
-	tend_reduce_udata->to_connect_count++;
+	// Compute the actual ipaddress and port for this mesh host.
+	mesh_get_ip_from_hostname(mesh_node->mesh_host_name,
+				  &mesh_node->endpoint.addr);
 
-	// Flip to back to pending. Actually the channel establish call is
-	// outside the reduce, however lets assume it will always happen.
-	mesh_node_status_change(mesh_node, AS_HB_MESH_NODE_CHANNEL_PENDING);
+	if (as_hb_ipaddr_is_specified(&mesh_node->endpoint.addr)) {
+
+		memcpy(&tend_reduce_udata
+			  ->to_connect[tend_reduce_udata->to_connect_count],
+		       &mesh_node->endpoint, sizeof(as_hb_endpoint));
+		tend_reduce_udata->to_connect_count++;
+
+		// Flip to back to pending. Actually the channel establish call
+		// is outside the reduce, however lets assume it will always
+		// happen.
+		mesh_node_status_change(mesh_node,
+					AS_HB_MESH_NODE_CHANNEL_PENDING);
+	}
 
 Exit:
 
@@ -5875,7 +5894,7 @@ Exit:
  * Tends the mesh host list, to discover and remove nodes. Should never
  * invoke a channel call while holding a mesh lock.
  */
-static void*
+void*
 mesh_tender(void* arg)
 {
 	DETAIL("Mesh tender started.");
@@ -6848,7 +6867,7 @@ mesh_tip(char* host, int port)
 	new_node.endpoint.port = port;
 	new_node.is_seed = true;
 
-	if (mesh_node_compute_endpoint(&new_node) != 0) {
+	if (mesh_get_ip_from_hostname(new_node.mesh_host_name, &new_node.endpoint.addr) != 0) {
 		WARNING("Error resolving ip address for mesh host %s:%d", host,
 			port);
 		rv = SHASH_ERR;
@@ -6990,7 +7009,7 @@ mesh_free_node_data_reduce(void* key, void* data, void* udata)
 }
 
 /**
- * Remove a host / port from the mesh seed list.
+ * Remove a host / port from the mesh list.
  */
 static int
 mesh_tip_clear_reduce(void* key, void* data, void* udata)
@@ -7004,23 +7023,23 @@ mesh_tip_clear_reduce(void* key, void* data, void* udata)
 	as_hb_mesh_tip_clear_udata* tip_clear_udata =
 	  (as_hb_mesh_tip_clear_udata*)udata;
 
-	if (mesh_node->is_seed) {
-		if (tip_clear_udata->host[0] == '\0') {
-			// handling tip clear all
-			INFO("Removing mesh seed %s:%d node %" PRIx64,
-			     tip_clear_udata->host, tip_clear_udata->port,
-			     nodeid);
-			rv = SHASH_REDUCE_DELETE;
-		} else if (strncmp(mesh_node->mesh_host_name,
-				   tip_clear_udata->host, HOST_NAME_MAX) == 0 &&
-			   mesh_node->endpoint.port == tip_clear_udata->port) {
+	if (tip_clear_udata == NULL) {
+		// Handling tip clear all.
+		INFO("Removing mesh node %s:%d node %" PRIx64,
+		     mesh_node->mesh_host_name, mesh_node->endpoint.port,
+		     nodeid);
+		rv = SHASH_REDUCE_DELETE;
+	} else if ((strncmp(mesh_node->mesh_host_name, tip_clear_udata->host_name,
+			    HOST_NAME_MAX) == 0 &&
+		    mesh_node->endpoint.port ==
+		      tip_clear_udata->endpoint.port) ||
+		   (as_hb_endpoint_cmp(&mesh_node->endpoint,
+				       &tip_clear_udata->endpoint) == 0)) {
+		INFO("Removing mesh node %s:%d node %" PRIx64,
+		     tip_clear_udata->host_name, tip_clear_udata->endpoint.port,
+		     nodeid);
 
-			INFO("Removing mesh seed %s:%d node %" PRIx64,
-			     tip_clear_udata->host, tip_clear_udata->port,
-			     nodeid);
-
-			rv = SHASH_REDUCE_DELETE;
-		}
+		rv = SHASH_REDUCE_DELETE;
 	}
 	MESH_UNLOCK();
 	if (rv == SHASH_REDUCE_DELETE) {
@@ -7791,11 +7810,27 @@ hb_plugin_init()
 /**
  * Transmits heartbeats at fixed intervals.
  */
-static void*
+void*
 hb_transmitter(void* arg)
 {
 	DETAIL("Heartbeat transmitter started.");
+
+	uint64_t last_time = 0;
+
 	while (HB_IS_RUNNING()) {
+
+		uint64_t curr_time = cf_getms();
+
+		if ((curr_time - last_time) < PULSE_TRANSMIT_INTERVAL()) {
+			// Interval has not been reached for sending heartbeats
+			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
+				   (last_time + PULSE_TRANSMIT_INTERVAL()) -
+				     curr_time) *
+			       1000);
+			continue;
+		}
+
+		last_time = curr_time;
 
 		// Construct the pulse message.
 		msg* msg = hb_msg_get();
@@ -7814,7 +7849,6 @@ hb_transmitter(void* arg)
 		hb_msg_return(msg);
 
 		DETAIL("Done sending pulse message.");
-		usleep(PULSE_TRANSMIT_INTERVAL() * 1000);
 	}
 
 	DETAIL("Heartbeat transmitter stopped.");
@@ -7986,7 +8020,7 @@ hb_adjacency_tend_reduce(void* key, void* data, void* udata)
 /**
  * Tends the adjacency list. Removes nodes that expire.
  */
-static void*
+void*
 hb_adjacency_tender(void* arg)
 {
 
