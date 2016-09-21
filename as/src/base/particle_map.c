@@ -495,7 +495,6 @@ static bool packed_map_op_write_k_ordered(packed_map_op *op, uint8_t *write_ptr,
 // packed_map create
 static as_particle *packed_map_create(rollback_alloc *alloc_buf, uint32_t ele_count, const uint8_t *buf, uint32_t content_size, uint8_t flags);
 
-static int64_t packed_map_strip_indexes_delta(const as_particle *p);
 static int64_t packed_map_strip_indexes(uint8_t *dest, const as_particle *p, bool remove_flags);
 
 // map_ele_find
@@ -1062,14 +1061,20 @@ map_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
 uint32_t
 map_flat_size(const as_particle *p)
 {
-	int64_t delta = packed_map_strip_indexes_delta(p);
+	const map_mem *p_map_mem = (const map_mem *)p;
 
-	if (delta < 0) {
-		cf_crash(AS_PARTICLE, "invalid map, ret=%ld", delta);
+	packed_map_op op;
+	packed_map_op_init_from_particle(&op, p);
+
+	if (op.pmi.flags == 0) {
+		return sizeof(map_flat) + p_map_mem->sz;
 	}
 
-	const map_mem *p_map_mem = (const map_mem *)p;
-	return sizeof(map_flat) + p_map_mem->sz - delta;
+	uint32_t sz = p_map_mem->sz - op.ele_start;
+	sz += as_pack_list_header_get_size(op.ele_count + 1);
+	sz += 3 + 1;	// 3 for min ext hdr and 1 for nil pair
+
+	return (uint32_t)sizeof(map_flat) + sz;
 }
 
 uint32_t
@@ -5226,47 +5231,6 @@ packed_map_create(rollback_alloc *alloc_buf, uint32_t ele_count, const uint8_t *
 	}
 
 	return (as_particle *)p_map_mem;
-}
-
-static int64_t
-packed_map_strip_indexes_delta(const as_particle *p)
-{
-	const map_mem *p_map_mem = (const map_mem *)p;
-
-	as_unpacker pk = {
-			.buffer = p_map_mem->data,
-			.offset = 0,
-			.length = (int)p_map_mem->sz
-	};
-
-	int64_t ele_count = as_unpack_map_header_element_count(&pk);
-
-	if (ele_count < 0) {
-		return -1;
-	}
-
-	if (ele_count > 0 && as_unpack_peek_is_ext(&pk)) {
-		as_msgpack_ext ext;
-		uint32_t ext_start = (uint32_t)pk.offset;
-
-		if (as_unpack_ext(&pk, &ext) != 0) {
-			return -2;
-		}
-
-		// +1 for type field.
-		uint32_t index_size = ext.type_offset - ext_start + ext.size + 1;
-
-		// Calculate removal of all metadata.
-		if (ext.type == AS_PACKED_MAP_FLAG_NONE) {
-			// +1 for nil val.
-			return index_size + 1;
-		}
-
-		// 3 is the number of bytes needed for encoding just flags.
-		return index_size - 3;
-	}
-
-	return 0;
 }
 
 static int64_t
