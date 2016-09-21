@@ -2900,7 +2900,7 @@ packed_map_op_unpack_hdridx(packed_map_op *op)
 	};
 
 	if (op->packed_sz == 0) {
-		op.pmi.flags = 0;
+		op->pmi.flags = 0;
 		return false;
 	}
 
