@@ -3295,7 +3295,6 @@ ssd_load_devices(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 		ssds->header->random = random;
 		ssds->header->devices_n = n_ssds;
 		as_storage_info_flush_ssd(ns);
-
 		ssd_load_devices_init_header_length(ssds);
 
 		return true;
@@ -3344,10 +3343,15 @@ ssd_load_devices(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 	ssds->header->random = random;
 	ssds->header->devices_n = n_ssds; // may have added fresh drives
 	as_storage_info_flush_ssd(ns);
-
-	as_partition_get_state_from_storage(ssds->ns, ssds->get_state_from_storage);
-
 	ssd_load_devices_init_header_length(ssds);
+
+	// Cache booleans indicating whether partitions are owned or not.
+	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+		as_partition_vinfo vinfo;
+
+		as_storage_info_get(ns, pid, &vinfo);
+		ssds->get_state_from_storage[pid] = ! as_partition_is_null(&vinfo);
+	}
 
 	// Warm restart - imitate device loading by reducing resumed index.
 	if (! ns->cold_start) {

@@ -78,4 +78,4 @@ as_migrate_result as_partition_immigrate_start(struct as_namespace_s* ns, uint32
 as_migrate_result as_partition_immigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
 
 // Counter that tells clients partition ownership has changed.
-extern cf_atomic64 g_partition_generation;
+extern cf_atomic32 g_partition_generation;

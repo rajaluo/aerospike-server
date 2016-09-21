@@ -76,7 +76,11 @@ typedef struct inter_hash_s {
 // Globals.
 //
 
-cf_atomic64 g_partition_generation = 0;
+cf_atomic32 g_partition_generation = 0;
+
+// Using int for 4-byte size, but maintaining bool semantics.
+// TODO - ok as non-volatile, but should selectively load/store in the future.
+static int g_init_balance_done = false;
 
 static cf_atomic32 g_migrate_num_incoming = 0;
 
@@ -282,7 +286,8 @@ as_partition_balance_init_single_node_cluster()
 	}
 
 	// Ok to allow transactions.
-	cf_atomic64_incr(&g_partition_generation);
+	g_init_balance_done = true;
+	cf_atomic32_incr(&g_partition_generation);
 }
 
 
@@ -301,7 +306,7 @@ as_partition_balance_init_multi_node_cluster()
 bool
 as_partition_balance_is_init_resolved()
 {
-	return g_partition_generation != 0;
+	return g_init_balance_done;
 }
 
 
@@ -478,7 +483,8 @@ as_partition_balance()
 	}
 
 	// All partitions now have replicas assigned, ok to allow transactions.
-	cf_atomic64_incr(&g_partition_generation);
+	g_init_balance_done = true;
+	cf_atomic32_incr(&g_partition_generation);
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_storage_info_flush(g_config.namespaces[ns_ix]);
@@ -613,7 +619,7 @@ as_partition_emigrate_done(as_migrate_state s, as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic64_incr(&g_partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -771,7 +777,7 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic64_incr(&g_partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -970,7 +976,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	}
 
 	if (client_replica_maps_update(ns, pid)) {
-		cf_atomic64_incr(&g_partition_generation);
+		cf_atomic32_incr(&g_partition_generation);
 	}
 
 	pthread_mutex_unlock(&p->lock);

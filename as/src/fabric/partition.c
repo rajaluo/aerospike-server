@@ -42,7 +42,6 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
-#include "storage/storage.h"
 #include "fabric/partition_balance.h"
 
 
@@ -109,30 +108,6 @@ as_partition_init(as_namespace* ns, uint32_t pid)
 				(as_index_value_destructor)&as_record_destroy, ns,
 				&ns->sub_tree_roots[pid]);
 	}
-}
-
-
-// Return number of partitions found in storage.
-int
-as_partition_get_state_from_storage(as_namespace* ns, bool* partition_states)
-{
-	memset(partition_states, 0, sizeof(bool) * AS_PARTITIONS);
-
-	int n_found = 0;
-
-	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		as_partition_vinfo vinfo;
-
-		// Find if the value has been set in storage.
-		as_storage_info_get(ns, pid, &vinfo);
-
-		if (! as_partition_is_null(&vinfo)) {
-			partition_states[pid] = true;
-			n_found++;
-		}
-	}
-
-	return n_found;
 }
 
 
