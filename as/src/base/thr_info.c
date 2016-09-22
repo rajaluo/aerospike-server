@@ -62,6 +62,8 @@
 #include "base/monitor.h"
 #include "base/scan.h"
 #include "base/thr_batch.h"
+#include "base/thr_demarshal.h"
+#include "base/thr_info_port.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
@@ -143,6 +145,11 @@ static cf_queue *g_info_work_q = 0;
 #define INFO_FIELD_GENERATION 1
 #define INFO_FIELD_SERVICE_ADDRESS 2
 #define INFO_FIELD_ALT_ADDRESS 3
+#define INFO_FIELD_SERVICES_CLEAR_STD 4
+#define INFO_FIELD_SERVICES_TLS_STD 5
+#define INFO_FIELD_SERVICES_CLEAR_ALT 6
+#define INFO_FIELD_SERVICES_TLS_ALT 7
+#define INFO_FIELD_TLS_NAME 8
 
 #define INFO_OP_UPDATE 0
 #define INFO_OP_ACK 1
@@ -152,10 +159,15 @@ msg_template info_mt[] = {
 	{ INFO_FIELD_OP,	M_FT_UINT32 },
 	{ INFO_FIELD_GENERATION, M_FT_UINT32 },
 	{ INFO_FIELD_SERVICE_ADDRESS, M_FT_STR },
-	{ INFO_FIELD_ALT_ADDRESS, M_FT_STR }
+	{ INFO_FIELD_ALT_ADDRESS, M_FT_STR },
+	{ INFO_FIELD_SERVICES_CLEAR_STD, M_FT_STR },
+	{ INFO_FIELD_SERVICES_TLS_STD, M_FT_STR },
+	{ INFO_FIELD_SERVICES_CLEAR_ALT, M_FT_STR },
+	{ INFO_FIELD_SERVICES_TLS_ALT, M_FT_STR },
+	{ INFO_FIELD_TLS_NAME, M_FT_STR }
 };
 
-#define INFO_MSG_SCRATCH_SIZE 128
+#define INFO_MSG_SCRATCH_SIZE 512
 
 // Is dumping GLibC-level memory stats enabled?
 bool g_mstats_enabled = false;
@@ -165,6 +177,7 @@ static bool g_mtrace_enabled = false;
 
 // Default location for the memory tracing output:
 #define DEFAULT_MTRACE_FILENAME  "/tmp/mtrace.out"
+
 
 //
 // The dynamic list has a name, and a function to call
@@ -363,6 +376,107 @@ info_get_cluster_name(char *name, cf_dyn_buf *db)
 	return 0;
 }
 
+
+static char *
+bind_to_string(cf_serv_cfg *cfg, cf_sock_owner owner)
+{
+	cf_dyn_buf_define_size(db, 2500);
+	uint32_t count = 0;
+
+	for (uint32_t i = 0; i < cfg->n_cfgs; ++i) {
+		if (cfg->cfgs[i].owner != owner) {
+			continue;
+		}
+
+		if (count > 0) {
+			cf_dyn_buf_append_char(&db, ',');
+		}
+
+		cf_dyn_buf_append_string(&db, cf_ip_addr_print(&cfg->cfgs[i].addr));
+		++count;
+	}
+
+	char *string = cf_dyn_buf_strdup(&db);
+	cf_dyn_buf_free(&db);
+	return string != NULL ? string : cf_strdup("null");
+}
+
+static char *
+access_to_string(as_addr_list *addrs)
+{
+	cf_dyn_buf_define_size(db, 2500);
+
+	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
+		if (i > 0) {
+			cf_dyn_buf_append_char(&db, ',');
+		}
+
+		cf_dyn_buf_append_string(&db, addrs->addrs[i]);
+	}
+
+	char *string = cf_dyn_buf_strdup(&db);
+	cf_dyn_buf_free(&db);
+	return string != NULL ? string : cf_strdup("null");
+}
+
+int
+info_get_endpoints(char *name, cf_dyn_buf *db)
+{
+	info_append_int(db, "service.port", g_access.service.port);
+
+	char *string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE);
+	info_append_string(db, "service.addresses", string);
+	cf_free(string);
+
+	string = access_to_string(&g_access.service.addrs);
+	info_append_string(db, "service.access-addresses", string);
+	cf_free(string);
+
+	info_append_int(db, "service.alternate-port", g_access.alt_service.port);
+
+	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_ALTERNATE);
+	info_append_string(db, "service.alternate-addresses", string);
+	cf_free(string);
+
+	string = access_to_string(&g_access.alt_service.addrs);
+	info_append_string(db, "service.alternate-access-addresses", string);
+	cf_free(string);
+
+	info_append_int(db, "service.tls-port", g_access.tls_service.port);
+
+	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
+	info_append_string(db, "service.tls-addresses", string);
+	cf_free(string);
+
+	string = access_to_string(&g_access.tls_service.addrs);
+	info_append_string(db, "service.tls-access-addresses", string);
+	cf_free(string);
+
+	info_append_int(db, "service.alternate-tls-port", g_access.alt_tls_service.port);
+
+	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS_ALTERNATE);
+	info_append_string(db, "service.alternate-tls-addresses", string);
+	cf_free(string);
+
+	string = access_to_string(&g_access.alt_tls_service.addrs);
+	info_append_string(db, "service.alternate-tls-access-addresses", string);
+	cf_free(string);
+
+	info_append_int(db, "fabric.port", g_fabric_port);
+
+	string = bind_to_string(&g_fabric_bind, CF_SOCK_OWNER_FABRIC);
+	info_append_string(db, "fabric.addresses", string);
+	cf_free(string);
+
+	info_append_int(db, "info.port", g_info_port);
+
+	string = bind_to_string(&g_info_bind, CF_SOCK_OWNER_INFO);
+	info_append_string(db, "info.addresses", string);
+	cf_free(string);
+
+	cf_dyn_buf_chomp(db);
+	return(0);
+}
 
 int
 info_get_partition_generation(char *name, cf_dyn_buf *db)
@@ -1698,12 +1812,13 @@ info_service_config_get(cf_dyn_buf *db)
 {
 	// Note - no user, group.
 	info_append_uint32(db, "paxos-single-replica-limit", g_config.paxos_single_replica_limit);
-	info_append_string(db, "pidfile", g_config.pidfile ? g_config.pidfile : "null");
+	info_append_string_safe(db, "pidfile", g_config.pidfile);
 	info_append_int(db, "service-threads", g_config.n_service_threads);
 	info_append_int(db, "transaction-queues", g_config.n_transaction_queues);
 	info_append_int(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
 	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
 
+	info_append_bool(db, "advertise-ipv6", g_config.advertise_ipv6);
 	info_append_bool(db, "allow-inline-transactions", g_config.allow_inline_transactions);
 	info_append_int(db, "batch-threads", g_config.n_batch_threads);
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
@@ -1722,13 +1837,14 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "fabric-workers", g_config.n_fabric_workers);
 	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
 	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
-	info_append_string(db, "hist-track-thresholds", g_config.hist_track_thresholds ? g_config.hist_track_thresholds : "null");
+	info_append_string_safe(db, "hist-track-thresholds", g_config.hist_track_thresholds);
 	info_append_int(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "ldt-benchmarks", g_config.ldt_benchmarks);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_int(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
 	info_append_int(db, "migrate-rx-lifetime-ms", g_config.migrate_rx_lifetime_ms);
 	info_append_int(db, "migrate-threads", g_config.n_migrate_threads);
+	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
 	info_append_uint32(db, "nsup-period", g_config.nsup_period);
 	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
@@ -1786,7 +1902,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "transaction-repeatable-read", g_config.transaction_repeatable_read);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
 	info_append_bool(db, "use-queue-per-device", g_config.use_queue_per_device);
-	info_append_string(db, "work-directory", g_config.work_directory ? g_config.work_directory : "null");
+	info_append_string_safe(db, "work-directory", g_config.work_directory);
 	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 
 #ifdef USE_ASM
@@ -1801,29 +1917,35 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "non-master-sets-delete", g_config.non_master_sets_delete); // dynamic only
 }
 
+static void
+append_addrs(cf_dyn_buf *db, const char *name, const as_addr_list *list)
+{
+	for (uint32_t i = 0; i < list->n_addrs; ++i) {
+		info_append_string(db, name, list->addrs[i]);
+	}
+}
 
 void
 info_network_config_get(cf_dyn_buf *db)
 {
 	// Service:
 
-	info_append_string(db, "service.address", g_config.socket.addr);
-	info_append_int(db, "service.port", g_config.socket.port);
+	info_append_int(db, "service.port", g_config.service.port);
+	append_addrs(db, "service.address", &g_config.service.bind);
+	append_addrs(db, "service.access-address", &g_config.service.access);
 
-	if (g_config.external_address) {
-		info_append_string(db, "service.access-address", g_config.external_address);
-		info_append_bool(db, "virtual", g_config.is_external_address_virtual); // TODO - how to present?
-	}
+	info_append_int(db, "service.tls-port", g_config.tls_service.port);
+	append_addrs(db, "service.tls-address", &g_config.tls_service.bind);
+	append_addrs(db, "service.tls-access-address", &g_config.tls_service.access);
+	info_append_string_safe(db, "service.tls-name", g_config.tls_name);
 
-	if (g_config.alternate_address) {
-		info_append_string(db, "service.alternate-address", g_config.alternate_address);
-	}
+	info_append_int(db, "service.alternate-port", g_config.alt_service.port);
+	append_addrs(db, "service.alternate-address", &g_config.alt_service.bind);
+	append_addrs(db, "service.alternate-access-address", &g_config.alt_service.access);
 
-	if (g_config.network_interface_name) {
-		info_append_string(db, "service.network-interface-name", g_config.network_interface_name);
-	}
-
-	info_append_bool(db, "service.reuse-address", g_config.socket_reuse_addr);
+	info_append_int(db, "service.alternate-tls-port", g_config.alt_tls_service.port);
+	append_addrs(db, "service.alternate-tls-address", &g_config.alt_tls_service.bind);
+	append_addrs(db, "service.alternate-tls-access-address", &g_config.alt_tls_service.access);
 
 	// Heartbeat:
 
@@ -1831,7 +1953,8 @@ info_network_config_get(cf_dyn_buf *db)
 
 	// Fabric:
 
-	info_append_int(db, "fabric.port", g_config.fabric_port);
+	append_addrs(db, "fabric.address", &g_config.info.bind);
+	info_append_int(db, "fabric.port", g_config.fabric.port);
 	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
 	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
 	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
@@ -1840,10 +1963,8 @@ info_network_config_get(cf_dyn_buf *db)
 
 	// Info:
 
-	// network.info.port is the asd info port variable/output, This was chosen
-	// because info.port conflicts with XDR config parameter. Ideally XDR should
-	// use xdr.info.port and asd should use info.port.
-	info_append_int(db, "info.port", g_config.info_port);
+	append_addrs(db, "info.address", &g_config.info.bind);
+	info_append_int(db, "info.port", g_config.info.port);
 }
 
 
@@ -1937,7 +2058,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		// TODO - how to report the shadows?
 
 		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
-		info_append_string(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode ? ns->storage_scheduler_mode : "null");
+		info_append_string_safe(db, "storage-engine.scheduler-mode", ns->storage_scheduler_mode);
 		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
 		info_append_bool(db, "storage-engine.data-in-memory", ns->storage_data_in_memory);
 		info_append_bool(db, "storage-engine.cold-start-empty", ns->storage_cold_start_empty);
@@ -2100,7 +2221,18 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		goto Error;
 	if (strcmp(context, "service") == 0) {
 		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "transaction-retry-ms", context, &context_len)) {
+		if (0 == as_info_parameter_get(params, "advertise-ipv6", context, &context_len)) {
+			if (strcmp(context, "true") == 0 || strcmp(context, "yes") == 0) {
+				g_config.advertise_ipv6 = true;
+			}
+			else if (strcmp(context, "false") == 0 || strcmp(context, "no") == 0) {
+				g_config.advertise_ipv6 = false;
+			}
+			else {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "transaction-retry-ms", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
 			if (val == 0)
@@ -2661,7 +2793,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		if (0 == as_info_parameter_get(params, "heartbeat.interval", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
-			if (!as_hb_tx_interval_set(val)) {
+			if (as_hb_tx_interval_set(val) != 0) {
 				goto Error;
 			}
 		}
@@ -2681,7 +2813,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			as_hb_override_mtu_set(val);
 		}
 		else if (0 == as_info_parameter_get(params, "heartbeat.protocol", context, &context_len)) {
-			hb_protocol_enum protocol = (!strcmp(context, "v1") ? AS_HB_PROTOCOL_V1 :
+			as_hb_protocol protocol = (!strcmp(context, "v1") ? AS_HB_PROTOCOL_V1 :
 										 (!strcmp(context, "v2") ? AS_HB_PROTOCOL_V2 :
 										  (!strcmp(context, "v3") ? AS_HB_PROTOCOL_V3 :
 										  (!strcmp(context, "reset") ? AS_HB_PROTOCOL_RESET :
@@ -2690,7 +2822,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (AS_HB_PROTOCOL_UNDEF == protocol)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of heartbeat protocol version to %s", context);
-			if (0 > as_hb_set_protocol(protocol))
+			if (0 > as_hb_protocol_set(protocol))
 				goto Error;
 		}
 		else
@@ -4263,26 +4395,48 @@ as_info_set(const char *name, const char *value, bool def)
 // makes sure that the distributed key system is properly distributed
 //
 
-static pthread_mutex_t		g_service_lock = PTHREAD_MUTEX_INITIALIZER;
-char 		*g_service_str = 0;
-uint32_t	g_service_generation = 0;
+static pthread_mutex_t g_serv_lock = PTHREAD_MUTEX_INITIALIZER;
+static char *g_serv_legacy = NULL;
+static char *g_serv_clear_std = NULL;
+static char *g_serv_clear_alt = NULL;
+static char *g_serv_tls_std = NULL;
+static char *g_serv_tls_alt = NULL;
+static char *g_serv_tls_name = NULL;
+static uint32_t g_serv_gen = 0;
+static cf_atomic64 g_peers_gen = 1;
 
 //
 // What other nodes are out there, and what are their ip addresses?
 //
 
-typedef struct {
-	uint64_t	last;				// last notice we got from a given node
-	char 		*service_addr;		// string representing the service address
-	char 		*alternate_addr;		// string representing the alternate address
-	uint32_t	generation;			// acked generation counter
+typedef struct info_node_info_s {
+	char     *service_addr;       // string representing the service address
+	char     *alternate_addr;     // string representing the alternate address
+	uint32_t generation;          // acked generation counter
+	char     *services_clear_std; // non-TLS standard services list
+	char     *services_tls_std;   // TLS standard services list
+	char     *services_clear_alt; // non-TLS alternate services list
+	char     *services_tls_alt;   // TLS alternate services list
+	char     *tls_name;           // TLS name
+	uint64_t last_changed;        // generation count of last modification (for delta updates)
 } info_node_info;
 
-typedef struct {
-	bool		printed_element;	// Boolean flag to control printing of ';'
-	cf_dyn_buf	*db;
+typedef const char *(*info_node_proj_fn)(info_node_info *info);
+
+typedef struct services_printer_s {
+	info_node_proj_fn proj;
+	cf_dyn_buf        *db;
+	const char        *strip;
+	uint64_t          since;
+	bool              with_tls_name;
+	int32_t           count;
 } services_printer;
 
+typedef struct port_savings_context_s {
+	info_node_proj_fn proj;
+	uint64_t          since;
+	uint32_t          port_savings[65536];
+} port_savings_context;
 
 // To avoid the services bug, g_info_node_info_hash should *always* be a subset
 // of g_info_node_info_history_hash. In order to ensure this, every modification
@@ -4293,87 +4447,263 @@ shash *g_info_node_info_hash = 0;
 
 int info_node_info_reduce_fn(void *key, void *data, void *udata);
 
-void
-build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db) {
-	bool empty = true;
+static char *
+format_services_string(const char **addrs, uint32_t n_addrs, cf_ip_port port, char sep)
+{
+	if (n_addrs == 0) {
+		return NULL;
+	}
 
-	for (int32_t i = 0; i < n_addrs; ++i) {
-		if (cf_ip_addr_is_loopback(&addrs[i])) {
-			continue;
+	cf_dyn_buf_define(db);
+
+	for (uint32_t i = 0; i < n_addrs; ++i) {
+		if (cf_ip_addr_is_dns_name(addrs[i])) {
+			cf_dyn_buf_append_string(&db, addrs[i]);
+			cf_dyn_buf_append_char(&db, ':');
+			cf_dyn_buf_append_string(&db, cf_ip_port_print(port));
+		}
+		else {
+			cf_sock_addr addr;
+			CF_NEVER_FAILS(cf_sock_addr_from_host_port(addrs[i], port, &addr));
+			cf_dyn_buf_append_string(&db, cf_sock_addr_print(&addr));
 		}
 
-		cf_sock_addr tmp;
-		cf_sock_addr_from_addr_port(&addrs[i], g_config.socket.port, &tmp);
-		cf_dyn_buf_append_string(db, cf_sock_addr_print(&tmp));
-		cf_dyn_buf_append_char(db, ';');
-		empty = false;
+		cf_dyn_buf_append_char(&db, sep);
 	}
 
-	if (!empty) {
-		cf_dyn_buf_chomp(db);
+	if (n_addrs > 0) {
+		cf_dyn_buf_chomp(&db);
 	}
+
+	char *res = cf_dyn_buf_strdup(&db);
+	cf_dyn_buf_free(&db);
+	return res;
 }
 
-//
-// Note: if all my interfaces go down, service_str will be 0
-//
-
-static int32_t
-inter_comp(const void *lhs, const void *rhs)
+static char *
+format_services_addr(cf_ip_addr *addrs, int32_t n_addrs, cf_ip_port port, char sep)
 {
-	return cf_ip_addr_compare(lhs, rhs);
+	if (n_addrs == 0) {
+		return NULL;
+	}
+
+	cf_dyn_buf_define(db);
+
+	for (int32_t i = 0; i < n_addrs; ++i) {
+		cf_sock_addr addr;
+		cf_sock_addr_from_addr_port(&addrs[i], port, &addr);
+		cf_dyn_buf_append_string(&db, cf_sock_addr_print(&addr));
+		cf_dyn_buf_append_char(&db, sep);
+	}
+
+	if (n_addrs > 0) {
+		cf_dyn_buf_chomp(&db);
+	}
+
+	char *res = cf_dyn_buf_strdup(&db);
+	cf_dyn_buf_free(&db);
+	return res;
+}
+
+static bool
+detect_name_change(char **tls_name)
+{
+	char *node_name = cf_node_name();
+
+	if (node_name[0] == 0) {
+		cf_free(node_name);
+		node_name = NULL;
+	}
+
+	if (*tls_name == NULL && node_name == NULL) {
+		return false;
+	}
+
+	if (*tls_name != NULL && node_name != NULL && strcmp(*tls_name, node_name) == 0) {
+		return false;
+	}
+
+	if (*tls_name != NULL) {
+		cf_free(*tls_name);
+	}
+
+	*tls_name = node_name;
+	return true;
+}
+
+static uint32_t
+filter_legacy(const char **from, uint32_t n_from, const char **to)
+{
+	uint32_t n_to = 0;
+
+	for (uint32_t i = 0; i < n_from; ++i) {
+		if (cf_ip_addr_str_is_legacy(from[i])) {
+			to[n_to] = from[i];
+			++n_to;
+		}
+	}
+
+	return n_to;
+}
+
+static void
+set_static_services(void)
+{
+	const char *filter[CF_SOCK_CFG_MAX];
+	uint32_t n_filter;
+
+	if (g_access.service.addrs.n_addrs > 0) {
+		n_filter = filter_legacy(g_access.service.addrs.addrs, g_access.service.addrs.n_addrs,
+				filter);
+		g_serv_legacy = format_services_string(filter, n_filter, g_access.service.port, ';');
+
+		if (cf_ip_addr_legacy_only()) {
+			g_serv_clear_std = format_services_string(filter, n_filter, g_access.service.port, ',');
+		}
+		else {
+			g_serv_clear_std = format_services_string(g_access.service.addrs.addrs,
+					g_access.service.addrs.n_addrs, g_access.service.port, ',');
+		}
+	}
+
+	if (g_access.alt_service.addrs.n_addrs > 0) {
+		if (cf_ip_addr_legacy_only()) {
+			n_filter = filter_legacy(g_access.alt_service.addrs.addrs,
+					g_access.alt_service.addrs.n_addrs, filter);
+			g_serv_clear_alt = format_services_string(filter, n_filter, g_access.alt_service.port,
+					',');
+		}
+		else {
+			g_serv_clear_alt = format_services_string(g_access.alt_service.addrs.addrs,
+					g_access.alt_service.addrs.n_addrs, g_access.alt_service.port, ',');
+		}
+	}
+
+	if (g_access.tls_service.addrs.n_addrs > 0) {
+		if (cf_ip_addr_legacy_only()) {
+			n_filter = filter_legacy(g_access.tls_service.addrs.addrs,
+					g_access.tls_service.addrs.n_addrs, filter);
+			g_serv_tls_std = format_services_string(filter, n_filter, g_access.tls_service.port,
+					',');
+		}
+		else {
+			g_serv_tls_std = format_services_string(g_access.tls_service.addrs.addrs,
+					g_access.tls_service.addrs.n_addrs, g_access.tls_service.port, ',');
+		}
+	}
+
+	if (g_access.alt_tls_service.addrs.n_addrs > 0) {
+		if (cf_ip_addr_legacy_only()) {
+			n_filter = filter_legacy(g_access.alt_tls_service.addrs.addrs,
+					g_access.alt_tls_service.addrs.n_addrs, filter);
+			g_serv_tls_alt = format_services_string(filter, n_filter, g_access.alt_tls_service.port,
+					',');
+		}
+		else {
+			g_serv_tls_alt = format_services_string(g_access.alt_tls_service.addrs.addrs,
+					g_access.alt_tls_service.addrs.n_addrs, g_access.alt_tls_service.port, ',');
+		}
+	}
 }
 
 void *
 info_interfaces_fn(void *unused)
 {
-	cf_ip_addr known[100];
-	int32_t n_known = 0;
+	pthread_mutex_lock(&g_serv_lock);
+	set_static_services();
+
+	if (g_config.tls_name != NULL) {
+		g_serv_tls_name = g_config.tls_name;
+	}
+
+	++g_serv_gen;
+	pthread_mutex_unlock(&g_serv_lock);
+
+	cf_ip_addr legacy[CF_SOCK_CFG_MAX];
+	uint32_t n_legacy = 0;
+
+	cf_ip_addr addrs[CF_SOCK_CFG_MAX];
+	uint32_t n_addrs = 0;
+
+	char *tls_name = NULL;
+	bool flag = cf_ip_addr_legacy_only();
 
 	while (true) {
-		uint8_t buffer[1000];
-		cf_ip_addr *curr;
-		int32_t n_curr;
+		bool chg_flag = cf_ip_addr_legacy_only() != flag;
+		bool chg_legacy = cf_inter_detect_changes_legacy(legacy, &n_legacy, CF_SOCK_CFG_MAX);
+		bool chg_any;
 
-		if (cf_inter_get_addr(&curr, &n_curr, buffer, sizeof(buffer)) < 0) {
-			cf_crash(AS_CFG, "Error while getting interface addresses");
-		}
-
-		qsort(curr, n_curr, sizeof(cf_ip_addr), inter_comp);
-		bool change = false;
-
-		if (n_curr != n_known) {
-			change = true;
+		if (cf_ip_addr_legacy_only()) {
+			chg_any = cf_inter_detect_changes_legacy(addrs, &n_addrs, CF_SOCK_CFG_MAX);
 		}
 		else {
-			for (int32_t i = 0; i < n_curr; ++i) {
-				if (inter_comp(&known[i], &curr[i]) != 0) {
-					change = true;
-					break;
-				}
+			chg_any = cf_inter_detect_changes(addrs, &n_addrs, CF_SOCK_CFG_MAX);
+		}
+
+		bool chg_name = detect_name_change(&tls_name);
+
+		if (chg_flag || chg_legacy || chg_any || chg_name) {
+			pthread_mutex_lock(&g_serv_lock);
+
+			if (chg_flag) {
+				set_static_services();
+				flag = cf_ip_addr_legacy_only();
 			}
+
+			if (chg_legacy && g_access.service.addrs.n_addrs == 0) {
+				if (g_serv_legacy != NULL) {
+					cf_free(g_serv_legacy);
+				}
+
+				g_serv_legacy = format_services_addr(legacy, n_legacy, g_access.service.port, ';');
+			}
+
+			if (chg_any && g_access.service.addrs.n_addrs == 0) {
+				if (g_serv_clear_std != NULL) {
+					cf_free(g_serv_clear_std);
+				}
+
+				g_serv_clear_std = format_services_addr(addrs, n_addrs, g_access.service.port, ',');
+			}
+
+			if (chg_any && g_access.alt_service.port != 0 &&
+					g_access.alt_service.addrs.n_addrs == 0) {
+				if (g_serv_clear_alt != NULL) {
+					cf_free(g_serv_clear_alt);
+				}
+
+				g_serv_clear_alt = format_services_addr(addrs, n_addrs, g_access.alt_service.port,
+						',');
+			}
+
+			if (chg_any && g_access.tls_service.port != 0 &&
+					g_access.tls_service.addrs.n_addrs == 0) {
+				if (g_serv_tls_std != NULL) {
+					cf_free(g_serv_tls_std);
+				}
+
+				g_serv_tls_std = format_services_addr(addrs, n_addrs, g_access.tls_service.port,
+						',');
+			}
+
+			if (chg_any && g_access.alt_tls_service.port != 0 &&
+					g_access.alt_tls_service.addrs.n_addrs == 0) {
+				if (g_serv_tls_alt != NULL) {
+					cf_free(g_serv_tls_alt);
+				}
+
+				g_serv_tls_alt = format_services_addr(addrs, n_addrs, g_access.alt_tls_service.port,
+						',');
+			}
+
+			if (chg_name && g_config.tls_name == NULL) {
+				g_serv_tls_name = tls_name;
+			}
+
+			++g_serv_gen;
+			pthread_mutex_unlock(&g_serv_lock);
 		}
 
-		if (change) {
-			cf_dyn_buf_define(services);
-			build_service_list(curr, n_curr, &services);
-
-			pthread_mutex_lock(&g_service_lock);
-
-			if (g_service_str != NULL)
-				cf_free(g_service_str);
-
-			g_service_str = cf_dyn_buf_strdup(&services);
-			g_service_generation++;
-
-			pthread_mutex_unlock(&g_service_lock);
-			cf_dyn_buf_free(&services);
-
-			memcpy(known, curr, sizeof(cf_ip_addr) * n_curr);
-			n_known = n_curr;
-		}
-
-		// reduce the info_node hash to apply any transmits
 		shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
 		sleep(2);
 	}
@@ -4381,68 +4711,131 @@ info_interfaces_fn(void *unused)
 	return NULL;
 }
 
-//
-// pushes the external address to everyone in the fabric
-//
+// Free the service strings of an info node.
 
-void *
-info_interfaces_static_fn(void *unused)
+static void
+free_node_info_service(char **string)
 {
-
-	cf_info(AS_INFO, " static external network definition ");
-
-	// For valid external-address specify the same in service-list
-	cf_dyn_buf_define(service_db);
-	cf_dyn_buf_append_string(&service_db, g_config.external_address);
-	cf_dyn_buf_append_char(&service_db, ':');
-	cf_dyn_buf_append_int(&service_db, g_config.socket.port);
-
-	pthread_mutex_lock(&g_service_lock);
-
-	g_service_generation = 1;
-	g_service_str = cf_dyn_buf_strdup(&service_db);
-
-	pthread_mutex_unlock(&g_service_lock);
-
-	cf_dyn_buf_free(&service_db);
-	while (1) {
-
-		// reduce the info_node hash to apply any transmits
-		shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
-
-		sleep(2);
-
+	if (*string) {
+		cf_free(*string);
+		*string = 0;
 	}
-	return(0);
+}
+
+static void
+free_node_info_services(info_node_info *info)
+{
+	free_node_info_service(&info->service_addr);
+	free_node_info_service(&info->alternate_addr);
+	free_node_info_service(&info->services_clear_std);
+	free_node_info_service(&info->services_tls_std);
+	free_node_info_service(&info->services_clear_alt);
+	free_node_info_service(&info->services_tls_alt);
+	free_node_info_service(&info->tls_name);
+}
+
+// Resets the service strings of an info node without freeing them.
+
+static void
+reset_node_info_services(info_node_info *info)
+{
+	info->service_addr = 0;
+	info->alternate_addr = 0;
+	info->services_clear_std = 0;
+	info->services_tls_std = 0;
+	info->services_clear_alt = 0;
+	info->services_tls_alt = 0;
+	info->tls_name = 0;
+}
+
+// Clone the service strings of an info node.
+
+static char *
+clone_node_info_service(const char *string)
+{
+	return string ? cf_strdup(string) : 0;
+}
+
+static void
+clone_node_info_services(info_node_info *from, info_node_info *to)
+{
+	to->service_addr = clone_node_info_service(from->service_addr);
+	to->alternate_addr = clone_node_info_service(from->alternate_addr);
+	to->services_clear_std = clone_node_info_service(from->services_clear_std);
+	to->services_tls_std = clone_node_info_service(from->services_tls_std);
+	to->services_clear_alt = clone_node_info_service(from->services_clear_alt);
+	to->services_tls_alt = clone_node_info_service(from->services_tls_alt);
+	to->tls_name = clone_node_info_service(from->tls_name);
+}
+
+// Compare the service strings of two info nodes.
+
+static bool
+compare_node_info_service(const char *lhs, const char *rhs)
+{
+	if (!lhs || !rhs) {
+		return !lhs && !rhs;
+	}
+
+	return strcmp(lhs, rhs) == 0;
+}
+
+static bool
+compare_node_info_services(info_node_info *lhs, info_node_info *rhs)
+{
+	return compare_node_info_service(lhs->service_addr, rhs->service_addr) &&
+			compare_node_info_service(lhs->alternate_addr, rhs->alternate_addr) &&
+			compare_node_info_service(lhs->services_clear_std, rhs->services_clear_std) &&
+			compare_node_info_service(lhs->services_tls_std, rhs->services_tls_std) &&
+			compare_node_info_service(lhs->services_clear_alt, rhs->services_clear_alt) &&
+			compare_node_info_service(lhs->services_tls_alt, rhs->services_tls_alt) &&
+			compare_node_info_service(lhs->tls_name, rhs->tls_name);
+}
+
+// Dump the service strings of an info node.
+
+static void
+dump_node_info_services(info_node_info *info)
+{
+	cf_debug(AS_INFO, "Service address:   %s", cf_safe_string(info->service_addr));
+	cf_debug(AS_INFO, "Alternate address: %s", cf_safe_string(info->alternate_addr));
+	cf_debug(AS_INFO, "Clear, standard:   %s", cf_safe_string(info->services_clear_std));
+	cf_debug(AS_INFO, "TLS, standard:     %s", cf_safe_string(info->services_tls_std));
+	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_safe_string(info->services_clear_alt));
+	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_safe_string(info->services_tls_alt));
+	cf_debug(AS_INFO, "TLS name:          %s", cf_safe_string(info->tls_name));
 }
 
 // This reduce function will eliminate elements from the info hash
 // which are no longer in the succession list
 
+typedef struct reduce_context_s {
+	cf_node *succession;
+	uint32_t n_deleted;
+	cf_node deleted[AS_CLUSTER_SZ];
+} reduce_context;
 
-int
+int32_t
 info_paxos_event_reduce_fn(void *key, void *data, void *udata)
 {
-	cf_node		*node = (cf_node *) key;		// this is a single element
-	cf_node		*succession = (cf_node *)	udata; // this is an array
-	info_node_info *infop = (info_node_info *)data;
+	reduce_context *cont = udata;
+	cf_node *node = key;
+	info_node_info *info = data;
 
-	uint i = 0;
-	while (succession[i]) {
-		if (*node == succession[i])
-			break;
-		i++;
+	for (int32_t i = 0; cont->succession[i] != 0; ++i) {
+		if (*node == cont->succession[i]) {
+			return SHASH_OK;
+		}
 	}
 
-	if (succession[i] == 0) {
-		cf_debug(AS_INFO, " paxos event reduce: removing node %"PRIx64, *node);
-		if (infop->service_addr)    cf_free(infop->service_addr);
-		if (infop->alternate_addr)    cf_free(infop->alternate_addr);
-		return(SHASH_REDUCE_DELETE);
-	}
+	cf_debug(AS_INFO, "Paxos event reduce: removing node %" PRIx64, *node);
 
-	return(0);
+	uint32_t n = cont->n_deleted;
+	cont->deleted[n] = *node;
+	++cont->n_deleted;
 
+	free_node_info_services(info);
+	return SHASH_REDUCE_DELETE;
 }
 
 //
@@ -4450,97 +4843,101 @@ info_paxos_event_reduce_fn(void *key, void *data, void *udata)
 //
 
 void
-as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node succession[], void *udata)
+as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node *succession,
+		void *udata)
 {
-
 	uint64_t start_ms = cf_getms();
+	cf_debug(AS_INFO, "Info received new Paxos state");
 
-	cf_debug(AS_INFO, "info received new paxos state:");
+	info_node_info temp;
+	temp.generation = 0;
+	temp.last_changed = 0;
+	reset_node_info_services(&temp);
 
-	// Make sure all elements in the succession list are in the hash
-	info_node_info info;
-	info.last = 0;
-	info.generation = 0;
+	int32_t i;
 
-	pthread_mutex_t *vlock_info_hash;
-	info_node_info *infop_info_hash;
-
-	pthread_mutex_t *vlock_info_history_hash;
-	info_node_info *infop_info_history_hash;
-
-	uint i = 0;
-	while (succession[i]) {
-		if (succession[i] != g_config.self_node) {
-
-			info.service_addr = 0;
-			info.alternate_addr = 0;
-
-			// Get lock for info_history_hash
-			if (SHASH_OK != shash_get_vlock(g_info_node_info_history_hash,
-					&(succession[i]), (void **) &infop_info_history_hash,
-					&vlock_info_history_hash)) {
-				// Node not in info_history_hash, so add it.
-
-				// This may fail, but this is ok. This should only fail when
-				// info_msg_fn is also trying to add this key, so either
-				// way the entry will be in the hash table.
-				shash_put_unique(g_info_node_info_history_hash,
-								 &(succession[i]), &info);
-
-				if (SHASH_OK != shash_get_vlock(g_info_node_info_history_hash,
-						&(succession[i]), (void **) &infop_info_history_hash,
-						&vlock_info_history_hash)) {
-					cf_assert(false, AS_INFO, CF_CRITICAL,
-							"could not create info_history_hash entry for %"PRIx64, (succession[i]));
-					continue;
-				}
-			}
-
-			if (SHASH_OK != shash_get_vlock(g_info_node_info_hash, &(succession[i]),
-					(void **) &infop_info_hash, &vlock_info_hash)) {
-				if (infop_info_history_hash->service_addr) {
-					// We remember the service address for this node!
-					// Use this service address from info_history_hash in
-					// the new entry into info_hash.
-					cf_debug(AS_INFO, "info: from paxos notification: copying service address from info history hash for node %"PRIx64, succession[i]);
-					info.service_addr = cf_strdup( infop_info_history_hash->service_addr );
-					cf_assert(info.service_addr, AS_INFO, CF_CRITICAL, "malloc");
-				}
-				if (infop_info_history_hash->alternate_addr) {
-					info.alternate_addr = cf_strdup( infop_info_history_hash->alternate_addr );
-				}
-
-				if (SHASH_OK == shash_put_unique(g_info_node_info_hash, &(succession[i]), &info)) {
-					cf_debug(AS_INFO, "info: from paxos notification: inserted node %"PRIx64, succession[i]);
-				} else {
-					if (info.service_addr)	cf_free(info.service_addr);
-					if (info.alternate_addr)	cf_free(info.alternate_addr);
-					cf_assert(false, AS_INFO, CF_CRITICAL,
-							"could not insert node %"PRIx64" from paxos notification",
-							succession[i]);
-				}
-			} else {
-				pthread_mutex_unlock(vlock_info_hash);
-			}
-
-			pthread_mutex_unlock(vlock_info_history_hash);
+	for (i = 0; succession[i] != 0; ++i) {
+		if (succession[i] == g_config.self_node) {
+			continue;
 		}
-		i++;
+
+		info_node_info *info_history;
+		pthread_mutex_t *vlock_history;
+
+		if (shash_get_vlock(g_info_node_info_history_hash, &succession[i], (void **)&info_history,
+				&vlock_history) != SHASH_OK) {
+			// This may fail, but this is OK. This should only fail when info_msg_fn is also trying
+			// to add this key, so either way the entry will be in the hash table.
+			shash_put_unique(g_info_node_info_history_hash, &succession[i], &temp);
+
+			if (shash_get_vlock(g_info_node_info_history_hash, &succession[i],
+					(void **)&info_history, &vlock_history) != SHASH_OK) {
+				cf_assert(false, AS_INFO, CF_CRITICAL,
+						"Could not create info history hash entry for %" PRIx64, succession[i]);
+				continue;
+			}
+		}
+
+		info_node_info *info;
+		pthread_mutex_t *vlock;
+
+		if (shash_get_vlock(g_info_node_info_hash, &succession[i], (void **)&info,
+				&vlock) != SHASH_OK) {
+			clone_node_info_services(info_history, &temp);
+			temp.last_changed = cf_atomic64_incr(&g_peers_gen);
+
+			if (shash_put_unique(g_info_node_info_hash, &succession[i], &temp) == SHASH_OK) {
+				reset_node_info_services(&temp);
+				info_history->last_changed = 0; // See info_paxos_event_reduce_fn().
+				cf_debug(AS_INFO, "Peers generation %" PRId64 ": added node %" PRIx64,
+						temp.last_changed, succession[i]);
+			}
+			else {
+				free_node_info_services(&temp);
+				cf_assert(false, AS_INFO, CF_CRITICAL,
+						"Could not insert node %" PRIx64 " from Paxos notification", succession[i]);
+			}
+
+			temp.last_changed = 0;
+		}
+		else {
+			pthread_mutex_unlock(vlock);
+		}
+
+		pthread_mutex_unlock(vlock_history);
 	}
 
-	cf_debug(AS_INFO, "info: paxos succession list has %d elements. after insert, info hash has %d", i, shash_get_size(g_info_node_info_hash));
+	uint32_t before = shash_get_size(g_info_node_info_hash);
+	cf_debug(AS_INFO, "Paxos succession list has %d element(s), info hash has %u", i, before);
 
-	// detect node deletion by reducing the hash table and deleting what needs deleting
-	cf_debug(AS_INFO, "paxos event: try removing nodes");
+	reduce_context cont = { .succession = succession, .n_deleted = 0 };
+	shash_reduce_delete(g_info_node_info_hash, info_paxos_event_reduce_fn, &cont);
 
-	shash_reduce_delete(g_info_node_info_hash, info_paxos_event_reduce_fn, succession);
+	// While an alumni is gone, its last_changed field is non-zero. When it comes back, the
+	// field goes back to zero.
 
-	cf_debug(AS_INFO, "info: after delete, info hash has %d", shash_get_size(g_info_node_info_hash));
+	for (uint32_t i = 0; i < cont.n_deleted; ++i) {
+		cf_debug(AS_INFO, "Updating alumni %" PRIx64, cont.deleted[i]);
+		info_node_info *info_history;
+		pthread_mutex_t *vlock_history;
 
-	// probably, something changed in the list. Just ask the clients to update
+		if (shash_get_vlock(g_info_node_info_history_hash, &cont.deleted[i],
+				(void **)&info_history, &vlock_history) != SHASH_OK) {
+			cf_crash(AS_INFO, "Removing a node (%" PRIx64 ") that is not an alumni",
+					cont.deleted[i]);
+		}
+
+		info_history->last_changed = cf_atomic64_incr(&g_peers_gen);
+		cf_debug(AS_INFO, "Peers generation %" PRId64 ": removed node %" PRIx64,
+				info_history->last_changed, cont.deleted[i]);
+		pthread_mutex_unlock(vlock_history);
+	}
+
+	uint32_t after = shash_get_size(g_info_node_info_hash);
+	cf_debug(AS_INFO, "After removal, info hash has %u element(s)", after);
+
 	cf_atomic32_incr(&g_node_info_generation);
-
-	cf_debug(AS_INFO, "as_info_paxos_event took %"PRIu64" ms", cf_getms() - start_ms);
+	cf_debug(AS_INFO, "as_info_paxos_event took %" PRIu64 " ms", cf_getms() - start_ms);
 }
 
 // This goes in a reduce function for retransmitting my information to another node
@@ -4551,11 +4948,11 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 	cf_node *node = (cf_node *)key;
 	info_node_info *infop = (info_node_info *) data;
 
-	if (infop->generation < g_service_generation) {
+	if (infop->generation < g_serv_gen) {
 
-		cf_debug(AS_INFO, "sending service string %s to node %"PRIx64, g_service_str, *node);
+		cf_debug(AS_INFO, "sending service string %s to node %"PRIx64, g_serv_legacy, *node);
 
-		pthread_mutex_lock(&g_service_lock);
+		pthread_mutex_lock(&g_serv_lock);
 
 		msg *m = as_fabric_msg_get(M_TYPE_INFO);
 		if (0 == m) {
@@ -4564,18 +4961,46 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 		}
 
 		// If we don't have the remote node's service address, request it via our update info. msg.
-		msg_set_uint32(m, INFO_FIELD_OP, (infop->service_addr ? INFO_OP_UPDATE : INFO_OP_UPDATE_REQ));
-		msg_set_uint32(m, INFO_FIELD_GENERATION, g_service_generation);
-		if (g_service_str) {
-			msg_set_str(m, INFO_FIELD_SERVICE_ADDRESS, g_service_str, MSG_SET_COPY);
-		}
-		if (g_config.alternate_address) {
-			char alt_add_port[1024];
-			snprintf(alt_add_port, 1024, "%s:%d", g_config.alternate_address, g_config.socket.port);
-			msg_set_str(m, INFO_FIELD_ALT_ADDRESS, alt_add_port, MSG_SET_COPY);
+		msg_set_uint32(m, INFO_FIELD_OP, infop->service_addr && infop->services_clear_std ?
+				INFO_OP_UPDATE : INFO_OP_UPDATE_REQ);
+		msg_set_uint32(m, INFO_FIELD_GENERATION, g_serv_gen);
+
+		if (g_serv_legacy) {
+			msg_set_str(m, INFO_FIELD_SERVICE_ADDRESS, g_serv_legacy, MSG_SET_COPY);
 		}
 
-		pthread_mutex_unlock(&g_service_lock);
+		// Legacy alternate address field.
+		for (uint32_t i = 0; i < g_access.alt_service.addrs.n_addrs; ++i) {
+			if (cf_ip_addr_str_is_legacy(g_access.alt_service.addrs.addrs[i])) {
+				char tmp[250];
+				snprintf(tmp, sizeof(tmp), "%s:%d", g_access.alt_service.addrs.addrs[i],
+						g_access.service.port);
+				msg_set_str(m, INFO_FIELD_ALT_ADDRESS, tmp, MSG_SET_COPY);
+				break;
+			}
+		}
+
+		if (g_serv_clear_std) {
+			msg_set_str(m, INFO_FIELD_SERVICES_CLEAR_STD, g_serv_clear_std, MSG_SET_COPY);
+		}
+
+		if (g_serv_tls_std) {
+			msg_set_str(m, INFO_FIELD_SERVICES_TLS_STD, g_serv_tls_std, MSG_SET_COPY);
+		}
+
+		if (g_serv_clear_alt) {
+			msg_set_str(m, INFO_FIELD_SERVICES_CLEAR_ALT, g_serv_clear_alt, MSG_SET_COPY);
+		}
+
+		if (g_serv_tls_alt) {
+			msg_set_str(m, INFO_FIELD_SERVICES_TLS_ALT, g_serv_tls_alt, MSG_SET_COPY);
+		}
+
+		if (g_serv_tls_name) {
+			msg_set_str(m, INFO_FIELD_TLS_NAME, g_serv_tls_name, MSG_SET_COPY);
+		}
+
+		pthread_mutex_unlock(&g_serv_lock);
 
 		if (as_fabric_send(*node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 				AS_FABRIC_SUCCESS) {
@@ -4602,117 +5027,111 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 	case INFO_OP_UPDATE:
 	case INFO_OP_UPDATE_REQ:
 		{
-			cf_debug(AS_INFO, " received service address from node %"PRIx64" ; op = %d", node, op);
+			cf_debug(AS_INFO, "Received service address from node %" PRIx64 "; op = %u", node, op);
+			info_node_info temp;
+			temp.generation = 0;
+			temp.last_changed = 0;
+			reset_node_info_services(&temp);
 
-			pthread_mutex_t *vlock_info_hash;
-			info_node_info *infop_info_hash;
+			info_node_info *info_history;
+			pthread_mutex_t *vlock_history;
 
-			pthread_mutex_t *vlock_info_history_hash;
-			info_node_info *infop_info_history_hash;
+			if (shash_get_vlock(g_info_node_info_history_hash, &node, (void **)&info_history,
+					&vlock_history) != SHASH_OK) {
+				// This may fail, but this is ok. This should only fail when as_info_paxos_event
+				// is concurrently trying to add this key, so either way the entry will be in the
+				// hash table.
+				shash_put_unique(g_info_node_info_history_hash, &node, &temp);
 
-			// Get lock for info_history_hash
-			if (SHASH_OK != shash_get_vlock(g_info_node_info_history_hash, &node,
-					(void **) &infop_info_history_hash, &vlock_info_history_hash)) {
-				// Node not in info_history_hash, so add it.
-
-				info_node_info info;
-				info.last = 0;
-				info.service_addr = 0;
-				info.alternate_addr = 0;
-				info.generation = 0;
-
-				// This may fail, but this is ok. This should only fail when
-				// as_info_paxos_event is also trying to add this key, so either
-				// way the entry will be in the hash table.
-				shash_put_unique(g_info_node_info_history_hash, &node, &info);
-
-				if (SHASH_OK != shash_get_vlock(g_info_node_info_history_hash, &node,
-						(void **) &infop_info_history_hash,
-						&vlock_info_history_hash)) {
+				if (shash_get_vlock(g_info_node_info_history_hash, &node, (void **)&info_history,
+						&vlock_history) != SHASH_OK) {
 					cf_assert(false, AS_INFO, CF_CRITICAL,
-							"could not create info_history_hash entry for %"PRIx64, node);
+							"Could not create info history hash entry for %" PRIx64, node);
 					break;
 				}
 			}
 
-			if (infop_info_history_hash->service_addr) {
-				cf_free(infop_info_history_hash->service_addr);
-				infop_info_history_hash->service_addr = 0;
-			}
-			if (infop_info_history_hash->alternate_addr) {
-				cf_free(infop_info_history_hash->alternate_addr);
-				infop_info_history_hash->alternate_addr = 0;
+			free_node_info_services(info_history);
+
+			if (msg_get_str(m, INFO_FIELD_SERVICE_ADDRESS, &info_history->service_addr,
+					0, MSG_GET_COPY_MALLOC) != 0 || !info_history->service_addr) {
+				cf_debug(AS_INFO, "No service address in message from node %" PRIx64, node);
 			}
 
-			if (0 != msg_get_str(m, INFO_FIELD_SERVICE_ADDRESS,
-								 &(infop_info_history_hash->service_addr), 0,
-								 MSG_GET_COPY_MALLOC)) {
-				cf_warning(AS_INFO, "failed to get service address in an info msg from node %"PRIx64"", node);
-				pthread_mutex_unlock(vlock_info_history_hash);
+			if (msg_get_str(m, INFO_FIELD_ALT_ADDRESS, &info_history->alternate_addr,
+					0, MSG_GET_COPY_MALLOC) != 0) {
+				cf_debug(AS_INFO, "No alternate address message from node %" PRIx64, node);
+			}
+
+			if (msg_get_str(m, INFO_FIELD_SERVICES_CLEAR_STD, &info_history->services_clear_std,
+					0, MSG_GET_COPY_MALLOC) != 0 || !info_history->services_clear_std) {
+				cf_warning(AS_INFO, "No services-clear-std in message from node %" PRIx64, node);
+				pthread_mutex_unlock(vlock_history);
 				break;
 			}
-			if (0 != msg_get_str(m, INFO_FIELD_ALT_ADDRESS,
-								 &(infop_info_history_hash->alternate_addr), 0,
-								 MSG_GET_COPY_MALLOC)) {
-				cf_debug(AS_INFO, "failed to get alternate address in an info msg from node %"PRIx64"", node);
+
+			if (msg_get_str(m, INFO_FIELD_SERVICES_TLS_STD, &info_history->services_tls_std,
+					0, MSG_GET_COPY_MALLOC) != 0) {
+				cf_debug(AS_INFO, "No services-tls-std in message from node %" PRIx64, node);
 			}
 
-			cf_debug(AS_INFO, " new service address is: %s", infop_info_history_hash->service_addr);
-			cf_debug(AS_INFO, " new alternate address is: %s", infop_info_history_hash->alternate_addr ?
-															infop_info_history_hash->alternate_addr : "NULL");
+			if (msg_get_str(m, INFO_FIELD_SERVICES_CLEAR_ALT, &info_history->services_clear_alt,
+					0, MSG_GET_COPY_MALLOC) != 0) {
+				cf_debug(AS_INFO, "No services-clear-alt in message from node %" PRIx64, node);
+			}
 
-			// See if element is in info_hash
-			// - if yes, update the service address.
-			if (SHASH_OK == shash_get_vlock(g_info_node_info_hash, &node,
-					(void **) &infop_info_hash, &vlock_info_hash)) {
+			if (msg_get_str(m, INFO_FIELD_SERVICES_TLS_ALT, &info_history->services_tls_alt,
+					0, MSG_GET_COPY_MALLOC) != 0) {
+				cf_debug(AS_INFO, "No services-tls-alt in message from node %" PRIx64, node);
+			}
 
-				if (infop_info_hash->service_addr) {
-					cf_free(infop_info_hash->service_addr);
-					infop_info_hash->service_addr = 0;
+			if (msg_get_str(m, INFO_FIELD_TLS_NAME, &info_history->tls_name,
+					0, MSG_GET_COPY_MALLOC) != 0) {
+				cf_debug(AS_INFO, "No tls-name in message from node %" PRIx64, node);
+			}
+
+			dump_node_info_services(info_history);
+
+			info_node_info *info;
+			pthread_mutex_t *vlock;
+
+			if (shash_get_vlock(g_info_node_info_hash, &node, (void **)&info, &vlock) == SHASH_OK) {
+				if (!compare_node_info_services(info_history, info)) {
+					cf_debug(AS_INFO, "Changed node info entry, was:");
+					dump_node_info_services(info);
+					info->last_changed = cf_atomic64_incr(&g_peers_gen);
+					cf_debug(AS_INFO, "Peers generation %" PRId64 ": updated node %" PRIx64,
+							info->last_changed, node);
 				}
-				if (infop_info_hash->alternate_addr) {
-					cf_free(infop_info_hash->alternate_addr);
-					infop_info_hash->alternate_addr = 0;
-				}
 
-				// Already unpacked msg in msg_get_str, so just copy the value
-				// from infop_info_history_hash.
-				if (!infop_info_history_hash->service_addr) {
-					cf_warning(AS_INFO, "ignoring bad Info msg with NULL service_addr");
-					pthread_mutex_unlock(vlock_info_hash);
-					pthread_mutex_unlock(vlock_info_history_hash);
-					break;
-				}
-
-				infop_info_hash->service_addr = cf_strdup( infop_info_history_hash->service_addr );
-				infop_info_hash->alternate_addr = infop_info_history_hash->alternate_addr ?
-												cf_strdup( infop_info_history_hash->alternate_addr ) : 0;
-				cf_assert(infop_info_hash->service_addr, AS_INFO, CF_CRITICAL, "malloc");
-
+				free_node_info_services(info);
+				clone_node_info_services(info_history, info);
 				if (INFO_OP_UPDATE_REQ == op) {
-					cf_debug(AS_INFO, "Received request for info update from node %"PRIx64" ~~ setting node's info generation to 0!", node);
-					infop_info_hash->generation = 0;
+					cf_debug(AS_INFO, "Received request for info update from node %" PRIx64 " ~~ setting node's info generation to 0!", node);
+					info->generation = 0;
 				}
 
-				pthread_mutex_unlock(vlock_info_hash);
-
-			} else {
-				// Before history_hash was added to code base, we would throw
-				// away message in this case.
-				cf_debug(AS_INFO, "node %"PRIx64" not in info_hash, saving service address in info_history_hash", node);
+				pthread_mutex_unlock(vlock);
+			}
+			else {
+				// Before history hash was added to the code base, we would throw away the message
+				// in this case.
+				cf_debug(AS_INFO, "Node %" PRIx64 " not in info hash, saving service address in info history hash", node);
 			}
 
-			pthread_mutex_unlock(vlock_info_history_hash);
+			pthread_mutex_unlock(vlock_history);
 
-			// Send the ack.
+			// Send the ACK.
 			msg_preserve_fields(m, 1, INFO_FIELD_GENERATION);
 			msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_ACK);
 
 			if ((rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH))) {
-				cf_warning(AS_INFO, "failed to send msg %p type %d to node %"PRIu64" (rv %d)", m, m->type, node, rv);
+				cf_warning(AS_INFO, "Failed to send message %p with type %d to node %"PRIu64" (rv %d)",
+						m, (int32_t)m->type, node, rv);
 				as_fabric_msg_put(m);
 			}
 		}
+
 		break;
 
 	case INFO_OP_ACK:
@@ -4748,76 +5167,407 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 // This dynamic function reduces the info_node_info hash and builds up the string of services
 //
 
-int
-info_get_services_reduce_fn(void *key, void *data, void *udata)
+int32_t
+info_get_x_legacy_reduce_fn(void *key, void *data, void *udata)
 {
-	services_printer *sp = (services_printer *)udata;
-	cf_dyn_buf *db = sp->db;
-	info_node_info *infop = (info_node_info *) data;
+	services_printer *sp = udata;
+	info_node_info *info = data;
 
-	if (infop->service_addr) {
-		if (sp->printed_element) {
-			cf_dyn_buf_append_char(db, ';');
-		}
-		cf_dyn_buf_append_string(db, infop->service_addr);
-		sp->printed_element = true;
+	info_node_proj_fn proj = sp->proj;
+	cf_dyn_buf *db = sp->db;
+	const char *services = proj(info);
+
+	if (services == NULL) {
+		return 0;
 	}
 
-	return(0);
-}
-
-int
-info_get_alt_addr_reduce_fn(void *key, void *data, void *udata)
-{
-	services_printer *sp = (services_printer *)udata;
-	cf_dyn_buf *db = sp->db;
-	info_node_info *infop = (info_node_info *) data;
-
-	if (infop->alternate_addr) {
-		if (sp->printed_element) {
-			cf_dyn_buf_append_char(db, ';');
-		}
-		cf_dyn_buf_append_string(db, infop->alternate_addr);
-		sp->printed_element = true;
+	if (sp->count > 0) {
+		cf_dyn_buf_append_char(db, ';');
 	}
 
-	return(0);
+	cf_dyn_buf_append_string(db, services);
+	++sp->count;
+	return 0;
 }
 
-int
+int32_t
+info_get_x_legacy_reduce(shash *h, info_node_proj_fn proj, cf_dyn_buf *db)
+{
+	services_printer sp = { .proj = proj, .db = db };
+	shash_reduce(h, info_get_x_legacy_reduce_fn, (void *)&sp);
+	return 0;
+}
+
+static const char *
+project_services(info_node_info *info)
+{
+	return info->service_addr;
+}
+
+int32_t
 info_get_services(char *name, cf_dyn_buf *db)
 {
-	services_printer sp;
-	sp.printed_element = false;
-	sp.db = db;
-
-	shash_reduce(g_info_node_info_hash, info_get_services_reduce_fn, (void *) &sp);
-
-	return(0);
+	return info_get_x_legacy_reduce(g_info_node_info_hash, project_services, db);
 }
 
-int
-info_get_alt_addr(char *name, cf_dyn_buf *db)
-{
-	services_printer sp;
-	sp.printed_element = false;
-	sp.db = db;
-
-	shash_reduce(g_info_node_info_hash, info_get_alt_addr_reduce_fn, (void *) &sp);
-
-	return(0);
-}
-
-int
+int32_t
 info_get_services_alumni(char *name, cf_dyn_buf *db)
 {
-	services_printer sp;
-	sp.printed_element = false;
-	sp.db = db;
+	return info_get_x_legacy_reduce(g_info_node_info_history_hash, project_services, db);
+}
 
-	shash_reduce(g_info_node_info_history_hash, info_get_services_reduce_fn, (void *) &sp);
+static const char *
+project_alt_addr(info_node_info *info)
+{
+	return info->alternate_addr;
+}
 
-	return(0);
+int32_t
+info_get_alt_addr(char *name, cf_dyn_buf *db)
+{
+	return info_get_x_legacy_reduce(g_info_node_info_hash, project_alt_addr, db);
+}
+
+int32_t
+info_port_savings_reduce_fn(void *key, void *data, void *udata)
+{
+	port_savings_context *psc = udata;
+	info_node_info *info = data;
+
+	if (info->last_changed <= psc->since) {
+		return 0;
+	}
+
+	const char *services = psc->proj(info);
+
+	if (services == NULL) {
+		return 0;
+	}
+
+	int32_t curr;
+
+	for (int32_t end = strlen(services); end > 0; end = curr) {
+		int32_t mult = 1;
+		int32_t port = 0;
+
+		for (curr = end - 1; curr >= 0; --curr) {
+			char ch = services[curr];
+
+			if (ch == ':') {
+				break;
+			}
+
+			if (ch < '0' || ch > '9') {
+				cf_warning(AS_INFO, "Invalid port number in services string: %s", services);
+				return 0;
+			}
+
+			port += (ch - '0') * mult;
+			mult *= 10;
+		}
+
+		int32_t savings = end - curr;
+		cf_debug(AS_INFO, "Default port %d saves %d byte(s)", port, savings);
+		psc->port_savings[port] += savings;
+
+		while (curr >= 0 && services[curr] != ',') {
+			--curr;
+		}
+	}
+
+	return 0;
+}
+
+static char *
+strip_service_suffixes(const char *services, const char *strip)
+{
+	const int32_t services_len = strlen(services);
+	const int32_t strip_len = strlen(strip);
+
+	char *clone = cf_strdup(services);
+
+	int32_t left = services_len;
+	int32_t right = services_len;
+
+	while (left >= strip_len) {
+		if (memcmp(clone + left - strip_len, strip, strip_len) == 0) {
+			left -= strip_len;
+		}
+
+		while (left > 0) {
+			clone[--right] = clone[--left];
+
+			if (clone[left] == ',') {
+				break;
+			}
+		}
+	}
+
+	memmove(clone, clone + right, services_len - right + 1);
+	return clone;
+}
+
+int32_t
+info_get_services_x_reduce_fn(void *key, void *data, void *udata)
+{
+	services_printer *sp = udata;
+	cf_node *node = key;
+	info_node_info *info = data;
+
+	if (info->last_changed <= sp->since) {
+		return 0;
+	}
+
+	const char *services = sp->proj(info);
+
+	if (services == NULL) {
+		return 0;
+	}
+
+	cf_dyn_buf *db = sp->db;
+
+	if (sp->count > 0) {
+		cf_dyn_buf_append_char(db, ',');
+	}
+
+	char node_id[17];
+	cf_str_itoa_u64(*node, node_id, 16);
+
+	cf_dyn_buf_append_char(db, '[');
+	cf_dyn_buf_append_string(db, node_id);
+	cf_dyn_buf_append_char(db, ',');
+
+	if (sp->with_tls_name && info->tls_name) {
+		cf_dyn_buf_append_string(db, info->tls_name);
+	}
+
+	cf_dyn_buf_append_char(db, ',');
+	cf_dyn_buf_append_char(db, '[');
+
+	if (sp->strip != NULL) {
+		char *stripped = strip_service_suffixes(services, sp->strip);
+		cf_dyn_buf_append_string(db, stripped);
+		cf_free(stripped);
+	}
+	else {
+		cf_dyn_buf_append_string(db, services);
+	}
+
+	cf_dyn_buf_append_char(db, ']');
+	cf_dyn_buf_append_char(db, ']');
+
+	++sp->count;
+	return 0;
+}
+
+int32_t
+info_get_services_x(shash *h, info_node_proj_fn proj, cf_dyn_buf *db, uint64_t since,
+		bool with_tls_name)
+{
+	// Pick the default port that saves us the most space.
+	port_savings_context psc = { .proj = proj, .since = since };
+	shash_reduce(h, info_port_savings_reduce_fn, &psc);
+
+	int32_t best_savings = 0;
+	int32_t best_port = 0;
+
+	for (int32_t i = 0; i < 65536; ++i) {
+		if (psc.port_savings[i] > best_savings) {
+			best_savings = psc.port_savings[i];
+			best_port = i;
+		}
+	}
+
+	cf_debug(AS_INFO, "Best default port is %d, saves %d byte(s)", best_port, best_savings);
+
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(g_peers_gen));
+	cf_dyn_buf_append_char(db, ',');
+
+	if (best_port > 0) {
+		cf_dyn_buf_append_int(db, best_port);
+	}
+
+	cf_dyn_buf_append_char(db, ',');
+
+	cf_dyn_buf_append_char(db, '[');
+
+	char strip[7];
+	snprintf(strip, sizeof(strip), ":%d", best_port);
+
+	services_printer sp = { .proj = proj, .db = db, .strip = strip, .since = since,
+			.with_tls_name = with_tls_name };
+	shash_reduce(h, info_get_services_x_reduce_fn, (void *)&sp);
+
+	cf_dyn_buf_append_char(db, ']');
+	return sp.count;
+}
+
+int32_t
+info_get_services_x_gone_reduce_fn(void *key, void *data, void *udata)
+{
+	services_printer *sp = udata;
+	cf_node *node = key;
+	info_node_info *info = data;
+
+	if (info->last_changed <= sp->since || sp->proj(info) == NULL) {
+		return 0;
+	}
+
+	cf_dyn_buf *db = sp->db;
+
+	if (sp->count > 0) {
+		cf_dyn_buf_append_char(db, ',');
+	}
+
+	char node_id[17];
+	cf_str_itoa_u64(*node, node_id, 16);
+
+	cf_dyn_buf_append_char(db, '[');
+	cf_dyn_buf_append_string(db, node_id);
+	cf_dyn_buf_append_char(db, ',');
+	cf_dyn_buf_append_char(db, ',');
+	cf_dyn_buf_append_char(db, ']');
+
+	++sp->count;
+	return 0;
+}
+
+void
+info_get_services_x_delta(info_node_proj_fn proj, cf_dyn_buf *db, char *params, bool with_tls_name)
+{
+	uint64_t since;
+
+	if (cf_str_atoi_64(params, (int64_t *)&since) < 0) {
+		cf_warning(AS_INFO, "Invalid peers generation %s", params);
+		cf_dyn_buf_append_string(db, "ERROR");
+		return;
+	}
+
+	uint64_t orig_gen = cf_atomic64_get(g_peers_gen);
+
+	while (true) {
+		int32_t count = info_get_services_x(g_info_node_info_hash, proj, db, since, with_tls_name);
+		cf_dyn_buf_chomp(db); // Remove the "]".
+
+		services_printer sp = { .proj = proj, .db = db, .since = since, .count = count };
+		shash_reduce(g_info_node_info_history_hash, info_get_services_x_gone_reduce_fn, &sp);
+
+		cf_dyn_buf_append_char(db, ']'); // Re-add the "]".
+
+		// Doing the above two reductions doesn't happen atomically. Theoretically, peers can
+		// arrive or leave between the two invocations, leading to duplicate or missing peers in
+		// the list. In this case, simply try again.
+
+		uint64_t gen = cf_atomic64_get(g_peers_gen);
+
+		if (gen == orig_gen) {
+			break;
+		}
+
+		db->used_sz = 0;
+		orig_gen = gen;
+	}
+}
+
+static const char *
+project_services_clear_std(info_node_info *info)
+{
+	return info->services_clear_std;
+}
+
+int32_t
+info_get_services_clear_std(char *name, cf_dyn_buf *db)
+{
+	info_get_services_x(g_info_node_info_hash, project_services_clear_std, db, 0, false);
+	return 0;
+}
+
+int32_t
+info_get_services_clear_std_delta(char *name, char *params, cf_dyn_buf *db)
+{
+	info_get_services_x_delta(project_services_clear_std, db, params, false);
+	return 0;
+}
+
+int32_t
+info_get_alumni_clear_std(char *name, cf_dyn_buf *db)
+{
+	info_get_services_x(g_info_node_info_history_hash, project_services_clear_std, db, 0, false);
+	return 0;
+}
+
+static const char *
+project_services_tls_std(info_node_info *info)
+{
+	return info->services_tls_std;
+}
+
+int32_t
+info_get_services_tls_std(char *name, cf_dyn_buf *db)
+{
+	info_get_services_x(g_info_node_info_hash, project_services_tls_std, db, 0, true);
+	return 0;
+}
+
+int32_t
+info_get_services_tls_std_delta(char *name, char *params, cf_dyn_buf *db)
+{
+	info_get_services_x_delta(project_services_tls_std, db, params, true);
+	return 0;
+}
+
+int32_t
+info_get_alumni_tls_std(char *name, cf_dyn_buf *db)
+{
+	info_get_services_x(g_info_node_info_history_hash, project_services_tls_std, db, 0, true);
+	return 0;
+}
+
+static const char *
+project_services_clear_alt(info_node_info *info)
+{
+	return info->services_clear_alt;
+}
+
+int32_t
+info_get_services_clear_alt(char *name, cf_dyn_buf *db)
+{
+	info_get_services_x(g_info_node_info_hash, project_services_clear_alt, db, 0, false);
+	return 0;
+}
+
+int32_t
+info_get_services_clear_alt_delta(char *name, char *params, cf_dyn_buf *db)
+{
+	info_get_services_x_delta(project_services_clear_alt, db, params, false);
+	return 0;
+}
+
+static const char *
+project_services_tls_alt(info_node_info *info)
+{
+	return info->services_tls_alt;
+}
+
+int32_t
+info_get_services_tls_alt(char *name, cf_dyn_buf *db)
+{
+	info_get_services_x(g_info_node_info_hash, project_services_tls_alt, db, 0, true);
+	return 0;
+}
+
+int32_t
+info_get_services_tls_alt_delta(char *name, char *params, cf_dyn_buf *db)
+{
+	info_get_services_x_delta(project_services_tls_alt, db, params, true);
+	return 0;
+}
+
+int32_t
+info_get_services_generation(char *name, cf_dyn_buf *db)
+{
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(g_peers_gen));
+	return 0;
 }
 
 //
@@ -5404,14 +6154,49 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 	return(0);
 }
 
-int
+int32_t
 info_get_service(char *name, cf_dyn_buf *db)
 {
-	pthread_mutex_lock(&g_service_lock);
-	cf_dyn_buf_append_string(db, g_service_str ? g_service_str : " ");
-	pthread_mutex_unlock(&g_service_lock);
+	pthread_mutex_lock(&g_serv_lock);
+	cf_dyn_buf_append_string(db, g_serv_legacy != NULL ? g_serv_legacy : "");
+	pthread_mutex_unlock(&g_serv_lock);
+	return 0;
+}
 
-	return(0);
+int32_t
+info_get_service_clear_std(char *name, cf_dyn_buf *db)
+{
+	pthread_mutex_lock(&g_serv_lock);
+	cf_dyn_buf_append_string(db, g_serv_clear_std != NULL ? g_serv_clear_std : "");
+	pthread_mutex_unlock(&g_serv_lock);
+	return 0;
+}
+
+int32_t
+info_get_service_tls_std(char *name, cf_dyn_buf *db)
+{
+	pthread_mutex_lock(&g_serv_lock);
+	cf_dyn_buf_append_string(db, g_serv_tls_std != NULL ? g_serv_tls_std : "");
+	pthread_mutex_unlock(&g_serv_lock);
+	return 0;
+}
+
+int32_t
+info_get_service_clear_alt(char *name, cf_dyn_buf *db)
+{
+	pthread_mutex_lock(&g_serv_lock);
+	cf_dyn_buf_append_string(db, g_serv_clear_alt != NULL ? g_serv_clear_alt : "");
+	pthread_mutex_unlock(&g_serv_lock);
+	return 0;
+}
+
+int32_t
+info_get_service_tls_alt(char *name, cf_dyn_buf *db)
+{
+	pthread_mutex_lock(&g_serv_lock);
+	cf_dyn_buf_append_string(db, g_serv_tls_alt != NULL ? g_serv_tls_alt : "");
+	pthread_mutex_unlock(&g_serv_lock);
+	return 0;
 }
 
 void
@@ -6050,7 +6835,7 @@ as_info_init()
 	as_info_set("status", "ok", false);                  // Always returns ok, used to verify service port is open.
 	as_info_set("STATUS", "OK", false);                  // Always returns OK, used to verify service port is open.
 
-	char istr[64];
+	char istr[1024];
 	cf_str_itoa(AS_PARTITIONS, istr, 10);
 	as_info_set("partitions", istr, false);              // Returns the number of partitions used to hash keys across.
 
@@ -6059,11 +6844,11 @@ as_info_init()
 	as_info_set("name", istr, false);                    // Alias to 'node'.
 	// Returns list of features supported by this server
 	static char features[1024];
-	strcat(features, "cdt-list;cdt-map;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf");
+	strcat(features, "peers;cdt-list;cdt-map;pipelining;geo;float;batch-index;replicas-all;replicas-master;replicas-prole;udf");
 	strcat(features, aerospike_build_features);
 	as_info_set("features", features, true);
-	hb_mode_enum hb_mode;
-	as_hb_info_listen_addr_get(&hb_mode, istr);
+	as_hb_mode hb_mode;
+	as_hb_info_listen_addr_get(&hb_mode, istr, sizeof(istr));
 	as_info_set( hb_mode == AS_HB_MODE_MESH ? "mesh" :  "mcast", istr, false);
 
 	// All commands accepted by asinfo/telnet
@@ -6085,25 +6870,39 @@ as_info_init()
 	 */
 
 	// Set up some dynamic functions
+	as_info_set_dynamic("alumni-clear-std", info_get_alumni_clear_std, false);        // Supersedes "services-alumni" for non-TLS service.
+	as_info_set_dynamic("alumni-tls-std", info_get_alumni_tls_std, false);            // Supersedes "services-alumni" for TLS service.
 	as_info_set_dynamic("bins", info_get_bins, false);                                // Returns bin usage information and used bin names.
 	as_info_set_dynamic("cluster-generation", info_get_cluster_generation, true);     // Returns cluster generation.
 	as_info_set_dynamic("cluster-name", info_get_cluster_name, false);                // Returns cluster name.
+	as_info_set_dynamic("endpoints", info_get_endpoints, false);                      // Returns the expanded bind / access address configuration.
 	as_info_set_dynamic("get-config", info_get_config, false);                        // Returns running config for specified context.
 	as_info_set_dynamic("logs", info_get_logs, false);                                // Returns a list of log file locations in use by this server.
 	as_info_set_dynamic("namespaces", info_get_namespaces, false);                    // Returns a list of namespace defined on this server.
 	as_info_set_dynamic("objects", info_get_objects, false);                          // Returns the number of objects stored on this server.
 	as_info_set_dynamic("partition-generation", info_get_partition_generation, true); // Returns the current partition generation.
 	as_info_set_dynamic("partition-info", info_get_partition_info, false);            // Returns partition ownership information.
+	as_info_set_dynamic("peers-clear-alt", info_get_services_clear_alt, false);       // Supersedes "services-alternate" for non-TLS, alternate addresses.
+	as_info_set_dynamic("peers-clear-std", info_get_services_clear_std, false);       // Supersedes "services" for non-TLS, standard addresses.
+	as_info_set_dynamic("peers-generation", info_get_services_generation, false);     // Returns the generation of the peers-*-* services lists.
+	as_info_set_dynamic("peers-tls-alt", info_get_services_tls_alt, false);           // Supersedes "services-alternate" for TLS, alternate addresses.
+	as_info_set_dynamic("peers-tls-std", info_get_services_tls_std, false);           // Supersedes "services" for TLS, standard addresses.
 	as_info_set_dynamic("replicas-all", info_get_replicas_all, false);                // Base 64 encoded binary representation of partitions this node is replica for.
 	as_info_set_dynamic("replicas-master", info_get_replicas_master, false);          // Base 64 encoded binary representation of partitions this node is master (replica) for.
 	as_info_set_dynamic("replicas-prole", info_get_replicas_prole, false);            // Base 64 encoded binary representation of partitions this node is prole (replica) for.
 	as_info_set_dynamic("service", info_get_service, false);                          // IP address and server port for this node, expected to be a single.
 	                                                                                  // address/port per node, may be multiple address if this node is configured.
 	                                                                                  // to listen on multiple interfaces (typically not advised).
+	as_info_set_dynamic("service-clear-alt", info_get_service_clear_alt, false);      // Supersedes "service". The alternate address and port for this node's non-TLS
+	                                                                                  // client service.
+	as_info_set_dynamic("service-clear-std", info_get_service_clear_std, false);      // Supersedes "service". The address and port for this node's non-TLS client service.
+	as_info_set_dynamic("service-tls-alt", info_get_service_tls_alt, false);          // Supersedes "service". The alternate address and port for this node's TLS
+	                                                                                  // client service.
+	as_info_set_dynamic("service-tls-std", info_get_service_tls_std, false);          // Supersedes "service". The address and port for this node's TLS client service.
 	as_info_set_dynamic("services", info_get_services, true);                         // List of addresses of neighbor cluster nodes to advertise for Application to connect.
 	as_info_set_dynamic("services-alternate", info_get_alt_addr, false);              // IP address mapping from internal to public ones
 	as_info_set_dynamic("services-alumni", info_get_services_alumni, true);           // All neighbor addresses (services) this server has ever know about.
-	as_info_set_dynamic("services-alumni-reset", info_services_alumni_reset, false);  // Reset the services alumni to equal services
+	as_info_set_dynamic("services-alumni-reset", info_services_alumni_reset, false);  // Reset the services alumni to equal services.
 	as_info_set_dynamic("sets", info_get_sets, false);                                // Returns set statistics for all or a particular set.
 	as_info_set_dynamic("statistics", info_get_stats, true);                          // Returns system health and usage stats for this server.
 
@@ -6147,6 +6946,10 @@ as_info_init()
 	as_info_set_command("mem", info_command_mem, PERM_NONE);                                  // Report on memory usage.
 	as_info_set_command("mstats", info_command_mstats, PERM_LOGGING_CTRL);                    // Dump GLibC-level memory stats.
 	as_info_set_command("mtrace", info_command_mtrace, PERM_SERVICE_CTRL);                    // Control GLibC-level memory tracing.
+	as_info_set_command("peers-clear-alt", info_get_services_clear_alt_delta, false);         // The delta update version of "peers-clear-alt".
+	as_info_set_command("peers-clear-std", info_get_services_clear_std_delta, false);         // The delta update version of "peers-clear-std".
+	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, false);             // The delta update version of "peers-tls-alt".
+	as_info_set_command("peers-tls-std", info_get_services_tls_std_delta, false);             // The delta update version of "peers-tls-std".
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
@@ -6203,14 +7006,6 @@ as_info_init()
 	as_fabric_register_msg_fn(M_TYPE_INFO, info_mt, sizeof(info_mt), INFO_MSG_SCRATCH_SIZE, info_msg_fn, 0 /* udata */ );
 
 	pthread_t info_interfaces_th;
-	// if there's a statically configured external interface, use this simple function to monitor
-	// and transmit
-	if (g_config.external_address) {
-		pthread_create(&info_interfaces_th, &thr_attr, info_interfaces_static_fn, 0);
-	} else {
-		// Or if we've got interfaces, monitor and transmit
-		pthread_create(&info_interfaces_th, &thr_attr, info_interfaces_fn, 0);
-	}
-
+	pthread_create(&info_interfaces_th, &thr_attr, info_interfaces_fn, 0);
 	return(0);
 }

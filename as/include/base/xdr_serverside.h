@@ -32,6 +32,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "dynbuf.h"
+#include "socket.h"
 #include "util.h"
 #include "xdr_config.h"
 
@@ -62,7 +63,7 @@ void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_no
 void as_xdr_handle_txn(as_transaction *txn);
 
 void as_xdr_info_init(void);
-int32_t as_xdr_info_port(void);
+void as_xdr_info_port(cf_serv_cfg *serv_cfg);
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
 void xdr_handle_failednodeprocessingdone(cf_node);
 void as_xdr_get_stats(char *name, cf_dyn_buf *db);

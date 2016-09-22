@@ -30,7 +30,6 @@
 
 #include "msg.h"
 #include "socket.h"
-#include "util.h"
 
 #include "fabric/hlc.h"
 
@@ -50,87 +49,74 @@
 #define AS_HB_TX_INTERVAL_MS_MAX 600000
 
 /**
- * An ipv4 / ipv6 address. cf_sockaddr accounts for port as well and has that semantic
- * but does not deal with IPv6. Inventing a new packed type that will also hold
- * ipv6 addresses.
- *
- * IPv4 addresses are mapped to ipv6 space address space as documented here
- * https://en.wikipedia.org/wiki/IPv6#IPv4-mapped_IPv6_addresses
- *
- * TODO: Move over to cf_sockaddr once it is ipv6 ready.
- *
+ * Heartbeat modes.
  */
-typedef struct as_hb_ipaddr_s
-{
-	/**
-	 * IPv6 address stored as big endian. IPv4 addresses should be mapped to
-	 * IPv4 mapped IPv6 space.
-	 */
-	union
-	{
-		uint8_t byte[16];
-		uint16_t word[8];
-		uint32_t dword[4];
-		uint64_t qword[2];
-	} addr;
-} __attribute__((__packed__)) as_hb_ipaddr;
+typedef enum as_hb_mode_enum {
+	AS_HB_MODE_UNDEF,
+	AS_HB_MODE_MULTICAST,
+	AS_HB_MODE_MESH
+} as_hb_mode;
 
 /**
- * TODO: Remove on integration.
+ * Heart protocol versions.
+ */
+typedef enum as_hb_protocol_enum {
+	AS_HB_PROTOCOL_UNDEF,
+	AS_HB_PROTOCOL_NONE,
+	AS_HB_PROTOCOL_RESET,
+	AS_HB_PROTOCOL_V1,
+	AS_HB_PROTOCOL_V2,
+	AS_HB_PROTOCOL_V3
+} as_hb_protocol;
+
+/**
+ * Heartbeat subsystem configuration.
  */
 typedef struct as_hb_config_s
 {
 	/**
 	 * Mode of operation. Mesh or Multicast for now.
 	 */
-	hb_mode_enum hb_mode;
+	as_hb_mode mode;
 
 	/**
-	 * The listening address and port.
+	 * Binding interface config.
 	 */
-	as_hb_ipaddr hb_listen_addr;
-	int hb_listen_port;
+	cf_serv_cfg bind_cfg;
 
 	/**
-	 * The address published with heartbeat messages and the port.
+	 * Multicast mode only config for multicast groups.
 	 */
-	as_hb_ipaddr hb_publish_addr;
-	int hb_publish_port;
-
-	/**
-	 * The address of the interface to bind to. Will be zero if we bind to
-	 * all interfaces.
-	 */
-	as_hb_ipaddr hb_bind_interface_addr;
+	cf_mserv_cfg multicast_group_cfg;
 
 	/**
 	 * The interval at which heartbeat pulse messages are sent in
 	 * milliseconds.
 	 */
-	uint32_t hb_tx_interval;
+	uint32_t tx_interval;
 
 	/**
 	 * Max number of missed heartbeat intervals after which a node is
 	 * considered expired.
 	 */
-	uint32_t hb_max_intervals_missed;
+	uint32_t max_intervals_missed;
 
 	/**
 	 * Set multiple of 'hb max intervals missed' during which if no fabric
 	 * messages arrive from a node, the node is considered fabric expired.
 	 * Set to -1 for infinite grace period.
 	 */
-	int hb_fabric_grace_factor;
+	int fabric_grace_factor;
 
 	/**
 	 * The ttl for multicast packets. Set to zero for default TTL.
 	 */
-	unsigned char hb_mcast_ttl;
+	uint8_t multicast_ttl;
 
 	/**
 	 * HB protocol to use.
 	 */
-	hb_protocol_enum hb_protocol;
+	as_hb_protocol protocol;
 
 	/**
 	 * Set to a value > 0 to override the MTU read from the network
@@ -138,17 +124,12 @@ typedef struct as_hb_config_s
 	 */
 	uint32_t override_mtu;
 
-	/*---- Derived values for convinience ----*/
-	char hb_listen_addr_s[INET6_ADDRSTRLEN];
-	char hb_publish_addr_s[INET6_ADDRSTRLEN];
-	char hb_bind_interface_addr_s[INET6_ADDRSTRLEN];
-
 	/**
 	 * Mesh seeds from config file.
 	 * Only used for during config parsing and initialization.
 	 */
-	char* hb_mesh_seed_addrs[AS_CLUSTER_SZ];
-	int hb_mesh_seed_ports[AS_CLUSTER_SZ];
+	char* mesh_seed_addrs[AS_CLUSTER_SZ];
+	int mesh_seed_ports[AS_CLUSTER_SZ];
 
 } as_hb_config;
 
@@ -156,7 +137,6 @@ typedef struct as_hb_config_s
  * Errors encountered by the heartbeat subsystem.
  */
 typedef enum as_hb_err_type_e {
-	// TODO: Check if these errors are relevant and increment as well.
 	AS_HB_ERR_NO_SRC_NODE,
 	AS_HB_ERR_NO_TYPE,
 	AS_HB_ERR_NO_ID,
@@ -227,6 +207,12 @@ typedef enum {
 	 * The heartbeat subsystem itself.
 	 */
 	AS_HB_PLUGIN_HB,
+	/**
+	 * The older clustering subsystem.
+	 * TODO: Use only one plugin id and register differently based on the
+	 * clustering version.
+	 */
+	AS_HB_PLUGIN_FABRIC,
 	/**
 	 * The older clustering subsystem.
 	 * TODO: Use only one plugin id and register differently based on the
@@ -343,46 +329,79 @@ typedef struct as_hb_plugin_s
 } as_hb_plugin;
 
 /**
- * The fields in the heartbeat message.
+ * The fields in the heartbeat message. V2 protocol is frozen. Should never
+ * change.
  */
 typedef enum {
-	/*---- Same meaning and order as v2 fields. Should never change. ----*/
-
-	AS_HB_MSG_ID = 0,
-	AS_HB_MSG_TYPE = 1,
-	AS_HB_MSG_NODE = 2,
-	AS_HB_MSG_ADDR = 3,
-	AS_HB_MSG_PORT = 4,
+	AS_HB_V2_MSG_ID = 0,
+	AS_HB_V2_MSG_TYPE = 1,
+	AS_HB_V2_MSG_NODE = 2,
+	AS_HB_V2_MSG_ADDR = 3,
+	AS_HB_V2_MSG_PORT = 4,
 
 	/**
-	 * AS_HB_MSG_HB_DATA corresponds to the AS_HB_V2_MSG_ANV from V2.
-	 * For pulse messages contains the node ids of adjacency list.
-	 * For info request contains the node ids of nodes to discover.
-	 * For info replies contains a list of nodeid and their endpoints.
+	 * For pulse messages contains the node ids of the succession list.
 	 */
-	AS_HB_MSG_HB_DATA = 5,
+	AS_HB_V2_MSG_ANV = 5,
 
 	/**
-	 * AS_HB_MSG_MAX_CLUSTER_SIZE corresponds to AS_HB_V2_MSG_ANV_LENGTH in
-	 * V2.
+	 * Legacy max cluster size and hence the length of the succession list
+	 * as well.
 	 */
-	AS_HB_MSG_MAX_CLUSTER_SIZE = 6,
+	AS_HB_V2_MSG_ANV_LENGTH = 6,
 
-	/*---- Fields specific to v3 ----*/
+	/*---- Internal fields not send on the wire but present to make the a v2
+	   message look mre like a v3 message as the code is v3 oriented. ----*/
+	/**
+	 * Compatibility as_endpoint_list field never send out on the wire. Used
+	 * to make the a v2 message work seamlessly with v3 oriented code.
+	 */
+	AS_HB_V2_MSG_COMPAT_ENDPOINTS = 7,
+
+	/**
+	 * Compatibility as_endpoint_list field never send out on the wire. Used
+	 * to make the a v2 message work seamlessly with v3 oriented code.
+	 */
+	AS_HB_V2_MSG_COMPAT_INFO_REQUEST = 8,
+
+	/**
+	 * Compatibility as_endpoint_list field never send out on the wire. Used
+	 * to make the a v2 message work seamlessly with v3 oriented code.
+	 */
+	AS_HB_V2_MSG_COMPAT_INFO_REPLY = 9,
+
+	/**
+	 * Sentinel value. Should be the last in the enum.
+	 */
+	AS_HB_V2_MSG_SENTINEL = 10
+
+} as_hb_v2_msg_fields;
+
+/**
+ * The fields in the heartbeat message.
+ * New field additions only at the end.
+ */
+typedef enum {
+	/*---- Same meaning and order as v2 fields. ----*/
+	AS_HB_MSG_ID,
+	AS_HB_MSG_TYPE,
+	AS_HB_MSG_NODE,
+
+	/*---- Fields specific to v3 but compulsory ----*/
+	/**
+	 * Cluster Name.
+	 */
+	AS_HB_MSG_CLUSTER_NAME,
+
 	/**
 	 * HLC timestamp.
 	 */
 	AS_HB_MSG_HLC_TIMESTAMP,
 
 	/**
-	 * Contains the cluster key and succession list.
+	 * Heartbeats endpoints advertised by this node.
 	 */
-	AS_HB_MSG_PAXOS_DATA,
-
-	/**
-	 * Cluster Name.
-	 */
-	AS_HB_MSG_CLUSTER_NAME,
+	AS_HB_MSG_ENDPOINTS,
 
 	/**
 	 * Payload for compressed messages.
@@ -390,25 +409,34 @@ typedef enum {
 	AS_HB_MSG_COMPRESSED_PAYLOAD,
 
 	/**
-	 * Sentinel value. Should be the last in the enum
+	 * Mesh info request.
 	 */
-	AS_HB_MSG_SENTINEL
-} as_hb_msg_fields;
+	AS_HB_MSG_INFO_REQUEST,
 
-/**
- * The fields in the older heartbeat message.
- */
-typedef enum {
 	/**
-	 * For pulse messages contains the node ids of adjacency list.
+	 * Mesh info reply.
 	 */
-	AS_HB_V2_MSG_ANV = 5,
-	AS_HB_V2_MSG_ANV_LENGTH = 6,
+	AS_HB_MSG_INFO_REPLY,
+
+	/*---- Plugin data fields. Potentially extensible  ----*/
 	/**
-	 * Sentinel value. Should be the last in the enum.
+	 * Fabric  data advertised by this node. Placed close to hb endpoints to
+	 * help compression, because it would most likely match with hb
+	 * endpoints.
 	 */
-	AS_HB_V2_MSG_SENTINEL = 7
-} as_hb_v2_msg_fields;
+	AS_HB_MSG_FABRIC_DATA,
+
+	/**
+	 * For pulse messages, adjacency list and clusterid. For mesh info reply
+	 * and response the reply and response objects.
+	 */
+	AS_HB_MSG_HB_DATA,
+
+	/**
+	 * Contains the cluster key and succession list.
+	 */
+	AS_HB_MSG_PAXOS_DATA
+} as_hb_msg_fields;
 
 /*-----------------------------------------------------------------
  * HB subsystem public API
@@ -435,7 +463,9 @@ void as_hb_shutdown();
 bool as_hb_node_is_adjacent(cf_node nodeid);
 
 /**
- * Get the ip address of a node given its node id.
+ * Get the ip address of a node given its node id. Only there to support fabric
+ * getting hold of a remote node's heartbeat message, with legacy heartbeat
+ * protocol.
  *
  * @param node the node to get ip address of.
  * @param addr the output ip address on success, undefined on failure.
@@ -491,7 +521,12 @@ void as_hb_dump(bool verbose);
 /**
  * Set heartbeat protocol version.
  */
-int as_hb_set_protocol(hb_protocol_enum protocol);
+as_hb_protocol as_hb_protocol_get();
+
+/**
+ * Set heartbeat protocol version.
+ */
+int as_hb_protocol_set(as_hb_protocol protocol);
 
 /**
  * Get the timeout invterval to consider a node dead / expired in milliseconds.
@@ -511,7 +546,7 @@ uint32_t as_hb_tx_interval_get();
 /**
  * Set the heartbeat pulse transmit interval.
  */
-bool as_hb_tx_interval_set(uint32_t new_interval);
+int as_hb_tx_interval_set(uint32_t new_interval);
 
 /**
  * Set the maximum number of missed heartbeat intervals after which a node is
@@ -567,21 +602,27 @@ void as_hb_config_validate();
 void as_hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict);
 
 /**
- * Read the plugin data for a node in the adjacency list. The plugin data is
- * always heap allocated and if not NULL should be freed using cf_free.
+ * Read the plugin data for a node in the adjacency list. The plugin_data->data
+ * input param should be pre allocated and plugin_data->data_capacity should
+ * indicate its capacity.
  *
  * @param nodeid the node id
  * @param pluginid the plugin identifier.
- * @param plugin_data (output) a double pointer to the saved plugin data for the
+ * @param plugin_data (input/output) on success plugin_data->data will be the
+ * plugin's data for the node and plugin_data->data_size will be the data size.
  * node. NULL if there is no plugin data.
  * @praram msg_hlc_ts  (output) if not NULL will be filled with the timestamp of
  * when the hb message for this data was received.
  * @param recv_monotonic_ts (output) if not NULL will be filled with monotonic
  * wall clock receive timestamp for this plugin data.
- * @return the size of the plugin data. 0 if there is no plugin data.
+ * @return 0 on success and -1 on error, where errno will be set to  ENOENT if
+ * there is no entry for this node and ENOMEM if the input plugin data's
+ * capacity is less than plugin's data. In ENOMEM case plugin_data->data_size
+ * will be set to the required capacity.
  */
 int as_hb_plugin_data_get(cf_node nodeid, as_hb_plugin_id plugin,
-			  void** plugin_data, as_hlc_msg_timestamp* msg_hlc_ts,
+			  as_hb_plugin_node_data* plugin_data,
+			  as_hlc_msg_timestamp* msg_hlc_ts,
 			  cf_clock* recv_monotonic_ts);
 
 /**
@@ -612,7 +653,7 @@ typedef void (*as_hb_plugin_data_iterate_fn)(cf_node nodeid, void* plugin_data,
  * @param plugin the plugin identifier.
  * @param iterate_fn the iterate function invoked for plugin data for every
  * node.
- * @param udata passed as is to the iterqte function. Useful for getting results
+ * @param udata passed as is to the iterate function. Useful for getting results
  * out of the iteration.
  * NULL if there is no plugin data.
  * @return the size of the plugin data. 0 if there is no plugin data.
@@ -628,7 +669,7 @@ void as_hb_plugin_data_iterate(cf_vector* nodes, as_hb_plugin_id plugin,
  * @param plugin the plugin identifier.
  * @param iterate_fn the iterate function invoked for plugin data for every
  * node.
- * @param udata passed as is to the iterqte function. Useful for getting results
+ * @param udata passed as is to the iterate function. Useful for getting results
  * out of the iteration.
  * NULL if there is no plugin data.
  * @return the size of the plugin data. 0 if there is no plugin data.
@@ -646,14 +687,16 @@ void as_hb_plugin_data_iterate_all(as_hb_plugin_id plugin,
 void as_hb_info_config_get(cf_dyn_buf* db);
 
 /**
- * Generate a string for listening address and port in format ip_address:port
- * and return the heartbeat mode.
+ * Generate a string for listening address and port in format
+ * ip_address:port along with the heartbeat mode.
  *
  * @param mode (output) current heartbeat subsystem mode.
  * @param addr_port (output) listening ip address and port formatted as
  * ip_address:port
+ * @param addr_port_capacity the capacity of the addr_port input.
  */
-void as_hb_info_listen_addr_get(hb_mode_enum* mode, char* addr_port);
+void as_hb_info_listen_addr_get(as_hb_mode* mode, char* addr_port,
+				size_t addr_port_capacity);
 
 /*-----------------------------------------------------------------
  * Mesh mode public API

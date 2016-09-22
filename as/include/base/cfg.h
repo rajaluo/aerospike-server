@@ -72,6 +72,17 @@ struct as_namespace_s;
 #define PBOOL(line) bool PGLUE(pad_, line)[3]; bool
 #define PAD_BOOL PBOOL(__LINE__)
 
+typedef struct as_addr_list_s {
+	uint32_t n_addrs;
+	const char* addrs[CF_SOCK_CFG_MAX];
+} as_addr_list;
+
+typedef struct as_serv_spec_s {
+	cf_ip_port port;
+	as_addr_list bind;
+	as_addr_list access;
+} as_serv_spec;
+
 typedef struct as_config_s {
 
 	// The order here matches that in the configuration parser's enum,
@@ -94,6 +105,7 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
+	PAD_BOOL		advertise_ipv6;
 	PAD_BOOL		allow_inline_transactions;
 	int				n_batch_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
@@ -115,6 +127,7 @@ typedef struct as_config_s {
 	int				migrate_max_num_incoming;
 	int				migrate_rx_lifetime_ms; // for debouncing re-tansmitted migrate start messages
 	int				n_migrate_threads;
+	char*			node_id_interface;
 	uint32_t		nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
 	uint32_t		nsup_period;
 	PAD_BOOL		nsup_startup_evict;
@@ -174,16 +187,14 @@ typedef struct as_config_s {
 
 	// Normally visible, in canonical configuration file order:
 
-	cf_socket_cfg	socket;
-	cf_socket_cfg	localhost_socket; // for listener on 127.0.0.1, only opened if main socket not already listening on 0.0.0.0 or 127.0.0.1
+	as_serv_spec	service; // client service
 
 	// Normally hidden:
 
-	const char*			external_address; // host name that clients will connect on
-	PAD_BOOL		is_external_address_virtual;
-	char*			alternate_address; // alternate service address (could be DNS)
-	char*			network_interface_name; // network_interface_name to use on this machine for generating the IP addresses
-	PAD_BOOL		socket_reuse_addr; // whether or not a socket can be reused (SO_REUSEADDR)
+	as_serv_spec	alt_service; // alternate client service
+	as_serv_spec	alt_tls_service; // alternate TLS client service
+	char*			tls_name; // TLS name
+	as_serv_spec	tls_service; // TLS client service
 
 	//--------------------------------------------
 	// network::heartbeat context.
@@ -197,7 +208,7 @@ typedef struct as_config_s {
 
 	// Normally visible, in canonical configuration file order:
 
-	int				fabric_port;
+	as_serv_spec	fabric; // fabric service
 
 	// Normally hidden, in canonical configuration file order:
 
@@ -213,7 +224,7 @@ typedef struct as_config_s {
 
 	// Normally visible, in canonical configuration file order:
 
-	int				info_port;
+	as_serv_spec	info; // info service
 
 	//--------------------------------------------
 	// Remaining configuration top-level contexts.
@@ -233,10 +244,8 @@ typedef struct as_config_s {
 	cf_node			self_node; // unique instance ID either HW inspired or cluster group/node ID
 	uint16_t		cluster_mode;
 	cf_node			hw_self_node; // cache the HW value self-node value, for various uses
-	char*			node_ip;
 
 	// Global variables that just shouldn't be here.
-	cf_socket_cfg	xdr_socket; // the port to listen on for XDR compatibility, typically 3004
 	cf_node			xdr_clmap[AS_CLUSTER_SZ]; // cluster map as known to XDR
 	xdr_lastship_s	xdr_lastship[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
 	uint64_t		xdr_self_lastshiptime[DC_MAX_NUM]; // last XDR shipping by this node

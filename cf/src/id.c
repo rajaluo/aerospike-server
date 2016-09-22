@@ -20,16 +20,22 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#include "fault.h"
 #include "util.h" // We don't have our own header file.
 
+#include "citrusleaf/alloc.h"
+
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+#include <unistd.h>
 
 /*
 ** This has nowhere else to go.
 */
 
-cf_digest cf_digest_zero = { .digest = { 0 } };
+const cf_digest cf_digest_zero = { .digest = { 0 } };
 
 /*
 ** Node IDs are great things to use as keys in the hash table.
@@ -47,4 +53,23 @@ cf_nodeid_rchash_fn(void *value, uint32_t len)
 {
 	(void)len;
 	return cf_nodeid_shash_fn(value);
+}
+
+char *
+cf_node_name(void)
+{
+	char buffer[1000];
+	int32_t res = gethostname(buffer, sizeof(buffer));
+
+	if (res == sizeof(buffer) || (res < 0 && errno == ENAMETOOLONG)) {
+		cf_crash(CF_MISC, "Host name too long");
+	}
+
+	if (res < 0) {
+		cf_warning(CF_MISC, "Error while determining host name: %d (%s)",
+				errno, cf_strerror(errno));
+		buffer[0] = 0;
+	}
+
+	return cf_strdup(buffer);
 }

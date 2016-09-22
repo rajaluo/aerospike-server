@@ -107,7 +107,7 @@ static cf_node as_paxos_hb_get_principal(cf_node nodeid);
 /* AS_PMC_USE
  * USE paxos_max_cluster_size? (For backward compatibility)
  */
-#define AS_PMC_USE() (g_config.hb_config.hb_protocol != AS_HB_PROTOCOL_V3)
+#define AS_PMC_USE() (as_hb_protocol_get() != AS_HB_PROTOCOL_V3)
 
 /* AS_PAXOS_ENABLED
  * Is this node sending out and receiving Paxos messages? */
@@ -130,7 +130,6 @@ static cf_node as_paxos_hb_get_principal(cf_node nodeid);
  * multiples of 128 bytes, allowing expansion to 16 nodes without reallocating.
  */
 #define HB_PLUGIN_DATA_BLOCK_SIZE 128
-
 
 /*
  * The singleton paxos object. TODO - why a pointer, is struct too big?
@@ -3328,10 +3327,10 @@ as_paxos_hb_msg_succession_get(msg* msg, cf_node** succession,
 
 	uint8_t* payload;
 	size_t payload_size;
-	int data_type = msg->type == M_TYPE_HEARTBEAT ? AS_HB_MSG_PAXOS_DATA
-						      : AS_HB_V2_MSG_ANV;
+	int field_id = msg->type == M_TYPE_HEARTBEAT ?
+			AS_HB_MSG_PAXOS_DATA : AS_HB_V2_MSG_ANV;
 
-	if (msg_get_buf(msg, data_type, &payload, &payload_size,
+	if (msg_get_buf(msg, field_id, &payload, &payload_size,
 			MSG_GET_DIRECT) != 0) {
 		return -1;
 	}
@@ -3386,7 +3385,7 @@ as_paxos_hb_msg_succession_set(msg* msg, uint8_t* payload, size_t payload_size)
 	} else {
 
 		// Include the ANV length in all heartbeat protocol greater than v2.
-		if (g_config.hb_config.hb_protocol != AS_HB_PROTOCOL_V1) {
+		if (as_hb_protocol_get() != AS_HB_PROTOCOL_V1) {
 			if (0 >
 			    msg_set_uint32(msg, AS_HB_V2_MSG_ANV_LENGTH,
 					   g_config.paxos_max_cluster_size)) {
@@ -3447,8 +3446,7 @@ as_paxos_hb_plugin_set_fn(msg* msg)
 		succession = (cf_node*)payload;
 	}
 
-	memcpy(succession, g_paxos->succession,
-	       sizeof(cf_node) * cluster_size);
+	memcpy(succession, g_paxos->succession, sizeof(cf_node) * cluster_size);
 
 	// Populate succession list into the message.
 	payload_size += (sizeof(cf_node) * cluster_size);
@@ -3517,30 +3515,46 @@ as_paxos_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 static void
 as_paxos_hb_get_succession_list(cf_node nodeid, cf_node* succession)
 {
-	// initialize to an empty list.
+	// Initialize to an empty list.
 	succession[0] = 0;
 
-	uint8_t* plugin_data = NULL;
-	as_hb_plugin_data_get(nodeid, AS_HB_PLUGIN_PAXOS, (void**)&plugin_data,
-			      NULL, NULL);
+	as_hb_plugin_node_data plugin_data;
+	// Initial data capacity.
+	plugin_data.data_capacity = 1024;
 
-	if (plugin_data == NULL) {
-		// This node is no longer in heartbeat adjacency list.
-		goto Exit;
+	int tries_remaining = 3;
+	while (tries_remaining--) {
+		plugin_data.data = alloca(plugin_data.data_capacity);
+		if (as_hb_plugin_data_get(nodeid, AS_HB_PLUGIN_PAXOS,
+					  &plugin_data, NULL, NULL) == 0) {
+			// Read success.
+			break;
+		}
+
+		if (errno == ENOENT) {
+			// No entry present for this node in heartbeat.
+			return;
+		}
+
+		if (errno == ENOMEM) {
+			plugin_data.data_capacity = plugin_data.data_size;
+		}
+	}
+
+	if (tries_remaining < 0) {
+		// Should never happen in practice.
+		cf_crash(AS_PAXOS, "Error allocating space for paxos hb plugin data.");
 	}
 
 	size_t succession_size;
-	cf_node* src = (cf_node*)(plugin_data + sizeof(size_t));
-	memcpy(&succession_size, plugin_data, sizeof(size_t));
+	cf_node* src = (cf_node*)(plugin_data.data + sizeof(size_t));
+	memcpy(&succession_size, plugin_data.data, sizeof(size_t));
 
 	if (succession_size > AS_CLUSTER_SZ) {
-		cf_warning(
-		  AS_PAXOS,
-		  "node %" PRIx64 " has succession list of length %zu "
-		  "greater than max cluster size %d. Ignoring succession list.",
-		  nodeid, succession_size, AS_CLUSTER_SZ);
+		cf_warning(AS_PAXOS, "node %" PRIx64 " has succession list of length %zu greater than max cluster size %d. Ignoring succession list.",
+				nodeid, succession_size, AS_CLUSTER_SZ);
 		succession[0] = 0;
-		goto Exit;
+		return;
 	}
 
 	// v3 does not send zero as the last element. Ensure the succession list
@@ -3548,11 +3562,6 @@ as_paxos_hb_get_succession_list(cf_node nodeid, cf_node* succession)
 	// AS_CLUSTER_SZ.
 	memset(succession, 0, AS_CLUSTER_SZ * sizeof(cf_node));
 	memcpy(succession, src, succession_size * sizeof(cf_node));
-
-Exit:
-	if (plugin_data) {
-		cf_free(plugin_data);
-	}
 }
 
 /**
@@ -3758,13 +3767,12 @@ as_paxos_sup_thr(void* arg)
 void
 as_paxos_start()
 {
-	int32_t wait_ms = g_config.hb_config.hb_max_intervals_missed * g_config.hb_config.hb_tx_interval * 2;
+	int32_t wait_ms = as_hb_node_timeout_get() * 2;
 
 	// Wait at least 2 hb intervals to ensure we receive heartbeats and also
 	// give the hb subsystem time to send out our heartbeats before starting
 	// a new paxos round.
-	uint32_t wait_interval_ms = MAX(wait_ms < 100 ? 100 : wait_ms / 100,
-					2 * g_config.hb_config.hb_tx_interval);
+	uint32_t wait_interval_ms = MAX(wait_ms < 100 ? 100 : wait_ms / 100, 2 * as_hb_tx_interval_get());
 
 	cf_info(AS_PAXOS, "listening for other nodes (max %u milliseconds) ...",
 			wait_ms);

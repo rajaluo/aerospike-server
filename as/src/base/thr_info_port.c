@@ -20,6 +20,8 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+#include "base/thr_info_port.h"
+
 #include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -57,6 +59,10 @@ typedef struct {
 
 } info_port_state;
 
+cf_serv_cfg g_info_bind = { .n_cfgs = 0 };
+cf_ip_port g_info_port = 0;
+
+static cf_sockets g_sockets;
 
 void
 info_port_state_free(info_port_state *ips)
@@ -197,80 +203,46 @@ thr_info_port_writable(info_port_state *ips)
 void *
 thr_info_port_fn(void *arg)
 {
-	cf_socket_cfg *s;
 	cf_poll poll;
-	int nevents, i;
-	int err_count = 0;
+	cf_debug(AS_INFO_PORT, "Info port process started");
 
-	cf_debug(AS_INFO_PORT, "info-port process started");
-
-	// Start the listener socket: note that because this is done after privilege
+	// Start the listener socket. Note that because this is done after privilege
 	// de-escalation, we can't use privileged ports.
-	cf_socket_cfg info_socket;
-	info_socket.addr = cf_strdup("0.0.0.0");
-	info_socket.type = SOCK_STREAM;
-	info_socket.port = g_config.info_port;
-	info_socket.reuse_addr = g_config.socket_reuse_addr ? true : false;
-	// Listen happens here.
-	if (0 != cf_socket_init_server(&info_socket)) {
-		cf_crash(AS_AS, "couldn't initialize service socket");
+
+	if (cf_socket_init_server(&g_info_bind, &g_sockets) < 0) {
+		cf_crash(AS_INFO_PORT, "Couldn't initialize service sockets");
 	}
-	cf_socket_disable_blocking(&info_socket.sock);
-
-	s = &info_socket;
-
-	// Create the epoll file descriptor and set up the epoll structure to listen
-	// to the socket.
 
 	cf_poll_create(&poll);
-	cf_poll_add_socket(poll, &s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
+	cf_poll_add_sockets(poll, &g_sockets, EPOLLIN | EPOLLERR | EPOLLHUP);
+	cf_socket_show_server(AS_INFO_PORT, "info", &g_sockets);
 
-	// Demarshal transactions from the socket.
-	for ( ; ; ) {
+	while (true) {
 		cf_poll_event events[POLL_SZ];
+		int32_t n_ev = cf_poll_wait(poll, events, POLL_SZ, -1);
 
-		cf_debug(AS_INFO_PORT, "calling epoll");
-
-		nevents = cf_poll_wait(poll, events, POLL_SZ, -1);
-
-		cf_debug(AS_INFO_PORT, "epoll event received: nevents %d", nevents);
-
-		// Iterate over all events.
-		for (i = 0; i < nevents; i++) {
+		for (int32_t i = 0; i < n_ev; ++i) {
 			cf_socket *ssock = events[i].data;
 
-			if (ssock == &s->sock) {
-
-				// Accept new connections on the service socket.
+			if (cf_sockets_has_socket(&g_sockets, ssock)) {
 				cf_socket csock;
-				cf_sock_addr sa;
+				cf_sock_addr addr;
 
-				if (cf_socket_accept(&s->sock, &csock, &sa) < 0) {
-					// This means we're out of file descriptors - could be a SYN
-					// flood attack or misbehaving client. Eventually we'd like
-					// to make the reaper fairer, but for now we'll just have to
-					// ignore the accept error and move on.
+				if (cf_socket_accept(ssock, &csock, &addr) < 0) {
+					// This means we're out of file descriptors.
 					if (errno == EMFILE) {
-						cf_debug(AS_INFO_PORT, " warning: too many file descriptors in use, consider raising limit");
+						cf_warning(AS_INFO_PORT, "Too many file descriptors in use, consider raising limit");
 						continue;
 					}
-					if (EINVAL == errno) {
-						if (!(err_count++ % 1000)) {
-							cf_warning(AS_INFO_PORT, "cf_socket_accept(%d) returned EINVAL ~~ Ignoring (err_count: %d)", CSFD(&s->sock), err_count);
-						}
-						continue;
-					}
-					cf_crash(AS_INFO_PORT, "cf_socket_accept: %s (errno %d)", cf_strerror(errno), errno);
+
+					cf_crash(AS_INFO_PORT, "cf_socket_accept() failed");
 				}
 
-				cf_detail(AS_INFO_PORT, "new connection: %s", cf_sock_addr_print(&sa));
-
-				// Set the socket to nonblocking.
-				cf_socket_disable_blocking(&csock);
-
+				cf_detail(AS_INFO_PORT, "New connection: %s", cf_sock_addr_print(&addr));
 				info_port_state *ips = cf_malloc(sizeof(info_port_state));
+
 				if (!ips) {
-					cf_crash(AS_INFO_PORT, "malloc");
+					cf_crash(AS_INFO_PORT, "Out of memory");
 				}
 
 				ips->recv_pos = 0;
@@ -279,53 +251,39 @@ thr_info_port_fn(void *arg)
 				ips->xmit_limit = ips->xmit_pos = 0;
 				ips->xmit_alloc = 100;
 				ips->xmit_buf = cf_malloc(100);
-				
 				cf_socket_copy(&csock, &ips->sock);
 
-				cf_poll_add_socket(poll, &ips->sock, EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
+				cf_poll_add_socket(poll, &csock, EPOLLIN | EPOLLOUT | EPOLLET | EPOLLRDHUP, ips);
 			}
 			else {
-				// A regular working socket.
-
 				info_port_state *ips = events[i].data;
-				if (ips == 0) {
-					cf_debug(AS_INFO_PORT, "event with null handle, continuing");
-					continue;
+
+				if (ips == NULL) {
+					cf_crash(AS_INFO_PORT, "Event with null handle");
 				}
 
-				cf_detail(AS_INFO_PORT, "event: %x fd: %d", events[i].events, CSFD(&ips->sock));
+				cf_detail(AS_INFO_PORT, "Events %x on FD %d", events[i].events, CSFD(&ips->sock));
 
 				if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
-					cf_detail(AS_INFO_PORT, "proto socket: remote close: fd %d event %x", CSFD(&ips->sock), events[i].events);
-					// no longer in use: out of epoll etc
+					cf_detail(AS_INFO_PORT, "Remote close on FD %d", CSFD(&ips->sock));
 					cf_poll_delete_socket(poll, &ips->sock);
 					info_port_state_free(ips);
 					continue;
 				}
 
-
-				if (events[i].events & EPOLLIN) {
-					if (0 != thr_info_port_readable(ips)) {
-						cf_poll_delete_socket(poll, &ips->sock);
-						info_port_state_free(ips);
-						goto NextEvent;
-					}
-
+				if ((events[i].events & EPOLLIN) != 0 && thr_info_port_readable(ips) < 0) {
+					cf_poll_delete_socket(poll, &ips->sock);
+					info_port_state_free(ips);
+					continue;
 				}
 
-				if (events[i].events & EPOLLOUT) {
-					if (0 != thr_info_port_writable(ips)) {
-						cf_poll_delete_socket(poll, &ips->sock);
-						info_port_state_free(ips);
-						goto NextEvent;
-					}
+				if ((events[i].events & EPOLLOUT) != 0 && thr_info_port_writable(ips) < 0) {
+					cf_poll_delete_socket(poll, &ips->sock);
+					info_port_state_free(ips);
+					continue;
 				}
-
-NextEvent:
-				;
 			}
 
-			// We should never be canceled externally, but just in case...
 			pthread_testcancel();
 		}
 	}
@@ -335,16 +293,14 @@ NextEvent:
 
 pthread_t g_info_port_th;
 
-int
+void
 as_info_port_start()
 {
-	if (g_config.info_port == 0) {
-		return 0;
+	if (g_info_port == 0) {
+		return;
 	}
 
-	if (0 != pthread_create(&g_info_port_th, 0, thr_info_port_fn, 0)) {
+	if (pthread_create(&g_info_port_th, NULL, thr_info_port_fn, NULL) != 0) {
 		cf_crash(AS_AS, "pthread_create: %s", cf_strerror(errno));
 	}
-
-	return 0;
 }

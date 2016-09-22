@@ -55,6 +55,7 @@
 #include "base/stats.h"
 #include "base/thr_batch.h"
 #include "base/thr_info.h"
+#include "base/thr_info_port.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/ticker.h"

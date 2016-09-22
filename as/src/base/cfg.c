@@ -58,20 +58,15 @@
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/security_config.h"
+#include "base/thr_demarshal.h"
 #include "base/thr_info.h"
+#include "base/thr_info_port.h"
 #include "base/thr_query.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction_policy.h"
+#include "fabric/fabric.h"
 #include "fabric/migrate.h"
-
-
-//==============================================================================
-// Constants.
-//
-
-const char IPV4_ANY_ADDR[] = "0.0.0.0";
-const char IPV4_LOCALHOST_ADDR[] = "127.0.0.1";
 
 
 //==========================================================
@@ -81,12 +76,24 @@ const char IPV4_LOCALHOST_ADDR[] = "127.0.0.1";
 // The runtime configuration instance.
 as_config g_config;
 
+// Heartbeat transient config. TODO - find a better way.
+static as_serv_spec g_hb_serv_spec;
+static as_addr_list g_hb_multicast_groups;
+
 
 //==========================================================
 // Forward declarations.
 //
 
-void cfg_add_mesh_seed_addr_port(char* addr, int port);
+void add_addr(const char* name, as_addr_list* addrs);
+void copy_addrs(const as_addr_list* from, as_addr_list* to);
+void default_access(const as_serv_spec* from, as_addr_list* to);
+void cfg_add_addr_bind(const char* name, as_serv_spec* spec);
+void cfg_add_addr_access(const char* name, as_serv_spec* spec);
+void cfg_mserv_config_from_addrs(as_addr_list* addrs, as_addr_list* bind_addrs, cf_mserv_cfg* serv_cfg, cf_ip_port port, cf_sock_owner owner, uint8_t ttl);
+void cfg_serv_spec_to_bind(const as_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner);
+void cfg_serv_spec_to_access(const as_serv_spec* spec, as_addr_list* access);
+void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
@@ -96,8 +103,6 @@ void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_
 void create_and_check_hist(histogram** h, const char* name, histogram_scale scale);
 void cfg_create_all_histograms();
 int cfg_reset_self_node(as_config* config_p);
-char* cfg_set_addr(const char* name);
-void cfg_use_hardware_values(as_config* c);
 
 
 //==========================================================
@@ -107,13 +112,9 @@ void cfg_use_hardware_values(as_config* c);
 void
 cfg_set_defaults()
 {
-	as_config *c = &g_config;
+	as_config* c = &g_config;
 
 	memset(c, 0, sizeof(as_config));
-
-	cf_socket_init(&g_config.socket.sock);
-	cf_socket_init(&g_config.localhost_socket.sock);
-	cf_socket_init(&g_config.xdr_socket.sock);
 
 	// Service defaults.
 	c->paxos_single_replica_limit = 1; // by default all clusters obey replication counts
@@ -164,21 +165,12 @@ cfg_set_defaults()
 	c->memory_accounting = false;
 	c->asmalloc_enabled = true;
 
-	// Network service defaults.
-	c->socket.type = SOCK_STREAM; // not configurable, but addr and port are
-	c->localhost_socket.type = SOCK_STREAM; // not configurable
-	c->xdr_socket.type = SOCK_STREAM;
-	c->socket.addr = (char*)IPV4_ANY_ADDR; // by default listen on any IPv4 address
-	c->xdr_socket.addr = (char*)IPV4_ANY_ADDR;
-	c->socket_reuse_addr = true;
-	c->xdr_socket.reuse_addr = true;
-
 	// Network heartbeat defaults.
-	c->hb_config.hb_mode = AS_HB_MODE_UNDEF;
-	c->hb_config.hb_tx_interval = 150;
-	c->hb_config.hb_max_intervals_missed = 10;
-	c->hb_config.hb_fabric_grace_factor = -1; // Infinite fabric grace period.
-	c->hb_config.hb_protocol = AS_HB_PROTOCOL_V2;
+	c->hb_config.mode = AS_HB_MODE_UNDEF;
+	c->hb_config.tx_interval = 150;
+	c->hb_config.max_intervals_missed = 10;
+	c->hb_config.fabric_grace_factor = -1; // Infinite fabric grace period.
+	c->hb_config.protocol = AS_HB_PROTOCOL_V2;
 	c->hb_config.override_mtu = 0;
 
 	// Fabric TCP socket keepalive defaults.
@@ -260,6 +252,7 @@ typedef enum {
 	CASE_SERVICE_CLIENT_FD_MAX, // renamed
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
+	CASE_SERVICE_ADVERTISE_IPV6,
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
@@ -281,6 +274,7 @@ typedef enum {
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
 	CASE_SERVICE_MIGRATE_RX_LIFETIME_MS,
 	CASE_SERVICE_MIGRATE_THREADS,
+	CASE_SERVICE_NODE_ID_INTERFACE,
 	CASE_SERVICE_NSUP_DELETE_SLEEP,
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_NSUP_STARTUP_EVICT,
@@ -389,14 +383,10 @@ typedef enum {
 	// Logging file options:
 	// Normally visible:
 	CASE_LOG_FILE_CONTEXT,
-	// Not supported:
-	CASE_LOG_FILE_SPECIFIC,
 
 	// Logging console options:
 	// Normally visible:
 	CASE_LOG_CONSOLE_CONTEXT,
-	// Not supported:
-	CASE_LOG_CONSOLE_SPECIFIC,
 
 	// Network options:
 	// In canonical configuration file order:
@@ -412,7 +402,17 @@ typedef enum {
 	// Normally hidden:
 	CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS, // renamed
 	CASE_NETWORK_SERVICE_ACCESS_ADDRESS,
+	CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS,
 	CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS,
+	CASE_NETWORK_SERVICE_ALTERNATE_PORT,
+	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS,
+	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS,
+	CASE_NETWORK_SERVICE_ALTERNATE_TLS_PORT,
+	CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS,
+	CASE_NETWORK_SERVICE_TLS_ADDRESS,
+	CASE_NETWORK_SERVICE_TLS_NAME,
+	CASE_NETWORK_SERVICE_TLS_PORT,
+	// Deprecated or obsoleted:
 	CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME,
 	CASE_NETWORK_SERVICE_REUSE_ADDRESS,
 
@@ -420,16 +420,19 @@ typedef enum {
 	// Normally visible, in canonical configuration file order:
 	CASE_NETWORK_HEARTBEAT_MODE,
 	CASE_NETWORK_HEARTBEAT_ADDRESS,
+	CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP,
 	CASE_NETWORK_HEARTBEAT_PORT,
 	CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT,
 	CASE_NETWORK_HEARTBEAT_INTERVAL,
 	CASE_NETWORK_HEARTBEAT_TIMEOUT,
 	// Normally hidden:
 	CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR,
-	CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS,
-	CASE_NETWORK_HEARTBEAT_MCAST_TTL,
 	CASE_NETWORK_HEARTBEAT_MTU,
+	CASE_NETWORK_HEARTBEAT_MCAST_TTL, // renamed
+	CASE_NETWORK_HEARTBEAT_MULTICAST_TTL,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL,
+	// Deprecated or obsoleted:
+	CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS,
 
 	// Network heartbeat mode options (value tokens):
 	CASE_NETWORK_HEARTBEAT_MODE_MESH,
@@ -679,6 +682,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
+		{ "advertise-ipv6",					CASE_SERVICE_ADVERTISE_IPV6 },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
@@ -700,6 +704,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
 		{ "migrate-rx-lifetime-ms",			CASE_SERVICE_MIGRATE_RX_LIFETIME_MS },
 		{ "migrate-threads",				CASE_SERVICE_MIGRATE_THREADS },
+		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
@@ -806,13 +811,11 @@ const cfg_opt LOGGING_OPTS[] = {
 
 const cfg_opt LOGGING_FILE_OPTS[] = {
 		{ "context",						CASE_LOG_FILE_CONTEXT },
-		{ "specific",						CASE_LOG_FILE_SPECIFIC },
 		{ "}",								CASE_CONTEXT_END }
 };
 
 const cfg_opt LOGGING_CONSOLE_OPTS[] = {
 		{ "context",						CASE_LOG_CONSOLE_CONTEXT },
-		{ "specific",						CASE_LOG_CONSOLE_SPECIFIC },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -829,7 +832,16 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "port",							CASE_NETWORK_SERVICE_PORT },
 		{ "external-address",				CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS },
 		{ "access-address",					CASE_NETWORK_SERVICE_ACCESS_ADDRESS },
+		{ "alternate-access-address",		CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS },
 		{ "alternate-address",				CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS },
+		{ "alternate-port",					CASE_NETWORK_SERVICE_ALTERNATE_PORT },
+		{ "alternate-tls-address",			CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS },
+		{ "alternate-tls-access-address",	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS },
+		{ "alternate-tls-port",				CASE_NETWORK_SERVICE_ALTERNATE_TLS_PORT },
+		{ "tls-access-address",				CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS },
+		{ "tls-address",					CASE_NETWORK_SERVICE_TLS_ADDRESS },
+		{ "tls-name",						CASE_NETWORK_SERVICE_TLS_NAME },
+		{ "tls-port",						CASE_NETWORK_SERVICE_TLS_PORT },
 		{ "network-interface-name",			CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME },
 		{ "reuse-address",					CASE_NETWORK_SERVICE_REUSE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
@@ -838,15 +850,17 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 const cfg_opt NETWORK_HEARTBEAT_OPTS[] = {
 		{ "mode",							CASE_NETWORK_HEARTBEAT_MODE },
 		{ "address",						CASE_NETWORK_HEARTBEAT_ADDRESS },
+		{ "multicast-group",				CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP },
 		{ "port",							CASE_NETWORK_HEARTBEAT_PORT },
 		{ "mesh-seed-address-port",			CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT },
 		{ "interval",						CASE_NETWORK_HEARTBEAT_INTERVAL },
 		{ "timeout",						CASE_NETWORK_HEARTBEAT_TIMEOUT },
 		{ "fabric-grace-factor",			CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR },
-		{ "interface-address",				CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS },
-		{ "mcast-ttl",						CASE_NETWORK_HEARTBEAT_MCAST_TTL },
 		{ "mtu",							CASE_NETWORK_HEARTBEAT_MTU },
+		{ "mcast-ttl",						CASE_NETWORK_HEARTBEAT_MCAST_TTL },
+		{ "multicast-ttl",					CASE_NETWORK_HEARTBEAT_MULTICAST_TTL },
 		{ "protocol",						CASE_NETWORK_HEARTBEAT_PROTOCOL },
+		{ "interface-address",				CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1267,21 +1281,6 @@ typedef struct cfg_line_s {
 } cfg_line;
 
 void
-cfg_future_name_tok(const cfg_line* p_line)
-{
-	// To see this log, change NO_SINKS_LIMIT in fault.c:
-	cf_info(AS_CFG, "line %d :: %s is not yet supported",
-			p_line->num, p_line->name_tok);
-}
-
-void
-cfg_future_val_tok_1(const cfg_line* p_line)
-{
-	cf_warning(AS_CFG, "line %d :: %s value '%s' is not yet supported",
-			p_line->num, p_line->name_tok, p_line->val_tok_1);
-}
-
-void
 cfg_renamed_name_tok(const cfg_line* p_line, const char* new_tok)
 {
 	cf_warning(AS_CFG, "line %d :: %s was renamed - please use '%s'",
@@ -1324,14 +1323,14 @@ cfg_unknown_val_tok_1(const cfg_line* p_line)
 }
 
 void
-cfg_obsolete(const cfg_line* p_line, const char *new_tok)
+cfg_obsolete(const cfg_line* p_line, const char* message)
 {
-	cf_crash_nostack(AS_CFG, "line %d :: '%s' is obsolete - must use '%s'",
-			p_line->num, p_line->name_tok, new_tok);
+	cf_crash_nostack(AS_CFG, "line %d :: '%s' is obsolete%s%s",
+			p_line->num, p_line->name_tok, message ? " - " : "", message);
 }
 
 void
-cfg_not_supported(const cfg_line* p_line, const char *feature)
+cfg_not_supported(const cfg_line* p_line, const char* feature)
 {
 	cf_crash_nostack(AS_CFG, "line %d :: illegal value '%s' for config parameter '%s' - feature %s is not supported",
 			p_line->num, p_line->val_tok_1, p_line->name_tok, feature);
@@ -1425,6 +1424,7 @@ void
 cfg_strcpy(const cfg_line* p_line, char* p_str, size_t max_size)
 {
 	size_t tok1_len = strlen(p_line->val_tok_1);
+
 	if (tok1_len == 0) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must have a value specified",
 				p_line->num, p_line->name_tok);
@@ -1767,16 +1767,16 @@ cfg_seconds(const cfg_line* p_line, uint32_t min, uint32_t max)
 const int CFG_MIN_PORT = 1024;
 const int CFG_MAX_PORT = USHRT_MAX;
 
-int
+cf_ip_port
 cfg_port(const cfg_line* p_line)
 {
-	return cfg_int(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
+	return (cf_ip_port)cfg_int(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
 }
 
-int
+cf_ip_port
 cfg_port_val2(const cfg_line* p_line)
 {
-	return cfg_int_val2(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
+	return (cf_ip_port)cfg_int_val2(p_line, CFG_MIN_PORT, CFG_MAX_PORT);
 }
 
 //------------------------------------------------
@@ -1792,7 +1792,7 @@ const char CFG_WHITESPACE[] = " \t\n\r\f\v";
 //
 
 as_config*
-as_config_init(const char *config_file)
+as_config_init(const char* config_file)
 {
 	as_config* c = &g_config; // shortcut pointer
 
@@ -1951,6 +1951,9 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_PROTO_FD_MAX:
 				c->n_proto_fd_max = cfg_int_no_checks(&line);
 				break;
+			case CASE_SERVICE_ADVERTISE_IPV6:
+				c->advertise_ipv6 = cfg_bool(&line);
+				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				c->allow_inline_transactions = cfg_bool(&line);
 				break;
@@ -2014,6 +2017,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_MIGRATE_THREADS:
 				c->n_migrate_threads = cfg_int(&line, 0, MAX_NUM_MIGRATE_XMIT_THREADS);
+				break;
+			case CASE_SERVICE_NODE_ID_INTERFACE:
+				c->node_id_interface = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_SERVICE_NSUP_DELETE_SLEEP:
 				c->nsup_delete_sleep = cfg_u32_no_checks(&line);
@@ -2265,9 +2271,6 @@ as_config_init(const char *config_file)
 					cf_crash_nostack(AS_CFG, "line %d :: can't add logging file context %s %s", line_num, line.val_tok_1, line.val_tok_2);
 				}
 				break;
-			case CASE_LOG_FILE_SPECIFIC:
-				cfg_future_name_tok(&line); // TODO - deprecate?
-				break;
 			case CASE_CONTEXT_END:
 				sink = NULL;
 				cfg_end_context(&state);
@@ -2288,9 +2291,6 @@ as_config_init(const char *config_file)
 				if (0 != cf_fault_sink_addcontext(sink, line.val_tok_1, line.val_tok_2)) {
 					cf_crash_nostack(AS_CFG, "line %d :: can't add logging console context %s %s", line_num, line.val_tok_1, line.val_tok_2);
 				}
-				break;
-			case CASE_LOG_CONSOLE_SPECIFIC:
-				cfg_future_name_tok(&line); // TODO - deprecate?
 				break;
 			case CASE_CONTEXT_END:
 				sink = NULL;
@@ -2336,27 +2336,52 @@ as_config_init(const char *config_file)
 		case NETWORK_SERVICE:
 			switch(cfg_find_tok(line.name_tok, NETWORK_SERVICE_OPTS, NUM_NETWORK_SERVICE_OPTS)) {
 			case CASE_NETWORK_SERVICE_ADDRESS:
-				c->socket.addr = cfg_set_addr(line.val_tok_1);
+				cfg_add_addr_bind(line.val_tok_1, &c->service);
 				break;
 			case CASE_NETWORK_SERVICE_PORT:
-				c->socket.port = cfg_port(&line);
-				c->localhost_socket.port = cfg_port(&line);
+				c->service.port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS:
 				cfg_renamed_name_tok(&line, "access-address");
 				// No break.
 			case CASE_NETWORK_SERVICE_ACCESS_ADDRESS:
-				c->external_address = cfg_strdup_no_checks(&line);
-				c->is_external_address_virtual = strcmp(line.val_tok_2, "virtual") == 0;
+				cfg_add_addr_access(line.val_tok_1, &c->service);
+				break;
+			case CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS:
+				cfg_add_addr_access(line.val_tok_1, &c->alt_service);
 				break;
 			case CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS:
-				c->alternate_address = cfg_strdup_no_checks(&line);
+				cfg_add_addr_bind(line.val_tok_1, &c->alt_service);
+				break;
+			case CASE_NETWORK_SERVICE_ALTERNATE_PORT:
+				c->alt_service.port = cfg_port(&line);
+				break;
+			case CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS:
+				cfg_add_addr_access(line.val_tok_1, &c->alt_tls_service);
+				break;
+			case CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS:
+				cfg_add_addr_bind(line.val_tok_1, &c->alt_tls_service);
+				break;
+			case CASE_NETWORK_SERVICE_ALTERNATE_TLS_PORT:
+				c->alt_tls_service.port = cfg_port(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS:
+				cfg_add_addr_access(line.val_tok_1, &c->tls_service);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_ADDRESS:
+				cfg_add_addr_bind(line.val_tok_1, &c->tls_service);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_PORT:
+				c->tls_service.port = cfg_port(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_NAME:
+				c->tls_name = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME:
-				c->network_interface_name = cfg_strdup_no_checks(&line);
+				cfg_obsolete(&line, "see Aerospike configuration documentation");
 				break;
 			case CASE_NETWORK_SERVICE_REUSE_ADDRESS:
-				c->socket_reuse_addr = cfg_bool_no_value_is_true(&line);
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -2376,10 +2401,10 @@ as_config_init(const char *config_file)
 			case CASE_NETWORK_HEARTBEAT_MODE:
 				switch(cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_MODE_OPTS, NUM_NETWORK_HEARTBEAT_MODE_OPTS)) {
 				case CASE_NETWORK_HEARTBEAT_MODE_MULTICAST:
-					c->hb_config.hb_mode = AS_HB_MODE_MCAST;
+					c->hb_config.mode = AS_HB_MODE_MULTICAST;
 					break;
 				case CASE_NETWORK_HEARTBEAT_MODE_MESH:
-					c->hb_config.hb_mode = AS_HB_MODE_MESH;
+					c->hb_config.mode = AS_HB_MODE_MESH;
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -2388,51 +2413,57 @@ as_config_init(const char *config_file)
 				}
 				break;
 			case CASE_NETWORK_HEARTBEAT_ADDRESS:
-				cfg_strcpy(&line, c->hb_config.hb_listen_addr_s, sizeof(c->hb_config.hb_listen_addr_s));
+				cfg_add_addr_bind(line.val_tok_1, &g_hb_serv_spec);
+				break;
+		    case CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP:
+				add_addr(line.val_tok_1, &g_hb_multicast_groups);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PORT:
-				c->hb_config.hb_listen_port = cfg_port(&line);
+				g_hb_serv_spec.port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT:
 				cfg_add_mesh_seed_addr_port(cfg_strdup_no_checks(&line), cfg_port_val2(&line));
 				break;
 			case CASE_NETWORK_HEARTBEAT_INTERVAL:
-				c->hb_config.hb_tx_interval = cfg_u32(&line, AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX);
+				c->hb_config.tx_interval = cfg_u32(&line, AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX);
 				break;
 			case CASE_NETWORK_HEARTBEAT_TIMEOUT:
-				c->hb_config.hb_max_intervals_missed = cfg_u32_no_checks(&line);
+				c->hb_config.max_intervals_missed = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR:
-				c->hb_config.hb_fabric_grace_factor = cfg_int_no_checks(&line);
+				c->hb_config.fabric_grace_factor = cfg_int_no_checks(&line);
 		 		break;
-			case CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS:
-				cfg_strcpy(&line, c->hb_config.hb_bind_interface_addr_s, sizeof(c->hb_config.hb_bind_interface_addr_s));
-				break;
-			case CASE_NETWORK_HEARTBEAT_MCAST_TTL:
-				c->hb_config.hb_mcast_ttl = cfg_u8_no_checks(&line);
-				break;
 			case CASE_NETWORK_HEARTBEAT_MTU:
 				c->hb_config.override_mtu = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NETWORK_HEARTBEAT_MCAST_TTL:
+				cfg_renamed_name_tok(&line, "multicast-ttl");
+				// No break.
+			case CASE_NETWORK_HEARTBEAT_MULTICAST_TTL:
+				c->hb_config.multicast_ttl = cfg_u8_no_checks(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PROTOCOL:
 				switch(cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_PROTOCOL_OPTS, NUM_NETWORK_HEARTBEAT_PROTOCOL_OPTS)) {
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_RESET:
-					c->hb_config.hb_protocol = AS_HB_PROTOCOL_RESET;
+					c->hb_config.protocol = AS_HB_PROTOCOL_RESET;
 					break;
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V1:
-					c->hb_config.hb_protocol = AS_HB_PROTOCOL_V1;
+					c->hb_config.protocol = AS_HB_PROTOCOL_V1;
 					break;
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V2:
-					c->hb_config.hb_protocol = AS_HB_PROTOCOL_V2;
+					c->hb_config.protocol = AS_HB_PROTOCOL_V2;
 					break;
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V3:
-					c->hb_config.hb_protocol = AS_HB_PROTOCOL_V3;
+					c->hb_config.protocol = AS_HB_PROTOCOL_V3;
 					break;
 				case CASE_NOT_FOUND:
 				default:
 					cfg_unknown_val_tok_1(&line);
 					break;
 				}
+				break;
+			case CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS:
+				cfg_obsolete(&line, "see Aerospike configuration documentation");
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -2450,10 +2481,10 @@ as_config_init(const char *config_file)
 		case NETWORK_FABRIC:
 			switch(cfg_find_tok(line.name_tok, NETWORK_FABRIC_OPTS, NUM_NETWORK_FABRIC_OPTS)) {
 			case CASE_NETWORK_FABRIC_ADDRESS:
-				cfg_future_name_tok(&line); // TODO - deprecate?
+				cfg_add_addr_bind(line.val_tok_1, &c->fabric);
 				break;
 			case CASE_NETWORK_FABRIC_PORT:
-				c->fabric_port = cfg_port(&line);
+				c->fabric.port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_ENABLED:
 				c->fabric_keepalive_enabled = cfg_bool(&line);
@@ -2486,10 +2517,10 @@ as_config_init(const char *config_file)
 		case NETWORK_INFO:
 			switch(cfg_find_tok(line.name_tok, NETWORK_INFO_OPTS, NUM_NETWORK_INFO_OPTS)) {
 			case CASE_NETWORK_INFO_ADDRESS:
-				cfg_future_name_tok(&line); // TODO - deprecate?
+				cfg_add_addr_bind(line.val_tok_1, &c->info);
 				break;
 			case CASE_NETWORK_INFO_PORT:
-				c->info_port = cfg_port(&line);
+				c->info.port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_INFO_ENABLE_FASTPATH:
 				cfg_deprecated_name_tok(&line);
@@ -3260,7 +3291,7 @@ as_config_init(const char *config_file)
 //
 
 void
-as_config_post_process(as_config *c, const char *config_file)
+as_config_post_process(as_config* c, const char* config_file)
 {
 	//--------------------------------------------
 	// Re-read the configuration file and print it to the logs, line by line.
@@ -3314,11 +3345,10 @@ as_config_post_process(as_config *c, const char *config_file)
 	// Setup performance metrics histograms.
 	cfg_create_all_histograms();
 
-	// Since cfg_use_hardware_values() has side effects, we MUST call it, and
-	// THEN if we are doing the new topology, set the new type of Self Node
-	// value.
-	c->self_node = (cf_node) 0;
-	cfg_use_hardware_values(c);
+	if (cf_node_id_get(c->fabric.port, c->node_id_interface, &c->self_node) < 0) {
+		cf_crash_nostack(AS_CFG, "could not get node id");
+	}
+
 	// Cache the HW value - which will be overridden if cache-aware is on.
 	c->hw_self_node = c->self_node;
 
@@ -3358,54 +3388,194 @@ as_config_post_process(as_config *c, const char *config_file)
 
 	cf_info(AS_CFG, "Node id %"PRIx64, c->self_node);
 
-	// Handle specific service address (as opposed to 'any') if configured.
-	if (g_config.socket.addr != IPV4_ANY_ADDR) {
-		if (g_config.external_address) {
-			if (strcmp(g_config.external_address, g_config.socket.addr) != 0) {
-				cf_crash_nostack(AS_CFG, "external address '%s' does not match service address '%s'",
-						g_config.external_address, g_config.socket.addr);
-			}
+	// Initialize access addresses.
+
+	cfg_serv_spec_to_access(&g_config.service, &g_access.service.addrs);
+	cfg_serv_spec_to_access(&g_config.alt_service, &g_access.alt_service.addrs);
+	cfg_serv_spec_to_access(&g_config.tls_service, &g_access.tls_service.addrs);
+	cfg_serv_spec_to_access(&g_config.alt_tls_service, &g_access.alt_tls_service.addrs);
+
+	// By default, if we bind, then use the bind addresses also as access addresses.
+
+	if (g_access.service.addrs.n_addrs == 0 && g_config.service.bind.n_addrs != 0) {
+		default_access(&g_config.service, &g_access.service.addrs);
+	}
+
+	if (g_access.alt_service.addrs.n_addrs == 0 && g_config.alt_service.bind.n_addrs != 0) {
+		default_access(&g_config.alt_service, &g_access.alt_service.addrs);
+	}
+
+	if (g_access.tls_service.addrs.n_addrs == 0 && g_config.tls_service.bind.n_addrs != 0) {
+		default_access(&g_config.tls_service, &g_access.tls_service.addrs);
+	}
+
+	if (g_access.alt_tls_service.addrs.n_addrs == 0 && g_config.alt_tls_service.bind.n_addrs != 0) {
+		default_access(&g_config.alt_tls_service, &g_access.alt_tls_service.addrs);
+	}
+
+	// Initialize ports.
+
+	g_access.service.port = g_config.service.port;
+	g_access.alt_service.port = g_config.alt_service.port;
+	g_access.tls_service.port = g_config.tls_service.port;
+	g_access.alt_tls_service.port = g_config.alt_tls_service.port;
+
+	// By default, use regular port also as alternate.
+
+	if (g_access.alt_service.port == 0 &&
+			(g_config.alt_service.bind.n_addrs != 0 || g_access.alt_service.addrs.n_addrs != 0)) {
+		g_access.alt_service.port = g_access.service.port;
+	}
+
+	// By default, use regular TLS port also as alternate TLS.
+
+	if (g_access.alt_tls_service.port == 0 &&
+			(g_config.alt_tls_service.bind.n_addrs != 0 || g_access.alt_tls_service.addrs.n_addrs != 0)) {
+		g_access.alt_tls_service.port = g_access.tls_service.port;
+	}
+
+	// "any" service specification.
+
+	as_serv_spec any;
+	any.port = 0;
+	any.bind.n_addrs = 1;
+	any.bind.addrs[0] = "any";
+	any.access.n_addrs = 0;
+
+	// Client service bind addresses.
+
+	cf_serv_cfg_init(&g_service_bind);
+
+	if (g_config.service.bind.n_addrs == 0 && g_config.alt_service.bind.n_addrs == 0) {
+		any.port = g_access.service.port;
+		cfg_serv_spec_to_bind(&any, &g_service_bind, CF_SOCK_OWNER_SERVICE);
+	}
+	else {
+		cfg_serv_spec_to_bind(&g_config.service, &g_service_bind, CF_SOCK_OWNER_SERVICE);
+		cfg_serv_spec_to_bind(&g_config.alt_service, &g_service_bind, CF_SOCK_OWNER_SERVICE_ALTERNATE);
+	}
+
+	// Client TLS service bind addresses.
+
+	if (g_access.tls_service.port != 0) {
+		as_serv_spec tls_spec;
+		tls_spec.port = g_access.tls_service.port;
+		tls_spec.access.n_addrs = 0;
+
+		// By default, use client service bind addresses also for TLS.
+
+		if (g_config.tls_service.bind.n_addrs == 0) {
+			copy_addrs(&g_config.service.bind, &tls_spec.bind);
 		}
 		else {
-			// Set external address to avoid updating service list continuously.
-			g_config.external_address = g_config.socket.addr;
+			copy_addrs(&g_config.tls_service.bind, &tls_spec.bind);
 		}
 
-		// Set the localhost socket address only if the main service socket is
-		// not already (effectively) listening on that address.
-		if (g_config.socket.addr != IPV4_LOCALHOST_ADDR) {
-			g_config.localhost_socket.addr = (char*)IPV4_LOCALHOST_ADDR;
+		as_serv_spec alt_tls_spec;
+		alt_tls_spec.port = g_access.alt_tls_service.port;
+		alt_tls_spec.access.n_addrs = 0;
+
+		// By default, use alternate client service bind addresses also for alternate TLS.
+
+		if (g_config.alt_tls_service.bind.n_addrs == 0) {
+			copy_addrs(&g_config.alt_service.bind, &alt_tls_spec.bind);
+		}
+		else {
+			copy_addrs(&g_config.alt_tls_service.bind, &alt_tls_spec.bind);
+		}
+
+		if (tls_spec.bind.n_addrs == 0 && alt_tls_spec.bind.n_addrs == 0) {
+			any.port = g_access.tls_service.port;
+			cfg_serv_spec_to_bind(&any, &g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
+		}
+		else {
+			cfg_serv_spec_to_bind(&tls_spec, &g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
+			cfg_serv_spec_to_bind(&alt_tls_spec, &g_service_bind, CF_SOCK_OWNER_SERVICE_TLS_ALTERNATE);
 		}
 	}
 
-	if (g_config.external_address && ! g_config.is_external_address_virtual) {
-		// Check if external address matches any address in service list.
-		uint8_t buffer[1000];
-		cf_ip_addr *addrs;
-		int32_t n_addrs;
+	// By default, use regular access addresses also as alternate.
 
-		if (cf_inter_get_addr_ex(&addrs, &n_addrs, buffer, sizeof(buffer)) < 0) {
-			cf_crash_nostack(AS_CFG, "Error while getting interface addresses");
-		}
-
-		cf_dyn_buf_define(services);
-		build_service_list(addrs, n_addrs, &services);
-
-		char *string = cf_dyn_buf_strdup(&services);
-
-		if (string == NULL || strstr(string, g_config.external_address) == NULL) {
-			cf_crash_nostack(AS_CFG, "external address '%s' does not match service addresses '%s'",
-					g_config.external_address,
-					string != NULL ? string : "null");
-		}
-
-		cf_dyn_buf_free(&services);
-		cf_free(string);
+	if (g_access.alt_service.port != 0 && g_access.alt_service.addrs.n_addrs == 0) {
+		copy_addrs(&g_access.service.addrs, &g_access.alt_service.addrs);
 	}
 
-	// "null" is a special value representing an empty cluster-name.
-	if (strncmp(g_config.cluster_name, "null", AS_CLUSTER_NAME_SZ) == 0) {
-		cf_crash_nostack(AS_CFG, "Cluster name \"null\" is not allowed.");
+	// By default, use regular access addresses also for TLS.
+
+	if (g_access.tls_service.port != 0 && g_access.tls_service.addrs.n_addrs == 0) {
+		copy_addrs(&g_access.service.addrs, &g_access.tls_service.addrs);
+	}
+
+	if (g_access.alt_tls_service.port != 0) {
+		// By default, use alternate access addresses also for alternate TLS.
+
+		if (g_access.alt_tls_service.addrs.n_addrs == 0) {
+			copy_addrs(&g_access.alt_service.addrs, &g_access.alt_tls_service.addrs);
+		}
+
+		// If this failed, try regular TLS access addresses.
+
+		if (g_access.alt_tls_service.addrs.n_addrs == 0) {
+			copy_addrs(&g_access.tls_service.addrs, &g_access.alt_tls_service.addrs);
+		}
+	}
+
+	// Heartbeat service bind addresses.
+
+	cf_serv_cfg_init(&g_config.hb_config.bind_cfg);
+
+	if (g_hb_serv_spec.bind.n_addrs == 0) {
+		any.port = g_hb_serv_spec.port;
+		cfg_serv_spec_to_bind(&any, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
+	}
+	else {
+		cfg_serv_spec_to_bind(&g_hb_serv_spec, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
+	}
+
+	// Heartbeat multicast groups.
+
+	if (g_hb_multicast_groups.n_addrs > 0) {
+		cfg_mserv_config_from_addrs(&g_hb_multicast_groups,
+				g_hb_serv_spec.bind.n_addrs ? &g_hb_serv_spec.bind : &any.bind,
+				&g_config.hb_config.multicast_group_cfg, g_hb_serv_spec.port,
+				CF_SOCK_OWNER_HEARTBEAT, g_config.hb_config.multicast_ttl);
+	}
+
+	// Fabric service port.
+
+	g_fabric_port = g_config.fabric.port;
+
+	// Fabric service bind addresses.
+
+	cf_serv_cfg_init(&g_fabric_bind);
+
+	if (g_config.fabric.bind.n_addrs == 0) {
+		any.port = g_fabric_port;
+		cfg_serv_spec_to_bind(&any, &g_fabric_bind, CF_SOCK_OWNER_FABRIC);
+	}
+	else {
+		cfg_serv_spec_to_bind(&g_config.fabric, &g_fabric_bind, CF_SOCK_OWNER_FABRIC);
+	}
+
+	// Info service port.
+
+	g_info_port = g_config.info.port;
+
+	// Info service bind addresses.
+
+	cf_serv_cfg_init(&g_info_bind);
+
+	if (g_config.info.bind.n_addrs == 0) {
+		any.port = g_info_port;
+		cfg_serv_spec_to_bind(&any, &g_info_bind, CF_SOCK_OWNER_INFO);
+	}
+	else {
+		cfg_serv_spec_to_bind(&g_config.info, &g_info_bind, CF_SOCK_OWNER_INFO);
+	}
+
+	// 'null' is a special value representing an empty cluster-name.
+	if (strcmp(g_config.cluster_name, "null") == 0) {
+		cf_crash_nostack(AS_CFG, "cluster name 'null' is not allowed");
 	}
 
 	// Validate heartbeat configuration.
@@ -3416,7 +3586,7 @@ as_config_post_process(as_config *c, const char *config_file)
 	//
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
+		as_namespace* ns = g_config.namespaces[i];
 
 		client_replica_maps_create(ns);
 
@@ -3564,14 +3734,190 @@ as_config_cluster_name_set(const char* cluster_name)
 //
 
 void
-cfg_add_mesh_seed_addr_port(char* addr, int port)
+add_addr(const char* name, as_addr_list* addrs)
 {
-	int i;
+	uint32_t n = addrs->n_addrs;
+
+	if (n >= CF_SOCK_CFG_MAX) {
+		cf_crash_nostack(CF_SOCKET, "Too many addresses: %s", name);
+	}
+
+	addrs->addrs[n] = cf_strdup(name);
+
+	if (addrs->addrs[n] == NULL) {
+		cf_crash(CF_SOCKET, "Out of memory");
+	}
+
+	++addrs->n_addrs;
+}
+
+void
+copy_addrs(const as_addr_list* from, as_addr_list* to)
+{
+	for (uint32_t i = 0; i < from->n_addrs; ++i) {
+		to->addrs[i] = from->addrs[i];
+	}
+
+	to->n_addrs = from->n_addrs;
+}
+
+void
+default_access(const as_serv_spec* from, as_addr_list* to)
+{
+	as_serv_spec spec;
+	spec.port = from->port;
+	spec.bind.n_addrs = 0;
+	spec.access.n_addrs = 0;
+
+	for (uint32_t i = 0; i < from->bind.n_addrs; ++i) {
+		cf_ip_addr resol[CF_SOCK_CFG_MAX];
+		uint32_t n_resol = CF_SOCK_CFG_MAX;
+
+		if (cf_ip_addr_from_string_multi(from->bind.addrs[i], resol, &n_resol) < 0) {
+			cf_crash_nostack(AS_CFG, "Invalid default access address: %s", from->bind.addrs[i]);
+		}
+
+		bool valid = true;
+
+		for (uint32_t k = 0; k < n_resol; ++k) {
+			if (cf_ip_addr_is_any(&resol[k]) || cf_ip_addr_is_local(&resol[k])) {
+				cf_debug(AS_CFG, "Skipping invalid default access address: %s",
+						from->bind.addrs[i]);
+				valid = false;
+				break;
+			}
+		}
+
+		if (valid) {
+			uint32_t n = spec.access.n_addrs;
+			spec.access.addrs[n] = from->bind.addrs[i];
+			++spec.access.n_addrs;
+		}
+	}
+
+	cfg_serv_spec_to_access(&spec, to);
+}
+
+void
+cfg_add_addr_bind(const char* name, as_serv_spec* spec)
+{
+	add_addr(name, &spec->bind);
+}
+
+void
+cfg_add_addr_access(const char* name, as_serv_spec* spec)
+{
+	add_addr(name, &spec->access);
+}
+
+void
+cfg_mserv_config_from_addrs(as_addr_list* addrs, as_addr_list* bind_addrs,
+			    cf_mserv_cfg* serv_cfg, cf_ip_port port,
+			    cf_sock_owner owner, uint8_t ttl)
+{
+	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
+
+		cf_ip_addr resol[CF_SOCK_CFG_MAX];
+		uint32_t n_resol = CF_SOCK_CFG_MAX;
+
+		if (cf_ip_addr_from_string_multi(addrs->addrs[i], resol,
+						 &n_resol) < 0) {
+			cf_crash_nostack(AS_CFG, "Invalid multicast group: %s",
+					 addrs->addrs[i]);
+		}
+
+		for (uint32_t j = 0; j < bind_addrs->n_addrs; j++) {
+
+			cf_ip_addr bind_resol[CF_SOCK_CFG_MAX];
+			uint32_t n_bind_resol = CF_SOCK_CFG_MAX;
+
+			if (cf_ip_addr_from_string_multi(bind_addrs->addrs[j],
+							 bind_resol,
+							 &n_bind_resol) < 0) {
+				cf_crash_nostack(AS_CFG, "Invalid address: %s",
+						 bind_addrs->addrs[j]);
+			}
+
+			for (int32_t k = 0; k < n_resol; ++k) {
+				for (int32_t l = 0; l < n_bind_resol; ++l) {
+					if (cf_mserv_cfg_add_combo(serv_cfg, owner, port,
+							&resol[k], &bind_resol[l], ttl) < 0) {
+						cf_crash_nostack(AS_CFG, "Too many IP addresses");
+					}
+				}
+			}
+		}
+	}
+}
+
+void
+cfg_serv_spec_to_bind(const as_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner)
+{
+	cf_sock_cfg cfg;
+	cf_sock_cfg_init(&cfg, owner);
+	cfg.port = spec->port;
+
+	const as_addr_list* addrs = &spec->bind;
+
+	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
+		cf_ip_addr resol[CF_SOCK_CFG_MAX];
+		uint32_t n_resol = CF_SOCK_CFG_MAX;
+
+		if (cf_ip_addr_from_string_multi(addrs->addrs[i], resol, &n_resol) < 0) {
+			cf_crash_nostack(AS_CFG, "Invalid address: %s", addrs->addrs[i]);
+		}
+
+		for (uint32_t k = 0; k < n_resol; ++k) {
+			cf_ip_addr_copy(&resol[k], &cfg.addr);
+
+			if (cf_serv_cfg_add_sock_cfg(bind, &cfg) < 0) {
+				cf_crash_nostack(AS_CFG, "Too many IP addresses: %s", addrs->addrs[i]);
+			}
+		}
+	}
+}
+
+void
+cfg_serv_spec_to_access(const as_serv_spec* spec, as_addr_list* access)
+{
+	const as_addr_list* addrs = &spec->access;
+
+	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
+		cf_ip_addr resol[CF_SOCK_CFG_MAX];
+		uint32_t n_resol = CF_SOCK_CFG_MAX;
+
+		if (cf_ip_addr_from_string_multi(addrs->addrs[i], resol, &n_resol) < 0) {
+			cf_crash_nostack(AS_CFG, "Invalid access address: %s", addrs->addrs[i]);
+		}
+
+		for (uint32_t k = 0; k < n_resol; ++k) {
+			if (cf_ip_addr_is_any(&resol[k]) || cf_ip_addr_is_local(&resol[k])) {
+				cf_crash_nostack(AS_CFG, "Invalid access address: %s", addrs->addrs[i]);
+			}
+		}
+
+		if (cf_ip_addr_is_dns_name(addrs->addrs[i])) {
+			add_addr(addrs->addrs[i], access);
+		}
+		else {
+			for (uint32_t k = 0; k < n_resol; ++k) {
+				char tmp[250];
+				cf_ip_addr_to_string_safe(&resol[k], tmp, sizeof(tmp));
+				add_addr(tmp, access);
+			}
+		}
+	}
+}
+
+void
+cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port)
+{
+	int32_t i;
 
 	for (i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (g_config.hb_config.hb_mesh_seed_addrs[i] == NULL) {
-			g_config.hb_config.hb_mesh_seed_addrs[i] = addr;
-			g_config.hb_config.hb_mesh_seed_ports[i] = port;
+		if (g_config.hb_config.mesh_seed_addrs[i] == NULL) {
+			g_config.hb_config.mesh_seed_addrs[i] = addr;
+			g_config.hb_config.mesh_seed_ports[i] = port;
 			break;
 		}
 	}
@@ -3708,6 +4054,12 @@ cfg_create_all_histograms()
 	create_and_check_hist(&g_stats.ldt_hist, "ldt", HIST_MILLISECONDS);
 }
 
+// TODO - shouldn't be needed much longer:
+typedef struct as_default_addrs_s {
+	uint32_t n_addrs;
+	cf_ip_addr addrs[CF_SOCK_CFG_MAX];
+} as_default_addrs;
+
 /**
  * cfg_reset_self_node:
  * If we're in "Topology Mode", then we repurpose the self-node value from
@@ -3719,7 +4071,8 @@ cfg_create_all_histograms()
  * Bottom 32 bits: Node ID
  */
 int
-cfg_reset_self_node(as_config * config_p) {
+cfg_reset_self_node(as_config* config_p)
+{
 	cf_node self_node = config_p->self_node;
 
 	// Take the existing Self Node, pull out the Port Number, then rebuild as
@@ -3735,18 +4088,23 @@ cfg_reset_self_node(as_config * config_p) {
 	cc_group_t group_id = config_p->cluster.cl_self_group;
 	uint16_t port_num = cc_compute_port(self_node);
 
+	as_default_addrs default_addrs = { .n_addrs = CF_SOCK_CFG_MAX };
+
+	if (cf_inter_get_addr_all(default_addrs.addrs, &default_addrs.n_addrs) < 0) {
+		cf_crash_nostack(AS_CFG, "error while getting default interface addresses");
+	}
+
+	if (default_addrs.n_addrs == 0) {
+		cf_crash_nostack(AS_CFG, "no default interface addresses");
+	}
+
 	// If cluster mode is DYNAMIC, then construct self-node-id from the
 	// service IP address.
 	if (config_p->cluster_mode == CL_MODE_DYNAMIC) {
 		cf_info(AS_CFG, "Cluster Mode Dynamic: Config IP address for Self Node");
-		int a, b, c, d;
-		if (4 != sscanf(config_p->node_ip, "%d.%d.%d.%d", &a, &b, &c, &d)) {
-			cf_crash_nostack(AS_CFG, "could not extract 4 octets from node IP address \"%s\" for node ID", config_p->node_ip);
-		}
-		else {
-			node_id = ((((((a << 8) | b) << 8) | c) << 8) | d);
-			cf_info(AS_CFG, "Setting node ID to %u (0x%08X) from IP address \"%s\"", node_id, node_id, config_p->node_ip);
-		}
+		cf_ip_addr_to_rack_aware_id(&default_addrs.addrs[0], &node_id);
+		cf_info(AS_CFG, "Setting node ID to %u (0x%08X) from IP address \"%s\"", node_id, node_id,
+				cf_ip_addr_print(&default_addrs.addrs[0]));
 	}
 	else if (config_p->cluster_mode == CL_MODE_STATIC) {
 		cf_info(AS_CFG, "Cluster Mode Static: Config self-node-id (%u) for Self Node", node_id);
@@ -3758,44 +4116,3 @@ cfg_reset_self_node(as_config * config_p) {
 
 	return 0;
 } // end cfg_reset_self_node()
-
-/**
- * cfg_set_addr
- * Normalize a name for an IP address into a specific IP address string.
- * Returns a constant string pointer for certain well-known addresses.
- */
-char*
-cfg_set_addr(const char* name)
-{
-	char* retval = NULL;
-
-	if (strcmp(name, "any") == 0 || strcmp(name, IPV4_ANY_ADDR) == 0) {
-		return (char*)IPV4_ANY_ADDR;
-	}
-	else if (strcmp(name, IPV4_LOCALHOST_ADDR) == 0) {
-		return (char*)IPV4_LOCALHOST_ADDR;
-	}
-	else {
-		if (NULL == (retval = cf_strdup(name))) {
-			cf_crash_nostack(AS_CFG, "failed alloc for %s", name);
-		}
-	}
-
-	return retval;
-}
-
-/**
- * cfg_use_hardware_values
- * Some configuration information -- such as the number of processors, amount of
- * memory, hardware addresses, etc. -- should be read from hardware sources
- * rather than specified via configuration parameters
- */
-void
-cfg_use_hardware_values(as_config* c)
-{
-	if (c->self_node == 0) {
-		if (cf_node_id_get(c->fabric_port, c->network_interface_name, &c->self_node, &c->node_ip) < 0) {
-			cf_crash_nostack(AS_CFG, "Could not get node ID and/or IP address");
-		}
-	}
-}

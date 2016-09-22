@@ -82,9 +82,9 @@ void as_xdr_info_init(void)
 {
 }
 
-int32_t as_xdr_info_port(void)
+void as_xdr_info_port(cf_serv_cfg *serv_cfg)
 {
-	return 0;
+	(void)serv_cfg;
 }
 
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db)

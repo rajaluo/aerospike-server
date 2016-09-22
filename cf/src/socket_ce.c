@@ -52,26 +52,109 @@ safe_strndup(const char *string, size_t length)
 }
 
 int32_t
-cf_ip_addr_from_string(const char *string, cf_ip_addr *addr)
+cf_ip_addr_from_string_multi(const char *string, cf_ip_addr *addrs, uint32_t *n_addrs)
 {
-	struct addrinfo *info;
+	if (strcmp(string, "any") == 0) {
+		if (*n_addrs < 1) {
+			cf_warning(CF_SOCKET, "Too many IP addresses");
+			return -1;
+		}
+
+		cf_ip_addr_set_any(&addrs[0]);
+		*n_addrs = 1;
+		return 0;
+	}
+
+	if (strcmp(string, "local") == 0) {
+		if (*n_addrs < 1) {
+			cf_warning(CF_SOCKET, "Too many IP addresses");
+			return -1;
+		}
+
+		cf_ip_addr_set_local(&addrs[0]);
+		*n_addrs = 1;
+		return 0;
+	}
+
+	cf_ip_addr if_addrs[CF_SOCK_CFG_MAX];
+	uint32_t n_if_addrs = CF_SOCK_CFG_MAX;
+
+	if (cf_inter_get_addr_name(if_addrs, &n_if_addrs, string) < 0) {
+		cf_warning(CF_SOCKET, "Error while getting interface addresses for '%s'", string);
+		return -1;
+	}
+
+	if (n_if_addrs > 0) {
+		if (n_if_addrs > *n_addrs) {
+			cf_warning(CF_SOCKET, "Too many IP addresses");
+			return -1;
+		}
+
+		for (uint32_t i = 0; i < n_if_addrs; ++i) {
+			cf_ip_addr_copy(&if_addrs[i], &addrs[i]);
+		}
+
+		*n_addrs = n_if_addrs;
+		return 0;
+	}
+
+	int32_t res = -1;
+	struct addrinfo *info = NULL;
 	static struct addrinfo hints = {
 		.ai_flags = 0,
 		.ai_family = AF_INET
 	};
 
-	int32_t res = getaddrinfo(string, NULL, &hints, &info);
+	int32_t x = getaddrinfo(string, NULL, &hints, &info);
 
-	if (res != 0) {
-		cf_warning(CF_SOCKET, "Error while converting address '%s': %s", string, gai_strerror(res));
-		return -1;
+	if (x != 0) {
+		cf_warning(CF_SOCKET, "Error while converting address '%s': %s", string, gai_strerror(x));
+		goto cleanup0;
 	}
 
-	struct sockaddr_in *sai = (struct sockaddr_in *)info->ai_addr;
-	*addr = sai->sin_addr;
+	uint32_t i = 0;
 
+	for (struct addrinfo *walker = info; walker != NULL; walker = walker->ai_next) {
+		if (walker->ai_socktype == SOCK_STREAM) {
+			if (i >= *n_addrs) {
+				cf_warning(CF_SOCKET, "Too many IP addresses");
+				goto cleanup1;
+			}
+
+			struct sockaddr_in *sai = (struct sockaddr_in *)walker->ai_addr;
+			addrs[i] = sai->sin_addr;
+			++i;
+		}
+	}
+
+	cf_ip_addr_sort(addrs, i);
+	*n_addrs = i;
+	res = 0;
+
+cleanup1:
 	freeaddrinfo(info);
-	return 0;
+
+cleanup0:
+	return res;
+}
+
+bool
+cf_ip_addr_str_is_legacy(const char *string)
+{
+	(void)string;
+	return true;
+}
+
+bool
+cf_ip_addr_is_legacy(const cf_ip_addr* addr)
+{
+	(void)addr;
+	return true;
+}
+
+bool cf_ip_addr_legacy_only(void)
+{
+	return true;
 }
 
 int32_t
@@ -86,46 +169,33 @@ cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size)
 }
 
 int32_t
-cf_ip_addr_from_binary(const uint8_t *binary, size_t size, cf_ip_addr *addr)
+cf_ip_addr_from_binary(const uint8_t* binary, size_t size, cf_ip_addr* addr)
 {
-	if (size < 16) {
-		cf_warning(CF_SOCKET, "Input buffer underflow");
+	if (size != 4) {
+		cf_debug(CF_SOCKET, "Input buffer size incorrect.");
 		return -1;
 	}
 
-	for (int32_t i = 0; i < 10; ++i) {
-		if (binary[i] != 0) {
-			cf_warning(CF_SOCKET, "Invalid binary IPv4 address");
-			return -1;
-		}
-	}
-
-	if (binary[10] != 0xff || binary[11] != 0xff) {
-		cf_warning(CF_SOCKET, "Invalid binary IPv4 address");
-		return -1;
-	}
-
-	uint32_t s_addr = *(uint32_t*)(binary + 12);
-	memcpy(&addr->s_addr, &s_addr, 4);
-	return 16;
+	memcpy(&addr->s_addr, binary, 4);
+	return 4;
 }
 
 int32_t
-cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
+cf_ip_addr_to_binary(const cf_ip_addr* addr, uint8_t* binary, size_t size)
 {
-	if (size < 16) {
+	if (size < 4) {
 		cf_warning(CF_SOCKET, "Output buffer overflow");
 		return -1;
 	}
 
-	for (int32_t i = 0; i < 10; ++i) {
-		binary[i] = 0;
-	}
+	memcpy(binary, &addr->s_addr, 4);
+	return 4;
+}
 
-	binary[10] = binary[11] = 0xff;
-	uint32_t s_addr = *(uint32_t*)&addr->s_addr;
-	memcpy(binary + 12, &s_addr, 4);
-	return 16;
+void
+cf_ip_addr_to_rack_aware_id(const cf_ip_addr *addr, uint32_t *id)
+{
+	*id = ntohl(addr->s_addr);
 }
 
 int32_t
@@ -140,20 +210,26 @@ cf_ip_addr_copy(const cf_ip_addr *from, cf_ip_addr *to)
 	to->s_addr = from->s_addr;
 }
 
+void
+cf_ip_addr_set_local(cf_ip_addr *addr)
+{
+	addr->s_addr = htonl(0x7f000001);
+}
+
 bool
-cf_ip_addr_is_loopback(const cf_ip_addr *addr)
+cf_ip_addr_is_local(const cf_ip_addr *addr)
 {
 	return (ntohl(addr->s_addr) & 0xff000000) == 0x7f000000;
 }
 
 void
-cf_ip_addr_set_zero(cf_ip_addr *addr)
+cf_ip_addr_set_any(cf_ip_addr *addr)
 {
 	addr->s_addr = 0;
 }
 
 bool
-cf_ip_addr_is_zero(const cf_ip_addr *addr)
+cf_ip_addr_is_any(const cf_ip_addr *addr)
 {
 	return addr->s_addr == 0;
 }
@@ -221,7 +297,7 @@ cleanup0:
 }
 
 void
-cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr)
+cf_sock_addr_from_native(const struct sockaddr *native, cf_sock_addr *addr)
 {
 	if (native->sa_family != AF_INET) {
 		cf_crash(CF_SOCKET, "Invalid address family: %d", native->sa_family);
@@ -233,13 +309,27 @@ cf_sock_addr_from_native(struct sockaddr *native, cf_sock_addr *addr)
 }
 
 void
-cf_sock_addr_to_native(cf_sock_addr *addr, struct sockaddr *native)
+cf_sock_addr_to_native(const cf_sock_addr *addr, struct sockaddr *native)
 {
 	struct sockaddr_in *sai = (struct sockaddr_in *)native;
 	memset(sai, 0, sizeof(struct sockaddr_in));
 	sai->sin_family = AF_INET;
 	sai->sin_addr = addr->addr;
 	sai->sin_port = htons(addr->port);
+}
+
+int32_t
+cf_mserv_cfg_add_combo(cf_mserv_cfg *serv_cfg, cf_sock_owner owner, cf_ip_port port,
+		cf_ip_addr *addr, cf_ip_addr *if_addr, uint8_t ttl)
+{
+	cf_msock_cfg sock_cfg;
+	cf_msock_cfg_init(&sock_cfg, owner);
+	sock_cfg.port = port;
+	cf_ip_addr_copy(addr, &sock_cfg.addr);
+	cf_ip_addr_copy(if_addr, &sock_cfg.if_addr);
+	sock_cfg.ttl = ttl;
+
+	return cf_mserv_cfg_add_msock_cfg(serv_cfg, &sock_cfg);
 }
 
 int32_t
@@ -276,7 +366,7 @@ cf_socket_mcast_join_group(cf_socket *sock, const cf_ip_addr *iaddr, const cf_ip
 	struct ip_mreqn mr;
 	memset(&mr, 0, sizeof(mr));
 
-	if (iaddr != NULL) {
+	if (!cf_ip_addr_is_any(iaddr)) {
 		mr.imr_address = *iaddr;
 	}
 
@@ -319,7 +409,7 @@ cf_socket_addr_len(const struct sockaddr *sa)
 
 int32_t
 cf_socket_parse_netlink(bool allow_ipv6, uint32_t family, uint32_t flags,
-		void *data, size_t len, cf_ip_addr *addr)
+		const void *data, size_t len, cf_ip_addr *addr)
 {
 	(void)allow_ipv6;
 	(void)flags;
@@ -333,7 +423,19 @@ cf_socket_parse_netlink(bool allow_ipv6, uint32_t family, uint32_t flags,
 }
 
 void
-cf_socket_fix_client(cf_socket *sock)
+cf_socket_fix_client(const cf_socket *sock)
+{
+	(void)sock;
+}
+
+void
+cf_socket_fix_bind(cf_serv_cfg *serv_cfg)
+{
+	(void)serv_cfg;
+}
+
+void
+cf_socket_fix_server(const cf_socket *sock)
 {
 	(void)sock;
 }
