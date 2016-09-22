@@ -49,6 +49,7 @@
 #include "fault.h"
 
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_digest.h"
 
 static char *
 safe_strdup(const char *string)
@@ -2470,7 +2471,16 @@ cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id)
 success:
 	;
 	uint8_t *buff = (uint8_t *)id;
-	memcpy(buff, entry->mac_addr, 6);
+
+	if (entry->mac_addr_len == 6) {
+		memcpy(buff, entry->mac_addr, 6);
+	}
+	else {
+		cf_digest dig;
+		cf_digest_compute(entry->mac_addr, entry->mac_addr_len, &dig);
+		memcpy(buff, dig.digest, 6);
+	}
+
 	memcpy(buff + 6, &port, 2);
 
 	cf_info(CF_SOCKET, "Node port %d, node ID %" PRIx64, port, *id);
