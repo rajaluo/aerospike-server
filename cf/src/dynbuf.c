@@ -230,6 +230,15 @@ info_append_string(cf_dyn_buf *db, const char *name, const char *value)
 }
 
 void
+info_append_string_safe(cf_dyn_buf *db, const char *name, const char *value)
+{
+	cf_dyn_buf_append_string(db, name);
+	cf_dyn_buf_append_char(db, '=');
+	cf_dyn_buf_append_string(db, value ? value : "null");
+	cf_dyn_buf_append_char(db, ';');
+}
+
+void
 info_append_uint32(cf_dyn_buf *db, const char *name, uint32_t value)
 {
 	cf_dyn_buf_append_string(db, name);

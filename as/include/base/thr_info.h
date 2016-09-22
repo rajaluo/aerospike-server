@@ -27,7 +27,6 @@
 #include <stdint.h>
 
 #include "dynbuf.h"
-#include "socket.h"
 #include "util.h"
 
 #include "base/proto.h"
@@ -78,11 +77,6 @@ extern int as_info_buffer(uint8_t *req_buf, size_t req_buf_len, cf_dyn_buf *rsp)
 // cluster so it needs to register for different messages and create listener
 // threads, etc.
 extern int as_info_init();
-
-// The info port is used by more basic monitoring services.
-extern int as_info_port_start();
-
-extern void build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db);
 
 // Needed by ticker:
 

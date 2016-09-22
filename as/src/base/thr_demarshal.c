@@ -75,6 +75,16 @@ typedef struct {
 
 static demarshal_args *g_demarshal_args = 0;
 
+as_info_access g_access = {
+	.service = { .addrs = { .n_addrs = 0 }, .port = 0 },
+	.alt_service = { .addrs = { .n_addrs = 0 }, .port = 0 },
+	.tls_service = { .addrs = { .n_addrs = 0 }, .port = 0 },
+	.alt_tls_service = { .addrs = { .n_addrs = 0 }, .port = 0 }
+};
+
+cf_serv_cfg g_service_bind = { .n_cfgs = 0 };
+
+static cf_sockets g_sockets;
 
 //
 // File handle reaper.
@@ -377,9 +387,8 @@ log_as_proto_and_peeked_data(as_proto *proto, uint8_t *peekbuf, size_t peeked_da
 // is special - also does accept [listens for new connections]. It is the only
 // thread which does it.
 void *
-thr_demarshal(void *arg)
+thr_demarshal(void *unused)
 {
-	cf_socket_cfg *s, *ls, *xs;
 	cf_poll poll;
 	int nevents, i, n;
 	cf_clock last_fd_print = 0;
@@ -387,12 +396,6 @@ thr_demarshal(void *arg)
 #if defined(USE_SYSTEMTAP)
 	uint64_t nodeid = g_config.self_node;
 #endif
-
-	// Early stage aborts; these will cause faults in process scope.
-	cf_assert(arg, AS_DEMARSHAL, CF_CRITICAL, "invalid argument");
-	s = &g_config.socket;
-	ls = &g_config.localhost_socket;
-	xs = &g_config.xdr_socket;
 
 #ifdef USE_JEM
 	int orig_arena;
@@ -422,18 +425,8 @@ thr_demarshal(void *arg)
 	if (thr_id == 0) {
 		demarshal_file_handle_init();
 
-		cf_poll_add_socket(poll, &s->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &s->sock);
-		cf_info(AS_DEMARSHAL, "Service started: socket %s:%d", s->addr, s->port);
-
-		if (cf_socket_exists(&ls->sock)) {
-			cf_poll_add_socket(poll, &ls->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &ls->sock);
-			cf_info(AS_DEMARSHAL, "Service also listening on localhost socket %s:%d", ls->addr, ls->port);
-		}
-
-		if (cf_socket_exists(&xs->sock)) {
-			cf_poll_add_socket(poll, &xs->sock, EPOLLIN | EPOLLERR | EPOLLHUP, &xs->sock);
-			cf_info(AS_DEMARSHAL, "Service also listening on XDR info socket %s:%d", xs->addr, xs->port);
-		}
+		cf_poll_add_sockets(poll, &g_sockets, EPOLLIN | EPOLLERR | EPOLLHUP);
+		cf_socket_show_server(AS_DEMARSHAL, "client", &g_sockets);
 	}
 
 	g_demarshal_args->polls[thr_id] = poll;
@@ -448,11 +441,6 @@ thr_demarshal(void *arg)
 		cf_detail(AS_DEMARSHAL, "calling epoll");
 
 		nevents = cf_poll_wait(poll, events, POLL_SZ, -1);
-
-		if (0 > nevents) {
-			cf_debug(AS_DEMARSHAL, "epoll_wait() returned %d ; errno = %d (%s)", nevents, errno, cf_strerror(errno));
-		}
-
 		cf_detail(AS_DEMARSHAL, "epoll event received: nevents %d", nevents);
 
 		uint64_t now_ns = cf_getns();
@@ -462,7 +450,7 @@ thr_demarshal(void *arg)
 		for (i = 0; i < nevents; i++) {
 			cf_socket *ssock = events[i].data;
 
-			if (ssock == &s->sock || ssock == &ls->sock || ssock == &xs->sock) {
+			if (cf_sockets_has_socket(&g_sockets, ssock)) {
 				// Accept new connections on the service socket.
 				cf_socket csock;
 				cf_sock_addr sa;
@@ -488,7 +476,8 @@ thr_demarshal(void *arg)
 
 				// Validate the limit of protocol connections we allow.
 				uint32_t conns_open = g_stats.proto_connections_opened - g_stats.proto_connections_closed;
-				if (ssock != &xs->sock && conns_open > g_config.n_proto_fd_max) {
+				cf_sock_cfg *cfg = ssock->data;
+				if (cfg->owner != CF_SOCK_OWNER_XDR && conns_open > g_config.n_proto_fd_max) {
 					if ((last_fd_print + 5000L) < cf_getms()) { // no more than 5 secs
 						cf_warning(AS_DEMARSHAL, "dropping incoming client connection: hit limit %d connections", conns_open);
 						last_fd_print = cf_getms();
@@ -498,9 +487,6 @@ thr_demarshal(void *arg)
 					cf_socket_term(&csock);
 					continue;
 				}
-
-				// Set the socket to nonblocking.
-				cf_socket_disable_blocking(&csock);
 
 				// Create as_file_handle and queue it up in epoll_fd for further
 				// communication on one of the demarshal threads.
@@ -886,6 +872,33 @@ NextEvent:
 	return NULL;
 }
 
+static void
+add_local(cf_serv_cfg *serv_cfg, cf_sock_owner owner, cf_ip_port port)
+{
+	// Localhost will only be added to the addresses, if we're not yet listening
+	// on wildcard ("any") or localhost.
+
+	for (uint32_t i = 0; i < serv_cfg->n_cfgs; ++i) {
+		if (serv_cfg->cfgs[i].owner != owner) {
+			continue;
+		}
+
+		if (cf_ip_addr_is_any(&serv_cfg->cfgs[i].addr) ||
+				cf_ip_addr_is_local(&serv_cfg->cfgs[i].addr)) {
+			return;
+		}
+	}
+
+	cf_sock_cfg sock_cfg;
+	cf_sock_cfg_init(&sock_cfg, owner);
+	sock_cfg.port = port;
+	cf_ip_addr_set_local(&sock_cfg.addr);
+
+	if (cf_serv_cfg_add_sock_cfg(serv_cfg, &sock_cfg) < 0) {
+		cf_crash(AS_DEMARSHAL, "Couldn't add localhost listening address");
+	}
+}
+
 // Initialize the demarshal service, start demarshal threads.
 int
 as_demarshal_start()
@@ -897,67 +910,49 @@ as_demarshal_start()
 	dm->num_threads = g_config.n_service_threads;
 
 	g_freeslot = cf_queue_create(sizeof(int), true);
+
 	if (!g_freeslot) {
-		cf_crash(AS_DEMARSHAL, " Couldn't create reaper free list ");
+		cf_crash(AS_DEMARSHAL, "Couldn't create reaper free list");
 	}
 
-	// Start the listener socket: note that because this is done after privilege
-	// de-escalation, we can't use privileged ports.
-	g_config.socket.reuse_addr = g_config.socket_reuse_addr;
-	if (0 != cf_socket_init_server(&g_config.socket)) {
-		cf_crash(AS_DEMARSHAL, "couldn't initialize service socket");
-	}
-	cf_socket_disable_blocking(&g_config.socket.sock);
+	add_local(&g_service_bind, CF_SOCK_OWNER_SERVICE, g_access.service.port);
 
-	// Note:  The localhost socket address will only be set if the main service socket
-	//        is not already (effectively) listening on the localhost address.
-	if (g_config.localhost_socket.addr) {
-		cf_debug(AS_DEMARSHAL, "Opening a localhost service socket");
-		g_config.localhost_socket.reuse_addr = g_config.socket_reuse_addr;
-		if (0 != cf_socket_init_server(&g_config.localhost_socket)) {
-			cf_crash(AS_DEMARSHAL, "couldn't initialize localhost service socket");
-		}
-		cf_socket_disable_blocking(&g_config.localhost_socket.sock);
+	if (g_access.tls_service.port != 0) {
+		add_local(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS, g_access.tls_service.port);
 	}
 
-	g_config.xdr_socket.port = as_xdr_info_port();
+	as_xdr_info_port(&g_service_bind);
 
-	if (g_config.xdr_socket.port != 0) {
-		cf_debug(AS_DEMARSHAL, "Opening XDR service socket");
-		g_config.xdr_socket.reuse_addr = g_config.socket_reuse_addr;
-
-		if (0 != cf_socket_init_server(&g_config.xdr_socket)) {
-			cf_crash(AS_DEMARSHAL, "Couldn't initialize XDR service socket");
-		}
-
-		cf_socket_disable_blocking(&g_config.xdr_socket.sock);
+	if (cf_socket_init_server(&g_service_bind, &g_sockets) < 0) {
+		cf_crash(AS_DEMARSHAL, "Couldn't initialize service socket");
 	}
 
 	// Create all the epoll_fds and wait for all the threads to come up.
-	int i;
-	for (i = 1; i < dm->num_threads; i++) {
-		if (0 != pthread_create(&(dm->dm_th[i]), 0, thr_demarshal, &g_config.socket)) {
+
+	for (int32_t i = 1; i < dm->num_threads; ++i) {
+		if (pthread_create(&dm->dm_th[i], NULL, thr_demarshal, NULL) != 0) {
 			cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
 		}
 	}
 
-	for (i = 1; i < dm->num_threads; i++) {
+	for (int32_t i = 1; i < dm->num_threads; i++) {
 		while (CEFD(dm->polls[i]) == 0) {
 			sleep(1);
-			cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads ...");
+			cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads...");
 		}
 	}
 
 	// Create first thread which is the listener. We do this one last, as it
 	// requires the other threads' epoll instances.
-	if (0 != pthread_create(&(dm->dm_th[0]), 0, thr_demarshal, &g_config.socket)) {
+	if (pthread_create(&dm->dm_th[0], NULL, thr_demarshal, NULL) != 0) {
 		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
 	}
+
 	while (CEFD(dm->polls[0]) == 0) {
 		sleep(1);
+		cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads...");
 	}
 
 	cf_info(AS_DEMARSHAL, "Started %d Demarshal Threads", dm->num_threads);
-
 	return 0;
 }

@@ -190,3 +190,6 @@ as_fabric_get_node_list(as_node_list *nl)
 
 	return(nl->sz);
 }
+
+extern cf_serv_cfg g_fabric_bind;
+extern cf_ip_port g_fabric_port;

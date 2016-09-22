@@ -22,7 +22,10 @@
 
 #pragma once
 
+#include "fault.h"
+
 #include <pthread.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -34,6 +37,17 @@
 
 #define CF_MUST_CHECK __attribute__((warn_unused_result))
 #define CF_IGNORE_ERROR(x) ((void)((x) == 12345))
+#define CF_NEVER_FAILS(x) do { \
+	if ((x) < 0) { \
+		cf_crash(CF_MISC, "This cannot happen..."); \
+	} \
+} while (false);
+
+static inline const char *
+cf_safe_string(const char *string)
+{
+	return string == NULL ? "NULL" : string;
+}
 
 /* cf_hash_fnv
  * The 64-bit Fowler-Noll-Vo hash function (FNV-1a) */
@@ -136,7 +150,7 @@ cf_compare_byteptr(const void *pa, const size_t asz, const void *pb, const size_
     return(memcmp(pa, pb, asz));
 }
 
-extern cf_digest cf_digest_zero;
+extern const cf_digest cf_digest_zero;
 
 // This one compare is probably the hottest line in the system.
 // Thus, please benchmark with these different compare functions and
@@ -157,7 +171,7 @@ cf_digest_compare( cf_digest *d1, cf_digest *d2 )
 
 #if 1
 static inline int
-cf_digest_compare( cf_digest *d1, cf_digest *d2 )
+cf_digest_compare(const cf_digest *d1, const cf_digest *d2)
 {
     return( memcmp( d1->digest, d2->digest, CF_DIGEST_KEY_SZ) );
 }
@@ -168,12 +182,9 @@ cf_digest_compare( cf_digest *d1, cf_digest *d2 )
 typedef uint64_t cf_node;
 extern uint32_t cf_nodeid_shash_fn(void *value);
 extern uint32_t cf_nodeid_rchash_fn(void *value, uint32_t value_len);
-typedef enum hb_mode_enum { AS_HB_MODE_UNDEF, AS_HB_MODE_MCAST, AS_HB_MODE_MESH } hb_mode_enum;
-typedef enum hb_protocol_enum { AS_HB_PROTOCOL_UNDEF, AS_HB_PROTOCOL_NONE, AS_HB_PROTOCOL_V1, AS_HB_PROTOCOL_V2, AS_HB_PROTOCOL_V3, AS_HB_PROTOCOL_RESET } hb_protocol_enum;
+extern char *cf_node_name(void);
 typedef enum paxos_protocol_enum { AS_PAXOS_PROTOCOL_UNDEF, AS_PAXOS_PROTOCOL_NONE, AS_PAXOS_PROTOCOL_V1, AS_PAXOS_PROTOCOL_V2, AS_PAXOS_PROTOCOL_V3, AS_PAXOS_PROTOCOL_V4 } paxos_protocol_enum;
 typedef enum paxos_recovery_policy_enum { AS_PAXOS_RECOVERY_POLICY_UNDEF, AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER } paxos_recovery_policy_enum;
-extern int cf_nodeid_get( unsigned short port, cf_node *id, char **node_ipp, const char **interface_names);
-extern unsigned short cf_nodeid_get_port(cf_node id);
 
 extern int cf_sort_firstk(uint64_t *v, size_t sz, int k);
 

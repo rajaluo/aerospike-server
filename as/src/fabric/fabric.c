@@ -28,7 +28,6 @@
 #include "fabric/fabric.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -55,8 +54,8 @@
 
 #include "base/cfg.h"
 #include "base/stats.h"
+#include "fabric/endpoint.h"
 #include "fabric/hb.h"
-#include "fabric/paxos.h"
 
 
 // #define EXTRA_CHECKS 1
@@ -293,6 +292,16 @@ static void fabric_buffer_release(fabric_buffer *fb);
 // Ideally this would not be global, but there is in reality only one fabric,
 // and the alternative would be to pass this value around everywhere.
 static fabric_args *g_fabric_args = 0;
+
+cf_serv_cfg g_fabric_bind = { .n_cfgs = 0 };
+cf_ip_port g_fabric_port = 0;
+
+static cf_sockets g_sockets;
+static as_endpoint_list *g_published_endpoint_list;
+static bool g_published_endpoint_list_ipv4_only;
+
+// Block size for allocating fabric hb plugin data.
+#define HB_PLUGIN_DATA_BLOCK_SIZE 128
 
 // The start message is always sent by the connecting device to specify
 // what the remote endpoint's node ID is. We could pack other info
@@ -556,11 +565,92 @@ fabric_buffer_set_keepalive_options(fabric_buffer *fb)
 	}
 }
 
+// Get the endpoint list to connect to the remote node.
+// Returns 0 on success and -1 on error, where errno will be set to  ENOENT if
+// there is no endpoint list could be obtained for this node and ENOMEM if the
+// input endpoint_list_size is less than actual size. Var endpoint_list_size will be
+// updated with the required capacity.
+static int
+fabric_endpoint_list_legacy_get(cf_node nodeid, as_endpoint_list* endpoint_list,
+				size_t* endpoint_list_size)
+{
+	cf_sock_cfg cfg;
+	cf_sock_cfg_init(&cfg, CF_SOCK_OWNER_FABRIC);
+	if (as_hb_getaddr(nodeid, &cfg.addr)) {
+		errno = ENOENT;
+		return -1;
+	}
+	cf_ip_port_from_node_id(nodeid, &cfg.port);
+
+	if (*endpoint_list_size < 256) {
+		*endpoint_list_size = 256;
+		errno = ENOMEM;
+		return -1;
+	}
+
+	// Create endpoint list for a single node.
+	endpoint_list->n_endpoints = 1;
+	as_endpoint_from_sock_cfg_fill(&cfg, &endpoint_list->endpoints[0]);
+	return 0;
+}
+
+// Get the endpoint list to connect to the remote node.
+// Returns 0 on success and -1 on error, where errno will be set to  ENOENT if
+// there is no endpoint list could be obtained for this node and ENOMEM if the
+// input endpoint_list_size is less than actual size. Var endpoint_list_size will be
+// updated with the required capacity.
+static int
+fabric_endpoint_list_get(cf_node nodeid, as_endpoint_list* endpoint_list,
+			 size_t* endpoint_list_size)
+{
+	as_hb_plugin_node_data plugin_data;
+	// Initial data capacity.
+	plugin_data.data_capacity = *endpoint_list_size;
+	plugin_data.data = endpoint_list;
+	plugin_data.data_size = 0;
+
+	if (as_hb_plugin_data_get(nodeid, AS_HB_PLUGIN_FABRIC, &plugin_data,
+				  NULL, NULL) == 0) {
+		if (plugin_data.data_size) {
+			return 0;
+		}
+
+		return fabric_endpoint_list_legacy_get(nodeid, endpoint_list,
+						       endpoint_list_size);
+	}
+
+	if (errno == ENOENT) {
+		// Try the legacy mechanism.
+		return fabric_endpoint_list_legacy_get(nodeid, endpoint_list,
+						       endpoint_list_size);
+	}
+
+	// Not enough allocated memory.
+	*endpoint_list_size = plugin_data.data_size;
+	return -1;
+}
+
+/**
+ * Filter out endpoints not matching this node's capabilities.
+ */
+static bool
+fabric_connect_endpoint_filter(const as_endpoint* endpoint, void* udata)
+{
+	if (cf_ip_addr_legacy_only() &&
+	    endpoint->addr_type == AS_ENDPOINT_ADDR_TYPE_IPv6) {
+		return false;
+	}
+
+	// TODO: If fabric supports tls filter mismatching capabilities here.
+	return true;
+}
+
+
 // Create a connection to the remote node. This creates a non-blocking
 // connection and adds it to the worker queue only, when the socket becomes
 // writable, messages can start flowing.
-static fabric_buffer *
-fabric_connect(fabric_args *fa, fabric_node_element *fne)
+static fabric_buffer*
+fabric_connect(fabric_args* fa, fabric_node_element* fne)
 {
 	// Don't create too many conns because you'll just get small packets.
 	uint32_t fds = cf_atomic32_incr(&(fne->outbound_fd_counter));
@@ -569,22 +659,49 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 		return NULL;
 	}
 
-	// Get the ip address of the remote endpoint.
-	cf_sock_addr addr;
-	if (as_hb_getaddr(fne->node, &addr.addr) < 0) {
-		cf_debug(AS_FABRIC, "fabric_connect: unknown remote endpoint %"PRIx64, fne->node);
+	size_t endpoint_list_capacity = 1024;
+	as_endpoint_list* endpoint_list = NULL;
+	int tries_remaining = 3;
+	while (tries_remaining--) {
+		endpoint_list = alloca(endpoint_list_capacity);
+
+		if (fabric_endpoint_list_get(fne->node, endpoint_list,
+					     &endpoint_list_capacity) == 0) {
+			// Read success.
+			break;
+		}
+
+		if (errno == ENOENT) {
+			// No entry present for this node in heartbeat.
+			cf_debug(
+			  AS_FABRIC, "fabric_connect: unknown remote endpoint %" PRIx64, fne->node);
+			cf_atomic32_decr(&fne->outbound_fd_counter);
+			return NULL;
+		}
+
+		// The list capacity was not enough. Rerty with suggested list
+		// size.
+	}
+
+	if (tries_remaining < 0) {
+		// Should never happen in practice. We could not allocate space
+		// on the stack.
+		cf_debug(AS_FABRIC,"fabric_connect: List get error for remote endpoint %" PRIx64, fne->node);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
 
-	// Get fabric port of the remote endpoint.
-	cf_ip_port_from_node_id(fne->node, &addr.port);
-
 	// Initiate the connect to the remote endpoint
 	cf_socket sock;
 
-	if (cf_socket_init_client_nb(&addr, &sock) < 0) {
-		cf_debug(AS_FABRIC, "fabric connect could not create connect");
+	const as_endpoint* connected_endpoint = as_endpoint_connect_any(
+		endpoint_list, CF_SOCK_OWNER_FABRIC, fabric_connect_endpoint_filter,
+		NULL, 0, &sock);
+
+	if (!connected_endpoint) {
+		char endpoint_list_str[1024];
+		as_endpoint_list_to_string(endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
+		cf_debug(AS_FABRIC, "fabric connect failed for remote node %" PRIx64 " with endpoints [%s]", fne->node, endpoint_list_str);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
@@ -592,25 +709,24 @@ fabric_connect(fabric_args *fa, fabric_node_element *fne)
 	cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
 	// Create a fabric buffer to go along with the file descriptor
-	fabric_buffer *fb = fabric_buffer_create(&sock);
+	fabric_buffer* fb = fabric_buffer_create(&sock);
 
-	cf_socket_disable_nagle(&fb->sock);
 	fabric_buffer_set_keepalive_options(fb);
 	fb->is_outbound = true;
 	fabric_buffer_associate(fb, fne);
 
 	// Grab a start message, send it to the remote endpoint so it knows me.
-	msg *m = as_fabric_msg_get(M_TYPE_FABRIC);
-	if (! m) {
+	msg* m = as_fabric_msg_get(M_TYPE_FABRIC);
+	if (!m) {
 		fabric_buffer_release(fb);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
 
-	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node); // identifies self to remote
+	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node);
 
 	fb->w_msg_in_progress = m;
-	cf_rc_reserve(fb);	// for put into fne->outbound_fb_hash
+	cf_rc_reserve(fb); // for put into fne->outbound_fb_hash
 
 	uint8_t value = 0;
 	int rv = shash_put_unique(fne->outbound_fb_hash, &fb, &value);
@@ -1156,41 +1272,43 @@ run_fabric_accept(void *argv)
 {
 	fabric_args *fa = g_fabric_args;
 
-	// Create listener socket.
-	cf_socket_cfg sc;
-	sc.addr = "0.0.0.0";     // inaddr any!
-	sc.port = g_config.fabric_port;
-	sc.reuse_addr = (g_config.socket_reuse_addr) ? true : false;
-	sc.type = SOCK_STREAM;
-	if (0 != cf_socket_init_server(&sc)) {
+	cf_debug(AS_FABRIC, "fabric_accept: creating listener");
+
+	if (cf_socket_init_server(&g_fabric_bind, &g_sockets) < 0) {
 		cf_crash(AS_FABRIC, "Could not create fabric listener socket - check configuration");
 	}
 
-	cf_debug(AS_FABRIC, "fabric_accept: creating listener");
+	cf_poll poll;
+	cf_poll_create(&poll);
+	cf_poll_add_sockets(poll, &g_sockets, EPOLLIN | EPOLLERR | EPOLLHUP);
+	cf_socket_show_server(AS_FABRIC, "fabric", &g_sockets);
 
 	while (true) {
 		// Accept new connections on the service socket.
-		cf_socket csock;
-		cf_sock_addr sa;
+		cf_poll_event events[64];
+		int32_t n_ev = cf_poll_wait(poll, events, 64, -1);
 
-		if (cf_socket_accept(&sc.sock, &csock, &sa) < 0) {
-			if (errno == EMFILE) {
-				cf_info(AS_FABRIC, "warning: low on file descriptors");
-				continue;
+		for (int32_t i = 0; i < n_ev; ++i) {
+			cf_socket *ssock = events[i].data;
+			cf_socket csock;
+			cf_sock_addr sa;
+
+			if (cf_socket_accept(ssock, &csock, &sa) < 0) {
+				if (errno == EMFILE) {
+					cf_info(AS_FABRIC, "warning: low on file descriptors");
+					continue;
+				}
+				else {
+					cf_crash(AS_FABRIC, "cf_socket_accept: %d %s", errno, cf_strerror(errno));
+				}
 			}
-			else {
-				cf_crash(AS_FABRIC, "cf_socket_accept: %d %s", errno, cf_strerror(errno));
-			}
+
+			cf_debug(AS_FABRIC, "fabric_accept: accepting new sock %d", CSFD(&csock));
+			cf_atomic64_incr(&g_stats.fabric_connections_opened);
+
+			fabric_buffer *fb = fabric_buffer_create(&csock);
+			fabric_worker_add(fa, fb);
 		}
-
-		cf_debug(AS_FABRIC, "fabric_accept: accepting new sock %d", CSFD(&csock));
-
-		// Set the socket to nonblocking.
-		cf_socket_disable_blocking(&csock);
-		cf_atomic64_incr(&g_stats.fabric_connections_opened);
-
-		fabric_buffer *fb = fabric_buffer_create(&csock);
-		fabric_worker_add(fa, fb);
 	}
 
 	return 0;
@@ -1220,8 +1338,8 @@ run_fabric_note_server(void *argv)
 			continue;
 		}
 
-		cf_disable_blocking(fd);
-		
+		cf_fd_disable_blocking(fd);
+
 		cf_atomic64_incr(&g_stats.fabric_connections_opened);
 		cf_debug(AS_FABRIC, "Notification server: received connect from index %d", fd_idx);
 
@@ -1336,6 +1454,188 @@ fabric_node_disconnect(cf_node node)
 	fne_release(fne);
 }
 
+
+// Plugin function that parses succession list out of a heartbeat pulse message.
+static void
+fabric_hb_plugin_parse_data_fn(msg* msg, cf_node source,
+				  as_hb_plugin_node_data* plugin_data)
+{
+	if (msg->type == M_TYPE_HEARTBEAT_V2) {
+		plugin_data->data_size = 0;
+		return;
+	}
+
+	uint8_t* payload = NULL;
+	size_t payload_size = 0;
+	if (msg_get_buf(msg, AS_HB_MSG_FABRIC_DATA, &payload, &payload_size,
+			MSG_GET_DIRECT) != 0) {
+		cf_warning(AS_FABRIC,
+			   "Unable to read fabric published endpoint list from "
+			   "heartbeat from node %" PRIx64,
+			   source);
+		return;
+	}
+
+	if (payload_size > plugin_data->data_capacity) {
+
+		// Round up to nearest multiple of block size to prevent very
+		// frequent reallocation.
+		size_t data_capacity =
+		  ((payload_size + HB_PLUGIN_DATA_BLOCK_SIZE - 1) /
+		   HB_PLUGIN_DATA_BLOCK_SIZE) *
+		  HB_PLUGIN_DATA_BLOCK_SIZE;
+
+		// Reallocate since we have outgrown existing capacity.
+		plugin_data->data =
+		  cf_realloc(plugin_data->data, data_capacity);
+
+		if (plugin_data->data == NULL) {
+			cf_crash(AS_FABRIC, "Error allocating space for "
+					    "storing fabric published "
+					    "endpoints for node %" PRIx64,
+				 source);
+		}
+		plugin_data->data_capacity = data_capacity;
+	}
+
+	plugin_data->data_size = payload_size;
+
+	memcpy(plugin_data->data, payload, payload_size);
+}
+
+// Get addresses to publish as serv config. Expand "any" addresses.
+static void
+fabric_published_serv_cfg_fill(const cf_serv_cfg* bind_cfg,
+				  cf_serv_cfg* published_cfg, bool ipv4_only)
+{
+	cf_serv_cfg_init(published_cfg);
+	cf_sock_cfg sock_cfg;
+	cf_sock_cfg_init(&sock_cfg, CF_SOCK_OWNER_HEARTBEAT);
+
+	for (int i = 0; i < bind_cfg->n_cfgs; i++) {
+
+		sock_cfg.port = bind_cfg->cfgs[i].port;
+
+		// Expand "any" address to all interfaces.
+		if (cf_ip_addr_is_any(&bind_cfg->cfgs[0].addr)) {
+			cf_ip_addr all_addrs[CF_SOCK_CFG_MAX];
+			uint32_t n_all_addrs = CF_SOCK_CFG_MAX;
+			if (cf_inter_get_addr_all(all_addrs, &n_all_addrs) !=
+			    0) {
+				cf_warning(
+				  AS_FABRIC,
+				  "Error getting all interface addresses.");
+				n_all_addrs = 0;
+			}
+
+			for (int j = 0; j < n_all_addrs; j++) {
+				// Skip local address if any is specified.
+				if (cf_ip_addr_is_local(&all_addrs[j]) ||
+				    (ipv4_only &&
+				     !cf_ip_addr_is_legacy(&all_addrs[j]))) {
+					continue;
+				}
+
+				cf_ip_addr_copy(&all_addrs[j], &sock_cfg.addr);
+				if (cf_serv_cfg_add_sock_cfg(
+				      published_cfg, &sock_cfg)) {
+					cf_crash(AS_FABRIC,
+						 "Error initializing published address list.");
+				}
+			}
+		} else {
+			if (ipv4_only &&
+			    !cf_ip_addr_is_legacy(&bind_cfg->cfgs[i].addr)) {
+				continue;
+			}
+
+			cf_ip_addr_copy(&bind_cfg->cfgs[i].addr,
+					&sock_cfg.addr);
+			if (cf_serv_cfg_add_sock_cfg(published_cfg,
+							    &sock_cfg)) {
+				cf_crash(AS_FABRIC,
+					 "Error initializing published address list.");
+			}
+		}
+	}
+}
+
+
+// Refresh  the fabric published endpoint list.
+// Returns 0 on successful list creation, -1 otherwise.
+static int
+fabric_published_endpoints_refresh()
+{
+	if (g_published_endpoint_list != NULL &&
+	    g_published_endpoint_list_ipv4_only == cf_ip_addr_legacy_only()) {
+		return 0;
+	}
+
+	// The global flag has changed, refresh the published
+	// address list.
+	if (g_published_endpoint_list) {
+		// Free the obsolete list.
+		cf_free(g_published_endpoint_list);
+	}
+
+	cf_serv_cfg published_cfg;
+
+    fabric_published_serv_cfg_fill(&g_fabric_bind, &published_cfg,
+					  g_published_endpoint_list_ipv4_only);
+
+	g_published_endpoint_list =
+	  as_endpoint_list_from_serv_cfg(&published_cfg);
+
+	if (!g_published_endpoint_list) {
+		cf_crash(AS_FABRIC,
+			 "Error initializing mesh published address list.");
+	}
+
+	g_published_endpoint_list_ipv4_only = cf_ip_addr_legacy_only();
+
+	if (!g_published_endpoint_list->n_endpoints) {
+		if (g_published_endpoint_list_ipv4_only) {
+			cf_warning(AS_FABRIC,
+				   "No IPv4 addresses configured for fabric.");
+		} else {
+			cf_warning(AS_FABRIC,
+				   "No addresses configured for fabric.");
+		}
+		return -1;
+	}
+	return 0;
+}
+
+
+// Set the fabric advertised endpoints.
+static void
+fabric_hb_plugin_set_fn(msg* msg)
+{
+	if (msg->type == M_TYPE_HEARTBEAT_V2) {
+		// In v1 and v2 fabric does not advertise its endpoints and they
+		// do not support plugged in data.
+		return;
+	}
+
+	if (fabric_published_endpoints_refresh()) {
+		cf_warning(AS_FABRIC, "No publish addresses found for fabric.");
+		return;
+	}
+
+	size_t payload_size = 0;
+	if (as_endpoint_list_sizeof(g_published_endpoint_list, &payload_size)) {
+		cf_crash(
+		  AS_FABRIC,
+		  "Error getting endpoint list size for published addresses.");
+	}
+
+	if (msg_set_buf(msg, AS_HB_MSG_FABRIC_DATA,
+			(uint8_t*)g_published_endpoint_list, payload_size,
+			MSG_SET_COPY) != 0) {
+		cf_crash(AS_FABRIC, "Error setting succession list on msg.");
+	}
+}
+
 // Function is called when a new node created or destroyed on the heartbeat system.
 // This will insert a new element in the hashtable that keeps track of all TCP connections
 static void
@@ -1423,7 +1723,7 @@ static int as_fabric_transact_init(void);
 int
 as_fabric_init()
 {
-	fabric_args *fa = cf_malloc(sizeof(fabric_args));
+	fabric_args* fa = cf_malloc(sizeof(fabric_args));
 	memset(fa, 0, sizeof(fabric_args));
 	g_fabric_args = fa;
 
@@ -1431,23 +1731,53 @@ as_fabric_init()
 
 	// Register my little fabric message type, so I can create 'em.
 	as_fabric_register_msg_fn(M_TYPE_FABRIC, fabric_mt, sizeof(fabric_mt),
-			FS_MSG_SCRATCH_SIZE, 0 /* arrival function!*/, 0);
+				  FS_MSG_SCRATCH_SIZE, 0 /* arrival function!*/,
+				  0);
 
 	// Create the cf_node hash table.
-	rchash_create(&g_fabric_node_element_hash, cf_nodeid_rchash_fn, fne_destructor,
-			sizeof(cf_node), 64, RCHASH_CR_MT_MANYLOCK);
+	rchash_create(&g_fabric_node_element_hash, cf_nodeid_rchash_fn,
+		      fne_destructor, sizeof(cf_node), 64,
+		      RCHASH_CR_MT_MANYLOCK);
 
 	// Create a global queue for the stashing of wayward messages for reuse.
 	for (int i = 0; i < M_TYPE_MAX; i++) {
-		fa->msg_pool_queue[i] = cf_queue_create(sizeof(msg *), true);
+		fa->msg_pool_queue[i] = cf_queue_create(sizeof(msg*), true);
 	}
+
+	// Create the published endpoint list.
+	g_published_endpoint_list = NULL;
+	g_published_endpoint_list_ipv4_only = cf_ip_addr_legacy_only();
+
+	if(fabric_published_endpoints_refresh()) {
+		cf_crash(AS_FABRIC,
+			 "Error creating fabric published endpoint list.");
+	}
+
+	// Register the fabric plugin for heartbeat subsystem.
+	as_hb_plugin fabric_plugin;
+	memset(&fabric_plugin, 0, sizeof(fabric_plugin));
+	fabric_plugin.id = AS_HB_PLUGIN_FABRIC;
+	// Includes the size for the protocol version.
+	fabric_plugin.wire_size_fixed = 0;
+	as_endpoint_list_sizeof(g_published_endpoint_list,
+				&fabric_plugin.wire_size_fixed);
+	// Size per node node in succession list.
+	fabric_plugin.wire_size_per_node = 0;
+	fabric_plugin.set_fn = fabric_hb_plugin_set_fn;
+	fabric_plugin.parse_fn = fabric_hb_plugin_parse_data_fn;
+	fabric_plugin.change_listener = NULL;
+	as_hb_plugin_register(&fabric_plugin);
+
+	// Register a callback with the heartbeat mechanism.
+	as_hb_register_listener(fabric_heartbeat_event, fa);
 
 	pthread_attr_t thr_attr;
 	pthread_attr_init(&thr_attr);
 	pthread_attr_setdetachstate(&thr_attr, PTHREAD_CREATE_DETACHED);
 
 	// Create a thread for monitoring the health of nodes.
-	pthread_create(&fa->node_health_th, &thr_attr, run_fabric_node_health, NULL);
+	pthread_create(&fa->node_health_th, &thr_attr, run_fabric_node_health,
+		       NULL);
 
 	as_fabric_transact_init();
 
@@ -1514,9 +1844,6 @@ as_fabric_start()
 	if (pthread_create(&fa->accept_th, &thr_attr, run_fabric_accept, NULL) != 0) {
 		cf_crash(AS_FABRIC, "Could not create thread to receive heartbeat");
 	}
-
-	// Register a callback with the heartbeat mechanism.
-	as_hb_register_listener(fabric_heartbeat_event, fa);
 
 	return 0;
 }

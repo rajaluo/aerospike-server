@@ -60,6 +60,7 @@ extern void cf_dyn_buf_free(cf_dyn_buf *db);
 void info_append_bool(cf_dyn_buf *db, const char *name, bool value);
 void info_append_int(cf_dyn_buf *db, const char *name, int value);
 void info_append_string(cf_dyn_buf *db, const char *name, const char *value);
+void info_append_string_safe(cf_dyn_buf *db, const char *name, const char *value);
 void info_append_uint32(cf_dyn_buf *db, const char *name, uint32_t value);
 void info_append_uint64(cf_dyn_buf *db, const char *name, uint64_t value);
 void info_append_uint64_x(cf_dyn_buf *db, const char *name, uint64_t value);

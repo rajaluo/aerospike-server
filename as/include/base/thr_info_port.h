@@ -1,7 +1,7 @@
 /*
- * thr_demarshal.h
+ * thr_info_port.h
  *
- * Copyright (C) 2015 Aerospike, Inc.
+ * Copyright (C) 2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -23,22 +23,8 @@
 #pragma once
 
 #include "socket.h"
-#include "base/cfg.h"
-#include "base/transaction.h"
 
-typedef struct as_info_endpoint_s {
-	as_addr_list addrs;
-	cf_ip_port port;
-} as_info_endpoint;
+void as_info_port_start();
 
-typedef struct as_info_access_s {
-	as_info_endpoint service;
-	as_info_endpoint alt_service;
-	as_info_endpoint tls_service;
-	as_info_endpoint alt_tls_service;
-} as_info_access;
-
-extern as_info_access g_access;
-extern cf_serv_cfg g_service_bind;
-
-void thr_demarshal_resume(as_file_handle *fd_h);
+extern cf_serv_cfg g_info_bind;
+extern cf_ip_port g_info_port;
