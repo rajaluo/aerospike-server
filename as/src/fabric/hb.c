@@ -566,7 +566,7 @@ typedef struct
 typedef struct as_hb_channel_s
 {
 	/**
-	 * Inidicates if this channel is a multicast channel.
+	 * Indicates if this channel is a multicast channel.
 	 */
 	bool is_multicast;
 
@@ -578,7 +578,7 @@ typedef struct as_hb_channel_s
 
 	/**
 	 * The id of the associated node. In mesh / unicast case this will
-	 * initially be zeor and filled in when the nodeid for the node at the
+	 * initially be zero and filled in when the nodeid for the node at the
 	 * other end is learnt. In multicast case this will be zero.
 	 */
 	cf_node nodeid;
@@ -677,7 +677,7 @@ typedef struct as_hb_channel_socket_close_entry_s
 	 */
 	cf_socket* socket;
 	/**
-	 * Inidicates if this close is a remote close.
+	 * Indicates if this close is a remote close.
 	 */
 	bool is_remote;
 	/**
