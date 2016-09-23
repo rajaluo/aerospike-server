@@ -526,16 +526,16 @@ as_partition_balance_remaining_migrations()
 //
 
 // Currently used only for enterprise build.
-int
-as_partition_pending_immigrations(as_partition* p)
+bool
+as_partition_pending_migrations(as_partition* p)
 {
 	pthread_mutex_lock(&p->lock);
 
-	int n = p->pending_immigrations;
+	bool pending = p->pending_immigrations + p->pending_emigrations > 0;
 
 	pthread_mutex_unlock(&p->lock);
 
-	return n;
+	return pending;
 }
 
 
