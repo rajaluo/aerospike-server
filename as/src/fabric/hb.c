@@ -8792,7 +8792,7 @@ hb_init()
 	// Initialize the plugin functions.
 	hb_plugin_init();
 
-	// Initialize IO channel subsysem.
+	// Initialize IO channel subsystem.
 	channel_init();
 
 	g_hb.status = AS_HB_STATUS_STOPPED;
@@ -8899,12 +8899,12 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 	msg_nodeid_get(msg, &source);
 
 	if (source == config_self_nodeid_get()) {
-		// Ingore self heatbeats.
+		// Ignore self heatbeats.
 		cf_atomic_int_incr(&g_stats.heartbeat_received_self);
 		return;
 	}
 
-	// Ingore self heatbeats.
+	// Ignore self heatbeats.
 	cf_atomic_int_incr(&g_stats.heartbeat_received_foreign);
 
 	// If this node encounters other nodes at startup, prevent it
