@@ -674,7 +674,7 @@ fabric_connect(fabric_args* fa, fabric_node_element* fne)
 		if (errno == ENOENT) {
 			// No entry present for this node in heartbeat.
 			cf_debug(
-			  AS_FABRIC, "fabric_connect: unknown remote endpoint %" PRIx64, fne->node);
+			  AS_FABRIC, "fabric_connect: unknown remote node %" PRIx64, fne->node);
 			cf_atomic32_decr(&fne->outbound_fd_counter);
 			return NULL;
 		}
@@ -686,22 +686,24 @@ fabric_connect(fabric_args* fa, fabric_node_element* fne)
 	if (tries_remaining < 0) {
 		// Should never happen in practice. We could not allocate space
 		// on the stack.
-		cf_debug(AS_FABRIC,"fabric_connect: List get error for remote endpoint %" PRIx64, fne->node);
+		cf_debug(AS_FABRIC,"fabric_connect: List get error for remote node %" PRIx64, fne->node);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
 
-	// Initiate the connect to the remote endpoint
-	cf_socket sock;
+	// Initiate connect to the remote endpoint
+	char endpoint_list_str[1024];
+	as_endpoint_list_to_string(endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
+	cf_debug(AS_FABRIC, "fabric connecting to remote node %" PRIx64 " with endpoints {%s}", fne->node, endpoint_list_str);
 
+	cf_socket sock;
 	const as_endpoint* connected_endpoint = as_endpoint_connect_any(
 		endpoint_list, CF_SOCK_OWNER_FABRIC, fabric_connect_endpoint_filter,
 		NULL, 0, &sock);
 
 	if (!connected_endpoint) {
-		char endpoint_list_str[1024];
 		as_endpoint_list_to_string(endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
-		cf_debug(AS_FABRIC, "fabric connect failed for remote node %" PRIx64 " with endpoints [%s]", fne->node, endpoint_list_str);
+		cf_debug(AS_FABRIC, "fabric connect failed for remote node %" PRIx64 " with endpoints {%s}", fne->node, endpoint_list_str);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
@@ -1603,6 +1605,10 @@ fabric_published_endpoints_refresh()
 		}
 		return -1;
 	}
+
+	char endpoint_list_str[512];
+	as_endpoint_list_to_string(g_published_endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
+	cf_info(AS_FABRIC, "Updated fabric published address list to {%s}", endpoint_list_str);
 	return 0;
 }
 
@@ -1617,13 +1623,13 @@ fabric_hb_plugin_set_fn(msg* msg)
 		return;
 	}
 
-	if (fabric_published_endpoints_refresh()) {
+	if (fabric_published_endpoints_refresh() != 0) {
 		cf_warning(AS_FABRIC, "No publish addresses found for fabric.");
 		return;
 	}
 
 	size_t payload_size = 0;
-	if (as_endpoint_list_sizeof(g_published_endpoint_list, &payload_size)) {
+	if (as_endpoint_list_sizeof(g_published_endpoint_list, &payload_size) != 0) {
 		cf_crash(
 		  AS_FABRIC,
 		  "Error getting endpoint list size for published addresses.");

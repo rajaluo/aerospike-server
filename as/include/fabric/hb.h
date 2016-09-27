@@ -197,7 +197,7 @@ typedef struct as_hb_event_node_s
 } as_hb_event_node;
 
 /**
- * A plugin that is publishing and receving data via the heartbeat subsystem.
+ * A plugin that is publishing and receiving data via the heartbeat subsystem.
  * The
  * heartbeat outgoing message buffer will be populated and parsed in the order
  * of this enum.
@@ -280,7 +280,7 @@ typedef void (*as_hb_plugin_parse_data_fn)(msg* hb_message, cf_node source,
 
 /**
  * A listener for detecting changes to this plugin's data for a particular node.
- * Does not suply old and new values of the data, because does not seem to be
+ * Does not supply old and new values of the data, because does not seem to be
  * required currently and to keep implementation simple.
  *
  * @param node the node whose plugin data changed.
@@ -288,7 +288,7 @@ typedef void (*as_hb_plugin_parse_data_fn)(msg* hb_message, cf_node source,
 typedef void (*as_hb_plugin_data_changed_fn)(cf_node nodeid);
 
 /**
- * A plugin allows a module to pushish and read
+ * A plugin allows a module to pushing and read
  * data with heartbeat pulse messages.
  */
 typedef struct as_hb_plugin_s
@@ -351,7 +351,7 @@ typedef enum {
 	AS_HB_V2_MSG_ANV_LENGTH = 6,
 
 	/*---- Internal fields not send on the wire but present to make the a v2
-	   message look mre like a v3 message as the code is v3 oriented. ----*/
+	   message look more like a v3 message as the code is v3 oriented. ----*/
 	/**
 	 * Compatibility as_endpoint_list field never send out on the wire. Used
 	 * to make the a v2 message work seamlessly with v3 oriented code.
@@ -427,8 +427,7 @@ typedef enum {
 	AS_HB_MSG_FABRIC_DATA,
 
 	/**
-	 * For pulse messages, adjacency list and clusterid. For mesh info reply
-	 * and response the reply and response objects.
+	 * Valid only for pulse messages, has adjacency list and clusterid.
 	 */
 	AS_HB_MSG_HB_DATA,
 
@@ -470,7 +469,7 @@ bool as_hb_node_is_adjacent(cf_node nodeid);
  * @param node the node to get ip address of.
  * @param addr the output ip address on success, undefined on failure.
  *
- * @return 0 if the node's ip adddress is found. -1 on failure.
+ * @return 0 if the node's ip address is found. -1 on failure.
  */
 int as_hb_getaddr(cf_node node, cf_ip_addr* addr);
 
@@ -494,7 +493,7 @@ void as_hb_register_listener(as_hb_event_fn event_callback, void* udata);
  *
  * @param succession_list the succession list to correct. This should be large
  * enough to hold g_config.paxos_max_cluster_size events.
- * @param succcession_size the size of the succession list.
+ * @param succession_size the size of the succession list.
  * @param events the output events. This should be large enough to hold
  * g_config.paxos_max_cluster_size events.
  * @param max_events the maximum number of events to generate, should be the
@@ -529,7 +528,7 @@ as_hb_protocol as_hb_protocol_get();
 int as_hb_protocol_set(as_hb_protocol protocol);
 
 /**
- * Get the timeout invterval to consider a node dead / expired in milliseconds.
+ * Get the timeout interval to consider a node dead / expired in milliseconds.
  */
 uint32_t as_hb_node_timeout_get();
 
@@ -568,7 +567,7 @@ void as_hb_fabric_grace_factor_set(int new_factor);
 uint32_t as_hb_node_timeout_get();
 
 /**
- * Inidcates if the input max cluster size is valid based on hb state.Transient
+ * Indicates if the input max cluster size is valid based on hb state.Transient
  * API to help with deciding to apply new max cluster size.
  */
 bool as_hb_max_cluster_size_isvalid(uint32_t max_cluster_size);
