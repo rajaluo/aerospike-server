@@ -234,12 +234,6 @@ as_endpoint_connect_any(const as_endpoint_list* endpoint_list, cf_sock_owner own
 		}
 	}
 
-	if(rv) {
-		cf_sock_addr addr;
-		as_endpoint_to_sock_addr(rv, &addr);
-		cf_debug(CF_SOCKET, "Endpoint connected to address %s", cf_sock_addr_print(&addr));
-	}
-
 	return rv;
 }
 
@@ -586,22 +580,18 @@ endpoint_from_sock_cfg(const cf_sock_cfg* src, as_endpoint* endpoint)
 }
 
 /**
- * Generate a hash for an endpoint, but salted with the nodeid so that different
- * nodes in the cluster generate a different but stable hash value for the same
- * endpoint.
- *
- * Basically is jenkins one-at-a-time hash of nodeid concatenated with the
- * endpoint.
+ * Generate a hash for an endpoint, but salted with the a random tie breaker to
+ * generate random looking shuffles for "equal" endpoints. This is jenkins
+ * one-at-a-time hash of the tie breaker concatenated with the endpoint.
  */
 static uint32_t
-endpoint_nodeid_hash(const as_endpoint* endpoint)
+endpoint_sort_hash(const as_endpoint* endpoint, int tie_breaker)
 {
 	uint32_t hash = 0;
 
 	// Hash the nodeid.
-	cf_node nodeid = g_config.self_node;
-	uint8_t* key = (uint8_t*)&nodeid;
-	for (int i = 0; i < sizeof(nodeid); ++i) {
+	uint8_t* key = (uint8_t*)&tie_breaker;
+	for (int i = 0; i < sizeof(tie_breaker); ++i) {
 		hash += *key;
 		hash += (hash << 10);
 		hash ^= (hash >> 6);
@@ -628,10 +618,11 @@ endpoint_nodeid_hash(const as_endpoint* endpoint)
  * Comparator to sort endpoints in descending order of preference.
  */
 static int
-endpoint_preference_compare(const void* e1, const void* e2)
+endpoint_preference_compare(const void* e1, const void* e2, void* arg)
 {
-	const as_endpoint* endpoint1 = (as_endpoint*) e1;
-	const as_endpoint* endpoint2 = (as_endpoint*) e2;
+	const as_endpoint* endpoint1 = *(as_endpoint**)e1;
+	const as_endpoint* endpoint2 = *(as_endpoint**)e2;
+	int tie_breaker = *((int*)arg);
 
 	// Prefer TLS over clear text.
 	bool endpoint1_is_tls = as_endpoint_capability_is_supported(endpoint1, AS_ENDPOINT_TLS_MASK);
@@ -650,8 +641,9 @@ endpoint_preference_compare(const void* e1, const void* e2)
 		return endpoint1_is_ipv6 ? -1 : 1;
 	}
 
-	// Break ties based on a nodeid specific hash function.
-	return endpoint_nodeid_hash(e1) - endpoint_nodeid_hash(e2);
+	// Used tie breaker parameter to salt the hashes for load balancing.
+	return endpoint_sort_hash(endpoint1, tie_breaker) -
+		endpoint_sort_hash(endpoint2, tie_breaker);
 }
 
 /**
@@ -661,7 +653,11 @@ endpoint_preference_compare(const void* e1, const void* e2)
 static void
 endpoints_preference_sort(const as_endpoint* endpoints[], size_t n_endpoints)
 {
-	qsort(endpoints, n_endpoints, sizeof(as_endpoint*), endpoint_preference_compare);
+	// Random tie breaker to load balance between two equivalent endpoints.
+	int tie_breaker = rand();
+
+	qsort_r(endpoints, n_endpoints, sizeof(as_endpoint*),
+		endpoint_preference_compare, &tie_breaker);
 }
 
 /**
