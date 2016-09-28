@@ -1,7 +1,7 @@
 /*
  * secondary_index.c
  *
- * Copyright (C) 2012-2015 Aerospike, Inc.
+ * Copyright (C) 2012-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -1240,11 +1240,11 @@ as_sindex__setup_histogram(as_sindex *si)
 		cf_warning(AS_SINDEX, "couldn't create histogram for sindex query io histogram");
 
 	sprintf(hist_name, "%s_query_row_count", si->imd->iname);
-	if (NULL == (si->stats._query_rcnt_hist = histogram_create(hist_name, HIST_RAW)))
+	if (NULL == (si->stats._query_rcnt_hist = histogram_create(hist_name, HIST_COUNT)))
 		cf_warning(AS_SINDEX, "couldn't create histogram for sindex query row count histogram");
 
 	sprintf(hist_name, "%s_query_diff_count", si->imd->iname);
-	if (NULL == (si->stats._query_diff_hist = histogram_create(hist_name, HIST_RAW)))
+	if (NULL == (si->stats._query_diff_hist = histogram_create(hist_name, HIST_COUNT)))
 		cf_warning(AS_SINDEX, "couldn't create histogram for sindex query diff histogram");
 
 }

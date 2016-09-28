@@ -819,7 +819,6 @@ struct as_namespace_s {
 	PAD_BOOL		disallow_null_setname;
 	PAD_BOOL		batch_sub_benchmarks_enabled;
 	PAD_BOOL		read_benchmarks_enabled;
-	PAD_BOOL		storage_benchmarks_enabled; // histograms are per-drive
 	PAD_BOOL		udf_benchmarks_enabled;
 	PAD_BOOL		udf_sub_benchmarks_enabled;
 	PAD_BOOL		write_benchmarks_enabled;
@@ -859,6 +858,7 @@ struct as_namespace_s {
 	uint32_t		storage_defrag_sleep;
 	int				storage_defrag_startup_minimum;
 	PAD_BOOL		storage_disable_odirect;
+	PAD_BOOL		storage_benchmarks_enabled; // histograms are per-drive
 	PAD_BOOL		storage_enable_osync;
 	uint64_t		storage_flush_max_us;
 	uint64_t		storage_fsync_max_us;
@@ -1112,6 +1112,9 @@ struct as_namespace_s {
 	histogram*		udf_sub_master_hist; // split this?
 	histogram*		udf_sub_repl_write_hist;
 	histogram*		udf_sub_response_hist;
+
+	histogram*		storage_read_size_hist;
+	histogram*		storage_write_size_hist;
 
 	// Histograms of master object storage sizes. (Meaningful for drive-backed
 	// namespaces only.)

@@ -1,7 +1,7 @@
 /*
  * thr_info.c
  *
- * Copyright (C) 2008-2015 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -2010,7 +2010,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
 	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-read", ns->read_benchmarks_enabled);
-	info_append_bool(db, "enable-benchmarks-storage", ns->storage_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-udf", ns->udf_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-udf-sub", ns->udf_sub_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-write", ns->write_benchmarks_enabled);
@@ -2067,6 +2066,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
 		info_append_int(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
 		info_append_bool(db, "storage-engine.disable-odirect", ns->storage_disable_odirect);
+		info_append_bool(db, "storage-engine.enable-benchmarks-storage", ns->storage_benchmarks_enabled);
 		info_append_bool(db, "storage-engine.enable-osync", ns->storage_enable_osync);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
 		info_append_uint64(db, "storage-engine.fsync-max-sec", ns->storage_fsync_max_us / 1000000);
