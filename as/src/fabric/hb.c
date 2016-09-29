@@ -6120,13 +6120,13 @@ mesh_stop()
 
 	// Clear allocated state if any.
 	if(g_hb.mode_state.mesh_state.published_endpoint_list) {
-			cf_free(g_hb.mode_state.mesh_state.published_endpoint_list);
-			g_hb.mode_state.mesh_state.published_endpoint_list = NULL;
+		cf_free(g_hb.mode_state.mesh_state.published_endpoint_list);
+		g_hb.mode_state.mesh_state.published_endpoint_list = NULL;
 	}
 
    	if(g_hb.mode_state.mesh_state.published_legacy_endpoint_list) {
-			cf_free(g_hb.mode_state.mesh_state.published_legacy_endpoint_list);
-			g_hb.mode_state.mesh_state.published_legacy_endpoint_list = NULL;
+		cf_free(g_hb.mode_state.mesh_state.published_legacy_endpoint_list);
+		g_hb.mode_state.mesh_state.published_legacy_endpoint_list = NULL;
 	}
 
 	MESH_UNLOCK();
