@@ -1189,7 +1189,7 @@ ssd_read_record(as_storage_rd *rd)
 		}
 
 		if (ns->storage_benchmarks_enabled) {
-			histogram_insert_raw(ns->storage_read_size_hist, read_size);
+			histogram_insert_raw(ns->device_read_size_hist, read_size);
 		}
 	}
 
@@ -1666,7 +1666,7 @@ ssd_write_bins(as_storage_rd *rd)
 	cf_atomic32_decr(&swb->n_writers);
 
 	if (ns->storage_benchmarks_enabled) {
-		histogram_insert_raw(ns->storage_write_size_hist, write_size);
+		histogram_insert_raw(ns->device_write_size_hist, write_size);
 	}
 
 	return 0;
@@ -3834,13 +3834,13 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 
 	snprintf(histname, sizeof(histname), "{%s}-device-read-size", ns->name);
 
-	if (! (ns->storage_read_size_hist = histogram_create(histname, HIST_SIZE))) {
+	if (! (ns->device_read_size_hist = histogram_create(histname, HIST_SIZE))) {
 		cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
 	}
 
 	snprintf(histname, sizeof(histname), "{%s}-device-write-size", ns->name);
 
-	if (! (ns->storage_write_size_hist = histogram_create(histname, HIST_SIZE))) {
+	if (! (ns->device_write_size_hist = histogram_create(histname, HIST_SIZE))) {
 		cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
 	}
 
@@ -4313,8 +4313,8 @@ as_storage_stats_ssd(as_namespace *ns, int *available_pct,
 int
 as_storage_ticker_stats_ssd(as_namespace *ns)
 {
-	histogram_dump(ns->storage_read_size_hist);
-	histogram_dump(ns->storage_write_size_hist);
+	histogram_dump(ns->device_read_size_hist);
+	histogram_dump(ns->device_write_size_hist);
 
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
 
