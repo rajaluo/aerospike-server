@@ -2797,23 +2797,24 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 
 	// We'll keep the record we're now reading ...
 
-	// Set/reset the record's void-time, last-update-time, and generation.
-	r->void_time = block->void_time;
+	// Set/reset the record's last-update-time and generation.
 	r->last_update_time = block->last_update_time;
 	r->generation = block->generation;
 
-	// If the record is beyond max-ttl, truncate the void-time.
-	if (! is_ldt_sub && r->void_time > ns->cold_start_max_void_time) {
-		cf_detail(AS_DRV_SSD, "record-add truncating void-time %u > max %u",
-				r->void_time, ns->cold_start_max_void_time);
+	// Set/reset the record's void-time, truncating it if beyond max-ttl.
+	if (! is_ldt_sub && block->void_time > ns->cold_start_max_void_time) {
+		cf_detail(AS_DRV_SSD, "record-add truncating void-time %lu > max %u",
+				block->void_time, ns->cold_start_max_void_time);
 
 		r->void_time = ns->cold_start_max_void_time;
 		ssd->record_add_max_ttl_counter++;
 	}
+	else {
+		r->void_time = block->void_time;
+	}
 
-	// Update maximum void-times.
+	// Update maximum void-time.
 	cf_atomic64_setmax(&p_partition->max_void_time, r->void_time);
-	cf_atomic64_setmax(&ns->max_void_time, r->void_time);
 
 	// If data is in memory, load bins and particles, adjust secondary index.
 	if (ns->storage_data_in_memory) {

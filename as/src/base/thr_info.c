@@ -5681,7 +5681,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_bool(db, "hwm_breached", ns->hwm_breached != 0);
 
 	info_append_uint64(db, "current_time", as_record_void_time_get());
-	info_append_uint64(db, "max_void_time", ns->max_void_time);
 	info_append_uint64(db, "non_expirable_objects", ns->non_expirable_objects);
 	info_append_uint64(db, "expired_objects", ns->n_expired_objects);
 	info_append_uint64(db, "evicted_objects", ns->n_evicted_objects);
