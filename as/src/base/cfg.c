@@ -483,7 +483,6 @@ typedef enum {
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_READ,
-	CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE, // TODO - should this be in storage scope?
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE,
@@ -552,6 +551,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM,
 	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
+	CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE,
 	CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC,
 	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS,
 	CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC,
@@ -912,7 +912,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
 		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
 		{ "enable-benchmarks-read",			CASE_NAMESPACE_ENABLE_BENCHMARKS_READ },
-		{ "enable-benchmarks-storage",		CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE },
 		{ "enable-benchmarks-udf",			CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF },
 		{ "enable-benchmarks-udf-sub",		CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB },
 		{ "enable-benchmarks-write",		CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE },
@@ -984,6 +983,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "defrag-sleep",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP },
 		{ "defrag-startup-minimum",			CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM },
 		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
+		{ "enable-benchmarks-storage",		CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE },
 		{ "enable-osync",					CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS },
 		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
@@ -2639,9 +2639,6 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_READ:
 				ns->read_benchmarks_enabled = true;
 				break;
-			case CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE:
-				ns->storage_benchmarks_enabled = true;
-				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF:
 				ns->udf_benchmarks_enabled = true;
 				break;
@@ -2834,6 +2831,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT:
 				ns->storage_disable_odirect = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE:
+				ns->storage_benchmarks_enabled = true;
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC:
 				ns->storage_enable_osync = cfg_bool(&line);
@@ -3607,7 +3607,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		create_and_check_hist_track(&ns->query_hist, hist_name, HIST_MILLISECONDS);
 
 		sprintf(hist_name, "{%s}-query-rec-count", ns->name);
-		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_RAW);
+		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_COUNT);
 
 		// Activate-by-config histograms (can't be tracked histograms).
 
@@ -4048,9 +4048,9 @@ cfg_create_all_histograms()
 	create_and_check_hist(&g_stats.svc_queue_hist, "svc-queue", HIST_MILLISECONDS);
 
 	create_and_check_hist(&g_stats.ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&g_stats.ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);
-	create_and_check_hist(&g_stats.ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
-	create_and_check_hist(&g_stats.ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_RAW);
+	create_and_check_hist(&g_stats.ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_COUNT);
+	create_and_check_hist(&g_stats.ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_COUNT);
+	create_and_check_hist(&g_stats.ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_SIZE);
 	create_and_check_hist(&g_stats.ldt_hist, "ldt", HIST_MILLISECONDS);
 }
 
