@@ -686,6 +686,11 @@ void as_hb_plugin_data_iterate_all(as_hb_plugin_id plugin,
 void as_hb_info_config_get(cf_dyn_buf* db);
 
 /**
+ * Populate heartbeat endpoints.
+ */
+void as_hb_info_endpoints_get(cf_dyn_buf* db);
+
+/**
  * Generate a string for listening address and port in format
  * ip_address:port along with the heartbeat mode.
  *

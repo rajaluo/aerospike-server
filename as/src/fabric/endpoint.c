@@ -482,11 +482,11 @@ as_endpoint_list_to_string(const as_endpoint_list* endpoint_list, char* buffer,
 	size_t buffer_capacity)
 {
 	if (!endpoint_list) {
+		buffer[0] = 0;
 		return 0;
 	}
 
-	as_endpoint_to_string_udata udata =
-	{ 0 };
+	as_endpoint_to_string_udata udata = { 0 };
 	udata.write_ptr = buffer;
 	udata.buffer_remaining = buffer_capacity;
 	as_endpoint_list_iterate(endpoint_list, endpoint_to_string_iterate, &udata);

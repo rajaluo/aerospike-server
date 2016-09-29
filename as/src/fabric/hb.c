@@ -861,7 +861,7 @@ typedef struct as_hb_adjacent_node_s
 	/**
 	 * The monotonic local time time node information was last updated.
 	 */
-	cf_clock lasted_updated_monotonic_ts;
+	cf_clock last_updated_monotonic_ts;
 
 	/**
 	 * Timestamp for the last pulse message.
@@ -2124,6 +2124,54 @@ as_hb_info_config_get(cf_dyn_buf* db)
 }
 
 /**
+ * Populate heartbeat endpoints.
+ */
+void as_hb_info_endpoints_get(cf_dyn_buf* db) {
+	const cf_serv_cfg *cfg	= config_bind_cfg_get();
+
+	if(cfg->n_cfgs == 0) {
+		// Will never happen in practice.
+		return;
+	}
+
+	info_append_int(db, "heartbeat.port", g_config.hb_serv_spec.port);
+
+	cf_dyn_buf_append_string(db, "heartbeat.addresses=");
+	uint32_t count = 0;
+	for (uint32_t i = 0; i < cfg->n_cfgs; ++i) {
+		if (count > 0) {
+			cf_dyn_buf_append_char(db, ',');
+		}
+
+		cf_dyn_buf_append_string(db, cf_ip_addr_print(&cfg->cfgs[i].addr));
+		++count;
+	}
+	cf_dyn_buf_append_char(db, ';');
+
+	if(IS_MESH()) {
+			return;
+	}
+
+	// Output multicast groups.
+	const cf_mserv_cfg* multicast_cfg = config_multicast_group_cfg_get();
+	if(multicast_cfg->n_cfgs == 0) {
+			return;
+	}
+
+	cf_dyn_buf_append_string(db, "heartbeat.multicast-groups=");
+	count = 0;
+	for (uint32_t i = 0; i < multicast_cfg->n_cfgs; ++i) {
+		if (count > 0) {
+			cf_dyn_buf_append_char(db, ',');
+		}
+
+		cf_dyn_buf_append_string(db, cf_ip_addr_print(&multicast_cfg->cfgs[i].addr));
+		++count;
+	}
+	cf_dyn_buf_append_char(db, ';');
+}
+
+/**
  * Generate a string for listening address and port in format
  * ip_address:port
  * and return the heartbeat mode.
@@ -2179,8 +2227,7 @@ as_hb_info_listen_addr_get(as_hb_mode* mode, char* addr_port, size_t addr_port_c
 
 /**
  * Indicates if the input max cluster size is valid based on hb
- * state.Transient
- * API to help with deciding to apply new max cluster size.
+ * state.Transient API to help with deciding to apply new max cluster size.
  */
 bool
 as_hb_max_cluster_size_isvalid(uint32_t max_cluster_size)
@@ -2321,7 +2368,7 @@ as_hb_plugin_data_get(cf_node nodeid, as_hb_plugin_id plugin, as_hb_plugin_node_
 		}
 
 		if (recv_monotonic_ts) {
-			*recv_monotonic_ts = adjacent_node.lasted_updated_monotonic_ts;
+			*recv_monotonic_ts = adjacent_node.last_updated_monotonic_ts;
 		}
 
 		rv = 0;
@@ -2386,7 +2433,7 @@ as_hb_plugin_data_iterate(cf_vector* nodes, as_hb_plugin_id plugin,
 
 			hb_adjacent_node_plugin_data_get(&nodeinfo, plugin, &data, &data_size);
 
-			iterate_fn(*nodeid, data, data_size, nodeinfo.lasted_updated_monotonic_ts,
+			iterate_fn(*nodeid, data, data_size, nodeinfo.last_updated_monotonic_ts,
 				&nodeinfo.last_msg_hlc_ts, udata);
 		} else {
 			// This node is not known to the heartbeat
@@ -2730,11 +2777,6 @@ as_hb_delete_all_reduce(void* key, void* data, void* udata)
 static void
 info_append_addrs(cf_dyn_buf *db, const char *name, const as_addr_list *list)
 {
-	if(list->n_addrs == 0) {
-		info_append_string(db, name, "any");
-		return;
-	}
-
 	for (uint32_t i = 0; i < list->n_addrs; ++i) {
 		info_append_string(db, name, list->addrs[i]);
 	}
@@ -3228,7 +3270,7 @@ msg_info_reply_get(msg* msg, as_hb_mesh_info_reply** reply, size_t* reply_count)
 
 		size_t endpoint_list_size = 0;
 		if (as_endpoint_list_nsizeof(reply_ptr->endpoint_list, &endpoint_list_size,
-			remaining_size)) {
+			remaining_size) != 0) {
 			// Incomplete / garbled info reply message.
 			*reply_count = 0;
 			return -1;
@@ -6078,13 +6120,13 @@ mesh_stop()
 
 	// Clear allocated state if any.
 	if(g_hb.mode_state.mesh_state.published_endpoint_list) {
-   		cf_free(g_hb.mode_state.mesh_state.published_endpoint_list);
-   		g_hb.mode_state.mesh_state.published_endpoint_list = NULL;
+			cf_free(g_hb.mode_state.mesh_state.published_endpoint_list);
+			g_hb.mode_state.mesh_state.published_endpoint_list = NULL;
 	}
 
    	if(g_hb.mode_state.mesh_state.published_legacy_endpoint_list) {
-   		cf_free(g_hb.mode_state.mesh_state.published_legacy_endpoint_list);
-   		g_hb.mode_state.mesh_state.published_legacy_endpoint_list = NULL;
+			cf_free(g_hb.mode_state.mesh_state.published_legacy_endpoint_list);
+			g_hb.mode_state.mesh_state.published_legacy_endpoint_list = NULL;
 	}
 
 	MESH_UNLOCK();
@@ -6721,17 +6763,10 @@ mesh_node_try_add_new(as_hb_channel_event* event)
 
 	new_node.nodeid = event->nodeid;
 	new_node.is_seed = false;
-	size_t endpoint_list_size;
-	as_endpoint_list_sizeof(msg_endpoint_list, &endpoint_list_size);
-	new_node.endpoint_list = cf_malloc(endpoint_list_size);
-
-	memcpy(new_node.endpoint_list, msg_endpoint_list, endpoint_list_size);
-
+	endpoint_list_copy(&new_node.endpoint_list, msg_endpoint_list);
 	mesh_node_status_change(&new_node, AS_HB_MESH_NODE_CHANNEL_ACTIVE);
 
-	as_hb_mesh_node_key new_key =
-	{
-	 true, new_node.nodeid };
+	as_hb_mesh_node_key new_key = {true, new_node.nodeid};
 
 	mesh_node_add_update(&new_key, &new_node, "Error adding mesh node.");
 
@@ -7222,15 +7257,18 @@ mesh_channel_on_info_reply(msg* msg)
 
 	MESH_LOCK();
 
+	uint8_t *start_ptr = (uint8_t*) reply;
 	for (int i = 0; i < reply_count; i++) {
+		as_hb_mesh_info_reply* reply_ptr = (as_hb_mesh_info_reply*) start_ptr;
+
 		// Search by endpoint to ensure that we do not hit an unknown
 		// seed node again.
 		as_hb_mesh_node_key key;
-		if (mesh_node_endpoint_list_overlapping_find(&reply[i].endpoint_list[0], &key) == 0) {
+		if (mesh_node_endpoint_list_overlapping_find(&reply_ptr->endpoint_list[0], &key) == 0) {
 			if (key.is_real_nodeid) {
-				if (key.nodeid != reply[i].nodeid) {
+				if (key.nodeid != reply_ptr->nodeid) {
 					char endpoint_list_str1[ENDPOINT_LIST_STR_SIZE()];
-					as_endpoint_list_to_string(&reply[i].endpoint_list[0], endpoint_list_str1,
+					as_endpoint_list_to_string(&reply_ptr->endpoint_list[0], endpoint_list_str1,
 						sizeof(endpoint_list_str1));
 
 					as_hb_mesh_node conflicting_node;
@@ -7238,7 +7276,7 @@ mesh_channel_on_info_reply(msg* msg)
 					mesh_node_get(key.nodeid, key.is_real_nodeid, &conflicting_node);
 
 					char endpoint_list_str2[ENDPOINT_LIST_STR_SIZE()];
-					as_endpoint_list_to_string(&reply[i].endpoint_list[0], endpoint_list_str2,
+					as_endpoint_list_to_string(&reply_ptr->endpoint_list[0], endpoint_list_str2,
 						sizeof(endpoint_list_str2));
 
 					// This is a bad case basically we see
@@ -7247,7 +7285,7 @@ mesh_channel_on_info_reply(msg* msg)
 						" and %" PRIx64
 						" having overlapping endpoints "
 						"{%s} and {%s}",
-						key.nodeid, reply[i].nodeid,
+						key.nodeid, reply_ptr->nodeid,
 						endpoint_list_str1,
 						endpoint_list_str2);
 				}
@@ -7265,23 +7303,23 @@ mesh_channel_on_info_reply(msg* msg)
 					// Should never happen in practice.
 					WARNING("Lost seed node with fake "
 						"nodeid %" PRIx64, key.nodeid);
-					continue;
+					goto NextReply;
 				}
 
-				mesh_seed_node_real_nodeid_set(&seed_mesh_node, &key, reply[i].nodeid, seed_mesh_node.status);
+				mesh_seed_node_real_nodeid_set(&seed_mesh_node, &key, reply_ptr->nodeid, seed_mesh_node.status);
 			}
 		} else {
 			as_hb_mesh_node existing_node;
 			// Potentially a discovered node with endpoint unknown
 			// previously. Update the endpoint.
-			if (mesh_node_get(reply[i].nodeid, true, &existing_node) != 0) {
+			if (mesh_node_get(reply_ptr->nodeid, true, &existing_node) != 0) {
 				// Somehow the node was removed from the mesh
 				// hash. Maybe a timeout.
-				continue;
+			   	goto NextReply;
 			}
 
 			// Update the endpoint.
-			endpoint_list_copy(&existing_node.endpoint_list, reply[i].endpoint_list);
+			endpoint_list_copy(&existing_node.endpoint_list, reply_ptr->endpoint_list);
 
 			// Update the state of this node.
 			if (existing_node.status == AS_HB_MESH_NODE_ENDPOINT_UNKNOWN) {
@@ -7290,17 +7328,23 @@ mesh_channel_on_info_reply(msg* msg)
 
 			as_hb_mesh_node_key new_key;
 			new_key.is_real_nodeid = true;
-			new_key.nodeid = reply[i].nodeid;
+			new_key.nodeid = reply_ptr->nodeid;
 
 			char endpoint_list_str[ENDPOINT_LIST_STR_SIZE()];
-			as_endpoint_list_to_string(reply[i].endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
+			as_endpoint_list_to_string(existing_node.endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
 
 			DEBUG("For node %" PRIx64 " discovered endpoints {%s}",
-				reply[i].nodeid, endpoint_list_str);
+				reply_ptr->nodeid, endpoint_list_str);
 
 			// Update the hash.
 			mesh_node_add_update(&new_key, &existing_node, "Error updating endpoint.");
 		}
+
+	NextReply:
+		start_ptr += sizeof(as_hb_mesh_info_reply);
+		size_t endpoint_list_size = 0;
+		as_endpoint_list_sizeof(reply_ptr->endpoint_list, &endpoint_list_size);
+		start_ptr += endpoint_list_size;
 	}
 
 	MESH_UNLOCK();
@@ -7600,6 +7644,7 @@ mesh_tip_clear_reduce(void* key, void* data, void* udata)
 		rv = SHASH_OK;
 	}
 
+Exit:
 	if (rv == SHASH_REDUCE_DELETE) {
 		char endpoint_list_str[ENDPOINT_LIST_STR_SIZE()];
 		as_endpoint_list_to_string(mesh_node->endpoint_list,
@@ -7624,7 +7669,6 @@ mesh_tip_clear_reduce(void* key, void* data, void* udata)
 		mesh_node_destroy(mesh_node);
 	}
 
-Exit:
 	MESH_UNLOCK();
 	return rv;
 }
@@ -8028,8 +8072,8 @@ multicast_stop()
 
 	// Clear allocated state if any.
 	if(g_hb.mode_state.multicast_state.published_legacy_endpoint_list) {
-   		cf_free(g_hb.mode_state.multicast_state.published_legacy_endpoint_list);
-   		g_hb.mode_state.multicast_state.published_legacy_endpoint_list = NULL;
+		cf_free(g_hb.mode_state.multicast_state.published_legacy_endpoint_list);
+		g_hb.mode_state.multicast_state.published_legacy_endpoint_list = NULL;
 	}
 	MULTICAST_UNLOCK();
 }
@@ -8223,10 +8267,11 @@ hb_event_publish_pending()
 }
 
 /**
- * Delete the plugin data while iterating through the map.
+ * Delete the heap allocated data while iterating through the hash and deleting
+ * entries.
  */
 static int
-hb_adjacency_free_plugin_data_reduce(void* key, void* data, void* udata)
+hb_adjacency_free_data_reduce(void* key, void* data, void* udata)
 {
 	as_hb_adjacent_node* adjacent_node = (as_hb_adjacent_node*) data;
 
@@ -8255,7 +8300,7 @@ hb_clear()
 	HB_LOCK();
 
 	// Free the plugin data and delete adjacent nodes.
-	shash_reduce_delete(g_hb.adjacency, hb_adjacency_free_plugin_data_reduce, NULL);
+	shash_reduce_delete(g_hb.adjacency, hb_adjacency_free_data_reduce, NULL);
 
 	HB_UNLOCK();
 
@@ -8626,7 +8671,7 @@ hb_node_has_expired(cf_node nodeid, as_hb_adjacent_node* adjacent_node)
 
 	cf_clock now = cf_getms();
 
-	bool adjacency_expired = adjacent_node->lasted_updated_monotonic_ts + HB_NODE_TIMEOUT() < now;
+	bool adjacency_expired = adjacent_node->last_updated_monotonic_ts + HB_NODE_TIMEOUT() < now;
 
 	uint64_t fabric_lasttime;
 
@@ -8643,7 +8688,7 @@ hb_node_has_expired(cf_node nodeid, as_hb_adjacent_node* adjacent_node)
 	} else if (!fabric_expired && adjacency_expired) {
 		// Use a grace period because fabric messages are being
 		// received.
-		expired = adjacent_node->lasted_updated_monotonic_ts +
+		expired = adjacent_node->last_updated_monotonic_ts +
 			HB_FABRIC_GRACE_PERIOD() < now;
 	} else if (fabric_expired && !adjacency_expired) {
 		// Maybe fabric is quiet because there is no fabric
@@ -8685,12 +8730,12 @@ hb_adjacent_node_destroy(as_hb_adjacent_node* adjacent_node)
 			adjacent_node->plugin_data[i][j].data_capacity = 0;
 			adjacent_node->plugin_data[i][j].data_size = 0;
 		}
+	}
 
-		if (adjacent_node->endpoint_list) {
-			// Free the endpoint list.
-			cf_free(adjacent_node->endpoint_list);
-			adjacent_node->endpoint_list = NULL;
-		}
+	if (adjacent_node->endpoint_list) {
+		// Free the endpoint list.
+		cf_free(adjacent_node->endpoint_list);
+		adjacent_node->endpoint_list = NULL;
 	}
 
 	HB_UNLOCK();
@@ -8965,12 +9010,24 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 	as_hb_adjacent_node adjacent_node;
 	memset(&adjacent_node, 0, sizeof(adjacent_node));
 
-	bool plugin_data_changed[AS_HB_PLUGIN_SENTINEL] =
-	{
-	 0 };
+	bool plugin_data_changed[AS_HB_PLUGIN_SENTINEL] = { 0 };
 	bool is_new = hb_adjacent_node_get(source, &adjacent_node) != 0;
 
-	if (!is_new) {
+	if (is_new) {
+		int mcsize = config_mcsize();
+		// Note: adjacency list does not contain self node hence
+		// (mcsize - 1) in the check.
+		if (shash_get_size(g_hb.adjacency) >= (mcsize - 1)) {
+			if (last_cluster_breach_print != (cf_getms() / 1000L)) {
+				WARNING("Exceeding maximum supported cluster "
+					"size %d. "
+					"Ignoring "
+					"node: %" PRIx64, mcsize, source);
+				last_cluster_breach_print = cf_getms() / 1000L;
+			}
+			goto Exit;
+		}
+	} else {
 		if (as_hlc_timestamp_order_get(msg_event->msg_hlc_ts.send_ts, adjacent_node.last_msg_hlc_ts.send_ts)
 			== AS_HLC_HAPPENS_BEFORE) {
 			// Received a delayed heartbeat send before the current
@@ -9000,23 +9057,8 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 	hb_plugin_msg_parse(msg, &adjacent_node, g_hb.plugins, plugin_data_changed);
 
 	// Update the last updated time.
-	adjacent_node.lasted_updated_monotonic_ts = cf_getms();
+	adjacent_node.last_updated_monotonic_ts = cf_getms();
 	memcpy(&adjacent_node.last_msg_hlc_ts, &msg_event->msg_hlc_ts, sizeof(as_hlc_msg_timestamp));
-
-	int mcsize = config_mcsize();
-
-	// Note: adjacency list does not contain self node hence
-	// (mcsize - 1) in the check.
-	if (is_new && shash_get_size(g_hb.adjacency) >= (mcsize - 1)) {
-		if (last_cluster_breach_print != (cf_getms() / 1000L)) {
-			WARNING("Exceeding maximum supported cluster "
-				"size %d. "
-				"Ignoring "
-				"node: %" PRIx64, mcsize, source);
-			last_cluster_breach_print = cf_getms() / 1000L;
-		}
-		goto Exit;
-	}
 
 	// Update plugin data, update times, etc.
 	SHASH_PUT_OR_DIE(g_hb.adjacency, &source, &adjacent_node,
@@ -9115,7 +9157,7 @@ hb_dump_reduce(void* key, void* data, void* udata)
 	INFO("HB Adjacent Node: Node: %" PRIx64 ", Protocol: %" PRIu32
 		", Endpoints: {%s}, Last Updated: %" PRIu64,
 		*nodeid, adjacent_node->protocol_version, endpoint_list_str,
-		adjacent_node->lasted_updated_monotonic_ts);
+		adjacent_node->last_updated_monotonic_ts);
 
 	return SHASH_OK;
 }
@@ -9363,7 +9405,7 @@ hb_plugin_data_iterate_reduce(void* key, void* data, void* udata)
 			NULL;
 
 	reduce_udata->iterate_fn(*nodeid, plugin_data, plugin_data_size,
-		adjacent_node->lasted_updated_monotonic_ts, &adjacent_node->last_msg_hlc_ts, reduce_udata->udata);
+		adjacent_node->last_updated_monotonic_ts, &adjacent_node->last_msg_hlc_ts, reduce_udata->udata);
 
 	return SHASH_OK;
 }

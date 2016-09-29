@@ -462,6 +462,8 @@ info_get_endpoints(char *name, cf_dyn_buf *db)
 	info_append_string(db, "service.alternate-tls-access-addresses", string);
 	cf_free(string);
 
+	as_hb_info_endpoints_get(db);
+
 	info_append_int(db, "fabric.port", g_fabric_port);
 
 	string = bind_to_string(&g_fabric_bind, CF_SOCK_OWNER_FABRIC);
@@ -1932,11 +1934,6 @@ info_service_config_get(cf_dyn_buf *db)
 static void
 append_addrs(cf_dyn_buf *db, const char *name, const as_addr_list *list)
 {
-	if(list->n_addrs == 0) {
-		info_append_string(db, name, "any");
-		return;
-	}
-
 	for (uint32_t i = 0; i < list->n_addrs; ++i) {
 		info_append_string(db, name, list->addrs[i]);
 	}
