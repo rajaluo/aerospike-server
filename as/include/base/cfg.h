@@ -200,6 +200,8 @@ typedef struct as_config_s {
 	// network::heartbeat context.
 	//
 
+	as_serv_spec	hb_serv_spec; // literal binding address spec parsed from config
+	as_addr_list	hb_multicast_groups; // literal multicast groups parsed from config
 	as_hb_config	hb_config;
 
 	//--------------------------------------------

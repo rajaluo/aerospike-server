@@ -332,7 +332,7 @@ typedef struct
 /**
  * Mesh endpoint list search udata.
  */
-typedef struct
+typedef struct as_hb_mesh_endpoint_list_reduce_udata_s
 {
 	/**
 	 * The endpoint to search.
@@ -345,7 +345,7 @@ typedef struct
 	bool found;
 
 	/**
-	 * The count of endpoints to connect.
+	 * The matched key if found.
 	 */
 	as_hb_mesh_node_key* matched_key;
 } as_hb_mesh_endpoint_list_reduce_udata;
@@ -400,12 +400,12 @@ typedef struct as_hb_mesh_node_s
 	/**
 	 * The name / ip address of this seed mesh host.
 	 */
-	char mesh_seed_host_name[HOST_NAME_MAX];
+	char seed_host_name[HOST_NAME_MAX];
 
 	/**
 	 * The port of this seed mesh host.
 	 */
-	cf_ip_port mesh_seed_port;
+	cf_ip_port seed_port;
 
 	/**
 	 * The heap allocated end point list for this mesh host. Should be freed
@@ -1634,6 +1634,8 @@ static msg_template g_hb_v2_msg_template[] =
 static void* hb_malloc(size_t size);
 static void hb_free(void* buff);
 
+static void info_append_addrs(cf_dyn_buf *db, const char *name, const as_addr_list *list);
+
 void endpoint_list_to_string_process(const as_endpoint_list* endpoint_list, void* udata);
 
 static cf_node config_self_nodeid_get();
@@ -1863,7 +1865,7 @@ as_hb_protocol_set(as_hb_protocol protocol)
 		goto Exit;
 	}
 
-	Exit:
+Exit:
 	SET_PROTOCOL_UNLOCK();
 	return rv;
 }
@@ -1921,7 +1923,7 @@ as_hb_getaddr(cf_node nodeid, cf_ip_addr* addr)
 		rv = -1;
 	}
 
-	Exit:
+Exit:
 	HB_UNLOCK();
 	return rv;
 }
@@ -2094,56 +2096,18 @@ as_hb_node_timeout_get()
 void
 as_hb_info_config_get(cf_dyn_buf* db)
 {
-	char endpoint_list_str[ENDPOINT_LIST_STR_SIZE()];
-
 	if (IS_MESH()) {
 		info_append_string(db, "heartbeat.mode", "mesh");
-
-		char endpoint_list_str[ENDPOINT_LIST_STR_SIZE()];
-		endpoint_list_to_string_udata udata;
-		udata.endpoint_list_str = endpoint_list_str;
-		udata.endpoint_list_str_capacity = sizeof(endpoint_list_str);
-		mesh_published_endpoints_process(
-			HB_PROTOCOL_IS_LEGACY(), endpoint_list_to_string_process, &udata);
-
-		info_append_string(db, "heartbeat.addresses", endpoint_list_str);
-
+		info_append_addrs(db, "heartbeat.address", &g_config.hb_serv_spec.bind);
+		info_append_uint32(db, "heartbeat.port",
+			(uint32_t)g_config.hb_serv_spec.port);
 		mesh_seed_host_list_get(db);
 	} else {
 		info_append_string(db, "heartbeat.mode", "multicast");
-
-		// Append all multicast group addresses.
-		const cf_mserv_cfg* multicast_cfg = config_multicast_group_cfg_get();
-		cf_dyn_buf_append_string(db, "heartbeat.multicast-groups=");
-		for (int i = 0; i < multicast_cfg->n_cfgs; i++) {
-			endpoint_list_str[0] = 0;
-			CF_IGNORE_ERROR(
-				cf_ip_addr_to_string(&multicast_cfg->cfgs[i].addr, endpoint_list_str,
-					sizeof(endpoint_list_str)));
-			cf_dyn_buf_append_string(db, endpoint_list_str);
-			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint32(db, multicast_cfg->cfgs[i].port);
-
-			if (i != multicast_cfg->n_cfgs - 1) {
-				cf_dyn_buf_append_char(db, ',');
-			}
-		}
-		cf_dyn_buf_append_string(db, ";");
-
-		// Append all binding interfaces.
-		// Append all multicast group addresses.
-		cf_dyn_buf_append_string(db, "heartbeat.addresses=");
-		for (int i = 0; i < multicast_cfg->n_cfgs; i++) {
-			endpoint_list_str[0] = 0;
-			CF_IGNORE_ERROR(
-				cf_ip_addr_to_string(&multicast_cfg->cfgs[i].if_addr, endpoint_list_str,
-					sizeof(endpoint_list_str)));
-			cf_dyn_buf_append_string(db, endpoint_list_str);
-			if (i != multicast_cfg->n_cfgs - 1) {
-				cf_dyn_buf_append_char(db, ',');
-			}
-		}
-		cf_dyn_buf_append_string(db, ";");
+		info_append_addrs(db, "heartbeat.address", &g_config.hb_serv_spec.bind);
+		info_append_addrs(db, "heartbeat.multicast-group", &g_config.hb_multicast_groups);
+	    info_append_uint32(db, "heartbeat.port",
+			(uint32_t)g_config.hb_serv_spec.port);
 	}
 
 	info_append_uint32(db, "heartbeat.interval", config_tx_interval_get());
@@ -2373,7 +2337,7 @@ as_hb_plugin_data_get(cf_node nodeid, as_hb_plugin_id plugin, as_hb_plugin_node_
 		rv = 0;
 	}
 
-	Exit:
+Exit:
 	HB_UNLOCK();
 	return rv;
 }
@@ -2500,19 +2464,19 @@ as_hb_dump(bool verbose)
 	as_hb_info_listen_addr_get(&mode, endpoint_list_str, sizeof(endpoint_list_str));
 
 	// Dump the config.
-	INFO("HB Mode:	%s (%d)",
+	INFO("HB Mode: %s (%d)",
 		(mode == AS_HB_MODE_MULTICAST ?
 			"multicast" : (mode == AS_HB_MODE_MESH ? "mesh" : "undefined")), mode);
 
-	INFO("HB Addresses:	 %s", endpoint_list_str);
-	INFO("HB MTU:  %d", MTU());
+	INFO("HB Addresses: {%s}", endpoint_list_str);
+	INFO("HB MTU: %d", MTU());
 
-	INFO("HB Interval:	%d", config_tx_interval_get());
-	INFO("HB Timeout:  %d", config_max_intervals_missed_get());
-	INFO("HB Fabric Grace Factor:  %d", config_fabric_grace_factor_get());
+	INFO("HB Interval: %d", config_tx_interval_get());
+	INFO("HB Timeout: %d", config_max_intervals_missed_get());
+	INFO("HB Fabric Grace Factor: %d", config_fabric_grace_factor_get());
 	char protocol_s[HB_PROTOCOL_STR_MAX_LEN()];
 	as_hb_protocol_get_s(config_protocol_get(), protocol_s);
-	INFO("HB Protocol:	%s (%d)", protocol_s, config_protocol_get());
+	INFO("HB Protocol: %s (%d)", protocol_s, config_protocol_get());
 
 	// dump mode specific state.
 	hb_mode_dump(verbose);
@@ -2757,6 +2721,23 @@ static int
 as_hb_delete_all_reduce(void* key, void* data, void* udata)
 {
 	return SHASH_REDUCE_DELETE;
+}
+
+/* ---- Info call related ---- */
+/**
+ * Append a address spec to a cf_dyn_buf.
+ */
+static void
+info_append_addrs(cf_dyn_buf *db, const char *name, const as_addr_list *list)
+{
+	if(list->n_addrs == 0) {
+		info_append_string(db, name, "any");
+		return;
+	}
+
+	for (uint32_t i = 0; i < list->n_addrs; ++i) {
+		info_append_string(db, name, list->addrs[i]);
+	}
 }
 
 /* ---- Vector operations ---- */
@@ -3847,7 +3828,8 @@ channel_socket_close(cf_socket* socket, bool remote_close, bool raise_close_even
 	DEBUG("Closing channel with fd %d", CSFD(socket));
 
 	channel_socket_destroy(socket);
-	Exit:
+
+Exit:
 	CHANNEL_UNLOCK();
 }
 
@@ -4079,7 +4061,7 @@ channel_compressed_message_parse(msg* msg, void* buffer, int buffer_content_len)
 		msg_preserve_all_fields(msg);
 	}
 
-	Exit:
+Exit:
 	MSG_BUFF_FREE(uncompressed_buffer, uncompressed_buffer_length);
 	return parsed;
 }
@@ -4243,8 +4225,7 @@ channel_multicast_msg_read(cf_socket* socket, msg* msg)
 	}
 	rv = AS_HB_CHANNEL_MSG_READ_SUCCESS;
 
-	Exit:
-
+Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
 
 	CHANNEL_UNLOCK();
@@ -4299,8 +4280,8 @@ channel_mesh_msg_read(cf_socket* socket, msg* msg)
 	DETAIL("mesh recv success fd %d message size %d", CSFD(socket), buffer_len);
 
 	rv = channel_message_parse(msg, buffer, buffer_len);
-	Exit:
 
+Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
 
 	CHANNEL_UNLOCK();
@@ -4488,7 +4469,7 @@ channel_socket_resolve(cf_socket* socket1, cf_socket* socket2)
 
 	rv = winner_socket;
 
-	Exit:
+Exit:
 	CHANNEL_UNLOCK();
 	return rv;
 }
@@ -4753,7 +4734,7 @@ channel_msg_event_process(cf_socket* socket, as_hb_channel_event* event)
 
 	rv = 0;
 
-	Exit:
+Exit:
 	CHANNEL_UNLOCK();
 	return rv;
 }
@@ -4942,7 +4923,7 @@ channel_msg_read(cf_socket* socket)
 		channel_event_queue(&event);
 	}
 
-	Exit:
+Exit:
 	CHANNEL_UNLOCK();
 
 	// release the message.
@@ -5154,7 +5135,7 @@ channel_node_disconnect(cf_node nodeid)
 
 	rv = 0;
 
-	Exit:
+Exit:
 	CHANNEL_UNLOCK();
 
 	return rv;
@@ -5300,8 +5281,7 @@ channel_start()
 		CRASH("Could not create channel tender thread: %s", cf_strerror(errno));
 	}
 
-	Exit:
-
+Exit:
 	CHANNEL_UNLOCK();
 }
 
@@ -5512,7 +5492,8 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu, uint8_t* buff
 		rv = msg_size;
 	}
 
-	Exit: return rv;
+Exit:
+	return rv;
 }
 
 /**
@@ -5558,7 +5539,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 	// Send over the buffer.
 	rv = channel_mesh_msg_send(connected_socket, buffer, (size_t) msg_size);
 
-	Exit:
+Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
 	CHANNEL_UNLOCK();
 	return rv;
@@ -5632,7 +5613,7 @@ channel_msg_broadcast(msg* msg)
 
 	shash_reduce(g_hb.channel_state.socket_to_channel, channel_msg_broadcast_reduce, &udata);
 
-	Exit:
+Exit:
 	MSG_BUFF_FREE(buffer, buffer_len);
 	CHANNEL_UNLOCK();
 	return rv;
@@ -5876,7 +5857,8 @@ mesh_published_endpoint_list_refresh(bool is_legacy)
 	INFO("Updated heartbeat published address list to {%s}", endpoint_list_str);
 
 	rv = 0;
-	Exit:
+
+Exit:
 	MESH_UNLOCK();
 	return rv;
 }
@@ -6045,8 +6027,8 @@ mesh_seed_host_list_reduce(void* key, void* data, void* udata)
 		} else {
 			WARNING("Error converting mesh host %s and port %d to "
 				"string.",
-				mesh_node->mesh_seed_host_name,
-				mesh_node->mesh_seed_port);
+				mesh_node->seed_host_name,
+				mesh_node->seed_port);
 		}
 	}
 
@@ -6133,7 +6115,7 @@ mesh_node_endpoint_list_fill(as_hb_mesh_node* mesh_node)
 	uint32_t n_resolved_addresses = CF_SOCK_CFG_MAX;
 	cf_ip_addr resolved_addresses[n_resolved_addresses];
 
-	int hostname_len = strnlen(mesh_node->mesh_seed_host_name, HOST_NAME_MAX);
+	int hostname_len = strnlen(mesh_node->seed_host_name, HOST_NAME_MAX);
 
 	if (hostname_len <= 0 || hostname_len == HOST_NAME_MAX) {
 		// Invalid hostname.
@@ -6141,9 +6123,9 @@ mesh_node_endpoint_list_fill(as_hb_mesh_node* mesh_node)
 	}
 
 	// Resolve and get all IPv4/IPv6 ip addresses.
-	if (cf_ip_addr_from_string_multi(mesh_node->mesh_seed_host_name, resolved_addresses,
+	if (cf_ip_addr_from_string_multi(mesh_node->seed_host_name, resolved_addresses,
 		&n_resolved_addresses) != 0 || n_resolved_addresses <= 0) {
-		DEBUG("Failed resolving mesh node hostname %s", mesh_node->mesh_seed_host_name);
+		DEBUG("Failed resolving mesh node hostname %s", mesh_node->seed_host_name);
 
 		// Hostname resolution failed.
 		return -1;
@@ -6155,7 +6137,7 @@ mesh_node_endpoint_list_fill(as_hb_mesh_node* mesh_node)
 
 	cf_sock_cfg sock_cfg;
 	cf_sock_cfg_init(&sock_cfg, CF_SOCK_OWNER_HEARTBEAT);
-	sock_cfg.port = mesh_node->mesh_seed_port;
+	sock_cfg.port = mesh_node->seed_port;
 
 	for (int i = 0; i < n_resolved_addresses; i++) {
 		cf_ip_addr_copy(&resolved_addresses[i], &sock_cfg.addr);
@@ -6163,7 +6145,7 @@ mesh_node_endpoint_list_fill(as_hb_mesh_node* mesh_node)
 			CRASH("Error initializing resolved address list.");
 		}
 
-		DETAIL("Resolved mesh node hostname %s to %s", mesh_node->mesh_seed_host_name,
+		DETAIL("Resolved mesh node hostname %s to %s", mesh_node->seed_host_name,
 			cf_ip_addr_print(&resolved_addresses[i]));
 	}
 
@@ -6259,7 +6241,7 @@ mesh_tend_reduce(void* key, void* data, void* udata)
 	// Flip status to pending.
 	mesh_node_status_change(mesh_node, AS_HB_MESH_NODE_CHANNEL_PENDING);
 
-	Exit:
+Exit:
 	if (rv == SHASH_REDUCE_DELETE) {
 		// Clear all internal allocated memory.
 		mesh_node_destroy(mesh_node);
@@ -6490,6 +6472,7 @@ mesh_endpoint_list_find_reduce(void* key, void* data, void* udata)
 
 	if (as_endpoint_lists_are_overlapping(mesh_node->endpoint_list, endpoint_reduce_udata->to_search,
 		true)) {
+		endpoint_reduce_udata->found = true;
 		memcpy(endpoint_reduce_udata->matched_key, node_key, sizeof(as_hb_mesh_node_key));
 		// Stop searching we found a match.
 		return SHASH_ERR;
@@ -6636,7 +6619,7 @@ mesh_channel_on_node_disconnect(as_hb_channel_event* event)
 	// Update the mesh entry.
 	mesh_node_add_update(&node_key, &mesh_node, "Error updating mesh node entry");
 
-	Exit:
+Exit:
 	MESH_UNLOCK();
 }
 
@@ -6669,7 +6652,7 @@ mesh_node_is_uptodate_active(as_hb_channel_event* event)
 
 	rv = as_endpoint_lists_are_equal(mesh_node.endpoint_list, msg_endpoint_list);
 
-	Exit:
+Exit:
 	MESH_UNLOCK();
 	return rv;
 }
@@ -6761,14 +6744,53 @@ mesh_node_try_add_new(as_hb_channel_event* event)
 		" and endpoints {%s}",
 		new_node.nodeid, endpoint_list_str);
 
-	Exit:
+Exit:
 	MESH_UNLOCK();
 	return rv;
+}
+
+
+/**
+ * Detect a redundant entry and delete if necessary.
+ * @param existing_nodeid_key mesh node entry that has nodeid matching the message event source.
+ * @param existing_endpoint_key mesh node entry that has matching endpoint with the message event source.
+ */
+static void
+mesh_node_redundant_check_delete(as_hb_mesh_node_key *existing_nodeid_key, as_hb_mesh_node_key *existing_endpoint_key) {
+
+	if(memcmp(existing_nodeid_key, existing_endpoint_key, sizeof(*existing_nodeid_key)) == 0) {
+		// There is no conflict, the nodeid and the endpoint point to same mesh entry.
+	}
+
+	// The seed node's nodeid has not yet been updated, however we
+	// have added an entry for the same node via mesh discovery or
+	// duplicate tip command (with different ip). Retain the entry with matching endpoint.
+	mesh_node_delete(existing_nodeid_key, "Error removing redundant mesh entry.");
+
+	DEBUG("Removed redundant mesh "
+			"entry for node %" PRIx64, existing_nodeid_key->nodeid);
+
+	// Update the mesh hash key to have real nodeid.
+	as_hb_mesh_node existing_mesh_seed_node;
+	if (mesh_node_get(existing_endpoint_key->nodeid,
+			  existing_nodeid_key->is_real_nodeid,
+			  &existing_mesh_seed_node) == 0) {
+
+		mesh_seed_node_real_nodeid_set(
+		  &existing_mesh_seed_node, existing_endpoint_key,
+		  existing_nodeid_key->nodeid, AS_HB_MESH_NODE_CHANNEL_ACTIVE);
+	}
+
 }
 
 /**
  * See if an incoming message causes a redundant / conflicting mesh entry, and
  * fix the issue.
+ *
+ * A conflict can happen if
+ *  1. The same seed node is added twice with different IPs.
+ *  2. This node discovers a seed node before the seed node's connection
+ *     receives a pulse message.
  */
 static void
 mesh_node_fix_conflict(as_hb_channel_event* event)
@@ -6781,39 +6803,29 @@ mesh_node_fix_conflict(as_hb_channel_event* event)
 		goto Exit;
 	}
 
-	as_hb_mesh_node_key existing_node_key =
-		{true, event->nodeid };
+	as_hb_mesh_node_key existing_nodeid_key = { true, event->nodeid };
 	as_hb_mesh_node_key existing_endpoint_key;
 
 	as_endpoint_list* msg_endpoint_list;
 	msg_endpoint_list_get(event->msg, &msg_endpoint_list);
 
-	if (mesh_node_endpoint_list_overlapping_find(msg_endpoint_list, &existing_node_key) == 0 ||
+	if (mesh_node_endpoint_list_overlapping_find(
+		msg_endpoint_list, &existing_endpoint_key) == 0) {
+		// The message has a matching endpoint entry, resolve the conflict.
+		mesh_node_redundant_check_delete(&existing_nodeid_key,
+			&existing_endpoint_key);
+	}
+
+	if (mesh_node_endpoint_addr_find(&event->peer_endpoint_addr,
+		&existing_endpoint_key) == 0) {
 		// Legacy v2 case where we will not have the entire bind address
 		// list for a node. The seed ip and the published ip might have
 		// differed.
-		mesh_node_endpoint_addr_find(&event->peer_endpoint_addr, &existing_endpoint_key) == 0) {
-
-		if (existing_node_key.is_real_nodeid == true && existing_endpoint_key.is_real_nodeid == false) {
-			// The seed node's nodeid has not yet been updated,
-			// however we have added a non-seed entry for the same
-			// node via mesh discovery. The non-seed entry is
-			// redundant. Delete it and proceed to update the seed
-			// node.
-			mesh_node_delete(&existing_node_key, "Error removing redundant mesh entry.");
-
-			DEBUG("Removed redundant mesh "
-				"entry for node %" PRIx64, existing_node_key.nodeid);
-
-			// Update the mesh hash key to have real nodeid.
-			as_hb_mesh_node existing_mesh_seed_node;
-			if (mesh_node_get(existing_endpoint_key.nodeid, existing_node_key.is_real_nodeid, &existing_mesh_seed_node) == 0) {
-				mesh_seed_node_real_nodeid_set(&existing_mesh_seed_node, &existing_endpoint_key, event->nodeid,
-					AS_HB_MESH_NODE_CHANNEL_ACTIVE);
-			}
-		}
+		mesh_node_redundant_check_delete(&existing_nodeid_key,
+			 &existing_endpoint_key);
 	}
-	Exit:
+
+Exit:
 	MESH_UNLOCK();
 }
 
@@ -6888,7 +6900,7 @@ mesh_node_data_update(as_hb_channel_event* event)
 	mesh_node_add_update(&existing_node_key, &existing_mesh_node,
 		"Error updating mesh node status to active");
 
-	Exit:
+Exit:
 	MESH_UNLOCK();
 }
 
@@ -6915,7 +6927,7 @@ mesh_node_on_msg_update(as_hb_channel_event* event)
 	}
 
 	if (mesh_node_try_add_new(event)) {
-		// Message for a new mesh node
+		// Message for a new mesh node.
 		return true;
 	}
 
@@ -7348,7 +7360,7 @@ mesh_seed_node_add(as_hb_mesh_node* new_node)
 		uint32_t random_address = rand();
 
 		memcpy(&new_key.nodeid, &random_address, sizeof(random_address));
-		memcpy(((byte*) &new_key.nodeid) + sizeof(random_address), &new_node->mesh_seed_port,
+		memcpy(((byte*) &new_key.nodeid) + sizeof(random_address), &new_node->seed_port,
 			sizeof(uint16_t));
 		// Ensure the generated id is unique.
 	} while (mesh_node_get(new_key.nodeid, false, &mesh_node) == 0);
@@ -7393,8 +7405,8 @@ mesh_tip(char* host, int port)
 	mesh_node_status_change(&new_node, AS_HB_MESH_NODE_CHANNEL_INACTIVE);
 
 	// Resolve the ip address of the new tip.
-	strncpy(new_node.mesh_seed_host_name, host, sizeof(new_node.mesh_seed_host_name));
-	new_node.mesh_seed_port = port;
+	strncpy(new_node.seed_host_name, host, sizeof(new_node.seed_host_name));
+	new_node.seed_port = port;
 	new_node.is_seed = true;
 
 	if (mesh_node_endpoint_list_fill(&new_node) != 0) {
@@ -7447,8 +7459,7 @@ mesh_tip(char* host, int port)
 	DEBUG("Added new mesh seed %s:%d", host, port);
 	rv = SHASH_OK;
 
-	Exit:
-
+Exit:
 	if (rv != SHASH_OK) {
 		// Endure endpoint allocated space is freed.
 		mesh_node_destroy(&new_node);
@@ -7550,9 +7561,9 @@ mesh_tip_clear_reduce(void* key, void* data, void* udata)
 
 	// Single node tip clear command.
 	if (mesh_node->is_seed &&
-	    strncmp(mesh_node->mesh_seed_host_name, tip_clear_udata->host,
+	    strncmp(mesh_node->seed_host_name, tip_clear_udata->host,
 		    HOST_NAME_MAX) == 0 &&
-	    mesh_node->mesh_seed_port == tip_clear_udata->port) {
+	    mesh_node->seed_port == tip_clear_udata->port) {
 		// The hostname and the port match the input seed
 		// address and port.
 		rv = SHASH_REDUCE_DELETE;
@@ -7597,8 +7608,8 @@ mesh_tip_clear_reduce(void* key, void* data, void* udata)
 
 		if (mesh_node->is_seed) {
 			INFO("Removed seed node %s:%d with endpoints {%s}",
-			     mesh_node->mesh_seed_host_name,
-			     mesh_node->mesh_seed_port, endpoint_list_str);
+			     mesh_node->seed_host_name,
+			     mesh_node->seed_port, endpoint_list_str);
 		} else {
 			INFO("Removed node with endpoints {%s}",
 			     endpoint_list_str);
@@ -7744,9 +7755,7 @@ mesh_dump(bool verbose)
 	}
 
 	MESH_LOCK();
-
 	shash_reduce(g_hb.mode_state.mesh_state.nodeid_to_mesh_node, mesh_dump_reduce, NULL);
-
 	MESH_UNLOCK();
 }
 
@@ -7881,7 +7890,8 @@ multicast_published_endpoint_list_refresh(bool is_legacy)
 	}
 
 	rv = 0;
-	Exit:
+
+Exit:
 	MULTICAST_UNLOCK();
 	return rv;
 }
@@ -8031,10 +8041,19 @@ multicast_stop()
 static void
 multicast_dump(bool verbose)
 {
-	if (!IS_MESH()) {
-		// Mode is multicast.
-		INFO("HB Multicast TTL:	 %d", config_multicast_ttl_get());
+	if (IS_MESH()) {
+		return;
 	}
+
+	if(HB_PROTOCOL_IS_LEGACY()) {
+		char endpoint_list_str[ENDPOINT_LIST_STR_SIZE()];
+		as_endpoint_list_to_string(
+			g_hb.mode_state.multicast_state.published_legacy_endpoint_list,
+	  		endpoint_list_str, sizeof(endpoint_list_str));
+		INFO("HB Multicast Advertised: {%s}", endpoint_list_str);
+	}
+	// Mode is multicast.
+	INFO("HB Multicast TTL: %d", config_multicast_ttl_get());
 }
 
 /**
@@ -9009,7 +9028,7 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 		hb_event_queue(AS_HB_NODE_ARRIVE, &source, 1);
 	}
 
-	Exit:
+Exit:
 	HB_UNLOCK();
 
 	// Call plugin change listeners outside of a lock to prevent
