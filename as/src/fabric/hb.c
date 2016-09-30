@@ -4235,7 +4235,7 @@ channel_accept_connection(cf_socket* lsock)
 			// and not do too much activity. So, sleep. We should
 			// not sleep too long as this same function is supposed
 			// to send heartbeat also.
-			usleep(MAX(config_tx_interval_get() / 2, 1) * 1000);
+			usleep(MAX(AS_HB_TX_INTERVAL_MS_MIN, 1) * 1000);
 			return;
 		} else {
 			// TODO: Find what there errors are.
@@ -6461,11 +6461,24 @@ mesh_tender(void* arg)
 	DETAIL("Mesh tender started.");
 	// Figure out which nodes need to be connected to.
 	// collect nodes to connect to and remove dead nodes.
-	as_hb_mesh_tend_reduce_udata tend_reduce_udata =
-	{
-	 NULL, 0, 0 };
+	as_hb_mesh_tend_reduce_udata tend_reduce_udata = { NULL, 0, 0 };
+
+	cf_clock last_time = 0;
 
 	while (IS_MESH() && MESH_IS_RUNNING()) {
+		cf_clock curr_time = cf_getms();
+
+		if ((curr_time - last_time) < MESH_TEND_INTERVAL()) {
+			// Interval has not been reached for sending heartbeats
+			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
+					   (last_time + MESH_TEND_INTERVAL()) -
+				     curr_time) *
+			       1000);
+			continue;
+		}
+
+		last_time = curr_time;
+
 		DETAIL("Tending mesh list.");
 
 		MESH_LOCK();
@@ -6491,8 +6504,6 @@ mesh_tender(void* arg)
 		}
 
 		DETAIL("Done tending mesh list.");
-
-		usleep(MESH_TEND_INTERVAL() * 1000);
 	}
 
 	if (tend_reduce_udata.to_connect) {
@@ -8005,7 +8016,7 @@ multicast_published_endpoint_list_refresh(bool is_legacy)
 	}
 
 	char endpoint_list_str[ENDPOINT_LIST_STR_SIZE()];
-	as_endpoint_list_to_string(g_hb.mode_state.multicast_state.published_legacy_endpoint_list, 
+	as_endpoint_list_to_string(g_hb.mode_state.multicast_state.published_legacy_endpoint_list,
 		endpoint_list_str, sizeof(endpoint_list_str));
 	INFO("Updated heartbeat published address list to {%s}", endpoint_list_str);
 
@@ -8646,11 +8657,10 @@ hb_transmitter(void* arg)
 {
 	DETAIL("Heartbeat transmitter started.");
 
-	uint64_t last_time = 0;
+	cf_clock last_time = 0;
 
 	while (HB_IS_RUNNING()) {
-
-		uint64_t curr_time = cf_getms();
+		cf_clock curr_time = cf_getms();
 
 		if ((curr_time - last_time) < PULSE_TRANSMIT_INTERVAL()) {
 			// Interval has not been reached for sending heartbeats
@@ -8848,7 +8858,23 @@ void*
 hb_adjacency_tender(void* arg)
 {
 	DETAIL("Adjacency tender started.");
+
+	cf_clock last_time = 0;
+
 	while (HB_IS_RUNNING()) {
+		cf_clock curr_time = cf_getms();
+
+		if ((curr_time - last_time) < ADJACENCY_TEND_INTERVAL()) {
+			// Interval has not been reached for sending heartbeats
+			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
+					   (last_time + ADJACENCY_TEND_INTERVAL()) -
+				     curr_time) *
+			       1000);
+			continue;
+		}
+
+		last_time = curr_time;
+
 		DETAIL("Tending adjacency list.");
 		HB_LOCK();
 		cf_node dead_nodes[shash_get_size(g_hb.adjacency)];
@@ -8869,10 +8895,6 @@ hb_adjacency_tender(void* arg)
 		hb_event_publish_pending();
 
 		DETAIL("Done tending adjacency list.");
-
-		// Sleep for some time.
-		// TODO: Is this too fast?
-		usleep(ADJACENCY_TEND_INTERVAL() * 1000);
 	}
 
 	DETAIL("Adjacency tender shut down.");
