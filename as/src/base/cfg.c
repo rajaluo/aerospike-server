@@ -76,11 +76,6 @@
 // The runtime configuration instance.
 as_config g_config;
 
-// Heartbeat transient config. TODO - find a better way.
-static as_serv_spec g_hb_serv_spec;
-static as_addr_list g_hb_multicast_groups;
-
-
 //==========================================================
 // Forward declarations.
 //
@@ -2418,13 +2413,13 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_NETWORK_HEARTBEAT_ADDRESS:
-				cfg_add_addr_bind(line.val_tok_1, &g_hb_serv_spec);
+				cfg_add_addr_bind(line.val_tok_1, &c->hb_serv_spec);
 				break;
 		    case CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP:
-				add_addr(line.val_tok_1, &g_hb_multicast_groups);
+				add_addr(line.val_tok_1, &c->hb_multicast_groups);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PORT:
-				g_hb_serv_spec.port = cfg_port(&line);
+				c->hb_serv_spec.port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT:
 				cfg_add_mesh_seed_addr_port(cfg_strdup_no_checks(&line), cfg_port_val2(&line));
@@ -3529,20 +3524,20 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	cf_serv_cfg_init(&g_config.hb_config.bind_cfg);
 
-	if (g_hb_serv_spec.bind.n_addrs == 0) {
-		any.port = g_hb_serv_spec.port;
+	if (c->hb_serv_spec.bind.n_addrs == 0) {
+		any.port = c->hb_serv_spec.port;
 		cfg_serv_spec_to_bind(&any, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
 	}
 	else {
-		cfg_serv_spec_to_bind(&g_hb_serv_spec, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
+		cfg_serv_spec_to_bind(&c->hb_serv_spec, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
 	}
 
 	// Heartbeat multicast groups.
 
-	if (g_hb_multicast_groups.n_addrs > 0) {
-		cfg_mserv_config_from_addrs(&g_hb_multicast_groups,
-				g_hb_serv_spec.bind.n_addrs ? &g_hb_serv_spec.bind : &any.bind,
-				&g_config.hb_config.multicast_group_cfg, g_hb_serv_spec.port,
+	if (c->hb_multicast_groups.n_addrs > 0) {
+		cfg_mserv_config_from_addrs(&c->hb_multicast_groups,
+				c->hb_serv_spec.bind.n_addrs ? &c->hb_serv_spec.bind : &any.bind,
+				&g_config.hb_config.multicast_group_cfg, c->hb_serv_spec.port,
 				CF_SOCK_OWNER_HEARTBEAT, g_config.hb_config.multicast_ttl);
 	}
 

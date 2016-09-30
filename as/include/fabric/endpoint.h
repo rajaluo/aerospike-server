@@ -43,7 +43,7 @@
 #include "socket.h"
 
 /**
- * Inidicates if this endpoint supports TLS.
+ * Indicates if this endpoint supports TLS.
  */
 #define AS_ENDPOINT_TLS_MASK 0x01
 
@@ -217,7 +217,7 @@ as_endpoint*
 as_endpoint_from_sock_cfg(const cf_sock_cfg* src);
 
 /**
- * Indicates if an endpoint supports listed capabilites.
+ * Indicates if an endpoint supports listed capabilities.
  * @return true if the endpoint supports the input capability.
  */
 bool

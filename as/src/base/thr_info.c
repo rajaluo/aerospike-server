@@ -462,6 +462,8 @@ info_get_endpoints(char *name, cf_dyn_buf *db)
 	info_append_string(db, "service.alternate-tls-access-addresses", string);
 	cf_free(string);
 
+	as_hb_info_endpoints_get(db);
+
 	info_append_int(db, "fabric.port", g_fabric_port);
 
 	string = bind_to_string(&g_fabric_bind, CF_SOCK_OWNER_FABRIC);
@@ -609,7 +611,7 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 	// Command Format:  "tip-clear:{host-port-list=<hpl>}" [the
 	// "host-port-list" argument is optional]
 	// where <hpl> is either "all" or else a comma-separated list of items
-	// of the form: <HostIPAddr>:<PortNum>
+	// of the form: <HostIPv4Addr>:<PortNum> or [<HostIPv6Addr>]:<PortNum>
 
 	char host_port_list[3000];
 	int host_port_list_len = sizeof(host_port_list);
@@ -626,9 +628,16 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 			  strtok_r(host_port_list, ",", &save_ptr);
 
 			while (host_port != NULL) {
+   				char* host_port_delim = ":";
+   				if(*host_port == '[') {
+					// Parse IPv6 address differently.
+					host_port++;
+					host_port_delim = "]";
+				}
+
 				char* host_port_save_ptr = NULL;
 				char* host =
-				  strtok_r(host_port, ":", &host_port_save_ptr);
+				  strtok_r(host_port, host_port_delim, &host_port_save_ptr);
 
 				if (host == NULL) {
 					cf_warning(AS_INFO,
@@ -638,7 +647,12 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 				}
 
 				char* port_str =
-				  strtok_r(NULL, ":", &host_port_save_ptr);
+				  strtok_r(NULL, host_port_delim, &host_port_save_ptr);
+
+				if(port_str != NULL && *port_str == ':') {
+			   		// IPv6 case
+				   	port_str++;
+				}
 				if (port_str == NULL ||
 				    0 != cf_str_atoi(port_str, &port)) {
 					cf_warning(AS_INFO,
