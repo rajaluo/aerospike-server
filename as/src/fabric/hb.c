@@ -1419,6 +1419,7 @@ static msg_template g_hb_v2_msg_template[] =
  * Logging macros.
  */
 #define CRASH(format, ...) cf_crash(AS_HB, format, ##__VA_ARGS__)
+#define CRASH_NOSTACK(format, ...) cf_crash_nostack(AS_HB, format, ##__VA_ARGS__)
 #define WARNING(format, ...) cf_warning(AS_HB, format, ##__VA_ARGS__)
 #define INFO(format, ...) cf_info(AS_HB, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_HB, format, ##__VA_ARGS__)
@@ -1641,6 +1642,7 @@ void endpoint_list_to_string_process(const as_endpoint_list* endpoint_list, void
 static cf_node config_self_nodeid_get();
 static as_hb_mode config_mode_get();
 static const cf_serv_cfg* config_bind_cfg_get();
+static bool config_binding_is_valid(char** error);
 static const cf_mserv_cfg* config_multicast_group_cfg_get();
 static as_hb_protocol config_protocol_get();
 static void config_protocol_set(as_hb_protocol new_protocol);
@@ -1653,6 +1655,7 @@ static void config_fabric_grace_factor_set(int new_factor);
 static uint32_t config_override_mtu_get();
 static void config_override_mtu_set(uint32_t mtu);
 static unsigned char config_multicast_ttl_get();
+static int config_get_legacy_addr(const cf_serv_cfg* hb_bind_cfg, const cf_serv_cfg* fb_bind_cfg, cf_serv_cfg* publish_bind_cfg);
 
 static void channel_event_init(as_hb_channel_event* event);
 static void channel_dump(bool verbose);
@@ -1802,38 +1805,47 @@ as_hb_protocol_get()
  * Set heartbeat protocol version.
  */
 int
-as_hb_protocol_set(as_hb_protocol protocol)
+as_hb_protocol_set(as_hb_protocol new_protocol)
 {
 	SET_PROTOCOL_LOCK();
 	int rv = 0;
-	if (config_protocol_get() == protocol) {
-		INFO("no heartbeat protocol change needed");
+	if (config_protocol_get() == new_protocol) {
+		INFO("No heartbeat protocol change needed.");
 		rv = 0;
 		goto Exit;
 	}
-	char protocol_s[HB_PROTOCOL_STR_MAX_LEN()];
-	switch (protocol) {
+	char old_protocol_s[HB_PROTOCOL_STR_MAX_LEN()];
+	char new_protocol_s[HB_PROTOCOL_STR_MAX_LEN()];
+	as_hb_protocol_get_s(config_protocol_get(), old_protocol_s);
+	as_hb_protocol_get_s(new_protocol, new_protocol_s);
+	switch (new_protocol) {
 	case AS_HB_PROTOCOL_V1:
-	case AS_HB_PROTOCOL_V2:
+	case AS_HB_PROTOCOL_V2: {
+		// Validate heartbeat and fabric bind addresses
+		char *error;
+		if(!config_binding_is_valid(&error)) {
+			WARNING("Protocol version not set to %s. %s", new_protocol_s, error);
+			rv = -1;
+			goto Exit;
+		}
+	}
 	case AS_HB_PROTOCOL_V3:
 		if (HB_IS_RUNNING()) {
-			as_hb_protocol_get_s(config_protocol_get(), protocol_s);
 			INFO("Disabling current "
-				"heartbeat protocol %s", protocol_s);
+				"heartbeat protocol %s", old_protocol_s);
 			hb_stop();
 		}
-		as_hb_protocol_get_s(protocol, protocol_s);
-		INFO("Setting heartbeat protocol version number to %s", protocol_s);
-		config_protocol_set(protocol);
+		INFO("Setting heartbeat protocol version number to %s", new_protocol_s);
+		config_protocol_set(new_protocol);
 		hb_start();
-		INFO("Heartbeat protocol version set to %s", protocol_s);
+		INFO("Heartbeat protocol version set to %s", new_protocol_s);
 
 		break;
 
 	case AS_HB_PROTOCOL_NONE:
 		INFO("Setting heartbeat protocol version to none");
 		hb_stop();
-		config_protocol_set(protocol);
+		config_protocol_set(new_protocol);
 		INFO("Heartbeat protocol set to none");
 		break;
 
@@ -1848,8 +1860,6 @@ as_hb_protocol_set(as_hb_protocol protocol)
 		// NB: "protocol" is never actually set to "RESET" ~~
 		// it is simply a trigger for the reset action.
 		INFO("Resetting heartbeat messaging");
-		as_hb_protocol_get_s(config_protocol_get(), protocol_s);
-		INFO("Disabling current heartbeat protocol (%s)", protocol_s);
 
 		hb_stop();
 
@@ -1860,7 +1870,7 @@ as_hb_protocol_set(as_hb_protocol protocol)
 		break;
 
 	default:
-		WARNING("Unknown heartbeat protocol version number: %d", protocol);
+		WARNING("Unknown heartbeat protocol version number: %d", new_protocol);
 		rv = -1;
 		goto Exit;
 	}
@@ -1962,61 +1972,10 @@ as_hb_register_listener(as_hb_event_fn event_callback, void* udata)
 void
 as_hb_config_validate()
 {
-	const cf_serv_cfg* bind_cfg = config_bind_cfg_get();
-	const cf_mserv_cfg* multicast_group_cfg = config_multicast_group_cfg_get();
-
-	if (IS_MESH()) {
-		if (bind_cfg->n_cfgs == 0) {
-			// Should not happen in practice.
-			CRASH("No bind addresses found for heartbeat.");
-		}
-
-		// Ensure we have a valid port for all bind endpoints.
-		for (int i = 0; i < bind_cfg->n_cfgs; i++) {
-			if (bind_cfg->cfgs[i].port == 0) {
-				CRASH("Invalid mesh listening port %d", bind_cfg->cfgs[i].port);
-			}
-		}
-
-		if (mesh_published_endpoint_list_refresh(
-			HB_PROTOCOL_IS_LEGACY())) {
-			CRASH("Error initializing mesh published "
-				"address list.");
-		}
-
-		if (multicast_group_cfg->n_cfgs != 0) {
-			CRASH("Multicast groups not supported in mesh mode.");
-		}
-	} else {
-		const cf_mserv_cfg* multicast_group_cfg = config_multicast_group_cfg_get();
-
-		if (multicast_group_cfg->n_cfgs == 0) {
-			CRASH("No multicast groups specified.");
-		}
-
-		// Ensure multicast groups have valid ports.
-		// TODO: We could check if the address is valid multicast.
-		for (int i = 0; i < multicast_group_cfg->n_cfgs; i++) {
-			if (multicast_group_cfg->cfgs[i].port == 0) {
-				CRASH("Invalid multicast group port %d", multicast_group_cfg->cfgs[i].port);
-			}
-		}
-
-		if (g_config.hb_config.mesh_seed_addrs[0]) {
-			CRASH("Invalid config option. mesh-seed-address-port not "
-				"supported for multicast mode.");
-		}
-
-		if (multicast_published_endpoint_list_refresh(
-			HB_PROTOCOL_IS_LEGACY())) {
-			CRASH("Error initializing multicast published "
-				"address list.");
-		}
+	char *error;
+	if(!config_binding_is_valid(&error)) {
+		CRASH_NOSTACK("%s", error);
 	}
-
-	// TODO: validate
-	// a. if protocol is v2 heartbeat published ip address includes is also
-	// used by fabric.
 }
 
 /**
@@ -3614,6 +3573,283 @@ config_mode_get()
 	return g_config.hb_config.mode;
 }
 
+/**
+ * Expand "any" binding addresses to actual interface addresses.
+ * @param bind_cfg the binding configuration.
+ * @param published_cfg (output) the server configuration to expand.
+ * @param ipv4_only indicates if only legacy addresses should be allowed.
+ */
+static void
+config_bind_serv_cfg_expand(const cf_serv_cfg* bind_cfg, cf_serv_cfg* published_cfg,
+	bool ipv4_only)
+{
+	cf_serv_cfg_init(published_cfg);
+	cf_sock_cfg sock_cfg;
+	cf_sock_cfg_init(&sock_cfg, CF_SOCK_OWNER_HEARTBEAT);
+
+	for (int i = 0; i < bind_cfg->n_cfgs; i++) {
+		sock_cfg.port = bind_cfg->cfgs[i].port;
+
+		// Expand "any" address to all interfaces.
+		if (cf_ip_addr_is_any(&bind_cfg->cfgs[0].addr)) {
+			cf_ip_addr all_addrs[CF_SOCK_CFG_MAX];
+			uint32_t n_all_addrs = CF_SOCK_CFG_MAX;
+			if (cf_inter_get_addr_all(all_addrs, &n_all_addrs) != 0) {
+				WARNING("Error getting all interface addresses.");
+				n_all_addrs = 0;
+			}
+
+			for (int j = 0; j < n_all_addrs; j++) {
+				// Skip local address if any is specified.
+				if (cf_ip_addr_is_local(&all_addrs[j])
+					|| (ipv4_only && !cf_ip_addr_is_legacy(&all_addrs[j]))) {
+					continue;
+				}
+
+				cf_ip_addr_copy(&all_addrs[j], &sock_cfg.addr);
+				if (cf_serv_cfg_add_sock_cfg(published_cfg, &sock_cfg)) {
+					CRASH("Error initializing published "
+						"address list.");
+				}
+			}
+		} else {
+			if (ipv4_only && !cf_ip_addr_is_legacy(&bind_cfg->cfgs[i].addr)) {
+				continue;
+			}
+
+			cf_ip_addr_copy(&bind_cfg->cfgs[i].addr, &sock_cfg.addr);
+			if (cf_serv_cfg_add_sock_cfg(published_cfg, &sock_cfg)) {
+				CRASH("Error initializing published "
+					"address list.");
+			}
+		}
+	}
+}
+
+/**
+ * Check if a bind configuration ips are a subset of the other bind
+ * configuration's ips.
+ *
+ * @param cfg1 the first configuration.
+ * @param cfg2 the second configuration.
+ * @param ipv4_only set to true if only ipv4 addresses should be considered.
+ * @return true if cfg1 is a subset of cfg2, false otherwise.
+ */
+static bool
+config_serv_cfg_is_subset(const cf_serv_cfg* cfg1, const cf_serv_cfg* cfg2,
+			  bool ipv4_only)
+{
+	cf_serv_cfg cfg1_expanded;
+
+	config_bind_serv_cfg_expand(cfg1, &cfg1_expanded, ipv4_only);
+
+	cf_serv_cfg cfg2_expanded;
+
+	config_bind_serv_cfg_expand(cfg2, &cfg2_expanded, ipv4_only);
+
+	for (int i = 0; i < cfg1_expanded.n_cfgs; i++) {
+		bool match_found = false;
+		for (int j = 0; j < cfg2_expanded.n_cfgs; j++) {
+			if (cf_ip_addr_compare(&cfg1_expanded.cfgs[i].addr,
+					       &cfg2_expanded.cfgs[j].addr) ==
+			    0) {
+				match_found = true;
+				break;
+			}
+		}
+
+		if (!match_found) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/**
+ * Compute legacy publishable address. The publishable address should always be
+ * an intersection of heartbeat bind addresses and fabric binding IPv4
+ * addresses.
+ * Prefers addresses that are default routes.
+ * @param hb_bind_cfg heartbeat bind config
+ * @param fb_bind_cfg fabric bind config
+ * @param publish_bind_cfg (output) publishable bind address
+ * @return 0 on success, -1 on failure.
+ */
+static int
+config_get_legacy_addr(const cf_serv_cfg* hb_bind_cfg,
+		       const cf_serv_cfg* fb_bind_cfg,
+		       cf_serv_cfg* publish_bind_cfg)
+{
+
+	cf_serv_cfg hb_published_cfg;
+
+	config_bind_serv_cfg_expand(hb_bind_cfg, &hb_published_cfg, true);
+
+	if (!hb_published_cfg.n_cfgs) {
+		return -1;
+	}
+
+	cf_serv_cfg fb_published_cfg;
+
+	config_bind_serv_cfg_expand(fb_bind_cfg, &fb_published_cfg, true);
+
+	if (!fb_published_cfg.n_cfgs) {
+		return -1;
+	}
+
+	cf_serv_cfg intersect_cfg;
+	cf_serv_cfg_init(&intersect_cfg);
+
+	for (int i = 0; i < hb_published_cfg.n_cfgs; i++) {
+		for (int j = 0; j < fb_published_cfg.n_cfgs; j++) {
+			if (cf_ip_addr_compare(
+			      &hb_published_cfg.cfgs[i].addr,
+			      &fb_published_cfg.cfgs[j].addr) == 0) {
+				if (cf_serv_cfg_add_sock_cfg(
+				      &intersect_cfg,
+				      &hb_published_cfg.cfgs[i])) {
+					CRASH("Error initializing intersect "
+					      "address list.");
+				}
+			}
+		}
+	}
+
+	int prefered_addr_index = 0;
+
+	// Prefer default interface, if there are multiple binding
+	// addresses.
+	cf_ip_addr default_addresses[CF_SOCK_CFG_MAX];
+	uint32_t num_default = CF_SOCK_CFG_MAX;
+	if (cf_inter_get_addr_def_legacy(default_addresses, &num_default) ==
+	    0) {
+		for (int i = 0; i < intersect_cfg.n_cfgs; i++) {
+			for (int j = 0; j < num_default; j++) {
+				if (cf_ip_addr_compare(
+				      &intersect_cfg.cfgs[i].addr,
+				      &default_addresses[j]) == 0) {
+					prefered_addr_index = i;
+				}
+				break;
+			}
+		}
+	}
+
+	if (intersect_cfg.n_cfgs == 0) {
+		return -1;
+	}
+
+	cf_sock_cfg publish_sock_cfg;
+	cf_sock_cfg_init(&publish_sock_cfg, CF_SOCK_OWNER_HEARTBEAT);
+
+	publish_sock_cfg.port = intersect_cfg.cfgs[prefered_addr_index].port;
+	cf_ip_addr_copy(&intersect_cfg.cfgs[prefered_addr_index].addr,
+			&publish_sock_cfg.addr);
+
+	if (cf_serv_cfg_add_sock_cfg(publish_bind_cfg, &publish_sock_cfg)) {
+		CRASH("Error initializing published "
+		      "address list.");
+	}
+
+	return 0;
+}
+
+/**
+ * Checks if the heartbeat binding configuration is valid.
+ * @param error pointer to a static error message if validation fails, else will be set to NULL.
+ */
+static bool
+config_binding_is_valid(char** error)
+{
+	const cf_serv_cfg* bind_cfg = config_bind_cfg_get();
+	const cf_mserv_cfg* multicast_group_cfg = config_multicast_group_cfg_get();
+
+	if (IS_MESH()) {
+		if (bind_cfg->n_cfgs == 0) {
+			// Should not happen in practice.
+			*error = "No bind addresses found for heartbeat.";
+			return false;
+		}
+
+		// Ensure we have a valid port for all bind endpoints.
+		for (int i = 0; i < bind_cfg->n_cfgs; i++) {
+			if (bind_cfg->cfgs[i].port == 0) {
+				*error = "Invalid mesh listening port";
+				return false;
+			}
+		}
+
+		cf_serv_cfg publish_serv_cfg;
+		cf_serv_cfg_init(&publish_serv_cfg);
+
+		if (HB_PROTOCOL_IS_LEGACY() &&
+		    config_get_legacy_addr(config_bind_cfg_get(),
+					   &g_fabric_bind,
+					   &publish_serv_cfg) != 0) {
+			*error = "Legacy heartbeat versions require atleast "
+				 "one common heartbeat and fabric binding IPv4 "
+				 "address.";
+			return false;
+		}
+
+		if (multicast_group_cfg->n_cfgs != 0) {
+			*error = "Invalid config option: multicast-group not "
+				 "supported in mesh mode.";
+			return false;
+		}
+	} else {
+		const cf_mserv_cfg* multicast_group_cfg =
+		  config_multicast_group_cfg_get();
+
+		if (multicast_group_cfg->n_cfgs == 0) {
+			*error = "No multicast groups specified.";
+			return false;
+		}
+
+		// Ensure multicast groups have valid ports.
+		// TODO: We could check if the address is valid multicast.
+		for (int i = 0; i < multicast_group_cfg->n_cfgs; i++) {
+			if (multicast_group_cfg->cfgs[i].port == 0) {
+				*error = "Invalid multicast port.";
+				return false;
+			}
+		}
+
+		if (g_config.hb_config.mesh_seed_addrs[0]) {
+			*error = "Invalid config option: "
+				 "mesh-seed-address-port not supported for "
+				 "multicast mode.";
+			return false;
+		}
+
+		cf_serv_cfg publish_serv_cfg;
+		cf_serv_cfg_init(&publish_serv_cfg);
+
+		if (HB_PROTOCOL_IS_LEGACY()) {
+			if (!config_serv_cfg_is_subset(bind_cfg, &g_fabric_bind,
+						       true)) {
+				*error = "Legacy heartbeat IPv4 addresses "
+					 "should be a subset of fabric binding "
+					 "addresses.";
+				return false;
+			}
+
+			if (config_get_legacy_addr(&g_fabric_bind,
+						   &g_fabric_bind,
+						   &publish_serv_cfg) != 0) {
+				*error =
+				  "Legacy heartbeat versions require "
+				  "atleast one fabric binding IPv4 address.";
+				return false;
+			}
+		}
+	}
+
+	*error = NULL;
+	return true;
+}
+
 /*----------------------------------------------------------------------------
  * Channel sub module.
  *----------------------------------------------------------------------------*/
@@ -4249,20 +4485,27 @@ channel_multicast_msg_read(cf_socket* socket, msg* msg)
 	}
 
 	if (HB_MSG_IS_LEGACY(msg)) {
-		uint32_t addr;
-		if (cf_ip_addr_to_binary(&from.addr, (uint8_t*) &addr, sizeof(addr)) <= 0) {
-			rv = AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
-			goto Exit;
-		}
+		if (!msg_is_set(msg, AS_HB_V2_MSG_ADDR)) {
+			// Fall back and use the multicast source ip.
+			uint32_t addr;
+			if (cf_ip_addr_to_binary(&from.addr, (uint8_t*)&addr,
+						 sizeof(addr)) <= 0) {
+				rv = AS_HB_CHANNEL_MSG_CHANNEL_FAIL;
+				goto Exit;
+			}
 
-		// Set AS_HB_MSG_ADDR,	as heartbeat version v2 does not set
-		// this in the message header for multicast, but we expect the
-		// source address to be present in the header.
-		if (msg_set_uint32(msg, AS_HB_V2_MSG_ADDR, addr) != 0) {
-			CRASH("Error setting heartbeat address on msg.");
-		}
-		if (msg_set_uint32(msg, AS_HB_V2_MSG_PORT, 0) != 0) {
-			CRASH("Error setting heartbeat port on msg.");
+			// Set AS_HB_MSG_ADDR,	as heartbeat version v2 does
+			// not set
+			// this in the message header for multicast, but we
+			// expect the
+			// source address to be present in the header.
+			if (msg_set_uint32(msg, AS_HB_V2_MSG_ADDR, addr) != 0) {
+				CRASH(
+				  "Error setting heartbeat address on msg.");
+			}
+			if (msg_set_uint32(msg, AS_HB_V2_MSG_PORT, 0) != 0) {
+				CRASH("Error setting heartbeat port on msg.");
+			}
 		}
 	}
 	rv = AS_HB_CHANNEL_MSG_READ_SUCCESS;
@@ -5733,59 +5976,6 @@ channel_dump(bool verbose)
  *----------------------------------------------------------------------------*/
 
 /**
- * Get addresses to publish.
- * @param bind_cfg the binding configuration.
- * @param published_cfg the server configuration to publish.
- * @param ipv4_only indicates if only legacy addresses should be allowed.
- */
-static void
-mesh_published_serv_cfg_fill(const cf_serv_cfg* bind_cfg, cf_serv_cfg* published_cfg,
-	bool ipv4_only)
-{
-	cf_serv_cfg_init(published_cfg);
-	cf_sock_cfg sock_cfg;
-	cf_sock_cfg_init(&sock_cfg, CF_SOCK_OWNER_HEARTBEAT);
-
-	for (int i = 0; i < bind_cfg->n_cfgs; i++) {
-		sock_cfg.port = bind_cfg->cfgs[i].port;
-
-		// Expand "any" address to all interfaces.
-		if (cf_ip_addr_is_any(&bind_cfg->cfgs[0].addr)) {
-			cf_ip_addr all_addrs[CF_SOCK_CFG_MAX];
-			uint32_t n_all_addrs = CF_SOCK_CFG_MAX;
-			if (cf_inter_get_addr_all(all_addrs, &n_all_addrs) != 0) {
-				WARNING("Error getting all interface addresses.");
-				n_all_addrs = 0;
-			}
-
-			for (int j = 0; j < n_all_addrs; j++) {
-				// Skip local address if any is specified.
-				if (cf_ip_addr_is_local(&all_addrs[j])
-					|| (ipv4_only && !cf_ip_addr_is_legacy(&all_addrs[j]))) {
-					continue;
-				}
-
-				cf_ip_addr_copy(&all_addrs[j], &sock_cfg.addr);
-				if (cf_serv_cfg_add_sock_cfg(published_cfg, &sock_cfg)) {
-					CRASH("Error initializing published "
-						"address list.");
-				}
-			}
-		} else {
-			if (ipv4_only && !cf_ip_addr_is_legacy(&bind_cfg->cfgs[i].addr)) {
-				continue;
-			}
-
-			cf_ip_addr_copy(&bind_cfg->cfgs[i].addr, &sock_cfg.addr);
-			if (cf_serv_cfg_add_sock_cfg(published_cfg, &sock_cfg)) {
-				CRASH("Error initializing published "
-					"address list.");
-			}
-		}
-	}
-}
-
-/**
  * Refresh	the mesh published endpoint list.
  * @param is_legacy to indicate if we are running legacy protocol, false
  * otherwise.
@@ -5816,7 +6006,7 @@ mesh_published_endpoint_list_refresh(bool is_legacy)
 		const cf_serv_cfg* bind_cfg = config_bind_cfg_get();
 		cf_serv_cfg published_cfg;
 
-		mesh_published_serv_cfg_fill(bind_cfg, &published_cfg,
+		config_bind_serv_cfg_expand(bind_cfg, &published_cfg,
 			g_hb.mode_state.mesh_state.published_endpoint_list_ipv4_only);
 
 		g_hb.mode_state.mesh_state.published_endpoint_list = as_endpoint_list_from_serv_cfg(
@@ -5843,47 +6033,14 @@ mesh_published_endpoint_list_refresh(bool is_legacy)
 		goto Exit;
 	}
 
-	const cf_serv_cfg* bind_cfg = config_bind_cfg_get();
-	cf_serv_cfg published_cfg;
-
-	mesh_published_serv_cfg_fill(bind_cfg, &published_cfg, true);
-
-	if (!published_cfg.n_cfgs) {
-		WARNING("No IPv4 interfaces found for the legacy "
-			"heartbeat protocol.");
-		rv = -1;
-		goto Exit;
-	}
-
-	int prefered_addr_index = 0;
-
-	// Prefer default interface, if there are multiple binding
-	// addresses.
-	cf_ip_addr default_addresses[CF_SOCK_CFG_MAX];
-	uint32_t num_default = CF_SOCK_CFG_MAX;
-	if (cf_inter_get_addr_def_legacy(default_addresses, &num_default) == 0) {
-		for (int i = 0; i < published_cfg.n_cfgs; i++) {
-			for (int j = 0; j < num_default; j++) {
-				if (cf_ip_addr_compare(&published_cfg.cfgs[i].addr, &default_addresses[j]) == 0) {
-					prefered_addr_index = i;
-				}
-				break;
-			}
-		}
-	}
-
 	cf_serv_cfg temp_serv_cfg;
 	cf_serv_cfg_init(&temp_serv_cfg);
 
-	cf_sock_cfg sock_cfg;
-	cf_sock_cfg_init(&sock_cfg, CF_SOCK_OWNER_HEARTBEAT);
-
-	sock_cfg.port = published_cfg.cfgs[prefered_addr_index].port;
-	cf_ip_addr_copy(&published_cfg.cfgs[prefered_addr_index].addr, &sock_cfg.addr);
-	if (cf_serv_cfg_add_sock_cfg(&temp_serv_cfg, &sock_cfg)) {
+	if (config_get_legacy_addr(config_bind_cfg_get(), &g_fabric_bind, &temp_serv_cfg) != 0) {
+		WARNING("Legacy heartbeat versions require atleast one "
+			      "common heartbeat and fabric bind address.");
 		rv = -1;
-		CRASH("Error initializing mesh published "
-			"address list.");
+		goto Exit;
 	}
 
 	g_hb.mode_state.mesh_state.published_legacy_endpoint_list = as_endpoint_list_from_serv_cfg(
@@ -5891,8 +6048,8 @@ mesh_published_endpoint_list_refresh(bool is_legacy)
 
 	if (!g_hb.mode_state.mesh_state.published_legacy_endpoint_list) {
 		rv = -1;
+		goto Exit;
 	}
-
 
 	char endpoint_list_str[ENDPOINT_LIST_STR_SIZE()];
 	as_endpoint_list_to_string(g_hb.mode_state.mesh_state.published_legacy_endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
@@ -7806,57 +7963,6 @@ mesh_dump(bool verbose)
 /*----------------------------------------------------------------------------
  * Multicast sub module.
  *----------------------------------------------------------------------------*/
-/**
- * Get multicast interface addresses to publish.
- * @param bind_cfg the binding configuration.
- * @param published_cfg the server configuration to publish.
- * @param ipv4_only indicates if only legacy addresses should be allowed.
- */
-static void
-multicast_published_serv_cfg_fill(const cf_mserv_cfg* multicast_cfg, cf_serv_cfg* published_cfg,
-	bool ipv4_only)
-{
-	cf_serv_cfg_init(published_cfg);
-	cf_sock_cfg sock_cfg;
-	cf_sock_cfg_init(&sock_cfg, CF_SOCK_OWNER_HEARTBEAT);
-
-	for (int i = 0; i < multicast_cfg->n_cfgs; i++) {
-		sock_cfg.port = multicast_cfg->cfgs[i].port;
-
-		// Expand "any" address to all interfaces.
-		if (cf_ip_addr_is_any(&multicast_cfg->cfgs[0].if_addr)) {
-			cf_ip_addr all_addrs[CF_SOCK_CFG_MAX];
-			uint32_t n_all_addrs = CF_SOCK_CFG_MAX;
-			if (cf_inter_get_addr_all(all_addrs, &n_all_addrs) != 0) {
-				WARNING("Error getting all interface addresses.");
-				n_all_addrs = 0;
-			}
-
-			for (int j = 0; j < n_all_addrs; j++) {
-				// Skip local address if any is specified.
-				if (cf_ip_addr_is_local(&all_addrs[j]) || (ipv4_only && !cf_ip_addr_is_legacy(&all_addrs[j]))) {
-					continue;
-				}
-
-				cf_ip_addr_copy(&all_addrs[j], &sock_cfg.addr);
-				if (cf_serv_cfg_add_sock_cfg(published_cfg, &sock_cfg)) {
-					CRASH("Error initializing published "
-						"address list.");
-				}
-			}
-		} else {
-			if (ipv4_only && !cf_ip_addr_is_legacy(&multicast_cfg->cfgs[i].if_addr)) {
-				continue;
-			}
-
-			cf_ip_addr_copy(&multicast_cfg->cfgs[i].if_addr, &sock_cfg.addr);
-			if (cf_serv_cfg_add_sock_cfg(published_cfg, &sock_cfg)) {
-				CRASH("Error initializing published "
-					"address list.");
-			}
-		}
-	}
-}
 
 /**
  * Refresh the multicast published endpoint list.
@@ -7882,48 +7988,13 @@ multicast_published_endpoint_list_refresh(bool is_legacy)
 		goto Exit;
 	}
 
-	const cf_mserv_cfg* multicast_cfg = config_multicast_group_cfg_get();
 	cf_serv_cfg published_cfg;
+	cf_serv_cfg_init(&published_cfg);
 
-	multicast_published_serv_cfg_fill(multicast_cfg, &published_cfg, true);
-
-	if (!published_cfg.n_cfgs) {
-		WARNING("No IPv4 interfaces found for the legacy "
-			"heartbeat protocol.");
-		rv = -1;
-		goto Exit;
-	}
-
-	// Prefer default interface, if there are multiple binding
-	// addresses.
-	cf_ip_addr default_addresses[CF_SOCK_CFG_MAX];
-	uint32_t num_default = CF_SOCK_CFG_MAX;
-	if (cf_inter_get_addr_def_legacy(default_addresses, &num_default) != 0) {
-		num_default = 0;
-	}
-
-	int prefered_addr_index = 0;
-	for (int i = 0; i < published_cfg.n_cfgs; i++) {
-		for (int j = 0; j < num_default; j++) {
-			if (cf_ip_addr_compare(&published_cfg.cfgs[i].addr, &default_addresses[j]) == 0) {
-				prefered_addr_index = i;
-			}
-			break;
-		}
-	}
-
-	cf_serv_cfg temp_serv_cfg;
-	cf_serv_cfg_init(&temp_serv_cfg);
-
-	cf_sock_cfg sock_cfg;
-	cf_sock_cfg_init(&sock_cfg, CF_SOCK_OWNER_HEARTBEAT);
-
-	sock_cfg.port = published_cfg.cfgs[prefered_addr_index].port;
-	cf_ip_addr_copy(&published_cfg.cfgs[prefered_addr_index].addr, &sock_cfg.addr);
-	if (cf_serv_cfg_add_sock_cfg(&temp_serv_cfg, &sock_cfg)) {
-		rv = -1;
-		CRASH("Error initializing multicast published "
-			"address list.");
+	if (config_get_legacy_addr(&g_fabric_bind, &g_fabric_bind,
+			&published_cfg) != 0) {
+		WARNING("Legacy heartbeat versions require atleast one "
+			"fabric binding IPv4 address.");
 	}
 
 	g_hb.mode_state.multicast_state.published_legacy_endpoint_list = as_endpoint_list_from_serv_cfg(
@@ -7932,6 +8003,11 @@ multicast_published_endpoint_list_refresh(bool is_legacy)
 	if (!g_hb.mode_state.multicast_state.published_legacy_endpoint_list) {
 		rv = -1;
 	}
+
+	char endpoint_list_str[ENDPOINT_LIST_STR_SIZE()];
+	as_endpoint_list_to_string(g_hb.mode_state.multicast_state.published_legacy_endpoint_list, 
+		endpoint_list_str, sizeof(endpoint_list_str));
+	INFO("Updated heartbeat published address list to {%s}", endpoint_list_str);
 
 	rv = 0;
 
