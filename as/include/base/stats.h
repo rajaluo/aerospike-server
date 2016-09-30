@@ -110,6 +110,11 @@ typedef struct as_stats_s {
 	histogram*		svc_demarshal_hist;
 	histogram*		svc_queue_hist;
 
+	histogram*		fabric_send_init_hist;
+	histogram*		fabric_send_fragment_hist;
+	histogram*		fabric_recv_fragment_hist;
+	histogram*		fabric_recv_cb_hist;
+
 	histogram*		_sindex_gc_validate_obj_hist; // time taken to validate sindex object
 	histogram*		_sindex_gc_delete_obj_hist; // time taken to delete sindex object by gc
 	histogram*		_sindex_gc_pimd_rlock_hist; // time spent under pimd rlock by sindex gc - TODO - unused?
