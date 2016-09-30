@@ -115,6 +115,7 @@ typedef struct as_config_s {
 	int				n_batch_index_threads;
 	int				clock_skew_max_ms; // maximum allowed skew between this node's physical clock and the physical component of its hybrid clock
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
+	PAD_BOOL		fabric_benchmarks_enabled;
 	PAD_BOOL		svc_benchmarks_enabled;
 	PAD_BOOL		info_hist_enabled;
 	int				n_fabric_workers;

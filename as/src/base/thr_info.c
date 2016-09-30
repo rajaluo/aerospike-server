@@ -1832,6 +1832,7 @@ info_service_config_get(cf_dyn_buf *db)
 	as_config_cluster_name_get(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
 
+	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
 	info_append_int(db, "fabric-workers", g_config.n_fabric_workers);
@@ -2718,6 +2719,20 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of query-longq-max-size from %d to %"PRIu64, g_config.query_long_q_max_size, val);
 			g_config.query_long_q_max_size = val;
+		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-fabric", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s", context);
+				g_config.fabric_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s", context);
+				g_config.fabric_benchmarks_enabled = false;
+				histogram_clear(g_stats.fabric_send_init_hist);
+				histogram_clear(g_stats.fabric_send_fragment_hist);
+				histogram_clear(g_stats.fabric_recv_fragment_hist);
+				histogram_clear(g_stats.fabric_recv_cb_hist);
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-svc", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {

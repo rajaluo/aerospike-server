@@ -269,6 +269,7 @@ typedef struct {
 	const uint8_t	*r_end;
 	uint32_t		r_msg_size;
 	msg_type		r_type;
+	uint64_t		benchmark_time;
 } fabric_buffer;
 
 // Worker queue
@@ -766,6 +767,10 @@ fabric_buffer_send_progress(fabric_buffer *fb, bool is_last)
 		msg_fillbuf(m, send_buf, &send_sz);
 		fb->w_buf_sz = send_sz;
 		fb->w_buf_written = 0;
+
+		if (m->benchmark_time != 0) {
+			m->benchmark_time = histogram_insert_data_point(g_stats.fabric_send_init_hist, m->benchmark_time);
+		}
 	}
 
 	int32_t flags = MSG_NOSIGNAL | (is_last ? 0 : MSG_MORE);
@@ -782,6 +787,10 @@ fabric_buffer_send_progress(fabric_buffer *fb, bool is_last)
 	}
 	else {
 		fb->fne->good_write_counter = 0;
+	}
+
+	if (fb->w_msg_in_progress->benchmark_time != 0) {
+		fb->w_msg_in_progress->benchmark_time = histogram_insert_data_point(g_stats.fabric_send_fragment_hist, fb->w_msg_in_progress->benchmark_time);
 	}
 
 	if ((size_t)w_sz == send_sz) {
@@ -997,6 +1006,10 @@ fabric_buffer_process_msg(fabric_buffer *fb)
 
 	if (g_fabric_args->msg_cb[m->type]) {
 		(*g_fabric_args->msg_cb[m->type])(fb->fne->node, m, g_fabric_args->msg_udata[m->type]);
+
+		if (fb->benchmark_time != 0) {
+			histogram_insert_data_point(g_stats.fabric_recv_cb_hist, fb->benchmark_time);
+		}
 	}
 	else {
 		cf_warning(AS_FABRIC, "read_msg: could not deliver message type %d", m->type);
@@ -1052,7 +1065,15 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 
 		fb->r_append += recv_sz;
 
+		if (fb->r_msg_size == 0) {
+			fb->benchmark_time = g_config.fabric_benchmarks_enabled ? cf_getns() : 0;
+		}
+
 		if ((size_t)recv_sz < recv_full) {
+			if (fb->benchmark_time != 0) {
+				fb->benchmark_time = histogram_insert_data_point(g_stats.fabric_recv_fragment_hist, fb->benchmark_time);
+			}
+
 			break;
 		}
 
@@ -1851,6 +1872,8 @@ as_fabric_start()
 int
 as_fabric_send(cf_node node, msg *m, int priority)
 {
+	m->benchmark_time = g_config.fabric_benchmarks_enabled ? cf_getns() : 0;
+
 	if (g_fabric_args == 0) {
 		cf_debug(AS_FABRIC, "fabric send without initialized fabric, BOO!");
 		return AS_FABRIC_ERR_UNINITIALIZED;

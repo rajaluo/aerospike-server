@@ -262,6 +262,7 @@ typedef enum {
 	CASE_SERVICE_BATCH_INDEX_THREADS,
 	CASE_SERVICE_CLOCK_SKEW_MAX_MS,
 	CASE_SERVICE_CLUSTER_NAME,
+	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
 	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FABRIC_WORKERS,
@@ -692,6 +693,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
 		{ "clock-skew-max-ms",				CASE_SERVICE_CLOCK_SKEW_MAX_MS },
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
+		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
 		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
@@ -1980,6 +1982,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_CLUSTER_NAME:
 				cfg_strcpy(&line, c->cluster_name, AS_CLUSTER_NAME_SZ);
+				break;
+			case CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC:
+				c->fabric_benchmarks_enabled = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
 				c->svc_benchmarks_enabled = cfg_bool(&line);
@@ -4046,6 +4051,11 @@ cfg_create_all_histograms()
 	create_and_check_hist(&g_stats.info_hist, "info", HIST_MILLISECONDS);
 	create_and_check_hist(&g_stats.svc_demarshal_hist, "svc-demarshal", HIST_MILLISECONDS);
 	create_and_check_hist(&g_stats.svc_queue_hist, "svc-queue", HIST_MILLISECONDS);
+
+	create_and_check_hist(&g_stats.fabric_send_init_hist, "fabric-send-init", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_fragment_hist, "fabric-send-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_fragment_hist, "fabric-recv-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_cb_hist, "fabric-recv-cb", HIST_MILLISECONDS);
 
 	create_and_check_hist(&g_stats.ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
 	create_and_check_hist(&g_stats.ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_COUNT);

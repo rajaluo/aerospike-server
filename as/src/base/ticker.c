@@ -666,6 +666,13 @@ dump_global_histograms()
 		histogram_dump(g_stats.svc_queue_hist);
 	}
 
+	if (g_config.fabric_benchmarks_enabled) {
+		histogram_dump(g_stats.fabric_send_init_hist);
+		histogram_dump(g_stats.fabric_send_fragment_hist);
+		histogram_dump(g_stats.fabric_recv_fragment_hist);
+		histogram_dump(g_stats.fabric_recv_cb_hist);
+	}
+
 	as_query_histogram_dumpall();
 	as_sindex_gc_histogram_dumpall();
 
