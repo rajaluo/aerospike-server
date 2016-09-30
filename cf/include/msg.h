@@ -124,6 +124,7 @@ typedef struct msg_t {
 	bool				just_parsed; // fields point into fabric buffer
 	msg_type			type;
 	const msg_template	*mt;
+	uint64_t			benchmark_time;
 	msg_field			f[];
 } msg;
 

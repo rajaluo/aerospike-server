@@ -710,9 +710,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		op_type = as_transaction_is_durable_delete(tr) ?
 				XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP;
 	}
-	// Or (normally) adjust max void-times.
+	// Or (normally) adjust max void-time.
 	else if (r->void_time != 0) {
-		cf_atomic64_setmax(&ns->max_void_time, r->void_time);
 		cf_atomic64_setmax(&tr->rsv.p->max_void_time, r->void_time);
 	}
 

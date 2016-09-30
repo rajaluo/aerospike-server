@@ -1091,11 +1091,12 @@ ssd_wblock_init(drv_ssd *ssd)
 int
 ssd_read_record(as_storage_rd *rd)
 {
+	as_namespace *ns = rd->ns;
 	as_record *r = rd->r;
 
 	if (STORAGE_RBLOCK_IS_INVALID(r->storage_key.ssd.rblock_id)) {
 		cf_warning_digest(AS_DRV_SSD, &rd->keyd, "{%s} read_ssd: invalid rblock_id ",
-				rd->ns->name);
+				ns->name);
 		return -1;
 	}
 
@@ -1113,7 +1114,7 @@ ssd_read_record(as_storage_rd *rd)
 
 	if (swb) {
 		// Data is in write buffer, so read it from there.
-		cf_atomic32_incr(&rd->ns->n_reads_from_cache);
+		cf_atomic32_incr(&ns->n_reads_from_cache);
 
 		read_buf = cf_malloc(record_size);
 
@@ -1129,7 +1130,7 @@ ssd_read_record(as_storage_rd *rd)
 	}
 	else {
 		// Normal case - data is read from device.
-		cf_atomic32_incr(&rd->ns->n_reads_from_device);
+		cf_atomic32_incr(&ns->n_reads_from_device);
 
 		uint64_t record_end_offset = record_offset + record_size;
 		uint64_t read_offset = BYTES_DOWN_TO_IO_MIN(ssd, record_offset);
@@ -1145,7 +1146,7 @@ ssd_read_record(as_storage_rd *rd)
 
 		int fd = ssd_fd_get(ssd);
 
-		uint64_t start_ns = rd->ns->storage_benchmarks_enabled ? cf_getns() : 0;
+		uint64_t start_ns = ns->storage_benchmarks_enabled ? cf_getns() : 0;
 
 		if (lseek(fd, (off_t)read_offset, SEEK_SET) != (off_t)read_offset) {
 			cf_warning(AS_DRV_SSD, "%s: seek failed: offset %lu: errno %d (%s)",
@@ -1185,6 +1186,10 @@ ssd_read_record(as_storage_rd *rd)
 				*(uint64_t*)&rd->keyd, *(uint64_t*)&block->keyd);
 			cf_free(read_buf);
 			return -1;
+		}
+
+		if (ns->storage_benchmarks_enabled) {
+			histogram_insert_raw(ns->device_read_size_hist, read_size);
 		}
 	}
 
@@ -1532,12 +1537,13 @@ ssd_write_calculate_size(as_storage_rd *rd)
 int
 ssd_write_bins(as_storage_rd *rd)
 {
+	as_namespace *ns = rd->ns;
 	as_record *r = rd->r;
 	drv_ssd *ssd = rd->u.ssd.ssd;
 
 	uint32_t write_size = ssd_write_calculate_size(rd);
 
-	if (write_size == 0 || write_size > ssd->write_block_size) {
+	if (write_size > ssd->write_block_size) {
 		cf_warning(AS_DRV_SSD, "write: rejecting %"PRIx64" write size: %u",
 				*(uint64_t*)&rd->keyd, write_size);
 		return -AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG;
@@ -1623,11 +1629,11 @@ ssd_write_bins(as_storage_rd *rd)
 
 		ssd_bin->version = 0;
 
-		if (! rd->ns->single_bin) {
-			strcpy(ssd_bin->name, as_bin_get_name_from_id(rd->ns, bin->id));
+		if (ns->single_bin) {
+			ssd_bin->name[0] = 0;
 		}
 		else {
-			ssd_bin->name[0] = 0;
+			strcpy(ssd_bin->name, as_bin_get_name_from_id(ns, bin->id));
 		}
 
 		ssd_bin->offset = buf - buf_start;
@@ -1658,6 +1664,10 @@ ssd_write_bins(as_storage_rd *rd)
 
 	// We are finished writing to the buffer.
 	cf_atomic32_decr(&swb->n_writers);
+
+	if (ns->storage_benchmarks_enabled) {
+		histogram_insert_raw(ns->device_write_size_hist, write_size);
+	}
 
 	return 0;
 }
@@ -2797,23 +2807,24 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 
 	// We'll keep the record we're now reading ...
 
-	// Set/reset the record's void-time, last-update-time, and generation.
-	r->void_time = block->void_time;
+	// Set/reset the record's last-update-time and generation.
 	r->last_update_time = block->last_update_time;
 	r->generation = block->generation;
 
-	// If the record is beyond max-ttl, truncate the void-time.
-	if (! is_ldt_sub && r->void_time > ns->cold_start_max_void_time) {
-		cf_detail(AS_DRV_SSD, "record-add truncating void-time %u > max %u",
-				r->void_time, ns->cold_start_max_void_time);
+	// Set/reset the record's void-time, truncating it if beyond max-ttl.
+	if (! is_ldt_sub && block->void_time > ns->cold_start_max_void_time) {
+		cf_detail(AS_DRV_SSD, "record-add truncating void-time %lu > max %u",
+				block->void_time, ns->cold_start_max_void_time);
 
 		r->void_time = ns->cold_start_max_void_time;
 		ssd->record_add_max_ttl_counter++;
 	}
+	else {
+		r->void_time = block->void_time;
+	}
 
-	// Update maximum void-times.
+	// Update maximum void-time.
 	cf_atomic64_setmax(&p_partition->max_void_time, r->void_time);
-	cf_atomic64_setmax(&ns->max_void_time, r->void_time);
 
 	// If data is in memory, load bins and particles, adjust secondary index.
 	if (ns->storage_data_in_memory) {
@@ -3820,6 +3831,20 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 
 	ns->storage_private = (void*)ssds;
 
+	char histname[HISTOGRAM_NAME_SIZE];
+
+	snprintf(histname, sizeof(histname), "{%s}-device-read-size", ns->name);
+
+	if (! (ns->device_read_size_hist = histogram_create(histname, HIST_SIZE))) {
+		cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
+	}
+
+	snprintf(histname, sizeof(histname), "{%s}-device-write-size", ns->name);
+
+	if (! (ns->device_write_size_hist = histogram_create(histname, HIST_SIZE))) {
+		cf_crash(AS_DRV_SSD, "cannot create histogram %s", histname);
+	}
+
 	// Finish initializing drv_ssd structures (non-zero-value members).
 	for (int i = 0; i < ssds->n_ssds; i++) {
 		drv_ssd *ssd = &ssds->ssds[i];
@@ -3866,8 +3891,6 @@ as_storage_namespace_init_ssd(as_namespace *ns, cf_queue *complete_q,
 				cf_crash(AS_DRV_SSD, "can't create post-write queue");
 			}
 		}
-
-		char histname[HISTOGRAM_NAME_SIZE];
 
 		snprintf(histname, sizeof(histname), "{%s}-%s-read", ns->name, ssd->name);
 
@@ -4291,6 +4314,9 @@ as_storage_stats_ssd(as_namespace *ns, int *available_pct,
 int
 as_storage_ticker_stats_ssd(as_namespace *ns)
 {
+	histogram_dump(ns->device_read_size_hist);
+	histogram_dump(ns->device_write_size_hist);
+
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
 
 	for (int i = 0; i < ssds->n_ssds; i++) {

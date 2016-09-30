@@ -269,6 +269,7 @@ typedef struct {
 	const uint8_t	*r_end;
 	uint32_t		r_msg_size;
 	msg_type		r_type;
+	uint64_t		benchmark_time;
 } fabric_buffer;
 
 // Worker queue
@@ -674,7 +675,7 @@ fabric_connect(fabric_args* fa, fabric_node_element* fne)
 		if (errno == ENOENT) {
 			// No entry present for this node in heartbeat.
 			cf_debug(
-			  AS_FABRIC, "fabric_connect: unknown remote endpoint %" PRIx64, fne->node);
+			  AS_FABRIC, "fabric_connect: unknown remote node %" PRIx64, fne->node);
 			cf_atomic32_decr(&fne->outbound_fd_counter);
 			return NULL;
 		}
@@ -686,22 +687,24 @@ fabric_connect(fabric_args* fa, fabric_node_element* fne)
 	if (tries_remaining < 0) {
 		// Should never happen in practice. We could not allocate space
 		// on the stack.
-		cf_debug(AS_FABRIC,"fabric_connect: List get error for remote endpoint %" PRIx64, fne->node);
+		cf_debug(AS_FABRIC,"fabric_connect: List get error for remote node %" PRIx64, fne->node);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
 
-	// Initiate the connect to the remote endpoint
-	cf_socket sock;
+	// Initiate connect to the remote endpoint
+	char endpoint_list_str[1024];
+	as_endpoint_list_to_string(endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
+	cf_debug(AS_FABRIC, "fabric connecting to remote node %" PRIx64 " with endpoints {%s}", fne->node, endpoint_list_str);
 
+	cf_socket sock;
 	const as_endpoint* connected_endpoint = as_endpoint_connect_any(
 		endpoint_list, CF_SOCK_OWNER_FABRIC, fabric_connect_endpoint_filter,
 		NULL, 0, &sock);
 
 	if (!connected_endpoint) {
-		char endpoint_list_str[1024];
 		as_endpoint_list_to_string(endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
-		cf_debug(AS_FABRIC, "fabric connect failed for remote node %" PRIx64 " with endpoints [%s]", fne->node, endpoint_list_str);
+		cf_debug(AS_FABRIC, "fabric connect failed for remote node %" PRIx64 " with endpoints {%s}", fne->node, endpoint_list_str);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
@@ -766,6 +769,10 @@ fabric_buffer_send_progress(fabric_buffer *fb, bool is_last)
 		msg_fillbuf(m, send_buf, &send_sz);
 		fb->w_buf_sz = send_sz;
 		fb->w_buf_written = 0;
+
+		if (m->benchmark_time != 0) {
+			m->benchmark_time = histogram_insert_data_point(g_stats.fabric_send_init_hist, m->benchmark_time);
+		}
 	}
 
 	int32_t flags = MSG_NOSIGNAL | (is_last ? 0 : MSG_MORE);
@@ -782,6 +789,10 @@ fabric_buffer_send_progress(fabric_buffer *fb, bool is_last)
 	}
 	else {
 		fb->fne->good_write_counter = 0;
+	}
+
+	if (fb->w_msg_in_progress->benchmark_time != 0) {
+		fb->w_msg_in_progress->benchmark_time = histogram_insert_data_point(g_stats.fabric_send_fragment_hist, fb->w_msg_in_progress->benchmark_time);
 	}
 
 	if ((size_t)w_sz == send_sz) {
@@ -997,6 +1008,10 @@ fabric_buffer_process_msg(fabric_buffer *fb)
 
 	if (g_fabric_args->msg_cb[m->type]) {
 		(*g_fabric_args->msg_cb[m->type])(fb->fne->node, m, g_fabric_args->msg_udata[m->type]);
+
+		if (fb->benchmark_time != 0) {
+			histogram_insert_data_point(g_stats.fabric_recv_cb_hist, fb->benchmark_time);
+		}
 	}
 	else {
 		cf_warning(AS_FABRIC, "read_msg: could not deliver message type %d", m->type);
@@ -1052,7 +1067,15 @@ fabric_buffer_process_readable(fabric_buffer *fb)
 
 		fb->r_append += recv_sz;
 
+		if (fb->r_msg_size == 0) {
+			fb->benchmark_time = g_config.fabric_benchmarks_enabled ? cf_getns() : 0;
+		}
+
 		if ((size_t)recv_sz < recv_full) {
+			if (fb->benchmark_time != 0) {
+				fb->benchmark_time = histogram_insert_data_point(g_stats.fabric_recv_fragment_hist, fb->benchmark_time);
+			}
+
 			break;
 		}
 
@@ -1603,6 +1626,10 @@ fabric_published_endpoints_refresh()
 		}
 		return -1;
 	}
+
+	char endpoint_list_str[512];
+	as_endpoint_list_to_string(g_published_endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
+	cf_info(AS_FABRIC, "Updated fabric published address list to {%s}", endpoint_list_str);
 	return 0;
 }
 
@@ -1617,13 +1644,13 @@ fabric_hb_plugin_set_fn(msg* msg)
 		return;
 	}
 
-	if (fabric_published_endpoints_refresh()) {
+	if (fabric_published_endpoints_refresh() != 0) {
 		cf_warning(AS_FABRIC, "No publish addresses found for fabric.");
 		return;
 	}
 
 	size_t payload_size = 0;
-	if (as_endpoint_list_sizeof(g_published_endpoint_list, &payload_size)) {
+	if (as_endpoint_list_sizeof(g_published_endpoint_list, &payload_size) != 0) {
 		cf_crash(
 		  AS_FABRIC,
 		  "Error getting endpoint list size for published addresses.");
@@ -1851,6 +1878,8 @@ as_fabric_start()
 int
 as_fabric_send(cf_node node, msg *m, int priority)
 {
+	m->benchmark_time = g_config.fabric_benchmarks_enabled ? cf_getns() : 0;
+
 	if (g_fabric_args == 0) {
 		cf_debug(AS_FABRIC, "fabric send without initialized fabric, BOO!");
 		return AS_FABRIC_ERR_UNINITIALIZED;

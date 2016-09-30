@@ -1,7 +1,7 @@
 /*
  * hist_track.c
  *
- * Copyright (C) 2012-2014 Aerospike, Inc.
+ * Copyright (C) 2012-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -43,6 +43,7 @@
 #include <citrusleaf/alloc.h>
 
 #include "dynbuf.h"
+#include "fault.h"
 #include "hist.h"
 
 
@@ -152,6 +153,10 @@ cf_hist_track_create(const char* name, histogram_scale scale)
 	strcpy(this->hist.name, name);
 	memset((void*)this->hist.counts, 0, sizeof(this->hist.counts));
 
+	// If cf_hist_track_insert_data_point() is called for a size or count
+	// histogram, the divide by 0 will crash - consider that a high-performance
+	// assert.
+
 	switch (scale) {
 	case HIST_MILLISECONDS:
 		this->hist.scale_tag = HIST_TAG_MILLISECONDS;
@@ -161,11 +166,16 @@ cf_hist_track_create(const char* name, histogram_scale scale)
 		this->hist.scale_tag = HIST_TAG_MICROSECONDS;
 		this->hist.time_div = 1000;
 		break;
-	default:
-		this->hist.scale_tag = HIST_TAG_RAW;
+	case HIST_SIZE:
+		this->hist.scale_tag = HIST_TAG_SIZE;
 		this->hist.time_div = 0;
-		// If cf_hist_track_insert_data_point() is called for a raw histogram,
-		// the divide by 0 will crash - consider that a high-performance assert.
+		break;
+	case HIST_COUNT:
+		this->hist.scale_tag = HIST_TAG_COUNT;
+		this->hist.time_div = 0;
+		break;
+	default:
+		cf_crash(AS_INFO, "%s: unrecognized histogram scale %d", name, scale);
 		break;
 	}
 

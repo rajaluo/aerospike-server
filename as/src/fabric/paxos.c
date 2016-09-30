@@ -253,9 +253,13 @@ void as_paxos_log_succession_list(char *msg, cf_node slist[], int list_max_lengt
 		num_printed++;
 	}
 
-	// Trim comma after the last node
-	if (num_printed && (used - 1 < print_buff_capacity)) {
-		snprintf(buff + used - 1, print_buff_capacity - used, "]");
+	if (num_printed){
+		// Trim comma after the last node
+		if (used - 1 < print_buff_capacity) {
+			snprintf(buff + used - 1, print_buff_capacity - used + 1, "]");
+		}
+	} else {
+		snprintf(buff + used, print_buff_capacity - used, "]");
 	}
 
 	// Force terminate the buffer in case sprintf has overflown.

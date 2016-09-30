@@ -1,7 +1,7 @@
 /*
  * thr_info.c
  *
- * Copyright (C) 2008-2015 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -462,6 +462,8 @@ info_get_endpoints(char *name, cf_dyn_buf *db)
 	info_append_string(db, "service.alternate-tls-access-addresses", string);
 	cf_free(string);
 
+	as_hb_info_endpoints_get(db);
+
 	info_append_int(db, "fabric.port", g_fabric_port);
 
 	string = bind_to_string(&g_fabric_bind, CF_SOCK_OWNER_FABRIC);
@@ -609,7 +611,7 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 	// Command Format:  "tip-clear:{host-port-list=<hpl>}" [the
 	// "host-port-list" argument is optional]
 	// where <hpl> is either "all" or else a comma-separated list of items
-	// of the form: <HostIPAddr>:<PortNum>
+	// of the form: <HostIPv4Addr>:<PortNum> or [<HostIPv6Addr>]:<PortNum>
 
 	char host_port_list[3000];
 	int host_port_list_len = sizeof(host_port_list);
@@ -626,9 +628,16 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 			  strtok_r(host_port_list, ",", &save_ptr);
 
 			while (host_port != NULL) {
+   				char* host_port_delim = ":";
+   				if(*host_port == '[') {
+					// Parse IPv6 address differently.
+					host_port++;
+					host_port_delim = "]";
+				}
+
 				char* host_port_save_ptr = NULL;
 				char* host =
-				  strtok_r(host_port, ":", &host_port_save_ptr);
+				  strtok_r(host_port, host_port_delim, &host_port_save_ptr);
 
 				if (host == NULL) {
 					cf_warning(AS_INFO,
@@ -638,7 +647,12 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 				}
 
 				char* port_str =
-				  strtok_r(NULL, ":", &host_port_save_ptr);
+				  strtok_r(NULL, host_port_delim, &host_port_save_ptr);
+
+				if(port_str != NULL && *port_str == ':') {
+			   		// IPv6 case
+				   	port_str++;
+				}
 				if (port_str == NULL ||
 				    0 != cf_str_atoi(port_str, &port)) {
 					cf_warning(AS_INFO,
@@ -1832,6 +1846,7 @@ info_service_config_get(cf_dyn_buf *db)
 	as_config_cluster_name_get(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
 
+	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
 	info_append_int(db, "fabric-workers", g_config.n_fabric_workers);
@@ -2010,7 +2025,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_bool(db, "disallow-null-setname", ns->disallow_null_setname);
 	info_append_bool(db, "enable-benchmarks-batch-sub", ns->batch_sub_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-read", ns->read_benchmarks_enabled);
-	info_append_bool(db, "enable-benchmarks-storage", ns->storage_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-udf", ns->udf_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-udf-sub", ns->udf_sub_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-write", ns->write_benchmarks_enabled);
@@ -2067,6 +2081,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint32(db, "storage-engine.defrag-sleep", ns->storage_defrag_sleep);
 		info_append_int(db, "storage-engine.defrag-startup-minimum", ns->storage_defrag_startup_minimum);
 		info_append_bool(db, "storage-engine.disable-odirect", ns->storage_disable_odirect);
+		info_append_bool(db, "storage-engine.enable-benchmarks-storage", ns->storage_benchmarks_enabled);
 		info_append_bool(db, "storage-engine.enable-osync", ns->storage_enable_osync);
 		info_append_uint64(db, "storage-engine.flush-max-ms", ns->storage_flush_max_us / 1000);
 		info_append_uint64(db, "storage-engine.fsync-max-sec", ns->storage_fsync_max_us / 1000000);
@@ -2718,6 +2733,20 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of query-longq-max-size from %d to %"PRIu64, g_config.query_long_q_max_size, val);
 			g_config.query_long_q_max_size = val;
+		}
+		else if (0 == as_info_parameter_get(params, "enable-benchmarks-fabric", context, &context_len)) {
+			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s", context);
+				g_config.fabric_benchmarks_enabled = true;
+			}
+			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
+				cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s", context);
+				g_config.fabric_benchmarks_enabled = false;
+				histogram_clear(g_stats.fabric_send_init_hist);
+				histogram_clear(g_stats.fabric_send_fragment_hist);
+				histogram_clear(g_stats.fabric_recv_fragment_hist);
+				histogram_clear(g_stats.fabric_recv_cb_hist);
+			}
 		}
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-svc", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -5681,7 +5710,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_bool(db, "hwm_breached", ns->hwm_breached != 0);
 
 	info_append_uint64(db, "current_time", as_record_void_time_get());
-	info_append_uint64(db, "max_void_time", ns->max_void_time);
 	info_append_uint64(db, "non_expirable_objects", ns->non_expirable_objects);
 	info_append_uint64(db, "expired_objects", ns->n_expired_objects);
 	info_append_uint64(db, "evicted_objects", ns->n_evicted_objects);

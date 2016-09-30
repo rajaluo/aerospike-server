@@ -26,13 +26,15 @@
 
 #include "citrusleaf/alloc.h"
 
+#include "base/cfg.h"
+
 /*----------------------------------------------------------------------------
  * Private internal data structures.
  *----------------------------------------------------------------------------*/
 typedef struct as_endpoint_collect_udata_s
 {
 	/**
-	 * Collected endpoint poiters.
+	 * Collected endpoint pointers.
 	 */
 	const as_endpoint** endpoints;
 
@@ -63,7 +65,7 @@ typedef struct as_endpoint_to_string_udata_s
 typedef struct as_endpoint_list_overlap_udata_s
 {
 	/**
-	 * Inidicates if there was an overlap.
+	 * Indicates if there was an overlap.
 	 */
 	bool overlapped;
 
@@ -82,7 +84,7 @@ typedef struct as_endpoint_list_overlap_udata_s
 typedef struct as_endpoint_list_endpoint_find_udata_s
 {
 	/**
-	 * Inidicates if there was an overlap.
+	 * Indicates if there was an overlap.
 	 */
 	bool match_found;
 
@@ -236,7 +238,7 @@ as_endpoint_connect_any(const as_endpoint_list* endpoint_list, cf_sock_owner own
 }
 
 /**
- * Convert a socket configuration to an endpoint inplace.
+ * Convert a socket configuration to an endpoint in place.
  * @return a heap allocated, converted endpoint. Should be freed using cf_free
  * once the endpoint is no longer needed.
  */
@@ -348,6 +350,10 @@ void
 as_endpoint_list_iterate(const as_endpoint_list* endpoint_list,
 	const as_endpoint_iterate_fn iterate_fn, void* udata)
 {
+	if(!endpoint_list) {
+		return;
+	}
+
 	uint8_t* endpoint_ptr = (uint8_t*) endpoint_list->endpoints;
 
 	for (int i = 0; i < endpoint_list->n_endpoints; i++) {
@@ -476,11 +482,11 @@ as_endpoint_list_to_string(const as_endpoint_list* endpoint_list, char* buffer,
 	size_t buffer_capacity)
 {
 	if (!endpoint_list) {
+		buffer[0] = 0;
 		return 0;
 	}
 
-	as_endpoint_to_string_udata udata =
-	{ 0 };
+	as_endpoint_to_string_udata udata = { 0 };
 	udata.write_ptr = buffer;
 	udata.buffer_remaining = buffer_capacity;
 	as_endpoint_list_iterate(endpoint_list, endpoint_to_string_iterate, &udata);
@@ -508,7 +514,7 @@ as_endpoint_list_to_string(const as_endpoint_list* endpoint_list, char* buffer,
  * Private internal functions.
  *----------------------------------------------------------------------------*/
 /**
- * Inidicates if input address type is valid.
+ * Indicates if input address type is valid.
  */
 static bool
 endpoint_addr_type_is_valid(uint8_t type)
@@ -568,19 +574,55 @@ endpoint_from_sock_cfg(const cf_sock_cfg* src, as_endpoint* endpoint)
 		cf_ip_addr_to_binary(&src->addr, endpoint->addr,
 			endpoint_addr_binary_size(endpoint->addr_type)));
 
-	// TODO: how to programatically get TLS from the server cfg. Maybe cfg
+	// TODO: how to programmatically get TLS from the server cfg. Maybe cfg
 	// should have a separate field / flag for TLS.
 	endpoint->capabilities = 0;
+}
+
+/**
+ * Generate a hash for an endpoint, but salted with the a random tie breaker to
+ * generate random looking shuffles for "equal" endpoints. This is jenkins
+ * one-at-a-time hash of the tie breaker concatenated with the endpoint.
+ */
+static uint32_t
+endpoint_sort_hash(const as_endpoint* endpoint, int tie_breaker)
+{
+	uint32_t hash = 0;
+
+	// Hash the nodeid.
+	uint8_t* key = (uint8_t*)&tie_breaker;
+	for (int i = 0; i < sizeof(tie_breaker); ++i) {
+		hash += *key;
+		hash += (hash << 10);
+		hash ^= (hash >> 6);
+		key++;
+	}
+
+	// Hash the endpoint value.
+	size_t endpoint_size = as_endpoint_sizeof(endpoint);
+	key = (uint8_t*)endpoint;
+	for (int i = 0; i < endpoint_size; ++i) {
+		hash += *key;
+		hash += (hash << 10);
+		hash ^= (hash >> 6);
+		key++;
+	}
+
+	hash += (hash << 3);
+	hash ^= (hash >> 11);
+	hash += (hash << 15);
+	return hash;
 }
 
 /**
  * Comparator to sort endpoints in descending order of preference.
  */
 static int
-endpoint_preference_compare(const void* e1, const void* e2)
+endpoint_preference_compare(const void* e1, const void* e2, void* arg)
 {
-	const as_endpoint* endpoint1 = (as_endpoint*) e1;
-	const as_endpoint* endpoint2 = (as_endpoint*) e2;
+	const as_endpoint* endpoint1 = *(as_endpoint**)e1;
+	const as_endpoint* endpoint2 = *(as_endpoint**)e2;
+	int tie_breaker = *((int*)arg);
 
 	// Prefer TLS over clear text.
 	bool endpoint1_is_tls = as_endpoint_capability_is_supported(endpoint1, AS_ENDPOINT_TLS_MASK);
@@ -599,8 +641,9 @@ endpoint_preference_compare(const void* e1, const void* e2)
 		return endpoint1_is_ipv6 ? -1 : 1;
 	}
 
-	// TODO: Randomize for load balancing.
-	return 0;
+	// Used tie breaker parameter to salt the hashes for load balancing.
+	return endpoint_sort_hash(endpoint1, tie_breaker) -
+		endpoint_sort_hash(endpoint2, tie_breaker);
 }
 
 /**
@@ -610,7 +653,11 @@ endpoint_preference_compare(const void* e1, const void* e2)
 static void
 endpoints_preference_sort(const as_endpoint* endpoints[], size_t n_endpoints)
 {
-	qsort(endpoints, n_endpoints, sizeof(as_endpoint*), endpoint_preference_compare);
+	// Random tie breaker to load balance between two equivalent endpoints.
+	int tie_breaker = rand();
+
+	qsort_r(endpoints, n_endpoints, sizeof(as_endpoint*),
+		endpoint_preference_compare, &tie_breaker);
 }
 
 /**
@@ -635,25 +682,38 @@ endpoint_to_string_iterate(const as_endpoint* endpoint, void* udata)
 	int capacity = sizeof(address_buffer);
 	char* endpoint_str_ptr = address_buffer;
 
-	cf_ip_addr temp_ip_addr;
+	cf_sock_addr temp_addr;
 	if (cf_ip_addr_from_binary(endpoint->addr, endpoint_addr_binary_size(endpoint->addr_type),
-		&temp_ip_addr) <= 0) {
+		&temp_addr.addr) <= 0) {
 		return;
 	}
 
-	int rv = cf_ip_addr_to_string(&temp_ip_addr, endpoint_str_ptr, capacity);
-	if (rv <= 0) {
-		return;
-	}
 
-	capacity -= rv;
-	endpoint_str_ptr += rv;
-
+	int rv = 0;
 	if (endpoint->port) {
-		rv = snprintf(endpoint_str_ptr, capacity, ":%d%s,", endpoint->port,
-			as_endpoint_capability_is_supported(endpoint, AS_ENDPOINT_TLS_MASK) ? " (tls)" : "");
-	} else {
-		// No port so capabilites do not matter.
+		temp_addr.port = endpoint->port;
+		rv = cf_sock_addr_to_string(&temp_addr, endpoint_str_ptr, capacity);
+		if (rv <= 0) {
+			return;
+		}
+
+		capacity -= rv;
+		endpoint_str_ptr += rv;
+
+		rv = snprintf(endpoint_str_ptr, capacity, "%s,",
+				as_endpoint_capability_is_supported(
+					endpoint, AS_ENDPOINT_TLS_MASK)
+				? " (tls)"
+				: "");
+	}else {
+		// Skip port and tls capabilities.
+		rv = cf_ip_addr_to_string(&temp_addr.addr, endpoint_str_ptr, capacity);
+		if (rv <= 0) {
+			return;
+		}
+
+		capacity -= rv;
+		endpoint_str_ptr += rv;
 		rv = snprintf(endpoint_str_ptr, capacity, ",");
 	}
 

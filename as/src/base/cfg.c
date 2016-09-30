@@ -76,11 +76,6 @@
 // The runtime configuration instance.
 as_config g_config;
 
-// Heartbeat transient config. TODO - find a better way.
-static as_serv_spec g_hb_serv_spec;
-static as_addr_list g_hb_multicast_groups;
-
-
 //==========================================================
 // Forward declarations.
 //
@@ -262,6 +257,7 @@ typedef enum {
 	CASE_SERVICE_BATCH_INDEX_THREADS,
 	CASE_SERVICE_CLOCK_SKEW_MAX_MS,
 	CASE_SERVICE_CLUSTER_NAME,
+	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
 	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FABRIC_WORKERS,
@@ -483,7 +479,6 @@ typedef enum {
 	CASE_NAMESPACE_DISALLOW_NULL_SETNAME,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_READ,
-	CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE, // TODO - should this be in storage scope?
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB,
 	CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE,
@@ -552,6 +547,7 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP,
 	CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM,
 	CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT,
+	CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE,
 	CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC,
 	CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS,
 	CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC,
@@ -692,6 +688,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
 		{ "clock-skew-max-ms",				CASE_SERVICE_CLOCK_SKEW_MAX_MS },
 		{ "cluster-name",					CASE_SERVICE_CLUSTER_NAME },
+		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
 		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
@@ -912,7 +909,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "disallow-null-setname",			CASE_NAMESPACE_DISALLOW_NULL_SETNAME },
 		{ "enable-benchmarks-batch-sub",	CASE_NAMESPACE_ENABLE_BENCHMARKS_BATCH_SUB },
 		{ "enable-benchmarks-read",			CASE_NAMESPACE_ENABLE_BENCHMARKS_READ },
-		{ "enable-benchmarks-storage",		CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE },
 		{ "enable-benchmarks-udf",			CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF },
 		{ "enable-benchmarks-udf-sub",		CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF_SUB },
 		{ "enable-benchmarks-write",		CASE_NAMESPACE_ENABLE_BENCHMARKS_WRITE },
@@ -984,6 +980,7 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "defrag-sleep",					CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_SLEEP },
 		{ "defrag-startup-minimum",			CASE_NAMESPACE_STORAGE_DEVICE_DEFRAG_STARTUP_MINIMUM },
 		{ "disable-odirect",				CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT },
+		{ "enable-benchmarks-storage",		CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE },
 		{ "enable-osync",					CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC },
 		{ "flush-max-ms",					CASE_NAMESPACE_STORAGE_DEVICE_FLUSH_MAX_MS },
 		{ "fsync-max-sec",					CASE_NAMESPACE_STORAGE_DEVICE_FSYNC_MAX_SEC },
@@ -1981,6 +1978,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_CLUSTER_NAME:
 				cfg_strcpy(&line, c->cluster_name, AS_CLUSTER_NAME_SZ);
 				break;
+			case CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC:
+				c->fabric_benchmarks_enabled = cfg_bool(&line);
+				break;
 			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
 				c->svc_benchmarks_enabled = cfg_bool(&line);
 				break;
@@ -2413,13 +2413,13 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_NETWORK_HEARTBEAT_ADDRESS:
-				cfg_add_addr_bind(line.val_tok_1, &g_hb_serv_spec);
+				cfg_add_addr_bind(line.val_tok_1, &c->hb_serv_spec);
 				break;
 		    case CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP:
-				add_addr(line.val_tok_1, &g_hb_multicast_groups);
+				add_addr(line.val_tok_1, &c->hb_multicast_groups);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PORT:
-				g_hb_serv_spec.port = cfg_port(&line);
+				c->hb_serv_spec.port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT:
 				cfg_add_mesh_seed_addr_port(cfg_strdup_no_checks(&line), cfg_port_val2(&line));
@@ -2639,9 +2639,6 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_READ:
 				ns->read_benchmarks_enabled = true;
 				break;
-			case CASE_NAMESPACE_ENABLE_BENCHMARKS_STORAGE:
-				ns->storage_benchmarks_enabled = true;
-				break;
 			case CASE_NAMESPACE_ENABLE_BENCHMARKS_UDF:
 				ns->udf_benchmarks_enabled = true;
 				break;
@@ -2834,6 +2831,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_DISABLE_ODIRECT:
 				ns->storage_disable_odirect = cfg_bool(&line);
+				break;
+			case CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_BENCHMARKS_STORAGE:
+				ns->storage_benchmarks_enabled = true;
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_ENABLE_OSYNC:
 				ns->storage_enable_osync = cfg_bool(&line);
@@ -3524,20 +3524,20 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	cf_serv_cfg_init(&g_config.hb_config.bind_cfg);
 
-	if (g_hb_serv_spec.bind.n_addrs == 0) {
-		any.port = g_hb_serv_spec.port;
+	if (c->hb_serv_spec.bind.n_addrs == 0) {
+		any.port = c->hb_serv_spec.port;
 		cfg_serv_spec_to_bind(&any, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
 	}
 	else {
-		cfg_serv_spec_to_bind(&g_hb_serv_spec, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
+		cfg_serv_spec_to_bind(&c->hb_serv_spec, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
 	}
 
 	// Heartbeat multicast groups.
 
-	if (g_hb_multicast_groups.n_addrs > 0) {
-		cfg_mserv_config_from_addrs(&g_hb_multicast_groups,
-				g_hb_serv_spec.bind.n_addrs ? &g_hb_serv_spec.bind : &any.bind,
-				&g_config.hb_config.multicast_group_cfg, g_hb_serv_spec.port,
+	if (c->hb_multicast_groups.n_addrs > 0) {
+		cfg_mserv_config_from_addrs(&c->hb_multicast_groups,
+				c->hb_serv_spec.bind.n_addrs ? &c->hb_serv_spec.bind : &any.bind,
+				&g_config.hb_config.multicast_group_cfg, c->hb_serv_spec.port,
 				CF_SOCK_OWNER_HEARTBEAT, g_config.hb_config.multicast_ttl);
 	}
 
@@ -3607,7 +3607,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		create_and_check_hist_track(&ns->query_hist, hist_name, HIST_MILLISECONDS);
 
 		sprintf(hist_name, "{%s}-query-rec-count", ns->name);
-		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_RAW);
+		create_and_check_hist(&ns->query_rec_count_hist, hist_name, HIST_COUNT);
 
 		// Activate-by-config histograms (can't be tracked histograms).
 
@@ -4047,10 +4047,15 @@ cfg_create_all_histograms()
 	create_and_check_hist(&g_stats.svc_demarshal_hist, "svc-demarshal", HIST_MILLISECONDS);
 	create_and_check_hist(&g_stats.svc_queue_hist, "svc-queue", HIST_MILLISECONDS);
 
+	create_and_check_hist(&g_stats.fabric_send_init_hist, "fabric-send-init", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_fragment_hist, "fabric-send-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_fragment_hist, "fabric-recv-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_cb_hist, "fabric-recv-cb", HIST_MILLISECONDS);
+
 	create_and_check_hist(&g_stats.ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
-	create_and_check_hist(&g_stats.ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_RAW);
-	create_and_check_hist(&g_stats.ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_RAW);
-	create_and_check_hist(&g_stats.ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_RAW);
+	create_and_check_hist(&g_stats.ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_COUNT);
+	create_and_check_hist(&g_stats.ldt_update_record_cnt_hist, "ldt_rec_update_count", HIST_COUNT);
+	create_and_check_hist(&g_stats.ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_SIZE);
 	create_and_check_hist(&g_stats.ldt_hist, "ldt", HIST_MILLISECONDS);
 }
 
