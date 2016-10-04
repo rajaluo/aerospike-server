@@ -3424,14 +3424,14 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	if (g_access.alt_service.port == 0 &&
 			(g_config.alt_service.bind.n_addrs != 0 || g_access.alt_service.addrs.n_addrs != 0)) {
-		g_access.alt_service.port = g_access.service.port;
+		g_access.alt_service.port = g_config.alt_service.port = g_access.service.port;
 	}
 
 	// By default, use regular TLS port also as alternate TLS.
 
 	if (g_access.alt_tls_service.port == 0 &&
 			(g_config.alt_tls_service.bind.n_addrs != 0 || g_access.alt_tls_service.addrs.n_addrs != 0)) {
-		g_access.alt_tls_service.port = g_access.tls_service.port;
+		g_access.alt_tls_service.port = g_config.alt_tls_service.port = g_access.tls_service.port;
 	}
 
 	// "any" service specification.
