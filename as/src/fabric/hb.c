@@ -1109,9 +1109,14 @@ typedef void
 /**
  * Check if heartbeat is running a legacy protocol.
  */
-#define HB_PROTOCOL_IS_LEGACY()												   \
-	(AS_HB_PROTOCOL_V1 == config_protocol_get() ||						   \
-		AS_HB_PROTOCOL_V2 == config_protocol_get())
+#define PROTOCOL_IS_LEGACY(protocol)												   \
+	(AS_HB_PROTOCOL_V1 == protocol ||						   \
+	 AS_HB_PROTOCOL_V2 == protocol)
+
+/**
+ * Check if heartbeat is running a legacy protocol.
+ */
+#define HB_PROTOCOL_IS_LEGACY() (PROTOCOL_IS_LEGACY(config_protocol_get()))
 
 /**
  * Check the message is a legacy protocol message.
@@ -1642,7 +1647,7 @@ void endpoint_list_to_string_process(const as_endpoint_list* endpoint_list, void
 static cf_node config_self_nodeid_get();
 static as_hb_mode config_mode_get();
 static const cf_serv_cfg* config_bind_cfg_get();
-static bool config_binding_is_valid(char** error);
+static bool config_binding_is_valid(char** error, as_hb_protocol protocol);
 static const cf_mserv_cfg* config_multicast_group_cfg_get();
 static as_hb_protocol config_protocol_get();
 static void config_protocol_set(as_hb_protocol new_protocol);
@@ -1655,7 +1660,7 @@ static void config_fabric_grace_factor_set(int new_factor);
 static uint32_t config_override_mtu_get();
 static void config_override_mtu_set(uint32_t mtu);
 static unsigned char config_multicast_ttl_get();
-static int config_get_legacy_addr(const cf_serv_cfg* hb_bind_cfg, const cf_serv_cfg* fb_bind_cfg, cf_serv_cfg* publish_bind_cfg);
+static int config_legacy_addr_get(const cf_serv_cfg* hb_bind_cfg, const cf_serv_cfg* fb_bind_cfg, cf_serv_cfg* publish_bind_cfg);
 
 static void channel_event_init(as_hb_channel_event* event);
 static void channel_dump(bool verbose);
@@ -1823,7 +1828,7 @@ as_hb_protocol_set(as_hb_protocol new_protocol)
 	case AS_HB_PROTOCOL_V2: {
 		// Validate heartbeat and fabric bind addresses
 		char *error;
-		if(!config_binding_is_valid(&error)) {
+		if(!config_binding_is_valid(&error, new_protocol)) {
 			WARNING("Protocol version not set to %s. %s", new_protocol_s, error);
 			rv = -1;
 			goto Exit;
@@ -1973,7 +1978,7 @@ void
 as_hb_config_validate()
 {
 	char *error;
-	if(!config_binding_is_valid(&error)) {
+	if(!config_binding_is_valid(&error, config_protocol_get())) {
 		CRASH_NOSTACK("%s", error);
 	}
 }
@@ -3677,7 +3682,7 @@ config_serv_cfg_is_subset(const cf_serv_cfg* cfg1, const cf_serv_cfg* cfg2,
  * @return 0 on success, -1 on failure.
  */
 static int
-config_get_legacy_addr(const cf_serv_cfg* hb_bind_cfg,
+config_legacy_addr_get(const cf_serv_cfg* hb_bind_cfg,
 		       const cf_serv_cfg* fb_bind_cfg,
 		       cf_serv_cfg* publish_bind_cfg)
 {
@@ -3760,7 +3765,7 @@ config_get_legacy_addr(const cf_serv_cfg* hb_bind_cfg,
  * @param error pointer to a static error message if validation fails, else will be set to NULL.
  */
 static bool
-config_binding_is_valid(char** error)
+config_binding_is_valid(char** error, as_hb_protocol protocol)
 {
 	const cf_serv_cfg* bind_cfg = config_bind_cfg_get();
 	const cf_mserv_cfg* multicast_group_cfg = config_multicast_group_cfg_get();
@@ -3783,8 +3788,8 @@ config_binding_is_valid(char** error)
 		cf_serv_cfg publish_serv_cfg;
 		cf_serv_cfg_init(&publish_serv_cfg);
 
-		if (HB_PROTOCOL_IS_LEGACY() &&
-		    config_get_legacy_addr(config_bind_cfg_get(),
+		if (PROTOCOL_IS_LEGACY(protocol) &&
+		    config_legacy_addr_get(config_bind_cfg_get(),
 					   &g_fabric_bind,
 					   &publish_serv_cfg) != 0) {
 			*error = "Legacy heartbeat versions require atleast "
@@ -3826,7 +3831,7 @@ config_binding_is_valid(char** error)
 		cf_serv_cfg publish_serv_cfg;
 		cf_serv_cfg_init(&publish_serv_cfg);
 
-		if (HB_PROTOCOL_IS_LEGACY()) {
+		if (PROTOCOL_IS_LEGACY(protocol)) {
 			if (!config_serv_cfg_is_subset(bind_cfg, &g_fabric_bind,
 						       true)) {
 				*error = "Legacy heartbeat IPv4 addresses "
@@ -3835,7 +3840,7 @@ config_binding_is_valid(char** error)
 				return false;
 			}
 
-			if (config_get_legacy_addr(&g_fabric_bind,
+			if (config_legacy_addr_get(&g_fabric_bind,
 						   &g_fabric_bind,
 						   &publish_serv_cfg) != 0) {
 				*error =
@@ -4356,6 +4361,16 @@ static as_hb_channel_msg_read_status
 channel_message_parse(msg* msg, void* buffer, int buffer_content_len)
 {
 	// Peek into the buffer to get hold of the message type.
+	msg_type type = 0;
+	uint32_t msg_size = 0;
+	if(msg_get_initial(&msg_size, &type, (uint8_t*)buffer, buffer_content_len) != 0 || type != msg->type)   {
+		// Pre check because msg_parse considers this a warning but this
+		// would be common when protocol version between nodes do not
+		// match.
+		DEBUG("Message type mismatch. Expected:%d received:%d", msg->type, type);
+		return AS_HB_CHANNEL_MSG_PARSE_FAIL;
+	}
+
 	bool parsed = msg_parse(msg, buffer, buffer_content_len) == 0;
 
 	if (parsed) {
@@ -6036,7 +6051,7 @@ mesh_published_endpoint_list_refresh(bool is_legacy)
 	cf_serv_cfg temp_serv_cfg;
 	cf_serv_cfg_init(&temp_serv_cfg);
 
-	if (config_get_legacy_addr(config_bind_cfg_get(), &g_fabric_bind, &temp_serv_cfg) != 0) {
+	if (config_legacy_addr_get(config_bind_cfg_get(), &g_fabric_bind, &temp_serv_cfg) != 0) {
 		WARNING("Legacy heartbeat versions require atleast one "
 			      "common heartbeat and fabric bind address.");
 		rv = -1;
@@ -6963,6 +6978,7 @@ mesh_node_redundant_check_delete(as_hb_mesh_node_key *existing_nodeid_key, as_hb
 
 	if(memcmp(existing_nodeid_key, existing_endpoint_key, sizeof(*existing_nodeid_key)) == 0) {
 		// There is no conflict, the nodeid and the endpoint point to same mesh entry.
+		return;
 	}
 
 	// The seed node's nodeid has not yet been updated, however we
@@ -8002,7 +8018,7 @@ multicast_published_endpoint_list_refresh(bool is_legacy)
 	cf_serv_cfg published_cfg;
 	cf_serv_cfg_init(&published_cfg);
 
-	if (config_get_legacy_addr(&g_fabric_bind, &g_fabric_bind,
+	if (config_legacy_addr_get(&g_fabric_bind, &g_fabric_bind,
 			&published_cfg) != 0) {
 		WARNING("Legacy heartbeat versions require atleast one "
 			"fabric binding IPv4 address.");
