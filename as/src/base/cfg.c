@@ -2378,7 +2378,7 @@ as_config_init(const char* config_file)
 				c->tls_name = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME:
-				cfg_obsolete(&line, "see Aerospike configuration documentation");
+				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
 				break;
 			case CASE_NETWORK_SERVICE_REUSE_ADDRESS:
 				cfg_deprecated_name_tok(&line);
@@ -2463,7 +2463,7 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS:
-				cfg_obsolete(&line, "see Aerospike configuration documentation");
+				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -3424,14 +3424,14 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	if (g_access.alt_service.port == 0 &&
 			(g_config.alt_service.bind.n_addrs != 0 || g_access.alt_service.addrs.n_addrs != 0)) {
-		g_access.alt_service.port = g_access.service.port;
+		g_access.alt_service.port = g_config.alt_service.port = g_access.service.port;
 	}
 
 	// By default, use regular TLS port also as alternate TLS.
 
 	if (g_access.alt_tls_service.port == 0 &&
 			(g_config.alt_tls_service.bind.n_addrs != 0 || g_access.alt_tls_service.addrs.n_addrs != 0)) {
-		g_access.alt_tls_service.port = g_access.tls_service.port;
+		g_access.alt_tls_service.port = g_config.alt_tls_service.port = g_access.tls_service.port;
 	}
 
 	// "any" service specification.

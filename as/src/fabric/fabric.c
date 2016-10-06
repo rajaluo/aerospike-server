@@ -646,36 +646,36 @@ fabric_connect_endpoint_filter(const as_endpoint* endpoint, void* udata)
 	return true;
 }
 
-
 // Create a connection to the remote node. This creates a non-blocking
 // connection and adds it to the worker queue only, when the socket becomes
 // writable, messages can start flowing.
-static fabric_buffer*
-fabric_connect(fabric_args* fa, fabric_node_element* fne)
+static fabric_buffer *
+fabric_connect(fabric_args *fa, fabric_node_element *fne)
 {
 	// Don't create too many conns because you'll just get small packets.
 	uint32_t fds = cf_atomic32_incr(&(fne->outbound_fd_counter));
+
 	if (fds >= FABRIC_MAX_FDS) {
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
 
 	size_t endpoint_list_capacity = 1024;
-	as_endpoint_list* endpoint_list = NULL;
+	as_endpoint_list *endpoint_list = NULL;
 	int tries_remaining = 3;
+
 	while (tries_remaining--) {
 		endpoint_list = alloca(endpoint_list_capacity);
 
 		if (fabric_endpoint_list_get(fne->node, endpoint_list,
-					     &endpoint_list_capacity) == 0) {
+				&endpoint_list_capacity) == 0) {
 			// Read success.
 			break;
 		}
 
 		if (errno == ENOENT) {
 			// No entry present for this node in heartbeat.
-			cf_debug(
-			  AS_FABRIC, "fabric_connect: unknown remote node %" PRIx64, fne->node);
+			cf_debug(AS_FABRIC, "fabric_connect: unknown remote node %" PRIx64, fne->node);
 			cf_atomic32_decr(&fne->outbound_fd_counter);
 			return NULL;
 		}
@@ -694,15 +694,16 @@ fabric_connect(fabric_args* fa, fabric_node_element* fne)
 
 	// Initiate connect to the remote endpoint
 	char endpoint_list_str[1024];
+
 	as_endpoint_list_to_string(endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
 	cf_debug(AS_FABRIC, "fabric connecting to remote node %" PRIx64 " with endpoints {%s}", fne->node, endpoint_list_str);
 
 	cf_socket sock;
-	const as_endpoint* connected_endpoint = as_endpoint_connect_any(
-		endpoint_list, CF_SOCK_OWNER_FABRIC, fabric_connect_endpoint_filter,
-		NULL, 0, &sock);
+	const as_endpoint *connected_endpoint = as_endpoint_connect_any(
+			endpoint_list, CF_SOCK_OWNER_FABRIC, fabric_connect_endpoint_filter,
+			NULL, 0, &sock);
 
-	if (!connected_endpoint) {
+	if (! connected_endpoint) {
 		as_endpoint_list_to_string(endpoint_list, endpoint_list_str, sizeof(endpoint_list_str));
 		cf_debug(AS_FABRIC, "fabric connect failed for remote node %" PRIx64 " with endpoints {%s}", fne->node, endpoint_list_str);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
@@ -712,21 +713,23 @@ fabric_connect(fabric_args* fa, fabric_node_element* fne)
 	cf_atomic64_incr(&g_stats.fabric_connections_opened);
 
 	// Create a fabric buffer to go along with the file descriptor
-	fabric_buffer* fb = fabric_buffer_create(&sock);
+	fabric_buffer *fb = fabric_buffer_create(&sock);
 
 	fabric_buffer_set_keepalive_options(fb);
 	fb->is_outbound = true;
 	fabric_buffer_associate(fb, fne);
 
 	// Grab a start message, send it to the remote endpoint so it knows me.
-	msg* m = as_fabric_msg_get(M_TYPE_FABRIC);
-	if (!m) {
+	msg *m = as_fabric_msg_get(M_TYPE_FABRIC);
+
+	if (! m) {
 		fabric_buffer_release(fb);
 		cf_atomic32_decr(&fne->outbound_fd_counter);
 		return NULL;
 	}
 
 	msg_set_uint64(m, FS_FIELD_NODE, g_config.self_node);
+	m->benchmark_time = g_config.fabric_benchmarks_enabled ? cf_getns() : 0;
 
 	fb->w_msg_in_progress = m;
 	cf_rc_reserve(fb); // for put into fne->outbound_fb_hash
