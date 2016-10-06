@@ -3437,20 +3437,26 @@ ssd_set_scheduler_mode(const char* device_name, const char* mode)
 		p_char++;
 	}
 
-	// If the device name ends with a number, assume it's a partition name and
-	// removing the number gives the raw device name.
-	if (p_char != device_tag) {
-		p_char--;
+	char scheduler_file_name[17 + strlen(device_tag) + 3 + 16 + 1];
 
-		if (*p_char >= '0' && *p_char <= '9') {
-			*p_char = 0;
-		}
+	strcpy(scheduler_file_name, "/sys/class/block/");
+	strcat(scheduler_file_name, device_tag);
+
+	// Determine if this device is a partition.
+	char partition_file_name[strlen(scheduler_file_name) + 10 + 1];
+
+	strcpy(partition_file_name, scheduler_file_name);
+	strcat(partition_file_name, "/partition");
+
+	FILE* partition_file = fopen(partition_file_name, "r");
+
+	if (partition_file) {
+		fclose(partition_file);
+
+		// This device is a partition, get parent device.
+		strcat(scheduler_file_name, "/..");
 	}
 
-	char scheduler_file_name[11 + strlen(device_tag) + 16 + 1];
-
-	strcpy(scheduler_file_name, "/sys/block/");
-	strcat(scheduler_file_name, device_tag);
 	strcat(scheduler_file_name, "/queue/scheduler");
 
 	FILE* scheduler_file = fopen(scheduler_file_name, "w");
