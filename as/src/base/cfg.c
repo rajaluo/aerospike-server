@@ -80,14 +80,14 @@ as_config g_config;
 // Forward declarations.
 //
 
-void add_addr(const char* name, as_addr_list* addrs);
-void copy_addrs(const as_addr_list* from, as_addr_list* to);
-void default_access(const as_serv_spec* from, as_addr_list* to);
-void cfg_add_addr_bind(const char* name, as_serv_spec* spec);
-void cfg_add_addr_access(const char* name, as_serv_spec* spec);
-void cfg_mserv_config_from_addrs(as_addr_list* addrs, as_addr_list* bind_addrs, cf_mserv_cfg* serv_cfg, cf_ip_port port, cf_sock_owner owner, uint8_t ttl);
-void cfg_serv_spec_to_bind(const as_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner);
-void cfg_serv_spec_to_access(const as_serv_spec* spec, as_addr_list* access);
+void add_addr(const char* name, cf_addr_list* addrs);
+void copy_addrs(const cf_addr_list* from, cf_addr_list* to);
+void default_access(const cf_serv_spec* from, cf_addr_list* to);
+void cfg_add_addr_bind(const char* name, cf_serv_spec* spec);
+void cfg_add_addr_access(const char* name, cf_serv_spec* spec);
+void cfg_mserv_config_from_addrs(cf_addr_list* addrs, cf_addr_list* bind_addrs, cf_mserv_cfg* serv_cfg, cf_ip_port port, cf_sock_owner owner, uint8_t ttl);
+void cfg_serv_spec_to_bind(const cf_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner);
+void cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access);
 void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_storage_file(as_namespace* ns, char* file_name);
@@ -3436,7 +3436,7 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	// "any" service specification.
 
-	as_serv_spec any;
+	cf_serv_spec any;
 	any.port = 0;
 	any.bind.n_addrs = 1;
 	any.bind.addrs[0] = "any";
@@ -3458,7 +3458,7 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Client TLS service bind addresses.
 
 	if (g_access.tls_service.port != 0) {
-		as_serv_spec tls_spec;
+		cf_serv_spec tls_spec;
 		tls_spec.port = g_access.tls_service.port;
 		tls_spec.access.n_addrs = 0;
 
@@ -3471,7 +3471,7 @@ as_config_post_process(as_config* c, const char* config_file)
 			copy_addrs(&g_config.tls_service.bind, &tls_spec.bind);
 		}
 
-		as_serv_spec alt_tls_spec;
+		cf_serv_spec alt_tls_spec;
 		alt_tls_spec.port = g_access.alt_tls_service.port;
 		alt_tls_spec.access.n_addrs = 0;
 
@@ -3734,7 +3734,7 @@ as_config_cluster_name_set(const char* cluster_name)
 //
 
 void
-add_addr(const char* name, as_addr_list* addrs)
+add_addr(const char* name, cf_addr_list* addrs)
 {
 	uint32_t n = addrs->n_addrs;
 
@@ -3752,7 +3752,7 @@ add_addr(const char* name, as_addr_list* addrs)
 }
 
 void
-copy_addrs(const as_addr_list* from, as_addr_list* to)
+copy_addrs(const cf_addr_list* from, cf_addr_list* to)
 {
 	for (uint32_t i = 0; i < from->n_addrs; ++i) {
 		to->addrs[i] = from->addrs[i];
@@ -3762,9 +3762,9 @@ copy_addrs(const as_addr_list* from, as_addr_list* to)
 }
 
 void
-default_access(const as_serv_spec* from, as_addr_list* to)
+default_access(const cf_serv_spec* from, cf_addr_list* to)
 {
-	as_serv_spec spec;
+	cf_serv_spec spec;
 	spec.port = from->port;
 	spec.bind.n_addrs = 0;
 	spec.access.n_addrs = 0;
@@ -3799,19 +3799,19 @@ default_access(const as_serv_spec* from, as_addr_list* to)
 }
 
 void
-cfg_add_addr_bind(const char* name, as_serv_spec* spec)
+cfg_add_addr_bind(const char* name, cf_serv_spec* spec)
 {
 	add_addr(name, &spec->bind);
 }
 
 void
-cfg_add_addr_access(const char* name, as_serv_spec* spec)
+cfg_add_addr_access(const char* name, cf_serv_spec* spec)
 {
 	add_addr(name, &spec->access);
 }
 
 void
-cfg_mserv_config_from_addrs(as_addr_list* addrs, as_addr_list* bind_addrs,
+cfg_mserv_config_from_addrs(cf_addr_list* addrs, cf_addr_list* bind_addrs,
 			    cf_mserv_cfg* serv_cfg, cf_ip_port port,
 			    cf_sock_owner owner, uint8_t ttl)
 {
@@ -3851,13 +3851,13 @@ cfg_mserv_config_from_addrs(as_addr_list* addrs, as_addr_list* bind_addrs,
 }
 
 void
-cfg_serv_spec_to_bind(const as_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner)
+cfg_serv_spec_to_bind(const cf_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner)
 {
 	cf_sock_cfg cfg;
 	cf_sock_cfg_init(&cfg, owner);
 	cfg.port = spec->port;
 
-	const as_addr_list* addrs = &spec->bind;
+	const cf_addr_list* addrs = &spec->bind;
 
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
 		cf_ip_addr resol[CF_SOCK_CFG_MAX];
@@ -3878,9 +3878,9 @@ cfg_serv_spec_to_bind(const as_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner
 }
 
 void
-cfg_serv_spec_to_access(const as_serv_spec* spec, as_addr_list* access)
+cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access)
 {
-	const as_addr_list* addrs = &spec->access;
+	const cf_addr_list* addrs = &spec->access;
 
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
 		cf_ip_addr resol[CF_SOCK_CFG_MAX];
