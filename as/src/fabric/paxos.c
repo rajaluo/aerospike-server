@@ -2811,7 +2811,7 @@ as_paxos_thr(void *arg)
 		 */
 		if (false == as_paxos_succession_ismember(qm->id)) {
 			cf_debug(AS_PAXOS, "got a message from a node not in the succession: %"PRIx64, qm->id);
-			if (!((self == principal) || (AS_PAXOS_MSG_COMMAND_SYNC == c || (qm->id > principal && as_hb_is_alive(principal))))) {
+			if (self != principal && AS_PAXOS_MSG_COMMAND_SYNC != c && qm->id < principal && as_hb_is_alive(principal)) {
 				cf_warning(AS_PAXOS, "ignoring message from a node not in the succession: %"PRIx64" command %d", qm->id, c);
 				goto cleanup;
 			}
