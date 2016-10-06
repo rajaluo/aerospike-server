@@ -2351,7 +2351,7 @@ as_config_init(const char* config_file)
 				cfg_add_addr_access(line.val_tok_1, &c->alt_service);
 				break;
 			case CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS:
-				cfg_add_addr_bind(line.val_tok_1, &c->alt_service);
+				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
 				break;
 			case CASE_NETWORK_SERVICE_ALTERNATE_PORT:
 				c->alt_service.port = cfg_port(&line);
