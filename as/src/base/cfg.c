@@ -399,7 +399,6 @@ typedef enum {
 	CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS, // renamed
 	CASE_NETWORK_SERVICE_ACCESS_ADDRESS,
 	CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS,
-	CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS,
 	CASE_NETWORK_SERVICE_ALTERNATE_PORT,
 	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS,
 	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS,
@@ -409,6 +408,7 @@ typedef enum {
 	CASE_NETWORK_SERVICE_TLS_NAME,
 	CASE_NETWORK_SERVICE_TLS_PORT,
 	// Deprecated or obsoleted:
+	CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS,
 	CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME,
 	CASE_NETWORK_SERVICE_REUSE_ADDRESS,
 
@@ -830,7 +830,6 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "external-address",				CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS },
 		{ "access-address",					CASE_NETWORK_SERVICE_ACCESS_ADDRESS },
 		{ "alternate-access-address",		CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS },
-		{ "alternate-address",				CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS },
 		{ "alternate-port",					CASE_NETWORK_SERVICE_ALTERNATE_PORT },
 		{ "alternate-tls-address",			CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS },
 		{ "alternate-tls-access-address",	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS },
@@ -839,6 +838,7 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "tls-address",					CASE_NETWORK_SERVICE_TLS_ADDRESS },
 		{ "tls-name",						CASE_NETWORK_SERVICE_TLS_NAME },
 		{ "tls-port",						CASE_NETWORK_SERVICE_TLS_PORT },
+		{ "alternate-address",				CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS },
 		{ "network-interface-name",			CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME },
 		{ "reuse-address",					CASE_NETWORK_SERVICE_REUSE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
@@ -2350,9 +2350,6 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS:
 				cfg_add_addr_access(line.val_tok_1, &c->alt_service);
 				break;
-			case CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS:
-				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
-				break;
 			case CASE_NETWORK_SERVICE_ALTERNATE_PORT:
 				c->alt_service.port = cfg_port(&line);
 				break;
@@ -2376,6 +2373,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NETWORK_SERVICE_TLS_NAME:
 				c->tls_name = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS:
+				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
 				break;
 			case CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME:
 				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
