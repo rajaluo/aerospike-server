@@ -5094,9 +5094,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 
 			if (msg_get_str(m, INFO_FIELD_SERVICES_CLEAR_STD, &info_history->services_clear_std,
 					0, MSG_GET_COPY_MALLOC) != 0 || !info_history->services_clear_std) {
-				cf_warning(AS_INFO, "No services-clear-std in message from node %" PRIx64, node);
-				pthread_mutex_unlock(vlock_history);
-				break;
+				cf_debug(AS_INFO, "No services-clear-std in message from node %" PRIx64, node);
 			}
 
 			if (msg_get_str(m, INFO_FIELD_SERVICES_TLS_STD, &info_history->services_tls_std,
