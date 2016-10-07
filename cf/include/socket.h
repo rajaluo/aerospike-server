@@ -124,6 +124,17 @@ typedef struct cf_serv_cfg_s {
 	cf_sock_cfg cfgs[CF_SOCK_CFG_MAX];
 } cf_serv_cfg;
 
+typedef struct cf_addr_list_s {
+	uint32_t n_addrs;
+	const char* addrs[CF_SOCK_CFG_MAX];
+} cf_addr_list;
+
+typedef struct cf_serv_spec_s {
+	cf_ip_port port;
+	cf_addr_list bind;
+	cf_addr_list access;
+} cf_serv_spec;
+
 typedef struct cf_poll_s {
 	int32_t fd;
 } __attribute__((packed)) cf_poll;

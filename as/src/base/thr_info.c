@@ -402,7 +402,7 @@ bind_to_string(cf_serv_cfg *cfg, cf_sock_owner owner)
 }
 
 static char *
-access_to_string(as_addr_list *addrs)
+access_to_string(cf_addr_list *addrs)
 {
 	cf_dyn_buf_define_size(db, 2500);
 
@@ -1933,7 +1933,7 @@ info_service_config_get(cf_dyn_buf *db)
 }
 
 static void
-append_addrs(cf_dyn_buf *db, const char *name, const as_addr_list *list)
+append_addrs(cf_dyn_buf *db, const char *name, const cf_addr_list *list)
 {
 	for (uint32_t i = 0; i < list->n_addrs; ++i) {
 		info_append_string(db, name, list->addrs[i]);
