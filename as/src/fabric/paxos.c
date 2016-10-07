@@ -2798,6 +2798,7 @@ as_paxos_thr(void *arg)
 		}
 
 		cf_node principal = as_paxos_succession_getprincipal();
+		bool principal_is_alive = as_hb_is_alive(principal);
 
 		/* Accept all messages from a new potential principal. This will enable
 		   hostile takeovers where this node needs to participate in the paxos
@@ -2811,7 +2812,7 @@ as_paxos_thr(void *arg)
 		 */
 		if (false == as_paxos_succession_ismember(qm->id)) {
 			cf_debug(AS_PAXOS, "got a message from a node not in the succession: %"PRIx64, qm->id);
-			if (!((self == principal) || (AS_PAXOS_MSG_COMMAND_SYNC == c || qm->id > principal))) {
+			if (self != principal && AS_PAXOS_MSG_COMMAND_SYNC != c && qm->id < principal && principal_is_alive) {
 				cf_warning(AS_PAXOS, "ignoring message from a node not in the succession: %"PRIx64" command %d", qm->id, c);
 				goto cleanup;
 			}
@@ -2828,7 +2829,7 @@ as_paxos_thr(void *arg)
 			 * reject the transaction only if it is also from a node NOT in our current
 			 * succession list
 			 */
-			if ((t.c.p_node < principal) && (false == as_paxos_succession_ismember(qm->id))) {
+			if ((t.c.p_node < principal && principal_is_alive) && (false == as_paxos_succession_ismember(qm->id))) {
 				cf_debug(AS_PAXOS, "Ignoring transaction from principal %"PRIx64" < current principal %"PRIx64" from node %"PRIx64" not in succession list", t.c.p_node, principal, qm->id);
 				goto cleanup;
 			}
@@ -3126,7 +3127,7 @@ as_paxos_thr(void *arg)
 				 * reject the transaction only if it is also from a node NOT in our current
 				 * succession list
 				 */
-				if ((qm->id < principal) && (false == as_paxos_succession_ismember(qm->id))) {
+				if ((qm->id < principal && as_hb_is_alive(principal)) && (false == as_paxos_succession_ismember(qm->id))) {
 					cf_debug(AS_PAXOS, "Ignoring sync message from principal %"PRIx64" < current principal %"PRIx64" and not in succession list", qm->id, principal);
 					break;
 				}
@@ -3141,7 +3142,7 @@ as_paxos_thr(void *arg)
 				/*
 				 * Check if we have already SYNC'd with a greater principal pro tempore.
 				 */
-				if (qm->id < p->principal_pro_tempore) {
+				if (qm->id < p->principal_pro_tempore && as_hb_is_alive(p->principal_pro_tempore)) {
 					cf_info(AS_PAXOS, "Ignoring sync message from principal %"PRIx64" < principal pro tempore %"PRIx64,
 							qm->id, p->principal_pro_tempore);
 					break;
