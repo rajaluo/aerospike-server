@@ -132,7 +132,7 @@ msg_create(msg **m_r, msg_type type, const msg_template *mt, size_t mt_sz,
 	size_t a_sz = u_sz + scratch_sz;
 
 	msg *m = cf_rc_alloc(a_sz);
-	cf_assert(m, CF_MSG, CF_CRITICAL, "malloc");
+	cf_assert(m, CF_MSG, "malloc");
 
 	m->n_fields = (uint32_t)max_id;
 	m->bytes_used = (uint32_t)u_sz;
@@ -536,7 +536,7 @@ msg_set_str(msg *m, int field_id, const char *v, msg_set_type type)
 		}
 		else {
 			mf->u.str = cf_strdup(v);
-			cf_assert(mf->u.str, CF_MSG, CF_CRITICAL, "malloc");
+			cf_assert(mf->u.str, CF_MSG, "malloc");
 			mf->free = true;
 		}
 	}
@@ -578,7 +578,7 @@ msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t len,
 		}
 		else {
 			mf->u.buf = cf_malloc(len);
-			cf_assert(mf->u.buf, CF_MSG, CF_CRITICAL, "malloc");
+			cf_assert(mf->u.buf, CF_MSG, "malloc");
 			mf->free = true;
 		}
 
@@ -890,7 +890,7 @@ msg_get_str(const msg *m, int field_id, char **r, size_t *len,
 	}
 	else if (MSG_GET_COPY_MALLOC == type) {
 		*r = cf_strdup(m->f[field_id].u.str);
-		cf_assert(*r, CF_MSG, CF_CRITICAL, "malloc");
+		cf_assert(*r, CF_MSG, "malloc");
 	}
 	else {
 		cf_crash(CF_MSG, "msg_get_str: illegal msg_get_type");
@@ -924,7 +924,7 @@ msg_get_buf(const msg *m, int field_id, uint8_t **r, size_t *len,
 	}
 	else if (MSG_GET_COPY_MALLOC == type) {
 		*r = cf_malloc(m->f[field_id].field_len);
-		cf_assert(*r, CF_MSG, CF_CRITICAL, "malloc");
+		cf_assert(*r, CF_MSG, "malloc");
 		memcpy(*r, m->f[field_id].u.buf, m->f[field_id].field_len);
 	}
 	else {
@@ -1265,7 +1265,7 @@ msg_field_save(msg *m, msg_field *mf)
 	case M_FT_ARRAY_BUF:
 		// Should only preserve received messages where buffer pointers point
 		// directly into a fabric buffer.
-		cf_assert(! mf->free, CF_MSG, CF_CRITICAL, "invalid msg preserve");
+		cf_assert(! mf->free, CF_MSG, "invalid msg preserve");
 
 		if (m->bytes_alloc - m->bytes_used >= mf->field_len) {
 			void *buf = ((uint8_t *)m) + m->bytes_used;
@@ -1277,7 +1277,7 @@ msg_field_save(msg *m, msg_field *mf)
 		}
 		else {
 			void *buf = cf_malloc(mf->field_len);
-			cf_assert(buf, CF_MSG, CF_CRITICAL, "malloc");
+			cf_assert(buf, CF_MSG, "malloc");
 
 			memcpy(buf, mf->u.any_buf, mf->field_len);
 			mf->u.any_buf = buf;

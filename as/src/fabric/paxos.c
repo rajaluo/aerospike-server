@@ -380,7 +380,7 @@ as_paxos_sync_msg_apply(msg *m)
 	int e = 0;
 	cf_node self = g_config.self_node;
 
-	cf_assert(m, AS_PAXOS, CF_CRITICAL, "invalid argument");
+	cf_assert(m, AS_PAXOS, "invalid argument");
 
 	as_paxos_generation gen;
 	memset(&gen, 0, sizeof(as_paxos_generation));
@@ -558,7 +558,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 	as_paxos *p = g_paxos;
 	int e = 0;
 
-	cf_assert(m, AS_PAXOS, CF_CRITICAL, "invalid argument");
+	cf_assert(m, AS_PAXOS, "invalid argument");
 
 	as_paxos_generation gen;
 	memset(&gen, 0, sizeof(as_paxos_generation));
@@ -766,7 +766,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 	size_t bufsz = 0;
 	int e = 0;
 
-	cf_assert(m, AS_PAXOS, CF_CRITICAL, "invalid argument");
+	cf_assert(m, AS_PAXOS, "invalid argument");
 
 	as_paxos_generation gen;
 	memset(&gen, 0, sizeof(as_paxos_generation));
@@ -1340,8 +1340,8 @@ as_paxos_transaction_search(as_paxos_transaction s)
 int
 as_paxos_transaction_compare(as_paxos_transaction *t1, as_paxos_transaction *t2)
 {
-	cf_assert(t1, AS_PAXOS, CF_CRITICAL, "invalid transaction (t1)");
-	cf_assert(t2, AS_PAXOS, CF_CRITICAL, "invalid transaction (t2)");
+	cf_assert(t1, AS_PAXOS, "invalid transaction (t1)");
+	cf_assert(t2, AS_PAXOS, "invalid transaction (t2)");
 
 	if (t1->gen.sequence == t2->gen.sequence &&
 			0 == memcmp(&t1->c, &t2->c, sizeof(as_paxos_change))) {
@@ -1357,8 +1357,8 @@ as_paxos_transaction_compare(as_paxos_transaction *t1, as_paxos_transaction *t2)
 void
 as_paxos_transaction_update(as_paxos_transaction *oldt, as_paxos_transaction *newt)
 {
-	cf_assert(oldt, AS_PAXOS, CF_CRITICAL, "invalid transaction (oldt)");
-	cf_assert(newt, AS_PAXOS, CF_CRITICAL, "invalid transaction (newt)");
+	cf_assert(oldt, AS_PAXOS, "invalid transaction (oldt)");
+	cf_assert(newt, AS_PAXOS, "invalid transaction (newt)");
 
 	oldt->gen.sequence = newt->gen.sequence;
 	memcpy(&oldt->c, &newt->c, sizeof(oldt->c));
@@ -1373,7 +1373,7 @@ as_paxos_transaction_establish(as_paxos_transaction *s)
 	as_paxos *p = g_paxos;
 	as_paxos_transaction *t = NULL, *oldest = NULL;
 
-	cf_assert(s, AS_PAXOS, CF_CRITICAL, "invalid transaction");
+	cf_assert(s, AS_PAXOS, "invalid transaction");
 
 	/* Scan through the list to find an empty slot; if none was found, reuse
 	 * the oldest retired transaction */
@@ -1417,7 +1417,7 @@ as_paxos_transaction_establish(as_paxos_transaction *s)
 void
 as_paxos_transaction_confirm(as_paxos_transaction *t)
 {
-	cf_assert(t, AS_PAXOS, CF_CRITICAL, "invalid argument");
+	cf_assert(t, AS_PAXOS, "invalid argument");
 
 	t->confirmed = true;
 
@@ -1439,7 +1439,7 @@ as_paxos_transaction_confirm(as_paxos_transaction *t)
 void
 as_paxos_transaction_retire(as_paxos_transaction *t)
 {
-	cf_assert(t, AS_PAXOS, CF_CRITICAL, "invalid argument");
+	cf_assert(t, AS_PAXOS, "invalid argument");
 
 	t->retired = true;
 }
@@ -1449,7 +1449,7 @@ as_paxos_transaction_retire(as_paxos_transaction *t)
 void
 as_paxos_transaction_destroy(as_paxos_transaction *t)
 {
-	cf_assert(t, AS_PAXOS, CF_CRITICAL, "invalid argument");
+	cf_assert(t, AS_PAXOS, "invalid argument");
 	memset(t, 0, sizeof(as_paxos_transaction));
 }
 
@@ -1469,8 +1469,8 @@ as_paxos_transaction_vote(as_paxos_transaction *s, cf_node n, as_paxos_transacti
 	as_paxos_transaction_vote_result r;
 	int c = 0, v = 0;
 
-	cf_assert(s, AS_PAXOS, CF_CRITICAL, "invalid transaction (s)");
-	cf_assert(t, AS_PAXOS, CF_CRITICAL, "invalid transaction (t)");
+	cf_assert(s, AS_PAXOS, "invalid transaction (s)");
+	cf_assert(t, AS_PAXOS, "invalid transaction (t)");
 
 	/* Make sure that the transaction we're voting on is the same one we
 	 * have in the pending transaction table */
@@ -1504,7 +1504,7 @@ as_paxos_transaction_vote(as_paxos_transaction *s, cf_node n, as_paxos_transacti
 void
 as_paxos_transaction_vote_reset(as_paxos_transaction *t)
 {
-	cf_assert(t, AS_PAXOS, CF_CRITICAL, "invalid argument");
+	cf_assert(t, AS_PAXOS, "invalid argument");
 
 	for (int i = 0; i < AS_CLUSTER_SZ; i++)
 		t->votes[i] = false;
@@ -1795,7 +1795,7 @@ as_paxos_msg_wrap(as_paxos_transaction *t, uint32_t c)
 		return(NULL);
 	}
 
-	cf_assert(t, AS_PAXOS, CF_CRITICAL, "invalid transaction");
+	cf_assert(t, AS_PAXOS, "invalid transaction");
 
 	if (NULL == (m = as_fabric_msg_get(M_TYPE_PAXOS))) {
 		cf_warning(AS_PAXOS, "unable to get a fabric message");
@@ -1851,8 +1851,8 @@ as_paxos_msg_unwrap(msg *m, as_paxos_transaction *t)
 		return(-1);
 	}
 
-	cf_assert(m, AS_PAXOS, CF_CRITICAL, "invalid message");
-	cf_assert(t, AS_PAXOS, CF_CRITICAL, "invalid transaction");
+	cf_assert(m, AS_PAXOS, "invalid message");
+	cf_assert(t, AS_PAXOS, "invalid transaction");
 
 	/* Initialize the transaction structure */
 	memset(t, 0, sizeof(as_paxos_transaction));
@@ -2057,12 +2057,12 @@ as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 	as_paxos *p = g_paxos;
 	as_paxos_msg *qm;
 
-	cf_assert(m, AS_PAXOS, CF_CRITICAL, "null message");
+	cf_assert(m, AS_PAXOS, "null message");
 
 	msg_preserve_all_fields(m);
 
 	qm = cf_calloc(1, sizeof(as_paxos_msg));
-	cf_assert(qm, AS_PAXOS, CF_CRITICAL, "allocation: %s", cf_strerror(errno));
+	cf_assert(qm, AS_PAXOS, "allocation: %s", cf_strerror(errno));
 	qm->id = id;
 	qm->m = m;
 
@@ -3595,7 +3595,7 @@ void
 as_paxos_init()
 {
 	g_paxos = cf_calloc(1, sizeof(as_paxos));
-	cf_assert(g_paxos, AS_PAXOS, CF_CRITICAL, "allocation: %s", cf_strerror(errno));
+	cf_assert(g_paxos, AS_PAXOS, "allocation: %s", cf_strerror(errno));
 
 	as_paxos *p = g_paxos; // shortcut pointer
 

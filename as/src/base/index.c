@@ -203,7 +203,7 @@ as_index_tree_release(as_index_tree *tree)
 		return 1;
 	}
 
-	cf_assert(rc == 0, AS_INDEX, CF_CRITICAL, "tree ref-count %d", rc);
+	cf_assert(rc == 0, AS_INDEX, "tree ref-count %d", rc);
 
 	// TODO - call as_index_tree_destroy() directly if tree is empty?
 
@@ -730,7 +730,7 @@ as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
 		return;
 	}
 
-	cf_assert(rc == 0, AS_INDEX, CF_CRITICAL, "index ref-count %d", rc);
+	cf_assert(rc == 0, AS_INDEX, "index ref-count %d", rc);
 
 	if (tree->destructor) {
 		tree->destructor(r, tree->destructor_udata);
