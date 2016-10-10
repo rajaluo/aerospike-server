@@ -423,7 +423,7 @@ cf_socket_parse_netlink(bool allow_ipv6, uint32_t family, uint32_t flags,
 }
 
 void
-cf_socket_fix_client(const cf_socket *sock)
+cf_socket_fix_client(cf_socket *sock)
 {
 	(void)sock;
 }
@@ -435,7 +435,7 @@ cf_socket_fix_bind(cf_serv_cfg *serv_cfg)
 }
 
 void
-cf_socket_fix_server(const cf_socket *sock)
+cf_socket_fix_server(cf_socket *sock)
 {
 	(void)sock;
 }
