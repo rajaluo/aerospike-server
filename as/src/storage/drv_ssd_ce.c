@@ -40,7 +40,7 @@ bool
 ssd_cold_start_is_valid_n_bins(uint32_t n_bins)
 {
 	// FIXME - what should we do here?
-	cf_assert(n_bins != 0, AS_DRV_SSD, CF_CRITICAL,
+	cf_assert(n_bins != 0, AS_DRV_SSD,
 			"community edition found tombstone - erase drive and restart");
 
 	return n_bins <= BIN_NAMES_QUOTA;

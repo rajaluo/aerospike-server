@@ -1570,11 +1570,9 @@ as_sindex_release(as_sindex *si, char *fname, int lineno)
 	uint64_t val = cf_rc_release(si->imd);
 	if (val == 0) {
 		cf_assert((si->state == AS_SINDEX_DESTROY),
-					AS_SINDEX, CF_CRITICAL,
-					" Invalid state at cleanup");
+					AS_SINDEX, " Invalid state at cleanup");
 		cf_assert(!(si->state & AS_SINDEX_FLAG_DESTROY_CLEANUP),
-					AS_SINDEX, CF_CRITICAL,
-					" Invalid state at cleanup");
+					AS_SINDEX, " Invalid state at cleanup");
 		si->flag |= AS_SINDEX_FLAG_DESTROY_CLEANUP;
 		if (CF_QUEUE_OK != cf_queue_push(g_sindex_destroy_q, &si)) {
 			return AS_SINDEX_ERR;

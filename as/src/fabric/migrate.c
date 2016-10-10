@@ -284,7 +284,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr)
 {
 	emigration *emig = cf_rc_alloc(sizeof(emigration));
 
-	cf_assert(emig, AS_MIGRATE, CF_CRITICAL, "failed emigration malloc");
+	cf_assert(emig, AS_MIGRATE, "failed emigration malloc");
 
 	emig->dest = pmr->dest;
 	emig->cluster_key = pmr->cluster_key;
@@ -1260,7 +1260,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 	immigration *immig = cf_rc_alloc(sizeof(immigration));
 
-	cf_assert(immig, AS_MIGRATE, CF_CRITICAL, "malloc");
+	cf_assert(immig, AS_MIGRATE, "malloc");
 
 	cf_atomic_int_incr(&ns->migrate_rx_instance_count);
 
@@ -1763,7 +1763,7 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 
 	if (! is_subrecord) {
 		cf_assert((emig->tx_state == AS_PARTITION_MIG_TX_STATE_RECORD),
-				AS_PARTITION, CF_CRITICAL,
+				AS_PARTITION,
 				"unexpected partition migration state at source %d:%d",
 				emig->tx_state, emig->rsv.p->id);
 	}
@@ -1842,7 +1842,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 		// When tree is being reduced for the record the state should already
 		// be STATE_RECORD.
 		cf_assert((emig->tx_state == AS_PARTITION_MIG_TX_STATE_RECORD),
-				AS_PARTITION, CF_CRITICAL,
+				AS_PARTITION,
 				"unexpected partition migration state at source %d:%d",
 				emig->tx_state, emig->rsv.p->id);
 
@@ -1863,7 +1863,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 	}
 	else if (is_subrec) {
 		cf_assert((emig->tx_state == AS_PARTITION_MIG_TX_STATE_SUBRECORD),
-				AS_PARTITION, CF_CRITICAL,
+				AS_PARTITION,
 				"unexpected partition migration state at source %d:%d",
 				emig->tx_state, emig->rsv.p->id);
 

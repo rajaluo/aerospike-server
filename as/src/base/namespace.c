@@ -83,7 +83,7 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	}
 
 	as_namespace *ns = cf_malloc(sizeof(as_namespace));
-	cf_assert(ns, AS_NAMESPACE, CF_CRITICAL, "%s as_namespace allocation failed", name);
+	cf_assert(ns, AS_NAMESPACE, "%s as_namespace allocation failed", name);
 
 	// Set all members 0/NULL/false to start with.
 	memset(ns, 0, sizeof(as_namespace));
@@ -358,10 +358,6 @@ as_namespace_getid_bymsgfield(as_msg_field *fp)
 void
 as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes)
 {
-	cf_assert(ns, AS_NAMESPACE, CF_WARNING, "NULL namespace");
-	cf_assert(hwm_breached, AS_NAMESPACE, CF_WARNING, "NULL parameter, hwm_breached");
-	cf_assert(stop_writes, AS_NAMESPACE, CF_WARNING, "NULL parameter, stop_writes");
-
 	*hwm_breached = false;
 	*stop_writes = false;
 
@@ -535,7 +531,7 @@ as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 int
 as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool apply_restrictions)
 {
-	cf_assert(set_name, AS_NAMESPACE, CF_CRITICAL, "null set name");
+	cf_assert(set_name, AS_NAMESPACE, "null set name");
 
 	return as_namespace_get_create_set_w_len(ns, set_name, strlen(set_name),
 			p_set_id, apply_restrictions);
@@ -544,8 +540,8 @@ as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_
 int
 as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions)
 {
-	cf_assert(set_name, AS_NAMESPACE, CF_CRITICAL, "null set name");
-	cf_assert(len != 0, AS_NAMESPACE, CF_CRITICAL, "empty set name");
+	cf_assert(set_name, AS_NAMESPACE, "null set name");
+	cf_assert(len != 0, AS_NAMESPACE, "empty set name");
 
 	uint32_t idx;
 	cf_vmapx_err result = cf_vmapx_get_index_w_len(ns->p_sets_vmap, set_name, len, &idx);

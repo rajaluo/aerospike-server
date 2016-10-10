@@ -4901,7 +4901,7 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node *s
 
 			if (shash_get_vlock(g_info_node_info_history_hash, &succession[i],
 					(void **)&info_history, &vlock_history) != SHASH_OK) {
-				cf_assert(false, AS_INFO, CF_CRITICAL,
+				cf_crash(AS_INFO,
 						"Could not create info history hash entry for %" PRIx64, succession[i]);
 				continue;
 			}
@@ -4923,7 +4923,7 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node *s
 			}
 			else {
 				free_node_info_services(&temp);
-				cf_assert(false, AS_INFO, CF_CRITICAL,
+				cf_crash(AS_INFO,
 						"Could not insert node %" PRIx64 " from Paxos notification", succession[i]);
 			}
 
@@ -5074,7 +5074,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 
 				if (shash_get_vlock(g_info_node_info_history_hash, &node, (void **)&info_history,
 						&vlock_history) != SHASH_OK) {
-					cf_assert(false, AS_INFO, CF_CRITICAL,
+					cf_crash(AS_INFO,
 							"Could not create info history hash entry for %" PRIx64, node);
 					break;
 				}
