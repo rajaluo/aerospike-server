@@ -106,7 +106,7 @@ char *cf_fault_context_strings[] = {
 COMPILER_ASSERT(sizeof(cf_fault_context_strings) / sizeof(char*) == CF_FAULT_CONTEXT_UNDEF);
 
 static const char *cf_fault_severity_strings[] = {
-		"CRITICAL",
+		"FAILED ASSERTION",
 		"WARNING",
 		"INFO",
 		"DEBUG",
@@ -496,7 +496,7 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
 		fflush(NULL);
 
 		// Our signal handler will log a stack trace.
-		abort();
+		raise(SIGUSR1);
 	}
 } // end cf_fault_event()
 
@@ -819,7 +819,7 @@ cf_fault_event2(const cf_fault_context context,
 		fflush(NULL);
 
 		// Our signal handler will log a stack trace.
-		abort();
+		raise(SIGUSR1);
 	}
 }
 

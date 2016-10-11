@@ -169,7 +169,7 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 			continue;
 		}
 		// else - got it - handle "hot key" scenario.
-		cf_assert(get_rv == RCHASH_OK, AS_RW, CF_CRITICAL, "rchash_get error");
+		cf_assert(get_rv == RCHASH_OK, AS_RW, "rchash_get error");
 
 		pthread_mutex_lock(&rw0->lock);
 
@@ -253,7 +253,7 @@ handle_hot_key(rw_request* rw0, as_transaction* tr)
 		// retried when the original is complete.
 
 		rw_wait_ele* e = cf_malloc(sizeof(rw_wait_ele));
-		cf_assert(e, AS_RW, CF_CRITICAL, "alloc rw_wait_ele");
+		cf_assert(e, AS_RW, "alloc rw_wait_ele");
 
 		as_transaction_copy_head(&e->tr, tr);
 		tr->from.any = NULL;

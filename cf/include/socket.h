@@ -124,6 +124,17 @@ typedef struct cf_serv_cfg_s {
 	cf_sock_cfg cfgs[CF_SOCK_CFG_MAX];
 } cf_serv_cfg;
 
+typedef struct cf_addr_list_s {
+	uint32_t n_addrs;
+	const char* addrs[CF_SOCK_CFG_MAX];
+} cf_addr_list;
+
+typedef struct cf_serv_spec_s {
+	cf_ip_port port;
+	cf_addr_list bind;
+	cf_addr_list access;
+} cf_serv_spec;
+
 typedef struct cf_poll_s {
 	int32_t fd;
 } __attribute__((packed)) cf_poll;
@@ -209,17 +220,17 @@ void cf_sockets_close(cf_sockets *socks);
 
 void cf_fd_disable_blocking(int32_t fd);
 
-void cf_socket_disable_blocking(const cf_socket *sock);
-void cf_socket_enable_blocking(const cf_socket *sock);
-void cf_socket_disable_nagle(const cf_socket *sock);
-void cf_socket_enable_nagle(const cf_socket *sock);
-void cf_socket_keep_alive(const cf_socket *sock, int32_t idle, int32_t interval, int32_t count);
-void cf_socket_set_send_buffer(const cf_socket *sock, int32_t size);
-void cf_socket_set_receive_buffer(const cf_socket *sock, int32_t size);
-void cf_socket_set_window(const cf_socket *sock, int32_t size);
+void cf_socket_disable_blocking(cf_socket *sock);
+void cf_socket_enable_blocking(cf_socket *sock);
+void cf_socket_disable_nagle(cf_socket *sock);
+void cf_socket_enable_nagle(cf_socket *sock);
+void cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t count);
+void cf_socket_set_send_buffer(cf_socket *sock, int32_t size);
+void cf_socket_set_receive_buffer(cf_socket *sock, int32_t size);
+void cf_socket_set_window(cf_socket *sock, int32_t size);
 
 void cf_socket_init(cf_socket *sock);
-bool cf_socket_exists(const cf_socket *sock);
+bool cf_socket_exists(cf_socket *sock);
 
 static inline void cf_socket_copy(const cf_socket *from, cf_socket *to)
 {
@@ -231,23 +242,23 @@ CF_MUST_CHECK int32_t cf_socket_init_server(cf_serv_cfg *cfg, cf_sockets *socks)
 void cf_socket_show_server(cf_fault_context cont, const char *tag, const cf_sockets *socks);
 CF_MUST_CHECK int32_t cf_socket_init_client(cf_sock_cfg *cfg, int32_t timeout, cf_socket *sock);
 
-CF_MUST_CHECK int32_t cf_socket_accept(const cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_socket_remote_name(const cf_socket *sock, cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_socket_local_name(const cf_socket *sock, cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_socket_available(const cf_socket *sock);
+CF_MUST_CHECK int32_t cf_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_remote_name(cf_socket *sock, cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_local_name(cf_socket *sock, cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_available(cf_socket *sock);
 
-CF_MUST_CHECK int32_t cf_socket_recv_from(const cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_socket_recv(const cf_socket *sock, void *buff, size_t size, int32_t flags);
-CF_MUST_CHECK int32_t cf_socket_send_to(const cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_socket_send(const cf_socket *sock, const void *buff, size_t size, int32_t flags);
+CF_MUST_CHECK int32_t cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags);
+CF_MUST_CHECK int32_t cf_socket_send_to(cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags);
 
-CF_MUST_CHECK int32_t cf_socket_recv_from_all(const cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr, int32_t timeout);
-CF_MUST_CHECK int32_t cf_socket_recv_all(const cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout);
-CF_MUST_CHECK int32_t cf_socket_send_to_all(const cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr, int32_t timeout);
-CF_MUST_CHECK int32_t cf_socket_send_all(const cf_socket *sock, const void *buff, size_t size, int32_t flags, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_recv_all(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr, int32_t timeout);
+CF_MUST_CHECK int32_t cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags, int32_t timeout);
 
-void cf_socket_write_shutdown(const cf_socket *sock);
-void cf_socket_shutdown(const cf_socket *sock);
+void cf_socket_write_shutdown(cf_socket *sock);
+void cf_socket_shutdown(cf_socket *sock);
 void cf_socket_close(cf_socket *sock);
 void cf_socket_drain_close(cf_socket *sock);
 void cf_socket_term(cf_socket *sock);
@@ -303,7 +314,7 @@ CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_no
 CF_MUST_CHECK size_t cf_socket_addr_len(const struct sockaddr* sa);
 CF_MUST_CHECK int32_t cf_socket_parse_netlink(bool allow_v6, uint32_t family, uint32_t flags,
 		const void *data, size_t len, cf_ip_addr *addr);
-void cf_socket_fix_client(const cf_socket *sock);
+void cf_socket_fix_client(cf_socket *sock);
 void cf_socket_fix_bind(cf_serv_cfg *serv_cfg);
-void cf_socket_fix_server(const cf_socket *sock);
+void cf_socket_fix_server(cf_socket *sock);
 #endif

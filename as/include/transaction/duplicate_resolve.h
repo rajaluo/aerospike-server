@@ -26,8 +26,6 @@
 // Includes.
 //
 
-#include <stdbool.h>
-
 #include "msg.h"
 #include "util.h"
 
@@ -39,7 +37,7 @@
 // Public API.
 //
 
-bool dup_res_make_message(rw_request* rw, as_transaction* tr, bool send_metadata);
+bool dup_res_make_message(rw_request* rw, as_transaction* tr);
 void dup_res_setup_rw(rw_request* rw, as_transaction* tr, dup_res_done_cb dup_res_cb, timeout_done_cb timeout_cb);
 void dup_res_handle_request(cf_node node, msg* m);
 void dup_res_handle_ack(cf_node node, msg* m);

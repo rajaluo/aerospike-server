@@ -57,7 +57,7 @@
 // Forward Declarations.
 //
 
-bool start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata);
+bool start_read_dup_res(rw_request* rw, as_transaction* tr);
 bool read_dup_res_cb(rw_request* rw);
 
 void send_read_response(as_transaction* tr, as_msg_op** ops,
@@ -65,7 +65,7 @@ void send_read_response(as_transaction* tr, as_msg_op** ops,
 		cf_dyn_buf* db);
 void read_timeout_cb(rw_request* rw);
 
-transaction_status read_local(as_transaction* tr, bool stop_if_not_found);
+transaction_status read_local(as_transaction* tr);
 void read_local_done(as_transaction* tr, as_index_ref* r_ref, as_storage_rd* rd,
 		int result_code);
 
@@ -118,34 +118,20 @@ as_read_start(as_transaction* tr)
 	BENCHMARK_START(tr, read, FROM_CLIENT);
 	BENCHMARK_START(tr, batch_sub, FROM_BATCH);
 
-	if (tr->rsv.n_dupl == 0) {
-		// No duplicates to resolve. Try to read local copy - response sent to
-		// origin no matter what.
-		return read_local(tr, false);
+	if (! as_read_must_duplicate_resolve(tr)) {
+		// No duplicates to resolve, or not configured to duplicate resolve.
+		// Just read local copy - response sent to origin no matter what.
+		return read_local(tr);
 	}
+	// else - there are duplicates, and we're configured to resolve them.
 
-	transaction_status status;
-	bool send_metadata = true;
-
-	if (! g_config.transaction_repeatable_read &&
-			TRANSACTION_CONSISTENCY_LEVEL(tr) !=
-					AS_POLICY_CONSISTENCY_LEVEL_ALL) {
-		// We only resolve duplicates if we don't find the record. Try to read
-		// local copy - done, and response sent to origin, if record is found.
-		if ((status = read_local(tr, true)) != TRANS_IN_PROGRESS) {
-			return status;
-		}
-
-		// Don't try to send non-existent metadata.
-		send_metadata = false;
-	}
-
-	// Must resolve duplicates - create rw_request and add to hash.
+	// Create rw_request and add to hash.
 	rw_request_hkey hkey = { tr->rsv.ns->id, tr->keyd };
 	rw_request* rw = rw_request_create(&tr->keyd);
+	transaction_status status = rw_request_hash_insert(&hkey, rw, tr);
 
 	// If rw_request wasn't inserted in hash, transaction is finished.
-	if ((status = rw_request_hash_insert(&hkey, rw, tr)) != TRANS_IN_PROGRESS) {
+	if (status != TRANS_IN_PROGRESS) {
 		rw_request_release(rw);
 
 		if (status != TRANS_WAITING) {
@@ -156,7 +142,7 @@ as_read_start(as_transaction* tr)
 	}
 	// else - rw_request is now in hash, continue...
 
-	if (! start_read_dup_res(rw, tr, send_metadata)) {
+	if (! start_read_dup_res(rw, tr)) {
 		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_read_response(tr, NULL, NULL, 0, NULL, NULL);
@@ -173,11 +159,11 @@ as_read_start(as_transaction* tr)
 //
 
 bool
-start_read_dup_res(rw_request* rw, as_transaction* tr, bool send_metadata)
+start_read_dup_res(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw_request, construct and send dup-res message.
 
-	if (! dup_res_make_message(rw, tr, send_metadata)) {
+	if (! dup_res_make_message(rw, tr)) {
 		return false;
 	}
 
@@ -202,7 +188,7 @@ read_dup_res_cb(rw_request* rw)
 	as_transaction_init_from_rw(&tr, rw);
 
 	// Read the local copy and respond to origin.
-	read_local(&tr, false);
+	read_local(&tr);
 
 	// Finished transaction - rw_request cleans up reservation and msgp!
 	return true;
@@ -310,7 +296,7 @@ read_timeout_cb(rw_request* rw)
 //
 
 transaction_status
-read_local(as_transaction* tr, bool stop_if_not_found)
+read_local(as_transaction* tr)
 {
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
@@ -319,10 +305,6 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 	r_ref.skip_lock = false;
 
 	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) != 0) {
-		if (stop_if_not_found) {
-			return TRANS_IN_PROGRESS;
-		}
-
 		read_local_done(tr, NULL, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return TRANS_DONE_ERROR;
 	}

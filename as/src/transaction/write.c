@@ -270,7 +270,7 @@ start_write_dup_res(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw, construct and send dup-res message.
 
-	if (! dup_res_make_message(rw, tr, true)) {
+	if (! dup_res_make_message(rw, tr)) {
 		return false;
 	}
 

@@ -1157,7 +1157,9 @@ fabric_worker_add(fabric_args *fa, fabric_buffer *fb)
 
 	// Write a byte to his file descriptor too.
 	uint8_t note_byte = 1;
-	cf_assert(fa->note_fd[worker], AS_FABRIC, CF_WARNING, "attempted write to fd 0");
+	if (fa->note_fd[worker] == 0) {
+		cf_warning(AS_FABRIC, "attempted write to fd 0");
+	}
 	if (1 != send(fa->note_fd[worker], &note_byte, sizeof(note_byte), MSG_NOSIGNAL)) {
 		// TODO!
 		cf_info(AS_FABRIC, "can't write to notification file descriptor: will probably have to take down process");
@@ -1196,7 +1198,9 @@ run_fabric_worker(void *arg)
 	}
 	// Write the one byte that is my index.
 	uint8_t fd_idx = worker_id;
-	cf_assert(note_fd, AS_FABRIC, CF_WARNING, "attempted write to fd 0");
+	if (note_fd == 0) {
+		cf_warning(AS_FABRIC, "attempted write to fd 0");
+	}
 	if (1 != send(note_fd, &fd_idx, sizeof(fd_idx), MSG_NOSIGNAL)) {
 		// TODO
 		cf_debug(AS_FABRIC, "can't write to notification fd: probably need to blow up process errno %d", errno);

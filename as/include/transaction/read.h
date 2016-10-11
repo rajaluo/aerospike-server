@@ -26,7 +26,11 @@
 // Includes.
 //
 
+#include <stdbool.h>
+
+#include "base/cfg.h"
 #include "base/transaction.h"
+#include "base/transaction_policy.h"
 
 
 //==========================================================
@@ -34,3 +38,12 @@
 //
 
 transaction_status as_read_start(as_transaction* tr);
+
+static inline bool
+as_read_must_duplicate_resolve(const as_transaction* tr)
+{
+	return tr->rsv.n_dupl != 0 &&
+			(g_config.transaction_repeatable_read ||
+					TRANSACTION_CONSISTENCY_LEVEL(tr) ==
+							AS_POLICY_CONSISTENCY_LEVEL_ALL);
+}

@@ -72,17 +72,6 @@ struct as_namespace_s;
 #define PBOOL(line) bool PGLUE(pad_, line)[3]; bool
 #define PAD_BOOL PBOOL(__LINE__)
 
-typedef struct as_addr_list_s {
-	uint32_t n_addrs;
-	const char* addrs[CF_SOCK_CFG_MAX];
-} as_addr_list;
-
-typedef struct as_serv_spec_s {
-	cf_ip_port port;
-	as_addr_list bind;
-	as_addr_list access;
-} as_serv_spec;
-
 typedef struct as_config_s {
 
 	// The order here matches that in the configuration parser's enum,
@@ -188,21 +177,21 @@ typedef struct as_config_s {
 
 	// Normally visible, in canonical configuration file order:
 
-	as_serv_spec	service; // client service
+	cf_serv_spec	service; // client service
 
 	// Normally hidden:
 
-	as_serv_spec	alt_service; // alternate client service
-	as_serv_spec	alt_tls_service; // alternate TLS client service
+	cf_serv_spec	alt_service; // alternate client service
+	cf_serv_spec	alt_tls_service; // alternate TLS client service
 	char*			tls_name; // TLS name
-	as_serv_spec	tls_service; // TLS client service
+	cf_serv_spec	tls_service; // TLS client service
 
 	//--------------------------------------------
 	// network::heartbeat context.
 	//
 
-	as_serv_spec	hb_serv_spec; // literal binding address spec parsed from config
-	as_addr_list	hb_multicast_groups; // literal multicast groups parsed from config
+	cf_serv_spec	hb_serv_spec; // literal binding address spec parsed from config
+	cf_addr_list	hb_multicast_groups; // literal multicast groups parsed from config
 	as_hb_config	hb_config;
 
 	//--------------------------------------------
@@ -211,7 +200,7 @@ typedef struct as_config_s {
 
 	// Normally visible, in canonical configuration file order:
 
-	as_serv_spec	fabric; // fabric service
+	cf_serv_spec	fabric; // fabric service
 
 	// Normally hidden, in canonical configuration file order:
 
@@ -227,7 +216,7 @@ typedef struct as_config_s {
 
 	// Normally visible, in canonical configuration file order:
 
-	as_serv_spec	info; // info service
+	cf_serv_spec	info; // info service
 
 	//--------------------------------------------
 	// Remaining configuration top-level contexts.

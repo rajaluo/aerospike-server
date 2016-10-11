@@ -68,7 +68,7 @@ void get_ldt_info(const msg* m, as_record_merge_component* c);
 //
 
 bool
-dup_res_make_message(rw_request* rw, as_transaction* tr, bool send_metadata)
+dup_res_make_message(rw_request* rw, as_transaction* tr)
 {
 	if (! (rw->dest_msg = as_fabric_msg_get(M_TYPE_RW))) {
 		return false;
@@ -86,19 +86,17 @@ dup_res_make_message(rw_request* rw, as_transaction* tr, bool send_metadata)
 	msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
-	if (send_metadata) {
-		as_index_ref r_ref;
-		r_ref.skip_lock = false;
+	as_index_ref r_ref;
+	r_ref.skip_lock = false;
 
-		if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) == 0) {
-			as_record* r = r_ref.r;
+	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) == 0) {
+		as_record* r = r_ref.r;
 
-			msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
-			msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
-			msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
+		msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
+		msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
+		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
 
-			as_record_done(&r_ref, ns);
-		}
+		as_record_done(&r_ref, ns);
 	}
 
 	return true;

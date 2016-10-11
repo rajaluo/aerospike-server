@@ -291,8 +291,8 @@ process_transaction(as_transaction *tr)
 		rv = as_partition_reserve_read(ns, pid, &tr->rsv, &dest,
 				&partition_cluster_key);
 
-		// TODO - does this reservation promotion really accomplish anything?
-		if (rv == 0 && tr->rsv.n_dupl > 0) {
+		// TODO - is reservation promotion really the best way?
+		if (rv == 0 && as_read_must_duplicate_resolve(tr)) {
 			// Upgrade to a write reservation.
 			as_partition_release(&tr->rsv);
 
@@ -399,7 +399,7 @@ thr_tsvc(void *arg)
 {
 	cf_queue *q = (cf_queue *) arg;
 
-	cf_assert(arg, AS_TSVC, CF_CRITICAL, "invalid argument");
+	cf_assert(arg, AS_TSVC, "invalid argument");
 
 	// Wait for a transaction to arrive.
 	for ( ; ; ) {

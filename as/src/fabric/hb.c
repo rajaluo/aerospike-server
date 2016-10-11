@@ -1640,7 +1640,7 @@ static msg_template g_hb_v2_msg_template[] =
 static void* hb_malloc(size_t size);
 static void hb_free(void* buff);
 
-static void info_append_addrs(cf_dyn_buf *db, const char *name, const as_addr_list *list);
+static void info_append_addrs(cf_dyn_buf *db, const char *name, const cf_addr_list *list);
 
 void endpoint_list_to_string_process(const as_endpoint_list* endpoint_list, void* udata);
 
@@ -2739,7 +2739,7 @@ as_hb_delete_all_reduce(void* key, void* data, void* udata)
  * Append a address spec to a cf_dyn_buf.
  */
 static void
-info_append_addrs(cf_dyn_buf *db, const char *name, const as_addr_list *list)
+info_append_addrs(cf_dyn_buf *db, const char *name, const cf_addr_list *list)
 {
 	for (uint32_t i = 0; i < list->n_addrs; ++i) {
 		info_append_string(db, name, list->addrs[i]);

@@ -498,8 +498,7 @@ proxyer_handle_response(msg* m, uint32_t tid)
 		return;
 	}
 
-	cf_assert(pr.from.any, AS_PROXY, CF_CRITICAL, "origin %u has null 'from'",
-			pr.origin);
+	cf_assert(pr.from.any, AS_PROXY, "origin %u has null 'from'", pr.origin);
 
 	int result;
 
@@ -775,7 +774,7 @@ proxy_retransmit_reduce_fn(void* key, void* data, void* udata)
 			return SHASH_REDUCE_DELETE;
 		}
 
-		cf_assert(pr->from.any, AS_PROXY, CF_CRITICAL,
+		cf_assert(pr->from.any, AS_PROXY,
 				"origin %u has null 'from'", pr->origin);
 
 		switch (pr->origin) {
@@ -1026,8 +1025,7 @@ proxy_msg_cb(cf_node src, msg* m, void* udata)
 void
 shipop_response_handler(msg* m, proxy_request* pr)
 {
-	cf_assert(pr->origin == 0, AS_PROXY, CF_CRITICAL,
-			"ship-op pr origin not 0");
+	cf_assert(pr->origin == 0, AS_PROXY, "ship-op pr origin not 0");
 
 	rw_request* rw = pr->rw;
 

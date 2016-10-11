@@ -2047,7 +2047,7 @@ cf_rc_alloc_at(size_t sz, char *file, int line)
 void
 cf_rc_free_at(void *addr, char *file, int line)
 {
-	cf_assert(addr, CF_ALLOC, CF_CRITICAL, "null address");
+	cf_assert(addr, CF_ALLOC, "null address");
 
 	cf_rc_hdr *hdr = (cf_rc_hdr *) ( ((uint8_t *)addr) - sizeof(cf_rc_hdr));
 

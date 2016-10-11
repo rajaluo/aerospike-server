@@ -239,7 +239,7 @@ as_record_done(as_index_ref *r_ref, as_namespace *ns)
 		return;
 	}
 
-	cf_assert(rc == 0, AS_RECORD, CF_CRITICAL, "index ref-count %d", rc);
+	cf_assert(rc == 0, AS_RECORD, "index ref-count %d", rc);
 
 	as_record_destroy(r_ref->r, ns);
 	cf_arenax_free(ns->arena, r_ref->r_h);
@@ -881,7 +881,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 			as_index_delete(rsv->tree, keyd);
 		}
 	} else {
-		cf_assert(has_local_copy, AS_RECORD, CF_CRITICAL,
+		cf_assert(has_local_copy, AS_RECORD,
 				"Local Copy Won when there is no local copy");
 		cf_detail_digest(AS_LDT, keyd, "Local Copy Win [%d %d] %d winner_idx=%d", r->generation, components[0].generation, r->void_time, *winner_idx);
 	}
