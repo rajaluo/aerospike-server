@@ -33,11 +33,6 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 
-void
-as_xmem_scheme_check() {
-	// For enterprise version only.
-}
-
 static bool
 check_capacity(uint32_t capacity)
 {
@@ -93,8 +88,8 @@ as_mem_check()
 	return capacity;
 }
 
-void
-as_namespace_setup(as_namespace* ns, uint32_t instance, uint32_t stage_capacity)
+static void
+setup_namespace(as_namespace* ns, uint32_t stage_capacity)
 {
 	ns->cold_start = true;
 
@@ -153,6 +148,14 @@ as_namespace_setup(as_namespace* ns, uint32_t instance, uint32_t stage_capacity)
 
 	if (arena_result != CF_ARENAX_OK) {
 		cf_crash(AS_NAMESPACE, "ns %s can't create arena: %s", ns->name, cf_arenax_errstr(arena_result));
+	}
+}
+
+void
+as_namespaces_setup(bool cold_start_cmd, uint32_t instance, uint32_t stage_capacity)
+{
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		setup_namespace(g_config.namespaces[i], stage_capacity);
 	}
 }
 

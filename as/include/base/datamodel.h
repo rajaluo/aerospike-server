@@ -712,8 +712,11 @@ struct as_namespace_s {
 	// Persistent memory.
 	//
 
+	// Persistent memory "base" block ID for this namespace.
+	uint32_t		xmem_id;
+
 	// Pointer to the persistent memory "base" block.
-	uint8_t*		p_xmem_base;
+	uint8_t*		xmem_base;
 
 	// Pointer to array of partition tree info in persistent memory base block.
 	as_treex*		tree_roots;
@@ -1208,15 +1211,14 @@ as_bin_memcpy_name(as_namespace *ns, byte *buf, as_bin *b) {
 struct as_msg_field_s;
 
 /* Namespace function declarations */
-extern as_namespace *as_namespace_create(char *name, uint16_t replication_factor);
+extern as_namespace *as_namespace_create(char *name);
 extern void as_namespaces_init(bool cold_start_cmd, uint32_t instance);
-extern void as_namespace_setup(as_namespace* ns, uint32_t instance, uint32_t stage_capacity);
+extern void as_namespaces_setup(bool cold_start_cmd, uint32_t instance, uint32_t stage_capacity);
 extern bool as_namespace_configure_sets(as_namespace *ns);
 extern as_namespace *as_namespace_get_byname(char *name);
 extern as_namespace *as_namespace_get_byid(uint id);
 extern as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
 extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
-extern as_namespace_id as_namespace_getid_bymsgfield(struct as_msg_field_s *fp);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);
 extern int as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool apply_restrictions);
 extern int as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions);
@@ -1245,10 +1247,8 @@ struct as_treex_s {
 };
 
 void as_namespace_xmem_trusted(as_namespace *ns);
-void as_namespace_xmem_release(as_namespace* ns);
 
 // Not namespace class functions, but they live in namespace.c:
-void as_xmem_scheme_check();
 uint32_t as_mem_check();
 
 /* Cluster Key */
