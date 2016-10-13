@@ -378,7 +378,6 @@ thr_demarshal(void *unused)
 {
 	cf_poll poll;
 	int nevents, i;
-	int n;
 	cf_clock last_fd_print = 0;
 
 #if defined(USE_SYSTEMTAP)
@@ -544,7 +543,6 @@ thr_demarshal(void *unused)
 				// Process data on an existing connection: this might be more
 				// activity on an already existing transaction, so we have some
 				// state to manage.
-				as_proto *proto_p = 0;
 				cf_socket *sock = &fd_h->sock;
 
 				if (events[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {
@@ -559,7 +557,7 @@ thr_demarshal(void *unused)
 					int32_t recv_sz = cf_socket_recv(sock, (uint8_t *)&fd_h->proto_hdr + sizeof(as_proto) - fd_h->proto_unread,	fd_h->proto_unread, 0);
 
 					if (recv_sz <= 0) {
-						if (errno == EAGAIN || errno == EWOULDBLOCK) {
+						if (recv_sz != 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
 							// This can happen because TLS protocol
 							// overhead can trip the epoll but no
 							// application-level bytes are actually
@@ -670,46 +668,45 @@ thr_demarshal(void *unused)
 #endif
 
 					// Allocate the complete message buffer.
-					proto_p = cf_malloc(sizeof(as_proto) + fd_h->proto_hdr.sz);
+					fd_h->proto = cf_malloc(sizeof(as_proto) + fd_h->proto_hdr.sz);
 
-					cf_assert(proto_p, AS_DEMARSHAL, "allocation: %zu %s", (sizeof(as_proto) + fd_h->proto_hdr.sz), cf_strerror(errno));
-					memcpy(proto_p, &fd_h->proto_hdr, sizeof(as_proto));
+					cf_assert(fd_h->proto, AS_DEMARSHAL, "allocation: %zu %s", (sizeof(as_proto) + fd_h->proto_hdr.sz), cf_strerror(errno));
+					memcpy(fd_h->proto, &fd_h->proto_hdr, sizeof(as_proto));
 
 #ifdef USE_JEM
 					// Jam in the peeked data.
 					if (peeked_data_sz) {
-						memcpy(proto_p->data, &peekbuf, peeked_data_sz);
+						memcpy(fd_h->proto->data, &peekbuf, peeked_data_sz);
 					}
-					fd_h->proto_unread = proto_p->sz - peeked_data_sz;
+					fd_h->proto_unread = fd_h->proto->sz - peeked_data_sz;
 #else
 					fd_h->proto_unread = proto_p->sz;
 #endif
-					fd_h->proto = (void *)proto_p;
-				}
-				else {
-					proto_p = fd_h->proto;
+//					fd_h->proto = (void *)proto_p;
 				}
 
-				if (fd_h->proto_unread > 0) {
+				const as_proto *proto_p = fd_h->proto;
 
+				if (fd_h->proto_unread != 0) {
 					// Read the data.
-					n = cf_socket_recv(sock, proto_p->data + (proto_p->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
-					if (0 >= n) {
-						if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+					int32_t recv_sz = cf_socket_recv(sock, fd_h->proto->data + (proto_p->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
+
+					if (recv_sz <= 0) {
+						if (recv_sz != 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
 							thr_demarshal_rearm(fd_h);
 							goto NextEvent;
 						}
-						cf_info(AS_DEMARSHAL, "receive socket: fail? n %d errno %d %s closing connection.", n, errno, cf_strerror(errno));
+						cf_info(AS_DEMARSHAL, "receive socket: fail? n %d errno %d %s closing connection.", recv_sz, errno, cf_strerror(errno));
 						goto NextEvent_FD_Cleanup;
 					}
 
 					// Decrement bytes-unread counter.
-					cf_detail(AS_DEMARSHAL, "read fd %d (%d %"PRIu64")", CSFD(sock), n, fd_h->proto_unread);
-					fd_h->proto_unread -= n;
+					cf_detail(AS_DEMARSHAL, "read fd %d (%d %"PRIu64")", CSFD(sock), recv_sz, fd_h->proto_unread);
+					fd_h->proto_unread -= recv_sz;
 				}
 
 				// Check for a finished read.
-				if (0 == fd_h->proto_unread) {
+				if (fd_h->proto_unread == 0) {
 					// It's only really live if it's injecting a transaction.
 					fd_h->last_used = now_ms;
 					fd_h->proto = 0;
@@ -720,7 +717,7 @@ thr_demarshal(void *unused)
 
 					// Info protocol requests.
 					if (proto_p->type == PROTO_TYPE_INFO) {
-						as_info_transaction it = { fd_h, proto_p, now_ns };
+						as_info_transaction it = { fd_h, fd_h->proto, now_ns };
 
 						as_info(&it);
 						goto NextEvent;
@@ -728,7 +725,7 @@ thr_demarshal(void *unused)
 
 					// INIT_TR
 					as_transaction tr;
-					as_transaction_init_head(&tr, NULL, (cl_msg *)proto_p);
+					as_transaction_init_head(&tr, NULL, (cl_msg *)fd_h->proto);
 
 					tr.origin = FROM_CLIENT;
 					tr.from.proto_fd_h = fd_h;
@@ -752,15 +749,15 @@ thr_demarshal(void *unused)
 						int rv = 0;
 						if ((rv = as_packet_decompression((uint8_t *)proto_p, &decompressed_buf, &decompressed_buf_size))) {
 							cf_warning(AS_DEMARSHAL, "as_proto decompression failed! (rv %d)", rv);
-							cf_warning_binary(AS_DEMARSHAL, proto_p, sizeof(as_proto) + proto_p->sz, CF_DISPLAY_HEX_SPACED, "compressed proto_p");
+							cf_warning_binary(AS_DEMARSHAL, (void *)proto_p, sizeof(as_proto) + proto_p->sz, CF_DISPLAY_HEX_SPACED, "compressed proto_p");
 							as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 							goto NextEvent;
 						}
 
 						// Free the compressed packet since we'll be using the
 						// decompressed packet from now on.
-						cf_free(proto_p);
-						proto_p = NULL;
+						cf_free(fd_h->proto);
+						fd_h->proto = NULL;
 						// Get original packet.
 						tr.msgp = (cl_msg *)decompressed_buf;
 						as_proto_swap(&(tr.msgp->proto));
@@ -828,8 +825,8 @@ thr_demarshal(void *unused)
 
 NextEvent_FD_Cleanup:
 				// If we allocated memory for the incoming message, free it.
-				if (proto_p) {
-					cf_free(proto_p);
+				if (fd_h->proto) {
+					cf_free(fd_h->proto);
 					fd_h->proto = 0;
 				}
 				// If fd has extra reference for transaction, release it.
