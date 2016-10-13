@@ -1879,7 +1879,7 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_BEGIN:
 				// Create the namespace objects.
-				ns = as_namespace_create(line.val_tok_1, 2);
+				ns = as_namespace_create(line.val_tok_1);
 				cfg_begin_context(&state, NAMESPACE);
 				break;
 			case CASE_XDR_BEGIN:

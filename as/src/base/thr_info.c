@@ -5733,6 +5733,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	info_append_uint64(db, "memory_free_pct", free_pct);
 
+	// Persistent memory block keys' namespace ID (enterprise only).
+	info_append_uint32(db, "xmem_id", ns->xmem_id);
+
 	// Remaining bin-name slots (yes, this can be negative).
 	if (! ns->single_bin) {
 		info_append_int(db, "available_bin_names", BIN_NAMES_QUOTA - (int)cf_vmapx_count(ns->p_bin_name_vmap));
