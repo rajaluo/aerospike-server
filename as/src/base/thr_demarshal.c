@@ -559,6 +559,14 @@ thr_demarshal(void *unused)
 					int32_t recv_sz = cf_socket_recv(sock, (uint8_t *)&fd_h->proto_hdr + sizeof(as_proto) - fd_h->proto_unread,	fd_h->proto_unread, 0);
 
 					if (recv_sz <= 0) {
+						if (errno == EAGAIN || errno == EWOULDBLOCK) {
+							// This can happen because TLS protocol
+							// overhead can trip the epoll but no
+							// application-level bytes are actually
+							// available yet.
+							thr_demarshal_rearm(fd_h);
+							goto NextEvent;
+						}
 						cf_detail(AS_DEMARSHAL, "proto socket: read header fail: error: rv %d errno %d", recv_sz, errno);
 						goto NextEvent_FD_Cleanup;
 					}
@@ -687,7 +695,7 @@ thr_demarshal(void *unused)
 					// Read the data.
 					n = cf_socket_recv(sock, proto_p->data + (proto_p->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
 					if (0 >= n) {
-						if (n < 0 && errno == EAGAIN) {
+						if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
 							thr_demarshal_rearm(fd_h);
 							goto NextEvent;
 						}
