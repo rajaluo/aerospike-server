@@ -685,11 +685,9 @@ thr_demarshal(void *unused)
 //					fd_h->proto = (void *)proto_p;
 				}
 
-				const as_proto *proto_p = fd_h->proto;
-
 				if (fd_h->proto_unread != 0) {
 					// Read the data.
-					int32_t recv_sz = cf_socket_recv(sock, fd_h->proto->data + (proto_p->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
+					int32_t recv_sz = cf_socket_recv(sock, fd_h->proto->data + (fd_h->proto->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
 
 					if (recv_sz <= 0) {
 						if (recv_sz != 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -707,9 +705,11 @@ thr_demarshal(void *unused)
 
 				// Check for a finished read.
 				if (fd_h->proto_unread == 0) {
+					as_proto *proto_p = fd_h->proto;
+
 					// It's only really live if it's injecting a transaction.
+					fd_h->proto = NULL;
 					fd_h->last_used = now_ms;
-					fd_h->proto = 0;
 					fd_h->proto_unread = (uint64_t)sizeof(as_proto);
 
 					cf_rc_reserve(fd_h);
@@ -717,7 +717,7 @@ thr_demarshal(void *unused)
 
 					// Info protocol requests.
 					if (proto_p->type == PROTO_TYPE_INFO) {
-						as_info_transaction it = { fd_h, fd_h->proto, now_ns };
+						as_info_transaction it = { fd_h, proto_p, now_ns };
 
 						as_info(&it);
 						goto NextEvent;
@@ -725,7 +725,7 @@ thr_demarshal(void *unused)
 
 					// INIT_TR
 					as_transaction tr;
-					as_transaction_init_head(&tr, NULL, (cl_msg *)fd_h->proto);
+					as_transaction_init_head(&tr, NULL, (cl_msg *)proto_p);
 
 					tr.origin = FROM_CLIENT;
 					tr.from.proto_fd_h = fd_h;
@@ -756,8 +756,8 @@ thr_demarshal(void *unused)
 
 						// Free the compressed packet since we'll be using the
 						// decompressed packet from now on.
-						cf_free(fd_h->proto);
-						fd_h->proto = NULL;
+						cf_free(proto_p);
+
 						// Get original packet.
 						tr.msgp = (cl_msg *)decompressed_buf;
 						as_proto_swap(&(tr.msgp->proto));
