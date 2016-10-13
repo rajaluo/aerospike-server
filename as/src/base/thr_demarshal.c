@@ -99,27 +99,14 @@ void *thr_demarshal_reaper_fn(void *arg);
 static cf_queue *g_freeslot = 0;
 
 void
-thr_demarshal_pause(as_file_handle *fd_h)
+thr_demarshal_rearm(as_file_handle *fd_h)
 {
-	fd_h->trans_active = true;
-}
-
-void
-thr_demarshal_resume(as_file_handle *fd_h)
-{
-	fd_h->trans_active = false;
-
-	// Make the demarshal thread aware of pending connection data (if any).
-	// Writing to an FD's event mask makes the epoll instance re-check for
-	// data, even when edge-triggered. If there is data, the demarshal thread
-	// gets EPOLLIN for this FD.
-
 	// This causes ENOENT, when we reached NextEvent_FD_Cleanup (e.g, because
 	// the client disconnected) while the transaction was still ongoing.
 
 	static int32_t err_ok[] = { ENOENT };
 	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(fd_h->poll, &fd_h->sock,
-			EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h,
+			EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h,
 			sizeof(err_ok) / sizeof(int32_t), err_ok));
 }
 
@@ -390,7 +377,8 @@ void *
 thr_demarshal(void *unused)
 {
 	cf_poll poll;
-	int nevents, i, n;
+	int nevents, i;
+	int n;
 	cf_clock last_fd_print = 0;
 
 #if defined(USE_SYSTEMTAP)
@@ -500,9 +488,8 @@ thr_demarshal(void *unused)
 
 				fd_h->last_used = cf_getms();
 				fd_h->reap_me = false;
-				fd_h->trans_active = false;
 				fd_h->proto = 0;
-				fd_h->proto_unread = 0;
+				fd_h->proto_unread = (uint64_t)sizeof(as_proto);
 				fd_h->fh_info = 0;
 				fd_h->security_filter = as_security_filter_create();
 
@@ -540,7 +527,7 @@ thr_demarshal(void *unused)
 					fd_h->poll = g_demarshal_args->polls[id];
 
 					// Place the client socket in the event queue.
-					cf_poll_add_socket(fd_h->poll, &fd_h->sock, EPOLLIN | EPOLLET | EPOLLRDHUP, fd_h);
+					cf_poll_add_socket(fd_h->poll, &fd_h->sock, EPOLLIN | EPOLLONESHOT | EPOLLRDHUP, fd_h);
 					cf_atomic64_incr(&g_stats.proto_connections_opened);
 				}
 			}
@@ -566,48 +553,38 @@ thr_demarshal(void *unused)
 					goto NextEvent_FD_Cleanup;
 				}
 
-				if (fd_h->trans_active) {
-					goto NextEvent;
-				}
-
 				// If pointer is NULL, then we need to create a transaction and
 				// store it in the buffer.
 				if (fd_h->proto == NULL) {
-					as_proto proto;
-					int sz = cf_socket_available(sock);
+					int32_t recv_sz = cf_socket_recv(sock, (uint8_t *)&fd_h->proto_hdr + sizeof(as_proto) - fd_h->proto_unread,	fd_h->proto_unread, 0);
 
-					// If we don't have enough data to fill the message buffer,
-					// just wait and we'll come back to this one. However, we'll
-					// let messages with zero size through, since they are
-					// likely errors. We don't cleanup the FD in this case since
-					// we'll get more data on it.
-					if (sz < sizeof(as_proto) && sz != 0) {
-						goto NextEvent;
-					}
-
-					// Do a preliminary read of the header into a stack-
-					// allocated structure, so that later on we can allocate the
-					// entire message buffer.
-					if (0 >= (n = cf_socket_recv(sock, &proto, sizeof(as_proto), MSG_WAITALL))) {
-						cf_detail(AS_DEMARSHAL, "proto socket: read header fail: error: rv %d sz was %d errno %d", n, sz, errno);
+					if (recv_sz <= 0) {
+						cf_detail(AS_DEMARSHAL, "proto socket: read header fail: error: rv %d errno %d", recv_sz, errno);
 						goto NextEvent_FD_Cleanup;
 					}
 
-					if (proto.version != PROTO_VERSION &&
+					fd_h->proto_unread -= recv_sz;
+
+					if (fd_h->proto_unread != 0) {
+						thr_demarshal_rearm(fd_h);
+						goto NextEvent;
+					}
+
+					if (fd_h->proto_hdr.version != PROTO_VERSION &&
 							// For backward compatibility, allow version 0 with
 							// security messages.
-							! (proto.version == 0 && proto.type == PROTO_TYPE_SECURITY)) {
+							! (fd_h->proto_hdr.version == 0 && fd_h->proto_hdr.type == PROTO_TYPE_SECURITY)) {
 						cf_warning(AS_DEMARSHAL, "proto input from %s: unsupported proto version %u",
-								fd_h->client, proto.version);
+								fd_h->client, fd_h->proto_hdr.version);
 						goto NextEvent_FD_Cleanup;
 					}
 
 					// Swap the necessary elements of the as_proto.
-					as_proto_swap(&proto);
+					as_proto_swap(&fd_h->proto_hdr);
 
-					if (proto.sz > PROTO_SIZE_MAX) {
+					if (fd_h->proto_hdr.sz > PROTO_SIZE_MAX) {
 						cf_warning(AS_DEMARSHAL, "proto input from %s: msg greater than %d, likely request from non-Aerospike client, rejecting: sz %"PRIu64,
-								fd_h->client, PROTO_SIZE_MAX, (uint64_t)proto.sz);
+								fd_h->client, PROTO_SIZE_MAX, (uint64_t)fd_h->proto_hdr.sz);
 						goto NextEvent_FD_Cleanup;
 					}
 
@@ -618,11 +595,11 @@ thr_demarshal(void *unused)
 					size_t min_as_msg_sz = sizeof(as_msg) + min_field_sz;
 					size_t peekbuf_sz = 2048; // (Arbitrary "large enough" size for peeking the fields of "most" AS_MSGs.)
 					uint8_t peekbuf[peekbuf_sz];
-					if (PROTO_TYPE_AS_MSG == proto.type) {
+					if (PROTO_TYPE_AS_MSG == fd_h->proto_hdr.type) {
 						size_t offset = sizeof(as_msg);
 						// Number of bytes to peek from the socket.
 //						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
-						size_t peek_sz = MIN(proto.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
+						size_t peek_sz = MIN(fd_h->proto_hdr.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
 						int32_t tmp = cf_socket_recv(sock, peekbuf, peek_sz, 0);
 						peeked_data_sz = tmp < 0 ? 0 : tmp;
 						if (!peeked_data_sz) {
@@ -633,9 +610,9 @@ thr_demarshal(void *unused)
 						}
 						if (peeked_data_sz > min_as_msg_sz) {
 //							cf_debug(AS_DEMARSHAL, "(Peeked %zu bytes.)", peeked_data_sz);
-							if (peeked_data_sz > proto.sz) {
+							if (peeked_data_sz > fd_h->proto_hdr.sz) {
 								cf_warning(AS_DEMARSHAL, "Received unexpected extra data from client %s socket %d when peeking as_proto!", fd_h->client, CSFD(sock));
-								log_as_proto_and_peeked_data(&proto, peekbuf, peeked_data_sz);
+								log_as_proto_and_peeked_data(&fd_h->proto_hdr, peekbuf, peeked_data_sz);
 								goto NextEvent_FD_Cleanup;
 							}
 
@@ -685,10 +662,10 @@ thr_demarshal(void *unused)
 #endif
 
 					// Allocate the complete message buffer.
-					proto_p = cf_malloc(sizeof(as_proto) + proto.sz);
+					proto_p = cf_malloc(sizeof(as_proto) + fd_h->proto_hdr.sz);
 
-					cf_assert(proto_p, AS_DEMARSHAL, "allocation: %zu %s", (sizeof(as_proto) + proto.sz), cf_strerror(errno));
-					memcpy(proto_p, &proto, sizeof(as_proto));
+					cf_assert(proto_p, AS_DEMARSHAL, "allocation: %zu %s", (sizeof(as_proto) + fd_h->proto_hdr.sz), cf_strerror(errno));
+					memcpy(proto_p, &fd_h->proto_hdr, sizeof(as_proto));
 
 #ifdef USE_JEM
 					// Jam in the peeked data.
@@ -699,7 +676,7 @@ thr_demarshal(void *unused)
 #else
 					fd_h->proto_unread = proto_p->sz;
 #endif
-					fd_h->proto = (void *) proto_p;
+					fd_h->proto = (void *)proto_p;
 				}
 				else {
 					proto_p = fd_h->proto;
@@ -711,7 +688,8 @@ thr_demarshal(void *unused)
 					n = cf_socket_recv(sock, proto_p->data + (proto_p->sz - fd_h->proto_unread), fd_h->proto_unread, 0);
 					if (0 >= n) {
 						if (n < 0 && errno == EAGAIN) {
-							continue;
+							thr_demarshal_rearm(fd_h);
+							goto NextEvent;
 						}
 						cf_info(AS_DEMARSHAL, "receive socket: fail? n %d errno %d %s closing connection.", n, errno, cf_strerror(errno));
 						goto NextEvent_FD_Cleanup;
@@ -727,8 +705,6 @@ thr_demarshal(void *unused)
 
 					// It's only really live if it's injecting a transaction.
 					fd_h->last_used = now_ms;
-
-					thr_demarshal_pause(fd_h); // pause reading while the transaction is in progress
 					fd_h->proto = 0;
 					fd_h->proto_unread = 0;
 

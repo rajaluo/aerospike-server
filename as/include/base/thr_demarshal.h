@@ -41,4 +41,4 @@ typedef struct as_info_access_s {
 extern as_info_access g_access;
 extern cf_serv_cfg g_service_bind;
 
-void thr_demarshal_resume(as_file_handle *fd_h);
+void thr_demarshal_rearm(as_file_handle *fd_h);
