@@ -702,11 +702,10 @@ thr_demarshal(void *unused)
 
 				// Check for a finished read.
 				if (0 == fd_h->proto_unread) {
-
 					// It's only really live if it's injecting a transaction.
 					fd_h->last_used = now_ms;
 					fd_h->proto = 0;
-					fd_h->proto_unread = 0;
+					fd_h->proto_unread = (uint64_t)sizeof(as_proto);
 
 					cf_rc_reserve(fd_h);
 					has_extra_ref = true;
