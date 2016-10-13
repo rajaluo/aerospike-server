@@ -27,7 +27,7 @@
 #include "base/transaction.h"
 
 typedef struct as_info_endpoint_s {
-	as_addr_list addrs;
+	cf_addr_list addrs;
 	cf_ip_port port;
 } as_info_endpoint;
 

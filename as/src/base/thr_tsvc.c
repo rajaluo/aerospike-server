@@ -399,7 +399,7 @@ thr_tsvc(void *arg)
 {
 	cf_queue *q = (cf_queue *) arg;
 
-	cf_assert(arg, AS_TSVC, CF_CRITICAL, "invalid argument");
+	cf_assert(arg, AS_TSVC, "invalid argument");
 
 	// Wait for a transaction to arrive.
 	for ( ; ; ) {

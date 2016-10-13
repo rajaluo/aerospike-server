@@ -137,7 +137,7 @@ demarshal_file_handle_init()
 
 		// Initialize the message pointer array and the unread byte counters.
 		g_file_handle_a = cf_calloc(rl.rlim_cur, sizeof(as_proto *));
-		cf_assert(g_file_handle_a, AS_DEMARSHAL, CF_CRITICAL, "allocation: %s", cf_strerror(errno));
+		cf_assert(g_file_handle_a, AS_DEMARSHAL, "allocation: %s", cf_strerror(errno));
 		g_file_handle_a_sz = rl.rlim_cur;
 
 		for (int i = 0; i < g_file_handle_a_sz; i++) {
@@ -687,7 +687,7 @@ thr_demarshal(void *unused)
 					// Allocate the complete message buffer.
 					proto_p = cf_malloc(sizeof(as_proto) + proto.sz);
 
-					cf_assert(proto_p, AS_DEMARSHAL, CF_CRITICAL, "allocation: %zu %s", (sizeof(as_proto) + proto.sz), cf_strerror(errno));
+					cf_assert(proto_p, AS_DEMARSHAL, "allocation: %zu %s", (sizeof(as_proto) + proto.sz), cf_strerror(errno));
 					memcpy(proto_p, &proto, sizeof(as_proto));
 
 #ifdef USE_JEM

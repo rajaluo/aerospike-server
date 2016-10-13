@@ -58,15 +58,10 @@ static as_namespace_id g_namespace_id_counter = 0;
 // Create a new namespace and hook it up in the data structure
 
 as_namespace *
-as_namespace_create(char *name, uint16_t replication_factor)
+as_namespace_create(char *name)
 {
 	if (strlen(name) >= AS_ID_NAMESPACE_SZ) {
 		cf_warning(AS_NAMESPACE, "can't create namespace: name length too long");
-		return NULL;
-	}
-
-	if (replication_factor < 2) {
-		cf_warning(AS_NAMESPACE, "can't create namespace: need replication factor >= 2");
 		return NULL;
 	}
 
@@ -83,7 +78,7 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	}
 
 	as_namespace *ns = cf_malloc(sizeof(as_namespace));
-	cf_assert(ns, AS_NAMESPACE, CF_CRITICAL, "%s as_namespace allocation failed", name);
+	cf_assert(ns, AS_NAMESPACE, "%s as_namespace allocation failed", name);
 
 	// Set all members 0/NULL/false to start with.
 	memset(ns, 0, sizeof(as_namespace));
@@ -108,8 +103,8 @@ as_namespace_create(char *name, uint16_t replication_factor)
 	// Configuration defaults.
 	//
 
-	ns->replication_factor = replication_factor;
-	ns->cfg_replication_factor = replication_factor;
+	ns->replication_factor = 2;
+	ns->cfg_replication_factor = 2;
 	ns->memory_size = 1024LL * 1024LL * 1024LL * 4LL; // default memory limit is 4G per namespace
 	ns->default_ttl = 0; // default time-to-live is unlimited
 	ns->enable_xdr = false;
@@ -194,22 +189,12 @@ as_namespace_create(char *name, uint16_t replication_factor)
 void
 as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 {
-	// Sanity-check the persistent memory scheme. TODO - compile-time assert.
-	as_xmem_scheme_check();
-
 	uint32_t stage_capacity = as_mem_check();
 
-	if (cold_start_cmd) {
-		cf_info(AS_NAMESPACE, "got cold-start command");
-	}
+	as_namespaces_setup(cold_start_cmd, instance, stage_capacity);
 
-	for (int i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
-
-		// Cold start if manually forced.
-		ns->cold_start = cold_start_cmd;
-
-		as_namespace_setup(ns, instance, stage_capacity);
 
 		// Done with temporary sets configuration array.
 		if (ns->sets_cfg_array) {
@@ -223,15 +208,15 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 		as_sindex_init(ns);
 	}
 
-	// Register Secondary Index module with the majority merge policy callback.
+	// Register secondary index module with the majority merge policy callback.
 	// Secondary index metadata is restored for all namespaces. Must be done
 	// before as_storage_init() populates the indexes.
 	int retval = as_smd_create_module(SINDEX_MODULE,
 			as_smd_majority_consensus_merge, NULL, as_sindex_smd_accept_cb,
 			NULL, as_sindex_smd_can_accept_cb, NULL);
 
-	if (0 > retval) {
-		cf_crash(AS_NAMESPACE, "failed to create SMD module \"%s\" (rv %d)",
+	if (retval < 0) {
+		cf_crash(AS_NAMESPACE, "failed to create SMD module '%s' (rv %d)",
 				SINDEX_MODULE, retval);
 	}
 
@@ -330,38 +315,12 @@ as_namespace_get_bymsgfield(as_msg_field *fp)
 }
 
 
-as_namespace_id
-as_namespace_getid_bymsgfield(as_msg_field *fp)
-{
-	if (as_msg_field_get_value_sz(fp) >= AS_ID_NAMESPACE_SZ) {
-		return -1;
-	}
-
-	as_namespace_id		ns_id = -1;
-	uint lim = g_config.n_namespaces;
-	uint i;
-	for (i = 0; i < lim; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-		if (strncmp((char *)fp->data, ns->name, as_msg_field_get_value_sz(fp)) == 0) {
-			ns_id = ns->id;
-			break;
-		}
-	}
-
-	return ns_id;
-}
-
-
 #define CL_TERA_BYTES	1099511627776L
 #define CL_PETA_BYTES	1125899906842624L
 
 void
 as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes)
 {
-	cf_assert(ns, AS_NAMESPACE, CF_WARNING, "NULL namespace");
-	cf_assert(hwm_breached, AS_NAMESPACE, CF_WARNING, "NULL parameter, hwm_breached");
-	cf_assert(stop_writes, AS_NAMESPACE, CF_WARNING, "NULL parameter, stop_writes");
-
 	*hwm_breached = false;
 	*stop_writes = false;
 
@@ -535,7 +494,7 @@ as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 int
 as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool apply_restrictions)
 {
-	cf_assert(set_name, AS_NAMESPACE, CF_CRITICAL, "null set name");
+	cf_assert(set_name, AS_NAMESPACE, "null set name");
 
 	return as_namespace_get_create_set_w_len(ns, set_name, strlen(set_name),
 			p_set_id, apply_restrictions);
@@ -544,8 +503,8 @@ as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_
 int
 as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions)
 {
-	cf_assert(set_name, AS_NAMESPACE, CF_CRITICAL, "null set name");
-	cf_assert(len != 0, AS_NAMESPACE, CF_CRITICAL, "empty set name");
+	cf_assert(set_name, AS_NAMESPACE, "null set name");
+	cf_assert(len != 0, AS_NAMESPACE, "empty set name");
 
 	uint32_t idx;
 	cf_vmapx_err result = cf_vmapx_get_index_w_len(ns->p_sets_vmap, set_name, len, &idx);

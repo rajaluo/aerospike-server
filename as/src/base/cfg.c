@@ -80,14 +80,14 @@ as_config g_config;
 // Forward declarations.
 //
 
-void add_addr(const char* name, as_addr_list* addrs);
-void copy_addrs(const as_addr_list* from, as_addr_list* to);
-void default_access(const as_serv_spec* from, as_addr_list* to);
-void cfg_add_addr_bind(const char* name, as_serv_spec* spec);
-void cfg_add_addr_access(const char* name, as_serv_spec* spec);
-void cfg_mserv_config_from_addrs(as_addr_list* addrs, as_addr_list* bind_addrs, cf_mserv_cfg* serv_cfg, cf_ip_port port, cf_sock_owner owner, uint8_t ttl);
-void cfg_serv_spec_to_bind(const as_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner);
-void cfg_serv_spec_to_access(const as_serv_spec* spec, as_addr_list* access);
+void add_addr(const char* name, cf_addr_list* addrs);
+void copy_addrs(const cf_addr_list* from, cf_addr_list* to);
+void default_access(const cf_serv_spec* from, cf_addr_list* to);
+void cfg_add_addr_bind(const char* name, cf_serv_spec* spec);
+void cfg_add_addr_access(const char* name, cf_serv_spec* spec);
+void cfg_mserv_config_from_addrs(cf_addr_list* addrs, cf_addr_list* bind_addrs, cf_mserv_cfg* serv_cfg, cf_ip_port port, cf_sock_owner owner, uint8_t ttl);
+void cfg_serv_spec_to_bind(const cf_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner);
+void cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access);
 void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_storage_file(as_namespace* ns, char* file_name);
@@ -399,7 +399,6 @@ typedef enum {
 	CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS, // renamed
 	CASE_NETWORK_SERVICE_ACCESS_ADDRESS,
 	CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS,
-	CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS,
 	CASE_NETWORK_SERVICE_ALTERNATE_PORT,
 	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS,
 	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS,
@@ -409,6 +408,7 @@ typedef enum {
 	CASE_NETWORK_SERVICE_TLS_NAME,
 	CASE_NETWORK_SERVICE_TLS_PORT,
 	// Deprecated or obsoleted:
+	CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS,
 	CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME,
 	CASE_NETWORK_SERVICE_REUSE_ADDRESS,
 
@@ -830,7 +830,6 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "external-address",				CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS },
 		{ "access-address",					CASE_NETWORK_SERVICE_ACCESS_ADDRESS },
 		{ "alternate-access-address",		CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS },
-		{ "alternate-address",				CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS },
 		{ "alternate-port",					CASE_NETWORK_SERVICE_ALTERNATE_PORT },
 		{ "alternate-tls-address",			CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS },
 		{ "alternate-tls-access-address",	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS },
@@ -839,6 +838,7 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "tls-address",					CASE_NETWORK_SERVICE_TLS_ADDRESS },
 		{ "tls-name",						CASE_NETWORK_SERVICE_TLS_NAME },
 		{ "tls-port",						CASE_NETWORK_SERVICE_TLS_PORT },
+		{ "alternate-address",				CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS },
 		{ "network-interface-name",			CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME },
 		{ "reuse-address",					CASE_NETWORK_SERVICE_REUSE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
@@ -1879,7 +1879,7 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_BEGIN:
 				// Create the namespace objects.
-				ns = as_namespace_create(line.val_tok_1, 2);
+				ns = as_namespace_create(line.val_tok_1);
 				cfg_begin_context(&state, NAMESPACE);
 				break;
 			case CASE_XDR_BEGIN:
@@ -2350,9 +2350,6 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS:
 				cfg_add_addr_access(line.val_tok_1, &c->alt_service);
 				break;
-			case CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS:
-				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
-				break;
 			case CASE_NETWORK_SERVICE_ALTERNATE_PORT:
 				c->alt_service.port = cfg_port(&line);
 				break;
@@ -2376,6 +2373,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NETWORK_SERVICE_TLS_NAME:
 				c->tls_name = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS:
+				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
 				break;
 			case CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME:
 				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
@@ -3436,7 +3436,7 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	// "any" service specification.
 
-	as_serv_spec any;
+	cf_serv_spec any;
 	any.port = 0;
 	any.bind.n_addrs = 1;
 	any.bind.addrs[0] = "any";
@@ -3458,7 +3458,7 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Client TLS service bind addresses.
 
 	if (g_access.tls_service.port != 0) {
-		as_serv_spec tls_spec;
+		cf_serv_spec tls_spec;
 		tls_spec.port = g_access.tls_service.port;
 		tls_spec.access.n_addrs = 0;
 
@@ -3471,7 +3471,7 @@ as_config_post_process(as_config* c, const char* config_file)
 			copy_addrs(&g_config.tls_service.bind, &tls_spec.bind);
 		}
 
-		as_serv_spec alt_tls_spec;
+		cf_serv_spec alt_tls_spec;
 		alt_tls_spec.port = g_access.alt_tls_service.port;
 		alt_tls_spec.access.n_addrs = 0;
 
@@ -3734,7 +3734,7 @@ as_config_cluster_name_set(const char* cluster_name)
 //
 
 void
-add_addr(const char* name, as_addr_list* addrs)
+add_addr(const char* name, cf_addr_list* addrs)
 {
 	uint32_t n = addrs->n_addrs;
 
@@ -3752,7 +3752,7 @@ add_addr(const char* name, as_addr_list* addrs)
 }
 
 void
-copy_addrs(const as_addr_list* from, as_addr_list* to)
+copy_addrs(const cf_addr_list* from, cf_addr_list* to)
 {
 	for (uint32_t i = 0; i < from->n_addrs; ++i) {
 		to->addrs[i] = from->addrs[i];
@@ -3762,9 +3762,9 @@ copy_addrs(const as_addr_list* from, as_addr_list* to)
 }
 
 void
-default_access(const as_serv_spec* from, as_addr_list* to)
+default_access(const cf_serv_spec* from, cf_addr_list* to)
 {
-	as_serv_spec spec;
+	cf_serv_spec spec;
 	spec.port = from->port;
 	spec.bind.n_addrs = 0;
 	spec.access.n_addrs = 0;
@@ -3799,19 +3799,19 @@ default_access(const as_serv_spec* from, as_addr_list* to)
 }
 
 void
-cfg_add_addr_bind(const char* name, as_serv_spec* spec)
+cfg_add_addr_bind(const char* name, cf_serv_spec* spec)
 {
 	add_addr(name, &spec->bind);
 }
 
 void
-cfg_add_addr_access(const char* name, as_serv_spec* spec)
+cfg_add_addr_access(const char* name, cf_serv_spec* spec)
 {
 	add_addr(name, &spec->access);
 }
 
 void
-cfg_mserv_config_from_addrs(as_addr_list* addrs, as_addr_list* bind_addrs,
+cfg_mserv_config_from_addrs(cf_addr_list* addrs, cf_addr_list* bind_addrs,
 			    cf_mserv_cfg* serv_cfg, cf_ip_port port,
 			    cf_sock_owner owner, uint8_t ttl)
 {
@@ -3851,13 +3851,13 @@ cfg_mserv_config_from_addrs(as_addr_list* addrs, as_addr_list* bind_addrs,
 }
 
 void
-cfg_serv_spec_to_bind(const as_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner)
+cfg_serv_spec_to_bind(const cf_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner)
 {
 	cf_sock_cfg cfg;
 	cf_sock_cfg_init(&cfg, owner);
 	cfg.port = spec->port;
 
-	const as_addr_list* addrs = &spec->bind;
+	const cf_addr_list* addrs = &spec->bind;
 
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
 		cf_ip_addr resol[CF_SOCK_CFG_MAX];
@@ -3878,9 +3878,9 @@ cfg_serv_spec_to_bind(const as_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner
 }
 
 void
-cfg_serv_spec_to_access(const as_serv_spec* spec, as_addr_list* access)
+cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access)
 {
-	const as_addr_list* addrs = &spec->access;
+	const cf_addr_list* addrs = &spec->access;
 
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
 		cf_ip_addr resol[CF_SOCK_CFG_MAX];

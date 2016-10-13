@@ -209,16 +209,14 @@ extern void cf_fault_event_nostack(const cf_fault_context,
 #endif
 
 // The "regular" version.
-#define cf_assert(a, context, severity, __msg, ...) \
-		((a) || severity > cf_fault_filter[context] ? \
-				(void)0 : \
-				cf_fault_event((context), (severity), __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
+#define cf_assert(a, context, __msg, ...) \
+		((a) ? (void)0 : \
+			cf_fault_event((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
 
 // The "no stack" versions.
-#define cf_assert_nostack(a, context, severity, __msg, ...) \
-		((a) || severity > cf_fault_filter[context] ? \
-				(void)0 : \
-				cf_fault_event_nostack((context), (severity), __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
+#define cf_assert_nostack(a, context, __msg, ...) \
+		((a) ? (void)0 : \
+			cf_fault_event_nostack((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
 #define cf_crash_nostack(context, __msg, ...) \
 		cf_fault_event_nostack((context), CF_CRITICAL, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__)
 
@@ -226,20 +224,37 @@ extern void cf_fault_event_nostack(const cf_fault_context,
 
 // This must literally be the direct clib "free()", because "strings" is
 // allocated by "backtrace_symbols()".
-#define PRINT_STACK() \
+#define PRINT_STACKTRACE() \
 do { \
 	void *bt[MAX_BACKTRACE_DEPTH]; \
 	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH); \
-	cf_warning(AS_AS, "stacktrace: found %d frames", sz); \
+	cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, "stacktrace: found %d frames", sz); \
 	char **strings = backtrace_symbols(bt, sz); \
 	if (strings) { \
 		for (int i = 0; i < sz; i++) { \
-			cf_warning(AS_AS, "stacktrace: frame %d: %s", i, strings[i]); \
+			cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, "stacktrace: frame %d: %s", i, strings[i]); \
 		} \
 		free(strings); \
 	} \
 	else { \
-		cf_warning(AS_AS, "stacktrace: found no symbols"); \
+		cf_fault_event(AS_AS, CF_WARNING, __FILENAME__, __LINE__, "stacktrace: found no symbols"); \
+	} \
+} while (0);
+
+#define PRINT_CALL_STACK(severity) \
+do { \
+	void *bt[MAX_BACKTRACE_DEPTH]; \
+	int sz = backtrace(bt, MAX_BACKTRACE_DEPTH); \
+	cf_fault_event(AS_AS, severity, __FILENAME__, __LINE__, "call stack: found %d frames", sz); \
+	char **strings = backtrace_symbols(bt, sz); \
+	if (strings) { \
+		for (int i = 0; i < sz; i++) { \
+			cf_fault_event(AS_AS, severity, __FILENAME__, __LINE__, "call stack: frame %d: %s", i, strings[i]); \
+		} \
+		free(strings); \
+	} \
+	else { \
+		cf_fault_event(AS_AS, severity, __FILENAME__, __LINE__, "call stack: found no symbols"); \
 	} \
 } while (0);
 

@@ -632,7 +632,7 @@ run_nsup_delete(void* pv_data)
 
 		cl_msg* msgp = cf_malloc(sz + 32); // TODO - remove the extra 32
 
-		cf_assert(msgp, AS_NSUP, CF_CRITICAL, "malloc failed: %s", cf_strerror(errno));
+		cf_assert(msgp, AS_NSUP, "malloc failed: %s", cf_strerror(errno));
 
 		msgp->proto.version = PROTO_VERSION;
 		msgp->proto.type = PROTO_TYPE_AS_MSG;

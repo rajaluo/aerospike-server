@@ -88,7 +88,7 @@ reraise_signal(int sig_num, sighandler_t handler)
 // Signal handlers.
 //
 
-// We get here on cf_crash(), cf_assert(), as well as on some crashes.
+// We get here on some crashes.
 void
 as_sig_handle_abort(int sig_num)
 {
@@ -97,7 +97,7 @@ as_sig_handle_abort(int sig_num)
 
 	xdr_sig_handler(sig_num);
 
-	PRINT_STACK();
+	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_abort);
 }
 
@@ -109,7 +109,7 @@ as_sig_handle_bus(int sig_num)
 
 	xdr_sig_handler(sig_num);
 
-	PRINT_STACK();
+	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_bus);
 }
 
@@ -122,7 +122,7 @@ as_sig_handle_fpe(int sig_num)
 
 	xdr_sig_handler(sig_num);
 
-	PRINT_STACK();
+	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_fpe);
 }
 
@@ -142,7 +142,7 @@ as_sig_handle_ill(int sig_num)
 	cf_warning(AS_AS, "SIGILL received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	PRINT_STACK();
+	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_ill);
 }
 
@@ -169,7 +169,7 @@ as_sig_handle_quit(int sig_num)
 	cf_warning(AS_AS, "SIGQUIT received, aborting %s build %s os %s",
 			aerospike_build_type, aerospike_build_id, aerospike_build_os);
 
-	PRINT_STACK();
+	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_quit);
 }
 
@@ -182,7 +182,7 @@ as_sig_handle_segv(int sig_num)
 
 	xdr_sig_handler(sig_num);
 
-	PRINT_STACK();
+	PRINT_STACKTRACE();
 	reraise_signal(sig_num, as_sig_handle_segv);
 }
 
@@ -190,7 +190,7 @@ as_sig_handle_segv(int sig_num)
 void
 as_sig_handle_term(int sig_num)
 {
-	cf_warning(AS_AS, "SIGTERM received, shutting down");
+	cf_info(AS_AS, "SIGTERM received, starting normal shutdown");
 
 	if (! g_startup_complete) {
 		cf_warning(AS_AS, "startup was not complete, exiting immediately");
@@ -200,6 +200,19 @@ as_sig_handle_term(int sig_num)
 	xdr_sig_handler(sig_num);
 
 	pthread_mutex_unlock(&g_NONSTOP);
+}
+
+// We get here on cf_crash() and cf_assert().
+void
+as_sig_handle_usr1(int sig_num)
+{
+	cf_warning(AS_AS, "SIGUSR1 received, aborting %s build %s os %s",
+			aerospike_build_type, aerospike_build_id, aerospike_build_os);
+
+	xdr_sig_handler(sig_num);
+
+	PRINT_CALL_STACK(CF_INFO);
+	reraise_signal(SIGABRT, as_sig_handle_abort);
 }
 
 
@@ -219,6 +232,7 @@ as_signal_setup()
 	register_signal_handler(SIGQUIT, as_sig_handle_quit);
 	register_signal_handler(SIGSEGV, as_sig_handle_segv);
 	register_signal_handler(SIGTERM, as_sig_handle_term);
+	register_signal_handler(SIGUSR1, as_sig_handle_usr1);
 
 	// Block SIGPIPE signal when there is some error while writing to pipe. The
 	// write() call will return with a normal error which we can handle.

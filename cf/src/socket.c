@@ -529,34 +529,34 @@ cf_fd_disable_blocking(int32_t fd)
 }
 
 void
-cf_socket_disable_blocking(const cf_socket *sock)
+cf_socket_disable_blocking(cf_socket *sock)
 {
 	cf_fd_disable_blocking(sock->fd);
 }
 
 void
-cf_socket_enable_blocking(const cf_socket *sock)
+cf_socket_enable_blocking(cf_socket *sock)
 {
 	int32_t flags = safe_fcntl(sock->fd, F_GETFL, 0);
 	safe_fcntl(sock->fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 
 void
-cf_socket_disable_nagle(const cf_socket *sock)
+cf_socket_disable_nagle(cf_socket *sock)
 {
 	static const int32_t flag = 1;
 	safe_setsockopt(sock->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
 }
 
 void
-cf_socket_enable_nagle(const cf_socket *sock)
+cf_socket_enable_nagle(cf_socket *sock)
 {
 	static const int32_t flag = 0;
 	safe_setsockopt(sock->fd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
 }
 
 void
-cf_socket_keep_alive(const cf_socket *sock, int32_t idle, int32_t interval, int32_t count)
+cf_socket_keep_alive(cf_socket *sock, int32_t idle, int32_t interval, int32_t count)
 {
 	static const int32_t flag = 1;
 	safe_setsockopt(sock->fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
@@ -575,19 +575,19 @@ cf_socket_keep_alive(const cf_socket *sock, int32_t idle, int32_t interval, int3
 }
 
 void
-cf_socket_set_send_buffer(const cf_socket *sock, int32_t size)
+cf_socket_set_send_buffer(cf_socket *sock, int32_t size)
 {
 	safe_setsockopt(sock->fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
 }
 
 void
-cf_socket_set_receive_buffer(const cf_socket *sock, int32_t size)
+cf_socket_set_receive_buffer(cf_socket *sock, int32_t size)
 {
 	safe_setsockopt(sock->fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 }
 
 void
-cf_socket_set_window(const cf_socket *sock, int32_t size)
+cf_socket_set_window(cf_socket *sock, int32_t size)
 {
 	safe_setsockopt(sock->fd, SOL_TCP, TCP_WINDOW_CLAMP, &size, sizeof(size));
 }
@@ -600,7 +600,7 @@ cf_socket_init(cf_socket *sock)
 }
 
 bool
-cf_socket_exists(const cf_socket *sock)
+cf_socket_exists(cf_socket *sock)
 {
 	return sock->fd >= 0;
 }
@@ -833,7 +833,7 @@ cleanup0:
 }
 
 int32_t
-cf_socket_accept(const cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr)
+cf_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr)
 {
 	int32_t res = -1;
 
@@ -891,19 +891,19 @@ x_name(name_func func, const char *which, int32_t fd, cf_sock_addr *addr)
 }
 
 int32_t
-cf_socket_remote_name(const cf_socket *sock, cf_sock_addr *addr)
+cf_socket_remote_name(cf_socket *sock, cf_sock_addr *addr)
 {
 	return x_name(getpeername, "remote", sock->fd, addr);
 }
 
 int32_t
-cf_socket_local_name(const cf_socket *sock, cf_sock_addr *addr)
+cf_socket_local_name(cf_socket *sock, cf_sock_addr *addr)
 {
 	return x_name(getsockname, "local", sock->fd, addr);
 }
 
 int32_t
-cf_socket_available(const cf_socket *sock)
+cf_socket_available(cf_socket *sock)
 {
 	int32_t size;
 	safe_ioctl(sock->fd, FIONREAD, &size);
@@ -911,7 +911,7 @@ cf_socket_available(const cf_socket *sock)
 }
 
 int32_t
-cf_socket_send_to(const cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr)
+cf_socket_send_to(cf_socket *sock, const void *buff, size_t size, int32_t flags, const cf_sock_addr *addr)
 {
 	struct sockaddr_storage sas;
 	struct sockaddr *sa = NULL;
@@ -934,13 +934,13 @@ cf_socket_send_to(const cf_socket *sock, const void *buff, size_t size, int32_t 
 }
 
 int32_t
-cf_socket_send(const cf_socket *sock, const void *buff, size_t size, int32_t flags)
+cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags)
 {
 	return cf_socket_send_to(sock, buff, size, flags, NULL);
 }
 
 int32_t
-cf_socket_recv_from(const cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
+cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr)
 {
 	struct sockaddr_storage sas;
 	struct sockaddr *sa = NULL;
@@ -965,7 +965,7 @@ cf_socket_recv_from(const cf_socket *sock, void *buff, size_t size, int32_t flag
 }
 
 int32_t
-cf_socket_recv(const cf_socket *sock, void *buff, size_t size, int32_t flags)
+cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags)
 {
 	return cf_socket_recv_from(sock, buff, size, flags, NULL);
 }
@@ -1005,7 +1005,7 @@ socket_wait(const cf_socket *sock, uint16_t events, int32_t timeout)
 }
 
 int32_t
-cf_socket_send_to_all(const cf_socket *sock, const void *buff, size_t size, int32_t flags,
+cf_socket_send_to_all(cf_socket *sock, const void *buff, size_t size, int32_t flags,
 		const cf_sock_addr *addr, int32_t timeout)
 {
 	cf_detail(CF_SOCKET, "Blocking send on FD %d, size = %zu", sock->fd, size);
@@ -1045,14 +1045,14 @@ cf_socket_send_to_all(const cf_socket *sock, const void *buff, size_t size, int3
 }
 
 int32_t
-cf_socket_send_all(const cf_socket *sock, const void *buff, size_t size, int32_t flags,
+cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags,
 		int32_t timeout)
 {
 	return cf_socket_send_to_all(sock, buff, size, flags, NULL, timeout);
 }
 
 int32_t
-cf_socket_recv_from_all(const cf_socket *sock, void *buff, size_t size, int32_t flags,
+cf_socket_recv_from_all(cf_socket *sock, void *buff, size_t size, int32_t flags,
 		cf_sock_addr *addr, int32_t timeout)
 {
 	cf_detail(CF_SOCKET, "Blocking receive on FD %d, size = %zu", sock->fd, size);
@@ -1090,7 +1090,7 @@ cf_socket_recv_from_all(const cf_socket *sock, void *buff, size_t size, int32_t 
 }
 
 int32_t
-cf_socket_recv_all(const cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout)
+cf_socket_recv_all(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout)
 {
 	return cf_socket_recv_from_all(sock, buff, size, flags, NULL, timeout);
 }
@@ -1111,14 +1111,14 @@ x_shutdown(const cf_socket *sock, int32_t how)
 }
 
 void
-cf_socket_write_shutdown(const cf_socket *sock)
+cf_socket_write_shutdown(cf_socket *sock)
 {
 	cf_debug(CF_SOCKET, "Shutting down write channel of FD %d", sock->fd);
 	x_shutdown(sock, SHUT_WR);
 }
 
 void
-cf_socket_shutdown(const cf_socket *sock)
+cf_socket_shutdown(cf_socket *sock)
 {
 	cf_debug(CF_SOCKET, "Shutting down FD %d", sock->fd);
 	x_shutdown(sock, SHUT_RDWR);
