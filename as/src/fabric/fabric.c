@@ -62,8 +62,8 @@
 
 // Operation to be performed on transaction in retransmission hash.
 typedef enum op_xmit_transaction_e {
-	OP_TRANS_TIMEOUT = 1,               // Transaction is timed out.
-	OP_TRANS_RETRANSMIT = 2,            // Retransmit the message.
+	OP_TRANS_TIMEOUT = 1,		// Transaction is timed out.
+	OP_TRANS_RETRANSMIT = 2,	// Retransmit the message.
 } op_xmit_transaction;
 
 #ifdef EXTRA_CHECKS
@@ -193,7 +193,7 @@ typedef struct {
 	as_fabric_msg_fn 	msg_cb[M_TYPE_MAX];
 	void 				*msg_udata[M_TYPE_MAX];
 
-	cf_queue    *msg_pool_queue[M_TYPE_MAX];   // A pool of unused messages, better than calling create
+	cf_queue	*msg_pool_queue[M_TYPE_MAX];   // A pool of unused messages, better than calling create
 
 	int			num_workers;
 	pthread_t	workers_th[MAX_FABRIC_WORKERS];
@@ -308,11 +308,11 @@ static bool g_published_endpoint_list_ipv4_only;
 // what the remote endpoint's node ID is. We could pack other info
 // in here as needed too
 // The MsgType is used to specify the type, it's a good idea but not required
-#define FS_FIELD_NODE 	 0
-#define FS_ADDR          1
-#define FS_PORT          2
-#define FS_ANV           3
-#define FS_ADDR_EX       4
+#define FS_FIELD_NODE	0
+#define FS_ADDR			1
+#define FS_PORT			2
+#define FS_ANV			3
+#define FS_ADDR_EX		4
 
 // Special message at the front to describe my node ID
 static msg_template fabric_mt[] = {
@@ -1588,9 +1588,9 @@ fabric_published_endpoints_refresh()
 	}
 
 	cf_serv_cfg published_cfg;
-    fabric_published_serv_cfg_fill(&g_fabric_bind, &published_cfg, g_published_endpoint_list_ipv4_only);
+	fabric_published_serv_cfg_fill(&g_fabric_bind, &published_cfg, g_published_endpoint_list_ipv4_only);
 
-    g_published_endpoint_list = as_endpoint_list_from_serv_cfg(&published_cfg);
+	g_published_endpoint_list = as_endpoint_list_from_serv_cfg(&published_cfg);
 
 	if (! g_published_endpoint_list) {
 		cf_crash(AS_FABRIC, "Error initializing mesh published address list.");
@@ -2506,7 +2506,7 @@ as_fabric_dump(bool verbose)
 		int rv = rchash_get(g_fabric_node_element_hash, &nl.nodes[i], sizeof(cf_node), (void **)&fne);
 
 		if (rv != RCHASH_OK) {
-			cf_info(AS_FABRIC, "   %"PRIx64" node not found in hash although reported available", nl.nodes[i]);
+			cf_info(AS_FABRIC, "    %"PRIx64" node not found in hash although reported available", nl.nodes[i]);
 		}
 		else {
 			cf_info(AS_FABRIC, "    %"PRIx64" fds %d live %d goodwrite %"PRIu64" goodread %"PRIu64" q %d", fne->node,
