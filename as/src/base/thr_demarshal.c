@@ -682,7 +682,6 @@ thr_demarshal(void *unused)
 #else
 					fd_h->proto_unread = proto_p->sz;
 #endif
-//					fd_h->proto = (void *)proto_p;
 				}
 
 				if (fd_h->proto_unread != 0) {
@@ -701,120 +700,124 @@ thr_demarshal(void *unused)
 					// Decrement bytes-unread counter.
 					cf_detail(AS_DEMARSHAL, "read fd %d (%d %"PRIu64")", CSFD(sock), recv_sz, fd_h->proto_unread);
 					fd_h->proto_unread -= recv_sz;
-				}
 
-				// Check for a finished read.
-				if (fd_h->proto_unread == 0) {
-					as_proto *proto_p = fd_h->proto;
-
-					// It's only really live if it's injecting a transaction.
-					fd_h->proto = NULL;
-					fd_h->last_used = now_ms;
-					fd_h->proto_unread = (uint64_t)sizeof(as_proto);
-
-					cf_rc_reserve(fd_h);
-					has_extra_ref = true;
-
-					// Info protocol requests.
-					if (proto_p->type == PROTO_TYPE_INFO) {
-						as_info_transaction it = { fd_h, proto_p, now_ns };
-
-						as_info(&it);
+					if (fd_h->proto_unread != 0) {
+						thr_demarshal_rearm(fd_h);
 						goto NextEvent;
 					}
+				}
 
-					// INIT_TR
-					as_transaction tr;
-					as_transaction_init_head(&tr, NULL, (cl_msg *)proto_p);
+				// fd_h->proto_unread == 0 - finished reading complete proto.
+				// In current pipelining model, can't rearm fd_h until end of
+				// transaction.
+				as_proto *proto_p = fd_h->proto;
 
-					tr.origin = FROM_CLIENT;
-					tr.from.proto_fd_h = fd_h;
-					tr.start_time = now_ns;
+				fd_h->proto = NULL;
+				fd_h->proto_unread = (uint64_t)sizeof(as_proto);
+				fd_h->last_used = now_ms;
 
-					if (! as_proto_is_valid_type(proto_p)) {
-						cf_warning(AS_DEMARSHAL, "unsupported proto message type %u", proto_p->type);
-						// We got a proto message type we don't recognize, so it
-						// may not do any good to send back an as_msg error, but
-						// it's the best we can do. At least we can keep the fd.
+				cf_rc_reserve(fd_h);
+				has_extra_ref = true;
+
+				// Info protocol requests.
+				if (proto_p->type == PROTO_TYPE_INFO) {
+					as_info_transaction it = { fd_h, proto_p, now_ns };
+
+					as_info(&it);
+					goto NextEvent;
+				}
+
+				// INIT_TR
+				as_transaction tr;
+				as_transaction_init_head(&tr, NULL, (cl_msg *)proto_p);
+
+				tr.origin = FROM_CLIENT;
+				tr.from.proto_fd_h = fd_h;
+				tr.start_time = now_ns;
+
+				if (! as_proto_is_valid_type(proto_p)) {
+					cf_warning(AS_DEMARSHAL, "unsupported proto message type %u", proto_p->type);
+					// We got a proto message type we don't recognize, so it
+					// may not do any good to send back an as_msg error, but
+					// it's the best we can do. At least we can keep the fd.
+					as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
+					goto NextEvent;
+				}
+
+				// Check if it's compressed.
+				if (tr.msgp->proto.type == PROTO_TYPE_AS_MSG_COMPRESSED) {
+					// Decompress it - allocate buffer to hold decompressed
+					// packet.
+					uint8_t *decompressed_buf = NULL;
+					size_t decompressed_buf_size = 0;
+					int rv = 0;
+					if ((rv = as_packet_decompression((uint8_t *)proto_p, &decompressed_buf, &decompressed_buf_size))) {
+						cf_warning(AS_DEMARSHAL, "as_proto decompression failed! (rv %d)", rv);
+						cf_warning_binary(AS_DEMARSHAL, (void *)proto_p, sizeof(as_proto) + proto_p->sz, CF_DISPLAY_HEX_SPACED, "compressed proto_p");
 						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 						goto NextEvent;
 					}
 
-					// Check if it's compressed.
-					if (tr.msgp->proto.type == PROTO_TYPE_AS_MSG_COMPRESSED) {
-						// Decompress it - allocate buffer to hold decompressed
-						// packet.
-						uint8_t *decompressed_buf = NULL;
-						size_t decompressed_buf_size = 0;
-						int rv = 0;
-						if ((rv = as_packet_decompression((uint8_t *)proto_p, &decompressed_buf, &decompressed_buf_size))) {
-							cf_warning(AS_DEMARSHAL, "as_proto decompression failed! (rv %d)", rv);
-							cf_warning_binary(AS_DEMARSHAL, (void *)proto_p, sizeof(as_proto) + proto_p->sz, CF_DISPLAY_HEX_SPACED, "compressed proto_p");
-							as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-							goto NextEvent;
-						}
+					// Free the compressed packet since we'll be using the
+					// decompressed packet from now on.
+					cf_free(proto_p);
 
-						// Free the compressed packet since we'll be using the
-						// decompressed packet from now on.
-						cf_free(proto_p);
+					// Get original packet.
+					tr.msgp = (cl_msg *)decompressed_buf;
+					as_proto_swap(&(tr.msgp->proto));
 
-						// Get original packet.
-						tr.msgp = (cl_msg *)decompressed_buf;
-						as_proto_swap(&(tr.msgp->proto));
-
-						if (! as_proto_wrapped_is_valid(&tr.msgp->proto, decompressed_buf_size)) {
-							cf_warning(AS_DEMARSHAL, "decompressed unusable proto: version %u, type %u, sz %lu [%lu]",
-									tr.msgp->proto.version, tr.msgp->proto.type, (uint64_t)tr.msgp->proto.sz, decompressed_buf_size);
-							as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
-							goto NextEvent;
-						}
-					}
-
-					// If it's an XDR connection and we haven't yet modified the connection settings, ...
-					if (tr.msgp->proto.type == PROTO_TYPE_AS_MSG &&
-							as_transaction_is_xdr(&tr) &&
-							(fd_h->fh_info & FH_INFO_XDR) == 0) {
-						// ... modify them.
-						if (thr_demarshal_config_xdr(&fd_h->sock) != 0) {
-							cf_warning(AS_DEMARSHAL, "Failed to configure XDR connection");
-							goto NextEvent_FD_Cleanup;
-						}
-
-						fd_h->fh_info |= FH_INFO_XDR;
-					}
-
-					// Security protocol transactions.
-					if (tr.msgp->proto.type == PROTO_TYPE_SECURITY) {
-						as_security_transact(&tr);
+					if (! as_proto_wrapped_is_valid(&tr.msgp->proto, decompressed_buf_size)) {
+						cf_warning(AS_DEMARSHAL, "decompressed unusable proto: version %u, type %u, sz %lu [%lu]",
+								tr.msgp->proto.version, tr.msgp->proto.type, (uint64_t)tr.msgp->proto.sz, decompressed_buf_size);
+						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_UNKNOWN);
 						goto NextEvent;
 					}
+				}
 
-					// For now only AS_MSG's contribute to this benchmark.
-					if (g_config.svc_benchmarks_enabled) {
-						tr.benchmark_time = histogram_insert_data_point(g_stats.svc_demarshal_hist, now_ns);
-					}
-
-					// Fast path for batch requests.
-					if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
-						as_batch_queue_task(&tr);
-						goto NextEvent;
-					}
-
-					// Swap as_msg fields and bin-ops to host order, and flag
-					// which fields are present, to reduce re-parsing.
-					if (! as_transaction_demarshal_prepare(&tr)) {
-						as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_PARAMETER);
-						goto NextEvent;
-					}
-
-					ASD_TRANS_DEMARSHAL(nodeid, (uint64_t) tr.msgp, as_transaction_trid(&tr));
-
-					// Either process the transaction directly in this thread,
-					// or queue it for processing by another thread (tsvc/info).
-					if (0 != thr_tsvc_process_or_enqueue(&tr)) {
-						cf_warning(AS_DEMARSHAL, "Failed to queue transaction to the service thread");
+				// If it's an XDR connection and we haven't yet modified the connection settings, ...
+				if (tr.msgp->proto.type == PROTO_TYPE_AS_MSG &&
+						as_transaction_is_xdr(&tr) &&
+						(fd_h->fh_info & FH_INFO_XDR) == 0) {
+					// ... modify them.
+					if (thr_demarshal_config_xdr(&fd_h->sock) != 0) {
+						cf_warning(AS_DEMARSHAL, "Failed to configure XDR connection");
 						goto NextEvent_FD_Cleanup;
 					}
+
+					fd_h->fh_info |= FH_INFO_XDR;
+				}
+
+				// Security protocol transactions.
+				if (tr.msgp->proto.type == PROTO_TYPE_SECURITY) {
+					as_security_transact(&tr);
+					goto NextEvent;
+				}
+
+				// For now only AS_MSG's contribute to this benchmark.
+				if (g_config.svc_benchmarks_enabled) {
+					tr.benchmark_time = histogram_insert_data_point(g_stats.svc_demarshal_hist, now_ns);
+				}
+
+				// Fast path for batch requests.
+				if (tr.msgp->msg.info1 & AS_MSG_INFO1_BATCH) {
+					as_batch_queue_task(&tr);
+					goto NextEvent;
+				}
+
+				// Swap as_msg fields and bin-ops to host order, and flag
+				// which fields are present, to reduce re-parsing.
+				if (! as_transaction_demarshal_prepare(&tr)) {
+					as_transaction_demarshal_error(&tr, AS_PROTO_RESULT_FAIL_PARAMETER);
+					goto NextEvent;
+				}
+
+				ASD_TRANS_DEMARSHAL(nodeid, (uint64_t) tr.msgp, as_transaction_trid(&tr));
+
+				// Either process the transaction directly in this thread,
+				// or queue it for processing by another thread (tsvc/info).
+				if (0 != thr_tsvc_process_or_enqueue(&tr)) {
+					cf_warning(AS_DEMARSHAL, "Failed to queue transaction to the service thread");
+					goto NextEvent_FD_Cleanup;
 				}
 
 				// Jump the proto message free & FD cleanup. If we get here, the
