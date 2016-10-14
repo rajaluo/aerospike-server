@@ -186,7 +186,7 @@ void as_fabric_dump();
 
 typedef struct {
 	// Arguably, these first two should be pushed into the msg system
-	const msg_template 	*mt[M_TYPE_MAX];
+	const msg_template	*mt[M_TYPE_MAX];
 	size_t 				mt_sz[M_TYPE_MAX];
 	size_t 				scratch_sz[M_TYPE_MAX];
 
@@ -209,7 +209,7 @@ typedef struct {
 	int			note_clients;
 	int			note_fd[MAX_FABRIC_WORKERS];
 
-	pthread_t   node_health_th;
+	pthread_t	node_health_th;
 } fabric_args;
 
 // This hash:
@@ -1180,24 +1180,30 @@ run_fabric_worker(void *arg)
 	struct sockaddr_un note_so;
 	memset(&note_so, 0, sizeof(note_so));
 	int note_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+
 	if (note_fd < 0) {
 		cf_warning(AS_FABRIC, "Could not create socket for notification thread");
 		return 0;
 	}
+
 	note_so.sun_family = AF_UNIX;
 	strcpy(note_so.sun_path, fa->note_sockname);
 	int len = sizeof(note_so.sun_family) + strlen(note_so.sun_path) + 1;
 	// Use an abstract Unix domain socket [Note:  Linux-specific!] by setting the first path character to NUL.
 	note_so.sun_path[0] = '\0';
+
 	if (connect(note_fd, (struct sockaddr *)&note_so, len) == -1) {
 		cf_crash(AS_FABRIC, "could not connect to notification socket");
 		return 0;
 	}
+
 	// Write the one byte that is my index.
 	uint8_t fd_idx = worker_id;
+
 	if (note_fd == 0) {
 		cf_warning(AS_FABRIC, "attempted write to fd 0");
 	}
+
 	if (1 != send(note_fd, &fd_idx, sizeof(fd_idx), MSG_NOSIGNAL)) {
 		// TODO
 		cf_debug(AS_FABRIC, "can't write to notification fd: probably need to blow up process errno %d", errno);
@@ -1391,7 +1397,7 @@ as_fabric_get_node_lasttime(cf_node node, uint64_t *lasttime)
 	*lasttime = fne->good_read_counter;
 
 	cf_debug(AS_FABRIC, "asking about node %"PRIx64" good read %u good write %u",
-			 node, (uint)fne->good_read_counter, (uint)fne->good_write_counter);
+			node, (uint)fne->good_read_counter, (uint)fne->good_write_counter);
 
 	fne_release(fne);
 
@@ -1481,7 +1487,6 @@ fabric_node_disconnect(cf_node node)
 	fne_release(fne);
 }
 
-
 // Plugin function that parses succession list out of a heartbeat pulse message.
 static void
 fabric_hb_plugin_parse_data_fn(msg *msg, cf_node source, as_hb_plugin_node_data *plugin_data)
@@ -1569,7 +1574,6 @@ fabric_published_serv_cfg_fill(const cf_serv_cfg *bind_cfg, cf_serv_cfg *publish
 	}
 }
 
-
 // Refresh  the fabric published endpoint list.
 // Returns 0 on successful list creation, -1 otherwise.
 static int
@@ -1616,7 +1620,6 @@ fabric_published_endpoints_refresh()
 
 	return 0;
 }
-
 
 // Set the fabric advertised endpoints.
 static void
@@ -2014,7 +2017,7 @@ static cf_atomic64 g_fabric_transact_tid = 0;
 
 typedef struct {
 	// allocated tid, without the 'code'
-	uint64_t   		tid;
+	uint64_t		tid;
 	cf_node 		node;
 	msg				*m;
 	pthread_mutex_t	LOCK;
@@ -2256,8 +2259,8 @@ fabric_transact_msg_fn(cf_node node, msg *m, void *udata)
 	return 0;
 }
 
-// registers all of this message type as a
-// transaction type message, which means the main message
+// Registers all of this message type as a
+// transaction type message, which means the main message.
 int
 as_fabric_transact_register(msg_type type, const msg_template *mt, size_t mt_sz,
 		size_t scratch_sz, as_fabric_transact_recv_fn cb, void *udata)
