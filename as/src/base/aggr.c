@@ -169,6 +169,8 @@ acleanup(aggr_state *astate)
 		astate->iter = NULL;
 	}
 	aclose(astate);
+
+	as_rec_destroy(astate->urec);
 }
 
 // **************************************************************************************************
@@ -227,7 +229,6 @@ istream_read(const as_stream *s)
 			}
 		}
 	}
-	as_val_reserve(astate->urec);
 	return (as_val *)astate->urec;
 }
 
@@ -317,6 +318,7 @@ as_aggr_process(as_namespace *ns, as_aggr_call * ag_call, cf_ll * ap_recl, void 
 
 	if (!astate.iter) {
 		cf_warning (AS_AGGR, "Could not set up iterator .. possibly out of memory .. Aborting Query !!");
+		as_rec_destroy(urec);
 		return AS_AGGR_ERR;
 	}
 
