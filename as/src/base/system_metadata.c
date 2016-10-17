@@ -3010,7 +3010,6 @@ static void incr_item_frequency_shash_update(void *key, void *value_old, void *v
 	//to count the frequency of the item.
 	as_smd_item_freq_t **item_freq = (as_smd_item_freq_t **) value_old;
 	(*item_freq)->freq++;
-	*(as_smd_item_freq_t**)value_new = *(as_smd_item_freq_t**)value_old;
 }
 
 /*

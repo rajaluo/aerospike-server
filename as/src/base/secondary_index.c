@@ -1445,7 +1445,7 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 		else if (0 == as_info_parameter_get(params, "gc-period", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_detail(AS_INFO, "gc-period = %"PRIu64"",val);
-			if ((int32_t)val < 0) {
+			if ((int64_t)val < 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO,"Changing value of gc-period of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
@@ -1455,7 +1455,7 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 		else if (0 == as_info_parameter_get(params, "gc-max-units", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_detail(AS_INFO, "gc-limit = %"PRIu64"",val);
-			if ((int32_t)val < 0) {
+			if ((int64_t)val < 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO,"Changing value of gc-max-units of ns %s sindex %s from %u to %lu",
@@ -2817,7 +2817,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			data              += startl;
 			srange->isrange    = FALSE;
 
-			if ((startl == 0) || (startl >= AS_SINDEX_MAX_STRING_KSIZE)) {
+			if (startl >= AS_SINDEX_MAX_STRING_KSIZE) {
 				cf_warning(AS_SINDEX, "Out of bound query key size %u", startl);
 				goto Cleanup;
 			}
