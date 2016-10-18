@@ -2457,38 +2457,19 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m, int priority)
 		nodes_sz = nl.sz;
 	}
 
-	if (nodes_sz == 1) {
-		return as_fabric_send(nodes[0], m, priority);
-	}
-
-	cf_debug(AS_FABRIC, "as_fabric_send_list sending: m %p", m);
-
-	for (int j = 0; j < nodes_sz; j++) {
-		cf_debug(AS_FABRIC, "  destination: %"PRIx64"\n", nodes[j]);
-	}
-
-	// Careful with the ref count here: need to increment before every
-	// send except the last.
 	int rv = 0;
-	int index;
 
-	for (index = 0; index < nodes_sz; index++) {
-		if (index != nodes_sz - 1) {
-			msg_incr_ref(m);
-		}
-
+	for (int index = 0; index < nodes_sz; index++) {
+		msg_incr_ref(m);
 		rv = as_fabric_send(nodes[index], m, priority);
-
-		if (rv != 0) {
-			if (index != nodes_sz - 1) {
-				as_fabric_msg_put(m);
-			}
-
-			return rv;
+		if (0 != rv) {
+			// Leave the reference for the sake of caller
+			break;
 		}
 	}
 
-	return 0;
+	as_fabric_msg_put(m); // Release main reference
+	return rv;
 }
 
 void

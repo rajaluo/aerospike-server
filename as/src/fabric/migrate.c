@@ -979,7 +979,7 @@ emigration_send_start(emigration *emig)
 		uint64_t now = cf_getms();
 
 		if (start_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
-			cf_rc_reserve(m);
+			msg_incr_ref(m);
 
 			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 					AS_FABRIC_SUCCESS) {
@@ -1047,7 +1047,7 @@ emigration_send_done(emigration *emig)
 		uint64_t now = cf_getms();
 
 		if (done_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
-			cf_rc_reserve(m);
+			msg_incr_ref(m);
 
 			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 					AS_FABRIC_SUCCESS) {

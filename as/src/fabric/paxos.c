@@ -1534,6 +1534,12 @@ as_paxos_send_sync_messages() {
 	as_paxos *p = g_paxos;
 	uint64_t cluster_key = as_paxos_get_cluster_key();
 	msg *reply = NULL;
+
+	if (NULL == (reply = as_paxos_sync_msg_generate(cluster_key))) {
+		cf_warning(AS_PAXOS, "unable to construct sync message");
+		return;
+	}
+
 	char sbuf[(AS_CLUSTER_SZ * 17) + 49];
 	snprintf(sbuf, 49, "SUCCESSION [%d]@%"PRIx64": ", p->gen.sequence, g_config.self_node);
 	snprintf(sbuf + strlen(sbuf), 18, "%"PRIx64" ", p->succession[0]);
@@ -1549,18 +1555,16 @@ as_paxos_send_sync_messages() {
 		}
 		snprintf(sbuf + strlen(sbuf), 18, "%"PRIx64" ", p->succession[i]);
 		if (p->partition_sync_state[i] == false) {
-			if (NULL == (reply = as_paxos_sync_msg_generate(cluster_key))) {
-				cf_warning(AS_PAXOS, "unable to construct sync message");
-			} else {
-				cf_info(AS_PAXOS, "sending sync message to %"PRIx64"", p->succession[i]);
-				if (0 != as_fabric_send(p->succession[i], reply, AS_FABRIC_PRIORITY_HIGH)) {
-					cf_warning(AS_PAXOS, "sync message to %"PRIx64" lost in fabric", p->succession[i]);
-					as_fabric_msg_put(reply);
-				}
+			msg_incr_ref(reply);
+			cf_info(AS_PAXOS, "sending sync message to %"PRIx64"", p->succession[i]);
+			if (0 != as_fabric_send(p->succession[i], reply, AS_FABRIC_PRIORITY_HIGH)) {
+				cf_warning(AS_PAXOS, "sync message to %"PRIx64" lost in fabric", p->succession[i]);
+				as_fabric_msg_put(reply);
 			}
 		}
 	}
 
+	as_fabric_msg_put(reply);
 	cf_info(AS_PAXOS, "%s", sbuf);
 	as_paxos_print_cluster_key("COMMAND CONFIRM");
 }
@@ -1912,7 +1916,7 @@ as_paxos_msg_unwrap(msg *m, as_paxos_transaction *t)
 /* as_paxos_send_to_sl
  * Send a msg to the proposed succession list. */
 static int
-as_paxos_send_to_sl(int cmd, as_paxos_transaction *tr, msg *px_msg, int priority)
+as_paxos_send_to_sl(msg *px_msg, int priority)
 {
 	as_node_list nl;
 	as_paxos *p = g_paxos;
@@ -2042,7 +2046,7 @@ as_paxos_spark(as_paxos_change *c)
 	}
 
 	int rv;
-	if ((rv = as_paxos_send_to_sl(cmd, s, m, AS_FABRIC_PRIORITY_HIGH))) {
+	if ((rv = as_paxos_send_to_sl(m, AS_FABRIC_PRIORITY_HIGH))) {
 		cf_warning(AS_PAXOS, "in spark, sending Paxos command %s to succession list failed: rv %d", as_paxos_cmd_name[cmd], rv);
 		as_fabric_msg_put(m);
 	}
@@ -2998,7 +3002,7 @@ as_paxos_thr(void *arg)
 
 						cf_debug(AS_PAXOS, "{%d} sending %s to %"PRIx64"",
 								t.gen.sequence, as_paxos_cmd_name[cmd], qm->id);
-						if ((rv = as_paxos_send_to_sl(cmd, s, reply, AS_FABRIC_PRIORITY_HIGH))) {
+						if ((rv = as_paxos_send_to_sl(reply, AS_FABRIC_PRIORITY_HIGH))) {
 							cf_warning(AS_PAXOS, "sending Paxos command %s to succession list failed: rv %d", as_paxos_cmd_name[cmd], rv);
 							as_fabric_msg_put(reply);
 						}
