@@ -100,8 +100,8 @@ typedef struct as_file_handle_s {
 	cf_socket	sock;			// our socket
 	cf_poll		poll;			// our epoll instance
 	bool		reap_me;		// tells the reaper to come and get us
-	bool		trans_active;	// a transaction is running on this connection
 	uint32_t	fh_info;		// bitmap containing status info of this file handle
+	as_proto	proto_hdr;
 	as_proto	*proto;
 	uint64_t	proto_unread;
 	void		*security_filter;
