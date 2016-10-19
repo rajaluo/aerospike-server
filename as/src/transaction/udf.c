@@ -589,7 +589,8 @@ udf_timeout_cb(rw_request* rw)
 
 	switch (rw->origin) {
 	case FROM_CLIENT:
-		as_end_of_transaction_force_close(rw->from.proto_fd_h);
+		as_msg_send_reply(rw->from.proto_fd_h, AS_PROTO_RESULT_FAIL_TIMEOUT, 0,
+				0, NULL, NULL, 0, NULL, rw_request_trid(rw), NULL);
 		// Timeouts aren't included in histograms.
 		client_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;

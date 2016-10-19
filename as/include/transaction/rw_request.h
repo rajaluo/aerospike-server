@@ -33,6 +33,7 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -199,4 +200,19 @@ rw_request_wait_q_depth(rw_request* rw)
 	}
 
 	return depth;
+}
+
+
+// See as_transaction_trid().
+static inline uint64_t
+rw_request_trid(const rw_request* rw)
+{
+	// Note - rw->msgp can be null if it's a ship-op.
+	if ((rw->msg_fields & AS_MSG_FIELD_BIT_TRID) == 0 || ! rw->msgp) {
+		return 0;
+	}
+
+	as_msg_field *f = as_msg_field_get(&rw->msgp->msg, AS_MSG_FIELD_TYPE_TRID);
+
+	return cf_swap_from_be64(*(uint64_t*)f->data);
 }
