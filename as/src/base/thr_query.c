@@ -2226,7 +2226,7 @@ query_run_setup(as_query_transaction *qtr)
 	qtr->qctx.bkey                = &qtr->bkey;
 	init_ai_obj(qtr->qctx.bkey);
 	bzero(&qtr->qctx.bdig, sizeof(cf_digest));
-	// Populate all the paritions for which this partition is query-able
+	// Populate all the partitions for which this partition is query-able
 	as_query_pre_reserve_partitions(qtr);
 
 	qtr->priority                 = g_config.query_priority;
