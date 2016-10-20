@@ -1516,6 +1516,7 @@ typedef struct inter_filter_s {
 	bool def_route;
 	bool up;
 	const char *if_name;
+	bool fail_empty;
 } inter_filter;
 
 typedef struct cb_context_s {
@@ -2072,6 +2073,7 @@ inter_get_addr(cf_ip_addr *addrs, uint32_t *n_addrs, inter_filter *filter)
 	enumerate_inter(&inter, filter->allow_v6);
 
 	uint32_t count = 0;
+	uint32_t matches = 0;
 
 	for (uint32_t i = 0; i < inter.n_inters; ++i) {
 		inter_entry *entry = &inter.inters[i];
@@ -2088,6 +2090,8 @@ inter_get_addr(cf_ip_addr *addrs, uint32_t *n_addrs, inter_filter *filter)
 			continue;
 		}
 
+		++matches;
+
 		for (uint32_t k = 0; k < entry->n_addrs; ++k) {
 			cf_ip_addr *addr = &entry->addrs[k];
 
@@ -2101,6 +2105,11 @@ inter_get_addr(cf_ip_addr *addrs, uint32_t *n_addrs, inter_filter *filter)
 		}
 	}
 
+	if (filter->fail_empty && matches > 0 && count == 0) {
+		cf_warning(CF_SOCKET, "No interface addresses found");
+		return -1;
+	}
+
 	*n_addrs = count;
 	return 0;
 }
@@ -2109,7 +2118,7 @@ int32_t
 cf_inter_get_addr_all(cf_ip_addr *addrs, uint32_t *n_addrs)
 {
 	static inter_filter filter = {
-		.allow_v6 = true, .def_route = false, .up = true, .if_name = NULL
+		.allow_v6 = true, .def_route = false, .up = true, .if_name = NULL, .fail_empty = false
 	};
 
 	return inter_get_addr(addrs, n_addrs, &filter);
@@ -2119,7 +2128,7 @@ int32_t
 cf_inter_get_addr_all_legacy(cf_ip_addr *addrs, uint32_t *n_addrs)
 {
 	static inter_filter filter = {
-		.allow_v6 = false, .def_route = false, .up = true, .if_name = NULL
+		.allow_v6 = false, .def_route = false, .up = true, .if_name = NULL, .fail_empty = false
 	};
 
 	return inter_get_addr(addrs, n_addrs, &filter);
@@ -2129,7 +2138,7 @@ int32_t
 cf_inter_get_addr_def(cf_ip_addr *addrs, uint32_t *n_addrs)
 {
 	static inter_filter filter = {
-		.allow_v6 = true, .def_route = true, .up = true, .if_name = NULL
+		.allow_v6 = true, .def_route = true, .up = true, .if_name = NULL, .fail_empty = false
 	};
 
 	return inter_get_addr(addrs, n_addrs, &filter);
@@ -2139,7 +2148,7 @@ int32_t
 cf_inter_get_addr_def_legacy(cf_ip_addr *addrs, uint32_t *n_addrs)
 {
 	static inter_filter filter = {
-		.allow_v6 = false, .def_route = true, .up = true, .if_name = NULL
+		.allow_v6 = false, .def_route = true, .up = true, .if_name = NULL, .fail_empty = false
 	};
 
 	return inter_get_addr(addrs, n_addrs, &filter);
@@ -2149,7 +2158,7 @@ int32_t
 cf_inter_get_addr_name(cf_ip_addr *addrs, uint32_t *n_addrs, const char *if_name)
 {
 	inter_filter filter = {
-		.allow_v6 = true, .def_route = false, .up = false, .if_name = if_name
+		.allow_v6 = true, .def_route = false, .up = false, .if_name = if_name, .fail_empty = true
 	};
 
 	return inter_get_addr(addrs, n_addrs, &filter);
