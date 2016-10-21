@@ -4470,7 +4470,7 @@ channel_endpoint_search_reduce(void* key, void* data, void* udata)
 		endpoint_reduce_udata->found = true;
 		endpoint_reduce_udata->socket = *socket;
 		// Stop the reduce, we have found a match.
-		return SHASH_ERR;
+		return SHASH_ERR_FOUND;
 	}
 
 	return SHASH_OK;
@@ -6420,7 +6420,7 @@ mesh_tend_reduce(void* key, void* data, void* udata)
 	as_hb_mesh_tend_reduce_udata* tend_reduce_udata =
 			(as_hb_mesh_tend_reduce_udata*)udata;
 
-	DETAIL("Tending mesh node %lx %s with status %s", nodeid,
+	DETAIL("Tending mesh node %"PRIx64" %s with status %s", nodeid,
 			mesh_node->is_seed ? "(seed)" : "(non-seed)",
 			mesh_node_status_string(mesh_node->status));
 
@@ -6429,22 +6429,21 @@ mesh_tend_reduce(void* key, void* data, void* udata)
 		goto Exit;
 	}
 
-	tend_reduce_udata->has_inactive_seeds = mesh_node->is_seed
-			&& mesh_node->status != AS_HB_MESH_NODE_CHANNEL_ACTIVE;
+	tend_reduce_udata->has_inactive_seeds |= (mesh_node->is_seed
+			&& mesh_node->status != AS_HB_MESH_NODE_CHANNEL_ACTIVE);
 
 	cf_clock now = cf_getms();
 
 	if (mesh_node->inactive_since + MESH_INACTIVE_TIMEOUT() <= now) {
 		if (!mesh_node->is_seed) {
-			DEBUG(
-					"Mesh forgetting node %lx because it could not be connected since %lu",
+			DEBUG("Mesh forgetting node %"PRIx64" because it could not be connected since %"PRIu64,
 					nodeid, mesh_node->inactive_since);
 			rv = SHASH_REDUCE_DELETE;
 			goto Exit;
 		}
 		else {
 			// A seed node that we could not connect to for a while.
-			DEBUG("Mesh seed node %lx could not be connected since %lu", nodeid,
+			DEBUG("Mesh seed node %"PRIx64" could not be connected since %"PRIu64, nodeid,
 					mesh_node->inactive_since);
 		}
 	}
@@ -6453,7 +6452,7 @@ mesh_tend_reduce(void* key, void* data, void* udata)
 		if (!mesh_node->is_seed && mesh_node->last_status_updated +
 		MESH_ENDPOINT_UNKNOWN_TIMEOUT() > now) {
 			DEBUG(
-					"Mesh forgetting node %lx ip address/port undiscovered since %lu",
+					"Mesh forgetting node %"PRIx64" ip address/port undiscovered since %"PRIu64,
 					nodeid, mesh_node->last_status_updated);
 
 			rv = SHASH_REDUCE_DELETE;
@@ -6483,7 +6482,7 @@ mesh_tend_reduce(void* key, void* data, void* udata)
 			>= tend_reduce_udata->to_connect_capacity) {
 		// New nodes found but we are out of capacity. Ultra defensive coding.
 		// This will never happen under the locks.
-		WARNING("Skipping connecting to node %lx. Not enough memory allocated.",
+		WARNING("Skipping connecting to node %"PRIx64". Not enough memory allocated.",
 				nodeid);
 		goto Exit;
 	}
@@ -6601,7 +6600,7 @@ mesh_node_add_update(as_hb_mesh_node_key* mesh_node_key,
 	MESH_LOCK();
 
 	SHASH_PUT_OR_DIE(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
-			mesh_node_key, mesh_node, "%s (Mesh  node: %lx)", add_error_message,
+			mesh_node_key, mesh_node, "%s (Mesh  node: %"PRIx64")", add_error_message,
 			mesh_node_key->nodeid);
 
 	MESH_UNLOCK();
@@ -6677,7 +6676,7 @@ mesh_endpoint_addr_find_iterate(const as_endpoint* endpoint, void* udata)
  * Reduce function to search for an endpoint in the mesh node hash.
  */
 static int
-mesh_endpoint_addr_find_reduce(void* key, void* data, void* udata)
+mesh_node_endpoint_addr_find_reduce(void* key, void* data, void* udata)
 {
 	as_hb_mesh_node_key* node_key = (as_hb_mesh_node_key*)key;
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
@@ -6700,7 +6699,7 @@ mesh_endpoint_addr_find_reduce(void* key, void* data, void* udata)
 		memcpy(endpoint_reduce_udata->matched_key, node_key,
 				sizeof(as_hb_mesh_node_key));
 		// Stop searching we found a match.
-		return SHASH_ERR;
+		return SHASH_ERR_FOUND;
 	}
 
 	return SHASH_OK;
@@ -6733,7 +6732,7 @@ mesh_node_endpoint_addr_find_exclude(cf_sock_addr* endpoint_addr,
 	MESH_LOCK();
 
 	shash_reduce(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
-			mesh_endpoint_addr_find_reduce, &udata);
+			mesh_node_endpoint_addr_find_reduce, &udata);
 
 	MESH_UNLOCK();
 
@@ -6763,7 +6762,7 @@ mesh_node_endpoint_addr_find(cf_sock_addr* endpoint_addr,
  * hash.
  */
 static int
-mesh_endpoint_list_find_reduce(void* key, void* data, void* udata)
+mesh_node_endpoint_list_find_reduce(void* key, void* data, void* udata)
 {
 	as_hb_mesh_node_key* node_key = (as_hb_mesh_node_key*)key;
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
@@ -6784,7 +6783,7 @@ mesh_endpoint_list_find_reduce(void* key, void* data, void* udata)
 		memcpy(endpoint_reduce_udata->matched_key, node_key,
 				sizeof(as_hb_mesh_node_key));
 		// Stop searching we found a match.
-		return SHASH_ERR;
+		return SHASH_ERR_FOUND;
 	}
 
 	return SHASH_OK;
@@ -6818,7 +6817,7 @@ mesh_node_endpoint_list_overlapping_find_exclude(
 	MESH_LOCK();
 
 	shash_reduce(g_hb.mode_state.mesh_state.nodeid_to_mesh_node,
-			mesh_endpoint_list_find_reduce, &udata);
+			mesh_node_endpoint_list_find_reduce, &udata);
 
 	MESH_UNLOCK();
 
@@ -7041,14 +7040,17 @@ mesh_node_try_add_new(as_hb_channel_event* event)
 	msg_endpoint_list_get(event->msg, &msg_endpoint_list);
 
 	as_hb_mesh_node_key existing_node_key;
+
+	// With v3 a search by endpoint list will suffice, unless we are dealing
+	// with a virtual address.
+	// In legacy v2 case where we will not have the entire bind address list for
+	// a node, the seed ip and the published ip might have differed, hence a
+	// lookup by peer endpoint is also required.
 	if (nodeid_entry_exists
 			|| mesh_node_endpoint_list_overlapping_find(msg_endpoint_list,
-					&existing_node_key) == 0 ||
-				// Legacy v2 case where we will not have the entire bind address
-				// list for a node. The seed ip and the published ip might have
-				// differed.
-				mesh_node_endpoint_addr_find(&event->peer_endpoint_addr,
-						&existing_node_key) == 0) {
+					&existing_node_key) == 0
+			|| mesh_node_endpoint_addr_find(&event->peer_endpoint_addr,
+					&existing_node_key) == 0) {
 		// Existing mesh node entry.
 		rv = false;
 		goto Exit;
@@ -7074,8 +7076,7 @@ mesh_node_try_add_new(as_hb_channel_event* event)
 	as_endpoint_list_to_string(new_node.endpoint_list, endpoint_list_str,
 			sizeof(endpoint_list_str));
 
-	DEBUG("Added new mesh non seed entry with nodeid %" PRIx64
-			" and endpoints {%s}",
+	DEBUG("Added new mesh non seed entry with nodeid %"PRIx64" and endpoints {%s}",
 			new_node.nodeid, endpoint_list_str);
 
 Exit:
@@ -7087,70 +7088,71 @@ Exit:
  * Delete one of two redundant entries while preserving exactly one seed entry,
  * if at least one of the redundant entries contains a seed node.
  *
- * @param existing_nodeid_key mesh node entry key that has nodeid matching the
+ * @param nodeid_matching_key mesh node entry key that has nodeid matching the
  * message event source.
- * @param existing_endpoint_key mesh node entry that has a matching endpoint
+ * @param endpoint_matching_key mesh node entry that has a matching endpoint
  * with the message event source.
  * @return pointer to entry retained.
  */
 static as_hb_mesh_node_key*
-mesh_node_redundant_entry_delete(as_hb_mesh_node_key *existing_nodeid_key,
-		as_hb_mesh_node_key *existing_endpoint_key)
+mesh_node_redundant_entry_delete(as_hb_mesh_node_key *nodeid_matching_key,
+		as_hb_mesh_node_key *endpoint_matching_key)
 {
 	MESH_LOCK();
 
 	as_hb_mesh_node_key* rv = NULL;
 	ASSERT(
-			memcmp(existing_nodeid_key, existing_endpoint_key,
-					sizeof(*existing_nodeid_key)),
-			"Node and seed keys should differ for node %lx",
-			existing_nodeid_key->nodeid);
+			memcmp(nodeid_matching_key, endpoint_matching_key,
+					sizeof(*nodeid_matching_key)),
+			"Node and seed keys should differ for node %"PRIx64,
+			nodeid_matching_key->nodeid);
 
 	as_hb_mesh_node_key *key_to_delete = NULL;
 	as_hb_mesh_node *node_to_delete = NULL;
 	as_hb_mesh_node_key *key_to_retain = NULL;
 	as_hb_mesh_node *node_to_retain = NULL;
 
-	as_hb_mesh_node nodeid_entry;
-	if (mesh_node_get(existing_nodeid_key->nodeid,
-			existing_nodeid_key->is_real_nodeid, &nodeid_entry) != 0) {
+	as_hb_mesh_node nodeid_matching_entry;
+	if (mesh_node_get(nodeid_matching_key->nodeid,
+			nodeid_matching_key->is_real_nodeid, &nodeid_matching_entry) != 0) {
 		// Redunant node went away. Can't happen in practice because the caller
 		// has locked mesh state.
-		rv = existing_endpoint_key;
+		rv = endpoint_matching_key;
 		goto Exit;
 	}
 
-	as_hb_mesh_node endpoint_entry;
-	if (mesh_node_get(existing_endpoint_key->nodeid,
-			existing_endpoint_key->is_real_nodeid, &endpoint_entry) != 0) {
+	as_hb_mesh_node endpoint_matching_entry;
+	if (mesh_node_get(endpoint_matching_key->nodeid,
+			endpoint_matching_key->is_real_nodeid, &endpoint_matching_entry)
+			!= 0) {
 		// Redunant node went away. Can't happen in practice because the caller
 		// has locked mesh state.
-		rv = existing_nodeid_key;
+		rv = nodeid_matching_key;
 		goto Exit;
 	}
 
-	if (endpoint_entry.is_seed == nodeid_entry.is_seed) {
+	if (endpoint_matching_entry.is_seed == nodeid_matching_entry.is_seed) {
 		// Both entries are either seed or both non seed  entries. Retain the
 		// entry with matching node id entry which will be the one matching the
 		// source message and delete the other entry.
-		key_to_delete = existing_endpoint_key;
-		node_to_delete = &endpoint_entry;
-		key_to_retain = existing_nodeid_key;
-		node_to_retain = &nodeid_entry;
+		key_to_delete = endpoint_matching_key;
+		node_to_delete = &endpoint_matching_entry;
+		key_to_retain = nodeid_matching_key;
+		node_to_retain = &nodeid_matching_entry;
 	}
 	else {
 		// Exactly one entry is the seed entry, retain the seed entry.
-		if (endpoint_entry.is_seed) {
-			key_to_delete = existing_nodeid_key;
-			node_to_delete = &nodeid_entry;
-			key_to_retain = existing_endpoint_key;
-			node_to_retain = &endpoint_entry;
+		if (endpoint_matching_entry.is_seed) {
+			key_to_delete = nodeid_matching_key;
+			node_to_delete = &nodeid_matching_entry;
+			key_to_retain = endpoint_matching_key;
+			node_to_retain = &endpoint_matching_entry;
 		}
 		else {
-			key_to_delete = existing_endpoint_key;
-			node_to_delete = &endpoint_entry;
-			key_to_retain = existing_nodeid_key;
-			node_to_retain = &nodeid_entry;
+			key_to_delete = endpoint_matching_key;
+			node_to_delete = &endpoint_matching_entry;
+			key_to_retain = nodeid_matching_key;
+			node_to_retain = &nodeid_matching_entry;
 		}
 	}
 
@@ -7167,21 +7169,22 @@ mesh_node_redundant_entry_delete(as_hb_mesh_node_key *existing_nodeid_key,
 				endpoint_list_str_to_retain,
 				sizeof(endpoint_list_str_to_retain));
 		WARNING(
-				"Nodes %lx and %lx have overlapping endpoint addresses {%s} and {%s} respectively",
+				"Nodes %"PRIx64" and %"PRIx64" have overlapping endpoint addresses {%s} and {%s} respectively",
 				key_to_delete->nodeid, key_to_retain->nodeid,
 				endpoint_list_str_to_delete, endpoint_list_str_to_retain);
 	}
 
 	if (node_to_delete->is_seed) {
-		INFO("Removing duplicate seed entry hostname:%s port:%d for node %lx",
+		INFO(
+				"Removing duplicate seed entry hostname:%s port:%d for node %"PRIx64,
 				node_to_delete->seed_host_name, node_to_delete->seed_port,
 				key_to_delete->nodeid);
 	}
 
-
 	mesh_node_delete(key_to_delete, "Error removing redundant mesh entry.");
 
-	DEBUG("Removed redundant mesh entry for node %lx", key_to_delete->nodeid);
+	DEBUG("Removed redundant mesh entry for node %"PRIx64,
+			key_to_delete->nodeid);
 
 	rv = key_to_retain;
 	if (node_to_retain->is_seed
@@ -7231,28 +7234,28 @@ mesh_node_fix_conflict(as_hb_channel_event* event)
 		goto Exit;
 	}
 
-	as_hb_mesh_node_key existing_nodeid_key = { true, event->nodeid };
-	as_hb_mesh_node_key existing_endpoint_key;
+	as_hb_mesh_node_key nodeid_matching_key = { true, event->nodeid };
+	as_hb_mesh_node_key endpoint_matching_key;
 
 	as_endpoint_list* msg_endpoint_list;
 	msg_endpoint_list_get(event->msg, &msg_endpoint_list);
 
-	as_hb_mesh_node_key* retained_key = &existing_nodeid_key;
+	as_hb_mesh_node_key* retained_key = &nodeid_matching_key;
 	while (mesh_node_endpoint_list_overlapping_find_exclude(msg_endpoint_list,
-			retained_key, &existing_endpoint_key) == 0) {
+			retained_key, &endpoint_matching_key) == 0) {
 		// The message has a redundant matching endpoint entry, resolve the
 		// conflict.
 		retained_key = mesh_node_redundant_entry_delete(retained_key,
-				&existing_endpoint_key);
+				&endpoint_matching_key);
 	}
 
 	while (mesh_node_endpoint_addr_find_exclude(&event->peer_endpoint_addr,
-			retained_key, &existing_endpoint_key) == 0) {
+			retained_key, &endpoint_matching_key) == 0) {
 		// Legacy v2 case where we will not have the entire bind address list
 		// for a node. The seed ip and the published ip might have differed,
 		// remove this redundant entry.
 		retained_key = mesh_node_redundant_entry_delete(retained_key,
-				&existing_endpoint_key);
+				&endpoint_matching_key);
 	}
 
 Exit:
@@ -7292,7 +7295,7 @@ mesh_node_data_update(as_hb_channel_event* event)
 			as_endpoint_list_to_string(existing_mesh_node.endpoint_list,
 					endpoint_list_str1, sizeof(endpoint_list_str1));
 			WARNING(
-					"Node id changed from %lx to %lx for node with endpoints {%s}",
+					"Node id changed from %"PRIx64" to %"PRIx64" for node with endpoints {%s}",
 					existing_mesh_node.nodeid, event->nodeid,
 					endpoint_list_str1);
 			existing_mesh_node.nodeid = event->nodeid;
