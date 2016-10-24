@@ -2389,7 +2389,7 @@ query_process_inline(as_query_transaction *qtr)
 	}
 }
 /*
- * Process the query work either inilne or pass it on to the
+ * Process the query work either inline or pass it on to the
  * worker thread
  *
  * Returns
