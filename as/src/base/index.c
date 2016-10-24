@@ -98,8 +98,8 @@ void as_index_reduce_sync_traverse(as_index_tree *tree, as_index *r, cf_arenax_h
 int as_index_search_lockless(as_index_tree *tree, cf_digest *keyd, as_index **ret, cf_arenax_handle *ret_h);
 void as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele);
 void as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele);
-void as_index_rotate_left(as_index_tree *tree, as_index_ele *a, as_index_ele *b);
-void as_index_rotate_right(as_index_tree *tree, as_index_ele *a, as_index_ele *b);
+void as_index_rotate_left(as_index_ele *a, as_index_ele *b);
+void as_index_rotate_right(as_index_ele *a, as_index_ele *b);
 
 
 
@@ -881,7 +881,7 @@ as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele)
 					r_e = parent_e;
 
 					// Then rotate r back down a layer.
-					as_index_rotate_left(tree, r_e, r0_e);
+					as_index_rotate_left(r_e, r0_e);
 
 					parent_e = r_e->parent;
 					// Note - grandparent_e is unchanged.
@@ -891,7 +891,7 @@ as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele)
 				grandparent_e->me->color = AS_RED;
 
 				// r and parent move up a layer as grandparent rotates down.
-				as_index_rotate_right(tree, grandparent_e, parent_e);
+				as_index_rotate_right(grandparent_e, parent_e);
 			}
 		}
 		else {
@@ -917,7 +917,7 @@ as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele)
 					r_e = parent_e;
 
 					// Then rotate r back down a layer.
-					as_index_rotate_right(tree, r_e, r0_e);
+					as_index_rotate_right(r_e, r0_e);
 
 					parent_e = r_e->parent;
 					// Note - grandparent_e is unchanged.
@@ -927,7 +927,7 @@ as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele)
 				grandparent_e->me->color = AS_RED;
 
 				// r and parent move up a layer as grandparent rotates down.
-				as_index_rotate_left(tree, grandparent_e, parent_e);
+				as_index_rotate_left(grandparent_e, parent_e);
 			}
 		}
 	}
@@ -960,7 +960,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 				ele->me_h = s_h;
 				ele->me = s;
 
-				as_index_rotate_left(tree, r_e->parent, ele);
+				as_index_rotate_left(r_e->parent, ele);
 
 				s_h = r_parent->right_h;
 				s = RESOLVE_H(s_h);
@@ -991,7 +991,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 					ele->me_h = s->left_h;
 					ele->me = s_left;
 
-					as_index_rotate_right(tree, s_e, ele);
+					as_index_rotate_right(s_e, ele);
 
 					s_h = r_parent->right_h;
 					s = s_left; // same as RESOLVE_H(s_h)
@@ -1006,7 +1006,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 				ele->me_h = s_h;
 				ele->me = s;
 
-				as_index_rotate_left(tree, r_e->parent, ele);
+				as_index_rotate_left(r_e->parent, ele);
 
 				RESOLVE_H(tree->root->left_h)->color = AS_BLACK;
 
@@ -1026,7 +1026,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 				ele->me_h = s_h;
 				ele->me = s;
 
-				as_index_rotate_right(tree, r_e->parent, ele);
+				as_index_rotate_right(r_e->parent, ele);
 
 				s_h = r_parent->left_h;
 				s = RESOLVE_H(s_h);
@@ -1057,7 +1057,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 					ele->me_h = s->right_h;
 					ele->me = s_right;
 
-					as_index_rotate_left(tree, s_e, ele);
+					as_index_rotate_left(s_e, ele);
 
 					s_h = r_parent->left_h;
 					s = s_right; // same as RESOLVE_H(s_h)
@@ -1072,7 +1072,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 				ele->me_h = s_h;
 				ele->me = s;
 
-				as_index_rotate_right(tree, r_e->parent, ele);
+				as_index_rotate_right(r_e->parent, ele);
 
 				RESOLVE_H(tree->root->left_h)->color = AS_BLACK;
 
@@ -1086,7 +1086,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 
 
 void
-as_index_rotate_left(as_index_tree *tree, as_index_ele *a, as_index_ele *b)
+as_index_rotate_left(as_index_ele *a, as_index_ele *b)
 {
 	// Element b is element a's right child - a will become b's left child.
 
@@ -1120,7 +1120,7 @@ as_index_rotate_left(as_index_tree *tree, as_index_ele *a, as_index_ele *b)
 
 
 void
-as_index_rotate_right(as_index_tree *tree, as_index_ele *a, as_index_ele *b)
+as_index_rotate_right(as_index_ele *a, as_index_ele *b)
 {
 	// Element b is element a's left child - a will become b's right child.
 

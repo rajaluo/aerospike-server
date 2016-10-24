@@ -3891,7 +3891,7 @@ cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access)
 		}
 
 		for (uint32_t k = 0; k < n_resol; ++k) {
-			if (cf_ip_addr_is_any(&resol[k]) || cf_ip_addr_is_local(&resol[k])) {
+			if (cf_ip_addr_is_any(&resol[k])) {
 				cf_crash_nostack(AS_CFG, "Invalid access address: %s", addrs->addrs[i]);
 			}
 		}
