@@ -1559,6 +1559,10 @@ fabric_published_serv_cfg_fill(const cf_serv_cfg *bind_cfg, cf_serv_cfg *publish
 					cf_crash(AS_FABRIC, "Error initializing published address list.");
 				}
 			}
+
+			if (published_cfg->n_cfgs == 0) {
+				cf_warning(AS_FABRIC, "No network interface addresses detected for fabric access");
+			}
 		}
 		else {
 			if (ipv4_only && ! cf_ip_addr_is_legacy(&bind_cfg->cfgs[i].addr)) {
