@@ -1024,6 +1024,14 @@ udf_post_processing(udf_record* urecord, udf_optype urecord_op, uint16_t set_id)
 			as_storage_record_set_rec_props(rd, rec_props_data);
 		}
 
+		as_msg* m = &tr->msgp->msg;
+
+		// Convert message TTL special value if appropriate.
+		if (m->record_ttl == TTL_DONT_UPDATE &&
+				(urecord->flag & UDF_RECORD_FLAG_PREEXISTS) == 0) {
+			m->record_ttl = TTL_NAMESPACE_DEFAULT;
+		}
+
 		write_udf_post_processing(tr, rd, &urecord->pickled_buf,
 			&urecord->pickled_sz, &urecord->pickled_rec_props);
 
