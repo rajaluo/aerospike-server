@@ -643,6 +643,11 @@ write_master(rw_request* rw, as_transaction* tr)
 		as_storage_record_set_rec_props(&rd, rec_props_data);
 	}
 
+	// Convert message TTL special value if appropriate.
+	if (record_created && m->record_ttl == TTL_DONT_UPDATE) {
+		m->record_ttl = TTL_NAMESPACE_DEFAULT;
+	}
+
 	//------------------------------------------------------
 	// Split write_master() according to configuration to
 	// handle record bins.

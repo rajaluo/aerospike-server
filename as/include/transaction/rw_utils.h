@@ -57,6 +57,11 @@ typedef struct rw_paxos_change_struct_t {
 	cf_node deletions[AS_CLUSTER_SZ];
 } rw_paxos_change_struct;
 
+// For now, use only for as_msg record_ttl special values.
+#define TTL_NAMESPACE_DEFAULT	0
+#define TTL_NEVER_EXPIRE		((uint32_t)-1)
+#define TTL_DONT_UPDATE			((uint32_t)-2)
+
 
 //==========================================================
 // Public API.
@@ -108,8 +113,10 @@ op_is_read_all(as_msg_op* op, as_msg* m)
 static inline bool
 is_valid_ttl(as_namespace* ns, uint32_t ttl)
 {
-	// Note - TTL 0 means "use namespace default", -1 means "never expire".
-	return ttl <= ns->max_ttl || ttl == 0xFFFFffff;
+	// Note - for now, ttl must be as_msg record_ttl.
+	// Note - ttl <= ns->max_ttl includes ttl == TTL_NAMESPACE_DEFAULT.
+	return ttl <= ns->max_ttl ||
+			ttl == TTL_NEVER_EXPIRE || ttl == TTL_DONT_UPDATE;
 }
 
 
