@@ -835,6 +835,7 @@ struct as_namespace_s {
 	uint32_t		ldt_page_size;
 	uint64_t		max_ttl;
 	uint32_t		migrate_order;
+	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
 	cf_atomic32		obj_size_hist_max; // TODO - doesn't need to be atomic, really.
 	as_policy_consistency_level read_consistency_level;

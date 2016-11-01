@@ -125,6 +125,7 @@ as_namespace_create(char *name)
 	ns->ldt_page_size = 8192; // default ldt page size is 8192
 	ns->max_ttl = MAX_ALLOWED_TTL; // 10 years
 	ns->migrate_order = 5;
+	ns->migrate_retransmit_ms = 1000 * 5; // 5 seconds
 	ns->migrate_sleep = 1;
 	ns->obj_size_hist_max = OBJ_SIZE_HIST_NUM_BUCKETS;
 	ns->single_bin = false;
