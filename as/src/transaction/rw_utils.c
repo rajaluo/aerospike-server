@@ -97,7 +97,6 @@ send_rw_messages(rw_request* rw)
 
 			// Mark as complete although we won't have a response msg.
 			rw->dest_complete[i] = true;
-			rw->dup_result_code[i] = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 	}
 }

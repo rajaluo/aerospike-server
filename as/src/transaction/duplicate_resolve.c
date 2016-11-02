@@ -139,7 +139,6 @@ dup_res_setup_rw(rw_request* rw, as_transaction* tr, dup_res_done_cb dup_res_cb,
 		rw->dest_complete[i] = false;
 		rw->dest_nodes[i] = tr->rsv.dupl_nodes[i];
 		rw->dup_msg[i] = NULL;
-		rw->dup_result_code[i] = 0;
 	}
 
 	// Allow retransmit thread to destroy rw as soon as we unlock.
@@ -409,7 +408,6 @@ dup_res_handle_ack(cf_node node, msg* m)
 		}
 
 		rw->dest_complete[i] = true;
-		rw->dup_result_code[i] = result_code;
 		rw->dup_msg[i] = m;
 
 		break;
