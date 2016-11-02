@@ -1951,7 +1951,7 @@ as_config_init(const char* config_file)
 				c->n_proto_fd_max = cfg_int_no_checks(&line);
 				break;
 			case CASE_SERVICE_ADVERTISE_IPV6:
-				c->advertise_ipv6 = cfg_bool(&line);
+				cf_socket_set_advertise_ipv6(cfg_bool(&line));
 				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				c->allow_inline_transactions = cfg_bool(&line);
