@@ -1068,8 +1068,7 @@ static as_smd_t *as_smd_create(void)
 	}
 
 	// Send an INIT message to the System Metadata thread.
-	int retval = 0;
-	if ((retval = as_smd_send_event(smd, as_smd_create_cmd_event(AS_SMD_CMD_INIT)))) {
+	if (as_smd_send_event(smd, as_smd_create_cmd_event(AS_SMD_CMD_INIT))) {
 		cf_crash(AS_SMD, "failed to send INIT message to System Metadata thread");
 	}
 
@@ -1120,7 +1119,7 @@ static int as_smd_msgq_push(cf_node node_id, msg *msg, void *udata)
 
 	// Extract the operation from the incoming fabric msg.
 	uint32_t op = 0;
-	e = msg_get_uint32(msg, AS_SMD_MSG_OP, &op);
+	msg_get_uint32(msg, AS_SMD_MSG_OP, &op);
 
 	cf_debug(AS_SMD, "Operation received %s", AS_SMD_MSG_OP_NAME(op));
 	// Create a System Metadata msg event object and populate it from the fabric msg.
@@ -1138,12 +1137,12 @@ static int as_smd_msgq_push(cf_node node_id, msg *msg, void *udata)
 	}
 
 	if (AS_SMD_MSG_OP_ACCEPT_THIS_METADATA == op) {
-		if ((e = msg_get_str(msg, AS_SMD_MSG_MODULE_NAME, &(smd_msg->items->module_name), 0, MSG_GET_COPY_MALLOC))) {
+		if (msg_get_str(msg, AS_SMD_MSG_MODULE_NAME, &(smd_msg->items->module_name), 0, MSG_GET_COPY_MALLOC)) {
 			cf_warning(AS_SMD, "could not get module name from the fabric msg");
 			smd_msg->items->module_name = NULL;
 		}
 
-		if ((e = msg_get_uint32(msg, AS_SMD_MSG_OPTIONS, &(smd_msg->options)))) {
+		if (msg_get_uint32(msg, AS_SMD_MSG_OPTIONS, &(smd_msg->options))) {
 			cf_warning(AS_SMD, "could not get info flags from the fabric msg");
 			smd_msg->options = 0;
 		} else {
@@ -1573,7 +1572,7 @@ static int as_smd_module_restore(as_smd_module_t *module_obj)
 		if (!generation_obj) {
 			cf_warning(AS_SMD, "missing \"generation\" for object %d in persisted System Metadata for module \"%s\" ~~ Using 1!", i, module_obj->module);
 		} else {
-			if (0 >= (generation = json_integer_value(generation_obj))) {
+			if (0 == (generation = json_integer_value(generation_obj))) {
 				cf_warning(AS_SMD, "bad \"generation\" for object %d in persisted System Metadata for module \"%s\" ~~ Using 1!", i, module_obj->module);
 				generation = 1;
 			}
@@ -1584,7 +1583,7 @@ static int as_smd_module_restore(as_smd_module_t *module_obj)
 		if (!timestamp_obj) {
 			cf_warning(AS_SMD, "missing \"timestamp\" for object %d in persisted System Metadata for module \"%s\" ~~ Using now!", i, module_obj->module);
 		} else {
-			if (0 >= (timestamp = json_integer_value(timestamp_obj))) {
+			if (0 == (timestamp = json_integer_value(timestamp_obj))) {
 				cf_warning(AS_SMD, "bad \"timestamp\" for object %d in persisted System Metadata for module \"%s\" ~~ Using now!", i, module_obj->module);
 				timestamp = cf_getms();
 			}
@@ -2061,7 +2060,7 @@ static int as_smd_metadata_change(as_smd_t *smd, as_smd_msg_op_t op, as_smd_item
 
 		cf_debug(AS_SMD, "handling metadata change type %s locally: module \"%s\" ; key \"%s\"", AS_SMD_MSG_OP_NAME(op), item->module_name, item->key);
 
-		if (item && (retval = as_smd_metadata_change_local(smd, op, item))) {
+		if ((retval = as_smd_metadata_change_local(smd, op, item))) {
 			cf_warning(AS_SMD, "failed to %s a metadata item locally: module \"%s\" ; key \"%s\" ; value \"%s\"", AS_SMD_MSG_OP_NAME(op), item->module_name, item->key, item->value);
 		}
 
@@ -3011,7 +3010,6 @@ static void incr_item_frequency_shash_update(void *key, void *value_old, void *v
 	//to count the frequency of the item.
 	as_smd_item_freq_t **item_freq = (as_smd_item_freq_t **) value_old;
 	(*item_freq)->freq++;
-	value_new = value_old;
 }
 
 /*

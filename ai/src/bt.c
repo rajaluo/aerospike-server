@@ -148,23 +148,23 @@ bt *createIBT(uchar ktype, int imatch, uchar btype) {
 	bts.ktype = ktype;
 	bts.btype = btype;
 	bts.num = imatch;
-	if        C_IS_I(ktype) { /* NOTE: under the covers: UL */
+	if (C_IS_I(ktype)) { /* NOTE: under the covers: UL */
 		bts.ksize = UL_SIZE;
 		cmp = ulCmp;
 		bts.bflag = BTFLAG_UINT_ULONG  + BTFLAG_UINT_INDEX;
-	} else if C_IS_L(ktype) { /* NOTE: under the covers: LL */
+	} else if (C_IS_L(ktype)) { /* NOTE: under the covers: LL */
 		bts.ksize = LL_SIZE;
 		cmp = llCmp;
 		bts.bflag = BTFLAG_ULONG_ULONG + BTFLAG_ULONG_INDEX;
-	} else if C_IS_G(ktype) { /* NOTE: under the covers: LL */
+	} else if (C_IS_G(ktype)) { /* NOTE: under the covers: LL */
 		bts.ksize = LL_SIZE;
 		cmp = llCmp;
 		bts.bflag = BTFLAG_ULONG_ULONG + BTFLAG_ULONG_INDEX;
-	} else if C_IS_X(ktype) { /* NOTE: under the covers: XL */
+	} else if (C_IS_X(ktype)) { /* NOTE: under the covers: XL */
 		bts.ksize = XL_SIZE;
 		cmp = xlCmp;
 		bts.bflag = BTFLAG_U128_ULONG  + BTFLAG_U128_INDEX;
-	} else if C_IS_Y(ktype) { /* NOTE: under the covers: YL */
+	} else if (C_IS_Y(ktype)) { /* NOTE: under the covers: YL */
 		bts.ksize = YL_SIZE;
 		cmp = ylCmp;
 		bts.bflag = BTFLAG_U160_ULONG  + BTFLAG_U160_INDEX;
@@ -176,7 +176,7 @@ bt *createIBT(uchar ktype, int imatch, uchar btype) {
 	return bt_create(cmp, TRANS_ONE, &bts, 0);
 }
 static bt *_createUIBT(uchar ktype, int imatch, uchar pktyp, uchar bflag) {
-	if        (C_IS_I(ktype)) {
+	if ((C_IS_I(ktype))) {
 		return  C_IS_I(pktyp) ? createUUBT(imatch, bflag) :
 				(C_IS_L(pktyp) ? createULBT(imatch, bflag) :
 				(C_IS_G(pktyp) ? createULBT(imatch, bflag) :
@@ -271,7 +271,7 @@ static int abt_replace(bt *btr, ai_obj *akey, void *val) {
 	DECLARE_BT_KEY(akey, 0)
 	uchar  *nstream = createStream(btr, val, btkey, ksize, &ssize, &crs);
 	if (!nstream) return 0;
-	if NORM_BT(btr) {
+	if (NORM_BT(btr)) {
 		uchar  **ostream = (uchar **)bt_find_loc(btr, btkey);
 		destroyBTKey(btkey, med);                        /* FREED 026 */
 		uint32   osize   = getStreamMallocSize(btr, *ostream);
