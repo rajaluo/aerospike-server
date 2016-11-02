@@ -1004,6 +1004,26 @@ struct as_namespace_s {
 	cf_atomic64		n_udf_sub_lang_delete_success;
 	cf_atomic64		n_udf_sub_lang_error;
 
+	// Transaction retransmit stats.
+
+	uint64_t		n_retransmit_client_read_dup_res;
+
+	uint64_t		n_retransmit_client_write_dup_res;
+	uint64_t		n_retransmit_client_write_repl_write;
+
+	uint64_t		n_retransmit_client_delete_dup_res;
+	uint64_t		n_retransmit_client_delete_repl_write;
+
+	uint64_t		n_retransmit_client_udf_dup_res;
+	uint64_t		n_retransmit_client_udf_repl_write;
+
+	uint64_t		n_retransmit_batch_sub_dup_res;
+
+	uint64_t		n_retransmit_udf_sub_dup_res;
+	uint64_t		n_retransmit_udf_sub_repl_write;
+
+	uint64_t		n_retransmit_nsup_repl_write;
+
 	// Scan stats.
 
 	cf_atomic64		n_scan_basic_complete;

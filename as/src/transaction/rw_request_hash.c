@@ -94,6 +94,7 @@ transaction_status handle_hot_key(rw_request* rw0, as_transaction* tr);
 
 void* run_retransmit(void* arg);
 int retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata);
+void update_retransmit_stats(const rw_request* rw);
 
 void on_paxos_change(as_paxos_generation gen, as_paxos_change* change,
 		cf_node succession[], void* udata);
@@ -316,11 +317,84 @@ retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 		rw->retry_interval_ms *= 2;
 
 		send_rw_messages(rw);
+		update_retransmit_stats(rw);
 
 		pthread_mutex_unlock(&rw->lock);
 	}
 
 	return 0;
+}
+
+
+void
+update_retransmit_stats(const rw_request* rw)
+{
+	as_namespace* ns = rw->rsv.ns;
+	as_msg* m = &rw->msgp->msg;
+	bool is_dup_res = rw->repl_write_cb == NULL;
+
+	// Note - only one retransmit thread, so no need for atomic increments.
+
+	switch (rw->origin) {
+	case FROM_CLIENT: {
+			bool is_write = (m->info2 & AS_MSG_INFO2_WRITE) != 0;
+			bool is_delete = (m->info2 & AS_MSG_INFO2_DELETE) != 0;
+			bool is_udf = (rw->msg_fields & AS_MSG_FIELD_BIT_UDF_FILENAME) != 0;
+
+			if (is_dup_res) {
+				if (is_write) {
+					if (is_delete) {
+						ns->n_retransmit_client_delete_dup_res++;
+					}
+					else if (is_udf) {
+						ns->n_retransmit_client_udf_dup_res++;
+					}
+					else {
+						ns->n_retransmit_client_write_dup_res++;
+					}
+				}
+				else {
+					ns->n_retransmit_client_read_dup_res++;
+				}
+			}
+			else {
+				cf_assert(is_write, AS_RW, "read doing replica write");
+
+				if (is_delete) {
+					ns->n_retransmit_client_delete_repl_write++;
+				}
+				else if (is_udf) {
+					ns->n_retransmit_client_udf_repl_write++;
+				}
+				else {
+					ns->n_retransmit_client_write_repl_write++;
+				}
+			}
+		}
+		break;
+	case FROM_PROXY:
+		// For now we don't report proxyee stats.
+		break;
+	case FROM_BATCH:
+		// For now batch sub transactions are read-only.
+		ns->n_retransmit_batch_sub_dup_res++;
+		break;
+	case FROM_IUDF:
+		if (is_dup_res) {
+			ns->n_retransmit_udf_sub_dup_res++;
+		}
+		else {
+			ns->n_retransmit_udf_sub_repl_write++;
+		}
+		break;
+	case FROM_NSUP:
+		// nsup deletes don't duplicate resolve.
+		ns->n_retransmit_nsup_repl_write++;
+		break;
+	default:
+		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
+		break;
+	}
 }
 
 
