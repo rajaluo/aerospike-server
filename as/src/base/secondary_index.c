@@ -1294,7 +1294,7 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	if (si->flag & AS_SINDEX_FLAG_RACTIVE) {
 		info_append_string(db, "load_pct", "100");
 	} else {
-		if (pending > ns_objects || pending < 0) {
+		if (pending > ns_objects) {
 			info_append_uint64(db, "load_pct", 100);
 		} else {
 			info_append_uint64(db, "load_pct", (ns_objects == 0) ? 100 : 100 - ((100 * pending) / ns_objects));
@@ -1445,7 +1445,7 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 		else if (0 == as_info_parameter_get(params, "gc-period", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_detail(AS_INFO, "gc-period = %"PRIu64"",val);
-			if (val < 0) {
+			if ((int64_t)val < 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO,"Changing value of gc-period of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
@@ -1455,7 +1455,7 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 		else if (0 == as_info_parameter_get(params, "gc-max-units", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_detail(AS_INFO, "gc-limit = %"PRIu64"",val);
-			if (val < 0) {
+			if ((int64_t)val < 0) {
 				goto Error;
 			}
 			cf_info(AS_INFO,"Changing value of gc-max-units of ns %s sindex %s from %u to %lu",
@@ -2817,7 +2817,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			data              += startl;
 			srange->isrange    = FALSE;
 
-			if ((startl < 0) || (startl >= AS_SINDEX_MAX_STRING_KSIZE)) {
+			if (startl >= AS_SINDEX_MAX_STRING_KSIZE) {
 				cf_warning(AS_SINDEX, "Out of bound query key size %u", startl);
 				goto Cleanup;
 			}
@@ -2840,7 +2840,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			char* start_binval = (char *)data;
 			data += startl;
 
-			if ((startl <= 0) || (startl >= AS_SINDEX_MAX_GEOJSON_KSIZE)) {
+			if ((startl == 0) || (startl >= AS_SINDEX_MAX_GEOJSON_KSIZE)) {
 				cf_warning(AS_SINDEX, "Out of bound query key size %u", startl);
 				goto Cleanup;
 			}
@@ -3518,11 +3518,6 @@ as_sindex_add_asval_to_default_sindex(as_val *val, as_sindex_bin * sbin)
 	return as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)](val, sbin);
 }
 
-typedef struct as_sindex_cdt_sbin_s {
-	as_particle_type    type;
-	as_sindex_bin * sbin;
-} as_sindex_cdt_sbin;
-
 static bool as_sindex_add_listvalues_foreach(as_val * element, void * udata)
 {
 	as_sindex_bin * sbin = (as_sindex_bin *)udata;
@@ -4077,7 +4072,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, const as_bin *b, as_sindex_bin * sbin
 				char* bin_val;
 				valsz = as_bin_particle_string_ptr(b, &bin_val);
 
-				if (valsz < 0 || valsz > AS_SINDEX_MAX_STRING_KSIZE) {
+				if (valsz > AS_SINDEX_MAX_STRING_KSIZE) {
 					cf_warning( AS_SINDEX, "sindex key size out of bounds %d ", valsz);
 				}
 				else {
@@ -4390,14 +4385,12 @@ as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes)
 	}
 
 	as_namespace *ns = imd->si->ns;
-	bool g_reserved  = false;
 	bool ns_reserved = false;
 	bool si_reserved = false;
 	uint64_t val     = 0;
 
 	// Global sindex memory reservation
 	val = cf_atomic64_add(&g_config.sindex_data_memory_used, bytes);
-	g_reserved = true;
 	if (val > g_config.sindex_data_max_memory) {
 		goto FAIL;
 	}
@@ -4418,11 +4411,9 @@ as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes)
 	return true;
 
 FAIL:
+	cf_atomic64_sub(&g_config.sindex_data_memory_used, bytes);
 	if (ns_reserved) {
 		cf_atomic64_sub(&ns->sindex_data_memory_used, bytes);
-	}
-	if (g_reserved)  {
-		cf_atomic64_sub(&g_config.sindex_data_memory_used, bytes);
 	}
 	if (si_reserved) {
 		cf_atomic64_sub(&imd->si->stats.mem_used, bytes);
