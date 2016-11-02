@@ -655,6 +655,7 @@ log_line_udf_sub(as_namespace* ns)
 void
 log_line_retransmits(as_namespace* ns)
 {
+	uint64_t n_migrate_record_retransmits = ns->migrate_record_retransmits;
 	uint64_t n_client_read_dup_res = ns->n_retransmit_client_read_dup_res;
 	uint64_t n_client_write_dup_res = ns->n_retransmit_client_write_dup_res;
 	uint64_t n_client_write_repl_write = ns->n_retransmit_client_write_repl_write;
@@ -667,7 +668,8 @@ log_line_retransmits(as_namespace* ns)
 	uint64_t n_udf_sub_repl_write = ns->n_retransmit_udf_sub_repl_write;
 	uint64_t n_nsup_repl_write = ns->n_retransmit_nsup_repl_write;
 
-	if ((n_client_read_dup_res |
+	if ((n_migrate_record_retransmits |
+			n_client_read_dup_res |
 			n_client_write_dup_res | n_client_write_repl_write |
 			n_client_delete_dup_res | n_client_delete_repl_write |
 			n_client_udf_dup_res | n_client_udf_repl_write |
@@ -677,8 +679,9 @@ log_line_retransmits(as_namespace* ns)
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} retransmits: client-read %lu client-write (%lu,%lu) client-delete (%lu,%lu) client-udf (%lu,%lu) batch-sub %lu udf-sub (%lu,%lu) nsup %lu",
+	cf_info(AS_INFO, "{%s} retransmits: migration %lu client-read %lu client-write (%lu,%lu) client-delete (%lu,%lu) client-udf (%lu,%lu) batch-sub %lu udf-sub (%lu,%lu) nsup %lu",
 			ns->name,
+			n_migrate_record_retransmits,
 			n_client_read_dup_res,
 			n_client_write_dup_res, n_client_write_repl_write,
 			n_client_delete_dup_res, n_client_delete_repl_write,
