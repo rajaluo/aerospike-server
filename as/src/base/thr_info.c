@@ -1832,7 +1832,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
 	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
 
-	info_append_bool(db, "advertise-ipv6", g_config.advertise_ipv6);
+	info_append_bool(db, "advertise-ipv6", cf_socket_advertises_ipv6());
 	info_append_bool(db, "allow-inline-transactions", g_config.allow_inline_transactions);
 	info_append_int(db, "batch-threads", g_config.n_batch_threads);
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
@@ -2238,10 +2238,10 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		context_len = sizeof(context);
 		if (0 == as_info_parameter_get(params, "advertise-ipv6", context, &context_len)) {
 			if (strcmp(context, "true") == 0 || strcmp(context, "yes") == 0) {
-				g_config.advertise_ipv6 = true;
+				cf_socket_set_advertise_ipv6(true);
 			}
 			else if (strcmp(context, "false") == 0 || strcmp(context, "no") == 0) {
-				g_config.advertise_ipv6 = false;
+				cf_socket_set_advertise_ipv6(false);
 			}
 			else {
 				goto Error;
@@ -5040,10 +5040,31 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 	return(0);
 }
 
+static char *
+convert_legacy_services(const char *legacy)
+{
+	if (legacy == NULL) {
+		return NULL;
+	}
+
+	char *res = cf_strdup(legacy);
+
+	if (res == NULL) {
+		cf_crash(AS_INFO, "Out of memory");
+	}
+
+	for (size_t i = 0; res[i] != 0; ++i) {
+		if (res[i] == ';') {
+			res[i] = ',';
+		}
+	}
+
+	return res;
+}
+
 //
 // Receive a message from a remote node, jam it in my table
 //
-
 
 int
 info_msg_fn(cf_node node, msg *m, void *udata)
@@ -5095,6 +5116,8 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			if (msg_get_str(m, INFO_FIELD_SERVICES_CLEAR_STD, &info_history->services_clear_std,
 					0, MSG_GET_COPY_MALLOC) != 0 || !info_history->services_clear_std) {
 				cf_debug(AS_INFO, "No services-clear-std in message from node %" PRIx64, node);
+				info_history->services_clear_std =
+						convert_legacy_services(info_history->service_addr);
 			}
 
 			if (msg_get_str(m, INFO_FIELD_SERVICES_TLS_STD, &info_history->services_tls_std,
@@ -5105,6 +5128,8 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			if (msg_get_str(m, INFO_FIELD_SERVICES_CLEAR_ALT, &info_history->services_clear_alt,
 					0, MSG_GET_COPY_MALLOC) != 0) {
 				cf_debug(AS_INFO, "No services-clear-alt in message from node %" PRIx64, node);
+				info_history->services_clear_alt =
+						convert_legacy_services(info_history->alternate_addr);
 			}
 
 			if (msg_get_str(m, INFO_FIELD_SERVICES_TLS_ALT, &info_history->services_tls_alt,

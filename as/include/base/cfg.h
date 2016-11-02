@@ -94,7 +94,7 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
-	PAD_BOOL		advertise_ipv6;
+	// Note - advertise-ipv6 affects a cf_socket_ee.c global, so can't be here.
 	PAD_BOOL		allow_inline_transactions;
 	int				n_batch_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
@@ -113,7 +113,7 @@ typedef struct as_config_s {
 	char*			hist_track_thresholds; // comma-separated bucket (ms) values to track
 	int				n_info_threads;
 	PAD_BOOL		ldt_benchmarks;
-	// Note - log-local-time affects a global in cf_fault.c, so can't be here.
+	// Note - log-local-time affects a cf_fault.c global, so can't be here.
 	int				migrate_max_num_incoming;
 	int				migrate_rx_lifetime_ms; // for debouncing re-tansmitted migrate start messages
 	int				n_migrate_threads;

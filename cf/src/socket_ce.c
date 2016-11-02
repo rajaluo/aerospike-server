@@ -51,6 +51,18 @@ safe_strndup(const char *string, size_t length)
 	return res;
 }
 
+void
+cf_socket_set_advertise_ipv6(bool advertise)
+{
+	cf_warning(CF_SOCKET, "'advertise-ipv6' is relevant for enterprise only");
+}
+
+bool
+cf_socket_advertises_ipv6(void)
+{
+	return false;
+}
+
 int32_t
 cf_ip_addr_from_string_multi(const char *string, cf_ip_addr *addrs, uint32_t *n_addrs)
 {
@@ -152,7 +164,8 @@ cf_ip_addr_is_legacy(const cf_ip_addr* addr)
 	return true;
 }
 
-bool cf_ip_addr_legacy_only(void)
+bool
+cf_ip_addr_legacy_only(void)
 {
 	return true;
 }

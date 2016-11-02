@@ -779,7 +779,9 @@ proxy_retransmit_reduce_fn(void* key, void* data, void* udata)
 
 		switch (pr->origin) {
 		case FROM_CLIENT:
-			as_end_of_transaction_force_close(pr->from.proto_fd_h);
+			// TODO - when it becomes important enough, find a way to echo trid.
+			as_msg_send_reply(pr->from.proto_fd_h, AS_PROTO_RESULT_FAIL_TIMEOUT,
+					0, 0, NULL, NULL, 0, NULL, 0, NULL);
 			client_proxy_update_stats(pr->ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 			break;
 		case FROM_BATCH:

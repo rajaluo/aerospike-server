@@ -482,7 +482,7 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 void
 as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
 {
-	thr_demarshal_resume(proto_fd_h);
+	thr_demarshal_rearm(proto_fd_h);
 
 	if (force_close) {
 		cf_socket_shutdown(&proto_fd_h->sock);

@@ -99,8 +99,7 @@ COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 
 #define MIG_MSG_SCRATCH_SIZE 128
 
-#define MIGRATE_RETRANSMIT_MS (g_config.transaction_retry_ms)
-#define MIGRATE_RETRANSMIT_STARTDONE_MS (g_config.transaction_retry_ms)
+#define MIGRATE_RETRANSMIT_STARTDONE_MS 1000 // for now, not configurable
 #define MAX_BYTES_EMIGRATING (16 * 1024 * 1024)
 
 typedef struct pickled_record_s {
@@ -881,7 +880,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 		usleep(1000);
 
 		// Temporary paranoia to inform us old nodes aren't acking properly.
-		if (++waits % 5000 == 0) {
+		if (++waits % (ns->migrate_retransmit_ms * 4) == 0) {
 			cf_warning(AS_MIGRATE, "missing acks from node %lx", emig->dest);
 		}
 	}
@@ -923,9 +922,10 @@ int
 emigration_reinsert_reduce_fn(void *key, void *data, void *udata)
 {
 	emigration_reinsert_ctrl *ri_ctrl = (emigration_reinsert_ctrl *)data;
+	as_namespace *ns = ri_ctrl->emig->rsv.ns;
 	uint64_t now = (uint64_t)udata;
 
-	if (ri_ctrl->xmit_ms + MIGRATE_RETRANSMIT_MS < now) {
+	if (ri_ctrl->xmit_ms + ns->migrate_retransmit_ms < now) {
 		msg_incr_ref(ri_ctrl->m);
 
 		if (as_fabric_send(ri_ctrl->emig->dest, ri_ctrl->m,
@@ -935,7 +935,7 @@ emigration_reinsert_reduce_fn(void *key, void *data, void *udata)
 		}
 
 		ri_ctrl->xmit_ms = now;
-		cf_atomic_int_incr(&ri_ctrl->emig->rsv.ns->migrate_record_retransmits);
+		cf_atomic_int_incr(&ns->migrate_record_retransmits);
 	}
 
 	return 0;
@@ -979,7 +979,7 @@ emigration_send_start(emigration *emig)
 		uint64_t now = cf_getms();
 
 		if (start_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
-			cf_rc_reserve(m);
+			msg_incr_ref(m);
 
 			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 					AS_FABRIC_SUCCESS) {
@@ -1047,7 +1047,7 @@ emigration_send_done(emigration *emig)
 		uint64_t now = cf_getms();
 
 		if (done_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
-			cf_rc_reserve(m);
+			msg_incr_ref(m);
 
 			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
 					AS_FABRIC_SUCCESS) {

@@ -158,6 +158,9 @@ typedef struct cf_mserv_cfg_s {
 	cf_msock_cfg cfgs[CF_SOCK_CFG_MAX];
 } cf_mserv_cfg;
 
+void cf_socket_set_advertise_ipv6(bool advertise);
+bool cf_socket_advertises_ipv6(void);
+
 CF_MUST_CHECK int32_t cf_ip_addr_from_string(const char *string, cf_ip_addr *addr);
 CF_MUST_CHECK int32_t cf_ip_addr_from_string_multi(const char *string, cf_ip_addr *addrs, uint32_t *n_addrs);
 CF_MUST_CHECK int32_t cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size);

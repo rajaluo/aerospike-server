@@ -589,7 +589,8 @@ udf_timeout_cb(rw_request* rw)
 
 	switch (rw->origin) {
 	case FROM_CLIENT:
-		as_end_of_transaction_force_close(rw->from.proto_fd_h);
+		as_msg_send_reply(rw->from.proto_fd_h, AS_PROTO_RESULT_FAIL_TIMEOUT, 0,
+				0, NULL, NULL, 0, NULL, rw_request_trid(rw), NULL);
 		// Timeouts aren't included in histograms.
 		client_udf_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT);
 		break;
@@ -1021,6 +1022,14 @@ udf_post_processing(udf_record* urecord, udf_optype urecord_op, uint16_t set_id)
 
 		if (rec_props_data_size > 0) {
 			as_storage_record_set_rec_props(rd, rec_props_data);
+		}
+
+		as_msg* m = &tr->msgp->msg;
+
+		// Convert message TTL special value if appropriate.
+		if (m->record_ttl == TTL_DONT_UPDATE &&
+				(urecord->flag & UDF_RECORD_FLAG_PREEXISTS) == 0) {
+			m->record_ttl = TTL_NAMESPACE_DEFAULT;
 		}
 
 		write_udf_post_processing(tr, rd, &urecord->pickled_buf,

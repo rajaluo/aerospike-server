@@ -492,6 +492,7 @@ typedef enum {
 	CASE_NAMESPACE_LDT_PAGE_SIZE,
 	CASE_NAMESPACE_MAX_TTL,
 	CASE_NAMESPACE_MIGRATE_ORDER,
+	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
@@ -922,7 +923,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "ldt-page-size",					CASE_NAMESPACE_LDT_PAGE_SIZE },
 		{ "max-ttl",						CASE_NAMESPACE_MAX_TTL },
 		{ "migrate-order",					CASE_NAMESPACE_MIGRATE_ORDER },
-		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP},
+		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
+		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
@@ -1949,7 +1951,7 @@ as_config_init(const char* config_file)
 				c->n_proto_fd_max = cfg_int_no_checks(&line);
 				break;
 			case CASE_SERVICE_ADVERTISE_IPV6:
-				c->advertise_ipv6 = cfg_bool(&line);
+				cf_socket_set_advertise_ipv6(cfg_bool(&line));
 				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				c->allow_inline_transactions = cfg_bool(&line);
@@ -2677,6 +2679,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_MIGRATE_ORDER:
 				ns->migrate_order = cfg_u32(&line, 1, 10);
+				break;
+			case CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS:
+				ns->migrate_retransmit_ms = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_MIGRATE_SLEEP:
 				ns->migrate_sleep = cfg_u32_no_checks(&line);
@@ -3891,7 +3896,7 @@ cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access)
 		}
 
 		for (uint32_t k = 0; k < n_resol; ++k) {
-			if (cf_ip_addr_is_any(&resol[k]) || cf_ip_addr_is_local(&resol[k])) {
+			if (cf_ip_addr_is_any(&resol[k])) {
 				cf_crash_nostack(AS_CFG, "Invalid access address: %s", addrs->addrs[i]);
 			}
 		}
