@@ -4669,6 +4669,10 @@ info_interfaces_fn(void *unused)
 			chg_any = cf_inter_detect_changes(addrs, &n_addrs, CF_SOCK_CFG_MAX);
 		}
 
+		if (n_legacy + n_addrs == 0) {
+			cf_warning(AS_INFO, "No network interface addresses detected for client access");
+		}
+
 		bool chg_name = detect_name_change(&tls_name);
 
 		if (chg_flag || chg_legacy || chg_any || chg_name) {
