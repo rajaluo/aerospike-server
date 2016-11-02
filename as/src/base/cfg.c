@@ -151,7 +151,7 @@ cfg_set_defaults()
 	c->transaction_max_ns = 1000 * 1000 * 1000; // 1 second
 	c->transaction_pending_limit = 20;
 	c->transaction_repeatable_read = false;
-	c->transaction_retry_ms = 1000;
+	c->transaction_retry_ms = 1000 + 2; // 1 second + epsilon, so default timeout happens first
 	as_sindex_gconfig_default(c);
 	as_query_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
