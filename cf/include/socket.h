@@ -71,9 +71,6 @@
 	_tmp; \
 })
 
-#if !defined USE_IPV6
-typedef struct in_addr cf_ip_addr;
-#else
 typedef struct cf_ip_addr_s {
 	sa_family_t family;
 
@@ -82,7 +79,6 @@ typedef struct cf_ip_addr_s {
 		struct in6_addr v6;
 	};
 } cf_ip_addr;
-#endif
 
 typedef uint16_t cf_ip_port;
 

@@ -139,7 +139,7 @@ cf_ip_addr_from_string_multi(const char *string, cf_ip_addr *addrs, uint32_t *n_
 			}
 
 			struct sockaddr_in *sai = (struct sockaddr_in *)walker->ai_addr;
-			addrs[i] = sai->sin_addr;
+			addrs[i].v4 = sai->sin_addr;
 			++i;
 		}
 	}
@@ -178,7 +178,7 @@ cf_ip_addr_legacy_only(void)
 int32_t
 cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size)
 {
-	if (inet_ntop(AF_INET, &addr->s_addr, string, size) == NULL) {
+	if (inet_ntop(AF_INET, &addr->v4, string, size) == NULL) {
 		cf_warning(CF_SOCKET, "Output buffer overflow");
 		return -1;
 	}
@@ -187,69 +187,69 @@ cf_ip_addr_to_string(const cf_ip_addr *addr, char *string, size_t size)
 }
 
 int32_t
-cf_ip_addr_from_binary(const uint8_t* binary, size_t size, cf_ip_addr* addr)
+cf_ip_addr_from_binary(const uint8_t *binary, size_t size, cf_ip_addr *addr)
 {
 	if (size != 4) {
 		cf_debug(CF_SOCKET, "Input buffer size incorrect.");
 		return -1;
 	}
 
-	memcpy(&addr->s_addr, binary, 4);
+	memcpy(&addr->v4, binary, 4);
 	return 4;
 }
 
 int32_t
-cf_ip_addr_to_binary(const cf_ip_addr* addr, uint8_t* binary, size_t size)
+cf_ip_addr_to_binary(const cf_ip_addr *addr, uint8_t *binary, size_t size)
 {
 	if (size < 4) {
 		cf_warning(CF_SOCKET, "Output buffer overflow");
 		return -1;
 	}
 
-	memcpy(binary, &addr->s_addr, 4);
+	memcpy(binary, &addr->v4, 4);
 	return 4;
 }
 
 void
 cf_ip_addr_to_rack_aware_id(const cf_ip_addr *addr, uint32_t *id)
 {
-	*id = ntohl(addr->s_addr);
+	*id = ntohl(addr->v4.s_addr);
 }
 
 int32_t
 cf_ip_addr_compare(const cf_ip_addr *lhs, const cf_ip_addr *rhs)
 {
-	return memcmp(&lhs->s_addr, &rhs->s_addr, 4);
+	return memcmp(&lhs->v4, &rhs->v4, 4);
 }
 
 void
 cf_ip_addr_copy(const cf_ip_addr *from, cf_ip_addr *to)
 {
-	to->s_addr = from->s_addr;
+	to->v4 = from->v4;
 }
 
 void
 cf_ip_addr_set_local(cf_ip_addr *addr)
 {
-	addr->s_addr = htonl(0x7f000001);
+	addr->v4.s_addr = htonl(0x7f000001);
 }
 
 bool
 cf_ip_addr_is_local(const cf_ip_addr *addr)
 {
-	return (ntohl(addr->s_addr) & 0xff000000) == 0x7f000000;
+	return (ntohl(addr->v4.s_addr) & 0xff000000) == 0x7f000000;
 }
 
 void
 cf_ip_addr_set_any(cf_ip_addr *addr)
 {
-	addr->s_addr = 0;
+	addr->v4.s_addr = 0;
 }
 
 bool
 cf_ip_addr_is_any(const cf_ip_addr *addr)
 {
-	return addr->s_addr == 0;
+	return addr->v4.s_addr == 0;
 }
 
 int32_t
@@ -322,7 +322,7 @@ cf_sock_addr_from_native(const struct sockaddr *native, cf_sock_addr *addr)
 	}
 
 	struct sockaddr_in *sai = (struct sockaddr_in *)native;
-	addr->addr = sai->sin_addr;
+	addr->addr.v4 = sai->sin_addr;
 	addr->port = ntohs(sai->sin_port);
 }
 
@@ -332,7 +332,7 @@ cf_sock_addr_to_native(const cf_sock_addr *addr, struct sockaddr *native)
 	struct sockaddr_in *sai = (struct sockaddr_in *)native;
 	memset(sai, 0, sizeof(struct sockaddr_in));
 	sai->sin_family = AF_INET;
-	sai->sin_addr = addr->addr;
+	sai->sin_addr = addr->addr.v4;
 	sai->sin_port = htons(addr->port);
 }
 
@@ -355,7 +355,7 @@ cf_socket_mcast_set_inter(cf_socket *sock, const cf_ip_addr *iaddr)
 {
 	struct ip_mreqn mr;
 	memset(&mr, 0, sizeof(mr));
-	mr.imr_address = *iaddr;
+	mr.imr_address = iaddr->v4;
 
 	if (setsockopt(sock->fd, IPPROTO_IP, IP_MULTICAST_IF, &mr, sizeof(mr)) < 0) {
 		cf_warning(CF_SOCKET, "setsockopt(IP_MULTICAST_IF) failed on FD %d: %d (%s)",
@@ -385,10 +385,10 @@ cf_socket_mcast_join_group(cf_socket *sock, const cf_ip_addr *iaddr, const cf_ip
 	memset(&mr, 0, sizeof(mr));
 
 	if (!cf_ip_addr_is_any(iaddr)) {
-		mr.imr_address = *iaddr;
+		mr.imr_address = iaddr->v4;
 	}
 
-	mr.imr_multiaddr = *gaddr;
+	mr.imr_multiaddr = gaddr->v4;
 
 	if (setsockopt(sock->fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof(mr)) < 0) {
 		cf_warning(CF_SOCKET, "setsockopt(IP_ADD_MEMBERSHIP) failed on FD %d: %d (%s)",
@@ -436,7 +436,7 @@ cf_socket_parse_netlink(bool allow_ipv6, uint32_t family, uint32_t flags,
 		return -1;
 	}
 
-	memcpy(&addr->s_addr, data, 4);
+	memcpy(&addr->v4, data, 4);
 	return 0;
 }
 
