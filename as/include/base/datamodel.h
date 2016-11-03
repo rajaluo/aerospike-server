@@ -835,6 +835,7 @@ struct as_namespace_s {
 	uint32_t		ldt_page_size;
 	uint64_t		max_ttl;
 	uint32_t		migrate_order;
+	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
 	cf_atomic32		obj_size_hist_max; // TODO - doesn't need to be atomic, really.
 	as_policy_consistency_level read_consistency_level;
@@ -1002,6 +1003,26 @@ struct as_namespace_s {
 	cf_atomic64		n_udf_sub_lang_write_success;
 	cf_atomic64		n_udf_sub_lang_delete_success;
 	cf_atomic64		n_udf_sub_lang_error;
+
+	// Transaction retransmit stats.
+
+	uint64_t		n_retransmit_client_read_dup_res;
+
+	uint64_t		n_retransmit_client_write_dup_res;
+	uint64_t		n_retransmit_client_write_repl_write;
+
+	uint64_t		n_retransmit_client_delete_dup_res;
+	uint64_t		n_retransmit_client_delete_repl_write;
+
+	uint64_t		n_retransmit_client_udf_dup_res;
+	uint64_t		n_retransmit_client_udf_repl_write;
+
+	uint64_t		n_retransmit_batch_sub_dup_res;
+
+	uint64_t		n_retransmit_udf_sub_dup_res;
+	uint64_t		n_retransmit_udf_sub_repl_write;
+
+	uint64_t		n_retransmit_nsup_repl_write;
 
 	// Scan stats.
 

@@ -456,8 +456,10 @@ write_timeout_cb(rw_request* rw)
 
 	switch (rw->origin) {
 	case FROM_CLIENT:
-		as_end_of_transaction_force_close(rw->from.proto_fd_h);
+		as_msg_send_reply(rw->from.proto_fd_h, AS_PROTO_RESULT_FAIL_TIMEOUT, 0,
+				0, NULL, NULL, 0, NULL, rw_request_trid(rw), NULL);
 		// Timeouts aren't included in histograms.
+		// Note - rw->msgp can be null if it's a ship-op.
 		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT,
 				rw->msgp ? as_msg_is_xdr(&rw->msgp->msg) : false);
 		break;
@@ -639,6 +641,11 @@ write_master(rw_request* rw, as_transaction* tr)
 
 	if (rec_props_data_size > 0) {
 		as_storage_record_set_rec_props(&rd, rec_props_data);
+	}
+
+	// Convert message TTL special value if appropriate.
+	if (record_created && m->record_ttl == TTL_DONT_UPDATE) {
+		m->record_ttl = TTL_NAMESPACE_DEFAULT;
 	}
 
 	//------------------------------------------------------

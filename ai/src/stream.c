@@ -489,26 +489,26 @@ char *createBTKey(ai_obj *akey, bool *med, uint32 *ksize, bt *btr, btk_t *btk) {
 	*med   = 0;
 	*ksize = VOIDSIZE;
 	//printf("createBTKey: btr: %p ", btr); DEBUG_BT_TYPE(printf, btr);
-	if      INODE_I(btr) return (char *) (long) akey->i;
-	else if INODE_L(btr) return (char *)        akey->l;
-	else if INODE_X(btr) return (char *)       &akey->x;// 2 big -> pass ref
-	else if INODE_Y(btr) return (char *)       &akey->y;// 2 big -> pass ref
-	else if UU     (btr) return (char *)((long)akey->i * UINT_MAX);
-	else if UL     (btr) OBT_CR8_BTK(btk->UL, i)
-	else if UX     (btr) OBT_CR8_BTK(btk->UX, i)
-	else if UY     (btr) OBT_CR8_BTK(btk->UY, i) //TODO too many IF's
-	else if LU     (btr) OBT_CR8_BTK(btk->LU, l)
-	else if LL     (btr) OBT_CR8_BTK(btk->LL, l)
-	else if LX     (btr) OBT_CR8_BTK(btk->LX, l)
-	else if LY     (btr) OBT_CR8_BTK(btk->LY, l)
-	else if XU     (btr) OBT_CR8_BTK(btk->XU, x)
-	else if XL     (btr) OBT_CR8_BTK(btk->XL, x)
-	else if XX     (btr) OBT_CR8_BTK(btk->XX, x)
-	else if XY     (btr) OBT_CR8_BTK(btk->XY, x)
-	else if YU     (btr) OBT_CR8_BTK(btk->YU, y)
-	else if YL     (btr) OBT_CR8_BTK(btk->YL, y)
-	else if YX     (btr) OBT_CR8_BTK(btk->YX, y)
-	else if YY     (btr) OBT_CR8_BTK(btk->YY, y)
+	if (INODE_I(btr)) { return (char *) (long) akey->i; }
+	else if (INODE_L(btr)) { return (char *)        akey->l; }
+	else if (INODE_X(btr)) { return (char *)       &akey->x; }// 2 big -> pass ref
+	else if (INODE_Y(btr)) { return (char *)       &akey->y; }// 2 big -> pass ref
+	else if (UU(btr)) { return (char *)((long)akey->i * UINT_MAX); }
+	else if (UL(btr)) { OBT_CR8_BTK(btk->UL, i) }
+	else if (UX(btr)) { OBT_CR8_BTK(btk->UX, i) }
+	else if (UY(btr)) { OBT_CR8_BTK(btk->UY, i) } //TODO too many IF's
+	else if (LU(btr)) { OBT_CR8_BTK(btk->LU, l) }
+	else if (LL(btr)) { OBT_CR8_BTK(btk->LL, l) }
+	else if (LX(btr)) { OBT_CR8_BTK(btk->LX, l) }
+	else if (LY(btr)) { OBT_CR8_BTK(btk->LY, l) }
+	else if (XU(btr)) { OBT_CR8_BTK(btk->XU, x) }
+	else if (XL(btr)) { OBT_CR8_BTK(btk->XL, x) }
+	else if (XX(btr)) { OBT_CR8_BTK(btk->XX, x) }
+	else if (XY(btr)) { OBT_CR8_BTK(btk->XY, x) }
+	else if (YU(btr)) { OBT_CR8_BTK(btk->YU, y) }
+	else if (YL(btr)) { OBT_CR8_BTK(btk->YL, y) }
+	else if (YX(btr)) { OBT_CR8_BTK(btk->YX, y) }
+	else if (YY(btr)) { OBT_CR8_BTK(btk->YY, y) }
 	
 int     ktype = btr->s.ktype;
 	uchar  *btkey = btk->btkeybuffer;
@@ -570,18 +570,18 @@ static uint32 skipToVal(uchar **stream, uchar ktype) { //printf("skipToVal\n");
   DEBUG_BT_TYPE(printf, btr);
 
 uchar *parseStream(uchar *stream, bt *btr) {               //DEBUG_PARSE_STREAM
-	if     (!stream || INODE(btr)) return NULL; //TODO too many IF's
-	else if UU      (btr)          return (uchar *)((long)stream % UINT_MAX);
-	else if UP      (btr)          return (uchar *)      (*(ulk *)(stream)).val;
-	else if LUP     (btr)          return (uchar *)(long)(*(luk *)(stream)).val;
-	else if LLP     (btr)          return (uchar *)      (*(llk *)(stream)).val;
-	else if XUP     (btr)          return (uchar *)(long)(*(xuk *)(stream)).val;
-	else if XLP     (btr)          return (uchar *)      (*(xlk *)(stream)).val;
+	if (!stream || INODE(btr)) return NULL; //TODO too many IF's
+	else if (UU(btr)) { return (uchar *)((long)stream % UINT_MAX); }
+	else if (UP(btr)) { return (uchar *)      (*(ulk *)(stream)).val; }
+	else if (LUP(btr)) { return (uchar *)(long)(*(luk *)(stream)).val; }
+	else if (LLP(btr)) { return (uchar *)      (*(llk *)(stream)).val; }
+	else if (XUP(btr)) { return (uchar *)(long)(*(xuk *)(stream)).val; }
+	else if (XLP(btr)) { return (uchar *)      (*(xlk *)(stream)).val; }
 	//TODO should XXP use xLk
-	else if XXP     (btr)          return (uchar *)(long)(*(xxk *)(stream)).val;
-	else if YLP     (btr)          return (uchar *)      (*(ylk *)(stream)).val;
-	else if YYP     (btr)          return (uchar *)(long)(*(ylk *)(stream)).val;
-	else if OTHER_BT(btr)          return stream;
+	else if (XXP(btr)) { return (uchar *)(long)(*(xxk *)(stream)).val; }
+	else if (YLP(btr)) { return (uchar *)      (*(ylk *)(stream)).val; }
+	else if (YYP(btr)) { return (uchar *)(long)(*(ylk *)(stream)).val; }
+	else if (OTHER_BT(btr)) { return stream; }
 	skipToVal(&stream, btr->s.ktype);
 	if      (btr->s.btype == BTREE_TABLE)   return stream;
 	else if (btr->s.btype == BTREE_INODE)   return NULL;
@@ -594,36 +594,36 @@ void convertStream2Key(uchar *stream, ai_obj *key, bt *btr) {
 	//printf("convertStream2Key\n"); DEBUG_BT_TYPE(printf, btr);
 	init_ai_obj(key);
 	key->empty = 0;
-	if        INODE_I(btr) {
+	if (INODE_I(btr)) {
 		key->type = key->enc = COL_TYPE_INT;
 		key->i    = INTVOID stream;
-	} else if INODE_L(btr) {
+	} else if (INODE_L(btr)) {
 		key->type = key->enc = COL_TYPE_LONG;
 		key->l    = (ulong)stream;
-	} else if INODE_X(btr) {
+	} else if (INODE_X(btr)) {
 		key->type = key->enc = COL_TYPE_U128;
 		memcpy(&key->x, stream, 16);
-	} else if INODE_Y(btr) {
+	} else if (INODE_Y(btr)) {
 		key->type = key->enc = COL_TYPE_U160;
 		memcpy(&key->y, stream, 20);
-	} else if UU     (btr) {
+	} else if (UU(btr)) {
 		key->type = key->enc = COL_TYPE_INT;
 		key->i    = (uint32)((long)stream / UINT_MAX);
-	} else if UL     (btr) OBT_CONV2STREAM(COL_TYPE_INT,  i, ulk)
-		else if UX     (btr) OBT_CONV2STREAM(COL_TYPE_INT,  i, uxk)
-		else if UY     (btr) OBT_CONV2STREAM(COL_TYPE_INT,  i, uyk)//TODO
-		else if LU     (btr) OBT_CONV2STREAM(COL_TYPE_LONG, l, luk)//too many IF's
-		else if LL     (btr) OBT_CONV2STREAM(COL_TYPE_LONG, l, llk)
-		else if LX     (btr) OBT_CONV2STREAM(COL_TYPE_LONG, l, lxk)
-		else if LY     (btr) OBT_CONV2STREAM(COL_TYPE_LONG, l, lyk)
-		else if XU     (btr) OBT_CONV2STREAM(COL_TYPE_U128, x, xuk)
-		else if XL     (btr) OBT_CONV2STREAM(COL_TYPE_U128, x, xlk)
-		else if XX     (btr) OBT_CONV2STREAM(COL_TYPE_U128, x, xxk)
-		else if XY     (btr) OBT_CONV2STREAM(COL_TYPE_U128, x, xyk)
-		else if YU     (btr) OBT_CONV2STREAM(COL_TYPE_U160, y, yuk)
-		else if YL     (btr) OBT_CONV2STREAM(COL_TYPE_U160, y, ylk)
-		else if YX     (btr) OBT_CONV2STREAM(COL_TYPE_U160, y, yxk)
-		else if YY     (btr) OBT_CONV2STREAM(COL_TYPE_U160, y, yyk)
+	} else if (UL(btr)) { OBT_CONV2STREAM(COL_TYPE_INT,  i, ulk) }
+		else if (UX(btr)) { OBT_CONV2STREAM(COL_TYPE_INT,  i, uxk) }
+		else if (UY(btr)) { OBT_CONV2STREAM(COL_TYPE_INT,  i, uyk) }//TODO
+		else if (LU(btr)) { OBT_CONV2STREAM(COL_TYPE_LONG, l, luk) }//too many IF's
+		else if (LL(btr)) { OBT_CONV2STREAM(COL_TYPE_LONG, l, llk) }
+		else if (LX(btr)) { OBT_CONV2STREAM(COL_TYPE_LONG, l, lxk) }
+		else if (LY(btr)) { OBT_CONV2STREAM(COL_TYPE_LONG, l, lyk) }
+		else if (XU(btr)) { OBT_CONV2STREAM(COL_TYPE_U128, x, xuk) }
+		else if (XL(btr)) { OBT_CONV2STREAM(COL_TYPE_U128, x, xlk) }
+		else if (XX(btr)) { OBT_CONV2STREAM(COL_TYPE_U128, x, xxk) }
+		else if (XY(btr)) { OBT_CONV2STREAM(COL_TYPE_U128, x, xyk) }
+		else if (YU(btr)) { OBT_CONV2STREAM(COL_TYPE_U160, y, yuk) }
+		else if (YL(btr)) { OBT_CONV2STREAM(COL_TYPE_U160, y, ylk) }
+		else if (YX(btr)) { OBT_CONV2STREAM(COL_TYPE_U160, y, yxk) }
+		else if (YY(btr)) { OBT_CONV2STREAM(COL_TYPE_U160, y, yyk) }
 		else { /* NORM_BT */
 			int ktype = btr->s.ktype;
 			if        (C_IS_I(ktype)) {
@@ -759,27 +759,27 @@ uint32 getStreamMallocSize(bt *btr, uchar *stream) {
 	return ((size + 7) / 8) * 8; /* round to 8-byte boundary */
 }
 uint32 getStreamRowSize(bt *btr, uchar *stream) { /* for rdbSaveAllRows() */
-	if NORM_BT(btr) {
+	if (NORM_BT(btr)) {
 		return skipToVal(&stream, btr->s.ktype) + getStreamVlen(btr, stream);
 	} else {
-		if      INODE(btr) return 0;
+		if (INODE(btr)) { return 0; }
 		//TODO, this can be an array (too many IF's)
-		else if UU   (btr) return UU_SIZE;
-		else if UL   (btr) return UL_SIZE;
-		else if UX   (btr) return UX_SIZE;
-		else if UY   (btr) return UY_SIZE;
-		else if LU   (btr) return LU_SIZE;
-		else if LL   (btr) return LL_SIZE;
-		else if LX   (btr) return LX_SIZE;
-		else if LY   (btr) return LY_SIZE;
-		else if XU   (btr) return XU_SIZE;
-		else if XL   (btr) return XL_SIZE;
-		else if XX   (btr) return XX_SIZE;
-		else if XY   (btr) return XY_SIZE;
-		else if YU   (btr) return YU_SIZE;
-		else if YL   (btr) return YL_SIZE;
-		else if YX   (btr) return YX_SIZE;
-		else if YY   (btr) return YY_SIZE;
+		else if (UU(btr)) { return UU_SIZE; }
+		else if (UL(btr)) { return UL_SIZE; }
+		else if (UX(btr)) { return UX_SIZE; }
+		else if (UY(btr)) { return UY_SIZE; }
+		else if (LU(btr)) { return LU_SIZE; }
+		else if (LL(btr)) { return LL_SIZE; }
+		else if (LX(btr)) { return LX_SIZE; }
+		else if (LY(btr)) { return LY_SIZE; }
+		else if (XU(btr)) { return XU_SIZE; }
+		else if (XL(btr)) { return XL_SIZE; }
+		else if (XX(btr)) { return XX_SIZE; }
+		else if (XY(btr)) { return XY_SIZE; }
+		else if (YU(btr)) { return YU_SIZE; }
+		else if (YL(btr)) { return YL_SIZE; }
+		else if (YX(btr)) { return YX_SIZE; }
+		else if (YY(btr)) { return YY_SIZE; }
 		assert(!"getStreamRowSize ERROR");
 		return -1;
 	}
@@ -797,48 +797,47 @@ uint32 getStreamRowSize(bt *btr, uchar *stream) { /* for rdbSaveAllRows() */
 static void *OBT_createStream(bt *btr, void *val, char *btkey, crs_t *crs) {
     //printf("OBT_createStream\n"); DEBUG_BT_TYPE(printf, btr);
     if (OBYI(btr) || MCI_UNIQ(btr)) {
-        if      UU(btr) return (void *)((long)btkey + (long)val); /* merge */
-        else if UL(btr) XOBT_CR8_STRM(ulk, crs->UL_StreamPtr)
-        else if UX(btr) XOBT_CR8_STRM(uxk, crs->UX_StreamPtr)
-        else if UY(btr) XOBT_CR8_STRM(uyk, crs->UY_StreamPtr) //TODO
-        else if LU(btr) XOBT_CR8_STRM(luk, crs->LU_StreamPtr) //  too many IF's
-        else if LL(btr) XOBT_CR8_STRM(llk, crs->LL_StreamPtr)
-        else if LX(btr) XOBT_CR8_STRM(lxk, crs->LX_StreamPtr)
-        else if LY(btr) XOBT_CR8_STRM(lyk, crs->LY_StreamPtr)
-        else if XU(btr) XOBT_CR8_STRM(xuk, crs->XU_StreamPtr)
-        else if XL(btr) XOBT_CR8_STRM(xlk, crs->XL_StreamPtr)
-        else if XX(btr) XOBT_CR8_STRM(xxk, crs->XX_StreamPtr)
-        else if XY(btr) XOBT_CR8_STRM(xyk, crs->XY_StreamPtr)
-        else if YU(btr) XOBT_CR8_STRM(yuk, crs->YU_StreamPtr)
-        else if YL(btr) XOBT_CR8_STRM(ylk, crs->YL_StreamPtr)
-        else if YX(btr) XOBT_CR8_STRM(yxk, crs->YX_StreamPtr)
-        else if YY(btr) XOBT_CR8_STRM(yyk, crs->YY_StreamPtr)
+        if (UU(btr)) { return (void *)((long)btkey + (long)val); } /* merge */
+        else if (UL(btr)) { XOBT_CR8_STRM(ulk, crs->UL_StreamPtr) }
+        else if (UX(btr)) { XOBT_CR8_STRM(uxk, crs->UX_StreamPtr) }
+        else if (UY(btr)) { XOBT_CR8_STRM(uyk, crs->UY_StreamPtr) } //TODO
+        else if (LU(btr)) { XOBT_CR8_STRM(luk, crs->LU_StreamPtr) } //  too many IF's
+        else if (LL(btr)) { XOBT_CR8_STRM(llk, crs->LL_StreamPtr) }
+        else if (LX(btr)) { XOBT_CR8_STRM(lxk, crs->LX_StreamPtr) }
+        else if (LY(btr)) { XOBT_CR8_STRM(lyk, crs->LY_StreamPtr) }
+        else if (XU(btr)) { XOBT_CR8_STRM(xuk, crs->XU_StreamPtr) }
+        else if (XL(btr)) { XOBT_CR8_STRM(xlk, crs->XL_StreamPtr) }
+        else if (XX(btr)) { XOBT_CR8_STRM(xxk, crs->XX_StreamPtr) }
+        else if (XY(btr)) { XOBT_CR8_STRM(xyk, crs->XY_StreamPtr) }
+        else if (YU(btr)) { XOBT_CR8_STRM(yuk, crs->YU_StreamPtr) }
+        else if (YL(btr)) { XOBT_CR8_STRM(ylk, crs->YL_StreamPtr) }
+        else if (YX(btr)) { XOBT_CR8_STRM(yxk, crs->YX_StreamPtr) }
+        else if (YY(btr)) { XOBT_CR8_STRM(yyk, crs->YY_StreamPtr) }
         assert(!"OBT_createStream OBYI error"); return NULL;
     }
-    if       UP(btr) OBT_CR8_STRM (ulk, crs->UL_StreamPtr, ulong)
-	else if LUP(btr) OBT_CR8_STRM (luk, crs->LU_StreamPtr, /* Actually: uint32 */ ulong)
-    else if LLP(btr) OBT_CR8_STRM (llk, crs->LL_StreamPtr, ulong)
-
-    else if UU(btr) return (void *)((long)btkey + (long)val); /* merge */
-    else if UL(btr) XOBT_CR8_STRM(ulk, crs->UL_StreamPtr)
-    else if UX(btr) XOBT_CR8_STRM(uxk, crs->UX_StreamPtr)
-    else if UY(btr) XOBT_CR8_STRM(uyk, crs->UY_StreamPtr) //TODO too many IF's
-    else if LU(btr) XOBT_CR8_STRM(luk, crs->LU_StreamPtr)
-    else if LL(btr) XOBT_CR8_STRM(llk, crs->LL_StreamPtr)
-    else if LX(btr) XOBT_CR8_STRM(lxk, crs->LX_StreamPtr)
-    else if LY(btr) XOBT_CR8_STRM(lyk, crs->LY_StreamPtr)
-    else if XU(btr) XOBT_CR8_STRM(xuk, crs->XU_StreamPtr)
-    else if XX(btr) XOBT_CR8_STRM(xxk, crs->XX_StreamPtr)
-    else if XY(btr) XOBT_CR8_STRM(xyk, crs->XY_StreamPtr)
-    else if YU(btr) XOBT_CR8_STRM(yuk, crs->YU_StreamPtr)
-    else if YX(btr) XOBT_CR8_STRM(yxk, crs->YX_StreamPtr)
-    else if YY(btr) XOBT_CR8_STRM(yyk, crs->YY_StreamPtr)
-    else if XL(btr) { //NOTE: XL is special it can be XXP()
+    if (UP(btr)) { OBT_CR8_STRM (ulk, crs->UL_StreamPtr, ulong) }
+	else if (LUP(btr)) { OBT_CR8_STRM (luk, crs->LU_StreamPtr, /* Actually: uint32 */ ulong) }
+    else if (LLP(btr)) { OBT_CR8_STRM (llk, crs->LL_StreamPtr, ulong) }
+    else if (UU(btr)) { return (void *)((long)btkey + (long)val); } /* merge */
+    else if (UL(btr)) { XOBT_CR8_STRM(ulk, crs->UL_StreamPtr) }
+    else if (UX(btr)) { XOBT_CR8_STRM(uxk, crs->UX_StreamPtr) }
+    else if (UY(btr)) { XOBT_CR8_STRM(uyk, crs->UY_StreamPtr) } //TODO too many IF's
+    else if (LU(btr)) { XOBT_CR8_STRM(luk, crs->LU_StreamPtr) }
+    else if (LL(btr)) { XOBT_CR8_STRM(llk, crs->LL_StreamPtr) }
+    else if (LX(btr)) { XOBT_CR8_STRM(lxk, crs->LX_StreamPtr) }
+    else if (LY(btr)) { XOBT_CR8_STRM(lyk, crs->LY_StreamPtr) }
+    else if (XU(btr)) { XOBT_CR8_STRM(xuk, crs->XU_StreamPtr) }
+    else if (XX(btr)) { XOBT_CR8_STRM(xxk, crs->XX_StreamPtr) }
+    else if (XY(btr)) { XOBT_CR8_STRM(xyk, crs->XY_StreamPtr) }
+    else if (YU(btr)) { XOBT_CR8_STRM(yuk, crs->YU_StreamPtr) }
+    else if (YX(btr)) { XOBT_CR8_STRM(yxk, crs->YX_StreamPtr) }
+    else if (YY(btr)) { XOBT_CR8_STRM(yyk, crs->YY_StreamPtr) }
+    else if (XL(btr)) { //NOTE: XL is special it can be XXP()
         xlk *xl               = (xlk *)btkey;
         crs->XL_StreamPtr.key = xl->key;
         crs->XL_StreamPtr.val = XXP(btr) ? (ulong)val : ((xlk *)val)->val;
         return &crs->XL_StreamPtr;
-    } else if YL(btr) { //NOTE: YL is special it can be YYP()
+    } else if (YL(btr)) { //NOTE: YL is special it can be YYP()
         ylk *yl               = (ylk *)btkey;
         crs->YL_StreamPtr.key = yl->key;
         crs->YL_StreamPtr.val = YYP(btr) ? (ulong)val : ((ylk *)val)->val;
@@ -852,8 +851,8 @@ static void *OBT_createStream(bt *btr, void *val, char *btkey, crs_t *crs) {
 void *createStream(bt *btr, void *val, char *btkey, uint32 klen, uint32 *size,
 				   crs_t *crs) {
 	*size = 0;                                           // DEBUG_BT_TYPE(btr);
-	if      INODE(btr)    return btkey;
-	else if OTHER_BT(btr) return OBT_createStream(btr, val, btkey, crs);
+	if (INODE(btr)) {return btkey; }
+	else if (OTHER_BT(btr)) { return OBT_createStream(btr, val, btkey, crs); }
 	uint32  vlen      = getStreamVlen(btr, val);
 	*size             = klen + vlen;                      //DEBUG_CREATE_STREAM
 	char   *bt_val    = (btr->s.btype == BTREE_TABLE) ? row_malloc(btr, *size) :
@@ -862,10 +861,10 @@ void *createStream(bt *btr, void *val, char *btkey, uint32 klen, uint32 *size,
 	memcpy(bt_val, btkey, klen);
 	bt_val           += klen;
 	uchar btype = btr->s.btype;
-	if        (btype == BTREE_TABLE) {
+	if (btype == BTREE_TABLE) {
 		if (val) memcpy(bt_val, val, vlen);
-		else     bzero (bt_val, sizeof(void *));
-	} else if (btype != BTREE_INODE) memcpy(bt_val, &val, sizeof(void *));
+		else     bzero (bt_val, *size);
+	} else if (btype != BTREE_INODE) { memcpy(bt_val, &val, vlen); }
 	return o_bt_val; /* line above is for STRING & FLOAT INDEX */
 }
 bool destroyStream(bt *btr, uchar *ostream) {

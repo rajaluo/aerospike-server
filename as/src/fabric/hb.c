@@ -3655,6 +3655,10 @@ config_bind_serv_cfg_expand(const cf_serv_cfg* bind_cfg, cf_serv_cfg* published_
 						"address list.");
 				}
 			}
+
+			if (published_cfg->n_cfgs == 0) {
+				cf_warning(AS_HB, "No network interface addresses detected for fabric access");
+			}
 		} else {
 			if (ipv4_only && !cf_ip_addr_is_legacy(&bind_cfg->cfgs[i].addr)) {
 				continue;

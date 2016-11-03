@@ -45,8 +45,8 @@ struct as_index_ref_s;
 struct as_namespace_s;
 
 // For receiver-side migration flow-control.
-// By default, allow up to 2 concurrent migrates from each member of the cluster.
-#define AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING (2 * AS_CLUSTER_SZ)
+// TODO - move to namespace? Go even lower than 4?
+#define AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING 4
 
 /*
  *  Default lifetime (in ms) for a migrate recv control object to stay in the recv control

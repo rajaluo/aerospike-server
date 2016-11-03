@@ -64,7 +64,7 @@ void dump_bt_mem_profile(bt *btr) {
   #define BT_MEM_PROFILE_MLC  {tot_bt_data++; tot_bt_data_mem += size;}
   #define BT_MEM_PROFILE_NODE {tot_num_bt_ns++; tnbtnmem += size;}
 #else
-void dump_bt_mem_profile(bt *btr) { btr = NULL; return; }
+void dump_bt_mem_profile(bt *btr) { return; }
   #define BT_MEM_PROFILE_BT
   #define BT_MEM_PROFILE_MLC
   #define BT_MEM_PROFILE_NODE
@@ -618,7 +618,7 @@ static bt_n *replaceKeyWithGhost(bt *btr, bt_n *x, int i, bt_data_t k,
 
 #define CREATE_RETURN_DELETED_KEY(btr, kp, dr)        \
   dwd_t dwd; bzero(&dwd, sizeof(dwd_t)); dwd.dr = dr; \
-  if BIG_BT(btr) memcpy(delbuf, kp, btr->s.ksize); \
+  if (BIG_BT(btr)) { memcpy(delbuf, kp, btr->s.ksize); } \
   dwd.k = BIG_BT(btr) ? delbuf : kp;
 
 /* NOTE: ksize > 8 bytes needs buffer for CASE 1 */
@@ -676,7 +676,7 @@ static dwd_t deletekey(bt   *btr,  bt_n *x,  bt_data_t k,    int    s, bool drt,
             } else decr_scion(x, 1 + dr); //NOTE: key FOR Case2A/B
         } else if (s == DK_NONE) {                // CASE: DELETE NOT CASE2A/B
             if (dr) {
-                if INODE(btr) x = incrPrevDR(btr, x, i, dr, p, pi, plist);
+                if (INODE(btr)) { x = incrPrevDR(btr, x, i, dr, p, pi, plist); }
                 else { rgst = 1; // DELETE DataBT KEY w/ DR -> REPLACE w/ GHOST
                     x = replaceKeyWithGhost(btr, x, i, kp, dr, p, pi);
                 }

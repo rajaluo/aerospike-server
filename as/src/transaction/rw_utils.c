@@ -97,7 +97,6 @@ send_rw_messages(rw_request* rw)
 
 			// Mark as complete although we won't have a response msg.
 			rw->dest_complete[i] = true;
-			rw->dup_result_code[i] = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 	}
 }
@@ -208,21 +207,29 @@ update_metadata_in_index(as_transaction* tr, bool increment_generation,
 
 	uint64_t now = cf_clepoch_milliseconds();
 
-	if (m->record_ttl == 0xFFFFffff) {
-		// TTL = -1 - set record to "never expire".
+	switch (m->record_ttl) {
+	case TTL_NAMESPACE_DEFAULT:
+		if (ns->default_ttl != 0) {
+			// Set record void-time using default TTL value.
+			r->void_time = (now / 1000) + ns->default_ttl;
+		}
+		else {
+			// Default TTL is "never expire".
+			r->void_time = 0;
+		}
+		break;
+	case TTL_NEVER_EXPIRE:
+		// Set record to "never expire".
 		r->void_time = 0;
-	}
-	else if (m->record_ttl != 0) {
-		// Assuming we checked m->record_ttl <= 10 years, so no overflow etc.
+		break;
+	case TTL_DONT_UPDATE:
+		// Do not change record's void time.
+		break;
+	default:
+		// Apply non-special m->record_ttl directly. Have already checked
+		// m->record_ttl <= 10 years, so no overflow etc.
 		r->void_time = (now / 1000) + m->record_ttl;
-	}
-	else if (ns->default_ttl != 0) {
-		// TTL = 0 - set record void-time using default TTL value.
-		r->void_time = (now / 1000) + ns->default_ttl;
-	}
-	else {
-		// TTL = 0 - and default TTL is "never expire".
-		r->void_time = 0;
+		break;
 	}
 
 	if (as_ldt_record_is_sub(r)) {

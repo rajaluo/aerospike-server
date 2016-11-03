@@ -33,6 +33,7 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 
@@ -131,7 +132,7 @@ typedef struct rw_request_s {
 	// Store ops' responses here.
 	cf_dyn_buf			response_db;
 
-	// Manage responses of duplicate resolution and replica writes, or
+	// Manage responses for duplicate resolution and replica write requests, or
 	// alternatively, timeouts.
 	uint32_t			tid;
 	bool				dup_res_complete;
@@ -139,25 +140,20 @@ typedef struct rw_request_s {
 	repl_write_done_cb	repl_write_cb;
 	timeout_done_cb		timeout_cb;
 
-	// The request we're making, so we can retransmit if necessary. Will be the
-	// duplicate request if we're in 'dup' phase, or the op (write) if we're in
-	// the second phase but it's always the message we're sending out to the
-	// nodes in the dest array.
+	// Message being sent to dest_nodes. May be duplicate resolution or replica
+	// write request. Message is kept in case it needs to be retransmitted.
 	msg*				dest_msg;
 
 	cf_clock			xmit_ms; // time of next retransmit
 	uint32_t			retry_interval_ms; // interval to add for next retransmit
 
-	// These three elements are used both for the duplicate resolution phase
-	//  the "operation" (usually write) phase.
+	// Destination info for duplicate resolution and replica write requests.
 	int					n_dest_nodes;
 	cf_node				dest_nodes[AS_CLUSTER_SZ];
 	bool				dest_complete[AS_CLUSTER_SZ];
 
-	// These elements are only used in the duplicate phase, and represent the
-	// response that comes back from a given node
+	// Duplicate resolution response messages from nodes with duplicates.
 	msg*				dup_msg[AS_CLUSTER_SZ];
-	int					dup_result_code[AS_CLUSTER_SZ];
 
 } rw_request;
 
@@ -180,7 +176,7 @@ rw_request_hdestroy(void* pv)
 static inline void
 rw_request_release(rw_request* rw)
 {
-	if (0 == cf_rc_release(rw)) {
+	if (cf_rc_release(rw) == 0) {
 		rw_request_destroy(rw);
 		cf_rc_free(rw);
 	}
@@ -199,4 +195,19 @@ rw_request_wait_q_depth(rw_request* rw)
 	}
 
 	return depth;
+}
+
+
+// See as_transaction_trid().
+static inline uint64_t
+rw_request_trid(const rw_request* rw)
+{
+	// Note - rw->msgp can be null if it's a ship-op.
+	if ((rw->msg_fields & AS_MSG_FIELD_BIT_TRID) == 0 || ! rw->msgp) {
+		return 0;
+	}
+
+	as_msg_field *f = as_msg_field_get(&rw->msgp->msg, AS_MSG_FIELD_TYPE_TRID);
+
+	return cf_swap_from_be64(*(uint64_t*)f->data);
 }

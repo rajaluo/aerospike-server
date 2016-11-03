@@ -2399,13 +2399,11 @@ query_process_inline(as_query_transaction *qtr)
 static int
 qtr_process(as_query_transaction *qtr)
 {
-	int ret = AS_QUERY_OK;
 	if (query_process_inline(qtr)) {
-
 		query_work qwork;
 		qwork_setup(&qwork, qtr);
 
-		ret = qwork_process(&qwork);
+		int ret = qwork_process(&qwork);
 
 		qwork_teardown(&qwork);
 		return ret;
@@ -2415,7 +2413,7 @@ qtr_process(as_query_transaction *qtr)
 		if (!qworkp) {
 			cf_warning(AS_QUERY, "Could not allocate query "
 					"request structure .. out of memory .. Aborting !!!");
-			ret = AS_QUERY_ERR;
+			return AS_QUERY_ERR;
 		}
 		// Successfully queued
 		cf_atomic32_incr(&qtr->n_qwork_active);
@@ -2911,9 +2909,7 @@ int
 as_query_kill(uint64_t trid)
 {
 	as_query_transaction *qtr;
-	int rv = AS_QUERY_ERR;
-
-	rv =  hash_get_qtr(trid, &qtr);
+	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
 		cf_warning(AS_QUERY, "Cannot kill query with trid [ %"PRIu64" ]",  trid);
@@ -2931,9 +2927,7 @@ int
 as_query_set_priority(uint64_t trid, uint32_t priority)
 {
 	as_query_transaction *qtr;
-	int rv = AS_QUERY_ERR;
-
-	rv =  hash_get_qtr(trid, &qtr);
+	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
 		cf_warning(AS_QUERY, "Cannot set priority for query with trid [ %"PRIu64" ]",  trid);
@@ -3032,8 +3026,7 @@ as_query_get_jobstat(uint64_t trid)
 {
 	as_mon_jobstat *stat;
 	as_query_transaction *qtr;
-	int rv = AS_QUERY_ERR;
-	rv     =  hash_get_qtr(trid, &qtr);
+	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
 		cf_warning(AS_MON, "No query was found with trid [ %"PRIu64" ]", trid);
