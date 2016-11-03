@@ -6455,8 +6455,7 @@ mesh_tend_reduce(void* key, void* data, void* udata)
 	if (mesh_node->status == AS_HB_MESH_NODE_ENDPOINT_UNKNOWN) {
 		if (!mesh_node->is_seed && mesh_node->last_status_updated +
 		MESH_ENDPOINT_UNKNOWN_TIMEOUT() > now) {
-			DEBUG(
-					"Mesh forgetting node %"PRIx64" ip address/port undiscovered since %"PRIu64,
+			DEBUG("Mesh forgetting node %"PRIx64" ip address/port undiscovered since %"PRIu64,
 					nodeid, mesh_node->last_status_updated);
 
 			rv = SHASH_REDUCE_DELETE;
@@ -6529,10 +6528,8 @@ mesh_tender(void* arg)
 
 		if ((curr_time - last_time) < MESH_TEND_INTERVAL()) {
 			// Interval has not been reached for sending heartbeats
-			usleep(
-					MIN(AS_HB_TX_INTERVAL_MS_MIN,
-							(last_time + MESH_TEND_INTERVAL()) - curr_time)
-							* 1000);
+			usleep(MIN(AS_HB_TX_INTERVAL_MS_MIN,
+				(last_time + MESH_TEND_INTERVAL()) - curr_time) * 1000);
 			continue;
 		}
 
@@ -7015,8 +7012,7 @@ mesh_node_check_fix_self_msg(as_hb_channel_event* event)
 			mesh_node_delete(&existing_node_key,
 					"Error removing self mesh entry.");
 
-			INFO("Removed self mesh "
-					"entry with	 address %s",
+			INFO("Removed self mesh entry with address %s",
 					cf_sock_addr_print(&event->peer_endpoint_addr));
 			MESH_UNLOCK();
 		}
@@ -7172,17 +7168,15 @@ mesh_node_redundant_entry_delete(as_hb_mesh_node_key *nodeid_matching_key,
 		as_endpoint_list_to_string(node_to_retain->endpoint_list,
 				endpoint_list_str_to_retain,
 				sizeof(endpoint_list_str_to_retain));
-		WARNING(
-				"Nodes %"PRIx64" and %"PRIx64" have overlapping endpoint addresses {%s} and {%s} respectively",
-				key_to_delete->nodeid, key_to_retain->nodeid,
-				endpoint_list_str_to_delete, endpoint_list_str_to_retain);
+		WARNING("Nodes %"PRIx64" and %"PRIx64" have overlapping endpoint addresses {%s} and {%s} respectively",
+			key_to_delete->nodeid, key_to_retain->nodeid,
+			endpoint_list_str_to_delete, endpoint_list_str_to_retain);
 	}
 
 	if (node_to_delete->is_seed) {
-		INFO(
-				"Removing duplicate seed entry hostname:%s port:%d for node %"PRIx64,
-				node_to_delete->seed_host_name, node_to_delete->seed_port,
-				key_to_delete->nodeid);
+		INFO("Removing duplicate seed entry hostname:%s port:%d for node %"PRIx64,
+			node_to_delete->seed_host_name, node_to_delete->seed_port,
+			key_to_delete->nodeid);
 	}
 
 	mesh_node_delete(key_to_delete, "Error removing redundant mesh entry.");
@@ -7199,6 +7193,7 @@ mesh_node_redundant_entry_delete(as_hb_mesh_node_key *nodeid_matching_key,
 		// has changed for the seed node in which case update the seed nodeid.
 		mesh_seed_node_real_nodeid_set(node_to_retain, key_to_retain,
 				key_to_delete->nodeid, AS_HB_MESH_NODE_CHANNEL_ACTIVE);
+
 		// Since we have flipped the key for the seed entry, the deleted entry
 		// will in fact be the finally retained entry.
 		rv = key_to_delete;
