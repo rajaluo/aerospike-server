@@ -588,7 +588,7 @@ as_bin_allocate_bin_space(as_record *r, as_storage_rd *rd, int32_t delta) {
 		rd->n_bins = (uint16_t)delta;
 
 		as_bin_space* bin_space = (as_bin_space*)
-				cf_malloc(sizeof(as_bin_space) + (rd->n_bins * sizeof(as_bin)));
+				cf_malloc_ns(sizeof(as_bin_space) + (rd->n_bins * sizeof(as_bin)));
 
 		rd->bins = bin_space->bins;
 		as_bin_set_all_empty(rd);
@@ -609,7 +609,7 @@ as_bin_allocate_bin_space(as_record *r, as_storage_rd *rd, int32_t delta) {
 
 		if (new_n_bins != 0) {
 			as_bin_space* bin_space = (as_bin_space*)
-					cf_realloc((void*)as_index_get_bin_space(r), sizeof(as_bin_space) + (rd->n_bins * sizeof(as_bin)));
+					cf_realloc_ns((void*)as_index_get_bin_space(r), sizeof(as_bin_space) + (rd->n_bins * sizeof(as_bin)));
 
 			rd->bins = bin_space->bins;
 

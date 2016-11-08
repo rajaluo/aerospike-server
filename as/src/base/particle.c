@@ -388,7 +388,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 		as_particle *old_particle = b->particle;
 
 		if (mem_size != 0) {
-			b->particle = cf_malloc((size_t)mem_size);
+			b->particle = cf_malloc_ns((size_t)mem_size);
 
 			if (! b->particle) {
 				b->particle = old_particle;
@@ -443,7 +443,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 		if (new_mem_size < 0) {
 			return new_mem_size;
 		}
-		if (! (new_particle = cf_malloc((size_t)new_mem_size))) {
+		if (! (new_particle = cf_malloc_ns((size_t)new_mem_size))) {
 			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 		memcpy(new_particle, b->particle, particle_vtable[existing_type]->size_fn(b->particle));
@@ -460,7 +460,7 @@ as_bin_particle_alloc_modify_from_client(as_bin *b, const as_msg_op *op)
 		if (new_mem_size < 0) {
 			return new_mem_size;
 		}
-		if (! (new_particle = cf_malloc((size_t)new_mem_size))) {
+		if (! (new_particle = cf_malloc_ns((size_t)new_mem_size))) {
 			return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 		}
 		memcpy(new_particle, b->particle, particle_vtable[existing_type]->size_fn(b->particle));
@@ -624,7 +624,7 @@ as_bin_particle_alloc_from_client(as_bin *b, const as_msg_op *op)
 	as_particle *old_particle = b->particle;
 
 	if (mem_size != 0) {
-		b->particle = cf_malloc((size_t)mem_size);
+		b->particle = cf_malloc_ns((size_t)mem_size);
 
 		if (! b->particle) {
 			b->particle = old_particle;
@@ -728,7 +728,7 @@ as_bin_particle_replace_from_pickled(as_bin *b, uint8_t **p_pickled)
 	}
 
 	if (new_mem_size != 0 && ! b->particle) {
-		b->particle = cf_malloc((size_t)new_mem_size);
+		b->particle = cf_malloc_ns((size_t)new_mem_size);
 
 		if (! b->particle) {
 			as_bin_set_empty(b);
@@ -915,7 +915,7 @@ as_bin_particle_replace_from_asval(as_bin *b, const as_val *val)
 	as_particle *old_particle = b->particle;
 
 	if (new_mem_size != 0) {
-		b->particle = cf_malloc(new_mem_size);
+		b->particle = cf_malloc_ns(new_mem_size);
 
 		if (! b->particle) {
 			b->particle = old_particle;
@@ -998,7 +998,7 @@ as_bin_particle_alloc_from_msgpack(as_bin *b, const uint8_t *packed, uint32_t pa
 	uint32_t mem_size = particle_vtable[type]->size_from_msgpack_fn(packed, packed_size);
 
 	if (mem_size != 0) {
-		b->particle = cf_malloc(mem_size);
+		b->particle = cf_malloc(mem_size); // response, so not cf_malloc_ns()
 
 		if (! b->particle) {
 			return -AS_PROTO_RESULT_FAIL_UNKNOWN;

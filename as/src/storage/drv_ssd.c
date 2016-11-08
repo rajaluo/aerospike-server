@@ -50,7 +50,6 @@
 
 #include "fault.h"
 #include "hist.h"
-#include "jem.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"
@@ -3120,11 +3119,6 @@ Finished:
 }
 
 
-#ifdef USE_JEM
-#include <sys/syscall.h>
-#include <unistd.h>
-#endif
-
 typedef struct {
 	drv_ssds *ssds;
 	drv_ssd *ssd;
@@ -3149,14 +3143,7 @@ ssd_load_devices_fn(void *udata)
 
 	cf_info(AS_DRV_SSD, "device %s: reading device to load index", ssd->name);
 
-#ifdef USE_JEM
-	int tid = syscall(SYS_gettid);
-	cf_info(AS_DRV_SSD, "In TID %d: Using arena #%d for loading data for namespace \"%s\"",
-			tid, ssds->ns->jem_arena, ssds->ns->name);
-
-	// Allocate long-term storage in this namespace's JEMalloc arena.
-	jem_set_arena(ssds->ns->jem_arena);
-#endif
+	JEM_SET_NS_ARENA(ssds->ns);
 
 	ssd->sub_sweep	= false;
 	ssd->has_ldt	= false;

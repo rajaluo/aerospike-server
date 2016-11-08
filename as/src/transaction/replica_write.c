@@ -987,10 +987,12 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 {
 	as_namespace* ns = rsv->ns;
 
-	if (! as_storage_has_space(rsv->ns)) {
+	if (! as_storage_has_space(ns)) {
 		cf_warning(AS_RW, "{%s} write_replica: drives full", ns->name);
 		return AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE;
 	}
+
+	JEM_SET_NS_ARENA(ns);
 
 	as_index_tree* tree = rsv->tree;
 	bool is_subrec = false;

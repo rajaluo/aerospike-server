@@ -507,7 +507,7 @@ list_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
 		return (int)new_size;
 	}
 
-	list_wrapper *p_list_wrapped = cf_malloc(new_size);
+	list_wrapper *p_list_wrapped = cf_malloc_ns(new_size);
 
 	if (! p_list_wrapped) {
 		cf_warning(AS_PARTICLE, "failed malloc for list wrapper (%d)", new_size);
@@ -1621,9 +1621,9 @@ cdt_process_state_packed_list_modify_optype(cdt_process_state *state, cdt_modify
 		return false;
 	}
 
-	rollback_alloc_inita(alloc_buf, cdt_udata->alloc_buf, 5);
+	rollback_alloc_inita(alloc_buf, cdt_udata->alloc_buf, 5, true);
 	// Results always on the heap.
-	rollback_alloc_inita(alloc_result, NULL, 1);
+	rollback_alloc_inita(alloc_result, NULL, 1, false);
 
 	switch (optype) {
 	// Add to list.
@@ -1883,7 +1883,7 @@ cdt_process_state_packed_list_read_optype(cdt_process_state *state, cdt_read_dat
 	}
 
 	// Just one entry needed for results bin.
-	rollback_alloc_inita(packed_alloc, NULL, 1);
+	rollback_alloc_inita(packed_alloc, NULL, 1, false);
 
 	switch (optype) {
 	case AS_CDT_OP_LIST_GET: {

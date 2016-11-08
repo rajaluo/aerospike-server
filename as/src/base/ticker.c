@@ -44,7 +44,6 @@
 #include "fault.h"
 #include "hist.h"
 #include "hist_track.h"
-#include "jem.h"
 #include "meminfo.h"
 
 #include "base/asm.h"
@@ -231,12 +230,22 @@ log_line_system_memory()
 	int freepct;
 	bool swapping;
 
-	cf_meminfo(0, &freemem, &freepct, &swapping);
+	cf_meminfo(NULL, &freemem, &freepct, &swapping);
 
-	cf_info(AS_INFO, "   system-memory: free-kbytes %lu free-pct %d%s",
+	size_t allocated_kbytes;
+	size_t active_kbytes;
+	size_t mapped_kbytes;
+	double efficiency_pct;
+
+	cf_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
+			&efficiency_pct);
+
+	cf_info(AS_INFO, "   system-memory: free-kbytes %lu free-pct %d%s heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
 			freemem / 1024,
 			freepct,
-			swapping ? " SWAPPING!" : ""
+			swapping ? " SWAPPING!" : "",
+			allocated_kbytes, active_kbytes, mapped_kbytes,
+			efficiency_pct
 			);
 }
 

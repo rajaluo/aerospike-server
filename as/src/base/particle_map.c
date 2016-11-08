@@ -1010,7 +1010,7 @@ map_from_flat(const uint8_t *flat, uint32_t flat_size, as_particle **pp)
 
 	if (op.pmi.flags == 0) {
 		// Convert temp buffer from disk to data-in-memory.
-		map_mem *p_map_mem = cf_malloc(sizeof(map_mem) + p_map_flat->size);
+		map_mem *p_map_mem = cf_malloc_ns(sizeof(map_mem) + p_map_flat->size);
 
 		p_map_mem->type = p_map_flat->type;
 		p_map_mem->sz = p_map_flat->size;
@@ -1358,7 +1358,7 @@ map_packer_create_particle(map_packer *pk, rollback_alloc *alloc_buf)
 	uint32_t size = pk->ext_size + pk->content_size + as_pack_map_header_get_size(pk->ele_count + (pk->flags ? 1 : 0));
 	map_mem *p_map_mem = (map_mem *)(alloc_buf
 			? rollback_alloc_reserve(alloc_buf, sizeof(map_mem) + size)
-			: cf_malloc(sizeof(map_mem) + size));
+			: cf_malloc(sizeof(map_mem) + size)); // response, so not cf_malloc_ns()
 
 	if (! p_map_mem) {
 		return NULL;
@@ -1992,8 +1992,8 @@ packed_map_add_items(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *it
 		items_count--;
 	}
 
-	rollback_alloc_inita(alloc_0, NULL, 1);
-	rollback_alloc_inita(alloc_1, NULL, 1);
+	rollback_alloc_inita(alloc_0, NULL, 1, false);
+	rollback_alloc_inita(alloc_1, NULL, 1, false);
 
 	int ret = AS_PROTO_RESULT_OK;
 
@@ -7034,9 +7034,9 @@ cdt_process_state_packed_map_modify_optype(cdt_process_state *state, cdt_modify_
 		return false;
 	}
 
-	rollback_alloc_inita(alloc_buf, cdt_udata->alloc_buf, 1);
+	rollback_alloc_inita(alloc_buf, cdt_udata->alloc_buf, 1, true);
 	// Results always on the heap.
-	rollback_alloc_inita(alloc_result, NULL, 1);
+	rollback_alloc_inita(alloc_result, NULL, 1, false);
 
 	cdt_result_data result_data = {
 			.result = result,
@@ -7652,7 +7652,7 @@ cdt_process_state_packed_map_read_optype(cdt_process_state *state, cdt_read_data
 	}
 
 	// Just one entry needed for results bin.
-	rollback_alloc_inita(alloc_result, NULL, 1);
+	rollback_alloc_inita(alloc_result, NULL, 1, false);
 
 	cdt_result_data result_data = {
 			.result = result,

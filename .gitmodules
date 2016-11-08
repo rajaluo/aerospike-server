@@ -11,10 +11,6 @@
 [submodule "modules/asmalloc"]
 	path = modules/asmalloc
 	url = https://github.com/aerospike/asmalloc.git
-[submodule "modules/jemalloc"]
-	path = modules/jemalloc
-	url = https://github.com/aerospike/jemalloc.git
-	ignore = dirty
 [submodule "modules/lua-core"]
 	path = modules/lua-core
 	url = https://github.com/aerospike/aerospike-lua-core.git
@@ -27,3 +23,6 @@
 [submodule "modules/telemetry"]
 	path = modules/telemetry
 	url = https://github.com/aerospike/aerospike-telemetry-agent.git
+[submodule "modules/jemalloc"]
+	path = modules/jemalloc
+	url = https://github.com/aerospike/jemalloc.git

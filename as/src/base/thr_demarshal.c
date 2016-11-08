@@ -40,7 +40,6 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
-#include "jem.h"
 #include "hist.h"
 #include "socket.h"
 
@@ -55,10 +54,6 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/xdr_serverside.h"
-
-#ifdef USE_JEM
-#include "base/datamodel.h"
-#endif
 
 #define POLL_SZ 1024
 
@@ -359,15 +354,6 @@ thr_demarshal_config_xdr(cf_socket *sock)
 	return 0;
 }
 
-// Log information about a suspicious incoming transaction.
-static void
-log_as_proto_and_peeked_data(as_proto *proto, uint8_t *peekbuf, size_t peeked_data_sz)
-{
-	cf_warning(AS_DEMARSHAL, "as_proto {version = %d ; type = %d ; sz =  %"PRIu64" (0x%"PRIx64")}", proto->version, proto->type, (uint64_t)proto->sz, (uint64_t)proto->sz);
-	cf_warning(AS_DEMARSHAL, "peeked_data_sz = %ld (0x%zx)", peeked_data_sz, peeked_data_sz);
-	cf_warning_binary(AS_DEMARSHAL, peekbuf, peeked_data_sz, CF_DISPLAY_HEX_SPACED, "peekbuf");
-}
-
 // Set of threads which talk to client over the connection for doing the needful
 // processing. Note that once fd is assigned to a thread all the work on that fd
 // is done by that thread. Fair fd usage is expected of the client. First thread
@@ -382,15 +368,6 @@ thr_demarshal(void *unused)
 
 #if defined(USE_SYSTEMTAP)
 	uint64_t nodeid = g_config.self_node;
-#endif
-
-#ifdef USE_JEM
-	int orig_arena;
-	if (0 > (orig_arena = jem_get_arena())) {
-		cf_crash(AS_DEMARSHAL, "Failed to get original arena for thr_demarshal()!");
-	} else {
-		cf_info(AS_DEMARSHAL, "Saved original JEMalloc arena #%d for thr_demarshal()", orig_arena);
-	}
 #endif
 
 	// Figure out my thread index.
@@ -594,94 +571,13 @@ thr_demarshal(void *unused)
 						goto NextEvent_FD_Cleanup;
 					}
 
-#ifdef USE_JEM
-					// Attempt to peek the namespace and set the JEMalloc arena accordingly.
-					size_t peeked_data_sz = 0;
-					size_t min_field_sz = sizeof(uint32_t) + sizeof(char);
-					size_t min_as_msg_sz = sizeof(as_msg) + min_field_sz;
-					size_t peekbuf_sz = 2048; // (Arbitrary "large enough" size for peeking the fields of "most" AS_MSGs.)
-					uint8_t peekbuf[peekbuf_sz];
-					if (PROTO_TYPE_AS_MSG == fd_h->proto_hdr.type) {
-						size_t offset = sizeof(as_msg);
-						// Number of bytes to peek from the socket.
-//						size_t peek_sz = peekbuf_sz;                 // Peak up to the size of the peek buffer.
-						size_t peek_sz = MIN(fd_h->proto_hdr.sz, peekbuf_sz);  // Peek only up to the minimum necessary number of bytes.
-						int32_t tmp = cf_socket_recv(sock, peekbuf, peek_sz, 0);
-						peeked_data_sz = tmp < 0 ? 0 : tmp;
-						if (!peeked_data_sz) {
-							// That's actually legitimate. The as_proto may have gone into one
-							// packet, the as_msg into the next one, which we haven't yet received.
-							// This just "never happened" without async.
-							cf_detail(AS_DEMARSHAL, "could not peek the as_msg header, expected %zu byte(s)", peek_sz);
-						}
-						if (peeked_data_sz > min_as_msg_sz) {
-//							cf_debug(AS_DEMARSHAL, "(Peeked %zu bytes.)", peeked_data_sz);
-							if (peeked_data_sz > fd_h->proto_hdr.sz) {
-								cf_warning(AS_DEMARSHAL, "Received unexpected extra data from client %s socket %d when peeking as_proto!", fd_h->client, CSFD(sock));
-								log_as_proto_and_peeked_data(&fd_h->proto_hdr, peekbuf, peeked_data_sz);
-								goto NextEvent_FD_Cleanup;
-							}
-
-							if (((as_msg*)peekbuf)->info1 & AS_MSG_INFO1_BATCH) {
-								jem_set_arena(orig_arena);
-							} else {
-								uint16_t n_fields = ntohs(((as_msg *) peekbuf)->n_fields), field_num = 0;
-								bool found = false;
-	//							cf_debug(AS_DEMARSHAL, "Found %d AS_MSG fields", n_fields);
-								while (!found && (field_num < n_fields)) {
-									as_msg_field *field = (as_msg_field *) (&peekbuf[offset]);
-									uint32_t value_sz = ntohl(field->field_sz) - 1;
-	//								cf_debug(AS_DEMARSHAL, "Field #%d offset: %lu", field_num, offset);
-	//								cf_debug(AS_DEMARSHAL, "\tvalue_sz %u", value_sz);
-	//								cf_debug(AS_DEMARSHAL, "\ttype %d", field->type);
-									if (AS_MSG_FIELD_TYPE_NAMESPACE == field->type) {
-										if (value_sz >= AS_ID_NAMESPACE_SZ) {
-											cf_warning(AS_DEMARSHAL, "namespace too long (%u) in as_msg", value_sz);
-											goto NextEvent_FD_Cleanup;
-										}
-										char ns[AS_ID_NAMESPACE_SZ];
-										found = true;
-										memcpy(ns, field->data, value_sz);
-										ns[value_sz] = '\0';
-	//									cf_debug(AS_DEMARSHAL, "Found ns \"%s\" in field #%d.", ns, field_num);
-										jem_set_arena(as_namespace_get_jem_arena(ns));
-									} else {
-	//									cf_debug(AS_DEMARSHAL, "Message field %d is not namespace (type %d) ~~ Reading next field", field_num, field->type);
-										field_num++;
-										offset += sizeof(as_msg_field) + value_sz;
-										if (offset >= peeked_data_sz) {
-											break;
-										}
-									}
-								}
-								if (!found) {
-									cf_warning(AS_DEMARSHAL, "Can't get namespace from AS_MSG (peeked %zu bytes) ~~ Using default thr_demarshal arena.", peeked_data_sz);
-									jem_set_arena(orig_arena);
-								}
-							}
-						} else {
-							jem_set_arena(orig_arena);
-						}
-					} else {
-						jem_set_arena(orig_arena);
-					}
-#endif
-
 					// Allocate the complete message buffer.
 					fd_h->proto = cf_malloc(sizeof(as_proto) + fd_h->proto_hdr.sz);
 
 					cf_assert(fd_h->proto, AS_DEMARSHAL, "allocation: %zu %s", (sizeof(as_proto) + fd_h->proto_hdr.sz), cf_strerror(errno));
 					memcpy(fd_h->proto, &fd_h->proto_hdr, sizeof(as_proto));
 
-#ifdef USE_JEM
-					// Jam in the peeked data.
-					if (peeked_data_sz) {
-						memcpy(fd_h->proto->data, &peekbuf, peeked_data_sz);
-					}
-					fd_h->proto_unread = fd_h->proto->sz - peeked_data_sz;
-#else
-					fd_h->proto_unread = proto_p->sz;
-#endif
+					fd_h->proto_unread = fd_h->proto->sz;
 				}
 
 				if (fd_h->proto_unread != 0) {

@@ -36,7 +36,6 @@
 
 #include "arenax.h"
 #include "fault.h"
-#include "jem.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -251,7 +250,7 @@ void
 as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size)
 {
 	as_rec_space* rec_space = (as_rec_space*)
-			cf_malloc(sizeof(as_rec_space) + key_size);
+			cf_malloc_ns(sizeof(as_rec_space) + key_size);
 
 	rec_space->bin_space = (as_bin_space*)r->dim;
 	rec_space->key_size = key_size;
@@ -395,22 +394,6 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		sbins_populated += as_sindex_sbins_from_rd(rd, newbins, old_n_bins, &sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 	}
 
-#ifdef USE_JEM
-	int orig_arena = -1;
-	if (ns->storage_data_in_memory) {
-		if (0 > (orig_arena = jem_get_arena())) {
-			cf_crash(AS_RECORD, "Failed to get original arena for as_record_unpickel_replace()!");
-		} else {
-			cf_debug(AS_RECORD, "Saved original JEMalloc arena #%d for as_record_unpickel_replace()", orig_arena);
-		}
-
-		// Set this thread's JEMalloc arena to one used by the current namespace for long-term storage.
-		int arena = ns->jem_arena;
-		cf_debug(AS_RECORD, "Setting JEMalloc arena #%d for long-term storage in namespace \"%s\"", arena, ns->name);
-		jem_set_arena(arena);
-	}
-#endif
-
 	if (ns->storage_data_in_memory && ! ns->single_bin) {
 		if (delta_bins) {
 			// If sizing down, this does destroy the excess particles.
@@ -460,13 +443,6 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 			sbins_populated += as_sindex_sbins_from_bin(ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
 		}
 	}
-
-#ifdef USE_JEM
-	if (ns->storage_data_in_memory && orig_arena > 0) {
-		cf_debug(AS_RECORD, "Restoring original JEMalloc arena #%d for as_record_unpickel_replace()", orig_arena);
-		jem_set_arena(orig_arena);
-	}
-#endif
 
 	if (buf > buf_lim) {
 		cf_warning(AS_RECORD, "unpickle record ran beyond input: %p > %p (diff: %lu) newbins: %d", buf, buf_lim, buf - buf_lim, newbins);
@@ -760,11 +736,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 		return -1;
 	}
 
-	// Validate the reservation. This is a WORKAROUND for a known crash
-	if ((rsv->tree == 0) || (rsv->ns == 0) || (rsv->p == 0)) {
-		cf_info(AS_RECORD, "record merge: bad reservation. tree %p ns %p part %p", rsv->tree, rsv->ns, rsv->p);
-		return(-1);
-	}
+	JEM_SET_NS_ARENA(rsv->ns);
 
 	// look up base record
 	as_index_ref r_ref;

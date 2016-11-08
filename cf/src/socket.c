@@ -1689,7 +1689,7 @@ netlink_dump(int32_t type, int32_t filter1, int32_t filter2a, int32_t filter2b, 
 	res = 0;
 
 cleanup2:
-	free(resp);
+	cf_free(resp);
 
 cleanup1:
 	close(nls);

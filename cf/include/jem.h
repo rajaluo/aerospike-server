@@ -55,29 +55,9 @@ int jem_init(bool enable);
 int jem_create_arena(void);
 
 /*
- *  Get the arena currently associated with the current thread.
- *  Returns the arena index (>= 0) upon success or -1 upon failure.
+ *  Read the JEMalloc statistics required for calculating memory fragmentation.
  */
-int jem_get_arena(void);
-
-/*
- *  Set the JEMalloc arena for the current thread.
- *  Returns 0 if successful, -1 otherwise.
- */
-int jem_set_arena(int arena);
-
-/*
- *  Set the state of the thread allocation cache.
- *  Returns 0 if successful, -1 otherwise.
- */
-int jem_enable_tcache(bool enabled);
-
-/*
- *  Allocate the requested number of bytes in the given JEMalloc arena.
- *  If use_allocm is true, use the "allocm()" JEMalloc API instead of "malloc()".
- *  Returns pointer to the memory if successful, NULL otherwise.
- */
-void *jem_allocate_in_arena(int arena, size_t size, bool use_allocm);
+void jem_get_frag_stats(size_t *allocated, size_t *active, size_t *mapped);
 
 /*
  *  Log information about the state of JEMalloc to a file with the given options.

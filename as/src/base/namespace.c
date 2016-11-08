@@ -93,7 +93,6 @@ as_namespace_create(char *name)
 	} else {
 		cf_info(AS_NAMESPACE, "Created JEMalloc arena #%d for namespace \"%s\"", ns->jem_arena, name);
 	}
-	as_namespace_set_jem_arena(ns->name, ns->jem_arena);
 #endif
 
 	ns->cold_start = false; // try warm restart unless told not to
@@ -826,74 +825,3 @@ as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *hist_name,
 		}
 	}
 }
-
-#ifdef USE_JEM
-/*
- *  Mapping between a namespace name and a JEMalloc arena number.
- */
-typedef struct ns2arena_s {
-	char *ns;                  // Namespace name.
-	int arena;                 // JEMalloc arena (-1 means none.)
-} ns2arena_t;
-
-/*
- *  Global array mapping namespace names to the corresponding JEMalloc arenas.
- */
-static ns2arena_t g_ns2arena[AS_NAMESPACE_SZ] =
-{
-	{ NULL, -1 }
-};
-
-/*
- *  Set the JEMalloc arena for the given namespace.
- *  The namespace must already be set.
- *  Return 0 if successful, else -1.
- */
-int
-as_namespace_set_jem_arena(char *ns, int arena)
-{
-	int retval = -1;
-
-	ns2arena_t *p = g_ns2arena;
-
-	while (p->ns) {
-		if (!strcmp(p->ns, ns)) {
-			p->arena = arena;
-			retval = 0;
-			break;
-		} else {
-			p++;
-		}
-	}
-
-	if (retval) {
-		p->ns = ns;
-		p->arena = arena;
-		retval = 0;
-	}
-
-	return retval;
-}
-
-/*
- *  Return the JEMalloc arena for the given namepace name.
- *  (-1 means none set.)
- */
-int
-as_namespace_get_jem_arena(char *ns)
-{
-	int arena = -1;
-	ns2arena_t *p = g_ns2arena;
-
-	while (p->ns) {
-		if (!strcmp(p->ns, ns)) {
-			arena = p->arena;
-			break;
-		} else {
-			p++;
-		}
-	}
-
-	return arena;
-}
-#endif

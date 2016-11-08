@@ -78,14 +78,17 @@ static bool jem_enabled = false;
 static size_t arenas_extend_mib[2], arenas_extend_miblen = sizeof(arenas_extend_mib);
 
 /*
- *  JEMalloc MIB values for the "thread.arena" control.
+ *  JEMalloc MIB values for fragmentation statistics:
+ *
+ *  - epoch
+ *  - stats.allocated
+ *  - stats.active
+ *  - stats.mapped
  */
-static size_t thread_arena_mib[2], thread_arena_miblen = sizeof(thread_arena_mib);
-
-/*
- *  JEMalloc MIB values for the "thread.tcache.enabled" control.
- */
-static size_t thread_tcache_enabled_mib[3], thread_tcache_enabled_miblen = sizeof(thread_tcache_enabled_mib);
+static size_t epoch_mib[1], epoch_miblen = sizeof(epoch_mib);
+static size_t stats_allocated_mib[2], stats_allocated_miblen = sizeof(stats_allocated_mib);
+static size_t stats_active_mib[2], stats_active_miblen = sizeof(stats_active_mib);
+static size_t stats_mapped_mib[2], stats_mapped_miblen = sizeof(stats_mapped_mib);
 
 /*
  *  Initialize the interface to JEMalloc.
@@ -101,13 +104,23 @@ int jem_init(bool enable)
 			cf_crash(CF_JEM, "Failed to get JEMalloc MIB for \"%s\" (errno %d)!", mib, errno);
 		}
 
-		mib = "thread.arena";
-		if (mallctlnametomib(mib, thread_arena_mib, &thread_arena_miblen)) {
+		mib = "epoch";
+		if (mallctlnametomib(mib, epoch_mib, &epoch_miblen)) {
 			cf_crash(CF_JEM, "Failed to get JEMalloc MIB for \"%s\" (errno %d)!", mib, errno);
 		}
 
-		mib = "thread.tcache.enabled";
-		if (mallctlnametomib(mib, thread_tcache_enabled_mib, &thread_tcache_enabled_miblen)) {
+		mib = "stats.allocated";
+		if (mallctlnametomib(mib, stats_allocated_mib, &stats_allocated_miblen)) {
+			cf_crash(CF_JEM, "Failed to get JEMalloc MIB for \"%s\" (errno %d)!", mib, errno);
+		}
+
+		mib = "stats.active";
+		if (mallctlnametomib(mib, stats_active_mib, &stats_active_miblen)) {
+			cf_crash(CF_JEM, "Failed to get JEMalloc MIB for \"%s\" (errno %d)!", mib, errno);
+		}
+
+		mib = "stats.mapped";
+		if (mallctlnametomib(mib, stats_mapped_mib, &stats_mapped_miblen)) {
 			cf_crash(CF_JEM, "Failed to get JEMalloc MIB for \"%s\" (errno %d)!", mib, errno);
 		}
 
@@ -143,116 +156,38 @@ int jem_create_arena(void)
 }
 
 /*
- *  Get the arena currently associated with the current thread.
- *  Returns the arena index (>= 0) upon success or -1 upon failure.
+ *  Read the JEMalloc statistics required for calculating memory fragmentation.
  */
-int jem_get_arena(void)
+void jem_get_frag_stats(size_t *allocated, size_t *active, size_t *mapped)
 {
-	int retval = -1;
-	unsigned orig_arena = 0;
-
-	if (jem_enabled) {
-		size_t len = sizeof(unsigned);
-		int tid = syscall(SYS_gettid);
-
-		if ((retval = mallctlbymib(thread_arena_mib, thread_arena_miblen, &orig_arena, &len, NULL, 0))) {
-			cf_warning(CF_JEM, "In TID %d:  Failed to get arena!", tid);
-		} else {
-			cf_debug(CF_JEM, "In TID %d:  Got arena #%d", tid, orig_arena);
-		}
+	if (!jem_enabled) {
+		cf_crash(CF_JEM, "JEMalloc is not enabled");
 	}
 
-	return (!retval ? orig_arena : retval);
-}
+	size_t len = sizeof(size_t);
+	size_t epoch = 1;
 
-/*
- *  Set the JEMalloc arena for the current thread.
- *  Returns 0 if successful, -1 otherwise.
- */
-int jem_set_arena(int arena)
-{
-	int retval = -1;
-
-	if (jem_enabled && (0 <= arena)) {
-		unsigned orig_arena = 0;
-		size_t len = sizeof(unsigned);
-		int tid = syscall(SYS_gettid);
-
-		if ((retval = mallctlbymib(thread_arena_mib, thread_arena_miblen, &orig_arena, &len, &arena, len))) {
-			cf_warning(CF_JEM, "Failed to set arena to #%d for TID %d! (rv %d ; errno %d)", arena, tid, retval, errno);
-		} else {
-			cf_debug(CF_JEM, "TID %d changed from arena #%d ==> #%d", tid, orig_arena, arena);
-		}
+	if (mallctlbymib(epoch_mib, epoch_miblen, &epoch, &len, &epoch, sizeof(epoch)) != 0) {
+		cf_crash(CF_JEM, "Failed to retrieve JEMalloc's stats.allocated");
 	}
 
-	return retval;
-}
+	len = sizeof(size_t);
 
-/*
- *  Set the state of the thread allocation cache.
- *  Returns 0 if successful, -1 otherwise.
- */
-int jem_enable_tcache(bool enabled)
-{
-	int retval = -1;
-
-	if (jem_enabled) {
-		bool orig_enabled;
-		size_t len = sizeof(bool);
-		int tid = syscall(SYS_gettid);
-
-		if ((retval = mallctlbymib(thread_tcache_enabled_mib, thread_tcache_enabled_miblen, &orig_enabled, &len, &enabled, len))) {
-			cf_warning(CF_JEM, "Failed to set tcached enabled to %d for TID %d (errno %d)!", enabled, tid, errno);
-		} else {
-			cf_debug(CF_JEM, "TID %d changed from tcache enabled state from %d ==> %d", tid, orig_enabled, enabled);
-		}
+	if (mallctlbymib(stats_allocated_mib, stats_allocated_miblen, allocated, &len, NULL, 0) != 0) {
+		cf_crash(CF_JEM, "Failed to retrieve JEMalloc's stats.allocated");
 	}
 
-	return retval;
-}
+	len = sizeof(size_t);
 
-/*
- *  Allocate the requested number of bytes in the given JEMalloc arena.
- *  If use_allocm is true, use the "allocm()" JEMalloc API instead of "malloc()".
- *  Returns pointer to the memory if successful, NULL otherwise.
- */
-void *jem_allocate_in_arena(int arena, size_t size, bool use_allocm)
-{
-	void *ptr = NULL;
-
-	if (jem_enabled) {
-		int retval = -1;
-		int tid = syscall(SYS_gettid);
-
-		if (jem_enabled) {
-			if (use_allocm) {
-				// Use the JEMalloc function to allocate within the requested arena.
-				size_t rsize = 0;
-				if ((retval = allocm(&ptr, &rsize, size, ALLOCM_ARENA(arena)))) {
-					cf_warning(CF_JEM, "TID %d failed (rv %d) to allocate %zu bytes on its arena (#%d)!", tid, retval, size, arena);
-				} else {
-					cf_debug(CF_JEM, "TID %d allocated %zu (%zu / %zu usable) bytes on its arena (#%d)!",
-							 tid, size, rsize, malloc_usable_size(ptr), arena);
-				}
-			} else {
-				// Go into the specified JEmalloc arena.
-				jem_set_arena(arena);
-
-				// Simply use "malloc()".
-				if (!(ptr = malloc(size))) {
-					cf_warning(CF_JEM, "TID %d failed to allocate %zu bytes on its arena (#%d)!", tid, size, arena);
-				} else {
-					cf_debug(CF_JEM, "TID %d allocated %zu (%zu usable) bytes on its arena (#%d)!",
-							 tid, size, malloc_usable_size(ptr), arena);
-				}
-			}
-		}
-	} else {
-		// Use the default "malloc(3)", which may be JEMalloc.
-		ptr = malloc(size);
+	if (mallctlbymib(stats_active_mib, stats_active_miblen, active, &len, NULL, 0) != 0) {
+		cf_crash(CF_JEM, "Failed to retrieve JEMalloc's stats.active");
 	}
 
-	return ptr;
+	len = sizeof(size_t);
+
+	if (mallctlbymib(stats_mapped_mib, stats_mapped_miblen, mapped, &len, NULL, 0) != 0) {
+		cf_crash(CF_JEM, "Failed to retrieve JEMalloc's stats.mapped");
+	}
 }
 
 /*

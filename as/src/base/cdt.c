@@ -471,7 +471,7 @@ rollback_alloc_reserve(rollback_alloc *alloc_buf, size_t size)
 		cf_ll_buf_reserve(alloc_buf->ll_buf, size, &ptr);
 	}
 	else {
-		ptr = cf_malloc(size);
+		ptr = alloc_buf->malloc_ns ? cf_malloc_ns(size) : cf_malloc(size);
 		rollback_alloc_push(alloc_buf, ptr);
 	}
 

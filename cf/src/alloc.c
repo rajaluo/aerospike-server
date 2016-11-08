@@ -44,6 +44,10 @@
 
 #include "fault.h"
 
+#ifdef USE_JEM
+#include "jem.h"
+#include "jemalloc/jemalloc.h"
+#endif
 
 // #define USE_CIRCUS 1
 
@@ -173,12 +177,52 @@ static shash *loc2alloc_shash = NULL;
 pthread_mutex_t mem_count_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*
+ * The JEM arena to be used by cf_malloc_ns() and friends. -1 indicates a
+ * thread's default arena.
+ */
+#ifdef USE_JEM
+__thread int jem_ns_arena = -1;
+#endif
+
+/*
  * Forward references.
  */
 static void make_location(location_t *loc, char *file, int line);
 static void copy_location(location_t *loc_out, location_t *loc_in);
 
 /********************************************************************************/
+
+#ifdef USE_JEM
+static void *
+arena_malloc(size_t sz, int arena)
+{
+	return arena < 0 ? malloc(sz) : mallocx(sz, MALLOCX_ARENA(arena));
+}
+
+static void *
+callocx(size_t nmemb, size_t sz, int flags)
+{
+	void *p = mallocx(nmemb * sz, flags);
+
+	if (p != NULL) {
+		memset(p, 0, nmemb * sz);
+	}
+
+	return p;
+}
+
+static void *
+arena_calloc(size_t nmemb, size_t sz, int arena)
+{
+	return arena < 0 ? calloc(nmemb, sz) : callocx(nmemb, sz, MALLOCX_ARENA(arena));
+}
+
+static void *
+arena_realloc(void *ptr, size_t sz, int arena)
+{
+	return arena < 0 ? realloc(ptr, sz) : rallocx(ptr, sz, MALLOCX_ARENA(arena));
+}
+#endif
 
 /*
  *  Enable wrappers for memory allocation functions for light-weight memory accounting.
@@ -566,7 +610,7 @@ static void *cf_init_header(void *ptr, size_t size, malloc_loc_t loc)
 /*
  *  Wrapper for "calloc()" that notes the location.
  */
-void *cf_calloc_loc(size_t nmemb, size_t size, malloc_loc_t loc)
+void *cf_calloc_loc(size_t nmemb, size_t size, int arena, malloc_loc_t loc)
 {
 	mallocation_register(MALLOCATION_TYPE_CALLOC, loc, nmemb * size);
 
@@ -590,7 +634,7 @@ void *cf_calloc_loc(size_t nmemb, size_t size, malloc_loc_t loc)
 /*
  *  Wrapper for "malloc()" that notes the location.
  */
-void *cf_malloc_loc(size_t size, malloc_loc_t loc)
+void *cf_malloc_loc(size_t size, int arena, malloc_loc_t loc)
 {
 	mallocation_register(MALLOCATION_TYPE_MALLOC, loc, size);
 
@@ -598,12 +642,20 @@ void *cf_malloc_loc(size_t size, malloc_loc_t loc)
 
 #ifdef USE_DF_DETECT
 	size_t new_size = size + HEADER_SZ;
+#ifdef USE_JEM
+	void *ptr = arena_malloc(new_size, arena);
+#else
 	void *ptr = malloc(new_size);
+#endif
 	if (ptr) {
 		retval = cf_init_header(ptr, size, loc);
 	}
 #else
+#ifdef USE_JEM
+	retval = arena_malloc(size, arena);
+#else
 	retval = malloc(size);
+#endif
 #endif
 
 	return retval;
@@ -623,7 +675,7 @@ void cf_free_loc(void *ptr, malloc_loc_t loc)
 			cf_warning(CF_ALLOC, "***Notice:  cfl(%p) can't find DF_DETECT header @ File: \"%s\" Line: %d TID %ld***",
 					   ptr, mallocations[loc].file, mallocations[loc].line, syscall(SYS_gettid));
 			// XXX -- Treat this case by assuming no header exists....
-			PRINT_STACK();
+			PRINT_STACKTRACE();
 		} else {
 			int mloc = header[2] & ~-(1 << 16);
 
@@ -644,7 +696,7 @@ void cf_free_loc(void *ptr, malloc_loc_t loc)
 				cf_warning(CF_ALLOC, "***Second cf_""free(%p) @ File: \"%s\" Line: %d TID %ld***",
 						   ptr, mallocations[loc].file, mallocations[loc].line, syscall(SYS_gettid));
 
-				PRINT_STACK();
+				PRINT_STACKTRACE();
 
 			} else {
 				header[3] = (uint64_t) (syscall(SYS_gettid) << 32) | loc;
@@ -668,7 +720,7 @@ void cf_free_loc(void *ptr, malloc_loc_t loc)
 /*
  *  Wrapper for "realloc()" that notes the location.
  */
-void *cf_realloc_loc(void *ptr, size_t size, malloc_loc_t loc)
+void *cf_realloc_loc(void *ptr, size_t size, int arena, malloc_loc_t loc)
 {
 	void *retval = 0;
 
@@ -688,14 +740,20 @@ void *cf_realloc_loc(void *ptr, size_t size, malloc_loc_t loc)
 				cf_warning(CF_ALLOC, "***Notice:  crl(%p) [#1] can't find DF_DETECT header @ File: \"%s\" Line: %d TID %ld***",
 						   ptr, mallocations[loc].file, mallocations[loc].line, syscall(SYS_gettid));
 				// XXX -- Treat this case by assuming no header exists....
-				PRINT_STACK();
+				PRINT_STACKTRACE();
 			} else {
 				// (NB:  Could do more header validation here.)
 				found_header = true;
 				ptr = ptr2;
 			}
 
-			if ((ptr2 = realloc(ptr, new_size))) {
+#ifdef USE_JEM
+			ptr2 = arena_realloc(ptr, new_size, arena);
+#else
+			ptr2 = realloc(ptr, new_size);
+#endif
+
+			if (ptr2) {
 				if (found_header) {
 					ptr2 = cf_init_header(ptr2, size, loc);
 				}
@@ -703,7 +761,11 @@ void *cf_realloc_loc(void *ptr, size_t size, malloc_loc_t loc)
 			}
 		} else {
 			// Acts like "malloc()".
+#ifdef USE_JEM
+			void *ptr2 = arena_realloc(ptr, new_size, arena);
+#else
 			void *ptr2 = realloc(ptr, new_size);
+#endif
 			if (ptr2) {
 				retval = cf_init_header(ptr2, size, loc);
 			}
@@ -718,7 +780,7 @@ void *cf_realloc_loc(void *ptr, size_t size, malloc_loc_t loc)
 				cf_warning(CF_ALLOC, "***Notice:  crl(%p) [#2] can't find DF_DETECT header @ File: \"%s\" Line: %d TID %ld***",
 						   ptr, mallocations[loc].file, mallocations[loc].line, syscall(SYS_gettid));
 				// XXX -- Treat this case by assuming no header exists....
-				PRINT_STACK();
+				PRINT_STACKTRACE();
 			} else {
 				int mloc = header[2] & ~-(1 << 16);
 
@@ -738,7 +800,7 @@ void *cf_realloc_loc(void *ptr, size_t size, malloc_loc_t loc)
 					cf_warning(CF_ALLOC, "***Second cf_""free(%p) @ File: \"%s\" Line: %d TID %ld***",
 							   ptr, mallocations[loc].file, mallocations[loc].line, syscall(SYS_gettid));
 
-					PRINT_STACK();
+					PRINT_STACKTRACE();
 				} else {
 					header[3] = (uint64_t) (syscall(SYS_gettid) << 32) | loc;
 				}
@@ -757,12 +819,20 @@ void *cf_realloc_loc(void *ptr, size_t size, malloc_loc_t loc)
 		// XXX -- It's possible for "realloc(p, 0)" to return a non-NULL pointer suitable for passing to "free()".
 		//        (This case is not currently handled using a header, but ?should? still work, just with a "Notice:"
 		//        message and stack being logged by "cf_{free,realloc}_loc()".
+#ifdef USE_JEM
+		retval = arena_realloc(ptr, size, arena);
+#else
 		retval = realloc(ptr, size);
+#endif
 	}
 #else
 	mallocation_register(MALLOCATION_TYPE_REALLOC, loc, (size ? size : - malloc_usable_size(ptr)));
 
+#ifdef USE_JEM
+	retval = arena_realloc(ptr, size, arena);
+#else
 	retval = realloc(ptr, size);
+#endif
 #endif
 
 	return retval;
@@ -1461,9 +1531,13 @@ update_alloc_at_location(void *p, size_t sz, alloc_type type, char *file, int li
 }
 
 void *
-cf_malloc_at(size_t sz, char *file, int line)
+cf_malloc_at(size_t sz, int arena, char *file, int line)
 {
+#ifdef USE_JEM
+	void *p = arena_malloc(sz, arena);
+#else
 	void *p = malloc(sz);
+#endif
 
 	if (!g_memory_accounting_enabled) {
 		return(p);
@@ -1534,9 +1608,13 @@ cf_free_at(void *p, char *file, int line)
 }
 
 void *
-cf_calloc_at(size_t nmemb, size_t sz, char *file, int line)
+cf_calloc_at(size_t nmemb, size_t sz, int arena, char *file, int line)
 {
+#ifdef USE_JEM
+	void *p = arena_calloc(nmemb, sz, arena);
+#else
 	void *p = calloc(nmemb, sz);
+#endif
 
 	if (!g_memory_accounting_enabled) {
 		return(p);
@@ -1562,9 +1640,13 @@ cf_calloc_at(size_t nmemb, size_t sz, char *file, int line)
 }
 
 void *
-cf_realloc_at(void *ptr, size_t sz, char *file, int line)
+cf_realloc_at(void *ptr, size_t sz, int arena, char *file, int line)
 {
+#ifdef USE_JEM
+	void *p = arena_realloc(ptr, sz, arena);
+#else
 	void *p = realloc(ptr, sz);
+#endif
 
 	if (!g_memory_accounting_enabled) {
 		return(p);
@@ -2019,7 +2101,7 @@ cf_rc_alloc_at(size_t sz, char *file, int line)
 
 #if defined(MEM_COUNT) && !defined(USE_ASM)
 	// Track the calling program location.
-	addr = cf_malloc_at(asz, file, line);
+	addr = cf_malloc_at(asz, -1, file, line);
 #else
 	// XXX -- Will not track in MEM_COUNT hash table when using ASMalloc!!
 	addr = cf_malloc(asz);
@@ -2103,4 +2185,40 @@ cf_rc_releaseandfree(void *addr) {
 		cf_free((void *)hdr);
 	}
 	return(c);
+}
+
+
+
+/*
+ * Heap statistics.
+ */
+
+void
+cf_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *mapped_kbytes, double *efficiency_pct)
+{
+	size_t allocated_bytes = 0;
+	size_t active_bytes = 0;
+	size_t mapped_bytes = 0;
+
+	// For now there are no stats if not using JEMalloc.
+#ifdef USE_JEM
+	jem_get_frag_stats(&allocated_bytes, &active_bytes, &mapped_bytes);
+#endif
+
+	if (allocated_kbytes) {
+		*allocated_kbytes = allocated_bytes / 1024;
+	}
+
+	if (active_kbytes) {
+		*active_kbytes = active_bytes / 1024;
+	}
+
+	if (mapped_kbytes) {
+		*mapped_kbytes = mapped_bytes / 1024;
+	}
+
+	if (efficiency_pct) {
+		*efficiency_pct = mapped_bytes != 0 ?
+				(double)allocated_bytes * 100.0 / (double)mapped_bytes : 0.0;
+	}
 }

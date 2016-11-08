@@ -42,14 +42,16 @@ typedef struct rollback_alloc_s {
 	cf_ll_buf *ll_buf;
 	size_t malloc_list_sz;
 	size_t malloc_list_cap;
+	bool malloc_ns;
 	void *malloc_list[];
 } rollback_alloc;
 
-#define rollback_alloc_inita(__name, __alloc_buf, __rollback_size) \
+#define rollback_alloc_inita(__name, __alloc_buf, __rollback_size, __malloc_ns) \
 		rollback_alloc *__name = (rollback_alloc *)alloca(sizeof(rollback_alloc) + sizeof(void *)*(__alloc_buf ? 0 : __rollback_size)); \
 		__name->ll_buf = __alloc_buf; \
 		__name->malloc_list_sz = 0; \
-		__name->malloc_list_cap = (__alloc_buf ? 0 : __rollback_size);
+		__name->malloc_list_cap = (__alloc_buf ? 0 : __rollback_size); \
+		__name->malloc_ns = __malloc_ns;
 
 typedef struct cdt_process_state_s {
 	as_cdt_optype type;

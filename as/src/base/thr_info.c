@@ -274,6 +274,17 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_int(db, "system_free_mem_pct", freepct);
 	info_append_bool(db, "system_swapping", swapping);
 
+	size_t allocated_kbytes;
+	size_t active_kbytes;
+	size_t mapped_kbytes;
+	double efficiency_pct;
+
+	cf_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes, &efficiency_pct);
+	info_append_uint64(db, "heap_allocated_kbytes", allocated_kbytes);
+	info_append_uint64(db, "heap_active_kbytes", active_kbytes);
+	info_append_uint64(db, "heap_mapped_kbytes", mapped_kbytes);
+	info_append_int(db, "heap_efficiency_pct", (int)(efficiency_pct + 0.5));
+
 	info_get_aggregated_namespace_stats(db);
 
 	info_append_int(db, "tsvc_queue", thr_tsvc_queue_get_size());
@@ -1271,11 +1282,13 @@ info_command_mtrace(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
+#ifdef USE_JEM
 static void
 info_log_jem_stats()
 {
 	jem_log_stats(NULL, NULL);
 }
+#endif
 
 int
 info_command_jem_stats(char *name, char *params, cf_dyn_buf *db)

@@ -27,14 +27,32 @@
 #include <stddef.h>
 #include <citrusleaf/cf_atomic.h>
 
+#ifdef USE_JEM
+
+extern __thread int jem_ns_arena;
+
+#define JEM_NS_ARENA jem_ns_arena
+#define JEM_SET_NS_ARENA(_ns) \
+	(jem_ns_arena = _ns->storage_data_in_memory ? _ns->jem_arena : -1)
+
+#else
+
+#define JEM_NS_ARENA -1
+#define JEM_SET_NS_ARENA(_ns)
+
+#endif
+
 #ifdef PREPRO
 
 // For generating code via the C pre-processor:
 
 #define cf_calloc(nmemb, size) (GEN_TAG AddLoc("cf_calloc_count", __FILE__, __LINE__) GEN_TAG)
+#define cf_calloc_ns(nmemb, size) (GEN_TAG AddLoc("cf_calloc_count", __FILE__, __LINE__) GEN_TAG)
 #define cf_malloc(size) (GEN_TAG AddLoc("cf_malloc_count", __FILE__, __LINE__) GEN_TAG)
+#define cf_malloc_ns(size) (GEN_TAG AddLoc("cf_malloc_count", __FILE__, __LINE__) GEN_TAG)
 #define cf_free(ptr) (GEN_TAG AddLoc("cf_free_count", __FILE__, __LINE__) GEN_TAG)
 #define cf_realloc(ptr, size) (GEN_TAG AddLoc("cf_realloc_count", __FILE__, __LINE__) GEN_TAG)
+#define cf_realloc_ns(ptr, size) (GEN_TAG AddLoc("cf_realloc_count", __FILE__, __LINE__) GEN_TAG)
 #define cf_strdup(s) (GEN_TAG AddLoc("cf_strdup_count", __FILE__, __LINE__) GEN_TAG)
 #define cf_strndup(s, n) (GEN_TAG AddLoc("cf_strndup_count", __FILE__, __LINE__) GEN_TAG)
 #define cf_valloc(size) (GEN_TAG AddLoc("cf_valloc_count", __FILE__, __LINE__) GEN_TAG)
@@ -58,10 +76,10 @@ typedef struct as_mallocation_s {
  */
 typedef uint16_t malloc_loc_t;
 
-void *cf_calloc_loc(size_t nmemb, size_t size, malloc_loc_t loc);
-void *cf_malloc_loc(size_t size, malloc_loc_t loc);
+void *cf_calloc_loc(size_t nmemb, size_t size, int arena, malloc_loc_t loc);
+void *cf_malloc_loc(size_t size, int arena, malloc_loc_t loc);
 void cf_free_loc(void *ptr, malloc_loc_t loc);
-void *cf_realloc_loc(void *ptr, size_t size, malloc_loc_t loc);
+void *cf_realloc_loc(void *ptr, size_t size, int arena, malloc_loc_t loc);
 char *cf_strdup_loc(const char *s, malloc_loc_t loc);
 char *cf_strndup_loc(const char *s, size_t n, malloc_loc_t loc);
 void *cf_valloc_loc(size_t size, malloc_loc_t loc);
@@ -74,17 +92,20 @@ void my_cb(uint64_t thread_id, uint16_t type, uint16_t loc, ssize_t delta_size, 
 
 #else // Default to the shash-based memory-tracking memory allocation functions.
 
-#define cf_malloc(s)            cf_malloc_at(s, __FILE__, __LINE__)
-#define cf_calloc(nmemb, sz)    cf_calloc_at(nmemb, sz, __FILE__, __LINE__)
-#define cf_realloc(ptr, sz)     cf_realloc_at(ptr, sz, __FILE__, __LINE__)
+#define cf_malloc(s)            cf_malloc_at(s, -1, __FILE__, __LINE__)
+#define cf_malloc_ns(s)         cf_malloc_at(s, JEM_NS_ARENA, __FILE__, __LINE__)
+#define cf_calloc(nmemb, sz)    cf_calloc_at(nmemb, sz, -1, __FILE__, __LINE__)
+#define cf_calloc_ns(nmemb, sz) cf_calloc_at(nmemb, sz, JEM_NS_ARENA,__FILE__, __LINE__)
+#define cf_realloc(ptr, sz)     cf_realloc_at(ptr, sz, -1, __FILE__, __LINE__)
+#define cf_realloc_ns(ptr, sz)  cf_realloc_at(ptr, sz, JEM_NS_ARENA, __FILE__, __LINE__)
 #define cf_strdup(s)            cf_strdup_at(s, __FILE__, __LINE__)
 #define cf_strndup(s, n)        cf_strndup_at(s, n, __FILE__, __LINE__)
 #define cf_valloc(sz)           cf_valloc_at(sz, __FILE__, __LINE__)
 #define cf_free(p)              cf_free_at(p, __FILE__, __LINE__)
 
-void *cf_malloc_at(size_t sz, char *file, int line);
-void *cf_calloc_at(size_t nmemb, size_t sz, char *file, int line);
-void *cf_realloc_at(void *ptr, size_t sz, char *file, int line);
+void *cf_malloc_at(size_t sz, int arena, char *file, int line);
+void *cf_calloc_at(size_t nmemb, size_t sz, int arena, char *file, int line);
+void *cf_realloc_at(void *ptr, size_t sz, int arena, char *file, int line);
 void *cf_strdup_at(const char *s, char *file, int line);
 void *cf_strndup_at(const char *s, size_t n, char *file, int line);
 void *cf_valloc_at(size_t sz, char *file, int line);
@@ -128,3 +149,9 @@ cf_rc_counter cf_rc_count(void *addr);
 int cf_rc_reserve(void *addr);
 int cf_rc_release(void *addr);
 int cf_rc_releaseandfree(void *addr);
+
+/*
+ * Heap statistics.
+ */
+
+void cf_heap_stats(size_t *allocated_kbytes, size_t *active_kbytes, size_t *mapped_kbytes, double *efficiency_pct);

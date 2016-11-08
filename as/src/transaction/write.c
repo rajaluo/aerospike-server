@@ -37,7 +37,6 @@
 
 #include "dynbuf.h"
 #include "fault.h"
-#include "jem.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -1015,13 +1014,6 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 		memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 	}
 
-#ifdef USE_JEM
-	// Set this thread's JEMalloc arena to one used by the current namespace for long-term storage.
-	int arena = ns->jem_arena;
-	cf_debug(AS_RW, "setting JEMalloc arena #%d for long-term storage in namespace \"%s\"", arena, ns->name);
-	jem_set_arena(arena);
-#endif
-
 	//------------------------------------------------------
 	// Copy existing bin into old_bin to enable unwinding.
 	//
@@ -1124,13 +1116,6 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// For memory accounting, note current usage.
 	uint64_t memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 
-#ifdef USE_JEM
-	// Set this thread's JEMalloc arena to one used by the current namespace for long-term storage.
-	int arena = ns->jem_arena;
-	cf_debug(AS_RW, "setting JEMalloc arena #%d for long-term storage in namespace \"%s\"", arena, ns->name);
-	jem_set_arena(arena);
-#endif
-
 	//------------------------------------------------------
 	// Copy existing bins to new space, and keep old bins
 	// intact for sindex adjustment and so it's possible to
@@ -1196,7 +1181,7 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	if (n_new_bins != 0) {
 		new_bins_size = n_new_bins * sizeof(as_bin);
 		new_bin_space = (as_bin_space*)
-				cf_malloc(sizeof(as_bin_space) + new_bins_size);
+				cf_malloc_ns(sizeof(as_bin_space) + new_bins_size);
 
 		if (! new_bin_space) {
 			cf_warning(AS_RW, "write_master: failed alloc new as_bin_space");

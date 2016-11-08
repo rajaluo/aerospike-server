@@ -50,7 +50,7 @@
  *  [Note:  This number must be at least as great as the value of "NUM_MALLOCATIONS"
  *           in the generated file "gen/mallocations.h".]
  */
-#define MAX_NUM_MALLOCATIONS               (1024)
+#define MAX_NUM_MALLOCATIONS               (1152)
 
 /*
  *  Default minimum size of blocks triggering mallocation alerts.

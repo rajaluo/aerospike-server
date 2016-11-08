@@ -1255,11 +1255,6 @@ extern void as_namespace_get_hist_info(as_namespace *ns, char *set_name, char *h
 		cf_dyn_buf *db, bool show_ns);
 extern int as_namespace_check_set_limits(as_set * p_set, as_namespace * ns);
 
-#ifdef USE_JEM
-int as_namespace_set_jem_arena(char *ns, int arena);
-int as_namespace_get_jem_arena(char *ns);
-#endif
-
 // Persistent Memory Management
 
 struct as_treex_s {

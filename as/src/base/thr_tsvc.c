@@ -120,6 +120,8 @@ process_transaction(as_transaction *tr)
 		goto Cleanup;
 	}
 
+	JEM_SET_NS_ARENA(ns);
+
 	// Have we finished the very first partition balance?
 	if (! as_partition_balance_is_init_resolved() &&
 			! as_transaction_is_nsup_delete(tr)) {

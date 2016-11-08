@@ -36,7 +36,6 @@
 #include "base/stats.h"
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
-#include "jem.h"
 #include "socket.h"
 #include <errno.h>
 
@@ -113,9 +112,6 @@ static as_buffer_pool batch_buffer_pool;
 
 static as_batch_queue batch_queues[MAX_BATCH_THREADS];
 static pthread_mutex_t batch_resize_lock;
-
-static int batch_buffer_arena_normal;
-static int batch_buffer_arena_huge;
 
 //---------------------------------------------------------
 // STATIC FUNCTIONS
@@ -425,18 +421,10 @@ as_batch_find_queue(int queue_index)
 }
 
 static as_batch_buffer*
-as_batch_buffer_create(uint32_t size, int arena)
+as_batch_buffer_create(uint32_t size)
 {
-#ifdef USE_JEM
-	// Create all buffers one batch buffer arena when jemalloc is used.
-	int orig_arena = jem_get_arena();
-	jem_set_arena(arena);
-#endif
 	as_batch_buffer* buffer = cf_malloc(size);
 	buffer->capacity = size - batch_buffer_pool.header_size;
-#ifdef USE_JEM
-	jem_set_arena(orig_arena);
-#endif
 	cf_atomic64_incr(&g_stats.batch_index_created_buffers);
 	return buffer;
 }
@@ -450,7 +438,7 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 	if (mem_size > batch_buffer_pool.buffer_size) {
 		// Requested size is greater than fixed buffer size.
 		// Allocate new buffer, but don't put back into pool.
-		buffer = as_batch_buffer_create(mem_size, batch_buffer_arena_huge);
+		buffer = as_batch_buffer_create(mem_size);
 		cf_atomic64_incr(&g_stats.batch_index_huge_buffers);
 	}
 	else {
@@ -463,7 +451,7 @@ as_batch_buffer_pop(as_batch_shared* shared, uint32_t size)
 		}
 		else if (status == CF_QUEUE_EMPTY) {
 			// Queue is empty.  Create new buffer.
-			buffer = as_batch_buffer_create(batch_buffer_pool.buffer_size, batch_buffer_arena_normal);
+			buffer = as_batch_buffer_create(batch_buffer_pool.buffer_size);
 	}
 	else {
 		cf_warning(AS_BATCH, "Failed to pop new batch buffer: %d", status);
@@ -618,18 +606,6 @@ as_batch_init()
 		return rc;
 	}
 
-#ifdef USE_JEM
-	batch_buffer_arena_normal = jem_create_arena();
-	batch_buffer_arena_huge = jem_create_arena();
-
-	if (batch_buffer_arena_normal >= 0 && batch_buffer_arena_huge >= 0) {
-		cf_info(AS_BATCH, "Created JEMalloc arena #%d for batch normal buffers", batch_buffer_arena_normal);
-		cf_info(AS_BATCH, "Created JEMalloc arena #%d for batch huge buffers", batch_buffer_arena_huge);
-	}
-	else {
-		cf_crash(AS_BATCH, "Failed to created JEMalloc arenas for batch buffers");
-	}
-#endif
 	return 0;
 }
 
