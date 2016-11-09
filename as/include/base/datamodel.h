@@ -306,18 +306,12 @@ extern void as_bin_particle_map_set_hidden(as_bin *b);
 /* as_bin
  * A bin container - null name means unused */
 struct as_bin_s {
-	as_particle iparticle;			// DO NOT USE THE TYPE FROM THIS STRUCTURE! THIS WILL OVERWRITE DATA IN THE SINGLE BIN CASE!
-									// Only use the is_integer and inuse fields.
-	union {
-		uint64_t ivalue;			// this field should be never used directly. always use the pointer to the iparticle;
-		as_particle *particle;
-	};
-	/*
-	 *  The above is used as an as_particle_int subtype embedded inside the bin
-	 *  The length to which we go to save bytes !
-	 */
-	uint16_t	id;			// ID of bin name (bytes 10 and 11 of this struct)
-	uint8_t		unused;		// pad to 12 bytes (multiple of 4) for thread safety
+	as_particle	iparticle;	// 1 byte
+	as_particle	*particle;	// for embedded particle this is value, not pointer
+
+	// Never read or write these bytes in single-bin configuration:
+	uint16_t	id;			// ID of bin name
+	uint8_t		unused;		// pad to 12 bytes (multiple of 4) - legacy
 } __attribute__ ((__packed__)) ;
 
 // For data-in-memory namespaces in multi-bin mode, we keep an array of as_bin
@@ -343,6 +337,14 @@ typedef struct as_rec_space_s {
 	uint32_t		key_size;
 	uint8_t			key[];
 } __attribute__ ((__packed__)) as_rec_space;
+
+// For copying as_bin structs without the last 3 bytes.
+static inline void
+as_single_bin_copy(as_bin *to, const as_bin *from)
+{
+	to->iparticle = from->iparticle;
+	to->particle = from->particle;
+}
 
 static inline bool
 as_bin_inuse(const as_bin *b)

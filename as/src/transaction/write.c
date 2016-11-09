@@ -1018,8 +1018,10 @@ write_master_dim_single_bin(as_transaction* tr, as_storage_rd* rd,
 	// Copy existing bin into old_bin to enable unwinding.
 	//
 
-	as_bin old_bin = *rd->bins;
 	uint32_t n_old_bins = as_bin_inuse_has(rd) ? 1 : 0;
+	as_bin old_bin;
+
+	as_single_bin_copy(&old_bin, rd->bins);
 
 	// Collect bins (old or intermediate versions) to destroy on cleanup.
 	as_bin cleanup_bins[m->n_ops];
@@ -1987,7 +1989,7 @@ write_master_dim_single_bin_unwind(as_bin* old_bin, as_bin* new_bin,
 		}
 	}
 
-	*new_bin = *old_bin;
+	as_single_bin_copy(new_bin, old_bin);
 }
 
 
