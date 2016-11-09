@@ -50,10 +50,6 @@ void xdr_broadcast_lastshipinfo(uint64_t val[])
 {
 }
 
-void xdr_clmap_update(int changetype, cf_node succession[], int listsize)
-{
-}
-
 void xdr_clear_dirty_bins(xdr_dirty_bins *dirty)
 {
 }

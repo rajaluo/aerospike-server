@@ -54,7 +54,6 @@ int as_xdr_shutdown();
 void xdr_sig_handler(int signum);
 
 void xdr_broadcast_lastshipinfo(uint64_t val[]);
-void xdr_clmap_update(int changetype, cf_node succession[], int listsize);
 void xdr_clear_dirty_bins(xdr_dirty_bins *dirty);
 void xdr_fill_dirty_bins(xdr_dirty_bins *dirty);
 void xdr_copy_dirty_bins(xdr_dirty_bins *from, xdr_dirty_bins *to);

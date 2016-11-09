@@ -47,9 +47,7 @@
 #include "base/proto.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
-#include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
-#include "fabric/paxos.h"
 #include "transaction/duplicate_resolve.h"
 #include "transaction/replica_write.h"
 #include "transaction/rw_request.h"
@@ -96,12 +94,6 @@ void* run_retransmit(void* arg);
 int retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata);
 void update_retransmit_stats(const rw_request* rw);
 
-void on_paxos_change(as_paxos_generation gen, as_paxos_change* change,
-		cf_node succession[], void* udata);
-int paxos_change_reduce_fn(void* key, uint32_t keylen, void* data, void* udata);
-int paxos_change_delete_reduce_fn(void* key, uint32_t keylen, void* data,
-		void* udata);
-
 int rw_msg_cb(cf_node id, msg* m, void* udata);
 
 
@@ -131,8 +123,6 @@ as_rw_init()
 	if (pthread_create(&thread, &attrs, run_retransmit, NULL) != 0) {
 		cf_crash(AS_RW, "failed to create retransmit thread");
 	}
-
-	as_paxos_register_change_callback(on_paxos_change, NULL);
 
 	as_fabric_register_msg_fn(M_TYPE_RW, rw_mt, sizeof(rw_mt),
 			RW_MSG_SCRATCH_SIZE, rw_msg_cb, NULL);
@@ -395,102 +385,6 @@ update_retransmit_stats(const rw_request* rw)
 		cf_crash(AS_RW, "unexpected transaction origin %u", rw->origin);
 		break;
 	}
-}
-
-
-//==========================================================
-// Local helpers - handle paxos changed events.
-//
-
-void
-on_paxos_change(as_paxos_generation gen, as_paxos_change* change,
-		cf_node succession[], void* udata)
-{
-	if (change->n_change != 1 || change->type[0] != AS_PAXOS_CHANGE_SYNC) {
-		cf_crash(AS_RW, "unexpected paxos-changed event data");
-	}
-
-	rw_paxos_change_struct del;
-
-	memset(&del, 0, sizeof(rw_paxos_change_struct));
-	memcpy(del.succession, succession, sizeof(cf_node) * AS_CLUSTER_SZ);
-
-	// Update the XDR cluster map. Piggybacking on this callback instead of
-	// adding a new one.
-	xdr_clmap_update(AS_PAXOS_CHANGE_SYNC, succession, AS_CLUSTER_SZ);
-
-	// Iterate through the hash table and find nodes that are not in the
-	// succession list. Remove these entries from the hash table.
-	rchash_reduce(g_rw_request_hash, paxos_change_reduce_fn, (void*)&del);
-
-	// If there are nodes to be deleted, execute the deletion algorithm.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (del.deletions[i] == (cf_node)0) {
-			break;
-		}
-
-		rchash_reduce(g_rw_request_hash, paxos_change_delete_reduce_fn,
-				(void*)&del.deletions[i]);
-	}
-}
-
-
-int
-paxos_change_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
-{
-	rw_request* rw = (rw_request*)data;
-	rw_paxos_change_struct* del = (rw_paxos_change_struct*)udata;
-	bool node_in_slist = false;
-
-	for (int i = 0; i < rw->n_dest_nodes; i++) {
-		// Check if this key is in the succession list.
-		node_in_slist = false;
-
-		for (int j = 0; j < AS_CLUSTER_SZ; j++) {
-			if (del->succession[j] == 0) {
-				break;
-			}
-
-			if (rw->dest_nodes[i] == del->succession[j]) {
-				node_in_slist = true;
-				break;
-			}
-		}
-
-		if (! node_in_slist) {
-			for (int j = 0; j < AS_CLUSTER_SZ; j++) {
-				// If an empty slot exists, then it means key is not there yet.
-				if (del->deletions[j] == (cf_node)0) {
-					del->deletions[j] = rw->dest_nodes[i];
-					break;
-				}
-
-				// If key already exists, return.
-				if (rw->dest_nodes[i] == del->deletions[i]) {
-					break;
-				}
-			}
-		}
-	}
-
-	return 0;
-}
-
-
-int
-paxos_change_delete_reduce_fn(void* key, uint32_t keylen, void* data,
-		void* udata)
-{
-	rw_request* rw = (rw_request*)data;
-	cf_node* node = (cf_node*)udata;
-
-	for (int i = 0; i < rw->n_dest_nodes; i++) {
-		if (! rw->dest_complete[i] && rw->dest_nodes[i] == *node) {
-			rw->xmit_ms = 0;
-		}
-	}
-
-	return 0;
 }
 
 
