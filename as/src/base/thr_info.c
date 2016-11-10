@@ -2052,7 +2052,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint64(db, "max-ttl", ns->max_ttl);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
-	// Note - no obj-size-hist-max, too much to reverse rounding algorithm.
+	info_append_uint32(db, "obj-size-hist-max", ns->obj_size_hist_max); // not original, may have been rounded
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));
