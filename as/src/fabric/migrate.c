@@ -125,8 +125,11 @@ typedef enum {
 } emigration_state;
 
 typedef struct emigration_pop_info_s {
-	uint32_t best_migrate_order;
-	uint32_t best_tree_elements;
+	uint32_t order;
+	uint64_t dest_score;
+	uint32_t n_elements;
+
+	uint64_t avoid_dest;
 } emigration_pop_info;
 
 typedef struct emigration_reinsert_ctrl_s {
@@ -148,9 +151,10 @@ typedef struct immigration_ldt_version_s {
 rchash *g_emigration_hash = NULL;
 rchash *g_immigration_hash = NULL;
 
+static uint64_t g_avoid_dest = 0;
 static cf_atomic32 g_emigration_id = 0;
 static cf_atomic32 g_emigration_insert_id = 0;
-static cf_queue *g_emigration_q = NULL;
+static cf_queue g_emigration_q;
 static shash *g_immigration_ldt_version_hash;
 
 
@@ -235,7 +239,9 @@ immigration_ldt_version_hashfn(void *key)
 void
 as_migrate_init()
 {
-	g_emigration_q = cf_queue_create(sizeof(void *), true);
+	g_avoid_dest = (uint64_t)g_config.self_node;
+
+	cf_queue_init(&g_emigration_q, sizeof(emigration), 4096, true);
 
 	if (rchash_create(&g_emigration_hash, emigration_hashfn, emigration_destroy,
 			sizeof(uint32_t), 64, RCHASH_CR_MT_MANYLOCK) != RCHASH_OK) {
@@ -321,7 +327,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr)
 		emig->rsv.p->current_outgoing_ldt_version = 0;
 	}
 
-	if (cf_queue_push(g_emigration_q, &emig) != CF_QUEUE_OK) {
+	if (cf_queue_push(&g_emigration_q, &emig) != CF_QUEUE_OK) {
 		cf_crash(AS_MIGRATE, "failed emigration queue push");
 	}
 }
@@ -364,7 +370,7 @@ as_migrate_set_num_xmit_threads(int n_threads)
 			void *death_msg = NULL;
 
 			// Send terminator (NULL message).
-			if (cf_queue_push(g_emigration_q, &death_msg) != CF_QUEUE_OK) {
+			if (cf_queue_push(&g_emigration_q, &death_msg) != CF_QUEUE_OK) {
 				cf_warning(AS_MIGRATE, "failed to queue thread terminator");
 				return;
 			}
@@ -401,7 +407,7 @@ as_migrate_dump(bool verbose)
 	cf_info(AS_MIGRATE, "number of emigrations in g_emigration_hash: %d",
 			rchash_get_size(g_emigration_hash));
 	cf_info(AS_MIGRATE, "number of requested emigrations waiting in g_emigration_q : %d",
-			cf_queue_sz(g_emigration_q));
+			cf_queue_sz(&g_emigration_q));
 	cf_info(AS_MIGRATE, "number of immigrations in g_immigration_hash: %d",
 			rchash_get_size(g_immigration_hash));
 	cf_info(AS_MIGRATE, "current emigration id: %d", g_emigration_id);
@@ -575,24 +581,17 @@ run_emigration(void *arg)
 void
 emigration_pop(emigration **emigp)
 {
-	emigration_pop_info pop_info;
+	emigration_pop_info best;
 
-	pop_info.best_migrate_order = 0xFFFFffff;
-	pop_info.best_tree_elements = 0;
-	// 0 is a special value - means we haven't started.
+	best.order = 0xFFFFffff;
+	best.dest_score = 0;
+	best.n_elements = 0xFFFFffff;
 
-	int rv = cf_queue_reduce_pop(g_emigration_q, (void *)emigp,
-			emigration_pop_reduce_fn, &pop_info);
+	best.avoid_dest = 0;
 
-	if (rv == CF_QUEUE_ERR) {
+	if (cf_queue_reduce_pop(&g_emigration_q, (void *)emigp, CF_QUEUE_FOREVER,
+			emigration_pop_reduce_fn, &best) != CF_QUEUE_OK) {
 		cf_crash(AS_MIGRATE, "emigration queue reduce pop failed");
-	}
-
-	if (rv == CF_QUEUE_NOMATCH) {
-		if (cf_queue_pop(g_emigration_q, (void *)emigp, CF_QUEUE_FOREVER) !=
-				CF_QUEUE_OK) {
-			cf_crash(AS_MIGRATE, "emigration queue pop failed");
-		}
 	}
 }
 
@@ -600,24 +599,34 @@ emigration_pop(emigration **emigp)
 int
 emigration_pop_reduce_fn(void *buf, void *udata)
 {
-	emigration_pop_info *pop_info = (emigration_pop_info *)udata;
+	emigration_pop_info *best = (emigration_pop_info *)udata;
 	emigration *emig = *(emigration **)buf;
 
 	if (! emig || // null emig terminates thread
-			emig->rsv.tree->elements == 0 ||
-			emig->tx_flags == TX_FLAGS_REQUEST ||
 			emig->cluster_key != as_paxos_get_cluster_key()) {
 		return -1; // process immediately
 	}
 
-	uint32_t migrate_order = emig->rsv.ns->migrate_order;
-	uint32_t tree_elements = emig->rsv.tree->elements;
+	if (best->avoid_dest == 0) {
+		best->avoid_dest = g_avoid_dest;
+	}
 
-	if (migrate_order < pop_info->best_migrate_order ||
-			(migrate_order == pop_info->best_migrate_order &&
-					tree_elements < pop_info->best_tree_elements)) {
-		pop_info->best_migrate_order = migrate_order;
-		pop_info->best_tree_elements = tree_elements;
+	uint32_t order = emig->rsv.ns->migrate_order;
+	uint64_t dest_score = (uint64_t)emig->dest - best->avoid_dest;
+	uint32_t n_elements = emig->tx_flags == TX_FLAGS_REQUEST ?
+			0 : emig->rsv.tree->elements;
+
+	if (order < best->order ||
+			(order == best->order &&
+					(dest_score > best->dest_score ||
+							(dest_score == best->dest_score &&
+									n_elements < best->n_elements)))) {
+		best->order = order;
+		best->dest_score = dest_score;
+		best->n_elements = n_elements;
+
+		g_avoid_dest = (uint64_t)emig->dest;
+
 		return -2; // candidate
 	}
 

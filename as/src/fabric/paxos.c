@@ -1056,6 +1056,9 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 						   AS_CLUSTER_LEGACY_SZ, g_config.paxos_max_cluster_size);
 				return(-1);
 			}
+
+			// TODO: Why do we allow migrations here? This could cause
+			// migrations to be allowed too early which could cause a cf_crash.
 			as_partition_balance_allow_migrations();
 			g_config.paxos_protocol = protocol;
 			break;
