@@ -179,6 +179,17 @@ as_bin_init(as_namespace *ns, as_bin *b, const char *name)
 	// as_index if single-bin, data-in-memory.
 }
 
+void
+as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from)
+{
+	if (ns->single_bin) {
+		as_single_bin_copy(to, from);
+	}
+	else {
+		*to = *from;
+	}
+}
+
 static void
 as_bin_init_w_len(as_namespace *ns, as_bin *b, byte *name, size_t len)
 {

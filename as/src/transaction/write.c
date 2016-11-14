@@ -1655,7 +1655,12 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 				if (j != -1) {
 					if (ns->storage_data_in_memory) {
-						append_bin_to_destroy(&rd->bins[j], cleanup_bins, p_n_cleanup_bins);
+						// Double copy necessary for single-bin, but doing it
+						// generally for code simplicity.
+						as_bin cleanup_bin;
+						as_bin_copy(ns, &cleanup_bin, &rd->bins[j]);
+
+						append_bin_to_destroy(&cleanup_bin, cleanup_bins, p_n_cleanup_bins);
 					}
 
 					as_bin_set_empty_shift(rd, j);
@@ -1671,7 +1676,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				}
 
 				if (ns->storage_data_in_memory) {
-					as_bin cleanup_bin = *b;
+					as_bin cleanup_bin;
+					as_bin_copy(ns, &cleanup_bin, b);
 
 					if ((result = as_bin_particle_alloc_from_client(b, op)) < 0) {
 						cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_particle_alloc_from_client() ", ns->name);
@@ -1704,7 +1710,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 
 			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin = *b;
+				as_bin cleanup_bin;
+				as_bin_copy(ns, &cleanup_bin, b);
 
 				if ((result = as_bin_particle_alloc_modify_from_client(b, op)) < 0) {
 					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_particle_alloc_modify_from_client() ", ns->name);
@@ -1736,7 +1743,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 				}
 
 				// ops array will not be not used in this case.
-				response_bins[(*p_n_response_bins)++] = *b;
+				as_bin_copy(ns, &response_bins[(*p_n_response_bins)++], b);
 			}
 		}
 		else if (op->op == AS_MSG_OP_READ) {
@@ -1748,7 +1755,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 
 			if (b) {
 				ops[*p_n_response_bins] = op;
-				response_bins[(*p_n_response_bins)++] = *b;
+				as_bin_copy(ns, &response_bins[(*p_n_response_bins)++], b);
 			}
 			else if (respond_all_ops) {
 				ops[*p_n_response_bins] = op;
@@ -1766,7 +1773,8 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			as_bin_set_empty(&result_bin);
 
 			if (ns->storage_data_in_memory) {
-				as_bin cleanup_bin = *b;
+				as_bin cleanup_bin;
+				as_bin_copy(ns, &cleanup_bin, b);
 
 				if ((result = as_bin_cdt_alloc_modify_from_client(b, op, &result_bin)) < 0) {
 					cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: failed as_bin_cdt_alloc_modify_from_client() ", ns->name);

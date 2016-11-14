@@ -501,6 +501,7 @@ extern uint16_t as_bin_inuse_count(as_storage_rd *rd);
 extern void as_bin_all_dump(as_storage_rd *rd, char *msg);
 
 extern void as_bin_init(as_namespace *ns, as_bin *b, const char *name);
+extern void as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from);
 
 typedef enum {
 	AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_UNDEF = 0,
