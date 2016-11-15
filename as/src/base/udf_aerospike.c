@@ -724,10 +724,6 @@ udf_aerospike__execute_updates(udf_record * urecord)
 	// Commit semantics is either all the update make it or none of it
 	rc = udf_aerospike__apply_update_atomic(urecord);
 
-	if (rc < 0) {
-		return rc;
-	}
-
 	// allocate down if bins are deleted / not in use
 	if (rd->ns && rd->ns->storage_data_in_memory && ! rd->ns->single_bin) {
 		int32_t delta_bins = (int32_t)as_bin_inuse_count(rd) - (int32_t)rd->n_bins;
