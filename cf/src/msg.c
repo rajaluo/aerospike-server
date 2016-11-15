@@ -818,7 +818,6 @@ int
 msg_get_uint32(const msg *m, int field_id, uint32_t *r)
 {
 	if (! m->f[field_id].is_set) {
-		*r = 0;
 		return -2;
 	}
 
@@ -832,7 +831,6 @@ int
 msg_get_int32(const msg *m, int field_id, int32_t *r)
 {
 	if (! m->f[field_id].is_set) {
-		*r = 0;
 		return -2;
 	}
 
@@ -846,7 +844,6 @@ int
 msg_get_uint64(const msg *m, int field_id, uint64_t *r)
 {
 	if (! m->f[field_id].is_set) {
-		*r = 0;
 		return -2;
 	}
 
@@ -860,7 +857,6 @@ int
 msg_get_int64(const msg *m, int field_id, int64_t *r)
 {
 	if (! m->f[field_id].is_set) {
-		*r = 0;
 		return -2;
 	}
 
@@ -876,12 +872,6 @@ msg_get_str(const msg *m, int field_id, char **r, size_t *len,
 		msg_get_type type)
 {
 	if (! m->f[field_id].is_set) {
-		*r = 0;
-
-		if (len) {
-			*len = 0;
-		}
-
 		return -2;
 	}
 
@@ -894,7 +884,6 @@ msg_get_str(const msg *m, int field_id, char **r, size_t *len,
 	}
 	else {
 		cf_crash(CF_MSG, "msg_get_str: illegal msg_get_type");
-		return -2;
 	}
 
 	if (len) {
@@ -910,12 +899,6 @@ msg_get_buf(const msg *m, int field_id, uint8_t **r, size_t *len,
 		msg_get_type type)
 {
 	if (! m->f[field_id].is_set) {
-		*r = 0;
-
-		if (len) {
-			*len = 0;
-		}
-
 		return -2;
 	}
 
@@ -929,7 +912,6 @@ msg_get_buf(const msg *m, int field_id, uint8_t **r, size_t *len,
 	}
 	else {
 		cf_crash(CF_MSG, "msg_get_buf: illegal msg_get_type");
-		return -2;
 	}
 
 	if (len) {

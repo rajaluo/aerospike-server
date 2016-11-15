@@ -733,6 +733,7 @@ static as_smd_event_t *as_smd_create_msg_event(as_smd_msg_op_t op, cf_node node_
 
 	if ((e = msg_get_uint64(msg, AS_SMD_MSG_CLUSTER_KEY, &(smd_msg->cluster_key)))) {
 		cf_warning(AS_SMD, "failed to get cluster key from System Metadata fabric msg (err %d)", e);
+		cf_free(evt);
 		return 0;
 	}
 
@@ -742,6 +743,7 @@ static as_smd_event_t *as_smd_create_msg_event(as_smd_msg_op_t op, cf_node node_
 
 	if ((e = msg_get_uint32(msg, AS_SMD_MSG_NUM_ITEMS, &(smd_msg->num_items)))) {
 		cf_warning(AS_SMD, "failed to get number of metadata items from System Metadata fabric msg (err %d)", e);
+		cf_free(evt);
 		return 0;
 	}
 

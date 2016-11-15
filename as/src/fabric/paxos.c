@@ -1896,10 +1896,12 @@ as_paxos_msg_unwrap(msg *m, as_paxos_transaction *t)
 	 * NB: the strange gyrations around bufp are because of the semantics of
 	 * msg_get_buf() and the fact that the as_paxos_change structure is
 	 * allocated directly within the as_paxos_transaction */
+	c = 0; // just preserve previous behavior of msg_get_uint32()
 	e += msg_get_uint32(m, AS_PAXOS_MSG_COMMAND, &c);
 	if (c != AS_PAXOS_MSG_COMMAND_SYNC_REQUEST && c != AS_PAXOS_MSG_COMMAND_SYNC &&
 		c != AS_PAXOS_MSG_COMMAND_PARTITION_SYNC_REQUEST && c != AS_PAXOS_MSG_COMMAND_PARTITION_SYNC  &&
 		c != AS_PAXOS_MSG_COMMAND_HEARTBEAT_EVENT && c != AS_PAXOS_MSG_COMMAND_RETRANSMIT_CHECK) {
+		t->gen.sequence = 0; // just preserve previous behavior of msg_get_uint32()
 		e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &t->gen.sequence);
 		// Older versions handled unused AS_PAXOS_MSG_GENERATION_PROPOSAL here.
 		e += msg_get_buf(m, AS_PAXOS_MSG_CHANGE, (byte **)&bufp, &bufsz, MSG_GET_DIRECT);
@@ -2073,7 +2075,7 @@ as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 	qm->id = id;
 	qm->m = m;
 
-	uint32_t c;
+	uint32_t c = 0;
 	msg_get_uint32(m, AS_PAXOS_MSG_COMMAND, &c);
 	cf_debug(AS_PAXOS, "PAXOS message with ID %d received from node %"PRIx64"", c, id);
 

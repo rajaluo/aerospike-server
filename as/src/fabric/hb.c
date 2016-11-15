@@ -2952,6 +2952,9 @@ msg_endpoint_list_get(msg* msg, as_endpoint_list** endpoint_list)
 	int field_id =
 		HB_MSG_IS_LEGACY(msg) ? AS_HB_V2_MSG_COMPAT_ENDPOINTS : AS_HB_MSG_ENDPOINTS;
 
+	// FIXME - shouldn't need this - check usage for non-zero default.
+	*endpoint_list = NULL;
+
 	size_t endpoint_list_size;
 	if (msg_get_buf(msg, field_id, (uint8_t**) endpoint_list, &endpoint_list_size, MSG_GET_DIRECT)
 		!= 0) {
@@ -2979,6 +2982,9 @@ static int
 msg_id_get(msg* msg, uint32_t* id)
 {
 	int field_id = HB_MSG_IS_LEGACY(msg) ? AS_HB_V2_MSG_ID : AS_HB_MSG_ID;
+
+	// FIXME - shouldn't need this - check usage for non-zero default.
+	*id = 0;
 
 	if (msg_get_uint32(msg, field_id, id) != 0) {
 		return -1;
@@ -3020,6 +3026,9 @@ msg_nodeid_get(msg* msg, cf_node* nodeid)
 {
 	int field_id =
 		HB_MSG_IS_LEGACY(msg) ? AS_HB_V2_MSG_NODE : AS_HB_MSG_NODE;
+
+	// FIXME - shouldn't need this - check usage for non-zero default.
+	*nodeid = 0;
 
 	if (msg_get_uint64(msg, field_id, nodeid) != 0) {
 		return -1;
@@ -3068,6 +3077,10 @@ msg_type_get(msg* msg, as_hb_msg_type* type)
 {
 	int field_id =
 		HB_MSG_IS_LEGACY(msg) ? AS_HB_V2_MSG_TYPE : AS_HB_MSG_TYPE;
+
+	// FIXME - shouldn't need this - check usage for non-zero default.
+	*type = 0;
+
 	if (msg_get_uint32(msg, field_id, type) != 0) {
 		return -1;
 	}
@@ -3111,6 +3124,10 @@ msg_cluster_name_get(msg* msg, char** cluster_name)
 static int
 msg_node_list_get(msg* msg, int field_id, cf_node** adj_list, size_t* adj_length)
 {
+	// FIXME - shouldn't need this - check usage for non-zero default.
+	*adj_list = NULL;
+	*adj_length = 0;
+
 	if (msg_get_buf(msg, field_id, (uint8_t**) adj_list, adj_length, MSG_GET_DIRECT) != 0) {
 		return -1;
 	}

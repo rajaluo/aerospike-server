@@ -277,9 +277,8 @@ repl_write_handle_op(cf_node node, msg* m)
 	}
 
 	cf_digest* keyd;
-	size_t sz;
 
-	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, &sz,
+	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "repl_write_handle_op: no digest");
 		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
@@ -310,14 +309,13 @@ repl_write_handle_op(cf_node node, msg* m)
 	}
 
 	cl_msg* msgp;
-	size_t msgp_sz;
 
 	uint8_t* pickled_buf;
 	size_t pickled_sz;
 
 	uint32_t result;
 
-	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, &msgp_sz,
+	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
 			MSG_GET_DIRECT) == 0) {
 		// <><><><><><>  Delete Operation  <><><><><><>
 
@@ -361,7 +359,7 @@ repl_write_handle_op(cf_node node, msg* m)
 		// Optional - older versions won't send it.
 		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
-		as_rec_props rec_props;
+		as_rec_props rec_props = { NULL, 0 };
 		size_t rec_props_size = 0;
 
 		msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data, &rec_props_size,
@@ -393,9 +391,8 @@ repl_write_handle_ack(cf_node node, msg* m)
 	}
 
 	cf_digest* keyd;
-	size_t sz;
 
-	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, &sz,
+	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "repl-write ack: no digest");
 		as_fabric_msg_put(m);
@@ -581,9 +578,8 @@ repl_write_handle_multiop(cf_node node, msg* m)
 	}
 
 	cf_digest* keyd;
-	size_t sz;
 
-	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, &sz,
+	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "handle_multiop: no digest");
 		send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
@@ -771,9 +767,8 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 		ldt_prole_info* linfo)
 {
 	cf_digest* keyd;
-	size_t sz;
 
-	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, &sz,
+	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "handle_multiop_subop: no digest");
 		return true;
@@ -804,12 +799,11 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 	}
 
 	cl_msg* msgp;
-	size_t msgp_sz;
 
 	uint8_t* pickled_buf;
 	size_t pickled_sz;
 
-	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, &msgp_sz,
+	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
 			MSG_GET_DIRECT) == 0) {
 		delete_replica(rsv, keyd,
 				(info & (RW_INFO_LDT_SUBREC | RW_INFO_LDT_ESR)) != 0,
@@ -837,7 +831,7 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 		// Optional - older versions won't send it.
 		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
-		as_rec_props rec_props;
+		as_rec_props rec_props = { NULL, 0 };
 		size_t rec_props_size = 0;
 
 		msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data, &rec_props_size,
@@ -860,9 +854,8 @@ bool
 ldt_get_info(ldt_prole_info* linfo, msg* m, as_partition_reservation* rsv)
 {
 	as_partition_vinfo* source_vinfo;
-	size_t vinfo_sz;
 
-	if (msg_get_buf(m, RW_FIELD_VINFOSET, (uint8_t**)&source_vinfo, &vinfo_sz,
+	if (msg_get_buf(m, RW_FIELD_VINFOSET, (uint8_t**)&source_vinfo, NULL,
 			MSG_GET_DIRECT) != 0) {
 		return false;
 	}

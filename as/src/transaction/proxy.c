@@ -572,9 +572,8 @@ proxyer_handle_batch_response(msg* m, proxy_request* pr)
 	}
 
 	cf_digest* keyd;
-	size_t keyd_sz;
 
-	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, &keyd_sz,
+	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_crash(AS_PROXY, "original msg get for digest failed");
 	}
@@ -620,19 +619,17 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 	}
 
 	cf_digest* keyd;
-	size_t keyd_sz = 0;
 
-	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, &keyd_sz,
+	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_crash(AS_PROXY, "original msg get for digest failed");
 	}
 
 	cl_msg* msgp;
-	size_t msgp_sz;
 
 	// TODO - inefficient! Should be a way to 'take' a buffer from msg.
-	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp,
-			&msgp_sz, MSG_GET_COPY_MALLOC) != 0) {
+	if (msg_get_buf(pr->fab_msg, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp, NULL,
+			MSG_GET_COPY_MALLOC) != 0) {
 		cf_crash(AS_PROXY, "original msg get for proto failed");
 	}
 
@@ -666,9 +663,8 @@ void
 proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 {
 	cf_digest* keyd;
-	size_t keyd_sz = 0;
 
-	if (msg_get_buf(m, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, &keyd_sz,
+	if (msg_get_buf(m, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_PROXY, "msg get for digest failed");
 		error_response(src, tid, AS_PROTO_RESULT_FAIL_UNKNOWN);
@@ -700,7 +696,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 	msg_get_uint32(m, PROXY_FIELD_INFO, &info);
 
 	if ((info & PROXY_INFO_SHIPPED_OP) != 0) {
-		uint64_t cluster_key = 0;
+		uint64_t cluster_key;
 
 		if (msg_get_uint64(m, PROXY_FIELD_CLUSTER_KEY, &cluster_key) == 0 &&
 				cluster_key != as_paxos_get_cluster_key()) {
@@ -850,16 +846,14 @@ proxy_retransmit_send(proxy_request* pr)
 		// Destination is self - abandon proxy and try local transaction.
 		if (new_dst == g_config.self_node) {
 			cf_digest* keyd;
-			size_t keyd_sz;
 
-			msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd,
-					&keyd_sz, MSG_GET_DIRECT);
+			msg_get_buf(pr->fab_msg, PROXY_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
+					MSG_GET_DIRECT);
 
 			cl_msg* msgp;
-			size_t msgp_sz;
 
 			msg_get_buf(pr->fab_msg, PROXY_FIELD_AS_PROTO, (uint8_t**)&msgp,
-					&msgp_sz, MSG_GET_COPY_MALLOC);
+					NULL, MSG_GET_COPY_MALLOC);
 
 			as_transaction tr;
 			as_transaction_init_head(&tr, keyd, msgp);

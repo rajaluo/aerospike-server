@@ -806,11 +806,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	as_storage_record_get_key(&rd);
 
 	as_rec_props_clear(&pr.rec_props);
-	as_rec_props rec_props;
-
-	if (as_storage_record_copy_rec_props(&rd, &rec_props) != 0) {
-		pr.rec_props = rec_props;
-	}
+	as_storage_record_copy_rec_props(&rd, &pr.rec_props);
 
 	as_ldt_fill_precord(&pr, &rd, emig);
 
@@ -1145,9 +1141,13 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 int
 migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 {
-	uint32_t op = OPERATION_UNDEF;
+	uint32_t op;
 
-	msg_get_uint32(m, MIG_FIELD_OP, &op);
+	if (msg_get_uint32(m, MIG_FIELD_OP, &op) != 0) {
+		cf_warning(AS_MIGRATE, "received message with no op");
+		as_fabric_msg_put(m);
+		return 0;
+	}
 
 	switch (op) {
 	//--------------------------------------------
@@ -1193,7 +1193,7 @@ migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 		break;
 
 	default:
-		cf_warning(AS_MIGRATE, "received unexpected message op %u", op);
+		cf_detail(AS_MIGRATE, "received unexpected message op %u", op);
 		as_fabric_msg_put(m);
 		break;
 	}
@@ -1223,7 +1223,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		return;
 	}
 
-	uint8_t *ns_name = NULL;
+	uint8_t *ns_name;
 	size_t ns_name_len;
 
 	if (msg_get_buf(m, MIG_FIELD_NAMESPACE, &ns_name, &ns_name_len,
@@ -1385,9 +1385,8 @@ immigration_ack_start_request(cf_node src, msg *m, uint32_t op)
 void
 immigration_handle_insert_request(cf_node src, msg *m) {
 	cf_digest *keyd;
-	size_t sz = 0;
 
-	if (msg_get_buf(m, MIG_FIELD_DIGEST, (byte **)&keyd, &sz,
+	if (msg_get_buf(m, MIG_FIELD_DIGEST, (byte **)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_MIGRATE, "handle insert: msg get for digest failed");
 		as_fabric_msg_put(m);
@@ -1441,8 +1440,8 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 		// Older nodes won't send this.
 		msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
-		void *value = NULL;
-		size_t value_sz = 0;
+		void *value;
+		size_t value_sz;
 
 		if (msg_get_buf(m, MIG_FIELD_RECORD, (byte **)&value, &value_sz,
 				MSG_GET_DIRECT) != 0) {
@@ -1452,13 +1451,6 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 			return;
 		}
 
-		as_rec_props rec_props;
-		as_rec_props_clear(&rec_props);
-
-		// These are optional.
-		msg_get_buf(m, MIG_FIELD_REC_PROPS, &rec_props.p_data,
-				(size_t *)&rec_props.size, MSG_GET_DIRECT);
-
 		as_record_merge_component c;
 
 		c.record_buf = value;
@@ -1466,7 +1458,14 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 		c.generation = generation;
 		c.void_time = void_time;
 		c.last_update_time = last_update_time;
-		c.rec_props = rec_props;
+		as_rec_props_clear(&c.rec_props);
+
+		size_t rec_props_size = 0;
+
+		// These are optional.
+		msg_get_buf(m, MIG_FIELD_REC_PROPS, &c.rec_props.p_data,
+				&rec_props_size, MSG_GET_DIRECT);
+		c.rec_props.size = (uint32_t)rec_props_size;
 
 		if (as_ldt_get_migrate_info(immig, &c, m, keyd)) {
 			immigration_release(immig);
@@ -1898,8 +1897,6 @@ int
 as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
 		msg *m, cf_digest *keyd)
 {
-	uint32_t info = 0;
-
 	c->flag        = AS_COMPONENT_FLAG_MIG;
 	c->pdigest     = cf_digest_zero;
 	c->edigest     = cf_digest_zero;
@@ -1910,6 +1907,8 @@ as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
 	if (! immig->rsv.ns->ldt_enabled) {
 		return 0;
 	}
+
+	uint32_t info;
 
 	if (msg_get_uint32(m, MIG_FIELD_INFO, &info) == 0) {
 		if ((info & MIG_INFO_LDT_SUBREC) != 0) {
@@ -1924,16 +1923,16 @@ as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
 	}
 	// else - resort to defaults.
 
-	size_t sz = 0;
-	cf_digest *key;
+	cf_digest *key = NULL;
 
-	msg_get_buf(m, MIG_FIELD_PDIGEST, (byte **)&key, &sz, MSG_GET_DIRECT);
+	msg_get_buf(m, MIG_FIELD_PDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
 
 	if (key) {
 		c->pdigest = *key;
+		key = NULL;
 	}
 
-	msg_get_buf(m, MIG_FIELD_EDIGEST, (byte **)&key, &sz, MSG_GET_DIRECT);
+	msg_get_buf(m, MIG_FIELD_EDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
 
 	if (key) {
 		c->edigest = *key;

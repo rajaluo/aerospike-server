@@ -429,7 +429,7 @@ as_partition_balance()
 			uint32_t n_dupl = 0;
 			cf_node dupl_nodes[cluster_size]; // nodes with duplicate versions
 
-			memset(&dupl_nodes, 0, sizeof(dupl_nodes));
+			memset(dupl_nodes, 0, sizeof(dupl_nodes));
 
 			bool has_version[cluster_size];
 			int self_n = -1;
@@ -1362,7 +1362,7 @@ find_duplicates(const as_partition* p, const cf_node* node_seq_table,
 	uint32_t n_dupl = 0;
 	as_partition_vinfo dupl_pvinfo[cluster_size];
 
-	memset(&dupl_pvinfo, 0, sizeof(dupl_pvinfo));
+	memset(dupl_pvinfo, 0, sizeof(dupl_pvinfo));
 
 	for (uint32_t n = 0; n < cluster_size; n++) {
 		int sl_ix = SL_IX(pid, n);

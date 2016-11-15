@@ -150,9 +150,8 @@ void
 dup_res_handle_request(cf_node node, msg* m)
 {
 	cf_digest* keyd;
-	size_t sz = 0;
 
-	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, &sz,
+	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "dup-res handler: no digest");
 		send_ack_for_bad_request(node, m);
@@ -170,8 +169,8 @@ dup_res_handle_request(cf_node node, msg* m)
 	uint8_t* ns_name;
 	size_t ns_name_len;
 
-	if (0 != msg_get_buf(m, RW_FIELD_NAMESPACE, &ns_name, &ns_name_len,
-			MSG_GET_DIRECT)) {
+	if (msg_get_buf(m, RW_FIELD_NAMESPACE, &ns_name, &ns_name_len,
+			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "dup-res handler: no namespace");
 		send_ack_for_bad_request(node, m);
 		return;
@@ -312,9 +311,8 @@ dup_res_handle_ack(cf_node node, msg* m)
 	}
 
 	cf_digest* keyd;
-	size_t sz;
 
-	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, &sz,
+	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_RW, "dup-res ack: no digest");
 		as_fabric_msg_put(m);
@@ -517,7 +515,7 @@ apply_winner(rw_request* rw)
 	int n = 0;
 	as_record_merge_component dups[rw->n_dest_nodes];
 
-	memset(&dups, 0, sizeof(dups));
+	memset(dups, 0, sizeof(dups));
 
 	for (int i = 0; i < rw->n_dest_nodes; i++) {
 		msg* m = rw->dup_msg[i];

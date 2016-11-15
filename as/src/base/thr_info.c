@@ -5086,9 +5086,12 @@ convert_legacy_services(const char *legacy)
 int
 info_msg_fn(cf_node node, msg *m, void *udata)
 {
-	uint32_t op = 9999;
-	msg_get_uint32(m, INFO_FIELD_OP, &op);
-	int rv;
+	uint32_t op;
+
+	if (msg_get_uint32(m, INFO_FIELD_OP, &op) != 0) {
+		as_fabric_msg_put(m);
+		return 0;
+	}
 
 	switch (op) {
 	case INFO_OP_UPDATE:
@@ -5194,7 +5197,9 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			msg_preserve_fields(m, 1, INFO_FIELD_GENERATION);
 			msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_ACK);
 
-			if ((rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH))) {
+			int rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH);
+
+			if (rv != AS_FABRIC_SUCCESS) {
 				cf_warning(AS_INFO, "Failed to send message %p with type %d to node %"PRIu64" (rv %d)",
 						m, (int32_t)m->type, node, rv);
 				as_fabric_msg_put(m);
@@ -5208,7 +5213,8 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 
 			cf_debug(AS_INFO, " received ACK from node %"PRIx64, node);
 
-			uint32_t	gen;
+			// TODO - dangerous to continue if no generation ???
+			uint32_t gen = 0;
 			msg_get_uint32(m, INFO_FIELD_GENERATION, &gen);
 			info_node_info	*info;
 			pthread_mutex_t	*vlock;
