@@ -969,12 +969,6 @@ static void modules_rchash_destructor_fn(void *object)
 	module_obj->accept_cb = module_obj->accept_udata = NULL;
 	module_obj->can_accept_cb = module_obj->can_accept_udata = NULL;
 
-	// Persist the module's metadata.
-	int retval = 0;
-	if ((retval = as_smd_module_persist(module_obj))) {
-		cf_warning(AS_SMD, "failed to persist System Metadata for module \"%s\" upon destruction (rv %d)", module_obj->module, retval);
-	}
-
 	// Release the module's JSON if necessary.
 	json_decref(module_obj->json);
 	module_obj->json = NULL;
