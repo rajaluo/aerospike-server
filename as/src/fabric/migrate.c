@@ -162,7 +162,8 @@ static shash *g_immigration_ldt_version_hash;
 // Forward declarations and inlines.
 //
 
-// Emigration, immigration, & pickled record destructors.
+// Various initializers and destructors.
+void emigration_init(emigration *emig);
 void emigration_destroy(void *parm);
 int emigration_reinsert_destroy_reduce_fn(void *key, void *data, void *udata);
 void immigration_destroy(void *parm);
@@ -172,6 +173,8 @@ void pickled_record_destroy(pickled_record *pr);
 void *run_emigration(void *arg);
 void emigration_pop(emigration **emigp);
 int emigration_pop_reduce_fn(void *buf, void *udata);
+void emigration_hash_insert(emigration *emig);
+void emigration_hash_delete(emigration *emig);
 as_migrate_state emigrate(emigration *emig);
 as_migrate_state emigrate_tree(emigration *emig);
 void *run_emigration_reinserter(void *arg);
@@ -439,8 +442,25 @@ as_migrate_dump(bool verbose)
 
 
 //==========================================================
-// Local helpers - emigration, immigration, & pickled record destructors.
+// Local helpers - various initializers and destructors.
 //
+
+void
+emigration_init(emigration *emig)
+{
+	shash_create(&emig->reinsert_hash, emigration_insert_hashfn,
+			sizeof(uint32_t), sizeof(emigration_reinsert_ctrl), 16 * 1024,
+			SHASH_CR_MT_MANYLOCK);
+
+	cf_assert(emig->reinsert_hash, AS_MIGRATE, "failed to create hash");
+
+	emig->ctrl_q = cf_queue_create(sizeof(int), true);
+
+	cf_assert(emig->ctrl_q, AS_MIGRATE, "failed to create queue");
+
+	emig->meta_q = emig_meta_q_create();
+}
+
 
 // Destructor handed to rchash.
 void
@@ -552,26 +572,38 @@ run_emigration(void *arg)
 		}
 
 		if (emig->cluster_key != as_paxos_get_cluster_key()) {
-			emigration_release(emig);
+			emigration_hash_delete(emig);
 			continue;
 		}
 
-		// Add the emigration to the global hash so acks can find it.
-		rchash_put(g_emigration_hash, (void *)&emig->id, sizeof(emig->id),
-				(void *)emig);
+		as_namespace *ns = emig->rsv.ns;
 
-		cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_partitions_active);
+		// Add the emigration to the global hash so acks can find it.
+		emigration_hash_insert(emig);
+
+		cf_atomic_int_incr(&ns->migrate_tx_partitions_active);
 
 		as_migrate_state result = emigrate(emig);
 
-		as_partition_emigrate_done(result, emig->rsv.ns, emig->rsv.p->id,
+		if (result == AS_MIGRATE_STATE_EAGAIN) {
+			// Remote node refused migration, requeue and fetch another.
+			cf_atomic_int_decr(&ns->migrate_tx_partitions_active);
+
+			if (cf_queue_push(&g_emigration_q, &emig) != CF_QUEUE_OK) {
+				cf_crash(AS_MIGRATE, "failed emigration queue push");
+			}
+
+			continue;
+		}
+
+		as_partition_emigrate_done(result, ns, emig->rsv.p->id,
 				emig->cluster_key, emig->tx_flags);
 
 		emig->tx_state = AS_PARTITION_MIG_TX_STATE_NONE;
 
-		cf_atomic_int_decr(&emig->rsv.ns->migrate_tx_partitions_active);
+		cf_atomic_int_decr(&ns->migrate_tx_partitions_active);
 
-		rchash_delete(g_emigration_hash, (void *)&emig->id, sizeof(emig->id));
+		emigration_hash_delete(emig);
 	}
 
 	return NULL;
@@ -607,6 +639,14 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 		return -1; // process immediately
 	}
 
+	if (emig->ctrl_q && cf_queue_sz(emig->ctrl_q) > 0) {
+		// This emig was requeued after its start command got an ACK_EAGAIN,
+		// likely because dest hit 'migrate-max-num-incoming'. A new ack has
+		// arrived - if it's ACK_OK, don't leave remote node hanging.
+
+		return -1; // process immediately
+	}
+
 	if (best->avoid_dest == 0) {
 		best->avoid_dest = g_avoid_dest;
 	}
@@ -634,28 +674,33 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 }
 
 
+void
+emigration_hash_insert(emigration *emig)
+{
+	if (! emig->ctrl_q) {
+		emigration_init(emig); // creates emig->ctrl_q etc.
+
+		rchash_put(g_emigration_hash, (void *)&emig->id, sizeof(emig->id),
+				(void *)emig);
+	}
+}
+
+
+void
+emigration_hash_delete(emigration *emig)
+{
+	if (emig->ctrl_q) {
+		rchash_delete(g_emigration_hash, (void *)&emig->id, sizeof(emig->id));
+	}
+	else {
+		emigration_release(emig);
+	}
+}
+
+
 as_migrate_state
 emigrate(emigration *emig)
 {
-	as_namespace *ns = emig->rsv.ns;
-
-	emig->ctrl_q = cf_queue_create(sizeof(int), true);
-	emig->meta_q = emig_meta_q_create();
-
-	if (! emig->ctrl_q) {
-		cf_warning(AS_MIGRATE, "imbalance: failed to allocate emig ctrl q");
-		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
-		return AS_MIGRATE_STATE_ERROR;
-	}
-
-	if (shash_create(&emig->reinsert_hash, emigration_insert_hashfn,
-			sizeof(uint32_t), sizeof(emigration_reinsert_ctrl),
-			16 * 1024, SHASH_CR_MT_MANYLOCK) != SHASH_OK) {
-		cf_warning(AS_MIGRATE, "imbalance: failed to allocate reinsert hash");
-		cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
-		return AS_MIGRATE_STATE_ERROR;
-	}
-
 	as_migrate_state result;
 
 	//--------------------------------------------
@@ -668,7 +713,7 @@ emigrate(emigration *emig)
 	//--------------------------------------------
 	// Send whole sub-tree - may block a while.
 	//
-	if (ns->ldt_enabled) {
+	if (emig->rsv.ns->ldt_enabled) {
 		if ((result = emigrate_tree(emig)) != AS_MIGRATE_STATE_DONE) {
 			return result;
 		}
@@ -983,7 +1028,8 @@ emigration_send_start(emigration *emig)
 
 		uint64_t now = cf_getms();
 
-		if (start_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
+		if (cf_queue_sz(emig->ctrl_q) == 0 &&
+				start_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
 			msg_incr_ref(m);
 
 			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
@@ -1006,8 +1052,8 @@ emigration_send_start(emigration *emig)
 				as_fabric_msg_put(m);
 				return AS_MIGRATE_STATE_DONE;
 			case OPERATION_START_ACK_EAGAIN:
-				usleep(MIGRATE_RETRANSMIT_STARTDONE_MS * 1000);
-				break;
+				as_fabric_msg_put(m);
+				return AS_MIGRATE_STATE_EAGAIN;
 			case OPERATION_START_ACK_FAIL:
 				cf_warning(AS_MIGRATE, "imbalance: dest refused migrate with ACK_FAIL");
 				cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
