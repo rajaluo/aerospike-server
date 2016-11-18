@@ -2051,6 +2051,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "ldt-page-size", ns->ldt_page_size);
 	info_append_uint64(db, "max-ttl", ns->max_ttl);
 	info_append_uint32(db, "migrate-order", ns->migrate_order);
+	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
 	info_append_uint32(db, "obj-size-hist-max", ns->obj_size_hist_max); // not original, may have been rounded
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
@@ -3017,6 +3018,13 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of migrate-order of ns %s from %u to %d", ns->name, ns->migrate_order, val);
 			ns->migrate_order = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "migrate-retransmit-ms", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of migrate-retransmit-ms of ns %s from %u to %d", ns->name, ns->migrate_retransmit_ms, val);
+			ns->migrate_retransmit_ms = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-sleep", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
