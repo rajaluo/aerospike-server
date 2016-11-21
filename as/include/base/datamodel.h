@@ -808,8 +808,8 @@ struct as_namespace_s {
 	// Configuration.
 	//
 
-	uint16_t		cfg_replication_factor;
-	uint16_t		replication_factor; // indirect config - can become less than cfg_replication_factor
+	uint32_t		cfg_replication_factor;
+	uint32_t		replication_factor; // indirect config - can become less than cfg_replication_factor
 	uint64_t		memory_size;
 	uint64_t		default_ttl;
 

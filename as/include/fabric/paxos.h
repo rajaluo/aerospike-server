@@ -242,7 +242,7 @@ typedef struct as_paxos_t {
 	// keeps track of transactions currently in flight
 	as_paxos_transaction *current[AS_CLUSTER_SZ];
 
-	size_t cluster_size;
+	uint32_t cluster_size;
 
 	bool cluster_has_integrity;    // Is true when there is no cluster integrity fault.
 

@@ -80,6 +80,7 @@ cf_atomic32 g_partition_generation = 0;
 
 // Using int for 4-byte size, but maintaining bool semantics.
 // TODO - ok as non-volatile, but should selectively load/store in the future.
+// Better - use g_partition_generation and selectively load to compare non-0.
 static int g_init_balance_done = false;
 
 static cf_atomic32 g_migrate_num_incoming = 0;
@@ -97,7 +98,7 @@ static uint64_t g_hashed_pids[AS_PARTITIONS];
 
 void set_partition_version_in_storage(as_namespace* ns, uint32_t pid, const as_partition_vinfo* vinfo, bool flush);
 void generate_new_partition_version(as_partition_vinfo* new_vinfo);
-void apply_single_replica_limit(int cluster_size);
+void apply_single_replica_limit(uint32_t cluster_size);
 void partition_cluster_topology_info();
 void fill_node_sequence_table(cf_node* node_seq_table, int* succession_index_table);
 void adjust_node_sequence_table(cf_node* node_seq_table, int* succession_index_table, uint32_t repl_factor);
@@ -321,18 +322,12 @@ as_partition_balance_is_multi_node_cluster()
 void
 as_partition_balance()
 {
-	// Shortcut pointers.
-	cf_node* succession = g_paxos->succession;
-
+	//--------------------------------------------
 	// TODO: START move to paxos.
-	if (! succession) {
-		cf_crash(AS_PARTITION, "imbalance: succession list is uninitialized: couldn't start migrate");
-	}
-
 	uint32_t cluster_size = 0;
 
 	while (cluster_size < AS_CLUSTER_SZ) {
-		if (succession[cluster_size] == (cf_node)0) {
+		if (g_paxos->succession[cluster_size] == (cf_node)0) {
 			break;
 		}
 
@@ -340,10 +335,11 @@ as_partition_balance()
 	}
 
 	g_paxos->cluster_size = cluster_size;
-	cf_info(AS_PARTITION, "CLUSTER SIZE = %zu", g_paxos->cluster_size);
+	cf_info(AS_PARTITION, "CLUSTER SIZE = %u", g_paxos->cluster_size);
 
 	as_paxos_set_cluster_integrity(g_paxos, true);
 	// TODO: END move to paxos.
+	//--------------------------------------------
 
 	// Figure out effective replication factor in the face of node failures.
 	apply_single_replica_limit(cluster_size);
@@ -1024,11 +1020,11 @@ generate_new_partition_version(as_partition_vinfo* new_vinfo)
 // Reduce the replication factor to 1 if the cluster size is less than or equal
 // to the specified limit.
 void
-apply_single_replica_limit(int cluster_size)
+apply_single_replica_limit(uint32_t cluster_size)
 {
 	bool reduce_repl = false;
 
-	cf_info(AS_PARTITION, "setting replication factors: cluster size %d, paxos single replica limit %d",
+	cf_info(AS_PARTITION, "setting replication factors: cluster size %u, paxos single replica limit %u",
 			cluster_size, g_config.paxos_single_replica_limit);
 
 	if (cluster_size <= g_config.paxos_single_replica_limit) {
@@ -1038,7 +1034,7 @@ apply_single_replica_limit(int cluster_size)
 	// Normal case - set replication factor.
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		as_namespace* ns = g_config.namespaces[ns_ix];
-		uint16_t repl_factor = ns->cfg_replication_factor > cluster_size ?
+		uint32_t repl_factor = ns->cfg_replication_factor > cluster_size ?
 				cluster_size : ns->cfg_replication_factor;
 
 		ns->replication_factor = reduce_repl ? 1 : repl_factor;
@@ -1053,7 +1049,7 @@ void
 partition_cluster_topology_info()
 {
 	cf_node* succession = g_paxos->succession;
-	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
+	uint32_t cluster_size = g_paxos->cluster_size;
 
 	uint32_t distinct_groups = 0;
 	cluster_config_t cc;
@@ -1136,7 +1132,7 @@ partition_cluster_topology_info()
 void
 fill_node_sequence_table(cf_node* node_seq_table, int* succession_index_table)
 {
-	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
+	uint32_t cluster_size = g_paxos->cluster_size;
 	cf_node* succession = g_paxos->succession;
 	uint64_t hashed_nodes[cluster_size];
 
@@ -1218,7 +1214,7 @@ adjust_node_sequence_table(cf_node* node_seq_table, int* succession_index_table,
 		return;
 	}
 
-	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
+	uint32_t cluster_size = g_paxos->cluster_size;
 	uint32_t n_groups = g_config.cluster.group_count;
 	uint32_t n_needed = n_groups < repl_factor ? n_groups : repl_factor;
 
@@ -1306,7 +1302,7 @@ set_primary_version(as_partition* p, const cf_node* node_seq_table,
 		const int* succession_index_table, as_namespace* ns, bool has_version[],
 		int* self_n)
 {
-	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
+	uint32_t cluster_size = g_paxos->cluster_size;
 	uint32_t pid = p->id;
 	int first_versioned_n = -1;
 
@@ -1356,7 +1352,7 @@ find_duplicates(const as_partition* p, const cf_node* node_seq_table,
 		const int* succession_index_table, const as_namespace* ns,
 		cf_node dupl_nodes[])
 {
-	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
+	uint32_t cluster_size = g_paxos->cluster_size;
 	uint32_t pid = p->id;
 
 	uint32_t n_dupl = 0;
@@ -1400,7 +1396,7 @@ find_duplicates(const as_partition* p, const cf_node* node_seq_table,
 bool
 should_advance_version(const as_partition* p, uint32_t old_repl_factor)
 {
-	uint32_t cluster_size = (uint32_t)g_paxos->cluster_size;
+	uint32_t cluster_size = g_paxos->cluster_size;
 	cf_node* succession = g_paxos->succession;
 
 	for (uint32_t repl_ix = 0; repl_ix < old_repl_factor; repl_ix++) {

@@ -2029,7 +2029,7 @@ as_paxos_spark(as_paxos_change *c)
 		cb += count;
 	}
 	*cb = '\0';
-	cf_info(AS_PAXOS, "as_paxos_spark establishing transaction [%"PRIu32"]@%"PRIx64" ClSz = %zu ; # change = %d : %s",
+	cf_info(AS_PAXOS, "as_paxos_spark establishing transaction [%"PRIu32"]@%"PRIx64" ClSz = %u ; # change = %d : %s",
 			t.gen.sequence, g_config.self_node, p->cluster_size, t.c.n_change, change_buf);
 
 	/*
@@ -3855,7 +3855,7 @@ as_paxos_dump(bool verbose)
 	as_paxos *p = g_paxos;
 	bool self = false, principal = false;
 
-	cf_info(AS_PAXOS, "Current Cluster Size: %zu", p->cluster_size);
+	cf_info(AS_PAXOS, "Current Cluster Size: %u", p->cluster_size);
 
 	cf_info(AS_PAXOS, "Cluster Key: %"PRIx64"", as_paxos_get_cluster_key());
 

@@ -2675,10 +2675,10 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 	cf_debug(AS_SMD, "invoking merge policy for module \"%s\"", module);
 
 	as_smd_item_list_t *item_list_out = NULL;
-	size_t num_lists = g_paxos->cluster_size;
+	uint32_t num_lists = g_paxos->cluster_size;
 	as_smd_item_list_t **item_lists_in = NULL;
 	if (!(item_lists_in = (as_smd_item_list_t **) cf_calloc(num_lists, sizeof(as_smd_item_list_t *)))) {
-		cf_crash(AS_SMD, "failed to allocate %zu System Metadata item lists", num_lists);
+		cf_crash(AS_SMD, "failed to allocate %u System Metadata item lists", num_lists);
 	}
 
 	int list_num = 0;
@@ -2693,7 +2693,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 
 		shash *module_item_count_hash = NULL;
 		if (SHASH_OK != shash_get(smd->scoreboard, &node_id, &module_item_count_hash)) {
-			cf_debug(AS_SMD, "***Cluster Size Is: %zu ; Scoreboard size is %d***", g_paxos->cluster_size, shash_get_size(smd->scoreboard));
+			cf_debug(AS_SMD, "***Cluster Size Is: %u ; Scoreboard size is %d***", g_paxos->cluster_size, shash_get_size(smd->scoreboard));
 
 			// Node may be in succession but not officially in cluster yet....
 			cf_debug(AS_SMD, "failed to get module item count hash for node %016lX ~~ Skipping!", node_id);
@@ -2858,7 +2858,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 
 	// Merge the metadata when all nodes have reported in.
 	if (shash_get_size(smd->scoreboard) == g_paxos->cluster_size) {
-		cf_debug(AS_SMD, "received metadata from all %zu cluster nodes ~~ invoking merge policies", g_paxos->cluster_size);
+		cf_debug(AS_SMD, "received metadata from all %u cluster nodes ~~ invoking merge policies", g_paxos->cluster_size);
 
 		// TODO: Make sure we're still principal. 
 		if (as_paxos_succession_getprincipal() != g_config.self_node) {
@@ -2880,7 +2880,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 		// But now two node has gone down. Cluster size is reduced to 2.
 		as_smd_clear_scoreboard(smd);
 	} else {
-		cf_debug(AS_SMD, "Cluster size = %zu and smd->scoreboard size = %d ", g_paxos->cluster_size, shash_get_size(smd->scoreboard));
+		cf_debug(AS_SMD, "Cluster size = %u and smd->scoreboard size = %d ", g_paxos->cluster_size, shash_get_size(smd->scoreboard));
 	}
 
 	return retval;

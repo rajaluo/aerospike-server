@@ -261,7 +261,7 @@ info_segv_test(char *name, cf_dyn_buf *db)
 int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
-	info_append_int(db, "cluster_size", g_paxos->cluster_size);
+	info_append_uint32(db, "cluster_size", g_paxos->cluster_size);
 	info_append_uint64_x(db, "cluster_key", as_paxos_get_cluster_key()); // not in ticker
 	info_append_bool(db, "cluster_integrity", as_paxos_get_cluster_integrity(g_paxos)); // not in ticker
 
@@ -2006,7 +2006,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		return;
 	}
 
-	info_append_uint32(db, "repl-factor", (uint32_t)ns->replication_factor);
+	info_append_uint32(db, "repl-factor", ns->replication_factor);
 	info_append_uint64(db, "memory-size", ns->memory_size);
 	info_append_uint64(db, "default-ttl", ns->default_ttl);
 

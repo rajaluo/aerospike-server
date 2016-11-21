@@ -163,7 +163,7 @@ run_ticker(void* arg)
 void
 log_ticker_frame()
 {
-	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %zd",
+	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u",
 			g_config.self_node,
 			g_paxos->cluster_size
 			);

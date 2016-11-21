@@ -83,10 +83,10 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_REC_PROPS, M_FT_BUF },
 		{ MIG_FIELD_INFO, M_FT_UINT32 },
 		{ MIG_FIELD_LDT_VERSION, M_FT_UINT64 },
-		{ MIG_FIELD_PDIGEST, M_FT_BUF },
-		{ MIG_FIELD_EDIGEST, M_FT_BUF },
-		{ MIG_FIELD_PGENERATION, M_FT_UINT32 },
-		{ MIG_FIELD_PVOID_TIME, M_FT_UINT32 },
+		{ MIG_FIELD_LDT_PDIGEST, M_FT_BUF },
+		{ MIG_FIELD_LDT_EDIGEST, M_FT_BUF },
+		{ MIG_FIELD_LDT_PGENERATION, M_FT_UINT32 },
+		{ MIG_FIELD_LDT_PVOID_TIME, M_FT_UINT32 },
 		{ MIG_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 },
 		{ MIG_FIELD_FEATURES, M_FT_UINT32 },
 		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT32 },
@@ -1832,23 +1832,23 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 				emig->rsv.ns);
 
 		if (rv == 0) {
-			msg_set_uint32(m, MIG_FIELD_PVOID_TIME, r_ref.r->void_time);
-			msg_set_uint32(m, MIG_FIELD_PGENERATION, r_ref.r->generation);
+			msg_set_uint32(m, MIG_FIELD_LDT_PVOID_TIME, r_ref.r->void_time);
+			msg_set_uint32(m, MIG_FIELD_LDT_PGENERATION, r_ref.r->generation);
 			as_record_done(&r_ref, emig->rsv.ns);
 		}
 		else {
 			return -1;
 		}
 
-		msg_set_buf(m, MIG_FIELD_PDIGEST, (void *)&pr->pkeyd, sizeof(cf_digest),
-				MSG_SET_COPY);
+		msg_set_buf(m, MIG_FIELD_LDT_PDIGEST, (void *)&pr->pkeyd,
+				sizeof(cf_digest), MSG_SET_COPY);
 
 		if (as_ldt_precord_is_esr(pr)) {
 			*info |= MIG_INFO_LDT_ESR;
 		}
 		else if (as_ldt_precord_is_subrec(pr)) {
 			*info |= MIG_INFO_LDT_SUBREC;
-			msg_set_buf(m, MIG_FIELD_EDIGEST, (void *)&pr->ekeyd,
+			msg_set_buf(m, MIG_FIELD_LDT_EDIGEST, (void *)&pr->ekeyd,
 					sizeof(cf_digest), MSG_SET_COPY);
 		}
 		else {
@@ -1971,22 +1971,22 @@ as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
 
 	cf_digest *key = NULL;
 
-	msg_get_buf(m, MIG_FIELD_PDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
+	msg_get_buf(m, MIG_FIELD_LDT_PDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
 
 	if (key) {
 		c->pdigest = *key;
 		key = NULL;
 	}
 
-	msg_get_buf(m, MIG_FIELD_EDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
+	msg_get_buf(m, MIG_FIELD_LDT_EDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
 
 	if (key) {
 		c->edigest = *key;
 	}
 
 	msg_get_uint64(m, MIG_FIELD_LDT_VERSION, &c->version);
-	msg_get_uint32(m, MIG_FIELD_PGENERATION, &c->pgeneration);
-	msg_get_uint32(m, MIG_FIELD_PVOID_TIME, &c->pvoid_time);
+	msg_get_uint32(m, MIG_FIELD_LDT_PGENERATION, &c->pgeneration);
+	msg_get_uint32(m, MIG_FIELD_LDT_PVOID_TIME, &c->pvoid_time);
 
 	if (COMPONENT_IS_LDT_SUB(c)) {
 		;
