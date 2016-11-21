@@ -185,14 +185,13 @@ dup_res_handle_request(cf_node node, msg* m)
 	}
 
 	uint32_t generation = 0;
-	uint32_t void_time = 0;
 	bool local_conflict_check =
-			msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0 &&
-			msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time) == 0;
+			msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0;
 
+	uint32_t void_time = 0;
 	uint64_t last_update_time = 0;
 
-	// Older nodes won't send this.
+	msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
 	msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
 	// Done reading message fields, may now set fields for ack.
@@ -540,12 +539,7 @@ apply_winner(rw_request* rw)
 			continue;
 		}
 
-		if (msg_get_uint32(m, RW_FIELD_VOID_TIME, &dups[n].void_time) != 0) {
-			cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: no void_time ");
-			continue;
-		}
-
-		// Older nodes won't send this.
+		msg_get_uint32(m, RW_FIELD_VOID_TIME, &dups[n].void_time);
 		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &dups[n].last_update_time);
 
 		if (rw->rsv.ns->ldt_enabled) {

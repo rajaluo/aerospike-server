@@ -345,18 +345,10 @@ repl_write_handle_op(cf_node node, msg* m)
 			return;
 		}
 
-		uint32_t void_time;
-
-		if (msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time) != 0) {
-			cf_warning(AS_RW, "repl_write_handle_op: no void-time");
-			as_partition_release(&rsv);
-			send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
-			return;
-		}
-
+		uint32_t void_time = 0;
 		uint64_t last_update_time = 0;
 
-		// Optional - older versions won't send it.
+		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
 		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
 		as_rec_props rec_props = { NULL, 0 };
@@ -774,12 +766,9 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 		return true;
 	}
 
-	uint32_t info;
+	uint32_t info = 0;
 
-	if (msg_get_uint32(m, RW_FIELD_INFO, &info) != 0) {
-		cf_warning(AS_RW, "handle_multiop_subop: no info");
-		return true;
-	}
+	msg_get_uint32(m, RW_FIELD_INFO, &info);
 
 	if ((info & RW_INFO_LDT) != 0 && ! ldt_get_info(linfo, m, rsv)) {
 		cf_warning(AS_RW, "handle_multiop_subop: no ldt info");
@@ -820,15 +809,10 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 			return true;
 		}
 
-		uint32_t void_time;
-
-		if (msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time) != 0) {
-			cf_warning(AS_RW, "handle_multiop_subop: no void-time");
-			return true;
-		}
-
+		uint32_t void_time = 0;
 		uint64_t last_update_time = 0;
-		// Optional - older versions won't send it.
+
+		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
 		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
 		as_rec_props rec_props = { NULL, 0 };
