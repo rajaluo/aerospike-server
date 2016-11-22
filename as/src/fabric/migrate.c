@@ -1477,9 +1477,7 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 		uint32_t void_time = 0;
 
-		if (msg_get_uint32(m, MIG_FIELD_VOID_TIME, &void_time) != 0) {
-			cf_warning(AS_MIGRATE, "handle insert: no void-time - making it 0");
-		}
+		msg_get_uint32(m, MIG_FIELD_VOID_TIME, &void_time);
 
 		uint64_t last_update_time = 0;
 
