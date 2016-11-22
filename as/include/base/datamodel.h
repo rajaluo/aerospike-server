@@ -1162,6 +1162,8 @@ struct as_namespace_s {
 	// Information for rebalancing.
 	//
 
+	uint32_t cluster_size;
+	cf_node succession[AS_CLUSTER_SZ];
 	as_partition_vinfo cluster_vinfo[AS_CLUSTER_SZ][AS_PARTITIONS];
 };
 
