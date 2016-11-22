@@ -37,22 +37,12 @@
 
 #define RCHASH_ERR_FOUND		CF_RCHASH_ERR_FOUND
 #define RCHASH_ERR_NOTFOUND		CF_RCHASH_ERR_NOTFOUND
-#define RCHASH_ERR_BUFSZ		CF_RCHASH_ERR_BUFSZ
 #define RCHASH_ERR				CF_RCHASH_ERR
 #define RCHASH_OK				CF_RCHASH_OK
 #define RCHASH_REDUCE_DELETE	CF_RCHASH_REDUCE_DELETE
 
-#define RCHASH_CR_RESIZE 0x01   // support resizes (will sometimes hang for long periods)
-#define RCHASH_CR_GRAB   0x02   // support 'grab' call (requires more memory)
 #define RCHASH_CR_MT_BIGLOCK 0x04 // support multithreaded access with a single big lock
 #define RCHASH_CR_MT_MANYLOCK 0x08 // support multithreaded access with a pool of object loccks
-#define RCHASH_CR_NOSIZE 0x10 // don't calculate the size on every call, which makes 'getsize' expensive if you ever call it
-
-#define RCHASH_CR_RESIZE 0x01   // support resizes (will sometimes hang for long periods)
-#define RCHASH_CR_MT_BIGLOCK 0x04 // support multithreaded access with a single big lock
-#define RCHASH_CR_MT_LOCKPOOL 0x08 // support multithreaded access with a pool of object loccks
-
-
 
 /******************************************************************************
  * TYPE ALIASES
