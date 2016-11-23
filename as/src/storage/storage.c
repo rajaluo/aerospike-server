@@ -142,29 +142,6 @@ as_storage_namespace_destroy(as_namespace *ns)
 }
 
 //--------------------------------------
-// as_storage_namespace_attributes_get
-//
-
-typedef int (*as_storage_namespace_attributes_get_fn)(as_namespace *ns, as_storage_attributes *attr);
-static const as_storage_namespace_attributes_get_fn as_storage_namespace_attributes_get_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	as_storage_namespace_attributes_get_memory,
-	as_storage_namespace_attributes_get_ssd,
-	as_storage_namespace_attributes_get_kv
-};
-
-int
-as_storage_namespace_attributes_get(as_namespace *ns, as_storage_attributes *attr)
-{
-	if (as_storage_namespace_attributes_get_table[ns->storage_type]) {
-		return as_storage_namespace_attributes_get_table[ns->storage_type](ns, attr);
-	}
-
-	cf_warning(AS_STORAGE, "could not get storage attributes for namespace %s: internal error", ns->name);
-	return -1;
-}
-
-//--------------------------------------
 // as_storage_has_index
 //
 

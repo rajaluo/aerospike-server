@@ -3981,17 +3981,6 @@ as_storage_namespace_destroy_ssd(as_namespace *ns)
 }
 
 
-int
-as_storage_namespace_attributes_get_ssd(as_namespace *ns,
-		as_storage_attributes *attr)
-{
-	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
-	attr->n_devices = ssds->n_ssds;
-
-	return 0;
-}
-
-
 // Note that this is *NOT* the counterpart to as_storage_record_create_ssd()!
 // That would be as_storage_record_close_ssd(). This is what gets called when a
 // record is destroyed, to dereference storage.
@@ -4113,8 +4102,7 @@ as_storage_wait_for_defrag_ssd(as_namespace *ns)
 	int n_service_threads = ns->storage_data_in_memory ?
 			g_config.n_service_threads : 0;
 
-	int n_transaction_threads = g_config.use_queue_per_device ?
-			g_config.n_transaction_threads_per_queue :
+	int n_transaction_threads =
 			g_config.n_transaction_queues * g_config.n_transaction_threads_per_queue;
 
 	ns->storage_min_free_wblocks =

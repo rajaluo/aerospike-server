@@ -840,17 +840,6 @@ as_storage_namespace_destroy_kv(as_namespace *ns)
 }
 
 int
-as_storage_namespace_attributes_get_kv(as_namespace *ns, as_storage_attributes *attr)
-{
-	attr->load_at_startup = false;
-
-	drv_kvs *kvs = (drv_kvs *) ns->storage_private;
-	attr->n_devices = kvs->n_kvs;
-
-	return(0);
-}
-
-int
 as_storage_has_index_kv(as_namespace *ns)
 {
 	return(true);
@@ -1202,14 +1191,6 @@ as_storage_namespace_init_kv(as_namespace *ns, cf_queue *complete_q, void *udata
 
 int
 as_storage_namespace_destroy_kv(as_namespace *ns)
-{
-	error_out();
-
-	return 0;
-}
-
-int
-as_storage_namespace_attributes_get_kv(as_namespace *ns, as_storage_attributes *attr)
 {
 	error_out();
 

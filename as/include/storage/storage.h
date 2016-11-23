@@ -98,11 +98,6 @@ typedef struct as_storage_rd_s {
 	} u;
 } as_storage_rd;
 
-// Information about a namespace's storage.
-typedef struct {
-    int		n_devices;
-} as_storage_attributes;
-
 
 //------------------------------------------------
 // Generic "base class" functions that call
@@ -112,7 +107,6 @@ typedef struct {
 extern void as_storage_init();
 extern void as_storage_start_tomb_raider();
 extern int as_storage_namespace_destroy(struct as_namespace_s *ns);
-extern int as_storage_namespace_attributes_get(struct as_namespace_s *ns, as_storage_attributes *attr);
 
 extern int as_storage_has_index(struct as_namespace_s *ns);
 extern int as_storage_record_exists(struct as_namespace_s *ns, cf_digest *keyd);
@@ -171,7 +165,6 @@ extern void as_storage_shutdown();
 extern int as_storage_namespace_init_memory(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
 extern void as_storage_start_tomb_raider_memory(struct as_namespace_s *ns);
 extern int as_storage_namespace_destroy_memory(struct as_namespace_s *ns);
-extern int as_storage_namespace_attributes_get_memory(struct as_namespace_s *ns, as_storage_attributes *attr);
 
 extern int as_storage_record_write_memory(as_storage_rd *rd);
 
@@ -186,7 +179,6 @@ extern int as_storage_namespace_init_ssd(struct as_namespace_s *ns, cf_queue *co
 extern void as_storage_start_tomb_raider_ssd(struct as_namespace_s *ns);
 extern void as_storage_cold_start_ticker_ssd(); // called directly by as_storage_init()
 extern int as_storage_namespace_destroy_ssd(struct as_namespace_s *ns);
-extern int as_storage_namespace_attributes_get_ssd(struct as_namespace_s *ns, as_storage_attributes *attr);
 
 extern int as_storage_record_destroy_ssd(struct as_namespace_s *ns, struct as_index_s *r);
 
@@ -224,7 +216,6 @@ extern void as_storage_shutdown_ssd(struct as_namespace_s *ns);
 
 extern int as_storage_namespace_init_kv(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
 extern int as_storage_namespace_destroy_kv(struct as_namespace_s *ns);
-extern int as_storage_namespace_attributes_get_kv(struct as_namespace_s *ns, as_storage_attributes *attr);
 
 extern int as_storage_has_index_kv(struct as_namespace_s *ns);
 extern int as_storage_record_exists_kv(struct as_namespace_s *ns, cf_digest *keyd);

@@ -114,7 +114,7 @@ cfg_set_defaults()
 	// Service defaults.
 	c->paxos_single_replica_limit = 1; // by default all clusters obey replication counts
 	c->n_service_threads = 4;
-	c->n_transaction_queues = 4; // calculated when use_queue_per_device is set, see thr_tsvc_queue_init()
+	c->n_transaction_queues = 4;
 	c->n_transaction_threads_per_queue = 4;
 	c->n_proto_fd_max = 15000;
 	c->allow_inline_transactions = true; // allow data-in-memory namespaces to process transactions in service threads
@@ -307,7 +307,6 @@ typedef enum {
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
-	CASE_SERVICE_USE_QUEUE_PER_DEVICE,
 	CASE_SERVICE_WORK_DIRECTORY,
 	CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE,
 	// For special debugging or bug-related repair:
@@ -357,6 +356,7 @@ typedef enum {
 	CASE_SERVICE_TRIAL_ACCOUNT_KEY,
 	CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY,
 	CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY,
+	CASE_SERVICE_USE_QUEUE_PER_DEVICE,
 
 	// Service paxos protocol options (value tokens):
 	CASE_SERVICE_PAXOS_PROTOCOL_V1,
@@ -739,7 +739,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
-		{ "use-queue-per-device",			CASE_SERVICE_USE_QUEUE_PER_DEVICE },
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "write-duplicate-resolution-disable", CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE },
 		{ "asmalloc-enabled",				CASE_SERVICE_ASMALLOC_ENABLED },
@@ -787,6 +786,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "trial-account-key",				CASE_SERVICE_TRIAL_ACCOUNT_KEY },
 		{ "udf-runtime-max-gmemory",		CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY },
 		{ "udf-runtime-max-memory",			CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY },
+		{ "use-queue-per-device",			CASE_SERVICE_USE_QUEUE_PER_DEVICE },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1814,9 +1814,6 @@ as_config_init(const char* config_file)
 	cc_group_t cluster_group_id = 0; // hold the group name while we process nodes (0 not a valid ID #)
 	cc_node_t cluster_node_id; // capture the node id in a group
 
-	// Flag mutually exclusive configuration options.
-	bool transaction_queues_set = false;
-
 	// Open the configuration file for reading.
 	if (NULL == (FD = fopen(config_file, "r"))) {
 		cf_crash_nostack(AS_CFG, "couldn't open configuration file %s: %s", config_file, cf_strerror(errno));
@@ -1939,7 +1936,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_TRANSACTION_QUEUES:
 				c->n_transaction_queues = cfg_int(&line, 1, MAX_TRANSACTION_QUEUES);
-				transaction_queues_set = true;
 				break;
 			case CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE:
 				c->n_transaction_threads_per_queue = cfg_int_no_checks(&line);
@@ -2156,9 +2152,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_TRANSACTION_RETRY_MS:
 				c->transaction_retry_ms = cfg_u32_no_checks(&line);
 				break;
-			case CASE_SERVICE_USE_QUEUE_PER_DEVICE:
-				c->use_queue_per_device = cfg_bool(&line);
-				break;
 			case CASE_SERVICE_WORK_DIRECTORY:
 				c->work_directory = cfg_strdup_no_checks(&line);
 				break;
@@ -2221,12 +2214,10 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_TRIAL_ACCOUNT_KEY:
 			case CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY:
 			case CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY:
+			case CASE_SERVICE_USE_QUEUE_PER_DEVICE:
 				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
-				if (c->use_queue_per_device && transaction_queues_set) {
-					cf_crash_nostack(AS_CFG, "can't set use-queue-per-device and explicit transaction-queues");
-				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:

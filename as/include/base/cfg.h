@@ -158,7 +158,6 @@ typedef struct as_config_s {
 	uint32_t		transaction_pending_limit; // 0 means no limit
 	PAD_BOOL		transaction_repeatable_read;
 	uint32_t		transaction_retry_ms;
-	PAD_BOOL		use_queue_per_device;
 	char*			work_directory;
 	PAD_BOOL		write_duplicate_resolution_disable;
 

@@ -782,10 +782,6 @@ struct as_namespace_s {
 
 	uint64_t		kv_size;
 
-	// TODO - could use n_devices in general, if we set it during config parse.
-	int				n_devices; // if using queue-per-device, store the number of devices used by this namespace
-	int				dev_q_offset; // if using queue-per-device, where this namespace's transaction queues are
-
 	// For data-not-in-memory, we optionally cache swbs after writing to device.
 	// To track fraction of reads from cache:
 	cf_atomic32		n_reads_from_cache;

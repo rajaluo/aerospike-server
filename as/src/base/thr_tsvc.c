@@ -436,40 +436,8 @@ uint32_t g_current_q = 0;
 void
 as_tsvc_init()
 {
-	int n_queues = 0;
-
-	for (int i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-		// TODO - get rid of this when we make general use of ns->n_devices, and
-		// set it in config parse:
-		as_storage_attributes s_attr;
-		as_storage_namespace_attributes_get(ns, &s_attr);
-
-		ns->n_devices = s_attr.n_devices;
-
-		if (ns->n_devices > 0) {
-			// Use 1 queue per read, 1 queue per write, for each device.
-			ns->dev_q_offset = n_queues;
-			n_queues += ns->n_devices * 2; // one queue per device per read/write
-		} else {
-			// No devices - it's an in-memory only namespace.
-			ns->dev_q_offset = n_queues;
-			n_queues += 2; // one read queue one write queue
-		}
-	}
-	if (n_queues > MAX_TRANSACTION_QUEUES) {
-		cf_crash(AS_TSVC, "# of queues required for use-queue-per-device is too much %d, must be < %d. Please reconfigure w/o use-queue-per-device",
-				n_queues, MAX_TRANSACTION_QUEUES);
-	}
-
-	if (g_config.use_queue_per_device) {
-		g_config.n_transaction_queues = n_queues;
-		cf_info(AS_TSVC, "device queues: %d queues with %d threads each",
-				g_config.n_transaction_queues, g_config.n_transaction_threads_per_queue);
-	} else {
-		cf_info(AS_TSVC, "shared queues: %d queues with %d threads each",
-				g_config.n_transaction_queues, g_config.n_transaction_threads_per_queue);
-	}
+	cf_info(AS_TSVC, "shared queues: %d queues with %d threads each",
+			g_config.n_transaction_queues, g_config.n_transaction_threads_per_queue);
 
 	// Create the transaction queues.
 	for (int i = 0; i < g_config.n_transaction_queues ; i++) {
@@ -517,52 +485,11 @@ thr_tsvc_process_or_enqueue(as_transaction *tr)
 int
 thr_tsvc_enqueue(as_transaction *tr)
 {
-#if 0
-	// WARNING! This happens legally in one place, where thr_nsup is deleting
-	// elements. If expiration/eviction is off, you should never see this!
-	if ((tr->proto_fd == 0) && (tr->proxy_msg == 0)) raise(SIGINT);
-#endif
+	// Transaction can go on any queue - distribute evenly.
+	uint32_t n_q = (g_current_q++) % g_config.n_transaction_queues;
+	cf_queue *q = g_transaction_queues[n_q];
 
-	uint32_t n_q = 0;
-
-	if (g_config.use_queue_per_device) {
-		// In queue-per-device mode, we must peek to find out which device (and
-		// so which queue) this transaction is destined for.
-		proto_peek ppeek;
-		as_msg_peek(tr, &ppeek);
-
-		if (ppeek.ns_n_devices) {
-			// Namespace with storage backing.
-			// q order: read_dev1, read_dev2, read_dev3, write_dev1, write_dev2, write_dev3
-			// See ssd_get_file_id() in drv_ssd.c for device assignment.
-			if (ppeek.info1 & AS_MSG_INFO1_READ) {
-				n_q = (ppeek.keyd.digest[8] % ppeek.ns_n_devices) + ppeek.ns_queue_offset;
-			}
-			else {
-				n_q = (ppeek.keyd.digest[8] % ppeek.ns_n_devices) + ppeek.ns_queue_offset + ppeek.ns_n_devices;
-			}
-		}
-		else {
-			// Namespace is memory only.
-			// q order: read, write
-			if (ppeek.info1 & AS_MSG_INFO1_READ) {
-				n_q = ppeek.ns_queue_offset;
-			}
-			else {
-				n_q = ppeek.ns_queue_offset + 1;
-			}
-		}
-	}
-	else {
-		// In default mode, transaction can go on any queue - distribute evenly.
-		n_q = (g_current_q++) % g_config.n_transaction_queues;
-	}
-
-	cf_queue *q;
-
-	if ((q = g_transaction_queues[n_q]) == NULL) {
-		cf_crash(AS_TSVC, "transaction queue #%d not initialized!", n_q);
-	}
+	cf_assert(q, AS_TSVC, "transaction queue #%d not initialized!", n_q);
 
 	if (cf_queue_push(q, tr) != 0) {
 		cf_crash(AS_TSVC, "transaction queue push failed - out of memory?");

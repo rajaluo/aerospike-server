@@ -529,17 +529,6 @@ extern int as_msg_send_fin(cf_socket *sock, uint32_t result_code);
 
 extern bool as_msg_peek_data_in_memory(const as_msg *m);
 
-// To find out key things about the message before actually reading it.
-typedef struct {
-	int       info1;
-	cf_digest keyd;
-	int       ns_queue_offset;
-	int       ns_n_devices;
-} proto_peek;
-
-// Always succeeds, sometimes finds nothing.
-extern void as_msg_peek(const struct as_transaction_s *tr, proto_peek *peek);
-
 extern uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		const char *set, int set_len, const cf_digest *d, uint64_t trid);
 

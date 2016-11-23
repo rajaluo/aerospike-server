@@ -1929,7 +1929,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "transaction-pending-limit", g_config.transaction_pending_limit);
 	info_append_bool(db, "transaction-repeatable-read", g_config.transaction_repeatable_read);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
-	info_append_bool(db, "use-queue-per-device", g_config.use_queue_per_device);
 	info_append_string_safe(db, "work-directory", g_config.work_directory);
 	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 
@@ -2493,18 +2492,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of respond-client-on-master-completion from %s to %s", bool_val[g_config.respond_client_on_master_completion], context);
 				g_config.respond_client_on_master_completion = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "use-queue-per-device", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of use-queue-per-device from %s to %s", bool_val[g_config.use_queue_per_device], context);
-				g_config.use_queue_per_device = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of use-queue-per-device from %s to %s", bool_val[g_config.use_queue_per_device], context);
-				g_config.use_queue_per_device = false;
 			}
 			else
 				goto Error;

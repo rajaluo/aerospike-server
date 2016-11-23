@@ -705,59 +705,6 @@ as_msg_peek_data_in_memory(const as_msg *m)
 	return ns && ns->storage_data_in_memory;
 }
 
-void
-as_msg_peek(const as_transaction *tr, proto_peek *peek)
-{
-	as_msg *m = &tr->msgp->msg;
-
-	peek->info1 = m->info1;
-	peek->keyd = cf_digest_zero;
-	peek->ns_n_devices = 0;
-	peek->ns_queue_offset = 0;
-
-	as_msg_field *nf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_NAMESPACE);
-
-	if (! nf) {
-		// Should never happen, but don't bark here.
-		return;
-	}
-
-	as_namespace *ns = as_namespace_get_bymsgfield(nf);
-
-	if (! ns) {
-		// Should never happen, but don't bark here.
-		return;
-	}
-
-	peek->ns_n_devices = ns->n_devices;
-	peek->ns_queue_offset = ns->dev_q_offset;
-
-	if (as_transaction_has_digest(tr)) {
-		// Modern client, single record.
-
-		as_msg_field *df = as_msg_field_get(m, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
-		// Note - not checking size.
-
-		peek->keyd = *(cf_digest *)df->data;
-
-		return;
-	}
-
-	if (as_transaction_has_key(tr)) {
-		// Old client, single record - calculate digest from key & set.
-
-		as_msg_field *kf = as_msg_field_get(m, AS_MSG_FIELD_TYPE_KEY);
-		uint32_t key_sz = as_msg_field_get_value_sz(kf);
-
-		as_msg_field *sf = as_transaction_has_set(tr) ?
-				as_msg_field_get(m, AS_MSG_FIELD_TYPE_SET) : NULL;
-		uint32_t set_sz = sf ? as_msg_field_get_value_sz(sf) : 0;
-
-		cf_digest_compute2(sf->data, set_sz, kf->data, key_sz, &peek->keyd);
-	}
-	// else - multi-record transaction, return 0 digest - is this ok?
-}
-
 uint8_t *
 as_msg_write_header(uint8_t *buf, size_t msg_sz, uint info1, uint info2,
 		uint info3, uint32_t generation, uint32_t record_ttl,
