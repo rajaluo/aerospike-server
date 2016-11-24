@@ -422,14 +422,6 @@ thr_tsvc(void *arg)
 } // end thr_tsvc()
 
 
-pthread_t* g_transaction_threads;
-
-static inline pthread_t*
-transaction_thread(int i, int j)
-{
-	return g_transaction_threads + (g_config.n_transaction_threads_per_queue * i) + j;
-}
-
 cf_queue* g_transaction_queues[MAX_TRANSACTION_QUEUES];
 uint32_t g_current_q = 0;
 
@@ -444,17 +436,16 @@ as_tsvc_init()
 		g_transaction_queues[i] = cf_queue_create(AS_TRANSACTION_HEAD_SIZE, true);
 	}
 
-	// Allocate the transaction threads that service all the queues.
-	g_transaction_threads = cf_malloc(sizeof(pthread_t) * g_config.n_transaction_queues * g_config.n_transaction_threads_per_queue);
-
-	if (! g_transaction_threads) {
-		cf_crash(AS_TSVC, "tsvc pthread_t array allocation failed");
-	}
-
 	// Start all the transaction threads.
 	for (int i = 0; i < g_config.n_transaction_queues; i++) {
 		for (int j = 0; j < g_config.n_transaction_threads_per_queue; j++) {
-			if (0 != pthread_create(transaction_thread(i, j), NULL, thr_tsvc, (void*)g_transaction_queues[i])) {
+			pthread_t thread;
+			pthread_attr_t attrs;
+
+			pthread_attr_init(&attrs);
+			pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
+
+			if (0 != pthread_create(&thread, &attrs, thr_tsvc, (void*)g_transaction_queues[i])) {
 				cf_crash(AS_TSVC, "tsvc thread %d:%d create failed", i, j);
 			}
 		}
