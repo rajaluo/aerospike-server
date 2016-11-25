@@ -3687,12 +3687,12 @@ as_config_post_process(as_config* c, const char* config_file)
 
 
 //==========================================================
-// Public API - get/set (dynamic) members.
+// Public API - Cluster name.
 //
 
 pthread_mutex_t g_config_lock = PTHREAD_MUTEX_INITIALIZER;
 
-void
+bool
 as_config_cluster_name_get(char* cluster_name)
 {
 	pthread_mutex_lock(&g_config_lock);
@@ -3700,6 +3700,10 @@ as_config_cluster_name_get(char* cluster_name)
 	pthread_mutex_unlock(&g_config_lock);
 	if (cluster_name[0] == '\0') {
 		strcpy(cluster_name, "null");
+		return false;
+	}
+	else {
+		return true;
 	}
 }
 
@@ -3724,6 +3728,14 @@ as_config_cluster_name_set(const char* cluster_name)
 	return true;
 }
 
+bool
+as_config_cluster_name_matches(const char* cluster_name)
+{
+	pthread_mutex_lock(&g_config_lock);
+	bool matches = strcmp(cluster_name, g_config.cluster_name) == 0;
+	pthread_mutex_unlock(&g_config_lock);
+	return matches;
+}
 
 //==========================================================
 // Item-specific parsing utilities.

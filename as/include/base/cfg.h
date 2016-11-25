@@ -261,8 +261,9 @@ typedef struct as_config_s {
 as_config* as_config_init(const char* config_file);
 void as_config_post_process(as_config* c, const char* config_file);
 
-void as_config_cluster_name_get(char* cluster_name);
+bool as_config_cluster_name_get(char* cluster_name);
 bool as_config_cluster_name_set(const char* cluster_name);
+bool as_config_cluster_name_matches(const char* cluster_name);
 
 extern as_config g_config;
 extern xdr_config g_xcfg;
