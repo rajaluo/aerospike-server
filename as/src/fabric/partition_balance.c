@@ -54,9 +54,6 @@
 // Constants and typedefs.
 //
 
-// TODO - same as in paxos.c, to be deprecated.
-#define AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(n) ((((int)(g_config.paxos_protocol) - AS_PAXOS_PROTOCOL_V ## n)) >= 0)
-
 // The instantaneous maximum number of cluster participants, represented as a
 // positive and negative mask.
 #define AS_CLUSTER_SZ_MASKP ((uint64_t)(1 - (AS_CLUSTER_SZ + 1)))
@@ -225,12 +222,6 @@ as_partition_balance_init()
 				p->state = AS_PARTITION_STATE_SYNC;
 
 				ns->cluster_vinfo[0][pid] = vinfo;
-
-				// TODO - deprecate this.
-				if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
-					g_paxos->c_partition_size[ns_ix][0][pid] =
-							p->vp->elements + p->sub_vp->elements;
-				}
 
 				n_stored++;
 			}

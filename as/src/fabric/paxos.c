@@ -526,16 +526,8 @@ as_paxos_partition_sync_request_msg_generate()
 
 		n_elem = 0;
 		for (int i = 0; i < g_config.n_namespaces; i++) {
-			uint64_t partitionsz[AS_PARTITIONS];
-			for (int j = 0; j < AS_PARTITIONS; j++) {
-				partitionsz[j] = (g_config.namespaces[i]->partitions[j].vp)
-								 ? g_config.namespaces[i]->partitions[j].vp->elements
-								 : 0;
-				partitionsz[j] += (g_config.namespaces[i]->partitions[j].sub_vp)
-								  ? g_config.namespaces[i]->partitions[j].sub_vp->elements
-								  : 0;
-				cf_detail(AS_PAXOS, "Assigning partition size for pid %d, %ld", j, partitionsz[j]);
-			}
+			uint64_t partitionsz[AS_PARTITIONS] = { 0 };
+
 			e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITIONSZ, n_elem, (uint8_t *)partitionsz, elem_size);
 			cf_debug(AS_PAXOS, "writing element %zu", n_elem);
 			n_elem++;
@@ -601,33 +593,6 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 			return(-1);
 		}
 		memcpy(ns->cluster_vinfo[n_pos], bufp, sizeof(as_partition_vinfo) * AS_PARTITIONS);
-	}
-
-	/* Require the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC_REQUEST messages. */
-	if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
-		array_size = g_config.n_namespaces;
-		if (0 != msg_get_buf_array_size(m, AS_PAXOS_MSG_PARTITIONSZ, &size)) {
-			cf_warning(AS_PAXOS, "Unable to read partition sync message");
-			return(-1);
-		}
-		if (size != array_size) {
-			cf_warning(AS_PAXOS, "Different number of namespaces (expected: %zu, received in partition sync message: %d) between nodes in same cluster ~~ Please check node configurations", array_size, size);
-			return(-1);
-		}
-		elem = 0;
-		for (int i = 0; i < g_config.n_namespaces; i++) {
-			byte *bufp = NULL;
-			size_t bufsz = sizeof(uint64_t) * AS_PARTITIONS;
-			uint64_t *partitionsz = p->c_partition_size[i][n_pos];
-			memset(partitionsz, 0, bufsz);
-			e += msg_get_buf_array(m, AS_PAXOS_MSG_PARTITIONSZ, elem, &bufp, &bufsz, MSG_GET_DIRECT);
-			elem++;
-			if ((0 > e) || (NULL == bufp)) {
-				cf_warning(AS_PAXOS, "unpacking partition sync request message failed");
-				return(-1);
-			}
-			memcpy(partitionsz, bufp, sizeof(uint64_t) * AS_PARTITIONS);
-		}
 	}
 
 	return(0);
@@ -719,30 +684,22 @@ as_paxos_partition_sync_msg_generate()
 			cf_warning(AS_PAXOS, "Cannot allocate array buffer. unable to set fabric message");
 			return(NULL);
 		}
+
 		n_elem = 0;
-		for (int i = 0; i < g_config.n_namespaces; i++)
+		uint64_t partitionsz[AS_PARTITIONS] = { 0 };
+
+		for (int i = 0; i < g_config.n_namespaces; i++) {
 			for (int j = 0; j < cluster_size; j++) {
-				uint64_t *partitionsz = p->c_partition_size[i][j];
-				// populate latest for the self node
-				if (p->succession[j] == g_config.self_node) {
-					for (int j = 0; j < AS_PARTITIONS; j++) {
-						partitionsz[j] = (g_config.namespaces[i]->partitions[j].vp)
-										 ? g_config.namespaces[i]->partitions[j].vp->elements
-										 : 0;
-						partitionsz[j] += (g_config.namespaces[i]->partitions[j].sub_vp)
-										  ? g_config.namespaces[i]->partitions[j].sub_vp->elements
-										  : 0;
-						cf_detail(AS_PAXOS, "Assigning partition size for pid %d, %ld", j, partitionsz[j]);
-					}
-				}
-				cf_debug(AS_PAXOS, "writing element %zu", n_elem);
 				e += msg_set_buf_array(m, AS_PAXOS_MSG_PARTITIONSZ, n_elem, (uint8_t *)partitionsz, elem_size);
+
 				if (0 > e) {
 					cf_warning(AS_PAXOS, "unable to generate sync message");
 					return(NULL);
 				}
 				n_elem++;
 			}
+		}
+
 		if (0 > e) {
 			cf_warning(AS_PAXOS, "unable to generate sync message");
 			return(NULL);
@@ -849,38 +806,6 @@ as_paxos_partition_sync_msg_apply(msg *m)
 			}
 			memcpy(ns->cluster_vinfo[j], bufp, sizeof(as_partition_vinfo) * AS_PARTITIONS);
 		}
-	}
-
-	/* Require the partition sizes array in all Paxos protocol v3 or greater PARTITION_SYNC messages. */
-	if (AS_PAXOS_PROTOCOL_IS_AT_LEAST_V(3)) {
-		array_size = cluster_size * g_config.n_namespaces;
-
-		if (0 != msg_get_buf_array_size(m, AS_PAXOS_MSG_PARTITIONSZ, &size)) {
-			cf_warning(AS_PAXOS, "Unable to read partition sync message");
-			return(-1);
-		}
-		if (size != array_size) {
-			cf_warning(AS_PAXOS, "Expected array size %zu, received %d, Unable to read partition sync message", array_size, size);
-			return(-1);
-		}
-		elem = 0;
-		for (int i = 0; i < g_config.n_namespaces; i++)
-			for (int j = 0; j < cluster_size; j++) {
-				byte *bufp = NULL;
-				bufsz = sizeof(uint64_t) * AS_PARTITIONS;
-				uint64_t *partitionsz = p->c_partition_size[i][j];
-				memset(partitionsz, 0, bufsz);
-				e += msg_get_buf_array(m, AS_PAXOS_MSG_PARTITIONSZ, elem, &bufp, &bufsz, MSG_GET_DIRECT);
-				elem++;
-				if ((0 > e) || (NULL == bufp)) {
-					cf_warning(AS_PAXOS, "unpacking partition sync message failed");
-					return(-1);
-				}
-				memcpy(partitionsz, bufp, sizeof(uint64_t) * AS_PARTITIONS);
-				for (int k = 0; k < AS_PARTITIONS; k++) {
-					cf_detail(AS_PAXOS, "Got size of pid %d = %ld", k, partitionsz[k]);
-				}
-			}
 	}
 
 	if (cf_context_at_severity(AS_PAXOS, CF_DEBUG)) {
