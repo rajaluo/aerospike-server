@@ -431,7 +431,7 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
 	ai_nbtr *anbtr = (ai_nbtr *)btIndFind(ibtr, acol);
 	ulong ba = 0, aa = 0;
 	if (!anbtr) {
-		return AS_SINDEX_ERR;
+		return AS_SINDEX_KEY_NOTFOUND;
 	}
 	if (anbtr->is_btree) {
 		if (!anbtr->u.nbtr) return AS_SINDEX_ERR;
@@ -442,11 +442,19 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
 			return AS_SINDEX_KEY_NOTFOUND;
 		}
 		ba = nbtr->msize;
-		int nkeys = btIndNodeDelete(nbtr, apk, NULL);
+
+		// TODO - Needs to be cleaner, type convert from signed
+		// to unsigned. Should be 64 bit !!
+		int nkeys_before = nbtr->numkeys; 
+		int nkeys_after = btIndNodeDelete(nbtr, apk, NULL);
 		aa = nbtr->msize;
 
+		if (nkeys_after == nkeys_before) {
+			return AS_SINDEX_KEY_NOTFOUND;
+		}
+
 		// remove from ibtr
-		if (!nkeys) {
+		if (nkeys_after == 0) {
 			btIndDelete(ibtr, acol);
 			aa = 0;
 			bt_destroy(nbtr);
