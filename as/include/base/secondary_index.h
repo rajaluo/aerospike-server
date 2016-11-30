@@ -236,7 +236,6 @@ typedef struct as_sindex_config_var_s {
 	char 		name[AS_ID_INAME_SZ];
 	uint64_t    defrag_period;
 	uint32_t    defrag_max_units;
-	uint64_t    data_max_memory;
 	bool        enable_histogram; // default false;
 	uint16_t    ignore_not_sync_flag;
 	bool 		conf_valid_flag;
@@ -245,7 +244,6 @@ typedef struct as_sindex_config_var_s {
 typedef struct as_sindex_config_s {
 	uint64_t    defrag_period;
 	uint32_t    defrag_max_units;
-	uint64_t    data_max_memory;
 	uint16_t    flag; // TODO change_name
 } as_sindex_config;
 
@@ -544,7 +542,6 @@ extern const char         * as_sindex_err_str(int err_code);
 extern uint8_t              as_sindex_err_to_clienterr(int err, char *fname, int lineno);
 extern bool                 as_sindex_isactive(as_sindex *si);
 extern int                  as_sindex_get_err(int op_code, char *filename, int lineno);
-extern uint64_t             as_sindex_get_ns_memory_used(as_namespace *ns);
 extern as_sindex_status     as_sindex__delete_from_set_binid_hash(as_namespace * ns, 
 							as_sindex_metadata * imd);
 extern as_val             * as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v);
@@ -635,8 +632,6 @@ extern int  as_sindex_release(as_sindex *si, char *fname, int lineno);
 extern int  as_sindex_imd_free(as_sindex_metadata *imd);
 extern int  as_sindex_sbin_free(as_sindex_bin *sbin);
 extern int  as_sindex_sbin_freeall(as_sindex_bin *sbin, int numval);
-bool as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes);
-bool as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes);
 void        as_sindex_release_arr(as_sindex *si_arr[], int si_arr_sz);
 // **************************************************************************************************
 

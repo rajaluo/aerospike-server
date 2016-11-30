@@ -301,7 +301,6 @@ typedef enum {
 	CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS,
 	CASE_SERVICE_SCAN_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
-	CASE_SERVICE_SINDEX_DATA_MAX_MEMORY,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
@@ -592,12 +591,10 @@ typedef enum {
 	// Namespace secondary-index options:
 	CASE_NAMESPACE_SI_GC_PERIOD,
 	CASE_NAMESPACE_SI_GC_MAX_UNITS,
-	CASE_NAMESPACE_SI_DATA_MAX_MEMORY,
 	CASE_NAMESPACE_SI_HISTOGRAM,
 	CASE_NAMESPACE_SI_IGNORE_NOT_SYNC,
 
 	// Namespace sindex options:
-	CASE_NAMESPACE_SINDEX_DATA_MAX_MEMORY,
 	CASE_NAMESPACE_SINDEX_NUM_PARTITIONS,
 
     // Namespace geo2dsphere within options:
@@ -733,7 +730,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-max-udf-transactions",		CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS },
 		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
-		{ "sindex-data-max-memory",			CASE_SERVICE_SINDEX_DATA_MAX_MEMORY },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
@@ -1031,14 +1027,12 @@ const cfg_opt NAMESPACE_SET_ENABLE_XDR_OPTS[] = {
 const cfg_opt NAMESPACE_SI_OPTS[] = {
 		{ "si-gc-period",					CASE_NAMESPACE_SI_GC_PERIOD },
 		{ "si-gc-max-units",				CASE_NAMESPACE_SI_GC_MAX_UNITS },
-		{ "si-data-max-memory",				CASE_NAMESPACE_SI_DATA_MAX_MEMORY },
 		{ "si-histogram",					CASE_NAMESPACE_SI_HISTOGRAM },
 		{ "si-ignore-not-sync",				CASE_NAMESPACE_SI_IGNORE_NOT_SYNC },
 		{ "}",								CASE_CONTEXT_END }
 };
 
 const cfg_opt NAMESPACE_SINDEX_OPTS[] = {
-		{ "data-max-memory",				CASE_NAMESPACE_SINDEX_DATA_MAX_MEMORY },
 		{ "num-partitions",					CASE_NAMESPACE_SINDEX_NUM_PARTITIONS },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -2134,9 +2128,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_SINDEX_BUILDER_THREADS:
 				c->sindex_builder_threads = cfg_u32(&line, 1, MAX_SINDEX_BUILDER_THREADS);
 				break;
-			case CASE_SERVICE_SINDEX_DATA_MAX_MEMORY:
-				c->sindex_data_max_memory = cfg_u64_no_checks(&line);
-				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
 				break;
@@ -2962,9 +2953,6 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_SI_GC_MAX_UNITS:
 				si_cfg.defrag_max_units = cfg_u32_no_checks(&line);
 				break;
-			case CASE_NAMESPACE_SI_DATA_MAX_MEMORY:
-				si_cfg.data_max_memory = cfg_u64_no_checks(&line);
-				break;
 			case CASE_NAMESPACE_SI_HISTOGRAM:
 				si_cfg.enable_histogram = cfg_bool(&line);
 				break;
@@ -2989,9 +2977,6 @@ as_config_init(const char* config_file)
 		//
 		case NAMESPACE_SINDEX:
 			switch(cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
-			case CASE_NAMESPACE_SINDEX_DATA_MAX_MEMORY:
-				ns->sindex_data_max_memory = cfg_u64_no_checks(&line);
-				break;
 			case CASE_NAMESPACE_SINDEX_NUM_PARTITIONS:
 				// FIXME - minimum should be 1, but currently crashes.
 				ns->sindex_num_partitions = cfg_u32(&line, MIN_PARTITIONS_PER_INDEX, MAX_PARTITIONS_PER_INDEX);

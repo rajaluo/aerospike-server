@@ -392,7 +392,6 @@ as_sindex_config_var_default(as_sindex_config_var *si_cfg)
 	si_cfg->defrag_period        = from_si.config.defrag_period;
 	si_cfg->defrag_max_units     = from_si.config.defrag_max_units;
 	// related non config value defaults
-	si_cfg->data_max_memory      = from_si.config.data_max_memory;
 	si_cfg->ignore_not_sync_flag = from_si.config.flag;
 }
 
@@ -1189,16 +1188,14 @@ as_sindex__stats_clear(as_sindex *si) {
 void
 as_sindex_gconfig_default(as_config *c)
 {
-	c->sindex_builder_threads         = 4;
-	c->sindex_data_max_memory         = ULONG_MAX;
-	c->sindex_data_memory_used        = 0;
+	c->sindex_builder_threads = 4;
 }
+
 void
 as_sindex__config_default(as_sindex *si)
 {
 	si->config.defrag_period    = 1000;
 	si->config.defrag_max_units = 1000;
-	si->config.data_max_memory  = ULONG_MAX; // No Limit
 	si->config.flag             = 1; // Default is - index is active
 }
 
@@ -1207,7 +1204,6 @@ as_sindex_config_var_copy(as_sindex *to_si, as_sindex_config_var *from_si_cfg)
 {
 	to_si->config.defrag_period    = from_si_cfg->defrag_period;
 	to_si->config.defrag_max_units = from_si_cfg->defrag_max_units;
-	to_si->config.data_max_memory  = from_si_cfg->data_max_memory;
 	to_si->enable_histogram        = from_si_cfg->enable_histogram;
 	to_si->config.flag             = from_si_cfg->ignore_not_sync_flag;
 }
@@ -1277,7 +1273,6 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	int      ns_objects  = ns->n_objects;
 	uint64_t si_objects  = cf_atomic64_get(si->stats.n_objects);
 	uint64_t pending     = cf_atomic64_get(si->stats.recs_pending);
-	uint64_t si_memory   = cf_atomic64_get(si->stats.mem_used);
 	// To protect the pimd while accessing it.
 	SINDEX_RLOCK(&si->imd->slock);
 	uint64_t n_keys      = ai_btree_get_numkeys(si->imd);
@@ -1290,7 +1285,7 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	SINDEX_UNLOCK(&si->imd->slock);
 	info_append_uint64(db, "ibtr_memory_used", i_size);
 	info_append_uint64(db, "nbtr_memory_used", n_size);
-	info_append_uint64(db, "si_accounted_memory", si_memory);
+	info_append_uint64(db, "si_accounted_memory", i_size + n_size);
 	if (si->flag & AS_SINDEX_FLAG_RACTIVE) {
 		info_append_string(db, "load_pct", "100");
 	} else {
@@ -1339,11 +1334,6 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	//CONFIG
 	info_append_uint64(db, "gc-period", si->config.defrag_period);
 	info_append_uint32(db, "gc-max-units", si->config.defrag_max_units);
-	if (si->config.data_max_memory != ULONG_MAX) {
-		info_append_uint64(db, "data-max-memory", si->config.data_max_memory);
-	} else {
-		info_append_string(db, "data-max-memory", "ULONG_MAX");
-	}
 
 	info_append_bool(db, "histogram", si->enable_histogram);
 	info_append_bool(db, "ignore-not-sync", (si->config.flag & AS_SINDEX_CONFIG_IGNORE_ON_DESYNC) != 0);
@@ -1427,20 +1417,6 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 			} else {
 				goto Error;
 			}
-		}
-		else if (0 == as_info_parameter_get(params, "data-max-memory", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_detail(AS_INFO, "data-max-memory = %"PRIu64"",val);
-			// Protect so someone does not reduce memory to below 1/2 current value, allow it
-			// in case value is ULONG_MAX
-			if (((si->config.data_max_memory != ULONG_MAX)
-				&& (val < (si->config.data_max_memory / 2L)))
-				|| (val < cf_atomic64_get(si->stats.mem_used))) {
-				goto Error;
-			}
-			cf_info(AS_INFO,"Changing value of data-max-memory of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
-							ns->name, imd->iname, si->config.data_max_memory, val);
-			si->config.data_max_memory = val;
 		}
 		else if (0 == as_info_parameter_get(params, "gc-period", context, &context_len)) {
 			uint64_t val = atoll(context);
@@ -1867,7 +1843,9 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		ns->sindex_cnt++;
 		si->ns          = ns;
 		si->simatch     = chosen_id;
-		as_sindex_reserve_data_memory(si->imd, ai_btree_get_isize(si->imd));
+
+		cf_atomic64_add(&ns->n_bytes_sindex_memory,
+				ai_btree_get_isize(si->imd));
 
 		// Only trigger scan if this create is done after boot
 		if (user_create && g_sindex_boot_done) {
@@ -1986,11 +1964,8 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 // 		reset memory used 
 // 		add previous number of objects as deletes 
 void
-as_sindex_clear_stats_on_empty_index(as_sindex * si)
+as_sindex_clear_stats_on_empty_index(as_sindex *si)
 {
-	as_sindex_release_data_memory(si->imd, si->stats.mem_used);	
-	as_sindex_reserve_data_memory(si->imd, ai_btree_get_isize(si->imd));
-
 	cf_atomic64_add(&si->stats.n_deletes, cf_atomic64_get(si->stats.n_objects));
 	cf_atomic64_set(&si->stats.n_keys, 0);
 	cf_atomic64_set(&si->stats.n_objects, 0);
@@ -2000,6 +1975,8 @@ void
 as_sindex_empty_index(as_sindex_metadata * imd)
 {
 	as_sindex_pmetadata * pimd;
+	cf_atomic64_sub(&imd->si->ns->n_bytes_sindex_memory,
+			ai_btree_get_isize(imd) + ai_btree_get_nsize(imd));
 	for (int i=0; i<imd->nprts; i++) {
 		SINDEX_RLOCK(&imd->slock);
 		pimd = &imd->pimd[i];
@@ -2010,6 +1987,8 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 		SINDEX_UNLOCK(&imd->slock);
 		ai_btree_delete_ibtr(ibtr, pimd->imatch);
 	}
+	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory,
+			ai_btree_get_isize(imd));
 	as_sindex_clear_stats_on_empty_index(imd->si);
 }
 
@@ -4360,104 +4339,8 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 }
 //                                    END - PUT RD IN SINDEX
 // ************************************************************************************************
-// ************************************************************************************************
-//                                      MEMORY ACCOUNTING
-/*
- * Internal function API for tracking sindex memory usage. This get called
- * from inside Aerospike Index.
- *
- * TODO: Make accounting subsystem cache friendly. At high speed it
- *       cache misses it causes starts to matter
- * TODO: This shows up in perf output on running prformance run
- *
- * Reserve locally first then globally
- */
-bool
-as_sindex_reserve_data_memory(as_sindex_metadata *imd, uint64_t bytes)
-{
-	if (!bytes) {
-		return true;
-	}
 
-	if (!imd) {
-		cf_warning(AS_SINDEX, "imd is null");
-		return false;
-	}
 
-	as_namespace *ns = imd->si->ns;
-	bool ns_reserved = false;
-	bool si_reserved = false;
-	uint64_t val     = 0;
-
-	// Global sindex memory reservation
-	val = cf_atomic64_add(&g_config.sindex_data_memory_used, bytes);
-	if (val > g_config.sindex_data_max_memory) {
-		goto FAIL;
-	}
-	
-	// Namespace sindex memory reservation
-	val = cf_atomic64_add(&ns->sindex_data_memory_used, bytes);
-	ns_reserved = true;
-	if (val > ns->sindex_data_max_memory) {
-		goto FAIL;
-	}
-
-	// Secondary Index memory reservation
-	val = cf_atomic64_add(&imd->si->stats.mem_used, bytes);
-	si_reserved = true;
-	if (val > imd->si->config.data_max_memory) {
-		goto FAIL;
-	}
-	return true;
-
-FAIL:
-	cf_atomic64_sub(&g_config.sindex_data_memory_used, bytes);
-	if (ns_reserved) {
-		cf_atomic64_sub(&ns->sindex_data_memory_used, bytes);
-	}
-	if (si_reserved) {
-		cf_atomic64_sub(&imd->si->stats.mem_used, bytes);
-	}
-	cf_warning(AS_SINDEX, "Sindex memory cap hit for index %s while reserving %ld bytes",
-			imd->iname, bytes);
-	return false;
-}
-
-// release locally first then globally
-bool
-as_sindex_release_data_memory(as_sindex_metadata *imd, uint64_t bytes)
-{
-	if (!bytes) {
-		return true;
-	}
-
-	as_namespace *ns = imd->si->ns;
-
-	uint64_t g_mem = cf_atomic64_get(g_config.sindex_data_memory_used);
-	uint64_t ns_mem = cf_atomic64_get(ns->sindex_data_memory_used);
-	uint64_t si_mem = cf_atomic64_get(imd->si->stats.mem_used);
-	
-	if (g_mem < bytes || ns_mem < bytes || si_mem < bytes) {
-		cf_warning(AS_SINDEX, "Sindex memory usage accounting is corrupted. [%"PRIu64" %"PRIu64" %"PRIu64" %"PRIu64"]",
-				g_mem, ns_mem, si_mem, bytes);
-		return false;
-	}
-	cf_atomic64_sub(&ns->sindex_data_memory_used, bytes);
-	cf_atomic64_sub(&g_config.sindex_data_memory_used, bytes);
-	cf_atomic64_sub(&imd->si->stats.mem_used, bytes);
-	return true;
-}
-
-uint64_t
-as_sindex_get_ns_memory_used(as_namespace *ns)
-{
-	if (as_sindex_ns_has_sindex(ns)) {
-		return cf_atomic64_get(ns->sindex_data_memory_used);
-	}
-	return 0;
-}
-//                                     END - MEMORY ACCOUNTING
-// ************************************************************************************************
 // ************************************************************************************************
 //                                           SMD CALLBACKS
 /*
@@ -4800,7 +4683,6 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 						}
 					}
 				}
-
 				SINDEX_GUNLOCK();
 
 				// Delete Index
@@ -4842,16 +4724,17 @@ as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint
 		// ai_btree_put() <- for every single sindex insertion (boot-time/dynamic)
 		// as_sindex_create() : for dynamic si creation, cluster change, smd on boot-up.
 
-		uint64_t si_memory   = 0;
-		char   * si_name     = NULL;
+		uint64_t si_memory = 0;
+		char   * si_name = NULL;
 
 		if (si) {
-			si_memory        = cf_atomic64_get(si->stats.mem_used);
-			si_name          = si->imd->iname;
+			si_memory += ai_btree_get_isize(si->imd);
+			si_memory += ai_btree_get_nsize(si->imd);
+			si_name = si->imd->iname;
 		}
 		else {
-			si_memory        = (uint64_t)cf_atomic64_get(ns->sindex_data_memory_used);
-			si_name          = "<all>";
+			si_memory = (uint64_t)cf_atomic64_get(ns->n_bytes_sindex_memory);
+			si_name = "<all>";
 		}
 
 		uint64_t n_objects       = cf_atomic64_get(ns->n_objects);
@@ -4873,12 +4756,13 @@ as_sindex_ticker_done(as_namespace * ns, as_sindex * si, uint64_t start_time)
 	char   * si_name     = NULL;
 
 	if (si) {
-		si_memory        = cf_atomic64_get(si->stats.mem_used);
-		si_name          = si->imd->iname;
+		si_memory += ai_btree_get_isize(si->imd);
+		si_memory += ai_btree_get_nsize(si->imd);
+		si_name = si->imd->iname;
 	}
 	else {
-		si_memory        = (uint64_t)cf_atomic64_get(ns->sindex_data_memory_used);
-		si_name          = "<all>";
+		si_memory = (uint64_t)cf_atomic64_get(ns->n_bytes_sindex_memory);
+		si_name = "<all>";
 	}
 
 	cf_info(AS_SINDEX, "Sindex-ticker done: ns=%s si=%s si-mem-used=%"PRIu64" elapsed=%"PRIu64" ms",

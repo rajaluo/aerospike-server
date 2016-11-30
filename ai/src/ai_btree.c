@@ -917,12 +917,7 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_
 		goto END;
 	}
 	ulong ab = pimd->ibtr->msize + pimd->ibtr->nsize;
-	if (!as_sindex_reserve_data_memory(imd, (ab - bb))) {
-		reduced_iRem(pimd->ibtr, &ncol, &apk);
-		ret = AS_SINDEX_ERR_NO_MEMORY;
-		goto END;
-	}
-
+	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory, (ab - bb));
 END:
 
 	return ret;
@@ -950,7 +945,7 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void * skey,
 	ulong bb = pimd->ibtr->msize + pimd->ibtr->nsize;
 	ret = reduced_iRem(pimd->ibtr, &ncol, &apk);
 	ulong ab = pimd->ibtr->msize + pimd->ibtr->nsize;
-	as_sindex_release_data_memory(imd, (bb - ab));
+	cf_atomic64_sub(&imd->si->ns->n_bytes_sindex_memory, (bb - ab));
 	return ret;
 }
 
@@ -1226,7 +1221,8 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 	}
 
 END:
-	as_sindex_release_data_memory(imd, (bb -  pimd->ibtr->msize - pimd->ibtr->nsize));
+	cf_atomic64_sub(&imd->si->ns->n_bytes_sindex_memory,
+			(bb -  pimd->ibtr->msize - pimd->ibtr->nsize));
 	*deleted += success;
 	return cf_ll_size(gc_list) ? true : false;
 }
