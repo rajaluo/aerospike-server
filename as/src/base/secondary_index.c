@@ -4645,11 +4645,8 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 		as_sindex_imd_free(&imd);
 	}
 
-	// Check if the incoming operation is merge. If it's merge
-	// After merge resolution of cluster, drop the local sindex definitions which are not part
-	// of the paxos principal's sindex definition.
 	if (accept_opt & AS_SMD_ACCEPT_OPT_MERGE) {
-		for (int k = 0; k < g_config.n_namespaces; k++) { // for each namespace
+		for (int k = 0; k < g_config.n_namespaces; k++) {
 			as_namespace *local_ns = g_config.namespaces[k];
 
 			if (local_ns->sindex_cnt > 0) {
@@ -4661,22 +4658,27 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				for (int i = 0; i < AS_SINDEX_MAX; i++) {
 					as_sindex *si = &local_ns->sindex[i];
 					if (si && si->imd && as_sindex_isactive(si)) {
-						int found     = 0;
+						// Create smd key
+						uint16_t key_len = strlen(si->imd->ns_name)
+							+ strlen(si->imd->iname) + 1;
+						char key[key_len + 1];
+						snprintf(key, key_len, "%s:%s", si->imd->ns_name,
+								si->imd->iname);
+
+						bool found = false;
+
 						SINDEX_RLOCK(&si->imd->slock);
 						for (int j = 0; j < items->num_items; j++) {
-							char key[256];
-							sprintf(key, "%s:%s", si->imd->ns_name, si->imd->iname);
-							cf_detail(AS_SINDEX,"Item key %s \n", items->item[j]->key);
-
 							if (strcmp(key, items->item[j]->key) == 0) {
-								found = 1;
-								cf_detail(AS_SINDEX, "Item found in merge list %s \n", si->imd->iname);
+								found = true;
 								break;
 							}
 						}
 						SINDEX_UNLOCK(&si->imd->slock);
 
-						if (found == 0) { // Was not found in the merged list from paxos principal
+						// Add to drop list list if not in
+						// merged list from paxos principal
+						if (! found) {
 							AS_SINDEX_RESERVE(si);
 							del_list[del_cnt] = si;
 							del_cnt++;
