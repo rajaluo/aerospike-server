@@ -875,7 +875,6 @@ struct as_namespace_s {
 	uint32_t		storage_num_write_blocks;
 	PAD_BOOL		cond_write; // true if writing uniqueness is to be enforced by the KV store
 
-	uint64_t		sindex_data_max_memory;
 	uint32_t		sindex_num_partitions;
 
 	PAD_BOOL		geo2dsphere_within_strict;
@@ -914,7 +913,7 @@ struct as_namespace_s {
 	// Memory usage stats.
 
 	cf_atomic_int	n_bytes_memory;
-	cf_atomic64		sindex_data_memory_used;
+	cf_atomic64		n_bytes_sindex_memory;
 
 	// Persistent storage stats.
 

@@ -194,10 +194,11 @@ as_sindex__destroy_fn(void *param)
 			cf_warning(AS_SINDEX, "Delete from set_binid hash fails with error %d", rv);
 		}
 		SINDEX_WLOCK(&si->imd->slock);
+		// Free entire usage counter before tree destroy
+		cf_atomic64_sub(&si->ns->n_bytes_sindex_memory,
+				ai_btree_get_isize(si->imd) + ai_btree_get_nsize(si->imd));    
+
 		ai_btree_destroy(si->imd);
-		// Free entire usage counter for this index after the destroy
-		// code... alc code does not do it.
-		as_sindex_release_data_memory(si->imd, si->stats.mem_used);
 		as_sindex_destroy_pmetadata(si);
 		si->state = AS_SINDEX_INACTIVE;
 		si->flag  = 0;

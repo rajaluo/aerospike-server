@@ -151,7 +151,6 @@ typedef struct as_config_s {
 	uint32_t		scan_max_udf_transactions; // maximum number of active transactions per UDF background scan
 	uint32_t		scan_threads; // size of scan thread pool
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
-	uint64_t		sindex_data_max_memory; // maximum memory for secondary index trees
 	PAD_BOOL		sindex_gc_enable_histogram; // dynamic only
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
@@ -240,8 +239,6 @@ typedef struct as_config_s {
 	cf_node			xdr_clmap[AS_CLUSTER_SZ]; // cluster map as known to XDR
 	xdr_lastship_s	xdr_lastship[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
 	uint64_t		xdr_self_lastshiptime[DC_MAX_NUM]; // last XDR shipping by this node
-
-	cf_atomic64	    sindex_data_memory_used;
 
 	// Namespaces.
 	struct as_namespace_s* namespaces[AS_NAMESPACE_SZ];
