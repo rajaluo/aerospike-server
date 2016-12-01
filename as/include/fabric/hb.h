@@ -49,6 +49,11 @@
 #define AS_HB_TX_INTERVAL_MS_MAX 600000
 
 /**
+ * Minimum max-intervals-missed.
+ */
+#define AS_HB_MAX_INTERVALS_MISSED_MIN 3
+
+/**
  * Heartbeat modes.
  */
 typedef enum as_hb_mode_enum
@@ -494,7 +499,7 @@ uint32_t as_hb_tx_interval_get();
 
 int as_hb_tx_interval_set(uint32_t new_interval);
 
-void as_hb_max_intervals_missed_set(uint32_t new_max);
+bool as_hb_max_intervals_missed_set(uint32_t new_max);
 
 void as_hb_fabric_grace_factor_set(int new_factor);
 
