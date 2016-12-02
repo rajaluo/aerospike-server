@@ -162,8 +162,7 @@ as_namespace_create(char *name)
 	ns->storage_write_threads = 1;
 
 	// SINDEX
-	ns->sindex_data_max_memory = ULONG_MAX;
-	ns->sindex_data_memory_used = 0;
+	ns->n_bytes_sindex_memory = 0;
 	ns->sindex_cfg_var_hash = NULL;
 	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_INDEX;
 
@@ -357,7 +356,7 @@ as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_w
 	uint64_t index_sz = cf_atomic64_get(ns->n_objects) * as_index_size_get(ns);
 	uint64_t sub_index_sz = cf_atomic64_get(ns->n_sub_objects) * as_index_size_get(ns);
 	uint64_t tombstone_index_sz = cf_atomic64_get(ns->n_tombstones) * as_index_size_get(ns);
-	uint64_t sindex_sz = as_sindex_get_ns_memory_used(ns);
+	uint64_t sindex_sz = cf_atomic64_get(ns->n_bytes_sindex_memory);
 	uint64_t data_in_memory_sz = cf_atomic_int_get(ns->n_bytes_memory);
 	uint64_t memory_sz = index_sz + sub_index_sz + tombstone_index_sz + data_in_memory_sz + sindex_sz;
 

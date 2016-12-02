@@ -188,7 +188,9 @@ log_ticker_frame()
 
 		size_t index_mem = as_index_size_get(ns) *
 				(n_objects + n_sub_objects + n_tombstones);
-		size_t sindex_mem = ns->sindex_data_memory_used;
+		// TODO - Memory usage should be in unsigned 64 bit.
+		// Down casting to signed 32 bit for sindex.
+		size_t sindex_mem = (size_t) cf_atomic64_get(ns->n_bytes_sindex_memory);
 		size_t data_mem = ns->n_bytes_memory;
 		size_t total_mem = index_mem + sindex_mem + data_mem;
 

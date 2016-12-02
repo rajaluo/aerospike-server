@@ -431,7 +431,7 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
 	ai_nbtr *anbtr = (ai_nbtr *)btIndFind(ibtr, acol);
 	ulong ba = 0, aa = 0;
 	if (!anbtr) {
-		return AS_SINDEX_ERR;
+		return AS_SINDEX_KEY_NOTFOUND;
 	}
 	if (anbtr->is_btree) {
 		if (!anbtr->u.nbtr) return AS_SINDEX_ERR;
@@ -442,11 +442,19 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
 			return AS_SINDEX_KEY_NOTFOUND;
 		}
 		ba = nbtr->msize;
-		int nkeys = btIndNodeDelete(nbtr, apk, NULL);
+
+		// TODO - Needs to be cleaner, type convert from signed
+		// to unsigned. Should be 64 bit !!
+		int nkeys_before = nbtr->numkeys; 
+		int nkeys_after = btIndNodeDelete(nbtr, apk, NULL);
 		aa = nbtr->msize;
 
+		if (nkeys_after == nkeys_before) {
+			return AS_SINDEX_KEY_NOTFOUND;
+		}
+
 		// remove from ibtr
-		if (!nkeys) {
+		if (nkeys_after == 0) {
 			btIndDelete(ibtr, acol);
 			aa = 0;
 			bt_destroy(nbtr);
@@ -893,8 +901,6 @@ ai_btree_query(as_sindex_metadata *imd, as_sindex_range *srange, as_sindex_qctx 
 int
 ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_digest *value)
 {
-	int ret = AS_SINDEX_OK;
-
 	ai_obj ncol;
 	if (C_IS_Y(imd->dtype)) {
 		init_ai_objFromDigest(&ncol, (cf_digest*)skey);
@@ -907,24 +913,15 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_
 	init_ai_objFromDigest(&apk, value);
 
 
-	ulong bb = pimd->ibtr->msize + pimd->ibtr->nsize;
-	ret = reduced_iAdd(pimd->ibtr, &ncol, &apk, COL_TYPE_U160);
-	if (ret == AS_SINDEX_KEY_FOUND) {
-		goto END;
-	} else if (ret != AS_SINDEX_OK) {
+	uint64_t before = pimd->ibtr->msize + pimd->ibtr->nsize;
+	int ret = reduced_iAdd(pimd->ibtr, &ncol, &apk, COL_TYPE_U160);
+	uint64_t after = pimd->ibtr->msize + pimd->ibtr->nsize;
+	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory, (after - before));
+
+	if (ret && ret != AS_SINDEX_KEY_FOUND) {
 		cf_warning(AS_SINDEX, "Insert into the btree failed");
-		ret = AS_SINDEX_ERR_NO_MEMORY;
-		goto END;
+		return AS_SINDEX_ERR_NO_MEMORY;
 	}
-	ulong ab = pimd->ibtr->msize + pimd->ibtr->nsize;
-	if (!as_sindex_reserve_data_memory(imd, (ab - bb))) {
-		reduced_iRem(pimd->ibtr, &ncol, &apk);
-		ret = AS_SINDEX_ERR_NO_MEMORY;
-		goto END;
-	}
-
-END:
-
 	return ret;
 }
 
@@ -947,10 +944,12 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void * skey,
 
 	ai_obj apk;
 	init_ai_objFromDigest(&apk, value);
-	ulong bb = pimd->ibtr->msize + pimd->ibtr->nsize;
+
+	uint64_t before = pimd->ibtr->msize + pimd->ibtr->nsize;
 	ret = reduced_iRem(pimd->ibtr, &ncol, &apk);
-	ulong ab = pimd->ibtr->msize + pimd->ibtr->nsize;
-	as_sindex_release_data_memory(imd, (bb - ab));
+	uint64_t after = pimd->ibtr->msize + pimd->ibtr->nsize;
+	cf_atomic64_sub(&imd->si->ns->n_bytes_sindex_memory, (before - after));
+
 	return ret;
 }
 
@@ -1183,9 +1182,12 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 	ulong success = 0;
 	as_namespace *ns = imd->si->ns;
 	// STEP 3: go thru the PKtoDeleteList and delete the keys
-	ulong bb = pimd->ibtr->msize + pimd->ibtr->nsize;
 	uint64_t validation_time_ns = 0;
 	uint64_t deletion_time_ns   = 0;
+
+	uint64_t before = 0;
+	uint64_t after = 0;
+
 	while (cf_ll_size(gc_list)) {
 		cf_ll_element        * ele  = cf_ll_get_head(gc_list);
 		ll_sindex_gc_element * node = (ll_sindex_gc_element * )ele;
@@ -1204,16 +1206,18 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 			if (ret == AS_SINDEX_GC_SKIP_ITERATION) {
 				goto END;
 			} else if (ret == AS_SINDEX_GC_OK) {
-				ai_obj           apk;
+				ai_obj apk;
 				init_ai_objFromDigest(&apk, &(dt->acol_digs[i].dig));
-				ai_obj          *acol = &(dt->acol_digs[i].acol);
+				ai_obj *acol = &(dt->acol_digs[i].acol);
 				cf_detail(AS_SINDEX, "Defragged %lu %ld", acol->l, *((uint64_t *)&apk.y));
 				
 				SET_TIME_FOR_SINDEX_GC_HIST(deletion_time_ns);
+				before += pimd->ibtr->msize + pimd->ibtr->nsize;
 				if (reduced_iRem(pimd->ibtr, acol, &apk) == AS_SINDEX_OK) {
 					success++;
-					SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_delete_obj_hist, deletion_time_ns);
 				}
+				after += pimd->ibtr->msize + pimd->ibtr->nsize;
+				SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_delete_obj_hist, deletion_time_ns);
 				deletion_time_ns = 0;
 			}
 			dt->num -= 1;
@@ -1226,7 +1230,7 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 	}
 
 END:
-	as_sindex_release_data_memory(imd, (bb -  pimd->ibtr->msize - pimd->ibtr->nsize));
+	cf_atomic64_sub(&imd->si->ns->n_bytes_sindex_memory, (before - after));
 	*deleted += success;
 	return cf_ll_size(gc_list) ? true : false;
 }

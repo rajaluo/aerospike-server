@@ -1916,13 +1916,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "scan-threads", g_config.scan_threads);
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 
-	if (g_config.sindex_data_max_memory != ULONG_MAX) {
-		info_append_uint64(db, "sindex-data-max-memory", g_config.sindex_data_max_memory);
-	}
-	else {
-		info_append_string(db, "sindex-data-max-memory", "ULONG_MAX");
-	}
-
 	info_append_bool(db, "sindex-gc-enable-histogram", g_config.sindex_gc_enable_histogram); // dynamic only
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
 	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
@@ -2119,13 +2112,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
 		info_append_uint32(db, "storage-engine.num-write-blocks", ns->storage_num_write_blocks);
 		info_append_bool(db, "storage-engine.cond-write", ns->cond_write);
-	}
-
-	if (ns->sindex_data_max_memory != ULONG_MAX) {
-		info_append_uint64(db, "sindex.data-max-memory", ns->sindex_data_max_memory);
-	}
-	else {
-		info_append_string(db, "sindex.data-max-memory", "ULONG_MAX");
 	}
 
 	info_append_uint32(db, "sindex.num-partitions", ns->sindex_num_partitions);
@@ -2595,18 +2581,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of sindex-builder-threads from %u to %d", g_config.sindex_builder_threads, val);
 			g_config.sindex_builder_threads = (uint32_t)val;
 			as_sbld_resize_thread_pool(g_config.sindex_builder_threads);
-		}
-		else if (0 == as_info_parameter_get(params, "sindex-data-max-memory", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "sindex-data-max-memory = %"PRIu64"", val);
-			if (val > g_config.sindex_data_max_memory) {
-				g_config.sindex_data_max_memory = val;
-			}
-			if (val < (g_config.sindex_data_max_memory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of sindex-data-max-memory from %"PRIu64" to %"PRIu64, g_config.sindex_data_max_memory, val);
-			g_config.sindex_data_max_memory = val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-threads", context, &context_len)) {
 			uint64_t val = atoll(context);
@@ -3379,17 +3353,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of post-write-queue of ns %s from %d to %d ", ns->name, ns->storage_post_write_queue, val);
 			cf_atomic32_set(&ns->storage_post_write_queue, (uint32_t)val);
-		}
-		else if (0 == as_info_parameter_get(params, "sindex-data-max-memory", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_debug(AS_INFO, "sindex-data-max-memory = %"PRIu64"", val);
-			if (val > ns->sindex_data_max_memory)
-				ns->sindex_data_max_memory = val;
-			if (val < (ns->sindex_data_max_memory / 2L)) { // protect so someone does not reduce memory to below 1/2 current value
-				goto Error;
-			}
-			cf_info(AS_INFO, "Changing value of sindex-data-max-memory of ns %s from %"PRIu64" to %"PRIu64, ns->name, ns->sindex_data_max_memory, val);
-			ns->sindex_data_max_memory = val;
 		}
 		else if (0 == as_info_parameter_get(params, "indexname", context, &context_len)) {
 			as_sindex_metadata imd;
@@ -5765,7 +5728,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 
 	uint64_t data_memory = ns->n_bytes_memory;
 	uint64_t index_memory = as_index_size_get(ns) * (ns->n_objects + ns->n_sub_objects + ns->n_tombstones);
-	uint64_t sindex_memory = ns->sindex_data_memory_used;
+	uint64_t sindex_memory = ns->n_bytes_sindex_memory;
 	uint64_t used_memory = data_memory + index_memory + sindex_memory;
 
 	info_append_uint64(db, "memory_used_bytes", used_memory);
