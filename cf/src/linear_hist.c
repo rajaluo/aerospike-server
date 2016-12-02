@@ -224,7 +224,8 @@ linear_hist_get_threshold_for_fraction(linear_hist *h, uint32_t tenths_pct,
 		linear_hist_threshold *p_threshold)
 {
 	return linear_hist_get_threshold_for_subtotal(h,
-			(linear_hist_get_total(h) * tenths_pct) / 1000, p_threshold);
+			(linear_hist_get_total(h) * (uint64_t)tenths_pct) / 1000,
+			p_threshold);
 }
 
 //------------------------------------------------
