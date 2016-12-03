@@ -625,14 +625,4 @@ get_ldt_info(const msg* m, as_record_merge_component* c)
 	if ((info & RW_INFO_LDT_DUMMY) != 0) {
 		c->flag |= AS_COMPONENT_FLAG_LDT_DUMMY;
 	}
-
-	if ((info & RW_INFO_LDT_SUBREC) != 0) {
-		c->flag |= AS_COMPONENT_FLAG_LDT_SUBREC;
-		cf_warning(AS_RW, "dup-res ack: got subrecord");
-	}
-
-	if ((info & RW_INFO_LDT_ESR) != 0) {
-		c->flag |= AS_COMPONENT_FLAG_LDT_ESR;
-		cf_warning(AS_RW, "dup-res ack: got esr");
-	}
 }

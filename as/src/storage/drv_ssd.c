@@ -2749,16 +2749,12 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 
 	if (ssd->sub_sweep) {
 		if (! is_ldt_sub) {
-			cf_detail(AS_DRV_SSD, "LDT_LOAD Skipping parent records in the subrecord sweep %d %d",
-					is_ldt_parent, is_ldt_sub);
-			return 0;
+			return -1;
 		}
 	}
 	else {
-		if (is_ldt_sub) {
-			cf_detail(AS_DRV_SSD, "LDT_LOAD Skipping subrecord records in the non subrecord sweep %d %d",
-					is_ldt_parent, is_ldt_sub);
-			return 0;
+		if (is_ldt_sub || (is_ldt_parent && ! ns->ldt_enabled)) {
+			return -1;
 		}
 	}
 

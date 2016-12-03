@@ -75,7 +75,7 @@ typedef enum {
 #define RW_INFO_LDT_DUMMY		0x0008 // dummy (no data)
 #define RW_INFO_LDT_PARENTREC	0x0010 // LDT parent record
 #define RW_INFO_LDT_SUBREC		0x0020 // LDT subrecord
-#define RW_INFO_LDT_ESR			0x0040 // LDT ESR
+#define RW_INFO_UNUSED_40		0x0040 // was LDT ESR
 #define RW_INFO_SINDEX_TOUCHED	0x0080 // sindex was touched
 #define RW_INFO_LDT				0x0100 // LDT multi-op message
 #define RW_INFO_UDF_WRITE		0x0200 // write is done from inside UDF

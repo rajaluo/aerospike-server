@@ -327,7 +327,7 @@ repl_write_handle_op(cf_node node, msg* m)
 		}
 
 		result = delete_replica(&rsv, keyd,
-				(info & (RW_INFO_LDT_SUBREC | RW_INFO_LDT_ESR)) != 0,
+				(info & RW_INFO_LDT_SUBREC) != 0,
 				(info & RW_INFO_NSUP_DELETE) != 0,
 				as_msg_is_xdr(&msgp->msg),
 				node);
@@ -569,6 +569,11 @@ repl_write_handle_multiop(cf_node node, msg* m)
 		return;
 	}
 
+	if (! ns->ldt_enabled) {
+		send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE);
+		return;
+	}
+
 	cf_digest* keyd;
 
 	if (msg_get_buf(m, RW_FIELD_DIGEST, (uint8_t**)&keyd, NULL,
@@ -702,20 +707,18 @@ pack_info_bits(as_transaction* tr, bool has_udf)
 uint32_t
 pack_ldt_info_bits(as_transaction* tr, bool is_parent, bool is_sub)
 {
-	uint32_t info = 0;
+	if (! tr->rsv.ns->ldt_enabled) {
+		return 0;
+	}
 
-	// TODO - do we really get here if ldt_enabled is false?
-	if (tr->rsv.ns->ldt_enabled) {
-		if (is_sub) {
-			info |= RW_INFO_LDT_SUBREC;
-		}
-		else {
-			if (is_parent) {
-				info |= RW_INFO_LDT_PARENTREC;
-			}
+	if (is_sub) {
+		return RW_INFO_LDT_SUBREC;
+	}
 
-			info |= RW_INFO_LDT;
-		}
+	uint32_t info = RW_INFO_LDT;
+
+	if (is_parent) {
+		info |= RW_INFO_LDT_PARENTREC;
 	}
 
 	return info;
@@ -782,10 +785,7 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 		return true;
 	}
 
-	// TODO - can we get here if ldt_enabled is false?
-	if (rsv->ns->ldt_enabled) {
-		ldt_set_prole_subrec_version(info, linfo, keyd);
-	}
+	ldt_set_prole_subrec_version(info, linfo, keyd);
 
 	cl_msg* msgp;
 
@@ -795,7 +795,7 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
 			MSG_GET_DIRECT) == 0) {
 		delete_replica(rsv, keyd,
-				(info & (RW_INFO_LDT_SUBREC | RW_INFO_LDT_ESR)) != 0,
+				(info & RW_INFO_LDT_SUBREC) != 0,
 				(info & RW_INFO_NSUP_DELETE) != 0,
 				as_msg_is_xdr(&msgp->msg),
 				node);
@@ -893,8 +893,7 @@ void
 ldt_set_prole_subrec_version(uint32_t info, const ldt_prole_info* linfo,
 		cf_digest* keyd)
 {
-	if ((info & RW_INFO_LDT_SUBREC) == 0 && (info & RW_INFO_LDT_ESR) == 0) {
-		// Not a subrecord.
+	if ((info & RW_INFO_LDT_SUBREC) == 0) {
 		return;
 	}
 
@@ -919,6 +918,11 @@ delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 {
 	// Shortcut pointers & flags.
 	as_namespace* ns = rsv->ns;
+
+	if (is_subrec && ! ns->ldt_enabled) {
+		return AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+	}
+
 	as_index_tree* tree = is_subrec ? rsv->sub_tree : rsv->tree;
 
 	as_index_ref r_ref;
@@ -971,19 +975,14 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 	JEM_SET_NS_ARENA(ns);
 
-	as_index_tree* tree = rsv->tree;
-	bool is_subrec = false;
-	bool is_ldt_parent = false;
+	bool is_subrec = (info & RW_INFO_LDT_SUBREC) != 0;
+	bool is_ldt_parent = (info & RW_INFO_LDT_PARENTREC) != 0;
 
-	if (ns->ldt_enabled) {
-		if ((info & RW_INFO_LDT_SUBREC) != 0 || (info & RW_INFO_LDT_ESR) != 0) {
-			tree = rsv->sub_tree;
-			is_subrec = true;
-		}
-		else if ((info & RW_INFO_LDT_PARENTREC) != 0) {
-			is_ldt_parent = true;
-		}
+	if ((is_subrec || is_ldt_parent) && ! ns->ldt_enabled) {
+		return AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
 	}
+
+	as_index_tree* tree = is_subrec ? rsv->sub_tree : rsv->tree;
 
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;

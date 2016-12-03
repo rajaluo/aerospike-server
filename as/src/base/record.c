@@ -50,10 +50,6 @@
 #include "transaction/delete.h"
 
 
-/* Used for debugging/tracing */
-static char * MOD = "partition.c::06/28/13";
-
-
 // Called assuming record area of as_index has already been cleared.
 void
 as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
@@ -728,146 +724,94 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 		uint16_t n_components, as_record_merge_component *components,
 		int *winner_idx)
 {
-	static char * meth = "as_record_flatten()";
-	cf_debug(AS_RECORD, "flatten start: ");
+	as_namespace *ns = rsv->ns;
 
-	if (! as_storage_has_space(rsv->ns)) {
-		cf_warning(AS_RECORD, "{%s}: record_flatten: drives full", rsv->ns->name);
+	if (COMPONENT_IS_LDT(&components[0]) && ! ns->ldt_enabled) {
+		// Ignore LDT migrations. (And if LDT is disabled, LDT dummies won't get
+		// here via duplicate resolution.)
+		return 0;
+	}
+
+	if (! as_storage_has_space(ns)) {
+		cf_warning(AS_RECORD, "{%s}: record_flatten: drives full", ns->name);
 		return -1;
 	}
 
-	JEM_SET_NS_ARENA(rsv->ns);
+	JEM_SET_NS_ARENA(ns);
 
-	// look up base record
+	bool is_subrec = false;
+
+	// LDT subrecords (which get here only via migration) have their own
+	// conflict resolution method.
+	if (COMPONENT_IS_MIG(&components[0]) &&
+			COMPONENT_IS_LDT_SUB(&components[0])) {
+		if (! as_ldt_merge_component_is_candidate(rsv, &components[0])) {
+			// Remote subrecord loses comparison - ignore it.
+			return 0;
+		}
+		// else - remote subrecord wins - apply it.
+
+		is_subrec = true;
+		*winner_idx = 0;
+	}
+
+	as_index_tree *tree = is_subrec ? rsv->sub_tree : rsv->tree;
+
 	as_index_ref r_ref;
-	r_ref.skip_lock     = false;
-	as_index_tree *tree = rsv->tree;
-	bool is_subrec      = false;
+	r_ref.skip_lock = false;
 
+	int rv = as_record_get_create(tree, keyd, &r_ref, ns, is_subrec);
 
-	// If the incoming component is the SUBRECORD it should have come as
-	// part of MIGRATION... and there will be only 1 component currently.
-	// assert the fact
-	if (rsv->ns->ldt_enabled) {
-		if (COMPONENT_IS_MIG(&components[0])) {
-			// Currently the migration is single record at a time merge
-			if (n_components > 1) {
-				cf_warning(AS_RECORD, "Unexpected function call parameter ... n_components = %d", n_components);
-				return (-1);
-			}
-
-			if (COMPONENT_IS_LDT_SUB(&components[0])) {
-
-				cf_detail_digest(AS_LDT, keyd, "LDT_MERGE merge component is LDT_SUB %d", components[0].flag);
-
-				if (as_ldt_merge_component_is_candidate(rsv, &components[0]) == false) {
-					cf_debug_digest(AS_LDT, keyd, "LDT subrec is not a merge candidate");
-					return 0;
-				}
-
-				if ((rsv->sub_tree == 0)) {
-					cf_warning(AS_RECORD, "[LDT]<%s:%s>record merge: bad reservation. sub tree %p",
-							MOD, meth, rsv->sub_tree);
-					return(-1);
-				}
-				tree        = rsv->sub_tree;
-				is_subrec   = true;
-				*winner_idx = 0;
-			} else {
-				cf_detail_digest(AS_RECORD, keyd, "LDT_MERGE merge component is NON LDT_SUB %d", components[0].flag);
-			}
-		} else {
-			// In non-migration i.e duplicate resolution code path digest being
-			// operated on at current node is is always for non ldt record or
-			// ldt parent record. is_subrec should always be false
-			is_subrec = false;
-		}
-	}
-
-	bool has_local_copy = false;
-	as_index  *r        = NULL;
-	int ret             = as_record_get_create(tree, keyd, &r_ref, rsv->ns, is_subrec);
-	if (-1 == ret) {
-		cf_debug_digest(AS_RECORD, keyd, "{%s} record flatten: could not get-create record %d", rsv->ns->name, is_subrec);
+	if (rv < 0) {
+		cf_debug_digest(AS_RECORD, keyd, "{%s} record flatten: could not get-create record %d", ns->name, is_subrec);
 		return -3;
-	} else if (ret) {
-		has_local_copy  = false;
-		r               = r_ref.r;
-	} else {
-		has_local_copy  = true;
-		r               = r_ref.r;
 	}
-	// DO NOT check for subrecord generation. If the parent generation wins
-	// (check above in *_merge_candidate) we should should have winner_idx
-	// set.
-	// Note: In all likelihood the incoming SUBRECORD will not have a local
-	// copy because the digest comes with the migrate_ldt_version already stamped
-	// in it. Even if it matches just go ahead and write it down.
-	if (!is_subrec) {
-		if (has_local_copy) {
-			*winner_idx = as_record_component_winner(rsv, n_components, components, r);
-		} else {
-			*winner_idx = as_record_component_winner(rsv, n_components, components, NULL);
+
+	bool is_create = rv == 1;
+	as_index *r = r_ref.r;
+
+	if (! is_subrec) {
+		*winner_idx = as_record_component_winner(rsv, n_components, components,
+				is_create ? NULL : r);
+	}
+
+	// If the winner is the local copy, nothing to do.
+	if (*winner_idx == -1) {
+		as_record_done(&r_ref, ns);
+		return 0;
+	}
+	// else - remote winner - apply it (unless it's an LDT dummy).
+
+	int flatten_rv;
+	as_record_merge_component *c = &components[*winner_idx];
+
+	if (COMPONENT_IS_LDT_DUMMY(c)) {
+		// LDT dummy won - don't apply locally, trigger a ship-op.
+		flatten_rv = -7; // -7 is special - do not change!
+	}
+	else {
+		// Normal remote winner.
+		as_storage_rd rd;
+
+		if (is_create) {
+			as_storage_record_create(ns, r, &rd, keyd);
 		}
-	}
-
-	int rv = 0;
-
-	// Remote winner.
-	if (*winner_idx != -1) {
-		cf_detail(AS_LDT, "Flatten Record Remote LDT Winner @ %d", *winner_idx);
-		as_record_merge_component *c = &components[*winner_idx];
-
-		if (COMPONENT_IS_LDT_DUMMY(c)) {
-			// Case 1:
-			// In case the winning component is remote and is dummy (ofcourse flatten
-			// is called under reply to duplicate resolution request) return -7. Caller
-			// would ship operation to the winning node!!
-			if (COMPONENT_IS_MIG(c)) {
-				cf_warning(AS_RECORD, "DUMMY LDT Component in Non Duplicate Resolution Code");
-				rv = -1;
-			} else {
-				cf_detail(AS_LDT, "Ship Operation");
-				// NB: DO NOT CHANGE THIS RETURN. IT MEANS A SPECIAL THING TO THE CALLER
-				rv = -7;
-			}
-		} else {
-			// Case 2:
-			// In case the winning component is remote then write it locally. Create record
-			// in case there is no local copy of record.
-			cf_detail_digest(AS_RECORD, keyd, "is_subrec (%d) Local (%d:%d) Remote (%d:%d)", is_subrec, r->generation, r->void_time, c->generation, c->void_time);
-
-			as_storage_rd rd;
-			if (has_local_copy) {
-				as_storage_record_open(rsv->ns, r_ref.r, &rd, keyd);
-			} else {
-				as_storage_record_create(rsv->ns, r_ref.r, &rd, keyd);
-			}
-
-			// NB: Side effect of this function is this closes the record
-			rv = as_record_flatten_component(rsv, &rd, &r_ref, c);
+		else {
+			as_storage_record_open(ns, r, &rd, keyd);
 		}
 
-		// delete newly created index above if there is no local copy
-		if (rv && !has_local_copy) {
-			as_index_delete(rsv->tree, keyd);
-		}
-	} else {
-		cf_assert(has_local_copy, AS_RECORD,
-				"Local Copy Won when there is no local copy");
-		cf_detail_digest(AS_LDT, keyd, "Local Copy Win [%d %d] %d winner_idx=%d", r->generation, components[0].generation, r->void_time, *winner_idx);
+		// Apply remote winner locally. (Yes, call closes as_storage_rd.)
+		flatten_rv = as_record_flatten_component(rsv, &rd, &r_ref, c);
 	}
 
-	// our reservation must still be valid here. Check it.
-	if ((rsv->tree == 0) || (rsv->ns == 0) || (rsv->p == 0)) {
-		cf_info(AS_RECORD, "record merge: bad reservation. tree %p ns %p part %p", rsv->tree, rsv->ns, rsv->p);
-		return(-1);
+	// On failure or ship-op, delete index element if created above.
+	if (flatten_rv != 0 && is_create) {
+		as_index_delete(rsv->tree, keyd);
 	}
 
-	// and after here it's GONE
-	as_record_done(&r_ref, rsv->ns);
+	as_record_done(&r_ref, ns);
 
-	return rv;
+	return flatten_rv;
 }
 
 // TODO - inline this, if/when we unravel header files.

@@ -583,8 +583,8 @@ extern uint32_t as_record_buf_get_stack_particles_sz(uint8_t *buf);
 		|| ((c)->flag & AS_COMPONENT_FLAG_LDT_SUBREC))
 
 #define COMPONENT_IS_LDT(c) \
-	COMPONENT_IS_LDT_PARENT((c)) \
-		|| COMPONENT_IS_LDT_SUB((c))
+	(COMPONENT_IS_LDT_PARENT((c)) \
+		|| COMPONENT_IS_LDT_SUB((c)))
 
 typedef struct {
 	uint8_t					*record_buf;
