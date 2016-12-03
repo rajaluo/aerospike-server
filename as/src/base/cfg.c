@@ -1266,13 +1266,6 @@ as_xdr_cfg_find_tok(const char* tok, const xdr_cfg_opt opts[], int num_opts)
 // Value parsing and sanity-checking utilities.
 //
 
-typedef struct cfg_line_s {
-	int		num;
-	char*	name_tok;
-	char*	val_tok_1;
-	char*	val_tok_2;
-} cfg_line;
-
 void
 cfg_renamed_name_tok(const cfg_line* p_line, const char* new_tok)
 {
@@ -1885,6 +1878,7 @@ as_config_init(const char* config_file)
 				cfg_begin_context(&state, CLUSTER);
 				break;
 			case CASE_SECURITY_BEGIN:
+				cfg_enterprise_only(&line);
 				cfg_begin_context(&state, SECURITY);
 				break;
 			case CASE_NOT_FOUND:
@@ -2714,9 +2708,11 @@ as_config_init(const char* config_file)
 				ns->stop_writes_pct = (float)cfg_pct_fraction(&line);
 				break;
 			case CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE:
+				cfg_enterprise_only(&line);
 				ns->tomb_raider_eligible_age = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_TOMB_RAIDER_PERIOD:
+				cfg_enterprise_only(&line);
 				ns->tomb_raider_period = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE:
@@ -2841,6 +2837,7 @@ as_config_init(const char* config_file)
 				ns->storage_post_write_queue = cfg_u32(&line, 0, 2 * 1024);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_TOMB_RAIDER_SLEEP:
+				cfg_enterprise_only(&line);
 				ns->storage_tomb_raider_sleep = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_DEVICE_WRITE_THREADS:

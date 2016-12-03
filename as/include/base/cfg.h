@@ -264,3 +264,18 @@ bool as_config_cluster_name_matches(const char* cluster_name);
 
 extern as_config g_config;
 extern xdr_config g_xcfg;
+
+
+//==========================================================
+// Private API - for enterprise separation only.
+//
+
+// Parsed configuration file line.
+typedef struct cfg_line_s {
+	int		num;
+	char*	name_tok;
+	char*	val_tok_1;
+	char*	val_tok_2;
+} cfg_line;
+
+void cfg_enterprise_only(const cfg_line* p_line);

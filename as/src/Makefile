@@ -41,6 +41,7 @@ BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
 BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
 BASE_SOURCES += udf_memtracker.c udf_record.c udf_timer.c
 ifneq ($(USE_EE),1)
+  BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += index_ce.c
   BASE_SOURCES += namespace_ce.c
   BASE_SOURCES += record_ce.c
