@@ -211,16 +211,17 @@
 #define MSG_WIRE_LENGTH_SIZE 4
 
 /**
+ * Channel idle interval after which check for inactive channel is triggered.
+ */
+#define CHANNEL_IDLE_CHECK_PERIOD (CHANNEL_NODE_READ_IDLE_TIMEOUT() / 2)
+
+/**
  * A channel times out if there is no msg received from a node in this interval.
  * Set to a fraction of node timeout so that a new channel could be set up to
  * recover from a potentially bad connection before the node times out.
  */
-#define CHANNEL_NODE_READ_IDLE_TIMEOUT() (PULSE_TRANSMIT_INTERVAL()  *  MAX(2, config_max_intervals_missed_get() ) / 3)
-
-/**
- * Channel idle interval after which check for inactive channel is triggered.
- */
-#define CHANNEL_IDLE_CHECK_PERIOD() (CHANNEL_NODE_READ_IDLE_TIMEOUT() / 2)
+#define CHANNEL_NODE_READ_IDLE_TIMEOUT()									\
+(PULSE_TRANSMIT_INTERVAL() * MAX(2, config_max_intervals_missed_get() / 3))
 
 /**
  * Acquire a lock on the entire channel sub module.
@@ -1120,11 +1121,6 @@ typedef struct as_hb_channel_state_s
 	 * unpublished heartbeat events.
 	 */
 	cf_queue events_queue;
-
-	 /**
-	 *  Clock to keep track of last time idle connections were checked.
-	 */
-	 cf_clock last_channel_idle_check;
 
 	/**
 	 * Thread id for the socket tender thread.
@@ -2155,7 +2151,7 @@ as_hb_tx_interval_set(uint32_t new_interval)
  * Set the maximum number of missed heartbeat intervals after which a node is
  * considered expired.
  */
-bool
+int
 as_hb_max_intervals_missed_set(uint32_t new_max)
 {
 	if (new_max < AS_HB_MAX_INTERVALS_MISSED_MIN) {
@@ -5471,12 +5467,10 @@ static void
 channel_channels_idle_check()
 {
 	CHANNEL_LOCK();
-	cf_clock now = cf_getms();
-	if (g_hb.channel_state.last_channel_idle_check + CHANNEL_IDLE_CHECK_PERIOD() > now) {
-		shash_reduce(g_hb.channel_state.socket_to_channel,
-				 channel_channels_tend_reduce, NULL);
-		g_hb.channel_state.last_channel_idle_check = now;
-	}
+
+	shash_reduce(g_hb.channel_state.socket_to_channel,
+			channel_channels_tend_reduce, NULL);
+
 	CHANNEL_UNLOCK();
 }
 
@@ -5487,6 +5481,10 @@ void*
 channel_tender(void* arg)
 {
 	DETAIL("Channel tender started.");
+
+	// Clock to keep track of last time idle connections were checked.
+	cf_clock last_channel_idle_check = 0;
+
 	while (channel_is_running()) {
 		cf_poll_event events[POLL_SZ];
 		int nevents = cf_poll_wait(g_hb.channel_state.poll, events, POLL_SZ,
@@ -5520,8 +5518,12 @@ channel_tender(void* arg)
 			}
 		}
 
-		// Tend channels to discard stale channels.
-		channel_channels_idle_check();
+		cf_clock now = cf_getms();
+		if (last_channel_idle_check + CHANNEL_IDLE_CHECK_PERIOD > now) {
+			// Tend channels to discard stale channels.
+			channel_channels_idle_check();
+			last_channel_idle_check = now;
+		}
 
 		// Close queued up socket.
 		channel_socket_close_pending();

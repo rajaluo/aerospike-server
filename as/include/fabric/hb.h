@@ -499,7 +499,7 @@ uint32_t as_hb_tx_interval_get();
 
 int as_hb_tx_interval_set(uint32_t new_interval);
 
-bool as_hb_max_intervals_missed_set(uint32_t new_max);
+int as_hb_max_intervals_missed_set(uint32_t new_max);
 
 void as_hb_fabric_grace_factor_set(int new_factor);
 

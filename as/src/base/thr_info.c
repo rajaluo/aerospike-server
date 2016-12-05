@@ -2804,8 +2804,8 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "heartbeat.timeout", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
-			if (as_hb_max_intervals_missed_set(val)){
-					goto Error;
+			if (as_hb_max_intervals_missed_set(val) != 0){
+				goto Error;
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "heartbeat.fabric-grace-factor", context, &context_len)) {

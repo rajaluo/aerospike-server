@@ -2412,7 +2412,7 @@ as_config_init(const char* config_file)
 				c->hb_config.tx_interval = cfg_u32(&line, AS_HB_TX_INTERVAL_MS_MIN, AS_HB_TX_INTERVAL_MS_MAX);
 				break;
 			case CASE_NETWORK_HEARTBEAT_TIMEOUT:
-					c->hb_config.max_intervals_missed = cfg_u32(&line, AS_HB_MAX_INTERVALS_MISSED_MIN, UINT_MAX);
+				c->hb_config.max_intervals_missed = cfg_u32(&line, AS_HB_MAX_INTERVALS_MISSED_MIN, UINT_MAX);
 				break;
 			case CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR:
 				c->hb_config.fabric_grace_factor = cfg_int_no_checks(&line);
