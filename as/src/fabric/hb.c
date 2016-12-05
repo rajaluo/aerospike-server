@@ -211,11 +211,17 @@
 #define MSG_WIRE_LENGTH_SIZE 4
 
 /**
+ * Channel idle interval after which check for inactive channel is triggered.
+ */
+#define CHANNEL_IDLE_CHECK_PERIOD (CHANNEL_NODE_READ_IDLE_TIMEOUT() / 2)
+
+/**
  * A channel times out if there is no msg received from a node in this interval.
  * Set to a fraction of node timeout so that a new channel could be set up to
  * recover from a potentially bad connection before the node times out.
  */
-#define CHANNEL_NODE_READ_IDLE_TIMEOUT (2 * HB_NODE_TIMEOUT() / 3)
+#define CHANNEL_NODE_READ_IDLE_TIMEOUT()									\
+(PULSE_TRANSMIT_INTERVAL() * MAX(2, config_max_intervals_missed_get() / 3))
 
 /**
  * Acquire a lock on the entire channel sub module.
@@ -1669,7 +1675,7 @@ static int channel_msg_sanity_check(as_hb_channel_event* msg_event);
 static int channel_msg_event_process(cf_socket* socket, as_hb_channel_event* event);
 static bool channel_msg_make_compatible(cf_socket* socket, msg* msg);
 static void channel_msg_read(cf_socket* socket);
-static void channel_channels_tend();
+static void channel_channels_idle_check();
 void* channel_tender(void* arg);
 static bool channel_mesh_endpoint_filter(const as_endpoint* endpoint, void* udata);
 static void channel_mesh_channel_establish(as_endpoint_list** endpoint_lists, int endpoint_list_count);
@@ -2145,10 +2151,16 @@ as_hb_tx_interval_set(uint32_t new_interval)
  * Set the maximum number of missed heartbeat intervals after which a node is
  * considered expired.
  */
-void
+int
 as_hb_max_intervals_missed_set(uint32_t new_max)
 {
+	if (new_max < AS_HB_MAX_INTERVALS_MISSED_MIN) {
+		WARNING("Heartbeat timeout must be >= %u. Ignoring %u.",
+				AS_HB_MAX_INTERVALS_MISSED_MIN, new_max);
+		return (-1);
+	}
 	config_max_intervals_missed_set(new_max);
+	return (0);
 }
 
 /**
@@ -5434,7 +5446,7 @@ channel_channels_tend_reduce(void* key, void* data, void* udata)
 			CSFD(*socket), channel->nodeid, channel->last_received,
 			cf_sock_addr_print(&channel->endpoint_addr));
 
-	if (channel->last_received + CHANNEL_NODE_READ_IDLE_TIMEOUT < cf_getms()) {
+	if (channel->last_received + CHANNEL_NODE_READ_IDLE_TIMEOUT() < cf_getms()) {
 		// Shutdown associated socket if it is not a multicast socket.
 		if (!channel->is_multicast) {
 			DEBUG("Channel shutting down idle fd %d associated with node %" PRIx64 ". Last received %" PRIu64 " Endpoint %s.",
@@ -5452,7 +5464,7 @@ channel_channels_tend_reduce(void* key, void* data, void* udata)
  * TODO: attached to misbehaving nodes).
  */
 static void
-channel_channels_tend()
+channel_channels_idle_check()
 {
 	CHANNEL_LOCK();
 
@@ -5469,6 +5481,10 @@ void*
 channel_tender(void* arg)
 {
 	DETAIL("Channel tender started.");
+
+	// Clock to keep track of last time idle connections were checked.
+	cf_clock last_channel_idle_check = 0;
+
 	while (channel_is_running()) {
 		cf_poll_event events[POLL_SZ];
 		int nevents = cf_poll_wait(g_hb.channel_state.poll, events, POLL_SZ,
@@ -5502,8 +5518,12 @@ channel_tender(void* arg)
 			}
 		}
 
-		// Tend channels to discard stale channels.
-		channel_channels_tend();
+		cf_clock now = cf_getms();
+		if (last_channel_idle_check + CHANNEL_IDLE_CHECK_PERIOD > now) {
+			// Tend channels to discard stale channels.
+			channel_channels_idle_check();
+			last_channel_idle_check = now;
+		}
 
 		// Close queued up socket.
 		channel_socket_close_pending();
