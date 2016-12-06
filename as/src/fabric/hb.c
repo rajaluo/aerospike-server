@@ -6391,8 +6391,8 @@ mesh_tend_udata_capacity_ensure(as_hb_mesh_tend_reduce_udata* tend_reduce_udata,
 		int old_capacity = tend_reduce_udata->to_connect_capacity;
 		tend_reduce_udata->to_connect_capacity = alloc_size
 				/ sizeof(as_endpoint_list*);
-		tend_reduce_udata->to_connect = cf_realloc(
-				tend_reduce_udata->to_connect, alloc_size);
+		tend_reduce_udata->to_connect =
+				cf_realloc(tend_reduce_udata->to_connect, alloc_size);
 
 		if (tend_reduce_udata->to_connect == NULL) {
 			CRASH("Error allocating endpoint space for mesh tender.");
