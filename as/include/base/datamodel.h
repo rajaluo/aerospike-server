@@ -774,7 +774,6 @@ struct as_namespace_s {
 	void*			storage_private;
 
 	uint64_t		ssd_size; // discovered (and rounded) size of drive
-	int				storage_min_free_wblocks; // the number of wblocks per device to "reserve"
 	int				storage_last_avail_pct; // most recently calculated available percent
 	int				storage_max_write_q; // storage_max_write_cache is converted to this
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done

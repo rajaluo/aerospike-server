@@ -1378,7 +1378,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	cf_atomic64_incr(&_job->n_records_read);
 	cf_atomic32_incr(&job->n_active_tr);
 
-	thr_tsvc_enqueue(&tr);
+	as_tsvc_enqueue(&tr);
 }
 
 int

@@ -378,7 +378,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 		rw->msgp = NULL;
 
 		tr.from_flags |= FROM_FLAG_RESTART;
-		thr_tsvc_enqueue(&tr);
+		as_tsvc_enqueue(&tr);
 
 		rw->dup_res_complete = true;
 

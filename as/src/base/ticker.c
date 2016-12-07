@@ -188,9 +188,7 @@ log_ticker_frame()
 
 		size_t index_mem = as_index_size_get(ns) *
 				(n_objects + n_sub_objects + n_tombstones);
-		// TODO - Memory usage should be in unsigned 64 bit.
-		// Down casting to signed 32 bit for sindex.
-		size_t sindex_mem = (size_t) cf_atomic64_get(ns->n_bytes_sindex_memory);
+		size_t sindex_mem = ns->n_bytes_sindex_memory;
 		size_t data_mem = ns->n_bytes_memory;
 		size_t total_mem = index_mem + sindex_mem + data_mem;
 
@@ -256,7 +254,7 @@ void
 log_line_in_progress()
 {
 	cf_info(AS_INFO, "   in-progress: tsvc-q %d info-q %d nsup-delete-q %d rw-hash %u proxy-hash %u tree-gc-q %d",
-			thr_tsvc_queue_get_size(),
+			as_tsvc_queue_get_size(),
 			as_info_queue_get_size(),
 			as_nsup_queue_get_size(),
 			rw_request_hash_count(),

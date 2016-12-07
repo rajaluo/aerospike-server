@@ -709,11 +709,17 @@ thr_demarshal(void *unused)
 
 				ASD_TRANS_DEMARSHAL(nodeid, (uint64_t) tr.msgp, as_transaction_trid(&tr));
 
-				// Either process the transaction directly in this thread,
-				// or queue it for processing by another thread (tsvc/info).
-				if (0 != thr_tsvc_process_or_enqueue(&tr)) {
-					cf_warning(AS_DEMARSHAL, "Failed to queue transaction to the service thread");
-					goto NextEvent_FD_Cleanup;
+				// Directly process or queue the transaction.
+				if (g_config.n_namespaces_in_memory != 0 &&
+						(g_config.n_namespaces_not_in_memory == 0 ||
+								// Only peek if at least one of each config.
+								as_msg_peek_data_in_memory(&tr.msgp->msg))) {
+					// Data-in-memory namespace - process in this thread.
+					as_tsvc_process_transaction(&tr);
+				}
+				else {
+					// Data-not-in-memory namespace - process via queues.
+					as_tsvc_enqueue(&tr);
 				}
 
 				// Jump the proto message free & FD cleanup. If we get here, the

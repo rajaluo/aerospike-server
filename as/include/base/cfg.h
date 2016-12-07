@@ -88,14 +88,14 @@ typedef struct as_config_s {
 	uint32_t		paxos_single_replica_limit; // cluster size at which, and below, the cluster will run with replication factor 1
 	char*			pidfile;
 	int				n_service_threads;
-	int				n_transaction_queues;
-	int				n_transaction_threads_per_queue;
+	uint32_t		n_transaction_queues;
+	uint32_t		n_transaction_threads_per_queue;
 	int				n_proto_fd_max;
 
 	// Normally hidden:
 
 	// Note - advertise-ipv6 affects a cf_socket_ee.c global, so can't be here.
-	PAD_BOOL		allow_inline_transactions;
+	PAD_BOOL		allow_inline_transactions; // FIXME - remove when XDR code is tweaked!
 	int				n_batch_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
 	uint32_t		batch_max_requests; // maximum count of database requests in a single batch

@@ -674,7 +674,7 @@ run_nsup_delete(void* pv_data)
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
-		thr_tsvc_enqueue(&tr);
+		as_tsvc_enqueue(&tr);
 
 		// Throttle - don't overwhelm tsvc queue.
 		if (g_config.nsup_delete_sleep != 0) {

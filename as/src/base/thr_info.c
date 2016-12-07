@@ -287,7 +287,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_get_aggregated_namespace_stats(db);
 
-	info_append_int(db, "tsvc_queue", thr_tsvc_queue_get_size());
+	info_append_int(db, "tsvc_queue", as_tsvc_queue_get_size());
 	info_append_int(db, "info_queue", as_info_queue_get_size());
 	info_append_int(db, "delete_queue", as_nsup_queue_get_size());
 	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
@@ -1841,12 +1841,11 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "paxos-single-replica-limit", g_config.paxos_single_replica_limit);
 	info_append_string_safe(db, "pidfile", g_config.pidfile);
 	info_append_int(db, "service-threads", g_config.n_service_threads);
-	info_append_int(db, "transaction-queues", g_config.n_transaction_queues);
-	info_append_int(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
+	info_append_uint32(db, "transaction-queues", g_config.n_transaction_queues);
+	info_append_uint32(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
 	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
 
 	info_append_bool(db, "advertise-ipv6", cf_socket_advertises_ipv6());
-	info_append_bool(db, "allow-inline-transactions", g_config.allow_inline_transactions);
 	info_append_int(db, "batch-threads", g_config.n_batch_threads);
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
@@ -2246,6 +2245,17 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
+		else if (0 == as_info_parameter_get(params, "transaction-threads-per-queue", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			if (val < 1 || val > MAX_TRANSACTION_THREADS_PER_QUEUE) {
+				cf_warning(AS_INFO, "transaction-threads-per-queue must be between 1 and %u", MAX_TRANSACTION_THREADS_PER_QUEUE);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of transaction-threads-per-queue from %u to %d ", g_config.n_transaction_threads_per_queue, val);
+			as_tsvc_set_threads_per_queue((uint32_t)val);
+		}
 		else if (0 == as_info_parameter_get(params, "transaction-retry-ms", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
@@ -2478,18 +2488,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of respond-client-on-master-completion from %s to %s", bool_val[g_config.respond_client_on_master_completion], context);
 				g_config.respond_client_on_master_completion = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "allow-inline-transactions", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of allow-inline-transactions from %s to %s", bool_val[g_config.allow_inline_transactions], context);
-				g_config.allow_inline_transactions = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of allow-inline-transactions from %s to %s", bool_val[g_config.allow_inline_transactions], context);
-				g_config.allow_inline_transactions = false;
 			}
 			else
 				goto Error;

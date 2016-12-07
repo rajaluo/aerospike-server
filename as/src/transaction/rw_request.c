@@ -161,7 +161,7 @@ rw_request_destroy(rw_request* rw)
 		rw_wait_ele* next = e->next;
 
 		e->tr.from_flags |= FROM_FLAG_RESTART;
-		thr_tsvc_enqueue(&e->tr);
+		as_tsvc_enqueue(&e->tr);
 
 		cf_free(e);
 		e = next;

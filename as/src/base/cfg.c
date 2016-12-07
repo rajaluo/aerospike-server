@@ -117,7 +117,6 @@ cfg_set_defaults()
 	c->n_transaction_queues = 4;
 	c->n_transaction_threads_per_queue = 4;
 	c->n_proto_fd_max = 15000;
-	c->allow_inline_transactions = true; // allow data-in-memory namespaces to process transactions in service threads
 	c->n_batch_threads = 4;
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
@@ -248,7 +247,6 @@ typedef enum {
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
 	CASE_SERVICE_ADVERTISE_IPV6,
-	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
 	CASE_SERVICE_BATCH_MAX_REQUESTS,
@@ -314,6 +312,8 @@ typedef enum {
 	CASE_SERVICE_MAX_MSGS_PER_TYPE,
 	CASE_SERVICE_MEMORY_ACCOUNTING,
 	CASE_SERVICE_PROLE_EXTRA_TTL,
+	// Obsoleted:
+	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	// Deprecated:
 	CASE_SERVICE_AUTO_DUN,
 	CASE_SERVICE_AUTO_UNDUN,
@@ -406,9 +406,10 @@ typedef enum {
 	CASE_NETWORK_SERVICE_TLS_ADDRESS,
 	CASE_NETWORK_SERVICE_TLS_NAME,
 	CASE_NETWORK_SERVICE_TLS_PORT,
-	// Deprecated or obsoleted:
+	// Obsoleted:
 	CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS,
 	CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME,
+	// Deprecated:
 	CASE_NETWORK_SERVICE_REUSE_ADDRESS,
 
 	// Network heartbeat options:
@@ -426,7 +427,7 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_MCAST_TTL, // renamed
 	CASE_NETWORK_HEARTBEAT_MULTICAST_TTL,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL,
-	// Deprecated or obsoleted:
+	// Obsoleted:
 	CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS,
 
 	// Network heartbeat mode options (value tokens):
@@ -677,7 +678,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
 		{ "advertise-ipv6",					CASE_SERVICE_ADVERTISE_IPV6 },
-		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
 		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
@@ -742,6 +742,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "max-msgs-per-type",				CASE_SERVICE_MAX_MSGS_PER_TYPE },
 		{ "memory-accounting",				CASE_SERVICE_MEMORY_ACCOUNTING },
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
+		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
 		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
 		{ "batch-retransmit",				CASE_SERVICE_BATCH_RETRANSMIT },
@@ -1923,10 +1924,10 @@ as_config_init(const char* config_file)
 				c->n_service_threads = cfg_int(&line, 1, MAX_DEMARSHAL_THREADS);
 				break;
 			case CASE_SERVICE_TRANSACTION_QUEUES:
-				c->n_transaction_queues = cfg_int(&line, 1, MAX_TRANSACTION_QUEUES);
+				c->n_transaction_queues = cfg_u32(&line, 1, MAX_TRANSACTION_QUEUES);
 				break;
 			case CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE:
-				c->n_transaction_threads_per_queue = cfg_int_no_checks(&line);
+				c->n_transaction_threads_per_queue = cfg_u32(&line, 1, MAX_TRANSACTION_THREADS_PER_QUEUE);
 				break;
 			case CASE_SERVICE_CLIENT_FD_MAX:
 				cfg_renamed_name_tok(&line, "proto-fd-max");
@@ -1936,9 +1937,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_ADVERTISE_IPV6:
 				cf_socket_set_advertise_ipv6(cfg_bool(&line));
-				break;
-			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
-				c->allow_inline_transactions = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_BATCH_THREADS:
 				c->n_batch_threads = cfg_int(&line, 0, MAX_BATCH_THREADS);
@@ -2158,6 +2156,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_PROLE_EXTRA_TTL:
 				c->prole_extra_ttl = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
+				cfg_obsolete(&line, "please configure 'service-threads' carefully"); // FIXME - better message?
 				break;
 			case CASE_SERVICE_AUTO_DUN:
 			case CASE_SERVICE_AUTO_UNDUN:

@@ -228,6 +228,29 @@ available_size(drv_ssd *ssd)
 }
 
 
+// Since some write threads can't yet unwind on failure, we ensure that they'll
+// succeed by checking before writing on all threads that there's at least one
+// wblock per thread. TODO - deprecate this methodology when we can unwind.
+static inline int
+min_free_wblocks(as_namespace *ns)
+{
+	// Data-in-memory namespaces process transactions in service threads.
+	int n_service_threads = ns->storage_data_in_memory ?
+			g_config.n_service_threads : 0;
+
+	int n_transaction_threads = (int)
+			(g_config.n_transaction_queues * g_config.n_transaction_threads_per_queue);
+
+	return	n_service_threads +			// client writes
+			n_transaction_threads +		// client writes
+			g_config.n_fabric_workers +	// migration and prole writes
+			1 +							// always 1 defrag thread
+			DEFRAG_RUNTIME_RESERVE +	// reserve for defrag at runtime
+			DEFRAG_STARTUP_RESERVE;		// reserve for defrag at startup
+			// TODO - what about UDFs?
+}
+
+
 //------------------------------------------------
 // ssd_write_buf "swb" methods.
 //
@@ -4090,28 +4113,6 @@ as_storage_wait_for_defrag_ssd(as_namespace *ns)
 
 	// Restore configured defrag throttling values.
 	ns->storage_defrag_sleep = ns->saved_defrag_sleep;
-
-	// Set the "floor" for wblock usage. Must come after startup defrag so it
-	// doesn't prevent defrag from resurrecting a drive that hit the floor.
-
-	// Data-in-memory namespaces process transactions in service threads.
-	int n_service_threads = ns->storage_data_in_memory ?
-			g_config.n_service_threads : 0;
-
-	int n_transaction_threads =
-			g_config.n_transaction_queues * g_config.n_transaction_threads_per_queue;
-
-	ns->storage_min_free_wblocks =
-			n_service_threads +			// client writes
-			n_transaction_threads +		// client writes
-			g_config.n_fabric_workers +	// migration and prole writes
-			1 +							// always 1 defrag thread
-			DEFRAG_RUNTIME_RESERVE +	// reserve for defrag at runtime
-			DEFRAG_STARTUP_RESERVE;		// reserve for defrag at startup
-	// TODO - what about UDFs?
-
-	cf_info(AS_DRV_SSD, "{%s} floor set at %u wblocks per device", ns->name,
-			ns->storage_min_free_wblocks);
 }
 
 
@@ -4159,8 +4160,7 @@ as_storage_has_space_ssd(as_namespace *ns)
 	drv_ssds* ssds = (drv_ssds*)ns->storage_private;
 
 	for (int i = 0; i < ssds->n_ssds; i++) {
-		if (cf_queue_sz(ssds->ssds[i].free_wblock_q) <
-				ns->storage_min_free_wblocks) {
+		if (cf_queue_sz(ssds->ssds[i].free_wblock_q) < min_free_wblocks(ns)) {
 			return false;
 		}
 	}
