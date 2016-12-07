@@ -1,3 +1,5 @@
+0.0.2
+
 # Aerospike Database Server
 
 Welcome to the Aerospike Database Server source code tree!
