@@ -95,7 +95,6 @@ typedef struct as_config_s {
 	// Normally hidden:
 
 	// Note - advertise-ipv6 affects a cf_socket_ee.c global, so can't be here.
-	PAD_BOOL		allow_inline_transactions; // FIXME - remove when XDR code is tweaked!
 	int				n_batch_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
 	uint32_t		batch_max_requests; // maximum count of database requests in a single batch

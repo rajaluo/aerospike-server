@@ -33,6 +33,3 @@ void as_tsvc_process_transaction(as_transaction *tr);
 
 #define MAX_TRANSACTION_QUEUES 128
 #define MAX_TRANSACTION_THREADS_PER_QUEUE 256
-
-// Needed by XDR. TODO - layer violation?
-extern cf_queue *g_transaction_queues[MAX_TRANSACTION_QUEUES];

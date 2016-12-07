@@ -83,8 +83,7 @@ should_security_check_data_op(const as_transaction *tr)
 // Globals.
 //
 
-// FIXME - XDR can use as_tsvc_enqueue().
-cf_queue* g_transaction_queues[MAX_TRANSACTION_QUEUES];
+static cf_queue* g_transaction_queues[MAX_TRANSACTION_QUEUES] = { NULL };
 
 // Track number of threads for each queue independently.
 static uint32_t g_queues_n_threads[MAX_TRANSACTION_QUEUES] = { 0 };
