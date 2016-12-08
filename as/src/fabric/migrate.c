@@ -244,7 +244,7 @@ as_migrate_init()
 {
 	g_avoid_dest = (uint64_t)g_config.self_node;
 
-	cf_queue_init(&g_emigration_q, sizeof(emigration), 4096, true);
+	cf_queue_init(&g_emigration_q, sizeof(emigration*), 4096, true);
 
 	if (rchash_create(&g_emigration_hash, emigration_hashfn, emigration_destroy,
 			sizeof(uint32_t), 64, RCHASH_CR_MT_MANYLOCK) != RCHASH_OK) {
