@@ -388,6 +388,18 @@ info_get_cluster_name(char *name, cf_dyn_buf *db)
 }
 
 
+static cf_ip_port
+bind_to_port(cf_serv_cfg *cfg, cf_sock_owner owner)
+{
+	for (uint32_t i = 0; i < cfg->n_cfgs; ++i) {
+		if (cfg->cfgs[i].owner == owner) {
+			return cfg->cfgs[i].port;
+		}
+	}
+
+	return 0;
+}
+
 static char *
 bind_to_string(cf_serv_cfg *cfg, cf_sock_owner owner)
 {
@@ -433,44 +445,42 @@ access_to_string(cf_addr_list *addrs)
 int
 info_get_endpoints(char *name, cf_dyn_buf *db)
 {
-	info_append_int(db, "service.port", g_access.service.port);
+	cf_ip_port port = bind_to_port(&g_service_bind, CF_SOCK_OWNER_SERVICE);
+	info_append_int(db, "service.port", port);
 
 	char *string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE);
 	info_append_string(db, "service.addresses", string);
 	cf_free(string);
 
+	info_append_int(db, "service.access-port", g_access.service.port);
+
 	string = access_to_string(&g_access.service.addrs);
 	info_append_string(db, "service.access-addresses", string);
 	cf_free(string);
 
-	info_append_int(db, "service.alternate-port", g_access.alt_service.port);
-
-	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_ALTERNATE);
-	info_append_string(db, "service.alternate-addresses", string);
-	cf_free(string);
+	info_append_int(db, "service.alternate-access-port", g_access.alt_service.port);
 
 	string = access_to_string(&g_access.alt_service.addrs);
 	info_append_string(db, "service.alternate-access-addresses", string);
 	cf_free(string);
 
-	info_append_int(db, "service.tls-port", g_access.tls_service.port);
+	port = bind_to_port(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
+	info_append_int(db, "service.tls-port", port);
 
 	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
 	info_append_string(db, "service.tls-addresses", string);
 	cf_free(string);
 
+	info_append_int(db, "service.tls-access-port", g_access.tls_service.port);
+
 	string = access_to_string(&g_access.tls_service.addrs);
 	info_append_string(db, "service.tls-access-addresses", string);
 	cf_free(string);
 
-	info_append_int(db, "service.alternate-tls-port", g_access.alt_tls_service.port);
-
-	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS_ALTERNATE);
-	info_append_string(db, "service.alternate-tls-addresses", string);
-	cf_free(string);
+	info_append_int(db, "service.tls-alternate-access-port", g_access.alt_tls_service.port);
 
 	string = access_to_string(&g_access.alt_tls_service.addrs);
-	info_append_string(db, "service.alternate-tls-access-addresses", string);
+	info_append_string(db, "service.tls-alternate-access-addresses", string);
 	cf_free(string);
 
 	as_hb_info_endpoints_get(db);
@@ -1949,22 +1959,20 @@ info_network_config_get(cf_dyn_buf *db)
 {
 	// Service:
 
-	info_append_int(db, "service.port", g_config.service.port);
+	info_append_int(db, "service.port", g_config.service.bind_port);
 	append_addrs(db, "service.address", &g_config.service.bind);
-	append_addrs(db, "service.access-address", &g_config.service.access);
+	info_append_int(db, "service.access-port", g_config.service.std_port);
+	append_addrs(db, "service.access-address", &g_config.service.std);
+	info_append_int(db, "service.alternate-access-port", g_config.service.alt_port);
+	append_addrs(db, "service.alternate-access-address", &g_config.service.alt);
 
-	info_append_int(db, "service.tls-port", g_config.tls_service.port);
+	info_append_int(db, "service.tls-port", g_config.tls_service.bind_port);
 	append_addrs(db, "service.tls-address", &g_config.tls_service.bind);
-	append_addrs(db, "service.tls-access-address", &g_config.tls_service.access);
+	info_append_int(db, "service.tls-access-port", g_config.tls_service.std_port);
+	append_addrs(db, "service.tls-access-address", &g_config.tls_service.std);
+	info_append_int(db, "service.tls-alternate-access-port", g_config.tls_service.alt_port);
+	append_addrs(db, "service.tls-alternate-access-address", &g_config.tls_service.alt);
 	info_append_string_safe(db, "service.tls-name", g_config.tls_name);
-
-	info_append_int(db, "service.alternate-port", g_config.alt_service.port);
-	append_addrs(db, "service.alternate-address", &g_config.alt_service.bind);
-	append_addrs(db, "service.alternate-access-address", &g_config.alt_service.access);
-
-	info_append_int(db, "service.alternate-tls-port", g_config.alt_tls_service.port);
-	append_addrs(db, "service.alternate-tls-address", &g_config.alt_tls_service.bind);
-	append_addrs(db, "service.alternate-tls-access-address", &g_config.alt_tls_service.access);
 
 	// Heartbeat:
 
@@ -1973,7 +1981,7 @@ info_network_config_get(cf_dyn_buf *db)
 	// Fabric:
 
 	append_addrs(db, "fabric.address", &g_config.info.bind);
-	info_append_int(db, "fabric.port", g_config.fabric.port);
+	info_append_int(db, "fabric.port", g_config.fabric.bind_port);
 	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
 	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
 	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
@@ -1983,7 +1991,7 @@ info_network_config_get(cf_dyn_buf *db)
 	// Info:
 
 	append_addrs(db, "info.address", &g_config.info.bind);
-	info_append_int(db, "info.port", g_config.info.port);
+	info_append_int(db, "info.port", g_config.info.bind_port);
 }
 
 
@@ -4670,16 +4678,6 @@ info_interfaces_fn(void *unused)
 				g_serv_clear_std = format_services_addr(addrs, n_addrs, g_access.service.port, ',');
 			}
 
-			if (chg_any && g_access.alt_service.port != 0 &&
-					g_access.alt_service.addrs.n_addrs == 0) {
-				if (g_serv_clear_alt != NULL) {
-					cf_free(g_serv_clear_alt);
-				}
-
-				g_serv_clear_alt = format_services_addr(addrs, n_addrs, g_access.alt_service.port,
-						',');
-			}
-
 			if (chg_any && g_access.tls_service.port != 0 &&
 					g_access.tls_service.addrs.n_addrs == 0) {
 				if (g_serv_tls_std != NULL) {
@@ -4687,16 +4685,6 @@ info_interfaces_fn(void *unused)
 				}
 
 				g_serv_tls_std = format_services_addr(addrs, n_addrs, g_access.tls_service.port,
-						',');
-			}
-
-			if (chg_any && g_access.alt_tls_service.port != 0 &&
-					g_access.alt_tls_service.addrs.n_addrs == 0) {
-				if (g_serv_tls_alt != NULL) {
-					cf_free(g_serv_tls_alt);
-				}
-
-				g_serv_tls_alt = format_services_addr(addrs, n_addrs, g_access.alt_tls_service.port,
 						',');
 			}
 
@@ -4801,13 +4789,13 @@ compare_node_info_services(info_node_info *lhs, info_node_info *rhs)
 static void
 dump_node_info_services(info_node_info *info)
 {
-	cf_debug(AS_INFO, "Service address:   %s", cf_safe_string(info->service_addr));
-	cf_debug(AS_INFO, "Alternate address: %s", cf_safe_string(info->alternate_addr));
-	cf_debug(AS_INFO, "Clear, standard:   %s", cf_safe_string(info->services_clear_std));
-	cf_debug(AS_INFO, "TLS, standard:     %s", cf_safe_string(info->services_tls_std));
-	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_safe_string(info->services_clear_alt));
-	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_safe_string(info->services_tls_alt));
-	cf_debug(AS_INFO, "TLS name:          %s", cf_safe_string(info->tls_name));
+	cf_debug(AS_INFO, "Service address:   %s", cf_safe_string(info->service_addr, "NULL"));
+	cf_debug(AS_INFO, "Alternate address: %s", cf_safe_string(info->alternate_addr, "NULL"));
+	cf_debug(AS_INFO, "Clear, standard:   %s", cf_safe_string(info->services_clear_std, "NULL"));
+	cf_debug(AS_INFO, "TLS, standard:     %s", cf_safe_string(info->services_tls_std, "NULL"));
+	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_safe_string(info->services_clear_alt, "NULL"));
+	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_safe_string(info->services_tls_alt, "NULL"));
+	cf_debug(AS_INFO, "TLS name:          %s", cf_safe_string(info->tls_name, "NULL"));
 }
 
 // This reduce function will eliminate elements from the info hash

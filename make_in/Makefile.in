@@ -26,18 +26,7 @@ AS_CFLAGS += -DDEBUG_ASM
 # Use the enhanced memory allocator (rather than the default version in the Common module.)
 AS_CFLAGS += -DENHANCED_ALLOC
 
-ifeq ($(LD_CRYPTO),static)
-  # Find and add the static OpenSSL "crypto" library.
-  LIBRARIES = $(or \
-    $(wildcard /usr/local/lib/libcrypto.a), \
-    $(wildcard /usr/lib64/libcrypto.a), \
-    $(wildcard /usr/lib/x86_64-linux-gnu/libcrypto.a), \
-    $(wildcard /usr/lib/libcrypto.a), \
-    $(wildcard /usr/lib/powerpc64le-linux-gnu/libcrypto.a), \
-    $(error Cannot find "libcrypto.a"))
-else
-  LIBRARIES = -lcrypto
-endif
+LIBRARIES += -lcrypto
 
 LIBRARIES += -lpthread -lrt -ldl -lz -lm
 

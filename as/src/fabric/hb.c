@@ -2194,16 +2194,14 @@ as_hb_info_config_get(cf_dyn_buf* db)
 		info_append_string(db, "heartbeat.mode", "mesh");
 		info_append_addrs(db, "heartbeat.address", &g_config.hb_serv_spec.bind);
 		info_append_uint32(db, "heartbeat.port",
-				(uint32_t)g_config.hb_serv_spec.port);
+			(uint32_t)g_config.hb_serv_spec.bind_port);
 		mesh_seed_host_list_get(db);
 	}
 	else {
 		info_append_string(db, "heartbeat.mode", "multicast");
 		info_append_addrs(db, "heartbeat.address", &g_config.hb_serv_spec.bind);
-		info_append_addrs(db, "heartbeat.multicast-group",
-				&g_config.hb_multicast_groups);
-		info_append_uint32(db, "heartbeat.port",
-				(uint32_t)g_config.hb_serv_spec.port);
+	    	info_append_uint32(db, "heartbeat.port",
+			(uint32_t)g_config.hb_serv_spec.bind_port);
 	}
 
 	info_append_uint32(db, "heartbeat.interval", config_tx_interval_get());
@@ -2234,7 +2232,7 @@ as_hb_info_endpoints_get(cf_dyn_buf* db)
 		return;
 	}
 
-	info_append_int(db, "heartbeat.port", g_config.hb_serv_spec.port);
+	info_append_int(db, "heartbeat.port", g_config.hb_serv_spec.bind_port);
 
 	cf_dyn_buf_append_string(db, "heartbeat.addresses=");
 	uint32_t count = 0;

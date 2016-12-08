@@ -84,6 +84,12 @@ const xdr_cfg_opt XDR_DC_OPTS[] = {
 		{ "dc-int-ext-ipmap",				XDR_CASE_DC_INT_EXT_IPMAP },
 		{ "dc-security-config-file",		XDR_CASE_DC_SECURITY_CONFIG_FILE },
 		{ "dc-use-alternate-services",		XDR_CASE_DC_USE_ALTERNATE_SERVICES },
+		{ "tls-node",						XDR_CASE_TLS_NODE },
+		{ "tls-cafile",						XDR_CASE_TLS_CAFILE },
+		{ "tls-capath",						XDR_CASE_TLS_CAPATH },
+		{ "tls-chainfile",					XDR_CASE_TLS_CHAINFILE },
+		{ "tls-keyfile",					XDR_CASE_TLS_KEYFILE },
+		{ "tls-cert-blacklist",				XDR_CASE_TLS_CERT_BLACKLIST },
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 

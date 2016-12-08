@@ -32,7 +32,11 @@
 #include <sys/socket.h>
 
 #include "msg.h"
+#include "tls_mode.h"
 #include "util.h"
+
+// Use forward declaration instead of including openssl/ssl.h here.
+typedef struct ssl_st SSL;
 
 #define CF_SOCKET_TIMEOUT 10000
 #define CF_SOCK_CFG_MAX 250
@@ -82,6 +86,30 @@ typedef struct cf_ip_addr_s {
 
 typedef uint16_t cf_ip_port;
 
+typedef struct cf_addr_list_s {
+	uint32_t n_addrs;
+	const char* addrs[CF_SOCK_CFG_MAX];
+} cf_addr_list;
+
+typedef struct cf_serv_spec_s {
+	cf_ip_port bind_port;
+	cf_addr_list bind;
+	cf_ip_port std_port;
+	cf_addr_list std;
+	cf_ip_port alt_port;
+	cf_addr_list alt;
+	cf_tls_mode mode;
+	char *chainfile;
+	char *keyfile;
+	char *cafile;
+	char *capath;
+	char *protocols;
+	char *cipher_suite;
+	char *cert_blacklist;
+	void *ssl_ctx;
+	void *cbl;
+} cf_serv_spec;
+
 typedef struct cf_sock_addr_s {
 	cf_ip_addr addr;
 	cf_ip_port port;
@@ -90,6 +118,7 @@ typedef struct cf_sock_addr_s {
 typedef struct cf_socket_s {
 	int32_t fd;
 	void *data;
+	SSL *ssl;
 } cf_socket;
 
 typedef struct cf_sockets_s {
@@ -100,8 +129,6 @@ typedef struct cf_sockets_s {
 typedef enum {
 	CF_SOCK_OWNER_SERVICE,
 	CF_SOCK_OWNER_SERVICE_TLS,
-	CF_SOCK_OWNER_SERVICE_ALTERNATE,
-	CF_SOCK_OWNER_SERVICE_TLS_ALTERNATE,
 	CF_SOCK_OWNER_HEARTBEAT,
 	CF_SOCK_OWNER_FABRIC,
 	CF_SOCK_OWNER_INFO,
@@ -118,18 +145,8 @@ typedef struct cf_sock_cfg_s {
 typedef struct cf_serv_cfg_s {
 	uint32_t n_cfgs;
 	cf_sock_cfg cfgs[CF_SOCK_CFG_MAX];
+	const cf_serv_spec *spec;
 } cf_serv_cfg;
-
-typedef struct cf_addr_list_s {
-	uint32_t n_addrs;
-	const char* addrs[CF_SOCK_CFG_MAX];
-} cf_addr_list;
-
-typedef struct cf_serv_spec_s {
-	cf_ip_port port;
-	cf_addr_list bind;
-	cf_addr_list access;
-} cf_serv_spec;
 
 typedef struct cf_poll_s {
 	int32_t fd;
@@ -235,6 +252,7 @@ static inline void cf_socket_copy(const cf_socket *from, cf_socket *to)
 {
 	to->fd = from->fd;
 	to->data = from->data;
+	to->ssl = from->ssl;
 }
 
 CF_MUST_CHECK int32_t cf_socket_init_server(cf_serv_cfg *cfg, cf_sockets *socks);
@@ -242,8 +260,8 @@ void cf_socket_show_server(cf_fault_context cont, const char *tag, const cf_sock
 CF_MUST_CHECK int32_t cf_socket_init_client(cf_sock_cfg *cfg, int32_t timeout, cf_socket *sock);
 
 CF_MUST_CHECK int32_t cf_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_socket_remote_name(cf_socket *sock, cf_sock_addr *addr);
-CF_MUST_CHECK int32_t cf_socket_local_name(cf_socket *sock, cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_remote_name(const cf_socket *sock, cf_sock_addr *addr);
+CF_MUST_CHECK int32_t cf_socket_local_name(const cf_socket *sock, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_available(cf_socket *sock);
 
 CF_MUST_CHECK int32_t cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_sock_addr *addr);

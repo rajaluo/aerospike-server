@@ -44,9 +44,9 @@
 } while (false);
 
 static inline const char *
-cf_safe_string(const char *string)
+cf_safe_string(const char *string, const char *def)
 {
-	return string == NULL ? "NULL" : string;
+	return string == NULL ? def : string;
 }
 
 /* cf_hash_fnv

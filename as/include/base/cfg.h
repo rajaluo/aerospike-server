@@ -178,8 +178,6 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
-	cf_serv_spec	alt_service; // alternate client service
-	cf_serv_spec	alt_tls_service; // alternate TLS client service
 	char*			tls_name; // TLS name
 	cf_serv_spec	tls_service; // TLS client service
 
