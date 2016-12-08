@@ -12,3 +12,9 @@ target
 \#*\#
 .\#*
 
+# TLS credentials
+key.pem
+cert.pem
+chain.pem
+cacert.pem
+cbl.txt

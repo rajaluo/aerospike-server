@@ -62,6 +62,7 @@ char *cf_fault_context_strings[] = {
 		"cf:msg",
 		"cf:rbuffer",
 		"cf:socket",
+		"cf:tls",
 
 		"aggr",
 		"as",

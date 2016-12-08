@@ -70,6 +70,7 @@ typedef enum {
 	CF_MSG,
 	CF_RBUFFER,
 	CF_SOCKET,
+	CF_TLS,
 
 	AS_AGGR,
 	AS_AS,
