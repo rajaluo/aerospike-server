@@ -4658,10 +4658,11 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				for (int i = 0; i < AS_SINDEX_MAX; i++) {
 					as_sindex *si = &local_ns->sindex[i];
 					if (si && si->imd && as_sindex_isactive(si)) {
-						// Create smd key
+						// Create smd key 2 extra
+						// space for ':' and '\0'
 						uint16_t key_len = strlen(si->imd->ns_name)
-							+ strlen(si->imd->iname) + 1;
-						char key[key_len + 1];
+							+ strlen(si->imd->iname) + 2;
+						char key[key_len];
 						snprintf(key, key_len, "%s:%s", si->imd->ns_name,
 								si->imd->iname);
 
