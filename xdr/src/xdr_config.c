@@ -121,12 +121,8 @@ const bool g_xdr_supported;
 void xdr_config_defaults(xdr_config *c)
 {
 	c->xdr_global_enabled = false;		// This config option overrides the enable-xdr setting of the namespace(s)
-
-	c->xdr_digestlog_path = NULL;	// Path where the digest information is written to the disk
-	c->xdr_digestlog_overwrite = true;
-	c->xdr_digestlog_persist = true;
+	c->xdr_digestlog_path = NULL;		// Path where the digest information is written to the disk
 	c->xdr_info_port = 0;
-
 	c->xdr_max_ship_throughput = 0;		// XDR TPS limit
 	c->xdr_max_ship_bandwidth = 0;		// XDR bandwidth limit
 	c->xdr_hotkey_time_ms = 100;		// Expiration time for the de-duplication cache

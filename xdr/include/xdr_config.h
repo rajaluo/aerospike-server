@@ -167,8 +167,6 @@ typedef struct xdr_config {
 	// Ring buffer configuration
 	char 	*xdr_digestlog_path;
 	uint64_t xdr_digestlog_file_size;
-	bool 	xdr_digestlog_overwrite;
-	bool	xdr_digestlog_persist;
 
 	int	xdr_info_port;
 	int	xdr_max_ship_throughput;
