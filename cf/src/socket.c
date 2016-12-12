@@ -2068,55 +2068,75 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 	// This double-checks that our new method returns interfaces in exactly the
 	// same order as does glibc.
 
-	struct ifaddrs *legacy;
+	bool enum_ok;
 
-	if (getifaddrs(&legacy) < 0) {
-		cf_crash(CF_SOCKET, "Error while legacy-enumerating interfaces: %d (%s)",
-				errno, cf_strerror(errno));
-	}
+	for (int32_t tries = 0; tries < 10; ++tries) {
+		enum_ok = true;
+		struct ifaddrs *legacy;
 
-	uint32_t n = 0;
+		if (getifaddrs(&legacy) < 0) {
+			cf_crash(CF_SOCKET, "Error while legacy-enumerating interfaces: %d (%s)",
+					errno, cf_strerror(errno));
+		}
 
-	for (struct ifaddrs *it = legacy; it != NULL; it = it->ifa_next) {
-		cf_detail(CF_SOCKET, "Checking legacy-enumerated interface %s", it->ifa_name);
-		bool found = false;
+		uint32_t n = 0;
 
-		for (uint32_t i = 0; i < n; ++i) {
-			inter_entry *entry = &inter->inters[i];
+		for (struct ifaddrs *it = legacy; it != NULL; it = it->ifa_next) {
+			cf_detail(CF_SOCKET, "Checking legacy-enumerated interface %s", it->ifa_name);
+			bool found = false;
 
-			if (strcmp(entry->name, it->ifa_name) == 0) {
-				cf_detail(CF_SOCKET, "Interface name matches a previous name");
-				found = true;
+			for (uint32_t i = 0; i < n; ++i) {
+				inter_entry *entry = &inter->inters[i];
+
+				if (strcmp(entry->name, it->ifa_name) == 0) {
+					cf_detail(CF_SOCKET, "Interface name matches a previous name");
+					found = true;
+					break;
+				}
+			}
+
+			if (found) {
+				continue;
+			}
+
+			cf_detail(CF_SOCKET, "Encountered new interface name");
+
+			if (n == inter->n_inters) {
+				cf_warning(CF_SOCKET, "Missed legacy-enumerated interface %s", it->ifa_name);
+				enum_ok = false;
 				break;
 			}
+
+			inter_entry *entry = &inter->inters[n];
+			cf_detail(CF_SOCKET, "Expecting interface name %s", entry->name);
+
+			if (strcmp(entry->name, it->ifa_name) != 0) {
+				cf_warning(CF_SOCKET, "Unexpected legacy-enumerated interface %s", it->ifa_name);
+				enum_ok = false;
+				break;
+			}
+
+			++n;
 		}
 
-		if (found) {
-			continue;
+		if (enum_ok && n < inter->n_inters) {
+			inter_entry *entry = &inter->inters[n];
+			cf_warning(CF_SOCKET, "Extraneous interface %s", entry->name);
+			enum_ok = false;
 		}
 
-		cf_detail(CF_SOCKET, "Encountered new interface name");
+		freeifaddrs(legacy);
 
-		if (n == inter->n_inters) {
-			cf_crash(CF_SOCKET, "Missed legacy-enumerated interface %s", it->ifa_name);
+		if (enum_ok) {
+			break;
 		}
 
-		inter_entry *entry = &inter->inters[n];
-		cf_detail(CF_SOCKET, "Expecting interface name %s", entry->name);
-
-		if (strcmp(entry->name, it->ifa_name) != 0) {
-			cf_crash(CF_SOCKET, "Unexpected legacy-enumerated interface %s", it->ifa_name);
-		}
-
-		++n;
+		usleep(100 * 1000);
 	}
 
-	if (n < inter->n_inters) {
-		inter_entry *entry = &inter->inters[n];
-		cf_crash(CF_SOCKET, "Extraneous interface %s", entry->name);
+	if (!enum_ok) {
+		cf_crash(CF_SOCKET, "Inconsistent interface enumeration");
 	}
-
-	freeifaddrs(legacy);
 
 	// --------------------- END PARANOIA ---------------------
 }
