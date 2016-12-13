@@ -5390,7 +5390,7 @@ channel_msg_read(cf_socket* socket)
 
 	// Transform the incoming legacy info message to the new message.
 	if (!channel_msg_make_compatible(socket, msg)) {
-		WARNING("Received message without associated channel.");
+		DEBUG("Received message without associated channel.");
 		goto Exit;
 	}
 
