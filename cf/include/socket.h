@@ -99,7 +99,7 @@ typedef struct cf_serv_spec_s {
 	cf_ip_port alt_port;
 	cf_addr_list alt;
 	cf_tls_mode mode;
-	char *chainfile;
+	char *certfile;
 	char *keyfile;
 	char *cafile;
 	char *capath;

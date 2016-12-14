@@ -421,7 +421,7 @@ typedef enum {
 	CASE_NETWORK_SERVICE_TLS_CAFILE,
 	CASE_NETWORK_SERVICE_TLS_CAPATH,
 	CASE_NETWORK_SERVICE_TLS_CERT_BLACKLIST,
-	CASE_NETWORK_SERVICE_TLS_CHAINFILE,
+	CASE_NETWORK_SERVICE_TLS_CERTFILE,
 	CASE_NETWORK_SERVICE_TLS_CIPHER_SUITE,
 	CASE_NETWORK_SERVICE_TLS_KEYFILE,
 	CASE_NETWORK_SERVICE_TLS_MODE,
@@ -865,7 +865,7 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "tls-cafile",						CASE_NETWORK_SERVICE_TLS_CAFILE },
 		{ "tls-capath",						CASE_NETWORK_SERVICE_TLS_CAPATH },
 		{ "tls-cert-blacklist",				CASE_NETWORK_SERVICE_TLS_CERT_BLACKLIST },
-		{ "tls-chainfile",					CASE_NETWORK_SERVICE_TLS_CHAINFILE },
+		{ "tls-certfile",					CASE_NETWORK_SERVICE_TLS_CERTFILE },
 		{ "tls-cipher-suite",				CASE_NETWORK_SERVICE_TLS_CIPHER_SUITE },
 		{ "tls-keyfile",					CASE_NETWORK_SERVICE_TLS_KEYFILE },
 		{ "tls-mode",						CASE_NETWORK_SERVICE_TLS_MODE },
@@ -2410,9 +2410,9 @@ as_config_init(const char* config_file)
 				cfg_enterprise_only(&line);
 				c->tls_service.cert_blacklist = cfg_strdup_no_checks(&line);
 				break;
-			case CASE_NETWORK_SERVICE_TLS_CHAINFILE:
+			case CASE_NETWORK_SERVICE_TLS_CERTFILE:
 				cfg_enterprise_only(&line);
-				c->tls_service.chainfile = cfg_strdup_no_checks(&line);
+				c->tls_service.certfile = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_SERVICE_TLS_CIPHER_SUITE:
 				cfg_enterprise_only(&line);
@@ -4207,7 +4207,7 @@ cfg_init_serv_spec(cf_serv_spec* spec_p)
 	spec_p->alt_port = 0;
 	init_addr_list(&spec_p->alt);
 	spec_p->mode = CF_TLS_MODE_AUTHENTICATE_SERVER;
-	spec_p->chainfile = NULL;
+	spec_p->certfile = NULL;
 	spec_p->keyfile = NULL;
 	spec_p->cafile = NULL;
 	spec_p->capath = NULL;

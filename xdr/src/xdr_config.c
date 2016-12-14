@@ -87,7 +87,7 @@ const xdr_cfg_opt XDR_DC_OPTS[] = {
 		{ "tls-node",						XDR_CASE_TLS_NODE },
 		{ "tls-cafile",						XDR_CASE_TLS_CAFILE },
 		{ "tls-capath",						XDR_CASE_TLS_CAPATH },
-		{ "tls-chainfile",					XDR_CASE_TLS_CHAINFILE },
+		{ "tls-certfile",					XDR_CASE_TLS_CERTFILE },
 		{ "tls-keyfile",					XDR_CASE_TLS_KEYFILE },
 		{ "tls-cert-blacklist",				XDR_CASE_TLS_CERT_BLACKLIST },
 		{ "}",								XDR_CASE_CONTEXT_END }
