@@ -615,6 +615,16 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 // Returns -1 if left wins, 1 if right wins, and 0 for tie.
 
 static inline int
+resolve_generation_direct(uint16_t left, uint16_t right)
+{
+	if (left == right) {
+		return 0;
+	}
+
+	return right > left  ? 1 : -1;
+}
+
+static inline int
 resolve_generation(uint16_t left, uint16_t right)
 {
 	if (left == right) {
@@ -659,7 +669,10 @@ as_record_resolve_conflict(conflict_resolution_pol policy,
 
 	switch (policy) {
 	case AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION:
-		result = resolve_generation(left_gen, right_gen);
+		// Doesn't use resolve_generation() - direct comparison gives much
+		// better odds of picking the record with more history after a split
+		// brain where one side starts the record from scratch.
+		result = resolve_generation_direct(left_gen, right_gen);
 		if (result == 0) {
 			result = resolve_last_update_time(left_lut, right_lut);
 		}
