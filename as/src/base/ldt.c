@@ -733,7 +733,7 @@ as_ldt_digest_randomizer(cf_digest *dig)
  * Note: Invariant of the problems it is ok to perform retries of shipop etc.
  *       duplicate data is deemed lesser of evil that no data. Also the effect
  *       is the DS specific. For timeseries any retry will result in the unique
- *       key contraint in LLIST or in case of LSET or LMAP the op may be idempotent
+ *       key constraint in LLIST or in case of LSET or LMAP the op may be idempotent
  */
 int
 as_ldt_shipop(rw_request *rw, cf_node dest_node)
@@ -1028,7 +1028,7 @@ int
 as_ldt_subrec_storage_get_digests(as_storage_rd *rd, cf_digest *edigest, cf_digest *pdigest)
 {
 	if (!rd) {
-		cf_warning(AS_LDT, "Invalid Paramter [%p]", rd);
+		cf_warning(AS_LDT, "Invalid Parameter [%p]", rd);
 		return -1;
 	}
 
@@ -1227,7 +1227,7 @@ Cleanup:
  *
  * TODO: Not needed once we have 128byte subrecord index record
  * need to be opened only in case of storage in memory case, for storage
- * acccounting
+ * accounting
  *
  * TODO: IO efficiency track LDT_GC_IO
  */
