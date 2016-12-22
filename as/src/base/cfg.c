@@ -522,6 +522,8 @@ typedef enum {
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
+	CASE_NAMESPACE_PARTITION_TREE_LOCKS,
+	CASE_NAMESPACE_PARTITION_TREE_SPRIGS,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
 	CASE_NAMESPACE_SET_BEGIN,
 	CASE_NAMESPACE_SI_BEGIN,
@@ -965,6 +967,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
+		{ "partition-tree-locks",			CASE_NAMESPACE_PARTITION_TREE_LOCKS },
+		{ "partition-tree-sprigs",			CASE_NAMESPACE_PARTITION_TREE_SPRIGS },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
 		{ "si",								CASE_NAMESPACE_SI_BEGIN },
@@ -1668,6 +1672,20 @@ cfg_u32(const cfg_line* p_line, uint32_t min, uint32_t max)
 	else if (value < min || value > max) {
 		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= %u and <= %u, not %u",
 				p_line->num, p_line->name_tok, min, max, value);
+	}
+
+	return value;
+}
+
+// Note - accepts 0 if min is 0.
+uint32_t
+cfg_u32_power_of_2(const cfg_line* p_line, uint32_t min, uint32_t max)
+{
+	uint32_t value = cfg_u32(p_line, min, max);
+
+	if ((value & (value - 1)) != 0) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be an exact power of 2, not %u",
+				p_line->num, p_line->name_tok, value);
 	}
 
 	return value;
@@ -2765,6 +2783,12 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_OBJ_SIZE_HIST_MAX:
 				ns->obj_size_hist_max = cfg_obj_size_hist_max(cfg_u32_no_checks(&line));
 				break;
+			case CASE_NAMESPACE_PARTITION_TREE_LOCKS:
+				ns->tree_shared.n_lock_pairs = cfg_u32_power_of_2(&line, 1, 256);
+				break;
+			case CASE_NAMESPACE_PARTITION_TREE_SPRIGS:
+				ns->tree_shared.n_sprigs = cfg_u32_power_of_2(&line, 16, 4096);
+				break;
 			case CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE:
 				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_READ_CONSISTENCY_OPTS, NUM_NAMESPACE_READ_CONSISTENCY_OPTS)) {
 				case CASE_NAMESPACE_READ_CONSISTENCY_ALL:
@@ -2850,6 +2874,9 @@ as_config_init(const char* config_file)
 				}
 				if (ns->default_ttl > ns->max_ttl) {
 					cf_crash_nostack(AS_CFG, "ns %s default-ttl can't be > max-ttl", ns->name);
+				}
+				if (ns->tree_shared.n_lock_pairs > ns->tree_shared.n_sprigs) {
+					cf_crash_nostack(AS_CFG, "ns %s partition-tree-locks can't be > partition-tree-sprigs", ns->name);
 				}
 				if (ns->storage_data_in_memory) {
 					ns->storage_post_write_queue = 0; // override default (or configuration mistake)
@@ -3612,6 +3639,12 @@ as_config_post_process(as_config* c, const char* config_file)
 		as_namespace* ns = g_config.namespaces[i];
 
 		client_replica_maps_create(ns);
+
+		ns->tree_shared.destructor			= (as_index_value_destructor)&as_record_destroy;
+		ns->tree_shared.destructor_udata	= (void*)ns;
+		ns->tree_shared.locks_shift			= 12 - cf_msb(ns->tree_shared.n_lock_pairs);
+		ns->tree_shared.sprigs_shift		= 12 - cf_msb(ns->tree_shared.n_sprigs);
+		ns->tree_shared.sprigs_offset		= sizeof(as_lock_pair) * ns->tree_shared.n_lock_pairs;
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
 

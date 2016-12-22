@@ -2053,6 +2053,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
 	info_append_uint32(db, "obj-size-hist-max", ns->obj_size_hist_max); // not original, may have been rounded
+	info_append_uint32(db, "partition-tree-locks", ns->tree_shared.n_lock_pairs);
+	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));

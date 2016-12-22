@@ -49,6 +49,20 @@ cf_safe_string(const char *string, const char *def)
 	return string == NULL ? def : string;
 }
 
+// Position of most significant bit, 0 ... 63 from low to high. -1 for value 0.
+static inline int
+cf_msb(uint64_t value)
+{
+	int n = -1;
+
+	while (value != 0) {
+		value >>= 1;
+		n++;
+	}
+
+	return n;
+}
+
 /* cf_hash_fnv
  * The 64-bit Fowler-Noll-Vo hash function (FNV-1a) */
 static inline uint64_t

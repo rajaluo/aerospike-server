@@ -643,7 +643,7 @@ basic_scan_job_slice(as_job* _job, as_partition_reservation* rsv)
 	}
 	else {
 		uint32_t sample_count = (uint32_t)
-				(((uint64_t)tree->elements * (uint64_t)job->sample_pct) / 100);
+				((as_index_tree_size(tree) * (uint64_t)job->sample_pct) / 100);
 
 		as_index_reduce_partial_live(tree, sample_count,
 				basic_scan_job_reduce_cb, (void*)&slice);

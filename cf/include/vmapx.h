@@ -32,6 +32,7 @@
 typedef struct vhash_s vhash;
 
 // DO NOT access this member data directly - use the API!
+// Caution - changing this struct could break warm restart.
 typedef struct cf_vmapx_s {
 	// vector-related
 	uint32_t			value_size;
@@ -39,11 +40,13 @@ typedef struct cf_vmapx_s {
 	volatile uint32_t	count;
 
 	// hash-related
-	vhash*				p_hash;
 	uint32_t			key_size;
+	vhash*				p_hash;
 
 	// generic
 	pthread_mutex_t		write_lock;
+
+	//<><><><><><><><><><><> 64 bytes <><><><><><><><><><><>
 
 	// vector data
 	uint8_t				values[];

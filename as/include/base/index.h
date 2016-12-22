@@ -51,14 +51,14 @@ typedef struct as_index_s {
 	cf_digest key;		// 20 bytes
 
 	// offset: 24
-	cf_arenax_handle right_h;
-	cf_arenax_handle left_h;
+	uint64_t right_h: 40;
+	uint64_t left_h: 40;
 
-	// offset: 32
+	// offset: 34
 	// Don't use the free bits here for record info - this is accessed outside
 	// the record lock.
-	uint32_t color: 1; // one bit
-	uint32_t unused_but_unsafe: 31;
+	uint16_t color: 1; // one bit
+	uint16_t unused_but_unsafe: 15;
 
 	// Everything below here is used under the record lock.
 
@@ -288,31 +288,50 @@ struct as_index_ref_s {
 	pthread_mutex_t		*olock;
 };
 
-// Callback invoked when as_index is destroyed.
-typedef void (*as_index_value_destructor) (as_index *v, void *udata);
-
 
 //==========================================================
 // Index tree.
 //
 
 typedef struct as_index_tree_s {
-	// Note: reduce_lock's scope is always inside of lock's scope.
-	pthread_mutex_t		lock;        // insert, delete vs. insert, delete, get
-	pthread_mutex_t		reduce_lock; // insert, delete vs. reduce
+	// Data common to all trees in a namespace.
+	as_index_tree_shared	*shared;
 
-	as_index			*root;
-	cf_arenax_handle	root_h;
+	// Where we allocate from and free to. Left out of 'shared' since we may
+	// later use multiple arenas per namespace.
+	cf_arenax				*arena;
 
-	cf_arenax_handle	sentinel_h;
-
-	as_index_value_destructor destructor;
-	void				*destructor_udata;
-
-	cf_arenax			*arena; // where we allocate and free to
-
-	uint32_t			elements; // not making this atomic, it's not very exact
+	// Variable length data, dependent on configuration.
+	uint8_t					data[];
 } as_index_tree;
+
+
+//==========================================================
+// as_index_tree variable length data components.
+//
+
+typedef struct as_lock_pair_s {
+	// Note: reduce_lock's scope is always inside of lock's scope.
+	pthread_mutex_t	lock;        // insert, delete vs. insert, delete, get
+	pthread_mutex_t	reduce_lock; // insert, delete vs. reduce
+} as_lock_pair;
+
+typedef struct as_sprig_s {
+	cf_arenax_handle	root_h;
+	uint32_t			n_elements;
+} as_sprig;
+
+static inline as_lock_pair *
+tree_locks(as_index_tree *tree)
+{
+	return (as_lock_pair*)tree->data;
+}
+
+static inline as_sprig *
+tree_sprigs(as_index_tree *tree)
+{
+	return (as_sprig*)(tree->data + tree->shared->sprigs_offset);
+}
 
 
 //------------------------------------------------
@@ -322,17 +341,16 @@ typedef struct as_index_tree_s {
 void as_index_tree_gc_init();
 int as_index_tree_gc_queue_size();
 
-as_index_tree *as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
-as_index_tree *as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor, void *destructor_udata, as_treex *p_treex);
+as_index_tree *as_index_tree_create(as_index_tree_shared *shared, cf_arenax *arena);
+as_index_tree *as_index_tree_resume(as_index_tree_shared *shared, cf_arenax *arena, as_treex *treex);
+void as_index_tree_shutdown(as_index_tree *tree, as_treex *treex);
 int as_index_tree_release(as_index_tree *tree);
 uint32_t as_index_tree_size(as_index_tree *tree);
 
 typedef void (*as_index_reduce_fn) (as_index_ref *value, void *udata);
-typedef void (*as_index_reduce_sync_fn) (as_index *value, void *udata);
 
 void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
 void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_sync(as_index_tree *tree, as_index_reduce_sync_fn cb, void *udata);
 
 void as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
 void as_index_reduce_partial_live(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
@@ -354,9 +372,20 @@ int as_index_ref_initialize(as_index_tree *tree, cf_digest *key, as_index_ref *i
 // Private API - for enterprise separation only.
 //
 
-#define RESOLVE_H(__h) ((as_index*)cf_arenax_resolve(tree->arena, __h))
+// Container for sprig-level function parameters.
+typedef struct as_index_sprig_s {
+	as_index_value_destructor destructor;
+	void			*destructor_udata;
+
+	cf_arenax		*arena;
+
+	as_lock_pair	*pair;
+	as_sprig		*sprig;
+} as_index_sprig;
+
+#define SENTINEL_H 0
+
+#define RESOLVE_H(__h) ((as_index*)cf_arenax_resolve(isprig->arena, __h))
 
 // Flag to indicate full index reduce.
 #define AS_REDUCE_ALL (-1)
-
-void as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);

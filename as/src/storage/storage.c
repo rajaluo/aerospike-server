@@ -811,10 +811,16 @@ as_storage_shutdown(void)
 		as_namespace *ns = g_config.namespaces[i];
 
 		if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
+
+			// For now this is only needed for warm-restartable namespaces.
+			for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+				as_partition_shutdown(ns, pid);
+			}
+
 			as_storage_shutdown_ssd(ns);
 			as_namespace_xmem_trusted(ns);
 		}
 	}
 
   	cf_info(AS_STORAGE, "completed flushing to storage");
-};
+}

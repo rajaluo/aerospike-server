@@ -130,6 +130,8 @@ as_namespace_create(char *name)
 	ns->single_bin = false;
 	ns->tomb_raider_eligible_age = 60 * 60 * 24; // 1 day
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
+	ns->tree_shared.n_lock_pairs = 8;
+	ns->tree_shared.n_sprigs = 64;
 	ns->stop_writes_pct = 0.9; // stop writes when 90% of either memory or disk is used
 
 	// Set default server policies which are used only when the corresponding override is true:
@@ -637,7 +639,7 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "tombstones=");
-	cf_dyn_buf_append_uint32(db, cf_atomic32_get(p_set->n_tombstones));
+	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_tombstones));
 	cf_dyn_buf_append_char(db, ':');
 
 	cf_dyn_buf_append_string(db, "memory_data_bytes=");

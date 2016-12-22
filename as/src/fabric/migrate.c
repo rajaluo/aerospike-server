@@ -654,7 +654,7 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 	uint32_t order = emig->rsv.ns->migrate_order;
 	uint64_t dest_score = (uint64_t)emig->dest - best->avoid_dest;
 	uint32_t n_elements = emig->tx_flags == TX_FLAGS_REQUEST ?
-			0 : emig->rsv.tree->elements;
+			0 : as_index_tree_size(emig->rsv.tree);
 
 	if (order < best->order ||
 			(order == best->order &&
@@ -1003,11 +1003,10 @@ emigration_send_start(emigration *emig)
 		return AS_MIGRATE_STATE_ERROR;
 	}
 
-	uint32_t partition_size = emig->rsv.tree->elements;
-
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START);
 	msg_set_uint32(m, MIG_FIELD_FEATURES, MY_MIG_FEATURES);
-	msg_set_uint32(m, MIG_FIELD_PARTITION_SIZE, partition_size);
+	msg_set_uint32(m, MIG_FIELD_PARTITION_SIZE,
+			as_index_tree_size(emig->rsv.tree));
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 	msg_set_uint64(m, MIG_FIELD_CLUSTER_KEY, emig->cluster_key);
 	msg_set_buf(m, MIG_FIELD_NAMESPACE, (byte *)ns->name,

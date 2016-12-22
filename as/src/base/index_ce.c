@@ -37,11 +37,18 @@
 //
 
 as_index_tree *
-as_index_tree_resume(cf_arenax *arena, as_index_value_destructor destructor,
-		void *destructor_udata, as_treex *p_treex)
+as_index_tree_resume(as_index_tree_shared *shared, cf_arenax *arena,
+		as_treex *treex)
 {
 	cf_crash(AS_INDEX, "CE code called as_index_tree_resume()");
 	return NULL;
+}
+
+
+void
+as_index_tree_shutdown(as_index_tree *tree, as_treex *treex)
+{
+	// For enterprise version only.
 }
 
 
