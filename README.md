@@ -123,6 +123,11 @@ revision of each submodule is first manually installed in the appropriate
 
 	$ make          -- Perform the default build (no packaging.)
 
+*Note:* You can use the `-j` option with `make` to speed up the build
+on multiple CPU cores. For example, to run four parallel jobs:
+
+    $ make -j4
+
 ### Build Options
 
 	$ make deb      -- Build the Debian (Ubuntu) package.
