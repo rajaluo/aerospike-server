@@ -1878,7 +1878,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "ldt-benchmarks", g_config.ldt_benchmarks);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_int(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
-	info_append_int(db, "migrate-rx-lifetime-ms", g_config.migrate_rx_lifetime_ms);
 	info_append_int(db, "migrate-threads", g_config.n_migrate_threads);
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
@@ -2467,12 +2466,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of migrate-max-num-incoming from %d to %d ", g_config.migrate_max_num_incoming, val);
 			g_config.migrate_max_num_incoming = val;
-		}
-		else if (0 == as_info_parameter_get(params, "migrate-rx-lifetime-ms", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || (0 > val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of migrate-rx-lifetime-ms from %d to %d ", g_config.migrate_rx_lifetime_ms, val);
-			g_config.migrate_rx_lifetime_ms = val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (0 > val) || (MAX_NUM_MIGRATE_XMIT_THREADS < val))

@@ -132,7 +132,6 @@ cfg_set_defaults()
 	c->n_info_threads = 16;
 	c->ldt_benchmarks = false;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
-	c->migrate_rx_lifetime_ms = AS_MIGRATE_DEFAULT_RX_LIFETIME_MS; // for debouncing re-transmitted migrate start messages
 	c->n_migrate_threads = 1;
 	c->nsup_delete_sleep = 100; // 100 microseconds means a delete rate of 10k TPS
 	c->nsup_period = 120; // run nsup once every 2 minutes
@@ -269,7 +268,6 @@ typedef enum {
 	CASE_SERVICE_LDT_BENCHMARKS,
 	CASE_SERVICE_LOG_LOCAL_TIME,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
-	CASE_SERVICE_MIGRATE_RX_LIFETIME_MS,
 	CASE_SERVICE_MIGRATE_THREADS,
 	CASE_SERVICE_NODE_ID_INTERFACE,
 	CASE_SERVICE_NSUP_DELETE_SLEEP,
@@ -334,6 +332,7 @@ typedef enum {
 	CASE_SERVICE_GENERATION_DISABLE,
 	CASE_SERVICE_MIGRATE_READ_PRIORITY,
 	CASE_SERVICE_MIGRATE_READ_SLEEP,
+	CASE_SERVICE_MIGRATE_RX_LIFETIME_MS,
 	CASE_SERVICE_MIGRATE_XMIT_HWM,
 	CASE_SERVICE_MIGRATE_XMIT_LWM,
 	CASE_SERVICE_MIGRATE_PRIORITY, // renamed
@@ -701,7 +700,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
-		{ "migrate-rx-lifetime-ms",			CASE_SERVICE_MIGRATE_RX_LIFETIME_MS },
 		{ "migrate-threads",				CASE_SERVICE_MIGRATE_THREADS },
 		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
@@ -764,6 +762,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "generation-disable",				CASE_SERVICE_GENERATION_DISABLE },
 		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
 		{ "migrate-read-sleep",				CASE_SERVICE_MIGRATE_READ_SLEEP },
+		{ "migrate-rx-lifetime-ms",			CASE_SERVICE_MIGRATE_RX_LIFETIME_MS },
 		{ "migrate-xmit-hwm",				CASE_SERVICE_MIGRATE_XMIT_HWM },
 		{ "migrate-xmit-lwm",				CASE_SERVICE_MIGRATE_XMIT_LWM },
 		{ "migrate-priority",				CASE_SERVICE_MIGRATE_PRIORITY },
@@ -2015,9 +2014,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING:
 				c->migrate_max_num_incoming = cfg_int(&line, 0, INT_MAX);
 				break;
-			case CASE_SERVICE_MIGRATE_RX_LIFETIME_MS:
-				c->migrate_rx_lifetime_ms = cfg_int_no_checks(&line);
-				break;
 			case CASE_SERVICE_MIGRATE_THREADS:
 				c->n_migrate_threads = cfg_int(&line, 0, MAX_NUM_MIGRATE_XMIT_THREADS);
 				break;
@@ -2198,6 +2194,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_GENERATION_DISABLE:
 			case CASE_SERVICE_MIGRATE_READ_PRIORITY:
 			case CASE_SERVICE_MIGRATE_READ_SLEEP:
+			case CASE_SERVICE_MIGRATE_RX_LIFETIME_MS:
 			case CASE_SERVICE_MIGRATE_XMIT_HWM:
 			case CASE_SERVICE_MIGRATE_XMIT_LWM:
 			case CASE_SERVICE_MIGRATE_PRIORITY:
