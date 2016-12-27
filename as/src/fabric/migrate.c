@@ -102,6 +102,8 @@ COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 #define MIGRATE_RETRANSMIT_STARTDONE_MS 1000 // for now, not configurable
 #define MAX_BYTES_EMIGRATING (16 * 1024 * 1024)
 
+#define IMMIGRATION_DEBOUNCE_MS (60 * 1000) // 1 minute
+
 typedef struct pickled_record_s {
 	cf_digest     keyd;
 	uint32_t      generation;
@@ -1153,17 +1155,12 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 	}
 
 	if (immig->cluster_key != as_paxos_get_cluster_key() ||
-			(g_config.migrate_rx_lifetime_ms > 0 &&
-					cf_atomic32_get(immig->done_recv) != 0 &&
-					immig->done_recv_ms != 0 &&
-					cf_getms() > immig->done_recv_ms +
-								g_config.migrate_rx_lifetime_ms)) {
-
+			(immig->done_recv_ms != 0 && cf_getms() > immig->done_recv_ms +
+					IMMIGRATION_DEBOUNCE_MS)) {
 		if (immig->start_result == AS_MIGRATE_OK &&
-				cf_atomic32_get(immig->done_recv) == 0) {
-			// No outstanding readers of hkey and hasn't yet completed means
-			// that we haven't already decremented migrate_rx_partitions_active.
-
+				// If we started ok, must be a cluster key change - make sure
+				// DONE handler doesn't also decrement active counter.
+				cf_atomic32_incr(&immig->done_recv) == 1) {
 			as_namespace *ns = immig->rsv.ns;
 
 			if (cf_atomic_int_decr(&ns->migrate_rx_partitions_active) < 0) {
@@ -1370,6 +1367,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		break;
 	case AS_MIGRATE_FAIL:
 		immig->start_recv_ms = cf_getms(); // permits reaping
+		immig->done_recv_ms = immig->start_recv_ms; // permits reaping
 		immigration_release(immig);
 		immigration_ack_start_request(src, m, OPERATION_START_ACK_FAIL);
 		return;
@@ -1381,6 +1379,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		return;
 	case AS_MIGRATE_ALREADY_DONE:
 		immig->start_recv_ms = cf_getms(); // permits reaping
+		immig->done_recv_ms = immig->start_recv_ms; // permits reaping
 		immigration_release(immig);
 		immigration_ack_start_request(src, m, OPERATION_START_ACK_ALREADY_DONE);
 		return;
@@ -1572,6 +1571,15 @@ immigration_handle_done_request(cf_node src, msg *m) {
 
 	if (rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
 			(void **)&immig) == RCHASH_OK) {
+		if (immig->start_result != AS_MIGRATE_OK || immig->start_recv_ms == 0) {
+			// If this immigration didn't start and reserve a partition, it's
+			// likely in the hash on a retransmit and this DONE is for the
+			// original - ignore, and let this immigration proceed.
+			immigration_release(immig);
+			as_fabric_msg_put(m);
+			return;
+		}
+
 		if (cf_atomic32_incr(&immig->done_recv) == 1) {
 			// Record the time of the first DONE received.
 			immig->done_recv_ms = cf_getms();
@@ -1585,10 +1593,6 @@ immigration_handle_done_request(cf_node src, msg *m) {
 
 			as_partition_immigrate_done(ns, immig->rsv.p->id,
 					immig->cluster_key, immig->src);
-
-			if (g_config.migrate_rx_lifetime_ms <= 0) {
-				rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
-			}
 		}
 		// else - was likely a retransmitted done message.
 

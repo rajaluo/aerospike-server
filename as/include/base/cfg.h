@@ -114,7 +114,6 @@ typedef struct as_config_s {
 	PAD_BOOL		ldt_benchmarks;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
 	int				migrate_max_num_incoming;
-	int				migrate_rx_lifetime_ms; // for debouncing re-tansmitted migrate start messages
 	int				n_migrate_threads;
 	char*			node_id_interface;
 	uint32_t		nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0

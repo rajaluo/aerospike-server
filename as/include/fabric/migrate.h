@@ -49,16 +49,6 @@ struct as_namespace_s;
 #define AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING 4
 
 /*
- *  Default lifetime (in ms) for a migrate recv control object to stay in the recv control
- *  hash table after receiving the first START event.  This provides a time window to de-bounce
- *  re-transmitted migrate START message from crossing paths with the DONE ACK message.  After
- *  that interval, the RX control object will be reaped by the reaper thread.
- *
- *  (A value of 0 disables this feature and reaps objects immediately upon receipt of the DONE event.)
- */
-#define AS_MIGRATE_DEFAULT_RX_LIFETIME_MS (60 * 1000) // 1 minute
-
-/*
  *  Maximum permissible number of migrate xmit threads.
  */
 #define MAX_NUM_MIGRATE_XMIT_THREADS  (100)
