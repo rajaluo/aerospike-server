@@ -981,9 +981,14 @@ as_sindex_arr_lookup_by_setname_lockfree(as_namespace * ns, const char *setname,
 int
 as_sindex__simatch_by_iname(as_namespace *ns, char *idx_name)
 {
+	if (strlen(idx_name) >= AS_ID_INAME_SZ) {
+		return -1;
+	}
+
+	char iname[AS_ID_INAME_SZ] = { 0 }; // must pad key
+	strcpy(iname, idx_name);
+
 	int simatch = -1;
-	char iname[AS_ID_INAME_SZ]; memset(iname, 0, AS_ID_INAME_SZ);
-	snprintf(iname, strlen(idx_name) + 1, "%s", idx_name);
 	int rv      = shash_get(ns->sindex_iname_hash, (void *)iname, (void *)&simatch);
 	cf_detail(AS_SINDEX, "Found iname simatch %s->%d rv=%d", iname, simatch, rv);
 
@@ -2541,28 +2546,29 @@ as_sindex_from_msg(as_namespace *ns, as_msg *msgp)
 {
 	cf_debug(AS_SINDEX, "as_sindex_from_msg");
 	as_msg_field *ifp  = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_INDEX_NAME);
-	as_msg_field *sfp  = as_msg_field_get(msgp, AS_MSG_FIELD_TYPE_SET);
 
 	if (!ifp) {
 		cf_debug(AS_SINDEX, "Index name not found in the query request");
 		return NULL;
 	}
 
-	char *setname = NULL;
-	char *iname   = NULL;
+	uint32_t iname_len = as_msg_field_get_value_sz(ifp);
 
-	if (sfp) {
-		setname   = cf_strndup((const char *)sfp->data, as_msg_field_get_value_sz(sfp));
+	if (iname_len >= AS_ID_INAME_SZ) {
+		cf_warning(AS_SINDEX, "index name too long");
+		return NULL;
 	}
-	iname         = cf_strndup((const char *)ifp->data, as_msg_field_get_value_sz(ifp));
+
+	char iname[AS_ID_INAME_SZ];
+
+	memcpy(iname, ifp->data, iname_len);
+	iname[iname_len] = 0;
 
 	as_sindex *si = as_sindex_lookup_by_iname(ns, iname, AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
 	if (!si) {
 		cf_detail(AS_SINDEX, "Search did not find index ");
 	}
 
-	if (sfp)   cf_free(setname);
-	if (iname) cf_free(iname);
 	return si;
 }
 

@@ -2727,8 +2727,19 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	// get optional set
 	as_msg_field *sfp = as_transaction_has_set(tr) ?
 			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_SET) : NULL;
-	if (sfp && as_msg_field_get_value_sz(sfp) > 0) {
-		setname = cf_strndup((const char *)sfp->data, as_msg_field_get_value_sz(sfp));
+
+	if (sfp) {
+		uint32_t setname_len = as_msg_field_get_value_sz(sfp);
+
+		if (setname_len >= AS_SET_NAME_MAX_SIZE) {
+			cf_warning(AS_QUERY, "set name too long");
+			tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
+			goto Cleanup;
+		}
+
+		if (setname_len != 0) {
+			setname = cf_strndup((const char *)sfp->data, setname_len);
+		}
 	}
 
 	if (si) {
