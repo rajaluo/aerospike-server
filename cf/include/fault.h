@@ -55,7 +55,7 @@
  * Examples:
  *    cf_info(CF_MISC, "important message: %s", my_msg);
  *    cf_crash(CF_MISC, "doom!");
- *    cf_assert(my_test, CF_MISC, CF_CRITICAL, "gloom!");
+ *    cf_assert(my_test, CF_MISC, "gloom!");
  */
 
 /* cf_fault_context
@@ -163,7 +163,6 @@ typedef enum {
 
 // note: passing a null sink sets for all currently known sinks
 extern int cf_fault_sink_addcontext(cf_fault_sink *s, char *context, char *severity);
-extern int cf_fault_sink_setcontext(cf_fault_sink *s, char *context, char *severity);
 extern cf_fault_sink *cf_fault_sink_add(char *path);
 
 extern cf_fault_sink *cf_fault_sink_hold(char *path);
