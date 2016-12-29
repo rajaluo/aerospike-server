@@ -374,35 +374,21 @@ cc_compute_self_node(const uint16_t port_num, const cc_group_t group_id,
 void
 cc_show_cluster_state(const cluster_config_t *cc)
 {
-	int i, j, buf_pos;
-	char print_buf[512];
 	if (CL_MODE_NO_TOPOLOGY == g_config.cluster_mode) {
-		cf_info(AS_PARTITION, "rack aware is disabled");
+		cf_info(AS_PARTITION, "rack-aware: disabled");
 	}
 	else {
-		cf_info(AS_PARTITION, "rack aware is enabled - mode:%s",
-				(CL_MODE_STATIC == g_config.cluster_mode ? CL_STR_STATIC : CL_STR_DYNAMIC));
-
-		// For each group -- print out the stats.  This is somewhat
-		// inefficient (N squared for N groups), but we don't expect N to
-		// be a large number (usually under 10, NEVER over 64).
-		cf_info(AS_PARTITION, "cluster state:%s self node:%"PRIx64" group count:%d total node count:%d",
+		cf_info(AS_PARTITION, "rack-aware: mode %s cluster-state %s self-node %lx group-count %u total-node-count %u",
+				g_config.cluster_mode == CL_MODE_STATIC ? CL_STR_STATIC : CL_STR_DYNAMIC,
 				cc_state_str[cc->cluster_state], g_config.self_node,
 				cc->group_count, cc->node_count);
-		for (i = 0; i < cc->group_count; i++) {
-			sprintf(print_buf, "group:%04x group node cnt:%u - ",
+
+		for (int i = 0; i < cc->group_count; i++) {
+			cf_info(AS_PARTITION, "rack-aware: group %04x group-node-count %u",
 					cc->group_ids[i], cc->group_node_count[i]);
-			for (j = 0; j < cc->node_count; j++) {
-				if ( cc->membership[j] == i) {
-					buf_pos = strlen(print_buf); // advance our position in buf
-					sprintf(&(print_buf[buf_pos - 1]), " node:%"PRIx64" ",
-							cc->full_node_val[j]);
-				}
-			}
-			cf_info(AS_PARTITION, "%s", print_buf);
-		} // for each group
-	} // Rack Aware Mode
-} // end cc_show_cluster_state()
+		}
+	}
+}
 
 /**
  * Evaluate the state of the cluster.  Basically, count up the node counts
