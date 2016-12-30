@@ -377,16 +377,24 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 	return(0);
 }
 
+void
+info_get_printable_cluster_name(char *cluster_name)
+{
+	as_config_cluster_name_get(cluster_name);
+	if (cluster_name[0] == '\0'){
+		strcpy(cluster_name, "null");
+	}
+}
+
 int
 info_get_cluster_name(char *name, cf_dyn_buf *db)
 {
 	char cluster_name[AS_CLUSTER_NAME_SZ];
-	as_config_cluster_name_get(cluster_name);
+	info_get_printable_cluster_name(cluster_name);
 	cf_dyn_buf_append_string(db, cluster_name);
 
 	return 0;
 }
-
 
 static char *
 bind_to_string(cf_serv_cfg *cfg, cf_sock_owner owner)
@@ -1856,7 +1864,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "clock-skew-max-ms", g_config.clock_skew_max_ms);
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];
-	as_config_cluster_name_get(cluster_name);
+	info_get_printable_cluster_name(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
 
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
