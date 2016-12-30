@@ -100,6 +100,7 @@ void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
 void cfg_init_si_var(as_namespace* ns);
 uint32_t cfg_obj_size_hist_max(uint32_t hist_max);
+void cfg_set_cluster_name(char* cluster_name);
 void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
 void create_and_check_hist(histogram** h, const char* name, histogram_scale scale);
 void cfg_create_all_histograms();
@@ -2020,7 +2021,7 @@ as_config_init(const char* config_file)
 				c->clock_skew_max_ms = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_CLUSTER_NAME:
-				cfg_strcpy(&line, c->cluster_name, AS_CLUSTER_NAME_SZ);
+				cfg_set_cluster_name(line.val_tok_1);
 				break;
 			case CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC:
 				c->fabric_benchmarks_enabled = cfg_bool(&line);
@@ -3570,7 +3571,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		// Read TLS parameters and initialize SSL_CTX.
 		tls_config_context(&g_config.tls_service);
 	}
-	
+
 	// Heartbeat service bind addresses.
 
 	cf_serv_cfg_init(&g_config.hb_config.bind_cfg);
@@ -3619,11 +3620,6 @@ as_config_post_process(as_config* c, const char* config_file)
 	}
 
 	cfg_serv_spec_to_bind(&g_config.info, &g_info_bind, CF_SOCK_OWNER_INFO);
-
-	// 'null' is a special value representing an empty cluster-name.
-	if (strcmp(g_config.cluster_name, "null") == 0) {
-		cf_crash_nostack(AS_CFG, "cluster name 'null' is not allowed");
-	}
 
 	// Validate heartbeat configuration.
 	as_hb_config_validate();
@@ -3749,37 +3745,35 @@ as_config_post_process(as_config* c, const char* config_file)
 
 pthread_mutex_t g_config_lock = PTHREAD_MUTEX_INITIALIZER;
 
-bool
+void
 as_config_cluster_name_get(char* cluster_name)
 {
 	pthread_mutex_lock(&g_config_lock);
 	strcpy(cluster_name, g_config.cluster_name);
 	pthread_mutex_unlock(&g_config_lock);
-	if (cluster_name[0] == '\0') {
-		strcpy(cluster_name, "null");
-		return false;
-	}
-	else {
-		return true;
-	}
 }
 
 bool
 as_config_cluster_name_set(const char* cluster_name)
 {
-	if ((strcmp(cluster_name, "null") == 0) || (cluster_name[0] == '\0')) {
-		cf_warning(AS_CFG, "Cluster name \"%s\" is not allowed. Ignoring!", cluster_name);
+	if (cluster_name[0] == '\0') {
+		cf_warning(AS_CFG, "cluster name '%s' is not allowed. Ignoring.", cluster_name);
 		return false;
 	}
 
 	if (strlen(cluster_name) >= AS_CLUSTER_NAME_SZ) {
-		cf_warning(AS_CFG, "Size of cluster name should not be greater than %d characters. Ignoring cluster name \"%s\"!",
+		cf_warning(AS_CFG, "size of cluster name should not be greater than %d characters. Ignoring cluster name '%s'.",
 			AS_CLUSTER_NAME_SZ - 1, cluster_name);
 		return false;
 	}
 
 	pthread_mutex_lock(&g_config_lock);
-	strcpy(g_config.cluster_name, cluster_name);
+	if (strcmp(cluster_name,"null") == 0){
+		// 'null' is a special value representing an unset cluster-name.
+		strcpy(g_config.cluster_name, "");
+	} else {
+		strcpy(g_config.cluster_name, cluster_name);
+	}
 	pthread_mutex_unlock(&g_config_lock);
 
 	return true;
@@ -4112,6 +4106,13 @@ cfg_obj_size_hist_max(uint32_t hist_max)
 	}
 
 	return round_max; // in 128-byte blocks
+}
+
+void
+cfg_set_cluster_name(char* cluster_name){
+	if(!as_config_cluster_name_set(cluster_name)){
+		cf_crash_nostack(AS_CFG, "cluster name '%s' is not allowed", cluster_name);
+	}
 }
 
 
