@@ -202,6 +202,12 @@ extern void cf_fault_event_nostack(const cf_fault_context,
 		char *msg, ...)
 		__attribute__ ((format (printf, 5, 6)));
 
+// For now there's only one cache, dumped by the ticker.
+extern void cf_fault_cache_event(cf_fault_context context,
+		cf_fault_severity severity, const char *file_name, int line,
+		char *msg, ...)
+		__attribute__ ((format (printf, 5, 6)));
+
 // This is ONLY to keep Eclipse happy without having to tell it __FILENAME__ is
 // defined. The make process will define it via the -D mechanism.
 #ifndef __FILENAME__
@@ -315,3 +321,18 @@ extern bool cf_context_at_severity(const cf_fault_context context, const cf_faul
 extern void cf_fault_init();
 
 int generate_packed_hex_string(void *mem_ptr, uint len, char* output);
+
+// For now there's only one cache, dumped by the ticker.
+extern void cf_fault_dump_cache();
+
+#define cf_dump_ticker_cache() cf_fault_dump_cache()
+
+#define __CACHE_SEVLOG(severity, context, __msg, ...) \
+		(severity > cf_fault_filter[context] ? \
+				(void)0 : \
+				cf_fault_cache_event((context), severity, __FILENAME__, __LINE__, (__msg), ##__VA_ARGS__))
+
+#define cf_ticker_warning(...) __CACHE_SEVLOG(CF_WARNING, ##__VA_ARGS__)
+#define cf_ticker_info(...) __CACHE_SEVLOG(CF_INFO, ##__VA_ARGS__)
+#define cf_ticker_debug(...) __CACHE_SEVLOG(CF_DEBUG, ##__VA_ARGS__)
+#define cf_ticker_detail(...) __CACHE_SEVLOG(CF_DETAIL, ##__VA_ARGS__)
