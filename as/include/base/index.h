@@ -236,10 +236,10 @@ bool as_index_has_set(as_index *index) {
 //
 
 static inline
-int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
-		bool apply_restrictions) {
+int as_index_set_set_w_len(as_index *index, as_namespace *ns,
+		const char *set_name, size_t len, bool apply_restrictions) {
 	uint16_t set_id;
-	int rv = as_namespace_get_create_set(ns, set_name, &set_id,
+	int rv = as_namespace_set_set_w_len(ns, set_name, len, &set_id,
 			apply_restrictions);
 
 	if (rv != 0) {
@@ -251,18 +251,10 @@ int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
 }
 
 static inline
-int as_index_set_set_w_len(as_index *index, as_namespace *ns,
-		const char *set_name, size_t len, bool apply_restrictions) {
-	uint16_t set_id;
-	int rv = as_namespace_get_create_set_w_len(ns, set_name, len, &set_id,
-			apply_restrictions);
-
-	if (rv != 0) {
-		return rv;
-	}
-
-	as_index_set_set_id(index, set_id);
-	return 0;
+int as_index_set_set(as_index *index, as_namespace *ns, const char *set_name,
+		bool apply_restrictions) {
+	return as_index_set_set_w_len(index, ns, set_name, strlen(set_name),
+		apply_restrictions);
 }
 
 static inline
