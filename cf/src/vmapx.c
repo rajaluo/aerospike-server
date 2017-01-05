@@ -227,7 +227,7 @@ cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
 
 	// Make sure name has no illegal premature null-terminator.
 	for (uint32_t i = 0; i < name_len; i++) {
-		if (p_value[i] == 0) {
+		if (((const char*)p_value)[i] == 0) {
 			pthread_mutex_unlock(&this->write_lock);
 			return CF_VMAPX_ERR_BAD_PARAM;
 		}
@@ -318,8 +318,8 @@ static inline void
 vhash_set_ele_key(char* ele_key, size_t key_size, const char* zkey,
 		size_t zkey_size)
 {
-	memcpy(ele_key, zkey, zkey_size);
-	memset(ele_key + zkey_size, 'x', key_size - zkey_size);
+	memcpy((void*)ele_key, (const void*)zkey, zkey_size);
+	memset((void*)(ele_key + zkey_size), 'x', key_size - zkey_size);
 }
 
 //------------------------------------------------
