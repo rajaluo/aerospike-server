@@ -220,6 +220,8 @@ log_ticker_frame()
 	if (g_config.fabric_dump_msgs) {
 		as_fabric_msg_queue_dump();
 	}
+
+	cf_dump_ticker_cache();
 }
 
 

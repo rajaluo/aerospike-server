@@ -177,6 +177,10 @@ cf_vmapx_err
 cf_vmapx_get_index_w_len(const cf_vmapx* this, const char* name,
 		size_t name_len, uint32_t* p_index)
 {
+	if (name_len >= this->key_size) {
+		return CF_VMAPX_ERR_NAME_NOT_FOUND;
+	}
+
 	return vhash_get(this->p_hash, name, name_len, p_index) ?
 			CF_VMAPX_OK : CF_VMAPX_ERR_NAME_NOT_FOUND;
 }

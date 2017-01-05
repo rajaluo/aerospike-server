@@ -24,6 +24,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -35,9 +36,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <aerospike/as_log.h>
-#include <citrusleaf/alloc.h>
-#include <citrusleaf/cf_b64.h>
+#include "aerospike/as_log.h"
+#include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_b64.h"
+#include "citrusleaf/cf_shash.h"
 
 
 /*
@@ -121,6 +123,18 @@ cf_fault_severity cf_fault_filter[CF_FAULT_CONTEXT_UNDEF];
 int cf_fault_sinks_inuse = 0;
 int num_held_fault_sinks = 0;
 
+shash *g_ticker_hash = NULL;
+#define CACHE_MSG_MAX_SIZE 128
+
+typedef struct cf_fault_cache_hkey_s {
+	// Members most likely to be unique come first:
+	int					line;
+	cf_fault_context	context;
+	const char			*file_name;
+	cf_fault_severity	severity;
+	char				msg[CACHE_MSG_MAX_SIZE];
+} cf_fault_cache_hkey;
+
 bool g_use_local_time = false;
 
 // Filter stderr logging at this level when there are no sinks:
@@ -153,6 +167,12 @@ cf_fault_set_severity(const cf_fault_context context, const cf_fault_severity se
 	}
 }
 
+static inline uint32_t
+cache_hash_fn(void *key)
+{
+	return (uint32_t)((cf_fault_cache_hkey*)key)->line;
+}
+
 /* cf_fault_init
  * This code MUST be the first thing executed by main(). */
 void
@@ -162,6 +182,12 @@ cf_fault_init()
 	for (int j = 0; j < CF_FAULT_CONTEXT_UNDEF; j++) {
 		// We start with no sinks, so let's be in-sync with that.
 		cf_fault_set_severity(j, NO_SINKS_LIMIT);
+	}
+
+	// Create the ticker hash.
+	if (shash_create(&g_ticker_hash, cache_hash_fn, sizeof(cf_fault_cache_hkey),
+			sizeof(uint32_t), 32, SHASH_CR_MT_MANYLOCK) != 0) {
+		cf_crash(CF_MISC, "failed ticker hash create");
 	}
 }
 
@@ -971,4 +997,78 @@ cf_fault_sink_context_strlist(int sink_id, char *context, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, ':');
 	cf_dyn_buf_append_string(db, cf_fault_severity_strings[s->limit[i]]);
 	return(0);
+}
+
+
+static int
+cf_fault_cache_reduce_fn(void *key, void *data, void *udata)
+{
+	uint32_t *count = (uint32_t*)data;
+
+	if (*count == 0) {
+		return SHASH_REDUCE_DELETE;
+	}
+
+	cf_fault_cache_hkey *hkey = (cf_fault_cache_hkey*)key;
+
+	cf_fault_event(hkey->context, hkey->severity, hkey->file_name, hkey->line,
+			"(repeated:%u) %s", *count, hkey->msg);
+
+	*count = 0;
+
+	return SHASH_OK;
+}
+
+
+// For now there's only one cache, dumped by the ticker.
+void
+cf_fault_dump_cache()
+{
+	shash_reduce_delete(g_ticker_hash, cf_fault_cache_reduce_fn, NULL);
+}
+
+
+// For now there's only one cache, dumped by the ticker.
+void
+cf_fault_cache_event(cf_fault_context context, cf_fault_severity severity,
+		const char *file_name, int line, char *msg, ...)
+{
+	cf_fault_cache_hkey key = {
+			.line = line,
+			.context = context,
+			.file_name = file_name,
+			.severity = severity,
+			.msg = { 0 } // must pad hash keys
+	};
+
+	size_t limit = sizeof(key.msg) - 1; // truncate leaving null-terminator
+
+	va_list argp;
+
+	va_start(argp, msg);
+	vsnprintf(key.msg, limit, msg, argp);
+	va_end(argp);
+
+	while (true) {
+		uint32_t *valp = NULL;
+		pthread_mutex_t *lockp = NULL;
+
+		if (shash_get_vlock(g_ticker_hash, &key, (void**)&valp, &lockp) ==
+				SHASH_OK) {
+			// Already in hash - increment count and don't log it.
+			(*valp)++;
+			pthread_mutex_unlock(lockp);
+			break;
+		}
+		// else - not found, add it to hash and log it.
+
+		uint32_t initv = 1;
+
+		if (shash_put_unique(g_ticker_hash, &key, &initv) == SHASH_ERR_FOUND) {
+			continue; // other thread beat us to it - loop around and get it
+		}
+
+		cf_fault_event(context, severity, file_name, line, "%s", key.msg);
+		break;
+	}
 }

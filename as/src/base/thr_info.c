@@ -2855,13 +2855,43 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 		context_len = sizeof(context);
 		// configure namespace/set related parameters:
 		if (0 == as_info_parameter_get(params, "set", context, &context_len)) {
-			// checks if there is a vmap set with the same name and if so returns a ptr to it
-			// if not, it creates an set structure, initializes it and returns a ptr to it.
-			as_set * p_set = as_namespace_init_set(ns, context);
-			cf_debug(AS_INFO, "set name is %s\n", p_set->name);
+			if (context_len == 0 || context_len >= AS_SET_NAME_MAX_SIZE) {
+				cf_warning(AS_INFO, "illegal length %d for set name %s",
+						context_len, context);
+				goto Error;
+			}
+
+			char set_name[AS_SET_NAME_MAX_SIZE];
+			size_t set_name_len = (size_t)context_len;
+
+			strcpy(set_name, context);
+
+			// Ideally, set operations should not be part of configs. But,
+			// set-delete is exception for historical reasons. Do an early check
+			// and bail out if set doesn't exist.
+			uint16_t set_id = as_namespace_get_set_id(ns, set_name);
+			if (set_id == INVALID_SET_ID) {
+				context_len = sizeof(context);
+				if (0 == as_info_parameter_get(params, "set-delete", context,
+						&context_len)) {
+					cf_warning(AS_INFO, "set-delete failed because set %s doesn't exist in ns %s",
+							set_name, ns->name);
+					goto Error;
+				}
+			}
+
+			// configurations should create set if it doesn't exist.
+			// checks if there is a vmap set with the same name and if so returns
+			// a ptr to it. if not, it creates an set structure, initializes it 
+			// and returns a ptr to it.
+			as_set *p_set = NULL;
+			if (as_namespace_get_create_set_w_len(ns, set_name, set_name_len,
+					&p_set, &set_id) != 0) {
+				goto Error;
+			}
+
 			context_len = sizeof(context);
-			if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len) ||
-					0 == as_info_parameter_get(params, "enable-xdr", context, &context_len)) {
+			if (0 == as_info_parameter_get(params, "set-enable-xdr", context, &context_len)) {
 				// TODO - make sure context is null-terminated.
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-enable-xdr of ns %s set %s to %s", ns->name, p_set->name, context);
@@ -2879,8 +2909,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					goto Error;
 				}
 			}
-			else if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len) ||
-					0 == as_info_parameter_get(params, "disable-eviction", context, &context_len)) {
+			else if (0 == as_info_parameter_get(params, "set-disable-eviction", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-disable-eviction of ns %s set %s to %s", ns->name, p_set->name, context);
 					DISABLE_SET_EVICTION(p_set, true);
@@ -2893,14 +2922,12 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 					goto Error;
 				}
 			}
-			else if (0 == as_info_parameter_get(params, "set-stop-writes-count", context, &context_len) ||
-					0 == as_info_parameter_get(params, "stop-writes-count", context, &context_len)) {
+			else if (0 == as_info_parameter_get(params, "set-stop-writes-count", context, &context_len)) {
 				uint64_t val = atoll(context);
 				cf_info(AS_INFO, "Changing value of set-stop-writes-count of ns %s set %s to %lu", ns->name, p_set->name, val);
 				cf_atomic64_set(&p_set->stop_writes_count, val);
 			}
-			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len) ||
-					0 == as_info_parameter_get(params, "delete", context, &context_len)) {
+			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len)) {
 				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
 					cf_info(AS_INFO, "Changing value of set-delete of ns %s set %s to %s", ns->name, p_set->name, context);
 					SET_DELETED_ON(p_set);
