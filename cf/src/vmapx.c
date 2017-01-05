@@ -225,6 +225,14 @@ cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
 		return CF_VMAPX_ERR_NAME_EXISTS;
 	}
 
+	// Make sure name has no illegal premature null-terminator.
+	for (uint32_t i = 0; i < name_len; i++) {
+		if (p_value[i] == 0) {
+			pthread_mutex_unlock(&this->write_lock);
+			return CF_VMAPX_ERR_BAD_PARAM;
+		}
+	}
+
 	uint32_t count = this->count;
 
 	// If vmap is full, can't add more.
@@ -303,6 +311,17 @@ typedef struct vhash_ele_s {
 #define VHASH_ELE_KEY_PTR(_e)		((char*)_e->data)
 #define VHASH_ELE_VALUE_PTR(_h, _e)	((uint32_t*)(_e->data + _h->key_size))
 
+// Copy null-terminated key into hash, then pad with non-null characters.
+// Padding ensures quicker compare in vhash_get() when key in hash is shorter,
+// and prevents accidental match if key param has illegal null character(s).
+static inline void
+vhash_set_ele_key(char* ele_key, size_t key_size, const char* zkey,
+		size_t zkey_size)
+{
+	memcpy(ele_key, zkey, zkey_size);
+	memset(ele_key + zkey_size, 'x', key_size - zkey_size);
+}
+
 //------------------------------------------------
 // Create vhash with specified key size (max) and
 // number or rows.
@@ -374,7 +393,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 	vhash_ele* e = (vhash_ele*)(h->table + (h->ele_size * row_i));
 
 	if (h->row_counts[row_i] == 0) {
-		strcpy(VHASH_ELE_KEY_PTR(e), zkey);
+		vhash_set_ele_key(VHASH_ELE_KEY_PTR(e), h->key_size, zkey, key_len + 1);
 		*VHASH_ELE_VALUE_PTR(h, e) = value;
 		h->row_counts[row_i]++;
 
@@ -398,7 +417,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 	e->next = e_head->next;
 	e_head->next = e;
 
-	strcpy(VHASH_ELE_KEY_PTR(e), zkey);
+	vhash_set_ele_key(VHASH_ELE_KEY_PTR(e), h->key_size, zkey, key_len + 1);
 	*VHASH_ELE_VALUE_PTR(h, e) = value;
 	h->row_counts[row_i]++;
 
