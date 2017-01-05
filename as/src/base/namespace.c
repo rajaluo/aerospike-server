@@ -493,28 +493,38 @@ as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 }
 
 int
-as_namespace_get_create_set(as_namespace *ns, const char *set_name, uint16_t *p_set_id, bool apply_restrictions)
+as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len,
+		uint16_t *p_set_id, bool apply_restrictions)
 {
-	cf_assert(set_name, AS_NAMESPACE, "null set name");
+	as_set *p_set;
 
-	return as_namespace_get_create_set_w_len(ns, set_name, strlen(set_name),
-			p_set_id, apply_restrictions);
+	if (as_namespace_get_create_set_w_len(ns, set_name, len, &p_set,
+			p_set_id) != 0) {
+		return -1;
+	}
+
+	if (apply_restrictions &&
+			(IS_SET_DELETED(p_set) || as_set_stop_writes(p_set))) {
+		return -2;
+	}
+
+	cf_atomic64_incr(&p_set->n_objects);
+
+	return 0;
 }
 
 int
-as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions)
+as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
+		size_t len, as_set **pp_set, uint16_t *p_set_id)
 {
 	cf_assert(set_name, AS_NAMESPACE, "null set name");
 	cf_assert(len != 0, AS_NAMESPACE, "empty set name");
 
 	uint32_t idx;
-	cf_vmapx_err result = cf_vmapx_get_index_w_len(ns->p_sets_vmap, set_name, len, &idx);
-	bool already_in_vmap = false;
+	cf_vmapx_err result = cf_vmapx_get_index_w_len(ns->p_sets_vmap, set_name,
+			len, &idx);
 
-	if (result == CF_VMAPX_OK) {
-		already_in_vmap = true;
-	}
-	else if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
+	if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
 		// Check name length just once, here at insertion. (Other vmap calls are
 		// safe if name is too long - they return CF_VMAPX_ERR_NAME_NOT_FOUND.)
 		if (len >= AS_SET_NAME_MAX_SIZE) {
@@ -532,101 +542,40 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t
 		memset(&set, 0, sizeof(set)); // paranoia - vmap null-terminates
 
 		memcpy(set.name, set_name, len);
-		set.n_objects = 1;
+		set.n_objects = 0;
+
 		result = cf_vmapx_put_unique_w_len(ns->p_sets_vmap, &set, len, &idx);
 
-		if (result == CF_VMAPX_ERR_NAME_EXISTS) {
-			already_in_vmap = true;
-		}
-		else if (result == CF_VMAPX_ERR_FULL) {
-			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s", set.name);
-			return -1;
-		}
-		else if (result != CF_VMAPX_OK) {
-			// Currently, remaining errors are all some form of out-of-memory.
-			cf_warning(AS_NAMESPACE, "error %d, can't add %s", result, set.name);
-			return -1;
-		}
-	}
-	else {
-		// Should be impossible.
-		cf_warning(AS_NAMESPACE, "unexpected error %d", result);
-		return -1;
-	}
-
-	if (already_in_vmap) {
-		as_set *p_set;
-
-		if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set)) != CF_VMAPX_OK) {
-			// Should be impossible - just verified idx.
-			cf_warning(AS_NAMESPACE, "unexpected error %d", result);
+		// Since this function can be called via many functions simultaneously.
+		// Need to handle race, So handle CF_VMAPX_ERR_NAME_EXISTS.
+		if (result == CF_VMAPX_ERR_FULL) {
+			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s",
+					set.name);
 			return -1;
 		}
 
-		// If requested, fail if emptying set or stop-writes limit is breached.
-		if (apply_restrictions && (IS_SET_DELETED(p_set) || as_set_stop_writes(p_set))) {
-			return -2;
-		}
-
-		// The set passed all tests - need to increment its n_objects.
-		cf_atomic64_incr(&p_set->n_objects);
-	}
-
-	*p_set_id = (uint16_t)(idx + 1);
-
-	return 0;
-}
-
-as_set *
-as_namespace_init_set(as_namespace *ns, const char *set_name)
-{
-	if (! set_name) {
-		return NULL;
-	}
-
-	uint32_t idx;
-	cf_vmapx_err result = cf_vmapx_get_index(ns->p_sets_vmap, set_name, &idx);
-
-	if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
-		as_set set;
-
-		memset(&set, 0, sizeof(set));
-
-		// Check name length just once, here at insertion. (Other vmap calls are
-		// safe if name is too long - they return CF_VMAPX_ERR_NAME_NOT_FOUND.)
-		strncpy(set.name, set_name, AS_SET_NAME_MAX_SIZE);
-
-		if (set.name[AS_SET_NAME_MAX_SIZE - 1]) {
-			set.name[AS_SET_NAME_MAX_SIZE - 1] = 0;
-
-			cf_info(AS_NAMESPACE, "set name %s... too long", set.name);
-			return NULL;
-		}
-
-		result = cf_vmapx_put_unique(ns->p_sets_vmap, &set, &idx);
-
-		// Since this function can be called via info, need to handle race with
-		// as_namespace_get_create_set() that returns CF_VMAPX_ERR_NAME_EXISTS.
 		if (result != CF_VMAPX_OK && result != CF_VMAPX_ERR_NAME_EXISTS) {
-			cf_warning(AS_NAMESPACE, "unexpected error %d", result);
-			return NULL;
+			cf_warning(AS_NAMESPACE, "unexpected error %d, can't add %s",
+					result, set.name);
+			return -1;
 		}
 	}
 	else if (result != CF_VMAPX_OK) {
 		// Should be impossible.
 		cf_warning(AS_NAMESPACE, "unexpected error %d", result);
-		return NULL;
+		return -1;
 	}
 
-	as_set *p_set = NULL;
-
-	if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set)) != CF_VMAPX_OK) {
+	if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx,
+			(void**)pp_set)) != CF_VMAPX_OK) {
 		// Should be impossible - just verified idx.
 		cf_warning(AS_NAMESPACE, "unexpected error %d", result);
-		return NULL;
+		return -1;
 	}
 
-	return p_set;
+	*p_set_id = (uint16_t)(idx + 1);
+
+	return 0;
 }
 
 static void
