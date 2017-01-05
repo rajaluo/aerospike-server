@@ -5490,15 +5490,6 @@ channel_tender(void* arg)
 
 		DETAIL("Tending channel");
 
-		if (nevents < 0) {
-			// Legacy did not crash here. Retaining the same behaviour.
-			if (errno == EINTR) {
-				continue;
-			}
-			WARNING("epoll_wait() returned %d ; errno = %d (%s)", nevents,
-					errno, cf_strerror(errno));
-		}
-
 		for (int i = 0; i < nevents; i++) {
 			cf_socket* socket = events[i].data;
 			if (channel_cf_sockets_contains(
@@ -5517,7 +5508,7 @@ channel_tender(void* arg)
 		}
 
 		cf_clock now = cf_getms();
-		if (last_channel_idle_check + CHANNEL_IDLE_CHECK_PERIOD > now) {
+		if (last_channel_idle_check + CHANNEL_IDLE_CHECK_PERIOD <= now) {
 			// Tend channels to discard stale channels.
 			channel_channels_idle_check();
 			last_channel_idle_check = now;
