@@ -801,21 +801,21 @@ as_batch_queue_task(as_transaction* btr)
 				should_inline = ns && ns->storage_data_in_memory;
 			}
 			mf = as_msg_field_get_next(mf);
+			data = (uint8_t*)mf;
 
 			// Swap remaining fields.
 			for (uint16_t j = 1; j < out->msg.n_fields; j++) {
+				if (data + sizeof(as_msg_field) > limit) {
+					goto TranEnd;
+				}
+
 				if (mf->type == AS_MSG_FIELD_TYPE_SET) {
 					as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_SET);
 				}
 
 				as_msg_swap_field(mf);
 				mf = as_msg_field_get_next(mf);
-			}
-
-			data = (uint8_t*)mf;
-
-			if (data > limit) {
-				break;
+				data = (uint8_t*)mf;
 			}
 
 			if (out->msg.n_ops) {
@@ -829,10 +829,6 @@ as_batch_queue_task(as_transaction* btr)
 					as_msg_swap_op(op);
 					op = as_msg_op_get_next(op);
 					data = (uint8_t*)op;
-
-					if (data > limit) {
-						goto TranEnd;
-					}
 				}
 			}
 
@@ -841,6 +837,10 @@ as_batch_queue_task(as_transaction* btr)
 			out->proto.type = PROTO_TYPE_AS_MSG;
 			out->proto.sz = (data - (uint8_t*)&out->msg);
 			tr.msgp = out;
+		}
+
+		if (data > limit) {
+			break;
 		}
 
 		// Submit transaction.
