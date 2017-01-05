@@ -546,7 +546,7 @@ as_record_pickle_is_binless(const uint8_t *buf)
 	return *(uint16_t *)buf == 0;
 }
 
-extern uint32_t as_record_buf_get_stack_particles_sz(uint8_t *buf);
+extern int32_t as_record_buf_get_stack_particles_sz(uint8_t *buf);
 
 // Set in component if it is dummy (no data). This in
 // conjunction with LDT_REC is used to determine if merge

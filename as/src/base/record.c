@@ -327,9 +327,9 @@ as_record_pickle(as_record *r, as_storage_rd *rd, byte **buf_r, size_t *len_r)
 	return(0);
 }
 
-uint32_t
+int32_t
 as_record_buf_get_stack_particles_sz(uint8_t *buf) {
-	uint32_t stack_particles_sz = 0;
+	int32_t stack_particles_sz = 0;
 
 	uint16_t newbins = ntohs( *(uint16_t *) buf );
 	buf += 2;
@@ -338,10 +338,16 @@ as_record_buf_get_stack_particles_sz(uint8_t *buf) {
 		byte name_sz = *buf;
 		buf += name_sz + 2;
 
-		stack_particles_sz += as_particle_size_from_pickled(&buf);
+		int32_t result = as_particle_size_from_pickled(&buf);
+
+		if (result < 0) {
+			return result;
+		}
+
+		stack_particles_sz += result;
 	}
 
-	return (stack_particles_sz);
+	return stack_particles_sz;
 }
 
 int
@@ -428,9 +434,11 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 		}
 
 		if (ns->storage_data_in_memory) {
+			// TODO - what if this fails?
 			as_bin_particle_replace_from_pickled(b, &buf);
 		}
 		else {
+			// TODO - what if this fails?
 			*stack_particles += as_bin_particle_stack_from_pickled(b, *stack_particles, &buf);
 		}
 
@@ -568,9 +576,16 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 
 	uint64_t memory_bytes = as_storage_record_get_n_bytes_memory(rd);
 
-	uint32_t stack_particles_sz = 0;
+	int32_t stack_particles_sz = 0;
+
 	if (! rd->ns->storage_data_in_memory) {
 		stack_particles_sz = as_record_buf_get_stack_particles_sz(c->record_buf);
+
+		if (stack_particles_sz < 0) {
+			cf_warning_digest(AS_RECORD, &rd->keyd, "stack particle size failed");
+			as_storage_record_close(rd);
+			return -1;
+		}
 	}
 
 	// 256 as upper bound on the LDT control bin, we may write version below

@@ -1024,8 +1024,23 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
-	uint32_t stack_particles_sz = rd.ns->storage_data_in_memory ?
-			0 : as_record_buf_get_stack_particles_sz(pickled_buf);
+	int32_t stack_particles_sz = 0;
+
+	if (! rd.ns->storage_data_in_memory) {
+		stack_particles_sz = as_record_buf_get_stack_particles_sz(pickled_buf);
+
+		if (stack_particles_sz < 0) {
+			if (is_create) {
+				as_index_delete(tree, keyd);
+			}
+
+			as_storage_record_close(&rd);
+			as_record_done(&r_ref, ns);
+
+			return -stack_particles_sz;
+		}
+	}
+
 	uint8_t stack_particles[stack_particles_sz + 256];
 	uint8_t* p_stack_particles = stack_particles;
 	// + 256 for LDT control bin, to hold version.
