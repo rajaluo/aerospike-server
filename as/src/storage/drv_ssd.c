@@ -4128,8 +4128,8 @@ as_storage_overloaded_ssd(as_namespace *ns)
 		int qsz = cf_queue_sz(ssd->swb_write_q);
 
 		if (qsz > max_write_q) {
-			cf_warning(AS_DRV_SSD, "{%s} write fail: queue too deep: q %d, max %d",
-					ns->name, qsz, max_write_q);
+			cf_ticker_warning(AS_DRV_SSD, "{%s} write fail: queue too deep: exceeds max %d",
+					ns->name, max_write_q);
 			return true;
 		}
 
@@ -4137,8 +4137,8 @@ as_storage_overloaded_ssd(as_namespace *ns)
 			qsz = cf_queue_sz(ssd->swb_shadow_q);
 
 			if (qsz > max_write_q) {
-				cf_warning(AS_DRV_SSD, "{%s} write fail: shadow queue too deep: q %d, max %d",
-						ns->name, qsz, max_write_q);
+				cf_ticker_warning(AS_DRV_SSD, "{%s} write fail: shadow queue too deep: exceeds max %d",
+						ns->name, max_write_q);
 				return true;
 			}
 		}
