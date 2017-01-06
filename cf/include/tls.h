@@ -1,7 +1,7 @@
 /*
- * thr_tsvc.h
+ * tls.h
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,14 +22,33 @@
 
 #pragma once
 
-#include <stdint.h>
-#include "base/transaction.h"
+#include "socket.h"
+#include "tls_mode.h"
 
-void as_tsvc_init();
-void as_tsvc_enqueue(as_transaction *tr);
-void as_tsvc_set_threads_per_queue(uint32_t n_threads);
-int as_tsvc_queue_get_size();
-void as_tsvc_process_transaction(as_transaction *tr);
+void tls_check_init();
 
-#define MAX_TRANSACTION_QUEUES 128
-#define MAX_TRANSACTION_THREADS_PER_QUEUE 256
+void tls_cleanup();
+
+void tls_thread_cleanup();
+
+void tls_socket_init(cf_socket *sock);
+
+void tls_socket_term(cf_socket *sock);
+
+void tls_config_context(cf_serv_spec *spec);
+
+void tls_socket_context(cf_socket *sock, cf_sock_cfg *cfg, const cf_serv_spec *spec);
+
+int tls_socket_shutdown(cf_socket *sock);
+
+void tls_socket_close(cf_socket *sock);
+
+int tls_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *sa);
+
+int tls_socket_recv(cf_socket *sock, void *buf, size_t sz, int32_t flags,
+					uint64_t timeout_msec);
+
+int tls_socket_send(cf_socket *sock, void const *buf, size_t sz, int32_t flags,
+					uint64_t timeout_msec);
+
+int tls_socket_pending(cf_socket *sock);

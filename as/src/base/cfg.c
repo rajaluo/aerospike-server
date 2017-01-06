@@ -50,6 +50,7 @@
 #include "msg.h"
 #include "olock.h"
 #include "socket.h"
+#include "tls.h"
 #include "util.h"
 
 #include "base/cluster_config.h"
@@ -76,28 +77,36 @@
 // The runtime configuration instance.
 as_config g_config;
 
+
 //==========================================================
 // Forward declarations.
 //
 
+void init_addr_list(cf_addr_list* addrs);
 void add_addr(const char* name, cf_addr_list* addrs);
 void copy_addrs(const cf_addr_list* from, cf_addr_list* to);
-void default_access(const cf_serv_spec* from, cf_addr_list* to);
+void default_addrs(cf_addr_list* one, cf_addr_list* two);
+void bind_to_access(const cf_serv_spec* from, cf_addr_list* to);
 void cfg_add_addr_bind(const char* name, cf_serv_spec* spec);
-void cfg_add_addr_access(const char* name, cf_serv_spec* spec);
+void cfg_add_addr_std(const char* name, cf_serv_spec* spec);
+void cfg_add_addr_alt(const char* name, cf_serv_spec* spec);
 void cfg_mserv_config_from_addrs(cf_addr_list* addrs, cf_addr_list* bind_addrs, cf_mserv_cfg* serv_cfg, cf_ip_port port, cf_sock_owner owner, uint8_t ttl);
 void cfg_serv_spec_to_bind(const cf_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner);
-void cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access);
+void cfg_serv_spec_std_to_access(const cf_serv_spec* spec, cf_addr_list* access);
+void cfg_serv_spec_alt_to_access(const cf_serv_spec* spec, cf_addr_list* access);
 void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
 void cfg_init_si_var(as_namespace* ns);
 uint32_t cfg_obj_size_hist_max(uint32_t hist_max);
+void cfg_set_cluster_name(char* cluster_name);
 void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
 void create_and_check_hist(histogram** h, const char* name, histogram_scale scale);
 void cfg_create_all_histograms();
 int cfg_reset_self_node(as_config* config_p);
+void cfg_init_serv_spec(cf_serv_spec* spec_p);
+void cfg_resolve_tls_name(as_config* config_p);
 
 
 //==========================================================
@@ -111,13 +120,17 @@ cfg_set_defaults()
 
 	memset(c, 0, sizeof(as_config));
 
-	// Service defaults.
+	cfg_init_serv_spec(&c->service);
+	cfg_init_serv_spec(&c->tls_service);
+	cfg_init_serv_spec(&c->hb_serv_spec);
+	cfg_init_serv_spec(&c->fabric);
+	cfg_init_serv_spec(&c->info);
+
 	c->paxos_single_replica_limit = 1; // by default all clusters obey replication counts
 	c->n_service_threads = 4;
 	c->n_transaction_queues = 4;
 	c->n_transaction_threads_per_queue = 4;
 	c->n_proto_fd_max = 15000;
-	c->allow_inline_transactions = true; // allow data-in-memory namespaces to process transactions in service threads
 	c->n_batch_threads = 4;
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
@@ -131,7 +144,6 @@ cfg_set_defaults()
 	c->n_info_threads = 16;
 	c->ldt_benchmarks = false;
 	c->migrate_max_num_incoming = AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING; // for receiver-side migration flow-control
-	c->migrate_rx_lifetime_ms = AS_MIGRATE_DEFAULT_RX_LIFETIME_MS; // for debouncing re-transmitted migrate start messages
 	c->n_migrate_threads = 1;
 	c->nsup_delete_sleep = 100; // 100 microseconds means a delete rate of 10k TPS
 	c->nsup_period = 120; // run nsup once every 2 minutes
@@ -248,7 +260,6 @@ typedef enum {
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
 	CASE_SERVICE_ADVERTISE_IPV6,
-	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
 	CASE_SERVICE_BATCH_MAX_REQUESTS,
@@ -268,7 +279,6 @@ typedef enum {
 	CASE_SERVICE_LDT_BENCHMARKS,
 	CASE_SERVICE_LOG_LOCAL_TIME,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
-	CASE_SERVICE_MIGRATE_RX_LIFETIME_MS,
 	CASE_SERVICE_MIGRATE_THREADS,
 	CASE_SERVICE_NODE_ID_INTERFACE,
 	CASE_SERVICE_NSUP_DELETE_SLEEP,
@@ -314,6 +324,8 @@ typedef enum {
 	CASE_SERVICE_MAX_MSGS_PER_TYPE,
 	CASE_SERVICE_MEMORY_ACCOUNTING,
 	CASE_SERVICE_PROLE_EXTRA_TTL,
+	// Obsoleted:
+	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
 	// Deprecated:
 	CASE_SERVICE_AUTO_DUN,
 	CASE_SERVICE_AUTO_UNDUN,
@@ -331,6 +343,7 @@ typedef enum {
 	CASE_SERVICE_GENERATION_DISABLE,
 	CASE_SERVICE_MIGRATE_READ_PRIORITY,
 	CASE_SERVICE_MIGRATE_READ_SLEEP,
+	CASE_SERVICE_MIGRATE_RX_LIFETIME_MS,
 	CASE_SERVICE_MIGRATE_XMIT_HWM,
 	CASE_SERVICE_MIGRATE_XMIT_LWM,
 	CASE_SERVICE_MIGRATE_PRIORITY, // renamed
@@ -397,19 +410,34 @@ typedef enum {
 	// Normally hidden:
 	CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS, // renamed
 	CASE_NETWORK_SERVICE_ACCESS_ADDRESS,
+	CASE_NETWORK_SERVICE_ACCESS_PORT,
 	CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS,
-	CASE_NETWORK_SERVICE_ALTERNATE_PORT,
-	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS,
-	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS,
-	CASE_NETWORK_SERVICE_ALTERNATE_TLS_PORT,
+	CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_PORT,
 	CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS,
+	CASE_NETWORK_SERVICE_TLS_ACCESS_PORT,
 	CASE_NETWORK_SERVICE_TLS_ADDRESS,
+	CASE_NETWORK_SERVICE_TLS_ALTERNATE_ACCESS_ADDRESS,
+	CASE_NETWORK_SERVICE_TLS_ALTERNATE_ACCESS_PORT,
+	CASE_NETWORK_SERVICE_TLS_CAFILE,
+	CASE_NETWORK_SERVICE_TLS_CAPATH,
+	CASE_NETWORK_SERVICE_TLS_CERT_BLACKLIST,
+	CASE_NETWORK_SERVICE_TLS_CERTFILE,
+	CASE_NETWORK_SERVICE_TLS_CIPHER_SUITE,
+	CASE_NETWORK_SERVICE_TLS_KEYFILE,
+	CASE_NETWORK_SERVICE_TLS_MODE,
 	CASE_NETWORK_SERVICE_TLS_NAME,
 	CASE_NETWORK_SERVICE_TLS_PORT,
-	// Deprecated or obsoleted:
+	CASE_NETWORK_SERVICE_TLS_PROTOCOLS,
+	// Obsoleted:
 	CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS,
 	CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME,
+	// Deprecated:
 	CASE_NETWORK_SERVICE_REUSE_ADDRESS,
+
+	// Network service tls-mode options (value tokens):
+	CASE_NETWORK_SERVICE_TLS_MODE_AUTHENTICATE_BOTH,
+	CASE_NETWORK_SERVICE_TLS_MODE_AUTHENTICATE_SERVER,
+	CASE_NETWORK_SERVICE_TLS_MODE_ENCRYPT_ONLY,
 
 	// Network heartbeat options:
 	// Normally visible, in canonical configuration file order:
@@ -426,7 +454,7 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_MCAST_TTL, // renamed
 	CASE_NETWORK_HEARTBEAT_MULTICAST_TTL,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL,
-	// Deprecated or obsoleted:
+	// Obsoleted:
 	CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS,
 
 	// Network heartbeat mode options (value tokens):
@@ -494,6 +522,8 @@ typedef enum {
 	CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS,
 	CASE_NAMESPACE_MIGRATE_SLEEP,
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
+	CASE_NAMESPACE_PARTITION_TREE_LOCKS,
+	CASE_NAMESPACE_PARTITION_TREE_SPRIGS,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
 	CASE_NAMESPACE_SET_BEGIN,
 	CASE_NAMESPACE_SI_BEGIN,
@@ -677,7 +707,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
 		{ "advertise-ipv6",					CASE_SERVICE_ADVERTISE_IPV6 },
-		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
 		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
@@ -697,7 +726,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
-		{ "migrate-rx-lifetime-ms",			CASE_SERVICE_MIGRATE_RX_LIFETIME_MS },
 		{ "migrate-threads",				CASE_SERVICE_MIGRATE_THREADS },
 		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
@@ -742,6 +770,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "max-msgs-per-type",				CASE_SERVICE_MAX_MSGS_PER_TYPE },
 		{ "memory-accounting",				CASE_SERVICE_MEMORY_ACCOUNTING },
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
+		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
 		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
 		{ "batch-retransmit",				CASE_SERVICE_BATCH_RETRANSMIT },
@@ -758,6 +787,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "generation-disable",				CASE_SERVICE_GENERATION_DISABLE },
 		{ "migrate-read-priority",			CASE_SERVICE_MIGRATE_READ_PRIORITY },
 		{ "migrate-read-sleep",				CASE_SERVICE_MIGRATE_READ_SLEEP },
+		{ "migrate-rx-lifetime-ms",			CASE_SERVICE_MIGRATE_RX_LIFETIME_MS },
 		{ "migrate-xmit-hwm",				CASE_SERVICE_MIGRATE_XMIT_HWM },
 		{ "migrate-xmit-lwm",				CASE_SERVICE_MIGRATE_XMIT_LWM },
 		{ "migrate-priority",				CASE_SERVICE_MIGRATE_PRIORITY },
@@ -826,19 +856,34 @@ const cfg_opt NETWORK_SERVICE_OPTS[] = {
 		{ "port",							CASE_NETWORK_SERVICE_PORT },
 		{ "external-address",				CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS },
 		{ "access-address",					CASE_NETWORK_SERVICE_ACCESS_ADDRESS },
+		{ "access-port",					CASE_NETWORK_SERVICE_ACCESS_PORT },
 		{ "alternate-access-address",		CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS },
-		{ "alternate-port",					CASE_NETWORK_SERVICE_ALTERNATE_PORT },
-		{ "alternate-tls-address",			CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS },
-		{ "alternate-tls-access-address",	CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS },
-		{ "alternate-tls-port",				CASE_NETWORK_SERVICE_ALTERNATE_TLS_PORT },
+		{ "alternate-access-port",			CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_PORT },
 		{ "tls-access-address",				CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS },
+		{ "tls-access-port",				CASE_NETWORK_SERVICE_TLS_ACCESS_PORT },
 		{ "tls-address",					CASE_NETWORK_SERVICE_TLS_ADDRESS },
+		{ "tls-alternate-access-address",	CASE_NETWORK_SERVICE_TLS_ALTERNATE_ACCESS_ADDRESS },
+		{ "tls-alternate-access-port",		CASE_NETWORK_SERVICE_TLS_ALTERNATE_ACCESS_PORT },
+		{ "tls-cafile",						CASE_NETWORK_SERVICE_TLS_CAFILE },
+		{ "tls-capath",						CASE_NETWORK_SERVICE_TLS_CAPATH },
+		{ "tls-cert-blacklist",				CASE_NETWORK_SERVICE_TLS_CERT_BLACKLIST },
+		{ "tls-certfile",					CASE_NETWORK_SERVICE_TLS_CERTFILE },
+		{ "tls-cipher-suite",				CASE_NETWORK_SERVICE_TLS_CIPHER_SUITE },
+		{ "tls-keyfile",					CASE_NETWORK_SERVICE_TLS_KEYFILE },
+		{ "tls-mode",						CASE_NETWORK_SERVICE_TLS_MODE },
 		{ "tls-name",						CASE_NETWORK_SERVICE_TLS_NAME },
 		{ "tls-port",						CASE_NETWORK_SERVICE_TLS_PORT },
+		{ "tls-protocols",					CASE_NETWORK_SERVICE_TLS_PROTOCOLS },
 		{ "alternate-address",				CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS },
 		{ "network-interface-name",			CASE_NETWORK_SERVICE_NETWORK_INTERFACE_NAME },
 		{ "reuse-address",					CASE_NETWORK_SERVICE_REUSE_ADDRESS },
 		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt NETWORK_SERVICE_TLS_MODE_OPTS[] = {
+		{ "authenticate-both",				CASE_NETWORK_SERVICE_TLS_MODE_AUTHENTICATE_BOTH },
+		{ "authenticate-server",			CASE_NETWORK_SERVICE_TLS_MODE_AUTHENTICATE_SERVER },
+		{ "encrypt-only",					CASE_NETWORK_SERVICE_TLS_MODE_ENCRYPT_ONLY },
 };
 
 const cfg_opt NETWORK_HEARTBEAT_OPTS[] = {
@@ -922,6 +967,8 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "migrate-retransmit-ms",			CASE_NAMESPACE_MIGRATE_RETRANSMIT_MS },
 		{ "migrate-sleep",					CASE_NAMESPACE_MIGRATE_SLEEP },
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
+		{ "partition-tree-locks",			CASE_NAMESPACE_PARTITION_TREE_LOCKS },
+		{ "partition-tree-sprigs",			CASE_NAMESPACE_PARTITION_TREE_SPRIGS },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
 		{ "si",								CASE_NAMESPACE_SI_BEGIN },
@@ -1104,6 +1151,7 @@ const int NUM_LOGGING_FILE_OPTS						= sizeof(LOGGING_FILE_OPTS) / sizeof(cfg_op
 const int NUM_LOGGING_CONSOLE_OPTS					= sizeof(LOGGING_CONSOLE_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_OPTS							= sizeof(NETWORK_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_SERVICE_OPTS					= sizeof(NETWORK_SERVICE_OPTS) / sizeof(cfg_opt);
+const int NUM_NETWORK_SERVICE_TLS_MODE_OPTS			= sizeof(NETWORK_SERVICE_TLS_MODE_OPTS) /sizeof(cfg_opt);
 const int NUM_NETWORK_HEARTBEAT_OPTS				= sizeof(NETWORK_HEARTBEAT_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_HEARTBEAT_MODE_OPTS			= sizeof(NETWORK_HEARTBEAT_MODE_OPTS) / sizeof(cfg_opt);
 const int NUM_NETWORK_HEARTBEAT_PROTOCOL_OPTS		= sizeof(NETWORK_HEARTBEAT_PROTOCOL_OPTS) / sizeof(cfg_opt);
@@ -1629,6 +1677,20 @@ cfg_u32(const cfg_line* p_line, uint32_t min, uint32_t max)
 	return value;
 }
 
+// Note - accepts 0 if min is 0.
+uint32_t
+cfg_u32_power_of_2(const cfg_line* p_line, uint32_t min, uint32_t max)
+{
+	uint32_t value = cfg_u32(p_line, min, max);
+
+	if ((value & (value - 1)) != 0) {
+		cf_crash_nostack(AS_CFG, "line %d :: %s must be an exact power of 2, not %u",
+				p_line->num, p_line->name_tok, value);
+	}
+
+	return value;
+}
+
 uint16_t
 cfg_u16_no_checks(const cfg_line* p_line)
 {
@@ -1923,10 +1985,10 @@ as_config_init(const char* config_file)
 				c->n_service_threads = cfg_int(&line, 1, MAX_DEMARSHAL_THREADS);
 				break;
 			case CASE_SERVICE_TRANSACTION_QUEUES:
-				c->n_transaction_queues = cfg_int(&line, 1, MAX_TRANSACTION_QUEUES);
+				c->n_transaction_queues = cfg_u32(&line, 1, MAX_TRANSACTION_QUEUES);
 				break;
 			case CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE:
-				c->n_transaction_threads_per_queue = cfg_int_no_checks(&line);
+				c->n_transaction_threads_per_queue = cfg_u32(&line, 1, MAX_TRANSACTION_THREADS_PER_QUEUE);
 				break;
 			case CASE_SERVICE_CLIENT_FD_MAX:
 				cfg_renamed_name_tok(&line, "proto-fd-max");
@@ -1936,9 +1998,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_ADVERTISE_IPV6:
 				cf_socket_set_advertise_ipv6(cfg_bool(&line));
-				break;
-			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
-				c->allow_inline_transactions = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_BATCH_THREADS:
 				c->n_batch_threads = cfg_int(&line, 0, MAX_BATCH_THREADS);
@@ -1962,7 +2021,7 @@ as_config_init(const char* config_file)
 				c->clock_skew_max_ms = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_CLUSTER_NAME:
-				cfg_strcpy(&line, c->cluster_name, AS_CLUSTER_NAME_SZ);
+				cfg_set_cluster_name(line.val_tok_1);
 				break;
 			case CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC:
 				c->fabric_benchmarks_enabled = cfg_bool(&line);
@@ -1997,9 +2056,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING:
 				c->migrate_max_num_incoming = cfg_int(&line, 0, INT_MAX);
-				break;
-			case CASE_SERVICE_MIGRATE_RX_LIFETIME_MS:
-				c->migrate_rx_lifetime_ms = cfg_int_no_checks(&line);
 				break;
 			case CASE_SERVICE_MIGRATE_THREADS:
 				c->n_migrate_threads = cfg_int(&line, 0, MAX_NUM_MIGRATE_XMIT_THREADS);
@@ -2159,6 +2215,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_PROLE_EXTRA_TTL:
 				c->prole_extra_ttl = cfg_u32_no_checks(&line);
 				break;
+			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
+				cfg_obsolete(&line, "please configure 'service-threads' carefully"); // FIXME - better message?
+				break;
 			case CASE_SERVICE_AUTO_DUN:
 			case CASE_SERVICE_AUTO_UNDUN:
 			case CASE_SERVICE_BATCH_RETRANSMIT:
@@ -2175,6 +2234,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_GENERATION_DISABLE:
 			case CASE_SERVICE_MIGRATE_READ_PRIORITY:
 			case CASE_SERVICE_MIGRATE_READ_SLEEP:
+			case CASE_SERVICE_MIGRATE_RX_LIFETIME_MS:
 			case CASE_SERVICE_MIGRATE_XMIT_HWM:
 			case CASE_SERVICE_MIGRATE_XMIT_LWM:
 			case CASE_SERVICE_MIGRATE_PRIORITY:
@@ -2317,40 +2377,96 @@ as_config_init(const char* config_file)
 				cfg_add_addr_bind(line.val_tok_1, &c->service);
 				break;
 			case CASE_NETWORK_SERVICE_PORT:
-				c->service.port = cfg_port(&line);
+				c->service.bind_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_SERVICE_EXTERNAL_ADDRESS:
 				cfg_renamed_name_tok(&line, "access-address");
 				// No break.
 			case CASE_NETWORK_SERVICE_ACCESS_ADDRESS:
-				cfg_add_addr_access(line.val_tok_1, &c->service);
+				cfg_add_addr_std(line.val_tok_1, &c->service);
+				break;
+			case CASE_NETWORK_SERVICE_ACCESS_PORT:
+				c->service.std_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_ADDRESS:
-				cfg_add_addr_access(line.val_tok_1, &c->alt_service);
+				cfg_add_addr_alt(line.val_tok_1, &c->service);
 				break;
-			case CASE_NETWORK_SERVICE_ALTERNATE_PORT:
-				c->alt_service.port = cfg_port(&line);
-				break;
-			case CASE_NETWORK_SERVICE_ALTERNATE_TLS_ACCESS_ADDRESS:
-				cfg_add_addr_access(line.val_tok_1, &c->alt_tls_service);
-				break;
-			case CASE_NETWORK_SERVICE_ALTERNATE_TLS_ADDRESS:
-				cfg_add_addr_bind(line.val_tok_1, &c->alt_tls_service);
-				break;
-			case CASE_NETWORK_SERVICE_ALTERNATE_TLS_PORT:
-				c->alt_tls_service.port = cfg_port(&line);
+			case CASE_NETWORK_SERVICE_ALTERNATE_ACCESS_PORT:
+				c->service.alt_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_SERVICE_TLS_ACCESS_ADDRESS:
-				cfg_add_addr_access(line.val_tok_1, &c->tls_service);
+				cfg_enterprise_only(&line);
+				cfg_add_addr_std(line.val_tok_1, &c->tls_service);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_ACCESS_PORT:
+				cfg_enterprise_only(&line);
+				c->tls_service.std_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_SERVICE_TLS_ADDRESS:
+				cfg_enterprise_only(&line);
 				cfg_add_addr_bind(line.val_tok_1, &c->tls_service);
 				break;
-			case CASE_NETWORK_SERVICE_TLS_PORT:
-				c->tls_service.port = cfg_port(&line);
+			case CASE_NETWORK_SERVICE_TLS_ALTERNATE_ACCESS_ADDRESS:
+				cfg_enterprise_only(&line);
+				cfg_add_addr_alt(line.val_tok_1, &c->tls_service);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_ALTERNATE_ACCESS_PORT:
+				cfg_enterprise_only(&line);
+				c->tls_service.alt_port = cfg_port(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_CAFILE:
+				cfg_enterprise_only(&line);
+				c->tls_service.cafile = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_CAPATH:
+				cfg_enterprise_only(&line);
+				c->tls_service.capath = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_CERT_BLACKLIST:
+				cfg_enterprise_only(&line);
+				c->tls_service.cert_blacklist = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_CERTFILE:
+				cfg_enterprise_only(&line);
+				c->tls_service.certfile = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_CIPHER_SUITE:
+				cfg_enterprise_only(&line);
+				c->tls_service.cipher_suite = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_KEYFILE:
+				cfg_enterprise_only(&line);
+				c->tls_service.keyfile = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_MODE:
+				cfg_enterprise_only(&line);
+				switch(cfg_find_tok(line.val_tok_1, NETWORK_SERVICE_TLS_MODE_OPTS, NUM_NETWORK_SERVICE_TLS_MODE_OPTS)) {
+				case CASE_NETWORK_SERVICE_TLS_MODE_ENCRYPT_ONLY:
+					c->tls_service.mode = CF_TLS_MODE_ENCRYPT_ONLY;
+					break;
+				case CASE_NETWORK_SERVICE_TLS_MODE_AUTHENTICATE_BOTH:
+					c->tls_service.mode = CF_TLS_MODE_AUTHENTICATE_BOTH;
+					break;
+				case CASE_NETWORK_SERVICE_TLS_MODE_AUTHENTICATE_SERVER:
+					c->tls_service.mode = CF_TLS_MODE_AUTHENTICATE_SERVER;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
 				break;
 			case CASE_NETWORK_SERVICE_TLS_NAME:
+				cfg_enterprise_only(&line);
 				c->tls_name = cfg_strdup_no_checks(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_PORT:
+				cfg_enterprise_only(&line);
+				c->tls_service.bind_port = cfg_port(&line);
+				break;
+			case CASE_NETWORK_SERVICE_TLS_PROTOCOLS:
+				cfg_enterprise_only(&line);
+				c->tls_service.protocols = cfg_strdup_no_checks(&line);
 				break;
 			case CASE_NETWORK_SERVICE_ALTERNATE_ADDRESS:
 				cfg_obsolete(&line, "see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/network_to_3_10");
@@ -2397,7 +2513,7 @@ as_config_init(const char* config_file)
 				add_addr(line.val_tok_1, &c->hb_multicast_groups);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PORT:
-				c->hb_serv_spec.port = cfg_port(&line);
+				c->hb_serv_spec.bind_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT:
 				cfg_add_mesh_seed_addr_port(cfg_strdup_no_checks(&line), cfg_port_val2(&line));
@@ -2462,7 +2578,7 @@ as_config_init(const char* config_file)
 				cfg_add_addr_bind(line.val_tok_1, &c->fabric);
 				break;
 			case CASE_NETWORK_FABRIC_PORT:
-				c->fabric.port = cfg_port(&line);
+				c->fabric.bind_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_ENABLED:
 				c->fabric_keepalive_enabled = cfg_bool(&line);
@@ -2498,7 +2614,7 @@ as_config_init(const char* config_file)
 				cfg_add_addr_bind(line.val_tok_1, &c->info);
 				break;
 			case CASE_NETWORK_INFO_PORT:
-				c->info.port = cfg_port(&line);
+				c->info.bind_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_INFO_ENABLE_FASTPATH:
 				cfg_deprecated_name_tok(&line);
@@ -2665,6 +2781,12 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_OBJ_SIZE_HIST_MAX:
 				ns->obj_size_hist_max = cfg_obj_size_hist_max(cfg_u32_no_checks(&line));
 				break;
+			case CASE_NAMESPACE_PARTITION_TREE_LOCKS:
+				ns->tree_shared.n_lock_pairs = cfg_u32_power_of_2(&line, 1, 256);
+				break;
+			case CASE_NAMESPACE_PARTITION_TREE_SPRIGS:
+				ns->tree_shared.n_sprigs = cfg_u32_power_of_2(&line, 16, 4096);
+				break;
 			case CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE:
 				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_READ_CONSISTENCY_OPTS, NUM_NAMESPACE_READ_CONSISTENCY_OPTS)) {
 				case CASE_NAMESPACE_READ_CONSISTENCY_ALL:
@@ -2750,6 +2872,9 @@ as_config_init(const char* config_file)
 				}
 				if (ns->default_ttl > ns->max_ttl) {
 					cf_crash_nostack(AS_CFG, "ns %s default-ttl can't be > max-ttl", ns->name);
+				}
+				if (ns->tree_shared.n_lock_pairs > ns->tree_shared.n_sprigs) {
+					cf_crash_nostack(AS_CFG, "ns %s partition-tree-locks can't be > partition-tree-sprigs", ns->name);
 				}
 				if (ns->storage_data_in_memory) {
 					ns->storage_post_write_queue = 0; // override default (or configuration mistake)
@@ -3323,7 +3448,7 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Setup performance metrics histograms.
 	cfg_create_all_histograms();
 
-	if (cf_node_id_get(c->fabric.port, c->node_id_interface, &c->self_node) < 0) {
+	if (cf_node_id_get(c->fabric.bind_port, c->node_id_interface, &c->self_node) < 0) {
 		cf_crash_nostack(AS_CFG, "could not get node id");
 	}
 
@@ -3366,136 +3491,85 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	cf_info(AS_CFG, "Node id %"PRIx64, c->self_node);
 
-	// Initialize access addresses.
+	// Populate access ports from configuration.
 
-	cfg_serv_spec_to_access(&g_config.service, &g_access.service.addrs);
-	cfg_serv_spec_to_access(&g_config.alt_service, &g_access.alt_service.addrs);
-	cfg_serv_spec_to_access(&g_config.tls_service, &g_access.tls_service.addrs);
-	cfg_serv_spec_to_access(&g_config.alt_tls_service, &g_access.alt_tls_service.addrs);
+	g_access.service.port = g_config.service.std_port != 0 ?
+			g_config.service.std_port : g_config.service.bind_port;
 
-	// By default, if we bind, then use the bind addresses also as access addresses.
+	g_access.alt_service.port = g_config.service.alt_port != 0 ?
+			g_config.service.alt_port : g_access.service.port;
 
-	if (g_access.service.addrs.n_addrs == 0 && g_config.service.bind.n_addrs != 0) {
-		default_access(&g_config.service, &g_access.service.addrs);
+	g_access.tls_service.port = g_config.tls_service.std_port != 0 ?
+			g_config.tls_service.std_port : g_config.tls_service.bind_port;
+
+	g_access.alt_tls_service.port = g_config.tls_service.alt_port != 0 ?
+			g_config.tls_service.alt_port : g_access.tls_service.port;
+
+	// Populate access addresses from configuration.
+
+	cfg_serv_spec_std_to_access(&g_config.service, &g_access.service.addrs);
+	cfg_serv_spec_alt_to_access(&g_config.service, &g_access.alt_service.addrs);
+	cfg_serv_spec_std_to_access(&g_config.tls_service, &g_access.tls_service.addrs);
+	cfg_serv_spec_alt_to_access(&g_config.tls_service, &g_access.alt_tls_service.addrs);
+
+	// By default, use bind addresses also as access addresses.
+
+	if (g_access.service.addrs.n_addrs == 0) {
+		bind_to_access(&g_config.service, &g_access.service.addrs);
 	}
 
-	if (g_access.alt_service.addrs.n_addrs == 0 && g_config.alt_service.bind.n_addrs != 0) {
-		default_access(&g_config.alt_service, &g_access.alt_service.addrs);
+	if (g_access.tls_service.addrs.n_addrs == 0) {
+		bind_to_access(&g_config.tls_service, &g_access.tls_service.addrs);
 	}
 
-	if (g_access.tls_service.addrs.n_addrs == 0 && g_config.tls_service.bind.n_addrs != 0) {
-		default_access(&g_config.tls_service, &g_access.tls_service.addrs);
-	}
+	// By default, use non-TLS access addresses also for TLS - and vice versa.
 
-	if (g_access.alt_tls_service.addrs.n_addrs == 0 && g_config.alt_tls_service.bind.n_addrs != 0) {
-		default_access(&g_config.alt_tls_service, &g_access.alt_tls_service.addrs);
-	}
-
-	// Initialize ports.
-
-	g_access.service.port = g_config.service.port;
-	g_access.alt_service.port = g_config.alt_service.port;
-	g_access.tls_service.port = g_config.tls_service.port;
-	g_access.alt_tls_service.port = g_config.alt_tls_service.port;
-
-	// By default, use regular port also as alternate.
-
-	if (g_access.alt_service.port == 0 &&
-			(g_config.alt_service.bind.n_addrs != 0 || g_access.alt_service.addrs.n_addrs != 0)) {
-		g_access.alt_service.port = g_config.alt_service.port = g_access.service.port;
-	}
-
-	// By default, use regular TLS port also as alternate TLS.
-
-	if (g_access.alt_tls_service.port == 0 &&
-			(g_config.alt_tls_service.bind.n_addrs != 0 || g_access.alt_tls_service.addrs.n_addrs != 0)) {
-		g_access.alt_tls_service.port = g_config.alt_tls_service.port = g_access.tls_service.port;
-	}
-
-	// "any" service specification.
-
-	cf_serv_spec any;
-	any.port = 0;
-	any.bind.n_addrs = 1;
-	any.bind.addrs[0] = "any";
-	any.access.n_addrs = 0;
-
-	// Client service bind addresses.
+	default_addrs(&g_access.service.addrs, &g_access.tls_service.addrs);
+	default_addrs(&g_access.alt_service.addrs, &g_access.alt_tls_service.addrs);
 
 	cf_serv_cfg_init(&g_service_bind);
 
-	if (g_config.service.bind.n_addrs == 0 && g_config.alt_service.bind.n_addrs == 0) {
-		any.port = g_access.service.port;
-		cfg_serv_spec_to_bind(&any, &g_service_bind, CF_SOCK_OWNER_SERVICE);
-	}
-	else {
+	// Client service bind addresses.
+
+	bool empty = false;
+
+	if (g_config.service.bind_port != 0) {
+		if (g_config.service.bind.n_addrs == 0) {
+			g_config.service.bind.n_addrs = 1;
+			g_config.service.bind.addrs[0] = "any";
+			empty = true;
+		}
+
 		cfg_serv_spec_to_bind(&g_config.service, &g_service_bind, CF_SOCK_OWNER_SERVICE);
-		cfg_serv_spec_to_bind(&g_config.alt_service, &g_service_bind, CF_SOCK_OWNER_SERVICE_ALTERNATE);
 	}
 
 	// Client TLS service bind addresses.
 
-	if (g_access.tls_service.port != 0) {
-		cf_serv_spec tls_spec;
-		tls_spec.port = g_access.tls_service.port;
-		tls_spec.access.n_addrs = 0;
+	bool tls_empty = false;
 
-		// By default, use client service bind addresses also for TLS.
-
+	if (g_config.tls_service.bind_port != 0) {
 		if (g_config.tls_service.bind.n_addrs == 0) {
-			copy_addrs(&g_config.service.bind, &tls_spec.bind);
-		}
-		else {
-			copy_addrs(&g_config.tls_service.bind, &tls_spec.bind);
+			copy_addrs(&g_config.service.bind, &g_config.tls_service.bind);
+			tls_empty = true;
 		}
 
-		cf_serv_spec alt_tls_spec;
-		alt_tls_spec.port = g_access.alt_tls_service.port;
-		alt_tls_spec.access.n_addrs = 0;
-
-		// By default, use alternate client service bind addresses also for alternate TLS.
-
-		if (g_config.alt_tls_service.bind.n_addrs == 0) {
-			copy_addrs(&g_config.alt_service.bind, &alt_tls_spec.bind);
-		}
-		else {
-			copy_addrs(&g_config.alt_tls_service.bind, &alt_tls_spec.bind);
-		}
-
-		if (tls_spec.bind.n_addrs == 0 && alt_tls_spec.bind.n_addrs == 0) {
-			any.port = g_access.tls_service.port;
-			cfg_serv_spec_to_bind(&any, &g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
-		}
-		else {
-			cfg_serv_spec_to_bind(&tls_spec, &g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
-			cfg_serv_spec_to_bind(&alt_tls_spec, &g_service_bind, CF_SOCK_OWNER_SERVICE_TLS_ALTERNATE);
-		}
+		cfg_serv_spec_to_bind(&g_config.tls_service, &g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
 	}
 
-	// By default, use regular access addresses also as alternate.
-
-	if (g_access.alt_service.port != 0 && g_access.alt_service.addrs.n_addrs == 0) {
-		copy_addrs(&g_access.service.addrs, &g_access.alt_service.addrs);
+	if (empty) {
+		g_config.service.bind.n_addrs = 0;
 	}
 
-	// By default, use regular access addresses also for TLS.
-
-	if (g_access.tls_service.port != 0 && g_access.tls_service.addrs.n_addrs == 0) {
-		copy_addrs(&g_access.service.addrs, &g_access.tls_service.addrs);
+	if (tls_empty) {
+		g_config.tls_service.bind.n_addrs = 0;
 	}
 
-	if (g_access.alt_tls_service.port != 0) {
-		// By default, use alternate access addresses also for alternate TLS.
+	if (g_config.tls_service.bind_port != 0) {
+		// Resolve the TLS name if necessary.
+		cfg_resolve_tls_name(&g_config);
 
-		if (g_access.alt_tls_service.addrs.n_addrs == 0) {
-			copy_addrs(&g_access.alt_service.addrs, &g_access.alt_tls_service.addrs);
-		}
-
-		// If this failed, try regular TLS access addresses.
-
-		if (g_access.alt_tls_service.addrs.n_addrs == 0) {
-			copy_addrs(&g_access.tls_service.addrs, &g_access.alt_tls_service.addrs);
-		}
+		// Read TLS parameters and initialize SSL_CTX.
+		tls_config_context(&g_config.tls_service);
 	}
 
 	// Heartbeat service bind addresses.
@@ -3503,58 +3577,49 @@ as_config_post_process(as_config* c, const char* config_file)
 	cf_serv_cfg_init(&g_config.hb_config.bind_cfg);
 
 	if (c->hb_serv_spec.bind.n_addrs == 0) {
-		any.port = c->hb_serv_spec.port;
-		cfg_serv_spec_to_bind(&any, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
+		c->hb_serv_spec.bind.n_addrs = 1;
+		c->hb_serv_spec.bind.addrs[0] = "any";
 	}
-	else {
-		cfg_serv_spec_to_bind(&c->hb_serv_spec, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
-	}
+
+	cfg_serv_spec_to_bind(&c->hb_serv_spec, &g_config.hb_config.bind_cfg, CF_SOCK_OWNER_HEARTBEAT);
 
 	// Heartbeat multicast groups.
 
 	if (c->hb_multicast_groups.n_addrs > 0) {
-		cfg_mserv_config_from_addrs(&c->hb_multicast_groups,
-				c->hb_serv_spec.bind.n_addrs ? &c->hb_serv_spec.bind : &any.bind,
-				&g_config.hb_config.multicast_group_cfg, c->hb_serv_spec.port,
+		cfg_mserv_config_from_addrs(&c->hb_multicast_groups, &c->hb_serv_spec.bind,
+				&g_config.hb_config.multicast_group_cfg, c->hb_serv_spec.bind_port,
 				CF_SOCK_OWNER_HEARTBEAT, g_config.hb_config.multicast_ttl);
 	}
 
 	// Fabric service port.
 
-	g_fabric_port = g_config.fabric.port;
+	g_fabric_port = g_config.fabric.bind_port;
 
 	// Fabric service bind addresses.
 
 	cf_serv_cfg_init(&g_fabric_bind);
 
 	if (g_config.fabric.bind.n_addrs == 0) {
-		any.port = g_fabric_port;
-		cfg_serv_spec_to_bind(&any, &g_fabric_bind, CF_SOCK_OWNER_FABRIC);
+		g_config.fabric.bind.n_addrs = 1;
+		g_config.fabric.bind.addrs[0] = "any";
 	}
-	else {
-		cfg_serv_spec_to_bind(&g_config.fabric, &g_fabric_bind, CF_SOCK_OWNER_FABRIC);
-	}
+
+	cfg_serv_spec_to_bind(&g_config.fabric, &g_fabric_bind, CF_SOCK_OWNER_FABRIC);
 
 	// Info service port.
 
-	g_info_port = g_config.info.port;
+	g_info_port = g_config.info.bind_port;
 
 	// Info service bind addresses.
 
 	cf_serv_cfg_init(&g_info_bind);
 
 	if (g_config.info.bind.n_addrs == 0) {
-		any.port = g_info_port;
-		cfg_serv_spec_to_bind(&any, &g_info_bind, CF_SOCK_OWNER_INFO);
-	}
-	else {
-		cfg_serv_spec_to_bind(&g_config.info, &g_info_bind, CF_SOCK_OWNER_INFO);
+		g_config.info.bind.n_addrs = 1;
+		g_config.info.bind.addrs[0] = "any";
 	}
 
-	// 'null' is a special value representing an empty cluster-name.
-	if (strcmp(g_config.cluster_name, "null") == 0) {
-		cf_crash_nostack(AS_CFG, "cluster name 'null' is not allowed");
-	}
+	cfg_serv_spec_to_bind(&g_config.info, &g_info_bind, CF_SOCK_OWNER_INFO);
 
 	// Validate heartbeat configuration.
 	as_hb_config_validate();
@@ -3567,6 +3632,12 @@ as_config_post_process(as_config* c, const char* config_file)
 		as_namespace* ns = g_config.namespaces[i];
 
 		client_replica_maps_create(ns);
+
+		ns->tree_shared.destructor			= (as_index_value_destructor)&as_record_destroy;
+		ns->tree_shared.destructor_udata	= (void*)ns;
+		ns->tree_shared.locks_shift			= 12 - cf_msb(ns->tree_shared.n_lock_pairs);
+		ns->tree_shared.sprigs_shift		= 12 - cf_msb(ns->tree_shared.n_sprigs);
+		ns->tree_shared.sprigs_offset		= sizeof(as_lock_pair) * ns->tree_shared.n_lock_pairs;
 
 		char hist_name[HISTOGRAM_NAME_SIZE];
 
@@ -3674,37 +3745,35 @@ as_config_post_process(as_config* c, const char* config_file)
 
 pthread_mutex_t g_config_lock = PTHREAD_MUTEX_INITIALIZER;
 
-bool
+void
 as_config_cluster_name_get(char* cluster_name)
 {
 	pthread_mutex_lock(&g_config_lock);
 	strcpy(cluster_name, g_config.cluster_name);
 	pthread_mutex_unlock(&g_config_lock);
-	if (cluster_name[0] == '\0') {
-		strcpy(cluster_name, "null");
-		return false;
-	}
-	else {
-		return true;
-	}
 }
 
 bool
 as_config_cluster_name_set(const char* cluster_name)
 {
-	if ((strcmp(cluster_name, "null") == 0) || (cluster_name[0] == '\0')) {
-		cf_warning(AS_CFG, "Cluster name \"%s\" is not allowed. Ignoring!", cluster_name);
+	if (cluster_name[0] == '\0') {
+		cf_warning(AS_CFG, "cluster name '%s' is not allowed. Ignoring.", cluster_name);
 		return false;
 	}
 
 	if (strlen(cluster_name) >= AS_CLUSTER_NAME_SZ) {
-		cf_warning(AS_CFG, "Size of cluster name should not be greater than %d characters. Ignoring cluster name \"%s\"!",
+		cf_warning(AS_CFG, "size of cluster name should not be greater than %d characters. Ignoring cluster name '%s'.",
 			AS_CLUSTER_NAME_SZ - 1, cluster_name);
 		return false;
 	}
 
 	pthread_mutex_lock(&g_config_lock);
-	strcpy(g_config.cluster_name, cluster_name);
+	if (strcmp(cluster_name,"null") == 0){
+		// 'null' is a special value representing an unset cluster-name.
+		strcpy(g_config.cluster_name, "");
+	} else {
+		strcpy(g_config.cluster_name, cluster_name);
+	}
 	pthread_mutex_unlock(&g_config_lock);
 
 	return true;
@@ -3722,6 +3791,13 @@ as_config_cluster_name_matches(const char* cluster_name)
 //==========================================================
 // Item-specific parsing utilities.
 //
+
+void
+init_addr_list(cf_addr_list* addrs)
+{
+	addrs->n_addrs = 0;
+	memset(&addrs->addrs, '\0', sizeof(addrs->addrs));
+}
 
 void
 add_addr(const char* name, cf_addr_list* addrs)
@@ -3752,12 +3828,27 @@ copy_addrs(const cf_addr_list* from, cf_addr_list* to)
 }
 
 void
-default_access(const cf_serv_spec* from, cf_addr_list* to)
+default_addrs(cf_addr_list* one, cf_addr_list* two)
+{
+	if (one->n_addrs == 0) {
+		copy_addrs(two, one);
+	}
+
+	if (two->n_addrs == 0) {
+		copy_addrs(one, two);
+	}
+}
+
+void
+bind_to_access(const cf_serv_spec* from, cf_addr_list* to)
 {
 	cf_serv_spec spec;
-	spec.port = from->port;
-	spec.bind.n_addrs = 0;
-	spec.access.n_addrs = 0;
+	spec.bind_port = 0;
+	init_addr_list(&spec.bind);
+	spec.std_port = 0;
+	init_addr_list(&spec.std);
+	spec.alt_port = 0;
+	init_addr_list(&spec.alt);
 
 	for (uint32_t i = 0; i < from->bind.n_addrs; ++i) {
 		cf_ip_addr resol[CF_SOCK_CFG_MAX];
@@ -3779,13 +3870,13 @@ default_access(const cf_serv_spec* from, cf_addr_list* to)
 		}
 
 		if (valid) {
-			uint32_t n = spec.access.n_addrs;
-			spec.access.addrs[n] = from->bind.addrs[i];
-			++spec.access.n_addrs;
+			uint32_t n = spec.std.n_addrs;
+			spec.std.addrs[n] = from->bind.addrs[i];
+			++spec.std.n_addrs;
 		}
 	}
 
-	cfg_serv_spec_to_access(&spec, to);
+	cfg_serv_spec_std_to_access(&spec, to);
 }
 
 void
@@ -3795,9 +3886,15 @@ cfg_add_addr_bind(const char* name, cf_serv_spec* spec)
 }
 
 void
-cfg_add_addr_access(const char* name, cf_serv_spec* spec)
+cfg_add_addr_std(const char* name, cf_serv_spec* spec)
 {
-	add_addr(name, &spec->access);
+	add_addr(name, &spec->std);
+}
+
+void
+cfg_add_addr_alt(const char* name, cf_serv_spec* spec)
+{
+	add_addr(name, &spec->alt);
 }
 
 void
@@ -3843,9 +3940,11 @@ cfg_mserv_config_from_addrs(cf_addr_list* addrs, cf_addr_list* bind_addrs,
 void
 cfg_serv_spec_to_bind(const cf_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner owner)
 {
+	bind->spec = spec;
+
 	cf_sock_cfg cfg;
 	cf_sock_cfg_init(&cfg, owner);
-	cfg.port = spec->port;
+	cfg.port = spec->bind_port;
 
 	const cf_addr_list* addrs = &spec->bind;
 
@@ -3867,11 +3966,9 @@ cfg_serv_spec_to_bind(const cf_serv_spec* spec, cf_serv_cfg* bind, cf_sock_owner
 	}
 }
 
-void
-cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access)
+static void
+addrs_to_access(const cf_addr_list* addrs, cf_addr_list* access)
 {
-	const cf_addr_list* addrs = &spec->access;
-
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
 		cf_ip_addr resol[CF_SOCK_CFG_MAX];
 		uint32_t n_resol = CF_SOCK_CFG_MAX;
@@ -3897,6 +3994,18 @@ cfg_serv_spec_to_access(const cf_serv_spec* spec, cf_addr_list* access)
 			}
 		}
 	}
+}
+
+void
+cfg_serv_spec_std_to_access(const cf_serv_spec* spec, cf_addr_list* access)
+{
+	addrs_to_access(&spec->std, access);
+}
+
+void
+cfg_serv_spec_alt_to_access(const cf_serv_spec* spec, cf_addr_list* access)
+{
+	addrs_to_access(&spec->alt, access);
 }
 
 void
@@ -3997,6 +4106,13 @@ cfg_obj_size_hist_max(uint32_t hist_max)
 	}
 
 	return round_max; // in 128-byte blocks
+}
+
+void
+cfg_set_cluster_name(char* cluster_name){
+	if(!as_config_cluster_name_set(cluster_name)){
+		cf_crash_nostack(AS_CFG, "cluster name '%s' is not allowed", cluster_name);
+	}
 }
 
 
@@ -4111,3 +4227,57 @@ cfg_reset_self_node(as_config* config_p)
 
 	return 0;
 } // end cfg_reset_self_node()
+
+void
+cfg_init_serv_spec(cf_serv_spec* spec_p)
+{
+	spec_p->bind_port = 0;
+	init_addr_list(&spec_p->bind);
+	spec_p->std_port = 0;
+	init_addr_list(&spec_p->std);
+	spec_p->alt_port = 0;
+	init_addr_list(&spec_p->alt);
+	spec_p->mode = CF_TLS_MODE_AUTHENTICATE_SERVER;
+	spec_p->certfile = NULL;
+	spec_p->keyfile = NULL;
+	spec_p->cafile = NULL;
+	spec_p->capath = NULL;
+	spec_p->protocols = NULL;
+	spec_p->cipher_suite = NULL;
+	spec_p->cert_blacklist = NULL;
+	spec_p->ssl_ctx = NULL;
+	spec_p->cbl = NULL;
+}
+
+void
+cfg_resolve_tls_name(as_config *cfg)
+{
+	if (!cfg->tls_name) {
+		if (cfg->tls_service.mode == CF_TLS_MODE_ENCRYPT_ONLY) {
+			return;
+		}
+		cf_crash_nostack(AS_CFG,
+			"tls-name required for TLS service");
+	}
+
+	if (strcmp(cfg->tls_name, "<hostname>") == 0) {
+		char hostname[1024];
+		int rv = gethostname(hostname, sizeof(hostname));
+		if (rv != 0) {
+			cf_crash_nostack(AS_CFG,
+				"trouble resolving hostname for tls-name: %s", cf_strerror(errno));
+		}
+		hostname[sizeof(hostname)-1] = '\0'; // POSIX.1-2001
+		cf_free(cfg->tls_name);
+		cfg->tls_name = cf_strdup(hostname);
+	}
+	else if (strcmp(cfg->tls_name, "<cluster-name>") == 0) {
+		if (! cfg->cluster_name || strlen(cfg->cluster_name) == 0) {
+			cf_crash_nostack
+				(AS_CFG, "can't resolve tls-name to non-existent cluster-name");
+		}
+		cf_free(cfg->tls_name);
+		cfg->tls_name = cf_strdup(cfg->cluster_name);
+	}
+	cf_info(AS_CFG, "tls-name %s", cfg->tls_name);
+}

@@ -48,9 +48,8 @@
 #include "base/stats.h"
 
 
-
 //==========================================================
-// Typedefs and macros.
+// Constants and typedefs.
 //
 
 typedef enum {
@@ -75,6 +74,7 @@ typedef struct as_index_ele_s {
 	as_index				*me;
 } as_index_ele;
 
+const size_t MAX_STACK_ARRAY_BYTES = 128 * 1024;
 
 
 //==========================================================
@@ -84,23 +84,63 @@ typedef struct as_index_ele_s {
 static cf_queue g_gc_queue;
 
 
-
 //==========================================================
 // Forward declarations.
 //
 
 void *run_index_tree_gc(void *unused);
 void as_index_tree_destroy(as_index_tree *tree);
-bool as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref);
-void as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h);
-void as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h, cf_arenax_handle sentinel_h, as_index_ph_array *v_a);
-void as_index_reduce_sync_traverse(as_index_tree *tree, as_index *r, cf_arenax_handle sentinel_h, as_index_reduce_sync_fn cb, void *udata);
-int as_index_search_lockless(as_index_tree *tree, cf_digest *keyd, as_index **ret, cf_arenax_handle *ret_h);
-void as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele);
-void as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele);
+void as_index_sprig_done(as_index_sprig *isprig, as_index *r, cf_arenax_handle r_h);
+bool as_index_sprig_invalid_record_done(as_index_sprig *isprig, as_index_ref *index_ref);
+
+uint32_t as_index_sprig_reduce_partial(as_index_sprig *isprig, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+void as_index_sprig_traverse(as_index_sprig *isprig, cf_arenax_handle r_h, as_index_ph_array *v_a);
+void as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h);
+
+int as_index_sprig_exists(as_index_sprig *isprig, cf_digest *keyd);
+int as_index_sprig_get_vlock(as_index_sprig *isprig, cf_digest *keyd, as_index_ref *index_ref);
+int as_index_sprig_get_insert_vlock(as_index_sprig *isprig, cf_digest *keyd, as_index_ref *index_ref);
+int as_index_sprig_delete(as_index_sprig *isprig, cf_digest *keyd);
+
+int as_index_sprig_search_lockless(as_index_sprig *isprig, cf_digest *keyd, as_index **ret, cf_arenax_handle *ret_h);
+void as_index_sprig_insert_rebalance(as_index_sprig *isprig, as_index *root_parent, as_index_ele *ele);
+void as_index_sprig_delete_rebalance(as_index_sprig *isprig, as_index *root_parent, as_index_ele *ele);
 void as_index_rotate_left(as_index_ele *a, as_index_ele *b);
 void as_index_rotate_right(as_index_ele *a, as_index_ele *b);
 
+static inline void
+as_index_sprig_from_i(as_index_tree *tree, as_index_sprig *isprig,
+		uint32_t sprig_i)
+{
+	uint32_t lock_i = sprig_i >>
+			(tree->shared->locks_shift - tree->shared->sprigs_shift);
+
+	isprig->destructor = tree->shared->destructor;
+	isprig->destructor_udata = tree->shared->destructor_udata;
+	isprig->arena = tree->arena;
+	isprig->pair = tree_locks(tree) + lock_i;
+	isprig->sprig = tree_sprigs(tree) + sprig_i;
+}
+
+static inline void
+as_index_sprig_from_keyd(as_index_tree *tree, as_index_sprig *isprig,
+		const cf_digest *keyd)
+{
+	// Get the 12 most significant non-pid bits in the digest. Note - this is
+	// hardwired around the way we currently extract the (12 bit) partition-ID
+	// from the digest.
+	uint32_t bits = (((uint32_t)keyd->digest[1] & 0xF0) << 4) |
+			(uint32_t)keyd->digest[2];
+
+	uint32_t lock_i = bits >> tree->shared->locks_shift;
+	uint32_t sprig_i = bits >> tree->shared->sprigs_shift;
+
+	isprig->destructor = tree->shared->destructor;
+	isprig->destructor_udata = tree->shared->destructor_udata;
+	isprig->arena = tree->arena;
+	isprig->pair = tree_locks(tree) + lock_i;
+	isprig->sprig = tree_sprigs(tree) + sprig_i;
+}
 
 
 //==========================================================
@@ -131,62 +171,36 @@ as_index_tree_gc_queue_size()
 }
 
 
-
 //==========================================================
-// Public API - create/resume/destroy/size a tree.
+// Public API - create/destroy/size a tree.
 //
 
 // Create a new red-black tree.
 as_index_tree *
-as_index_tree_create(cf_arenax *arena, as_index_value_destructor destructor,
-		void *destructor_udata, as_treex *p_treex)
+as_index_tree_create(as_index_tree_shared *shared, cf_arenax *arena)
 {
-	as_index_tree *tree = cf_rc_alloc(sizeof(as_index_tree));
+	size_t locks_size = sizeof(pthread_mutex_t) * shared->n_lock_pairs * 2;
+	size_t sprigs_size = sizeof(as_sprig) * shared->n_sprigs;
+	size_t tree_size = sizeof(as_index_tree) + locks_size + sprigs_size;
 
-	if (! tree) {
-		cf_crash(AS_INDEX, "failed to allocate tree");
-	}
+	as_index_tree *tree = cf_rc_alloc(tree_size);
 
-	pthread_mutex_init(&tree->lock, NULL);
-	pthread_mutex_init(&tree->reduce_lock, NULL);
+	cf_assert(tree, AS_INDEX, "failed to allocate tree (%lu bytes)", tree_size);
 
+	tree->shared = shared;
 	tree->arena = arena;
 
-	// Make the sentinel element.
-	tree->sentinel_h = cf_arenax_alloc(arena);
+	as_lock_pair *pair = tree_locks(tree);
+	as_lock_pair *pair_end = pair + shared->n_lock_pairs;
 
-	if (tree->sentinel_h == 0) {
-		cf_crash(AS_INDEX, "failed to allocate sentinel");
+	while (pair < pair_end) {
+		pthread_mutex_init(&pair->lock, NULL);
+		pthread_mutex_init(&pair->reduce_lock, NULL);
+		pair++;
 	}
 
-	as_index *sentinel = RESOLVE_H(tree->sentinel_h);
-
-	memset(sentinel, 0, sizeof(as_index));
-	sentinel->left_h = sentinel->right_h = tree->sentinel_h;
-	sentinel->color = AS_BLACK;
-
-	// Make the fixed root element.
-	tree->root_h = cf_arenax_alloc(arena);
-
-	if (tree->root_h == 0) {
-		cf_crash(AS_INDEX, "failed to allocate root");
-	}
-
-	tree->root = RESOLVE_H(tree->root_h);
-	memset(tree->root, 0, sizeof(as_index));
-	tree->root->left_h = tree->root->right_h = tree->sentinel_h;
-	tree->root->color = AS_BLACK;
-
-	tree->destructor = destructor;
-	tree->destructor_udata = destructor_udata;
-
-	tree->elements = 0;
-
-	if (p_treex) {
-		// Update the tree information in persistent memory.
-		p_treex->sentinel_h = tree->sentinel_h;
-		p_treex->root_h = tree->root_h;
-	}
+	// The tree starts empty.
+	memset(tree_sprigs(tree), 0, sprigs_size);
 
 	return tree;
 }
@@ -219,15 +233,17 @@ as_index_tree_release(as_index_tree *tree)
 uint32_t
 as_index_tree_size(as_index_tree *tree)
 {
-	pthread_mutex_lock(&tree->lock);
+	uint32_t n_elements = 0;
+	as_sprig* sprig = tree_sprigs(tree);
+	as_sprig* sprig_end = sprig + tree->shared->n_sprigs;
 
-	uint32_t sz = tree->elements;
+	while (sprig < sprig_end) {
+		n_elements += sprig->n_elements;
+		sprig++;
+	}
 
-	pthread_mutex_unlock(&tree->lock);
-
-	return sz;
+	return n_elements;
 }
-
 
 
 //==========================================================
@@ -248,91 +264,21 @@ void
 as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count,
 		as_index_reduce_fn cb, void *udata)
 {
-	pthread_mutex_lock(&tree->reduce_lock);
+	// Reduce sprigs from largest to smallest digests to preserve this order for
+	// the whole tree. (Rapid rebalance requires exact order.)
 
-	// For full reduce, get the number of elements inside the tree lock.
-	if (sample_count == AS_REDUCE_ALL) {
-		sample_count = tree->elements;
-	}
+	for (int i = (int)tree->shared->n_sprigs - 1; i >= 0; i--) {
+		as_index_sprig isprig;
+		as_index_sprig_from_i(tree, &isprig, (uint32_t)i);
 
-	if (sample_count == 0) {
-		pthread_mutex_unlock(&tree->reduce_lock);
-		return;
-	}
+		sample_count -= as_index_sprig_reduce_partial(&isprig, sample_count, cb,
+				udata);
 
-	size_t sz = sizeof(as_index_ph_array) +
-			(sizeof(as_index_ph) * sample_count);
-	as_index_ph_array *v_a;
-	uint8_t buf[64 * 1024];
-
-	if (sz > 64 * 1024) {
-		v_a = cf_malloc(sz);
-
-		if (! v_a) {
-			pthread_mutex_unlock(&tree->reduce_lock);
-			return;
+		if (sample_count == 0) {
+			break;
 		}
 	}
-	else {
-		v_a = (as_index_ph_array*)buf;
-	}
-
-	v_a->alloc_sz = sample_count;
-	v_a->pos = 0;
-
-	uint64_t start_ms = cf_getms();
-
-	// Recursively, fetch all the value pointers into this array, so we can make
-	// all the callbacks outside the big lock.
-	if (tree->root->left_h != tree->sentinel_h) {
-		as_index_reduce_traverse(tree, tree->root->left_h, tree->sentinel_h,
-				v_a);
-	}
-
-	cf_debug(AS_INDEX, "as_index_reduce_traverse took %"PRIu64" ms",
-			cf_getms() - start_ms);
-
-	pthread_mutex_unlock(&tree->reduce_lock);
-
-	for (uint32_t i = 0; i < v_a->pos; i++) {
-		as_index_ref r_ref;
-
-		r_ref.skip_lock = false;
-		r_ref.r = v_a->indexes[i].r;
-		r_ref.r_h = v_a->indexes[i].r_h;
-
-		olock_vlock(g_record_locks, &r_ref.r->key, &r_ref.olock);
-
-		// Ignore this record if it's "half created" or deleted.
-		if (as_index_invalid_record_done(tree, &r_ref)) {
-			continue;
-		}
-
-		// Callback MUST call as_record_done() to unlock and release record.
-		cb(&r_ref, udata);
-	}
-
-	if (v_a != (as_index_ph_array*)buf) {
-		cf_free(v_a);
-	}
 }
-
-
-// Make a callback for every element in the tree, from under the tree lock.
-void
-as_index_reduce_sync(as_index_tree *tree, as_index_reduce_sync_fn cb,
-		void *udata)
-{
-	pthread_mutex_lock(&tree->reduce_lock);
-
-	if (tree->root->left_h != tree->sentinel_h) {
-		as_index_reduce_sync_traverse(tree, RESOLVE_H(tree->root->left_h),
-				tree->sentinel_h, cb, udata);
-	}
-
-	pthread_mutex_unlock(&tree->reduce_lock);
-}
-
 
 
 //==========================================================
@@ -347,13 +293,10 @@ as_index_reduce_sync(as_index_tree *tree, as_index_reduce_sync_fn cb,
 int
 as_index_exists(as_index_tree *tree, cf_digest *keyd)
 {
-	pthread_mutex_lock(&tree->lock);
+	as_index_sprig isprig;
+	as_index_sprig_from_keyd(tree, &isprig, keyd);
 
-	int rv = as_index_search_lockless(tree, keyd, NULL, NULL);
-
-	pthread_mutex_unlock(&tree->lock);
-
-	return rv;
+	return as_index_sprig_exists(&isprig, keyd);
 }
 
 
@@ -367,30 +310,10 @@ int
 as_index_get_vlock(as_index_tree *tree, cf_digest *keyd,
 		as_index_ref *index_ref)
 {
-	pthread_mutex_lock(&tree->lock);
+	as_index_sprig isprig;
+	as_index_sprig_from_keyd(tree, &isprig, keyd);
 
-	int rv = as_index_search_lockless(tree, keyd, &index_ref->r,
-			&index_ref->r_h);
-
-	if (rv != 0) {
-		pthread_mutex_unlock(&tree->lock);
-		return rv;
-	}
-
-	as_index_reserve(index_ref->r);
-
-	pthread_mutex_unlock(&tree->lock);
-
-	if (! index_ref->skip_lock) {
-		olock_vlock(g_record_locks, keyd, &index_ref->olock);
-	}
-
-	// Treat record as not found if it's "half created" or deleted.
-	if (as_index_invalid_record_done(tree, index_ref)) {
-		return -1;
-	}
-
-	return 0;
+	return as_index_sprig_get_vlock(&isprig, keyd, index_ref);
 }
 
 
@@ -407,8 +330,298 @@ int
 as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 		as_index_ref *index_ref)
 {
+	as_index_sprig isprig;
+	as_index_sprig_from_keyd(tree, &isprig, keyd);
+
+	return as_index_sprig_get_insert_vlock(&isprig, keyd, index_ref);
+}
+
+
+// If there's an element with specified digest in the tree, delete it.
+//
+// Returns:
+//		 0 - found and deleted
+//		-1 - not found
+// TODO - nobody cares about the return value, make it void?
+int
+as_index_delete(as_index_tree *tree, cf_digest *keyd)
+{
+	as_index_sprig isprig;
+	as_index_sprig_from_keyd(tree, &isprig, keyd);
+
+	return as_index_sprig_delete(&isprig, keyd);
+}
+
+
+//==========================================================
+// Local helpers - garbage collection, generic.
+//
+
+void *
+run_index_tree_gc(void *unused)
+{
+	as_index_tree *tree;
+
+	while (cf_queue_pop(&g_gc_queue, &tree, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
+		as_index_tree_destroy(tree);
+	}
+
+	return NULL;
+}
+
+
+void
+as_index_tree_destroy(as_index_tree *tree)
+{
+	as_sprig* sprig = tree_sprigs(tree);
+	as_sprig* sprig_end = sprig + tree->shared->n_sprigs;
+
+	while (sprig < sprig_end) {
+		as_index_sprig isprig;
+
+		isprig.destructor = tree->shared->destructor;
+		isprig.destructor_udata = tree->shared->destructor_udata;
+		isprig.arena = tree->arena;
+		isprig.sprig = sprig;
+
+		as_index_sprig_traverse_purge(&isprig, isprig.sprig->root_h);
+		sprig++;
+	}
+
+	as_lock_pair *pair = tree_locks(tree);
+	as_lock_pair *pair_end = pair + tree->shared->n_lock_pairs;
+
+	while (pair < pair_end) {
+		pthread_mutex_destroy(&pair->lock);
+		pthread_mutex_destroy(&pair->reduce_lock);
+		pair++;
+	}
+
+	cf_rc_free(tree);
+}
+
+
+void
+as_index_sprig_done(as_index_sprig *isprig, as_index *r, cf_arenax_handle r_h)
+{
+	int rc = as_index_release(r);
+
+	if (rc > 0) {
+		return;
+	}
+
+	cf_assert(rc == 0, AS_INDEX, "index ref-count %d", rc);
+
+	if (isprig->destructor) {
+		isprig->destructor(r, isprig->destructor_udata);
+	}
+
+	cf_arenax_free(isprig->arena, r_h);
+}
+
+
+bool
+as_index_sprig_invalid_record_done(as_index_sprig *isprig,
+		as_index_ref *index_ref)
+{
+	if (as_index_is_valid_record(index_ref->r)) {
+		return false;
+	}
+
+	if (! index_ref->skip_lock) {
+		pthread_mutex_unlock(index_ref->olock);
+	}
+
+	as_index_sprig_done(isprig, index_ref->r, index_ref->r_h);
+
+	return true;
+}
+
+
+//==========================================================
+// Local helpers - reduce a sprig.
+//
+
+// Make a callback for a specified number of elements in the tree, from outside
+// the tree lock.
+uint32_t
+as_index_sprig_reduce_partial(as_index_sprig *isprig, uint32_t sample_count,
+		as_index_reduce_fn cb, void *udata)
+{
+	bool reduce_all = sample_count == AS_REDUCE_ALL;
+
+	pthread_mutex_lock(&isprig->pair->reduce_lock);
+
+	if (reduce_all || sample_count > isprig->sprig->n_elements) {
+		sample_count = isprig->sprig->n_elements;
+	}
+
+	// Common to encounter empty sprigs.
+	if (sample_count == 0) {
+		pthread_mutex_unlock(&isprig->pair->reduce_lock);
+		return 0;
+	}
+
+	size_t sz = sizeof(as_index_ph_array) +
+			(sizeof(as_index_ph) * sample_count);
+	as_index_ph_array *v_a;
+	uint8_t buf[MAX_STACK_ARRAY_BYTES];
+
+	if (sz > MAX_STACK_ARRAY_BYTES) {
+		v_a = cf_malloc(sz);
+
+		if (! v_a) {
+			cf_warning(AS_INDEX, "index reduce failed to allocate ref array");
+			pthread_mutex_unlock(&isprig->pair->reduce_lock);
+			return 0;
+		}
+	}
+	else {
+		v_a = (as_index_ph_array*)buf;
+	}
+
+	v_a->alloc_sz = sample_count;
+	v_a->pos = 0;
+
+	uint64_t start_ms = cf_getms();
+
+	// Recursively, fetch all the value pointers into this array, so we can make
+	// all the callbacks outside the big lock.
+	as_index_sprig_traverse(isprig, isprig->sprig->root_h, v_a);
+
+	cf_detail(AS_INDEX, "sprig reduce took %lu ms", cf_getms() - start_ms);
+
+	pthread_mutex_unlock(&isprig->pair->reduce_lock);
+
+	uint32_t i;
+
+	for (i = 0; i < v_a->pos; i++) {
+		as_index_ref r_ref;
+
+		r_ref.skip_lock = false;
+		r_ref.r = v_a->indexes[i].r;
+		r_ref.r_h = v_a->indexes[i].r_h;
+
+		olock_vlock(g_record_locks, &r_ref.r->key, &r_ref.olock);
+
+		// Ignore this record if it's "half created" or deleted.
+		if (as_index_sprig_invalid_record_done(isprig, &r_ref)) {
+			continue;
+		}
+
+		// Callback MUST call as_record_done() to unlock and release record.
+		cb(&r_ref, udata);
+	}
+
+	if (v_a != (as_index_ph_array*)buf) {
+		cf_free(v_a);
+	}
+
+	// In reduce-all mode, return 0 so outside loop continues to pass
+	// sample_count = AS_REDUCE_ALL.
+	return reduce_all ? 0 : i;
+}
+
+
+void
+as_index_sprig_traverse(as_index_sprig *isprig, cf_arenax_handle r_h,
+		as_index_ph_array *v_a)
+{
+	if (r_h == SENTINEL_H) {
+		return;
+	}
+
+	as_index *r = RESOLVE_H(r_h);
+
+	as_index_sprig_traverse(isprig, r->left_h, v_a);
+
+	if (v_a->pos >= v_a->alloc_sz) {
+		return;
+	}
+
+	as_index_reserve(r);
+
+	v_a->indexes[v_a->pos].r = r;
+	v_a->indexes[v_a->pos].r_h = r_h;
+	v_a->pos++;
+
+	as_index_sprig_traverse(isprig, r->right_h, v_a);
+}
+
+
+void
+as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h)
+{
+	if (r_h == SENTINEL_H) {
+		return;
+	}
+
+	as_index *r = RESOLVE_H(r_h);
+
+	as_index_sprig_traverse_purge(isprig, r->left_h);
+	as_index_sprig_traverse_purge(isprig, r->right_h);
+
+	as_index_sprig_done(isprig, r, r_h);
+}
+
+
+//==========================================================
+// Local helpers - get/insert/delete an element in a sprig.
+//
+
+int
+as_index_sprig_exists(as_index_sprig *isprig, cf_digest *keyd)
+{
+	pthread_mutex_lock(&isprig->pair->lock);
+
+	int rv = as_index_sprig_search_lockless(isprig, keyd, NULL, NULL);
+
+	pthread_mutex_unlock(&isprig->pair->lock);
+
+	return rv;
+}
+
+
+int
+as_index_sprig_get_vlock(as_index_sprig *isprig, cf_digest *keyd,
+		as_index_ref *index_ref)
+{
+	pthread_mutex_lock(&isprig->pair->lock);
+
+	int rv = as_index_sprig_search_lockless(isprig, keyd, &index_ref->r,
+			&index_ref->r_h);
+
+	if (rv != 0) {
+		pthread_mutex_unlock(&isprig->pair->lock);
+		return rv;
+	}
+
+	as_index_reserve(index_ref->r);
+
+	pthread_mutex_unlock(&isprig->pair->lock);
+
+	if (! index_ref->skip_lock) {
+		olock_vlock(g_record_locks, keyd, &index_ref->olock);
+	}
+
+	// Treat record as not found if it's "half created" or deleted.
+	if (as_index_sprig_invalid_record_done(isprig, index_ref)) {
+		return -1;
+	}
+
+	return 0;
+}
+
+
+int
+as_index_sprig_get_insert_vlock(as_index_sprig *isprig, cf_digest *keyd,
+		as_index_ref *index_ref)
+{
 	int cmp = 0;
 	bool retry;
+
+	// Use a stack as_index object for the root's parent, for convenience.
+	as_index root_parent;
 
 	// Save parents as we search for the specified element's insertion point.
 	as_index_ele eles[64];
@@ -417,18 +630,21 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 	do {
 		ele = eles;
 
-		pthread_mutex_lock(&tree->lock);
+		pthread_mutex_lock(&isprig->pair->lock);
 
 		// Search for the specified element, or a parent to insert it under.
 
-		ele->parent = NULL; // we'll never look this far up
-		ele->me_h = tree->root_h;
-		ele->me = tree->root;
+		root_parent.left_h = isprig->sprig->root_h;
+		root_parent.color = AS_BLACK;
 
-		cf_arenax_handle t_h = tree->root->left_h;
+		ele->parent = NULL; // we'll never look this far up
+		ele->me_h = 0; // root parent has no handle, never used
+		ele->me = &root_parent;
+
+		cf_arenax_handle t_h = isprig->sprig->root_h;
 		as_index *t = RESOLVE_H(t_h);
 
-		while (t_h != tree->sentinel_h) {
+		while (t_h != SENTINEL_H) {
 			ele++;
 			ele->parent = ele - 1;
 			ele->me_h = t_h;
@@ -439,7 +655,7 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 
 				as_index_reserve(t);
 
-				pthread_mutex_unlock(&tree->lock);
+				pthread_mutex_unlock(&isprig->pair->lock);
 
 				if (! index_ref->skip_lock) {
 					olock_vlock(g_record_locks, keyd, &index_ref->olock);
@@ -449,7 +665,7 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 				index_ref->r_h = t_h;
 
 				// Fail if the record is "half created" or deleted.
-				if (as_index_invalid_record_done(tree, index_ref)) {
+				if (as_index_sprig_invalid_record_done(isprig, index_ref)) {
 					return -1;
 				}
 
@@ -464,14 +680,14 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 
 		retry = false;
 
-		if (EBUSY == pthread_mutex_trylock(&tree->reduce_lock)) {
+		if (EBUSY == pthread_mutex_trylock(&isprig->pair->reduce_lock)) {
 			// The tree is being reduced - could take long, unlock so reads and
 			// overwrites aren't blocked.
-			pthread_mutex_unlock(&tree->lock);
+			pthread_mutex_unlock(&isprig->pair->lock);
 
 			// Wait until the tree reduce is done...
-			pthread_mutex_lock(&tree->reduce_lock);
-			pthread_mutex_unlock(&tree->reduce_lock);
+			pthread_mutex_lock(&isprig->pair->reduce_lock);
+			pthread_mutex_unlock(&isprig->pair->reduce_lock);
 
 			// ... and start over - we unlocked, so the tree may have changed.
 			retry = true;
@@ -480,13 +696,16 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 
 	// Create a new element and insert it.
 
+	// Save the root so we can detect whether it changes.
+	cf_arenax_handle old_root = isprig->sprig->root_h;
+
 	// Make the new element.
-	cf_arenax_handle n_h = cf_arenax_alloc(tree->arena);
+	cf_arenax_handle n_h = cf_arenax_alloc(isprig->arena);
 
 	if (n_h == 0) {
 		cf_warning(AS_INDEX, "arenax alloc failed");
-		pthread_mutex_unlock(&tree->reduce_lock);
-		pthread_mutex_unlock(&tree->lock);
+		pthread_mutex_unlock(&isprig->pair->reduce_lock);
+		pthread_mutex_unlock(&isprig->pair->lock);
 		return -1;
 	}
 
@@ -496,14 +715,14 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 
 	n->key = *keyd;
 
-	n->left_h = n->right_h = tree->sentinel_h; // n starts as a leaf element
+	n->left_h = n->right_h = SENTINEL_H; // n starts as a leaf element
 	n->color = AS_RED; // n's color starts as red
 
 	// Make sure we can detect that the record isn't initialized.
 	as_index_clear_record_info(n);
 
 	// Insert the new element n under parent ele.
-	if (ele->me == tree->root || 0 < cmp) {
+	if (ele->me == &root_parent || 0 < cmp) {
 		ele->me->left_h = n_h;
 	}
 	else {
@@ -515,13 +734,18 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 	ele->me_h = n_h;
 	ele->me = n;
 
-	// Rebalance the tree as needed.
-	as_index_insert_rebalance(tree, ele);
+	// Rebalance the sprig as needed.
+	as_index_sprig_insert_rebalance(isprig, &root_parent, ele);
 
-	tree->elements++;
+	// If insertion caused the root to change, save the new root.
+	if (root_parent.left_h != old_root) {
+		isprig->sprig->root_h = root_parent.left_h;
+	}
 
-	pthread_mutex_unlock(&tree->reduce_lock);
-	pthread_mutex_unlock(&tree->lock);
+	isprig->sprig->n_elements++;
+
+	pthread_mutex_unlock(&isprig->pair->reduce_lock);
+	pthread_mutex_unlock(&isprig->pair->lock);
 
 	if (! index_ref->skip_lock) {
 		olock_vlock(g_record_locks, keyd, &index_ref->olock);
@@ -534,18 +758,15 @@ as_index_get_insert_vlock(as_index_tree *tree, cf_digest *keyd,
 }
 
 
-// If there's an element with specified digest in the tree, delete it.
-//
-// Returns:
-//		 0 - found and deleted
-//		-1 - not found
-// TODO - nobody cares about the return value, make it void?
 int
-as_index_delete(as_index_tree *tree, cf_digest *keyd)
+as_index_sprig_delete(as_index_sprig *isprig, cf_digest *keyd)
 {
 	as_index *r;
 	cf_arenax_handle r_h;
 	bool retry;
+
+	// Use a stack as_index object for the root's parent, for convenience.
+	as_index root_parent;
 
 	// Save parents as we search for the specified element (or its successor).
 	as_index_ele eles[(64 * 2) + 3];
@@ -554,16 +775,19 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 	do {
 		ele = eles;
 
-		pthread_mutex_lock(&tree->lock);
+		pthread_mutex_lock(&isprig->pair->lock);
+
+		root_parent.left_h = isprig->sprig->root_h;
+		root_parent.color = AS_BLACK;
 
 		ele->parent = NULL; // we'll never look this far up
-		ele->me_h = tree->root_h;
-		ele->me = tree->root;
+		ele->me_h = 0; // root parent has no handle, never used
+		ele->me = &root_parent;
 
-		r_h = tree->root->left_h;
+		r_h = isprig->sprig->root_h;
 		r = RESOLVE_H(r_h);
 
-		while (r_h != tree->sentinel_h) {
+		while (r_h != SENTINEL_H) {
 			ele++;
 			ele->parent = ele - 1;
 			ele->me_h = r_h;
@@ -579,8 +803,8 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 			r = RESOLVE_H(r_h);
 		}
 
-		if (r_h == tree->sentinel_h) {
-			pthread_mutex_unlock(&tree->lock);
+		if (r_h == SENTINEL_H) {
+			pthread_mutex_unlock(&isprig->pair->lock);
 			return -1; // not found, nothing to delete
 		}
 
@@ -588,14 +812,14 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 
 		retry = false;
 
-		if (EBUSY == pthread_mutex_trylock(&tree->reduce_lock)) {
+		if (EBUSY == pthread_mutex_trylock(&isprig->pair->reduce_lock)) {
 			// The tree is being reduced - could take long, unlock so reads and
 			// overwrites aren't blocked.
-			pthread_mutex_unlock(&tree->lock);
+			pthread_mutex_unlock(&isprig->pair->lock);
 
 			// Wait until the tree reduce is done...
-			pthread_mutex_lock(&tree->reduce_lock);
-			pthread_mutex_unlock(&tree->reduce_lock);
+			pthread_mutex_lock(&isprig->pair->reduce_lock);
+			pthread_mutex_unlock(&isprig->pair->reduce_lock);
 
 			// ... and start over - we unlocked, so the tree may have changed.
 			retry = true;
@@ -604,10 +828,13 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 
 	// Delete the element.
 
+	// Save the root so we can detect whether it changes.
+	cf_arenax_handle old_root = isprig->sprig->root_h;
+
 	// Snapshot the element to delete, r. (Already have r_h and r shortcuts.)
 	as_index_ele *r_e = ele;
 
-	if (r->left_h != tree->sentinel_h && r->right_h != tree->sentinel_h) {
+	if (r->left_h != SENTINEL_H && r->right_h != SENTINEL_H) {
 		// Search down for a "successor"...
 
 		ele++;
@@ -615,7 +842,7 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 		ele->me_h = r->right_h;
 		ele->me = RESOLVE_H(ele->me_h);
 
-		while (ele->me->left_h != tree->sentinel_h) {
+		while (ele->me->left_h != SENTINEL_H) {
 			ele++;
 			ele->parent = ele - 1;
 			ele->me_h = ele->parent->me->left_h;
@@ -632,7 +859,7 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 	// Get the appropriate child of s. (Note - child could be sentinel.)
 	ele++;
 
-	if (s->left_h == tree->sentinel_h) {
+	if (s->left_h == SENTINEL_H) {
 		ele->me_h = s->right_h;
 	}
 	else {
@@ -654,7 +881,7 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 	// Rebalance at ele if necessary. (Note - if r != s, r is in the tree, and
 	// its parent may change during rebalancing.)
 	if (s->color == AS_BLACK) {
-		as_index_delete_rebalance(tree, ele);
+		as_index_sprig_delete_rebalance(isprig, &root_parent, ele);
 	}
 
 	if (s != r) {
@@ -671,159 +898,38 @@ as_index_delete(as_index_tree *tree, cf_digest *keyd)
 		}
 	}
 
+	// If delete caused the root to change, save the new root.
+	if (root_parent.left_h != old_root) {
+		isprig->sprig->root_h = root_parent.left_h;
+	}
+
 	// Flag record as deleted.
 	as_index_invalidate_record(r);
 
-	// We may now destroy r, which is no longer in the tree.
-	as_index_done(tree, r, r_h);
+	// We may now destroy r, which is no longer in the sprig.
+	as_index_sprig_done(isprig, r, r_h);
 
-	tree->elements--;
+	isprig->sprig->n_elements--;
 
-	pthread_mutex_unlock(&tree->reduce_lock);
-	pthread_mutex_unlock(&tree->lock);
+	pthread_mutex_unlock(&isprig->pair->reduce_lock);
+	pthread_mutex_unlock(&isprig->pair->lock);
 
 	return 0;
 }
 
 
-
 //==========================================================
-// Local helpers.
+// Local helpers - search/rebalance a sprig.
 //
 
-void *
-run_index_tree_gc(void *unused)
-{
-	as_index_tree *tree;
-
-	while (cf_queue_pop(&g_gc_queue, &tree, CF_QUEUE_FOREVER) == CF_QUEUE_OK) {
-		as_index_tree_destroy(tree);
-	}
-
-	return NULL;
-}
-
-
-void
-as_index_tree_destroy(as_index_tree *tree)
-{
-	as_index_tree_purge(tree, RESOLVE_H(tree->root->left_h),
-			tree->root->left_h);
-
-	cf_arenax_free(tree->arena, tree->root_h);
-	cf_arenax_free(tree->arena, tree->sentinel_h);
-
-	pthread_mutex_destroy(&tree->lock);
-	pthread_mutex_destroy(&tree->reduce_lock);
-
-	memset(tree, 0, sizeof(as_index_tree)); // paranoia - for debugging only
-	cf_rc_free(tree);
-}
-
-
-void
-as_index_done(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
-{
-	int rc = as_index_release(r);
-
-	if (rc > 0) {
-		return;
-	}
-
-	cf_assert(rc == 0, AS_INDEX, "index ref-count %d", rc);
-
-	if (tree->destructor) {
-		tree->destructor(r, tree->destructor_udata);
-	}
-
-	cf_arenax_free(tree->arena, r_h);
-}
-
-
-bool
-as_index_invalid_record_done(as_index_tree *tree, as_index_ref *index_ref)
-{
-	if (as_index_is_valid_record(index_ref->r)) {
-		return false;
-	}
-
-	if (! index_ref->skip_lock) {
-		pthread_mutex_unlock(index_ref->olock);
-	}
-
-	as_index_done(tree, index_ref->r, index_ref->r_h);
-
-	return true;
-}
-
-
-void
-as_index_tree_purge(as_index_tree *tree, as_index *r, cf_arenax_handle r_h)
-{
-	// Don't purge the sentinel.
-	if (r_h == tree->sentinel_h) {
-		return;
-	}
-
-	as_index_tree_purge(tree, RESOLVE_H(r->left_h), r->left_h);
-	as_index_tree_purge(tree, RESOLVE_H(r->right_h), r->right_h);
-
-	as_index_done(tree, r, r_h);
-}
-
-
-void
-as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h,
-		cf_arenax_handle sentinel_h, as_index_ph_array *v_a)
-{
-	as_index *r = RESOLVE_H(r_h);
-
-	if (r->left_h != sentinel_h) {
-		as_index_reduce_traverse(tree, r->left_h, sentinel_h, v_a);
-	}
-
-	if (v_a->pos >= v_a->alloc_sz) {
-		return;
-	}
-
-	as_index_reserve(r);
-
-	v_a->indexes[v_a->pos].r = r;
-	v_a->indexes[v_a->pos].r_h = r_h;
-	v_a->pos++;
-
-	if (r->right_h != sentinel_h) {
-		as_index_reduce_traverse(tree, r->right_h, sentinel_h, v_a);
-	}
-}
-
-
-void
-as_index_reduce_sync_traverse(as_index_tree *tree, as_index *r,
-		cf_arenax_handle sentinel_h, as_index_reduce_sync_fn cb, void *udata)
-{
-	cb(r, udata);
-
-	if (r->left_h != sentinel_h) {
-		as_index_reduce_sync_traverse(tree, RESOLVE_H(r->left_h), sentinel_h,
-				cb, udata);
-	}
-
-	if (r->right_h != sentinel_h) {
-		as_index_reduce_sync_traverse(tree, RESOLVE_H(r->right_h), sentinel_h,
-				cb, udata);
-	}
-}
-
-
 int
-as_index_search_lockless(as_index_tree *tree, cf_digest *keyd, as_index **ret,
-		cf_arenax_handle *ret_h)
+as_index_sprig_search_lockless(as_index_sprig *isprig, cf_digest *keyd,
+		as_index **ret, cf_arenax_handle *ret_h)
 {
-	cf_arenax_handle r_h = tree->root->left_h;
+	cf_arenax_handle r_h = isprig->sprig->root_h;
 	as_index *r = RESOLVE_H(r_h);
 
-	while (r_h != tree->sentinel_h) {
+	while (r_h != SENTINEL_H) {
 		int cmp = cf_digest_compare(keyd, &r->key);
 
 		if (cmp == 0) {
@@ -847,7 +953,8 @@ as_index_search_lockless(as_index_tree *tree, cf_digest *keyd, as_index **ret,
 
 
 void
-as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele)
+as_index_sprig_insert_rebalance(as_index_sprig *isprig, as_index *root_parent,
+		as_index_ele *ele)
 {
 	// Entering here, ele is the last element on the stack. It turns out during
 	// insert rebalancing we won't ever need new elements on the stack, but make
@@ -932,19 +1039,20 @@ as_index_insert_rebalance(as_index_tree *tree, as_index_ele *ele)
 		}
 	}
 
-	RESOLVE_H(tree->root->left_h)->color = AS_BLACK;
+	RESOLVE_H(root_parent->left_h)->color = AS_BLACK;
 }
 
 
 void
-as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
+as_index_sprig_delete_rebalance(as_index_sprig *isprig, as_index *root_parent,
+		as_index_ele *ele)
 {
 	// Entering here, ele is the last element on the stack. It's possible as r_e
 	// crawls up the tree, we'll need new elements on the stack, in which case
 	// ele keeps building the stack down while r_e goes up.
 	as_index_ele *r_e = ele;
 
-	while (r_e->me->color == AS_BLACK && r_e->me_h != tree->root->left_h) {
+	while (r_e->me->color == AS_BLACK && r_e->me_h != root_parent->left_h) {
 		as_index *r_parent = r_e->parent->me;
 
 		if (r_e->me_h == r_parent->left_h) {
@@ -1008,7 +1116,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 
 				as_index_rotate_left(r_e->parent, ele);
 
-				RESOLVE_H(tree->root->left_h)->color = AS_BLACK;
+				RESOLVE_H(root_parent->left_h)->color = AS_BLACK;
 
 				return;
 			}
@@ -1074,7 +1182,7 @@ as_index_delete_rebalance(as_index_tree *tree, as_index_ele *ele)
 
 				as_index_rotate_right(r_e->parent, ele);
 
-				RESOLVE_H(tree->root->left_h)->color = AS_BLACK;
+				RESOLVE_H(root_parent->left_h)->color = AS_BLACK;
 
 				return;
 			}

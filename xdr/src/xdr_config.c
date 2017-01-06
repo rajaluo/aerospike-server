@@ -84,6 +84,12 @@ const xdr_cfg_opt XDR_DC_OPTS[] = {
 		{ "dc-int-ext-ipmap",				XDR_CASE_DC_INT_EXT_IPMAP },
 		{ "dc-security-config-file",		XDR_CASE_DC_SECURITY_CONFIG_FILE },
 		{ "dc-use-alternate-services",		XDR_CASE_DC_USE_ALTERNATE_SERVICES },
+		{ "tls-node",						XDR_CASE_TLS_NODE },
+		{ "tls-cafile",						XDR_CASE_TLS_CAFILE },
+		{ "tls-capath",						XDR_CASE_TLS_CAPATH },
+		{ "tls-certfile",					XDR_CASE_TLS_CERTFILE },
+		{ "tls-keyfile",					XDR_CASE_TLS_KEYFILE },
+		{ "tls-cert-blacklist",				XDR_CASE_TLS_CERT_BLACKLIST },
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -115,12 +121,8 @@ const bool g_xdr_supported;
 void xdr_config_defaults(xdr_config *c)
 {
 	c->xdr_global_enabled = false;		// This config option overrides the enable-xdr setting of the namespace(s)
-
-	c->xdr_digestlog_path = NULL;	// Path where the digest information is written to the disk
-	c->xdr_digestlog_overwrite = true;
-	c->xdr_digestlog_persist = true;
+	c->xdr_digestlog_path = NULL;		// Path where the digest information is written to the disk
 	c->xdr_info_port = 0;
-
 	c->xdr_max_ship_throughput = 0;		// XDR TPS limit
 	c->xdr_max_ship_bandwidth = 0;		// XDR bandwidth limit
 	c->xdr_hotkey_time_ms = 100;		// Expiration time for the de-duplication cache

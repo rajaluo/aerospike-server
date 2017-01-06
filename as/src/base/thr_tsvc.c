@@ -20,6 +20,10 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+//==========================================================
+// Includes.
+//
+
 #include "base/thr_tsvc.h"
 
 #include <pthread.h>
@@ -60,6 +64,14 @@
 #include "transaction/write.h"
 
 
+//==========================================================
+// Forward declarations.
+//
+
+void tsvc_add_threads(uint32_t qid, uint32_t n_threads);
+void tsvc_remove_threads(uint32_t qid, uint32_t n_threads);
+void *run_tsvc(void *arg);
+
 static inline bool
 should_security_check_data_op(const as_transaction *tr)
 {
@@ -67,9 +79,102 @@ should_security_check_data_op(const as_transaction *tr)
 }
 
 
+//==========================================================
+// Globals.
+//
+
+static cf_queue* g_transaction_queues[MAX_TRANSACTION_QUEUES] = { NULL };
+
+// Track number of threads for each queue independently.
+static uint32_t g_queues_n_threads[MAX_TRANSACTION_QUEUES] = { 0 };
+
+// It's ok for this to not be atomic - might not round-robin perfectly, but will
+// be cache friendly.
+static uint32_t g_current_q = 0;
+
+// TODO - consider how to unify usage of one configuration setting lock.
+static pthread_mutex_t g_tsvc_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
+
+
+//==========================================================
+// Public API.
+//
+
+void
+as_tsvc_init()
+{
+	cf_info(AS_TSVC, "shared queues: %u queues with %u threads each",
+			g_config.n_transaction_queues,
+			g_config.n_transaction_threads_per_queue);
+
+	// Create the transaction queues.
+	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
+		g_transaction_queues[qid] =
+				cf_queue_create(AS_TRANSACTION_HEAD_SIZE, true);
+
+		cf_assert(g_transaction_queues[qid], AS_TSVC, "failed to create queue");
+	}
+
+	// Start all the transaction threads.
+	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
+		tsvc_add_threads(qid, g_config.n_transaction_threads_per_queue);
+	}
+}
+
+
+// Decide which queue to use, and enqueue transaction.
+void
+as_tsvc_enqueue(as_transaction *tr)
+{
+	// Transaction can go on any queue - distribute evenly.
+	uint32_t qid = (g_current_q++) % g_config.n_transaction_queues;
+
+	if (cf_queue_push(g_transaction_queues[qid], tr) != CF_QUEUE_OK) {
+		cf_crash(AS_TSVC, "transaction queue push failed - out of memory?");
+	}
+}
+
+
+// Triggered via dynamic configuration change.
+void
+as_tsvc_set_threads_per_queue(uint32_t target_n_threads)
+{
+	pthread_mutex_lock(&g_tsvc_cfg_lock);
+
+	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
+		uint32_t current_n_threads = g_queues_n_threads[qid];
+
+		if (target_n_threads > current_n_threads) {
+			tsvc_add_threads(qid, target_n_threads - current_n_threads);
+		}
+		else {
+			tsvc_remove_threads(qid, current_n_threads - target_n_threads);
+		}
+	}
+
+	g_config.n_transaction_threads_per_queue = target_n_threads;
+
+	pthread_mutex_unlock(&g_tsvc_cfg_lock);
+}
+
+
+// Total transactions currently queued, for ticker and info statistics.
+int
+as_tsvc_queue_get_size()
+{
+	int current_total = 0;
+
+	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
+		current_total += cf_queue_sz(g_transaction_queues[qid]);
+	}
+
+	return current_total;
+}
+
+
 // Handle the transaction, including proxy to another node if necessary.
 void
-process_transaction(as_transaction *tr)
+as_tsvc_process_transaction(as_transaction *tr)
 {
 	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
 		as_xdr_handle_txn(tr);
@@ -395,115 +500,74 @@ Cleanup:
 } // end process_transaction()
 
 
+//==========================================================
+// Local helpers.
+//
+
+void
+tsvc_add_threads(uint32_t qid, uint32_t n_threads)
+{
+	pthread_t thread;
+	pthread_attr_t attrs;
+
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
+
+	for (uint32_t n = 0; n < n_threads; n++) {
+		if (pthread_create(&thread, &attrs, run_tsvc,
+				(void*)g_transaction_queues[qid]) == 0) {
+			g_queues_n_threads[qid]++;
+		}
+		else {
+			cf_warning(AS_TSVC, "tsvc queue %u failed thread create", qid);
+		}
+	}
+}
+
+
+void
+tsvc_remove_threads(uint32_t qid, uint32_t n_threads)
+{
+	as_transaction death_tr = { .msgp = NULL };
+
+	for (uint32_t n = 0; n < n_threads; n++) {
+		// Send terminator (transaction with NULL msgp).
+		if (cf_queue_push(g_transaction_queues[qid], &death_tr) ==
+				CF_QUEUE_OK) {
+			g_queues_n_threads[qid]--;
+		}
+		else {
+			cf_warning(AS_TSVC, "tsvc queue %u failed thread termination", qid);
+		}
+	}
+}
+
+
 // Service transactions - arg is the queue we're to service.
 void *
-thr_tsvc(void *arg)
+run_tsvc(void *arg)
 {
-	cf_queue *q = (cf_queue *) arg;
+	cf_queue *q = (cf_queue *)arg;
 
-	cf_assert(arg, AS_TSVC, "invalid argument");
-
-	// Wait for a transaction to arrive.
-	for ( ; ; ) {
+	while (true) {
 		as_transaction tr;
-		if (0 != cf_queue_pop(q, &tr, CF_QUEUE_FOREVER)) {
+
+		if (cf_queue_pop(q, &tr, CF_QUEUE_FOREVER) != CF_QUEUE_OK) {
 			cf_crash(AS_TSVC, "unable to pop from transaction queue");
+		}
+
+		if (! tr.msgp) {
+			break; // thread termination via configuration change
 		}
 
 		if (g_config.svc_benchmarks_enabled &&
 				tr.benchmark_time != 0 && ! as_transaction_is_restart(&tr)) {
-			histogram_insert_data_point(g_stats.svc_queue_hist, tr.benchmark_time);
+			histogram_insert_data_point(g_stats.svc_queue_hist,
+					tr.benchmark_time);
 		}
 
-		process_transaction(&tr);
+		as_tsvc_process_transaction(&tr);
 	}
 
 	return NULL;
-} // end thr_tsvc()
-
-
-cf_queue* g_transaction_queues[MAX_TRANSACTION_QUEUES];
-uint32_t g_current_q = 0;
-
-void
-as_tsvc_init()
-{
-	cf_info(AS_TSVC, "shared queues: %d queues with %d threads each",
-			g_config.n_transaction_queues, g_config.n_transaction_threads_per_queue);
-
-	// Create the transaction queues.
-	for (int i = 0; i < g_config.n_transaction_queues ; i++) {
-		g_transaction_queues[i] = cf_queue_create(AS_TRANSACTION_HEAD_SIZE, true);
-	}
-
-	// Start all the transaction threads.
-	for (int i = 0; i < g_config.n_transaction_queues; i++) {
-		for (int j = 0; j < g_config.n_transaction_threads_per_queue; j++) {
-			pthread_t thread;
-			pthread_attr_t attrs;
-
-			pthread_attr_init(&attrs);
-			pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-
-			if (0 != pthread_create(&thread, &attrs, thr_tsvc, (void*)g_transaction_queues[i])) {
-				cf_crash(AS_TSVC, "tsvc thread %d:%d create failed", i, j);
-			}
-		}
-	}
-} // end thr_tsvc_init()
-
-
-// Peek into packet and decide if transaction can be executed inline in
-// demarshal thread or if it must be enqueued, and handle appropriately.
-int
-thr_tsvc_process_or_enqueue(as_transaction *tr)
-{
-	// If transaction is for data-in-memory namespace, process in this thread.
-	if (g_config.allow_inline_transactions &&
-			g_config.n_namespaces_in_memory != 0 &&
-					(g_config.n_namespaces_not_in_memory == 0 ||
-							as_msg_peek_data_in_memory(&tr->msgp->msg))) {
-		process_transaction(tr);
-		return 0;
-	}
-
-	// Transaction is for data-not-in-memory namespace - process via queues.
-	return thr_tsvc_enqueue(tr);
 }
-
-
-// Decide which queue to use, and enqueue transaction.
-int
-thr_tsvc_enqueue(as_transaction *tr)
-{
-	// Transaction can go on any queue - distribute evenly.
-	uint32_t n_q = (g_current_q++) % g_config.n_transaction_queues;
-	cf_queue *q = g_transaction_queues[n_q];
-
-	cf_assert(q, AS_TSVC, "transaction queue #%d not initialized!", n_q);
-
-	if (cf_queue_push(q, tr) != 0) {
-		cf_crash(AS_TSVC, "transaction queue push failed - out of memory?");
-	}
-
-	return 0;
-} // end thr_tsvc_enqueue()
-
-
-// Get one of the most interesting load statistics: the transaction queue depth.
-int
-thr_tsvc_queue_get_size()
-{
-	int qs = 0;
-
-	for (int i = 0; i < g_config.n_transaction_queues; i++) {
-		if (g_transaction_queues[i]) {
-			qs += cf_queue_sz(g_transaction_queues[i]);
-		}
-		else {
-			cf_detail(AS_TSVC, "no queue when getting size");
-		}
-	}
-
-	return qs;
-} // end thr_tsvc_queue_get_size()

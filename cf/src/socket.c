@@ -47,6 +47,7 @@
 #include <sys/types.h>
 
 #include "fault.h"
+#include "tls.h"
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
@@ -597,6 +598,7 @@ cf_socket_init(cf_socket *sock)
 {
 	sock->fd = -1;
 	sock->data = NULL;
+	tls_socket_init(sock);
 }
 
 bool
@@ -675,6 +677,8 @@ cf_socket_init_server(cf_serv_cfg *cfg, cf_sockets *socks)
 		}
 
 		sock->data = &cfg->cfgs[n];
+
+		tls_socket_context(sock, &cfg->cfgs[n], cfg->spec);
 	}
 
 	socks->n_socks = n;
@@ -891,13 +895,13 @@ x_name(name_func func, const char *which, int32_t fd, cf_sock_addr *addr)
 }
 
 int32_t
-cf_socket_remote_name(cf_socket *sock, cf_sock_addr *addr)
+cf_socket_remote_name(const cf_socket *sock, cf_sock_addr *addr)
 {
 	return x_name(getpeername, "remote", sock->fd, addr);
 }
 
 int32_t
-cf_socket_local_name(cf_socket *sock, cf_sock_addr *addr)
+cf_socket_local_name(const cf_socket *sock, cf_sock_addr *addr)
 {
 	return x_name(getsockname, "local", sock->fd, addr);
 }
@@ -907,6 +911,9 @@ cf_socket_available(cf_socket *sock)
 {
 	int32_t size;
 	safe_ioctl(sock->fd, FIONREAD, &size);
+
+	size += tls_socket_pending(sock);
+	
 	return size;
 }
 
@@ -936,7 +943,23 @@ cf_socket_send_to(cf_socket *sock, const void *buff, size_t size, int32_t flags,
 int32_t
 cf_socket_send(cf_socket *sock, const void *buff, size_t size, int32_t flags)
 {
-	return cf_socket_send_to(sock, buff, size, flags, NULL);
+	if (sock->ssl) {
+		ssize_t rv = tls_socket_send(sock, buff, size, flags, 0);
+		if (rv < 0) {
+			// errno is set by tls_socket_send.
+			if (errno == ETIMEDOUT) {
+				errno = EAGAIN;
+			}
+			return -1;
+		}
+		else {
+			// This might be a partial return.
+			return rv;
+		}
+	}
+	else {
+		return cf_socket_send_to(sock, buff, size, flags, NULL);
+	}
 }
 
 int32_t
@@ -967,7 +990,23 @@ cf_socket_recv_from(cf_socket *sock, void *buff, size_t size, int32_t flags, cf_
 int32_t
 cf_socket_recv(cf_socket *sock, void *buff, size_t size, int32_t flags)
 {
-	return cf_socket_recv_from(sock, buff, size, flags, NULL);
+	if (sock->ssl) {
+		ssize_t rv = tls_socket_recv(sock, buff, size, flags, 0);
+		if (rv < 0) {
+			// errno is set by tls_socket_send.
+			if (errno == ETIMEDOUT) {
+				errno = EAGAIN;
+			}
+			return -1;
+		}
+		else {
+			// This might be a partial return.
+			return rv;
+		}
+	}
+	else {
+		return cf_socket_recv_from(sock, buff, size, flags, NULL);
+	}
 }
 
 static bool
@@ -1049,7 +1088,12 @@ int32_t
 cf_socket_send_all(cf_socket *sock, const void *buff, size_t size, int32_t flags,
 		int32_t timeout)
 {
-	return cf_socket_send_to_all(sock, buff, size, flags, NULL, timeout);
+	if (sock->ssl) {
+		return tls_socket_send(sock, buff, size, flags, timeout);
+	}
+	else {
+		return cf_socket_send_to_all(sock, buff, size, flags, NULL, timeout);
+	}
 }
 
 int32_t
@@ -1094,12 +1138,21 @@ cf_socket_recv_from_all(cf_socket *sock, void *buffp, size_t size, int32_t flags
 int32_t
 cf_socket_recv_all(cf_socket *sock, void *buff, size_t size, int32_t flags, int32_t timeout)
 {
-	return cf_socket_recv_from_all(sock, buff, size, flags, NULL, timeout);
+	if (sock->ssl) {
+		return tls_socket_recv(sock, buff, size, flags, timeout);
+	}
+	else {
+		return cf_socket_recv_from_all(sock, buff, size, flags, NULL, timeout);
+	}
 }
 
 static void
-x_shutdown(const cf_socket *sock, int32_t how)
+x_shutdown(cf_socket *sock, int32_t how)
 {
+	if (sock->ssl) {
+		tls_socket_shutdown(sock);
+	}
+
 	if (shutdown(sock->fd, how) < 0) {
 		if (errno != ENOTCONN) {
 			cf_crash(CF_SOCKET, "shutdown() failed on FD %d: %d (%s)",
@@ -1130,6 +1183,7 @@ void
 cf_socket_close(cf_socket *sock)
 {
 	cf_debug(CF_SOCKET, "Closing FD %d", sock->fd);
+	tls_socket_close(sock);
 	safe_close(sock->fd);
 	sock->fd = -1;
 }
@@ -1175,6 +1229,7 @@ cleanup1:
 void
 cf_socket_term(cf_socket *sock)
 {
+	tls_socket_term(sock);
 	sock->fd = -1;
 }
 
@@ -2013,55 +2068,75 @@ enumerate_inter(inter_info *inter, bool allow_v6)
 	// This double-checks that our new method returns interfaces in exactly the
 	// same order as does glibc.
 
-	struct ifaddrs *legacy;
+	bool enum_ok;
 
-	if (getifaddrs(&legacy) < 0) {
-		cf_crash(CF_SOCKET, "Error while legacy-enumerating interfaces: %d (%s)",
-				errno, cf_strerror(errno));
-	}
+	for (int32_t tries = 0; tries < 10; ++tries) {
+		enum_ok = true;
+		struct ifaddrs *legacy;
 
-	uint32_t n = 0;
+		if (getifaddrs(&legacy) < 0) {
+			cf_crash(CF_SOCKET, "Error while legacy-enumerating interfaces: %d (%s)",
+					errno, cf_strerror(errno));
+		}
 
-	for (struct ifaddrs *it = legacy; it != NULL; it = it->ifa_next) {
-		cf_detail(CF_SOCKET, "Checking legacy-enumerated interface %s", it->ifa_name);
-		bool found = false;
+		uint32_t n = 0;
 
-		for (uint32_t i = 0; i < n; ++i) {
-			inter_entry *entry = &inter->inters[i];
+		for (struct ifaddrs *it = legacy; it != NULL; it = it->ifa_next) {
+			cf_detail(CF_SOCKET, "Checking legacy-enumerated interface %s", it->ifa_name);
+			bool found = false;
 
-			if (strcmp(entry->name, it->ifa_name) == 0) {
-				cf_detail(CF_SOCKET, "Interface name matches a previous name");
-				found = true;
+			for (uint32_t i = 0; i < n; ++i) {
+				inter_entry *entry = &inter->inters[i];
+
+				if (strcmp(entry->name, it->ifa_name) == 0) {
+					cf_detail(CF_SOCKET, "Interface name matches a previous name");
+					found = true;
+					break;
+				}
+			}
+
+			if (found) {
+				continue;
+			}
+
+			cf_detail(CF_SOCKET, "Encountered new interface name");
+
+			if (n == inter->n_inters) {
+				cf_warning(CF_SOCKET, "Missed legacy-enumerated interface %s", it->ifa_name);
+				enum_ok = false;
 				break;
 			}
+
+			inter_entry *entry = &inter->inters[n];
+			cf_detail(CF_SOCKET, "Expecting interface name %s", entry->name);
+
+			if (strcmp(entry->name, it->ifa_name) != 0) {
+				cf_warning(CF_SOCKET, "Unexpected legacy-enumerated interface %s", it->ifa_name);
+				enum_ok = false;
+				break;
+			}
+
+			++n;
 		}
 
-		if (found) {
-			continue;
+		if (enum_ok && n < inter->n_inters) {
+			inter_entry *entry = &inter->inters[n];
+			cf_warning(CF_SOCKET, "Extraneous interface %s", entry->name);
+			enum_ok = false;
 		}
 
-		cf_detail(CF_SOCKET, "Encountered new interface name");
+		freeifaddrs(legacy);
 
-		if (n == inter->n_inters) {
-			cf_crash(CF_SOCKET, "Missed legacy-enumerated interface %s", it->ifa_name);
+		if (enum_ok) {
+			break;
 		}
 
-		inter_entry *entry = &inter->inters[n];
-		cf_detail(CF_SOCKET, "Expecting interface name %s", entry->name);
-
-		if (strcmp(entry->name, it->ifa_name) != 0) {
-			cf_crash(CF_SOCKET, "Unexpected legacy-enumerated interface %s", it->ifa_name);
-		}
-
-		++n;
+		usleep(100 * 1000);
 	}
 
-	if (n < inter->n_inters) {
-		inter_entry *entry = &inter->inters[n];
-		cf_crash(CF_SOCKET, "Extraneous interface %s", entry->name);
+	if (!enum_ok) {
+		cf_crash(CF_SOCKET, "Inconsistent interface enumeration");
 	}
-
-	freeifaddrs(legacy);
 
 	// --------------------- END PARANOIA ---------------------
 }

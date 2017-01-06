@@ -646,7 +646,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 	tr.from_data.batch_index = pr->batch_index;
 	tr.start_time = pr->start_time;
 
-	thr_tsvc_enqueue(&tr);
+	as_tsvc_enqueue(&tr);
 
 	as_fabric_msg_put(pr->fab_msg);
 
@@ -729,7 +729,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 		tr.from_flags |= FROM_FLAG_SHIPPED_OP;
 	}
 
-	thr_tsvc_enqueue(&tr);
+	as_tsvc_enqueue(&tr);
 }
 
 
@@ -867,7 +867,7 @@ proxy_retransmit_send(proxy_request* pr)
 			tr.from_data.batch_index = pr->batch_index;
 			tr.start_time = pr->start_time;
 
-			thr_tsvc_enqueue(&tr);
+			as_tsvc_enqueue(&tr);
 
 			as_fabric_msg_put(pr->fab_msg);
 

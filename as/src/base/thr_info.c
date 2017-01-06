@@ -287,7 +287,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 
 	info_get_aggregated_namespace_stats(db);
 
-	info_append_int(db, "tsvc_queue", thr_tsvc_queue_get_size());
+	info_append_int(db, "tsvc_queue", as_tsvc_queue_get_size());
 	info_append_int(db, "info_queue", as_info_queue_get_size());
 	info_append_int(db, "delete_queue", as_nsup_queue_get_size());
 	info_append_uint32(db, "rw_in_progress", rw_request_hash_count());
@@ -377,16 +377,37 @@ info_get_cluster_generation(char *name, cf_dyn_buf *db)
 	return(0);
 }
 
+void
+info_get_printable_cluster_name(char *cluster_name)
+{
+	as_config_cluster_name_get(cluster_name);
+	if (cluster_name[0] == '\0'){
+		strcpy(cluster_name, "null");
+	}
+}
+
 int
 info_get_cluster_name(char *name, cf_dyn_buf *db)
 {
 	char cluster_name[AS_CLUSTER_NAME_SZ];
-	as_config_cluster_name_get(cluster_name);
+	info_get_printable_cluster_name(cluster_name);
 	cf_dyn_buf_append_string(db, cluster_name);
 
 	return 0;
 }
 
+
+static cf_ip_port
+bind_to_port(cf_serv_cfg *cfg, cf_sock_owner owner)
+{
+	for (uint32_t i = 0; i < cfg->n_cfgs; ++i) {
+		if (cfg->cfgs[i].owner == owner) {
+			return cfg->cfgs[i].port;
+		}
+	}
+
+	return 0;
+}
 
 static char *
 bind_to_string(cf_serv_cfg *cfg, cf_sock_owner owner)
@@ -433,44 +454,42 @@ access_to_string(cf_addr_list *addrs)
 int
 info_get_endpoints(char *name, cf_dyn_buf *db)
 {
-	info_append_int(db, "service.port", g_access.service.port);
+	cf_ip_port port = bind_to_port(&g_service_bind, CF_SOCK_OWNER_SERVICE);
+	info_append_int(db, "service.port", port);
 
 	char *string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE);
 	info_append_string(db, "service.addresses", string);
 	cf_free(string);
 
+	info_append_int(db, "service.access-port", g_access.service.port);
+
 	string = access_to_string(&g_access.service.addrs);
 	info_append_string(db, "service.access-addresses", string);
 	cf_free(string);
 
-	info_append_int(db, "service.alternate-port", g_access.alt_service.port);
-
-	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_ALTERNATE);
-	info_append_string(db, "service.alternate-addresses", string);
-	cf_free(string);
+	info_append_int(db, "service.alternate-access-port", g_access.alt_service.port);
 
 	string = access_to_string(&g_access.alt_service.addrs);
 	info_append_string(db, "service.alternate-access-addresses", string);
 	cf_free(string);
 
-	info_append_int(db, "service.tls-port", g_access.tls_service.port);
+	port = bind_to_port(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
+	info_append_int(db, "service.tls-port", port);
 
 	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
 	info_append_string(db, "service.tls-addresses", string);
 	cf_free(string);
 
+	info_append_int(db, "service.tls-access-port", g_access.tls_service.port);
+
 	string = access_to_string(&g_access.tls_service.addrs);
 	info_append_string(db, "service.tls-access-addresses", string);
 	cf_free(string);
 
-	info_append_int(db, "service.alternate-tls-port", g_access.alt_tls_service.port);
-
-	string = bind_to_string(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS_ALTERNATE);
-	info_append_string(db, "service.alternate-tls-addresses", string);
-	cf_free(string);
+	info_append_int(db, "service.tls-alternate-access-port", g_access.alt_tls_service.port);
 
 	string = access_to_string(&g_access.alt_tls_service.addrs);
-	info_append_string(db, "service.alternate-tls-access-addresses", string);
+	info_append_string(db, "service.tls-alternate-access-addresses", string);
 	cf_free(string);
 
 	as_hb_info_endpoints_get(db);
@@ -1841,12 +1860,11 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "paxos-single-replica-limit", g_config.paxos_single_replica_limit);
 	info_append_string_safe(db, "pidfile", g_config.pidfile);
 	info_append_int(db, "service-threads", g_config.n_service_threads);
-	info_append_int(db, "transaction-queues", g_config.n_transaction_queues);
-	info_append_int(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
+	info_append_uint32(db, "transaction-queues", g_config.n_transaction_queues);
+	info_append_uint32(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
 	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
 
 	info_append_bool(db, "advertise-ipv6", cf_socket_advertises_ipv6());
-	info_append_bool(db, "allow-inline-transactions", g_config.allow_inline_transactions);
 	info_append_int(db, "batch-threads", g_config.n_batch_threads);
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
@@ -1856,7 +1874,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "clock-skew-max-ms", g_config.clock_skew_max_ms);
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];
-	as_config_cluster_name_get(cluster_name);
+	info_get_printable_cluster_name(cluster_name);
 	info_append_string(db, "cluster-name", cluster_name);
 
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
@@ -1870,7 +1888,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "ldt-benchmarks", g_config.ldt_benchmarks);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_int(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
-	info_append_int(db, "migrate-rx-lifetime-ms", g_config.migrate_rx_lifetime_ms);
 	info_append_int(db, "migrate-threads", g_config.n_migrate_threads);
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
@@ -1950,22 +1967,20 @@ info_network_config_get(cf_dyn_buf *db)
 {
 	// Service:
 
-	info_append_int(db, "service.port", g_config.service.port);
+	info_append_int(db, "service.port", g_config.service.bind_port);
 	append_addrs(db, "service.address", &g_config.service.bind);
-	append_addrs(db, "service.access-address", &g_config.service.access);
+	info_append_int(db, "service.access-port", g_config.service.std_port);
+	append_addrs(db, "service.access-address", &g_config.service.std);
+	info_append_int(db, "service.alternate-access-port", g_config.service.alt_port);
+	append_addrs(db, "service.alternate-access-address", &g_config.service.alt);
 
-	info_append_int(db, "service.tls-port", g_config.tls_service.port);
+	info_append_int(db, "service.tls-port", g_config.tls_service.bind_port);
 	append_addrs(db, "service.tls-address", &g_config.tls_service.bind);
-	append_addrs(db, "service.tls-access-address", &g_config.tls_service.access);
+	info_append_int(db, "service.tls-access-port", g_config.tls_service.std_port);
+	append_addrs(db, "service.tls-access-address", &g_config.tls_service.std);
+	info_append_int(db, "service.tls-alternate-access-port", g_config.tls_service.alt_port);
+	append_addrs(db, "service.tls-alternate-access-address", &g_config.tls_service.alt);
 	info_append_string_safe(db, "service.tls-name", g_config.tls_name);
-
-	info_append_int(db, "service.alternate-port", g_config.alt_service.port);
-	append_addrs(db, "service.alternate-address", &g_config.alt_service.bind);
-	append_addrs(db, "service.alternate-access-address", &g_config.alt_service.access);
-
-	info_append_int(db, "service.alternate-tls-port", g_config.alt_tls_service.port);
-	append_addrs(db, "service.alternate-tls-address", &g_config.alt_tls_service.bind);
-	append_addrs(db, "service.alternate-tls-access-address", &g_config.alt_tls_service.access);
 
 	// Heartbeat:
 
@@ -1974,7 +1989,7 @@ info_network_config_get(cf_dyn_buf *db)
 	// Fabric:
 
 	append_addrs(db, "fabric.address", &g_config.info.bind);
-	info_append_int(db, "fabric.port", g_config.fabric.port);
+	info_append_int(db, "fabric.port", g_config.fabric.bind_port);
 	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
 	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
 	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
@@ -1984,7 +1999,7 @@ info_network_config_get(cf_dyn_buf *db)
 	// Info:
 
 	append_addrs(db, "info.address", &g_config.info.bind);
-	info_append_int(db, "info.port", g_config.info.port);
+	info_append_int(db, "info.port", g_config.info.bind_port);
 }
 
 
@@ -2046,6 +2061,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "migrate-retransmit-ms", ns->migrate_retransmit_ms);
 	info_append_uint32(db, "migrate-sleep", ns->migrate_sleep);
 	info_append_uint32(db, "obj-size-hist-max", ns->obj_size_hist_max); // not original, may have been rounded
+	info_append_uint32(db, "partition-tree-locks", ns->tree_shared.n_lock_pairs);
+	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));
@@ -2245,6 +2262,17 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else {
 				goto Error;
 			}
+		}
+		else if (0 == as_info_parameter_get(params, "transaction-threads-per-queue", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			if (val < 1 || val > MAX_TRANSACTION_THREADS_PER_QUEUE) {
+				cf_warning(AS_INFO, "transaction-threads-per-queue must be between 1 and %u", MAX_TRANSACTION_THREADS_PER_QUEUE);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of transaction-threads-per-queue from %u to %d ", g_config.n_transaction_threads_per_queue, val);
+			as_tsvc_set_threads_per_queue((uint32_t)val);
 		}
 		else if (0 == as_info_parameter_get(params, "transaction-retry-ms", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
@@ -2446,12 +2474,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of migrate-max-num-incoming from %d to %d ", g_config.migrate_max_num_incoming, val);
 			g_config.migrate_max_num_incoming = val;
 		}
-		else if (0 == as_info_parameter_get(params, "migrate-rx-lifetime-ms", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || (0 > val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of migrate-rx-lifetime-ms from %d to %d ", g_config.migrate_rx_lifetime_ms, val);
-			g_config.migrate_rx_lifetime_ms = val;
-		}
 		else if (0 == as_info_parameter_get(params, "migrate-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (0 > val) || (MAX_NUM_MIGRATE_XMIT_THREADS < val))
 				goto Error;
@@ -2478,18 +2500,6 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of respond-client-on-master-completion from %s to %s", bool_val[g_config.respond_client_on_master_completion], context);
 				g_config.respond_client_on_master_completion = false;
-			}
-			else
-				goto Error;
-		}
-		else if (0 == as_info_parameter_get(params, "allow-inline-transactions", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of allow-inline-transactions from %s to %s", bool_val[g_config.allow_inline_transactions], context);
-				g_config.allow_inline_transactions = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of allow-inline-transactions from %s to %s", bool_val[g_config.allow_inline_transactions], context);
-				g_config.allow_inline_transactions = false;
 			}
 			else
 				goto Error;
@@ -4672,16 +4682,6 @@ info_interfaces_fn(void *unused)
 				g_serv_clear_std = format_services_addr(addrs, n_addrs, g_access.service.port, ',');
 			}
 
-			if (chg_any && g_access.alt_service.port != 0 &&
-					g_access.alt_service.addrs.n_addrs == 0) {
-				if (g_serv_clear_alt != NULL) {
-					cf_free(g_serv_clear_alt);
-				}
-
-				g_serv_clear_alt = format_services_addr(addrs, n_addrs, g_access.alt_service.port,
-						',');
-			}
-
 			if (chg_any && g_access.tls_service.port != 0 &&
 					g_access.tls_service.addrs.n_addrs == 0) {
 				if (g_serv_tls_std != NULL) {
@@ -4689,16 +4689,6 @@ info_interfaces_fn(void *unused)
 				}
 
 				g_serv_tls_std = format_services_addr(addrs, n_addrs, g_access.tls_service.port,
-						',');
-			}
-
-			if (chg_any && g_access.alt_tls_service.port != 0 &&
-					g_access.alt_tls_service.addrs.n_addrs == 0) {
-				if (g_serv_tls_alt != NULL) {
-					cf_free(g_serv_tls_alt);
-				}
-
-				g_serv_tls_alt = format_services_addr(addrs, n_addrs, g_access.alt_tls_service.port,
 						',');
 			}
 
@@ -4803,13 +4793,13 @@ compare_node_info_services(info_node_info *lhs, info_node_info *rhs)
 static void
 dump_node_info_services(info_node_info *info)
 {
-	cf_debug(AS_INFO, "Service address:   %s", cf_safe_string(info->service_addr));
-	cf_debug(AS_INFO, "Alternate address: %s", cf_safe_string(info->alternate_addr));
-	cf_debug(AS_INFO, "Clear, standard:   %s", cf_safe_string(info->services_clear_std));
-	cf_debug(AS_INFO, "TLS, standard:     %s", cf_safe_string(info->services_tls_std));
-	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_safe_string(info->services_clear_alt));
-	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_safe_string(info->services_tls_alt));
-	cf_debug(AS_INFO, "TLS name:          %s", cf_safe_string(info->tls_name));
+	cf_debug(AS_INFO, "Service address:   %s", cf_safe_string(info->service_addr, "NULL"));
+	cf_debug(AS_INFO, "Alternate address: %s", cf_safe_string(info->alternate_addr, "NULL"));
+	cf_debug(AS_INFO, "Clear, standard:   %s", cf_safe_string(info->services_clear_std, "NULL"));
+	cf_debug(AS_INFO, "TLS, standard:     %s", cf_safe_string(info->services_tls_std, "NULL"));
+	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_safe_string(info->services_clear_alt, "NULL"));
+	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_safe_string(info->services_tls_alt, "NULL"));
+	cf_debug(AS_INFO, "TLS name:          %s", cf_safe_string(info->tls_name, "NULL"));
 }
 
 // This reduce function will eliminate elements from the info hash

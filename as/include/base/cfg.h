@@ -88,14 +88,13 @@ typedef struct as_config_s {
 	uint32_t		paxos_single_replica_limit; // cluster size at which, and below, the cluster will run with replication factor 1
 	char*			pidfile;
 	int				n_service_threads;
-	int				n_transaction_queues;
-	int				n_transaction_threads_per_queue;
+	uint32_t		n_transaction_queues;
+	uint32_t		n_transaction_threads_per_queue;
 	int				n_proto_fd_max;
 
 	// Normally hidden:
 
 	// Note - advertise-ipv6 affects a cf_socket_ee.c global, so can't be here.
-	PAD_BOOL		allow_inline_transactions;
 	int				n_batch_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
 	uint32_t		batch_max_requests; // maximum count of database requests in a single batch
@@ -115,7 +114,6 @@ typedef struct as_config_s {
 	PAD_BOOL		ldt_benchmarks;
 	// Note - log-local-time affects a cf_fault.c global, so can't be here.
 	int				migrate_max_num_incoming;
-	int				migrate_rx_lifetime_ms; // for debouncing re-tansmitted migrate start messages
 	int				n_migrate_threads;
 	char*			node_id_interface;
 	uint32_t		nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
@@ -179,8 +177,6 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
-	cf_serv_spec	alt_service; // alternate client service
-	cf_serv_spec	alt_tls_service; // alternate TLS client service
 	char*			tls_name; // TLS name
 	cf_serv_spec	tls_service; // TLS client service
 
@@ -258,7 +254,7 @@ typedef struct as_config_s {
 as_config* as_config_init(const char* config_file);
 void as_config_post_process(as_config* c, const char* config_file);
 
-bool as_config_cluster_name_get(char* cluster_name);
+void as_config_cluster_name_get(char* cluster_name);
 bool as_config_cluster_name_set(const char* cluster_name);
 bool as_config_cluster_name_matches(const char* cluster_name);
 

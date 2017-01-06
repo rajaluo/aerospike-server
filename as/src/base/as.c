@@ -39,6 +39,7 @@
 #include "ai.h"
 #include "fault.h"
 #include "jem.h"
+#include "tls.h"
 #include "util.h"
 
 #include "base/asm.h"
@@ -280,6 +281,9 @@ main(int argc, char **argv)
 	// Start global stats at 0.
 	as_stats_init();
 
+	// Initialize the TLS library.
+	tls_check_init();
+	
 	int i;
 	int cmd_optidx;
 	const char *config_file = DEFAULT_CONFIG_FILE;

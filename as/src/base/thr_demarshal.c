@@ -42,6 +42,7 @@
 #include "fault.h"
 #include "hist.h"
 #include "socket.h"
+#include "tls.h"
 
 #include "base/as_stap.h"
 #include "base/batch.h"
@@ -452,6 +453,18 @@ thr_demarshal(void *unused)
 					continue;
 				}
 
+				// Perform the TLS accept (no-op for non TLS sockets).
+				// NOTE - We can't do this until the non-blocking is
+				// set (inside cf_socket_accept above).
+				if (ssock->ssl) {
+					int rv = tls_socket_accept(ssock, &csock, &sa);
+					if (rv != 1) {
+						cf_socket_close(&csock);
+						cf_socket_term(&csock);
+						continue;
+					}
+				}
+
 				// Create as_file_handle and queue it up in epoll_fd for further
 				// communication on one of the demarshal threads.
 				as_file_handle *fd_h = cf_rc_alloc(sizeof(as_file_handle));
@@ -551,6 +564,19 @@ thr_demarshal(void *unused)
 					if (fd_h->proto_unread != 0) {
 						thr_demarshal_rearm(fd_h);
 						goto NextEvent;
+					}
+
+					// Check for a TLS ClientHello arriving at a non-TLS socket. Heuristic:
+					//   - tls[0] == ContentType.handshake (22)
+					//   - tls[1] == ProtocolVersion.major (3)
+					//   - tls[5] == HandshakeType.client_hello (1)
+
+					uint8_t *tls = (uint8_t *)&fd_h->proto_hdr;
+
+					if (tls[0] == 22 && tls[1] == 3 && tls[5] == 1) {
+						cf_warning(AS_DEMARSHAL, "ignoring incoming TLS connection from %s", fd_h->client);
+						goto NextEvent_FD_Cleanup;
+
 					}
 
 					if (fd_h->proto_hdr.version != PROTO_VERSION &&
@@ -709,11 +735,17 @@ thr_demarshal(void *unused)
 
 				ASD_TRANS_DEMARSHAL(nodeid, (uint64_t) tr.msgp, as_transaction_trid(&tr));
 
-				// Either process the transaction directly in this thread,
-				// or queue it for processing by another thread (tsvc/info).
-				if (0 != thr_tsvc_process_or_enqueue(&tr)) {
-					cf_warning(AS_DEMARSHAL, "Failed to queue transaction to the service thread");
-					goto NextEvent_FD_Cleanup;
+				// Directly process or queue the transaction.
+				if (g_config.n_namespaces_in_memory != 0 &&
+						(g_config.n_namespaces_not_in_memory == 0 ||
+								// Only peek if at least one of each config.
+								as_msg_peek_data_in_memory(&tr.msgp->msg))) {
+					// Data-in-memory namespace - process in this thread.
+					as_tsvc_process_transaction(&tr);
+				}
+				else {
+					// Data-not-in-memory namespace - process via queues.
+					as_tsvc_enqueue(&tr);
 				}
 
 				// Jump the proto message free & FD cleanup. If we get here, the
@@ -752,20 +784,28 @@ NextEvent:
 }
 
 static void
-add_local(cf_serv_cfg *serv_cfg, cf_sock_owner owner, cf_ip_port port)
+add_local(cf_serv_cfg *serv_cfg, cf_sock_owner owner)
 {
 	// Localhost will only be added to the addresses, if we're not yet listening
 	// on wildcard ("any") or localhost.
+
+	cf_ip_port port = 0;
 
 	for (uint32_t i = 0; i < serv_cfg->n_cfgs; ++i) {
 		if (serv_cfg->cfgs[i].owner != owner) {
 			continue;
 		}
 
+		port = serv_cfg->cfgs[i].port;
+
 		if (cf_ip_addr_is_any(&serv_cfg->cfgs[i].addr) ||
 				cf_ip_addr_is_local(&serv_cfg->cfgs[i].addr)) {
 			return;
 		}
+	}
+
+	if (port == 0) {
+		return;
 	}
 
 	cf_sock_cfg sock_cfg;
@@ -794,11 +834,8 @@ as_demarshal_start()
 		cf_crash(AS_DEMARSHAL, "Couldn't create reaper free list");
 	}
 
-	add_local(&g_service_bind, CF_SOCK_OWNER_SERVICE, g_access.service.port);
-
-	if (g_access.tls_service.port != 0) {
-		add_local(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS, g_access.tls_service.port);
-	}
+	add_local(&g_service_bind, CF_SOCK_OWNER_SERVICE);
+	add_local(&g_service_bind, CF_SOCK_OWNER_SERVICE_TLS);
 
 	as_xdr_info_port(&g_service_bind);
 

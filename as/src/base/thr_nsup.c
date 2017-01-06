@@ -572,7 +572,8 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 
 			if (cb_info.num_deleted != 0) {
 				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, state %d, %u records remaining",
-						ns->name, n, cb_info.num_deleted, rsv.state, rsv.tree->elements);
+						ns->name, n, cb_info.num_deleted, rsv.state,
+						as_index_tree_size(rsv.tree));
 			}
 
 			as_partition_release(&rsv);
@@ -674,7 +675,7 @@ run_nsup_delete(void* pv_data)
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_DIGEST_RIPE);
 
-		thr_tsvc_enqueue(&tr);
+		as_tsvc_enqueue(&tr);
 
 		// Throttle - don't overwhelm tsvc queue.
 		if (g_config.nsup_delete_sleep != 0) {

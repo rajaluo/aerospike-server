@@ -1,7 +1,7 @@
 /*
- * thr_tsvc.h
+ * tls_mode.h
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,14 +22,8 @@
 
 #pragma once
 
-#include <stdint.h>
-#include "base/transaction.h"
-
-void as_tsvc_init();
-void as_tsvc_enqueue(as_transaction *tr);
-void as_tsvc_set_threads_per_queue(uint32_t n_threads);
-int as_tsvc_queue_get_size();
-void as_tsvc_process_transaction(as_transaction *tr);
-
-#define MAX_TRANSACTION_QUEUES 128
-#define MAX_TRANSACTION_THREADS_PER_QUEUE 256
+typedef enum cf_tls_mode_enum {
+	CF_TLS_MODE_AUTHENTICATE_BOTH,
+	CF_TLS_MODE_AUTHENTICATE_SERVER,
+	CF_TLS_MODE_ENCRYPT_ONLY
+} cf_tls_mode;

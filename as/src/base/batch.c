@@ -746,7 +746,7 @@ as_batch_queue_task(as_transaction* btr)
 	uint32_t tran_row = 0;
 	uint8_t info = *data++;  // allow transaction inline.
 
-	bool allow_inline = (g_config.allow_inline_transactions && g_config.n_namespaces_in_memory != 0 && info);
+	bool allow_inline = (g_config.n_namespaces_in_memory != 0 && info);
 	bool check_inline = (allow_inline && g_config.n_namespaces_not_in_memory != 0);
 	bool should_inline = (allow_inline && g_config.n_namespaces_not_in_memory == 0);
 
@@ -850,11 +850,11 @@ as_batch_queue_task(as_transaction* btr)
 			// We need each transaction to be initialized to proper values.
 			as_transaction tmp;
 			memcpy(&tmp, &tr, sizeof(as_transaction));
-			process_transaction(&tmp);
+			as_tsvc_process_transaction(&tmp);
 		}
 		else {
 			// Queue transaction to be processed by a transaction thread.
-			thr_tsvc_enqueue(&tr);
+			as_tsvc_enqueue(&tr);
 		}
 		tran_row++;
 	}

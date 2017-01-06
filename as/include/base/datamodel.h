@@ -81,6 +81,7 @@
  * Subrecord Digest Scramble Position
  */
 // [0-1] For Partitionid
+// [1-2] For tree sprigs and locks
 // [2-3] For the Lock
 // [4-6] Scrambled bytes
 #define DIGEST_SCRAMBLE_BYTE1       4
@@ -706,6 +707,28 @@ typedef struct ns_ldt_stats_s {
 } ns_ldt_stats;
 
 
+// TODO - would be nice to put this in as_index.h:
+// Callback invoked when as_index is destroyed.
+typedef void (*as_index_value_destructor) (struct as_index_s* v, void* udata);
+
+// TODO - would be nice to put this in as_index.h:
+typedef struct as_index_tree_shared_s {
+	as_index_value_destructor destructor;
+	void*			destructor_udata;
+
+	// Number of lock pairs and sprigs per partition tree.
+	uint32_t		n_lock_pairs;
+	uint32_t		n_sprigs;
+
+	// Bit-shifts used to calculate indexes from digest bits.
+	uint32_t		locks_shift;
+	uint32_t		sprigs_shift;
+
+	// Offset into as_index_tree struct's variable-sized data.
+	uint32_t		sprigs_offset;
+} as_index_tree_shared;
+
+
 struct as_namespace_s {
 
 	char name[AS_ID_NAMESPACE_SZ];
@@ -721,22 +744,25 @@ struct as_namespace_s {
 	// Pointer to the persistent memory "base" block.
 	uint8_t*		xmem_base;
 
-	// Pointer to array of partition tree info in persistent memory base block.
-	as_treex*		tree_roots;
-	as_treex*		sub_tree_roots;
+	// Pointer to partition tree info in persistent memory "treex" block.
+	as_treex*		xmem_roots;
+	as_treex*		sub_tree_roots; // pointer within treex block
 
 	// Pointer to arena structure (not stages) in persistent memory base block.
 	cf_arenax*		arena;
 
-	// Pointer to bin name vmap in persistent memory.
+	// Pointer to bin name vmap in persistent memory base block.
 	cf_vmapx*		p_bin_name_vmap;
 
-	// Pointer to set information vmap in persistent memory.
+	// Pointer to set information vmap in persistent memory base block.
 	cf_vmapx*		p_sets_vmap;
 
 	// Temporary array of sets to hold config values until sets vmap is ready.
 	as_set*			sets_cfg_array;
 	uint32_t		sets_cfg_count;
+
+	// Configuration flags relevant for warm restart.
+	uint32_t		xmem_flags;
 
 	//--------------------------------------------
 	// Cold-start.
@@ -766,6 +792,9 @@ struct as_namespace_s {
 	// Cached partition ownership info for clients.
 	client_replica_map* replica_maps;
 
+	// Common partition tree information. Contains two configuration items.
+	as_index_tree_shared tree_shared;
+
 	//--------------------------------------------
 	// Storage management.
 	//
@@ -774,7 +803,6 @@ struct as_namespace_s {
 	void*			storage_private;
 
 	uint64_t		ssd_size; // discovered (and rounded) size of drive
-	int				storage_min_free_wblocks; // the number of wblocks per device to "reserve"
 	int				storage_last_avail_pct; // most recently calculated available percent
 	int				storage_max_write_q; // storage_max_write_cache is converted to this
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done
@@ -1179,15 +1207,18 @@ typedef enum {
 	AS_SET_ENABLE_XDR_FALSE = 2
 } as_set_enable_xdr_flag;
 
+// Caution - changing this struct could break warm restart.
 struct as_set_s {
 	char			name[AS_SET_NAME_MAX_SIZE];
 	cf_atomic64		n_objects;
+	cf_atomic64		n_tombstones;		// relevant only for enterprise edition
 	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
 	cf_atomic64		stop_writes_count;	// restrict number of records in a set
-	cf_atomic32		n_tombstones;		// relevant only for enterprise edition
+	cf_atomic64		delete_time;		// TODO - implement
 	cf_atomic32		deleted;			// empty a set (triggered via info command only)
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
 	cf_atomic32		enable_xdr;			// white-list (AS_SET_ENABLE_XDR_TRUE) or black-list (AS_SET_ENABLE_XDR_FALSE) a set for XDR replication
+	uint8_t padding[12];
 };
 
 static inline bool
@@ -1258,9 +1289,8 @@ extern int as_namespace_check_set_limits(as_set * p_set, as_namespace * ns);
 // Persistent Memory Management
 
 struct as_treex_s {
-	cf_arenax_handle sentinel_h;
-	cf_arenax_handle root_h;
-};
+	uint64_t root_h: 40;
+} __attribute__ ((__packed__));
 
 void as_namespace_xmem_trusted(as_namespace *ns);
 

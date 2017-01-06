@@ -102,11 +102,11 @@ cf_process_daemonize(int *fd_ignore_list, int list_size)
 	snprintf(cfile, 128, "/tmp/aerospike-console.%d", getpid());
 
 	if (-1 == (FD = open(cfile, O_WRONLY|O_CREAT|O_APPEND, S_IRUSR|S_IWUSR))) {
-		cf_crash(CF_MISC, "couldn't open console redirection file: %s", cf_strerror(errno));
+		cf_crash(CF_MISC, "couldn't open console redirection file %s: %s", cfile, cf_strerror(errno));
 	}
 
 	if (-1 == chmod(cfile, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) {
-		cf_crash(CF_MISC, "couldn't set mode on console redirection file: %s", cf_strerror(errno));
+		cf_crash(CF_MISC, "couldn't set mode on console redirection file %s: %s", cfile, cf_strerror(errno));
 	}
 
 	// Redirect stdout, stderr, and stdin to the console file.

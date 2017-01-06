@@ -102,7 +102,13 @@ typedef enum {
 	XDR_CASE_DC_NODE_ADDRESS_PORT,
 	XDR_CASE_DC_INT_EXT_IPMAP,
 	XDR_CASE_DC_SECURITY_CONFIG_FILE,
-	XDR_CASE_DC_USE_ALTERNATE_SERVICES
+	XDR_CASE_DC_USE_ALTERNATE_SERVICES,
+	XDR_CASE_TLS_NODE,
+	XDR_CASE_TLS_CAFILE,
+	XDR_CASE_TLS_CAPATH,
+	XDR_CASE_TLS_CERTFILE,
+	XDR_CASE_TLS_KEYFILE,
+	XDR_CASE_TLS_CERT_BLACKLIST
 } xdr_cfg_case_id;
 
 /* Configuration parser token plus case-identifier pair. The server (cfg.c)
@@ -161,8 +167,6 @@ typedef struct xdr_config {
 	// Ring buffer configuration
 	char 	*xdr_digestlog_path;
 	uint64_t xdr_digestlog_file_size;
-	bool 	xdr_digestlog_overwrite;
-	bool	xdr_digestlog_persist;
 
 	int	xdr_info_port;
 	int	xdr_max_ship_throughput;

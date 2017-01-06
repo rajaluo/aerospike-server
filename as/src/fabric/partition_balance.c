@@ -1657,20 +1657,17 @@ set_partition_absent_lockfree(as_partition* p, as_namespace* ns, bool flush)
 void
 drop_trees(as_partition* p, as_namespace* ns)
 {
-	uint32_t pid = p->id;
 	as_index_tree* temp = p->vp;
 
-	p->vp = as_index_tree_create(ns->arena,
-			(as_index_value_destructor)&as_record_destroy, ns,
-			ns->tree_roots ? &ns->tree_roots[pid] : NULL);
+	p->vp = as_index_tree_create(&ns->tree_shared, ns->arena);
 	as_index_tree_release(temp);
 
-	as_index_tree* sub_temp = p->sub_vp;
+	if (ns->ldt_enabled) {
+		as_index_tree* sub_temp = p->sub_vp;
 
-	p->sub_vp = as_index_tree_create(ns->arena,
-			(as_index_value_destructor)&as_record_destroy, ns,
-			ns->sub_tree_roots ? &ns->sub_tree_roots[pid] : NULL);
-	as_index_tree_release(sub_temp);
+		p->sub_vp = as_index_tree_create(&ns->tree_shared, ns->arena);
+		as_index_tree_release(sub_temp);
+	}
 
 	// TODO - consider p->n_tombstones?
 	cf_atomic64_set(&p->max_void_time, 0);

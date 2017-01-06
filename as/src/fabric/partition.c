@@ -91,22 +91,37 @@ as_partition_init(as_namespace* ns, uint32_t pid)
 	p->state = AS_PARTITION_STATE_ABSENT;
 
 	if (ns->cold_start) {
-		p->vp = as_index_tree_create(ns->arena,
-				(as_index_value_destructor)&as_record_destroy, ns,
-				ns->tree_roots ? &ns->tree_roots[pid] : NULL);
+		p->vp = as_index_tree_create(&ns->tree_shared, ns->arena);
 
-		p->sub_vp = as_index_tree_create(ns->arena,
-				(as_index_value_destructor)&as_record_destroy, ns,
-				ns->sub_tree_roots ? &ns->sub_tree_roots[pid] : NULL);
+		if (ns->ldt_enabled) {
+			p->sub_vp = as_index_tree_create(&ns->tree_shared, ns->arena);
+		}
 	}
 	else {
-		p->vp = as_index_tree_resume(ns->arena,
-				(as_index_value_destructor)&as_record_destroy, ns,
-				&ns->tree_roots[pid]);
+		p->vp = as_index_tree_resume(&ns->tree_shared, ns->arena,
+				&ns->xmem_roots[pid * ns->tree_shared.n_sprigs]);
 
-		p->sub_vp = as_index_tree_resume(ns->arena,
-				(as_index_value_destructor)&as_record_destroy, ns,
-				&ns->sub_tree_roots[pid]);
+		if (ns->ldt_enabled) {
+			p->sub_vp = as_index_tree_resume(&ns->tree_shared, ns->arena,
+					&ns->sub_tree_roots[pid * ns->tree_shared.n_sprigs]);
+		}
+	}
+}
+
+
+void
+as_partition_shutdown(as_namespace* ns, uint32_t pid)
+{
+	as_partition* p = &ns->partitions[pid];
+
+	pthread_mutex_lock(&p->lock);
+
+	as_index_tree_shutdown(p->vp,
+			&ns->xmem_roots[pid * ns->tree_shared.n_sprigs]);
+
+	if (ns->ldt_enabled) {
+		as_index_tree_shutdown(p->sub_vp,
+				&ns->sub_tree_roots[pid * ns->tree_shared.n_sprigs]);
 	}
 }
 
@@ -276,19 +291,29 @@ as_partition_get_master_prole_stats(as_namespace* ns, repl_stats* p_stats)
 
 		if (am_master) {
 			int64_t n_tombstones = (int64_t)p->n_tombstones;
-			int64_t n_objects = (int64_t)p->vp->elements - n_tombstones;
+			int64_t n_objects =
+					(int64_t)as_index_tree_size(p->vp) - n_tombstones;
 
 			p_stats->n_master_objects += n_objects > 0 ?
 					(uint64_t)n_objects : 0;
-			p_stats->n_master_sub_objects += p->sub_vp->elements;
+
+			if (ns->ldt_enabled) {
+				p_stats->n_master_sub_objects += as_index_tree_size(p->sub_vp);
+			}
+
 			p_stats->n_master_tombstones += (uint64_t)n_tombstones;
 		}
 		else if (self_n > 0 && p->origin == 0) {
 			int64_t n_tombstones = (int64_t)p->n_tombstones;
-			int64_t n_objects = (int64_t)p->vp->elements - n_tombstones;
+			int64_t n_objects =
+					(int64_t)as_index_tree_size(p->vp) - n_tombstones;
 
 			p_stats->n_prole_objects += n_objects > 0 ? (uint64_t)n_objects : 0;
-			p_stats->n_prole_sub_objects += p->sub_vp->elements;
+
+			if (ns->ldt_enabled) {
+				p_stats->n_prole_sub_objects += as_index_tree_size(p->sub_vp);
+			}
+
 			p_stats->n_prole_tombstones += (uint64_t)n_tombstones;
 		}
 
@@ -437,7 +462,10 @@ void
 as_partition_release(as_partition_reservation* rsv)
 {
 	as_index_tree_release(rsv->tree);
-	as_index_tree_release(rsv->sub_tree);
+
+	if (rsv->ns->ldt_enabled) {
+		as_index_tree_release(rsv->sub_tree);
+	}
 }
 
 
@@ -487,9 +515,10 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64_x(db, p->pending_immigrations);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint32(db, p->vp->elements);
+			cf_dyn_buf_append_uint32(db, as_index_tree_size(p->vp));
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint32(db, p->sub_vp->elements);
+			cf_dyn_buf_append_uint32(db, ns->ldt_enabled ?
+					as_index_tree_size(p->sub_vp) : 0);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->n_tombstones);
 			cf_dyn_buf_append_char(db, ':');
@@ -759,7 +788,10 @@ partition_reserve_read_write(as_namespace* ns, uint32_t pid,
 	}
 
 	cf_rc_reserve(p->vp);
-	cf_rc_reserve(p->sub_vp);
+
+	if (ns->ldt_enabled) {
+		cf_rc_reserve(p->sub_vp);
+	}
 
 	rsv->ns = ns;
 	rsv->p = p;
@@ -787,7 +819,10 @@ partition_reserve_lockfree(as_namespace* ns, uint32_t pid,
 	as_partition* p = &ns->partitions[pid];
 
 	cf_rc_reserve(p->vp);
-	cf_rc_reserve(p->sub_vp);
+
+	if (ns->ldt_enabled) {
+		cf_rc_reserve(p->sub_vp);
+	}
 
 	rsv->ns = ns;
 	rsv->p = p;
