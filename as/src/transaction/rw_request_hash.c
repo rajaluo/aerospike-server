@@ -303,11 +303,14 @@ retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 	if (rw->xmit_ms < now->now_ms) {
 		pthread_mutex_lock(&rw->lock);
 
-		rw->xmit_ms = now->now_ms + rw->retry_interval_ms;
-		rw->retry_interval_ms *= 2;
+		if (rw->from.any) {
+			rw->xmit_ms = now->now_ms + rw->retry_interval_ms;
+			rw->retry_interval_ms *= 2;
 
-		send_rw_messages(rw);
-		update_retransmit_stats(rw);
+			send_rw_messages(rw);
+			update_retransmit_stats(rw);
+		}
+		// else - lost race against dup-res or repl-write callback.
 
 		pthread_mutex_unlock(&rw->lock);
 	}
@@ -319,6 +322,11 @@ retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 void
 update_retransmit_stats(const rw_request* rw)
 {
+	// Note - rw->msgp can be null if it's a ship-op.
+	if (! rw->msgp) {
+		return;
+	}
+
 	as_namespace* ns = rw->rsv.ns;
 	as_msg* m = &rw->msgp->msg;
 	bool is_dup_res = rw->repl_write_cb == NULL;
