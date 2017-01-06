@@ -1411,6 +1411,15 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 	if (rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
 			(void **)&immig) == RCHASH_OK) {
+		if (immig->start_result != AS_MIGRATE_OK || immig->start_recv_ms == 0) {
+			// If this immigration didn't start and reserve a partition, it's
+			// likely in the hash on a retransmit and this insert is for the
+			// original - ignore, and let this immigration proceed.
+			immigration_release(immig);
+			as_fabric_msg_put(m);
+			return;
+		}
+
 		cf_atomic_int_incr(&immig->rsv.ns->migrate_record_receives);
 
 		if (immig->cluster_key != as_paxos_get_cluster_key()) {
