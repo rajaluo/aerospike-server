@@ -2231,7 +2231,7 @@ cf_inter_min_mtu(void)
 	for (uint32_t i = 0; i < inter.n_inters; ++i) {
 		inter_entry *entry = &inter.inters[i];
 
-		if (entry->mtu < min) {
+		if (entry->up && entry->mtu < min) {
 			min = entry->mtu;
 		}
 	}
