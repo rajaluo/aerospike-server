@@ -46,4 +46,4 @@ transaction_status as_delete_start(as_transaction* tr);
 
 bool delete_storage_overloaded(as_transaction* tr);
 transaction_status delete_master(as_transaction* tr, rw_request* rw);
-transaction_status drop_master(as_transaction* tr, as_index_ref* r_ref);
+transaction_status drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw);

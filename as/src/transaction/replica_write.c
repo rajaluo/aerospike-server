@@ -86,9 +86,8 @@ bool ldt_get_prole_version(as_partition_reservation* rsv, cf_digest* keyd,
 void ldt_set_prole_subrec_version(uint32_t info, const ldt_prole_info* linfo,
 		cf_digest* keyd);
 
-int delete_replica(as_partition_reservation* rsv, cf_digest* keyd,
-		bool is_subrec, bool is_nsup_delete, bool is_xdr_op, cf_node master);
-
+int drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
+		bool is_nsup_delete, bool is_xdr_op, cf_node master);
 int write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		uint8_t* pickled_buf, size_t pickled_sz,
 		const as_rec_props* p_rec_props, as_generation generation,
@@ -109,6 +108,9 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	else if (! (rw->dest_msg = as_fabric_msg_get(M_TYPE_RW))) {
 		return false;
 	}
+
+	// TODO - remove this when we're comfortable:
+	cf_assert(rw->pickled_buf, AS_RW, "making repl-write msg with null pickle");
 
 	as_namespace* ns = tr->rsv.ns;
 	msg* m = rw->dest_msg;
@@ -148,41 +150,31 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 		return true;
 	}
 
+	// TODO - deal with this on the write-becomes-drop & udf-drop paths?
+	clear_delete_response_metadata(rw, tr);
+
 	uint32_t info = pack_info_bits(tr, rw->has_udf);
 
-	if (rw->pickled_buf) {
-		// Replica writes.
+	repl_write_flag_pickle(tr, rw->pickled_buf, &info);
 
-		clear_delete_response_metadata(rw, tr);
-		repl_write_flag_pickle(tr, rw->pickled_buf, &info);
+	bool is_sub;
+	bool is_parent;
 
-		bool is_sub;
-		bool is_parent;
+	as_ldt_get_property(&rw->pickled_rec_props, &is_parent, &is_sub);
+	info |= pack_ldt_info_bits(tr, is_parent, is_sub);
 
-		as_ldt_get_property(&rw->pickled_rec_props, &is_parent, &is_sub);
-		info |= pack_ldt_info_bits(tr, is_parent, is_sub);
+	msg_set_buf(m, RW_FIELD_RECORD, (void*)rw->pickled_buf, rw->pickled_sz,
+			MSG_SET_HANDOFF_MALLOC);
 
-		msg_set_buf(m, RW_FIELD_RECORD, (void*)rw->pickled_buf, rw->pickled_sz,
-				MSG_SET_HANDOFF_MALLOC);
+	// Make sure destructor doesn't free this.
+	rw->pickled_buf = NULL;
 
-		// Make sure destructor doesn't free this.
-		rw->pickled_buf = NULL;
+	if (rw->pickled_rec_props.p_data) {
+		msg_set_buf(m, RW_FIELD_REC_PROPS, rw->pickled_rec_props.p_data,
+				rw->pickled_rec_props.size, MSG_SET_HANDOFF_MALLOC);
 
-		if (rw->pickled_rec_props.p_data) {
-			msg_set_buf(m, RW_FIELD_REC_PROPS, rw->pickled_rec_props.p_data,
-					rw->pickled_rec_props.size, MSG_SET_HANDOFF_MALLOC);
-
-			// Make sure destructor doesn't free the data.
-			as_rec_props_clear(&rw->pickled_rec_props);
-		}
-	}
-	else {
-		// Replica deletes.
-
-		msg_set_buf(m, RW_FIELD_AS_MSG, (void*)tr->msgp,
-				as_proto_size_get(&tr->msgp->proto), MSG_SET_COPY);
-
-		info |= pack_ldt_info_bits(tr, false, false);
+		// Make sure destructor doesn't free the data.
+		as_rec_props_clear(&rw->pickled_rec_props);
 	}
 
 	// TODO - add 0 check if older code handler doesn't require field.
@@ -319,15 +311,18 @@ repl_write_handle_op(cf_node node, msg* m)
 			MSG_GET_DIRECT) == 0) {
 		// <><><><><><>  Delete Operation  <><><><><><>
 
-		// TODO - does this really need to be here? Just to fill linfo?
+		// In rolling upgrades, older nodes send replica deletes here.
+
+		// TODO - does this really need to be here? Seems sender never sets LDT
+		// parent flag, so always returns true. Also, linfo never set or used.
 		if (! ldt_get_prole_version(&rsv, keyd, &linfo, info, NULL, false)) {
 			as_partition_release(&rsv);
 			send_repl_write_ack(node, m, AS_PROTO_RESULT_OK); // ???
 			return;
 		}
 
-		result = delete_replica(&rsv, keyd,
-				(info & RW_INFO_LDT_SUBREC) != 0,
+		result = drop_replica(&rsv, keyd,
+				(info & RW_INFO_LDT_SUBREC) != 0, // but sender never sets it
 				(info & RW_INFO_NSUP_DELETE) != 0,
 				as_msg_is_xdr(&msgp->msg),
 				node);
@@ -335,6 +330,19 @@ repl_write_handle_op(cf_node node, msg* m)
 	else if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
 			&pickled_sz, MSG_GET_DIRECT) == 0) {
 		// <><><><><><>  Write Pickle  <><><><><><>
+
+		if (repl_write_pickle_is_drop(pickled_buf, info)) {
+			result = drop_replica(&rsv, keyd,
+					(info & RW_INFO_LDT_SUBREC) != 0,
+					(info & RW_INFO_NSUP_DELETE) != 0,
+					as_msg_is_xdr(&msgp->msg),
+					node);
+
+			as_partition_release(&rsv);
+			send_repl_write_ack(node, m, result);
+
+			return;
+		}
 
 		as_generation generation;
 
@@ -794,7 +802,7 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 
 	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
 			MSG_GET_DIRECT) == 0) {
-		delete_replica(rsv, keyd,
+		drop_replica(rsv, keyd,
 				(info & RW_INFO_LDT_SUBREC) != 0,
 				(info & RW_INFO_NSUP_DELETE) != 0,
 				as_msg_is_xdr(&msgp->msg),
@@ -909,11 +917,11 @@ ldt_set_prole_subrec_version(uint32_t info, const ldt_prole_info* linfo,
 
 
 //==========================================================
-// Local helpers - delete replicas.
+// Local helpers - drop  or write replicas.
 //
 
 int
-delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
+drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 		bool is_nsup_delete, bool is_xdr_op, cf_node master)
 {
 	// Shortcut pointers & flags.
@@ -954,10 +962,6 @@ delete_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 	return AS_PROTO_RESULT_OK;
 }
 
-
-//==========================================================
-// Local helpers - write replicas.
-//
 
 int
 write_replica(as_partition_reservation* rsv, cf_digest* keyd,
@@ -1102,15 +1106,14 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		}
 	}
 
-	bool is_delete = as_record_apply_replica(&rd, info, tree);
+	bool is_durable_delete = as_record_apply_replica(&rd, info, tree);
 
 	uint16_t set_id = as_index_get_set_id(r);
 	xdr_op_type op_type = XDR_OP_TYPE_WRITE;
 
-	if (is_delete) {
+	if (is_durable_delete) {
 		generation = 0;
-		op_type = rd.is_durable_delete ?
-				XDR_OP_TYPE_DURABLE_DELETE : XDR_OP_TYPE_DROP;
+		op_type = XDR_OP_TYPE_DURABLE_DELETE;
 	}
 
 	as_storage_record_adjust_mem_stats(&rd, memory_bytes);
@@ -1118,7 +1121,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	as_record_done(&r_ref, ns);
 
 	// Don't send an XDR delete if it's disallowed.
-	if (is_delete && ! is_xdr_delete_shipping_enabled()) {
+	if (is_durable_delete && ! is_xdr_delete_shipping_enabled()) {
 		// TODO - should we also not ship if there was no record here before?
 		return AS_PROTO_RESULT_OK;
 	}

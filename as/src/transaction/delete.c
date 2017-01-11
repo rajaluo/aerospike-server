@@ -377,7 +377,7 @@ delete_timeout_cb(rw_request* rw)
 //
 
 transaction_status
-drop_master(as_transaction* tr, as_index_ref* r_ref)
+drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 {
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
@@ -414,6 +414,15 @@ drop_master(as_transaction* tr, as_index_ref* r_ref)
 
 		as_storage_record_close(&rd);
 	}
+
+	// Generate a binless pickle. but don't generate pickled rec-props - these
+	// are useless for a drop.
+	rw->pickled_sz = sizeof(uint16_t);
+	rw->pickled_buf = cf_malloc(rw->pickled_sz);
+
+	cf_assert(rw->pickled_buf, AS_RW, "failed pickle allocation");
+
+	*(uint16_t*)rw->pickled_buf = 0;
 
 	// Save the set-ID for XDR.
 	uint16_t set_id = as_index_get_set_id(r);

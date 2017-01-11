@@ -65,5 +65,5 @@ delete_master(as_transaction* tr, rw_request* rw)
 		return TRANS_DONE_ERROR;
 	}
 
-	return drop_master(tr, &r_ref);
+	return drop_master(tr, &r_ref, rw);
 }

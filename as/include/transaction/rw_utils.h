@@ -145,3 +145,4 @@ void dup_res_flag_pickle(const uint8_t* buf, uint32_t* info);
 bool dup_res_ignore_pickle(const uint8_t* buf, const msg* m);
 
 void repl_write_flag_pickle(const as_transaction* tr, const uint8_t* buf, uint32_t* info);
+bool repl_write_pickle_is_drop(const uint8_t* buf, uint32_t info);

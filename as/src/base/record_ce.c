@@ -81,9 +81,7 @@ as_record_drop_stats(as_record* r, as_namespace* ns)
 void
 as_record_apply_pickle(as_storage_rd* rd)
 {
-	if (! as_bin_inuse_has(rd)) {
-		cf_crash(AS_RECORD, "should not be applying binless pickle");
-	}
+	cf_assert(as_bin_inuse_has(rd), AS_RECORD, "unexpected binless pickle");
 
 	as_storage_record_write(rd);
 }
@@ -92,11 +90,8 @@ as_record_apply_pickle(as_storage_rd* rd)
 bool
 as_record_apply_replica(as_storage_rd* rd, uint32_t info, as_index_tree* tree)
 {
-	if (! as_bin_inuse_has(rd)) {
-		// Drop signaled by master deleting last bin.
-		as_index_delete(tree, &rd->keyd);
-		return true;
-	}
+	// Should already have handled drop.
+	cf_assert(as_bin_inuse_has(rd), AS_RECORD, "unexpected binless pickle");
 
 	as_storage_record_write(rd);
 

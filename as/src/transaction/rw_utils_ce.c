@@ -119,3 +119,10 @@ repl_write_flag_pickle(const as_transaction* tr, const uint8_t* buf,
 {
 	// Do nothing.
 }
+
+
+bool
+repl_write_pickle_is_drop(const uint8_t* buf, uint32_t info)
+{
+	return as_record_pickle_is_binless(buf);
+}
