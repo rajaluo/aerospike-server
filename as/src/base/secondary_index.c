@@ -2803,7 +2803,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			srange->isrange    = FALSE;
 
 			if (startl >= AS_SINDEX_MAX_STRING_KSIZE) {
-				cf_warning(AS_SINDEX, "Out of bound query key size %u", startl);
+				cf_warning(AS_SINDEX, "Query on bin %s fails. Value length %u too long.", binname, startl);
 				goto Cleanup;
 			}
 			uint32_t endl	   = ntohl(*((uint32_t *)data));
@@ -4059,6 +4059,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, const as_bin *b, as_sindex_bin * sbin
 
 				if (valsz > AS_SINDEX_MAX_STRING_KSIZE) {
 					cf_warning( AS_SINDEX, "sindex key size out of bounds %d ", valsz);
+					cf_warning(AS_SINDEX, "Sindex on bin %s fails. Value length %u too long.", imd->bname, valsz);
 				}
 				else {
 					cf_digest buf_dig;
