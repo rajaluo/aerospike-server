@@ -171,6 +171,7 @@ as_sindex__populate_fn(void *param)
 			cf_debug(AS_SINDEX, "Populating index %s", si->imd->iname);
 			// should set under a lock
 			si->flag |= AS_SINDEX_FLAG_POPULATING;
+			si->stats.recs_pending = si->ns->n_objects;
 			as_sbld_build(si);
 		}
 	}
