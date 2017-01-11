@@ -343,6 +343,7 @@ as_udf_start(as_transaction* tr)
 	// If we don't need replica writes, transaction is finished.
 	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
+		clear_delete_response_metadata(rw, tr);
 		send_udf_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey, rw);
 		return TRANS_DONE_SUCCESS;
@@ -418,7 +419,7 @@ start_udf_repl_write(rw_request* rw, as_transaction* tr)
 {
 	// Finish initializing rw, construct and send repl-write message.
 
-	if (! repl_write_make_message(rw, tr)) { // TODO - split this?
+	if (! repl_write_make_message(rw, tr)) {
 		return false;
 	}
 
@@ -466,6 +467,7 @@ udf_dup_res_cb(rw_request* rw)
 
 	// If we don't need replica writes, transaction is finished.
 	if (rw->n_dest_nodes == 0) {
+		clear_delete_response_metadata(rw, &tr);
 		send_udf_response(&tr, &rw->response_db);
 		return true;
 	}
@@ -487,7 +489,7 @@ udf_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	// Recycle rw_request that was just used for duplicate resolution to now do
 	// replica writes. Note - we are under the rw_request lock here!
 
-	if (! repl_write_make_message(rw, tr)) { // TODO - split this?
+	if (! repl_write_make_message(rw, tr)) {
 		return false;
 	}
 
@@ -650,7 +652,7 @@ udf_master(rw_request* rw, as_transaction* tr)
 		rw->is_multiop = true;
 	}
 
-	// UDFs send original msg for replica deletes.
+	// UDFs send binless pickles for replica deletes.
 	// Note - not currently necessary to set this message flag.
 	if (UDF_OP_IS_DELETE(optype)) {
 		tr->msgp->msg.info2 |= AS_MSG_INFO2_DELETE;
