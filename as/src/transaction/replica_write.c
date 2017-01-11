@@ -335,7 +335,7 @@ repl_write_handle_op(cf_node node, msg* m)
 			result = drop_replica(&rsv, keyd,
 					(info & RW_INFO_LDT_SUBREC) != 0,
 					(info & RW_INFO_NSUP_DELETE) != 0,
-					as_msg_is_xdr(&msgp->msg),
+					(info & RW_INFO_XDR) != 0,
 					node);
 
 			as_partition_release(&rsv);

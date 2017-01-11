@@ -80,7 +80,7 @@ const msg_template rw_mt[] = {
 
 COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 
-#define RW_MSG_SCRATCH_SIZE 280 // 128 + 152 for prole deletes
+#define RW_MSG_SCRATCH_SIZE 128
 
 
 //==========================================================
