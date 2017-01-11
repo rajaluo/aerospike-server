@@ -307,7 +307,7 @@ CF_MUST_CHECK int32_t cf_inter_min_mtu(void);
 bool cf_inter_detect_changes(cf_ip_addr *addrs, uint32_t *n_addrs, uint32_t limit);
 bool cf_inter_detect_changes_legacy(cf_ip_addr *addrs, uint32_t *n_addrs, uint32_t limit);
 
-CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id);
+CF_MUST_CHECK int32_t cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, cf_ip_addr *rack_addr);
 
 #if defined CF_SOCKET_PRIVATE
 CF_MUST_CHECK size_t cf_socket_addr_len(const struct sockaddr* sa);
