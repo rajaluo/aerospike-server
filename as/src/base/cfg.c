@@ -104,7 +104,7 @@ void cfg_set_cluster_name(char* cluster_name);
 void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
 void create_and_check_hist(histogram** h, const char* name, histogram_scale scale);
 void cfg_create_all_histograms();
-int cfg_reset_self_node(as_config* config_p);
+int cfg_reset_self_node(as_config* config_p, cf_ip_addr *rack_addr);
 void cfg_init_serv_spec(cf_serv_spec* spec_p);
 void cfg_resolve_tls_name(as_config* config_p);
 
@@ -3448,7 +3448,9 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Setup performance metrics histograms.
 	cfg_create_all_histograms();
 
-	if (cf_node_id_get(c->fabric.bind_port, c->node_id_interface, &c->self_node) < 0) {
+	cf_ip_addr rack_addr;
+
+	if (cf_node_id_get(c->fabric.bind_port, c->node_id_interface, &c->self_node, &rack_addr) < 0) {
 		cf_crash_nostack(AS_CFG, "could not get node id");
 	}
 
@@ -3480,7 +3482,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		}
 
 		// If we got this far, then group/node should be ok.
-		cfg_reset_self_node(c);
+		cfg_reset_self_node(c, &rack_addr);
 	}
 	else if (AS_PAXOS_PROTOCOL_V4 == c->paxos_protocol) {
 		cf_crash_nostack(AS_CFG, "must only use Paxos protocol V4 with Rack Aware enabled");
@@ -4176,7 +4178,7 @@ cfg_create_all_histograms()
  * Bottom 32 bits: Node ID
  */
 int
-cfg_reset_self_node(as_config* config_p)
+cfg_reset_self_node(as_config* config_p, cf_ip_addr *rack_addr)
 {
 	cf_node self_node = config_p->self_node;
 
@@ -4193,34 +4195,16 @@ cfg_reset_self_node(as_config* config_p)
 	cc_group_t group_id = config_p->cluster.cl_self_group;
 	uint16_t port_num = cc_compute_port(self_node);
 
-	cf_ip_addr addrs[CF_SOCK_CFG_MAX];
-	uint32_t n_addrs = CF_SOCK_CFG_MAX;
-
-	if (config_p->node_id_interface != NULL) {
-		if (cf_inter_get_addr_name(addrs, &n_addrs, config_p->node_id_interface) < 0) {
-			cf_crash_nostack(AS_CFG, "error while getting interface addresses for %s",
-					config_p->node_id_interface);
-		}
-
-		if (n_addrs == 0) {
-			cf_crash_nostack(AS_CFG, "no interface addresses for %s", config_p->node_id_interface);
-		}
-	}
-	else {
-		if (cf_inter_get_addr_def(addrs, &n_addrs) < 0) {
-			cf_crash_nostack(AS_CFG, "error while getting default interface addresses");
-		}
-
-		if (n_addrs == 0) {
-			cf_crash_nostack(AS_CFG, "no default interface addresses");
-		}
-	}
-
 	if (config_p->cluster_mode == CL_MODE_DYNAMIC) {
 		cf_info(AS_CFG, "Cluster Mode Dynamic: Config IP address for Self Node");
-		cf_ip_addr_to_rack_aware_id(&addrs[0], &node_id);
+
+		if (cf_ip_addr_is_any(rack_addr)) {
+			cf_crash_nostack(AS_CFG, "Interface without IP address used for dynamic node ID");
+		}
+
+		cf_ip_addr_to_rack_aware_id(rack_addr, &node_id);
 		cf_info(AS_CFG, "Setting node ID to %u (0x%08X) from IP address \"%s\"", node_id, node_id,
-				cf_ip_addr_print(&addrs[0]));
+				cf_ip_addr_print(rack_addr));
 	}
 	else if (config_p->cluster_mode == CL_MODE_STATIC) {
 		cf_info(AS_CFG, "Cluster Mode Static: Config self-node-id (%u) for Self Node", node_id);
