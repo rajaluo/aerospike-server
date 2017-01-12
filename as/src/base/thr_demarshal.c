@@ -845,6 +845,8 @@ as_demarshal_start()
 
 	// Create all the epoll_fds and wait for all the threads to come up.
 
+	cf_info(AS_DEMARSHAL, "starting %u demarshal threads", dm->num_threads);
+
 	for (int32_t i = 1; i < dm->num_threads; ++i) {
 		if (pthread_create(&dm->dm_th[i], NULL, thr_demarshal, NULL) != 0) {
 			cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
@@ -853,8 +855,7 @@ as_demarshal_start()
 
 	for (int32_t i = 1; i < dm->num_threads; i++) {
 		while (CEFD(dm->polls[i]) == 0) {
-			sleep(1);
-			cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads...");
+			usleep(1000);
 		}
 	}
 
@@ -864,11 +865,10 @@ as_demarshal_start()
 		cf_crash(AS_DEMARSHAL, "Can't create demarshal threads");
 	}
 
+	// For orderly startup log, wait for endpoint setup.
 	while (CEFD(dm->polls[0]) == 0) {
-		sleep(1);
-		cf_info(AS_DEMARSHAL, "Waiting to spawn demarshal threads...");
+		usleep(1000);
 	}
 
-	cf_info(AS_DEMARSHAL, "Started %d Demarshal Threads", dm->num_threads);
 	return 0;
 }

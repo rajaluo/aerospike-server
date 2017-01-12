@@ -103,7 +103,7 @@ static pthread_mutex_t g_tsvc_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
 void
 as_tsvc_init()
 {
-	cf_info(AS_TSVC, "shared queues: %u queues with %u threads each",
+	cf_info(AS_TSVC, "%u transaction queues: starting %u threads per queue",
 			g_config.n_transaction_queues,
 			g_config.n_transaction_threads_per_queue);
 

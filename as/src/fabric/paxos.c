@@ -3600,8 +3600,6 @@ as_paxos_init()
 	as_paxos_set_cluster_integrity(g_paxos, true);
 
 	as_partition_balance_init();
-
-	cf_info(AS_PAXOS, "Paxos service ignited: %"PRIx64, p->succession[0]);
 }
 
 /*
@@ -3659,8 +3657,6 @@ as_paxos_deregister_change_callback(as_paxos_change_callback cb, void *udata)
 void*
 as_paxos_sup_thr(void* arg)
 {
-	cf_info(AS_PAXOS, "paxos supervisor thread started");
-
 	// Run at twice the retransmit rate and update cluster integrity along
 	// the way. This ensure after a fix the integrity flag will not wait for
 	// a full next cycle.
@@ -3740,6 +3736,8 @@ as_paxos_start()
 	pthread_attr_t thr_attr;
 	pthread_t thr_id;
 	pthread_t sup_thr_id;
+
+	cf_info(AS_PAXOS, "starting paxos threads");
 
 	/* Start the Paxos service thread */
 	if (0 != pthread_attr_init(&thr_attr))

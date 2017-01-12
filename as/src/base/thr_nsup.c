@@ -1104,8 +1104,6 @@ update_stats(as_namespace* ns, uint32_t n_master, uint32_t n_0_void_time,
 void *
 thr_ldt_sup(void *arg)
 {
-	cf_info(AS_LDT, "LDT supervisor started");
-
 	for ( ; ; ) {
 		// Skip 1 second between LDT nsup cycles.
 		struct timespec delay = { 1, 0 };
@@ -1141,8 +1139,6 @@ thr_ldt_sup(void *arg)
 void *
 thr_nsup(void *arg)
 {
-	cf_info(AS_NSUP, "namespace supervisor started");
-
 	// Garbage-collect long-expired proles, one partition per loop.
 	int prole_pids[g_config.n_namespaces];
 
@@ -1410,6 +1406,8 @@ as_nsup_start()
 	if (NULL == (g_p_nsup_delete_q = cf_queue_create(sizeof(record_delete_info), true))) {
 		cf_crash(AS_NSUP, "nsup delete queue create failed");
 	}
+
+	cf_info(AS_NSUP, "starting namespace supervisor threads");
 
 	// Start thread to handle all nsup-generated deletions.
 	if (0 != pthread_create(&g_nsup_delete_thread, 0, run_nsup_delete, NULL)) {

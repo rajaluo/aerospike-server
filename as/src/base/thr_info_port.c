@@ -64,6 +64,9 @@ cf_ip_port g_info_port = 0;
 
 static cf_sockets g_sockets;
 
+// Using int for 4-byte size, but maintaining bool semantics.
+static volatile int g_started = false;
+
 void
 info_port_state_free(info_port_state *ips)
 {
@@ -217,6 +220,8 @@ thr_info_port_fn(void *arg)
 	cf_poll_add_sockets(poll, &g_sockets, EPOLLIN | EPOLLERR | EPOLLHUP);
 	cf_socket_show_server(AS_INFO_PORT, "info", &g_sockets);
 
+	g_started = true;
+
 	while (true) {
 		cf_poll_event events[POLL_SZ];
 		int32_t n_ev = cf_poll_wait(poll, events, POLL_SZ, -1);
@@ -291,7 +296,6 @@ thr_info_port_fn(void *arg)
 	return NULL;
 }
 
-pthread_t g_info_port_th;
 
 void
 as_info_port_start()
@@ -300,7 +304,20 @@ as_info_port_start()
 		return;
 	}
 
-	if (pthread_create(&g_info_port_th, NULL, thr_info_port_fn, NULL) != 0) {
-		cf_crash(AS_AS, "pthread_create: %s", cf_strerror(errno));
+	cf_info(AS_INFO_PORT, "starting info port thread");
+
+	pthread_t thread;
+	pthread_attr_t attrs;
+
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
+
+	if (pthread_create(&thread, &attrs, thr_info_port_fn, NULL) != 0) {
+		cf_crash(AS_INFO_PORT, "failed to create info port thread");
+	}
+
+	// For orderly startup log, wait for endpoint setup.
+	while (! g_started) {
+		usleep(1000);
 	}
 }
