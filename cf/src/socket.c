@@ -2436,7 +2436,7 @@ cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, cf_ip_addr *ra
 		for (int32_t k = 0; k < 11; ++k) {
 			char tmp[100];
 			snprintf(tmp, sizeof(tmp), "%s%d", if_in_order[i], k);
-			entry = find_inter(&inter, tmp, false);
+			entry = find_inter(&inter, tmp, true);
 
 			if (entry != NULL) {
 				goto success;
