@@ -2410,7 +2410,7 @@ match_inter(inter_info *inter, const char **patterns)
 }
 
 int32_t
-cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id)
+cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id, cf_ip_addr *rack_addr)
 {
 	cf_debug(CF_SOCKET, "Getting node ID");
 	inter_info inter;
@@ -2438,7 +2438,7 @@ cf_node_id_get(cf_ip_port port, const char *if_hint, cf_node *id)
 		for (int32_t k = 0; k < 11; ++k) {
 			char tmp[100];
 			snprintf(tmp, sizeof(tmp), "%s%d", if_in_order[i], k);
-			entry = find_inter(&inter, tmp, false);
+			entry = find_inter(&inter, tmp, true);
 
 			if (entry != NULL) {
 				goto success;
@@ -2485,6 +2485,16 @@ success:
 
 	memcpy(buff + 6, &port, 2);
 
-	cf_info(CF_SOCKET, "Node port %d, node ID %" PRIx64, port, *id);
+	if (entry->n_addrs > 0) {
+		cf_ip_addr_copy(&entry->addrs[0], rack_addr);
+		cf_debug(CF_SOCKET, "Using IP address %s for rack-aware mode", cf_ip_addr_print(rack_addr));
+	}
+	else {
+		cf_ip_addr_set_any(rack_addr);
+		cf_debug(CF_SOCKET, "No IP addresses for rack-aware mode");
+	}
+
+	cf_info(CF_SOCKET, "Node port %d, node ID %" PRIx64 ", rack-aware %s",
+			port, *id, cf_ip_addr_print(rack_addr));
 	return 0;
 }
