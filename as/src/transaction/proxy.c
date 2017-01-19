@@ -53,7 +53,6 @@
 #include "base/stats.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
-#include "fabric/paxos.h"
 #include "transaction/rw_request.h"
 #include "transaction/rw_request_hash.h"
 #include "transaction/rw_utils.h"
@@ -144,11 +143,6 @@ void* run_proxy_retransmit(void* arg);
 int proxy_retransmit_reduce_fn(void* key, void* data, void* udata);
 int proxy_retransmit_send(proxy_request* pr);
 
-void on_proxy_paxos_change(as_paxos_generation gen, as_paxos_change* change,
-		cf_node succession[], void* udata);
-int proxy_paxos_change_reduce_fn(void* key, void* data, void* udata);
-int proxy_paxos_change_delete_reduce_fn(void* key, void* data, void* udata);
-
 int proxy_msg_cb(cf_node src, msg* m, void* udata);
 
 void proxyer_handle_response(msg* m, uint32_t tid);
@@ -234,8 +228,6 @@ as_proxy_init()
 	if (pthread_create(&thread, &attrs, run_proxy_retransmit, NULL) != 0) {
 		cf_crash(AS_RW, "failed to create proxy retransmit thread");
 	}
-
-	as_paxos_register_change_callback(on_proxy_paxos_change, NULL);
 
 	as_fabric_register_msg_fn(M_TYPE_PROXY, proxy_mt, sizeof(proxy_mt),
 			PROXY_MSG_SCRATCH_SIZE, proxy_msg_cb, NULL);
@@ -886,88 +878,6 @@ proxy_retransmit_send(proxy_request* pr)
 
 	// For now, it's impossible to get here.
 	return SHASH_ERR;
-}
-
-
-//==========================================================
-// Local helpers - handle paxos changed events.
-//
-
-void
-on_proxy_paxos_change(as_paxos_generation gen, as_paxos_change* change,
-		cf_node succession[], void* udata)
-{
-	if (change->n_change != 1 || change->type[0] != AS_PAXOS_CHANGE_SYNC) {
-		cf_crash(AS_PROXY, "unexpected paxos-changed event data");
-	}
-
-	rw_paxos_change_struct del;
-
-	memset(&del, 0, sizeof(rw_paxos_change_struct));
-	memcpy(del.succession, succession, sizeof(cf_node) * AS_CLUSTER_SZ);
-
-	// Iterate through the hash table and find nodes that are not in the
-	// succession list. Remove these entries from the hash table.
-	shash_reduce(g_proxy_hash, proxy_paxos_change_reduce_fn, (void*)&del);
-
-	// If there are nodes to be deleted, execute the deletion algorithm.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (del.deletions[i] == (cf_node)0) {
-			break;
-		}
-
-		shash_reduce(g_proxy_hash, proxy_paxos_change_delete_reduce_fn,
-				(void*)&del.deletions[i]);
-	}
-}
-
-
-int
-proxy_paxos_change_reduce_fn(void* key, void* data, void* udata)
-{
-	proxy_request* pr = (proxy_request*)data;
-	rw_paxos_change_struct* del = (rw_paxos_change_struct*)udata;
-
-	// Check if this key is in the succession list.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (del->succession[i] == (cf_node)0) {
-			break;
-		}
-
-		if (pr->dest == del->succession[i]) {
-			return 0;
-		}
-	}
-
-	// This key is not in succession list - mark it to be deleted.
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		// If an empty slot exists, then it means key is not there yet.
-		if (del->deletions[i] == (cf_node)0) {
-			del->deletions[i] = pr->dest;
-			break;
-		}
-
-		// If key already exists, return.
-		if (pr->dest == del->deletions[i]) {
-			break;
-		}
-	}
-
-	return 0;
-}
-
-
-int
-proxy_paxos_change_delete_reduce_fn(void* key, void* data, void* udata)
-{
-	proxy_request* pr = (proxy_request*)data;
-	cf_node* node = (cf_node*)udata;
-
-	if (pr->dest == *node) {
-		pr->xmit_ms = 0;
-	}
-
-	return 0;
 }
 
 
