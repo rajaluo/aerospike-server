@@ -63,7 +63,7 @@ xdr_allows_write(as_transaction* tr)
 		}
 	}
 	else {
-		if (tr->rsv.ns->ns_allow_nonxdr_writes) {
+		if (tr->rsv.ns->ns_allow_nonxdr_writes || tr->origin == FROM_NSUP) {
 			return true;
 		}
 	}
