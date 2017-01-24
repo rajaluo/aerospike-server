@@ -871,7 +871,7 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 				// Allow AS_PARTICLE_TYPE_NULL, although bin-delete operations
 				// are not likely in single-bin configuration.
 				op->particle_type != AS_PARTICLE_TYPE_NULL) {
-			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: can't write non-integer in data-in-index configuration ", ns->name);
+			cf_warning_digest(AS_RW, &tr->keyd, "{%s} write_master: can't write data type %u in data-in-index configuration ", ns->name, op->particle_type);
 			return AS_PROTO_RESULT_FAIL_INCOMPATIBLE_TYPE;
 		}
 
