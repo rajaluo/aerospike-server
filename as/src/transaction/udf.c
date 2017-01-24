@@ -343,7 +343,11 @@ as_udf_start(as_transaction* tr)
 	// If we don't need replica writes, transaction is finished.
 	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
-		clear_delete_response_metadata(rw, tr);
+		// LDT multi-ops don't generate pickle if replication is not needed.
+		if (rw->pickled_buf) {
+			clear_delete_response_metadata(rw, tr);
+		}
+
 		send_udf_response(tr, &rw->response_db);
 		rw_request_hash_delete(&hkey, rw);
 		return TRANS_DONE_SUCCESS;
@@ -467,7 +471,11 @@ udf_dup_res_cb(rw_request* rw)
 
 	// If we don't need replica writes, transaction is finished.
 	if (rw->n_dest_nodes == 0) {
-		clear_delete_response_metadata(rw, &tr);
+		// LDT multi-ops don't generate pickle if replication is not needed.
+		if (rw->pickled_buf) {
+			clear_delete_response_metadata(rw, &tr);
+		}
+
 		send_udf_response(&tr, &rw->response_db);
 		return true;
 	}
