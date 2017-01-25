@@ -810,6 +810,16 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 	}
 	else if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
 			&pickled_sz, MSG_GET_DIRECT) == 0) {
+		if (repl_write_pickle_is_drop(pickled_buf, info)) {
+			drop_replica(rsv, keyd,
+					(info & RW_INFO_LDT_SUBREC) != 0,
+					(info & RW_INFO_NSUP_DELETE) != 0,
+					(info & RW_INFO_XDR) != 0,
+					node);
+
+			return true;
+		}
+
 		as_generation generation;
 
 		if (msg_get_uint32(m, RW_FIELD_GENERATION, &generation) != 0) {
