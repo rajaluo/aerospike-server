@@ -1,7 +1,7 @@
 /*
  * as.c
  *
- * Copyright (C) 2008-2015 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -38,6 +38,7 @@
 
 #include "ai.h"
 #include "fault.h"
+#include "hardware.h"
 #include "jem.h"
 #include "tls.h"
 #include "util.h"
@@ -424,6 +425,9 @@ main(int argc, char **argv)
 
 	// Includes echoing the configuration file to log.
 	as_config_post_process(c, config_file);
+
+	// Detect the CPU topology.
+	cf_topo_init((cf_topo_numa_node_index)instance, false);
 
 	// Make one more pass for XDR-related config and crash if needed.
 	// TODO : XDR config parsing should be merged with main config parsing.

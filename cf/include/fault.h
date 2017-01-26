@@ -187,19 +187,19 @@ extern cf_fault_severity cf_fault_filter[];
 // cf_fault_event() is "regular" logging
 extern void cf_fault_event(const cf_fault_context,
 		const cf_fault_severity severity, const char *file_name,
-		const int line, char *msg, ...)
+		const int line, const char *msg, ...)
 		__attribute__ ((format (printf, 5, 6)));
 
 // cf_fault_event2() is for advanced logging, where we want to print some
 // binary object (often a digest).
 extern void cf_fault_event2(const cf_fault_context,
 		const cf_fault_severity severity, const char *file_name, const int line,
-		void * mem_ptr, size_t len, cf_display_type dt, char *msg, ...)
+		void * mem_ptr, size_t len, cf_display_type dt, const char *msg, ...)
 		__attribute__ ((format (printf, 8, 9)));
 
 extern void cf_fault_event_nostack(const cf_fault_context,
 		const cf_fault_severity severity, const char *fn, const int line,
-		char *msg, ...)
+		const char *msg, ...)
 		__attribute__ ((format (printf, 5, 6)));
 
 // For now there's only one cache, dumped by the ticker.
@@ -312,7 +312,7 @@ do { \
 #define cf_detail_digest(...)  __DIGEST_SEVLOG(CF_DETAIL, ##__VA_ARGS__)
 
 // _GNU_SOURCE gives us a strerror_r() that returns (char *).
-#define cf_strerror(err) strerror_r(err, alloca(200), 200)
+#define cf_strerror(err) strerror_r(err, (char *)alloca(200), 200)
 
 /* cf_context_at_severity
  * Return whether the given context is set to this severity level or higher. */

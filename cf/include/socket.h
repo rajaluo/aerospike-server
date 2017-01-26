@@ -1,7 +1,7 @@
 /*
  * socket.h
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -31,6 +31,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
+#include "hardware.h"
 #include "msg.h"
 #include "tls_mode.h"
 #include "util.h"
@@ -261,6 +262,7 @@ CF_MUST_CHECK int32_t cf_socket_init_client(cf_sock_cfg *cfg, int32_t timeout, c
 
 CF_MUST_CHECK int32_t cf_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_remote_name(const cf_socket *sock, cf_sock_addr *addr);
+cf_topo_cpu_index cf_socket_cpu(const cf_socket *sock);
 CF_MUST_CHECK int32_t cf_socket_local_name(const cf_socket *sock, cf_sock_addr *addr);
 CF_MUST_CHECK int32_t cf_socket_available(cf_socket *sock);
 

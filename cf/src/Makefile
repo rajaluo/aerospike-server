@@ -13,7 +13,7 @@ HEADERS += enhanced_alloc.h fault.h hist.h hist_track.h linear_hist.h mem_count.
 HEADERS += meminfo.h msg.h olock.h rchash.h socket.h tls.h util.h
 HEADERS += vmapx.h
 
-SOURCES += alloc.c arenax.c cf_str.c daemon.c dynbuf.c fault.c
+SOURCES += alloc.c arenax.c cf_str.c daemon.c dynbuf.c fault.c hardware.c
 SOURCES += hist.c hist_track.c id.c linear_hist.c meminfo.c msg.c olock.c
 SOURCES += socket.c vmapx.c
 ifneq ($(USE_EE),1)

@@ -1,7 +1,7 @@
 /*
  * socket.c
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -47,10 +47,17 @@
 #include <sys/types.h>
 
 #include "fault.h"
+#include "hardware.h"
 #include "tls.h"
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_digest.h"
+
+// Only available in Linux kernel version 3.19 and later; but we'd like to
+// allow compilation with older kernel headers.
+#if !defined SO_INCOMING_CPU
+#define SO_INCOMING_CPU 49
+#endif
 
 static char *
 safe_strdup(const char *string)
@@ -874,6 +881,23 @@ cf_socket_accept(cf_socket *lsock, cf_socket *sock, cf_sock_addr *addr)
 
 cleanup0:
 	return res;
+}
+
+cf_topo_cpu_index
+cf_socket_cpu(const cf_socket *sock)
+{
+	int32_t os;
+	socklen_t len = sizeof(os);
+
+	if (getsockopt(sock->fd, SOL_SOCKET, SO_INCOMING_CPU, &os, &len) < 0) {
+		// This will happen on Linux kernels before 3.19, which don't yet
+		// support SO_INCOMING_CPU. So, CPU pinning won't work with these
+		// kernels.
+		cf_crash(CF_SOCKET, "Error while determining incoming CPU: %d (%s)",
+				errno, cf_strerror(errno));
+	}
+
+	return cf_topo_os_cpu_index_to_cpu_index((cf_topo_os_cpu_index)os);
 }
 
 typedef int32_t (*name_func)(int32_t fd, struct sockaddr *sa, socklen_t *sa_len);

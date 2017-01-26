@@ -424,7 +424,7 @@ cf_fault_is_using_local_time()
  * Respond to a fault */
 void
 cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
-		const char *file_name, const int line, char *msg, ...)
+		const char *file_name, const int line, const char *msg, ...)
 {
 	va_list argp;
 	char mbuf[1024];
@@ -686,7 +686,7 @@ int generate_column_bits_string(void *mem_ptr, uint len, char* output)
 void
 cf_fault_event2(const cf_fault_context context,
 		const cf_fault_severity severity, const char *file_name, const int line,
-		void * mem_ptr, size_t len, cf_display_type dt, char *msg, ...)
+		void * mem_ptr, size_t len, cf_display_type dt, const char *msg, ...)
 {
 	va_list argp;
 	char mbuf[MAX_BINARY_BUF_SZ];
@@ -833,7 +833,7 @@ cf_fault_event2(const cf_fault_context context,
 void
 cf_fault_event_nostack(const cf_fault_context context,
 		const cf_fault_severity severity, const char *fn, const int line,
-		char *msg, ...)
+		const char *msg, ...)
 {
 	va_list argp;
 	char mbuf[1024];
