@@ -313,14 +313,6 @@ repl_write_handle_op(cf_node node, msg* m)
 
 		// In rolling upgrades, older nodes send replica deletes here.
 
-		// TODO - does this really need to be here? Seems sender never sets LDT
-		// parent flag, so always returns true. Also, linfo never set or used.
-		if (! ldt_get_prole_version(&rsv, keyd, &linfo, info, NULL, false)) {
-			as_partition_release(&rsv);
-			send_repl_write_ack(node, m, AS_PROTO_RESULT_OK); // ???
-			return;
-		}
-
 		result = drop_replica(&rsv, keyd,
 				(info & RW_INFO_LDT_SUBREC) != 0, // but sender never sets it
 				(info & RW_INFO_NSUP_DELETE) != 0,
@@ -500,6 +492,9 @@ void
 repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 		size_t pickled_sz, as_rec_props* p_pickled_rec_props, bool is_subrec)
 {
+	// TODO - remove this when we're comfortable:
+	cf_assert(*p_pickled_buf, AS_RW, "making LDT-repl msg with null pickle");
+
 	as_namespace* ns = tr->rsv.ns;
 
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE);
@@ -527,28 +522,20 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 
 	uint32_t info = pack_info_bits(tr, true);
 
-	if (*p_pickled_buf) {
-		bool is_sub;
-		bool is_parent;
+	bool is_sub;
+	bool is_parent;
 
-		as_ldt_get_property(p_pickled_rec_props, &is_parent, &is_sub);
-		info |= pack_ldt_info_bits(tr, is_parent, is_sub);
+	as_ldt_get_property(p_pickled_rec_props, &is_parent, &is_sub);
+	info |= pack_ldt_info_bits(tr, is_parent, is_sub);
 
-		msg_set_buf(m, RW_FIELD_RECORD, (void*)*p_pickled_buf, pickled_sz,
-				MSG_SET_HANDOFF_MALLOC);
-		*p_pickled_buf = NULL;
+	msg_set_buf(m, RW_FIELD_RECORD, (void*)*p_pickled_buf, pickled_sz,
+			MSG_SET_HANDOFF_MALLOC);
+	*p_pickled_buf = NULL;
 
-		if (p_pickled_rec_props && p_pickled_rec_props->p_data) {
-			msg_set_buf(m, RW_FIELD_REC_PROPS, p_pickled_rec_props->p_data,
-					p_pickled_rec_props->size, MSG_SET_HANDOFF_MALLOC);
-			as_rec_props_clear(p_pickled_rec_props);
-		}
-	}
-	else {
-		msg_set_buf(m, RW_FIELD_AS_MSG, (void*)tr->msgp,
-				as_proto_size_get(&tr->msgp->proto), MSG_SET_COPY);
-
-		info |= pack_ldt_info_bits(tr, false, is_subrec);
+	if (p_pickled_rec_props && p_pickled_rec_props->p_data) {
+		msg_set_buf(m, RW_FIELD_REC_PROPS, p_pickled_rec_props->p_data,
+				p_pickled_rec_props->size, MSG_SET_HANDOFF_MALLOC);
+		as_rec_props_clear(p_pickled_rec_props);
 	}
 
 	msg_set_uint32(m, RW_FIELD_INFO, info);
@@ -802,6 +789,10 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 
 	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
 			MSG_GET_DIRECT) == 0) {
+
+		// In rolling upgrades, *really* old nodes might send LDT replica
+		// deletes here.
+
 		drop_replica(rsv, keyd,
 				(info & RW_INFO_LDT_SUBREC) != 0,
 				(info & RW_INFO_NSUP_DELETE) != 0,
