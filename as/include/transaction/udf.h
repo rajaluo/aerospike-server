@@ -42,25 +42,8 @@ typedef enum {
 	UDF_OPTYPE_NONE,
 	UDF_OPTYPE_READ,
 	UDF_OPTYPE_WRITE,
-	UDF_OPTYPE_DELETE,
-	UDF_OPTYPE_LDT_READ,
-	UDF_OPTYPE_LDT_WRITE,
-	UDF_OPTYPE_LDT_DELETE
+	UDF_OPTYPE_DELETE
 } udf_optype;
-
-#define UDF_OP_IS_DELETE(op) \
-	(((op) == UDF_OPTYPE_DELETE) || ((op) == UDF_OPTYPE_LDT_DELETE))
-
-#define UDF_OP_IS_READ(op) \
-	(((op) == UDF_OPTYPE_READ) || ((op) == UDF_OPTYPE_LDT_READ))
-
-#define UDF_OP_IS_WRITE(op) \
-	(((op) == UDF_OPTYPE_WRITE) || ((op) == UDF_OPTYPE_LDT_WRITE))
-
-#define UDF_OP_IS_LDT(op) \
-	(((op) == UDF_OPTYPE_LDT_READ) || \
-			((op) == UDF_OPTYPE_LDT_WRITE) || \
-			((op) == UDF_OPTYPE_LDT_DELETE))
 
 #define UDF_MAX_STRING_SZ 128
 

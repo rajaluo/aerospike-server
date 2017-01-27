@@ -1502,13 +1502,13 @@ as_ldt_record_pickle(ldt_record *lrecord,
 				ret = -3;
 				goto Out;
 			}
-			if (UDF_OP_IS_READ(c_urecord->op)) {
+			if (c_urecord->op == UDF_OPTYPE_READ) {
 				// Skip Reads
 				continue;
 			}
 
 			bool reset_flag = true;
-			if (UDF_OP_IS_DELETE(c_urecord->op)) {
+			if (c_urecord->op == UDF_OPTYPE_DELETE) {
 				// Fake it as delete
 				if (c_tr->msgp->msg.info2 & AS_MSG_INFO2_DELETE) {
 					reset_flag = false;	
