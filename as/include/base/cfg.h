@@ -61,7 +61,6 @@ struct as_namespace_s;
 #define AS_CLUSTER_NAME_SZ 65
 
 #define MAX_DEMARSHAL_THREADS 256
-#define MAX_FABRIC_WORKERS 128
 #define MAX_BATCH_THREADS 64
 
 // Declare bools with PAD_BOOL so they can't share a 4-byte space with other
@@ -106,7 +105,6 @@ typedef struct as_config_s {
 	PAD_BOOL		fabric_benchmarks_enabled;
 	PAD_BOOL		svc_benchmarks_enabled;
 	PAD_BOOL		info_hist_enabled;
-	int				n_fabric_workers;
 	uint32_t		hist_track_back; // total time span in seconds over which to cache data
 	uint32_t		hist_track_slice; // period in seconds at which to cache histogram data
 	char*			hist_track_thresholds; // comma-separated bucket (ms) values to track
@@ -196,13 +194,23 @@ typedef struct as_config_s {
 
 	cf_serv_spec	fabric; // fabric service
 
-	// Normally hidden, in canonical configuration file order:
+	// Normally hidden:
 
+	uint32_t		n_fabric_channel_bulk_fds;
+	uint32_t		n_fabric_channel_bulk_recv_threads;
+	uint32_t		n_fabric_channel_ctrl_fds;
+	uint32_t		n_fabric_channel_ctrl_recv_threads;
+	uint32_t		n_fabric_channel_meta_fds;
+	uint32_t		n_fabric_channel_meta_recv_threads;
+	uint32_t		n_fabric_channel_rw_fds;
+	uint32_t		n_fabric_channel_rw_recv_threads;
 	PAD_BOOL		fabric_keepalive_enabled;
-	int				fabric_keepalive_time;
 	int				fabric_keepalive_intvl;
 	int				fabric_keepalive_probes;
+	int				fabric_keepalive_time;
 	int				fabric_latency_max_ms; // time window for ordering
+	uint32_t		fabric_recv_rearm_threshold;
+	uint32_t		n_fabric_send_threads;
 
 	//--------------------------------------------
 	// network::info context.

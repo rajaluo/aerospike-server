@@ -111,6 +111,7 @@
 #include "ai_btree.h"
 #include "bt.h"
 #include "bt_iterator.h"
+#include "rchash.h"
 
 #include "base/aggr.h"
 #include "base/as_stap.h"

@@ -36,10 +36,10 @@
 #include <sys/stat.h>
 
 #include "citrusleaf/cf_clock.h"
-#include "citrusleaf/cf_rchash.h"
 #include "citrusleaf/cf_shash.h"
 
 #include "msg.h"
+#include "rchash.h"
 
 #include "base/cfg.h"
 #include "base/secondary_index.h"

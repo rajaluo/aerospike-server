@@ -356,8 +356,14 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_bool(db, "migrate_allowed", as_partition_balance_are_migrations_allowed());
 	info_append_uint64(db, "migrate_partitions_remaining", as_partition_balance_remaining_migrations());
 
-	info_append_uint64(db, "fabric_msgs_sent", g_stats.fabric_msgs_sent);
-	info_append_uint64(db, "fabric_msgs_rcvd", g_stats.fabric_msgs_rcvd);
+	info_append_uint64(db, "fabric_bulk_send_rate", g_stats.fabric_bulk_s_rate);
+	info_append_uint64(db, "fabric_bulk_recv_rate", g_stats.fabric_bulk_r_rate);
+	info_append_uint64(db, "fabric_ctrl_send_rate", g_stats.fabric_ctrl_s_rate);
+	info_append_uint64(db, "fabric_ctrl_recv_rate", g_stats.fabric_ctrl_r_rate);
+	info_append_uint64(db, "fabric_meta_send_rate", g_stats.fabric_meta_s_rate);
+	info_append_uint64(db, "fabric_meta_recv_rate", g_stats.fabric_meta_r_rate);
+	info_append_uint64(db, "fabric_rw_send_rate", g_stats.fabric_rw_s_rate);
+	info_append_uint64(db, "fabric_rw_recv_rate", g_stats.fabric_rw_r_rate);
 
 	as_xdr_get_stats(name, db);
 
@@ -1880,7 +1886,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "enable-benchmarks-fabric", g_config.fabric_benchmarks_enabled);
 	info_append_bool(db, "enable-benchmarks-svc", g_config.svc_benchmarks_enabled);
 	info_append_bool(db, "enable-hist-info", g_config.info_hist_enabled);
-	info_append_int(db, "fabric-workers", g_config.n_fabric_workers);
 	info_append_uint32(db, "hist-track-back", g_config.hist_track_back);
 	info_append_uint32(db, "hist-track-slice", g_config.hist_track_slice);
 	info_append_string_safe(db, "hist-track-thresholds", g_config.hist_track_thresholds);
@@ -1990,11 +1995,21 @@ info_network_config_get(cf_dyn_buf *db)
 
 	append_addrs(db, "fabric.address", &g_config.info.bind);
 	info_append_int(db, "fabric.port", g_config.fabric.bind_port);
+	info_append_int(db, "fabric.channel-bulk-fds", g_config.n_fabric_channel_bulk_fds);
+	info_append_int(db, "fabric.channel-bulk-recv-threads", g_config.n_fabric_channel_bulk_recv_threads);
+	info_append_int(db, "fabric.channel-ctrl-fds", g_config.n_fabric_channel_ctrl_fds);
+	info_append_int(db, "fabric.channel-ctrl-recv-threads", g_config.n_fabric_channel_ctrl_recv_threads);
+	info_append_int(db, "fabric.channel-meta-fds", g_config.n_fabric_channel_meta_fds);
+	info_append_int(db, "fabric.channel-meta-recv-threads", g_config.n_fabric_channel_meta_recv_threads);
+	info_append_int(db, "fabric.channel-rw-fds", g_config.n_fabric_channel_rw_fds);
+	info_append_int(db, "fabric.channel-rw-recv-threads", g_config.n_fabric_channel_rw_recv_threads);
 	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
-	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
 	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
 	info_append_int(db, "fabric.keepalive-probes", g_config.fabric_keepalive_probes);
+	info_append_int(db, "fabric.keepalive-time", g_config.fabric_keepalive_time);
 	info_append_int(db, "fabric.latency-max-ms", g_config.fabric_latency_max_ms);
+	info_append_int(db, "fabric.recv-rearm-threshold", g_config.fabric_recv_rearm_threshold);
+	info_append_int(db, "fabric.send-threads", g_config.n_fabric_send_threads);
 
 	// Info:
 
@@ -2727,10 +2742,22 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
 				cf_info(AS_INFO, "Changing value of enable-benchmarks-fabric to %s", context);
 				g_config.fabric_benchmarks_enabled = false;
-				histogram_clear(g_stats.fabric_send_init_hist);
-				histogram_clear(g_stats.fabric_send_fragment_hist);
-				histogram_clear(g_stats.fabric_recv_fragment_hist);
-				histogram_clear(g_stats.fabric_recv_cb_hist);
+				histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK]);
+				histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
+				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
+				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK]);
+				histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL]);
+				histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
+				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
+				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL]);
+				histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META]);
+				histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META]);
+				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META]);
+				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META]);
+				histogram_clear(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW]);
+				histogram_clear(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW]);
+				histogram_clear(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW]);
+				histogram_clear(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW]);
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "enable-benchmarks-svc", context, &context_len)) {
@@ -2840,6 +2867,53 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of heartbeat protocol version to %s", context);
 			if (0 > as_hb_protocol_set(protocol))
 				goto Error;
+		}
+		else if (0 == as_info_parameter_get(params, "fabric.channel-bulk-recv-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+
+			if (! as_fabric_set_worker_threads(AS_FABRIC_CHANNEL_BULK, val)) {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "fabric.channel-ctrl-recv-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+
+			if (! as_fabric_set_worker_threads(AS_FABRIC_CHANNEL_CTRL, val)) {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "fabric.channel-meta-recv-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+
+			if (! as_fabric_set_worker_threads(AS_FABRIC_CHANNEL_META, val)) {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "fabric.channel-rw-recv-threads", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+
+			if (! as_fabric_set_worker_threads(AS_FABRIC_CHANNEL_RW, val)) {
+				goto Error;
+			}
+		}
+		else if (0 == as_info_parameter_get(params, "fabric.recv-rearm-threshold", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+
+			if (val < 1 || val > 1024 * 1024) {
+				goto Error;
+			}
+
+			g_config.fabric_recv_rearm_threshold = (uint32_t)val;
 		}
 		else
 			goto Error;
@@ -5025,7 +5099,7 @@ info_node_info_reduce_fn(void *key, void *data, void *udata)
 
 		pthread_mutex_unlock(&g_serv_lock);
 
-		if (as_fabric_send(*node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+		if (as_fabric_send(*node, m, AS_FABRIC_CHANNEL_CTRL) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(m);
 		}
@@ -5174,7 +5248,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			msg_preserve_fields(m, 1, INFO_FIELD_GENERATION);
 			msg_set_uint32(m, INFO_FIELD_OP, INFO_OP_ACK);
 
-			int rv = as_fabric_send(node, m, AS_FABRIC_PRIORITY_HIGH);
+			int rv = as_fabric_send(node, m, AS_FABRIC_CHANNEL_CTRL);
 
 			if (rv != AS_FABRIC_SUCCESS) {
 				cf_warning(AS_INFO, "Failed to send message %p with type %d to node %"PRIu64" (rv %d)",

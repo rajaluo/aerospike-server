@@ -138,7 +138,6 @@ cfg_set_defaults()
 	c->batch_priority = 200; // # of rows between a quick context switch?
 	c->n_batch_index_threads = 4;
 	c->clock_skew_max_ms = 1000;
-	c->n_fabric_workers = 16;
 	c->hist_track_back = 300;
 	c->hist_track_slice = 10;
 	c->n_info_threads = 16;
@@ -181,10 +180,20 @@ cfg_set_defaults()
 	c->hb_config.override_mtu = 0;
 
 	// Fabric TCP socket keepalive defaults.
+	c->n_fabric_channel_bulk_fds = 2;
+	c->n_fabric_channel_bulk_recv_threads = 4;
+	c->n_fabric_channel_ctrl_fds = 1;
+	c->n_fabric_channel_ctrl_recv_threads = 4;
+	c->n_fabric_channel_meta_fds = 1;
+	c->n_fabric_channel_meta_recv_threads = 4;
+	c->n_fabric_channel_rw_fds = 8;
+	c->n_fabric_channel_rw_recv_threads = 16;
 	c->fabric_keepalive_enabled = true;
-	c->fabric_keepalive_time = 1; // seconds
 	c->fabric_keepalive_intvl = 1; // seconds
 	c->fabric_keepalive_probes = 10; // tries
+	c->fabric_keepalive_time = 1; // seconds
+	c->fabric_recv_rearm_threshold = 1024;
+	c->n_fabric_send_threads = 8;
 
 	// XDR defaults.
 	for (int i = 0; i < AS_CLUSTER_SZ ; i++) {
@@ -271,7 +280,6 @@ typedef enum {
 	CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC,
 	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
 	CASE_SERVICE_ENABLE_HIST_INFO,
-	CASE_SERVICE_FABRIC_WORKERS,
 	CASE_SERVICE_HIST_TRACK_BACK,
 	CASE_SERVICE_HIST_TRACK_SLICE,
 	CASE_SERVICE_HIST_TRACK_THRESHOLDS,
@@ -326,6 +334,7 @@ typedef enum {
 	CASE_SERVICE_PROLE_EXTRA_TTL,
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
+	CASE_SERVICE_FABRIC_WORKERS,
 	// Deprecated:
 	CASE_SERVICE_AUTO_DUN,
 	CASE_SERVICE_AUTO_UNDUN,
@@ -471,12 +480,22 @@ typedef enum {
 	// Normally visible, in canonical configuration file order:
 	CASE_NETWORK_FABRIC_ADDRESS,
 	CASE_NETWORK_FABRIC_PORT,
-	// Normally hidden, in canonical configuration file order:
+	// Normally hidden:
+	CASE_NETWORK_FABRIC_CHANNEL_BULK_FDS,
+	CASE_NETWORK_FABRIC_CHANNEL_BULK_RECV_THREADS,
+	CASE_NETWORK_FABRIC_CHANNEL_CTRL_FDS,
+	CASE_NETWORK_FABRIC_CHANNEL_CTRL_RECV_THREADS,
+	CASE_NETWORK_FABRIC_CHANNEL_META_FDS,
+	CASE_NETWORK_FABRIC_CHANNEL_META_RECV_THREADS,
+	CASE_NETWORK_FABRIC_CHANNEL_RW_FDS,
+	CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_THREADS,
 	CASE_NETWORK_FABRIC_KEEPALIVE_ENABLED,
-	CASE_NETWORK_FABRIC_KEEPALIVE_TIME,
 	CASE_NETWORK_FABRIC_KEEPALIVE_INTVL,
 	CASE_NETWORK_FABRIC_KEEPALIVE_PROBES,
+	CASE_NETWORK_FABRIC_KEEPALIVE_TIME,
 	CASE_NETWORK_FABRIC_LATENCY_MAX_MS,
+	CASE_NETWORK_FABRIC_RECV_REARM_THRESHOLD,
+	CASE_NETWORK_FABRIC_SEND_THREADS,
 
 	// Network info options:
 	// Normally visible, in canonical configuration file order:
@@ -718,7 +737,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "enable-benchmarks-fabric",		CASE_SERVICE_ENABLE_BENCHMARKS_FABRIC },
 		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
-		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
 		{ "hist-track-back",				CASE_SERVICE_HIST_TRACK_BACK },
 		{ "hist-track-slice",				CASE_SERVICE_HIST_TRACK_SLICE },
 		{ "hist-track-thresholds",			CASE_SERVICE_HIST_TRACK_THRESHOLDS },
@@ -771,6 +789,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "memory-accounting",				CASE_SERVICE_MEMORY_ACCOUNTING },
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
+		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
 		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
 		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
 		{ "batch-retransmit",				CASE_SERVICE_BATCH_RETRANSMIT },
@@ -918,11 +937,21 @@ const cfg_opt NETWORK_HEARTBEAT_PROTOCOL_OPTS[] = {
 const cfg_opt NETWORK_FABRIC_OPTS[] = {
 		{ "address",						CASE_NETWORK_FABRIC_ADDRESS },
 		{ "port",							CASE_NETWORK_FABRIC_PORT },
+		{ "channel-bulk-fds",				CASE_NETWORK_FABRIC_CHANNEL_BULK_FDS },
+		{ "channel-bulk-recv-threads",		CASE_NETWORK_FABRIC_CHANNEL_BULK_RECV_THREADS },
+		{ "channel-ctrl-fds",				CASE_NETWORK_FABRIC_CHANNEL_CTRL_FDS },
+		{ "channel-ctrl-recv-threads",		CASE_NETWORK_FABRIC_CHANNEL_CTRL_RECV_THREADS },
+		{ "channel-meta-fds",				CASE_NETWORK_FABRIC_CHANNEL_META_FDS },
+		{ "channel-meta-recv-threads",		CASE_NETWORK_FABRIC_CHANNEL_META_RECV_THREADS },
+		{ "channel-rw-fds",					CASE_NETWORK_FABRIC_CHANNEL_RW_FDS },
+		{ "channel-rw-recv-threads",		CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_THREADS },
 		{ "keepalive-enabled",				CASE_NETWORK_FABRIC_KEEPALIVE_ENABLED },
-		{ "keepalive-time",					CASE_NETWORK_FABRIC_KEEPALIVE_TIME },
 		{ "keepalive-intvl",				CASE_NETWORK_FABRIC_KEEPALIVE_INTVL },
 		{ "keepalive-probes",				CASE_NETWORK_FABRIC_KEEPALIVE_PROBES },
+		{ "keepalive-time",					CASE_NETWORK_FABRIC_KEEPALIVE_TIME },
 		{ "latency-max-ms",					CASE_NETWORK_FABRIC_LATENCY_MAX_MS },
+		{ "recv-rearm-threshold",			CASE_NETWORK_FABRIC_RECV_REARM_THRESHOLD },
+		{ "send-threads",					CASE_NETWORK_FABRIC_SEND_THREADS },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -2032,9 +2061,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_ENABLE_HIST_INFO:
 				c->info_hist_enabled = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_FABRIC_WORKERS:
-				c->n_fabric_workers = cfg_int(&line, 1, MAX_FABRIC_WORKERS);
-				break;
 			case CASE_SERVICE_HIST_TRACK_BACK:
 				c->hist_track_back = cfg_u32_no_checks(&line);
 				break;
@@ -2217,6 +2243,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				cfg_obsolete(&line, "please configure 'service-threads' carefully"); // FIXME - better message?
+				break;
+			case CASE_SERVICE_FABRIC_WORKERS:
+				cfg_obsolete(&line, "please configure fabric channels"); // FIXME - better message?
 				break;
 			case CASE_SERVICE_AUTO_DUN:
 			case CASE_SERVICE_AUTO_UNDUN:
@@ -2580,11 +2609,32 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_FABRIC_PORT:
 				c->fabric.bind_port = cfg_port(&line);
 				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_BULK_FDS:
+				c->n_fabric_channel_bulk_fds = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
+				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_BULK_RECV_THREADS:
+				c->n_fabric_channel_bulk_recv_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
+				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_CTRL_FDS:
+				c->n_fabric_channel_ctrl_fds = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
+				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_CTRL_RECV_THREADS:
+				c->n_fabric_channel_ctrl_recv_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
+				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_META_FDS:
+				c->n_fabric_channel_meta_fds = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
+				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_META_RECV_THREADS:
+				c->n_fabric_channel_meta_recv_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
+				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_RW_FDS:
+				c->n_fabric_channel_rw_fds = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
+				break;
+			case CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_THREADS:
+				c->n_fabric_channel_rw_recv_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
+				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_ENABLED:
 				c->fabric_keepalive_enabled = cfg_bool(&line);
-				break;
-			case CASE_NETWORK_FABRIC_KEEPALIVE_TIME:
-				c->fabric_keepalive_time = cfg_int_no_checks(&line);
 				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_INTVL:
 				c->fabric_keepalive_intvl = cfg_int_no_checks(&line);
@@ -2592,8 +2642,17 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_FABRIC_KEEPALIVE_PROBES:
 				c->fabric_keepalive_probes = cfg_int_no_checks(&line);
 				break;
+			case CASE_NETWORK_FABRIC_KEEPALIVE_TIME:
+				c->fabric_keepalive_time = cfg_int_no_checks(&line);
+				break;
 			case CASE_NETWORK_FABRIC_LATENCY_MAX_MS:
 				c->fabric_latency_max_ms = cfg_int(&line, 0, 1000);
+				break;
+			case CASE_NETWORK_FABRIC_RECV_REARM_THRESHOLD:
+				c->fabric_recv_rearm_threshold = cfg_u32(&line, 1, 1024 * 1024);
+				break;
+			case CASE_NETWORK_FABRIC_SEND_THREADS:
+				c->n_fabric_send_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -4155,10 +4214,22 @@ cfg_create_all_histograms()
 	create_and_check_hist(&g_stats.svc_demarshal_hist, "svc-demarshal", HIST_MILLISECONDS);
 	create_and_check_hist(&g_stats.svc_queue_hist, "svc-queue", HIST_MILLISECONDS);
 
-	create_and_check_hist(&g_stats.fabric_send_init_hist, "fabric-send-init", HIST_MILLISECONDS);
-	create_and_check_hist(&g_stats.fabric_send_fragment_hist, "fabric-send-fragment", HIST_MILLISECONDS);
-	create_and_check_hist(&g_stats.fabric_recv_fragment_hist, "fabric-recv-fragment", HIST_MILLISECONDS);
-	create_and_check_hist(&g_stats.fabric_recv_cb_hist, "fabric-recv-cb", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK], "fabric-bulk-send-init", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK], "fabric-bulk-send-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK], "fabric-bulk-recv-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK], "fabric-bulk-recv-cb", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL], "fabric-ctrl-send-init", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL], "fabric-ctrl-send-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL], "fabric-ctrl-recv-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL], "fabric-ctrl-recv-cb", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META], "fabric-meta-send-init", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META], "fabric-meta-send-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META], "fabric-meta-recv-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META], "fabric-meta-recv-cb", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW], "fabric-rw-send-init", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW], "fabric-rw-send-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW], "fabric-rw-recv-fragment", HIST_MILLISECONDS);
+	create_and_check_hist(&g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW], "fabric-rw-recv-cb", HIST_MILLISECONDS);
 
 	create_and_check_hist(&g_stats.ldt_multiop_prole_hist, "ldt_multiop_prole", HIST_MILLISECONDS);
 	create_and_check_hist(&g_stats.ldt_io_record_cnt_hist, "ldt_rec_io_count", HIST_COUNT);

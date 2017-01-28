@@ -72,12 +72,13 @@ extern int as_nsup_queue_get_size();
 extern bool g_shutdown_started;
 
 void* run_ticker(void* arg);
-void log_ticker_frame();
+void log_ticker_frame(uint64_t delta_time);
 
 void log_line_system_memory();
 void log_line_in_progress();
 void log_line_fds();
 void log_line_heartbeat();
+void log_fabric_rate(uint64_t delta_time);
 void log_line_early_fail();
 void log_line_batch_index();
 
@@ -140,9 +141,9 @@ run_ticker(void* arg)
 		nanosleep(&delay, NULL);
 
 		uint64_t curr_time = cf_getns();
+		uint64_t delta_time = curr_time - last_time;
 
-		if (curr_time - last_time <
-				(uint64_t)g_config.ticker_interval * 1000000000) {
+		if (delta_time < (uint64_t)g_config.ticker_interval * 1000000000) {
 			continue; // period has not been reached for showing a frame
 		}
 
@@ -153,7 +154,7 @@ run_ticker(void* arg)
 			break;
 		}
 
-		log_ticker_frame();
+		log_ticker_frame(delta_time);
 	}
 
 	return NULL;
@@ -161,7 +162,7 @@ run_ticker(void* arg)
 
 
 void
-log_ticker_frame()
+log_ticker_frame(uint64_t delta_time)
 {
 	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u",
 			g_config.self_node,
@@ -172,6 +173,7 @@ log_ticker_frame()
 	log_line_in_progress();
 	log_line_fds();
 	log_line_heartbeat();
+	log_fabric_rate(delta_time);
 	log_line_early_fail();
 	log_line_batch_index();
 
@@ -298,6 +300,36 @@ log_line_heartbeat()
 
 
 void
+log_fabric_rate(uint64_t delta_time)
+{
+	fabric_rate rate = { { 0 } };
+
+	as_fabric_rate_capture(&rate);
+
+	uint64_t dt_sec = delta_time / 1000000000;
+
+	if (dt_sec < 1) {
+		dt_sec = 1;
+	}
+
+	g_stats.fabric_bulk_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_BULK] / dt_sec;
+	g_stats.fabric_bulk_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_BULK] / dt_sec;
+	g_stats.fabric_ctrl_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_CTRL] / dt_sec;
+	g_stats.fabric_ctrl_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_CTRL] / dt_sec;
+	g_stats.fabric_meta_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_META] / dt_sec;
+	g_stats.fabric_meta_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_META] / dt_sec;
+	g_stats.fabric_rw_s_rate = rate.s_bytes[AS_FABRIC_CHANNEL_RW] / dt_sec;
+	g_stats.fabric_rw_r_rate = rate.r_bytes[AS_FABRIC_CHANNEL_RW] / dt_sec;
+
+	cf_info(AS_INFO, "   fabric-bytes-per-second: bulk (%lu,%lu) ctrl (%lu,%lu) meta (%lu,%lu) rw (%lu,%lu)",
+			g_stats.fabric_bulk_s_rate, g_stats.fabric_bulk_r_rate,
+			g_stats.fabric_ctrl_s_rate, g_stats.fabric_ctrl_r_rate,
+			g_stats.fabric_meta_s_rate, g_stats.fabric_meta_r_rate,
+			g_stats.fabric_rw_s_rate, g_stats.fabric_rw_r_rate);
+}
+
+
+void
 log_line_early_fail()
 {
 	uint64_t n_demarshal = g_stats.n_demarshal_error;
@@ -390,12 +422,12 @@ log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 void
 log_line_migrations(as_namespace* ns)
 {
-	int64_t initial_rx = (int64_t)ns->migrate_rx_partitions_initial;
 	int64_t initial_tx = (int64_t)ns->migrate_tx_partitions_initial;
-	int64_t remaining_rx = (int64_t)ns->migrate_rx_partitions_remaining;
+	int64_t initial_rx = (int64_t)ns->migrate_rx_partitions_initial;
 	int64_t remaining_tx = (int64_t)ns->migrate_tx_partitions_remaining;
-	int64_t initial = initial_rx + initial_tx;
-	int64_t remaining = remaining_rx + remaining_tx;
+	int64_t remaining_rx = (int64_t)ns->migrate_rx_partitions_remaining;
+	int64_t initial = initial_tx + initial_rx;
+	int64_t remaining = remaining_tx + remaining_rx;
 
 	if (initial > 0 && remaining > 0) {
 		float complete_pct = (1 - ((float)remaining / (float)initial)) * 100;
@@ -721,10 +753,22 @@ dump_global_histograms()
 	}
 
 	if (g_config.fabric_benchmarks_enabled) {
-		histogram_dump(g_stats.fabric_send_init_hist);
-		histogram_dump(g_stats.fabric_send_fragment_hist);
-		histogram_dump(g_stats.fabric_recv_fragment_hist);
-		histogram_dump(g_stats.fabric_recv_cb_hist);
+		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_BULK]);
+		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
+		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_BULK]);
+		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_BULK]);
+		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_CTRL]);
+		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
+		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_CTRL]);
+		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_CTRL]);
+		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_META]);
+		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_META]);
+		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_META]);
+		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_META]);
+		histogram_dump(g_stats.fabric_send_init_hists[AS_FABRIC_CHANNEL_RW]);
+		histogram_dump(g_stats.fabric_send_fragment_hists[AS_FABRIC_CHANNEL_RW]);
+		histogram_dump(g_stats.fabric_recv_fragment_hists[AS_FABRIC_CHANNEL_RW]);
+		histogram_dump(g_stats.fabric_recv_cb_hists[AS_FABRIC_CHANNEL_RW]);
 	}
 
 	as_query_histogram_dumpall();

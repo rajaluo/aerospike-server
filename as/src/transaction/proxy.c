@@ -307,8 +307,7 @@ as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns,
 
 	msg_incr_ref(m);
 
-	if (as_fabric_send(dst, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 
@@ -334,7 +333,7 @@ as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
 	msg_set_uint64(m, PROXY_FIELD_REDIRECT,
 			redirect_node == (cf_node)0 ? tr->from.proxy_node : redirect_node);
 
-	if (as_fabric_send(tr->from.proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+	if (as_fabric_send(tr->from.proxy_node, m, AS_FABRIC_CHANNEL_RW) !=
 			AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
@@ -364,8 +363,7 @@ as_proxy_send_response(cf_node dst, uint32_t proxy_tid, uint32_t result_code,
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (uint8_t*)msgp, msg_sz,
 			MSG_SET_HANDOFF_MALLOC);
 
-	if (as_fabric_send(dst, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -396,8 +394,7 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db)
 		db->buf = NULL; // the fabric owns the buffer now
 	}
 
-	if (as_fabric_send(dst, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -464,8 +461,7 @@ as_proxy_shipop(cf_node dst, rw_request* rw)
 
 	msg_incr_ref(m);
 
-	if (as_fabric_send(dst, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(dst, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -601,7 +597,7 @@ proxyer_handle_return_to_sender(msg* m, uint32_t tid)
 
 		msg_incr_ref(pr->fab_msg);
 
-		if (as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_PRIORITY_MEDIUM) !=
+		if (as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_CHANNEL_RW) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(pr->fab_msg);
 		}
@@ -815,8 +811,7 @@ proxy_retransmit_send(proxy_request* pr)
 
 		msg_incr_ref(pr->fab_msg);
 
-		int rv = as_fabric_send(pr->dest, pr->fab_msg,
-				AS_FABRIC_PRIORITY_MEDIUM);
+		int rv = as_fabric_send(pr->dest, pr->fab_msg, AS_FABRIC_CHANNEL_RW);
 
 		if (rv == AS_FABRIC_SUCCESS) {
 			return SHASH_OK;
@@ -956,7 +951,7 @@ shipop_response_handler(msg* m, proxy_request* pr)
 		// Fake the ORIGINATING proxy tid.
 		msg_set_uint32(m, PROXY_FIELD_TID, rw->from_data.proxy_tid);
 		msg_incr_ref(m);
-		if (as_fabric_send(rw->from.proxy_node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+		if (as_fabric_send(rw->from.proxy_node, m, AS_FABRIC_CHANNEL_RW) !=
 				AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(pr->fab_msg);
 		}

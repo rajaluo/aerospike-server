@@ -85,7 +85,7 @@ send_rw_messages(rw_request* rw)
 		msg_incr_ref(rw->dest_msg);
 
 		int rv = as_fabric_send(rw->dest_nodes[i], rw->dest_msg,
-				AS_FABRIC_PRIORITY_MEDIUM);
+				AS_FABRIC_CHANNEL_RW);
 
 		if (rv != AS_FABRIC_SUCCESS) {
 			if (rv != AS_FABRIC_ERR_NO_NODE) {

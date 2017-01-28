@@ -486,8 +486,7 @@ send_dup_res_ack(cf_node node, msg* m, uint32_t result)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result);
 
-	if (as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -501,8 +500,7 @@ send_ack_for_bad_request(cf_node node, msg* m)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_DUP_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, AS_PROTO_RESULT_FAIL_UNKNOWN); // ???
 
-	if (as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }

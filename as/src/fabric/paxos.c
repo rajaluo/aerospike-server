@@ -1485,7 +1485,7 @@ as_paxos_send_sync_messages() {
 		if (p->partition_sync_state[i] == false) {
 			msg_incr_ref(reply);
 			cf_info(AS_PAXOS, "sending sync message to %"PRIx64"", p->succession[i]);
-			if (0 != as_fabric_send(p->succession[i], reply, AS_FABRIC_PRIORITY_HIGH)) {
+			if (0 != as_fabric_send(p->succession[i], reply, AS_FABRIC_CHANNEL_CTRL)) {
 				cf_warning(AS_PAXOS, "sync message to %"PRIx64" lost in fabric", p->succession[i]);
 				as_fabric_msg_put(reply);
 			}
@@ -1976,7 +1976,7 @@ as_paxos_spark(as_paxos_change *c)
 	}
 
 	int rv;
-	if ((rv = as_paxos_send_to_sl(m, AS_FABRIC_PRIORITY_HIGH))) {
+	if ((rv = as_paxos_send_to_sl(m, AS_FABRIC_CHANNEL_CTRL))) {
 		cf_warning(AS_PAXOS, "in spark, sending Paxos command %s to succession list failed: rv %d", as_paxos_cmd_name[cmd], rv);
 		as_fabric_msg_put(m);
 	}
@@ -2315,7 +2315,7 @@ as_paxos_send_partition_sync_request(cf_node p_node) {
 	if (NULL == (reply = as_paxos_partition_sync_request_msg_generate())) {
 		cf_warning(AS_PAXOS, "unable to construct partition sync request message to node %"PRIx64"", p_node);
 		return;
-	} else if (0 != as_fabric_send(p_node, reply, AS_FABRIC_PRIORITY_HIGH)) {
+	} else if (0 != as_fabric_send(p_node, reply, AS_FABRIC_CHANNEL_CTRL)) {
 		cf_warning(AS_PAXOS, "unable to send partition sync message to node %"PRIx64"", p_node);
 		as_fabric_msg_put(reply);
 		return;
@@ -2833,7 +2833,7 @@ as_paxos_thr(void *arg)
 						reply = as_paxos_msg_wrap(as_paxos_current_get(), as_paxos_state_next(c, NACK));
 					}
 
-					if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH)) {
+					if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_CHANNEL_CTRL)) {
 						as_fabric_msg_put(reply);
 					}
 					break;
@@ -2846,7 +2846,7 @@ as_paxos_thr(void *arg)
 
 						cf_info(AS_PAXOS, "{%d} principal acking it's prepare %"PRIx64"",
 								t.gen.sequence, qm->id);
-						if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH)) {
+						if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_CHANNEL_CTRL)) {
 							as_fabric_msg_put(reply);
 						}
 
@@ -2867,7 +2867,7 @@ as_paxos_thr(void *arg)
 
 					cf_debug(AS_PAXOS, "{%d} sending commit_ack to %"PRIx64"",
 							t.gen.sequence, qm->id);
-					if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH))
+					if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_CHANNEL_CTRL))
 						as_fabric_msg_put(reply);
 				}
 				else {
@@ -2932,7 +2932,7 @@ as_paxos_thr(void *arg)
 
 						cf_debug(AS_PAXOS, "{%d} sending %s to %"PRIx64"",
 								t.gen.sequence, as_paxos_cmd_name[cmd], qm->id);
-						if ((rv = as_paxos_send_to_sl(reply, AS_FABRIC_PRIORITY_HIGH))) {
+						if ((rv = as_paxos_send_to_sl(reply, AS_FABRIC_CHANNEL_CTRL))) {
 							cf_warning(AS_PAXOS, "sending Paxos command %s to succession list failed: rv %d", as_paxos_cmd_name[cmd], rv);
 							as_fabric_msg_put(reply);
 						}
@@ -3042,7 +3042,7 @@ as_paxos_thr(void *arg)
 				uint64_t cluster_key = as_paxos_get_cluster_key();
 				if (NULL == (reply = as_paxos_sync_msg_generate(cluster_key)))
 					cf_warning(AS_PAXOS, "unable to construct reply message");
-				else if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_PRIORITY_HIGH))
+				else if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_CHANNEL_CTRL))
 					as_fabric_msg_put(reply);
 
 				break;
@@ -3151,7 +3151,7 @@ as_paxos_thr(void *arg)
 						cf_info(AS_PAXOS, "Re-sending paxos partition sync message to %"PRIx64"", p->succession[npos]);
 						if (NULL == (reply = as_paxos_partition_sync_msg_generate()))
 							cf_warning(AS_PAXOS, "unable to construct partition sync message to node %"PRIx64"", p->succession[npos]);
-						else if (0 != as_fabric_send(p->succession[npos], reply, AS_FABRIC_PRIORITY_HIGH)) {
+						else if (0 != as_fabric_send(p->succession[npos], reply, AS_FABRIC_CHANNEL_CTRL)) {
 							as_fabric_msg_put(reply);
 							cf_warning(AS_PAXOS, "unable to send partition sync message to node %"PRIx64"", p->succession[npos]);
 						}
@@ -3166,7 +3166,7 @@ as_paxos_thr(void *arg)
 								cf_info(AS_PAXOS, "Sending paxos partition sync message to %"PRIx64"", p->succession[i]);
 								if (NULL == (reply = as_paxos_partition_sync_msg_generate()))
 									cf_warning(AS_PAXOS, "unable to construct partition sync message to node %"PRIx64"", p->succession[i]);
-								else if (0 != as_fabric_send(p->succession[i], reply, AS_FABRIC_PRIORITY_HIGH)) {
+								else if (0 != as_fabric_send(p->succession[i], reply, AS_FABRIC_CHANNEL_CTRL)) {
 									as_fabric_msg_put(reply);
 									cf_warning(AS_PAXOS, "unable to send partition sync message to node %"PRIx64"", p->succession[i]);
 								}

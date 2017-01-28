@@ -243,7 +243,8 @@ min_free_wblocks(as_namespace *ns)
 
 	return	n_service_threads +			// client writes
 			n_transaction_threads +		// client writes
-			g_config.n_fabric_workers +	// migration and prole writes
+			g_config.n_fabric_channel_rw_recv_threads + // prole writes
+			g_config.n_fabric_channel_bulk_recv_threads + // migration writes
 			1 +							// always 1 defrag thread
 			DEFRAG_RUNTIME_RESERVE +	// reserve for defrag at runtime
 			DEFRAG_STARTUP_RESERVE;		// reserve for defrag at startup

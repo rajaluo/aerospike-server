@@ -728,8 +728,7 @@ send_repl_write_ack(cf_node node, msg* m, uint32_t result)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_WRITE_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result);
 
-	if (as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
@@ -744,8 +743,7 @@ send_multiop_ack(cf_node node, msg* m, uint32_t result)
 	msg_set_uint32(m, RW_FIELD_OP, RW_OP_MULTI_ACK);
 	msg_set_uint32(m, RW_FIELD_RESULT, result);
 
-	if (as_fabric_send(node, m, AS_FABRIC_PRIORITY_MEDIUM) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(node, m, AS_FABRIC_CHANNEL_RW) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }

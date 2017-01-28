@@ -961,7 +961,7 @@ emigrate_record(emigration *emig, msg *m)
 
 	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
 
-	if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_LOW) !=
+	if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_BULK) !=
 			AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
@@ -981,7 +981,7 @@ emigration_reinsert_reduce_fn(void *key, void *data, void *udata)
 		msg_incr_ref(ri_ctrl->m);
 
 		if (as_fabric_send(ri_ctrl->emig->dest, ri_ctrl->m,
-				AS_FABRIC_PRIORITY_LOW) != AS_FABRIC_SUCCESS) {
+				AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
 			as_fabric_msg_put(ri_ctrl->m);
 			return -1; // this will stop the reduce
 		}
@@ -1033,7 +1033,7 @@ emigration_send_start(emigration *emig)
 				start_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
 			msg_incr_ref(m);
 
-			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+			if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_CTRL) !=
 					AS_FABRIC_SUCCESS) {
 				as_fabric_msg_put(m);
 			}
@@ -1101,7 +1101,7 @@ emigration_send_done(emigration *emig)
 		if (done_xmit_ms + MIGRATE_RETRANSMIT_STARTDONE_MS < now) {
 			msg_incr_ref(m);
 
-			if (as_fabric_send(emig->dest, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+			if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_CTRL) !=
 					AS_FABRIC_SUCCESS) {
 				as_fabric_msg_put(m);
 			}
@@ -1419,7 +1419,7 @@ immigration_ack_start_request(cf_node src, msg *m, uint32_t op)
 {
 	msg_set_uint32(m, MIG_FIELD_OP, op);
 
-	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) !=
 			AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
@@ -1548,7 +1548,7 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
 
-	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_BULK) !=
 			AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 		return;
@@ -1609,7 +1609,7 @@ immigration_handle_done_request(cf_node src, msg *m) {
 	}
 	// else - garbage, or super-stale retransmitted done message.
 
-	if (as_fabric_send(src, m, AS_FABRIC_PRIORITY_MEDIUM) !=
+	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) !=
 			AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 		return;

@@ -32,6 +32,8 @@
 
 #include "hist.h"
 
+#include "fabric/fabric.h"
+
 
 //==========================================================
 // Typedefs.
@@ -95,8 +97,14 @@ typedef struct as_stats_s {
 	uint64_t		sindex_gc_garbage_cleaned; // amount of garbage deleted during list deletion phase
 
 	// Fabric stats.
-	cf_atomic64		fabric_msgs_sent; // not in ticker
-	cf_atomic64		fabric_msgs_rcvd; // not in ticker
+	uint64_t		fabric_bulk_s_rate;
+	uint64_t		fabric_bulk_r_rate;
+	uint64_t		fabric_ctrl_s_rate;
+	uint64_t		fabric_ctrl_r_rate;
+	uint64_t		fabric_meta_s_rate;
+	uint64_t		fabric_meta_r_rate;
+	uint64_t		fabric_rw_s_rate;
+	uint64_t		fabric_rw_r_rate;
 
 	//--------------------------------------------
 	// Histograms.
@@ -110,10 +118,10 @@ typedef struct as_stats_s {
 	histogram*		svc_demarshal_hist;
 	histogram*		svc_queue_hist;
 
-	histogram*		fabric_send_init_hist;
-	histogram*		fabric_send_fragment_hist;
-	histogram*		fabric_recv_fragment_hist;
-	histogram*		fabric_recv_cb_hist;
+	histogram*		fabric_send_init_hists[AS_FABRIC_N_CHANNELS];
+	histogram*		fabric_send_fragment_hists[AS_FABRIC_N_CHANNELS];
+	histogram*		fabric_recv_fragment_hists[AS_FABRIC_N_CHANNELS];
+	histogram*		fabric_recv_cb_hists[AS_FABRIC_N_CHANNELS];
 
 	histogram*		_sindex_gc_validate_obj_hist; // time taken to validate sindex object
 	histogram*		_sindex_gc_delete_obj_hist; // time taken to delete sindex object by gc
