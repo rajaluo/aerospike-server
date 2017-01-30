@@ -511,9 +511,9 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64_x(db, p->target);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint64_x(db, p->pending_emigrations);
+			cf_dyn_buf_append_uint64(db, p->pending_emigrations);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint64_x(db, p->pending_immigrations);
+			cf_dyn_buf_append_uint64(db, p->pending_immigrations);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint32(db, as_index_tree_size(p->vp));
 			cf_dyn_buf_append_char(db, ':');
@@ -522,13 +522,13 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64(db, p->n_tombstones);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint64(db, p->current_outgoing_ldt_version);
+			cf_dyn_buf_append_uint64_x(db, p->current_outgoing_ldt_version);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint64(db, p->version_info.iid);
+			cf_dyn_buf_append_uint64_x(db, p->version_info.iid);
 			cf_dyn_buf_append_char(db, '-');
-			cf_dyn_buf_append_uint64(db, p->version_info.vtp[0]);
+			cf_dyn_buf_append_uint64_x(db, *(uint64_t*)&p->version_info.vtp[0]);
 			cf_dyn_buf_append_char(db, '-');
-			cf_dyn_buf_append_uint64(db, p->version_info.vtp[8]);
+			cf_dyn_buf_append_uint64_x(db, *(uint64_t*)&p->version_info.vtp[8]);
 			cf_dyn_buf_append_char(db, ';');
 
 			pthread_mutex_unlock(&p->lock);
