@@ -2649,7 +2649,7 @@ as_config_init(const char* config_file)
 				c->fabric_latency_max_ms = cfg_int(&line, 0, 1000);
 				break;
 			case CASE_NETWORK_FABRIC_RECV_REARM_THRESHOLD:
-				c->fabric_recv_rearm_threshold = cfg_u32(&line, 1, 1024 * 1024);
+				c->fabric_recv_rearm_threshold = cfg_u32(&line, 0, 1024 * 1024);
 				break;
 			case CASE_NETWORK_FABRIC_SEND_THREADS:
 				c->n_fabric_send_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);

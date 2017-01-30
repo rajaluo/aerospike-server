@@ -2909,7 +2909,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 
-			if (val < 1 || val > 1024 * 1024) {
+			if (val < 0 || val > 1024 * 1024) {
 				goto Error;
 			}
 
