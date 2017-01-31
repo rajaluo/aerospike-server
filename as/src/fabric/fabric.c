@@ -88,14 +88,30 @@
 #define FABRIC_EPOLL_SEND_EVENTS		16
 #define FABRIC_EPOLL_RECV_EVENTS		1
 
-// msg_template defines.
+typedef enum {
+	// These values go on the wire, so mind backward compatibility if changing.
+	FS_FIELD_NODE,
+	FS_UNUSED1, // used to be FS_ADDR
+	FS_UNUSED2, // used to be FS_PORT
+	FS_UNUSED3, // used to be FS_ANV
+	FS_UNUSED4, // used to be FS_ADDR_EX
+	FS_CHANNEL,
+
+	NUM_FS_FIELDS
+} fs_msg_fields;
+
+static const msg_template fabric_mt[] = {
+	{ FS_FIELD_NODE, M_FT_UINT64 },
+	{ FS_UNUSED1, M_FT_UINT32 },
+	{ FS_UNUSED2, M_FT_UINT32 },
+	{ FS_UNUSED3, M_FT_BUF },
+	{ FS_UNUSED4, M_FT_BUF },
+	{ FS_CHANNEL, M_FT_UINT32 },
+};
+
+COMPILER_ASSERT(sizeof(fabric_mt) / sizeof(msg_template) == NUM_FS_FIELDS);
+
 #define FS_MSG_SCRATCH_SIZE	128
-#define FS_FIELD_NODE		0
-#define FS_UNUSED0			1 // used to be FS_ADDR
-#define FS_UNUSED1			2 // used to be FS_PORT
-#define FS_UNUSED2			3 // used to be FS_ANV
-#define FS_UNUSED3			4 // used to be FS_ADDR_EX
-#define FS_CHANNEL			5
 
 #define DEFAULT_EVENTS (EPOLLERR | EPOLLHUP | EPOLLRDHUP | EPOLLONESHOT)
 
@@ -213,16 +229,6 @@ COMPILER_ASSERT(sizeof(CHANNEL_NAMES) / sizeof(const char*) ==
 
 cf_serv_cfg g_fabric_bind = { .n_cfgs = 0 };
 cf_ip_port g_fabric_port = 0;
-
-// Special message at the front to describe my node ID.
-static msg_template fabric_mt[] = {
-	{ FS_FIELD_NODE, M_FT_UINT64 },
-	{ FS_UNUSED0, M_FT_UINT32 },
-	{ FS_UNUSED1, M_FT_UINT32 },
-	{ FS_UNUSED2, M_FT_BUF },
-	{ FS_UNUSED3, M_FT_BUF },
-	{ FS_CHANNEL, M_FT_UINT32 },
-};
 
 static fabric_state g_fabric;
 static cf_poll g_accept_poll;
