@@ -2018,8 +2018,9 @@ write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
 		}
 
 		as_particle* p_new = b_new->particle;
+		uint32_t i_old;
 
-		for (uint32_t i_old = 0; i_old < n_old_bins; i_old++) {
+		for (i_old = 0; i_old < n_old_bins; i_old++) {
 			as_bin* b_old = &old_bins[i_old];
 
 			if (b_new->id == b_old->id) {
@@ -2030,13 +2031,18 @@ write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
 				break;
 			}
 		}
+
+		if (i_old == n_old_bins) {
+			as_bin_particle_destroy(b_new, true);
+		}
 	}
 
 	for (uint32_t i_cleanup = 0; i_cleanup < n_cleanup_bins; i_cleanup++) {
 		as_bin* b_cleanup = &cleanup_bins[i_cleanup];
 		as_particle* p_cleanup = b_cleanup->particle;
+		uint32_t i_old;
 
-		for (uint32_t i_old = 0; i_old < n_old_bins; i_old++) {
+		for (i_old = 0; i_old < n_old_bins; i_old++) {
 			as_bin* b_old = &old_bins[i_old];
 
 			if (b_cleanup->id == b_old->id) {
@@ -2046,6 +2052,10 @@ write_master_dim_unwind(as_bin* old_bins, uint32_t n_old_bins, as_bin* new_bins,
 
 				break;
 			}
+		}
+
+		if (i_old == n_old_bins) {
+			as_bin_particle_destroy(b_cleanup, true);
 		}
 	}
 
