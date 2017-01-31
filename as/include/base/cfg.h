@@ -42,6 +42,7 @@
 
 #include "base/cluster_config.h"
 #include "base/security_config.h"
+#include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/hlc.h"
 
@@ -196,14 +197,8 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
-	uint32_t		n_fabric_channel_bulk_fds;
-	uint32_t		n_fabric_channel_bulk_recv_threads;
-	uint32_t		n_fabric_channel_ctrl_fds;
-	uint32_t		n_fabric_channel_ctrl_recv_threads;
-	uint32_t		n_fabric_channel_meta_fds;
-	uint32_t		n_fabric_channel_meta_recv_threads;
-	uint32_t		n_fabric_channel_rw_fds;
-	uint32_t		n_fabric_channel_rw_recv_threads;
+	uint32_t		n_fabric_channel_fds[AS_FABRIC_N_CHANNELS];
+	uint32_t		n_fabric_channel_recv_threads[AS_FABRIC_N_CHANNELS];
 	PAD_BOOL		fabric_keepalive_enabled;
 	int				fabric_keepalive_intvl;
 	int				fabric_keepalive_probes;

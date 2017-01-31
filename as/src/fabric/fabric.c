@@ -103,10 +103,8 @@
 #define HB_PLUGIN_DATA_BLOCK_SIZE	128
 
 typedef struct fabric_recv_thread_pool_s {
-	pthread_mutex_t		lock;
 	cf_vector			threads;
 	cf_poll				poll;
-	uint32_t			*config_size;
 	uint32_t			pool_id;
 } fabric_recv_thread_pool;
 
@@ -128,7 +126,7 @@ typedef struct fabric_state_s {
 	cf_queue			*msg_pool_queue[M_TYPE_MAX]; // a pool of reusable msgs
 	cf_vector			fb_free;
 
-	fabric_recv_thread_pool recv_pool[AS_FABRIC_N_CHANNELS]; // 0 is high
+	fabric_recv_thread_pool recv_pool[AS_FABRIC_N_CHANNELS];
 
 	pthread_mutex_t		send_lock;
 	send_entry			*sends;
@@ -295,8 +293,8 @@ static bool fabric_connection_process_msg(fabric_connection *fc, bool do_rearm);
 static bool fabric_connection_process_readable(fabric_connection *fc);
 
 // fabric_recv_thread_pool
-static void fabric_recv_thread_pool_init(fabric_recv_thread_pool *pool, uint32_t *config_size, uint32_t pool_id);
-static bool fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint32_t size);
+static void fabric_recv_thread_pool_init(fabric_recv_thread_pool *pool, uint32_t size, uint32_t pool_id);
+static void fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint32_t size);
 static void fabric_recv_thread_pool_add_fc(fabric_recv_thread_pool *pool, fabric_connection *fc);
 
 // fabric_endpoint
@@ -412,29 +410,11 @@ as_fabric_msg_queue_dump()
 int
 as_fabric_init()
 {
-	g_fabric_connect_limit[AS_FABRIC_CHANNEL_RW] =
-			g_config.n_fabric_channel_rw_fds;
-	g_fabric_connect_limit[AS_FABRIC_CHANNEL_CTRL] =
-			g_config.n_fabric_channel_ctrl_fds;
-	g_fabric_connect_limit[AS_FABRIC_CHANNEL_BULK] =
-			g_config.n_fabric_channel_bulk_fds;
-	g_fabric_connect_limit[AS_FABRIC_CHANNEL_META] =
-			g_config.n_fabric_channel_meta_fds;
-
-	uint32_t *config_thread_counts[AS_FABRIC_N_CHANNELS] = {
-			[AS_FABRIC_CHANNEL_RW] =
-					&g_config.n_fabric_channel_rw_recv_threads,
-			[AS_FABRIC_CHANNEL_CTRL] =
-					&g_config.n_fabric_channel_ctrl_recv_threads,
-			[AS_FABRIC_CHANNEL_BULK] =
-					&g_config.n_fabric_channel_bulk_recv_threads,
-			[AS_FABRIC_CHANNEL_META] =
-					&g_config.n_fabric_channel_meta_recv_threads,
-	};
-
 	for (uint32_t i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
+		g_fabric_connect_limit[i] = g_config.n_fabric_channel_fds[i];
+
 		fabric_recv_thread_pool_init(&g_fabric.recv_pool[i],
-				config_thread_counts[i], i);
+				g_config.n_fabric_channel_recv_threads[i], i);
 	}
 
 	pthread_mutex_init(&g_fabric.send_lock, 0);
@@ -451,8 +431,8 @@ as_fabric_init()
 		g_fabric.msg_pool_queue[i] = cf_queue_create(sizeof(msg*), true);
 	}
 
-	cf_vector_init(&g_fabric.fb_free, sizeof(fabric_buffer *),
-			g_config.n_fabric_channel_rw_recv_threads, VECTOR_FLAG_BIGLOCK);
+	cf_vector_init(&g_fabric.fb_free, sizeof(fabric_buffer *), 64,
+			VECTOR_FLAG_BIGLOCK);
 
 	g_published_endpoint_list = NULL;
 	g_published_endpoint_list_ipv4_only = cf_ip_addr_legacy_only();
@@ -513,22 +493,11 @@ as_fabric_start()
 
 	g_fabric.sends[g_config.n_fabric_send_threads - 1].next = NULL;
 
-	const uint32_t thread_counts[AS_FABRIC_N_CHANNELS] = {
-			[AS_FABRIC_CHANNEL_RW] =
-					g_config.n_fabric_channel_rw_recv_threads,
-			[AS_FABRIC_CHANNEL_CTRL] =
-					g_config.n_fabric_channel_ctrl_recv_threads,
-			[AS_FABRIC_CHANNEL_BULK] =
-					g_config.n_fabric_channel_bulk_recv_threads,
-			[AS_FABRIC_CHANNEL_META] =
-					g_config.n_fabric_channel_meta_recv_threads,
-	};
-
-	for (int i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
-		cf_info(AS_FABRIC, "starting %u fabric %s-channel recv threads", thread_counts[i], CHANNEL_NAMES[i]);
+	for (uint32_t i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
+		cf_info(AS_FABRIC, "starting %u fabric %s channel recv threads", g_config.n_fabric_channel_recv_threads[i], CHANNEL_NAMES[i]);
 
 		fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[i],
-				thread_counts[i]);
+				g_config.n_fabric_channel_recv_threads[i]);
 	}
 
 	if (pthread_create(&thread, &attrs, run_fabric_accept, NULL) != 0) {
@@ -538,13 +507,12 @@ as_fabric_start()
 	return 0;
 }
 
-bool
+void
 as_fabric_set_recv_threads(as_fabric_channel channel, uint32_t count)
 {
-	cf_info(AS_FABRIC, "setting %u fabric %s-channel recv threads", count, CHANNEL_NAMES[channel]);
+	g_config.n_fabric_channel_recv_threads[channel] = count;
 
-	return fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[(int)channel],
-			count);
+	fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[channel], count);
 }
 
 int
@@ -1988,28 +1956,18 @@ fabric_connection_process_readable(fabric_connection *fc)
 //
 
 static void
-fabric_recv_thread_pool_init(fabric_recv_thread_pool *pool,
-		uint32_t *config_size, uint32_t pool_id)
+fabric_recv_thread_pool_init(fabric_recv_thread_pool *pool, uint32_t size,
+		uint32_t pool_id)
 {
-	pthread_mutex_init(&pool->lock, NULL);
-	cf_vector_init(&pool->threads, sizeof(pthread_t), *config_size, 0);
+	cf_vector_init(&pool->threads, sizeof(pthread_t), size, 0);
 	cf_poll_create(&pool->poll);
-	pool->config_size = config_size;
 	pool->pool_id = pool_id;
 }
 
-static bool
+// Called only at startup or under set-config lock. Caller has checked size.
+static void
 fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint32_t size)
 {
-	if (size < 1 || size > MAX_FABRIC_CHANNEL_THREADS) {
-		cf_warning(AS_FABRIC, "thread count (%d) not accepted (out of range)", size);
-		return false;
-	}
-
-	pthread_mutex_lock(&pool->lock);
-
-	*pool->config_size = size;
-
 	while (size < cf_vector_size(&pool->threads)) {
 		pthread_t th;
 		cf_vector_pop(&pool->threads, &th);
@@ -2029,10 +1987,6 @@ fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint32_t size)
 
 		cf_vector_append(&pool->threads, &thread);
 	}
-
-	pthread_mutex_unlock(&pool->lock);
-
-	return true;
 }
 
 static void

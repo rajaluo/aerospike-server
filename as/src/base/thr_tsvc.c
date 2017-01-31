@@ -92,9 +92,6 @@ static uint32_t g_queues_n_threads[MAX_TRANSACTION_QUEUES] = { 0 };
 // be cache friendly.
 static uint32_t g_current_q = 0;
 
-// TODO - consider how to unify usage of one configuration setting lock.
-static pthread_mutex_t g_tsvc_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
-
 
 //==========================================================
 // Public API.
@@ -139,8 +136,6 @@ as_tsvc_enqueue(as_transaction *tr)
 void
 as_tsvc_set_threads_per_queue(uint32_t target_n_threads)
 {
-	pthread_mutex_lock(&g_tsvc_cfg_lock);
-
 	for (uint32_t qid = 0; qid < g_config.n_transaction_queues; qid++) {
 		uint32_t current_n_threads = g_queues_n_threads[qid];
 
@@ -153,8 +148,6 @@ as_tsvc_set_threads_per_queue(uint32_t target_n_threads)
 	}
 
 	g_config.n_transaction_threads_per_queue = target_n_threads;
-
-	pthread_mutex_unlock(&g_tsvc_cfg_lock);
 }
 
 

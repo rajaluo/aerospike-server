@@ -104,7 +104,7 @@ void as_fabric_msg_queue_dump();
 
 int as_fabric_init(void);
 int as_fabric_start(void);
-bool as_fabric_set_recv_threads(as_fabric_channel channel, uint32_t count);
+void as_fabric_set_recv_threads(as_fabric_channel channel, uint32_t count);
 int as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel);
 int as_fabric_send_list(cf_node *node_ids, int nodes_sz, msg *m, as_fabric_channel channel);
 int as_fabric_get_node_lasttime(cf_node node_id, uint64_t *lasttime);

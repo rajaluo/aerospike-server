@@ -179,15 +179,15 @@ cfg_set_defaults()
 	c->hb_config.protocol = AS_HB_PROTOCOL_V2;
 	c->hb_config.override_mtu = 0;
 
-	// Fabric TCP socket keepalive defaults.
-	c->n_fabric_channel_bulk_fds = 2;
-	c->n_fabric_channel_bulk_recv_threads = 4;
-	c->n_fabric_channel_ctrl_fds = 1;
-	c->n_fabric_channel_ctrl_recv_threads = 4;
-	c->n_fabric_channel_meta_fds = 1;
-	c->n_fabric_channel_meta_recv_threads = 4;
-	c->n_fabric_channel_rw_fds = 8;
-	c->n_fabric_channel_rw_recv_threads = 16;
+	// Fabric defaults.
+	c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_BULK] = 2;
+	c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK] = 4;
+	c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_CTRL] = 1;
+	c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_CTRL] = 4;
+	c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_META] = 1;
+	c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_META] = 4;
+	c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_RW] = 8;
+	c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW] = 16;
 	c->fabric_keepalive_enabled = true;
 	c->fabric_keepalive_intvl = 1; // seconds
 	c->fabric_keepalive_probes = 10; // tries
@@ -2610,28 +2610,28 @@ as_config_init(const char* config_file)
 				c->fabric.bind_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_BULK_FDS:
-				c->n_fabric_channel_bulk_fds = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
+				c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_BULK] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
 				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_BULK_RECV_THREADS:
-				c->n_fabric_channel_bulk_recv_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
+				c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
 				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_CTRL_FDS:
-				c->n_fabric_channel_ctrl_fds = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
+				c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_CTRL] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
 				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_CTRL_RECV_THREADS:
-				c->n_fabric_channel_ctrl_recv_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
+				c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_CTRL] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
 				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_META_FDS:
-				c->n_fabric_channel_meta_fds = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
+				c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_META] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
 				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_META_RECV_THREADS:
-				c->n_fabric_channel_meta_recv_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
+				c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_META] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
 				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_RW_FDS:
-				c->n_fabric_channel_rw_fds = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
+				c->n_fabric_channel_fds[AS_FABRIC_CHANNEL_RW] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_SOCKETS);
 				break;
 			case CASE_NETWORK_FABRIC_CHANNEL_RW_RECV_THREADS:
-				c->n_fabric_channel_rw_recv_threads = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
+				c->n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW] = cfg_u32(&line, 1, MAX_FABRIC_CHANNEL_THREADS);
 				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_ENABLED:
 				c->fabric_keepalive_enabled = cfg_bool(&line);

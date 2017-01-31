@@ -1995,14 +1995,14 @@ info_network_config_get(cf_dyn_buf *db)
 
 	append_addrs(db, "fabric.address", &g_config.info.bind);
 	info_append_int(db, "fabric.port", g_config.fabric.bind_port);
-	info_append_int(db, "fabric.channel-bulk-fds", g_config.n_fabric_channel_bulk_fds);
-	info_append_int(db, "fabric.channel-bulk-recv-threads", g_config.n_fabric_channel_bulk_recv_threads);
-	info_append_int(db, "fabric.channel-ctrl-fds", g_config.n_fabric_channel_ctrl_fds);
-	info_append_int(db, "fabric.channel-ctrl-recv-threads", g_config.n_fabric_channel_ctrl_recv_threads);
-	info_append_int(db, "fabric.channel-meta-fds", g_config.n_fabric_channel_meta_fds);
-	info_append_int(db, "fabric.channel-meta-recv-threads", g_config.n_fabric_channel_meta_recv_threads);
-	info_append_int(db, "fabric.channel-rw-fds", g_config.n_fabric_channel_rw_fds);
-	info_append_int(db, "fabric.channel-rw-recv-threads", g_config.n_fabric_channel_rw_recv_threads);
+	info_append_int(db, "fabric.channel-bulk-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_BULK]);
+	info_append_int(db, "fabric.channel-bulk-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK]);
+	info_append_int(db, "fabric.channel-ctrl-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_CTRL]);
+	info_append_int(db, "fabric.channel-ctrl-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_CTRL]);
+	info_append_int(db, "fabric.channel-meta-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_META]);
+	info_append_int(db, "fabric.channel-meta-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_META]);
+	info_append_int(db, "fabric.channel-rw-fds", g_config.n_fabric_channel_fds[AS_FABRIC_CHANNEL_RW]);
+	info_append_int(db, "fabric.channel-rw-recv-threads", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW]);
 	info_append_bool(db, "fabric.keepalive-enabled", g_config.fabric_keepalive_enabled);
 	info_append_int(db, "fabric.keepalive-intvl", g_config.fabric_keepalive_intvl);
 	info_append_int(db, "fabric.keepalive-probes", g_config.fabric_keepalive_probes);
@@ -2254,7 +2254,7 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 // config-set:context=namespace;id=test;variable=value;
 //
 int
-info_command_config_set(char *name, char *params, cf_dyn_buf *db)
+info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "config-set command received: params %s", params);
 
@@ -2872,37 +2872,45 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}
-
-			if (! as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_BULK, val)) {
+			if (val < 1 || val > MAX_FABRIC_CHANNEL_THREADS) {
+				cf_warning(AS_INFO, "fabric.channel-bulk-recv-threads must be between 1 and %u", MAX_FABRIC_CHANNEL_THREADS);
 				goto Error;
 			}
+			cf_info(AS_FABRIC, "changing fabric.channel-bulk-recv-threads from %u to %d", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_BULK], val);
+			as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_BULK, val);
 		}
 		else if (0 == as_info_parameter_get(params, "fabric.channel-ctrl-recv-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}
-
-			if (! as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_CTRL, val)) {
+			if (val < 1 || val > MAX_FABRIC_CHANNEL_THREADS) {
+				cf_warning(AS_INFO, "fabric.channel-ctrl-recv-threads must be between 1 and %u", MAX_FABRIC_CHANNEL_THREADS);
 				goto Error;
 			}
+			cf_info(AS_FABRIC, "changing fabric.channel-ctrl-recv-threads from %u to %d", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_CTRL], val);
+			as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_CTRL, val);
 		}
 		else if (0 == as_info_parameter_get(params, "fabric.channel-meta-recv-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}
-
-			if (! as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_META, val)) {
+			if (val < 1 || val > MAX_FABRIC_CHANNEL_THREADS) {
+				cf_warning(AS_INFO, "fabric.channel-meta-recv-threads must be between 1 and %u", MAX_FABRIC_CHANNEL_THREADS);
 				goto Error;
 			}
+			cf_info(AS_FABRIC, "changing fabric.channel-meta-recv-threads from %u to %d", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_META], val);
+			as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_META, val);
 		}
 		else if (0 == as_info_parameter_get(params, "fabric.channel-rw-recv-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}
-
-			if (! as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_RW, val)) {
+			if (val < 1 || val > MAX_FABRIC_CHANNEL_THREADS) {
+				cf_warning(AS_INFO, "fabric.channel-rw-recv-threads must be between 1 and %u", MAX_FABRIC_CHANNEL_THREADS);
 				goto Error;
 			}
+			cf_info(AS_FABRIC, "changing fabric.channel-rw-recv-threads from %u to %d", g_config.n_fabric_channel_recv_threads[AS_FABRIC_CHANNEL_RW], val);
+			as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_RW, val);
 		}
 		else if (0 == as_info_parameter_get(params, "fabric.recv-rearm-threshold", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
@@ -3581,6 +3589,21 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 Error:
 	cf_dyn_buf_append_string(db, "error");
 	return(0);
+}
+
+// Protect all set-config commands from concurrency issues.
+static pthread_mutex_t g_set_cfg_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int
+info_command_config_set(char *name, char *params, cf_dyn_buf *db)
+{
+	pthread_mutex_lock(&g_set_cfg_lock);
+
+	int result = info_command_config_set_threadsafe(name, params, db);
+
+	pthread_mutex_unlock(&g_set_cfg_lock);
+
+	return result;
 }
 
 //

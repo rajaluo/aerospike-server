@@ -365,7 +365,6 @@ as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version,
 
 
 // Called via info command. Caller has sanity-checked n_threads.
-// TODO - make thread safe for concurrent info commands?
 void
 as_migrate_set_num_xmit_threads(int n_threads)
 {
