@@ -2873,7 +2873,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 
-			if (! as_fabric_set_worker_threads(AS_FABRIC_CHANNEL_BULK, val)) {
+			if (! as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_BULK, val)) {
 				goto Error;
 			}
 		}
@@ -2882,7 +2882,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 
-			if (! as_fabric_set_worker_threads(AS_FABRIC_CHANNEL_CTRL, val)) {
+			if (! as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_CTRL, val)) {
 				goto Error;
 			}
 		}
@@ -2891,7 +2891,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 
-			if (! as_fabric_set_worker_threads(AS_FABRIC_CHANNEL_META, val)) {
+			if (! as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_META, val)) {
 				goto Error;
 			}
 		}
@@ -2900,7 +2900,7 @@ info_command_config_set(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 
-			if (! as_fabric_set_worker_threads(AS_FABRIC_CHANNEL_RW, val)) {
+			if (! as_fabric_set_recv_threads(AS_FABRIC_CHANNEL_RW, val)) {
 				goto Error;
 			}
 		}

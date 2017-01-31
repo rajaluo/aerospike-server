@@ -102,9 +102,6 @@
 // Block size for allocating fabric hb plugin data.
 #define HB_PLUGIN_DATA_BLOCK_SIZE	128
 
-// Max connections formed via connect. Others are formed via accept.
-static uint32_t fabric_connect_limit[AS_FABRIC_N_CHANNELS];
-
 typedef struct fabric_recv_thread_pool_s {
 	pthread_mutex_t		lock;
 	cf_vector			threads;
@@ -201,6 +198,16 @@ typedef struct fabric_connection_s {
 	uint64_t r_bytes_last;
 } fabric_connection;
 
+const char* CHANNEL_NAMES[] = {
+		[AS_FABRIC_CHANNEL_RW]   = "rw",
+		[AS_FABRIC_CHANNEL_CTRL] = "ctrl",
+		[AS_FABRIC_CHANNEL_BULK] = "bulk",
+		[AS_FABRIC_CHANNEL_META] = "meta",
+};
+
+COMPILER_ASSERT(sizeof(CHANNEL_NAMES) / sizeof(const char*) ==
+		AS_FABRIC_N_CHANNELS);
+
 
 //==========================================================
 // Globals.
@@ -224,6 +231,9 @@ static cf_poll g_accept_poll;
 
 static as_endpoint_list *g_published_endpoint_list;
 static bool g_published_endpoint_list_ipv4_only;
+
+// Max connections formed via connect. Others are formed via accept.
+static uint32_t g_fabric_connect_limit[AS_FABRIC_N_CHANNELS];
 
 
 //==========================================================
@@ -402,18 +412,16 @@ as_fabric_msg_queue_dump()
 int
 as_fabric_init()
 {
-	fabric_state *fs = &g_fabric;
-
-	fabric_connect_limit[AS_FABRIC_CHANNEL_RW] =
+	g_fabric_connect_limit[AS_FABRIC_CHANNEL_RW] =
 			g_config.n_fabric_channel_rw_fds;
-	fabric_connect_limit[AS_FABRIC_CHANNEL_CTRL] =
+	g_fabric_connect_limit[AS_FABRIC_CHANNEL_CTRL] =
 			g_config.n_fabric_channel_ctrl_fds;
-	fabric_connect_limit[AS_FABRIC_CHANNEL_BULK] =
+	g_fabric_connect_limit[AS_FABRIC_CHANNEL_BULK] =
 			g_config.n_fabric_channel_bulk_fds;
-	fabric_connect_limit[AS_FABRIC_CHANNEL_META] =
+	g_fabric_connect_limit[AS_FABRIC_CHANNEL_META] =
 			g_config.n_fabric_channel_meta_fds;
 
-	uint32_t *config_count[AS_FABRIC_N_CHANNELS] = {
+	uint32_t *config_thread_counts[AS_FABRIC_N_CHANNELS] = {
 			[AS_FABRIC_CHANNEL_RW] =
 					&g_config.n_fabric_channel_rw_recv_threads,
 			[AS_FABRIC_CHANNEL_CTRL] =
@@ -425,31 +433,32 @@ as_fabric_init()
 	};
 
 	for (uint32_t i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
-		fabric_recv_thread_pool_init(&fs->recv_pool[i], config_count[i], i);
+		fabric_recv_thread_pool_init(&g_fabric.recv_pool[i],
+				config_thread_counts[i], i);
 	}
 
-	pthread_mutex_init(&fs->send_lock, 0);
+	pthread_mutex_init(&g_fabric.send_lock, 0);
 
 	as_fabric_register_msg_fn(M_TYPE_FABRIC, fabric_mt, sizeof(fabric_mt),
 			FS_MSG_SCRATCH_SIZE, NULL, NULL);
 
-	pthread_mutex_init(&fs->node_hash_lock, 0);
+	pthread_mutex_init(&g_fabric.node_hash_lock, 0);
 
-	rchash_create(&fs->node_hash, cf_nodeid_rchash_fn, fabric_node_destructor,
-			sizeof(cf_node), 64, RCHASH_CR_MT_MANYLOCK);
+	rchash_create(&g_fabric.node_hash, cf_nodeid_rchash_fn,
+			fabric_node_destructor, sizeof(cf_node), 64, RCHASH_CR_MT_MANYLOCK);
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
-		fs->msg_pool_queue[i] = cf_queue_create(sizeof(msg*), true);
+		g_fabric.msg_pool_queue[i] = cf_queue_create(sizeof(msg*), true);
 	}
 
-	cf_vector_init(&fs->fb_free, sizeof(fabric_buffer *),
+	cf_vector_init(&g_fabric.fb_free, sizeof(fabric_buffer *),
 			g_config.n_fabric_channel_rw_recv_threads, VECTOR_FLAG_BIGLOCK);
 
 	g_published_endpoint_list = NULL;
 	g_published_endpoint_list_ipv4_only = cf_ip_addr_legacy_only();
 
 	if (! fabric_published_endpoints_refresh()) {
-		cf_crash(AS_FABRIC, "Error creating fabric published endpoint list.");
+		cf_crash(AS_FABRIC, "error creating fabric published endpoint list");
 	}
 
 	as_hb_plugin fabric_plugin;
@@ -465,7 +474,7 @@ as_fabric_init()
 	fabric_plugin.change_listener = NULL;
 	as_hb_plugin_register(&fabric_plugin);
 
-	as_hb_register_listener(fabric_heartbeat_event, fs);
+	as_hb_register_listener(fabric_heartbeat_event, &g_fabric);
 
 	as_fabric_transact_init();
 
@@ -475,31 +484,36 @@ as_fabric_init()
 int
 as_fabric_start()
 {
-	fabric_state *fs = &g_fabric;
+	pthread_t thread;
+	pthread_attr_t attrs;
 
-	cf_info(AS_FABRIC, "as_fabric_start()");
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
 
-	pthread_attr_t thr_attr;
-	pthread_attr_init(&thr_attr);
-	pthread_attr_setdetachstate(&thr_attr, PTHREAD_CREATE_DETACHED);
-	pthread_t thr_stump;
+	// TODO - will go away soon:
+	pthread_create(&thread, &attrs, run_fabric_node_health, NULL);
 
-	pthread_create(&thr_stump, &thr_attr, run_fabric_node_health, NULL);
+	g_fabric.sends =
+			cf_malloc(sizeof(send_entry) * g_config.n_fabric_send_threads);
+	g_fabric.send_head = g_fabric.sends;
 
-	fs->sends = cf_malloc(sizeof(send_entry) * g_config.n_fabric_send_threads);
-	fs->send_head = fs->sends;
+	cf_info(AS_FABRIC, "starting %u fabric send threads", g_config.n_fabric_send_threads);
 
 	for (int i = 0; i < g_config.n_fabric_send_threads; i++) {
-		cf_poll_create(&fs->sends[i].poll);
-		fs->sends[i].id = i;
-		fs->sends[i].count = 0;
-		fs->sends[i].next = fs->sends + i + 1;
-		pthread_create(&thr_stump, &thr_attr, run_fabric_send, &fs->sends[i]);
+		cf_poll_create(&g_fabric.sends[i].poll);
+		g_fabric.sends[i].id = i;
+		g_fabric.sends[i].count = 0;
+		g_fabric.sends[i].next = g_fabric.sends + i + 1;
+
+		if (pthread_create(&thread, &attrs, run_fabric_send,
+				&g_fabric.sends[i]) != 0) {
+			cf_crash(AS_FABRIC, "could not create fabric send thread");
+		}
 	}
 
-	fs->sends[g_config.n_fabric_send_threads - 1].next = NULL;
+	g_fabric.sends[g_config.n_fabric_send_threads - 1].next = NULL;
 
-	const uint32_t worker_counts[AS_FABRIC_N_CHANNELS] = {
+	const uint32_t thread_counts[AS_FABRIC_N_CHANNELS] = {
 			[AS_FABRIC_CHANNEL_RW] =
 					g_config.n_fabric_channel_rw_recv_threads,
 			[AS_FABRIC_CHANNEL_CTRL] =
@@ -511,19 +525,24 @@ as_fabric_start()
 	};
 
 	for (int i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
-		fabric_recv_thread_pool_set_size(&fs->recv_pool[i], worker_counts[i]);
+		cf_info(AS_FABRIC, "starting %u fabric %s-channel recv threads", thread_counts[i], CHANNEL_NAMES[i]);
+
+		fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[i],
+				thread_counts[i]);
 	}
 
-	if (pthread_create(&thr_stump, &thr_attr, run_fabric_accept, NULL) != 0) {
-		cf_crash(AS_FABRIC, "Could not create thread to receive heartbeat");
+	if (pthread_create(&thread, &attrs, run_fabric_accept, NULL) != 0) {
+		cf_crash(AS_FABRIC, "could not create fabric accept thread");
 	}
 
 	return 0;
 }
 
 bool
-as_fabric_set_worker_threads(as_fabric_channel channel, uint32_t count)
+as_fabric_set_recv_threads(as_fabric_channel channel, uint32_t count)
 {
+	cf_info(AS_FABRIC, "setting %u fabric %s-channel recv threads", count, CHANNEL_NAMES[channel]);
+
 	return fabric_recv_thread_pool_set_size(&g_fabric.recv_pool[(int)channel],
 			count);
 }
@@ -916,7 +935,7 @@ fabric_node_connect(fabric_node *node, uint32_t ch)
 
 	uint32_t fds = node->connect_count[ch] + 1;
 
-	if (fds > fabric_connect_limit[ch]) {
+	if (fds > g_fabric_connect_limit[ch]) {
 		pthread_mutex_unlock(&node->connect_lock);
 		return NULL;
 	}
@@ -1015,7 +1034,7 @@ fabric_node_connect_all(fabric_node *node)
 	}
 
 	for (uint32_t ch = 0; ch < AS_FABRIC_N_CHANNELS; ch++) {
-		uint32_t n = fabric_connect_limit[ch] - node->connect_count[ch];
+		uint32_t n = g_fabric_connect_limit[ch] - node->connect_count[ch];
 
 		for (uint32_t i = 0; i < n; i++) {
 			fabric_connection *fc = fabric_node_connect(node, ch);
@@ -1244,7 +1263,7 @@ static bool
 fabric_node_is_connect_full(const fabric_node *node)
 {
 	for (int ch = 0; ch < AS_FABRIC_N_CHANNELS; ch++) {
-		if (node->connect_count[ch] < fabric_connect_limit[ch]) {
+		if (node->connect_count[ch] < g_fabric_connect_limit[ch]) {
 			return false;
 		}
 	}
@@ -1989,9 +2008,7 @@ fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint32_t size)
 
 	pthread_mutex_lock(&pool->lock);
 
-	if (pool->config_size) {
-		*pool->config_size = size;
-	}
+	*pool->config_size = size;
 
 	while (size < cf_vector_size(&pool->threads)) {
 		pthread_t th;
@@ -1999,18 +2016,18 @@ fabric_recv_thread_pool_set_size(fabric_recv_thread_pool *pool, uint32_t size)
 		pthread_cancel(th);
 	}
 
-	pthread_attr_t thr_attr;
-	pthread_attr_init(&thr_attr);
-	pthread_attr_setdetachstate(&thr_attr, PTHREAD_CREATE_DETACHED);
+	pthread_t thread;
+	pthread_attr_t attrs;
+
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
 
 	while (size > cf_vector_size(&pool->threads)) {
-		pthread_t th;
-
-		if (pthread_create(&th, &thr_attr, run_fabric_recv, pool) != 0) {
-			cf_crash(AS_FABRIC, "Failed to create run_fabric_recv_worker() thread");
+		if (pthread_create(&thread, &attrs, run_fabric_recv, pool) != 0) {
+			cf_crash(AS_FABRIC, "could not create fabric recv thread");
 		}
 
-		cf_vector_append(&pool->threads, &th);
+		cf_vector_append(&pool->threads, &thread);
 	}
 
 	pthread_mutex_unlock(&pool->lock);
@@ -2134,7 +2151,7 @@ run_fabric_recv(void *arg)
 	uint64_t worker_id = worker_id_counter++;
 	cf_poll poll = pool->poll;
 
-	cf_info(AS_FABRIC, "run_fabric_recv() created index %lu", worker_id);
+	cf_detail(AS_FABRIC, "run_fabric_recv() created index %lu", worker_id);
 
 	pthread_cleanup_push(run_fabric_recv_cleanup, (void*)worker_id);
 
@@ -2191,7 +2208,7 @@ run_fabric_recv_cleanup(void *arg)
 {
 	uint64_t worker_id = (uint64_t)arg;
 
-	cf_info(AS_FABRIC, "run_fabric_recv() canceling index %lu", worker_id);
+	cf_detail(AS_FABRIC, "run_fabric_recv() canceling index %lu", worker_id);
 }
 
 static void *
@@ -2200,7 +2217,7 @@ run_fabric_send(void *arg)
 	send_entry *se = (send_entry *)arg;
 	cf_poll poll = se->poll;
 
-	cf_info(AS_FABRIC, "run_fabric_send_worker(%d) id %u", poll.fd, se->id);
+	cf_detail(AS_FABRIC, "run_fabric_send() fd %d id %u", poll.fd, se->id);
 
 	while (true) {
 		cf_poll_event events[FABRIC_EPOLL_SEND_EVENTS];
@@ -2588,13 +2605,15 @@ as_fabric_transact_init()
 			fabric_transact_recv_destructor,
 			sizeof(uint64_t), 64 /* n_buckets */, RCHASH_CR_MT_MANYLOCK);
 
-	pthread_t thr_stump;
-	pthread_attr_t thr_attr;
+	pthread_t thread;
+	pthread_attr_t attrs;
 
-	pthread_attr_init(&thr_attr);
-	pthread_attr_setdetachstate(&thr_attr, PTHREAD_CREATE_DETACHED);
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
 
-	pthread_create(&thr_stump, &thr_attr, run_fabric_transact, NULL);
+	if (pthread_create(&thread, &attrs, run_fabric_transact, NULL) != 0) {
+		cf_crash(AS_FABRIC, "could not create fabric transact thread");
+	}
 }
 
 void
