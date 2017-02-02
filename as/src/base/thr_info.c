@@ -4715,7 +4715,7 @@ set_static_services(void)
 		}
 	}
 
-	if (g_access.tls_service.addrs.n_addrs > 0) {
+	if (g_access.tls_service.addrs.n_addrs > 0 && g_access.tls_service.port != 0) {
 		if (cf_ip_addr_legacy_only()) {
 			n_filter = filter_legacy(g_access.tls_service.addrs.addrs,
 					g_access.tls_service.addrs.n_addrs, filter);
@@ -4728,7 +4728,7 @@ set_static_services(void)
 		}
 	}
 
-	if (g_access.alt_tls_service.addrs.n_addrs > 0) {
+	if (g_access.alt_tls_service.addrs.n_addrs > 0 && g_access.alt_tls_service.port != 0) {
 		if (cf_ip_addr_legacy_only()) {
 			n_filter = filter_legacy(g_access.alt_tls_service.addrs.addrs,
 					g_access.alt_tls_service.addrs.n_addrs, filter);
