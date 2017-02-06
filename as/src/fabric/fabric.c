@@ -506,6 +506,8 @@ as_fabric_start()
 				g_config.n_fabric_channel_recv_threads[i]);
 	}
 
+	cf_info(AS_FABRIC, "starting fabric accept thread");
+
 	if (pthread_create(&thread, &attrs, run_fabric_accept, NULL) != 0) {
 		cf_crash(AS_FABRIC, "could not create fabric accept thread");
 	}
@@ -1385,7 +1387,7 @@ fabric_connection_release(fabric_connection *fc)
 			fc->node = NULL;
 		}
 		else {
-			cf_info(AS_FABRIC, "releasing fc %p not attached to a node", fc);
+			cf_detail(AS_FABRIC, "releasing fc %p not attached to a node", fc);
 		}
 
 		cf_socket_close(&fc->sock);
@@ -1546,7 +1548,7 @@ fabric_connection_disconnect(fabric_connection *fc)
 		pthread_mutex_unlock(&node->connect_lock);
 	}
 
-	cf_info(AS_FABRIC, "fabric_connection_disconnect(%p) {pool=%u id=%lx fd=%u}",
+	cf_detail(AS_FABRIC, "fabric_connection_disconnect(%p) {pool=%u id=%lx fd=%u}",
 			fc,	fc->pool ? fc->pool->pool_id : 0,
 			node ? node->node_id : (cf_node)0, fc->sock.fd);
 
@@ -1719,21 +1721,22 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 
 	uint32_t pool_id = AS_FABRIC_CHANNEL_RW;
 
-	msg_get_uint32(m, FS_CHANNEL, &pool_id);
+	if (msg_get_uint32(m, FS_CHANNEL, &pool_id) == 0) {
+		if (pool_id >= AS_FABRIC_N_CHANNELS) {
+			fabric_node_release(node); // from rchash_get
+			return false;
+		}
 
-	if (pool_id >= AS_FABRIC_N_CHANNELS) {
-		fabric_node_release(node); // from rchash_get
-		return false;
+		pthread_mutex_lock(&node->send_idle_fc_queue_lock);
+
+		if (node->live) {
+			fabric_connection_reserve(fc); // for send poll & idleQ
+			cf_queue_push(&node->send_idle_fc_queue[pool_id], &fc);
+		}
+
+		pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
 	}
-
-	pthread_mutex_lock(&node->send_idle_fc_queue_lock);
-
-	if (node->live) {
-		fabric_connection_reserve(fc); // for send poll & idleQ
-		cf_queue_push(&node->send_idle_fc_queue[pool_id], &fc);
-	}
-
-	pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
+	// else don't enable sending for old fabric compatibility.
 
 	fabric_node_release(node); // from rchash_get
 
@@ -2225,8 +2228,6 @@ run_fabric_send(void *arg)
 static void *
 run_fabric_accept(void *arg)
 {
-	cf_info(AS_FABRIC, "fabric_accept: creating listener");
-
 	cf_sockets sockset;
 
 	if (cf_socket_init_server(&g_fabric_bind, &sockset) < 0) {
