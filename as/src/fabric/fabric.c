@@ -1719,21 +1719,22 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 
 	uint32_t pool_id = AS_FABRIC_CHANNEL_RW;
 
-	msg_get_uint32(m, FS_CHANNEL, &pool_id);
+	if (msg_get_uint32(m, FS_CHANNEL, &pool_id) == 0) {
+		if (pool_id >= AS_FABRIC_N_CHANNELS) {
+			fabric_node_release(node); // from rchash_get
+			return false;
+		}
 
-	if (pool_id >= AS_FABRIC_N_CHANNELS) {
-		fabric_node_release(node); // from rchash_get
-		return false;
+		pthread_mutex_lock(&node->send_idle_fc_queue_lock);
+
+		if (node->live) {
+			fabric_connection_reserve(fc); // for send poll & idleQ
+			cf_queue_push(&node->send_idle_fc_queue[pool_id], &fc);
+		}
+
+		pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
 	}
-
-	pthread_mutex_lock(&node->send_idle_fc_queue_lock);
-
-	if (node->live) {
-		fabric_connection_reserve(fc); // for send poll & idleQ
-		cf_queue_push(&node->send_idle_fc_queue[pool_id], &fc);
-	}
-
-	pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
+	// else don't enable sending for old fabric compatibility.
 
 	fabric_node_release(node); // from rchash_get
 
