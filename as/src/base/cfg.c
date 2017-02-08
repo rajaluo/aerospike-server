@@ -334,7 +334,6 @@ typedef enum {
 	CASE_SERVICE_PROLE_EXTRA_TTL,
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
-	CASE_SERVICE_FABRIC_WORKERS,
 	// Deprecated:
 	CASE_SERVICE_AUTO_DUN,
 	CASE_SERVICE_AUTO_UNDUN,
@@ -345,6 +344,7 @@ typedef enum {
 	CASE_SERVICE_DEFRAG_QUEUE_LWM,
 	CASE_SERVICE_DEFRAG_QUEUE_PRIORITY,
 	CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE,
+	CASE_SERVICE_FABRIC_WORKERS,
 	CASE_SERVICE_FB_HEALTH_BAD_PCT,
 	CASE_SERVICE_FB_HEALTH_GOOD_PCT,
 	CASE_SERVICE_FB_HEALTH_MSG_PER_BURST,
@@ -789,7 +789,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "memory-accounting",				CASE_SERVICE_MEMORY_ACCOUNTING },
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
-		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
 		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
 		{ "auto-undun",						CASE_SERVICE_AUTO_UNDUN },
 		{ "batch-retransmit",				CASE_SERVICE_BATCH_RETRANSMIT },
@@ -799,6 +798,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "defrag-queue-lwm",				CASE_SERVICE_DEFRAG_QUEUE_LWM },
 		{ "defrag-queue-priority",			CASE_SERVICE_DEFRAG_QUEUE_PRIORITY },
 		{ "dump-message-above-size",		CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE },
+		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
 		{ "fb-health-bad-pct",				CASE_SERVICE_FB_HEALTH_BAD_PCT },
 		{ "fb-health-good-pct",				CASE_SERVICE_FB_HEALTH_GOOD_PCT },
 		{ "fb-health-msg-per-burst",		CASE_SERVICE_FB_HEALTH_MSG_PER_BURST },
@@ -2244,9 +2244,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS:
 				cfg_obsolete(&line, "please configure 'service-threads' carefully"); // FIXME - better message?
 				break;
-			case CASE_SERVICE_FABRIC_WORKERS:
-				cfg_obsolete(&line, "please configure fabric channels"); // FIXME - better message?
-				break;
 			case CASE_SERVICE_AUTO_DUN:
 			case CASE_SERVICE_AUTO_UNDUN:
 			case CASE_SERVICE_BATCH_RETRANSMIT:
@@ -2256,6 +2253,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_DEFRAG_QUEUE_LWM:
 			case CASE_SERVICE_DEFRAG_QUEUE_PRIORITY:
 			case CASE_SERVICE_DUMP_MESSAGE_ABOVE_SIZE:
+			case CASE_SERVICE_FABRIC_WORKERS:
 			case CASE_SERVICE_FB_HEALTH_BAD_PCT:
 			case CASE_SERVICE_FB_HEALTH_GOOD_PCT:
 			case CASE_SERVICE_FB_HEALTH_MSG_PER_BURST:
