@@ -363,8 +363,12 @@ cf_topo_init(cf_topo_numa_node_index a_numa_node, bool pin)
 			}
 		}
 
+		// Some Docker installations seem to not have any NUMA information
+		// in /sys. In this case, assume a system with a single NUMA node.
+
 		if (i_os_numa_node == CPU_SETSIZE) {
-			cf_crash(CF_MISC, "OS CPU index %hu does not have a NUMA node", g_n_os_cpus);
+			cf_detail(CF_MISC, "OS CPU index %hu does not have a NUMA node", g_n_os_cpus);
+			i_os_numa_node = 0;
 		}
 
 		cf_detail(CF_MISC, "OS NUMA node index is %hu", i_os_numa_node);
