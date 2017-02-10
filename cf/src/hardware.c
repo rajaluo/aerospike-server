@@ -275,6 +275,7 @@ cf_topo_init(cf_topo_numa_node_index a_numa_node, bool pin)
 	g_n_os_cpus = 0;
 	g_n_cpus = 0;
 	char path[1000];
+	bool no_numa = false;
 
 	// Loop through all CPUs in the system by looping through OS CPU indexes.
 
@@ -363,8 +364,13 @@ cf_topo_init(cf_topo_numa_node_index a_numa_node, bool pin)
 			}
 		}
 
+		// Some Docker installations seem to not have any NUMA information
+		// in /sys. In this case, assume a system with a single NUMA node.
+
 		if (i_os_numa_node == CPU_SETSIZE) {
-			cf_crash(CF_MISC, "OS CPU index %hu does not have a NUMA node", g_n_os_cpus);
+			cf_detail(CF_MISC, "OS CPU index %hu does not have a NUMA node", g_n_os_cpus);
+			no_numa = true;
+			i_os_numa_node = 0;
 		}
 
 		cf_detail(CF_MISC, "OS NUMA node index is %hu", i_os_numa_node);
@@ -429,6 +435,10 @@ cf_topo_init(cf_topo_numa_node_index a_numa_node, bool pin)
 
 	if (g_n_os_cpus == CPU_SETSIZE) {
 		cf_crash(CF_MISC, "too many CPUs");
+	}
+
+	if (no_numa) {
+		cf_warning(CF_MISC, "no NUMA information found in /sys");
 	}
 
 	if (!pin) {
