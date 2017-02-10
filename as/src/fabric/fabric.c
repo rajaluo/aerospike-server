@@ -1716,6 +1716,7 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	fabric_node *node = fabric_node_get_or_create(node_id);
 
 	if (! fabric_node_add_connection(node, fc)) {
+		fabric_node_release(node); // from rchash_get
 		return false;
 	}
 
