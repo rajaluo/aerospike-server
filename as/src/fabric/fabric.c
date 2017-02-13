@@ -551,7 +551,7 @@ as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel)
 
 	while (true) {
 		// Sync with fabric_connection_process_writable() to avoid non-empty
-		// outbound_msg_queue with every fb being in outbound_idle_fc_queue.
+		// send_queue with every fc being in send_idle_fc_queue.
 		pthread_mutex_lock(&node->send_idle_fc_queue_lock);
 
 		fabric_connection *fc;
@@ -572,7 +572,7 @@ as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel)
 		pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
 
 		if ((! cf_socket_exists(&fc->sock)) || fc->failed) {
-			fabric_connection_release(fc); // outbound_idle_fc_queue
+			fabric_connection_release(fc); // send_idle_fc_queue
 			continue;
 		}
 
@@ -1082,7 +1082,7 @@ fabric_node_destructor(void *pnode)
 	cf_detail(AS_FABRIC, "fabric_node_destructor(%p)", node);
 
 	for (int i = 0; i < AS_FABRIC_N_CHANNELS; i++) {
-		// outbound_idle_fc_queue section.
+		// send_idle_fc_queue section.
 		cf_assert(cf_queue_sz(&node->send_idle_fc_queue[i]) == 0, AS_FABRIC, "send_idle_fc_queue not empty as expected");
 		cf_queue_destroy(&node->send_idle_fc_queue[i]);
 
@@ -1478,10 +1478,9 @@ static void
 fabric_connection_recv_rearm(fabric_connection *fc)
 {
 	uint32_t events = EPOLLIN | DEFAULT_EVENTS;
-	int32_t err_ok[] = { ENOENT };
 
 	CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(fc->pool->poll, &fc->sock,
-			events, fc, sizeof(err_ok) / sizeof(int32_t), err_ok));
+			events, fc, 0, NULL));
 }
 
 // epoll takes the reference of fc.
@@ -1489,12 +1488,10 @@ static void
 fabric_connection_send_rearm(fabric_connection *fc)
 {
 	uint32_t events = EPOLLOUT | DEFAULT_EVENTS;
-	int32_t err_ok[] = { ENOENT };
 
 	if (fc->send_active) {
 		CF_IGNORE_ERROR(cf_poll_modify_socket_forgiving(fc->send_ptr->poll,
-				&fc->sock, events, fc, sizeof(err_ok) / sizeof(int32_t),
-				err_ok));
+				&fc->sock, events, fc, 0, NULL));
 	}
 	else {
 		fabric_connection_send_assign(fc);
@@ -1836,6 +1833,7 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 	// Save some state for after re-arm.
 	cf_node node = fc->node->node_id;
 	uint64_t bt = fc->benchmark_time;
+	uint32_t ch = fc->pool->pool_id;
 
 	fc->r_msg_size = 0;
 
@@ -1849,8 +1847,7 @@ fabric_connection_process_msg(fabric_connection *fc, bool do_rearm)
 		(*g_fabric.msg_cb[m->type])(node, m, g_fabric.msg_udata[m->type]);
 
 		if (bt != 0) {
-			histogram_insert_data_point(
-					g_stats.fabric_recv_cb_hists[fc->pool->pool_id], bt);
+			histogram_insert_data_point(g_stats.fabric_recv_cb_hists[ch], bt);
 		}
 	}
 	else {
