@@ -219,7 +219,7 @@ const char* CHANNEL_NAMES[] = {
 		[AS_FABRIC_CHANNEL_META] = "meta",
 };
 
-COMPILER_ASSERT(sizeof(CHANNEL_NAMES) / sizeof(const char*) ==
+COMPILER_ASSERT(sizeof(CHANNEL_NAMES) / sizeof(const char *) ==
 		AS_FABRIC_N_CHANNELS);
 
 
@@ -434,7 +434,7 @@ as_fabric_init()
 			fabric_node_destructor, sizeof(cf_node), 64, RCHASH_CR_MT_MANYLOCK);
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
-		g_fabric.msg_pool_queue[i] = cf_queue_create(sizeof(msg*), true);
+		g_fabric.msg_pool_queue[i] = cf_queue_create(sizeof(msg *), true);
 	}
 
 	cf_vector_init(&g_fabric.fb_free, sizeof(fabric_buffer *), 64,
@@ -1333,27 +1333,12 @@ fabric_connection_create(cf_socket *sock)
 {
 	fabric_connection *fc = cf_rc_alloc(sizeof(fabric_connection));
 
+	memset(fc, 0, sizeof(fabric_connection));
+
 	cf_socket_copy(sock, &fc->sock);
 
-	fc->node = NULL;
-	fc->failed = false;
-
-	fc->s_count = 0;
-	fc->s_msg_in_progress = NULL;
-	fc->s_buf.buf = NULL;
-
-	fc->r_msg_size = 0;
-	fc->r_type = M_TYPE_FABRIC;
 	fc->r_buf_in_progress = fabric_buffer_create(sizeof(msg_hdr));
-
-	fc->pool = NULL;
-	fc->started_via_connect = false;
-
-	fc->send_active = false;
-	fc->s_bytes = 0;
-	fc->s_bytes_last = 0;
-	fc->r_bytes = 0;
-	fc->r_bytes_last = 0;
+	fc->r_type = M_TYPE_FABRIC;
 
 	return fc;
 }
@@ -2117,7 +2102,7 @@ run_fabric_recv(void *arg)
 
 	cf_detail(AS_FABRIC, "run_fabric_recv() created index %lu", worker_id);
 
-	pthread_cleanup_push(run_fabric_recv_cleanup, (void*)worker_id);
+	pthread_cleanup_push(run_fabric_recv_cleanup, (void *)worker_id);
 
 	while (true) {
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
@@ -2130,7 +2115,7 @@ run_fabric_recv(void *arg)
 		for (int32_t i = 0; i < n; i++) {
 			fabric_connection *fc = events[i].data;
 
-			if (fc->node && (fc->node->live == false)) {
+			if (fc->node && ! fc->node->live) {
 				fabric_connection_disconnect(fc);
 				fabric_connection_release(fc);
 				continue;
@@ -2190,7 +2175,7 @@ run_fabric_send(void *arg)
 		for (int32_t i = 0; i < n; i++) {
 			fabric_connection *fc = events[i].data;
 
-			if (fc->node && (fc->node->live == false)) {
+			if (fc->node && ! fc->node->live) {
 				fabric_connection_disconnect(fc);
 				fabric_connection_send_unassign(fc);
 				fabric_connection_release(fc);
@@ -2378,7 +2363,7 @@ fabric_hb_plugin_set_fn(msg *m)
 	}
 
 	if (msg_set_buf(m, AS_HB_MSG_FABRIC_DATA,
-			(uint8_t*)g_published_endpoint_list, payload_size,
+			(uint8_t *)g_published_endpoint_list, payload_size,
 			MSG_SET_COPY) != 0) {
 		cf_crash(AS_FABRIC, "Error setting succession list on msg.");
 	}
