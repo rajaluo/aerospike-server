@@ -2200,7 +2200,9 @@ as_hb_info_config_get(cf_dyn_buf* db)
 	else {
 		info_append_string(db, "heartbeat.mode", "multicast");
 		info_append_addrs(db, "heartbeat.address", &g_config.hb_serv_spec.bind);
-	    	info_append_uint32(db, "heartbeat.port",
+		info_append_addrs(db, "heartbeat.multicast-group",
+			&g_config.hb_multicast_groups);
+		info_append_uint32(db, "heartbeat.port",
 			(uint32_t)g_config.hb_serv_spec.bind_port);
 	}
 
