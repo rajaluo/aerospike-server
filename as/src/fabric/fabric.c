@@ -1285,7 +1285,10 @@ fabric_buffer_destroy(fabric_buffer *fb)
 {
 	fabric_buffer_free_extra(fb);
 
-	if (cf_vector_append(&g_fabric.fb_free, &fb) != 0) {
+	if (cf_vector_size(&g_fabric.fb_free) > 64) {
+		cf_free(fb);
+	}
+	else if (cf_vector_append(&g_fabric.fb_free, &fb) != 0) {
 		cf_crash(AS_FABRIC, "push into %p failed on fb %p", &g_fabric.fb_free, fb);
 	}
 }
