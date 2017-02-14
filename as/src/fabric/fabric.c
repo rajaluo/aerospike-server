@@ -431,7 +431,7 @@ as_fabric_init()
 	pthread_mutex_init(&g_fabric.node_hash_lock, 0);
 
 	rchash_create(&g_fabric.node_hash, cf_nodeid_rchash_fn,
-			fabric_node_destructor, sizeof(cf_node), 64, RCHASH_CR_MT_MANYLOCK);
+			fabric_node_destructor, sizeof(cf_node), 128, 0);
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
 		g_fabric.msg_pool_queue[i] = cf_queue_create(sizeof(msg *), true);
@@ -691,7 +691,9 @@ as_fabric_dump(bool verbose)
 void
 as_fabric_rate_capture(fabric_rate *rate)
 {
+	pthread_mutex_lock(&g_fabric.node_hash_lock);
 	rchash_reduce(g_fabric.node_hash, fabric_rate_node_reduce_fn, rate);
+	pthread_mutex_unlock(&g_fabric.node_hash_lock);
 }
 
 
@@ -1065,7 +1067,7 @@ fabric_node_create(cf_node node_id)
 	}
 
 	if (shash_create(&(node->fc_hash), ptr_hash_fn, sizeof(fabric_connection *),
-			sizeof(uint8_t), 100, 0) != SHASH_OK) {
+			sizeof(uint8_t), 32, 0) != SHASH_OK) {
 		cf_crash(AS_FABRIC, "fabric_node_create(%lx) failed to create fc_hash",
 				node_id);
 	}
@@ -2321,6 +2323,10 @@ fabric_rate_fc_reduce_fn(void *key, void *data, void *udata)
 {
 	fabric_connection *fc = *(fabric_connection **)key;
 	fabric_rate *rate = (fabric_rate *)udata;
+
+	if (! fc->pool) {
+		return 0;
+	}
 
 	uint32_t pool_id = fc->pool->pool_id;
 	uint32_t r_bytes = fc->r_bytes;
