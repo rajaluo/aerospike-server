@@ -1302,3 +1302,11 @@ uint32_t as_mem_check();
 extern void as_paxos_set_cluster_key(uint64_t cluster_key);
 // Get the cluster key
 extern uint64_t as_paxos_get_cluster_key();
+
+// XXX JUMP - remove in "six months".
+static inline uint32_t
+truncate_void_time(as_namespace *ns, uint32_t void_time)
+{
+	uint32_t max_void_time = as_record_void_time_get() + (uint32_t)ns->max_ttl;
+	return void_time > max_void_time ? max_void_time : void_time;
+}

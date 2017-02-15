@@ -1077,7 +1077,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	}
 
 	r->generation = generation;
-	r->void_time = void_time;
+	r->void_time = truncate_void_time(ns, void_time);
 	r->last_update_time = last_update_time;
 
 	uint64_t version_to_set = 0;
