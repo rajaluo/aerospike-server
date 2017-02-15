@@ -1535,6 +1535,15 @@ fabric_connection_disconnect(fabric_connection *fc)
 		pthread_mutex_unlock(&node->connect_lock);
 	}
 
+	pthread_mutex_lock(&node->send_idle_fc_queue_lock);
+
+	if (cf_queue_delete(&node->send_idle_fc_queue[fc->pool->pool_id], &fc,
+			true) == CF_QUEUE_OK) {
+		fabric_connection_release(fc); // for delete from send_idle_fc_queue
+	}
+
+	pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
+
 	cf_detail(AS_FABRIC, "fabric_connection_disconnect(%p) {pool=%u id=%lx fd=%u}",
 			fc,	fc->pool ? fc->pool->pool_id : 0,
 			node ? node->node_id : (cf_node)0, fc->sock.fd);
@@ -1665,7 +1674,7 @@ fabric_connection_process_writable(fabric_connection *fc)
 		// Try with bigger lock block to sync with as_fabric_send().
 		pthread_mutex_lock(&node->send_idle_fc_queue_lock);
 
-		if (! fc->node->live) {
+		if (! fc->node->live && fc->failed) {
 			pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
 			return false;
 		}
@@ -1708,23 +1717,12 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	}
 
 	uint32_t pool_id = AS_FABRIC_CHANNEL_RW;
+	int rv = msg_get_uint32(m, FS_CHANNEL, &pool_id);
 
-	if (msg_get_uint32(m, FS_CHANNEL, &pool_id) == 0) {
-		if (pool_id >= AS_FABRIC_N_CHANNELS) {
-			fabric_node_release(node); // from rchash_get
-			return false;
-		}
-
-		pthread_mutex_lock(&node->send_idle_fc_queue_lock);
-
-		if (node->live) {
-			fabric_connection_reserve(fc); // for send poll & idleQ
-			cf_queue_push(&node->send_idle_fc_queue[pool_id], &fc);
-		}
-
-		pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
+	if (rv == 0 && pool_id >= AS_FABRIC_N_CHANNELS) {
+		fabric_node_release(node); // from rchash_get
+		return false;
 	}
-	// else don't enable sending for old fabric compatibility.
 
 	fabric_node_release(node); // from rchash_get
 
@@ -1732,7 +1730,21 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	fabric_buffer_init(fc->r_buf_in_progress, sizeof(msg_hdr));
 	fc->r_msg_size = 0;
 
+	// fc->pool needs to be set before placing into send_idle_fc_queue.
 	fabric_recv_thread_pool_add_fc(&g_fabric.recv_pool[pool_id], fc);
+
+	if (rv == 0) {
+		pthread_mutex_lock(&node->send_idle_fc_queue_lock);
+
+		if (node->live && ! fc->failed) {
+			fabric_connection_reserve(fc); // for send poll & idleQ
+			cf_queue_push(&node->send_idle_fc_queue[pool_id], &fc);
+		}
+
+		pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
+	}
+	// else - don't enable sending for old fabric compatibility.
+
 	fabric_connection_release(fc); // from g_accept_poll
 
 	return true;
