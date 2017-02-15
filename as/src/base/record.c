@@ -601,7 +601,7 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 		return rv;
     }
 
-	r->void_time  = c->void_time;
+	r->void_time = truncate_void_time(rd->ns, c->void_time);
 	r->last_update_time  = c->last_update_time;
 	r->generation = c->generation;
 	// Update the version in the parent. In case it is incoming migration
