@@ -1724,8 +1724,6 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 		return false;
 	}
 
-	fabric_node_release(node); // from rchash_get
-
 	fabric_buffer_free_extra(fc->r_buf_in_progress);
 	fabric_buffer_init(fc->r_buf_in_progress, sizeof(msg_hdr));
 	fc->r_msg_size = 0;
@@ -1745,6 +1743,7 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	}
 	// else - don't enable sending for old fabric compatibility.
 
+	fabric_node_release(node); // from rchash_get
 	fabric_connection_release(fc); // from g_accept_poll
 
 	return true;
