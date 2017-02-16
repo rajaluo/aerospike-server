@@ -93,7 +93,7 @@ immigration_handle_meta_batch_ack(cf_node src, msg *m)
 
 bool
 immigration_start_meta_sender(immigration *immig, uint32_t emig_features,
-		uint32_t emig_partition_sz)
+		uint64_t emig_partition_sz)
 {
 	return false;
 }
