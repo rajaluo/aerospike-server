@@ -239,7 +239,7 @@ bool immigration_ignore_pickle(const uint8_t *buf, const msg *m);
 void immigration_handle_meta_batch_ack(cf_node src, msg *m);
 
 // Meta sender.
-bool immigration_start_meta_sender(immigration *immig, uint32_t emig_features, uint32_t emig_n_recs);
+bool immigration_start_meta_sender(immigration *immig, uint32_t emig_features, uint64_t emig_n_recs);
 
 // Immigration meta queue.
 void immig_meta_q_init(immig_meta_q *imq);

@@ -63,8 +63,8 @@ typedef struct as_index_ph_s {
 } as_index_ph;
 
 typedef struct as_index_ph_array_s {
-	uint32_t	alloc_sz;
-	uint32_t	pos;
+	uint64_t	alloc_sz;
+	uint64_t	pos;
 	as_index_ph	indexes[];
 } as_index_ph_array;
 
@@ -93,7 +93,7 @@ void as_index_tree_destroy(as_index_tree *tree);
 void as_index_sprig_done(as_index_sprig *isprig, as_index *r, cf_arenax_handle r_h);
 bool as_index_sprig_invalid_record_done(as_index_sprig *isprig, as_index_ref *index_ref);
 
-uint32_t as_index_sprig_reduce_partial(as_index_sprig *isprig, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+uint64_t as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 void as_index_sprig_traverse(as_index_sprig *isprig, cf_arenax_handle r_h, as_index_ph_array *v_a);
 void as_index_sprig_traverse_purge(as_index_sprig *isprig, cf_arenax_handle r_h);
 
@@ -230,10 +230,10 @@ as_index_tree_release(as_index_tree *tree)
 
 
 // Get the number of elements in the tree.
-uint32_t
+uint64_t
 as_index_tree_size(as_index_tree *tree)
 {
-	uint32_t n_elements = 0;
+	uint64_t n_elements = 0;
 	as_sprig* sprig = tree_sprigs(tree);
 	as_sprig* sprig_end = sprig + tree->shared->n_sprigs;
 
@@ -261,7 +261,7 @@ as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata)
 // Make a callback for a specified number of elements in the tree, from outside
 // the tree lock.
 void
-as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count,
+as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count,
 		as_index_reduce_fn cb, void *udata)
 {
 	// Reduce sprigs from largest to smallest digests to preserve this order for
@@ -444,8 +444,8 @@ as_index_sprig_invalid_record_done(as_index_sprig *isprig,
 
 // Make a callback for a specified number of elements in the tree, from outside
 // the tree lock.
-uint32_t
-as_index_sprig_reduce_partial(as_index_sprig *isprig, uint32_t sample_count,
+uint64_t
+as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
 		as_index_reduce_fn cb, void *udata)
 {
 	bool reduce_all = sample_count == AS_REDUCE_ALL;
@@ -493,7 +493,7 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, uint32_t sample_count,
 
 	pthread_mutex_unlock(&isprig->pair->reduce_lock);
 
-	uint32_t i;
+	uint64_t i;
 
 	for (i = 0; i < v_a->pos; i++) {
 		as_index_ref r_ref;
@@ -624,7 +624,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, cf_digest *keyd,
 	as_index root_parent;
 
 	// Save parents as we search for the specified element's insertion point.
-	as_index_ele eles[64];
+	as_index_ele eles[64]; // FIXME - increase this appropriately
 	as_index_ele *ele;
 
 	do {
@@ -769,7 +769,7 @@ as_index_sprig_delete(as_index_sprig *isprig, cf_digest *keyd)
 	as_index root_parent;
 
 	// Save parents as we search for the specified element (or its successor).
-	as_index_ele eles[(64 * 2) + 3];
+	as_index_ele eles[(64 * 2) + 3]; // FIXME - increase this appropriately
 	as_index_ele *ele;
 
 	do {

@@ -1275,7 +1275,7 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	}
 
 	// A good thing to cache the stats first.
-	int      ns_objects  = ns->n_objects;
+	uint64_t ns_objects  = ns->n_objects;
 	uint64_t si_objects  = cf_atomic64_get(si->stats.n_objects);
 	uint64_t pending     = cf_atomic64_get(si->stats.recs_pending);
 	// To protect the pimd while accessing it.

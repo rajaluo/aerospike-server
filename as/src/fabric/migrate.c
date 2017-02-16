@@ -89,7 +89,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_LDT_PVOID_TIME, M_FT_UINT32 },
 		{ MIG_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 },
 		{ MIG_FIELD_FEATURES, M_FT_UINT32 },
-		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT32 },
+		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT32 }, // TODO - eventually UINT64
 		{ MIG_FIELD_META_RECORDS, M_FT_BUF },
 		{ MIG_FIELD_META_SEQUENCE, M_FT_UINT32 },
 		{ MIG_FIELD_META_SEQUENCE_FINAL, M_FT_UINT32 }
@@ -129,7 +129,7 @@ typedef enum {
 typedef struct emigration_pop_info_s {
 	uint32_t order;
 	uint64_t dest_score;
-	uint32_t n_elements;
+	uint64_t n_elements;
 
 	uint64_t avoid_dest;
 } emigration_pop_info;
@@ -618,7 +618,7 @@ emigration_pop(emigration **emigp)
 
 	best.order = 0xFFFFffff;
 	best.dest_score = 0;
-	best.n_elements = 0xFFFFffff;
+	best.n_elements = 0xFFFFffffFFFFffff;
 
 	best.avoid_dest = 0;
 
@@ -1006,8 +1006,8 @@ emigration_send_start(emigration *emig)
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START);
 	msg_set_uint32(m, MIG_FIELD_FEATURES, MY_MIG_FEATURES);
-	msg_set_uint32(m, MIG_FIELD_PARTITION_SIZE,
-			as_index_tree_size(emig->rsv.tree));
+	msg_set_uint32(m, MIG_FIELD_PARTITION_SIZE, // TODO - eventually UINT64
+			(uint32_t)as_index_tree_size(emig->rsv.tree));
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 	msg_set_uint64(m, MIG_FIELD_CLUSTER_KEY, emig->cluster_key);
 	msg_set_buf(m, MIG_FIELD_NAMESPACE, (byte *)ns->name,
@@ -1298,7 +1298,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 	msg_get_uint32(m, MIG_FIELD_FEATURES, &emig_features);
 
-	uint32_t emig_n_recs = 0;
+	uint32_t emig_n_recs = 0; // TODO - eventually uint64_t
 
 	msg_get_uint32(m, MIG_FIELD_PARTITION_SIZE, &emig_n_recs);
 

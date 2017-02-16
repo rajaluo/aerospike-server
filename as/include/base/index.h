@@ -310,7 +310,7 @@ typedef struct as_lock_pair_s {
 
 typedef struct as_sprig_s {
 	cf_arenax_handle	root_h;
-	uint32_t			n_elements;
+	uint64_t			n_elements;
 } as_sprig;
 
 static inline as_lock_pair *
@@ -337,15 +337,15 @@ as_index_tree *as_index_tree_create(as_index_tree_shared *shared, cf_arenax *are
 as_index_tree *as_index_tree_resume(as_index_tree_shared *shared, cf_arenax *arena, as_treex *treex);
 void as_index_tree_shutdown(as_index_tree *tree, as_treex *treex);
 int as_index_tree_release(as_index_tree *tree);
-uint32_t as_index_tree_size(as_index_tree *tree);
+uint64_t as_index_tree_size(as_index_tree *tree);
 
 typedef void (*as_index_reduce_fn) (as_index_ref *value, void *udata);
 
 void as_index_reduce(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_partial(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_partial(as_index_tree *tree, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 
 void as_index_reduce_live(as_index_tree *tree, as_index_reduce_fn cb, void *udata);
-void as_index_reduce_partial_live(as_index_tree *tree, uint32_t sample_count, as_index_reduce_fn cb, void *udata);
+void as_index_reduce_partial_live(as_index_tree *tree, uint64_t sample_count, as_index_reduce_fn cb, void *udata);
 
 int as_index_exists(as_index_tree *tree, cf_digest *keyd);
 int as_index_get_vlock(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref);
@@ -380,4 +380,4 @@ typedef struct as_index_sprig_s {
 #define RESOLVE_H(__h) ((as_index*)cf_arenax_resolve(isprig->arena, __h))
 
 // Flag to indicate full index reduce.
-#define AS_REDUCE_ALL (-1)
+#define AS_REDUCE_ALL (-1L)

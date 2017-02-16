@@ -242,11 +242,11 @@ get_cold_start_ttl_range(as_namespace* ns, uint32_t now)
 //------------------------------------------------
 // Set cold-start eviction threshold.
 //
-static uint32_t
+static uint64_t
 set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 {
 	linear_hist_threshold threshold;
-	uint32_t subtotal = linear_hist_get_threshold_for_fraction(hist, ns->evict_tenths_pct, &threshold);
+	uint64_t subtotal = linear_hist_get_threshold_for_fraction(hist, ns->evict_tenths_pct, &threshold);
 	bool all_buckets = threshold.value == 0xFFFFffff;
 
 	if (subtotal == 0) {
@@ -254,7 +254,7 @@ set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 			cf_warning(AS_NSUP, "{%s} cold-start found no records eligible for eviction", ns->name);
 		}
 		else {
-			cf_warning(AS_NSUP, "{%s} cold-start found no records below eviction void-time %u - threshold bucket %u, width %u sec, count %u > target %u (%.1f pct)",
+			cf_warning(AS_NSUP, "{%s} cold-start found no records below eviction void-time %u - threshold bucket %u, width %u sec, count %lu > target %lu (%.1f pct)",
 					ns->name, threshold.value, threshold.bucket_index,
 					threshold.bucket_width, threshold.bucket_count,
 					threshold.target_count, (float)ns->evict_tenths_pct / 10.0);
@@ -264,7 +264,7 @@ set_cold_start_threshold(as_namespace* ns, linear_hist* hist)
 	}
 
 	if (all_buckets) {
-		cf_warning(AS_NSUP, "{%s} cold-start would evict all %u records eligible - not evicting!", ns->name, subtotal);
+		cf_warning(AS_NSUP, "{%s} cold-start would evict all %lu records eligible - not evicting!", ns->name, subtotal);
 		return 0;
 	}
 
@@ -376,7 +376,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	// Now we're single-threaded again.
 
 	// Calculate the eviction threshold.
-	uint32_t n_evictable = set_cold_start_threshold(ns, prep_thread_infos[0].hist);
+	uint64_t n_evictable = set_cold_start_threshold(ns, prep_thread_infos[0].hist);
 
 	linear_hist_destroy(prep_thread_infos[0].hist);
 
@@ -386,7 +386,7 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 		return true;
 	}
 
-	cf_info(AS_NSUP, "{%s} cold-start found %u records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
+	cf_info(AS_NSUP, "{%s} cold-start found %lu records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
 
 	// Reduce all partitions to evict based on the thresholds.
 	evict_thread_info thread_info;
@@ -571,7 +571,7 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 			as_index_reduce_live(rsv.tree, non_master_sets_delete_reduce_cb, &cb_info);
 
 			if (cb_info.num_deleted != 0) {
-				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, state %d, %u records remaining",
+				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, state %d, %lu records remaining",
 						ns->name, n, cb_info.num_deleted, rsv.state,
 						as_index_tree_size(rsv.tree));
 			}
@@ -747,9 +747,9 @@ typedef struct sets_delete_info_s {
 	as_namespace*	ns;
 	uint32_t		now;
 	bool*			sets_deleting;
-	uint32_t		num_deleted;
-	uint32_t		num_expired;
-	uint32_t		num_0_void_time;
+	uint64_t		num_deleted;
+	uint64_t		num_expired;
+	uint64_t		num_0_void_time;
 } sets_delete_info;
 
 static void
@@ -796,7 +796,7 @@ sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_prep_info_s {
 	as_namespace*	ns;
 	bool*			sets_not_evicting;
-	uint32_t		num_0_void_time;
+	uint64_t		num_0_void_time;
 } evict_prep_info;
 
 static void
@@ -834,7 +834,7 @@ typedef struct evict_info_s {
 	uint32_t		now;
 	bool*			sets_not_evicting;
 	uint32_t		evict_void_time;
-	uint32_t		num_evicted;
+	uint64_t		num_evicted;
 } evict_info;
 
 static void
@@ -871,8 +871,8 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct expire_info_s {
 	as_namespace*	ns;
 	uint32_t		now;
-	uint32_t		num_expired;
-	uint32_t		num_0_void_time;
+	uint64_t		num_expired;
+	uint64_t		num_0_void_time;
 } expire_info;
 
 static void
@@ -1030,7 +1030,7 @@ static bool
 get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 {
 	linear_hist_threshold threshold;
-	uint32_t subtotal = linear_hist_get_threshold_for_fraction(ns->evict_hist, ns->evict_tenths_pct, &threshold);
+	uint64_t subtotal = linear_hist_get_threshold_for_fraction(ns->evict_hist, ns->evict_tenths_pct, &threshold);
 	bool all_buckets = threshold.value == 0xFFFFffff;
 
 	*p_evict_void_time = threshold.value;
@@ -1040,7 +1040,7 @@ get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 			cf_warning(AS_NSUP, "{%s} no records eligible for eviction", ns->name);
 		}
 		else {
-			cf_warning(AS_NSUP, "{%s} no records below eviction void-time %u - threshold bucket %u, width %u sec, count %u > target %u (%.1f pct)",
+			cf_warning(AS_NSUP, "{%s} no records below eviction void-time %u - threshold bucket %u, width %u sec, count %lu > target %lu (%.1f pct)",
 					ns->name, threshold.value, threshold.bucket_index,
 					threshold.bucket_width, threshold.bucket_count,
 					threshold.target_count, (float)ns->evict_tenths_pct / 10.0);
@@ -1050,11 +1050,11 @@ get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 	}
 
 	if (all_buckets) {
-		cf_warning(AS_NSUP, "{%s} would evict all %u records eligible - not evicting!", ns->name, subtotal);
+		cf_warning(AS_NSUP, "{%s} would evict all %lu records eligible - not evicting!", ns->name, subtotal);
 		return false;
 	}
 
-	cf_info(AS_NSUP, "{%s} found %u records eligible for eviction", ns->name, subtotal);
+	cf_info(AS_NSUP, "{%s} found %lu records eligible for eviction", ns->name, subtotal);
 
 	return true;
 }
@@ -1063,8 +1063,8 @@ get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 // Stats per namespace at the end of an nsup lap.
 //
 static void
-update_stats(as_namespace* ns, uint32_t n_master, uint32_t n_0_void_time,
-		uint32_t n_expired_records, uint32_t n_evicted_records, uint32_t n_deleted_set_records,
+update_stats(as_namespace* ns, uint64_t n_master, uint64_t n_0_void_time,
+		uint64_t n_expired_records, uint64_t n_evicted_records, uint64_t n_deleted_set_records,
 		uint32_t evict_ttl, uint32_t n_set_waits, uint32_t n_clear_waits, uint32_t n_general_waits,
 		uint64_t start_ms)
 {
@@ -1088,10 +1088,10 @@ update_stats(as_namespace* ns, uint32_t n_master, uint32_t n_0_void_time,
 	ns->nsup_cycle_duration = (uint32_t)(total_duration_ms / 1000);
 	ns->nsup_cycle_sleep_pct = total_duration_ms == 0 ? 0 : (uint32_t)((n_general_waits * 100) / total_duration_ms);
 
-	cf_info(AS_NSUP, "{%s} Records: %u, %u 0-vt, "
-			"%u(%"PRIu64") expired, %u(%"PRIu64") evicted, "
-			"%u(%"PRIu64") set deletes. "
-			"Evict ttl: %d. Waits: %u,%u,%u. Total time: %"PRIu64" ms",
+	cf_info(AS_NSUP, "{%s} Records: %lu, %lu 0-vt, "
+			"%lu(%lu) expired, %lu(%lu) evicted, "
+			"%lu(%lu) set deletes. "
+			"Evict ttl: %d. Waits: %u,%u,%u. Total time: %lu ms",
 			ns->name, n_master, n_0_void_time,
 			n_expired_records, ns->n_expired_objects, n_evicted_records, ns->n_evicted_objects,
 			n_deleted_set_records, ns->n_deleted_set_objects,
@@ -1179,9 +1179,9 @@ thr_nsup(void *arg)
 
 			linear_hist_clear(ns->ttl_hist, now, ttl_range);
 
-			uint32_t n_expired_records = 0;
-			uint32_t n_0_void_time_records = 0;
-			uint32_t n_deleted_set_records = 0;
+			uint64_t n_expired_records = 0;
+			uint64_t n_0_void_time_records = 0;
+			uint64_t n_deleted_set_records = 0;
 			uint32_t n_set_waits = 0;
 
 			uint32_t num_sets = cf_vmapx_count(ns->p_sets_vmap);
@@ -1256,7 +1256,7 @@ thr_nsup(void *arg)
 				n_clear_waits++;
 			}
 
-			uint32_t n_evicted_records = 0;
+			uint64_t n_evicted_records = 0;
 			uint32_t evict_ttl = 0;
 			uint32_t n_general_waits = 0;
 
