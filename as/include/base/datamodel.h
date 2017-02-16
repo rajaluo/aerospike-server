@@ -855,8 +855,8 @@ struct as_namespace_s {
 	PAD_BOOL		proxy_hist_enabled;
 	uint32_t		evict_hist_buckets;
 	uint32_t		evict_tenths_pct;
-	float			hwm_disk;
-	float			hwm_memory;
+	uint32_t		hwm_disk_pct;
+	uint32_t		hwm_memory_pct;
 	PAD_BOOL		ldt_enabled;
 	uint32_t		ldt_gc_sleep_us;
 	uint32_t		ldt_page_size;
@@ -868,7 +868,7 @@ struct as_namespace_s {
 	as_policy_consistency_level read_consistency_level;
 	PAD_BOOL		read_consistency_level_override;
 	PAD_BOOL		single_bin; // restrict the namespace to objects with exactly one bin
-	float			stop_writes_pct;
+	uint32_t		stop_writes_pct;
 	uint32_t		tomb_raider_eligible_age; // relevant only for enterprise edition
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
 	as_policy_commit_level write_commit_level;

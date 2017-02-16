@@ -116,8 +116,8 @@ as_namespace_create(char *name)
 	ns->data_in_index = false;
 	ns->evict_hist_buckets = 10000; // for 30 day TTL, bucket width is 4 minutes 20 seconds
 	ns->evict_tenths_pct = 5; // default eviction amount is 0.5%
-	ns->hwm_disk = 0.5; // default high water mark for eviction is 50%
-	ns->hwm_memory = 0.6; // default high water mark for eviction is 60%
+	ns->hwm_disk_pct = 50; // evict when device usage exceeds 50%
+	ns->hwm_memory_pct = 60; // evict when memory usage exceeds 50% of namespace memory-size
 	ns->ldt_enabled = false; // By default ldt is not enabled
 	ns->ldt_gc_sleep_us = 500; // Default is sleep for .5Ms. This translates to constant 2k Subrecord
 							   // GC per second.
@@ -132,7 +132,7 @@ as_namespace_create(char *name)
 	ns->tomb_raider_period = 60 * 60 * 24; // 1 day
 	ns->tree_shared.n_lock_pairs = 8;
 	ns->tree_shared.n_sprigs = 64;
-	ns->stop_writes_pct = 0.9; // stop writes when 90% of either memory or disk is used
+	ns->stop_writes_pct = 90; // stop writes when 90% of either memory or disk is used
 
 	// Set default server policies which are used only when the corresponding override is true:
 	ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ONE;
@@ -330,11 +330,11 @@ as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_w
 	uint64_t ssd_lim = ns->ssd_size;
 
 	// Compute the high-watermarks - memory.
-	uint64_t mem_hwm = mem_lim * ns->hwm_memory;
-	uint64_t mem_stop_writes = mem_lim * ns->stop_writes_pct;
+	uint64_t mem_hwm = (mem_lim * ns->hwm_memory_pct) / 100;
+	uint64_t mem_stop_writes = (mem_lim * ns->stop_writes_pct) / 100;
 
 	// Compute the high-watermark - disk.
-	uint64_t ssd_hwm = ssd_lim * ns->hwm_disk;
+	uint64_t ssd_hwm = (ssd_lim * ns->hwm_disk_pct) / 100;
 
 	// compute disk size of namespace
 	uint64_t disk_sz = 0;

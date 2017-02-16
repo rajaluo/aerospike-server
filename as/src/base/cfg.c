@@ -1784,24 +1784,6 @@ cfg_u8(const cfg_line* p_line, uint8_t min, uint8_t max)
 	return value;
 }
 
-double
-cfg_pct_fraction(const cfg_line* p_line)
-{
-	if (*p_line->val_tok_1 == '\0') {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must specify a numeric value",
-				p_line->num, p_line->name_tok);
-	}
-
-	double value = atof(p_line->val_tok_1);
-
-	if (value < 0.0 || value > 100.0) {
-		cf_crash_nostack(AS_CFG, "line %d :: %s must be >= 0 and <= 100, not %s",
-				p_line->num, p_line->name_tok, p_line->val_tok_1);
-	}
-
-	return value / 100.0;
-}
-
 uint32_t
 cfg_seconds_no_checks(const cfg_line* p_line)
 {
@@ -2809,10 +2791,10 @@ as_config_init(const char* config_file)
 				ns->evict_tenths_pct = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_HIGH_WATER_DISK_PCT:
-				ns->hwm_disk = (float)cfg_pct_fraction(&line);
+				ns->hwm_disk_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_HIGH_WATER_MEMORY_PCT:
-				ns->hwm_memory = (float)cfg_pct_fraction(&line);
+				ns->hwm_memory_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_LDT_ENABLED:
 				ns->ldt_enabled = cfg_bool(&line);
@@ -2884,7 +2866,7 @@ as_config_init(const char* config_file)
 				ns->single_bin = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_STOP_WRITES_PCT:
-				ns->stop_writes_pct = (float)cfg_pct_fraction(&line);
+				ns->stop_writes_pct = cfg_u32(&line, 0, 100);
 				break;
 			case CASE_NAMESPACE_TOMB_RAIDER_ELIGIBLE_AGE:
 				cfg_enterprise_only(&line);

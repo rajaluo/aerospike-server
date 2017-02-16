@@ -2066,8 +2066,8 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_bool(db, "enable-hist-proxy", ns->proxy_hist_enabled);
 	info_append_uint32(db, "evict-hist-buckets", ns->evict_hist_buckets);
 	info_append_uint32(db, "evict-tenths-pct", ns->evict_tenths_pct);
-	info_append_int(db, "high-water-disk-pct", (int)(ns->hwm_disk * 100));
-	info_append_int(db, "high-water-memory-pct", (int)(ns->hwm_memory * 100));
+	info_append_uint32(db, "high-water-disk-pct", ns->hwm_disk_pct);
+	info_append_uint32(db, "high-water-memory-pct", ns->hwm_memory_pct);
 	info_append_bool(db, "ldt-enabled", ns->ldt_enabled);
 	info_append_uint32(db, "ldt-gc-rate", ns->ldt_gc_sleep_us / 1000000);
 	info_append_uint32(db, "ldt-page-size", ns->ldt_page_size);
@@ -2080,7 +2080,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
-	info_append_int(db, "stop-writes-pct", (int)(ns->stop_writes_pct * 100));
+	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
 	info_append_uint32(db, "tomb-raider-eligible-age", ns->tomb_raider_eligible_age);
 	info_append_uint32(db, "tomb-raider-period", ns->tomb_raider_period);
 	info_append_string(db, "write-commit-level-override", NS_WRITE_COMMIT_LEVEL_NAME());
@@ -3042,12 +3042,18 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->memory_size = val;
 		}
 		else if (0 == as_info_parameter_get(params, "high-water-disk-pct", context, &context_len)) {
-			cf_info(AS_INFO, "Changing value of high-water-disk-pct of ns %s from %1.3f to %1.3f ", ns->name, ns->hwm_disk, atof(context) / (float)100);
-			ns->hwm_disk = atof(context) / (float)100;
+			if (0 != cf_str_atoi(context, &val) || val < 0 || val > 100) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of high-water-disk-pct of ns %s from %u to %d ", ns->name, ns->hwm_disk_pct, val);
+			ns->hwm_disk_pct = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "high-water-memory-pct", context, &context_len)) {
-			cf_info(AS_INFO, "Changing value of high-water-memory-pct memory of ns %s from %1.3f to %1.3f ", ns->name, ns->hwm_memory, atof(context) / (float)100);
-			ns->hwm_memory = atof(context) / (float)100;
+			if (0 != cf_str_atoi(context, &val) || val < 0 || val > 100) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of high-water-memory-pct memory of ns %s from %u to %d ", ns->name, ns->hwm_memory_pct, val);
+			ns->hwm_memory_pct = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "evict-tenths-pct", context, &context_len)) {
 			cf_info(AS_INFO, "Changing value of evict-tenths-pct memory of ns %s from %d to %d ", ns->name, ns->evict_tenths_pct, atoi(context));
@@ -3061,8 +3067,11 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			ns->evict_hist_buckets = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "stop-writes-pct", context, &context_len)) {
-			cf_info(AS_INFO, "Changing value of stop-writes-pct memory of ns %s from %1.3f to %1.3f ", ns->name, ns->stop_writes_pct, atof(context) / (float)100);
-			ns->stop_writes_pct = atof(context) / (float)100;
+			if (0 != cf_str_atoi(context, &val) || val < 0 || val > 100) {
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of stop-writes-pct memory of ns %s from %u to %d ", ns->name, ns->stop_writes_pct, val);
+			ns->stop_writes_pct = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "default-ttl", context, &context_len)) {
 			uint64_t val;
