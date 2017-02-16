@@ -47,7 +47,7 @@ extern const char aerospike_build_os[];
 //
 
 // The mutex that the main function deadlocks on after starting the service.
-extern pthread_mutex_t g_NONSTOP;
+extern pthread_mutex_t g_main_deadlock;
 extern bool g_startup_complete;
 
 
@@ -159,7 +159,7 @@ as_sig_handle_int(int sig_num)
 
 	xdr_sig_handler(sig_num);
 
-	pthread_mutex_unlock(&g_NONSTOP);
+	pthread_mutex_unlock(&g_main_deadlock);
 }
 
 // We get here if we intentionally trigger the signal.
@@ -199,7 +199,7 @@ as_sig_handle_term(int sig_num)
 
 	xdr_sig_handler(sig_num);
 
-	pthread_mutex_unlock(&g_NONSTOP);
+	pthread_mutex_unlock(&g_main_deadlock);
 }
 
 // We get here on cf_crash() and cf_assert().

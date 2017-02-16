@@ -119,12 +119,14 @@ int as_asm_cmd(asm_cmd_t cmd, ...)
 /*
  *  Initialize ASMalloc functions if the library has been preloaded.
  */
-void asm_init(void)
+void asm_init(void *cb_udata)
 {
 #ifdef DEBUG_ASM
 	fprintf(stderr, "In asm_init()!\n");
 	fflush(stderr);
 #endif
+
+	g_my_cb_udata = cb_udata;
 
 	if (!(g_hook = dlsym(RTLD_NEXT, "asm_hook"))) {
 		fprintf(stderr, "Could not find \"asm_hook\" ~~ Using \"original_hook\"!\n");

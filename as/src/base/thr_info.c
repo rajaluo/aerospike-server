@@ -114,22 +114,7 @@ void as_storage_summarize_wblock_stats(as_namespace *ns);
 int as_storage_analyze_wblock(as_namespace* ns, int device_index, uint32_t wblock_id);
 
 
-//------------------------------------------------
-// This is here for now, until such time as a
-// separate .c file is worth it.
-//
-
-as_stats g_stats;
-
-void
-as_stats_init()
-{
-	memset((void*)&g_stats, 0, sizeof(g_stats));
-}
-
-//
-// END - provisional stats.c
-//------------------------------------------------
+as_stats g_stats = { 0 }; // separate .c file not worth it
 
 uint64_t g_start_ms; // start time of the server
 

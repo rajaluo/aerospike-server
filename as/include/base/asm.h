@@ -92,7 +92,7 @@ extern void *g_my_cb_udata;
 /*
  *  Initialize ASMalloc functions if the library has been preloaded.
  */
-void asm_init(void);
+void asm_init(void *cb_udata);
 
 /*
  *  Invoke the ASMalloc hook function.

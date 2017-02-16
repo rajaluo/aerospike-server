@@ -81,18 +81,18 @@ extern const char aerospike_build_type[];
 extern const char aerospike_build_id[];
 
 // Command line options for the Aerospike server.
-const struct option cmd_opts[] = {
-		{ "help", no_argument, 0, 'h' },
-		{ "version", no_argument, 0, 'v' },
-		{ "config-file", required_argument, 0, 'f' },
-		{ "foreground", no_argument, 0, 'd' },
-		{ "fgdaemon", no_argument, 0, 'F' },
-		{ "cold-start", no_argument, 0, 'c' },
-		{ "instance", required_argument, 0, 'n' },
-		{ 0, 0, 0, 0 }
+static const struct option CMD_OPTS[] = {
+		{ "help", no_argument, NULL, 'h' },
+		{ "version", no_argument, NULL, 'v' },
+		{ "config-file", required_argument, NULL, 'f' },
+		{ "foreground", no_argument, NULL, 'd' },
+		{ "fgdaemon", no_argument, NULL, 'F' },
+		{ "cold-start", no_argument, NULL, 'c' },
+		{ "instance", required_argument, NULL, 'n' },
+		{ NULL, 0, NULL, 0 }
 };
 
-const char HELP[] =
+static const char HELP[] =
 		"\n"
 		"Aerospike server installation installs the script /etc/init.d/aerospike which\n"
 		"is normally used to start and stop the server. The script is also found as\n"
@@ -138,7 +138,7 @@ const char HELP[] =
 		"option.\n"
 		;
 
-const char USAGE[] =
+static const char USAGE[] =
 		"\n"
 		"asd informative command-line options:\n"
 		"[--help]\n"
@@ -152,15 +152,16 @@ const char USAGE[] =
 		"[--instance <0-15>]\n"
 		;
 
-const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
+static const char DEFAULT_CONFIG_FILE[] = "/etc/aerospike/aerospike.conf";
+
+static const char SMD_DIR_NAME[] = "/smd";
 
 
 //==========================================================
 // Globals.
 //
 
-// The mutex that the main function deadlocks on after starting the service.
-pthread_mutex_t g_NONSTOP;
+pthread_mutex_t g_main_deadlock = PTHREAD_MUTEX_INITIALIZER;
 bool g_startup_complete = false;
 bool g_shutdown_started = false;
 
@@ -174,70 +175,9 @@ extern void as_signal_setup();
 extern void as_demarshal_start();
 extern void as_nsup_start();
 
-
-//==========================================================
-// Local helpers.
-//
-
-static void
-write_pidfile(char* pidfile)
-{
-	if (! pidfile) {
-		// If there's no pid file specified in the config file, just move on.
-		return;
-	}
-
-	// Note - the directory the pid file is in must already exist.
-
-	remove(pidfile);
-
-	int pid_fd = open(pidfile, O_CREAT | O_RDWR,
-			S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
-
-	if (pid_fd < 0) {
-		cf_crash_nostack(AS_AS, "failed to open pid file %s: %s", pidfile,
-				cf_strerror(errno));
-	}
-
-	char pidstr[16];
-	sprintf(pidstr, "%u\n", (uint32_t)getpid());
-
-	// If we can't access this resource, just log a warning and continue -
-	// it is not critical to the process.
-	if (-1 == write(pid_fd, pidstr, strlen(pidstr))) {
-		cf_warning(AS_AS, "failed write to pid file %s: %s", pidfile,
-				cf_strerror(errno));
-	}
-
-	close(pid_fd);
-}
-
-static void
-validate_directory(const char* path, const char* log_tag)
-{
-	struct stat buf;
-
-	if (stat(path, &buf) != 0) {
-		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: %s",
-				log_tag, path, cf_strerror(errno));
-	}
-	else if (! S_ISDIR(buf.st_mode)) {
-		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: Not a directory",
-				log_tag, path);
-	}
-}
-
-static void
-validate_smd_directory()
-{
-	size_t len = strlen(g_config.work_directory);
-	const char SMD_DIR_NAME[] = "/smd";
-	char smd_path[len + sizeof(SMD_DIR_NAME)];
-
-	strcpy(smd_path, g_config.work_directory);
-	strcpy(smd_path + len, SMD_DIR_NAME);
-	validate_directory(smd_path, "system metadata");
-}
+static void write_pidfile(char *pidfile);
+static void validate_directory(const char *path, const char *log_tag);
+static void validate_smd_directory();
 
 
 //==========================================================
@@ -250,16 +190,10 @@ main(int argc, char **argv)
 	g_start_ms = cf_getms();
 
 #ifdef USE_ASM
-	as_mallocation_t asm_array[MAX_NUM_MALLOCATIONS];
-
-	// Zero-out the statically-allocated array of memory allocation locations.
-	memset(asm_array, 0, sizeof(asm_array));
-
-	// Set the ASMalloc callback user data.
-	g_my_cb_udata = asm_array;
+	as_mallocation_t asm_array[MAX_NUM_MALLOCATIONS] = { 0 };
 
 	// This must come first to allow initialization of the ASMalloc library.
-	asm_init();
+	asm_init(asm_array);
 #endif // defined(USE_ASM)
 
 #ifdef USE_JEM
@@ -276,17 +210,11 @@ main(int argc, char **argv)
 	// Setup signal handlers.
 	as_signal_setup();
 
-	// Initialize the Jansson JSON API.
-	as_json_init();
-
-	// Start global stats at 0.
-	as_stats_init();
-
-	// Initialize the TLS library.
+	// Initialize TLS library.
 	tls_check_init();
-	
-	int i;
-	int cmd_optidx;
+
+	int opt;
+	int opt_i;
 	const char *config_file = DEFAULT_CONFIG_FILE;
 	bool run_in_foreground = false;
 	bool new_style_daemon = false;
@@ -294,8 +222,8 @@ main(int argc, char **argv)
 	uint32_t instance = 0;
 
 	// Parse command line options.
-	while (-1 != (i = getopt_long(argc, argv, "", cmd_opts, &cmd_optidx))) {
-		switch (i) {
+	while ((opt = getopt_long(argc, argv, "", CMD_OPTS, &opt_i)) != -1) {
+		switch (opt) {
 		case 'h':
 			// printf() since we want stdout and don't want cf_fault's prefix.
 			printf("%s\n", HELP);
@@ -411,10 +339,10 @@ main(int argc, char **argv)
 
 #ifdef USE_ASM
 	// Log the main thread's Linux Task ID (pre- and post-fork) to the console.
-	fprintf(stderr, "Initial main thread tid: %ld\n", initial_tid);
+	fprintf(stderr, "initial main thread tid: %ld\n", initial_tid);
 
 	if (! run_in_foreground && c->run_as_daemon) {
-		fprintf(stderr, "Post-daemonize main thread tid: %lu\n",
+		fprintf(stderr, "post-daemonize main thread tid: %lu\n",
 				syscall(SYS_gettid));
 	}
 #endif
@@ -458,6 +386,7 @@ main(int argc, char **argv)
 	// starting worker threads, etc. (But no communication with other server
 	// nodes or clients yet.)
 
+	as_json_init();				// Jansson JSON API used by System Metadata
 	as_smd_init();				// System Metadata first - others depend on it
 	as_index_tree_gc_init();	// thread to purge dropped index trees
 	ai_init();					// before as_storage_init() populates indexes
@@ -526,18 +455,17 @@ main(int argc, char **argv)
 
 	// Stop this thread from finishing. Intentionally deadlocking on a mutex is
 	// a remarkably efficient way to do this.
-	pthread_mutex_init(&g_NONSTOP, NULL);
-	pthread_mutex_lock(&g_NONSTOP);
+	pthread_mutex_lock(&g_main_deadlock);
 	g_startup_complete = true;
-	pthread_mutex_lock(&g_NONSTOP);
+	pthread_mutex_lock(&g_main_deadlock);
 
 	// When the service is running, you are here (deadlocked) - the signals that
 	// stop the service (yes, these signals always occur in this thread) will
 	// unlock the mutex, allowing us to continue.
 
 	g_shutdown_started = true;
-	pthread_mutex_unlock(&g_NONSTOP);
-	pthread_mutex_destroy(&g_NONSTOP);
+	pthread_mutex_unlock(&g_main_deadlock);
+	pthread_mutex_destroy(&g_main_deadlock);
 
 	//--------------------------------------------
 	// Received a shutdown signal.
@@ -558,4 +486,68 @@ main(int argc, char **argv)
 #endif
 
 	return 0;
+}
+
+
+//==========================================================
+// Local helpers.
+//
+
+static void
+write_pidfile(char *pidfile)
+{
+	if (! pidfile) {
+		// If there's no pid file specified in the config file, just move on.
+		return;
+	}
+
+	// Note - the directory the pid file is in must already exist.
+
+	remove(pidfile);
+
+	int pid_fd = open(pidfile, O_CREAT | O_RDWR,
+			S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+
+	if (pid_fd < 0) {
+		cf_crash_nostack(AS_AS, "failed to open pid file %s: %s", pidfile,
+				cf_strerror(errno));
+	}
+
+	char pidstr[16];
+	sprintf(pidstr, "%u\n", (uint32_t)getpid());
+
+	// If we can't access this resource, just log a warning and continue -
+	// it is not critical to the process.
+	if (write(pid_fd, pidstr, strlen(pidstr)) == -1) {
+		cf_warning(AS_AS, "failed write to pid file %s: %s", pidfile,
+				cf_strerror(errno));
+	}
+
+	close(pid_fd);
+}
+
+static void
+validate_directory(const char *path, const char *log_tag)
+{
+	struct stat buf;
+
+	if (stat(path, &buf) != 0) {
+		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: %s",
+				log_tag, path, cf_strerror(errno));
+	}
+	else if (! S_ISDIR(buf.st_mode)) {
+		cf_crash_nostack(AS_AS, "%s directory '%s' is not set up properly: Not a directory",
+				log_tag, path);
+	}
+}
+
+static void
+validate_smd_directory()
+{
+	size_t len = strlen(g_config.work_directory);
+	char smd_path[len + sizeof(SMD_DIR_NAME)];
+
+	strcpy(smd_path, g_config.work_directory);
+	strcpy(smd_path + len, SMD_DIR_NAME);
+	validate_directory(smd_path, "system metadata");
 }
