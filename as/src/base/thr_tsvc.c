@@ -41,6 +41,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
+#include "hardware.h"
 #include "util.h"
 
 #include "base/cfg.h"
@@ -100,6 +101,20 @@ static uint32_t g_current_q = 0;
 void
 as_tsvc_init()
 {
+	// Default 'transaction-queues' can't be set before call to cf_topo_init().
+	if (g_config.n_transaction_queues == 0) {
+		g_config.n_transaction_queues =
+				// If there's at least one SSD namespace, use CPU count.
+				// Otherwise, be modest - only proxies, internal retries, and
+				// background scans & queries will use these queues & threads.
+				g_config.n_namespaces_not_in_memory != 0 ?
+						cf_topo_count_cpus() : 4;
+	}
+
+	// TODO - don't CPU-pin queues & threads unless
+	// g_config.n_namespaces_not_in_memory != 0
+	// (Use separate logic clause to above, so above may be moved later.)
+
 	cf_info(AS_TSVC, "%u transaction queues: starting %u threads per queue",
 			g_config.n_transaction_queues,
 			g_config.n_transaction_threads_per_queue);

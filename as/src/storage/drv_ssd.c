@@ -236,7 +236,7 @@ min_free_wblocks(as_namespace *ns)
 {
 	// Data-in-memory namespaces process transactions in service threads.
 	int n_service_threads = ns->storage_data_in_memory ?
-			g_config.n_service_threads : 0;
+			(int)g_config.n_service_threads : 0;
 
 	int n_transaction_threads = (int)
 			(g_config.n_transaction_queues * g_config.n_transaction_threads_per_queue);

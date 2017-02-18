@@ -87,9 +87,6 @@ typedef struct as_config_s {
 	gid_t			gid;
 	uint32_t		paxos_single_replica_limit; // cluster size at which, and below, the cluster will run with replication factor 1
 	char*			pidfile;
-	int				n_service_threads;
-	uint32_t		n_transaction_queues;
-	uint32_t		n_transaction_threads_per_queue;
 	int				n_proto_fd_max;
 
 	// Normally hidden:
@@ -147,13 +144,16 @@ typedef struct as_config_s {
 	uint32_t		scan_max_done; // maximum number of finished scans kept for monitoring
 	uint32_t		scan_max_udf_transactions; // maximum number of active transactions per UDF background scan
 	uint32_t		scan_threads; // size of scan thread pool
+	uint32_t		n_service_threads;
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
 	PAD_BOOL		sindex_gc_enable_histogram; // dynamic only
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
 	uint32_t		transaction_pending_limit; // 0 means no limit
+	uint32_t		n_transaction_queues;
 	PAD_BOOL		transaction_repeatable_read;
 	uint32_t		transaction_retry_ms;
+	uint32_t		n_transaction_threads_per_queue;
 	char*			work_directory;
 	PAD_BOOL		write_duplicate_resolution_disable;
 

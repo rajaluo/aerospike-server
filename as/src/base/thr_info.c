@@ -1850,9 +1850,6 @@ info_service_config_get(cf_dyn_buf *db)
 	// Note - no user, group.
 	info_append_uint32(db, "paxos-single-replica-limit", g_config.paxos_single_replica_limit);
 	info_append_string_safe(db, "pidfile", g_config.pidfile);
-	info_append_int(db, "service-threads", g_config.n_service_threads);
-	info_append_uint32(db, "transaction-queues", g_config.n_transaction_queues);
-	info_append_uint32(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
 	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
 
 	info_append_bool(db, "advertise-ipv6", cf_socket_advertises_ipv6());
@@ -1921,14 +1918,16 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "scan-max-done", g_config.scan_max_done);
 	info_append_uint32(db, "scan-max-udf-transactions", g_config.scan_max_udf_transactions);
 	info_append_uint32(db, "scan-threads", g_config.scan_threads);
+	info_append_uint32(db, "service-threads", g_config.n_service_threads);
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
-
 	info_append_bool(db, "sindex-gc-enable-histogram", g_config.sindex_gc_enable_histogram); // dynamic only
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
 	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
 	info_append_uint32(db, "transaction-pending-limit", g_config.transaction_pending_limit);
+	info_append_uint32(db, "transaction-queues", g_config.n_transaction_queues);
 	info_append_bool(db, "transaction-repeatable-read", g_config.transaction_repeatable_read);
 	info_append_uint32(db, "transaction-retry-ms", g_config.transaction_retry_ms);
+	info_append_uint32(db, "transaction-threads-per-queue", g_config.n_transaction_threads_per_queue);
 	info_append_string_safe(db, "work-directory", g_config.work_directory);
 	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 

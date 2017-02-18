@@ -127,9 +127,6 @@ cfg_set_defaults()
 	cfg_init_serv_spec(&c->info);
 
 	c->paxos_single_replica_limit = 1; // by default all clusters obey replication counts
-	c->n_service_threads = 4;
-	c->n_transaction_queues = 4;
-	c->n_transaction_threads_per_queue = 4;
 	c->n_proto_fd_max = 15000;
 	c->n_batch_threads = 4;
 	c->batch_max_buffers_per_queue = 255; // maximum number of buffers allowed in a single queue
@@ -163,6 +160,7 @@ cfg_set_defaults()
 	c->transaction_pending_limit = 20;
 	c->transaction_repeatable_read = false;
 	c->transaction_retry_ms = 1000 + 2; // 1 second + epsilon, so default timeout happens first
+	c->n_transaction_threads_per_queue = 4;
 	as_sindex_gconfig_default(c);
 	as_query_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
@@ -262,9 +260,6 @@ typedef enum {
 	CASE_SERVICE_GROUP,
 	CASE_SERVICE_PAXOS_SINGLE_REPLICA_LIMIT,
 	CASE_SERVICE_PIDFILE,
-	CASE_SERVICE_SERVICE_THREADS,
-	CASE_SERVICE_TRANSACTION_QUEUES,
-	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE,
 	CASE_SERVICE_CLIENT_FD_MAX, // renamed
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
@@ -318,12 +313,15 @@ typedef enum {
 	CASE_SERVICE_SCAN_MAX_DONE,
 	CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS,
 	CASE_SERVICE_SCAN_THREADS,
+	CASE_SERVICE_SERVICE_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
+	CASE_SERVICE_TRANSACTION_QUEUES,
 	CASE_SERVICE_TRANSACTION_REPEATABLE_READ,
 	CASE_SERVICE_TRANSACTION_RETRY_MS,
+	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE,
 	CASE_SERVICE_WORK_DIRECTORY,
 	CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE,
 	// For special debugging or bug-related repair:
@@ -720,9 +718,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "group",							CASE_SERVICE_GROUP },
 		{ "paxos-single-replica-limit",		CASE_SERVICE_PAXOS_SINGLE_REPLICA_LIMIT },
 		{ "pidfile",						CASE_SERVICE_PIDFILE },
-		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
-		{ "transaction-queues",				CASE_SERVICE_TRANSACTION_QUEUES },
-		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
 		{ "advertise-ipv6",					CASE_SERVICE_ADVERTISE_IPV6 },
@@ -775,12 +770,15 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-max-done",					CASE_SERVICE_SCAN_MAX_DONE },
 		{ "scan-max-udf-transactions",		CASE_SERVICE_SCAN_MAX_UDF_TRANSACTIONS },
 		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
+		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
+		{ "transaction-queues",				CASE_SERVICE_TRANSACTION_QUEUES },
 		{ "transaction-repeatable-read",	CASE_SERVICE_TRANSACTION_REPEATABLE_READ },
 		{ "transaction-retry-ms",			CASE_SERVICE_TRANSACTION_RETRY_MS },
+		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "write-duplicate-resolution-disable", CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE },
 		{ "asmalloc-enabled",				CASE_SERVICE_ASMALLOC_ENABLED },
@@ -1992,15 +1990,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_PIDFILE:
 				c->pidfile = cfg_strdup_no_checks(&line);
 				break;
-			case CASE_SERVICE_SERVICE_THREADS:
-				c->n_service_threads = cfg_int(&line, 1, MAX_DEMARSHAL_THREADS);
-				break;
-			case CASE_SERVICE_TRANSACTION_QUEUES:
-				c->n_transaction_queues = cfg_u32(&line, 1, MAX_TRANSACTION_QUEUES);
-				break;
-			case CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE:
-				c->n_transaction_threads_per_queue = cfg_u32(&line, 1, MAX_TRANSACTION_THREADS_PER_QUEUE);
-				break;
 			case CASE_SERVICE_CLIENT_FD_MAX:
 				cfg_renamed_name_tok(&line, "proto-fd-max");
 				// No break.
@@ -2183,6 +2172,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_SCAN_THREADS:
 				c->scan_threads = cfg_u32(&line, 0, 32);
 				break;
+			case CASE_SERVICE_SERVICE_THREADS:
+				c->n_service_threads = cfg_u32(&line, 1, MAX_DEMARSHAL_THREADS);
+				break;
 			case CASE_SERVICE_SINDEX_BUILDER_THREADS:
 				c->sindex_builder_threads = cfg_u32(&line, 1, MAX_SINDEX_BUILDER_THREADS);
 				break;
@@ -2195,11 +2187,17 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_TRANSACTION_PENDING_LIMIT:
 				c->transaction_pending_limit = cfg_u32_no_checks(&line);
 				break;
+			case CASE_SERVICE_TRANSACTION_QUEUES:
+				c->n_transaction_queues = cfg_u32(&line, 1, MAX_TRANSACTION_QUEUES);
+				break;
 			case CASE_SERVICE_TRANSACTION_REPEATABLE_READ:
 				c->transaction_repeatable_read = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_TRANSACTION_RETRY_MS:
 				c->transaction_retry_ms = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE:
+				c->n_transaction_threads_per_queue = cfg_u32(&line, 1, MAX_TRANSACTION_THREADS_PER_QUEUE);
 				break;
 			case CASE_SERVICE_WORK_DIRECTORY:
 				c->work_directory = cfg_strdup_no_checks(&line);

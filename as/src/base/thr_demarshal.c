@@ -40,6 +40,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
+#include "hardware.h"
 #include "hist.h"
 #include "socket.h"
 #include "tls.h"
@@ -826,8 +827,6 @@ as_demarshal_start()
 	memset(dm, 0, sizeof(demarshal_args));
 	g_demarshal_args = dm;
 
-	dm->num_threads = g_config.n_service_threads;
-
 	g_freeslot = cf_queue_create(sizeof(int), true);
 
 	if (!g_freeslot) {
@@ -845,7 +844,15 @@ as_demarshal_start()
 
 	// Create all the epoll_fds and wait for all the threads to come up.
 
-	cf_info(AS_DEMARSHAL, "starting %u demarshal threads", dm->num_threads);
+	// Default 'service-threads' can't be set before call to cf_topo_init().
+	if (g_config.n_service_threads == 0) {
+		g_config.n_service_threads = cf_topo_count_cpus();
+	}
+
+	cf_info(AS_DEMARSHAL, "starting %u demarshal threads",
+			g_config.n_service_threads);
+
+	dm->num_threads = g_config.n_service_threads;
 
 	for (int32_t i = 1; i < dm->num_threads; ++i) {
 		if (pthread_create(&dm->dm_th[i], NULL, thr_demarshal, NULL) != 0) {
