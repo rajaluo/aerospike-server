@@ -812,11 +812,12 @@ query_teardown(as_query_transaction *qtr)
 }
 
 static void
-query_release_fd(as_query_transaction *qtr)
+query_release_fd(as_file_handle *fd_h, bool force_close)
 {
-	if (qtr && qtr->fd_h) {
-		as_end_of_transaction(qtr->fd_h, qtr_is_abort(qtr));
-		qtr->fd_h = NULL;
+	if (fd_h) {
+		fd_h->fh_info &= ~FH_INFO_DONOT_REAP;                                  
+		fd_h->last_used = cf_getms();                   
+		as_end_of_transaction(fd_h, force_close);
 	}
 }
 
@@ -833,15 +834,16 @@ query_transaction_done(as_query_transaction *qtr)
 
 	ASD_QUERY_TRANS_DONE(nodeid, qtr->trid, (void *) qtr);
 
-
 	if (qtr_started(qtr)) {
 		query_run_teardown(qtr);
 	}
 
 
-	query_release_fd(qtr);
+	// if query is aborted force close connection.
+	// Not to be reused
+	query_release_fd(qtr->fd_h, qtr_is_abort(qtr));
+	qtr->fd_h = NULL;
 	query_teardown(qtr);
-
 
 	ASD_QUERY_QTR_FREE(nodeid, qtr->trid, (void *) qtr);
 
@@ -1237,9 +1239,7 @@ query_send_bg_udf_response(as_transaction *tr)
 {
 	cf_detail(AS_QUERY, "Send Fin for Background UDF");
 	bool force_close = as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) != 0;
-	// Note: should be inside release file handle ?
-	tr->from.proto_fd_h->last_used = cf_getms();
-	as_end_of_transaction(tr->from.proto_fd_h, force_close);
+	query_release_fd(tr->from.proto_fd_h, force_close);
 	tr->from.proto_fd_h = NULL;
 }
 
@@ -2876,10 +2876,11 @@ as_query(as_transaction *tr, as_namespace *ns)
 	if (rv == AS_QUERY_DONE) {
 		// Send FIN packet to client to ignore this.
 		bool force_close = as_msg_send_fin(&tr->from.proto_fd_h->sock, AS_PROTO_RESULT_OK) != 0;
-		as_end_of_transaction(tr->from.proto_fd_h, force_close);
+		query_release_fd(tr->from.proto_fd_h, force_close);
 		tr->from.proto_fd_h = NULL; // Paranoid
 		return AS_QUERY_OK;
 	} else if (rv == AS_QUERY_ERR) {
+		// tsvc takes care of managing fd
 		return AS_QUERY_ERR;
 	}
 
