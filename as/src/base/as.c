@@ -190,7 +190,7 @@ main(int argc, char **argv)
 	g_start_ms = cf_getms();
 
 #ifdef USE_ASM
-	as_mallocation_t asm_array[MAX_NUM_MALLOCATIONS] = { 0 };
+	as_mallocation_t asm_array[MAX_NUM_MALLOCATIONS] = { { 0 } };
 
 	// This must come first to allow initialization of the ASMalloc library.
 	asm_init(asm_array);

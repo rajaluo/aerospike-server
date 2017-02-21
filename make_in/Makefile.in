@@ -130,6 +130,9 @@ endif
 # Generate dependency files.
 COMMON_CFLAGS += -MMD
 
+# Require strict warning-free compilation.
+COMMON_CFLAGS += -Werror
+
 CFLAGS = $(COMMON_CFLAGS) -DMARCH_$(MARCH_NATIVE)
 
 # Define a macro for the base source file name.
