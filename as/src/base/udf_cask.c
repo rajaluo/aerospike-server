@@ -737,7 +737,7 @@ udf_cask_init()
 
 	// as_smd_create_module(udf_smd_module_name, udf_cask_smd_merge_fn, 0, udf_cask_smd_accept_fn, 0);
 	// take the default merge function
-	if (as_smd_create_module(udf_smd_module_name, 0, 0, udf_cask_smd_accept_fn, 0, 0, 0)) {
+	if (as_smd_create_module(udf_smd_module_name, 0, 0, 0, 0, udf_cask_smd_accept_fn, 0, 0, 0)) {
 		cf_crash(AS_UDF, "failed to create SMD module \"%s\"", udf_smd_module_name);
 	}
 

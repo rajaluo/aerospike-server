@@ -118,6 +118,15 @@ typedef int (*as_smd_get_cb)(char *module, as_smd_item_list_t *items, void *udat
 typedef int (*as_smd_merge_cb)(char *module, as_smd_item_list_t **item_list_out, as_smd_item_list_t **item_lists_in, size_t num_lists, void *udata);
 
 /*
+ *  Callback function type for metadata merge item conflict resolution functions.
+ *    Use only if not using custom as_smd_merge_cb
+ *    Default item conflict resolution picks greater SMD generation/timestamp
+ *    Configurable via registering a per-module callback function.
+ *    Return true to choose existing_item, false to choose new_item.
+ */
+typedef bool (*as_smd_conflict_cb)(char *module, as_smd_item_t *existing_item, as_smd_item_t *new_item, void *udata);
+
+/*
  *  Callback function type for metadata acceptance policy functions.
  *    The accept callback is executed to commit a metadata change, with
  *     the accept option specifying the originator of the accept action as follows:
@@ -179,8 +188,11 @@ int as_smd_shutdown(as_smd_t *smd);
  *  Create a container for the named module's metadata and register the policy callback functions.
  *  (Pass a NULL callback function pointer to select the default policy.)
  */
-int as_smd_create_module(char *module, as_smd_merge_cb merge_cb, void *merge_udata, as_smd_accept_cb accept_cb,
-						 void *accept_udata, as_smd_can_accept_cb can_accept_cb, void *can_accept_udata);
+int as_smd_create_module(char *module,
+						 as_smd_merge_cb merge_cb, void *merge_udata,
+						 as_smd_conflict_cb conflict_cb, void *conflict_udata,
+						 as_smd_accept_cb accept_cb, void *accept_udata,
+						 as_smd_can_accept_cb can_accept_cb, void *can_accept_udata);
 
 /*
  *  Destroy the container for the named module's metadata, releasing all of its metadata.

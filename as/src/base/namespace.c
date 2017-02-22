@@ -213,8 +213,8 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 	// Secondary index metadata is restored for all namespaces. Must be done
 	// before as_storage_init() populates the indexes.
 	int retval = as_smd_create_module(SINDEX_MODULE,
-			as_smd_majority_consensus_merge, NULL, as_sindex_smd_accept_cb,
-			NULL, as_sindex_smd_can_accept_cb, NULL);
+			as_smd_majority_consensus_merge, NULL, NULL, NULL,
+			as_sindex_smd_accept_cb, NULL, as_sindex_smd_can_accept_cb, NULL);
 
 	if (retval < 0) {
 		cf_crash(AS_NAMESPACE, "failed to create SMD module '%s' (rv %d)",

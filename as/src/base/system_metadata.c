@@ -293,10 +293,10 @@ typedef enum as_smd_cmd_type_e {
  *  Type for System Metadata event messages sent via the API.
  */
 typedef struct as_smd_cmd_s {
-	as_smd_cmd_type_t type;            // System Metadata command type
-	uint32_t options;                  // Bit vector of event options of type "as_smd_cmd_opt_t"
-	as_smd_item_t *item;               // Metadata item associated with this event (only relevant fields are set)
-	void *a, *b, *c, *d, *e, *f;       // Generic storage for command parameters.
+	as_smd_cmd_type_t type;              // System Metadata command type
+	uint32_t options;                    // Bit vector of event options of type "as_smd_cmd_opt_t"
+	as_smd_item_t *item;                 // Metadata item associated with this event (only relevant fields are set)
+	void *a, *b, *c, *d, *e, *f, *g, *h; // Generic storage for command parameters.
 } as_smd_cmd_t;
 
 /*
@@ -492,6 +492,12 @@ typedef struct as_smd_module_s {
 	// User data for the merge metadata callback (or NULL if none.)
 	void *merge_udata;
 
+	// This module's item conflict resolution callback function (or NULL if none.)
+	as_smd_conflict_cb conflict_cb;
+
+	// User data for the item conflict resolution callback (or NULL if none.)
+	void *conflict_udata;
+
 	// This module's accept metadata callback function (or NULL if none.)
 	as_smd_accept_cb accept_cb;
 
@@ -584,6 +590,8 @@ static as_smd_event_t *as_smd_create_cmd_event(as_smd_cmd_type_t type, ...)
 	// In Commands:  Create
 	as_smd_merge_cb merge_cb = NULL;
 	void *merge_udata = NULL;
+	as_smd_conflict_cb conflict_cb = NULL;
+	void *conflict_udata = NULL;
 	as_smd_accept_cb accept_cb = NULL;
 	void *accept_udata = NULL;
 	as_smd_can_accept_cb can_accept_cb = NULL;
@@ -607,6 +615,8 @@ static as_smd_event_t *as_smd_create_cmd_event(as_smd_cmd_type_t type, ...)
 			module = va_arg(args, char *);
 			merge_cb = va_arg(args, as_smd_merge_cb);
 			merge_udata = va_arg(args, void *);
+			conflict_cb = va_arg(args, as_smd_conflict_cb);
+			conflict_udata = va_arg(args, void *);
 			accept_cb = va_arg(args, as_smd_accept_cb);
 			accept_udata = va_arg(args, void *);
 			can_accept_cb = va_arg(args, as_smd_can_accept_cb);
@@ -698,10 +708,12 @@ static as_smd_event_t *as_smd_create_cmd_event(as_smd_cmd_type_t type, ...)
 	if (AS_SMD_CMD_CREATE_MODULE == type) {
 		cmd->a = merge_cb;
 		cmd->b = merge_udata;
-		cmd->c = accept_cb;
-		cmd->d = accept_udata;
-		cmd->e = can_accept_cb;
-		cmd->f = can_accept_udata;
+		cmd->c = conflict_cb;
+		cmd->d = conflict_udata;
+		cmd->e = accept_cb;
+		cmd->f = accept_udata;
+		cmd->g = can_accept_cb;
+		cmd->h = can_accept_udata;
 	} else if (AS_SMD_CMD_GET_METADATA == type) {
 		cmd->a = get_cb;
 		cmd->b = get_udata;
@@ -966,6 +978,7 @@ static void modules_rchash_destructor_fn(void *object)
 
 	// Ensure that the module's callbacks cannot be called again.
 	module_obj->merge_cb = module_obj->merge_udata = NULL;
+	module_obj->conflict_cb = module_obj->conflict_udata = NULL;
 	module_obj->accept_cb = module_obj->accept_udata = NULL;
 	module_obj->can_accept_cb = module_obj->can_accept_udata = NULL;
 
@@ -1222,12 +1235,16 @@ int as_smd_shutdown(as_smd_t *smd)
  *  Create a container for the named module's metadata and register the policy callback functions.
  *  (Pass a NULL callback function pointer to select the default policy.)
  */
-int as_smd_create_module(char *module, as_smd_merge_cb merge_cb, void *merge_udata, as_smd_accept_cb accept_cb, void *accept_udata,
+int as_smd_create_module(char *module,
+						 as_smd_merge_cb merge_cb, void *merge_udata,
+						 as_smd_conflict_cb conflict_cb, void *conflict_udata,
+						 as_smd_accept_cb accept_cb, void *accept_udata,
 						 as_smd_can_accept_cb can_accept_cb, void *can_accept_udata)
 {
 	// Send a CREATE command to the System Metadata thread.
-	return as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_CREATE_MODULE, module, merge_cb, merge_udata, accept_cb, accept_udata,
-							 can_accept_cb, can_accept_udata));
+	return as_smd_send_event(g_smd, as_smd_create_cmd_event(AS_SMD_CMD_CREATE_MODULE, module,
+							 merge_cb, merge_udata, conflict_cb, conflict_udata,
+							 accept_cb, accept_udata, can_accept_cb, can_accept_udata));
 }
 
 /*
@@ -1309,6 +1326,8 @@ static int as_smd_dump_reduce_fn(void *key, uint32_t keylen, void *object, void 
 	cf_info(AS_SMD, "Module %d: \"%s\" [\"%s\"]: ", *module_num++, module, module_obj->module);
 	cf_info(AS_SMD, "merge cb: %p", module_obj->merge_cb);
 	cf_info(AS_SMD, "merge udata: %p", module_obj->merge_udata);
+	cf_info(AS_SMD, "conflict cb: %p", module_obj->conflict_cb);
+	cf_info(AS_SMD, "conflict udata: %p", module_obj->conflict_udata);
 	cf_info(AS_SMD, "accept cb: %p", module_obj->accept_cb);
 	cf_info(AS_SMD, "accept udata: %p", module_obj->accept_udata);
 	cf_info(AS_SMD, "can accept cb: %p", module_obj->can_accept_cb);
@@ -1388,7 +1407,7 @@ void as_smd_info_cmd(char *cmd, cf_node node_id, char *module, char *key, char *
 	// Invoke the appropriate System Metadata API function.
 
 	if (!strcmp(cmd, "create")) {
-		if ((retval = as_smd_create_module(module, NULL, NULL, NULL, NULL, NULL, NULL))) {
+		if ((retval = as_smd_create_module(module, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))) {
 			cf_warning(AS_SMD, "System Metadata create module \"%s\" failed (retval %d)", module, retval);
 		}
 	} else if (!strcmp(cmd, "destroy")) {
@@ -1720,10 +1739,12 @@ static int as_smd_module_create(as_smd_t *smd, as_smd_cmd_t *cmd)
 	// Set the callback functions and their respective user data.
 	module_obj->merge_cb = cmd->a;
 	module_obj->merge_udata = cmd->b;
-	module_obj->accept_cb = cmd->c;
-	module_obj->accept_udata = cmd->d;
-	module_obj->can_accept_cb = cmd->e;
-	module_obj->can_accept_udata = cmd->f;
+	module_obj->conflict_cb = cmd->c;
+	module_obj->conflict_udata = cmd->d;
+	module_obj->accept_cb = cmd->e;
+	module_obj->accept_udata = cmd->f;
+	module_obj->can_accept_cb = cmd->g;
+	module_obj->can_accept_udata = cmd->h;
 
 	int num_items = as_smd_module_restore(module_obj);
 	if (0 > num_items) {
@@ -2736,7 +2757,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 
 		// No merge policy registered ~~ Default to union.
 		rchash *merge_hash = NULL;
-		if (RCHASH_OK != rchash_create(&merge_hash, str_hash_fn, metadata_rchash_destructor_fn, 0, 127, RCHASH_CR_MT_BIGLOCK)) {
+		if (RCHASH_OK != rchash_create(&merge_hash, str_hash_fn, metadata_rchash_destructor_fn, 0, 127, 0)) {
 			cf_crash(AS_SMD, "failed to create merge hash table for module \"%s\"", module_obj->module);
 		}
 
@@ -2755,10 +2776,19 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 							cf_crash(AS_SMD, "failed to insert item into merge hash");
 						}
 					} else {
-						// Otherwise, choose a winner first by the highest generation and second by the highest timestamp.
-						as_smd_item_t *winning_item = ((existing_item->generation > new_item->generation) ||
-								((existing_item->generation == new_item->generation) &&
-								 (existing_item->timestamp > new_item->timestamp)) ? existing_item : new_item);
+						// Otherwise, choose a winner.
+						as_smd_item_t *winning_item;
+
+						if (module_obj->conflict_cb) {
+							// Use registered callback to determine winner.
+							winning_item = (module_obj->conflict_cb)(module, existing_item, new_item, module_obj->conflict_udata) ?
+									existing_item : new_item;
+						} else {
+							// Otherwise, choose a winner first by the highest generation and second by the highest timestamp.
+							winning_item = ((existing_item->generation > new_item->generation) ||
+									((existing_item->generation == new_item->generation) &&
+									 (existing_item->timestamp > new_item->timestamp)) ? existing_item : new_item);
+						}
 
 						// And insert it back into the hash table.
 						if (RCHASH_OK != rchash_put(merge_hash, winning_item->key, key_len, winning_item)) {
