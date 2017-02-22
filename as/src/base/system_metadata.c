@@ -2777,21 +2777,23 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 						}
 					} else {
 						// Otherwise, choose a winner.
-						as_smd_item_t *winning_item;
+						bool existing_wins;
 
 						if (module_obj->conflict_cb) {
 							// Use registered callback to determine winner.
-							winning_item = (module_obj->conflict_cb)(module, existing_item, new_item, module_obj->conflict_udata) ?
-									existing_item : new_item;
+							existing_wins = (module_obj->conflict_cb)(module, existing_item, new_item, module_obj->conflict_udata);
 						} else {
 							// Otherwise, choose a winner first by the highest generation and second by the highest timestamp.
-							winning_item = ((existing_item->generation > new_item->generation) ||
+							existing_wins = (existing_item->generation > new_item->generation) ||
 									((existing_item->generation == new_item->generation) &&
-									 (existing_item->timestamp > new_item->timestamp)) ? existing_item : new_item);
+									 (existing_item->timestamp > new_item->timestamp));
 						}
 
-						// And insert it back into the hash table.
-						if (RCHASH_OK != rchash_put(merge_hash, winning_item->key, key_len, winning_item)) {
+						// Leave existing item in hash, or replace existing item
+						// with new item (put releases existing item).
+						if (existing_wins) {
+							cf_rc_release(existing_item); // for rchash_get - ref-count won't hit 0
+						} else if (RCHASH_OK != rchash_put(merge_hash, new_item->key, key_len, new_item)) {
 							cf_crash(AS_SMD, "failed to insert item into merge hash");
 						}
 					}
