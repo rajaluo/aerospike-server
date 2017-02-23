@@ -301,6 +301,12 @@ as_transaction_has_scan_options(const as_transaction *tr)
 	return (tr->msg_fields & AS_MSG_FIELD_BIT_SCAN_OPTIONS) != 0;
 }
 
+static inline bool
+as_transaction_has_predexp(const as_transaction *tr)
+{
+	return (tr->msg_fields & AS_MSG_FIELD_BIT_PREDEXP) != 0;
+}
+
 // For now it's not worth storing the trid in the as_transaction struct since we
 // only parse it from the msg once per transaction anyway.
 static inline uint64_t

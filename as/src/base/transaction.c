@@ -190,6 +190,9 @@ as_transaction_set_msg_field_flag(as_transaction *tr, uint8_t type)
 	case AS_MSG_FIELD_TYPE_BATCH_WITH_SET: // shouldn't get here - batch parent handles this
 		tr->msg_fields |= AS_MSG_FIELD_BIT_BATCH_WITH_SET;
 		break;
+	case AS_MSG_FIELD_TYPE_PREDEXP:
+		tr->msg_fields |= AS_MSG_FIELD_BIT_PREDEXP;
+		break;
 	default:
 		return false;
 	}

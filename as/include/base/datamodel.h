@@ -278,6 +278,7 @@ extern uint32_t as_bin_particle_to_flat(const as_bin *b, uint8_t *flat);
 
 // integer:
 extern int64_t as_bin_particle_integer_value(const as_bin *b);
+extern void as_bin_particle_integer_set(as_bin *b, int64_t i);
 
 // string:
 extern uint32_t as_bin_particle_string_ptr(const as_bin *b, char **p_value);
@@ -289,6 +290,7 @@ typedef void * geo_region_t;
 extern size_t as_bin_particle_geojson_cellids(const as_bin *b, uint64_t **pp_cells);
 extern bool as_particle_geojson_match(as_particle *p, uint64_t cellid, geo_region_t region, bool is_strict);
 extern bool as_particle_geojson_match_asval(const as_val *val, uint64_t cellid, geo_region_t region, bool is_strict);
+char const *as_geojson_mem_jsonstr(const as_particle *p, size_t *p_jsonsz);
 
 // list:
 struct cdt_payload_s;

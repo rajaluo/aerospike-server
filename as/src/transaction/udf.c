@@ -732,6 +732,21 @@ udf_master_apply(udf_call* call, rw_request* rw)
 			return UDF_OPTYPE_NONE;
 		}
 
+		if (tr->origin == FROM_IUDF && tr->from.iudf_orig->predexp) {
+			predexp_args_t predargs = {
+					.ns = ns, .md = r_ref.r, .vl = NULL, .rd = &rd
+			};
+
+			if (! predexp_matches_record(tr->from.iudf_orig->predexp,
+					&predargs)) {
+				udf_record_close(&urecord);
+				tr->result_code = AS_PROTO_RESULT_FAIL_NOTFOUND; // not ideal
+				process_failure(call, NULL, &rw->response_db);
+				ldt_record_destroy(&lrecord);
+				return UDF_OPTYPE_NONE;
+			}
+		}
+
 		as_msg* m = &tr->msgp->msg;
 
 		// If both the record and the message have keys, check them.

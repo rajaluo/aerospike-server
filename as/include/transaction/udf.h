@@ -29,7 +29,9 @@
 #include <stdint.h>
 
 #include "aerospike/as_aerospike.h"
+#include "aerospike/as_list.h"
 
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/transaction.h"
 
@@ -57,15 +59,28 @@ typedef struct udf_def_s {
 typedef int (*iudf_cb)(void* udata, int retcode);
 
 typedef struct iudf_origin_s {
-	udf_def	def;
-	iudf_cb	cb;
-	void*	udata;
+	udf_def			def;
+	predexp_eval_t*	predexp;
+	iudf_cb			cb;
+	void*			udata;
 } iudf_origin;
 
 
 //==========================================================
 // Public API.
 //
+
+static inline void
+iudf_origin_destroy(iudf_origin* origin)
+{
+	if (origin->def.arglist) {
+		as_list_destroy(origin->def.arglist);
+	}
+
+	if (origin->predexp) {
+		predexp_destroy(origin->predexp);
+	}
+}
 
 void as_udf_init();
 udf_def* udf_def_init_from_msg(udf_def* def, const as_transaction* tr);
