@@ -116,6 +116,7 @@
 #include "base/aggr.h"
 #include "base/as_stap.h"
 #include "base/datamodel.h"
+#include "base/predexp.h"
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/stats.h"
@@ -173,6 +174,7 @@ typedef struct as_query_transaction_s {
 	as_sindex              * si;
 	as_sindex_range        * srange;
 	query_type               job_type;  // Job type [LOOKUP/AGG/UDF]
+	predexp_eval_t         * predexp_eval;
 	cf_vector              * binlist;
 	as_file_handle         * fd_h;      // ref counted nonetheless
 	/************************** Run Time Data *********************************/
@@ -802,11 +804,12 @@ query_teardown(as_query_transaction *qtr)
 	if (qtr->si)          AS_SINDEX_RELEASE(qtr->si);
 	if (qtr->binlist)     cf_vector_destroy(qtr->binlist);
 	if (qtr->setname)     cf_free(qtr->setname);
+	if (qtr->predexp_eval) predexp_destroy(qtr->predexp_eval);
 	if (qtr->job_type == QUERY_TYPE_AGGR && qtr->agg_call.def.arglist) {
 		as_list_destroy(qtr->agg_call.def.arglist);
 	}
-	else if (qtr->job_type == QUERY_TYPE_UDF_BG && qtr->origin.def.arglist) {
-		as_list_destroy(qtr->origin.def.arglist);
+	else if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+		iudf_origin_destroy(&qtr->origin);
 	}
 	pthread_mutex_destroy(&qtr->slock);
 }
@@ -1588,6 +1591,15 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 
 	if (rec_rv == 0) {
 		as_index *r = r_ref.r;
+
+		predexp_args_t predargs = { .ns = ns, .md = r, .vl = NULL, .rd = NULL };
+
+		if (qtr->predexp_eval &&
+			! predexp_matches_metadata(qtr->predexp_eval, &predargs)) {
+			as_record_done(&r_ref, ns);
+			goto CLEANUP;
+		}
+
 		// check to see this isn't an expired record waiting to die
 		if (as_record_is_expired(r)) {
 			as_record_done(&r_ref, ns);
@@ -1597,6 +1609,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 			// that server will never send a error result code to the query client.
 			goto CLEANUP;
 		}
+
 		// make sure it's brought in from storage if necessary
 		as_storage_rd rd;
 		as_storage_record_open(ns, r, &rd, &r->key);
@@ -1612,6 +1625,17 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 		// Figure out which bins you want - for now, all
 		as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 		rd.n_bins = as_bin_inuse_count(&rd);
+
+		// Now we have a record.
+		predargs.rd = &rd;
+
+		if (qtr->predexp_eval &&
+			 ! predexp_matches_record(qtr->predexp_eval, &predargs)) {
+			as_storage_record_close(&rd);
+			as_record_done(&r_ref, ns);
+			goto CLEANUP;
+		}
+
 		// Call Back
 		if (!query_record_matches(qtr, &rd, skey)) {
 			as_storage_record_close(&rd);
@@ -1827,6 +1851,38 @@ query_udf_bg_tr_complete(void *udata, int retcode)
 int
 query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 {
+	if (qtr->origin.predexp) {
+		as_partition_reservation rsv_stack;
+		as_partition_reservation *rsv = &rsv_stack;
+		uint32_t pid = as_partition_getid(*keyd);
+
+		if (! (rsv = query_reserve_partition(qtr->ns, qtr, pid, rsv))) {
+			return AS_QUERY_OK;
+		}
+
+		as_index_ref r_ref;
+		r_ref.skip_lock = false;
+
+		if (as_record_get(rsv->tree, keyd, &r_ref, qtr->ns) != 0) {
+			query_release_partition(qtr, rsv);
+			return AS_QUERY_OK;
+		}
+
+		predexp_args_t predargs = {
+				.ns = qtr->ns, .md = r_ref.r, .vl = NULL, .rd = NULL
+		};
+
+		if (qtr->origin.predexp &&
+				! predexp_matches_metadata(qtr->origin.predexp, &predargs)) {
+			as_record_done(&r_ref, qtr->ns);
+			query_release_partition(qtr, rsv);
+			return AS_QUERY_OK;
+		}
+
+		as_record_done(&r_ref, qtr->ns);
+		query_release_partition(qtr, rsv);
+	}
+
 	as_transaction tr;
 
 	if (as_transaction_init_iudf(&tr, qtr->ns, keyd, &qtr->origin, qtr->is_durable_delete)) {
@@ -2700,6 +2756,7 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	as_sindex *si           = NULL;
 	cf_vector *binlist      = 0;
 	as_sindex_range *srange = 0;
+	predexp_eval_t *predexp_eval = NULL;
 	char *setname           = NULL;
 	as_query_transaction *qtr = NULL;
 
@@ -2757,6 +2814,17 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 		si = as_sindex_from_range(ns, setname, srange);
 	}
 
+	if (as_transaction_has_predexp(tr)) {
+		as_msg_field * pfp =
+			as_msg_field_get(&tr->msgp->msg, AS_MSG_FIELD_TYPE_PREDEXP);
+		predexp_eval = predexp_build(pfp);
+		if (! predexp_eval) {
+			cf_warning(AS_QUERY, "Failed to build predicate expression");
+			tr->result_code = AS_PROTO_RESULT_FAIL_PARAMETER;
+			goto Cleanup;
+		}
+	}
+	
 	int numbins = 0;
 	// Populate binlist to be Projected by the Query
 	binlist = as_sindex_binlist_from_msg(ns, &tr->msgp->msg, &numbins);
@@ -2789,6 +2857,13 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 		goto Cleanup;
 	}
 
+	if (qtype == QUERY_TYPE_AGGR && as_transaction_has_predexp(tr)) {
+		cf_warning(AS_QUERY, "aggregation queries do not support predexp filters");
+		tr->result_code = AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE;
+		rv              = AS_QUERY_ERR;
+		goto Cleanup;
+	}
+
 	ASD_QUERY_QTRSETUP_STARTING(nodeid, trid);
 	qtr = qtr_alloc();
 	if (!qtr) {
@@ -2813,7 +2888,11 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 
 	query_setup_fd(qtr, tr);
 
-	if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+	if (qtr->job_type == QUERY_TYPE_LOOKUP) {
+		qtr->predexp_eval = predexp_eval;
+	}
+	else if (qtr->job_type == QUERY_TYPE_UDF_BG) {
+		qtr->origin.predexp = predexp_eval;
 		qtr->origin.cb     = query_udf_bg_tr_complete;
 		qtr->origin.udata  = (void *)qtr;
 		qtr->is_durable_delete = as_transaction_is_durable_delete(tr);
@@ -2843,6 +2922,7 @@ Cleanup:
 	// Pre Query Setup Failure
 	if (setname)     cf_free(setname);
 	if (si)          AS_SINDEX_RELEASE(si);
+	if (predexp_eval) predexp_destroy(predexp_eval);
 	if (srange)      as_sindex_range_free(&srange);
 	if (binlist)     cf_vector_destroy(binlist);
 	return rv;
