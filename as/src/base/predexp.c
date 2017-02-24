@@ -31,6 +31,7 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
+#include "citrusleaf/cf_clock.h"
 
 #include "base/particle.h"
 #include "base/predexp.h"
@@ -1251,13 +1252,8 @@ eval_last_update(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wb
 
 	// predexp_eval_last_update_t* dp = (predexp_eval_last_update_t *) bp;
 
-	// FIXME - I think we want a cf_epoch_nanoseconds_from_clepoch
-	// call here instead.
-	//
-	uint64_t last_update_clepoch = argsp->md->last_update_time;
-	int64_t last_update_ms =
-		last_update_clepoch + ((int64_t) CITRUSLEAF_EPOCH * 1000);
-	int64_t last_update_ns = last_update_ms * (1000 * 1000);
+	int64_t last_update_ns =
+			(int64_t) cf_utc_ns_from_clepoch_ms(argsp->md->last_update_time);
 
 	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);
 	as_bin_particle_integer_set(&wbinp->bin, last_update_ns);
@@ -1319,17 +1315,13 @@ eval_void_time(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 
 	// predexp_eval_void_time_t* dp = (predexp_eval_void_time_t *) bp;
 
-	// FIXME - I think we want a cf_epoch_nanoseconds_from_clepoch
-	// call here instead.
-	//
-	uint64_t void_time_clepoch = argsp->md->void_time;
-	int64_t void_time = void_time_clepoch + ((int64_t) CITRUSLEAF_EPOCH);
-	int64_t void_time_ns = void_time * ((int64_t) 1e9);
+	int64_t void_time_ns =
+			(int64_t) cf_utc_ns_from_clepoch_sec(argsp->md->void_time);
 
-	// SPECIAL CASE - if the void_time_clepoch == 0 set the
+	// SPECIAL CASE - if the argsp->md->void_time == 0 set the
 	// void_time_ns to 0 as well.
 	//
-	if (void_time_clepoch == 0) {
+	if (argsp->md->void_time == 0) {
 		void_time_ns = 0;
 	}
 
