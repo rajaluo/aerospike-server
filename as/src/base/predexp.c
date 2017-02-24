@@ -940,16 +940,21 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 		}
 	}
 
-	as_bin_state_set_from_type(&dp->bin, type);
-
 	int result = particle_vtable[type]->from_wire_fn(type,
 													 valptr,
 													 vallen,
 													 &dp->bin.particle);
-	if (result != 0) {
+
+	// Set the bin's iparticle metadata.
+	if (result == 0) {
+		as_bin_state_set_from_type(&dp->bin, type);
+	}
+	else {
 		cf_warning(AS_QUERY, "failed to build predexp value with err %d",
 				   result);
-		// Clear the bin, we didn't succeed in initializing it ...
+		if (mem_size != 0) {
+			cf_free(dp->bin.particle);
+		}
 		as_bin_set_empty(&dp->bin);
 		dp->bin.particle = NULL;
 		goto Failed;
