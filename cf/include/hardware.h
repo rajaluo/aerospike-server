@@ -25,6 +25,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef enum {
+	CF_TOPO_AUTO_PIN_NONE,
+	CF_TOPO_AUTO_PIN_CPU,
+	CF_TOPO_AUTO_PIN_NUMA
+} cf_topo_auto_pin;
+
 typedef uint16_t cf_topo_os_cpu_index;
 
 typedef uint16_t cf_topo_numa_node_index;

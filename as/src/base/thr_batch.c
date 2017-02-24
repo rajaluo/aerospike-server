@@ -330,7 +330,7 @@ int
 as_batch_direct_init()
 {
 	uint32_t threads = g_config.n_batch_threads;
-	cf_info(AS_BATCH, "Initialize batch-threads to %u", threads);
+	cf_info(AS_BATCH, "starting %u batch-threads", threads);
 	int status = as_thread_pool_init_fixed(&batch_direct_thread_pool, threads, batch_worker, sizeof(batch_transaction), offsetof(batch_transaction,complete));
 
 	if (status) {
@@ -424,7 +424,7 @@ as_batch_direct_threads_resize(uint32_t threads)
 
 	if (status) {
 		cf_warning(AS_BATCH, "Failed to resize batch-threads. status=%d, batch-threads=%d",
-				status, g_config.n_batch_index_threads);
+				status, g_config.n_batch_threads);
 	}
 	return status;
 }

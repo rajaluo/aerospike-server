@@ -45,6 +45,7 @@
 #include "cf_str.h"
 #include "dynbuf.h"
 #include "fault.h"
+#include "hardware.h"
 #include "hist.h"
 #include "hist_track.h"
 #include "msg.h"
@@ -133,7 +134,6 @@ cfg_set_defaults()
 	c->batch_max_requests = 5000; // maximum requests/digests in a single batch
 	c->batch_max_unused_buffers = 256; // maximum number of buffers allowed in batch buffer pool
 	c->batch_priority = 200; // # of rows between a quick context switch?
-	c->n_batch_index_threads = 4;
 	c->clock_skew_max_ms = 1000;
 	c->hist_track_back = 300;
 	c->hist_track_slice = 10;
@@ -264,6 +264,7 @@ typedef enum {
 	CASE_SERVICE_PROTO_FD_MAX,
 	// Normally hidden:
 	CASE_SERVICE_ADVERTISE_IPV6,
+	CASE_SERVICE_AUTO_PIN,
 	CASE_SERVICE_BATCH_THREADS,
 	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE,
 	CASE_SERVICE_BATCH_MAX_REQUESTS,
@@ -376,6 +377,11 @@ typedef enum {
 	CASE_SERVICE_UDF_RUNTIME_MAX_GMEMORY,
 	CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY,
 	CASE_SERVICE_USE_QUEUE_PER_DEVICE,
+
+	// Service auto-pin options (value tokens):
+	CASE_SERVICE_AUTO_PIN_NONE,
+	CASE_SERVICE_AUTO_PIN_CPU,
+	CASE_SERVICE_AUTO_PIN_NUMA,
 
 	// Service paxos protocol options (value tokens):
 	CASE_SERVICE_PAXOS_PROTOCOL_V1,
@@ -721,6 +727,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "client-fd-max",					CASE_SERVICE_CLIENT_FD_MAX },
 		{ "proto-fd-max",					CASE_SERVICE_PROTO_FD_MAX },
 		{ "advertise-ipv6",					CASE_SERVICE_ADVERTISE_IPV6 },
+		{ "auto-pin",						CASE_SERVICE_AUTO_PIN },
 		{ "batch-threads",					CASE_SERVICE_BATCH_THREADS },
 		{ "batch-max-buffers-per-queue",	CASE_SERVICE_BATCH_MAX_BUFFERS_PER_QUEUE },
 		{ "batch-max-requests",				CASE_SERVICE_BATCH_MAX_REQUESTS },
@@ -831,6 +838,12 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "udf-runtime-max-memory",			CASE_SERVICE_UDF_RUNTIME_MAX_MEMORY },
 		{ "use-queue-per-device",			CASE_SERVICE_USE_QUEUE_PER_DEVICE },
 		{ "}",								CASE_CONTEXT_END }
+};
+
+const cfg_opt SERVICE_AUTO_PIN_OPTS[] = {
+		{ "none",							CASE_SERVICE_AUTO_PIN_NONE },
+		{ "cpu",							CASE_SERVICE_AUTO_PIN_CPU },
+		{ "numa",							CASE_SERVICE_AUTO_PIN_NUMA }
 };
 
 const cfg_opt SERVICE_PAXOS_PROTOCOL_OPTS[] = {
@@ -1171,6 +1184,7 @@ const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 
 const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
+const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_PAXOS_PROTOCOL_OPTS			= sizeof(SERVICE_PAXOS_PROTOCOL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_PAXOS_RECOVERY_OPTS			= sizeof(SERVICE_PAXOS_RECOVERY_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
@@ -1999,6 +2013,23 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_ADVERTISE_IPV6:
 				cf_socket_set_advertise_ipv6(cfg_bool(&line));
 				break;
+			case CASE_SERVICE_AUTO_PIN:
+				switch(cfg_find_tok(line.val_tok_1, SERVICE_AUTO_PIN_OPTS, NUM_SERVICE_AUTO_PIN_OPTS)) {
+				case CASE_SERVICE_AUTO_PIN_NONE:
+					c->auto_pin = CF_TOPO_AUTO_PIN_NONE;
+					break;
+				case CASE_SERVICE_AUTO_PIN_CPU:
+					c->auto_pin = CF_TOPO_AUTO_PIN_CPU;
+					break;
+				case CASE_SERVICE_AUTO_PIN_NUMA:
+					c->auto_pin = CF_TOPO_AUTO_PIN_NUMA;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
+				break;
 			case CASE_SERVICE_BATCH_THREADS:
 				c->n_batch_threads = cfg_int(&line, 0, MAX_BATCH_THREADS);
 				break;
@@ -2015,7 +2046,7 @@ as_config_init(const char* config_file)
 				c->batch_priority = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_BATCH_INDEX_THREADS:
-				c->n_batch_index_threads = cfg_int(&line, 1, MAX_BATCH_THREADS);
+				c->n_batch_index_threads = cfg_u32(&line, 1, MAX_BATCH_THREADS);
 				break;
 			case CASE_SERVICE_CLOCK_SKEW_MAX_MS:
 				c->clock_skew_max_ms = cfg_u32_no_checks(&line);
@@ -3477,6 +3508,16 @@ as_config_post_process(as_config* c, const char* config_file)
 	}
 
 	cf_info(AS_CFG, "system file descriptor limit: %lu, proto-fd-max: %d", fd_limit.rlim_cur, c->n_proto_fd_max);
+
+	if (c->auto_pin != CF_TOPO_AUTO_PIN_NONE) {
+		if (c->n_service_threads != 0) {
+			cf_crash_nostack(AS_CFG, "can't configure 'service-threads' and 'auto-pin' at the same time");
+		}
+
+		if (c->n_transaction_queues != 0) {
+			cf_crash_nostack(AS_CFG, "can't configure 'transaction-queues' and 'auto-pin' at the same time");
+		}
+	}
 
 	// Allocate and initialize the record locks (olocks). Maybe not the best
 	// place for this, unless we make number of locks configurable.

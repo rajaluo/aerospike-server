@@ -584,12 +584,18 @@ as_batch_init()
 		return -1;
 	}
 
-	uint32_t threads = g_config.n_batch_index_threads;
-	cf_info(AS_BATCH, "Initialize batch-index-threads to %u", threads);
-	int rc = as_thread_pool_init_fixed(&batch_thread_pool, threads, as_batch_worker, sizeof(as_batch_work), offsetof(as_batch_work,complete));
+	// Default 'batch-index-threads' can't be set before call to cf_topo_init().
+	if (g_config.n_batch_index_threads == 0) {
+		g_config.n_batch_index_threads = cf_topo_count_cpus();
+	}
+
+	cf_info(AS_BATCH, "starting %u batch-index-threads", g_config.n_batch_index_threads);
+
+	int rc = as_thread_pool_init_fixed(&batch_thread_pool, g_config.n_batch_index_threads, as_batch_worker,
+			sizeof(as_batch_work), offsetof(as_batch_work,complete));
 
 	if (rc) {
-		cf_warning(AS_BATCH, "Failed to initialize batch-index-threads to %u: %d", threads, rc);
+		cf_warning(AS_BATCH, "Failed to initialize batch-index-threads to %u: %d", g_config.n_batch_index_threads, rc);
 		return rc;
 	}
 
@@ -600,7 +606,7 @@ as_batch_init()
 		return rc;
 	}
 
-	rc = as_batch_create_thread_queues(0, threads);
+	rc = as_batch_create_thread_queues(0, g_config.n_batch_index_threads);
 
 	if (rc) {
 		return rc;
@@ -1080,7 +1086,7 @@ as_batch_threads_resize(uint32_t threads)
 			}
 			else {
 				// Show warning, but keep going as some threads may have been successfully added/removed.
-				cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%d",
+				cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%u",
 						status, g_config.n_batch_index_threads);
 				threads = batch_thread_pool.thread_size;
 
@@ -1101,7 +1107,7 @@ as_batch_threads_resize(uint32_t threads)
 				g_config.n_batch_index_threads = batch_thread_pool.thread_size;
 
 				if (status) {
-					cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%d",
+					cf_warning(AS_BATCH, "Failed to resize batch-index-threads. status=%d, batch-index-threads=%u",
 							status, g_config.n_batch_index_threads);
 				}
 			}

@@ -1858,7 +1858,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
 	info_append_uint32(db, "batch-max-unused-buffers", g_config.batch_max_unused_buffers);
 	info_append_uint32(db, "batch-priority", g_config.batch_priority);
-	info_append_int(db, "batch-index-threads", g_config.n_batch_index_threads);
+	info_append_uint32(db, "batch-index-threads", g_config.n_batch_index_threads);
 	info_append_int(db, "clock-skew-max-ms", g_config.clock_skew_max_ms);
 
 	char cluster_name[AS_CLUSTER_NAME_SZ];

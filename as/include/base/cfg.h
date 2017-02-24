@@ -37,6 +37,7 @@
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/cf_atomic.h"
 
+#include "hardware.h"
 #include "socket.h"
 #include "util.h"
 
@@ -62,7 +63,7 @@ struct as_namespace_s;
 #define AS_CLUSTER_NAME_SZ 65
 
 #define MAX_DEMARSHAL_THREADS 256
-#define MAX_BATCH_THREADS 64
+#define MAX_BATCH_THREADS 256
 
 // Declare bools with PAD_BOOL so they can't share a 4-byte space with other
 // bools, chars or shorts. This prevents adjacent bools set concurrently in
@@ -92,12 +93,13 @@ typedef struct as_config_s {
 	// Normally hidden:
 
 	// Note - advertise-ipv6 affects a cf_socket_ee.c global, so can't be here.
+	cf_topo_auto_pin auto_pin;
 	int				n_batch_threads;
 	uint32_t		batch_max_buffers_per_queue; // maximum number of buffers allowed in a buffer queue at any one time, fail batch if full
 	uint32_t		batch_max_requests; // maximum count of database requests in a single batch
 	uint32_t		batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
 	uint32_t		batch_priority; // number of records between an enforced context switch, used by old batch only
-	int				n_batch_index_threads;
+	uint32_t		n_batch_index_threads;
 	int				clock_skew_max_ms; // maximum allowed skew between this node's physical clock and the physical component of its hybrid clock
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	PAD_BOOL		fabric_benchmarks_enabled;
