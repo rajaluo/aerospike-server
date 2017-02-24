@@ -949,6 +949,9 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	if (result != 0) {
 		cf_warning(AS_QUERY, "failed to build predexp value with err %d",
 				   result);
+		// Clear the bin, we didn't succeed in initializing it ...
+		as_bin_set_empty(&dp->bin);
+		dp->bin.particle = NULL;
 		goto Failed;
 	}
 
