@@ -1863,7 +1863,7 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 		as_index_ref r_ref;
 		r_ref.skip_lock = false;
 
-		if (as_record_get(rsv->tree, keyd, &r_ref, qtr->ns) != 0) {
+		if (as_record_get_live(rsv->tree, keyd, &r_ref, qtr->ns) != 0) {
 			query_release_partition(qtr, rsv);
 			return AS_QUERY_OK;
 		}

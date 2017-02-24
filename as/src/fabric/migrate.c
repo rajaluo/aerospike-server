@@ -1837,8 +1837,8 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 		as_index_ref r_ref;
 		r_ref.skip_lock = false;
 
-		int rv = as_record_get(emig->rsv.tree, (cf_digest *)&pr->pkeyd, &r_ref,
-				emig->rsv.ns);
+		int rv = as_record_get_live(emig->rsv.tree, (cf_digest *)&pr->pkeyd,
+				&r_ref, emig->rsv.ns);
 
 		if (rv == 0) {
 			msg_set_uint32(m, MIG_FIELD_LDT_PVOID_TIME, r_ref.r->void_time);

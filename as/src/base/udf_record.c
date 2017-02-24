@@ -230,16 +230,16 @@ udf_record_open(udf_record * urecord)
 	as_transaction *tr    = urecord->tr;
 	as_index_ref   *r_ref = urecord->r_ref;
 	as_index_tree  *tree  = tr->rsv.tree;
+	bool is_subrec = (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) != 0;
 
-	if (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) {
+	if (is_subrec) {
 		tree = tr->rsv.sub_tree;
 	}
 
 	int rec_rv = 0;
 	if (!(urecord->flag & UDF_RECORD_FLAG_OPEN)) {
-		cf_detail(AS_UDF, "Opening %sRecord ",
-				  (urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "Sub" : "");
-		rec_rv = as_record_get(tree, &tr->keyd, r_ref, tr->rsv.ns);
+		cf_detail(AS_UDF, "Opening %sRecord ", is_subrec ? "Sub" : "");
+		rec_rv = as_record_get_live(tree, &tr->keyd, r_ref, tr->rsv.ns);
 	}
 
 	if (!rec_rv) {
@@ -257,7 +257,7 @@ udf_record_open(udf_record * urecord)
 		}
 	} else {
 		cf_detail_digest(AS_UDF, &urecord->tr->keyd, "udf_record_open: %s rec_get returned with %d", 
-				(urecord->flag & UDF_RECORD_FLAG_IS_SUBRECORD) ? "sub" : "", rec_rv);
+				is_subrec ? "sub" : "", rec_rv);
 	}
 	return rec_rv;
 }
