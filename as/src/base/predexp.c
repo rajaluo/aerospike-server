@@ -140,9 +140,9 @@ destroy_list(predexp_eval_t* bp)
 #define AS_PREDEXP_STRING_VAR			121
 #define AS_PREDEXP_GEOJSON_VAR			122
 
-#define AS_PREDEXP_RECSIZE				150
-#define AS_PREDEXP_LAST_UPDATE			151
-#define AS_PREDEXP_VOID_TIME			152
+#define AS_PREDEXP_REC_DEVICE_SIZE		150
+#define AS_PREDEXP_REC_LAST_UPDATE		151
+#define AS_PREDEXP_REC_VOID_TIME		152
 
 #define AS_PREDEXP_INTEGER_EQUAL		200
 #define AS_PREDEXP_INTEGER_UNEQUAL		201
@@ -1175,52 +1175,55 @@ build_var(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 }
 
 // ----------------------------------------------------------------
-// AS_PREDEXP_RECSIZE
+// AS_PREDEXP_REC_DEVICE_SIZE
 // ----------------------------------------------------------------
 
-typedef struct predexp_eval_recsize_s {
+typedef struct predexp_eval_rec_device_size_s {
 	predexp_eval_t			base;
-} predexp_eval_recsize_t;
+} predexp_eval_rec_device_size_t;
 
 static void
-destroy_recsize(predexp_eval_t* bp)
+destroy_rec_device_size(predexp_eval_t* bp)
 {
-	predexp_eval_recsize_t* dp = (predexp_eval_recsize_t *) bp;
+	predexp_eval_rec_device_size_t* dp = (predexp_eval_rec_device_size_t *) bp;
 	cf_free(dp);
 }
 
 static predexp_retval_t
-eval_recsize(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
+eval_rec_device_size(predexp_eval_t* bp,
+					 predexp_args_t* argsp,
+					 wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_recsize called outside value context");
+		cf_crash(AS_QUERY, "eval_rec_device_size called outside value context");
 	}
 
-	// predexp_eval_recsize_t* dp = (predexp_eval_recsize_t *) bp;
+	// predexp_eval_rec_device_size_t* dp =
+	//     (predexp_eval_rec_device_size_t *) bp;
 
-	int64_t recsize = argsp->md->storage_key.ssd.n_rblocks * 128;
+	int64_t rec_device_size = argsp->md->storage_key.ssd.n_rblocks * 128;
 
 	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);
-	as_bin_particle_integer_set(&wbinp->bin, recsize);
+	as_bin_particle_integer_set(&wbinp->bin, rec_device_size);
 	return PREDEXP_VALUE;
 }
 
 static bool
-build_recsize(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
+build_rec_device_size(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 {
-	predexp_eval_recsize_t* dp = (predexp_eval_recsize_t *)
-			cf_malloc(sizeof(predexp_eval_recsize_t));
+	predexp_eval_rec_device_size_t* dp = (predexp_eval_rec_device_size_t *)
+			cf_malloc(sizeof(predexp_eval_rec_device_size_t));
 
 	predexp_eval_base_init((predexp_eval_t *) dp,
-						   destroy_recsize,
-						   eval_recsize,
+						   destroy_rec_device_size,
+						   eval_rec_device_size,
 						   PREDEXP_VALUE_NODE,
 						   AS_PARTICLE_TYPE_INTEGER);
 
 	uint8_t* endp = pp + len;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_recsize: msg unaligned");
+		cf_warning(AS_QUERY, "build_rec_device_size: msg unaligned");
 		goto Failed;
 	}
 
@@ -1236,54 +1239,57 @@ build_recsize(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 }
 
 // ----------------------------------------------------------------
-// AS_PREDEXP_LAST_UPDATE
+// AS_PREDEXP_REC_LAST_UPDATE
 // ----------------------------------------------------------------
 
-typedef struct predexp_eval_last_update_s {
+typedef struct predexp_eval_rec_last_update_s {
 	predexp_eval_t			base;
 	as_bin					bin;
-} predexp_eval_last_update_t;
+} predexp_eval_rec_last_update_t;
 
 static void
-destroy_last_update(predexp_eval_t* bp)
+destroy_rec_last_update(predexp_eval_t* bp)
 {
-	predexp_eval_last_update_t* dp = (predexp_eval_last_update_t *) bp;
+	predexp_eval_rec_last_update_t* dp = (predexp_eval_rec_last_update_t *) bp;
 	cf_free(dp);
 }
 
 static predexp_retval_t
-eval_last_update(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
+eval_rec_last_update(predexp_eval_t* bp,
+					 predexp_args_t* argsp,
+					 wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_last_update called outside value context");
+		cf_crash(AS_QUERY, "eval_rec_last_update called outside value context");
 	}
 
-	// predexp_eval_last_update_t* dp = (predexp_eval_last_update_t *) bp;
+	// predexp_eval_rec_last_update_t* dp =
+	//     (predexp_eval_rec_last_update_t *) bp;
 
-	int64_t last_update_ns =
-			(int64_t) cf_utc_ns_from_clepoch_ms(argsp->md->last_update_time);
+	int64_t rec_last_update_ns =
+		(int64_t) cf_utc_ns_from_clepoch_ms(argsp->md->last_update_time);
 
 	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);
-	as_bin_particle_integer_set(&wbinp->bin, last_update_ns);
+	as_bin_particle_integer_set(&wbinp->bin, rec_last_update_ns);
 	return PREDEXP_VALUE;
 }
 
 static bool
-build_last_update(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
+build_rec_last_update(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 {
-	predexp_eval_last_update_t* dp = (predexp_eval_last_update_t *)
-			cf_malloc(sizeof(predexp_eval_last_update_t));
+	predexp_eval_rec_last_update_t* dp = (predexp_eval_rec_last_update_t *)
+			cf_malloc(sizeof(predexp_eval_rec_last_update_t));
 
 	predexp_eval_base_init((predexp_eval_t *) dp,
-						   destroy_last_update,
-						   eval_last_update,
+						   destroy_rec_last_update,
+						   eval_rec_last_update,
 						   PREDEXP_VALUE_NODE,
 						   AS_PARTICLE_TYPE_INTEGER);
 
 	uint8_t* endp = pp + len;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_last_update: msg unaligned");
+		cf_warning(AS_QUERY, "build_rec_last_update: msg unaligned");
 		goto Failed;
 	}
 
@@ -1299,61 +1305,63 @@ build_last_update(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 }
 
 // ----------------------------------------------------------------
-// AS_PREDEXP_VOID_TIME
+// AS_PREDEXP_REC_VOID_TIME
 // ----------------------------------------------------------------
 
-typedef struct predexp_eval_void_time_s {
+typedef struct predexp_eval_rec_void_time_s {
 	predexp_eval_t			base;
 	as_bin					bin;
-} predexp_eval_void_time_t;
+} predexp_eval_rec_void_time_t;
 
 static void
-destroy_void_time(predexp_eval_t* bp)
+destroy_rec_void_time(predexp_eval_t* bp)
 {
-	predexp_eval_void_time_t* dp = (predexp_eval_void_time_t *) bp;
+	predexp_eval_rec_void_time_t* dp = (predexp_eval_rec_void_time_t *) bp;
 	cf_free(dp);
 }
 
 static predexp_retval_t
-eval_void_time(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
+eval_rec_void_time(predexp_eval_t* bp,
+				   predexp_args_t* argsp,
+				   wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_void_time called outside value context");
+		cf_crash(AS_QUERY, "eval_rec_void_time called outside value context");
 	}
 
-	// predexp_eval_void_time_t* dp = (predexp_eval_void_time_t *) bp;
+	// predexp_eval_rec_void_time_t* dp = (predexp_eval_rec_void_time_t *) bp;
 
-	int64_t void_time_ns =
+	int64_t rec_void_time_ns =
 			(int64_t) cf_utc_ns_from_clepoch_sec(argsp->md->void_time);
 
-	// SPECIAL CASE - if the argsp->md->void_time == 0 set the
-	// void_time_ns to 0 as well.
+	// SPECIAL CASE - if the argsp->md->rec_void_time == 0 set the
+	// rec_void_time_ns to 0 as well.
 	//
 	if (argsp->md->void_time == 0) {
-		void_time_ns = 0;
+		rec_void_time_ns = 0;
 	}
 
 	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);
-	as_bin_particle_integer_set(&wbinp->bin, void_time_ns);
+	as_bin_particle_integer_set(&wbinp->bin, rec_void_time_ns);
 	return PREDEXP_VALUE;
 }
 
 static bool
-build_void_time(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
+build_rec_void_time(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 {
-	predexp_eval_void_time_t* dp = (predexp_eval_void_time_t *)
-			cf_malloc(sizeof(predexp_eval_void_time_t));
+	predexp_eval_rec_void_time_t* dp = (predexp_eval_rec_void_time_t *)
+			cf_malloc(sizeof(predexp_eval_rec_void_time_t));
 
 	predexp_eval_base_init((predexp_eval_t *) dp,
-						   destroy_void_time,
-						   eval_void_time,
+						   destroy_rec_void_time,
+						   eval_rec_void_time,
 						   PREDEXP_VALUE_NODE,
 						   AS_PARTICLE_TYPE_INTEGER);
 
 	uint8_t* endp = pp + len;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_void_time: msg unaligned");
+		cf_warning(AS_QUERY, "build_rec_void_time: msg unaligned");
 		goto Failed;
 	}
 
@@ -1795,12 +1803,12 @@ build(predexp_eval_t** stackpp, uint16_t tag, uint32_t len, uint8_t* pp)
 	case AS_PREDEXP_STRING_VAR:
 	case AS_PREDEXP_GEOJSON_VAR:
 		return build_var(stackpp, len, pp, tag);
-	case AS_PREDEXP_RECSIZE:
-		return build_recsize(stackpp, len, pp);
-	case AS_PREDEXP_LAST_UPDATE:
-		return build_last_update(stackpp, len, pp);
-	case AS_PREDEXP_VOID_TIME:
-		return build_void_time(stackpp, len, pp);
+	case AS_PREDEXP_REC_DEVICE_SIZE:
+		return build_rec_device_size(stackpp, len, pp);
+	case AS_PREDEXP_REC_LAST_UPDATE:
+		return build_rec_last_update(stackpp, len, pp);
+	case AS_PREDEXP_REC_VOID_TIME:
+		return build_rec_void_time(stackpp, len, pp);
 	case AS_PREDEXP_LIST_ITERATE_OR:
 	case AS_PREDEXP_LIST_ITERATE_AND:
 	case AS_PREDEXP_MAPKEY_ITERATE_OR:
