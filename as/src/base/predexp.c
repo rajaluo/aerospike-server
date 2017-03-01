@@ -711,6 +711,33 @@ build_compare(predexp_eval_t** stackpp,
 		return false;
 	}
 
+	// ---- Pop the right child off the stack.
+
+	if (! *stackpp) {
+		cf_warning(AS_QUERY,
+				   "predexp_compare: missing right child");
+		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
+		return false;
+	}
+
+	dp->rchild = *stackpp;
+	*stackpp = dp->rchild->next;
+	dp->rchild->next = NULL;
+
+	if ((dp->rchild->flags & PREDEXP_VALUE_NODE) == 0) {
+		cf_warning(AS_QUERY,
+				   "predexp compare: right child is not value node");
+		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
+		return false;
+	}
+
+	if (dp->rchild->type != dp->type) {
+		cf_warning(AS_QUERY,
+				   "predexp compare: right child is wrong type");
+		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
+		return false;
+	}
+
 	// ---- Pop the left child off the stack.
 
 	if (! *stackpp) {
@@ -734,33 +761,6 @@ build_compare(predexp_eval_t** stackpp,
 	if (dp->lchild->type != dp->type) {
 		cf_warning(AS_QUERY,
 				   "predexp compare: left child is wrong type");
-		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
-		return false;
-	}
-
-	// ---- Pop the right child off the stack.
-
-	if (! *stackpp) {
-		cf_warning(AS_QUERY,
-				   "predexp_compare: missing right child");
-		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
-		return false;
-	}
-
-	dp->rchild = *stackpp;
-	*stackpp = dp->rchild->next;
-	dp->rchild->next = NULL;
-
-	if ((dp->rchild->flags & PREDEXP_VALUE_NODE) == 0) {
-		cf_warning(AS_QUERY,
-				   "predexp integer_compare: right child is not value node");
-		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
-		return false;
-	}
-
-	if (dp->rchild->type != dp->type) {
-		cf_warning(AS_QUERY,
-				   "predexp compare: right child is wrong type");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -1384,8 +1384,8 @@ typedef struct predexp_eval_iter_s {
 	predexp_eval_t			base;
 	uint16_t				tag;
 	uint8_t					type;
-	predexp_eval_t*			lchild;		// collection
-	predexp_eval_t*			rchild;		// per-element expr
+	predexp_eval_t*			lchild;		// per-element expr
+	predexp_eval_t*			rchild;		// collection
 	char					vname[AS_ID_BIN_SZ];
 } predexp_eval_iter_t;
 
@@ -1417,7 +1417,7 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 
 	wrapped_as_bin_t lwbin;
 	lwbin.must_free = false;
-	if ((*dp->lchild->eval_fn)(dp->lchild, argsp, &lwbin) ==
+	if ((*dp->rchild->eval_fn)(dp->rchild, argsp, &lwbin) ==
 		PREDEXP_NOVALUE) {
 		return argsp->rd ? PREDEXP_FALSE : PREDEXP_UNKNOWN;
 	}
@@ -1449,7 +1449,7 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 
 		switch (dp->tag) {
 		case AS_PREDEXP_LIST_ITERATE_OR:
-			switch ((*dp->rchild->eval_fn)(dp->rchild, argsp, NULL)) {
+			switch ((*dp->lchild->eval_fn)(dp->lchild, argsp, NULL)) {
 			case PREDEXP_TRUE:
 				// Shortcut, skip remaining children.
 				retval = PREDEXP_TRUE;
@@ -1468,7 +1468,7 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 			}
 			break;
 		case AS_PREDEXP_LIST_ITERATE_AND:
-			switch ((*dp->rchild->eval_fn)(dp->rchild, argsp, NULL)) {
+			switch ((*dp->lchild->eval_fn)(dp->lchild, argsp, NULL)) {
 			case PREDEXP_FALSE:
 				// Shortcut, skip remaining children.
 				retval = PREDEXP_FALSE;
@@ -1534,7 +1534,7 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 
 	wrapped_as_bin_t lwbin;
 	lwbin.must_free = false;
-	if ((*dp->lchild->eval_fn)(dp->lchild, argsp, &lwbin) ==
+	if ((*dp->rchild->eval_fn)(dp->rchild, argsp, &lwbin) ==
 		PREDEXP_NOVALUE) {
 		return argsp->rd ? PREDEXP_FALSE : PREDEXP_UNKNOWN;
 	}
@@ -1582,7 +1582,7 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 		switch (dp->tag) {
 		case AS_PREDEXP_MAPKEY_ITERATE_OR:
 		case AS_PREDEXP_MAPVAL_ITERATE_OR:
-			switch ((*dp->rchild->eval_fn)(dp->rchild, argsp, NULL)) {
+			switch ((*dp->lchild->eval_fn)(dp->lchild, argsp, NULL)) {
 			case PREDEXP_TRUE:
 				// Shortcut, skip remaining children.
 				retval = PREDEXP_TRUE;
@@ -1602,7 +1602,7 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 			break;
 		case AS_PREDEXP_MAPKEY_ITERATE_AND:
 		case AS_PREDEXP_MAPVAL_ITERATE_AND:
-			switch ((*dp->rchild->eval_fn)(dp->rchild, argsp, NULL)) {
+			switch ((*dp->lchild->eval_fn)(dp->lchild, argsp, NULL)) {
 			case PREDEXP_FALSE:
 				// Shortcut, skip remaining children.
 				retval = PREDEXP_FALSE;
@@ -1691,34 +1691,7 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	dp->vname[vnlen] = '\0';
 	pp += vnlen;
 
-	// ---- Pop the left child (list) off the stack.
-
-	if (! *stackpp) {
-		cf_warning(AS_QUERY,
-				   "predexp_iterate: missing left child");
-		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
-		return false;
-	}
-
-	dp->lchild = *stackpp;
-	*stackpp = dp->lchild->next;
-	dp->lchild->next = NULL;
-
-	if ((dp->lchild->flags & PREDEXP_VALUE_NODE) == 0) {
-		cf_warning(AS_QUERY,
-				   "predexp iterate: left child is not value node");
-		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
-		return false;
-	}
-
-	if (dp->lchild->type != dp->type) {
-		cf_warning(AS_QUERY,
-				   "predexp iterate: left child is wrong type");
-		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
-		return false;
-	}
-
-	// ---- Pop the right child (per-element expr) off the stack.
+	// ---- Pop the right child (collection) off the stack.
 
 	if (! *stackpp) {
 		cf_warning(AS_QUERY,
@@ -1731,20 +1704,46 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	*stackpp = dp->rchild->next;
 	dp->rchild->next = NULL;
 
-	if ((dp->rchild->flags & PREDEXP_VALUE_NODE) == 1) {
+	if ((dp->rchild->flags & PREDEXP_VALUE_NODE) == 0) {
 		cf_warning(AS_QUERY,
-				   "predexp iterate: right child is value node");
+				   "predexp iterate: right child is not value node");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
 
-	if (dp->rchild->type != AS_PARTICLE_TYPE_NULL) {
+	if (dp->rchild->type != dp->type) {
 		cf_warning(AS_QUERY,
 				   "predexp iterate: right child is wrong type");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
 
+	// ---- Pop the left child (per-element expr) off the stack.
+
+	if (! *stackpp) {
+		cf_warning(AS_QUERY,
+				   "predexp_iterate: missing left child");
+		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
+		return false;
+	}
+
+	dp->lchild = *stackpp;
+	*stackpp = dp->lchild->next;
+	dp->lchild->next = NULL;
+
+	if ((dp->lchild->flags & PREDEXP_VALUE_NODE) == 1) {
+		cf_warning(AS_QUERY,
+				   "predexp iterate: left child is value node");
+		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
+		return false;
+	}
+
+	if (dp->lchild->type != AS_PARTICLE_TYPE_NULL) {
+		cf_warning(AS_QUERY,
+				   "predexp iterate: left child is wrong type");
+		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
+		return false;
+	}
 
 	if (pp != endp) {
 		cf_warning(AS_QUERY, "build_iter: msg unaligned");
