@@ -1405,7 +1405,7 @@ enable_coalescing(const char *if_name)
 
 	if (ioctl(sock, SIOCETHTOOL, &req) < 0) {
 		if (errno == EOPNOTSUPP) {
-			cf_detail(CF_MISC, "interface %s does not support interrupt coalescing", if_name);
+			cf_detail(CF_MISC, "interface %s does not support ETHTOOL_GCOALESCE", if_name);
 			goto cleanup1;
 		}
 
@@ -1428,6 +1428,11 @@ enable_coalescing(const char *if_name)
 	};
 
 	if (ioctl(sock, SIOCETHTOOL, &req) < 0) {
+		if (errno == EOPNOTSUPP) {
+			cf_detail(CF_MISC, "interface %s does not support ETHTOOL_SCOALESCE", if_name);
+			goto cleanup1;
+		}
+
 		cf_crash(CF_MISC, "error while adjusting interface settings: %d (%s)",
 				errno, cf_strerror(errno));
 	}
@@ -1505,12 +1510,12 @@ config_interface(const char *if_name, bool rfs, irq_list *irqs)
 	//
 	// We consider a machine low-end, if we handle interrupts on 25% or less of the
 	// available CPUs (i.e., if the number of NIC queues is 25% or less of the number
-	// of available CPUs).
+	// of available CPUs) and it has fewer than 4 NIC queues.
 	//
 	// Better (i.e., NUMA) machines typically come with adaptive interrupt coalescing
 	// enabled by default. That's why we only do this here and not in the NUMA case.
 
-	if (rfs && n_irq_cpus <= g_n_cpus / 4) {
+	if (rfs && n_irq_cpus <= g_n_cpus / 4 && n_irq_cpus < 4) {
 		enable_coalescing(if_name);
 	}
 }
