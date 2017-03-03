@@ -118,9 +118,6 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 	const char * set_name = as_index_get_set_name(rd->r, rd->ns);
 	
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
-	if (has_sindex) {
-		SINDEX_GRLOCK();
-	}
 	SINDEX_BINS_SETUP(sbins, rd->ns->sindex_cnt);
 	as_sindex * si_arr[rd->ns->sindex_cnt];
 	int si_arr_index = 0;
@@ -128,7 +125,6 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 	if (has_sindex) {
 		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, sbins, AS_SINDEX_OP_DELETE);
-		SINDEX_GUNLOCK();
 	}
 
 	int32_t i = as_bin_get_index(rd, bname);
@@ -279,9 +275,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	}
 
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
-	if (has_sindex) {
-		SINDEX_GRLOCK();
-	}
 	SINDEX_BINS_SETUP(sbins, 2 * rd->ns->sindex_cnt);
 	as_sindex * si_arr[2 * rd->ns->sindex_cnt];
 	int sbins_populated = 0;
@@ -330,7 +323,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 	// Update sindex if required
 	if (has_sindex) {
 		if (ret) {
-			SINDEX_GUNLOCK();
 			if (sbins_populated > 0) {
 				as_sindex_sbin_freeall(sbins, sbins_populated);
 			}
@@ -340,7 +332,6 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 
 		si_arr_index += as_sindex_arr_lookup_by_set_binid_lockfree(rd->ns, set_name, b->id, &si_arr[si_arr_index]);
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
-		SINDEX_GUNLOCK();
 		if (sbins_populated > 0) {
 			tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
 			as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sbins_populated, &rd->keyd);	
