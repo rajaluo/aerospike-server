@@ -101,20 +101,6 @@ static uint32_t g_current_q = 0;
 void
 as_tsvc_init()
 {
-	// Default 'transaction-queues' can't be set before call to cf_topo_init().
-	if (g_config.n_transaction_queues == 0) {
-		g_config.n_transaction_queues =
-				// If there's at least one SSD namespace, use CPU count.
-				// Otherwise, be modest - only proxies, internal retries, and
-				// background scans & queries will use these queues & threads.
-				g_config.n_namespaces_not_in_memory != 0 ?
-						cf_topo_count_cpus() : 4;
-	}
-
-	// TODO - don't CPU-pin queues & threads unless
-	// g_config.n_namespaces_not_in_memory != 0
-	// (Use separate logic clause to above, so above may be moved later.)
-
 	cf_info(AS_TSVC, "%u transaction queues: starting %u threads per queue",
 			g_config.n_transaction_queues,
 			g_config.n_transaction_threads_per_queue);
@@ -138,8 +124,18 @@ as_tsvc_init()
 void
 as_tsvc_enqueue(as_transaction *tr)
 {
-	// Transaction can go on any queue - distribute evenly.
-	uint32_t qid = (g_current_q++) % g_config.n_transaction_queues;
+	uint32_t qid;
+
+	if (g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE ||
+			g_config.n_namespaces_not_in_memory == 0) {
+		cf_debug(AS_TSVC, "no CPU pinning - dispatching transaction round-robin");
+		// Transaction can go on any queue - distribute evenly.
+		qid = (g_current_q++) % g_config.n_transaction_queues;
+	}
+	else {
+		qid = cf_topo_current_cpu();
+		cf_debug(AS_TSVC, "transaction on CPU %u", qid);
+	}
 
 	if (cf_queue_push(g_transaction_queues[qid], tr) != CF_QUEUE_OK) {
 		cf_crash(AS_TSVC, "transaction queue push failed - out of memory?");
@@ -523,7 +519,7 @@ tsvc_add_threads(uint32_t qid, uint32_t n_threads)
 
 	for (uint32_t n = 0; n < n_threads; n++) {
 		if (pthread_create(&thread, &attrs, run_tsvc,
-				(void*)g_transaction_queues[qid]) == 0) {
+				(void*)(uint64_t)qid) == 0) {
 			g_queues_n_threads[qid]++;
 		}
 		else {
@@ -555,7 +551,15 @@ tsvc_remove_threads(uint32_t qid, uint32_t n_threads)
 void *
 run_tsvc(void *arg)
 {
-	cf_queue *q = (cf_queue *)arg;
+	uint32_t qid = (uint32_t)(uint64_t)arg;
+
+	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE &&
+			g_config.n_namespaces_not_in_memory != 0) {
+		cf_detail(AS_TSVC, "pinning thread to CPU %u", qid);
+		cf_topo_pin_to_cpu((cf_topo_cpu_index)qid);
+	}
+
+	cf_queue *q = g_transaction_queues[qid];
 
 	while (true) {
 		as_transaction tr;
@@ -567,6 +571,8 @@ run_tsvc(void *arg)
 		if (! tr.msgp) {
 			break; // thread termination via configuration change
 		}
+
+		cf_debug(AS_TSVC, "running on CPU %hu", cf_topo_current_cpu());
 
 		if (g_config.svc_benchmarks_enabled &&
 				tr.benchmark_time != 0 && ! as_transaction_is_restart(&tr)) {

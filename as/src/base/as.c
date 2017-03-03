@@ -284,6 +284,9 @@ main(int argc, char **argv)
 	mem_count_init(c->memory_accounting ? MEM_COUNT_ENABLE : MEM_COUNT_DISABLE);
 #endif
 
+	// Detect the NUMA topology and, if requested, prepare for CPU and NUMA pinning.
+	cf_topo_config(c->auto_pin, (cf_topo_numa_node_index)instance, &c->service.bind);
+
 	// Perform privilege separation as necessary. If configured user & group
 	// don't have root privileges, all resources created or reopened past this
 	// point must be set up so that they are accessible without root privileges.
@@ -353,9 +356,6 @@ main(int argc, char **argv)
 
 	// Includes echoing the configuration file to log.
 	as_config_post_process(c, config_file);
-
-	// Detect the CPU topology.
-	cf_topo_init((cf_topo_numa_node_index)instance, false);
 
 	// Make one more pass for XDR-related config and crash if needed.
 	// TODO : XDR config parsing should be merged with main config parsing.

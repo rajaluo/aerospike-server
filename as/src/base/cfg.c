@@ -3509,6 +3509,9 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	cf_info(AS_CFG, "system file descriptor limit: %lu, proto-fd-max: %d", fd_limit.rlim_cur, c->n_proto_fd_max);
 
+	// Output NUMA topology information.
+	cf_topo_info();
+
 	if (c->auto_pin != CF_TOPO_AUTO_PIN_NONE) {
 		if (c->n_service_threads != 0) {
 			cf_crash_nostack(AS_CFG, "can't configure 'service-threads' and 'auto-pin' at the same time");
@@ -3517,6 +3520,19 @@ as_config_post_process(as_config* c, const char* config_file)
 		if (c->n_transaction_queues != 0) {
 			cf_crash_nostack(AS_CFG, "can't configure 'transaction-queues' and 'auto-pin' at the same time");
 		}
+	}
+
+	uint16_t n_cpus = cf_topo_count_cpus();
+
+	if (c->n_service_threads == 0) {
+		c->n_service_threads = n_cpus;
+	}
+
+	if (c->n_transaction_queues == 0) {
+		// If there's at least one SSD namespace, use CPU count. Otherwise, be
+		// modest - only proxies, internal retries, and background scans & queries
+		// will use these queues & threads.
+		c->n_transaction_queues = g_config.n_namespaces_not_in_memory != 0 ? n_cpus : 4;
 	}
 
 	// Allocate and initialize the record locks (olocks). Maybe not the best
