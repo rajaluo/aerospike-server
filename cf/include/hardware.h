@@ -25,6 +25,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <socket.h>
+
 typedef enum {
 	CF_TOPO_AUTO_PIN_NONE,
 	CF_TOPO_AUTO_PIN_CPU,
@@ -37,14 +39,15 @@ typedef uint16_t cf_topo_numa_node_index;
 typedef uint16_t cf_topo_core_index;
 typedef uint16_t cf_topo_cpu_index;
 
-bool cf_topo_init(cf_topo_numa_node_index i_numa_node, bool pin);
+void cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
+		const cf_addr_list *addrs);
+void cf_topo_info(void);
 
 uint16_t cf_topo_count_cores(void);
 uint16_t cf_topo_count_cpus(void);
 
 cf_topo_cpu_index cf_topo_current_cpu(void);
+cf_topo_cpu_index cf_topo_socket_cpu(const cf_socket *sock);
 
 void cf_topo_pin_to_core(cf_topo_core_index i_core);
 void cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu);
-
-cf_topo_cpu_index cf_topo_os_cpu_index_to_cpu_index(cf_topo_os_cpu_index i_os_cpu);

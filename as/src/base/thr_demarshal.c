@@ -385,6 +385,11 @@ thr_demarshal(void *unused)
 		return(0);
 	}
 
+	if (g_config.auto_pin != CF_TOPO_AUTO_PIN_NONE) {
+		cf_detail(AS_DEMARSHAL, "pinning thread to CPU %d", thr_id);
+		cf_topo_pin_to_cpu((cf_topo_cpu_index)thr_id);
+	}
+
 	cf_poll_create(&poll);
 
 	// First thread accepts new connection at interface socket.
@@ -511,9 +516,17 @@ thr_demarshal(void *unused)
 					cf_rc_free(fd_h); // will free even with ref-count of 2
 				}
 				else {
-					// Round-robin pick up demarshal thread epoll_fd and add
-					// this new connection to epoll.
-					int id = (id_cntr++) % g_demarshal_args->num_threads;
+					int32_t id;
+
+					if (g_config.auto_pin == CF_TOPO_AUTO_PIN_NONE) {
+						cf_detail(AS_DEMARSHAL, "no CPU pinning - dispatching incoming connection round-robin");
+						id = (id_cntr++) % g_demarshal_args->num_threads;
+					}
+					else {
+						id = cf_topo_socket_cpu(&fd_h->sock);
+						cf_detail(AS_DEMARSHAL, "incoming connection on CPU %d", id);
+					}
+
 					fd_h->poll = g_demarshal_args->polls[id];
 
 					// Place the client socket in the event queue.
@@ -629,6 +642,8 @@ thr_demarshal(void *unused)
 						goto NextEvent;
 					}
 				}
+
+				cf_debug(AS_DEMARSHAL, "running on CPU %hu", cf_topo_current_cpu());
 
 				// fd_h->proto_unread == 0 - finished reading complete proto.
 				// In current pipelining model, can't rearm fd_h until end of
@@ -843,11 +858,6 @@ as_demarshal_start()
 	}
 
 	// Create all the epoll_fds and wait for all the threads to come up.
-
-	// Default 'service-threads' can't be set before call to cf_topo_init().
-	if (g_config.n_service_threads == 0) {
-		g_config.n_service_threads = cf_topo_count_cpus();
-	}
 
 	cf_info(AS_DEMARSHAL, "starting %u demarshal threads",
 			g_config.n_service_threads);
