@@ -43,6 +43,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
+#include "hardware.h"
 #include "linear_hist.h"
 #include "vmapx.h"
 
@@ -72,7 +73,6 @@ pthread_t g_nsup_thread;
 // for convenient comparison to run-time eviction.
 //
 
-#define NUM_EVICT_THREADS 24
 #define EVAL_WRITE_STATE_FREQUENCY 1024
 #define COLD_START_HIST_MIN_BUCKETS 100000 // histogram memory is transient
 
@@ -109,6 +109,7 @@ cold_start_evict_prep_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_prep_thread_info_s {
 	as_namespace*		ns;
 	cf_atomic32*		p_pid;
+	uint32_t			i_cpu;
 	linear_hist*		hist;
 	bool*				sets_not_evicting;
 } evict_prep_thread_info;
@@ -117,6 +118,9 @@ void*
 run_cold_start_evict_prep(void* udata)
 {
 	evict_prep_thread_info* p_info = (evict_prep_thread_info*)udata;
+
+	cf_topo_pin_to_cpu((cf_topo_cpu_index)p_info->i_cpu);
+
 	as_namespace *ns = p_info->ns;
 
 	cold_start_evict_prep_info cb_info;
@@ -177,6 +181,7 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 typedef struct evict_thread_info_s {
 	as_namespace*	ns;
 	cf_atomic32		pid;
+	cf_atomic32		i_cpu;
 	bool*			sets_not_evicting;
 	cf_atomic32		total_evicted;
 	cf_atomic32		total_0_void_time;
@@ -186,6 +191,9 @@ void*
 run_cold_start_evict(void* udata)
 {
 	evict_thread_info* p_info = (evict_thread_info*)udata;
+
+	cf_topo_pin_to_cpu((cf_topo_cpu_index)cf_atomic32_incr(&p_info->i_cpu));
+
 	as_namespace* ns = p_info->ns;
 
 	cold_start_evict_info cb_info;
@@ -346,24 +354,26 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	}
 
 	// Split these tasks across multiple threads.
-	pthread_t evict_threads[NUM_EVICT_THREADS];
+	uint32_t n_cpus = cf_topo_count_cpus();
+	pthread_t evict_threads[n_cpus];
 
 	// Reduce all partitions to build the eviction histogram.
-	evict_prep_thread_info prep_thread_infos[NUM_EVICT_THREADS];
+	evict_prep_thread_info prep_thread_infos[n_cpus];
 	cf_atomic32 pid = -1;
 
-	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+	for (uint32_t n = 0; n < n_cpus; n++) {
 		prep_thread_infos[n].ns = ns;
 		prep_thread_infos[n].p_pid = &pid;
+		prep_thread_infos[n].i_cpu = n;
 		prep_thread_infos[n].hist = linear_hist_create("thread-hist", now, ttl_range, n_buckets);
 		prep_thread_infos[n].sets_not_evicting = sets_not_evicting;
 
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict_prep, (void*)&prep_thread_infos[n]) != 0) {
-			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %d", ns->name, n);
+			cf_crash(AS_NSUP, "{%s} failed to create evict-prep thread %u", ns->name, n);
 		}
 	}
 
-	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+	for (uint32_t n = 0; n < n_cpus; n++) {
 		pthread_join(evict_threads[n], NULL);
 
 		if (n == 0) {
@@ -389,21 +399,22 @@ as_cold_start_evict_if_needed(as_namespace* ns)
 	cf_info(AS_NSUP, "{%s} cold-start found %lu records eligible for eviction, evict ttl %u", ns->name, n_evictable, cf_atomic32_get(ns->cold_start_threshold_void_time) - now);
 
 	// Reduce all partitions to evict based on the thresholds.
-	evict_thread_info thread_info;
+	evict_thread_info thread_info = {
+			.ns = ns,
+			.pid = -1,
+			.i_cpu = -1,
+			.sets_not_evicting = sets_not_evicting,
+			.total_evicted = 0,
+			.total_0_void_time = 0
+	};
 
-	thread_info.ns = ns;
-	thread_info.pid = -1;
-	thread_info.sets_not_evicting = sets_not_evicting;
-	thread_info.total_evicted = 0;
-	thread_info.total_0_void_time = 0;
-
-	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+	for (uint32_t n = 0; n < n_cpus; n++) {
 		if (pthread_create(&evict_threads[n], NULL, run_cold_start_evict, (void*)&thread_info) != 0) {
-			cf_crash(AS_NSUP, "{%s} failed to create evict thread %d", ns->name, n);
+			cf_crash(AS_NSUP, "{%s} failed to create evict thread %u", ns->name, n);
 		}
 	}
 
-	for (int n = 0; n < NUM_EVICT_THREADS; n++) {
+	for (uint32_t n = 0; n < n_cpus; n++) {
 		pthread_join(evict_threads[n], NULL);
 	}
 	// Now we're single-threaded again.
