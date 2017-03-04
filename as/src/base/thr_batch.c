@@ -109,8 +109,8 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 				if (rec_rv == 0) {
 					as_index *r = r_ref.r;
 
-					// Check to see this isn't an expired record waiting to die.
-					if (as_record_is_expired(r)) {
+					// Check to see this isn't a record waiting to die.
+					if (as_record_is_doomed(r, ns)) {
 						as_msg_make_error_response_bufbuilder(&bmd->keyd, AS_PROTO_RESULT_FAIL_NOTFOUND, bb_r, ns->name);
 					}
 					else {

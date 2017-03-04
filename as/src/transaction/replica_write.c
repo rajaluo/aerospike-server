@@ -47,6 +47,7 @@
 #include "base/rec_props.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
+#include "base/truncate.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h" // for LDTs
 #include "fabric/partition.h"
@@ -1063,6 +1064,18 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 			0 : as_storage_record_get_n_bytes_memory(&rd);
 
 	as_record_set_properties(&rd, p_rec_props);
+
+	if (is_create) {
+		r->last_update_time = last_update_time;
+
+		if (as_truncate_record_is_truncated(r, ns)) {
+			as_index_delete(tree, keyd);
+			as_storage_record_close(&rd);
+			as_record_done(&r_ref, ns);
+
+			return AS_PROTO_RESULT_FAIL_FORBIDDEN;
+		}
+	}
 
 	if (as_record_unpickle_replace(r, &rd, pickled_buf, pickled_sz,
 			&p_stack_particles, has_sindex) != 0) {

@@ -1600,8 +1600,8 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 			goto CLEANUP;
 		}
 
-		// check to see this isn't an expired record waiting to die
-		if (as_record_is_expired(r)) {
+		// check to see this isn't a record waiting to die
+		if (as_record_is_doomed(r, ns)) {
 			as_record_done(&r_ref, ns);
 			cf_debug(AS_QUERY,
 					"build_response: record expired. treat as not found");

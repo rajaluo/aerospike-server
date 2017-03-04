@@ -46,6 +46,7 @@
 #include "base/ldt.h"
 #include "base/secondary_index.h"
 #include "base/transaction.h"
+#include "base/truncate.h"
 #include "base/udf_record.h"
 #include "base/xdr_serverside.h"
 #include "storage/storage.h"
@@ -825,8 +826,8 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	if (rv == 1) {
 		// Record created.
 	} else if (rv == 0) {
-		// If it's an expired record, pretend it's a fresh create.
-		if (as_record_is_expired(r_ref->r)) {
+		// If it's an expired or truncated record, pretend it's a fresh create.
+		if (! is_subrec && as_record_is_doomed(r_ref->r, tr->rsv.ns)) {
 			as_record_destroy(r_ref->r, tr->rsv.ns);
 			as_record_reinitialize(r_ref, tr->rsv.ns);
 			cf_atomic64_incr(&tr->rsv.ns->n_objects);
@@ -849,6 +850,13 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 				set_set_from_msg(r_ref->r, tr->rsv.ns, &tr->msgp->msg) : 0;
 		if (rv_set != 0) {
 			cf_warning(AS_UDF, "udf_aerospike_rec_create: Failed to set setname");
+			as_index_delete(tree, &tr->keyd);
+			as_record_done(r_ref, tr->rsv.ns);
+			return 4;
+		}
+
+		// Don't write record if it would be truncated.
+		if (as_truncate_now_is_truncated(tr->rsv.ns, as_index_get_set_id(r_ref->r))) {
 			as_index_delete(tree, &tr->keyd);
 			as_record_done(r_ref, tr->rsv.ns);
 			return 4;

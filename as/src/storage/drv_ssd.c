@@ -59,6 +59,7 @@
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/secondary_index.h"
+#include "base/truncate.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 
@@ -2782,6 +2783,10 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		}
 	}
 
+	if (ssd_cold_start_is_record_truncated(ns, block, &props)) {
+		return -1;
+	}
+
 	// Get/create the record from/in the appropriate index tree.
 	int rv = as_record_get_create(
 			is_ldt_sub ? p_partition->sub_vp : p_partition->vp,
@@ -3158,19 +3163,21 @@ ssd_load_devices_fn(void *udata)
 	void *complete_udata = ldd->complete_udata;
 	void *complete_rc = ldd->complete_rc;
 
+	as_namespace* ns = ssds->ns;
+
 	cf_free(ldd);
 	ldd = 0;
 
 	cf_info(AS_DRV_SSD, "device %s: reading device to load index", ssd->name);
 
-	JEM_SET_NS_ARENA(ssds->ns);
+	JEM_SET_NS_ARENA(ns);
 
 	ssd->sub_sweep	= false;
 	ssd->has_ldt	= false;
 
 	ssd_load_device_sweep(ssds, ssd);
 
-	if (ssds->ns->ldt_enabled && ssd->has_ldt) {
+	if (ns->ldt_enabled && ssd->has_ldt) {
 		cf_info(AS_DRV_SSD, "device %s: reading device again to load subrecords",
 				ssd->name);
 		ssd->sub_sweep = true;
@@ -3190,14 +3197,16 @@ ssd_load_devices_fn(void *udata)
 	if (0 == cf_rc_release(complete_rc)) {
 		// All drives are done reading.
 
-		ssds->ns->cold_start_loading = false;
-		ssd_cold_start_drop_cenotaphs(ssds->ns);
+		ns->cold_start_loading = false;
+		ssd_cold_start_drop_cenotaphs(ns);
 		ssd_load_wblock_queues(ssds);
 
-		pthread_mutex_destroy(&ssds->ns->cold_start_evict_lock);
+		pthread_mutex_destroy(&ns->cold_start_evict_lock);
 
 		cf_queue_push(complete_q, &complete_udata);
 		cf_rc_free(complete_rc);
+
+		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
 
 		ssd_start_maintenance_threads(ssds);
 		ssd_start_write_worker_threads(ssds);
@@ -3373,6 +3382,7 @@ ssd_load_devices(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 
 	// Warm restart - imitate device loading by reducing resumed index.
 	if (! ns->cold_start) {
+		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
 		ssd_resume_devices(ssds);
 
 		return true;

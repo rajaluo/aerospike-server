@@ -45,6 +45,7 @@
 
 struct as_index_s;
 struct as_namespace_s;
+struct as_rec_props_s;
 struct as_storage_rd_s;
 struct drv_ssd_s;
 
@@ -255,12 +256,19 @@ typedef struct drv_ssd_block_s {
 	uint8_t			data[];
 } __attribute__ ((__packed__)) drv_ssd_block;
 
-
+// Warm restart.
 void ssd_resume_devices(drv_ssds *ssds);
-bool ssd_cold_start_is_valid_n_bins(uint32_t n_bins);
+
+// Tomb raider.
 void ssd_cold_start_adjust_cenotaph(struct as_namespace_s *ns, const drv_ssd_block *block, struct as_index_s *r);
 void ssd_cold_start_transition_record(struct as_namespace_s *ns, const drv_ssd_block *block, struct as_index_s *r, bool is_create);
 void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
+
+// Miscellaneous.
+bool ssd_cold_start_is_valid_n_bins(uint32_t n_bins);
+bool ssd_cold_start_is_record_truncated(struct as_namespace_s *ns, const drv_ssd_block *block, const struct as_rec_props_s *p_props);
+
+// Called in (enterprise-split) storage table function.
 int ssd_write(struct as_storage_rd_s *rd);
 
 

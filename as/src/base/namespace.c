@@ -49,6 +49,7 @@
 #include "base/proto.h"
 #include "base/secondary_index.h"
 #include "base/system_metadata.h"
+#include "base/truncate.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 
@@ -206,6 +207,7 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 			as_partition_init(ns, pid);
 		}
 
+		as_truncate_init(ns);
 		as_sindex_init(ns);
 	}
 

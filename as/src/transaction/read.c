@@ -312,8 +312,8 @@ read_local(as_transaction* tr)
 
 	as_record* r = r_ref.r;
 
-	// Check if it's an expired record.
-	if (as_record_is_expired(r)) {
+	// Check if it's an expired or truncated record.
+	if (as_record_is_doomed(r, ns)) {
 		read_local_done(tr, &r_ref, NULL, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return TRANS_DONE_ERROR;
 	}

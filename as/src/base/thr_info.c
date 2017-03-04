@@ -71,6 +71,7 @@
 #include "base/security.h"
 #include "base/stats.h"
 #include "base/system_metadata.h"
+#include "base/truncate.h"
 #include "base/udf_cask.h"
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
@@ -3884,6 +3885,106 @@ info_command_hist_track(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
+// Format is one of:
+//
+//	truncate:namespace=<ns-name>;set=<set-name>;lut=<UTC-nanosec-string>
+//	truncate:namespace=<ns-name>;set=<set-name>
+//
+//	truncate:namespace=<ns-name>;lut=<UTC-nanosec-string>
+//	truncate:namespace=<ns-name>
+//
+int
+info_command_truncate(char *name, char *params, cf_dyn_buf *db)
+{
+	// Get the namespace name.
+
+	char ns_name[AS_ID_NAMESPACE_SZ];
+	int ns_name_len = (int)sizeof(ns_name);
+	int ns_rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
+
+	if (ns_rv != 0 || ns_name_len == 0) {
+		cf_warning(AS_INFO, "truncate command: missing or invalid namespace name in command");
+		cf_dyn_buf_append_string(db, "error-namespace-name");
+		return 0;
+	}
+
+	// Get the set-name if there is one.
+
+	char set_name[AS_SET_NAME_MAX_SIZE];
+	int set_name_len = (int)sizeof(set_name);
+	int set_rv = as_info_parameter_get(params, "set", set_name, &set_name_len);
+
+	if (set_rv == -2 || (set_rv == 0 && set_name_len == 0)) {
+		cf_warning(AS_INFO, "truncate command: invalid set name in command");
+		cf_dyn_buf_append_string(db, "error-set-name");
+		return 0;
+	}
+
+	// Get the threshold last-update-time if there is one.
+
+	char lut_str[24]; // allow decimal, hex or octal in C constant format
+	int lut_str_len = (int)sizeof(lut_str);
+	int lut_rv = as_info_parameter_get(params, "lut", lut_str, &lut_str_len);
+
+	if (lut_rv == -2 || (lut_rv == 0 && lut_str_len == 0)) {
+		cf_warning(AS_INFO, "truncate command: invalid last-update-time in command");
+		cf_dyn_buf_append_string(db, "error-last-update-time");
+		return 0;
+	}
+
+	// Issue the truncate command.
+
+	bool ok = as_truncate_cmd(ns_name,
+			set_rv == 0 ? set_name : NULL,
+			lut_rv == 0 ? lut_str : NULL);
+
+	cf_dyn_buf_append_string(db, ok ? "ok" : "error-truncate");
+
+	return 0;
+}
+
+// Format is one of:
+//
+//	truncate-undo:namespace=<ns-name>;set=<set-name>
+//
+//	truncate-undo:namespace=<ns-name>
+//
+int
+info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
+{
+	// Get the namespace name.
+
+	char ns_name[AS_ID_NAMESPACE_SZ];
+	int ns_name_len = (int)sizeof(ns_name);
+	int ns_rv = as_info_parameter_get(params, "namespace", ns_name, &ns_name_len);
+
+	if (ns_rv != 0 || ns_name_len == 0) {
+		cf_warning(AS_INFO, "truncate-undo command: missing or invalid namespace name in command");
+		cf_dyn_buf_append_string(db, "error-namespace-name");
+		return 0;
+	}
+
+	// Get the set-name if there is one.
+
+	char set_name[AS_SET_NAME_MAX_SIZE];
+	int set_name_len = (int)sizeof(set_name);
+	int set_rv = as_info_parameter_get(params, "set", set_name, &set_name_len);
+
+	if (set_rv == -2 || (set_rv == 0 && set_name_len == 0)) {
+		cf_warning(AS_INFO, "truncate-undo command: invalid set name in command");
+		cf_dyn_buf_append_string(db, "error-set-name");
+		return 0;
+	}
+
+	// Issue the truncate-undo command.
+
+	as_truncate_undo_cmd(ns_name, set_rv == 0 ? set_name : NULL);
+
+	cf_dyn_buf_append_string(db, "ok");
+
+	return 0;
+}
+
 //
 // Log a message to the server.
 // Limited to 2048 characters.
@@ -7024,7 +7125,7 @@ as_info_init()
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;sindex-repair;"
-				"smd;statistics;status;tip;tip-clear;version;",
+				"smd;statistics;status;tip;tip-clear;truncate;truncate-undo;version;",
 				false);
 	/*
 	 * help intentionally does not include the following:
@@ -7121,6 +7222,8 @@ as_info_init()
 	as_info_set_command("throughput", info_command_hist_track, PERM_NONE);                    // Returns throughput info.
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
+	as_info_set_command("truncate", info_command_truncate, PERM_SERVICE_CTRL);                // Truncate a namespace or set. FIXME - permission ???
+	as_info_set_command("truncate-undo", info_command_truncate_undo, PERM_SERVICE_CTRL);      // Undo a truncate command. FIXME - permission ???
 	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);               // Command to XDR module.
 
 	// SINDEX

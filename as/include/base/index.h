@@ -215,7 +215,7 @@ void as_index_set_bin_space(as_index* index, as_bin_space* bin_space) {
 //
 
 static inline
-uint16_t as_index_get_set_id(as_index *index) {
+uint16_t as_index_get_set_id(const as_index *index) {
 	return index->storage_key.ssd.set_id_bits;
 }
 
@@ -226,7 +226,7 @@ void as_index_set_set_id(as_index *index, uint16_t set_id) {
 }
 
 static inline
-bool as_index_has_set(as_index *index) {
+bool as_index_has_set(const as_index *index) {
 	return index->storage_key.ssd.set_id_bits != 0;
 }
 

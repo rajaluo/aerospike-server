@@ -52,6 +52,7 @@
 #include "base/proto.h"
 #include "base/rec_props.h"
 #include "base/transaction_policy.h"
+#include "base/truncate.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 
@@ -609,7 +610,13 @@ extern int as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 
 // a simpler call that gives seconds in the right epoch
 #define as_record_void_time_get() cf_clepoch_seconds()
-bool as_record_is_expired(as_record *r); // TODO - eventually inline
+bool as_record_is_expired(const as_record *r); // TODO - eventually inline
+
+static inline bool
+as_record_is_doomed(const as_record *r, struct as_namespace_s *ns)
+{
+	return as_record_is_expired(r) || as_truncate_record_is_truncated(r, ns);
+}
 
 #define AS_SINDEX_MAX		256
 
@@ -816,6 +823,12 @@ struct as_namespace_s {
 	// To track fraction of reads from cache:
 	cf_atomic32		n_reads_from_cache;
 	cf_atomic32		n_reads_from_device;
+
+	//--------------------------------------------
+	// Truncate records.
+	//
+
+	as_truncate		truncate;
 
 	//--------------------------------------------
 	// Secondary index.
@@ -1216,7 +1229,7 @@ struct as_set_s {
 	cf_atomic64		n_tombstones;		// relevant only for enterprise edition
 	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
 	cf_atomic64		stop_writes_count;	// restrict number of records in a set
-	cf_atomic64		delete_time;		// TODO - implement
+	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
 	cf_atomic32		deleted;			// empty a set (triggered via info command only)
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
 	cf_atomic32		enable_xdr;			// white-list (AS_SET_ENABLE_XDR_TRUE) or black-list (AS_SET_ENABLE_XDR_FALSE) a set for XDR replication
