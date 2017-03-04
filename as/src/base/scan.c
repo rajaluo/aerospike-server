@@ -761,7 +761,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_index* r = r_ref->r;
 
-	if (excluded_set(r, _job->set_id) || as_record_is_expired(r)) {
+	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -1121,7 +1121,7 @@ aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_index* r = r_ref->r;
 
-	if (excluded_set(r, _job->set_id) || as_record_is_expired(r)) {
+	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -1405,7 +1405,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	as_index* r = r_ref->r;
 
-	if (excluded_set(r, _job->set_id) || as_record_is_expired(r)) {
+	if (excluded_set(r, _job->set_id) || as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
 		return;
 	}

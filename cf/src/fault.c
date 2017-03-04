@@ -101,6 +101,7 @@ char *cf_fault_context_strings[] = {
 		"sindex",
 		"smd",
 		"storage",
+		"truncate",
 		"tsvc",
 		"udf",
 		"xdr"

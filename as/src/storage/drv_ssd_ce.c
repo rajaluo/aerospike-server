@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include "fault.h"
 #include "base/datamodel.h"
+#include "base/rec_props.h"
 #include "storage/storage.h"
 
 
@@ -44,6 +45,14 @@ ssd_cold_start_is_valid_n_bins(uint32_t n_bins)
 			"community edition found tombstone - erase drive and restart");
 
 	return n_bins <= BIN_NAMES_QUOTA;
+}
+
+
+bool
+ssd_cold_start_is_record_truncated(as_namespace* ns, const drv_ssd_block* block,
+		const as_rec_props* p_props)
+{
+	return false;
 }
 
 

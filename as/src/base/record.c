@@ -45,6 +45,7 @@
 #include "base/secondary_index.h"
 #include "base/stats.h"
 #include "base/transaction.h"
+#include "base/truncate.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
@@ -555,8 +556,8 @@ as_record_set_properties(as_storage_rd *rd, const as_rec_props *p_rec_props)
 }
 
 int
-as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
-		as_index_ref *r_ref, as_record_merge_component *c)
+as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
+		as_record_merge_component *c, bool is_create)
 {
 	as_index *r = r_ref->r;
 	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
@@ -594,6 +595,16 @@ as_record_flatten_component(as_partition_reservation *rsv, as_storage_rd *rd,
 
 	// Cleanup old info and put new info
 	as_record_set_properties(rd, &c->rec_props);
+
+	if (is_create) {
+		r->last_update_time = c->last_update_time;
+
+		if (as_truncate_record_is_truncated(r, rd->ns)) {
+			as_storage_record_close(rd);
+			return -8; // yes, another special return value
+		}
+	}
+
 	int rv = as_record_unpickle_replace(r, rd, c->record_buf, c->record_buf_sz, &p_stack_particles, has_sindex);
 	if (0 != rv) {
 		cf_warning_digest(AS_LDT, &rd->keyd, "Unpickled replace failed rv=%d",rv);
@@ -829,7 +840,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 		}
 
 		// Apply remote winner locally. (Yes, call closes as_storage_rd.)
-		flatten_rv = as_record_flatten_component(rsv, &rd, &r_ref, c);
+		flatten_rv = as_record_flatten_component(&rd, &r_ref, c, is_create);
 	}
 
 	// On failure or ship-op, delete index element if created above.
@@ -844,7 +855,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 
 // TODO - inline this, if/when we unravel header files.
 bool
-as_record_is_expired(as_record *r)
+as_record_is_expired(const as_record *r)
 {
 	return r->void_time != 0 && r->void_time < as_record_void_time_get();
 }

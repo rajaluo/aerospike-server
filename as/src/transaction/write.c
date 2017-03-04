@@ -46,6 +46,7 @@
 #include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
+#include "base/truncate.h"
 #include "base/xdr_serverside.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
@@ -537,7 +538,7 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		r = r_ref.r;
 
-		if (as_record_is_expired(r)) {
+		if (as_record_is_doomed(r, ns)) {
 			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_NOTFOUND);
 			return TRANS_DONE_ERROR;
 		}
@@ -554,8 +555,8 @@ write_master(rw_request* rw, as_transaction* tr)
 		r = r_ref.r;
 		record_created = rv == 1;
 
-		// If it's an expired record, pretend it's a fresh create.
-		if (! record_created && as_record_is_expired(r)) {
+		// If it's an expired or truncated record, pretend it's a fresh create.
+		if (! record_created && as_record_is_doomed(r, ns)) {
 			as_record_destroy(r, ns);
 			as_record_reinitialize(&r_ref, ns);
 			cf_atomic64_incr(&ns->n_objects);
@@ -586,6 +587,12 @@ write_master(rw_request* rw, as_transaction* tr)
 			return TRANS_DONE_ERROR;
 		}
 		else if (rv_set == -2) {
+			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_FORBIDDEN);
+			return TRANS_DONE_ERROR;
+		}
+
+		// Don't write record if it would be truncated.
+		if (as_truncate_now_is_truncated(ns, as_index_get_set_id(r))) {
 			write_master_failed(tr, &r_ref, record_created, tree, 0, AS_PROTO_RESULT_FAIL_FORBIDDEN);
 			return TRANS_DONE_ERROR;
 		}

@@ -819,7 +819,7 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_index *r = r_ref->r;
 
 	if ((_job->set_id != INVALID_SET_ID && _job->set_id != as_index_get_set_id(r)) ||
-			as_record_is_expired(r)) {
+			as_record_is_doomed(r, ns)) {
 		as_record_done(r_ref, ns);
 		return;
 	}

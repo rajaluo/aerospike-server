@@ -701,8 +701,8 @@ udf_master_apply(udf_call* call, rw_request* rw)
 
 	int get_rv = as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns);
 
-	if (get_rv == 0 && as_record_is_expired(r_ref.r)) {
-		// If record is expired, pretend it was not found.
+	if (get_rv == 0 && as_record_is_doomed(r_ref.r, ns)) {
+		// If record is expired or truncated, pretend it was not found.
 		as_record_done(&r_ref, ns);
 		get_rv = -1;
 	}

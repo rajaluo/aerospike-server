@@ -1530,9 +1530,9 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 			int winner_idx  = -1;
 			int rv = as_record_flatten(&immig->rsv, keyd, 1, &c, &winner_idx);
 
-			if (rv != 0 && rv != -3) {
-				// -3 is not a failure. It is get_create failure inside
-				// as_record_flatten which is possible in case of race.
+			// -3: race where we encountered a half-created/deleted record
+			// -8: didn't write record because it's truncated
+			if (rv != 0 && rv != -3 && rv != -8) {
 				cf_warning_digest(AS_MIGRATE, keyd, "handle insert: record flatten failed %d ", rv);
 				immigration_release(immig);
 				as_fabric_msg_put(m);

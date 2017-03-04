@@ -107,6 +107,7 @@ typedef enum {
 	AS_SINDEX,
 	AS_SMD,
 	AS_STORAGE,
+	AS_TRUNCATE,
 	AS_TSVC,
 	AS_UDF,
 	AS_XDR,
