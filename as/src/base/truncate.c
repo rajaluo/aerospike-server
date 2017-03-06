@@ -203,17 +203,18 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 		uint64_t utc_nanosec = strtoul(lut_str, NULL, 0);
 
 		// Last update time as human-readable UTC seconds.
+		// TODO - make generic utility?
 		char utc_sec[64] = { 0 };
 		time_t utc_time = utc_nanosec / 1000000000;
 		struct tm utc_tm;
 
 		if (cf_fault_is_using_local_time()) {
 			localtime_r(&utc_time, &utc_tm);
-			strftime(utc_sec, sizeof(utc_sec), "%b %d %Y %T GMT%z: ", &utc_tm);
+			strftime(utc_sec, sizeof(utc_sec), "%b %d %Y %T GMT%z", &utc_tm);
 		}
 		else {
 			gmtime_r(&utc_time, &utc_tm);
-			strftime(utc_sec, sizeof(utc_sec), "%b %d %Y %T %Z: ", &utc_tm);
+			strftime(utc_sec, sizeof(utc_sec), "%b %d %Y %T %Z", &utc_tm);
 		}
 
 		lut = cf_clepoch_ms_from_utc_ns(utc_nanosec);
