@@ -267,6 +267,7 @@ void ssd_cold_start_drop_cenotaphs(struct as_namespace_s *ns);
 // Miscellaneous.
 bool ssd_cold_start_is_valid_n_bins(uint32_t n_bins);
 bool ssd_cold_start_is_record_truncated(struct as_namespace_s *ns, const drv_ssd_block *block, const struct as_rec_props_s *p_props);
+void ssd_cold_start_list_truncate_cenotaphs(struct as_namespace_s *ns);
 
 // Called in (enterprise-split) storage table function.
 int ssd_write(struct as_storage_rd_s *rd);

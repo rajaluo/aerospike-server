@@ -57,6 +57,13 @@ ssd_cold_start_is_record_truncated(as_namespace* ns, const drv_ssd_block* block,
 
 
 void
+ssd_cold_start_list_truncate_cenotaphs(struct as_namespace_s* ns)
+{
+	// Nothing to do - relevant for enterprise version only.
+}
+
+
+void
 ssd_cold_start_adjust_cenotaph(as_namespace* ns, const drv_ssd_block* block,
 		as_record* r)
 {

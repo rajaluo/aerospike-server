@@ -46,8 +46,6 @@
 #include "base/index.h"
 #include "base/system_metadata.h"
 
-// FIXME - new fault context?
-
 
 //==========================================================
 // Typedefs & constants.
@@ -147,7 +145,7 @@ as_truncate_init(as_namespace* ns)
 {
 	// Create the shash used at startup. (Will be destroyed after startup.)
 	if (shash_create(&ns->truncate.startup_set_hash, truncate_hash_fn,
-			AS_SET_NAME_MAX_SIZE, sizeof(uint64_t), 1024, 0) != SHASH_OK) {
+			AS_SET_NAME_MAX_SIZE, sizeof(truncate_hval), 1024, 0) != SHASH_OK) {
 		cf_crash(AS_TRUNCATE, "truncate init - failed startup-set-hash create");
 	}
 
@@ -157,7 +155,7 @@ as_truncate_init(as_namespace* ns)
 	// Lazily create the global filter shash used on the SMD principal.
 	if (! g_truncate_filter_hash &&
 			shash_create(&g_truncate_filter_hash, truncate_hash_fn,
-					TRUNCATE_KEY_SIZE, sizeof(uint64_t),
+					TRUNCATE_KEY_SIZE, sizeof(truncate_hval),
 					1024 * g_config.n_namespaces, 0) != SHASH_OK) {
 		cf_crash(AS_TRUNCATE, "truncate init - failed filter-hash create");
 	}
@@ -225,7 +223,12 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 			return false;
 		}
 
-		// FIXME - enforce future bound sanity check ???
+		// 40-bit limit. TODO - enforce tighter future bound sanity check ???
+		if (lut > 0xFFffffFFFF) {
+			cf_warning(AS_TRUNCATE, "command lut %s (%s) too far in the future",
+					lut_str, utc_sec);
+			return false;
+		}
 
 		cf_info(AS_TRUNCATE, "{%s} got command to truncate to %s (%lx)",
 				smd_key, utc_sec, lut);
@@ -351,7 +354,7 @@ startup_set_hash_reduce_cb(void* key, void* data, void* udata)
 {
 	as_namespace* ns = (as_namespace*)udata;
 	const char* set_name = (const char*)key;
-	uint64_t set_lut = *(uint64_t*)data;
+	truncate_hval* hval = (truncate_hval*)data;
 
 	as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 
@@ -362,7 +365,7 @@ startup_set_hash_reduce_cb(void* key, void* data, void* udata)
 	}
 
 	// Transfer the last-update-time from the hash to the vmap.
-	p_set->truncate_lut = set_lut;
+	p_set->truncate_lut = hval->lut;
 
 	return SHASH_OK;
 }
@@ -371,15 +374,16 @@ startup_set_hash_reduce_cb(void* key, void* data, void* udata)
 bool
 filter_hash_put(const as_smd_item_t* item)
 {
-	uint64_t new_lut = lut_from_smd(item);
-	uint64_t ex_lut;
 	char hkey[TRUNCATE_KEY_SIZE] = { 0 }; // pad for consistent shash key
 
 	strcpy(hkey, item->key);
 
-	if (shash_get(g_truncate_filter_hash, hkey, &ex_lut) != SHASH_OK ||
-			new_lut > ex_lut) {
-		if (shash_put(g_truncate_filter_hash, hkey, &new_lut) != SHASH_OK) {
+	truncate_hval new_hval = { .lut = lut_from_smd(item) };
+	truncate_hval ex_hval;
+
+	if (shash_get(g_truncate_filter_hash, hkey, &ex_hval) != SHASH_OK ||
+			new_hval.lut > ex_hval.lut) {
+		if (shash_put(g_truncate_filter_hash, hkey, &new_hval) != SHASH_OK) {
 			cf_warning(AS_TRUNCATE, "{%s} failed filter-hash put", item->key);
 		}
 
@@ -388,7 +392,7 @@ filter_hash_put(const as_smd_item_t* item)
 
 	// This is normal on principal, from truncate_smd_accept_cb().
 	cf_detail(AS_TRUNCATE, "{%s} ignoring truncate lut %lx <= %lx", item->key,
-			new_lut, ex_lut);
+			(uint64_t)new_hval.lut, (uint64_t)ex_hval.lut);
 
 	return false;
 }
@@ -507,7 +511,9 @@ action_startup(as_namespace* ns, const char* set_name, uint64_t lut)
 
 	strcpy(hkey, set_name);
 
-	if (shash_put_unique(ns->truncate.startup_set_hash, hkey, &lut) !=
+	truncate_hval hval = { .cenotaph = 1, .lut = lut };
+
+	if (shash_put_unique(ns->truncate.startup_set_hash, hkey, &hval) !=
 			SHASH_OK) {
 		cf_crash(AS_TRUNCATE, "{%s|%s} failed startup-hash put", ns->name,
 				set_name);
