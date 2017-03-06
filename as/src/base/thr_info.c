@@ -5932,6 +5932,10 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint32(db, "nsup_cycle_duration", ns->nsup_cycle_duration);
 	info_append_uint32(db, "nsup_cycle_sleep_pct", ns->nsup_cycle_sleep_pct);
 
+	// Truncate stats.
+
+	info_append_uint64(db, "truncated_records", ns->truncate.n_records);
+
 	// Memory usage stats.
 
 	uint64_t data_memory = ns->n_bytes_memory;

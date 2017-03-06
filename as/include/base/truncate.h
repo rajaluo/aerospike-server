@@ -51,6 +51,8 @@ typedef struct as_truncate_s {
 	pthread_mutex_t state_lock;
 	cf_atomic32 n_threads_running;
 	cf_atomic32 pid;
+	cf_atomic64 n_records_this_run;
+	uint64_t n_records;
 } as_truncate;
 
 

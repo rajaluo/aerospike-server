@@ -55,6 +55,7 @@
 typedef struct truncate_reduce_cb_info_s {
 	as_namespace* ns;
 	as_index_tree* tree;
+	int64_t n_deleted;
 } truncate_reduce_cb_info;
 
 static const uint32_t NUM_TRUNCATE_THREADS = 4;
@@ -588,6 +589,8 @@ truncate_all(as_namespace* ns)
 	cf_atomic32_set(&ns->truncate.n_threads_running, NUM_TRUNCATE_THREADS);
 	cf_atomic32_set(&ns->truncate.pid, -1);
 
+	cf_atomic64_set(&ns->truncate.n_records_this_run, 0);
+
 	pthread_t thread;
 	pthread_attr_t attrs;
 
@@ -618,6 +621,8 @@ run_truncate(void* arg)
 
 		as_index_reduce(rsv.tree, truncate_reduce_cb, (void*)&cb_info);
 		as_partition_release(&rsv);
+
+		cf_atomic64_add(&ns->truncate.n_records_this_run, cb_info.n_deleted);
 	}
 
 	truncate_finish(ns);
@@ -631,6 +636,11 @@ truncate_finish(as_namespace* ns)
 {
 	if (cf_atomic32_decr(&ns->truncate.n_threads_running) == 0) {
 		pthread_mutex_lock(&ns->truncate.state_lock);
+
+		ns->truncate.n_records += ns->truncate.n_records_this_run;
+
+		cf_info(AS_TRUNCATE, "{%s} truncated records (%lu,%lu)",
+				ns->truncate.n_records_this_run, ns->truncate.n_records);
 
 		switch (ns->truncate.state) {
 		case TRUNCATE_RUNNING:
@@ -660,6 +670,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_namespace* ns = cb_info->ns;
 
 	if (r->last_update_time < ns->truncate.lut) {
+		cb_info->n_deleted++;
 		as_index_delete(cb_info->tree, &r->key);
 		as_record_done(r_ref, ns);
 		return;
@@ -669,6 +680,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	// Delete records not updated since their set's threshold last-update-time.
 	if (p_set && r->last_update_time < p_set->truncate_lut) {
+		cb_info->n_deleted++;
 		as_index_delete(cb_info->tree, &r->key);
 	}
 
