@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
@@ -185,23 +186,6 @@ as_truncate_done_startup(as_namespace* ns)
 bool
 as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 {
-	uint64_t lut;
-
-	if (lut_str) {
-		lut = cf_clepoch_ms_from_utc_ns(strtoul(lut_str, NULL, 0));
-
-		if (lut == 0) {
-			cf_warning(AS_TRUNCATE, "lut %s would truncate to 0", lut_str);
-			return false;
-		}
-
-		// FIXME - enforce future bound sanity check ???
-	}
-	else {
-		// Use a last-update-time threshold of now.
-		lut = cf_clepoch_milliseconds();
-	}
-
 	char smd_key[TRUNCATE_KEY_SIZE];
 
 	strcpy(smd_key, ns_name);
@@ -213,7 +197,45 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 		strcpy(p_write, set_name);
 	}
 
-	cf_info(AS_TRUNCATE, "{%s} got command to truncate to %lx", smd_key, lut);
+	uint64_t lut;
+
+	if (lut_str) {
+		uint64_t utc_nanosec = strtoul(lut_str, NULL, 0);
+
+		// Last update time as human-readable UTC seconds.
+		char utc_sec[64] = { 0 };
+		time_t utc_time = utc_nanosec / 1000000000;
+		struct tm utc_tm;
+
+		if (cf_fault_is_using_local_time()) {
+			localtime_r(&utc_time, &utc_tm);
+			strftime(utc_sec, sizeof(utc_sec), "%b %d %Y %T GMT%z: ", &utc_tm);
+		}
+		else {
+			gmtime_r(&utc_time, &utc_tm);
+			strftime(utc_sec, sizeof(utc_sec), "%b %d %Y %T %Z: ", &utc_tm);
+		}
+
+		lut = cf_clepoch_ms_from_utc_ns(utc_nanosec);
+
+		if (lut == 0) {
+			cf_warning(AS_TRUNCATE, "command lut %s (%s) would truncate to 0",
+					lut_str, utc_sec);
+			return false;
+		}
+
+		// FIXME - enforce future bound sanity check ???
+
+		cf_info(AS_TRUNCATE, "{%s} got command to truncate to %s (%lx)",
+				smd_key, utc_sec, lut);
+	}
+	else {
+		// Use a last-update-time threshold of now.
+		lut = cf_clepoch_milliseconds();
+
+		cf_info(AS_TRUNCATE, "{%s} got command to truncate to now (%lx)",
+				smd_key, lut);
+	}
 
 	char smd_value[16 + 1]; // uint64_t takes at most 16 hex characters
 
@@ -639,7 +661,7 @@ truncate_finish(as_namespace* ns)
 
 		ns->truncate.n_records += ns->truncate.n_records_this_run;
 
-		cf_info(AS_TRUNCATE, "{%s} truncated records (%lu,%lu)",
+		cf_info(AS_TRUNCATE, "{%s} truncated records (%lu,%lu)", ns->name,
 				ns->truncate.n_records_this_run, ns->truncate.n_records);
 
 		switch (ns->truncate.state) {
