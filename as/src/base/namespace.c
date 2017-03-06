@@ -597,6 +597,10 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 	cf_dyn_buf_append_uint64(db, cf_atomic64_get(p_set->n_bytes_memory));
 	cf_dyn_buf_append_char(db, ':');
 
+	cf_dyn_buf_append_string(db, "truncate_lut=");
+	cf_dyn_buf_append_uint64(db, p_set->truncate_lut);
+	cf_dyn_buf_append_char(db, ':');
+
 	cf_dyn_buf_append_string(db, "deleting=");
 	cf_dyn_buf_append_string(db, IS_SET_DELETED(p_set) ? "true" : "false");
 	cf_dyn_buf_append_char(db, ':');
