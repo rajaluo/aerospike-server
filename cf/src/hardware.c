@@ -208,11 +208,23 @@ readdir_safe(DIR *dir, struct dirent *ent)
 {
 	while (true) {
 		struct dirent *res_ent;
-		int32_t res = readdir_r(dir, ent, &res_ent);
 
-		if (res != 0) {
+		// Glibc 2.24 deprecates readdir_r(), which causes a compiler warning.
+
+#if __GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 24)
+		errno = 0;
+		res_ent = readdir(dir);
+
+		if (res_ent != NULL) {
+			memcpy(ent, res_ent, sizeof(struct dirent));
+		}
+#else
+		errno = readdir_r(dir, ent, &res_ent);
+#endif
+
+		if (errno != 0) {
 			cf_crash(CF_MISC, "error while reading directory: %d (%s)",
-					res, cf_strerror(res));
+					errno, cf_strerror(errno));
 		}
 
 		if (res_ent == NULL) {
