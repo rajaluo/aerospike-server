@@ -1546,9 +1546,12 @@ as_sindex_reserve(as_sindex *si, char *fname, int lineno)
 int
 as_sindex_release(as_sindex *si, char *fname, int lineno)
 {
-	if (!si) return AS_SINDEX_OK;
-	// Can be checked without locking
+	if (! si) {
+	   	return AS_SINDEX_OK;
+	}
+
 	uint64_t val = cf_rc_release(si->imd);
+
 	if (val == 0) {
 		cf_assert((si->state == AS_SINDEX_DESTROY),
 					AS_SINDEX, " Invalid state at cleanup");
@@ -1558,18 +1561,6 @@ as_sindex_release(as_sindex *si, char *fname, int lineno)
 		if (CF_QUEUE_OK != cf_queue_push(g_sindex_destroy_q, &si)) {
 			return AS_SINDEX_ERR;
 		}
-	}
-	else {
-		SINDEX_RLOCK(&si->imd->slock);
-		cf_debug(AS_SINDEX, "Index %s in %d state Released "
-					"to reference count  %"PRIu64" < 2 at %s:%d",
-					si->imd->iname, si->state, val, fname, lineno);
-		// Display a warning when rc math is messed-up during sindex-delete
-		if(si->state == AS_SINDEX_DESTROY){
-			cf_info(AS_SINDEX,"Returning from a sindex destroy op for: %s:%s with reference count %"PRIu64"",
-								si->ns->name, si->imd->iname, val);
-		}
-		SINDEX_UNLOCK(&si->imd->slock);
 	}
 	return AS_SINDEX_OK;
 }
