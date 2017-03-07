@@ -58,7 +58,7 @@
 typedef int (*as_storage_namespace_init_fn)(as_namespace *ns, cf_queue *complete_q, void *udata);
 static const as_storage_namespace_init_fn as_storage_namespace_init_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
-	0, // memory has no init
+	as_storage_namespace_init_memory,
 	as_storage_namespace_init_ssd,
 	as_storage_namespace_init_kv
 };
@@ -77,9 +77,7 @@ as_storage_init()
 			}
 		}
 		else {
-			void *_t;
-
-			cf_queue_push(complete_q, &_t);
+			cf_crash(AS_STORAGE, "invalid storage type for namespace %s", ns->name);
 		}
 	}
 

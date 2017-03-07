@@ -31,6 +31,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "base/datamodel.h"
+#include "base/truncate.h"
 #include "storage/storage.h"
 
 
@@ -49,8 +50,13 @@
 int
 as_storage_namespace_init_memory(as_namespace *ns, cf_queue *complete_q, void *udata)
 {
-	cf_queue_push(complete_q, &udata);
-	return(0);
+	as_truncate_done_startup(ns);
+
+	void *_t = NULL;
+
+	cf_queue_push(complete_q, &_t);
+
+	return 0;
 }
 
 int

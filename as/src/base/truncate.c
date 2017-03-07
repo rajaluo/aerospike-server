@@ -70,13 +70,17 @@ const char AS_TRUNCATE_MODULE[] = "truncate";
 // System metadata key format token.
 #define TOK_DELIMITER ('|')
 
+// Detect excessive clock skew for warning purposes only.
+static const uint64_t WARN_CLOCK_SKEW_MS = 1000 * 5;
+
 
 //==========================================================
 // Globals.
 //
 
-static bool g_truncate_smd_loaded = false;
 static shash* g_truncate_filter_hash = NULL;
+static bool g_truncate_smd_loaded = false;
+static uint64_t g_startup_clepoch_ms = 0;
 
 
 //==========================================================
@@ -174,13 +178,23 @@ as_truncate_init(as_namespace* ns)
 void
 as_truncate_done_startup(as_namespace* ns)
 {
+	// One clock call covers everything.
+	if (g_startup_clepoch_ms == 0) {
+		g_startup_clepoch_ms = cf_clepoch_milliseconds();
+	}
+
+	if (ns->truncate.lut > g_startup_clepoch_ms) {
+		cf_warning(AS_TRUNCATE, "{%s} tombstone lut %lu ms in the future",
+				ns->name,ns->truncate.lut - g_startup_clepoch_ms);
+	}
+
 	shash_reduce(ns->truncate.startup_set_hash, startup_set_hash_reduce_cb, ns);
 	shash_destroy(ns->truncate.startup_set_hash);
 }
 
 
 // SMD key is "ns-name|set-name" or "ns-name".
-// SMD value is last-update-time as hex string.
+// SMD value is last-update-time as decimal string.
 bool
 as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 {
@@ -195,6 +209,7 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 		strcpy(p_write, set_name);
 	}
 
+	uint64_t now = cf_clepoch_milliseconds();
 	uint64_t lut;
 
 	if (lut_str) {
@@ -223,9 +238,8 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 			return false;
 		}
 
-		// 40-bit limit. TODO - enforce tighter future bound sanity check ???
-		if (lut > 0xFFffffFFFF) {
-			cf_warning(AS_TRUNCATE, "command lut %s (%s) too far in the future",
+		if (lut > now) {
+			cf_warning(AS_TRUNCATE, "command lut %s (%s) is in the future",
 					lut_str, utc_sec);
 			return false;
 		}
@@ -235,13 +249,13 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 	}
 	else {
 		// Use a last-update-time threshold of now.
-		lut = cf_clepoch_milliseconds();
+		lut = now;
 
 		cf_info(AS_TRUNCATE, "{%s} got command to truncate to now (%lu)",
 				smd_key, lut);
 	}
 
-	char smd_value[13 + 1]; // 0xFFffffFFFF is 13 decimal characters
+	char smd_value[13 + 1]; // 0xFFffffFFFF (40 bits) is 13 decimal characters
 
 	sprintf(smd_value, "%lu", lut);
 
@@ -355,6 +369,11 @@ startup_set_hash_reduce_cb(void* key, void* data, void* udata)
 	as_namespace* ns = (as_namespace*)udata;
 	const char* set_name = (const char*)key;
 	truncate_hval* hval = (truncate_hval*)data;
+
+	if (hval->lut > g_startup_clepoch_ms) {
+		cf_warning(AS_TRUNCATE, "{%s|%s} tombstone lut %lu ms in the future",
+				ns->name, set_name, hval->lut - g_startup_clepoch_ms);
+	}
 
 	as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 
@@ -530,6 +549,13 @@ action_startup(as_namespace* ns, const char* set_name, uint64_t lut)
 void
 action_truncate(as_namespace* ns, const char* set_name, uint64_t lut)
 {
+	uint64_t now = cf_clepoch_milliseconds();
+
+	if (lut > now + WARN_CLOCK_SKEW_MS) {
+		cf_warning(AS_TRUNCATE, "lut is %lu ms in the future - clock skew?",
+				lut - now);
+	}
+
 	if (set_name) {
 		as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 
