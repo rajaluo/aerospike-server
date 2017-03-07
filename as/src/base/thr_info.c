@@ -3904,7 +3904,7 @@ info_command_truncate(char *name, char *params, cf_dyn_buf *db)
 
 	if (ns_rv != 0 || ns_name_len == 0) {
 		cf_warning(AS_INFO, "truncate command: missing or invalid namespace name in command");
-		cf_dyn_buf_append_string(db, "error::namespace-name");
+		cf_dyn_buf_append_string(db, "ERROR::namespace-name");
 		return 0;
 	}
 
@@ -3916,7 +3916,7 @@ info_command_truncate(char *name, char *params, cf_dyn_buf *db)
 
 	if (set_rv == -2 || (set_rv == 0 && set_name_len == 0)) {
 		cf_warning(AS_INFO, "truncate command: invalid set name in command");
-		cf_dyn_buf_append_string(db, "error::set-name");
+		cf_dyn_buf_append_string(db, "ERROR::set-name");
 		return 0;
 	}
 
@@ -3928,7 +3928,7 @@ info_command_truncate(char *name, char *params, cf_dyn_buf *db)
 
 	if (lut_rv == -2 || (lut_rv == 0 && lut_str_len == 0)) {
 		cf_warning(AS_INFO, "truncate command: invalid last-update-time in command");
-		cf_dyn_buf_append_string(db, "error::last-update-time");
+		cf_dyn_buf_append_string(db, "ERROR::last-update-time");
 		return 0;
 	}
 
@@ -3938,7 +3938,7 @@ info_command_truncate(char *name, char *params, cf_dyn_buf *db)
 			set_rv == 0 ? set_name : NULL,
 			lut_rv == 0 ? lut_str : NULL);
 
-	cf_dyn_buf_append_string(db, ok ? "ok" : "error::truncate");
+	cf_dyn_buf_append_string(db, ok ? "ok" : "ERROR::truncate");
 
 	return 0;
 }
@@ -3960,7 +3960,7 @@ info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
 
 	if (ns_rv != 0 || ns_name_len == 0) {
 		cf_warning(AS_INFO, "truncate-undo command: missing or invalid namespace name in command");
-		cf_dyn_buf_append_string(db, "error::namespace-name");
+		cf_dyn_buf_append_string(db, "ERROR::namespace-name");
 		return 0;
 	}
 
@@ -3972,7 +3972,7 @@ info_command_truncate_undo(char *name, char *params, cf_dyn_buf *db)
 
 	if (set_rv == -2 || (set_rv == 0 && set_name_len == 0)) {
 		cf_warning(AS_INFO, "truncate-undo command: invalid set name in command");
-		cf_dyn_buf_append_string(db, "error::set-name");
+		cf_dyn_buf_append_string(db, "ERROR::set-name");
 		return 0;
 	}
 
