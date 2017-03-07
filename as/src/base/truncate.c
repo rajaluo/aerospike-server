@@ -111,7 +111,7 @@ as_namespace_get_record_set(as_namespace* ns, const as_record* r)
 static inline uint64_t
 lut_from_smd(const as_smd_item_t* item)
 {
-	return strtoul(item->value, NULL, 16);
+	return strtoul(item->value, NULL, 10);
 }
 
 // TODO - promote to util when shash is cleaned up. (See also SMD.)
@@ -230,20 +230,20 @@ as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str)
 			return false;
 		}
 
-		cf_info(AS_TRUNCATE, "{%s} got command to truncate to %s (%lx)",
+		cf_info(AS_TRUNCATE, "{%s} got command to truncate to %s (%lu)",
 				smd_key, utc_sec, lut);
 	}
 	else {
 		// Use a last-update-time threshold of now.
 		lut = cf_clepoch_milliseconds();
 
-		cf_info(AS_TRUNCATE, "{%s} got command to truncate to now (%lx)",
+		cf_info(AS_TRUNCATE, "{%s} got command to truncate to now (%lu)",
 				smd_key, lut);
 	}
 
-	char smd_value[16 + 1]; // uint64_t takes at most 16 hex characters
+	char smd_value[13 + 1]; // 0xFFffffFFFF is 13 decimal characters
 
-	sprintf(smd_value, "%lx", lut);
+	sprintf(smd_value, "%lu", lut);
 
 	// Broadcast the truncate command to all nodes (including this one).
 	as_smd_set_metadata(TRUNCATE_MODULE, smd_key, smd_value);
@@ -359,7 +359,7 @@ startup_set_hash_reduce_cb(void* key, void* data, void* udata)
 	as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 
 	if (! p_set) {
-		cf_detail(AS_TRUNCATE, "{%s|%s} set tombstone found for empty set",
+		cf_detail(AS_TRUNCATE, "{%s|%s} tombstone found for nonexistent set",
 				ns->name, set_name);
 		return SHASH_OK;
 	}
@@ -391,7 +391,7 @@ filter_hash_put(const as_smd_item_t* item)
 	}
 
 	// This is normal on principal, from truncate_smd_accept_cb().
-	cf_detail(AS_TRUNCATE, "{%s} ignoring truncate lut %lx <= %lx", item->key,
+	cf_detail(AS_TRUNCATE, "{%s} truncate lut %lu <= filter lut %lu", item->key,
 			(uint64_t)new_hval.lut, (uint64_t)ex_hval.lut);
 
 	return false;
@@ -483,7 +483,13 @@ int
 truncate_smd_can_accept_cb(char* module, as_smd_item_t* item, void* udata)
 {
 	if (item->action == AS_SMD_ACTION_SET) {
-		return filter_hash_put(item) ? 0 : -1;
+		if (filter_hash_put(item)) {
+			return 0;
+		}
+
+		cf_info(AS_TRUNCATE, "{%s} ignoring redundant truncate lut", item->key);
+
+		return -1;
 	}
 	else if (item->action == AS_SMD_ACTION_DELETE) {
 		return 0;
@@ -528,30 +534,30 @@ action_truncate(as_namespace* ns, const char* set_name, uint64_t lut)
 		as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 
 		if (! p_set) {
-			cf_detail(AS_TRUNCATE, "{%s|%s} truncate for nonexistent set",
+			cf_info(AS_TRUNCATE, "{%s|%s} truncate for nonexistent set",
 					ns->name, set_name);
 			return;
 		}
 
 		if (lut <= p_set->truncate_lut) {
-			cf_detail(AS_TRUNCATE, "{%s|%s} truncate lut %lx <= vmap lut %lx",
+			cf_info(AS_TRUNCATE, "{%s|%s} truncate lut %lu <= vmap lut %lu",
 					ns->name, set_name, lut, p_set->truncate_lut);
 			return;
 		}
 
-		cf_info(AS_TRUNCATE, "{%s|%s} truncating to %lx", ns->name, set_name,
+		cf_info(AS_TRUNCATE, "{%s|%s} truncating to %lu", ns->name, set_name,
 				lut);
 
 		p_set->truncate_lut = lut;
 	}
 	else {
 		if (lut <= ns->truncate.lut) {
-			cf_detail(AS_TRUNCATE, "{%s} truncate lut %lx <= ns lut %lx",
+			cf_info(AS_TRUNCATE, "{%s} truncate lut %lu <= ns lut %lu",
 					ns->name, lut, ns->truncate.lut);
 			return;
 		}
 
-		cf_info(AS_TRUNCATE, "{%s} truncating to %lx", ns->name, lut);
+		cf_info(AS_TRUNCATE, "{%s} truncating to %lu", ns->name, lut);
 
 		ns->truncate.lut = lut;
 	}
@@ -588,18 +594,18 @@ action_undo(as_namespace* ns, const char* set_name)
 		as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
 
 		if (! p_set) {
-			cf_detail(AS_TRUNCATE, "{%s|%s} undo truncate for nonexistent set",
+			cf_info(AS_TRUNCATE, "{%s|%s} undo truncate for nonexistent set",
 					ns->name, set_name);
 			return;
 		}
 
-		cf_info(AS_TRUNCATE, "{%s|%s} undoing truncate to %lx", ns->name,
+		cf_info(AS_TRUNCATE, "{%s|%s} undoing truncate - was to %lu", ns->name,
 				set_name, p_set->truncate_lut);
 
 		p_set->truncate_lut = 0;
 	}
 	else {
-		cf_info(AS_TRUNCATE, "{%s} undoing truncate to %lx", ns->name,
+		cf_info(AS_TRUNCATE, "{%s} undoing truncate - was to %lu", ns->name,
 				ns->truncate.lut);
 
 		ns->truncate.lut = 0;
