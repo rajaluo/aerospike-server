@@ -3325,6 +3325,9 @@ ssd_load_devices(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 		as_storage_info_flush_ssd(ns);
 		ssd_load_devices_init_header_length(ssds);
 
+		ssd_cold_start_list_truncate_cenotaphs(ns);
+		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
+
 		return true;
 	}
 
