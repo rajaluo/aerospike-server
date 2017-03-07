@@ -2019,10 +2019,6 @@ static int as_smd_metadata_change_local(as_smd_t *smd, as_smd_msg_op_t op, as_sm
 	} else if (item->key) {
 		// Handle the Set case:
 
-		// Add reference to item for storage in the hash table.
-		// (Note:  One reference to the item will be released by the thread when it releases the containing command.)
-		cf_rc_reserve(item);
-
 		// Select metadata local hash table for incoming metadata.
 		rchash *metadata_hash = module_obj->my_metadata;
 
@@ -2042,9 +2038,26 @@ static int as_smd_metadata_change_local(as_smd_t *smd, as_smd_msg_op_t op, as_sm
 			item->timestamp = cf_getms();
 		}
 
-		// Add new, or replace existing, metadata in the module's metadata hash table.
-		if (RCHASH_OK != (retval = rchash_put(metadata_hash, key, key_len, item))) {
-			cf_warning(AS_SMD, "failed to set metadata for key \"%s\" for System Metadata module \"%s\" (retval %d)", item->key, item->module_name, retval);
+		// Add new, replace or keep existing, metadata in the module's metadata hash table.
+
+		as_smd_item_t *existing_item;
+		bool existing_wins = false;
+
+		if (RCHASH_OK == rchash_get(metadata_hash, key, key_len, (void **)&existing_item)) {
+			existing_wins = (existing_item->generation > item->generation) ||
+					((existing_item->generation == item->generation) &&
+					 (existing_item->timestamp > item->timestamp));
+			as_smd_item_destroy(existing_item);
+		}
+
+		if (! existing_wins) {
+			// Add reference to item for storage in the hash table.
+			// (Note:  One reference to the item will be released by the thread when it releases the containing command.)
+			cf_rc_reserve(item);
+
+			if (RCHASH_OK != (retval = rchash_put(metadata_hash, key, key_len, item))) {
+				cf_crash(AS_SMD, "failed to set metadata for key \"%s\" for System Metadata module \"%s\" (retval %d)", item->key, item->module_name, retval);
+			}
 		}
 	} else {
 		cf_debug(AS_SMD, "(not setting empty metadata item for module \"%s\")", module_obj->module);
@@ -2798,7 +2811,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 							}
 						}
 
-						cf_rc_release(existing_item); // for rchash_get
+						as_smd_item_destroy(existing_item); // for rchash_get
 					}
 				}
 			}
