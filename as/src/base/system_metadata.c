@@ -2769,6 +2769,8 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 					as_smd_item_t *existing_item = NULL;
 					if (RCHASH_OK != rchash_get(merge_hash, new_item->key, key_len, (void **) &existing_item)) {
 						// If not found, insert this item.
+						cf_rc_reserve(new_item);
+
 						if (RCHASH_OK != rchash_put(merge_hash, new_item->key, key_len, new_item)) {
 							cf_crash(AS_SMD, "failed to insert item into merge hash");
 						}
@@ -2788,11 +2790,15 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 
 						// Leave existing item in hash, or replace existing item
 						// with new item (put releases existing item).
-						if (existing_wins) {
-							cf_rc_release(existing_item); // for rchash_get - ref-count won't hit 0
-						} else if (RCHASH_OK != rchash_put(merge_hash, new_item->key, key_len, new_item)) {
-							cf_crash(AS_SMD, "failed to insert item into merge hash");
+						if (! existing_wins) {
+							cf_rc_reserve(new_item);
+
+							if (RCHASH_OK != rchash_put(merge_hash, new_item->key, key_len, new_item)) {
+								cf_crash(AS_SMD, "failed to insert item into merge hash");
+							}
 						}
+
+						cf_rc_release(existing_item); // for rchash_get
 					}
 				}
 			}
@@ -3014,6 +3020,7 @@ static int as_smd_merge_resolution_reduce_fn(void *key, void *data, void *udata)
 	if (itfq->freq >= (list->num_list + 1) / 2) {
 		cf_debug(AS_SMD, "Item freq %d", (itfq)->freq);
 
+		cf_rc_reserve(itfq->item);
 		list->merge_list->item[list->merge_list->num_items] = itfq->item;
 		list->merge_list->num_items++;
 		cf_debug(AS_SMD, "Num items in the merged list %zu", list->merge_list->num_items);
@@ -3059,8 +3066,9 @@ int as_smd_majority_consensus_merge(char *module, as_smd_item_list_t **merged_li
 		return -1;
 	}
 
+	// Key is (char *)as_smd_item_t.value, value is (as_smd_item_freq_t *).
 	shash *merge_hash = NULL;
-	if (SHASH_OK != shash_create(&merge_hash, shash_str_hash_fn, AS_SMD_MAJORITY_CONSENSUS_KEYSIZE, sizeof(as_smd_item_freq_t *), 17, SHASH_CR_MT_BIGLOCK)) {
+	if (SHASH_OK != shash_create(&merge_hash, shash_str_hash_fn, AS_SMD_MAJORITY_CONSENSUS_KEYSIZE, sizeof(as_smd_item_freq_t *), 17, 0)) {
 		cf_crash(AS_SMD, "Memory allocation for hash during merge resolution, failed ");
 	}
 
@@ -3098,7 +3106,7 @@ int as_smd_majority_consensus_merge(char *module, as_smd_item_list_t **merged_li
 			} else {
 				// Otherwise put the item in the hash.
 				item_freq = cf_malloc(sizeof(as_smd_item_freq_t));
-				item_freq->item = curitem;
+				item_freq->item = curitem; // does not hold a ref
 				item_freq->freq = 1;
 
 				if (SHASH_OK != shash_put_unique(merge_hash, key, (void *) (&item_freq))) {
