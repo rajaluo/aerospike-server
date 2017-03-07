@@ -207,34 +207,23 @@ static int32_t
 readdir_safe(DIR *dir, struct dirent *ent)
 {
 	while (true) {
-		struct dirent *res_ent;
-
-		// Glibc 2.24 deprecates readdir_r(), which causes a compiler warning.
-
-#if __GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 24)
 		errno = 0;
-		res_ent = readdir(dir);
+		struct dirent *tmp = readdir(dir);
 
-		if (res_ent != NULL) {
-			memcpy(ent, res_ent, sizeof(struct dirent));
-		}
-#else
-		errno = readdir_r(dir, ent, &res_ent);
-#endif
+		if (tmp == NULL) {
+			if (errno != 0) {
+				cf_crash(CF_MISC, "error while reading directory: %d (%s)",
+						errno, cf_strerror(errno));
+			}
 
-		if (errno != 0) {
-			cf_crash(CF_MISC, "error while reading directory: %d (%s)",
-					errno, cf_strerror(errno));
-		}
-
-		if (res_ent == NULL) {
 			return -1;
 		}
 
-		if (strcmp(res_ent->d_name, ".") == 0 || strcmp(res_ent->d_name, "..") == 0) {
+		if (strcmp(tmp->d_name, ".") == 0 || strcmp(tmp->d_name, "..") == 0) {
 			continue;
 		}
 
+		memcpy(ent, tmp, sizeof(struct dirent));
 		return 0;
 	}
 }
