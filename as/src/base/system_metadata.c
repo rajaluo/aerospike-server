@@ -2697,10 +2697,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 
 	as_smd_item_list_t *item_list_out = NULL;
 	uint32_t num_lists = g_paxos->cluster_size;
-	as_smd_item_list_t **item_lists_in = NULL;
-	if (!(item_lists_in = (as_smd_item_list_t **) cf_calloc(num_lists, sizeof(as_smd_item_list_t *)))) {
-		cf_crash(AS_SMD, "failed to allocate %u System Metadata item lists", num_lists);
-	}
+	as_smd_item_list_t *item_lists_in[num_lists];
 
 	int list_num = 0;
 	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
@@ -2829,18 +2826,13 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 		as_fabric_transact_start(node_id, msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
 	}
 
-#if 0 
-	// Apparently not necessary to do this here, but still need to make sure 
-	// the list containers do not leak.
 	// Release the item lists.
-	for (int i = 0; i < num_lists; i++) {
+	for (int i = 0; i < list_num; i++) {
 		as_smd_item_list_destroy(item_lists_in[i]);
 	}
-	cf_free(item_lists_in);
 
 	// Release the merged items list.
 	as_smd_item_list_destroy(item_list_out);
-#endif
 
 	return 0;
 }
