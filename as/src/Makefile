@@ -46,6 +46,7 @@ ifneq ($(USE_EE),1)
   BASE_SOURCES += namespace_ce.c
   BASE_SOURCES += record_ce.c
   BASE_SOURCES += security_ce.c
+  BASE_SOURCES += truncate_ce.c
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
 

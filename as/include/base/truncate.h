@@ -29,6 +29,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_shash.h"
@@ -46,7 +47,7 @@ typedef enum {
 
 typedef struct as_truncate_s {
 	uint64_t lut;
-	shash* startup_set_hash;
+	shash* startup_set_hash; // relevant only for enterprise edition
 	truncate_state state;
 	pthread_mutex_t state_lock;
 	cf_atomic32 n_threads_running;
@@ -62,6 +63,7 @@ typedef struct as_truncate_s {
 
 struct as_index_s;
 struct as_namespace_s;
+struct as_set_s;
 
 
 //==========================================================
@@ -69,6 +71,7 @@ struct as_namespace_s;
 //
 
 void as_truncate_init(struct as_namespace_s* ns);
+void as_truncate_list_cenotaphs(struct as_namespace_s* ns);
 void as_truncate_done_startup(struct as_namespace_s* ns);
 bool as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str);
 void as_truncate_undo_cmd(const char* ns_name, const char* set_name);
@@ -85,3 +88,28 @@ typedef struct truncate_hval_s {
 	uint64_t unused:23;
 	uint64_t lut:40;
 } truncate_hval;
+
+void truncate_startup_hash_init(struct as_namespace_s* ns);
+void truncate_action_startup(struct as_namespace_s* ns, const char* set_name, uint64_t lut);
+struct as_set_s* as_namespace_get_set_by_name(struct as_namespace_s* ns, const char* set_name);
+
+// TODO - promote to util when shash is cleaned up. (See also SMD.)
+static inline uint32_t
+fno_hash_fn(uint8_t* buf, uint32_t size)
+{
+	uint32_t hash = 2166136261;
+
+	while (size--) {
+		hash ^= *buf++;
+		hash *= 16777619;
+	}
+
+	return hash;
+}
+
+// TODO - make generic string hash and promote to util?
+static inline uint32_t
+truncate_hash_fn(void* key)
+{
+	return fno_hash_fn((uint8_t*)key, (uint32_t)strlen((const char*)key));
+}

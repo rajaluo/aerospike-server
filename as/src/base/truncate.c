@@ -80,16 +80,13 @@ static const uint64_t WARN_CLOCK_SKEW_MS = 1000 * 5;
 
 static shash* g_truncate_filter_hash = NULL;
 static bool g_truncate_smd_loaded = false;
-static uint64_t g_startup_clepoch_ms = 0;
 
 
 //==========================================================
 // Forward declarations & inlines.
 //
 
-as_set* as_namespace_get_set_by_name(as_namespace* ns, const char* set_name);
 as_set* as_namespace_get_set_by_id(as_namespace* ns, uint16_t set_id);
-int startup_set_hash_reduce_cb(void* key, void* data, void* udata);
 bool filter_hash_put(const as_smd_item_t* item);
 void filter_hash_delete(const as_smd_item_t* item);
 
@@ -97,9 +94,8 @@ bool truncate_smd_conflict_cb(char* module, as_smd_item_t* existing_item, as_smd
 int truncate_smd_accept_cb(char* module, as_smd_item_list_t* items, void* udata, uint32_t accept_opt);
 int truncate_smd_can_accept_cb(char* module, as_smd_item_t *item, void *udata);
 
-void action_startup(as_namespace* ns, const char* set_name, uint64_t lut);
-void action_truncate(as_namespace* ns, const char* set_name, uint64_t lut);
-void action_undo(as_namespace* ns, const char* set_name);
+void truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut);
+void truncate_action_undo(as_namespace* ns, const char* set_name);
 void truncate_all(as_namespace* ns);
 void* run_truncate(void* arg);
 void truncate_finish(as_namespace* ns);
@@ -118,27 +114,6 @@ lut_from_smd(const as_smd_item_t* item)
 	return strtoul(item->value, NULL, 10);
 }
 
-// TODO - promote to util when shash is cleaned up. (See also SMD.)
-static inline uint32_t
-fno_hash_fn(void* value, uint32_t size)
-{
-	uint32_t hash = 2166136261;
-
-	while (size--) {
-		hash ^= *(uint8_t*)value++;
-		hash *= 16777619;
-	}
-
-	return hash;
-}
-
-// TODO - make generic string hash and promote to util?
-static inline uint32_t
-truncate_hash_fn(void* key)
-{
-	return fno_hash_fn(key, (uint32_t)strlen((const char*)key));
-}
-
 
 //==========================================================
 // Public API.
@@ -147,11 +122,7 @@ truncate_hash_fn(void* key)
 void
 as_truncate_init(as_namespace* ns)
 {
-	// Create the shash used at startup. (Will be destroyed after startup.)
-	if (shash_create(&ns->truncate.startup_set_hash, truncate_hash_fn,
-			AS_SET_NAME_MAX_SIZE, sizeof(truncate_hval), 1024, 0) != SHASH_OK) {
-		cf_crash(AS_TRUNCATE, "truncate init - failed startup-set-hash create");
-	}
+	truncate_startup_hash_init(ns);
 
 	ns->truncate.state = TRUNCATE_IDLE;
 	pthread_mutex_init(&ns->truncate.state_lock, 0);
@@ -172,24 +143,6 @@ as_truncate_init(as_namespace* ns)
 			truncate_smd_can_accept_cb, NULL) != 0) {
 		cf_crash(AS_TRUNCATE, "truncate init - failed smd create module");
 	}
-}
-
-
-void
-as_truncate_done_startup(as_namespace* ns)
-{
-	// One clock call covers everything.
-	if (g_startup_clepoch_ms == 0) {
-		g_startup_clepoch_ms = cf_clepoch_milliseconds();
-	}
-
-	if (ns->truncate.lut > g_startup_clepoch_ms) {
-		cf_warning(AS_TRUNCATE, "{%s} tombstone lut %lu ms in the future",
-				ns->name,ns->truncate.lut - g_startup_clepoch_ms);
-	}
-
-	shash_reduce(ns->truncate.startup_set_hash, startup_set_hash_reduce_cb, ns);
-	shash_destroy(ns->truncate.startup_set_hash);
 }
 
 
@@ -363,33 +316,6 @@ as_namespace_get_set_by_id(as_namespace* ns, uint16_t set_id)
 }
 
 
-int
-startup_set_hash_reduce_cb(void* key, void* data, void* udata)
-{
-	as_namespace* ns = (as_namespace*)udata;
-	const char* set_name = (const char*)key;
-	truncate_hval* hval = (truncate_hval*)data;
-
-	if (hval->lut > g_startup_clepoch_ms) {
-		cf_warning(AS_TRUNCATE, "{%s|%s} tombstone lut %lu ms in the future",
-				ns->name, set_name, hval->lut - g_startup_clepoch_ms);
-	}
-
-	as_set* p_set = as_namespace_get_set_by_name(ns, set_name);
-
-	if (! p_set) {
-		cf_detail(AS_TRUNCATE, "{%s|%s} tombstone found for nonexistent set",
-				ns->name, set_name);
-		return SHASH_OK;
-	}
-
-	// Transfer the last-update-time from the hash to the vmap.
-	p_set->truncate_lut = hval->lut;
-
-	return SHASH_OK;
-}
-
-
 bool
 filter_hash_put(const as_smd_item_t* item)
 {
@@ -483,14 +409,14 @@ truncate_smd_accept_cb(char* module, as_smd_item_list_t* items, void* udata,
 			uint64_t lut = lut_from_smd(item);
 
 			if (g_truncate_smd_loaded) {
-				action_truncate(ns, set_name, lut);
+				truncate_action_do(ns, set_name, lut);
 			}
 			else {
-				action_startup(ns, set_name, lut);
+				truncate_action_startup(ns, set_name, lut);
 			}
 		}
 		else {
-			action_undo(ns, set_name);
+			truncate_action_undo(ns, set_name);
 		}
 	}
 
@@ -525,29 +451,7 @@ truncate_smd_can_accept_cb(char* module, as_smd_item_t* item, void* udata)
 //
 
 void
-action_startup(as_namespace* ns, const char* set_name, uint64_t lut)
-{
-	if (! set_name) {
-		ns->truncate.lut = lut;
-		return;
-	}
-
-	char hkey[AS_SET_NAME_MAX_SIZE] = { 0 }; // pad for consistent shash key
-
-	strcpy(hkey, set_name);
-
-	truncate_hval hval = { .cenotaph = 1, .lut = lut };
-
-	if (shash_put_unique(ns->truncate.startup_set_hash, hkey, &hval) !=
-			SHASH_OK) {
-		cf_crash(AS_TRUNCATE, "{%s|%s} failed startup-hash put", ns->name,
-				set_name);
-	}
-}
-
-
-void
-action_truncate(as_namespace* ns, const char* set_name, uint64_t lut)
+truncate_action_do(as_namespace* ns, const char* set_name, uint64_t lut)
 {
 	uint64_t now = cf_clepoch_milliseconds();
 
@@ -614,7 +518,7 @@ action_truncate(as_namespace* ns, const char* set_name, uint64_t lut)
 
 
 void
-action_undo(as_namespace* ns, const char* set_name)
+truncate_action_undo(as_namespace* ns, const char* set_name)
 {
 	if (set_name) {
 		as_set* p_set = as_namespace_get_set_by_name(ns, set_name);

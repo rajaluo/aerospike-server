@@ -3206,7 +3206,7 @@ ssd_load_devices_fn(void *udata)
 		cf_queue_push(complete_q, &complete_udata);
 		cf_rc_free(complete_rc);
 
-		ssd_cold_start_list_truncate_cenotaphs(ns);
+		as_truncate_list_cenotaphs(ns);
 		as_truncate_done_startup(ns); // set truncate last-update-times in sets' vmap
 
 		ssd_start_maintenance_threads(ssds);
@@ -3325,7 +3325,7 @@ ssd_load_devices(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 		as_storage_info_flush_ssd(ns);
 		ssd_load_devices_init_header_length(ssds);
 
-		ssd_cold_start_list_truncate_cenotaphs(ns); // all will show as cenotaph
+		as_truncate_list_cenotaphs(ns); // all will show as cenotaph
 		as_truncate_done_startup(ns);
 
 		return true;
