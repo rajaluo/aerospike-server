@@ -207,22 +207,23 @@ static int32_t
 readdir_safe(DIR *dir, struct dirent *ent)
 {
 	while (true) {
-		struct dirent *res_ent;
-		int32_t res = readdir_r(dir, ent, &res_ent);
+		errno = 0;
+		struct dirent *tmp = readdir(dir);
 
-		if (res != 0) {
-			cf_crash(CF_MISC, "error while reading directory: %d (%s)",
-					res, cf_strerror(res));
-		}
+		if (tmp == NULL) {
+			if (errno != 0) {
+				cf_crash(CF_MISC, "error while reading directory: %d (%s)",
+						errno, cf_strerror(errno));
+			}
 
-		if (res_ent == NULL) {
 			return -1;
 		}
 
-		if (strcmp(res_ent->d_name, ".") == 0 || strcmp(res_ent->d_name, "..") == 0) {
+		if (strcmp(tmp->d_name, ".") == 0 || strcmp(tmp->d_name, "..") == 0) {
 			continue;
 		}
 
+		memcpy(ent, tmp, sizeof(struct dirent));
 		return 0;
 	}
 }
