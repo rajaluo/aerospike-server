@@ -1581,94 +1581,6 @@ info_command_dump_smd(char *name, char *params, cf_dyn_buf *db)
 }
 
 /*
- *  Manipulate System Metatdata.
- */
-int
-info_command_smd_cmd(char *name, char *params, cf_dyn_buf *db)
-{
-	cf_debug(AS_INFO, "smd command received: params %s", params);
-
-	/*
-	 *	Command Format:	 "smd:cmd=<cmd>;module=<string>{node=<hexadecimal string>;key=<string>;value=<hexadecimal string>}"
-	 *
-	 *	 where <cmd> is one of:
-	 *      "create"       --  Create a new container for the given module's metadata.
-	 *      "destroy"      --  Destroy the container for the given module's metadata after deleting all the metadata within it.
-	 *      "set"          --  Add a new, or modify an existing, item of metadata in a given module.
-	 *      "delete"       --  Delete an existing item of metadata from a given module.
-	 *      "get"          --  Look up the given key in the given module's metadata.
-	 *      "init"         --  (Re-)Initialize the System Metadata module.
-	 *      "start"        --  Start up the System Metadata module for receiving Paxos state change events.
-	 *      "shutdown"     --  Terminate the System Metadata module.
-	 */
-
-	char cmd[10], module[256], node[17], key[256], value[1024];
-	int cmd_len = sizeof(cmd);
-	int module_len = sizeof(module);
-	int node_len = sizeof(node);
-	int key_len = sizeof(key);
-	int value_len = sizeof(value);
-	cf_node node_id = 0;
-
-	cmd[0] = '\0';
-	if (!as_info_parameter_get(params, "cmd", cmd, &cmd_len)) {
-		if (strcmp(cmd, "create") && strcmp(cmd, "destroy") && strcmp(cmd, "set") && strcmp(cmd, "delete") && strcmp(cmd, "get") &&
-				strcmp(cmd, "init") && strcmp(cmd, "start") && strcmp(cmd, "shutdown")) {
-			cf_warning(AS_INFO, "Unknown \"%s:\" command \"cmd\" cmdtion (received: \"%s\".)  Must be one of: {\"create\", \"destroy\", \"set\", \"delete\", \"get\", \"init\", \"start\", \"shutdown\"}.", name, cmd);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	} else {
-		cf_warning(AS_INFO, "The \"%s:\" command requires an \"cmd\" parameter", name);
-		cf_dyn_buf_append_string(db, "error");
-		return 0;
-	}
-
-	module[0] = '\0';
-	if (strcmp(cmd, "init") && strcmp(cmd, "start") && strcmp(cmd, "shutdown")) {
-		if (as_info_parameter_get(params, "module", module, &module_len)) {
-			cf_warning(AS_INFO, "The \"%s:\" command requires a \"module\" parameter", name);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-
-	if (!strcmp(cmd, "get")) {
-		node[0] = '\0';
-		if (!as_info_parameter_get(params, "node", node, &node_len)) {
-			if (cf_str_atoi_u64_x(node, &node_id, 16)) {
-				cf_warning(AS_INFO, "The \"%s:\" command \"node\" parameter must be a 64-bit hex number, not \"%s\"", name, node);
-				cf_dyn_buf_append_string(db, "error");
-				return 0;
-			}
-		}
-	}
-
-	if (!strcmp(cmd, "set") || !strcmp(cmd, "delete") || !strcmp(cmd, "get")) {
-		key[0] = '\0';
-		if (as_info_parameter_get(params, "key", key, &key_len)) {
-			cf_warning(AS_INFO, "The \"%s:\" command \"%s\" requires a \"key\" parameter", name, cmd);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-
-	if (!strcmp(cmd, "set")) {
-		value[0] = '\0';
-		if (as_info_parameter_get(params, "value", value, &value_len)) {
-			cf_warning(AS_INFO, "The \"%s:\" command \"%s\" requires a \"value\" parameter", name, cmd);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-
-	as_smd_info_cmd(cmd, node_id, module, key, value);
-	cf_dyn_buf_append_string(db, "ok");
-
-	return 0;
-}
-
-/*
  *  Print out Secondary Index info.
  */
 int
@@ -7223,7 +7135,6 @@ as_info_init()
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
-	as_info_set_command("smd", info_command_smd_cmd, PERM_SERVICE_CTRL);                      // Manipulate the System Metadata.
 	as_info_set_command("throughput", info_command_hist_track, PERM_NONE);                    // Returns throughput info.
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
