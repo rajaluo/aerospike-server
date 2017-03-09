@@ -51,8 +51,8 @@
 typedef struct cf_rchash_s rchash;
 typedef struct cf_rchash_elem_v_s rchash_elem_v;
 typedef struct cf_rchash_elem_f_s rchash_elem_f;
-typedef uint32_t (*rchash_hash_fn) (void *value, uint32_t value_len);
-typedef int (*rchash_reduce_fn) (void *key, uint32_t keylen, void *object, void *udata);
+typedef uint32_t (*rchash_hash_fn) (const void *value, uint32_t value_len);
+typedef int (*rchash_reduce_fn) (const void *key, uint32_t keylen, void *object, void *udata);
 typedef void (*rchash_destructor_fn) (void *object);
 
 /******************************************************************************

@@ -3035,7 +3035,7 @@ as_query_set_priority(uint64_t trid, uint32_t priority)
 }
 
 int
-as_query_list_job_reduce_fn (void *key, uint32_t keylen, void *object, void *udata)
+as_query_list_job_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 	as_query_transaction * qtr = (as_query_transaction*)object;
 	cf_dyn_buf * db = (cf_dyn_buf*) udata;
@@ -3139,7 +3139,7 @@ as_query_get_jobstat(uint64_t trid)
 
 
 int
-as_mon_query_jobstat_reduce_fn (void *key, uint32_t keylen, void *object, void *udata)
+as_mon_query_jobstat_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 	as_query_transaction * qtr = (as_query_transaction*)object;
 	query_jobstat *job_pool = (query_jobstat*) udata;
@@ -3233,9 +3233,9 @@ as_query_gconfig_default(as_config *c)
 }
 
 uint32_t
-query_job_trid_hash(void *value, uint32_t keylen)
+query_job_trid_hash(const void *value, uint32_t keylen)
 {
-	return( *(uint32_t *)value);
+	return( *(const uint32_t *)value);
 }
 
 

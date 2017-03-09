@@ -87,11 +87,11 @@ COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 // Forward Declarations.
 //
 
-uint32_t rw_request_hash_fn(void* value, uint32_t value_len);
+uint32_t rw_request_hash_fn(const void* value, uint32_t value_len);
 transaction_status handle_hot_key(rw_request* rw0, as_transaction* tr);
 
 void* run_retransmit(void* arg);
-int retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata);
+int retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata);
 void update_retransmit_stats(const rw_request* rw);
 
 int rw_msg_cb(cf_node id, msg* m, void* udata);
@@ -208,7 +208,7 @@ rw_request_hash_dump()
 //
 
 uint32_t
-rw_request_hash_fn(void* value, uint32_t value_len)
+rw_request_hash_fn(const void* value, uint32_t value_len)
 {
 	rw_request_hkey* hkey = (rw_request_hkey*)value;
 
@@ -281,7 +281,7 @@ run_retransmit(void* arg)
 
 
 int
-retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
+retransmit_reduce_fn(const void* key, uint32_t keylen, void* data, void* udata)
 {
 	rw_request* rw = data;
 	now_times* now = (now_times*)udata;

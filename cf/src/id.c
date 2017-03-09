@@ -44,15 +44,15 @@ const cf_digest cf_digest_zero = { .digest = { 0 } };
 uint32_t
 cf_nodeid_shash_fn(void *value)
 {
-	cf_node id = *(cf_node *)value;
+	cf_node id = *(const cf_node *)value;
 	return (uint32_t)(id >> 32) | (uint32_t)id;
 }
 
 uint32_t
-cf_nodeid_rchash_fn(void *value, uint32_t len)
+cf_nodeid_rchash_fn(const void *value, uint32_t len)
 {
 	(void)len;
-	return cf_nodeid_shash_fn(value);
+	return cf_nodeid_shash_fn((void *)value);
 }
 
 char *

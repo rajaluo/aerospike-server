@@ -940,7 +940,7 @@ static int as_smd_send_event(as_smd_t *smd, as_smd_event_t *evt)
 /*
  *  Hash the given string using the 32-bit FNV-1a hash algorithm for use with rchash tables.
  */
-static uint32_t str_hash_fn(void *value, uint32_t value_len)
+static uint32_t str_hash_fn(const void *value, uint32_t value_len)
 {
 	uint32_t hash = 2166136261;
 
@@ -1303,7 +1303,7 @@ int as_smd_get_metadata(char *module, char *key, as_smd_get_cb cb, void *udata)
 /*
  *  Reduce function to print a single metadata item.
  */
-static int as_smd_metadata_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_metadata_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *smd_key = (char *) key; // (Not used.)
 	as_smd_item_t *item = (as_smd_item_t *) object;
@@ -1316,9 +1316,9 @@ static int as_smd_metadata_reduce_fn(void *key, uint32_t keylen, void *object, v
 /*
  *  Reduce function to print info. about a single System Metadata module.
  */
-static int as_smd_dump_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_dump_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
-	char *module = (char *) key;
+	const char *module = (const char *) key;
 	as_smd_module_t *module_obj = (as_smd_module_t *) object;
 	int *module_num = (int *) udata;
 	int num_items = 0;
@@ -1621,7 +1621,7 @@ static int as_smd_module_restore(as_smd_module_t *module_obj)
 /*
  *  Serialize a single metadata item into a JSON object and add it to the array passed in via "udata".
  */
-static int as_smd_serialize_into_json_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_serialize_into_json_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *smd_key = (char *) key; // (Not used.)
 	as_smd_item_t *item = (as_smd_item_t *) object;
@@ -1844,7 +1844,7 @@ static int as_smd_module_destroy(as_smd_t *smd, as_smd_cmd_t *cmd)
 /*
  *  Get or create a new System Metadata fabric msg to perform the given operation on the given metadata items.
  */
-static msg *as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, char *module_name, uint32_t accept_opt)
+static msg *as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const char *module_name, uint32_t accept_opt)
 {
 	msg *msg = NULL;
 
@@ -2142,7 +2142,7 @@ typedef struct as_smd_metadata_get_state_s {
 /*
  *  Reduce function to count one metadata item.
  */
-static int as_smd_count_matching_item_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_count_matching_item_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *smd_key = (char *) key; // (Not used.)
 	as_smd_item_t *item = (as_smd_item_t *) object;
@@ -2159,7 +2159,7 @@ static int as_smd_count_matching_item_reduce_fn(void *key, uint32_t keylen, void
 /*
  *  Reduce function to return a single metadata option, if it matches the pattern.
  */
-static int as_smd_metadata_get_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_metadata_get_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *smd_key = (char *) key; // (Not used.)
 	as_smd_item_t *item = (as_smd_item_t *) object;
@@ -2179,9 +2179,9 @@ static int as_smd_metadata_get_reduce_fn(void *key, uint32_t keylen, void *objec
 /*
  *  Reduce function to perform a given reduce function on each matching module.
  */
-static int as_smd_matching_module_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_matching_module_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
-	char *module = (char *) key;
+	const char *module = (const char *) key;
 	as_smd_module_t *module_obj = (as_smd_module_t *) object;
 	as_smd_metadata_get_state_t *get_state = (as_smd_metadata_get_state_t *) udata;
 
@@ -2284,7 +2284,7 @@ static void as_smd_terminate(as_smd_t *smd)
 /*
  *  Reduce function to count one metadata item.
  */
-static int as_smd_count_item_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_count_item_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *smd_key = (char *) key; // (Not used.)
 //	as_smd_item_t *item = (as_smd_item_t *) object; // (Not used.)
@@ -2298,7 +2298,7 @@ static int as_smd_count_item_reduce_fn(void *key, uint32_t keylen, void *object,
 /*
  *  Reduce function to count metadata items in one module.
  */
-static int as_smd_module_count_items_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_module_count_items_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *module = (char *) key; // (Not used.)
 	as_smd_module_t *module_obj = (as_smd_module_t *) object;
@@ -2313,7 +2313,7 @@ static int as_smd_module_count_items_reduce_fn(void *key, uint32_t keylen, void 
 /*
  *  Reduce function to serialize one metadata item.
  */
-static int as_smd_item_serialize_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_item_serialize_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *smd_key = (char *) key; // (Not used.)
 	as_smd_item_t *item = (as_smd_item_t *) object;
@@ -2330,7 +2330,7 @@ static int as_smd_item_serialize_reduce_fn(void *key, uint32_t keylen, void *obj
 /*
  *  Reduce function to serialize all of a module's metadata items.
  */
-static int as_smd_module_serialize_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_module_serialize_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *module = (char *) key; // (Not used.)
 	as_smd_module_t *module_obj = (as_smd_module_t *) object;
@@ -2407,7 +2407,7 @@ static int as_smd_scoreboard_reduce_delete_fn(void *key, void *data, void *udata
 /*
  *  Remove the metadata item from the hash table.
  */
-static int as_smd_reduce_delete_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_reduce_delete_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 	return RCHASH_REDUCE_DELETE;
 }
@@ -2415,7 +2415,7 @@ static int as_smd_reduce_delete_fn(void *key, uint32_t keylen, void *object, voi
 /*
  *  Delete all of this module's external metadata items.
  */
-static int as_smd_delete_external_metadata_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_delete_external_metadata_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *module = (char *) key; // (Not used.)
 	as_smd_module_t *module_obj = (as_smd_module_t *) object;
@@ -2659,9 +2659,9 @@ typedef struct as_smd_node_item_search_s {
 /*
  *  Reduce function to find and add metadata items from a given node to an item list.
  */
-static int as_smd_item_list_for_node_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_item_list_for_node_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
-	as_smd_external_item_key_t *item_key = (as_smd_external_item_key_t *) key;
+	const as_smd_external_item_key_t *item_key = (const as_smd_external_item_key_t *) key;
 	as_smd_item_t *item = (as_smd_item_t *) object;
 	as_smd_node_item_search_t *search = (as_smd_node_item_search_t *) udata;
 
@@ -2679,7 +2679,7 @@ static int as_smd_item_list_for_node_reduce_fn(void *key, uint32_t keylen, void 
 /*
  *  Reduce function to create a list of metadata items from an rchash table.
  */
-static int as_smd_list_items_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_list_items_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
 //	char *item_key = (char *) key; // (Not used.)
 	as_smd_item_t *item = (as_smd_item_t *) object;
@@ -2700,9 +2700,9 @@ static int as_smd_list_items_reduce_fn(void *key, uint32_t keylen, void *object,
 /*
  *  Invoke the merge policy callback function for this module.
  */
-static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
-	char *module = (char *) key;
+	const char *module = (const char *) key;
 	as_smd_module_t *module_obj = (as_smd_module_t *) object;
 	as_smd_t *smd = (as_smd_t *) udata;
 
@@ -2793,7 +2793,7 @@ static int as_smd_invoke_merge_reduce_fn(void *key, uint32_t keylen, void *objec
 
 						if (module_obj->conflict_cb) {
 							// Use registered callback to determine winner.
-							existing_wins = (module_obj->conflict_cb)(module, existing_item, new_item, module_obj->conflict_udata);
+							existing_wins = (module_obj->conflict_cb)((char *)module, existing_item, new_item, module_obj->conflict_udata);
 						} else {
 							// Otherwise, choose a winner first by the highest generation and second by the highest timestamp.
 							existing_wins = (existing_item->generation > new_item->generation) ||
@@ -2929,7 +2929,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 	return retval;
 }
 
-static int metadata_local_deleteall_fn(void * key, uint32_t key_len, void *object, void *udata)
+static int metadata_local_deleteall_fn(const void *key, uint32_t key_len, void *object, void *udata)
 {
 	return RCHASH_REDUCE_DELETE;
 }
@@ -3070,7 +3070,7 @@ static void incr_item_frequency_shash_update(void *key, void *value_old, void *v
  *      cluster_size   : No. of active nodes in the cluster
  *      udata          : User specific data for callback
  */
-int as_smd_majority_consensus_merge(char *module, as_smd_item_list_t **merged_list,
+int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **merged_list,
 									as_smd_item_list_t **lists_to_merge, size_t num_list, void *udata)
 {
 	cf_debug(AS_SMD, "Executing majority consensus merge policy for module %s ", module);

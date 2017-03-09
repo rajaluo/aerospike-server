@@ -188,7 +188,7 @@ as_migrate_state emigration_send_done(emigration *emig);
 
 // Immigration.
 void *run_immigration_reaper(void *unused);
-int immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object, void *udata);
+int immigration_reaper_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
 
 // Migrate fabric message handling.
 int migrate_receive_msg_cb(cf_node src, msg *m, void *udata);
@@ -200,8 +200,8 @@ void emigration_handle_insert_ack(cf_node src, msg *m);
 void emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op);
 
 // Info API helpers.
-int emigration_dump_reduce_fn(void *key, uint32_t keylen, void *object, void *udata);
-int immigration_dump_reduce_fn(void *key, uint32_t keylen, void *object, void *udata);
+int emigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
+int immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
 
 // LDT-related.
 bool as_ldt_precord_is_esr(const pickled_record *pr);
@@ -213,9 +213,9 @@ int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, ms
 
 
 static inline uint32_t
-emigration_hashfn(void *value, uint32_t value_len)
+emigration_hashfn(const void *value, uint32_t value_len)
 {
-	return *(uint32_t *)value;
+	return *(const uint32_t *)value;
 }
 
 static inline uint32_t
@@ -225,9 +225,9 @@ emigration_insert_hashfn(void *key)
 }
 
 static inline uint32_t
-immigration_hashfn(void *value, uint32_t value_len)
+immigration_hashfn(const void *value, uint32_t value_len)
 {
-	return ((immigration_hkey *)value)->emig_id;
+	return ((const immigration_hkey *)value)->emig_id;
 }
 
 static inline uint32_t
@@ -1143,7 +1143,7 @@ run_immigration_reaper(void *unused)
 
 
 int
-immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
+immigration_reaper_reduce_fn(const void *key, uint32_t keylen, void *object,
 		void *udata)
 {
 	immigration *immig = (immigration *)object;
@@ -1727,9 +1727,10 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op)
 //
 
 int
-emigration_dump_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
+emigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
+		void *udata)
 {
-	uint32_t emig_id = *(uint32_t *)key;
+	uint32_t emig_id = *(const uint32_t *)key;
 	emigration *emig = (emigration *)object;
 	int *item_num = (int *)udata;
 
@@ -1743,10 +1744,10 @@ emigration_dump_reduce_fn(void *key, uint32_t keylen, void *object, void *udata)
 
 
 int
-immigration_dump_reduce_fn(void *key, uint32_t keylen, void *object,
+immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
 		void *udata)
 {
-	immigration_hkey *hkey = (immigration_hkey *)key;
+	const immigration_hkey *hkey = (const immigration_hkey *)key;
 	immigration *immig = (immigration *)object;
 	int *item_num = (int *)udata;
 

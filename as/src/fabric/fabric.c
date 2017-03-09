@@ -247,7 +247,7 @@ static uint32_t g_fabric_connect_limit[AS_FABRIC_N_CHANNELS];
 // Support functions.
 static void send_entry_insert(send_entry **se_pp, send_entry *se);
 
-static int fabric_get_node_list_fn(void *key, uint32_t keylen, void *data, void *udata);
+static int fabric_get_node_list_fn(const void *key, uint32_t keylen, void *data, void *udata);
 static uint32_t fabric_get_node_list(as_node_list *nl);
 static int fabric_node_disconnect_reduce_fn(void *key, void *data, void *udata);
 static void fabric_node_disconnect(cf_node node_id);
@@ -316,7 +316,7 @@ static void *run_fabric_accept(void *arg);
 static void *run_fabric_node_health(void *arg);
 
 // Ticker helpers.
-static int fabric_rate_node_reduce_fn(void *key, uint32_t keylen, void *data, void *udata);
+static int fabric_rate_node_reduce_fn(const void *key, uint32_t keylen, void *data, void *udata);
 static int fabric_rate_fc_reduce_fn(void *key, void *data, void *udata);
 
 // Heartbeat.
@@ -713,7 +713,7 @@ send_entry_insert(send_entry **se_pp, send_entry *se)
 }
 
 static int
-fabric_get_node_list_fn(void *key, uint32_t keylen, void *data, void *udata)
+fabric_get_node_list_fn(const void *key, uint32_t keylen, void *data, void *udata)
 {
 	as_node_list *nl = (as_node_list *)udata;
 
@@ -721,7 +721,7 @@ fabric_get_node_list_fn(void *key, uint32_t keylen, void *data, void *udata)
 		return 0;
 	}
 
-	nl->nodes[nl->sz] = *(cf_node *)key;
+	nl->nodes[nl->sz] = *(const cf_node *)key;
 	nl->sz++;
 
 	return 0;
@@ -2287,7 +2287,7 @@ run_fabric_accept(void *arg)
 }
 
 static int
-fabric_node_health_reduce_fn(void *key, uint32_t keylen, void *data,
+fabric_node_health_reduce_fn(const void *key, uint32_t keylen, void *data,
 		void *udata)
 {
 	fabric_node *node = (fabric_node *)data;
@@ -2317,7 +2317,7 @@ run_fabric_node_health(void *arg)
 }
 
 static int
-fabric_rate_node_reduce_fn(void *key, uint32_t keylen, void *data, void *udata)
+fabric_rate_node_reduce_fn(const void *key, uint32_t keylen, void *data, void *udata)
 {
 	fabric_node *node = (fabric_node *)data;
 	fabric_rate *rate = (fabric_rate *)udata;
@@ -2527,12 +2527,12 @@ static rchash *g_fabric_transact_recv_hash = 0;
 static void fabric_transact_xmit_destructor(void *object);
 static void fabric_transact_xmit_release(fabric_transact_xmit *ft);
 static void fabric_transact_recv_destructor(void *object);
-static uint32_t fabric_tranact_xmit_hash_fn(void *value, uint32_t value_len);
-static uint32_t fabric_tranact_recv_hash_fn(void *value, uint32_t value_len);
+static uint32_t fabric_tranact_xmit_hash_fn(const void *value, uint32_t value_len);
+static uint32_t fabric_tranact_recv_hash_fn(const void *value, uint32_t value_len);
 static int fabric_transact_msg_fn(cf_node node_id, msg *m, void *udata);
 static void *run_fabric_transact(void *arg);
 static void ll_ftx_destructor_fn(cf_ll_element *e);
-static int fabric_transact_xmit_reduce_fn(void *key, uint32_t keylen, void *o, void *udata);
+static int fabric_transact_xmit_reduce_fn(const void *key, uint32_t keylen, void *o, void *udata);
 static int ll_ftx_reduce_fn(cf_ll_element *le, void *udata);
 
 inline static transact_code
@@ -2769,7 +2769,7 @@ fabric_transact_msg_fn(cf_node node_id, msg *m, void *udata)
 }
 
 static uint32_t
-fabric_tranact_xmit_hash_fn(void *value, uint32_t value_len)
+fabric_tranact_xmit_hash_fn(const void *value, uint32_t value_len)
 {
 	// TODO: the input is a transaction id which really is just used directly,
 	// but is depends on the size and whether we've got "masking bits".
@@ -2789,7 +2789,7 @@ fabric_transact_xmit_destructor(void *object)
 }
 
 static uint32_t
-fabric_tranact_recv_hash_fn(void *value, uint32_t value_len)
+fabric_tranact_recv_hash_fn(const void *value, uint32_t value_len)
 {
 	// TODO: the input is a transaction id which really is just used directly,
 	// but is depends on the size and whether we've got "masking bits".
@@ -2847,7 +2847,7 @@ ll_ftx_destructor_fn(cf_ll_element *e)
 }
 
 static int
-fabric_transact_xmit_reduce_fn(void *key, uint32_t keylen, void *o, void *udata)
+fabric_transact_xmit_reduce_fn(const void *key, uint32_t keylen, void *o, void *udata)
 {
 	fabric_transact_xmit *ftx = (fabric_transact_xmit *)o;
 	int op = 0;
