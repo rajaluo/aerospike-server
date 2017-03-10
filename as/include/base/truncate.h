@@ -95,7 +95,7 @@ struct as_set_s* as_namespace_get_set_by_name(struct as_namespace_s* ns, const c
 
 // TODO - promote to util when shash is cleaned up. (See also SMD.)
 static inline uint32_t
-fno_hash_fn(uint8_t* buf, uint32_t size)
+fno_hash_fn(const uint8_t* buf, uint32_t size)
 {
 	uint32_t hash = 2166136261;
 
@@ -109,7 +109,7 @@ fno_hash_fn(uint8_t* buf, uint32_t size)
 
 // TODO - make generic string hash and promote to util?
 static inline uint32_t
-truncate_hash_fn(void* key)
+truncate_hash_fn(const void* key)
 {
-	return fno_hash_fn((uint8_t*)key, (uint32_t)strlen((const char*)key));
+	return fno_hash_fn((const uint8_t*)key, (uint32_t)strlen((const char*)key));
 }

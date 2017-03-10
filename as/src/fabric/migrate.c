@@ -167,7 +167,7 @@ static shash *g_immigration_ldt_version_hash;
 // Various initializers and destructors.
 void emigration_init(emigration *emig);
 void emigration_destroy(void *parm);
-int emigration_reinsert_destroy_reduce_fn(void *key, void *data, void *udata);
+int emigration_reinsert_destroy_reduce_fn(const void *key, void *data, void *udata);
 void immigration_destroy(void *parm);
 void pickled_record_destroy(pickled_record *pr);
 
@@ -182,7 +182,7 @@ as_migrate_state emigrate_tree(emigration *emig);
 void *run_emigration_reinserter(void *arg);
 void emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata);
 bool emigrate_record(emigration *emig, msg *m);
-int emigration_reinsert_reduce_fn(void *key, void *data, void *udata);
+int emigration_reinsert_reduce_fn(const void *key, void *data, void *udata);
 as_migrate_state emigration_send_start(emigration *emig);
 as_migrate_state emigration_send_done(emigration *emig);
 
@@ -219,9 +219,9 @@ emigration_hashfn(const void *value, uint32_t value_len)
 }
 
 static inline uint32_t
-emigration_insert_hashfn(void *key)
+emigration_insert_hashfn(const void *key)
 {
-	return *(uint32_t *)key;
+	return *(const uint32_t *)key;
 }
 
 static inline uint32_t
@@ -231,9 +231,9 @@ immigration_hashfn(const void *value, uint32_t value_len)
 }
 
 static inline uint32_t
-immigration_ldt_version_hashfn(void *key)
+immigration_ldt_version_hashfn(const void *key)
 {
-	return *(uint32_t *)key;
+	return *(const uint32_t *)key;
 }
 
 
@@ -492,7 +492,7 @@ emigration_destroy(void *parm)
 
 
 int
-emigration_reinsert_destroy_reduce_fn(void *key, void *data, void *udata)
+emigration_reinsert_destroy_reduce_fn(const void *key, void *data, void *udata)
 {
 	emigration_reinsert_ctrl *ri_ctrl = (emigration_reinsert_ctrl *)data;
 
@@ -970,7 +970,7 @@ emigrate_record(emigration *emig, msg *m)
 
 
 int
-emigration_reinsert_reduce_fn(void *key, void *data, void *udata)
+emigration_reinsert_reduce_fn(const void *key, void *data, void *udata)
 {
 	emigration_reinsert_ctrl *ri_ctrl = (emigration_reinsert_ctrl *)data;
 	as_namespace *ns = ri_ctrl->emig->rsv.ns;

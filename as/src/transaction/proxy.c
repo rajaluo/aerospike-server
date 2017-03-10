@@ -140,7 +140,7 @@ typedef struct proxy_request_s {
 //
 
 void* run_proxy_retransmit(void* arg);
-int proxy_retransmit_reduce_fn(void* key, void* data, void* udata);
+int proxy_retransmit_reduce_fn(const void* key, void* data, void* udata);
 int proxy_retransmit_send(proxy_request* pr);
 
 int proxy_msg_cb(cf_node src, msg* m, void* udata);
@@ -157,9 +157,9 @@ void shipop_handle_client_response(msg* m, rw_request* rw);
 void shipop_timeout_handler(proxy_request* pr);
 
 static inline uint32_t
-proxy_hash_fn(void* value)
+proxy_hash_fn(const void* value)
 {
-	return *(uint32_t*)value;
+	return *(const uint32_t*)value;
 }
 
 static inline void
@@ -744,7 +744,7 @@ run_proxy_retransmit(void* arg)
 
 
 int
-proxy_retransmit_reduce_fn(void* key, void* data, void* udata)
+proxy_retransmit_reduce_fn(const void* key, void* data, void* udata)
 {
 	proxy_request* pr = data;
 	now_times* now = (now_times*)udata;

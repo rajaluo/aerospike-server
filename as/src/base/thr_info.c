@@ -4587,7 +4587,7 @@ typedef struct port_savings_context_s {
 shash *g_info_node_info_history_hash = 0;
 shash *g_info_node_info_hash = 0;
 
-int info_node_info_reduce_fn(void *key, void *data, void *udata);
+int info_node_info_reduce_fn(const void *key, void *data, void *udata);
 
 static char *
 format_services_string(const char **addrs, uint32_t n_addrs, cf_ip_port port, char sep)
@@ -4942,10 +4942,10 @@ typedef struct reduce_context_s {
 } reduce_context;
 
 int32_t
-info_paxos_event_reduce_fn(void *key, void *data, void *udata)
+info_paxos_event_reduce_fn(const void *key, void *data, void *udata)
 {
 	reduce_context *cont = udata;
-	cf_node *node = key;
+	const cf_node *node = key;
 	info_node_info *info = data;
 
 	for (int32_t i = 0; cont->succession[i] != 0; ++i) {
@@ -5069,9 +5069,9 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node *s
 // This goes in a reduce function for retransmitting my information to another node
 
 int
-info_node_info_reduce_fn(void *key, void *data, void *udata)
+info_node_info_reduce_fn(const void *key, void *data, void *udata)
 {
-	cf_node *node = (cf_node *)key;
+	const cf_node *node = (const cf_node *)key;
 	info_node_info *infop = (info_node_info *) data;
 
 	if (infop->generation < g_serv_gen) {
@@ -5323,7 +5323,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 //
 
 int32_t
-info_get_x_legacy_reduce_fn(void *key, void *data, void *udata)
+info_get_x_legacy_reduce_fn(const void *key, void *data, void *udata)
 {
 	services_printer *sp = udata;
 	info_node_info *info = data;
@@ -5384,7 +5384,7 @@ info_get_alt_addr(char *name, cf_dyn_buf *db)
 }
 
 int32_t
-info_port_savings_reduce_fn(void *key, void *data, void *udata)
+info_port_savings_reduce_fn(const void *key, void *data, void *udata)
 {
 	port_savings_context *psc = udata;
 	info_node_info *info = data;
@@ -5463,10 +5463,10 @@ strip_service_suffixes(const char *services, const char *strip)
 }
 
 int32_t
-info_get_services_x_reduce_fn(void *key, void *data, void *udata)
+info_get_services_x_reduce_fn(const void *key, void *data, void *udata)
 {
 	services_printer *sp = udata;
-	cf_node *node = key;
+	const cf_node *node = key;
 	info_node_info *info = data;
 
 	if (info->last_changed <= sp->since) {
@@ -5558,10 +5558,10 @@ info_get_services_x(shash *h, info_node_proj_fn proj, cf_dyn_buf *db, uint64_t s
 }
 
 int32_t
-info_get_services_x_gone_reduce_fn(void *key, void *data, void *udata)
+info_get_services_x_gone_reduce_fn(const void *key, void *data, void *udata)
 {
 	services_printer *sp = udata;
-	cf_node *node = key;
+	const cf_node *node = key;
 	info_node_info *info = data;
 
 	if (info->last_changed <= sp->since || sp->proj(info) == NULL) {
@@ -5730,7 +5730,7 @@ info_get_services_generation(char *name, cf_dyn_buf *db)
 // aren't present in g_info_node_info_hash.
 //
 int
-history_purge_reduce_fn(void *key, void *data, void *udata)
+history_purge_reduce_fn(const void *key, void *data, void *udata)
 {
 	return SHASH_OK == shash_get(g_info_node_info_hash, key, NULL) ? SHASH_OK : SHASH_REDUCE_DELETE;
 }

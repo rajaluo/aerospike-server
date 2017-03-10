@@ -118,7 +118,7 @@ static bool g_ai_initialized = false;
  * shash hash function
  */
 static inline uint32_t
-as_sindex__dict_hash_fn(void* p_key)
+as_sindex__dict_hash_fn(const void* p_key)
 {
 	return (uint32_t)cf_hash_fnv(p_key, sizeof(uint32_t));
 }

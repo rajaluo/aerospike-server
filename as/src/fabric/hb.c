@@ -1664,7 +1664,7 @@ static void channel_socket_register(cf_socket* socket, bool is_multicast, bool i
 static void channel_accept_connection(cf_socket* lsock);
 static as_hb_channel_msg_read_status channel_compressed_message_parse(msg* msg, void* buffer, int buffer_content_len);
 static void channel_endpoint_find_iterate_fn(const as_endpoint* endpoint, void* udata);
-static int channel_endpoint_search_reduce(void* key, void* data, void* udata);
+static int channel_endpoint_search_reduce(const void* key, void* data, void* udata);
 static bool channel_endpoint_is_connected(as_endpoint_list* endpoint_list);
 static as_hb_channel_msg_read_status channel_multicast_msg_read(cf_socket* socket, msg* msg);
 static as_hb_channel_msg_read_status channel_mesh_msg_read(cf_socket* socket, msg* msg);
@@ -1686,7 +1686,7 @@ static void channel_multicast_listening_socks_register(cf_sockets* listening_soc
 static void channel_multicast_listening_socks_deregister(cf_sockets* listening_sockets);
 static void channel_init();
 static void channel_start();
-static int channel_sockets_get_reduce(void* key, void* data, void* udata);
+static int channel_sockets_get_reduce(const void* key, void* data, void* udata);
 static void channel_stop();
 static int channel_mesh_msg_send(cf_socket* socket, byte* buff, size_t buffer_length);
 static int channel_multicast_msg_send(cf_socket* socket, byte* buff, size_t buffer_length);
@@ -1694,10 +1694,10 @@ static bool channel_msg_is_compression_required(msg* msg, int wire_size, int mtu
 static int channel_msg_buffer_size_get(int wire_size, int mtu);
 static int channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu, uint8_t* buffer, size_t buffer_len);
 static int channel_msg_unicast(cf_node dest, msg* msg);
-static int channel_msg_broadcast_reduce(void* key, void* data, void* udata);
+static int channel_msg_broadcast_reduce(const void* key, void* data, void* udata);
 static int channel_msg_broadcast(msg* msg);
 static void channel_clear();
-static int channel_dump_reduce(void* key, void* data, void* udata);
+static int channel_dump_reduce(const void* key, void* data, void* udata);
 static void channel_dump(bool verbose);
 
 static bool mesh_is_running();
@@ -1709,21 +1709,21 @@ static void mesh_tend_udata_capacity_ensure(as_hb_mesh_tend_reduce_udata* tend_r
 static void mesh_node_status_change(as_hb_mesh_node* mesh_node, as_hb_mesh_node_status new_status);
 static void mesh_seed_node_real_nodeid_set(as_hb_mesh_node* mesh_node, as_hb_mesh_node_key* existing_node_key, cf_node nodeid, as_hb_mesh_node_status new_status);
 static void mesh_listening_sockets_close();
-static int mesh_seed_host_list_reduce(void* key, void* data, void* udata);
+static int mesh_seed_host_list_reduce(const void* key, void* data, void* udata);
 static void mesh_seed_host_list_get(cf_dyn_buf* db);
 static void mesh_stop();
 static int mesh_node_endpoint_list_fill(as_hb_mesh_node* mesh_node);
-static int mesh_tend_reduce(void* key, void* data, void* udata);
+static int mesh_tend_reduce(const void* key, void* data, void* udata);
 void* mesh_tender(void* arg);
 static void mesh_node_add_update(as_hb_mesh_node_key* mesh_node_key, as_hb_mesh_node* mesh_node, char* add_error_message);
 static void mesh_node_destroy(as_hb_mesh_node* mesh_node);
 static void mesh_node_delete_no_destroy(as_hb_mesh_node_key* mesh_node_key, char* delete_error_message);
 static void mesh_node_delete(as_hb_mesh_node_key* mesh_node_key, char* delete_error_message);
 void mesh_endpoint_addr_find_iterate(const as_endpoint* endpoint, void* udata);
-static int mesh_node_endpoint_addr_find_reduce(void* key, void* data, void* udata);
+static int mesh_node_endpoint_addr_find_reduce(const void* key, void* data, void* udata);
 static int mesh_node_endpoint_addr_find_exclude(cf_sock_addr* endpoint_addr, as_hb_mesh_node_key* exclude_key, as_hb_mesh_node_key* key);
 static int mesh_node_endpoint_addr_find(cf_sock_addr* endpoint_addr, as_hb_mesh_node_key* key);
-static int mesh_node_endpoint_list_find_reduce(void* key, void* data, void* udata);
+static int mesh_node_endpoint_list_find_reduce(const void* key, void* data, void* udata);
 static int mesh_node_endpoint_list_overlapping_find_exclude(as_endpoint_list* endpoint_list, as_hb_mesh_node_key* exclude_key, as_hb_mesh_node_key* key);
 static int mesh_node_endpoint_list_overlapping_find(as_endpoint_list* endpoint_list, as_hb_mesh_node_key* key);
 static bool mesh_node_is_discovered(cf_node nodeid);
@@ -1746,12 +1746,12 @@ static void mesh_seed_node_add(as_hb_mesh_node* new_node);
 static int mesh_tip(char* host, int port);
 static void mesh_channel_event_process(as_hb_channel_event* event);
 static void mesh_init();
-static int mesh_free_node_data_reduce(void* key, void* data, void* udata);
-static int mesh_tip_clear_reduce(void* key, void* data, void* udata);
+static int mesh_free_node_data_reduce(const void* key, void* data, void* udata);
+static int mesh_tip_clear_reduce(const void* key, void* data, void* udata);
 static void mesh_clear();
 static void mesh_listening_sockets_open();
 static void mesh_start();
-static int mesh_dump_reduce(void* key, void* data, void* udata);
+static int mesh_dump_reduce(const void* key, void* data, void* udata);
 static void mesh_dump(bool verbose);
 
 static int multicast_published_endpoint_list_refresh(bool is_legacy);
@@ -1778,11 +1778,11 @@ static bool hb_input_protocol_is_legacy(as_hb_protocol protocol);
 static bool hb_protocol_is_legacy();
 static cf_clock hb_node_depart_time(cf_clock detect_time);
 static bool hb_is_mesh();
-static void hb_event_queue(as_hb_event_type event_type, cf_node* nodes, int node_count);
+static void hb_event_queue(as_hb_event_type event_type, const cf_node* nodes, int node_count);
 static void hb_event_publish_pending();
-static int hb_adjacency_free_data_reduce(void* key, void* data, void* udata);
+static int hb_adjacency_free_data_reduce(const void* key, void* data, void* udata);
 static void hb_clear();
-static int hb_adjacency_iterate_reduce(void* key, void* data, void* udata);
+static int hb_adjacency_iterate_reduce(const void* key, void* data, void* udata);
 static void hb_plugin_set_fn(msg* msg);
 static void hb_plugin_parse_data_fn(msg* msg, cf_node source, as_hb_plugin_node_data* plugin_data);
 static msg* hb_msg_get();
@@ -1795,7 +1795,7 @@ static int hb_adjacent_node_get(cf_node nodeid, as_hb_adjacent_node* adjacent_no
 static void hb_adjacent_node_plugin_data_get(as_hb_adjacent_node* adjacent_node, as_hb_plugin_id plugin_id, void** plugin_data, size_t* plugin_data_size);
 static bool hb_node_has_expired(cf_node nodeid, as_hb_adjacent_node* adjacent_node);
 static void hb_adjacent_node_destroy(as_hb_adjacent_node* adjacent_node);
-static int hb_adjacency_tend_reduce(void* key, void* data, void* udata);
+static int hb_adjacency_tend_reduce(const void* key, void* data, void* udata);
 void* hb_adjacency_tender(void* arg);
 static void hb_tx_start();
 static void hb_tx_stop();
@@ -1811,11 +1811,11 @@ static void hb_channel_on_msg_rcvd(as_hb_channel_event* event);
 static void hb_handle_cluster_name_mismatch(as_hb_channel_event* event);
 static void hb_channel_event_process(as_hb_channel_event* event);
 static void hb_mode_dump(bool verbose);
-static int hb_dump_reduce(void* key, void* data, void* udata);
+static int hb_dump_reduce(const void* key, void* data, void* udata);
 static void hb_dump(bool verbose);
 static void hb_adjacency_graph_invert(cf_vector* nodes, uint8_t** inverted_graph);
 static void hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict);
-static int hb_plugin_data_iterate_reduce(void* key, void* data, void* udata);
+static int hb_plugin_data_iterate_reduce(const void* key, void* data, void* udata);
 void hb_plugin_data_iterate_all(as_hb_plugin_id pluginid, as_hb_plugin_data_iterate_fn iterate_fn, void* udata);
 
 /*
@@ -2659,11 +2659,11 @@ as_hb_is_alive(cf_node nodeid)
  * but part of the adjacency list.
  */
 static int
-hb_new_nodes_find_reduce(void* key, void* data, void* udata)
+hb_new_nodes_find_reduce(const void* key, void* data, void* udata)
 {
 	as_hb_find_new_nodes_reduce_udata* u =
 			(as_hb_find_new_nodes_reduce_udata*)udata;
-	cf_node nodeid = *(cf_node*)key;
+	cf_node nodeid = *(const cf_node*)key;
 
 	bool is_new_node = true;
 
@@ -2818,7 +2818,7 @@ round_up_pow2(uint32_t v)
  * Generate a hash code for a blob using Jenkins hash function.
  */
 static uint32_t
-hb_blob_hash(uint8_t* value, size_t value_size)
+hb_blob_hash(const uint8_t* value, size_t value_size)
 {
 	uint32_t hash = 0;
 	for (int i = 0; i < value_size; ++i) {
@@ -2837,27 +2837,27 @@ hb_blob_hash(uint8_t* value, size_t value_size)
  * Generate a hash code for a mesh node key.
  */
 static uint32_t
-hb_mesh_node_key_hash_fn(void* value)
+hb_mesh_node_key_hash_fn(const void* value)
 {
 	// Note packed structure ensures a generic blob hash function works well.
-	return hb_blob_hash((uint8_t*)value, sizeof(as_hb_mesh_node_key));
+	return hb_blob_hash((const uint8_t*)value, sizeof(as_hb_mesh_node_key));
 }
 
 /**
  * Generate a hash code for a cf_socket.
  */
 static uint32_t
-hb_socket_hash_fn(void* value)
+hb_socket_hash_fn(const void* value)
 {
-	cf_socket** socket = (cf_socket**)value;
-	return hb_blob_hash((uint8_t*)socket, sizeof(cf_socket*));
+	const cf_socket** socket = (const cf_socket**)value;
+	return hb_blob_hash((const uint8_t*)socket, sizeof(cf_socket*));
 }
 
 /**
  * Reduce function to delete all entries in a map
  */
 static int
-hb_delete_all_reduce(void* key, void* data, void* udata)
+hb_delete_all_reduce(const void* key, void* data, void* udata)
 {
 	return SHASH_REDUCE_DELETE;
 }
@@ -4617,7 +4617,7 @@ channel_endpoint_find_iterate_fn(const as_endpoint* endpoint, void* udata)
  * Reduce function to find a matching endpoint.
  */
 static int
-channel_endpoint_search_reduce(void* key, void* data, void* udata)
+channel_endpoint_search_reduce(const void* key, void* data, void* udata)
 {
 	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
@@ -5437,7 +5437,7 @@ Exit:
  * to have channel tender cleanup.
  */
 static int
-channel_channels_tend_reduce(void* key, void* data, void* udata)
+channel_channels_tend_reduce(const void* key, void* data, void* udata)
 {
 	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
@@ -5792,7 +5792,7 @@ Exit:
  * Get all sockets.
  */
 static int
-channel_sockets_get_reduce(void* key, void* data, void* udata)
+channel_sockets_get_reduce(const void* key, void* data, void* udata)
 {
 	cf_vector* sockets = (cf_vector*)udata;
 	cf_vector_append(sockets, key);
@@ -6057,7 +6057,7 @@ Exit:
  * the message in udata.
  */
 static int
-channel_msg_broadcast_reduce(void* key, void* data, void* udata)
+channel_msg_broadcast_reduce(const void* key, void* data, void* udata)
 {
 	CHANNEL_LOCK();
 	cf_socket** socket = (cf_socket**)key;
@@ -6160,7 +6160,7 @@ channel_clear()
  * Reduce function to dump channel node info to log file.
  */
 static int
-channel_dump_reduce(void* key, void* data, void* udata)
+channel_dump_reduce(const void* key, void* data, void* udata)
 {
 	cf_socket** socket = (cf_socket**)key;
 	as_hb_channel* channel = (as_hb_channel*)data;
@@ -6473,7 +6473,7 @@ mesh_listening_sockets_close()
  * Reduce function to copy mesh seed list on to the buffer.
  */
 static int
-mesh_seed_host_list_reduce(void* key, void* data, void* udata)
+mesh_seed_host_list_reduce(const void* key, void* data, void* udata)
 {
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
 	cf_dyn_buf* db = (cf_dyn_buf*)udata;
@@ -6623,13 +6623,13 @@ mesh_node_endpoint_list_fill(as_hb_mesh_node* mesh_node)
  * Determines if a mesh entry should be connected to or expired and deleted.
  */
 static int
-mesh_tend_reduce(void* key, void* data, void* udata)
+mesh_tend_reduce(const void* key, void* data, void* udata)
 {
 	int rv = SHASH_OK;
 
 	MESH_LOCK();
 
-	cf_node nodeid = ((as_hb_mesh_node_key*)key)->nodeid;
+	cf_node nodeid = ((const as_hb_mesh_node_key*)key)->nodeid;
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
 	as_hb_mesh_tend_reduce_udata* tend_reduce_udata =
 			(as_hb_mesh_tend_reduce_udata*)udata;
@@ -6892,9 +6892,9 @@ mesh_endpoint_addr_find_iterate(const as_endpoint* endpoint, void* udata)
  * Reduce function to search for an endpoint in the mesh node hash.
  */
 static int
-mesh_node_endpoint_addr_find_reduce(void* key, void* data, void* udata)
+mesh_node_endpoint_addr_find_reduce(const void* key, void* data, void* udata)
 {
-	as_hb_mesh_node_key* node_key = (as_hb_mesh_node_key*)key;
+	const as_hb_mesh_node_key* node_key = (const as_hb_mesh_node_key*)key;
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
 	as_hb_mesh_endpoint_addr_reduce_udata* endpoint_reduce_udata =
 			(as_hb_mesh_endpoint_addr_reduce_udata*)udata;
@@ -6978,9 +6978,9 @@ mesh_node_endpoint_addr_find(cf_sock_addr* endpoint_addr,
  * hash.
  */
 static int
-mesh_node_endpoint_list_find_reduce(void* key, void* data, void* udata)
+mesh_node_endpoint_list_find_reduce(const void* key, void* data, void* udata)
 {
-	as_hb_mesh_node_key* node_key = (as_hb_mesh_node_key*)key;
+	const as_hb_mesh_node_key* node_key = (const as_hb_mesh_node_key*)key;
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
 	as_hb_mesh_endpoint_list_reduce_udata* endpoint_reduce_udata =
 			(as_hb_mesh_endpoint_list_reduce_udata*)udata;
@@ -8223,7 +8223,7 @@ mesh_init()
  * Delete the shash entries only if they are not seed entries.
  */
 static int
-mesh_free_node_data_reduce(void* key, void* data, void* udata)
+mesh_free_node_data_reduce(const void* key, void* data, void* udata)
 {
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
 
@@ -8240,13 +8240,13 @@ mesh_free_node_data_reduce(void* key, void* data, void* udata)
  * Remove a host / port from the mesh list.
  */
 static int
-mesh_tip_clear_reduce(void* key, void* data, void* udata)
+mesh_tip_clear_reduce(const void* key, void* data, void* udata)
 {
 	int rv = SHASH_OK;
 
 	MESH_LOCK();
 
-	cf_node nodeid = ((as_hb_mesh_node_key*)key)->nodeid;
+	cf_node nodeid = ((const as_hb_mesh_node_key*)key)->nodeid;
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
 	as_hb_mesh_tip_clear_udata* tip_clear_udata =
 			(as_hb_mesh_tip_clear_udata*)udata;
@@ -8281,7 +8281,7 @@ mesh_tip_clear_reduce(void* key, void* data, void* udata)
 			as_hb_mesh_endpoint_addr_reduce_udata udata;
 			udata.found = false;
 			udata.to_search = &sock_addr;
-			udata.matched_key = key;
+			udata.matched_key = (as_hb_mesh_node_key*)key;
 
 			as_endpoint_list_iterate(mesh_node->endpoint_list,
 					mesh_endpoint_addr_find_iterate, &udata);
@@ -8426,7 +8426,7 @@ mesh_start()
  * Reduce function to dump mesh node info to log file.
  */
 static int
-mesh_dump_reduce(void* key, void* data, void* udata)
+mesh_dump_reduce(const void* key, void* data, void* udata)
 {
 	as_hb_mesh_node* mesh_node = (as_hb_mesh_node*)data;
 
@@ -8905,7 +8905,8 @@ hb_is_mesh()
  * Publish an event to subsystems listening to heart beat events.
  */
 static void
-hb_event_queue(as_hb_event_type event_type, cf_node* nodes, int node_count)
+hb_event_queue(as_hb_event_type event_type, const cf_node* nodes,
+		int node_count)
 {
 	// Lock-less because the queue is thread safe and we do not use heartbeat
 	// state here.
@@ -8980,11 +8981,11 @@ hb_event_publish_pending()
  * entries.
  */
 static int
-hb_adjacency_free_data_reduce(void* key, void* data, void* udata)
+hb_adjacency_free_data_reduce(const void* key, void* data, void* udata)
 {
 	as_hb_adjacent_node* adjacent_node = (as_hb_adjacent_node*)data;
 
-	cf_node* nodeid = (cf_node*)key;
+	const cf_node* nodeid = (const cf_node*)key;
 
 	hb_adjacent_node_destroy(adjacent_node);
 
@@ -9030,9 +9031,9 @@ hb_clear()
  * Reduce function to get hold of current adjacency list.
  */
 static int
-hb_adjacency_iterate_reduce(void* key, void* data, void* udata)
+hb_adjacency_iterate_reduce(const void* key, void* data, void* udata)
 {
-	cf_node* nodeid = (cf_node*)key;
+	const cf_node* nodeid = (const cf_node*)key;
 	as_hb_adjacency_reduce_udata* adjacency_reduce_udata =
 			(as_hb_adjacency_reduce_udata*)udata;
 
@@ -9450,9 +9451,9 @@ hb_adjacent_node_destroy(as_hb_adjacent_node* adjacent_node)
  * Tend reduce function that removes expired nodes from adjacency list.
  */
 static int
-hb_adjacency_tend_reduce(void* key, void* data, void* udata)
+hb_adjacency_tend_reduce(const void* key, void* data, void* udata)
 {
-	cf_node nodeid = *(cf_node*)key;
+	cf_node nodeid = *(const cf_node*)key;
 	as_hb_adjacent_node* adjacent_node = (as_hb_adjacent_node*)data;
 	as_hb_adjacency_tender_udata* adjacency_tender_udata =
 			(as_hb_adjacency_tender_udata*)udata;
@@ -9912,9 +9913,9 @@ hb_mode_dump(bool verbose)
  * Reduce function to dump hb node info to log file.
  */
 static int
-hb_dump_reduce(void* key, void* data, void* udata)
+hb_dump_reduce(const void* key, void* data, void* udata)
 {
-	cf_node* nodeid = (cf_node*)key;
+	const cf_node* nodeid = (const cf_node*)key;
 	as_hb_adjacent_node* adjacent_node = (as_hb_adjacent_node*)data;
 
 	char endpoint_list_str[ENDPOINT_LIST_STR_SIZE];
@@ -10148,9 +10149,9 @@ hb_maximal_clique_evict(cf_vector* nodes, cf_vector* nodes_to_evict)
  * Reduce function to iterate over plugin data for all adjacent nodes.
  */
 static int
-hb_plugin_data_iterate_reduce(void* key, void* data, void* udata)
+hb_plugin_data_iterate_reduce(const void* key, void* data, void* udata)
 {
-	cf_node* nodeid = (cf_node*)key;
+	const cf_node* nodeid = (const cf_node*)key;
 	as_hb_adjacent_node* adjacent_node = (as_hb_adjacent_node*)data;
 	as_hb_adjacecny_iterate_reduce_udata* reduce_udata =
 			(as_hb_adjacecny_iterate_reduce_udata*)udata;

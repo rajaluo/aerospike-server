@@ -954,9 +954,9 @@ static uint32_t str_hash_fn(const void *value, uint32_t value_len)
 /*
  *  Hash the given string using the 32-bit FNV-1a hash algorithm for use with rchash tables.
  */
-static uint32_t shash_str_hash_fn(void *value)
+static uint32_t shash_str_hash_fn(const void *value)
 {
-	int value_len = strlen((char*)value) + 1;
+	int value_len = strlen((const char*)value) + 1;
 	uint32_t hash = 2166136261;
 
 	while (value_len--) {
@@ -2392,7 +2392,7 @@ static void as_smd_paxos_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 /*
  *  Destroy a node's scoreboard hash table mapping module to metadata item count.
  */
-static int as_smd_scoreboard_reduce_delete_fn(void *key, void *data, void *udata)
+static int as_smd_scoreboard_reduce_delete_fn(const void *key, void *data, void *udata)
 {
 	cf_node node_id = (cf_node) key;
 	shash *module_item_count_hash = *((shash **) data);
@@ -3020,7 +3020,7 @@ typedef struct as_smd_merge_info_s {
 	as_smd_item_list_t *merge_list;
 } as_smd_merge_info_t;
 
-static int as_smd_merge_resolution_reduce_fn(void *key, void *data, void *udata)
+static int as_smd_merge_resolution_reduce_fn(const void *key, void *data, void *udata)
 {
 	as_smd_item_freq_t **item_freq = (as_smd_item_freq_t **) data;
 	as_smd_item_freq_t *itfq = (*item_freq);
@@ -3045,7 +3045,7 @@ static int as_smd_merge_resolution_reduce_fn(void *key, void *data, void *udata)
 	return 0;
 }
 
-static void incr_item_frequency_shash_update(void *key, void *value_old, void *value_new, void *udata)
+static void incr_item_frequency_shash_update(const void *key, void *value_old, void *value_new, void *udata)
 {
 	//to count the frequency of the item.
 	as_smd_item_freq_t **item_freq = (as_smd_item_freq_t **) value_old;

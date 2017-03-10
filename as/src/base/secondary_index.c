@@ -791,14 +791,14 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 
 // Hash a binname string.
 static inline uint32_t
-as_sindex__set_binid_hash_fn(void* p_key)
+as_sindex__set_binid_hash_fn(const void* p_key)
 {
 	return (uint32_t)cf_hash_fnv(p_key, sizeof(uint32_t));
 }
 
 // Hash a binname string.
 static inline uint32_t
-as_sindex__iname_hash_fn(void* p_key)
+as_sindex__iname_hash_fn(const void* p_key)
 {
 	return (uint32_t)cf_hash_fnv(p_key, strlen((const char*)p_key));
 }
@@ -3609,7 +3609,7 @@ static const as_sindex_add_asval_to_itype_sindex_fn
 
 
 static inline uint32_t
-as_sindex_hash_fn(void* p_key)
+as_sindex_hash_fn(const void* p_key)
 {
 	return (uint32_t)cf_hash_fnv(p_key, sizeof(uint32_t));
 }
@@ -3728,7 +3728,7 @@ shash_add_packed_val(shash *h, const cdt_payload *val, as_val_t type, bool value
 }
 
 static int
-shash_diff_reduce_fn(void *skey, void *data, void *udata)
+shash_diff_reduce_fn(const void *skey, void *data, void *udata)
 {
 	bool value = *(bool *)data;
 	as_sindex_bin *sbin = (as_sindex_bin *)udata;
@@ -3741,10 +3741,10 @@ shash_diff_reduce_fn(void *skey, void *data, void *udata)
 	if (! value) {
 		// Add in the sbin.
 		if (sbin->type == AS_PARTICLE_TYPE_STRING) {
-			as_sindex_add_digest_to_sbin(sbin, *(cf_digest*)skey);
+			as_sindex_add_digest_to_sbin(sbin, *(const cf_digest*)skey);
 		}
 		else if (sbin->type == AS_PARTICLE_TYPE_INTEGER) {
-			as_sindex_add_integer_to_sbin(sbin, *(uint64_t*)skey);
+			as_sindex_add_integer_to_sbin(sbin, *(const uint64_t*)skey);
 		}
 	}
 
@@ -4506,7 +4506,7 @@ ERROR:
 }
 
 int
-as_sindex_cfg_var_hash_reduce_fn(void *key, void *data, void *udata)
+as_sindex_cfg_var_hash_reduce_fn(const void *key, void *data, void *udata)
 {
 	// Parse through the entire si_cfg_array, do an shash_delete on all the valid entries
 	// How do we know if its a valid-entry ? valid-entries get marked by the valid_flag in

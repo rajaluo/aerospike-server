@@ -249,7 +249,7 @@ static void send_entry_insert(send_entry **se_pp, send_entry *se);
 
 static int fabric_get_node_list_fn(const void *key, uint32_t keylen, void *data, void *udata);
 static uint32_t fabric_get_node_list(as_node_list *nl);
-static int fabric_node_disconnect_reduce_fn(void *key, void *data, void *udata);
+static int fabric_node_disconnect_reduce_fn(const void *key, void *data, void *udata);
 static void fabric_node_disconnect(cf_node node_id);
 static void fabric_published_serv_cfg_fill(const cf_serv_cfg *bind_cfg, cf_serv_cfg *published_cfg, bool ipv4_only);
 static bool fabric_published_endpoints_refresh(void);
@@ -317,7 +317,7 @@ static void *run_fabric_node_health(void *arg);
 
 // Ticker helpers.
 static int fabric_rate_node_reduce_fn(const void *key, uint32_t keylen, void *data, void *udata);
-static int fabric_rate_fc_reduce_fn(void *key, void *data, void *udata);
+static int fabric_rate_fc_reduce_fn(const void *key, void *data, void *udata);
 
 // Heartbeat.
 static void fabric_hb_plugin_set_fn(msg *m);
@@ -743,7 +743,7 @@ fabric_get_node_list(as_node_list *nl)
 }
 
 static int
-fabric_node_disconnect_reduce_fn(void *key, void *data, void *udata)
+fabric_node_disconnect_reduce_fn(const void *key, void *data, void *udata)
 {
 	fabric_connection *fc = *(fabric_connection **)key;
 
@@ -2330,7 +2330,7 @@ fabric_rate_node_reduce_fn(const void *key, uint32_t keylen, void *data, void *u
 }
 
 static int
-fabric_rate_fc_reduce_fn(void *key, void *data, void *udata)
+fabric_rate_fc_reduce_fn(const void *key, void *data, void *udata)
 {
 	fabric_connection *fc = *(fabric_connection **)key;
 	fabric_rate *rate = (fabric_rate *)udata;

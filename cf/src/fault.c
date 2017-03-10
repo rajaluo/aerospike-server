@@ -169,9 +169,9 @@ cf_fault_set_severity(const cf_fault_context context, const cf_fault_severity se
 }
 
 static inline uint32_t
-cache_hash_fn(void *key)
+cache_hash_fn(const void *key)
 {
-	return (uint32_t)((cf_fault_cache_hkey*)key)->line;
+	return (uint32_t)((const cf_fault_cache_hkey*)key)->line;
 }
 
 /* cf_fault_init
@@ -1002,7 +1002,7 @@ cf_fault_sink_context_strlist(int sink_id, char *context, cf_dyn_buf *db)
 
 
 static int
-cf_fault_cache_reduce_fn(void *key, void *data, void *udata)
+cf_fault_cache_reduce_fn(const void *key, void *data, void *udata)
 {
 	uint32_t *count = (uint32_t*)data;
 
@@ -1010,7 +1010,7 @@ cf_fault_cache_reduce_fn(void *key, void *data, void *udata)
 		return SHASH_REDUCE_DELETE;
 	}
 
-	cf_fault_cache_hkey *hkey = (cf_fault_cache_hkey*)key;
+	const cf_fault_cache_hkey *hkey = (const cf_fault_cache_hkey*)key;
 
 	cf_fault_event(hkey->context, hkey->severity, hkey->file_name, hkey->line,
 			"(repeated:%u) %s", *count, hkey->msg);
