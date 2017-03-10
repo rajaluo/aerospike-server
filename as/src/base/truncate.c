@@ -377,12 +377,18 @@ truncate_smd_accept_cb(char* module, as_smd_item_list_t* items, void* udata,
 		return 0;
 	}
 
+	bool is_merge = (accept_opt & AS_SMD_ACCEPT_OPT_MERGE) != 0;
+
 	for (int i = 0; i < (int)items->num_items; i++) {
 		as_smd_item_t* item = items->item[i];
 
 		if (item->action == AS_SMD_ACTION_SET) {
-			// Ignore result - SMD principal's hash will already have this item.
-			filter_hash_put(item);
+			// If we're here via SMD API command (as opposed to via merge), SMD
+			// principal's hash will already have this item - ignore filter
+			// result, let as_set/as_namespace cached value do the filtering.
+			if (! filter_hash_put(item) && is_merge) {
+				continue;
+			}
 		}
 		else if (item->action == AS_SMD_ACTION_DELETE) {
 			filter_hash_delete(item);
