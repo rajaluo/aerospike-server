@@ -134,7 +134,12 @@ as_truncate_init(as_namespace* ns)
 					1024 * g_config.n_namespaces, 0) != SHASH_OK) {
 		cf_crash(AS_TRUNCATE, "truncate init - failed filter-hash create");
 	}
+}
 
+
+void
+as_truncate_init_smd()
+{
 	// Register the system metadata custom callbacks.
 	if (as_smd_create_module(TRUNCATE_MODULE,
 			NULL, NULL,

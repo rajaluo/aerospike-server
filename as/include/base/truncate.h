@@ -71,6 +71,7 @@ struct as_set_s;
 //
 
 void as_truncate_init(struct as_namespace_s* ns);
+void as_truncate_init_smd();
 void as_truncate_list_cenotaphs(struct as_namespace_s* ns);
 void as_truncate_done_startup(struct as_namespace_s* ns);
 bool as_truncate_cmd(const char* ns_name, const char* set_name, const char* lut_str);

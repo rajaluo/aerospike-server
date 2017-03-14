@@ -211,6 +211,8 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 		as_sindex_init(ns);
 	}
 
+	as_truncate_init_smd();
+
 	// Register secondary index module with the majority merge policy callback.
 	// Secondary index metadata is restored for all namespaces. Must be done
 	// before as_storage_init() populates the indexes.
