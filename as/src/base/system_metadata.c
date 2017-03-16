@@ -29,17 +29,15 @@
  *    to that opaque metadata.
  */
 
-// #define DEBUG  // [Note:  Requires DEBUG_HASH to be defined in "cf_rchash.c" as well.]
-
 #include <errno.h>
 #include <stdarg.h>
 #include <sys/stat.h>
 
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_rchash.h"
 #include "citrusleaf/cf_shash.h"
 
 #include "msg.h"
-#include "rchash.h"
 
 #include "base/cfg.h"
 #include "base/secondary_index.h"
@@ -468,7 +466,7 @@ struct as_smd_s {
 	as_smd_state_t state;
 
 	// Hash table mapping module name (char *) ==> module object (as_smd_module_t *).
-	rchash *modules;
+	cf_rchash *modules;
 
 	// Message queue for receiving System Metadata messages.
 	cf_queue *msgq;
@@ -514,10 +512,10 @@ typedef struct as_smd_module_s {
 	json_t *json;
 
 	// Hash table of metadata registered by this node mapping key (char *) ==> metadata item (as_smd_item_t *).
-	rchash *my_metadata;
+	cf_rchash *my_metadata;
 
 	// Hash table of metadata received from all external nodes mapping key (as_smd_external_item_key_t *) ==> metadata item (as_smd_item_t *).
-	rchash *external_metadata;
+	cf_rchash *external_metadata;
 
 } as_smd_module_t;
 
@@ -990,20 +988,8 @@ static void modules_rchash_destructor_fn(void *object)
 	CF_FREE_AND_NULLIFY(module_obj->module);
 
 	// Free both of the module's metadata hash tables.
-
-#ifdef DEBUG
-	cf_debug(AS_SMD, "Dumping my_metadata:");
-	rchash_dump(module_obj->my_metadata);
-#endif
-
-	rchash_destroy(module_obj->my_metadata);
-
-#ifdef DEBUG
-	cf_debug(AS_SMD, "Dumping external_metadata:");
-	rchash_dump(module_obj->external_metadata);
-#endif
-
-	rchash_destroy(module_obj->external_metadata);
+	cf_rchash_destroy(module_obj->my_metadata);
+	cf_rchash_destroy(module_obj->external_metadata);
 }
 
 /*
@@ -1052,7 +1038,7 @@ static as_smd_t *as_smd_create(void)
 	smd->state = AS_SMD_STATE_IDLE;
 
 	// Create the System Metadata modules hash table.
-	if (RCHASH_OK != rchash_create(&(smd->modules), str_hash_fn, modules_rchash_destructor_fn, 0, 127, RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(smd->modules), str_hash_fn, modules_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the System Metadata modules hash table");
 	}
 
@@ -1334,17 +1320,17 @@ static int as_smd_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
 	cf_info(AS_SMD, "can accept udata: %p", module_obj->can_accept_udata);
 
 	cf_info(AS_SMD, "My Metadata:");
-	cf_info(AS_SMD, "number of metadata items: %d", num_items = rchash_get_size(module_obj->my_metadata));
+	cf_info(AS_SMD, "number of metadata items: %d", num_items = cf_rchash_get_size(module_obj->my_metadata));
 	if (num_items) {
 		cf_info(AS_SMD, "Node ID\t\tModule\tKey\tValue\t\tGeneration\tTimestamp");
-		rchash_reduce(module_obj->my_metadata, as_smd_metadata_reduce_fn, NULL);
+		cf_rchash_reduce(module_obj->my_metadata, as_smd_metadata_reduce_fn, NULL);
 	}
 
 	cf_info(AS_SMD, "External Metadata:");
-	cf_info(AS_SMD, "number of metadata items: %d", num_items = rchash_get_size(module_obj->external_metadata));
+	cf_info(AS_SMD, "number of metadata items: %d", num_items = cf_rchash_get_size(module_obj->external_metadata));
 	if (num_items) {
 		cf_info(AS_SMD, "Node ID\t\tModule\tKey\tValue\t\tGeneration\tTimestamp");
-		rchash_reduce(module_obj->external_metadata, as_smd_metadata_reduce_fn, NULL);
+		cf_rchash_reduce(module_obj->external_metadata, as_smd_metadata_reduce_fn, NULL);
 	}
 
 	return 0;
@@ -1362,13 +1348,13 @@ void as_smd_dump_metadata(as_smd_t *smd, as_smd_cmd_t *cmd)
 	cf_info(AS_SMD, "thr_id: 0x%lx", smd->thr_id);
 	cf_info(AS_SMD, "thr_attr: %p", &smd->thr_attr);
 	cf_info(AS_SMD, "state: %s", AS_SMD_STATE_NAME(smd->state));
-	cf_info(AS_SMD, "number of modules: %d", rchash_get_size(smd->modules));
+	cf_info(AS_SMD, "number of modules: %d", cf_rchash_get_size(smd->modules));
 	cf_info(AS_SMD, "number of pending messages in queue: %d", cf_queue_sz(smd->msgq));
 
 	// If verbose, dump info. about the metadata itself.
 	if (cmd->options & AS_SMD_CMD_OPT_VERBOSE) {
 		int module_num = 0;
-		rchash_reduce(smd->modules, as_smd_dump_reduce_fn, &module_num);
+		cf_rchash_reduce(smd->modules, as_smd_dump_reduce_fn, &module_num);
 	}
 }
 
@@ -1674,7 +1660,7 @@ static int as_smd_module_persist(as_smd_module_t *module_obj)
 	}
 
 	// Walk the module's metadata hash table and create a JSON array of objects, one for each item.
-	rchash_reduce(module_obj->my_metadata, as_smd_serialize_into_json_reduce_fn, module_obj->json);
+	cf_rchash_reduce(module_obj->my_metadata, as_smd_serialize_into_json_reduce_fn, module_obj->json);
 
 	// Store the module's metadata persistently if necessary.
 	if (module_obj->json && (retval = as_smd_write(module_obj->module, module_obj->json))) {
@@ -1701,7 +1687,7 @@ static int as_smd_module_create(as_smd_t *smd, as_smd_cmd_t *cmd)
 	cf_debug(AS_SMD, "System Metadata thread - creating module \"%s\"", item->module_name);
 
 	// Verify the module does not yet exist.
-	if (RCHASH_OK == (retval = rchash_get(smd->modules, item->module_name, strlen(item->module_name) + 1, (void **) &module_obj))) {
+	if (CF_RCHASH_OK == (retval = cf_rchash_get(smd->modules, item->module_name, strlen(item->module_name) + 1, (void **) &module_obj))) {
 		// (Note:  This is not a problem ~~ May have come over the wire.)
 		cf_detail(AS_SMD, "System Metadata module \"%s\" already exists", item->module_name);
 
@@ -1722,17 +1708,17 @@ static int as_smd_module_create(as_smd_t *smd, as_smd_cmd_t *cmd)
 	module_obj->module = cf_strdup(item->module_name);
 
 	// Create the module's local metadata hash table.
-	if (RCHASH_OK != rchash_create(&(module_obj->my_metadata), str_hash_fn, metadata_rchash_destructor_fn, 0, 127, RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->my_metadata), str_hash_fn, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the local metadata hash table for System Metadata module \"%s\"", item->module_name);
 	}
 
 	// Create the module's external metadata hash table.
-	if (RCHASH_OK != rchash_create(&(module_obj->external_metadata), str_hash_fn, metadata_rchash_destructor_fn, 0, 127, RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->external_metadata), str_hash_fn, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the external metadata hash table for System Metadata module \"%s\"", item->module_name);
 	}
 
 	// Add the module to the modules hash table.
-	if (RCHASH_OK != (retval = rchash_put_unique(smd->modules, item->module_name, strlen(item->module_name) + 1, module_obj))) {
+	if (CF_RCHASH_OK != (retval = cf_rchash_put_unique(smd->modules, item->module_name, strlen(item->module_name) + 1, module_obj))) {
 		cf_crash(AS_SMD, "failed to add System Metadata module \"%s\" to modules table (retval %d)", item->module_name, retval);
 	}
 
@@ -1795,7 +1781,7 @@ static as_smd_module_t *as_smd_module_get(as_smd_t *smd, as_smd_item_t *item, as
 		return NULL;
 	}
 
-	if (RCHASH_OK != (retval = rchash_get(smd->modules, module_name, strlen(module_name) + 1, (void **) &module_obj))) {
+	if (CF_RCHASH_OK != (retval = cf_rchash_get(smd->modules, module_name, strlen(module_name) + 1, (void **) &module_obj))) {
 		as_smd_cmd_t cmd;
 		as_smd_item_t fakeitem;
 		// Could not find the module object corresponding to the module name. Create one.
@@ -1813,7 +1799,7 @@ static as_smd_module_t *as_smd_module_get(as_smd_t *smd, as_smd_item_t *item, as
 		} else {
 			cf_debug(AS_SMD, "created System Metadata module \"%s\" on-the-fly", module_name);
 
-			if (RCHASH_OK != (retval = rchash_get(smd->modules, module_name, strlen(module_name) + 1, (void **) &module_obj))) {
+			if (CF_RCHASH_OK != (retval = cf_rchash_get(smd->modules, module_name, strlen(module_name) + 1, (void **) &module_obj))) {
 				cf_crash(AS_SMD, "failed to get System Metadata module \"%s\" after creation (rv %d)", module_name, retval);
 			}
 		}
@@ -1833,7 +1819,7 @@ static int as_smd_module_destroy(as_smd_t *smd, as_smd_cmd_t *cmd)
 	cf_debug(AS_SMD, "System Metadata thread - destroying module \"%s\"", item->module_name);
 
 	// Remove the module's object from the hash table.
-	if (RCHASH_OK != (retval = rchash_delete(smd->modules, item->module_name, strlen(item->module_name) + 1))) {
+	if (CF_RCHASH_OK != (retval = cf_rchash_delete(smd->modules, item->module_name, strlen(item->module_name) + 1))) {
 		cf_warning(AS_SMD, "failed to delete System Metadata module \"%s\" (retval %d)", item->module_name, retval);
 		return retval;
 	}
@@ -2006,21 +1992,21 @@ static int as_smd_metadata_change_local(as_smd_t *smd, as_smd_msg_op_t op, as_sm
 			 AS_SMD_MSG_OP_NAME(op), item->node_id, AS_SMD_ACTION_NAME(item->action), item->module_name, item->key);
 
 	// Find the module's object.
-	if (RCHASH_OK != (retval = rchash_get(smd->modules, item->module_name, strlen(item->module_name) + 1, (void **) &module_obj))) {
+	if (CF_RCHASH_OK != (retval = cf_rchash_get(smd->modules, item->module_name, strlen(item->module_name) + 1, (void **) &module_obj))) {
 		cf_warning(AS_SMD, "failed to find System Metadata module \"%s\" (retval %d)", item->module_name, retval);
 		return retval;
 	}
 
 	if (AS_SMD_ACTION_DELETE == item->action) {
 		// Delete the metadata from the module's local metadata hash table.
-		if (RCHASH_OK != (retval = rchash_delete(module_obj->my_metadata, item->key, strlen(item->key) + 1))) {
+		if (CF_RCHASH_OK != (retval = cf_rchash_delete(module_obj->my_metadata, item->key, strlen(item->key) + 1))) {
 			cf_warning(AS_SMD, "failed to delete key \"%s\" from System Metadata module \"%s\" (retval %d)", item->key, item->module_name, retval);
 		}
 	} else if (item->key) {
 		// Handle the Set case:
 
 		// Select metadata local hash table for incoming metadata.
-		rchash *metadata_hash = module_obj->my_metadata;
+		cf_rchash *metadata_hash = module_obj->my_metadata;
 
 		// The length of the key string includes the NULL terminator.
 		uint32_t key_len = strlen(item->key) + 1;
@@ -2043,7 +2029,7 @@ static int as_smd_metadata_change_local(as_smd_t *smd, as_smd_msg_op_t op, as_sm
 		as_smd_item_t *existing_item;
 		bool existing_wins = false;
 
-		if (RCHASH_OK == rchash_get(metadata_hash, key, key_len, (void **)&existing_item)) {
+		if (CF_RCHASH_OK == cf_rchash_get(metadata_hash, key, key_len, (void **)&existing_item)) {
 			existing_wins = (existing_item->generation > item->generation) ||
 					((existing_item->generation == item->generation) &&
 					 (existing_item->timestamp > item->timestamp));
@@ -2055,17 +2041,13 @@ static int as_smd_metadata_change_local(as_smd_t *smd, as_smd_msg_op_t op, as_sm
 			// (Note:  One reference to the item will be released by the thread when it releases the containing command.)
 			cf_rc_reserve(item);
 
-			if (RCHASH_OK != (retval = rchash_put(metadata_hash, key, key_len, item))) {
+			if (CF_RCHASH_OK != (retval = cf_rchash_put(metadata_hash, key, key_len, item))) {
 				cf_crash(AS_SMD, "failed to set metadata for key \"%s\" for System Metadata module \"%s\" (retval %d)", item->key, item->module_name, retval);
 			}
 		}
 	} else {
 		cf_debug(AS_SMD, "(not setting empty metadata item for module \"%s\")", module_obj->module);
 	}
-
-#ifdef DEBUG
-	rchash_dump(module_obj->my_metadata);
-#endif
 
 	// Give back the module reference.
 	cf_rc_release(module_obj);
@@ -2136,7 +2118,7 @@ typedef struct as_smd_metadata_get_state_s {
 	size_t num_items;                   // Number of matching items.
 	as_smd_item_t *item;                // Item to compare with each item.
 	as_smd_item_list_t *item_list;      // List of matching items.
-	rchash_reduce_fn reduce_fn;         // Reduce function to apply to matching items.
+	cf_rchash_reduce_fn reduce_fn;         // Reduce function to apply to matching items.
 } as_smd_metadata_get_state_t;
 
 /*
@@ -2187,7 +2169,7 @@ static int as_smd_matching_module_reduce_fn(const void *key, uint32_t keylen, vo
 
 	// Perform the given reduce function on matching module's metadata.
 	if (!strcmp(get_state->item->module_name, "") || !strcmp(get_state->item->module_name, module)) {
-		rchash_reduce(module_obj->my_metadata, get_state->reduce_fn, get_state);
+		cf_rchash_reduce(module_obj->my_metadata, get_state->reduce_fn, get_state);
 	}
 
 	return 0;
@@ -2220,7 +2202,7 @@ static int as_smd_metadata_get(as_smd_t *smd, as_smd_cmd_t *cmd)
 	get_state.reduce_fn = as_smd_count_matching_item_reduce_fn;
 
 	// Count the number of matching items.
-	rchash_reduce(smd->modules, as_smd_matching_module_reduce_fn, &get_state);
+	cf_rchash_reduce(smd->modules, as_smd_matching_module_reduce_fn, &get_state);
 
 	// Allocate a list of sufficient size for the get result.
 	as_smd_item_list_t *item_list = NULL;
@@ -2235,7 +2217,7 @@ static int as_smd_metadata_get(as_smd_t *smd, as_smd_cmd_t *cmd)
 
 	// Add matching items to the list.
 	get_state.reduce_fn = as_smd_metadata_get_reduce_fn;
-	rchash_reduce(smd->modules, as_smd_matching_module_reduce_fn, &get_state);
+	cf_rchash_reduce(smd->modules, as_smd_matching_module_reduce_fn, &get_state);
 
 	// Invoke the user's callback function.
 	(get_cb)(item->module_name, item_list, get_udata);
@@ -2275,7 +2257,7 @@ static void as_smd_terminate(as_smd_t *smd)
 	shash_destroy(smd->scoreboard);
 
 	// Release the modules hash table.
-	rchash_destroy(smd->modules);
+	cf_rchash_destroy(smd->modules);
 
 	// Release the System Metadata object.
 	cf_free(smd);
@@ -2305,7 +2287,7 @@ static int as_smd_module_count_items_reduce_fn(const void *key, uint32_t keylen,
 	size_t *num_items = (size_t *) udata;
 
 	// Increase the running total by the count the number of metadata items in this module.
-	rchash_reduce(module_obj->my_metadata, as_smd_count_item_reduce_fn, num_items);
+	cf_rchash_reduce(module_obj->my_metadata, as_smd_count_item_reduce_fn, num_items);
 
 	return 0;
 }
@@ -2337,7 +2319,7 @@ static int as_smd_module_serialize_reduce_fn(const void *key, uint32_t keylen, v
 	as_smd_item_list_t *item_list = (as_smd_item_list_t *) udata;
 
 	// Serialize all of this module's metadata items.
-	rchash_reduce(module_obj->my_metadata, as_smd_item_serialize_reduce_fn, item_list);
+	cf_rchash_reduce(module_obj->my_metadata, as_smd_item_serialize_reduce_fn, item_list);
 
 	return 0;
 }
@@ -2356,7 +2338,7 @@ static void as_smd_paxos_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 
 	// Determine the number of metadata items to be sent.
 	size_t num_items = 0;
-	rchash_reduce(smd->modules, as_smd_module_count_items_reduce_fn, &num_items);
+	cf_rchash_reduce(smd->modules, as_smd_module_count_items_reduce_fn, &num_items);
 
 	cf_debug(AS_SMD, "sending %zu serialized metadata items to the Paxos principal", num_items);
 
@@ -2370,7 +2352,7 @@ static void as_smd_paxos_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 	item_list->num_items = 0;
 	// set the module name to NULL, because this item_list consists of items from all modules registered to SMD
 	item_list->module_name = NULL;
-	rchash_reduce(smd->modules, as_smd_module_serialize_reduce_fn, item_list);
+	cf_rchash_reduce(smd->modules, as_smd_module_serialize_reduce_fn, item_list);
 
 	cf_debug(AS_SMD, "aspc():  num_items = %zu (%zu)", item_list->num_items, num_items);
 
@@ -2409,7 +2391,7 @@ static int as_smd_scoreboard_reduce_delete_fn(const void *key, void *data, void 
  */
 static int as_smd_reduce_delete_fn(const void *key, uint32_t keylen, void *object, void *udata)
 {
-	return RCHASH_REDUCE_DELETE;
+	return CF_RCHASH_REDUCE_DELETE;
 }
 
 /*
@@ -2421,7 +2403,7 @@ static int as_smd_delete_external_metadata_reduce_fn(const void *key, uint32_t k
 	as_smd_module_t *module_obj = (as_smd_module_t *) object;
 	as_smd_t *smd = (as_smd_t *) udata;
 
-	rchash_reduce(module_obj->external_metadata, as_smd_reduce_delete_fn, smd);
+	cf_rchash_reduce(module_obj->external_metadata, as_smd_reduce_delete_fn, smd);
 	cf_debug(AS_SMD, "All the entries in the scoreboard have been deleted");
 
 	return 0;
@@ -2433,7 +2415,7 @@ static int as_smd_delete_external_metadata_reduce_fn(const void *key, uint32_t k
 static void as_smd_clear_scoreboard(as_smd_t *smd)
 {
 	shash_reduce_delete(smd->scoreboard, as_smd_scoreboard_reduce_delete_fn, smd);
-	rchash_reduce(smd->modules, as_smd_delete_external_metadata_reduce_fn, smd);
+	cf_rchash_reduce(smd->modules, as_smd_delete_external_metadata_reduce_fn, smd);
 }
 
 /*
@@ -2483,7 +2465,7 @@ static int as_smd_apply_metadata_change(as_smd_t *smd, as_smd_module_t *module_o
 			// Perform the appropriate union operation.
 
 			as_smd_item_t *existing_item = NULL;
-			if (RCHASH_OK == rchash_get(module_obj->my_metadata, item->key, strlen(item->key) + 1, (void **) &existing_item)) {
+			if (CF_RCHASH_OK == cf_rchash_get(module_obj->my_metadata, item->key, strlen(item->key) + 1, (void **) &existing_item)) {
 				cf_debug(AS_SMD, "asamc():  Old item exists.");
 			} else {
 				cf_debug(AS_SMD, "asamc():  Old item does not exist.");
@@ -2620,8 +2602,8 @@ static shash *as_smd_store_metadata_by_module(as_smd_t *smd, as_smd_msg_t *smd_m
 
 		// Warn if the item is already present.
 		as_smd_item_t *old_item = NULL;
-		rchash *metadata_hash = module_obj->external_metadata;
-		if (RCHASH_OK == rchash_get(metadata_hash, stack_key, stack_key_len, (void **) &old_item)) {
+		cf_rchash *metadata_hash = module_obj->external_metadata;
+		if (CF_RCHASH_OK == cf_rchash_get(metadata_hash, stack_key, stack_key_len, (void **) &old_item)) {
 			cf_warning(AS_SMD, "found existing metadata item: node: %016lX module: \"%s\" key: \"%s\" value: \"%s\" ~~ Replacing with value: \"%s\"!",
 					   item->node_id, item->module_name, item->key, old_item->value, item->value);
 			// Give back the item reference.
@@ -2633,7 +2615,7 @@ static shash *as_smd_store_metadata_by_module(as_smd_t *smd, as_smd_msg_t *smd_m
 		cf_rc_reserve(item);
 
 		// Insert the new metadata into the module's external metadata hash table, replacing any previous contents.
-		if (RCHASH_OK != rchash_put(metadata_hash, stack_key, stack_key_len, item)) {
+		if (CF_RCHASH_OK != cf_rchash_put(metadata_hash, stack_key, stack_key_len, item)) {
 			cf_warning(AS_SMD, "failed to insert metadata for key \"%s\" for System Metadata module \"%s\"", item->key, item->module_name);
 		}
 
@@ -2752,7 +2734,7 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 
 			// (Note:  Use num_items to count the position for each metadata item.)
 			item_lists_in[list_num]->num_items = 0;
-			rchash_reduce(module_obj->external_metadata, as_smd_item_list_for_node_reduce_fn, &search);
+			cf_rchash_reduce(module_obj->external_metadata, as_smd_item_list_for_node_reduce_fn, &search);
 		}
 
 		list_num++;
@@ -2766,8 +2748,8 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 		cf_debug(AS_SMD, "no merge cb registered ~~ performing default merge policy: union");
 
 		// No merge policy registered ~~ Default to union.
-		rchash *merge_hash = NULL;
-		if (RCHASH_OK != rchash_create(&merge_hash, str_hash_fn, metadata_rchash_destructor_fn, 0, 127, 0)) {
+		cf_rchash *merge_hash = NULL;
+		if (CF_RCHASH_OK != cf_rchash_create(&merge_hash, str_hash_fn, metadata_rchash_destructor_fn, 0, 127, 0)) {
 			cf_crash(AS_SMD, "failed to create merge hash table for module \"%s\"", module_obj->module);
 		}
 
@@ -2780,11 +2762,11 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 
 					// Look for an existing items with this key.
 					as_smd_item_t *existing_item = NULL;
-					if (RCHASH_OK != rchash_get(merge_hash, new_item->key, key_len, (void **) &existing_item)) {
+					if (CF_RCHASH_OK != cf_rchash_get(merge_hash, new_item->key, key_len, (void **) &existing_item)) {
 						// If not found, insert this item.
 						cf_rc_reserve(new_item);
 
-						if (RCHASH_OK != rchash_put(merge_hash, new_item->key, key_len, new_item)) {
+						if (CF_RCHASH_OK != cf_rchash_put(merge_hash, new_item->key, key_len, new_item)) {
 							cf_crash(AS_SMD, "failed to insert item into merge hash");
 						}
 					} else {
@@ -2806,19 +2788,19 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 						if (! existing_wins) {
 							cf_rc_reserve(new_item);
 
-							if (RCHASH_OK != rchash_put(merge_hash, new_item->key, key_len, new_item)) {
+							if (CF_RCHASH_OK != cf_rchash_put(merge_hash, new_item->key, key_len, new_item)) {
 								cf_crash(AS_SMD, "failed to insert item into merge hash");
 							}
 						}
 
-						as_smd_item_destroy(existing_item); // for rchash_get
+						as_smd_item_destroy(existing_item); // for cf_rchash_get
 					}
 				}
 			}
 		}
 
 		// Create a merged items list.
-		size_t num_items = rchash_get_size(merge_hash);
+		size_t num_items = cf_rchash_get_size(merge_hash);
 		if (!(item_list_out = as_smd_item_list_alloc(num_items))) {
 			cf_crash(AS_SMD, "failed to create System Metadata items list of size %zu", num_items);
 		}
@@ -2826,8 +2808,8 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 		// Populate the merged items list from the hash table.
 		// (Note:  Use num_items to count the position for each metadata item.)
 		item_list_out->num_items = 0;
-		rchash_reduce(merge_hash, as_smd_list_items_reduce_fn, item_list_out);
-		rchash_destroy(merge_hash);
+		cf_rchash_reduce(merge_hash, as_smd_list_items_reduce_fn, item_list_out);
+		cf_rchash_destroy(merge_hash);
 	}
 
 	// Sent out a merged metadata msg via fabric transaction to every cluster node.
@@ -2909,7 +2891,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 		} else {
 			cf_debug(AS_SMD, "Invoking merge reduce in Paxos principal");
 			// Invoke the merge policy for each module and send the results to all nodes.
-			rchash_reduce(smd->modules, as_smd_invoke_merge_reduce_fn, smd);
+			cf_rchash_reduce(smd->modules, as_smd_invoke_merge_reduce_fn, smd);
 		}
 
 		// Clear out the state used to notify cluster nodes of the new metadata.
@@ -2931,7 +2913,7 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 
 static int metadata_local_deleteall_fn(const void *key, uint32_t key_len, void *object, void *udata)
 {
-	return RCHASH_REDUCE_DELETE;
+	return CF_RCHASH_REDUCE_DELETE;
 }
 
 /*
@@ -2971,7 +2953,7 @@ static int as_smd_accept_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as
 	// In case of merge (after cluster state change) drop the existing local metadata definitions
 	// This is done to clean up some metadata, which could have been dropped during the merge
 	if (smd_msg->options & AS_SMD_ACCEPT_OPT_MERGE) {
-		rchash_reduce(module_obj->my_metadata, metadata_local_deleteall_fn, NULL);
+		cf_rchash_reduce(module_obj->my_metadata, metadata_local_deleteall_fn, NULL);
 	}
 
 	for (int i = 0; i < smd_msg->items->num_items; i++) {
@@ -3295,10 +3277,6 @@ void *as_smd_thr(void *arg)
 			cf_detail(AS_SMD, "System Metadata thread - received timeout event");
 		} else {
 			as_smd_process_event(smd, evt);
-
-#ifdef DEBUG
-			rchash_dump(smd->modules);
-#endif
 
 			// Release the event message.
 			as_smd_destroy_event(evt);

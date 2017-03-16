@@ -134,7 +134,12 @@ as_truncate_init(as_namespace* ns)
 					1024 * g_config.n_namespaces, 0) != SHASH_OK) {
 		cf_crash(AS_TRUNCATE, "truncate init - failed filter-hash create");
 	}
+}
 
+
+void
+as_truncate_init_smd()
+{
 	// Register the system metadata custom callbacks.
 	if (as_smd_create_module(TRUNCATE_MODULE,
 			NULL, NULL,
@@ -377,12 +382,18 @@ truncate_smd_accept_cb(char* module, as_smd_item_list_t* items, void* udata,
 		return 0;
 	}
 
+	bool is_merge = (accept_opt & AS_SMD_ACCEPT_OPT_MERGE) != 0;
+
 	for (int i = 0; i < (int)items->num_items; i++) {
 		as_smd_item_t* item = items->item[i];
 
 		if (item->action == AS_SMD_ACTION_SET) {
-			// Ignore result - SMD principal's hash will already have this item.
-			filter_hash_put(item);
+			// If we're here via SMD API command (as opposed to via merge), SMD
+			// principal's hash will already have this item - ignore filter
+			// result, let as_set/as_namespace cached value do the filtering.
+			if (! filter_hash_put(item) && is_merge) {
+				continue;
+			}
 		}
 		else if (item->action == AS_SMD_ACTION_DELETE) {
 			filter_hash_delete(item);
