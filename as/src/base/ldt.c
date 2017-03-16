@@ -772,7 +772,7 @@ as_ldt_get_from_map(const as_map *prop_map, char prop_type, void *value)
 	sprintf(key_buffer, "%c", prop_type);
 	as_string key_val;
 	as_string_init(&key_val, key_buffer, false);
-	switch(prop_type) {
+	switch (prop_type) {
 		case PM_EsrDigest:
 		case PM_ParentDigest:
 		case PM_SelfDigest:
@@ -843,7 +843,7 @@ as_ldt_set_in_map(as_map *prop_map, char prop_type, void *value)
 	cf_detail(AS_LDT, "[ENTER] PropType(%c)", prop_type );
 
 	int rv = 0;
-	switch(prop_type) {
+	switch (prop_type) {
 		case RPM_Version:
 		{
 			uint64_t ldt_version = *(uint64_t *)value;

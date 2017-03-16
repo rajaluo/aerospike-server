@@ -1589,7 +1589,7 @@ as_paxos_transaction_apply(cf_node from_id)
 		/* Update the generation count */
 		p->gen.sequence = t->gen.sequence;
 		for (int i = 0; i < t->c.n_change; i++) {
-			switch(t->c.type[i]) {
+			switch (t->c.type[i]) {
 				case AS_PAXOS_CHANGE_NOOP:
 					break;
 				case AS_PAXOS_CHANGE_SUCCESSION_ADD:
@@ -2782,7 +2782,7 @@ as_paxos_thr(void *arg)
 		// We are only getting this message because the principal is sending to all nodes known by fabric
 		if ((t.c.p_node == principal) && (self != principal)) {
 			for (int i = 0; i < t.c.n_change; i++) {
-				switch(t.c.type[i]) {
+				switch (t.c.type[i]) {
 					case AS_PAXOS_CHANGE_NOOP:
 						break;
 					case AS_PAXOS_CHANGE_SUCCESSION_ADD:
@@ -2808,7 +2808,7 @@ as_paxos_thr(void *arg)
 			}
 		}
 
-		switch(c) {
+		switch (c) {
 			case AS_PAXOS_MSG_COMMAND_PREPARE:
 				cf_debug(AS_PAXOS, "{%d} received prepare message from %"PRIx64"",
 						t.gen.sequence, qm->id);
@@ -2912,7 +2912,7 @@ as_paxos_thr(void *arg)
 
 				// Attempt to record the vote; if this results in a quorum,
 				// send a commit message and reset the vote count
-				switch(as_paxos_transaction_vote(s, qm->id, &t)) {
+				switch (as_paxos_transaction_vote(s, qm->id, &t)) {
 					case AS_PAXOS_TRANSACTION_VOTE_ACCEPT:
 						cf_debug(AS_PAXOS, "{%d} received 'accept' vote from %"PRIx64" election %d",
 								t.gen.sequence, qm->id, s->election_cycle);

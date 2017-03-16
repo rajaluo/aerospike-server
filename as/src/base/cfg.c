@@ -229,7 +229,7 @@ cfg_set_defaults()
 
 
 //==========================================================
-// All configuration items must have a switch() case
+// All configuration items must have a switch case
 // identifier somewhere in this enum. The order is not
 // important, other than for organizational sanity.
 //
@@ -1219,7 +1219,7 @@ const int NUM_SECURITY_SYSLOG_OPTS					= sizeof(SECURITY_SYSLOG_OPTS) / sizeof(c
 
 
 //==========================================================
-// Configuration value constants not for switch() cases.
+// Configuration value constants not for switch cases.
 //
 
 const char* DEVICE_SCHEDULER_MODES[] = {
@@ -1324,7 +1324,7 @@ cfg_end_context(cfg_parser_state* p_state)
 }
 
 //------------------------------------------------
-// Given a token, return switch() case identifier.
+// Given a token, return switch case identifier.
 //
 
 cfg_case_id
@@ -1977,7 +1977,7 @@ as_config_init(const char* config_file)
 		// Parse service context items.
 		//
 		case SERVICE:
-			switch(cfg_find_tok(line.name_tok, SERVICE_OPTS, NUM_SERVICE_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, SERVICE_OPTS, NUM_SERVICE_OPTS)) {
 			case CASE_SERVICE_USER:
 				{
 					struct passwd* pwd;
@@ -2014,7 +2014,7 @@ as_config_init(const char* config_file)
 				cf_socket_set_advertise_ipv6(cfg_bool(&line));
 				break;
 			case CASE_SERVICE_AUTO_PIN:
-				switch(cfg_find_tok(line.val_tok_1, SERVICE_AUTO_PIN_OPTS, NUM_SERVICE_AUTO_PIN_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, SERVICE_AUTO_PIN_OPTS, NUM_SERVICE_AUTO_PIN_OPTS)) {
 				case CASE_SERVICE_AUTO_PIN_NONE:
 					c->auto_pin = CF_TOPO_AUTO_PIN_NONE;
 					break;
@@ -2104,7 +2104,7 @@ as_config_init(const char* config_file)
 				c->paxos_max_cluster_size = cfg_u64(&line, 1, AS_CLUSTER_SZ);
 				break;
 			case CASE_SERVICE_PAXOS_PROTOCOL:
-				switch(cfg_find_tok(line.val_tok_1, SERVICE_PAXOS_PROTOCOL_OPTS, NUM_SERVICE_PAXOS_PROTOCOL_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, SERVICE_PAXOS_PROTOCOL_OPTS, NUM_SERVICE_PAXOS_PROTOCOL_OPTS)) {
 				case CASE_SERVICE_PAXOS_PROTOCOL_V1:
 					c->paxos_protocol = AS_PAXOS_PROTOCOL_V1;
 					break;
@@ -2124,7 +2124,7 @@ as_config_init(const char* config_file)
 				}
 				break;
 			case CASE_SERVICE_PAXOS_RECOVERY_POLICY:
-				switch(cfg_find_tok(line.val_tok_1, SERVICE_PAXOS_RECOVERY_OPTS, NUM_SERVICE_PAXOS_RECOVERY_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, SERVICE_PAXOS_RECOVERY_OPTS, NUM_SERVICE_PAXOS_RECOVERY_OPTS)) {
 				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER:
 					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER;
 					break;
@@ -2314,7 +2314,7 @@ as_config_init(const char* config_file)
 		// Parse logging context items.
 		//
 		case LOGGING:
-			switch(cfg_find_tok(line.name_tok, LOGGING_OPTS, NUM_LOGGING_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, LOGGING_OPTS, NUM_LOGGING_OPTS)) {
 			case CASE_LOG_FILE_BEGIN:
 				if ((sink = cf_fault_sink_hold(line.val_tok_1)) == NULL) {
 					cf_crash_nostack(AS_CFG, "line %d :: can't add file %s as log sink", line_num, line.val_tok_1);
@@ -2341,7 +2341,7 @@ as_config_init(const char* config_file)
 		// Parse logging::file context items.
 		//
 		case LOGGING_FILE:
-			switch(cfg_find_tok(line.name_tok, LOGGING_FILE_OPTS, NUM_LOGGING_FILE_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, LOGGING_FILE_OPTS, NUM_LOGGING_FILE_OPTS)) {
 			case CASE_LOG_FILE_CONTEXT:
 				if (0 != cf_fault_sink_addcontext(sink, line.val_tok_1, line.val_tok_2)) {
 					cf_crash_nostack(AS_CFG, "line %d :: can't add logging file context %s %s", line_num, line.val_tok_1, line.val_tok_2);
@@ -2362,7 +2362,7 @@ as_config_init(const char* config_file)
 		// Parse logging::console context items.
 		//
 		case LOGGING_CONSOLE:
-			switch(cfg_find_tok(line.name_tok, LOGGING_CONSOLE_OPTS, NUM_LOGGING_CONSOLE_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, LOGGING_CONSOLE_OPTS, NUM_LOGGING_CONSOLE_OPTS)) {
 			case CASE_LOG_CONSOLE_CONTEXT:
 				if (0 != cf_fault_sink_addcontext(sink, line.val_tok_1, line.val_tok_2)) {
 					cf_crash_nostack(AS_CFG, "line %d :: can't add logging console context %s %s", line_num, line.val_tok_1, line.val_tok_2);
@@ -2383,7 +2383,7 @@ as_config_init(const char* config_file)
 		// Parse network context items.
 		//
 		case NETWORK:
-			switch(cfg_find_tok(line.name_tok, NETWORK_OPTS, NUM_NETWORK_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NETWORK_OPTS, NUM_NETWORK_OPTS)) {
 			case CASE_NETWORK_SERVICE_BEGIN:
 				cfg_begin_context(&state, NETWORK_SERVICE);
 				break;
@@ -2410,7 +2410,7 @@ as_config_init(const char* config_file)
 		// Parse network::service context items.
 		//
 		case NETWORK_SERVICE:
-			switch(cfg_find_tok(line.name_tok, NETWORK_SERVICE_OPTS, NUM_NETWORK_SERVICE_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NETWORK_SERVICE_OPTS, NUM_NETWORK_SERVICE_OPTS)) {
 			case CASE_NETWORK_SERVICE_ADDRESS:
 				cfg_add_addr_bind(line.val_tok_1, &c->service);
 				break;
@@ -2478,7 +2478,7 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NETWORK_SERVICE_TLS_MODE:
 				cfg_enterprise_only(&line);
-				switch(cfg_find_tok(line.val_tok_1, NETWORK_SERVICE_TLS_MODE_OPTS, NUM_NETWORK_SERVICE_TLS_MODE_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, NETWORK_SERVICE_TLS_MODE_OPTS, NUM_NETWORK_SERVICE_TLS_MODE_OPTS)) {
 				case CASE_NETWORK_SERVICE_TLS_MODE_ENCRYPT_ONLY:
 					c->tls_service.mode = CF_TLS_MODE_ENCRYPT_ONLY;
 					break;
@@ -2529,9 +2529,9 @@ as_config_init(const char* config_file)
 		// Parse network::heartbeat context items.
 		//
 		case NETWORK_HEARTBEAT:
-			switch(cfg_find_tok(line.name_tok, NETWORK_HEARTBEAT_OPTS, NUM_NETWORK_HEARTBEAT_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NETWORK_HEARTBEAT_OPTS, NUM_NETWORK_HEARTBEAT_OPTS)) {
 			case CASE_NETWORK_HEARTBEAT_MODE:
-				switch(cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_MODE_OPTS, NUM_NETWORK_HEARTBEAT_MODE_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_MODE_OPTS, NUM_NETWORK_HEARTBEAT_MODE_OPTS)) {
 				case CASE_NETWORK_HEARTBEAT_MODE_MULTICAST:
 					c->hb_config.mode = AS_HB_MODE_MULTICAST;
 					break;
@@ -2575,7 +2575,7 @@ as_config_init(const char* config_file)
 				c->hb_config.multicast_ttl = cfg_u8_no_checks(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PROTOCOL:
-				switch(cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_PROTOCOL_OPTS, NUM_NETWORK_HEARTBEAT_PROTOCOL_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_PROTOCOL_OPTS, NUM_NETWORK_HEARTBEAT_PROTOCOL_OPTS)) {
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_RESET:
 					c->hb_config.protocol = AS_HB_PROTOCOL_RESET;
 					break;
@@ -2611,7 +2611,7 @@ as_config_init(const char* config_file)
 		// Parse network::fabric context items.
 		//
 		case NETWORK_FABRIC:
-			switch(cfg_find_tok(line.name_tok, NETWORK_FABRIC_OPTS, NUM_NETWORK_FABRIC_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NETWORK_FABRIC_OPTS, NUM_NETWORK_FABRIC_OPTS)) {
 			case CASE_NETWORK_FABRIC_ADDRESS:
 				cfg_add_addr_bind(line.val_tok_1, &c->fabric);
 				break;
@@ -2677,7 +2677,7 @@ as_config_init(const char* config_file)
 		// Parse network::info context items.
 		//
 		case NETWORK_INFO:
-			switch(cfg_find_tok(line.name_tok, NETWORK_INFO_OPTS, NUM_NETWORK_INFO_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NETWORK_INFO_OPTS, NUM_NETWORK_INFO_OPTS)) {
 			case CASE_NETWORK_INFO_ADDRESS:
 				cfg_add_addr_bind(line.val_tok_1, &c->info);
 				break;
@@ -2701,7 +2701,7 @@ as_config_init(const char* config_file)
 		// Parse namespace items.
 		//
 		case NAMESPACE:
-			switch(cfg_find_tok(line.name_tok, NAMESPACE_OPTS, NUM_NAMESPACE_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_OPTS, NUM_NAMESPACE_OPTS)) {
 			case CASE_NAMESPACE_REPLICATION_FACTOR:
 				ns->cfg_replication_factor = ns->replication_factor = cfg_u32(&line, 1, AS_CLUSTER_SZ);
 				break;
@@ -2715,7 +2715,7 @@ as_config_init(const char* config_file)
 				ns->default_ttl = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_STORAGE_ENGINE_BEGIN:
-				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_STORAGE_OPTS, NUM_NAMESPACE_STORAGE_OPTS)) {
 				case CASE_NAMESPACE_STORAGE_MEMORY:
 					ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 					ns->storage_data_in_memory = true;
@@ -2776,7 +2776,7 @@ as_config_init(const char* config_file)
 				ns->cold_start_evict_ttl = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_CONFLICT_RESOLUTION_POLICY:
-				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_CONFLICT_RESOLUTION_OPTS, NUM_NAMESPACE_CONFLICT_RESOLUTION_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_CONFLICT_RESOLUTION_OPTS, NUM_NAMESPACE_CONFLICT_RESOLUTION_OPTS)) {
 				case CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION:
 					ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
 					break;
@@ -2856,7 +2856,7 @@ as_config_init(const char* config_file)
 				ns->tree_shared.n_sprigs = cfg_u32_power_of_2(&line, 16, 4096);
 				break;
 			case CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE:
-				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_READ_CONSISTENCY_OPTS, NUM_NAMESPACE_READ_CONSISTENCY_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_READ_CONSISTENCY_OPTS, NUM_NAMESPACE_READ_CONSISTENCY_OPTS)) {
 				case CASE_NAMESPACE_READ_CONSISTENCY_ALL:
 					ns->read_consistency_level = AS_POLICY_CONSISTENCY_LEVEL_ALL;
 					ns->read_consistency_level_override = true;
@@ -2906,7 +2906,7 @@ as_config_init(const char* config_file)
 				ns->tomb_raider_period = cfg_seconds_no_checks(&line);
 				break;
 			case CASE_NAMESPACE_WRITE_COMMIT_LEVEL_OVERRIDE:
-				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_WRITE_COMMIT_OPTS, NUM_NAMESPACE_WRITE_COMMIT_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_WRITE_COMMIT_OPTS, NUM_NAMESPACE_WRITE_COMMIT_OPTS)) {
 				case CASE_NAMESPACE_WRITE_COMMIT_ALL:
 					ns->write_commit_level = AS_POLICY_COMMIT_LEVEL_ALL;
 					ns->write_commit_level_override = true;
@@ -2968,7 +2968,7 @@ as_config_init(const char* config_file)
 		// Parse namespace::storage-engine device context items.
 		//
 		case NAMESPACE_STORAGE_DEVICE:
-			switch(cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_DEVICE_OPTS, NUM_NAMESPACE_STORAGE_DEVICE_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_DEVICE_OPTS, NUM_NAMESPACE_STORAGE_DEVICE_OPTS)) {
 			case CASE_NAMESPACE_STORAGE_DEVICE_DEVICE:
 				cfg_add_storage_device(ns, cfg_strdup(&line, true), cfg_strdup_val2(&line, false));
 				break;
@@ -3059,7 +3059,7 @@ as_config_init(const char* config_file)
 		// Parse namespace::storage-engine kv context items.
 		//
 		case NAMESPACE_STORAGE_KV:
-			switch(cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_KV_OPTS, NUM_NAMESPACE_STORAGE_KV_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_KV_OPTS, NUM_NAMESPACE_STORAGE_KV_OPTS)) {
 			case CASE_NAMESPACE_STORAGE_KV_DEVICE:
 				cfg_add_storage_file(ns, cfg_strdup(&line, true));
 				break;
@@ -3092,12 +3092,12 @@ as_config_init(const char* config_file)
 		// Parse namespace::set context items.
 		//
 		case NAMESPACE_SET:
-			switch(cfg_find_tok(line.name_tok, NAMESPACE_SET_OPTS, NUM_NAMESPACE_SET_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_SET_OPTS, NUM_NAMESPACE_SET_OPTS)) {
 			case CASE_NAMESPACE_SET_DISABLE_EVICTION:
 				DISABLE_SET_EVICTION(p_set, cfg_bool(&line));
 				break;
 			case CASE_NAMESPACE_SET_ENABLE_XDR:
-				switch(cfg_find_tok(line.val_tok_1, NAMESPACE_SET_ENABLE_XDR_OPTS, NUM_NAMESPACE_SET_ENABLE_XDR_OPTS)) {
+				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_SET_ENABLE_XDR_OPTS, NUM_NAMESPACE_SET_ENABLE_XDR_OPTS)) {
 				case CASE_NAMESPACE_SET_ENABLE_XDR_USE_DEFAULT:
 					p_set->enable_xdr = AS_SET_ENABLE_XDR_DEFAULT;
 					break;
@@ -3136,7 +3136,7 @@ as_config_init(const char* config_file)
 		// Parse namespace::si context items.
 		//
 		case NAMESPACE_SI:
-			switch(cfg_find_tok(line.name_tok, NAMESPACE_SI_OPTS, NUM_NAMESPACE_SI_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_SI_OPTS, NUM_NAMESPACE_SI_OPTS)) {
 			case CASE_NAMESPACE_SI_GC_PERIOD:
 				si_cfg.defrag_period = cfg_u64_no_checks(&line);
 				break;
@@ -3166,7 +3166,7 @@ as_config_init(const char* config_file)
 		// Parse namespace::sindex context items.
 		//
 		case NAMESPACE_SINDEX:
-			switch(cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_SINDEX_OPTS, NUM_NAMESPACE_SINDEX_OPTS)) {
 			case CASE_NAMESPACE_SINDEX_NUM_PARTITIONS:
 				// FIXME - minimum should be 1, but currently crashes.
 				ns->sindex_num_partitions = cfg_u32(&line, MIN_PARTITIONS_PER_INDEX, MAX_PARTITIONS_PER_INDEX);
@@ -3185,7 +3185,7 @@ as_config_init(const char* config_file)
 		// Parse namespace::2dsphere-within context items.
 		//
 		case NAMESPACE_GEO2DSPHERE_WITHIN:
-			switch(cfg_find_tok(line.name_tok, NAMESPACE_GEO2DSPHERE_WITHIN_OPTS, NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, NAMESPACE_GEO2DSPHERE_WITHIN_OPTS, NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS)) {
 			case CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT:
 				ns->geo2dsphere_within_strict = cfg_bool(&line);
 				break;
@@ -3218,7 +3218,7 @@ as_config_init(const char* config_file)
 		// Parse xdr context items.
 		//
 		case XDR:
-			switch(as_xdr_cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
+			switch (as_xdr_cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
 			// Just skip over the XDR section and its DC subsection. XDR config
 			// parser will pick up XDR configuration.
 			// TODO - config parsing should be unified.
@@ -3244,7 +3244,7 @@ as_config_init(const char* config_file)
 			// This is a hack to avoid defining a new array for the datacenter
 			// subsection. The server is not interested in the details. It just
 			// wants the subsection to end. So just check for the closing brace.
-			switch(as_xdr_cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
+			switch (as_xdr_cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
 			case XDR_CASE_CONTEXT_END:
 				cfg_end_context(&state);
 				break;
@@ -3258,7 +3258,7 @@ as_config_init(const char* config_file)
 		// Parse mod-lua context items.
 		//
 		case MOD_LUA:
-			switch(cfg_find_tok(line.name_tok, MOD_LUA_OPTS, NUM_MOD_LUA_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, MOD_LUA_OPTS, NUM_MOD_LUA_OPTS)) {
 			case CASE_MOD_LUA_CACHE_ENABLED:
 				c->mod_lua.cache_enabled = cfg_bool(&line);
 				break;
@@ -3282,7 +3282,7 @@ as_config_init(const char* config_file)
 		// Parse cluster context items.
 		//
 		case CLUSTER:
-			switch(cfg_find_tok(line.name_tok, CLUSTER_OPTS, NUM_CLUSTER_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, CLUSTER_OPTS, NUM_CLUSTER_OPTS)) {
 			case CASE_CLUSTER_SELF_NODE_ID:
 				c->cluster.cl_self_node = cfg_u32_no_checks(&line);
 				break;
@@ -3325,7 +3325,7 @@ as_config_init(const char* config_file)
 		// Parse cluster::group context items.
 		//
 		case CLUSTER_GROUP:
-			switch(cfg_find_tok(line.name_tok, CLUSTER_GROUP_OPTS, NUM_CLUSTER_GROUP_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, CLUSTER_GROUP_OPTS, NUM_CLUSTER_GROUP_OPTS)) {
 			case CASE_CLUSTER_GROUP_NODE_ID:
 				// For each node ID, register the node and group.
 				cluster_node_id = cfg_u32_no_checks(&line);
@@ -3347,7 +3347,7 @@ as_config_init(const char* config_file)
 		// Parse security context items.
 		//
 		case SECURITY:
-			switch(cfg_find_tok(line.name_tok, SECURITY_OPTS, NUM_SECURITY_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, SECURITY_OPTS, NUM_SECURITY_OPTS)) {
 			case CASE_SECURITY_ENABLE_SECURITY:
 				c->sec_cfg.security_enabled = cfg_bool(&line);
 				break;
@@ -3374,7 +3374,7 @@ as_config_init(const char* config_file)
 		// Parse security::log context items.
 		//
 		case SECURITY_LOG:
-			switch(cfg_find_tok(line.name_tok, SECURITY_LOG_OPTS, NUM_SECURITY_LOG_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, SECURITY_LOG_OPTS, NUM_SECURITY_LOG_OPTS)) {
 			case CASE_SECURITY_LOG_REPORT_AUTHENTICATION:
 				c->sec_cfg.report.authentication |= cfg_bool(&line) ? AS_SEC_SINK_LOG : 0;
 				break;
@@ -3404,7 +3404,7 @@ as_config_init(const char* config_file)
 		// Parse security::syslog context items.
 		//
 		case SECURITY_SYSLOG:
-			switch(cfg_find_tok(line.name_tok, SECURITY_SYSLOG_OPTS, NUM_SECURITY_SYSLOG_OPTS)) {
+			switch (cfg_find_tok(line.name_tok, SECURITY_SYSLOG_OPTS, NUM_SECURITY_SYSLOG_OPTS)) {
 			case CASE_SECURITY_SYSLOG_LOCAL:
 				c->sec_cfg.syslog_local = (as_sec_syslog_local)cfg_int(&line, AS_SYSLOG_MIN, AS_SYSLOG_MAX);
 				break;

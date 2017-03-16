@@ -177,7 +177,7 @@ as_sindex_binid_has_sindex(as_namespace *ns, int binid)
 //                                             UTILITY
 // Translation from sindex error code to string. In alphabetic order
 const char *as_sindex_err_str(int op_code) {
-	switch(op_code) {
+	switch (op_code) {
 		case AS_SINDEX_ERR:                     return "ERR GENERIC";
 		case AS_SINDEX_ERR_BIN_NOTFOUND:        return "BIN NOT FOUND";
 		case AS_SINDEX_ERR_FOUND:               return "INDEX FOUND";
@@ -212,7 +212,7 @@ inline bool as_sindex_isactive(as_sindex *si)
 
 // Translation from sindex internal error code to generic client visible Aerospike error code
 uint8_t as_sindex_err_to_clienterr(int err, char *fname, int lineno) {
-	switch(err) {
+	switch (err) {
 		case AS_SINDEX_ERR_FOUND:        return AS_PROTO_RESULT_FAIL_INDEX_FOUND;
 		case AS_SINDEX_ERR_INAME_MAXLEN: return AS_PROTO_RESULT_FAIL_INDEX_NAME_MAXLEN;
 		case AS_SINDEX_ERR_MAXCOUNT:     return AS_PROTO_RESULT_FAIL_INDEX_MAXCOUNT;
@@ -286,7 +286,7 @@ as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 as_particle_type
 as_sindex_pktype(as_sindex_metadata * imd)
 {
-	switch(imd->btype) {
+	switch (imd->btype) {
 		case AS_SINDEX_KTYPE_LONG: {
 			return AS_PARTICLE_TYPE_INTEGER;
 		}
@@ -349,7 +349,7 @@ as_sindex_ktype_from_string(char const * type_str)
 as_sindex_key_type
 as_sindex_key_type_from_pktype(as_particle_type t)
 {
-	switch(t) {
+	switch (t) {
 		case AS_PARTICLE_TYPE_INTEGER :     return AS_SINDEX_KEY_TYPE_LONG;
 		case AS_PARTICLE_TYPE_STRING  :     return AS_SINDEX_KEY_TYPE_DIGEST;
 		case AS_PARTICLE_TYPE_GEOJSON :     return AS_SINDEX_KEY_TYPE_GEO2DSPHERE;
@@ -364,7 +364,7 @@ as_sindex_key_type_from_pktype(as_particle_type t)
 as_sindex_ktype
 as_sindex_sktype_from_pktype(as_particle_type t)
 {
-	switch(t) {
+	switch (t) {
 		case AS_PARTICLE_TYPE_INTEGER :     return AS_SINDEX_KTYPE_LONG;
 		case AS_PARTICLE_TYPE_FLOAT   :     return AS_SINDEX_KTYPE_FLOAT;
 		case AS_PARTICLE_TYPE_STRING  :     return AS_SINDEX_KTYPE_DIGEST;
@@ -527,7 +527,7 @@ void
 as_sindex__process_ret(as_sindex *si, int ret, as_sindex_op op,
 		uint64_t starttime, int pos)
 {
-	switch(op) {
+	switch (op) {
 		case AS_SINDEX_OP_INSERT:
 			if (AS_SINDEX_ERR_NO_MEMORY == ret) {
 				cf_atomic_int_incr(&si->desync_cnt);
@@ -2404,7 +2404,7 @@ as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v)
 	}
 	as_sindex_path *path = imd->path;
 	for (int i=0; i<imd->path_length; i++) {
-		switch(val->type) {
+		switch (val->type) {
 			case AS_STRING:
 			case AS_INTEGER:
 				return NULL;

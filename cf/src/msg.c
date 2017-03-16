@@ -1098,7 +1098,7 @@ msg_dump(const msg *m, const char *info)
 				i, mf->id, mf->is_valid, mf->is_set);
 
 		if (mf->is_valid && mf->is_set) {
-			switch(mf->type) {
+			switch (mf->type) {
 			case M_FT_INT32:
 				cf_info(CF_MSG, "   type INT32 value %d", mf->u.i32);
 				break;
@@ -1199,7 +1199,7 @@ msg_stamp_field(uint8_t *buf, const msg_field *mf)
 
 	buf += 4;
 
-	switch(mf->type) {
+	switch (mf->type) {
 	case M_FT_INT32:
 	case M_FT_UINT32:
 		flen = 4;
