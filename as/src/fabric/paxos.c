@@ -3442,9 +3442,10 @@ as_paxos_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	plugin_data->data_size = data_size;
 
 	memcpy(plugin_data->data, &succession_size, sizeof(size_t));
-	cf_node* dest = (cf_node*)(plugin_data->data + sizeof(size_t));
-	for (int i = 0; i < succession_size; i++) {
-		dest[i] = succession[i];
+
+	if(succession_size) {
+		cf_node* dest = (cf_node*)(plugin_data->data + sizeof(size_t));
+		memcpy(dest, succession, succession_size * sizeof(cf_node));
 	}
 }
 
