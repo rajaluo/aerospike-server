@@ -106,12 +106,12 @@
 #include "aerospike/as_val.h"
 #include "aerospike/mod_lua.h"
 #include "citrusleaf/cf_ll.h"
+#include "citrusleaf/cf_rchash.h"
 
 #include "ai.h"
 #include "ai_btree.h"
 #include "bt.h"
 #include "bt_iterator.h"
-#include "rchash.h"
 
 #include "base/aggr.h"
 #include "base/as_stap.h"
@@ -299,7 +299,7 @@ typedef struct qtr_skey_s {
 static int              g_current_queries_count = 0;
 static pthread_rwlock_t g_query_lock
 						= PTHREAD_RWLOCK_WRITER_NONRECURSIVE_INITIALIZER_NP;
-static rchash         * g_query_job_hash = NULL;
+static cf_rchash      * g_query_job_hash = NULL;
 // Buf Builder Pool
 static cf_queue       * g_query_response_bb_pool  = 0;
 static cf_queue       * g_query_qwork_pool         = 0;
@@ -1076,7 +1076,7 @@ hash_put_qtr(as_query_transaction * qtr)
 		return AS_QUERY_CONTINUE;
 	}
 
-	int rc = rchash_put_unique(g_query_job_hash, &qtr->trid, sizeof(qtr->trid), qtr);
+	int rc = cf_rchash_put_unique(g_query_job_hash, &qtr->trid, sizeof(qtr->trid), qtr);
 	if (rc) {
 		cf_warning(AS_SINDEX, "QTR Put in hash failed with error %d", rc);
 	}
@@ -1088,8 +1088,8 @@ hash_put_qtr(as_query_transaction * qtr)
 static int
 hash_get_qtr(uint64_t trid, as_query_transaction ** qtr)
 {
-	int rv = rchash_get(g_query_job_hash, &trid, sizeof(trid), (void **) qtr);
-	if (RCHASH_OK != rv) {
+	int rv = cf_rchash_get(g_query_job_hash, &trid, sizeof(trid), (void **) qtr);
+	if (CF_RCHASH_OK != rv) {
 		cf_info(AS_SCAN, "Query job with transaction id [%"PRIu64"] does not exist", trid );
 	}
 	return rv;
@@ -1103,8 +1103,8 @@ hash_delete_qtr(as_query_transaction *qtr)
 		return AS_QUERY_CONTINUE;
 	}
 
-	int rv = rchash_delete(g_query_job_hash, &qtr->trid, sizeof(qtr->trid));
-	if (RCHASH_OK != rv) {
+	int rv = cf_rchash_delete(g_query_job_hash, &qtr->trid, sizeof(qtr->trid));
+	if (CF_RCHASH_OK != rv) {
 		cf_warning(AS_SINDEX, "Failed to delete qtr from query hash.");
 	}
 	return rv;
@@ -3062,14 +3062,14 @@ as_query_list_job_reduce_fn (void *key, uint32_t keylen, void *object, void *uda
 int
 as_query_list(char *name, cf_dyn_buf *db)
 {
-	uint32_t size = rchash_get_size(g_query_job_hash);
+	uint32_t size = cf_rchash_get_size(g_query_job_hash);
 	// No elements in the query job hash, return failure
 	if (!size) {
 		cf_dyn_buf_append_string(db, "No running queries");
 	}
 	// Else go through all the jobs in the hash and list their statistics
 	else {
-		rchash_reduce(g_query_job_hash, as_query_list_job_reduce_fn, db);
+		cf_rchash_reduce(g_query_job_hash, as_query_list_job_reduce_fn, db);
 		cf_dyn_buf_chomp(db);
 	}
 	return AS_QUERY_OK;
@@ -3155,7 +3155,7 @@ as_mon_query_jobstat_reduce_fn (void *key, uint32_t keylen, void *object, void *
 as_mon_jobstat *
 as_query_get_jobstat_all(int * size)
 {
-	*size = rchash_get_size(g_query_job_hash);
+	*size = cf_rchash_get_size(g_query_job_hash);
 	if(*size == 0) return AS_QUERY_OK;
 
 	as_mon_jobstat     * job_stats;
@@ -3168,7 +3168,7 @@ as_query_get_jobstat_all(int * size)
 	job_pool.jobstat  = &job_stats;
 	job_pool.index    = 0;
 	job_pool.max_size = *size;
-	rchash_reduce(g_query_job_hash, as_mon_query_jobstat_reduce_fn, &job_pool);
+	cf_rchash_reduce(g_query_job_hash, as_mon_query_jobstat_reduce_fn, &job_pool);
 	*size              = job_pool.index;
 	return job_stats;
 }
@@ -3246,7 +3246,7 @@ as_query_init()
 	cf_detail(AS_QUERY, "Initialize %d Query Worker threads.", g_config.query_threads);
 
 	// global job hash to keep track of the query job
-	int rc = rchash_create(&g_query_job_hash, query_job_trid_hash, NULL, sizeof(uint64_t), 64, RCHASH_CR_MT_MANYLOCK);
+	int rc = cf_rchash_create(&g_query_job_hash, query_job_trid_hash, NULL, sizeof(uint64_t), 64, CF_RCHASH_CR_MT_MANYLOCK);
 	if (rc) {
 		cf_crash(AS_QUERY, "Failed to create query job hash");
 	}

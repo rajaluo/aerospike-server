@@ -45,11 +45,11 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
+#include "citrusleaf/cf_rchash.h"
 #include "citrusleaf/cf_shash.h"
 
 #include "fault.h"
 #include "msg.h"
-#include "rchash.h"
 #include "util.h"
 
 #include "base/cfg.h"
@@ -150,8 +150,8 @@ typedef struct immigration_ldt_version_s {
 // Globals.
 //
 
-rchash *g_emigration_hash = NULL;
-rchash *g_immigration_hash = NULL;
+cf_rchash *g_emigration_hash = NULL;
+cf_rchash *g_immigration_hash = NULL;
 
 static uint64_t g_avoid_dest = 0;
 static cf_atomic32 g_emigration_id = 0;
@@ -248,14 +248,15 @@ as_migrate_init()
 
 	cf_queue_init(&g_emigration_q, sizeof(emigration*), 4096, true);
 
-	if (rchash_create(&g_emigration_hash, emigration_hashfn, emigration_destroy,
-			sizeof(uint32_t), 64, RCHASH_CR_MT_MANYLOCK) != RCHASH_OK) {
+	if (cf_rchash_create(&g_emigration_hash, emigration_hashfn,
+			emigration_destroy, sizeof(uint32_t), 64,
+			CF_RCHASH_CR_MT_MANYLOCK) != CF_RCHASH_OK) {
 		cf_crash(AS_MIGRATE, "couldn't create emigration hash");
 	}
 
-	if (rchash_create(&g_immigration_hash, immigration_hashfn,
+	if (cf_rchash_create(&g_immigration_hash, immigration_hashfn,
 			immigration_destroy, sizeof(immigration_hkey), 64,
-			RCHASH_CR_MT_BIGLOCK) != RCHASH_OK) {
+			CF_RCHASH_CR_MT_BIGLOCK) != CF_RCHASH_OK) {
 		cf_crash(AS_MIGRATE, "couldn't create immigration hash");
 	}
 
@@ -409,11 +410,11 @@ as_migrate_dump(bool verbose)
 	cf_info(AS_MIGRATE, "migration info:");
 	cf_info(AS_MIGRATE, "---------------");
 	cf_info(AS_MIGRATE, "number of emigrations in g_emigration_hash: %d",
-			rchash_get_size(g_emigration_hash));
+			cf_rchash_get_size(g_emigration_hash));
 	cf_info(AS_MIGRATE, "number of requested emigrations waiting in g_emigration_q : %d",
 			cf_queue_sz(&g_emigration_q));
 	cf_info(AS_MIGRATE, "number of immigrations in g_immigration_hash: %d",
-			rchash_get_size(g_immigration_hash));
+			cf_rchash_get_size(g_immigration_hash));
 	cf_info(AS_MIGRATE, "current emigration id: %d", g_emigration_id);
 	cf_info(AS_MIGRATE, "current emigration insert id: %d",
 			g_emigration_insert_id);
@@ -421,21 +422,21 @@ as_migrate_dump(bool verbose)
 	if (verbose) {
 		int item_num = 0;
 
-		if (rchash_get_size(g_emigration_hash) > 0) {
+		if (cf_rchash_get_size(g_emigration_hash) > 0) {
 			cf_info(AS_MIGRATE, "contents of g_emigration_hash:");
 			cf_info(AS_MIGRATE, "------------------------------");
 
-			rchash_reduce(g_emigration_hash, emigration_dump_reduce_fn,
+			cf_rchash_reduce(g_emigration_hash, emigration_dump_reduce_fn,
 					&item_num);
 		}
 
-		if (rchash_get_size(g_immigration_hash) > 0) {
+		if (cf_rchash_get_size(g_immigration_hash) > 0) {
 			item_num = 0;
 
 			cf_info(AS_MIGRATE, "contents of g_immigration_hash:");
 			cf_info(AS_MIGRATE, "-------------------------------");
 
-			rchash_reduce(g_immigration_hash, immigration_dump_reduce_fn,
+			cf_rchash_reduce(g_immigration_hash, immigration_dump_reduce_fn,
 					&item_num);
 		}
 	}
@@ -681,7 +682,7 @@ emigration_hash_insert(emigration *emig)
 	if (! emig->ctrl_q) {
 		emigration_init(emig); // creates emig->ctrl_q etc.
 
-		rchash_put(g_emigration_hash, (void *)&emig->id, sizeof(emig->id),
+		cf_rchash_put(g_emigration_hash, (void *)&emig->id, sizeof(emig->id),
 				(void *)emig);
 	}
 }
@@ -691,7 +692,8 @@ void
 emigration_hash_delete(emigration *emig)
 {
 	if (emig->ctrl_q) {
-		rchash_delete(g_emigration_hash, (void *)&emig->id, sizeof(emig->id));
+		cf_rchash_delete(g_emigration_hash, (void *)&emig->id,
+				sizeof(emig->id));
 	}
 	else {
 		emigration_release(emig);
@@ -1134,7 +1136,8 @@ void *
 run_immigration_reaper(void *unused)
 {
 	while (true) {
-		rchash_reduce(g_immigration_hash, immigration_reaper_reduce_fn, NULL);
+		cf_rchash_reduce(g_immigration_hash, immigration_reaper_reduce_fn,
+				NULL);
 		sleep(1);
 	}
 
@@ -1150,7 +1153,7 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 
 	if (immig->start_recv_ms == 0) {
 		// If the start time isn't set, immigration is still being processed.
-		return RCHASH_OK;
+		return CF_RCHASH_OK;
 	}
 
 	if (immig->cluster_key != as_paxos_get_cluster_key() ||
@@ -1168,10 +1171,10 @@ immigration_reaper_reduce_fn(void *key, uint32_t keylen, void *object,
 			}
 		}
 
-		return RCHASH_REDUCE_DELETE;
+		return CF_RCHASH_REDUCE_DELETE;
 	}
 
-	return RCHASH_OK;
+	return CF_RCHASH_OK;
 }
 
 
@@ -1334,8 +1337,8 @@ immigration_handle_start_request(cf_node src, msg *m) {
 	hkey.emig_id = emig_id;
 
 	while (true) {
-		if (rchash_put_unique(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-				(void *)immig) == RCHASH_OK) {
+		if (cf_rchash_put_unique(g_immigration_hash, (void *)&hkey,
+				sizeof(hkey), (void *)immig) == CF_RCHASH_OK) {
 			cf_rc_reserve(immig); // so either put or get yields ref-count 2
 
 			// First start request (not a retransmit) for this pid this round,
@@ -1347,8 +1350,8 @@ immigration_handle_start_request(cf_node src, msg *m) {
 
 		immigration *immig0;
 
-		if (rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-				(void *)&immig0) == RCHASH_OK) {
+		if (cf_rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+				(void *)&immig0) == CF_RCHASH_OK) {
 			immigration_release(immig); // free just-alloc'd immig ...
 
 			if (immig0->start_recv_ms == 0) {
@@ -1372,7 +1375,7 @@ immigration_handle_start_request(cf_node src, msg *m) {
 		return;
 	case AS_MIGRATE_AGAIN:
 		// Remove from hash so that the immig can be tried again.
-		rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
+		cf_rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
 		immigration_release(immig);
 		immigration_ack_start_request(src, m, OPERATION_START_ACK_EAGAIN);
 		return;
@@ -1451,8 +1454,8 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 	immigration *immig;
 
-	if (rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-			(void **)&immig) == RCHASH_OK) {
+	if (cf_rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+			(void **)&immig) == CF_RCHASH_OK) {
 		if (immig->start_result != AS_MIGRATE_OK || immig->start_recv_ms == 0) {
 			// If this immigration didn't start and reserve a partition, it's
 			// likely in the hash on a retransmit and this insert is for the
@@ -1577,8 +1580,8 @@ immigration_handle_done_request(cf_node src, msg *m) {
 
 	immigration *immig;
 
-	if (rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
-			(void **)&immig) == RCHASH_OK) {
+	if (cf_rchash_get(g_immigration_hash, (void *)&hkey, sizeof(hkey),
+			(void **)&immig) == CF_RCHASH_OK) {
 		if (immig->start_result != AS_MIGRATE_OK || immig->start_recv_ms == 0) {
 			// If this immigration didn't start and reserve a partition, it's
 			// likely in the hash on a retransmit and this DONE is for the
@@ -1632,8 +1635,8 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 
 	emigration *emig;
 
-	if (rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
-			(void **)&emig) != RCHASH_OK) {
+	if (cf_rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
+			(void **)&emig) != CF_RCHASH_OK) {
 		// Probably came from a migration prior to the latest rebalance.
 		as_fabric_msg_put(m);
 		return;
@@ -1695,8 +1698,8 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op)
 
 	emigration *emig;
 
-	if (rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
-			(void **)&emig) == RCHASH_OK) {
+	if (cf_rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
+			(void **)&emig) == CF_RCHASH_OK) {
 		if (emig->dest == src) {
 			if ((immig_features & MIG_FEATURES_SEEN) == 0 ||
 					(immig_features & MIG_FEATURE_MERGE) == 0) {

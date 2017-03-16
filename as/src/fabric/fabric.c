@@ -65,11 +65,11 @@
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_ll.h"
 #include "citrusleaf/cf_queue.h"
+#include "citrusleaf/cf_rchash.h"
 #include "citrusleaf/cf_shash.h"
 
 #include "fault.h"
 #include "msg.h"
-#include "rchash.h"
 #include "socket.h"
 #include "util.h"
 
@@ -149,7 +149,7 @@ typedef struct fabric_state_s {
 	send_entry			*send_head;
 
 	pthread_mutex_t		node_hash_lock;
-	rchash				*node_hash; // key is cf_node, value is (fabric_node *)
+	cf_rchash			*node_hash; // key is cf_node, value is (fabric_node *)
 } fabric_state;
 
 typedef struct fabric_buffer_s {
@@ -430,7 +430,7 @@ as_fabric_init()
 
 	pthread_mutex_init(&g_fabric.node_hash_lock, 0);
 
-	rchash_create(&g_fabric.node_hash, cf_nodeid_rchash_fn,
+	cf_rchash_create(&g_fabric.node_hash, cf_nodeid_rchash_fn,
 			fabric_node_destructor, sizeof(cf_node), 128, 0);
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
@@ -545,7 +545,7 @@ as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel)
 	}
 
 	if (! node->live) {
-		fabric_node_release(node); // rchash_get
+		fabric_node_release(node); // cf_rchash_get
 		return AS_FABRIC_ERR_NO_NODE;
 	}
 
@@ -583,7 +583,7 @@ as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel)
 		break;
 	}
 
-	fabric_node_release(node); // rchash_get
+	fabric_node_release(node); // cf_rchash_get
 
 	return AS_FABRIC_SUCCESS;
 }
@@ -692,7 +692,7 @@ void
 as_fabric_rate_capture(fabric_rate *rate)
 {
 	pthread_mutex_lock(&g_fabric.node_hash_lock);
-	rchash_reduce(g_fabric.node_hash, fabric_rate_node_reduce_fn, rate);
+	cf_rchash_reduce(g_fabric.node_hash, fabric_rate_node_reduce_fn, rate);
 	pthread_mutex_unlock(&g_fabric.node_hash_lock);
 }
 
@@ -736,7 +736,7 @@ fabric_get_node_list(as_node_list *nl)
 	nl->alloc_sz = MAX_NODES_LIST;
 
 	pthread_mutex_lock(&g_fabric.node_hash_lock);
-	rchash_reduce(g_fabric.node_hash, fabric_get_node_list_fn, nl);
+	cf_rchash_reduce(g_fabric.node_hash, fabric_get_node_list_fn, nl);
 	pthread_mutex_unlock(&g_fabric.node_hash_lock);
 
 	return nl->sz;
@@ -1137,11 +1137,11 @@ fabric_node_get(cf_node node_id)
 	fabric_node *node;
 
 	pthread_mutex_lock(&g_fabric.node_hash_lock);
-	int rv = rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
+	int rv = cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
 			(void **)&node);
 	pthread_mutex_unlock(&g_fabric.node_hash_lock);
 
-	if (rv != RCHASH_OK) {
+	if (rv != CF_RCHASH_OK) {
 		return NULL;
 	}
 
@@ -1155,16 +1155,16 @@ fabric_node_get_or_create(cf_node node_id)
 
 	pthread_mutex_lock(&g_fabric.node_hash_lock);
 
-	if (rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
-			(void **)&node) == RCHASH_OK) {
+	if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
+			(void **)&node) == CF_RCHASH_OK) {
 		pthread_mutex_unlock(&g_fabric.node_hash_lock);
 		return node;
 	}
 
 	node = fabric_node_create(node_id);
 
-	if (rchash_put_unique(g_fabric.node_hash, &node_id, sizeof(cf_node),
-			node) != RCHASH_OK) {
+	if (cf_rchash_put_unique(g_fabric.node_hash, &node_id, sizeof(cf_node),
+			node) != CF_RCHASH_OK) {
 		cf_crash(AS_FABRIC, "fabric_node_get_or_create(%lx)", node_id);
 	}
 
@@ -1184,10 +1184,10 @@ fabric_node_pop(cf_node node_id)
 
 	pthread_mutex_lock(&g_fabric.node_hash_lock);
 
-	if (rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
-			(void **)&node) == RCHASH_OK) {
-		if (rchash_delete(g_fabric.node_hash, &node_id, sizeof(node_id)) !=
-				RCHASH_OK) {
+	if (cf_rchash_get(g_fabric.node_hash, &node_id, sizeof(cf_node),
+			(void **)&node) == CF_RCHASH_OK) {
+		if (cf_rchash_delete(g_fabric.node_hash, &node_id, sizeof(node_id)) !=
+				CF_RCHASH_OK) {
 			cf_crash(AS_FABRIC, "fabric_node_pop(%lx)", node_id);
 		}
 	}
@@ -1712,7 +1712,7 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	fabric_node *node = fabric_node_get_or_create(node_id);
 
 	if (! fabric_node_add_connection(node, fc)) {
-		fabric_node_release(node); // from rchash_get
+		fabric_node_release(node); // from cf_rchash_get
 		return false;
 	}
 
@@ -1720,7 +1720,7 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	int rv = msg_get_uint32(m, FS_CHANNEL, &pool_id);
 
 	if (rv == 0 && pool_id >= AS_FABRIC_N_CHANNELS) {
-		fabric_node_release(node); // from rchash_get
+		fabric_node_release(node); // from cf_rchash_get
 		return false;
 	}
 
@@ -1743,7 +1743,7 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	}
 	// else - don't enable sending for old fabric compatibility.
 
-	fabric_node_release(node); // from rchash_get
+	fabric_node_release(node); // from cf_rchash_get
 	fabric_connection_release(fc); // from g_accept_poll
 
 	return true;
@@ -2309,7 +2309,7 @@ run_fabric_node_health(void *arg)
 		uint32_t ms = cf_getms() - start;
 
 		pthread_mutex_lock(&g_fabric.node_hash_lock);
-		rchash_reduce(g_fabric.node_hash, fabric_node_health_reduce_fn, &ms);
+		cf_rchash_reduce(g_fabric.node_hash, fabric_node_health_reduce_fn, &ms);
 		pthread_mutex_unlock(&g_fabric.node_hash_lock);
 	}
 
@@ -2514,10 +2514,10 @@ typedef struct ll_fabric_transact_xmit_element_s {
 //
 
 static cf_atomic64 g_fabric_transact_tid = 0;
-static rchash *g_fabric_transact_xmit_hash = 0;
+static cf_rchash *g_fabric_transact_xmit_hash = 0;
 static as_fabric_transact_recv_fn fabric_transact_recv_cb[M_TYPE_MAX] = { 0 };
 static void *fabric_transact_recv_udata[M_TYPE_MAX] = { 0 };
-static rchash *g_fabric_transact_recv_hash = 0;
+static cf_rchash *g_fabric_transact_recv_hash = 0;
 
 
 //==========================================================
@@ -2561,13 +2561,13 @@ tid_code_clear(uint64_t tid)
 void
 as_fabric_transact_init()
 {
-	rchash_create(&g_fabric_transact_xmit_hash, fabric_tranact_xmit_hash_fn,
+	cf_rchash_create(&g_fabric_transact_xmit_hash, fabric_tranact_xmit_hash_fn,
 			fabric_transact_xmit_destructor,
-			sizeof(uint64_t), 64 /* n_buckets */, RCHASH_CR_MT_MANYLOCK);
+			sizeof(uint64_t), 64 /* n_buckets */, CF_RCHASH_CR_MT_MANYLOCK);
 
-	rchash_create(&g_fabric_transact_recv_hash, fabric_tranact_recv_hash_fn,
+	cf_rchash_create(&g_fabric_transact_recv_hash, fabric_tranact_recv_hash_fn,
 			fabric_transact_recv_destructor,
-			sizeof(uint64_t), 64 /* n_buckets */, RCHASH_CR_MT_MANYLOCK);
+			sizeof(uint64_t), 64 /* n_buckets */, CF_RCHASH_CR_MT_MANYLOCK);
 
 	pthread_t thread;
 	pthread_attr_t attrs;
@@ -2622,8 +2622,8 @@ as_fabric_transact_start(cf_node dest, msg *m, int timeout_ms,
 	// Put will take the reference, need to keep one around for the send.
 	cf_rc_reserve(ft);
 
-	if (rchash_put(g_fabric_transact_xmit_hash, &ft->tid, sizeof(ft->tid),
-			ft) != RCHASH_OK) {
+	if (cf_rchash_put(g_fabric_transact_xmit_hash, &ft->tid, sizeof(ft->tid),
+			ft) != CF_RCHASH_OK) {
 		cf_warning(AS_FABRIC, "as_fabric_transact: can't put in hash");
 		cf_rc_release(ft);
 		fabric_transact_xmit_release(ft);
@@ -2721,15 +2721,15 @@ fabric_transact_msg_fn(cf_node node_id, msg *m, void *udata)
 	if (code == TRANSACT_CODE_RESPONSE) {
 		fabric_transact_xmit *ft;
 
-		if (rchash_get(g_fabric_transact_xmit_hash, &tid, sizeof(tid),
-				(void **)&ft) != RCHASH_OK) {
+		if (cf_rchash_get(g_fabric_transact_xmit_hash, &tid, sizeof(tid),
+				(void **)&ft) != CF_RCHASH_OK) {
 			cf_detail(AS_FABRIC, "transact_msg: {%lu} no fabric transmit structure in global hash", tid);
 			as_fabric_msg_put(m);
 			return 0;
 		}
 
-		if (rchash_delete(g_fabric_transact_xmit_hash, &tid, sizeof(tid)) ==
-				RCHASH_ERR_NOTFOUND) {
+		if (cf_rchash_delete(g_fabric_transact_xmit_hash, &tid, sizeof(tid)) ==
+				CF_RCHASH_ERR_NOTFOUND) {
 			cf_detail(AS_FABRIC, "transact_msg: {%lu} concurrent thread has already removed transaction", tid);
 			fabric_transact_xmit_release(ft);
 			as_fabric_msg_put(m);
@@ -2825,7 +2825,7 @@ run_fabric_transact(void *arg)
 		// Visit each entry in g_fabric_transact_xmit_hash and select entries to
 		// be retransmitted or timed out. Add that transaction id (tid) in the
 		// linked list 'll_fabric_transact_xmit'.
-		rchash_reduce(g_fabric_transact_xmit_hash,
+		cf_rchash_reduce(g_fabric_transact_xmit_hash,
 				fabric_transact_xmit_reduce_fn,
 				(void *)&ll_fabric_transact_xmit);
 
@@ -2911,8 +2911,8 @@ ll_ftx_reduce_fn(cf_ll_element *le, void *udata)
 	fabric_transact_xmit *ftx;
 	uint64_t tid = ll_ftx_ele->tid;
 
-	// rchash_get increment ref count on transaction ftx.
-	int rv = rchash_get(g_fabric_transact_xmit_hash, &tid, sizeof(tid),
+	// cf_rchash_get increment ref count on transaction ftx.
+	int rv = cf_rchash_get(g_fabric_transact_xmit_hash, &tid, sizeof(tid),
 			(void **)&ftx);
 
 	if (rv != 0) {
@@ -2928,8 +2928,8 @@ ll_ftx_reduce_fn(cf_ll_element *le, void *udata)
 		}
 
 		cf_detail(AS_FABRIC, "fabric transact: %lu timed out", tid);
-		// rchash_delete removes ftx from hash and decrement ref count on it.
-		rchash_delete(g_fabric_transact_xmit_hash, &tid, sizeof(tid));
+		// cf_rchash_delete removes ftx from hash and decrement ref count on it.
+		cf_rchash_delete(g_fabric_transact_xmit_hash, &tid, sizeof(tid));
 		// It should be final release of transaction ftx. On final release, it
 		// also decrements message ref count, taken by initial fabric_send().
 		fabric_transact_xmit_release(ftx);
@@ -2950,7 +2950,7 @@ ll_ftx_reduce_fn(cf_ll_element *le, void *udata)
 			}
 		}
 
-		// Decrement ref count, incremented by rchash_get.
+		// Decrement ref count, incremented by cf_rchash_get.
 		fabric_transact_xmit_release(ftx);
 	}
 

@@ -36,10 +36,10 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_rchash.h"
 
 #include "fault.h"
 #include "msg.h"
-#include "rchash.h"
 #include "util.h"
 
 #include "base/cfg.h"
@@ -101,7 +101,7 @@ int rw_msg_cb(cf_node id, msg* m, void* udata);
 // Globals.
 //
 
-static rchash* g_rw_request_hash = NULL;
+static cf_rchash* g_rw_request_hash = NULL;
 
 
 //==========================================================
@@ -111,8 +111,9 @@ static rchash* g_rw_request_hash = NULL;
 void
 as_rw_init()
 {
-	rchash_create(&g_rw_request_hash, rw_request_hash_fn, rw_request_hdestroy,
-			sizeof(rw_request_hkey), 32 * 1024, RCHASH_CR_MT_MANYLOCK);
+	cf_rchash_create(&g_rw_request_hash, rw_request_hash_fn,
+			rw_request_hdestroy, sizeof(rw_request_hkey), 32 * 1024,
+			CF_RCHASH_CR_MT_MANYLOCK);
 
 	pthread_t thread;
 	pthread_attr_t attrs;
@@ -132,7 +133,7 @@ as_rw_init()
 uint32_t
 rw_request_hash_count()
 {
-	return rchash_get_size(g_rw_request_hash);
+	return cf_rchash_get_size(g_rw_request_hash);
 }
 
 
@@ -142,25 +143,25 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 {
 	int insert_rv;
 
-	while ((insert_rv = rchash_put_unique(g_rw_request_hash, hkey,
-			sizeof(*hkey), rw)) != RCHASH_OK) {
+	while ((insert_rv = cf_rchash_put_unique(g_rw_request_hash, hkey,
+			sizeof(*hkey), rw)) != CF_RCHASH_OK) {
 
-		if (insert_rv != RCHASH_ERR_FOUND) {
+		if (insert_rv != CF_RCHASH_ERR_FOUND) {
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN; // malloc failure
 			return TRANS_DONE_ERROR;
 		}
 		// else - rw_request with this digest already in hash - get it.
 
 		rw_request* rw0;
-		int get_rv = rchash_get(g_rw_request_hash, hkey, sizeof(*hkey),
+		int get_rv = cf_rchash_get(g_rw_request_hash, hkey, sizeof(*hkey),
 				(void**)&rw0);
 
-		if (get_rv == RCHASH_ERR_NOTFOUND) {
+		if (get_rv == CF_RCHASH_ERR_NOTFOUND) {
 			// Try insertion again immediately.
 			continue;
 		}
 		// else - got it - handle "hot key" scenario.
-		cf_assert(get_rv == RCHASH_OK, AS_RW, "rchash_get error");
+		cf_assert(get_rv == CF_RCHASH_OK, AS_RW, "cf_rchash_get error");
 
 		pthread_mutex_lock(&rw0->lock);
 
@@ -179,7 +180,7 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 void
 rw_request_hash_delete(rw_request_hkey* hkey, rw_request* rw)
 {
-	rchash_delete_object(g_rw_request_hash, hkey, sizeof(*hkey), rw);
+	cf_rchash_delete_object(g_rw_request_hash, hkey, sizeof(*hkey), rw);
 }
 
 
@@ -188,7 +189,7 @@ rw_request_hash_get(rw_request_hkey* hkey)
 {
 	rw_request* rw = NULL;
 
-	rchash_get(g_rw_request_hash, hkey, sizeof(*hkey), (void**)&rw);
+	cf_rchash_get(g_rw_request_hash, hkey, sizeof(*hkey), (void**)&rw);
 
 	return rw;
 }
@@ -273,7 +274,7 @@ run_retransmit(void* arg)
 		now.now_ns = cf_getns();
 		now.now_ms = now.now_ns / 1000000;
 
-		rchash_reduce(g_rw_request_hash, retransmit_reduce_fn, &now);
+		cf_rchash_reduce(g_rw_request_hash, retransmit_reduce_fn, &now);
 	}
 
 	return NULL;
@@ -297,7 +298,7 @@ retransmit_reduce_fn(void* key, uint32_t keylen, void* data, void* udata)
 
 		pthread_mutex_unlock(&rw->lock);
 
-		return RCHASH_REDUCE_DELETE;
+		return CF_RCHASH_REDUCE_DELETE;
 	}
 
 	if (rw->xmit_ms < now->now_ms) {

@@ -32,10 +32,10 @@
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
+#include "citrusleaf/cf_rchash.h"
 #include "citrusleaf/cf_shash.h"
 
 #include "msg.h"
-#include "rchash.h"
 #include "util.h"
 
 #include "fabric/hb.h"
@@ -217,8 +217,8 @@ typedef struct immigration_hkey_s {
 
 
 // Globals.
-extern rchash *g_emigration_hash;
-extern rchash *g_immigration_hash;
+extern cf_rchash *g_emigration_hash;
+extern cf_rchash *g_immigration_hash;
 
 
 // Emigration, immigration, & pickled record destructors.
