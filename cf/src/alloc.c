@@ -188,7 +188,7 @@ __thread int jem_ns_arena = -1;
  * Forward references.
  */
 static void make_location(location_t *loc, char *file, int line);
-static void copy_location(location_t *loc_out, location_t *loc_in);
+static void copy_location(location_t *loc_out, const location_t *loc_in);
 
 /********************************************************************************/
 
@@ -1002,9 +1002,9 @@ log_mallinfo(void)
  *  Hash function for the loc2alloc shash table.
  */
 static uint32_t
-location_hash_fn(void *loc)
+location_hash_fn(const void *loc)
 {
-	char *b = (char *) loc;
+	const char *b = (const char *) loc;
 	uint32_t acc = 0;
 
 	for (int i = 0; i < sizeof(location_t); i++) {
@@ -1206,9 +1206,9 @@ typedef struct mem_count_report_s {
  * This shash reduce function is used to extract the records for the pointer to program location report.
  */
 static int
-mem_count_report_p2l_reduce_fn(void *key, void *data, void *udata)
+mem_count_report_p2l_reduce_fn(const void *key, void *data, void *udata)
 {
-	alloc_loc_t *alloc_loc = (alloc_loc_t *) data;
+	const alloc_loc_t *alloc_loc = (const alloc_loc_t *) data;
 	mem_count_report_t *report = (mem_count_report_t *) udata;
 	alloc_loc_t *rec = report->u.p2l_output;
 
@@ -1247,9 +1247,9 @@ copy_alloc_info(alloc_info_t *to, alloc_info_t *from)
  * This shash reduce function is used to extract the records for the program location to allocation info report.
  */
 static int
-mem_count_report_l2a_reduce_fn(void *key, void *data, void *udata)
+mem_count_report_l2a_reduce_fn(const void *key, void *data, void *udata)
 {
-	location_t *loc = (location_t *) key;
+	const location_t *loc = (const location_t *) key;
 	alloc_info_t *alloc_info = (alloc_info_t *) data;
 	mem_count_report_t *report = (mem_count_report_t *) udata;
 	alloc_info_t *rec = report->u.l2a_output;
@@ -1438,10 +1438,10 @@ make_location(location_t *loc, char *file, int line)
 /* copy_location
  * Copy one location_t object representing a program location to another. */
 static void
-copy_location(location_t *loc_out, location_t *loc_in)
+copy_location(location_t *loc_out, const location_t *loc_in)
 {
 	memset((char *) loc_out, 0, sizeof(location_t));
-	memcpy((char *) loc_out, (char *) loc_in, sizeof(location_t));
+	memcpy((char *) loc_out, (const char *) loc_in, sizeof(location_t));
 }
 
 /* update_alloc_info
@@ -1449,9 +1449,9 @@ copy_location(location_t *loc_out, location_t *loc_in)
  * The old value will be NULL if the key is not present.
  * The updated new value is the output. */
 static void
-update_alloc_info(void *key, void *value_old, void *value_new, void *udata)
+update_alloc_info(const void *key, void *value_old, void *value_new, void *udata)
 {
-	location_t *loc = (location_t *) key;
+	const location_t *loc = (const location_t *) key;
 	alloc_info_t *alloc_info_old = (alloc_info_t *) value_old;
 	alloc_info_t *alloc_info_new = (alloc_info_t *) value_new;
 
@@ -1463,7 +1463,7 @@ update_alloc_info(void *key, void *value_old, void *value_new, void *udata)
 	make_location(&(alloc_info_new->loc), "(unused)", 0);
 
 	if (0 > alloc_info_new->net_alloc_count) {
-		cf_crash(CF_ALLOC, "allocation count for location \"%s\" just went negative!", (char *) loc);
+		cf_crash(CF_ALLOC, "allocation count for location \"%s\" just went negative!", (const char *) loc);
 	}
 }
 

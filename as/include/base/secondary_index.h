@@ -569,7 +569,7 @@ extern void as_sindex_gconfig_default(struct as_config_s *c);
 extern int  as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
 			bool is_create, bool *is_smd_op, char * cmd);
 void        as_sindex_config_var_default(as_sindex_config_var *si_cfg);
-int         as_sindex_cfg_var_hash_reduce_fn(void *key, void *data, void *udata);
+int         as_sindex_cfg_var_hash_reduce_fn(const void *key, void *data, void *udata);
 void        as_sindex__config_default(as_sindex *si);
 void        as_sindex_ticker_start(as_namespace * ns, as_sindex * si);
 void        as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint64_t start_time);
@@ -685,7 +685,7 @@ do {                                            \
  */
 // **************************************************************************************************
 static inline uint32_t
-as_sindex_config_var_hash_fn(void* p_key)
+as_sindex_config_var_hash_fn(const void* p_key)
 {
 	return (uint32_t)cf_hash_fnv(p_key, strlen((const char *)p_key));
 }

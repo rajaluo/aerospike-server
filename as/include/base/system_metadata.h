@@ -115,7 +115,7 @@ typedef int (*as_smd_get_cb)(char *module, as_smd_item_list_t *items, void *udat
  *    Alternative merge policies:  highest generation, latest timestamp
  *    Configurable via registering a per-module callback function.
  */
-typedef int (*as_smd_merge_cb)(char *module, as_smd_item_list_t **item_list_out, as_smd_item_list_t **item_lists_in, size_t num_lists, void *udata);
+typedef int (*as_smd_merge_cb)(const char *module, as_smd_item_list_t **item_list_out, as_smd_item_list_t **item_lists_in, size_t num_lists, void *udata);
 
 /*
  *  Callback function type for metadata merge item conflict resolution functions.
@@ -236,5 +236,5 @@ void as_smd_info_cmd(char *cmd, cf_node node_id, char *module, char *key, char *
 /*
  *  Merge callback function implementing the majority consensus merge policy.
  */
-int as_smd_majority_consensus_merge(char *module, as_smd_item_list_t **item_list_out,
+int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **item_list_out,
 									as_smd_item_list_t **item_lists_in, size_t num_lists, void *udata);

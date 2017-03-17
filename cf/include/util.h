@@ -66,11 +66,11 @@ cf_msb(uint64_t value)
 /* cf_hash_fnv
  * The 64-bit Fowler-Noll-Vo hash function (FNV-1a) */
 static inline uint64_t
-cf_hash_fnv(void *buf, size_t bufsz)
+cf_hash_fnv(const void *buf, size_t bufsz)
 {
     uint64_t hash = 0xcbf29ce484222325ULL;
-    uint8_t *bufp = (uint8_t *) buf;
-    uint8_t *bufe = bufp + bufsz;
+    const uint8_t *bufp = (const uint8_t *) buf;
+    const uint8_t *bufe = bufp + bufsz;
 
     while (bufp < bufe) {
         /* XOR the current byte into the bottom of the hash */
@@ -194,8 +194,8 @@ cf_digest_compare(const cf_digest *d1, const cf_digest *d2)
 // Sorry, too lazy to create a whole new file for just one function
 #define CF_NODE_UNSET (0xFFFFFFFFFFFFFFFF)
 typedef uint64_t cf_node;
-extern uint32_t cf_nodeid_shash_fn(void *value);
-extern uint32_t cf_nodeid_rchash_fn(void *value, uint32_t value_len);
+extern uint32_t cf_nodeid_shash_fn(const void *value);
+extern uint32_t cf_nodeid_rchash_fn(const void *value, uint32_t value_len);
 extern char *cf_node_name(void);
 typedef enum paxos_protocol_enum { AS_PAXOS_PROTOCOL_UNDEF, AS_PAXOS_PROTOCOL_NONE, AS_PAXOS_PROTOCOL_V1, AS_PAXOS_PROTOCOL_V2, AS_PAXOS_PROTOCOL_V3, AS_PAXOS_PROTOCOL_V4 } paxos_protocol_enum;
 typedef enum paxos_recovery_policy_enum { AS_PAXOS_RECOVERY_POLICY_UNDEF, AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER } paxos_recovery_policy_enum;
