@@ -1492,25 +1492,20 @@ static int as_smd_write(char *module, json_t *module_smd)
 	int retval = 0;
 
 	char smd_path[MAX_PATH_LEN];
+	char smd_save_path[MAX_PATH_LEN];
 	size_t dump_flags = JSON_INDENT(3) | JSON_ENSURE_ASCII | JSON_PRESERVE_ORDER;
 
 	snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, module);
+	snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
 
-	// If a file with this name already exists, rename the old version first.
-	struct stat buf;
-	if (!stat(smd_path, &buf)) {
-		char smd_save_path[MAX_PATH_LEN];
-		snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
-		if (0 > rename(smd_path, smd_save_path)) {
-			cf_warning(AS_SMD, "error on renaming existing metadata file \"%s\": %s (%d)", smd_save_path, cf_strerror(errno), errno);
-		}
-	} else {
-		cf_debug(AS_SMD, "failed to rename old persisted System Metadata file \"%s\" for module \"%s\": %s (%d)", smd_path, module, cf_strerror(errno), errno);
+	if (json_dump_file(module_smd, smd_save_path, dump_flags) < 0) {
+		cf_warning(AS_SMD, "failed to dump System Metadata for module \"%s\" to file \"%s\": %s (%d)", module, smd_path, cf_strerror(errno), errno);
+		return -1;
 	}
 
-	if (0 > json_dump_file(module_smd, smd_path, dump_flags)) {
-		cf_warning(AS_SMD, "failed to dump System Metadata for module \"%s\" to file \"%s\": %s (%d)", module, smd_path, cf_strerror(errno), errno);
-		retval = -1;
+	if (rename(smd_save_path, smd_path) != 0) {
+		cf_warning(AS_SMD, "error on renaming existing metadata file \"%s\": %s (%d)", smd_save_path, cf_strerror(errno), errno);
+		return -1;
 	}
 
 	return retval;
