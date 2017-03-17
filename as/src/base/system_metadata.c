@@ -517,6 +517,8 @@ typedef struct as_smd_module_s {
 	// Hash table of metadata received from all external nodes mapping key (as_smd_external_item_key_t *) ==> metadata item (as_smd_item_t *).
 	cf_rchash *external_metadata;
 
+	// Does the module need to be persisted?
+	bool dirty;
 } as_smd_module_t;
 
 
@@ -1490,25 +1492,20 @@ static int as_smd_write(char *module, json_t *module_smd)
 	int retval = 0;
 
 	char smd_path[MAX_PATH_LEN];
+	char smd_save_path[MAX_PATH_LEN];
 	size_t dump_flags = JSON_INDENT(3) | JSON_ENSURE_ASCII | JSON_PRESERVE_ORDER;
 
 	snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, module);
+	snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
 
-	// If a file with this name already exists, rename the old version first.
-	struct stat buf;
-	if (!stat(smd_path, &buf)) {
-		char smd_save_path[MAX_PATH_LEN];
-		snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
-		if (0 > rename(smd_path, smd_save_path)) {
-			cf_warning(AS_SMD, "error on renaming existing metadata file \"%s\": %s (%d)", smd_save_path, cf_strerror(errno), errno);
-		}
-	} else {
-		cf_debug(AS_SMD, "failed to rename old persisted System Metadata file \"%s\" for module \"%s\": %s (%d)", smd_path, module, cf_strerror(errno), errno);
+	if (json_dump_file(module_smd, smd_save_path, dump_flags) < 0) {
+		cf_warning(AS_SMD, "failed to dump System Metadata for module \"%s\" to file \"%s\": %s (%d)", module, smd_path, cf_strerror(errno), errno);
+		return -1;
 	}
 
-	if (0 > json_dump_file(module_smd, smd_path, dump_flags)) {
-		cf_warning(AS_SMD, "failed to dump System Metadata for module \"%s\" to file \"%s\": %s (%d)", module, smd_path, cf_strerror(errno), errno);
-		retval = -1;
+	if (rename(smd_save_path, smd_path) != 0) {
+		cf_warning(AS_SMD, "error on renaming existing metadata file \"%s\": %s (%d)", smd_save_path, cf_strerror(errno), errno);
+		return -1;
 	}
 
 	return retval;
@@ -1647,6 +1644,11 @@ static int as_smd_module_persist(as_smd_module_t *module_obj)
 {
 	int retval = 0;
 
+	// Avoid unnecessary writes.
+	if (!module_obj->dirty) {
+		return retval;
+	}
+
 	if (module_obj->json) {
 		cf_warning(AS_SMD, "module \"%s\" JSON is unexpectedly non-NULL (rc %zu) ~~ Nulling!", module_obj->module, module_obj->json->refcount);
 		json_decref(module_obj->json);
@@ -1666,6 +1668,9 @@ static int as_smd_module_persist(as_smd_module_t *module_obj)
 	if (module_obj->json && (retval = as_smd_write(module_obj->module, module_obj->json))) {
 		cf_warning(AS_SMD, "failed to write persisted System Metadata file for module \"%s\"", module_obj->module);
 		retval = -1;
+	} else {
+		// The module's SMD has been persisted.
+		module_obj->dirty = false;
 	}
 
 	// Release the module's JSON if necessary.
@@ -2090,6 +2095,11 @@ static int as_smd_metadata_change(as_smd_t *smd, as_smd_msg_op_t op, as_smd_item
 		}
 
 		as_smd_module_t *module_obj   = as_smd_module_get(smd, item, NULL, NULL);
+
+		// At the end of module creation, SMD will be persisted.
+		if (AS_SMD_ACCEPT_OPT_CREATE == accept_opt) {
+			module_obj->dirty = true;
+		}
 
 		if (module_obj->accept_cb) {
 			// Invoke the module's registered accept policy callback function.
@@ -2970,6 +2980,9 @@ static int as_smd_accept_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as
 		cf_debug(AS_SMD, "Calling accept callback with OPT_MERGE for module %s with nitems %zu", smd_msg->items->module_name, smd_msg->items->num_items);
 		(module_obj->accept_cb)(module_obj->module, smd_msg->items, module_obj->accept_udata, smd_msg->options);
 	}
+
+	// SMD should now be persisted.
+	module_obj->dirty = true;
 
 	// Persist the accepted metadata for this module.
 	if (as_smd_module_persist(module_obj)) {
