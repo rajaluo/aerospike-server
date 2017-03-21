@@ -209,14 +209,11 @@ rw_request_hash_dump()
 //
 
 uint32_t
-rw_request_hash_fn(const void* value, uint32_t value_len)
+rw_request_hash_fn(const void* key, uint32_t key_size)
 {
-	rw_request_hkey* hkey = (rw_request_hkey*)value;
+	rw_request_hkey* hkey = (rw_request_hkey*)key;
 
-	// TODO - surely this can be simpler, use 4 bytes???
-	return	(hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE1] << 16) |
-			(hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE2] << 8) |
-			(hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE3]);
+	return *(uint32_t*)&hkey->keyd.digest[DIGEST_SCRAMBLE_BYTE1];
 }
 
 

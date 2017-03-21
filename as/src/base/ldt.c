@@ -665,11 +665,10 @@ as_ldt_digest_randomizer(cf_digest *dig)
 	// window to have collision
 	memcpy(&dig->digest[DIGEST_SCRAMBLE_BYTE1], &digest_rand, 3);
 
-	// 6 bytes system clock in microsecond ... make it good for 10^16 microseconds
-	// = 317 years
-	uint64_t clock = cf_clock_getabsoluteus();
-	dig->digest[DIGEST_CLOCK_ZERO_BYTE]                  = ((clock & 0x0000ff0000000000) >> 40);
-	*(uint64_t *)(&dig->digest[DIGEST_CLOCK_START_BYTE]) = ((clock & 0x000000ffffffffff)); // 6 byte clock
+	// 3 bytes system clock in microseconds.
+	uint32_t clock = (uint32_t)cf_clock_getabsoluteus();
+	dig->digest[DIGEST_CLOCK_ZERO_BYTE]                  = ((clock & 0x00ff0000) >> 16);
+	*(uint32_t *)(&dig->digest[DIGEST_CLOCK_START_BYTE]) = ((clock & 0x0000ffff));
 
 	as_ldt_subdigest_resetversion(dig);
 }

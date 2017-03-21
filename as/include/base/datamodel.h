@@ -69,8 +69,8 @@
  */
 #define AS_CLUSTER_DEFAULT_SZ (AS_CLUSTER_LEGACY_SZ)
 
-#define AS_STORAGE_MAX_DEVICES 32 // maximum devices per namespace
-#define AS_STORAGE_MAX_FILES 32 // maximum files per namespace
+#define AS_STORAGE_MAX_DEVICES (64 - 1) // maximum devices per namespace
+#define AS_STORAGE_MAX_FILES (64 - 1) // maximum files per namespace
 #define AS_STORAGE_MAX_DEVICE_SIZE (2L * 1024L * 1024L * 1024L * 1024L) // 2Tb, due to rblock_id in as_index
 
 #define OBJ_SIZE_HIST_NUM_BUCKETS 100
@@ -84,21 +84,21 @@
 // [0-1] For Partitionid
 // [1-2] For tree sprigs and locks
 // [2-3] For the Lock
-// [4-6] Scrambled bytes
+// [4-6] Scrambled bytes (4-7 used for rw_request hash)
 #define DIGEST_SCRAMBLE_BYTE1       4
 #define DIGEST_SCRAMBLE_BYTE2       5
 #define DIGEST_SCRAMBLE_BYTE3       6
-// [8]   SSD device hash
-//       DO NOT CHANGE THIS 2.0 STORAGE uses it
-//       Needed for backward compatibility
-#define DIGEST_STORAGE_BYTE			8
+// [8-11]   SSD device hash
+// Note - overlaps 3 old LDT clock bytes (9-11), meaning old subrecords of one
+// LDT can now be spread to different devices.
+#define DIGEST_STORAGE_BASE_BYTE	8
 
-// [7] [9-13]  // 6 byte clock
+// [7] [12-13]  // 3 byte clock
 #define DIGEST_CLOCK_ZERO_BYTE      7
-#define DIGEST_CLOCK_START_BYTE     9 // upto 13
+#define DIGEST_CLOCK_START_BYTE     12 // up to 13
 
 // [14-19]  // 6 byte version
-#define DIGEST_VERSION_START_POS   14 // upto 19
+#define DIGEST_VERSION_START_POS   14 // up to 19
 // Define the size of the Version Info that we'll write into the LDT control Map
 #define LDT_VERSION_SIZE  6
 

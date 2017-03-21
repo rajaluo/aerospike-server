@@ -173,10 +173,10 @@ ssd_shadow_fd_put(drv_ssd *ssd, int fd)
 
 
 // Decide which device a record belongs on.
-static inline int
+static inline uint32_t
 ssd_get_file_id(drv_ssds *ssds, cf_digest *keyd)
 {
-	return keyd->digest[DIGEST_STORAGE_BYTE] % ssds->n_ssds;
+	return *(uint32_t*)&keyd->digest[DIGEST_STORAGE_BASE_BYTE] % ssds->n_ssds;
 }
 
 
@@ -557,7 +557,7 @@ defrag_move_record(drv_ssd *ssd, drv_ssd_block *block, as_index *r)
 	ssd = &ssds->ssds[ssd_get_file_id(ssds, &block->keyd)];
 
 	if (! ssd) {
-		cf_warning(AS_DRV_SSD, "{%s} defrag_move_record: no drv_ssd for file_id %d",
+		cf_warning(AS_DRV_SSD, "{%s} defrag_move_record: no drv_ssd for file_id %u",
 				ssds->ns->name, ssd_get_file_id(ssds, &block->keyd));
 		return;
 	}
@@ -1723,7 +1723,7 @@ ssd_write(as_storage_rd *rd)
 	drv_ssd *ssd = rd->u.ssd.ssd;
 
 	if (! ssd) {
-		cf_warning(AS_DRV_SSD, "{%s} ssd_write: no drv_ssd for file_id %d",
+		cf_warning(AS_DRV_SSD, "{%s} ssd_write: no drv_ssd for file_id %u",
 				rd->ns->name, ssd_get_file_id(ssds, &rd->keyd));
 		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
