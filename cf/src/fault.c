@@ -171,7 +171,8 @@ cf_fault_set_severity(const cf_fault_context context, const cf_fault_severity se
 static inline uint32_t
 cache_hash_fn(const void *key)
 {
-	return (uint32_t)((const cf_fault_cache_hkey*)key)->line;
+	return (uint32_t)((const cf_fault_cache_hkey*)key)->line +
+			*(uint32_t*)((const cf_fault_cache_hkey*)key)->msg;
 }
 
 /* cf_fault_init
@@ -187,7 +188,7 @@ cf_fault_init()
 
 	// Create the ticker hash.
 	if (shash_create(&g_ticker_hash, cache_hash_fn, sizeof(cf_fault_cache_hkey),
-			sizeof(uint32_t), 32, SHASH_CR_MT_MANYLOCK) != 0) {
+			sizeof(uint32_t), 256, SHASH_CR_MT_MANYLOCK) != 0) {
 		cf_crash(CF_MISC, "failed ticker hash create");
 	}
 }
