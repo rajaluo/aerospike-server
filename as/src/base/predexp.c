@@ -143,6 +143,7 @@ destroy_list(predexp_eval_t* bp)
 #define AS_PREDEXP_REC_DEVICE_SIZE		150
 #define AS_PREDEXP_REC_LAST_UPDATE		151
 #define AS_PREDEXP_REC_VOID_TIME		152
+#define AS_PREDEXP_REC_DIGEST_MODULO	153
 
 #define AS_PREDEXP_INTEGER_EQUAL		200
 #define AS_PREDEXP_INTEGER_UNEQUAL		201
@@ -1377,6 +1378,88 @@ build_rec_void_time(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 }
 
 // ----------------------------------------------------------------
+// AS_PREDEXP_REC_DIGEST_MODULO
+// ----------------------------------------------------------------
+
+typedef struct predexp_eval_rec_digest_modulo_s {
+	predexp_eval_t			base;
+	int32_t					mod;
+} predexp_eval_rec_digest_modulo_t;
+
+static void
+destroy_rec_digest_modulo(predexp_eval_t* bp)
+{
+	predexp_eval_rec_digest_modulo_t* dp =
+		(predexp_eval_rec_digest_modulo_t *) bp;
+	cf_free(dp);
+}
+
+static predexp_retval_t
+eval_rec_digest_modulo(predexp_eval_t* bp,
+				   predexp_args_t* argsp,
+				   wrapped_as_bin_t* wbinp)
+{
+	if (wbinp == NULL) {
+		cf_crash(AS_QUERY,
+				 "eval_rec_digest_modulo called outside value context");
+	}
+
+	predexp_eval_rec_digest_modulo_t* dp =
+		(predexp_eval_rec_digest_modulo_t *) bp;
+
+	// We point at the last 4 bytes of the digest.
+	uint32_t* valp = (uint32_t*) &argsp->md->key.digest[16];
+	int64_t digest_modulo = *valp % dp->mod;
+
+	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);
+	as_bin_particle_integer_set(&wbinp->bin, digest_modulo);
+	return PREDEXP_VALUE;
+}
+
+static bool
+build_rec_digest_modulo(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
+{
+	predexp_eval_rec_digest_modulo_t* dp = (predexp_eval_rec_digest_modulo_t *)
+			cf_malloc(sizeof(predexp_eval_rec_digest_modulo_t));
+
+	predexp_eval_base_init((predexp_eval_t *) dp,
+						   destroy_rec_digest_modulo,
+						   eval_rec_digest_modulo,
+						   PREDEXP_VALUE_NODE,
+						   AS_PARTICLE_TYPE_INTEGER);
+
+	uint8_t* endp = pp + len;
+
+	if (pp + sizeof(int32_t) > endp) {
+		cf_warning(AS_QUERY, "build_rec_digest_modulo: msg too short");
+		goto Failed;
+	}
+	
+	dp->mod = cf_swap_from_be32(* (int32_t*) pp);
+	pp += sizeof(int32_t);
+		
+	if (pp != endp) {
+		cf_warning(AS_QUERY, "build_rec_digest_modulo: msg unaligned");
+		goto Failed;
+	}
+
+	if (dp->mod == 0) {
+		cf_warning(AS_QUERY, "build_rec_digest_modulo: zero modulo invalid");
+		goto Failed;
+	}
+
+	// Success, push ourself onto the stack.
+	dp->base.next = *stackpp;				// We point next at the old top.
+	*stackpp = (predexp_eval_t *) dp;	// We're the new top
+
+	return true;
+
+ Failed:
+	(*dp->base.dtor_fn)((predexp_eval_t *) dp);
+	return false;
+}
+
+// ----------------------------------------------------------------
 // AS_PREDEXP_*_ITERATE_*
 // ----------------------------------------------------------------
 
@@ -1808,6 +1891,8 @@ build(predexp_eval_t** stackpp, uint16_t tag, uint32_t len, uint8_t* pp)
 		return build_rec_last_update(stackpp, len, pp);
 	case AS_PREDEXP_REC_VOID_TIME:
 		return build_rec_void_time(stackpp, len, pp);
+	case AS_PREDEXP_REC_DIGEST_MODULO:
+		return build_rec_digest_modulo(stackpp, len, pp);
 	case AS_PREDEXP_LIST_ITERATE_OR:
 	case AS_PREDEXP_LIST_ITERATE_AND:
 	case AS_PREDEXP_MAPKEY_ITERATE_OR:
