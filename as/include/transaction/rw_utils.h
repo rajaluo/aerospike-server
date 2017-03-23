@@ -77,6 +77,7 @@ bool get_msg_key(as_transaction* tr, as_storage_rd* rd);
 int handle_msg_key(as_transaction* tr, as_storage_rd* rd);
 void update_metadata_in_index(as_transaction* tr, bool increment_generation, as_record* r);
 bool pickle_all(as_storage_rd* rd, rw_request* rw);
+void record_delete_adjust_sindex(as_record* r, as_namespace* ns);
 void delete_adjust_sindex(as_storage_rd* rd);
 void remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd, as_bin* bins, uint32_t n_bins);
 bool xdr_must_ship_delete(as_namespace* ns, bool is_nsup_delete, bool is_xdr_op);

@@ -943,10 +943,7 @@ drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 	as_record* r = r_ref.r;
 
 	if (ns->storage_data_in_memory) {
-		as_storage_rd rd;
-		as_storage_record_open(ns, r, &rd, keyd);
-		delete_adjust_sindex(&rd);
-		as_storage_record_close(&rd);
+		record_delete_adjust_sindex(r, ns);
 	}
 
 	// Save the set-ID for XDR.

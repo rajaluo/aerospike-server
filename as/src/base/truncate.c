@@ -45,6 +45,7 @@
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/system_metadata.h"
+#include "transaction/rw_utils.h"
 
 
 //==========================================================
@@ -647,6 +648,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (r->last_update_time < ns->truncate.lut) {
 		cb_info->n_deleted++;
+		record_delete_adjust_sindex(r, ns);
 		as_index_delete(cb_info->tree, &r->key);
 		as_record_done(r_ref, ns);
 		return;
@@ -657,6 +659,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	// Delete records not updated since their set's threshold last-update-time.
 	if (p_set && r->last_update_time < p_set->truncate_lut) {
 		cb_info->n_deleted++;
+		record_delete_adjust_sindex(r, ns);
 		as_index_delete(cb_info->tree, &r->key);
 	}
 

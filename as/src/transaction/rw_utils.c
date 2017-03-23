@@ -278,6 +278,29 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 }
 
 
+// If called for data-not-in-memory, this may read record from drive!
+void
+record_delete_adjust_sindex(as_record* r, as_namespace* ns)
+{
+	if (! as_sindex_ns_has_sindex(ns)) {
+		return;
+	}
+
+	// FIXME - check if relevant set (or lack thereof) has sindex.
+
+	as_storage_rd rd;
+	as_storage_record_open(ns, r, &rd, &r->key);
+
+	as_storage_rd_load_n_bins(&rd);
+	as_storage_rd_load_bins(&rd, NULL);
+
+	remove_from_sindex(ns, as_index_get_set_name(rd.r, ns), &rd.keyd,
+			rd.bins, rd.n_bins);
+
+	as_storage_record_close(&rd);
+}
+
+
 // Remove record from secondary index. Called only for data-in-memory. If
 // data-not-in-memory, existing record is not read, and secondary index entry is
 // cleaned up by background sindex defrag thread.
