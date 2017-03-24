@@ -1238,7 +1238,7 @@ write_master_dim(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// Success - adjust sindex, looking at old and new bins.
 	//
 
-	if (as_sindex_ns_has_sindex(ns) &&
+	if (record_has_sindex(r, ns) &&
 			write_master_sindex_update(ns, set_name, &tr->keyd, old_bins,
 					n_old_bins, new_bins, n_new_bins)) {
 		tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
@@ -1398,7 +1398,7 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
 	as_record* r = rd->r;
-	bool has_sindex = as_sindex_ns_has_sindex(ns);
+	bool has_sindex = record_has_sindex(r, ns);
 
 	// If it's not touch or modify, determine if we must read existing record.
 	if (! must_fetch_data) {

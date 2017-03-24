@@ -1008,7 +1008,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	}
 
 	bool has_sindex = (info & RW_INFO_SINDEX_TOUCHED) != 0 ||
-			(is_create && as_sindex_ns_has_sindex(ns));
+			(is_create && record_has_sindex(r, ns));
 
 	rd.ignore_record_on_device = ! has_sindex && ! is_ldt_parent;
 	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
