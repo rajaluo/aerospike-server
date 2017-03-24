@@ -52,6 +52,8 @@
 #include "socket.h"
 #include "util.h"
 
+#include "citrusleaf/alloc.h"
+
 #include "warnings.h"
 
 // Only available in Linux kernel version 3.19 and later; but we'd like to
@@ -1566,6 +1568,7 @@ config_interface_numa(const char *if_name, irq_list *irqs)
 static void
 optimize_interface(const char *if_name)
 {
+	cf_detail(CF_MISC, "optimizing interface %s", if_name);
 	uint16_t n_queues = interface_rx_queues(if_name);
 	irq_list irqs;
 	interface_irqs(if_name, &irqs);
@@ -1689,7 +1692,14 @@ cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 					if_name);
 		}
 
-		optimize_interface(if_name);
+		char *exp_names[100];
+		uint32_t n_exp = sizeof(exp_names) / sizeof(exp_names[0]);
+		cf_inter_expand_bond(if_name, exp_names, &n_exp);
+
+		for (uint32_t k = 0; k < n_exp; ++k) {
+			optimize_interface(exp_names[k]);
+			cf_free(exp_names[k]);
+		}
 	}
 
 	// If we don't do NUMA pinning, then we're done after setting up the
