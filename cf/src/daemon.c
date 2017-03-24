@@ -32,10 +32,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <linux/capability.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include "fault.h"
+
+extern int capset(cap_user_header_t header, cap_user_data_t data);
+
+
+static bool g_hold_caps = false;
+static bool g_clear_caps = false;
 
 
 void
@@ -43,6 +51,15 @@ cf_process_privsep(uid_t uid, gid_t gid)
 {
 	if (0 != getuid() || (uid == getuid() && gid == getgid())) {
 		return;
+	}
+
+	// If appropriate, make all capabilities survive the UID/GID switch.
+	if (g_hold_caps) {
+		if (0 > prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0)) {
+			cf_crash(CF_MISC, "prctl: %s", cf_strerror(errno));
+		}
+
+		g_clear_caps = true;
 	}
 
 	// Drop all auxiliary groups.
@@ -57,6 +74,36 @@ cf_process_privsep(uid_t uid, gid_t gid)
 
 	if (0 > setuid(uid)) {
 		cf_crash(CF_MISC, "setuid: %s", cf_strerror(errno));
+	}
+}
+
+
+// TODO - if we get more customers of this API, we could switch to either using
+// a 'hold counter', or a more involved scheme where individual capabilities can
+// be kept and revoked.
+
+void
+cf_process_holdcap(void)
+{
+	g_hold_caps = true;
+}
+
+
+void
+cf_process_clearcap(void)
+{
+	if (! g_clear_caps) {
+		return;
+	}
+
+	struct __user_cap_header_struct cap_head = {
+		.version = _LINUX_CAPABILITY_VERSION_2
+	};
+
+	struct __user_cap_data_struct cap_data[2] = { { 0 } };
+
+	if (0 > capset(&cap_head, cap_data)) {
+		cf_crash(CF_MISC, "capset: %s", cf_strerror(errno));
 	}
 }
 

@@ -206,3 +206,5 @@ extern void cf_process_daemonize(int *fd_ignore_list, int list_size);
 
 /* daemon.c */
 extern void cf_process_privsep(uid_t uid, gid_t gid);
+extern void cf_process_holdcap(void);
+extern void cf_process_clearcap(void);

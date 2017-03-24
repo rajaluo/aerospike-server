@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <socket.h>
@@ -41,6 +42,8 @@ typedef uint16_t cf_topo_cpu_index;
 
 void cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 		const cf_addr_list *addrs);
+void cf_topo_force_map_memory(const uint8_t *from, size_t size);
+void cf_topo_migrate_memory(void);
 void cf_topo_info(void);
 
 uint16_t cf_topo_count_cores(void);

@@ -284,8 +284,9 @@ main(int argc, char **argv)
 	mem_count_init(c->memory_accounting ? MEM_COUNT_ENABLE : MEM_COUNT_DISABLE);
 #endif
 
-	// Detect the NUMA topology and, if requested, prepare for CPU and NUMA pinning.
-	cf_topo_config(c->auto_pin, (cf_topo_numa_node_index)instance, &c->service.bind);
+	// Detect NUMA topology and, if requested, prepare for CPU and NUMA pinning.
+	cf_topo_config(c->auto_pin, (cf_topo_numa_node_index)instance,
+			&c->service.bind);
 
 	// Perform privilege separation as necessary. If configured user & group
 	// don't have root privileges, all resources created or reopened past this
@@ -401,6 +402,9 @@ main(int argc, char **argv)
 	// all the objects off the drives. This may block for a long time. The
 	// defrag subsystem starts operating at the end of this call.
 	as_storage_init();
+
+	// Migrate memory to correct NUMA node (includes restored index arenas).
+	cf_topo_migrate_memory();
 
 	// Populate all secondary indexes. This may block for a long time.
 	as_sindex_boot_populateall();

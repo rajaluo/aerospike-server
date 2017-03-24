@@ -63,6 +63,8 @@
 #define INVALID_INDEX ((uint16_t)-1)
 #define POLICY_SCRIPT "/etc/aerospike/irqbalance-ban.sh"
 
+#define MEM_PAGE_SIZE (4096L)
+
 typedef enum {
 	FILE_RES_OK,
 	FILE_RES_NOT_FOUND,
@@ -659,22 +661,8 @@ pin_to_numa_node(cf_topo_numa_node_index a_numa_node)
 	// Unlike select(), we have to pass "number of valid bits + 1".
 	set_mempolicy_safe(MPOL_BIND, &to_mask, 65);
 
-	// Migrate existing memory allocations to the selected NUMA node.
-
-	uint64_t from_mask = 0;
-
-	for (cf_topo_numa_node_index i_numa_node = 0; i_numa_node < g_n_numa_nodes; ++i_numa_node) {
-		i_os_numa_node = g_numa_node_index_to_os_numa_node_index[i_numa_node];
-		from_mask |= 1u << i_os_numa_node;
-	}
-
-	from_mask &= ~to_mask;
-	cf_detail(CF_MISC, "NUMA node mask (from): %016" PRIx64, from_mask);
-
-	if (from_mask != 0) {
-		// Unlike select(), we have to pass "number of valid bits + 1".
-		migrate_pages_safe(0, 65, &from_mask, &to_mask);
-	}
+	// Make sure we can migrate shared memory that we later attach and map.
+	cf_process_holdcap();
 }
 
 static uint32_t
@@ -1714,6 +1702,66 @@ cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 	// NUMA pinning.
 
 	pin_to_numa_node(a_numa_node);
+}
+
+void
+cf_topo_force_map_memory(const uint8_t *from, size_t size)
+{
+	if (g_i_numa_node == INVALID_INDEX || size == 0) {
+		return;
+	}
+
+	cf_assert(from, CF_MISC, "invalid cf_topo_force_map_memory() call");
+
+	// Read one byte per memory page to force otherwise lazy mapping.
+
+	const uint8_t *start = (const uint8_t *)
+			(((int64_t)from + (MEM_PAGE_SIZE - 1)) & -MEM_PAGE_SIZE);
+	const uint8_t *end = from + size;
+	const volatile uint8_t *p_byte;
+
+	// In case 'from' was not page-aligned, take care of the partial page.
+	if (start > from) {
+		p_byte = from;
+		p_byte[0];
+	}
+
+	for (p_byte = start; p_byte < end; p_byte += MEM_PAGE_SIZE) {
+		p_byte[0];
+	}
+}
+
+void
+cf_topo_migrate_memory(void)
+{
+	if (g_i_numa_node == INVALID_INDEX) {
+		return;
+	}
+
+	// Migrate existing memory allocations to the selected NUMA node.
+
+	os_numa_node_index i_os_numa_node = g_numa_node_index_to_os_numa_node_index[g_i_numa_node];
+	uint64_t to_mask = 1u << i_os_numa_node;
+	cf_detail(CF_MISC, "NUMA node mask (to): %016" PRIx64, to_mask);
+
+	uint64_t from_mask = 0;
+
+	for (cf_topo_numa_node_index i_numa_node = 0; i_numa_node < g_n_numa_nodes; ++i_numa_node) {
+		i_os_numa_node = g_numa_node_index_to_os_numa_node_index[i_numa_node];
+		from_mask |= 1u << i_os_numa_node;
+	}
+
+	from_mask &= ~to_mask;
+	cf_detail(CF_MISC, "NUMA node mask (from): %016" PRIx64, from_mask);
+
+	if (from_mask != 0) {
+		cf_info(CF_MISC, "migrating shared memory to local NUMA node - this may take a bit");
+		// Unlike select(), we have to pass "number of valid bits + 1".
+		migrate_pages_safe(0, 65, &from_mask, &to_mask);
+	}
+
+	// We had kept capabilities so we could do this migrate - revoke them now.
+	cf_process_clearcap();
 }
 
 void
