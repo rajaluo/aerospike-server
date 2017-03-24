@@ -121,9 +121,14 @@ cf_vmapx_count(const cf_vmapx* this)
 cf_vmapx_err
 cf_vmapx_get_by_index(const cf_vmapx* this, uint32_t index, void** pp_value)
 {
-	if (index >= this->count) {
-		return CF_VMAPX_ERR_BAD_PARAM;
-	}
+	// This check is commented out for now to avoid the volatile access.
+	// TODO - ultimately, caller code can be simplified. (Especially if this
+	// just returned the value pointer.) And if necessary, we could make a
+	// "safe" version of this that does the check.
+
+//	if (index >= this->count) {
+//		return CF_VMAPX_ERR_BAD_PARAM;
+//	}
 
 	*pp_value = cf_vmapx_value_ptr(this, index);
 
