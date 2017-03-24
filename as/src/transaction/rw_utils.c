@@ -304,10 +304,13 @@ record_delete_adjust_sindex(as_record* r, as_namespace* ns)
 	}
 
 	as_storage_rd rd;
-	as_storage_record_open(ns, r, &rd, &r->key);
 
+	as_storage_record_open(ns, r, &rd, &r->key);
 	as_storage_rd_load_n_bins(&rd);
-	as_storage_rd_load_bins(&rd, NULL);
+
+	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
+
+	as_storage_rd_load_bins(&rd, stack_bins);
 
 	remove_from_sindex(ns, as_index_get_set_name(rd.r, ns), &rd.keyd,
 			rd.bins, rd.n_bins);
