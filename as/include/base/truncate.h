@@ -63,7 +63,6 @@ typedef struct as_truncate_s {
 
 struct as_index_s;
 struct as_namespace_s;
-struct as_set_s;
 
 
 //==========================================================
@@ -92,7 +91,6 @@ typedef struct truncate_hval_s {
 
 void truncate_startup_hash_init(struct as_namespace_s* ns);
 void truncate_action_startup(struct as_namespace_s* ns, const char* set_name, uint64_t lut);
-struct as_set_s* as_namespace_get_set_by_name(struct as_namespace_s* ns, const char* set_name);
 
 // TODO - promote to util when shash is cleaned up. (See also SMD.)
 static inline uint32_t

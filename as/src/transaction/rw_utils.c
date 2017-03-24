@@ -50,6 +50,23 @@
 
 
 //==========================================================
+// Forward declarations.
+//
+
+static inline bool
+record_has_sindex(const as_record* r, as_namespace* ns)
+{
+	if (! as_sindex_ns_has_sindex(ns)) {
+		return false;
+	}
+
+	as_set* set = as_namespace_get_record_set(ns, r);
+
+	return set ? set->n_sindexes != 0 : ns->n_setless_sindexes != 0;
+}
+
+
+//==========================================================
 // Public API.
 //
 
@@ -282,11 +299,9 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 void
 record_delete_adjust_sindex(as_record* r, as_namespace* ns)
 {
-	if (! as_sindex_ns_has_sindex(ns)) {
+	if (! record_has_sindex(r, ns)) {
 		return;
 	}
-
-	// FIXME - check if relevant set (or lack thereof) has sindex.
 
 	as_storage_rd rd;
 	as_storage_record_open(ns, r, &rd, &r->key);
@@ -309,7 +324,7 @@ delete_adjust_sindex(as_storage_rd* rd)
 {
 	as_namespace* ns = rd->ns;
 
-	if (! as_sindex_ns_has_sindex(ns)) {
+	if (! record_has_sindex(rd->r, ns)) {
 		return;
 	}
 

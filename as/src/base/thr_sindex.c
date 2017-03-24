@@ -203,7 +203,16 @@ as_sindex__destroy_fn(void *param)
 		as_sindex_destroy_pmetadata(si);
 		si->state = AS_SINDEX_INACTIVE;
 		si->flag  = 0;
+
 		si->ns->sindex_cnt--;
+
+		if (si->imd->set) {
+			as_set *p_set = as_namespace_get_set_by_name(si->ns, si->imd->set);
+			p_set->n_sindexes--;
+		} else {
+			si->ns->n_setless_sindexes--;
+		}
+
 		as_sindex_metadata *imd = si->imd;
 		si->imd = NULL;
 

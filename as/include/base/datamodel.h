@@ -835,6 +835,7 @@ struct as_namespace_s {
 	//
 
 	int				sindex_cnt;
+	uint32_t		n_setless_sindexes;
 	struct as_sindex_s* sindex; // array with AS_MAX_SINDEX metadata
 	shash*			sindex_set_binid_hash;
 	shash*			sindex_iname_hash;
@@ -1233,7 +1234,8 @@ struct as_set_s {
 	cf_atomic32		deleted;			// empty a set (triggered via info command only)
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
 	cf_atomic32		enable_xdr;			// white-list (AS_SET_ENABLE_XDR_TRUE) or black-list (AS_SET_ENABLE_XDR_FALSE) a set for XDR replication
-	uint8_t padding[12];
+	uint32_t		n_sindexes;
+	uint8_t padding[8];
 };
 
 static inline bool
@@ -1287,12 +1289,14 @@ extern as_namespace *as_namespace_get_byid(uint id);
 extern as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
 extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);
-extern int as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions);
-extern int as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, as_set **pp_set, uint16_t *p_set_id);
-extern as_set * as_namespace_init_set(as_namespace *ns, const char *set_name);
 extern const char *as_namespace_get_set_name(as_namespace *ns, uint16_t set_id);
 extern uint16_t as_namespace_get_set_id(as_namespace *ns, const char *set_name);
 extern uint16_t as_namespace_get_create_set_id(as_namespace *ns, const char *set_name);
+extern int as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len, uint16_t *p_set_id, bool apply_restrictions);
+extern int as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name, size_t len, as_set **pp_set, uint16_t *p_set_id);
+extern as_set *as_namespace_get_set_by_name(as_namespace *ns, const char *set_name);
+extern as_set* as_namespace_get_set_by_id(as_namespace* ns, uint16_t set_id);
+extern as_set* as_namespace_get_record_set(as_namespace *ns, const as_record *r);
 extern void as_namespace_get_set_info(as_namespace *ns, const char *set_name, cf_dyn_buf *db);
 extern void as_namespace_adjust_set_memory(as_namespace *ns, uint16_t set_id, int64_t delta_bytes);
 extern void as_namespace_release_set_id(as_namespace *ns, uint16_t set_id);

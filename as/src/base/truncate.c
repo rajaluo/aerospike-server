@@ -87,7 +87,6 @@ static bool g_truncate_smd_loaded = false;
 // Forward declarations & inlines.
 //
 
-as_set* as_namespace_get_set_by_id(as_namespace* ns, uint16_t set_id);
 bool filter_hash_put(const as_smd_item_t* item);
 void filter_hash_delete(const as_smd_item_t* item);
 
@@ -101,13 +100,6 @@ void truncate_all(as_namespace* ns);
 void* run_truncate(void* arg);
 void truncate_finish(as_namespace* ns);
 void truncate_reduce_cb(as_index_ref* r_ref, void* udata);
-
-// TODO - make this a generic utility in namespace.c?
-static inline as_set*
-as_namespace_get_record_set(as_namespace* ns, const as_record* r)
-{
-	return as_namespace_get_set_by_id(ns, as_index_get_set_id(r));
-}
 
 static inline uint64_t
 lut_from_smd(const as_smd_item_t* item)
@@ -278,49 +270,6 @@ as_truncate_record_is_truncated(const as_record* r, as_namespace* ns)
 //==========================================================
 // Local helpers - generic.
 //
-
-// TODO - make this a generic utility in namespace.c?
-as_set*
-as_namespace_get_set_by_name(as_namespace* ns, const char* set_name)
-{
-	uint32_t idx;
-
-	if (cf_vmapx_get_index(ns->p_sets_vmap, set_name, &idx) != CF_VMAPX_OK) {
-		return NULL;
-	}
-
-	as_set* p_set;
-
-	if (cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set) !=
-			CF_VMAPX_OK) {
-		// Should be impossible - just verified idx.
-		cf_crash(AS_TRUNCATE, "unexpected vmap error");
-	}
-
-	return p_set;
-}
-
-
-// TODO - make this a generic utility in namespace.c?
-as_set*
-as_namespace_get_set_by_id(as_namespace* ns, uint16_t set_id)
-{
-	if (set_id == INVALID_SET_ID) {
-		return NULL;
-	}
-
-	as_set* p_set;
-
-	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) !=
-			CF_VMAPX_OK) {
-		// Should be impossible.
-		cf_warning(AS_TRUNCATE, "unexpected - record with set-id not in vmap");
-		return NULL;
-	}
-
-	return p_set;
-}
-
 
 bool
 filter_hash_put(const as_smd_item_t* item)

@@ -1756,17 +1756,6 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		return AS_SINDEX_ERR_PARAM;
 	}
 
-	char si_prop[AS_SINDEX_PROP_KEY_SIZE];
-	int si_prop_len = sizeof(si_prop);
-	memset(si_prop, 0, si_prop_len);
-	if (!imd->set) {
-		// sindex can be over a NULL set
-		sprintf(si_prop, "_%d_%d", imd->binid, imd->btype);
-	}
-	else {
-		sprintf(si_prop, "%s_%d_%d", imd->set, imd->binid, imd->btype);
-	}
-
 	as_sindex_status rv = as_sindex__put_in_set_binid_hash(ns, imd->set, imd->binid, id);
 	if (rv != AS_SINDEX_OK) {
 		cf_warning(AS_SINDEX, "SINDEX CREATE : Put in set_binid hash fails with error %d", rv);
@@ -1837,6 +1826,14 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		as_sindex__stats_clear(si);
 
 		ns->sindex_cnt++;
+
+		if (imd->set) {
+			as_set *p_set = as_namespace_get_set_by_name(ns, imd->set);
+			p_set->n_sindexes++;
+		} else {
+			ns->n_setless_sindexes++;
+		}
+
 		si->ns          = ns;
 		si->simatch     = chosen_id;
 

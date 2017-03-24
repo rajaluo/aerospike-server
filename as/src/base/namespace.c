@@ -582,6 +582,51 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 	return 0;
 }
 
+as_set*
+as_namespace_get_set_by_name(as_namespace *ns, const char *set_name)
+{
+	uint32_t idx;
+
+	if (cf_vmapx_get_index(ns->p_sets_vmap, set_name, &idx) != CF_VMAPX_OK) {
+		return NULL;
+	}
+
+	as_set *p_set;
+
+	if (cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set) !=
+			CF_VMAPX_OK) {
+		// Should be impossible - just verified idx.
+		cf_crash(AS_NAMESPACE, "unexpected vmap error");
+	}
+
+	return p_set;
+}
+
+as_set*
+as_namespace_get_set_by_id(as_namespace *ns, uint16_t set_id)
+{
+	if (set_id == INVALID_SET_ID) {
+		return NULL;
+	}
+
+	as_set *p_set;
+
+	if (cf_vmapx_get_by_index(ns->p_sets_vmap, set_id - 1, (void**)&p_set) !=
+			CF_VMAPX_OK) {
+		// Should be impossible.
+		cf_warning(AS_NAMESPACE, "unexpected - record with set-id not in vmap");
+		return NULL;
+	}
+
+	return p_set;
+}
+
+as_set*
+as_namespace_get_record_set(as_namespace *ns, const as_record *r)
+{
+	return as_namespace_get_set_by_id(ns, as_index_get_set_id(r));
+}
+
 static void
 append_set_props(as_set *p_set, cf_dyn_buf *db)
 {
