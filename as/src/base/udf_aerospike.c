@@ -828,9 +828,7 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	} else if (rv == 0) {
 		// If it's an expired or truncated record, pretend it's a fresh create.
 		if (! is_subrec && as_record_is_doomed(r_ref->r, tr->rsv.ns)) {
-			as_record_destroy(r_ref->r, tr->rsv.ns);
-			as_record_reinitialize(r_ref, tr->rsv.ns);
-			cf_atomic64_incr(&tr->rsv.ns->n_objects);
+			as_record_rescue(r_ref, tr->rsv.ns);
 		} else {
 			cf_warning(AS_UDF, "udf_aerospike_rec_create: Record Already Exists 2");
 			as_record_done(r_ref, tr->rsv.ns);

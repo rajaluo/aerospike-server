@@ -520,7 +520,7 @@ extern int as_record_get(struct as_index_tree_s *tree, cf_digest *keyd, as_index
 extern int as_record_get_live(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
 extern int as_record_exists(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
 extern int as_record_exists_live(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
-extern void as_record_reinitialize(as_index_ref *r_ref, as_namespace *ns);
+extern void as_record_rescue(as_index_ref *r_ref, as_namespace *ns);
 
 extern void as_record_clean_bins_from(as_storage_rd *rd, uint16_t from);
 extern void as_record_clean_bins(as_storage_rd *rd);

@@ -557,9 +557,7 @@ write_master(rw_request* rw, as_transaction* tr)
 
 		// If it's an expired or truncated record, pretend it's a fresh create.
 		if (! record_created && as_record_is_doomed(r, ns)) {
-			as_record_destroy(r, ns);
-			as_record_reinitialize(&r_ref, ns);
-			cf_atomic64_incr(&ns->n_objects);
+			as_record_rescue(&r_ref, ns);
 			record_created = true;
 		}
 	}

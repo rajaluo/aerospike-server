@@ -49,6 +49,7 @@
 #include "fabric/partition.h"
 #include "storage/storage.h"
 #include "transaction/delete.h"
+#include "transaction/rw_utils.h"
 
 
 // Called assuming record area of as_index has already been cleared.
@@ -77,10 +78,13 @@ as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
 }
 
 void
-as_record_reinitialize(as_index_ref *r_ref, as_namespace *ns)
+as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 {
+	record_delete_adjust_sindex(r_ref->r, ns);
+	as_record_destroy(r_ref->r, ns);
 	as_index_clear_record_info(r_ref->r);
 	as_record_initialize(r_ref, ns);
+	cf_atomic64_incr(&ns->n_objects);
 }
 
 /* as_record_get_create
