@@ -50,23 +50,6 @@
 
 
 //==========================================================
-// Forward declarations.
-//
-
-static inline bool
-record_has_sindex(const as_record* r, as_namespace* ns)
-{
-	if (! as_sindex_ns_has_sindex(ns)) {
-		return false;
-	}
-
-	as_set* set = as_namespace_get_record_set(ns, r);
-
-	return set ? set->n_sindexes != 0 : ns->n_setless_sindexes != 0;
-}
-
-
-//==========================================================
 // Public API.
 //
 
@@ -296,6 +279,7 @@ pickle_all(as_storage_rd* rd, rw_request* rw)
 
 
 // If called for data-not-in-memory, this may read record from drive!
+// TODO - rename as as_record_... and move to record.c?
 void
 record_delete_adjust_sindex(as_record* r, as_namespace* ns)
 {
@@ -322,6 +306,7 @@ record_delete_adjust_sindex(as_record* r, as_namespace* ns)
 // Remove record from secondary index. Called only for data-in-memory. If
 // data-not-in-memory, existing record is not read, and secondary index entry is
 // cleaned up by background sindex defrag thread.
+// TODO - rename as as_record_... and move to record.c?
 void
 delete_adjust_sindex(as_storage_rd* rd)
 {
@@ -339,6 +324,8 @@ delete_adjust_sindex(as_storage_rd* rd)
 }
 
 
+// TODO - rename as as_record_..., move to record.c, take r instead of set_name,
+// and lose keyd parameter?
 void
 remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
 		as_bin* bins, uint32_t n_bins)

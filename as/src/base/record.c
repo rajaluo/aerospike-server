@@ -564,7 +564,7 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 		as_record_merge_component *c, bool is_create)
 {
 	as_index *r = r_ref->r;
-	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
+	bool has_sindex = record_has_sindex(r, rd->ns);
 
 	rd->ignore_record_on_device = true; // TODO - set to ! has_sindex
 	as_storage_rd_load_n_bins(rd); // TODO - handle error returned

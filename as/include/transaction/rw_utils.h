@@ -35,6 +35,7 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
+#include "base/secondary_index.h"
 #include "base/transaction.h"
 #include "base/transaction_policy.h"
 #include "base/udf_record.h"
@@ -81,6 +82,20 @@ void record_delete_adjust_sindex(as_record* r, as_namespace* ns);
 void delete_adjust_sindex(as_storage_rd* rd);
 void remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd, as_bin* bins, uint32_t n_bins);
 bool xdr_must_ship_delete(as_namespace* ns, bool is_nsup_delete, bool is_xdr_op);
+
+
+// TODO - rename as as_record_... and move to record.c?
+static inline bool
+record_has_sindex(const as_record* r, as_namespace* ns)
+{
+	if (! as_sindex_ns_has_sindex(ns)) {
+		return false;
+	}
+
+	as_set* set = as_namespace_get_record_set(ns, r);
+
+	return set ? set->n_sindexes != 0 : ns->n_setless_sindexes != 0;
+}
 
 
 static inline bool

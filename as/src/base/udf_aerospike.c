@@ -118,7 +118,7 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 
 	const char * set_name = as_index_get_set_name(rd->r, rd->ns);
 	
-	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
+	bool has_sindex = record_has_sindex(rd->r, rd->ns);
 	SINDEX_BINS_SETUP(sbins, rd->ns->sindex_cnt);
 	as_sindex * si_arr[rd->ns->sindex_cnt];
 	int si_arr_index = 0;
@@ -275,7 +275,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 		return -1;
 	}
 
-	bool has_sindex = as_sindex_ns_has_sindex(rd->ns);
+	bool has_sindex = record_has_sindex(rd->r, rd->ns);
 	SINDEX_BINS_SETUP(sbins, 2 * rd->ns->sindex_cnt);
 	as_sindex * si_arr[2 * rd->ns->sindex_cnt];
 	int sbins_populated = 0;
@@ -409,7 +409,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	int new_bins				= 0;	// How many new bins have to be created in this update
 	as_storage_rd * rd			= urecord->rd;
 	as_namespace * ns			= rd->ns;
-	bool has_sindex				= as_sindex_ns_has_sindex(ns);
+	bool has_sindex				= record_has_sindex(rd->r, ns);
 	bool is_record_dirty		= false;
 	bool is_record_flag_dirty	= false;
 	uint8_t old_index_flags		= as_index_get_flags(rd->r);

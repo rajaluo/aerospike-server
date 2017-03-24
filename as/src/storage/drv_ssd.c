@@ -62,6 +62,7 @@
 #include "base/truncate.h"
 #include "fabric/partition.h"
 #include "storage/storage.h"
+#include "transaction/rw_utils.h"
 
 
 //==========================================================
@@ -2878,7 +2879,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 
 		uint16_t old_n_bins = rd.n_bins;
 
-		bool has_sindex = as_sindex_ns_has_sindex(ns);
+		bool has_sindex = record_has_sindex(r, ns);
 		int sbins_populated = 0;
 
 		if (has_sindex) {
