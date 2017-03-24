@@ -570,14 +570,18 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 		return -1;
 	}
 
-	if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx,
-			(void**)pp_set)) != CF_VMAPX_OK) {
-		// Should be impossible - just verified idx.
-		cf_warning(AS_NAMESPACE, "unexpected error %d", result);
-		return -1;
+	if (pp_set) {
+		if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx,
+				(void**)pp_set)) != CF_VMAPX_OK) {
+			// Should be impossible - just verified idx.
+			cf_warning(AS_NAMESPACE, "unexpected error %d", result);
+			return -1;
+		}
 	}
 
-	*p_set_id = (uint16_t)(idx + 1);
+	if (p_set_id) {
+		*p_set_id = (uint16_t)(idx + 1);
+	}
 
 	return 0;
 }

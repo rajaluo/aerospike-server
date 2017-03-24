@@ -2865,7 +2865,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			// and returns a ptr to it.
 			as_set *p_set = NULL;
 			if (as_namespace_get_create_set_w_len(ns, set_name, set_name_len,
-					&p_set, &set_id) != 0) {
+					&p_set, NULL) != 0) {
 				goto Error;
 			}
 
@@ -6464,7 +6464,11 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		imd->set = NULL;
 	}
 	ret = as_info_parameter_get(params, STR_SET, set_str, &set_len);
-	if (!ret) {
+	if (!ret && set_len != 0) {
+		if (as_namespace_get_create_set_w_len(ns, set_str, set_len, NULL, NULL) != 0) {
+			INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER, "Set vmap full");
+			return AS_SINDEX_ERR_PARAM;
+		}
 		imd->set = cf_strdup(set_str);
 	} else if (ret == -2) {
 		cf_warning(AS_INFO, "%s : Failed. Setname is longer than %d for index %s",
