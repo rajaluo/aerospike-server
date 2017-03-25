@@ -1399,53 +1399,57 @@ ai_btree_dump(char *ns_name, char *setname, char *filename, bool verbose)
 	return retval;
 }
 
-// Returns AS_SINDEX_ERR in case of failure
 uint64_t
 ai_btree_get_numkeys(as_sindex_metadata *imd)
 {
 	uint64_t val = 0;
-	if ((!imd->ns_name)) {
-		return AS_SINDEX_ERR;
-	}
 
 	for (int i = 0; i < imd->nprts; i++) {
-		val += imd->pimd[i].ibtr->numkeys;
+		as_sindex_pmetadata *pimd = &imd->pimd[i];
+		PIMD_RLOCK(&pimd->slock);
+		val += pimd->ibtr->numkeys;
+		PIMD_UNLOCK(&pimd->slock);
 	}
 
 	return val;
 }
 
-// Returns AS_SINDEX_ERR in case of failure
+uint64_t
+ai_btree_get_pimd_isize(as_sindex_pmetadata *pimd)
+{
+	// TODO - Why check of > 0
+	return pimd->ibtr->msize > 0 ? pimd->ibtr->msize : 0;
+}
+
 uint64_t
 ai_btree_get_isize(as_sindex_metadata *imd)
 {
 	uint64_t size = 0;
-	if ((!imd->ns_name)) {
-		return AS_SINDEX_ERR;
-	}
-
 	for (int i = 0; i < imd->nprts; i++) {
-		if (imd->pimd[i].ibtr->msize > 0) {
-			size += imd->pimd[i].ibtr->msize;
-		}
+		as_sindex_pmetadata *pimd = &imd->pimd[i];
+		PIMD_RLOCK(&pimd->slock);
+		size += ai_btree_get_pimd_isize(pimd);
+		PIMD_UNLOCK(&pimd->slock);
 	}
-
 	return size;
 }
 
-// Returns AS_SINDEX_ERR in case of failure
+uint64_t
+ai_btree_get_pimd_nsize(as_sindex_pmetadata *pimd)
+{
+	// TODO - Why check of > 0
+	return pimd->ibtr->nsize > 0 ? pimd->ibtr->nsize : 0;
+}
+
 uint64_t
 ai_btree_get_nsize(as_sindex_metadata *imd)
 {
 	uint64_t size = 0;
-	if ((!imd->ns_name)) {
-		return AS_SINDEX_ERR;
-	}
-
 	for (int i = 0; i < imd->nprts; i++) {
-		if (imd->pimd[i].ibtr->nsize > 0) {
-			size += imd->pimd[i].ibtr->nsize;
-		}
+		as_sindex_pmetadata *pimd = &imd->pimd[i];
+		PIMD_RLOCK(&pimd->slock);
+		size += ai_btree_get_pimd_nsize(pimd);
+		PIMD_UNLOCK(&pimd->slock)
 	}
 
 	return size;
@@ -1454,7 +1458,7 @@ ai_btree_get_nsize(as_sindex_metadata *imd)
 void
 ai_btree_reinit_pimd(as_sindex_pmetadata * pimd)
 {
-	if(!pimd->ibtr)	{
+	if (! pimd->ibtr) {
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
 
@@ -1466,9 +1470,8 @@ ai_btree_reinit_pimd(as_sindex_pmetadata * pimd)
 void
 ai_btree_delete_ibtr(bt * ibtr, int imatch)
 {
-	if(!ibtr)	{
+	if (! ibtr) {
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
-
 	ai_destroy_index(ibtr, imatch);	
 }
