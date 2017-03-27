@@ -59,7 +59,6 @@ as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
 	as_record *r = r_ref->r;
 
 	if (AS_STORAGE_ENGINE_SSD == ns->storage_type) {
-		r->storage_key.ssd.file_id = STORAGE_INVALID_FILE_ID;
 		r->storage_key.ssd.rblock_id = STORAGE_INVALID_RBLOCK;
 	}
 #ifdef USE_KV
