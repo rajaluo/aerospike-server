@@ -91,6 +91,7 @@ char *cf_fault_context_strings[] = {
 		"particle",
 		"partition",
 		"paxos",
+		"predexp",
 		"proto",
 		"proxy",
 		"query",
