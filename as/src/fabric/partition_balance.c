@@ -1067,6 +1067,7 @@ balance_namespace(cf_node* px_node_seq_table, int* px_vinfo_index_table,
 	int ns_pending_immigrations = 0;
 	int ns_pending_emigrations = 0;
 	int ns_delayed_emigrations = 0;
+	uint32_t ns_fresh_partitions = 0;
 
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition* p = &ns->partitions[pid];
@@ -1127,6 +1128,7 @@ balance_namespace(cf_node* px_node_seq_table, int* px_vinfo_index_table,
 			p->primary_version_info = *new_vinfo;
 
 			handle_lost_partition(p, ns_node_seq, ns, has_version);
+			ns_fresh_partitions++;
 		}
 		else {
 			n_dupl = find_duplicates(p, ns_node_seq, ns_vinfo_index, ns,
@@ -1160,6 +1162,11 @@ balance_namespace(cf_node* px_node_seq_table, int* px_vinfo_index_table,
 
 	cf_info(AS_PARTITION, "{%s} re-balanced, expected migrations - (%d tx, %d rx)",
 			ns->name, ns_all_pending_emigrations, ns_pending_immigrations);
+
+	if (ns_fresh_partitions != 0) {
+		cf_info(AS_PARTITION, "{%s} fresh-partitions %u", ns->name,
+				ns_fresh_partitions);
+	}
 
 	ns->migrate_tx_partitions_initial = ns_all_pending_emigrations;
 	ns->migrate_tx_partitions_remaining = ns_all_pending_emigrations;
