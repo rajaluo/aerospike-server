@@ -194,7 +194,6 @@ as_sindex__destroy_fn(void *param)
 		if (rv) {
 			cf_warning(AS_SINDEX, "Delete from set_binid hash fails with error %d", rv);
 		}
-		SINDEX_WLOCK(&si->imd->slock);
 		// Free entire usage counter before tree destroy
 		cf_atomic64_sub(&si->ns->n_bytes_sindex_memory,
 				ai_btree_get_isize(si->imd) + ai_btree_get_nsize(si->imd));    
@@ -228,7 +227,6 @@ as_sindex__destroy_fn(void *param)
 		// remember this is going to release the write lock
 		// of meta-data first. This is the only special case
 		// where both GLOCK and LOCK is called together
-		SINDEX_UNLOCK(&imd->slock);
 		SINDEX_GUNLOCK();
 
 		if (si->new_imd) {
@@ -460,14 +458,12 @@ as_sindex__defrag_fn(void *udata)
 			int ret = 0;
 			int limit_per_iteration = limit > 100 ? 100 : limit;
 			for (int i = 0; i < limit; i += limit_per_iteration) {
-				SINDEX_RLOCK(&si->imd->slock);
 				pimd = &si->imd->pimd[p_index];
-				SINDEX_RLOCK(&pimd->slock);
+				PIMD_RLOCK(&pimd->slock);
 				SET_TIME_FOR_SINDEX_GC_HIST(pimd_rlock_time_ns);
 				ret  = ai_btree_build_defrag_list(si->imd, pimd, &i_col, &n_offset, limit_per_iteration, &processed, &found, &defrag_list);
 				SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_pimd_rlock_hist, pimd_rlock_time_ns);
-				SINDEX_UNLOCK(&pimd->slock);
-				SINDEX_UNLOCK(&si->imd->slock);
+				PIMD_UNLOCK(&pimd->slock);
 				pimd_rlock_time_ns = 0;
 				if (ret != AS_SINDEX_CONTINUE) {
 					break;
@@ -487,14 +483,12 @@ as_sindex__defrag_fn(void *udata)
 				uint64_t pimd_wlock_time_ns = 0;
 				bool     more               = true;
 				while (more) {
-					SINDEX_RLOCK(&si->imd->slock);
 					pimd = &si->imd->pimd[p_index];
-					SINDEX_WLOCK(&pimd->slock);
+					PIMD_WLOCK(&pimd->slock);
 					SET_TIME_FOR_SINDEX_GC_HIST(pimd_wlock_time_ns);
 					more = ai_btree_defrag_list(si->imd, pimd, &defrag_list, wl_lim, &deleted);
 					SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_pimd_wlock_hist, pimd_wlock_time_ns);
-					SINDEX_UNLOCK(&pimd->slock);
-					SINDEX_UNLOCK(&si->imd->slock);
+					PIMD_UNLOCK(&pimd->slock);
 					pimd_wlock_time_ns = 0;
 				}
 				cf_detail(AS_SINDEX, "Deleted %d units of attempted %ld units from index %s", listsize, limit, si->imd->iname);

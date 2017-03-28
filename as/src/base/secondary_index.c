@@ -500,22 +500,6 @@ as_sindex__dup_meta(as_sindex_metadata *imd, as_sindex_metadata **qimd,
 	qimdp->btype       = imd->btype;
 	qimdp->binid       = imd->binid;
 
-
-	pthread_rwlockattr_t rwattr;
-	if (pthread_rwlockattr_init(&rwattr))
-		cf_crash(AS_AS,  "pthread_rwlockattr_init: %s",
-					cf_strerror(errno));
-	if (pthread_rwlockattr_setkind_np(&rwattr,
-				PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP)) {
-		cf_crash( AS_TSVC, "pthread_rwlockattr_setkind_np: %s",
-				cf_strerror(errno));
-	}
-	if (pthread_rwlock_init(&qimdp->slock, &rwattr)) {
-		cf_crash(AS_SINDEX,
-				"Could not create secondary index dml mutex ");
-	}
-	qimdp->flag |= IMD_FLAG_LOCKSET;
-
 	*qimd = qimdp;
 }
 
@@ -530,7 +514,7 @@ as_sindex__process_ret(as_sindex *si, int ret, as_sindex_op op,
 	switch (op) {
 		case AS_SINDEX_OP_INSERT:
 			if (AS_SINDEX_ERR_NO_MEMORY == ret) {
-				cf_atomic_int_incr(&si->desync_cnt);
+				cf_atomic64_incr(&si->desync_cnt);
 			}
 			if (ret && ret != AS_SINDEX_KEY_FOUND) {
 				cf_debug(AS_SINDEX,
@@ -623,10 +607,6 @@ as_sindex_imd_free(as_sindex_metadata *imd)
 	if (imd->path_str) {
 		cf_free(imd->path_str);
 		imd->path_str = NULL;
-	}
-
-	if (imd->flag & IMD_FLAG_LOCKSET) {
-		pthread_rwlock_destroy(&imd->slock);
 	}
 
 	if (imd->bname) {
@@ -964,12 +944,9 @@ as_sindex_arr_lookup_by_setname_lockfree(as_namespace * ns, const char *setname,
 			continue;
 		}
 	
-		SINDEX_RLOCK(&si->imd->slock);
 		if (!as_sindex__setname_match(si->imd, setname)) {
-			SINDEX_UNLOCK(&si->imd->slock);
 			continue;
 		}
-		SINDEX_UNLOCK(&si->imd->slock);
 	
 		AS_SINDEX_RESERVE(si);
 
@@ -1207,7 +1184,7 @@ as_sindex__config_default(as_sindex *si)
 void
 as_sindex_config_var_copy(as_sindex *to_si, as_sindex_config_var *from_si_cfg)
 {
-	to_si->config.defrag_period    = from_si_cfg->defrag_period;
+	cf_atomic64_set(&to_si->config.defrag_period, from_si_cfg->defrag_period);
 	to_si->config.defrag_max_units = from_si_cfg->defrag_max_units;
 	to_si->enable_histogram        = from_si_cfg->enable_histogram;
 	to_si->config.flag             = from_si_cfg->ignore_not_sync_flag;
@@ -1278,16 +1255,13 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	uint64_t ns_objects  = ns->n_objects;
 	uint64_t si_objects  = cf_atomic64_get(si->stats.n_objects);
 	uint64_t pending     = cf_atomic64_get(si->stats.recs_pending);
-	// To protect the pimd while accessing it.
-	SINDEX_RLOCK(&si->imd->slock);
+
 	uint64_t n_keys      = ai_btree_get_numkeys(si->imd);
-	SINDEX_UNLOCK(&si->imd->slock);
-	info_append_uint64(db, "keys", n_keys);
-	info_append_uint64(db, "entries", si_objects);
-	SINDEX_RLOCK(&si->imd->slock);
 	uint64_t i_size      = ai_btree_get_isize(si->imd);
 	uint64_t n_size      = ai_btree_get_nsize(si->imd);
-	SINDEX_UNLOCK(&si->imd->slock);
+
+	info_append_uint64(db, "keys", n_keys);
+	info_append_uint64(db, "entries", si_objects);
 	info_append_uint64(db, "ibtr_memory_used", i_size);
 	info_append_uint64(db, "nbtr_memory_used", n_size);
 	info_append_uint64(db, "si_accounted_memory", i_size + n_size);
@@ -1402,13 +1376,14 @@ as_sindex_histogram_enable(as_namespace *ns, char * iname, bool enable)
 int
 as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 {
-	if (!ns)
+	if (! ns)
 		return AS_SINDEX_ERR_PARAM;
+
 	as_sindex *si = as_sindex_lookup_by_iname(ns, imd->iname, AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
-	if (!si) {
+	if (! si) {
 		return AS_SINDEX_ERR_NOTFOUND;
 	}
-	SINDEX_WLOCK(&si->imd->slock);
+
 	if (si->state == AS_SINDEX_ACTIVE) {
 		char context[100];
 		int  context_len = sizeof(context);
@@ -1431,7 +1406,7 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 			}
 			cf_info(AS_INFO,"Changing value of gc-period of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
 							ns->name, imd->iname, si->config.defrag_period, val);
-			si->config.defrag_period = val;
+			cf_atomic64_set(&si->config.defrag_period, val);
 		}
 		else if (0 == as_info_parameter_get(params, "gc-max-units", context, &context_len)) {
 			uint64_t val = atoll(context);
@@ -1447,12 +1422,11 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 			goto Error;
 		}
 	}
-	SINDEX_UNLOCK(&si->imd->slock);
+
 	AS_SINDEX_RELEASE(si);
 	return AS_SINDEX_OK;
 
 Error:
-	SINDEX_UNLOCK(&si->imd->slock);
 	AS_SINDEX_RELEASE(si);
 	return AS_SINDEX_ERR_PARAM;
 }
@@ -1468,9 +1442,7 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 	for (int i = 0; i < AS_SINDEX_MAX; i++) {
 		if (&(ns->sindex[i]) && (ns->sindex[i].imd)) {
 			as_sindex si = ns->sindex[i];
-			if (as_sindex_isactive(&si)) {
-				SINDEX_RLOCK(&si.imd->slock);
-			}
+
 			cf_dyn_buf_append_string(db, "ns=");
 			cf_dyn_buf_append_string(db, ns->name);
 			cf_dyn_buf_append_string(db, ":set=");
@@ -1511,9 +1483,6 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 			}
 			else {
 				cf_dyn_buf_append_string(db, ":state=D;");
-			}
-			if (as_sindex_isactive(&si)) {
-				SINDEX_UNLOCK(&si.imd->slock);
 			}
 		}
 	}
@@ -1971,13 +1940,11 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 	cf_atomic64_sub(&imd->si->ns->n_bytes_sindex_memory,
 			ai_btree_get_isize(imd) + ai_btree_get_nsize(imd));
 	for (int i=0; i<imd->nprts; i++) {
-		SINDEX_RLOCK(&imd->slock);
 		pimd = &imd->pimd[i];
-		SINDEX_WLOCK(&pimd->slock);
+		PIMD_WLOCK(&pimd->slock);
 		struct btree * ibtr = pimd->ibtr;
 		ai_btree_reinit_pimd(pimd);
-		SINDEX_UNLOCK(&pimd->slock);
-		SINDEX_UNLOCK(&imd->slock);
+		PIMD_UNLOCK(&pimd->slock);
 		ai_btree_delete_ibtr(ibtr, pimd->imatch);
 	}
 	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory,
@@ -2010,13 +1977,10 @@ as_sindex_delete_set(as_namespace * ns, char * set_name)
 int
 as_sindex_populate_done(as_sindex *si)
 {
-	int ret = AS_SINDEX_OK;
-	SINDEX_WLOCK(&si->imd->slock);
 	// Setting flag is atomic: meta lockless
 	si->flag |= AS_SINDEX_FLAG_RACTIVE;
 	si->flag &= ~AS_SINDEX_FLAG_POPULATING;
-	SINDEX_UNLOCK(&si->imd->slock);
-	return ret;
+	return AS_SINDEX_OK;
 }
 /*
  * Client API to start namespace scan to populate secondary index. The scan
@@ -2970,19 +2934,16 @@ as_sindex_query(as_sindex *si, as_sindex_range *srange, as_sindex_qctx *qctx)
 {
 	if ((!si || !srange)) return AS_SINDEX_ERR_PARAM;
 	as_sindex_metadata *imd = si->imd;
-	SINDEX_RLOCK(&imd->slock);
-	SINDEX_RLOCK(&imd->pimd[qctx->pimd_idx].slock);
+	PIMD_RLOCK(&imd->pimd[qctx->pimd_idx].slock);
 	int ret = as_sindex__pre_op_assert(si, AS_SINDEX_OP_READ);
 	if (AS_SINDEX_OK != ret) {
-		SINDEX_UNLOCK(&imd->pimd[qctx->pimd_idx].slock);
-		SINDEX_UNLOCK(&imd->slock);
+		PIMD_UNLOCK(&imd->pimd[qctx->pimd_idx].slock);
 		return ret;
 	}
 	uint64_t starttime = 0;
 	ret = ai_btree_query(imd, srange, qctx);
 	as_sindex__process_ret(si, ret, AS_SINDEX_OP_READ, starttime, __LINE__);
-	SINDEX_UNLOCK(&imd->pimd[qctx->pimd_idx].slock);
-	SINDEX_UNLOCK(&imd->slock);
+	PIMD_UNLOCK(&imd->pimd[qctx->pimd_idx].slock);
 	return ret;
 }
 //                                        END -  SINDEX QUERY
@@ -3064,7 +3025,6 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 		imd =  si->imd;
 		op = sbin->op;
 	// 		Take the read lock on imd
-		SINDEX_RLOCK(&imd->slock);
 		for (int j=0; j<sbin->num_values; j++) {
 
 			int ret = as_sindex__pre_op_assert(si, op);
@@ -3103,7 +3063,7 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 			}
 
 	//			Get the pimd write lock
-			SINDEX_WLOCK(&pimd->slock);
+			PIMD_WLOCK(&pimd->slock);
 
 	//			If op is DELETE delete the value from sindex
 			if (op == AS_SINDEX_OP_DELETE) {
@@ -3115,7 +3075,7 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 			}
 
 	//			Release the pimd lock
-			SINDEX_UNLOCK(&pimd->slock);
+			PIMD_UNLOCK(&pimd->slock);
 			as_sindex__process_ret(si, ret, op, starttime, __LINE__);
 		}
 		cf_debug(AS_SINDEX, " Secondary Index Op Finish------------- ");
@@ -3124,8 +3084,7 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 	//		Release the SI.
 
 	}
-	Cleanup:
-	SINDEX_UNLOCK(&imd->slock);
+Cleanup:
 	return retval;
 }
 //                                       END - SBIN UTILITY
@@ -4284,14 +4243,11 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	if (as_index_has_set(rd->r)) {
 		setname = as_index_get_set_name(rd->r, si->ns);
 	}
-	SINDEX_RLOCK(&imd->slock);
+
 	if (!as_sindex__setname_match(imd, setname)) {
-		SINDEX_UNLOCK(&imd->slock);
 		SINDEX_GUNLOCK();
 		return AS_SINDEX_OK;
 	}
-
-	SINDEX_UNLOCK(&imd->slock);
 
 	// collect sbins
 	SINDEX_BINS_SETUP(sbins, 1);
@@ -4663,14 +4619,12 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 
 						bool found = false;
 
-						SINDEX_RLOCK(&si->imd->slock);
 						for (int j = 0; j < items->num_items; j++) {
 							if (strcmp(key, items->item[j]->key) == 0) {
 								found = true;
 								break;
 							}
 						}
-						SINDEX_UNLOCK(&si->imd->slock);
 
 						// Add to drop list list if not in
 						// merged list from paxos principal

@@ -239,12 +239,12 @@ typedef struct as_sindex_config_var_s {
 	bool        enable_histogram; // default false;
 	uint16_t    ignore_not_sync_flag;
 	bool 		conf_valid_flag;
-}as_sindex_config_var;
+} as_sindex_config_var;
 
 typedef struct as_sindex_config_s {
-	uint64_t    defrag_period;
-	uint32_t    defrag_max_units;
-	uint16_t    flag; // TODO change_name
+	cf_atomic64        defrag_period;
+	cf_atomic32        defrag_max_units;
+	volatile uint16_t  flag; // TODO change_name
 } as_sindex_config;
 
 // **************************************************************************************************
@@ -310,15 +310,19 @@ typedef struct as_sindex_s {
 	byte                         state;
 	
 	// TODO : shift to imd
-	uint64_t                     flag;
+	volatile uint16_t            flag;
+	cf_atomic64                  desync_cnt;
+	// No need to be volatile; little stale info
+	// about this is ok. And it is not checked
+	// in busy loop
+	bool                         enable_histogram; // default false;
+
 	as_namespace                *ns;
-	cf_atomic_int                desync_cnt;
 
 	// Protected by si reference
 	struct as_sindex_metadata_s *imd;
 	struct as_sindex_metadata_s *new_imd;
 
-	bool                         enable_histogram; // default false;
 	as_sindex_stat               stats;
 	as_sindex_config             config;
 } as_sindex;
@@ -658,18 +662,18 @@ do { \
 	if (ret) cf_warning(AS_SINDEX, "GUNLOCK (%d) %s:%d",ret,  __FILE__, __LINE__); \
 } while (0);
 
-#define SINDEX_RLOCK(l)          \
+#define PIMD_RLOCK(l)          \
 do {                                            \
 	int ret = pthread_rwlock_rdlock((l));        \
 	if (ret) cf_warning(AS_SINDEX, "RLOCK_ONLY (%d) %s:%d", ret, __FILE__, __LINE__); \
 } while(0);
 
-#define SINDEX_WLOCK(l)                       \
+#define PIMD_WLOCK(l)                       \
 do {                                            \
 	int ret = pthread_rwlock_wrlock((l));        \
 	if (ret) cf_warning(AS_SINDEX, "WLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
 } while(0);
-#define SINDEX_UNLOCK(l)                      \
+#define PIMD_UNLOCK(l)                      \
 do {                                            \
 	int ret = pthread_rwlock_unlock((l));        \
 	if (ret) cf_warning(AS_SINDEX, "UNLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \

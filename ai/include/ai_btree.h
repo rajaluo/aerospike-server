@@ -51,6 +51,10 @@ uint64_t ai_btree_get_isize(as_sindex_metadata *imd);
 
 uint64_t ai_btree_get_nsize(as_sindex_metadata *imd);
 
+uint64_t ai_btree_get_pimd_nsize(as_sindex_pmetadata *pimd);
+
+uint64_t ai_btree_get_pimd_isize(as_sindex_pmetadata *pimd);
+
 int ai_btree_list(char *ns, char *set, as_sindex_metadata **imds, int *num_indexes);
 
 int ai_btree_list_ns(char *ns, as_sindex_metadata **imds, int *num_indexes);
