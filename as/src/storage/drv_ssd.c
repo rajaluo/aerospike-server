@@ -4050,10 +4050,8 @@ as_storage_record_create_ssd(as_namespace *ns, as_record *r, as_storage_rd *rd,
 	rd->u.ssd.must_free_block = NULL;
 	rd->u.ssd.ssd = 0;
 
-	// Should already look like this, but ...
-	r->storage_key.ssd.file_id = STORAGE_INVALID_FILE_ID;
-	r->storage_key.ssd.rblock_id = STORAGE_INVALID_RBLOCK;
-	r->storage_key.ssd.n_rblocks = 0;
+	cf_assert(r->storage_key.ssd.rblock_id == STORAGE_INVALID_RBLOCK,
+			AS_DRV_SSD, "unexpected - uninitialized rblock-id");
 
 	return 0;
 }

@@ -20,9 +20,9 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
-#include <regex.h>
+#include "base/predexp.h"
 
-#include "fault.h"
+#include <regex.h>
 
 #include <aerospike/as_arraylist.h>
 #include <aerospike/as_arraylist_iterator.h>
@@ -33,9 +33,9 @@
 #include "citrusleaf/cf_byte_order.h"
 #include "citrusleaf/cf_clock.h"
 
-#include "base/particle.h"
-#include "base/predexp.h"
+#include "fault.h"
 
+#include "base/particle.h"
 #include "geospatial/geospatial.h"
 
 typedef enum {
@@ -208,7 +208,7 @@ eval_and(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
 		case PREDEXP_VALUE:
 		case PREDEXP_NOVALUE:
 			// Child can't be value node; shouldn't ever happen.
-			cf_crash(AS_QUERY, "eval_and child was value node");
+			cf_crash(AS_PREDEXP, "eval_and child was value node");
 		}
 	}
 
@@ -219,7 +219,7 @@ static bool
 build_and(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 {
 	if (len != sizeof(uint16_t)) {
-		cf_warning(AS_QUERY, "predexp_and: unexpected size %d", len);
+		cf_warning(AS_PREDEXP, "predexp_and: unexpected size %d", len);
 		return false;
 	}
 	uint16_t nterms = cf_swap_from_be16(* (uint16_t *) pp);
@@ -239,7 +239,7 @@ build_and(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	for (uint16_t ndx = 0; ndx < nterms; ++ndx) {
 		// If there is not an available child expr cleanup and fail.
 		if (! *stackpp) {
-			cf_warning(AS_QUERY, "predexp_and: missing child %d", ndx);
+			cf_warning(AS_PREDEXP, "predexp_and: missing child %d", ndx);
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
 		}
@@ -253,7 +253,7 @@ build_and(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 
 		// Make sure the child is not a value node.
 		if (dp->child->flags & PREDEXP_VALUE_NODE) {
-			cf_warning(AS_QUERY, "predexp_and: child %d is value node", ndx);
+			cf_warning(AS_PREDEXP, "predexp_and: child %d is value node", ndx);
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
 		}
@@ -307,7 +307,7 @@ eval_or(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
 		case PREDEXP_VALUE:
 		case PREDEXP_NOVALUE:
 			// Child can't be value node; shouldn't ever happen.
-			cf_crash(AS_QUERY, "eval_or child was value node");
+			cf_crash(AS_PREDEXP, "eval_or child was value node");
 		}
 	}
 
@@ -318,7 +318,7 @@ static bool
 build_or(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 {
 	if (len != sizeof(uint16_t)) {
-		cf_warning(AS_QUERY, "predexp_or: unexpected size %d", len);
+		cf_warning(AS_PREDEXP, "predexp_or: unexpected size %d", len);
 		return false;
 	}
 	uint16_t nterms = cf_swap_from_be16(* (uint16_t *) pp);
@@ -337,7 +337,7 @@ build_or(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	for (uint16_t ndx = 0; ndx < nterms; ++ndx) {
 		// If there is not an available child expr cleanup and fail.
 		if (! *stackpp) {
-			cf_warning(AS_QUERY, "predexp_or: missing child %d", ndx);
+			cf_warning(AS_PREDEXP, "predexp_or: missing child %d", ndx);
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
 		}
@@ -350,7 +350,7 @@ build_or(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 
 		// Make sure the child is not a value node.
 		if (dp->child->flags & PREDEXP_VALUE_NODE) {
-			cf_warning(AS_QUERY, "predexp_or: child %d is value node", ndx);
+			cf_warning(AS_PREDEXP, "predexp_or: child %d is value node", ndx);
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
 		}
@@ -397,7 +397,7 @@ eval_not(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
 	case PREDEXP_VALUE:
 	case PREDEXP_NOVALUE:
 		// Child can't be value node; shouldn't ever happen.
-		cf_crash(AS_QUERY, "eval_not child was value node");
+		cf_crash(AS_PREDEXP, "eval_not child was value node");
 	}
 
 	return PREDEXP_UNKNOWN;	// Can't get here, makes compiler happy.
@@ -407,7 +407,7 @@ static bool
 build_not(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 {
 	if (len != 0) {
-		cf_warning(AS_QUERY, "predexp_not: unexpected size %d", len);
+		cf_warning(AS_PREDEXP, "predexp_not: unexpected size %d", len);
 		return false;
 	}
 
@@ -423,7 +423,7 @@ build_not(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 
 	// If there is not an available child expr cleanup and fail.
 	if (! *stackpp) {
-		cf_warning(AS_QUERY, "predexp_not: missing child");
+		cf_warning(AS_PREDEXP, "predexp_not: missing child");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -436,7 +436,7 @@ build_not(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 
 	// Make sure the child is not a value node.
 	if (dp->child->flags & PREDEXP_VALUE_NODE) {
-		cf_warning(AS_QUERY, "predexp_not: child is value node");
+		cf_warning(AS_PREDEXP, "predexp_not: child is value node");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -574,7 +574,8 @@ eval_compare(predexp_eval_t* bp,
 			retval = PREDEXP_RETVAL(lval <= rval);
 			goto Cleanup;
 		default:
-			cf_crash(AS_QUERY, "eval_compare integer unknown tag %d", dp->tag);
+			cf_crash(AS_PREDEXP, "eval_compare integer unknown tag %d",
+					 dp->tag);
 		}
 	}
 	case AS_PARTICLE_TYPE_STRING: {
@@ -597,7 +598,7 @@ eval_compare(predexp_eval_t* bp,
 				retval = ! isequal;
 				goto Cleanup;
 			default:
-				cf_crash(AS_QUERY, "eval_compare string (eq) unknown tag %d",
+				cf_crash(AS_PREDEXP, "eval_compare string (eq) unknown tag %d",
 						 dp->tag);
 			}
 		case AS_PREDEXP_STRING_REGEX: {
@@ -608,7 +609,7 @@ eval_compare(predexp_eval_t* bp,
 			goto Cleanup;
 		}
 		default:
-			cf_crash(AS_QUERY, "eval_compare string unknown tag %d", dp->tag);
+			cf_crash(AS_PREDEXP, "eval_compare string unknown tag %d", dp->tag);
 		}
 	}
 	case AS_PARTICLE_TYPE_GEOJSON: {
@@ -627,19 +628,20 @@ eval_compare(predexp_eval_t* bp,
 			goto Cleanup;
 		}
 		default:
-			cf_crash(AS_QUERY, "eval_compare geojson unknown tag %d", dp->tag);
+			cf_crash(AS_PREDEXP, "eval_compare geojson unknown tag %d",
+					 dp->tag);
 		}
 	}
 	default:
-		cf_crash(AS_QUERY, "eval_compare unknown type %d", dp->type);
+		cf_crash(AS_PREDEXP, "eval_compare unknown type %d", dp->type);
 	}
 
  Cleanup:
 	if (lwbin.must_free) {
-		cf_crash(AS_QUERY, "eval_compare need bin cleanup, didn't before");
+		cf_crash(AS_PREDEXP, "eval_compare need bin cleanup, didn't before");
 	}
 	if (rwbin.must_free) {
-		cf_crash(AS_QUERY, "eval_compare need bin cleanup, didn't before");
+		cf_crash(AS_PREDEXP, "eval_compare need bin cleanup, didn't before");
 	}
 	return retval;
 }
@@ -687,7 +689,7 @@ build_compare(predexp_eval_t** stackpp,
 		dp->type = AS_PARTICLE_TYPE_GEOJSON;
 		break;
 	default:
-		cf_crash(AS_QUERY, "build_compare called with bogus tag: %d", tag);
+		cf_crash(AS_PREDEXP, "build_compare called with bogus tag: %d", tag);
 		break;
 	}
 
@@ -697,7 +699,7 @@ build_compare(predexp_eval_t** stackpp,
 	if (tag == AS_PREDEXP_STRING_REGEX) {
 		// This comparison takes a uint32_t opts argument.
 		if (pp + sizeof(uint32_t) > endp) {
-			cf_warning(AS_QUERY, "build_compare: regex opts past end");
+			cf_warning(AS_PREDEXP, "build_compare: regex opts past end");
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
 		}
@@ -707,7 +709,7 @@ build_compare(predexp_eval_t** stackpp,
 
 	// No arguments.
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_compare: msg unaligned");
+		cf_warning(AS_PREDEXP, "build_compare: msg unaligned");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -715,8 +717,7 @@ build_compare(predexp_eval_t** stackpp,
 	// ---- Pop the right child off the stack.
 
 	if (! *stackpp) {
-		cf_warning(AS_QUERY,
-				   "predexp_compare: missing right child");
+		cf_warning(AS_PREDEXP, "predexp_compare: missing right child");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -726,15 +727,14 @@ build_compare(predexp_eval_t** stackpp,
 	dp->rchild->next = NULL;
 
 	if ((dp->rchild->flags & PREDEXP_VALUE_NODE) == 0) {
-		cf_warning(AS_QUERY,
+		cf_warning(AS_PREDEXP,
 				   "predexp compare: right child is not value node");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
 
 	if (dp->rchild->type != dp->type) {
-		cf_warning(AS_QUERY,
-				   "predexp compare: right child is wrong type");
+		cf_warning(AS_PREDEXP, "predexp compare: right child is wrong type");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -742,8 +742,7 @@ build_compare(predexp_eval_t** stackpp,
 	// ---- Pop the left child off the stack.
 
 	if (! *stackpp) {
-		cf_warning(AS_QUERY,
-				   "predexp_compare: missing left child");
+		cf_warning(AS_PREDEXP, "predexp_compare: missing left child");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -753,15 +752,13 @@ build_compare(predexp_eval_t** stackpp,
 	dp->lchild->next = NULL;
 
 	if ((dp->lchild->flags & PREDEXP_VALUE_NODE) == 0) {
-		cf_warning(AS_QUERY,
-				   "predexp compare: left child is not value node");
+		cf_warning(AS_PREDEXP, "predexp compare: left child is not value node");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
 
 	if (dp->lchild->type != dp->type) {
-		cf_warning(AS_QUERY,
-				   "predexp compare: left child is wrong type");
+		cf_warning(AS_PREDEXP, "predexp compare: left child is wrong type");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -771,7 +768,7 @@ build_compare(predexp_eval_t** stackpp,
 	case AS_PREDEXP_GEOJSON_CONTAINS:
 		// The right child needs to be an immediate value.
 		if ((dp->rchild->flags & PREDEXP_IMMEDIATE_NODE) == 0) {
-			cf_warning(AS_QUERY,
+			cf_warning(AS_PREDEXP,
 					   "predexp compare: within arg not immediate GeoJSON");
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
@@ -783,7 +780,7 @@ build_compare(predexp_eval_t** stackpp,
 		rwbin.must_free = false;
 		if ((*dp->rchild->eval_fn)(dp->rchild, argsp, &rwbin) ==
 			PREDEXP_NOVALUE) {
-			cf_warning(AS_QUERY,
+			cf_warning(AS_PREDEXP,
 					   "predexp compare: within arg had unknown value");
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
@@ -795,22 +792,22 @@ build_compare(predexp_eval_t** stackpp,
 		if (!geo_parse(NULL, ptr, sz,
 					   &dp->state.geojson.cellid,
 					   &dp->state.geojson.region)) {
-			cf_warning(AS_QUERY,
-					   "predexp compare: failed to parse GeoJSON");
+			cf_warning(AS_PREDEXP, "predexp compare: failed to parse GeoJSON");
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			if (rwbin.must_free) {
-				cf_crash(AS_QUERY, "predexp compare now needs bin destructor");
+				cf_crash(AS_PREDEXP,
+						 "predexp compare now needs bin destructor");
 			}
 			return false;
 		}
 		if (rwbin.must_free) {
-			cf_crash(AS_QUERY, "predexp compare now needs bin destructor");
+			cf_crash(AS_PREDEXP, "predexp compare now needs bin destructor");
 		}
 		break;
 	case AS_PREDEXP_STRING_REGEX:
 		// The right child needs to be an immediate value.
 		if ((dp->rchild->flags & PREDEXP_IMMEDIATE_NODE) == 0) {
-			cf_warning(AS_QUERY,
+			cf_warning(AS_PREDEXP,
 					   "predexp compare: regex arg not immediate string");
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
@@ -822,7 +819,7 @@ build_compare(predexp_eval_t** stackpp,
 		rwbin2.must_free = false;
 		if ((*dp->rchild->eval_fn)(dp->rchild, argsp2, &rwbin2) ==
 			PREDEXP_NOVALUE) {
-			cf_warning(AS_QUERY,
+			cf_warning(AS_PREDEXP,
 					   "predexp compare: regex arg had unknown value");
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			return false;
@@ -835,18 +832,18 @@ build_compare(predexp_eval_t** stackpp,
 		if (rv != 0) {
 			char errbuf[1024];
 			regerror(rv, &dp->state.regex.regex, errbuf, sizeof(errbuf));
-			cf_warning(AS_QUERY,
-					   "predexp compare: regex compile failed: %s",
+			cf_warning(AS_PREDEXP, "predexp compare: regex compile failed: %s",
 					   errbuf);
 			(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 			if (rwbin2.must_free) {
-				cf_crash(AS_QUERY, "predexp compare now needs bin destructor");
+				cf_crash(AS_PREDEXP,
+						 "predexp compare now needs bin destructor");
 			}
 			return false;
 		}
 		dp->state.regex.iscompiled = true;
 		if (rwbin2.must_free) {
-			cf_crash(AS_QUERY, "predexp compare now needs bin destructor");
+			cf_crash(AS_PREDEXP, "predexp compare now needs bin destructor");
 		}
 		break;
 
@@ -884,7 +881,7 @@ static predexp_retval_t
 eval_value(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_value called outside value context");
+		cf_crash(AS_PREDEXP, "eval_value called outside value context");
 	}
 
 	predexp_eval_value_t* dp = (predexp_eval_value_t *) bp;
@@ -907,7 +904,7 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	case AS_PREDEXP_STRING_VALUE: type = AS_PARTICLE_TYPE_STRING; break;
 	case AS_PREDEXP_GEOJSON_VALUE: type = AS_PARTICLE_TYPE_GEOJSON; break;
 	default:
-		cf_crash(AS_QUERY, "build_value called with bogus tag: %d", tag);
+		cf_crash(AS_PREDEXP, "build_value called with bogus tag: %d", tag);
 		break;
 	}
 
@@ -927,7 +924,7 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	pp += vallen;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "predexp value: msg unaligned");
+		cf_warning(AS_PREDEXP, "predexp value: msg unaligned");
 		goto Failed;
 	}
 
@@ -937,7 +934,7 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 		dp->bin.particle = cf_malloc((size_t)mem_size);
 		if (! dp->bin.particle) {
 			// FIXME - Could this ever happen?
-			cf_crash(AS_QUERY, "cf_malloc failed");
+			cf_crash(AS_PREDEXP, "cf_malloc failed");
 		}
 	}
 
@@ -951,7 +948,7 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 		as_bin_state_set_from_type(&dp->bin, type);
 	}
 	else {
-		cf_warning(AS_QUERY, "failed to build predexp value with err %d",
+		cf_warning(AS_PREDEXP, "failed to build predexp value with err %d",
 				   result);
 		if (mem_size != 0) {
 			cf_free(dp->bin.particle);
@@ -993,7 +990,7 @@ static predexp_retval_t
 eval_bin(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_bin called outside value context");
+		cf_crash(AS_PREDEXP, "eval_bin called outside value context");
 	}
 
 	predexp_eval_bin_t* dp = (predexp_eval_bin_t *) bp;
@@ -1040,7 +1037,7 @@ build_bin(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 		dp->type = AS_PARTICLE_TYPE_MAP;
 		break;
 	default:
-		cf_crash(AS_QUERY, "build_bin called with bogus tag: %d", tag);
+		cf_crash(AS_PREDEXP, "build_bin called with bogus tag: %d", tag);
 		break;
 	}
 
@@ -1053,7 +1050,7 @@ build_bin(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	uint8_t* endp = pp + len;
 
 	if (len >= sizeof(dp->bname)) {
-		cf_warning(AS_QUERY, "build_bin: binname too long");
+		cf_warning(AS_PREDEXP, "build_bin: binname too long");
 		goto Failed;
 	}
 	uint8_t bnlen = (uint8_t) len;
@@ -1062,7 +1059,7 @@ build_bin(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	pp += bnlen;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_bin: msg unaligned");
+		cf_warning(AS_PREDEXP, "build_bin: msg unaligned");
 		goto Failed;
 	}
 
@@ -1098,7 +1095,7 @@ static predexp_retval_t
 eval_var(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_var called outside value context");
+		cf_crash(AS_PREDEXP, "eval_var called outside value context");
 	}
 
 	predexp_eval_var_t* dp = (predexp_eval_var_t *) bp;
@@ -1138,7 +1135,7 @@ build_var(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 		dp->type = AS_PARTICLE_TYPE_GEOJSON;
 		break;
 	default:
-		cf_crash(AS_QUERY, "build_var called with bogus tag: %d", tag);
+		cf_crash(AS_PREDEXP, "build_var called with bogus tag: %d", tag);
 		break;
 	}
 
@@ -1151,7 +1148,7 @@ build_var(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	uint8_t* endp = pp + len;
 
 	if (len >= sizeof(dp->vname)) {
-		cf_warning(AS_QUERY, "build_var: varname too long");
+		cf_warning(AS_PREDEXP, "build_var: varname too long");
 		goto Failed;
 	}
 	uint8_t bnlen = (uint8_t) len;
@@ -1160,7 +1157,7 @@ build_var(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	pp += bnlen;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_var: msg unaligned");
+		cf_warning(AS_PREDEXP, "build_var: msg unaligned");
 		goto Failed;
 	}
 
@@ -1196,7 +1193,8 @@ eval_rec_device_size(predexp_eval_t* bp,
 					 wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_rec_device_size called outside value context");
+		cf_crash(AS_PREDEXP,
+				 "eval_rec_device_size called outside value context");
 	}
 
 	// predexp_eval_rec_device_size_t* dp =
@@ -1224,7 +1222,7 @@ build_rec_device_size(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	uint8_t* endp = pp + len;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_rec_device_size: msg unaligned");
+		cf_warning(AS_PREDEXP, "build_rec_device_size: msg unaligned");
 		goto Failed;
 	}
 
@@ -1261,7 +1259,8 @@ eval_rec_last_update(predexp_eval_t* bp,
 					 wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_rec_last_update called outside value context");
+		cf_crash(AS_PREDEXP,
+				 "eval_rec_last_update called outside value context");
 	}
 
 	// predexp_eval_rec_last_update_t* dp =
@@ -1290,7 +1289,7 @@ build_rec_last_update(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	uint8_t* endp = pp + len;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_rec_last_update: msg unaligned");
+		cf_warning(AS_PREDEXP, "build_rec_last_update: msg unaligned");
 		goto Failed;
 	}
 
@@ -1327,7 +1326,7 @@ eval_rec_void_time(predexp_eval_t* bp,
 				   wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY, "eval_rec_void_time called outside value context");
+		cf_crash(AS_PREDEXP, "eval_rec_void_time called outside value context");
 	}
 
 	// predexp_eval_rec_void_time_t* dp = (predexp_eval_rec_void_time_t *) bp;
@@ -1362,7 +1361,7 @@ build_rec_void_time(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	uint8_t* endp = pp + len;
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_rec_void_time: msg unaligned");
+		cf_warning(AS_PREDEXP, "build_rec_void_time: msg unaligned");
 		goto Failed;
 	}
 
@@ -1400,7 +1399,7 @@ eval_rec_digest_modulo(predexp_eval_t* bp,
 				   wrapped_as_bin_t* wbinp)
 {
 	if (wbinp == NULL) {
-		cf_crash(AS_QUERY,
+		cf_crash(AS_PREDEXP,
 				 "eval_rec_digest_modulo called outside value context");
 	}
 
@@ -1431,20 +1430,20 @@ build_rec_digest_modulo(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	uint8_t* endp = pp + len;
 
 	if (pp + sizeof(int32_t) > endp) {
-		cf_warning(AS_QUERY, "build_rec_digest_modulo: msg too short");
+		cf_warning(AS_PREDEXP, "build_rec_digest_modulo: msg too short");
 		goto Failed;
 	}
-	
+
 	dp->mod = cf_swap_from_be32(* (int32_t*) pp);
 	pp += sizeof(int32_t);
-		
+
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_rec_digest_modulo: msg unaligned");
+		cf_warning(AS_PREDEXP, "build_rec_digest_modulo: msg unaligned");
 		goto Failed;
 	}
 
 	if (dp->mod == 0) {
-		cf_warning(AS_QUERY, "build_rec_digest_modulo: zero modulo invalid");
+		cf_warning(AS_PREDEXP, "build_rec_digest_modulo: zero modulo invalid");
 		goto Failed;
 	}
 
@@ -1495,7 +1494,8 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 		retval = PREDEXP_TRUE;
 		break;
 	default:
-		cf_crash(AS_QUERY, "eval_list_iter called with bogus tag: %d", dp->tag);
+		cf_crash(AS_PREDEXP,
+				 "eval_list_iter called with bogus tag: %d", dp->tag);
 	}
 
 	wrapped_as_bin_t lwbin;
@@ -1526,7 +1526,8 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 		as_val* val = (as_val*) as_arraylist_iterator_next(&it);
 		int rv = as_bin_particle_replace_from_asval(&var.bin, val);
 		if (rv != 0) {
-			cf_warning(AS_QUERY, "eval_list_iter: particle from asval failed");
+			cf_warning(AS_PREDEXP,
+					   "eval_list_iter: particle from asval failed");
 			continue;
 		}
 
@@ -1547,7 +1548,7 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 			case PREDEXP_VALUE:
 			case PREDEXP_NOVALUE:
 				// Child can't be value node; shouldn't ever happen.
-				cf_crash(AS_QUERY, "eval_list_iter child was value node");
+				cf_crash(AS_PREDEXP, "eval_list_iter child was value node");
 			}
 			break;
 		case AS_PREDEXP_LIST_ITERATE_AND:
@@ -1566,11 +1567,12 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 			case PREDEXP_VALUE:
 			case PREDEXP_NOVALUE:
 				// Child can't be value node; shouldn't ever happen.
-				cf_crash(AS_QUERY, "eval_list_iter child was value node");
+				cf_crash(AS_PREDEXP, "eval_list_iter child was value node");
 			}
 			break;
 		default:
-			cf_crash(AS_QUERY, "eval_list_iter called with bogus tag: %d", dp->tag);
+			cf_crash(AS_PREDEXP, "eval_list_iter called with bogus tag: %d",
+					 dp->tag);
 		}
 
 	}
@@ -1588,7 +1590,7 @@ eval_list_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbin
 	argsp->vl = var.next;
 
 	if (lwbin.must_free) {
-		cf_crash(AS_QUERY, "eval_list_iter need bin cleanup, didn't before");
+		cf_crash(AS_PREDEXP, "eval_list_iter need bin cleanup, didn't before");
 	}
 
 	return retval;
@@ -1612,7 +1614,8 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 		retval = PREDEXP_TRUE;
 		break;
 	default:
-		cf_crash(AS_QUERY, "eval_map_iter called with bogus tag: %d", dp->tag);
+		cf_crash(AS_PREDEXP, "eval_map_iter called with bogus tag: %d",
+				 dp->tag);
 	}
 
 	wrapped_as_bin_t lwbin;
@@ -1652,13 +1655,13 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 			val = as_pair_2(pair);
 			break;
 		default:
-			cf_crash(AS_QUERY, "eval_map_iter called with bogus tag (2): %d",
+			cf_crash(AS_PREDEXP, "eval_map_iter called with bogus tag (2): %d",
 					 dp->tag);
 		}
 
 		int rv = as_bin_particle_replace_from_asval(&var.bin, val);
 		if (rv != 0) {
-			cf_warning(AS_QUERY, "eval_map_iter: particle from asval failed");
+			cf_warning(AS_PREDEXP, "eval_map_iter: particle from asval failed");
 			continue;
 		}
 
@@ -1680,7 +1683,7 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 			case PREDEXP_VALUE:
 			case PREDEXP_NOVALUE:
 				// Child can't be value node; shouldn't ever happen.
-				cf_crash(AS_QUERY, "eval_map_iter child was value node");
+				cf_crash(AS_PREDEXP, "eval_map_iter child was value node");
 			}
 			break;
 		case AS_PREDEXP_MAPKEY_ITERATE_AND:
@@ -1700,11 +1703,11 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 			case PREDEXP_VALUE:
 			case PREDEXP_NOVALUE:
 				// Child can't be value node; shouldn't ever happen.
-				cf_crash(AS_QUERY, "eval_map_iter child was value node");
+				cf_crash(AS_PREDEXP, "eval_map_iter child was value node");
 			}
 			break;
 		default:
-			cf_crash(AS_QUERY, "eval_map_iter called with bogus tag: %d",
+			cf_crash(AS_PREDEXP, "eval_map_iter called with bogus tag: %d",
 					 dp->tag);
 		}
 
@@ -1723,7 +1726,7 @@ eval_map_iter(predexp_eval_t* bp, predexp_args_t* argsp, wrapped_as_bin_t* wbinp
 	argsp->vl = var.next;
 
 	if (lwbin.must_free) {
-		cf_crash(AS_QUERY, "eval_map_iter need bin cleanup, didn't before");
+		cf_crash(AS_PREDEXP, "eval_map_iter need bin cleanup, didn't before");
 	}
 	return retval;
 }
@@ -1756,7 +1759,7 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 		dp->type = AS_PARTICLE_TYPE_MAP;
 		break;
 	default:
-		cf_crash(AS_QUERY, "build_iter called with bogus tag: %d", tag);
+		cf_crash(AS_PREDEXP, "build_iter called with bogus tag: %d", tag);
 	}
 
 	dp->tag = tag;
@@ -1766,7 +1769,7 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	uint8_t* endp = pp + len;
 
 	if (len >= sizeof(dp->vname)) {
-		cf_warning(AS_QUERY, "build_iter: varname too long");
+		cf_warning(AS_PREDEXP, "build_iter: varname too long");
 		goto Failed;
 	}
 	uint8_t vnlen = (uint8_t) len;
@@ -1777,8 +1780,7 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	// ---- Pop the right child (collection) off the stack.
 
 	if (! *stackpp) {
-		cf_warning(AS_QUERY,
-				   "predexp_iterate: missing right child");
+		cf_warning(AS_PREDEXP, "predexp_iterate: missing right child");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -1788,15 +1790,14 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	dp->rchild->next = NULL;
 
 	if ((dp->rchild->flags & PREDEXP_VALUE_NODE) == 0) {
-		cf_warning(AS_QUERY,
+		cf_warning(AS_PREDEXP,
 				   "predexp iterate: right child is not value node");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
 
 	if (dp->rchild->type != dp->type) {
-		cf_warning(AS_QUERY,
-				   "predexp iterate: right child is wrong type");
+		cf_warning(AS_PREDEXP, "predexp iterate: right child is wrong type");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -1804,8 +1805,7 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	// ---- Pop the left child (per-element expr) off the stack.
 
 	if (! *stackpp) {
-		cf_warning(AS_QUERY,
-				   "predexp_iterate: missing left child");
+		cf_warning(AS_PREDEXP, "predexp_iterate: missing left child");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
@@ -1815,21 +1815,19 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	dp->lchild->next = NULL;
 
 	if ((dp->lchild->flags & PREDEXP_VALUE_NODE) == 1) {
-		cf_warning(AS_QUERY,
-				   "predexp iterate: left child is value node");
+		cf_warning(AS_PREDEXP, "predexp iterate: left child is value node");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
 
 	if (dp->lchild->type != AS_PARTICLE_TYPE_NULL) {
-		cf_warning(AS_QUERY,
-				   "predexp iterate: left child is wrong type");
+		cf_warning(AS_PREDEXP, "predexp iterate: left child is wrong type");
 		(*dp->base.dtor_fn)((predexp_eval_t *) dp);
 		return false;
 	}
 
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "build_iter: msg unaligned");
+		cf_warning(AS_PREDEXP, "build_iter: msg unaligned");
 		goto Failed;
 	}
 
@@ -1901,7 +1899,7 @@ build(predexp_eval_t** stackpp, uint16_t tag, uint32_t len, uint8_t* pp)
 	case AS_PREDEXP_MAPVAL_ITERATE_AND:
 		return build_iter(stackpp, len, pp, tag);
 	default:
-		cf_warning(AS_QUERY, "unexpected predexp tag: %d", tag);
+		cf_warning(AS_PREDEXP, "unexpected predexp tag: %d", tag);
 		return false;
 	}
 }
@@ -1924,7 +1922,7 @@ predexp_build(as_msg_field* pfp)
 		pp += sizeof(uint32_t);
 
 		if (pp + len > endp) {
-			cf_warning(AS_QUERY, "malformed predexp field");
+			cf_warning(AS_PREDEXP, "malformed predexp field");
 			goto FAILED;
 		}
 
@@ -1937,23 +1935,23 @@ predexp_build(as_msg_field* pfp)
 
 	// The cursor needs to neatly point at the end pointer.
 	if (pp != endp) {
-		cf_warning(AS_QUERY, "malformed predexp field");
+		cf_warning(AS_PREDEXP, "malformed predexp field");
 		goto FAILED;
 	}
 
 	// We'd better have exactly one node on the stack now.
 	if (!stackp) {
-		cf_warning(AS_QUERY, "no top level predexp");
+		cf_warning(AS_PREDEXP, "no top level predexp");
 		goto FAILED;
 	}
 	if (stackp->next) {
-		cf_warning(AS_QUERY, "multiple top-level predexp");
+		cf_warning(AS_PREDEXP, "multiple top-level predexp");
 		goto FAILED;
 	}
 
 	// The top node needs to be a matching node, not a value node.
 	if (stackp->flags & PREDEXP_VALUE_NODE) {
-		cf_warning(AS_QUERY, "top-level predexp is value node");
+		cf_warning(AS_PREDEXP, "top-level predexp is value node");
 		goto FAILED;
 	}
 
@@ -1988,7 +1986,7 @@ predexp_matches_record(predexp_eval_t* bp, predexp_args_t* argsp)
 	case PREDEXP_FALSE:
 		return false;
 	default:
-		cf_crash(AS_QUERY, "predexp eval returned other then true/false "
+		cf_crash(AS_PREDEXP, "predexp eval returned other then true/false "
 				 "with record data present");
 		return false;	// makes compiler happy
 	}
