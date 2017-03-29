@@ -1121,6 +1121,11 @@ as_batch_threads_resize(uint32_t threads)
 void
 as_batch_queues_info(cf_dyn_buf* db)
 {
+	if (pthread_mutex_lock(&batch_resize_lock)) {
+		cf_warning(AS_BATCH, "Batch info resize lock failed");
+		return;
+	}
+
 	uint32_t max = batch_thread_pool.thread_size;
 
 	for (uint32_t i = 0; i < max; i++) {
@@ -1132,6 +1137,7 @@ as_batch_queues_info(cf_dyn_buf* db)
 		cf_dyn_buf_append_char(db, ':');
 		cf_dyn_buf_append_int(db, cf_queue_sz(bq->response_queue));  // Buffer count
 	}
+	pthread_mutex_unlock(&batch_resize_lock);
 }
 
 int
