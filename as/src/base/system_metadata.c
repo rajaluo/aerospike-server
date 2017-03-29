@@ -1163,15 +1163,13 @@ static int as_smd_transact_recv_fn(cf_node node_id, msg *msg, void *transact_dat
 			 g_config.self_node, (as_paxos_succession_getprincipal() == g_config.self_node ? "Paxos principal" : "regular node"),
 			 node_id, (as_paxos_succession_getprincipal() == node_id ? "Paxos principal" : "regular node"));
 
-	// Make sure fields pointing into the fabric buffer are preserved.
-	msg_preserve_all_fields(msg);
-
 	// Send the received msg to the System Metadata thread.
 	if ((retval = as_smd_msgq_push(node_id, msg, smd))) {
 		cf_warning(AS_SMD, "failed to push received transact msg (retval %d)", retval);
 	}
 
 	// Complete the transaction by replying to the received msg.
+	msg_reset(msg);
 	as_fabric_transact_reply(msg, transact_data);
 
 	return retval;
@@ -1928,27 +1926,18 @@ static msg *as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_
 static int transact_complete_fn(msg *response, void *udata, int fabric_err)
 {
 //	as_smd_t *smd = (as_smd_t *) udata; // (Not used.)
-	int e = 0;
-	uint32_t op = 0;
 
 	if (!response) {
 		cf_warning(AS_SMD, "Null response message passed in transaction complete!");
 		return -1;
 	}
 
+	as_fabric_msg_put(response);
+
 	if (AS_FABRIC_SUCCESS != fabric_err) {
 		cf_warning(AS_SMD, "System Metadata transaction failed with fabric error %d", fabric_err);
-		as_fabric_msg_put(response);
 		return -1;
 	}
-
-	if (0 > (e = msg_get_uint32(response, AS_SMD_MSG_OP, &op))) {
-		cf_warning(AS_SMD, "failed to get metadata operation from failed transaction response msg (err %d ; fabric err %d)", e, fabric_err);
-	}
-
-	cf_debug(AS_SMD, "System Metadata received transaction complete for operation %s (fabric error %d)", AS_SMD_MSG_OP_NAME(op), fabric_err);
-
-	as_fabric_msg_put(response);
 
 	return 0;
 }
