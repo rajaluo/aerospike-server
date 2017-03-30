@@ -198,6 +198,15 @@ as_sindex__destroy_fn(void *param)
 		cf_atomic64_sub(&si->ns->n_bytes_sindex_memory,
 				ai_btree_get_isize(si->imd) + ai_btree_get_nsize(si->imd));    
 
+		// Cache the ibtr pointers
+		uint16_t nprts = si->imd->nprts;
+		struct btree *ibtr[nprts];
+		for (int i = 0; i < nprts; i++) {
+			as_sindex_pmetadata *pimd = &si->imd->pimd[i];
+			ibtr[i] = pimd->ibtr;
+			ai_btree_reset_pimd(pimd);
+		}
+
 		ai_btree_destroy(si->imd);
 		as_sindex_destroy_pmetadata(si);
 		si->state = AS_SINDEX_INACTIVE;
@@ -228,6 +237,11 @@ as_sindex__destroy_fn(void *param)
 		// of meta-data first. This is the only special case
 		// where both GLOCK and LOCK is called together
 		SINDEX_GWUNLOCK();
+
+		// Destroy cached ibtr pointer
+		for (int i = 0; i < imd->nprts; i++) {
+			ai_btree_delete_ibtr(ibtr[i]);
+		}
 
 		if (si->new_imd) {
 			as_sindex_metadata *recreate_imd = si->new_imd;
