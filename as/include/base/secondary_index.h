@@ -656,10 +656,16 @@ do { \
 	if (ret) cf_warning(AS_SINDEX, "GWLOCK(%d) %s:%d", ret, __FILE__, __LINE__); \
 } while (0);
 
-#define SINDEX_GUNLOCK()        \
+#define SINDEX_GRUNLOCK()        \
 do { \
 	int ret = pthread_rwlock_unlock(&g_sindex_rwlock); \
-	if (ret) cf_warning(AS_SINDEX, "GUNLOCK (%d) %s:%d",ret,  __FILE__, __LINE__); \
+	if (ret) cf_warning(AS_SINDEX, "GRUNLOCK (%d) %s:%d",ret,  __FILE__, __LINE__); \
+} while (0);
+
+#define SINDEX_GWUNLOCK()        \
+do { \
+	int ret = pthread_rwlock_unlock(&g_sindex_rwlock); \
+	if (ret) cf_warning(AS_SINDEX, "GWUNLOCK (%d) %s:%d",ret,  __FILE__, __LINE__); \
 } while (0);
 
 #define PIMD_RLOCK(l)          \
@@ -673,11 +679,19 @@ do {                                            \
 	int ret = pthread_rwlock_wrlock((l));        \
 	if (ret) cf_warning(AS_SINDEX, "WLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
 } while(0);
-#define PIMD_UNLOCK(l)                      \
+
+#define PIMD_RUNLOCK(l)							\
 do {                                            \
 	int ret = pthread_rwlock_unlock((l));        \
-	if (ret) cf_warning(AS_SINDEX, "UNLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
+	if (ret) cf_warning(AS_SINDEX, "RUNLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
 } while(0);
+
+#define PIMD_WUNLOCK(l)							\
+do {                                            \
+	int ret = pthread_rwlock_unlock((l));        \
+	if (ret) cf_warning(AS_SINDEX, "WUNLOCK_ONLY (%d) %s:%d",ret, __FILE__, __LINE__); \
+} while(0);
+
 // **************************************************************************************************
 
 

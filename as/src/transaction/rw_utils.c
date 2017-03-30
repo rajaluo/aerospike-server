@@ -349,7 +349,7 @@ remove_from_sindex(as_namespace* ns, const char* set_name, cf_digest* keyd,
 				&sbins[sbins_populated], AS_SINDEX_OP_DELETE);
 	}
 
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 
 	if (sbins_populated) {
 		as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated, keyd);

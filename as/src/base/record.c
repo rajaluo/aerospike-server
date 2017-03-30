@@ -458,7 +458,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	}
 
 	if (has_sindex) {
-		SINDEX_GUNLOCK();
+		SINDEX_GRUNLOCK();
 	}
 	if (ret == 0) {
 		if (has_sindex && sbins_populated) {
