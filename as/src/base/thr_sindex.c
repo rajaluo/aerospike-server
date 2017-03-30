@@ -808,7 +808,7 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	if (job->si) {
-		if (! as_sindex_isactive(job->si) || job->si->desync_cnt > job->si_desync_cnt) {
+		if (job->si->desync_cnt > job->si_desync_cnt) {
 			as_record_done(r_ref, ns);
 			as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
 			return;
@@ -834,7 +834,11 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 	if (job->si) {
-		as_sindex_put_rd(job->si, &rd);
+		if (as_sindex_put_rd(job->si, &rd)) {
+			as_record_done(r_ref, ns);
+			as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
+			return;
+		}
 	}
 	else {
 		as_sindex_putall_rd(ns, &rd);
