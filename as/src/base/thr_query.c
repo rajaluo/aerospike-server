@@ -2743,8 +2743,8 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 {
 
 #if defined(USE_SYSTEMTAP)
-    uint64_t nodeid = g_config.self_node;
-    uint64_t trid = tr? tr->trid : 0;
+	uint64_t nodeid = g_config.self_node;
+	uint64_t trid = tr ? as_transaction_trid(tr) : 0;
 #endif
 
 	int rv = AS_QUERY_ERR;
