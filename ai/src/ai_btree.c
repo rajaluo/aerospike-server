@@ -1408,7 +1408,7 @@ ai_btree_get_numkeys(as_sindex_metadata *imd)
 		as_sindex_pmetadata *pimd = &imd->pimd[i];
 		PIMD_RLOCK(&pimd->slock);
 		val += pimd->ibtr->numkeys;
-		PIMD_UNLOCK(&pimd->slock);
+		PIMD_RUNLOCK(&pimd->slock);
 	}
 
 	return val;
@@ -1429,7 +1429,7 @@ ai_btree_get_isize(as_sindex_metadata *imd)
 		as_sindex_pmetadata *pimd = &imd->pimd[i];
 		PIMD_RLOCK(&pimd->slock);
 		size += ai_btree_get_pimd_isize(pimd);
-		PIMD_UNLOCK(&pimd->slock);
+		PIMD_RUNLOCK(&pimd->slock);
 	}
 	return size;
 }
@@ -1449,7 +1449,7 @@ ai_btree_get_nsize(as_sindex_metadata *imd)
 		as_sindex_pmetadata *pimd = &imd->pimd[i];
 		PIMD_RLOCK(&pimd->slock);
 		size += ai_btree_get_pimd_nsize(pimd);
-		PIMD_UNLOCK(&pimd->slock)
+		PIMD_RUNLOCK(&pimd->slock)
 	}
 
 	return size;

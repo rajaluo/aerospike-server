@@ -593,7 +593,7 @@ udf_aerospike__apply_update_atomic(udf_record *urecord)
 	}
 
 	if (has_sindex) {
-		SINDEX_GUNLOCK();
+		SINDEX_GRUNLOCK();
 	}
 
 	// If there were updates do miscellaneous successful commit
@@ -659,7 +659,7 @@ Rollback:
 	urecord->ldt_rectype_bit_update = 0;
 
 	if (has_sindex) {
-		SINDEX_GUNLOCK();
+		SINDEX_GRUNLOCK();
 	}
 
 	// Reset the flat size in case the stuff is backedout !!! it should not

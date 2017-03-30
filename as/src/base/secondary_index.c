@@ -1042,7 +1042,7 @@ as_sindex__lookup(as_namespace *ns, char *iname, char *set, int binid, as_sindex
 {
 	SINDEX_GRLOCK();
 	as_sindex *si = as_sindex__lookup_lockfree(ns, iname, set, binid, type, itype, path, flag);
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 	return si;
 }
 
@@ -1352,7 +1352,7 @@ as_sindex_histogram_dumpall(as_namespace *ns)
 		if (si->stats._query_diff_hist)
 			histogram_dump(si->stats._query_diff_hist);
 	}
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 	return AS_SINDEX_OK;
 }
 
@@ -1486,7 +1486,7 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 			}
 		}
 	}
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 	return AS_SINDEX_OK;
 }
 //                                  END - STAT/CONFIG/HISTOGRAM
@@ -1553,7 +1553,7 @@ as_sindex_populator_reserve_all(as_namespace * ns)
 		}
 		count++;
 	}
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 	return AS_SINDEX_OK;
 }
 
@@ -1576,7 +1576,7 @@ as_sindex_populator_release_all(as_namespace * ns)
 		}
 		count++;
 	}
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 	return AS_SINDEX_OK;
 }
 
@@ -1681,7 +1681,7 @@ as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd)
 	}
 
 END:
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
     return ret;
 }
 
@@ -1695,7 +1695,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 	SINDEX_GWLOCK();
 	if (as_sindex_lookup_by_iname_lockfree(ns, imd->iname, AS_SINDEX_LOOKUP_FLAG_NORESERVE)) {
 		cf_detail(AS_SINDEX,"Index %s already exists", imd->iname);
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR_FOUND;
 	}
 	int chosen_id = AS_SINDEX_MAX;
@@ -1710,7 +1710,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 
 	if (!si || (chosen_id == AS_SINDEX_MAX))  {
 		cf_warning(AS_SINDEX, "SINDEX CREATE : Maxed out secondary index limit no more indexes allowed");
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR;
 	}
 
@@ -1721,14 +1721,14 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 
 	if (as_sindex__populate_binid(ns, imd)) {
 		cf_warning(AS_SINDEX, "SINDEX CREATE : Popluating bin id failed");
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR_PARAM;
 	}
 
 	as_sindex_status rv = as_sindex__put_in_set_binid_hash(ns, imd->set, imd->binid, id);
 	if (rv != AS_SINDEX_OK) {
 		cf_warning(AS_SINDEX, "SINDEX CREATE : Put in set_binid hash fails with error %d", rv);
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR;
 	}
 
@@ -1745,7 +1745,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		if (rv) {
 			cf_warning(AS_SINDEX, "Delete from set_binid hash fails with error %d", rv);
 		}
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR;
 	}
 	cf_detail(AS_SINDEX, "Put iname simatch %s:%zu->%d", iname, strlen(imd->iname), chosen_id);
@@ -1813,7 +1813,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		if (user_create && g_sindex_boot_done) {
 			// Reserve it before pushing it into queue
 			AS_SINDEX_RESERVE(si);
-			SINDEX_GUNLOCK();
+			SINDEX_GWUNLOCK();
 			int rv = cf_queue_push(g_sindex_populate_q, &si);
 			if (CF_QUEUE_OK != rv) {
 				cf_warning(AS_SINDEX, "Failed to queue up for population... index=%s "
@@ -1823,7 +1823,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		} else {
 			// Internal create is called before storage is initialized. Loading
 			// of storage will fill up the indexes no need to queue it up for scan
-			SINDEX_GUNLOCK();
+			SINDEX_GWUNLOCK();
 		}
 	} else {
 		// TODO: When alc_btree_create fails, accept_cb should have a better
@@ -1838,7 +1838,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		as_sindex_imd_free(qimd);
 		cf_debug(AS_SINDEX, "Create index %s failed ret = %d",
 				imd->iname, ret);
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 	}
 	return ret;
 }
@@ -1913,10 +1913,10 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 		si->state = AS_SINDEX_DESTROY;
 		as_sindex_reset_binid_has_sindex(ns, imd->binid);
 		AS_SINDEX_RELEASE(si);
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 		return AS_SINDEX_OK;
 	} else {
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 		return AS_SINDEX_ERR_NOTFOUND;
 	}
 }
@@ -1944,7 +1944,7 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 		PIMD_WLOCK(&pimd->slock);
 		struct btree * ibtr = pimd->ibtr;
 		ai_btree_reinit_pimd(pimd);
-		PIMD_UNLOCK(&pimd->slock);
+		PIMD_WUNLOCK(&pimd->slock);
 		ai_btree_delete_ibtr(ibtr, pimd->imatch);
 	}
 	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory,
@@ -1964,7 +1964,7 @@ as_sindex_delete_set(as_namespace * ns, char * set_name)
 		as_sindex_empty_index(si_arr[i]->imd);
 		cf_info(AS_SINDEX, "Finished si set delete for index %s in set %s", si_arr[i]->imd->iname, set_name);
 	}
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 	as_sindex_release_arr(si_arr, sindex_count);
 }
 //                                        END - SINDEX DELETE
@@ -2081,7 +2081,7 @@ as_sindex_boot_populateall_done(as_namespace *ns)
 		if (si->flag & AS_SINDEX_FLAG_POPULATING) continue;
 		si->flag |= AS_SINDEX_FLAG_RACTIVE;
 	}
-	SINDEX_GUNLOCK();
+	SINDEX_GWUNLOCK();
 	cf_queue_push(g_sindex_populateall_done_q, &ret);
 	cf_info(AS_SINDEX, "Namespace %s sindex population done", ns->name);
 	return ret;
@@ -2937,13 +2937,13 @@ as_sindex_query(as_sindex *si, as_sindex_range *srange, as_sindex_qctx *qctx)
 	PIMD_RLOCK(&imd->pimd[qctx->pimd_idx].slock);
 	int ret = as_sindex__pre_op_assert(si, AS_SINDEX_OP_READ);
 	if (AS_SINDEX_OK != ret) {
-		PIMD_UNLOCK(&imd->pimd[qctx->pimd_idx].slock);
+		PIMD_RUNLOCK(&imd->pimd[qctx->pimd_idx].slock);
 		return ret;
 	}
 	uint64_t starttime = 0;
 	ret = ai_btree_query(imd, srange, qctx);
 	as_sindex__process_ret(si, ret, AS_SINDEX_OP_READ, starttime, __LINE__);
-	PIMD_UNLOCK(&imd->pimd[qctx->pimd_idx].slock);
+	PIMD_RUNLOCK(&imd->pimd[qctx->pimd_idx].slock);
 	return ret;
 }
 //                                        END -  SINDEX QUERY
@@ -3075,7 +3075,7 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 			}
 
 	//			Release the pimd lock
-			PIMD_UNLOCK(&pimd->slock);
+			PIMD_WUNLOCK(&pimd->slock);
 			as_sindex__process_ret(si, ret, op, starttime, __LINE__);
 		}
 		cf_debug(AS_SINDEX, " Secondary Index Op Finish------------- ");
@@ -4232,7 +4232,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	// Proceed only if sindex is active
 	SINDEX_GRLOCK();
 	if (!as_sindex_isactive(si)) {
-		SINDEX_GUNLOCK();
+		SINDEX_GRUNLOCK();
 		return AS_SINDEX_ERR;
 	}
 
@@ -4245,7 +4245,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	}
 
 	if (!as_sindex__setname_match(imd, setname)) {
-		SINDEX_GUNLOCK();
+		SINDEX_GRUNLOCK();
 		return AS_SINDEX_OK;
 	}
 
@@ -4258,7 +4258,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	as_bin *b = as_bin_get(rd, imd->bname);
 
 	if (!b) {
-		SINDEX_GUNLOCK();
+		SINDEX_GRUNLOCK();
 		return AS_SINDEX_OK;
 	}
 
@@ -4275,7 +4275,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 					sbins_populated);
 		}
 	}
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 
 	if (cdt_val) {
 		as_val_destroy(cdt_val);
@@ -4635,7 +4635,7 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 						}
 					}
 				}
-				SINDEX_GUNLOCK();
+				SINDEX_GRUNLOCK();
 
 				// Delete Index
 				for (int i = 0 ; i < del_cnt; i++) {

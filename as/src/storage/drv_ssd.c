@@ -2942,7 +2942,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		}
 
 		if (has_sindex) {
-			SINDEX_GUNLOCK();
+			SINDEX_GRUNLOCK();
 
 			if (sbins_populated > 0) {
 				as_sindex_update_by_sbin(ns, as_index_get_set_name(r, ns), sbins, sbins_populated, &rd.keyd);

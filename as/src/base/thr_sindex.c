@@ -227,7 +227,7 @@ as_sindex__destroy_fn(void *param)
 		// remember this is going to release the write lock
 		// of meta-data first. This is the only special case
 		// where both GLOCK and LOCK is called together
-		SINDEX_GUNLOCK();
+		SINDEX_GWUNLOCK();
 
 		if (si->new_imd) {
 			as_sindex_metadata *recreate_imd = si->new_imd;
@@ -314,20 +314,20 @@ get_pimd_and_reserve_si(as_namespace *ns, int *si_index, int *p_index, as_sindex
 	as_sindex * si = &ns->sindex[*si_index];
 
 	if (!si) {
-		SINDEX_GUNLOCK();
+		SINDEX_GRUNLOCK();
 		cf_warning(AS_SINDEX, "Allocated sindex was found as null.");
 		return -2;
 	}
 	if (si->state != AS_SINDEX_ACTIVE) {
 		// Skip to next sindex in the same namespace
-		SINDEX_GUNLOCK();
+		SINDEX_GRUNLOCK();
 		*si_index = *si_index + 1;
 		*p_index  = 0;
 		return -1;
 	}
 
 	AS_SINDEX_RESERVE(si);
-	SINDEX_GUNLOCK();
+	SINDEX_GRUNLOCK();
 	*sindex                   = si;
 	cf_detail(AS_SINDEX, "Defragging pimd %d of sindex %s on namespace %s and set %s",
 			*p_index, si->imd->iname, si->imd->ns_name, si->imd->set);
@@ -463,7 +463,7 @@ as_sindex__defrag_fn(void *udata)
 				SET_TIME_FOR_SINDEX_GC_HIST(pimd_rlock_time_ns);
 				ret  = ai_btree_build_defrag_list(si->imd, pimd, &i_col, &n_offset, limit_per_iteration, &processed, &found, &defrag_list);
 				SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_pimd_rlock_hist, pimd_rlock_time_ns);
-				PIMD_UNLOCK(&pimd->slock);
+				PIMD_RUNLOCK(&pimd->slock);
 				pimd_rlock_time_ns = 0;
 				if (ret != AS_SINDEX_CONTINUE) {
 					break;
@@ -488,7 +488,7 @@ as_sindex__defrag_fn(void *udata)
 					SET_TIME_FOR_SINDEX_GC_HIST(pimd_wlock_time_ns);
 					more = ai_btree_defrag_list(si->imd, pimd, &defrag_list, wl_lim, &deleted);
 					SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_pimd_wlock_hist, pimd_wlock_time_ns);
-					PIMD_UNLOCK(&pimd->slock);
+					PIMD_WUNLOCK(&pimd->slock);
 					pimd_wlock_time_ns = 0;
 				}
 				cf_detail(AS_SINDEX, "Deleted %d units of attempted %ld units from index %s", listsize, limit, si->imd->iname);
