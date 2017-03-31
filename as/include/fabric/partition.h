@@ -91,8 +91,7 @@ typedef struct as_partition_s {
 	as_partition_vinfo primary_version_info;
 	as_partition_vinfo version_info;
 	as_partition_state state;
-
-	bool has_master_wait; // TODO - deprecate in "six months"
+	bool has_master_wait; // XXX JUMP - remove in "six months"
 	int pending_emigrations;
 	int pending_immigrations;
 	bool replicas_delayed_emigrate[AS_CLUSTER_SZ];
@@ -240,5 +239,6 @@ as_partition_getid(const cf_digest d)
 //
 
 void client_replica_maps_create(struct as_namespace_s* ns);
+void client_replica_maps_clear(struct as_namespace_s* ns);
 bool client_replica_maps_update(struct as_namespace_s* ns, uint32_t pid);
 bool client_replica_maps_is_partition_queryable(const struct as_namespace_s* ns, uint32_t pid);

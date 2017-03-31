@@ -49,6 +49,8 @@
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/thr_info.h"
+#include "fabric/clustering.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/hlc.h"
@@ -76,8 +78,19 @@
  */
 
 
+// TEMPORARY - reach into new clustering module.
+extern void as_clustering_set_integrity(bool has_integrity);
+extern void as_exchange_cluster_key_set(uint64_t cluster_key);
+extern cf_node* as_exchange_succession();
+extern void as_exchange_succession_set(cf_node* succession, uint32_t cluster_size);
+extern void as_clustering_switchover(uint64_t cluster_key,	uint32_t cluster_size,
+				cf_node* succession, uint32_t sequence_number);
+
+
 /* Function forward references: */
 
+bool as_paxos_succession_ismember(cf_node n);
+cf_node as_paxos_succession_getprincipal();
 void as_paxos_current_init(as_paxos* p);
 static bool as_paxos_are_proto_compatible(uint32_t protocol1, uint32_t protocol2);
 static void as_paxos_hb_get_succession_list(cf_node nodeid,
@@ -136,31 +149,9 @@ static cf_node as_paxos_hb_get_principal(cf_node nodeid);
  */
 as_paxos *g_paxos = NULL;
 
-/*
- * The migrate key changes once when a Paxos vote completes.
- * Every migration operation stores its key and sends it as part of its start
- * message. If a migrate message's key does not match its global key, the
- * migrate is terminated.
- */
-static uint64_t g_cluster_key;
-
-// Set the cluster key
-void
-as_paxos_set_cluster_key(uint64_t cluster_key)
-{
-	g_cluster_key = cluster_key;
-
-	cf_info(AS_PAXOS, "cluster_key set to 0x%"PRIx64"", g_cluster_key);
-
-	as_partition_balance_synchronize_migrations();
-}
-
-// Get the cluster key
-uint64_t
-as_paxos_get_cluster_key()
-{
-	return (g_cluster_key);
-}
+// These threads are joinable:
+pthread_t g_thr_id;
+pthread_t g_sup_thr_id;
 
 /* as_paxos_state_next
  * This is just a little bit of syntactic sugar around the transitions in
@@ -321,7 +312,7 @@ dump_partition_state()
 void
 as_paxos_print_cluster_key(const char *message)
 {
-	cf_debug(AS_PAXOS, "%s: cluster key %"PRIx64"", message, as_paxos_get_cluster_key());
+	cf_debug(AS_PAXOS, "%s: cluster key %"PRIx64"", message, as_exchange_cluster_key());
 }
 
 /* as_paxos_sync_generate
@@ -436,7 +427,10 @@ as_paxos_sync_msg_apply(msg *m)
 	as_partition_balance_disallow_migrations();
 
 	// AER-4645 Important that setting cluster key follows disallow_migrations.
-	as_paxos_set_cluster_key(cluster_key);
+	as_exchange_cluster_key_set(cluster_key);
+	cf_info(AS_PAXOS, "cluster key set to %lx", cluster_key);
+
+	as_partition_balance_synchronize_migrations();
 
 	/* Fix up the auxiliary state around the succession table and destroy
 	 * any pending transactions */
@@ -959,56 +953,65 @@ as_paxos_succession_ismember(cf_node n)
 int
 as_paxos_set_protocol(paxos_protocol_enum protocol)
 {
-	if (g_config.paxos_protocol == protocol) {
-		cf_info(AS_PAXOS, "no Paxos protocol change needed");
-		return(0);
+	if (protocol != AS_PAXOS_PROTOCOL_V5) {
+		cf_warning(AS_PAXOS, "can't set paxos protocol to anything but v5");
+		return -1;
 	}
 
-	switch (protocol) {
-		case AS_PAXOS_PROTOCOL_V4:
-			if (CL_MODE_NO_TOPOLOGY == g_config.cluster_mode) {
-				cf_warning(AS_PAXOS, "Rack Aware not enabled ~~ cannot dynamically set Paxos protocol to version %d", AS_PAXOS_PROTOCOL_VERSION_NUMBER(protocol));
-				return(-1);
-			}
-			// [NB:  Else, simply fall through.]
-		case AS_PAXOS_PROTOCOL_V1:
-		case AS_PAXOS_PROTOCOL_V2:
-		case AS_PAXOS_PROTOCOL_V3:
-			cf_debug(AS_PAXOS, "setting Paxos protocol to version %d", AS_PAXOS_PROTOCOL_VERSION_NUMBER(protocol));
-
-			if (AS_PAXOS_PROTOCOL_V1 == protocol && AS_CLUSTER_LEGACY_SZ != g_config.paxos_max_cluster_size) {
-				cf_warning(AS_PAXOS, "setting paxos protocol version v1 only allowed when paxos_max_cluster_size = %d not the current value of %d",
-						   AS_CLUSTER_LEGACY_SZ, g_config.paxos_max_cluster_size);
-				return(-1);
-			}
-
-			// TODO: Why do we allow migrations here? This could cause
-			// migrations to be allowed too early which could cause a cf_crash.
-			as_partition_balance_allow_migrations();
-			g_config.paxos_protocol = protocol;
-			break;
-		case AS_PAXOS_PROTOCOL_NONE:
-			cf_info(AS_PAXOS, "disabling Paxos messaging");
-			as_partition_balance_disallow_migrations();
-			g_config.paxos_protocol = protocol;
-			break;
-		default:
-			cf_warning(AS_PAXOS, "unknown Paxos protocol version number: %d", protocol);
-			return(-1);
+	if (g_config.paxos_protocol == AS_PAXOS_PROTOCOL_V5) {
+		cf_info(AS_PAXOS, "paxos protocol is already v5");
+		return -1;
 	}
 
-	return(0);
-}
+	if (as_hb_protocol_get() != AS_HB_PROTOCOL_V3) {
+		cf_warning(AS_PAXOS,
+				"paxos protocol v5 requires heartbeat protocol v3");
+		return -1;
+	}
 
-/* as_paxos_set_recovery_policy
- * Set the Paxos recovery policy.
- * Returns 0 if successful, else returns -1.  */
-int
-as_paxos_set_recovery_policy(paxos_recovery_policy_enum policy)
-{
-	g_config.paxos_recovery_policy = policy;
+	if (!as_partition_balance_are_migrations_allowed()) {
+		cf_warning(AS_PAXOS,
+				"switch to paxos protocol v5 requires stable cluster");
+		return -1;
+	}
 
-	return(0);
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+
+		int64_t initial_tx = (int64_t)ns->migrate_tx_partitions_initial;
+		int64_t initial_rx = (int64_t)ns->migrate_rx_partitions_initial;
+		int64_t remaining_tx = (int64_t)ns->migrate_tx_partitions_remaining;
+		int64_t remaining_rx = (int64_t)ns->migrate_rx_partitions_remaining;
+		int64_t initial = initial_tx + initial_rx;
+		int64_t remaining = remaining_tx + remaining_rx;
+
+		if (initial > 0 && remaining > 0) {
+			cf_warning(AS_PAXOS,
+					"switch to paxos protocol v5 requires migrations to be complete for namespace %s",
+					ns->name);
+			return -1;
+		}
+	}
+
+	// Switch to new world!
+	g_config.paxos_protocol = AS_PAXOS_PROTOCOL_V5;
+
+	cf_info(AS_PAXOS, "stopping old paxos module ...");
+
+	pthread_join(g_thr_id, NULL);
+	pthread_join(g_sup_thr_id, NULL);
+
+	cf_info(AS_PAXOS,
+			"old paxos stopped - starting new exchange and clustering modules ...");
+
+	as_partition_balance_refresh_versions();
+
+	as_exchange_start();
+	as_clustering_switchover(as_exchange_cluster_key(),
+			as_exchange_cluster_size(), as_exchange_succession(),
+			g_paxos->gen.sequence);
+
+	return 0;
 }
 
 /**
@@ -1460,7 +1463,7 @@ as_paxos_transaction_getnext(cf_node master_node)
 void
 as_paxos_send_sync_messages() {
 	as_paxos *p = g_paxos;
-	uint64_t cluster_key = as_paxos_get_cluster_key();
+	uint64_t cluster_key = as_exchange_cluster_key();
 	msg *reply = NULL;
 
 	if (NULL == (reply = as_paxos_sync_msg_generate(cluster_key))) {
@@ -1507,8 +1510,8 @@ void as_paxos_start_second_phase()
 	 */
 	uint64_t cluster_key = 0;
 
-	// Generate a non-zero cluster key.
-	while (!(cluster_key = cf_get_rand64())) {
+	// Generate a non-zero cluster key that fits in 7 bytes.
+	while ((cluster_key = (cf_get_rand64() >> 8)) == 0) {
 		;
 	}
 
@@ -1517,7 +1520,10 @@ void as_paxos_start_second_phase()
 	as_partition_balance_disallow_migrations();
 
 	// AER-4645 Important that setting cluster key follows disallow_migrations.
-	as_paxos_set_cluster_key(cluster_key);
+	as_exchange_cluster_key_set(cluster_key);
+	cf_info(AS_PAXOS, "cluster key set to %lx", cluster_key);
+
+	as_partition_balance_synchronize_migrations();
 
 	/* Earlier code used to synchronize only new members. However, this code is changed to
 	 * send sync messages to all members of the cluster. On receiving a sync, all nodes are expected to send
@@ -1955,7 +1961,7 @@ as_paxos_spark(as_paxos_change *c)
 	}
 	*cb = '\0';
 	cf_info(AS_PAXOS, "as_paxos_spark establishing transaction [%"PRIu32"]@%"PRIx64" ClSz = %u ; # change = %d : %s",
-			t.gen.sequence, g_config.self_node, p->cluster_size, t.c.n_change, change_buf);
+			t.gen.sequence, g_config.self_node, as_exchange_cluster_size(), t.c.n_change, change_buf);
 
 	/*
 	 * Reset the sync attempt number.
@@ -1988,6 +1994,12 @@ as_paxos_spark(as_paxos_change *c)
 int
 as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 {
+	if (as_new_clustering()) {
+		cf_warning(AS_PAXOS, "paxos v5 - got old paxos msg from %lx", id);
+		as_fabric_msg_put(m);
+		return 0;
+	}
+
 	as_paxos *p = g_paxos;
 	as_paxos_msg *qm;
 
@@ -2042,6 +2054,11 @@ as_paxos_msgq_push(cf_node id, msg *m, void *udata)
 void
 as_paxos_event(int nevents, as_hb_event_node *events, void *udata)
 {
+	if (as_new_clustering()) {
+		// Ignore heartbeat events in new clustering mode.
+		return;
+	}
+
 	// Leave one extra room for RESET event on top of node events
 	if ((1 > nevents) || (AS_CLUSTER_SZ + 1 < nevents) || !events) {
 		cf_warning(AS_PAXOS, "Illegal state in as_paxos_event, node events is: %d", nevents);
@@ -2549,7 +2566,7 @@ as_paxos_check_integrity()
 		}
 	} // end for each node
 
-	as_paxos_set_cluster_integrity(p, !cluster_integrity_fault);
+	as_clustering_set_integrity(! cluster_integrity_fault);
 }
 
 void
@@ -2566,7 +2583,7 @@ as_paxos_process_retransmit_check()
 	bool succession_list_fault = corrective_event_count > 0;
 
 	as_paxos_check_integrity();
-	bool cluster_integrity_fault = !as_paxos_get_cluster_integrity(p);
+	bool cluster_integrity_fault = ! as_clustering_has_integrity();
 
 	// Second phase failed if migrations are disallowed and we have
 	// attempted sync more than the threshold number of times.
@@ -2579,25 +2596,11 @@ as_paxos_process_retransmit_check()
 	bool paxos_sparked = false;
 
 	if (cluster_integrity_fault || succession_list_fault ||
-	    second_phase_failed) {
-
-		switch (g_config.paxos_recovery_policy) {
-
-			case AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER: {
-				as_paxos_auto_reset_master(
-				  cluster_integrity_fault ||
-				    second_phase_failed,
-				  corrective_event_count, corrective_events);
-				paxos_sparked = true;
-				break;
-			}
-
-			default:
-				// defensive code. Should never happen.
-				cf_crash(AS_PAXOS,
-					 "unknown Paxos recovery policy %d",
-					 g_config.paxos_recovery_policy);
-		}
+			second_phase_failed) {
+		as_paxos_auto_reset_master(
+				cluster_integrity_fault || second_phase_failed,
+				corrective_event_count, corrective_events);
+		paxos_sparked = true;
 	}
 
 	// Second phase succeeded, we are already in a cluster, hence we are
@@ -2632,6 +2635,39 @@ as_paxos_process_retransmit_check()
 	}
 }
 
+static void
+paxos_begin_partition_balance()
+{
+	uint32_t cluster_size = 0;
+
+	while (cluster_size < AS_CLUSTER_SZ) {
+		if (g_paxos->succession[cluster_size] == (cf_node)0) {
+			break;
+		}
+
+		cluster_size++;
+	}
+
+	as_exchange_succession_set(g_paxos->succession, cluster_size);
+
+	cf_info(AS_PAXOS, "CLUSTER SIZE = %u", cluster_size);
+
+	// Currently all namespaces' succession lists are the same as the global
+	// cluster list. The paxos replacement, "exchange", will fill in the
+	// namespace lists independently.
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
+
+		ns->cluster_size = cluster_size;
+		memset(ns->succession, 0, sizeof(ns->succession));
+		memcpy(ns->succession, g_paxos->succession,
+				sizeof(cf_node) * cluster_size);
+	}
+
+	// Balance partitions and kick off necessary migrations.
+	as_partition_balance();
+}
+
 // as_paxos_thr
 // A thread to handle all Paxos events
 void *
@@ -2642,7 +2678,7 @@ as_paxos_thr(void *arg)
 	int c;
 
 	/* Event processing loop */
-	for ( ; ; ) {
+	while (! as_new_clustering()) {
 		as_paxos_msg *qm = NULL;
 		msg *reply = NULL;
 		/* NB: t is the transaction being processed; s is a pointer to the
@@ -2689,16 +2725,17 @@ as_paxos_thr(void *arg)
 				// Clean out the sync states array.
 				memset(p->partition_sync_state, 0, sizeof(p->partition_sync_state));
 
-				as_partition_balance();
+				paxos_begin_partition_balance();
 
 				if (p->cb) {
-					as_paxos_change c;
-					c.n_change = 1;
-					c.type[0] = AS_PAXOS_CHANGE_SYNC;
-					c.id[0] = 0;
+					as_exchange_cluster_changed_event c = {
+							.cluster_key = as_exchange_cluster_key(),
+							.cluster_size = as_exchange_cluster_size(),
+							.succession = as_exchange_succession()
+					};
 
 					for (int i = 0; i < p->n_callbacks; i++) {
-						(p->cb[i])(p->gen, &c, p->succession, p->cb_udata[i]);
+						(p->cb[i])(&c, p->cb_udata[i]);
 					}
 				}
 			}
@@ -3039,7 +3076,7 @@ as_paxos_thr(void *arg)
 				if (self != as_paxos_succession_getprincipal())
 					break;
 
-				uint64_t cluster_key = as_paxos_get_cluster_key();
+				uint64_t cluster_key = as_exchange_cluster_key();
 				if (NULL == (reply = as_paxos_sync_msg_generate(cluster_key)))
 					cf_warning(AS_PAXOS, "unable to construct reply message");
 				else if (0 != as_fabric_send(qm->id, reply, AS_FABRIC_CHANNEL_CTRL))
@@ -3182,15 +3219,18 @@ as_paxos_thr(void *arg)
 							break;
 						}
 
-						as_partition_balance();
+						paxos_begin_partition_balance();
 
 						if (p->cb) {
-							as_paxos_change c;
-							c.n_change = 1;
-							c.type[0] = AS_PAXOS_CHANGE_SYNC;
-							c.id[0] = 0;
-							for (int i = 0; i < p->n_callbacks; i++)
-								(p->cb[i])(p->gen, &c, p->succession, p->cb_udata[i]);
+							as_exchange_cluster_changed_event c = {
+									.cluster_key = as_exchange_cluster_key(),
+									.cluster_size = as_exchange_cluster_size(),
+									.succession = as_exchange_succession()
+							};
+
+							for (int i = 0; i < p->n_callbacks; i++) {
+								(p->cb[i])(&c, p->cb_udata[i]);
+							}
 						}
 					}
 				}
@@ -3213,15 +3253,18 @@ as_paxos_thr(void *arg)
 				 * We now need to perform migrations as a result of external
 				 * synchronizations, since nodes outside the cluster could contain data due to a cluster merge
 				 */
-				as_partition_balance();
+				paxos_begin_partition_balance();
 
 				if (p->cb) {
-					as_paxos_change c;
-					c.n_change = 1;
-					c.type[0] = AS_PAXOS_CHANGE_SYNC;
-					c.id[0] = 0;
-					for (int i = 0; i < p->n_callbacks; i++)
-						(p->cb[i])(p->gen, &c, p->succession, p->cb_udata[i]);
+					as_exchange_cluster_changed_event c = {
+							.cluster_key = as_exchange_cluster_key(),
+							.cluster_size = as_exchange_cluster_size(),
+							.succession = as_exchange_succession()
+					};
+
+					for (int i = 0; i < p->n_callbacks; i++) {
+						(p->cb[i])(&c, p->cb_udata[i]);
+					}
 				}
 				break;
 			default:
@@ -3254,14 +3297,14 @@ as_paxos_are_proto_compatible(uint32_t protocol1, uint32_t protocol2)
  * @param msg the incoming message.
  * @param succession output. on success will point to the succession list in the
  * message.
- * @param succession_size output. on success will contain the length of the succession
+ * @param succession_length output. on success will contain the length of the succession
  * list.
  * @param source the source node. Required for logging.
  * @return 0 on success. -1 if the succession list is absent.
  */
 static int
 as_paxos_hb_msg_succession_get(msg* msg, cf_node** succession,
-			       size_t* succession_size, cf_node source)
+			       size_t* succession_length, cf_node source)
 {
 
 	uint8_t* payload;
@@ -3291,14 +3334,14 @@ as_paxos_hb_msg_succession_get(msg* msg, cf_node** succession,
 		*succession = (cf_node*)(payload + sizeof(uint32_t));
 
 		// correct succession list length.
-		*succession_size =
+		*succession_length =
 		  (payload_size - sizeof(uint32_t)) / sizeof(cf_node);
 	} else {
 		*succession = (cf_node*)payload;
 		// The size of the succession list is AS_CLUSTER_SZ.
 		// Succession list contains the current nodes and the rest of
 		// the data is set to zero.
-		*succession_size = payload_size / sizeof(cf_node);
+		*succession_length = payload_size / sizeof(cf_node);
 	}
 
 	return 0;
@@ -3309,7 +3352,7 @@ as_paxos_hb_msg_succession_get(msg* msg, cf_node** succession,
  *
  * @param msg the outgoing message.
  * @param succession the succession list to set.
- * @para succession_size the length of the adjacecny list.
+ * @para succession_length the length of the adjacecny list.
  */
 static void
 as_paxos_hb_msg_succession_set(msg* msg, uint8_t* payload, size_t payload_size)
@@ -3350,6 +3393,10 @@ as_paxos_hb_msg_succession_set(msg* msg, uint8_t* payload, size_t payload_size)
 static void
 as_paxos_hb_plugin_set_fn(msg* msg)
 {
+	if (as_new_clustering()) {
+		// Ignore if in new clustering mode.
+		return;
+	}
 
 	// TODO: Protect the succession list with a lock.
 	size_t cluster_size = 0;
@@ -3398,54 +3445,51 @@ as_paxos_hb_plugin_set_fn(msg* msg)
  */
 static void
 as_paxos_hb_plugin_parse_data_fn(msg* msg, cf_node source,
-				 as_hb_plugin_node_data* plugin_data)
+		as_hb_plugin_node_data* plugin_data)
 {
-	size_t succession_size = 0;
-	cf_node* succession = NULL;
-
-	if (as_paxos_hb_msg_succession_get(msg, &succession, &succession_size,
-					   source) != 0) {
-		// store a zero length succession list. Should not have
-		// happened.
-		cf_warning(AS_PAXOS, "Unable to read succession list from "
-				     "heartbeat from node %" PRIx64,
-			   source);
-		succession_size = 0;
+	if (as_new_clustering()) {
+		// Ignore if in new clustering mode.
+		return;
 	}
 
-	size_t data_size = sizeof(size_t) + (succession_size * sizeof(cf_node));
+	size_t succession_length = 0;
+	cf_node* succession = NULL;
+
+	if (as_paxos_hb_msg_succession_get(msg, &succession, &succession_length,
+			source) != 0) {
+		// store a zero length succession list. Should not have happened.
+		cf_warning(AS_PAXOS, "Unable to read succession list from heartbeat from node %" PRIx64,
+				source);
+		succession_length = 0;
+	}
+
+	size_t data_size = sizeof(size_t) + (succession_length * sizeof(cf_node));
 
 	if (data_size > plugin_data->data_capacity) {
-
-		// Round up to nearest multiple of block size to prevent very
-		// frequent reallocation.
-		size_t data_capacity =
-		  ((data_size + HB_PLUGIN_DATA_BLOCK_SIZE - 1) /
-		   HB_PLUGIN_DATA_BLOCK_SIZE) *
-		  HB_PLUGIN_DATA_BLOCK_SIZE;
+		// Round up to nearest multiple of block size to prevent very frequent
+		// reallocation.
+		size_t data_capacity = ((data_size + HB_PLUGIN_DATA_BLOCK_SIZE - 1) /
+		HB_PLUGIN_DATA_BLOCK_SIZE) *
+		HB_PLUGIN_DATA_BLOCK_SIZE;
 
 		// Reallocate since we have outgrown existing capacity.
-		plugin_data->data =
-		  cf_realloc(plugin_data->data, data_capacity);
+		plugin_data->data = cf_realloc(plugin_data->data, data_capacity);
 
 		if (plugin_data->data == NULL) {
 			cf_crash(
-			  AS_PAXOS,
-			  "Error allocating space for storing succession "
-			  "list for "
-			  "node %" PRIx64,
-			  source);
+					AS_PAXOS,
+					"Error allocating space for storing succession list for node %" PRIx64,
+					source);
 		}
 		plugin_data->data_capacity = data_capacity;
 	}
 
 	plugin_data->data_size = data_size;
+	memcpy(plugin_data->data, &succession_length, sizeof(size_t));
 
-	memcpy(plugin_data->data, &succession_size, sizeof(size_t));
-
-	if(succession_size) {
+	if (succession_length) {
 		cf_node* dest = (cf_node*)(plugin_data->data + sizeof(size_t));
-		memcpy(dest, succession, succession_size * sizeof(cf_node));
+		memcpy(dest, succession, succession_length * sizeof(cf_node));
 	}
 }
 
@@ -3486,13 +3530,13 @@ as_paxos_hb_get_succession_list(cf_node nodeid, cf_node* succession)
 		cf_crash(AS_PAXOS, "Error allocating space for paxos hb plugin data.");
 	}
 
-	size_t succession_size;
+	size_t succession_length;
 	cf_node* src = (cf_node*)(plugin_data.data + sizeof(size_t));
-	memcpy(&succession_size, plugin_data.data, sizeof(size_t));
+	memcpy(&succession_length, plugin_data.data, sizeof(size_t));
 
-	if (succession_size > AS_CLUSTER_SZ) {
+	if (succession_length > AS_CLUSTER_SZ) {
 		cf_warning(AS_PAXOS, "node %" PRIx64 " has succession list of length %zu greater than max cluster size %d. Ignoring succession list.",
-				nodeid, succession_size, AS_CLUSTER_SZ);
+				nodeid, succession_length, AS_CLUSTER_SZ);
 		succession[0] = 0;
 		return;
 	}
@@ -3501,7 +3545,7 @@ as_paxos_hb_get_succession_list(cf_node nodeid, cf_node* succession)
 	// is zero terminated, assuming succession to be of the size
 	// AS_CLUSTER_SZ.
 	memset(succession, 0, AS_CLUSTER_SZ * sizeof(cf_node));
-	memcpy(succession, src, succession_size * sizeof(cf_node));
+	memcpy(succession, src, succession_length * sizeof(cf_node));
 }
 
 /**
@@ -3538,19 +3582,13 @@ as_paxos_init()
 		cf_crash(AS_PAXOS, "unable to init mutex: %s", cf_strerror(errno));
 	}
 
-	as_paxos_set_cluster_integrity(p, false);
-
 	as_paxos_current_init(p);
 	p->msgq= cf_queue_priority_create(sizeof(void *), true);
 
 	p->need_to_rebalance = false;
 	p->ready = false;
-	p->cluster_size = 0;
 
-	// For now there's one paxos, with the info callback as the first callback.
-	p->n_callbacks = 1;
-	p->cb[0] = as_info_paxos_event;
-	p->cb_udata[0] = NULL;
+	p->n_callbacks = 0;
 
 	/* Register the paxos plugin for heartbeat subsystem. */
 	as_hb_plugin paxos_plugin;
@@ -3577,30 +3615,11 @@ as_paxos_init()
 	memset(p->partition_sync_state, 0, sizeof(p->partition_sync_state));
 
 	memset(p->succession, 0, sizeof(p->succession));
-	p->succession[0] = g_config.self_node;
 
 	memset(p->alive, 0, sizeof(p->alive));
 	p->alive[0] = true;
 
 	p->ready = true;
-
-	// Generate a non-zero cluster key.
-	uint64_t cluster_key;
-
-	while ((cluster_key = cf_get_rand64()) == 0) {
-		;
-	}
-
-	/*
-	 * Set the cluster key
-	 */
-	as_paxos_set_cluster_key(cluster_key);
-	as_paxos_print_cluster_key("IGNITION");
-
-	g_paxos->cluster_size = 1;
-	as_paxos_set_cluster_integrity(g_paxos, true);
-
-	as_partition_balance_init();
 }
 
 /*
@@ -3614,7 +3633,7 @@ as_paxos_init()
  */
 
 int
-as_paxos_register_change_callback(as_paxos_change_callback cb, void *udata)
+as_paxos_register_change_callback(as_exchange_cluster_changed_cb cb, void *udata)
 {
 	as_paxos *p = g_paxos;
 
@@ -3628,7 +3647,7 @@ as_paxos_register_change_callback(as_paxos_change_callback cb, void *udata)
 }
 
 int
-as_paxos_deregister_change_callback(as_paxos_change_callback cb, void *udata)
+as_paxos_deregister_change_callback(as_exchange_cluster_changed_cb cb, void *udata)
 {
 	as_paxos *p = g_paxos;
 	int i = 0;
@@ -3662,7 +3681,7 @@ as_paxos_sup_thr(void* arg)
 	// the way. This ensure after a fix the integrity flag will not wait for
 	// a full next cycle.
 	cf_clock next_retransmit_ts = 0;
-	for (;;) {
+	while (! as_new_clustering()) {
 
 		as_paxos* p = g_paxos;
 		size_t cluster_size = 0;
@@ -3678,10 +3697,9 @@ as_paxos_sup_thr(void* arg)
 		// to finish.
 		uint32_t retransmit_period_s =
 		  MIN(2, MAX((int)(cluster_size * 0.5),
-			     g_config.paxos_retransmit_period));
+				  g_config.paxos_retransmit_period));
 
-		struct timespec delay = { retransmit_period_s / 2, 0 };
-		nanosleep(&delay, NULL);
+		usleep(1000 * 100);
 
 		cf_clock now = cf_getms();
 		if (now >= next_retransmit_ts) {
@@ -3689,9 +3707,6 @@ as_paxos_sup_thr(void* arg)
 			// message queue.
 			as_paxos_retransmit_check();
 			next_retransmit_ts = now + retransmit_period_s * 1000;
-		} else {
-			// Update cluster integrity.
-			as_paxos_check_integrity();
 		}
 	}
 
@@ -3703,6 +3718,19 @@ as_paxos_sup_thr(void* arg)
 void
 as_paxos_start()
 {
+	uint64_t cluster_key;
+
+	// Generate a non-zero cluster key that fits in 7 bytes.
+	while ((cluster_key = (cf_get_rand64() >> 8)) == 0) {
+		;
+	}
+
+	as_exchange_cluster_key_set(cluster_key);
+	cf_info(AS_PAXOS, "cluster key set to %lx", cluster_key);
+
+	g_paxos->succession[0] = g_config.self_node;
+	as_exchange_succession_set(g_paxos->succession, 1);
+
 	int32_t wait_ms = as_hb_node_timeout_get() * 2;
 
 	// Wait at least 2 hb intervals to ensure we receive heartbeats and also
@@ -3735,8 +3763,6 @@ as_paxos_start()
 
 	as_paxos *p = g_paxos;
 	pthread_attr_t thr_attr;
-	pthread_t thr_id;
-	pthread_t sup_thr_id;
 
 	cf_info(AS_PAXOS, "starting paxos threads");
 
@@ -3745,28 +3771,10 @@ as_paxos_start()
 		cf_crash(AS_PAXOS, "unable to initialize thread attributes: %s", cf_strerror(errno));
 	if (0 != pthread_attr_setscope(&thr_attr, PTHREAD_SCOPE_SYSTEM))
 		cf_crash(AS_PAXOS, "unable to set thread scope: %s", cf_strerror(errno));
-	if (0 != pthread_create(&thr_id, &thr_attr, as_paxos_thr, p))
+	if (0 != pthread_create(&g_thr_id, &thr_attr, as_paxos_thr, p))
 		cf_crash(AS_PAXOS, "unable to create paxos thread: %s", cf_strerror(errno));
-	if (0 != pthread_create(&sup_thr_id, 0, as_paxos_sup_thr, 0))
+	if (0 != pthread_create(&g_sup_thr_id, 0, as_paxos_sup_thr, 0))
 		cf_crash(AS_PAXOS, "unable to create paxos supervisor thread: %s", cf_strerror(errno));
-}
-
-/* as_paxos_get_cluster_integrity
- * Get the Paxos cluster integrity state.
- */
-bool
-as_paxos_get_cluster_integrity(as_paxos *p)
-{
-	return p->cluster_has_integrity;
-}
-
-/* as_paxos_set_cluster_integrity
- * Set the Paxos cluster integrity state.
- */
-void
-as_paxos_set_cluster_integrity(as_paxos *p, bool state)
-{
-	p->cluster_has_integrity = state;
 }
 
 /* as_paxos_dump
@@ -3779,14 +3787,12 @@ as_paxos_dump(bool verbose)
 	as_paxos *p = g_paxos;
 	bool self = false, principal = false;
 
-	cf_info(AS_PAXOS, "Current Cluster Size: %u", p->cluster_size);
+	cf_info(AS_PAXOS, "Current Cluster Size: %u", as_exchange_cluster_size());
 
-	cf_info(AS_PAXOS, "Cluster Key: %"PRIx64"", as_paxos_get_cluster_key());
+	cf_info(AS_PAXOS, "Cluster Key: %"PRIx64"", as_exchange_cluster_key());
 
 	cf_info(AS_PAXOS, "cluster generation: [%d]@%"PRIx64,
 			p->gen.sequence, p->succession[0]);
-
-	cf_info(AS_PAXOS, "Cluster State: Has Integrity %s", (p->cluster_has_integrity ? "" : "FAULT"));
 
 	cf_info(AS_PAXOS, "Migrations are%s allowed.", (as_partition_balance_are_migrations_allowed() ? "" : " NOT"));
 
@@ -3803,37 +3809,4 @@ as_paxos_dump(bool verbose)
 		cf_info(AS_PAXOS, "SuccessionList[%d]: Node %"PRIx64" %s%s %s", i, node,
 				(self ? "[Self]" : ""), (principal ? "[Principal]" : ""), (p->alive[i] ? "" : "DEAD"));
 	}
-}
-
-/* as_paxos_get_succession_list
- * Get the Paxos succession list and log it to the given "cf_dyn_buf *".
- * The first element of the list will become the Paxos principal.
- * Returns 0 if successful, -1 otherwise.
- */
-int
-as_paxos_get_succession_list(cf_dyn_buf *db)
-{
-	as_paxos *p = g_paxos;
-	char hex_node_id[18];
-	bool need_comma = false;
-	char line[AS_CLUSTER_SZ * 17];
-	int pos = 0;
-
-	for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-		cf_node node = p->succession[i];
-
-		if ((cf_node) 0 == node) {
-			break;
-		}
-
-		snprintf(hex_node_id, 17 + (need_comma ? 1 : 0), "%s%"PRIx64"", (need_comma ? "," : ""), node);
-		pos += snprintf(&line[pos], 17 + (need_comma ? 1 : 0), "%s%"PRIx64"", (need_comma ? "," : ""), node);
-		cf_dyn_buf_append_string(db, hex_node_id);
-
-		need_comma = true;
-	}
-	cf_dyn_buf_append_string(db, "\n");
-	cf_info(AS_PAXOS, "Paxos Succession List: %s", line);
-
-	return 0;
 }

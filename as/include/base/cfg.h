@@ -43,6 +43,7 @@
 
 #include "base/cluster_config.h"
 #include "base/security_config.h"
+#include "fabric/clustering.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/hlc.h"
@@ -73,6 +74,17 @@ struct as_namespace_s;
 #define PBOOL(line) bool PGLUE(pad_, line)[3]; bool
 #define PAD_BOOL PBOOL(__LINE__)
 
+// XXX JUMP - remove in "six months":
+typedef enum {
+	AS_PAXOS_PROTOCOL_UNDEF,
+	AS_PAXOS_PROTOCOL_NONE,
+	AS_PAXOS_PROTOCOL_V1,
+	AS_PAXOS_PROTOCOL_V2,
+	AS_PAXOS_PROTOCOL_V3,
+	AS_PAXOS_PROTOCOL_V4,
+	AS_PAXOS_PROTOCOL_V5 // paxos replaced by new clustering & exchange
+} paxos_protocol_enum;
+
 typedef struct as_config_s {
 
 	// The order here matches that in the configuration parser's enum,
@@ -101,7 +113,10 @@ typedef struct as_config_s {
 	uint32_t		batch_priority; // number of records between an enforced context switch, used by old batch only
 	uint32_t		n_batch_index_threads;
 	int				clock_skew_max_ms; // maximum allowed skew between this node's physical clock and the physical component of its hybrid clock
+
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
+	as_clustering_config clustering_config;
+
 	PAD_BOOL		fabric_benchmarks_enabled;
 	PAD_BOOL		svc_benchmarks_enabled;
 	PAD_BOOL		info_hist_enabled;
@@ -119,7 +134,6 @@ typedef struct as_config_s {
 	PAD_BOOL		nsup_startup_evict;
 	uint32_t		paxos_max_cluster_size;
 	paxos_protocol_enum paxos_protocol;
-	paxos_recovery_policy_enum paxos_recovery_policy;
 	uint32_t		paxos_retransmit_period;
 	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	int				proto_slow_netio_sleep_ms; // dynamic only
@@ -205,7 +219,7 @@ typedef struct as_config_s {
 	int				fabric_keepalive_intvl;
 	int				fabric_keepalive_probes;
 	int				fabric_keepalive_time;
-	int				fabric_latency_max_ms; // time window for ordering
+	uint32_t		fabric_latency_max_ms; // time window for ordering
 	uint32_t		fabric_recv_rearm_threshold;
 	uint32_t		n_fabric_send_threads;
 
@@ -265,6 +279,13 @@ bool as_config_cluster_name_matches(const char* cluster_name);
 
 extern as_config g_config;
 extern xdr_config g_xcfg;
+
+// XXX JUMP - remove in "six months":
+static inline bool
+as_new_clustering()
+{
+	return g_config.paxos_protocol == AS_PAXOS_PROTOCOL_V5;
+}
 
 
 //==========================================================

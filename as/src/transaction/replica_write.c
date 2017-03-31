@@ -122,14 +122,31 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	msg_set_uint32(m, RW_FIELD_NS_ID, ns->id);
 	msg_set_buf(m, RW_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
-	msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
-	msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
-	msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
-	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
+	if (as_new_clustering()) {
+		if (tr->generation != 0) {
+			msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
+		}
+
+		if (tr->void_time != 0) {
+			msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+		}
+
+		if (tr->last_update_time != 0) {
+			msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
+		}
+	}
+	else {
+		msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
+
+		msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
+		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
+	}
 
 	// TODO - do we really intend to send this if the record is non-LDT?
+	// FIXME - should address this question for the NEW_CODE split.
 	if (ns->ldt_enabled) {
 		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version_info,
 				sizeof(as_partition_vinfo), MSG_SET_COPY);
@@ -178,8 +195,14 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 		as_rec_props_clear(&rw->pickled_rec_props);
 	}
 
-	// TODO - add 0 check if older code handler doesn't require field.
-	msg_set_uint32(m, RW_FIELD_INFO, info);
+	if (as_new_clustering()) {
+		if (info != 0) {
+			msg_set_uint32(m, RW_FIELD_INFO, info);
+		}
+	}
+	else {
+		msg_set_uint32(m, RW_FIELD_INFO, info);
+	}
 
 	return true;
 }
@@ -301,15 +324,16 @@ repl_write_handle_op(cf_node node, msg* m)
 		return;
 	}
 
-	cl_msg* msgp;
-
 	uint8_t* pickled_buf;
 	size_t pickled_sz;
 
 	uint32_t result;
 
-	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
-			MSG_GET_DIRECT) == 0) {
+	cl_msg* msgp; // XXX JUMP - remove in "six months"
+
+	if (! as_new_clustering() &&
+			msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
+					MSG_GET_DIRECT) == 0) {
 		// <><><><><><>  Delete Operation  <><><><><><>
 
 		// In rolling upgrades, older nodes send replica deletes here.
@@ -346,11 +370,25 @@ repl_write_handle_op(cf_node node, msg* m)
 			return;
 		}
 
+		uint64_t last_update_time;
+
+		if (as_new_clustering()) {
+			if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+					&last_update_time) != 0) {
+				cf_warning(AS_RW, "repl_write_handle_op: no last-update-time");
+				as_partition_release(&rsv);
+				send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+				return;
+			}
+		}
+		else {
+			last_update_time = 0;
+			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+		}
+
 		uint32_t void_time = 0;
-		uint64_t last_update_time = 0;
 
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
 		as_rec_props rec_props = { NULL, 0 };
 		size_t rec_props_size = 0;
@@ -504,13 +542,22 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 	msg_set_uint32(m, RW_FIELD_NS_ID, ns->id);
 	msg_set_buf(m, RW_FIELD_DIGEST, (void*)&tr->keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
-	msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
 
 	msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
-	msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
 	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
 
+	if (as_new_clustering()) {
+		if (tr->void_time != 0) {
+			msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+		}
+	}
+	else {
+		msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
+		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+	}
+
 	// TODO - do we really get here if ldt_enabled is false?
+	// FIXME - should address this question for the NEW_CODE split.
 	if (ns->ldt_enabled && ! is_subrec) {
 		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version_info,
 				sizeof(as_partition_vinfo), MSG_SET_COPY);
@@ -539,7 +586,14 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 		as_rec_props_clear(p_pickled_rec_props);
 	}
 
-	msg_set_uint32(m, RW_FIELD_INFO, info);
+	if (as_new_clustering()) {
+		if (info != 0) {
+			msg_set_uint32(m, RW_FIELD_INFO, info);
+		}
+	}
+	else {
+		msg_set_uint32(m, RW_FIELD_INFO, info);
+	}
 }
 
 
@@ -781,13 +835,14 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 
 	ldt_set_prole_subrec_version(info, linfo, keyd);
 
-	cl_msg* msgp;
-
 	uint8_t* pickled_buf;
 	size_t pickled_sz;
 
-	if (msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
-			MSG_GET_DIRECT) == 0) {
+	cl_msg* msgp; // XXX JUMP - remove in "six months"
+
+	if (! as_new_clustering() &&
+			msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
+					MSG_GET_DIRECT) == 0) {
 
 		// In rolling upgrades, *really* old nodes might send LDT replica
 		// deletes here.
@@ -817,11 +872,23 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 			return true;
 		}
 
+		uint64_t last_update_time;
+
+		if (as_new_clustering()) {
+			if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+					&last_update_time) != 0) {
+				cf_warning(AS_RW, "handle_multiop_subop: no last-update-time");
+				return true;
+			}
+		}
+		else {
+			last_update_time = 0;
+			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+		}
+
 		uint32_t void_time = 0;
-		uint64_t last_update_time = 0;
 
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
 		as_rec_props rec_props = { NULL, 0 };
 		size_t rec_props_size = 0;

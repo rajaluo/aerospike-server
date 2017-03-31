@@ -1316,12 +1316,6 @@ void as_namespace_xmem_trusted(as_namespace *ns);
 // Not namespace class functions, but they live in namespace.c:
 uint32_t as_mem_check();
 
-/* Cluster Key */
-// Set the cluster key
-extern void as_paxos_set_cluster_key(uint64_t cluster_key);
-// Get the cluster key
-extern uint64_t as_paxos_get_cluster_key();
-
 // XXX JUMP - remove in "six months".
 static inline uint32_t
 truncate_void_time(as_namespace *ns, uint32_t void_time)

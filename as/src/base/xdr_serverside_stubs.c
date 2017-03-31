@@ -22,8 +22,6 @@
 
 #include "base/xdr_serverside.h"
 
-xdr_state g_xdr_state = XDR_DOWN;
-
 int as_xdr_init()
 {
 	return -1;

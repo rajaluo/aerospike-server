@@ -51,6 +51,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/stats.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "transaction/rw_request.h"
@@ -422,7 +423,7 @@ as_proxy_shipop(cf_node dst, rw_request* rw)
 			MSG_SET_COPY);
 	msg_set_buf(m, PROXY_FIELD_AS_PROTO, (void*)rw->msgp,
 			as_proto_size_get(&rw->msgp->proto), MSG_SET_HANDOFF_MALLOC);
-	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, as_paxos_get_cluster_key());
+	msg_set_uint64(m, PROXY_FIELD_CLUSTER_KEY, as_exchange_cluster_key());
 	msg_set_uint32(m, PROXY_FIELD_INFO, PROXY_INFO_SHIPPED_OP);
 
 	rw->msgp = NULL;
@@ -687,7 +688,7 @@ proxyee_handle_request(cf_node src, msg* m, uint32_t tid)
 		uint64_t cluster_key;
 
 		if (msg_get_uint64(m, PROXY_FIELD_CLUSTER_KEY, &cluster_key) == 0 &&
-				cluster_key != as_paxos_get_cluster_key()) {
+				cluster_key != as_exchange_cluster_key()) {
 			error_response(src, tid, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
 			return;
 		}

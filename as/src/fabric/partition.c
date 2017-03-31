@@ -565,6 +565,22 @@ client_replica_maps_create(as_namespace* ns)
 }
 
 
+void
+client_replica_maps_clear(as_namespace* ns)
+{
+	memset(ns->replica_maps, 0,
+			sizeof(client_replica_map) * ns->cfg_replication_factor);
+
+	for (uint32_t repl_ix = 0; repl_ix < ns->cfg_replication_factor;
+			repl_ix++) {
+		client_replica_map* repl_map = &ns->replica_maps[repl_ix];
+
+		cf_b64_encode((uint8_t*)repl_map->bitmap,
+				(uint32_t)sizeof(repl_map->bitmap), (char*)repl_map->b64map);
+	}
+}
+
+
 bool
 client_replica_maps_update(as_namespace* ns, uint32_t pid)
 {

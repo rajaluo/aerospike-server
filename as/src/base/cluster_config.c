@@ -27,7 +27,7 @@
 
 #include "base/cfg.h"
 #include "base/cluster_config.h"
-#include "fabric/paxos.h"
+#include "fabric/exchange.h"
 
 
 // String defined for the various cluster states
@@ -35,6 +35,10 @@ const char * cc_state_str[] = {"unknown", "balanced", "unbalanced", "invalid"};
 
 const char * cc_mode_str[] = {CL_STR_NONE, CL_STR_STATIC, CL_STR_DYNAMIC};
 
+// Temporary - Unsafe hook to get hold of succession list, used by the
+// rack aware dump call. To be removed or fixed, if the dump call is still
+// relevant.
+extern cf_node* as_exchange_succession();
 
 /**
  * cluster_config defaults
@@ -374,19 +378,18 @@ cc_compute_self_node(const uint16_t port_num, const cc_group_t group_id,
 void
 cc_show_cluster_state(const cluster_config_t *cc)
 {
-	if (CL_MODE_NO_TOPOLOGY == g_config.cluster_mode) {
-		cf_info(AS_PARTITION, "rack-aware: disabled");
+	if (g_config.cluster_mode == CL_MODE_NO_TOPOLOGY) {
+		return;
 	}
-	else {
-		cf_info(AS_PARTITION, "rack-aware: mode %s cluster-state %s self-node %lx group-count %u total-node-count %u",
-				g_config.cluster_mode == CL_MODE_STATIC ? CL_STR_STATIC : CL_STR_DYNAMIC,
-				cc_state_str[cc->cluster_state], g_config.self_node,
-				cc->group_count, cc->node_count);
 
-		for (int i = 0; i < cc->group_count; i++) {
-			cf_info(AS_PARTITION, "rack-aware: group %04x group-node-count %u",
-					cc->group_ids[i], cc->group_node_count[i]);
-		}
+	cf_info(AS_PARTITION, "rack-aware: mode %s cluster-state %s self-node %lx group-count %u total-node-count %u",
+			g_config.cluster_mode == CL_MODE_STATIC ? CL_STR_STATIC : CL_STR_DYNAMIC,
+			cc_state_str[cc->cluster_state], g_config.self_node,
+			cc->group_count, cc->node_count);
+
+	for (int i = 0; i < cc->group_count; i++) {
+		cf_info(AS_PARTITION, "rack-aware: group %04x group-node-count %u",
+				cc->group_ids[i], cc->group_node_count[i]);
 	}
 }
 
@@ -399,39 +402,36 @@ cc_show_cluster_state(const cluster_config_t *cc)
 cluster_state_t
 cc_get_cluster_state(const cluster_config_t *cc)
 {
+	if (g_config.cluster_mode == CL_MODE_NO_TOPOLOGY) {
+		return unknown;
+	}
+
 	int i;
 	int first_group_count = 0;
 	int first_group_ndx = 0; // Remember the ndx of 1st non-zero count. It SHOULD be 0.
-	cluster_state_t result = unknown;
-	if (CL_MODE_NO_TOPOLOGY == g_config.cluster_mode) {
-		cf_info(AS_CFG, "rack aware is disabled");
-	}
-	else {
-		result = balanced;
-		cf_info(AS_PARTITION, "rack aware is enabled - mode:%s",
-				(CL_MODE_STATIC == g_config.cluster_mode ? CL_STR_STATIC : CL_STR_DYNAMIC));
+	cluster_state_t result = balanced;
 
-		// For each group, check the counts; if they are not equal, then
-		// declare this cluster unbalanced, and print out the counts.
-		for (i = 0; i < cc->group_count; i++) {
-			if (first_group_count == 0) {
-				first_group_ndx = i;
-				first_group_count = cc->group_node_count[i];
-				cf_info(AS_PARTITION, "setting first group:%d %04x cnt:%d",
-						i, cc->group_ids[i], first_group_count);
-			}
-			if (first_group_count != cc->group_node_count[i]) {
-				result = unbalanced;
-				cf_warning(AS_PARTITION, "unbalanced cluster - group node counts differ - first group:%04x cnt:%d this group:%04x cnt:%d",
-						cc->group_ids[first_group_ndx], first_group_count,
-						cc->group_ids[i], cc->group_node_count[i]);
-			}
-		} // for each group
-	} // Rack Aware Mode
+	// For each group, check the counts; if they are not equal, then
+	// declare this cluster unbalanced, and print out the counts.
+	for (i = 0; i < cc->group_count; i++) {
+		if (first_group_count == 0) {
+			first_group_ndx = i;
+			first_group_count = cc->group_node_count[i];
+		}
+
+		if (first_group_count != cc->group_node_count[i]) {
+			result = unbalanced;
+
+			cf_warning(AS_PARTITION, "unbalanced cluster - group node counts differ - first group:%04x cnt:%d this group:%04x cnt:%d",
+					cc->group_ids[first_group_ndx], first_group_count,
+					cc->group_ids[i], cc->group_node_count[i]);
+		}
+	} // for each group
 
 	return result;
 } // end cc_get_cluster_state()
 
+// XXX JUMP - remove in "six months".
 /**
  * Log the status of the Rack Aware feature.
  * If verbose, when enabled, decode the fields of each node in the Paxos succession list.
@@ -447,23 +447,19 @@ cc_cluster_config_dump(const bool verbose)
 				(CL_MODE_STATIC == g_config.cluster_mode ? CL_STR_STATIC : CL_STR_DYNAMIC));
 
 		if (verbose) {
-			as_paxos *p = g_paxos;
-			bool self = false, principal = false;
+			uint32_t px_cluster_size = as_exchange_cluster_size();
+			cf_node *succession = as_exchange_succession();
+			bool self = false;
 
-			cf_node principal_node = as_paxos_succession_getprincipal();
-			for (int i = 0; i < AS_CLUSTER_SZ; i++) {
-				cf_node node = p->succession[i];
-				if ((cf_node)0 == node) {
-					break;
-				}
+			for (int i = 0; i < px_cluster_size; i++) {
+				cf_node node = succession[i];
+
 				self = (node == g_config.self_node);
-				principal = (node == principal_node);
-				cf_info(AS_PARTITION, "succession list[%d] - node:%"PRIx64" port:%u group_id:%u node_id:%u %s%s",
+				cf_info(AS_PARTITION, "succession list[%d] - node:%"PRIx64" port:%u group_id:%u node_id:%u %s",
 						i, node, cc_compute_port(node),
 						cc_compute_group_id(node),
 						cc_compute_node_id(node),
-						(self ? "[Self]" : ""),
-						(principal ? "[Principal]" : ""));
+						(self ? "[Self]" : ""));
 			}
 		}
 	}

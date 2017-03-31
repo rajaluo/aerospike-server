@@ -1,7 +1,7 @@
 /*
  * migrate.c
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -57,6 +57,7 @@
 #include "base/index.h"
 #include "base/ldt.h"
 #include "base/rec_props.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
@@ -573,7 +574,7 @@ run_emigration(void *arg)
 			break; // signal of death
 		}
 
-		if (emig->cluster_key != as_paxos_get_cluster_key()) {
+		if (emig->cluster_key != as_exchange_cluster_key()) {
 			emigration_hash_delete(emig);
 			continue;
 		}
@@ -637,7 +638,7 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 	emigration *emig = *(emigration **)buf;
 
 	if (! emig || // null emig terminates thread
-			emig->cluster_key != as_paxos_get_cluster_key()) {
+			emig->cluster_key != as_exchange_cluster_key()) {
 		return -1; // process immediately
 	}
 
@@ -776,7 +777,7 @@ run_emigration_reinserter(void *arg)
 
 	// Reduce over the reinsert hash until finished.
 	while ((emig_state = cf_atomic32_get(emig->state)) != EMIG_STATE_ABORTED) {
-		if (emig->cluster_key != as_paxos_get_cluster_key()) {
+		if (emig->cluster_key != as_exchange_cluster_key()) {
 			cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
 			return NULL;
 		}
@@ -810,7 +811,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 		return; // no point continuing to reduce this tree
 	}
 
-	if (emig->cluster_key != as_paxos_get_cluster_key()) {
+	if (emig->cluster_key != as_exchange_cluster_key()) {
 		as_record_done(r_ref, ns);
 		emig->aborted = true;
 		cf_atomic32_set(&emig->state, EMIG_STATE_ABORTED);
@@ -892,9 +893,17 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	msg_set_buf(m, MIG_FIELD_DIGEST, (void *)&pr.keyd, sizeof(cf_digest),
 			MSG_SET_COPY);
 	msg_set_uint32(m, MIG_FIELD_GENERATION, pr.generation);
-	msg_set_uint32(m, MIG_FIELD_VOID_TIME, pr.void_time);
 	msg_set_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, pr.last_update_time);
-	// Note - older versions handle missing MIG_FIELD_VINFOSET field.
+
+	if (as_new_clustering()) {
+		if (pr.void_time != 0) {
+			msg_set_uint32(m, MIG_FIELD_VOID_TIME, pr.void_time);
+		}
+	}
+	else {
+		msg_set_uint32(m, MIG_FIELD_VOID_TIME, pr.void_time);
+		// Note - older versions handle missing MIG_FIELD_VINFOSET field.
+	}
 
 	if (info != 0) {
 		msg_set_uint32(m, MIG_FIELD_INFO, info);
@@ -929,7 +938,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	uint32_t waits = 0;
 
 	while (cf_atomic32_get(emig->bytes_emigrating) > MAX_BYTES_EMIGRATING &&
-			emig->cluster_key == as_paxos_get_cluster_key()) {
+			emig->cluster_key == as_exchange_cluster_key()) {
 		usleep(1000);
 
 		// Temporary paranoia to inform us old nodes aren't acking properly.
@@ -960,7 +969,8 @@ emigrate_record(emigration *emig, msg *m)
 		return false;
 	}
 
-	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
+	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m,
+			as_new_clustering()));
 
 	if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_BULK) !=
 			AS_FABRIC_SUCCESS) {
@@ -1023,7 +1033,7 @@ emigration_send_start(emigration *emig)
 	uint64_t start_xmit_ms = 0;
 
 	while (true) {
-		if (emig->cluster_key != as_paxos_get_cluster_key()) {
+		if (emig->cluster_key != as_exchange_cluster_key()) {
 			as_fabric_msg_put(m);
 			return AS_MIGRATE_STATE_ERROR;
 		}
@@ -1092,7 +1102,7 @@ emigration_send_done(emigration *emig)
 	uint64_t done_xmit_ms = 0;
 
 	while (true) {
-		if (emig->cluster_key != as_paxos_get_cluster_key()) {
+		if (emig->cluster_key != as_exchange_cluster_key()) {
 			as_fabric_msg_put(m);
 			return AS_MIGRATE_STATE_ERROR;
 		}
@@ -1156,7 +1166,7 @@ immigration_reaper_reduce_fn(const void *key, uint32_t keylen, void *object,
 		return CF_RCHASH_OK;
 	}
 
-	if (immig->cluster_key != as_paxos_get_cluster_key() ||
+	if (immig->cluster_key != as_exchange_cluster_key() ||
 			(immig->done_recv_ms != 0 && cf_getms() > immig->done_recv_ms +
 					IMMIGRATION_DEBOUNCE_MS)) {
 		if (immig->start_result == AS_MIGRATE_OK &&
@@ -1327,7 +1337,14 @@ immigration_handle_start_request(cf_node src, msg *m) {
 	immig->done_recv_ms = 0;
 	immig->emig_id = emig_id;
 	immig_meta_q_init(&immig->meta_q);
-	immig->features = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
+
+	if (as_new_clustering()) {
+		immig->features = MY_MIG_FEATURES;
+	}
+	else {
+		immig->features = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
+	}
+
 	immig->ns = ns;
 	immig->rsv.p = NULL;
 
@@ -1467,31 +1484,52 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 		cf_atomic_int_incr(&immig->rsv.ns->migrate_record_receives);
 
-		if (immig->cluster_key != as_paxos_get_cluster_key()) {
+		if (immig->cluster_key != as_exchange_cluster_key()) {
 			immigration_release(immig);
 			as_fabric_msg_put(m);
 			return;
 		}
 
-		uint32_t generation = 1;
+		uint32_t generation;
+		uint64_t last_update_time;
 
-		if (msg_get_uint32(m, MIG_FIELD_GENERATION, &generation) != 0) {
-			cf_warning(AS_MIGRATE, "handle insert: no generation - making it 1");
+		if (as_new_clustering()) {
+			if (msg_get_uint32(m, MIG_FIELD_GENERATION, &generation) != 0) {
+				cf_warning(AS_MIGRATE, "handle insert: got no generation");
+				immigration_release(immig);
+				as_fabric_msg_put(m);
+				return;
+			}
+
+			if (msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME,
+					&last_update_time) != 0) {
+				cf_warning(AS_MIGRATE, "handle insert: got no last-update-time");
+				immigration_release(immig);
+				as_fabric_msg_put(m);
+				return;
+			}
 		}
-
-		if (generation == 0) {
-			cf_warning(AS_MIGRATE, "handle insert: generation 0 - making it 1");
+		else {
 			generation = 1;
+
+			if (msg_get_uint32(m, MIG_FIELD_GENERATION, &generation) != 0) {
+				cf_warning(AS_MIGRATE, "handle insert: no generation - making it 1");
+			}
+
+			if (generation == 0) {
+				cf_warning(AS_MIGRATE, "handle insert: generation 0 - making it 1");
+				generation = 1;
+			}
+
+			last_update_time = 0;
+
+			// Older nodes won't send this.
+			msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, &last_update_time);
 		}
 
 		uint32_t void_time = 0;
 
 		msg_get_uint32(m, MIG_FIELD_VOID_TIME, &void_time);
-
-		uint64_t last_update_time = 0;
-
-		// Older nodes won't send this.
-		msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, &last_update_time);
 
 		void *value;
 		size_t value_sz;
@@ -1658,7 +1696,8 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 			&vlock) == SHASH_OK) {
 		if (src == emig->dest) {
 			if (cf_atomic32_sub(&emig->bytes_emigrating,
-					(int32_t)msg_get_wire_size(ri_ctrl->m)) < 0) {
+					(int32_t)msg_get_wire_size(ri_ctrl->m,
+							as_new_clustering())) < 0) {
 				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
 			}
 
@@ -1701,7 +1740,8 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op)
 	if (cf_rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
 			(void **)&emig) == CF_RCHASH_OK) {
 		if (emig->dest == src) {
-			if ((immig_features & MIG_FEATURES_SEEN) == 0 ||
+			if ((! as_new_clustering() &&
+					(immig_features & MIG_FEATURES_SEEN) == 0) ||
 					(immig_features & MIG_FEATURE_MERGE) == 0) {
 				// TODO - rethink where this should go after further refactor.
 				if (op == OPERATION_START_ACK_OK && emig->meta_q) {
@@ -1737,8 +1777,8 @@ emigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
 	emigration *emig = (emigration *)object;
 	int *item_num = (int *)udata;
 
-	cf_info(AS_MIGRATE, "[%d]: mig_id %u : id %u ; ck %016lx", *item_num,
-			emig_id, emig->id, emig->cluster_key);
+	cf_info(AS_MIGRATE, "[%d]: mig_id %u : id %u ; ck %lx", *item_num, emig_id,
+			emig->id, emig->cluster_key);
 
 	*item_num += 1;
 
@@ -1754,7 +1794,7 @@ immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
 	immigration *immig = (immigration *)object;
 	int *item_num = (int *)udata;
 
-	cf_info(AS_MIGRATE, "[%d]: src %016lx ; id %u : src %016lx ; done recv %u ; start recv ms %lu ; done recv ms %lu ; ck %016lx",
+	cf_info(AS_MIGRATE, "[%d]: src %016lx ; id %u : src %016lx ; done recv %u ; start recv ms %lu ; done recv ms %lu ; ck %lx",
 			*item_num, hkey->src, hkey->emig_id, immig->src, immig->done_recv,
 			immig->start_recv_ms, immig->done_recv_ms, immig->cluster_key);
 
@@ -1835,9 +1875,15 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 				emig->tx_state, emig->rsv.p->id);
 	}
 
-	msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
+	if (! as_new_clustering()) {
+		msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
+	}
 
 	if (is_subrecord) {
+		if (as_new_clustering()) {
+			msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
+		}
+
 		as_index_ref r_ref;
 		r_ref.skip_lock = false;
 
@@ -1869,6 +1915,10 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 		}
 	}
 	else if (as_ldt_precord_is_parent(pr)) {
+		if (as_new_clustering()) {
+			msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
+		}
+
 		*info |= MIG_INFO_LDT_PREC;
 	}
 

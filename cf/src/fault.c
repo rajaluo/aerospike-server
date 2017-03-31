@@ -35,6 +35,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 #include "aerospike/as_log.h"
 #include "citrusleaf/alloc.h"
@@ -71,10 +72,12 @@ char *cf_fault_context_strings[] = {
 		"batch",
 		"bin",
 		"config",
+		"clustering",
 		"compression",
 		"demarshal",
 		"drv_kv",
 		"drv_ssd",
+		"exchange",
 		"fabric",
 		"geo",
 		"hb",
@@ -138,6 +141,8 @@ typedef struct cf_fault_cache_hkey_s {
 } cf_fault_cache_hkey;
 
 bool g_use_local_time = false;
+
+static bool g_log_millis = false;
 
 // Filter stderr logging at this level when there are no sinks:
 #define NO_SINKS_LIMIT CF_WARNING
@@ -423,6 +428,60 @@ cf_fault_is_using_local_time()
 	return g_use_local_time;
 }
 
+void
+cf_fault_log_millis(bool log_millis)
+{
+		g_log_millis = log_millis;
+}
+
+bool
+cf_fault_is_logging_millis()
+{
+	return g_log_millis;
+}
+
+int
+cf_sprintf_now(char* mbuf, size_t limit)
+{
+	struct tm nowtm;
+
+	if (cf_fault_is_logging_millis()) {
+		// Logging milli seconds as well.
+		struct timeval curTime;
+		gettimeofday(&curTime, NULL);
+		int millis = curTime.tv_usec / 1000;
+		int pos = 0;
+		if (g_use_local_time) {
+			localtime_r(&curTime.tv_sec, &nowtm);
+			pos = strftime(mbuf, limit, "%b %d %Y %T.", &nowtm);
+			pos +=
+			  snprintf(mbuf + pos, limit - pos, "%03d", millis);
+			pos +=
+			  strftime(mbuf + pos, limit - pos, " GMT%z: ", &nowtm);
+			return pos;
+		} else {
+			gmtime_r(&curTime.tv_sec, &nowtm);
+			pos = strftime(mbuf, limit, "%b %d %Y %T.", &nowtm);
+			pos +=
+			  snprintf(mbuf + pos, limit - pos, "%03d", millis);
+			pos +=
+			  strftime(mbuf + pos, limit - pos, " %Z: ", &nowtm);
+			return pos;
+		}
+	}
+
+	// Logging only seconds.
+	time_t now = time(NULL);
+
+	if (g_use_local_time) {
+		localtime_r(&now, &nowtm);
+		return strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
+	} else {
+		gmtime_r(&now, &nowtm);
+		return strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
+	}
+}
+
 /* cf_fault_event
  * Respond to a fault */
 void
@@ -431,8 +490,6 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
 {
 	va_list argp;
 	char mbuf[1024];
-	time_t now;
-	struct tm nowtm;
 	size_t pos;
 
 
@@ -440,16 +497,7 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
 	size_t limit = sizeof(mbuf) - 2;
 
 	/* Set the timestamp */
-	now = time(NULL);
-
-	if (g_use_local_time) {
-		localtime_r(&now, &nowtm);
-		pos = strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
-	}
-	else {
-		gmtime_r(&now, &nowtm);
-		pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
-	}
+	pos = cf_sprintf_now(mbuf, limit);
 
 	/* Set the context/scope/severity tag */
 	pos += snprintf(mbuf + pos, limit - pos, "%s (%s): ", severity_tag(severity), cf_fault_context_strings[context]);
@@ -693,8 +741,6 @@ cf_fault_event2(const cf_fault_context context,
 {
 	va_list argp;
 	char mbuf[MAX_BINARY_BUF_SZ];
-	time_t now;
-	struct tm nowtm;
 	size_t pos;
 
 	char binary_buf[MAX_BINARY_BUF_SZ];
@@ -709,16 +755,7 @@ cf_fault_event2(const cf_fault_context context,
 	size_t limit = sizeof(mbuf) - 2;
 
 	/* Set the timestamp */
-	now = time(NULL);
-
-	if (g_use_local_time) {
-		localtime_r(&now, &nowtm);
-		pos = strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
-	}
-	else {
-		gmtime_r(&now, &nowtm);
-		pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
-	}
+	pos = cf_sprintf_now(mbuf, limit);
 
 	// If we're given a valid MEMORY POINTER for a binary value, then
 	// compute the string that corresponds to the bytes.

@@ -1470,7 +1470,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 		*pickled_sz  = 0;
 	} else {
 		size_t sz     = 0;
-		size_t buflen = 0;
+		bool send_pk = as_new_clustering();
 
 		m[ops] = as_fabric_msg_get(M_TYPE_RW);
 		if (!m[ops]) {
@@ -1484,9 +1484,8 @@ as_ldt_record_pickle(ldt_record *lrecord,
 							h_urecord->pickled_sz,
 							&h_urecord->pickled_rec_props,
 							false);
-			buflen = 0;
-			msg_fillbuf(m[ops], NULL, &buflen);
-			sz += buflen;
+
+			sz += msg_get_wire_size(m[ops], send_pk);
 			ops++;
 		}
 
@@ -1527,9 +1526,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 				c_tr->msgp->msg.info2 &= ~AS_MSG_INFO2_DELETE;
 			}
 			
-			buflen = 0;
-			msg_fillbuf(m[ops], NULL, &buflen);
-			sz += buflen;
+			sz += msg_get_wire_size(m[ops], send_pk);
 			ops++;
 		}
 
@@ -1543,13 +1540,9 @@ as_ldt_record_pickle(ldt_record *lrecord,
 			}
 			*pickled_buf = buf;
 			*pickled_sz  = sz;
-			int rsz = sz;
-			sz = 0;
 
 			for (int i = 0; i < ops; i++) {
-				sz = rsz - sz;
-				ret = msg_fillbuf(m[i], buf, &sz);
-				buf += sz;
+				buf += msg_to_wire(m[i], buf, send_pk);
 			}
 		}
 	}

@@ -1,7 +1,7 @@
 /*
  * msg.h
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -37,16 +37,16 @@
 
 // These values are used on the wire - don't change them.
 typedef enum msg_field_type_t {
-	M_FT_INT32 = 1,
+	M_FT_PK_UINT32 = 1,
 	M_FT_UINT32 = 2,
-	M_FT_INT64 = 3,
+	M_FT_PK_UINT64 = 3,
 	M_FT_UINT64 = 4,
 	M_FT_STR = 5,
 	M_FT_BUF = 6,
 	M_FT_ARRAY_UINT32 = 7,
 	M_FT_ARRAY_UINT64 = 8,
 	M_FT_ARRAY_BUF = 9,
-	M_FT_ARRAY_STR = 10
+	M_FT_ARRAY_STR = 10,
 } msg_field_type;
 
 typedef enum msg_type_t {
@@ -56,10 +56,10 @@ typedef enum msg_type_t {
 	M_TYPE_MIGRATE = 3,
 	M_TYPE_PROXY = 4,
 	M_TYPE_HEARTBEAT = 5,
-	M_TYPE_UNUSED_6 = 6,
+	M_TYPE_CLUSTERING = 6,
 	M_TYPE_RW = 7,
 	M_TYPE_INFO = 8,
-	M_TYPE_UNUSED_9 = 9,
+	M_TYPE_EXCHANGE = 9,
 	M_TYPE_UNUSED_10 = 10,
 	M_TYPE_XDR = 11,
 	M_TYPE_UNUSED_12 = 12,
@@ -138,7 +138,6 @@ typedef struct msg_hdr_s {
 typedef struct msg_field_hdr_s {
 	uint16_t	id;
 	uint8_t		type;
-	uint32_t	size;
 	uint8_t		content[];
 } __attribute__ ((__packed__)) msg_field_hdr;
 
@@ -190,13 +189,10 @@ void msg_decr_ref(msg *m);
 // Pack messages into flattened data.
 //
 
-uint32_t msg_get_wire_size(const msg *m);
-// Get the fixed wire size of input templates.
-// mt - pointer to the templates.
-// mt_len - number of templates.
-int msg_get_template_fixed_sz(const msg_template* mt, const size_t mt_len);
-
-int msg_fillbuf(const msg *m, uint8_t *buf, size_t *buflen);
+// XXX JUMP - remove send_pk parameter in "six months".
+uint32_t msg_get_wire_size(const msg *m, bool send_pk);
+uint32_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_len, bool send_pk);
+uint32_t msg_to_wire(const msg *m, uint8_t *buf, bool send_pk);
 
 //------------------------------------------------
 // Parse flattened data into messages.

@@ -103,7 +103,7 @@ as_namespace_create(char *name)
 	// Configuration defaults.
 	//
 
-	ns->replication_factor = 2;
+	ns->replication_factor = 1; // not 0 in case clients get map before initial rebalance
 	ns->cfg_replication_factor = 2;
 	ns->memory_size = 1024LL * 1024LL * 1024LL * 4LL; // default memory limit is 4G per namespace
 	ns->default_ttl = 0; // default time-to-live is unlimited

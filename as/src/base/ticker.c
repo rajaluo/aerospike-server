@@ -55,10 +55,10 @@
 #include "base/thr_info.h"
 #include "base/thr_sindex.h"
 #include "base/thr_tsvc.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/partition.h"
-#include "fabric/paxos.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -166,7 +166,7 @@ log_ticker_frame(uint64_t delta_time)
 {
 	cf_info(AS_INFO, "NODE-ID %lx CLUSTER-SIZE %u",
 			g_config.self_node,
-			g_paxos->cluster_size
+			as_exchange_cluster_size()
 			);
 
 	log_line_system_memory();

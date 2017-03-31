@@ -145,8 +145,7 @@ cfg_set_defaults()
 	c->nsup_period = 120; // run nsup once every 2 minutes
 	c->nsup_startup_evict = true;
 	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // default the maximum cluster size to a "reasonable" value
-	c->paxos_protocol = AS_PAXOS_PROTOCOL_V3; // default to 3.0 "sindex" paxos protocol version
-	c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER; // default to auto reset master
+	c->paxos_protocol = AS_PAXOS_PROTOCOL_V3;
 	c->paxos_retransmit_period = 5; // run paxos retransmit once every 5 seconds
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
@@ -173,7 +172,6 @@ cfg_set_defaults()
 	c->hb_config.mode = AS_HB_MODE_UNDEF;
 	c->hb_config.tx_interval = 150;
 	c->hb_config.max_intervals_missed = 10;
-	c->hb_config.fabric_grace_factor = -1; // Infinite fabric grace period.
 	c->hb_config.protocol = AS_HB_PROTOCOL_V2;
 	c->hb_config.override_mtu = 0;
 
@@ -190,8 +188,13 @@ cfg_set_defaults()
 	c->fabric_keepalive_intvl = 1; // seconds
 	c->fabric_keepalive_probes = 10; // tries
 	c->fabric_keepalive_time = 1; // seconds
+	c->fabric_latency_max_ms = 5; // assume a one way latency of 5 milliseconds by default
 	c->fabric_recv_rearm_threshold = 1024;
 	c->n_fabric_send_threads = 8;
+
+	// Clustering defaults.
+	c->clustering_config.cluster_size_min = 1;
+	c->clustering_config.clique_based_eviction_enabled = true;
 
 	// XDR defaults.
 	for (int i = 0; i < AS_CLUSTER_SZ ; i++) {
@@ -226,7 +229,6 @@ cfg_set_defaults()
 	c->sec_cfg.privilege_refresh_period = 60 * 5; // refresh socket privileges every 5 minutes
 	c->sec_cfg.syslog_local = AS_SYSLOG_NONE;
 }
-
 
 //==========================================================
 // All configuration items must have a switch case
@@ -282,15 +284,16 @@ typedef enum {
 	CASE_SERVICE_INFO_THREADS,
 	CASE_SERVICE_LDT_BENCHMARKS,
 	CASE_SERVICE_LOG_LOCAL_TIME,
+	CASE_SERVICE_LOG_MILLIS,
 	CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING,
 	CASE_SERVICE_MIGRATE_THREADS,
+	CASE_SERVICE_MIN_CLUSTER_SIZE,
 	CASE_SERVICE_NODE_ID_INTERFACE,
 	CASE_SERVICE_NSUP_DELETE_SLEEP,
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_NSUP_STARTUP_EVICT,
 	CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE,
 	CASE_SERVICE_PAXOS_PROTOCOL,
-	CASE_SERVICE_PAXOS_RECOVERY_POLICY,
 	CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
@@ -366,6 +369,7 @@ typedef enum {
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
 	CASE_SERVICE_NSUP_THREADS,
+	CASE_SERVICE_PAXOS_RECOVERY_POLICY,
 	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
 	CASE_SERVICE_SCAN_MEMORY,
 	CASE_SERVICE_SCAN_PRIORITY,
@@ -388,12 +392,7 @@ typedef enum {
 	CASE_SERVICE_PAXOS_PROTOCOL_V2,
 	CASE_SERVICE_PAXOS_PROTOCOL_V3,
 	CASE_SERVICE_PAXOS_PROTOCOL_V4,
-
-	// Service paxos recovery policy options (value tokens):
-	CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL,
-	CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER,
-	CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER,
-	CASE_SERVICE_PAXOS_RECOVERY_MANUAL,
+	CASE_SERVICE_PAXOS_PROTOCOL_V5,
 
 	// Logging options:
 	// Normally visible:
@@ -462,7 +461,6 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_INTERVAL,
 	CASE_NETWORK_HEARTBEAT_TIMEOUT,
 	// Normally hidden:
-	CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR,
 	CASE_NETWORK_HEARTBEAT_MTU,
 	CASE_NETWORK_HEARTBEAT_MCAST_TTL, // renamed
 	CASE_NETWORK_HEARTBEAT_MULTICAST_TTL,
@@ -475,7 +473,7 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_MODE_MULTICAST,
 
 	// Network heartbeat protocol options (value tokens):
-	CASE_NETWORK_HEARTBEAT_PROTOCOL_RESET,
+	CASE_NETWORK_HEARTBEAT_PROTOCOL_NONE,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL_V1,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL_V2,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL_V3,
@@ -745,15 +743,16 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "info-threads",					CASE_SERVICE_INFO_THREADS },
 		{ "ldt-benchmarks",					CASE_SERVICE_LDT_BENCHMARKS },
 		{ "log-local-time",					CASE_SERVICE_LOG_LOCAL_TIME },
+		{ "log-millis",						CASE_SERVICE_LOG_MILLIS},
 		{ "migrate-max-num-incoming",		CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING },
 		{ "migrate-threads",				CASE_SERVICE_MIGRATE_THREADS },
+		{ "min-cluster-size",				CASE_SERVICE_MIN_CLUSTER_SIZE },
 		{ "node-id-interface",				CASE_SERVICE_NODE_ID_INTERFACE },
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
 		{ "paxos-max-cluster-size",			CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE },
 		{ "paxos-protocol",					CASE_SERVICE_PAXOS_PROTOCOL },
-		{ "paxos-recovery-policy",			CASE_SERVICE_PAXOS_RECOVERY_POLICY },
 		{ "paxos-retransmit-period",		CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
@@ -826,6 +825,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
 		{ "nsup-threads",					CASE_SERVICE_NSUP_THREADS },
+		{ "paxos-recovery-policy",			CASE_SERVICE_PAXOS_RECOVERY_POLICY },
 		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
 		{ "scan-memory",					CASE_SERVICE_SCAN_MEMORY },
 		{ "scan-priority",					CASE_SERVICE_SCAN_PRIORITY },
@@ -850,11 +850,8 @@ const cfg_opt SERVICE_PAXOS_PROTOCOL_OPTS[] = {
 		{ "v1",								CASE_SERVICE_PAXOS_PROTOCOL_V1 },
 		{ "v2",								CASE_SERVICE_PAXOS_PROTOCOL_V2 },
 		{ "v3",								CASE_SERVICE_PAXOS_PROTOCOL_V3 },
-		{ "v4",								CASE_SERVICE_PAXOS_PROTOCOL_V4 }
-};
-
-const cfg_opt SERVICE_PAXOS_RECOVERY_OPTS[] = {
-		{ "auto-reset-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER }
+		{ "v4",								CASE_SERVICE_PAXOS_PROTOCOL_V4 },
+		{ "v5",								CASE_SERVICE_PAXOS_PROTOCOL_V5 }
 };
 
 const cfg_opt LOGGING_OPTS[] = {
@@ -924,7 +921,6 @@ const cfg_opt NETWORK_HEARTBEAT_OPTS[] = {
 		{ "mesh-seed-address-port",			CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT },
 		{ "interval",						CASE_NETWORK_HEARTBEAT_INTERVAL },
 		{ "timeout",						CASE_NETWORK_HEARTBEAT_TIMEOUT },
-		{ "fabric-grace-factor",			CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR },
 		{ "mtu",							CASE_NETWORK_HEARTBEAT_MTU },
 		{ "mcast-ttl",						CASE_NETWORK_HEARTBEAT_MCAST_TTL },
 		{ "multicast-ttl",					CASE_NETWORK_HEARTBEAT_MULTICAST_TTL },
@@ -939,7 +935,7 @@ const cfg_opt NETWORK_HEARTBEAT_MODE_OPTS[] = {
 };
 
 const cfg_opt NETWORK_HEARTBEAT_PROTOCOL_OPTS[] = {
-		{ "reset",							CASE_NETWORK_HEARTBEAT_PROTOCOL_RESET },
+		{ "none",							CASE_NETWORK_HEARTBEAT_PROTOCOL_NONE },
 		{ "v1",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V1 },
 		{ "v2",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V2 },
 		{ "v3",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V3}
@@ -1186,7 +1182,6 @@ const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_PAXOS_PROTOCOL_OPTS			= sizeof(SERVICE_PAXOS_PROTOCOL_OPTS) / sizeof(cfg_opt);
-const int NUM_SERVICE_PAXOS_RECOVERY_OPTS			= sizeof(SERVICE_PAXOS_RECOVERY_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_FILE_OPTS						= sizeof(LOGGING_FILE_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_CONSOLE_OPTS					= sizeof(LOGGING_CONSOLE_OPTS) / sizeof(cfg_opt);
@@ -2082,11 +2077,17 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_LOG_LOCAL_TIME:
 				cf_fault_use_local_time(cfg_bool(&line));
 				break;
+			case CASE_SERVICE_LOG_MILLIS:
+				cf_fault_log_millis(cfg_bool(&line));
+				break;
 			case CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING:
 				c->migrate_max_num_incoming = cfg_int(&line, 0, INT_MAX);
 				break;
 			case CASE_SERVICE_MIGRATE_THREADS:
 				c->n_migrate_threads = cfg_int(&line, 0, MAX_NUM_MIGRATE_XMIT_THREADS);
+				break;
+			case CASE_SERVICE_MIN_CLUSTER_SIZE:
+				c->clustering_config.cluster_size_min = cfg_u32(&line, 0, AS_CLUSTER_SZ);
 				break;
 			case CASE_SERVICE_NODE_ID_INTERFACE:
 				c->node_id_interface = cfg_strdup_no_checks(&line);
@@ -2117,16 +2118,8 @@ as_config_init(const char* config_file)
 				case CASE_SERVICE_PAXOS_PROTOCOL_V4:
 					c->paxos_protocol = AS_PAXOS_PROTOCOL_V4;
 					break;
-				case CASE_NOT_FOUND:
-				default:
-					cfg_unknown_val_tok_1(&line);
-					break;
-				}
-				break;
-			case CASE_SERVICE_PAXOS_RECOVERY_POLICY:
-				switch (cfg_find_tok(line.val_tok_1, SERVICE_PAXOS_RECOVERY_OPTS, NUM_SERVICE_PAXOS_RECOVERY_OPTS)) {
-				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER:
-					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER;
+				case CASE_SERVICE_PAXOS_PROTOCOL_V5:
+					c->paxos_protocol = AS_PAXOS_PROTOCOL_V5;
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -2287,6 +2280,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
 			case CASE_SERVICE_NSUP_THREADS:
+			case CASE_SERVICE_PAXOS_RECOVERY_POLICY:
 			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
 			case CASE_SERVICE_SCAN_MEMORY:
 			case CASE_SERVICE_SCAN_PRIORITY:
@@ -2562,9 +2556,6 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_HEARTBEAT_TIMEOUT:
 				c->hb_config.max_intervals_missed = cfg_u32(&line, AS_HB_MAX_INTERVALS_MISSED_MIN, UINT_MAX);
 				break;
-			case CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR:
-				c->hb_config.fabric_grace_factor = cfg_int_no_checks(&line);
-		 		break;
 			case CASE_NETWORK_HEARTBEAT_MTU:
 				c->hb_config.override_mtu = cfg_u32_no_checks(&line);
 				break;
@@ -2576,8 +2567,8 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NETWORK_HEARTBEAT_PROTOCOL:
 				switch (cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_PROTOCOL_OPTS, NUM_NETWORK_HEARTBEAT_PROTOCOL_OPTS)) {
-				case CASE_NETWORK_HEARTBEAT_PROTOCOL_RESET:
-					c->hb_config.protocol = AS_HB_PROTOCOL_RESET;
+				case CASE_NETWORK_HEARTBEAT_PROTOCOL_NONE:
+					c->hb_config.protocol = AS_HB_PROTOCOL_NONE;
 					break;
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V1:
 					c->hb_config.protocol = AS_HB_PROTOCOL_V1;
@@ -2703,7 +2694,7 @@ as_config_init(const char* config_file)
 		case NAMESPACE:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_OPTS, NUM_NAMESPACE_OPTS)) {
 			case CASE_NAMESPACE_REPLICATION_FACTOR:
-				ns->cfg_replication_factor = ns->replication_factor = cfg_u32(&line, 1, AS_CLUSTER_SZ);
+				ns->cfg_replication_factor = cfg_u32(&line, 1, AS_CLUSTER_SZ);
 				break;
 			case CASE_NAMESPACE_LIMIT_SIZE:
 				cfg_renamed_name_tok(&line, "memory-size");
@@ -3578,9 +3569,6 @@ as_config_post_process(as_config* c, const char* config_file)
 		// If we got this far, then group/node should be ok.
 		cfg_reset_self_node(c, &rack_addr);
 	}
-	else if (AS_PAXOS_PROTOCOL_V4 == c->paxos_protocol) {
-		cf_crash_nostack(AS_CFG, "must only use Paxos protocol V4 with Rack Aware enabled");
-	}
 	else {
 		cf_info(AS_CFG, "Rack Aware mode not enabled");
 	}
@@ -4292,10 +4280,6 @@ cfg_reset_self_node(as_config* config_p, cf_ip_addr *rack_addr)
 	// PORT + GROUP ID + NODE ID (16 bits::16 bits::32 bits)
 	cf_debug(AS_CFG,"[ENTER] set self Node:: group(%u) Node (%u)\n",
 		config_p->cluster.cl_self_group, config_p->cluster.cl_self_node);
-
-	if (AS_PAXOS_PROTOCOL_V4 != config_p->paxos_protocol) {
-		cf_crash_nostack(AS_CFG, "must use Paxos protocol V4 with Rack Aware enabled");
-	}
 
 	cc_node_t node_id = config_p->cluster.cl_self_node;
 	cc_group_t group_id = config_p->cluster.cl_self_group;
