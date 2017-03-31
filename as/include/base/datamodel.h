@@ -974,6 +974,8 @@ struct as_namespace_s {
 	cf_atomic_int	migrate_tx_partitions_remaining;
 	cf_atomic_int	migrate_rx_partitions_initial;
 	cf_atomic_int	migrate_rx_partitions_remaining;
+	cf_atomic_int	migrate_signals_active;
+	cf_atomic_int	migrate_signals_remaining;
 
 	// Per-record migration stats:
 	cf_atomic_int	migrate_records_skipped; // relevant only for enterprise edition
@@ -1203,7 +1205,8 @@ struct as_namespace_s {
 
 	uint32_t cluster_size;
 	cf_node succession[AS_CLUSTER_SZ];
-	as_partition_vinfo cluster_vinfo[AS_CLUSTER_SZ][AS_PARTITIONS];
+	as_partition_vinfo cluster_vinfo[AS_CLUSTER_SZ][AS_PARTITIONS]; // XXX JUMP - remove in "six months"
+	as_partition_version cluster_versions[AS_CLUSTER_SZ][AS_PARTITIONS];
 };
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator

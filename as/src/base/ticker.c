@@ -432,10 +432,10 @@ log_line_migrations(as_namespace* ns)
 	if (initial > 0 && remaining > 0) {
 		float complete_pct = (1 - ((float)remaining / (float)initial)) * 100;
 
-		cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld) active (%ld,%ld) complete-pct %0.2f",
+		cf_info(AS_INFO, "{%s} migrations: remaining (%ld,%ld,%ld) active (%ld,%ld,%ld) complete-pct %0.2f",
 				ns->name,
-				remaining_tx, remaining_rx,
-				ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active,
+				remaining_tx, remaining_rx, ns->migrate_signals_remaining,
+				ns->migrate_tx_partitions_active, ns->migrate_rx_partitions_active, ns->migrate_signals_active,
 				complete_pct
 				);
 	}

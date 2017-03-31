@@ -78,9 +78,9 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_GENERATION, M_FT_UINT32 },
 		{ MIG_FIELD_RECORD, M_FT_BUF },
 		{ MIG_FIELD_CLUSTER_KEY, M_FT_UINT64 },
-		{ MIG_FIELD_VINFOSET, M_FT_BUF },
+		{ MIG_FIELD_VINFOSET, M_FT_BUF }, // XXX JUMP - recycle in "six months"
 		{ MIG_FIELD_VOID_TIME, M_FT_UINT32 },
-		{ MIG_FIELD_TYPE, M_FT_UINT32 }, // AS_MIGRATE_TYPE: 0 merge, 1 overwrite
+		{ MIG_FIELD_TYPE, M_FT_UINT32 }, // XXX JUMP - recycle in "six months"
 		{ MIG_FIELD_REC_PROPS, M_FT_BUF },
 		{ MIG_FIELD_INFO, M_FT_UINT32 },
 		{ MIG_FIELD_LDT_VERSION, M_FT_UINT64 },
@@ -101,6 +101,7 @@ COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 #define MIG_MSG_SCRATCH_SIZE 128
 
 #define MIGRATE_RETRANSMIT_STARTDONE_MS 1000 // for now, not configurable
+#define MIGRATE_RETRANSMIT_SIGNAL_MS 1000 // for now, not configurable
 #define MAX_BYTES_EMIGRATING (16 * 1024 * 1024)
 
 #define IMMIGRATION_DEBOUNCE_MS (60 * 1000) // 1 minute
@@ -178,6 +179,7 @@ void emigration_pop(emigration **emigp);
 int emigration_pop_reduce_fn(void *buf, void *udata);
 void emigration_hash_insert(emigration *emig);
 void emigration_hash_delete(emigration *emig);
+bool emigrate_transfer(emigration *emig);
 as_migrate_state emigrate(emigration *emig);
 as_migrate_state emigrate_tree(emigration *emig);
 void *run_emigration_reinserter(void *arg);
@@ -186,6 +188,7 @@ bool emigrate_record(emigration *emig, msg *m);
 int emigration_reinsert_reduce_fn(const void *key, void *data, void *udata);
 as_migrate_state emigration_send_start(emigration *emig);
 as_migrate_state emigration_send_done(emigration *emig);
+void emigrate_signal(emigration *emig);
 
 // Immigration.
 void *run_immigration_reaper(void *unused);
@@ -197,6 +200,7 @@ void immigration_handle_start_request(cf_node src, msg *m);
 void immigration_ack_start_request(cf_node src, msg *m, uint32_t op);
 void immigration_handle_insert_request(cf_node src, msg *m);
 void immigration_handle_done_request(cf_node src, msg *m);
+void immigration_handle_all_done_request(cf_node src, msg *m);
 void emigration_handle_insert_ack(cf_node src, msg *m);
 void emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op);
 
@@ -301,6 +305,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr)
 	emig->dest = pmr->dest;
 	emig->cluster_key = pmr->cluster_key;
 	emig->id = cf_atomic32_incr(&g_emigration_id);
+	emig->type = pmr->type;
 	emig->tx_flags = pmr->tx_flags;
 	emig->state = EMIG_STATE_ACTIVE;
 	emig->aborted = false;
@@ -580,33 +585,30 @@ run_emigration(void *arg)
 		}
 
 		as_namespace *ns = emig->rsv.ns;
+		bool requeued = false;
 
 		// Add the emigration to the global hash so acks can find it.
 		emigration_hash_insert(emig);
 
-		cf_atomic_int_incr(&ns->migrate_tx_partitions_active);
-
-		as_migrate_state result = emigrate(emig);
-
-		if (result == AS_MIGRATE_STATE_EAGAIN) {
-			// Remote node refused migration, requeue and fetch another.
+		switch (emig->type) {
+		case EMIG_TYPE_TRANSFER:
+			cf_atomic_int_incr(&ns->migrate_tx_partitions_active);
+			requeued = emigrate_transfer(emig);
 			cf_atomic_int_decr(&ns->migrate_tx_partitions_active);
-
-			if (cf_queue_push(&g_emigration_q, &emig) != CF_QUEUE_OK) {
-				cf_crash(AS_MIGRATE, "failed emigration queue push");
-			}
-
-			continue;
+			break;
+		case EMIG_TYPE_SIGNAL_ALL_DONE:
+			cf_atomic_int_incr(&ns->migrate_signals_active);
+			emigrate_signal(emig);
+			cf_atomic_int_decr(&ns->migrate_signals_active);
+			break;
+		default:
+			cf_crash(AS_MIGRATE, "bad emig type %u", emig->type);
+			break;
 		}
 
-		as_partition_emigrate_done(result, ns, emig->rsv.p->id,
-				emig->cluster_key, emig->tx_flags);
-
-		emig->tx_state = AS_PARTITION_MIG_TX_STATE_NONE;
-
-		cf_atomic_int_decr(&ns->migrate_tx_partitions_active);
-
-		emigration_hash_delete(emig);
+		if (! requeued) {
+			emigration_hash_delete(emig);
+		}
 	}
 
 	return NULL;
@@ -647,6 +649,10 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 		// likely because dest hit 'migrate-max-num-incoming'. A new ack has
 		// arrived - if it's ACK_OK, don't leave remote node hanging.
 
+		return -1; // process immediately
+	}
+
+	if (emig->type == EMIG_TYPE_SIGNAL_ALL_DONE) {
 		return -1; // process immediately
 	}
 
@@ -699,6 +705,30 @@ emigration_hash_delete(emigration *emig)
 	else {
 		emigration_release(emig);
 	}
+}
+
+
+bool
+emigrate_transfer(emigration *emig)
+{
+	as_migrate_state result = emigrate(emig);
+	as_namespace *ns = emig->rsv.ns;
+
+	if (result == AS_MIGRATE_STATE_EAGAIN) {
+		// Remote node refused migration, requeue and fetch another.
+		if (cf_queue_push(&g_emigration_q, &emig) != CF_QUEUE_OK) {
+			cf_crash(AS_MIGRATE, "failed emigration queue push");
+		}
+
+		return true; // requeued
+	}
+
+	as_partition_emigrate_done(result, ns, emig->rsv.p->id, emig->cluster_key,
+			emig->tx_flags);
+
+	emig->tx_state = AS_PARTITION_MIG_TX_STATE_NONE;
+
+	return false; // did not requeue
 }
 
 
@@ -890,8 +920,8 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT);
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
-	msg_set_buf(m, MIG_FIELD_DIGEST, (void *)&pr.keyd, sizeof(cf_digest),
-			MSG_SET_COPY);
+	msg_set_buf(m, MIG_FIELD_DIGEST, (const uint8_t *)&pr.keyd,
+			sizeof(cf_digest), MSG_SET_COPY);
 	msg_set_uint32(m, MIG_FIELD_GENERATION, pr.generation);
 	msg_set_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, pr.last_update_time);
 
@@ -912,8 +942,9 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	// Note - after MSG_SET_HANDOFF_MALLOCs, no need to destroy pickled_record.
 
 	if (pr.rec_props.p_data) {
-		msg_set_buf(m, MIG_FIELD_REC_PROPS, (void *)pr.rec_props.p_data,
-				pr.rec_props.size, MSG_SET_HANDOFF_MALLOC);
+		msg_set_buf(m, MIG_FIELD_REC_PROPS,
+				(const uint8_t *)pr.rec_props.p_data, pr.rec_props.size,
+				MSG_SET_HANDOFF_MALLOC);
 	}
 
 	msg_set_buf(m, MIG_FIELD_RECORD, pr.record_buf, pr.record_len,
@@ -1022,7 +1053,7 @@ emigration_send_start(emigration *emig)
 			(uint32_t)as_index_tree_size(emig->rsv.tree));
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 	msg_set_uint64(m, MIG_FIELD_CLUSTER_KEY, emig->cluster_key);
-	msg_set_buf(m, MIG_FIELD_NAMESPACE, (byte *)ns->name,
+	msg_set_buf(m, MIG_FIELD_NAMESPACE, (const uint8_t *)ns->name,
 			strlen(ns->name), MSG_SET_COPY);
 	msg_set_uint32(m, MIG_FIELD_PARTITION, emig->rsv.p->id);
 	msg_set_uint32(m, MIG_FIELD_TYPE, emig->tx_flags == TX_FLAGS_REQUEST ?
@@ -1138,6 +1169,71 @@ emigration_send_done(emigration *emig)
 }
 
 
+void
+emigrate_signal(emigration *emig)
+{
+	as_namespace *ns = emig->rsv.ns;
+	msg *m = as_fabric_msg_get(M_TYPE_MIGRATE);
+
+	if (! m) {
+		cf_warning(AS_MIGRATE, "signal: failed to get fabric msg");
+		return;
+	}
+
+	switch (emig->type) {
+	case EMIG_TYPE_SIGNAL_ALL_DONE:
+		msg_set_uint32(m, MIG_FIELD_OP, OPERATION_ALL_DONE);
+		break;
+	default:
+		cf_crash(AS_MIGRATE, "signal: bad emig type %u", emig->type);
+		break;
+	}
+
+	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
+	msg_set_uint64(m, MIG_FIELD_CLUSTER_KEY, emig->cluster_key);
+	msg_set_buf(m, MIG_FIELD_NAMESPACE, (const uint8_t *)ns->name,
+			strlen(ns->name), MSG_SET_COPY);
+	msg_set_uint32(m, MIG_FIELD_PARTITION, emig->rsv.p->id);
+
+	uint64_t signal_xmit_ms = 0;
+
+	while (true) {
+		if (emig->cluster_key != as_exchange_cluster_key()) {
+			as_fabric_msg_put(m);
+			return;
+		}
+
+		uint64_t now = cf_getms();
+
+		if (signal_xmit_ms + MIGRATE_RETRANSMIT_SIGNAL_MS < now) {
+			msg_incr_ref(m);
+
+			if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_CTRL) !=
+					AS_FABRIC_SUCCESS) {
+				as_fabric_msg_put(m);
+			}
+
+			signal_xmit_ms = now;
+		}
+
+		int op;
+
+		if (cf_queue_pop(emig->ctrl_q, &op, MIGRATE_RETRANSMIT_SIGNAL_MS) ==
+				CF_QUEUE_OK) {
+			switch (op) {
+			case OPERATION_ALL_DONE_ACK:
+				cf_atomic_int_decr(&ns->migrate_signals_remaining);
+				as_fabric_msg_put(m);
+				return;
+			default:
+				cf_warning(AS_MIGRATE, "signal: unexpected ctrl op %d", op);
+				break;
+			}
+		}
+	}
+}
+
+
 //==========================================================
 // Local helpers - immigration.
 //
@@ -1224,6 +1320,9 @@ migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 	case OPERATION_DONE:
 		immigration_handle_done_request(src, m);
 		break;
+	case OPERATION_ALL_DONE:
+		immigration_handle_all_done_request(src, m);
+		break;
 
 	//--------------------------------------------
 	// Emigration - handle acknowledgments:
@@ -1236,6 +1335,7 @@ migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 	case OPERATION_START_ACK_FAIL:
 	case OPERATION_START_ACK_ALREADY_DONE:
 	case OPERATION_DONE_ACK:
+	case OPERATION_ALL_DONE_ACK:
 		emigration_handle_ctrl_ack(src, m, op);
 		break;
 
@@ -1255,12 +1355,14 @@ migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 	return 0;
 }
 
+
 //----------------------------------------------------------
 // Immigration - request message handling.
 //
 
 void
-immigration_handle_start_request(cf_node src, msg *m) {
+immigration_handle_start_request(cf_node src, msg *m)
+{
 	uint32_t emig_id;
 
 	if (msg_get_uint32(m, MIG_FIELD_EMIG_ID, &emig_id) != 0) {
@@ -1438,15 +1540,15 @@ immigration_ack_start_request(cf_node src, msg *m, uint32_t op)
 {
 	msg_set_uint32(m, MIG_FIELD_OP, op);
 
-	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 	}
 }
 
 
 void
-immigration_handle_insert_request(cf_node src, msg *m) {
+immigration_handle_insert_request(cf_node src, msg *m)
+{
 	cf_digest *keyd;
 
 	if (msg_get_buf(m, MIG_FIELD_DIGEST, (byte **)&keyd, NULL,
@@ -1588,8 +1690,7 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
 
-	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_BULK) !=
-			AS_FABRIC_SUCCESS) {
+	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_BULK) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 		return;
 	}
@@ -1597,7 +1698,8 @@ immigration_handle_insert_request(cf_node src, msg *m) {
 
 
 void
-immigration_handle_done_request(cf_node src, msg *m) {
+immigration_handle_done_request(cf_node src, msg *m)
+{
 	uint32_t emig_id;
 
 	if (msg_get_uint32(m, MIG_FIELD_EMIG_ID, &emig_id) != 0) {
@@ -1607,8 +1709,6 @@ immigration_handle_done_request(cf_node src, msg *m) {
 	}
 
 	msg_preserve_fields(m, 1, MIG_FIELD_EMIG_ID);
-
-	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_DONE_ACK);
 
 	// See if this migration already exists & has been notified.
 	immigration_hkey hkey;
@@ -1649,12 +1749,79 @@ immigration_handle_done_request(cf_node src, msg *m) {
 	}
 	// else - garbage, or super-stale retransmitted done message.
 
-	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) !=
-			AS_FABRIC_SUCCESS) {
+	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_DONE_ACK);
+
+	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(m);
 		return;
 	}
 }
+
+
+void
+immigration_handle_all_done_request(cf_node src, msg *m)
+{
+	uint32_t emig_id;
+
+	if (msg_get_uint32(m, MIG_FIELD_EMIG_ID, &emig_id) != 0) {
+		cf_warning(AS_MIGRATE, "handle start: msg get for emig id failed");
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	uint64_t cluster_key;
+
+	if (msg_get_uint64(m, MIG_FIELD_CLUSTER_KEY, &cluster_key) != 0) {
+		cf_warning(AS_MIGRATE, "handle all done: msg get for cluster key failed");
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	uint8_t *ns_name;
+	size_t ns_name_len;
+
+	if (msg_get_buf(m, MIG_FIELD_NAMESPACE, &ns_name, &ns_name_len,
+			MSG_GET_DIRECT) != 0) {
+		cf_warning(AS_MIGRATE, "handle all done: msg get for namespace failed");
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	as_namespace *ns = as_namespace_get_bybuf(ns_name, ns_name_len);
+
+	if (! ns) {
+		cf_warning(AS_MIGRATE, "handle all done: bad namespace");
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	uint32_t pid;
+
+	if (msg_get_uint32(m, MIG_FIELD_PARTITION, &pid) != 0) {
+		cf_warning(AS_MIGRATE, "handle all done: msg get for pid failed");
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	msg_preserve_fields(m, 1, MIG_FIELD_EMIG_ID);
+
+	// TODO - optionally, for replicas we might use this to remove immig objects
+	// from hash and deprecate timer...
+
+	if (as_partition_migrations_all_done(ns, pid, cluster_key) !=
+			AS_MIGRATE_OK) {
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_ALL_DONE_ACK);
+
+	if (as_fabric_send(src, m, AS_FABRIC_CHANNEL_CTRL) != AS_FABRIC_SUCCESS) {
+		as_fabric_msg_put(m);
+		return;
+	}
+}
+
 
 //----------------------------------------------------------
 // Emigration - acknowledgment message handling.
@@ -1899,7 +2066,7 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 			return -1;
 		}
 
-		msg_set_buf(m, MIG_FIELD_LDT_PDIGEST, (void *)&pr->pkeyd,
+		msg_set_buf(m, MIG_FIELD_LDT_PDIGEST, (const uint8_t *)&pr->pkeyd,
 				sizeof(cf_digest), MSG_SET_COPY);
 
 		if (as_ldt_precord_is_esr(pr)) {
@@ -1907,7 +2074,7 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 		}
 		else if (as_ldt_precord_is_subrec(pr)) {
 			*info |= MIG_INFO_LDT_SUBREC;
-			msg_set_buf(m, MIG_FIELD_LDT_EDIGEST, (void *)&pr->ekeyd,
+			msg_set_buf(m, MIG_FIELD_LDT_EDIGEST, (const uint8_t *)&pr->ekeyd,
 					sizeof(cf_digest), MSG_SET_COPY);
 		}
 		else {

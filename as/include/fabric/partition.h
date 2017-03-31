@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "citrusleaf/cf_atomic.h"
@@ -54,6 +55,10 @@ struct as_namespace_s;
 #define AS_PARTITIONS 4096
 #define AS_PARTITION_MASK (AS_PARTITIONS - 1)
 
+//------------------------------------------------
+// XXX JUMP - remove in "six months".
+//
+
 #define AS_PARTITION_STATE_UNDEF 0
 #define AS_PARTITION_STATE_SYNC 1
 #define AS_PARTITION_STATE_DESYNC 2
@@ -69,6 +74,28 @@ typedef struct as_partition_vinfo_s {
 } as_partition_vinfo;
 
 extern const as_partition_vinfo NULL_VINFO;
+
+//
+// End - XXX JUMP - remove in "six months".
+//------------------------------------------------
+
+#define VERSION_FAMILY_BITS 3
+#define VERSION_FAMILY_UNIQUE ((1 << VERSION_FAMILY_BITS) - 1)
+#define AS_PARTITION_N_FAMILIES VERSION_FAMILY_UNIQUE
+
+#define AS_PARTITION_FLAG_EMPTY 0x1
+
+typedef struct as_partition_version_s {
+	uint64_t ckey:56;
+	uint64_t family:VERSION_FAMILY_BITS;
+	uint64_t unused:3;
+	uint64_t subset:1;
+	uint64_t evade:1;
+} as_partition_version;
+
+typedef struct as_partition_version_string_s {
+	char s[18 + 1]; // format ccCCCCccccCCCC.Fse
+} as_partition_version_string;
 
 typedef struct as_partition_s {
 	pthread_mutex_t lock;
@@ -88,21 +115,25 @@ typedef struct as_partition_s {
 	// Rebalance & migration related:
 
 	uint64_t cluster_key;
-	as_partition_vinfo primary_version_info;
-	as_partition_vinfo version_info;
-	as_partition_state state;
+	as_partition_version final_version;
+	as_partition_version version;
+	as_partition_vinfo primary_version_info; // XXX JUMP - remove in "six months"
+	as_partition_vinfo version_info; // XXX JUMP - remove in "six months"
+	as_partition_state state; // XXX JUMP - remove in "six months"
 	bool has_master_wait; // XXX JUMP - remove in "six months"
+	bool acting_master_involved;
 	int pending_emigrations;
 	int pending_immigrations;
-	bool replicas_delayed_emigrate[AS_CLUSTER_SZ];
+	bool immigrators[AS_CLUSTER_SZ]; // XXX JUMP - overloaded - was replicas_delayed_emigrate
 
 	cf_node origin;
 	cf_node target;
 
 	uint32_t n_dupl;
-	cf_node dupl_nodes[AS_CLUSTER_SZ];
+	cf_node dupls[AS_CLUSTER_SZ];
 
-	cf_node old_node_seq[AS_CLUSTER_SZ];
+	uint32_t n_witnesses;
+	cf_node witnesses[AS_CLUSTER_SZ]; // XXX JUMP - overloaded - was old_node_seq
 
 	// LDT related.
 	uint64_t current_outgoing_ldt_version;
@@ -115,7 +146,7 @@ typedef struct as_partition_reservation_s {
 	struct as_index_tree_s* tree;
 	struct as_index_tree_s* sub_tree;
 	uint64_t cluster_key;
-	as_partition_state state;
+	bool reject_repl_write;
 	// 3 unused bytes
 	uint32_t n_dupl;
 	cf_node dupl_nodes[AS_CLUSTER_SZ];
@@ -167,7 +198,7 @@ typedef enum {
 	__rsv.tree = NULL; \
 	__rsv.sub_tree = NULL; \
 	__rsv.cluster_key = 0; \
-	__rsv.state = AS_PARTITION_STATE_UNDEF; \
+	__rsv.reject_repl_write = false; \
 	__rsv.n_dupl = 0;
 
 #define AS_PARTITION_RESERVATION_INITP(__rsv) \
@@ -176,8 +207,10 @@ typedef enum {
 	__rsv->tree = NULL; \
 	__rsv->sub_tree = NULL; \
 	__rsv->cluster_key = 0; \
-	__rsv->state = AS_PARTITION_STATE_UNDEF; \
+	__rsv->reject_repl_write = false; \
 	__rsv->n_dupl = 0;
+
+#define VERSION_AS_STRING(v_ptr) (as_partition_version_as_string(v_ptr).s)
 
 
 //==========================================================
@@ -211,6 +244,10 @@ void as_partition_release(as_partition_reservation* rsv);
 
 void as_partition_getinfo_str(cf_dyn_buf* db);
 
+//------------------------------------------------
+// XXX JUMP - remove in "six months".
+//
+
 static inline bool
 as_partition_is_null(const as_partition_vinfo* vinfo)
 {
@@ -227,10 +264,59 @@ as_partition_vinfo_same(const as_partition_vinfo* v1, const as_partition_vinfo* 
 	return memcmp(v1->vtp, v2->vtp, AS_PARTITION_MAX_VERSION) == 0;
 }
 
+//
+// End - XXX JUMP - remove in "six months".
+//------------------------------------------------
+
+// Use VERSION_AS_STRING() - see above.
+static inline as_partition_version_string
+as_partition_version_as_string(const as_partition_version* version)
+{
+	as_partition_version_string str;
+
+	sprintf(str.s, "%014lx.%c%c%c", (uint64_t)version->ckey,
+			version->family == VERSION_FAMILY_UNIQUE ?
+					'U' : '0' + version->family,
+			version->subset == 0 ? 'p' : 's',
+			version->evade == 0 ? '-' : 'e');
+
+	return str;
+}
+
+static inline bool
+as_partition_version_is_null(const as_partition_version* version)
+{
+	return version->ckey == 0;
+}
+
+static inline bool
+as_partition_version_same(const as_partition_version* v1, const as_partition_version* v2)
+{
+	return *(const uint64_t*)v1 == *(const uint64_t*)v2;
+}
+
 static inline uint32_t
 as_partition_getid(const cf_digest d)
 {
 	return cf_digest_gethash(&d, AS_PARTITION_MASK);
+}
+
+static inline int
+index_of_node(const cf_node* nodes, uint32_t n_nodes, cf_node node)
+{
+	for (uint32_t n = 0; n < n_nodes; n++) {
+		if (node == nodes[n]) {
+			return (int)n;
+		}
+	}
+
+	return -1;
+}
+
+static inline bool
+contains_node(const cf_node* nodes, uint32_t n_nodes, cf_node node)
+{
+	return index_of_node(nodes, n_nodes, node) != -1;
 }
 
 

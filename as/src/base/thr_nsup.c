@@ -582,8 +582,8 @@ non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
 			as_index_reduce_live(rsv.tree, non_master_sets_delete_reduce_cb, &cb_info);
 
 			if (cb_info.num_deleted != 0) {
-				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, state %d, %lu records remaining",
-						ns->name, n, cb_info.num_deleted, rsv.state,
+				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, %lu records remaining",
+						ns->name, n, cb_info.num_deleted,
 						as_index_tree_size(rsv.tree));
 			}
 

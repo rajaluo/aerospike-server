@@ -1004,7 +1004,7 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 	cf_info(AS_PAXOS,
 			"old paxos stopped - starting new exchange and clustering modules ...");
 
-	as_partition_balance_refresh_versions();
+	as_partition_balance_jump_versions();
 
 	as_exchange_start();
 	as_clustering_switchover(as_exchange_cluster_key(),

@@ -5912,6 +5912,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "migrate_record_retransmits", ns->migrate_record_retransmits);
 	info_append_uint64(db, "migrate_record_receives", ns->migrate_record_receives);
 
+	info_append_uint64(db, "migrate_signals_active", ns->migrate_signals_active);
+	info_append_uint64(db, "migrate_signals_remaining", ns->migrate_signals_remaining);
+
 	// From-client transaction stats.
 
 	info_append_uint64(db, "client_tsvc_error", ns->n_client_tsvc_error);

@@ -148,8 +148,15 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	// TODO - do we really intend to send this if the record is non-LDT?
 	// FIXME - should address this question for the NEW_CODE split.
 	if (ns->ldt_enabled) {
-		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version_info,
-				sizeof(as_partition_vinfo), MSG_SET_COPY);
+		if (as_new_clustering()) {
+			msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version,
+					sizeof(as_partition_version), MSG_SET_COPY);
+		}
+		else {
+			msg_set_buf(m, RW_FIELD_VINFOSET,
+					(uint8_t*)&tr->rsv.p->version_info,
+					sizeof(as_partition_vinfo), MSG_SET_COPY);
+		}
 
 		if (tr->rsv.p->current_outgoing_ldt_version != 0) {
 			msg_set_uint64(m, RW_FIELD_LDT_VERSION,
@@ -305,7 +312,7 @@ repl_write_handle_op(cf_node node, msg* m)
 
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
 
-	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
+	if (rsv.reject_repl_write) {
 		as_partition_release(&rsv);
 		send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
 		return;
@@ -559,8 +566,15 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 	// TODO - do we really get here if ldt_enabled is false?
 	// FIXME - should address this question for the NEW_CODE split.
 	if (ns->ldt_enabled && ! is_subrec) {
-		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version_info,
-				sizeof(as_partition_vinfo), MSG_SET_COPY);
+		if (as_new_clustering()) {
+			msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version,
+					sizeof(as_partition_version), MSG_SET_COPY);
+		}
+		else {
+			msg_set_buf(m, RW_FIELD_VINFOSET,
+					(uint8_t*)&tr->rsv.p->version_info,
+					sizeof(as_partition_vinfo), MSG_SET_COPY);
+		}
 
 		if (tr->rsv.p->current_outgoing_ldt_version != 0) {
 			msg_set_uint64(m, RW_FIELD_LDT_VERSION,
@@ -650,7 +664,7 @@ repl_write_handle_multiop(cf_node node, msg* m)
 
 	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
 
-	if (rsv.state == AS_PARTITION_STATE_ABSENT) {
+	if (rsv.reject_repl_write) {
 		as_partition_release(&rsv);
 		send_multiop_ack(node, m, AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);
 		return;
@@ -912,15 +926,24 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 bool
 ldt_get_info(ldt_prole_info* linfo, msg* m, as_partition_reservation* rsv)
 {
+	// XXX JUMP - use only as_partition_version in "six months".
+	size_t source_vinfo_size;
 	as_partition_vinfo* source_vinfo;
 
-	if (msg_get_buf(m, RW_FIELD_VINFOSET, (uint8_t**)&source_vinfo, NULL,
-			MSG_GET_DIRECT) != 0) {
+	if (msg_get_buf(m, RW_FIELD_VINFOSET, (uint8_t**)&source_vinfo,
+			&source_vinfo_size, MSG_GET_DIRECT) != 0) {
 		return false;
 	}
 
-	linfo->replication_partition_version_match =
-			as_partition_vinfo_same(source_vinfo, &rsv->p->version_info);
+	if (source_vinfo_size == sizeof(as_partition_vinfo)) {
+		linfo->replication_partition_version_match =
+				as_partition_vinfo_same(source_vinfo, &rsv->p->version_info);
+	}
+	else {
+		linfo->replication_partition_version_match =
+				as_partition_version_same((as_partition_version*)source_vinfo,
+						&rsv->p->version);
+	}
 
 	linfo->ldt_source_version = 0;
 	linfo->ldt_source_version_set = false;

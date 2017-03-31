@@ -131,7 +131,7 @@ typedef struct as_exchange_vinfo_payload_s
 	/**
 	 * The partition vinfo.
 	 */
-	as_partition_vinfo vinfo;
+	as_partition_version vinfo;
 
 	/**
 	 * Count of partitions having this vinfo.
@@ -633,7 +633,7 @@ static pthread_mutex_t g_external_event_publisher_lock =
  */
 #define AS_EXCHANGE_SELF_DYN_BUF_SIZE() (AS_NAMESPACE_SZ * AS_EXCHANGE_UNIQUE_VINFO_MAX_SIZE_SOFT	\
 		* ((AS_EXCHANGE_VINFO_NUM_PIDS_AVG * sizeof(uint16_t))										\
-				+ sizeof(as_partition_vinfo)))
+				+ sizeof(as_partition_version)))
 
 /**
  * Scratch size for exchange messages.
@@ -1050,7 +1050,7 @@ static uint32_t
 exchange_vinfo_shash(const void* value)
 {
 	return exchange_blob_hash((const uint8_t*)value,
-			sizeof(as_partition_vinfo));
+			sizeof(as_partition_version));
 }
 
 /*
@@ -1729,10 +1729,10 @@ exchange_data_ack_msg_send(cf_node dest)
  * Add a pid to the namespace hash for the input vinfo.
  */
 static void
-exchange_namespace_hash_pid_add(shash* ns_hash, as_partition_vinfo* vinfo,
+exchange_namespace_hash_pid_add(shash* ns_hash, as_partition_version* vinfo,
 		uint16_t pid)
 {
-	if (as_partition_is_null(vinfo)) {
+	if (as_partition_version_is_null(vinfo)) {
 		// Ignore NULL vinfos.
 		return;
 	}
@@ -1770,7 +1770,7 @@ static int
 exchange_namespace_hash_serialize_reduce(const void* key, void* data,
 		void* udata)
 {
-	const as_partition_vinfo* vinfo = (const as_partition_vinfo*)key;
+	const as_partition_version* vinfo = (const as_partition_version*)key;
 	cf_vector* pid_vector = *(cf_vector**)data;
 	cf_dyn_buf* dyn_buf = (cf_dyn_buf*)udata;
 
@@ -1804,8 +1804,8 @@ exchange_data_namespace_payload_add(as_namespace* ns, cf_dyn_buf* dyn_buf)
 	// having the vinfo.
 	shash* ns_hash;
 
-	if (shash_create(&ns_hash, exchange_vinfo_shash, sizeof(as_partition_vinfo),
-			sizeof(cf_vector*),
+	if (shash_create(&ns_hash, exchange_vinfo_shash,
+			sizeof(as_partition_version), sizeof(cf_vector*),
 			AS_EXCHANGE_UNIQUE_VINFO_MAX_SIZE_SOFT, 0) != SHASH_OK) {
 		CRASH("error creating namespace payload hash");
 	}
@@ -1814,7 +1814,7 @@ exchange_data_namespace_payload_add(as_namespace* ns, cf_dyn_buf* dyn_buf)
 
 	// Populate the hash with one entry for each vinfo
 	for (int i = 0; i < AS_PARTITIONS; i++) {
-		as_partition_vinfo* current_vinfo = &partitions[i].version_info;
+		as_partition_version* current_vinfo = &partitions[i].version;
 		exchange_namespace_hash_pid_add(ns_hash, current_vinfo, i);
 	}
 
@@ -2645,8 +2645,9 @@ exchange_namespace_payload_commit_for_node(cf_node node,
 				(as_exchange_vinfo_payload*)read_ptr;
 
 		for (int j = 0; j < vinfo_payload->num_pids; j++) {
+			// FIXME - just copy struct instead of memcpy()!
 			memcpy(
-					&ns->cluster_vinfo[node_ns_succession_index][vinfo_payload->pids[j]],
+					&ns->cluster_versions[node_ns_succession_index][vinfo_payload->pids[j]],
 					&vinfo_payload->vinfo, sizeof(vinfo_payload->vinfo));
 
 		}
@@ -2703,7 +2704,7 @@ exchange_data_commit()
 		memset(ns->succession, 0, sizeof(ns->succession));
 
 		// Assuming zero to represent "null" partition.
-		memset(ns->cluster_vinfo, 0, sizeof(ns->cluster_vinfo));
+		memset(ns->cluster_versions, 0, sizeof(ns->cluster_versions));
 
 		// Reset ns cluster size to zero.
 		ns->cluster_size = 0;
