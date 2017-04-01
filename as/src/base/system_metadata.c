@@ -33,6 +33,9 @@
 #include <stdarg.h>
 #include <sys/stat.h>
 
+#include "aerospike/as_hashmap.h"
+#include "aerospike/as_integer.h"
+#include "aerospike/as_stringmap.h"
 #include "citrusleaf/cf_clock.h"
 #include "citrusleaf/cf_rchash.h"
 #include "citrusleaf/cf_shash.h"
@@ -3048,6 +3051,7 @@ static void incr_item_frequency_shash_update(const void *key, void *value_old, v
 	(*item_freq)->freq++;
 }
 
+// XXX JUMP - remove in "six months".
 /*
  * Majority Consensus Merge Policy in SMD.
  * Algorithm      : "Agree upon majority consensus in the cluster."
@@ -3066,7 +3070,7 @@ static void incr_item_frequency_shash_update(const void *key, void *value_old, v
  *      cluster_size   : No. of active nodes in the cluster
  *      udata          : User specific data for callback
  */
-int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **merged_list,
+int old_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **merged_list,
 									as_smd_item_list_t **lists_to_merge, size_t num_list, void *udata)
 {
 	cf_debug(AS_SMD, "Executing majority consensus merge policy for module %s ", module);
@@ -3145,6 +3149,98 @@ int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **mer
 	shash_reduce(merge_hash, as_smd_merge_resolution_reduce_fn, (void *) &merge_info);
 	shash_destroy(merge_hash);
 	cf_debug(AS_SMD, "Majority consensus merge policy execution complete!");
+
+	return 0;
+}
+
+static uint32_t key2idx_get_index(as_hashmap *map, const char *key)
+{
+	const as_integer *i = as_stringmap_get_integer((as_map *)map, key);
+
+	if (i) {
+		return (uint32_t)as_integer_get(i);
+	}
+
+	uint32_t new_index = as_hashmap_size(map);
+
+	as_stringmap_set_int64((as_map *)map, key, (int64_t)new_index);
+
+	return new_index;
+}
+
+int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **merged_list,
+									as_smd_item_list_t **lists_to_merge, size_t num_list, void *udata)
+{
+	if (! as_new_clustering()) {
+		return old_smd_majority_consensus_merge(module, merged_list, lists_to_merge, num_list, udata);
+	}
+
+	typedef struct {
+		as_smd_item_t *item; // does not hold ref to item
+		uint32_t count;
+	} merge_item;
+
+	cf_vector merge_list;
+	as_hashmap key2idx;
+
+	as_hashmap_init(&key2idx, 1024);
+	cf_vector_init(&merge_list, sizeof(merge_item), 1024, 0);
+
+	for(size_t i = 0; i < num_list; i++) {
+		size_t num_items = lists_to_merge[i]->num_items;
+
+		for (size_t j = 0; j < num_items; j++) {
+			as_smd_item_t *item = lists_to_merge[i]->item[j];
+			uint32_t idx = key2idx_get_index(&key2idx, item->key);
+
+			if (idx >= cf_vector_size(&merge_list)) {
+				merge_item mitem = {
+						.item = item,
+						.count = 1
+				};
+
+				cf_vector_append(&merge_list, &mitem);
+				continue;
+			}
+
+			merge_item *p_mitem = (merge_item *)cf_vector_getp(&merge_list, idx);
+			bool existing_wins = (p_mitem->item->generation > item->generation) ||
+					((p_mitem->item->generation == item->generation) &&
+							(p_mitem->item->timestamp > item->timestamp));
+
+			if (! existing_wins) {
+				p_mitem->item = item;
+			}
+
+			p_mitem->count++;
+		}
+	}
+
+	as_hashmap_destroy(&key2idx);
+	*merged_list = as_smd_item_list_alloc(cf_vector_size(&merge_list));
+
+	uint32_t majority_count = ((uint32_t)num_list + 1) / 2;
+
+	for (uint32_t i = 0; i < cf_vector_size(&merge_list); i++) {
+		merge_item *p_mitem = (merge_item *)cf_vector_getp(&merge_list, i);
+
+		if (p_mitem->count >= majority_count) {
+			cf_rc_reserve(p_mitem->item);
+			(*merged_list)->item[i] = p_mitem->item;
+		}
+		else {
+			as_smd_item_t *item = (as_smd_item_t *)cf_rc_alloc(sizeof(as_smd_item_t));
+
+			memset(item, 0, sizeof(as_smd_item_t));
+			item->action = AS_SMD_ACTION_DELETE;
+			item->key = cf_strdup(p_mitem->item->key);
+			item->generation = p_mitem->item->generation + 1;
+			item->timestamp = cf_getms();
+			(*merged_list)->item[i] = item;
+		}
+	}
+
+	cf_vector_destroy(&merge_list);
 
 	return 0;
 }
@@ -3304,4 +3400,117 @@ void *as_smd_thr(void *arg)
 
 	// Exit the System Metadata thread.
 	return NULL;
+}
+
+
+//==============================================================================
+// Special v3 -> v5 converter.
+// XXX JUMP - remove in "six months".
+//
+
+bool
+convert_sindex_item(const char *old_key, const char *old_value, char *new_key,
+		char *new_value)
+{
+	// Convert old key to new value.
+
+	const char *iname = strchr(old_key, ':');
+
+	if (! iname) {
+		cf_warning(AS_SMD, "can't parse sindex name from smd key");
+		return false;
+	}
+
+	strcpy(new_value, ++iname);
+
+	// Convert old value to new key.
+
+	as_sindex_metadata imd;
+	memset(&imd, 0, sizeof(imd));
+
+	bool is_smd_op; // dummy
+
+	if (as_info_parse_params_to_sindex_imd((char *)old_value, &imd, NULL, true,
+			&is_smd_op, "sindex smd conversion") != AS_SINDEX_OK) {
+		cf_warning(AS_SMD, "can't parse sindex info from smd value");
+		as_sindex_imd_free(&imd);
+		return false;
+	}
+
+	as_sindex_imd_to_smd_key(&imd, new_key);
+	as_sindex_imd_free(&imd);
+
+	return true;
+}
+
+int
+old_reduce_fn(const void *key, uint32_t key_size, void *object, void *udata)
+{
+	as_smd_item_t *old_item = (as_smd_item_t *)object;
+	as_smd_module_t *new_module_obj = (as_smd_module_t *)udata;
+
+	char new_key[SINDEX_SMD_KEY_SIZE];
+	char new_value[strlen(old_item->key)];
+
+	if (! convert_sindex_item(old_item->key, old_item->value, new_key, new_value)) {
+		return CF_RCHASH_OK;
+	}
+
+	as_smd_item_t *new_item = (as_smd_item_t *)cf_rc_alloc(sizeof(as_smd_item_t));
+
+	memset(new_item, 0, sizeof(as_smd_item_t));
+	new_item->module_name = cf_strdup(SINDEX_MODULE);
+	new_item->action = AS_SMD_ACTION_SET;
+	new_item->key = cf_strdup(new_key);
+	new_item->value = cf_strdup(new_value);
+	new_item->generation = old_item->generation;
+	new_item->timestamp = old_item->timestamp;
+
+	if (cf_rchash_put(new_module_obj->my_metadata, new_key, strlen(new_key) + 1, new_item) != CF_RCHASH_OK) {
+		as_smd_item_destroy(new_item);
+	}
+
+	return CF_RCHASH_OK;
+}
+
+void
+as_smd_convert_sindex_module()
+{
+	cf_info(AS_SMD, "converting sindex SMD module to new format ...");
+
+	as_smd_module_t *old_module_obj;
+
+	if (cf_rchash_get(g_smd->modules, OLD_SINDEX_MODULE, sizeof(OLD_SINDEX_MODULE), (void **)&old_module_obj) != CF_RCHASH_OK) {
+		cf_warning(AS_SMD, "can't find old sindex module");
+		return;
+	}
+
+	as_smd_module_t *new_module_obj;
+
+	if (cf_rchash_get(g_smd->modules, SINDEX_MODULE, sizeof(SINDEX_MODULE), (void **)&new_module_obj) != CF_RCHASH_OK) {
+		cf_warning(AS_SMD, "can't find new sindex module");
+		return;
+	}
+
+	cf_rchash_reduce(old_module_obj->my_metadata, old_reduce_fn, new_module_obj);
+	cf_rc_release(old_module_obj);
+
+	new_module_obj->dirty = true;
+	as_smd_module_persist(new_module_obj);
+	cf_rc_release(new_module_obj);
+
+	if (cf_rchash_delete(g_smd->modules, OLD_SINDEX_MODULE, sizeof(OLD_SINDEX_MODULE)) != CF_RCHASH_OK) {
+		cf_warning(AS_SMD, "failed to delete old sindex smd module");
+	}
+
+	char smd_path[MAX_PATH_LEN];
+	char smd_save_path[MAX_PATH_LEN];
+
+	snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
+	snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
+
+	unlink(smd_path);
+	unlink(smd_save_path);
+
+	cf_info(AS_SMD, "... done converting sindex SMD module to new format");
 }

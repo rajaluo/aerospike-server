@@ -1714,6 +1714,16 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 		return AS_SINDEX_ERR;
 	}
 
+	as_set *p_set = NULL;
+
+	if (imd->set) {
+		if (as_namespace_get_create_set_w_len(ns, imd->set, strlen(imd->set), &p_set, NULL) != 0) {
+			cf_warning(AS_SINDEX, "SINDEX CREATE : failed get-create set %s", imd->set);
+			SINDEX_GWUNLOCK();
+			return AS_SINDEX_ERR;
+		}
+	}
+
 	imd->nprts  = ns->sindex_num_partitions;
 	int id      = chosen_id;
 	si          = &ns->sindex[id];
@@ -1796,8 +1806,7 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 
 		ns->sindex_cnt++;
 
-		if (imd->set) {
-			as_set *p_set = as_namespace_get_set_by_name(ns, imd->set);
+		if (p_set) {
 			p_set->n_sindexes++;
 		} else {
 			ns->n_setless_sindexes++;
@@ -1900,8 +1909,24 @@ int
 as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 {
 	SINDEX_GWLOCK();
-	as_sindex *si   = as_sindex_lookup_by_iname_lockfree(ns, imd->iname,
-						AS_SINDEX_LOOKUP_FLAG_NORESERVE | AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
+	as_sindex *si = NULL;
+
+	if (imd->iname) {
+		si = as_sindex_lookup_by_iname_lockfree(ns, imd->iname,
+				AS_SINDEX_LOOKUP_FLAG_NORESERVE | AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
+	}
+	else {
+		int16_t bin_id = as_bin_get_id(ns, imd->bname);
+
+		if (bin_id == -1) {
+			SINDEX_GWUNLOCK();
+			return AS_SINDEX_ERR_NOTFOUND;
+		}
+
+		si = as_sindex_lookup_by_defns_lockfree(ns, imd->set, (int)bin_id,
+				imd->btype, imd->itype, imd->path_str,
+				AS_SINDEX_LOOKUP_FLAG_NORESERVE | AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
+	}
 
 	if (si) {
 		if (imd->post_op == 1) {
@@ -4358,6 +4383,8 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 
 // Global flag to signal that all secondary index SMD is restored.
 bool g_sindex_smd_restored = false;
+
+// XXX JUMP - remove in "six months".
 /*
  * Description: This cb function is called by paxos master, before doing the
  *              In the case of AS_SMD_SET_ACTION
@@ -4505,8 +4532,224 @@ as_sindex_cfg_var_hash_reduce_fn(const void *key, void *data, void *udata)
  * 		underlying secondary index all needs to take corresponding lock and
  * 		SMD is today single threaded no sync needed there
  */
+
+as_sindex_ktype
+as_sindex_ktype_from_smd_char(char c)
+{
+	if (c == 'S') {
+		return AS_SINDEX_KTYPE_DIGEST;
+	}
+	else if (c == 'I') {
+		return AS_SINDEX_KTYPE_LONG;
+	}
+	else if (c == 'G') {
+		return AS_SINDEX_KTYPE_GEO2DSPHERE;
+	}
+	else {
+		cf_warning(AS_SINDEX, "unknown smd ktype %c", c);
+		return AS_SINDEX_KTYPE_NONE;
+	}
+}
+
+const char *
+as_sindex_ktype_to_smd_str(as_sindex_ktype ktype)
+{
+	if (ktype == AS_SINDEX_KTYPE_DIGEST) {
+		return "S";
+	}
+	else if (ktype == AS_SINDEX_KTYPE_LONG) {
+		return "I";
+	}
+	else if (ktype == AS_SINDEX_KTYPE_GEO2DSPHERE) {
+		return "G";
+	}
+	else {
+		cf_warning(AS_SINDEX, "unknown ktype %d", ktype);
+		return "";
+	}
+}
+
+as_sindex_type
+as_sindex_type_from_smd_char(char c)
+{
+	if (c == 'L') {
+		return AS_SINDEX_ITYPE_LIST;
+	}
+	else if (c == 'K') {
+		return AS_SINDEX_ITYPE_MAPKEYS;
+	}
+	else if (c == 'V') {
+		return AS_SINDEX_ITYPE_MAPVALUES;
+	}
+	else if (c == 0) {
+		return AS_SINDEX_ITYPE_DEFAULT; // or - "scalar"
+	}
+	else {
+		cf_warning(AS_SINDEX, "unknown smd type %c", c);
+		return AS_SINDEX_ITYPE_MAX; // since there's no named illegal value
+	}
+}
+
+const char *
+as_sindex_type_to_smd_str(as_sindex_type itype)
+{
+	if (itype == AS_SINDEX_ITYPE_LIST) {
+		return "L";
+	}
+	else if (itype == AS_SINDEX_ITYPE_MAPKEYS) {
+		return "K";
+	}
+	else if (itype == AS_SINDEX_ITYPE_MAPVALUES) {
+		return "V";
+	}
+	else if (itype == AS_SINDEX_ITYPE_DEFAULT) {
+		return "";
+	}
+	else {
+		cf_warning(AS_SINDEX, "unknown type %d", itype);
+		return "";
+	}
+}
+
+#define TOK_CHAR_DELIMITER '|'
+
+bool
+smd_key_to_imd(const char *smd_key, as_sindex_metadata *imd)
+{
+	// ns-name|<set-name>|path|btype|<itype>
+	// Note - btype a.k.a. ktype and dtype.
+
+	const char *read = smd_key;
+	const char *tok = strchr(read, TOK_CHAR_DELIMITER);
+
+	if (! tok) {
+		cf_warning(AS_SINDEX, "smd - namespace name missing delimiter");
+		return false;
+	}
+
+	uint32_t ns_name_len = tok - read;
+
+	imd->ns_name = cf_malloc(ns_name_len + 1);
+	memcpy(imd->ns_name, read, ns_name_len);
+	imd->ns_name[ns_name_len] = 0;
+
+	read = tok + 1;
+	tok = strchr(read, TOK_CHAR_DELIMITER);
+
+	if (! tok) {
+		cf_warning(AS_SINDEX, "smd - set name missing delimiter");
+		return false;
+	}
+
+	uint32_t set_name_len = tok - read;
+
+	if (set_name_len != 0) {
+		imd->set = cf_malloc(set_name_len + 1);
+		memcpy(imd->set, read, set_name_len);
+		imd->set[set_name_len] = 0;
+	}
+	// else - imd->set remains NULL.
+
+	read = tok + 1;
+	tok = strchr(read, TOK_CHAR_DELIMITER);
+
+	if (! tok) {
+		cf_warning(AS_SINDEX, "smd - path missing delimiter");
+		return false;
+	}
+
+	uint32_t path_len = tok - read;
+
+	imd->path_str = cf_malloc(path_len + 1);
+	memcpy(imd->path_str, read, path_len);
+	imd->path_str[path_len] = 0;
+
+	if (as_sindex_extract_bin_path(imd, imd->path_str) != AS_SINDEX_OK) {
+		cf_warning(AS_SINDEX, "smd - can't parse path");
+		return false;
+	}
+
+	read = tok + 1;
+	tok = strchr(read, TOK_CHAR_DELIMITER);
+
+	if (! tok) {
+		cf_warning(AS_SINDEX, "smd - btype missing delimiter");
+		return false;
+	}
+
+	if ((imd->btype = as_sindex_ktype_from_smd_char(*read)) ==
+			AS_SINDEX_KTYPE_NONE) {
+		cf_warning(AS_SINDEX, "smd - bad btype");
+		return false;
+	}
+
+	read = tok + 1; // may point to null-terminator
+
+	if ((imd->itype = as_sindex_type_from_smd_char(*read)) ==
+			AS_SINDEX_ITYPE_MAX) {
+		cf_warning(AS_SINDEX, "smd - bad itype");
+		return false;
+	}
+
+	return true;
+}
+
+void
+smd_value_to_imd(const char *smd_value, as_sindex_metadata *imd)
+{
+	// For now, it's only index-name
+	imd->iname = strdup(smd_value);
+}
+
+#define TOK_STR_DELIMITER "|"
+
+void
+as_sindex_imd_to_smd_key(const as_sindex_metadata *imd, char *smd_key)
+{
+	// ns-name|<set-name>|path|btype|<itype>
+	// Note - btype a.k.a. ktype and dtype.
+
+	// This is not efficient, but stick with simplicity for now...
+	strcpy(smd_key, imd->ns_name);
+	strcat(smd_key, TOK_STR_DELIMITER);
+
+	if (imd->set) {
+		strcat(smd_key, imd->set);
+	}
+
+	strcat(smd_key, TOK_STR_DELIMITER);
+	strcat(smd_key, imd->path_str);
+	strcat(smd_key, TOK_STR_DELIMITER);
+	strcat(smd_key, as_sindex_ktype_to_smd_str(imd->btype));
+	strcat(smd_key, TOK_STR_DELIMITER);
+	strcat(smd_key, as_sindex_type_to_smd_str(imd->itype));
+}
+
+bool
+as_sindex_delete_imd_to_smd_key(as_namespace *ns, as_sindex_metadata *imd, char *smd_key)
+{
+	// ns-name|<set-name>|path|btype|<itype>
+	// Note - btype a.k.a. ktype and dtype.
+
+	// The imd passed in doesn't have enough to make SMD key - use a full imd
+	// from the existing sindex, if it's there.
+
+	// TODO - takes lock - is this ok? Flags ok?
+	as_sindex *si = as_sindex_lookup_by_iname(ns, imd->iname,
+			AS_SINDEX_LOOKUP_FLAG_NORESERVE | AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
+
+	if (! si) {
+		return false;
+	}
+
+	as_sindex_imd_to_smd_key(si->imd, smd_key);
+
+	return true;
+}
+
+// XXX JUMP - remove in "six months".
 int
-as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, uint32_t accept_opt)
+old_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, uint32_t accept_opt)
 {
 	if (accept_opt & AS_SMD_ACCEPT_OPT_CREATE) {
 		cf_debug(AS_SINDEX, "all secondary index SMD restored");
@@ -4650,6 +4893,71 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 	}
 
 	return(0);
+}
+
+int
+as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, uint32_t accept_opt)
+{
+	if (! as_new_clustering()) {
+		return old_sindex_smd_accept_cb(module, items, udata, accept_opt);
+	}
+
+	if ((accept_opt & AS_SMD_ACCEPT_OPT_CREATE) != 0) {
+		g_sindex_smd_restored = true;
+		return 0;
+	}
+
+	for (int i = 0; i < (int)items->num_items; i++) {
+		as_smd_item_t *item = items->item[i];
+		as_sindex_metadata imd;
+
+		memset(&imd, 0, sizeof(imd)); // TODO - arrange to use { 0 } ???
+
+		if (! smd_key_to_imd(item->key, &imd)) {
+			as_sindex_imd_free(&imd);
+			continue;
+		}
+
+		as_namespace *ns = as_namespace_get_byname(imd.ns_name);
+
+		if (! ns) {
+			cf_detail(AS_SINDEX, "skipping invalid namespace %s", imd.ns_name);
+			as_sindex_imd_free(&imd);
+			continue;
+		}
+
+		if (item->action == AS_SMD_ACTION_SET) {
+			smd_value_to_imd(item->value, &imd); // sets index name
+
+			if (as_sindex_exists_by_defn(ns, &imd)) {
+				cf_detail(AS_SINDEX, "index with the same definition already exists");
+				as_sindex_imd_free(&imd);
+				continue;
+			}
+
+			// Pessimistic - check was already done at SMD entry point.
+			int retval = as_sindex_create_check_params(ns, &imd);
+
+			if (retval != AS_SINDEX_OK) {
+					cf_warning(AS_SINDEX, "index creation failed - error %d - dropping index due to cluster state change", retval);
+					imd.post_op = 1; // leads to sindex recreation
+					as_sindex_destroy(ns, &imd);
+			}
+			else {
+				as_sindex_create(ns, &imd, true);
+			}
+		}
+		else if (item->action == AS_SMD_ACTION_DELETE) {
+			as_sindex_destroy(ns, &imd);
+		}
+		else {
+			cf_warning(AS_SINDEX, "smd accept cb - unknown action");
+		}
+
+		as_sindex_imd_free(&imd);
+	}
+
+	return 0;
 }
 //                                     END - SMD CALLBACKS
 // ************************************************************************************************

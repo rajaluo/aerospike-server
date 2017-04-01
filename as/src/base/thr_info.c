@@ -6634,12 +6634,21 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 	if (is_smd_op == true)
 	{
 		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
-		char module[] = SINDEX_MODULE;
-		char key[SINDEX_SMD_KEY_SIZE];
-		sprintf(key, "%s:%s", imd.ns_name, imd.iname);
-		// TODO : Send imd instead of params as value.
-		// Today as_info_parse_params_to_sindex_imd is done again by smd layer
-		res = as_smd_set_metadata(module, key, params);
+
+		if (as_new_clustering()) {
+			char smd_key[SINDEX_SMD_KEY_SIZE];
+
+			as_sindex_imd_to_smd_key(&imd, smd_key);
+			res = as_smd_set_metadata(SINDEX_MODULE, smd_key, imd.iname);
+		}
+		else {
+			char module[] = OLD_SINDEX_MODULE;
+			char key[OLD_SINDEX_SMD_KEY_SIZE];
+			sprintf(key, "%s:%s", imd.ns_name, imd.iname);
+			// TODO : Send imd instead of params as value.
+			// Today as_info_parse_params_to_sindex_imd is done again by smd layer
+			res = as_smd_set_metadata(module, key, params);
+		}
 
 		if (res != 0) {
 			cf_warning(AS_INFO, "SINDEX CREATE : Queuing the index %s metadata to SMD failed with error %s",
@@ -6690,10 +6699,24 @@ int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 	if (is_smd_op == true)
 	{
 		cf_info(AS_INFO, "SINDEX DROP : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
-		char module[] = SINDEX_MODULE;
-		char key[SINDEX_SMD_KEY_SIZE];
-		sprintf(key, "%s:%s", imd.ns_name, imd.iname);
-		res = as_smd_delete_metadata(module, key);
+
+		if (as_new_clustering()) {
+			char smd_key[SINDEX_SMD_KEY_SIZE];
+
+			if (as_sindex_delete_imd_to_smd_key(ns, &imd, smd_key)) {
+				res = as_smd_delete_metadata(SINDEX_MODULE, smd_key);
+			}
+			else {
+				res = AS_SINDEX_ERR_NOTFOUND;
+			}
+		}
+		else {
+			char module[] = OLD_SINDEX_MODULE;
+			char key[OLD_SINDEX_SMD_KEY_SIZE];
+			sprintf(key, "%s:%s", imd.ns_name, imd.iname);
+			res = as_smd_delete_metadata(module, key);
+		}
+
 		if (0 != res) {
 			cf_warning(AS_INFO, "SINDEX DROP : Queuing the index %s metadata to SMD failed with error %s",
 					imd.iname, as_sindex_err_str(res));

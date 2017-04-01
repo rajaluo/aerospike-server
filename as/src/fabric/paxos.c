@@ -48,6 +48,7 @@
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
+#include "base/system_metadata.h"
 #include "base/thr_info.h"
 #include "fabric/clustering.h"
 #include "fabric/exchange.h"
@@ -1010,6 +1011,8 @@ as_paxos_set_protocol(paxos_protocol_enum protocol)
 	as_clustering_switchover(as_exchange_cluster_key(),
 			as_exchange_cluster_size(), as_exchange_succession(),
 			g_paxos->gen.sequence);
+
+	as_smd_convert_sindex_module();
 
 	return 0;
 }

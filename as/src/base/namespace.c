@@ -213,16 +213,23 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 
 	as_truncate_init_smd();
 
-	// Register secondary index module with the majority merge policy callback.
-	// Secondary index metadata is restored for all namespaces. Must be done
-	// before as_storage_init() populates the indexes.
+	// Must be done before as_storage_init() populates the indexes.
 	int retval = as_smd_create_module(SINDEX_MODULE,
-			as_smd_majority_consensus_merge, NULL, NULL, NULL,
-			as_sindex_smd_accept_cb, NULL, as_sindex_smd_can_accept_cb, NULL);
+				as_smd_majority_consensus_merge, NULL,
+				NULL, NULL,
+				as_sindex_smd_accept_cb, NULL,
+				NULL, NULL);
 
-	if (retval < 0) {
-		cf_crash(AS_NAMESPACE, "failed to create SMD module '%s' (rv %d)",
-				SINDEX_MODULE, retval);
+	cf_assert(retval == 0, AS_NAMESPACE, "failed to create sindex SMD module (rv %d)", retval);
+
+	if (! as_new_clustering()) {
+		retval = as_smd_create_module(OLD_SINDEX_MODULE,
+					as_smd_majority_consensus_merge, NULL,
+					NULL, NULL,
+					as_sindex_smd_accept_cb, NULL,
+					as_sindex_smd_can_accept_cb, NULL);
+
+		cf_assert(retval == 0, AS_NAMESPACE, "failed to create old sindex SMD module (rv %d)", retval);
 	}
 
 	// Wait for Secondary Index SMD to be completely restored.
