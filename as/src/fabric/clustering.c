@@ -2571,10 +2571,22 @@ clustering_hb_succession_list_matches(cf_node* succession_list,
  */
 
 /**
- * Reset the state for the next quantum interval.
+ * Initialize quantum interval generator.
  */
 static void
 quantum_interval_generator_init()
+{
+	CLUSTERING_LOCK();
+	memset(&g_quantum_interval_generator, 0,
+			sizeof(g_quantum_interval_generator));
+	CLUSTERING_UNLOCK();
+}
+
+/**
+ * Start quantum interval generator.
+ */
+static void
+quantum_interval_generator_start()
 {
 	CLUSTERING_LOCK();
 	g_quantum_interval_generator.last_quantum_start_time = cf_getms();
@@ -2682,7 +2694,6 @@ quantum_interval_generator_timer_event_handle(
 				AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_POST_START;
 		internal_event_dispatch(&timer_event);
 	}
-
 }
 
 /**
@@ -2769,14 +2780,6 @@ quantum_interval_generator_hb_plugin_data_changed_handle(
 	if (*succession_list_length_p > 0
 			&& !clustering_is_our_principal(succession_list_p[0])) {
 		// We are seeing a new principal.
-		neighboring_cluster_changed = true;
-	}
-	else if (*succession_list_length_p == 0
-			&& vector_find(&g_register.succession_list,
-					&change_event->plugin_data_changed_nodeid) >= 0) {
-		// A node from our succession list switched to orphan. This an important
-		// event to delay quantum intervals. Maybe the source node restarted
-		// quickly.
 		neighboring_cluster_changed = true;
 	}
 	else {
@@ -7424,6 +7427,9 @@ clustering_start()
 	CLUSTERING_LOCK();
 	g_clustering.sys_state = AS_CLUSTERING_SYS_STATE_RUNNING;
 	CLUSTERING_UNLOCK();
+
+	// Start quantum interval generator.
+	quantum_interval_generator_start();
 
 	// Start the timer.
 	timer_start();
