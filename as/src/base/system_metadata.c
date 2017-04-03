@@ -3171,10 +3171,6 @@ static uint32_t key2idx_get_index(as_hashmap *map, const char *key)
 int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **merged_list,
 									as_smd_item_list_t **lists_to_merge, size_t num_list, void *udata)
 {
-	if (! as_new_clustering()) {
-		return old_smd_majority_consensus_merge(module, merged_list, lists_to_merge, num_list, udata);
-	}
-
 	typedef struct {
 		as_smd_item_t *item; // does not hold ref to item
 		uint32_t count;

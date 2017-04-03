@@ -719,8 +719,12 @@ as_sindex_config_var_hash_fn(const void* p_key)
 extern bool g_sindex_smd_restored;
 extern void as_sindex_imd_to_smd_key(const as_sindex_metadata *imd, char *smd_key);
 extern bool as_sindex_delete_imd_to_smd_key(as_namespace *ns, as_sindex_metadata *imd, char *smd_key);
-extern int  as_sindex_smd_can_accept_cb(char* module, as_smd_item_t *item, void *udata);
 extern int  as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, 
+						uint32_t accept_opt);
+// XXX JUMP - remove in "six months".
+extern bool g_old_sindex_smd_restored;
+extern int old_sindex_smd_can_accept_cb(char* module, as_smd_item_t *item, void *udata);
+extern int old_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata,
 						uint32_t accept_opt);
 // **************************************************************************************************
 

@@ -4383,6 +4383,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 
 // Global flag to signal that all secondary index SMD is restored.
 bool g_sindex_smd_restored = false;
+bool g_old_sindex_smd_restored = false; // XXX JUMP - remove in "six months"
 
 // XXX JUMP - remove in "six months".
 /*
@@ -4411,7 +4412,7 @@ bool g_sindex_smd_restored = false;
  * 		operation.
  */
 int
-as_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
+old_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 {
 	as_sindex_metadata imd;
 	memset((void *)&imd, 0, sizeof(imd));
@@ -4536,11 +4537,11 @@ as_sindex_cfg_var_hash_reduce_fn(const void *key, void *data, void *udata)
 as_sindex_ktype
 as_sindex_ktype_from_smd_char(char c)
 {
-	if (c == 'S') {
-		return AS_SINDEX_KTYPE_DIGEST;
-	}
-	else if (c == 'I') {
+	if (c == 'I') {
 		return AS_SINDEX_KTYPE_LONG;
+	}
+	else if (c == 'S') {
+		return AS_SINDEX_KTYPE_DIGEST;
 	}
 	else if (c == 'G') {
 		return AS_SINDEX_KTYPE_GEO2DSPHERE;
@@ -4551,28 +4552,31 @@ as_sindex_ktype_from_smd_char(char c)
 	}
 }
 
-const char *
-as_sindex_ktype_to_smd_str(as_sindex_ktype ktype)
+char
+as_sindex_ktype_to_smd_char(as_sindex_ktype ktype)
 {
-	if (ktype == AS_SINDEX_KTYPE_DIGEST) {
-		return "S";
+	if (ktype == AS_SINDEX_KTYPE_LONG) {
+		return 'I';
 	}
-	else if (ktype == AS_SINDEX_KTYPE_LONG) {
-		return "I";
+	else if (ktype == AS_SINDEX_KTYPE_DIGEST) {
+		return 'S';
 	}
 	else if (ktype == AS_SINDEX_KTYPE_GEO2DSPHERE) {
-		return "G";
+		return 'G';
 	}
 	else {
-		cf_warning(AS_SINDEX, "unknown ktype %d", ktype);
-		return "";
+		cf_crash(AS_SINDEX, "unknown ktype %d", ktype);
+		return '?';
 	}
 }
 
 as_sindex_type
 as_sindex_type_from_smd_char(char c)
 {
-	if (c == 'L') {
+	if (c == '.') {
+		return AS_SINDEX_ITYPE_DEFAULT; // or - "scalar"
+	}
+	else if (c == 'L') {
 		return AS_SINDEX_ITYPE_LIST;
 	}
 	else if (c == 'K') {
@@ -4581,33 +4585,30 @@ as_sindex_type_from_smd_char(char c)
 	else if (c == 'V') {
 		return AS_SINDEX_ITYPE_MAPVALUES;
 	}
-	else if (c == 0) {
-		return AS_SINDEX_ITYPE_DEFAULT; // or - "scalar"
-	}
 	else {
 		cf_warning(AS_SINDEX, "unknown smd type %c", c);
 		return AS_SINDEX_ITYPE_MAX; // since there's no named illegal value
 	}
 }
 
-const char *
-as_sindex_type_to_smd_str(as_sindex_type itype)
+char
+as_sindex_type_to_smd_char(as_sindex_type itype)
 {
-	if (itype == AS_SINDEX_ITYPE_LIST) {
-		return "L";
+	if (itype == AS_SINDEX_ITYPE_DEFAULT) {
+		return '.';
+	}
+	else if (itype == AS_SINDEX_ITYPE_LIST) {
+		return 'L';
 	}
 	else if (itype == AS_SINDEX_ITYPE_MAPKEYS) {
-		return "K";
+		return 'K';
 	}
 	else if (itype == AS_SINDEX_ITYPE_MAPVALUES) {
-		return "V";
-	}
-	else if (itype == AS_SINDEX_ITYPE_DEFAULT) {
-		return "";
+		return 'V';
 	}
 	else {
-		cf_warning(AS_SINDEX, "unknown type %d", itype);
-		return "";
+		cf_crash(AS_SINDEX, "unknown type %d", itype);
+		return '?';
 	}
 }
 
@@ -4616,7 +4617,7 @@ as_sindex_type_to_smd_str(as_sindex_type itype)
 bool
 smd_key_to_imd(const char *smd_key, as_sindex_metadata *imd)
 {
-	// ns-name|<set-name>|path|btype|<itype>
+	// ns-name|<set-name>|path|itype|btype
 	// Note - btype a.k.a. ktype and dtype.
 
 	const char *read = smd_key;
@@ -4673,21 +4674,21 @@ smd_key_to_imd(const char *smd_key, as_sindex_metadata *imd)
 	tok = strchr(read, TOK_CHAR_DELIMITER);
 
 	if (! tok) {
-		cf_warning(AS_SINDEX, "smd - btype missing delimiter");
+		cf_warning(AS_SINDEX, "smd - itype missing delimiter");
 		return false;
 	}
-
-	if ((imd->btype = as_sindex_ktype_from_smd_char(*read)) ==
-			AS_SINDEX_KTYPE_NONE) {
-		cf_warning(AS_SINDEX, "smd - bad btype");
-		return false;
-	}
-
-	read = tok + 1; // may point to null-terminator
 
 	if ((imd->itype = as_sindex_type_from_smd_char(*read)) ==
 			AS_SINDEX_ITYPE_MAX) {
 		cf_warning(AS_SINDEX, "smd - bad itype");
+		return false;
+	}
+
+	read = tok + 1;
+
+	if ((imd->btype = as_sindex_ktype_from_smd_char(*read)) ==
+			AS_SINDEX_KTYPE_NONE) {
+		cf_warning(AS_SINDEX, "smd - bad btype");
 		return false;
 	}
 
@@ -4701,28 +4702,18 @@ smd_value_to_imd(const char *smd_value, as_sindex_metadata *imd)
 	imd->iname = strdup(smd_value);
 }
 
-#define TOK_STR_DELIMITER "|"
-
 void
 as_sindex_imd_to_smd_key(const as_sindex_metadata *imd, char *smd_key)
 {
-	// ns-name|<set-name>|path|btype|<itype>
+	// ns-name|<set-name>|path|itype|btype
 	// Note - btype a.k.a. ktype and dtype.
 
-	// This is not efficient, but stick with simplicity for now...
-	strcpy(smd_key, imd->ns_name);
-	strcat(smd_key, TOK_STR_DELIMITER);
-
-	if (imd->set) {
-		strcat(smd_key, imd->set);
-	}
-
-	strcat(smd_key, TOK_STR_DELIMITER);
-	strcat(smd_key, imd->path_str);
-	strcat(smd_key, TOK_STR_DELIMITER);
-	strcat(smd_key, as_sindex_ktype_to_smd_str(imd->btype));
-	strcat(smd_key, TOK_STR_DELIMITER);
-	strcat(smd_key, as_sindex_type_to_smd_str(imd->itype));
+	sprintf(smd_key, "%s|%s|%s|%c|%c",
+			imd->ns_name,
+			imd->set ? imd->set : "",
+			imd->path_str,
+			as_sindex_type_to_smd_char(imd->itype),
+			as_sindex_ktype_to_smd_char(imd->btype));
 }
 
 bool
@@ -4753,7 +4744,7 @@ old_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, u
 {
 	if (accept_opt & AS_SMD_ACCEPT_OPT_CREATE) {
 		cf_debug(AS_SINDEX, "all secondary index SMD restored");
-		g_sindex_smd_restored = true;
+		g_old_sindex_smd_restored = true;
 		return 0;
 	}
 
@@ -4898,10 +4889,6 @@ old_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, u
 int
 as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, uint32_t accept_opt)
 {
-	if (! as_new_clustering()) {
-		return old_sindex_smd_accept_cb(module, items, udata, accept_opt);
-	}
-
 	if ((accept_opt & AS_SMD_ACCEPT_OPT_CREATE) != 0) {
 		g_sindex_smd_restored = true;
 		return 0;

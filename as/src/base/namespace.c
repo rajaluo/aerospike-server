@@ -224,12 +224,16 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 
 	if (! as_new_clustering()) {
 		retval = as_smd_create_module(OLD_SINDEX_MODULE,
-					as_smd_majority_consensus_merge, NULL,
+					old_smd_majority_consensus_merge, NULL,
 					NULL, NULL,
-					as_sindex_smd_accept_cb, NULL,
-					as_sindex_smd_can_accept_cb, NULL);
+					old_sindex_smd_accept_cb, NULL,
+					old_sindex_smd_can_accept_cb, NULL);
 
 		cf_assert(retval == 0, AS_NAMESPACE, "failed to create old sindex SMD module (rv %d)", retval);
+
+		while (! g_old_sindex_smd_restored) {
+			usleep(1000);
+		}
 	}
 
 	// Wait for Secondary Index SMD to be completely restored.
