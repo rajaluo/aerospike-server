@@ -4699,7 +4699,7 @@ void
 smd_value_to_imd(const char *smd_value, as_sindex_metadata *imd)
 {
 	// For now, it's only index-name
-	imd->iname = strdup(smd_value);
+	imd->iname = cf_strdup(smd_value);
 }
 
 void
