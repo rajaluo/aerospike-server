@@ -1090,11 +1090,11 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 	bool is_create = false;
 
 	if (rv == 1) {
-		as_storage_record_create(ns, r, &rd, keyd);
+		as_storage_record_create(ns, r, &rd);
 		is_create = true;
 	}
 	else {
-		as_storage_record_open(ns, r, &rd, keyd);
+		as_storage_record_open(ns, r, &rd);
 	}
 
 	bool has_sindex = (info & RW_INFO_SINDEX_TOUCHED) != 0 ||

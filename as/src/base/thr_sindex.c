@@ -842,7 +842,7 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_storage_rd rd;
-	as_storage_record_open(ns, r, &rd, &r->key);
+	as_storage_record_open(ns, r, &rd);
 	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned

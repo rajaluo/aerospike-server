@@ -860,7 +860,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	as_index *r = r_ref->r;
 	as_storage_rd rd;
 
-	as_storage_record_open(ns, r, &rd, &r->key);
+	as_storage_record_open(ns, r, &rd);
 
 	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
@@ -877,7 +877,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 		return;
 	}
 
-	pr.keyd = r->key;
+	pr.keyd = r->keyd;
 	pr.generation = r->generation;
 	pr.void_time = r->void_time;
 	pr.last_update_time = r->last_update_time;

@@ -485,11 +485,7 @@ int as_msg_make_response_bufbuilder(as_record *r, as_storage_rd *rd,
 	as_msg_field *mf = (as_msg_field *) buf;
 	mf->field_sz = sizeof(cf_digest) + 1;
 	mf->type = AS_MSG_FIELD_TYPE_DIGEST_RIPE;
-	if (rd) {
-		memcpy(mf->data, &rd->keyd, sizeof(cf_digest));
-	} else {
-		memcpy(mf->data, &r->key, sizeof(cf_digest));
-	}
+	memcpy(mf->data, &r->keyd, sizeof(cf_digest));
 	as_msg_swap_field(mf);
 	buf += sizeof(as_msg_field) + sizeof(cf_digest);
 

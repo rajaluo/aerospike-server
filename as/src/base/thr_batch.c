@@ -117,7 +117,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 						// Make sure it's brought in from storage if necessary.
 						as_storage_rd rd;
 						if (get_data) {
-							as_storage_record_open(ns, r, &rd, &r->key);
+							as_storage_record_open(ns, r, &rd);
 							as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 						}
 

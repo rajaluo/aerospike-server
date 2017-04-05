@@ -598,7 +598,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (r->last_update_time < ns->truncate.lut) {
 		cb_info->n_deleted++;
 		record_delete_adjust_sindex(r, ns);
-		as_index_delete(cb_info->tree, &r->key);
+		as_index_delete(cb_info->tree, &r->keyd);
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -609,7 +609,7 @@ truncate_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (p_set && r->last_update_time < p_set->truncate_lut) {
 		cb_info->n_deleted++;
 		record_delete_adjust_sindex(r, ns);
-		as_index_delete(cb_info->tree, &r->key);
+		as_index_delete(cb_info->tree, &r->keyd);
 	}
 
 	as_record_done(r_ref, ns);

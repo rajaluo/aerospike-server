@@ -502,7 +502,7 @@ as_index_sprig_reduce_partial(as_index_sprig *isprig, uint64_t sample_count,
 		r_ref.r = v_a->indexes[i].r;
 		r_ref.r_h = v_a->indexes[i].r_h;
 
-		olock_vlock(g_record_locks, &r_ref.r->key, &r_ref.olock);
+		olock_vlock(g_record_locks, &r_ref.r->keyd, &r_ref.olock);
 
 		// Ignore this record if it's "half created" or deleted.
 		if (as_index_sprig_invalid_record_done(isprig, &r_ref)) {
@@ -650,7 +650,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, cf_digest *keyd,
 			ele->me_h = t_h;
 			ele->me = t;
 
-			if ((cmp = cf_digest_compare(keyd, &t->key)) == 0) {
+			if ((cmp = cf_digest_compare(keyd, &t->keyd)) == 0) {
 				// The element already exists, simply return it.
 
 				as_index_reserve(t);
@@ -713,7 +713,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, cf_digest *keyd,
 
 	n->rc = 2; // one for create (eventually balanced by delete), one for caller
 
-	n->key = *keyd;
+	n->keyd = *keyd;
 
 	n->left_h = n->right_h = SENTINEL_H; // n starts as a leaf element
 	n->color = AS_RED; // n's color starts as red
@@ -793,7 +793,7 @@ as_index_sprig_delete(as_index_sprig *isprig, cf_digest *keyd)
 			ele->me_h = r_h;
 			ele->me = r;
 
-			int cmp = cf_digest_compare(keyd, &r->key);
+			int cmp = cf_digest_compare(keyd, &r->keyd);
 
 			if (cmp == 0) {
 				break; // found, we'll be deleting it
@@ -930,7 +930,7 @@ as_index_sprig_search_lockless(as_index_sprig *isprig, cf_digest *keyd,
 	as_index *r = RESOLVE_H(r_h);
 
 	while (r_h != SENTINEL_H) {
-		int cmp = cf_digest_compare(keyd, &r->key);
+		int cmp = cf_digest_compare(keyd, &r->keyd);
 
 		if (cmp == 0) {
 			if (ret_h) {
@@ -1274,7 +1274,7 @@ as_index_rotate_right(as_index_ele *a, as_index_ele *b)
  *          -1 = fail
  */
 int
-as_index_ref_initialize(as_index_tree *tree, cf_digest *key, as_index_ref *index_ref, bool create_p, as_namespace *ns)
+as_index_ref_initialize(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref, bool create_p, as_namespace *ns)
 {
 	/* Allocate memory for the new node and set the node parameters */
 	cf_arenax_handle n_h = cf_arenax_alloc(tree->arena);
@@ -1283,7 +1283,7 @@ as_index_ref_initialize(as_index_tree *tree, cf_digest *key, as_index_ref *index
 		return(-1);
 	}
 	as_index *n = RESOLVE_H(n_h);
-	n->key = *key;
+	n->keyd = *keyd;
 	n->rc = 1;
 	n->left_h = n->right_h = tree->sentinel_h;
 	n->color = AS_RED;
@@ -1292,18 +1292,18 @@ as_index_ref_initialize(as_index_tree *tree, cf_digest *key, as_index_ref *index
 	if (AS_STORAGE_ENGINE_KV == ns->storage_type)
 		n->storage_key.kv.file_id = STORAGE_INVALID_FILE_ID; // careful here - this is now unsigned
 	else
-		cf_crash(AS_INDEX, "non-KV storage type ns %s key %p", ns->name, key);
+		cf_crash(AS_INDEX, "non-KV storage type ns %s key %p", ns->name, keyd);
 
 	index_ref->r = n;
 	index_ref->r_h = n_h;
 	if (!index_ref->skip_lock) {
-		olock_vlock(g_config.record_locks, key, &(index_ref->olock));
+		olock_vlock(g_config.record_locks, keyd, &(index_ref->olock));
 		cf_atomic_int_incr(&g_config.global_record_lock_count);
 	}
 	as_index_reserve(n);
 	cf_atomic_int_add(&g_config.global_record_ref_count, 2);
 
-	int rv = !as_storage_record_exists(ns, key);
+	int rv = !as_storage_record_exists(ns, keyd);
 
 	// Unlock if not found and we're not creating it.
 	if (rv && !create_p) {

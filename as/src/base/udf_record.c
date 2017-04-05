@@ -86,7 +86,7 @@ udf_storage_record_open(udf_record *urecord)
 	as_index       *r	  = urecord->r_ref->r;
 	as_transaction *tr    = urecord->tr;
 
-	as_storage_record_open(tr->rsv.ns, r, rd, &r->key);
+	as_storage_record_open(tr->rsv.ns, r, rd);
 
 	// Deal with delete durability (enterprise only).
 	if ((urecord->flag & UDF_RECORD_FLAG_ALLOW_UPDATES) != 0 &&
@@ -170,7 +170,7 @@ udf_storage_record_close(udf_record *urecord)
 
 		if (! is_subrec) {
 			if (as_ldt_record_is_parent(rd->r)) {
-				cf_detail_digest(AS_LDT, &rd->keyd, "LDT_INDEXBIT Parent @ write: Digest:");
+				cf_detail_digest(AS_LDT, &rd->r->keyd, "LDT_INDEXBIT Parent @ write: Digest:");
 			}
 		} else if (has_bins) {
 			as_ldt_subrec_storage_validate(rd, "Writing");
@@ -834,7 +834,7 @@ udf_record_set_type(const as_rec * rec,  int8_t ldt_rectype_bit_update)
 
 	urecord->ldt_rectype_bit_update = ldt_rectype_bit_update;
 	cf_detail(AS_RW, "TO URECORD FROM LUA   Digest=%"PRIx64" bits %d",
-			  *(uint64_t *)&urecord->rd->keyd.digest[8], urecord->ldt_rectype_bit_update);
+			  *(uint64_t *)&urecord->rd->r->keyd.digest[8], urecord->ldt_rectype_bit_update);
 
 	urecord->flag |= UDF_RECORD_FLAG_METADATA_UPDATED;
 

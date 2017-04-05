@@ -1214,7 +1214,7 @@ as_storage_record_exists_kv(as_namespace *ns, cf_digest *keyd)
 }
 
 int
-as_storage_record_create_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd)
+as_storage_record_create_kv(as_storage_rd *rd)
 {
 	error_out();
 
@@ -1222,7 +1222,7 @@ as_storage_record_create_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, c
 }
 
 int
-as_storage_record_open_kv(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd)
+as_storage_record_open_kv(as_storage_rd *rd)
 {
 	error_out();
 

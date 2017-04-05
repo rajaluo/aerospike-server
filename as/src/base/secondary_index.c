@@ -4283,7 +4283,7 @@ as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 	}
 
 	if (sbins_populated) {
-		as_sindex_update_by_sbin(rd->ns, setname, sbins, sbins_populated, &rd->keyd);
+		as_sindex_update_by_sbin(rd->ns, setname, sbins, sbins_populated, &rd->r->keyd);
 		as_sindex_sbin_freeall(sbins, sbins_populated);
 	}
 

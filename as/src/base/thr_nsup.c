@@ -164,7 +164,7 @@ cold_start_evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (void_time != 0) {
 		if (! p_info->sets_not_evicting[set_id] &&
 				void_time < ns->cold_start_threshold_void_time) {
-			as_index_delete(p_partition->vp, &r->key);
+			as_index_delete(p_partition->vp, &r->keyd);
 			p_info->num_evicted++;
 		}
 	}
@@ -448,7 +448,7 @@ garbage_collect_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	// If we're past void-time plus safety margin, delete the record.
 	if (void_time != 0 && p_info->now > void_time + g_config.prole_extra_ttl) {
-		as_index_delete(p_info->p_tree, &r_ref->r->key);
+		as_index_delete(p_info->p_tree, &r_ref->r->keyd);
 		p_info->num_deleted++;
 	}
 
@@ -525,7 +525,7 @@ non_master_sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
 	uint32_t set_id = as_index_get_set_id(r_ref->r);
 
 	if (p_info->sets_deleting[set_id]) {
-		as_index_delete(p_info->p_tree, &r_ref->r->key);
+		as_index_delete(p_info->p_tree, &r_ref->r->keyd);
 		p_info->num_deleted++;
 	}
 
@@ -772,7 +772,7 @@ sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
 	uint32_t set_id = as_index_get_set_id(r);
 
 	if (p_info->sets_deleting[set_id]) {
-		queue_for_delete(ns, &r->key);
+		queue_for_delete(ns, &r->keyd);
 		p_info->num_deleted++;
 
 		as_record_done(r_ref, ns);
@@ -783,7 +783,7 @@ sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (void_time != 0) {
 		if (p_info->now > void_time) {
-			queue_for_delete(ns, &r->key);
+			queue_for_delete(ns, &r->keyd);
 			p_info->num_expired++;
 		}
 		else {
@@ -860,12 +860,12 @@ evict_reduce_cb(as_index_ref* r_ref, void* udata)
 	if (void_time != 0) {
 		if (p_info->sets_not_evicting[set_id]) {
 			if (p_info->now > void_time) {
-				queue_for_delete(ns, &r->key);
+				queue_for_delete(ns, &r->keyd);
 				p_info->num_evicted++;
 			}
 		}
 		else if (void_time < p_info->evict_void_time) {
-			queue_for_delete(ns, &r->key);
+			queue_for_delete(ns, &r->keyd);
 			p_info->num_evicted++;
 		}
 	}
@@ -896,7 +896,7 @@ expire_reduce_cb(as_index_ref* r_ref, void* udata)
 
 	if (void_time != 0) {
 		if (p_info->now > void_time) {
-			queue_for_delete(ns, &r->key);
+			queue_for_delete(ns, &r->keyd);
 			p_info->num_expired++;
 		}
 		else {

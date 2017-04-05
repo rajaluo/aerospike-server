@@ -1612,7 +1612,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 
 		// make sure it's brought in from storage if necessary
 		as_storage_rd rd;
-		as_storage_record_open(ns, r, &rd, &r->key);
+		as_storage_record_open(ns, r, &rd);
 		qtr->n_read_success += 1;
 		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
