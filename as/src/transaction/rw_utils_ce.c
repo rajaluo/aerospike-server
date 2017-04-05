@@ -87,7 +87,7 @@ create_only_check(const as_record* r, const as_msg* m)
 void
 write_delete_record(as_record* r, as_index_tree* tree)
 {
-	as_index_delete(tree, &r->key);
+	as_index_delete(tree, &r->keyd);
 }
 
 
