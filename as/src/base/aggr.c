@@ -128,7 +128,7 @@ aopen(aggr_state *astate, cf_digest digest)
 	// NB: Partial Initialization due to heaviness. Not everything needed
 	// TODO: Make such initialization Commodity
 	tr->rsv.ns          = astate->rsv->ns;
-	tr->rsv.state       = astate->rsv->state;
+	tr->rsv.reject_repl_write = astate->rsv->reject_repl_write;
 	tr->rsv.p           = astate->rsv->p;
 	tr->rsv.tree        = astate->rsv->tree;
 	tr->rsv.cluster_key = astate->rsv->cluster_key;

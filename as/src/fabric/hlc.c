@@ -89,9 +89,11 @@
  */
 static as_hlc_timestamp g_now;
 
-/*----------------------------------------------------------------------------
+/*
+ * ----------------------------------------------------------------------------
  * Globals.
- *----------------------------------------------------------------------------*/
+ * ----------------------------------------------------------------------------
+ */
 /**
  * Mask for the physical component of a hlc timestamp.
  */
@@ -106,13 +108,8 @@ static as_hlc_timestamp g_now;
  * Increment the logical timestamp and deal with a wrap around by incrementing
  * the physical timestamp.
  */
-#define LOGICAL_TS_INCR(logical_ts, physical_ts)                               \
-	{                                                                      \
-		logical_ts++;                                                  \
-		if (logical_ts == 0) {                                         \
-			physical_ts++;                                         \
-		}                                                              \
-	}
+#define LOGICAL_TS_INCR(logical_ts, physical_ts)		\
+{logical_ts++; if (logical_ts == 0) {physical_ts++;}}
 
 /**
  * Print the skew warning once every five seconds.
@@ -127,28 +124,37 @@ static as_hlc_timestamp g_now;
 #define INFO(format, ...) cf_info(AS_HLC, format, ##__VA_ARGS__)
 #define DEBUG(format, ...) cf_debug(AS_HLC, format, ##__VA_ARGS__)
 #define DETAIL(format, ...) cf_detail(AS_HLC, format, ##__VA_ARGS__)
-#define ASSERT(expression, message, ...)                                       \
-	if (!(expression)) {                                                   \
-		WARNING(message, __VA_ARGS__);                                 \
-	}
+#define ASSERT(expression, message, ...)				\
+if (!(expression)) {WARNING(message, __VA_ARGS__);}
 
-/*----------------------------------------------------------------------------
+/*
+ * ----------------------------------------------------------------------------
  * Forward declarations.
- *----------------------------------------------------------------------------*/
-static cf_clock hlc_wall_clock_get();
-static as_hlc_timestamp hlc_ts_get();
-static bool hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value);
-static cf_clock hlc_physical_ts_get(as_hlc_timestamp hlc_ts);
-static uint16_t hlc_logical_ts_get(as_hlc_timestamp hlc_ts);
-static void hlc_physical_ts_set(as_hlc_timestamp* hlc_ts, cf_clock physical_ts);
-static void hlc_logical_ts_set(as_hlc_timestamp* hlc_ts, uint16_t logical_ts);
-static bool hlc_is_skew_tolerable(cf_node source, cf_clock send_ts_physical_ts,
-				  cf_clock wall_clock_physical_ts,
-				  cf_clock current_hlc_physical_ts);
+ * ----------------------------------------------------------------------------
+ */
+static cf_clock
+hlc_wall_clock_get();
+static as_hlc_timestamp
+hlc_ts_get();
+static bool
+hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value);
+static cf_clock
+hlc_physical_ts_get(as_hlc_timestamp hlc_ts);
+static uint16_t
+hlc_logical_ts_get(as_hlc_timestamp hlc_ts);
+static void
+hlc_physical_ts_set(as_hlc_timestamp* hlc_ts, cf_clock physical_ts);
+static void
+hlc_logical_ts_set(as_hlc_timestamp* hlc_ts, uint16_t logical_ts);
+static bool
+hlc_is_skew_tolerable(cf_node source, cf_clock send_ts_physical_ts,
+		cf_clock wall_clock_physical_ts, cf_clock current_hlc_physical_ts);
 
-/*----------------------------------------------------------------------------
+/*
+ * ----------------------------------------------------------------------------
  * Public API.
- *----------------------------------------------------------------------------*/
+ * ----------------------------------------------------------------------------
+ */
 /**
  * Initialize hybrid logical clock.
  */
@@ -183,10 +189,8 @@ as_hlc_timestamp_now()
 
 		// Initialize the new physical and logical values to current
 		// values.
-		cf_clock new_hlc_physical_ts =
-		  hlc_physical_ts_get(current_hlc_ts);
-		uint16_t new_hlc_logical_ts =
-		  hlc_logical_ts_get(current_hlc_ts);
+		cf_clock new_hlc_physical_ts = hlc_physical_ts_get(current_hlc_ts);
+		uint16_t new_hlc_logical_ts = hlc_logical_ts_get(current_hlc_ts);
 
 		cf_clock wall_clock_physical_ts = hlc_wall_clock_get();
 
@@ -194,10 +198,10 @@ as_hlc_timestamp_now()
 			// The HLC physical component is greater than the
 			// physical wall time, just advance the logical
 			// timestamp.
-			LOGICAL_TS_INCR(new_hlc_logical_ts,
-					new_hlc_physical_ts);
+			LOGICAL_TS_INCR(new_hlc_logical_ts, new_hlc_physical_ts);
 
-		} else {
+		}
+		else {
 			// The wall clocl has is greater, use this as the
 			// physical component and reset the logical timestamp.
 			new_hlc_physical_ts = wall_clock_physical_ts;
@@ -211,7 +215,7 @@ as_hlc_timestamp_now()
 
 		if (hlc_ts_set(current_hlc_ts, new_hlc_ts)) {
 			DETAIL("Changed HLC value from %" PRIu64 " to %" PRIu64,
-			       current_hlc_ts, new_hlc_ts);
+					current_hlc_ts, new_hlc_ts);
 			return new_hlc_ts;
 		}
 	}
@@ -228,7 +232,7 @@ as_hlc_timestamp_now()
  */
 void
 as_hlc_timestamp_update(cf_node source, as_hlc_timestamp send_ts,
-			as_hlc_msg_timestamp* msg_ts)
+		as_hlc_msg_timestamp* msg_ts)
 {
 	cf_clock send_ts_physical_ts = hlc_physical_ts_get(send_ts);
 	uint16_t send_ts_logical_ts = hlc_logical_ts_get(send_ts);
@@ -240,44 +244,40 @@ as_hlc_timestamp_update(cf_node source, as_hlc_timestamp send_ts,
 
 		as_hlc_timestamp current_hlc_ts = hlc_ts_get();
 
-		cf_clock current_hlc_physical_ts =
-		  hlc_physical_ts_get(current_hlc_ts);
-		uint16_t current_hlc_logical_ts =
-		  hlc_logical_ts_get(current_hlc_ts);
+		cf_clock current_hlc_physical_ts = hlc_physical_ts_get(current_hlc_ts);
+		uint16_t current_hlc_logical_ts = hlc_logical_ts_get(current_hlc_ts);
 
 		cf_clock wall_clock_physical_ts = hlc_wall_clock_get();
 
-		cf_clock new_hlc_physical_ts =
-		  MAX(MAX(current_hlc_physical_ts, send_ts_physical_ts),
-		      wall_clock_physical_ts);
+		cf_clock new_hlc_physical_ts = MAX(
+				MAX(current_hlc_physical_ts, send_ts_physical_ts),
+				wall_clock_physical_ts);
 		uint16_t new_hlc_logical_ts = 0;
 
-		if (new_hlc_physical_ts == current_hlc_physical_ts &&
-		    new_hlc_physical_ts == send_ts_physical_ts) {
+		if (new_hlc_physical_ts == current_hlc_physical_ts
+				&& new_hlc_physical_ts == send_ts_physical_ts) {
 			// There is no change in the physical components of all
 			// three clocks. Set logical component to max of the two
 			// values and increment.
-			new_hlc_logical_ts =
-			  MAX(current_hlc_logical_ts, send_ts_logical_ts);
-			LOGICAL_TS_INCR(new_hlc_logical_ts,
-					new_hlc_physical_ts);
+			new_hlc_logical_ts = MAX(current_hlc_logical_ts,
+					send_ts_logical_ts);
+			LOGICAL_TS_INCR(new_hlc_logical_ts, new_hlc_physical_ts);
 
-		} else if (new_hlc_physical_ts == current_hlc_physical_ts) {
+		}
+		else if (new_hlc_physical_ts == current_hlc_physical_ts) {
 			// The physical component of the send timestamp is
 			// smaller than our current physical component. We just
 			// need to increment the logical component.
 			new_hlc_logical_ts = current_hlc_ts;
-			LOGICAL_TS_INCR(new_hlc_logical_ts,
-					new_hlc_physical_ts);
-		} else if (new_hlc_physical_ts == send_ts_physical_ts) {
+			LOGICAL_TS_INCR(new_hlc_logical_ts, new_hlc_physical_ts);
+		}
+		else if (new_hlc_physical_ts == send_ts_physical_ts) {
 			if (!hlc_is_skew_tolerable(source, send_ts_physical_ts,
-						   wall_clock_physical_ts,
-						   current_hlc_physical_ts)) {
+					wall_clock_physical_ts, current_hlc_physical_ts)) {
 				// Reject the update.
 				if (msg_ts) {
 					msg_ts->send_ts = send_ts;
-					msg_ts->recv_ts =
-					  as_hlc_timestamp_now();
+					msg_ts->recv_ts = as_hlc_timestamp_now();
 				}
 				return;
 			}
@@ -286,9 +286,9 @@ as_hlc_timestamp_update(cf_node source, as_hlc_timestamp send_ts,
 			// the updated logical component is greater than he
 			// send logical component.
 			new_hlc_logical_ts = send_ts_logical_ts;
-			LOGICAL_TS_INCR(new_hlc_logical_ts,
-					new_hlc_physical_ts);
-		} else {
+			LOGICAL_TS_INCR(new_hlc_logical_ts, new_hlc_physical_ts);
+		}
+		else {
 			// Our physical clock is greater than current physical
 			// component and the send physical component. We can
 			// reset the logical clock to zero and still maintain
@@ -303,10 +303,10 @@ as_hlc_timestamp_update(cf_node source, as_hlc_timestamp send_ts,
 
 		if (hlc_ts_set(current_hlc_ts, new_hlc_ts)) {
 			DETAIL("Message received from node %" PRIx64
-			       " with HLC %" PRIu64
-			       ". Changed HLC value from %" PRIu64
-			       " to %" PRIu64,
-			       source, send_ts, current_hlc_ts, new_hlc_ts);
+					" with HLC %" PRIu64
+					". Changed HLC value from %" PRIu64
+					" to %" PRIu64,
+					source, send_ts, current_hlc_ts, new_hlc_ts);
 			if (msg_ts) {
 				msg_ts->send_ts = send_ts;
 				msg_ts->recv_ts = new_hlc_ts;
@@ -338,7 +338,8 @@ as_hlc_timestamp_diff_ms(as_hlc_timestamp ts1, as_hlc_timestamp ts2)
 	int64_t diff = 0;
 	if (ts1 >= ts2) {
 		diff = hlc_physical_ts_get(ts1) - hlc_physical_ts_get(ts2);
-	} else {
+	}
+	else {
 		diff = -(hlc_physical_ts_get(ts2) - hlc_physical_ts_get(ts1));
 	}
 
@@ -355,9 +356,8 @@ as_hlc_timestamp_diff_ms(as_hlc_timestamp ts1, as_hlc_timestamp ts2)
  */
 as_hlc_timestamp_order
 as_hlc_send_timestamp_order(as_hlc_timestamp local_ts,
-			    as_hlc_msg_timestamp* msg_ts)
+		as_hlc_msg_timestamp* msg_ts)
 {
-
 	if (local_ts > msg_ts->recv_ts) {
 		// The local event happened after the local message received
 		// timestamp and therefore after the remote send as well.
@@ -376,8 +376,8 @@ as_hlc_send_timestamp_order(as_hlc_timestamp local_ts,
 	cf_clock local_physical_ts = hlc_physical_ts_get(local_ts);
 	cf_clock recv_physical_ts = hlc_physical_ts_get(msg_ts->recv_ts);
 
-	if ((recv_physical_ts - local_physical_ts) <
-	    g_config.fabric_latency_max_ms) {
+	if ((recv_physical_ts - local_physical_ts)
+			< g_config.fabric_latency_max_ms) {
 		// Consider the max network delay worth of time to also be part
 		// of the uncertainty window.
 		return AS_HLC_ORDER_INDETERMINATE;
@@ -400,7 +400,8 @@ as_hlc_timestamp_order_get(as_hlc_timestamp ts1, as_hlc_timestamp ts2)
 {
 	if (ts1 < ts2) {
 		return AS_HLC_HAPPENS_BEFORE;
-	} else if (ts1 > ts2) {
+	}
+	else if (ts1 > ts2) {
 		return AS_HLC_HAPPENS_AFTER;
 	}
 
@@ -436,16 +437,18 @@ as_hlc_dump(bool verbose)
 	uint16_t current_hlc_logical_ts = hlc_logical_ts_get(now);
 
 	INFO("HLC Ts:%" PRIu64 " HLC Physical Ts:%" PRIu64
-	     " HLC Logical Ts:%d Wall Clock:%" PRIu64
-	     " Tolerable skew:%d ms",
-	     now, current_hlc_physical_ts, current_hlc_logical_ts,
-	     hlc_wall_clock_get(),
-	     g_config.clock_skew_max_ms);
+			" HLC Logical Ts:%d Wall Clock:%" PRIu64
+			" Tolerable skew:%d ms",
+			now, current_hlc_physical_ts, current_hlc_logical_ts,
+			hlc_wall_clock_get(),
+			g_config.clock_skew_max_ms);
 }
 
-/*----------------------------------------------------------------------------
+/*
+ * ----------------------------------------------------------------------------
  * Private functions.
- *----------------------------------------------------------------------------*/
+ * ----------------------------------------------------------------------------
+ */
 /**
  * Return this node's wall clock.
  */
@@ -537,29 +540,28 @@ hlc_ts_set(as_hlc_timestamp old_value, as_hlc_timestamp new_value)
  */
 static bool
 hlc_is_skew_tolerable(cf_node source, cf_clock send_ts_physical_ts,
-		      cf_clock wall_clock_physical_ts,
-		      cf_clock current_hlc_physical_ts)
+		cf_clock wall_clock_physical_ts, cf_clock current_hlc_physical_ts)
 {
 	// Control the rate of print of clock skew exceeded warnings.
 	static cf_clock last_skew_warning_print = 0;
 
-	if (g_config.clock_skew_max_ms > 0 &&
-	    send_ts_physical_ts - wall_clock_physical_ts >
-	      g_config.clock_skew_max_ms &&
-	    last_skew_warning_print !=
-	      cf_getms() / SKEW_WARNING_INTERVAL_MS()) {
+	if (g_config.clock_skew_max_ms > 0&&
+	send_ts_physical_ts - wall_clock_physical_ts >
+	g_config.clock_skew_max_ms &&
+	last_skew_warning_print !=
+	cf_getms() / SKEW_WARNING_INTERVAL_MS()) {
 
 		// Incoming message is causing a large jump in
 		// physical component.
 		WARNING("HLC jumped by %" PRIu64
-			" milliseconds with message from %" PRIx64
-			". Current physical clock:%" PRIu64
-			" Current HLC:%" PRIu64 " Incoming HLC:%" PRIu64
-			" Tolerable skew:%d ms",
-			send_ts_physical_ts - wall_clock_physical_ts, source,
-			wall_clock_physical_ts, current_hlc_physical_ts,
-			send_ts_physical_ts,
-			g_config.clock_skew_max_ms);
+				" milliseconds with message from %" PRIx64
+				". Current physical clock:%" PRIu64
+				" Current HLC:%" PRIu64 " Incoming HLC:%" PRIu64
+				" Tolerable skew:%d ms",
+				send_ts_physical_ts - wall_clock_physical_ts, source,
+				wall_clock_physical_ts, current_hlc_physical_ts,
+				send_ts_physical_ts,
+				g_config.clock_skew_max_ms);
 	}
 
 	return true;

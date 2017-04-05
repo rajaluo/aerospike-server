@@ -189,13 +189,11 @@ typedef struct xdr_config {
 	bool	xdr_handle_linkdown;
 } xdr_config;
 
-// XDR states
+// XDR states. Moves from DOWN -> DLOG_WRITER_UP -> UP
 typedef enum xdr_state_e {
-	XDR_COMING_UP,
+	XDR_DOWN,
 	XDR_DLOG_WRITER_UP,
-	XDR_UP,
-	XDR_GOING_DOWN,
-	XDR_DOWN
+	XDR_UP
 } xdr_state;
 
 // Prototypes

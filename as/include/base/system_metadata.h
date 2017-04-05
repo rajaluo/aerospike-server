@@ -238,3 +238,8 @@ void as_smd_info_cmd(char *cmd, cf_node node_id, char *module, char *key, char *
  */
 int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **item_list_out,
 									as_smd_item_list_t **item_lists_in, size_t num_lists, void *udata);
+
+// XXX JUMP - remove in "six months".
+int old_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **merged_list,
+									as_smd_item_list_t **lists_to_merge, size_t num_list, void *udata);
+void as_smd_convert_sindex_module();

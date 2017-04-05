@@ -62,10 +62,11 @@
 #include "base/thr_tsvc.h"
 #include "base/ticker.h"
 #include "base/xdr_serverside.h"
+#include "fabric/clustering.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/migrate.h"
-#include "fabric/paxos.h"
 #include "storage/storage.h"
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
@@ -416,8 +417,9 @@ main(int argc, char **argv)
 	as_tsvc_init();				// all transaction handling
 	as_hb_init();				// inter-node heartbeat
 	as_fabric_init();			// inter-node communications
+	as_exchange_init();			// initialize the cluster exchange subsystem
+	as_clustering_init();		// clustering-v5 start
 	as_info_init();				// info transaction handling
-	as_paxos_init();			// cluster consensus algorithm
 	as_migrate_init();			// move data between nodes
 	as_proxy_init();			// do work on behalf of others
 	as_rw_init();				// read & write service
@@ -436,11 +438,12 @@ main(int argc, char **argv)
 	// Start subsystems. At this point we may begin communicating with other
 	// cluster nodes, and ultimately with clients.
 
-	as_smd_start(g_smd);		// enables receiving paxos state change events
+	as_smd_start(g_smd);		// enables receiving cluster state change events
 	as_fabric_start();			// may send & receive fabric messages
 	as_xdr_start();				// XDR should start before it joins other nodes
-	as_hb_start();				// start inter-node heatbeat
-	as_paxos_start();			// blocks until cluster membership is obtained
+	as_hb_start();				// start inter-node heartbeat
+	as_exchange_start();		// start the cluster exchange subsystem
+	as_clustering_start();		// clustering-v5 start
 	as_nsup_start();			// may send delete transactions to other nodes
 	as_demarshal_start();		// server will now receive client transactions
 	as_info_port_start();		// server will now receive info transactions

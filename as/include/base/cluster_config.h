@@ -33,6 +33,8 @@
 #include "fault.h"
 #include "util.h"
 
+#include "fabric/hb.h"
+
 /*
 ** global #defines that control features/functionality go here
 */
@@ -69,10 +71,10 @@
 #define CL_STR_STATIC "static"
 #define CL_STR_DYNAMIC "dynamic"
 extern const char *cc_mode_str[];
-// TODO:
-// NOTE: These values will be set to the GLOBAL "Max Node Count" value.
-#define CL_MAX_NODES 127
-#define CL_MAX_GROUPS 127
+
+// Set to the global cluster size limit.
+#define CL_MAX_NODES AS_CLUSTER_SZ
+#define CL_MAX_GROUPS AS_CLUSTER_SZ
 
 // Define the types we'll use to hold Group ID and Node ID
 // Once upon a time, it was all uint16_t, but once things changed, it became

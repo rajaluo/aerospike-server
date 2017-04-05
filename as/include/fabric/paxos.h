@@ -38,7 +38,9 @@
 #include "msg.h"
 #include "util.h"
 
+#include "base/cfg.h"
 #include "base/datamodel.h"
+#include "fabric/exchange.h"
 #include "fabric/partition.h"
 
 /* SYNOPSIS
@@ -207,11 +209,6 @@ typedef enum {
 } as_paxos_transaction_vote_result;
 
 
-/* as_paxos_change_callback
- * A callback that will be triggered when a vote completes *and the partition rebalance*
- * NB: This will be called under the protection of the Paxos lock! */
-typedef void (*as_paxos_change_callback) (as_paxos_generation gen, as_paxos_change *change, cf_node succession[], void *udata);
-
 #define MAX_CHANGE_CALLBACKS 6
 
 /* as_paxos
@@ -232,7 +229,7 @@ typedef struct as_paxos_t {
 	cf_node principal_pro_tempore; // Node with greatest ID currently vying to become Paxos principal (or 0 if there is none.)
 
 	int n_callbacks;
-	as_paxos_change_callback cb[MAX_CHANGE_CALLBACKS];
+	as_exchange_cluster_changed_cb cb[MAX_CHANGE_CALLBACKS];
 	void *cb_udata[MAX_CHANGE_CALLBACKS];
 
 	as_paxos_transaction pending[AS_PAXOS_ALPHA];
@@ -240,17 +237,10 @@ typedef struct as_paxos_t {
 	// keeps track of transactions currently in flight
 	as_paxos_transaction *current[AS_CLUSTER_SZ];
 
-	uint32_t cluster_size;
-
-	bool cluster_has_integrity;    // Is true when there is no cluster integrity fault.
-
 	bool dun_other_clusters;       // Do we automatically dun nodes in other clusters?
 
 	int num_sync_attempts;       // Number of times sync was attempted during current paxos round
 } as_paxos;
-
-// The singleton paxos object.
-extern as_paxos *g_paxos;
 
 /* as_paxos_petition_type
  * What sorts of changes can be requested */
@@ -265,25 +255,11 @@ typedef enum {
 
 void as_paxos_init();
 void as_paxos_start();
-int as_paxos_register_change_callback(as_paxos_change_callback cb, void *udata);
-int as_paxos_deregister_change_callback(as_paxos_change_callback cb, void *udata);
-cf_node as_paxos_succession_getprincipal();
-bool as_paxos_succession_ismember(cf_node n);
-
-// Get the head of the Paxos succession list, or zero if there is none.
-cf_node as_paxos_succession_getprincipal();
+int as_paxos_register_change_callback(as_exchange_cluster_changed_cb cb, void *udata);
+int as_paxos_deregister_change_callback(as_exchange_cluster_changed_cb cb, void *udata);
 
 // Set the Paxos protocol version.
 int as_paxos_set_protocol(paxos_protocol_enum protocol);
-
-// Set the Paxos recovery policy.
-int as_paxos_set_recovery_policy(paxos_recovery_policy_enum policy);
-
-// Get the Paxos cluster integrity state.
-bool as_paxos_get_cluster_integrity(as_paxos *p);
-
-// Set the Paxos cluster integrity state.
-void as_paxos_set_cluster_integrity(as_paxos *p, bool state);
 
 /* Paxos Info. command functions. */
 
@@ -292,10 +268,3 @@ void as_paxos_set_cluster_integrity(as_paxos *p, bool state);
  * (Verbose true prints partition map as well.)
  */
 void as_paxos_dump(bool verbose);
-
-/*
- * Get the Paxos succession list and log it to the given "cf_dyn_buf *".
- * The first element of the list will become the Paxos principal.
- * Returns 0 if successful, -1 otherwise.
- */
-int as_paxos_get_succession_list(cf_dyn_buf *db);

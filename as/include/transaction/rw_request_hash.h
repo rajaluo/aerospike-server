@@ -48,7 +48,7 @@ typedef enum {
 	RW_FIELD_GENERATION,
 	RW_FIELD_DIGEST,
 	RW_FIELD_VINFOSET, // now used only by LDT
-	RW_FIELD_AS_MSG,
+	RW_FIELD_AS_MSG, // XXX JUMP - remove in "six months"
 	RW_FIELD_CLUSTER_KEY,
 	RW_FIELD_RECORD,
 	RW_FIELD_TID,
