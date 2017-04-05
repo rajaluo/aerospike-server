@@ -1970,7 +1970,7 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 		struct btree * ibtr = pimd->ibtr;
 		ai_btree_reinit_pimd(pimd);
 		PIMD_WUNLOCK(&pimd->slock);
-		ai_btree_delete_ibtr(ibtr, pimd->imatch);
+		ai_btree_delete_ibtr(ibtr);
 	}
 	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory,
 			ai_btree_get_isize(imd));
