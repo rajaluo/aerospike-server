@@ -742,6 +742,7 @@ struct as_namespace_s {
 
 	char name[AS_ID_NAMESPACE_SZ];
 	as_namespace_id id;
+	uint32_t namehash;
 
 	//--------------------------------------------
 	// Persistent memory.
@@ -889,6 +890,7 @@ struct as_namespace_s {
 	uint32_t		tomb_raider_period; // relevant only for enterprise edition
 	as_policy_commit_level write_commit_level;
 	PAD_BOOL		write_commit_level_override;
+	cf_vector		xdr_dclist_v;
 
 	as_storage_type storage_type;
 

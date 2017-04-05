@@ -42,8 +42,6 @@
 #include "citrusleaf/cf_shash.h"
 #include "citrusleaf/cf_vector.h"
 
-#include "xdr_config.h"
-
 #include "cf_str.h"
 #include "dynbuf.h"
 #include "fault.h"
@@ -73,6 +71,7 @@
 #include "base/system_metadata.h"
 #include "base/truncate.h"
 #include "base/udf_cask.h"
+#include "base/xdr_config.h"
 #include "base/xdr_serverside.h"
 #include "fabric/exchange.h"
 #include "fabric/fabric.h"
@@ -100,11 +99,6 @@
 #define STR_BINTYPE         "bintype"
 
 extern int as_nsup_queue_get_size();
-
-// Acceptable timediffs in XDR lastship times.
-// (Print warning only if time went back by at least 5 minutes.)
-#define XDR_ACCEPTABLE_TIMEDIFF XDR_TIME_ADJUST
-
 
 int info_get_objects(char *name, cf_dyn_buf *db);
 void clear_ldt_histograms();
@@ -3467,16 +3461,9 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		}
 	}
 	else if (strcmp(context, "xdr") == 0) {
-		context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "failednodeprocessingdone", context, &context_len)) {
-			cf_node nodeid = atoll(context);
-			xdr_handle_failednodeprocessingdone(nodeid);
-		}
-		else {
-			as_xdr_set_config(params, db);
-			cf_info(AS_INFO, "config-set command : params %s",params);
-			return 0;
-		}
+		as_xdr_set_config(params, db);
+		cf_info(AS_INFO, "config-set command : params %s",params);
+		return 0;
 	}
 	else
 		goto Error;

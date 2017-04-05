@@ -25,6 +25,10 @@
  *
  */
 
+//==========================================================
+// Includes.
+//
+
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -53,11 +57,44 @@
 #include "fabric/partition.h"
 #include "storage/storage.h"
 
+//==========================================================
+// Typedefs & constants.
+//
+
+//==========================================================
+// Globals.
+//
 
 static as_namespace_id g_namespace_id_counter = 0;
 
-// Create a new namespace and hook it up in the data structure
+//==========================================================
+// Forward Declarations.
+//
 
+//==========================================================
+// Inlines and Macros
+//
+
+// Generate a hash value which does not collide with nsid (32 to UINT32_MAX)
+// Note: For namespaces whose fnv hash value falls between 0-32 may collide with
+// namespaces whose value falls between 32-64 as we are adding 32. Hoping that
+// it is low probability. We will know if it happens as server crases upfront.
+static inline uint32_t
+ns_name_hash(char *name)
+{
+	uint32_t hv = (uint32_t) cf_hash_fnv(name, strlen(name));
+	if (hv <= NAMESPACE_MAX_NUM) {
+		hv += NAMESPACE_MAX_NUM;
+	}
+
+	return hv;
+}
+
+//==========================================================
+// Public API.
+//
+
+// Create a new namespace and hook it up in the data structure
 as_namespace *
 as_namespace_create(char *name)
 {
@@ -78,6 +115,15 @@ as_namespace_create(char *name)
 		}
 	}
 
+	uint32_t cur_namehash = ns_name_hash(name);
+
+	for (int i = 0; i < g_config.n_namespaces; i++) {
+		if (g_config.namespaces[i]->namehash == cur_namehash) {
+			cf_crash_nostack(AS_XDR, "namespace %s's hash value collides with namespace %s",
+					g_config.namespaces[i]->name, name);
+		}
+	}
+
 	as_namespace *ns = cf_malloc(sizeof(as_namespace));
 	cf_assert(ns, AS_NAMESPACE, "%s as_namespace allocation failed", name);
 
@@ -87,6 +133,7 @@ as_namespace_create(char *name)
 	strncpy(ns->name, name, AS_ID_NAMESPACE_SZ - 1);
 	ns->name[AS_ID_NAMESPACE_SZ - 1] = '\0';
 	ns->id = ++g_namespace_id_counter; // note that id is 1-based
+	ns->namehash = cur_namehash;
 
 #ifdef USE_JEM
 	if (-1 == (ns->jem_arena = jem_create_arena())) {
@@ -107,11 +154,6 @@ as_namespace_create(char *name)
 	ns->cfg_replication_factor = 2;
 	ns->memory_size = 1024LL * 1024LL * 1024LL * 4LL; // default memory limit is 4G per namespace
 	ns->default_ttl = 0; // default time-to-live is unlimited
-	ns->enable_xdr = false;
-	ns->sets_enable_xdr = true; // ship all the sets by default
-	ns->ns_forward_xdr_writes = false; // forwarding of xdr writes is disabled by default
-	ns->ns_allow_nonxdr_writes = true; // allow nonxdr writes by default
-	ns->ns_allow_xdr_writes = true; // allow xdr writes by default
 	ns->cold_start_evict_ttl = 0xFFFFffff; // unless this is specified via config file, use evict void-time saved in device header
 	ns->conflict_resolution_policy = AS_NAMESPACE_CONFLICT_RESOLUTION_POLICY_GENERATION;
 	ns->data_in_index = false;
@@ -163,6 +205,14 @@ as_namespace_create(char *name)
 	// [Note - current FusionIO maximum read buffer size is 1MB - 512B.]
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
 	ns->storage_write_threads = 1;
+
+	// XDR
+	ns->enable_xdr = false;
+	ns->sets_enable_xdr = true; // ship all the sets by default
+	ns->ns_forward_xdr_writes = false; // forwarding of xdr writes is disabled by default
+	ns->ns_allow_nonxdr_writes = true; // allow nonxdr writes by default
+	ns->ns_allow_xdr_writes = true; // allow xdr writes by default
+	cf_vector_pointer_init(&ns->xdr_dclist_v, 3, 0);
 
 	// SINDEX
 	ns->n_bytes_sindex_memory = 0;

@@ -27,7 +27,7 @@ int as_xdr_init()
 	return -1;
 }
 
-void xdr_conf_init(const char *config_file)
+void xdr_config_post_process()
 {
 }
 
@@ -68,7 +68,7 @@ void xdr_write(as_namespace *ns, cf_digest keyd, as_generation generation, cf_no
 {
 }
 
-void as_xdr_handle_txn(as_transaction *txn)
+void as_xdr_read_txn(as_transaction *txn)
 {
 }
 
@@ -84,10 +84,6 @@ void as_xdr_info_port(cf_serv_cfg *serv_cfg)
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db)
 {
 	return -1;
-}
-
-void xdr_handle_failednodeprocessingdone(cf_node nodeid)
-{
 }
 
 void as_xdr_get_stats(char *name, cf_dyn_buf *db)
@@ -122,3 +118,8 @@ bool is_xdr_forwarding_enabled()
 {
 	return false;
 }
+
+void xdr_cfg_add_int_ext_mapping(dc_config_opt *dc_cfg, char* orig, char* alt)
+{
+}
+

@@ -252,7 +252,7 @@ typedef struct as_config_s {
 
 	// Global variables that just shouldn't be here.
 	cf_node			xdr_clmap[AS_CLUSTER_SZ]; // cluster map as known to XDR
-	xdr_lastship_s	xdr_lastship[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
+	xdr_node_lst	xdr_peers_lst[AS_CLUSTER_SZ]; // last XDR shipping info of other nodes
 	uint64_t		xdr_self_lastshiptime[DC_MAX_NUM]; // last XDR shipping by this node
 
 	// Namespaces.
@@ -278,7 +278,6 @@ bool as_config_cluster_name_set(const char* cluster_name);
 bool as_config_cluster_name_matches(const char* cluster_name);
 
 extern as_config g_config;
-extern xdr_config g_xcfg;
 
 // XXX JUMP - remove in "six months":
 static inline bool
@@ -298,6 +297,7 @@ typedef struct cfg_line_s {
 	char*	name_tok;
 	char*	val_tok_1;
 	char*	val_tok_2;
+	char*	val_tok_3;
 } cfg_line;
 
 void cfg_enterprise_only(const cfg_line* p_line);

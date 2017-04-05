@@ -359,9 +359,7 @@ main(int argc, char **argv)
 	// Includes echoing the configuration file to log.
 	as_config_post_process(c, config_file);
 
-	// Make one more pass for XDR-related config and crash if needed.
-	// TODO : XDR config parsing should be merged with main config parsing.
-	xdr_conf_init(config_file);
+	xdr_config_post_process();
 
 	// If we allocated a non-default config file name, free it.
 	if (config_file != DEFAULT_CONFIG_FILE) {
