@@ -553,11 +553,6 @@ typedef enum
 	AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_START,
 
 	/**
-	 * Indicates that the handling of quantum interval start is done.
-	 */
-	AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_POST_START,
-
-	/**
 	 * Indicates that self node's cluster membership changed.
 	 */
 	AS_CLUSTERING_INTERNAL_EVENT_REGISTER_CLUSTER_CHANGED,
@@ -1075,7 +1070,7 @@ quantum_interval()
 static uint32_t
 quantum_interval_skip_max()
 {
-	return 1;
+	return 2;
 }
 
 /**
@@ -1109,10 +1104,10 @@ join_request_timeout()
 	// 	- 1 quantum interval, where our request lands just after the potential
 	// principal's quantum interval start.
 	// 	- 0.5 quantum intervals to give time for a paxos round to finish
-	// 	- quantum_interval_skip_max intervals if the principal had to skip
+	// 	- (quantum_interval_skip_max -1) intervals if the principal had to skip
 	// quantum intervals.
 	return (uint32_t)(
-			(1 + 0.5 + quantum_interval_skip_max()) * quantum_interval());
+			(1 + 0.5 + (quantum_interval_skip_max() - 1)) * quantum_interval());
 }
 
 /**
@@ -1121,21 +1116,28 @@ join_request_timeout()
 static uint32_t
 join_cluster_check_interval()
 {
-	return MIN(quantum_interval() / 2, 2 * as_hb_tx_interval_get());
+	return timer_tick_interval();
 }
 
 /**
  * The amount of time to wait for further join requests from nodes all resulting
  * from the same underlying fault event.
  * Wait for the join check interval + one network latency interval for all
- * affected nodes to send us a join requets + one hb tx interval - so that we
+ * affected nodes to send us a join requets + two hb tx intervals - so that we
  * see the hb data change as well.
  */
 static uint32_t
 join_fault_wait_interval()
 {
-	return join_cluster_check_interval() + network_latency_max()
-			+ as_hb_tx_interval_get();
+	// If the join request falls in the second half of the qunatum interval then
+	// it will result in a push forward, else it will not push the quantum
+	// interval forward.
+	// This is likely in the cluster merge cases where the join request will
+	// happen much later than the node arrival, because merge join request are
+	// sent only at quantum interval starts.
+	return MAX(quantum_interval() / 2,
+			join_cluster_check_interval() + network_latency_max()
+					+ (2 * as_hb_tx_interval_get()));
 }
 
 /**
@@ -1160,7 +1162,6 @@ join_request_move_reject_interval()
 	// sending a move command.
 	return quantum_interval();
 }
-
 
 /**
  * Timeout in milliseconds for a paxos proposal. Give a paxos round two thirds
@@ -2690,9 +2691,8 @@ quantum_interval_generator_timer_event_handle(
 		timer_event.type = AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_START;
 		internal_event_dispatch(&timer_event);
 
-		timer_event.type =
-				AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_POST_START;
-		internal_event_dispatch(&timer_event);
+		// Reset for next interval generation.
+		quantum_interval_generator_reset();
 	}
 }
 
@@ -2776,22 +2776,17 @@ quantum_interval_generator_hb_plugin_data_changed_handle(
 					change_event->plugin_data->data,
 					change_event->plugin_data->data_size);
 
-	bool neighboring_cluster_changed = false;
 	if (*succession_list_length_p > 0
 			&& !clustering_is_our_principal(succession_list_p[0])) {
 		// We are seeing a new principal.
-		neighboring_cluster_changed = true;
-	}
-	else {
-		// A node becoming an orphan node or seeing a succession with our
-		// principal does not mean we have seen a new cluster.
-	}
-
-	if (neighboring_cluster_changed) {
 		quantum_interval_fault_update(
 				&g_quantum_interval_generator.neighboring_fault, cf_getms(),
 				change_event->plugin_data_changed_nodeid,
 				"neighboring cluster changed");
+	}
+	else {
+		// A node becoming an orphan node or seeing a succession with our
+		// principal does not mean we have seen a new cluster.
 	}
 
 Exit:
@@ -2834,9 +2829,6 @@ quantum_interval_generator_event_dispatch(as_clustering_internal_event* event)
 		break;
 	case AS_CLUSTERING_INTERNAL_EVENT_JOIN_REQUEST_ACCEPTED:
 		quantum_interval_generator_join_request_accepted_handle(event);
-		break;
-	case AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_POST_START:
-		quantum_interval_generator_reset();
 		break;
 	default:
 		break;
@@ -5823,15 +5815,15 @@ clustering_join_request_filter_blocked(cf_vector* requestees, cf_vector* target)
 }
 
 /**
- * Send a cluster join request to a neighboring principal. If preferred_principal
- * is set and it is an eligible neighboring principal, a request is sent to that
- * principal, else this function cycles among eligible neighboring principals at
- * each call.
+ * Send a cluster join request to a neighboring principal. If
+ * preferred_principal is set and it is an eligible neighboring principal, a
+ * request is sent to that principal, else this function cycles among eligible
+ * neighboring principals at each call.
  *
  * A request will not be sent if there is no neighboring principal.
  *
- * @param preferred_principal the preferred principal to join. User zero if there
- * is no preference.
+ * @param preferred_principal the preferred principal to join. User zero if
+ * there is no preference.
  * @return 0 if the join request was send or there is one in progress. -1 if
  * there are no principals to try and send the join request.
  */
@@ -6900,10 +6892,11 @@ clustering_join_request_handle(as_clustering_internal_event* msg_event)
 
 	cf_clock now = cf_getms();
 
-	if(g_clustering.move_cmd_issue_time + join_request_move_reject_interval() > now) {
+	if (g_clustering.move_cmd_issue_time + join_request_move_reject_interval()
+			> now) {
 		// We have just send out a move request. Reject this join request.
 		INFO("ignoring join request from node %"PRIx64" since we have just issued a move command",
-			 src_nodeid);
+				src_nodeid);
 		clustering_join_reject_send(src_nodeid);
 		goto Exit;
 	}
@@ -7699,7 +7692,9 @@ as_clustering_cluster_size_min_set(uint32_t new_cluster_size_min)
 	int rv = 0;
 	uint32_t cluster_size = cf_vector_size(&g_register.succession_list);
 	if (clustering_is_orphan() || cluster_size >= new_cluster_size_min) {
-		INFO("changing value of min-cluster-size from %u to %u", g_config.clustering_config.cluster_size_min, new_cluster_size_min);
+		INFO("changing value of min-cluster-size from %u to %u",
+				g_config.clustering_config.cluster_size_min,
+				new_cluster_size_min);
 		g_config.clustering_config.cluster_size_min = new_cluster_size_min;
 	}
 	else {

@@ -285,7 +285,7 @@
 /**
  * Intervals at which mesh tender runs.
  */
-#define MESH_TEND_INTERVAL (2 * PULSE_TRANSMIT_INTERVAL())
+#define MESH_TEND_INTERVAL (PULSE_TRANSMIT_INTERVAL())
 
 /**
  * Intervals at which conflict checks is enabled.
