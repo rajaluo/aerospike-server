@@ -87,7 +87,6 @@ static inline int file_resolve(char * filepath, char * filename, char * ext) {
 static int file_read(char * filename, uint8_t ** content, size_t * content_len, unsigned char * hash) {
 
 	char    filepath[256]   = {0};
-	FILE *  file            = NULL;
 	char    line[1024]      = {0};
 	size_t  line_len        = sizeof(line);
 
@@ -95,7 +94,8 @@ static int file_read(char * filename, uint8_t ** content, size_t * content_len, 
 
 	cf_dyn_buf_define(buf);
 
-	file = fopen(filepath, "r");
+	FILE *file = fopen(filepath, "r");
+
 	if ( file ) {
 
 		while( fgets(line, line_len, file) != NULL ) {
@@ -137,12 +137,12 @@ static int file_read(char * filename, uint8_t ** content, size_t * content_len, 
 
 static int file_write(char * filename, uint8_t * content, size_t content_len, unsigned char * hash) {
 
-	FILE *  file            = NULL;
 	char    filepath[256]   = {0};
 
 	file_resolve(filepath, filename, NULL);
 
-	file = fopen(filepath, "w");
+	FILE *file = fopen(filepath, "w");
+
 	if (file == NULL) {
 		cf_warning(AS_UDF, "could not open udf put to %s: %s", filepath, cf_strerror(errno));
 		return -1;
@@ -710,14 +710,14 @@ void
 udf_cask_init()
 {
 	// Have to delete the existing files in the user path on startup
-	DIR      * dir               = NULL;
 	struct dirent   * entry         = NULL;
 	// opendir(NULL) seg-faults
 	if (!g_config.mod_lua.user_path)
 	{
 		cf_crash(AS_UDF, "cask init: null mod-lua user-path");
 	}
-	dir = opendir(g_config.mod_lua.user_path);
+
+	DIR *dir = opendir(g_config.mod_lua.user_path);
 	if ( dir == 0 ) {
 		cf_crash(AS_UDF, "cask init: could not open udf directory %s: %s", g_config.mod_lua.user_path, cf_strerror(errno));
 	}

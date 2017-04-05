@@ -627,7 +627,6 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->no_bin_data = (tr->msgp->msg.info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0;
 	job->sample_pct = options.sample_pct;
 	job->predexp = predexp;
-	job->bin_names = NULL;
 
 	int result;
 

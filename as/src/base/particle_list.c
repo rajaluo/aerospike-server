@@ -233,7 +233,7 @@ static int packed_list_insert(as_bin *b, rollback_alloc *alloc_buf, const cdt_pa
 static int packed_list_remove(as_bin *b, rollback_alloc *alloc_buf, int64_t index, uint64_t count, as_bin *result, bool result_is_count, bool result_is_list, rollback_alloc *alloc_result);
 static int packed_list_set(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *payload, int64_t index);
 static int packed_list_trim(as_bin *b, rollback_alloc *alloc_buf, int64_t index, uint64_t count, as_bin *result);
-static uint8_t *packed_list_setup_bin(as_bin *b, rollback_alloc *alloc_buf, uint32_t new_size, uint32_t index, uint32_t new_ele_count, as_packed_list_index *pli);
+static uint8_t *packed_list_setup_bin(as_bin *b, rollback_alloc *alloc_buf, uint32_t new_size, uint32_t new_ele_count, uint32_t index, as_packed_list_index *pli);
 
 // Debugging support
 static void print_cdt_list_particle(const as_particle *p);

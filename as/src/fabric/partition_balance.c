@@ -837,9 +837,7 @@ partition_cluster_topology_info()
 
 	cc_cluster_config_defaults(&cc);
 
-	for (uint32_t cur_n = 0;
-			g_succession[cur_n] != (cf_node)0 && cur_n < g_cluster_size;
-			cur_n++) {
+	for (uint32_t cur_n = 0; cur_n < g_cluster_size; cur_n++) {
 		cc_group_t cur_group = cc_compute_group_id(g_succession[cur_n]);
 
 		cc_add_fullnode_group_entry(&cc, g_succession[cur_n]);

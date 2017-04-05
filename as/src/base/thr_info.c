@@ -1316,12 +1316,12 @@ info_command_jem_stats(char *name, char *params, cf_dyn_buf *db)
 	char *file = NULL, *options = NULL;
 
 	param_str[0] = '\0';
-	param_str_len = sizeof(param_str);
 	if (!as_info_parameter_get(params, "file", param_str, &param_str_len)) {
 		file = cf_strdup(param_str);
 	}
 
 	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
 	if (!as_info_parameter_get(params, "options", param_str, &param_str_len)) {
 		options = cf_strdup(param_str);
 	}
@@ -1595,7 +1595,6 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
 	 */
 	param_str[0] = '\0';
-	param_str_len = sizeof(param_str);
 	if (!as_info_parameter_get(params, "ns", param_str, &param_str_len)) {
 		ns = cf_strdup(param_str);
 	} else {

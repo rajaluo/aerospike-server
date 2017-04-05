@@ -385,8 +385,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
 	as_sindex * si_arr[2 * ns->sindex_cnt];
 	int si_arr_index = 0;
-	const char* set_name = NULL;
-	set_name = as_index_get_set_name(rd->r, ns);
+	const char* set_name = as_index_get_set_name(rd->r, ns);
 
 	// RESERVE SIs for old bins
 	// Cannot reserve SIs for new bins as we do not know the bin-id yet
