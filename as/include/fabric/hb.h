@@ -77,35 +77,6 @@ typedef enum as_hb_protocol_enum
 } as_hb_protocol;
 
 /**
- * Errors encountered by the heartbeat subsystem.
- */
-typedef enum as_hb_err_type_e
-{
-	AS_HB_ERR_NO_SRC_NODE,
-	AS_HB_ERR_NO_TYPE,
-	AS_HB_ERR_NO_ID,
-	AS_HB_ERR_HEARTBEAT_PROTOCOL_MISMATCH,
-	AS_HB_ERR_NO_ENDPOINT,
-	AS_HB_ERR_NO_SEND_TS,
-	AS_HB_ERR_NO_NODE_REQ,
-	AS_HB_ERR_NO_NODE_REPLY,
-	AS_HB_ERR_NO_ANV_LENGTH,
-	AS_HB_ERR_MAX_CLUSTER_SIZE_MISMATCH,
-	AS_HB_ERR_SEND_INFO_REQ_FAIL,
-	AS_HB_ERR_SEND_INFO_REPLY_FAIL,
-	AS_HB_ERR_SEND_BROADCAST_FAIL,
-	AS_HB_ERR_EXPIRE_HB,
-	AS_HB_ERR_EXPIRE_FAB_DEAD,
-	AS_HB_ERR_EXPIRE_FAB_ALIVE,
-	AS_HB_ERR_UNPARSABLE_MSG,
-	AS_HB_ERR_MESH_CONNECT_FAIL,
-	AS_HB_ERR_REMOTE_CLOSE,
-	AS_HB_ERR_MTU_BREACH,
-	AS_HB_ERR_CLUSTER_NAME_MISMATCH,
-	AS_HB_ERR_MAX_TYPE
-} as_hb_err_type;
-
-/**
  * Events published by the heartbeat subsystem.
  */
 typedef enum
@@ -147,6 +118,7 @@ typedef enum
 	 */
 	AS_HB_PLUGIN_SENTINEL
 } as_hb_plugin_id;
+
 /**
  * The fields in the heartbeat message. V2 protocol is frozen. Should never
  * change.
@@ -304,13 +276,6 @@ typedef struct as_hb_config_s
 	 * expired.
 	 */
 	uint32_t max_intervals_missed;
-
-	/**
-	 * Set multiple of 'hb max intervals missed' during which if no fabric
-	 * messages arrive from a node, the node is considered fabric expired.
-	 * Set to -1 for infinite grace period.
-	 */
-	int fabric_grace_factor;
 
 	/**
 	 * The ttl for multicast packets. Set to zero for default TTL.
@@ -483,8 +448,6 @@ void as_hb_register_listener(as_hb_event_fn event_callback, void* udata);
 
 int as_hb_get_corrective_events(cf_node* succession, size_t succession_size, as_hb_event_node* events, size_t max_events);
 
-char* as_hb_stats_get(bool verbose);
-
 void as_hb_dump(bool verbose);
 
 as_hb_protocol as_hb_protocol_get();
@@ -500,8 +463,6 @@ uint32_t as_hb_tx_interval_get();
 int as_hb_tx_interval_set(uint32_t new_interval);
 
 int as_hb_max_intervals_missed_set(uint32_t new_max);
-
-void as_hb_fabric_grace_factor_set(int new_factor);
 
 uint32_t as_hb_node_timeout_get();
 

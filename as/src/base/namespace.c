@@ -103,7 +103,7 @@ as_namespace_create(char *name)
 	// Configuration defaults.
 	//
 
-	ns->replication_factor = 2;
+	ns->replication_factor = 1; // not 0 in case clients get map before initial rebalance
 	ns->cfg_replication_factor = 2;
 	ns->memory_size = 1024LL * 1024LL * 1024LL * 4LL; // default memory limit is 4G per namespace
 	ns->default_ttl = 0; // default time-to-live is unlimited
@@ -213,16 +213,27 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 
 	as_truncate_init_smd();
 
-	// Register secondary index module with the majority merge policy callback.
-	// Secondary index metadata is restored for all namespaces. Must be done
-	// before as_storage_init() populates the indexes.
+	// Must be done before as_storage_init() populates the indexes.
 	int retval = as_smd_create_module(SINDEX_MODULE,
-			as_smd_majority_consensus_merge, NULL, NULL, NULL,
-			as_sindex_smd_accept_cb, NULL, as_sindex_smd_can_accept_cb, NULL);
+				as_smd_majority_consensus_merge, NULL,
+				NULL, NULL,
+				as_sindex_smd_accept_cb, NULL,
+				NULL, NULL);
 
-	if (retval < 0) {
-		cf_crash(AS_NAMESPACE, "failed to create SMD module '%s' (rv %d)",
-				SINDEX_MODULE, retval);
+	cf_assert(retval == 0, AS_NAMESPACE, "failed to create sindex SMD module (rv %d)", retval);
+
+	if (! as_new_clustering()) {
+		retval = as_smd_create_module(OLD_SINDEX_MODULE,
+					old_smd_majority_consensus_merge, NULL,
+					NULL, NULL,
+					old_sindex_smd_accept_cb, NULL,
+					old_sindex_smd_can_accept_cb, NULL);
+
+		cf_assert(retval == 0, AS_NAMESPACE, "failed to create old sindex SMD module (rv %d)", retval);
+
+		while (! g_old_sindex_smd_restored) {
+			usleep(1000);
+		}
 	}
 
 	// Wait for Secondary Index SMD to be completely restored.

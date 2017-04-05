@@ -93,8 +93,16 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 		as_record* r = r_ref.r;
 
 		msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
-		msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
 		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
+
+		if (as_new_clustering()) {
+			if (r->void_time != 0) {
+				msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
+			}
+		}
+		else {
+			msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
+		}
 
 		as_record_done(&r_ref, ns);
 	}
@@ -184,15 +192,36 @@ dup_res_handle_request(cf_node node, msg* m)
 		return;
 	}
 
-	uint32_t generation = 0;
-	bool local_conflict_check =
-			msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0;
+	uint32_t generation;
+	uint32_t void_time;
+	uint64_t last_update_time;
 
-	uint32_t void_time = 0;
-	uint64_t last_update_time = 0;
+	bool local_conflict_check;
 
-	msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-	msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+	if (as_new_clustering()) {
+		local_conflict_check =
+				msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0 &&
+				msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+						&last_update_time) == 0;
+
+		void_time = 0;
+
+		if (local_conflict_check) {
+			msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
+		}
+	}
+	else {
+		local_conflict_check =
+				msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0;
+
+		void_time = 0;
+		last_update_time = 0;
+
+		if (local_conflict_check) {
+			msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
+			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+		}
+	}
 
 	// Done reading message fields, may now set fields for ack.
 	msg_preserve_fields(m, 3, RW_FIELD_NS_ID, RW_FIELD_DIGEST, RW_FIELD_TID);
@@ -285,13 +314,22 @@ dup_res_handle_request(cf_node node, msg* m)
 				MSG_SET_HANDOFF_MALLOC);
 	}
 
-	// Note - older versions expect RW_FIELD_VINFOSET, so must send it for now.
-	static const uint8_t VINFO_BUF_0[] = { 0, 0, 0, 0 };
-	msg_set_buf(m, RW_FIELD_VINFOSET, VINFO_BUF_0, 4, MSG_SET_COPY);
+	if (! as_new_clustering()) {
+		static const uint8_t VINFO_BUF_0[] = { 0, 0, 0, 0 };
+		msg_set_buf(m, RW_FIELD_VINFOSET, VINFO_BUF_0, 4, MSG_SET_COPY);
+	}
 
 	msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
-	msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
 	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
+
+	if (as_new_clustering()) {
+		if (r->void_time != 0) {
+			msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
+		}
+	}
+	else {
+		msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
+	}
 
 	done_handle_request(&rsv, &r_ref);
 	send_dup_res_ack(node, m, AS_PROTO_RESULT_OK);
@@ -537,8 +575,18 @@ apply_winner(rw_request* rw)
 			continue;
 		}
 
+		if (as_new_clustering()) {
+			if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+					&dups[n].last_update_time) != 0) {
+				cf_warning_digest(AS_RW, &rw->keyd, "dup-res ack: no last-update-time ");
+				continue;
+			}
+		}
+		else {
+			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &dups[n].last_update_time);
+		}
+
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &dups[n].void_time);
-		msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &dups[n].last_update_time);
 
 		if (rw->rsv.ns->ldt_enabled) {
 			get_ldt_info(m, &dups[n]);

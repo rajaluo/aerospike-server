@@ -77,10 +77,12 @@ typedef enum {
 	AS_BATCH,
 	AS_BIN,
 	AS_CFG,
+	AS_CLUSTERING,
 	AS_COMPRESSION,
 	AS_DEMARSHAL,
 	AS_DRV_KV,
 	AS_DRV_SSD,
+	AS_EXCHANGE,
 	AS_FABRIC,
 	AS_GEO,
 	AS_HB,
@@ -112,7 +114,6 @@ typedef enum {
 	AS_TSVC,
 	AS_UDF,
 	AS_XDR,
-
 	CF_FAULT_CONTEXT_UNDEF
 } cf_fault_context;
 
@@ -182,6 +183,9 @@ extern void cf_fault_sink_logroll(void);
 
 extern void cf_fault_use_local_time(bool val);
 extern bool cf_fault_is_using_local_time();
+
+extern void cf_fault_log_millis(bool log_millis);
+extern bool cf_fault_is_logging_millis();
 
 extern cf_fault_severity cf_fault_filter[];
 

@@ -53,9 +53,14 @@ struct as_namespace_s;
  */
 #define MAX_NUM_MIGRATE_XMIT_THREADS  (100)
 
+typedef enum {
+	EMIG_TYPE_TRANSFER,
+	EMIG_TYPE_SIGNAL_ALL_DONE
+} emig_type;
+
 #define TX_FLAGS_NONE           ((uint32_t) 0x0)
 #define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
-#define TX_FLAGS_REQUEST        ((uint32_t) 0x2)
+#define TX_FLAGS_REQUEST        ((uint32_t) 0x2) // XXX JUMP - remove in "six months"
 
 // If 0 then it is a migration start from an old node.
 #define MIG_TYPE_START_IS_NORMAL 1
@@ -71,6 +76,7 @@ typedef struct partition_migrate_record_s {
 	struct as_namespace_s *ns;
 	uint32_t pid;
 	uint64_t cluster_key;
+	emig_type type;
 	uint32_t tx_flags;
 } partition_migrate_record;
 
@@ -97,9 +103,9 @@ typedef enum {
 	MIG_FIELD_GENERATION,
 	MIG_FIELD_RECORD,
 	MIG_FIELD_CLUSTER_KEY,
-	MIG_FIELD_VINFOSET, // deprecated
+	MIG_FIELD_VINFOSET, // XXX JUMP - recycle in "six months"
 	MIG_FIELD_VOID_TIME,
-	MIG_FIELD_TYPE, // deprecated
+	MIG_FIELD_TYPE, // XXX JUMP - recycle in "six months"
 	MIG_FIELD_REC_PROPS,
 	MIG_FIELD_INFO,
 	MIG_FIELD_LDT_VERSION,
@@ -130,6 +136,8 @@ typedef enum {
 #define OPERATION_CANCEL 10 // deprecated
 #define OPERATION_MERGE_META 11
 #define OPERATION_MERGE_META_ACK 12
+#define OPERATION_ALL_DONE 13
+#define OPERATION_ALL_DONE_ACK 14
 
 #define MIG_INFO_LDT_PREC   0x0001
 #define MIG_INFO_LDT_SUBREC 0x0002
@@ -169,6 +177,7 @@ typedef struct emigration_s {
 	cf_node     dest;
 	uint64_t    cluster_key;
 	uint32_t    id;
+	emig_type	type;
 	uint32_t    tx_flags;
 	cf_atomic32 state;
 	bool        aborted;

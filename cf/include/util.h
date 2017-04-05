@@ -197,8 +197,6 @@ typedef uint64_t cf_node;
 extern uint32_t cf_nodeid_shash_fn(const void *value);
 extern uint32_t cf_nodeid_rchash_fn(const void *value, uint32_t value_len);
 extern char *cf_node_name(void);
-typedef enum paxos_protocol_enum { AS_PAXOS_PROTOCOL_UNDEF, AS_PAXOS_PROTOCOL_NONE, AS_PAXOS_PROTOCOL_V1, AS_PAXOS_PROTOCOL_V2, AS_PAXOS_PROTOCOL_V3, AS_PAXOS_PROTOCOL_V4 } paxos_protocol_enum;
-typedef enum paxos_recovery_policy_enum { AS_PAXOS_RECOVERY_POLICY_UNDEF, AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER } paxos_recovery_policy_enum;
 
 extern int cf_sort_firstk(uint64_t *v, size_t sz, int k);
 

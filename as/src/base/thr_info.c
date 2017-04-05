@@ -74,13 +74,14 @@
 #include "base/truncate.h"
 #include "base/udf_cask.h"
 #include "base/xdr_serverside.h"
+#include "fabric/exchange.h"
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/hlc.h"
 #include "fabric/migrate.h"
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
-#include "fabric/paxos.h"
+#include "fabric/paxos.h" // FIXME - remove remaining dependencies ???
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
 
@@ -247,9 +248,10 @@ info_segv_test(char *name, cf_dyn_buf *db)
 int
 info_get_stats(char *name, cf_dyn_buf *db)
 {
-	info_append_uint32(db, "cluster_size", g_paxos->cluster_size);
-	info_append_uint64_x(db, "cluster_key", as_paxos_get_cluster_key()); // not in ticker
-	info_append_bool(db, "cluster_integrity", as_paxos_get_cluster_integrity(g_paxos)); // not in ticker
+	info_append_uint32(db, "cluster_size", as_exchange_cluster_size());
+	info_append_uint64_x(db, "cluster_key", as_exchange_cluster_key()); // not in ticker
+	info_append_bool(db, "cluster_integrity", as_clustering_has_integrity()); // not in ticker
+	info_append_bool(db, "cluster_is_member", ! as_clustering_is_orphan());
 
 	info_append_uint64(db, "uptime", (cf_getms() - g_start_ms) / 1000); // not in ticker
 
@@ -335,8 +337,8 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "sindex_gc_garbage_found", g_stats.sindex_gc_garbage_found);
 	info_append_uint64(db, "sindex_gc_garbage_cleaned", g_stats.sindex_gc_garbage_cleaned);
 
-	char paxos_principal[19];
-	snprintf(paxos_principal, 19, "%"PRIX64"", as_paxos_succession_getprincipal());
+	char paxos_principal[16 + 1];
+	sprintf(paxos_principal, "%lX", as_exchange_principal());
 	info_append_string(db, "paxos_principal", paxos_principal);
 
 	info_append_bool(db, "migrate_allowed", as_partition_balance_are_migrations_allowed());
@@ -550,16 +552,9 @@ info_get_replicas_all(char *name, cf_dyn_buf *db)
 int
 info_command_get_sl(char *name, char *params, cf_dyn_buf *db)
 {
-	char *result = "error";
-
-	//  Get the Paxos Succession List:
 	// Command Format:  "get-sl:"
 
-	if (!as_paxos_get_succession_list(db)) {
-		result = "ok";
-	}
-
-	cf_dyn_buf_append_string(db, result);
+	as_exchange_info_get_succession(db);
 
 	return 0;
 }
@@ -739,6 +734,36 @@ info_command_show_devices(char *name, char *params, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, "ok");
 
+	return(0);
+}
+
+int
+info_command_dump_cluster(char *name, char *params, cf_dyn_buf *db)
+{
+	bool verbose = false;
+	char param_str[100];
+	int param_str_len = sizeof(param_str);
+
+	/*
+	 *  Command Format:  "dump-cluster:{verbose=<opt>}" [the "verbose" argument is optional]
+	 *
+	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
+	 */
+	param_str[0] = '\0';
+	if (!as_info_parameter_get(params, "verbose", param_str, &param_str_len)) {
+		if (!strncmp(param_str, "true", 5)) {
+			verbose = true;
+		} else if (!strncmp(param_str, "false", 6)) {
+			verbose = false;
+		} else {
+			cf_warning(AS_INFO, "The \"%s:\" command argument \"verbose\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
+			cf_dyn_buf_append_string(db, "error");
+			return 0;
+		}
+	}
+	as_clustering_dump(verbose);
+	as_exchange_dump(verbose);
+	cf_dyn_buf_append_string(db, "ok");
 	return(0);
 }
 
@@ -1013,37 +1038,14 @@ info_command_dump_rw_request_hash(char *name, char *params, cf_dyn_buf *db)
 }
 
 int
-info_command_dump_paxos(char *name, char *params, cf_dyn_buf *db)
-{
-	bool verbose = false;
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-
-	/*
-	 *  Command Format:  "dump-paxos:{verbose=<opt>}" [the "verbose" argument is optional]
-	 *
-	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
-	 */
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "verbose", param_str, &param_str_len)) {
-		if (!strncmp(param_str, "true", 5)) {
-			verbose = true;
-		} else if (!strncmp(param_str, "false", 6)) {
-			verbose = false;
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"verbose\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-	as_paxos_dump(verbose);
-	cf_dyn_buf_append_string(db, "ok");
-	return(0);
-}
-
-int
 info_command_dump_ra(char *name, char *params, cf_dyn_buf *db)
 {
+	if (as_new_clustering()) {
+		cf_warning(AS_INFO, "the command 'dump-ra' has been deprecated");
+		cf_dyn_buf_append_string(db, "error");
+		return 0;
+	}
+
 	bool verbose = false;
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
@@ -1789,6 +1791,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
 	info_append_int(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
 	info_append_int(db, "migrate-threads", g_config.n_migrate_threads);
+	info_append_uint32(db, "min-cluster-size", g_config.clustering_config.cluster_size_min);
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
 	info_append_uint32(db, "nsup-period", g_config.nsup_period);
@@ -1800,10 +1803,8 @@ info_service_config_get(cf_dyn_buf *db)
 				(AS_PAXOS_PROTOCOL_V2 == g_config.paxos_protocol ? "v2" :
 					(AS_PAXOS_PROTOCOL_V3 == g_config.paxos_protocol ? "v3" :
 						(AS_PAXOS_PROTOCOL_V4 == g_config.paxos_protocol ? "v4" :
-							(AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined"))))));
-
-	info_append_string(db, "paxos-recovery-policy",
-			(AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER == g_config.paxos_recovery_policy ? "auto-reset-master" : "undefined"));
+						 	(AS_PAXOS_PROTOCOL_V5 == g_config.paxos_protocol ? "v5" :
+								(AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined")))))));
 
 	info_append_uint32(db, "paxos-retransmit-period", g_config.paxos_retransmit_period);
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
@@ -2358,21 +2359,14 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 											(!strcmp(context, "v2") ? AS_PAXOS_PROTOCOL_V2 :
 											 (!strcmp(context, "v3") ? AS_PAXOS_PROTOCOL_V3 :
 											  (!strcmp(context, "v4") ? AS_PAXOS_PROTOCOL_V4 :
-											   (!strcmp(context, "none") ? AS_PAXOS_PROTOCOL_NONE :
-												AS_PAXOS_PROTOCOL_UNDEF)))));
+											   (!strcmp(context, "v5") ? AS_PAXOS_PROTOCOL_V5 :
+											    (!strcmp(context, "none") ? AS_PAXOS_PROTOCOL_NONE :
+												 AS_PAXOS_PROTOCOL_UNDEF))))));
 			if (AS_PAXOS_PROTOCOL_UNDEF == protocol)
 				goto Error;
 			if (0 > as_paxos_set_protocol(protocol))
 				goto Error;
 			cf_info(AS_INFO, "Changing value of paxos-protocol version to %s", context);
-		}
-		else if (0 == as_info_parameter_get(params, "paxos-recovery-policy", context, &context_len)) {
-			paxos_recovery_policy_enum policy = ((!strcmp(context, "auto-reset-master") ? AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER : AS_PAXOS_RECOVERY_POLICY_UNDEF));
-			if (AS_PAXOS_RECOVERY_POLICY_UNDEF == policy)
-				goto Error;
-			if (0 > as_paxos_set_recovery_policy(policy))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of paxos-recovery-policy to %s", context);
 		}
 		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
 			if (!as_config_cluster_name_set(context)) {
@@ -2391,6 +2385,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of migrate-theads from %d to %d ", g_config.n_migrate_threads, val);
 			as_migrate_set_num_xmit_threads(val);
+		}
+		else if (0 == as_info_parameter_get(params, "min-cluster-size", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val) || (0 > val) || (as_clustering_cluster_size_min_set(val) < 0))
+				goto Error;
 		}
 		else if (0 == as_info_parameter_get(params, "write-duplicate-resolution-disable", context, &context_len)) {
 			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
@@ -2742,11 +2740,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			}
 		}
-		else if (0 == as_info_parameter_get(params, "heartbeat.fabric-grace-factor", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			as_hb_fabric_grace_factor_set(val);
-		}
 		else if (0 == as_info_parameter_get(params, "heartbeat.mtu", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val))
 				goto Error;
@@ -2861,7 +2854,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 
 			// configurations should create set if it doesn't exist.
 			// checks if there is a vmap set with the same name and if so returns
-			// a ptr to it. if not, it creates an set structure, initializes it 
+			// a ptr to it. if not, it creates an set structure, initializes it
 			// and returns a ptr to it.
 			as_set *p_set = NULL;
 			if (as_namespace_get_create_set_w_len(ns, set_name, set_name_len,
@@ -4936,29 +4929,30 @@ dump_node_info_services(info_node_info *info)
 // which are no longer in the succession list
 
 typedef struct reduce_context_s {
+	uint32_t cluster_size;
 	cf_node *succession;
 	uint32_t n_deleted;
 	cf_node deleted[AS_CLUSTER_SZ];
 } reduce_context;
 
 int32_t
-info_paxos_event_reduce_fn(const void *key, void *data, void *udata)
+info_clustering_event_reduce_fn(const void *key, void *data, void *udata)
 {
-	reduce_context *cont = udata;
 	const cf_node *node = key;
 	info_node_info *info = data;
+	reduce_context *context = udata;
 
-	for (int32_t i = 0; cont->succession[i] != 0; ++i) {
-		if (*node == cont->succession[i]) {
+	for (uint32_t i = 0; i < context->cluster_size; ++i) {
+		if (*node == context->succession[i]) {
 			return SHASH_OK;
 		}
 	}
 
-	cf_debug(AS_INFO, "Paxos event reduce: removing node %" PRIx64, *node);
+	cf_debug(AS_INFO, "Clustering event reduce: removing node %" PRIx64, *node);
 
-	uint32_t n = cont->n_deleted;
-	cont->deleted[n] = *node;
-	++cont->n_deleted;
+	uint32_t n = context->n_deleted;
+	context->deleted[n] = *node;
+	++context->n_deleted;
 
 	free_node_info_services(info);
 	return SHASH_REDUCE_DELETE;
@@ -4967,39 +4961,39 @@ info_paxos_event_reduce_fn(const void *key, void *data, void *udata)
 //
 // Maintain the info_node_info hash as a shadow of the succession list
 //
-
-void
-as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node *succession,
-		void *udata)
+static void
+info_clustering_event_listener(const as_exchange_cluster_changed_event* event, void* udata)
 {
 	uint64_t start_ms = cf_getms();
-	cf_debug(AS_INFO, "Info received new Paxos state");
+	cf_debug(AS_INFO, "Info received new clustering state");
 
 	info_node_info temp;
 	temp.generation = 0;
 	temp.last_changed = 0;
 	reset_node_info_services(&temp);
 
-	int32_t i;
+	uint32_t i;
 
-	for (i = 0; succession[i] != 0; ++i) {
-		if (succession[i] == g_config.self_node) {
+	for (i = 0; i < event->cluster_size; ++i) {
+		cf_node member_nodeid = event->succession[i];
+
+		if (member_nodeid == g_config.self_node) {
 			continue;
 		}
 
 		info_node_info *info_history;
 		pthread_mutex_t *vlock_history;
 
-		if (shash_get_vlock(g_info_node_info_history_hash, &succession[i], (void **)&info_history,
+		if (shash_get_vlock(g_info_node_info_history_hash, &member_nodeid, (void **)&info_history,
 				&vlock_history) != SHASH_OK) {
 			// This may fail, but this is OK. This should only fail when info_msg_fn is also trying
 			// to add this key, so either way the entry will be in the hash table.
-			shash_put_unique(g_info_node_info_history_hash, &succession[i], &temp);
+			shash_put_unique(g_info_node_info_history_hash, &member_nodeid, &temp);
 
-			if (shash_get_vlock(g_info_node_info_history_hash, &succession[i],
+			if (shash_get_vlock(g_info_node_info_history_hash, &member_nodeid,
 					(void **)&info_history, &vlock_history) != SHASH_OK) {
 				cf_crash(AS_INFO,
-						"Could not create info history hash entry for %" PRIx64, succession[i]);
+						"Could not create info history hash entry for %" PRIx64, member_nodeid);
 				continue;
 			}
 		}
@@ -5007,21 +5001,21 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node *s
 		info_node_info *info;
 		pthread_mutex_t *vlock;
 
-		if (shash_get_vlock(g_info_node_info_hash, &succession[i], (void **)&info,
+		if (shash_get_vlock(g_info_node_info_hash, &member_nodeid, (void **)&info,
 				&vlock) != SHASH_OK) {
 			clone_node_info_services(info_history, &temp);
 			temp.last_changed = cf_atomic64_incr(&g_peers_gen);
 
-			if (shash_put_unique(g_info_node_info_hash, &succession[i], &temp) == SHASH_OK) {
+			if (shash_put_unique(g_info_node_info_hash, &member_nodeid, &temp) == SHASH_OK) {
 				reset_node_info_services(&temp);
-				info_history->last_changed = 0; // See info_paxos_event_reduce_fn().
+				info_history->last_changed = 0; // See info_clustering_event_reduce_fn().
 				cf_debug(AS_INFO, "Peers generation %" PRId64 ": added node %" PRIx64,
-						temp.last_changed, succession[i]);
+						temp.last_changed, member_nodeid);
 			}
 			else {
 				free_node_info_services(&temp);
 				cf_crash(AS_INFO,
-						"Could not insert node %" PRIx64 " from Paxos notification", succession[i]);
+						"Could not insert node %" PRIx64 " from clustering notification", member_nodeid);
 			}
 
 			temp.last_changed = 0;
@@ -5034,10 +5028,10 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node *s
 	}
 
 	uint32_t before = shash_get_size(g_info_node_info_hash);
-	cf_debug(AS_INFO, "Paxos succession list has %d element(s), info hash has %u", i, before);
+	cf_debug(AS_INFO, "Clustering succession list has %d element(s), info hash has %u", i, before);
 
-	reduce_context cont = { .succession = succession, .n_deleted = 0 };
-	shash_reduce_delete(g_info_node_info_hash, info_paxos_event_reduce_fn, &cont);
+	reduce_context cont = { .cluster_size = event->cluster_size, .succession = event->succession, .n_deleted = 0 };
+	shash_reduce_delete(g_info_node_info_hash, info_clustering_event_reduce_fn, &cont);
 
 	// While an alumni is gone, its last_changed field is non-zero. When it comes back, the
 	// field goes back to zero.
@@ -5063,7 +5057,7 @@ as_info_paxos_event(as_paxos_generation gen, as_paxos_change *change, cf_node *s
 	cf_debug(AS_INFO, "After removal, info hash has %u element(s)", after);
 
 	cf_atomic32_incr(&g_node_info_generation);
-	cf_debug(AS_INFO, "as_info_paxos_event took %" PRIu64 " ms", cf_getms() - start_ms);
+	cf_debug(AS_INFO, "info_clustering_event_listener took %" PRIu64 " ms", cf_getms() - start_ms);
 }
 
 // This goes in a reduce function for retransmitting my information to another node
@@ -5918,6 +5912,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "migrate_record_retransmits", ns->migrate_record_retransmits);
 	info_append_uint64(db, "migrate_record_receives", ns->migrate_record_receives);
 
+	info_append_uint64(db, "migrate_signals_active", ns->migrate_signals_active);
+	info_append_uint64(db, "migrate_signals_remaining", ns->migrate_signals_remaining);
+
 	// From-client transaction stats.
 
 	info_append_uint64(db, "client_tsvc_error", ns->n_client_tsvc_error);
@@ -6637,12 +6634,21 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 	if (is_smd_op == true)
 	{
 		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
-		char module[] = SINDEX_MODULE;
-		char key[SINDEX_SMD_KEY_SIZE];
-		sprintf(key, "%s:%s", imd.ns_name, imd.iname);
-		// TODO : Send imd instead of params as value.
-		// Today as_info_parse_params_to_sindex_imd is done again by smd layer
-		res = as_smd_set_metadata(module, key, params);
+
+		if (as_new_clustering()) {
+			char smd_key[SINDEX_SMD_KEY_SIZE];
+
+			as_sindex_imd_to_smd_key(&imd, smd_key);
+			res = as_smd_set_metadata(SINDEX_MODULE, smd_key, imd.iname);
+		}
+		else {
+			char module[] = OLD_SINDEX_MODULE;
+			char key[OLD_SINDEX_SMD_KEY_SIZE];
+			sprintf(key, "%s:%s", imd.ns_name, imd.iname);
+			// TODO : Send imd instead of params as value.
+			// Today as_info_parse_params_to_sindex_imd is done again by smd layer
+			res = as_smd_set_metadata(module, key, params);
+		}
 
 		if (res != 0) {
 			cf_warning(AS_INFO, "SINDEX CREATE : Queuing the index %s metadata to SMD failed with error %s",
@@ -6693,10 +6699,24 @@ int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 	if (is_smd_op == true)
 	{
 		cf_info(AS_INFO, "SINDEX DROP : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
-		char module[] = SINDEX_MODULE;
-		char key[SINDEX_SMD_KEY_SIZE];
-		sprintf(key, "%s:%s", imd.ns_name, imd.iname);
-		res = as_smd_delete_metadata(module, key);
+
+		if (as_new_clustering()) {
+			char smd_key[SINDEX_SMD_KEY_SIZE];
+
+			if (as_sindex_delete_imd_to_smd_key(ns, &imd, smd_key)) {
+				res = as_smd_delete_metadata(SINDEX_MODULE, smd_key);
+			}
+			else {
+				res = AS_SINDEX_ERR_NOTFOUND;
+			}
+		}
+		else {
+			char module[] = OLD_SINDEX_MODULE;
+			char key[OLD_SINDEX_SMD_KEY_SIZE];
+			sprintf(key, "%s:%s", imd.ns_name, imd.iname);
+			res = as_smd_delete_metadata(module, key);
+		}
+
 		if (0 != res) {
 			cf_warning(AS_INFO, "SINDEX DROP : Queuing the index %s metadata to SMD failed with error %s",
 					imd.iname, as_sindex_err_str(res));
@@ -7039,7 +7059,7 @@ as_info_init()
 
 	// All commands accepted by asinfo/telnet
 	as_info_set("help", "alloc-info;asm;bins;build;build_os;build_time;cluster-name;config-get;config-set;"
-				"df;digests;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-paxos;dump-rw;"
+				"df;digests;dump-cluster;dump-fabric;dump-hb;dump-migrates;dump-msgs;dump-rw;"
 				"dump-si;dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
@@ -7108,12 +7128,12 @@ as_info_init()
 	as_info_set_command("config-get", info_command_config_get, PERM_NONE);                    // Returns running config for specified context.
 	as_info_set_command("config-set", info_command_config_set, PERM_SET_CONFIG);              // Set a configuration parameter at run time, configuration parameter must be dynamic.
 	as_info_set_command("df", info_command_double_free, PERM_SERVICE_CTRL);                   // Do an intentional double "free()" to test Double "free()" Detection.
+	as_info_set_command("dump-cluster", info_command_dump_cluster, PERM_LOGGING_CTRL);        // Print debug information about clustering and exchange to the log file.
 	as_info_set_command("dump-fabric", info_command_dump_fabric, PERM_LOGGING_CTRL);          // Print debug information about fabric to the log file.
 	as_info_set_command("dump-hb", info_command_dump_hb, PERM_LOGGING_CTRL);                  // Print debug information about heartbeat state to the log file.
 	as_info_set_command("dump-hlc", info_command_dump_hlc, PERM_LOGGING_CTRL);                // Print debug information about Hybrid Logical Clock to the log file.
 	as_info_set_command("dump-migrates", info_command_dump_migrates, PERM_LOGGING_CTRL);      // Print debug information about migration.
 	as_info_set_command("dump-msgs", info_command_dump_msgs, PERM_LOGGING_CTRL);              // Print debug information about existing 'msg' objects and queues to the log file.
-	as_info_set_command("dump-paxos", info_command_dump_paxos, PERM_LOGGING_CTRL);            // Print debug information about Paxos state to the log file.
 	as_info_set_command("dump-ra", info_command_dump_ra, PERM_LOGGING_CTRL);                  // Print debug information about Rack Aware state.
 	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
 	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
@@ -7191,6 +7211,8 @@ as_info_init()
 	}
 
 	as_fabric_register_msg_fn(M_TYPE_INFO, info_mt, sizeof(info_mt), INFO_MSG_SCRATCH_SIZE, info_msg_fn, 0 /* udata */ );
+
+	as_exchange_register_listener(info_clustering_event_listener, NULL);
 
 	pthread_t info_interfaces_th;
 	pthread_create(&info_interfaces_th, &thr_attr, info_interfaces_fn, 0);

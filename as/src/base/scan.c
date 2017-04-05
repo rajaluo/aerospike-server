@@ -63,6 +63,7 @@
 #include "base/thr_tsvc.h"
 #include "base/transaction.h"
 #include "base/udf_memtracker.h"
+#include "fabric/exchange.h"
 #include "fabric/partition.h"
 #include "transaction/udf.h"
 
@@ -620,7 +621,7 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	as_job_init(_job, &basic_scan_job_vtable, &g_scan_manager, RSV_WRITE,
 			as_transaction_trid(tr), ns, set_id, options.priority);
 
-	job->cluster_key = as_paxos_get_cluster_key();
+	job->cluster_key = as_exchange_cluster_key();
 	job->fail_on_cluster_change = options.fail_on_cluster_change;
 	job->include_ldt_data = options.include_ldt_data;
 	job->no_bin_data = (tr->msgp->msg.info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0;
@@ -774,7 +775,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	if (job->fail_on_cluster_change &&
-			job->cluster_key != as_paxos_get_cluster_key()) {
+			job->cluster_key != as_exchange_cluster_key()) {
 		as_record_done(r_ref, ns);
 		as_job_manager_abandon_job(_job->mgr, _job,
 				AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH);

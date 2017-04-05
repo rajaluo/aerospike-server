@@ -107,7 +107,6 @@ int as_fabric_start(void);
 void as_fabric_set_recv_threads(as_fabric_channel channel, uint32_t count);
 int as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel);
 int as_fabric_send_list(cf_node *node_ids, int nodes_sz, msg *m, as_fabric_channel channel);
-int as_fabric_get_node_lasttime(cf_node node_id, uint64_t *lasttime);
 int as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz, size_t scratch_sz, as_fabric_msg_fn msg_cb, void *udata_msg);
 void as_fabric_rate_capture(fabric_rate *rate);
 void as_fabric_dump(bool verbose);
