@@ -197,7 +197,7 @@ const char *as_sindex_err_str(int op_code) {
 
 inline bool as_sindex_isactive(as_sindex *si)
 {
-	if (!si) {
+	if (! si) {
 		cf_warning(AS_SINDEX, "si is null in as_sindex_isactive");
 		return FALSE;
 	}
@@ -427,23 +427,7 @@ char *as_sindex_type_defs[] =
 int
 as_sindex__pre_op_assert(as_sindex *si, int op)
 {
-	int ret = AS_SINDEX_ERR;
-	if (!si) {
-		SINDEX_CRASH("DML with NULL si"); return ret;
-	}
-	if (!si->imd) {
-		SINDEX_CRASH("DML with NULL imd"); return ret;
-	}
-
-	// Caller of DML should always reserves si, If the state of si is not DESTROY and
-	// if the count is 1 then caller did not reserve fail the assertion
-	int count = cf_rc_count(si->imd);
-	cf_debug(AS_SINDEX, "DML on index %s in %d state with reference count %d < 2", si->imd->iname, si->state, count);
-	if ((count < 2) && (si->state != AS_SINDEX_DESTROY)) {
-		cf_warning(AS_SINDEX, "Secondary index is improperly ref counted ... cannot be used");
-		return ret;
-	}
-	ret = AS_SINDEX_OK;
+	int ret = AS_SINDEX_OK;
 
 	switch (op)
 	{
@@ -1384,43 +1368,41 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 		return AS_SINDEX_ERR_NOTFOUND;
 	}
 
-	if (si->state == AS_SINDEX_ACTIVE) {
-		char context[100];
-		int  context_len = sizeof(context);
-		if (0 == as_info_parameter_get(params, "ignore-not-sync", context, &context_len)) {
-			if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
-				cf_info(AS_INFO,"Changing value of ignore-not-sync of ns %s sindex %s to %s", ns->name, imd->iname, context);
-				si->config.flag |= AS_SINDEX_CONFIG_IGNORE_ON_DESYNC;
-			} else if (strncmp(context, "false", 5)==0 || strncmp(context, "no", 2)==0) {
-				cf_info(AS_INFO,"Changing value of ignore-not-sync of ns %s sindex %s to %s", ns->name, imd->iname, context);
-				si->config.flag &= ~AS_SINDEX_CONFIG_IGNORE_ON_DESYNC;
-			} else {
-				goto Error;
-			}
-		}
-		else if (0 == as_info_parameter_get(params, "gc-period", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_detail(AS_INFO, "gc-period = %"PRIu64"",val);
-			if ((int64_t)val < 0) {
-				goto Error;
-			}
-			cf_info(AS_INFO,"Changing value of gc-period of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
-							ns->name, imd->iname, si->config.defrag_period, val);
-			cf_atomic64_set(&si->config.defrag_period, val);
-		}
-		else if (0 == as_info_parameter_get(params, "gc-max-units", context, &context_len)) {
-			uint64_t val = atoll(context);
-			cf_detail(AS_INFO, "gc-limit = %"PRIu64"",val);
-			if ((int64_t)val < 0) {
-				goto Error;
-			}
-			cf_info(AS_INFO,"Changing value of gc-max-units of ns %s sindex %s from %u to %lu",
-							ns->name, imd->iname, si->config.defrag_max_units, val);
-			si->config.defrag_max_units = val;
-		}
-		else {
+	char context[100];
+	int  context_len = sizeof(context);
+	if (0 == as_info_parameter_get(params, "ignore-not-sync", context, &context_len)) {
+		if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
+			cf_info(AS_INFO,"Changing value of ignore-not-sync of ns %s sindex %s to %s", ns->name, imd->iname, context);
+			si->config.flag |= AS_SINDEX_CONFIG_IGNORE_ON_DESYNC;
+		} else if (strncmp(context, "false", 5)==0 || strncmp(context, "no", 2)==0) {
+			cf_info(AS_INFO,"Changing value of ignore-not-sync of ns %s sindex %s to %s", ns->name, imd->iname, context);
+			si->config.flag &= ~AS_SINDEX_CONFIG_IGNORE_ON_DESYNC;
+		} else {
 			goto Error;
 		}
+	}
+	else if (0 == as_info_parameter_get(params, "gc-period", context, &context_len)) {
+		uint64_t val = atoll(context);
+		cf_detail(AS_INFO, "gc-period = %"PRIu64"",val);
+		if ((int64_t)val < 0) {
+			goto Error;
+		}
+		cf_info(AS_INFO,"Changing value of gc-period of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
+						ns->name, imd->iname, si->config.defrag_period, val);
+		cf_atomic64_set(&si->config.defrag_period, val);
+	}
+	else if (0 == as_info_parameter_get(params, "gc-max-units", context, &context_len)) {
+		uint64_t val = atoll(context);
+		cf_detail(AS_INFO, "gc-limit = %"PRIu64"",val);
+		if ((int64_t)val < 0) {
+			goto Error;
+		}
+		cf_info(AS_INFO,"Changing value of gc-max-units of ns %s sindex %s from %u to %lu",
+						ns->name, imd->iname, si->config.defrag_max_units, val);
+		si->config.defrag_max_units = val;
+	}
+	else {
+		goto Error;
 	}
 
 	AS_SINDEX_RELEASE(si);
@@ -1497,14 +1479,15 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 int
 as_sindex_reserve(as_sindex *si, char *fname, int lineno)
 {
-	if (!as_sindex_isactive(si)) {
+	if (! as_sindex_isactive(si)) {
 		cf_warning(AS_SINDEX, "Trying to reserve sindex %s in a state other than active. State is %d",
 							si->imd->iname, si->state);
 	}
-	if (si->imd) cf_rc_reserve(si->imd);
-	int count = cf_rc_count(si->imd);
-	cf_debug(AS_SINDEX, "Index %s:%s in %d state Reserved to reference count %d < 2 at %s:%d", 
-							si->ns->name, si->imd->iname, si->state, count, fname, lineno);
+
+	if (si->imd) {
+		cf_rc_reserve(si->imd);
+	}
+
 	return AS_SINDEX_OK;
 }
 
@@ -1522,10 +1505,6 @@ as_sindex_release(as_sindex *si, char *fname, int lineno)
 	uint64_t val = cf_rc_release(si->imd);
 
 	if (val == 0) {
-		cf_assert((si->state == AS_SINDEX_DESTROY),
-					AS_SINDEX, " Invalid state at cleanup");
-		cf_assert(!(si->state & AS_SINDEX_FLAG_DESTROY_CLEANUP),
-					AS_SINDEX, " Invalid state at cleanup");
 		si->flag |= AS_SINDEX_FLAG_DESTROY_CLEANUP;
 		if (CF_QUEUE_OK != cf_queue_push(g_sindex_destroy_q, &si)) {
 			return AS_SINDEX_ERR;
@@ -4237,9 +4216,11 @@ as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd)
 	int count = 0;
 	int valid = 0;
 
+	// Only called at the boot time. No writer is expected to
+	// change ns->sindex in parallel.
 	while (count < AS_SINDEX_MAX && valid < ns->sindex_cnt) {
 		as_sindex *si = &ns->sindex[count];
-		if (!as_sindex_put_rd(si, rd)) {
+		if (! as_sindex_put_rd(si, rd)) {
 			valid++;
 		}
 		count++;
@@ -4249,14 +4230,9 @@ as_sindex_putall_rd(as_namespace *ns, as_storage_rd *rd)
 as_sindex_status
 as_sindex_put_rd(as_sindex *si, as_storage_rd *rd)
 {
-	if (!si) {
-		cf_warning(AS_SINDEX, "SI is null in as_sindex_put_rd");
-		return AS_SINDEX_ERR;
-	}
-
 	// Proceed only if sindex is active
 	SINDEX_GRLOCK();
-	if (!as_sindex_isactive(si)) {
+	if (! as_sindex_isactive(si)) {
 		SINDEX_GRUNLOCK();
 		return AS_SINDEX_ERR;
 	}
@@ -5075,9 +5051,11 @@ int
 as_sindex_init(as_namespace *ns)
 {
 	ns->sindex = cf_malloc(sizeof(as_sindex) * AS_SINDEX_MAX);
-	if (!ns->sindex)
+
+	if (! ns->sindex) {
 		cf_crash(AS_SINDEX,
 				"Could not allocation memory for secondary index");
+	}
 
 	ns->sindex_cnt = 0;
 	for (int i = 0; i < AS_SINDEX_MAX; i++) {
