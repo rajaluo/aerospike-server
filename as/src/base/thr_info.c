@@ -1066,121 +1066,6 @@ info_command_dump_ra(char *name, char *params, cf_dyn_buf *db)
 	return(0);
 }
 
-int
-info_command_alloc_info(char *name, char *params, cf_dyn_buf *db)
-{
-	cf_debug(AS_INFO, "alloc-info command received: params %s", params);
-
-#ifdef MEM_COUNT
-	/*
-	 *  Command Format:  "alloc-info:loc=<loc>"
-	 *
-	 *   where <loc> is a string of the form:  <Filename>:<LineNumber>
-	 */
-
-	char param_str[100], file[100];
-	int line;
-	int param_str_len = sizeof(param_str);
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "loc", param_str, &param_str_len)) {
-		char *colon_ptr = strchr(param_str, ':');
-		if (colon_ptr) {
-			*colon_ptr++ = '\0';
-			strncpy(file, param_str, sizeof(file));
-			line = atoi(colon_ptr);
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command \"loc\" parameter (received: \"%s\") needs to be of the form: <Filename>:<LineNumber>", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	} else {
-		cf_warning(AS_INFO, "The \"%s:\" command requires a \"loc\" parameter of the form: <Filename>:<LineNumber>", name);
-		cf_dyn_buf_append_string(db, "error");
-		return 0;
-	}
-
-	char *status = "ok";
-	if (mem_count_alloc_info(file, line, db)) {
-		status = "error";
-	}
-	cf_dyn_buf_append_string(db, status);
-#else
-	cf_warning(AS_INFO, "memory allocation counting not compiled into build ~~ rebuild with \"MEM_COUNT=1\" to use");
-	cf_dyn_buf_append_string(db, "error");
-#endif
-
-	return 0;
-}
-
-int
-info_command_mem(char *name, char *params, cf_dyn_buf *db)
-{
-	cf_debug(AS_INFO, "mem command received: params %s", params);
-
-#ifdef MEM_COUNT
-	/*
-	 *	Command Format:	 "mem:{top_n=<N>;sort_by=<opt>}"
-	 *
-	 *	 where <opt> is one of:
-	 *      "space"         --  Net allocation size.
-	 *      "time"          --  Most recently allocated.
-	 *      "net_count"     --  Net number of allocation calls.
-	 *      "total_count"   --  Total number of allocation calls.
-	 *      "change"        --  Delta in allocation size.
-	 */
-
-	// These next values are the initial defaults for the report to be run.
-	static int top_n = 10;
-	static sort_field_t sort_by = CF_ALLOC_SORT_NET_SZ;
-
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "top_n", param_str, &param_str_len)) {
-		int new_top_n = atoi(param_str);
-		if ((new_top_n >= 1) && (new_top_n <= 100000)) {
-			top_n = new_top_n;
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command \"top_n\" value (received: %d) must be >= 1 and <= 100000.", name, new_top_n);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-
-	param_str_len = sizeof(param_str);
-	if (!as_info_parameter_get(params, "sort_by", param_str, &param_str_len)) {
-		if (!strcmp(param_str, "space")) {
-			sort_by = CF_ALLOC_SORT_NET_SZ;
-		} else if (!strcmp(param_str, "time")) {
-			sort_by = CF_ALLOC_SORT_TIME_LAST_MODIFIED;
-		} else if (!strcmp(param_str, "net_count")) {
-			sort_by = CF_ALLOC_SORT_NET_ALLOC_COUNT;
-		} else if (!strcmp(param_str, "total_count")) {
-			sort_by = CF_ALLOC_SORT_TOTAL_ALLOC_COUNT;
-		} else if (!strcmp(param_str, "change")) {
-			sort_by = CF_ALLOC_SORT_DELTA_SZ;
-		} else {
-			cf_warning(AS_INFO, "Unknown \"%s:\" command \"sort_by\" option (received: \"%s\".)  Must be one of: {\"space\", \"time\", \"net_count\", \"total_count\", \"change\"}.", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-
-	char *status = "ok";
-	if (mem_count_report(sort_by, top_n, db)) {
-		status = "error";
-	}
-	cf_dyn_buf_append_string(db, status);
-#else
-	cf_warning(AS_INFO, "memory allocation counting not compiled into build ~~ rebuild with \"MEM_COUNT=1\" to use");
-	cf_dyn_buf_append_string(db, "error");
-#endif
-
-	return 0;
-}
-
 void
 info_log_with_datestamp(void (*log_fn)(void))
 {
@@ -1843,9 +1728,6 @@ info_service_config_get(cf_dyn_buf *db)
 #endif
 	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
 	info_append_int(db, "max-msgs-per-type", (int)g_config.max_msgs_per_type);
-#ifdef MEM_COUNT
-	info_append_bool(db, "memory-accounting", g_config.memory_accounting);
-#endif
 	info_append_uint32(db, "prole-extra-ttl", g_config.prole_extra_ttl);
 	info_append_bool(db, "non-master-sets-delete", g_config.non_master_sets_delete); // dynamic only
 }
@@ -2432,22 +2314,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of max-msgs-per-type from %"PRId64" to %d ", g_config.max_msgs_per_type, val);
 			msg_set_max_msgs_per_type(g_config.max_msgs_per_type = (val >= 0 ? val : -1));
 		}
-#ifdef MEM_COUNT
-		else if (0 == as_info_parameter_get(params, "memory-accounting", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				g_config.memory_accounting = true;
-				cf_info(AS_INFO, "Changing value of memory-accounting from %s to %s", bool_val[g_config.memory_accounting], context);
-				mem_count_init(MEM_COUNT_ENABLE_DYNAMIC);
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				g_config.memory_accounting = false;
-				cf_info(AS_INFO, "Changing value of memory-accounting from %s to %s", bool_val[g_config.memory_accounting], context);
-				mem_count_init(MEM_COUNT_DISABLE);
-			}
-			else
-				goto Error;
-		}
-#endif
 		else if (0 == as_info_parameter_get(params, "query-buf-size", context, &context_len)) {
 			uint64_t val = atoll(context);
 			cf_debug(AS_INFO, "query-buf-size = %"PRIu64"", val);
@@ -7109,7 +6975,6 @@ as_info_init()
 	as_info_set_tree("sets", info_get_tree_sets);           // Returns set statistics for all or a particular set.
 
 	// Define commands
-	as_info_set_command("alloc-info", info_command_alloc_info, PERM_NONE);                    // Lookup a memory allocation by program location.
 	as_info_set_command("asm", info_command_asm, PERM_SERVICE_CTRL);                          // Control the operation of the ASMalloc library.
 	as_info_set_command("config-get", info_command_config_get, PERM_NONE);                    // Returns running config for specified context.
 	as_info_set_command("config-set", info_command_config_set, PERM_SET_CONFIG);              // Set a configuration parameter at run time, configuration parameter must be dynamic.
@@ -7135,7 +7000,6 @@ as_info_init()
 	as_info_set_command("latency", info_command_hist_track, PERM_NONE);                       // Returns latency and throughput information.
 	as_info_set_command("log-message", info_command_log_message, PERM_NONE);                  // Log a message.
 	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
-	as_info_set_command("mem", info_command_mem, PERM_NONE);                                  // Report on memory usage.
 	as_info_set_command("mstats", info_command_mstats, PERM_LOGGING_CTRL);                    // Dump GLibC-level memory stats.
 	as_info_set_command("mtrace", info_command_mtrace, PERM_SERVICE_CTRL);                    // Control GLibC-level memory tracing.
 	as_info_set_command("peers-clear-alt", info_get_services_clear_alt_delta, false);         // The delta update version of "peers-clear-alt".

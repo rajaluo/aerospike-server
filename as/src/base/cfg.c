@@ -169,7 +169,6 @@ cfg_set_defaults()
 	c->work_directory = "/opt/aerospike";
 	c->fabric_dump_msgs = false;
 	c->max_msgs_per_type = -1; // by default, the maximum number of "msg" objects per type is unlimited
-	c->memory_accounting = false;
 	c->asmalloc_enabled = true;
 
 	// Network heartbeat defaults.
@@ -338,7 +337,6 @@ typedef enum {
 	CASE_SERVICE_ASMALLOC_ENABLED,
 	CASE_SERVICE_FABRIC_DUMP_MSGS,
 	CASE_SERVICE_MAX_MSGS_PER_TYPE,
-	CASE_SERVICE_MEMORY_ACCOUNTING,
 	CASE_SERVICE_PROLE_EXTRA_TTL,
 	// Obsoleted:
 	CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS,
@@ -832,7 +830,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "asmalloc-enabled",				CASE_SERVICE_ASMALLOC_ENABLED },
 		{ "fabric-dump-msgs",				CASE_SERVICE_FABRIC_DUMP_MSGS },
 		{ "max-msgs-per-type",				CASE_SERVICE_MAX_MSGS_PER_TYPE },
-		{ "memory-accounting",				CASE_SERVICE_MEMORY_ACCOUNTING },
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
 		{ "allow-inline-transactions",		CASE_SERVICE_ALLOW_INLINE_TRANSACTIONS },
 		{ "auto-dun",						CASE_SERVICE_AUTO_DUN },
@@ -2371,9 +2368,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_MAX_MSGS_PER_TYPE:
 				c->max_msgs_per_type = cfg_i64_no_checks(&line);
 				msg_set_max_msgs_per_type(c->max_msgs_per_type = c->max_msgs_per_type >= 0 ? c->max_msgs_per_type : -1);
-				break;
-			case CASE_SERVICE_MEMORY_ACCOUNTING:
-				c->memory_accounting = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_PROLE_EXTRA_TTL:
 				c->prole_extra_ttl = cfg_u32_no_checks(&line);

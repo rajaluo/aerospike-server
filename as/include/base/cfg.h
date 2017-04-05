@@ -178,7 +178,6 @@ typedef struct as_config_s {
 	PAD_BOOL		asmalloc_enabled; // whether ASMalloc integration is enabled
 	PAD_BOOL		fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
 	int64_t			max_msgs_per_type; // maximum number of "msg" objects permitted per type
-	PAD_BOOL		memory_accounting; // whether memory accounting is enabled
 	uint32_t		prole_extra_ttl; // seconds beyond expiry time after which we garbage collect, 0 for no garbage collection
 	PAD_BOOL		non_master_sets_delete;	// dynamic only - locally delete non-master records in sets that are being emptied
 
