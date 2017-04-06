@@ -459,7 +459,7 @@ typedef enum as_smd_state_e {
 
 typedef struct smd_pending_merge_s {
 	as_smd_msg_t m;
-	cf_clock expire;
+	uint64_t expire;
 } smd_pending_merge;
 
 /*
@@ -485,7 +485,7 @@ struct as_smd_s {
 	// Scoreboard of what cluster nodes the SMD principal has received metadata from:  cf_node ==> shash *.
 	shash *scoreboard;
 
-	cf_queue pending_merge; // elements are (smd_pending_merge)
+	cf_queue pending_merge_queue; // elements are (smd_pending_merge)
 };
 
 /*
@@ -1099,7 +1099,8 @@ static as_smd_t *as_smd_create(void)
 		cf_crash(AS_SMD, "failed to create the System Metadata message queue");
 	}
 
-	if (! cf_queue_init(&smd->pending_merge, sizeof(smd_pending_merge), 128, false)) {
+	if (! cf_queue_init(&smd->pending_merge_queue, sizeof(smd_pending_merge),
+			128, false)) {
 		cf_crash(AS_SMD, "failed to create the System Metadata pending_merge queue");
 	}
 
@@ -2371,20 +2372,42 @@ static int as_smd_module_serialize_reduce_fn(const void *key, uint32_t keylen, v
 static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg);
 
 static void
+smd_expire_pending_merges()
+{
+	if (cf_queue_sz(&g_smd->pending_merge_queue) == 0) {
+		return;
+	}
+
+	smd_pending_merge item;
+	uint64_t now = cf_getms();
+
+	while (cf_queue_pop(&g_smd->pending_merge_queue, &item, CF_QUEUE_NOWAIT) ==
+			CF_QUEUE_OK) {
+		if (item.expire > now) {
+			cf_queue_push_head(&g_smd->pending_merge_queue, &item);
+			break;
+		}
+
+		cf_free(item.m.module_name);
+		as_smd_item_list_destroy(item.m.items);
+	}
+}
+
+static void
 smd_process_pending_merges()
 {
-	cf_clock now = cf_getms();
+	uint64_t now = cf_getms();
 	smd_pending_merge item;
-	int count = cf_queue_sz(&g_smd->pending_merge);
+	int count = cf_queue_sz(&g_smd->pending_merge_queue);
 
 	for (int i = 0; i < count; i++) {
-		cf_queue_pop(&g_smd->pending_merge, &item, CF_QUEUE_NOWAIT);
+		cf_queue_pop(&g_smd->pending_merge_queue, &item, CF_QUEUE_NOWAIT);
 
 		if (item.m.cluster_key == g_cluster_key) {
 			as_smd_receive_metadata(g_smd, &item.m);
 		}
-		else if (item.expire < now) {
-			cf_queue_push(&g_smd->pending_merge, &item);
+		else if (item.expire > now) {
+			cf_queue_push(&g_smd->pending_merge_queue, &item);
 			continue;
 		}
 
@@ -2908,7 +2931,7 @@ smd_add_pending_merge(as_smd_msg_t *sm)
 	sm->items = NULL;
 	sm->module_name = NULL;
 
-	cf_queue_push(&g_smd->pending_merge, &add);
+	cf_queue_push(&g_smd->pending_merge_queue, &add);
 }
 
 /*
@@ -3442,6 +3465,7 @@ void *as_smd_thr(void *arg)
 		if (CF_QUEUE_EMPTY == retval) {
 			// [Could handle any periodic / background events here when there's nothing else to do.]
 			cf_detail(AS_SMD, "System Metadata thread - received timeout event");
+			smd_expire_pending_merges();
 		} else {
 			as_smd_process_event(smd, evt);
 
