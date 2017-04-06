@@ -254,6 +254,7 @@ static int fabric_node_disconnect_reduce_fn(const void *key, void *data, void *u
 static void fabric_node_disconnect(cf_node node_id);
 
 static fabric_connection *fabric_node_connect(fabric_node *node, uint32_t ch);
+static int fabric_node_send(fabric_node *node, msg *m, as_fabric_channel channel);
 static void fabric_node_connect_all(fabric_node *node);
 static void fabric_node_destructor(void *pnode);
 inline static void fabric_node_reserve(fabric_node *node);
@@ -286,6 +287,7 @@ static void fabric_connection_send_rearm(fabric_connection *fc);
 static void fabric_connection_disconnect(fabric_connection *fc);
 static void fabric_connection_set_keepalive_options(fabric_connection *fc);
 
+static void fabric_connection_reroute_msg(fabric_connection *fc);
 static void fabric_connection_send_progress(fabric_connection *fc, bool is_last);
 static bool fabric_connection_process_writable(fabric_connection *fc);
 
@@ -531,54 +533,7 @@ as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel)
 		return AS_FABRIC_ERR_BAD_MSG;
 	}
 
-	fabric_node *node = fabric_node_get(node_id);
-
-	if (! node) {
-		return AS_FABRIC_ERR_NO_NODE;
-	}
-
-	if (! node->live) {
-		fabric_node_release(node); // cf_rchash_get
-		return AS_FABRIC_ERR_NO_NODE;
-	}
-
-	while (true) {
-		// Sync with fabric_connection_process_writable() to avoid non-empty
-		// send_queue with every fc being in send_idle_fc_queue.
-		pthread_mutex_lock(&node->send_idle_fc_queue_lock);
-
-		fabric_connection *fc;
-		int rv = cf_queue_pop(&node->send_idle_fc_queue[(int)channel], &fc,
-				CF_QUEUE_NOWAIT);
-
-		if (rv != CF_QUEUE_OK) {
-			cf_queue_push(&node->send_queue[(int)channel], &m);
-			pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
-
-			if (! node->connect_full) {
-				fabric_node_connect_all(node);
-			}
-
-			break;
-		}
-
-		pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
-
-		if ((! cf_socket_exists(&fc->sock)) || fc->failed) {
-			fabric_connection_release(fc); // send_idle_fc_queue
-			continue;
-		}
-
-		// Wake up.
-		fc->s_msg_in_progress = m;
-		fabric_connection_send_rearm(fc); // takes fc ref
-
-		break;
-	}
-
-	fabric_node_release(node); // cf_rchash_get
-
-	return AS_FABRIC_SUCCESS;
+	return fabric_node_send(fabric_node_get(node_id), m, channel);
 }
 
 int
@@ -1068,6 +1023,57 @@ fabric_node_connect(fabric_node *node, uint32_t ch)
 	return fc;
 }
 
+static int
+fabric_node_send(fabric_node *node, msg *m, as_fabric_channel channel)
+{
+	if (! node) {
+		return AS_FABRIC_ERR_NO_NODE;
+	}
+
+	if (! node->live) {
+		fabric_node_release(node); // cf_rchash_get
+		return AS_FABRIC_ERR_NO_NODE;
+	}
+
+	while (true) {
+		// Sync with fabric_connection_process_writable() to avoid non-empty
+		// send_queue with every fc being in send_idle_fc_queue.
+		pthread_mutex_lock(&node->send_idle_fc_queue_lock);
+
+		fabric_connection *fc;
+		int rv = cf_queue_pop(&node->send_idle_fc_queue[(int)channel], &fc,
+				CF_QUEUE_NOWAIT);
+
+		if (rv != CF_QUEUE_OK) {
+			cf_queue_push(&node->send_queue[(int)channel], &m);
+			pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
+
+			if (! node->connect_full) {
+				fabric_node_connect_all(node);
+			}
+
+			break;
+		}
+
+		pthread_mutex_unlock(&node->send_idle_fc_queue_lock);
+
+		if ((! cf_socket_exists(&fc->sock)) || fc->failed) {
+			fabric_connection_release(fc); // send_idle_fc_queue
+			continue;
+		}
+
+		// Wake up.
+		fc->s_msg_in_progress = m;
+		fabric_connection_send_rearm(fc); // takes fc ref
+
+		break;
+	}
+
+	fabric_node_release(node); // cf_rchash_get
+
+	return AS_FABRIC_SUCCESS;
+}
+
 static void
 fabric_node_connect_all(fabric_node *node)
 {
@@ -1540,6 +1546,21 @@ fabric_connection_set_keepalive_options(fabric_connection *fc)
 				g_config.fabric_keepalive_intvl,
 				g_config.fabric_keepalive_probes);
 	}
+}
+
+static void
+fabric_connection_reroute_msg(fabric_connection *fc)
+{
+	if (! fc->s_msg_in_progress) {
+		return;
+	}
+
+	if (fabric_node_send(fc->node, fc->s_msg_in_progress, fc->pool->pool_id) !=
+			AS_FABRIC_SUCCESS) {
+		as_fabric_msg_put(fc->s_msg_in_progress);
+	}
+
+	fc->s_msg_in_progress = NULL;
 }
 
 static void
@@ -2191,6 +2212,7 @@ run_fabric_send(void *arg)
 						((events[i].events & EPOLLRDHUP) ? 1 : 0));
 				fabric_connection_disconnect(fc);
 				fabric_connection_send_unassign(fc);
+				fabric_connection_reroute_msg(fc);
 				fabric_connection_release(fc);
 				continue;
 			}
@@ -2200,6 +2222,7 @@ run_fabric_send(void *arg)
 			if (! fabric_connection_process_writable(fc)) {
 				fabric_connection_disconnect(fc);
 				fabric_connection_send_unassign(fc);
+				fabric_connection_reroute_msg(fc);
 				fabric_connection_release(fc);
 				continue;
 			}
