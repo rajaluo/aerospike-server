@@ -455,6 +455,13 @@ typedef enum as_smd_state_e {
 									(AS_SMD_STATE_RUNNING == state ? "RUNNING" : \
 									 (AS_SMD_STATE_EXITING == state ? "EXITING" : "UNKNOWN"))))
 
+#define SMD_PENDING_MERGE_TIMEOUT_SEC 30
+
+typedef struct smd_pending_merge_s {
+	as_smd_msg_t m;
+	cf_clock expire;
+} smd_pending_merge;
+
 /*
  *  Internal representation of the state of the System Metadata module.
  */
@@ -478,6 +485,7 @@ struct as_smd_s {
 	// Scoreboard of what cluster nodes the SMD principal has received metadata from:  cf_node ==> shash *.
 	shash *scoreboard;
 
+	cf_queue pending_merge; // elements are (smd_pending_merge)
 };
 
 /*
@@ -1089,6 +1097,10 @@ static as_smd_t *as_smd_create(void)
 	// Create the System Metadata message queue.
 	if (!(smd->msgq = cf_queue_create(sizeof(as_smd_event_t *), true))) {
 		cf_crash(AS_SMD, "failed to create the System Metadata message queue");
+	}
+
+	if (! cf_queue_init(&smd->pending_merge, sizeof(smd_pending_merge), 128, false)) {
+		cf_crash(AS_SMD, "failed to create the System Metadata pending_merge queue");
 	}
 
 	// Create the System Metadata thread.
@@ -2356,6 +2368,31 @@ static int as_smd_module_serialize_reduce_fn(const void *key, uint32_t keylen, v
 	return 0;
 }
 
+static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg);
+
+static void
+smd_process_pending_merges()
+{
+	cf_clock now = cf_getms();
+	smd_pending_merge item;
+	int count = cf_queue_sz(&g_smd->pending_merge);
+
+	for (int i = 0; i < count; i++) {
+		cf_queue_pop(&g_smd->pending_merge, &item, CF_QUEUE_NOWAIT);
+
+		if (item.m.cluster_key == g_cluster_key) {
+			as_smd_receive_metadata(g_smd, &item.m);
+		}
+		else if (item.expire < now) {
+			cf_queue_push(&g_smd->pending_merge, &item);
+			continue;
+		}
+
+		cf_free(item.m.module_name);
+		as_smd_item_list_destroy(item.m.items);
+	}
+}
+
 /*
  *  Handle a cluster state changed message.
  *  This function collects all metadata items in this node, from all the module,
@@ -2403,6 +2440,8 @@ static void as_smd_cluster_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 
 	// Send the serialized metadata to the SMD principal.
 	as_fabric_transact_start(as_smd_principal(), msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+
+	smd_process_pending_merges();
 }
 
 /*
@@ -2857,6 +2896,21 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 	return 0;
 }
 
+static void
+smd_add_pending_merge(as_smd_msg_t *sm)
+{
+	smd_pending_merge add = {
+			.m = *sm,
+			.expire = cf_getms() + SMD_PENDING_MERGE_TIMEOUT_SEC * 1000
+	};
+
+	// Steal memory from original.
+	sm->items = NULL;
+	sm->module_name = NULL;
+
+	cf_queue_push(&g_smd->pending_merge, &add);
+}
+
 /*
  *  Receive a node's metadata on the SMD principal to be combined via the registered merge policy.
  */
@@ -2864,16 +2918,21 @@ static int as_smd_receive_metadata(as_smd_t *smd, as_smd_msg_t *smd_msg)
 {
 	int retval = 0;
 
-	// Only the SMD principal receives other node's metadata.)
-	if (as_smd_principal() != g_config.self_node) {
-		cf_debug(AS_SMD, "non-principal node %016lX received metadata from node %016lX ~~ Ignoring!", g_config.self_node, smd_msg->node_id);
+	// Only the SMD principal receives other node's metadata.
+	if (g_config.self_node != as_smd_principal()) {
+		if (smd_msg->cluster_key != g_cluster_key) {
+			smd_add_pending_merge(smd_msg);
+		}
+
+		cf_debug(AS_SMD, "non-principal node %016lX received metadata from node %016lX", g_config.self_node, smd_msg->node_id);
 		return -1;
 	}
 
 	cf_debug(AS_SMD, "System Metadata thread - received %d metadata items from node %016lX", smd_msg->num_items, smd_msg->node_id);
 
 	if (g_cluster_key != smd_msg->cluster_key) {
-		cf_debug(AS_SMD, "received SMD with non-current cluster key (%016lx != %016lx) from node %016lX ~~ Ignoring!",
+		smd_add_pending_merge(smd_msg);
+		cf_debug(AS_SMD, "received SMD with non-current cluster key (%016lx != %016lx) from node %016lX -> Pending",
 				 smd_msg->cluster_key, g_cluster_key, smd_msg->node_id);
 		return -1;
 	}
