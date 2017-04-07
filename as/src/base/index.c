@@ -32,6 +32,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <xmmintrin.h>
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
@@ -650,6 +651,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, cf_digest *keyd,
 			ele->me_h = t_h;
 			ele->me = t;
 
+			_mm_prefetch(t, _MM_HINT_NTA);
 			if ((cmp = cf_digest_compare(keyd, &t->keyd)) == 0) {
 				// The element already exists, simply return it.
 
@@ -793,6 +795,7 @@ as_index_sprig_delete(as_index_sprig *isprig, cf_digest *keyd)
 			ele->me_h = r_h;
 			ele->me = r;
 
+			_mm_prefetch(r, _MM_HINT_NTA);
 			int cmp = cf_digest_compare(keyd, &r->keyd);
 
 			if (cmp == 0) {
@@ -930,6 +933,7 @@ as_index_sprig_search_lockless(as_index_sprig *isprig, cf_digest *keyd,
 	as_index *r = RESOLVE_H(r_h);
 
 	while (r_h != SENTINEL_H) {
+		_mm_prefetch(r, _MM_HINT_NTA);
 		int cmp = cf_digest_compare(keyd, &r->keyd);
 
 		if (cmp == 0) {
