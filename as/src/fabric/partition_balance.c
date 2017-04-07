@@ -197,6 +197,16 @@ remove_node(cf_node* nodes, uint32_t n_nodes, cf_node node)
 	return n_nodes;
 }
 
+// A comparison_fn_t used with qsort().
+static inline int
+compare_hashed_nodes(const void* pa, const void* pb)
+{
+	const uint64_t* a = (const uint64_t*)pa;
+	const uint64_t* b = (const uint64_t*)pb;
+
+	return *a > *b ? -1 : (*a == *b ? 0 : 1);
+}
+
 
 //==========================================================
 // Public API - regulate migrations.
@@ -937,7 +947,7 @@ fill_global_tables(cf_node* full_node_seq_table, int* full_version_ix_table)
 
 		// Sort the hashed node values.
 		qsort(&full_node_seq_table[pid * g_cluster_size], g_cluster_size,
-				sizeof(cf_node), cf_compare_uint64ptr);
+				sizeof(cf_node), compare_hashed_nodes);
 
 		// Overwrite the sorted hash values with the original node IDs.
 		for (uint32_t n = 0; n < g_cluster_size; n++) {
