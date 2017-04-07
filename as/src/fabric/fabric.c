@@ -138,7 +138,7 @@ typedef struct fabric_state_s {
 	as_fabric_msg_fn	msg_cb[M_TYPE_MAX];
 	void 				*msg_udata[M_TYPE_MAX];
 
-	cf_queue			*msg_pool_queue[M_TYPE_MAX]; // a pool of reusable msgs
+	cf_queue			msg_pool_queue[M_TYPE_MAX]; // a pool of reusable msgs
 	cf_vector			fb_free;
 
 	fabric_recv_thread_pool recv_pool[AS_FABRIC_N_CHANNELS];
@@ -335,17 +335,17 @@ msg *
 as_fabric_msg_get(msg_type type)
 {
 	if (type >= M_TYPE_MAX) {
-		return 0;
+		return NULL;
 	}
 
-	if (g_fabric.mt[type] == 0) {
-		return 0;
+	if (! g_fabric.mt[type]) {
+		return NULL;
 	}
 
-	msg *m = 0;
-	cf_queue *q = g_fabric.msg_pool_queue[type];
+	msg *m = NULL;
 
-	if (cf_queue_pop(q, &m, CF_QUEUE_NOWAIT) != CF_QUEUE_OK) {
+	if (cf_queue_pop(&g_fabric.msg_pool_queue[type], &m, CF_QUEUE_NOWAIT) !=
+			CF_QUEUE_OK) {
 		msg_create(&m, type, g_fabric.mt[type], g_fabric.mt_sz[type],
 				g_fabric.scratch_sz[type]);
 	}
@@ -364,11 +364,11 @@ as_fabric_msg_put(msg *m)
 	if (cnt == 0) {
 		msg_reset(m);
 
-		if (cf_queue_sz(g_fabric.msg_pool_queue[m->type]) > 128) {
+		if (cf_queue_sz(&g_fabric.msg_pool_queue[m->type]) > 128) {
 			msg_put(m);
 		}
 		else {
-			cf_queue_push(g_fabric.msg_pool_queue[m->type], &m);
+			cf_queue_push(&g_fabric.msg_pool_queue[m->type], &m);
 		}
 	}
 	else if (cnt < 0) {
@@ -387,7 +387,7 @@ as_fabric_msg_queue_dump()
 	int total_alloced_msgs = 0;
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
-		int q_sz = cf_queue_sz(g_fabric.msg_pool_queue[i]);
+		int q_sz = cf_queue_sz(&g_fabric.msg_pool_queue[i]);
 		int num_of_type = cf_atomic_int_get(g_num_msgs_by_type[i]);
 
 		total_alloced_msgs += num_of_type;
@@ -432,7 +432,8 @@ as_fabric_init()
 			fabric_node_destructor, sizeof(cf_node), 128, 0);
 
 	for (int i = 0; i < M_TYPE_MAX; i++) {
-		g_fabric.msg_pool_queue[i] = cf_queue_create(sizeof(msg *), true);
+		cf_queue_init(&g_fabric.msg_pool_queue[i], sizeof(msg *),
+				CF_QUEUE_ALLOCSZ, true);
 	}
 
 	cf_vector_init(&g_fabric.fb_free, sizeof(fabric_buffer *), 64,
@@ -920,7 +921,10 @@ fabric_node_disconnect(cf_node node_id)
 				break;
 			}
 
-			fabric_connection_send_unassign(fc);
+			if (fc->send_active) {
+				fabric_connection_send_unassign(fc);
+			}
+
 			fabric_connection_release(fc);
 		}
 	}
@@ -1449,7 +1453,8 @@ fabric_connection_send_unassign(fabric_connection *fc)
 		pp = &(*pp)->next;
 	}
 
-	cf_assert(se->count != 0 && fc->node->send_counts[se->id] != 0, AS_FABRIC, "invalid send_count accounting");
+	cf_assert(se->count != 0 || fc->node->send_counts[se->id] != 0, AS_FABRIC, "invalid send_count accounting se %p id %u count %u node send_count %u",
+			se, se->id, se->count, fc->node->send_counts[se->id]);
 
 	se->count--;
 	fc->node->send_counts[se->id]--;
