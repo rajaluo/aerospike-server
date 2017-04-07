@@ -100,12 +100,12 @@ typedef enum {
 } fs_msg_fields;
 
 static const msg_template fabric_mt[] = {
-	{ FS_FIELD_NODE, M_FT_UINT64 },
-	{ FS_UNUSED1, M_FT_UINT32 },
-	{ FS_UNUSED2, M_FT_UINT32 },
-	{ FS_UNUSED3, M_FT_BUF },
-	{ FS_UNUSED4, M_FT_BUF },
-	{ FS_CHANNEL, M_FT_UINT32 },
+		{ FS_FIELD_NODE, M_FT_UINT64 },
+		{ FS_UNUSED1, M_FT_UINT32 },
+		{ FS_UNUSED2, M_FT_UINT32 },
+		{ FS_UNUSED3, M_FT_BUF },
+		{ FS_UNUSED4, M_FT_BUF },
+		{ FS_CHANNEL, M_FT_UINT32 },
 };
 
 COMPILER_ASSERT(sizeof(fabric_mt) / sizeof(msg_template) == NUM_FS_FIELDS);
@@ -533,7 +533,14 @@ as_fabric_send(cf_node node_id, msg *m, as_fabric_channel channel)
 		return AS_FABRIC_ERR_BAD_MSG;
 	}
 
-	return fabric_node_send(fabric_node_get(node_id), m, channel);
+	fabric_node *node = fabric_node_get(node_id);
+	int ret = fabric_node_send(node, m, channel);
+
+	if (node) {
+		fabric_node_release(node); // from fabric_node_get
+	}
+
+	return ret;
 }
 
 int
@@ -1031,7 +1038,6 @@ fabric_node_send(fabric_node *node, msg *m, as_fabric_channel channel)
 	}
 
 	if (! node->live) {
-		fabric_node_release(node); // cf_rchash_get
 		return AS_FABRIC_ERR_NO_NODE;
 	}
 
@@ -1068,8 +1074,6 @@ fabric_node_send(fabric_node *node, msg *m, as_fabric_channel channel)
 
 		break;
 	}
-
-	fabric_node_release(node); // cf_rchash_get
 
 	return AS_FABRIC_SUCCESS;
 }
@@ -2656,6 +2660,7 @@ as_fabric_transact_reply(msg *m, void *transact_data)
 
 	return 0;
 }
+
 
 //==========================================================
 // Local helpers - various initializers and destructors.
