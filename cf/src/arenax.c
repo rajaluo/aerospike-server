@@ -36,7 +36,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <xmmintrin.h>
 #include <sys/types.h>
 
 #include "fault.h"
@@ -238,8 +237,6 @@ cf_arenax_free(cf_arenax* this, cf_arenax_handle h)
 void*
 cf_arenax_resolve(cf_arenax* this, cf_arenax_handle h)
 {
-	_mm_prefetch(&this->stages[h >> ELEMENT_ID_NUM_BITS], _MM_HINT_NTA);
-
 	return this->stages[h >> ELEMENT_ID_NUM_BITS] +
 			((h & ELEMENT_ID_MASK) * this->element_size);
 }
