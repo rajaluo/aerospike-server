@@ -920,7 +920,10 @@ fabric_node_disconnect(cf_node node_id)
 				break;
 			}
 
-			fabric_connection_send_unassign(fc);
+			if (fc->send_active) {
+				fabric_connection_send_unassign(fc);
+			}
+
 			fabric_connection_release(fc);
 		}
 	}
@@ -1449,7 +1452,8 @@ fabric_connection_send_unassign(fabric_connection *fc)
 		pp = &(*pp)->next;
 	}
 
-	cf_assert(se->count != 0 && fc->node->send_counts[se->id] != 0, AS_FABRIC, "invalid send_count accounting");
+	cf_assert(se->count != 0 || fc->node->send_counts[se->id] != 0, AS_FABRIC, "invalid send_count accounting se %p id %u count %u node send_count %u",
+			se, se->id, se->count, fc->node->send_counts[se->id]);
 
 	se->count--;
 	fc->node->send_counts[se->id]--;
