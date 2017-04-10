@@ -48,7 +48,7 @@ typedef struct as_index_s {
 	cf_atomic32 rc;		// must be on 4-byte boundary
 
 	// offset: 4
-	cf_digest key;		// 20 bytes
+	cf_digest keyd;
 
 	// offset: 24
 	uint64_t right_h: 40;
@@ -356,7 +356,7 @@ int as_index_delete(as_index_tree *tree, cf_digest *keyd);
 #define as_index_release(_r) cf_atomic32_decr(&(_r->rc))
 
 #ifdef USE_KV
-int as_index_ref_initialize(as_index_tree *tree, cf_digest *key, as_index_ref *index_ref, bool create_p, as_namespace *ns);
+int as_index_ref_initialize(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref, bool create_p, as_namespace *ns);
 #endif
 
 

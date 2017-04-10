@@ -865,12 +865,6 @@ dump_namespace_histograms(as_namespace* ns)
 void
 log_mem_stats(size_t total_ns_memory_inuse)
 {
-#ifdef MEM_COUNT
-	if (g_config.memory_accounting) {
-		mem_count_stats();
-	}
-#endif
-
 #ifdef USE_ASM
 	if (g_asm_hook_enabled) {
 		static uint64_t iter = 0;

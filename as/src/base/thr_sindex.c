@@ -198,6 +198,15 @@ as_sindex__destroy_fn(void *param)
 		cf_atomic64_sub(&si->ns->n_bytes_sindex_memory,
 				ai_btree_get_isize(si->imd) + ai_btree_get_nsize(si->imd));    
 
+		// Cache the ibtr pointers
+		uint16_t nprts = si->imd->nprts;
+		struct btree *ibtr[nprts];
+		for (int i = 0; i < nprts; i++) {
+			as_sindex_pmetadata *pimd = &si->imd->pimd[i];
+			ibtr[i] = pimd->ibtr;
+			ai_btree_reset_pimd(pimd);
+		}
+
 		ai_btree_destroy(si->imd);
 		as_sindex_destroy_pmetadata(si);
 		si->state = AS_SINDEX_INACTIVE;
@@ -228,6 +237,11 @@ as_sindex__destroy_fn(void *param)
 		// of meta-data first. This is the only special case
 		// where both GLOCK and LOCK is called together
 		SINDEX_GWUNLOCK();
+
+		// Destroy cached ibtr pointer
+		for (int i = 0; i < imd->nprts; i++) {
+			ai_btree_delete_ibtr(ibtr[i]);
+		}
 
 		if (si->new_imd) {
 			as_sindex_metadata *recreate_imd = si->new_imd;
@@ -808,7 +822,7 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	if (job->si) {
-		if (! as_sindex_isactive(job->si) || job->si->desync_cnt > job->si_desync_cnt) {
+		if (job->si->desync_cnt > job->si_desync_cnt) {
 			as_record_done(r_ref, ns);
 			as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
 			return;
@@ -828,13 +842,17 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	as_storage_rd rd;
-	as_storage_record_open(ns, r, &rd, &r->key);
+	as_storage_record_open(ns, r, &rd);
 	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
 	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
 	if (job->si) {
-		as_sindex_put_rd(job->si, &rd);
+		if (as_sindex_put_rd(job->si, &rd)) {
+			as_record_done(r_ref, ns);
+			as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
+			return;
+		}
 	}
 	else {
 		as_sindex_putall_rd(ns, &rd);

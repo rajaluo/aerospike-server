@@ -1468,10 +1468,24 @@ ai_btree_reinit_pimd(as_sindex_pmetadata * pimd)
 }
 
 void
-ai_btree_delete_ibtr(bt * ibtr, int imatch)
+ai_btree_reset_pimd(as_sindex_pmetadata *pimd)
+{
+	if (! pimd->ibtr) {
+		cf_crash(AS_SINDEX, "IBTR is null");
+	}
+
+	r_ind_t *ri = &Index[pimd->imatch];
+	ri->btr = NULL;
+	pimd->ibtr = NULL;
+}
+
+
+
+void
+ai_btree_delete_ibtr(bt * ibtr)
 {
 	if (! ibtr) {
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
-	ai_destroy_index(ibtr, imatch);	
+	ai_destroy_index(ibtr);	
 }

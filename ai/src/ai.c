@@ -199,18 +199,11 @@ void ai_init()
 	g_ai_initialized = true;
 }
 
-static void destroy_index(bt *ibtr, bt_n *n, int imatch)
+static void destroy_index(bt *ibtr, bt_n *n)
 {
-	r_ind_t *ri = &Index[imatch];
-
-	if (UNIQ(ri->cnstr)) {
-		bt_destroy(ibtr);
-		return;
-	}
-
-	if (!n->leaf) {
+	if (! n->leaf) {
 		for (int i = 0; i <= n->n; i++) {
-			destroy_index(ibtr, NODES(ibtr, n)[i], imatch);
+			destroy_index(ibtr, NODES(ibtr, n)[i]);
 		}
 	}
 
@@ -255,7 +248,7 @@ static void emptyIndex(int imatch, bool is_part)
 		}
 	}
 	if ((is_part || 0 <= ri->icol->cmatch) && ri->btr) {
-		destroy_index(ri->btr, ri->btr->root, imatch);
+		destroy_index(ri->btr, ri->btr->root);
 	}
 	if (ri->icol) {
 		cf_free(ri->icol);
@@ -280,9 +273,9 @@ static void emptyIndex(int imatch, bool is_part)
 }
 
 // imatch is not necessary here.
-void ai_destroy_index(bt * btr, int imatch)
+void ai_destroy_index(bt * btr)
 {
-	destroy_index(btr, btr->root, imatch);
+	destroy_index(btr, btr->root);
 }
 
 static int validateCreateTableCnames(cf_ll *cnames)
@@ -590,10 +583,8 @@ int ai_create_index(char *iname, char *tname, char *cname, int col_type, int num
 		goto END;
 	}
 
-	// Actually create the index.
-	uchar cnstr = CONSTRAINT_NONE;
 	// Create new index for 0th pimd
-	rv = newIndex(iname, tmatch, ic, cnstr, col_type, num_partitions);
+	rv = newIndex(iname, tmatch, ic, CONSTRAINT_NONE, col_type, num_partitions);
 	if (0 > rv) {
 		cf_warning(AS_SINDEX, "newIndex failed with error %d", rv);
 		goto END;
@@ -606,7 +597,7 @@ int ai_create_index(char *iname, char *tname, char *cname, int col_type, int num
 	for (int i = 1; i < num_partitions; i++) {
 		char piname[INDD_HASH_KEY_SIZE];
 		snprintf(piname, sizeof(piname), "%s.%d", iname, i);
-		if (0 > newIndex(piname, tmatch, ic, cnstr, col_type, -1)) {
+		if (0 > newIndex(piname, tmatch, ic, CONSTRAINT_NONE, col_type, -1)) {
 			rv = -1;
 			cf_warning(AS_SINDEX, "newIndex failed with error %d", rv);
 			goto END;

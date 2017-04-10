@@ -209,7 +209,7 @@ as_storage_record_destroy(as_namespace *ns, as_record *r)
 // as_storage_record_create
 //
 
-typedef int (*as_storage_record_create_fn)(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
+typedef int (*as_storage_record_create_fn)(as_storage_rd *rd);
 static const as_storage_record_create_fn as_storage_record_create_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
 	0, // memory has no record create
@@ -218,13 +218,12 @@ static const as_storage_record_create_fn as_storage_record_create_table[AS_STORA
 };
 
 int
-as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd)
+as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
 	rd->storage_type = ns->storage_type;
 	rd->r = r;
 	rd->ns = ns;
 	as_rec_props_clear(&rd->rec_props);
-	rd->keyd = *keyd;
 	rd->bins = 0;
 	rd->n_bins = 0;
 	rd->record_on_device = false;
@@ -234,7 +233,7 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_d
 	rd->is_durable_delete = false;
 
 	if (as_storage_record_create_table[ns->storage_type]) {
-		return as_storage_record_create_table[ns->storage_type](ns, r, rd, keyd);
+		return as_storage_record_create_table[ns->storage_type](rd);
 	}
 
 	return 0;
@@ -244,7 +243,7 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_d
 // as_storage_record_open
 //
 
-typedef int (*as_storage_record_open_fn)(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd);
+typedef int (*as_storage_record_open_fn)(as_storage_rd *rd);
 static const as_storage_record_open_fn as_storage_record_open_table[AS_STORAGE_ENGINE_TYPES] = {
 	NULL,
 	0, // memory has no record open
@@ -253,13 +252,12 @@ static const as_storage_record_open_fn as_storage_record_open_table[AS_STORAGE_E
 };
 
 int
-as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_digest *keyd)
+as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
 	rd->storage_type = ns->storage_type;
 	rd->r = r;
 	rd->ns = ns;
 	as_rec_props_clear(&rd->rec_props);
-	rd->keyd = *keyd;
 	rd->bins = 0;
 	rd->n_bins = 0;
 	rd->record_on_device = true;
@@ -269,7 +267,7 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd, cf_dig
 	rd->is_durable_delete = false;
 
 	if (as_storage_record_open_table[ns->storage_type]) {
-		return as_storage_record_open_table[ns->storage_type](ns, r, rd, keyd);
+		return as_storage_record_open_table[ns->storage_type](rd);
 	}
 
 	return 0;

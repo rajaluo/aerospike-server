@@ -19,6 +19,7 @@ endif
 
 ifeq ($(USE_EE),1)
   include $(EEREPO)/as/make_in/Makefile.vars
+  include $(EEREPO)/xdr/make_in/Makefile.vars
 endif
 
 BASE_HEADERS += aggr.h asm.h batch.h cdt.h cfg.h cluster_config.h datamodel.h index.h job_manager.h json_init.h
@@ -29,7 +30,7 @@ BASE_HEADERS += thr_batch.h thr_info.h thr_query.h thr_sindex.h
 BASE_HEADERS += thr_tsvc.h ticker.h transaction.h transaction_policy.h truncate.h
 BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h
 BASE_HEADERS += udf_memtracker.h udf_record.h udf_timer.h
-BASE_HEADERS += xdr_serverside.h
+BASE_HEADERS += xdr_serverside.h xdr_config.h
 
 BASE_SOURCES += aggr.c as.c asm.c batch.c bin.c cdt.c cfg.c cluster_config.c index.c job_manager.c json_init.c
 BASE_SOURCES += ldt.c ldt_record.c ldt_aerospike.c monitor.c namespace.c packet_compression.c
@@ -40,6 +41,8 @@ BASE_SOURCES += thr_batch.c thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.
 BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c truncate.c
 BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
 BASE_SOURCES += udf_memtracker.c udf_record.c udf_timer.c
+BASE_SOURCES += xdr_config.c
+
 ifneq ($(USE_EE),1)
   BASE_SOURCES += cfg_ce.c
   BASE_SOURCES += index_ce.c
@@ -77,7 +80,7 @@ SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCE
 
 SERVER = $(BIN_DIR)/asd
 
-INCLUDES += $(INCLUDE_DIR:%=-I%) -I$(XDR_INCLUDE_DIR)
+INCLUDES += $(INCLUDE_DIR:%=-I%)
 ifeq ($(USE_KV),1)
   INCLUDES += -I$(KV_INCLUDE_DIR)
 endif
@@ -87,6 +90,7 @@ INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
 INCLUDES += -I$(MOD_LUA)/target/$(PLATFORM)/include
 INCLUDES += -I$(JANSSON)/src
 INCLUDES += -I$(S2)
+INCLUDES += -I$(XDR_INCLUDES)
 
 ifeq ($(USE_LUAJIT),1)
   INCLUDES += -I$(LUAJIT)/src
@@ -102,7 +106,6 @@ AS_LIBRARIES += $(LIBRARY_DIR)/libcf.a
 AS_LIBRARIES += $(LIBRARY_DIR)/libai.a
 AS_LIBRARIES += $(MOD_LUA)/target/$(PLATFORM)/lib/libmod_lua.a
 AS_LIBRARIES += $(COMMON)/target/$(PLATFORM)/lib/libaerospike-common.a
-AS_LIBRARIES += $(LIBRARY_DIR)/libxdrconfig.a
 
 ifeq ($(DOPROFILE),1)
   LIBRARIES += -pg -fprofile-arcs -lgcov
@@ -155,6 +158,7 @@ endif
 OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ) $(SYSTEMTAP_PROBES_O)
 OBJECTS = $(OBJECTS.c:%.cc=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
+DEPENDENCIES += $(XDR_DEPENDENCIES)
 MEXP_SOURCES = $(SOURCES:%=$(MEXP_DIR)/%)
 PREPROS = $(OBJECTS:%=%$(PREPRO_SUFFIX))
 
@@ -172,11 +176,15 @@ clean:
 check-syntax:
 	$(CC) -Wall -Wextra -pedantic -fsyntax-only $(CHK_SOURCES)
 
-$(SERVER): $(OBJECTS) $(AS_LIB_DEPS)
+$(SERVER): $(OBJECTS) $(AS_LIB_DEPS) $(XDR_LIBRARY) $(XDR_ALL_OBJECTS)
 ifneq ($(PREPRO),1)
   ifneq ($(MEXP_PHASE),1)
-	$(LINK.c) -o $(SERVER) $(OBJECTS) $(LIBRARIES)
+	$(LINK.c) -o $(SERVER) $(OBJECTS) $(XDR_ALL_OBJECTS) $(LIBRARIES)
   endif
+endif
+
+ifeq ($(USE_EE),1)
+  include $(XDR)/make_in/Makefile.targets
 endif
 
 include $(DEPTH)/make_in/Makefile.targets

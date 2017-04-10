@@ -181,7 +181,7 @@ void
 as_tsvc_process_transaction(as_transaction *tr)
 {
 	if (tr->msgp->proto.type == PROTO_TYPE_INTERNAL_XDR) {
-		as_xdr_handle_txn(tr);
+		as_xdr_read_txn(tr);
 		return;
 	}
 

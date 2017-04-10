@@ -990,11 +990,6 @@ typedef struct as_clustering_external_event_publisher_s
 	 * Mutex to protect the conditional variable.
 	 */
 	pthread_mutex_t is_pending_mutex;
-
-	/**
-	 * Event listener count.
-	 */
-	uint32_t event_listener_count;
 } as_clustering_external_event_publisher;
 
 /*

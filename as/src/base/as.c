@@ -278,13 +278,6 @@ main(int argc, char **argv)
 	long initial_tid = syscall(SYS_gettid);
 #endif
 
-#ifdef MEM_COUNT
-	// [Note: This should ideally be at the very start of the "main()" function,
-	//        but we need to wait until after the config file has been parsed in
-	//        order to support run-time configurability.]
-	mem_count_init(c->memory_accounting ? MEM_COUNT_ENABLE : MEM_COUNT_DISABLE);
-#endif
-
 	// Detect NUMA topology and, if requested, prepare for CPU and NUMA pinning.
 	cf_topo_config(c->auto_pin, (cf_topo_numa_node_index)instance,
 			&c->service.bind);
@@ -359,9 +352,7 @@ main(int argc, char **argv)
 	// Includes echoing the configuration file to log.
 	as_config_post_process(c, config_file);
 
-	// Make one more pass for XDR-related config and crash if needed.
-	// TODO : XDR config parsing should be merged with main config parsing.
-	xdr_conf_init(config_file);
+	xdr_config_post_process();
 
 	// If we allocated a non-default config file name, free it.
 	if (config_file != DEFAULT_CONFIG_FILE) {

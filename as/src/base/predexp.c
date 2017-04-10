@@ -1407,7 +1407,7 @@ eval_rec_digest_modulo(predexp_eval_t* bp,
 		(predexp_eval_rec_digest_modulo_t *) bp;
 
 	// We point at the last 4 bytes of the digest.
-	uint32_t* valp = (uint32_t*) &argsp->md->key.digest[16];
+	uint32_t* valp = (uint32_t*) &argsp->md->keyd.digest[16];
 	int64_t digest_modulo = *valp % dp->mod;
 
 	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);

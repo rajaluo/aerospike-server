@@ -74,7 +74,6 @@ typedef struct as_storage_rd_s {
 	uint16_t		n_bins;
 	bool			record_on_device;			// if true, record exists on device
 	bool			ignore_record_on_device;	// if true, never read record off device (such as in replace case)
-	cf_digest		keyd;						// when doing a write, we'll need to stash this to do the "callback"
 
 	// Parameters used when handling key storage:
 	uint32_t		key_size;
@@ -115,8 +114,8 @@ extern int as_storage_record_exists(struct as_namespace_s *ns, cf_digest *keyd);
 extern int as_storage_record_destroy(struct as_namespace_s *ns, struct as_index_s *r); // not the counterpart of as_storage_record_create()
 
 // Start and finish an as_storage_rd usage cycle.
-extern int as_storage_record_create(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_open(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_create(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd);
+extern int as_storage_record_open(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd);
 extern int as_storage_record_close(as_storage_rd *rd);
 
 // Called within as_storage_rd usage cycle.
@@ -184,8 +183,8 @@ extern int as_storage_namespace_destroy_ssd(struct as_namespace_s *ns);
 
 extern int as_storage_record_destroy_ssd(struct as_namespace_s *ns, struct as_index_s *r);
 
-extern int as_storage_record_create_ssd(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_open_ssd(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_create_ssd(as_storage_rd *rd);
+extern int as_storage_record_open_ssd(as_storage_rd *rd);
 extern int as_storage_record_close_ssd(as_storage_rd *rd);
 
 extern int as_storage_record_load_n_bins_ssd(as_storage_rd *rd);
@@ -222,8 +221,8 @@ extern int as_storage_namespace_destroy_kv(struct as_namespace_s *ns);
 extern int as_storage_has_index_kv(struct as_namespace_s *ns);
 extern int as_storage_record_exists_kv(struct as_namespace_s *ns, cf_digest *keyd);
 
-extern int as_storage_record_create_kv(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
-extern int as_storage_record_open_kv(struct as_namespace_s *ns, struct as_index_s *r, as_storage_rd *rd, cf_digest *keyd);
+extern int as_storage_record_create_kv(as_storage_rd *rd);
+extern int as_storage_record_open_kv(as_storage_rd *rd);
 extern int as_storage_record_close_kv(as_storage_rd *rd);
 
 extern int as_storage_record_load_n_bins_kv(as_storage_rd *rd);

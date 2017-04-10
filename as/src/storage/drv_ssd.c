@@ -650,13 +650,13 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 		if (r->storage_key.ssd.file_id == ssd->file_id &&
 				r->storage_key.ssd.rblock_id == rblock_id) {
 			if (r->generation != block->generation) {
-				cf_warning_digest(AS_DRV_SSD, &r->key, "device %s defrag: rblock_id %lu generation mismatch (%u:%u)%s ",
+				cf_warning_digest(AS_DRV_SSD, &r->keyd, "device %s defrag: rblock_id %lu generation mismatch (%u:%u)%s ",
 						ssd->name, rblock_id, r->generation, block->generation,
 						is_subrec ? " subrec" : "");
 			}
 
 			if (r->storage_key.ssd.n_rblocks != n_rblocks) {
-				cf_warning_digest(AS_DRV_SSD, &r->key, "device %s defrag: rblock_id %lu n_blocks mismatch (%u:%u)%s ",
+				cf_warning_digest(AS_DRV_SSD, &r->keyd, "device %s defrag: rblock_id %lu n_blocks mismatch (%u:%u)%s ",
 						ssd->name, rblock_id, r->storage_key.ssd.n_rblocks,
 						n_rblocks, is_subrec ? " subrec" : "");
 			}
@@ -1120,7 +1120,7 @@ ssd_read_record(as_storage_rd *rd)
 	as_record *r = rd->r;
 
 	if (STORAGE_RBLOCK_IS_INVALID(r->storage_key.ssd.rblock_id)) {
-		cf_warning_digest(AS_DRV_SSD, &rd->keyd, "{%s} read_ssd: invalid rblock_id ",
+		cf_warning_digest(AS_DRV_SSD, &r->keyd, "{%s} read_ssd: invalid rblock_id ",
 				ns->name);
 		return -1;
 	}
@@ -1206,9 +1206,9 @@ ssd_read_record(as_storage_rd *rd)
 			cf_free(read_buf);
 			return -1;
 		}
-		if (0 != cf_digest_compare(&block->keyd, &rd->keyd)) {
+		if (0 != cf_digest_compare(&block->keyd, &r->keyd)) {
 			cf_warning(AS_DRV_SSD, "read: read wrong key: expecting %"PRIx64" got %"PRIx64,
-				*(uint64_t*)&rd->keyd, *(uint64_t*)&block->keyd);
+				*(uint64_t*)&r->keyd, *(uint64_t*)&block->keyd);
 			cf_free(read_buf);
 			return -1;
 		}
@@ -1570,7 +1570,7 @@ ssd_write_bins(as_storage_rd *rd)
 
 	if (write_size > ssd->write_block_size) {
 		cf_warning(AS_DRV_SSD, "write: rejecting %"PRIx64" write size: %u",
-				*(uint64_t*)&rd->keyd, write_size);
+				*(uint64_t*)&r->keyd, write_size);
 		return -AS_PROTO_RESULT_FAIL_RECORD_TOO_BIG;
 	}
 
@@ -1673,7 +1673,7 @@ ssd_write_bins(as_storage_rd *rd)
 	block->sig = 0; // deprecated
 	block->length = write_size - LENGTH_BASE;
 	block->magic = SSD_BLOCK_MAGIC;
-	block->keyd = rd->keyd;
+	block->keyd = r->keyd;
 	block->generation = r->generation;
 	block->void_time = r->void_time;
 	block->bins_offset = rd->rec_props.p_data ? rd->rec_props.size : 0;
@@ -1719,13 +1719,13 @@ ssd_write(as_storage_rd *rd)
 	// Figure out which device to write to. When replacing an old record, it's
 	// possible this is different from the old device (e.g. if we've added a
 	// fresh device), so derive it from the digest each time.
-	rd->u.ssd.ssd = &ssds->ssds[ssd_get_file_id(ssds, &rd->keyd)];
+	rd->u.ssd.ssd = &ssds->ssds[ssd_get_file_id(ssds, &r->keyd)];
 
 	drv_ssd *ssd = rd->u.ssd.ssd;
 
 	if (! ssd) {
 		cf_warning(AS_DRV_SSD, "{%s} ssd_write: no drv_ssd for file_id %u",
-				rd->ns->name, ssd_get_file_id(ssds, &rd->keyd));
+				rd->ns->name, ssd_get_file_id(ssds, &r->keyd));
 		return -AS_PROTO_RESULT_FAIL_UNKNOWN;
 	}
 
@@ -2858,10 +2858,10 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		as_storage_rd rd;
 
 		if (is_create) {
-			as_storage_record_create(ns, r, &rd, &block->keyd);
+			as_storage_record_create(ns, r, &rd);
 		}
 		else {
-			as_storage_record_open(ns, r, &rd, &block->keyd);
+			as_storage_record_open(ns, r, &rd);
 		}
 
 		as_storage_rd_load_n_bins(&rd);
@@ -2945,7 +2945,7 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 			SINDEX_GRUNLOCK();
 
 			if (sbins_populated > 0) {
-				as_sindex_update_by_sbin(ns, as_index_get_set_name(r, ns), sbins, sbins_populated, &rd.keyd);
+				as_sindex_update_by_sbin(ns, as_index_get_set_name(r, ns), sbins, sbins_populated, &r->keyd);
 				as_sindex_sbin_freeall(sbins, sbins_populated);
 			}
 
@@ -4043,14 +4043,13 @@ as_storage_record_destroy_ssd(as_namespace *ns, as_record *r)
 //
 
 int
-as_storage_record_create_ssd(as_namespace *ns, as_record *r, as_storage_rd *rd,
-		cf_digest *keyd)
+as_storage_record_create_ssd(as_storage_rd *rd)
 {
 	rd->u.ssd.block = 0;
 	rd->u.ssd.must_free_block = NULL;
 	rd->u.ssd.ssd = 0;
 
-	cf_assert(r->storage_key.ssd.rblock_id == STORAGE_INVALID_RBLOCK,
+	cf_assert(rd->r->storage_key.ssd.rblock_id == STORAGE_INVALID_RBLOCK,
 			AS_DRV_SSD, "unexpected - uninitialized rblock-id");
 
 	return 0;
@@ -4058,14 +4057,13 @@ as_storage_record_create_ssd(as_namespace *ns, as_record *r, as_storage_rd *rd,
 
 
 int
-as_storage_record_open_ssd(as_namespace *ns, as_record *r, as_storage_rd *rd,
-		cf_digest *keyd)
+as_storage_record_open_ssd(as_storage_rd *rd)
 {
-	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
+	drv_ssds *ssds = (drv_ssds*)rd->ns->storage_private;
 
 	rd->u.ssd.block = 0;
 	rd->u.ssd.must_free_block = NULL;
-	rd->u.ssd.ssd = &ssds->ssds[r->storage_key.ssd.file_id];
+	rd->u.ssd.ssd = &ssds->ssds[rd->r->storage_key.ssd.file_id];
 
 	return 0;
 }

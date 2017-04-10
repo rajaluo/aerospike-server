@@ -271,7 +271,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	else {
 		as_storage_rd rd;
 
-		as_storage_record_open(ns, r, &rd, keyd);
+		as_storage_record_open(ns, r, &rd);
 
 		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 

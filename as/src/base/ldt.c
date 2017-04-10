@@ -592,14 +592,14 @@ as_ldt_subrec_storage_validate(as_storage_rd *rd, char *op)
 
 	uint32_t  esr_pid = as_partition_getid(esr_digest);
 	uint32_t  parent_pid = as_partition_getid(parent_digest);
-	uint32_t  subrec_pid = as_partition_getid(rd->r->key);
+	uint32_t  subrec_pid = as_partition_getid(rd->r->keyd);
 	cf_detail(AS_LDT, "parent_pid = %d, esr_pid=%d subrec_pid=%d",
 			parent_pid, esr_pid, subrec_pid);
 
 	if ((parent_pid != esr_pid) || (parent_pid != subrec_pid) || (esr_pid != subrec_pid)) {
 		cf_info_digest(AS_LDT, &parent_digest, "Parent Digest: ");
 		cf_info_digest(AS_LDT, &esr_digest, "ESR Digest: ");
-		cf_info_digest(AS_LDT, &rd->r->key, "Sub-Rec Digest: ");
+		cf_info_digest(AS_LDT, &rd->r->keyd, "Sub-Rec Digest: ");
 
 		cf_warning(AS_LDT, "%s Corrupted Property Map ... digest mismatch [%d %d %d]",
 				op, parent_pid, esr_pid, subrec_pid);
@@ -898,7 +898,7 @@ as_ldt_parent_storage_set_version(as_storage_rd *rd, uint64_t ldt_version, uint8
 	as_bin * binp           = as_bin_get(rd, REC_LDT_CTRL_BIN);
 	int rv                  = 0;
 	if (!binp) {
-		cf_warning_digest(AS_LDT, &rd->keyd, "as_ldt_parent_storage_set_version: [LDT Control bin not found %s %d]", fname, lineno);
+		cf_warning_digest(AS_LDT, &rd->r->keyd, "as_ldt_parent_storage_set_version: [LDT Control bin not found %s %d]", fname, lineno);
 		return -1;
 	}
 	as_val * valp           = as_bin_particle_to_asval( binp );
@@ -973,7 +973,7 @@ as_ldt_parent_storage_get_version(as_storage_rd *rd, uint64_t *ldt_version, bool
 	if (!binp) {
 		if (as_ldt_record_is_parent(rd->r)) {
 			if (no_fail) {
-				cf_warning_digest(AS_LDT, &rd->keyd, "Control bin not found LDT parent record %s %d", fname, lineno);
+				cf_warning_digest(AS_LDT, &rd->r->keyd, "Control bin not found LDT parent record %s %d", fname, lineno);
 			}
 		} else {
 			cf_debug(AS_LDT, "Control bin not found");
@@ -1162,7 +1162,7 @@ as_ldt_is_parent_and_version_match(uint64_t subrec_version, as_index_tree *tree,
 		return false;
 	}
 
-	rv              = as_storage_record_open(ns, r, &rd, keyd);
+	rv              = as_storage_record_open(ns, r, &rd);
 	if (0 != rv) {
 		cf_warning_digest(AS_UDF, keyd,
 				"LDT_SUB_GC Could not open record @ version rv=%d: Digest:", rv);
@@ -1239,7 +1239,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	ldt_sub_gc_info *linfo  = (ldt_sub_gc_info *)udata;
 	as_index *r             = r_ref->r;
 	as_namespace *ns        = linfo->ns;
-	as_partition *p         = &ns->partitions[as_partition_getid(r->key)];
+	as_partition *p         = &ns->partitions[as_partition_getid(r->keyd)];
 
 	// Miscellaneous Checks
 	if (!as_ldt_record_is_sub(r)) {
@@ -1254,7 +1254,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	}
 
 	// Subrecord Version
-	cf_digest subrec_digest = r->key;
+	cf_digest subrec_digest = r->keyd;
 	uint64_t subrec_version = as_ldt_subdigest_getversion(&subrec_digest);
 	cf_detail(AS_LDT, "LDT_SUB_GC Sub Record Version %ld", subrec_version);
 
@@ -1275,9 +1275,9 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 
 	// LDT_GC_IO: SUBRECORD
 	as_storage_rd rd;
-	int rv                  = as_storage_record_open(ns, r, &rd, &r->key);
+	int rv                  = as_storage_record_open(ns, r, &rd);
 	if (0 != rv) {
-		cf_warning(AS_UDF, "LDT_SUB_GC Could not open record %"PRIx64"!! rv=%d", *(uint64_t *)&rd.keyd, rv);
+		cf_warning(AS_UDF, "LDT_SUB_GC Could not open record %"PRIx64"!! rv=%d", *(uint64_t *)&r->keyd, rv);
 		as_record_done(r_ref, ns);
 		return;
 	}
@@ -1397,7 +1397,7 @@ as_ldt_merge_component_is_candidate(as_partition_reservation *rsv, as_record_mer
 		rv = false;
 		as_record_done(&r_ref, rsv->ns);
 	}
-	cf_detail_digest(AS_LDT, &r->key, "Local Parent vs incoming [%d %d] void_time [%u %u]", r->generation, c->pgeneration, r->void_time, c->pvoid_time);
+	cf_detail_digest(AS_LDT, &r->keyd, "Local Parent vs incoming [%d %d] void_time [%u %u]", r->generation, c->pgeneration, r->void_time, c->pvoid_time);
 	return rv;
 
 #if 0
@@ -1675,14 +1675,14 @@ as_bin_get_llist(as_namespace *ns, as_storage_rd *rd, as_index_tree *sub_tree, a
 		sub_r_ref.skip_lock = true;
 		int rv = as_record_get_live(sub_tree, &keyd, &sub_r_ref, ns);
 		if (rv) {
-			cf_warning_digest(AS_LDT, &rd->keyd, " LDT stucture invalid %ld", ldt_version);
+			cf_warning_digest(AS_LDT, &rd->r->keyd, " LDT stucture invalid %ld", ldt_version);
 			as_val_destroy(rl);
 			return NULL;
 		}
 
 		as_record *sub_r = sub_r_ref.r;
 
-		as_storage_record_open(ns, sub_r, &sub_rd, &sub_r->key);
+		as_storage_record_open(ns, sub_r, &sub_rd);
 		as_storage_rd_load_n_bins(&sub_rd); // TODO - handle error returned
 		// Have bound checks ...
 		as_bin stack_bins[(sub_r && !ns->storage_data_in_memory) ? sub_rd.n_bins : 0];

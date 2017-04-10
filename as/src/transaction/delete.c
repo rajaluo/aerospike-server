@@ -396,7 +396,7 @@ drop_master(as_transaction* tr, as_index_ref* r_ref, rw_request* rw)
 
 	if (ns->storage_data_in_memory || check_key) {
 		as_storage_rd rd;
-		as_storage_record_open(ns, r, &rd, &tr->keyd);
+		as_storage_record_open(ns, r, &rd);
 
 		// Check the key if required.
 		// Note - for data-not-in-memory a key check is expensive!

@@ -106,90 +106,13 @@ cf_hash_oneatatime(void *buf, size_t bufsz)
 }
 
 
-/* cf_swap64
- * Swap a 64-bit value
- * --- there's a fair amount of commentary on the web as to whether this kind
- * of swap optimization is useful for superscalar architectures.  Leave it in
- * for now */
-#define cf_swap64(a, b) (void)(((a) == (b)) || (((a) ^= (b)), ((b) ^= (a)), ((a) ^= (b))))
-// #define cf_swap64(a, b) { uint64_t __t; __t = a; a = b; b = __t; }
-
-/* cf_contains64
- * See if a vector of uint64s contains an certain value */
-static inline int
-cf_contains64(const uint64_t *v, int vsz, uint64_t a)
-{
-    for (int i = 0; i < vsz; i++) {
-        if (v[i] == a)
-            return(1);
-    }
-
-    return(0);
-}
-
-/* cf_compare_ptr
- * Compare the first sz bytes from two regions referenced by pointers */
-static inline int
-cf_compare_ptr(const void *a, const void *b, ssize_t sz)
-{
-    return(memcmp(a, b, sz));
-}
-
-/* cf_compare_uint64ptr
- * Compare two integers */
-static inline int
-cf_compare_uint64ptr(const void *pa, const void *pb)
-{
-    int r;
-    const uint64_t *a = (uint64_t *) pa;
-    const uint64_t *b = (uint64_t *) pb;
-
-    if (*a == *b)
-        return(0);
-
-    r = (*a > *b) ? -1 : 1;
-
-    return(r);
-}
-
-
-/* cf_compare_byteptr
- * Compare the regions pointed to by two sized byte pointers */
-static inline int
-cf_compare_byteptr(const void *pa, const size_t asz, const void *pb, const size_t bsz)
-{
-    if (asz != bsz)
-        return(asz - bsz);
-
-    return(memcmp(pa, pb, asz));
-}
-
 extern const cf_digest cf_digest_zero;
 
-// This one compare is probably the hottest line in the system.
-// Thus, please benchmark with these different compare functions and
-// see which is faster/better
-#if 0
-static inline int
-cf_digest_compare( cf_digest *d1, cf_digest *d2 )
-{
-    if (d1->digest[0] != d2->digest[0]) {
-        if (d1->digest[0] < d2->digest[0])
-            return(-1);
-        else
-            return(1);
-    }
-    return( memcmp( d1, d2, sizeof(cf_digest) ) );
-}
-#endif
-
-#if 1
 static inline int
 cf_digest_compare(const cf_digest *d1, const cf_digest *d2)
 {
     return( memcmp( d1->digest, d2->digest, CF_DIGEST_KEY_SZ) );
 }
-#endif
 
 // Sorry, too lazy to create a whole new file for just one function
 #define CF_NODE_UNSET (0xFFFFFFFFFFFFFFFF)

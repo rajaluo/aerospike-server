@@ -627,7 +627,6 @@ basic_scan_job_start(as_transaction* tr, as_namespace* ns, uint16_t set_id)
 	job->no_bin_data = (tr->msgp->msg.info1 & AS_MSG_INFO1_GET_NOBINDATA) != 0;
 	job->sample_pct = options.sample_pct;
 	job->predexp = predexp;
-	job->bin_names = NULL;
 
 	int result;
 
@@ -802,7 +801,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		if (as_index_is_flag_set(r, AS_INDEX_FLAG_KEY_STORED)) {
 			as_storage_rd rd;
 
-			as_storage_record_open(ns, r, &rd, &r->key);
+			as_storage_record_open(ns, r, &rd);
 			as_msg_make_response_bufbuilder(r, &rd, slice->bb_r, true, NULL,
 					job->include_ldt_data, true, true, NULL);
 			as_storage_record_close(&rd);
@@ -815,7 +814,7 @@ basic_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	else {
 		as_storage_rd rd;
 
-		as_storage_record_open(ns, r, &rd, &r->key);
+		as_storage_record_open(ns, r, &rd);
 		as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
 		as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
@@ -1152,7 +1151,7 @@ aggr_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 		return;
 	}
 
-	if (! aggr_scan_add_digest(slice->ll, &r->key)) {
+	if (! aggr_scan_add_digest(slice->ll, &r->keyd)) {
 		as_record_done(r_ref, ns);
 		as_job_manager_abandon_job(_job->mgr, _job,
 				AS_PROTO_RESULT_FAIL_UNKNOWN);
@@ -1441,7 +1440,7 @@ udf_bg_scan_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	// Save this before releasing record.
-	cf_digest d = r->key;
+	cf_digest d = r->keyd;
 
 	// Release record lock before enqueuing transaction.
 	as_record_done(r_ref, ns);

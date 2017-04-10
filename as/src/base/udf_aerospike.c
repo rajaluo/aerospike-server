@@ -133,7 +133,7 @@ udf_aerospike_delbin(udf_record * urecord, const char * bname)
 		if (has_sindex) {
 			if (sbins_populated > 0) {	
 				tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
-				as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sbins_populated, &rd->keyd);
+				as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sbins_populated, &rd->r->keyd);
 			}
 		}
 		as_bin_destroy(rd, i);
@@ -335,7 +335,7 @@ udf_aerospike_setbin(udf_record * urecord, int offset, const char * bname, const
 		sbins_populated += as_sindex_sbins_from_bin(rd->ns, set_name, b, &sbins[sbins_populated], AS_SINDEX_OP_INSERT);
 		if (sbins_populated > 0) {
 			tr->flags |= AS_TRANSACTION_FLAG_SINDEX_TOUCHED;
-			as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sbins_populated, &rd->keyd);	
+			as_sindex_update_by_sbin(rd->ns, as_index_get_set_name(rd->r, rd->ns), sbins, sbins_populated, &rd->r->keyd);
 			as_sindex_sbin_freeall(sbins, sbins_populated);
 		}
 		as_sindex_release_arr(si_arr, si_arr_index);
@@ -862,7 +862,7 @@ udf_aerospike_rec_create(const as_aerospike * as, const as_rec * rec)
 	}
 
 	// open up storage
-	as_storage_record_create(tr->rsv.ns, r_ref->r, rd, &tr->keyd);
+	as_storage_record_create(tr->rsv.ns, r_ref->r, rd);
 
 	// If the message has a key, apply it to the record.
 	if (! get_msg_key(tr, rd)) {
@@ -943,7 +943,7 @@ udf_aerospike_rec_update(const as_aerospike * as, const as_rec * rec)
 		cf_warning(AS_UDF, "Record not found to be open while updating urecord flag=%d", urecord ? urecord->flag : -1);
 		return -2;
 	}
-	cf_detail_digest(AS_UDF, &urecord->rd->r->key, "Executing Updates");
+	cf_detail_digest(AS_UDF, &urecord->rd->r->keyd, "Executing Updates");
 	ret = udf_aerospike__execute_updates(urecord);
 
 	if (ret < 0) {

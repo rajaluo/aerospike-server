@@ -613,10 +613,10 @@ write_master(rw_request* rw, as_transaction* tr)
 	as_storage_rd rd;
 
 	if (record_created) {
-		as_storage_record_create(ns, r, &rd, &tr->keyd);
+		as_storage_record_create(ns, r, &rd);
 	}
 	else {
-		as_storage_record_open(ns, r, &rd, &tr->keyd);
+		as_storage_record_open(ns, r, &rd);
 	}
 
 	// Deal with delete durability (enterprise only).

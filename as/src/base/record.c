@@ -385,8 +385,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	SINDEX_BINS_SETUP(sbins, 2 * ns->sindex_cnt);
 	as_sindex * si_arr[2 * ns->sindex_cnt];
 	int si_arr_index = 0;
-	const char* set_name = NULL;
-	set_name = as_index_get_set_name(rd->r, ns);
+	const char* set_name = as_index_get_set_name(rd->r, ns);
 
 	// RESERVE SIs for old bins
 	// Cannot reserve SIs for new bins as we do not know the bin-id yet
@@ -462,7 +461,7 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 	}
 	if (ret == 0) {
 		if (has_sindex && sbins_populated) {
-			sindex_ret = as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated, &rd->keyd);
+			sindex_ret = as_sindex_update_by_sbin(ns, set_name, sbins, sbins_populated, &rd->r->keyd);
 			if (sindex_ret != AS_SINDEX_OK) {
 				cf_warning(AS_RECORD, "Failed: %s", as_sindex_err_str(sindex_ret));
 			}
@@ -586,7 +585,7 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 		stack_particles_sz = as_record_buf_get_stack_particles_sz(c->record_buf);
 
 		if (stack_particles_sz < 0) {
-			cf_warning_digest(AS_RECORD, &rd->keyd, "stack particle size failed");
+			cf_warning_digest(AS_RECORD, &rd->r->keyd, "stack particle size failed");
 			as_storage_record_close(rd);
 			return -1;
 		}
@@ -610,7 +609,7 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 
 	int rv = as_record_unpickle_replace(r, rd, c->record_buf, c->record_buf_sz, &p_stack_particles, has_sindex);
 	if (0 != rv) {
-		cf_warning_digest(AS_LDT, &rd->keyd, "Unpickled replace failed rv=%d",rv);
+		cf_warning_digest(AS_LDT, &rd->r->keyd, "Unpickled replace failed rv=%d",rv);
 		as_storage_record_close(rd);
 		return rv;
     }
@@ -626,7 +625,7 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 	if (COMPONENT_IS_MIG(c) && as_ldt_record_is_parent(rd->r)) {
 		int ldt_rv = as_ldt_parent_storage_set_version(rd, c->version, p_stack_particles, __FILE__, __LINE__);
 		if (ldt_rv < 0) {
-			cf_warning_digest(AS_LDT, &rd->keyd, "LDT_MERGE Failed to write version in rv=%d", ldt_rv);
+			cf_warning_digest(AS_LDT, &rd->r->keyd, "LDT_MERGE Failed to write version in rv=%d", ldt_rv);
 		}
 	}
 
@@ -836,10 +835,10 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 		as_storage_rd rd;
 
 		if (is_create) {
-			as_storage_record_create(ns, r, &rd, keyd);
+			as_storage_record_create(ns, r, &rd);
 		}
 		else {
-			as_storage_record_open(ns, r, &rd, keyd);
+			as_storage_record_open(ns, r, &rd);
 		}
 
 		// Apply remote winner locally. (Yes, call closes as_storage_rd.)

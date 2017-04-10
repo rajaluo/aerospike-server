@@ -320,7 +320,7 @@ read_local(as_transaction* tr)
 
 	as_storage_rd rd;
 
-	as_storage_record_open(ns, r, &rd, &tr->keyd);
+	as_storage_record_open(ns, r, &rd);
 
 	// Check the key if required.
 	// Note - for data-not-in-memory "exists" ops, key check is expensive!
