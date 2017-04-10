@@ -516,9 +516,9 @@ typedef enum {
 /* Record function declarations */
 extern bool as_record_is_live(const as_record *r);
 extern int as_record_get_create(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns, bool);
-extern int as_record_get(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
+extern int as_record_get(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref);
 extern int as_record_get_live(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
-extern int as_record_exists(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
+extern int as_record_exists(struct as_index_tree_s *tree, cf_digest *keyd);
 extern int as_record_exists_live(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
 extern void as_record_rescue(as_index_ref *r_ref, as_namespace *ns);
 
@@ -818,8 +818,6 @@ struct as_namespace_s {
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done
 	uint32_t		defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
 
-	uint64_t		kv_size;
-
 	// For data-not-in-memory, we optionally cache swbs after writing to device.
 	// To track fraction of reads from cache:
 	cf_atomic32		n_reads_from_cache;
@@ -916,10 +914,6 @@ struct as_namespace_s {
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
 	uint32_t		storage_write_threads;
-
-	uint32_t		storage_read_block_size;
-	uint32_t		storage_num_write_blocks;
-	PAD_BOOL		cond_write; // true if writing uniqueness is to be enforced by the KV store
 
 	uint32_t		sindex_num_partitions;
 

@@ -45,7 +45,7 @@
 typedef struct as_index_s {
 
 	// offset: 0
-	cf_atomic32 rc;		// must be on 4-byte boundary
+	cf_atomic32 rc;
 
 	// offset: 4
 	cf_digest keyd;
@@ -57,7 +57,7 @@ typedef struct as_index_s {
 	// offset: 34
 	// Don't use the free bits here for record info - this is accessed outside
 	// the record lock.
-	uint16_t color: 1; // one bit
+	uint16_t color: 1;
 	uint16_t unused_but_unsafe: 15;
 
 	// Everything below here is used under the record lock.
@@ -73,29 +73,23 @@ typedef struct as_index_s {
 
 	// offset: 47
 	// Used by the storage engines.
-	union {
-		struct {
-			uint64_t rblock_id: 34;		// can address 2^34 * 128b = 2Tb drive
-			uint64_t n_rblocks: 14;		// is enough for 1Mb/128b = 8K rblocks
-			uint64_t file_id: 6;		// can spec 2^6 = 64 drives
-			uint64_t set_id_bits: 10;	// do not use directly, used for set-ID
-		} ssd;
-		struct {
-			uint32_t file_id: 6;
-		} kv;
-	} storage_key;
+	uint64_t rblock_id: 34;		// can address 2^34 * 128b = 2Tb drive
+	uint64_t n_rblocks: 14;		// is enough for 1Mb/128b = 8K rblocks
+	uint64_t file_id: 6;		// can spec 2^6 = 64 drives
+
+	uint64_t set_id_bits: 10;	// do not use directly, used for set-ID
 
 	// offset: 55
 	// In single-bin mode for data-in-memory namespaces, this is cast to an
 	// as_bin, though only the last 4 bits get used (for the iparticle state).
-	// The first 4 bits are used for index flags. Do not use flex_bits_2
+	// The first 4 bits are used for index flags. Do not use flex_bits
 	// directly - use access functions!
 	uint8_t flex_bits;
 
 	// offset: 56
 	// For data-not-in-memory namespaces, these 8 bytes are currently unused.
 	// For data-in-memory namespaces: in single-bin mode the as_bin is embedded
-	// here (these 8 bytes plus the last 4 bits in flex_bits_2 above), but in
+	// here (these 8 bytes plus the last 4 bits in flex_bits above), but in
 	// multi-bin mode this is a pointer to either of:
 	// - an as_bin_space containing n_bins and an array of as_bin structs
 	// - an as_rec_space containing an as_bin_space pointer and other metadata
@@ -216,18 +210,18 @@ void as_index_set_bin_space(as_index* index, as_bin_space* bin_space) {
 
 static inline
 uint16_t as_index_get_set_id(const as_index *index) {
-	return index->storage_key.ssd.set_id_bits;
+	return index->set_id_bits;
 }
 
 static inline
 void as_index_set_set_id(as_index *index, uint16_t set_id) {
 	// TODO - check that it fits in the 10 bits ???
-	index->storage_key.ssd.set_id_bits = set_id;
+	index->set_id_bits = set_id;
 }
 
 static inline
 bool as_index_has_set(const as_index *index) {
-	return index->storage_key.ssd.set_id_bits != 0;
+	return index->set_id_bits != 0;
 }
 
 
@@ -354,10 +348,6 @@ int as_index_delete(as_index_tree *tree, cf_digest *keyd);
 
 #define as_index_reserve(_r) cf_atomic32_incr(&(_r->rc))
 #define as_index_release(_r) cf_atomic32_decr(&(_r->rc))
-
-#ifdef USE_KV
-int as_index_ref_initialize(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref, bool create_p, as_namespace *ns);
-#endif
 
 
 //------------------------------------------------

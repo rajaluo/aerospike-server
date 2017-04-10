@@ -56,11 +56,9 @@
 //
 
 typedef int (*as_storage_namespace_init_fn)(as_namespace *ns, cf_queue *complete_q, void *udata);
-static const as_storage_namespace_init_fn as_storage_namespace_init_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
+static const as_storage_namespace_init_fn as_storage_namespace_init_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_namespace_init_memory,
-	as_storage_namespace_init_ssd,
-	as_storage_namespace_init_kv
+	as_storage_namespace_init_ssd
 };
 
 void
@@ -97,11 +95,9 @@ as_storage_init()
 //
 
 typedef void (*as_storage_start_tomb_raider_fn)(as_namespace *ns);
-static const as_storage_start_tomb_raider_fn as_storage_start_tomb_raider_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
+static const as_storage_start_tomb_raider_fn as_storage_start_tomb_raider_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_start_tomb_raider_memory,
-	as_storage_start_tomb_raider_ssd,
-	0  // kv doesn't tomb raid
+	as_storage_start_tomb_raider_ssd
 };
 
 void
@@ -121,12 +117,9 @@ as_storage_start_tomb_raider()
 //
 
 typedef int (*as_storage_namespace_destroy_fn)(as_namespace *ns);
-static const as_storage_namespace_destroy_fn as_storage_namespace_destroy_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no destroy
-	as_storage_namespace_destroy_ssd,
-	as_storage_namespace_destroy_kv
-
+static const as_storage_namespace_destroy_fn as_storage_namespace_destroy_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no destroy
+	as_storage_namespace_destroy_ssd
 };
 
 int
@@ -140,59 +133,13 @@ as_storage_namespace_destroy(as_namespace *ns)
 }
 
 //--------------------------------------
-// as_storage_has_index
-//
-
-typedef int (*as_storage_has_index_fn)(as_namespace *ns);
-static const as_storage_has_index_fn as_storage_has_index_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no index
-	0, // ssd has no index
-	as_storage_has_index_kv
-};
-
-int
-as_storage_has_index(as_namespace *ns)
-{
-	if (as_storage_has_index_table[ns->storage_type]) {
-	  return as_storage_has_index_table[ns->storage_type](ns);
-	}
-
-	return 0;
-}
-
-//--------------------------------------
-// as_storage_record_exists
-//
-
-typedef int (*as_storage_record_exists_fn)(as_namespace *ns, cf_digest *keyd);
-static const as_storage_record_exists_fn as_storage_record_exists_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no record exists
-	0, // ssd has no record exists
-	as_storage_record_exists_kv
-};
-
-int as_storage_record_exists(as_namespace *ns, cf_digest *keyd)
-{
-	if (as_storage_record_exists_table[ns->storage_type]) {
-	  return as_storage_record_exists_table[ns->storage_type](ns, keyd);
-	}
-
-	cf_warning(AS_STORAGE, "record existence check not supported by storage type %d on namespace %s", ns->storage_type, ns->name);
-	return 0;
-}
-
-//--------------------------------------
 // as_storage_record_destroy
 //
 
 typedef int (*as_storage_record_destroy_fn)(as_namespace *ns, as_record *r);
-static const as_storage_record_destroy_fn as_storage_record_destroy_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no record destroy
-	as_storage_record_destroy_ssd,
-	0  // kv has no record destroy
+static const as_storage_record_destroy_fn as_storage_record_destroy_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record destroy
+	as_storage_record_destroy_ssd
 };
 
 int
@@ -210,17 +157,14 @@ as_storage_record_destroy(as_namespace *ns, as_record *r)
 //
 
 typedef int (*as_storage_record_create_fn)(as_storage_rd *rd);
-static const as_storage_record_create_fn as_storage_record_create_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no record create
-	as_storage_record_create_ssd,
-	as_storage_record_create_kv,
+static const as_storage_record_create_fn as_storage_record_create_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record create
+	as_storage_record_create_ssd
 };
 
 int
 as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
-	rd->storage_type = ns->storage_type;
 	rd->r = r;
 	rd->ns = ns;
 	as_rec_props_clear(&rd->rec_props);
@@ -244,17 +188,14 @@ as_storage_record_create(as_namespace *ns, as_record *r, as_storage_rd *rd)
 //
 
 typedef int (*as_storage_record_open_fn)(as_storage_rd *rd);
-static const as_storage_record_open_fn as_storage_record_open_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no record open
-	as_storage_record_open_ssd,
-	as_storage_record_open_kv,
+static const as_storage_record_open_fn as_storage_record_open_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record open
+	as_storage_record_open_ssd
 };
 
 int
 as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 {
-	rd->storage_type = ns->storage_type;
 	rd->r = r;
 	rd->ns = ns;
 	as_rec_props_clear(&rd->rec_props);
@@ -278,18 +219,16 @@ as_storage_record_open(as_namespace *ns, as_record *r, as_storage_rd *rd)
 //
 
 typedef int (*as_storage_record_close_fn)(as_storage_rd *rd);
-static const as_storage_record_close_fn as_storage_record_close_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no record close
-	as_storage_record_close_ssd,
-	as_storage_record_close_kv
+static const as_storage_record_close_fn as_storage_record_close_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record close
+	as_storage_record_close_ssd
 };
 
 int
 as_storage_record_close(as_storage_rd *rd)
 {
-	if (as_storage_record_close_table[rd->storage_type]) {
-		return as_storage_record_close_table[rd->storage_type](rd);
+	if (as_storage_record_close_table[rd->ns->storage_type]) {
+		return as_storage_record_close_table[rd->ns->storage_type](rd);
 	}
 
 	return 0;
@@ -300,18 +239,16 @@ as_storage_record_close(as_storage_rd *rd)
 //
 
 typedef int (*as_storage_record_load_n_bins_fn)(as_storage_rd *rd);
-static const as_storage_record_load_n_bins_fn as_storage_record_load_n_bins_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no record load n bins
-	as_storage_record_load_n_bins_ssd,
-	as_storage_record_load_n_bins_kv,
+static const as_storage_record_load_n_bins_fn as_storage_record_load_n_bins_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record load n bins
+	as_storage_record_load_n_bins_ssd
 };
 
 int
 as_storage_record_load_n_bins(as_storage_rd *rd)
 {
-	if (as_storage_record_load_n_bins_table[rd->storage_type]) {
-		return as_storage_record_load_n_bins_table[rd->storage_type](rd);
+	if (as_storage_record_load_n_bins_table[rd->ns->storage_type]) {
+		return as_storage_record_load_n_bins_table[rd->ns->storage_type](rd);
 	}
 
 	return 0;
@@ -322,18 +259,16 @@ as_storage_record_load_n_bins(as_storage_rd *rd)
 //
 
 typedef int (*as_storage_record_load_bins_fn)(as_storage_rd *rd);
-static const as_storage_record_load_bins_fn as_storage_record_load_bins_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no record load bins
-	as_storage_record_load_bins_ssd,
-	as_storage_record_load_bins_kv
+static const as_storage_record_load_bins_fn as_storage_record_load_bins_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no record load bins
+	as_storage_record_load_bins_ssd
 };
 
 int
 as_storage_record_load_bins(as_storage_rd *rd)
 {
-	if (as_storage_record_load_bins_table[rd->storage_type]) {
-		return as_storage_record_load_bins_table[rd->storage_type](rd);
+	if (as_storage_record_load_bins_table[rd->ns->storage_type]) {
+		return as_storage_record_load_bins_table[rd->ns->storage_type](rd);
 	}
 
 	return 0;
@@ -344,11 +279,9 @@ as_storage_record_load_bins(as_storage_rd *rd)
 //
 
 typedef bool (*as_storage_record_size_and_check_fn)(as_storage_rd *rd);
-static const as_storage_record_size_and_check_fn as_storage_record_size_and_check_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // no limit if no persistent storage - flat size is irrelevant
-	as_storage_record_size_and_check_ssd,
-	0
+static const as_storage_record_size_and_check_fn as_storage_record_size_and_check_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // no limit if no persistent storage - flat size is irrelevant
+	as_storage_record_size_and_check_ssd
 };
 
 bool
@@ -366,18 +299,16 @@ as_storage_record_size_and_check(as_storage_rd *rd)
 //
 
 typedef int (*as_storage_record_write_fn)(as_storage_rd *rd);
-static const as_storage_record_write_fn as_storage_record_write_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
+static const as_storage_record_write_fn as_storage_record_write_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_record_write_memory,
-	as_storage_record_write_ssd,
-	as_storage_record_write_kv
+	as_storage_record_write_ssd
 };
 
 int
 as_storage_record_write(as_storage_rd *rd)
 {
-	if (as_storage_record_write_table[rd->storage_type]) {
-		return as_storage_record_write_table[rd->storage_type](rd);
+	if (as_storage_record_write_table[rd->ns->storage_type]) {
+		return as_storage_record_write_table[rd->ns->storage_type](rd);
 	}
 
 	return 0;
@@ -388,11 +319,9 @@ as_storage_record_write(as_storage_rd *rd)
 //
 
 typedef void (*as_storage_wait_for_defrag_fn)(as_namespace *ns);
-static const as_storage_wait_for_defrag_fn as_storage_wait_for_defrag_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory doesn't do defrag
-	as_storage_wait_for_defrag_ssd,
-	0  // kv doesn't do defrag
+static const as_storage_wait_for_defrag_fn as_storage_wait_for_defrag_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't do defrag
+	as_storage_wait_for_defrag_ssd
 };
 
 void
@@ -412,11 +341,9 @@ as_storage_wait_for_defrag()
 //
 
 typedef bool (*as_storage_overloaded_fn)(as_namespace *ns);
-static const as_storage_overloaded_fn as_storage_overloaded_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no overload check
-	as_storage_overloaded_ssd,
-	0  // kv has no overload check
+static const as_storage_overloaded_fn as_storage_overloaded_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no overload check
+	as_storage_overloaded_ssd
 };
 
 bool
@@ -434,11 +361,9 @@ as_storage_overloaded(as_namespace *ns)
 //
 
 typedef bool (*as_storage_has_space_fn)(as_namespace *ns);
-static const as_storage_has_space_fn as_storage_has_space_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory has no space check
-	as_storage_has_space_ssd,
-	0  // kv has no space check
+static const as_storage_has_space_fn as_storage_has_space_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory has no space check
+	as_storage_has_space_ssd
 };
 
 bool
@@ -456,11 +381,9 @@ as_storage_has_space(as_namespace *ns)
 //
 
 typedef void (*as_storage_defrag_sweep_fn)(as_namespace *ns);
-static const as_storage_defrag_sweep_fn as_storage_defrag_sweep_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory doesn't do defrag
-	as_storage_defrag_sweep_ssd,
-	0  // kv doesn't do defrag
+static const as_storage_defrag_sweep_fn as_storage_defrag_sweep_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't do defrag
+	as_storage_defrag_sweep_ssd
 };
 
 void
@@ -476,11 +399,9 @@ as_storage_defrag_sweep(as_namespace *ns)
 //
 
 typedef void (*as_storage_info_set_fn)(as_namespace *ns, uint32_t pid, const as_partition_vinfo *vinfo);
-static const as_storage_info_set_fn as_storage_info_set_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory doesn't support info
-	as_storage_info_set_ssd,
-	0  // kv doesn't support info
+static const as_storage_info_set_fn as_storage_info_set_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support info
+	as_storage_info_set_ssd
 };
 
 void
@@ -496,11 +417,9 @@ as_storage_info_set(as_namespace *ns, uint32_t pid, const as_partition_vinfo *vi
 //
 
 typedef void (*as_storage_info_get_fn)(as_namespace *ns, uint32_t pid, as_partition_vinfo *vinfo);
-static const as_storage_info_get_fn as_storage_info_get_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory doesn't support info
-	as_storage_info_get_ssd,
-	0  // kv doesn't support info
+static const as_storage_info_get_fn as_storage_info_get_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support info
+	as_storage_info_get_ssd
 };
 
 void
@@ -516,11 +435,9 @@ as_storage_info_get(as_namespace *ns, uint32_t pid, as_partition_vinfo *vinfo)
 //
 
 typedef int (*as_storage_info_flush_fn)(as_namespace *ns);
-static const as_storage_info_flush_fn as_storage_info_flush_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory doesn't support info
-	as_storage_info_flush_ssd,
-	0  // kv doesn't support info
+static const as_storage_info_flush_fn as_storage_info_flush_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support info
+	as_storage_info_flush_ssd
 };
 
 int
@@ -538,11 +455,9 @@ as_storage_info_flush(as_namespace *ns)
 //
 
 typedef void (*as_storage_save_evict_void_time_fn)(as_namespace *ns, uint32_t evict_void_time);
-static const as_storage_save_evict_void_time_fn as_storage_save_evict_void_time_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory doesn't store info
-	as_storage_save_evict_void_time_ssd,
-	0  // kv doesn't store info
+static const as_storage_save_evict_void_time_fn as_storage_save_evict_void_time_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't store info
+	as_storage_save_evict_void_time_ssd
 };
 
 void
@@ -558,11 +473,9 @@ as_storage_save_evict_void_time(as_namespace *ns, uint32_t evict_void_time)
 //
 
 typedef int (*as_storage_stats_fn)(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes);
-static const as_storage_stats_fn as_storage_stats_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
+static const as_storage_stats_fn as_storage_stats_table[AS_NUM_STORAGE_ENGINES] = {
 	as_storage_stats_memory,
-	as_storage_stats_ssd,
-	as_storage_stats_kv,
+	as_storage_stats_ssd
 };
 
 int
@@ -580,11 +493,9 @@ as_storage_stats(as_namespace *ns, int *available_pct, uint64_t *used_disk_bytes
 //
 
 typedef int (*as_storage_ticker_stats_fn)(as_namespace *ns);
-static const as_storage_ticker_stats_fn as_storage_ticker_stats_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory doesn't support per-disk histograms... for now.
-	as_storage_ticker_stats_ssd,
-	0  // kv doesn't support per-disk histograms... for now.
+static const as_storage_ticker_stats_fn as_storage_ticker_stats_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support per-disk histograms... for now.
+	as_storage_ticker_stats_ssd
 };
 
 int
@@ -602,11 +513,9 @@ as_storage_ticker_stats(as_namespace *ns)
 //
 
 typedef int (*as_storage_histogram_clear_fn)(as_namespace *ns);
-static const as_storage_histogram_clear_fn as_storage_histogram_clear_table[AS_STORAGE_ENGINE_TYPES] = {
-	NULL,
-	0, // memory doesn't support per-disk histograms... for now.
-	as_storage_histogram_clear_ssd,
-	0  // kv doesn't support per-disk histograms... for now.
+static const as_storage_histogram_clear_fn as_storage_histogram_clear_table[AS_NUM_STORAGE_ENGINES] = {
+	NULL, // memory doesn't support per-disk histograms... for now.
+	as_storage_histogram_clear_ssd
 };
 
 int

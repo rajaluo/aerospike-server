@@ -1312,7 +1312,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	char type   = 0;
 	rv = 0;
 
-	if (check_esr && (rv = as_record_exists(p->sub_vp, &esr_digest, ns))) {
+	if (check_esr && (rv = as_record_exists(p->sub_vp, &esr_digest))) {
 		delete = true;
 		type   = LDT_SUB_GC_NO_ESR;
 	} else if ((rv = as_record_exists_live(p->vp, &parent_digest, ns))) {

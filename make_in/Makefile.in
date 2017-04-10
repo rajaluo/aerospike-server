@@ -12,9 +12,6 @@ include $(DEPTH)/make_in/Makefile.vars
 CF_INCLUDE_DIR = $(DEPTH)/common/src/include
 CF_LIB_DIR     = $(DEPTH)/common/target/$(PLATFORM)/lib
 
-KV_INCLUDE_DIR = /usr/local/include
-KV_LIB_DIR     = /usr/local/lib64
-
 AS_CFLAGS += -D_FILE_OFFSET_BITS=64 -std=gnu99 -D_REENTRANT -D_GNU_SOURCE
 
 # Enable ASMalloc debugging messages:
@@ -142,8 +139,5 @@ DEF_FN += -D__FILENAME__=\"$(notdir $<)\"
 #CFLAGS_32 = $(COMMON_CFLAGS) -DMARCH_i686
 
 LDFLAGS = -rdynamic -L$(CF_LIB_DIR) $(WRAPFLAGS)
-ifeq ($(USE_KV),1)
-  LDFLAGS += -L$(KV_LIB_DIR)
-endif
 
 STRIP = strip -p -v -s

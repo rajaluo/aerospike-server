@@ -89,7 +89,7 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) == 0) {
+	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) == 0) {
 		as_record* r = r_ref.r;
 
 		msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
@@ -240,7 +240,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(rsv.tree, keyd, &r_ref, ns) != 0) {
+	if (as_record_get(rsv.tree, keyd, &r_ref) != 0) {
 		done_handle_request(&rsv, NULL);
 		send_dup_res_ack(node, m, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return;

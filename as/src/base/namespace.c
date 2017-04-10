@@ -186,7 +186,7 @@ as_namespace_create(char *name)
 	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 	ns->storage_data_in_memory = true;
 	// Note - default true is consistent with AS_STORAGE_ENGINE_MEMORY, but
-	// cfg.c will set default false for AS_STORAGE_ENGINE_SSD and KV.
+	// cfg.c will set default false for AS_STORAGE_ENGINE_SSD.
 
 	ns->storage_filesize = 1024LL * 1024LL * 1024LL * 16LL; // default file size is 16G per file
 	ns->storage_scheduler_mode = NULL; // null indicates default is to not change scheduler mode
@@ -199,10 +199,7 @@ as_namespace_create(char *name)
 	ns->storage_fsync_max_us = 0; // fsync interval in microseconds (0 = never)
 	ns->storage_max_write_cache = 1024 * 1024 * 64;
 	ns->storage_min_avail_pct = 5; // stop writes when < 5% disk is writable
-	ns->storage_num_write_blocks = 64; // number of write blocks to use with KV store devices
 	ns->storage_post_write_queue = 256; // number of wblocks per device used as post-write cache
-	ns->storage_read_block_size = 64 * 1024; // size in bytes of read buffers to use with KV store devices
-	// [Note - current FusionIO maximum read buffer size is 1MB - 512B.]
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
 	ns->storage_write_threads = 1;
 

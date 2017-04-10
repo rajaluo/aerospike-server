@@ -52,37 +52,12 @@
 #include "transaction/rw_utils.h"
 
 
-// Called assuming record area of as_index has already been cleared.
-void
-as_record_initialize(as_index_ref *r_ref, as_namespace *ns)
-{
-	as_record *r = r_ref->r;
-
-	if (AS_STORAGE_ENGINE_SSD == ns->storage_type) {
-		r->storage_key.ssd.rblock_id = STORAGE_INVALID_RBLOCK;
-	}
-#ifdef USE_KV
-	else if (AS_STORAGE_ENGINE_KV == ns->storage_type) {
-		r->storage_key.kv.file_id = STORAGE_INVALID_FILE_ID;
-	}
-#endif
-	else if (AS_STORAGE_ENGINE_MEMORY == ns->storage_type) {
-		// The storage_key struct shouldn't be used, but for now is accessed
-		// when making the (useless for memory-only) object size histogram.
-		r->storage_key.ssd.rblock_id = STORAGE_INVALID_RBLOCK;
-	}
-	else {
-		cf_crash(AS_RECORD, "unknown storage engine type: %d", ns->storage_type);
-	}
-}
-
 void
 as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 {
 	record_delete_adjust_sindex(r_ref->r, ns);
 	as_record_destroy(r_ref->r, ns);
 	as_index_clear_record_info(r_ref->r);
-	as_record_initialize(r_ref, ns);
 	cf_atomic64_incr(&ns->n_objects);
 }
 
@@ -96,20 +71,13 @@ as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 int
 as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns, bool is_subrec)
 {
-	int rv =
-#ifdef USE_KV
-			as_storage_has_index(ns) ? as_index_ref_initialize(tree, keyd, r_ref, true, ns) :
-#endif
-			as_index_get_insert_vlock(tree, keyd, r_ref);
+	int rv = as_index_get_insert_vlock(tree, keyd, r_ref);
 
 	if (rv == 0) {
 		cf_detail(AS_RECORD, "record get_create: digest %"PRIx64" found record %p", *(uint64_t *)keyd , r_ref->r);
 	}
 	else if (rv == 1) {
 		cf_detail(AS_RECORD, "record get_create: digest %"PRIx64" new record %p", *(uint64_t *)keyd, r_ref->r);
-
-		// new record, have to initialize bits
-		as_record_initialize(r_ref, ns);
 
 		// this is decremented by the destructor here, so best tracked on the constructor
 		if (is_subrec) {
@@ -195,15 +163,9 @@ as_record_destroy(as_record *r, as_namespace *ns)
  * -1 if searched tree and record does not exist
  */
 int
-as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns)
+as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref)
 {
-	int rv =
-#ifdef USE_KV
-			as_storage_has_index(ns) ? (! as_index_ref_initialize(tree, keyd, r_ref, false, ns) ? 0 : -1) :
-#endif
-			as_index_get_vlock(tree, keyd, r_ref);
-
-	return rv;
+	return as_index_get_vlock(tree, keyd, r_ref);
 }
 
 /* as_record_exists
@@ -212,15 +174,9 @@ as_record_get(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_name
  * -1 if searched tree and record does not exist
  */
 int
-as_record_exists(as_index_tree *tree, cf_digest *keyd, as_namespace *ns)
+as_record_exists(as_index_tree *tree, cf_digest *keyd)
 {
-	int rv =
-#ifdef USE_KV
-			as_storage_has_index(ns) ? -1 :
-#endif
-			as_index_exists(tree, keyd);
-
-	return rv;
+	return as_index_exists(tree, keyd);
 }
 
 /* Done with this record - release and unlock

@@ -276,8 +276,9 @@ int ssd_write(struct as_storage_rd_s *rd);
 // Conversions between bytes and rblocks.
 //
 
-#define STORAGE_RBLOCK_IS_VALID(__x)	((__x) != STORAGE_INVALID_RBLOCK)
-#define STORAGE_RBLOCK_IS_INVALID(__x)	((__x) == STORAGE_INVALID_RBLOCK)
+// TODO - make checks stricter (exclude drive header, consider drive size) ???
+#define STORAGE_RBLOCK_IS_VALID(__x)	((__x) != 0)
+#define STORAGE_RBLOCK_IS_INVALID(__x)	((__x) == 0)
 
 #define RBLOCK_SIZE			128	// 2^7
 #define LOG_2_RBLOCK_SIZE	7	// must be in sync with RBLOCK_SIZE

@@ -32,25 +32,6 @@
 #include "base/rec_props.h"
 
 
-// The type of backing storage configured.
-typedef enum {
-	AS_STORAGE_ENGINE_UNDEF		= 0,
-	AS_STORAGE_ENGINE_MEMORY	= 1,
-	AS_STORAGE_ENGINE_SSD		= 2,
-	AS_STORAGE_ENGINE_KV		= 3
-} as_storage_type;
-
-#define NAMESPACE_HAS_PERSISTENCE(ns) \
-	(ns->storage_type != AS_STORAGE_ENGINE_MEMORY) 
-// For sizing the storage API "v-tables".
-#define AS_STORAGE_ENGINE_TYPES 4
-
-// For invalidating the ssd.file_id and ssd.rblock_id bits in as_index.
-#ifdef USE_KV
-#define STORAGE_INVALID_FILE_ID	0x3F // 6 bits
-#endif
-#define STORAGE_INVALID_RBLOCK	0x3FFFFffff // 34 bits
-
 // Forward declarations.
 struct as_bin_s;
 struct as_index_s;
@@ -58,45 +39,37 @@ struct as_partition_vinfo_s;
 struct as_namespace_s;
 struct drv_ssd_s;
 struct drv_ssd_block_s;
-struct drv_kv_s;
-struct drv_kv_block_s;
 
-// A record descriptor.
+
+typedef enum {
+	AS_STORAGE_ENGINE_MEMORY	= 0,
+	AS_STORAGE_ENGINE_SSD		= 1,
+
+	AS_NUM_STORAGE_ENGINES
+} as_storage_type;
+
 typedef struct as_storage_rd_s {
 	struct as_index_s		*r;
-	struct as_namespace_s	*ns;				// the namespace, which contain all files
-	as_rec_props			rec_props;			// list of metadata name-value pairs, e.g. name of set
-	struct as_bin_s			*bins;				// pointer to the appropriate bin_space, which is either
-												// part of the record (single bin, data_in_memory == true),
-												// memalloc'd (multi-bin, data_in_memory == true), or
-												// temporary (data_in_memory == false)
-												// enables this record's data to be written to drive
-	uint16_t		n_bins;
-	bool			record_on_device;			// if true, record exists on device
-	bool			ignore_record_on_device;	// if true, never read record off device (such as in replace case)
+	struct as_namespace_s	*ns;
+
+	as_rec_props			rec_props;
+
+	struct as_bin_s			*bins;
+	uint16_t				n_bins;
+
+	bool					record_on_device;
+	bool					ignore_record_on_device;
 
 	// Parameters used when handling key storage:
-	uint32_t		key_size;
-	uint8_t			*key;
+	uint32_t				key_size;
+	uint8_t					*key;
 
-	bool			is_durable_delete;			// enterprise only
+	bool					is_durable_delete; // enterprise only
 
-	as_storage_type storage_type;
-
-	union {
-		struct {
-			struct drv_ssd_block_s	*block;				// data that was read in at one point
-			uint8_t					*must_free_block;	// if not null, must free this pointer - may be different to block pointer
-														// if null, part of a bigger block that will be freed elsewhere
-			struct drv_ssd_s		*ssd;				// the particular ssd object we're using
-		} ssd;
-		struct {
-			struct drv_kv_block_s	*block;				// data that was read in at one point
-			uint8_t					*must_free_block;	// if not null, must free this pointer - may be different to block pointer
-														// if null, part of a bigger block that will be freed elsewhere
-			struct drv_kv_s			*kv;				// the particular kv object we're using
-		} kv;
-	} u;
+	// Specific to storage type AS_STORAGE_ENGINE_SSD:
+	struct drv_ssd_block_s	*block;
+	uint8_t					*must_free_block;
+	struct drv_ssd_s		*ssd;
 } as_storage_rd;
 
 
@@ -109,8 +82,6 @@ extern void as_storage_init();
 extern void as_storage_start_tomb_raider();
 extern int as_storage_namespace_destroy(struct as_namespace_s *ns);
 
-extern int as_storage_has_index(struct as_namespace_s *ns);
-extern int as_storage_record_exists(struct as_namespace_s *ns, cf_digest *keyd);
 extern int as_storage_record_destroy(struct as_namespace_s *ns, struct as_index_s *r); // not the counterpart of as_storage_record_create()
 
 // Start and finish an as_storage_rd usage cycle.
@@ -209,24 +180,3 @@ extern int as_storage_histogram_clear_ssd(struct as_namespace_s *ns);
 // Called by "base class" functions but not via table.
 extern bool as_storage_record_get_key_ssd(as_storage_rd *rd);
 extern void as_storage_shutdown_ssd(struct as_namespace_s *ns);
-
-
-//------------------------------------------------
-// AS_STORAGE_ENGINE_KV functions.
-//
-
-extern int as_storage_namespace_init_kv(struct as_namespace_s *ns, cf_queue *complete_q, void *udata);
-extern int as_storage_namespace_destroy_kv(struct as_namespace_s *ns);
-
-extern int as_storage_has_index_kv(struct as_namespace_s *ns);
-extern int as_storage_record_exists_kv(struct as_namespace_s *ns, cf_digest *keyd);
-
-extern int as_storage_record_create_kv(as_storage_rd *rd);
-extern int as_storage_record_open_kv(as_storage_rd *rd);
-extern int as_storage_record_close_kv(as_storage_rd *rd);
-
-extern int as_storage_record_load_n_bins_kv(as_storage_rd *rd);
-extern int as_storage_record_load_bins_kv(as_storage_rd *rd);
-extern int as_storage_record_write_kv(as_storage_rd *rd);
-
-extern int as_storage_stats_kv(struct as_namespace_s *ns, int *available_pct, uint64_t *used_disk_bytes);

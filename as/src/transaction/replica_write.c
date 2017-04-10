@@ -1026,7 +1026,7 @@ drop_replica(as_partition_reservation* rsv, cf_digest* keyd, bool is_subrec,
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(tree, keyd, &r_ref, ns) != 0) {
+	if (as_record_get(tree, keyd, &r_ref) != 0) {
 		return AS_PROTO_RESULT_FAIL_NOTFOUND;
 	}
 

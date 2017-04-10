@@ -1860,8 +1860,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	info_append_string(db, "storage-engine",
 			(ns->storage_type == AS_STORAGE_ENGINE_MEMORY ? "memory" :
-				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" :
-					(ns->storage_type == AS_STORAGE_ENGINE_KV ? "kv" : "illegal"))));
+				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal")));
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
@@ -1901,22 +1900,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
 		info_append_uint32(db, "storage-engine.write-threads", ns->storage_write_threads);
-	}
-
-	if (ns->storage_type == AS_STORAGE_ENGINE_KV) {
-		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
-			if (! ns->storage_devices[i]) {
-				break;
-			}
-
-			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
-		}
-
-		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
-		info_append_uint32(db, "storage-engine.read-block-size", ns->storage_read_block_size);
-		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
-		info_append_uint32(db, "storage-engine.num-write-blocks", ns->storage_num_write_blocks);
-		info_append_bool(db, "storage-engine.cond-write", ns->cond_write);
 	}
 
 	info_append_uint32(db, "sindex.num-partitions", ns->sindex_num_partitions);
@@ -5740,8 +5723,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 		}
 	}
-
-	// Not bothering with AS_STORAGE_ENGINE_KV.
 
 	// Migration stats.
 

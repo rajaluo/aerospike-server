@@ -75,7 +75,6 @@ char *cf_fault_context_strings[] = {
 		"clustering",
 		"compression",
 		"demarshal",
-		"drv_kv",
 		"drv_ssd",
 		"exchange",
 		"fabric",
