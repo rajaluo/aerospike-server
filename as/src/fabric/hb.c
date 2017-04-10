@@ -8795,9 +8795,9 @@ hb_event_publish_pending()
 
 	as_hb_event_node events[AS_HB_CLUSTER_MAX_SIZE_SOFT];
 	int published_count = 0;
-	while (cf_queue_pop(&g_hb_event_listeners.external_events_queue,
-			&events[published_count], 0) == CF_QUEUE_OK
-			&& published_count <= AS_HB_CLUSTER_MAX_SIZE_SOFT) {
+	while (published_count < AS_HB_CLUSTER_MAX_SIZE_SOFT
+			&& cf_queue_pop(&g_hb_event_listeners.external_events_queue,
+					&events[published_count], 0) == CF_QUEUE_OK) {
 		published_count++;
 	}
 
