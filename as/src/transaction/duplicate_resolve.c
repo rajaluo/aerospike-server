@@ -95,12 +95,7 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 		msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
 		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
 
-		if (as_new_clustering()) {
-			if (r->void_time != 0) {
-				msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
-			}
-		}
-		else {
+		if (! as_new_clustering()) {
 			msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
 		}
 
@@ -192,9 +187,9 @@ dup_res_handle_request(cf_node node, msg* m)
 		return;
 	}
 
-	uint32_t generation;
-	uint32_t void_time;
-	uint64_t last_update_time;
+	uint32_t generation = 0;
+	uint32_t void_time = 0;// XXX JUMP - remove void-time in "six months"
+	uint64_t last_update_time = 0;
 
 	bool local_conflict_check;
 
@@ -203,19 +198,10 @@ dup_res_handle_request(cf_node node, msg* m)
 				msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0 &&
 				msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
 						&last_update_time) == 0;
-
-		void_time = 0;
-
-		if (local_conflict_check) {
-			msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-		}
 	}
 	else {
 		local_conflict_check =
 				msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0;
-
-		void_time = 0;
-		last_update_time = 0;
 
 		if (local_conflict_check) {
 			msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);

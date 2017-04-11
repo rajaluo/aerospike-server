@@ -640,6 +640,7 @@ resolve_void_time(uint32_t left, uint32_t right)
 	return 1;
 }
 
+// XXX JUMP - remove void-time parameters in "six months".
 int
 as_record_resolve_conflict(conflict_resolution_pol policy,
 		uint16_t left_gen, uint64_t left_lut, uint32_t left_vt,
@@ -679,6 +680,7 @@ as_record_resolve_conflict(conflict_resolution_pol policy,
 	return result;
 }
 
+// XXX JUMP - remove void-time as part of conflict resolution in "six months".
 int
 as_record_component_winner(as_partition_reservation *rsv, int n_components,
 		as_record_merge_component *components, as_index *r)
@@ -707,9 +709,10 @@ as_record_component_winner(as_partition_reservation *rsv, int n_components,
 		if (-1 == as_record_resolve_conflict(rsv->ns->conflict_resolution_policy,
 				c->generation, c->last_update_time, c->void_time,
 				max_generation, max_last_update_time, max_void_time)) {
-					max_void_time = c->void_time;
-					max_generation = c->generation;
-					winner_idx = (int32_t)i;
+			max_last_update_time = c->last_update_time;
+			max_void_time = c->void_time;
+			max_generation = c->generation;
+			winner_idx = (int32_t)i;
 		}
 	}
 
