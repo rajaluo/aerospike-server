@@ -4745,6 +4745,7 @@ old_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, u
 				ns         = as_namespace_get_byname(imd.ns_name);
 				if (as_sindex_exists_by_defn(ns, &imd)) {
 					cf_detail(AS_SINDEX, "Index with the same index defn already exists.");
+					as_sindex_imd_free(&imd);
 					// Fail quietly for duplicate sindex requests
 					continue;
 				}
