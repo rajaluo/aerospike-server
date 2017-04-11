@@ -2840,7 +2840,7 @@ static int
 vector_find(cf_vector* vector, const void* element)
 {
 	int element_count = cf_vector_size(vector);
-	size_t value_len = vector->value_len;
+	size_t value_len = cf_vector_element_size(vector);
 	for (int i = 0; i < element_count; i++) {
 		// No null check required since we are iterating under a lock and within
 		// vector bounds.
