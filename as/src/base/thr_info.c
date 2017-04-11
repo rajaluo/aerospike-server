@@ -5650,14 +5650,17 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "tombstones", ns->n_tombstones);
 
 	repl_stats mp;
-	as_partition_get_master_prole_stats(ns, &mp);
+	as_partition_get_replica_stats(ns, &mp);
 
 	info_append_uint64(db, "master_objects", mp.n_master_objects);
 	info_append_uint64(db, "master_sub_objects", mp.n_master_sub_objects);
 	info_append_uint64(db, "master_tombstones", mp.n_master_tombstones);
-	info_append_uint64(db, "prole_objects", mp.n_prole_objects);
-	info_append_uint64(db, "prole_sub_objects", mp.n_prole_sub_objects);
-	info_append_uint64(db, "prole_tombstones", mp.n_prole_tombstones);
+	info_append_uint64(db, "replica_objects", mp.n_replica_objects);
+	info_append_uint64(db, "replica_sub_objects", mp.n_replica_sub_objects);
+	info_append_uint64(db, "replica_tombstones", mp.n_replica_tombstones);
+	info_append_uint64(db, "non_replica_objects", mp.n_non_replica_objects);
+	info_append_uint64(db, "non_replica_sub_objects", mp.n_non_replica_sub_objects);
+	info_append_uint64(db, "non_replica_tombstones", mp.n_non_replica_tombstones);
 
 	// Expiration & eviction (nsup) stats.
 

@@ -58,6 +58,7 @@ const as_partition_vinfo NULL_VINFO = { 0 };
 //
 
 cf_node find_best_node(const as_partition* p, const as_namespace* ns, bool is_read);
+void accumulate_replica_stats(const as_partition* p, bool is_ldt_enabled, uint64_t* p_n_objects, uint64_t* p_n_sub_objects, uint64_t* p_n_tombstones);
 int partition_reserve_read_write(as_namespace* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, bool is_read, uint64_t* cluster_key);
 void partition_reserve_lockfree(as_partition* p, as_namespace* ns, as_partition_reservation* rsv);
 cf_node partition_getreplica_prole(as_namespace* ns, uint32_t pid);
@@ -270,14 +271,9 @@ as_partition_get_replicas_all_str(cf_dyn_buf* db)
 
 
 void
-as_partition_get_master_prole_stats(as_namespace* ns, repl_stats* p_stats)
+as_partition_get_replica_stats(as_namespace* ns, repl_stats* p_stats)
 {
-	p_stats->n_master_objects = 0;
-	p_stats->n_prole_objects = 0;
-	p_stats->n_master_sub_objects = 0;
-	p_stats->n_prole_sub_objects = 0;
-	p_stats->n_master_tombstones = 0;
-	p_stats->n_prole_tombstones = 0;
+	memset(p_stats, 0, sizeof(repl_stats));
 
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
 		as_partition* p = &ns->partitions[pid];
@@ -289,31 +285,22 @@ as_partition_get_master_prole_stats(as_namespace* ns, repl_stats* p_stats)
 				p->target != (cf_node)0;
 
 		if (is_working_master) {
-			int64_t n_tombstones = (int64_t)p->n_tombstones;
-			int64_t n_objects =
-					(int64_t)as_index_tree_size(p->vp) - n_tombstones;
-
-			p_stats->n_master_objects += n_objects > 0 ?
-					(uint64_t)n_objects : 0;
-
-			if (ns->ldt_enabled) {
-				p_stats->n_master_sub_objects += as_index_tree_size(p->sub_vp);
-			}
-
-			p_stats->n_master_tombstones += (uint64_t)n_tombstones;
+			accumulate_replica_stats(p, ns->ldt_enabled,
+					&p_stats->n_master_objects,
+					&p_stats->n_master_sub_objects,
+					&p_stats->n_master_tombstones);
 		}
-		else if (self_n > 0 && p->origin == (cf_node)0) {
-			int64_t n_tombstones = (int64_t)p->n_tombstones;
-			int64_t n_objects =
-					(int64_t)as_index_tree_size(p->vp) - n_tombstones;
-
-			p_stats->n_prole_objects += n_objects > 0 ? (uint64_t)n_objects : 0;
-
-			if (ns->ldt_enabled) {
-				p_stats->n_prole_sub_objects += as_index_tree_size(p->sub_vp);
-			}
-
-			p_stats->n_prole_tombstones += (uint64_t)n_tombstones;
+		else if (self_n >= 0) {
+			accumulate_replica_stats(p, ns->ldt_enabled,
+					&p_stats->n_replica_objects,
+					&p_stats->n_replica_sub_objects,
+					&p_stats->n_replica_tombstones);
+		}
+		else {
+			accumulate_replica_stats(p, ns->ldt_enabled,
+					&p_stats->n_non_replica_objects,
+					&p_stats->n_non_replica_sub_objects,
+					&p_stats->n_non_replica_tombstones);
 		}
 
 		pthread_mutex_unlock(&p->lock);
@@ -681,6 +668,24 @@ find_best_node(const as_partition* p, const as_namespace* ns, bool is_read)
 	}
 
 	return p->replicas[0]; // final master as a last resort
+}
+
+
+void
+accumulate_replica_stats(const as_partition* p, bool is_ldt_enabled,
+		uint64_t* p_n_objects, uint64_t* p_n_sub_objects,
+		uint64_t* p_n_tombstones)
+{
+	int64_t n_tombstones = (int64_t)p->n_tombstones;
+	int64_t n_objects = (int64_t)as_index_tree_size(p->vp) - n_tombstones;
+
+	*p_n_objects += n_objects > 0 ? (uint64_t)n_objects : 0;
+
+	if (is_ldt_enabled) {
+		*p_n_sub_objects += as_index_tree_size(p->sub_vp);
+	}
+
+	*p_n_tombstones += (uint64_t)n_tombstones;
 }
 
 

@@ -197,7 +197,7 @@ log_ticker_frame(uint64_t delta_time)
 		total_ns_memory_inuse += total_mem;
 
 		repl_stats mp;
-		as_partition_get_master_prole_stats(ns, &mp);
+		as_partition_get_replica_stats(ns, &mp);
 
 		log_line_objects(ns, n_objects, &mp);
 		log_line_sub_objects(ns, n_sub_objects, &mp);
@@ -374,11 +374,12 @@ void
 log_line_objects(as_namespace* ns, uint64_t n_objects, repl_stats* mp)
 {
 	// TODO - show if all 0's ???
-	cf_info(AS_INFO, "{%s} objects: all %lu master %lu prole %lu",
+	cf_info(AS_INFO, "{%s} objects: all %lu master %lu replica %lu non-replica %lu",
 			ns->name,
 			n_objects,
 			mp->n_master_objects,
-			mp->n_prole_objects
+			mp->n_replica_objects,
+			mp->n_non_replica_objects
 			);
 }
 
@@ -388,15 +389,17 @@ log_line_sub_objects(as_namespace* ns, uint64_t n_sub_objects, repl_stats* mp)
 {
 	if ((n_sub_objects |
 			mp->n_master_sub_objects |
-			mp->n_prole_sub_objects) == 0) {
+			mp->n_replica_sub_objects |
+			mp->n_non_replica_sub_objects) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu prole %lu",
+	cf_info(AS_INFO, "{%s} sub-objects: all %lu master %lu replica %lu non-replica %lu",
 			ns->name,
 			n_sub_objects,
 			mp->n_master_sub_objects,
-			mp->n_prole_sub_objects
+			mp->n_replica_sub_objects,
+			mp->n_non_replica_sub_objects
 			);
 }
 
@@ -406,15 +409,17 @@ log_line_tombstones(as_namespace* ns, uint64_t n_tombstones, repl_stats* mp)
 {
 	if ((n_tombstones |
 			mp->n_master_tombstones |
-			mp->n_prole_tombstones) == 0) {
+			mp->n_replica_tombstones |
+			mp->n_non_replica_tombstones) == 0) {
 		return;
 	}
 
-	cf_info(AS_INFO, "{%s} tombstones: all %lu master %lu prole %lu",
+	cf_info(AS_INFO, "{%s} tombstones: all %lu master %lu replica %lu non-replica %lu",
 			ns->name,
 			n_tombstones,
 			mp->n_master_tombstones,
-			mp->n_prole_tombstones
+			mp->n_replica_tombstones,
+			mp->n_non_replica_tombstones
 			);
 }
 

@@ -154,11 +154,14 @@ typedef struct as_partition_reservation_s {
 
 typedef struct repl_stats_s {
 	uint64_t n_master_objects;
-	uint64_t n_prole_objects;
+	uint64_t n_replica_objects;
+	uint64_t n_non_replica_objects;
 	uint64_t n_master_sub_objects;
-	uint64_t n_prole_sub_objects;
+	uint64_t n_replica_sub_objects;
+	uint64_t n_non_replica_sub_objects;
 	uint64_t n_master_tombstones;
-	uint64_t n_prole_tombstones;
+	uint64_t n_replica_tombstones;
+	uint64_t n_non_replica_tombstones;
 } repl_stats;
 
 #define CLIENT_BITMAP_BYTES ((AS_PARTITIONS + 7) / 8)
@@ -229,7 +232,7 @@ void as_partition_get_replicas_prole_str(cf_dyn_buf* db); // deprecate in "six m
 void as_partition_get_replicas_master_str(cf_dyn_buf* db);
 void as_partition_get_replicas_all_str(cf_dyn_buf* db);
 
-void as_partition_get_master_prole_stats(struct as_namespace_s* ns, repl_stats* p_stats);
+void as_partition_get_replica_stats(struct as_namespace_s* ns, repl_stats* p_stats);
 
 int as_partition_reserve_write(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, uint64_t* cluster_key);
 int as_partition_reserve_read(struct as_namespace_s* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, uint64_t* cluster_key);
