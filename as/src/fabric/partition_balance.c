@@ -121,11 +121,11 @@ void rack_aware_adjust_rows(cf_node* ns_node_seq, uint32_t* ns_version_ix, const
 bool is_group_distinct_before_n(const cf_node* ns_node_seq, cc_node_t group_id, uint32_t n);
 uint32_t find_self(const cf_node* ns_node_seq, const as_namespace* ns);
 int find_working_master(const as_partition* p, const uint32_t* ns_version_ix, const as_namespace* ns);
-uint32_t find_duplicates(const as_partition* p, const cf_node* ns_node_seq, const uint32_t* ns_version_ix, const as_namespace* ns, int working_master_n, cf_node dupls[]);
+uint32_t find_duplicates(const as_partition* p, const cf_node* ns_node_seq, const uint32_t* ns_version_ix, const as_namespace* ns, uint32_t working_master_n, cf_node dupls[]);
 void fill_witnesses(as_partition* p, const cf_node* ns_node_seq, const uint32_t* ns_version_ix, as_namespace* ns);
-uint32_t fill_immigrators(as_partition* p, const uint32_t* ns_version_ix, as_namespace* ns, int working_master_n, uint32_t n_dupl);
-void advance_version(as_partition* p, const uint32_t* ns_version_ix, as_namespace* ns, uint32_t self_n,	int working_master_n, uint32_t n_dupl, const cf_node dupls[]);
-uint32_t fill_family_versions(const as_partition* p, const uint32_t* ns_version_ix, const as_namespace* ns, int working_master_n, uint32_t n_dupl, const cf_node dupls[], as_partition_version family_versions[]);
+uint32_t fill_immigrators(as_partition* p, const uint32_t* ns_version_ix, as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl);
+void advance_version(as_partition* p, const uint32_t* ns_version_ix, as_namespace* ns, uint32_t self_n,	uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[]);
+uint32_t fill_family_versions(const as_partition* p, const uint32_t* ns_version_ix, const as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[], as_partition_version family_versions[]);
 bool has_replica_parent(const as_partition* p, const uint32_t* ns_version_ix, const as_namespace* ns, const as_partition_version* subset_version, uint32_t subset_n);
 uint32_t find_family(const as_partition_version* self_version, uint32_t n_families, const as_partition_version family_versions[]);
 void queue_namespace_migrations(as_partition* p, as_namespace* ns, uint32_t self_n, cf_node working_master, uint32_t n_dupl, cf_node dupls[], cf_queue* mq);
@@ -919,7 +919,8 @@ partition_cluster_topology_info()
 // We keep the partition version index table so we can refer back to namespaces'
 // version tables, where nodes are in the original succession list order.
 void
-fill_global_tables(cf_node* full_node_seq_table, uint32_t* full_version_ix_table)
+fill_global_tables(cf_node* full_node_seq_table,
+		uint32_t* full_version_ix_table)
 {
 	uint64_t hashed_nodes[g_cluster_size];
 
@@ -1071,14 +1072,14 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_version_ix_table,
 			p->acting_master_involved = working_master_n != 0;
 
 			n_dupl = find_duplicates(p, ns_node_seq, ns_version_ix, ns,
-					working_master_n, dupls);
+					(uint32_t)working_master_n, dupls);
 
 			if (self_n == 0) {
 				fill_witnesses(p, ns_node_seq, ns_version_ix, ns);
 			}
 
 			uint32_t n_immigrators = fill_immigrators(p, ns_version_ix, ns,
-					working_master_n, n_dupl);
+					(uint32_t)working_master_n, n_dupl);
 
 			// TEMPORARY debugging.
 			debug_n_immigrators = n_immigrators;
@@ -1086,7 +1087,7 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_version_ix_table,
 
 			if (n_immigrators != 0 || p->n_replicas < old_repl_factor) {
 				advance_version(p, ns_version_ix, ns, self_n,
-						working_master_n, n_dupl, dupls);
+						(uint32_t)working_master_n, n_dupl, dupls);
 			}
 			else {
 				// Refresh replicas' versions.
@@ -1367,8 +1368,8 @@ find_working_master(const as_partition* p, const uint32_t* ns_version_ix,
 
 uint32_t
 find_duplicates(const as_partition* p, const cf_node* ns_node_seq,
-		const uint32_t* ns_version_ix, const as_namespace* ns, int working_master_n,
-		cf_node dupls[])
+		const uint32_t* ns_version_ix, const as_namespace* ns,
+		uint32_t working_master_n, cf_node dupls[])
 {
 	uint32_t n_dupl = 0;
 	as_partition_version parent_dupl_versions[ns->cluster_size];
@@ -1449,15 +1450,15 @@ fill_witnesses(as_partition* p, const cf_node* ns_node_seq,
 
 
 uint32_t
-fill_immigrators(as_partition* p, const uint32_t* ns_version_ix, as_namespace* ns,
-		int working_master_n, uint32_t n_dupl)
+fill_immigrators(as_partition* p, const uint32_t* ns_version_ix,
+		as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl)
 {
 	uint32_t n_immigrators = 0;
 
 	for (uint32_t repl_ix = 0; repl_ix < p->n_replicas; repl_ix++) {
 		const as_partition_version* version = OLD_VERSION(repl_ix);
 
-		if (n_dupl != 0 || (repl_ix != (uint32_t)working_master_n &&
+		if (n_dupl != 0 || (repl_ix != working_master_n &&
 				(as_partition_version_is_null(version) ||
 						version->subset == 1))) {
 			p->immigrators[repl_ix] = true;
@@ -1470,9 +1471,9 @@ fill_immigrators(as_partition* p, const uint32_t* ns_version_ix, as_namespace* n
 
 
 void
-advance_version(as_partition* p, const uint32_t* ns_version_ix, as_namespace* ns,
-		uint32_t self_n, int working_master_n, uint32_t n_dupl,
-		const cf_node dupls[])
+advance_version(as_partition* p, const uint32_t* ns_version_ix,
+		as_namespace* ns, uint32_t self_n, uint32_t working_master_n,
+		uint32_t n_dupl, const cf_node dupls[])
 {
 	// Fill family versions.
 
@@ -1487,7 +1488,7 @@ advance_version(as_partition* p, const uint32_t* ns_version_ix, as_namespace* ns
 			working_master_n, n_dupl, dupls, family_versions);
 
 	// Advance working master.
-	if (self_n == (uint32_t)working_master_n) {
+	if (self_n == working_master_n) {
 		p->version.ckey = p->final_version.ckey;
 		p->version.family = (self_n == 0 || n_dupl == 0) ? 0 : 1;
 		p->version.subset = 0;
@@ -1549,7 +1550,7 @@ advance_version(as_partition* p, const uint32_t* ns_version_ix, as_namespace* ns
 
 uint32_t
 fill_family_versions(const as_partition* p, const uint32_t* ns_version_ix,
-		const as_namespace* ns, int working_master_n, uint32_t n_dupl,
+		const as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl,
 		const cf_node dupls[], as_partition_version family_versions[])
 {
 	uint32_t n_families = 1;
@@ -1572,7 +1573,7 @@ fill_family_versions(const as_partition* p, const uint32_t* ns_version_ix,
 	}
 
 	for (uint32_t repl_ix = 1; repl_ix < p->n_replicas; repl_ix++) {
-		if (repl_ix == (uint32_t)working_master_n) {
+		if (repl_ix == working_master_n) {
 			continue;
 		}
 
@@ -1862,8 +1863,8 @@ as_partition_balance_is_multi_node_cluster()
 //
 
 void
-old_as_partition_emigrate_done(as_migrate_state s, as_namespace* ns, uint32_t pid,
-		uint64_t orig_cluster_key, uint32_t tx_flags)
+old_as_partition_emigrate_done(as_migrate_state s, as_namespace* ns,
+		uint32_t pid, uint64_t orig_cluster_key, uint32_t tx_flags)
 {
 	// TODO - better handled outside?
 	if (s != AS_MIGRATE_STATE_DONE) {
