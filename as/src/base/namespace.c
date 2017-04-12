@@ -237,9 +237,9 @@ as_namespace_configure_sets(as_namespace *ns)
 {
 	for (uint32_t i = 0; i < ns->sets_cfg_count; i++) {
 		uint32_t idx;
-		cf_vmapx_err result = cf_vmapx_put_unique(ns->p_sets_vmap, &ns->sets_cfg_array[i], &idx);
+		cf_vmapx_err result = cf_vmapx_put_unique(ns->p_sets_vmap, ns->sets_cfg_array[i].name, &idx);
 
-		if (result == CF_VMAPX_ERR_NAME_EXISTS) {
+		if (result == CF_VMAPX_OK || result == CF_VMAPX_ERR_NAME_EXISTS) {
 			as_set* p_set = NULL;
 
 			if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set)) != CF_VMAPX_OK) {
@@ -248,12 +248,12 @@ as_namespace_configure_sets(as_namespace *ns)
 				return false;
 			}
 
-			// Rewrite configurable metadata - config values may have changed.
+			// Transfer configurable metadata.
 			p_set->stop_writes_count = ns->sets_cfg_array[i].stop_writes_count;
 			p_set->disable_eviction = ns->sets_cfg_array[i].disable_eviction;
 			p_set->enable_xdr = ns->sets_cfg_array[i].enable_xdr;
 		}
-		else if (result != CF_VMAPX_OK) {
+		else {
 			// Maybe exceeded max sets allowed, but try failing gracefully.
 			cf_warning(AS_NAMESPACE, "vmap error %d", result);
 			return false;
@@ -455,36 +455,25 @@ as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 	}
 
 	if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
-		as_set set;
-
-		memset(&set, 0, sizeof(set));
-
-		// Check name length just once, here at insertion. (Other vmap calls are
-		// safe if name is too long - they return CF_VMAPX_ERR_NAME_NOT_FOUND.)
-		strncpy(set.name, set_name, AS_SET_NAME_MAX_SIZE);
-
-		if (set.name[AS_SET_NAME_MAX_SIZE - 1]) {
-			set.name[AS_SET_NAME_MAX_SIZE - 1] = 0;
-
-			cf_warning(AS_NAMESPACE, "set name %s... too long", set.name);
-			return INVALID_SET_ID;
-		}
-
-		set.n_objects = 0; // *not* adding an element
-		result = cf_vmapx_put_unique(ns->p_sets_vmap, &set, &idx);
+		result = cf_vmapx_put_unique(ns->p_sets_vmap, set_name, &idx);
 
 		if (result == CF_VMAPX_ERR_NAME_EXISTS) {
 			return (uint16_t)(idx + 1);
 		}
 
+		if (result == CF_VMAPX_ERR_BAD_PARAM) {
+			cf_warning(AS_NAMESPACE, "set name %s too long", set_name);
+			return INVALID_SET_ID;
+		}
+
 		if (result == CF_VMAPX_ERR_FULL) {
-			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s", set.name);
+			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s", set_name);
 			return INVALID_SET_ID;
 		}
 
 		if (result != CF_VMAPX_OK) {
 			// Currently, remaining errors are all some form of out-of-memory.
-			cf_warning(AS_NAMESPACE, "error %d, can't add %s", result, set.name);
+			cf_warning(AS_NAMESPACE, "error %d, can't add %s", result, set_name);
 			return INVALID_SET_ID;
 		}
 
@@ -529,8 +518,7 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 			len, &idx);
 
 	if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
-		// Check name length just once, here at insertion. (Other vmap calls are
-		// safe if name is too long - they return CF_VMAPX_ERR_NAME_NOT_FOUND.)
+		// Special case handling for name too long.
 		if (len >= AS_SET_NAME_MAX_SIZE) {
 			char bad_name[AS_SET_NAME_MAX_SIZE];
 
@@ -541,26 +529,18 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 			return -1;
 		}
 
-		as_set set;
-
-		memset(&set, 0, sizeof(set)); // paranoia - vmap null-terminates
-
-		memcpy(set.name, set_name, len);
-		set.n_objects = 0;
-
-		result = cf_vmapx_put_unique_w_len(ns->p_sets_vmap, &set, len, &idx);
+		result = cf_vmapx_put_unique_w_len(ns->p_sets_vmap, set_name, len,
+				&idx);
 
 		// Since this function can be called via many functions simultaneously.
 		// Need to handle race, So handle CF_VMAPX_ERR_NAME_EXISTS.
 		if (result == CF_VMAPX_ERR_FULL) {
-			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s",
-					set.name);
+			cf_warning(AS_NAMESPACE, "at set names limit, can't add set");
 			return -1;
 		}
 
 		if (result != CF_VMAPX_OK && result != CF_VMAPX_ERR_NAME_EXISTS) {
-			cf_warning(AS_NAMESPACE, "unexpected error %d, can't add %s",
-					result, set.name);
+			cf_warning(AS_NAMESPACE, "error %d, can't add set", result);
 			return -1;
 		}
 	}
