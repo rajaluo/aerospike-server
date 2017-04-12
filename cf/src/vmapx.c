@@ -197,24 +197,24 @@ cf_vmapx_get_index_w_len(const cf_vmapx* this, const char* name,
 // enable us to rebuild the hash map on warm
 // restart.)
 //
-// If name is not found, add new value and return
-// newly assigned index (and CF_VMAPX_OK). If name
-// is found, return index for existing name (with
-// CF_VMAPX_ERR_NAME_EXISTS) but ignore new value.
-// May pass null p_index.
+// If name is not found, add new name, clear rest
+// of value in vector, and return newly assigned
+// index (and CF_VMAPX_OK). If name is found,
+// return index for existing value (with
+// CF_VMAPX_ERR_NAME_EXISTS). May pass null
+// p_index.
 //
 cf_vmapx_err
-cf_vmapx_put_unique(cf_vmapx* this, const void* p_value, uint32_t* p_index)
+cf_vmapx_put_unique(cf_vmapx* this, const char* name, uint32_t* p_index)
 {
-	return cf_vmapx_put_unique_w_len(this, p_value,
-			strlen((const char*)p_value), p_index);
+	return cf_vmapx_put_unique_w_len(this, name, strlen(name), p_index);
 }
 
 //------------------------------------------------
 // Same as above, but with known name length.
 //
 cf_vmapx_err
-cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
+cf_vmapx_put_unique_w_len(cf_vmapx* this, const char* name, size_t name_len,
 		uint32_t* p_index)
 {
 	// Make sure name fits in key's allocated size.
@@ -225,14 +225,14 @@ cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
 	pthread_mutex_lock(&this->write_lock);
 
 	// If name is found, return existing name's index, ignore p_value.
-	if (vhash_get(this->p_hash, (const char*)p_value, name_len, p_index)) {
+	if (vhash_get(this->p_hash, name, name_len, p_index)) {
 		pthread_mutex_unlock(&this->write_lock);
 		return CF_VMAPX_ERR_NAME_EXISTS;
 	}
 
 	// Make sure name has no illegal premature null-terminator.
 	for (uint32_t i = 0; i < name_len; i++) {
-		if (((const char*)p_value)[i] == 0) {
+		if (name[i] == 0) {
 			pthread_mutex_unlock(&this->write_lock);
 			return CF_VMAPX_ERR_BAD_PARAM;
 		}
@@ -246,13 +246,11 @@ cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
 		return CF_VMAPX_ERR_FULL;
 	}
 
-	// Add to vector.
+	// Add name to vector (and clear rest of value).
 	char* value_ptr = (char*)cf_vmapx_value_ptr(this, count);
 
-	memcpy((void*)value_ptr, p_value, this->value_size);
-
-	// In case it wasn't already, null-terminate name within stored value.
-	value_ptr[name_len] = 0;
+	memset((void*)value_ptr, 0, this->value_size);
+	memcpy((void*)value_ptr, name, name_len);
 
 	// Increment count here so indexes returned by other public API calls (just
 	// after adding to hash below) are guaranteed to be valid.
