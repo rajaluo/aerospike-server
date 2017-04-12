@@ -175,10 +175,6 @@
  * Constants
  * ----------------------------------------------------------------------------
  */
-/**
- * Get the absolute value.
- */
-#define ABS(x) ((x) < 0 ? -(x) : (x))
 
 /**
  * A soft limit for the maximum cluster size. Meant to be optimize hash and list
@@ -1256,197 +1252,49 @@ if (((size) > STACK_ALLOC_LIMIT()) && buffer) {cf_free(buffer);}
 #else
 #define TRACE(format, ...)
 #endif
+
+#ifdef TRACE_ENABLED
+#define TRACE_LOG(context, format, ...) cf_detail(context, format, ##__VA_ARGS__)
+#else
+#define TRACE_LOG(context, format, ...)
+#endif
+
 #define CF_TRACE CF_FAULT_SEVERITY_UNDEF
 
-#define LOG(severity, format, ...)			\
-({											\
-	switch (severity) {						\
-	case CF_CRITICAL:						\
-		CRASH(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_WARNING:						\
-		WARNING(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_INFO:							\
-		INFO(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_DEBUG:							\
-		DEBUG(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_DETAIL:							\
-		DETAIL(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_TRACE:							\
-		TRACE(format, ##__VA_ARGS__);		\
-		break;								\
-	default:								\
-		break;								\
-	}										\
+#define LOG(severity, context, format, ...)				\
+({														\
+	switch (severity) {									\
+	case CF_CRITICAL:									\
+		cf_crash(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_WARNING:									\
+		cf_warning(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_INFO:										\
+		cf_info(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_DEBUG:										\
+		cf_debug(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_DETAIL:										\
+		cf_detail(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_TRACE:										\
+		TRACE_LOG(context, format, ##__VA_ARGS__);		\
+		break;											\
+	default:											\
+		break;											\
+	}													\
 })
 
 #define ASSERT(expression, message, ...)				\
 if (!(expression)) {WARNING(message, ##__VA_ARGS__);}
 
-/**
- * Log a vector of nodeids at input severity with a max of LOG_LENGTH_MAX()
- * characters per log record. The call might not work for if the vector  is not
- * protected against multi-threaded access.
- *
- * @param message the message prefix for each log line. Message and node list
- * will be separated with a space. Can be NULL for no prefix.
- * @param nodes the vector of nodes.
- * @param severity the log severity.
- */
-static void
-log_cf_node_vector(char* message, cf_vector* nodes, cf_fault_severity severity)
-{
-	if (!cf_context_at_severity(AS_CLUSTERING, severity) && severity != CF_TRACE) {
-		return;
-	}
-
-	// Also account the space following the nodeid.
-	int node_str_len = 2 * (sizeof(cf_node)) + 1;
-
-	int message_length = 0;
-	if (message) {
-		// Limit the message length to allow at least one node to fit in the log
-		// line. Accounting for the separator between message and node list.
-		message_length = MIN(strnlen(message, LOG_LENGTH_MAX() - 1),
-				LOG_LENGTH_MAX() - 1
-
-					// For NULL terminator
-					- node_str_len)
-				// For at least on nodeid)
-				+ 1;
-		// For the separator between message and nodeid
-
-		// Truncate the message.
-		char copied_message[message_length + 1];
-		strncpy(copied_message, message, message_length);
-		message = copied_message;
-	}
-
-	// Allow for the NULL terminator.
-	int nodes_per_line = (LOG_LENGTH_MAX() - message_length - 1) / node_str_len;
-	nodes_per_line = MAX(1, nodes_per_line);
-
-	// Have a buffer large enough to accomodate the message and nodes per line.
-	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
-	int node_count = cf_vector_size(nodes);
-	int output_node_count = 0;
-
-	// Marks the start of the nodeid list in the log line buffer.
-	char* node_buffer_start = log_buffer;
-	if (message) {
-		node_buffer_start += sprintf(log_buffer, "%s ", message);
-	}
-
-	for (int i = 0; i < node_count;) {
-		char* buffer = node_buffer_start;
-
-		for (int j = 0; j < nodes_per_line && i < node_count; j++) {
-			cf_node* requesting_nodeid_p = (cf_node*)cf_vector_getp(nodes, i);
-			if (requesting_nodeid_p) {
-				buffer += sprintf(buffer, "%"PRIx64" ",
-						*requesting_nodeid_p);
-				output_node_count++;
-			}
-			i++;
-		}
-
-		// Overwrite the space from the last node on the log line only if there
-		// is atleast one node output
-		if (buffer != node_buffer_start) {
-			*(buffer - 1) = 0;
-			LOG(severity, "%s", log_buffer);
-		}
-	}
-
-	// Handle the empty vector case.
-	if (output_node_count == 0) {
-		sprintf(node_buffer_start, "(empty)");
-		LOG(severity, "%s", log_buffer);
-	}
-}
-
-/**
- * Log a vector of nodeids at input severity with a max of LOG_LENGTH_MAX()
- * characters per log record. The call might not work for if the vector  is not
- * protected against multi-threaded access.
- *
- * @param message the message prefix for each log line. Message and node list
- * will be separated with a space. Can be NULL for no prefix.
- * @param nodes the array of nodes. Can be NULL if node_count is zero.
- * @param node_count the number of nodes.
- * @param severity the log severity.
- */
-static void
-log_cf_node_array(char* message, cf_node* nodes, int node_count,
-		cf_fault_severity severity)
-{
-	if (!cf_context_at_severity(AS_CLUSTERING, severity) && severity != CF_TRACE) {
-		return;
-	}
-
-	// Also account the space following the nodeid.
-	int node_str_len = 2 * (sizeof(cf_node)) + 1;
-
-	int message_length = 0;
-	if (message) {
-		// Limit the message length to allow at least one node to fit in the log
-		// line. Accounting for the separator between message and node list.
-		message_length = MIN(strnlen(message, LOG_LENGTH_MAX() - 1),
-				LOG_LENGTH_MAX() - 1
-
-					// For NULL terminator
-					- node_str_len)
-				// For at least on nodeid)
-				+ 1;
-		// For the separator between message and nodeid
-
-		// Truncate the message.
-		char copied_message[message_length + 1];
-		strncpy(copied_message, message, message_length);
-		message = copied_message;
-	}
-
-	// Allow for the NULL terminator.
-	int nodes_per_line = (LOG_LENGTH_MAX() - message_length - 1) / node_str_len;
-	nodes_per_line = MAX(1, nodes_per_line);
-
-	// Have a buffer large enough to accomodate the message and nodes per line.
-	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
-	int output_node_count = 0;
-
-	// Marks the start of the nodeid list in the log line buffer.
-	char* node_buffer_start = log_buffer;
-	if (message) {
-		node_buffer_start += sprintf(log_buffer, "%s ", message);
-	}
-
-	for (int i = 0; i < node_count;) {
-		char* buffer = node_buffer_start;
-
-		for (int j = 0; j < nodes_per_line && i < node_count; j++) {
-			buffer += sprintf(buffer, "%"PRIx64" ", nodes[i]);
-			output_node_count++;
-			i++;
-		}
-
-		// Overwrite the space from the last node on the log line only if there
-		// is atleast one node output
-		if (buffer != node_buffer_start) {
-			*(buffer - 1) = 0;
-			LOG(severity, "%s", log_buffer);
-		}
-	}
-
-	// Handle the empty vector case.
-	if (output_node_count == 0) {
-		sprintf(node_buffer_start, "(empty)");
-		LOG(severity, "%s", log_buffer);
-	}
-}
+#define log_cf_node_array(message, nodes, node_count, severity)		\
+as_clustering_log_cf_node_array(severity, AS_CLUSTERING, message,	\
+		nodes, node_count)
+#define log_cf_node_vector(message, nodes, severity) as_clustering_log_cf_node_vector(severity, AS_CLUSTERING, message,		\
+		nodes)
 
 /*
  * ----------------------------------------------------------------------------
@@ -1730,6 +1578,16 @@ vector_subtract(cf_vector* target, cf_vector* to_remove)
 }
 
 /**
+ * Convert a vector to an array.
+ * FIXME: return pointer to the internal vector storage.
+ */
+static cf_node*
+vector_to_array(cf_vector* vector)
+{
+	return (cf_node*)vector->vector;
+}
+
+/**
  * Copy elements in a vector to an array.
  * @param array the destination array. Should be large enough to hold the number
  * all elements in the vector.
@@ -1737,7 +1595,7 @@ vector_subtract(cf_vector* target, cf_vector* to_remove)
  * @param element_count the number of elements to copy from the source vector.
  */
 static void
-vector_to_array(void* array, cf_vector* src, int element_count)
+vector_array_cpy(void* array, cf_vector* src, int element_count)
 {
 	uint8_t* element_ptr = array;
 	int element_size = VECTOR_ELEM_SZ(src);
@@ -1917,16 +1775,17 @@ config_self_nodeid_get()
 as_cluster_proto_identifier
 clustering_protocol_identifier_get()
 {
-	// TODO: Handle this.
-	return 0;
+	return 0x707C;
 }
 
+/**
+ * Compare clustering protocol versions for compatibility.
+ */
 bool
 clustering_versions_are_compatible(as_cluster_proto_identifier v1,
 		as_cluster_proto_identifier v2)
 {
-	// TODO: Handle this.
-	return true;
+	return v1 == v2;
 }
 
 /*
@@ -2497,7 +2356,7 @@ clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 
 	if (msg_get_buf(msg, AS_HB_MSG_PAXOS_DATA, (uint8_t**)&payload,
 			&payload_size, MSG_GET_DIRECT) != 0) {
-		WARNING(
+		cf_ticker_warning(AS_CLUSTERING,
 				"received empty clustering payload in heartbeat pulse from node %"PRIx64,
 				source);
 		plugin_data->data_size = 0;
@@ -2506,7 +2365,7 @@ clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 
 	// Validate and retain only valid plugin data.
 	if (!clustering_hb_plugin_data_is_valid(payload, payload_size)) {
-		WARNING(
+		cf_ticker_warning(AS_CLUSTERING,
 				"received invalid clustering payload in heartbeat pulse from node %"PRIx64,
 				source);
 		plugin_data->data_size = 0;
@@ -3814,7 +3673,7 @@ msg_nodes_send(msg* msg, cf_vector* nodes)
 	cf_node* send_list = (cf_node*)BUFFER_ALLOC_OR_DIE(alloc_size,
 			"cannot allocate memory for node list while sending");
 
-	vector_to_array(send_list, nodes, node_count);
+	vector_array_cpy(send_list, nodes, node_count);
 
 	if (as_fabric_send_list(send_list, node_count, msg, AS_FABRIC_CHANNEL_CTRL)
 			!= 0) {
@@ -3845,16 +3704,13 @@ msg_nodes_send(msg* msg, cf_vector* nodes)
 static int
 paxos_proposal_id_compare(as_paxos_proposal_id* id1, as_paxos_proposal_id* id2)
 {
-	as_paxos_sequence_number sequence_diff = id1->sequence_number
-			- id2->sequence_number;
-	if (sequence_diff) {
-		return sequence_diff > 0 ? 1 : -1;
+	if (id1->sequence_number != id2->sequence_number) {
+		return id1->sequence_number > id2->sequence_number ? 1 : -1;
 	}
 
 	// Sequence numbers match, compare nodeids.
-	cf_node node_diff = id1->src_nodeid - id2->src_nodeid;
-	if (node_diff) {
-		return node_diff > 0 ? 1 : -1;
+	if (id1->src_nodeid != id2->src_nodeid) {
+		return id1->src_nodeid > id2->src_nodeid ? 1 : -1;
 	}
 
 	// Node id and sequence numbers match.
@@ -5393,7 +5249,7 @@ register_is_sycn_pending()
 	CLUSTERING_LOCK();
 	bool sync_pending = cf_vector_size(&g_register.sync_pending) > 0;
 	log_cf_node_vector("pending register sync:", &g_register.sync_pending,
-	CF_TRACE);
+			CF_TRACE);
 	CLUSTERING_UNLOCK();
 	return sync_pending;
 }
@@ -5879,9 +5735,8 @@ clustering_principal_join_request_attempt(cf_node preferred_principal)
 	g_clustering.last_join_request_principal = 0;
 
 	cf_node* principal_to_try = cf_vector_getp(eligible_principals,
-			ABS(
-					next_join_request_principal_index
-							% cf_vector_size(eligible_principals)));
+			next_join_request_principal_index
+					% cf_vector_size(eligible_principals));
 
 	if (principal_to_try) {
 		rv = clustering_join_request_send(*principal_to_try) == 0 ?
@@ -6856,9 +6711,6 @@ clustering_timer_event_handle()
 static bool
 clustering_message_sanity_check(cf_node src_nodeid, msg* msg)
 {
-	return true;
-
-	// For now ensure that the protocols match
 	as_cluster_proto_identifier proto;
 	if (msg_proto_id_get(msg, &proto) != 0) {
 		WARNING(
@@ -6866,7 +6718,7 @@ clustering_message_sanity_check(cf_node src_nodeid, msg* msg)
 				src_nodeid);
 		return false;
 	}
-	// Check that the message has the hlc timestamp.
+
 	return clustering_versions_are_compatible(proto,
 			clustering_protocol_identifier_get());
 }
@@ -7255,6 +7107,7 @@ clustering_event_handle(as_clustering_internal_event* event)
 		break;
 	case AS_CLUSTERING_INTERNAL_EVENT_REGISTER_CLUSTER_SYNCED:
 		clustering_register_cluster_synced_handle();
+		break;
 	case AS_CLUSTERING_INTERNAL_EVENT_PAXOS_PROPOSER_FAIL:	// Send reject message to all
 		clustering_paxos_proposer_fail_handle();
 		break;
@@ -7700,4 +7553,99 @@ as_clustering_cluster_size_min_set(uint32_t new_cluster_size_min)
 	}
 	CLUSTERING_UNLOCK();
 	return rv;
+}
+
+/**
+ * Log a vector of node-ids at input severity spliting long vectors over
+ * multiple lines. The call might not work if the vector is not protected
+ * against multi-threaded access.
+ *
+ * @param context the logging context.
+ * @param severity the log severity.
+ * @param message the message prefix for each log line. Message and node list
+ * will be separated with a space. Can be NULL for no prefix.
+ * @param nodes the vector of nodes.
+ */
+void
+as_clustering_log_cf_node_vector(cf_fault_severity severity,
+		cf_fault_context context, char* message, cf_vector* nodes)
+{
+	as_clustering_log_cf_node_array(severity, context, message,
+			vector_to_array(nodes), cf_vector_size(nodes));
+}
+
+/**
+ * Log an array of node-ids at input severity spliting long vectors over
+ * multiple lines. The call might not work if the array is not protected against
+ * multi-threaded access.
+ *
+ * @param context the logging context.
+ * @param severity the log severity.
+ * @param message the message prefix for each log line. Message and node list
+ * will be separated with a space. Can be NULL for no prefix.
+ * @param nodes the array of nodes.
+ * @param node_count the count of nodes in the array.
+ */
+void
+as_clustering_log_cf_node_array(cf_fault_severity severity,
+		cf_fault_context context, char* message, cf_node* nodes, int node_count)
+{
+	if (!cf_context_at_severity(context, severity) && severity != CF_TRACE) {
+		return;
+	}
+
+	// Also account the space following the nodeid.
+	int node_str_len = 2 * (sizeof(cf_node)) + 1;
+
+	int message_length = 0;
+	char copied_message[LOG_LENGTH_MAX()];
+
+	if (message) {
+		// Limit the message length to allow at least one node to fit in the log
+		// line. Accounting for the separator between message and node list.
+		message_length = MIN(strnlen(message, LOG_LENGTH_MAX() - 1),
+				LOG_LENGTH_MAX() - 1
+				- node_str_len) + 1;
+
+		// Truncate the message.
+		strncpy(copied_message, message, message_length);
+		message = copied_message;
+	}
+
+	// Allow for the NULL terminator.
+	int nodes_per_line = (LOG_LENGTH_MAX() - message_length - 1) / node_str_len;
+	nodes_per_line = MAX(1, nodes_per_line);
+
+	// Have a buffer large enough to accomodate the message and nodes per line.
+	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
+	int output_node_count = 0;
+
+	// Marks the start of the nodeid list in the log line buffer.
+	char* node_buffer_start = log_buffer;
+	if (message) {
+		node_buffer_start += sprintf(log_buffer, "%s ", message);
+	}
+
+	for (int i = 0; i < node_count;) {
+		char* buffer = node_buffer_start;
+
+		for (int j = 0; j < nodes_per_line && i < node_count; j++) {
+			buffer += sprintf(buffer, "%"PRIx64" ", nodes[i]);
+			output_node_count++;
+			i++;
+		}
+
+		// Overwrite the space from the last node on the log line only if there
+		// is atleast one node output
+		if (buffer != node_buffer_start) {
+			*(buffer - 1) = 0;
+			LOG(severity, context, "%s", log_buffer);
+		}
+	}
+
+	// Handle the empty vector case.
+	if (output_node_count == 0) {
+		sprintf(node_buffer_start, "(empty)");
+		LOG(severity, context, "%s", log_buffer);
+	}
 }

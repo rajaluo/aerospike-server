@@ -859,172 +859,6 @@ vector_copy(cf_vector* dest, cf_vector* src)
 }
 
 /**
- * Log a vector of nodeids at input severity with a max of LOG_LENGTH_MAX()
- * characters per log record. The call might not work for if the vector  is not
- * protected against multi-threaded access.
- *
- * @param message the message prefix for each log line. Message and node list
- * will be separated with a space. Can be NULL for no prefix.
- * @param nodes the vvector of nodes.
- * @param severity the log severity.
- */
-static void
-log_cf_node_vector(char* message, cf_vector* nodes, cf_fault_severity severity)
-{
-	if (!cf_context_at_severity(AS_EXCHANGE, severity)) {
-		return;
-	}
-
-	// Also account the space following the nodeid.
-	int node_str_len = 2 * (sizeof(cf_node)) + 1;
-
-	int message_length = 0;
-	if (message) {
-		// Limit the message length to allow at least one node to fit in the log
-		// line. Accounting for the separator between message and node list.
-		message_length = MIN(strnlen(message, LOG_LENGTH_MAX() - 1),
-
-
-					// For NULL terminator
-					LOG_LENGTH_MAX() - 1
-
-
-						// For at least one nodeid
-						- node_str_len)
-					// For the separator between message and nodeid
-					+ 1;
-
-		// Truncate the message.
-		char* copied_message = alloca(message_length + 1);
-		strncpy(copied_message, message, message_length);
-		message = copied_message;
-	}
-
-	// Allow for the NULL terminator.
-	int nodes_per_line = (LOG_LENGTH_MAX() - message_length - 1) / node_str_len;
-	nodes_per_line = MAX(1, nodes_per_line);
-
-	// Have a buffer large enough to accomodate the message and nodes per line.
-	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
-	int node_count = nodes ? cf_vector_size(nodes) : 0;
-	int output_node_count = 0;
-
-	// Marks the start of the nodeid list in the log line buffer.
-	char* node_buffer_start = log_buffer;
-	if (message) {
-		node_buffer_start += sprintf(log_buffer, "%s ", message);
-	}
-
-	for (int i = 0; i < node_count;) {
-		char* buffer = node_buffer_start;
-
-		for (int j = 0; j < nodes_per_line && i < node_count; j++) {
-			cf_node* requesting_nodeid_p = (cf_node*)cf_vector_getp(nodes, i);
-			if (requesting_nodeid_p) {
-				buffer += sprintf(buffer, "%"PRIx64" ",
-						*requesting_nodeid_p);
-				output_node_count++;
-			}
-			i++;
-		}
-
-		// Overwrite the space from the last node on the log line only if there
-		// is atleast one node output
-		if (buffer != node_buffer_start) {
-			*(buffer - 1) = 0;
-			LOG(severity, "%s", log_buffer);
-		}
-	}
-
-	// Handle the empty vector case.
-	if (output_node_count == 0) {
-		sprintf(node_buffer_start, "(empty)");
-		LOG(severity, "%s", log_buffer);
-	}
-}
-
-/**
- * Log a vector of nodeids at input severity with a max of LOG_LENGTH_MAX()
- * characters per log record. The call might not work for if the vector  is not
- * protected against multi-threaded access.
- *
- * @param message the message prefix for each log line. Message and node list
- * will be separated with a space. Can be NULL for no prefix.
- * @param nodes the array of nodes. Can be NULL if node_count is zero.
- * @param node_count the number of nodes.
- * @param severity the log severity.
- */
-static void
-log_cf_node_array(char* message, cf_node* nodes, int node_count,
-		cf_fault_severity severity)
-{
-	if (!cf_context_at_severity(AS_EXCHANGE, severity)) {
-		return;
-	}
-
-	// Also account the space following the nodeid.
-	int node_str_len = 2 * (sizeof(cf_node)) + 1;
-
-	int message_length = 0;
-	if (message) {
-		// Limit the message length to allow at least one node to fit in the log
-		// line. Accounting for the separator between message and node list.
-		message_length = MIN(strnlen(message, LOG_LENGTH_MAX() - 1),
-
-
-					// For NULL terminator
-					LOG_LENGTH_MAX() - 1
-
-
-						// For at least one nodeid
-						- node_str_len)
-					// For the separator between message and nodeid
-					+ 1;
-
-		// Truncate the message.
-		char* copied_message = alloca(message_length + 1);
-		strncpy(copied_message, message, message_length);
-		message = copied_message;
-	}
-
-	// Allow for the NULL terminator.
-	int nodes_per_line = (LOG_LENGTH_MAX() - message_length - 1) / node_str_len;
-	nodes_per_line = MAX(1, nodes_per_line);
-
-	// Have a buffer large enough to accomodate the message and nodes per line.
-	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
-	int output_node_count = 0;
-
-	// Marks the start of the nodeid list in the log line buffer.
-	char* node_buffer_start = log_buffer;
-	if (message) {
-		node_buffer_start += sprintf(log_buffer, "%s ", message);
-	}
-
-	for (int i = 0; i < node_count;) {
-		char* buffer = node_buffer_start;
-
-		for (int j = 0; j < nodes_per_line && i < node_count; j++) {
-			buffer += sprintf(buffer, "%"PRIx64" ", nodes[i]);
-			output_node_count++;
-			i++;
-		}
-
-		// Overwrite the space from the last node on the log line only if there
-		// is atleast one node output
-		if (buffer != node_buffer_start) {
-			*(buffer - 1) = 0;
-			LOG(severity, "%s", log_buffer);
-		}
-	}
-
-	// Handle the empty vector case.
-	if (output_node_count == 0) {
-		sprintf(node_buffer_start, "(empty)");
-		LOG(severity, "%s", log_buffer);
-	}
-}
-/**
  * Generate a hash code for a blob using Jenkins hash function.
  */
 static uint32_t
@@ -1622,7 +1456,8 @@ exchange_msg_send_list(msg* msg, cf_node* dests, int num_dests, char* error_msg)
 			!= 0) {
 		// Fabric will not return the message to the pool. Do it ourself.
 		exchange_msg_return(msg);
-		log_cf_node_array(error_msg, dests, num_dests, CF_WARNING);
+		as_clustering_log_cf_node_array(CF_WARNING, AS_EXCHANGE, error_msg,
+				dests, num_dests);
 	}
 }
 
@@ -1647,8 +1482,8 @@ static void
 exchange_commit_msg_send_all(cf_node* dests, int num_dests)
 {
 	msg* commit_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_COMMIT);
-	log_cf_node_array("sending commit message to nodes:", dests, num_dests,
-			CF_DEBUG);
+	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
+			"sending commit message to nodes:", dests, num_dests);
 	exchange_msg_send_list(commit_msg, dests, num_dests,
 			"error sending commit message");
 }
@@ -1698,8 +1533,9 @@ exchange_data_msg_send_pending_ack()
 	exchange_msg_data_payload_set(data_msg, g_exchange.self_data_dyn_buf.buf,
 			g_exchange.self_data_dyn_buf.used_sz);
 
-	log_cf_node_array("sending exchange data to nodes:", unacked_nodes,
-			num_unacked_nodes, CF_DEBUG);
+	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
+			"sending exchange data to nodes:", unacked_nodes,
+			num_unacked_nodes);
 
 	exchange_msg_send_list(data_msg, unacked_nodes, num_unacked_nodes,
 			"error sending exchange data");
@@ -2047,23 +1883,25 @@ exchange_dump(cf_fault_severity severity, bool verbose)
 	}
 	else {
 		LOG(severity, "EXG: cluster key: %"PRIx64, g_exchange.cluster_key);
-		log_cf_node_vector("EXG: succession:", &g_exchange.succession_list,
-				severity);
+		as_clustering_log_cf_node_vector(severity, AS_EXCHANGE,
+				"EXG: succession:", &g_exchange.succession_list);
 
 		if (verbose) {
 			vector_clear(node_vector);
 			exchange_nodes_find_send_unacked(node_vector);
-			log_cf_node_vector("EXG: send pending:", node_vector, severity);
+			as_clustering_log_cf_node_vector(severity, AS_EXCHANGE,
+					"EXG: send pending:", node_vector);
 
 			vector_clear(node_vector);
 			exchange_nodes_find_not_received(node_vector);
-			log_cf_node_vector("EXG: receive pending:", node_vector, severity);
+			as_clustering_log_cf_node_vector(severity, AS_EXCHANGE,
+					"EXG: receive pending:", node_vector);
 
 			if (exchange_self_is_principal()) {
 				vector_clear(node_vector);
 				exchange_nodes_find_not_ready_to_commit(node_vector);
-				log_cf_node_vector("EXG: ready to commit pending:", node_vector,
-						severity);
+				as_clustering_log_cf_node_vector(severity, AS_EXCHANGE,
+						"EXG: ready to commit pending:", node_vector);
 			}
 		}
 	}
@@ -2203,8 +2041,8 @@ exchange_orphan_transaction_block_timeout()
 	// Round up to the nearest 5 second interval.
 	int round_up_to = 5000;
 
-	int timeout = as_clustering_quantum_interval()
-			* AS_EXCHANGE_TRANSACTION_BLOCK_ORPHAN_INTERVALS;
+	int timeout =
+			as_clustering_quantum_interval() * AS_EXCHANGE_TRANSACTION_BLOCK_ORPHAN_INTERVALS;
 	return ((timeout + round_up_to - 1) / round_up_to) * round_up_to;
 }
 
