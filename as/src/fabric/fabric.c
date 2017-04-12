@@ -1356,9 +1356,9 @@ fabric_connection_release(fabric_connection *fc)
 
 	if (cnt == 0) {
 		if (fc->s_msg_in_progress) {
-			// First message (w_count == 0) is initial M_TYPE_FABRIC message
+			// First message (s_count == 0) is initial M_TYPE_FABRIC message
 			// and does not need to be saved.
-			if (fc->node && fc->s_count > 0) {
+			if (! fc->started_via_connect || fc->s_count != 0) {
 				cf_queue_push(&fc->node->send_queue[fc->pool->pool_id],
 						&fc->s_msg_in_progress);
 			}
@@ -1564,8 +1564,10 @@ fabric_connection_reroute_msg(fabric_connection *fc)
 		return;
 	}
 
-	if (fabric_node_send(fc->node, fc->s_msg_in_progress, fc->pool->pool_id) !=
-			AS_FABRIC_SUCCESS) {
+	// Don't reroute initial M_TYPE_FABRIC message.
+	if ((fc->started_via_connect && fc->s_count == 0) ||
+			fabric_node_send(fc->node, fc->s_msg_in_progress,
+					fc->pool->pool_id) != AS_FABRIC_SUCCESS) {
 		as_fabric_msg_put(fc->s_msg_in_progress);
 	}
 
