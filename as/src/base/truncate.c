@@ -72,7 +72,7 @@ const char AS_TRUNCATE_MODULE[] = "truncate";
 #define TOK_DELIMITER ('|')
 
 // Detect excessive clock skew for warning purposes only.
-static const uint64_t WARN_CLOCK_SKEW_MS = 1000 * 5;
+static const uint64_t WARN_CLOCK_SKEW_MS = 1000UL * 5;
 
 
 //==========================================================

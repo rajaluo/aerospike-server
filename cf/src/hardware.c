@@ -657,7 +657,7 @@ pin_to_numa_node(cf_topo_numa_node_index a_numa_node)
 	// Force future memory allocations to the selected NUMA node.
 
 	os_numa_node_index i_os_numa_node = g_numa_node_index_to_os_numa_node_index[a_numa_node];
-	uint64_t to_mask = 1u << i_os_numa_node;
+	uint64_t to_mask = 1UL << i_os_numa_node;
 	cf_detail(CF_MISC, "NUMA node mask (to): %016" PRIx64, to_mask);
 
 	// Unlike select(), we have to pass "number of valid bits + 1".
@@ -951,6 +951,8 @@ interface_queues(const char *if_name, const char *format)
 
 		++n_queues;
 	}
+
+	cf_assert(n_queues != 0, CF_MISC, "interface %s has no queues", if_name);
 
 	return n_queues;
 }
@@ -1751,7 +1753,7 @@ cf_topo_migrate_memory(void)
 	// Migrate existing memory allocations to the selected NUMA node.
 
 	os_numa_node_index i_os_numa_node = g_numa_node_index_to_os_numa_node_index[g_i_numa_node];
-	uint64_t to_mask = 1u << i_os_numa_node;
+	uint64_t to_mask = 1UL << i_os_numa_node;
 	cf_detail(CF_MISC, "NUMA node mask (to): %016" PRIx64, to_mask);
 
 	uint64_t from_mask = 0;
