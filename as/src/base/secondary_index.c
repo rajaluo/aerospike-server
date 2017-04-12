@@ -757,7 +757,7 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 static inline uint32_t
 as_sindex__set_binid_hash_fn(const void* p_key)
 {
-	return (uint32_t)cf_hash_fnv(p_key, sizeof(uint32_t));
+	return (uint32_t)cf_hash_fnv(p_key, strlen((const char*)p_key));
 }
 
 // Hash a binname string.
@@ -1915,7 +1915,7 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 			si->new_imd = NULL;
 		}
 		si->state = AS_SINDEX_DESTROY;
-		as_sindex_reset_binid_has_sindex(ns, imd->binid);
+		as_sindex_reset_binid_has_sindex(ns, si->imd->binid);
 		AS_SINDEX_RELEASE(si);
 		SINDEX_GWUNLOCK();
 		return AS_SINDEX_OK;
@@ -3571,7 +3571,7 @@ static const as_sindex_add_asval_to_itype_sindex_fn
 static inline uint32_t
 as_sindex_hash_fn(const void* p_key)
 {
-	return (uint32_t)cf_hash_fnv(p_key, sizeof(uint32_t));
+	return *(uint32_t *)p_key;
 }
 
 
