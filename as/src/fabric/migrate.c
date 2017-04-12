@@ -662,7 +662,7 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 
 	uint32_t order = emig->rsv.ns->migrate_order;
 	uint64_t dest_score = (uint64_t)emig->dest - best->avoid_dest;
-	uint32_t n_elements = emig->tx_flags == TX_FLAGS_REQUEST ?
+	uint64_t n_elements = emig->tx_flags == TX_FLAGS_REQUEST ?
 			0 : as_index_tree_size(emig->rsv.tree);
 
 	if (order < best->order ||
