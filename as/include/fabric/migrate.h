@@ -144,8 +144,8 @@ typedef enum {
 #define MIG_INFO_LDT_ESR    0x0004
 #define MIG_INFO_TOMBSTONE  0x0008 // enterprise only
 
-#define MIG_FEATURE_MERGE 0x00000001
-#define MIG_FEATURES_SEEN 0x80000000 // needed for backward compatibility
+#define MIG_FEATURE_MERGE 0x00000001U
+#define MIG_FEATURES_SEEN 0x80000000U // needed for backward compatibility
 extern const uint32_t MY_MIG_FEATURES;
 
 #define AS_PARTITION_MIG_TX_STATE_NONE 0

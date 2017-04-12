@@ -191,7 +191,7 @@ as_migrate_state emigration_send_done(emigration *emig);
 void emigrate_signal(emigration *emig);
 
 // Immigration.
-void *run_immigration_reaper(void *unused);
+void *run_immigration_reaper(void *arg);
 int immigration_reaper_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
 
 // Migrate fabric message handling.
@@ -214,7 +214,7 @@ bool as_ldt_precord_is_subrec(const pickled_record *pr);
 bool as_ldt_precord_is_parent(const pickled_record *pr);
 int as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr, uint32_t *info);
 void as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, const emigration *emig);
-int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, msg *m, cf_digest *keyd);
+int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, msg *m);
 
 
 static inline uint32_t
@@ -1239,7 +1239,7 @@ emigrate_signal(emigration *emig)
 //
 
 void *
-run_immigration_reaper(void *unused)
+run_immigration_reaper(void *arg)
 {
 	while (true) {
 		cf_rchash_reduce(g_immigration_hash, immigration_reaper_reduce_fn,
@@ -1660,7 +1660,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 				&rec_props_size, MSG_GET_DIRECT);
 		c.rec_props.size = (uint32_t)rec_props_size;
 
-		if (as_ldt_get_migrate_info(immig, &c, m, keyd)) {
+		if (as_ldt_get_migrate_info(immig, &c, m)) {
 			immigration_release(immig);
 			as_fabric_msg_put(m);
 			return;
@@ -2171,7 +2171,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 // side effect component will be filled up
 int
 as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
-		msg *m, cf_digest *keyd)
+		msg *m)
 {
 	c->flag        = AS_COMPONENT_FLAG_MIG;
 	c->pdigest     = cf_digest_zero;
