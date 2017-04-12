@@ -292,9 +292,9 @@ as_partition_get_replica_stats(as_namespace* ns, repl_stats* p_stats)
 		}
 		else if (self_n >= 0) {
 			accumulate_replica_stats(p, ns->ldt_enabled,
-					&p_stats->n_replica_objects,
-					&p_stats->n_replica_sub_objects,
-					&p_stats->n_replica_tombstones);
+					&p_stats->n_prole_objects,
+					&p_stats->n_prole_sub_objects,
+					&p_stats->n_prole_tombstones);
 		}
 		else {
 			accumulate_replica_stats(p, ns->ldt_enabled,

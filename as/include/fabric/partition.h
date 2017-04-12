@@ -154,13 +154,13 @@ typedef struct as_partition_reservation_s {
 
 typedef struct repl_stats_s {
 	uint64_t n_master_objects;
-	uint64_t n_replica_objects;
+	uint64_t n_prole_objects;
 	uint64_t n_non_replica_objects;
 	uint64_t n_master_sub_objects;
-	uint64_t n_replica_sub_objects;
+	uint64_t n_prole_sub_objects;
 	uint64_t n_non_replica_sub_objects;
 	uint64_t n_master_tombstones;
-	uint64_t n_replica_tombstones;
+	uint64_t n_prole_tombstones;
 	uint64_t n_non_replica_tombstones;
 } repl_stats;
 
