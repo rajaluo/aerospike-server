@@ -249,9 +249,7 @@ cf_vmapx_put_unique_w_len(cf_vmapx* this, const void* p_value, size_t name_len,
 	// Add to vector.
 	char* value_ptr = (char*)cf_vmapx_value_ptr(this, count);
 
-	memcpy((void*)value_ptr, p_value, this->value_size);
-
-	// In case it wasn't already, null-terminate name within stored value.
+	memcpy((void*)value_ptr, p_value, name_len);
 	value_ptr[name_len] = 0;
 
 	// Increment count here so indexes returned by other public API calls (just
