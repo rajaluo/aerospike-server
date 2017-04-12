@@ -403,6 +403,11 @@ typedef enum {
 	AS_SMD_MSG_OPTIONS, // deprecate
 	AS_SMD_MSG_MODULE_COUNTS,
 
+	AS_SMD_MSG_SINGLE_KEY,
+	AS_SMD_MSG_SINGLE_VALUE,
+	AS_SMD_MSG_SINGLE_GENERATION,
+	AS_SMD_MSG_SINGLE_TIMESTAMP,
+
 	NUM_SMD_FIELDS
 } smd_msg_fields;
 
@@ -441,6 +446,10 @@ static const msg_template as_smd_msg_template[] = {
 	{ AS_SMD_MSG_MODULE_NAME, M_FT_STR },          // Name of module the message is from or else NULL if from all.
 	{ AS_SMD_MSG_OPTIONS, M_FT_UINT32 },           // Option flags specifying the originator of the message (i.e., MERGE/API)
 	{ AS_SMD_MSG_MODULE_COUNTS, M_FT_ARRAY_UINT32 },
+	{ AS_SMD_MSG_SINGLE_KEY, M_FT_STR },
+	{ AS_SMD_MSG_SINGLE_VALUE, M_FT_STR },
+	{ AS_SMD_MSG_SINGLE_GENERATION, M_FT_UINT32 },
+	{ AS_SMD_MSG_SINGLE_TIMESTAMP, M_FT_UINT64 },
 };
 
 COMPILER_ASSERT(sizeof(as_smd_msg_template) / sizeof(msg_template) == NUM_SMD_FIELDS);
@@ -808,8 +817,43 @@ smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
 
 	if (sm->module_name) {
 		mod_idx = 1;
-		counts[0] = sm->num_items;
 		mod_list[0] = smd_module_get_by_name(sm->module_name);
+
+		if (! mod_list[0]) {
+			return false;
+		}
+
+		// Check single item optimized packing.
+		if (sm->num_items == 1) {
+			char *key = NULL;
+			size_t sz = 0;
+
+			if (msg_get_str(m, AS_SMD_MSG_SINGLE_KEY, &key, &sz,
+					MSG_GET_DIRECT) == 0) {
+				if (! (sm->items = as_smd_item_list_create(1))) {
+					cf_warning(AS_SMD, "failed to allocate array of 1 metadata items for a msg event");
+					return false;
+				}
+
+				as_smd_item_t *item = sm->items->item[0];
+
+				item->node_id = node_id;
+				item->module_name = cf_strdup(sm->module_name);
+				item->key = cf_strdup(key);
+				msg_get_str(m, AS_SMD_MSG_SINGLE_VALUE, &item->value,
+						&sz, MSG_GET_COPY_MALLOC);
+				msg_get_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
+						&item->generation);
+				msg_get_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
+						&item->timestamp);
+				item->action = item->value ?
+						AS_SMD_ACTION_SET : AS_SMD_ACTION_DELETE;
+
+				return true;
+			}
+		}
+
+		counts[0] = sm->num_items;
 	}
 	else {
 		int msg_count = 0;
@@ -2062,6 +2106,30 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
 			cf_warning(AS_SMD, "get module failed");
 			as_fabric_msg_put(m);
 			return NULL;
+		}
+
+		// Single item optimized packing.
+		if (num_items == 1) {
+			e += msg_set_str(m, AS_SMD_MSG_SINGLE_KEY, item[0]->key,
+					MSG_SET_COPY);
+
+			if (item[0]->value) {
+				e += msg_set_str(m, AS_SMD_MSG_SINGLE_VALUE, item[0]->value,
+						MSG_SET_COPY);
+			}
+
+			e += msg_set_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
+					item[0]->generation);
+			e += msg_set_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
+					item[0]->timestamp);
+
+			if (e != 0) {
+				cf_warning(AS_SMD, "msg_set failed");
+				as_fabric_msg_put(m);
+				return NULL;
+			}
+
+			return m;
 		}
 	}
 
