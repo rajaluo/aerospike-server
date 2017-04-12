@@ -57,7 +57,7 @@ const as_partition_vinfo NULL_VINFO = { 0 };
 // Forward declarations.
 //
 
-cf_node find_best_node(const as_partition* p, const as_namespace* ns, bool is_read);
+cf_node find_best_node(const as_partition* p, bool is_read);
 void accumulate_replica_stats(const as_partition* p, bool is_ldt_enabled, uint64_t* p_n_objects, uint64_t* p_n_sub_objects, uint64_t* p_n_tombstones);
 int partition_reserve_read_write(as_namespace* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, bool is_read, uint64_t* cluster_key);
 void partition_reserve_lockfree(as_partition* p, as_namespace* ns, as_partition_reservation* rsv);
@@ -160,7 +160,7 @@ as_partition_writable_node(as_namespace* ns, uint32_t pid)
 
 	pthread_mutex_lock(&p->lock);
 
-	cf_node best_node = find_best_node(p, ns, false);
+	cf_node best_node = find_best_node(p, false);
 
 	pthread_mutex_unlock(&p->lock);
 
@@ -478,11 +478,12 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 
 			cf_dyn_buf_append_string(db, ns->name);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_int(db, pid);
+			cf_dyn_buf_append_uint32(db, pid);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_char(db, state_c);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_int(db, self_n == -1 ? p->n_replicas : self_n);
+			cf_dyn_buf_append_int(db, self_n == -1 ?
+					(int)p->n_replicas : self_n);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint32(db, p->n_dupl);
 			cf_dyn_buf_append_char(db, ':');
@@ -490,9 +491,9 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64_x(db, p->target);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint64(db, p->pending_emigrations);
+			cf_dyn_buf_append_int(db, p->pending_emigrations);
 			cf_dyn_buf_append_char(db, ':');
-			cf_dyn_buf_append_uint64(db, p->pending_immigrations);
+			cf_dyn_buf_append_int(db, p->pending_immigrations);
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint32(db, as_index_tree_size(p->vp));
 			cf_dyn_buf_append_char(db, ':');
@@ -646,7 +647,7 @@ client_replica_maps_is_partition_queryable(const as_namespace* ns, uint32_t pid)
 
 // Find best node to handle read/write. Called within partition lock.
 cf_node
-find_best_node(const as_partition* p, const as_namespace* ns, bool is_read)
+find_best_node(const as_partition* p, bool is_read)
 {
 	int self_n = find_self_in_replicas(p);
 	bool is_final_master = self_n == 0;
@@ -698,7 +699,7 @@ partition_reserve_read_write(as_namespace* ns, uint32_t pid,
 
 	pthread_mutex_lock(&p->lock);
 
-	cf_node best_node = find_best_node(p, ns, is_read);
+	cf_node best_node = find_best_node(p, is_read);
 
 	if (node) {
 		*node = best_node;
@@ -763,7 +764,7 @@ partition_getreplica_prole(as_namespace* ns, uint32_t pid)
 	pthread_mutex_lock(&p->lock);
 
 	// Check is this is a master node.
-	cf_node best_node = find_best_node(p, ns, false);
+	cf_node best_node = find_best_node(p, false);
 
 	if (best_node == g_config.self_node) {
 		// It's a master, return 0.
@@ -771,7 +772,7 @@ partition_getreplica_prole(as_namespace* ns, uint32_t pid)
 	}
 	else {
 		// Not a master, see if it's a prole.
-		best_node = find_best_node(p, ns, true);
+		best_node = find_best_node(p, true);
 	}
 
 	pthread_mutex_unlock(&p->lock);
