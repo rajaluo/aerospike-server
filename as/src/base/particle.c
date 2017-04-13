@@ -1123,7 +1123,7 @@ as_bin_particle_to_flat(const as_bin *b, uint8_t *flat)
 uint32_t
 as_ldt_particle_client_value_size(as_storage_rd *rd, as_bin *b, as_val **p_val)
 {
-	*p_val = as_llist_scan(rd->ns, rd->ns->partitions[as_partition_getid(rd->r->keyd)].sub_vp, rd, b);
+	*p_val = as_llist_scan(rd->ns, rd->ns->partitions[as_partition_getid(&rd->r->keyd)].sub_vp, rd, b);
 
 	if (! *p_val) {
 		return 0;

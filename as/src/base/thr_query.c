@@ -1577,7 +1577,7 @@ query_io(as_query_transaction *qtr, cf_digest *dig, as_sindex_key * skey)
 	// Attempt the query reservation here as well. If this partition is not
 	// query-able anymore then no need to return anything
 	// Since we are reserving all the partitions upfront, this is a defensive check
-	uint32_t pid = as_partition_getid(*dig);
+	uint32_t pid = as_partition_getid(dig);
 	rsv = query_reserve_partition(ns, qtr, pid, rsv);
 	if (!rsv) {
 		return AS_QUERY_OK;
@@ -1854,7 +1854,7 @@ query_udf_bg_tr_start(as_query_transaction *qtr, cf_digest *keyd)
 	if (qtr->origin.predexp) {
 		as_partition_reservation rsv_stack;
 		as_partition_reservation *rsv = &rsv_stack;
-		uint32_t pid = as_partition_getid(*keyd);
+		uint32_t pid = as_partition_getid(keyd);
 
 		if (! (rsv = query_reserve_partition(qtr->ns, qtr, pid, rsv))) {
 			return AS_QUERY_OK;

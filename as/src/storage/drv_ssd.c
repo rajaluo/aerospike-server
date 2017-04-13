@@ -628,7 +628,7 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 {
 	as_namespace *ns = ssd->ns;
 	as_partition_reservation rsv;
-	uint32_t pid = as_partition_getid(block->keyd);
+	uint32_t pid = as_partition_getid(&block->keyd);
 
 	as_partition_reserve_migrate(ns, pid, &rsv, 0);
 
@@ -1995,7 +1995,7 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 		uint32_t n_rblocks = (uint32_t)BYTES_TO_RBLOCKS(next_offset - offset);
 
 		bool living = false;
-		uint32_t pid = as_partition_getid(p_block->keyd);
+		uint32_t pid = as_partition_getid(&p_block->keyd);
 		as_partition_reservation rsv;
 
 		as_partition_reserve_migrate(ns, pid, &rsv, 0);
@@ -2731,7 +2731,7 @@ int
 ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		uint64_t rblock_id, uint32_t n_rblocks)
 {
-	uint32_t pid = as_partition_getid(block->keyd);
+	uint32_t pid = as_partition_getid(&block->keyd);
 
 	// If this isn't a partition we're interested in, skip this record.
 	if (! ssds->get_state_from_storage[pid]) {

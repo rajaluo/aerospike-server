@@ -215,7 +215,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	as_partition_reservation rsv;
 	AS_PARTITION_RESERVATION_INIT(rsv); // TODO - not really needed?
 
-	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
+	as_partition_reserve_migrate(ns, as_partition_getid(keyd), &rsv, NULL);
 
 	if (rsv.cluster_key != cluster_key) {
 		done_handle_request(&rsv, NULL);

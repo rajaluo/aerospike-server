@@ -30,7 +30,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/types.h>
-#include <citrusleaf/cf_digest.h>
 
 // TODO - as_ .c files depend on this:
 #include <asm/byteorder.h>
@@ -105,14 +104,6 @@ cf_hash_oneatatime(void *buf, size_t bufsz)
     return(hash);
 }
 
-
-extern const cf_digest cf_digest_zero;
-
-static inline int
-cf_digest_compare(const cf_digest *d1, const cf_digest *d2)
-{
-    return( memcmp( d1->digest, d2->digest, CF_DIGEST_KEY_SZ) );
-}
 
 // Sorry, too lazy to create a whole new file for just one function
 #define CF_NODE_UNSET (0xFFFFFFFFFFFFFFFF)

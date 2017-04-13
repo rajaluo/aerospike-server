@@ -247,7 +247,7 @@ bool
 as_proxy_divert(cf_node dst, as_transaction* tr, as_namespace* ns,
 		uint64_t cluster_key)
 {
-	uint32_t pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(&tr->keyd);
 
 	// Get a fabric message and fill it out.
 
@@ -326,7 +326,7 @@ as_proxy_return_to_sender(const as_transaction* tr, as_namespace* ns)
 		return;
 	}
 
-	uint32_t pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(&tr->keyd);
 	cf_node redirect_node = as_partition_proxyee_redirect(ns, pid);
 
 	msg_set_uint32(m, PROXY_FIELD_OP, PROXY_OP_RETURN_TO_SENDER);
@@ -405,7 +405,7 @@ as_proxy_send_ops_response(cf_node dst, uint32_t proxy_tid, cf_dyn_buf* db)
 void
 as_proxy_shipop(cf_node dst, rw_request* rw)
 {
-	uint32_t pid = as_partition_getid(rw->keyd);
+	uint32_t pid = as_partition_getid(&rw->keyd);
 
 	// Get a fabric message and fill it out.
 

@@ -310,7 +310,7 @@ repl_write_handle_op(cf_node node, msg* m)
 
 	as_partition_reservation rsv;
 
-	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
+	as_partition_reserve_migrate(ns, as_partition_getid(keyd), &rsv, NULL);
 
 	if (rsv.reject_repl_write) {
 		as_partition_release(&rsv);
@@ -662,7 +662,7 @@ repl_write_handle_multiop(cf_node node, msg* m)
 
 	as_partition_reservation rsv;
 
-	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
+	as_partition_reserve_migrate(ns, as_partition_getid(keyd), &rsv, NULL);
 
 	if (rsv.reject_repl_write) {
 		as_partition_release(&rsv);

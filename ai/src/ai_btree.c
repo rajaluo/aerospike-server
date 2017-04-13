@@ -653,7 +653,7 @@ btree_addsinglerec(as_sindex_metadata *imd, ai_obj * key, cf_digest *dig, cf_ll 
 								bool * can_partition_query, bool partitions_pre_reserved)
 {
 	// The digests which belongs to one of the query-able partitions are elligible to go into recl
-	uint32_t pid =  as_partition_getid(*dig);
+	uint32_t pid =  as_partition_getid(dig);
 	as_namespace * ns = imd->si->ns;
 	if (partitions_pre_reserved) {
 		if (!can_partition_query[pid]) {

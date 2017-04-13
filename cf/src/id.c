@@ -32,12 +32,6 @@
 #include <unistd.h>
 
 /*
-** This has nowhere else to go.
-*/
-
-const cf_digest cf_digest_zero = { .digest = { 0 } };
-
-/*
 ** Node IDs are great things to use as keys in the hash table.
 */
 

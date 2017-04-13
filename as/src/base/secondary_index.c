@@ -259,7 +259,7 @@ as_sindex_gc_status
 as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 {
 	as_partition_reservation rsv;
-	uint32_t pid = as_partition_getid(*keyd);
+	uint32_t pid = as_partition_getid(keyd);
 
 	int timeout_ms = 2;
 	if (as_partition_reserve_migrate_timeout(ns, pid, &rsv, 0, timeout_ms) != 0 ) {

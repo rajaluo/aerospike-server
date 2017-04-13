@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_digest.h"
 
 #include "dynbuf.h"
 #include "util.h"
@@ -299,9 +300,9 @@ as_partition_version_same(const as_partition_version* v1, const as_partition_ver
 }
 
 static inline uint32_t
-as_partition_getid(const cf_digest d)
+as_partition_getid(const cf_digest* d)
 {
-	return cf_digest_gethash(&d, AS_PARTITION_MASK);
+	return *(uint32_t*)d & AS_PARTITION_MASK;
 }
 
 static inline int
