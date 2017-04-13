@@ -855,8 +855,14 @@ as_batch_queue_task(as_transaction* btr)
 			// Must copy generic transaction before processing inline, because some
 			// transaction fields are modified during the course of the transaction.
 			// We need each transaction to be initialized to proper values.
+
+			// TODO - may be able to avoid this copy altogether if we're careful
+			// above to reset members such as AS_MSG_FIELD_TYPE_SET flag, and
+			// anything in the transaction head changed downstream, such as
+			// benchmark_time.
+
 			as_transaction tmp;
-			memcpy(&tmp, &tr, sizeof(as_transaction));
+			memcpy(&tmp, &tr, AS_TRANSACTION_HEAD_SIZE);
 			as_tsvc_process_transaction(&tmp);
 		}
 		else {
