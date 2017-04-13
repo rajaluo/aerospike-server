@@ -808,7 +808,6 @@ smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
 
 	msg_get_buf_array_size(m, AS_SMD_MSG_KEY, &num_items);
 	sm->num_items = (uint32_t)num_items;
-	sm->items->node_id = node_id;
 
 	uint32_t mod_max = cf_rchash_get_size(g_smd->modules);
 	uint32_t counts[mod_max];
@@ -975,7 +974,7 @@ as_smd_old_create_msg_event(as_smd_msg_op_t op, cf_node node_id, msg *msg)
 		cf_debug(AS_SMD, "failed to get module name from System Metadata fabric msg (err %d)", e);
 	}
 
-	if (msg_get_uint32(msg, AS_SMD_MSG_NUM_ITEMS, &smd_msg->num_items)) {
+	if (msg_get_uint32(msg, AS_SMD_MSG_NUM_ITEMS, &smd_msg->num_items) != 0) {
 		if (! smd_new_create_msg_event(smd_msg, node_id, msg)) {
 			as_smd_destroy_event(evt);
 			return NULL;
@@ -992,7 +991,6 @@ as_smd_old_create_msg_event(as_smd_msg_op_t op, cf_node node_id, msg *msg)
 		as_smd_destroy_event(evt);
 		return 0;
 	}
-	smd_msg->items->node_id = node_id;
 
 	// Populate the msg event items from the fabric msg.
 	for (int i = 0; i < smd_msg->num_items; i++) {
@@ -1051,9 +1049,7 @@ static as_smd_item_list_t *as_smd_item_list_alloc(size_t num_items)
 	as_smd_item_list_t *item_list = NULL;
 
 	if ((item_list = (as_smd_item_list_t *) cf_malloc(sizeof(as_smd_item_list_t) + num_items * sizeof(as_smd_item_t *)))) {
-		item_list->node_id = 0;
 		item_list->num_items = num_items;
-		item_list->module_name = NULL;
 		memset(item_list->item, 0, num_items * sizeof(as_smd_item_t *));
 	}
 
@@ -1377,9 +1373,9 @@ static int as_smd_msgq_push(cf_node node_id, msg *msg, void *udata)
 	}
 
 	if (AS_SMD_MSG_OP_ACCEPT_THIS_METADATA == op) {
-		if (msg_get_str(msg, AS_SMD_MSG_MODULE_NAME, &(smd_msg->items->module_name), 0, MSG_GET_COPY_MALLOC)) {
+		if (msg_get_str(msg, AS_SMD_MSG_MODULE_NAME, &smd_msg->module_name, 0,
+				MSG_GET_COPY_MALLOC) != 0) {
 			cf_warning(AS_SMD, "could not get module name from the fabric msg");
-			smd_msg->items->module_name = NULL;
 		}
 
 		if (msg_get_uint32(msg, AS_SMD_MSG_OPTIONS, &(smd_msg->options))) {
@@ -2000,7 +1996,8 @@ static int as_smd_module_create(as_smd_t *smd, as_smd_cmd_t *cmd)
  *  First preference is to get the information from the specific item
  *  If the item is NULL, get the information from the item_list.
  */
-static as_smd_module_t *as_smd_module_get(as_smd_t *smd, as_smd_item_t *item, as_smd_item_list_t *item_list, as_smd_msg_t *msg)
+static as_smd_module_t *
+as_smd_module_get(as_smd_t *smd, as_smd_item_t *item, as_smd_msg_t *msg)
 {
 	as_smd_module_t *module_obj = NULL;
 	int retval = 0;
@@ -2011,15 +2008,13 @@ static as_smd_module_t *as_smd_module_get(as_smd_t *smd, as_smd_item_t *item, as
 	if (msg && msg->module_name) {
 		cf_debug(AS_SMD, "asmg():  Name of module from message: \"%s\"", module_name);
 		module_name = msg->module_name;
-	} else if (item && item->module_name) {
+	}
+	else if (item && item->module_name) {
 		// Next, see if an item is passed and it has module name set.  This takes precedence.
 		module_name = item->module_name;
 		cf_debug(AS_SMD, "asmg():  Name of module from the item: \"%s\"", module_name);
-	} else if (item_list && (item_list->module_name != NULL)) {
-		// If there is no item, see if there is module name at item_list level.
-		module_name = item_list->module_name;
-		cf_debug(AS_SMD, "asmg():  Name of module from item_list: \"%s\"", module_name);
-	} else {
+	}
+	else {
 		// If the message, item, and item_list are NULL, we cannot do anything.
 		cf_debug(AS_SMD, "asmg():  No module name found!");
 		return NULL;
@@ -2488,7 +2483,7 @@ static int as_smd_metadata_change(as_smd_t *smd, as_smd_msg_op_t op, as_smd_item
 			item_list->item[0] = item;
 		}
 
-		as_smd_module_t *module_obj   = as_smd_module_get(smd, item, NULL, NULL);
+		as_smd_module_t *module_obj = as_smd_module_get(smd, item, NULL);
 
 		// At the end of module creation, SMD will be persisted.
 		if (AS_SMD_ACCEPT_OPT_CREATE == accept_opt) {
@@ -2799,8 +2794,6 @@ static void as_smd_cluster_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 	}
 	// (Note:  Use num_items to count the position for each serialized metadata item.)
 	item_list->num_items = 0;
-	// set the module name to NULL, because this item_list consists of items from all modules registered to SMD
-	item_list->module_name = NULL;
 	cf_rchash_reduce(smd->modules, as_smd_module_serialize_reduce_fn, item_list);
 
 	cf_debug(AS_SMD, "aspc():  num_items = %zu (%zu)", item_list->num_items, num_items);
@@ -3029,7 +3022,7 @@ static shash *as_smd_store_metadata_by_module(as_smd_t *smd, as_smd_msg_t *smd_m
 
 		// Find the appropriate module's external hash table for this item.
 		as_smd_module_t *module_obj = NULL;
-		if (!(module_obj = as_smd_module_get(smd, item, NULL, NULL))) {
+		if (! (module_obj = as_smd_module_get(smd, item, NULL))) {
 			cf_warning(AS_SMD, "failed to get System Metadata module \"%s\" ~~ Skipping item!", item->module_name);
 			continue;
 		}
@@ -3161,8 +3154,6 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 		if (!(item_lists_in[list_num] = as_smd_item_list_alloc(num_items))) {
 			cf_crash(AS_SMD, "failed to create merge item list for node %016lX", node_id);
 		}
-
-		item_lists_in[list_num]->module_name = cf_strdup(module);
 
 		// Only search for items to add to the list any exist.
 		if (num_items) {
@@ -3417,7 +3408,7 @@ static int as_smd_accept_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as
 	// Accept the metadata item list for this module.
 	if (module_obj->accept_cb) {
 		// Invoke the module's registered accept policy callback function.
-		cf_debug(AS_SMD, "Calling accept callback with OPT_MERGE for module %s with nitems %zu", smd_msg->items->module_name, smd_msg->items->num_items);
+		cf_debug(AS_SMD, "Calling accept callback with OPT_MERGE for module %s with nitems %zu", smd_msg->module_name, smd_msg->items->num_items);
 		(module_obj->accept_cb)(module_obj->module, smd_msg->items, module_obj->accept_udata, smd_msg->options);
 	}
 
@@ -3557,9 +3548,6 @@ int old_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **me
 	merge_info.num_list = num_list;
 	if (*merged_list == NULL) {
 		(*merged_list) = as_smd_item_list_alloc(num_items);
-		if (num_list > 0 && (lists_to_merge[0] != NULL) && (lists_to_merge[0]->module_name != NULL)) {
-			(*merged_list)->module_name = cf_strdup(lists_to_merge[0]->module_name);
-		}
 	}
 	merge_info.merge_list = (*merged_list);
 	merge_info.merge_list->num_items = 0;
@@ -3746,7 +3734,7 @@ static void as_smd_process_event (as_smd_t *smd, as_smd_event_t *evt)
 		}
 
 		// Find (or create) the module's object.
-		as_smd_module_t *module_obj = as_smd_module_get(smd, (msg->num_items > 0 ? msg->items->item[0] : NULL), msg->items, msg);
+		as_smd_module_t *module_obj = as_smd_module_get(smd, (msg->num_items > 0 ? msg->items->item[0] : NULL), msg);
 
 		switch (msg->op) {
 			case AS_SMD_MSG_OP_SET_ITEM:
