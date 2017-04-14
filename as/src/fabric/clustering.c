@@ -5138,10 +5138,16 @@ external_event_publisher_thr(void* arg)
 {
 	pthread_mutex_lock(&g_external_event_publisher.is_pending_mutex);
 
-	while (external_event_publisher_is_running()) {
+	while (true) {
 		pthread_cond_wait(&g_external_event_publisher.is_pending,
 				&g_external_event_publisher.is_pending_mutex);
-		external_events_publish();
+		if (external_event_publisher_is_running()) {
+			external_events_publish();
+		}
+		else {
+			// Publisher stopped, exit the tread.
+			break;
+		}
 	}
 
 	pthread_mutex_unlock(&g_external_event_publisher.is_pending_mutex);
@@ -5175,9 +5181,14 @@ external_event_publisher_stop()
 	CLUSTERING_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state =
 			AS_CLUSTERING_SYS_STATE_SHUTTING_DOWN;
+	CLUSTERING_EVENT_PUBLISHER_UNLOCK();
+
 	external_event_publisher_thr_wakeup();
 	pthread_join(g_external_event_publisher.event_publisher_tid, NULL);
+
+	CLUSTERING_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_CLUSTERING_SYS_STATE_STOPPED;
+	g_external_event_publisher.event_queued = false;
 	CLUSTERING_EVENT_PUBLISHER_UNLOCK();
 }
 
@@ -5459,6 +5470,8 @@ register_paxos_acceptor_success_handle(
 			paxos_success_event->new_cluster_key);
 	log_cf_node_vector("applied new succession list",
 			&g_register.succession_list, CF_INFO);
+	INFO("applied cluster size %d",
+			cf_vector_size(&g_register.succession_list));
 
 	as_clustering_internal_event cluster_changed;
 	memset(&cluster_changed, 0, sizeof(cluster_changed));
@@ -6454,6 +6467,7 @@ clustering_principal_quantum_interval_start_handle()
 
 	log_cf_node_vector("proposed succession list", new_succession_list,
 			CF_DEBUG);
+	DEBUG("proposed cluster size %d", cf_vector_size(new_succession_list));
 
 	as_paxos_start_result result = paxos_proposer_proposal_start(
 			new_succession_list, new_succession_list);

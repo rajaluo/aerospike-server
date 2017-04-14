@@ -1021,13 +1021,18 @@ exchange_external_event_publisher_thr(void* arg)
 {
 	pthread_mutex_lock(&g_external_event_publisher.is_pending_mutex);
 
-	while (exchange_external_event_publisher_is_running()) {
+	while (true) {
 		pthread_cond_wait(&g_external_event_publisher.is_pending,
 				&g_external_event_publisher.is_pending_mutex);
-		exchange_external_events_publish();
+		if (exchange_external_event_publisher_is_running()) {
+			exchange_external_events_publish();
+		}
+		else {
+			// Publisher stopped, exit the tread.
+			break;
+		}
 	}
 
-	pthread_mutex_unlock(&g_external_event_publisher.is_pending_mutex);
 	return NULL;
 }
 
@@ -1056,10 +1061,16 @@ static void
 external_event_publisher_stop()
 {
 	EXTERNAL_EVENT_PUBLISHER_LOCK();
-	g_external_event_publisher.sys_state = AS_EXCHANGE_SYS_STATE_SHUTTING_DOWN;
+	g_external_event_publisher.sys_state =
+			AS_EXCHANGE_SYS_STATE_SHUTTING_DOWN;
+	EXTERNAL_EVENT_PUBLISHER_UNLOCK();
+
 	exchange_external_event_publisher_thr_wakeup();
 	pthread_join(g_external_event_publisher.event_publisher_tid, NULL);
+
+	EXTERNAL_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_EXCHANGE_SYS_STATE_STOPPED;
+	g_external_event_publisher.event_queued = false;
 	EXTERNAL_EVENT_PUBLISHER_UNLOCK();
 }
 
