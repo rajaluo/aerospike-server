@@ -744,8 +744,6 @@ as_batch_queue_task(as_transaction* btr)
 	tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	tr.start_time = btr->start_time;
 
-	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
-
 	// Read batch keys and initialize generic transactions.
 	as_batch_input* in;
 	cl_msg* out = 0;
@@ -764,8 +762,13 @@ as_batch_queue_task(as_transaction* btr)
 	while (tran_row < tran_count && data + BATCH_REPEAT_SIZE <= limit) {
 		// Copy transaction data before memory gets overwritten.
 		in = (as_batch_input*)data;
+
+		tr.msg_fields = 0; // erase previous AS_MSG_FIELD_BIT_SET flag, if any
+		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
+
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
-		memcpy(&tr.keyd, &in->keyd, sizeof(cf_digest));
+		tr.keyd = in->keyd;
+		tr.benchmark_time = 0; // reset in case of previous usage
 
 		if (in->repeat) {
 			// Row should use previous namespace and bin names.
@@ -852,18 +855,7 @@ as_batch_queue_task(as_transaction* btr)
 
 		// Submit transaction.
 		if (should_inline) {
-			// Must copy generic transaction before processing inline, because some
-			// transaction fields are modified during the course of the transaction.
-			// We need each transaction to be initialized to proper values.
-
-			// TODO - may be able to avoid this copy altogether if we're careful
-			// above to reset members such as AS_MSG_FIELD_TYPE_SET flag, and
-			// anything in the transaction head changed downstream, such as
-			// benchmark_time.
-
-			as_transaction tmp;
-			memcpy(&tmp, &tr, AS_TRANSACTION_HEAD_SIZE);
-			as_tsvc_process_transaction(&tmp);
+			as_tsvc_process_transaction(&tr);
 		}
 		else {
 			// Queue transaction to be processed by a transaction thread.
