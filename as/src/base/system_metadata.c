@@ -823,33 +823,33 @@ smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
 		}
 
 		// Check single item optimized packing.
-		if (sm->num_items == 1) {
-			char *key = NULL;
-			size_t sz = 0;
+		char *key;
+		size_t sz;
 
-			if (msg_get_str(m, AS_SMD_MSG_SINGLE_KEY, &key, &sz,
-					MSG_GET_DIRECT) == 0) {
-				if (! (sm->items = as_smd_item_list_create(1))) {
-					cf_warning(AS_SMD, "failed to allocate array of 1 metadata items for a msg event");
-					return false;
-				}
+		if (msg_get_str(m, AS_SMD_MSG_SINGLE_KEY, &key, &sz,
+				MSG_GET_DIRECT) == 0) {
+			sm->num_items = 1;
 
-				as_smd_item_t *item = sm->items->item[0];
-
-				item->node_id = node_id;
-				item->module_name = cf_strdup(sm->module_name);
-				item->key = cf_strdup(key);
-				msg_get_str(m, AS_SMD_MSG_SINGLE_VALUE, &item->value,
-						&sz, MSG_GET_COPY_MALLOC);
-				msg_get_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
-						&item->generation);
-				msg_get_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
-						&item->timestamp);
-				item->action = item->value ?
-						AS_SMD_ACTION_SET : AS_SMD_ACTION_DELETE;
-
-				return true;
+			if (! (sm->items = as_smd_item_list_create(1))) {
+				cf_warning(AS_SMD, "failed to allocate array of 1 metadata items for a msg event");
+				return false;
 			}
+
+			as_smd_item_t *item = sm->items->item[0];
+
+			item->node_id = node_id;
+			item->module_name = cf_strdup(sm->module_name);
+			item->key = cf_strdup(key);
+			msg_get_str(m, AS_SMD_MSG_SINGLE_VALUE, &item->value,
+					&sz, MSG_GET_COPY_MALLOC);
+			msg_get_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
+					&item->generation);
+			msg_get_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
+					&item->timestamp);
+			item->action = item->value ?
+					AS_SMD_ACTION_SET : AS_SMD_ACTION_DELETE;
+
+			return true;
 		}
 
 		counts[0] = sm->num_items;
