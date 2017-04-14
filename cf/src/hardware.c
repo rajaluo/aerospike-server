@@ -111,16 +111,16 @@ static cf_topo_numa_node_index g_i_numa_node;
 static file_res
 read_file(const char *path, void *buff, size_t *limit)
 {
-	cf_detail(CF_MISC, "reading file %s with buffer size %zu", path, *limit);
+	cf_detail(CF_HARDWARE, "reading file %s with buffer size %zu", path, *limit);
 	int32_t fd = open(path, O_RDONLY);
 
 	if (fd < 0) {
 		if (errno == ENOENT) {
-			cf_detail(CF_MISC, "file %s not found", path);
+			cf_detail(CF_HARDWARE, "file %s not found", path);
 			return FILE_RES_NOT_FOUND;
 		}
 
-		cf_warning(CF_MISC, "error while opening file %s for reading: %d (%s)",
+		cf_warning(CF_HARDWARE, "error while opening file %s for reading: %d (%s)",
 				path, errno, cf_strerror(errno));
 		return FILE_RES_ERROR;
 	}
@@ -128,23 +128,23 @@ read_file(const char *path, void *buff, size_t *limit)
 	size_t total = 0;
 
 	while (total < *limit) {
-		cf_detail(CF_MISC, "reading %zd byte(s) at offset %zu", *limit - total, total);
+		cf_detail(CF_HARDWARE, "reading %zd byte(s) at offset %zu", *limit - total, total);
 		ssize_t len = read(fd, (uint8_t *)buff + total, *limit - total);
 		CF_NEVER_FAILS(len);
 
 		if (len == 0) {
-			cf_detail(CF_MISC, "EOF");
+			cf_detail(CF_HARDWARE, "EOF");
 			break;
 		}
 
 		total += (size_t)len;
 	}
 
-	cf_detail(CF_MISC, "read %zu byte(s) from file %s", total, path);
+	cf_detail(CF_HARDWARE, "read %zu byte(s) from file %s", total, path);
 	file_res res;
 
 	if (total == *limit) {
-		cf_warning(CF_MISC, "read buffer too small for file %s", path);
+		cf_warning(CF_HARDWARE, "read buffer too small for file %s", path);
 		res = FILE_RES_ERROR;
 	}
 	else {
@@ -159,16 +159,16 @@ read_file(const char *path, void *buff, size_t *limit)
 static file_res
 write_file(const char *path, const void *buff, size_t limit)
 {
-	cf_detail(CF_MISC, "writing file %s with buffer size %zu", path, limit);
+	cf_detail(CF_HARDWARE, "writing file %s with buffer size %zu", path, limit);
 	int32_t fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 
 	if (fd < 0) {
 		if (errno == ENOENT) {
-			cf_detail(CF_MISC, "file %s not found", path);
+			cf_detail(CF_HARDWARE, "file %s not found", path);
 			return FILE_RES_NOT_FOUND;
 		}
 
-		cf_warning(CF_MISC, "error while opening file %s for writing: %d (%s)",
+		cf_warning(CF_HARDWARE, "error while opening file %s for writing: %d (%s)",
 				path, errno, cf_strerror(errno));
 		return FILE_RES_ERROR;
 	}
@@ -176,13 +176,13 @@ write_file(const char *path, const void *buff, size_t limit)
 	size_t total = 0;
 
 	while (total < limit) {
-		cf_detail(CF_MISC, "writing %zd byte(s) at offset %zu", limit - total, total);
+		cf_detail(CF_HARDWARE, "writing %zd byte(s) at offset %zu", limit - total, total);
 		ssize_t len = write(fd, (uint8_t *)buff + total, limit - total);
 		CF_NEVER_FAILS(len);
 		total += (size_t)len;
 	}
 
-	cf_detail(CF_MISC, "done writing");
+	cf_detail(CF_HARDWARE, "done writing");
 	CF_NEVER_FAILS(close(fd));
 	return FILE_RES_OK;
 }
@@ -191,7 +191,7 @@ static void
 write_file_safe(const char *path, const void *buff, size_t limit)
 {
 	if (write_file(path, buff, limit) != FILE_RES_OK) {
-		cf_crash(CF_MISC, "write failed unexpectedly");
+		cf_crash(CF_HARDWARE, "write failed unexpectedly");
 	}
 }
 
@@ -201,7 +201,7 @@ opendir_safe(const char *path)
 	DIR *dir = opendir(path);
 
 	if (dir == NULL) {
-		cf_crash(CF_MISC, "error while opening directory: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while opening directory: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 
@@ -217,7 +217,7 @@ readdir_safe(DIR *dir, struct dirent *ent)
 
 		if (tmp == NULL) {
 			if (errno != 0) {
-				cf_crash(CF_MISC, "error while reading directory: %d (%s)",
+				cf_crash(CF_HARDWARE, "error while reading directory: %d (%s)",
 						errno, cf_strerror(errno));
 			}
 
@@ -237,7 +237,7 @@ static void
 closedir_safe(DIR *dir)
 {
 	if (closedir(dir) < 0) {
-		cf_crash(CF_MISC, "error while closing PCI device directory: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while closing PCI device directory: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 }
@@ -252,7 +252,7 @@ path_exists(const char *path)
 			return false;
 		}
 
-		cf_crash(CF_MISC, "error while checking for path %s: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while checking for path %s: %d (%s)",
 				path, errno, cf_strerror(errno));
 	}
 
@@ -263,7 +263,7 @@ static void
 set_mempolicy_safe(uint32_t mode, uint64_t *node_mask, size_t max_node)
 {
 	if (syscall(__NR_set_mempolicy, mode, node_mask, max_node) < 0) {
-		cf_crash(CF_MISC, "set_mempolicy() system call failed: %d (%s)",
+		cf_crash(CF_HARDWARE, "set_mempolicy() system call failed: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 }
@@ -274,12 +274,12 @@ migrate_pages_safe(pid_t pid, size_t max_node, uint64_t *from_mask, uint64_t *to
 	int64_t res = syscall(__NR_migrate_pages, pid, max_node, from_mask, to_mask);
 
 	if (res < 0) {
-		cf_crash(CF_MISC, "migrate_pages() syscall failed: %d (%s)",
+		cf_crash(CF_HARDWARE, "migrate_pages() syscall failed: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 
 	if (res > 0) {
-		cf_warning(CF_MISC, "could not NUMA-migrate %" PRId64 " page(s)", res);
+		cf_warning(CF_HARDWARE, "could not NUMA-migrate %" PRId64 " page(s)", res);
 	}
 }
 
@@ -298,7 +298,7 @@ mask_to_string(cpu_set_t *mask, char *buff, size_t limit)
 	size_t size = (size_t)words * 9;
 
 	if (size > limit) {
-		cf_crash(CF_MISC, "CPU mask buffer overflow: %zu vs. %zu", size, limit);
+		cf_crash(CF_HARDWARE, "CPU mask buffer overflow: %zu vs. %zu", size, limit);
 	}
 
 	for (int32_t i = words - 1; i >= 0; --i) {
@@ -324,7 +324,7 @@ mask_to_string(cpu_set_t *mask, char *buff, size_t limit)
 static file_res
 read_index(const char *path, uint16_t *val)
 {
-	cf_detail(CF_MISC, "reading index from file %s", path);
+	cf_detail(CF_HARDWARE, "reading index from file %s", path);
 	char buff[100];
 	size_t limit = sizeof(buff);
 	file_res res = read_file(path, buff, &limit);
@@ -334,13 +334,13 @@ read_index(const char *path, uint16_t *val)
 	}
 
 	buff[limit - 1] = '\0';
-	cf_detail(CF_MISC, "parsing index \"%s\"", buff);
+	cf_detail(CF_HARDWARE, "parsing index \"%s\"", buff);
 
 	char *end;
 	uint64_t x = strtoul(buff, &end, 10);
 
 	if (*end != '\0' || x >= CPU_SETSIZE) {
-		cf_warning(CF_MISC, "invalid index \"%s\" in %s", buff, path);
+		cf_warning(CF_HARDWARE, "invalid index \"%s\" in %s", buff, path);
 		return FILE_RES_ERROR;
 	}
 
@@ -351,7 +351,7 @@ read_index(const char *path, uint16_t *val)
 static file_res
 read_list(const char *path, cpu_set_t *mask)
 {
-	cf_detail(CF_MISC, "reading list from file %s", path);
+	cf_detail(CF_HARDWARE, "reading list from file %s", path);
 	char buff[1000];
 	size_t limit = sizeof(buff);
 	file_res res = read_file(path, buff, &limit);
@@ -361,7 +361,7 @@ read_list(const char *path, cpu_set_t *mask)
 	}
 
 	buff[limit - 1] = '\0';
-	cf_detail(CF_MISC, "parsing list \"%s\"", buff);
+	cf_detail(CF_HARDWARE, "parsing list \"%s\"", buff);
 
 	CPU_ZERO(mask);
 	char *walker = buff;
@@ -379,16 +379,16 @@ read_list(const char *path, cpu_set_t *mask)
 			thru = strtoul(walker, &delim, 10);
 		}
 		else {
-			cf_warning(CF_MISC, "invalid list \"%s\" in %s", buff, path);
+			cf_warning(CF_HARDWARE, "invalid list \"%s\" in %s", buff, path);
 			return FILE_RES_ERROR;
 		}
 
 		if (from >= CPU_SETSIZE || thru >= CPU_SETSIZE || from > thru) {
-			cf_warning(CF_MISC, "invalid list \"%s\" in %s", buff, path);
+			cf_warning(CF_HARDWARE, "invalid list \"%s\" in %s", buff, path);
 			return FILE_RES_ERROR;
 		}
 
-		cf_detail(CF_MISC, "marking %d through %d", (int32_t)from, (int32_t)thru);
+		cf_detail(CF_HARDWARE, "marking %d through %d", (int32_t)from, (int32_t)thru);
 
 		for (size_t i = from; i <= thru; ++i) {
 			CPU_SET(i, mask);
@@ -403,7 +403,7 @@ read_list(const char *path, cpu_set_t *mask)
 
 	char buff2[1000];
 	mask_to_string(mask, buff2, sizeof(buff2));
-	cf_detail(CF_MISC, "list \"%s\" -> mask %s", buff, buff2);
+	cf_detail(CF_HARDWARE, "list \"%s\" -> mask %s", buff, buff2);
 
 	return FILE_RES_OK;
 }
@@ -412,17 +412,17 @@ static void
 detect(cf_topo_numa_node_index a_numa_node)
 {
 	if (a_numa_node == INVALID_INDEX) {
-		cf_detail(CF_MISC, "detecting online CPUs");
+		cf_detail(CF_HARDWARE, "detecting online CPUs");
 	}
 	else {
-		cf_detail(CF_MISC, "detecting online CPUs on NUMA node %hu", a_numa_node);
+		cf_detail(CF_HARDWARE, "detecting online CPUs on NUMA node %hu", a_numa_node);
 	}
 
 	if (read_list("/sys/devices/system/cpu/online", &g_os_cpus_online) != FILE_RES_OK) {
-		cf_crash(CF_MISC, "error while reading list of online CPUs");
+		cf_crash(CF_HARDWARE, "error while reading list of online CPUs");
 	}
 
-	cf_detail(CF_MISC, "learning CPU topology");
+	cf_detail(CF_HARDWARE, "learning CPU topology");
 
 	cf_topo_numa_node_index os_numa_node_index_to_numa_node_index[CPU_SETSIZE];
 
@@ -456,7 +456,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 	// Loop through all CPUs in the system by looping through OS CPU indexes.
 
 	for (g_n_os_cpus = 0; g_n_os_cpus < CPU_SETSIZE; ++g_n_os_cpus) {
-		cf_detail(CF_MISC, "querying OS CPU index %hu", g_n_os_cpus);
+		cf_detail(CF_HARDWARE, "querying OS CPU index %hu", g_n_os_cpus);
 
 		// Let's look at the CPU's package.
 
@@ -474,15 +474,15 @@ detect(cf_topo_numa_node_index a_numa_node)
 		}
 
 		if (res != FILE_RES_OK) {
-			cf_crash(CF_MISC, "error while reading OS package index from %s", path);
+			cf_crash(CF_HARDWARE, "error while reading OS package index from %s", path);
 		}
 
-		cf_detail(CF_MISC, "OS package index is %hu", i_os_package);
+		cf_detail(CF_HARDWARE, "OS package index is %hu", i_os_package);
 
 		// Only consider CPUs that are actually in use.
 
 		if (!CPU_ISSET(g_n_os_cpus, &g_os_cpus_online)) {
-			cf_detail(CF_MISC, "OS CPU index %hu is offline", g_n_os_cpus);
+			cf_detail(CF_HARDWARE, "OS CPU index %hu is offline", g_n_os_cpus);
 			continue;
 		}
 
@@ -496,10 +496,10 @@ detect(cf_topo_numa_node_index a_numa_node)
 		res = read_index(path, &i_os_core);
 
 		if (res != FILE_RES_OK) {
-			cf_crash(CF_MISC, "error while reading OS core index from %s", path);
+			cf_crash(CF_HARDWARE, "error while reading OS core index from %s", path);
 		}
 
-		cf_detail(CF_MISC, "OS core index is %hu", i_os_core);
+		cf_detail(CF_HARDWARE, "OS core index is %hu", i_os_core);
 
 		// Consider a core when we see it for the first time. In other words, we
 		// consider the first Hyper Threading peer of each core to be that core.
@@ -507,11 +507,11 @@ detect(cf_topo_numa_node_index a_numa_node)
 		bool new_core;
 
 		if (CPU_ISSET(i_os_core, &covered_cores[i_os_package])) {
-			cf_detail(CF_MISC, "core (%hu, %hu) already covered", i_os_core, i_os_package);
+			cf_detail(CF_HARDWARE, "core (%hu, %hu) already covered", i_os_core, i_os_package);
 			new_core = false;
 		}
 		else {
-			cf_detail(CF_MISC, "core (%hu, %hu) is new", i_os_core, i_os_package);
+			cf_detail(CF_HARDWARE, "core (%hu, %hu) is new", i_os_core, i_os_package);
 			new_core = true;
 			CPU_SET(i_os_core, &covered_cores[i_os_package]);
 		}
@@ -536,7 +536,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 			}
 
 			if (res != FILE_RES_NOT_FOUND) {
-				cf_crash(CF_MISC, "error while reading core number from %s", path);
+				cf_crash(CF_HARDWARE, "error while reading core number from %s", path);
 			}
 		}
 
@@ -544,12 +544,12 @@ detect(cf_topo_numa_node_index a_numa_node)
 		// in /sys. In this case, assume a system with a single NUMA node.
 
 		if (i_os_numa_node == CPU_SETSIZE) {
-			cf_detail(CF_MISC, "OS CPU index %hu does not have a NUMA node", g_n_os_cpus);
+			cf_detail(CF_HARDWARE, "OS CPU index %hu does not have a NUMA node", g_n_os_cpus);
 			no_numa = true;
 			i_os_numa_node = 0;
 		}
 
-		cf_detail(CF_MISC, "OS NUMA node index is %hu", i_os_numa_node);
+		cf_detail(CF_HARDWARE, "OS NUMA node index is %hu", i_os_numa_node);
 
 		// Again, just like with cores, we consider a NUMA node when we encounter
 		// it for the first time.
@@ -557,18 +557,18 @@ detect(cf_topo_numa_node_index a_numa_node)
 		bool new_numa_node;
 
 		if (CPU_ISSET(i_os_numa_node, &covered_numa_nodes)) {
-			cf_detail(CF_MISC, "OS NUMA node index %hu already covered", i_os_numa_node);
+			cf_detail(CF_HARDWARE, "OS NUMA node index %hu already covered", i_os_numa_node);
 			new_numa_node = false;
 		}
 		else {
-			cf_detail(CF_MISC, "OS NUMA node index %hu is new", i_os_numa_node);
+			cf_detail(CF_HARDWARE, "OS NUMA node index %hu is new", i_os_numa_node);
 			new_numa_node = true;
 			CPU_SET(i_os_numa_node, &covered_numa_nodes);
 
 			// For now, we only support a 64-bit bitmask (= one uint64_t).
 
 			if (i_os_numa_node >= 64) {
-				cf_crash(CF_MISC, "OS NUMA node index %hu too high", i_os_numa_node);
+				cf_crash(CF_HARDWARE, "OS NUMA node index %hu too high", i_os_numa_node);
 			}
 		}
 
@@ -582,23 +582,23 @@ detect(cf_topo_numa_node_index a_numa_node)
 			++g_n_numa_nodes;
 			os_numa_node_index_to_numa_node_index[i_os_numa_node] = i_numa_node;
 			g_numa_node_index_to_os_numa_node_index[i_numa_node] = i_os_numa_node;
-			cf_detail(CF_MISC, "OS NUMA node index %hu -> new NUMA node index %hu",
+			cf_detail(CF_HARDWARE, "OS NUMA node index %hu -> new NUMA node index %hu",
 					i_os_numa_node, i_numa_node);
 		}
 		else {
 			i_numa_node = os_numa_node_index_to_numa_node_index[i_os_numa_node];
-			cf_detail(CF_MISC, "OS NUMA node index %hu -> existing NUMA node index %hu",
+			cf_detail(CF_HARDWARE, "OS NUMA node index %hu -> existing NUMA node index %hu",
 					i_os_numa_node, i_numa_node);
 		}
 
-		cf_detail(CF_MISC, "OS CPU index %hu on NUMA node index %hu", g_n_os_cpus, i_numa_node);
+		cf_detail(CF_HARDWARE, "OS CPU index %hu on NUMA node index %hu", g_n_os_cpus, i_numa_node);
 		CPU_SET(g_n_os_cpus, &g_numa_node_os_cpus_online[i_numa_node]);
 
 		// If we're in NUMA mode and the CPU isn't on the NUMA mode that we're
 		// running on, then ignore the CPU.
 
 		if (a_numa_node != INVALID_INDEX && a_numa_node != i_numa_node) {
-			cf_detail(CF_MISC, "skipping unwanted NUMA node index %hu", i_numa_node);
+			cf_detail(CF_HARDWARE, "skipping unwanted NUMA node index %hu", i_numa_node);
 			continue;
 		}
 
@@ -606,7 +606,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 
 		if (new_core) {
 			g_core_index_to_os_cpu_index[g_n_cores] = g_n_os_cpus;
-			cf_detail(CF_MISC, "core index %hu -> OS CPU index %hu", g_n_cores, g_n_os_cpus);
+			cf_detail(CF_HARDWARE, "core index %hu -> OS CPU index %hu", g_n_cores, g_n_os_cpus);
 			++g_n_cores;
 		}
 
@@ -615,16 +615,16 @@ detect(cf_topo_numa_node_index a_numa_node)
 		g_os_cpu_index_to_cpu_index[g_n_os_cpus] = g_n_cpus;
 		g_cpu_index_to_os_cpu_index[g_n_cpus] = g_n_os_cpus;
 
-		cf_detail(CF_MISC, "OS CPU index %hu <-> CPU index %hu", g_n_os_cpus, g_n_cpus);
+		cf_detail(CF_HARDWARE, "OS CPU index %hu <-> CPU index %hu", g_n_os_cpus, g_n_cpus);
 		++g_n_cpus;
 	}
 
 	if (g_n_os_cpus == CPU_SETSIZE) {
-		cf_crash(CF_MISC, "too many CPUs");
+		cf_crash(CF_HARDWARE, "too many CPUs");
 	}
 
 	if (no_numa) {
-		cf_warning(CF_MISC, "no NUMA information found in /sys");
+		cf_warning(CF_HARDWARE, "no NUMA information found in /sys");
 	}
 
 	g_i_numa_node = a_numa_node;
@@ -633,7 +633,7 @@ detect(cf_topo_numa_node_index a_numa_node)
 static void
 pin_to_numa_node(cf_topo_numa_node_index a_numa_node)
 {
-	cf_info(CF_MISC, "pinning to NUMA node %hu", a_numa_node);
+	cf_info(CF_HARDWARE, "pinning to NUMA node %hu", a_numa_node);
 
 	// Move the current thread (and all of its future descendants) to the CPUs
 	// on the selected NUMA node.
@@ -648,10 +648,10 @@ pin_to_numa_node(cf_topo_numa_node_index a_numa_node)
 
 	char buff[1000];
 	mask_to_string(&cpu_set, buff, sizeof(buff));
-	cf_detail(CF_MISC, "NUMA node %hu CPU mask: %s", a_numa_node, buff);
+	cf_detail(CF_HARDWARE, "NUMA node %hu CPU mask: %s", a_numa_node, buff);
 
 	if (sched_setaffinity(0, sizeof(cpu_set), &cpu_set) < 0) {
-		cf_crash(CF_MISC, "error while pinning thread to NUMA node %hu: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while pinning thread to NUMA node %hu: %d (%s)",
 				a_numa_node, errno, cf_strerror(errno));
 	}
 
@@ -659,7 +659,7 @@ pin_to_numa_node(cf_topo_numa_node_index a_numa_node)
 
 	os_numa_node_index i_os_numa_node = g_numa_node_index_to_os_numa_node_index[a_numa_node];
 	uint64_t to_mask = 1UL << i_os_numa_node;
-	cf_detail(CF_MISC, "NUMA node mask (to): %016" PRIx64, to_mask);
+	cf_detail(CF_HARDWARE, "NUMA node mask (to): %016" PRIx64, to_mask);
 
 	// Unlike select(), we have to pass "number of valid bits + 1".
 	set_mempolicy_safe(MPOL_BIND, &to_mask, 65);
@@ -701,19 +701,19 @@ cf_topo_count_cpus(void)
 static cf_topo_cpu_index
 os_cpu_index_to_cpu_index(cf_topo_os_cpu_index i_os_cpu)
 {
-	cf_detail(CF_MISC, "translating OS CPU index %hu", i_os_cpu);
+	cf_detail(CF_HARDWARE, "translating OS CPU index %hu", i_os_cpu);
 
 	if (i_os_cpu >= g_n_os_cpus) {
-		cf_crash(CF_MISC, "invalid OS CPU index %hu", i_os_cpu);
+		cf_crash(CF_HARDWARE, "invalid OS CPU index %hu", i_os_cpu);
 	}
 
 	cf_topo_cpu_index i_cpu = g_os_cpu_index_to_cpu_index[i_os_cpu];
 
 	if (i_cpu == INVALID_INDEX) {
-		cf_detail(CF_MISC, "foreign OS CPU index %hu", i_os_cpu);
+		cf_detail(CF_HARDWARE, "foreign OS CPU index %hu", i_os_cpu);
 	}
 	else {
-		cf_detail(CF_MISC, "CPU index is %hu", i_cpu);
+		cf_detail(CF_HARDWARE, "CPU index is %hu", i_cpu);
 	}
 
 	return i_cpu;
@@ -722,11 +722,11 @@ os_cpu_index_to_cpu_index(cf_topo_os_cpu_index i_os_cpu)
 cf_topo_cpu_index
 cf_topo_current_cpu(void)
 {
-	cf_detail(CF_MISC, "getting current OS CPU index");
+	cf_detail(CF_HARDWARE, "getting current OS CPU index");
 	int32_t os = sched_getcpu();
 
 	if (os < 0) {
-		cf_crash(CF_MISC, "error while getting OS CPU index: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while getting OS CPU index: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 
@@ -736,7 +736,7 @@ cf_topo_current_cpu(void)
 cf_topo_cpu_index
 cf_topo_socket_cpu(const cf_socket *sock)
 {
-	cf_detail(CF_MISC, "determining CPU index for socket FD %d", CSFD(sock));
+	cf_detail(CF_HARDWARE, "determining CPU index for socket FD %d", CSFD(sock));
 
 	int32_t os;
 	socklen_t len = sizeof(os);
@@ -746,7 +746,7 @@ cf_topo_socket_cpu(const cf_socket *sock)
 				errno, cf_strerror(errno));
 	}
 
-	cf_detail(CF_MISC, "OS CPU index is %d", os);
+	cf_detail(CF_HARDWARE, "OS CPU index is %d", os);
 	cf_topo_cpu_index i_cpu = os_cpu_index_to_cpu_index((cf_topo_os_cpu_index)os);
 
 	// 1. The incoming connection was handled on the wrong NUMA node. In this case,
@@ -754,7 +754,7 @@ cf_topo_socket_cpu(const cf_socket *sock)
 
 	if (i_cpu == INVALID_INDEX) {
 		i_cpu = (cf_topo_cpu_index)pick_random(g_n_cpus);
-		cf_detail(CF_MISC, "picking random CPU index %hu", i_cpu);
+		cf_detail(CF_HARDWARE, "picking random CPU index %hu", i_cpu);
 		return i_cpu;
 	}
 
@@ -765,7 +765,7 @@ cf_topo_socket_cpu(const cf_socket *sock)
 
 	if (i_cpu >= g_n_irq_cpus) {
 		i_cpu = (cf_topo_cpu_index)pick_random(g_n_cpus);
-		cf_detail(CF_MISC, "randomizing unexpected CPU index >%hu to %hu",
+		cf_detail(CF_HARDWARE, "randomizing unexpected CPU index >%hu to %hu",
 				g_n_irq_cpus - 1, i_cpu);
 		return i_cpu;
 	}
@@ -782,7 +782,7 @@ cf_topo_socket_cpu(const cf_socket *sock)
 	// yields the desired total probability of p1 * p2 = 0.5 * 0.25 = 0.125.
 
 	if (pick_random(100000) < g_n_irq_cpus * (uint32_t)100000 / g_n_cpus) {
-		cf_detail(CF_MISC, "staying on CPU index %hu", i_cpu);
+		cf_detail(CF_HARDWARE, "staying on CPU index %hu", i_cpu);
 		return i_cpu;
 	}
 
@@ -792,21 +792,21 @@ cf_topo_socket_cpu(const cf_socket *sock)
 
 	i_cpu = (cf_topo_cpu_index)(g_n_irq_cpus +
 			pick_random((uint32_t)g_n_cpus - (uint32_t)g_n_irq_cpus));
-	cf_detail(CF_MISC, "redirecting to CPU index %hu", i_cpu);
+	cf_detail(CF_HARDWARE, "redirecting to CPU index %hu", i_cpu);
 	return i_cpu;
 }
 
 static void
 pin_to_os_cpu(cf_topo_os_cpu_index i_os_cpu)
 {
-	cf_detail(CF_MISC, "pinning to OS CPU index %hu", i_os_cpu);
+	cf_detail(CF_HARDWARE, "pinning to OS CPU index %hu", i_os_cpu);
 
 	cpu_set_t cpu_set;
 	CPU_ZERO(&cpu_set);
 	CPU_SET(i_os_cpu, &cpu_set);
 
 	if (sched_setaffinity(0, sizeof(cpu_set), &cpu_set) < 0) {
-		cf_crash(CF_MISC, "error while pinning thread to OS CPU %hu: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while pinning thread to OS CPU %hu: %d (%s)",
 				i_os_cpu, errno, cf_strerror(errno));
 	}
 }
@@ -814,10 +814,10 @@ pin_to_os_cpu(cf_topo_os_cpu_index i_os_cpu)
 void
 cf_topo_pin_to_core(cf_topo_core_index i_core)
 {
-	cf_detail(CF_MISC, "pinning to core index %hu", i_core);
+	cf_detail(CF_HARDWARE, "pinning to core index %hu", i_core);
 
 	if (i_core >= g_n_cores) {
-		cf_crash(CF_MISC, "invalid core index %hu", i_core);
+		cf_crash(CF_HARDWARE, "invalid core index %hu", i_core);
 	}
 
 	pin_to_os_cpu(g_core_index_to_os_cpu_index[i_core]);
@@ -826,10 +826,10 @@ cf_topo_pin_to_core(cf_topo_core_index i_core)
 void
 cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu)
 {
-	cf_detail(CF_MISC, "pinning to CPU index %hu", i_cpu);
+	cf_detail(CF_HARDWARE, "pinning to CPU index %hu", i_cpu);
 
 	if (i_cpu >= g_n_cpus) {
-		cf_crash(CF_MISC, "invalid CPU index %hu", i_cpu);
+		cf_crash(CF_HARDWARE, "invalid CPU index %hu", i_cpu);
 	}
 
 	pin_to_os_cpu(g_cpu_index_to_os_cpu_index[i_cpu]);
@@ -838,10 +838,10 @@ cf_topo_pin_to_cpu(cf_topo_cpu_index i_cpu)
 static check_proc_res
 check_proc(const char *name, int32_t argc, const char *argv[])
 {
-	cf_detail(CF_MISC, "looking for process %s", name);
+	cf_detail(CF_HARDWARE, "looking for process %s", name);
 
 	for (int32_t i = 0; i < argc; ++i) {
-		cf_detail(CF_MISC, "argv[%d]: %s", i, argv[i]);
+		cf_detail(CF_HARDWARE, "argv[%d]: %s", i, argv[i]);
 	}
 
 	DIR *dir = opendir_safe("/proc");
@@ -876,7 +876,7 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 		}
 
 		if (rfr == FILE_RES_ERROR) {
-			cf_crash(CF_MISC, "error while reading file %s", path);
+			cf_crash(CF_HARDWARE, "error while reading file %s", path);
 		}
 
 		if (limit > 0 && cmd[limit - 1] != 0) {
@@ -901,17 +901,17 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 	closedir_safe(dir);
 
 	if (!found) {
-		cf_detail(CF_MISC, "process %s absent", name);
+		cf_detail(CF_HARDWARE, "process %s absent", name);
 		return CHECK_PROC_ABSENT;
 	}
 
-	cf_detail(CF_MISC, "process %s is %s", name, cmd);
+	cf_detail(CF_HARDWARE, "process %s is %s", name, cmd);
 
 	if (argc > 0) {
 		int32_t i_arg = 0;
 
 		for (size_t off = strlen(cmd) + 1; off < limit; off += strlen(cmd + off) + 1) {
-			cf_detail(CF_MISC, "checking argument %s against %s", cmd + off, argv[i_arg]);
+			cf_detail(CF_HARDWARE, "checking argument %s against %s", cmd + off, argv[i_arg]);
 
 			if (strcmp(cmd + off, argv[i_arg]) == 0) {
 				++i_arg;
@@ -926,12 +926,12 @@ check_proc(const char *name, int32_t argc, const char *argv[])
 		}
 
 		if (i_arg >= argc) {
-			cf_detail(CF_MISC, "process %s present with argument", name);
+			cf_detail(CF_HARDWARE, "process %s present with argument", name);
 			return CHECK_PROC_PRESENT;
 		}
 	}
 
-	cf_detail(CF_MISC, "process %s present", name);
+	cf_detail(CF_HARDWARE, "process %s present", name);
 	return CHECK_PROC_PRESENT_NO_ARG;
 }
 
@@ -943,17 +943,17 @@ interface_queues(const char *if_name, const char *format)
 	while (true) {
 		char path[1000];
 		snprintf(path, sizeof(path), format, if_name, n_queues);
-		cf_detail(CF_MISC, "checking for path %s", path);
+		cf_detail(CF_HARDWARE, "checking for path %s", path);
 
 		if (!path_exists(path)) {
-			cf_detail(CF_MISC, "path not found");
+			cf_detail(CF_HARDWARE, "path not found");
 			break;
 		}
 
 		++n_queues;
 	}
 
-	cf_assert(n_queues != 0, CF_MISC, "interface %s has no queues", if_name);
+	cf_assert(n_queues != 0, CF_HARDWARE, "interface %s has no queues", if_name);
 
 	return n_queues;
 }
@@ -961,14 +961,14 @@ interface_queues(const char *if_name, const char *format)
 static uint16_t
 interface_rx_queues(const char *if_name)
 {
-	cf_detail(CF_MISC, "getting receive queues for interface %s", if_name);
+	cf_detail(CF_HARDWARE, "getting receive queues for interface %s", if_name);
 	return interface_queues(if_name, "/sys/class/net/%s/queues/rx-%hu");
 }
 
 static uint16_t
 interface_tx_queues(const char *if_name)
 {
-	cf_detail(CF_MISC, "getting transmit queues for interface %s", if_name);
+	cf_detail(CF_HARDWARE, "getting transmit queues for interface %s", if_name);
 	return interface_queues(if_name, "/sys/class/net/%s/queues/tx-%hu");
 }
 
@@ -981,7 +981,7 @@ comp_irq_number(const void *lhs, const void *rhs)
 static void
 interface_irqs(const char *if_name, irq_list *irqs)
 {
-	cf_detail(CF_MISC, "getting IRQs for interface %s", if_name);
+	cf_detail(CF_HARDWARE, "getting IRQs for interface %s", if_name);
 
 	DIR *dir = opendir_safe("/sys/bus/pci/devices");
 	struct dirent ent;
@@ -1012,10 +1012,10 @@ interface_irqs(const char *if_name, irq_list *irqs)
 		snprintf(path, sizeof(path), "/sys/bus/pci/devices/%s/msi_irqs", ent.d_name);
 
 		if (!path_exists(path)) {
-			cf_crash(CF_MISC, "interface %s does not support MSIs", if_name);
+			cf_crash(CF_HARDWARE, "interface %s does not support MSIs", if_name);
 		}
 
-		cf_detail(CF_MISC, "interface %s is %s", if_name, ent.d_name);
+		cf_detail(CF_HARDWARE, "interface %s is %s", if_name, ent.d_name);
 		found = true;
 		break;
 	}
@@ -1023,7 +1023,7 @@ interface_irqs(const char *if_name, irq_list *irqs)
 	closedir_safe(dir);
 
 	if (!found) {
-		cf_crash(CF_MISC, "interface %s does not have a PCI device entry", if_name);
+		cf_crash(CF_HARDWARE, "interface %s does not have a PCI device entry", if_name);
 	}
 
 	dir = opendir_safe(path);
@@ -1035,14 +1035,14 @@ interface_irqs(const char *if_name, irq_list *irqs)
 		uint64_t tmp = strtoul(ent.d_name, &end, 10);
 
 		if (*end != 0 || tmp > 65535) {
-			cf_crash(CF_MISC, "invalid IRQ number %s in %s", ent.d_name, path);
+			cf_crash(CF_HARDWARE, "invalid IRQ number %s in %s", ent.d_name, path);
 		}
 
 		if (count >= CPU_SETSIZE) {
-			cf_crash(CF_MISC, "too many IRQs in %s", path);
+			cf_crash(CF_HARDWARE, "too many IRQs in %s", path);
 		}
 
-		cf_detail(CF_MISC, "interface %s has IRQ %hu", if_name, (irq_number)tmp);
+		cf_detail(CF_HARDWARE, "interface %s has IRQ %hu", if_name, (irq_number)tmp);
 		irq_nums[count] = (irq_number)tmp;
 		++count;
 	}
@@ -1059,7 +1059,7 @@ interface_irqs(const char *if_name, irq_list *irqs)
 	FILE *fh = fopen("/proc/interrupts", "r");
 
 	if (fh == NULL) {
-		cf_crash(CF_MISC, "error while opening /proc/interrupts");
+		cf_crash(CF_HARDWARE, "error while opening /proc/interrupts");
 	}
 
 	int32_t line_no = 0;
@@ -1102,11 +1102,11 @@ interface_irqs(const char *if_name, irq_list *irqs)
 		char *action = line + i + 1;
 
 		if (strlen(action) >= sizeof(actions[0])) {
-			cf_crash(CF_MISC, "oversize action in line %d in /proc/interrupts: %s",
+			cf_crash(CF_HARDWARE, "oversize action in line %d in /proc/interrupts: %s",
 					line_no, action);
 		}
 
-		cf_detail(CF_MISC, "IRQ %hu has action %s", irq_num, action);
+		cf_detail(CF_HARDWARE, "IRQ %hu has action %s", irq_num, action);
 
 		for (i = 0; i < count; ++i) {
 			if (irq_nums[i] == irq_num) {
@@ -1127,7 +1127,7 @@ interface_irqs(const char *if_name, irq_list *irqs)
 				}
 
 				actions[i][m] = 0;
-				cf_detail(CF_MISC, "action pattern is %s", actions[i]);
+				cf_detail(CF_HARDWARE, "action pattern is %s", actions[i]);
 				break;
 			}
 		}
@@ -1159,10 +1159,10 @@ interface_irqs(const char *if_name, irq_list *irqs)
 
 		if (actions[i][0] == 0) {
 			inactive_group = n_groups;
-			cf_detail(CF_MISC, "inactive IRQs in new group %d", n_groups);
+			cf_detail(CF_HARDWARE, "inactive IRQs in new group %d", n_groups);
 		}
 		else {
-			cf_detail(CF_MISC, "new group %d: %s", n_groups, actions[i]);
+			cf_detail(CF_HARDWARE, "new group %d: %s", n_groups, actions[i]);
 		}
 
 		for (int32_t k = i + 1; k < count; ++k) {
@@ -1172,13 +1172,13 @@ interface_irqs(const char *if_name, irq_list *irqs)
 			}
 		}
 
-		cf_detail(CF_MISC, "group %d has %d member(s)", n_groups, group_sizes[n_groups]);
+		cf_detail(CF_HARDWARE, "group %d has %d member(s)", n_groups, group_sizes[n_groups]);
 
 		// Prefer groups whose action patterns have "rx", "tx", "input", or "output" in them.
 
 		if (strstr(actions[i], "rx") != NULL || strstr(actions[i], "tx") != NULL ||
 				strstr(actions[i], "input") != NULL || strstr(actions[i], "output") != NULL) {
-			cf_detail(CF_MISC, "preferring group %d", n_groups);
+			cf_detail(CF_HARDWARE, "preferring group %d", n_groups);
 			group_extra[n_groups] = 1;
 		}
 
@@ -1198,7 +1198,7 @@ interface_irqs(const char *if_name, irq_list *irqs)
 	}
 
 	if (a < 0) {
-		cf_crash(CF_MISC, "no active interrupts for interface %s", if_name);
+		cf_crash(CF_HARDWARE, "no active interrupts for interface %s", if_name);
 	}
 
 	for (int32_t i = 0; i < n_groups; ++i) {
@@ -1208,13 +1208,13 @@ interface_irqs(const char *if_name, irq_list *irqs)
 		}
 	}
 
-	cf_detail(CF_MISC, "largest groups: %d, %d", a, b);
+	cf_detail(CF_HARDWARE, "largest groups: %d, %d", a, b);
 
 	// If the two largest groups have an equal number of members, then we assume
 	// that it's a NIC with separate RX and TX queue IRQs.
 
 	if (b >= 0 && group_sizes[a] == group_sizes[b]) {
-		cf_detail(CF_MISC, "assuming %d separate RX and TX queue IRQ(s)",
+		cf_detail(CF_HARDWARE, "assuming %d separate RX and TX queue IRQ(s)",
 				group_sizes[a] + group_sizes[b]);
 		int32_t ia = 0;
 		int32_t ib = 0;
@@ -1224,12 +1224,12 @@ interface_irqs(const char *if_name, irq_list *irqs)
 		for (int32_t k = 0; k < count; ++k) {
 			if (action_groups[k] == a) {
 				irqs->irqs[ia * 2] = irq_nums[k];
-				cf_detail(CF_MISC, "irqs[%d] = %hu", ia * 2, irq_nums[k]);
+				cf_detail(CF_HARDWARE, "irqs[%d] = %hu", ia * 2, irq_nums[k]);
 				++ia;
 			}
 			else if (action_groups[k] == b) {
 				irqs->irqs[ib * 2 + 1] = irq_nums[k];
-				cf_detail(CF_MISC, "irqs[%d] = %hu", ib * 2 + 1, irq_nums[k]);
+				cf_detail(CF_HARDWARE, "irqs[%d] = %hu", ib * 2 + 1, irq_nums[k]);
 				++ib;
 			}
 		}
@@ -1246,13 +1246,13 @@ interface_irqs(const char *if_name, irq_list *irqs)
 	// Otherwise, we assume that it's a NIC with combined RX and TX queue IRQs
 	// and that the largest group contains these IRQs.
 
-	cf_detail(CF_MISC, "assuming %d combined RX and TX queue IRQ(s)", group_sizes[a]);
+	cf_detail(CF_HARDWARE, "assuming %d combined RX and TX queue IRQ(s)", group_sizes[a]);
 	int32_t ia = 0;
 
 	for (int32_t k = 0; k < count; ++k) {
 		if (action_groups[k] == a) {
 			irqs->irqs[ia] = irq_nums[k];
-			cf_detail(CF_MISC, "irqs[%d] = %hu", ia, irq_nums[k]);
+			cf_detail(CF_HARDWARE, "irqs[%d] = %hu", ia, irq_nums[k]);
 			++ia;
 		}
 	}
@@ -1267,7 +1267,7 @@ interface_irqs(const char *if_name, irq_list *irqs)
 static void
 pin_irq(irq_number i_irq, cf_topo_os_cpu_index i_os_cpu)
 {
-	cf_detail(CF_MISC, "pinning IRQ number %hu to OS CPU index %hu", i_irq, i_os_cpu);
+	cf_detail(CF_HARDWARE, "pinning IRQ number %hu to OS CPU index %hu", i_irq, i_os_cpu);
 
 	cpu_set_t mask;
 	CPU_ZERO(&mask);
@@ -1275,13 +1275,13 @@ pin_irq(irq_number i_irq, cf_topo_os_cpu_index i_os_cpu)
 
 	char mask_str[200];
 	mask_to_string(&mask, mask_str, sizeof(mask_str));
-	cf_detail(CF_MISC, "CPU mask is %s", mask_str);
+	cf_detail(CF_HARDWARE, "CPU mask is %s", mask_str);
 
 	char path[1000];
 	snprintf(path, sizeof(path), "/proc/irq/%hu/smp_affinity", i_irq);
 
 	if (write_file(path, mask_str, strlen(mask_str)) != FILE_RES_OK) {
-		cf_crash(CF_MISC, "error while pinning IRQ, path %s", path);
+		cf_crash(CF_HARDWARE, "error while pinning IRQ, path %s", path);
 	}
 }
 
@@ -1325,11 +1325,11 @@ config_steering(const char *format, const char *if_name, uint16_t n_queues, bool
 	for (i_queue = 0; i_queue < n_queues; ++i_queue) {
 		char path[1000];
 		snprintf(path, sizeof(path), format, if_name, i_queue);
-		cf_detail(CF_MISC, "path is %s", path);
+		cf_detail(CF_HARDWARE, "path is %s", path);
 
 		char mask_str[200];
 		mask_to_string(&masks[i_queue], mask_str, sizeof(mask_str));
-		cf_detail(CF_MISC, "CPU mask is %s", mask_str);
+		cf_detail(CF_HARDWARE, "CPU mask is %s", mask_str);
 
 		write_file_safe(path, mask_str, strlen(mask_str));
 	}
@@ -1338,7 +1338,7 @@ config_steering(const char *format, const char *if_name, uint16_t n_queues, bool
 static void
 enable_xps(const char *if_name)
 {
-	cf_detail(CF_MISC, "enabling XPS for interface %s", if_name);
+	cf_detail(CF_HARDWARE, "enabling XPS for interface %s", if_name);
 	uint16_t n_queues = interface_tx_queues(if_name);
 	config_steering("/sys/class/net/%s/queues/tx-%hu/xps_cpus", if_name, n_queues, true);
 }
@@ -1346,7 +1346,7 @@ enable_xps(const char *if_name)
 static void
 disable_rps(const char *if_name)
 {
-	cf_detail(CF_MISC, "disabling RPS for interface %s", if_name);
+	cf_detail(CF_HARDWARE, "disabling RPS for interface %s", if_name);
 	uint16_t n_queues = interface_rx_queues(if_name);
 	config_steering("/sys/class/net/%s/queues/rx-%hu/rps_cpus", if_name, n_queues, false);
 }
@@ -1354,13 +1354,13 @@ disable_rps(const char *if_name)
 static void
 config_rfs(const char *if_name, bool enable)
 {
-	cf_detail(CF_MISC, "%s RFS for interface %s", enable ? "enabling" : "disabling", if_name);
+	cf_detail(CF_HARDWARE, "%s RFS for interface %s", enable ? "enabling" : "disabling", if_name);
 
 	uint16_t n_queues = interface_rx_queues(if_name);
 	uint32_t sz_glob = enable ? 1000000 : 0;
 	uint32_t sz_queue = sz_glob / n_queues;
 
-	cf_detail(CF_MISC, "global size is %u, per-queue size is %u", sz_glob, sz_queue);
+	cf_detail(CF_HARDWARE, "global size is %u, per-queue size is %u", sz_glob, sz_queue);
 
 	char string[50];
 	snprintf(string, sizeof(string), "%u", sz_glob);
@@ -1379,18 +1379,18 @@ config_rfs(const char *if_name, bool enable)
 static void
 enable_coalescing(const char *if_name)
 {
-	cf_detail(CF_MISC, "enabling interrupt coalescing for interface %s", if_name);
+	cf_detail(CF_HARDWARE, "enabling interrupt coalescing for interface %s", if_name);
 	int32_t sock = socket(AF_INET, SOCK_DGRAM, 0);
 
 	if (sock < 0) {
-		cf_crash(CF_MISC, "error while create ethtool socket: %d (%s)", errno, cf_strerror(errno));
+		cf_crash(CF_HARDWARE, "error while create ethtool socket: %d (%s)", errno, cf_strerror(errno));
 	}
 
 	struct ifreq req;
 	memset(&req, 0, sizeof(req));
 
 	if (strlen(if_name) > IFNAMSIZ - 1) {
-		cf_crash(CF_MISC, "invalid interface name %s", if_name);
+		cf_crash(CF_HARDWARE, "invalid interface name %s", if_name);
 	}
 
 	strcpy(req.ifr_name, if_name);
@@ -1399,23 +1399,23 @@ enable_coalescing(const char *if_name)
 
 	if (ioctl(sock, SIOCETHTOOL, &req) < 0) {
 		if (errno == EOPNOTSUPP) {
-			cf_detail(CF_MISC, "interface %s does not support ETHTOOL_GCOALESCE", if_name);
+			cf_detail(CF_HARDWARE, "interface %s does not support ETHTOOL_GCOALESCE", if_name);
 			goto cleanup1;
 		}
 
-		cf_crash(CF_MISC, "error while getting interface settings: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while getting interface settings: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 
-	cf_detail(CF_MISC, "current interface settings: adaptive = %u, usecs = %u",
+	cf_detail(CF_HARDWARE, "current interface settings: adaptive = %u, usecs = %u",
 			coal.use_adaptive_rx_coalesce, coal.rx_coalesce_usecs);
 
 	if (coal.use_adaptive_rx_coalesce != 0 || coal.rx_coalesce_usecs >= 100) {
-		cf_detail(CF_MISC, "leaving interface settings untouched");
+		cf_detail(CF_HARDWARE, "leaving interface settings untouched");
 		goto cleanup1;
 	}
 
-	cf_detail(CF_MISC, "adjusting interface settings");
+	cf_detail(CF_HARDWARE, "adjusting interface settings");
 	coal = (struct ethtool_coalesce){
 		.cmd = ETHTOOL_SCOALESCE,
 		.rx_coalesce_usecs = 100 // .1 ms for now, which adds .05 ms to a request on average.
@@ -1423,11 +1423,11 @@ enable_coalescing(const char *if_name)
 
 	if (ioctl(sock, SIOCETHTOOL, &req) < 0) {
 		if (errno == EOPNOTSUPP) {
-			cf_detail(CF_MISC, "interface %s does not support ETHTOOL_SCOALESCE", if_name);
+			cf_detail(CF_HARDWARE, "interface %s does not support ETHTOOL_SCOALESCE", if_name);
 			goto cleanup1;
 		}
 
-		cf_crash(CF_MISC, "error while adjusting interface settings: %d (%s)",
+		cf_crash(CF_HARDWARE, "error while adjusting interface settings: %d (%s)",
 				errno, cf_strerror(errno));
 	}
 
@@ -1438,7 +1438,7 @@ cleanup1:
 static void
 check_irqbalance(void)
 {
-	cf_detail(CF_MISC, "checking irqbalance");
+	cf_detail(CF_HARDWARE, "checking irqbalance");
 
 	check_proc_res res = check_proc("irqbalance", 1, (const char *[]){
 		"--policyscript=" POLICY_SCRIPT
@@ -1465,7 +1465,7 @@ check_irqbalance(void)
 	}
 
 	if (res == CHECK_PROC_PRESENT_NO_ARG) {
-		cf_crash_nostack(CF_MISC, "please disable irqbalance or run it with the Aerospike policy script, /etc/aerospike/irqbalance-ban.sh");
+		cf_crash_nostack(CF_HARDWARE, "please disable irqbalance or run it with the Aerospike policy script, /etc/aerospike/irqbalance-ban.sh");
 	}
 }
 
@@ -1484,13 +1484,13 @@ config_interface(const char *if_name, bool rfs, irq_list *irqs)
 		}
 	}
 
-	cf_detail(CF_MISC, "interface %s with %hu RX interrupt(s)", if_name, n_irq_cpus);
+	cf_detail(CF_HARDWARE, "interface %s with %hu RX interrupt(s)", if_name, n_irq_cpus);
 
 	if (g_n_irq_cpus == 0) {
 		g_n_irq_cpus = n_irq_cpus;
 	}
 	else if (n_irq_cpus != g_n_irq_cpus) {
-		cf_crash(CF_MISC, "interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
+		cf_crash(CF_HARDWARE, "interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
 				if_name, n_irq_cpus, g_n_irq_cpus);
 	}
 
@@ -1534,7 +1534,7 @@ config_interface_numa(const char *if_name, irq_list *irqs)
 	for (uint16_t i = 0; i < irqs->n_irqs; ++i) {
 		char mask_str[200];
 		mask_to_string(&g_numa_node_os_cpus_online[i_numa_node], mask_str, sizeof(mask_str));
-		cf_detail(CF_MISC, "NUMA node index %hu CPU mask is %s", i_numa_node, mask_str);
+		cf_detail(CF_HARDWARE, "NUMA node index %hu CPU mask is %s", i_numa_node, mask_str);
 
 		pin_irq(irqs->irqs[i], i_os_cpu[i_numa_node]);
 
@@ -1552,14 +1552,14 @@ config_interface_numa(const char *if_name, irq_list *irqs)
 		}
 	}
 
-	cf_detail(CF_MISC, "interface %s with %hu RX interrupt(s) on NUMA node %hu",
+	cf_detail(CF_HARDWARE, "interface %s with %hu RX interrupt(s) on NUMA node %hu",
 			if_name, n_irq_cpus, g_i_numa_node);
 
 	if (g_n_irq_cpus == 0) {
 		g_n_irq_cpus = n_irq_cpus;
 	}
 	else if (n_irq_cpus != g_n_irq_cpus) {
-		cf_crash(CF_MISC, "interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
+		cf_crash(CF_HARDWARE, "interface %s with inconsistent number of RX interrupts: %hu vs. %hu",
 				if_name, n_irq_cpus, g_n_irq_cpus);
 	}
 
@@ -1571,12 +1571,12 @@ config_interface_numa(const char *if_name, irq_list *irqs)
 static void
 optimize_interface(const char *if_name)
 {
-	cf_detail(CF_MISC, "optimizing interface %s", if_name);
+	cf_detail(CF_HARDWARE, "optimizing interface %s", if_name);
 	uint16_t n_queues = interface_rx_queues(if_name);
 	irq_list irqs;
 	interface_irqs(if_name, &irqs);
 
-	cf_info(CF_MISC, "detected %hu NIC receive queue(s), %hu interrupt(s) for %s",
+	cf_info(CF_HARDWARE, "detected %hu NIC receive queue(s), %hu interrupt(s) for %s",
 			n_queues, irqs.n_irqs, if_name);
 
 	// We either expect one interrupt per RX queue (shared with TX) or two
@@ -1585,32 +1585,32 @@ optimize_interface(const char *if_name)
 	uint16_t n_irq_cpus = irqs.n_irqs / irqs.per_cpu;
 
 	if (n_irq_cpus != n_queues) {
-		cf_crash(CF_MISC, "suspicious NIC interrupt count %hu with %hu NIC receive queue(s)",
+		cf_crash(CF_HARDWARE, "suspicious NIC interrupt count %hu with %hu NIC receive queue(s)",
 				irqs.n_irqs, n_queues);
 	}
 
 	if (n_irq_cpus == g_n_cpus) {
 		if (g_i_numa_node != INVALID_INDEX) {
-			cf_detail(CF_MISC, "setting up for a fancy interface with NUMA");
+			cf_detail(CF_HARDWARE, "setting up for a fancy interface with NUMA");
 			config_interface_numa(if_name, &irqs);
 		}
 		else {
-			cf_detail(CF_MISC, "setting up for a fancy interface, no NUMA");
+			cf_detail(CF_HARDWARE, "setting up for a fancy interface, no NUMA");
 			config_interface(if_name, false, &irqs);
 		}
 	}
 	else {
 		if (n_irq_cpus <= g_n_cpus / 4) {
-			cf_warning(CF_MISC, "%s has very few NIC queues; only %hu out of %hu CPUs handle(s) NIC interrupts",
+			cf_warning(CF_HARDWARE, "%s has very few NIC queues; only %hu out of %hu CPUs handle(s) NIC interrupts",
 					if_name, n_irq_cpus, g_n_cpus);
 		}
 
 		if (g_i_numa_node != INVALID_INDEX) {
-			cf_detail(CF_MISC, "setting up for a lame interface with NUMA");
+			cf_detail(CF_HARDWARE, "setting up for a lame interface with NUMA");
 			config_interface_numa(if_name, &irqs);
 		}
 		else {
-			cf_detail(CF_MISC, "setting up for a lame interface, no NUMA");
+			cf_detail(CF_HARDWARE, "setting up for a lame interface, no NUMA");
 			config_interface(if_name, true, &irqs);
 		}
 	}
@@ -1662,7 +1662,7 @@ cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 		if (a_numa_node >= g_n_numa_nodes) {
 			cf_topo_numa_node_index orig = a_numa_node;
 			a_numa_node = (cf_topo_numa_node_index)(a_numa_node % g_n_numa_nodes);
-			cf_detail(CF_MISC, "invalid NUMA node index: %hu, clamping to %hu", orig, a_numa_node);
+			cf_detail(CF_HARDWARE, "invalid NUMA node index: %hu, clamping to %hu", orig, a_numa_node);
 			detect(a_numa_node);
 		}
 
@@ -1684,14 +1684,14 @@ cf_topo_config(cf_topo_auto_pin auto_pin, cf_topo_numa_node_index a_numa_node,
 	check_irqbalance();
 
 	if (addrs->n_addrs == 0) {
-		cf_crash_nostack(CF_MISC, "auto-pinning requires binding the service to one or more network interfaces");
+		cf_crash_nostack(CF_HARDWARE, "auto-pinning requires binding the service to one or more network interfaces");
 	}
 
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
 		const char *if_name = addrs->addrs[i];
 
 		if (!cf_inter_is_inter_name(if_name)) {
-			cf_crash_nostack(CF_MISC, "auto-pinning requires binding the service to network interfaces; \"%s\" isn't a network interface",
+			cf_crash_nostack(CF_HARDWARE, "auto-pinning requires binding the service to network interfaces; \"%s\" isn't a network interface",
 					if_name);
 		}
 
@@ -1724,7 +1724,7 @@ cf_topo_force_map_memory(const uint8_t *from, size_t size)
 		return;
 	}
 
-	cf_assert(from, CF_MISC, "invalid cf_topo_force_map_memory() call");
+	cf_assert(from, CF_HARDWARE, "invalid cf_topo_force_map_memory() call");
 
 	// Read one byte per memory page to force otherwise lazy mapping.
 
@@ -1755,7 +1755,7 @@ cf_topo_migrate_memory(void)
 
 	os_numa_node_index i_os_numa_node = g_numa_node_index_to_os_numa_node_index[g_i_numa_node];
 	uint64_t to_mask = 1UL << i_os_numa_node;
-	cf_detail(CF_MISC, "NUMA node mask (to): %016" PRIx64, to_mask);
+	cf_detail(CF_HARDWARE, "NUMA node mask (to): %016" PRIx64, to_mask);
 
 	uint64_t from_mask = 0;
 
@@ -1765,10 +1765,10 @@ cf_topo_migrate_memory(void)
 	}
 
 	from_mask &= ~to_mask;
-	cf_detail(CF_MISC, "NUMA node mask (from): %016" PRIx64, from_mask);
+	cf_detail(CF_HARDWARE, "NUMA node mask (from): %016" PRIx64, from_mask);
 
 	if (from_mask != 0) {
-		cf_info(CF_MISC, "migrating shared memory to local NUMA node - this may take a bit");
+		cf_info(CF_HARDWARE, "migrating shared memory to local NUMA node - this may take a bit");
 		// Unlike select(), we have to pass "number of valid bits + 1".
 		migrate_pages_safe(0, 65, &from_mask, &to_mask);
 	}
@@ -1781,11 +1781,11 @@ void
 cf_topo_info(void)
 {
 	if (g_i_numa_node == INVALID_INDEX) {
-		cf_info(CF_MISC, "detected %hu CPU(s), %hu core(s), %hu NUMA node(s)",
+		cf_info(CF_HARDWARE, "detected %hu CPU(s), %hu core(s), %hu NUMA node(s)",
 				g_n_cpus, g_n_cores, g_n_numa_nodes);
 	}
 	else {
-		cf_info(CF_MISC, "detected %hu CPU(s), %hu core(s) on NUMA node %hu of %hu",
+		cf_info(CF_HARDWARE, "detected %hu CPU(s), %hu core(s) on NUMA node %hu of %hu",
 				g_n_cpus, g_n_cores, g_i_numa_node, g_n_numa_nodes);
 	}
 }

@@ -57,15 +57,16 @@
 /* MUST BE KEPT IN SYNC WITH FAULT.H */
 
 char *cf_fault_context_strings[] = {
-		"cf:misc",
+		"misc",
 
-		"cf:alloc",
-		"cf:arenax",
-		"cf:jem",
-		"cf:msg",
-		"cf:rbuffer",
-		"cf:socket",
-		"cf:tls",
+		"alloc",
+		"arenax",
+		"hardware",
+		"jem",
+		"msg",
+		"rbuffer",
+		"socket",
+		"tls",
 
 		"aggr",
 		"as",
