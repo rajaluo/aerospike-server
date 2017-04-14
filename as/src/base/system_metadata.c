@@ -998,7 +998,7 @@ as_smd_old_create_msg_event(as_smd_msg_op_t op, cf_node node_id, msg *msg)
 
 		item->node_id = node_id;
 
-		e += msg_get_uint32_array(msg, AS_SMD_MSG_ACTION, i, &(item->action));
+		e = msg_get_uint32_array(msg, AS_SMD_MSG_ACTION, i, &item->action);
 		e += msg_get_str_array(msg, AS_SMD_MSG_MODULE, i, &(item->module_name), &ignored_len, MSG_GET_COPY_MALLOC);
 		e += msg_get_str_array(msg, AS_SMD_MSG_KEY, i, &(item->key), &ignored_len, MSG_GET_COPY_MALLOC);
 
