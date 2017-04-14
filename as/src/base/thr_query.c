@@ -1090,7 +1090,7 @@ hash_get_qtr(uint64_t trid, as_query_transaction ** qtr)
 {
 	int rv = cf_rchash_get(g_query_job_hash, &trid, sizeof(trid), (void **) qtr);
 	if (CF_RCHASH_OK != rv) {
-		cf_info(AS_SCAN, "Query job with transaction id [%"PRIu64"] does not exist", trid );
+		cf_info(AS_SINDEX, "Query job with transaction id [%"PRIu64"] does not exist", trid );
 	}
 	return rv;
 }

@@ -44,7 +44,6 @@
 #include <citrusleaf/cf_ll.h>
 
 #include "fault.h"
-#include "util.h"
 
 #define DIG_ARRAY_QUEUE_HIGHWATER 512
 

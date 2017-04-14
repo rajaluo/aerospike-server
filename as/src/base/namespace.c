@@ -45,6 +45,7 @@
 #include "jem.h"
 #include "linear_hist.h"
 #include "meminfo.h"
+#include "util.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"

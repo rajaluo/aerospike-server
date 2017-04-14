@@ -36,7 +36,7 @@
 #include "citrusleaf/cf_shash.h"
 
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "fabric/hb.h"
 #include "fabric/partition.h"

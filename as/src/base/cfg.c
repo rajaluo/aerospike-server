@@ -48,6 +48,7 @@
 #include "hist.h"
 #include "hist_track.h"
 #include "msg.h"
+#include "node.h"
 #include "olock.h"
 #include "socket.h"
 #include "tls.h"

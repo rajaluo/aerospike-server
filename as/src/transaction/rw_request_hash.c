@@ -40,7 +40,7 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"

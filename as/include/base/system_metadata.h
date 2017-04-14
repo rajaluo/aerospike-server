@@ -34,7 +34,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "util.h" // For "cf_node"
+#include "node.h"
 
 
 /* Declare Public System Metadata Types */

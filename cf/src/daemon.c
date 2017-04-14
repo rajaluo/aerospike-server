@@ -1,7 +1,7 @@
 /*
  * daemon.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -24,7 +24,7 @@
  * process utilities
  */
 
-#include "util.h" // we don't have our own header file
+#include "daemon.h"
 
 #include <errno.h>
 #include <fcntl.h>

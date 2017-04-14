@@ -32,6 +32,7 @@
 #include <sys/socket.h>
 
 #include "msg.h"
+#include "node.h"
 #include "tls_mode.h"
 #include "util.h"
 

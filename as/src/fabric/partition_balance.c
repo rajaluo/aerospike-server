@@ -38,6 +38,7 @@
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
+#include "node.h"
 #include "util.h"
 
 #include "base/cluster_config.h"

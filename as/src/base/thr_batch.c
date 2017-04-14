@@ -39,7 +39,7 @@
 
 #include "dynbuf.h"
 #include "hist.h"
-#include "util.h"
+#include "node.h"
 #include "socket.h"
 
 #include "base/cfg.h"

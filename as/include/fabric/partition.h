@@ -36,7 +36,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "dynbuf.h"
-#include "util.h"
+#include "node.h"
 
 #include "fabric/hb.h"
 

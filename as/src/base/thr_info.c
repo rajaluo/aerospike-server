@@ -48,6 +48,7 @@
 #include "jem.h"
 #include "meminfo.h"
 #include "socket.h"
+#include "util.h"
 
 #include "ai_obj.h"
 #include "ai_btree.h"

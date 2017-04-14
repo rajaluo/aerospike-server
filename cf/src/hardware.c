@@ -49,6 +49,7 @@
 #include <linux/mempolicy.h>
 #include <linux/sockios.h>
 
+#include "daemon.h"
 #include "fault.h"
 #include "socket.h"
 #include "util.h"

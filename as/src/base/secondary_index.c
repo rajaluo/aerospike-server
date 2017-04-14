@@ -101,6 +101,7 @@
 #include "bt_iterator.h"
 #include "cf_str.h"
 #include "fault.h"
+#include "util.h"
 
 #include "base/cdt.h"
 #include "base/cfg.h"

@@ -32,7 +32,7 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/datamodel.h"
 #include "fabric/fabric.h"

@@ -26,6 +26,8 @@
 
 #include "citrusleaf/alloc.h"
 
+#include "util.h"
+
 #include "base/cfg.h"
 
 /*----------------------------------------------------------------------------

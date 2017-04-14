@@ -22,23 +22,16 @@
 
 #pragma once
 
-#include "fault.h"
-
-#include <pthread.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
-#include <sys/types.h>
 
-// TODO - as_ .c files depend on this:
-#include <asm/byteorder.h>
+#include "fault.h"
 
 #define CF_MUST_CHECK __attribute__((warn_unused_result))
 #define CF_IGNORE_ERROR(x) ((void)((x) == 12345))
 #define CF_NEVER_FAILS(x) do { \
 	if ((x) < 0) { \
-		cf_crash(CF_MISC, "This cannot happen..."); \
+		cf_crash(CF_MISC, "this cannot happen..."); \
 	} \
 } while (false);
 
@@ -82,7 +75,6 @@ cf_hash_fnv(const void *buf, size_t bufsz)
     return(hash);
 }
 
-
 /* cf_hash_oneatatime
  * The 64-bit One-at-a-Time hash function */
 static inline uint64_t
@@ -103,20 +95,3 @@ cf_hash_oneatatime(void *buf, size_t bufsz)
 
     return(hash);
 }
-
-
-// Sorry, too lazy to create a whole new file for just one function
-#define CF_NODE_UNSET (0xFFFFFFFFFFFFFFFF)
-typedef uint64_t cf_node;
-extern uint32_t cf_nodeid_shash_fn(const void *value);
-extern uint32_t cf_nodeid_rchash_fn(const void *value, uint32_t value_len);
-extern char *cf_node_name(void);
-
-extern int cf_sort_firstk(uint64_t *v, size_t sz, int k);
-
-extern void cf_process_daemonize(int *fd_ignore_list, int list_size);
-
-/* daemon.c */
-extern void cf_process_privsep(uid_t uid, gid_t gid);
-extern void cf_process_holdcap(void);
-extern void cf_process_clearcap(void);

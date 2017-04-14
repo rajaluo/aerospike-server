@@ -37,11 +37,11 @@
 #include "citrusleaf/alloc.h"
 
 #include "ai.h"
+#include "daemon.h"
 #include "fault.h"
 #include "hardware.h"
 #include "jem.h"
 #include "tls.h"
-#include "util.h"
 
 #include "base/asm.h"
 #include "base/batch.h"

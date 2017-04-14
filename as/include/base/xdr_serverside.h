@@ -32,8 +32,8 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "dynbuf.h"
+#include "node.h"
 #include "socket.h"
-#include "util.h"
 
 #include "base/datamodel.h"
 #include "base/transaction.h"

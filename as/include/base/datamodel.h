@@ -45,7 +45,7 @@
 #include "hist_track.h"
 #include "linear_hist.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"

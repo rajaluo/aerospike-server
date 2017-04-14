@@ -1,7 +1,7 @@
 /*
- * duplicate_resolve.h
+ * daemon.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,22 +22,9 @@
 
 #pragma once
 
-//==========================================================
-// Includes.
-//
+#include <sys/types.h>
 
-#include "msg.h"
-#include "node.h"
-
-#include "base/transaction.h"
-#include "transaction/rw_request.h"
-
-
-//==========================================================
-// Public API.
-//
-
-bool dup_res_make_message(rw_request* rw, as_transaction* tr);
-void dup_res_setup_rw(rw_request* rw, as_transaction* tr, dup_res_done_cb dup_res_cb, timeout_done_cb timeout_cb);
-void dup_res_handle_request(cf_node node, msg* m);
-void dup_res_handle_ack(cf_node node, msg* m);
+void cf_process_daemonize(int *fd_ignore_list, int list_size);
+void cf_process_privsep(uid_t uid, gid_t gid);
+void cf_process_holdcap(void);
+void cf_process_clearcap(void);

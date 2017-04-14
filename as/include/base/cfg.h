@@ -38,8 +38,8 @@
 #include "citrusleaf/cf_atomic.h"
 
 #include "hardware.h"
+#include "node.h"
 #include "socket.h"
-#include "util.h"
 
 #include "base/cluster_config.h"
 #include "base/security_config.h"

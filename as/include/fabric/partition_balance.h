@@ -31,7 +31,7 @@
 
 #include "citrusleaf/cf_atomic.h"
 
-#include "util.h"
+#include "node.h"
 
 #include "fabric/partition.h"
 
