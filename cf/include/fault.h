@@ -45,6 +45,32 @@
 #define CVERIFY(expr, line) typedef char CGLUE(compiler_assert_failed_on_line_, line)[(expr) ? 1 : -1]
 #define COMPILER_ASSERT(expr) CVERIFY(expr, __LINE__)
 
+// Use CF_MUST_CHECK with declarations to force caller to handle return value.
+//
+// e.g.
+// CF_MUST_CHECK int my_function();
+//
+#define CF_MUST_CHECK __attribute__((warn_unused_result))
+
+// Use CF_IGNORE_ERROR() as caller to override CF_MUST_CHECK in declaration.
+//
+// e.g.
+// CF_IGNORE_ERROR(my_function());
+//
+#define CF_IGNORE_ERROR(x) ((void)((x) == 12345))
+
+// Use CF_NEVER_FAILS() as caller to assert that returned value is not negative.
+//
+// e.g.
+// CF_NEVER_FAILS(my_function());
+//
+#define CF_NEVER_FAILS(x) \
+do { \
+	if ((x) < 0) { \
+		cf_crash(CF_MISC, "this cannot happen..."); \
+	} \
+} while (false);
+
 
 /* SYNOPSIS
  * Fault scoping

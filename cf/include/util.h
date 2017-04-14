@@ -25,22 +25,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "fault.h"
-
-#define CF_MUST_CHECK __attribute__((warn_unused_result))
-#define CF_IGNORE_ERROR(x) ((void)((x) == 12345))
-#define CF_NEVER_FAILS(x) do { \
-	if ((x) < 0) { \
-		cf_crash(CF_MISC, "this cannot happen..."); \
-	} \
-} while (false);
-
-static inline const char *
-cf_safe_string(const char *string, const char *def)
-{
-	return string == NULL ? def : string;
-}
-
 // Position of most significant bit, 0 ... 63 from low to high. -1 for value 0.
 static inline int
 cf_msb(uint64_t value)

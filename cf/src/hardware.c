@@ -52,7 +52,6 @@
 #include "daemon.h"
 #include "fault.h"
 #include "socket.h"
-#include "util.h"
 
 #include "citrusleaf/alloc.h"
 

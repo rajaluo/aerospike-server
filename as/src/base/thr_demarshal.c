@@ -44,7 +44,6 @@
 #include "hist.h"
 #include "socket.h"
 #include "tls.h"
-#include "util.h"
 
 #include "base/as_stap.h"
 #include "base/batch.h"

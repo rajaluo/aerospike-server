@@ -48,7 +48,6 @@
 #include "jem.h"
 #include "meminfo.h"
 #include "socket.h"
-#include "util.h"
 
 #include "ai_obj.h"
 #include "ai_btree.h"
@@ -4752,13 +4751,13 @@ compare_node_info_services(info_node_info *lhs, info_node_info *rhs)
 static void
 dump_node_info_services(info_node_info *info)
 {
-	cf_debug(AS_INFO, "Service address:   %s", cf_safe_string(info->service_addr, "NULL"));
-	cf_debug(AS_INFO, "Alternate address: %s", cf_safe_string(info->alternate_addr, "NULL"));
-	cf_debug(AS_INFO, "Clear, standard:   %s", cf_safe_string(info->services_clear_std, "NULL"));
-	cf_debug(AS_INFO, "TLS, standard:     %s", cf_safe_string(info->services_tls_std, "NULL"));
-	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_safe_string(info->services_clear_alt, "NULL"));
-	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_safe_string(info->services_tls_alt, "NULL"));
-	cf_debug(AS_INFO, "TLS name:          %s", cf_safe_string(info->tls_name, "NULL"));
+	cf_debug(AS_INFO, "Service address:   %s", cf_str_safe_as_null(info->service_addr));
+	cf_debug(AS_INFO, "Alternate address: %s", cf_str_safe_as_null(info->alternate_addr));
+	cf_debug(AS_INFO, "Clear, standard:   %s", cf_str_safe_as_null(info->services_clear_std));
+	cf_debug(AS_INFO, "TLS, standard:     %s", cf_str_safe_as_null(info->services_tls_std));
+	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_str_safe_as_null(info->services_clear_alt));
+	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_str_safe_as_null(info->services_tls_alt));
+	cf_debug(AS_INFO, "TLS name:          %s", cf_str_safe_as_null(info->tls_name));
 }
 
 // This reduce function will eliminate elements from the info hash

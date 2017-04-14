@@ -72,7 +72,6 @@
 #include "msg.h"
 #include "node.h"
 #include "socket.h"
-#include "util.h"
 
 #include "base/cfg.h"
 #include "base/stats.h"
