@@ -339,12 +339,12 @@ as_namespace_get_byname(char *name)
 
 
 as_namespace *
-as_namespace_get_byid(uint id)
+as_namespace_get_byid(uint32_t id)
 {
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
-		if (id == ns->id) {
+		if (id == (uint32_t)ns->id) {
 			return ns;
 		}
 	}

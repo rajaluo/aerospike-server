@@ -352,7 +352,7 @@ extern bool cf_context_at_severity(const cf_fault_context context, const cf_faul
 
 extern void cf_fault_init();
 
-int generate_packed_hex_string(void *mem_ptr, uint len, char* output);
+int generate_packed_hex_string(void *mem_ptr, uint32_t len, char* output);
 
 // For now there's only one cache, dumped by the ticker.
 extern void cf_fault_dump_cache();

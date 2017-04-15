@@ -1284,7 +1284,7 @@ extern void as_namespaces_init(bool cold_start_cmd, uint32_t instance);
 extern void as_namespaces_setup(bool cold_start_cmd, uint32_t instance, uint32_t stage_capacity);
 extern bool as_namespace_configure_sets(as_namespace *ns);
 extern as_namespace *as_namespace_get_byname(char *name);
-extern as_namespace *as_namespace_get_byid(uint id);
+extern as_namespace *as_namespace_get_byid(uint32_t id);
 extern as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
 extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);

@@ -200,15 +200,10 @@ inline bool as_sindex_isactive(as_sindex *si)
 {
 	if (! si) {
 		cf_warning(AS_SINDEX, "si is null in as_sindex_isactive");
-		return FALSE;
+		return false;
 	}
-	bool ret;
-	if (si->state == AS_SINDEX_ACTIVE) {
-		ret = TRUE;
-	} else {
-		ret = FALSE;
-	}
-	return ret;
+
+	return si->state == AS_SINDEX_ACTIVE;
 }
 
 // Translation from sindex internal error code to generic client visible Aerospike error code
@@ -2744,10 +2739,8 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				cf_warning(AS_SINDEX,
                      "Invalid range from %ld to %ld", start->u.i64, end->u.i64);
 				goto Cleanup;
-			} else if (start->u.i64 == end->u.i64) {
-				srange->isrange = FALSE;
 			} else {
-				srange->isrange = TRUE;
+				srange->isrange = start->u.i64 != end->u.i64;
 			}
 			cf_debug(AS_SINDEX, "Range is equal  %"PRId64", %"PRId64"",
 								start->u.i64, end->u.i64);
@@ -2757,7 +2750,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			data              += sizeof(uint32_t);
 			char* start_binval       = (char *)data;
 			data              += startl;
-			srange->isrange    = FALSE;
+			srange->isrange    = false;
 
 			if (startl >= AS_SINDEX_MAX_STRING_KSIZE) {
 				cf_warning(AS_SINDEX, "Query on bin %s fails. Value length %u too long.", binname, startl);
@@ -2831,7 +2824,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				// they were filled in above.
 				for (int ii = 0; ii < numcenters; ++ii) {
 					srange[ii].num_binval = 1;
-					srange[ii].isrange = TRUE;
+					srange[ii].isrange = true;
 					srange[ii].start.id = srange[0].start.id;
 					srange[ii].start.type = srange[0].start.type;
 					srange[ii].start.u.i64 = center[ii];
@@ -2860,7 +2853,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				// they were filled in above.
 				for (int ii = 0; ii < numcells; ++ii) {
 					srange[ii].num_binval = 1;
-					srange[ii].isrange = TRUE;
+					srange[ii].isrange = true;
 					srange[ii].start.id = srange[0].start.id;
 					srange[ii].start.type = srange[0].start.type;
 					srange[ii].start.u.i64 = cellmin[ii];

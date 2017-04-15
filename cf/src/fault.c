@@ -565,7 +565,7 @@ cf_fault_event(const cf_fault_context context, const cf_fault_severity severity,
  * used in other contexts as a hex number).
  */
 int
-generate_packed_hex_string(void *mem_ptr, uint len, char* output)
+generate_packed_hex_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
@@ -574,7 +574,7 @@ generate_packed_hex_string(void *mem_ptr, uint len, char* output)
 	*p++ = '0';
 	*p++ = 'x';
 
-	for (int i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		sprintf(p, "%02x", d[i]);
 		p += 2;
 	}
@@ -588,13 +588,13 @@ generate_packed_hex_string(void *mem_ptr, uint len, char* output)
  * e.g. fc 86 e8 3a 6d 6d 30 24 65 9e 6f e4 8c 35 1a aa f6 e9 64 a5
  */
 int
-generate_spaced_hex_string(void *mem_ptr, uint len, char* output)
+generate_spaced_hex_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
 	char* startp = p; // Remember where we started.
 
-	for (int i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		sprintf(p, "%02x ", d[i]); // Notice the space after the 02x.
 		p += 3;
 	}
@@ -611,11 +611,11 @@ generate_spaced_hex_string(void *mem_ptr, uint len, char* output)
  * f6e9 64a5
  */
 int
-generate_column_hex_string(void *mem_ptr, uint len, char* output)
+generate_column_hex_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
-	int i;
+	uint32_t i;
 	char* startp = p; // Remember where we started.
 
 	*p++ = '\n'; // Start out on a new line
@@ -645,7 +645,7 @@ generate_column_hex_string(void *mem_ptr, uint len, char* output)
  * Base 64 Chars:     T(19)      W(22)      F(5)      u(46)
  * and so this string is converted into the Base 64 string: "TWFu"
  */
-int generate_base64_string(void *mem_ptr, uint len, char output_buf[])
+int generate_base64_string(void *mem_ptr, uint32_t len, char output_buf[])
 {
 	uint32_t encoded_len = cf_b64_encoded_len(len);
 	// TODO - check that output_buf is big enough, and/or truncate.
@@ -663,7 +663,7 @@ int generate_base64_string(void *mem_ptr, uint len, char output_buf[])
  * Print the bits left to right (big to small).
  * This is assuming BIG ENDIAN representation (most significant bit is left).
  */
-int generate_4spaced_bits_string(void *mem_ptr, uint len, char* output)
+int generate_4spaced_bits_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
@@ -672,7 +672,7 @@ int generate_4spaced_bits_string(void *mem_ptr, uint len, char* output)
 	char* startp = p; // Remember where we started.
 
 	// For each byte in the string
-	for (int i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		uint_val = d[i];
 		for (int j = 0; j < 8; j++) {
 			sprintf(p, "%1d", ((uint_val << j) & mask));
@@ -690,7 +690,7 @@ int generate_4spaced_bits_string(void *mem_ptr, uint len, char* output)
  * four bit groups.  Columns will be 8 columns of 4 bits.
  * (1 32 bit word per row)
  */
-int generate_column_bits_string(void *mem_ptr, uint len, char* output)
+int generate_column_bits_string(void *mem_ptr, uint32_t len, char* output)
 {
 	uint8_t *d = (uint8_t *) mem_ptr;
 	char* p = output;
@@ -702,7 +702,7 @@ int generate_column_bits_string(void *mem_ptr, uint len, char* output)
 	*p++ = '\n';
 
 	// For each byte in the string
-	for (int i = 0; i < len; i++) {
+	for (uint32_t i = 0; i < len; i++) {
 		uint_val = d[i];
 		for (int j = 0; j < 8; j++) {
 			sprintf(p, "%1d", ((uint_val << j) & mask));
@@ -1003,7 +1003,7 @@ cf_fault_sink_context_all_strlist(int sink_id, cf_dyn_buf *db)
 	if (sink_id > cf_fault_sinks_inuse)	return(-1);
 	cf_fault_sink *s = &cf_fault_sinks[sink_id];
 
-	for (uint i=0; i<CF_FAULT_CONTEXT_UNDEF; i++) {
+	for (int i = 0; i < CF_FAULT_CONTEXT_UNDEF; i++) {
 		cf_dyn_buf_append_string(db, cf_fault_context_strings[i]);
 		cf_dyn_buf_append_char(db, ':');
 		cf_dyn_buf_append_string(db, cf_fault_severity_strings[s->limit[i]]);
@@ -1021,8 +1021,8 @@ cf_fault_sink_context_strlist(int sink_id, char *context, cf_dyn_buf *db)
 	cf_fault_sink *s = &cf_fault_sinks[sink_id];
 
 	// get the severity
-	uint i;
-	for (i=0;i<CF_FAULT_CONTEXT_UNDEF;i++) {
+	int i;
+	for (i = 0; i < CF_FAULT_CONTEXT_UNDEF; i++) {
 		if (0 == strcmp(cf_fault_context_strings[i],context))
 			break;
 	}

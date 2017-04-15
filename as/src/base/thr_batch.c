@@ -358,7 +358,7 @@ as_batch_direct_queue_task(as_transaction* tr, as_namespace *ns)
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	uint n_digests = dfp->field_sz / sizeof(cf_digest);
+	uint32_t n_digests = dfp->field_sz / sizeof(cf_digest);
 
 	if (n_digests > g_config.batch_max_requests) {
 		cf_warning(AS_BATCH, "Batch request size %u exceeds max %u.", n_digests, g_config.batch_max_requests);

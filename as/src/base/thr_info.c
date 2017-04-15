@@ -3387,7 +3387,7 @@ info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 		if (0 != as_info_parameter_get(params, context, level_str, &level_str_len)) {
 			continue;
 		}
-		for (uint i = 0; level_str[i]; i++) level_str[i] = toupper(level_str[i]);
+		for (uint32_t i = 0; level_str[i]; i++) level_str[i] = toupper(level_str[i]);
 
 		if (0 != cf_fault_sink_addcontext(s, context, level_str)) {
 			cf_info(AS_INFO, "log set command: addcontext failed: context %s level %s", context, level_str);
@@ -5583,7 +5583,7 @@ info_services_alumni_reset(char *name, cf_dyn_buf *db)
 int
 info_get_namespaces(char *name, cf_dyn_buf *db)
 {
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		cf_dyn_buf_append_string(db, g_config.namespaces[i]->name);
 		cf_dyn_buf_append_char(db, ';');
 	}
@@ -5607,7 +5607,7 @@ info_get_objects(char *name, cf_dyn_buf *db)
 {
 	uint64_t	objects = 0;
 
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		objects += g_config.namespaces[i]->n_objects;
 	}
 
@@ -6003,7 +6003,7 @@ info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db)
 
 	// format w/o namespace is ns1:set1:prop1=val1:prop2=val2:..propn=valn;ns1:set2...;ns2:set1...;
 	if (!ns) {
-		for (uint i = 0; i < g_config.n_namespaces; i++) {
+		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 			as_namespace_get_set_info(g_config.namespaces[i], set_name, db);
 		}
 	}
@@ -6033,7 +6033,7 @@ info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db)
 	// format w/o namespace is
 	// ns:num-bin-names=val1,bin-names-quota=val2,name1,name2,...;ns:...
 	if (!ns) {
-		for (uint i = 0; i < g_config.n_namespaces; i++) {
+		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 			as_namespace_get_bins_info(g_config.namespaces[i], db, true);
 		}
 	}
@@ -6146,7 +6146,7 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 	// format w/o namespace is:
 	//    ns=ns1:set=set1:indexname=index1:prop1=val1:...:propn=valn;ns=ns1:set=set2:indexname=index2:...;ns=ns2:set=set1:...;
 	if (!ns) {
-		for (uint i = 0; i < g_config.n_namespaces; i++) {
+		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 			as_sindex_list_str(g_config.namespaces[i], db);
 		}
 	}

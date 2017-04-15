@@ -598,7 +598,7 @@ as_fabric_dump(bool verbose)
 
 	cf_info(AS_FABRIC, " Fabric Dump: nodes known %d", nl.sz);
 
-	for (uint i = 0; i < nl.sz; i++) {
+	for (uint32_t i = 0; i < nl.sz; i++) {
 		if (nl.nodes[i] == g_config.self_node) {
 			cf_info(AS_FABRIC, "\tnode %lx is self", nl.nodes[i]);
 			continue;
