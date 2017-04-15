@@ -111,7 +111,7 @@ typedef struct pickled_record_s {
 	uint32_t      generation;
 	uint32_t      void_time;
 	uint64_t      last_update_time;
-	byte          *record_buf; // pickled!
+	uint8_t       *record_buf; // pickled!
 	size_t        record_len;
 	as_rec_props  rec_props;
 
@@ -1551,7 +1551,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 {
 	cf_digest *keyd;
 
-	if (msg_get_buf(m, MIG_FIELD_DIGEST, (byte **)&keyd, NULL,
+	if (msg_get_buf(m, MIG_FIELD_DIGEST, (uint8_t **)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_MIGRATE, "handle insert: msg get for digest failed");
 		as_fabric_msg_put(m);
@@ -1636,7 +1636,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		void *value;
 		size_t value_sz;
 
-		if (msg_get_buf(m, MIG_FIELD_RECORD, (byte **)&value, &value_sz,
+		if (msg_get_buf(m, MIG_FIELD_RECORD, (uint8_t **)&value, &value_sz,
 				MSG_GET_DIRECT) != 0) {
 			cf_warning(AS_MIGRATE, "handle insert: got no record");
 			immigration_release(immig);
@@ -2201,14 +2201,16 @@ as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
 
 	cf_digest *key = NULL;
 
-	msg_get_buf(m, MIG_FIELD_LDT_PDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
+	msg_get_buf(m, MIG_FIELD_LDT_PDIGEST, (uint8_t **)&key, NULL,
+			MSG_GET_DIRECT);
 
 	if (key) {
 		c->pdigest = *key;
 		key = NULL;
 	}
 
-	msg_get_buf(m, MIG_FIELD_LDT_EDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
+	msg_get_buf(m, MIG_FIELD_LDT_EDIGEST, (uint8_t **)&key, NULL,
+			MSG_GET_DIRECT);
 
 	if (key) {
 		c->edigest = *key;

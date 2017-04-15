@@ -91,7 +91,7 @@ init_ai_objFromDigest(ai_obj *akey, cf_digest *d)
 	init_ai_objU160(akey, *(uint160 *)d);
 }
 
-const byte INIT_CAPACITY = 1;
+const uint8_t INIT_CAPACITY = 1;
 
 static ai_arr *
 ai_arr_new()

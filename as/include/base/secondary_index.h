@@ -310,7 +310,7 @@ typedef struct as_sindex_metadata_s {
 typedef struct as_sindex_s {
 	int                          simatch; //self, shash match by name
 	// Protected by SI_GWLOCK
-	byte                         state;
+	uint8_t                      state;
 	
 	// TODO : shift to imd
 	volatile uint16_t            flag;
@@ -435,7 +435,7 @@ typedef struct as_sindex_query_context_s {
  *  [startl, endl]
  */
 typedef struct as_sindex_range_s {
-	byte                num_binval;
+	uint8_t             num_binval;
 	bool                isrange;
 	as_sindex_bin_data  start;
 	as_sindex_bin_data  end;

@@ -237,7 +237,7 @@ as_record_remove_key(as_record* r)
 //
 
 int
-as_record_pickle(as_record *r, as_storage_rd *rd, byte **buf_r, size_t *len_r)
+as_record_pickle(as_record *r, as_storage_rd *rd, uint8_t **buf_r, size_t *len_r)
 {
 	// Determine size
 	uint32_t sz = 2;
@@ -255,14 +255,14 @@ as_record_pickle(as_record *r, as_storage_rd *rd, byte **buf_r, size_t *len_r)
 		sz += as_bin_particle_pickled_size(b);
 	}
 
-	byte *buf = cf_malloc(sz);
+	uint8_t *buf = cf_malloc(sz);
 	if (!buf) {
 		*buf_r = 0;
 		*len_r = 0;
 		return(-1);
 	}
 
-	byte *buf_lim = buf + sz; // debug
+	uint8_t *buf_lim = buf + sz; // debug
 	*len_r = sz;
 	*buf_r = buf;
 
@@ -272,7 +272,7 @@ as_record_pickle(as_record *r, as_storage_rd *rd, byte **buf_r, size_t *len_r)
 	for (uint16_t i = 0; i < n_bins_inuse; i++) {
 		as_bin *b = &rd->bins[i];
 
-		byte namelen = (byte)as_bin_memcpy_name(rd->ns, buf + 1, b);
+		uint8_t namelen = (uint8_t)as_bin_memcpy_name(rd->ns, buf + 1, b);
 		*buf++ = namelen;
 		buf += namelen;
 		*buf++ = 0; // was bin version
@@ -295,7 +295,7 @@ as_record_buf_get_stack_particles_sz(uint8_t *buf) {
 	buf += 2;
 
 	for (uint16_t i = 0; i < newbins; i++) {
-		byte name_sz = *buf;
+		uint8_t name_sz = *buf;
 		buf += name_sz + 2;
 
 		int32_t result = as_particle_size_from_pickled(&buf);
@@ -375,8 +375,8 @@ as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t
 			break;
 		}
 
-		byte name_sz     = *buf++;
-		byte *name       = buf;
+		uint8_t name_sz  = *buf++;
+		uint8_t *name    = buf;
 		buf             += name_sz;
 		buf++; // skipped byte was bin version
 		as_bin *b;

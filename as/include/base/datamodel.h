@@ -494,7 +494,7 @@ extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
 extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name);
-extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, byte *name, size_t namesz, bool create_only, bool replace_only, int *p_result);
+extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz, bool create_only, bool replace_only, int *p_result);
 extern int32_t as_bin_get_index(as_storage_rd *rd, const char *name);
 extern int32_t as_bin_get_index_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
 extern void as_bin_allocate_bin_space(as_record *r, as_storage_rd *rd, int32_t delta);
@@ -1248,7 +1248,7 @@ as_set_stop_writes(as_set *p_set) {
 // These bin functions must be below definition of struct as_namespace_s:
 
 static inline void
-as_bin_set_id_from_name_buf(as_namespace *ns, as_bin *b, byte *buf, int len) {
+as_bin_set_id_from_name_buf(as_namespace *ns, as_bin *b, uint8_t *buf, int len) {
 	if (! ns->single_bin) {
 		b->id = as_bin_get_or_assign_id_w_len(ns, (const char *)buf, len);
 	}
@@ -1262,7 +1262,7 @@ as_bin_set_id_from_name(as_namespace *ns, as_bin *b, const char *name) {
 }
 
 static inline size_t
-as_bin_memcpy_name(as_namespace *ns, byte *buf, as_bin *b) {
+as_bin_memcpy_name(as_namespace *ns, uint8_t *buf, as_bin *b) {
 	size_t len = 0;
 
 	if (! ns->single_bin) {

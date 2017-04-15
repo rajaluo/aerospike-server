@@ -58,7 +58,7 @@ as_bin_get_id(as_namespace *ns, const char *name)
 }
 
 static bool
-as_bin_get_id_w_len(as_namespace *ns, byte *name, size_t len, uint32_t *p_id)
+as_bin_get_id_w_len(as_namespace *ns, uint8_t *name, size_t len, uint32_t *p_id)
 {
 	if (ns->single_bin) {
 		cf_crash(AS_BIN, "single-bin call of as_bin_get_id_w_len()");
@@ -191,7 +191,7 @@ as_bin_copy(as_namespace *ns, as_bin *to, const as_bin *from)
 }
 
 static void
-as_bin_init_w_len(as_namespace *ns, as_bin *b, byte *name, size_t len)
+as_bin_init_w_len(as_namespace *ns, as_bin *b, uint8_t *name, size_t len)
 {
 	as_bin_state_set(b, AS_BIN_STATE_UNUSED);
 	b->particle = NULL;
@@ -306,7 +306,7 @@ as_bin_create(as_storage_rd *rd, const char *name)
 }
 
 as_bin *
-as_bin_create_from_buf(as_storage_rd *rd, byte *name, size_t namesz)
+as_bin_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz)
 {
 	if (rd->ns->single_bin) {
 		if (as_bin_inuse(rd->bins)) {
@@ -374,7 +374,7 @@ as_bin_get(as_storage_rd *rd, const char *name)
 }
 
 as_bin *
-as_bin_get_from_buf(as_storage_rd *rd, byte *name, size_t namesz)
+as_bin_get_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz)
 {
 	if (rd->ns->single_bin) {
 		return as_bin_inuse_has(rd) ? rd->bins : NULL;
@@ -460,7 +460,7 @@ as_bin_get_or_create(as_storage_rd *rd, const char *name)
 // Does not check bin name length.
 // Checks bin name quota and bin-level policy - use appropriately.
 as_bin *
-as_bin_get_or_create_from_buf(as_storage_rd *rd, byte *name, size_t namesz,
+as_bin_get_or_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz,
 		bool create_only, bool replace_only, int *p_result)
 {
 	if (rd->ns->single_bin) {
@@ -566,7 +566,7 @@ as_bin_get_index(as_storage_rd *rd, const char *name)
 }
 
 int32_t
-as_bin_get_index_from_buf(as_storage_rd *rd, byte *name, size_t namesz)
+as_bin_get_index_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz)
 {
 	if (rd->ns->single_bin) {
 		return as_bin_inuse_has(rd) ? 0 : -1;

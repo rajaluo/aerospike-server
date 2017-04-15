@@ -1663,8 +1663,8 @@ static void channel_init();
 static void channel_start();
 static int channel_sockets_get_reduce(const void* key, void* data, void* udata);
 static void channel_stop();
-static int channel_mesh_msg_send(cf_socket* socket, byte* buff, size_t buffer_length);
-static int channel_multicast_msg_send(cf_socket* socket, byte* buff, size_t buffer_length);
+static int channel_mesh_msg_send(cf_socket* socket, uint8_t* buff, size_t buffer_length);
+static int channel_multicast_msg_send(cf_socket* socket, uint8_t* buff, size_t buffer_length);
 static bool channel_msg_is_compression_required(msg* msg, int wire_size, int mtu);
 static int channel_msg_buffer_size_get(int wire_size, int mtu);
 static size_t channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu, uint8_t* buffer, size_t buffer_len);
@@ -5730,7 +5730,7 @@ channel_stop()
  * @return 0 on successful send -1 on failure
  */
 static int
-channel_mesh_msg_send(cf_socket* socket, byte* buff, size_t buffer_length)
+channel_mesh_msg_send(cf_socket* socket, uint8_t* buff, size_t buffer_length)
 {
 	CHANNEL_LOCK();
 	int rv;
@@ -5767,7 +5767,8 @@ channel_mesh_msg_send(cf_socket* socket, byte* buff, size_t buffer_length)
  * @return 0 on successful send -1 on failure
  */
 static int
-channel_multicast_msg_send(cf_socket* socket, byte* buff, size_t buffer_length)
+channel_multicast_msg_send(cf_socket* socket, uint8_t* buff,
+		size_t buffer_length)
 {
 	CHANNEL_LOCK();
 	int rv = 0;
@@ -7901,7 +7902,7 @@ mesh_seed_node_add(as_hb_mesh_node* new_node)
 		uint32_t random_address = rand();
 
 		memcpy(&new_key.nodeid, &random_address, sizeof(random_address));
-		memcpy(((byte*)&new_key.nodeid) + sizeof(random_address),
+		memcpy(((uint8_t*)&new_key.nodeid) + sizeof(random_address),
 				&new_node->seed_port, sizeof(uint16_t));
 		// Ensure the generated id is unique.
 	}

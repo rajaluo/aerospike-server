@@ -354,7 +354,7 @@ as_namespace_get_byid(uint32_t id)
 
 
 as_namespace *
-as_namespace_get_bybuf(byte *buf, size_t len)
+as_namespace_get_bybuf(uint8_t *buf, size_t len)
 {
 	if (len >= AS_ID_NAMESPACE_SZ) {
 		return NULL;
@@ -375,7 +375,7 @@ as_namespace_get_bybuf(byte *buf, size_t len)
 as_namespace *
 as_namespace_get_bymsgfield(as_msg_field *fp)
 {
-	return as_namespace_get_bybuf((byte *)fp->data, as_msg_field_get_value_sz(fp));
+	return as_namespace_get_bybuf(fp->data, as_msg_field_get_value_sz(fp));
 }
 
 
