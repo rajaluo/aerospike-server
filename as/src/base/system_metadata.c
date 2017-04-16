@@ -2092,16 +2092,8 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
 
 	e += msg_set_uint32(m, AS_SMD_MSG_OP, op);
 
-	const as_smd_module_t *module = NULL;
-
 	if (module_name) {
 		e += msg_set_str(m, AS_SMD_MSG_MODULE_NAME, module_name, MSG_SET_COPY);
-
-		if (! (module = smd_module_get_by_name(module_name))) {
-			cf_warning(AS_SMD, "get module failed");
-			as_fabric_msg_put(m);
-			return NULL;
-		}
 
 		// Single item optimized packing.
 		if (num_items == 1) {
@@ -2141,14 +2133,14 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
 	uint32_t mod_sz = 0;
 	uint32_t mod_idx = 0;
 	uint32_t mod_max = cf_rchash_get_size(g_smd->modules);
-	const as_smd_module_t *mod_list[mod_max];
+	const char *mod_list[mod_max];
 	uint32_t mod_counts[mod_max];
 
-	if (! module) {
+	if (! module_name) {
 		// Assume same item module names are clustered together.
 		for (size_t i = 0; i < num_items; i++) {
 			if (mod_idx != 0) {
-				const char *name = mod_list[mod_idx - 1]->module;
+				const char *name = mod_list[mod_idx - 1];
 
 				if (strcmp(name, item[i]->module_name) == 0) {
 					mod_counts[mod_idx - 1]++;
@@ -2157,9 +2149,8 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
 			}
 
 			mod_sz += (uint32_t)strlen(item[i]->module_name) + 1;
-			mod_list[mod_idx] = smd_module_get_by_name(item[i]->module_name);
+			mod_list[mod_idx] = item[i]->module_name;
 
-			cf_assert(mod_list[mod_idx], AS_SMD, "get module failed");
 			cf_assert(mod_idx < mod_max, AS_SMD, "unexpected item module name ordering");
 
 			mod_counts[mod_idx++] = 1;
@@ -2169,8 +2160,7 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
 		e += msg_set_uint32_array_size(m, AS_SMD_MSG_MODULE_COUNTS, mod_idx);
 
 		for (uint32_t i = 0; i < mod_idx; i++) {
-			e += msg_set_str_array(m, AS_SMD_MSG_MODULE, i,
-					mod_list[i]->module);
+			e += msg_set_str_array(m, AS_SMD_MSG_MODULE, i, mod_list[i]);
 			e += msg_set_uint32_array(m, AS_SMD_MSG_MODULE_COUNTS, i,
 					mod_counts[i]);
 		}
