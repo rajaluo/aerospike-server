@@ -740,7 +740,6 @@ as_batch_queue_task(as_transaction* btr)
 	as_transaction_init_head(&tr, 0, 0);
 
 	tr.origin = FROM_BATCH;
-	tr.from.batch_shared = shared;
 	tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	tr.start_time = btr->start_time;
 
@@ -766,6 +765,7 @@ as_batch_queue_task(as_transaction* btr)
 		tr.msg_fields = 0; // erase previous AS_MSG_FIELD_BIT_SET flag, if any
 		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 
+		tr.from.batch_shared = shared; // is set NULL after sub-transaction
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
 		tr.keyd = in->keyd;
 		tr.benchmark_time = 0; // reset in case of previous usage
