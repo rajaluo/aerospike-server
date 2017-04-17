@@ -4593,6 +4593,11 @@ set_static_services(void)
 	}
 }
 
+void
+info_node_info_tend() {
+	shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
+}
+
 void *
 info_interfaces_fn(void *unused)
 {
@@ -4675,7 +4680,7 @@ info_interfaces_fn(void *unused)
 			pthread_mutex_unlock(&g_serv_lock);
 		}
 
-		shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
+		info_node_info_tend();
 		sleep(2);
 	}
 
@@ -4910,6 +4915,9 @@ info_clustering_event_listener(const as_exchange_cluster_changed_event* event, v
 
 	cf_atomic32_incr(&g_node_info_generation);
 	cf_debug(AS_INFO, "info_clustering_event_listener took %" PRIu64 " ms", cf_getms() - start_ms);
+
+	// Trigger an immediate tend to start peer list update across the cluster.
+	info_node_info_tend();
 }
 
 // This goes in a reduce function for retransmitting my information to another node
@@ -4920,7 +4928,7 @@ info_node_info_reduce_fn(const void *key, void *data, void *udata)
 	const cf_node *node = (const cf_node *)key;
 	info_node_info *infop = (info_node_info *) data;
 
-	if (infop->generation < g_serv_gen) {
+	if (infop->generation == 0) {
 
 		cf_debug(AS_INFO, "sending service string %s to node %"PRIx64, g_serv_legacy, *node);
 
