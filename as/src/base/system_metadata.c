@@ -782,24 +782,6 @@ static as_smd_event_t *as_smd_create_cmd_event(as_smd_cmd_type_t type, ...)
 	return evt;
 }
 
-const as_smd_module_t *
-smd_module_get_by_name(const char *name)
-{
-	as_smd_module_t *module = NULL;
-
-	if (cf_rchash_get(g_smd->modules, name, strlen(name) + 1,
-			(void **)&module) != CF_RCHASH_OK) {
-		return NULL;
-	}
-
-	// Assume module won't disappear under us for simplicity.
-	// This way we don't have to do crazy stuff like make sure it is released
-	// everywhere we return.
-	cf_rc_release(module);
-
-	return module;
-}
-
 // New message protocol.
 static bool
 smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
@@ -811,16 +793,12 @@ smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
 
 	uint32_t mod_max = cf_rchash_get_size(g_smd->modules);
 	uint32_t counts[mod_max];
-	const as_smd_module_t *mod_list[mod_max];
+	const char *mod_list[mod_max];
 	uint32_t mod_idx;
 
 	if (sm->module_name) {
 		mod_idx = 1;
-		mod_list[0] = smd_module_get_by_name(sm->module_name);
-
-		if (! mod_list[0]) {
-			return false;
-		}
+		mod_list[0] = sm->module_name;
 
 		// Check single item optimized packing.
 		char *key;
@@ -870,11 +848,10 @@ smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
 				continue;
 			}
 
-			mod_list[mod_idx] = smd_module_get_by_name(name);
+			mod_list[mod_idx] = name;
 
-			if (! mod_list[mod_idx] ||
-					msg_get_uint32_array(m, AS_SMD_MSG_MODULE_COUNTS, i,
-							&counts[mod_idx]) != 0) {
+			if (msg_get_uint32_array(m, AS_SMD_MSG_MODULE_COUNTS, i,
+					&counts[mod_idx]) != 0) {
 				continue;
 			}
 
@@ -903,18 +880,16 @@ smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
 	uint32_t msg_idx = 0;
 
 	for (uint32_t i = 0; i < mod_idx; i++) {
-		const as_smd_module_t *module = mod_list[i];
-
 		for (uint32_t j = 0; j < counts[i]; j++) {
 			as_smd_item_t *item = sm->items->item[msg_idx];
 			size_t sz = 0;
 
 			item->node_id = node_id;
-			item->module_name = cf_strdup(module->module);
+			item->module_name = cf_strdup(mod_list[i]);
 
 			if (msg_get_str_array(m, AS_SMD_MSG_KEY, msg_idx, &item->key, &sz,
 					MSG_GET_COPY_MALLOC) != 0) {
-				cf_warning(AS_SMD, "SMD message missing expected key, module %s item %u", module->module, j);
+				cf_warning(AS_SMD, "SMD message missing expected key, module %s item %u", mod_list[i], j);
 				return false;
 			}
 
