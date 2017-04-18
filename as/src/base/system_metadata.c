@@ -994,6 +994,13 @@ as_smd_old_create_msg_event(as_smd_msg_op_t op, cf_node node_id, msg *msg)
 		}
 	}
 
+	if (op == AS_SMD_MSG_OP_ACCEPT_THIS_METADATA) {
+		if (msg_get_uint32(msg, AS_SMD_MSG_OPTIONS, &smd_msg->options) != 0) {
+			cf_warning(AS_SMD, "could not get info flags from the fabric msg");
+			smd_msg->options = 0;
+		}
+	}
+
 	return evt;
 }
 
@@ -1307,29 +1314,6 @@ static int as_smd_msgq_push(cf_node node_id, msg *msg, void *udata)
 	as_smd_event_t *evt = as_smd_old_create_msg_event(op, node_id, msg);
 
 	cf_assert(evt, AS_SMD, "failed to create a System Metadata msg event");
-
-	as_smd_msg_t *smd_msg = &(evt->u.msg);
-	if (smd_msg->num_items) {
-		as_smd_item_t *item = smd_msg->items->item[0]; // (Only log the fist item.)
-		cf_debug(AS_SMD, "asmp(): op: %s num_items %d ; node: %016lX ; item 0: module: \"%s\" ; key: \"%s\" ; value: \"%s\" ; generation: %u ; timestamp: %lu",
-				 AS_SMD_MSG_OP_NAME(smd_msg->op), smd_msg->num_items, item->node_id, item->module_name, item->key, item->value, item->generation, item->timestamp);
-	} else {
-		cf_debug(AS_SMD, "asmp():  op: %s [Zero metadata items]", AS_SMD_MSG_OP_NAME(smd_msg->op));
-	}
-
-	if (AS_SMD_MSG_OP_ACCEPT_THIS_METADATA == op) {
-		if (msg_get_str(msg, AS_SMD_MSG_MODULE_NAME, &smd_msg->module_name, 0,
-				MSG_GET_COPY_MALLOC) != 0) {
-			cf_warning(AS_SMD, "could not get module name from the fabric msg");
-		}
-
-		if (msg_get_uint32(msg, AS_SMD_MSG_OPTIONS, &(smd_msg->options))) {
-			cf_warning(AS_SMD, "could not get info flags from the fabric msg");
-			smd_msg->options = 0;
-		} else {
-			cf_debug(AS_SMD, "SMD msg options flag set to 0x%08x from the fabric msg", smd_msg->options);
-		}
-	}
 
 	// Send the msg event to the System Metadata thread.
 	return as_smd_send_event(smd, evt);
