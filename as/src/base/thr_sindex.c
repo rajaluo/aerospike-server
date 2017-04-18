@@ -599,7 +599,6 @@ typedef struct sbld_job_s {
 
 	// Derived class data:
 	as_sindex*		si;
-	uint64_t		si_desync_cnt;
 
 	char*			si_name;
 	cf_atomic64		n_reduced;
@@ -744,7 +743,6 @@ sbld_job_create(as_namespace* ns, uint16_t set_id, as_sindex* si)
 			RSV_MIGRATE, 0, ns, set_id, AS_JOB_PRIORITY_MEDIUM);
 
 	job->si = si;
-	job->si_desync_cnt = si ? si->desync_cnt : 0;
 	job->si_name = si ? cf_strdup(si->imd->iname) : NULL;
 	job->n_reduced = 0;
 
@@ -822,12 +820,6 @@ sbld_job_reduce_cb(as_index_ref* r_ref, void* udata)
 	}
 
 	if (job->si) {
-		if (job->si->desync_cnt > job->si_desync_cnt) {
-			as_record_done(r_ref, ns);
-			as_job_manager_abandon_job(_job->mgr, _job, AS_JOB_FAIL_UNKNOWN);
-			return;
-		}
-
 		cf_atomic64_decr(&job->si->stats.recs_pending);
 	}
 

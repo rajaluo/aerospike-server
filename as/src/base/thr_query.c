@@ -2801,11 +2801,10 @@ query_setup(as_transaction *tr, as_namespace *ns, as_query_transaction **qtrp)
 	}
 
 	if (si) {
-		// Validate index and range specified
-		ret = as_sindex_assert_query(si, srange);
-		if (AS_QUERY_OK != ret) {
-			cf_warning(AS_QUERY, "Query Parameter Mismatch %d", ret);
-			tr->result_code = as_sindex_err_to_clienterr(ret, __FILE__, __LINE__);
+
+		if (! as_sindex_can_query(si)) {
+			tr->result_code = as_sindex_err_to_clienterr(
+					AS_SINDEX_ERR_NOT_READABLE, __FILE__, __LINE__);
 			goto Cleanup;
 		}
 	} else {
