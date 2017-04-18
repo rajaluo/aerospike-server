@@ -83,8 +83,7 @@ static as_namespace_id g_namespace_id_counter = 0;
 static inline uint32_t
 ns_name_hash(char *name)
 {
-	// FIXME - is this dependent on other nodes doing the same thing?
-	uint32_t hv = (uint32_t)cf_hash_fnv64((const uint8_t *)name, strlen(name));
+	uint32_t hv = cf_hash_fnv32((const uint8_t *)name, strlen(name));
 
 	if (hv <= NAMESPACE_MAX_NUM) {
 		hv += NAMESPACE_MAX_NUM;
