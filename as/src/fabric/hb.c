@@ -3798,8 +3798,8 @@ config_legacy_addr_get(const cf_serv_cfg* hb_bind_cfg,
 				if (cf_ip_addr_compare(&intersect_cfg.cfgs[i].addr,
 						&default_addresses[j]) == 0) {
 					prefered_addr_index = i;
+					break;
 				}
-				break;
 			}
 		}
 	}
@@ -8352,6 +8352,7 @@ multicast_published_endpoint_list_refresh(bool is_legacy)
 
 	if (!g_hb.mode_state.multicast_state.published_legacy_endpoint_list) {
 		rv = -1;
+		goto Exit;
 	}
 
 	char endpoint_list_str[ENDPOINT_LIST_STR_SIZE];
