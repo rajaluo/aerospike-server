@@ -186,47 +186,6 @@ typedef struct ai_obj {
 	uchar    empty;
 } ai_obj;
 
-typedef struct r_tbl {
-	char    *name;
-	bt      *btr;
-	int      col_count;
-	r_col_t *col;
-	cf_ll    *ilist;      // USAGE: list of this table's imatch's
-	shash   *cdict;      // USAGE: maps cname to ci_t
-	uint32   tcols;      // HASH: on INSERT num new columns
-
-	uint32   lrud;       // LRU: timestamp & bool
-	int      lruc;       // LRU: column containing LRU
-	bool     lfu;        // LFU: indexing on/off
-	int      lfuc;       // LFU: column containing LFU
-
-	bool     dirty;      // ALTER TABLE [UN]SET DIRTY
-} r_tbl_t;
-
-typedef struct r_ind {
-	bt     *btr;         // Btree of Index
-	int     nprts;       // Number or Partitions
-
-	char   *name;        // Name of index
-
-	int     tmatch;      // table index is ON
-	icol_t *icol;        // single column OR 1st MCI column
-
-	uchar   cnstr;       // CONSTRAINTS: [UNIQUE,,,]
-
-	bool    done;        // CREATE INDEX OFFSET -> not done until finished
-	long    ofst;        // CREATE INDEX OFFSET partial indexes current offset
-
-	bool    iposon;      // Index Position On (i.e. SELECT "index.pos()"
-	uint32  cipos;       // Current Index position, when iposon
-
-	uchar   dtype;       // DotNotation Index Type (e.g. luatbl.x.y.z -> INT)
-	char   *fname;       // LuaFunctionIndex: functionname
-
-	int     simatch;     // AEROSPIKE Secondary Index Array[slot]
-} r_ind_t;
-
-
 typedef struct filter {
 	int      jan;        // JoinAliasNumber filter runs on (for JOINS)
 	int      imatch;     // index  filter runs on (for JOINS)

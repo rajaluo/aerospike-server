@@ -19,7 +19,6 @@
 #include <string.h>
 #include <strings.h>
 
-#include "ai_globals.h"
 #include "bt.h"
 #include "bt_iterator.h"
 #include "stream.h"
@@ -218,16 +217,6 @@ bt *bt_create(bt_cmp_t cmp, uchar trans, bts_t *s, char dirty) {
     return btr;
 }
 
-// INDEX.POS() INDEX.POS() INDEX.POS() INDEX.POS() INDEX.POS() INDEX.POS()
-static inline void add_to_cipos(bt *btr, bt_n *x, int i) {
-    if (i == -1) return;
-    if (!x->leaf) {
-        for (int j = 0; j <= i; j++) {
-            bt_n *xp = NODES(btr, x)[j]; Index[btr->s.num].cipos += xp->scion;
-        }}
-    Index[btr->s.num].cipos += i + 1;                      //DEBUG_ADD_TO_CIPOS
-}
-
 // BINARY_SEARCH BINARY_SEARCH BINARY_SEARCH BINARY_SEARCH BINARY_SEARCH
 /* This is the real log2 function.  It is only called when we don't have
  * a value in the table. -> which is basically never */
@@ -292,7 +281,6 @@ static int findkindex(bt *btr, bt_n *x, bt_data_t k, int *r, btIterator *iter) {
         }
     }
     if ((*rr = btr->cmp(k, KEYS(btr, x, i))) < 0)  i--;
-    if (SIMP_UNIQ(btr) && Index[btr->s.num].iposon) add_to_cipos(btr, x, i);
     if (iter) { iter->bln->in = iter->bln->ik = (i > 0) ? i : 0; }
     return i;
 }
@@ -972,7 +960,6 @@ dwm_t findnodekey(bt *btr, bt_n *x, bt_data_t k, ai_obj *akey) {
     int    r = -1,             i = 0;
     bt_n  *p = btr->root; int pi = 0;
     dwm_t  dwm; bzero(&dwm, sizeof(dwm_t)); SET_DWM_XIP
-    if (SIMP_UNIQ(btr) && Index[btr->s.num].iposon) Index[btr->s.num].cipos = 0;
     while (x) {
         i = findkindex(btr, x, k, &r, NULL);              //DEBUG_FIND_NODE_KEY
         if (i >= 0 && !r) { SET_DWM_XIP dwm.k = KEYS(btr, x, i); return dwm; }

@@ -27,13 +27,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ai.h"
-#include "ai_globals.h"
 #include "ai_obj.h"
 #include "ai_btree.h"
 #include "bt_iterator.h"
 #include "bt_output.h"
-#include "find.h"
+#include "stream.h"
 #include "base/thr_sindex.h"
 #include "base/cfg.h"
 #include "fabric/partition.h"
@@ -50,34 +48,9 @@
 #define AI_ARR_MAX_USED 32
 
 /*
- *  Default file to use for printing a B-Tree by the "sindex-dump:" Info. command.
- */
-#define DEFAULT_BTREE_DUMP_FILENAME "/tmp/BTREE.dump"
-
-/*
  *  Global determining whether to use array rather than B-Tree.
  */
 bool g_use_arr = true;
-
-extern pthread_rwlock_t g_ai_rwlock;
-
-#define AI_GRLOCK()													\
-	do {																\
-		int ret = pthread_rwlock_rdlock(&g_ai_rwlock);					\
-		if (ret) cf_warning(AS_SINDEX, "AI_RLOCK (%d) %s:%d", ret, __FILE__, __LINE__); \
-	} while (0);
-
-#define AI_GWLOCK()													\
-	do {																\
-		int ret = pthread_rwlock_wrlock(&g_ai_rwlock);					\
-		if (ret) cf_warning(AS_SINDEX, "AI_WLOCK (%d) %s:%d",ret, __FILE__, __LINE__); \
-	} while (0);
-
-#define AI_UNLOCK()													\
-	do {																\
-		int ret = pthread_rwlock_unlock(&g_ai_rwlock);					\
-		if (ret) cf_warning(AS_SINDEX, "AI_UNLOCK (%d) %s:%d",ret, __FILE__, __LINE__); \
-	} while (0);
 
 static void
 cloneDigestFromai_obj(cf_digest *d, ai_obj *akey)
@@ -119,7 +92,7 @@ ai_arr_move_to_tree(ai_arr *arr, bt *nbtr)
 /*
  * Side effect if success full *arr will be freed
  */
-void
+static void
 ai_arr_destroy(ai_arr *arr)
 {
 	if (!arr) return;
@@ -484,72 +457,12 @@ reduced_iRem(bt *ibtr, ai_obj *acol, ai_obj *apk)
 	return AS_SINDEX_OK;
 }
 
-static char *
-str_concat(char *first, char separator, char *second)
-{
-	char *str;
-	size_t str_len = strlen(first) + strlen(second) + 2;
-
-	if (!(str = cf_malloc(str_len))) {
-		return NULL;
-	}
-
-	if (0 > snprintf(str, str_len, "%s%c%s", first, separator, second)) {
-		cf_free(str);
-		return NULL;
-	}
-
-	return str;
-}
-
-static char *
-create_tname(char *ns_name, char *set)
-{
-	return str_concat(ns_name, '.', (set ? set : ""));
-}
-
-static char *
-create_tname_from_imd(const as_sindex_metadata *imd)
-{
-	return create_tname(imd->ns_name, imd->set);
-}
-
-static char *
-create_cname(char *bin_path, int bin_type, int index_type)
-{
-	int type_str_size = AS_SINDEX_KTYPE_MAX_TO_STR_SZ + 1 + AS_SINDEX_ITYPE_MAX_TO_STR_SZ;
-	char type_str[type_str_size];
-	bzero(type_str, type_str_size);
-	if (0 > snprintf(type_str, sizeof(type_str), "%d_%d", bin_type, index_type)) {
-		return NULL;
-	}
-	// TODO : CHECK SIZE
-	return str_concat(bin_path, '_', type_str);
-}
-
-static char *
-create_cname_from_imd(const as_sindex_metadata *imd) {
-	return create_cname(imd->path_str, imd->btype, imd->itype);
-}
-
-static char *
-get_iname(char *ns_name, char *iname)
-{
-	return str_concat(ns_name, '.', iname);
-}
-
-static char *
-get_iname_from_imd(const as_sindex_metadata *imd)
-{
-	return get_iname(imd->ns_name, imd->iname);
-}
-
 int
 ai_btree_key_hash_from_sbin(as_sindex_metadata *imd, as_sindex_bin_data *b)
 {
 	uint64_t u;
 
-	if (C_IS_Y(imd->dtype)) {
+	if (C_IS_Y(imd->btype)) {
 		char *x = (char *) &b->digest; // x += 4;
 		u = ((* (uint128 *) x) % imd->nprts);
 	} else {
@@ -564,7 +477,7 @@ ai_btree_key_hash(as_sindex_metadata *imd, void *skey)
 {
 	uint64_t u;
 
-	if (C_IS_Y(imd->dtype)) {
+	if (C_IS_Y(imd->btype)) {
 		char *x = (char *) ((cf_digest *)skey); // x += 4;
 		u = ((* (uint128 *) x) % imd->nprts);
 	} else {
@@ -572,75 +485,6 @@ ai_btree_key_hash(as_sindex_metadata *imd, void *skey)
 	}
 
 	return (int) u;
-}
-
-int
-ai_findandset_imatch(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int idx)
-{
-	if (!Num_tbls) {
-		return AS_SINDEX_ERR;
-	}
-
-	char *tname = NULL;
-	char *cname = NULL;
-	char *iname = NULL;
-
-	if (!(tname = create_tname_from_imd(imd))) {
-		return AS_SINDEX_ERR_NO_MEMORY;
-	}
-
-	int ret = AS_SINDEX_ERR;
-
-	AI_GRLOCK();
-
-	int tmatch = find_table(tname);
-	if (tmatch == -1) {
-		goto END;
-	}
-	if (imd->iname) {
-		// This is always true
-		if (!(iname = get_iname_from_imd(imd))) {
-			ret = AS_SINDEX_ERR_NO_MEMORY;
-			goto END;
-		}
-		
-		char piname[INDD_HASH_KEY_SIZE];
-		snprintf(piname, sizeof(piname), "%s.%d", iname, idx);	
-		pimd->imatch = match_partial_index_name(piname);
-	} else {
-		// CAUTION : This will not work. Since ci->list is only populated for 0th pimd
-		if (!(cname = create_cname_from_imd(imd))) {
-			ret = AS_SINDEX_ERR_NO_MEMORY;
-			goto END;
-		}
-		icol_t *ic = find_column(tmatch, cname);
-		if (!ic) {
-			goto END;
-		}
-		pimd->imatch = find_partial_index(tmatch, ic);
-		cf_free(ic);
-	}
-	if (pimd->imatch == -1) {
-		cf_debug(AS_SINDEX, "Index %s not found for %dth pimd", imd->iname, idx);
-		goto END;
-	}
-
-	ret = AS_SINDEX_OK;
-
-END:
-
-	AI_UNLOCK();
-
-	if (tname) {
-		cf_free(tname);
-	}
-	if (iname) { 
-		cf_free(iname);
-	}
-	if (cname) {
-		cf_free(cname);
-	}
-	return ret;
 }
 
 /*
@@ -688,7 +532,7 @@ btree_addsinglerec(as_sindex_metadata *imd, ai_obj * key, cf_digest *dig, cf_ll 
 	memcpy(&keys_arr->pindex_digs[keys_arr->num], dig, CF_DIGEST_KEY_SZ);
 
 	// Copy the key
-	if (C_IS_Y(imd->dtype)) {
+	if (C_IS_Y(imd->btype)) {
 		memcpy(&keys_arr->sindex_keys[keys_arr->num].key.str_key, &key->y, CF_DIGEST_KEY_SZ);
 	}
 	else {
@@ -883,7 +727,7 @@ ai_btree_query(as_sindex_metadata *imd, as_sindex_range *srange, as_sindex_qctx 
 	if (!srange->isrange) { // EQUALITY LOOKUP
 		ai_obj afk;
 		init_ai_obj(&afk);
-		if (C_IS_Y(imd->dtype)) {
+		if (C_IS_Y(imd->btype)) {
 			init_ai_objFromDigest(&afk, &srange->start.digest);
 		}
 		else {
@@ -901,7 +745,7 @@ int
 ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_digest *value)
 {
 	ai_obj ncol;
-	if (C_IS_Y(imd->dtype)) {
+	if (C_IS_Y(imd->btype)) {
 		init_ai_objFromDigest(&ncol, (cf_digest*)skey);
 	}
 	else {
@@ -934,7 +778,7 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void * skey,
 	}
 
 	ai_obj ncol;
-	if (C_IS_Y(imd->dtype)) {
+	if (C_IS_Y(imd->btype)) {
 		init_ai_objFromDigest(&ncol, (cf_digest *)skey);
 	}
 	else {
@@ -1102,11 +946,7 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, a
 	if (!ns) {
 		ns = as_namespace_get_byname((char *)imd->ns_name);
 	}
-	char *iname = get_iname_from_imd(imd);
-	if (!iname) {
-		ret = AS_SINDEX_ERR_NO_MEMORY;
-		return ret;
-	}
+
 	if (!pimd || !pimd->ibtr || !pimd->ibtr->numkeys) {
 		goto END;
 	}
@@ -1162,7 +1002,6 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, a
 	};
 	btReleaseRangeIterator(bi);
 END:
-	cf_free(iname);
 
 	return ret;
 }
@@ -1234,168 +1073,61 @@ END:
 	return cf_ll_size(gc_list) ? true : false;
 }
 
-/* NOTE: The creation of a secondary index is the following two commands
-          0.) optional: CREATE TABLE namespace (pk U160, __dummy TEXT)
-          1.) ALTER TABLE namespace ADD COLUMN binname columntype
-          2.) CREATE [UNIQUE] INDEX indexname ON namespace (binname)
- */
-int
-ai_btree_create(as_sindex_metadata *imd, int simatch, int *bimatch, int nprts)
+void
+ai_btree_create(as_sindex_metadata *imd)
 {
-	char *iname = NULL, *cname = NULL, *tname = NULL;
-	int ret = AS_SINDEX_ERR, rv;
-
-	if (!(tname = create_tname_from_imd(imd))) {
-		return AS_SINDEX_ERR_NO_MEMORY;
-	}
-
-	if (!(cname = create_cname_from_imd(imd))) {
-		if (tname) {
-			cf_free(tname);
+	for (int i = 0; i < imd->nprts; i++) {
+		as_sindex_pmetadata *pimd = &imd->pimd[i];
+		pimd->ibtr = createIndexBT(imd->btype, -1);
+		if (! pimd->ibtr) {
+			cf_crash(AS_SINDEX, "Failed to allocate secondary index tree for ns:%s, indexname:%s",
+					imd->ns_name, imd->iname);
 		}
-		return AS_SINDEX_ERR_NO_MEMORY;
 	}
-
-	AI_GWLOCK();
-
-	// TODO : ai_create_table has this check. So this is redundant
-	// 3 shash_get can be reduced to 1 through ai_get_or_create_table func
-	int tmatch = find_table(tname);
-	if (tmatch == -1) {
-		if (0 > (rv = ai_create_table(tname))) {
-			cf_warning(AS_SINDEX, "Create table %s failed (rv %d)", tname, rv);
-			goto END;
-		}
-		tmatch = find_table(tname);
-	}
-	r_tbl_t *rt = &Tbl[tmatch];
-
-	// 1.) add entries in Aerospike Index's virtual TABLE
-	int col_type = imd->btype;
-	icol_t *ic = find_column(tmatch, cname);
-	if (!ic) { // COLUMN does not exist
-		if (0 > ai_add_column(tname, cname, col_type)) {
-			goto END;
-		}
-		// Add (cmatch+1) always non-zero
-		cf_debug(AS_SINDEX, "Added Mapping [BINNAME=%s: BINID=%d: COLID%d] [IMATCH=%d: SIMATCH=%d: INAME=%s]",
-				imd->bname, imd->binid, rt->col_count, Num_indx - 1, simatch, imd->iname);
-	}
-	else {
-		cf_free(ic);
-	}
-
-	//NOTE: COMMAND: CREATE PARTITIONED INDEX iname ON tname (cname) NUM = nprts
-	if (!(iname = get_iname_from_imd(imd))) {
-		ret = AS_SINDEX_ERR_NO_MEMORY;
-		goto END;
-	}
-
-	if (0 > (rv = ai_create_index(iname, tname, cname, col_type, nprts))) {
-		cf_warning(AS_SINDEX, "Create index %s failed (rv %d)", iname, rv);
-		goto END;
-	}
-
-	*bimatch = match_partial_index_name(iname);
-	cf_debug(AS_SINDEX, "cr8SecIndex: iname: %s bname: %s type: %d ns: %s set: %s tmatch: %d bimatch: %d",
-		   imd->iname, imd->bname, imd->btype, imd->ns_name, imd->set, tmatch, *bimatch);
-
-	ret = AS_SINDEX_OK;
-
-END:
-
-	AI_UNLOCK();
-
-	if (tname) {
-		cf_free(tname);
-	}
-	if (cname) {
-		cf_free(cname);
-	}
-	if (iname) {
-		cf_free(iname);
-	}
-	return ret;
 }
 
-int
-ai_post_index_creation_setup_pmetadata(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, int simatch, int idx)
+static void
+destroy_index(bt *ibtr, bt_n *n)                        
+{                                                                               
+	if (! n->leaf) {                                                             
+		for (int i = 0; i <= n->n; i++) {                                       
+			destroy_index(ibtr, NODES(ibtr, n)[i]);                     
+		}                                                                       
+	}                                                                           
+
+	for (int i = 0; i < n->n; i++) {                                            
+		void *be = KEYS(ibtr, n, i);                                            
+		ai_nbtr *anbtr = (ai_nbtr *) parseStream(be, ibtr);                     
+		if (anbtr) {                                                            
+			if (anbtr->is_btree) {                                              
+				bt_destroy(anbtr->u.nbtr);                                      
+			} else {                                                            
+				ai_arr_destroy(anbtr->u.arr);                                   
+			}                                                                   
+			cf_free(anbtr);                                                     
+		}                                                                       
+	}                                                                           
+}                 
+
+void
+ai_btree_dump(as_sindex_metadata *imd, char *fname, bool verbose)
 {
-	if (idx == 0) {
-		pimd->imatch = imd->bimatch;
-	} else if (AS_SINDEX_OK != ai_findandset_imatch(imd, pimd, idx)) {
-		return AS_SINDEX_ERR;
+	FILE *fp = NULL;                                                            
+	if (!(fp = fopen(fname, "w"))) {                                         
+		return;                                                              
+	}           
+
+	fprintf(fp, "Namespace: %s set: %s\n", imd->ns_name, imd->set ? imd->set : "None");
+
+	for (int i = 0; i < imd->nprts; i++) {
+		as_sindex_pmetadata *pimd = &imd->pimd[i];
+		fprintf(fp, "INDEX: name: %s:%d (%p)\n", imd->iname, i, (void *) pimd->ibtr);
+		if (pimd->ibtr) {
+			bt_dumptree(fp, pimd->ibtr, 1, verbose);
+		}
 	}
 
-	r_ind_t *ri = &Index[pimd->imatch];
-	ri->simatch = simatch; //ref for simatch to enable search through Aerospike Index
-	ri->done = true;
-	if (idx == 0) { // idx of 0 means fill these in
-		imd->dtype = ri->dtype;
-		imd->btype = ri->dtype;
-	}
-	pimd->tmatch = ri->tmatch;
-	pimd->ibtr = ri->btr;
-
-	return AS_SINDEX_OK;
-}
-
-int
-ai_btree_destroy(as_sindex_metadata *imd)
-{
-	char *tname, *cname, *iname;
-
-	AI_GWLOCK();
-
-
-	if (!(tname = create_tname_from_imd(imd))) {
-		return AS_SINDEX_ERR_NO_MEMORY;
-	}
-
-	if (!(cname = create_cname_from_imd(imd))) {
-		return AS_SINDEX_ERR_NO_MEMORY;
-	}
-
-	if (0 > ai_drop_column(tname, cname)) {
-		cf_warning(AS_SINDEX, "Failed to drop column %s from table %s", cname, tname);
-	}
-
-	cf_free(tname);
-	cf_free(cname);
-
-	if (!(iname = get_iname_from_imd(imd))) {
-		return AS_SINDEX_ERR_NO_MEMORY;
-	}
-
-	if (0 > ai_drop_index(iname)) {
-		cf_warning(AS_SINDEX, "Failed to drop index %s", iname);
-	}
-
-	cf_free(iname);
-
-	AI_UNLOCK();
-
-	return AS_SINDEX_OK;
-}
-
-int
-ai_btree_dump(char *ns_name, char *setname, char *filename, bool verbose)
-{
-	char *tname;
-
-	if (!(tname = create_tname(ns_name, setname))) {
-		return -1;
-	}
-
-	AI_GRLOCK();
-
-	int retval = dump_btree(tname, (filename ? filename : DEFAULT_BTREE_DUMP_FILENAME), verbose);
-
-	AI_UNLOCK();
-
-	cf_free(tname);
-
-	return retval;
+	fclose(fp);
 }
 
 uint64_t
@@ -1455,15 +1187,12 @@ ai_btree_get_nsize(as_sindex_metadata *imd)
 }
 
 void
-ai_btree_reinit_pimd(as_sindex_pmetadata * pimd)
+ai_btree_reinit_pimd(as_sindex_pmetadata * pimd, int btype)
 {
 	if (! pimd->ibtr) {
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
-
-	r_ind_t *ri = &Index[pimd->imatch];
-	ri->btr = createIndexBT(ri->dtype, pimd->imatch);
-	pimd->ibtr = ri->btr;
+	pimd->ibtr = createIndexBT(btype, -1);
 }
 
 void
@@ -1472,13 +1201,8 @@ ai_btree_reset_pimd(as_sindex_pmetadata *pimd)
 	if (! pimd->ibtr) {
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
-
-	r_ind_t *ri = &Index[pimd->imatch];
-	ri->btr = NULL;
 	pimd->ibtr = NULL;
 }
-
-
 
 void
 ai_btree_delete_ibtr(bt * ibtr)
@@ -1486,5 +1210,5 @@ ai_btree_delete_ibtr(bt * ibtr)
 	if (! ibtr) {
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
-	ai_destroy_index(ibtr);	
+	destroy_index(ibtr, ibtr->root); 
 }

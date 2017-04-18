@@ -97,7 +97,6 @@
 #include "aerospike/as_val.h"
 
 #include "ai_btree.h"
-#include "ai_globals.h"
 #include "bt_iterator.h"
 #include "cf_str.h"
 #include "fault.h"
@@ -1591,11 +1590,7 @@ as_sindex__create_pmeta(as_sindex *si, int simatch, int nptr)
 			cf_crash(AS_SINDEX,
 					"Could not create secondary index dml mutex ");
 		}
-		if (ai_post_index_creation_setup_pmetadata(si->imd, pimd,
-													simatch, i)) {
-			cf_crash(AS_SINDEX,
-					"Something went reallly bad !!!");
-		}
+	
 	}
 }
 
@@ -1646,7 +1641,7 @@ END:
 }
 
 int
-as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
+as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 {
 	int ret = AS_SINDEX_ERR;
 	// Ideally there should be one lock per namespace, but because the
@@ -1720,95 +1715,59 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create)
 	}
 	cf_detail(AS_SINDEX, "Put iname simatch %s:%zu->%d", iname, strlen(imd->iname), chosen_id);
 
-	as_sindex__dup_meta(imd, &qimd, true);
-	qimd->si    = si;
-	qimd->nprts = imd->nprts;
-	int bimatch = -1;
-
-	ret = ai_btree_create(qimd, id, &bimatch, imd->nprts);
-	if (!ret) { // create ref counted index metadata & hang it from sindex
-		si->imd         = qimd;
-		si->imd->bimatch = bimatch;
-		si->state       = AS_SINDEX_ACTIVE;
-		as_sindex_set_binid_has_sindex(ns, si->imd->binid);
-		si->desync_cnt  = 0;
-		si->flag        = AS_SINDEX_FLAG_WACTIVE;
-		si->new_imd     = NULL;
-		as_sindex__create_pmeta(si, id, imd->nprts);
-		// Always tune si to default settings to start with
-		as_sindex__config_default(si);
-
-		// If this si has a valid config-item and this si was created by smd boot-up,
-		// then set the config-variables from si_cfg_array.
-
-		// si_cfg_var_hash is deliberately kept as a transient structure.
-		// Its applicable only for boot-time si-creation via smd
-		// In the case of sindex creations via aql, i.e dynamic si creation,
-		// this array wont exist and all si configs will be default configs.
-		if (ns->sindex_cfg_var_hash) {
-			// Check for duplicate si stanzas with the same si-name ?
-			as_sindex_config_var check_si_conf;
-
-			if (SHASH_OK == shash_get(ns->sindex_cfg_var_hash, (void *)iname, (void *)&check_si_conf)){
-				// A valid config stanza exists for this si entry
-				// Copy the config over to the new si
-				// delete the old hash entry
-				cf_info(AS_SINDEX,"Found custom configuration for SI:%s, applying", imd->iname);
-				as_sindex_config_var_copy(si, &check_si_conf);
-				shash_delete(ns->sindex_cfg_var_hash,  (void *)iname);
-				check_si_conf.conf_valid_flag = true;
-				shash_put_unique(ns->sindex_cfg_var_hash, (void *)iname, (void *)&check_si_conf);
-			}
+	// Init SI
+	si->ns          = ns;
+	si->simatch     = chosen_id;
+	si->state       = AS_SINDEX_ACTIVE;
+	si->desync_cnt  = 0;
+	si->flag        = AS_SINDEX_FLAG_WACTIVE;
+	si->new_imd     = NULL;
+	as_sindex__config_default(si);
+	if (ns->sindex_cfg_var_hash) {
+		as_sindex_config_var check_si_conf;
+		if (SHASH_OK == shash_get(ns->sindex_cfg_var_hash, (void *)iname, (void *)&check_si_conf)){
+			as_sindex_config_var_copy(si, &check_si_conf);
+			shash_delete(ns->sindex_cfg_var_hash,  (void *)iname);
+			check_si_conf.conf_valid_flag = true;
+			shash_put_unique(ns->sindex_cfg_var_hash, (void *)iname, (void *)&check_si_conf);
 		}
-
-		as_sindex__setup_histogram(si);
-		as_sindex__stats_clear(si);
-
-		ns->sindex_cnt++;
-
-		if (p_set) {
-			p_set->n_sindexes++;
-		} else {
-			ns->n_setless_sindexes++;
-		}
-
-		si->ns          = ns;
-		si->simatch     = chosen_id;
-
-		cf_atomic64_add(&ns->n_bytes_sindex_memory,
-				ai_btree_get_isize(si->imd));
-
-		// Only trigger scan if this create is done after boot
-		if (user_create && g_sindex_boot_done) {
-			// Reserve it before pushing it into queue
-			AS_SINDEX_RESERVE(si);
-			SINDEX_GWUNLOCK();
-			int rv = cf_queue_push(g_sindex_populate_q, &si);
-			if (CF_QUEUE_OK != rv) {
-				cf_warning(AS_SINDEX, "Failed to queue up for population... index=%s "
-							"Internal Queue Error rv=%d, try dropping and recreating",
-							si->imd->iname, rv);
-			}
-		} else {
-			// Internal create is called before storage is initialized. Loading
-			// of storage will fill up the indexes no need to queue it up for scan
-			SINDEX_GWUNLOCK();
-		}
-	} else {
-		// TODO: When alc_btree_create fails, accept_cb should have a better
-		//       way to handle failure. Currently it maintains a dummy si
-		//       structures with not created flag. accept_cb should repair
-		//       such dummy si structures and retry alc_btree_create.
-		shash_delete(ns->sindex_iname_hash, (void *)iname);
-		rv = as_sindex__delete_from_set_binid_hash(ns, imd);
-		if (rv) {
-			cf_warning(AS_SINDEX, "Delete from set_binid hash fails with error %d", rv);
-		}
-		as_sindex_imd_free(qimd);
-		cf_debug(AS_SINDEX, "Create index %s failed ret = %d",
-				imd->iname, ret);
-		SINDEX_GWUNLOCK();
 	}
+
+	// Init IMD
+	as_sindex__dup_meta(imd, &qimd, true);
+	si->imd = qimd;
+	qimd->si = si;
+
+	// Init PIMD
+	as_sindex__create_pmeta(si, id, imd->nprts);
+	ai_btree_create(si->imd);
+	as_sindex_set_binid_has_sindex(ns, si->imd->binid);
+
+
+	// Update Counter
+	as_sindex__setup_histogram(si);
+	as_sindex__stats_clear(si);
+	ns->sindex_cnt++;
+	if (p_set) {
+		p_set->n_sindexes++;
+	} else {
+		ns->n_setless_sindexes++;
+	}
+	cf_atomic64_add(&ns->n_bytes_sindex_memory, ai_btree_get_isize(si->imd));
+
+	// Queue this for secondary index builder if create is done after boot.
+	// At the boot time single builder request is queued for entire namespace.
+	if (g_sindex_boot_done) {
+		// Reserve for ref in queue
+		AS_SINDEX_RESERVE(si);
+		int rv = cf_queue_push(g_sindex_populate_q, &si);
+		if (CF_QUEUE_OK != rv) {
+			cf_warning(AS_SINDEX, "Failed to queue up for population... index=%s "
+						"Internal Queue Error rv=%d, try dropping and recreating",
+						si->imd->iname, rv);
+		}
+	}
+	SINDEX_GWUNLOCK();
 	return ret;
 }
 
@@ -1825,7 +1784,7 @@ int
 as_sindex_update(as_sindex_metadata* imd)
 {
 	as_namespace *ns = as_namespace_get_byname(imd->ns_name);
-	int ret          = as_sindex_create(ns, imd, true);
+	int ret          = as_sindex_create(ns, imd);
 	if (ret != 0) {
 		cf_warning(AS_SINDEX,"Index %s creation failed at the accept callback", imd->iname);
 	}
@@ -1928,7 +1887,7 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 		pimd = &imd->pimd[i];
 		PIMD_WLOCK(&pimd->slock);
 		struct btree * ibtr = pimd->ibtr;
-		ai_btree_reinit_pimd(pimd);
+		ai_btree_reinit_pimd(pimd, imd->btype);
 		PIMD_WUNLOCK(&pimd->slock);
 		ai_btree_delete_ibtr(ibtr);
 	}
@@ -4742,7 +4701,7 @@ old_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, u
 						as_sindex_destroy(ns, &imd);
 				}
 				else {
-					retval = as_sindex_create(ns, &imd, true);
+					retval = as_sindex_create(ns, &imd);
 				}
 				break;
 			}
@@ -4887,7 +4846,7 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 					as_sindex_destroy(ns, &imd);
 			}
 			else {
-				as_sindex_create(ns, &imd, true);
+				as_sindex_create(ns, &imd);
 			}
 		}
 		else if (item->action == AS_SMD_ACTION_DELETE) {
@@ -5070,4 +5029,13 @@ as_sindex_init(as_namespace *ns)
 		g_q_index_keys_arr = cf_queue_create(sizeof(void *), true);
 	}
 	return AS_SINDEX_OK;
+}
+
+void
+as_sindex_dump(char *nsname, char *iname, char *fname, bool verbose)
+{
+	as_namespace *ns = as_namespace_get_byname(nsname);
+	as_sindex *si = as_sindex_lookup_by_iname(ns, iname, AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
+	ai_btree_dump(si->imd, fname, verbose);
+	AS_SINDEX_RELEASE(si);
 }
