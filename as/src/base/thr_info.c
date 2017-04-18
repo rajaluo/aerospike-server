@@ -4911,7 +4911,7 @@ info_node_info_reduce_fn(const void *key, void *data, void *udata)
 	const cf_node *node = (const cf_node *)key;
 	info_node_info *infop = (info_node_info *) data;
 
-	if (infop->generation == 0) {
+	if (infop->generation < g_serv_gen) {
 
 		cf_debug(AS_INFO, "sending service string %s to node %"PRIx64, g_serv_legacy, *node);
 
