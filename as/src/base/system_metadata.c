@@ -2334,7 +2334,7 @@ static int as_smd_metadata_change_local(as_smd_t *smd, as_smd_msg_op_t op, as_sm
 
 		// Default timestamp to now.
 		if (!item->timestamp) {
-			item->timestamp = cf_getms();
+			item->timestamp = cf_clepoch_milliseconds();
 		}
 
 		// Add new, replace or keep existing, metadata in the module's metadata hash table.
@@ -2819,7 +2819,7 @@ static int as_smd_apply_metadata_change(as_smd_t *smd, as_smd_module_t *module_o
 
 			// Default timestamp to now.
 			if (!item->timestamp) {
-				item->timestamp = cf_getms();
+				item->timestamp = cf_clepoch_milliseconds();
 			}
 
 			cf_debug(AS_SMD, "asamc():  processing item %d: module \"%s\" key \"%s\" action %s gen %u ts %lu", i, item->module_name, item->key, AS_SMD_ACTION_NAME(item->action), item->generation, item->timestamp);
@@ -3559,7 +3559,7 @@ int as_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **mer
 			item->action = AS_SMD_ACTION_DELETE;
 			item->key = cf_strdup(p_mitem->item->key);
 			item->generation = p_mitem->item->generation + 1;
-			item->timestamp = cf_getms();
+			item->timestamp = cf_clepoch_milliseconds();
 			(*merged_list)->item[i] = item;
 		}
 	}
