@@ -1,7 +1,7 @@
 /*
- * util.h
+ * bits.h
  *
- * Copyright (C) 2008-2016 Aerospike, Inc.
+ * Copyright (C) 2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,8 +22,16 @@
 
 #pragma once
 
-#include <stddef.h>
+//==========================================================
+// Includes.
+//
+
 #include <stdint.h>
+
+
+//==========================================================
+// Public API.
+//
 
 // Position of most significant bit, 0 ... 63 from low to high. -1 for value 0.
 static inline int
@@ -37,45 +45,4 @@ cf_msb(uint64_t value)
 	}
 
 	return n;
-}
-
-/* cf_hash_fnv
- * The 64-bit Fowler-Noll-Vo hash function (FNV-1a) */
-static inline uint64_t
-cf_hash_fnv(const void *buf, size_t bufsz)
-{
-    uint64_t hash = 0xcbf29ce484222325ULL;
-    const uint8_t *bufp = (const uint8_t *) buf;
-    const uint8_t *bufe = bufp + bufsz;
-
-    while (bufp < bufe) {
-        /* XOR the current byte into the bottom of the hash */
-        hash ^= (uint64_t)*bufp++;
-
-        /* Multiply by the 64-bit FNV magic prime */
-        hash *= 0x100000001b3ULL;
-    }
-
-    return(hash);
-}
-
-/* cf_hash_oneatatime
- * The 64-bit One-at-a-Time hash function */
-static inline uint64_t
-cf_hash_oneatatime(void *buf, size_t bufsz)
-{
-    size_t i;
-    uint64_t hash = 0;
-    uint8_t *b = (uint8_t *)buf;
-
-    for (i = 0; i < bufsz; i++) {
-        hash += b[i];
-        hash += (hash << 10);
-        hash ^= (hash >> 6);
-    }
-    hash += (hash << 3);
-    hash ^= (hash >> 11);
-    hash += (hash << 15);
-
-    return(hash);
 }

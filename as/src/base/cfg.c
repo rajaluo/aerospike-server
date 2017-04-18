@@ -41,6 +41,7 @@
 #include "citrusleaf/cf_shash.h"
 #include "citrusleaf/cf_vector.h"
 
+#include "bits.h"
 #include "cf_str.h"
 #include "dynbuf.h"
 #include "fault.h"
@@ -52,7 +53,6 @@
 #include "olock.h"
 #include "socket.h"
 #include "tls.h"
-#include "util.h"
 
 #include "base/cluster_config.h"
 #include "base/datamodel.h"
