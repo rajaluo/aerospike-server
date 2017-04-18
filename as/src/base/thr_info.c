@@ -6636,31 +6636,6 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 	return 0;
 }
 
-int info_command_sindex_repair(char *name, char *params, cf_dyn_buf *db) {
-	as_namespace *ns = NULL;
-	char * iname = NULL;
-	if (as_info_parse_ns_iname(params, &ns, &iname, db, "SINDEX REPAIR")) {
-		return 0;
-	}
-
-	int resp = as_sindex_repair(ns, iname);
-	if (resp) {
-		cf_warning(AS_INFO, "Sindex repair failed for index %s: err = %d", name, resp);
-		INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
-			as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX REPAIR : for index %s - ns %s failed with error %d",
-			iname, ns->name, resp);
-	}
-	else {
-		cf_dyn_buf_append_string(db, "Ok");
-	}
-
-	if (iname) {
-		cf_free(iname);
-	}
-	return(0);
-}
-
 int info_command_abort_scan(char *name, char *params, cf_dyn_buf *db) {
 	char context[100];
 	int  context_len = sizeof(context);
@@ -6901,7 +6876,7 @@ as_info_init()
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
-				"sindex-histogram;sindex-repair;"
+				"sindex-histogram;"
 				"smd;statistics;status;tip;tip-clear;truncate;truncate-undo;version;",
 				false);
 	/*
@@ -7018,7 +6993,6 @@ as_info_init()
 
 	// Undocumented Secondary Index Command
 	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
-	as_info_set_command("sindex-repair", info_command_sindex_repair, PERM_SERVICE_CTRL);
 
 	as_info_set_dynamic("query-list", as_query_list, false);
 	as_info_set_command("query-kill", info_command_query_kill, PERM_QUERY_MANAGE);

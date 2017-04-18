@@ -639,6 +639,7 @@ typedef enum {
 	CASE_NAMESPACE_SI_GC_PERIOD,
 	CASE_NAMESPACE_SI_GC_MAX_UNITS,
 	CASE_NAMESPACE_SI_HISTOGRAM,
+	// Deprecated:
 	CASE_NAMESPACE_SI_IGNORE_NOT_SYNC,
 
 	// Namespace sindex options:
@@ -3193,7 +3194,7 @@ as_config_init(const char* config_file)
 				si_cfg.enable_histogram = cfg_bool(&line);
 				break;
 			case CASE_NAMESPACE_SI_IGNORE_NOT_SYNC:
-				si_cfg.ignore_not_sync_flag = cfg_bool(&line) ? 1 : 0;
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
 				if (SHASH_OK != shash_put_unique(ns->sindex_cfg_var_hash, (void*)si_cfg.name, (void*)&si_cfg)) {
