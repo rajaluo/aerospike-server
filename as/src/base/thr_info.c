@@ -1860,8 +1860,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 
 	info_append_string(db, "storage-engine",
 			(ns->storage_type == AS_STORAGE_ENGINE_MEMORY ? "memory" :
-				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" :
-					(ns->storage_type == AS_STORAGE_ENGINE_KV ? "kv" : "illegal"))));
+				(ns->storage_type == AS_STORAGE_ENGINE_SSD ? "device" : "illegal")));
 
 	if (ns->storage_type == AS_STORAGE_ENGINE_SSD) {
 		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
@@ -1901,22 +1900,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 		info_append_uint32(db, "storage-engine.post-write-queue", ns->storage_post_write_queue);
 		info_append_uint32(db, "storage-engine.tomb-raider-sleep", ns->storage_tomb_raider_sleep);
 		info_append_uint32(db, "storage-engine.write-threads", ns->storage_write_threads);
-	}
-
-	if (ns->storage_type == AS_STORAGE_ENGINE_KV) {
-		for (int i = 0; i < AS_STORAGE_MAX_DEVICES; i++) {
-			if (! ns->storage_devices[i]) {
-				break;
-			}
-
-			info_append_string(db, "storage-engine.device", ns->storage_devices[i]);
-		}
-
-		info_append_uint64(db, "storage-engine.filesize", ns->storage_filesize);
-		info_append_uint32(db, "storage-engine.read-block-size", ns->storage_read_block_size);
-		info_append_uint32(db, "storage-engine.write-block-size", ns->storage_write_block_size);
-		info_append_uint32(db, "storage-engine.num-write-blocks", ns->storage_num_write_blocks);
-		info_append_bool(db, "storage-engine.cond-write", ns->cond_write);
 	}
 
 	info_append_uint32(db, "sindex.num-partitions", ns->sindex_num_partitions);
@@ -3404,7 +3387,7 @@ info_command_log_set(char *name, char *params, cf_dyn_buf *db)
 		if (0 != as_info_parameter_get(params, context, level_str, &level_str_len)) {
 			continue;
 		}
-		for (uint i = 0; level_str[i]; i++) level_str[i] = toupper(level_str[i]);
+		for (uint32_t i = 0; level_str[i]; i++) level_str[i] = toupper(level_str[i]);
 
 		if (0 != cf_fault_sink_addcontext(s, context, level_str)) {
 			cf_info(AS_INFO, "log set command: addcontext failed: context %s level %s", context, level_str);
@@ -4773,13 +4756,13 @@ compare_node_info_services(info_node_info *lhs, info_node_info *rhs)
 static void
 dump_node_info_services(info_node_info *info)
 {
-	cf_debug(AS_INFO, "Service address:   %s", cf_safe_string(info->service_addr, "NULL"));
-	cf_debug(AS_INFO, "Alternate address: %s", cf_safe_string(info->alternate_addr, "NULL"));
-	cf_debug(AS_INFO, "Clear, standard:   %s", cf_safe_string(info->services_clear_std, "NULL"));
-	cf_debug(AS_INFO, "TLS, standard:     %s", cf_safe_string(info->services_tls_std, "NULL"));
-	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_safe_string(info->services_clear_alt, "NULL"));
-	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_safe_string(info->services_tls_alt, "NULL"));
-	cf_debug(AS_INFO, "TLS name:          %s", cf_safe_string(info->tls_name, "NULL"));
+	cf_debug(AS_INFO, "Service address:   %s", cf_str_safe_as_null(info->service_addr));
+	cf_debug(AS_INFO, "Alternate address: %s", cf_str_safe_as_null(info->alternate_addr));
+	cf_debug(AS_INFO, "Clear, standard:   %s", cf_str_safe_as_null(info->services_clear_std));
+	cf_debug(AS_INFO, "TLS, standard:     %s", cf_str_safe_as_null(info->services_tls_std));
+	cf_debug(AS_INFO, "Clear, alternate:  %s", cf_str_safe_as_null(info->services_clear_alt));
+	cf_debug(AS_INFO, "TLS, alternate:    %s", cf_str_safe_as_null(info->services_tls_alt));
+	cf_debug(AS_INFO, "TLS name:          %s", cf_str_safe_as_null(info->tls_name));
 }
 
 // This reduce function will eliminate elements from the info hash
@@ -5608,7 +5591,7 @@ info_services_alumni_reset(char *name, cf_dyn_buf *db)
 int
 info_get_namespaces(char *name, cf_dyn_buf *db)
 {
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		cf_dyn_buf_append_string(db, g_config.namespaces[i]->name);
 		cf_dyn_buf_append_char(db, ';');
 	}
@@ -5632,7 +5615,7 @@ info_get_objects(char *name, cf_dyn_buf *db)
 {
 	uint64_t	objects = 0;
 
-	for (uint i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		objects += g_config.namespaces[i]->n_objects;
 	}
 
@@ -5675,7 +5658,7 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "tombstones", ns->n_tombstones);
 
 	repl_stats mp;
-	as_partition_get_master_prole_stats(ns, &mp);
+	as_partition_get_replica_stats(ns, &mp);
 
 	info_append_uint64(db, "master_objects", mp.n_master_objects);
 	info_append_uint64(db, "master_sub_objects", mp.n_master_sub_objects);
@@ -5683,6 +5666,9 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "prole_objects", mp.n_prole_objects);
 	info_append_uint64(db, "prole_sub_objects", mp.n_prole_sub_objects);
 	info_append_uint64(db, "prole_tombstones", mp.n_prole_tombstones);
+	info_append_uint64(db, "non_replica_objects", mp.n_non_replica_objects);
+	info_append_uint64(db, "non_replica_sub_objects", mp.n_non_replica_sub_objects);
+	info_append_uint64(db, "non_replica_tombstones", mp.n_non_replica_tombstones);
 
 	// Expiration & eviction (nsup) stats.
 
@@ -5748,8 +5734,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 			info_append_int(db, "cache_read_pct", (int)(ns->cache_read_pct + 0.5));
 		}
 	}
-
-	// Not bothering with AS_STORAGE_ENGINE_KV.
 
 	// Migration stats.
 
@@ -6027,7 +6011,7 @@ info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db)
 
 	// format w/o namespace is ns1:set1:prop1=val1:prop2=val2:..propn=valn;ns1:set2...;ns2:set1...;
 	if (!ns) {
-		for (uint i = 0; i < g_config.n_namespaces; i++) {
+		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 			as_namespace_get_set_info(g_config.namespaces[i], set_name, db);
 		}
 	}
@@ -6057,7 +6041,7 @@ info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db)
 	// format w/o namespace is
 	// ns:num-bin-names=val1,bin-names-quota=val2,name1,name2,...;ns:...
 	if (!ns) {
-		for (uint i = 0; i < g_config.n_namespaces; i++) {
+		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 			as_namespace_get_bins_info(g_config.namespaces[i], db, true);
 		}
 	}
@@ -6170,7 +6154,7 @@ info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db)
 	// format w/o namespace is:
 	//    ns=ns1:set=set1:indexname=index1:prop1=val1:...:propn=valn;ns=ns1:set=set2:indexname=index2:...;ns=ns2:set=set1:...;
 	if (!ns) {
-		for (uint i = 0; i < g_config.n_namespaces; i++) {
+		for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 			as_sindex_list_str(g_config.namespaces[i], db);
 		}
 	}

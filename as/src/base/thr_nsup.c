@@ -721,7 +721,7 @@ add_to_obj_size_histograms(as_namespace* ns, as_index* r)
 {
 	uint32_t set_id = as_index_get_set_id(r);
 	linear_hist* set_obj_size_hist = ns->set_obj_size_hists[set_id];
-	uint64_t n_rblocks = r->storage_key.ssd.n_rblocks;
+	uint64_t n_rblocks = r->n_rblocks;
 
 	linear_hist_insert_data_point(ns->obj_size_hist, n_rblocks);
 

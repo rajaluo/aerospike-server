@@ -44,7 +44,7 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -347,7 +347,7 @@ as_paxos_sync_msg_generate(uint64_t cluster_key)
 		e += msg_set_uint32(m, AS_PAXOS_MSG_SUCCESSION_LENGTH, cluster_limit);
 	}
 
-	e += msg_set_buf(m, AS_PAXOS_MSG_SUCCESSION, (byte *)p->succession, cluster_limit * sizeof(cf_node), MSG_SET_COPY);
+	e += msg_set_buf(m, AS_PAXOS_MSG_SUCCESSION, (uint8_t *)p->succession, cluster_limit * sizeof(cf_node), MSG_SET_COPY);
 	e += msg_set_uint64(m, AS_PAXOS_MSG_CLUSTER_KEY, cluster_key);
 	if (0 > e) {
 		cf_warning(AS_PAXOS, "unable to generate sync message");
@@ -364,7 +364,7 @@ as_paxos_sync_msg_apply(msg *m)
 {
 	as_paxos *p = g_paxos;
 
-	byte *bufp = NULL;
+	uint8_t *bufp = NULL;
 	size_t bufsz = 0;
 
 	uint64_t cluster_key = 0;
@@ -579,7 +579,7 @@ as_paxos_partition_sync_request_msg_apply(msg *m, int n_pos)
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 		memset(ns->cluster_vinfo[n_pos], 0, sizeof(as_partition_vinfo) * AS_PARTITIONS);
-		byte *bufp = NULL;
+		uint8_t *bufp = NULL;
 		size_t bufsz = sizeof(as_partition_vinfo) * AS_PARTITIONS;
 		e += msg_get_buf_array(m, AS_PAXOS_MSG_PARTITION, elem, &bufp, &bufsz, MSG_GET_DIRECT);
 		elem++;
@@ -621,7 +621,7 @@ as_paxos_partition_sync_msg_generate()
 		e += msg_set_uint32(m, AS_PAXOS_MSG_SUCCESSION_LENGTH, cluster_limit);
 	}
 
-	e += msg_set_buf(m, AS_PAXOS_MSG_SUCCESSION, (byte *)p->succession, cluster_limit * sizeof(cf_node), MSG_SET_COPY);
+	e += msg_set_buf(m, AS_PAXOS_MSG_SUCCESSION, (uint8_t *)p->succession, cluster_limit * sizeof(cf_node), MSG_SET_COPY);
 
 	/*
 	 * Create a message with the global partition version info
@@ -714,7 +714,7 @@ int
 as_paxos_partition_sync_msg_apply(msg *m)
 {
 	as_paxos *p = g_paxos;
-	byte *bufp = NULL;
+	uint8_t *bufp = NULL;
 	size_t bufsz = 0;
 	int e = 0;
 
@@ -791,7 +791,7 @@ as_paxos_partition_sync_msg_apply(msg *m)
 		as_namespace *ns = g_config.namespaces[i];
 		for (int j = 0; j < cluster_size; j++) {
 			memset(ns->cluster_vinfo[j], 0, sizeof(as_partition_vinfo) * AS_PARTITIONS);
-			byte *bufp = NULL;
+			uint8_t *bufp = NULL;
 			bufsz = sizeof(as_partition_vinfo) * AS_PARTITIONS;
 			e += msg_get_buf_array(m, AS_PAXOS_MSG_PARTITION, elem, &bufp, &bufsz, MSG_GET_DIRECT);
 			elem++;
@@ -1838,7 +1838,7 @@ as_paxos_msg_unwrap(msg *m, as_paxos_transaction *t)
 		t->gen.sequence = 0; // just preserve previous behavior of msg_get_uint32()
 		e += msg_get_uint32(m, AS_PAXOS_MSG_GENERATION_SEQUENCE, &t->gen.sequence);
 		// Older versions handled unused AS_PAXOS_MSG_GENERATION_PROPOSAL here.
-		e += msg_get_buf(m, AS_PAXOS_MSG_CHANGE, (byte **)&bufp, &bufsz, MSG_GET_DIRECT);
+		e += msg_get_buf(m, AS_PAXOS_MSG_CHANGE, (uint8_t **)&bufp, &bufsz, MSG_GET_DIRECT);
 	}
 
 	if (0 > e) {
@@ -2160,7 +2160,7 @@ as_paxos_process_heartbeat_event(msg *m)
 	 * Extract the heartbeat information from the message
 	 */
 	e += msg_get_uint32(m, AS_PAXOS_MSG_HEARTBEAT_EVENTS_COUNT, &nevents);
-	e += msg_get_buf(m, AS_PAXOS_MSG_HEARTBEAT_EVENTS, (byte **)&events, &bufsz, MSG_GET_DIRECT);
+	e += msg_get_buf(m, AS_PAXOS_MSG_HEARTBEAT_EVENTS, (uint8_t **)&events, &bufsz, MSG_GET_DIRECT);
 
 	if (0 > e) {
 		cf_warning(AS_PAXOS, "as_paxos_process_heartbeat_event: unable to unwrap heartbeat message");

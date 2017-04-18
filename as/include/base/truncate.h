@@ -91,24 +91,3 @@ typedef struct truncate_hval_s {
 
 void truncate_startup_hash_init(struct as_namespace_s* ns);
 void truncate_action_startup(struct as_namespace_s* ns, const char* set_name, uint64_t lut);
-
-// TODO - promote to util when shash is cleaned up. (See also SMD.)
-static inline uint32_t
-fno_hash_fn(const uint8_t* buf, uint32_t size)
-{
-	uint32_t hash = 2166136261;
-
-	while (size--) {
-		hash ^= *buf++;
-		hash *= 16777619;
-	}
-
-	return hash;
-}
-
-// TODO - make generic string hash and promote to util?
-static inline uint32_t
-truncate_hash_fn(const void* key)
-{
-	return fno_hash_fn((const uint8_t*)key, (uint32_t)strlen((const char*)key));
-}

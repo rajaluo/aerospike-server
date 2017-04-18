@@ -32,7 +32,7 @@
 
 #include "citrusleaf/cf_vector.h"
 
-#include "util.h"
+#include "fault.h"
 
 #include "fabric/hlc.h"
 

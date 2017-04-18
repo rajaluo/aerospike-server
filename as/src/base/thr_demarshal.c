@@ -89,7 +89,7 @@ static cf_sockets g_sockets;
 
 pthread_mutex_t	g_file_handle_a_LOCK = PTHREAD_MUTEX_INITIALIZER;
 as_file_handle	**g_file_handle_a = 0;
-uint			g_file_handle_a_sz;
+uint32_t		g_file_handle_a_sz;
 pthread_t		g_demarshal_reaper_th;
 
 void *thr_demarshal_reaper_fn(void *arg);
@@ -151,7 +151,7 @@ thr_demarshal_reaper_fn(void *arg)
 
 	while (true) {
 		uint64_t now = cf_getms();
-		uint inuse_cnt = 0;
+		uint32_t inuse_cnt = 0;
 		uint64_t kill_ms = g_config.proto_fd_idle_ms;
 		bool refresh = false;
 
@@ -209,7 +209,7 @@ thr_demarshal_reaper_fn(void *arg)
 
 		// Validate the system statistics.
 		if (g_stats.proto_connections_opened - g_stats.proto_connections_closed != inuse_cnt) {
-			cf_debug(AS_DEMARSHAL, "reaper: mismatched connection count:  %"PRIu64" in stats vs %d calculated",
+			cf_debug(AS_DEMARSHAL, "reaper: mismatched connection count:  %"PRIu64" in stats vs %u calculated",
 					g_stats.proto_connections_opened - g_stats.proto_connections_closed,
 					inuse_cnt);
 		}

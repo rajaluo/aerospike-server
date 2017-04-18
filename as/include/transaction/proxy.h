@@ -30,7 +30,7 @@
 #include <stdint.h>
 
 #include "dynbuf.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/datamodel.h"
 #include "base/proto.h"

@@ -590,9 +590,9 @@ as_ldt_subrec_storage_validate(as_storage_rd *rd, char *op)
 		cf_warning(AS_LDT, "as_ldt_subrec_storage_validate %s Parent or ESR digest not set in subrecord", op);
 	}
 
-	uint32_t  esr_pid = as_partition_getid(esr_digest);
-	uint32_t  parent_pid = as_partition_getid(parent_digest);
-	uint32_t  subrec_pid = as_partition_getid(rd->r->keyd);
+	uint32_t  esr_pid = as_partition_getid(&esr_digest);
+	uint32_t  parent_pid = as_partition_getid(&parent_digest);
+	uint32_t  subrec_pid = as_partition_getid(&rd->r->keyd);
 	cf_detail(AS_LDT, "parent_pid = %d, esr_pid=%d subrec_pid=%d",
 			parent_pid, esr_pid, subrec_pid);
 
@@ -1239,7 +1239,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	ldt_sub_gc_info *linfo  = (ldt_sub_gc_info *)udata;
 	as_index *r             = r_ref->r;
 	as_namespace *ns        = linfo->ns;
-	as_partition *p         = &ns->partitions[as_partition_getid(r->keyd)];
+	as_partition *p         = &ns->partitions[as_partition_getid(&r->keyd)];
 
 	// Miscellaneous Checks
 	if (!as_ldt_record_is_sub(r)) {
@@ -1312,7 +1312,7 @@ as_ldt_sub_gc_fn(as_index_ref *r_ref, void *udata)
 	char type   = 0;
 	rv = 0;
 
-	if (check_esr && (rv = as_record_exists(p->sub_vp, &esr_digest, ns))) {
+	if (check_esr && (rv = as_record_exists(p->sub_vp, &esr_digest))) {
 		delete = true;
 		type   = LDT_SUB_GC_NO_ESR;
 	} else if ((rv = as_record_exists_live(p->vp, &parent_digest, ns))) {

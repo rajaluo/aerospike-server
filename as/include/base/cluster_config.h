@@ -31,7 +31,7 @@
 #include <stdio.h>
 
 #include "fault.h"
-#include "util.h"
+#include "node.h"
 
 #include "fabric/hb.h"
 

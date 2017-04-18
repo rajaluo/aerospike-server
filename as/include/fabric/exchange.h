@@ -26,7 +26,7 @@
 #include <stdint.h>
 
 #include "dynbuf.h"
-#include "util.h"
+#include "node.h"
 
 /*
  * ----------------------------------------------------------------------------

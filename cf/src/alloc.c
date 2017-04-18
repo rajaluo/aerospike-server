@@ -40,7 +40,6 @@
 
 #include <citrusleaf/cf_atomic.h>
 #include <citrusleaf/cf_shash.h>
-#include <citrusleaf/cf_types.h> // for byte
 
 #include "fault.h"
 
@@ -2113,7 +2112,7 @@ cf_rc_alloc_at(size_t sz, char *file, int line)
 	cf_rc_hdr *hdr = (cf_rc_hdr *) addr;
 	hdr->count = 1;  // doesn't have to be atomic
 	hdr->sz = sz;
-	byte *base = addr + sizeof(cf_rc_hdr);
+	uint8_t *base = addr + sizeof(cf_rc_hdr);
 
 #ifdef USE_CIRCUS
 	if (cf_alloc_track_sz && (cf_alloc_track_sz == hdr->sz))

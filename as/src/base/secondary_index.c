@@ -199,15 +199,10 @@ inline bool as_sindex_isactive(as_sindex *si)
 {
 	if (! si) {
 		cf_warning(AS_SINDEX, "si is null in as_sindex_isactive");
-		return FALSE;
+		return false;
 	}
-	bool ret;
-	if (si->state == AS_SINDEX_ACTIVE) {
-		ret = TRUE;
-	} else {
-		ret = FALSE;
-	}
-	return ret;
+
+	return si->state == AS_SINDEX_ACTIVE;
 }
 
 // Translation from sindex internal error code to generic client visible Aerospike error code
@@ -259,7 +254,7 @@ as_sindex_gc_status
 as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 {
 	as_partition_reservation rsv;
-	uint32_t pid = as_partition_getid(*keyd);
+	uint32_t pid = as_partition_getid(keyd);
 
 	int timeout_ms = 2;
 	if (as_partition_reserve_migrate_timeout(ns, pid, &rsv, 0, timeout_ms) != 0 ) {
@@ -751,20 +746,6 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 		return AS_SINDEX_ERR_NOTFOUND;
 	}
 	return AS_SINDEX_OK;
-}
-
-// Hash a binname string.
-static inline uint32_t
-as_sindex__set_binid_hash_fn(const void* p_key)
-{
-	return (uint32_t)cf_hash_fnv(p_key, sizeof(uint32_t));
-}
-
-// Hash a binname string.
-static inline uint32_t
-as_sindex__iname_hash_fn(const void* p_key)
-{
-	return (uint32_t)cf_hash_fnv(p_key, strlen((const char*)p_key));
 }
 
 
@@ -1915,7 +1896,7 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 			si->new_imd = NULL;
 		}
 		si->state = AS_SINDEX_DESTROY;
-		as_sindex_reset_binid_has_sindex(ns, imd->binid);
+		as_sindex_reset_binid_has_sindex(ns, si->imd->binid);
 		AS_SINDEX_RELEASE(si);
 		SINDEX_GWUNLOCK();
 		return AS_SINDEX_OK;
@@ -2743,10 +2724,8 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				cf_warning(AS_SINDEX,
                      "Invalid range from %ld to %ld", start->u.i64, end->u.i64);
 				goto Cleanup;
-			} else if (start->u.i64 == end->u.i64) {
-				srange->isrange = FALSE;
 			} else {
-				srange->isrange = TRUE;
+				srange->isrange = start->u.i64 != end->u.i64;
 			}
 			cf_debug(AS_SINDEX, "Range is equal  %"PRId64", %"PRId64"",
 								start->u.i64, end->u.i64);
@@ -2756,7 +2735,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 			data              += sizeof(uint32_t);
 			char* start_binval       = (char *)data;
 			data              += startl;
-			srange->isrange    = FALSE;
+			srange->isrange    = false;
 
 			if (startl >= AS_SINDEX_MAX_STRING_KSIZE) {
 				cf_warning(AS_SINDEX, "Query on bin %s fails. Value length %u too long.", binname, startl);
@@ -2830,7 +2809,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				// they were filled in above.
 				for (int ii = 0; ii < numcenters; ++ii) {
 					srange[ii].num_binval = 1;
-					srange[ii].isrange = TRUE;
+					srange[ii].isrange = true;
 					srange[ii].start.id = srange[0].start.id;
 					srange[ii].start.type = srange[0].start.type;
 					srange[ii].start.u.i64 = center[ii];
@@ -2859,7 +2838,7 @@ as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange
 				// they were filled in above.
 				for (int ii = 0; ii < numcells; ++ii) {
 					srange[ii].num_binval = 1;
-					srange[ii].isrange = TRUE;
+					srange[ii].isrange = true;
 					srange[ii].start.id = srange[0].start.id;
 					srange[ii].start.type = srange[0].start.type;
 					srange[ii].start.u.i64 = cellmin[ii];
@@ -3571,7 +3550,7 @@ static const as_sindex_add_asval_to_itype_sindex_fn
 static inline uint32_t
 as_sindex_hash_fn(const void* p_key)
 {
-	return (uint32_t)cf_hash_fnv(p_key, sizeof(uint32_t));
+	return *(uint32_t *)p_key;
 }
 
 
@@ -3812,7 +3791,7 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 	}
 
 	shash *hash;
-	if (shash_create(&hash, as_sindex_hash_fn, data_size, 1, short_list_size, 0) != SHASH_OK) {
+	if (shash_create(&hash, cf_shash_fn_u32, data_size, 1, short_list_size, 0) != SHASH_OK) {
 		cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() failed to create hash");
 		return -1;
 	}
@@ -4745,6 +4724,7 @@ old_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, u
 				ns         = as_namespace_get_byname(imd.ns_name);
 				if (as_sindex_exists_by_defn(ns, &imd)) {
 					cf_detail(AS_SINDEX, "Index with the same index defn already exists.");
+					as_sindex_imd_free(&imd);
 					// Fail quietly for duplicate sindex requests
 					continue;
 				}
@@ -5072,14 +5052,14 @@ as_sindex_init(as_namespace *ns)
 
 	// binid to simatch lookup
 	if (SHASH_OK != shash_create(&ns->sindex_set_binid_hash,
-						as_sindex__set_binid_hash_fn, AS_SINDEX_PROP_KEY_SIZE, sizeof(cf_ll *),
+						cf_shash_fn_zstr, AS_SINDEX_PROP_KEY_SIZE, sizeof(cf_ll *),
 						AS_SINDEX_MAX, 0)) {
 		cf_crash(AS_AS, "Couldn't create sindex binid hash");
 	}
 
 	// iname to simatch lookup
 	if (SHASH_OK != shash_create(&ns->sindex_iname_hash,
-						as_sindex__iname_hash_fn, AS_ID_INAME_SZ, sizeof(uint32_t),
+						cf_shash_fn_zstr, AS_ID_INAME_SZ, sizeof(uint32_t),
 						AS_SINDEX_MAX, 0)) {
 		cf_crash(AS_AS, "Couldn't create sindex iname hash");
 	}

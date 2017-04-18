@@ -652,6 +652,7 @@ as_index_sprig_get_insert_vlock(as_index_sprig *isprig, cf_digest *keyd,
 			ele->me = t;
 
 			_mm_prefetch(t, _MM_HINT_NTA);
+
 			if ((cmp = cf_digest_compare(keyd, &t->keyd)) == 0) {
 				// The element already exists, simply return it.
 
@@ -796,6 +797,7 @@ as_index_sprig_delete(as_index_sprig *isprig, cf_digest *keyd)
 			ele->me = r;
 
 			_mm_prefetch(r, _MM_HINT_NTA);
+
 			int cmp = cf_digest_compare(keyd, &r->keyd);
 
 			if (cmp == 0) {
@@ -934,6 +936,7 @@ as_index_sprig_search_lockless(as_index_sprig *isprig, cf_digest *keyd,
 
 	while (r_h != SENTINEL_H) {
 		_mm_prefetch(r, _MM_HINT_NTA);
+
 		int cmp = cf_digest_compare(keyd, &r->keyd);
 
 		if (cmp == 0) {
@@ -1263,65 +1266,3 @@ as_index_rotate_right(as_index_ele *a, as_index_ele *b)
 	b->me->right_h = a->me_h;
 	a->parent = b;
 }
-
-
-
-//==========================================================
-// KV API - currently unmaintained.
-//
-
-#ifdef USE_KV
-/*
- * Create a tree "stub" for the storage has index case.
- * Returns:  1 = new
- *           0 = success (found)
- *          -1 = fail
- */
-int
-as_index_ref_initialize(as_index_tree *tree, cf_digest *keyd, as_index_ref *index_ref, bool create_p, as_namespace *ns)
-{
-	/* Allocate memory for the new node and set the node parameters */
-	cf_arenax_handle n_h = cf_arenax_alloc(tree->arena);
-	if (0 == n_h) {
-		// cf_debug(AS_INDEX," malloc failed ");
-		return(-1);
-	}
-	as_index *n = RESOLVE_H(n_h);
-	n->keyd = *keyd;
-	n->rc = 1;
-	n->left_h = n->right_h = tree->sentinel_h;
-	n->color = AS_RED;
-	n->parent_h = tree->sentinel_h;
-
-	if (AS_STORAGE_ENGINE_KV == ns->storage_type)
-		n->storage_key.kv.file_id = STORAGE_INVALID_FILE_ID; // careful here - this is now unsigned
-	else
-		cf_crash(AS_INDEX, "non-KV storage type ns %s key %p", ns->name, keyd);
-
-	index_ref->r = n;
-	index_ref->r_h = n_h;
-	if (!index_ref->skip_lock) {
-		olock_vlock(g_config.record_locks, keyd, &(index_ref->olock));
-		cf_atomic_int_incr(&g_config.global_record_lock_count);
-	}
-	as_index_reserve(n);
-	cf_atomic_int_add(&g_config.global_record_ref_count, 2);
-
-	int rv = !as_storage_record_exists(ns, keyd);
-
-	// Unlock if not found and we're not creating it.
-	if (rv && !create_p) {
-		if (!index_ref->skip_lock) {
-			pthread_mutex_unlock(index_ref->olock);
-			cf_atomic_int_decr(&g_config.global_record_lock_count);
-		}
-		as_index_release(n);
-		cf_atomic_int_decr(&g_config.global_record_ref_count);
-		cf_arenax_free(tree->arena, n_h);
-		index_ref->r = 0;
-		index_ref->r_h = 0;
-	}
-
-	return(rv);
-}
-#endif // USE_KV

@@ -50,7 +50,7 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -111,7 +111,7 @@ typedef struct pickled_record_s {
 	uint32_t      generation;
 	uint32_t      void_time;
 	uint64_t      last_update_time;
-	byte          *record_buf; // pickled!
+	uint8_t       *record_buf; // pickled!
 	size_t        record_len;
 	as_rec_props  rec_props;
 
@@ -191,7 +191,7 @@ as_migrate_state emigration_send_done(emigration *emig);
 void emigrate_signal(emigration *emig);
 
 // Immigration.
-void *run_immigration_reaper(void *unused);
+void *run_immigration_reaper(void *arg);
 int immigration_reaper_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
 
 // Migrate fabric message handling.
@@ -214,31 +214,13 @@ bool as_ldt_precord_is_subrec(const pickled_record *pr);
 bool as_ldt_precord_is_parent(const pickled_record *pr);
 int as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr, uint32_t *info);
 void as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, const emigration *emig);
-int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, msg *m, cf_digest *keyd);
+int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, msg *m);
 
-
-static inline uint32_t
-emigration_hashfn(const void *value, uint32_t value_len)
-{
-	return *(const uint32_t *)value;
-}
-
-static inline uint32_t
-emigration_insert_hashfn(const void *key)
-{
-	return *(const uint32_t *)key;
-}
 
 static inline uint32_t
 immigration_hashfn(const void *value, uint32_t value_len)
 {
 	return ((const immigration_hkey *)value)->emig_id;
-}
-
-static inline uint32_t
-immigration_ldt_version_hashfn(const void *key)
-{
-	return *(const uint32_t *)key;
 }
 
 
@@ -253,7 +235,7 @@ as_migrate_init()
 
 	cf_queue_init(&g_emigration_q, sizeof(emigration*), 4096, true);
 
-	if (cf_rchash_create(&g_emigration_hash, emigration_hashfn,
+	if (cf_rchash_create(&g_emigration_hash, cf_rchash_fn_u32,
 			emigration_destroy, sizeof(uint32_t), 64,
 			CF_RCHASH_CR_MT_MANYLOCK) != CF_RCHASH_OK) {
 		cf_crash(AS_MIGRATE, "couldn't create emigration hash");
@@ -283,9 +265,9 @@ as_migrate_init()
 		cf_crash(AS_MIGRATE, "failed to create immigration reaper thread");
 	}
 
-	if (shash_create(&g_immigration_ldt_version_hash,
-			immigration_ldt_version_hashfn, sizeof(immigration_ldt_version),
-			sizeof(void *), 64, SHASH_CR_MT_MANYLOCK) != SHASH_OK) {
+	if (shash_create(&g_immigration_ldt_version_hash, cf_shash_fn_u32,
+			sizeof(immigration_ldt_version), sizeof(void *), 64,
+			SHASH_CR_MT_MANYLOCK) != SHASH_OK) {
 		cf_crash(AS_MIGRATE, "couldn't create immigration ldt version hash");
 	}
 
@@ -456,9 +438,8 @@ as_migrate_dump(bool verbose)
 void
 emigration_init(emigration *emig)
 {
-	shash_create(&emig->reinsert_hash, emigration_insert_hashfn,
-			sizeof(uint32_t), sizeof(emigration_reinsert_ctrl), 16 * 1024,
-			SHASH_CR_MT_MANYLOCK);
+	shash_create(&emig->reinsert_hash, cf_shash_fn_u32, sizeof(uint32_t),
+			sizeof(emigration_reinsert_ctrl), 16 * 1024, SHASH_CR_MT_MANYLOCK);
 
 	cf_assert(emig->reinsert_hash, AS_MIGRATE, "failed to create hash");
 
@@ -662,7 +643,7 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 
 	uint32_t order = emig->rsv.ns->migrate_order;
 	uint64_t dest_score = (uint64_t)emig->dest - best->avoid_dest;
-	uint32_t n_elements = emig->tx_flags == TX_FLAGS_REQUEST ?
+	uint64_t n_elements = emig->tx_flags == TX_FLAGS_REQUEST ?
 			0 : as_index_tree_size(emig->rsv.tree);
 
 	if (order < best->order ||
@@ -1239,7 +1220,7 @@ emigrate_signal(emigration *emig)
 //
 
 void *
-run_immigration_reaper(void *unused)
+run_immigration_reaper(void *arg)
 {
 	while (true) {
 		cf_rchash_reduce(g_immigration_hash, immigration_reaper_reduce_fn,
@@ -1551,7 +1532,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 {
 	cf_digest *keyd;
 
-	if (msg_get_buf(m, MIG_FIELD_DIGEST, (byte **)&keyd, NULL,
+	if (msg_get_buf(m, MIG_FIELD_DIGEST, (uint8_t **)&keyd, NULL,
 			MSG_GET_DIRECT) != 0) {
 		cf_warning(AS_MIGRATE, "handle insert: msg get for digest failed");
 		as_fabric_msg_put(m);
@@ -1636,7 +1617,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		void *value;
 		size_t value_sz;
 
-		if (msg_get_buf(m, MIG_FIELD_RECORD, (byte **)&value, &value_sz,
+		if (msg_get_buf(m, MIG_FIELD_RECORD, (uint8_t **)&value, &value_sz,
 				MSG_GET_DIRECT) != 0) {
 			cf_warning(AS_MIGRATE, "handle insert: got no record");
 			immigration_release(immig);
@@ -1660,7 +1641,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 				&rec_props_size, MSG_GET_DIRECT);
 		c.rec_props.size = (uint32_t)rec_props_size;
 
-		if (as_ldt_get_migrate_info(immig, &c, m, keyd)) {
+		if (as_ldt_get_migrate_info(immig, &c, m)) {
 			immigration_release(immig);
 			as_fabric_msg_put(m);
 			return;
@@ -2171,7 +2152,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 // side effect component will be filled up
 int
 as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
-		msg *m, cf_digest *keyd)
+		msg *m)
 {
 	c->flag        = AS_COMPONENT_FLAG_MIG;
 	c->pdigest     = cf_digest_zero;
@@ -2201,14 +2182,16 @@ as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c,
 
 	cf_digest *key = NULL;
 
-	msg_get_buf(m, MIG_FIELD_LDT_PDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
+	msg_get_buf(m, MIG_FIELD_LDT_PDIGEST, (uint8_t **)&key, NULL,
+			MSG_GET_DIRECT);
 
 	if (key) {
 		c->pdigest = *key;
 		key = NULL;
 	}
 
-	msg_get_buf(m, MIG_FIELD_LDT_EDIGEST, (byte **)&key, NULL, MSG_GET_DIRECT);
+	msg_get_buf(m, MIG_FIELD_LDT_EDIGEST, (uint8_t **)&key, NULL,
+			MSG_GET_DIRECT);
 
 	if (key) {
 		c->edigest = *key;

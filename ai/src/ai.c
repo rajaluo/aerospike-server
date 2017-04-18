@@ -30,7 +30,6 @@
 #include <citrusleaf/cf_ll.h>
 
 #include "fault.h"
-#include "util.h"
 
 #include "base/datamodel.h"
 
@@ -115,15 +114,6 @@ cf_ll *DropI = NULL;
 static bool g_ai_initialized = false;
 
 /*
- * shash hash function
- */
-static inline uint32_t
-as_sindex__dict_hash_fn(const void* p_key)
-{
-	return (uint32_t)cf_hash_fnv(p_key, sizeof(uint32_t));
-}
-
-/*
  * Functions needed for linked lists
  */
 void
@@ -167,7 +157,7 @@ void ai_init()
 	Num_tbls = 0;
 	Tbl_HW = ntbl;
 
-	if (SHASH_OK != shash_create(&TblD, as_sindex__dict_hash_fn, TBLD_HASH_KEY_SIZE,
+	if (SHASH_OK != shash_create(&TblD, cf_shash_fn_zstr, TBLD_HASH_KEY_SIZE,
 								 sizeof(long), AS_SINDEX_MAX, 0)) {
 		cf_crash(AS_SINDEX, "Failed to allocate tables dictionary");
 	}
@@ -186,7 +176,7 @@ void ai_init()
 	Num_indx = 0;
 	Ind_HW = nindx;
 
-	if (SHASH_OK != shash_create(&IndD, as_sindex__dict_hash_fn, INDD_HASH_KEY_SIZE,
+	if (SHASH_OK != shash_create(&IndD, cf_shash_fn_zstr, INDD_HASH_KEY_SIZE,
 								 sizeof(long), AS_SINDEX_MAX, 0)) {
 		cf_crash(AS_SINDEX, "Failed to allocate tables dictionary");
 	}
@@ -451,7 +441,7 @@ static int newTable(cf_ll *ctypes, cf_ll *cnames, int ccount, char *tname)
 	// NUMERIC - 8 characters
 	// STRING  - 7 characters (we will assume max characters used by bin type to be 10 )
 	// key - bin_name.bin_type (AS_ID_BIN_SZ)
-	if (SHASH_OK != shash_create(&rt->cdict, as_sindex__dict_hash_fn, CDICT_HASH_KEY_SIZE,
+	if (SHASH_OK != shash_create(&rt->cdict, cf_shash_fn_zstr, CDICT_HASH_KEY_SIZE,
 								 sizeof(ci_t *), AS_SINDEX_MAX, 0)) {
 		cf_crash(AS_SINDEX, "Failed to allocate tables dictionary");
 	}

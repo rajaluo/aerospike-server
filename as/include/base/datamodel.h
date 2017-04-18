@@ -45,7 +45,7 @@
 #include "hist_track.h"
 #include "linear_hist.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"
@@ -494,7 +494,7 @@ extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
 extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name);
-extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, byte *name, size_t namesz, bool create_only, bool replace_only, int *p_result);
+extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz, bool create_only, bool replace_only, int *p_result);
 extern int32_t as_bin_get_index(as_storage_rd *rd, const char *name);
 extern int32_t as_bin_get_index_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
 extern void as_bin_allocate_bin_space(as_record *r, as_storage_rd *rd, int32_t delta);
@@ -516,9 +516,9 @@ typedef enum {
 /* Record function declarations */
 extern bool as_record_is_live(const as_record *r);
 extern int as_record_get_create(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns, bool);
-extern int as_record_get(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
+extern int as_record_get(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref);
 extern int as_record_get_live(struct as_index_tree_s *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns);
-extern int as_record_exists(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
+extern int as_record_exists(struct as_index_tree_s *tree, cf_digest *keyd);
 extern int as_record_exists_live(struct as_index_tree_s *tree, cf_digest *keyd, as_namespace *ns);
 extern void as_record_rescue(as_index_ref *r_ref, as_namespace *ns);
 
@@ -818,8 +818,6 @@ struct as_namespace_s {
 	uint32_t		saved_defrag_sleep; // restore after defrag at startup is done
 	uint32_t		defrag_lwm_size; // storage_defrag_lwm_pct % of storage_write_block_size
 
-	uint64_t		kv_size;
-
 	// For data-not-in-memory, we optionally cache swbs after writing to device.
 	// To track fraction of reads from cache:
 	cf_atomic32		n_reads_from_cache;
@@ -916,10 +914,6 @@ struct as_namespace_s {
 	cf_atomic32 	storage_post_write_queue; // number of swbs/device held after writing to device
 	uint32_t		storage_tomb_raider_sleep; // relevant only for enterprise edition
 	uint32_t		storage_write_threads;
-
-	uint32_t		storage_read_block_size;
-	uint32_t		storage_num_write_blocks;
-	PAD_BOOL		cond_write; // true if writing uniqueness is to be enforced by the KV store
 
 	uint32_t		sindex_num_partitions;
 
@@ -1254,7 +1248,7 @@ as_set_stop_writes(as_set *p_set) {
 // These bin functions must be below definition of struct as_namespace_s:
 
 static inline void
-as_bin_set_id_from_name_buf(as_namespace *ns, as_bin *b, byte *buf, int len) {
+as_bin_set_id_from_name_buf(as_namespace *ns, as_bin *b, uint8_t *buf, int len) {
 	if (! ns->single_bin) {
 		b->id = as_bin_get_or_assign_id_w_len(ns, (const char *)buf, len);
 	}
@@ -1268,7 +1262,7 @@ as_bin_set_id_from_name(as_namespace *ns, as_bin *b, const char *name) {
 }
 
 static inline size_t
-as_bin_memcpy_name(as_namespace *ns, byte *buf, as_bin *b) {
+as_bin_memcpy_name(as_namespace *ns, uint8_t *buf, as_bin *b) {
 	size_t len = 0;
 
 	if (! ns->single_bin) {
@@ -1290,7 +1284,7 @@ extern void as_namespaces_init(bool cold_start_cmd, uint32_t instance);
 extern void as_namespaces_setup(bool cold_start_cmd, uint32_t instance, uint32_t stage_capacity);
 extern bool as_namespace_configure_sets(as_namespace *ns);
 extern as_namespace *as_namespace_get_byname(char *name);
-extern as_namespace *as_namespace_get_byid(uint id);
+extern as_namespace *as_namespace_get_byid(uint32_t id);
 extern as_namespace *as_namespace_get_bymsgfield(struct as_msg_field_s *fp);
 extern as_namespace *as_namespace_get_bybuf(uint8_t *name, size_t len);
 extern void as_namespace_eval_write_state(as_namespace *ns, bool *hwm_breached, bool *stop_writes);

@@ -29,8 +29,8 @@
 #include <stdint.h>
 
 #include "msg.h"
+#include "node.h"
 #include "socket.h"
-#include "util.h"
 
 #include "fabric/hb.h"
 

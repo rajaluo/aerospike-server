@@ -59,8 +59,6 @@ int ai_btree_list(char *ns, char *set, as_sindex_metadata **imds, int *num_index
 
 int ai_btree_list_ns(char *ns, as_sindex_metadata **imds, int *num_indexes);
 
-uint ai_btree_remove_partition(as_sindex_metadata *imd, uint32_t partition_id, uint batch_size);
-
 uint64_t ai_btree_get_numkeys(as_sindex_metadata *imd);
 
 int ai_btree_dump(char *ns_name, char *setname, char *fname, bool verbose);

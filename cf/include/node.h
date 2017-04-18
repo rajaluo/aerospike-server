@@ -1,7 +1,7 @@
 /*
- * duplicate_resolve.h
+ * node.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -22,22 +22,10 @@
 
 #pragma once
 
-//==========================================================
-// Includes.
-//
+#include <stdint.h>
 
-#include "msg.h"
-#include "node.h"
+typedef uint64_t cf_node;
 
-#include "base/transaction.h"
-#include "transaction/rw_request.h"
-
-
-//==========================================================
-// Public API.
-//
-
-bool dup_res_make_message(rw_request* rw, as_transaction* tr);
-void dup_res_setup_rw(rw_request* rw, as_transaction* tr, dup_res_done_cb dup_res_cb, timeout_done_cb timeout_cb);
-void dup_res_handle_request(cf_node node, msg* m);
-void dup_res_handle_ack(cf_node node, msg* m);
+uint32_t cf_nodeid_shash_fn(const void *key);
+uint32_t cf_nodeid_rchash_fn(const void *key, uint32_t key_size);
+char *cf_node_name();

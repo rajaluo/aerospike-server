@@ -37,7 +37,7 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/datamodel.h"
 #include "base/ldt.h"
@@ -89,18 +89,13 @@ dup_res_make_message(rw_request* rw, as_transaction* tr)
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref, ns) == 0) {
+	if (as_record_get(tr->rsv.tree, &tr->keyd, &r_ref) == 0) {
 		as_record* r = r_ref.r;
 
 		msg_set_uint32(m, RW_FIELD_GENERATION, r->generation);
 		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, r->last_update_time);
 
-		if (as_new_clustering()) {
-			if (r->void_time != 0) {
-				msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
-			}
-		}
-		else {
+		if (! as_new_clustering()) {
 			msg_set_uint32(m, RW_FIELD_VOID_TIME, r->void_time);
 		}
 
@@ -192,9 +187,9 @@ dup_res_handle_request(cf_node node, msg* m)
 		return;
 	}
 
-	uint32_t generation;
-	uint32_t void_time;
-	uint64_t last_update_time;
+	uint32_t generation = 0;
+	uint32_t void_time = 0;// XXX JUMP - remove void-time in "six months"
+	uint64_t last_update_time = 0;
 
 	bool local_conflict_check;
 
@@ -203,19 +198,10 @@ dup_res_handle_request(cf_node node, msg* m)
 				msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0 &&
 				msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
 						&last_update_time) == 0;
-
-		void_time = 0;
-
-		if (local_conflict_check) {
-			msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-		}
 	}
 	else {
 		local_conflict_check =
 				msg_get_uint32(m, RW_FIELD_GENERATION, &generation) == 0;
-
-		void_time = 0;
-		last_update_time = 0;
 
 		if (local_conflict_check) {
 			msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
@@ -229,7 +215,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	as_partition_reservation rsv;
 	AS_PARTITION_RESERVATION_INIT(rsv); // TODO - not really needed?
 
-	as_partition_reserve_migrate(ns, as_partition_getid(*keyd), &rsv, NULL);
+	as_partition_reserve_migrate(ns, as_partition_getid(keyd), &rsv, NULL);
 
 	if (rsv.cluster_key != cluster_key) {
 		done_handle_request(&rsv, NULL);
@@ -240,7 +226,7 @@ dup_res_handle_request(cf_node node, msg* m)
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	if (as_record_get(rsv.tree, keyd, &r_ref, ns) != 0) {
+	if (as_record_get(rsv.tree, keyd, &r_ref) != 0) {
 		done_handle_request(&rsv, NULL);
 		send_dup_res_ack(node, m, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return;

@@ -1200,7 +1200,7 @@ eval_rec_device_size(predexp_eval_t* bp,
 	// predexp_eval_rec_device_size_t* dp =
 	//     (predexp_eval_rec_device_size_t *) bp;
 
-	int64_t rec_device_size = argsp->md->storage_key.ssd.n_rblocks * 128;
+	int64_t rec_device_size = argsp->md->n_rblocks * 128;
 
 	as_bin_state_set_from_type(&wbinp->bin, AS_PARTICLE_TYPE_INTEGER);
 	as_bin_particle_integer_set(&wbinp->bin, rec_device_size);

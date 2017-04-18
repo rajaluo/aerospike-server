@@ -63,7 +63,7 @@ GEOSPATIAL_HEADERS += geospatial.h
 GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
 
 STORAGE_HEADERS += storage.h drv_ssd.h
-STORAGE_SOURCES += storage.c drv_kv.c drv_memory.c drv_ssd.c
+STORAGE_SOURCES += storage.c drv_memory.c drv_ssd.c
 ifneq ($(USE_EE),1)
   STORAGE_SOURCES += drv_memory_ce.c
   STORAGE_SOURCES += drv_ssd_ce.c
@@ -81,9 +81,6 @@ SOURCES = $(BASE_SOURCES:%=base/%) $(FABRIC_SOURCES:%=fabric/%) $(STORAGE_SOURCE
 SERVER = $(BIN_DIR)/asd
 
 INCLUDES += $(INCLUDE_DIR:%=-I%)
-ifeq ($(USE_KV),1)
-  INCLUDES += -I$(KV_INCLUDE_DIR)
-endif
 INCLUDES += -I$(CF)/include
 INCLUDES += -I$(AI)/include
 INCLUDES += -I$(COMMON)/target/$(PLATFORM)/include
@@ -148,11 +145,6 @@ ifneq ($(PREPRO),1)
   ifneq ($(MEXP_PHASE),1)
     AS_LIB_DEPS = $(AS_LIBRARIES)
   endif
-endif
-
-ifeq ($(USE_KV),1)
-  LIBRARIES += -lvsl -lvsldp
-  CFLAGS += -DUSE_KV
 endif
 
 OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ) $(SYSTEMTAP_PROBES_O)

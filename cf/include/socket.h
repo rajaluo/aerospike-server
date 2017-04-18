@@ -31,9 +31,10 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
+#include "fault.h"
 #include "msg.h"
+#include "node.h"
 #include "tls_mode.h"
-#include "util.h"
 
 // Use forward declaration instead of including openssl/ssl.h here.
 typedef struct ssl_st SSL;

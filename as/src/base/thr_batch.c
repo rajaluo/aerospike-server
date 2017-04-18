@@ -39,7 +39,7 @@
 
 #include "dynbuf.h"
 #include "hist.h"
-#include "util.h"
+#include "node.h"
 #include "socket.h"
 
 #include "base/cfg.h"
@@ -99,7 +99,7 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 				*bb_r = cf_buf_builder_create_size(1024 * 4);
 			}
 
-			int rv = as_partition_reserve_read(ns, as_partition_getid(bmd->keyd), &rsv, &other_node, &cluster_key);
+			int rv = as_partition_reserve_read(ns, as_partition_getid(&bmd->keyd), &rsv, &other_node, &cluster_key);
 
 			if (rv == 0) {
 				as_index_ref r_ref;
@@ -358,7 +358,7 @@ as_batch_direct_queue_task(as_transaction* tr, as_namespace *ns)
 		return AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	uint n_digests = dfp->field_sz / sizeof(cf_digest);
+	uint32_t n_digests = dfp->field_sz / sizeof(cf_digest);
 
 	if (n_digests > g_config.batch_max_requests) {
 		cf_warning(AS_BATCH, "Batch request size %u exceeds max %u.", n_digests, g_config.batch_max_requests);

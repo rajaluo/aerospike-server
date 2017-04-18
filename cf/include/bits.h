@@ -1,7 +1,7 @@
 /*
- * replica_write.h
+ * bits.h
  *
- * Copyright (C) 2016 Aerospike, Inc.
+ * Copyright (C) 2017 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -26,32 +26,23 @@
 // Includes.
 //
 
-#include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
-
-#include "msg.h"
-#include "node.h"
-
-#include "base/datamodel.h"
-#include "base/rec_props.h"
-#include "base/transaction.h"
-#include "transaction/rw_request.h"
 
 
 //==========================================================
 // Public API.
 //
 
-bool repl_write_make_message(rw_request* rw, as_transaction* tr);
-void repl_write_setup_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb repl_write_cb, timeout_done_cb timeout_cb);
-void repl_write_reset_rw(rw_request* rw, as_transaction* tr, repl_write_done_cb cb);
-void repl_write_handle_op(cf_node node, msg* m);
-void repl_write_handle_ack(cf_node node, msg* m);
+// Position of most significant bit, 0 ... 63 from low to high. -1 for value 0.
+static inline int
+cf_msb(uint64_t value)
+{
+	int n = -1;
 
-// For LDTs only:
-void repl_write_ldt_make_message(msg* m, as_transaction* tr,
-		uint8_t** p_pickled_buf, size_t pickled_sz,
-		as_rec_props* p_pickled_rec_props, bool is_subrec);
-void repl_write_handle_multiop(cf_node node, msg* m);
-void repl_write_handle_multiop_ack(cf_node node, msg* m);
+	while (value != 0) {
+		value >>= 1;
+		n++;
+	}
+
+	return n;
+}

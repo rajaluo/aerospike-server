@@ -547,8 +547,8 @@ void
 defrag_move_record(drv_ssd *ssd, drv_ssd_block *block, as_index *r)
 {
 	drv_ssd *old_ssd = ssd;
-	uint64_t old_rblock_id = r->storage_key.ssd.rblock_id;
-	uint16_t old_n_rblocks = r->storage_key.ssd.n_rblocks;
+	uint64_t old_rblock_id = r->rblock_id;
+	uint16_t old_n_rblocks = r->n_rblocks;
 
 	drv_ssds *ssds = (drv_ssds*)ssd->ns->storage_private;
 
@@ -607,9 +607,9 @@ defrag_move_record(drv_ssd *ssd, drv_ssd_block *block, as_index *r)
 
 	memcpy(swb->buf + swb->pos, (const uint8_t*)block, write_size);
 
-	r->storage_key.ssd.file_id = ssd->file_id;
-	r->storage_key.ssd.rblock_id = BYTES_TO_RBLOCKS(WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id) + swb->pos);
-	r->storage_key.ssd.n_rblocks = BYTES_TO_RBLOCKS(write_size);
+	r->file_id = ssd->file_id;
+	r->rblock_id = BYTES_TO_RBLOCKS(WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id) + swb->pos);
+	r->n_rblocks = BYTES_TO_RBLOCKS(write_size);
 
 	swb->pos += write_size;
 
@@ -628,7 +628,7 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 {
 	as_namespace *ns = ssd->ns;
 	as_partition_reservation rsv;
-	uint32_t pid = as_partition_getid(block->keyd);
+	uint32_t pid = as_partition_getid(&block->keyd);
 
 	as_partition_reserve_migrate(ns, pid, &rsv, 0);
 
@@ -636,29 +636,28 @@ ssd_record_defrag(drv_ssd *ssd, drv_ssd_block *block, uint64_t rblock_id,
 	as_index_ref r_ref;
 	r_ref.skip_lock = false;
 
-	bool found = 0 == as_record_get(rsv.tree, &block->keyd, &r_ref, ns);
+	bool found = 0 == as_record_get(rsv.tree, &block->keyd, &r_ref);
 	bool is_subrec = false;
 
 	if (ns->ldt_enabled && ! found) {
-		found = 0 == as_record_get(rsv.sub_tree, &block->keyd, &r_ref, ns);
+		found = 0 == as_record_get(rsv.sub_tree, &block->keyd, &r_ref);
 		is_subrec = true;
 	}
 
 	if (found) {
 		as_index *r = r_ref.r;
 
-		if (r->storage_key.ssd.file_id == ssd->file_id &&
-				r->storage_key.ssd.rblock_id == rblock_id) {
+		if (r->file_id == ssd->file_id && r->rblock_id == rblock_id) {
 			if (r->generation != block->generation) {
 				cf_warning_digest(AS_DRV_SSD, &r->keyd, "device %s defrag: rblock_id %lu generation mismatch (%u:%u)%s ",
 						ssd->name, rblock_id, r->generation, block->generation,
 						is_subrec ? " subrec" : "");
 			}
 
-			if (r->storage_key.ssd.n_rblocks != n_rblocks) {
+			if (r->n_rblocks != n_rblocks) {
 				cf_warning_digest(AS_DRV_SSD, &r->keyd, "device %s defrag: rblock_id %lu n_blocks mismatch (%u:%u)%s ",
-						ssd->name, rblock_id, r->storage_key.ssd.n_rblocks,
-						n_rblocks, is_subrec ? " subrec" : "");
+						ssd->name, rblock_id, r->n_rblocks, n_rblocks,
+						is_subrec ? " subrec" : "");
 			}
 
 			defrag_move_record(ssd, block, r);
@@ -1119,21 +1118,21 @@ ssd_read_record(as_storage_rd *rd)
 	as_namespace *ns = rd->ns;
 	as_record *r = rd->r;
 
-	if (STORAGE_RBLOCK_IS_INVALID(r->storage_key.ssd.rblock_id)) {
+	if (STORAGE_RBLOCK_IS_INVALID(r->rblock_id)) {
 		cf_warning_digest(AS_DRV_SSD, &r->keyd, "{%s} read_ssd: invalid rblock_id ",
 				ns->name);
 		return -1;
 	}
 
-	uint64_t record_offset = RBLOCKS_TO_BYTES(r->storage_key.ssd.rblock_id);
-	uint64_t record_size = RBLOCKS_TO_BYTES(r->storage_key.ssd.n_rblocks);
+	uint64_t record_offset = RBLOCKS_TO_BYTES(r->rblock_id);
+	uint64_t record_size = RBLOCKS_TO_BYTES(r->n_rblocks);
 
 	uint8_t *read_buf = NULL;
 	drv_ssd_block *block = NULL;
 
-	drv_ssd *ssd = rd->u.ssd.ssd;
+	drv_ssd *ssd = rd->ssd;
 	ssd_write_buf *swb = 0;
-	uint32_t wblock = RBLOCK_ID_TO_WBLOCK_ID(ssd, r->storage_key.ssd.rblock_id);
+	uint32_t wblock = RBLOCK_ID_TO_WBLOCK_ID(ssd, r->rblock_id);
 
 	swb_check_and_reserve(&ssd->alloc_table->wblock_state[wblock], &swb);
 
@@ -1218,8 +1217,8 @@ ssd_read_record(as_storage_rd *rd)
 		}
 	}
 
-	rd->u.ssd.block = block;
-	rd->u.ssd.must_free_block = read_buf;
+	rd->block = block;
+	rd->must_free_block = read_buf;
 
 	return 0;
 }
@@ -1238,12 +1237,12 @@ as_storage_record_load_n_bins_ssd(as_storage_rd *rd)
 	}
 
 	// If the record hasn't been read, read it.
-	if (! rd->u.ssd.block && ssd_read_record(rd) != 0) {
+	if (! rd->block && ssd_read_record(rd) != 0) {
 		cf_warning(AS_DRV_SSD, "load_n_bins: failed ssd_read_record()");
 		return -1;
 	}
 
-	rd->n_bins = rd->u.ssd.block->n_bins;
+	rd->n_bins = rd->block->n_bins;
 	return 0;
 }
 
@@ -1256,13 +1255,13 @@ as_storage_record_load_bins_ssd(as_storage_rd *rd)
 	}
 
 	// If the record hasn't been read, read it.
-	if (! rd->u.ssd.block && ssd_read_record(rd) != 0) {
+	if (! rd->block && ssd_read_record(rd) != 0) {
 		cf_warning(AS_DRV_SSD, "load_bins: failed ssd_read_record()");
 		return -1;
 	}
 
-	drv_ssd_block *block = rd->u.ssd.block;
-	uint8_t *block_head = (uint8_t*)rd->u.ssd.block;
+	drv_ssd_block *block = rd->block;
+	uint8_t *block_head = (uint8_t*)rd->block;
 
 	drv_ssd_bin *ssd_bin = (drv_ssd_bin*)(block->data + block->bins_offset);
 
@@ -1287,12 +1286,12 @@ bool
 as_storage_record_get_key_ssd(as_storage_rd *rd)
 {
 	// If the record hasn't been read, read it.
-	if (! rd->u.ssd.block && ssd_read_record(rd) != 0) {
+	if (! rd->block && ssd_read_record(rd) != 0) {
 		cf_warning(AS_DRV_SSD, "get_key: failed ssd_read_record()");
 		return false;
 	}
 
-	drv_ssd_block *block = rd->u.ssd.block;
+	drv_ssd_block *block = rd->block;
 	as_rec_props props;
 
 	props.size = block->bins_offset;
@@ -1564,7 +1563,7 @@ ssd_write_bins(as_storage_rd *rd)
 {
 	as_namespace *ns = rd->ns;
 	as_record *r = rd->r;
-	drv_ssd *ssd = rd->u.ssd.ssd;
+	drv_ssd *ssd = rd->ssd;
 
 	uint32_t write_size = ssd_write_calculate_size(rd);
 
@@ -1680,9 +1679,9 @@ ssd_write_bins(as_storage_rd *rd)
 	block->n_bins = n_bins_written;
 	block->last_update_time = r->last_update_time;
 
-	r->storage_key.ssd.file_id = ssd->file_id;
-	r->storage_key.ssd.rblock_id = BYTES_TO_RBLOCKS(WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id) + swb_pos);
-	r->storage_key.ssd.n_rblocks = BYTES_TO_RBLOCKS(write_size);
+	r->file_id = ssd->file_id;
+	r->rblock_id = BYTES_TO_RBLOCKS(WBLOCK_ID_TO_BYTES(ssd, swb->wblock_id) + swb_pos);
+	r->n_rblocks = BYTES_TO_RBLOCKS(write_size);
 
 	cf_atomic64_add(&ssd->inuse_size, (int64_t)write_size);
 	cf_atomic32_add(&ssd->alloc_table->wblock_state[swb->wblock_id].inuse_sz, (int32_t)write_size);
@@ -1707,11 +1706,11 @@ ssd_write(as_storage_rd *rd)
 	uint64_t old_rblock_id = 0;
 	uint16_t old_n_rblocks = 0;
 
-	if (STORAGE_RBLOCK_IS_VALID(r->storage_key.ssd.rblock_id)) {
+	if (STORAGE_RBLOCK_IS_VALID(r->rblock_id)) {
 		// Replacing an old record.
-		old_ssd = rd->u.ssd.ssd;
-		old_rblock_id = r->storage_key.ssd.rblock_id;
-		old_n_rblocks = r->storage_key.ssd.n_rblocks;
+		old_ssd = rd->ssd;
+		old_rblock_id = r->rblock_id;
+		old_n_rblocks = r->n_rblocks;
 	}
 
 	drv_ssds *ssds = (drv_ssds*)rd->ns->storage_private;
@@ -1719,9 +1718,9 @@ ssd_write(as_storage_rd *rd)
 	// Figure out which device to write to. When replacing an old record, it's
 	// possible this is different from the old device (e.g. if we've added a
 	// fresh device), so derive it from the digest each time.
-	rd->u.ssd.ssd = &ssds->ssds[ssd_get_file_id(ssds, &r->keyd)];
+	rd->ssd = &ssds->ssds[ssd_get_file_id(ssds, &r->keyd)];
 
-	drv_ssd *ssd = rd->u.ssd.ssd;
+	drv_ssd *ssd = rd->ssd;
 
 	if (! ssd) {
 		cf_warning(AS_DRV_SSD, "{%s} ssd_write: no drv_ssd for file_id %u",
@@ -1996,7 +1995,7 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 		uint32_t n_rblocks = (uint32_t)BYTES_TO_RBLOCKS(next_offset - offset);
 
 		bool living = false;
-		uint32_t pid = as_partition_getid(p_block->keyd);
+		uint32_t pid = as_partition_getid(&p_block->keyd);
 		as_partition_reservation rsv;
 
 		as_partition_reserve_migrate(ns, pid, &rsv, 0);
@@ -2004,22 +2003,20 @@ as_storage_analyze_wblock(as_namespace* ns, int device_index,
 		as_index_ref r_ref;
 		r_ref.skip_lock = false;
 
-		if (0 == as_record_get(rsv.tree, &p_block->keyd, &r_ref, ns)) {
+		if (0 == as_record_get(rsv.tree, &p_block->keyd, &r_ref)) {
 			as_index* r = r_ref.r;
 
-			if (r->storage_key.ssd.rblock_id == rblock_id &&
-					r->storage_key.ssd.n_rblocks == n_rblocks) {
+			if (r->rblock_id == rblock_id && r->n_rblocks == n_rblocks) {
 				living = true;
 			}
 
 			as_record_done(&r_ref, ns);
 		}
 		else if (ns->ldt_enabled &&
-				0 == as_record_get(rsv.sub_tree, &p_block->keyd, &r_ref, ns)) {
+				0 == as_record_get(rsv.sub_tree, &p_block->keyd, &r_ref)) {
 			as_index* r = r_ref.r;
 
-			if (r->storage_key.ssd.rblock_id == rblock_id &&
-					r->storage_key.ssd.n_rblocks == n_rblocks) {
+			if (r->rblock_id == rblock_id && r->n_rblocks == n_rblocks) {
 				living = true;
 			}
 
@@ -2661,8 +2658,8 @@ prefer_existing_record(drv_ssd* ssd, uint32_t wblock_id, drv_ssd_block* block,
 {
 	// If the existing record points to the wblock we're reading, the existing
 	// record must be older.
-	if (wblock_id == RBLOCK_ID_TO_WBLOCK_ID(ssd, r->storage_key.ssd.rblock_id)
-			&& ssd->file_id == r->storage_key.ssd.file_id) {
+	if (wblock_id == RBLOCK_ID_TO_WBLOCK_ID(ssd, r->rblock_id)
+			&& ssd->file_id == r->file_id) {
 		return false;
 	}
 
@@ -2734,7 +2731,7 @@ int
 ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 		uint64_t rblock_id, uint32_t n_rblocks)
 {
-	uint32_t pid = as_partition_getid(block->keyd);
+	uint32_t pid = as_partition_getid(&block->keyd);
 
 	// If this isn't a partition we're interested in, skip this record.
 	if (! ssds->get_state_from_storage[pid]) {
@@ -2967,10 +2964,9 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	if (is_create) {
 		ssd->record_add_unique_counter++;
 	}
-	else if (STORAGE_RBLOCK_IS_VALID(r->storage_key.ssd.rblock_id)) {
+	else if (STORAGE_RBLOCK_IS_VALID(r->rblock_id)) {
 		// Replacing an existing record, undo its previous storage accounting.
-		ssd_block_free(&ssds->ssds[r->storage_key.ssd.file_id],
-				r->storage_key.ssd.rblock_id, r->storage_key.ssd.n_rblocks,
+		ssd_block_free(&ssds->ssds[r->file_id], r->rblock_id, r->n_rblocks,
 				"record-add");
 		ssd->record_add_replace_counter++;
 	}
@@ -2988,9 +2984,9 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	ssd->alloc_table->wblock_state[wblock_id].inuse_sz += size;
 
 	// Set/reset the record's storage information.
-	r->storage_key.ssd.file_id = ssd->file_id;
-	r->storage_key.ssd.rblock_id = rblock_id;
-	r->storage_key.ssd.n_rblocks = n_rblocks;
+	r->file_id = ssd->file_id;
+	r->rblock_id = rblock_id;
+	r->n_rblocks = n_rblocks;
 
 	// Make sure subrecord sweep happens.
 	if (is_ldt_parent) {
@@ -4022,16 +4018,14 @@ as_storage_namespace_destroy_ssd(as_namespace *ns)
 int
 as_storage_record_destroy_ssd(as_namespace *ns, as_record *r)
 {
-	if (STORAGE_RBLOCK_IS_VALID(r->storage_key.ssd.rblock_id) &&
-			r->storage_key.ssd.n_rblocks != 0) {
+	if (STORAGE_RBLOCK_IS_VALID(r->rblock_id) && r->n_rblocks != 0) {
 		drv_ssds *ssds = (drv_ssds*)ns->storage_private;
-		drv_ssd *ssd = &ssds->ssds[r->storage_key.ssd.file_id];
+		drv_ssd *ssd = &ssds->ssds[r->file_id];
 
-		ssd_block_free(ssd, r->storage_key.ssd.rblock_id,
-				r->storage_key.ssd.n_rblocks, "destroy");
+		ssd_block_free(ssd, r->rblock_id, r->n_rblocks, "destroy");
 
-		r->storage_key.ssd.rblock_id = STORAGE_INVALID_RBLOCK;
-		r->storage_key.ssd.n_rblocks = 0;
+		r->rblock_id = 0;
+		r->n_rblocks = 0;
 	}
 
 	return 0;
@@ -4045,12 +4039,11 @@ as_storage_record_destroy_ssd(as_namespace *ns, as_record *r)
 int
 as_storage_record_create_ssd(as_storage_rd *rd)
 {
-	rd->u.ssd.block = 0;
-	rd->u.ssd.must_free_block = NULL;
-	rd->u.ssd.ssd = 0;
+	rd->block = NULL;
+	rd->must_free_block = NULL;
+	rd->ssd = NULL;
 
-	cf_assert(rd->r->storage_key.ssd.rblock_id == STORAGE_INVALID_RBLOCK,
-			AS_DRV_SSD, "unexpected - uninitialized rblock-id");
+	cf_assert(rd->r->rblock_id == 0, AS_DRV_SSD, "unexpected - uninitialized rblock-id");
 
 	return 0;
 }
@@ -4061,9 +4054,9 @@ as_storage_record_open_ssd(as_storage_rd *rd)
 {
 	drv_ssds *ssds = (drv_ssds*)rd->ns->storage_private;
 
-	rd->u.ssd.block = 0;
-	rd->u.ssd.must_free_block = NULL;
-	rd->u.ssd.ssd = &ssds->ssds[rd->r->storage_key.ssd.file_id];
+	rd->block = NULL;
+	rd->must_free_block = NULL;
+	rd->ssd = &ssds->ssds[rd->r->file_id];
 
 	return 0;
 }
@@ -4072,10 +4065,10 @@ as_storage_record_open_ssd(as_storage_rd *rd)
 int
 as_storage_record_close_ssd(as_storage_rd *rd)
 {
-	if (rd->u.ssd.must_free_block) {
-		cf_free(rd->u.ssd.must_free_block);
-		rd->u.ssd.must_free_block = NULL;
-		rd->u.ssd.block = NULL;
+	if (rd->must_free_block) {
+		cf_free(rd->must_free_block);
+		rd->must_free_block = NULL;
+		rd->block = NULL;
 	}
 
 	return 0;

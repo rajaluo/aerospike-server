@@ -306,10 +306,10 @@ typedef struct as_smd_cmd_s {
  */
 typedef enum as_smd_msg_op_e {
 	AS_SMD_MSG_OP_SET_ITEM,                 // Add a new, or modify an existing, metadata item
-	AS_SMD_MSG_OP_DELETE_ITEM,              // Delete an existing metadata item (must already exist)
+	AS_SMD_MSG_OP_DELETE_ITEM,              // Delete an existing metadata item (must already exist)  [[Deprecated]]
 	AS_SMD_MSG_OP_MY_CURRENT_METADATA,      // Current metadata sent from a node to the principal
 	AS_SMD_MSG_OP_ACCEPT_THIS_METADATA,     // New blessed metadata sent from the principal to a node
-	AS_SMD_MSG_OP_NODES_CURRENT_METADATA    // Another node's current metadata sent from the principal to a node
+	AS_SMD_MSG_OP_SET_FROM_PR               // Accept item (OPT_API) from principal.
 } as_smd_msg_op_t;
 
 /*
@@ -319,7 +319,7 @@ typedef enum as_smd_msg_op_e {
 								 (AS_SMD_MSG_OP_DELETE_ITEM == op ? "DELETE_ITEM" : \
 								  (AS_SMD_MSG_OP_MY_CURRENT_METADATA == op ? "MY_CURRENT_METADATA" : \
 								   (AS_SMD_MSG_OP_ACCEPT_THIS_METADATA == op ? "ACCEPT_THIS_METADATA" : \
-									(AS_SMD_MSG_OP_NODES_CURRENT_METADATA == op ? "NODES_CURRENT_METADATA" : "<UNKNOWN>")))))
+									(AS_SMD_MSG_OP_SET_FROM_PR == op ? "SET_FROM_PR" : "<UNKNOWN>")))))
 
 /*
  *  Name of the given System Metadata action.
@@ -387,6 +387,32 @@ typedef struct as_smd_external_item_key_s {
 	char key[];                 // Flexible array member for the null-terminated key string.
 } as_smd_external_item_key_t;
 
+typedef enum {
+	AS_SMD_MSG_TRID,
+	AS_SMD_MSG_ID,
+	AS_SMD_MSG_CLUSTER_KEY,
+	AS_SMD_MSG_OP,
+	AS_SMD_MSG_NUM_ITEMS, // deprecate
+	AS_SMD_MSG_ACTION, // deprecate
+	AS_SMD_MSG_MODULE,
+	AS_SMD_MSG_KEY,
+	AS_SMD_MSG_VALUE,
+	AS_SMD_MSG_GENERATION,
+	AS_SMD_MSG_TIMESTAMP,
+	AS_SMD_MSG_MODULE_NAME,
+	AS_SMD_MSG_OPTIONS, // deprecate
+	AS_SMD_MSG_MODULE_COUNTS,
+
+	AS_SMD_MSG_SINGLE_KEY,
+	AS_SMD_MSG_SINGLE_VALUE,
+	AS_SMD_MSG_SINGLE_GENERATION,
+	AS_SMD_MSG_SINGLE_TIMESTAMP,
+
+	NUM_SMD_FIELDS
+} smd_msg_fields;
+
+#define AS_SMD_MSG_V2_IDENTIFIER  0x123B
+
 /*
  *  Define the template for System Metadata messages.
  *
@@ -406,34 +432,27 @@ typedef struct as_smd_external_item_key_s {
  *     12). Options - (uint32_t <==> UINT32)
  */
 static const msg_template as_smd_msg_template[] = {
-#define AS_SMD_MSG_TRID 0
 	{ AS_SMD_MSG_TRID, M_FT_UINT64 },              // Transaction ID for Fabric Transact
-#define AS_SMD_MSG_V2_IDENTIFIER  0x123B
-#define AS_SMD_MSG_ID 1
 	{ AS_SMD_MSG_ID, M_FT_UINT32 },                // Version of the System Metadata protocol
-#define AS_SMD_MSG_CLUSTER_KEY 2
 	{ AS_SMD_MSG_CLUSTER_KEY, M_FT_UINT64 },       // Cluster key corresponding to msg contents
-#define AS_SMD_MSG_OP 3
 	{ AS_SMD_MSG_OP, M_FT_UINT32 },                // Metadata operation
-#define AS_SMD_MSG_NUM_ITEMS 4
 	{ AS_SMD_MSG_NUM_ITEMS, M_FT_UINT32 },         // Number of metadata items
-#define AS_SMD_MSG_ACTION 5
 	{ AS_SMD_MSG_ACTION, M_FT_ARRAY_UINT32 },      // Metadata action array
-#define AS_SMD_MSG_MODULE 6
 	{ AS_SMD_MSG_MODULE, M_FT_ARRAY_STR },         // Metadata module array
-#define AS_SMD_MSG_KEY 7
 	{ AS_SMD_MSG_KEY, M_FT_ARRAY_STR },            // Metadata key array
-#define AS_SMD_MSG_VALUE 8
 	{ AS_SMD_MSG_VALUE, M_FT_ARRAY_STR },          // Metadata value array
-#define AS_SMD_MSG_GENERATION 9
 	{ AS_SMD_MSG_GENERATION, M_FT_ARRAY_UINT32 },  // Metadata generation array
-#define AS_SMD_MSG_TIMESTAMP 10
 	{ AS_SMD_MSG_TIMESTAMP, M_FT_ARRAY_UINT64 },   // Metadata timestamp array
-#define AS_SMD_MSG_MODULE_NAME 11
 	{ AS_SMD_MSG_MODULE_NAME, M_FT_STR },          // Name of module the message is from or else NULL if from all.
-#define AS_SMD_MSG_OPTIONS 12
-	{ AS_SMD_MSG_OPTIONS, M_FT_UINT32 }            // Option flags specifying the originator of the message (i.e., MERGE/API)
+	{ AS_SMD_MSG_OPTIONS, M_FT_UINT32 },           // Option flags specifying the originator of the message (i.e., MERGE/API)
+	{ AS_SMD_MSG_MODULE_COUNTS, M_FT_ARRAY_UINT32 },
+	{ AS_SMD_MSG_SINGLE_KEY, M_FT_STR },
+	{ AS_SMD_MSG_SINGLE_VALUE, M_FT_STR },
+	{ AS_SMD_MSG_SINGLE_GENERATION, M_FT_UINT32 },
+	{ AS_SMD_MSG_SINGLE_TIMESTAMP, M_FT_UINT64 },
 };
+
+COMPILER_ASSERT(sizeof(as_smd_msg_template) / sizeof(msg_template) == NUM_SMD_FIELDS);
 
 #define AS_SMD_MSG_SCRATCH_SIZE 64 // accommodate module name
 
@@ -571,6 +590,7 @@ static uint64_t g_cluster_key;
 static uint32_t g_cluster_size;
 static cf_node g_succession[AS_CLUSTER_SZ];
 
+static void as_smd_destroy_event(as_smd_event_t *evt);
 
 /* Get SMD's principal node */
 
@@ -762,12 +782,148 @@ static as_smd_event_t *as_smd_create_cmd_event(as_smd_cmd_type_t type, ...)
 	return evt;
 }
 
+// New message protocol.
+static bool
+smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
+{
+	int num_items = 0;
+
+	msg_get_buf_array_size(m, AS_SMD_MSG_KEY, &num_items);
+	sm->num_items = (uint32_t)num_items;
+
+	uint32_t mod_max = cf_rchash_get_size(g_smd->modules);
+	uint32_t counts[mod_max];
+	const char *mod_list[mod_max];
+	uint32_t mod_idx;
+
+	if (sm->module_name) {
+		mod_idx = 1;
+		mod_list[0] = sm->module_name;
+
+		// Check single item optimized packing.
+		char *key;
+		size_t sz;
+
+		if (msg_get_str(m, AS_SMD_MSG_SINGLE_KEY, &key, &sz,
+				MSG_GET_DIRECT) == 0) {
+			sm->num_items = 1;
+
+			if (! (sm->items = as_smd_item_list_create(1))) {
+				cf_warning(AS_SMD, "failed to allocate array of 1 metadata items for a msg event");
+				return false;
+			}
+
+			as_smd_item_t *item = sm->items->item[0];
+
+			item->node_id = node_id;
+			item->module_name = cf_strdup(sm->module_name);
+			item->key = cf_strdup(key);
+			msg_get_str(m, AS_SMD_MSG_SINGLE_VALUE, &item->value,
+					&sz, MSG_GET_COPY_MALLOC);
+			msg_get_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
+					&item->generation);
+			msg_get_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
+					&item->timestamp);
+			item->action = item->value ?
+					AS_SMD_ACTION_SET : AS_SMD_ACTION_DELETE;
+
+			return true;
+		}
+
+		counts[0] = sm->num_items;
+	}
+	else {
+		int msg_count = 0;
+		uint32_t total = 0;
+
+		msg_get_buf_array_size(m, AS_SMD_MSG_MODULE, &msg_count);
+		mod_idx = 0;
+
+		for (int i = 0; i < msg_count; i++) {
+			char *name;
+			size_t unused;
+
+			if (msg_get_str_array(m, AS_SMD_MSG_MODULE, i, &name,
+					&unused, MSG_GET_DIRECT) != 0) {
+				continue;
+			}
+
+			mod_list[mod_idx] = name;
+
+			if (msg_get_uint32_array(m, AS_SMD_MSG_MODULE_COUNTS, i,
+					&counts[mod_idx]) != 0) {
+				continue;
+			}
+
+			if (counts[mod_idx] == 0) {
+				continue;
+			}
+
+			total += counts[mod_idx];
+			mod_idx++;
+		}
+
+		if (total != sm->num_items) {
+			cf_warning(AS_SMD, "smd_new_create_msg_event() MODULE_COUNTS total %u does not match number o keys %u", total, sm->num_items);
+
+			if (sm->num_items < total) {
+				sm->num_items = total;
+			}
+		}
+	}
+
+	if (! (sm->items = as_smd_item_list_create(sm->num_items))) {
+		cf_warning(AS_SMD, "failed to allocate array of %d metadata items for a msg event", sm->num_items);
+		return false;
+	}
+
+	uint32_t msg_idx = 0;
+
+	for (uint32_t i = 0; i < mod_idx; i++) {
+		for (uint32_t j = 0; j < counts[i]; j++) {
+			as_smd_item_t *item = sm->items->item[msg_idx];
+			size_t sz = 0;
+
+			item->node_id = node_id;
+			item->module_name = cf_strdup(mod_list[i]);
+
+			if (msg_get_str_array(m, AS_SMD_MSG_KEY, msg_idx, &item->key, &sz,
+					MSG_GET_COPY_MALLOC) != 0) {
+				cf_warning(AS_SMD, "SMD message missing expected key, module %s item %u", mod_list[i], j);
+				return false;
+			}
+
+			msg_get_str_array(m, AS_SMD_MSG_VALUE, msg_idx, &item->value, &sz,
+					MSG_GET_COPY_MALLOC);
+			msg_get_uint32_array(m, AS_SMD_MSG_GENERATION, i,
+					&item->generation);
+			msg_get_uint64_array(m, AS_SMD_MSG_TIMESTAMP, i, &item->timestamp);
+
+			item->action = item->value ?
+					AS_SMD_ACTION_SET : AS_SMD_ACTION_DELETE;
+
+			msg_idx++;
+		}
+	}
+
+	if (sm->op == AS_SMD_MSG_OP_ACCEPT_THIS_METADATA) {
+		sm->options = AS_SMD_ACCEPT_OPT_MERGE;
+	}
+	else if (sm->op == AS_SMD_MSG_OP_SET_FROM_PR) {
+		sm->op = AS_SMD_MSG_OP_ACCEPT_THIS_METADATA;
+		sm->options = AS_SMD_ACCEPT_OPT_API;
+	}
+
+	return true;
+}
+
 /*
  *  Allocate a System Metadata msg event object to handle an incoming SMD fabric msg.
  *
  *  Release using "as_smd_destroy_event()".
  */
-static as_smd_event_t *as_smd_create_msg_event(as_smd_msg_op_t op, cf_node node_id, msg *msg)
+static as_smd_event_t *
+as_smd_old_create_msg_event(as_smd_msg_op_t op, cf_node node_id, msg *msg)
 {
 	as_smd_event_t *evt = NULL;
 	int e = 0;
@@ -793,21 +949,23 @@ static as_smd_event_t *as_smd_create_msg_event(as_smd_msg_op_t op, cf_node node_
 		cf_debug(AS_SMD, "failed to get module name from System Metadata fabric msg (err %d)", e);
 	}
 
-	if ((e = msg_get_uint32(msg, AS_SMD_MSG_NUM_ITEMS, &(smd_msg->num_items)))) {
-		cf_warning(AS_SMD, "failed to get number of metadata items from System Metadata fabric msg (err %d)", e);
-		cf_free(evt);
-		return 0;
+	if (msg_get_uint32(msg, AS_SMD_MSG_NUM_ITEMS, &smd_msg->num_items) != 0) {
+		if (! smd_new_create_msg_event(smd_msg, node_id, msg)) {
+			as_smd_destroy_event(evt);
+			return NULL;
+		}
+
+		return evt;
 	}
 
 	cf_debug(AS_SMD, "ascme():  Received msg w/ node_id %016lX ; ck %016lx ; num_items %d", smd_msg->node_id, smd_msg->cluster_key, smd_msg->num_items);
 
 	// Create a msg event with space for the incoming metadata items.
-	if (!(smd_msg->items = as_smd_item_list_create(smd_msg->num_items))) {
+	if (! (smd_msg->items = as_smd_item_list_create(smd_msg->num_items))) {
 		cf_warning(AS_SMD, "failed to allocate array of %d metadata items for a msg event", smd_msg->num_items);
-		cf_free(evt);
+		as_smd_destroy_event(evt);
 		return 0;
 	}
-	smd_msg->items->node_id = node_id;
 
 	// Populate the msg event items from the fabric msg.
 	for (int i = 0; i < smd_msg->num_items; i++) {
@@ -815,7 +973,7 @@ static as_smd_event_t *as_smd_create_msg_event(as_smd_msg_op_t op, cf_node node_
 
 		item->node_id = node_id;
 
-		e += msg_get_uint32_array(msg, AS_SMD_MSG_ACTION, i, &(item->action));
+		e = msg_get_uint32_array(msg, AS_SMD_MSG_ACTION, i, &item->action);
 		e += msg_get_str_array(msg, AS_SMD_MSG_MODULE, i, &(item->module_name), &ignored_len, MSG_GET_COPY_MALLOC);
 		e += msg_get_str_array(msg, AS_SMD_MSG_KEY, i, &(item->key), &ignored_len, MSG_GET_COPY_MALLOC);
 
@@ -866,9 +1024,7 @@ static as_smd_item_list_t *as_smd_item_list_alloc(size_t num_items)
 	as_smd_item_list_t *item_list = NULL;
 
 	if ((item_list = (as_smd_item_list_t *) cf_malloc(sizeof(as_smd_item_list_t) + num_items * sizeof(as_smd_item_t *)))) {
-		item_list->node_id = 0;
 		item_list->num_items = num_items;
-		item_list->module_name = NULL;
 		memset(item_list->item, 0, num_items * sizeof(as_smd_item_t *));
 	}
 
@@ -978,36 +1134,6 @@ static int as_smd_send_event(as_smd_t *smd, as_smd_event_t *evt)
 
 
 /*
- *  Hash the given string using the 32-bit FNV-1a hash algorithm for use with rchash tables.
- */
-static uint32_t str_hash_fn(const void *value, uint32_t value_len)
-{
-	uint32_t hash = 2166136261;
-
-	while (value_len--) {
-		hash ^= * (uint8_t *) value++;
-		hash *= 16777619;
-	}
-
-	return hash;
-}
-/*
- *  Hash the given string using the 32-bit FNV-1a hash algorithm for use with rchash tables.
- */
-static uint32_t shash_str_hash_fn(const void *value)
-{
-	int value_len = strlen((const char*)value) + 1;
-	uint32_t hash = 2166136261;
-
-	while (value_len--) {
-		hash ^= * (uint8_t *) value++;
-		hash *= 16777619;
-	}
-
-	return hash;
-}
-
-/*
  *  Free a module object from the modules rchash table.
  */
 static void modules_rchash_destructor_fn(void *object)
@@ -1085,12 +1211,12 @@ static as_smd_t *as_smd_create(void)
 	smd->state = AS_SMD_STATE_IDLE;
 
 	// Create the System Metadata modules hash table.
-	if (CF_RCHASH_OK != cf_rchash_create(&(smd->modules), str_hash_fn, modules_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(smd->modules), cf_rchash_fn_fnv32, modules_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the System Metadata modules hash table");
 	}
 
 	// Create the scoreboard hash table.
-	if (SHASH_OK != shash_create(&(smd->scoreboard), ptr_hash_fn, sizeof(cf_node), sizeof(shash *), 127, SHASH_CR_MT_BIGLOCK)) {
+	if (SHASH_OK != shash_create(&(smd->scoreboard), cf_shash_fn_ptr, sizeof(cf_node), sizeof(shash *), 127, SHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the System Metadata scoreboard hash table");
 	}
 
@@ -1150,7 +1276,6 @@ as_smd_t *as_smd_init(void)
 static int as_smd_msgq_push(cf_node node_id, msg *msg, void *udata)
 {
 	as_smd_t *smd = (as_smd_t *) udata;
-	as_smd_event_t *evt = NULL;
 
 	cf_debug(AS_SMD, "asmp():  Receiving a System Metadata message from node %016lX", node_id);
 
@@ -1177,10 +1302,11 @@ static int as_smd_msgq_push(cf_node node_id, msg *msg, void *udata)
 	msg_get_uint32(msg, AS_SMD_MSG_OP, &op);
 
 	cf_debug(AS_SMD, "Operation received %s", AS_SMD_MSG_OP_NAME(op));
+
 	// Create a System Metadata msg event object and populate it from the fabric msg.
-	if (!(evt = as_smd_create_msg_event(op, node_id, msg))) {
-		cf_crash(AS_SMD, "failed to create a System Metadata msg event");
-	}
+	as_smd_event_t *evt = as_smd_old_create_msg_event(op, node_id, msg);
+
+	cf_assert(evt, AS_SMD, "failed to create a System Metadata msg event");
 
 	as_smd_msg_t *smd_msg = &(evt->u.msg);
 	if (smd_msg->num_items) {
@@ -1192,9 +1318,9 @@ static int as_smd_msgq_push(cf_node node_id, msg *msg, void *udata)
 	}
 
 	if (AS_SMD_MSG_OP_ACCEPT_THIS_METADATA == op) {
-		if (msg_get_str(msg, AS_SMD_MSG_MODULE_NAME, &(smd_msg->items->module_name), 0, MSG_GET_COPY_MALLOC)) {
+		if (msg_get_str(msg, AS_SMD_MSG_MODULE_NAME, &smd_msg->module_name, 0,
+				MSG_GET_COPY_MALLOC) != 0) {
 			cf_warning(AS_SMD, "could not get module name from the fabric msg");
-			smd_msg->items->module_name = NULL;
 		}
 
 		if (msg_get_uint32(msg, AS_SMD_MSG_OPTIONS, &(smd_msg->options))) {
@@ -1767,12 +1893,12 @@ static int as_smd_module_create(as_smd_t *smd, as_smd_cmd_t *cmd)
 	module_obj->module = cf_strdup(item->module_name);
 
 	// Create the module's local metadata hash table.
-	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->my_metadata), str_hash_fn, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->my_metadata), cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the local metadata hash table for System Metadata module \"%s\"", item->module_name);
 	}
 
 	// Create the module's external metadata hash table.
-	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->external_metadata), str_hash_fn, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->external_metadata), cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the external metadata hash table for System Metadata module \"%s\"", item->module_name);
 	}
 
@@ -1815,7 +1941,8 @@ static int as_smd_module_create(as_smd_t *smd, as_smd_cmd_t *cmd)
  *  First preference is to get the information from the specific item
  *  If the item is NULL, get the information from the item_list.
  */
-static as_smd_module_t *as_smd_module_get(as_smd_t *smd, as_smd_item_t *item, as_smd_item_list_t *item_list, as_smd_msg_t *msg)
+static as_smd_module_t *
+as_smd_module_get(as_smd_t *smd, as_smd_item_t *item, as_smd_msg_t *msg)
 {
 	as_smd_module_t *module_obj = NULL;
 	int retval = 0;
@@ -1826,15 +1953,13 @@ static as_smd_module_t *as_smd_module_get(as_smd_t *smd, as_smd_item_t *item, as
 	if (msg && msg->module_name) {
 		cf_debug(AS_SMD, "asmg():  Name of module from message: \"%s\"", module_name);
 		module_name = msg->module_name;
-	} else if (item && item->module_name) {
+	}
+	else if (item && item->module_name) {
 		// Next, see if an item is passed and it has module name set.  This takes precedence.
 		module_name = item->module_name;
 		cf_debug(AS_SMD, "asmg():  Name of module from the item: \"%s\"", module_name);
-	} else if (item_list && (item_list->module_name != NULL)) {
-		// If there is no item, see if there is module name at item_list level.
-		module_name = item_list->module_name;
-		cf_debug(AS_SMD, "asmg():  Name of module from item_list: \"%s\"", module_name);
-	} else {
+	}
+	else {
 		// If the message, item, and item_list are NULL, we cannot do anything.
 		cf_debug(AS_SMD, "asmg():  No module name found!");
 		return NULL;
@@ -1886,11 +2011,164 @@ static int as_smd_module_destroy(as_smd_t *smd, as_smd_cmd_t *cmd)
 	return retval;
 }
 
+// New message protocol.
+static msg *
+smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
+		const char *module_name, uint32_t accept_opt)
+{
+	msg *m = as_fabric_msg_get(M_TYPE_SMD);
+
+	if (! m) {
+		cf_warning(AS_SMD, "failed to get a System Metadata msg");
+		return NULL;
+	}
+
+	int e = msg_set_uint32(m, AS_SMD_MSG_ID, AS_SMD_MSG_V2_IDENTIFIER);
+
+	e += msg_set_uint64(m, AS_SMD_MSG_CLUSTER_KEY, g_cluster_key);
+
+	if (op == AS_SMD_MSG_OP_ACCEPT_THIS_METADATA &&
+			(accept_opt & AS_SMD_ACCEPT_OPT_API) != 0) {
+		op = AS_SMD_MSG_OP_SET_FROM_PR;
+	}
+	else if (op == AS_SMD_MSG_OP_DELETE_ITEM) {
+		op = AS_SMD_MSG_OP_SET_ITEM;
+	}
+
+	e += msg_set_uint32(m, AS_SMD_MSG_OP, op);
+
+	if (module_name) {
+		e += msg_set_str(m, AS_SMD_MSG_MODULE_NAME, module_name, MSG_SET_COPY);
+
+		// Single item optimized packing.
+		if (num_items == 1) {
+			e += msg_set_str(m, AS_SMD_MSG_SINGLE_KEY, item[0]->key,
+					MSG_SET_COPY);
+
+			if (item[0]->value) {
+				e += msg_set_str(m, AS_SMD_MSG_SINGLE_VALUE, item[0]->value,
+						MSG_SET_COPY);
+			}
+
+			e += msg_set_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
+					item[0]->generation);
+			e += msg_set_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
+					item[0]->timestamp);
+
+			if (e != 0) {
+				cf_warning(AS_SMD, "msg_set failed");
+				as_fabric_msg_put(m);
+				return NULL;
+			}
+
+			return m;
+		}
+	}
+
+	if (e != 0) {
+		cf_warning(AS_SMD, "msg_set failed");
+		as_fabric_msg_put(m);
+		return NULL;
+	}
+
+	if (num_items == 0) {
+		return m;
+	}
+
+	uint32_t mod_sz = 0;
+	uint32_t mod_idx = 0;
+	uint32_t mod_max = cf_rchash_get_size(g_smd->modules);
+	const char *mod_list[mod_max];
+	uint32_t mod_counts[mod_max];
+
+	if (! module_name) {
+		// Assume same item module names are clustered together.
+		for (size_t i = 0; i < num_items; i++) {
+			if (mod_idx != 0) {
+				const char *name = mod_list[mod_idx - 1];
+
+				if (strcmp(name, item[i]->module_name) == 0) {
+					mod_counts[mod_idx - 1]++;
+					continue;
+				}
+			}
+
+			mod_sz += (uint32_t)strlen(item[i]->module_name) + 1;
+			mod_list[mod_idx] = item[i]->module_name;
+
+			cf_assert(mod_idx < mod_max, AS_SMD, "unexpected item module name ordering");
+
+			mod_counts[mod_idx++] = 1;
+		}
+
+		e = msg_set_str_array_size(m, AS_SMD_MSG_MODULE, mod_idx, mod_sz);
+		e += msg_set_uint32_array_size(m, AS_SMD_MSG_MODULE_COUNTS, mod_idx);
+
+		for (uint32_t i = 0; i < mod_idx; i++) {
+			e += msg_set_str_array(m, AS_SMD_MSG_MODULE, i, mod_list[i]);
+			e += msg_set_uint32_array(m, AS_SMD_MSG_MODULE_COUNTS, i,
+					mod_counts[i]);
+		}
+
+		if (e != 0) {
+			cf_warning(AS_SMD, "msg_set failed");
+			as_fabric_msg_put(m);
+			return NULL;
+		}
+	}
+
+	uint32_t key_sz = 0;
+	uint32_t value_sz = 0;
+
+	for (size_t i = 0; i < num_items; i++) {
+		key_sz += (uint32_t)strlen(item[i]->key) + 1;
+
+		if (item[i]->action == AS_SMD_ACTION_SET && item[i]->value) {
+			value_sz += (uint32_t)strlen(item[i]->value) + 1;
+		}
+	}
+
+	e = msg_set_str_array_size(m, AS_SMD_MSG_KEY, num_items, key_sz);
+	e += msg_set_str_array_size(m, AS_SMD_MSG_VALUE, num_items, value_sz);
+	e += msg_set_uint32_array_size(m, AS_SMD_MSG_GENERATION, num_items);
+	e += msg_set_uint64_array_size(m, AS_SMD_MSG_TIMESTAMP, num_items);
+
+	if (e != 0) {
+		cf_warning(AS_SMD, "msg_set failed");
+		as_fabric_msg_put(m);
+		return NULL;
+	}
+
+	for (size_t i = 0; i < num_items; i++) {
+		e = msg_set_str_array(m, AS_SMD_MSG_KEY, i, item[i]->key);
+
+		if (item[i]->action == AS_SMD_ACTION_SET && item[i]->value) {
+			e += msg_set_str_array(m, AS_SMD_MSG_VALUE, i, item[i]->value);
+		}
+
+		e += msg_set_uint32_array(m, AS_SMD_MSG_GENERATION, i, item[i]->generation);
+		e += msg_set_uint64_array(m, AS_SMD_MSG_TIMESTAMP, i, item[i]->timestamp);
+
+		if (e != 0) {
+			cf_warning(AS_SMD, "msg_set failed");
+			as_fabric_msg_put(m);
+			return NULL;
+		}
+	}
+
+	return m;
+}
+
 /*
  *  Get or create a new System Metadata fabric msg to perform the given operation on the given metadata items.
  */
-static msg *as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const char *module_name, uint32_t accept_opt)
+static msg *
+as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const char *module_name, uint32_t accept_opt)
 {
+	if (as_new_clustering()) {
+		return smd_create_msg(op, item, num_items, module_name, accept_opt);
+	}
+
 	msg *msg = NULL;
 
 	cf_debug(AS_SMD, "Getting a msg for module %s with num_items %zu for accept option 0x%08x", module_name, num_items, accept_opt);
@@ -1911,6 +2189,12 @@ static msg *as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_
 	if (module_name != NULL) {
 		e += msg_set_str(msg, AS_SMD_MSG_MODULE_NAME, module_name, MSG_SET_COPY);
 		e += msg_set_uint32(msg, AS_SMD_MSG_OPTIONS, accept_opt);
+	}
+
+	if (e != 0) {
+		cf_warning(AS_SMD, "msg_set failed");
+		as_fabric_msg_put(msg);
+		return NULL;
 	}
 
 	if (num_items) {
@@ -2134,7 +2418,7 @@ static int as_smd_metadata_change(as_smd_t *smd, as_smd_msg_op_t op, as_smd_item
 			item_list->item[0] = item;
 		}
 
-		as_smd_module_t *module_obj   = as_smd_module_get(smd, item, NULL, NULL);
+		as_smd_module_t *module_obj = as_smd_module_get(smd, item, NULL);
 
 		// At the end of module creation, SMD will be persisted.
 		if (AS_SMD_ACCEPT_OPT_CREATE == accept_opt) {
@@ -2445,8 +2729,6 @@ static void as_smd_cluster_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 	}
 	// (Note:  Use num_items to count the position for each serialized metadata item.)
 	item_list->num_items = 0;
-	// set the module name to NULL, because this item_list consists of items from all modules registered to SMD
-	item_list->module_name = NULL;
 	cf_rchash_reduce(smd->modules, as_smd_module_serialize_reduce_fn, item_list);
 
 	cf_debug(AS_SMD, "aspc():  num_items = %zu (%zu)", item_list->num_items, num_items);
@@ -2665,7 +2947,7 @@ static shash *as_smd_store_metadata_by_module(as_smd_t *smd, as_smd_msg_t *smd_m
 	shash *module_item_count_hash = NULL;
 
 	// Allocate a hash table mapping module ==> number of metadata items from this node.
-	if (SHASH_OK != shash_create(&module_item_count_hash, ptr_hash_fn, sizeof(as_smd_module_t *), sizeof(size_t), 19, SHASH_CR_MT_BIGLOCK)) {
+	if (SHASH_OK != shash_create(&module_item_count_hash, cf_shash_fn_ptr, sizeof(as_smd_module_t *), sizeof(size_t), 19, SHASH_CR_MT_BIGLOCK)) {
 		cf_warning(AS_SMD, "failed to allocate module item count hash table");
 		return NULL;
 	}
@@ -2675,7 +2957,7 @@ static shash *as_smd_store_metadata_by_module(as_smd_t *smd, as_smd_msg_t *smd_m
 
 		// Find the appropriate module's external hash table for this item.
 		as_smd_module_t *module_obj = NULL;
-		if (!(module_obj = as_smd_module_get(smd, item, NULL, NULL))) {
+		if (! (module_obj = as_smd_module_get(smd, item, NULL))) {
 			cf_warning(AS_SMD, "failed to get System Metadata module \"%s\" ~~ Skipping item!", item->module_name);
 			continue;
 		}
@@ -2808,8 +3090,6 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 			cf_crash(AS_SMD, "failed to create merge item list for node %016lX", node_id);
 		}
 
-		item_lists_in[list_num]->module_name = cf_strdup(module);
-
 		// Only search for items to add to the list any exist.
 		if (num_items) {
 			// Add all of this node's metadata items to this list.
@@ -2834,7 +3114,7 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 
 		// No merge policy registered ~~ Default to union.
 		cf_rchash *merge_hash = NULL;
-		if (CF_RCHASH_OK != cf_rchash_create(&merge_hash, str_hash_fn, metadata_rchash_destructor_fn, 0, 127, 0)) {
+		if (CF_RCHASH_OK != cf_rchash_create(&merge_hash, cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, 0)) {
 			cf_crash(AS_SMD, "failed to create merge hash table for module \"%s\"", module_obj->module);
 		}
 
@@ -3063,7 +3343,7 @@ static int as_smd_accept_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as
 	// Accept the metadata item list for this module.
 	if (module_obj->accept_cb) {
 		// Invoke the module's registered accept policy callback function.
-		cf_debug(AS_SMD, "Calling accept callback with OPT_MERGE for module %s with nitems %zu", smd_msg->items->module_name, smd_msg->items->num_items);
+		cf_debug(AS_SMD, "Calling accept callback with OPT_MERGE for module %s with nitems %zu", smd_msg->module_name, smd_msg->items->num_items);
 		(module_obj->accept_cb)(module_obj->module, smd_msg->items, module_obj->accept_udata, smd_msg->options);
 	}
 
@@ -3075,21 +3355,6 @@ static int as_smd_accept_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as
 		cf_warning(AS_SMD, "failed to persist accepted metadata for module \"%s\"", module_obj->module);
 	}
 
-	return retval;
-}
-
-/*
- *  Receive a remote node's metadata and store it locally.
- */
-static int as_smd_receive_nodes_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as_smd_msg_t *smd_msg)
-{
-	int retval = 0;
-
-	as_smd_item_t *item = smd_msg->items->item[0]; // (Only log the fist item.)
-	cf_debug(AS_SMD, "System Metadata thread - receiving node %016lX's metadata: item 0: module \"%s\" ; key \"%s\" ; value \"%s\"",
-			 smd_msg->node_id, module_obj->module, item->key, item->value);
-
-	// NB: The node ID in the msg may not be the expected node!!
 	return retval;
 }
 
@@ -3163,7 +3428,7 @@ int old_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **me
 
 	// Key is (char *)as_smd_item_t.value, value is (as_smd_item_freq_t *).
 	shash *merge_hash = NULL;
-	if (SHASH_OK != shash_create(&merge_hash, shash_str_hash_fn, AS_SMD_MAJORITY_CONSENSUS_KEYSIZE, sizeof(as_smd_item_freq_t *), 17, 0)) {
+	if (SHASH_OK != shash_create(&merge_hash, cf_shash_fn_zstr, AS_SMD_MAJORITY_CONSENSUS_KEYSIZE, sizeof(as_smd_item_freq_t *), 17, 0)) {
 		cf_crash(AS_SMD, "Memory allocation for hash during merge resolution, failed ");
 	}
 
@@ -3218,9 +3483,6 @@ int old_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **me
 	merge_info.num_list = num_list;
 	if (*merged_list == NULL) {
 		(*merged_list) = as_smd_item_list_alloc(num_items);
-		if (num_list > 0 && (lists_to_merge[0] != NULL) && (lists_to_merge[0]->module_name != NULL)) {
-			(*merged_list)->module_name = cf_strdup(lists_to_merge[0]->module_name);
-		}
 	}
 	merge_info.merge_list = (*merged_list);
 	merge_info.merge_list->num_items = 0;
@@ -3407,7 +3669,7 @@ static void as_smd_process_event (as_smd_t *smd, as_smd_event_t *evt)
 		}
 
 		// Find (or create) the module's object.
-		as_smd_module_t *module_obj = as_smd_module_get(smd, (msg->num_items > 0 ? msg->items->item[0] : NULL), msg->items, msg);
+		as_smd_module_t *module_obj = as_smd_module_get(smd, (msg->num_items > 0 ? msg->items->item[0] : NULL), msg);
 
 		switch (msg->op) {
 			case AS_SMD_MSG_OP_SET_ITEM:
@@ -3420,11 +3682,8 @@ static void as_smd_process_event (as_smd_t *smd, as_smd_event_t *evt)
 				break;
 
 			case AS_SMD_MSG_OP_ACCEPT_THIS_METADATA:
+			case AS_SMD_MSG_OP_SET_FROM_PR:
 				as_smd_accept_metadata(smd, module_obj, msg);
-				break;
-
-			case AS_SMD_MSG_OP_NODES_CURRENT_METADATA:
-				as_smd_receive_nodes_metadata(smd, module_obj, msg);
 				break;
 		}
 

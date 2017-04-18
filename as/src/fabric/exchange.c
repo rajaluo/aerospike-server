@@ -521,7 +521,7 @@ typedef struct as_exchange_external_event_publisher_s
 	/**
 	 * Event listener count.
 	 */
-	uint event_listener_count;
+	uint32_t event_listener_count;
 } as_exchange_external_event_publisher;
 
 /*
@@ -1003,7 +1003,8 @@ exchange_external_events_publish()
 
 	if (g_external_event_publisher.event_queued) {
 		g_external_event_publisher.event_queued = false;
-		for (uint i = 0; i < g_external_event_publisher.event_listener_count;
+		for (uint32_t i = 0;
+				i < g_external_event_publisher.event_listener_count;
 				i++) {
 			(g_external_event_publisher.event_listeners[i].event_callback)(
 					&g_external_event_publisher.to_publish,

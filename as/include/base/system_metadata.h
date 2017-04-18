@@ -34,7 +34,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "util.h" // For "cf_node"
+#include "node.h"
 
 
 /* Declare Public System Metadata Types */
@@ -65,10 +65,6 @@ typedef struct as_smd_item_s {
  *  Type for a list of metadata items for a particular node.
  */
 typedef struct as_smd_item_list_s {
-	char *module_name;       // All the items in this list belong to this module if module is not NULL.
-							 // (The module name is only NULL when a node submits all of its local
-							 //   metadata to the Paxos principal after a cluster state change.)
-	cf_node node_id;         // Node providing this metadata
 	size_t num_items;        // Number of metadata items
 	as_smd_item_t *item[];   // Array of pointers to metadata items
 } as_smd_item_list_t;

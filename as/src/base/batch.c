@@ -740,11 +740,8 @@ as_batch_queue_task(as_transaction* btr)
 	as_transaction_init_head(&tr, 0, 0);
 
 	tr.origin = FROM_BATCH;
-	tr.from.batch_shared = shared;
 	tr.from_flags |= FROM_FLAG_BATCH_SUB;
 	tr.start_time = btr->start_time;
-
-	as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
 
 	// Read batch keys and initialize generic transactions.
 	as_batch_input* in;
@@ -764,8 +761,14 @@ as_batch_queue_task(as_transaction* btr)
 	while (tran_row < tran_count && data + BATCH_REPEAT_SIZE <= limit) {
 		// Copy transaction data before memory gets overwritten.
 		in = (as_batch_input*)data;
+
+		tr.msg_fields = 0; // erase previous AS_MSG_FIELD_BIT_SET flag, if any
+		as_transaction_set_msg_field_flag(&tr, AS_MSG_FIELD_TYPE_NAMESPACE);
+
+		tr.from.batch_shared = shared; // is set NULL after sub-transaction
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
-		memcpy(&tr.keyd, &in->keyd, sizeof(cf_digest));
+		tr.keyd = in->keyd;
+		tr.benchmark_time = 0; // reset in case of previous usage
 
 		if (in->repeat) {
 			// Row should use previous namespace and bin names.
@@ -852,12 +855,7 @@ as_batch_queue_task(as_transaction* btr)
 
 		// Submit transaction.
 		if (should_inline) {
-			// Must copy generic transaction before processing inline, because some
-			// transaction fields are modified during the course of the transaction.
-			// We need each transaction to be initialized to proper values.
-			as_transaction tmp;
-			memcpy(&tmp, &tr, sizeof(as_transaction));
-			as_tsvc_process_transaction(&tmp);
+			as_tsvc_process_transaction(&tr);
 		}
 		else {
 			// Queue transaction to be processed by a transaction thread.

@@ -42,7 +42,7 @@
 
 #include "fault.h"
 #include "hardware.h"
-#include "util.h"
+#include "node.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -358,7 +358,7 @@ as_tsvc_process_transaction(as_transaction *tr)
 	// write reservation, replica writes, etc. Writes quickly get split into
 	// write, delete, or UDF after the reservation.
 
-	uint32_t pid = as_partition_getid(tr->keyd);
+	uint32_t pid = as_partition_getid(&tr->keyd);
 	cf_node dest;
 	uint64_t partition_cluster_key = 0;
 

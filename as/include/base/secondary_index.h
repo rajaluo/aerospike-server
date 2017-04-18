@@ -309,7 +309,7 @@ typedef struct as_sindex_metadata_s {
 typedef struct as_sindex_s {
 	int                          simatch; //self, shash match by name
 	// Protected by SI_GWLOCK
-	byte                         state;
+	uint8_t                      state;
 	
 	// TODO : shift to imd
 	volatile uint16_t            flag;
@@ -434,7 +434,7 @@ typedef struct as_sindex_query_context_s {
  *  [startl, endl]
  */
 typedef struct as_sindex_range_s {
-	byte                num_binval;
+	uint8_t             num_binval;
 	bool                isrange;
 	as_sindex_bin_data  start;
 	as_sindex_bin_data  end;
@@ -695,22 +695,6 @@ do {                                            \
 } while(0);
 
 // **************************************************************************************************
-
-
-/*
- * INLINES
- *
- * Hash function that takes a sindex-name and returns a uint64_t hash, 
- * meant for hashing name to a as_sindex_config_var structure. 
- */
-// **************************************************************************************************
-static inline uint32_t
-as_sindex_config_var_hash_fn(const void* p_key)
-{
-	return (uint32_t)cf_hash_fnv(p_key, strlen((const char *)p_key));
-}
-// **************************************************************************************************
-
 
 /*
  * APIs for SMD

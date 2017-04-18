@@ -465,7 +465,7 @@ as_msg_op_iterate(as_msg *msg, as_msg_op *current, int *n)
 
 		as_msg_field *mf = (as_msg_field*)msg->data;
 
-		for (uint i = 0; i < msg->n_fields; i++) {
+		for (uint16_t i = 0; i < msg->n_fields; i++) {
 			mf = as_msg_field_get_next(mf);
 		}
 
@@ -536,8 +536,8 @@ extern bool as_msg_peek_data_in_memory(const as_msg *m);
 extern uint8_t * as_msg_write_fields(uint8_t *buf, const char *ns, int ns_len,
 		const char *set, int set_len, const cf_digest *d, uint64_t trid);
 
-extern uint8_t * as_msg_write_header(uint8_t *buf, size_t msg_sz, uint info1,
-		uint info2, uint info3, uint32_t generation, uint32_t record_ttl,
+extern uint8_t * as_msg_write_header(uint8_t *buf, size_t msg_sz, uint8_t info1,
+		uint8_t info2, uint8_t info3, uint32_t generation, uint32_t record_ttl,
 		uint32_t transaction_ttl, uint32_t n_fields, uint32_t n_ops);
 
 // Async IO

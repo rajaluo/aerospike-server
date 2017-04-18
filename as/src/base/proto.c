@@ -648,7 +648,7 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 		as_namespace *ns, uint64_t trid, const char *setname)
 {
 	// most cases are small messages - try to stack alloc if we can
-	byte fb[MSG_STACK_BUFFER_SZ];
+	uint8_t fb[MSG_STACK_BUFFER_SZ];
 	size_t msg_sz = sizeof(fb);
 //	memset(fb,0xff,msg_sz);  // helpful to see what you might not be setting
 
@@ -679,7 +679,7 @@ as_msg_send_reply(as_file_handle *fd_h, uint32_t result_code, uint32_t generatio
 		rv = 0;
 	}
 
-	if ((uint8_t *)msgp != fb)
+	if (msgp != fb)
 		cf_free(msgp);
 
 	return(rv);
@@ -702,8 +702,8 @@ as_msg_peek_data_in_memory(const as_msg *m)
 }
 
 uint8_t *
-as_msg_write_header(uint8_t *buf, size_t msg_sz, uint info1, uint info2,
-		uint info3, uint32_t generation, uint32_t record_ttl,
+as_msg_write_header(uint8_t *buf, size_t msg_sz, uint8_t info1, uint8_t info2,
+		uint8_t info3, uint32_t generation, uint32_t record_ttl,
 		uint32_t transaction_ttl, uint32_t n_fields, uint32_t n_ops)
 {
 	cl_msg *msg = (cl_msg *) buf;

@@ -79,8 +79,8 @@ cf_vmapx_err cf_vmapx_get_by_name(const cf_vmapx* _this, const char* name, void*
 cf_vmapx_err cf_vmapx_get_index(const cf_vmapx* _this, const char* name, uint32_t* p_index);
 cf_vmapx_err cf_vmapx_get_index_w_len(const cf_vmapx* _this, const char* name, size_t name_len, uint32_t* p_index);
 
-cf_vmapx_err cf_vmapx_put_unique(cf_vmapx* _this, const void* p_value, uint32_t* p_index);
-cf_vmapx_err cf_vmapx_put_unique_w_len(cf_vmapx* _this, const void* p_value, size_t name_len, uint32_t* p_index);
+cf_vmapx_err cf_vmapx_put_unique(cf_vmapx* _this, const char* name, uint32_t* p_index);
+cf_vmapx_err cf_vmapx_put_unique_w_len(cf_vmapx* _this, const char* name, size_t name_len, uint32_t* p_index);
 
 
 //------------------------------------------------

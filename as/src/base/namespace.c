@@ -38,6 +38,7 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_hash_math.h"
 
 #include "dynbuf.h"
 #include "fault.h"
@@ -78,11 +79,12 @@ static as_namespace_id g_namespace_id_counter = 0;
 // Generate a hash value which does not collide with nsid (32 to UINT32_MAX)
 // Note: For namespaces whose fnv hash value falls between 0-32 may collide with
 // namespaces whose value falls between 32-64 as we are adding 32. Hoping that
-// it is low probability. We will know if it happens as server crases upfront.
+// it is low probability. We will know if it happens as server crashes up front.
 static inline uint32_t
 ns_name_hash(char *name)
 {
-	uint32_t hv = (uint32_t) cf_hash_fnv(name, strlen(name));
+	uint32_t hv = cf_hash_fnv32((const uint8_t *)name, strlen(name));
+
 	if (hv <= NAMESPACE_MAX_NUM) {
 		hv += NAMESPACE_MAX_NUM;
 	}
@@ -186,7 +188,7 @@ as_namespace_create(char *name)
 	ns->storage_type = AS_STORAGE_ENGINE_MEMORY;
 	ns->storage_data_in_memory = true;
 	// Note - default true is consistent with AS_STORAGE_ENGINE_MEMORY, but
-	// cfg.c will set default false for AS_STORAGE_ENGINE_SSD and KV.
+	// cfg.c will set default false for AS_STORAGE_ENGINE_SSD.
 
 	ns->storage_filesize = 1024LL * 1024LL * 1024LL * 16LL; // default file size is 16G per file
 	ns->storage_scheduler_mode = NULL; // null indicates default is to not change scheduler mode
@@ -199,10 +201,7 @@ as_namespace_create(char *name)
 	ns->storage_fsync_max_us = 0; // fsync interval in microseconds (0 = never)
 	ns->storage_max_write_cache = 1024 * 1024 * 64;
 	ns->storage_min_avail_pct = 5; // stop writes when < 5% disk is writable
-	ns->storage_num_write_blocks = 64; // number of write blocks to use with KV store devices
 	ns->storage_post_write_queue = 256; // number of wblocks per device used as post-write cache
-	ns->storage_read_block_size = 64 * 1024; // size in bytes of read buffers to use with KV store devices
-	// [Note - current FusionIO maximum read buffer size is 1MB - 512B.]
 	ns->storage_tomb_raider_sleep = 1000; // sleep this many microseconds between each device read
 	ns->storage_write_threads = 1;
 
@@ -298,9 +297,9 @@ as_namespace_configure_sets(as_namespace *ns)
 {
 	for (uint32_t i = 0; i < ns->sets_cfg_count; i++) {
 		uint32_t idx;
-		cf_vmapx_err result = cf_vmapx_put_unique(ns->p_sets_vmap, &ns->sets_cfg_array[i], &idx);
+		cf_vmapx_err result = cf_vmapx_put_unique(ns->p_sets_vmap, ns->sets_cfg_array[i].name, &idx);
 
-		if (result == CF_VMAPX_ERR_NAME_EXISTS) {
+		if (result == CF_VMAPX_OK || result == CF_VMAPX_ERR_NAME_EXISTS) {
 			as_set* p_set = NULL;
 
 			if ((result = cf_vmapx_get_by_index(ns->p_sets_vmap, idx, (void**)&p_set)) != CF_VMAPX_OK) {
@@ -309,12 +308,12 @@ as_namespace_configure_sets(as_namespace *ns)
 				return false;
 			}
 
-			// Rewrite configurable metadata - config values may have changed.
+			// Transfer configurable metadata.
 			p_set->stop_writes_count = ns->sets_cfg_array[i].stop_writes_count;
 			p_set->disable_eviction = ns->sets_cfg_array[i].disable_eviction;
 			p_set->enable_xdr = ns->sets_cfg_array[i].enable_xdr;
 		}
-		else if (result != CF_VMAPX_OK) {
+		else {
 			// Maybe exceeded max sets allowed, but try failing gracefully.
 			cf_warning(AS_NAMESPACE, "vmap error %d", result);
 			return false;
@@ -341,12 +340,12 @@ as_namespace_get_byname(char *name)
 
 
 as_namespace *
-as_namespace_get_byid(uint id)
+as_namespace_get_byid(uint32_t id)
 {
 	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace *ns = g_config.namespaces[i];
 
-		if (id == ns->id) {
+		if (id == (uint32_t)ns->id) {
 			return ns;
 		}
 	}
@@ -356,7 +355,7 @@ as_namespace_get_byid(uint id)
 
 
 as_namespace *
-as_namespace_get_bybuf(byte *buf, size_t len)
+as_namespace_get_bybuf(uint8_t *buf, size_t len)
 {
 	if (len >= AS_ID_NAMESPACE_SZ) {
 		return NULL;
@@ -377,7 +376,7 @@ as_namespace_get_bybuf(byte *buf, size_t len)
 as_namespace *
 as_namespace_get_bymsgfield(as_msg_field *fp)
 {
-	return as_namespace_get_bybuf((byte *)fp->data, as_msg_field_get_value_sz(fp));
+	return as_namespace_get_bybuf(fp->data, as_msg_field_get_value_sz(fp));
 }
 
 
@@ -516,36 +515,25 @@ as_namespace_get_create_set_id(as_namespace *ns, const char *set_name)
 	}
 
 	if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
-		as_set set;
-
-		memset(&set, 0, sizeof(set));
-
-		// Check name length just once, here at insertion. (Other vmap calls are
-		// safe if name is too long - they return CF_VMAPX_ERR_NAME_NOT_FOUND.)
-		strncpy(set.name, set_name, AS_SET_NAME_MAX_SIZE);
-
-		if (set.name[AS_SET_NAME_MAX_SIZE - 1]) {
-			set.name[AS_SET_NAME_MAX_SIZE - 1] = 0;
-
-			cf_warning(AS_NAMESPACE, "set name %s... too long", set.name);
-			return INVALID_SET_ID;
-		}
-
-		set.n_objects = 0; // *not* adding an element
-		result = cf_vmapx_put_unique(ns->p_sets_vmap, &set, &idx);
+		result = cf_vmapx_put_unique(ns->p_sets_vmap, set_name, &idx);
 
 		if (result == CF_VMAPX_ERR_NAME_EXISTS) {
 			return (uint16_t)(idx + 1);
 		}
 
+		if (result == CF_VMAPX_ERR_BAD_PARAM) {
+			cf_warning(AS_NAMESPACE, "set name %s too long", set_name);
+			return INVALID_SET_ID;
+		}
+
 		if (result == CF_VMAPX_ERR_FULL) {
-			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s", set.name);
+			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s", set_name);
 			return INVALID_SET_ID;
 		}
 
 		if (result != CF_VMAPX_OK) {
 			// Currently, remaining errors are all some form of out-of-memory.
-			cf_warning(AS_NAMESPACE, "error %d, can't add %s", result, set.name);
+			cf_warning(AS_NAMESPACE, "error %d, can't add %s", result, set_name);
 			return INVALID_SET_ID;
 		}
 
@@ -590,8 +578,7 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 			len, &idx);
 
 	if (result == CF_VMAPX_ERR_NAME_NOT_FOUND) {
-		// Check name length just once, here at insertion. (Other vmap calls are
-		// safe if name is too long - they return CF_VMAPX_ERR_NAME_NOT_FOUND.)
+		// Special case handling for name too long.
 		if (len >= AS_SET_NAME_MAX_SIZE) {
 			char bad_name[AS_SET_NAME_MAX_SIZE];
 
@@ -602,26 +589,18 @@ as_namespace_get_create_set_w_len(as_namespace *ns, const char *set_name,
 			return -1;
 		}
 
-		as_set set;
-
-		memset(&set, 0, sizeof(set)); // paranoia - vmap null-terminates
-
-		memcpy(set.name, set_name, len);
-		set.n_objects = 0;
-
-		result = cf_vmapx_put_unique_w_len(ns->p_sets_vmap, &set, len, &idx);
+		result = cf_vmapx_put_unique_w_len(ns->p_sets_vmap, set_name, len,
+				&idx);
 
 		// Since this function can be called via many functions simultaneously.
 		// Need to handle race, So handle CF_VMAPX_ERR_NAME_EXISTS.
 		if (result == CF_VMAPX_ERR_FULL) {
-			cf_warning(AS_NAMESPACE, "at set names limit, can't add %s",
-					set.name);
+			cf_warning(AS_NAMESPACE, "at set names limit, can't add set");
 			return -1;
 		}
 
 		if (result != CF_VMAPX_OK && result != CF_VMAPX_ERR_NAME_EXISTS) {
-			cf_warning(AS_NAMESPACE, "unexpected error %d, can't add %s",
-					result, set.name);
+			cf_warning(AS_NAMESPACE, "error %d, can't add set", result);
 			return -1;
 		}
 	}

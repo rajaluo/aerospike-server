@@ -41,6 +41,7 @@
 #include "citrusleaf/cf_shash.h"
 #include "citrusleaf/cf_vector.h"
 
+#include "bits.h"
 #include "cf_str.h"
 #include "dynbuf.h"
 #include "fault.h"
@@ -48,10 +49,10 @@
 #include "hist.h"
 #include "hist_track.h"
 #include "msg.h"
+#include "node.h"
 #include "olock.h"
 #include "socket.h"
 #include "tls.h"
-#include "util.h"
 
 #include "base/cluster_config.h"
 #include "base/datamodel.h"
@@ -584,7 +585,6 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_MEMORY,
 	CASE_NAMESPACE_STORAGE_SSD,
 	CASE_NAMESPACE_STORAGE_DEVICE,
-	CASE_NAMESPACE_STORAGE_KV,
 
 	// Namespace storage-engine device options:
 	// Normally visible, in canonical configuration file order:
@@ -619,14 +619,6 @@ typedef enum {
 	CASE_NAMESPACE_STORAGE_DEVICE_READONLY,
 	CASE_NAMESPACE_STORAGE_DEVICE_SIGNATURE,
 	CASE_NAMESPACE_STORAGE_DEVICE_WRITE_SMOOTHING_PERIOD,
-
-	// Namespace storage-engine kv options:
-	CASE_NAMESPACE_STORAGE_KV_DEVICE,
-	CASE_NAMESPACE_STORAGE_KV_FILESIZE,
-	CASE_NAMESPACE_STORAGE_KV_READ_BLOCK_SIZE,
-	CASE_NAMESPACE_STORAGE_KV_WRITE_BLOCK_SIZE,
-	CASE_NAMESPACE_STORAGE_KV_NUM_WRITE_BLOCKS,
-	CASE_NAMESPACE_STORAGE_KV_COND_WRITE,
 
 	// Namespace set options:
 	CASE_NAMESPACE_SET_DISABLE_EVICTION,
@@ -1082,8 +1074,7 @@ const cfg_opt NAMESPACE_WRITE_COMMIT_OPTS[] = {
 const cfg_opt NAMESPACE_STORAGE_OPTS[] = {
 		{ "memory",							CASE_NAMESPACE_STORAGE_MEMORY },
 		{ "ssd",							CASE_NAMESPACE_STORAGE_SSD },
-		{ "device",							CASE_NAMESPACE_STORAGE_DEVICE },
-		{ "kv",								CASE_NAMESPACE_STORAGE_KV }
+		{ "device",							CASE_NAMESPACE_STORAGE_DEVICE }
 };
 
 const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
@@ -1116,16 +1107,6 @@ const cfg_opt NAMESPACE_STORAGE_DEVICE_OPTS[] = {
 		{ "readonly",						CASE_NAMESPACE_STORAGE_DEVICE_READONLY },
 		{ "signature",						CASE_NAMESPACE_STORAGE_DEVICE_SIGNATURE },
 		{ "write-smoothing-period",			CASE_NAMESPACE_STORAGE_DEVICE_WRITE_SMOOTHING_PERIOD },
-		{ "}",								CASE_CONTEXT_END }
-};
-
-const cfg_opt NAMESPACE_STORAGE_KV_OPTS[] = {
-		{ "device",							CASE_NAMESPACE_STORAGE_KV_DEVICE },
-		{ "filesize",						CASE_NAMESPACE_STORAGE_KV_FILESIZE },
-		{ "read-block-size",				CASE_NAMESPACE_STORAGE_KV_READ_BLOCK_SIZE },
-		{ "write-block-size",				CASE_NAMESPACE_STORAGE_KV_WRITE_BLOCK_SIZE },
-		{ "num-write-blocks",				CASE_NAMESPACE_STORAGE_KV_NUM_WRITE_BLOCKS },
-		{ "cond-write",						CASE_NAMESPACE_STORAGE_KV_COND_WRITE },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1288,7 +1269,6 @@ const int NUM_NAMESPACE_READ_CONSISTENCY_OPTS		= sizeof(NAMESPACE_READ_CONSISTEN
 const int NUM_NAMESPACE_WRITE_COMMIT_OPTS			= sizeof(NAMESPACE_WRITE_COMMIT_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_OPTS				= sizeof(NAMESPACE_STORAGE_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_STORAGE_DEVICE_OPTS			= sizeof(NAMESPACE_STORAGE_DEVICE_OPTS) / sizeof(cfg_opt);
-const int NUM_NAMESPACE_STORAGE_KV_OPTS				= sizeof(NAMESPACE_STORAGE_KV_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_OPTS					= sizeof(NAMESPACE_SET_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SET_ENABLE_XDR_OPTS			= sizeof(NAMESPACE_SET_ENABLE_XDR_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_SI_OPTS						= sizeof(NAMESPACE_SI_OPTS) / sizeof(cfg_opt);
@@ -1342,7 +1322,7 @@ typedef enum {
 	SERVICE,
 	LOGGING, LOGGING_FILE, LOGGING_CONSOLE,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO,
-	NAMESPACE, NAMESPACE_STORAGE_DEVICE, NAMESPACE_STORAGE_KV, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
+	NAMESPACE, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	XDR, XDR_DATACENTER,
 	MOD_LUA,
 	CLUSTER, CLUSTER_GROUP,
@@ -1358,7 +1338,7 @@ const char* CFG_PARSER_STATES[] = {
 		"SERVICE",
 		"LOGGING", "LOGGING_FILE", "LOGGING_CONSOLE",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO",
-		"NAMESPACE", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_STORAGE_KV", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
+		"NAMESPACE", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"XDR", "XDR_DATACENTER",
 		"MOD_LUA",
 		"CLUSTER", "CLUSTER_GROUP",
@@ -2846,11 +2826,6 @@ as_config_init(const char* config_file)
 					ns->storage_data_in_memory = false;
 					cfg_begin_context(&state, NAMESPACE_STORAGE_DEVICE);
 					break;
-				case CASE_NAMESPACE_STORAGE_KV:
-					ns->storage_type = AS_STORAGE_ENGINE_KV;
-					ns->storage_data_in_memory = false;
-					cfg_begin_context(&state, NAMESPACE_STORAGE_KV);
-					break;
 				case CASE_NOT_FOUND:
 				default:
 					cfg_unknown_val_tok_1(&line);
@@ -3148,39 +3123,6 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_STORAGE_DEVICE_SIGNATURE:
 			case CASE_NAMESPACE_STORAGE_DEVICE_WRITE_SMOOTHING_PERIOD:
 				cfg_deprecated_name_tok(&line);
-				break;
-			case CASE_CONTEXT_END:
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		//----------------------------------------
-		// Parse namespace::storage-engine kv context items.
-		//
-		case NAMESPACE_STORAGE_KV:
-			switch (cfg_find_tok(line.name_tok, NAMESPACE_STORAGE_KV_OPTS, NUM_NAMESPACE_STORAGE_KV_OPTS)) {
-			case CASE_NAMESPACE_STORAGE_KV_DEVICE:
-				cfg_add_storage_file(ns, cfg_strdup(&line, true));
-				break;
-			case CASE_NAMESPACE_STORAGE_KV_FILESIZE:
-				ns->storage_filesize = cfg_i64_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_STORAGE_KV_READ_BLOCK_SIZE:
-				ns->storage_read_block_size = cfg_u32_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_STORAGE_KV_WRITE_BLOCK_SIZE:
-				ns->storage_write_block_size = cfg_u32_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_STORAGE_KV_NUM_WRITE_BLOCKS:
-				ns->storage_num_write_blocks = cfg_u32_no_checks(&line);
-				break;
-			case CASE_NAMESPACE_STORAGE_KV_COND_WRITE:
-				ns->cond_write = cfg_bool(&line);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -4502,9 +4444,9 @@ void
 cfg_init_si_var(as_namespace* ns)
 {
 	if (! ns->sindex_cfg_var_hash) {
-		if (SHASH_OK != shash_create(&ns->sindex_cfg_var_hash,
-							as_sindex_config_var_hash_fn, AS_ID_INAME_SZ, sizeof(as_sindex_config_var),
-							AS_SINDEX_MAX, 0)) {
+		if (shash_create(&ns->sindex_cfg_var_hash, cf_shash_fn_zstr,
+				AS_ID_INAME_SZ, sizeof(as_sindex_config_var), AS_SINDEX_MAX,
+				0) != SHASH_OK) {
 			cf_crash_nostack(AS_CFG, "namespace %s couldn't create sindex cfg item hash", ns->name);
 		}
 	}

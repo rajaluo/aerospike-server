@@ -44,7 +44,6 @@
 #include <citrusleaf/cf_ll.h>
 
 #include "fault.h"
-#include "util.h"
 
 #define DIG_ARRAY_QUEUE_HIGHWATER 512
 
@@ -92,7 +91,7 @@ init_ai_objFromDigest(ai_obj *akey, cf_digest *d)
 	init_ai_objU160(akey, *(uint160 *)d);
 }
 
-const byte INIT_CAPACITY = 1;
+const uint8_t INIT_CAPACITY = 1;
 
 static ai_arr *
 ai_arr_new()
@@ -653,7 +652,7 @@ btree_addsinglerec(as_sindex_metadata *imd, ai_obj * key, cf_digest *dig, cf_ll 
 								bool * can_partition_query, bool partitions_pre_reserved)
 {
 	// The digests which belongs to one of the query-able partitions are elligible to go into recl
-	uint32_t pid =  as_partition_getid(*dig);
+	uint32_t pid =  as_partition_getid(dig);
 	as_namespace * ns = imd->si->ns;
 	if (partitions_pre_reserved) {
 		if (!can_partition_query[pid]) {

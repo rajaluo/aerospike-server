@@ -34,7 +34,6 @@
 #include <string.h>
 
 #include "citrusleaf/cf_atomic.h"
-#include "citrusleaf/cf_types.h"
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_byte_order.h"
 

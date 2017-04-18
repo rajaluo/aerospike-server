@@ -26,8 +26,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <citrusleaf/cf_atomic.h>
-#include <citrusleaf/cf_types.h>
+#include "citrusleaf/cf_atomic.h"
 #include "dynbuf.h"
 
 

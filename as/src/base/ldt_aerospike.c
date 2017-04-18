@@ -44,7 +44,6 @@
 
 #include "fault.h"
 #include "msg.h"
-#include "util.h"
 
 #include "base/datamodel.h"
 #include "base/ldt.h"
