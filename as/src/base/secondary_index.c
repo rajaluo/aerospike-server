@@ -101,7 +101,6 @@
 #include "bt_iterator.h"
 #include "cf_str.h"
 #include "fault.h"
-#include "util.h"
 
 #include "base/cdt.h"
 #include "base/cfg.h"
@@ -747,20 +746,6 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 		return AS_SINDEX_ERR_NOTFOUND;
 	}
 	return AS_SINDEX_OK;
-}
-
-// Hash a binname string.
-static inline uint32_t
-as_sindex__set_binid_hash_fn(const void* p_key)
-{
-	return (uint32_t)cf_hash_fnv(p_key, strlen((const char*)p_key));
-}
-
-// Hash a binname string.
-static inline uint32_t
-as_sindex__iname_hash_fn(const void* p_key)
-{
-	return (uint32_t)cf_hash_fnv(p_key, strlen((const char*)p_key));
 }
 
 
@@ -3806,7 +3791,7 @@ as_sindex_sbins_sindex_list_diff_populate(as_sindex_bin *sbins, as_sindex *si, c
 	}
 
 	shash *hash;
-	if (shash_create(&hash, as_sindex_hash_fn, data_size, 1, short_list_size, 0) != SHASH_OK) {
+	if (shash_create(&hash, cf_shash_fn_u32, data_size, 1, short_list_size, 0) != SHASH_OK) {
 		cf_warning(AS_SINDEX, "as_sindex_sbins_sindex_list_diff_populate() failed to create hash");
 		return -1;
 	}
@@ -5067,14 +5052,14 @@ as_sindex_init(as_namespace *ns)
 
 	// binid to simatch lookup
 	if (SHASH_OK != shash_create(&ns->sindex_set_binid_hash,
-						as_sindex__set_binid_hash_fn, AS_SINDEX_PROP_KEY_SIZE, sizeof(cf_ll *),
+						cf_shash_fn_zstr, AS_SINDEX_PROP_KEY_SIZE, sizeof(cf_ll *),
 						AS_SINDEX_MAX, 0)) {
 		cf_crash(AS_AS, "Couldn't create sindex binid hash");
 	}
 
 	// iname to simatch lookup
 	if (SHASH_OK != shash_create(&ns->sindex_iname_hash,
-						as_sindex__iname_hash_fn, AS_ID_INAME_SZ, sizeof(uint32_t),
+						cf_shash_fn_zstr, AS_ID_INAME_SZ, sizeof(uint32_t),
 						AS_SINDEX_MAX, 0)) {
 		cf_crash(AS_AS, "Couldn't create sindex iname hash");
 	}

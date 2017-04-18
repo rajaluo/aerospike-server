@@ -218,27 +218,9 @@ int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, ms
 
 
 static inline uint32_t
-emigration_hashfn(const void *value, uint32_t value_len)
-{
-	return *(const uint32_t *)value;
-}
-
-static inline uint32_t
-emigration_insert_hashfn(const void *key)
-{
-	return *(const uint32_t *)key;
-}
-
-static inline uint32_t
 immigration_hashfn(const void *value, uint32_t value_len)
 {
 	return ((const immigration_hkey *)value)->emig_id;
-}
-
-static inline uint32_t
-immigration_ldt_version_hashfn(const void *key)
-{
-	return *(const uint32_t *)key;
 }
 
 
@@ -253,7 +235,7 @@ as_migrate_init()
 
 	cf_queue_init(&g_emigration_q, sizeof(emigration*), 4096, true);
 
-	if (cf_rchash_create(&g_emigration_hash, emigration_hashfn,
+	if (cf_rchash_create(&g_emigration_hash, cf_rchash_fn_u32,
 			emigration_destroy, sizeof(uint32_t), 64,
 			CF_RCHASH_CR_MT_MANYLOCK) != CF_RCHASH_OK) {
 		cf_crash(AS_MIGRATE, "couldn't create emigration hash");
@@ -283,9 +265,9 @@ as_migrate_init()
 		cf_crash(AS_MIGRATE, "failed to create immigration reaper thread");
 	}
 
-	if (shash_create(&g_immigration_ldt_version_hash,
-			immigration_ldt_version_hashfn, sizeof(immigration_ldt_version),
-			sizeof(void *), 64, SHASH_CR_MT_MANYLOCK) != SHASH_OK) {
+	if (shash_create(&g_immigration_ldt_version_hash, cf_shash_fn_u32,
+			sizeof(immigration_ldt_version), sizeof(void *), 64,
+			SHASH_CR_MT_MANYLOCK) != SHASH_OK) {
 		cf_crash(AS_MIGRATE, "couldn't create immigration ldt version hash");
 	}
 
@@ -456,9 +438,8 @@ as_migrate_dump(bool verbose)
 void
 emigration_init(emigration *emig)
 {
-	shash_create(&emig->reinsert_hash, emigration_insert_hashfn,
-			sizeof(uint32_t), sizeof(emigration_reinsert_ctrl), 16 * 1024,
-			SHASH_CR_MT_MANYLOCK);
+	shash_create(&emig->reinsert_hash, cf_shash_fn_u32, sizeof(uint32_t),
+			sizeof(emigration_reinsert_ctrl), 16 * 1024, SHASH_CR_MT_MANYLOCK);
 
 	cf_assert(emig->reinsert_hash, AS_MIGRATE, "failed to create hash");
 

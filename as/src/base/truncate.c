@@ -122,7 +122,7 @@ as_truncate_init(as_namespace* ns)
 
 	// Lazily create the global filter shash used on the SMD principal.
 	if (! g_truncate_filter_hash &&
-			shash_create(&g_truncate_filter_hash, truncate_hash_fn,
+			shash_create(&g_truncate_filter_hash, cf_shash_fn_zstr,
 					TRUNCATE_KEY_SIZE, sizeof(truncate_hval),
 					1024 * g_config.n_namespaces, 0) != SHASH_OK) {
 		cf_crash(AS_TRUNCATE, "truncate init - failed filter-hash create");

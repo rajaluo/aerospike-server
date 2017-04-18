@@ -35,11 +35,11 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
 
 #include "fault.h"
 #include "node.h"
-#include "util.h"
 
 #include "base/cluster_config.h"
 #include "base/cfg.h"
@@ -279,7 +279,8 @@ as_partition_balance_init()
 {
 	// Cache hashed pids for all future rebalances.
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		g_hashed_pids[pid] = cf_hash_fnv(&pid, sizeof(uint32_t));
+		g_hashed_pids[pid] = cf_hash_fnv64((const uint8_t*)&pid,
+				sizeof(uint32_t));
 	}
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
@@ -926,7 +927,8 @@ fill_global_tables(cf_node* full_node_seq_table,
 	uint64_t hashed_nodes[g_cluster_size];
 
 	for (uint32_t n = 0; n < g_cluster_size; n++) {
-		hashed_nodes[n] = cf_hash_fnv(&g_succession[n], sizeof(cf_node));
+		hashed_nodes[n] = cf_hash_fnv64((const uint8_t*)&g_succession[n],
+				sizeof(cf_node));
 	}
 
 	// Build the node sequence table.
@@ -940,7 +942,7 @@ fill_global_tables(cf_node* full_node_seq_table,
 
 			cf_node* node_p = &FULL_NODE_SEQ(pid, n);
 
-			*node_p = cf_hash_oneatatime(&h, sizeof(h));
+			*node_p = cf_hash_jen64((const uint8_t*)&h, sizeof(h));
 
 			// Overlay index onto last byte.
 			*node_p &= AS_CLUSTER_SZ_MASKP;

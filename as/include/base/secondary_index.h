@@ -40,7 +40,6 @@
 
 #include "dynbuf.h"
 #include "hist.h"
-#include "util.h"
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -696,22 +695,6 @@ do {                                            \
 } while(0);
 
 // **************************************************************************************************
-
-
-/*
- * INLINES
- *
- * Hash function that takes a sindex-name and returns a uint64_t hash, 
- * meant for hashing name to a as_sindex_config_var structure. 
- */
-// **************************************************************************************************
-static inline uint32_t
-as_sindex_config_var_hash_fn(const void* p_key)
-{
-	return (uint32_t)cf_hash_fnv(p_key, strlen((const char *)p_key));
-}
-// **************************************************************************************************
-
 
 /*
  * APIs for SMD

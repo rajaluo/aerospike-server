@@ -4444,9 +4444,9 @@ void
 cfg_init_si_var(as_namespace* ns)
 {
 	if (! ns->sindex_cfg_var_hash) {
-		if (SHASH_OK != shash_create(&ns->sindex_cfg_var_hash,
-							as_sindex_config_var_hash_fn, AS_ID_INAME_SZ, sizeof(as_sindex_config_var),
-							AS_SINDEX_MAX, 0)) {
+		if (shash_create(&ns->sindex_cfg_var_hash, cf_shash_fn_zstr,
+				AS_ID_INAME_SZ, sizeof(as_sindex_config_var), AS_SINDEX_MAX,
+				0) != SHASH_OK) {
 			cf_crash_nostack(AS_CFG, "namespace %s couldn't create sindex cfg item hash", ns->name);
 		}
 	}

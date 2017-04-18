@@ -27,7 +27,6 @@
 #include <stdint.h>
 
 #include "dynbuf.h"
-#include "util.h"
 
 #include "base/proto.h"
 #include "base/security.h"

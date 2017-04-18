@@ -38,6 +38,7 @@
 
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_hash_math.h"
 
 #include "dynbuf.h"
 #include "fault.h"
@@ -45,7 +46,6 @@
 #include "jem.h"
 #include "linear_hist.h"
 #include "meminfo.h"
-#include "util.h"
 #include "vmapx.h"
 
 #include "base/cfg.h"
@@ -79,11 +79,13 @@ static as_namespace_id g_namespace_id_counter = 0;
 // Generate a hash value which does not collide with nsid (32 to UINT32_MAX)
 // Note: For namespaces whose fnv hash value falls between 0-32 may collide with
 // namespaces whose value falls between 32-64 as we are adding 32. Hoping that
-// it is low probability. We will know if it happens as server crases upfront.
+// it is low probability. We will know if it happens as server crashes up front.
 static inline uint32_t
 ns_name_hash(char *name)
 {
-	uint32_t hv = (uint32_t) cf_hash_fnv(name, strlen(name));
+	// FIXME - is this dependent on other nodes doing the same thing?
+	uint32_t hv = (uint32_t)cf_hash_fnv64((const uint8_t *)name, strlen(name));
+
 	if (hv <= NAMESPACE_MAX_NUM) {
 		hv += NAMESPACE_MAX_NUM;
 	}

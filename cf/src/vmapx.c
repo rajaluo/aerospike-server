@@ -34,8 +34,7 @@
 #include <string.h>
 
 #include "citrusleaf/alloc.h"
-
-#include "util.h"
+#include "citrusleaf/cf_hash_math.h"
 
 
 //==========================================================
@@ -390,7 +389,7 @@ vhash_destroy(vhash* h)
 bool
 vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 {
-	uint64_t hashed_key = cf_hash_fnv((void*)zkey, key_len);
+	uint64_t hashed_key = cf_hash_fnv32((const uint8_t*)zkey, key_len);
 	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
 
 	vhash_ele* e = (vhash_ele*)(h->table + (h->ele_size * row_i));
@@ -434,7 +433,7 @@ vhash_put(vhash* h, const char* zkey, size_t key_len, uint32_t value)
 bool
 vhash_get(const vhash* h, const char* key, size_t key_len, uint32_t* p_value)
 {
-	uint64_t hashed_key = cf_hash_fnv((void*)key, key_len);
+	uint64_t hashed_key = cf_hash_fnv32((const uint8_t*)key, key_len);
 	uint32_t row_i = (uint32_t)(hashed_key % h->n_rows);
 	uint32_t row_count = h->row_counts[row_i];
 

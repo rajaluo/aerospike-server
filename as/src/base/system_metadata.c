@@ -1134,36 +1134,6 @@ static int as_smd_send_event(as_smd_t *smd, as_smd_event_t *evt)
 
 
 /*
- *  Hash the given string using the 32-bit FNV-1a hash algorithm for use with rchash tables.
- */
-static uint32_t str_hash_fn(const void *value, uint32_t value_len)
-{
-	uint32_t hash = 2166136261;
-
-	while (value_len--) {
-		hash ^= * (uint8_t *) value++;
-		hash *= 16777619;
-	}
-
-	return hash;
-}
-/*
- *  Hash the given string using the 32-bit FNV-1a hash algorithm for use with rchash tables.
- */
-static uint32_t shash_str_hash_fn(const void *value)
-{
-	int value_len = strlen((const char*)value) + 1;
-	uint32_t hash = 2166136261;
-
-	while (value_len--) {
-		hash ^= * (uint8_t *) value++;
-		hash *= 16777619;
-	}
-
-	return hash;
-}
-
-/*
  *  Free a module object from the modules rchash table.
  */
 static void modules_rchash_destructor_fn(void *object)
@@ -1241,12 +1211,12 @@ static as_smd_t *as_smd_create(void)
 	smd->state = AS_SMD_STATE_IDLE;
 
 	// Create the System Metadata modules hash table.
-	if (CF_RCHASH_OK != cf_rchash_create(&(smd->modules), str_hash_fn, modules_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(smd->modules), cf_rchash_fn_fnv32, modules_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the System Metadata modules hash table");
 	}
 
 	// Create the scoreboard hash table.
-	if (SHASH_OK != shash_create(&(smd->scoreboard), ptr_hash_fn, sizeof(cf_node), sizeof(shash *), 127, SHASH_CR_MT_BIGLOCK)) {
+	if (SHASH_OK != shash_create(&(smd->scoreboard), cf_shash_fn_ptr, sizeof(cf_node), sizeof(shash *), 127, SHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the System Metadata scoreboard hash table");
 	}
 
@@ -1923,12 +1893,12 @@ static int as_smd_module_create(as_smd_t *smd, as_smd_cmd_t *cmd)
 	module_obj->module = cf_strdup(item->module_name);
 
 	// Create the module's local metadata hash table.
-	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->my_metadata), str_hash_fn, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->my_metadata), cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the local metadata hash table for System Metadata module \"%s\"", item->module_name);
 	}
 
 	// Create the module's external metadata hash table.
-	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->external_metadata), str_hash_fn, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
+	if (CF_RCHASH_OK != cf_rchash_create(&(module_obj->external_metadata), cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, CF_RCHASH_CR_MT_BIGLOCK)) {
 		cf_crash(AS_SMD, "failed to create the external metadata hash table for System Metadata module \"%s\"", item->module_name);
 	}
 
@@ -2977,7 +2947,7 @@ static shash *as_smd_store_metadata_by_module(as_smd_t *smd, as_smd_msg_t *smd_m
 	shash *module_item_count_hash = NULL;
 
 	// Allocate a hash table mapping module ==> number of metadata items from this node.
-	if (SHASH_OK != shash_create(&module_item_count_hash, ptr_hash_fn, sizeof(as_smd_module_t *), sizeof(size_t), 19, SHASH_CR_MT_BIGLOCK)) {
+	if (SHASH_OK != shash_create(&module_item_count_hash, cf_shash_fn_ptr, sizeof(as_smd_module_t *), sizeof(size_t), 19, SHASH_CR_MT_BIGLOCK)) {
 		cf_warning(AS_SMD, "failed to allocate module item count hash table");
 		return NULL;
 	}
@@ -3144,7 +3114,7 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 
 		// No merge policy registered ~~ Default to union.
 		cf_rchash *merge_hash = NULL;
-		if (CF_RCHASH_OK != cf_rchash_create(&merge_hash, str_hash_fn, metadata_rchash_destructor_fn, 0, 127, 0)) {
+		if (CF_RCHASH_OK != cf_rchash_create(&merge_hash, cf_rchash_fn_fnv32, metadata_rchash_destructor_fn, 0, 127, 0)) {
 			cf_crash(AS_SMD, "failed to create merge hash table for module \"%s\"", module_obj->module);
 		}
 
@@ -3458,7 +3428,7 @@ int old_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **me
 
 	// Key is (char *)as_smd_item_t.value, value is (as_smd_item_freq_t *).
 	shash *merge_hash = NULL;
-	if (SHASH_OK != shash_create(&merge_hash, shash_str_hash_fn, AS_SMD_MAJORITY_CONSENSUS_KEYSIZE, sizeof(as_smd_item_freq_t *), 17, 0)) {
+	if (SHASH_OK != shash_create(&merge_hash, cf_shash_fn_zstr, AS_SMD_MAJORITY_CONSENSUS_KEYSIZE, sizeof(as_smd_item_freq_t *), 17, 0)) {
 		cf_crash(AS_SMD, "Memory allocation for hash during merge resolution, failed ");
 	}
 

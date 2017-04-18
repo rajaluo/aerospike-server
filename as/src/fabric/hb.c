@@ -34,6 +34,7 @@
 #include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_clock.h"
+#include "citrusleaf/cf_hash_math.h"
 #include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_shash.h"
 
@@ -2758,42 +2759,23 @@ round_up_pow2(uint32_t v)
 }
 
 /**
- * Generate a hash code for a blob using Jenkins hash function.
- */
-static uint32_t
-hb_blob_hash(const uint8_t* value, size_t value_size)
-{
-	uint32_t hash = 0;
-	for (int i = 0; i < value_size; ++i) {
-		hash += value[i];
-		hash += (hash << 10);
-		hash ^= (hash >> 6);
-	}
-	hash += (hash << 3);
-	hash ^= (hash >> 11);
-	hash += (hash << 15);
-
-	return hash;
-}
-
-/**
  * Generate a hash code for a mesh node key.
  */
 static uint32_t
-hb_mesh_node_key_hash_fn(const void* value)
+hb_mesh_node_key_hash_fn(const void* key)
 {
 	// Note packed structure ensures a generic blob hash function works well.
-	return hb_blob_hash((const uint8_t*)value, sizeof(as_hb_mesh_node_key));
+	return cf_hash_jen32((const uint8_t*)key, sizeof(as_hb_mesh_node_key));
 }
 
 /**
  * Generate a hash code for a cf_socket.
  */
 static uint32_t
-hb_socket_hash_fn(const void* value)
+hb_socket_hash_fn(const void* key)
 {
-	const cf_socket** socket = (const cf_socket**)value;
-	return hb_blob_hash((const uint8_t*)socket, sizeof(cf_socket*));
+	const cf_socket** socket = (const cf_socket**)key;
+	return cf_hash_jen32((const uint8_t*)socket, sizeof(cf_socket*));
 }
 
 /**

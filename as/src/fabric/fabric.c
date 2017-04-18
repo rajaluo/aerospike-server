@@ -793,8 +793,8 @@ fabric_node_create(cf_node node_id)
 		cf_crash(AS_FABRIC, "fabric_node_create(%lx) failed to init fc_hash_lock", node_id);
 	}
 
-	if (shash_create(&(node->fc_hash), ptr_hash_fn, sizeof(fabric_connection *),
-			0, 32, 0) != SHASH_OK) {
+	if (shash_create(&(node->fc_hash), cf_shash_fn_ptr,
+			sizeof(fabric_connection *), 0, 32, 0) != SHASH_OK) {
 		cf_crash(AS_FABRIC, "fabric_node_create(%lx) failed to create fc_hash",
 				node_id);
 	}
@@ -2504,10 +2504,9 @@ typedef struct ll_fabric_transact_xmit_element_s {
 //
 
 static cf_atomic64 g_fabric_transact_tid = 0;
-static cf_rchash *g_fabric_transact_xmit_hash = 0;
+static cf_rchash *g_fabric_transact_xmit_hash = NULL;
 static as_fabric_transact_recv_fn fabric_transact_recv_cb[M_TYPE_MAX] = { 0 };
 static void *fabric_transact_recv_udata[M_TYPE_MAX] = { 0 };
-static cf_rchash *g_fabric_transact_recv_hash = 0;
 
 
 //==========================================================
@@ -2516,9 +2515,6 @@ static cf_rchash *g_fabric_transact_recv_hash = 0;
 
 static void fabric_transact_xmit_destructor(void *object);
 static void fabric_transact_xmit_release(fabric_transact_xmit *ft);
-static void fabric_transact_recv_destructor(void *object);
-static uint32_t fabric_tranact_xmit_hash_fn(const void *value, uint32_t value_len);
-static uint32_t fabric_tranact_recv_hash_fn(const void *value, uint32_t value_len);
 static int fabric_transact_msg_fn(cf_node node_id, msg *m, void *udata);
 static void *run_fabric_transact(void *arg);
 static void ll_ftx_destructor_fn(cf_ll_element *e);
@@ -2551,13 +2547,9 @@ tid_code_clear(uint64_t tid)
 void
 as_fabric_transact_init()
 {
-	cf_rchash_create(&g_fabric_transact_xmit_hash, fabric_tranact_xmit_hash_fn,
-			fabric_transact_xmit_destructor,
-			sizeof(uint64_t), 64 /* n_buckets */, CF_RCHASH_CR_MT_MANYLOCK);
-
-	cf_rchash_create(&g_fabric_transact_recv_hash, fabric_tranact_recv_hash_fn,
-			fabric_transact_recv_destructor,
-			sizeof(uint64_t), 64 /* n_buckets */, CF_RCHASH_CR_MT_MANYLOCK);
+	cf_rchash_create(&g_fabric_transact_xmit_hash, cf_rchash_fn_u32,
+			fabric_transact_xmit_destructor, sizeof(uint64_t), 64,
+			CF_RCHASH_CR_MT_MANYLOCK);
 
 	pthread_t thread;
 	pthread_attr_t attrs;
@@ -2759,45 +2751,11 @@ fabric_transact_msg_fn(cf_node node_id, msg *m, void *udata)
 	return 0;
 }
 
-static uint32_t
-fabric_tranact_xmit_hash_fn(const void *value, uint32_t value_len)
-{
-	// TODO: the input is a transaction id which really is just used directly,
-	// but is depends on the size and whether we've got "masking bits".
-	if (value_len != sizeof(uint64_t)) {
-		cf_warning(AS_FABRIC, "transact hash fn received wrong size");
-		return 0;
-	}
-
-	return (uint32_t)(*(const uint64_t *)value);
-}
-
 static void
 fabric_transact_xmit_destructor(void *object)
 {
 	fabric_transact_xmit *ft = object;
 	as_fabric_msg_put(ft->m);
-}
-
-static uint32_t
-fabric_tranact_recv_hash_fn(const void *value, uint32_t value_len)
-{
-	// TODO: the input is a transaction id which really is just used directly,
-	// but is depends on the size and whether we've got "masking bits".
-	if (value_len != sizeof(transact_recv_key)) {
-		cf_warning(AS_FABRIC, "transact hash fn received wrong size");
-		return 0;
-	}
-
-	const transact_recv_key *trk = (const transact_recv_key *)value;
-
-	return (uint32_t)trk->tid;
-}
-
-static void
-fabric_transact_recv_destructor(void *object)
-{
-//	(fabric_transact_recv *)object;
 }
 
 // Long running thread for transaction maintenance.

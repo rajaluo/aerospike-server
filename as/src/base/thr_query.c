@@ -3232,12 +3232,6 @@ as_query_gconfig_default(as_config *c)
 	c->partitions_pre_reserved       = false;
 }
 
-uint32_t
-query_job_trid_hash(const void *value, uint32_t keylen)
-{
-	return( *(const uint32_t *)value);
-}
-
 
 void
 as_query_init()
@@ -3246,7 +3240,7 @@ as_query_init()
 	cf_detail(AS_QUERY, "Initialize %d Query Worker threads.", g_config.query_threads);
 
 	// global job hash to keep track of the query job
-	int rc = cf_rchash_create(&g_query_job_hash, query_job_trid_hash, NULL, sizeof(uint64_t), 64, CF_RCHASH_CR_MT_MANYLOCK);
+	int rc = cf_rchash_create(&g_query_job_hash, cf_rchash_fn_u32, NULL, sizeof(uint64_t), 64, CF_RCHASH_CR_MT_MANYLOCK);
 	if (rc) {
 		cf_crash(AS_QUERY, "Failed to create query job hash");
 	}
