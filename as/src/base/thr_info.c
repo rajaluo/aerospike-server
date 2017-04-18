@@ -4490,6 +4490,7 @@ detect_name_change(char **tls_name)
 	}
 
 	if (*tls_name != NULL && node_name != NULL && strcmp(*tls_name, node_name) == 0) {
+		cf_free(node_name);
 		return false;
 	}
 
