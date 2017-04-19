@@ -35,7 +35,7 @@
 //
 
 // These values are used on the wire - don't change them.
-typedef enum msg_field_type_t {
+typedef enum {
 	M_FT_PK_UINT32 = 1,
 	M_FT_UINT32 = 2,
 	M_FT_PK_UINT64 = 3,
@@ -46,9 +46,10 @@ typedef enum msg_field_type_t {
 	M_FT_ARRAY_UINT64 = 8,
 	M_FT_ARRAY_BUF = 9,
 	M_FT_ARRAY_STR = 10,
-} msg_field_type;
+} msg_field_type; // encoded in uint8_t
 
-typedef enum msg_type_t {
+// These values are used on the wire - don't change them.
+typedef enum {
 	M_TYPE_FABRIC = 0,
 	M_TYPE_HEARTBEAT_V2 = 1,
 	M_TYPE_PAXOS = 2,
@@ -68,77 +69,52 @@ typedef enum msg_type_t {
 	M_TYPE_UNUSED_16 = 16,
 	M_TYPE_UNUSED_17 = 17,
 	M_TYPE_MAX = 18
-} msg_type;
+} msg_type; // encoded in uint16_t
 
 typedef struct msg_template_s {
-	int				id;
-	msg_field_type	type;
+	uint16_t id;
+	msg_field_type type;
 } msg_template;
 
-typedef struct msg_str_array_s {
-	uint32_t	alloc_size;	// number of bytes allocated
-	uint32_t	used_size;	// bytes used in the string array
-	uint32_t	len;		// number of string offsets
-	uint32_t	offset[];	// array of pointers to the strings
-} msg_str_array;
+struct msg_str_array_s;
+struct msg_buf_array_s;
 
-typedef struct msg_pbuf_s {
-	uint32_t	len;
-	uint8_t		data[];
-} msg_pbuf;
+typedef struct msg_field_s {
+	uint16_t id;
+	bool is_set;
+	bool is_free;
+	uint32_t field_sz;
 
-typedef struct msg_buf_array_s {
-	uint32_t	alloc_size;	// number of bytes allocated
-	uint32_t	used_size;	// bytes used in the buffer array
-	uint32_t	len;		// number of string offsets
-	uint32_t	offset[];	// array of pointers to the buffers
-} msg_buf_array;
-
-typedef struct msg_field_t {
-	int		 		id;
-	msg_field_type	type;
-	uint32_t 		field_len;
-	bool			is_valid;
-	bool			is_set;
-	bool 			free;
 	union {
-		uint32_t		ui32;
-		int32_t			i32;
-		uint64_t		ui64;
-		int64_t			i64;
-		char 			*str;
-		uint8_t			*buf;
-		uint32_t		*ui32_a;
-		uint64_t		*ui64_a;
-		msg_str_array	*str_a;
-		msg_buf_array	*buf_a;
-		void			*any_buf;
+		uint32_t ui32;
+		int32_t i32;
+		uint64_t ui64;
+		int64_t i64;
+		char *str;
+		uint8_t *buf;
+		uint32_t *ui32_a;
+		uint64_t *ui64_a;
+		struct msg_str_array_s *str_a;
+		struct msg_buf_array_s *buf_a;
+		void *any_buf;
 	} u;
 } msg_field;
 
-typedef struct msg_t {
-	uint32_t			n_fields;
-	uint32_t			bytes_used;
-	uint32_t			bytes_alloc;
-	bool				just_parsed; // fields point into fabric buffer
-	msg_type			type;
-	const msg_template	*mt;
-	uint64_t			benchmark_time;
-	msg_field			f[];
+typedef struct msg_s {
+	msg_type type;
+	uint16_t n_fields;
+	bool just_parsed; // fields point into fabric buffer
+	uint32_t bytes_used;
+	uint32_t bytes_alloc;
+	uint64_t benchmark_time;
+	msg_field f[]; // indexed by id
 } msg;
 
 // msg header on wire.
 typedef struct msg_hdr_s {
-	uint32_t	size;
-	uint16_t	type;
+	uint32_t size;
+	uint16_t type;
 } __attribute__ ((__packed__)) msg_hdr;
-
-// msg field header on wire.
-typedef struct msg_field_hdr_s {
-	uint16_t	id;
-	uint8_t		type;
-	uint8_t		content[];
-} __attribute__ ((__packed__)) msg_field_hdr;
 
 typedef enum {
 	MSG_GET_DIRECT,
@@ -178,27 +154,26 @@ void msg_put(msg *m);
 // Lifecycle.
 //
 
-int msg_create(msg **m, msg_type type, const msg_template *mt, size_t mt_sz, size_t scratch_sz);
+void msg_type_register(msg_type type, const msg_template *mt, size_t mt_sz, size_t scratch_sz);
+msg *msg_create(msg_type type);
 void msg_destroy(msg *m);
-
 void msg_incr_ref(msg *m);
-void msg_decr_ref(msg *m);
 
 //------------------------------------------------
 // Pack messages into flattened data.
 //
 
 // XXX JUMP - remove send_pk parameter in "six months".
-uint32_t msg_get_wire_size(const msg *m, bool send_pk);
-uint32_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_len, bool send_pk);
-uint32_t msg_to_wire(const msg *m, uint8_t *buf, bool send_pk);
+size_t msg_get_wire_size(const msg *m, bool send_pk);
+size_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_len, bool send_pk);
+size_t msg_to_wire(const msg *m, uint8_t *buf, bool send_pk);
 
 //------------------------------------------------
 // Parse flattened data into messages.
 //
 
-int msg_parse(msg *m, const uint8_t *buf, size_t buflen);
-int msg_get_initial(uint32_t *size, msg_type *type, const uint8_t *buf, uint32_t buflen);
+int msg_parse(msg *m, const uint8_t *buf, size_t bufsz);
+int msg_get_initial(uint32_t *size, msg_type *type, const uint8_t *buf, uint32_t bufsz);
 
 void msg_reset(msg *m);
 void msg_preserve_fields(msg *m, uint32_t n_field_ids, ...);
@@ -212,34 +187,39 @@ int msg_set_int32(msg *m, int field_id, int32_t v);
 int msg_set_uint64(msg *m, int field_id, uint64_t v);
 int msg_set_int64(msg *m, int field_id, int64_t v);
 int msg_set_str(msg *m, int field_id, const char *v, msg_set_type type);
-int msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t len, msg_set_type type);
+int msg_set_buf(msg *m, int field_id, const uint8_t *v, size_t sz, msg_set_type type);
 
-int msg_set_uint32_array_size(msg *m, int field_id, int size);
-int msg_set_uint32_array(msg *m, int field_id, int index, uint32_t v);
-int msg_set_uint64_array_size(msg *m, int field_id, int size);
-int msg_set_uint64_array(msg *m, int field_id, int index, uint64_t v);
-int msg_set_str_array_size(msg *m, int field_id, int size, int total_len);
-int msg_set_str_array(msg *m, int field_id, int index, const char *v);
-int msg_set_buf_array_size(msg *m, int field_id, int size, int elem_size);
-int msg_set_buf_array(msg *m, int field_id, int index, const uint8_t *v, size_t len);
+int msg_set_uint32_array_size(msg *m, int field_id, uint32_t count);
+int msg_set_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t v);
+int msg_set_uint64_array_size(msg *m, int field_id, uint32_t count);
+int msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v);
+
+// XXX - JUMP - remove in "6 months"
+int msg_set_str_array_size(msg *m, int field_id, uint32_t count, uint32_t total_sz);
+int msg_set_str_array(msg *m, int field_id, uint32_t idx, const char *str);
+int msg_set_buf_array_size(msg *m, int field_id, uint32_t count, uint32_t ele_sz);
+int msg_set_buf_array(msg *m, int field_id, uint32_t idx, const uint8_t *buf, size_t sz);
 
 //------------------------------------------------
 // Get fields from messages.
 //
+msg_field_type msg_field_get_type(const msg *m, uint16_t id);
 bool msg_is_set(const msg *m, int field_id);
-int msg_get_uint32(const msg *m, int field_id, uint32_t *r);
-int msg_get_int32(const msg *m, int field_id, int32_t *r);
-int msg_get_uint64(const msg *m, int field_id, uint64_t *r);
-int msg_get_int64(const msg *m, int field_id, int64_t *r);
-int msg_get_str(const msg *m, int field_id, char **r, size_t *len, msg_get_type type);
-int msg_get_buf(const msg *m, int field_id, uint8_t **r, size_t *len, msg_get_type type);
+int msg_get_uint32(const msg *m, int field_id, uint32_t *val_r);
+int msg_get_int32(const msg *m, int field_id, int32_t *val_r);
+int msg_get_uint64(const msg *m, int field_id, uint64_t *val_r);
+int msg_get_int64(const msg *m, int field_id, int64_t *val_r);
+int msg_get_str(const msg *m, int field_id, char **str_r, size_t *sz_r, msg_get_type type);
+int msg_get_buf(const msg *m, int field_id, uint8_t **buf_r, size_t *sz_r, msg_get_type type);
 
-int msg_get_uint32_array(msg *m, int field_id, int index, uint32_t *r);
-int msg_get_uint64_array_size(msg *m, int field_id, int *size);
-int msg_get_uint64_array(msg *m, int field_id, int index, uint64_t *r);
-int msg_get_str_array(msg *m, int field_id, int index, char **r, size_t *len, msg_get_type type);
-int msg_get_buf_array_size(const msg *m, int field_id, int *size);
-int msg_get_buf_array(const msg *m, int field_id, int index, uint8_t **r, size_t *len, msg_get_type type);
+int msg_get_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t *val_r);
+int msg_get_uint64_array_count(msg *m, int field_id, uint32_t *count_r);
+int msg_get_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t *val_r);
+
+// XXX - JUMP - remove in "6 months"
+int msg_get_str_array(msg *m, int field_id, uint32_t idx, char **str_r, size_t *sz_r, msg_get_type type);
+int msg_get_buf_array_size(const msg *m, int field_id, int *count_r); // TODO - change int type to uint32_t
+int msg_get_buf_array(const msg *m, int field_id, uint32_t idx, uint8_t **buf_r, size_t *sz_r, msg_get_type type);
 
 
 //==========================================================
