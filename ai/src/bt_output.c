@@ -17,14 +17,9 @@
 #include <string.h>
 #include <strings.h>
 
-#include "ai_globals.h"
 #include "bt_output.h"
 #include "bt_iterator.h"
-#include "find.h"
 #include "stream.h"
-
-#define getBtr(tmatch)  Tbl[tmatch].btr
-#define getIBtr(imatch) Index[imatch].btr
 
 #define PRINT_EVICTED_KEYS
 
@@ -282,63 +277,4 @@ void bt_dumptree(FILE *fp, bt *btr, bool is_index, bool verbose)
 		dump_tree_node(fp, btr, btr->root, 0, is_index, 0, verbose);
 	}
 	fprintf(fp, "\n");
-}
-
-static char const *col_type_str(uchar type)
-{
-	switch (type) {
-	  case COL_TYPE_LONG:
-		  return "NUMERIC";
-	  case COL_TYPE_STRING:
-		  return "TEXT";
-	  case COL_TYPE_U160:
-		  return "DIGEST";
-	  case COL_TYPE_GEOJSON:
-		  return "GEOJSON";
-	  default:
-		  return "??????";
-	}
-}
-
-/*
- *  Print out the structure and contents of a B-Tree.
- *  Return 0 if successful, -1 otherwise.
- */
-int dump_btree(char *tbl_name, char *filename, bool verbose)
-{
-	int tmatch = -1;
-
-	if (-1 == (tmatch = find_table(tbl_name))) {
-		return -1;
-	}
-
-	FILE *fp = NULL;
-	if (!(fp = fopen(filename, "w"))) {
-		return -1;
-	}
-
-	r_tbl_t *rt = &Tbl[tmatch];
-	fprintf(fp, "Table: %s columns\n", rt->name);
-	for (int j = 0; j < rt->col_count; j++) {
-		fprintf(fp, "\t%s | %s\n", rt->col[j].name, col_type_str((as_sindex_ktype) rt->col[j].type));
-	}
-	MATCH_INDICES(tmatch);
-	bt *btr = getBtr(tmatch);
-
-	bt_dumptree(fp, btr, 0, verbose);
-
-	if (matches) {
-		for (int i = 0; i < matches; i++) {
-			int j = inds[i];
-			bt *ibtr = getIBtr(j);
-			fprintf(fp, "INDEX: name: %s imatch: %d (%p)\n", Index[j].name, inds[i], (void *) ibtr);
-			if (ibtr) {
-				bt_dumptree(fp, ibtr, 1, verbose);
-			}
-		}
-	}
-
-	fclose(fp);
-
-	return 0;
 }

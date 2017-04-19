@@ -1471,17 +1471,17 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	char *ns = NULL, *set = NULL, *file = NULL;
+	char *nsname = NULL, *indexname = NULL, *filename = NULL;
 	bool verbose = false;
 
 	/*
-	 *  Command Format:  "dump-si:ns=<string>;set=<string>{;file=<string>;verbose=<opt>}" [the "file" and "verbose" arguments are optional]
+	 *  Command Format:  "dump-si:ns=<string>;indexname=<string>;filename=<string>;{verbose=<opt>}" [the "file" and "verbose" arguments are optional]
 	 *
 	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
 	 */
 	param_str[0] = '\0';
 	if (!as_info_parameter_get(params, "ns", param_str, &param_str_len)) {
-		ns = cf_strdup(param_str);
+		nsname = cf_strdup(param_str);
 	} else {
 		cf_warning(AS_INFO, "The \"%s:\" command requires an \"ns\" parameter", name);
 		cf_dyn_buf_append_string(db, "error");
@@ -1490,10 +1490,10 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 
 	param_str[0] = '\0';
 	param_str_len = sizeof(param_str);
-	if (!as_info_parameter_get(params, "set", param_str, &param_str_len)) {
-		set = cf_strdup(param_str);
+	if (!as_info_parameter_get(params, "indexname", param_str, &param_str_len)) {
+		indexname = cf_strdup(param_str);
 	} else {
-		cf_warning(AS_INFO, "The \"%s:\" command requires a \"set\" parameter", name);
+		cf_warning(AS_INFO, "The \"%s:\" command requires a \"indexname\" parameter", name);
 		cf_dyn_buf_append_string(db, "error");
 		goto cleanup;
 	}
@@ -1501,8 +1501,13 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 	param_str[0] = '\0';
 	param_str_len = sizeof(param_str);
 	if (!as_info_parameter_get(params, "file", param_str, &param_str_len)) {
-		file = cf_strdup(param_str);
+		filename = cf_strdup(param_str);
+	} else {
+		cf_warning(AS_INFO, "The \"%s:\" command requires a \"filename\" parameter", name);
+		cf_dyn_buf_append_string(db, "error");
+		goto cleanup;
 	}
+
 
 	param_str[0] = '\0';
 	if (!as_info_parameter_get(params, "verbose", param_str, &param_str_len)) {
@@ -1517,20 +1522,21 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 		}
 	}
 
-	ai_btree_dump(ns, set, file, verbose);
+	as_sindex_dump(nsname, indexname, filename, verbose);
 	cf_dyn_buf_append_string(db, "ok");
 
+
  cleanup:
-	if (ns) {
-		cf_free(ns);
+	if (nsname) {
+		cf_free(nsname);
 	}
 
-	if (set) {
-		cf_free(set);
+	if (indexname) {
+		cf_free(indexname);
 	}
 
-	if (file) {
-		cf_free(file);
+	if (filename) {
+		cf_free(filename);
 	}
 
 	return 0;
@@ -6496,7 +6502,7 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (is_smd_op == false) {
 		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via info", imd.ns_name, imd.iname);
-		res = as_sindex_create(ns, &imd, true);
+		res = as_sindex_create(ns, &imd);
 		if (0 != res) {
 			cf_warning(AS_INFO, "SINDEX CREATE : Failed with error %s for index %s",
 					as_sindex_err_str(res), imd.iname);

@@ -207,7 +207,6 @@ as_sindex__destroy_fn(void *param)
 			ai_btree_reset_pimd(pimd);
 		}
 
-		ai_btree_destroy(si->imd);
 		as_sindex_destroy_pmetadata(si);
 		si->state = AS_SINDEX_INACTIVE;
 		si->flag  = 0;

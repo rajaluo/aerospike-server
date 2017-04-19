@@ -32,13 +32,9 @@
 
 #include "ai_obj.h"
 #include "bt.h"
-#include "find.h"
 #include "stream.h"
 
 #include <citrusleaf/alloc.h>
-
-extern r_tbl_t *Tbl;
-extern r_ind_t *Index;
 
 #define TWO_POW_7                 128
 #define TWO_POW_14              16384
