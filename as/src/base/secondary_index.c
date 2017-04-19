@@ -385,8 +385,6 @@ as_sindex_config_var_default(as_sindex_config_var *si_cfg)
 	// 2 of the 6 variables : enable-histogram and trace-flag are not a part of default-settings for si
 	si_cfg->defrag_period        = from_si.config.defrag_period;
 	si_cfg->defrag_max_units     = from_si.config.defrag_max_units;
-	// related non config value defaults
-	si_cfg->ignore_not_sync_flag = from_si.config.flag;
 }
 
 /*
@@ -402,46 +400,11 @@ char *as_sindex_type_defs[] =
 {	"NONE", "LIST", "MAPKEYS", "MAPVALUES"
 };
 
-/*
- * Returns -
- * 		AS_SINDEX_OK  - On success.
- *		Else on failure one of these -
- * 			AS_SINDEX_ERR
- * 			AS_SINDEX_ERR_OTHER
- * 			AS_SINDEX_ERR_NOT_READABLE
- * Notes -
- * 		Assert anything which is inconsistent with the way DML/DML/DDL/defrag_th/destroy_th
- * 		running in multi-threaded environment.
- * 		This is called before acquiring secondary index lock.
- *
- * Synchronization -
- * 		reserves the imd.
- * 		Caller of DML should always reserves si.
- */
-int
-as_sindex__pre_op_assert(as_sindex *si, int op)
+bool
+as_sindex_can_query(as_sindex *si)
 {
-	int ret = AS_SINDEX_OK;
-
-	switch (op)
-	{
-		case AS_SINDEX_OP_READ:
-			// First one signifies that index is still getting built
-			// Second on signifies because of some failure secondary
-			// is not in sync with primary
-			if (!(si->flag & AS_SINDEX_FLAG_RACTIVE)
-				|| ( (si->desync_cnt > 0)
-					&& !(si->config.flag & AS_SINDEX_CONFIG_IGNORE_ON_DESYNC))) {
-				ret = AS_SINDEX_ERR_NOT_READABLE;
-			}
-			break;
-		case AS_SINDEX_OP_INSERT:
-		case AS_SINDEX_OP_DELETE:
-			break;
-		default:
-			cf_warning(AS_SINDEX, "Unidentified Secondary Index Op .. Ignoring!!");
-	}
-	return ret;
+	// Still building. Do not allow reads
+	return (si->flag & AS_SINDEX_FLAG_RACTIVE) ? true : false;
 }
 
 /*
@@ -491,9 +454,6 @@ as_sindex__process_ret(as_sindex *si, int ret, as_sindex_op op,
 {
 	switch (op) {
 		case AS_SINDEX_OP_INSERT:
-			if (AS_SINDEX_ERR_NO_MEMORY == ret) {
-				cf_atomic64_incr(&si->desync_cnt);
-			}
 			if (ret && ret != AS_SINDEX_KEY_FOUND) {
 				cf_debug(AS_SINDEX,
 						"SINDEX_FAIL: Insert into %s failed at %d with %d",
@@ -1026,7 +986,6 @@ as_sindex *
 as_sindex_lookup_by_iname_lockfree(as_namespace *ns, char * iname, char flag)
 {
 	return as_sindex__lookup_lockfree(ns, iname, NULL, -1, 0, 0, NULL, flag);
-
 }
 
 as_sindex *
@@ -1142,7 +1101,7 @@ as_sindex__config_default(as_sindex *si)
 {
 	si->config.defrag_period    = 1000;
 	si->config.defrag_max_units = 1000;
-	si->config.flag             = 1; // Default is - index is active
+	si->config.flag             = AS_SINDEX_FLAG_WACTIVE;
 }
 
 void
@@ -1151,8 +1110,8 @@ as_sindex_config_var_copy(as_sindex *to_si, as_sindex_config_var *from_si_cfg)
 	cf_atomic64_set(&to_si->config.defrag_period, from_si_cfg->defrag_period);
 	to_si->config.defrag_max_units = from_si_cfg->defrag_max_units;
 	to_si->enable_histogram        = from_si_cfg->enable_histogram;
-	to_si->config.flag             = from_si_cfg->ignore_not_sync_flag;
 }
+
 void
 as_sindex__setup_histogram(as_sindex *si)
 {
@@ -1279,7 +1238,6 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	info_append_uint32(db, "gc-max-units", si->config.defrag_max_units);
 
 	info_append_bool(db, "histogram", si->enable_histogram);
-	info_append_bool(db, "ignore-not-sync", (si->config.flag & AS_SINDEX_CONFIG_IGNORE_ON_DESYNC) != 0);
 
 	cf_dyn_buf_chomp(db);
 
@@ -1350,18 +1308,7 @@ as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
 
 	char context[100];
 	int  context_len = sizeof(context);
-	if (0 == as_info_parameter_get(params, "ignore-not-sync", context, &context_len)) {
-		if (strncmp(context, "true", 4)==0 || strncmp(context, "yes", 3)==0) {
-			cf_info(AS_INFO,"Changing value of ignore-not-sync of ns %s sindex %s to %s", ns->name, imd->iname, context);
-			si->config.flag |= AS_SINDEX_CONFIG_IGNORE_ON_DESYNC;
-		} else if (strncmp(context, "false", 5)==0 || strncmp(context, "no", 2)==0) {
-			cf_info(AS_INFO,"Changing value of ignore-not-sync of ns %s sindex %s to %s", ns->name, imd->iname, context);
-			si->config.flag &= ~AS_SINDEX_CONFIG_IGNORE_ON_DESYNC;
-		} else {
-			goto Error;
-		}
-	}
-	else if (0 == as_info_parameter_get(params, "gc-period", context, &context_len)) {
+	if (0 == as_info_parameter_get(params, "gc-period", context, &context_len)) {
 		uint64_t val = atoll(context);
 		cf_detail(AS_INFO, "gc-period = %"PRIu64"",val);
 		if ((int64_t)val < 0) {
@@ -1420,13 +1367,7 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 
 			cf_dyn_buf_append_string(db, ":path=");
 			cf_dyn_buf_append_string(db, si.imd->path_str);
-			cf_dyn_buf_append_string(db, ":sync_state=");
-			if (si.desync_cnt > 0) {
-				cf_dyn_buf_append_string(db, "needsync");
-			}
-			else {
-				cf_dyn_buf_append_string(db, "synced");
-			}
+
 			// Index State
 			if (si.state == AS_SINDEX_ACTIVE) {
 				if (si.flag & AS_SINDEX_FLAG_RACTIVE) {
@@ -1719,7 +1660,6 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 	si->ns          = ns;
 	si->simatch     = chosen_id;
 	si->state       = AS_SINDEX_ACTIVE;
-	si->desync_cnt  = 0;
 	si->flag        = AS_SINDEX_FLAG_WACTIVE;
 	si->new_imd     = NULL;
 	as_sindex__config_default(si);
@@ -2031,34 +1971,6 @@ as_sindex_boot_populateall_done(as_namespace *ns)
 	return ret;
 }
 
-// TODO : sindex repair should drop the index and repopulate it
-// Currently we only populate the sindex again. This does not clean the uncleanable
-// garbage accumulated in the secondary index tree.
-int
-as_sindex_repair(as_namespace *ns, char * iname)
-{
-	as_sindex *si = as_sindex_lookup_by_iname(ns, iname, AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
-	if (si) {
-		if (si->desync_cnt == 0) {
-			cf_warning(AS_SINDEX, "SINDEX REPAIR : index %s is found in sync with primary."
-						" No need to repair index", iname);
-			AS_SINDEX_RELEASE(si);
-			return AS_SINDEX_OK;
-		}
-		int rv = cf_queue_push(g_sindex_populate_q, &si);
-		if (CF_QUEUE_OK != rv) {
-			cf_warning(AS_SINDEX, "SINDEX REPAIR : Failed to queue up for population. index=%s "
-					"Internal Queue Error rv=%d, retry repair", si->imd->iname, rv);
-			AS_SINDEX_RELEASE(si);
-			return AS_SINDEX_ERR;
-		}
-		return AS_SINDEX_OK;
-	}
-	else {
-		cf_warning(AS_SINDEX, "SINDEX REPAIR : index %s not found", iname);
-	}
-	return AS_SINDEX_ERR_NOTFOUND;
-}
 //                                            END - SINDEX POPULATE
 // ************************************************************************************************
 // ************************************************************************************************
@@ -2517,18 +2429,6 @@ as_sindex_range_free(as_sindex_range **range)
  * repeat "numranges" times from "binname"
  */
 
-
-/*
- * Function as_sindex_assert_query
- * Returns -
- * 		Return value of as_sindex__pre_op_assert
- */
-int
-as_sindex_assert_query(as_sindex *si, as_sindex_range *range)
-{
-	return as_sindex__pre_op_assert(si, AS_SINDEX_OP_READ);
-}
-
 /*
  * Function as_sindex_binlist_from_msg
  *
@@ -2874,18 +2774,24 @@ as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **sran
 int
 as_sindex_query(as_sindex *si, as_sindex_range *srange, as_sindex_qctx *qctx)
 {
-	if ((!si || !srange)) return AS_SINDEX_ERR_PARAM;
-	as_sindex_metadata *imd = si->imd;
-	PIMD_RLOCK(&imd->pimd[qctx->pimd_idx].slock);
-	int ret = as_sindex__pre_op_assert(si, AS_SINDEX_OP_READ);
-	if (AS_SINDEX_OK != ret) {
-		PIMD_RUNLOCK(&imd->pimd[qctx->pimd_idx].slock);
-		return ret;
+	if (! si || ! srange) {
+		return AS_SINDEX_ERR_PARAM;
 	}
-	uint64_t starttime = 0;
-	ret = ai_btree_query(imd, srange, qctx);
-	as_sindex__process_ret(si, ret, AS_SINDEX_OP_READ, starttime, __LINE__);
-	PIMD_RUNLOCK(&imd->pimd[qctx->pimd_idx].slock);
+
+	as_sindex_metadata *imd = si->imd;
+	as_sindex_pmetadata *pimd = &imd->pimd[qctx->pimd_idx];
+
+	if (! as_sindex_can_query(si)) {
+		return AS_SINDEX_ERR_NOT_READABLE;
+	}
+
+	PIMD_RLOCK(&pimd->slock);
+	int ret = ai_btree_query(imd, srange, qctx);
+	PIMD_RUNLOCK(&pimd->slock);
+
+	as_sindex__process_ret(si, ret, AS_SINDEX_OP_READ,
+			0 /* No histogram for query per call */, __LINE__);
+
 	return ret;
 }
 //                                        END -  SINDEX QUERY
@@ -2969,10 +2875,6 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 	// 		Take the read lock on imd
 		for (int j=0; j<sbin->num_values; j++) {
 
-			int ret = as_sindex__pre_op_assert(si, op);
-			if (AS_SINDEX_OK != ret) {
-				goto Cleanup;
-			}
 	//		Get a value from sbin
 			void * skey;
 			switch (sbin->type) {
@@ -3008,6 +2910,7 @@ as_sindex__op_by_sbin(as_namespace *ns, const char *set, int numbins, as_sindex_
 			PIMD_WLOCK(&pimd->slock);
 
 	//			If op is DELETE delete the value from sindex
+			int ret = AS_SINDEX_OK;
 			if (op == AS_SINDEX_OP_DELETE) {
 				ret = ai_btree_delete(imd, pimd, skey, pkey);
 			}
