@@ -6983,10 +6983,10 @@ as_info_init()
 	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("mstats", info_command_mstats, PERM_LOGGING_CTRL);                    // Dump GLibC-level memory stats.
 	as_info_set_command("mtrace", info_command_mtrace, PERM_SERVICE_CTRL);                    // Control GLibC-level memory tracing.
-	as_info_set_command("peers-clear-alt", info_get_services_clear_alt_delta, false);         // The delta update version of "peers-clear-alt".
-	as_info_set_command("peers-clear-std", info_get_services_clear_std_delta, false);         // The delta update version of "peers-clear-std".
-	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, false);             // The delta update version of "peers-tls-alt".
-	as_info_set_command("peers-tls-std", info_get_services_tls_std_delta, false);             // The delta update version of "peers-tls-std".
+	as_info_set_command("peers-clear-alt", info_get_services_clear_alt_delta, PERM_NONE);     // The delta update version of "peers-clear-alt".
+	as_info_set_command("peers-clear-std", info_get_services_clear_std_delta, PERM_NONE);     // The delta update version of "peers-clear-std".
+	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, PERM_NONE);         // The delta update version of "peers-tls-alt".
+	as_info_set_command("peers-tls-std", info_get_services_tls_std_delta, PERM_NONE);         // The delta update version of "peers-tls-std".
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
