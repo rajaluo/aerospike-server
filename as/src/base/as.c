@@ -36,7 +36,6 @@
 
 #include "citrusleaf/alloc.h"
 
-#include "ai.h"
 #include "daemon.h"
 #include "fault.h"
 #include "hardware.h"
@@ -382,7 +381,6 @@ main(int argc, char **argv)
 	as_json_init();				// Jansson JSON API used by System Metadata
 	as_smd_init();				// System Metadata first - others depend on it
 	as_index_tree_gc_init();	// thread to purge dropped index trees
-	ai_init();					// before as_storage_init() populates indexes
 	as_sindex_thr_init();		// defrag secondary index (ok during population)
 
 	// Initialize namespaces. Each namespace decides here whether it will do a

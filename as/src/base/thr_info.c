@@ -1471,17 +1471,17 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	char *ns = NULL, *set = NULL, *file = NULL;
+	char *nsname = NULL, *indexname = NULL, *filename = NULL;
 	bool verbose = false;
 
 	/*
-	 *  Command Format:  "dump-si:ns=<string>;set=<string>{;file=<string>;verbose=<opt>}" [the "file" and "verbose" arguments are optional]
+	 *  Command Format:  "dump-si:ns=<string>;indexname=<string>;filename=<string>;{verbose=<opt>}" [the "file" and "verbose" arguments are optional]
 	 *
 	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
 	 */
 	param_str[0] = '\0';
 	if (!as_info_parameter_get(params, "ns", param_str, &param_str_len)) {
-		ns = cf_strdup(param_str);
+		nsname = cf_strdup(param_str);
 	} else {
 		cf_warning(AS_INFO, "The \"%s:\" command requires an \"ns\" parameter", name);
 		cf_dyn_buf_append_string(db, "error");
@@ -1490,10 +1490,10 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 
 	param_str[0] = '\0';
 	param_str_len = sizeof(param_str);
-	if (!as_info_parameter_get(params, "set", param_str, &param_str_len)) {
-		set = cf_strdup(param_str);
+	if (!as_info_parameter_get(params, "indexname", param_str, &param_str_len)) {
+		indexname = cf_strdup(param_str);
 	} else {
-		cf_warning(AS_INFO, "The \"%s:\" command requires a \"set\" parameter", name);
+		cf_warning(AS_INFO, "The \"%s:\" command requires a \"indexname\" parameter", name);
 		cf_dyn_buf_append_string(db, "error");
 		goto cleanup;
 	}
@@ -1501,8 +1501,13 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 	param_str[0] = '\0';
 	param_str_len = sizeof(param_str);
 	if (!as_info_parameter_get(params, "file", param_str, &param_str_len)) {
-		file = cf_strdup(param_str);
+		filename = cf_strdup(param_str);
+	} else {
+		cf_warning(AS_INFO, "The \"%s:\" command requires a \"filename\" parameter", name);
+		cf_dyn_buf_append_string(db, "error");
+		goto cleanup;
 	}
+
 
 	param_str[0] = '\0';
 	if (!as_info_parameter_get(params, "verbose", param_str, &param_str_len)) {
@@ -1517,20 +1522,21 @@ info_command_dump_si(char *name, char *params, cf_dyn_buf *db)
 		}
 	}
 
-	ai_btree_dump(ns, set, file, verbose);
+	as_sindex_dump(nsname, indexname, filename, verbose);
 	cf_dyn_buf_append_string(db, "ok");
 
+
  cleanup:
-	if (ns) {
-		cf_free(ns);
+	if (nsname) {
+		cf_free(nsname);
 	}
 
-	if (set) {
-		cf_free(set);
+	if (indexname) {
+		cf_free(indexname);
 	}
 
-	if (file) {
-		cf_free(file);
+	if (filename) {
+		cf_free(filename);
 	}
 
 	return 0;
@@ -4490,6 +4496,7 @@ detect_name_change(char **tls_name)
 	}
 
 	if (*tls_name != NULL && node_name != NULL && strcmp(*tls_name, node_name) == 0) {
+		cf_free(node_name);
 		return false;
 	}
 
@@ -4577,7 +4584,8 @@ set_static_services(void)
 }
 
 void
-info_node_info_tend() {
+info_node_info_tend()
+{
 	shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
 }
 
@@ -5019,6 +5027,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			temp.generation = 0;
 			temp.last_changed = 0;
 			reset_node_info_services(&temp);
+			bool node_info_tend_required = false;
 
 			info_node_info *info_history;
 			pthread_mutex_t *vlock_history;
@@ -5098,6 +5107,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				if (INFO_OP_UPDATE_REQ == op) {
 					cf_debug(AS_INFO, "Received request for info update from node %" PRIx64 " ~~ setting node's info generation to 0!", node);
 					info->generation = 0;
+					node_info_tend_required = true;
 				}
 
 				pthread_mutex_unlock(vlock);
@@ -5120,6 +5130,10 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				cf_warning(AS_INFO, "Failed to send message %p with type %d to node %"PRIu64" (rv %d)",
 						m, (int32_t)m->type, node, rv);
 				as_fabric_msg_put(m);
+			}
+
+			if (node_info_tend_required) {
+				info_node_info_tend();
 			}
 		}
 
@@ -6503,7 +6517,7 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 	}
 	else if (is_smd_op == false) {
 		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via info", imd.ns_name, imd.iname);
-		res = as_sindex_create(ns, &imd, true);
+		res = as_sindex_create(ns, &imd);
 		if (0 != res) {
 			cf_warning(AS_INFO, "SINDEX CREATE : Failed with error %s for index %s",
 					as_sindex_err_str(res), imd.iname);
@@ -6642,31 +6656,6 @@ as_info_parse_ns_iname(char* params, as_namespace ** ns, char ** iname, cf_dyn_b
 	*iname = cf_strdup(index_name_str);
 
 	return 0;
-}
-
-int info_command_sindex_repair(char *name, char *params, cf_dyn_buf *db) {
-	as_namespace *ns = NULL;
-	char * iname = NULL;
-	if (as_info_parse_ns_iname(params, &ns, &iname, db, "SINDEX REPAIR")) {
-		return 0;
-	}
-
-	int resp = as_sindex_repair(ns, iname);
-	if (resp) {
-		cf_warning(AS_INFO, "Sindex repair failed for index %s: err = %d", name, resp);
-		INFO_COMMAND_SINDEX_FAILCODE(as_sindex_err_to_clienterr(resp, __FILE__, __LINE__),
-			as_sindex_err_str(resp));
-		cf_warning(AS_INFO, "SINDEX REPAIR : for index %s - ns %s failed with error %d",
-			iname, ns->name, resp);
-	}
-	else {
-		cf_dyn_buf_append_string(db, "Ok");
-	}
-
-	if (iname) {
-		cf_free(iname);
-	}
-	return(0);
 }
 
 int info_command_abort_scan(char *name, char *params, cf_dyn_buf *db) {
@@ -6909,7 +6898,7 @@ as_info_init()
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
 				"service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
-				"sindex-histogram;sindex-repair;"
+				"sindex-histogram;"
 				"smd;statistics;status;tip;tip-clear;truncate;truncate-undo;version;",
 				false);
 	/*
@@ -7026,7 +7015,6 @@ as_info_init()
 
 	// Undocumented Secondary Index Command
 	as_info_set_command("sindex-histogram", info_command_sindex_histogram, PERM_SERVICE_CTRL);
-	as_info_set_command("sindex-repair", info_command_sindex_repair, PERM_SERVICE_CTRL);
 
 	as_info_set_dynamic("query-list", as_query_list, false);
 	as_info_set_command("query-kill", info_command_query_kill, PERM_QUERY_MANAGE);

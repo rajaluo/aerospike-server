@@ -166,18 +166,6 @@ typedef enum {
 // **************************************************************************************************
 
 /* 
- * Configuration parameter and control variable for secondary indexes
- */
-// **************************************************************************************************
-#define AS_SINDEX_CONFIG_IGNORE_ON_DESYNC     0x01
-// First byte
-// TODO REMOVE .. NOt being used
-#define IMD_FLAG_NO_RANGE_QUERY      0x0001
-// Fourth byte ..  TODO can remove
-#define IMD_FLAG_LOCKSET             0x0200
-// **************************************************************************************************
-
-/* 
  * STRUCTURES FROM ALCHEMY
  */
 // *****************************
@@ -239,7 +227,6 @@ typedef struct as_sindex_config_var_s {
 	uint64_t    defrag_period;
 	uint32_t    defrag_max_units;
 	bool        enable_histogram; // default false;
-	uint16_t    ignore_not_sync_flag;
 	bool 		conf_valid_flag;
 } as_sindex_config_var;
 
@@ -257,13 +244,8 @@ typedef struct as_sindex_config_s {
  */
 // **************************************************************************************************
 typedef struct as_sindex_physical_metadata_s {
-	// Static member. Does not need protection by lock
-	int                 tmatch;
-	int                 imatch;  // slot in Index array (Alchemy)
-
 	pthread_rwlock_t    slock;
-	// Need protection by lock
-	struct btree       *ibtr;    // Aerospike Index pointer
+	struct btree       *ibtr;
 } as_sindex_pmetadata;
 
 
@@ -289,7 +271,6 @@ typedef struct as_sindex_metadata_s {
 	char                * set;
 	char                * iname;
 	char                * bname;
-	unsigned char         dtype;   // Aerospike Index type
 	uint32_t              binid; // Redundant info to aid search
 	as_sindex_ktype       btype; // Same as Aerospike Index type
 	as_sindex_type        itype;
@@ -297,8 +278,6 @@ typedef struct as_sindex_metadata_s {
 	as_sindex_path        path[AS_SINDEX_MAX_DEPTH];
 	int                   path_length;
 	char                * path_str;
-	int                   bimatch; // imatch of 0th pimd
-	int                   tmatch;  // Aerospike Index to table(tmatch)
 	int                   nprts;   // Aerospike Index Number of Index partitions	
 } as_sindex_metadata;
 
@@ -313,7 +292,6 @@ typedef struct as_sindex_s {
 	
 	// TODO : shift to imd
 	volatile uint16_t            flag;
-	cf_atomic64                  desync_cnt;
 	// No need to be volatile; little stale info
 	// about this is ok. And it is not checked
 	// in busy loop
@@ -508,7 +486,7 @@ extern int  as_sindex_boot_populateall();
  * 
 */
 // **************************************************************************************************
-extern int  as_sindex_create(as_namespace *ns, as_sindex_metadata *imd, bool user_create);
+extern int  as_sindex_create(as_namespace *ns, as_sindex_metadata *imd);
 extern int  as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd);
 extern int  as_sindex_update(as_sindex_metadata *imd);
 extern void as_sindex_destroy_pmetadata(as_sindex *si);
@@ -569,8 +547,8 @@ void                        as_sindex_delete_set(as_namespace * ns, char * set_n
 // **************************************************************************************************
 extern int  as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db);
 extern int  as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db);
-extern int  as_sindex_repair(as_namespace *ns, char * iname);
 extern int  as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params);
+extern void as_sindex_dump(char *nsname, char *iname, char *fname, bool verbose);
 extern void as_sindex_gconfig_default(struct as_config_s *c);
 extern int  as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
 			bool is_create, bool *is_smd_op, char * cmd);
@@ -617,7 +595,7 @@ extern int         as_sindex_query(as_sindex *si, as_sindex_range *range, as_sin
 extern int         as_sindex_range_free(as_sindex_range **srange);
 extern int         as_sindex_rangep_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range **srange);
 extern int         as_sindex_range_from_msg(as_namespace *ns, as_msg *msgp, as_sindex_range *srange);
-extern int         as_sindex_assert_query(as_sindex *si, as_sindex_range *srange);
+extern bool        as_sindex_can_query(as_sindex *si);
 extern as_sindex * as_sindex_from_msg(as_namespace *ns, as_msg *msgp); 
 extern as_sindex * as_sindex_from_range(as_namespace *ns, char *set, as_sindex_range *srange);
 extern int         as_index_keys_reduce_fn(cf_ll_element *ele, void *udata);
