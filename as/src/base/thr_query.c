@@ -108,7 +108,6 @@
 #include "citrusleaf/cf_ll.h"
 #include "citrusleaf/cf_rchash.h"
 
-#include "ai.h"
 #include "ai_btree.h"
 #include "bt.h"
 #include "bt_iterator.h"

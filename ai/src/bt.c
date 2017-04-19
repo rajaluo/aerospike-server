@@ -30,7 +30,6 @@
 #include <string.h>
 #include <strings.h>
 
-#include "ai_globals.h"
 #include "bt.h"
 #include "bt_iterator.h"
 #include "stream.h"
@@ -128,20 +127,6 @@ static bt *createOBT(uchar ktype, uchar vtype, int tmatch, uchar btype) {
                           C_IS_F(ktype) ? btFloatCmp : \
                           /* TEXT */      btTextCmp
 
-bt *createDBT(uchar ktype, int tmatch) {
-	r_tbl_t *rt = &Tbl[tmatch];
-	if (rt->col_count == 2) {
-		bt *obtr = createOBT(ktype, rt->col[1].type, tmatch, BTREE_TABLE);
-		if (obtr) return obtr;
-	}
-	bts_t bts;
-	bts.ktype = ktype;
-	bts.btype = BTREE_TABLE;
-	bts.ksize = VOIDSIZE;
-	bts.bflag = BTFLAG_NONE;
-	bts.num   = tmatch;
-	return bt_create(ASSIGN_CMP(ktype), TRANS_ONE, &bts, rt->dirty);
-}
 bt *createIBT(uchar ktype, int imatch, uchar btype) {
 	bt_cmp_t cmp;
 	bts_t bts;
