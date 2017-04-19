@@ -4583,6 +4583,12 @@ set_static_services(void)
 	}
 }
 
+void
+info_node_info_tend()
+{
+	shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
+}
+
 void *
 info_interfaces_fn(void *unused)
 {
@@ -4665,7 +4671,7 @@ info_interfaces_fn(void *unused)
 			pthread_mutex_unlock(&g_serv_lock);
 		}
 
-		shash_reduce(g_info_node_info_hash, info_node_info_reduce_fn, 0);
+		info_node_info_tend();
 		sleep(2);
 	}
 
@@ -4900,6 +4906,9 @@ info_clustering_event_listener(const as_exchange_cluster_changed_event* event, v
 
 	cf_atomic32_incr(&g_node_info_generation);
 	cf_debug(AS_INFO, "info_clustering_event_listener took %" PRIu64 " ms", cf_getms() - start_ms);
+
+	// Trigger an immediate tend to start peer list update across the cluster.
+	info_node_info_tend();
 }
 
 // This goes in a reduce function for retransmitting my information to another node
@@ -5018,6 +5027,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 			temp.generation = 0;
 			temp.last_changed = 0;
 			reset_node_info_services(&temp);
+			bool node_info_tend_required = false;
 
 			info_node_info *info_history;
 			pthread_mutex_t *vlock_history;
@@ -5097,6 +5107,7 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				if (INFO_OP_UPDATE_REQ == op) {
 					cf_debug(AS_INFO, "Received request for info update from node %" PRIx64 " ~~ setting node's info generation to 0!", node);
 					info->generation = 0;
+					node_info_tend_required = true;
 				}
 
 				pthread_mutex_unlock(vlock);
@@ -5119,6 +5130,10 @@ info_msg_fn(cf_node node, msg *m, void *udata)
 				cf_warning(AS_INFO, "Failed to send message %p with type %d to node %"PRIu64" (rv %d)",
 						m, (int32_t)m->type, node, rv);
 				as_fabric_msg_put(m);
+			}
+
+			if (node_info_tend_required) {
+				info_node_info_tend();
 			}
 		}
 
