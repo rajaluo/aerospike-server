@@ -169,7 +169,12 @@ msg_type_register(msg_type type, const msg_template *mt, size_t mt_sz,
 	msg_type_entry *mte = &g_mte[type];
 	uint16_t mt_count = (uint16_t)(mt_sz / sizeof(msg_template));
 
-	cf_assert(! mte->mt, CF_MSG, "msg_type_register() type %d already registered", type);
+	if (mte->mt) {
+		// This happens on the heartbeat version jump - handle gently for now.
+		cf_info(CF_MSG, "msg_type_register() type %d already registered", type);
+		return;
+	}
+
 	cf_assert(mt_count != 0, CF_MSG, "msg_type_register() empty template");
 
 	uint16_t max_id = 0;
