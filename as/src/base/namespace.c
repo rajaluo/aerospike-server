@@ -58,9 +58,11 @@
 #include "fabric/partition.h"
 #include "storage/storage.h"
 
+
 //==========================================================
 // Typedefs & constants.
 //
+
 
 //==========================================================
 // Globals.
@@ -68,12 +70,14 @@
 
 static as_namespace_id g_namespace_id_counter = 0;
 
-//==========================================================
-// Forward Declarations.
-//
 
 //==========================================================
-// Inlines and Macros
+// Forward declarations.
+//
+
+
+//==========================================================
+// Inlines & macros.
 //
 
 // Generate a hash value which does not collide with nsid (32 to UINT32_MAX)
@@ -91,6 +95,7 @@ ns_name_hash(char *name)
 
 	return hv;
 }
+
 
 //==========================================================
 // Public API.
