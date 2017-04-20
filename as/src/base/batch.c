@@ -84,6 +84,7 @@ struct as_batch_shared_s {
 	uint32_t tran_count;
 	uint32_t tran_max;
 	int result_code;
+	bool bad_response_fd;
 };
 
 typedef struct {
@@ -171,7 +172,7 @@ static void
 as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 {
 	// Don't send buffer if an error has already occurred.
-	if (! shared->fd_h || shared->result_code) {
+	if (shared->bad_response_fd || shared->result_code) {
 		return;
 	}
 
@@ -184,9 +185,9 @@ as_batch_send_buffer(as_batch_shared* shared, as_batch_buffer* buffer)
 	int status = as_batch_send(&shared->fd_h->sock, (uint8_t*)&buffer->proto, sizeof(as_proto) + buffer->size, MSG_NOSIGNAL | MSG_MORE);
 
 	if (status) {
-		// Socket error. Close socket.
-		as_end_of_transaction_force_close(shared->fd_h);
-		shared->fd_h = 0;
+		// Socket error. Release shared->fd_h after all sub-transactions are
+		// complete - shared->fd_h needed for security filter.
+		shared->bad_response_fd = true;
 		cf_atomic64_incr(&g_stats.batch_index_errors);
 	}
 }
@@ -195,7 +196,9 @@ static void
 as_batch_send_final(as_batch_shared* shared)
 {
 	// Send protocol trailer to client socket.
-	if (! shared->fd_h) {
+	if (shared->bad_response_fd) {
+		as_end_of_transaction_force_close(shared->fd_h);
+		shared->fd_h = NULL;
 		return;
 	}
 
@@ -220,7 +223,7 @@ as_batch_send_final(as_batch_shared* shared)
 	int status = as_batch_send(&shared->fd_h->sock, (uint8_t*) &m, sizeof(m), MSG_NOSIGNAL);
 
 	as_end_of_transaction(shared->fd_h, status != 0);
-	shared->fd_h = 0;
+	shared->fd_h = NULL;
 
 	// For now the model is timeouts don't appear in histograms.
 	if (shared->result_code != AS_PROTO_RESULT_FAIL_TIMEOUT) {
