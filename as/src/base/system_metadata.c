@@ -2275,6 +2275,19 @@ static int transact_complete_fn(msg *response, void *udata, int fabric_err)
 	return 0;
 }
 
+static void
+smd_fabric_send(cf_node node_id, msg *m)
+{
+	if (node_id == g_config.self_node) {
+		as_smd_msgq_push(node_id, m, g_smd);
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	as_fabric_transact_start(node_id, m, AS_SMD_TRANSACT_TIMEOUT_MS,
+			transact_complete_fn, NULL);
+}
+
 /*
  *  Send the metadata item change message to the SMD principal.
  */
@@ -2296,7 +2309,7 @@ static int as_smd_proxy_to_principal(as_smd_t *smd, as_smd_msg_op_t op, as_smd_i
 		return -1;
 	}
 
-	as_fabric_transact_start(as_smd_principal(), msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+	smd_fabric_send(as_smd_principal(), msg);
 
 	return 0;
 }
@@ -2736,8 +2749,7 @@ static void as_smd_cluster_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 	// The metadata has been copied into the fabric msg and can now be released.
 	as_smd_item_list_destroy(item_list);
 
-	// Send the serialized metadata to the SMD principal.
-	as_fabric_transact_start(as_smd_principal(), msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+	smd_fabric_send(as_smd_principal(), msg);
 
 	smd_process_pending_merges();
 }
@@ -2898,7 +2910,8 @@ static int as_smd_apply_metadata_change(as_smd_t *smd, as_smd_module_t *module_o
 							   AS_SMD_MSG_OP_NAME(accept_op), node_id);
 					continue;
 				}
-				as_fabric_transact_start(node_id, msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+
+				smd_fabric_send(node_id, msg);
 			}
 		}
 #if 0
@@ -3178,7 +3191,8 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 		if (!(msg = as_smd_msg_get(merge_op, item_list_out->item, item_list_out->num_items, module, AS_SMD_ACCEPT_OPT_MERGE))) {
 			cf_crash(AS_SMD, "failed to get a System Metadata fabric msg for operation %s", AS_SMD_MSG_OP_NAME(merge_op));
 		}
-		as_fabric_transact_start(node_id, msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+
+		smd_fabric_send(node_id, msg);
 	}
 
 	// Release the item lists.
