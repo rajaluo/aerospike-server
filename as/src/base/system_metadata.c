@@ -2113,7 +2113,11 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
 	}
 
 	e = msg_set_str_array_size(m, AS_SMD_MSG_KEY, num_items, key_sz);
-	e += msg_set_str_array_size(m, AS_SMD_MSG_VALUE, num_items, value_sz);
+
+	if (value_sz != 0) {
+		msg_set_str_array_size(m, AS_SMD_MSG_VALUE, num_items, value_sz);
+	}
+
 	e += msg_set_uint32_array_size(m, AS_SMD_MSG_GENERATION, num_items);
 	e += msg_set_uint64_array_size(m, AS_SMD_MSG_TIMESTAMP, num_items);
 
@@ -2184,13 +2188,15 @@ as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const
 	if (num_items) {
 		int module_sz = 0;
 		int key_sz    = 0;
-		int value_sz    = 0;
+		uint32_t value_sz = 0;
+
 		for (int i = 0; i < num_items; i++) {
 			module_sz += strlen(item[i]->module_name) + 1;
 			key_sz += strlen(item[i]->key) + 1;
+
 			if (AS_SMD_ACTION_DELETE != item[i]->action) {
 				if (item[i]->value) {
-					value_sz += strlen(item[i]->value) + 1;
+					value_sz += (uint32_t)strlen(item[i]->value) + 1;
 				}
 			}
 		}
@@ -2198,8 +2204,11 @@ as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const
 		e += msg_set_uint32_array_size(msg, AS_SMD_MSG_ACTION, num_items);
 		e += msg_set_str_array_size(msg, AS_SMD_MSG_MODULE, num_items, module_sz);
 		e += msg_set_str_array_size(msg, AS_SMD_MSG_KEY, num_items, key_sz);
-		// (Note:  The corresponding fields won't be used for items with the DELETE action.)
-		e += msg_set_str_array_size(msg, AS_SMD_MSG_VALUE, num_items, value_sz);
+
+		if (value_sz != 0) {
+			msg_set_str_array_size(msg, AS_SMD_MSG_VALUE, num_items, value_sz);
+		}
+
 		e += msg_set_uint32_array_size(msg, AS_SMD_MSG_GENERATION, num_items);
 		e += msg_set_uint64_array_size(msg, AS_SMD_MSG_TIMESTAMP, num_items);
 
