@@ -1260,7 +1260,24 @@ static as_smd_t *as_smd_create(void)
  */
 as_smd_t *as_smd_init(void)
 {
-	if (! as_new_clustering()) {
+	if (as_new_clustering()) {
+		// XXX JUMP - remove in "six months", even though it's for v5.
+		char smd_path[MAX_PATH_LEN];
+		char smd_save_path[MAX_PATH_LEN];
+
+		snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
+		snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
+
+		struct stat result;
+		bool both_gone =
+				stat(smd_path, &result) != 0 && errno == ENOENT &&
+				stat(smd_save_path, &result) != 0 && errno == ENOENT;
+
+		if (! both_gone) {
+			cf_crash_nostack(AS_SMD, "Aerospike server was not properly switched to paxos-protocol v5");
+		}
+	}
+	else {
 		// No cluster-changed event from old paxos when becoming single-node
 		// cluster at startup - initialize this info just for that case.
 		g_cluster_key = 0;
