@@ -1779,7 +1779,7 @@ as_partition_balance_jump_versions()
 			pthread_mutex_unlock(&p->lock);
 		}
 
-		as_storage_info_flush(g_config.namespaces[ns_ix]);
+		as_storage_info_flush(ns);
 	}
 }
 
