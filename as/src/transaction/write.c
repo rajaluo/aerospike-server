@@ -1330,7 +1330,7 @@ write_master_ssd_single_bin(as_transaction* tr, as_storage_rd* rd,
 	// the new record bin to write.
 	//
 
-	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
+	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
 
 	uint32_t n_new_bins = 0;
 
@@ -1467,7 +1467,7 @@ write_master_ssd(as_transaction* tr, const char* set_name, as_storage_rd* rd,
 	// the new record bins to write.
 	//
 
-	cf_ll_buf_inita(particles_llb, STACK_PARTICLES_SIZE);
+	cf_ll_buf_define(particles_llb, STACK_PARTICLES_SIZE);
 
 	if ((result = write_master_bin_ops(tr, rd, &particles_llb, NULL, NULL,
 			&rw->response_db, &n_new_bins, dirty_bins)) != 0) {
