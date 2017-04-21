@@ -1264,7 +1264,7 @@ as_smd_t *as_smd_init(void)
 		// This is here only because we happen to use the absence of the old
 		// sindex SMD files as proof of a proper live jump from v3 to v5. We'll
 		// need to keep this around for a long time - perhaps move it to a
-		// better place when secondary index is overhauled.
+		// better place when SMD is overhauled.
 
 		char smd_path[MAX_PATH_LEN];
 		char smd_save_path[MAX_PATH_LEN];
