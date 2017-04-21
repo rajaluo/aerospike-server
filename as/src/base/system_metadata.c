@@ -1261,20 +1261,26 @@ static as_smd_t *as_smd_create(void)
 as_smd_t *as_smd_init(void)
 {
 	if (as_new_clustering()) {
-		// XXX JUMP - remove in "six months", even though it's for v5.
+		// This is here only because we happen to use the absence of the old
+		// sindex SMD files as proof of a proper live jump from v3 to v5. We'll
+		// need to keep this around for a long time - perhaps move it to a
+		// better place when secondary index is overhauled.
+
 		char smd_path[MAX_PATH_LEN];
 		char smd_save_path[MAX_PATH_LEN];
 
 		snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
 		snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
 
-		struct stat result;
+		struct stat buf;
 		bool both_gone =
-				stat(smd_path, &result) != 0 && errno == ENOENT &&
-				stat(smd_save_path, &result) != 0 && errno == ENOENT;
+				stat(smd_path, &buf) != 0 && errno == ENOENT &&
+				stat(smd_save_path, &buf) != 0 && errno == ENOENT;
 
 		if (! both_gone) {
-			cf_crash_nostack(AS_SMD, "Aerospike server was not properly switched to paxos-protocol v5");
+			cf_crash_nostack(AS_SMD,
+					"Aerospike server was not properly switched to paxos-protocol v5 - "
+					"see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/cluster_to_3_13");
 		}
 	}
 	else {
