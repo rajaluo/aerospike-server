@@ -1155,6 +1155,18 @@ join_request_move_reject_interval()
 }
 
 /**
+ * Maximum tolerable join request transmission delay in milliseconds. Join
+ * requests delayed by more than this amount will not be accepted.
+ */
+static uint32_t
+join_request_accept_delay_max()
+{
+	// Join request is considered stale / delayed if the (received hlc timestamp
+	// - send hlc timestamp) > this value;
+	return (2 * as_hb_tx_interval_get() + network_latency_max());
+}
+
+/**
  * Timeout in milliseconds for a paxos proposal. Give a paxos round two thirds
  * of an interval to timeout.
  * A paxos round should definitely timeout before the next quantum interval, so
@@ -1179,12 +1191,11 @@ paxos_msg_timeout()
  * Maximum amount of time a node will be in orphan state. After this timeout the
  * node will try forming a new cluster even if there are other adjacent
  * clusters/nodes visible.
- * TODO: Fix a value for this.
  */
 static uint32_t
 clustering_orphan_timeout()
 {
-	return 10 * quantum_interval();
+	return UINT_MAX;
 }
 
 /*
@@ -5638,8 +5649,7 @@ clustering_join_request_send(cf_node new_principal)
 		g_clustering.last_join_request_principal = new_principal;
 		g_clustering.last_join_request_sent_time = cf_getms();
 
-		DEBUG("sent cluster join request to %"PRIx64, new_principal);
-
+		INFO("sent cluster join request to %"PRIx64, new_principal);
 		rv = 0;
 	}
 
@@ -5763,6 +5773,12 @@ clustering_principal_join_request_attempt(cf_node preferred_principal)
 	}
 
 Exit:
+	if (rv != AS_CLUSTERING_JOIN_REQUEST_SENT) {
+		// Forget the last principal we sent the join request to.
+		g_clustering.last_join_request_principal = 0;
+		g_clustering.last_join_request_sent_time = 0;
+	}
+
 	CLUSTERING_UNLOCK();
 
 	cf_vector_destroy(neighboring_principals);
@@ -5880,12 +5896,13 @@ clustering_join_request_attempt()
 			// Wait for the principal to respond. do nothing
 			DETAIL(
 					"join request to principal %"PRIx64" pending - not attempting new join request",
-					g_clustering.last_join_request_principal);
+					last_join_request_principal);
 			return AS_CLUSTERING_JOIN_REQUEST_PENDING;
 		}
 		// Timeout joining a principal. Choose a different principal.
 		INFO("join request timed out for principal %"PRIx64,
-				g_clustering.last_join_request_principal);
+				last_join_request_principal);
+
 	}
 
 	// Try sending a join request to a neighboring principal.
@@ -6794,6 +6811,16 @@ clustering_join_request_handle(as_clustering_internal_event* msg_event)
 		goto Exit;
 	}
 
+	// Check if we are receiving a stale or very delayed join request.
+	int64_t message_delay_estimate = as_hlc_timestamp_diff_ms(
+			as_hlc_timestamp_now(), msg_event->msg_hlc_ts.send_ts);
+	if (message_delay_estimate < 0
+			|| message_delay_estimate > join_request_accept_delay_max()) {
+		INFO("ignoring stale join request from node %"PRIx64" - delay estimate %lu(ms) ",
+				src_nodeid, message_delay_estimate);
+		goto Exit;
+	}
+
 	// Add this request to the pending queue.
 	cf_vector_append_unique(&g_clustering.pending_join_requests, &src_nodeid);
 
@@ -6852,6 +6879,7 @@ clustering_join_reject_handle(as_clustering_internal_event* event)
 		// This join request should not be considered as pending, so reset the
 		// join request sent time.
 		g_clustering.last_join_request_sent_time = 0;
+		g_clustering.last_join_request_principal = 0;
 		clustering_join_request_attempt();
 	}
 

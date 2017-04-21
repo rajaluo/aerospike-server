@@ -1176,6 +1176,16 @@ typedef enum
 } as_hb_msg_type;
 
 /**
+ * Events published by the heartbeat subsystem.
+ */
+typedef enum
+{
+	AS_HB_INTERNAL_NODE_ARRIVE,
+	AS_HB_INTERNAL_NODE_DEPART,
+	AS_HB_INTERNAL_NODE_EVICT
+} as_hb_internal_event_type;
+
+/**
  * State maintained by the heartbeat subsystem for the selected mode.
  */
 typedef struct as_hb_mode_state_s
@@ -1406,12 +1416,22 @@ typedef struct as_hb_adjacency_tender_udata_s
 	/**
 	 * The list of expired nodes.
 	 */
-	cf_node* dead_node_list;
+	cf_node* dead_nodes;
 
 	/**
 	 * Count of elements in the dead node list.
 	 */
 	int dead_node_count;
+
+	/**
+	 * The list of evicted nodes , e.g. due to cluster name mismatch.
+	 */
+	cf_node* evicted_nodes;
+
+	/**
+	 * Count of elements in the evicted node list.
+	 */
+	int evicted_node_count;
 } as_hb_adjacency_tender_udata;
 
 /**
@@ -1753,7 +1773,7 @@ static bool hb_input_protocol_is_legacy(as_hb_protocol protocol);
 static bool hb_protocol_is_legacy();
 static cf_clock hb_node_depart_time(cf_clock detect_time);
 static bool hb_is_mesh();
-static void hb_event_queue(as_hb_event_type event_type, const cf_node* nodes, int node_count);
+static void hb_event_queue(as_hb_internal_event_type event_type, const cf_node* nodes, int node_count);
 static void hb_event_publish_pending();
 static int hb_adjacency_free_data_reduce(const void* key, void* data, void* udata);
 static void hb_clear();
@@ -8731,22 +8751,29 @@ hb_is_mesh()
  * Publish an event to subsystems listening to heart beat events.
  */
 static void
-hb_event_queue(as_hb_event_type event_type, const cf_node* nodes,
+hb_event_queue(as_hb_internal_event_type event_type, const cf_node* nodes,
 		int node_count)
 {
 	// Lock-less because the queue is thread safe and we do not use heartbeat
 	// state here.
 	for (int i = 0; i < node_count; i++) {
 		as_hb_event_node event;
-		event.evt = event_type;
 		event.nodeid = nodes[i];
-
 		event.event_detected_time = cf_getms();
-		if (event_type == AS_HB_NODE_DEPART) {
-			event.event_time = hb_node_depart_time(event.event_detected_time);
-		}
-		else {
+
+		switch (event_type) {
+		case AS_HB_INTERNAL_NODE_ARRIVE:
+			event.evt = AS_HB_NODE_ARRIVE;
 			event.event_time = event.event_detected_time;
+			break;
+		case AS_HB_INTERNAL_NODE_DEPART:
+			event.evt = AS_HB_NODE_DEPART;
+			event.event_time = hb_node_depart_time(event.event_detected_time);
+			break;
+		case AS_HB_INTERNAL_NODE_EVICT:
+			event.evt = AS_HB_NODE_DEPART;
+			event.event_time = event.event_detected_time;
+			break;
 		}
 
 		DEBUG("queuing event of type %d for node %" PRIx64, event.evt,
@@ -8816,7 +8843,7 @@ hb_adjacency_free_data_reduce(const void* key, void* data, void* udata)
 	hb_adjacent_node_destroy(adjacent_node);
 
 	// Send event depart to for this node
-	hb_event_queue(AS_HB_NODE_DEPART, nodeid, 1);
+	hb_event_queue(AS_HB_INTERNAL_NODE_DEPART, nodeid, 1);
 
 	return SHASH_REDUCE_DELETE;
 }
@@ -9244,8 +9271,14 @@ hb_adjacency_tend_reduce(const void* key, void* data, void* udata)
 			> CLUSTER_NAME_MISMATCH_MAX;
 	if (hb_node_has_expired(nodeid, adjacent_node) || cluster_name_mismatch) {
 		INFO("node expired %" PRIx64" %s", nodeid, cluster_name_mismatch ? "(cluster name mismatch)" : "");
-		adjacency_tender_udata->dead_node_list[adjacency_tender_udata->dead_node_count++] =
-				nodeid;
+		if (cluster_name_mismatch) {
+			adjacency_tender_udata->evicted_nodes[adjacency_tender_udata->evicted_node_count++] =
+					nodeid;
+		}
+		else {
+			adjacency_tender_udata->dead_nodes[adjacency_tender_udata->dead_node_count++] =
+					nodeid;
+		}
 
 		// Free plugin data as well.
 		hb_adjacent_node_destroy(adjacent_node);
@@ -9280,21 +9313,30 @@ hb_adjacency_tender(void* arg)
 		last_time = curr_time;
 
 		DETAIL("tending adjacency list");
+
 		HB_LOCK();
 		cf_node dead_nodes[shash_get_size(g_hb.adjacency)];
+		cf_node evicted_nodes[shash_get_size(g_hb.adjacency)];
 		as_hb_adjacency_tender_udata adjacency_tender_udata;
-		adjacency_tender_udata.dead_node_list = dead_nodes;
+		adjacency_tender_udata.dead_nodes = dead_nodes;
 		adjacency_tender_udata.dead_node_count = 0;
+		adjacency_tender_udata.evicted_nodes = evicted_nodes;
+		adjacency_tender_udata.evicted_node_count = 0;
 
 		shash_reduce_delete(g_hb.adjacency, hb_adjacency_tend_reduce,
 				&adjacency_tender_udata);
-
 		HB_UNLOCK();
 
 		if (adjacency_tender_udata.dead_node_count > 0) {
 			// Queue events for dead nodes.
-			hb_event_queue(AS_HB_NODE_DEPART, dead_nodes,
+			hb_event_queue(AS_HB_INTERNAL_NODE_DEPART, dead_nodes,
 					adjacency_tender_udata.dead_node_count);
+		}
+
+		if (adjacency_tender_udata.evicted_node_count > 0) {
+			// Queue events for dead nodes.
+			hb_event_queue(AS_HB_INTERNAL_NODE_EVICT, evicted_nodes,
+						   adjacency_tender_udata.evicted_node_count);
 		}
 
 		// See if we have pending events to publish.
@@ -9597,7 +9639,7 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 	// Publish event if this is a new node.
 	if (is_new) {
 		INFO("node arrived %" PRIx64, source);
-		hb_event_queue(AS_HB_NODE_ARRIVE, &source, 1);
+		hb_event_queue(AS_HB_INTERNAL_NODE_ARRIVE, &source, 1);
 	}
 
 Exit:
