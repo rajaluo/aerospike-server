@@ -24,6 +24,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <unistd.h>
 #include <sys/param.h> // For MAX() and MIN().
 
 #include "citrusleaf/alloc.h"

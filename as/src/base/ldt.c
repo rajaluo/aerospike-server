@@ -271,6 +271,8 @@
 
 #include "base/ldt.h"
 
+#include <unistd.h>
+
 #include "aerospike/as_msgpack.h"
 #include "aerospike/as_types.h"
 

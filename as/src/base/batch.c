@@ -39,6 +39,7 @@
 #include "hardware.h"
 #include "socket.h"
 #include <errno.h>
+#include <unistd.h>
 
 //---------------------------------------------------------
 // MACROS

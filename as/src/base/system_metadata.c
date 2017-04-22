@@ -31,6 +31,7 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <unistd.h> // for unlink() XXX - JUMP - remove in "six months"
 #include <sys/stat.h>
 
 #include "aerospike/as_hashmap.h"
