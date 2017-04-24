@@ -33,9 +33,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "citrusleaf/cf_atomic.h"
+#include "aerospike/as_msgpack.h"
 #include "citrusleaf/alloc.h"
+#include "citrusleaf/cf_atomic.h"
 #include "citrusleaf/cf_byte_order.h"
+#include "citrusleaf/cf_vector.h"
 
 #include "dynbuf.h"
 #include "fault.h"
@@ -417,6 +419,7 @@ msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 			case M_FT_ARRAY_UINT64:
 			case M_FT_ARRAY_STR:
 			case M_FT_ARRAY_BUF:
+			case M_FT_MSGPACK:
 				mf->field_sz = (uint32_t)fsz;
 				mf->u.any_buf = (void *)buf;
 				mf->is_free = false;
@@ -774,15 +777,103 @@ msg_set_buf_array(msg *m, int field_id, uint32_t idx, const uint8_t *buf,
 	return 0;
 }
 
+void
+msg_msgpack_list_set_uint32(msg *m, int field_id, const uint32_t *buf,
+		uint32_t count)
+{
+	msg_field *mf = &m->f[field_id];
+	uint32_t a_sz = as_pack_list_header_get_size(count);
+
+	mf_destroy(mf);
+
+	for (uint32_t i = 0; i < count; i++) {
+		a_sz += as_pack_uint64_size((uint64_t)buf[i]);
+	}
+
+	mf->field_sz = a_sz;
+	mf->u.any_buf = cf_malloc(a_sz);
+
+	cf_assert(mf->u.any_buf, CF_MSG, "malloc");
+
+	as_packer pk = {
+			.buffer = mf->u.any_buf,
+			.offset = 0,
+			.capacity = (int)a_sz,
+	};
+
+	int e = as_pack_list_header(&pk, count);
+
+	cf_assert(e == 0, CF_MSG, "as_pack_list_header failed");
+
+	for (uint32_t i = 0; i < count; i++) {
+		e = as_pack_uint64(&pk, (uint64_t)buf[i]);
+		cf_assert(e == 0, CF_MSG, "as_pack_str failed");
+	}
+
+	mf->is_free = true;
+	mf->is_set = true;
+}
+
+void
+msg_msgpack_list_set_buf(msg *m, int field_id, const cf_vector *v)
+{
+	msg_field *mf = &m->f[field_id];
+	uint32_t count = cf_vector_size(v);
+	uint32_t a_sz = as_pack_list_header_get_size(count);
+
+	mf_destroy(mf);
+
+	for (uint32_t i = 0; i < count; i++) {
+		const msg_buf_ele *ele = cf_vector_getp((cf_vector *)v, i);
+
+		if (! ele->ptr) {
+			a_sz++; // TODO - add to common later
+		}
+		else {
+			a_sz += as_pack_str_size(ele->sz);
+		}
+	}
+
+	mf->field_sz = a_sz;
+	mf->u.any_buf = cf_malloc(a_sz);
+
+	cf_assert(mf->u.any_buf, CF_MSG, "malloc");
+
+	as_packer pk = {
+			.buffer = mf->u.any_buf,
+			.offset = 0,
+			.capacity = (int)a_sz,
+	};
+
+	int e = as_pack_list_header(&pk, count);
+
+	cf_assert(e == 0, CF_MSG, "as_pack_list_header failed");
+
+	for (uint32_t i = 0; i < count; i++) {
+		const msg_buf_ele *ele = cf_vector_getp((cf_vector *)v, i);
+
+		if (! ele->ptr) {
+			pk.buffer[pk.offset++] = 0xc0; // TODO - add to common later
+		}
+		else {
+			e = as_pack_str(&pk, ele->ptr, ele->sz);
+			cf_assert(e == 0, CF_MSG, "as_pack_str failed");
+		}
+	}
+
+	mf->is_free = true;
+	mf->is_set = true;
+}
+
 
 //==========================================================
 // Public API - get fields from messages.
 //
 
 msg_field_type
-msg_field_get_type(const msg *m, uint16_t id)
+msg_field_get_type(const msg *m, int field_id)
 {
-	return mf_type(&m->f[id], m->type);
+	return mf_type(&m->f[field_id], m->type);
 }
 
 int
@@ -895,9 +986,9 @@ msg_is_set(const msg *m, int field_id)
 }
 
 int
-msg_get_uint32_array(msg *m, int field_id, uint32_t index, uint32_t *val_r)
+msg_get_uint32_array(const msg *m, int field_id, uint32_t index, uint32_t *val_r)
 {
-	msg_field *mf = &m->f[field_id];
+	const msg_field *mf = &m->f[field_id];
 
 	if (! mf->is_set) {
 		return -1;
@@ -909,9 +1000,9 @@ msg_get_uint32_array(msg *m, int field_id, uint32_t index, uint32_t *val_r)
 }
 
 int
-msg_get_uint64_array_count(msg *m, int field_id, uint32_t *count_r)
+msg_get_uint64_array_count(const msg *m, int field_id, uint32_t *count_r)
 {
-	msg_field *mf = &m->f[field_id];
+	const msg_field *mf = &m->f[field_id];
 
 	if (! mf->is_set) {
 		return -1;
@@ -923,9 +1014,9 @@ msg_get_uint64_array_count(msg *m, int field_id, uint32_t *count_r)
 }
 
 int
-msg_get_uint64_array(msg *m, int field_id, uint32_t index, uint64_t *val_r)
+msg_get_uint64_array(const msg *m, int field_id, uint32_t index, uint64_t *val_r)
 {
-	msg_field *mf = &m->f[field_id];
+	const msg_field *mf = &m->f[field_id];
 
 	if (! mf->is_set) {
 		return -1;
@@ -1045,6 +1136,191 @@ msg_get_buf_array(const msg *m, int field_id, uint32_t idx, uint8_t **buf_r,
 	return 0;
 }
 
+bool
+msg_msgpack_container_get_count(const msg *m, int field_id, uint32_t *count_r)
+{
+	const msg_field *mf = &m->f[field_id];
+
+	if (! mf->is_set) {
+		return false;
+	}
+
+	as_unpacker pk = {
+			.buffer = (const uint8_t *)mf->u.any_buf,
+			.offset = 0,
+			.length = (int)mf->field_sz
+	};
+
+	as_val_t type = as_unpack_peek_type(&pk);
+	int64_t count;
+
+	switch (type) {
+	case AS_LIST:
+		count = as_unpack_list_header_element_count(&pk);
+		break;
+	case AS_MAP:
+		count = as_unpack_map_header_element_count(&pk);
+		break;
+	default:
+		cf_ticker_warning(CF_MSG, "type %d not a packed container", type);
+		return false;
+	}
+
+	if (count < 0) {
+		cf_ticker_warning(CF_MSG, "invalid packed container type %d", type);
+		return false;
+	}
+
+	*count_r = (uint32_t)count;
+
+	return true;
+}
+
+bool
+msg_msgpack_list_get_uint32_array(const msg *m, int field_id, uint32_t **buf_r,
+		uint32_t *count_r)
+{
+	const msg_field *mf = &m->f[field_id];
+
+	if (! mf->is_set) {
+		return false;
+	}
+
+	as_unpacker pk = {
+			.buffer = (const uint8_t *)mf->u.any_buf,
+			.offset = 0,
+			.length = (int)mf->field_sz
+	};
+
+	as_val_t type = as_unpack_peek_type(&pk);
+	int64_t count;
+
+	switch (type) {
+	case AS_LIST:
+		count = as_unpack_list_header_element_count(&pk);
+		break;
+	default:
+		cf_ticker_warning(CF_MSG, "msg_msgpack_array_get_uint32_array() type %d but expected list", type);
+		return false;
+	}
+
+	if (count < 0) {
+		cf_ticker_warning(CF_MSG, "invalid packed list type %d", type);
+		return false;
+	}
+
+	bool need_free = false;
+
+	if (! *buf_r) {
+		*buf_r = cf_malloc(sizeof(uint64_t) * (size_t)count);
+
+		if (! *buf_r) {
+			cf_warning(CF_MSG, "malloc failed - count %ld", count);
+			return false;
+		}
+
+		*count_r = (uint32_t)count;
+		need_free = true;
+	}
+	else if (*count_r < (uint32_t)count) {
+		cf_warning(CF_MSG, "count_r %u < %ld too small", *count_r, count);
+		return false;
+	}
+
+	for (int64_t i = 0; i < count; i++) {
+		uint64_t val;
+		int ret = as_unpack_uint64(&pk, &val);
+
+		if (ret != 0 || (val & (0xFFFFffffUL << 32)) != 0) {
+			if (need_free) {
+				cf_free(*buf_r);
+				*buf_r = NULL;
+				*count_r = 0;
+			}
+
+			cf_warning(CF_MSG, "i %ld/%ld invalid packed uint32 ret %d val 0x%lx", i, count, ret, val);
+			return false;
+		}
+
+		(*buf_r)[i] = (uint32_t)val;
+	}
+
+	*count_r = (uint32_t)count;
+
+	return true;
+}
+
+bool
+msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r,
+		bool init_vec)
+{
+	const msg_field *mf = &m->f[field_id];
+
+	if (! mf->is_set) {
+		return false;
+	}
+
+	as_unpacker pk = {
+			.buffer = (const uint8_t *)mf->u.any_buf,
+			.offset = 0,
+			.length = (int)mf->field_sz
+	};
+
+	as_val_t type = as_unpack_peek_type(&pk);
+	int64_t count;
+
+	switch (type) {
+	case AS_LIST:
+		count = as_unpack_list_header_element_count(&pk);
+		break;
+	default:
+		cf_ticker_warning(CF_MSG, "msg_msgpack_array_get_buf_vec_with_init() type %d but expected list", type);
+		return false;
+	}
+
+	if (count < 0) {
+		cf_ticker_warning(CF_MSG, "invalid packed list type %d", type);
+		return false;
+	}
+
+	if (init_vec) {
+		if (cf_vector_init(v_r, sizeof(msg_buf_ele), (uint32_t)count, 0) != 0) {
+			cf_warning(CF_MSG, "vector malloc failed - count %ld", count);
+			return false;
+		}
+	}
+	else if ((uint32_t)count > v_r->capacity) { // TODO - wrap to avoid access of private members?
+		cf_warning(CF_MSG, "count %ld > vector cap %u", count, v_r->capacity);
+		return false;
+	}
+
+	for (int64_t i = 0; i < count; i++) {
+		msg_buf_ele ele;
+
+		ele.ptr = (uint8_t *)as_unpack_str(&pk, &ele.sz);
+
+		if (! ele.ptr) {
+			int64_t sz = as_unpack_size(&pk);
+
+			if (sz < 0) {
+				if (init_vec) {
+					cf_vector_destroy(v_r);
+				}
+
+				cf_warning(CF_MSG, "i %ld/%ld invalid msgpack element", i, count);
+
+				return false;
+			}
+
+			ele.sz = 0;
+		}
+
+		cf_vector_append(v_r, &ele);
+	}
+
+	return true;
+}
+
 
 //==========================================================
 // Public API - debugging only.
@@ -1158,6 +1434,7 @@ msg_get_field_wire_size(msg_field_type type, size_t field_sz, bool send_pk)
 	case M_FT_ARRAY_UINT64:
 	case M_FT_ARRAY_STR:
 	case M_FT_ARRAY_BUF:
+	case M_FT_MSGPACK:
 		break;
 	default:
 		cf_crash(CF_MSG, "unexpected field type %d", type);
@@ -1215,6 +1492,7 @@ msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf, bool send_pk)
 	case M_FT_ARRAY_UINT64:
 	case M_FT_ARRAY_STR:
 	case M_FT_ARRAY_BUF:
+	case M_FT_MSGPACK:
 		fsz = mf->field_sz;
 		memcpy(buf, mf->u.any_buf, fsz);
 		break;
@@ -1243,6 +1521,7 @@ msg_field_save(msg *m, msg_field *mf)
 	case M_FT_ARRAY_UINT64:
 	case M_FT_ARRAY_STR:
 	case M_FT_ARRAY_BUF:
+	case M_FT_MSGPACK:
 		// Should only preserve received messages where buffer pointers point
 		// directly into a fabric buffer.
 		cf_assert(! mf->is_free, CF_MSG, "invalid msg preserve");

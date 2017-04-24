@@ -26,7 +26,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
 #include "citrusleaf/cf_atomic.h"
+#include "citrusleaf/cf_vector.h"
+
 #include "dynbuf.h"
 
 
@@ -46,6 +49,7 @@ typedef enum {
 	M_FT_ARRAY_UINT64 = 8,
 	M_FT_ARRAY_BUF = 9,
 	M_FT_ARRAY_STR = 10,
+	M_FT_MSGPACK = 11
 } msg_field_type; // encoded in uint8_t
 
 // These values are used on the wire - don't change them.
@@ -126,6 +130,11 @@ typedef enum {
 	MSG_SET_COPY
 } msg_set_type;
 
+typedef struct msg_buf_ele_s {
+	uint32_t sz;
+	uint8_t *ptr;
+} msg_buf_ele;
+
 
 //==========================================================
 // Globals.
@@ -165,7 +174,7 @@ void msg_incr_ref(msg *m);
 
 // XXX JUMP - remove send_pk parameter in "six months".
 size_t msg_get_wire_size(const msg *m, bool send_pk);
-size_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_len, bool send_pk);
+size_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_count, bool send_pk);
 size_t msg_to_wire(const msg *m, uint8_t *buf, bool send_pk);
 
 //------------------------------------------------
@@ -173,7 +182,7 @@ size_t msg_to_wire(const msg *m, uint8_t *buf, bool send_pk);
 //
 
 int msg_parse(msg *m, const uint8_t *buf, size_t bufsz);
-int msg_get_initial(uint32_t *size, msg_type *type, const uint8_t *buf, uint32_t bufsz);
+int msg_get_initial(uint32_t *size_r, msg_type *type_r, const uint8_t *buf, uint32_t bufsz);
 
 void msg_reset(msg *m);
 void msg_preserve_fields(msg *m, uint32_t n_field_ids, ...);
@@ -182,6 +191,7 @@ void msg_preserve_all_fields(msg *m);
 //------------------------------------------------
 // Set fields in messages.
 //
+
 int msg_set_uint32(msg *m, int field_id, uint32_t v);
 int msg_set_int32(msg *m, int field_id, int32_t v);
 int msg_set_uint64(msg *m, int field_id, uint64_t v);
@@ -200,10 +210,14 @@ int msg_set_str_array(msg *m, int field_id, uint32_t idx, const char *str);
 int msg_set_buf_array_size(msg *m, int field_id, uint32_t count, uint32_t ele_sz);
 int msg_set_buf_array(msg *m, int field_id, uint32_t idx, const uint8_t *buf, size_t sz);
 
+void msg_msgpack_list_set_uint32(msg *m, int field_id, const uint32_t *buf, uint32_t count);
+void msg_msgpack_list_set_buf(msg *m, int field_id, const cf_vector *v);
+
 //------------------------------------------------
 // Get fields from messages.
 //
-msg_field_type msg_field_get_type(const msg *m, uint16_t id);
+
+msg_field_type msg_field_get_type(const msg *m, int field_id);
 bool msg_is_set(const msg *m, int field_id);
 int msg_get_uint32(const msg *m, int field_id, uint32_t *val_r);
 int msg_get_int32(const msg *m, int field_id, int32_t *val_r);
@@ -212,14 +226,24 @@ int msg_get_int64(const msg *m, int field_id, int64_t *val_r);
 int msg_get_str(const msg *m, int field_id, char **str_r, size_t *sz_r, msg_get_type type);
 int msg_get_buf(const msg *m, int field_id, uint8_t **buf_r, size_t *sz_r, msg_get_type type);
 
-int msg_get_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t *val_r);
-int msg_get_uint64_array_count(msg *m, int field_id, uint32_t *count_r);
-int msg_get_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t *val_r);
+int msg_get_uint32_array(const msg *m, int field_id, uint32_t idx, uint32_t *val_r);
+int msg_get_uint64_array_count(const msg *m, int field_id, uint32_t *count_r);
+int msg_get_uint64_array(const msg *m, int field_id, uint32_t idx, uint64_t *val_r);
 
 // XXX - JUMP - remove in "6 months"
 int msg_get_str_array(msg *m, int field_id, uint32_t idx, char **str_r, size_t *sz_r, msg_get_type type);
 int msg_get_buf_array_size(const msg *m, int field_id, int *count_r); // TODO - change int type to uint32_t
 int msg_get_buf_array(const msg *m, int field_id, uint32_t idx, uint8_t **buf_r, size_t *sz_r, msg_get_type type);
+
+bool msg_msgpack_container_get_count(const msg *m, int field_id, uint32_t *count_r);
+bool msg_msgpack_list_get_uint32_array(const msg *m, int field_id, uint32_t **buf_r, uint32_t *count_r);
+bool msg_msgpack_list_get_buf_array(const msg *m, int field_id, cf_vector *v_r, bool init_vec);
+
+static inline bool
+msg_msgpack_list_get_buf_array_presized(const msg *m, int field_id, cf_vector *v_r)
+{
+	return msg_msgpack_list_get_buf_array(m, field_id, v_r, false);
+}
 
 
 //==========================================================
