@@ -665,7 +665,7 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 				   	port_str++;
 				}
 				if (port_str == NULL ||
-				    0 != cf_str_atoi(port_str, &port)) {
+					0 != cf_str_atoi(port_str, &port)) {
 					cf_warning(AS_INFO,
 						   "tip clear command: port must be an integer in: %s",
 						   port_str);
@@ -2212,8 +2212,8 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "paxos-max-cluster-size", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (1 > val) ||
-			    (val > AS_CLUSTER_SZ) ||
-			    !as_hb_max_cluster_size_isvalid(val))
+				(val > AS_CLUSTER_SZ) ||
+				!as_hb_max_cluster_size_isvalid(val))
 				goto Error;
 			cf_info(AS_INFO, "Changing value of paxos-max-cluster-size from %d to %d ", g_config.paxos_max_cluster_size, val);
 			g_config.paxos_max_cluster_size = val;
@@ -2224,7 +2224,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 											 (!strcmp(context, "v3") ? AS_PAXOS_PROTOCOL_V3 :
 											  (!strcmp(context, "v4") ? AS_PAXOS_PROTOCOL_V4 :
 											   (!strcmp(context, "v5") ? AS_PAXOS_PROTOCOL_V5 :
-											    (!strcmp(context, "none") ? AS_PAXOS_PROTOCOL_NONE :
+												(!strcmp(context, "none") ? AS_PAXOS_PROTOCOL_NONE :
 												 AS_PAXOS_PROTOCOL_UNDEF))))));
 			if (AS_PAXOS_PROTOCOL_UNDEF == protocol)
 				goto Error;

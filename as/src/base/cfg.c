@@ -646,13 +646,13 @@ typedef enum {
 	// Namespace sindex options:
 	CASE_NAMESPACE_SINDEX_NUM_PARTITIONS,
 
-    // Namespace geo2dsphere within options:
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MIN_LEVEL,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_LEVEL,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_CELLS,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_LEVEL_MOD,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_EARTH_RADIUS_METERS,
+	// Namespace geo2dsphere within options:
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MIN_LEVEL,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_LEVEL,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_CELLS,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_LEVEL_MOD,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_EARTH_RADIUS_METERS,
 
 	// Mod-lua options:
 	CASE_MOD_LUA_CACHE_ENABLED,
@@ -2666,7 +2666,7 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_HEARTBEAT_ADDRESS:
 				cfg_add_addr_bind(line.val_tok_1, &c->hb_serv_spec);
 				break;
-		    case CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP:
+			case CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP:
 				add_addr(line.val_tok_1, &c->hb_multicast_groups);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PORT:
@@ -4271,8 +4271,8 @@ cfg_add_addr_alt(const char* name, cf_serv_spec* spec)
 
 void
 cfg_mserv_config_from_addrs(cf_addr_list* addrs, cf_addr_list* bind_addrs,
-			    cf_mserv_cfg* serv_cfg, cf_ip_port port,
-			    cf_sock_owner owner, uint8_t ttl)
+		cf_mserv_cfg* serv_cfg, cf_ip_port port, cf_sock_owner owner,
+		uint8_t ttl)
 {
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
 

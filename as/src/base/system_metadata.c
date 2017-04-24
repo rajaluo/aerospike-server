@@ -290,7 +290,7 @@ typedef enum as_smd_cmd_type_e {
 										 (AS_SMD_CMD_GET_METADATA == cmd ? "GET" : \
 										  (AS_SMD_CMD_CLUSTER_CHANGED == cmd ? "CLUSTER" : \
 										   (AS_SMD_CMD_INTERNAL == cmd ? "INTERNAL" : \
-										    (AS_SMD_CMD_SHUTDOWN == cmd ? "SHUTDOWN" : "<UNKNOWN>"))))))))))
+											(AS_SMD_CMD_SHUTDOWN == cmd ? "SHUTDOWN" : "<UNKNOWN>"))))))))))
 
 /*
  *  Type for System Metadata event messages sent via the API.

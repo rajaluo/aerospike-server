@@ -52,7 +52,7 @@
 
 
 //==========================================================
-// Constants and typedefs.
+// Typedefs & constants.
 //
 
 // The instantaneous maximum number of cluster participants, represented as a
@@ -1505,11 +1505,11 @@ advance_version(as_partition* p, const uint32_t* ns_version_ix,
 		bool self_is_versionless = as_partition_version_is_null(&p->version);
 
 		p->version.ckey = p->final_version.ckey;
-	    p->version.family = 0;
-	    p->version.subset = n_dupl == 0 ? 1 : 0;
+		p->version.family = 0;
+		p->version.subset = n_dupl == 0 ? 1 : 0;
 
 		if (self_is_versionless || p->version.subset == 0) {
-		    p->version.evade = 1;
+			p->version.evade = 1;
 		}
 		// else - don't change evade flag.
 
@@ -1528,12 +1528,12 @@ advance_version(as_partition* p, const uint32_t* ns_version_ix,
 		p->version.family = family;
 
 		if (self_is_versionless) {
-		    p->version.family = 0;
-		    p->version.subset = 1;
-		    p->version.evade = 1;
+			p->version.family = 0;
+			p->version.subset = 1;
+			p->version.evade = 1;
 		}
 		else if (n_dupl != 0 && p->version.family == 0) {
-		    p->version.subset = 1;
+			p->version.subset = 1;
 		}
 		// else - don't change either subset or evade flag.
 
@@ -1545,7 +1545,7 @@ advance_version(as_partition* p, const uint32_t* ns_version_ix,
 			family_versions[family].subset == 0) {
 		p->version.ckey = p->final_version.ckey;
 		p->version.family = family;
-	    p->version.subset = 1;
+		p->version.subset = 1;
 	}
 	// else - leave version as-is.
 }
