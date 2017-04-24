@@ -1360,7 +1360,7 @@ find_working_master(const as_partition* p, const uint32_t* ns_version_ix,
 		// else - keep going but remember the best so far.
 
 		if (score > best_score) {
-			score = best_score;
+			best_score = score;
 			best_n = n;
 		}
 	}
