@@ -917,6 +917,12 @@ typedef struct as_clustering_s
 	 * join requests.
 	 */
 	cf_clock last_join_request_sent_time;
+
+	/**
+	 * The time at which the last join request was retransmitted, to track and
+	 * retransmit join requests.
+	 */
+	cf_clock last_join_request_retransmit_time;
 } as_clustering;
 
 /**
@@ -997,6 +1003,8 @@ static void
 internal_event_dispatch(as_clustering_internal_event* timer_event);
 static bool
 clustering_is_our_principal(cf_node nodeid);
+static bool
+clustering_is_principal();
 
 /*
  * ----------------------------------------------------------------------------
@@ -1100,6 +1108,17 @@ join_request_timeout()
 	return (uint32_t)(
 			(1 + 0.5 + (quantum_interval_skip_max() - 1)) * quantum_interval());
 }
+
+
+/**
+ * Timeout for a retransmitting a join request.
+ */
+static uint32_t
+join_request_retransmit_timeout()
+{
+	return (uint32_t)(quantum_interval() / 2);
+}
+
 
 /**
  * The interval at which a node checks to see if it should join a cluster.
@@ -2641,17 +2660,32 @@ quantum_interval_generator_hb_plugin_data_changed_handle(
 					change_event->plugin_data->data,
 					change_event->plugin_data->data_size);
 
+	bool neighboring_cluster_changed = false;
+
 	if (*succession_list_length_p > 0
 			&& !clustering_is_our_principal(succession_list_p[0])) {
 		// We are seeing a new principal.
+		neighboring_cluster_changed = true;
+	}
+	else {
+		if (clustering_is_principal() && *succession_list_length_p == 0
+				&& vector_find(&g_register.succession_list,
+						&change_event->plugin_data_changed_nodeid) >= 0) {
+			// One of our cluster members switched to orphan state. Most likely
+			// a quick restart.
+			neighboring_cluster_changed = true;
+		}
+		else {
+			// A node becoming an orphan node or seeing a succession with our
+			// principal does not mean we have seen a new cluster.
+		}
+	}
+
+	if (neighboring_cluster_changed) {
 		quantum_interval_fault_update(
 				&g_quantum_interval_generator.neighboring_fault, cf_getms(),
 				change_event->plugin_data_changed_nodeid,
 				"neighboring cluster changed");
-	}
-	else {
-		// A node becoming an orphan node or seeing a succession with our
-		// principal does not mean we have seen a new cluster.
 	}
 
 Exit:
@@ -5641,13 +5675,13 @@ clustering_join_request_send(cf_node new_principal)
 
 	DETAIL("sending cluster join request to node %"PRIx64, new_principal);
 
-	// Send a join request to the best neighboring orphan node.
 	if (msg_node_send(msg, new_principal) == 0) {
 		cf_clock now = cf_getms();
 		shash_put(g_clustering.join_request_blackout, &new_principal, &now);
 
 		g_clustering.last_join_request_principal = new_principal;
-		g_clustering.last_join_request_sent_time = cf_getms();
+		g_clustering.last_join_request_sent_time =
+				g_clustering.last_join_request_retransmit_time = cf_getms();
 
 		INFO("sent cluster join request to %"PRIx64, new_principal);
 		rv = 0;
@@ -5662,6 +5696,31 @@ clustering_join_request_send(cf_node new_principal)
 	CLUSTERING_UNLOCK();
 	return rv;
 }
+
+/**
+ * Retransmit a join request to a previously attmepted principal.
+ * @param last_join_request_principal the principal to retransmit to.
+ */
+static void
+clustering_join_request_retransmit(cf_node last_join_request_principal)
+{
+	CLUSTERING_LOCK();
+	cf_node new_principal = g_clustering.last_join_request_principal;
+	g_clustering.last_join_request_retransmit_time = cf_getms();
+	CLUSTERING_UNLOCK();
+
+	if (new_principal != last_join_request_principal) {
+		// The last attempted principal has changed. Don't retransmit.
+		return;
+	}
+
+	msg* msg = msg_pool_get(AS_CLUSTERING_MSG_TYPE_JOIN_REQUEST);
+	DETAIL("re-sending cluster join request to node %"PRIx64, new_principal);
+	if (msg_node_send(msg, new_principal) == 0) {
+		DEBUG("re-sent cluster join request to %"PRIx64, new_principal);
+	}
+}
+
 
 /**
  *  Remove nodes for which join requests are blocked.
@@ -5683,7 +5742,6 @@ clustering_join_request_filter_blocked(cf_vector* requestees, cf_vector* target)
 			// The requestee is not marked for blackout
 			cf_vector_append(target, &requestee);
 		}
-
 	}
 	CLUSTERING_UNLOCK();
 }
@@ -5887,16 +5945,25 @@ clustering_join_request_attempt()
 			g_clustering.last_join_request_principal;
 	cf_clock last_join_request_sent_time =
 			g_clustering.last_join_request_sent_time;
+	cf_clock last_join_request_retransmit_time =
+			g_clustering.last_join_request_retransmit_time;
 	CLUSTERING_UNLOCK();
 
 	// Check if the outgoing join request has timed out.
 	if (last_join_request_principal
 			&& as_hb_is_alive(last_join_request_principal)) {
 		if (last_join_request_sent_time + join_request_timeout() > cf_getms()) {
+			if (last_join_request_retransmit_time
+					+ join_request_retransmit_timeout() < cf_getms()) {
+				// Re-transmit join request to the same principal, to cover the
+				// case where the previous join request was lost.
+				clustering_join_request_retransmit(last_join_request_principal);
+			}
 			// Wait for the principal to respond. do nothing
 			DETAIL(
 					"join request to principal %"PRIx64" pending - not attempting new join request",
 					last_join_request_principal);
+
 			return AS_CLUSTERING_JOIN_REQUEST_PENDING;
 		}
 		// Timeout joining a principal. Choose a different principal.
@@ -6105,15 +6172,19 @@ clustering_orphan_quantum_interval_start_handle()
  *
  * @param candidate_principal the principal to which the other nodes should try
  * and join after receiving the move command.
+ * @param cluster_key current cluster key for receiver validation.
  * @param nodeids the nodes to send move command to.
  */
 static void
-clustering_cluster_move_send(cf_node candidate_principal, cf_vector* nodeids)
+clustering_cluster_move_send(cf_node candidate_principal, as_cluster_key cluster_key, cf_vector* nodeids)
 {
 	msg* msg = msg_pool_get(AS_CLUSTERING_MSG_TYPE_MERGE_MOVE);
 
 	// Set the proposed principal.
 	msg_proposed_principal_set(msg, candidate_principal);
+
+	// Set cluster key for message validation.
+	msg_cluster_key_set(msg, cluster_key);
 
 	log_cf_node_vector("cluster merge move command sent to:", nodeids,
 			CF_DEBUG);
@@ -6345,15 +6416,18 @@ clustering_preferred_principal_move()
 	}
 
 	cf_vector* succession_list = vector_stack_lockless_create(cf_node);
+	as_cluster_key cluster_key = 0;
 	CLUSTERING_LOCK();
 	vector_copy(succession_list, &g_register.succession_list);
+	cluster_key = g_register.cluster_key;
 	// Update the time move command was sent.
 	g_clustering.move_cmd_issue_time = cf_getms();
 	CLUSTERING_UNLOCK();
 
 	INFO("majority nodes find %"PRIx64" to be a better principal - sending move command to all cluster members",
 			preferred_principal);
-	clustering_cluster_move_send(preferred_principal, succession_list);
+	clustering_cluster_move_send(preferred_principal, cluster_key,
+			succession_list);
 	cf_vector_destroy(succession_list);
 
 	return 0;
@@ -6372,6 +6446,7 @@ clustering_merge_attempt()
 	CLUSTERING_LOCK();
 	cf_vector* succession_list = vector_stack_lockless_create(cf_node);
 	vector_copy(succession_list, &g_register.succession_list);
+	as_cluster_key cluster_key = g_register.cluster_key;
 	cf_node candidate_principal = 0;
 
 	// Use a single iteration over the clustering data received via the
@@ -6393,7 +6468,8 @@ clustering_merge_attempt()
 	// and will handle the move accordingly.
 	INFO("this cluster can merge with cluster with principal %"PRIx64" - sending move command to all cluster members",
 			candidate_principal);
-	clustering_cluster_move_send(candidate_principal, succession_list);
+	clustering_cluster_move_send(candidate_principal, cluster_key,
+			succession_list);
 	rv = 0;
 Exit:
 	cf_vector_destroy(succession_list);
@@ -6900,18 +6976,23 @@ clustering_merge_move_handle(as_clustering_internal_event* event)
 
 	CLUSTERING_LOCK();
 
-	if (msg_is_obsolete(g_register.cluster_modified_hlc_ts,
-			g_register.cluster_modified_time, event->msg_recvd_ts,
-			&event->msg_hlc_ts) || !clustering_is_our_principal(src_nodeid)
-			|| paxos_proposer_proposal_is_active()) {
-		INFO("ignoring cluster merge move from node %"PRIx64, src_nodeid);
-	}
+	as_cluster_key msg_cluster_key = 0;
+	msg_cluster_key_get(event->msg, &msg_cluster_key);
 
 	if (clustering_is_orphan()) {
 		// Already part of a cluster. Ignore the reject.
 		INFO(
 				"already orphan node - ignoring merge move command from node %"PRIx64,
 				src_nodeid);
+		goto Exit;
+	}
+
+	if (msg_is_obsolete(g_register.cluster_modified_hlc_ts,
+			g_register.cluster_modified_time, event->msg_recvd_ts,
+			&event->msg_hlc_ts) || !clustering_is_our_principal(src_nodeid)
+			|| paxos_proposer_proposal_is_active()
+			|| msg_cluster_key != g_register.cluster_key) {
+		INFO("ignoring cluster merge move from node %"PRIx64, src_nodeid);
 		goto Exit;
 	}
 

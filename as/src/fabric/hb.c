@@ -270,7 +270,7 @@
 /**
  * Mesh timeout for pending nodes.
  */
-#define MESH_PENDING_TIMEOUT (2 * CONNECT_TIMEOUT())
+#define MESH_PENDING_TIMEOUT (CONNECT_TIMEOUT())
 
 /**
  * Mesh inactive timeout after which a mesh node will be forgotten.
@@ -446,9 +446,9 @@
 #endif
 
 /**
- * Connection initiation timeout, Capped at 250 ms.
+ * Connection initiation timeout, Capped at 100 ms.
  */
-#define CONNECT_TIMEOUT() (MIN(250, config_tx_interval_get() * 3))
+#define CONNECT_TIMEOUT() (MIN(100, config_tx_interval_get()))
 
 /**
  * Allocate a buffer for heart beat messages. Larger buffers are heap allocated
