@@ -849,8 +849,8 @@ smd_msg_read_items(as_smd_msg_t *sm, const msg *m, const cf_vector *mod_vec,
 			}
 
 			item->key = cf_strndup((const char *)p_key->ptr, p_key->sz);
-			item->value = p_value->ptr ? cf_strndup((const char *)p_value->ptr,
-					p_value->sz) : NULL;
+			item->value = p_value->ptr ?
+					cf_strndup((const char *)p_value->ptr, p_value->sz) : NULL;
 
 			item->generation = gen_list[msg_idx];
 			msg_get_uint64_array(m, AS_SMD_MSG_TIMESTAMP, msg_idx,
