@@ -24,6 +24,7 @@
  *  Configuration file-related routines shared between the server and XDR.
  */
 
+#include <string.h>
 #include "base/xdr_config.h"
 
 void xdr_config_defaults()

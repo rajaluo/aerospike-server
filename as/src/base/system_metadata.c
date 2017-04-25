@@ -31,6 +31,7 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <unistd.h> // for unlink() XXX - JUMP - remove in "six months"
 #include <sys/stat.h>
 
 #include "aerospike/as_hashmap.h"
@@ -248,6 +249,8 @@
 /* Time in milliseconds for System Metadata proxy transactions to the SMD principal. */
 #define AS_SMD_TRANSACT_TIMEOUT_MS  (1000)
 
+#define SMD_MAX_STACK_MODULES 128
+#define SMD_MAX_STACK_NUM_ITEMS (1 << 14)
 
 /* Declare Private Types */
 
@@ -289,7 +292,7 @@ typedef enum as_smd_cmd_type_e {
 										 (AS_SMD_CMD_GET_METADATA == cmd ? "GET" : \
 										  (AS_SMD_CMD_CLUSTER_CHANGED == cmd ? "CLUSTER" : \
 										   (AS_SMD_CMD_INTERNAL == cmd ? "INTERNAL" : \
-										    (AS_SMD_CMD_SHUTDOWN == cmd ? "SHUTDOWN" : "<UNKNOWN>"))))))))))
+											(AS_SMD_CMD_SHUTDOWN == cmd ? "SHUTDOWN" : "<UNKNOWN>"))))))))))
 
 /*
  *  Type for System Metadata event messages sent via the API.
@@ -392,16 +395,21 @@ typedef enum {
 	AS_SMD_MSG_ID,
 	AS_SMD_MSG_CLUSTER_KEY,
 	AS_SMD_MSG_OP,
-	AS_SMD_MSG_NUM_ITEMS, // deprecate
-	AS_SMD_MSG_ACTION, // deprecate
-	AS_SMD_MSG_MODULE,
-	AS_SMD_MSG_KEY,
-	AS_SMD_MSG_VALUE,
-	AS_SMD_MSG_GENERATION,
+	AS_SMD_MSG_NUM_ITEMS, // deprecated
+	AS_SMD_MSG_ACTION, // deprecated
+	AS_SMD_MSG_MODULE, // deprecated
+	AS_SMD_MSG_KEY, // deprecated
+	AS_SMD_MSG_VALUE, // deprecated
+	AS_SMD_MSG_GENERATION, // deprecated
 	AS_SMD_MSG_TIMESTAMP,
 	AS_SMD_MSG_MODULE_NAME,
-	AS_SMD_MSG_OPTIONS, // deprecate
+	AS_SMD_MSG_OPTIONS, // deprecated
+
+	AS_SMD_MSG_MODULE_LIST,
 	AS_SMD_MSG_MODULE_COUNTS,
+	AS_SMD_MSG_KEY_LIST,
+	AS_SMD_MSG_VALUE_LIST,
+	AS_SMD_MSG_GEN_LIST,
 
 	AS_SMD_MSG_SINGLE_KEY,
 	AS_SMD_MSG_SINGLE_VALUE,
@@ -445,7 +453,13 @@ static const msg_template as_smd_msg_template[] = {
 	{ AS_SMD_MSG_TIMESTAMP, M_FT_ARRAY_UINT64 },   // Metadata timestamp array
 	{ AS_SMD_MSG_MODULE_NAME, M_FT_STR },          // Name of module the message is from or else NULL if from all.
 	{ AS_SMD_MSG_OPTIONS, M_FT_UINT32 },           // Option flags specifying the originator of the message (i.e., MERGE/API)
-	{ AS_SMD_MSG_MODULE_COUNTS, M_FT_ARRAY_UINT32 },
+
+	{ AS_SMD_MSG_MODULE_LIST, M_FT_MSGPACK },
+	{ AS_SMD_MSG_MODULE_COUNTS, M_FT_MSGPACK },
+	{ AS_SMD_MSG_KEY_LIST, M_FT_MSGPACK },
+	{ AS_SMD_MSG_VALUE_LIST, M_FT_MSGPACK },
+	{ AS_SMD_MSG_GEN_LIST, M_FT_MSGPACK },
+
 	{ AS_SMD_MSG_SINGLE_KEY, M_FT_STR },
 	{ AS_SMD_MSG_SINGLE_VALUE, M_FT_STR },
 	{ AS_SMD_MSG_SINGLE_GENERATION, M_FT_UINT32 },
@@ -782,122 +796,65 @@ static as_smd_event_t *as_smd_create_cmd_event(as_smd_cmd_type_t type, ...)
 	return evt;
 }
 
-// New message protocol.
 static bool
-smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
+smd_msg_read_items(as_smd_msg_t *sm, const msg *m, const cf_vector *mod_vec,
+		const uint32_t *counts, cf_vector *key_vec, cf_vector *value_vec,
+		uint32_t *gen_list)
 {
-	int num_items = 0;
-
-	msg_get_buf_array_size(m, AS_SMD_MSG_KEY, &num_items);
-	sm->num_items = (uint32_t)num_items;
-
-	uint32_t mod_max = cf_rchash_get_size(g_smd->modules);
-	uint32_t counts[mod_max];
-	const char *mod_list[mod_max];
-	uint32_t mod_idx;
-
-	if (sm->module_name) {
-		mod_idx = 1;
-		mod_list[0] = sm->module_name;
-
-		// Check single item optimized packing.
-		char *key;
-		size_t sz;
-
-		if (msg_get_str(m, AS_SMD_MSG_SINGLE_KEY, &key, &sz,
-				MSG_GET_DIRECT) == 0) {
-			sm->num_items = 1;
-
-			if (! (sm->items = as_smd_item_list_create(1))) {
-				cf_warning(AS_SMD, "failed to allocate array of 1 metadata items for a msg event");
-				return false;
-			}
-
-			as_smd_item_t *item = sm->items->item[0];
-
-			item->node_id = node_id;
-			item->module_name = cf_strdup(sm->module_name);
-			item->key = cf_strdup(key);
-			msg_get_str(m, AS_SMD_MSG_SINGLE_VALUE, &item->value,
-					&sz, MSG_GET_COPY_MALLOC);
-			msg_get_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
-					&item->generation);
-			msg_get_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
-					&item->timestamp);
-			item->action = item->value ?
-					AS_SMD_ACTION_SET : AS_SMD_ACTION_DELETE;
-
-			return true;
-		}
-
-		counts[0] = sm->num_items;
+	if (! msg_msgpack_list_get_buf_array_presized(m, AS_SMD_MSG_KEY_LIST,
+			key_vec)) {
+		cf_warning(AS_SMD, "KEY_LIST invalid");
+		return false;
 	}
-	else {
-		int msg_count = 0;
-		uint32_t total = 0;
 
-		msg_get_buf_array_size(m, AS_SMD_MSG_MODULE, &msg_count);
-		mod_idx = 0;
+	msg_msgpack_list_get_buf_array_presized(m, AS_SMD_MSG_VALUE_LIST,
+			value_vec);
 
-		for (int i = 0; i < msg_count; i++) {
-			char *name;
-			size_t unused;
+	uint32_t check = sm->num_items;
 
-			if (msg_get_str_array(m, AS_SMD_MSG_MODULE, i, &name,
-					&unused, MSG_GET_DIRECT) != 0) {
-				continue;
-			}
+	if (! msg_msgpack_list_get_uint32_array(m, AS_SMD_MSG_GEN_LIST, &gen_list,
+			&check) || check != sm->num_items) {
+		cf_warning(AS_SMD, "GEN_LIST invalid with count %u num_items %u", check, sm->num_items);
+		return false;
+	}
 
-			mod_list[mod_idx] = name;
-
-			if (msg_get_uint32_array(m, AS_SMD_MSG_MODULE_COUNTS, i,
-					&counts[mod_idx]) != 0) {
-				continue;
-			}
-
-			if (counts[mod_idx] == 0) {
-				continue;
-			}
-
-			total += counts[mod_idx];
-			mod_idx++;
-		}
-
-		if (total != sm->num_items) {
-			cf_warning(AS_SMD, "smd_new_create_msg_event() MODULE_COUNTS total %u does not match number o keys %u", total, sm->num_items);
-
-			if (sm->num_items < total) {
-				sm->num_items = total;
-			}
-		}
+	if (msg_get_uint64_array_count(m, AS_SMD_MSG_TIMESTAMP, &check) != 0 ||
+			check != sm->num_items) {
+		cf_warning(AS_SMD, "TIMESTAMP invalid with count %u num_items %u", check, sm->num_items);
+		return false;
 	}
 
 	if (! (sm->items = as_smd_item_list_create(sm->num_items))) {
-		cf_warning(AS_SMD, "failed to allocate array of %d metadata items for a msg event", sm->num_items);
+		cf_warning(AS_SMD, "as_smd_item_list_create(%u) failed", sm->num_items);
 		return false;
 	}
 
 	uint32_t msg_idx = 0;
 
-	for (uint32_t i = 0; i < mod_idx; i++) {
+	for (uint32_t i = 0; i < cf_vector_size(mod_vec); i++) {
+		const msg_buf_ele *p_mod = cf_vector_getp((cf_vector *)mod_vec, i);
+
 		for (uint32_t j = 0; j < counts[i]; j++) {
 			as_smd_item_t *item = sm->items->item[msg_idx];
-			size_t sz = 0;
 
-			item->node_id = node_id;
-			item->module_name = cf_strdup(mod_list[i]);
+			item->node_id = sm->node_id;
+			item->module_name = cf_strndup((const char *)p_mod->ptr, p_mod->sz);
 
-			if (msg_get_str_array(m, AS_SMD_MSG_KEY, msg_idx, &item->key, &sz,
-					MSG_GET_COPY_MALLOC) != 0) {
-				cf_warning(AS_SMD, "SMD message missing expected key, module %s item %u", mod_list[i], j);
+			const msg_buf_ele *p_key = cf_vector_getp(key_vec, msg_idx);
+			const msg_buf_ele *p_value = cf_vector_getp(value_vec, msg_idx);
+
+			if (! p_key->ptr) {
+				cf_warning(AS_SMD, "invalid packed key at %u/%u", msg_idx, sm->num_items);
 				return false;
 			}
 
-			msg_get_str_array(m, AS_SMD_MSG_VALUE, msg_idx, &item->value, &sz,
-					MSG_GET_COPY_MALLOC);
-			msg_get_uint32_array(m, AS_SMD_MSG_GENERATION, i,
-					&item->generation);
-			msg_get_uint64_array(m, AS_SMD_MSG_TIMESTAMP, i, &item->timestamp);
+			item->key = cf_strndup((const char *)p_key->ptr, p_key->sz);
+			item->value = p_value->ptr ?
+					cf_strndup((const char *)p_value->ptr, p_value->sz) : NULL;
+
+			item->generation = gen_list[msg_idx];
+			msg_get_uint64_array(m, AS_SMD_MSG_TIMESTAMP, msg_idx,
+					&item->timestamp);
 
 			item->action = item->value ?
 					AS_SMD_ACTION_SET : AS_SMD_ACTION_DELETE;
@@ -905,6 +862,16 @@ smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
 			msg_idx++;
 		}
 	}
+
+	return true;
+}
+
+// New message protocol.
+static bool
+smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
+{
+	uint32_t counts[SMD_MAX_STACK_MODULES];
+	cf_vector_define(mod_vec, sizeof(msg_buf_ele), SMD_MAX_STACK_MODULES, 0);
 
 	if (sm->op == AS_SMD_MSG_OP_ACCEPT_THIS_METADATA) {
 		sm->options = AS_SMD_ACCEPT_OPT_MERGE;
@@ -914,7 +881,112 @@ smd_new_create_msg_event(as_smd_msg_t *sm, cf_node node_id, msg *m)
 		sm->options = AS_SMD_ACCEPT_OPT_API;
 	}
 
-	return true;
+	if (sm->module_name) {
+		// Check single item optimized packing.
+		char *key;
+
+		if (msg_get_str(m, AS_SMD_MSG_SINGLE_KEY, &key, NULL,
+				MSG_GET_DIRECT) == 0) {
+			sm->num_items = 1;
+
+			sm->items = as_smd_item_list_create(1);
+			cf_assert(sm->items, AS_SMD, "as_smd_item_list_create(1) failed");
+
+			as_smd_item_t *item = sm->items->item[0];
+
+			item->node_id = node_id;
+			item->module_name = cf_strdup(sm->module_name);
+			item->key = cf_strdup(key);
+			msg_get_str(m, AS_SMD_MSG_SINGLE_VALUE, &item->value, NULL,
+					MSG_GET_COPY_MALLOC);
+			msg_get_uint32(m, AS_SMD_MSG_SINGLE_GENERATION, &item->generation);
+			msg_get_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP, &item->timestamp);
+			item->action = item->value ?
+					AS_SMD_ACTION_SET : AS_SMD_ACTION_DELETE;
+
+			return true;
+		}
+
+		if (! msg_msgpack_container_get_count(m, AS_SMD_MSG_KEY_LIST,
+				&sm->num_items) || sm->num_items == 0) {
+			sm->items = as_smd_item_list_create(0);
+			cf_assert(sm->items, AS_SMD, "as_smd_item_list_create(0) failed");
+			return true;
+		}
+
+		msg_buf_ele ele = {
+				.sz = (uint32_t)strlen(sm->module_name),
+				.ptr = (uint8_t *)sm->module_name
+		};
+
+		cf_vector_append(&mod_vec, &ele);
+		counts[0] = sm->num_items;
+	}
+	else {
+		if (! msg_msgpack_container_get_count(m, AS_SMD_MSG_KEY_LIST,
+				&sm->num_items) || sm->num_items == 0) {
+			sm->items = as_smd_item_list_create(0);
+			cf_assert(sm->items, AS_SMD, "as_smd_item_list_create(0) failed");
+			return true;
+		}
+
+		if (! msg_msgpack_list_get_buf_array_presized(m, AS_SMD_MSG_MODULE_LIST,
+				&mod_vec)) {
+			cf_warning(AS_SMD, "MODULE_LIST invalid");
+			return false;
+		}
+
+		if (cf_vector_size(&mod_vec) == 0) {
+			cf_warning(AS_SMD, "MODULE_LIST zero module names with num_items %u", sm->num_items);
+			return false;
+		}
+
+		uint32_t check = SMD_MAX_STACK_MODULES;
+		uint32_t *p_counts = counts;
+
+		if (! msg_msgpack_list_get_uint32_array(m, AS_SMD_MSG_MODULE_COUNTS,
+				&p_counts, &check) ||
+				check != cf_vector_size(&mod_vec)) {
+			cf_warning(AS_SMD, "MODULE_COUNTS invalid with counts %u vector_size(mod_vec) %u", check, cf_vector_size(&mod_vec));
+			return false;
+		}
+
+		uint32_t total_check = 0;
+
+		for (uint32_t i = 0; i < cf_vector_size(&mod_vec); i++) {
+			total_check += counts[i];
+		}
+
+		if (total_check != sm->num_items) {
+			cf_warning(AS_SMD, "MODULE_COUNTS total %u does not match num_items %u", total_check, sm->num_items);
+			return false;
+		}
+	}
+
+	if (sm->num_items < SMD_MAX_STACK_NUM_ITEMS) {
+		uint32_t gen_list[sm->num_items];
+		cf_vector_define(key_vec, sizeof(msg_buf_ele), sm->num_items, 0);
+		cf_vector_define(value_vec, sizeof(msg_buf_ele), sm->num_items, 0);
+
+		return smd_msg_read_items(sm, m, &mod_vec, counts, &key_vec, &value_vec,
+				gen_list);
+	}
+
+	cf_vector key_vec;
+	cf_vector value_vec;
+	uint32_t *gen_list = cf_malloc(sizeof(uint32_t) * sm->num_items);
+
+	cf_vector_init(&key_vec, sizeof(msg_buf_ele), sm->num_items, 0);
+	cf_vector_init(&value_vec, sizeof(msg_buf_ele), sm->num_items, 0);
+
+	bool ret = smd_msg_read_items(sm, m, &mod_vec, counts, &key_vec, &value_vec,
+			gen_list);
+
+	cf_vector_destroy(&key_vec);
+	cf_vector_destroy(&value_vec);
+	cf_free(gen_list);
+
+	return ret;
 }
 
 /*
@@ -1260,7 +1332,30 @@ static as_smd_t *as_smd_create(void)
  */
 as_smd_t *as_smd_init(void)
 {
-	if (! as_new_clustering()) {
+	if (as_new_clustering()) {
+		// This is here only because we happen to use the absence of the old
+		// sindex SMD files as proof of a proper live jump from v3 to v5. We'll
+		// need to keep this around for a long time - perhaps move it to a
+		// better place when SMD is overhauled.
+
+		char smd_path[MAX_PATH_LEN];
+		char smd_save_path[MAX_PATH_LEN];
+
+		snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
+		snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
+
+		struct stat buf;
+		bool both_gone =
+				stat(smd_path, &buf) != 0 && errno == ENOENT &&
+				stat(smd_save_path, &buf) != 0 && errno == ENOENT;
+
+		if (! both_gone) {
+			cf_crash_nostack(AS_SMD,
+					"Aerospike server was not properly switched to paxos-protocol v5 - "
+					"see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/cluster_to_3_13");
+		}
+	}
+	else {
 		// No cluster-changed event from old paxos when becoming single-node
 		// cluster at startup - initialize this info just for that case.
 		g_cluster_key = 0;
@@ -1995,9 +2090,49 @@ static int as_smd_module_destroy(as_smd_t *smd, as_smd_cmd_t *cmd)
 	return retval;
 }
 
+static void
+smd_msg_fill_items(msg *m, as_smd_item_t **items, uint32_t num_items,
+		cf_vector *key_vec, cf_vector *value_vec, uint32_t *gen_list)
+{
+	uint32_t value_count = 0;
+
+	msg_set_uint64_array_size(m, AS_SMD_MSG_TIMESTAMP, num_items);
+
+	for (uint32_t i = 0; i < num_items; i++) {
+		msg_buf_ele key_ele = {
+				.sz = (uint32_t)strlen(items[i]->key),
+				.ptr = (uint8_t *)items[i]->key
+		};
+
+		cf_vector_append(key_vec, &key_ele);
+
+		msg_buf_ele value_ele = {
+				.ptr = (uint8_t *)items[i]->value
+		};
+
+		if (items[i]->value) {
+			value_ele.sz = (uint32_t)strlen(items[i]->value);
+			value_count++;
+		}
+
+		cf_vector_append(value_vec, &value_ele);
+
+		gen_list[i] = items[i]->generation;
+		msg_set_uint64_array(m, AS_SMD_MSG_TIMESTAMP, i, items[i]->timestamp);
+	}
+
+	msg_msgpack_list_set_buf(m, AS_SMD_MSG_KEY_LIST, key_vec);
+
+	if (value_count != 0) {
+		msg_msgpack_list_set_buf(m, AS_SMD_MSG_VALUE_LIST, value_vec);
+	}
+
+	msg_msgpack_list_set_uint32(m, AS_SMD_MSG_GEN_LIST, gen_list, num_items);
+}
+
 // New message protocol.
 static msg *
-smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
+smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **items, uint32_t num_items,
 		const char *module_name, uint32_t accept_opt)
 {
 	msg *m = as_fabric_msg_get(M_TYPE_SMD);
@@ -2007,9 +2142,8 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
 		return NULL;
 	}
 
-	int e = msg_set_uint32(m, AS_SMD_MSG_ID, AS_SMD_MSG_V2_IDENTIFIER);
-
-	e += msg_set_uint64(m, AS_SMD_MSG_CLUSTER_KEY, g_cluster_key);
+	msg_set_uint32(m, AS_SMD_MSG_ID, AS_SMD_MSG_V2_IDENTIFIER);
+	msg_set_uint64(m, AS_SMD_MSG_CLUSTER_KEY, g_cluster_key);
 
 	if (op == AS_SMD_MSG_OP_ACCEPT_THIS_METADATA &&
 			(accept_opt & AS_SMD_ACCEPT_OPT_API) != 0) {
@@ -2019,125 +2153,99 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items,
 		op = AS_SMD_MSG_OP_SET_ITEM;
 	}
 
-	e += msg_set_uint32(m, AS_SMD_MSG_OP, op);
+	msg_set_uint32(m, AS_SMD_MSG_OP, op);
 
 	if (module_name) {
-		e += msg_set_str(m, AS_SMD_MSG_MODULE_NAME, module_name, MSG_SET_COPY);
+		msg_set_str(m, AS_SMD_MSG_MODULE_NAME, module_name, MSG_SET_COPY);
 
 		// Single item optimized packing.
 		if (num_items == 1) {
-			e += msg_set_str(m, AS_SMD_MSG_SINGLE_KEY, item[0]->key,
+			msg_set_str(m, AS_SMD_MSG_SINGLE_KEY, items[0]->key,
 					MSG_SET_COPY);
 
-			if (item[0]->value) {
-				e += msg_set_str(m, AS_SMD_MSG_SINGLE_VALUE, item[0]->value,
+			if (items[0]->value) {
+				msg_set_str(m, AS_SMD_MSG_SINGLE_VALUE, items[0]->value,
 						MSG_SET_COPY);
 			}
 
-			e += msg_set_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
-					item[0]->generation);
-			e += msg_set_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
-					item[0]->timestamp);
+			if (items[0]->generation != 0) {
+				msg_set_uint32(m, AS_SMD_MSG_SINGLE_GENERATION,
+						items[0]->generation);
+			}
 
-			if (e != 0) {
-				cf_warning(AS_SMD, "msg_set failed");
-				as_fabric_msg_put(m);
-				return NULL;
+			if (items[0]->timestamp != 0) {
+				msg_set_uint64(m, AS_SMD_MSG_SINGLE_TIMESTAMP,
+						items[0]->timestamp);
 			}
 
 			return m;
 		}
 	}
 
-	if (e != 0) {
-		cf_warning(AS_SMD, "msg_set failed");
-		as_fabric_msg_put(m);
-		return NULL;
-	}
-
 	if (num_items == 0) {
 		return m;
 	}
 
-	uint32_t mod_sz = 0;
-	uint32_t mod_idx = 0;
-	uint32_t mod_max = cf_rchash_get_size(g_smd->modules);
-	const char *mod_list[mod_max];
-	uint32_t mod_counts[mod_max];
-
 	if (! module_name) {
-		// Assume same item module names are clustered together.
-		for (size_t i = 0; i < num_items; i++) {
-			if (mod_idx != 0) {
-				const char *name = mod_list[mod_idx - 1];
+		uint32_t mod_max = cf_rchash_get_size(g_smd->modules);
+		uint32_t mod_counts[mod_max];
+		uint32_t count = 0;
+		const char *prev = NULL;
+		cf_vector_define(mod_vec, sizeof(msg_buf_ele), mod_max, 0);
 
-				if (strcmp(name, item[i]->module_name) == 0) {
-					mod_counts[mod_idx - 1]++;
-					continue;
-				}
+		// Assume same item module names are clustered together.
+		for (uint32_t i = 0; i < num_items; i++) {
+			if (count != 0 && strcmp(prev, items[i]->module_name) == 0) {
+				mod_counts[count - 1]++;
+				continue;
 			}
 
-			mod_sz += (uint32_t)strlen(item[i]->module_name) + 1;
-			mod_list[mod_idx] = item[i]->module_name;
+			msg_buf_ele ele = {
+					.sz = (uint32_t)strlen(items[i]->module_name),
+					.ptr = (uint8_t *)items[i]->module_name
+			};
 
-			cf_assert(mod_idx < mod_max, AS_SMD, "unexpected item module name ordering");
+			cf_vector_append(&mod_vec, &ele);
+			prev = items[i]->module_name;
 
-			mod_counts[mod_idx++] = 1;
+			cf_assert(count < mod_max, AS_SMD, "unexpected item module name ordering");
+
+			mod_counts[count++] = 1;
 		}
 
-		e = msg_set_str_array_size(m, AS_SMD_MSG_MODULE, mod_idx, mod_sz);
-		e += msg_set_uint32_array_size(m, AS_SMD_MSG_MODULE_COUNTS, mod_idx);
-
-		for (uint32_t i = 0; i < mod_idx; i++) {
-			e += msg_set_str_array(m, AS_SMD_MSG_MODULE, i, mod_list[i]);
-			e += msg_set_uint32_array(m, AS_SMD_MSG_MODULE_COUNTS, i,
-					mod_counts[i]);
-		}
-
-		if (e != 0) {
-			cf_warning(AS_SMD, "msg_set failed");
-			as_fabric_msg_put(m);
-			return NULL;
-		}
+		msg_msgpack_list_set_buf(m, AS_SMD_MSG_MODULE_LIST, &mod_vec);
+		msg_msgpack_list_set_uint32(m, AS_SMD_MSG_MODULE_COUNTS, mod_counts,
+				count);
 	}
 
-	uint32_t key_sz = 0;
-	uint32_t value_sz = 0;
+	if (num_items < SMD_MAX_STACK_NUM_ITEMS) {
+		uint32_t gen_list[num_items];
+		cf_vector_define(key_vec, sizeof(msg_buf_ele), num_items, 0);
+		cf_vector_define(value_vec, sizeof(msg_buf_ele), num_items, 0);
 
-	for (size_t i = 0; i < num_items; i++) {
-		key_sz += (uint32_t)strlen(item[i]->key) + 1;
-
-		if (item[i]->action == AS_SMD_ACTION_SET && item[i]->value) {
-			value_sz += (uint32_t)strlen(item[i]->value) + 1;
-		}
+		smd_msg_fill_items(m, items, num_items, &key_vec, &value_vec, gen_list);
 	}
+	else {
+		cf_vector key_vec;
+		cf_vector value_vec;
+		uint32_t *gen_list = cf_malloc(sizeof(uint32_t) * num_items);
 
-	e = msg_set_str_array_size(m, AS_SMD_MSG_KEY, num_items, key_sz);
-	e += msg_set_str_array_size(m, AS_SMD_MSG_VALUE, num_items, value_sz);
-	e += msg_set_uint32_array_size(m, AS_SMD_MSG_GENERATION, num_items);
-	e += msg_set_uint64_array_size(m, AS_SMD_MSG_TIMESTAMP, num_items);
+		cf_assert(gen_list, AS_SMD, "malloc");
 
-	if (e != 0) {
-		cf_warning(AS_SMD, "msg_set failed");
-		as_fabric_msg_put(m);
-		return NULL;
-	}
-
-	for (size_t i = 0; i < num_items; i++) {
-		e = msg_set_str_array(m, AS_SMD_MSG_KEY, i, item[i]->key);
-
-		if (item[i]->action == AS_SMD_ACTION_SET && item[i]->value) {
-			e += msg_set_str_array(m, AS_SMD_MSG_VALUE, i, item[i]->value);
+		if (cf_vector_init(&key_vec, sizeof(msg_buf_ele), num_items, 0) != 0) {
+			cf_crash(AS_SMD, "cf_vector_init");
 		}
 
-		e += msg_set_uint32_array(m, AS_SMD_MSG_GENERATION, i, item[i]->generation);
-		e += msg_set_uint64_array(m, AS_SMD_MSG_TIMESTAMP, i, item[i]->timestamp);
-
-		if (e != 0) {
-			cf_warning(AS_SMD, "msg_set failed");
-			as_fabric_msg_put(m);
-			return NULL;
+		if (cf_vector_init(&value_vec, sizeof(msg_buf_ele), num_items, 0) !=
+				0) {
+			cf_crash(AS_SMD, "cf_vector_init");
 		}
+
+		smd_msg_fill_items(m, items, num_items, &key_vec, &value_vec, gen_list);
+
+		cf_vector_destroy(&key_vec);
+		cf_vector_destroy(&value_vec);
+		cf_free(gen_list);
 	}
 
 	return m;
@@ -2150,7 +2258,7 @@ static msg *
 as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const char *module_name, uint32_t accept_opt)
 {
 	if (as_new_clustering()) {
-		return smd_create_msg(op, item, num_items, module_name, accept_opt);
+		return smd_create_msg(op, item, (uint32_t)num_items, module_name, accept_opt);
 	}
 
 	msg *msg = NULL;
@@ -2184,13 +2292,15 @@ as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const
 	if (num_items) {
 		int module_sz = 0;
 		int key_sz    = 0;
-		int value_sz    = 0;
+		uint32_t value_sz = 0;
+
 		for (int i = 0; i < num_items; i++) {
 			module_sz += strlen(item[i]->module_name) + 1;
 			key_sz += strlen(item[i]->key) + 1;
+
 			if (AS_SMD_ACTION_DELETE != item[i]->action) {
 				if (item[i]->value) {
-					value_sz += strlen(item[i]->value) + 1;
+					value_sz += (uint32_t)strlen(item[i]->value) + 1;
 				}
 			}
 		}
@@ -2198,8 +2308,11 @@ as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const
 		e += msg_set_uint32_array_size(msg, AS_SMD_MSG_ACTION, num_items);
 		e += msg_set_str_array_size(msg, AS_SMD_MSG_MODULE, num_items, module_sz);
 		e += msg_set_str_array_size(msg, AS_SMD_MSG_KEY, num_items, key_sz);
-		// (Note:  The corresponding fields won't be used for items with the DELETE action.)
-		e += msg_set_str_array_size(msg, AS_SMD_MSG_VALUE, num_items, value_sz);
+
+		if (value_sz != 0) {
+			msg_set_str_array_size(msg, AS_SMD_MSG_VALUE, num_items, value_sz);
+		}
+
 		e += msg_set_uint32_array_size(msg, AS_SMD_MSG_GENERATION, num_items);
 		e += msg_set_uint64_array_size(msg, AS_SMD_MSG_TIMESTAMP, num_items);
 
@@ -2266,6 +2379,19 @@ static int transact_complete_fn(msg *response, void *udata, int fabric_err)
 	return 0;
 }
 
+static void
+smd_fabric_send(cf_node node_id, msg *m)
+{
+	if (node_id == g_config.self_node) {
+		as_smd_msgq_push(node_id, m, g_smd);
+		as_fabric_msg_put(m);
+		return;
+	}
+
+	as_fabric_transact_start(node_id, m, AS_SMD_TRANSACT_TIMEOUT_MS,
+			transact_complete_fn, NULL);
+}
+
 /*
  *  Send the metadata item change message to the SMD principal.
  */
@@ -2287,7 +2413,7 @@ static int as_smd_proxy_to_principal(as_smd_t *smd, as_smd_msg_op_t op, as_smd_i
 		return -1;
 	}
 
-	as_fabric_transact_start(as_smd_principal(), msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+	smd_fabric_send(as_smd_principal(), msg);
 
 	return 0;
 }
@@ -2727,8 +2853,7 @@ static void as_smd_cluster_changed(as_smd_t *smd, as_smd_cmd_t *cmd)
 	// The metadata has been copied into the fabric msg and can now be released.
 	as_smd_item_list_destroy(item_list);
 
-	// Send the serialized metadata to the SMD principal.
-	as_fabric_transact_start(as_smd_principal(), msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+	smd_fabric_send(as_smd_principal(), msg);
 
 	smd_process_pending_merges();
 }
@@ -2889,7 +3014,8 @@ static int as_smd_apply_metadata_change(as_smd_t *smd, as_smd_module_t *module_o
 							   AS_SMD_MSG_OP_NAME(accept_op), node_id);
 					continue;
 				}
-				as_fabric_transact_start(node_id, msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+
+				smd_fabric_send(node_id, msg);
 			}
 		}
 #if 0
@@ -3169,7 +3295,8 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 		if (!(msg = as_smd_msg_get(merge_op, item_list_out->item, item_list_out->num_items, module, AS_SMD_ACCEPT_OPT_MERGE))) {
 			cf_crash(AS_SMD, "failed to get a System Metadata fabric msg for operation %s", AS_SMD_MSG_OP_NAME(merge_op));
 		}
-		as_fabric_transact_start(node_id, msg, AS_SMD_TRANSACT_TIMEOUT_MS, transact_complete_fn, smd);
+
+		smd_fabric_send(node_id, msg);
 	}
 
 	// Release the item lists.

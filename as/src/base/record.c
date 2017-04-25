@@ -568,7 +568,7 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 		cf_warning_digest(AS_LDT, &rd->r->keyd, "Unpickled replace failed rv=%d",rv);
 		as_storage_record_close(rd);
 		return rv;
-    }
+	}
 
 	r->void_time = truncate_void_time(rd->ns, c->void_time);
 	r->last_update_time  = c->last_update_time;

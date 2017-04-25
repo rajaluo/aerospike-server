@@ -665,7 +665,7 @@ info_command_tip_clear(char* name, char* params, cf_dyn_buf* db)
 				   	port_str++;
 				}
 				if (port_str == NULL ||
-				    0 != cf_str_atoi(port_str, &port)) {
+					0 != cf_str_atoi(port_str, &port)) {
 					cf_warning(AS_INFO,
 						   "tip clear command: port must be an integer in: %s",
 						   port_str);
@@ -2212,8 +2212,8 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		}
 		else if (0 == as_info_parameter_get(params, "paxos-max-cluster-size", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (1 > val) ||
-			    (val > AS_CLUSTER_SZ) ||
-			    !as_hb_max_cluster_size_isvalid(val))
+				(val > AS_CLUSTER_SZ) ||
+				!as_hb_max_cluster_size_isvalid(val))
 				goto Error;
 			cf_info(AS_INFO, "Changing value of paxos-max-cluster-size from %d to %d ", g_config.paxos_max_cluster_size, val);
 			g_config.paxos_max_cluster_size = val;
@@ -2224,7 +2224,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 											 (!strcmp(context, "v3") ? AS_PAXOS_PROTOCOL_V3 :
 											  (!strcmp(context, "v4") ? AS_PAXOS_PROTOCOL_V4 :
 											   (!strcmp(context, "v5") ? AS_PAXOS_PROTOCOL_V5 :
-											    (!strcmp(context, "none") ? AS_PAXOS_PROTOCOL_NONE :
+												(!strcmp(context, "none") ? AS_PAXOS_PROTOCOL_NONE :
 												 AS_PAXOS_PROTOCOL_UNDEF))))));
 			if (AS_PAXOS_PROTOCOL_UNDEF == protocol)
 				goto Error;
@@ -6983,18 +6983,18 @@ as_info_init()
 	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("mstats", info_command_mstats, PERM_LOGGING_CTRL);                    // Dump GLibC-level memory stats.
 	as_info_set_command("mtrace", info_command_mtrace, PERM_SERVICE_CTRL);                    // Control GLibC-level memory tracing.
-	as_info_set_command("peers-clear-alt", info_get_services_clear_alt_delta, false);         // The delta update version of "peers-clear-alt".
-	as_info_set_command("peers-clear-std", info_get_services_clear_std_delta, false);         // The delta update version of "peers-clear-std".
-	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, false);             // The delta update version of "peers-tls-alt".
-	as_info_set_command("peers-tls-std", info_get_services_tls_std_delta, false);             // The delta update version of "peers-tls-std".
+	as_info_set_command("peers-clear-alt", info_get_services_clear_alt_delta, PERM_NONE);     // The delta update version of "peers-clear-alt".
+	as_info_set_command("peers-clear-std", info_get_services_clear_std_delta, PERM_NONE);     // The delta update version of "peers-clear-std".
+	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, PERM_NONE);         // The delta update version of "peers-tls-alt".
+	as_info_set_command("peers-tls-std", info_get_services_tls_std_delta, PERM_NONE);         // The delta update version of "peers-tls-std".
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
 	as_info_set_command("throughput", info_command_hist_track, PERM_NONE);                    // Returns throughput info.
 	as_info_set_command("tip", info_command_tip, PERM_SERVICE_CTRL);                          // Add external IP to mesh-mode heartbeats.
 	as_info_set_command("tip-clear", info_command_tip_clear, PERM_SERVICE_CTRL);              // Clear tip list from mesh-mode heartbeats.
-	as_info_set_command("truncate", info_command_truncate, PERM_SERVICE_CTRL);                // Truncate a namespace or set. FIXME - permission ???
-	as_info_set_command("truncate-undo", info_command_truncate_undo, PERM_SERVICE_CTRL);      // Undo a truncate command. FIXME - permission ???
+	as_info_set_command("truncate", info_command_truncate, PERM_TRUNCATE);                    // Truncate a namespace or set.
+	as_info_set_command("truncate-undo", info_command_truncate_undo, PERM_TRUNCATE);          // Undo a truncate command.
 	as_info_set_command("xdr-command", as_info_command_xdr, PERM_SERVICE_CTRL);               // Command to XDR module.
 
 	// SINDEX

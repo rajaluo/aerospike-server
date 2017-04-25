@@ -92,6 +92,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 #include <sys/time.h>
 
 #include "aerospike/as_buffer.h"
@@ -3003,7 +3004,7 @@ as_query_kill(uint64_t trid)
 	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
-		cf_warning(AS_QUERY, "Cannot kill query with trid [ %"PRIu64" ]",  trid);
+		cf_warning(AS_QUERY, "Cannot kill query with trid [%"PRIu64"]",  trid);
 	} else {
 		qtr_set_abort(qtr, AS_PROTO_RESULT_FAIL_QUERY_USERABORT, __FILE__, __LINE__);
 		rv = AS_QUERY_OK;
@@ -3021,7 +3022,7 @@ as_query_set_priority(uint64_t trid, uint32_t priority)
 	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
-		cf_warning(AS_QUERY, "Cannot set priority for query with trid [ %"PRIu64" ]",  trid);
+		cf_warning(AS_QUERY, "Cannot set priority for query with trid [%"PRIu64"]",  trid);
 	} else {
 		uint32_t old_priority = qtr->priority;
 		qtr->priority = priority;
@@ -3120,7 +3121,7 @@ as_query_get_jobstat(uint64_t trid)
 	int rv = hash_get_qtr(trid, &qtr);
 
 	if (rv != AS_QUERY_OK) {
-		cf_warning(AS_MON, "No query was found with trid [ %"PRIu64" ]", trid);
+		cf_warning(AS_MON, "No query was found with trid [%"PRIu64"]", trid);
 		stat = NULL;
 	}
 	else {

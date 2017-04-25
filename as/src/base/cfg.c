@@ -32,6 +32,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/resource.h>
 
 #include "aerospike/mod_lua_config.h"
@@ -114,6 +115,7 @@ void cfg_resolve_tls_name(as_config* config_p);
 void xdr_cfg_add_datacenter(char* dc, uint32_t nsid);
 void xdr_cfg_add_node_addr_port(dc_config_opt *dc_cfg, char* addr, int port);
 void xdr_cfg_add_tls_node(dc_config_opt *dc_cfg, char* addr, char *tls_name, int port);
+
 
 //==========================================================
 // Helper - set as_config defaults.
@@ -252,15 +254,14 @@ typedef enum {
 	// Top-level options:
 	// In canonical configuration file order:
 	CASE_SERVICE_BEGIN,
-	CASE_LOG_BEGIN,
+	CASE_LOGGING_BEGIN,
 	CASE_NETWORK_BEGIN,
 	CASE_NAMESPACE_BEGIN,
-	// For XDR only:
-	CASE_XDR_BEGIN,
-	// Recent (non-2.x) functionality:
 	CASE_MOD_LUA_BEGIN,
 	CASE_CLUSTER_BEGIN,
+	// Enterprise-only:
 	CASE_SECURITY_BEGIN,
+	CASE_XDR_BEGIN,
 
 	// Service options:
 	// Normally visible, in canonical configuration file order:
@@ -645,13 +646,13 @@ typedef enum {
 	// Namespace sindex options:
 	CASE_NAMESPACE_SINDEX_NUM_PARTITIONS,
 
-    // Namespace geo2dsphere within options:
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MIN_LEVEL,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_LEVEL,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_CELLS,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_LEVEL_MOD,
-    CASE_NAMESPACE_GEO2DSPHERE_WITHIN_EARTH_RADIUS_METERS,
+	// Namespace geo2dsphere within options:
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_STRICT,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MIN_LEVEL,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_LEVEL,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_MAX_CELLS,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_LEVEL_MOD,
+	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_EARTH_RADIUS_METERS,
 
 	// Mod-lua options:
 	CASE_MOD_LUA_CACHE_ENABLED,
@@ -689,42 +690,52 @@ typedef enum {
 	CASE_SECURITY_SYSLOG_REPORT_USER_ADMIN,
 	CASE_SECURITY_SYSLOG_REPORT_VIOLATION,
 
-	// Main XDR options:
-	XDR_CASE_ENABLE_XDR,
-	XDR_CASE_DIGESTLOG_PATH,
-	XDR_CASE_INFO_PORT,
-	XDR_CASE_DATACENTER_BEGIN,
-	XDR_CASE_MAX_SHIP_THROUGHPUT,
-	XDR_CASE_MAX_SHIP_BANDWIDTH,
-	XDR_CASE_HOTKEY_TIME_MS,
-	XDR_CASE_FORWARD_XDR_WRITES,
-	XDR_CASE_CLIENT_THREADS,
-	XDR_CASE_WRITE_TIMEOUT,
-	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED,
-	XDR_CASE_XDR_NSUP_DELETES_ENABLED,
-	XDR_CASE_XDR_SHIP_BINS,
-	XDR_CASE_XDR_SHIPPING_ENABLED,
-	XDR_CASE_XDR_INFO_TIMEOUT,
-	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
-	XDR_CASE_XDR_SHIP_DELAY,
-	XDR_CASE_XDR_READ_THREADS,
+	// XDR options:
+	// Normally visible, in canonical configuration file order:
+	CASE_XDR_ENABLE_XDR,
+	CASE_XDR_DIGESTLOG_PATH,
+	CASE_XDR_DATACENTER_BEGIN,
+	// Normally hidden:
+	CASE_XDR_CLIENT_THREADS,
+	CASE_XDR_COMPRESSION_THRESHOLD,
+	CASE_XDR_DELETE_SHIPPING_ENABLED,
+	CASE_XDR_FORWARD_XDR_WRITES,
+	CASE_XDR_HOTKEY_TIME_MS,
+	CASE_XDR_INFO_PORT,
+	CASE_XDR_INFO_TIMEOUT,
+	CASE_XDR_MAX_SHIP_BANDWIDTH,
+	CASE_XDR_MAX_SHIP_THROUGHPUT,
+	CASE_XDR_NSUP_DELETES_ENABLED,
+	CASE_XDR_READ_THREADS,
+	CASE_XDR_SHIP_BINS,
+	CASE_XDR_SHIP_DELAY,
+	CASE_XDR_SHIPPING_ENABLED,
+	CASE_XDR_WRITE_TIMEOUT,
 
-	// Security options:
-	XDR_CASE_SEC_CREDENTIALS_BEGIN,
-	XDR_CASE_SEC_CRED_USERNAME,
-	XDR_CASE_SEC_CRED_PASSWORD,
+	// XDR (remote) datacenter options:
+	// Normally visible, in canonical configuration file order:
+	CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT,
+	// Normally hidden:
+	CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP,
+	CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE,
+	CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES,
+	CASE_XDR_DATACENTER_TLS_CAFILE,
+	CASE_XDR_DATACENTER_TLS_CAPATH,
+	CASE_XDR_DATACENTER_TLS_CERT_BLACKLIST,
+	CASE_XDR_DATACENTER_TLS_CERTFILE,
+	CASE_XDR_DATACENTER_TLS_KEYFILE,
+	CASE_XDR_DATACENTER_TLS_NODE,
 
-	// Remote datacenter options:
-	XDR_CASE_DC_NODE_ADDRESS_PORT,
-	XDR_CASE_DC_INT_EXT_IPMAP,
-	XDR_CASE_DC_SECURITY_CONFIG_FILE,
-	XDR_CASE_DC_USE_ALTERNATE_SERVICES,
-	XDR_CASE_TLS_NODE,
-	XDR_CASE_TLS_CAFILE,
-	XDR_CASE_TLS_CAPATH,
-	XDR_CASE_TLS_CERTFILE,
-	XDR_CASE_TLS_KEYFILE,
-	XDR_CASE_TLS_CERT_BLACKLIST
+	// Used parsing separate file, but share this enum:
+
+	// XDR security top-level options:
+	XDR_SEC_CASE_CREDENTIALS_BEGIN,
+
+	// XDR security credentials options:
+	// Normally visible, in canonical configuration file order:
+	XDR_SEC_CASE_CREDENTIALS_USERNAME,
+	XDR_SEC_CASE_CREDENTIALS_PASSWORD
+
 } cfg_case_id;
 
 
@@ -741,13 +752,13 @@ typedef struct cfg_opt_s {
 
 const cfg_opt GLOBAL_OPTS[] = {
 		{ "service",						CASE_SERVICE_BEGIN },
-		{ "logging",						CASE_LOG_BEGIN },
+		{ "logging",						CASE_LOGGING_BEGIN },
 		{ "network",						CASE_NETWORK_BEGIN },
 		{ "namespace",						CASE_NAMESPACE_BEGIN },
-		{ "xdr",							CASE_XDR_BEGIN },
 		{ "mod-lua",						CASE_MOD_LUA_BEGIN },
 		{ "cluster",						CASE_CLUSTER_BEGIN },
-		{ "security",						CASE_SECURITY_BEGIN }
+		{ "security",						CASE_SECURITY_BEGIN },
+		{ "xdr",							CASE_XDR_BEGIN }
 };
 
 const cfg_opt SERVICE_OPTS[] = {
@@ -1201,51 +1212,52 @@ const cfg_opt SECURITY_SYSLOG_OPTS[] = {
 
 const cfg_opt XDR_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
-		{ "enable-xdr",						XDR_CASE_ENABLE_XDR },
-		{ "xdr-digestlog-path",				XDR_CASE_DIGESTLOG_PATH },
-		{ "xdr-info-port",					XDR_CASE_INFO_PORT },
-		{ "datacenter",						XDR_CASE_DATACENTER_BEGIN },
-		{ "xdr-max-ship-throughput",		XDR_CASE_MAX_SHIP_THROUGHPUT },
-		{ "xdr-max-ship-bandwidth",			XDR_CASE_MAX_SHIP_BANDWIDTH },
-		{ "xdr-hotkey-time-ms",				XDR_CASE_HOTKEY_TIME_MS },
-		{ "forward-xdr-writes",				XDR_CASE_FORWARD_XDR_WRITES },
-		{ "xdr-client-threads",				XDR_CASE_CLIENT_THREADS },
-		{ "xdr-write-timeout",				XDR_CASE_WRITE_TIMEOUT },
-		{ "xdr-delete-shipping-enabled",	XDR_CASE_XDR_DELETE_SHIPPING_ENABLED },
-		{ "xdr-ship-bins",					XDR_CASE_XDR_SHIP_BINS },
-		{ "xdr-nsup-deletes-enabled",		XDR_CASE_XDR_NSUP_DELETES_ENABLED },
-		{ "xdr-shipping-enabled",			XDR_CASE_XDR_SHIPPING_ENABLED },
-		{ "xdr-info-timeout",				XDR_CASE_XDR_INFO_TIMEOUT },
-		{ "xdr-compression-threshold",		XDR_CASE_XDR_COMPRESSION_THRESHOLD },
-		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },					// hidden
-		{ "xdr-read-threads",				XDR_CASE_XDR_READ_THREADS},
+		{ "enable-xdr",						CASE_XDR_ENABLE_XDR },
+		{ "xdr-digestlog-path",				CASE_XDR_DIGESTLOG_PATH },
+		{ "datacenter",						CASE_XDR_DATACENTER_BEGIN },
+		{ "xdr-client-threads",				CASE_XDR_CLIENT_THREADS },
+		{ "xdr-compression-threshold",		CASE_XDR_COMPRESSION_THRESHOLD },
+		{ "xdr-delete-shipping-enabled",	CASE_XDR_DELETE_SHIPPING_ENABLED },
+		{ "forward-xdr-writes",				CASE_XDR_FORWARD_XDR_WRITES },
+		{ "xdr-hotkey-time-ms",				CASE_XDR_HOTKEY_TIME_MS },
+		{ "xdr-info-port",					CASE_XDR_INFO_PORT },
+		{ "xdr-info-timeout",				CASE_XDR_INFO_TIMEOUT },
+		{ "xdr-max-ship-bandwidth",			CASE_XDR_MAX_SHIP_BANDWIDTH },
+		{ "xdr-max-ship-throughput",		CASE_XDR_MAX_SHIP_THROUGHPUT },
+		{ "xdr-nsup-deletes-enabled",		CASE_XDR_NSUP_DELETES_ENABLED },
+		{ "xdr-read-threads",				CASE_XDR_READ_THREADS},
+		{ "xdr-ship-bins",					CASE_XDR_SHIP_BINS },
+		{ "xdr-ship-delay",					CASE_XDR_SHIP_DELAY }, // hidden
+		{ "xdr-shipping-enabled",			CASE_XDR_SHIPPING_ENABLED },
+		{ "xdr-write-timeout",				CASE_XDR_WRITE_TIMEOUT },
 		{ "}",								CASE_CONTEXT_END }
 };
 
-const cfg_opt XDR_DC_OPTS[] = {
+const cfg_opt XDR_DATACENTER_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
-		{ "dc-node-address-port",			XDR_CASE_DC_NODE_ADDRESS_PORT },
-		{ "dc-int-ext-ipmap",				XDR_CASE_DC_INT_EXT_IPMAP },
-		{ "dc-security-config-file",		XDR_CASE_DC_SECURITY_CONFIG_FILE },
-		{ "dc-use-alternate-services",		XDR_CASE_DC_USE_ALTERNATE_SERVICES },
-		{ "tls-node",						XDR_CASE_TLS_NODE },
-		{ "tls-cafile",						XDR_CASE_TLS_CAFILE },
-		{ "tls-capath",						XDR_CASE_TLS_CAPATH },
-		{ "tls-certfile",					XDR_CASE_TLS_CERTFILE },
-		{ "tls-keyfile",					XDR_CASE_TLS_KEYFILE },
-		{ "tls-cert-blacklist",				XDR_CASE_TLS_CERT_BLACKLIST },
+		{ "dc-node-address-port",			CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT },
+		{ "dc-int-ext-ipmap",				CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP },
+		{ "dc-security-config-file",		CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE },
+		{ "dc-use-alternate-services",		CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES },
+		{ "tls-cafile",						CASE_XDR_DATACENTER_TLS_CAFILE },
+		{ "tls-capath",						CASE_XDR_DATACENTER_TLS_CAPATH },
+		{ "tls-cert-blacklist",				CASE_XDR_DATACENTER_TLS_CERT_BLACKLIST },
+		{ "tls-certfile",					CASE_XDR_DATACENTER_TLS_CERTFILE },
+		{ "tls-keyfile",					CASE_XDR_DATACENTER_TLS_KEYFILE },
+		{ "tls-node",						CASE_XDR_DATACENTER_TLS_NODE },
 		{ "}",								CASE_CONTEXT_END }
 };
 
-// Security related configs
+// Used parsing separate file, but share cfg_case_id enum.
+
 const cfg_opt XDR_SEC_GLOBAL_OPTS[] = {
-		{ "credentials",					XDR_CASE_SEC_CREDENTIALS_BEGIN }
+		{ "credentials",					XDR_SEC_CASE_CREDENTIALS_BEGIN }
 };
 
-const cfg_opt XDR_SEC_CRED_OPTS[] = {
+const cfg_opt XDR_SEC_CREDENTIALS_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
-		{ "username",						XDR_CASE_SEC_CRED_USERNAME },
-		{ "password",						XDR_CASE_SEC_CRED_PASSWORD },
+		{ "username",						XDR_SEC_CASE_CREDENTIALS_USERNAME },
+		{ "password",						XDR_SEC_CASE_CREDENTIALS_PASSWORD },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1281,11 +1293,14 @@ const int NUM_CLUSTER_GROUP_OPTS					= sizeof(CLUSTER_GROUP_OPTS) / sizeof(cfg_o
 const int NUM_SECURITY_OPTS							= sizeof(SECURITY_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_LOG_OPTS						= sizeof(SECURITY_LOG_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_SYSLOG_OPTS					= sizeof(SECURITY_SYSLOG_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_OPTS								= sizeof(XDR_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_DATACENTER_OPTS					= sizeof(XDR_DATACENTER_OPTS) / sizeof(cfg_opt);
 
-const int NUM_XDR_OPTS				= sizeof(XDR_OPTS) / sizeof(cfg_opt);
-const int NUM_XDR_DC_OPTS			= sizeof(XDR_DC_OPTS) / sizeof(cfg_opt);
-const int NUM_XDR_SEC_GLOBAL_OPTS	= sizeof(XDR_SEC_GLOBAL_OPTS) / sizeof(cfg_opt);
-const int NUM_XDR_SEC_CRED_OPTS		= sizeof(XDR_SEC_CRED_OPTS) / sizeof(cfg_opt);
+// Used parsing separate file, but share cfg_case_id enum.
+
+const int NUM_XDR_SEC_GLOBAL_OPTS					= sizeof(XDR_SEC_GLOBAL_OPTS) / sizeof(cfg_opt);
+const int NUM_XDR_SEC_CREDENTIALS_OPTS				= sizeof(XDR_SEC_CREDENTIALS_OPTS) / sizeof(cfg_opt);
+
 
 //==========================================================
 // Configuration value constants not for switch cases.
@@ -1324,11 +1339,12 @@ typedef enum {
 	LOGGING, LOGGING_FILE, LOGGING_CONSOLE,
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO,
 	NAMESPACE, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
-	XDR, XDR_DATACENTER,
 	MOD_LUA,
 	CLUSTER, CLUSTER_GROUP,
 	SECURITY, SECURITY_LOG, SECURITY_SYSLOG,
-	XDR_DC_CREDENTIALS,
+	XDR, XDR_DATACENTER,
+	// Used parsing separate file, but shares this enum:
+	XDR_SEC_CREDENTIALS,
 	// Must be last, use for sanity-checking:
 	PARSER_STATE_MAX_PLUS_1
 } as_config_parser_state;
@@ -1340,11 +1356,12 @@ const char* CFG_PARSER_STATES[] = {
 		"LOGGING", "LOGGING_FILE", "LOGGING_CONSOLE",
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO",
 		"NAMESPACE", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
-		"XDR", "XDR_DATACENTER",
 		"MOD_LUA",
 		"CLUSTER", "CLUSTER_GROUP",
 		"SECURITY", "SECURITY_LOG", "SECURITY_SYSLOG",
-		"XDR_DC_CREDENTIALS"
+		"XDR", "XDR_DATACENTER",
+		// Used parsing separate file, but shares corresponding enum:
+		"XDR_SEC_CREDENTIALS"
 };
 
 typedef struct cfg_parser_state_s {
@@ -2047,7 +2064,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_BEGIN:
 				cfg_begin_context(&state, SERVICE);
 				break;
-			case CASE_LOG_BEGIN:
+			case CASE_LOGGING_BEGIN:
 				cfg_begin_context(&state, LOGGING);
 				break;
 			case CASE_NETWORK_BEGIN:
@@ -2058,10 +2075,6 @@ as_config_init(const char* config_file)
 				ns = as_namespace_create(line.val_tok_1);
 				cfg_begin_context(&state, NAMESPACE);
 				break;
-			case CASE_XDR_BEGIN:
-				cfg_enterprise_only(&line);
-				cfg_begin_context(&state, XDR);
-				break;
 			case CASE_MOD_LUA_BEGIN:
 				cfg_begin_context(&state, MOD_LUA);
 				break;
@@ -2071,6 +2084,10 @@ as_config_init(const char* config_file)
 			case CASE_SECURITY_BEGIN:
 				cfg_enterprise_only(&line);
 				cfg_begin_context(&state, SECURITY);
+				break;
+			case CASE_XDR_BEGIN:
+				cfg_enterprise_only(&line);
+				cfg_begin_context(&state, XDR);
 				break;
 			case CASE_NOT_FOUND:
 			default:
@@ -2649,7 +2666,7 @@ as_config_init(const char* config_file)
 			case CASE_NETWORK_HEARTBEAT_ADDRESS:
 				cfg_add_addr_bind(line.val_tok_1, &c->hb_serv_spec);
 				break;
-		    case CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP:
+			case CASE_NETWORK_HEARTBEAT_MULTICAST_GROUP:
 				add_addr(line.val_tok_1, &c->hb_multicast_groups);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PORT:
@@ -3262,140 +3279,6 @@ as_config_init(const char* config_file)
 			break;
 
 		//==================================================
-		// Parse xdr context items.
-		//
-		case XDR:
-			switch (cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
-			case CASE_CONTEXT_BEGIN:
-				// Allow open brace on its own line to begin this context.
-				break;
-			case XDR_CASE_ENABLE_XDR:
-				g_xcfg.xdr_global_enabled = cfg_bool(&line);
-				break;
-			case XDR_CASE_DIGESTLOG_PATH:
-				g_xcfg.xdr_digestlog_path = cfg_strdup(&line, true);
-				g_xcfg.xdr_digestlog_file_size = cfg_u64_val2_no_checks(&line);
-				break;
-			case XDR_CASE_INFO_PORT:
-				g_xcfg.xdr_info_port = cfg_port(&line);
-				break;
-			case XDR_CASE_DATACENTER_BEGIN:
-				cur_dc_cfg = &g_dc_xcfg_opt[g_dc_count];
-				cur_dc_cfg->dc_name = cfg_strdup(&line, true);
-				cur_dc_cfg->dc_id = g_dc_count;
-				cf_vector_pointer_init(&cur_dc_cfg->dc_node_v, 10, 0);
-				cf_vector_pointer_init(&cur_dc_cfg->dc_addr_map_v, 10, 0);
-				cfg_begin_context(&state, XDR_DATACENTER);
-				break;
-			case XDR_CASE_MAX_SHIP_THROUGHPUT:
-				g_xcfg.xdr_max_ship_throughput = cfg_u32_no_checks(&line);
-				break;
-			case XDR_CASE_MAX_SHIP_BANDWIDTH:
-				g_xcfg.xdr_max_ship_bandwidth = cfg_u32_no_checks(&line);
-				break;
-			case XDR_CASE_HOTKEY_TIME_MS:
-				g_xcfg.xdr_hotkey_time_ms = cfg_u32_no_checks(&line);
-				break;
-			case XDR_CASE_FORWARD_XDR_WRITES:
-				g_xcfg.xdr_forward_xdrwrites = cfg_bool(&line);
-				break;
-			case XDR_CASE_XDR_DELETE_SHIPPING_ENABLED:
-				g_xcfg.xdr_delete_shipping_enabled = cfg_bool(&line);
-				break;
-			case XDR_CASE_CLIENT_THREADS:
-				g_xcfg.xdr_client_threads = cfg_u32_no_checks(&line);
-				break;
-			case XDR_CASE_WRITE_TIMEOUT:
-				g_xcfg.xdr_write_timeout = cfg_u32_no_checks(&line);
-				break;
-			case XDR_CASE_XDR_SHIP_BINS:
-				g_xcfg.xdr_ship_bins = cfg_bool(&line);
-				break;
-			case XDR_CASE_XDR_NSUP_DELETES_ENABLED:
-				g_xcfg.xdr_nsup_deletes_enabled = cfg_bool(&line);
-				break;
-			case XDR_CASE_XDR_SHIPPING_ENABLED:
-				g_xcfg.xdr_shipping_enabled = cfg_bool(&line);
-				break;
-			case XDR_CASE_XDR_INFO_TIMEOUT:
-				g_xcfg.xdr_info_request_timeout_ms = cfg_u32_no_checks(&line);
-				break;
-			case XDR_CASE_XDR_COMPRESSION_THRESHOLD:
-				g_xcfg.xdr_compression_threshold = cfg_u32_no_checks(&line);
-				break;
-			case XDR_CASE_XDR_SHIP_DELAY:
-				g_xcfg.xdr_internal_shipping_delay = cfg_u32_no_checks(&line);
-				break;
-			case XDR_CASE_XDR_READ_THREADS:
-				g_xcfg.xdr_read_threads = cfg_u32_no_checks(&line);
-				break;
-			case CASE_CONTEXT_END:
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		//----------------------------------------
-		// Parse xdr::datacenter context items.
-		//
-		case XDR_DATACENTER:
-			// This is a hack to avoid defining a new array for the datacenter
-			// subsection. The server is not interested in the details. It just
-			// wants the subsection to end. So just check for the closing brace.
-			switch (cfg_find_tok(line.name_tok, XDR_DC_OPTS, NUM_XDR_DC_OPTS)) {
-			case CASE_CONTEXT_BEGIN:
-				// Allow open brace on its own line to begin this context.
-				break;
-			case XDR_CASE_DC_NODE_ADDRESS_PORT:
-				xdr_cfg_add_node_addr_port(cur_dc_cfg, cfg_strdup(&line, true),
-						cfg_port_val2(&line));
-				break;
-			case XDR_CASE_DC_INT_EXT_IPMAP:
-				xdr_cfg_add_int_ext_mapping(cur_dc_cfg, cfg_strdup(&line, true), 
-						cfg_strdup_val2(&line, true));
-				break;
-			case XDR_CASE_DC_SECURITY_CONFIG_FILE:
-				cur_dc_cfg->dc_security_cfg.sec_config_file =
-						cfg_strdup(&line, true);
-				break;
-			case XDR_CASE_DC_USE_ALTERNATE_SERVICES:
-				cur_dc_cfg->dc_use_alternate_services = cfg_bool(&line);
-				break;
-			case XDR_CASE_TLS_NODE:
-				xdr_cfg_add_tls_node(cur_dc_cfg, cfg_strdup(&line, true),
-						cfg_strdup_val2(&line, true), cfg_port_val3(&line));
-				break;
-			case XDR_CASE_TLS_CAFILE:
-				cur_dc_cfg->tls_cafile = cfg_strdup(&line, true);
-				break;
-			case XDR_CASE_TLS_CAPATH:
-				cur_dc_cfg->tls_capath = cfg_strdup(&line, true);
-				break;
-			case XDR_CASE_TLS_CERTFILE:
-				cur_dc_cfg->tls_certfile = cfg_strdup(&line, true);
-				break;
-			case XDR_CASE_TLS_KEYFILE:
-				cur_dc_cfg->tls_keyfile = cfg_strdup(&line, true);
-				break;
-			case XDR_CASE_TLS_CERT_BLACKLIST:
-				cur_dc_cfg->tls_cert_blacklist = cfg_strdup(&line, true);
-				break;
-			case CASE_CONTEXT_END:
-				g_dc_count++;
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		//==================================================
 		// Parse mod-lua context items.
 		//
 		case MOD_LUA:
@@ -3565,6 +3448,133 @@ as_config_init(const char* config_file)
 				c->sec_cfg.report.violation |= cfg_bool(&line) ? AS_SEC_SINK_SYSLOG : 0;
 				break;
 			case CASE_CONTEXT_END:
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//==================================================
+		// Parse xdr context items.
+		//
+		case XDR:
+			switch (cfg_find_tok(line.name_tok, XDR_OPTS, NUM_XDR_OPTS)) {
+			case CASE_CONTEXT_BEGIN:
+				// Allow open brace on its own line to begin this context.
+				break;
+			case CASE_XDR_ENABLE_XDR:
+				g_xcfg.xdr_global_enabled = cfg_bool(&line);
+				break;
+			case CASE_XDR_DIGESTLOG_PATH:
+				g_xcfg.xdr_digestlog_path = cfg_strdup(&line, true);
+				g_xcfg.xdr_digestlog_file_size = cfg_u64_val2_no_checks(&line);
+				break;
+			case CASE_XDR_DATACENTER_BEGIN:
+				cur_dc_cfg = &g_dc_xcfg_opt[g_dc_count];
+				cur_dc_cfg->dc_name = cfg_strdup(&line, true);
+				cur_dc_cfg->dc_id = g_dc_count;
+				cf_vector_pointer_init(&cur_dc_cfg->dc_node_v, 10, 0);
+				cf_vector_pointer_init(&cur_dc_cfg->dc_addr_map_v, 10, 0);
+				cfg_begin_context(&state, XDR_DATACENTER);
+				break;
+			case CASE_XDR_CLIENT_THREADS:
+				g_xcfg.xdr_client_threads = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_COMPRESSION_THRESHOLD:
+				g_xcfg.xdr_compression_threshold = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_DELETE_SHIPPING_ENABLED:
+				g_xcfg.xdr_delete_shipping_enabled = cfg_bool(&line);
+				break;
+			case CASE_XDR_FORWARD_XDR_WRITES:
+				g_xcfg.xdr_forward_xdrwrites = cfg_bool(&line);
+				break;
+			case CASE_XDR_HOTKEY_TIME_MS:
+				g_xcfg.xdr_hotkey_time_ms = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_INFO_PORT:
+				g_xcfg.xdr_info_port = cfg_port(&line);
+				break;
+			case CASE_XDR_INFO_TIMEOUT:
+				g_xcfg.xdr_info_request_timeout_ms = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_MAX_SHIP_BANDWIDTH:
+				g_xcfg.xdr_max_ship_bandwidth = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_MAX_SHIP_THROUGHPUT:
+				g_xcfg.xdr_max_ship_throughput = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_NSUP_DELETES_ENABLED:
+				g_xcfg.xdr_nsup_deletes_enabled = cfg_bool(&line);
+				break;
+			case CASE_XDR_READ_THREADS:
+				g_xcfg.xdr_read_threads = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_SHIP_BINS:
+				g_xcfg.xdr_ship_bins = cfg_bool(&line);
+				break;
+			case CASE_XDR_SHIP_DELAY:
+				g_xcfg.xdr_internal_shipping_delay = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_SHIPPING_ENABLED:
+				g_xcfg.xdr_shipping_enabled = cfg_bool(&line);
+				break;
+			case CASE_XDR_WRITE_TIMEOUT:
+				g_xcfg.xdr_write_timeout = cfg_u32_no_checks(&line);
+				break;
+			case CASE_CONTEXT_END:
+				cfg_end_context(&state);
+				break;
+			case CASE_NOT_FOUND:
+			default:
+				cfg_unknown_name_tok(&line);
+				break;
+			}
+			break;
+
+		//----------------------------------------
+		// Parse xdr::datacenter context items.
+		//
+		case XDR_DATACENTER:
+			switch (cfg_find_tok(line.name_tok, XDR_DATACENTER_OPTS, NUM_XDR_DATACENTER_OPTS)) {
+			case CASE_CONTEXT_BEGIN:
+				// Allow open brace on its own line to begin this context.
+				break;
+			case CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT:
+				xdr_cfg_add_node_addr_port(cur_dc_cfg, cfg_strdup(&line, true), cfg_port_val2(&line));
+				break;
+			case CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP:
+				xdr_cfg_add_int_ext_mapping(cur_dc_cfg, cfg_strdup(&line, true), cfg_strdup_val2(&line, true));
+				break;
+			case CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE:
+				cur_dc_cfg->dc_security_cfg.sec_config_file = cfg_strdup(&line, true);
+				break;
+			case CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES:
+				cur_dc_cfg->dc_use_alternate_services = cfg_bool(&line);
+				break;
+			case CASE_XDR_DATACENTER_TLS_CAFILE:
+				cur_dc_cfg->tls_cafile = cfg_strdup(&line, true);
+				break;
+			case CASE_XDR_DATACENTER_TLS_CAPATH:
+				cur_dc_cfg->tls_capath = cfg_strdup(&line, true);
+				break;
+			case CASE_XDR_DATACENTER_TLS_CERT_BLACKLIST:
+				cur_dc_cfg->tls_cert_blacklist = cfg_strdup(&line, true);
+				break;
+			case CASE_XDR_DATACENTER_TLS_CERTFILE:
+				cur_dc_cfg->tls_certfile = cfg_strdup(&line, true);
+				break;
+			case CASE_XDR_DATACENTER_TLS_KEYFILE:
+				cur_dc_cfg->tls_keyfile = cfg_strdup(&line, true);
+				break;
+			case CASE_XDR_DATACENTER_TLS_NODE:
+				xdr_cfg_add_tls_node(cur_dc_cfg, cfg_strdup(&line, true), cfg_strdup_val2(&line, true), cfg_port_val3(&line));
+				break;
+			case CASE_CONTEXT_END:
+				g_dc_count++;
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -4022,8 +4032,9 @@ as_config_cluster_name_matches(const char* cluster_name)
 	return matches;
 }
 
+
 //==========================================================
-// Public API - XDR
+// Public API - XDR.
 //
 
 bool
@@ -4102,10 +4113,9 @@ xdr_read_security_configfile(xdr_security_config* sc)
 
 		// Parse top-level items.
 		case GLOBAL:
-			switch (cfg_find_tok(line.name_tok, XDR_SEC_GLOBAL_OPTS,
-					NUM_XDR_SEC_GLOBAL_OPTS)) {
-			case XDR_CASE_SEC_CREDENTIALS_BEGIN:
-				cfg_begin_context(&state, XDR_DC_CREDENTIALS);
+			switch (cfg_find_tok(line.name_tok, XDR_SEC_GLOBAL_OPTS, NUM_XDR_SEC_GLOBAL_OPTS)) {
+			case XDR_SEC_CASE_CREDENTIALS_BEGIN:
+				cfg_begin_context(&state, XDR_SEC_CREDENTIALS);
 				break;
 			case CASE_NOT_FOUND:
 			default:
@@ -4115,16 +4125,15 @@ xdr_read_security_configfile(xdr_security_config* sc)
 			break;
 
 		// Parse xdr context items.
-		case XDR_DC_CREDENTIALS:
-			switch (cfg_find_tok(line.name_tok, XDR_SEC_CRED_OPTS,
-					NUM_XDR_SEC_CRED_OPTS)) {
+		case XDR_SEC_CREDENTIALS:
+			switch (cfg_find_tok(line.name_tok, XDR_SEC_CREDENTIALS_OPTS, NUM_XDR_SEC_CREDENTIALS_OPTS)) {
 			case CASE_CONTEXT_BEGIN:
 				// Allow open brace on its own line to begin this context.
 				break;
-			case XDR_CASE_SEC_CRED_USERNAME:
+			case XDR_SEC_CASE_CREDENTIALS_USERNAME:
 				sc->username = cfg_strdup(&line, true);
 				break;
-			case XDR_CASE_SEC_CRED_PASSWORD:
+			case XDR_SEC_CASE_CREDENTIALS_PASSWORD:
 				sc->password = cfg_strdup(&line, true);
 				break;
 			case CASE_CONTEXT_END:
@@ -4149,6 +4158,7 @@ xdr_read_security_configfile(xdr_security_config* sc)
 	fclose(FD);
 	return true;
 }
+
 
 //==========================================================
 // Item-specific parsing utilities.
@@ -4261,8 +4271,8 @@ cfg_add_addr_alt(const char* name, cf_serv_spec* spec)
 
 void
 cfg_mserv_config_from_addrs(cf_addr_list* addrs, cf_addr_list* bind_addrs,
-			    cf_mserv_cfg* serv_cfg, cf_ip_port port,
-			    cf_sock_owner owner, uint8_t ttl)
+		cf_mserv_cfg* serv_cfg, cf_ip_port port, cf_sock_owner owner,
+		uint8_t ttl)
 {
 	for (uint32_t i = 0; i < addrs->n_addrs; ++i) {
 
@@ -4639,6 +4649,7 @@ cfg_resolve_tls_name(as_config *cfg)
 	cf_info(AS_CFG, "tls-name %s", cfg->tls_name);
 }
 
+
 //==========================================================
 // XDR utilities.
 //
@@ -4646,24 +4657,18 @@ cfg_resolve_tls_name(as_config *cfg)
 void
 xdr_cfg_add_datacenter(char* dc, uint32_t nsid)
 {
-	// Add the string pointer (of the datacenter name) to the vector.
-	// Crash if datacenter with same name already exist.
-	cf_vector *v = &(g_config.namespaces[nsid-1]->xdr_dclist_v);
-	bool found = false;
-	for (int index = 0 ; index < cf_vector_size(v); index++) {
-		void *val = cf_vector_pointer_get(v, index);
-		if (0 == strcmp((char *)val, dc)) {
-			found = true;
-			break;
+	cf_vector *v = &g_config.namespaces[nsid-1]->xdr_dclist_v;
+
+	// Crash if datacenter with same name already exists.
+	for (uint32_t index = 0; index < cf_vector_size(v); index++) {
+		if (strcmp((char *)cf_vector_pointer_get(v, index), dc) == 0) {
+			cf_crash_nostack(AS_XDR, "datacenter %s already exists for namespace %s - please remove duplicate entries from config file",
+					dc, g_config.namespaces[nsid-1]->name);
 		}
 	}
 
-	if (found == true) {
-		cf_crash_nostack(AS_XDR, "Datacenter %s already exists for Namespace %s. Please remove duplicate entries from config file.",
-				dc, g_config.namespaces[nsid-1]->name);
-    } else {
-		cf_vector_pointer_append(v, dc);
-	}
+	// Add the string pointer (of the datacenter name) to the vector.
+	cf_vector_pointer_append(v, dc);
 }
 
 void
@@ -4676,7 +4681,7 @@ void
 xdr_cfg_add_tls_node(dc_config_opt *dc_cfg, char* addr, char *tls_name, int port)
 {
 	// Add the element to the vector.
-	node_addr_port* nap = (node_addr_port*) cf_malloc(sizeof(node_addr_port));
+	node_addr_port* nap = (node_addr_port*)cf_malloc(sizeof(node_addr_port));
 
 	if (nap == NULL) {
 		cf_warning(AS_XDR, "unable to allocate memory for node details");

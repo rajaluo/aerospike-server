@@ -83,9 +83,9 @@
 // Typedefs & constants.
 //
 
-#define FABRIC_BUFFER_MEM_SZ			(1024 * 1024) // bytes
-#define FABRIC_EPOLL_SEND_EVENTS		16
-#define FABRIC_EPOLL_RECV_EVENTS		1
+#define FABRIC_BUFFER_MEM_SZ		(1024 * 1024) // bytes
+#define FABRIC_EPOLL_SEND_EVENTS	16
+#define FABRIC_EPOLL_RECV_EVENTS	1
 
 typedef enum {
 	// These values go on the wire, so mind backward compatibility if changing.
@@ -131,10 +131,6 @@ typedef struct send_entry_s {
 } send_entry;
 
 typedef struct fabric_state_s {
-	const msg_template	*mt[M_TYPE_MAX];
-	size_t 				mt_sz[M_TYPE_MAX];
-	size_t 				scratch_sz[M_TYPE_MAX];
-
 	as_fabric_msg_fn	msg_cb[M_TYPE_MAX];
 	void 				*msg_udata[M_TYPE_MAX];
 
@@ -338,16 +334,11 @@ as_fabric_msg_get(msg_type type)
 		return NULL;
 	}
 
-	if (! g_fabric.mt[type]) {
-		return NULL;
-	}
-
 	msg *m = NULL;
 
 	if (cf_queue_pop(&g_fabric.msg_pool_queue[type], &m, CF_QUEUE_NOWAIT) !=
 			CF_QUEUE_OK) {
-		msg_create(&m, type, g_fabric.mt[type], g_fabric.mt_sz[type],
-				g_fabric.scratch_sz[type]);
+		m = msg_create(type);
 	}
 	else {
 		msg_incr_ref(m);
@@ -573,21 +564,14 @@ as_fabric_send_list(cf_node *nodes, int nodes_sz, msg *m,
 }
 
 // TODO - make static registration
-int
+void
 as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz,
 		size_t scratch_sz, as_fabric_msg_fn msg_cb, void *msg_udata)
 {
-	if (type >= M_TYPE_MAX) {
-		return -1;
-	}
+	msg_type_register(type, mt, mt_sz, scratch_sz);
 
-	g_fabric.mt[type] = mt;
-	g_fabric.mt_sz[type] = mt_sz;
-	g_fabric.scratch_sz[type] = scratch_sz;
 	g_fabric.msg_cb[type] = msg_cb;
 	g_fabric.msg_udata[type] = msg_udata;
-
-	return 0;
 }
 
 void
@@ -2568,7 +2552,7 @@ as_fabric_transact_start(cf_node dest, msg *m, int timeout_ms,
 {
 	// TODO - could check it against the list of global message ids.
 
-	if (m->f[0].type != M_FT_UINT64) {
+	if (msg_field_get_type(m, 0) != M_FT_UINT64) {
 		// error
 		cf_warning(AS_FABRIC, "as_fabric_transact: first field must be int64");
 		(*cb)(NULL, udata, AS_FABRIC_ERR_UNKNOWN);
