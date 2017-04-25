@@ -409,16 +409,19 @@ as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 
 	pthread_mutex_lock(&p->lock);
 
-	int res;
+	int res = -1;
 
-	// FIXME - what to do in ADM model?
-	if (p->state == AS_PARTITION_STATE_SYNC ||
-			p->state == AS_PARTITION_STATE_ZOMBIE) {
-		partition_reserve_lockfree(p, ns, rsv);
-		res = 0;
+	if (as_new_clustering()) {
+		if (! as_partition_version_is_null(&p->version)) {
+			partition_reserve_lockfree(p, ns, rsv);
+			res = 0;
+		}
 	}
 	else {
-		res = -1;
+		if (! as_partition_is_null(&p->version_info)) {
+			partition_reserve_lockfree(p, ns, rsv);
+			res = 0;
+		}
 	}
 
 	pthread_mutex_unlock(&p->lock);
