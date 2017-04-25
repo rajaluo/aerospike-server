@@ -197,8 +197,13 @@
  * Maximum quantum interval duration, should be at least two heartbeat
  * intervals, to ensure there is at least one exchange of clustering information
  * over heartbeats.
+ *
+ * FIXME: Reduce the max to only the second max expression after the jump
+ * version. This is for now a function of hb node timeout which will likely be set to a very
+ * large value while protocol switch from paxos v3/4 to paxos v5.
  */
-#define QUANTUM_INTERVAL_MAX MAX(5000, 2 * as_hb_tx_interval_get())
+#define QUANTUM_INTERVAL_MAX MAX(as_hb_node_timeout_get(),	\
+		MAX(5000, 2 * as_hb_tx_interval_get()))
 
 /**
  * Block size for allocating node plugin data. Ensure the allocation is in
