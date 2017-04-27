@@ -2291,9 +2291,8 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 				goto Exit;
 			}
 
-			as_exchange_ns_vinfos_payload* new_partition_versions = cf_realloc(
-					namespace_data->partition_versions,
-					partition_versions_element->sz);
+			as_exchange_ns_vinfos_payload* new_partition_versions =
+					cf_realloc(namespace_data->partition_versions, partition_versions_element->sz);
 
 			if (!new_partition_versions) {
 				WARNING(
