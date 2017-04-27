@@ -597,6 +597,7 @@ void *as_smd_thr(void *arg);
 
 /* Globals. */
 
+bool g_convert_v3_to_v5 = false; // XXX JUMP - remove in "six months"
 
 as_smd_t *g_smd;
 
@@ -1350,9 +1351,16 @@ as_smd_t *as_smd_init(void)
 				stat(smd_save_path, &buf) != 0 && errno == ENOENT;
 
 		if (! both_gone) {
-			cf_crash_nostack(AS_SMD,
+			g_convert_v3_to_v5 = true;
+
+			cf_info(AS_SMD,
 					"Aerospike server was not properly switched to paxos-protocol v5 - "
-					"see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/cluster_to_3_13");
+					"will convert SMD files and partition versions to new formats");
+
+			// After 3.13, just crash out, don't convert!
+//			cf_crash_nostack(AS_SMD,
+//					"Aerospike server was not properly switched to paxos-protocol v5 - "
+//					"see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/cluster_to_3_13");
 		}
 	}
 	else {

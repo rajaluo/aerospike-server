@@ -33,6 +33,7 @@
 
 #include "citrusleaf/cf_digest.h"
 #include "citrusleaf/cf_queue.h"
+#include "citrusleaf/cf_random.h" // XXX JUMP - remove in "six months"
 
 #include "fault.h"
 #include "olock.h"
@@ -42,6 +43,7 @@
 #include "base/index.h"
 #include "base/ldt.h"
 #include "base/rec_props.h"
+#include "base/system_metadata.h" // XXX JUMP - remove in "six months"
 #include "base/thr_info.h"
 #include "fabric/partition.h"
 
@@ -88,6 +90,57 @@ as_storage_init()
 	}
 
 	cf_queue_destroy(complete_q);
+
+	//--------------------------------------------
+	// XXX JUMP - remove in "six months".
+	//
+
+	if (! g_convert_v3_to_v5) {
+		return;
+	}
+
+	cf_info(AS_STORAGE, "converting partition versions to new format ...");
+
+	uint64_t rand_ckey;
+
+	while ((rand_ckey = (cf_get_rand64() >> 8)) == 0) {
+		;
+	}
+
+	as_partition_version new_version = { .ckey = rand_ckey };
+
+	for (uint32_t i = 0; i < g_config.n_namespaces; i++) {
+		as_namespace *ns = g_config.namespaces[i];
+
+		for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
+			as_partition *p = &ns->partitions[pid];
+
+			pthread_mutex_lock(&p->lock);
+
+			p->final_version = new_version;
+
+			// Cross-over from old vinfo world to new version world.
+			if (! as_partition_is_null(&p->version_info)) {
+				p->version = p->final_version;
+
+				as_partition_vinfo vinfo = { .iid = *(uint64_t*)&p->version };
+
+				as_storage_info_set(ns, pid, &vinfo);
+			}
+
+			p->state = AS_PARTITION_STATE_UNDEF;
+
+			pthread_mutex_unlock(&p->lock);
+		}
+
+		as_storage_info_flush(ns);
+	}
+
+	cf_info(AS_STORAGE, "... done converting partition versions to new format");
+
+	//
+	// End - XXX JUMP - remove in "six months".
+	//--------------------------------------------
 }
 
 //--------------------------------------
