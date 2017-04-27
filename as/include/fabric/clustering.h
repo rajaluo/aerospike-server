@@ -32,6 +32,8 @@
 
 #include "citrusleaf/cf_vector.h"
 
+#include "fault.h"
+
 #include "fabric/hlc.h"
 
 /*
@@ -156,6 +158,38 @@ as_clustering_stop();
  */
 uint32_t
 as_clustering_quantum_interval();
+
+/**
+ * Log a vector of node-ids at input severity spliting long vectors over
+ * multiple lines. The call might not work if the vector is not protected
+ * against multi-threaded access.
+ *
+ * @param context the logging context.
+ * @param severity the log severity.
+ * @param message the message prefix for each log line. Message and node list
+ * will be separated with a space. Can be NULL for no prefix.
+ * @param nodes the vector of nodes.
+ */
+void
+as_clustering_log_cf_node_vector(cf_fault_severity severity,
+		cf_fault_context context, char* message, cf_vector* nodes);
+
+/**
+ * Log an array of node-ids at input severity spliting long vectors over
+ * multiple lines. The call might not work if the array is not protected against
+ * multi-threaded access.
+ *
+ * @param context the logging context.
+ * @param severity the log severity.
+ * @param message the message prefix for each log line. Message and node list
+ * will be separated with a space. Can be NULL for no prefix.
+ * @param nodes the array of nodes.
+ * @param node_count the count of nodes in the array.
+ */
+void
+as_clustering_log_cf_node_array(cf_fault_severity severity,
+		cf_fault_context context, char* message, cf_node* nodes,
+		int node_count);
 
 /*
  * ---- Clustering info command functions. ----

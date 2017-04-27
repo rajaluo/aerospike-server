@@ -176,10 +176,6 @@
  * Constants
  * ----------------------------------------------------------------------------
  */
-/**
- * Get the absolute value.
- */
-#define ABS(x) ((x) < 0 ? -(x) : (x))
 
 /**
  * A soft limit for the maximum cluster size. Meant to be optimize hash and list
@@ -202,8 +198,13 @@
  * Maximum quantum interval duration, should be at least two heartbeat
  * intervals, to ensure there is at least one exchange of clustering information
  * over heartbeats.
+ *
+ * FIXME: Reduce the max to only the second max expression after the jump
+ * version. This is for now a function of hb node timeout which will likely be set to a very
+ * large value while protocol switch from paxos v3/4 to paxos v5.
  */
-#define QUANTUM_INTERVAL_MAX MAX(5000, 2 * as_hb_tx_interval_get())
+#define QUANTUM_INTERVAL_MAX MAX(as_hb_node_timeout_get(),	\
+		MAX(5000, 2 * as_hb_tx_interval_get()))
 
 /**
  * Block size for allocating node plugin data. Ensure the allocation is in
@@ -552,11 +553,6 @@ typedef enum
 	 * Indicates the start of a quantum interval.
 	 */
 	AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_START,
-
-	/**
-	 * Indicates that the handling of quantum interval start is done.
-	 */
-	AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_POST_START,
 
 	/**
 	 * Indicates that self node's cluster membership changed.
@@ -927,6 +923,12 @@ typedef struct as_clustering_s
 	 * join requests.
 	 */
 	cf_clock last_join_request_sent_time;
+
+	/**
+	 * The time at which the last join request was retransmitted, to track and
+	 * retransmit join requests.
+	 */
+	cf_clock last_join_request_retransmit_time;
 } as_clustering;
 
 /**
@@ -1007,6 +1009,8 @@ static void
 internal_event_dispatch(as_clustering_internal_event* timer_event);
 static bool
 clustering_is_our_principal(cf_node nodeid);
+static bool
+clustering_is_principal();
 
 /*
  * ----------------------------------------------------------------------------
@@ -1071,7 +1075,7 @@ quantum_interval()
 static uint32_t
 quantum_interval_skip_max()
 {
-	return 1;
+	return 2;
 }
 
 /**
@@ -1105,11 +1109,22 @@ join_request_timeout()
 	// 	- 1 quantum interval, where our request lands just after the potential
 	// principal's quantum interval start.
 	// 	- 0.5 quantum intervals to give time for a paxos round to finish
-	// 	- quantum_interval_skip_max intervals if the principal had to skip
+	// 	- (quantum_interval_skip_max -1) intervals if the principal had to skip
 	// quantum intervals.
 	return (uint32_t)(
-			(1 + 0.5 + quantum_interval_skip_max()) * quantum_interval());
+			(1 + 0.5 + (quantum_interval_skip_max() - 1)) * quantum_interval());
 }
+
+
+/**
+ * Timeout for a retransmitting a join request.
+ */
+static uint32_t
+join_request_retransmit_timeout()
+{
+	return (uint32_t)(quantum_interval() / 2);
+}
+
 
 /**
  * The interval at which a node checks to see if it should join a cluster.
@@ -1117,21 +1132,28 @@ join_request_timeout()
 static uint32_t
 join_cluster_check_interval()
 {
-	return MIN(quantum_interval() / 2, 2 * as_hb_tx_interval_get());
+	return timer_tick_interval();
 }
 
 /**
  * The amount of time to wait for further join requests from nodes all resulting
  * from the same underlying fault event.
  * Wait for the join check interval + one network latency interval for all
- * affected nodes to send us a join requets + one hb tx interval - so that we
+ * affected nodes to send us a join requets + two hb tx intervals - so that we
  * see the hb data change as well.
  */
 static uint32_t
 join_fault_wait_interval()
 {
-	return join_cluster_check_interval() + network_latency_max()
-			+ as_hb_tx_interval_get();
+	// If the join request falls in the second half of the qunatum interval then
+	// it will result in a push forward, else it will not push the quantum
+	// interval forward.
+	// This is likely in the cluster merge cases where the join request will
+	// happen much later than the node arrival, because merge join request are
+	// sent only at quantum interval starts.
+	return MAX(quantum_interval() / 2,
+			join_cluster_check_interval() + network_latency_max()
+					+ (2 * as_hb_tx_interval_get()));
 }
 
 /**
@@ -1157,6 +1179,17 @@ join_request_move_reject_interval()
 	return quantum_interval();
 }
 
+/**
+ * Maximum tolerable join request transmission delay in milliseconds. Join
+ * requests delayed by more than this amount will not be accepted.
+ */
+static uint32_t
+join_request_accept_delay_max()
+{
+	// Join request is considered stale / delayed if the (received hlc timestamp
+	// - send hlc timestamp) > this value;
+	return (2 * as_hb_tx_interval_get() + network_latency_max());
+}
 
 /**
  * Timeout in milliseconds for a paxos proposal. Give a paxos round two thirds
@@ -1183,12 +1216,11 @@ paxos_msg_timeout()
  * Maximum amount of time a node will be in orphan state. After this timeout the
  * node will try forming a new cluster even if there are other adjacent
  * clusters/nodes visible.
- * TODO: Fix a value for this.
  */
 static uint32_t
 clustering_orphan_timeout()
 {
-	return 10 * quantum_interval();
+	return UINT_MAX;
 }
 
 /*
@@ -1256,197 +1288,49 @@ if (((size) > STACK_ALLOC_LIMIT()) && buffer) {cf_free(buffer);}
 #else
 #define TRACE(format, ...)
 #endif
+
+#ifdef TRACE_ENABLED
+#define TRACE_LOG(context, format, ...) cf_detail(context, format, ##__VA_ARGS__)
+#else
+#define TRACE_LOG(context, format, ...)
+#endif
+
 #define CF_TRACE CF_FAULT_SEVERITY_UNDEF
 
-#define LOG(severity, format, ...)			\
-({											\
-	switch (severity) {						\
-	case CF_CRITICAL:						\
-		CRASH(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_WARNING:						\
-		WARNING(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_INFO:							\
-		INFO(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_DEBUG:							\
-		DEBUG(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_DETAIL:							\
-		DETAIL(format, ##__VA_ARGS__);		\
-		break;								\
-	case CF_TRACE:							\
-		TRACE(format, ##__VA_ARGS__);		\
-		break;								\
-	default:								\
-		break;								\
-	}										\
+#define LOG(severity, context, format, ...)				\
+({														\
+	switch (severity) {									\
+	case CF_CRITICAL:									\
+		cf_crash(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_WARNING:									\
+		cf_warning(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_INFO:										\
+		cf_info(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_DEBUG:										\
+		cf_debug(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_DETAIL:										\
+		cf_detail(context, format, ##__VA_ARGS__);		\
+		break;											\
+	case CF_TRACE:										\
+		TRACE_LOG(context, format, ##__VA_ARGS__);		\
+		break;											\
+	default:											\
+		break;											\
+	}													\
 })
 
 #define ASSERT(expression, message, ...)				\
 if (!(expression)) {WARNING(message, ##__VA_ARGS__);}
 
-/**
- * Log a vector of nodeids at input severity with a max of LOG_LENGTH_MAX()
- * characters per log record. The call might not work for if the vector  is not
- * protected against multi-threaded access.
- *
- * @param message the message prefix for each log line. Message and node list
- * will be separated with a space. Can be NULL for no prefix.
- * @param nodes the vector of nodes.
- * @param severity the log severity.
- */
-static void
-log_cf_node_vector(char* message, cf_vector* nodes, cf_fault_severity severity)
-{
-	if (!cf_context_at_severity(AS_CLUSTERING, severity) && severity != CF_TRACE) {
-		return;
-	}
-
-	// Also account the space following the nodeid.
-	int node_str_len = 2 * (sizeof(cf_node)) + 1;
-
-	int message_length = 0;
-	if (message) {
-		// Limit the message length to allow at least one node to fit in the log
-		// line. Accounting for the separator between message and node list.
-		message_length = MIN(strnlen(message, LOG_LENGTH_MAX() - 1),
-				LOG_LENGTH_MAX() - 1
-
-					// For NULL terminator
-					- node_str_len)
-				// For at least on nodeid)
-				+ 1;
-		// For the separator between message and nodeid
-
-		// Truncate the message.
-		char copied_message[message_length + 1];
-		strncpy(copied_message, message, message_length);
-		message = copied_message;
-	}
-
-	// Allow for the NULL terminator.
-	int nodes_per_line = (LOG_LENGTH_MAX() - message_length - 1) / node_str_len;
-	nodes_per_line = MAX(1, nodes_per_line);
-
-	// Have a buffer large enough to accomodate the message and nodes per line.
-	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
-	int node_count = cf_vector_size(nodes);
-	int output_node_count = 0;
-
-	// Marks the start of the nodeid list in the log line buffer.
-	char* node_buffer_start = log_buffer;
-	if (message) {
-		node_buffer_start += sprintf(log_buffer, "%s ", message);
-	}
-
-	for (int i = 0; i < node_count;) {
-		char* buffer = node_buffer_start;
-
-		for (int j = 0; j < nodes_per_line && i < node_count; j++) {
-			cf_node* requesting_nodeid_p = (cf_node*)cf_vector_getp(nodes, i);
-			if (requesting_nodeid_p) {
-				buffer += sprintf(buffer, "%"PRIx64" ",
-						*requesting_nodeid_p);
-				output_node_count++;
-			}
-			i++;
-		}
-
-		// Overwrite the space from the last node on the log line only if there
-		// is atleast one node output
-		if (buffer != node_buffer_start) {
-			*(buffer - 1) = 0;
-			LOG(severity, "%s", log_buffer);
-		}
-	}
-
-	// Handle the empty vector case.
-	if (output_node_count == 0) {
-		sprintf(node_buffer_start, "(empty)");
-		LOG(severity, "%s", log_buffer);
-	}
-}
-
-/**
- * Log a vector of nodeids at input severity with a max of LOG_LENGTH_MAX()
- * characters per log record. The call might not work for if the vector  is not
- * protected against multi-threaded access.
- *
- * @param message the message prefix for each log line. Message and node list
- * will be separated with a space. Can be NULL for no prefix.
- * @param nodes the array of nodes. Can be NULL if node_count is zero.
- * @param node_count the number of nodes.
- * @param severity the log severity.
- */
-static void
-log_cf_node_array(char* message, cf_node* nodes, int node_count,
-		cf_fault_severity severity)
-{
-	if (!cf_context_at_severity(AS_CLUSTERING, severity) && severity != CF_TRACE) {
-		return;
-	}
-
-	// Also account the space following the nodeid.
-	int node_str_len = 2 * (sizeof(cf_node)) + 1;
-
-	int message_length = 0;
-	if (message) {
-		// Limit the message length to allow at least one node to fit in the log
-		// line. Accounting for the separator between message and node list.
-		message_length = MIN(strnlen(message, LOG_LENGTH_MAX() - 1),
-				LOG_LENGTH_MAX() - 1
-
-					// For NULL terminator
-					- node_str_len)
-				// For at least on nodeid)
-				+ 1;
-		// For the separator between message and nodeid
-
-		// Truncate the message.
-		char copied_message[message_length + 1];
-		strncpy(copied_message, message, message_length);
-		message = copied_message;
-	}
-
-	// Allow for the NULL terminator.
-	int nodes_per_line = (LOG_LENGTH_MAX() - message_length - 1) / node_str_len;
-	nodes_per_line = MAX(1, nodes_per_line);
-
-	// Have a buffer large enough to accomodate the message and nodes per line.
-	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
-	int output_node_count = 0;
-
-	// Marks the start of the nodeid list in the log line buffer.
-	char* node_buffer_start = log_buffer;
-	if (message) {
-		node_buffer_start += sprintf(log_buffer, "%s ", message);
-	}
-
-	for (int i = 0; i < node_count;) {
-		char* buffer = node_buffer_start;
-
-		for (int j = 0; j < nodes_per_line && i < node_count; j++) {
-			buffer += sprintf(buffer, "%"PRIx64" ", nodes[i]);
-			output_node_count++;
-			i++;
-		}
-
-		// Overwrite the space from the last node on the log line only if there
-		// is atleast one node output
-		if (buffer != node_buffer_start) {
-			*(buffer - 1) = 0;
-			LOG(severity, "%s", log_buffer);
-		}
-	}
-
-	// Handle the empty vector case.
-	if (output_node_count == 0) {
-		sprintf(node_buffer_start, "(empty)");
-		LOG(severity, "%s", log_buffer);
-	}
-}
+#define log_cf_node_array(message, nodes, node_count, severity)		\
+as_clustering_log_cf_node_array(severity, AS_CLUSTERING, message,	\
+		nodes, node_count)
+#define log_cf_node_vector(message, nodes, severity) as_clustering_log_cf_node_vector(severity, AS_CLUSTERING, message,		\
+		nodes)
 
 /*
  * ----------------------------------------------------------------------------
@@ -1730,6 +1614,16 @@ vector_subtract(cf_vector* target, cf_vector* to_remove)
 }
 
 /**
+ * Convert a vector to an array.
+ * FIXME: return pointer to the internal vector storage.
+ */
+static cf_node*
+vector_to_array(cf_vector* vector)
+{
+	return (cf_node*)vector->vector;
+}
+
+/**
  * Copy elements in a vector to an array.
  * @param array the destination array. Should be large enough to hold the number
  * all elements in the vector.
@@ -1737,7 +1631,7 @@ vector_subtract(cf_vector* target, cf_vector* to_remove)
  * @param element_count the number of elements to copy from the source vector.
  */
 static void
-vector_to_array(void* array, cf_vector* src, int element_count)
+vector_array_cpy(void* array, cf_vector* src, int element_count)
 {
 	uint8_t* element_ptr = array;
 	int element_size = VECTOR_ELEM_SZ(src);
@@ -1917,16 +1811,17 @@ config_self_nodeid_get()
 as_cluster_proto_identifier
 clustering_protocol_identifier_get()
 {
-	// TODO: Handle this.
-	return 0;
+	return 0x707C;
 }
 
+/**
+ * Compare clustering protocol versions for compatibility.
+ */
 bool
 clustering_versions_are_compatible(as_cluster_proto_identifier v1,
 		as_cluster_proto_identifier v2)
 {
-	// TODO: Handle this.
-	return true;
+	return v1 == v2;
 }
 
 /*
@@ -2497,7 +2392,7 @@ clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 
 	if (msg_get_buf(msg, AS_HB_MSG_PAXOS_DATA, (uint8_t**)&payload,
 			&payload_size, MSG_GET_DIRECT) != 0) {
-		WARNING(
+		cf_ticker_warning(AS_CLUSTERING,
 				"received empty clustering payload in heartbeat pulse from node %"PRIx64,
 				source);
 		plugin_data->data_size = 0;
@@ -2506,7 +2401,7 @@ clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 
 	// Validate and retain only valid plugin data.
 	if (!clustering_hb_plugin_data_is_valid(payload, payload_size)) {
-		WARNING(
+		cf_ticker_warning(AS_CLUSTERING,
 				"received invalid clustering payload in heartbeat pulse from node %"PRIx64,
 				source);
 		plugin_data->data_size = 0;
@@ -2686,9 +2581,8 @@ quantum_interval_generator_timer_event_handle(
 		timer_event.type = AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_START;
 		internal_event_dispatch(&timer_event);
 
-		timer_event.type =
-				AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_POST_START;
-		internal_event_dispatch(&timer_event);
+		// Reset for next interval generation.
+		quantum_interval_generator_reset();
 	}
 }
 
@@ -2773,14 +2667,24 @@ quantum_interval_generator_hb_plugin_data_changed_handle(
 					change_event->plugin_data->data_size);
 
 	bool neighboring_cluster_changed = false;
+
 	if (*succession_list_length_p > 0
 			&& !clustering_is_our_principal(succession_list_p[0])) {
 		// We are seeing a new principal.
 		neighboring_cluster_changed = true;
 	}
 	else {
-		// A node becoming an orphan node or seeing a succession with our
-		// principal does not mean we have seen a new cluster.
+		if (clustering_is_principal() && *succession_list_length_p == 0
+				&& vector_find(&g_register.succession_list,
+						&change_event->plugin_data_changed_nodeid) >= 0) {
+			// One of our cluster members switched to orphan state. Most likely
+			// a quick restart.
+			neighboring_cluster_changed = true;
+		}
+		else {
+			// A node becoming an orphan node or seeing a succession with our
+			// principal does not mean we have seen a new cluster.
+		}
 	}
 
 	if (neighboring_cluster_changed) {
@@ -2830,9 +2734,6 @@ quantum_interval_generator_event_dispatch(as_clustering_internal_event* event)
 		break;
 	case AS_CLUSTERING_INTERNAL_EVENT_JOIN_REQUEST_ACCEPTED:
 		quantum_interval_generator_join_request_accepted_handle(event);
-		break;
-	case AS_CLUSTERING_INTERNAL_EVENT_QUANTUM_INTERVAL_POST_START:
-		quantum_interval_generator_reset();
 		break;
 	default:
 		break;
@@ -3823,7 +3724,7 @@ msg_nodes_send(msg* msg, cf_vector* nodes)
 	cf_node* send_list = (cf_node*)BUFFER_ALLOC_OR_DIE(alloc_size,
 			"cannot allocate memory for node list while sending");
 
-	vector_to_array(send_list, nodes, node_count);
+	vector_array_cpy(send_list, nodes, node_count);
 
 	if (as_fabric_send_list(send_list, node_count, msg, AS_FABRIC_CHANNEL_CTRL)
 			!= 0) {
@@ -3854,16 +3755,13 @@ msg_nodes_send(msg* msg, cf_vector* nodes)
 static int
 paxos_proposal_id_compare(as_paxos_proposal_id* id1, as_paxos_proposal_id* id2)
 {
-	as_paxos_sequence_number sequence_diff = id1->sequence_number
-			- id2->sequence_number;
-	if (sequence_diff) {
-		return sequence_diff > 0 ? 1 : -1;
+	if (id1->sequence_number != id2->sequence_number) {
+		return id1->sequence_number > id2->sequence_number ? 1 : -1;
 	}
 
 	// Sequence numbers match, compare nodeids.
-	cf_node node_diff = id1->src_nodeid - id2->src_nodeid;
-	if (node_diff) {
-		return node_diff > 0 ? 1 : -1;
+	if (id1->src_nodeid != id2->src_nodeid) {
+		return id1->src_nodeid > id2->src_nodeid ? 1 : -1;
 	}
 
 	// Node id and sequence numbers match.
@@ -5291,10 +5189,16 @@ external_event_publisher_thr(void* arg)
 {
 	pthread_mutex_lock(&g_external_event_publisher.is_pending_mutex);
 
-	while (external_event_publisher_is_running()) {
+	while (true) {
 		pthread_cond_wait(&g_external_event_publisher.is_pending,
 				&g_external_event_publisher.is_pending_mutex);
-		external_events_publish();
+		if (external_event_publisher_is_running()) {
+			external_events_publish();
+		}
+		else {
+			// Publisher stopped, exit the tread.
+			break;
+		}
 	}
 
 	pthread_mutex_unlock(&g_external_event_publisher.is_pending_mutex);
@@ -5328,9 +5232,14 @@ external_event_publisher_stop()
 	CLUSTERING_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state =
 			AS_CLUSTERING_SYS_STATE_SHUTTING_DOWN;
+	CLUSTERING_EVENT_PUBLISHER_UNLOCK();
+
 	external_event_publisher_thr_wakeup();
 	pthread_join(g_external_event_publisher.event_publisher_tid, NULL);
+
+	CLUSTERING_EVENT_PUBLISHER_LOCK();
 	g_external_event_publisher.sys_state = AS_CLUSTERING_SYS_STATE_STOPPED;
+	g_external_event_publisher.event_queued = false;
 	CLUSTERING_EVENT_PUBLISHER_UNLOCK();
 }
 
@@ -5402,7 +5311,7 @@ register_is_sycn_pending()
 	CLUSTERING_LOCK();
 	bool sync_pending = cf_vector_size(&g_register.sync_pending) > 0;
 	log_cf_node_vector("pending register sync:", &g_register.sync_pending,
-	CF_TRACE);
+			CF_TRACE);
 	CLUSTERING_UNLOCK();
 	return sync_pending;
 }
@@ -5612,6 +5521,8 @@ register_paxos_acceptor_success_handle(
 			paxos_success_event->new_cluster_key);
 	log_cf_node_vector("applied new succession list",
 			&g_register.succession_list, CF_INFO);
+	INFO("applied cluster size %d",
+			cf_vector_size(&g_register.succession_list));
 
 	as_clustering_internal_event cluster_changed;
 	memset(&cluster_changed, 0, sizeof(cluster_changed));
@@ -5770,16 +5681,15 @@ clustering_join_request_send(cf_node new_principal)
 
 	DETAIL("sending cluster join request to node %"PRIx64, new_principal);
 
-	// Send a join request to the best neighboring orphan node.
 	if (msg_node_send(msg, new_principal) == 0) {
 		cf_clock now = cf_getms();
 		shash_put(g_clustering.join_request_blackout, &new_principal, &now);
 
 		g_clustering.last_join_request_principal = new_principal;
-		g_clustering.last_join_request_sent_time = cf_getms();
+		g_clustering.last_join_request_sent_time =
+				g_clustering.last_join_request_retransmit_time = cf_getms();
 
-		DEBUG("sent cluster join request to %"PRIx64, new_principal);
-
+		INFO("sent cluster join request to %"PRIx64, new_principal);
 		rv = 0;
 	}
 
@@ -5792,6 +5702,31 @@ clustering_join_request_send(cf_node new_principal)
 	CLUSTERING_UNLOCK();
 	return rv;
 }
+
+/**
+ * Retransmit a join request to a previously attmepted principal.
+ * @param last_join_request_principal the principal to retransmit to.
+ */
+static void
+clustering_join_request_retransmit(cf_node last_join_request_principal)
+{
+	CLUSTERING_LOCK();
+	cf_node new_principal = g_clustering.last_join_request_principal;
+	g_clustering.last_join_request_retransmit_time = cf_getms();
+	CLUSTERING_UNLOCK();
+
+	if (new_principal != last_join_request_principal) {
+		// The last attempted principal has changed. Don't retransmit.
+		return;
+	}
+
+	msg* msg = msg_pool_get(AS_CLUSTERING_MSG_TYPE_JOIN_REQUEST);
+	DETAIL("re-sending cluster join request to node %"PRIx64, new_principal);
+	if (msg_node_send(msg, new_principal) == 0) {
+		DEBUG("re-sent cluster join request to %"PRIx64, new_principal);
+	}
+}
+
 
 /**
  *  Remove nodes for which join requests are blocked.
@@ -5813,21 +5748,20 @@ clustering_join_request_filter_blocked(cf_vector* requestees, cf_vector* target)
 			// The requestee is not marked for blackout
 			cf_vector_append(target, &requestee);
 		}
-
 	}
 	CLUSTERING_UNLOCK();
 }
 
 /**
- * Send a cluster join request to a neighboring principal. If preferred_principal
- * is set and it is an eligible neighboring principal, a request is sent to that
- * principal, else this function cycles among eligible neighboring principals at
- * each call.
+ * Send a cluster join request to a neighboring principal. If
+ * preferred_principal is set and it is an eligible neighboring principal, a
+ * request is sent to that principal, else this function cycles among eligible
+ * neighboring principals at each call.
  *
  * A request will not be sent if there is no neighboring principal.
  *
- * @param preferred_principal the preferred principal to join. User zero if there
- * is no preference.
+ * @param preferred_principal the preferred principal to join. User zero if
+ * there is no preference.
  * @return 0 if the join request was send or there is one in progress. -1 if
  * there are no principals to try and send the join request.
  */
@@ -5888,9 +5822,8 @@ clustering_principal_join_request_attempt(cf_node preferred_principal)
 	g_clustering.last_join_request_principal = 0;
 
 	cf_node* principal_to_try = cf_vector_getp(eligible_principals,
-			ABS(
-					next_join_request_principal_index
-							% cf_vector_size(eligible_principals)));
+			next_join_request_principal_index
+					% cf_vector_size(eligible_principals));
 
 	if (principal_to_try) {
 		rv = clustering_join_request_send(*principal_to_try) == 0 ?
@@ -5904,6 +5837,12 @@ clustering_principal_join_request_attempt(cf_node preferred_principal)
 	}
 
 Exit:
+	if (rv != AS_CLUSTERING_JOIN_REQUEST_SENT) {
+		// Forget the last principal we sent the join request to.
+		g_clustering.last_join_request_principal = 0;
+		g_clustering.last_join_request_sent_time = 0;
+	}
+
 	CLUSTERING_UNLOCK();
 
 	cf_vector_destroy(neighboring_principals);
@@ -6012,21 +5951,31 @@ clustering_join_request_attempt()
 			g_clustering.last_join_request_principal;
 	cf_clock last_join_request_sent_time =
 			g_clustering.last_join_request_sent_time;
+	cf_clock last_join_request_retransmit_time =
+			g_clustering.last_join_request_retransmit_time;
 	CLUSTERING_UNLOCK();
 
 	// Check if the outgoing join request has timed out.
 	if (last_join_request_principal
 			&& as_hb_is_alive(last_join_request_principal)) {
 		if (last_join_request_sent_time + join_request_timeout() > cf_getms()) {
+			if (last_join_request_retransmit_time
+					+ join_request_retransmit_timeout() < cf_getms()) {
+				// Re-transmit join request to the same principal, to cover the
+				// case where the previous join request was lost.
+				clustering_join_request_retransmit(last_join_request_principal);
+			}
 			// Wait for the principal to respond. do nothing
 			DETAIL(
 					"join request to principal %"PRIx64" pending - not attempting new join request",
-					g_clustering.last_join_request_principal);
+					last_join_request_principal);
+
 			return AS_CLUSTERING_JOIN_REQUEST_PENDING;
 		}
 		// Timeout joining a principal. Choose a different principal.
 		INFO("join request timed out for principal %"PRIx64,
-				g_clustering.last_join_request_principal);
+				last_join_request_principal);
+
 	}
 
 	// Try sending a join request to a neighboring principal.
@@ -6229,15 +6178,19 @@ clustering_orphan_quantum_interval_start_handle()
  *
  * @param candidate_principal the principal to which the other nodes should try
  * and join after receiving the move command.
+ * @param cluster_key current cluster key for receiver validation.
  * @param nodeids the nodes to send move command to.
  */
 static void
-clustering_cluster_move_send(cf_node candidate_principal, cf_vector* nodeids)
+clustering_cluster_move_send(cf_node candidate_principal, as_cluster_key cluster_key, cf_vector* nodeids)
 {
 	msg* msg = msg_pool_get(AS_CLUSTERING_MSG_TYPE_MERGE_MOVE);
 
 	// Set the proposed principal.
 	msg_proposed_principal_set(msg, candidate_principal);
+
+	// Set cluster key for message validation.
+	msg_cluster_key_set(msg, cluster_key);
 
 	log_cf_node_vector("cluster merge move command sent to:", nodeids,
 			CF_DEBUG);
@@ -6469,15 +6422,18 @@ clustering_preferred_principal_move()
 	}
 
 	cf_vector* succession_list = vector_stack_lockless_create(cf_node);
+	as_cluster_key cluster_key = 0;
 	CLUSTERING_LOCK();
 	vector_copy(succession_list, &g_register.succession_list);
+	cluster_key = g_register.cluster_key;
 	// Update the time move command was sent.
 	g_clustering.move_cmd_issue_time = cf_getms();
 	CLUSTERING_UNLOCK();
 
 	INFO("majority nodes find %"PRIx64" to be a better principal - sending move command to all cluster members",
 			preferred_principal);
-	clustering_cluster_move_send(preferred_principal, succession_list);
+	clustering_cluster_move_send(preferred_principal, cluster_key,
+			succession_list);
 	cf_vector_destroy(succession_list);
 
 	return 0;
@@ -6496,6 +6452,7 @@ clustering_merge_attempt()
 	CLUSTERING_LOCK();
 	cf_vector* succession_list = vector_stack_lockless_create(cf_node);
 	vector_copy(succession_list, &g_register.succession_list);
+	as_cluster_key cluster_key = g_register.cluster_key;
 	cf_node candidate_principal = 0;
 
 	// Use a single iteration over the clustering data received via the
@@ -6517,7 +6474,8 @@ clustering_merge_attempt()
 	// and will handle the move accordingly.
 	INFO("this cluster can merge with cluster with principal %"PRIx64" - sending move command to all cluster members",
 			candidate_principal);
-	clustering_cluster_move_send(candidate_principal, succession_list);
+	clustering_cluster_move_send(candidate_principal, cluster_key,
+			succession_list);
 	rv = 0;
 Exit:
 	cf_vector_destroy(succession_list);
@@ -6608,6 +6566,7 @@ clustering_principal_quantum_interval_start_handle()
 
 	log_cf_node_vector("proposed succession list", new_succession_list,
 			CF_DEBUG);
+	DEBUG("proposed cluster size %d", cf_vector_size(new_succession_list));
 
 	as_paxos_start_result result = paxos_proposer_proposal_start(
 			new_succession_list, new_succession_list);
@@ -6865,9 +6824,6 @@ clustering_timer_event_handle()
 static bool
 clustering_message_sanity_check(cf_node src_nodeid, msg* msg)
 {
-	return true;
-
-	// For now ensure that the protocols match
 	as_cluster_proto_identifier proto;
 	if (msg_proto_id_get(msg, &proto) != 0) {
 		WARNING(
@@ -6875,7 +6831,7 @@ clustering_message_sanity_check(cf_node src_nodeid, msg* msg)
 				src_nodeid);
 		return false;
 	}
-	// Check that the message has the hlc timestamp.
+
 	return clustering_versions_are_compatible(proto,
 			clustering_protocol_identifier_get());
 }
@@ -6896,10 +6852,11 @@ clustering_join_request_handle(as_clustering_internal_event* msg_event)
 
 	cf_clock now = cf_getms();
 
-	if(g_clustering.move_cmd_issue_time + join_request_move_reject_interval() > now) {
+	if (g_clustering.move_cmd_issue_time + join_request_move_reject_interval()
+			> now) {
 		// We have just send out a move request. Reject this join request.
 		INFO("ignoring join request from node %"PRIx64" since we have just issued a move command",
-			 src_nodeid);
+				src_nodeid);
 		clustering_join_reject_send(src_nodeid);
 		goto Exit;
 	}
@@ -6933,6 +6890,16 @@ clustering_join_request_handle(as_clustering_internal_event* msg_event)
 	if (vector_find(&g_clustering.pending_join_requests, &src_nodeid) >= 0) {
 		INFO("ignoring join request from node %"PRIx64" since a request is already pending",
 				src_nodeid);
+		goto Exit;
+	}
+
+	// Check if we are receiving a stale or very delayed join request.
+	int64_t message_delay_estimate = as_hlc_timestamp_diff_ms(
+			as_hlc_timestamp_now(), msg_event->msg_hlc_ts.send_ts);
+	if (message_delay_estimate < 0
+			|| message_delay_estimate > join_request_accept_delay_max()) {
+		INFO("ignoring stale join request from node %"PRIx64" - delay estimate %lu(ms) ",
+				src_nodeid, message_delay_estimate);
 		goto Exit;
 	}
 
@@ -6994,6 +6961,7 @@ clustering_join_reject_handle(as_clustering_internal_event* event)
 		// This join request should not be considered as pending, so reset the
 		// join request sent time.
 		g_clustering.last_join_request_sent_time = 0;
+		g_clustering.last_join_request_principal = 0;
 		clustering_join_request_attempt();
 	}
 
@@ -7014,18 +6982,23 @@ clustering_merge_move_handle(as_clustering_internal_event* event)
 
 	CLUSTERING_LOCK();
 
-	if (msg_is_obsolete(g_register.cluster_modified_hlc_ts,
-			g_register.cluster_modified_time, event->msg_recvd_ts,
-			&event->msg_hlc_ts) || !clustering_is_our_principal(src_nodeid)
-			|| paxos_proposer_proposal_is_active()) {
-		INFO("ignoring cluster merge move from node %"PRIx64, src_nodeid);
-	}
+	as_cluster_key msg_cluster_key = 0;
+	msg_cluster_key_get(event->msg, &msg_cluster_key);
 
 	if (clustering_is_orphan()) {
 		// Already part of a cluster. Ignore the reject.
 		INFO(
 				"already orphan node - ignoring merge move command from node %"PRIx64,
 				src_nodeid);
+		goto Exit;
+	}
+
+	if (msg_is_obsolete(g_register.cluster_modified_hlc_ts,
+			g_register.cluster_modified_time, event->msg_recvd_ts,
+			&event->msg_hlc_ts) || !clustering_is_our_principal(src_nodeid)
+			|| paxos_proposer_proposal_is_active()
+			|| msg_cluster_key != g_register.cluster_key) {
+		INFO("ignoring cluster merge move from node %"PRIx64, src_nodeid);
 		goto Exit;
 	}
 
@@ -7263,6 +7236,7 @@ clustering_event_handle(as_clustering_internal_event* event)
 		break;
 	case AS_CLUSTERING_INTERNAL_EVENT_REGISTER_CLUSTER_SYNCED:
 		clustering_register_cluster_synced_handle();
+		break;
 	case AS_CLUSTERING_INTERNAL_EVENT_PAXOS_PROPOSER_FAIL:	// Send reject message to all
 		clustering_paxos_proposer_fail_handle();
 		break;
@@ -7695,7 +7669,9 @@ as_clustering_cluster_size_min_set(uint32_t new_cluster_size_min)
 	int rv = 0;
 	uint32_t cluster_size = cf_vector_size(&g_register.succession_list);
 	if (clustering_is_orphan() || cluster_size >= new_cluster_size_min) {
-		INFO("changing value of min-cluster-size from %u to %u", g_config.clustering_config.cluster_size_min, new_cluster_size_min);
+		INFO("changing value of min-cluster-size from %u to %u",
+				g_config.clustering_config.cluster_size_min,
+				new_cluster_size_min);
 		g_config.clustering_config.cluster_size_min = new_cluster_size_min;
 	}
 	else {
@@ -7706,4 +7682,99 @@ as_clustering_cluster_size_min_set(uint32_t new_cluster_size_min)
 	}
 	CLUSTERING_UNLOCK();
 	return rv;
+}
+
+/**
+ * Log a vector of node-ids at input severity spliting long vectors over
+ * multiple lines. The call might not work if the vector is not protected
+ * against multi-threaded access.
+ *
+ * @param context the logging context.
+ * @param severity the log severity.
+ * @param message the message prefix for each log line. Message and node list
+ * will be separated with a space. Can be NULL for no prefix.
+ * @param nodes the vector of nodes.
+ */
+void
+as_clustering_log_cf_node_vector(cf_fault_severity severity,
+		cf_fault_context context, char* message, cf_vector* nodes)
+{
+	as_clustering_log_cf_node_array(severity, context, message,
+			vector_to_array(nodes), cf_vector_size(nodes));
+}
+
+/**
+ * Log an array of node-ids at input severity spliting long vectors over
+ * multiple lines. The call might not work if the array is not protected against
+ * multi-threaded access.
+ *
+ * @param context the logging context.
+ * @param severity the log severity.
+ * @param message the message prefix for each log line. Message and node list
+ * will be separated with a space. Can be NULL for no prefix.
+ * @param nodes the array of nodes.
+ * @param node_count the count of nodes in the array.
+ */
+void
+as_clustering_log_cf_node_array(cf_fault_severity severity,
+		cf_fault_context context, char* message, cf_node* nodes, int node_count)
+{
+	if (!cf_context_at_severity(context, severity) && severity != CF_TRACE) {
+		return;
+	}
+
+	// Also account the space following the nodeid.
+	int node_str_len = 2 * (sizeof(cf_node)) + 1;
+
+	int message_length = 0;
+	char copied_message[LOG_LENGTH_MAX()];
+
+	if (message) {
+		// Limit the message length to allow at least one node to fit in the log
+		// line. Accounting for the separator between message and node list.
+		message_length = MIN(strnlen(message, LOG_LENGTH_MAX() - 1),
+				LOG_LENGTH_MAX() - 1
+				- node_str_len) + 1;
+
+		// Truncate the message.
+		strncpy(copied_message, message, message_length);
+		message = copied_message;
+	}
+
+	// Allow for the NULL terminator.
+	int nodes_per_line = (LOG_LENGTH_MAX() - message_length - 1) / node_str_len;
+	nodes_per_line = MAX(1, nodes_per_line);
+
+	// Have a buffer large enough to accomodate the message and nodes per line.
+	char log_buffer[message_length + (nodes_per_line * node_str_len) + 1];	// For the NULL terminator.
+	int output_node_count = 0;
+
+	// Marks the start of the nodeid list in the log line buffer.
+	char* node_buffer_start = log_buffer;
+	if (message) {
+		node_buffer_start += sprintf(log_buffer, "%s ", message);
+	}
+
+	for (int i = 0; i < node_count;) {
+		char* buffer = node_buffer_start;
+
+		for (int j = 0; j < nodes_per_line && i < node_count; j++) {
+			buffer += sprintf(buffer, "%"PRIx64" ", nodes[i]);
+			output_node_count++;
+			i++;
+		}
+
+		// Overwrite the space from the last node on the log line only if there
+		// is atleast one node output
+		if (buffer != node_buffer_start) {
+			*(buffer - 1) = 0;
+			LOG(severity, context, "%s", log_buffer);
+		}
+	}
+
+	// Handle the empty vector case.
+	if (output_node_count == 0) {
+		sprintf(node_buffer_start, "(empty)");
+		LOG(severity, context, "%s", log_buffer);
+	}
 }

@@ -3680,11 +3680,8 @@ as_paxos_deregister_change_callback(as_exchange_cluster_changed_cb cb, void *uda
 void*
 as_paxos_sup_thr(void* arg)
 {
-	// Run at twice the retransmit rate and update cluster integrity along
-	// the way. This ensure after a fix the integrity flag will not wait for
-	// a full next cycle.
-	cf_clock next_retransmit_ts = 0;
-	while (! as_new_clustering()) {
+	cf_clock last_retransmit_ts = cf_getms();
+	while (!as_new_clustering()) {
 
 		as_paxos* p = g_paxos;
 		size_t cluster_size = 0;
@@ -3696,20 +3693,21 @@ as_paxos_sup_thr(void* arg)
 			}
 		}
 
-		// For larger clusters allow more time for partition rebalance
-		// to finish.
-		uint32_t retransmit_period_s =
-		  MIN(2, MAX((int)(cluster_size * 0.5),
-				  g_config.paxos_retransmit_period));
-
 		usleep(1000 * 100);
 
+		// For larger clusters allow more time for partition rebalance to
+		// finish.
+		uint32_t retransmit_period_ms =
+				MAX(as_hb_node_timeout_get() / 1000,
+						MAX((int)(cluster_size * 0.5), g_config.paxos_retransmit_period))
+						* 1000;
+
 		cf_clock now = cf_getms();
-		if (now >= next_retransmit_ts) {
-			// drop a retransmit check paxos message into the paxos
-			// message queue.
+		if (last_retransmit_ts + retransmit_period_ms < now) {
+			// Drop a retransmit check paxos message into the paxos message
+			// queue.
 			as_paxos_retransmit_check();
-			next_retransmit_ts = now + retransmit_period_s * 1000;
+			last_retransmit_ts = now;
 		}
 	}
 
