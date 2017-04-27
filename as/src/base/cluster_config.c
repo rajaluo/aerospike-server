@@ -25,6 +25,8 @@
  *
  */
 
+// XXX JUMP - remove this file and cluster_config.h in "six months".
+
 #include "base/cfg.h"
 #include "base/cluster_config.h"
 #include "fabric/exchange.h"
@@ -288,7 +290,7 @@ cc_add_fullnode_group_entry(cluster_config_t *cc, const cf_node fullnode) {
 	// entry, point that out, but ALSO
 	if (cc->membership[node_ndx]  > 0
 			&& cc->membership[node_ndx] != group_ndx) {
-		cf_debug(AS_PARTITION, "adding full node:%d %"PRIx64" member:%d",
+		cf_debug(AS_PARTITION, "adding full node:%d %lx member:%d",
 				node_ndx, fullnode, cc->membership[node_ndx]);
 		rc = -1;
 	}
@@ -431,7 +433,6 @@ cc_get_cluster_state(const cluster_config_t *cc)
 	return result;
 } // end cc_get_cluster_state()
 
-// XXX JUMP - remove in "six months".
 /**
  * Log the status of the Rack Aware feature.
  * If verbose, when enabled, decode the fields of each node in the Paxos succession list.
@@ -455,7 +456,7 @@ cc_cluster_config_dump(const bool verbose)
 				cf_node node = succession[i];
 
 				self = (node == g_config.self_node);
-				cf_info(AS_PARTITION, "succession list[%d] - node:%"PRIx64" port:%u group_id:%u node_id:%u %s",
+				cf_info(AS_PARTITION, "succession list[%d] - node:%lx port:%u group_id:%u node_id:%u %s",
 						i, node, cc_compute_port(node),
 						cc_compute_group_id(node),
 						cc_compute_node_id(node),

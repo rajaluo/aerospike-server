@@ -44,6 +44,13 @@ struct as_namespace_s;
 
 
 //==========================================================
+// Typedefs & constants.
+//
+
+#define MAX_RACK_ID 1000000
+
+
+//==========================================================
 // Public API - regulate migrations.
 //
 

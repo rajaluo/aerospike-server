@@ -1857,6 +1857,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 	info_append_uint32(db, "obj-size-hist-max", ns->obj_size_hist_max); // not original, may have been rounded
 	info_append_uint32(db, "partition-tree-locks", ns->tree_shared.n_lock_pairs);
 	info_append_uint32(db, "partition-tree-sprigs", ns->tree_shared.n_sprigs);
+	info_append_uint32(db, "rack-id", ns->rack_id);
 	info_append_string(db, "read-consistency-level-override", NS_READ_CONSISTENCY_LEVEL_NAME());
 	info_append_bool(db, "single-bin", ns->single_bin);
 	info_append_uint32(db, "stop-writes-pct", ns->stop_writes_pct);
@@ -1919,6 +1920,7 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 }
 
 
+// XXX JUMP - remove in "six months".
 void
 info_cluster_config_get(cf_dyn_buf *db)
 {
@@ -2896,6 +2898,17 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of obj-size-hist-max of ns %s to %u", ns->name, round_max);
 			cf_atomic32_set(&ns->obj_size_hist_max, round_max); // in 128-byte blocks
+		}
+		else if (0 == as_info_parameter_get(params, "rack-id", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val)) {
+				goto Error;
+			}
+			if ((uint32_t)val > MAX_RACK_ID) {
+				cf_warning(AS_INFO, "rack-id %d must be >= 0 and <= %u", val, MAX_RACK_ID);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of rack-id of ns %s from %u to %d", ns->name, ns->rack_id, val);
+			ns->rack_id = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "conflict-resolution-policy", context, &context_len)) {
 			if (strncmp(context, "generation", 10) == 0) {

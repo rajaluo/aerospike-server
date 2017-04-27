@@ -880,6 +880,7 @@ struct as_namespace_s {
 	uint32_t		migrate_retransmit_ms;
 	uint32_t		migrate_sleep;
 	cf_atomic32		obj_size_hist_max; // TODO - doesn't need to be atomic, really.
+	uint32_t		rack_id;
 	as_policy_consistency_level read_consistency_level;
 	PAD_BOOL		read_consistency_level_override;
 	PAD_BOOL		single_bin; // restrict the namespace to objects with exactly one bin
@@ -1203,6 +1204,7 @@ struct as_namespace_s {
 	cf_node succession[AS_CLUSTER_SZ];
 	as_partition_vinfo cluster_vinfo[AS_CLUSTER_SZ][AS_PARTITIONS]; // XXX JUMP - remove in "six months"
 	as_partition_version cluster_versions[AS_CLUSTER_SZ][AS_PARTITIONS];
+	uint32_t rack_ids[AS_CLUSTER_SZ];
 };
 
 #define AS_SET_NAME_MAX_SIZE	64		// includes space for null-terminator

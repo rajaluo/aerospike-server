@@ -148,13 +148,8 @@ typedef struct as_exchange_vinfo_payload_s
 /**
  * Information exchanged for a single namespace.
  */
-typedef struct as_exchange_namespace_payload_s
+typedef struct as_exchange_ns_vinfos_payload_s
 {
-	/**
-	 * Name of the namespace.
-	 */
-	char name[AS_ID_NAMESPACE_SZ];
-
 	/**
 	 * Count of version infos.
 	 */
@@ -164,43 +159,44 @@ typedef struct as_exchange_namespace_payload_s
 	 * Parition version information for each unique version.
 	 */
 	as_exchange_vinfo_payload vinfos[];
-}__attribute__((__packed__)) as_exchange_namespace_payload;
+}__attribute__((__packed__)) as_exchange_ns_vinfos_payload;
 
 /**
- * Information exchanged for all namespaces.
+ * Received data stored per node, per namespace, before actual commit.
  */
-typedef struct as_exchange_namespaces_payload_s
+typedef struct as_exchange_node_namespace_data_s
 {
 	/**
-	 * The number of namespaces.
+	 * Mapped local namespace.
 	 */
-	uint32_t num_namespaces;
+	as_namespace* local_namespace;
 
 	/**
-	 * Per namespace payload array.
+	 * Partition versions for this namespace. This field is reused across
+	 * exchange rounds and may not be null even if the local namespace is null.
 	 */
-	as_exchange_namespace_payload namespace_payloads[];
-}__attribute__((__packed__)) as_exchange_namespaces_payload;
+	as_exchange_ns_vinfos_payload* partition_versions;
+
+	/**
+	 * Sending node's rack id for this namespace.
+	 */
+	uint32_t rack_id;
+} as_exchange_node_namespace_data;
 
 /**
- * Heap allocated incarnation of exchanged data for a single node.
+ * Exchanged data for a single node.
  */
 typedef struct as_exchange_node_data_s
 {
 	/**
-	 * Exchanged data pointer.
+	 * Number of sender's namespaces that have a matching local namespace.
 	 */
-	as_exchange_namespaces_payload *data;
+	uint32_t num_namespaces;
 
 	/**
-	 * Size of exchanged data.
+	 * Data for sender's namespaces having a matching local namespace.
 	 */
-	size_t data_size;
-
-	/**
-	 * Allocated capacity for the exchanged data.
-	 */
-	size_t data_capacity;
+	as_exchange_node_namespace_data namespace_data[AS_NAMESPACE_SZ];
 } as_exchange_node_data;
 
 /*
@@ -353,10 +349,11 @@ typedef struct as_exchange_node_state_s
 	bool is_ready_to_commit;
 
 	/**
-	 * Exchange data received from this peer node. Will be heap allocated and
-	 * hence should be freed carefully while discarding this structure instance.
+	 * Exchange data received from this peer node. Member variables may be heap
+	 * allocated and hence should be freed carefully while discarding this
+	 * structure instance.
 	 */
-	as_exchange_node_data data;
+	as_exchange_node_data* data;
 } as_exchange_node_state;
 
 /**
@@ -454,7 +451,7 @@ typedef struct as_exchange_s
 	/**
 	 * This node's data payload for current round.
 	 */
-	cf_dyn_buf self_data_dyn_buf;
+	cf_dyn_buf self_data_dyn_buf[AS_NAMESPACE_SZ];
 } as_exchange;
 
 /**
@@ -545,17 +542,27 @@ typedef enum
 	AS_EXCHANGE_MSG_ID,
 	AS_EXCHANGE_MSG_TYPE,
 	AS_EXCHANGE_MSG_CLUSTER_KEY,
-	AS_EXCHANGE_MSG_NAMESPACES_PAYLOAD
+	AS_EXCHANGE_MSG_NAMESPACES,
+	AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS,
+	AS_EXCHANGE_MSG_NS_RACK_IDS,
+
+	NUM_EXCHANGE_MSG_FIELDS
 } as_exchange_msg_fields;
 
 /**
  * Exchange message template.
  */
-static msg_template g_exchange_msg_template[] = { {
-	AS_EXCHANGE_MSG_ID,
-	M_FT_UINT32 }, { AS_EXCHANGE_MSG_TYPE, M_FT_UINT32 }, {
-	AS_EXCHANGE_MSG_CLUSTER_KEY,
-	M_FT_UINT64 }, { AS_EXCHANGE_MSG_NAMESPACES_PAYLOAD, M_FT_BUF } };
+static const msg_template exchange_msg_template[] = {
+		{ AS_EXCHANGE_MSG_ID, M_FT_UINT32 },
+		{ AS_EXCHANGE_MSG_TYPE, M_FT_UINT32 },
+		{ AS_EXCHANGE_MSG_CLUSTER_KEY, M_FT_UINT64 },
+		{ AS_EXCHANGE_MSG_NAMESPACES, M_FT_MSGPACK },
+		{ AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, M_FT_MSGPACK },
+		{ AS_EXCHANGE_MSG_NS_RACK_IDS, M_FT_MSGPACK }
+};
+
+COMPILER_ASSERT(sizeof(exchange_msg_template) / sizeof(msg_template) ==
+		NUM_EXCHANGE_MSG_FIELDS);
 
 /**
  * Global lock to serialize all reads and writes to the exchange state.
@@ -630,10 +637,10 @@ static pthread_mutex_t g_external_event_publisher_lock =
 })
 
 /**
- * Size of the self payload dynamic buffer.
+ * Size of the (per-namespace) self payload dynamic buffer.
  */
-#define AS_EXCHANGE_SELF_DYN_BUF_SIZE() (AS_NAMESPACE_SZ * AS_EXCHANGE_UNIQUE_VINFO_MAX_SIZE_SOFT	\
-		* ((AS_EXCHANGE_VINFO_NUM_PIDS_AVG * sizeof(uint16_t))										\
+#define AS_EXCHANGE_SELF_DYN_BUF_SIZE() (AS_EXCHANGE_UNIQUE_VINFO_MAX_SIZE_SOFT		\
+		* ((AS_EXCHANGE_VINFO_NUM_PIDS_AVG * sizeof(uint16_t))						\
 				+ sizeof(as_partition_version)))
 
 /**
@@ -1005,8 +1012,7 @@ exchange_external_events_publish()
 	if (g_external_event_publisher.event_queued) {
 		g_external_event_publisher.event_queued = false;
 		for (uint32_t i = 0;
-				i < g_external_event_publisher.event_listener_count;
-				i++) {
+				i < g_external_event_publisher.event_listener_count; i++) {
 			(g_external_event_publisher.event_listeners[i].event_callback)(
 					&g_external_event_publisher.to_publish,
 					g_external_event_publisher.event_listeners[i].udata);
@@ -1089,6 +1095,9 @@ static void
 exchange_node_state_init(as_exchange_node_state* node_state)
 {
 	memset(node_state, 0, sizeof(*node_state));
+
+	node_state->data = cf_calloc(1, sizeof(as_exchange_node_data));
+	// FIXME - assert on failure?
 }
 
 /**
@@ -1100,7 +1109,11 @@ exchange_node_state_reset(as_exchange_node_state* node_state)
 	node_state->send_acked = false;
 	node_state->received = false;
 	node_state->is_ready_to_commit = false;
-	node_state->data.data_size = 0;
+
+	node_state->data->num_namespaces = 0;
+	for (int i = 0; i < AS_NAMESPACE_SZ; i++) {
+		node_state->data->namespace_data[i].local_namespace = NULL;
+	}
 }
 
 /**
@@ -1109,13 +1122,13 @@ exchange_node_state_reset(as_exchange_node_state* node_state)
 static void
 exchange_node_state_destroy(as_exchange_node_state* node_state)
 {
-	if (node_state->data.data) {
-		cf_free(node_state->data.data);
+	for (int i = 0; i < AS_NAMESPACE_SZ; i++) {
+		if (node_state->data->namespace_data[i].partition_versions) {
+			cf_free(node_state->data->namespace_data[i].partition_versions);
+		}
 	}
 
-	node_state->data.data = NULL;
-	node_state->data.data_size = 0;
-	node_state->data.data_capacity = 0;
+	cf_free(node_state->data);
 }
 
 /**
@@ -1295,8 +1308,7 @@ static void
 exchange_msg_src_fill(msg* msg, as_exchange_msg_type type)
 {
 	EXCHANGE_LOCK();
-	msg_set_uint32(msg, AS_EXCHANGE_MSG_ID,
-	AS_EXCHANGE_PROTOCOL_IDENTIFIER);
+	msg_set_uint32(msg, AS_EXCHANGE_MSG_ID, AS_EXCHANGE_PROTOCOL_IDENTIFIER);
 	msg_set_uint64(msg, AS_EXCHANGE_MSG_CLUSTER_KEY, g_exchange.cluster_key);
 	msg_set_uint32(msg, AS_EXCHANGE_MSG_TYPE, type);
 	EXCHANGE_UNLOCK();
@@ -1360,30 +1372,40 @@ exchange_msg_cluster_key_get(msg* msg, as_cluster_key* cluster_key)
 }
 
 /**
- * Get data payload for a message.
- */
-static int
-exchange_msg_data_payload_get(msg* msg, uint8_t** data_payload,
-		size_t* namespaces_payload_size)
-{
-	if (msg_get_buf(msg, AS_EXCHANGE_MSG_NAMESPACES_PAYLOAD, data_payload,
-			namespaces_payload_size, MSG_GET_DIRECT) != 0) {
-		return -1;
-	}
-	return 0;
-}
-
-/**
  * Set data payload for a message.
  */
 static void
-exchange_msg_data_payload_set(msg* msg, uint8_t* data_payload,
-		size_t data_payload_size)
+exchange_msg_data_payload_set(msg* msg)
 {
-	if (msg_set_buf(msg, AS_EXCHANGE_MSG_NAMESPACES_PAYLOAD,
-			(uint8_t*)data_payload, data_payload_size, MSG_SET_COPY) != 0) {
-		CRASH("error setting exchange data payload");
+	uint32_t ns_count = g_config.n_namespaces;
+
+	cf_vector_define(namespace_list, sizeof(msg_buf_ele), ns_count, 0);
+	cf_vector_define(partition_versions, sizeof(msg_buf_ele), ns_count, 0);
+	uint32_t rack_ids[ns_count];
+
+	for (uint32_t ns_ix = 0; ns_ix < ns_count; ns_ix++) {
+		as_namespace* ns = g_config.namespaces[ns_ix];
+
+		msg_buf_ele ns_ele = {
+			.sz = (uint32_t)strlen(ns->name),
+			.ptr = (uint8_t*)ns->name
+		};
+
+		msg_buf_ele pv_ele = {
+			.sz = (uint32_t)g_exchange.self_data_dyn_buf[ns_ix].used_sz,
+			.ptr = g_exchange.self_data_dyn_buf[ns_ix].buf
+		};
+
+		cf_vector_append(&namespace_list, &ns_ele);
+		cf_vector_append(&partition_versions, &pv_ele);
+		rack_ids[ns_ix] = ns->rack_id;
 	}
+
+	msg_msgpack_list_set_buf(msg, AS_EXCHANGE_MSG_NAMESPACES, &namespace_list);
+	msg_msgpack_list_set_buf(msg, AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS,
+			&partition_versions);
+	msg_msgpack_list_set_uint32(msg, AS_EXCHANGE_MSG_NS_RACK_IDS, rack_ids,
+			ns_count);
 }
 
 /**
@@ -1543,8 +1565,7 @@ exchange_data_msg_send_pending_ack()
 	}
 
 	msg* data_msg = exchange_msg_get(AS_EXCHANGE_MSG_TYPE_DATA);
-	exchange_msg_data_payload_set(data_msg, g_exchange.self_data_dyn_buf.buf,
-			g_exchange.self_data_dyn_buf.used_sz);
+	exchange_msg_data_payload_set(data_msg);
 
 	as_clustering_log_cf_node_array(CF_DEBUG, AS_EXCHANGE,
 			"sending exchange data to nodes:", unacked_nodes,
@@ -1671,9 +1692,6 @@ exchange_data_namespace_payload_add(as_namespace* ns, cf_dyn_buf* dyn_buf)
 	DEBUG("namespace %s has %d unique vinfos", ns->name,
 			shash_get_size(ns_hash));
 
-	// Append the name with a null terminator.
-	cf_dyn_buf_append_buf(dyn_buf, (uint8_t*)ns->name, sizeof(ns->name));
-
 	// Append the vinfo count.
 	uint32_t num_vinfos = shash_get_size(ns_hash);
 	cf_dyn_buf_append_buf(dyn_buf, (uint8_t*)&num_vinfos, sizeof(num_vinfos));
@@ -1699,21 +1717,55 @@ exchange_data_payloads_prepare()
 	as_partition_balance_disallow_migrations();
 	as_partition_balance_synchronize_migrations();
 
-	// Reset the data size for the dyn buffer.
-	g_exchange.self_data_dyn_buf.used_sz = 0;
-
-	// Append the number of namespaces (in host order).
-	uint32_t num_namespaces = g_config.n_namespaces;
-	cf_dyn_buf_append_buf(&g_exchange.self_data_dyn_buf,
-			(uint8_t*)&num_namespaces, sizeof(num_namespaces));
-
-	for (int i = 0; i < g_config.n_namespaces; i++) {
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
 		// Append payload for each namespace.
-		as_namespace* ns = g_config.namespaces[i];
-		exchange_data_namespace_payload_add(ns, &g_exchange.self_data_dyn_buf);
+
+		// TODO - add API to reset dynbuf?
+		g_exchange.self_data_dyn_buf[ns_ix].used_sz = 0;
+
+		exchange_data_namespace_payload_add(g_config.namespaces[ns_ix],
+				&g_exchange.self_data_dyn_buf[ns_ix]);
 	}
 
 	EXCHANGE_UNLOCK();
+}
+
+/**
+ * Indicates if the per-namespace fields in an incoming data message are valid.
+ *
+ * @return number of namespaces.
+ */
+static uint32_t
+exchange_data_msg_get_num_namespaces(as_exchange_event* msg_event)
+{
+	uint32_t num_namespaces_sent = 0;
+	uint32_t num_namespace_elements_sent = 0;
+
+	if (!msg_msgpack_container_get_count(msg_event->msg,
+			AS_EXCHANGE_MSG_NAMESPACES, &num_namespaces_sent)
+			|| num_namespaces_sent > AS_NAMESPACE_SZ) {
+		WARNING("received invalid namespaces from node %"PRIx64,
+				msg_event->msg_source);
+		return 0;
+	}
+
+	if (!msg_msgpack_container_get_count(msg_event->msg,
+			AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, &num_namespace_elements_sent)
+			|| num_namespaces_sent != num_namespace_elements_sent) {
+		WARNING("received invalid partition versions from node %"PRIx64,
+				msg_event->msg_source);
+		return 0;
+	}
+
+	if (!msg_msgpack_container_get_count(msg_event->msg,
+			AS_EXCHANGE_MSG_NS_RACK_IDS, &num_namespace_elements_sent)
+			|| num_namespaces_sent != num_namespace_elements_sent) {
+		WARNING("received invalid cluster groups from node %"PRIx64,
+				msg_event->msg_source);
+		return 0;
+	}
+
+	return num_namespaces_sent;
 }
 
 /**
@@ -1724,28 +1776,17 @@ exchange_data_payloads_prepare()
  * 	3. Namespaces payload does not exceed payload_end_ptr.
  *
  * @param ns_payload pointer to start of the namespace payload.
- * @param payload_end_ptr end pointer (inclusive) beyond which this namespace
- * data should not span.
- * @param ns_payload_size (output) the size of the input namespace payload. Will
- * be set only if this namespace payload is valid.
+ * @param ns_payload_size the size of the input namespace payload.
  * @return true if this is a valid payload.
  */
 static bool
-exchange_namespace_payload_is_valid(as_exchange_namespace_payload* ns_payload,
-		uint8_t* payload_end_ptr, size_t* ns_payload_size)
+exchange_namespace_payload_is_valid(as_exchange_ns_vinfos_payload* ns_payload,
+		uint32_t ns_payload_size)
 {
-	if ((uint8_t*)&ns_payload->name > payload_end_ptr) {
-		return false;
-	}
+	// Pointer past the last byte in the payload.
+	uint8_t* payload_end_ptr = (uint8_t*)ns_payload + ns_payload_size;
 
-	int ns_name_len = strnlen(ns_payload->name, AS_ID_NAMESPACE_SZ);
-
-	if (ns_name_len == AS_ID_NAMESPACE_SZ) {
-		// The namespace length is too long, abort.
-		return false;
-	}
-
-	if ((uint8_t*)&ns_payload->num_vinfos > payload_end_ptr) {
+	if ((uint8_t*)ns_payload->vinfos > payload_end_ptr) {
 		return false;
 	}
 
@@ -1754,15 +1795,16 @@ exchange_namespace_payload_is_valid(as_exchange_namespace_payload* ns_payload,
 	}
 
 	uint8_t* read_ptr = (uint8_t*)ns_payload->vinfos;
-	for (int i = 0; i < ns_payload->num_vinfos; i++) {
-		if (read_ptr > payload_end_ptr) {
+
+	for (uint32_t i = 0; i < ns_payload->num_vinfos; i++) {
+		if (read_ptr >= payload_end_ptr) {
 			return false;
 		}
 
 		as_exchange_vinfo_payload* vinfo_payload =
 				(as_exchange_vinfo_payload*)read_ptr;
 
-		if ((uint8_t*)&vinfo_payload->num_pids > payload_end_ptr) {
+		if ((uint8_t*)vinfo_payload->pids > payload_end_ptr) {
 			return false;
 		}
 
@@ -1770,76 +1812,27 @@ exchange_namespace_payload_is_valid(as_exchange_namespace_payload* ns_payload,
 			return false;
 		}
 
-		for (int j = 0; j < vinfo_payload->num_pids; j++) {
-			uint16_t* pid = &vinfo_payload->pids[j];
-			if ((uint8_t*)pid > payload_end_ptr
-					|| (uint8_t*)pid + sizeof(*pid) - 1 > payload_end_ptr) {
-				return false;
-			}
+		size_t pids_size = vinfo_payload->num_pids * sizeof(uint16_t);
 
-			if (*pid >= AS_PARTITIONS) {
-				return false;
-			}
-		}
-
-		read_ptr += sizeof(as_exchange_vinfo_payload)
-				+ vinfo_payload->num_pids * sizeof(uint16_t);
-	}
-
-	*ns_payload_size = read_ptr - (uint8_t*)ns_payload;
-	return true;
-}
-
-/**
- * Basic validation for incoming data playload.
- * Validates that
- * 	1. The payload fits sizewise an as_exchange_namespaces_payload
- * 	2. The number of namespaces fit the maximum limit.
- * 	3. Basic namespace payload validation.
- */
-static bool
-exchange_data_payload_is_valid(uint8_t* payload, size_t payload_size)
-{
-	uint8_t* payload_end_ptr = payload + payload_size - 1;
-	as_exchange_namespaces_payload* namespaces_payload =
-			(as_exchange_namespaces_payload *)payload;
-
-	if (payload + sizeof(*namespaces_payload) > payload_end_ptr) {
-		if ((uint8_t*)&namespaces_payload->num_namespaces
-				+ sizeof(namespaces_payload->num_namespaces) - 1
-				> payload_end_ptr || namespaces_payload->num_namespaces > 0) {
+		if ((uint8_t*)vinfo_payload->pids + pids_size > payload_end_ptr) {
 			return false;
 		}
-		else {
-			// This is the case where the other node has no namespaces. Allow
-			// for now.
+
+		for (uint32_t j = 0; j < vinfo_payload->num_pids; j++) {
+			if (vinfo_payload->pids[j] >= AS_PARTITIONS) {
+				return false;
+			}
 		}
 
+		read_ptr += sizeof(as_exchange_vinfo_payload) + pids_size;
 	}
 
-	if (namespaces_payload->num_namespaces > AS_NAMESPACE_SZ) {
+	if (read_ptr != payload_end_ptr) {
+		// There are unaccounted for extra bytes in the payload.
 		return false;
 	}
 
-	as_exchange_namespace_payload* namespace_payload =
-			&namespaces_payload->namespace_payloads[0];
-	for (int i = 0; i < namespaces_payload->num_namespaces; i++) {
-		if ((uint8_t*)namespace_payload > payload_end_ptr) {
-			return false;
-		}
-		size_t namespace_payload_size = 0;
-		if (!exchange_namespace_payload_is_valid(namespace_payload,
-				payload_end_ptr, &namespace_payload_size)) {
-			return false;
-		}
-		// Jump to the next namespace.
-		namespace_payload =
-				(as_exchange_namespace_payload*)((uint8_t*)namespace_payload
-						+ namespace_payload_size);
-	}
-
-	// Return true only if we have payload matching exact input size.
-	return (payload_end_ptr - ((uint8_t*)namespace_payload - 1)) == 0;
+	return true;
 }
 
 /*
@@ -2230,36 +2223,91 @@ exchange_exchanging_data_msg_handle(as_exchange_event* msg_event)
 	exchange_node_state_get_safe(msg_event->msg_source, &node_state);
 
 	if (!node_state.received) {
-		uint8_t* data_payload = NULL;
-		size_t data_payload_size = 0;
-		if (exchange_msg_data_payload_get(msg_event->msg, &data_payload,
-				&data_payload_size) != 0
-				|| !exchange_data_payload_is_valid(data_payload,
-						data_payload_size)) {
-			WARNING("received invalid exchange data payload from node %"PRIx64,
+		uint32_t num_namespaces_sent =
+				exchange_data_msg_get_num_namespaces(msg_event);
+
+		if (num_namespaces_sent == 0) {
+			WARNING("ignoring invalid exchange data from node %"PRIx64,
 					msg_event->msg_source);
 			goto Exit;
 		}
 
-		// Copy over the payload to the source node's state.
-		if (node_state.data.data_capacity < data_payload_size) {
-			// Round up to nearest multiple of 1024 bytes.
-			size_t allocate_size = ((data_payload_size + 1023) / 1024) * 1024;
+		cf_vector_define(namespace_list, sizeof(msg_buf_ele), num_namespaces_sent, 0);
+		cf_vector_define(partition_versions, sizeof(msg_buf_ele), num_namespaces_sent, 0);
+		uint32_t rack_ids[num_namespaces_sent];
 
-			// Creating an alias to prevent cf_realloc params from being split.
-			// ASM build fails if cf_realloc arguments are split.
-			void *data_ptr = node_state.data.data;
-			node_state.data.data = cf_realloc(data_ptr, allocate_size);
-			if (!node_state.data.data) {
-				CRASH(
-						"error allocating data payload space %zu for source node %"PRIx64,
-						allocate_size, msg_event->msg_source);
-			}
-			node_state.data.data_capacity = allocate_size;
+		if (!msg_msgpack_list_get_buf_array_presized(msg_event->msg,
+				AS_EXCHANGE_MSG_NAMESPACES, &namespace_list)) {
+			WARNING("received invalid namespaces from node %"PRIx64,
+					msg_event->msg_source);
+			goto Exit;
 		}
 
-		memcpy(node_state.data.data, data_payload, data_payload_size);
-		node_state.data.data_size = data_payload_size;
+		if (!msg_msgpack_list_get_buf_array_presized(msg_event->msg,
+				AS_EXCHANGE_MSG_NS_PARTITION_VERSIONS, &partition_versions)) {
+			WARNING("received invalid partition versions from node %"PRIx64,
+					msg_event->msg_source);
+			goto Exit;
+		}
+
+		uint32_t num_rack_ids = num_namespaces_sent;
+		uint32_t* rack_ids_array = rack_ids;
+		if (!msg_msgpack_list_get_uint32_array(msg_event->msg,
+				AS_EXCHANGE_MSG_NS_RACK_IDS, &rack_ids_array, &num_rack_ids)) {
+			WARNING("received invalid cluster groups from node %"PRIx64,
+					msg_event->msg_source);
+			goto Exit;
+		}
+
+		for (uint32_t i = 0; i < num_namespaces_sent; i++) {
+			msg_buf_ele* namespace_name_element =
+					cf_vector_getp(&namespace_list, i);
+
+			// Find a match for the namespace.
+			as_namespace* matching_namespace = as_namespace_get_bybuf(
+					namespace_name_element->ptr, namespace_name_element->sz);
+
+			if (!matching_namespace) {
+				continue;
+			}
+
+			as_exchange_node_namespace_data* namespace_data =
+					&node_state.data->namespace_data[node_state.data->num_namespaces];
+			node_state.data->num_namespaces++;
+
+			namespace_data->local_namespace = matching_namespace;
+			namespace_data->rack_id = rack_ids[i];
+
+			// Copy partition versions.
+			msg_buf_ele* partition_versions_element = cf_vector_getp(
+					&partition_versions, i);
+
+			if (!exchange_namespace_payload_is_valid(
+					(as_exchange_ns_vinfos_payload*)partition_versions_element->ptr,
+					partition_versions_element->sz)) {
+				WARNING(
+						"received invalid partition versions for namespace %s from node %"PRIx64,
+						matching_namespace->name, msg_event->msg_source);
+				goto Exit;
+			}
+
+			as_exchange_ns_vinfos_payload* new_partition_versions = cf_realloc(
+					namespace_data->partition_versions,
+					partition_versions_element->sz);
+
+			if (!new_partition_versions) {
+				WARNING(
+						"failed malloc partition versions for namespace %s from node %"PRIx64,
+						matching_namespace->name, msg_event->msg_source);
+				goto Exit;
+			}
+
+			namespace_data->partition_versions = new_partition_versions;
+
+			memcpy(namespace_data->partition_versions,
+					partition_versions_element->ptr,
+					partition_versions_element->sz);
+		}
 
 		// Mark exchange data received from the source.
 		node_state.received = true;
@@ -2457,38 +2505,16 @@ exchange_ready_to_commit_rtc_msg_handle(as_exchange_event* msg_event)
  */
 static void
 exchange_namespace_payload_commit_for_node(cf_node node,
-		as_exchange_namespace_payload* ns_payload, size_t* ns_payload_size)
+		as_exchange_node_namespace_data* namespace_data)
 {
-	as_namespace* ns = as_namespace_get_byname(ns_payload->name);
-	if (ns == NULL) {
-		// Self node does not have this namespace. Maybe its a rolling namespace
-		// addition.
-		WARNING(
-				"ignoring unknown namespace %s in partition info from node %"PRIx64,
-				ns_payload->name, node);
+	as_namespace* ns = namespace_data->local_namespace;
 
-		// We should update the namespace payload size either way even if this
-		// namespace is ignored.
-		uint8_t* read_ptr = (uint8_t*)ns_payload->vinfos;
-		for (int i = 0; i < ns_payload->num_vinfos; i++) {
-			as_exchange_vinfo_payload* vinfo_payload =
-					(as_exchange_vinfo_payload*)read_ptr;
+	uint32_t sl_ix = ns->cluster_size++;
 
-			read_ptr += sizeof(as_exchange_vinfo_payload)
-					+ vinfo_payload->num_pids * sizeof(uint16_t);
-		}
+	ns->succession[sl_ix] = node;
 
-		*ns_payload_size = read_ptr - (uint8_t*)ns_payload;
-		return;
-	}
-
-	// Append this node to the namespace succession list.
-	int node_ns_succession_index = ns->cluster_size;
-	ns->succession[node_ns_succession_index] = node;
-
-	// Increment the ns cluster size.
-	ns->cluster_size++;
-
+	as_exchange_ns_vinfos_payload* ns_payload =
+			namespace_data->partition_versions;
 	uint8_t* read_ptr = (uint8_t*)ns_payload->vinfos;
 
 	for (int i = 0; i < ns_payload->num_vinfos; i++) {
@@ -2496,19 +2522,15 @@ exchange_namespace_payload_commit_for_node(cf_node node,
 				(as_exchange_vinfo_payload*)read_ptr;
 
 		for (int j = 0; j < vinfo_payload->num_pids; j++) {
-			// FIXME - just copy struct instead of memcpy()!
-			memcpy(
-					&ns->cluster_versions[node_ns_succession_index][vinfo_payload->pids[j]],
+			memcpy(&ns->cluster_versions[sl_ix][vinfo_payload->pids[j]],
 					&vinfo_payload->vinfo, sizeof(vinfo_payload->vinfo));
-
 		}
 
 		read_ptr += sizeof(as_exchange_vinfo_payload)
 				+ vinfo_payload->num_pids * sizeof(uint16_t);
 	}
 
-	DEBUG("committed data from node %"PRIx64" for namespace %s", node, ns->name);
-	*ns_payload_size = read_ptr - (uint8_t*)ns_payload;
+	ns->rack_ids[sl_ix] = namespace_data->rack_id;
 }
 
 /**
@@ -2521,18 +2543,9 @@ exchange_data_commit_for_node(cf_node node)
 	as_exchange_node_state node_state;
 	exchange_node_state_get_safe(node, &node_state);
 
-	as_exchange_namespaces_payload* namespaces_payload = node_state.data.data;
-	as_exchange_namespace_payload* namespace_payload =
-			&namespaces_payload->namespace_payloads[0];
-
-	for (int i = 0; i < namespaces_payload->num_namespaces; i++) {
-		size_t namespace_payload_size = 0;
-		exchange_namespace_payload_commit_for_node(node, namespace_payload,
-				&namespace_payload_size);
-		// Jump to the next namespace.
-		namespace_payload =
-				(as_exchange_namespace_payload*)((uint8_t*)namespace_payload
-						+ namespace_payload_size);
+	for (uint32_t i = 0; i < node_state.data->num_namespaces; i++) {
+		exchange_namespace_payload_commit_for_node(node,
+				&node_state.data->namespace_data[i]);
 	}
 
 	EXCHANGE_UNLOCK();
@@ -2556,6 +2569,8 @@ exchange_data_commit()
 
 		// Assuming zero to represent "null" partition.
 		memset(ns->cluster_versions, 0, sizeof(ns->cluster_versions));
+
+		memset(ns->rack_ids, 0, sizeof(ns->rack_ids));
 
 		// Reset ns cluster size to zero.
 		ns->cluster_size = 0;
@@ -2814,10 +2829,10 @@ exchange_clustering_event_listener(as_clustering_event* event)
 static void
 exchange_msg_init()
 {
-	// Register fabric exchange msg type with no processing function:
-	as_fabric_register_msg_fn(M_TYPE_EXCHANGE, g_exchange_msg_template,
-			sizeof(g_exchange_msg_template),
-			AS_EXCHANGE_MSG_SCRATCH_SIZE, exchange_fabric_msg_listener, NULL);
+	// Register fabric exchange msg type with no processing function.
+	as_fabric_register_msg_fn(M_TYPE_EXCHANGE, exchange_msg_template,
+			sizeof(exchange_msg_template), AS_EXCHANGE_MSG_SCRATCH_SIZE,
+			exchange_fabric_msg_listener, NULL);
 }
 
 /**
@@ -2851,12 +2866,14 @@ exchange_init()
 	cf_vector_init(&g_exchange.committed_succession_list, sizeof(cf_node),
 	AS_EXCHANGE_CLUSTER_MAX_SIZE_SOFT, VECTOR_FLAG_INITZERO);
 
-	// Initialize fabric message pool.
+	// Initialize exchange fabric messaging.
 	exchange_msg_init();
 
-	// Initialize self exchange data dynamic buffer.
-	cf_dyn_buf_init_heap(&g_exchange.self_data_dyn_buf,
-	AS_EXCHANGE_SELF_DYN_BUF_SIZE());
+	// Initialize self exchange data dynamic buffers.
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		cf_dyn_buf_init_heap(&g_exchange.self_data_dyn_buf[ns_ix],
+			AS_EXCHANGE_SELF_DYN_BUF_SIZE());
+	}
 
 	// Initialize external event publishing.
 	exchange_external_event_publisher_init();

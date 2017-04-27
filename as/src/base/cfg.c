@@ -72,6 +72,7 @@
 #include "base/xdr_serverside.h"
 #include "fabric/fabric.h"
 #include "fabric/migrate.h"
+#include "fabric/partition_balance.h"
 
 
 //==========================================================
@@ -551,6 +552,7 @@ typedef enum {
 	CASE_NAMESPACE_OBJ_SIZE_HIST_MAX,
 	CASE_NAMESPACE_PARTITION_TREE_LOCKS,
 	CASE_NAMESPACE_PARTITION_TREE_SPRIGS,
+	CASE_NAMESPACE_RACK_ID,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
 	CASE_NAMESPACE_SET_BEGIN,
 	CASE_NAMESPACE_SI_BEGIN,
@@ -1048,6 +1050,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "obj-size-hist-max",				CASE_NAMESPACE_OBJ_SIZE_HIST_MAX },
 		{ "partition-tree-locks",			CASE_NAMESPACE_PARTITION_TREE_LOCKS },
 		{ "partition-tree-sprigs",			CASE_NAMESPACE_PARTITION_TREE_SPRIGS },
+		{ "rack-id",						CASE_NAMESPACE_RACK_ID },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
 		{ "si",								CASE_NAMESPACE_SI_BEGIN },
@@ -1998,6 +2001,7 @@ as_config_init(const char* config_file)
 	as_set* p_set = NULL; // local variable used for set initialization
 	as_sindex_config_var si_cfg;
 
+	bool old_rack_aware = false; // XXX JUMP - remove in "six months"
 	cc_group_t cluster_group_id = 0; // hold the group name while we process nodes (0 not a valid ID #)
 	cc_node_t cluster_node_id; // capture the node id in a group
 
@@ -2952,6 +2956,9 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_PARTITION_TREE_SPRIGS:
 				ns->tree_shared.n_sprigs = cfg_u32_power_of_2(&line, 16, 4096);
 				break;
+			case CASE_NAMESPACE_RACK_ID:
+				ns->rack_id = cfg_u32(&line, 0, MAX_RACK_ID);
+				break;
 			case CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE:
 				switch (cfg_find_tok(line.val_tok_1, NAMESPACE_READ_CONSISTENCY_OPTS, NUM_NAMESPACE_READ_CONSISTENCY_OPTS)) {
 				case CASE_NAMESPACE_READ_CONSISTENCY_ALL:
@@ -3304,8 +3311,10 @@ as_config_init(const char* config_file)
 
 		//==================================================
 		// Parse cluster context items.
+		// XXX JUMP - remove in "six months".
 		//
 		case CLUSTER:
+			old_rack_aware = true;
 			switch (cfg_find_tok(line.name_tok, CLUSTER_OPTS, NUM_CLUSTER_OPTS)) {
 			case CASE_CLUSTER_SELF_NODE_ID:
 				c->cluster.cl_self_node = cfg_u32_no_checks(&line);
@@ -3347,6 +3356,7 @@ as_config_init(const char* config_file)
 
 		//----------------------------------------
 		// Parse cluster::group context items.
+		// XXX JUMP - remove in "six months".
 		//
 		case CLUSTER_GROUP:
 			switch (cfg_find_tok(line.name_tok, CLUSTER_GROUP_OPTS, NUM_CLUSTER_GROUP_OPTS)) {
@@ -3601,6 +3611,11 @@ as_config_init(const char* config_file)
 	// failure logs show in the console, doing them in as_config_post_process()
 	// means failure logs show in the log file.
 	//
+
+	if (as_new_clustering() && old_rack_aware) {
+		cf_crash_nostack(AS_CFG, "'cluster' configuration context is obsolete - "
+				"see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/cluster_to_3_13");
+	}
 
 	as_security_config_check();
 
