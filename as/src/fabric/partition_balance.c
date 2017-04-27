@@ -655,6 +655,18 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		return AS_MIGRATE_FAIL;
 	}
 
+	if (! is_self_final_master(p) &&
+			// Become subset of final version if not already such.
+			! (p->version.ckey == p->final_version.ckey &&
+					p->version.family == 0 && p->version.subset == 1)) {
+		p->version.ckey = p->final_version.ckey;
+		p->version.family = 0;
+		p->version.subset = 1;
+		// Leave evade flag as-is.
+
+		set_partition_version_in_storage(ns, p->id, &p->version, true);
+	}
+
 	pthread_mutex_unlock(&p->lock);
 
 	return AS_MIGRATE_OK;
