@@ -1043,7 +1043,7 @@ compare_rack_nodes(const void* pa, const void* pb)
 	uint32_t a = ((const rack_node*)pa)->rack_id;
 	uint32_t b = ((const rack_node*)pb)->rack_id;
 
-	return a > b ? -1 : (a == b ? 0 : 1);
+	return a > b ? 1 : (a == b ? 0 : -1);
 }
 
 void
@@ -1051,6 +1051,11 @@ namespace_rack_info(as_namespace *ns, cf_dyn_buf *db)
 {
 	// Not thread safe - can be wrong, but not a disaster.
 	uint32_t n_nodes = ns->cluster_size;
+
+	if (n_nodes == 0) {
+		return;
+	}
+
 	rack_node rack_nodes[n_nodes];
 
 	for (uint32_t i = 0; i < n_nodes; i++) {
