@@ -90,10 +90,11 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_LDT_PVOID_TIME, M_FT_UINT32 },
 		{ MIG_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 },
 		{ MIG_FIELD_FEATURES, M_FT_UINT32 },
-		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT32 }, // TODO - eventually UINT64
+		{ MIG_FIELD_PARTITION_SIZE_OLD, M_FT_UINT32 }, // XXX JUMP - recycle in "six months"
 		{ MIG_FIELD_META_RECORDS, M_FT_BUF },
 		{ MIG_FIELD_META_SEQUENCE, M_FT_UINT32 },
-		{ MIG_FIELD_META_SEQUENCE_FINAL, M_FT_UINT32 }
+		{ MIG_FIELD_META_SEQUENCE_FINAL, M_FT_UINT32 },
+		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT64 }
 };
 
 COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
@@ -1030,15 +1031,27 @@ emigration_send_start(emigration *emig)
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START);
 	msg_set_uint32(m, MIG_FIELD_FEATURES, MY_MIG_FEATURES);
-	msg_set_uint32(m, MIG_FIELD_PARTITION_SIZE, // TODO - eventually UINT64
-			(uint32_t)as_index_tree_size(emig->rsv.tree));
+
+	if (as_new_clustering()) {
+		msg_set_uint64(m, MIG_FIELD_PARTITION_SIZE,
+				as_index_tree_size(emig->rsv.tree));
+	}
+	else {
+		msg_set_uint32(m, MIG_FIELD_PARTITION_SIZE_OLD,
+				(uint32_t)as_index_tree_size(emig->rsv.tree));
+	}
+
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 	msg_set_uint64(m, MIG_FIELD_CLUSTER_KEY, emig->cluster_key);
 	msg_set_buf(m, MIG_FIELD_NAMESPACE, (const uint8_t *)ns->name,
 			strlen(ns->name), MSG_SET_COPY);
 	msg_set_uint32(m, MIG_FIELD_PARTITION, emig->rsv.p->id);
-	msg_set_uint32(m, MIG_FIELD_TYPE, emig->tx_flags == TX_FLAGS_REQUEST ?
-			MIG_TYPE_START_IS_REQUEST : MIG_TYPE_START_IS_NORMAL);
+
+	if (! as_new_clustering()) {
+		msg_set_uint32(m, MIG_FIELD_TYPE, emig->tx_flags == TX_FLAGS_REQUEST ?
+				MIG_TYPE_START_IS_REQUEST : MIG_TYPE_START_IS_NORMAL);
+	}
+
 	msg_set_uint64(m, MIG_FIELD_LDT_VERSION,
 			emig->rsv.p->current_outgoing_ldt_version);
 
@@ -1394,9 +1407,17 @@ immigration_handle_start_request(cf_node src, msg *m)
 
 	msg_get_uint32(m, MIG_FIELD_FEATURES, &emig_features);
 
-	uint32_t emig_n_recs = 0; // TODO - eventually uint64_t
+	uint64_t emig_n_recs = 0;
 
-	msg_get_uint32(m, MIG_FIELD_PARTITION_SIZE, &emig_n_recs);
+	if (as_new_clustering()) {
+		msg_get_uint64(m, MIG_FIELD_PARTITION_SIZE, &emig_n_recs);
+	}
+	else {
+		uint32_t n_recs = 0;
+
+		msg_get_uint32(m, MIG_FIELD_PARTITION_SIZE_OLD, &n_recs);
+		emig_n_recs = (uint64_t)n_recs;
+	}
 
 	uint64_t incoming_ldt_version = 0;
 
