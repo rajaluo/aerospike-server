@@ -1208,6 +1208,10 @@ rack_count(const as_namespace* ns)
 	memcpy(ids, ns->rack_ids, sizeof(ids));
 	qsort(ids, ns->cluster_size, sizeof(uint32_t), compare_rack_ids);
 
+	if (ids[0] == ids[ns->cluster_size - 1]) {
+		return 1; // common path - not rack-aware
+	}
+
 	uint32_t n_racks = 1;
 	uint32_t cur_id = ids[0];
 

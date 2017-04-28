@@ -1031,6 +1031,106 @@ info_command_dump_rw_request_hash(char *name, char *params, cf_dyn_buf *db)
 	return(0);
 }
 
+typedef struct rack_node_s {
+	uint32_t rack_id;
+	cf_node node;
+} rack_node;
+
+// A comparison_fn_t used with qsort().
+static inline int
+compare_rack_nodes(const void* pa, const void* pb)
+{
+	uint32_t a = ((const rack_node*)pa)->rack_id;
+	uint32_t b = ((const rack_node*)pb)->rack_id;
+
+	return a > b ? -1 : (a == b ? 0 : 1);
+}
+
+void
+namespace_rack_info(as_namespace *ns, cf_dyn_buf *db)
+{
+	// Not thread safe - can be wrong, but not a disaster.
+	uint32_t n_nodes = ns->cluster_size;
+	rack_node rack_nodes[n_nodes];
+
+	for (uint32_t i = 0; i < n_nodes; i++) {
+		rack_nodes[i].rack_id = ns->rack_ids[i];
+		rack_nodes[i].node = ns->succession[i];
+	}
+	// End - not thread safe.
+
+	qsort(rack_nodes, n_nodes, sizeof(rack_node), compare_rack_nodes);
+
+	uint32_t cur_id = rack_nodes[0].rack_id;
+
+	cf_dyn_buf_append_string(db, "rack_");
+	cf_dyn_buf_append_uint32(db, cur_id);
+	cf_dyn_buf_append_char(db, '=');
+	cf_dyn_buf_append_uint64_x(db, rack_nodes[0].node);
+
+	for (uint32_t i = 1; i < ns->cluster_size; i++) {
+		if (rack_nodes[i].rack_id == cur_id) {
+			cf_dyn_buf_append_char(db, ',');
+			cf_dyn_buf_append_uint64_x(db, rack_nodes[i].node);
+			continue;
+		}
+
+		cur_id = rack_nodes[i].rack_id;
+
+		cf_dyn_buf_append_char(db, ':');
+		cf_dyn_buf_append_string(db, "rack_");
+		cf_dyn_buf_append_uint32(db, cur_id);
+		cf_dyn_buf_append_char(db, '=');
+		cf_dyn_buf_append_uint64_x(db, rack_nodes[i].node);
+	}
+}
+
+int
+info_command_racks(char *name, char *params, cf_dyn_buf *db)
+{
+	// Command format: "racks:{namespace=<namespace-name>}"
+
+	char param_str[AS_ID_NAMESPACE_SZ] = { 0 };
+	int param_str_len = (int)sizeof(param_str);
+	int rv = as_info_parameter_get(params, "namespace", param_str, &param_str_len);
+
+	if (rv == -2) {
+		cf_warning(AS_INFO, "namespace parameter value too long");
+		cf_dyn_buf_append_string(db, "error");
+		return 0;
+	}
+
+	if (rv == 0) {
+		as_namespace *ns = as_namespace_get_byname(param_str);
+
+		if (! ns) {
+			cf_warning(AS_INFO, "unknown namespace %s", param_str);
+			cf_dyn_buf_append_string(db, "error");
+			return 0;
+		}
+
+		namespace_rack_info(ns, db);
+
+		return 0;
+	}
+
+	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
+		as_namespace *ns = g_config.namespaces[ns_ix];
+
+		cf_dyn_buf_append_string(db, "ns=");
+		cf_dyn_buf_append_string(db, ns->name);
+		cf_dyn_buf_append_char(db, ':');
+
+		namespace_rack_info(ns, db);
+
+		cf_dyn_buf_append_char(db, ';');
+	}
+
+	cf_dyn_buf_chomp(db);
+
+	return 0;
+}
+
 int
 info_command_dump_ra(char *name, char *params, cf_dyn_buf *db)
 {
@@ -6909,7 +7009,7 @@ as_info_init()
 				"dump-si;dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
-				"service;services;services-alumni;services-alumni-reset;set-config;"
+				"racks;service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;"
 				"smd;statistics;status;tip;tip-clear;truncate;truncate-undo;version;",
@@ -7000,6 +7100,7 @@ as_info_init()
 	as_info_set_command("peers-clear-std", info_get_services_clear_std_delta, PERM_NONE);     // The delta update version of "peers-clear-std".
 	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, PERM_NONE);         // The delta update version of "peers-tls-alt".
 	as_info_set_command("peers-tls-std", info_get_services_tls_std_delta, PERM_NONE);         // The delta update version of "peers-tls-std".
+	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.
