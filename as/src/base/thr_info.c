@@ -1068,7 +1068,7 @@ namespace_rack_info(as_namespace *ns, cf_dyn_buf *db)
 	cf_dyn_buf_append_char(db, '=');
 	cf_dyn_buf_append_uint64_x(db, rack_nodes[0].node);
 
-	for (uint32_t i = 1; i < ns->cluster_size; i++) {
+	for (uint32_t i = 1; i < n_nodes; i++) {
 		if (rack_nodes[i].rack_id == cur_id) {
 			cf_dyn_buf_append_char(db, ',');
 			cf_dyn_buf_append_uint64_x(db, rack_nodes[i].node);
