@@ -2354,7 +2354,7 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		else if (0 == as_info_parameter_get(params, "migrate-threads", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (0 > val) || (MAX_NUM_MIGRATE_XMIT_THREADS < val))
 				goto Error;
-			cf_info(AS_INFO, "Changing value of migrate-theads from %d to %d ", g_config.n_migrate_threads, val);
+			cf_info(AS_INFO, "Changing value of migrate-threads from %d to %d ", g_config.n_migrate_threads, val);
 			as_migrate_set_num_xmit_threads(val);
 		}
 		else if (0 == as_info_parameter_get(params, "min-cluster-size", context, &context_len)) {
