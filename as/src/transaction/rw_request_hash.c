@@ -75,12 +75,15 @@ const msg_template rw_mt[] = {
 		{ RW_FIELD_REC_PROPS, M_FT_BUF },
 		{ RW_FIELD_MULTIOP, M_FT_BUF },
 		{ RW_FIELD_LDT_VERSION, M_FT_UINT64 },
-		{ RW_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 }
+		{ RW_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 },
+		{ RW_FIELD_SET_NAME, M_FT_BUF },
+		{ RW_FIELD_KEY, M_FT_BUF },
+		{ RW_FIELD_LDT_BITS, M_FT_UINT32 }
 };
 
 COMPILER_ASSERT(sizeof(rw_mt) / sizeof(msg_template) == NUM_RW_FIELDS);
 
-#define RW_MSG_SCRATCH_SIZE 128
+#define RW_MSG_SCRATCH_SIZE 192
 
 
 //==========================================================

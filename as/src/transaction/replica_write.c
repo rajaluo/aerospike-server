@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h> // for alloca() only
 #include <string.h>
 
 #include "citrusleaf/cf_clock.h"
@@ -194,12 +195,42 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 	// Make sure destructor doesn't free this.
 	rw->pickled_buf = NULL;
 
+	// TODO - replace rw->pickled_rec_props with individual fields.
 	if (rw->pickled_rec_props.p_data) {
-		msg_set_buf(m, RW_FIELD_REC_PROPS, rw->pickled_rec_props.p_data,
-				rw->pickled_rec_props.size, MSG_SET_HANDOFF_MALLOC);
+		if (as_new_clustering()) {
+			const char* set_name;
+			uint32_t set_name_size;
 
-		// Make sure destructor doesn't free the data.
-		as_rec_props_clear(&rw->pickled_rec_props);
+			if (as_rec_props_get_value(&rw->pickled_rec_props,
+					CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
+					(uint8_t**)&set_name) == 0) {
+				msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
+						set_name_size - 1, MSG_SET_COPY);
+			}
+
+			uint32_t key_size;
+			uint8_t* key;
+
+			if (as_rec_props_get_value(&rw->pickled_rec_props,
+					CL_REC_PROPS_FIELD_KEY, &key_size, &key) == 0) {
+				msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
+			}
+
+			uint16_t* ldt_bits;
+
+			if ((as_rec_props_get_value(&rw->pickled_rec_props,
+					CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+					(uint8_t**)&ldt_bits) == 0)) {
+				msg_set_uint32(m, RW_FIELD_LDT_BITS, (uint32_t)*ldt_bits);
+			}
+		}
+		else {
+			msg_set_buf(m, RW_FIELD_REC_PROPS, rw->pickled_rec_props.p_data,
+					rw->pickled_rec_props.size, MSG_SET_HANDOFF_MALLOC);
+
+			// Make sure destructor doesn't free the data.
+			as_rec_props_clear(&rw->pickled_rec_props);
+		}
 	}
 
 	if (as_new_clustering()) {
@@ -398,11 +429,40 @@ repl_write_handle_op(cf_node node, msg* m)
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
 
 		as_rec_props rec_props = { NULL, 0 };
-		size_t rec_props_size = 0;
+		size_t rec_props_data_size = 0;
 
-		msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data, &rec_props_size,
+		uint8_t *set_name = NULL;
+		size_t set_name_len = 0;
+
+		msg_get_buf(m, RW_FIELD_SET_NAME, &set_name, &set_name_len,
 				MSG_GET_DIRECT);
-		rec_props.size = (uint32_t)rec_props_size;
+
+		uint8_t *key = NULL;
+		size_t key_size = 0;
+
+		msg_get_buf(m, RW_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
+
+		uint32_t ldt_bits = 0;
+
+		msg_get_uint32(m, RW_FIELD_LDT_BITS, &ldt_bits);
+
+		if (set_name || key || ldt_bits != 0) {
+			rec_props_data_size = as_rec_props_size_all(set_name, set_name_len,
+					key, key_size, ldt_bits);
+
+			if (rec_props_data_size != 0) {
+				// Use alloca() until after jump (remove new-cluster scope).
+				rec_props.p_data = alloca(rec_props_data_size);
+
+				as_rec_props_fill_all(&rec_props, rec_props.p_data, set_name,
+						set_name_len, key, key_size, ldt_bits);
+			}
+		}
+		else {
+			msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data,
+					&rec_props_data_size, MSG_GET_DIRECT);
+			rec_props.size = (uint32_t)rec_props_data_size;
+		}
 
 		result = write_replica(&rsv, keyd, pickled_buf, pickled_sz, &rec_props,
 				generation, void_time, last_update_time, node, info, &linfo);
@@ -595,9 +655,38 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 	*p_pickled_buf = NULL;
 
 	if (p_pickled_rec_props && p_pickled_rec_props->p_data) {
-		msg_set_buf(m, RW_FIELD_REC_PROPS, p_pickled_rec_props->p_data,
-				p_pickled_rec_props->size, MSG_SET_HANDOFF_MALLOC);
-		as_rec_props_clear(p_pickled_rec_props);
+		if (as_new_clustering()) {
+			const char* set_name;
+			uint32_t set_name_size;
+
+			if (as_rec_props_get_value(p_pickled_rec_props,
+					CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
+					(uint8_t**)&set_name) == 0) {
+				msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
+						set_name_size - 1, MSG_SET_COPY);
+			}
+
+			uint32_t key_size;
+			uint8_t* key;
+
+			if (as_rec_props_get_value(p_pickled_rec_props,
+					CL_REC_PROPS_FIELD_KEY, &key_size, &key) == 0) {
+				msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
+			}
+
+			uint16_t* ldt_bits;
+
+			if ((as_rec_props_get_value(p_pickled_rec_props,
+					CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+					(uint8_t**)&ldt_bits) == 0)) {
+				msg_set_uint32(m, RW_FIELD_LDT_BITS, (uint32_t)*ldt_bits);
+			}
+		}
+		else {
+			msg_set_buf(m, RW_FIELD_REC_PROPS, p_pickled_rec_props->p_data,
+					p_pickled_rec_props->size, MSG_SET_HANDOFF_MALLOC);
+			as_rec_props_clear(p_pickled_rec_props);
+		}
 	}
 
 	if (as_new_clustering()) {
@@ -905,11 +994,40 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
 
 		as_rec_props rec_props = { NULL, 0 };
-		size_t rec_props_size = 0;
+		size_t rec_props_data_size = 0;
 
-		msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data, &rec_props_size,
+		uint8_t *set_name = NULL;
+		size_t set_name_len = 0;
+
+		msg_get_buf(m, RW_FIELD_SET_NAME, &set_name, &set_name_len,
 				MSG_GET_DIRECT);
-		rec_props.size = (uint32_t)rec_props_size;
+
+		uint8_t *key = NULL;
+		size_t key_size = 0;
+
+		msg_get_buf(m, RW_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
+
+		uint32_t ldt_bits = 0;
+
+		msg_get_uint32(m, RW_FIELD_LDT_BITS, &ldt_bits);
+
+		if (set_name || key || ldt_bits != 0) {
+			rec_props_data_size = as_rec_props_size_all(set_name, set_name_len,
+					key, key_size, ldt_bits);
+
+			if (rec_props_data_size != 0) {
+				// Use alloca() until after jump (remove new-cluster scope).
+				rec_props.p_data = alloca(rec_props_data_size);
+
+				as_rec_props_fill_all(&rec_props, rec_props.p_data, set_name,
+						set_name_len, key, key_size, ldt_bits);
+			}
+		}
+		else {
+			msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data,
+					&rec_props_data_size, MSG_GET_DIRECT);
+			rec_props.size = (uint32_t)rec_props_data_size;
+		}
 
 		write_replica(rsv, keyd, pickled_buf, pickled_sz, &rec_props,
 				generation, void_time, last_update_time, node, info, linfo);

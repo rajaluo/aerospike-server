@@ -36,6 +36,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h> // for alloca() only
 #include <string.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -81,7 +82,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_VINFOSET, M_FT_BUF }, // XXX JUMP - recycle in "six months"
 		{ MIG_FIELD_VOID_TIME, M_FT_UINT32 },
 		{ MIG_FIELD_TYPE, M_FT_UINT32 }, // XXX JUMP - recycle in "six months"
-		{ MIG_FIELD_REC_PROPS, M_FT_BUF },
+		{ MIG_FIELD_REC_PROPS, M_FT_BUF }, // XXX JUMP - recycle in "six months"
 		{ MIG_FIELD_INFO, M_FT_UINT32 },
 		{ MIG_FIELD_LDT_VERSION, M_FT_UINT64 },
 		{ MIG_FIELD_LDT_PDIGEST, M_FT_BUF },
@@ -94,12 +95,15 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_META_RECORDS, M_FT_BUF },
 		{ MIG_FIELD_META_SEQUENCE, M_FT_UINT32 },
 		{ MIG_FIELD_META_SEQUENCE_FINAL, M_FT_UINT32 },
-		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT64 }
+		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT64 },
+		{ MIG_FIELD_SET_NAME, M_FT_BUF },
+		{ MIG_FIELD_KEY, M_FT_BUF },
+		{ MIG_FIELD_LDT_BITS, M_FT_UINT32 }
 };
 
 COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
 
-#define MIG_MSG_SCRATCH_SIZE 128
+#define MIG_MSG_SCRATCH_SIZE 192
 
 #define MIGRATE_RETRANSMIT_STARTDONE_MS 1000 // for now, not configurable
 #define MIGRATE_RETRANSMIT_SIGNAL_MS 1000 // for now, not configurable
@@ -114,7 +118,7 @@ typedef struct pickled_record_s {
 	uint64_t      last_update_time;
 	uint8_t       *record_buf; // pickled!
 	size_t        record_len;
-	as_rec_props  rec_props;
+	as_rec_props  rec_props; // XXX JUMP - remove in "six months"
 
 	// For LDT only:
 	cf_digest     pkeyd;
@@ -846,7 +850,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	as_storage_rd_load_n_bins(&rd); // TODO - handle error returned
 
-	as_bin stack_bins[rd.ns->storage_data_in_memory ? 0 : rd.n_bins];
+	as_bin stack_bins[ns->storage_data_in_memory ? 0 : rd.n_bins];
 
 	as_storage_rd_load_bins(&rd, stack_bins); // TODO - handle error returned
 
@@ -867,7 +871,23 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	as_storage_record_get_key(&rd);
 
 	as_rec_props_clear(&pr.rec_props);
-	as_storage_record_copy_rec_props(&rd, &pr.rec_props);
+
+	const char *set_name = NULL;
+	uint32_t ldt_bits = 0;
+	uint32_t key_size = rd.key_size;
+	uint8_t key[as_new_clustering() ? key_size : 0];
+
+	if (as_new_clustering()) {
+		set_name = as_index_get_set_name(r, ns);
+		ldt_bits = (uint32_t)as_ldt_record_get_rectype_bits(r);
+
+		if (key_size != 0) {
+			memcpy(key, rd.key, key_size);
+		}
+	}
+	else {
+		as_storage_record_copy_rec_props(&rd, &pr.rec_props);
+	}
 
 	as_ldt_fill_precord(&pr, &rd, emig);
 
@@ -923,10 +943,26 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	// Note - after MSG_SET_HANDOFF_MALLOCs, no need to destroy pickled_record.
 
-	if (pr.rec_props.p_data) {
-		msg_set_buf(m, MIG_FIELD_REC_PROPS,
-				(const uint8_t *)pr.rec_props.p_data, pr.rec_props.size,
-				MSG_SET_HANDOFF_MALLOC);
+	if (as_new_clustering()) {
+		if (set_name) {
+			msg_set_buf(m, MIG_FIELD_SET_NAME, (const uint8_t *)set_name,
+					strlen(set_name), MSG_SET_COPY);
+		}
+
+		if (key_size != 0) {
+			msg_set_buf(m, MIG_FIELD_KEY, key, key_size, MSG_SET_COPY);
+		}
+
+		if (ldt_bits != 0) {
+			msg_set_uint32(m, MIG_FIELD_LDT_BITS, ldt_bits);
+		}
+	}
+	else {
+		if (pr.rec_props.p_data) {
+			msg_set_buf(m, MIG_FIELD_REC_PROPS,
+					(const uint8_t *)pr.rec_props.p_data, pr.rec_props.size,
+					MSG_SET_HANDOFF_MALLOC);
+		}
 	}
 
 	msg_set_buf(m, MIG_FIELD_RECORD, pr.record_buf, pr.record_len,
@@ -1660,12 +1696,43 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		c.last_update_time = last_update_time;
 		as_rec_props_clear(&c.rec_props);
 
-		size_t rec_props_size = 0;
+		uint8_t *rec_props_data = NULL;
 
-		// These are optional.
-		msg_get_buf(m, MIG_FIELD_REC_PROPS, &c.rec_props.p_data,
-				&rec_props_size, MSG_GET_DIRECT);
-		c.rec_props.size = (uint32_t)rec_props_size;
+		if (as_new_clustering()) {
+			uint8_t *set_name = NULL;
+			size_t set_name_len = 0;
+
+			msg_get_buf(m, MIG_FIELD_SET_NAME, &set_name, &set_name_len,
+					MSG_GET_DIRECT);
+
+			uint8_t *key = NULL;
+			size_t key_size = 0;
+
+			msg_get_buf(m, MIG_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
+
+			uint32_t ldt_bits = 0;
+
+			msg_get_uint32(m, MIG_FIELD_LDT_BITS, &ldt_bits);
+
+			size_t rec_props_data_size = as_rec_props_size_all(set_name,
+					set_name_len, key, key_size, ldt_bits);
+
+			if (rec_props_data_size != 0) {
+				// Use alloca() until after jump (remove new-cluster scope).
+				rec_props_data = alloca(rec_props_data_size);
+
+				as_rec_props_fill_all(&c.rec_props, rec_props_data, set_name,
+						set_name_len, key, key_size, ldt_bits);
+			}
+		}
+		else {
+			size_t rec_props_data_size = 0;
+
+			// These are optional.
+			msg_get_buf(m, MIG_FIELD_REC_PROPS, &c.rec_props.p_data,
+					&rec_props_data_size, MSG_GET_DIRECT);
+			c.rec_props.size = (uint32_t)rec_props_data_size;
+		}
 
 		if (as_ldt_get_migrate_info(immig, &c, m)) {
 			immigration_release(immig);

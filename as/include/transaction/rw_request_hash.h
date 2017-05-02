@@ -54,10 +54,13 @@ typedef enum {
 	RW_FIELD_TID,
 	RW_FIELD_VOID_TIME,
 	RW_FIELD_INFO,
-	RW_FIELD_REC_PROPS,
+	RW_FIELD_REC_PROPS, // XXX JUMP - remove in "six months"
 	RW_FIELD_MULTIOP, // single msg for multiple ops - LDT (& secondary index?)
 	RW_FIELD_LDT_VERSION,
 	RW_FIELD_LAST_UPDATE_TIME,
+	RW_FIELD_SET_NAME,
+	RW_FIELD_KEY,
+	RW_FIELD_LDT_BITS,
 
 	NUM_RW_FIELDS
 } rw_msg_field;

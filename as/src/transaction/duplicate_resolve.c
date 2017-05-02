@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h> // for alloca() only
 #include <string.h>
 
 #include "citrusleaf/cf_atomic.h"
@@ -285,13 +286,33 @@ dup_res_handle_request(cf_node node, msg* m)
 
 		as_storage_record_get_key(&rd);
 
-		size_t rec_props_data_size = as_storage_record_rec_props_size(&rd);
-		uint8_t rec_props_data[rec_props_data_size];
+		if (as_new_clustering()) {
+			const char* set_name = as_index_get_set_name(r, ns);
 
-		if (rec_props_data_size > 0) {
-			as_storage_record_set_rec_props(&rd, rec_props_data);
-			msg_set_buf(m, RW_FIELD_REC_PROPS, rd.rec_props.p_data,
-					rd.rec_props.size, MSG_SET_COPY);
+			if (set_name) {
+				msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
+						strlen(set_name), MSG_SET_COPY);
+			}
+
+			if (rd.key) {
+				msg_set_buf(m, RW_FIELD_KEY, rd.key, rd.key_size, MSG_SET_COPY);
+			}
+
+			uint32_t ldt_bits = (uint32_t)as_ldt_record_get_rectype_bits(r);
+
+			if (ldt_bits != 0) {
+				msg_set_uint32(m, RW_FIELD_LDT_BITS, ldt_bits);
+			}
+		}
+		else {
+			size_t rec_props_data_size = as_storage_record_rec_props_size(&rd);
+			uint8_t rec_props_data[rec_props_data_size];
+
+			if (rec_props_data_size > 0) {
+				as_storage_record_set_rec_props(&rd, rec_props_data);
+				msg_set_buf(m, RW_FIELD_REC_PROPS, rd.rec_props.p_data,
+						rd.rec_props.size, MSG_SET_COPY);
+			}
 		}
 
 		as_storage_record_close(&rd);
@@ -594,11 +615,41 @@ apply_winner(rw_request* rw)
 			continue;
 		}
 
-		size_t rec_props_size = 0;
+		size_t rec_props_data_size = 0;
 
-		msg_get_buf(m, RW_FIELD_REC_PROPS, &dups[n].rec_props.p_data,
-				&rec_props_size, MSG_GET_DIRECT);
-		dups[n].rec_props.size = (uint32_t)rec_props_size;
+		uint8_t *set_name = NULL;
+		size_t set_name_len = 0;
+
+		msg_get_buf(m, RW_FIELD_SET_NAME, &set_name, &set_name_len,
+				MSG_GET_DIRECT);
+
+		uint8_t *key = NULL;
+		size_t key_size = 0;
+
+		msg_get_buf(m, RW_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
+
+		uint32_t ldt_bits = 0;
+
+		msg_get_uint32(m, RW_FIELD_LDT_BITS, &ldt_bits);
+
+		if (set_name || key || ldt_bits != 0) {
+			rec_props_data_size = as_rec_props_size_all(set_name, set_name_len,
+					key, key_size, ldt_bits);
+
+			if (rec_props_data_size != 0) {
+				// Use alloca() until after jump (remove new-cluster scope).
+				dups[n].rec_props.p_data = alloca(rec_props_data_size);
+
+				as_rec_props_fill_all(&dups[n].rec_props,
+						dups[n].rec_props.p_data, set_name, set_name_len, key,
+						key_size, ldt_bits);
+			}
+		}
+		else {
+			msg_get_buf(m, RW_FIELD_REC_PROPS, &dups[n].rec_props.p_data,
+					&rec_props_data_size, MSG_GET_DIRECT);
+			dups[n].rec_props.size = (uint32_t)rec_props_data_size;
+		}
 
 		n++;
 	}
