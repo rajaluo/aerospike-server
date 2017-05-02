@@ -3122,29 +3122,39 @@ static shash *as_smd_store_metadata_by_module(as_smd_t *smd, as_smd_msg_t *smd_m
 	return module_item_count_hash;
 }
 
-/*
- *  Type for searching for and returning metadata items from a given node.
- */
-typedef struct as_smd_node_item_search_s {
-	cf_node node_id;                 // Node to look for.
-	as_smd_item_list_t *item_list;   // Where to store the result.
-} as_smd_node_item_search_t;
+typedef struct smd_ext_item_search_s {
+	cf_node node_id;
+	as_smd_item_list_t *item_list;
+	uint32_t count;
+} smd_ext_item_search;
 
-/*
- *  Reduce function to find and add metadata items from a given node to an item list.
- */
-static int as_smd_item_list_for_node_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata)
+static int
+smd_ext_items_fn(const void *key, uint32_t keylen, void *obj, void *udata)
 {
-	const as_smd_external_item_key_t *item_key = (const as_smd_external_item_key_t *) key;
-	as_smd_item_t *item = (as_smd_item_t *) object;
-	as_smd_node_item_search_t *search = (as_smd_node_item_search_t *) udata;
+	const as_smd_external_item_key_t *extkey =
+			(const as_smd_external_item_key_t *)key;
+	as_smd_item_t *item = (as_smd_item_t *)obj;
+	smd_ext_item_search *search = (smd_ext_item_search *)udata;
 
-	// Add each matching metadata item to the list.
-	if (item_key->node_id == search->node_id) {
+	if (extkey->node_id == search->node_id) {
 		cf_rc_reserve(item);
 		search->item_list->item[search->item_list->num_items] = item;
-		search->item_list->num_items += 1;
-		cf_debug(AS_SMD, "For the node \"%016lX\", num_items is %zu", item_key->node_id, search->item_list->num_items);
+		search->item_list->num_items++;
+		cf_debug(AS_SMD, "For the node \"%016lX\", num_items is %zu", extkey->node_id, search->item_list->num_items);
+	}
+
+	return 0;
+}
+
+static int
+smd_ext_items_count_fn(const void *key, uint32_t keysz, void *obj, void *udata)
+{
+	const as_smd_external_item_key_t *extkey =
+			(const as_smd_external_item_key_t *)key;
+	smd_ext_item_search *search = (smd_ext_item_search *)udata;
+
+	if (extkey->node_id == search->node_id) {
+		search->count++;
 	}
 
 	return 0;
@@ -3178,49 +3188,29 @@ static int as_smd_invoke_merge_reduce_fn(const void *key, uint32_t keylen, void 
 {
 	const char *module = (const char *) key;
 	as_smd_module_t *module_obj = (as_smd_module_t *) object;
-	as_smd_t *smd = (as_smd_t *) udata;
 
 	cf_debug(AS_SMD, "invoking merge policy for module \"%s\"", module);
 
 	as_smd_item_list_t *item_list_out = NULL;
 	as_smd_item_list_t *item_lists_in[g_cluster_size];
+	int list_num = (int)g_cluster_size;
 
-	int list_num = 0;
 	for (uint32_t i = 0; i < g_cluster_size; i++) {
-		cf_node node_id = g_succession[i];
+		smd_ext_item_search search = {
+				.node_id = g_succession[i]
+		};
 
-		shash *module_item_count_hash = NULL;
-		if (SHASH_OK != shash_get(smd->scoreboard, &node_id, &module_item_count_hash)) {
-			cf_debug(AS_SMD, "***Cluster Size Is: %u ; Scoreboard size is %d***", g_cluster_size, shash_get_size(smd->scoreboard));
+		cf_rchash_reduce(module_obj->external_metadata, smd_ext_items_count_fn,
+				&search);
+		item_lists_in[i] = as_smd_item_list_alloc(search.count);
+		cf_assert(item_lists_in[i], AS_SMD, "failed to create merge item list for node %016lX", g_succession[i]);
 
-			// Node may be in succession but not officially in cluster yet....
-			cf_debug(AS_SMD, "failed to get module item count hash for node %016lX ~~ Skipping!", node_id);
-			continue;
+		if (search.count != 0) {
+			search.item_list = item_lists_in[i];
+			item_lists_in[i]->num_items = 0;
+			cf_rchash_reduce(module_obj->external_metadata, smd_ext_items_fn,
+					&search);
 		}
-
-		size_t num_items = 0;
-		if (SHASH_OK != shash_get(module_item_count_hash, &module_obj, &num_items)) {
-			cf_debug(AS_SMD, "failed to get module items count for module \"%s\" from node %016lX ~~ Using 0!", module_obj->module, node_id);
-		}
-
-		// Start with an an empty item list.
-		if (!(item_lists_in[list_num] = as_smd_item_list_alloc(num_items))) {
-			cf_crash(AS_SMD, "failed to create merge item list for node %016lX", node_id);
-		}
-
-		// Only search for items to add to the list any exist.
-		if (num_items) {
-			// Add all of this node's metadata items to this list.
-			as_smd_node_item_search_t search;
-			search.node_id = node_id;
-			search.item_list = item_lists_in[list_num];
-
-			// (Note:  Use num_items to count the position for each metadata item.)
-			item_lists_in[list_num]->num_items = 0;
-			cf_rchash_reduce(module_obj->external_metadata, as_smd_item_list_for_node_reduce_fn, &search);
-		}
-
-		list_num++;
 	}
 
 	// Merge the metadata item lists for this module.
