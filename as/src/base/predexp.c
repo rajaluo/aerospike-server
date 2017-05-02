@@ -263,6 +263,8 @@ build_and(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	dp->base.next = *stackpp;			// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
 
+	cf_debug(AS_PREDEXP, "%p: predexp_and(%d)", stackpp, nterms);
+	
 	return true;
 }
 
@@ -360,6 +362,8 @@ build_or(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	dp->base.next = *stackpp;			// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
 
+	cf_debug(AS_PREDEXP, "%p: predexp_or(%d)", stackpp, nterms);
+	
 	return true;
 }
 
@@ -445,6 +449,8 @@ build_not(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	dp->base.next = *stackpp;			// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
 
+	cf_debug(AS_PREDEXP, "%p: predexp_not", stackpp);
+	
 	return true;
 }
 
@@ -856,6 +862,46 @@ build_compare(predexp_eval_t** stackpp,
 	dp->base.next = *stackpp;			// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
 
+	switch (tag) {
+	case AS_PREDEXP_INTEGER_EQUAL:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_equal", stackpp);
+		break;
+	case AS_PREDEXP_INTEGER_UNEQUAL:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_unequal", stackpp);
+		break;
+	case AS_PREDEXP_INTEGER_GREATER:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_greater", stackpp);
+		break;
+	case AS_PREDEXP_INTEGER_GREATEREQ:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_greatereq", stackpp);
+		break;
+	case AS_PREDEXP_INTEGER_LESS:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_less", stackpp);
+		break;
+	case AS_PREDEXP_INTEGER_LESSEQ:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_lesseq", stackpp);
+		break;
+	case AS_PREDEXP_STRING_EQUAL:
+		cf_debug(AS_PREDEXP, "%p: predexp_string_equal", stackpp);
+		break;
+	case AS_PREDEXP_STRING_UNEQUAL:
+		cf_debug(AS_PREDEXP, "%p: predexp_string_unequal", stackpp);
+		break;
+	case AS_PREDEXP_STRING_REGEX:
+		cf_debug(AS_PREDEXP, "%p: predexp_string_regex(%d)", stackpp,
+				 regex_opts);
+		break;
+	case AS_PREDEXP_GEOJSON_WITHIN:
+		cf_debug(AS_PREDEXP, "%p: predexp_geojson_within", stackpp);
+		break;
+	case AS_PREDEXP_GEOJSON_CONTAINS:
+		cf_debug(AS_PREDEXP, "%p: predexp_geojson_contains", stackpp);
+		break;
+	default:
+		cf_crash(AS_PREDEXP, "build_compare called with bogus tag: %d", tag);
+		break;
+	}
+
 	return true;
 }
 
@@ -962,6 +1008,32 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	dp->base.next = *stackpp;				// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;		// We're the new top
 
+	switch (tag) {
+	case AS_PREDEXP_INTEGER_VALUE:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_value(%"PRId64")", stackpp,
+				 (int64_t) dp->bin.particle);
+		break;
+	case AS_PREDEXP_STRING_VALUE: {
+		char* tmpstr = cf_strndup(valptr, vallen);
+		cf_debug(AS_PREDEXP, "%p: predexp_string_value(\"%s\")", stackpp,
+				 tmpstr);
+		cf_free(tmpstr);
+		break;
+	}
+	case AS_PREDEXP_GEOJSON_VALUE: {
+		size_t jsonsz;
+		char const * jsonptr =
+			as_geojson_mem_jsonstr(dp->bin.particle, &jsonsz);
+		char* tmpstr = cf_strndup(jsonptr, jsonsz);
+		cf_debug(AS_PREDEXP, "%p: predexp_geojson_value(%s)", stackpp, tmpstr);
+		cf_free(tmpstr);
+		break;
+	}
+	default:
+		cf_crash(AS_PREDEXP, "build_value called with bogus tag: %d", tag);
+		break;
+	}
+
 	return true;
 
  Failed:
@@ -1067,6 +1139,32 @@ build_bin(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	dp->base.next = *stackpp;				// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
 
+	switch (tag) {
+	case AS_PREDEXP_INTEGER_BIN:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_bin(\"%s\")", stackpp,
+				 dp->bname);
+		break;
+	case AS_PREDEXP_STRING_BIN:
+		cf_debug(AS_PREDEXP, "%p: predexp_string_bin(\"%s\")", stackpp,
+				 dp->bname);
+		break;
+	case AS_PREDEXP_GEOJSON_BIN:
+		cf_debug(AS_PREDEXP, "%p: predexp_geojson_bin(\"%s\")", stackpp,
+				 dp->bname);
+		break;
+	case AS_PREDEXP_LIST_BIN:
+		cf_debug(AS_PREDEXP, "%p: predexp_list_bin(\"%s\")", stackpp,
+				 dp->bname);
+		break;
+	case AS_PREDEXP_MAP_BIN:
+		cf_debug(AS_PREDEXP, "%p: predexp_map_bin(\"%s\")", stackpp,
+				 dp->bname);
+		break;
+	default:
+		cf_crash(AS_PREDEXP, "build_bin called with bogus tag: %d", tag);
+		break;
+	}
+
 	return true;
 
  Failed:
@@ -1165,6 +1263,24 @@ build_var(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	dp->base.next = *stackpp;				// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
 
+	switch (tag) {
+	case AS_PREDEXP_INTEGER_VAR:
+		cf_debug(AS_PREDEXP, "%p: predexp_integer_var(\"%s\")", stackpp,
+				 dp->vname);
+		break;
+	case AS_PREDEXP_STRING_VAR:
+		cf_debug(AS_PREDEXP, "%p: predexp_string_var(\"%s\")", stackpp,
+				 dp->vname);
+		break;
+	case AS_PREDEXP_GEOJSON_VAR:
+		cf_debug(AS_PREDEXP, "%p: predexp_geojson_var(\"%s\")", stackpp,
+				 dp->vname);
+		break;
+	default:
+		cf_crash(AS_PREDEXP, "build_var called with bogus tag: %d", tag);
+		break;
+	}
+
 	return true;
 
  Failed:
@@ -1229,6 +1345,8 @@ build_rec_device_size(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	// Success, push ourself onto the stack.
 	dp->base.next = *stackpp;				// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
+
+	cf_debug(AS_PREDEXP, "%p: predexp_rec_device_size()", stackpp);
 
 	return true;
 
@@ -1296,6 +1414,8 @@ build_rec_last_update(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	// Success, push ourself onto the stack.
 	dp->base.next = *stackpp;				// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
+
+	cf_debug(AS_PREDEXP, "%p: predexp_rec_last_update()", stackpp);
 
 	return true;
 
@@ -1368,6 +1488,8 @@ build_rec_void_time(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	// Success, push ourself onto the stack.
 	dp->base.next = *stackpp;				// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
+
+	cf_debug(AS_PREDEXP, "%p: predexp_rec_void_time()", stackpp);
 
 	return true;
 
@@ -1450,6 +1572,8 @@ build_rec_digest_modulo(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp)
 	// Success, push ourself onto the stack.
 	dp->base.next = *stackpp;				// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
+
+	cf_debug(AS_PREDEXP, "%p: predexp_rec_digest_modulo(%d)", stackpp, dp->mod);
 
 	return true;
 
@@ -1835,6 +1959,29 @@ build_iter(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	dp->base.next = *stackpp;				// We point next at the old top.
 	*stackpp = (predexp_eval_t *) dp;	// We're the new top
 
+	switch (tag) {
+	case AS_PREDEXP_LIST_ITERATE_OR:
+		cf_debug(AS_PREDEXP, "%p: predexp_list_iterate_or()", stackpp);
+		break;
+	case AS_PREDEXP_LIST_ITERATE_AND:
+		cf_debug(AS_PREDEXP, "%p: predexp_list_iterate_and()", stackpp);
+		break;
+	case AS_PREDEXP_MAPKEY_ITERATE_OR:
+		cf_debug(AS_PREDEXP, "%p: predexp_mapkey_iterate_or()", stackpp);
+		break;
+	case AS_PREDEXP_MAPVAL_ITERATE_OR:
+		cf_debug(AS_PREDEXP, "%p: predexp_mapval_iterate_or()", stackpp);
+		break;
+	case AS_PREDEXP_MAPKEY_ITERATE_AND:
+		cf_debug(AS_PREDEXP, "%p: predexp_mapkey_iterate_and()", stackpp);
+		break;
+	case AS_PREDEXP_MAPVAL_ITERATE_AND:
+		cf_debug(AS_PREDEXP, "%p: predexp_mapval_iterate_and()", stackpp);
+		break;
+	default:
+		cf_crash(AS_PREDEXP, "build_iter called with bogus tag: %d", tag);
+	}
+
 	return true;
 
  Failed:
@@ -1909,6 +2056,8 @@ predexp_build(as_msg_field* pfp)
 {
 	predexp_eval_t* stackp = NULL;
 
+	cf_debug(AS_PREDEXP, "%p: predexp_build starting", &stackp);
+
 	uint8_t* pp = pfp->data;
 	uint32_t pdsize = as_msg_field_get_value_sz(pfp);
 	uint8_t* endp = pp + pdsize;
@@ -1955,10 +2104,13 @@ predexp_build(as_msg_field* pfp)
 		goto FAILED;
 	}
 
+	cf_debug(AS_PREDEXP, "%p: predexp_build finished", &stackp);
+
 	// Return the root of the predicate expression tree.
 	return stackp;
 
  FAILED:
+	cf_debug(AS_PREDEXP, "%p: predexp_build failed", &stackp);
 	destroy_list(stackp);
 	return NULL;
 }
