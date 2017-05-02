@@ -505,14 +505,21 @@ repl_write_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	// TODO - result_code is currently ignored! What should we do with it?
-	// Note - CLUSTER_KEY_MISMATCH not special, can't re-queue transaction.
+	// TODO - handle failure results other than CLUSTER_KEY_MISMATCH.
 	uint32_t result_code;
 
 	if (msg_get_uint32(m, RW_FIELD_RESULT, &result_code) != 0) {
 		cf_warning(AS_RW, "repl-write ack: no result_code");
 		as_fabric_msg_put(m);
 		return;
+	}
+
+	if (as_new_clustering()) {
+		// TODO - force retransmit to happen faster than default.
+		if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH) {
+			as_fabric_msg_put(m);
+			return;
+		}
 	}
 
 	rw_request_hkey hkey = { ns_id, *keyd };
