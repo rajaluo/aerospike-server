@@ -323,8 +323,6 @@ typedef struct as_paxos_acceptor_s
 
 	/**
 	 * Id of the last proposal, promised or accepted by this node.
-	 * This is used to guard against the case where a node reboots quickly,
-	 * and learns its membership from the heartbeats.
 	 */
 	as_paxos_proposal_id last_proposal_received_id;
 } as_paxos_acceptor;
@@ -4509,17 +4507,16 @@ paxos_acceptor_dump(bool verbose)
 }
 
 /**
- * Reset the acceptor.
+ * Reset the acceptor for the next round.
  */
 static void
 paxos_acceptor_reset()
 {
 	CLUSTERING_LOCK();
-	// Memset to zero which ensures that all acceptor state variables have zero
-	// which is the correct initial value for elements other that contained
-	// vectors and status.
-	memset(&g_acceptor, 0, sizeof(g_acceptor));
 	g_acceptor.state = AS_PAXOS_ACCEPTOR_STATE_IDLE;
+	g_acceptor.acceptor_round_start = 0;
+	g_acceptor.promise_send_time = 0;
+	g_acceptor.accepted_send_time = 0;
 	CLUSTERING_UNLOCK();
 }
 
@@ -4718,9 +4715,16 @@ paxos_acceptor_prepare_handle(as_clustering_internal_event* event)
 
 		// Update the round start time.
 		g_acceptor.acceptor_round_start = cf_getms();
-	}
 
-	g_acceptor.state = AS_PAXOS_ACCEPTOR_STATE_PROMISED;
+		// Switch to promised state.
+		g_acceptor.state = AS_PAXOS_ACCEPTOR_STATE_PROMISED;
+	}
+	else {
+		// This is a retransmit or delayed message in which case we do not
+		// update the state.
+		// If we have already accepted this proposal, we would want to remain in
+		// accepted state.
+	}
 
 	// The proposal is promised. Send back a paxos promise.
 	paxos_acceptor_promise_send(src_nodeid, proposal_id.sequence_number);
@@ -4808,7 +4812,7 @@ paxos_acceptor_accept_handle(as_clustering_internal_event* event)
 	}
 
 	g_acceptor.state = AS_PAXOS_ACCEPTOR_STATE_ACCEPTED;
-	// The proposal is accepted. Send back a paxos promise.
+	// The proposal is accepted. Send back a paxos accept.
 	paxos_acceptor_accepted_send(src_nodeid, proposal_id.sequence_number);
 
 	CLUSTERING_UNLOCK();
@@ -4853,10 +4857,7 @@ paxos_acceptor_learn_handle(as_clustering_internal_event* event)
 	if (paxos_proposal_id_compare(&proposal_id,
 			&g_acceptor.last_proposal_received_id) != 0) {
 		// We have not promised nor accepted this proposal,
-		// ignore the learn message. It is possbile we lost both the promise and
-		// accept messages (however with a very low probability), in which case
-		// the principal will label this node as faulty and evict. This node
-		// will again send a join request and eventually be part of the cluster.
+		// ignore the learn message.
 		INFO(
 				"ignoring paxos learn from node %"PRIx64" - proposal id (%"PRIx64":%"PRIu64") mismatches current proposal id (%"PRIx64":%"PRIu64")",
 				src_nodeid, proposal_id.src_nodeid,
