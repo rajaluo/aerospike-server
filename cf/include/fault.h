@@ -104,7 +104,7 @@ static inline cf_zstr64
 cf_null_terminate_64(const char *str, size_t sz)
 {
 	cf_zstr64 zstr;
-	uint32_t len = sz < sizeof(zstr.s) ? sz : sizeof(zstr.s) - 1;
+	size_t len = sz < sizeof(zstr.s) ? sz : sizeof(zstr.s) - 1;
 
 	memcpy(zstr.s, str, len);
 	zstr.s[len] = 0;
@@ -116,7 +116,7 @@ static inline cf_zstr1k
 cf_null_terminate_1k(const char *str, size_t sz)
 {
 	cf_zstr1k zstr;
-	uint32_t len = sz < sizeof(zstr.s) ? sz : sizeof(zstr.s) - 1;
+	size_t len = sz < sizeof(zstr.s) ? sz : sizeof(zstr.s) - 1;
 
 	memcpy(zstr.s, str, len);
 	zstr.s[len] = 0;
