@@ -89,13 +89,14 @@ extern const as_partition_vinfo NULL_VINFO;
 typedef struct as_partition_version_s {
 	uint64_t ckey:48;
 	uint64_t family:VERSION_FAMILY_BITS;
-	uint64_t unused:10;
+	uint64_t unused:9;
+	uint64_t master:1;
 	uint64_t subset:1;
 	uint64_t evade:1;
 } as_partition_version;
 
 typedef struct as_partition_version_string_s {
-	char s[16 + 1]; // format CCCCccccCCCC.Fse
+	char s[17 + 1]; // format CCCCccccCCCC.Fmse
 } as_partition_version_string;
 
 typedef struct as_partition_s {
@@ -278,9 +279,10 @@ as_partition_version_as_string(const as_partition_version* version)
 {
 	as_partition_version_string str;
 
-	sprintf(str.s, "%012lx.%c%c%c", (uint64_t)version->ckey,
+	sprintf(str.s, "%012lx.%c%c%c%c", (uint64_t)version->ckey,
 			version->family == VERSION_FAMILY_UNIQUE ?
 					'U' : '0' + version->family,
+			version->master == 0 ? '-' : 'm',
 			version->subset == 0 ? 'p' : 's',
 			version->evade == 0 ? '-' : 'e');
 

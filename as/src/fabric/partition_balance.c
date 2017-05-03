@@ -334,6 +334,7 @@ as_partition_balance_init()
 					p->n_replicas = 1;
 					p->replicas[0] = g_config.self_node;
 
+					version.master = 0;
 					version.subset = 1;
 
 					p->final_version = version;
@@ -401,6 +402,7 @@ as_partition_balance_revert_to_orphan()
 			pthread_mutex_lock(&p->lock);
 
 			if (! as_partition_version_is_null(&p->version)) {
+				p->version.master = 0;
 				p->version.subset = 1;
 			}
 
@@ -574,12 +576,13 @@ as_partition_emigrate_done(as_migrate_state s, as_namespace* ns, uint32_t pid,
 
 	p->current_outgoing_ldt_version = 0;
 
-	if ((tx_flags & TX_FLAGS_ACTING_MASTER) != 0) {
-		p->target = (cf_node)0;
-		p->n_dupl = 0;
-	}
-
 	if (! is_self_final_master(p)) {
+		if ((tx_flags & TX_FLAGS_ACTING_MASTER) != 0) {
+			p->target = (cf_node)0;
+			p->n_dupl = 0;
+			p->version.master = 0;
+		}
+
 		p->version.ckey = p->final_version.ckey;
 		p->version.family = 0;
 
@@ -731,6 +734,7 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 	if (p->origin == source_node) {
 		p->origin = (cf_node)0;
 		p->version = p->final_version;
+		p->version.master = 1;
 		set_partition_version_in_storage(ns, p->id, &p->version, true);
 	}
 	else {
@@ -1104,6 +1108,10 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 
 			if (self_n < p->n_replicas) {
 				p->version = p->final_version;
+
+				if (self_n == 0) {
+					p->version.master = 1;
+				}
 			}
 		}
 		else {
@@ -1131,6 +1139,10 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 				// Refresh replicas' versions.
 				if (self_n < p->n_replicas) {
 					p->version = p->final_version;
+
+					if (self_n == 0) {
+						p->version.master = 1;
+					}
 				}
 			}
 
@@ -1158,9 +1170,10 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 		// TEMPORARY debugging.
 		if (pid < 20) {
 			cf_debug(AS_PARTITION, "ck%012lX %02u (%d %d) %s -> %s - self_n %u wm_n %d repls %u dupls %u immigrators %u",
-					p->cluster_key, pid, p->pending_emigrations, p->pending_immigrations,
-					VERSION_AS_STRING(&debug_orig), VERSION_AS_STRING(&p->version),
-					self_n, working_master_n, p->n_replicas, n_dupl, debug_n_immigrators);
+					p->cluster_key, pid, p->pending_emigrations,
+					p->pending_immigrations, VERSION_AS_STRING(&debug_orig),
+					VERSION_AS_STRING(&p->version), self_n, working_master_n,
+					p->n_replicas, n_dupl, debug_n_immigrators);
 		}
 
 		client_replica_maps_update(ns, pid);
@@ -1381,7 +1394,7 @@ find_self(const cf_node* ns_node_seq, const as_namespace* ns)
 }
 
 
-// Preference: V > Ve > Vs > Vse > absent
+// Preference: Vm > V > Ve > Vs > Vse > absent.
 int
 find_working_master(const as_partition* p, const uint32_t* ns_sl_ix,
 		const as_namespace* ns)
@@ -1397,16 +1410,17 @@ find_working_master(const as_partition* p, const uint32_t* ns_sl_ix,
 			continue;
 		}
 
-		// 2 points for full, 1 point for parent gives:
-		// V = 3 > Ve = 2 > Vs = 1 > Vse = 0.
-		int score = (version->evade == 1 ? 0 : 1) +
-				(version->subset == 1 ? 0 : 2);
-
-		// If full parent, can't do better.
-		if (score == 3) {
+		// If previous working master exists, use it. (There can be more than
+		// one after split brains. Also, the flag is only to prevent superfluous
+		// master swaps on rebalance when rack-aware.)
+		if (version->master == 1) {
 			return n;
 		}
 		// else - keep going but remember the best so far.
+
+		// V = 3 > Ve = 2 > Vs = 1 > Vse = 0.
+		int score = (version->evade == 1 ? 0 : 1) +
+				(version->subset == 1 ? 0 : 2);
 
 		if (score > best_score) {
 			best_score = score;
@@ -1543,11 +1557,14 @@ advance_version(as_partition* p, const uint32_t* ns_sl_ix, as_namespace* ns,
 	if (self_n == working_master_n) {
 		p->version.ckey = p->final_version.ckey;
 		p->version.family = (self_n == 0 || n_dupl == 0) ? 0 : 1;
+		p->version.master = 1;
 		p->version.subset = 0;
 		p->version.evade = 0;
 
 		return;
 	}
+
+	p->version.master = 0;
 
 	// Advance eventual master.
 	if (self_n == 0) {
