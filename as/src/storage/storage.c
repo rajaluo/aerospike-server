@@ -103,7 +103,7 @@ as_storage_init()
 
 	uint64_t rand_ckey;
 
-	while ((rand_ckey = (cf_get_rand64() >> 8)) == 0) {
+	while ((rand_ckey = (cf_get_rand64() >> 16)) == 0) {
 		;
 	}
 

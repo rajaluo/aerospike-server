@@ -80,22 +80,22 @@ extern const as_partition_vinfo NULL_VINFO;
 // End - XXX JUMP - remove in "six months".
 //------------------------------------------------
 
-#define VERSION_FAMILY_BITS 3
+#define VERSION_FAMILY_BITS 4
 #define VERSION_FAMILY_UNIQUE ((1 << VERSION_FAMILY_BITS) - 1)
 #define AS_PARTITION_N_FAMILIES VERSION_FAMILY_UNIQUE
 
 #define AS_PARTITION_FLAG_EMPTY 0x1
 
 typedef struct as_partition_version_s {
-	uint64_t ckey:56;
+	uint64_t ckey:48;
 	uint64_t family:VERSION_FAMILY_BITS;
-	uint64_t unused:3;
+	uint64_t unused:10;
 	uint64_t subset:1;
 	uint64_t evade:1;
 } as_partition_version;
 
 typedef struct as_partition_version_string_s {
-	char s[18 + 1]; // format ccCCCCccccCCCC.Fse
+	char s[16 + 1]; // format CCCCccccCCCC.Fse
 } as_partition_version_string;
 
 typedef struct as_partition_s {
@@ -278,7 +278,7 @@ as_partition_version_as_string(const as_partition_version* version)
 {
 	as_partition_version_string str;
 
-	sprintf(str.s, "%014lx.%c%c%c", (uint64_t)version->ckey,
+	sprintf(str.s, "%012lx.%c%c%c", (uint64_t)version->ckey,
 			version->family == VERSION_FAMILY_UNIQUE ?
 					'U' : '0' + version->family,
 			version->subset == 0 ? 'p' : 's',

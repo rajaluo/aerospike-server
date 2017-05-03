@@ -1513,8 +1513,8 @@ void as_paxos_start_second_phase()
 	 */
 	uint64_t cluster_key = 0;
 
-	// Generate a non-zero cluster key that fits in 7 bytes.
-	while ((cluster_key = (cf_get_rand64() >> 8)) == 0) {
+	// Generate a non-zero cluster key that fits in 6 bytes.
+	while ((cluster_key = (cf_get_rand64() >> 16)) == 0) {
 		;
 	}
 
@@ -3721,8 +3721,8 @@ as_paxos_start()
 {
 	uint64_t cluster_key;
 
-	// Generate a non-zero cluster key that fits in 7 bytes.
-	while ((cluster_key = (cf_get_rand64() >> 8)) == 0) {
+	// Generate a non-zero cluster key that fits in 6 bytes.
+	while ((cluster_key = (cf_get_rand64() >> 16)) == 0) {
 		;
 	}
 

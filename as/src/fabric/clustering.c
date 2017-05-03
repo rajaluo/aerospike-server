@@ -2757,8 +2757,8 @@ clustering_cluster_key_generate(as_cluster_key current_cluster_key)
 	// Generate one uuid and use this for the cluster key
 	as_cluster_key cluster_key = 0;
 
-	// Generate a non-zero cluster key that fits in 7 bytes.
-	while ((cluster_key = (cf_get_rand64() >> 8)) == 0
+	// Generate a non-zero cluster key that fits in 6 bytes.
+	while ((cluster_key = (cf_get_rand64() >> 16)) == 0
 			|| cluster_key == current_cluster_key) {
 		;
 	}
