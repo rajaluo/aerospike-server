@@ -951,7 +951,7 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 	case AS_PREDEXP_GEOJSON_VALUE: type = AS_PARTICLE_TYPE_GEOJSON; break;
 	default:
 		cf_crash(AS_PREDEXP, "build_value called with bogus tag: %d", tag);
-		break;
+		return false;
 	}
 
 	predexp_eval_base_init((predexp_eval_t *) dp,
@@ -1014,19 +1014,16 @@ build_value(predexp_eval_t** stackpp, uint32_t len, uint8_t* pp, uint16_t tag)
 				 (int64_t) dp->bin.particle);
 		break;
 	case AS_PREDEXP_STRING_VALUE: {
-		char* tmpstr = cf_strndup(valptr, vallen);
 		cf_debug(AS_PREDEXP, "%p: predexp_string_value(\"%s\")", stackpp,
-				 tmpstr);
-		cf_free(tmpstr);
+				 CF_ZSTR1K(valptr, vallen));
 		break;
 	}
 	case AS_PREDEXP_GEOJSON_VALUE: {
 		size_t jsonsz;
 		char const * jsonptr =
 			as_geojson_mem_jsonstr(dp->bin.particle, &jsonsz);
-		char* tmpstr = cf_strndup(jsonptr, jsonsz);
-		cf_debug(AS_PREDEXP, "%p: predexp_geojson_value(%s)", stackpp, tmpstr);
-		cf_free(tmpstr);
+		cf_debug(AS_PREDEXP, "%p: predexp_geojson_value(%s)", stackpp,
+				CF_ZSTR1K(jsonptr, jsonsz));
 		break;
 	}
 	default:

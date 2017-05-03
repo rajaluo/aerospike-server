@@ -960,7 +960,7 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 
 	if (! f || as_msg_field_get_value_sz(f) == 0) {
 		if (set_name) {
-			cf_warning_digest(AS_RW, &tr->keyd, "op overwriting record in set '%s' has no set name ",
+			cf_warning_digest(AS_RW, &tr->keyd, "overwriting record in set '%s' but msg has no set name ",
 					set_name);
 		}
 
@@ -972,12 +972,10 @@ check_msg_set_name(as_transaction* tr, const char* set_name)
 	if (! set_name ||
 			strncmp(set_name, (const char*)f->data, msg_set_name_len) != 0 ||
 			set_name[msg_set_name_len] != 0) {
-		char msg_set_name[msg_set_name_len + 1];
+		CF_ZSTR_DEFINE(msg_set_name, AS_SET_NAME_MAX_SIZE + 4, f->data,
+				msg_set_name_len);
 
-		memcpy((void*)msg_set_name, (const void*)f->data, msg_set_name_len);
-		msg_set_name[msg_set_name_len] = 0;
-
-		cf_warning_digest(AS_RW, &tr->keyd, "op overwriting record in set '%s' has different set name '%s' ",
+		cf_warning_digest(AS_RW, &tr->keyd, "overwriting record in set '%s' but msg has different set name '%s' ",
 				set_name ? set_name : "(null)", msg_set_name);
 		return false;
 	}

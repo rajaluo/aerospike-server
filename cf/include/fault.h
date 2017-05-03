@@ -71,6 +71,62 @@ do { \
 	} \
 } while (false);
 
+// Use CF_ZSTR_DEFINE() to null-terminate strings conveniently.
+//
+// e.g.
+// CF_ZSTR_DEFINE(zstr, 40, ns_name, name_sz);
+// cf_warning(AS_NAMESPACE, "got namespace %s", zstr);
+//
+#define CF_ZSTR_DEFINE(zstr, max_sz, str, sz) \
+		char zstr[max_sz]; \
+		size_t zstr##len = sz < max_sz ? sz : max_sz - 1; \
+		memcpy(zstr, str, zstr##len); \
+		zstr[zstr##len] = 0;
+
+// Use CF_ZSTRxx() to null-terminate strings conveniently. Useful especially as
+// cf_detail & cf_debug parameters where there's no cost unless the log level
+// is enabled. (Cost may be more than CF_ZSTR_DEFINE() due to copying struct on
+// function return.)
+//
+// e.g.
+// cf_debug(AS_NAMESPACE, "got namespace %s", CF_ZSTR64(ns_name, name_sz));
+//
+
+typedef struct cf_zstr64_s {
+	char s[64];
+} cf_zstr64;
+
+typedef struct cf_zstr1k_s {
+	char s[1024];
+} cf_zstr1k;
+
+static inline cf_zstr64
+cf_null_terminate_64(const char *str, size_t sz)
+{
+	cf_zstr64 zstr;
+	uint32_t len = sz < sizeof(zstr.s) ? sz : sizeof(zstr.s) - 1;
+
+	memcpy(zstr.s, str, len);
+	zstr.s[len] = 0;
+
+	return zstr;
+}
+
+static inline cf_zstr1k
+cf_null_terminate_1k(const char *str, size_t sz)
+{
+	cf_zstr1k zstr;
+	uint32_t len = sz < sizeof(zstr.s) ? sz : sizeof(zstr.s) - 1;
+
+	memcpy(zstr.s, str, len);
+	zstr.s[len] = 0;
+
+	return zstr;
+}
+
+#define CF_ZSTR64(str, sz) (cf_null_terminate_64((const char *)str, sz).s)
+#define CF_ZSTR1K(str, sz) (cf_null_terminate_1k((const char *)str, sz).s)
+
 
 /* SYNOPSIS
  * Fault scoping

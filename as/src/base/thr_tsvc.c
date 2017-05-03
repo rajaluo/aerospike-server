@@ -215,12 +215,8 @@ as_tsvc_process_transaction(as_transaction *tr)
 	as_namespace *ns = as_namespace_get_bymsgfield(nf);
 
 	if (! ns) {
-		char ns_name[AS_ID_NAMESPACE_SZ];
 		uint32_t ns_sz = as_msg_field_get_value_sz(nf);
-		uint32_t len = ns_sz < sizeof(ns_name) ? ns_sz : sizeof(ns_name) - 1;
-
-		memcpy(ns_name, nf->data, len);
-		ns_name[len] = 0;
+		CF_ZSTR_DEFINE(ns_name, AS_ID_NAMESPACE_SZ, nf->data, ns_sz);
 
 		cf_warning(AS_TSVC, "unknown namespace %s (%u) in protocol request - check configuration file",
 				ns_name, ns_sz);
