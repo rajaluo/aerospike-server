@@ -749,7 +749,8 @@ as_batch_queue_task(as_transaction* btr)
 
 	// Read batch keys and initialize generic transactions.
 	as_batch_input* in;
-	cl_msg* out = 0;
+	cl_msg* out = NULL;
+	cl_msg* prev_msgp = NULL;
 	as_msg_op* op;
 	uint32_t tran_row = 0;
 	uint8_t info = *data++;  // allow transaction inline.
@@ -775,8 +776,13 @@ as_batch_queue_task(as_transaction* btr)
 		tr.benchmark_time = 0; // reset in case of previous usage
 
 		if (in->repeat) {
+			if (! prev_msgp) {
+				break; // bad bytes from client - repeat set on first item
+			}
+
 			// Row should use previous namespace and bin names.
 			data += BATCH_REPEAT_SIZE;
+			tr.msgp = prev_msgp;
 		}
 		else {
 			// Row contains full namespace/bin names.
@@ -851,6 +857,7 @@ as_batch_queue_task(as_transaction* btr)
 			out->proto.type = PROTO_TYPE_AS_MSG;
 			out->proto.sz = (data - (uint8_t*)&out->msg);
 			tr.msgp = out;
+			prev_msgp = out;
 		}
 
 		if (data > limit) {
