@@ -118,6 +118,7 @@ as_storage_init()
 			pthread_mutex_lock(&p->lock);
 
 			p->final_version = new_version;
+			p->final_version.master = p->replicas[0] == g_config.self_node ? 1 : 0;
 
 			// Cross-over from old vinfo world to new version world.
 			if (! as_partition_is_null(&p->version_info)) {

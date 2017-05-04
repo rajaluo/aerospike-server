@@ -279,12 +279,19 @@ as_partition_version_as_string(const as_partition_version* version)
 {
 	as_partition_version_string str;
 
-	sprintf(str.s, "%012lx.%c%c%c%c", (uint64_t)version->ckey,
-			version->family == VERSION_FAMILY_UNIQUE ?
-					'U' : '0' + version->family,
-			version->master == 0 ? '-' : 'm',
-			version->subset == 0 ? 'p' : 's',
-			version->evade == 0 ? '-' : 'e');
+	if (version->family == VERSION_FAMILY_UNIQUE) {
+		sprintf(str.s, "%012lx.U.%c%c%c", (uint64_t)version->ckey,
+				version->master == 0 ? '-' : 'm',
+				version->subset == 0 ? 'p' : 's',
+				version->evade == 0 ? '-' : 'e');
+	}
+	else {
+		sprintf(str.s, "%012lx.%X.%c%c%c", (uint64_t)version->ckey,
+				(uint32_t)version->family,
+				version->master == 0 ? '-' : 'm',
+				version->subset == 0 ? 'p' : 's',
+				version->evade == 0 ? '-' : 'e');
+	}
 
 	return str;
 }
@@ -298,7 +305,11 @@ as_partition_version_is_null(const as_partition_version* version)
 static inline bool
 as_partition_version_same(const as_partition_version* v1, const as_partition_version* v2)
 {
-	return *(const uint64_t*)v1 == *(const uint64_t*)v2;
+	return v1->ckey == v2->ckey &&
+			v1->family == v2->family &&
+			// Note - master flag not included in definition of "same".
+			v1->subset == v2->subset &&
+			v1->evade == v2->evade;
 }
 
 static inline uint32_t

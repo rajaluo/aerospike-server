@@ -337,7 +337,6 @@ as_partition_balance_init()
 					version.master = 0;
 					version.subset = 1;
 
-					p->final_version = version;
 					p->version = version;
 
 					ns->cluster_versions[0][pid] = version;
@@ -733,9 +732,11 @@ as_partition_immigrate_done(as_namespace* ns, uint32_t pid,
 
 	if (p->origin == source_node) {
 		p->origin = (cf_node)0;
-		p->version = p->final_version;
-		p->version.master = 1;
-		set_partition_version_in_storage(ns, p->id, &p->version, true);
+
+		if (! as_partition_version_same(&p->version, &p->final_version)) {
+			p->version = p->final_version;
+			set_partition_version_in_storage(ns, p->id, &p->version, true);
+		}
 	}
 	else {
 		p->n_dupl = remove_node(p->dupls, p->n_dupl, source_node);
@@ -1086,11 +1087,13 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 
 		p->current_outgoing_ldt_version = 0;
 
+		uint32_t self_n = find_self(ns_node_seq, ns);
+
 		as_partition_version final_version = { .ckey = p->cluster_key };
 
 		p->final_version = final_version;
+		p->final_version.master = self_n == 0 ? 1 : 0;
 
-		uint32_t self_n = find_self(ns_node_seq, ns);
 		int working_master_n = find_working_master(p, ns_sl_ix, ns);
 
 		uint32_t n_dupl = 0;
@@ -1108,10 +1111,6 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 
 			if (self_n < p->n_replicas) {
 				p->version = p->final_version;
-
-				if (self_n == 0) {
-					p->version.master = 1;
-				}
 			}
 		}
 		else {
@@ -1139,10 +1138,6 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 				// Refresh replicas' versions.
 				if (self_n < p->n_replicas) {
 					p->version = p->final_version;
-
-					if (self_n == 0) {
-						p->version.master = 1;
-					}
 				}
 			}
 
@@ -1837,6 +1832,7 @@ as_partition_balance_jump_versions()
 			pthread_mutex_lock(&p->lock);
 
 			p->final_version = new_version;
+			p->final_version.master = is_self_final_master(p) ? 1 : 0;
 
 			// Cross-over from old vinfo world to new version world.
 			if (! as_partition_is_null(&p->version_info)) {
