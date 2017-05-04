@@ -96,7 +96,7 @@ typedef struct as_partition_version_s {
 } as_partition_version;
 
 typedef struct as_partition_version_string_s {
-	char s[17 + 1]; // format CCCCccccCCCC.Fmse
+	char s[19 + 1]; // format CCCCccccCCCC.F.mse - F may someday be 2 characters
 } as_partition_version_string;
 
 typedef struct as_partition_s {
