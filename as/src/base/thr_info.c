@@ -1778,8 +1778,8 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "info-threads", g_config.n_info_threads);
 	info_append_bool(db, "ldt-benchmarks", g_config.ldt_benchmarks);
 	info_append_bool(db, "log-local-time", cf_fault_is_using_local_time());
-	info_append_int(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
-	info_append_int(db, "migrate-threads", g_config.n_migrate_threads);
+	info_append_uint32(db, "migrate-max-num-incoming", g_config.migrate_max_num_incoming);
+	info_append_uint32(db, "migrate-threads", g_config.n_migrate_threads);
 	info_append_uint32(db, "min-cluster-size", g_config.clustering_config.cluster_size_min);
 	info_append_string_safe(db, "node-id-interface", g_config.node_id_interface);
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
@@ -2346,15 +2346,25 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of cluster-name to '%s'", context);
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-max-num-incoming", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || (0 > val))
+			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
-			cf_info(AS_INFO, "Changing value of migrate-max-num-incoming from %d to %d ", g_config.migrate_max_num_incoming, val);
-			g_config.migrate_max_num_incoming = val;
+			}
+			if ((uint32_t)val > AS_MIGRATE_LIMIT_MAX_NUM_INCOMING) {
+				cf_warning(AS_INFO, "migrate-max-num-incoming %d must be >= 0 and <= %u", val, AS_MIGRATE_LIMIT_MAX_NUM_INCOMING);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of migrate-max-num-incoming from %u to %d ", g_config.migrate_max_num_incoming, val);
+			g_config.migrate_max_num_incoming = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "migrate-threads", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || (0 > val) || (MAX_NUM_MIGRATE_XMIT_THREADS < val))
+			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
-			cf_info(AS_INFO, "Changing value of migrate-threads from %d to %d ", g_config.n_migrate_threads, val);
+			}
+			if ((uint32_t)val > MAX_NUM_MIGRATE_XMIT_THREADS) {
+				cf_warning(AS_INFO, "migrate-threads %d must be >= 0 and <= %u", val, MAX_NUM_MIGRATE_XMIT_THREADS);
+				goto Error;
+			}
+			cf_info(AS_INFO, "Changing value of migrate-threads from %u to %d ", g_config.n_migrate_threads, val);
 			as_migrate_set_num_xmit_threads(val);
 		}
 		else if (0 == as_info_parameter_get(params, "min-cluster-size", context, &context_len)) {

@@ -260,7 +260,7 @@ as_migrate_init()
 	pthread_attr_init(&attrs);
 	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
 
-	for (int i = 0; i < g_config.n_migrate_threads; i++) {
+	for (uint32_t i = 0; i < g_config.n_migrate_threads; i++) {
 		if (pthread_create(&thread, &attrs, run_emigration, NULL) != 0) {
 			cf_crash(AS_MIGRATE, "failed to create emigration thread");
 		}
@@ -360,7 +360,7 @@ as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version,
 
 // Called via info command. Caller has sanity-checked n_threads.
 void
-as_migrate_set_num_xmit_threads(int n_threads)
+as_migrate_set_num_xmit_threads(uint32_t n_threads)
 {
 	if (g_config.n_migrate_threads > n_threads) {
 		// Decrease the number of migrate transmit threads to n_threads.

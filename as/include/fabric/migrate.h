@@ -47,11 +47,10 @@ struct as_namespace_s;
 // For receiver-side migration flow-control.
 // TODO - move to namespace? Go even lower than 4?
 #define AS_MIGRATE_DEFAULT_MAX_NUM_INCOMING 4
+#define AS_MIGRATE_LIMIT_MAX_NUM_INCOMING 64
 
-/*
- *  Maximum permissible number of migrate xmit threads.
- */
-#define MAX_NUM_MIGRATE_XMIT_THREADS  (100)
+// Maximum permissible number of migrate xmit threads.
+#define MAX_NUM_MIGRATE_XMIT_THREADS 100
 
 typedef enum {
 	EMIG_TYPE_TRANSFER,
@@ -84,7 +83,7 @@ typedef struct partition_migrate_record_s {
 void as_migrate_init();
 void as_migrate_emigrate(const partition_migrate_record *pmr);
 bool as_migrate_is_incoming(cf_digest *subrec_digest, uint64_t version, uint32_t partition_id, int state);
-void as_migrate_set_num_xmit_threads(int n_threads);
+void as_migrate_set_num_xmit_threads(uint32_t n_threads);
 void as_migrate_dump(bool verbose);
 
 

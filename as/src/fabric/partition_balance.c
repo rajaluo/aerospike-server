@@ -643,7 +643,7 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		return AS_MIGRATE_AGAIN;
 	}
 
-	int64_t num_incoming = cf_atomic32_incr(&g_migrate_num_incoming);
+	uint32_t num_incoming = (uint32_t)cf_atomic32_incr(&g_migrate_num_incoming);
 
 	if (num_incoming > g_config.migrate_max_num_incoming) {
 		cf_atomic32_decr(&g_migrate_num_incoming);
@@ -2031,7 +2031,7 @@ old_as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 		return AS_MIGRATE_AGAIN;
 	}
 
-	int64_t num_incoming = cf_atomic32_incr(&g_migrate_num_incoming);
+	uint32_t num_incoming = (uint32_t)cf_atomic32_incr(&g_migrate_num_incoming);
 
 	if (num_incoming > g_config.migrate_max_num_incoming) {
 		cf_atomic32_decr(&g_migrate_num_incoming);

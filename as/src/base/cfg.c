@@ -2213,10 +2213,10 @@ as_config_init(const char* config_file)
 				cf_fault_log_millis(cfg_bool(&line));
 				break;
 			case CASE_SERVICE_MIGRATE_MAX_NUM_INCOMING:
-				c->migrate_max_num_incoming = cfg_int(&line, 0, INT_MAX);
+				c->migrate_max_num_incoming = cfg_u32(&line, 0, AS_MIGRATE_LIMIT_MAX_NUM_INCOMING);
 				break;
 			case CASE_SERVICE_MIGRATE_THREADS:
-				c->n_migrate_threads = cfg_int(&line, 0, MAX_NUM_MIGRATE_XMIT_THREADS);
+				c->n_migrate_threads = cfg_u32(&line, 0, MAX_NUM_MIGRATE_XMIT_THREADS);
 				break;
 			case CASE_SERVICE_MIN_CLUSTER_SIZE:
 				c->clustering_config.cluster_size_min = cfg_u32(&line, 0, AS_CLUSTER_SZ);
