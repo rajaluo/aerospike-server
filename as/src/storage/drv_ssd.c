@@ -2789,9 +2789,24 @@ ssd_record_add(drv_ssds* ssds, drv_ssd* ssd, drv_ssd_block* block,
 	}
 
 	// Get/create the record from/in the appropriate index tree.
-	int rv = as_record_get_create(
-			is_ldt_sub ? p_partition->sub_vp : p_partition->vp,
-					&block->keyd, &r_ref, ns, is_ldt_sub);
+	int rv;
+	int retries = 0;
+
+	while (true) {
+		if ((rv = as_record_get_create(
+				is_ldt_sub ? p_partition->sub_vp : p_partition->vp,
+						&block->keyd, &r_ref, ns, is_ldt_sub)) != -1) {
+			break;
+		}
+
+		// rv = -1 - race can occur if versions of this record are on more than
+		// one drive - wait for other thread to finish create.
+		usleep(50);
+
+		if (++retries % 20000 == 0) {
+			cf_warning_digest(AS_DRV_SSD, &block->keyd, "record-add as_record_get_create() stuck ");
+		}
+	}
 
 	if (rv < 0) {
 		cf_warning_digest(AS_DRV_SSD, &block->keyd, "record-add as_record_get_create() failed ");

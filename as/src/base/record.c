@@ -86,13 +86,11 @@ as_record_rescue(as_index_ref *r_ref, as_namespace *ns)
 	cf_atomic64_incr(&ns->n_objects);
 }
 
-/* as_record_get_create
- * Instantiate a new as_record in a namespace (no bins though)
- * AND CREATE IF IT DOESN"T EXIST
- * returns -1 if fail
- * 0 if successful find
- * 1 if successful but CREATE
- */
+// Returns:
+//  1 - created new record
+//  0 - found existing record
+// -1 - failure - found "half created" or deleted record
+// -2 - failure - could not allocate arena stage
 int
 as_record_get_create(as_index_tree *tree, cf_digest *keyd, as_index_ref *r_ref, as_namespace *ns, bool is_subrec)
 {
