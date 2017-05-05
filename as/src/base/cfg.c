@@ -1367,9 +1367,11 @@ const char* CFG_PARSER_STATES[] = {
 		"XDR_SEC_CREDENTIALS"
 };
 
+#define MAX_STACK_DEPTH 8
+
 typedef struct cfg_parser_state_s {
 	as_config_parser_state	current;
-	as_config_parser_state	stack[8];
+	as_config_parser_state	stack[MAX_STACK_DEPTH];
 	int						depth;
 } cfg_parser_state;
 
@@ -1389,7 +1391,7 @@ cfg_begin_context(cfg_parser_state* p_state, as_config_parser_state context)
 
 	as_config_parser_state prev_context = p_state->stack[p_state->depth];
 
-	if (++p_state->depth >= (int)sizeof(p_state->stack)) {
+	if (++p_state->depth >= MAX_STACK_DEPTH) {
 		cf_crash(AS_CFG, "parsing - context too deep");
 	}
 
@@ -4654,7 +4656,7 @@ cfg_resolve_tls_name(as_config *cfg)
 		cfg->tls_name = cf_strdup(hostname);
 	}
 	else if (strcmp(cfg->tls_name, "<cluster-name>") == 0) {
-		if (! cfg->cluster_name || strlen(cfg->cluster_name) == 0) {
+		if (strlen(cfg->cluster_name) == 0) {
 			cf_crash_nostack
 				(AS_CFG, "can't resolve tls-name to non-existent cluster-name");
 		}
