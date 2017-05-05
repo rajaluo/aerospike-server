@@ -2344,8 +2344,8 @@ fabric_rate_fc_reduce_fn(const void *key, void *data, void *udata)
 	}
 
 	uint32_t pool_id = fc->pool->pool_id;
-	uint32_t r_bytes = fc->r_bytes;
-	uint32_t s_bytes = fc->s_bytes;
+	uint64_t r_bytes = fc->r_bytes;
+	uint64_t s_bytes = fc->s_bytes;
 
 	rate->r_bytes[pool_id] += r_bytes - fc->r_bytes_last;
 	rate->s_bytes[pool_id] += s_bytes - fc->s_bytes_last;
