@@ -752,6 +752,7 @@ as_record_component_winner(as_partition_reservation *rsv, int n_components,
 		if (-1 == as_record_resolve_conflict(rsv->ns->conflict_resolution_policy,
 				c->generation, c->last_update_time, c->void_time,
 				max_generation, max_last_update_time, max_void_time)) {
+					max_last_update_time = c->last_update_time;
 					max_void_time = c->void_time;
 					max_generation = c->generation;
 					winner_idx = (int32_t)i;
