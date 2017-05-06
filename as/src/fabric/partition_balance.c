@@ -663,6 +663,7 @@ as_partition_immigrate_start(as_namespace* ns, uint32_t pid,
 					p->version.family == 0 && p->version.subset == 1)) {
 		p->version.ckey = p->final_version.ckey;
 		p->version.family = 0;
+		p->version.master = 0; // racing emigrate done if we were acting master
 		p->version.subset = 1;
 		// Leave evade flag as-is.
 
