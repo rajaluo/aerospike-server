@@ -1182,6 +1182,7 @@ aggr_scan_add_digest(cf_ll* ll, cf_digest* keyd)
 		}
 
 		if (! (tail_e = cf_malloc(sizeof(as_index_keys_ll_element)))) {
+			cf_free(keys_arr);
 			return false;
 		}
 

@@ -5055,6 +5055,8 @@ info_node_info_reduce_fn(const void *key, void *data, void *udata)
 
 		msg *m = as_fabric_msg_get(M_TYPE_INFO);
 		if (0 == m) {
+			pthread_mutex_unlock(&g_serv_lock);
+
 			cf_debug(AS_INFO, " could not get fabric message");
 			return(-1);
 		}

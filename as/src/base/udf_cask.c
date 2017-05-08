@@ -436,15 +436,24 @@ int udf_cask_info_put(char *name, char * params, cf_dyn_buf * out) {
 	if ( decoded_len > MAX_UDF_CONTENT_LENGTH) {
 		cf_info(AS_INFO, "lua file size:%d > 1MB", decoded_len);
 		cf_dyn_buf_append_string(out, "error=invalid_udf_content_len, lua file size > 1MB");
+		cf_free(udf_content);
 		return 0;
 	}
 
 	char * decoded_str = cf_malloc(decoded_len);
 
+	if ( ! decoded_str ) {
+		cf_info(AS_UDF, "internal allocation error");
+		cf_dyn_buf_append_string(out, "error=internal_error");
+		cf_free(udf_content);
+		return 0;
+	}
+
 	if ( ! cf_b64_validate_and_decode(udf_content, encoded_len, (uint8_t*)decoded_str, &decoded_len) ) {
 		cf_info(AS_UDF, "invalid base64 content %s", filename);
 		cf_dyn_buf_append_string(out, "error=invalid_base64_content");
 		cf_free(decoded_str);
+		cf_free(udf_content);
 		return 0;
 	}
 
@@ -482,17 +491,19 @@ int udf_cask_info_put(char *name, char * params, cf_dyn_buf * out) {
 	json_t *udf_obj = 0;
 	if (!(udf_obj = json_object())) {
 		cf_warning(AS_UDF, "failed to create JSON array for receiving UDF");
-		if (udf_content) cf_free(udf_content);
+		cf_free(udf_content);
 		return -1;
 	}
 	int e = 0;
 	e += json_object_set_new(udf_obj, "content64", json_string(udf_content));
 	e += json_object_set_new(udf_obj, "type", json_string(type));
 	e += json_object_set_new(udf_obj, "name", json_string(filename));
+
+	cf_free(udf_content);
+
 	if (e) {
 		cf_warning(AS_UDF, "could not encode UDF object, error %d", e);
 		json_decref(udf_obj);
-		if (udf_content) cf_free(udf_content);
 		return(-1);
 	}
 	// make it into a string, yet another buffer copy
@@ -507,7 +518,6 @@ int udf_cask_info_put(char *name, char * params, cf_dyn_buf * out) {
 	if (e) {
 		cf_warning(AS_UDF, "could not add UDF metadata, error %d", e);
 		cf_free(udf_obj_str);
-		if (udf_content) cf_free(udf_content);
 		return(-1);
 	}
 
@@ -516,8 +526,6 @@ int udf_cask_info_put(char *name, char * params, cf_dyn_buf * out) {
 	// free the metadata
 	cf_free(udf_obj_str);
 	udf_obj_str = 0;
-
-	if (udf_content) cf_free(udf_content);
 
 	return 0;
 }
@@ -721,7 +729,7 @@ udf_cask_init()
 	if ( dir == 0 ) {
 		cf_crash(AS_UDF, "cask init: could not open udf directory %s: %s", g_config.mod_lua.user_path, cf_strerror(errno));
 	}
-	while ( (entry = readdir(dir)) && entry->d_name) {
+	while ( (entry = readdir(dir))) {
 		// readdir also reads "." and ".." entries.
 		if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, ".."))
 		{
