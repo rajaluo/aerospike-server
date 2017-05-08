@@ -441,7 +441,7 @@ as_partition_balance()
 	cf_assert(full_node_seq_table, AS_PARTITION, "as_partition_balance: couldn't allocate node sequence table");
 
 	uint32_t* full_sl_ix_table =
-			cf_malloc(AS_PARTITIONS * g_cluster_size * sizeof(int));
+			cf_malloc(AS_PARTITIONS * g_cluster_size * sizeof(uint32_t));
 
 	cf_assert(full_sl_ix_table, AS_PARTITION, "as_partition_balance: couldn't allocate succession index table");
 
