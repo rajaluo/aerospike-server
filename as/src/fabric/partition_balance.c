@@ -814,7 +814,7 @@ as_partition_migrations_all_done(as_namespace* ns, uint32_t pid,
 	// Not a replica - drop partition.
 	if (! is_self_replica(p)) {
 		p->version = ZERO_VERSION;
-		set_partition_version_in_storage(ns, p->id, &p->version, false);
+		set_partition_version_in_storage(ns, p->id, &p->version, true);
 		drop_trees(p, ns);
 	}
 
