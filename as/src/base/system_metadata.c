@@ -842,7 +842,8 @@ smd_msg_read_items(as_smd_msg_t *sm, const msg *m, const cf_vector *mod_vec,
 			item->module_name = cf_strndup((const char *)p_mod->ptr, p_mod->sz);
 
 			const msg_buf_ele *p_key = cf_vector_getp(key_vec, msg_idx);
-			const msg_buf_ele *p_value = cf_vector_getp(value_vec, msg_idx);
+			const msg_buf_ele *p_value = (msg_idx < cf_vector_size(value_vec)) ?
+					cf_vector_getp(value_vec, msg_idx) : NULL;
 
 			if (! p_key->ptr) {
 				cf_warning(AS_SMD, "invalid packed key at %u/%u", msg_idx, sm->num_items);
@@ -850,7 +851,7 @@ smd_msg_read_items(as_smd_msg_t *sm, const msg *m, const cf_vector *mod_vec,
 			}
 
 			item->key = cf_strndup((const char *)p_key->ptr, p_key->sz);
-			item->value = p_value->ptr ?
+			item->value = (p_value && p_value->ptr) ?
 					cf_strndup((const char *)p_value->ptr, p_value->sz) : NULL;
 
 			item->generation = gen_list[msg_idx];
