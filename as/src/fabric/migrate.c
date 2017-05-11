@@ -71,7 +71,7 @@
 
 const msg_template migrate_mt[] = {
 		{ MIG_FIELD_OP, M_FT_UINT32 },
-		{ MIG_FIELD_EMIG_INSERT_ID, M_FT_UINT32 },
+		{ MIG_FIELD_EMIG_INSERT_ID_OLD, M_FT_UINT32 }, // XXX JUMP - recycle in "six months"
 		{ MIG_FIELD_EMIG_ID, M_FT_UINT32 },
 		{ MIG_FIELD_NAMESPACE, M_FT_BUF },
 		{ MIG_FIELD_PARTITION, M_FT_UINT32 },
@@ -98,7 +98,8 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_PARTITION_SIZE, M_FT_UINT64 },
 		{ MIG_FIELD_SET_NAME, M_FT_BUF },
 		{ MIG_FIELD_KEY, M_FT_BUF },
-		{ MIG_FIELD_LDT_BITS, M_FT_UINT32 }
+		{ MIG_FIELD_LDT_BITS, M_FT_UINT32 },
+		{ MIG_FIELD_EMIG_INSERT_ID, M_FT_UINT64 }
 };
 
 COMPILER_ASSERT(sizeof(migrate_mt) / sizeof(msg_template) == NUM_MIG_FIELDS);
@@ -162,7 +163,6 @@ cf_rchash *g_immigration_hash = NULL;
 
 static uint64_t g_avoid_dest = 0;
 static cf_atomic32 g_emigration_id = 0;
-static cf_atomic32 g_emigration_insert_id = 0;
 static cf_queue g_emigration_q;
 static shash *g_immigration_ldt_version_hash;
 
@@ -300,6 +300,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr)
 	// Create these later only when we need them - we'll get lots at once.
 	emig->bytes_emigrating = 0;
 	emig->reinsert_hash = NULL;
+	emig->insert_id = 0;
 	emig->ctrl_q = NULL;
 	emig->meta_q = NULL;
 
@@ -409,8 +410,6 @@ as_migrate_dump(bool verbose)
 	cf_info(AS_MIGRATE, "number of immigrations in g_immigration_hash: %d",
 			cf_rchash_get_size(g_immigration_hash));
 	cf_info(AS_MIGRATE, "current emigration id: %d", g_emigration_id);
-	cf_info(AS_MIGRATE, "current emigration insert id: %d",
-			g_emigration_insert_id);
 
 	if (verbose) {
 		int item_num = 0;
@@ -443,7 +442,7 @@ as_migrate_dump(bool verbose)
 void
 emigration_init(emigration *emig)
 {
-	shash_create(&emig->reinsert_hash, cf_shash_fn_u32, sizeof(uint32_t),
+	shash_create(&emig->reinsert_hash, cf_shash_fn_u32, sizeof(uint64_t),
 			sizeof(emigration_reinsert_ctrl), 16 * 1024, SHASH_CR_MT_MANYLOCK);
 
 	cf_assert(emig->reinsert_hash, AS_MIGRATE, "failed to create hash");
@@ -1001,9 +1000,14 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 bool
 emigrate_record(emigration *emig, msg *m)
 {
-	uint32_t insert_id = cf_atomic32_incr(&g_emigration_insert_id);
+	uint64_t insert_id = emig->insert_id++;
 
-	msg_set_uint32(m, MIG_FIELD_EMIG_INSERT_ID, insert_id);
+	if (as_new_clustering()) {
+		msg_set_uint64(m, MIG_FIELD_EMIG_INSERT_ID, insert_id);
+	}
+	else {
+		msg_set_uint32(m, MIG_FIELD_EMIG_INSERT_ID_OLD, (uint32_t)insert_id);
+	}
 
 	emigration_reinsert_ctrl ri_ctrl;
 
@@ -1760,7 +1764,9 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		immigration_release(immig);
 	}
 
-	msg_preserve_fields(m, 2, MIG_FIELD_EMIG_INSERT_ID, MIG_FIELD_EMIG_ID);
+	msg_preserve_fields(m, 2, as_new_clustering() ?
+			MIG_FIELD_EMIG_INSERT_ID : MIG_FIELD_EMIG_INSERT_ID_OLD,
+			MIG_FIELD_EMIG_ID);
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
 
@@ -1921,13 +1927,27 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 		return;
 	}
 
-	uint32_t insert_id;
+	uint64_t insert_id;
 
-	if (msg_get_uint32(m, MIG_FIELD_EMIG_INSERT_ID, &insert_id) != 0) {
-		cf_warning(AS_MIGRATE, "insert ack: msg get for emig insert id failed");
-		emigration_release(emig);
-		as_fabric_msg_put(m);
-		return;
+	if (as_new_clustering()) {
+		if (msg_get_uint64(m, MIG_FIELD_EMIG_INSERT_ID, &insert_id) != 0) {
+			cf_warning(AS_MIGRATE, "insert ack: msg get for emig insert id failed");
+			emigration_release(emig);
+			as_fabric_msg_put(m);
+			return;
+		}
+	}
+	else {
+		uint32_t in_id;
+
+		if (msg_get_uint32(m, MIG_FIELD_EMIG_INSERT_ID_OLD, &in_id) != 0) {
+			cf_warning(AS_MIGRATE, "insert ack: msg get for emig insert id failed");
+			emigration_release(emig);
+			as_fabric_msg_put(m);
+			return;
+		}
+
+		insert_id = (uint64_t)in_id;
 	}
 
 	emigration_reinsert_ctrl *ri_ctrl = NULL;

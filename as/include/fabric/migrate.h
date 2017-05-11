@@ -94,7 +94,7 @@ void as_migrate_dump(bool verbose);
 typedef enum {
 	// These values go on the wire, so mind backward compatibility if changing.
 	MIG_FIELD_OP,
-	MIG_FIELD_EMIG_INSERT_ID,
+	MIG_FIELD_EMIG_INSERT_ID_OLD, // XXX JUMP - recycle in "six months"
 	MIG_FIELD_EMIG_ID,
 	MIG_FIELD_NAMESPACE,
 	MIG_FIELD_PARTITION,
@@ -122,6 +122,7 @@ typedef enum {
 	MIG_FIELD_SET_NAME,
 	MIG_FIELD_KEY,
 	MIG_FIELD_LDT_BITS,
+	MIG_FIELD_EMIG_INSERT_ID,
 
 	NUM_MIG_FIELDS
 } migrate_msg_fields;
@@ -188,6 +189,7 @@ typedef struct emigration_s {
 
 	cf_atomic32 bytes_emigrating;
 	shash       *reinsert_hash;
+	uint64_t    insert_id;
 	cf_queue    *ctrl_q;
 	emig_meta_q *meta_q;
 
