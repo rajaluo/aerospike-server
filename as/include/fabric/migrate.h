@@ -176,6 +176,7 @@ typedef struct emigration_s {
 
 	cf_atomic32 bytes_emigrating;
 	shash       *reinsert_hash;
+	uint32_t    insert_id;
 	cf_queue    *ctrl_q;
 	emig_meta_q *meta_q;
 

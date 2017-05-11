@@ -155,7 +155,6 @@ cf_rchash *g_immigration_hash = NULL;
 
 static uint64_t g_avoid_dest = 0;
 static cf_atomic32 g_emigration_id = 0;
-static cf_atomic32 g_emigration_insert_id = 0;
 static cf_queue g_emigration_q;
 static shash *g_immigration_ldt_version_hash;
 
@@ -307,6 +306,7 @@ as_migrate_emigrate(const partition_migrate_record *pmr)
 	// Create these later only when we need them - we'll get lots at once.
 	emig->bytes_emigrating = 0;
 	emig->reinsert_hash = NULL;
+	emig->insert_id = 0;
 	emig->ctrl_q = NULL;
 	emig->meta_q = NULL;
 
@@ -416,8 +416,6 @@ as_migrate_dump(bool verbose)
 	cf_info(AS_MIGRATE, "number of immigrations in g_immigration_hash: %d",
 			cf_rchash_get_size(g_immigration_hash));
 	cf_info(AS_MIGRATE, "current emigration id: %d", g_emigration_id);
-	cf_info(AS_MIGRATE, "current emigration insert id: %d",
-			g_emigration_insert_id);
 
 	if (verbose) {
 		int item_num = 0;
@@ -943,7 +941,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 bool
 emigrate_record(emigration *emig, msg *m)
 {
-	uint32_t insert_id = cf_atomic32_incr(&g_emigration_insert_id);
+	uint32_t insert_id = emig->insert_id++;
 
 	msg_set_uint32(m, MIG_FIELD_EMIG_INSERT_ID, insert_id);
 
