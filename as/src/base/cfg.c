@@ -327,6 +327,8 @@ typedef enum {
 	CASE_SERVICE_SCAN_THREADS,
 	CASE_SERVICE_SERVICE_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
+	CASE_SERVICE_SINDEX_GC_MAX_RATE,
+	CASE_SERVICE_SINDEX_GC_PERIOD,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
@@ -555,7 +557,6 @@ typedef enum {
 	CASE_NAMESPACE_RACK_ID,
 	CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE,
 	CASE_NAMESPACE_SET_BEGIN,
-	CASE_NAMESPACE_SI_BEGIN,
 	CASE_NAMESPACE_SINDEX_BEGIN,
 	CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN,
 	CASE_NAMESPACE_SINGLE_BIN,
@@ -569,6 +570,7 @@ typedef enum {
 	CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER,
 	CASE_NAMESPACE_HIGH_WATER_PCT,
 	CASE_NAMESPACE_LOW_WATER_PCT,
+	CASE_NAMESPACE_SI_BEGIN,
 
 	// Namespace conflict-resolution-policy options (value tokens):
 	CASE_NAMESPACE_CONFLICT_RESOLUTION_GENERATION,
@@ -639,10 +641,10 @@ typedef enum {
 	CASE_NAMESPACE_SET_ENABLE_XDR_TRUE,
 
 	// Namespace secondary-index options:
+	// Deprecated:
 	CASE_NAMESPACE_SI_GC_PERIOD,
 	CASE_NAMESPACE_SI_GC_MAX_UNITS,
 	CASE_NAMESPACE_SI_HISTOGRAM,
-	// Deprecated:
 	CASE_NAMESPACE_SI_IGNORE_NOT_SYNC,
 
 	// Namespace sindex options:
@@ -824,6 +826,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
 		{ "service-threads",				CASE_SERVICE_SERVICE_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
+		{ "sindex-gc-max-rate",				CASE_SERVICE_SINDEX_GC_MAX_RATE },
+		{ "sindex-gc-period",				CASE_SERVICE_SINDEX_GC_PERIOD },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
@@ -1053,7 +1057,6 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "rack-id",						CASE_NAMESPACE_RACK_ID },
 		{ "read-consistency-level-override", CASE_NAMESPACE_READ_CONSISTENCY_LEVEL_OVERRIDE },
 		{ "set",							CASE_NAMESPACE_SET_BEGIN },
-		{ "si",								CASE_NAMESPACE_SI_BEGIN },
 		{ "sindex",							CASE_NAMESPACE_SINDEX_BEGIN },
 		{ "geo2dsphere-within",				CASE_NAMESPACE_GEO2DSPHERE_WITHIN_BEGIN },
 		{ "single-bin",						CASE_NAMESPACE_SINGLE_BIN },
@@ -1066,6 +1069,7 @@ const cfg_opt NAMESPACE_OPTS[] = {
 		{ "demo-write-multiplier",			CASE_NAMESPACE_DEMO_WRITE_MULTIPLIER },
 		{ "high-water-pct",					CASE_NAMESPACE_HIGH_WATER_PCT },
 		{ "low-water-pct",					CASE_NAMESPACE_LOW_WATER_PCT },
+		{ "si",								CASE_NAMESPACE_SI_BEGIN },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -2001,7 +2005,6 @@ as_config_init(const char* config_file)
 	dc_config_opt *cur_dc_cfg = NULL;
 	cf_fault_sink* sink = NULL;
 	as_set* p_set = NULL; // local variable used for set initialization
-	as_sindex_config_var si_cfg;
 
 	bool old_rack_aware = false; // XXX JUMP - remove in "six months"
 	cc_group_t cluster_group_id = 0; // hold the group name while we process nodes (0 not a valid ID #)
@@ -2335,6 +2338,12 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_SINDEX_BUILDER_THREADS:
 				c->sindex_builder_threads = cfg_u32(&line, 1, MAX_SINDEX_BUILDER_THREADS);
+				break;
+			case CASE_SERVICE_SINDEX_GC_MAX_RATE:
+				c->sindex_gc_max_rate = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_SINDEX_GC_PERIOD:
+				c->sindex_gc_period = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
@@ -2985,12 +2994,6 @@ as_config_init(const char* config_file)
 				cfg_strcpy(&line, p_set->name, AS_SET_NAME_MAX_SIZE);
 				cfg_begin_context(&state, NAMESPACE_SET);
 				break;
-			case CASE_NAMESPACE_SI_BEGIN:
-				cfg_init_si_var(ns);
-				as_sindex_config_var_default(&si_cfg);
-				cfg_strcpy(&line, si_cfg.name, AS_ID_INAME_SZ);
-				cfg_begin_context(&state, NAMESPACE_SI);
-				break;
 			case CASE_NAMESPACE_SINDEX_BEGIN:
 				cfg_begin_context(&state, NAMESPACE_SINDEX);
 				break;
@@ -3036,6 +3039,13 @@ as_config_init(const char* config_file)
 			case CASE_NAMESPACE_HIGH_WATER_PCT:
 			case CASE_NAMESPACE_LOW_WATER_PCT:
 				cfg_deprecated_name_tok(&line);
+				break;
+			case CASE_NAMESPACE_SI_BEGIN:
+				cfg_deprecated_name_tok(&line);
+				// Entire section is deprecated but
+				// needs to begin and end the context
+				// to avoid crash
+				cfg_begin_context(&state, NAMESPACE_SI);
 				break;
 			case CASE_CONTEXT_END:
 				if (ns->data_in_index && ! (ns->single_bin && ns->storage_data_in_memory && ns->storage_type == AS_STORAGE_ENGINE_SSD)) {
@@ -3211,21 +3221,18 @@ as_config_init(const char* config_file)
 		case NAMESPACE_SI:
 			switch (cfg_find_tok(line.name_tok, NAMESPACE_SI_OPTS, NUM_NAMESPACE_SI_OPTS)) {
 			case CASE_NAMESPACE_SI_GC_PERIOD:
-				si_cfg.defrag_period = cfg_u64_no_checks(&line);
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_NAMESPACE_SI_GC_MAX_UNITS:
-				si_cfg.defrag_max_units = cfg_u32_no_checks(&line);
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_NAMESPACE_SI_HISTOGRAM:
-				si_cfg.enable_histogram = cfg_bool(&line);
+				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_NAMESPACE_SI_IGNORE_NOT_SYNC:
 				cfg_deprecated_name_tok(&line);
 				break;
 			case CASE_CONTEXT_END:
-				if (SHASH_OK != shash_put_unique(ns->sindex_cfg_var_hash, (void*)si_cfg.name, (void*)&si_cfg)) {
-					cf_crash_nostack(AS_CFG, "ns %s failed inserting hash for si config item %s", ns->name, si_cfg.name);
-				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -4469,21 +4476,6 @@ cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name)
 
 	if (i == AS_STORAGE_MAX_DEVICES) {
 		cf_crash_nostack(AS_CFG, "namespace %s - too many storage devices", ns->name);
-	}
-}
-
-void
-cfg_init_si_var(as_namespace* ns)
-{
-	if (! ns->sindex_cfg_var_hash) {
-		if (shash_create(&ns->sindex_cfg_var_hash, cf_shash_fn_zstr,
-				AS_ID_INAME_SZ, sizeof(as_sindex_config_var), AS_SINDEX_MAX,
-				0) != SHASH_OK) {
-			cf_crash_nostack(AS_CFG, "namespace %s couldn't create sindex cfg item hash", ns->name);
-		}
-	}
-	else if (shash_get_size(ns->sindex_cfg_var_hash) >= AS_SINDEX_MAX) {
-		cf_crash_nostack(AS_CFG, "namespace %s - too many secondary indexes", ns->name);
 	}
 }
 

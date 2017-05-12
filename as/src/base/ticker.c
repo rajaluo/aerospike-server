@@ -777,7 +777,6 @@ dump_global_histograms()
 	}
 
 	as_query_histogram_dumpall();
-	as_sindex_gc_histogram_dumpall();
 
 	if (g_config.ldt_benchmarks) {
 		histogram_dump(g_stats.ldt_multiop_prole_hist);

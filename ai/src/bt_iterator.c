@@ -514,8 +514,8 @@ static bool btScionFind(btSIter *siter, bt_n *x, ulong ofst, bt *btr, bool asc,
 	}
 	return 1;
 }
-btSIter *btGetFullXthIter(bt *btr, long oofst, bool asc, cswc_t *w, long lim) {
-	ulong ofst = (ulong)oofst;
+btSIter *btGetFullXthIter(bt *btr, ulong oofst, bool asc, cswc_t *w, long lim) {
+	ulong ofst = oofst;
 	cswc_t W; // used in setHigh()
 	if (!btr->root || !btr->numkeys)                      return NULL;
 	if (!w) w = &W;

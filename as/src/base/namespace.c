@@ -220,7 +220,6 @@ as_namespace_create(char *name)
 
 	// SINDEX
 	ns->n_bytes_sindex_memory = 0;
-	ns->sindex_cfg_var_hash = NULL;
 	ns->sindex_num_partitions = DEFAULT_PARTITIONS_PER_INDEX;
 
 	// Geospatial query within defaults

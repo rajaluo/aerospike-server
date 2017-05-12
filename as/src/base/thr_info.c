@@ -1824,6 +1824,8 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "service-threads", g_config.n_service_threads);
 	info_append_uint32(db, "sindex-builder-threads", g_config.sindex_builder_threads);
 	info_append_bool(db, "sindex-gc-enable-histogram", g_config.sindex_gc_enable_histogram); // dynamic only
+	info_append_uint32(db, "sindex-gc-max-rate", g_config.sindex_gc_max_rate);
+	info_append_uint32(db, "sindex-gc-period", g_config.sindex_gc_period);
 	info_append_uint32(db, "ticker-interval", g_config.ticker_interval);
 	info_append_int(db, "transaction-max-ms", (int)(g_config.transaction_max_ns / 1000000));
 	info_append_uint32(db, "transaction-pending-limit", g_config.transaction_pending_limit);
@@ -2466,6 +2468,18 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of sindex-builder-threads from %u to %d", g_config.sindex_builder_threads, val);
 			g_config.sindex_builder_threads = (uint32_t)val;
 			as_sbld_resize_thread_pool(g_config.sindex_builder_threads);
+		}
+		else if (0 == as_info_parameter_get(params, "sindex-gc-max-rate", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val))
+				goto Error;
+			cf_info(AS_INFO, "Changing value of sindex-gc-max-rate from %d to %d ", g_config.sindex_gc_max_rate, val);
+			g_config.sindex_gc_max_rate = (uint32_t)val;
+		}
+		else if (0 == as_info_parameter_get(params, "sindex-gc-period", context, &context_len)) {
+			if (0 != cf_str_atoi(context, &val))
+				goto Error;
+			cf_info(AS_INFO, "Changing value of sindex-gc-period from %d to %d ", g_config.sindex_gc_period, val);
+			g_config.sindex_gc_period = (uint32_t)val;
 		}
 		else if (0 == as_info_parameter_get(params, "query-threads", context, &context_len)) {
 			uint64_t val = atoll(context);
@@ -3351,20 +3365,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 			cf_info(AS_INFO, "Changing value of post-write-queue of ns %s from %d to %d ", ns->name, ns->storage_post_write_queue, val);
 			cf_atomic32_set(&ns->storage_post_write_queue, (uint32_t)val);
-		}
-		else if (0 == as_info_parameter_get(params, "indexname", context, &context_len)) {
-			as_sindex_metadata imd;
-			memset((void *)&imd, 0, sizeof(imd));
-			imd.ns_name = cf_strdup(ns->name);
-			imd.iname   = cf_strdup(context);
-			int ret_val = as_sindex_set_config(ns, &imd, params);
-
-			if (imd.ns_name) cf_free(imd.ns_name);
-			if (imd.iname) cf_free(imd.iname);
-
-			if (ret_val) {
-				goto Error;
-			}
 		}
 		else if (0 == as_info_parameter_get(params, "read-consistency-level-override", context, &context_len)) {
 			char *original_value = NS_READ_CONSISTENCY_LEVEL_NAME();

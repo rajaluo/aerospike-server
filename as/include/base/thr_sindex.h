@@ -40,21 +40,6 @@
 #include "base/datamodel.h"
 #include "base/monitor.h"
 
-#define SET_TIME_FOR_SINDEX_GC_HIST(start_time)                                           \
-do {                                                                                      \
-	if (g_config.sindex_gc_enable_histogram) {                                            \
-		start_time = cf_getns();                                                          \
-	}                                                                                     \
-} while(0);
-
-#define SINDEX_GC_HIST_INSERT_DATA_POINT(type, start_time_ns)                             \
-do {                                                                                      \
-	if (start_time_ns != 0 && g_config.sindex_gc_enable_histogram && g_stats._ ##type) {  \
-		histogram_insert_data_point(g_stats._ ##type, start_time_ns);                     \
-	}                                                                                     \
-} while(0);
-
-
 #define SINDEX_GC_QUEUE_HIGHWATER  10
 #define SINDEX_GC_NUM_OBJS_PER_ARR 20
 

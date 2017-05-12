@@ -349,25 +349,6 @@ as_sindex_sktype_from_pktype(as_particle_type t)
 	return COL_TYPE_INVALID;
 }
 
-// Always make this function get cfg default from as_sindex structure's values,
-// instead of hard-coding it : useful when the defaults change.
-// This also gets called during config-file init, at that time, we are using a
-// dummy variable init.
-void
-as_sindex_config_var_default(as_sindex_config_var *si_cfg)
-{
-	// Mandatory memset, Totally worth the cost
-	// Do not remove
-	memset(si_cfg, 0, sizeof(as_sindex_config_var));
-
-	as_sindex from_si;
-	as_sindex__config_default(&from_si);
-
-	// 2 of the 6 variables : enable-histogram and trace-flag are not a part of default-settings for si
-	si_cfg->defrag_period        = from_si.config.defrag_period;
-	si_cfg->defrag_max_units     = from_si.config.defrag_max_units;
-}
-
 /*
  * Client API to check if there is secondary index on given namespace
  */
@@ -1075,22 +1056,14 @@ void
 as_sindex_gconfig_default(as_config *c)
 {
 	c->sindex_builder_threads = 4;
+	c->sindex_gc_max_rate = 1000000; // 1 million per second
+	c->sindex_gc_period = 10; // every 10 seconds
 }
 
 void
 as_sindex__config_default(as_sindex *si)
 {
-	si->config.defrag_period    = 1000;
-	si->config.defrag_max_units = 1000;
-	si->config.flag             = AS_SINDEX_FLAG_WACTIVE;
-}
-
-void
-as_sindex_config_var_copy(as_sindex *to_si, as_sindex_config_var *from_si_cfg)
-{
-	cf_atomic64_set(&to_si->config.defrag_period, from_si_cfg->defrag_period);
-	to_si->config.defrag_max_units = from_si_cfg->defrag_max_units;
-	to_si->enable_histogram        = from_si_cfg->enable_histogram;
+	si->config.flag = AS_SINDEX_FLAG_WACTIVE;
 }
 
 void
@@ -1214,10 +1187,6 @@ as_sindex_stats_str(as_namespace *ns, char * iname, cf_dyn_buf *db)
 	info_append_uint64(db, "query_lookup_avg_rec_count", lkup ? lkup_rec / lkup : 0);
 	info_append_uint64(db, "query_lookup_avg_record_size", lkup_rec ? lkup_size / lkup_rec : 0);
 
-	//CONFIG
-	info_append_uint64(db, "gc-period", si->config.defrag_period);
-	info_append_uint32(db, "gc-max-units", si->config.defrag_max_units);
-
 	info_append_bool(db, "histogram", si->enable_histogram);
 
 	cf_dyn_buf_chomp(db);
@@ -1271,54 +1240,6 @@ as_sindex_histogram_enable(as_namespace *ns, char * iname, bool enable)
 	si->enable_histogram = enable;
 	AS_SINDEX_RELEASE(si);
 	return AS_SINDEX_OK;
-}
-
-/*
- * Client API function to set configuration parameters for secondary indexes
- */
-int
-as_sindex_set_config(as_namespace *ns, as_sindex_metadata *imd, char *params)
-{
-	if (! ns)
-		return AS_SINDEX_ERR_PARAM;
-
-	as_sindex *si = as_sindex_lookup_by_iname(ns, imd->iname, AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
-	if (! si) {
-		return AS_SINDEX_ERR_NOTFOUND;
-	}
-
-	char context[100];
-	int  context_len = sizeof(context);
-	if (0 == as_info_parameter_get(params, "gc-period", context, &context_len)) {
-		uint64_t val = atoll(context);
-		cf_detail(AS_INFO, "gc-period = %"PRIu64"",val);
-		if ((int64_t)val < 0) {
-			goto Error;
-		}
-		cf_info(AS_INFO,"Changing value of gc-period of ns %s sindex %s from %"PRIu64"to %"PRIu64"",
-						ns->name, imd->iname, si->config.defrag_period, val);
-		cf_atomic64_set(&si->config.defrag_period, val);
-	}
-	else if (0 == as_info_parameter_get(params, "gc-max-units", context, &context_len)) {
-		uint64_t val = atoll(context);
-		cf_detail(AS_INFO, "gc-limit = %"PRIu64"",val);
-		if ((int64_t)val < 0) {
-			goto Error;
-		}
-		cf_info(AS_INFO,"Changing value of gc-max-units of ns %s sindex %s from %u to %lu",
-						ns->name, imd->iname, si->config.defrag_max_units, val);
-		si->config.defrag_max_units = val;
-	}
-	else {
-		goto Error;
-	}
-
-	AS_SINDEX_RELEASE(si);
-	return AS_SINDEX_OK;
-
-Error:
-	AS_SINDEX_RELEASE(si);
-	return AS_SINDEX_ERR_PARAM;
 }
 
 /*
@@ -1644,15 +1565,6 @@ as_sindex_create(as_namespace *ns, as_sindex_metadata *imd)
 	si->flag        = AS_SINDEX_FLAG_WACTIVE;
 	si->new_imd     = NULL;
 	as_sindex__config_default(si);
-	if (ns->sindex_cfg_var_hash) {
-		as_sindex_config_var check_si_conf;
-		if (SHASH_OK == shash_get(ns->sindex_cfg_var_hash, (void *)iname, (void *)&check_si_conf)){
-			as_sindex_config_var_copy(si, &check_si_conf);
-			shash_delete(ns->sindex_cfg_var_hash,  (void *)iname);
-			check_si_conf.conf_valid_flag = true;
-			shash_put_unique(ns->sindex_cfg_var_hash, (void *)iname, (void *)&check_si_conf);
-		}
-	}
 
 	// Init IMD
 	as_sindex__dup_meta(imd, &qimd, true);
@@ -1910,22 +1822,6 @@ as_sindex_boot_populateall()
 	as_sbld_resize_thread_pool(g_config.sindex_builder_threads);
 
 	g_sindex_boot_done = true;
-
-	// This above flag indicates that the basic sindex boot-up loader is done
-	// Go and destroy the sindex_cfg_var_hash here to prevent run-time
-	// si's from getting the config-file settings.
-	for (int i = 0; i < g_config.n_namespaces; i++) {
-		as_namespace *ns = g_config.namespaces[i];
-
-		if (ns->sindex_cfg_var_hash) {
-			shash_reduce(ns->sindex_cfg_var_hash, as_sindex_cfg_var_hash_reduce_fn, NULL);
-	    	shash_destroy(ns->sindex_cfg_var_hash);
-
-	    	// Assign hash to NULL at the start and end of its lifetime
-			ns->sindex_cfg_var_hash = NULL;
-		}
-
-	}
 
 	return AS_SINDEX_OK;
 }
@@ -4283,23 +4179,6 @@ old_sindex_smd_can_accept_cb(char *module, as_smd_item_t *item, void *udata)
 ERROR:
 	as_sindex_imd_free(&imd);
 	return retval;
-}
-
-int
-as_sindex_cfg_var_hash_reduce_fn(const void *key, void *data, void *udata)
-{
-	// Parse through the entire si_cfg_array, do an shash_delete on all the valid entries
-	// How do we know if its a valid-entry ? valid-entries get marked by the valid_flag in
-	// the process of doing as_sindex_create() called by smd.
-	// display a warning for those that are not valid and finally, free the entire structure
-
-	as_sindex_config_var *si_cfg_var = (as_sindex_config_var *)data;
-
-	if (! si_cfg_var->conf_valid_flag) {
-		cf_warning(AS_SINDEX, "No secondary index %s found. Configuration stanza for %s ignored.", si_cfg_var->name, si_cfg_var->name);
-	}
-
-	return 0;
 }
 
 /*

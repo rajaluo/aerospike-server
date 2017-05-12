@@ -805,7 +805,7 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void * skey,
  *
  */
 static long
-build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *acol, bt *nbtr, long nofst, long *limit, uint64_t * tot_found, cf_ll *gc_list)
+build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *acol, bt *nbtr, ulong nofst, ulong *limit, uint64_t * tot_found, cf_ll *gc_list)
 {
 	int error = -1;
 	btEntry *nbe;
@@ -819,19 +819,14 @@ build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *acol, bt *nbtr, long nofst
 
 	long      found             = 0;
 	long  processed             = 0;
-	uint64_t validation_time_ns = 0;
 	while ((nbe = btRangeNext(nbi, 1))) {
 		ai_obj *akey = nbe->key;
-		// STEP 2: if this PK is to be deleted then add it to PKtoDeleteList
-		SET_TIME_FOR_SINDEX_GC_HIST(validation_time_ns);
 		int ret = as_sindex_can_defrag_record(ns, (cf_digest *) (&akey->y));
-		SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_validate_obj_hist, validation_time_ns);
-		validation_time_ns = 0; 
 
 		if (ret == AS_SINDEX_GC_SKIP_ITERATION) {
 			*limit = 0;
 			break;
-		} else if (ret == AS_SINDEX_GC_OK){
+		} else if (ret == AS_SINDEX_GC_OK) {
 
 			bool create   = (cf_ll_size(gc_list) == 0) ? true : false;
 			objs_to_defrag_arr *dt;
@@ -870,16 +865,13 @@ build_defrag_list_from_nbtr(as_namespace *ns, ai_obj *acol, bt *nbtr, long nofst
 }
 
 static long
-build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr, long nofst, long *limit, uint64_t * tot_found, cf_ll *gc_list)
+build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr, ulong nofst, ulong *limit, uint64_t * tot_found, cf_ll *gc_list)
 {
 	long     found              = 0;
 	long     processed          = 0;
-	uint64_t validation_time_ns = 0;
-	for (int i = nofst; i < arr->used; i++) {
-		SET_TIME_FOR_SINDEX_GC_HIST(validation_time_ns);	
+
+	for (ulong i = nofst; i < arr->used; i++) {
 		int ret = as_sindex_can_defrag_record(ns, (cf_digest *) &arr->data[i * CF_DIGEST_KEY_SZ]);
-		SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_validate_obj_hist, validation_time_ns);
-		validation_time_ns = 0;
 		if (ret == AS_SINDEX_GC_SKIP_ITERATION) {
 			*limit = 0;
 			break;
@@ -934,7 +926,7 @@ build_defrag_list_from_arr(as_namespace *ns, ai_obj *acol, ai_arr *arr, long nof
  */
 int
 ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, ai_obj *icol,
-						   long *nofst, long limit, uint64_t * tot_processed, uint64_t * tot_found, cf_ll *gc_list)
+						   ulong *nofst, ulong limit, uint64_t * tot_processed, uint64_t * tot_found, cf_ll *gc_list)
 {
 	int ret = AS_SINDEX_ERR;
 
@@ -1014,14 +1006,12 @@ bool
 ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *gc_list, ulong n2del, ulong *deleted)
 {
 	// If n2del is zero here, that means caller do not want to defrag
-	if (n2del == 0 ) {
+	if (n2del == 0) {
 		return false;
 	}
 	ulong success = 0;
 	as_namespace *ns = imd->si->ns;
 	// STEP 3: go thru the PKtoDeleteList and delete the keys
-	uint64_t validation_time_ns = 0;
-	uint64_t deletion_time_ns   = 0;
 
 	uint64_t before = 0;
 	uint64_t after = 0;
@@ -1037,10 +1027,7 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 		int i = 0;
 		while (dt->num != 0) {
 			i = dt->num - 1;
-			SET_TIME_FOR_SINDEX_GC_HIST(validation_time_ns);
 			int ret = as_sindex_can_defrag_record(ns, &(dt->acol_digs[i].dig));
-			SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_validate_obj_hist, validation_time_ns);
-			validation_time_ns = 0;
 			if (ret == AS_SINDEX_GC_SKIP_ITERATION) {
 				goto END;
 			} else if (ret == AS_SINDEX_GC_OK) {
@@ -1049,14 +1036,11 @@ ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *
 				ai_obj *acol = &(dt->acol_digs[i].acol);
 				cf_detail(AS_SINDEX, "Defragged %lu %ld", acol->l, *((uint64_t *)&apk.y));
 				
-				SET_TIME_FOR_SINDEX_GC_HIST(deletion_time_ns);
 				before += pimd->ibtr->msize + pimd->ibtr->nsize;
 				if (reduced_iRem(pimd->ibtr, acol, &apk) == AS_SINDEX_OK) {
 					success++;
 				}
 				after += pimd->ibtr->msize + pimd->ibtr->nsize;
-				SINDEX_GC_HIST_INSERT_DATA_POINT(sindex_gc_delete_obj_hist, deletion_time_ns);
-				deletion_time_ns = 0;
 			}
 			dt->num -= 1;
 			n2del--;

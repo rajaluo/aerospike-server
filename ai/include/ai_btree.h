@@ -53,7 +53,7 @@ uint64_t ai_btree_get_numkeys(as_sindex_metadata *imd);
 
 void ai_btree_dump(as_sindex_metadata *imd, char *fname, bool verbose);
 
-int ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, struct ai_obj *icol, long *nofst, long lim, uint64_t * tot_processed, uint64_t * tot_found, cf_ll *apk2d);
+int ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, struct ai_obj *icol, ulong *nofst, ulong lim, uint64_t * tot_processed, uint64_t * tot_found, cf_ll *apk2d);
 
 bool ai_btree_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, cf_ll *apk2d, ulong n2del, ulong *deleted);
 

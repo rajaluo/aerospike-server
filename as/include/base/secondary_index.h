@@ -206,17 +206,7 @@ typedef struct as_sindex_stat_s {
 	histogram *       _query_diff_hist;       // Histogram to track the false positives found by queries
 } as_sindex_stat;
 
-typedef struct as_sindex_config_var_s {
-	char 		name[AS_ID_INAME_SZ];
-	uint64_t    defrag_period;
-	uint32_t    defrag_max_units;
-	bool        enable_histogram; // default false;
-	bool 		conf_valid_flag;
-} as_sindex_config_var;
-
 typedef struct as_sindex_config_s {
-	cf_atomic64        defrag_period;
-	cf_atomic32        defrag_max_units;
 	volatile uint16_t  flag; // TODO change_name
 } as_sindex_config;
 
@@ -536,8 +526,6 @@ extern void as_sindex_dump(char *nsname, char *iname, char *fname, bool verbose)
 extern void as_sindex_gconfig_default(struct as_config_s *c);
 extern int  as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn_buf* db,
 			bool is_create, bool *is_smd_op, char * cmd);
-void        as_sindex_config_var_default(as_sindex_config_var *si_cfg);
-int         as_sindex_cfg_var_hash_reduce_fn(const void *key, void *data, void *udata);
 void        as_sindex__config_default(as_sindex *si);
 void        as_sindex_ticker_start(as_namespace * ns, as_sindex * si);
 void        as_sindex_ticker(as_namespace * ns, as_sindex * si, uint64_t n_obj_scanned, uint64_t start_time);

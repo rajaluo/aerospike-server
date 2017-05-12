@@ -123,11 +123,6 @@ typedef struct as_stats_s {
 	histogram*		fabric_recv_fragment_hists[AS_FABRIC_N_CHANNELS];
 	histogram*		fabric_recv_cb_hists[AS_FABRIC_N_CHANNELS];
 
-	histogram*		_sindex_gc_validate_obj_hist; // time taken to validate sindex object
-	histogram*		_sindex_gc_delete_obj_hist; // time taken to delete sindex object by gc
-	histogram*		_sindex_gc_pimd_rlock_hist; // time spent under pimd rlock by sindex gc - TODO - unused?
-	histogram*		_sindex_gc_pimd_wlock_hist; // time spent under pimd wlock by sindex gc - TODO - unused?
-
 	histogram*		ldt_multiop_prole_hist; // tracks LDT multi op replication performance (in fabric)
 	histogram*		ldt_update_record_cnt_hist; // tracks number of records written (write/update) by LDT UDF excluding parent record
 	histogram*		ldt_io_record_cnt_hist; // tracks number of records opened (write/update) by LDT UDF excluding parent record

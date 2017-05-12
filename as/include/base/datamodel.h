@@ -840,9 +840,6 @@ struct as_namespace_s {
 	shash*			sindex_iname_hash;
 	uint32_t		binid_has_sindex[AS_BINID_HAS_SINDEX_SIZE];
 
-	// Temporary structure to hold si config values until smd-bootup is done.
-	shash*			sindex_cfg_var_hash;
-
 	//--------------------------------------------
 	// Configuration.
 	//
