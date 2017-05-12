@@ -280,17 +280,14 @@ as_sindex_can_defrag_record(as_namespace *ns, cf_digest *keyd)
 as_particle_type
 as_sindex_pktype(as_sindex_metadata * imd)
 {
-	switch (imd->btype) {
-		case AS_SINDEX_KTYPE_LONG: {
+	switch (imd->sktype) {
+		case COL_TYPE_LONG: {
 			return AS_PARTICLE_TYPE_INTEGER;
 		}
-		case AS_SINDEX_KTYPE_FLOAT: {
-			return AS_PARTICLE_TYPE_FLOAT;
-		}
-		case AS_SINDEX_KTYPE_DIGEST: {
+		case COL_TYPE_DIGEST: {
 			return AS_PARTICLE_TYPE_STRING;
 		}
-		case AS_SINDEX_KTYPE_GEO2DSPHERE: {
+		case COL_TYPE_GEOJSON: {
 			return AS_PARTICLE_TYPE_GEOJSON;
 		}
 		default: {
@@ -309,9 +306,9 @@ char const *
 as_sindex_ktype_str(as_sindex_ktype type)
 {
 	switch (type) {
-	case AS_SINDEX_KTYPE_LONG:      return "NUMERIC";
-	case AS_SINDEX_KTYPE_DIGEST:    return "STRING";
-	case AS_SINDEX_KTYPE_GEO2DSPHERE:  return "GEOJSON";
+	case COL_TYPE_LONG:    return "NUMERIC";
+	case COL_TYPE_DIGEST:  return "STRING";
+	case COL_TYPE_GEOJSON: return "GEOJSON";
 	default:
 		cf_warning(AS_SINDEX, "UNSUPPORTED KEY TYPE %d", type);
 		return "??????";
@@ -321,51 +318,35 @@ as_sindex_ktype_str(as_sindex_ktype type)
 as_sindex_ktype
 as_sindex_ktype_from_string(char const * type_str)
 {
-	if (!type_str) {
+	if (! type_str) {
 		cf_warning(AS_SINDEX, "missing secondary index key type");
-		return AS_SINDEX_KTYPE_NONE;
+		return COL_TYPE_INVALID;
 	}
 	else if (strncasecmp(type_str, "string", 6) == 0) {
-		return AS_SINDEX_KTYPE_DIGEST;
+		return COL_TYPE_DIGEST;
 	}
 	else if (strncasecmp(type_str, "numeric", 7) == 0) {
-		return AS_SINDEX_KTYPE_LONG;
+		return COL_TYPE_LONG;
 	}
 	else if (strncasecmp(type_str, "geo2dsphere", 11) == 0) {
-		return AS_SINDEX_KTYPE_GEO2DSPHERE;
+		return COL_TYPE_GEOJSON;
 	}
 	else {
 		cf_warning(AS_SINDEX, "UNRECOGNIZED KEY TYPE %s", type_str);
-		return AS_SINDEX_KTYPE_NONE;
+		return COL_TYPE_INVALID;
 	}
-}
-
-as_sindex_key_type
-as_sindex_key_type_from_pktype(as_particle_type t)
-{
-	switch (t) {
-		case AS_PARTICLE_TYPE_INTEGER :     return AS_SINDEX_KEY_TYPE_LONG;
-		case AS_PARTICLE_TYPE_STRING  :     return AS_SINDEX_KEY_TYPE_DIGEST;
-		case AS_PARTICLE_TYPE_GEOJSON :     return AS_SINDEX_KEY_TYPE_GEO2DSPHERE;
-		default                       :     {
-			cf_warning(AS_SINDEX, "bad particle type %d", t);
-			return AS_SINDEX_KEY_TYPE_MAX;
-		}
-	}
-	return AS_SINDEX_KEY_TYPE_MAX;
 }
 
 as_sindex_ktype
 as_sindex_sktype_from_pktype(as_particle_type t)
 {
 	switch (t) {
-		case AS_PARTICLE_TYPE_INTEGER :     return AS_SINDEX_KTYPE_LONG;
-		case AS_PARTICLE_TYPE_FLOAT   :     return AS_SINDEX_KTYPE_FLOAT;
-		case AS_PARTICLE_TYPE_STRING  :     return AS_SINDEX_KTYPE_DIGEST;
-		case AS_PARTICLE_TYPE_GEOJSON :     return AS_SINDEX_KTYPE_GEO2DSPHERE;
-		default                       :     return AS_SINDEX_KTYPE_NONE;
+		case AS_PARTICLE_TYPE_INTEGER :     return COL_TYPE_LONG;
+		case AS_PARTICLE_TYPE_STRING  :     return COL_TYPE_DIGEST;
+		case AS_PARTICLE_TYPE_GEOJSON :     return COL_TYPE_GEOJSON;
+		default                       :     return COL_TYPE_INVALID;
 	}
-	return AS_SINDEX_KTYPE_NONE;
+	return COL_TYPE_INVALID;
 }
 
 // Always make this function get cfg default from as_sindex structure's values,
@@ -438,7 +419,7 @@ as_sindex__dup_meta(as_sindex_metadata *imd, as_sindex_metadata **qimd,
 	qimdp->path_length = imd->path_length;
 	memcpy(qimdp->path, imd->path, AS_SINDEX_MAX_DEPTH*sizeof(as_sindex_path));
 	qimdp->bname       = cf_strdup(imd->bname);
-	qimdp->btype       = imd->btype;
+	qimdp->sktype       = imd->sktype;
 	qimdp->binid       = imd->binid;
 
 	*qimd = qimdp;
@@ -674,7 +655,7 @@ as_sindex__delete_from_set_binid_hash(as_namespace * ns, as_sindex_metadata * im
 			prop_ele       = ( sindex_set_binid_hash_ele * ) ele;
 			as_sindex * si = &(ns->sindex[prop_ele->simatch]);
 			if (strcmp(si->imd->path_str, imd->path_str) == 0 &&
-				si->imd->btype == imd->btype && si->imd->itype == imd->itype) {
+				si->imd->sktype == imd->sktype && si->imd->itype == imd->itype) {
 				to_delete  = true;
 				break;
 			}
@@ -775,7 +756,7 @@ as_sindex__simatch_by_set_binid(as_namespace *ns, char * set, int binid, as_sind
 			prop_ele = ( sindex_set_binid_hash_ele * ) ele;
 			as_sindex * si = &(ns->sindex[prop_ele->simatch]);
 			if (strcmp(si->imd->path_str, path) == 0 &&
-				si->imd->btype == type && si->imd->itype == itype) {
+				si->imd->sktype == type && si->imd->itype == itype) {
 				simatch  = prop_ele->simatch;
 				break;
 			}
@@ -1018,7 +999,7 @@ as_sindex_exists_by_defn(as_namespace* ns, as_sindex_metadata* imd)
 	int binid     = as_bin_get_id(ns, imd->bname);
 	if(si->imd->bname && imd->bname) {
 		if (binid == si->imd->binid && !strcmp(imd->bname, si->imd->bname)
-						&& imd->btype == si->imd->btype) {
+						&& imd->sktype == si->imd->sktype) {
 			AS_SINDEX_RELEASE(si);
 			return true;
 		}
@@ -1361,7 +1342,7 @@ as_sindex_list_str(as_namespace *ns, cf_dyn_buf *db)
 			cf_dyn_buf_append_string(db, ":bin=");
 			cf_dyn_buf_append_buf(db, (uint8_t *)si.imd->bname, strlen(si.imd->bname));
 			cf_dyn_buf_append_string(db, ":type=");
-			cf_dyn_buf_append_string(db, as_sindex_ktype_str(si.imd->btype));
+			cf_dyn_buf_append_string(db, as_sindex_ktype_str(si.imd->sktype));
 			cf_dyn_buf_append_string(db, ":indextype=");
 			cf_dyn_buf_append_string(db, as_sindex_type_defs[si.imd->itype]);
 
@@ -1568,7 +1549,7 @@ as_sindex_create_check_params(as_namespace* ns, as_sindex_metadata* imd)
 		int16_t binid = as_bin_get_id(ns, imd->bname);
 		if (binid != -1)
 		{
-			int simatch = as_sindex__simatch_by_set_binid(ns, imd->set, binid, imd->btype, imd->itype, imd->path_str);
+			int simatch = as_sindex__simatch_by_set_binid(ns, imd->set, binid, imd->sktype, imd->itype, imd->path_str);
 			if (simatch != -1) {
 				ret = AS_SINDEX_ERR_FOUND;
 				goto END;
@@ -1783,7 +1764,7 @@ as_sindex_destroy(as_namespace *ns, as_sindex_metadata *imd)
 		}
 
 		si = as_sindex_lookup_by_defns_lockfree(ns, imd->set, (int)bin_id,
-				imd->btype, imd->itype, imd->path_str,
+				imd->sktype, imd->itype, imd->path_str,
 				AS_SINDEX_LOOKUP_FLAG_NORESERVE | AS_SINDEX_LOOKUP_FLAG_ISACTIVE);
 	}
 
@@ -1827,7 +1808,7 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 		pimd = &imd->pimd[i];
 		PIMD_WLOCK(&pimd->slock);
 		struct btree * ibtr = pimd->ibtr;
-		ai_btree_reinit_pimd(pimd, imd->btype);
+		ai_btree_reinit_pimd(pimd, imd->sktype);
 		PIMD_WUNLOCK(&pimd->slock);
 		ai_btree_delete_ibtr(ibtr);
 	}
@@ -2215,7 +2196,7 @@ as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v)
 
 	as_val * val = v;
 
-	as_particle_type imd_btype = as_sindex_pktype(imd);
+	as_particle_type imd_sktype = as_sindex_pktype(imd);
 	if (imd->path_length == 0) {
 		goto END;
 	}
@@ -2275,10 +2256,10 @@ as_sindex_extract_val_from_path(as_sindex_metadata * imd, as_val * v)
 
 END:
 	if (imd->itype == AS_SINDEX_ITYPE_DEFAULT) {
-		if (val->type == AS_INTEGER && imd_btype == AS_PARTICLE_TYPE_INTEGER) {
+		if (val->type == AS_INTEGER && imd_sktype == AS_PARTICLE_TYPE_INTEGER) {
 			return val;
 		}
-		else if (val->type == AS_STRING && imd_btype == AS_PARTICLE_TYPE_STRING) {
+		else if (val->type == AS_STRING && imd_sktype == AS_PARTICLE_TYPE_STRING) {
 			return val;
 		}
 	}
@@ -3279,10 +3260,11 @@ as_sindex_add_geo2dsphere_from_as_val(as_val *val, as_sindex_bin *sbin)
 typedef as_sindex_status (*as_sindex_add_keytype_from_asval_fn)
 (as_val *val, as_sindex_bin * sbin);
 static const as_sindex_add_keytype_from_asval_fn
-			 as_sindex_add_keytype_from_asval[AS_SINDEX_KEY_TYPE_MAX] = {
+			 as_sindex_add_keytype_from_asval[COL_TYPE_MAX] = {
+	NULL,
 	as_sindex_add_long_from_asval,
 	as_sindex_add_digest_from_asval,
-	as_sindex_add_geo2dsphere_from_as_val,
+	as_sindex_add_geo2dsphere_from_as_val // 3
 };
 
 //                             END - ADD KEYTYPE FROM BASIC TYPE ASVAL
@@ -3292,13 +3274,13 @@ static const as_sindex_add_keytype_from_asval_fn
 as_sindex_status
 as_sindex_add_asval_to_default_sindex(as_val *val, as_sindex_bin * sbin)
 {
-	return as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)](val, sbin);
+	return as_sindex_add_keytype_from_asval[as_sindex_sktype_from_pktype(sbin->type)](val, sbin);
 }
 
 static bool as_sindex_add_listvalues_foreach(as_val * element, void * udata)
 {
 	as_sindex_bin * sbin = (as_sindex_bin *)udata;
-	as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)](element, sbin);
+	as_sindex_add_keytype_from_asval[as_sindex_sktype_from_pktype(sbin->type)](element, sbin);
 	return true;
 }
 
@@ -3332,14 +3314,14 @@ as_sindex_add_asval_to_list_sindex(as_val *val, as_sindex_bin * sbin)
 static bool as_sindex_add_mapkeys_foreach(const as_val * key, const as_val * val, void * udata)
 {
 	as_sindex_bin * sbin = (as_sindex_bin *)udata;
-	as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)]((as_val *)key, sbin);
+	as_sindex_add_keytype_from_asval[as_sindex_sktype_from_pktype(sbin->type)]((as_val *)key, sbin);
 	return true;
 }
 
 static bool as_sindex_add_mapvalues_foreach(const as_val * key, const as_val * val, void * udata)
 {
 	as_sindex_bin * sbin = (as_sindex_bin *)udata;
-	as_sindex_add_keytype_from_asval[as_sindex_key_type_from_pktype(sbin->type)]((as_val *)val, sbin);
+	as_sindex_add_keytype_from_asval[as_sindex_sktype_from_pktype(sbin->type)]((as_val *)val, sbin);
 	return true;
 }
 
@@ -3819,7 +3801,7 @@ int
 as_sindex_sbin_from_sindex(as_sindex * si, const as_bin *b, as_sindex_bin * sbin, as_val ** cdt_asval)
 {
 	as_sindex_metadata * imd    = si->imd;
-	as_particle_type imd_btype  = as_sindex_pktype(imd);
+	as_particle_type imd_sktype  = as_sindex_pktype(imd);
 	as_val * cdt_val            = * cdt_asval;
 	uint32_t  valsz             = 0;
 	int sindex_found            = 0;
@@ -3833,7 +3815,7 @@ as_sindex_sbin_from_sindex(as_sindex * si, const as_bin *b, as_sindex_bin * sbin
 	if (imd->path_length == 0) {
 		// 			If itype == AS_SINDEX_ITYPE_DEFAULT and bin_type == STRING OR INTEGER
 		// 				Add the value to the sbin.
-		if (imd->itype == AS_SINDEX_ITYPE_DEFAULT && bin_type == imd_btype) {
+		if (imd->itype == AS_SINDEX_ITYPE_DEFAULT && bin_type == imd_sktype) {
 			if (bin_type == AS_PARTICLE_TYPE_INTEGER) {
 				found = true;
 				sbin->value.int_val = as_bin_particle_integer_value(b);
@@ -4355,30 +4337,30 @@ as_sindex_ktype
 as_sindex_ktype_from_smd_char(char c)
 {
 	if (c == 'I') {
-		return AS_SINDEX_KTYPE_LONG;
+		return COL_TYPE_LONG;
 	}
 	else if (c == 'S') {
-		return AS_SINDEX_KTYPE_DIGEST;
+		return COL_TYPE_DIGEST;
 	}
 	else if (c == 'G') {
-		return AS_SINDEX_KTYPE_GEO2DSPHERE;
+		return COL_TYPE_GEOJSON;
 	}
 	else {
 		cf_warning(AS_SINDEX, "unknown smd ktype %c", c);
-		return AS_SINDEX_KTYPE_NONE;
+		return COL_TYPE_INVALID;
 	}
 }
 
 char
 as_sindex_ktype_to_smd_char(as_sindex_ktype ktype)
 {
-	if (ktype == AS_SINDEX_KTYPE_LONG) {
+	if (ktype == COL_TYPE_LONG) {
 		return 'I';
 	}
-	else if (ktype == AS_SINDEX_KTYPE_DIGEST) {
+	else if (ktype == COL_TYPE_DIGEST) {
 		return 'S';
 	}
-	else if (ktype == AS_SINDEX_KTYPE_GEO2DSPHERE) {
+	else if (ktype == COL_TYPE_GEOJSON) {
 		return 'G';
 	}
 	else {
@@ -4434,8 +4416,8 @@ as_sindex_type_to_smd_char(as_sindex_type itype)
 bool
 smd_key_to_imd(const char *smd_key, as_sindex_metadata *imd)
 {
-	// ns-name|<set-name>|path|itype|btype
-	// Note - btype a.k.a. ktype and dtype.
+	// ns-name|<set-name>|path|itype|sktype
+	// Note - sktype a.k.a. ktype and dtype.
 
 	const char *read = smd_key;
 	const char *tok = strchr(read, TOK_CHAR_DELIMITER);
@@ -4503,9 +4485,9 @@ smd_key_to_imd(const char *smd_key, as_sindex_metadata *imd)
 
 	read = tok + 1;
 
-	if ((imd->btype = as_sindex_ktype_from_smd_char(*read)) ==
-			AS_SINDEX_KTYPE_NONE) {
-		cf_warning(AS_SINDEX, "smd - bad btype");
+	if ((imd->sktype = as_sindex_ktype_from_smd_char(*read)) ==
+			COL_TYPE_INVALID) {
+		cf_warning(AS_SINDEX, "smd - bad sktype");
 		return false;
 	}
 
@@ -4522,22 +4504,22 @@ smd_value_to_imd(const char *smd_value, as_sindex_metadata *imd)
 void
 as_sindex_imd_to_smd_key(const as_sindex_metadata *imd, char *smd_key)
 {
-	// ns-name|<set-name>|path|itype|btype
-	// Note - btype a.k.a. ktype and dtype.
+	// ns-name|<set-name>|path|itype|sktype
+	// Note - sktype a.k.a. ktype and dtype.
 
 	sprintf(smd_key, "%s|%s|%s|%c|%c",
 			imd->ns_name,
 			imd->set ? imd->set : "",
 			imd->path_str,
 			as_sindex_type_to_smd_char(imd->itype),
-			as_sindex_ktype_to_smd_char(imd->btype));
+			as_sindex_ktype_to_smd_char(imd->sktype));
 }
 
 bool
 as_sindex_delete_imd_to_smd_key(as_namespace *ns, as_sindex_metadata *imd, char *smd_key)
 {
-	// ns-name|<set-name>|path|btype|<itype>
-	// Note - btype a.k.a. ktype and dtype.
+	// ns-name|<set-name>|path|sktype|<itype>
+	// Note - sktype a.k.a. ktype and dtype.
 
 	// The imd passed in doesn't have enough to make SMD key - use a full imd
 	// from the existing sindex, if it's there.

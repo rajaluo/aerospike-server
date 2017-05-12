@@ -49,8 +49,6 @@ uint64_t ai_btree_get_pimd_isize(as_sindex_pmetadata *pimd);
 
 int ai_btree_list(char *ns, char *set, as_sindex_metadata **imds, int *num_indexes);
 
-int ai_btree_list_ns(char *ns, as_sindex_metadata **imds, int *num_indexes);
-
 uint64_t ai_btree_get_numkeys(as_sindex_metadata *imd);
 
 void ai_btree_dump(as_sindex_metadata *imd, char *fname, bool verbose);
@@ -65,6 +63,6 @@ int ai_btree_key_hash(as_sindex_metadata *imd, void *skey);
 
 void ai_btree_delete_ibtr(bt *ibtr);
 
-void ai_btree_reinit_pimd(as_sindex_pmetadata *pimd, int btype);
+void ai_btree_reinit_pimd(as_sindex_pmetadata *pimd, col_type_t sktype);
 
 void ai_btree_reset_pimd(as_sindex_pmetadata * pimd);

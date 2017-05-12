@@ -6565,7 +6565,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 	}
 
 	as_sindex_ktype ktype = as_sindex_ktype_from_string(type_str);
-	if (ktype == AS_SINDEX_KTYPE_NONE) {
+	if (ktype == COL_TYPE_INVALID) {
 		cf_warning(AS_INFO, "%s : Failed. Invalid bin type %s for index %s", cmd,
 				type_str, indexname_str);
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_PARAMETER,
@@ -6573,7 +6573,7 @@ as_info_parse_params_to_sindex_imd(char* params, as_sindex_metadata *imd, cf_dyn
 		cf_vector_destroy(str_v);
 		return AS_SINDEX_ERR_PARAM;
 	}
-	imd->btype = ktype;
+	imd->sktype = ktype;
 
 	if (imd->bname && strlen(imd->bname) >= AS_ID_BIN_SZ) {
 		cf_warning(AS_INFO, "%s : Failed. Bin Name %s longer than allowed %d for index %s",

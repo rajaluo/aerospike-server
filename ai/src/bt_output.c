@@ -23,49 +23,13 @@
 
 #define PRINT_EVICTED_KEYS
 
-void printKey(bt *btr, bt_n *x, int i)
-{
-	if (i < 0 || i >= x->n) {
-		printf(" NO KEY\n");
-	} else {
-		ai_obj akey;
-		void *be = KEYS(btr, x, i);
-		//printf("btr: %p x: %p i: %d be: %p\n", btr, x, i, be);
-		convertStream2Key(be, &akey, btr);
-		dump_ai_obj(stdout, &akey);
-	}
-}
-
-void printDWD(dwd_t dwd, bt *btr)
-{
-	ai_obj akey;
-	void *be = dwd.k;
-	convertStream2Key(be, &akey, btr);
-	dump_ai_obj(stdout, &akey);
-}
-
-void printKeyFromPtr(bt *btr, void *be) {
-	ai_obj akey;
-	convertStream2Key(be, &akey, btr);
-	dump_ai_obj(stdout, &akey);
-}
-
-#define DEBUG_BT_TYPE(fp, btr)										\
-	fprintf(fp, "btr: %p INODE: %d NORM: %d "						\
-			"UU: %d UL: %d UX: %d UY: %d "							\
-			"LU: %d LL: %d LX: %d LY: %d "							\
-			"XU: %d XL: %d XX: %d XY: %d "							\
-			"YU: %d YL: %d YX: %d YY: %d "							\
-			" [UP: %d LUP: %d LLP: %d XUP: %d XLP: %d XXP: %d] "	\
-			" [YLP: %d YYP: %d] OBYI: %d BIG: %d ksize: %d\n",		\
-			btr, INODE(btr), NORM_BT(btr),							\
-			UU(btr), UL(btr), UX(btr), UY(btr),						\
-			LU(btr), LL(btr), LX(btr), LY(btr),						\
-			XU(btr), XL(btr), XX(btr), XY(btr),						\
-			YU(btr), YL(btr), YX(btr), YY(btr),						\
-			UP(btr),  LUP(btr), LLP(btr),							\
-			XUP(btr), XLP(btr), XXP(btr),							\
-			YLP(btr), YYP(btr), OBYI(btr), BIG_BT(btr), btr->s.ksize);
+#define DEBUG_BT_TYPE(fp, btr)						\
+	fprintf(fp, "btr: %p NBT: %d NONE: %d "	        \
+			"LL: %d YL: %d "		                \
+			"BIG: %d ksize: %d\n",                  \
+			btr, NBT(btr), NONE_BT(btr),            \
+			LL(btr), YL(btr),                       \
+			BIG_BT(btr), btr->s.ksize);
 
 static int treeheight(bt *btr)
 {
@@ -164,78 +128,12 @@ static void dump_tree_node(FILE *fp, bt *btr, bt_n *x, int depth, bool is_index,
 		if (is_index) {
 			fprintf(fp, "\tINDEX-KEY: ");
 			dump_ai_obj_as_digest(fp, &akey);
-			if (!SIMP_UNIQ(btr)) {
-				if (!rrow) { fprintf(fp, "\t\tTOTAL EVICTION\n"); }
-				else { bt_dump_nbtr(fp, (ai_nbtr *) rrow, 0, verbose); }
-			}
+			if (!rrow) { fprintf(fp, "\t\tTOTAL EVICTION\n"); }
+			else { bt_dump_nbtr(fp, (ai_nbtr *) rrow, 0, verbose); }
 		} else if (verbose) {
 			bool key_printed = 0;
-			if (UU(btr)) {
-				key_printed = 1;
-				ulong uu = (ulong)rrow;
-				fprintf(fp, "\t\tUU[%d]: KEY: %lu VAL: %lu\n",
-						i, (uu / UINT_MAX), (uu % UINT_MAX));
-			} else if (UL(btr)) {
-				if (UP(btr)) { fprintf(fp, "\t\tUL: PTR: %p\t", rrow); }
-				else {
-					key_printed = 1;
-					ulk *ul = (ulk *)rrow;
-					fprintf(fp, "\t\tUL[%d]: KEY: %u VAL: %lu\n",
-							i, ul->key, ul->val);
-				}
-			} else if (LU(btr)) {
-				if (LUP(btr)) { fprintf(fp, "\t\tLU: PTR: %p\t", rrow); }
-				else {
-					key_printed = 1;
-					luk *lu = (luk *)rrow;
-					fprintf(fp, "\t\tLU[%d]: KEY: %lu VAL: %u\n",
-							i, lu->key, lu->val);
-				}
-			} else if (LL(btr)) {
-				if (LLP(btr)) { fprintf(fp, "\t\tLL: PTR: %p\t", rrow); }
-				else {
-					key_printed = 1;
-					llk *ll = (llk *)rrow;
-					fprintf(fp, "\t\tLL[%d]: KEY: %lu VAL: %lu\n",
-							i, ll->key, ll->val);
-				}
-			} else if (UX(btr)) {
-				key_printed = 1;
-				uxk *ux = (uxk *)rrow;
-				fprintf(fp, "\t\tUX[%d]: KEY: %u ", i, ux->key);
-				fprintf(fp, " VAL: ");
-				DEBUG_U128(fp, ux->val);
-				fprintf(fp, "\n");
-			} else if (XU(btr)) {
-				key_printed = 1;
-				xuk *xu = (xuk *)rrow;
-				fprintf(fp, "\t\tXU[%d]: KEY: ", i);
-				DEBUG_U128(fp, xu->key);
-				fprintf(fp, " VAL: %u\n", xu->val);
-			} else if (LX(btr)) {
-				key_printed = 1;
-				lxk *lx = (lxk *)rrow;
-				fprintf(fp, "\t\tLX[%d]: KEY: %lu ", i, lx->key);
-				fprintf(fp, " VAL: ");
-				DEBUG_U128(fp, lx->val);
-				fprintf(fp, "\n");
-			} else if (XL(btr)) {
-				if (XLP(btr)) { fprintf(fp, "\t\tXL: PTR: %p\t", rrow); }
-				else {
-					key_printed = 1;
-					xlk *xl = (xlk *)rrow;
-					fprintf(fp, "\t\tXL[%d]: KEY: ", i);
-					DEBUG_U128(fp, xl->key);
-					fprintf(fp, " VAL: %lu\n", xl->val);
-				}
-			} else if (XX(btr)) {
-				key_printed = 1;
-				xxk *xx = (xxk *)rrow;
-				fprintf(fp, "\t\tXX[%d]: KEY: ", i);
-				DEBUG_U128(fp, xx->key);
-				fprintf(fp, " VAL: ");
-				DEBUG_U128(fp, xx->val);
-				fprintf(fp, "\n");
+			if (LL(btr)) {
+				fprintf(fp, "\t\tLL: PTR: %p\t", rrow);
 			} else {
 				bool gost = IS_GHOST(btr, rrow);
 				if (gost) { fprintf(fp, "\t\tROW [%d]: %p \tGHOST-", i, rrow); }
@@ -250,7 +148,7 @@ static void dump_tree_node(FILE *fp, bt *btr, bt_n *x, int depth, bool is_index,
 				uint32 dr = getDR(btr, x, i);
 				if (dr) { fprintf(fp, "\t\t\t\tDR: %d\n", dr); }
 				else {
-					ulong beg = C_IS_I(btr->s.ktype) ? akey.i : akey.l;
+					ulong beg = akey.l;
 					for (ulong j = 1; j <= (ulong)dr; j++) {
 						fprintf(fp, "\t\t\t\t\tEVICTED KEY:\t\t\t%lu\n", beg + j);
 					}

@@ -43,8 +43,6 @@
 
 #include "fault.h"
 
-#define DIG_ARRAY_QUEUE_HIGHWATER 512
-
 #define AI_ARR_MAX_USED 32
 
 /*
@@ -216,7 +214,7 @@ ai_arr_insert(ai_arr *arr, cf_digest *dig, bool *found)
  * Returns the size diff
  */
 static int
-anbtr_check_convert(ai_nbtr *anbtr, uchar pktyp)
+anbtr_check_convert(ai_nbtr *anbtr, col_type_t sktype)
 {
 	// Nothing to do
 	if (anbtr->is_btree)
@@ -227,7 +225,7 @@ anbtr_check_convert(ai_nbtr *anbtr, uchar pktyp)
 		//cf_info(AS_SINDEX,"Flipped @ %d", arr->used);
 		ulong ba = ai_arr_size(arr);
 		// Allocate btree move digest from arr to btree
-		bt *nbtr = createIndexNode(pktyp, COL_TYPE_NONE);
+		bt *nbtr = createNBT(sktype);
 		if (!nbtr) {
 			cf_warning(AS_SINDEX, "btree allocation failure");
 			return 0;
@@ -251,7 +249,7 @@ anbtr_check_convert(ai_nbtr *anbtr, uchar pktyp)
  *          size of allocation in case of success
  */
 static int
-anbtr_check_init(ai_nbtr *anbtr, uchar pktyp)
+anbtr_check_init(ai_nbtr *anbtr, col_type_t sktype)
 {
 	bool create_arr = false;
 	bool create_nbtr = false;
@@ -282,7 +280,7 @@ anbtr_check_init(ai_nbtr *anbtr, uchar pktyp)
 		}
 		return ai_arr_size(anbtr->u.arr);
 	} else if (create_nbtr) {
-		anbtr->u.nbtr = createIndexNode(pktyp, COL_TYPE_NONE);
+		anbtr->u.nbtr = createNBT(sktype);
 		if (!anbtr->u.nbtr) {
 			return -1;
 		}
@@ -306,7 +304,7 @@ anbtr_check_init(ai_nbtr *anbtr, uchar pktyp)
  * Parameter:   ibtr  : Btree of key
  *              acol  : Secondary index key
  *              apk   : value (primary key to be inserted)
- *              pktyp : value type (U160 currently)
+ *              sktype : value type (U160 currently)
  *
  * Returns:
  *      AS_SINDEX_OK        : In case of success
@@ -314,7 +312,7 @@ anbtr_check_init(ai_nbtr *anbtr, uchar pktyp)
  *      AS_SINDEX_KEY_FOUND : If key already exists
  */
 static int
-reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk, uchar pktyp)
+reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk, col_type_t sktype)
 {
 	ai_nbtr *anbtr = (ai_nbtr *)btIndFind(ibtr, acol);
 	ulong ba = 0, aa = 0;
@@ -331,7 +329,7 @@ reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk, uchar pktyp)
 	}
 
 	// Init the array
-	int ret = anbtr_check_init(anbtr, pktyp);
+	int ret = anbtr_check_init(anbtr, sktype);
 	if (ret < 0) {
 		if (allocated_anbtr) {
 			cf_free(anbtr);
@@ -343,7 +341,7 @@ reduced_iAdd(bt *ibtr, ai_obj *acol, ai_obj *apk, uchar pktyp)
 	}
 
 	// Convert from arr to nbtr if limit is hit
-	ibtr->nsize += anbtr_check_convert(anbtr, pktyp);
+	ibtr->nsize += anbtr_check_convert(anbtr, sktype);
 
 	// If already a btree use it
 	if (anbtr->is_btree) {
@@ -462,7 +460,7 @@ ai_btree_key_hash_from_sbin(as_sindex_metadata *imd, as_sindex_bin_data *b)
 {
 	uint64_t u;
 
-	if (C_IS_Y(imd->btype)) {
+	if (C_IS_DG(imd->sktype)) {
 		char *x = (char *) &b->digest; // x += 4;
 		u = ((* (uint128 *) x) % imd->nprts);
 	} else {
@@ -477,7 +475,7 @@ ai_btree_key_hash(as_sindex_metadata *imd, void *skey)
 {
 	uint64_t u;
 
-	if (C_IS_Y(imd->btype)) {
+	if (C_IS_DG(imd->sktype)) {
 		char *x = (char *) ((cf_digest *)skey); // x += 4;
 		u = ((* (uint128 *) x) % imd->nprts);
 	} else {
@@ -532,7 +530,7 @@ btree_addsinglerec(as_sindex_metadata *imd, ai_obj * key, cf_digest *dig, cf_ll 
 	memcpy(&keys_arr->pindex_digs[keys_arr->num], dig, CF_DIGEST_KEY_SZ);
 
 	// Copy the key
-	if (C_IS_Y(imd->btype)) {
+	if (C_IS_DG(imd->sktype)) {
 		memcpy(&keys_arr->sindex_keys[keys_arr->num].key.str_key, &key->y, CF_DIGEST_KEY_SZ);
 	}
 	else {
@@ -727,7 +725,7 @@ ai_btree_query(as_sindex_metadata *imd, as_sindex_range *srange, as_sindex_qctx 
 	if (!srange->isrange) { // EQUALITY LOOKUP
 		ai_obj afk;
 		init_ai_obj(&afk);
-		if (C_IS_Y(imd->btype)) {
+		if (C_IS_DG(imd->sktype)) {
 			init_ai_objFromDigest(&afk, &srange->start.digest);
 		}
 		else {
@@ -745,10 +743,11 @@ int
 ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_digest *value)
 {
 	ai_obj ncol;
-	if (C_IS_Y(imd->btype)) {
+	if (C_IS_DG(imd->sktype)) {
 		init_ai_objFromDigest(&ncol, (cf_digest*)skey);
 	}
 	else {
+		// TODO - ai_obj type is LONG for both Geo and Long
 		init_ai_objLong(&ncol, *(ulong *)skey);
 	}
 
@@ -757,7 +756,7 @@ ai_btree_put(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void *skey, cf_
 
 
 	uint64_t before = pimd->ibtr->msize + pimd->ibtr->nsize;
-	int ret = reduced_iAdd(pimd->ibtr, &ncol, &apk, COL_TYPE_U160);
+	int ret = reduced_iAdd(pimd->ibtr, &ncol, &apk, COL_TYPE_DIGEST);
 	uint64_t after = pimd->ibtr->msize + pimd->ibtr->nsize;
 	cf_atomic64_add(&imd->si->ns->n_bytes_sindex_memory, (after - before));
 
@@ -778,10 +777,11 @@ ai_btree_delete(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, void * skey,
 	}
 
 	ai_obj ncol;
-	if (C_IS_Y(imd->btype)) {
+	if (C_IS_DG(imd->sktype)) {
 		init_ai_objFromDigest(&ncol, (cf_digest *)skey);
 	}
 	else {
+		// TODO - ai_obj type is LONG for both Geo and Long
 		init_ai_objLong(&ncol, *(ulong *)skey);
 	}
 
@@ -951,7 +951,7 @@ ai_btree_build_defrag_list(as_sindex_metadata *imd, as_sindex_pmetadata *pimd, a
 		goto END;
 	}
 	//Entry is range query, FROM previous icol TO maxKey(ibtr)
-	if (icol->empty) {
+	if (icol->type == COL_TYPE_INVALID) {
 		assignMinKey(pimd->ibtr, icol); // init first call
 	}
 	ai_obj iH;
@@ -1078,7 +1078,7 @@ ai_btree_create(as_sindex_metadata *imd)
 {
 	for (int i = 0; i < imd->nprts; i++) {
 		as_sindex_pmetadata *pimd = &imd->pimd[i];
-		pimd->ibtr = createIndexBT(imd->btype, -1);
+		pimd->ibtr = createIBT(imd->sktype, -1);
 		if (! pimd->ibtr) {
 			cf_crash(AS_SINDEX, "Failed to allocate secondary index tree for ns:%s, indexname:%s",
 					imd->ns_name, imd->iname);
@@ -1187,12 +1187,12 @@ ai_btree_get_nsize(as_sindex_metadata *imd)
 }
 
 void
-ai_btree_reinit_pimd(as_sindex_pmetadata * pimd, int btype)
+ai_btree_reinit_pimd(as_sindex_pmetadata * pimd, col_type_t sktype)
 {
 	if (! pimd->ibtr) {
 		cf_crash(AS_SINDEX, "IBTR is null");
 	}
-	pimd->ibtr = createIndexBT(btype, -1);
+	pimd->ibtr = createIBT(sktype, -1);
 }
 
 void

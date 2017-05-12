@@ -127,26 +127,10 @@ typedef enum {
 // **************************************************************************************************
 
 /*
- * SECONDARY INDEX KEY TYPES
- * NB: DO NOT CHANGE NUMBERING, it matches COL_TYPE* to track down weird 
- * behavior if it does not match.
+ * SECONDARY INDEX KEY TYPES same as COL_TYPE*
  */
 // **************************************************************************************************
-typedef enum {
-	AS_SINDEX_KTYPE_NONE   = 0,
-	AS_SINDEX_KTYPE_LONG   = 2, //Particle type INT
-	AS_SINDEX_KTYPE_FLOAT  = 4, //Particle type INT
-	AS_SINDEX_KTYPE_DIGEST = 10,
-	AS_SINDEX_KTYPE_GEO2DSPHERE = 12
-} as_sindex_ktype;
-#define AS_SINDEX_KTYPE_MAX_TO_STR_SZ 3
-
-typedef enum {
-	AS_SINDEX_KEY_TYPE_LONG   = 0,
-	AS_SINDEX_KEY_TYPE_DIGEST = 1,
-	AS_SINDEX_KEY_TYPE_GEO2DSPHERE = 2,
-	AS_SINDEX_KEY_TYPE_MAX    = 3
-} as_sindex_key_type;
+typedef uint8_t as_sindex_ktype;
 // **************************************************************************************************
 
 /*
@@ -272,7 +256,7 @@ typedef struct as_sindex_metadata_s {
 	char                * iname;
 	char                * bname;
 	uint32_t              binid; // Redundant info to aid search
-	as_sindex_ktype       btype; // Same as Aerospike Index type
+	as_sindex_ktype       sktype; // Same as Aerospike Index type
 	as_sindex_type        itype;
 	int 				  post_op;
 	as_sindex_path        path[AS_SINDEX_MAX_DEPTH];
