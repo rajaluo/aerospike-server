@@ -724,8 +724,7 @@ connect_socket(const cf_socket *sock, struct sockaddr *sa, int32_t timeout)
 	}
 
 	if (errno != EINPROGRESS) {
-		cf_ticker_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)",
-				sock->fd, errno, cf_strerror(errno));
+		cf_ticker_warning(CF_SOCKET, "Error while connecting: %d (%s)", errno, cf_strerror(errno));
 		goto cleanup0;
 	}
 
@@ -751,7 +750,7 @@ connect_socket(const cf_socket *sock, struct sockaddr *sa, int32_t timeout)
 	int32_t count = safe_wait(efd, &event, 1, timeout);
 
 	if (count == 0) {
-		cf_ticker_warning(CF_SOCKET, "Timeout while connecting FD %d", sock->fd);
+		cf_ticker_warning(CF_SOCKET, "Timeout while connecting");
 		goto cleanup1;
 	}
 
@@ -760,8 +759,7 @@ connect_socket(const cf_socket *sock, struct sockaddr *sa, int32_t timeout)
 	safe_getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
 
 	if (err != 0) {
-		cf_ticker_warning(CF_SOCKET, "Error while connecting FD %d: %d (%s)",
-				sock->fd, err, cf_strerror(err));
+		cf_ticker_warning(CF_SOCKET, "Error while connecting: %d (%s)", err, cf_strerror(err));
 		goto cleanup1;
 	}
 
