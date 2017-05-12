@@ -3015,6 +3015,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_atomic32_set(&ns->obj_size_hist_max, round_max); // in 128-byte blocks
 		}
 		else if (0 == as_info_parameter_get(params, "rack-id", context, &context_len)) {
+			if (! as_new_clustering()) {
+				cf_warning(AS_INFO, "rack-id may only be set after switch to paxos-protocol v5");
+				goto Error;
+			}
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}

@@ -3892,6 +3892,10 @@ as_config_post_process(as_config* c, const char* config_file)
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
 
+		if (! as_new_clustering() && ns->rack_id != 0) {
+			cf_crash_nostack(AS_CFG, "{%s} 'rack-id' may only be configured after switch to paxos-protocol v5", ns->name);
+		}
+
 		client_replica_maps_create(ns);
 
 		ns->tree_shared.destructor			= (as_index_value_destructor)&as_record_destroy;
