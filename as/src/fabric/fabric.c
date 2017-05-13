@@ -1572,13 +1572,12 @@ fabric_connection_send_progress(fabric_connection *fc, bool is_last)
 	else {
 		// Fresh msg.
 		msg *m = fc->s_msg_in_progress;
-		bool send_pk = as_new_clustering();
 
-		send_full = msg_get_wire_size(m, send_pk);
+		send_full = msg_get_wire_size(m, true);
 		fabric_buffer_init(&fc->s_buf, send_full);
 
 		send_progress = fc->s_buf.progress;
-		msg_to_wire(m, send_progress, send_pk);
+		msg_to_wire(m, send_progress, true);
 
 		if (m->benchmark_time != 0) {
 			m->benchmark_time = histogram_insert_data_point(
@@ -1714,7 +1713,7 @@ fabric_connection_process_fabric_msg(fabric_connection *fc, const msg *m)
 	uint32_t pool_id = AS_FABRIC_CHANNEL_RW;
 	int rv = msg_get_uint32(m, FS_CHANNEL, &pool_id);
 
-	// XXX JUMP - remove check for field's presence in "six months".
+	// XXX POST-JUMP - remove check for field's presence in "six months".
 	if (rv == 0 && pool_id >= AS_FABRIC_N_CHANNELS) {
 		fabric_node_release(node); // from cf_rchash_get
 		return false;

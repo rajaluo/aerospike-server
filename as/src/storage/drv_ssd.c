@@ -98,8 +98,8 @@ extern bool as_cold_start_evict_if_needed(as_namespace* ns);
 
 // Info slice in device header block.
 typedef struct info_buf_s {
-	uint32_t len;
-	as_partition_vinfo vinfo;
+	uint32_t len; // set, but never read
+	as_partition_version version;
 } __attribute__ ((__packed__)) info_buf;
 
 
@@ -3390,10 +3390,11 @@ ssd_load_devices(drv_ssds *ssds, cf_queue *complete_q, void *udata)
 
 	// Cache booleans indicating whether partitions are owned or not.
 	for (uint32_t pid = 0; pid < AS_PARTITIONS; pid++) {
-		as_partition_vinfo vinfo;
+		as_partition_version version;
 
-		as_storage_info_get(ns, pid, &vinfo);
-		ssds->get_state_from_storage[pid] = ! as_partition_is_null(&vinfo);
+		as_storage_info_get(ns, pid, &version);
+		ssds->get_state_from_storage[pid] =
+				! as_partition_version_is_null(&version);
 	}
 
 	// Warm restart - imitate device loading by reducing resumed index.
@@ -4208,26 +4209,26 @@ as_storage_defrag_sweep_ssd(as_namespace *ns)
 
 void
 as_storage_info_set_ssd(as_namespace *ns, uint32_t pid,
-		const as_partition_vinfo *vinfo)
+		const as_partition_version *version)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
 	info_buf *b = (info_buf*)
 			(ssds->header->info_data + (SSD_HEADER_INFO_STRIDE * pid));
 
-	b->len = (uint32_t)sizeof(as_partition_vinfo);
-	b->vinfo = *vinfo;
+	b->len = (uint32_t)sizeof(as_partition_version);
+	b->version = *version;
 }
 
 
 void
 as_storage_info_get_ssd(as_namespace *ns, uint32_t pid,
-		as_partition_vinfo *vinfo)
+		as_partition_version *version)
 {
 	drv_ssds *ssds = (drv_ssds*)ns->storage_private;
 	info_buf *b = (info_buf*)
 			(ssds->header->info_data + (SSD_HEADER_INFO_STRIDE * pid));
 
-	*vinfo = b->vinfo;
+	*version = b->version;
 }
 
 

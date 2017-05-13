@@ -42,7 +42,6 @@
 #include "fabric/fabric.h"
 #include "fabric/hb.h"
 #include "fabric/partition_balance.h"
-#include "fabric/paxos.h"
 
 /*
  * Overview
@@ -2962,9 +2961,7 @@ as_exchange_init()
 void
 as_exchange_start()
 {
-	if (as_new_clustering()) {
-		exchange_start();
-	}
+	exchange_start();
 }
 
 /**
@@ -2983,10 +2980,6 @@ void
 as_exchange_register_listener(as_exchange_cluster_changed_cb cb, void* udata)
 {
 	exchange_external_event_listener_register(cb, udata);
-
-	if (!as_new_clustering()) {
-		as_paxos_register_change_callback(cb, udata);
-	}
 }
 
 /**
@@ -2995,9 +2988,7 @@ as_exchange_register_listener(as_exchange_cluster_changed_cb cb, void* udata)
 void
 as_exchange_dump(bool verbose)
 {
-	if (as_new_clustering()) {
-		exchange_dump(CF_INFO, verbose);
-	}
+	exchange_dump(CF_INFO, verbose);
 }
 
 /**

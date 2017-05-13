@@ -510,9 +510,8 @@ as_ldt_op_type(int package_index, const char *op_name)
 uint64_t
 as_ldt_generate_version()
 {
-	as_config * c    = &g_config;
 	// MAC address for starting bits
-	uint64_t version = c->hw_self_node;
+	uint64_t version = g_config.self_node;
 
 	// clock for randomizer
 	srand(cf_clock_getabsoluteus());
@@ -1472,7 +1471,6 @@ as_ldt_record_pickle(ldt_record *lrecord,
 		*pickled_sz  = 0;
 	} else {
 		size_t sz     = 0;
-		bool send_pk = as_new_clustering();
 
 		m[ops] = as_fabric_msg_get(M_TYPE_RW);
 		if (!m[ops]) {
@@ -1487,7 +1485,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 							&h_urecord->pickled_rec_props,
 							false);
 
-			sz += msg_get_wire_size(m[ops], send_pk);
+			sz += msg_get_wire_size(m[ops], true);
 			ops++;
 		}
 
@@ -1528,7 +1526,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 				c_tr->msgp->msg.info2 &= ~AS_MSG_INFO2_DELETE;
 			}
 			
-			sz += msg_get_wire_size(m[ops], send_pk);
+			sz += msg_get_wire_size(m[ops], true);
 			ops++;
 		}
 
@@ -1544,7 +1542,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 			*pickled_sz  = sz;
 
 			for (int i = 0; i < ops; i++) {
-				buf += msg_to_wire(m[i], buf, send_pk);
+				buf += msg_to_wire(m[i], buf, true);
 			}
 		}
 	}

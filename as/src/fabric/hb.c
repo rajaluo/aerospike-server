@@ -1950,21 +1950,11 @@ as_hb_protocol_set(as_hb_protocol new_protocol)
 	as_hb_protocol_get_s(new_protocol, new_protocol_s);
 	switch (new_protocol) {
 	case AS_HB_PROTOCOL_V1:
-	case AS_HB_PROTOCOL_V2: {
-		if (as_new_clustering()) {
-			WARNING("clustering protocol v5 is incompatible with heartbeat protocol %s", new_protocol_s);
-			rv = -1;
-			goto Exit;
-		}
-		// Validate heartbeat and fabric bind addresses
-		char *error;
-		if (!config_binding_is_valid(&error, new_protocol)) {
-			WARNING("protocol version not set to %s - %s", new_protocol_s,
-					error);
-			rv = -1;
-			goto Exit;
-		}
-	}
+	case AS_HB_PROTOCOL_V2:
+		WARNING("clustering protocol v5 is incompatible with heartbeat protocol %s", new_protocol_s);
+		rv = -1;
+		goto Exit;
+
 	case AS_HB_PROTOCOL_V3:
 		if (hb_is_running()) {
 			INFO("disabling current heartbeat protocol %s", old_protocol_s);
@@ -2110,8 +2100,8 @@ as_hb_config_validate()
 	// Validate clustering and heartbeat version compatibility.
 	as_hb_protocol hb_protocol = config_protocol_get();
 
-	if (as_new_clustering() && (hb_protocol != AS_HB_PROTOCOL_V3
-			&& hb_protocol != AS_HB_PROTOCOL_NONE)) {
+	if (hb_protocol != AS_HB_PROTOCOL_V3
+			&& hb_protocol != AS_HB_PROTOCOL_NONE) {
 		CRASH_NOSTACK("clustering protocol v5 requires hearbeat version v3");
 	}
 
@@ -5834,7 +5824,7 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 {
 	// This is output by msg_to_wire. Using a separate variable so that we do
 	// not lose the actual buffer length needed for compression later on.
-	size_t msg_size = msg_to_wire(original_msg, buffer, as_new_clustering());
+	size_t msg_size = msg_to_wire(original_msg, buffer, true);
 
 	if (channel_msg_is_compression_required(original_msg, msg_size, mtu)) {
 		// Compression is required.
@@ -5859,7 +5849,7 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 
 			msg_set_buf(temp_msg, AS_HB_MSG_COMPRESSED_PAYLOAD,
 					compressed_buffer, compressed_msg_size, MSG_SET_COPY);
-			msg_size = msg_to_wire(temp_msg, buffer, as_new_clustering());
+			msg_size = msg_to_wire(temp_msg, buffer, true);
 
 			hb_msg_return(temp_msg);
 		}
@@ -5898,7 +5888,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 
 	// Read the message to a buffer.
 	int mtu = hb_mtu();
-	int wire_size = msg_get_wire_size(msg, as_new_clustering());
+	int wire_size = msg_get_wire_size(msg, true);
 	buffer_len = channel_msg_buffer_size_get(wire_size, mtu);
 	buffer = MSG_BUFF_ALLOC_OR_DIE(buffer_len,
 					"error allocating memory size %zu for sending message to node %" PRIx64,
@@ -5957,7 +5947,7 @@ channel_msg_broadcast(msg* msg)
 
 	// Read the message to a buffer.
 	int mtu = hb_mtu();
-	int wire_size = msg_get_wire_size(msg, as_new_clustering());
+	int wire_size = msg_get_wire_size(msg, true);
 	size_t buffer_len = channel_msg_buffer_size_get(wire_size, mtu);
 	uint8_t* buffer = MSG_BUFF_ALLOC_OR_DIE(buffer_len,
 			"error allocating memory size %zu for sending broadcast message",
@@ -8560,7 +8550,7 @@ multicast_supported_cluster_size_get()
 		size_t fixed_payload_size = msg_get_template_fixed_sz(
 				g_hb_v2_msg_template,
 				sizeof(g_hb_v2_msg_template) / sizeof(msg_template),
-				as_new_clustering());
+				true);
 
 		// Also accommodate for the terminating '0' nodeid.
 		int supported_cluster_size = ((hb_mtu() - UDP_HEADER_SIZE_MAX
@@ -8572,7 +8562,7 @@ multicast_supported_cluster_size_get()
 	// Calculate the fixed size for a UDP packet and the message header.
 	size_t msg_fixed_size = msg_get_template_fixed_sz(g_hb_msg_template,
 			sizeof(g_hb_msg_template) / sizeof(msg_template),
-			as_new_clustering());
+			true);
 
 	size_t msg_plugin_per_node_size = 0;
 
@@ -9572,12 +9562,6 @@ hb_channel_on_pulse(as_hb_channel_event* msg_event)
 	}
 
 	cf_atomic_int_incr(&g_stats.heartbeat_received_foreign);
-
-	// If this node encounters other nodes at startup, prevent it from switching
-	// to a single-node cluster.
-	if (! as_new_clustering()) {
-		as_partition_balance_init_multi_node_cluster();
-	}
 
 	HB_LOCK();
 

@@ -55,7 +55,6 @@
 #include "socket.h"
 #include "tls.h"
 
-#include "base/cluster_config.h"
 #include "base/datamodel.h"
 #include "base/ldt.h"
 #include "base/proto.h"
@@ -103,13 +102,11 @@ void cfg_add_mesh_seed_addr_port(char* addr, cf_ip_port port);
 as_set* cfg_add_set(as_namespace* ns);
 void cfg_add_storage_file(as_namespace* ns, char* file_name);
 void cfg_add_storage_device(as_namespace* ns, char* device_name, char* shadow_name);
-void cfg_init_si_var(as_namespace* ns);
 uint32_t cfg_obj_size_hist_max(uint32_t hist_max);
 void cfg_set_cluster_name(char* cluster_name);
 void create_and_check_hist_track(cf_hist_track** h, const char* name, histogram_scale scale);
 void create_and_check_hist(histogram** h, const char* name, histogram_scale scale);
 void cfg_create_all_histograms();
-int cfg_reset_self_node(as_config* config_p, cf_ip_addr *rack_addr);
 void cfg_init_serv_spec(cf_serv_spec* spec_p);
 void cfg_resolve_tls_name(as_config* config_p);
 
@@ -153,8 +150,6 @@ cfg_set_defaults()
 	c->nsup_period = 120; // run nsup once every 2 minutes
 	c->nsup_startup_evict = true;
 	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // default the maximum cluster size to a "reasonable" value
-	c->paxos_protocol = AS_PAXOS_PROTOCOL_V3;
-	c->paxos_retransmit_period = 5; // run paxos retransmit once every 5 seconds
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
@@ -223,14 +218,6 @@ cfg_set_defaults()
 	c->mod_lua.cache_enabled    = true;
 	strcpy(c->mod_lua.system_path, "/opt/aerospike/sys/udf/lua");
 	strcpy(c->mod_lua.user_path, "/opt/aerospike/usr/udf/lua");
-
-	// Cluster Topology: With the new Rack Aware feature, we allow the customers
-	// to define their nodes and groups with THEIR names, and thus overrule the
-	// autogenerate node ID based on MAC address and port (i.e. Hardware
-	// config). The DEFAULT value for "cluster mode" will be the old style -->
-	// No Topology. We have to see a CLUSTER definition of "static" or "dynamic"
-	// in the config file in order to change to the new mode.
-	c->cluster_mode = CL_MODE_NO_TOPOLOGY;
 
 	// TODO - security set default config API?
 	c->sec_cfg.privilege_refresh_period = 60 * 5; // refresh socket privileges every 5 minutes
@@ -301,8 +288,6 @@ typedef enum {
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_NSUP_STARTUP_EVICT,
 	CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE,
-	CASE_SERVICE_PAXOS_PROTOCOL,
-	CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
 	CASE_SERVICE_QUERY_BUFPOOL_SIZE,
@@ -378,7 +363,9 @@ typedef enum {
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
 	CASE_SERVICE_NSUP_THREADS,
+	CASE_SERVICE_PAXOS_PROTOCOL,
 	CASE_SERVICE_PAXOS_RECOVERY_POLICY,
+	CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD,
 	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET,
 	CASE_SERVICE_SCAN_MEMORY,
 	CASE_SERVICE_SCAN_PRIORITY,
@@ -395,13 +382,6 @@ typedef enum {
 	CASE_SERVICE_AUTO_PIN_NONE,
 	CASE_SERVICE_AUTO_PIN_CPU,
 	CASE_SERVICE_AUTO_PIN_NUMA,
-
-	// Service paxos protocol options (value tokens):
-	CASE_SERVICE_PAXOS_PROTOCOL_V1,
-	CASE_SERVICE_PAXOS_PROTOCOL_V2,
-	CASE_SERVICE_PAXOS_PROTOCOL_V3,
-	CASE_SERVICE_PAXOS_PROTOCOL_V4,
-	CASE_SERVICE_PAXOS_PROTOCOL_V5,
 
 	// Logging options:
 	// Normally visible:
@@ -663,16 +643,6 @@ typedef enum {
 	CASE_MOD_LUA_SYSTEM_PATH,
 	CASE_MOD_LUA_USER_PATH,
 
-	// Cluster options:
-	CASE_CLUSTER_SELF_NODE_ID,
-	CASE_CLUSTER_SELF_GROUP_ID,
-	CASE_CLUSTER_GROUP_BEGIN,
-	CASE_CLUSTER_MODE,
-
-	// Cluster group options:
-	CASE_CLUSTER_GROUP_NODE_ID,
-	CASE_CLUSTER_GROUP_GROUP_ATTR,
-
 	// Security options:
 	CASE_SECURITY_ENABLE_SECURITY,
 	CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD,
@@ -800,8 +770,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
 		{ "paxos-max-cluster-size",			CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE },
-		{ "paxos-protocol",					CASE_SERVICE_PAXOS_PROTOCOL },
-		{ "paxos-retransmit-period",		CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
 		{ "query-bufpool-size",				CASE_SERVICE_QUERY_BUFPOOL_SIZE },
@@ -874,7 +842,9 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
 		{ "nsup-threads",					CASE_SERVICE_NSUP_THREADS },
+		{ "paxos-protocol",					CASE_SERVICE_PAXOS_PROTOCOL },
 		{ "paxos-recovery-policy",			CASE_SERVICE_PAXOS_RECOVERY_POLICY },
+		{ "paxos-retransmit-period",		CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD },
 		{ "replication-fire-and-forget",	CASE_SERVICE_REPLICATION_FIRE_AND_FORGET },
 		{ "scan-memory",					CASE_SERVICE_SCAN_MEMORY },
 		{ "scan-priority",					CASE_SERVICE_SCAN_PRIORITY },
@@ -893,14 +863,6 @@ const cfg_opt SERVICE_AUTO_PIN_OPTS[] = {
 		{ "none",							CASE_SERVICE_AUTO_PIN_NONE },
 		{ "cpu",							CASE_SERVICE_AUTO_PIN_CPU },
 		{ "numa",							CASE_SERVICE_AUTO_PIN_NUMA }
-};
-
-const cfg_opt SERVICE_PAXOS_PROTOCOL_OPTS[] = {
-		{ "v1",								CASE_SERVICE_PAXOS_PROTOCOL_V1 },
-		{ "v2",								CASE_SERVICE_PAXOS_PROTOCOL_V2 },
-		{ "v3",								CASE_SERVICE_PAXOS_PROTOCOL_V3 },
-		{ "v4",								CASE_SERVICE_PAXOS_PROTOCOL_V4 },
-		{ "v5",								CASE_SERVICE_PAXOS_PROTOCOL_V5 }
 };
 
 const cfg_opt LOGGING_OPTS[] = {
@@ -1176,20 +1138,6 @@ const cfg_opt MOD_LUA_OPTS[] = {
 		{ "}",								CASE_CONTEXT_END }
 };
 
-const cfg_opt CLUSTER_OPTS[] = {
-		{ "self-node-id",					CASE_CLUSTER_SELF_NODE_ID },
-		{ "self-group-id",					CASE_CLUSTER_SELF_GROUP_ID },
-		{ "group",							CASE_CLUSTER_GROUP_BEGIN },
-		{ "mode",							CASE_CLUSTER_MODE },
-		{ "}",								CASE_CONTEXT_END }
-};
-
-const cfg_opt CLUSTER_GROUP_OPTS[] = {
-		{ "node-id",						CASE_CLUSTER_GROUP_NODE_ID },
-		{ "group-attr",						CASE_CLUSTER_GROUP_GROUP_ATTR },
-		{ "}",								CASE_CONTEXT_END }
-};
-
 const cfg_opt SECURITY_OPTS[] = {
 		{ "enable-security",				CASE_SECURITY_ENABLE_SECURITY },
 		{ "privilege-refresh-period",		CASE_SECURITY_PRIVILEGE_REFRESH_PERIOD },
@@ -1271,7 +1219,6 @@ const cfg_opt XDR_SEC_CREDENTIALS_OPTS[] = {
 const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof(cfg_opt);
-const int NUM_SERVICE_PAXOS_PROTOCOL_OPTS			= sizeof(SERVICE_PAXOS_PROTOCOL_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_FILE_OPTS						= sizeof(LOGGING_FILE_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_CONSOLE_OPTS					= sizeof(LOGGING_CONSOLE_OPTS) / sizeof(cfg_opt);
@@ -1295,8 +1242,6 @@ const int NUM_NAMESPACE_SI_OPTS						= sizeof(NAMESPACE_SI_OPTS) / sizeof(cfg_op
 const int NUM_NAMESPACE_SINDEX_OPTS					= sizeof(NAMESPACE_SINDEX_OPTS) / sizeof(cfg_opt);
 const int NUM_NAMESPACE_GEO2DSPHERE_WITHIN_OPTS		= sizeof(NAMESPACE_GEO2DSPHERE_WITHIN_OPTS) / sizeof(cfg_opt);
 const int NUM_MOD_LUA_OPTS							= sizeof(MOD_LUA_OPTS) / sizeof(cfg_opt);
-const int NUM_CLUSTER_OPTS							= sizeof(CLUSTER_OPTS) / sizeof(cfg_opt);
-const int NUM_CLUSTER_GROUP_OPTS					= sizeof(CLUSTER_GROUP_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_OPTS							= sizeof(SECURITY_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_LOG_OPTS						= sizeof(SECURITY_LOG_OPTS) / sizeof(cfg_opt);
 const int NUM_SECURITY_SYSLOG_OPTS					= sizeof(SECURITY_SYSLOG_OPTS) / sizeof(cfg_opt);
@@ -1347,7 +1292,6 @@ typedef enum {
 	NETWORK, NETWORK_SERVICE, NETWORK_HEARTBEAT, NETWORK_FABRIC, NETWORK_INFO,
 	NAMESPACE, NAMESPACE_STORAGE_DEVICE, NAMESPACE_SET, NAMESPACE_SI, NAMESPACE_SINDEX, NAMESPACE_GEO2DSPHERE_WITHIN,
 	MOD_LUA,
-	CLUSTER, CLUSTER_GROUP,
 	SECURITY, SECURITY_LOG, SECURITY_SYSLOG,
 	XDR, XDR_DATACENTER,
 	// Used parsing separate file, but shares this enum:
@@ -1364,7 +1308,6 @@ const char* CFG_PARSER_STATES[] = {
 		"NETWORK", "NETWORK_SERVICE", "NETWORK_HEARTBEAT", "NETWORK_FABRIC", "NETWORK_INFO",
 		"NAMESPACE", "NAMESPACE_STORAGE_DEVICE", "NAMESPACE_SET", "NAMESPACE_SI", "NAMESPACE_SINDEX", "NAMESPACE_GEO2DSPHERE_WITHIN",
 		"MOD_LUA",
-		"CLUSTER", "CLUSTER_GROUP",
 		"SECURITY", "SECURITY_LOG", "SECURITY_SYSLOG",
 		"XDR", "XDR_DATACENTER",
 		// Used parsing separate file, but shares corresponding enum:
@@ -2006,10 +1949,6 @@ as_config_init(const char* config_file)
 	cf_fault_sink* sink = NULL;
 	as_set* p_set = NULL; // local variable used for set initialization
 
-	bool old_rack_aware = false; // XXX JUMP - remove in "six months"
-	cc_group_t cluster_group_id = 0; // hold the group name while we process nodes (0 not a valid ID #)
-	cc_node_t cluster_node_id; // capture the node id in a group
-
 	// Open the configuration file for reading.
 	if (NULL == (FD = fopen(config_file, "r"))) {
 		cf_crash_nostack(AS_CFG, "couldn't open configuration file %s: %s", config_file, cf_strerror(errno));
@@ -2086,9 +2025,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_MOD_LUA_BEGIN:
 				cfg_begin_context(&state, MOD_LUA);
-				break;
-			case CASE_CLUSTER_BEGIN:
-				cfg_begin_context(&state, CLUSTER);
 				break;
 			case CASE_SECURITY_BEGIN:
 				cfg_enterprise_only(&line);
@@ -2240,32 +2176,6 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE:
 				c->paxos_max_cluster_size = cfg_u64(&line, 1, AS_CLUSTER_SZ);
-				break;
-			case CASE_SERVICE_PAXOS_PROTOCOL:
-				switch (cfg_find_tok(line.val_tok_1, SERVICE_PAXOS_PROTOCOL_OPTS, NUM_SERVICE_PAXOS_PROTOCOL_OPTS)) {
-				case CASE_SERVICE_PAXOS_PROTOCOL_V1:
-					c->paxos_protocol = AS_PAXOS_PROTOCOL_V1;
-					break;
-				case CASE_SERVICE_PAXOS_PROTOCOL_V2:
-					c->paxos_protocol = AS_PAXOS_PROTOCOL_V2;
-					break;
-				case CASE_SERVICE_PAXOS_PROTOCOL_V3:
-					c->paxos_protocol = AS_PAXOS_PROTOCOL_V3;
-					break;
-				case CASE_SERVICE_PAXOS_PROTOCOL_V4:
-					c->paxos_protocol = AS_PAXOS_PROTOCOL_V4;
-					break;
-				case CASE_SERVICE_PAXOS_PROTOCOL_V5:
-					c->paxos_protocol = AS_PAXOS_PROTOCOL_V5;
-					break;
-				case CASE_NOT_FOUND:
-				default:
-					cfg_unknown_val_tok_1(&line);
-					break;
-				}
-				break;
-			case CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD:
-				c->paxos_retransmit_period = cfg_u32_no_checks(&line);
 				break;
 			case CASE_SERVICE_PROTO_FD_IDLE_MS:
 				c->proto_fd_idle_ms = cfg_int_no_checks(&line);
@@ -2420,7 +2330,9 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
 			case CASE_SERVICE_NSUP_THREADS:
+			case CASE_SERVICE_PAXOS_PROTOCOL:
 			case CASE_SERVICE_PAXOS_RECOVERY_POLICY:
+			case CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD:
 			case CASE_SERVICE_REPLICATION_FIRE_AND_FORGET:
 			case CASE_SERVICE_SCAN_MEMORY:
 			case CASE_SERVICE_SCAN_PRIORITY:
@@ -3042,9 +2954,8 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_NAMESPACE_SI_BEGIN:
 				cfg_deprecated_name_tok(&line);
-				// Entire section is deprecated but
-				// needs to begin and end the context
-				// to avoid crash
+				// Entire section is deprecated but needs to begin and end the
+				// context to avoid crash.
 				cfg_begin_context(&state, NAMESPACE_SI);
 				break;
 			case CASE_CONTEXT_END:
@@ -3319,74 +3230,6 @@ as_config_init(const char* config_file)
 			break;
 
 		//==================================================
-		// Parse cluster context items.
-		// XXX JUMP - remove in "six months".
-		//
-		case CLUSTER:
-			old_rack_aware = true;
-			switch (cfg_find_tok(line.name_tok, CLUSTER_OPTS, NUM_CLUSTER_OPTS)) {
-			case CASE_CLUSTER_SELF_NODE_ID:
-				c->cluster.cl_self_node = cfg_u32_no_checks(&line);
-				break;
-			case CASE_CLUSTER_SELF_GROUP_ID:
-				c->cluster.cl_self_group = cfg_u16_no_checks(&line);
-				break;
-			case CASE_CLUSTER_MODE:
-				// Define the MODE for this cluster: static or dynamic.
-				if (strcmp(line.val_tok_1, CL_STR_STATIC) == 0) {
-					c->cluster_mode = CL_MODE_STATIC;
-				}
-				else if (strcmp(line.val_tok_1, CL_STR_DYNAMIC) == 0) {
-					c->cluster_mode = CL_MODE_DYNAMIC;
-				}
-				else if (strcmp(line.val_tok_1, CL_STR_NONE) == 0) {
-					// Same as default case -- for now.  Leave as separate
-					// test, though, to make future changes easier.
-					c->cluster_mode = CL_MODE_NO_TOPOLOGY;
-				}
-				else {
-					c->cluster_mode = CL_MODE_NO_TOPOLOGY;
-				}
-				break;
-			case CASE_CLUSTER_GROUP_BEGIN:
-				cluster_group_id = cfg_u16_no_checks(&line);
-				cc_add_group(&(c->cluster), cluster_group_id);
-				cfg_begin_context(&state, CLUSTER_GROUP);
-				break;
-			case CASE_CONTEXT_END:
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		//----------------------------------------
-		// Parse cluster::group context items.
-		// XXX JUMP - remove in "six months".
-		//
-		case CLUSTER_GROUP:
-			switch (cfg_find_tok(line.name_tok, CLUSTER_GROUP_OPTS, NUM_CLUSTER_GROUP_OPTS)) {
-			case CASE_CLUSTER_GROUP_NODE_ID:
-				// For each node ID, register the node and group.
-				cluster_node_id = cfg_u32_no_checks(&line);
-				cc_add_node_group_entry(&(c->cluster), cluster_node_id, cluster_group_id);
-				cf_detail(AS_CFG, "node ID(%08x) Group ID(%04x)", cluster_node_id, cluster_group_id);
-				break;
-			case CASE_CONTEXT_END:
-				cluster_group_id = 0; // clear the group ID
-				cfg_end_context(&state);
-				break;
-			case CASE_NOT_FOUND:
-			default:
-				cfg_unknown_name_tok(&line);
-				break;
-			}
-			break;
-
-		//==================================================
 		// Parse security context items.
 		//
 		case SECURITY:
@@ -3621,11 +3464,6 @@ as_config_init(const char* config_file)
 	// means failure logs show in the log file.
 	//
 
-	if (as_new_clustering() && old_rack_aware) {
-		cf_crash_nostack(AS_CFG, "'cluster' configuration context is obsolete - "
-				"see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/cluster_to_3_13");
-	}
-
 	as_security_config_check();
 
 	return &g_config;
@@ -3723,41 +3561,7 @@ as_config_post_process(as_config* c, const char* config_file)
 		cf_crash_nostack(AS_CFG, "could not get node id");
 	}
 
-	// Cache the HW value - which will be overridden if cache-aware is on.
-	c->hw_self_node = c->self_node;
-
-	// If we're in "manual cluster topology" mode, then that means the user has
-	// defined a node ID and Group ID in the config file, and thus we will
-	// override the HW Generated file and create a PORT + GROUP + NODE value
-	// for the "Self Node" value that is passed around by Paxos.
-	//
-	// FOR FUTURE CONSIDERATION:: We may want to use the new naming style even
-	// when Rack-Aware mode is turned off -- provided that the group and node
-	// values are valid.  However, in order to use "cfg_reset_self_node()", we
-	// ALSO must make sure that other things are in effect (e.g. Paxos V4).
-	// So -- this is just a bookmark for some future changes:
-	// TODO: Update this to set new self_node even in "No Topology" mode.
-	if (c->cluster_mode != CL_MODE_NO_TOPOLOGY) {
-		cf_info(AS_CFG, "Rack Aware mode enabled");
-		// Do some checking here to verify that the user gave us valid group
-		// and node id values.  If not, then stop here and do not proceed.
-		if (c->cluster.cl_self_group == 0) {
-			cf_crash_nostack(AS_CFG,
-				"Cluster 'self-group-id' must be set to a non-zero value");
-		}
-		if (c->cluster.cl_self_node == 0 && c->cluster_mode == CL_MODE_STATIC) {
-			cf_crash_nostack(AS_CFG,
-				"Cluster 'self-node-id' must be set to a non-zero value when in 'static' mode");
-		}
-
-		// If we got this far, then group/node should be ok.
-		cfg_reset_self_node(c, &rack_addr);
-	}
-	else {
-		cf_info(AS_CFG, "Rack Aware mode not enabled");
-	}
-
-	cf_info(AS_CFG, "Node id %"PRIx64, c->self_node);
+	cf_info(AS_CFG, "node-id %lx", c->self_node);
 
 	// Populate access ports from configuration.
 
@@ -3898,10 +3702,6 @@ as_config_post_process(as_config* c, const char* config_file)
 
 	for (int i = 0; i < g_config.n_namespaces; i++) {
 		as_namespace* ns = g_config.namespaces[i];
-
-		if (! as_new_clustering() && ns->rack_id != 0) {
-			cf_crash_nostack(AS_CFG, "{%s} 'rack-id' may only be configured after switch to paxos-protocol v5", ns->name);
-		}
 
 		client_replica_maps_create(ns);
 
@@ -4561,52 +4361,6 @@ cfg_create_all_histograms()
 	create_and_check_hist(&g_stats.ldt_update_io_bytes_hist, "ldt_rec_update_bytes", HIST_SIZE);
 	create_and_check_hist(&g_stats.ldt_hist, "ldt", HIST_MILLISECONDS);
 }
-
-/**
- * cfg_reset_self_node:
- * If we're in "Topology Mode", then we repurpose the self-node value from
- * "PORT + MAC ADDRESS" to our altered state:
- *
- * Rebuild the self node value as follows:
- * Top 16 bits: Port Number
- * Next 16 bits: Group ID
- * Bottom 32 bits: Node ID
- */
-int
-cfg_reset_self_node(as_config* config_p, cf_ip_addr *rack_addr)
-{
-	cf_node self_node = config_p->self_node;
-
-	// Take the existing Self Node, pull out the Port Number, then rebuild as
-	// PORT + GROUP ID + NODE ID (16 bits::16 bits::32 bits)
-	cf_debug(AS_CFG,"[ENTER] set self Node:: group(%u) Node (%u)\n",
-		config_p->cluster.cl_self_group, config_p->cluster.cl_self_node);
-
-	cc_node_t node_id = config_p->cluster.cl_self_node;
-	cc_group_t group_id = config_p->cluster.cl_self_group;
-	uint16_t port_num = cc_compute_port(self_node);
-
-	if (config_p->cluster_mode == CL_MODE_DYNAMIC) {
-		cf_info(AS_CFG, "Cluster Mode Dynamic: Config IP address for Self Node");
-
-		if (cf_ip_addr_is_any(rack_addr)) {
-			cf_crash_nostack(AS_CFG, "Interface without IP address used for dynamic node ID");
-		}
-
-		cf_ip_addr_to_rack_aware_id(rack_addr, &node_id);
-		cf_info(AS_CFG, "Setting node ID to %u (0x%08X) from IP address \"%s\"", node_id, node_id,
-				cf_ip_addr_print(rack_addr));
-	}
-	else if (config_p->cluster_mode == CL_MODE_STATIC) {
-		cf_info(AS_CFG, "Cluster Mode Static: Config self-node-id (%u) for Self Node", node_id);
-	}
-
-	cf_node new_self = cc_compute_self_node(port_num, group_id, node_id);
-
-	config_p->self_node = new_self;
-
-	return 0;
-} // end cfg_reset_self_node()
 
 void
 cfg_init_serv_spec(cf_serv_spec* spec_p)

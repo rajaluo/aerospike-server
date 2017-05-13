@@ -46,14 +46,6 @@
 
 
 //==========================================================
-// Constants and typedefs.
-//
-
-// XXX JUMP - remove in "six months".
-const as_partition_vinfo NULL_VINFO = { 0 };
-
-
-//==========================================================
 // Forward declarations.
 //
 
@@ -87,10 +79,6 @@ as_partition_init(as_namespace* ns, uint32_t pid)
 	pthread_mutex_init(&p->lock, NULL);
 
 	p->id = pid;
-
-	if (! as_new_clustering()) {
-		p->state = AS_PARTITION_STATE_ABSENT;
-	}
 
 	if (ns->cold_start) {
 		p->vp = as_index_tree_create(&ns->tree_shared, ns->arena);
@@ -411,17 +399,9 @@ as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 
 	int res = -1;
 
-	if (as_new_clustering()) {
-		if (! as_partition_version_is_null(&p->version)) {
-			partition_reserve_lockfree(p, ns, rsv);
-			res = 0;
-		}
-	}
-	else {
-		if (! as_partition_is_null(&p->version_info)) {
-			partition_reserve_lockfree(p, ns, rsv);
-			res = 0;
-		}
+	if (! as_partition_version_is_null(&p->version)) {
+		partition_reserve_lockfree(p, ns, rsv);
+		res = 0;
 	}
 
 	pthread_mutex_unlock(&p->lock);
@@ -507,31 +487,9 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 			cf_dyn_buf_append_char(db, ':');
 			cf_dyn_buf_append_uint64_x(db, p->current_outgoing_ldt_version);
 			cf_dyn_buf_append_char(db, ':');
-
-			if (as_new_clustering()) {
-				cf_dyn_buf_append_string(db,
-						VERSION_AS_STRING(&p->version));
-				cf_dyn_buf_append_char(db, ':');
-				cf_dyn_buf_append_string(db,
-						VERSION_AS_STRING(&p->final_version));
-			}
-			else {
-				cf_dyn_buf_append_uint64_x(db, p->version_info.iid);
-				cf_dyn_buf_append_char(db, '-');
-				cf_dyn_buf_append_uint64_x(db,
-						*(uint64_t*)&p->version_info.vtp[0]);
-				cf_dyn_buf_append_char(db, '-');
-				cf_dyn_buf_append_uint64_x(db,
-						*(uint64_t*)&p->version_info.vtp[8]);
-				cf_dyn_buf_append_char(db, ':');
-				cf_dyn_buf_append_uint64_x(db, p->primary_version_info.iid);
-				cf_dyn_buf_append_char(db, '-');
-				cf_dyn_buf_append_uint64_x(db,
-						*(uint64_t*)&p->primary_version_info.vtp[0]);
-				cf_dyn_buf_append_char(db, '-');
-				cf_dyn_buf_append_uint64_x(db,
-						*(uint64_t*)&p->primary_version_info.vtp[8]);
-			}
+			cf_dyn_buf_append_string(db, VERSION_AS_STRING(&p->version));
+			cf_dyn_buf_append_char(db, ':');
+			cf_dyn_buf_append_string(db, VERSION_AS_STRING(&p->final_version));
 
 			cf_dyn_buf_append_char(db, ';');
 
@@ -742,13 +700,8 @@ partition_reserve_lockfree(as_partition* p, as_namespace* ns,
 	rsv->sub_tree = p->sub_vp;
 	rsv->cluster_key = p->cluster_key;
 
-	if (as_new_clustering()) {
-		// FIXME - this is equivalent, but is it correct ???
-		rsv->reject_repl_write = as_partition_version_is_null(&p->version);
-	}
-	else {
-		rsv->reject_repl_write = p->state == AS_PARTITION_STATE_ABSENT;
-	}
+	// FIXME - this is equivalent, but is it correct ???
+	rsv->reject_repl_write = as_partition_version_is_null(&p->version);
 
 	rsv->n_dupl = p->n_dupl;
 
@@ -784,36 +737,16 @@ partition_getreplica_prole(as_namespace* ns, uint32_t pid)
 }
 
 
-// Definition for the partition-info data:
-// name:part_id:STATE:replica_count(int):origin:target:migrate_tx:migrate_rx:sz
 char
 partition_getstate_str(const as_partition* p)
 {
-	if (as_new_clustering()) {
-		int self_n = find_self_in_replicas(p); // -1 if not
+	int self_n = find_self_in_replicas(p); // -1 if not
 
-		if (self_n >= 0) {
-			return p->pending_immigrations == 0 ? 'S' : 'D';
-		}
+	if (self_n >= 0) {
+		return p->pending_immigrations == 0 ? 'S' : 'D';
+	}
 
-		return as_partition_version_is_null(&p->version) ? 'A' : 'Z';
-	}
-	else {
-		switch (p->state) {
-		case AS_PARTITION_STATE_UNDEF:
-			return 'U';
-		case AS_PARTITION_STATE_SYNC:
-			return 'S';
-		case AS_PARTITION_STATE_DESYNC:
-			return 'D';
-		case AS_PARTITION_STATE_ZOMBIE:
-			return 'Z';
-		case AS_PARTITION_STATE_ABSENT:
-			return 'A';
-		default:
-			return '?';
-		}
-	}
+	return as_partition_version_is_null(&p->version) ? 'A' : 'Z';
 }
 
 

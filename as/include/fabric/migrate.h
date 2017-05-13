@@ -59,7 +59,6 @@ typedef enum {
 
 #define TX_FLAGS_NONE           ((uint32_t) 0x0)
 #define TX_FLAGS_ACTING_MASTER  ((uint32_t) 0x1)
-#define TX_FLAGS_REQUEST        ((uint32_t) 0x2) // XXX JUMP - remove in "six months"
 
 // If 0 then it is a migration start from an old node.
 #define MIG_TYPE_START_IS_NORMAL 1
@@ -94,7 +93,7 @@ void as_migrate_dump(bool verbose);
 typedef enum {
 	// These values go on the wire, so mind backward compatibility if changing.
 	MIG_FIELD_OP,
-	MIG_FIELD_EMIG_INSERT_ID_OLD, // XXX JUMP - recycle in "six months"
+	MIG_FIELD_UNUSED_1,
 	MIG_FIELD_EMIG_ID,
 	MIG_FIELD_NAMESPACE,
 	MIG_FIELD_PARTITION,
@@ -102,10 +101,10 @@ typedef enum {
 	MIG_FIELD_GENERATION,
 	MIG_FIELD_RECORD,
 	MIG_FIELD_CLUSTER_KEY,
-	MIG_FIELD_VINFOSET, // XXX JUMP - recycle in "six months"
+	MIG_FIELD_UNUSED_9,
 	MIG_FIELD_VOID_TIME,
-	MIG_FIELD_TYPE, // XXX JUMP - recycle in "six months"
-	MIG_FIELD_REC_PROPS, // XXX JUMP - recycle in "six months"
+	MIG_FIELD_UNUSED_11,
+	MIG_FIELD_UNUSED_12,
 	MIG_FIELD_INFO,
 	MIG_FIELD_LDT_VERSION,
 	MIG_FIELD_LDT_PDIGEST,
@@ -114,7 +113,7 @@ typedef enum {
 	MIG_FIELD_LDT_PVOID_TIME,
 	MIG_FIELD_LAST_UPDATE_TIME,
 	MIG_FIELD_FEATURES,
-	MIG_FIELD_PARTITION_SIZE_OLD, // XXX JUMP - recycle in "six months"
+	MIG_FIELD_UNUSED_21,
 	MIG_FIELD_META_RECORDS,
 	MIG_FIELD_META_SEQUENCE,
 	MIG_FIELD_META_SEQUENCE_FINAL,

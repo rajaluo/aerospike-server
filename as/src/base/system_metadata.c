@@ -31,7 +31,6 @@
 
 #include <errno.h>
 #include <stdarg.h>
-#include <unistd.h> // for unlink() XXX - JUMP - remove in "six months"
 #include <sys/stat.h>
 
 #include "aerospike/as_hashmap.h"
@@ -596,8 +595,6 @@ void *as_smd_thr(void *arg);
 
 
 /* Globals. */
-
-bool g_convert_v3_to_v5 = false; // XXX JUMP - remove in "six months"
 
 as_smd_t *g_smd;
 
@@ -1334,42 +1331,26 @@ static as_smd_t *as_smd_create(void)
  */
 as_smd_t *as_smd_init(void)
 {
-	if (as_new_clustering()) {
-		// This is here only because we happen to use the absence of the old
-		// sindex SMD files as proof of a proper live jump from v3 to v5. We'll
-		// need to keep this around for a long time - perhaps move it to a
-		// better place when SMD is overhauled.
+	// This is here only because we happen to use the absence of the old
+	// sindex SMD files as proof of a proper live jump from v3 to v5. We'll
+	// need to keep this around for a long time - perhaps move it to a
+	// better place when SMD is overhauled.
 
-		char smd_path[MAX_PATH_LEN];
-		char smd_save_path[MAX_PATH_LEN];
+	char smd_path[MAX_PATH_LEN];
+	char smd_save_path[MAX_PATH_LEN];
 
-		snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
-		snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
+	snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
+	snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
 
-		struct stat buf;
-		bool both_gone =
-				stat(smd_path, &buf) != 0 && errno == ENOENT &&
-				stat(smd_save_path, &buf) != 0 && errno == ENOENT;
+	struct stat buf;
+	bool both_gone =
+			stat(smd_path, &buf) != 0 && errno == ENOENT &&
+			stat(smd_save_path, &buf) != 0 && errno == ENOENT;
 
-		if (! both_gone) {
-			g_convert_v3_to_v5 = true;
-
-			cf_info(AS_SMD,
-					"Aerospike server was not properly switched to paxos-protocol v5 - "
-					"will convert SMD files and partition versions to new formats");
-
-			// After 3.13, just crash out, don't convert!
-//			cf_crash_nostack(AS_SMD,
-//					"Aerospike server was not properly switched to paxos-protocol v5 - "
-//					"see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/cluster_to_3_13");
-		}
-	}
-	else {
-		// No cluster-changed event from old paxos when becoming single-node
-		// cluster at startup - initialize this info just for that case.
-		g_cluster_key = 0;
-		g_cluster_size = 1;
-		g_succession[0] = g_config.self_node;
+	if (! both_gone) {
+		cf_crash_nostack(AS_SMD,
+				"Aerospike server was not properly switched to paxos-protocol v5 - "
+				"see Aerospike documentation http://www.aerospike.com/docs/operations/upgrade/cluster_to_3_13");
 	}
 
 	if (! g_smd) {
@@ -2266,100 +2247,8 @@ smd_create_msg(as_smd_msg_op_t op, as_smd_item_t **items, uint32_t num_items,
 static msg *
 as_smd_msg_get(as_smd_msg_op_t op, as_smd_item_t **item, size_t num_items, const char *module_name, uint32_t accept_opt)
 {
-	if (as_new_clustering()) {
-		return smd_create_msg(op, item, (uint32_t)num_items, module_name, accept_opt);
-	}
-
-	msg *msg = NULL;
-
-	cf_debug(AS_SMD, "Getting a msg for module %s with num_items %zu for accept option 0x%08x", module_name, num_items, accept_opt);
-
-	// Get an existing (or create a new) System Metadata fabric msg.
-	if (!(msg = as_fabric_msg_get(M_TYPE_SMD))) {
-		cf_warning(AS_SMD, "failed to get a System Metadata msg");
-		return 0;
-	}
-
-	// Populate a System Metadata fabric msg from the metadata item.
-	int e = 0;
-	e += msg_set_uint32(msg, AS_SMD_MSG_ID, AS_SMD_MSG_V2_IDENTIFIER);
-	e += msg_set_uint64(msg, AS_SMD_MSG_CLUSTER_KEY, g_cluster_key);
-	e += msg_set_uint32(msg, AS_SMD_MSG_OP, op);
-	e += msg_set_uint32(msg, AS_SMD_MSG_NUM_ITEMS, num_items);
-
-	if (module_name != NULL) {
-		e += msg_set_str(msg, AS_SMD_MSG_MODULE_NAME, module_name, MSG_SET_COPY);
-		e += msg_set_uint32(msg, AS_SMD_MSG_OPTIONS, accept_opt);
-	}
-
-	if (e != 0) {
-		cf_warning(AS_SMD, "msg_set failed");
-		as_fabric_msg_put(msg);
-		return NULL;
-	}
-
-	if (num_items) {
-		int module_sz = 0;
-		int key_sz    = 0;
-		uint32_t value_sz = 0;
-
-		for (int i = 0; i < num_items; i++) {
-			module_sz += strlen(item[i]->module_name) + 1;
-			key_sz += strlen(item[i]->key) + 1;
-
-			if (AS_SMD_ACTION_DELETE != item[i]->action) {
-				if (item[i]->value) {
-					value_sz += (uint32_t)strlen(item[i]->value) + 1;
-				}
-			}
-		}
-		// Set the array sizes to the number of items.
-		e += msg_set_uint32_array_size(msg, AS_SMD_MSG_ACTION, num_items);
-		e += msg_set_str_array_size(msg, AS_SMD_MSG_MODULE, num_items, module_sz);
-		e += msg_set_str_array_size(msg, AS_SMD_MSG_KEY, num_items, key_sz);
-
-		if (value_sz != 0) {
-			msg_set_str_array_size(msg, AS_SMD_MSG_VALUE, num_items, value_sz);
-		}
-
-		e += msg_set_uint32_array_size(msg, AS_SMD_MSG_GENERATION, num_items);
-		e += msg_set_uint64_array_size(msg, AS_SMD_MSG_TIMESTAMP, num_items);
-
-		if (0 > e) {
-			cf_warning(AS_SMD, "failed to set array size when constructing outbound System Metadata fabric msg for operation %s with %zu items: module \"%s\" ; key \"%s\" (rv %d)",
-					   AS_SMD_MSG_OP_NAME(op), num_items, item[0]->module_name, item[0]->key, e);
-			as_fabric_msg_put(msg);
-			return 0;
-		}
-
-		// Put all of the items' fields into the msg.
-		for (int i = 0; i < num_items; i++) {
-			e += msg_set_uint32_array(msg, AS_SMD_MSG_ACTION, i, item[i]->action);
-			e += msg_set_str_array(msg, AS_SMD_MSG_MODULE, i, item[i]->module_name);
-			e += msg_set_str_array(msg, AS_SMD_MSG_KEY, i, item[i]->key);
-			if (AS_SMD_ACTION_DELETE != item[i]->action) {
-				if (item[i]->value) {
-					e += msg_set_str_array(msg, AS_SMD_MSG_VALUE, i, item[i]->value);
-				} else {
-					cf_warning(AS_SMD, "SMD item value is not set for op %s", AS_SMD_MSG_OP_NAME(op));
-				}
-				e += msg_set_uint32_array(msg, AS_SMD_MSG_GENERATION, i, item[i]->generation);
-				e += msg_set_uint64_array(msg, AS_SMD_MSG_TIMESTAMP, i, item[i]->timestamp);
-			}
-
-			if (0 > e) {
-				cf_warning(AS_SMD, "failed to construct outbound System Metadata fabric msg for operation %s with item %d: module \"%s\" ; key \"%s\" (rv %d)",
-						   AS_SMD_MSG_OP_NAME(op), i, item[i]->module_name, item[i]->key, e);
-				as_fabric_msg_put(msg);
-				return 0;
-			} else {
-				cf_debug(AS_SMD, "Constructed outbound System Metadata fabric msg for operation %s with item %d: module \"%s\" ; key \"%s\" (rv %d)",
-						 AS_SMD_MSG_OP_NAME(op), i, item[i]->module_name, item[i]->key, e);
-			}
-		}
-	}
-
-	return msg;
+	// TODO - collapse - don't need two functions any more.
+	return smd_create_msg(op, item, (uint32_t)num_items, module_name, accept_opt);
 }
 
 /*
@@ -3468,145 +3357,6 @@ static int as_smd_accept_metadata(as_smd_t *smd, as_smd_module_t *module_obj, as
 	return retval;
 }
 
-/* Struct to be passed as udata for shash reduce in
- * majority consensus merge policy
- */
-typedef struct as_smd_merge_info_s {
-	int num_list;
-	as_smd_item_list_t *merge_list;
-} as_smd_merge_info_t;
-
-static int as_smd_merge_resolution_reduce_fn(const void *key, void *data, void *udata)
-{
-	as_smd_item_freq_t **item_freq = (as_smd_item_freq_t **) data;
-	as_smd_item_freq_t *itfq = (*item_freq);
-
-	as_smd_merge_info_t *list = (as_smd_merge_info_t *) udata;
-
-	// If majority of nodes(half or more number of the nodes in the cluster contains
-	// this metadata accept it.
-	cf_debug(AS_SMD, "Key %s and module %s", (itfq)->item->key, (itfq)->item->module_name);
-	if (itfq->freq >= (list->num_list + 1) / 2) {
-		cf_debug(AS_SMD, "Item freq %d", (itfq)->freq);
-
-		cf_rc_reserve(itfq->item);
-		list->merge_list->item[list->merge_list->num_items] = itfq->item;
-		list->merge_list->num_items++;
-		cf_debug(AS_SMD, "Num items in the merged list %zu", list->merge_list->num_items);
-	} else {
-		cf_debug(AS_SMD, " key %s in the module %s is dropped after merge", (itfq)->item->key, (itfq)->item->module_name);
-	}
-	cf_free(*item_freq);
-
-	return 0;
-}
-
-static void incr_item_frequency_shash_update(const void *key, void *value_old, void *value_new, void *udata)
-{
-	//to count the frequency of the item.
-	as_smd_item_freq_t **item_freq = (as_smd_item_freq_t **) value_old;
-	(*item_freq)->freq++;
-}
-
-// XXX JUMP - remove in "six months".
-/*
- * Majority Consensus Merge Policy in SMD.
- * Algorithm      : "Agree upon majority consensus in the cluster."
- *                : If a metadata item is present in exactly half or more the number
- *                  nodes in the cluster , accept it as final truth.
- * Implementation : Hash all the unique metadata items based on the value(which is metadata defn itself).
- *                  why value?.. item's Key alone is not sufficient to decide the uniqueness of a metadata defn
- *                  (e.g., SINDEX module)
- *                  Count the frequency of each item.
- *                  If frequency of a given item is equal to or greater than half of the
- *                  cluster size, accept the given metadata item.
- * Parameter:
- *      module         : Module(SINDEX/UDF) for which this merge is being executed
- *      merged_list    : Final list of merged items, after merge resolution
- *      lists_to_merge : list that contains a list of metadata items in each node
- *      cluster_size   : No. of active nodes in the cluster
- *      udata          : User specific data for callback
- */
-int old_smd_majority_consensus_merge(const char *module, as_smd_item_list_t **merged_list,
-									as_smd_item_list_t **lists_to_merge, size_t num_list, void *udata)
-{
-	cf_debug(AS_SMD, "Executing majority consensus merge policy for module %s ", module);
-
-	if (lists_to_merge == NULL) {
-		return -1;
-	}
-
-	// Key is (char *)as_smd_item_t.value, value is (as_smd_item_freq_t *).
-	shash *merge_hash = NULL;
-	if (SHASH_OK != shash_create(&merge_hash, cf_shash_fn_zstr, AS_SMD_MAJORITY_CONSENSUS_KEYSIZE, sizeof(as_smd_item_freq_t *), 17, 0)) {
-		cf_crash(AS_SMD, "Memory allocation for hash during merge resolution, failed ");
-	}
-
-	// Traverse through the set of list containing metadata items
-	for(int i = 0; i < num_list; i++) {
-		// Traverse through the list of metadata items from every node
-		int nitems = lists_to_merge[i]->num_items;
-		cf_debug(AS_SMD, "Number of items %d", nitems);
-
-		for (int j = 0; j < nitems; j++) {
-			as_smd_item_freq_t * item_freq;
-			as_smd_item_t *curitem = lists_to_merge[i]->item[j];
-
-			// Note: The value (not key) of the metadata item is used as the key in merge_hash.
-			char  key[AS_SMD_MAJORITY_CONSENSUS_KEYSIZE] = {"\0"};
-			if (!curitem) {
-				cf_warning(AS_SMD, "In SMD module \"%s\", in metadata item list %d, skipping invalid NULL item %d during merge resolution", module, i, j);
-				continue;
-			} else if (!(curitem->value) || !(strlen(curitem->value))) {
-				cf_warning(AS_SMD, "In SMD module \"%s\", in metadata item list %d from node %016lX, item %d, key \"%s\" has an invalid NULL value ~~ skipping it for consideration during merge resolution", curitem->module_name, i, curitem->node_id, j, curitem->key);
-				continue;
-			}
-			int keylen = strlen(curitem->value);
-			if (keylen > AS_SMD_MAJORITY_CONSENSUS_KEYSIZE) {
-				cf_warning(AS_SMD, "Metadata item from module %s with key %s is not considered for merge resolution as the key is too large (%d)", curitem->module_name, curitem->value, keylen);
-				continue;
-			}
-
-			strncpy(key, curitem->value, keylen);
-			// If the item is already present in the hash, increment the frequency of the item.
-			if (SHASH_OK == shash_get(merge_hash, key, (void *) (&item_freq))) {
-				cf_debug(AS_SMD, "Item found %s", item_freq->item->value);
-				as_smd_item_freq_t* new_item_freq = item_freq;
-				shash_update(merge_hash, key, (void *) (&item_freq), (void *) (&new_item_freq), incr_item_frequency_shash_update, NULL);
-			} else {
-				// Otherwise put the item in the hash.
-				item_freq = cf_malloc(sizeof(as_smd_item_freq_t));
-				item_freq->item = curitem; // does not hold a ref
-				item_freq->freq = 1;
-
-				if (SHASH_OK != shash_put_unique(merge_hash, key, (void *) (&item_freq))) {
-					cf_warning(AS_SMD, "Metadata item from module %s with key %s is not considered for merge resolution", item_freq->item->module_name, item_freq->item->value);
-				}
-				cf_debug(AS_SMD, "Put into the hash %s", item_freq->item->value);
-			}
-		}
-	}
-	int num_items = shash_get_size(merge_hash);
-	// Pass necessary information to shash_reduce function, so that it can either
-	// accept that item or reject it.
-	as_smd_merge_info_t merge_info;
-	merge_info.num_list = num_list;
-	if (*merged_list == NULL) {
-		(*merged_list) = as_smd_item_list_alloc(num_items);
-	}
-	merge_info.merge_list = (*merged_list);
-	merge_info.merge_list->num_items = 0;
-
-	// Shash reduce to traverse each element in the hash,
-	// decide if it is the final accepted metadata item,
-	// and delete the content of structure the pointer is pointing to.
-	shash_reduce(merge_hash, as_smd_merge_resolution_reduce_fn, (void *) &merge_info);
-	shash_destroy(merge_hash);
-	cf_debug(AS_SMD, "Majority consensus merge policy execution complete!");
-
-	return 0;
-}
-
 static uint32_t key2idx_get_index(as_hashmap *map, const char *key)
 {
 	const as_integer *i = as_stringmap_get_integer((as_map *)map, key);
@@ -3848,117 +3598,4 @@ void *as_smd_thr(void *arg)
 
 	// Exit the System Metadata thread.
 	return NULL;
-}
-
-
-//==============================================================================
-// Special v3 -> v5 converter.
-// XXX JUMP - remove in "six months".
-//
-
-bool
-convert_sindex_item(const char *old_key, const char *old_value, char *new_key,
-		char *new_value)
-{
-	// Convert old key to new value.
-
-	const char *iname = strchr(old_key, ':');
-
-	if (! iname) {
-		cf_warning(AS_SMD, "can't parse sindex name from smd key");
-		return false;
-	}
-
-	strcpy(new_value, ++iname);
-
-	// Convert old value to new key.
-
-	as_sindex_metadata imd;
-	memset(&imd, 0, sizeof(imd));
-
-	bool is_smd_op; // dummy
-
-	if (as_info_parse_params_to_sindex_imd((char *)old_value, &imd, NULL, true,
-			&is_smd_op, "sindex smd conversion") != AS_SINDEX_OK) {
-		cf_warning(AS_SMD, "can't parse sindex info from smd value");
-		as_sindex_imd_free(&imd);
-		return false;
-	}
-
-	as_sindex_imd_to_smd_key(&imd, new_key);
-	as_sindex_imd_free(&imd);
-
-	return true;
-}
-
-int
-old_reduce_fn(const void *key, uint32_t key_size, void *object, void *udata)
-{
-	as_smd_item_t *old_item = (as_smd_item_t *)object;
-	as_smd_module_t *new_module_obj = (as_smd_module_t *)udata;
-
-	char new_key[SINDEX_SMD_KEY_SIZE];
-	char new_value[strlen(old_item->key)];
-
-	if (! convert_sindex_item(old_item->key, old_item->value, new_key, new_value)) {
-		return CF_RCHASH_OK;
-	}
-
-	as_smd_item_t *new_item = (as_smd_item_t *)cf_rc_alloc(sizeof(as_smd_item_t));
-
-	memset(new_item, 0, sizeof(as_smd_item_t));
-	new_item->module_name = cf_strdup(SINDEX_MODULE);
-	new_item->action = AS_SMD_ACTION_SET;
-	new_item->key = cf_strdup(new_key);
-	new_item->value = cf_strdup(new_value);
-	new_item->generation = old_item->generation;
-	new_item->timestamp = old_item->timestamp;
-
-	if (cf_rchash_put(new_module_obj->my_metadata, new_key, strlen(new_key) + 1, new_item) != CF_RCHASH_OK) {
-		as_smd_item_destroy(new_item);
-	}
-
-	return CF_RCHASH_OK;
-}
-
-void
-as_smd_convert_sindex_module()
-{
-	cf_info(AS_SMD, "converting sindex SMD module to new format ...");
-
-	as_smd_module_t *old_module_obj;
-
-	if (cf_rchash_get(g_smd->modules, OLD_SINDEX_MODULE, sizeof(OLD_SINDEX_MODULE), (void **)&old_module_obj) != CF_RCHASH_OK) {
-		cf_warning(AS_SMD, "can't find old sindex module");
-		return;
-	}
-
-	as_smd_module_t *new_module_obj;
-
-	if (cf_rchash_get(g_smd->modules, SINDEX_MODULE, sizeof(SINDEX_MODULE), (void **)&new_module_obj) != CF_RCHASH_OK) {
-		cf_warning(AS_SMD, "can't find new sindex module");
-		return;
-	}
-
-	cf_rchash_reduce(old_module_obj->my_metadata, old_reduce_fn, new_module_obj);
-	cf_rc_release(old_module_obj);
-
-	new_module_obj->dirty = true;
-	as_smd_module_persist(new_module_obj);
-	cf_rc_release(new_module_obj);
-
-	if (cf_rchash_delete(g_smd->modules, OLD_SINDEX_MODULE, sizeof(OLD_SINDEX_MODULE)) != CF_RCHASH_OK) {
-		cf_warning(AS_SMD, "failed to delete old sindex smd module");
-	}
-
-	char smd_path[MAX_PATH_LEN];
-	char smd_save_path[MAX_PATH_LEN];
-
-	snprintf(smd_path, MAX_PATH_LEN, "%s/smd/%s.smd", g_config.work_directory, OLD_SINDEX_MODULE);
-	snprintf(smd_save_path, MAX_PATH_LEN, "%s.save", smd_path);
-
-	unlink(smd_path);
-	unlink(smd_save_path);
-
-	cf_info(AS_SMD, "... done converting sindex SMD module to new format");
 }

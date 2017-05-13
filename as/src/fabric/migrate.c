@@ -71,7 +71,7 @@
 
 const msg_template migrate_mt[] = {
 		{ MIG_FIELD_OP, M_FT_UINT32 },
-		{ MIG_FIELD_EMIG_INSERT_ID_OLD, M_FT_UINT32 }, // XXX JUMP - recycle in "six months"
+		{ MIG_FIELD_UNUSED_1, M_FT_UINT32 },
 		{ MIG_FIELD_EMIG_ID, M_FT_UINT32 },
 		{ MIG_FIELD_NAMESPACE, M_FT_BUF },
 		{ MIG_FIELD_PARTITION, M_FT_UINT32 },
@@ -79,10 +79,10 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_GENERATION, M_FT_UINT32 },
 		{ MIG_FIELD_RECORD, M_FT_BUF },
 		{ MIG_FIELD_CLUSTER_KEY, M_FT_UINT64 },
-		{ MIG_FIELD_VINFOSET, M_FT_BUF }, // XXX JUMP - recycle in "six months"
+		{ MIG_FIELD_UNUSED_9, M_FT_BUF },
 		{ MIG_FIELD_VOID_TIME, M_FT_UINT32 },
-		{ MIG_FIELD_TYPE, M_FT_UINT32 }, // XXX JUMP - recycle in "six months"
-		{ MIG_FIELD_REC_PROPS, M_FT_BUF }, // XXX JUMP - recycle in "six months"
+		{ MIG_FIELD_UNUSED_11, M_FT_UINT32 },
+		{ MIG_FIELD_UNUSED_12, M_FT_BUF },
 		{ MIG_FIELD_INFO, M_FT_UINT32 },
 		{ MIG_FIELD_LDT_VERSION, M_FT_UINT64 },
 		{ MIG_FIELD_LDT_PDIGEST, M_FT_BUF },
@@ -91,7 +91,7 @@ const msg_template migrate_mt[] = {
 		{ MIG_FIELD_LDT_PVOID_TIME, M_FT_UINT32 },
 		{ MIG_FIELD_LAST_UPDATE_TIME, M_FT_UINT64 },
 		{ MIG_FIELD_FEATURES, M_FT_UINT32 },
-		{ MIG_FIELD_PARTITION_SIZE_OLD, M_FT_UINT32 }, // XXX JUMP - recycle in "six months"
+		{ MIG_FIELD_UNUSED_21, M_FT_UINT32 },
 		{ MIG_FIELD_META_RECORDS, M_FT_BUF },
 		{ MIG_FIELD_META_SEQUENCE, M_FT_UINT32 },
 		{ MIG_FIELD_META_SEQUENCE_FINAL, M_FT_UINT32 },
@@ -119,7 +119,6 @@ typedef struct pickled_record_s {
 	uint64_t      last_update_time;
 	uint8_t       *record_buf; // pickled!
 	size_t        record_len;
-	as_rec_props  rec_props; // XXX JUMP - remove in "six months"
 
 	// For LDT only:
 	cf_digest     pkeyd;
@@ -214,11 +213,8 @@ int emigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object, vo
 int immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
 
 // LDT-related.
-bool as_ldt_precord_is_esr(const pickled_record *pr);
-bool as_ldt_precord_is_subrec(const pickled_record *pr);
-bool as_ldt_precord_is_parent(const pickled_record *pr);
-int as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr, uint32_t *info);
-void as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, const emigration *emig);
+int as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr, uint16_t ldt_bits, uint32_t *info);
+void as_ldt_fill_precord(pickled_record *pr, uint16_t ldt_bits, as_storage_rd *rd, const emigration *emig);
 int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, msg *m);
 
 
@@ -540,10 +536,6 @@ void
 pickled_record_destroy(pickled_record *pr)
 {
 	cf_free(pr->record_buf);
-
-	if (pr->rec_props.p_data) {
-		cf_free(pr->rec_props.p_data);
-	}
 }
 
 
@@ -647,8 +639,7 @@ emigration_pop_reduce_fn(void *buf, void *udata)
 
 	uint32_t order = emig->rsv.ns->migrate_order;
 	uint64_t dest_score = (uint64_t)emig->dest - best->avoid_dest;
-	uint64_t n_elements = emig->tx_flags == TX_FLAGS_REQUEST ?
-			0 : as_index_tree_size(emig->rsv.tree);
+	uint64_t n_elements = as_index_tree_size(emig->rsv.tree);
 
 	if (order < best->order ||
 			(order == best->order &&
@@ -869,26 +860,16 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	as_storage_record_get_key(&rd);
 
-	as_rec_props_clear(&pr.rec_props);
-
-	const char *set_name = NULL;
-	uint32_t ldt_bits = 0;
+	const char *set_name = as_index_get_set_name(r, ns);
+	uint32_t ldt_bits = (uint32_t)as_ldt_record_get_rectype_bits(r);
 	uint32_t key_size = rd.key_size;
-	uint8_t key[as_new_clustering() ? key_size : 0];
+	uint8_t key[key_size];
 
-	if (as_new_clustering()) {
-		set_name = as_index_get_set_name(r, ns);
-		ldt_bits = (uint32_t)as_ldt_record_get_rectype_bits(r);
-
-		if (key_size != 0) {
-			memcpy(key, rd.key, key_size);
-		}
-	}
-	else {
-		as_storage_record_copy_rec_props(&rd, &pr.rec_props);
+	if (key_size != 0) {
+		memcpy(key, rd.key, key_size);
 	}
 
-	as_ldt_fill_precord(&pr, &rd, emig);
+	as_ldt_fill_precord(&pr, (uint16_t)ldt_bits, &rd, emig);
 
 	as_storage_record_close(&rd);
 	as_record_done(r_ref, ns);
@@ -910,7 +891,7 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	uint32_t info = 0;
 
-	if (as_ldt_fill_mig_msg(emig, m, &pr, &info) != 0) {
+	if (as_ldt_fill_mig_msg(emig, m, &pr, (uint16_t)ldt_bits, &info) != 0) {
 		// Skipping stale version subrecord shipping.
 		as_fabric_msg_put(m);
 		pickled_record_destroy(&pr);
@@ -926,14 +907,8 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	msg_set_uint32(m, MIG_FIELD_GENERATION, pr.generation);
 	msg_set_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, pr.last_update_time);
 
-	if (as_new_clustering()) {
-		if (pr.void_time != 0) {
-			msg_set_uint32(m, MIG_FIELD_VOID_TIME, pr.void_time);
-		}
-	}
-	else {
+	if (pr.void_time != 0) {
 		msg_set_uint32(m, MIG_FIELD_VOID_TIME, pr.void_time);
-		// Note - older versions handle missing MIG_FIELD_VINFOSET field.
 	}
 
 	if (info != 0) {
@@ -942,26 +917,17 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	// Note - after MSG_SET_HANDOFF_MALLOCs, no need to destroy pickled_record.
 
-	if (as_new_clustering()) {
-		if (set_name) {
-			msg_set_buf(m, MIG_FIELD_SET_NAME, (const uint8_t *)set_name,
-					strlen(set_name), MSG_SET_COPY);
-		}
-
-		if (key_size != 0) {
-			msg_set_buf(m, MIG_FIELD_KEY, key, key_size, MSG_SET_COPY);
-		}
-
-		if (ldt_bits != 0) {
-			msg_set_uint32(m, MIG_FIELD_LDT_BITS, ldt_bits);
-		}
+	if (set_name) {
+		msg_set_buf(m, MIG_FIELD_SET_NAME, (const uint8_t *)set_name,
+				strlen(set_name), MSG_SET_COPY);
 	}
-	else {
-		if (pr.rec_props.p_data) {
-			msg_set_buf(m, MIG_FIELD_REC_PROPS,
-					(const uint8_t *)pr.rec_props.p_data, pr.rec_props.size,
-					MSG_SET_HANDOFF_MALLOC);
-		}
+
+	if (key_size != 0) {
+		msg_set_buf(m, MIG_FIELD_KEY, key, key_size, MSG_SET_COPY);
+	}
+
+	if (ldt_bits != 0) {
+		msg_set_uint32(m, MIG_FIELD_LDT_BITS, ldt_bits);
 	}
 
 	msg_set_buf(m, MIG_FIELD_RECORD, pr.record_buf, pr.record_len,
@@ -1002,12 +968,7 @@ emigrate_record(emigration *emig, msg *m)
 {
 	uint64_t insert_id = emig->insert_id++;
 
-	if (as_new_clustering()) {
-		msg_set_uint64(m, MIG_FIELD_EMIG_INSERT_ID, insert_id);
-	}
-	else {
-		msg_set_uint32(m, MIG_FIELD_EMIG_INSERT_ID_OLD, (uint32_t)insert_id);
-	}
+	msg_set_uint64(m, MIG_FIELD_EMIG_INSERT_ID, insert_id);
 
 	emigration_reinsert_ctrl ri_ctrl;
 
@@ -1023,7 +984,7 @@ emigrate_record(emigration *emig, msg *m)
 	}
 
 	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m,
-			as_new_clustering()));
+			true));
 
 	if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_BULK) !=
 			AS_FABRIC_SUCCESS) {
@@ -1071,26 +1032,13 @@ emigration_send_start(emigration *emig)
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START);
 	msg_set_uint32(m, MIG_FIELD_FEATURES, MY_MIG_FEATURES);
-
-	if (as_new_clustering()) {
-		msg_set_uint64(m, MIG_FIELD_PARTITION_SIZE,
-				as_index_tree_size(emig->rsv.tree));
-	}
-	else {
-		msg_set_uint32(m, MIG_FIELD_PARTITION_SIZE_OLD,
-				(uint32_t)as_index_tree_size(emig->rsv.tree));
-	}
-
+	msg_set_uint64(m, MIG_FIELD_PARTITION_SIZE,
+			as_index_tree_size(emig->rsv.tree));
 	msg_set_uint32(m, MIG_FIELD_EMIG_ID, emig->id);
 	msg_set_uint64(m, MIG_FIELD_CLUSTER_KEY, emig->cluster_key);
 	msg_set_buf(m, MIG_FIELD_NAMESPACE, (const uint8_t *)ns->name,
 			strlen(ns->name), MSG_SET_COPY);
 	msg_set_uint32(m, MIG_FIELD_PARTITION, emig->rsv.p->id);
-
-	if (! as_new_clustering()) {
-		msg_set_uint32(m, MIG_FIELD_TYPE, emig->tx_flags == TX_FLAGS_REQUEST ?
-				MIG_TYPE_START_IS_REQUEST : MIG_TYPE_START_IS_NORMAL);
-	}
 
 	msg_set_uint64(m, MIG_FIELD_LDT_VERSION,
 			emig->rsv.p->current_outgoing_ldt_version);
@@ -1439,25 +1387,13 @@ immigration_handle_start_request(cf_node src, msg *m)
 		return;
 	}
 
-	uint32_t start_type = 0;
-
-	msg_get_uint32(m, MIG_FIELD_TYPE, &start_type);
-
 	uint32_t emig_features = 0;
 
 	msg_get_uint32(m, MIG_FIELD_FEATURES, &emig_features);
 
 	uint64_t emig_n_recs = 0;
 
-	if (as_new_clustering()) {
-		msg_get_uint64(m, MIG_FIELD_PARTITION_SIZE, &emig_n_recs);
-	}
-	else {
-		uint32_t n_recs = 0;
-
-		msg_get_uint32(m, MIG_FIELD_PARTITION_SIZE_OLD, &n_recs);
-		emig_n_recs = (uint64_t)n_recs;
-	}
+	msg_get_uint64(m, MIG_FIELD_PARTITION_SIZE, &emig_n_recs);
 
 	uint64_t incoming_ldt_version = 0;
 
@@ -1481,14 +1417,7 @@ immigration_handle_start_request(cf_node src, msg *m)
 	immig->done_recv_ms = 0;
 	immig->emig_id = emig_id;
 	immig_meta_q_init(&immig->meta_q);
-
-	if (as_new_clustering()) {
-		immig->features = MY_MIG_FEATURES;
-	}
-	else {
-		immig->features = MY_MIG_FEATURES | MIG_FEATURES_SEEN;
-	}
-
+	immig->features = MY_MIG_FEATURES;
 	immig->ns = ns;
 	immig->rsv.p = NULL;
 
@@ -1505,7 +1434,7 @@ immigration_handle_start_request(cf_node src, msg *m)
 			// First start request (not a retransmit) for this pid this round,
 			// or we had ack'd previous start request with 'EAGAIN'.
 			immig->start_result = as_partition_immigrate_start(ns, pid,
-					cluster_key, start_type, src);
+					cluster_key, src);
 			break;
 		}
 
@@ -1640,40 +1569,22 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		}
 
 		uint32_t generation;
+
+		if (msg_get_uint32(m, MIG_FIELD_GENERATION, &generation) != 0) {
+			cf_warning(AS_MIGRATE, "handle insert: got no generation");
+			immigration_release(immig);
+			as_fabric_msg_put(m);
+			return;
+		}
+
 		uint64_t last_update_time;
 
-		if (as_new_clustering()) {
-			if (msg_get_uint32(m, MIG_FIELD_GENERATION, &generation) != 0) {
-				cf_warning(AS_MIGRATE, "handle insert: got no generation");
-				immigration_release(immig);
-				as_fabric_msg_put(m);
-				return;
-			}
-
-			if (msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME,
-					&last_update_time) != 0) {
-				cf_warning(AS_MIGRATE, "handle insert: got no last-update-time");
-				immigration_release(immig);
-				as_fabric_msg_put(m);
-				return;
-			}
-		}
-		else {
-			generation = 1;
-
-			if (msg_get_uint32(m, MIG_FIELD_GENERATION, &generation) != 0) {
-				cf_warning(AS_MIGRATE, "handle insert: no generation - making it 1");
-			}
-
-			if (generation == 0) {
-				cf_warning(AS_MIGRATE, "handle insert: generation 0 - making it 1");
-				generation = 1;
-			}
-
-			last_update_time = 0;
-
-			// Older nodes won't send this.
-			msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME, &last_update_time);
+		if (msg_get_uint64(m, MIG_FIELD_LAST_UPDATE_TIME,
+				&last_update_time) != 0) {
+			cf_warning(AS_MIGRATE, "handle insert: got no last-update-time");
+			immigration_release(immig);
+			as_fabric_msg_put(m);
+			return;
 		}
 
 		uint32_t void_time = 0;
@@ -1701,41 +1612,30 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		as_rec_props_clear(&c.rec_props);
 
 		uint8_t *rec_props_data = NULL;
+		uint8_t *set_name = NULL;
+		size_t set_name_len = 0;
 
-		if (as_new_clustering()) {
-			uint8_t *set_name = NULL;
-			size_t set_name_len = 0;
+		msg_get_buf(m, MIG_FIELD_SET_NAME, &set_name, &set_name_len,
+				MSG_GET_DIRECT);
 
-			msg_get_buf(m, MIG_FIELD_SET_NAME, &set_name, &set_name_len,
-					MSG_GET_DIRECT);
+		uint8_t *key = NULL;
+		size_t key_size = 0;
 
-			uint8_t *key = NULL;
-			size_t key_size = 0;
+		msg_get_buf(m, MIG_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
 
-			msg_get_buf(m, MIG_FIELD_KEY, &key, &key_size, MSG_GET_DIRECT);
+		uint32_t ldt_bits = 0;
 
-			uint32_t ldt_bits = 0;
+		msg_get_uint32(m, MIG_FIELD_LDT_BITS, &ldt_bits);
 
-			msg_get_uint32(m, MIG_FIELD_LDT_BITS, &ldt_bits);
+		size_t rec_props_data_size = as_rec_props_size_all(set_name,
+				set_name_len, key, key_size, ldt_bits);
 
-			size_t rec_props_data_size = as_rec_props_size_all(set_name,
+		if (rec_props_data_size != 0) {
+			// Use alloca() until after jump (remove new-cluster scope).
+			rec_props_data = alloca(rec_props_data_size);
+
+			as_rec_props_fill_all(&c.rec_props, rec_props_data, set_name,
 					set_name_len, key, key_size, ldt_bits);
-
-			if (rec_props_data_size != 0) {
-				// Use alloca() until after jump (remove new-cluster scope).
-				rec_props_data = alloca(rec_props_data_size);
-
-				as_rec_props_fill_all(&c.rec_props, rec_props_data, set_name,
-						set_name_len, key, key_size, ldt_bits);
-			}
-		}
-		else {
-			size_t rec_props_data_size = 0;
-
-			// These are optional.
-			msg_get_buf(m, MIG_FIELD_REC_PROPS, &c.rec_props.p_data,
-					&rec_props_data_size, MSG_GET_DIRECT);
-			c.rec_props.size = (uint32_t)rec_props_data_size;
 		}
 
 		if (as_ldt_get_migrate_info(immig, &c, m)) {
@@ -1764,9 +1664,7 @@ immigration_handle_insert_request(cf_node src, msg *m)
 		immigration_release(immig);
 	}
 
-	msg_preserve_fields(m, 2, as_new_clustering() ?
-			MIG_FIELD_EMIG_INSERT_ID : MIG_FIELD_EMIG_INSERT_ID_OLD,
-			MIG_FIELD_EMIG_ID);
+	msg_preserve_fields(m, 2, MIG_FIELD_EMIG_INSERT_ID, MIG_FIELD_EMIG_ID);
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_INSERT_ACK);
 
@@ -1929,25 +1827,11 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 
 	uint64_t insert_id;
 
-	if (as_new_clustering()) {
-		if (msg_get_uint64(m, MIG_FIELD_EMIG_INSERT_ID, &insert_id) != 0) {
-			cf_warning(AS_MIGRATE, "insert ack: msg get for emig insert id failed");
-			emigration_release(emig);
-			as_fabric_msg_put(m);
-			return;
-		}
-	}
-	else {
-		uint32_t in_id;
-
-		if (msg_get_uint32(m, MIG_FIELD_EMIG_INSERT_ID_OLD, &in_id) != 0) {
-			cf_warning(AS_MIGRATE, "insert ack: msg get for emig insert id failed");
-			emigration_release(emig);
-			as_fabric_msg_put(m);
-			return;
-		}
-
-		insert_id = (uint64_t)in_id;
+	if (msg_get_uint64(m, MIG_FIELD_EMIG_INSERT_ID, &insert_id) != 0) {
+		cf_warning(AS_MIGRATE, "insert ack: msg get for emig insert id failed");
+		emigration_release(emig);
+		as_fabric_msg_put(m);
+		return;
 	}
 
 	emigration_reinsert_ctrl *ri_ctrl = NULL;
@@ -1957,8 +1841,7 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 			&vlock) == SHASH_OK) {
 		if (src == emig->dest) {
 			if (cf_atomic32_sub(&emig->bytes_emigrating,
-					(int32_t)msg_get_wire_size(ri_ctrl->m,
-							as_new_clustering())) < 0) {
+					(int32_t)msg_get_wire_size(ri_ctrl->m, true)) < 0) {
 				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
 			}
 
@@ -2001,9 +1884,7 @@ emigration_handle_ctrl_ack(cf_node src, msg *m, uint32_t op)
 	if (cf_rchash_get(g_emigration_hash, (void *)&emig_id, sizeof(emig_id),
 			(void **)&emig) == CF_RCHASH_OK) {
 		if (emig->dest == src) {
-			if ((! as_new_clustering() &&
-					(immig_features & MIG_FEATURES_SEEN) == 0) ||
-					(immig_features & MIG_FEATURE_MERGE) == 0) {
+			if ((immig_features & MIG_FEATURE_MERGE) == 0) {
 				// TODO - rethink where this should go after further refactor.
 				if (op == OPERATION_START_ACK_OK && emig->meta_q) {
 					emig->meta_q->is_done = true;
@@ -2069,51 +1950,6 @@ immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
 // Local helpers - LDT-related.
 //
 
-bool
-as_ldt_precord_is_esr(const pickled_record *pr)
-{
-	uint16_t *ldt_rectype_bits;
-
-	if (pr->rec_props.size != 0 &&
-			(as_rec_props_get_value(&pr->rec_props, CL_REC_PROPS_FIELD_LDT_TYPE,
-					NULL, (uint8_t**)&ldt_rectype_bits) == 0)) {
-		return as_ldt_flag_has_esr(*ldt_rectype_bits);
-	}
-
-	return false;
-}
-
-
-bool
-as_ldt_precord_is_subrec(const pickled_record *pr)
-{
-	uint16_t *ldt_rectype_bits;
-
-	if (pr->rec_props.size != 0 &&
-			(as_rec_props_get_value(&pr->rec_props, CL_REC_PROPS_FIELD_LDT_TYPE,
-					NULL, (uint8_t**)&ldt_rectype_bits) == 0)) {
-		return as_ldt_flag_has_subrec(*ldt_rectype_bits);
-	}
-
-	return false;
-}
-
-
-bool
-as_ldt_precord_is_parent(const pickled_record *pr)
-{
-	uint16_t *ldt_rectype_bits;
-
-	if (pr->rec_props.size != 0 &&
-			(as_rec_props_get_value(&pr->rec_props, CL_REC_PROPS_FIELD_LDT_TYPE,
-					NULL, (uint8_t**)&ldt_rectype_bits) == 0)) {
-		return as_ldt_flag_has_parent(*ldt_rectype_bits);
-	}
-
-	return false;
-}
-
-
 // Set up the LDT information.
 // 1. Flag
 // 2. Parent Digest
@@ -2121,7 +1957,7 @@ as_ldt_precord_is_parent(const pickled_record *pr)
 // 4. Version
 int
 as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
-		uint32_t *info)
+		uint16_t ldt_bits, uint32_t *info)
 {
 	if (! emig->rsv.ns->ldt_enabled) {
 		return 0;
@@ -2136,14 +1972,8 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 				emig->tx_state, emig->rsv.p->id);
 	}
 
-	if (! as_new_clustering()) {
-		msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
-	}
-
 	if (is_subrecord) {
-		if (as_new_clustering()) {
-			msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
-		}
+		msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
 
 		as_index_ref r_ref;
 		r_ref.skip_lock = false;
@@ -2163,10 +1993,10 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 		msg_set_buf(m, MIG_FIELD_LDT_PDIGEST, (const uint8_t *)&pr->pkeyd,
 				sizeof(cf_digest), MSG_SET_COPY);
 
-		if (as_ldt_precord_is_esr(pr)) {
+		if (as_ldt_flag_has_esr(ldt_bits)) {
 			*info |= MIG_INFO_LDT_ESR;
 		}
-		else if (as_ldt_precord_is_subrec(pr)) {
+		else if (as_ldt_flag_has_subrec(ldt_bits)) {
 			*info |= MIG_INFO_LDT_SUBREC;
 			msg_set_buf(m, MIG_FIELD_LDT_EDIGEST, (const uint8_t *)&pr->ekeyd,
 					sizeof(cf_digest), MSG_SET_COPY);
@@ -2175,10 +2005,8 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 			cf_warning(AS_MIGRATE, "expected subrec and esr bit not found");
 		}
 	}
-	else if (as_ldt_precord_is_parent(pr)) {
-		if (as_new_clustering()) {
-			msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
-		}
+	else if (as_ldt_flag_has_parent(ldt_bits)) {
+		msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
 
 		*info |= MIG_INFO_LDT_PREC;
 	}
@@ -2188,7 +2016,7 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 
 
 void
-as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
+as_ldt_fill_precord(pickled_record *pr, uint16_t ldt_bits, as_storage_rd *rd,
 		const emigration *emig)
 {
 	pr->pkeyd = cf_digest_zero;
@@ -2202,7 +2030,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 	bool is_subrec = false;
 	bool is_parent = false;
 
-	if (as_ldt_precord_is_subrec(pr)) {
+	if (as_ldt_flag_has_subrec(ldt_bits)) {
 		int rv = as_ldt_subrec_storage_get_digests(rd, &pr->ekeyd, &pr->pkeyd);
 
 		if (rv) {
@@ -2212,7 +2040,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 
 		is_subrec = true;
 	}
-	else if (as_ldt_precord_is_esr(pr)) {
+	else if (as_ldt_flag_has_esr(ldt_bits)) {
 		as_ldt_subrec_storage_get_digests(rd, NULL, &pr->pkeyd);
 		is_subrec = true;
 	}
@@ -2224,7 +2052,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 				"unexpected partition migration state at source %d:%d",
 				emig->tx_state, emig->rsv.p->id);
 
-		if (as_ldt_precord_is_parent(pr)) {
+		if (as_ldt_flag_has_parent(ldt_bits)) {
 			is_parent = true;
 		}
 	}

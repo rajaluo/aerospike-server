@@ -80,7 +80,6 @@
 #include "fabric/migrate.h"
 #include "fabric/partition.h"
 #include "fabric/partition_balance.h"
-#include "fabric/paxos.h" // FIXME - remove remaining dependencies ???
 #include "transaction/proxy.h"
 #include "transaction/rw_request_hash.h"
 
@@ -1136,41 +1135,6 @@ info_command_racks(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
-int
-info_command_dump_ra(char *name, char *params, cf_dyn_buf *db)
-{
-	if (as_new_clustering()) {
-		cf_warning(AS_INFO, "the command 'dump-ra' has been deprecated");
-		cf_dyn_buf_append_string(db, "error");
-		return 0;
-	}
-
-	bool verbose = false;
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-
-	/*
-	 *  Command Format:  "dump-ra:{verbose=<opt>}" [the "verbose" argument is optional]
-	 *
-	 *  where <opt> is one of:  {"true" | "false"} and defaults to "false".
-	 */
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "verbose", param_str, &param_str_len)) {
-		if (!strncmp(param_str, "true", 5)) {
-			verbose = true;
-		} else if (!strncmp(param_str, "false", 6)) {
-			verbose = false;
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"verbose\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-	cc_cluster_config_dump(verbose);
-	cf_dyn_buf_append_string(db, "ok");
-	return(0);
-}
-
 void
 info_log_with_datestamp(void (*log_fn)(void))
 {
@@ -1786,16 +1750,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "nsup-period", g_config.nsup_period);
 	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
 	info_append_uint64(db, "paxos-max-cluster-size", g_config.paxos_max_cluster_size);
-
-	info_append_string(db, "paxos-protocol",
-			(AS_PAXOS_PROTOCOL_V1 == g_config.paxos_protocol ? "v1" :
-				(AS_PAXOS_PROTOCOL_V2 == g_config.paxos_protocol ? "v2" :
-					(AS_PAXOS_PROTOCOL_V3 == g_config.paxos_protocol ? "v3" :
-						(AS_PAXOS_PROTOCOL_V4 == g_config.paxos_protocol ? "v4" :
-						 	(AS_PAXOS_PROTOCOL_V5 == g_config.paxos_protocol ? "v5" :
-								(AS_PAXOS_PROTOCOL_NONE == g_config.paxos_protocol ? "none" : "undefined")))))));
-
-	info_append_uint32(db, "paxos-retransmit-period", g_config.paxos_retransmit_period);
+	info_append_string(db, "paxos-protocol", "v5"); // until tests catch up
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
 	info_append_uint32(db, "query-batch-size", g_config.query_bsize);
@@ -2027,16 +1982,6 @@ info_namespace_config_get(char* context, cf_dyn_buf *db)
 }
 
 
-// XXX JUMP - remove in "six months".
-void
-info_cluster_config_get(cf_dyn_buf *db)
-{
-	info_append_string(db, "mode", cc_mode_str[g_config.cluster_mode]);
-	info_append_uint32(db, "self-group-id", (uint32_t)g_config.cluster.cl_self_group);
-	info_append_uint32(db, "self-node-id", g_config.cluster.cl_self_node);
-}
-
-
 // TODO - security API?
 void
 info_security_config_get(cf_dyn_buf *db)
@@ -2079,9 +2024,6 @@ info_command_config_get_with_params(char *name, char *params, cf_dyn_buf *db)
 
 		info_namespace_config_get(context, db);
 	}
-	else if (strcmp(context, "cluster") == 0) {
-		info_cluster_config_get(db);
-	}
 	else if (strcmp(context, "security") == 0) {
 		info_security_config_get(db);
 	}
@@ -2109,7 +2051,6 @@ info_command_config_get(char *name, char *params, cf_dyn_buf *db)
 	// In that case we want to print everything.
 	info_service_config_get(db);
 	info_network_config_get(db);
-	info_cluster_config_get(db);
 	info_security_config_get(db);
 	as_xdr_get_config(db);
 
@@ -2313,12 +2254,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_info(AS_INFO, "Changing value of nsup-period from %d to %d ", g_config.nsup_period, val);
 			g_config.nsup_period = val;
 		}
-		else if (0 == as_info_parameter_get(params, "paxos-retransmit-period", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of paxos-retransmit-period from %d to %d ", g_config.paxos_retransmit_period, val);
-			g_config.paxos_retransmit_period = val;
-		}
 		else if (0 == as_info_parameter_get(params, "paxos-max-cluster-size", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val) || (1 > val) ||
 				(val > AS_CLUSTER_SZ) ||
@@ -2326,20 +2261,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of paxos-max-cluster-size from %d to %d ", g_config.paxos_max_cluster_size, val);
 			g_config.paxos_max_cluster_size = val;
-		}
-		else if (0 == as_info_parameter_get(params, "paxos-protocol", context, &context_len)) {
-			paxos_protocol_enum protocol = (!strcmp(context, "v1") ? AS_PAXOS_PROTOCOL_V1 :
-											(!strcmp(context, "v2") ? AS_PAXOS_PROTOCOL_V2 :
-											 (!strcmp(context, "v3") ? AS_PAXOS_PROTOCOL_V3 :
-											  (!strcmp(context, "v4") ? AS_PAXOS_PROTOCOL_V4 :
-											   (!strcmp(context, "v5") ? AS_PAXOS_PROTOCOL_V5 :
-												(!strcmp(context, "none") ? AS_PAXOS_PROTOCOL_NONE :
-												 AS_PAXOS_PROTOCOL_UNDEF))))));
-			if (AS_PAXOS_PROTOCOL_UNDEF == protocol)
-				goto Error;
-			if (0 > as_paxos_set_protocol(protocol))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of paxos-protocol version to %s", context);
 		}
 		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
 			if (!as_config_cluster_name_set(context)) {
@@ -3029,10 +2950,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			cf_atomic32_set(&ns->obj_size_hist_max, round_max); // in 128-byte blocks
 		}
 		else if (0 == as_info_parameter_get(params, "rack-id", context, &context_len)) {
-			if (! as_new_clustering()) {
-				cf_warning(AS_INFO, "rack-id may only be set after switch to paxos-protocol v5");
-				goto Error;
-			}
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
 			}
@@ -6627,20 +6544,10 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 	{
 		cf_info(AS_INFO, "SINDEX CREATE : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
 
-		if (as_new_clustering()) {
-			char smd_key[SINDEX_SMD_KEY_SIZE];
+		char smd_key[SINDEX_SMD_KEY_SIZE];
 
-			as_sindex_imd_to_smd_key(&imd, smd_key);
-			res = as_smd_set_metadata(SINDEX_MODULE, smd_key, imd.iname);
-		}
-		else {
-			char module[] = OLD_SINDEX_MODULE;
-			char key[OLD_SINDEX_SMD_KEY_SIZE];
-			sprintf(key, "%s:%s", imd.ns_name, imd.iname);
-			// TODO : Send imd instead of params as value.
-			// Today as_info_parse_params_to_sindex_imd is done again by smd layer
-			res = as_smd_set_metadata(module, key, params);
-		}
+		as_sindex_imd_to_smd_key(&imd, smd_key);
+		res = as_smd_set_metadata(SINDEX_MODULE, smd_key, imd.iname);
 
 		if (res != 0) {
 			cf_warning(AS_INFO, "SINDEX CREATE : Queuing the index %s metadata to SMD failed with error %s",
@@ -6692,21 +6599,13 @@ int info_command_sindex_delete(char *name, char *params, cf_dyn_buf *db) {
 	{
 		cf_info(AS_INFO, "SINDEX DROP : Request received for %s:%s via SMD", imd.ns_name, imd.iname);
 
-		if (as_new_clustering()) {
-			char smd_key[SINDEX_SMD_KEY_SIZE];
+		char smd_key[SINDEX_SMD_KEY_SIZE];
 
-			if (as_sindex_delete_imd_to_smd_key(ns, &imd, smd_key)) {
-				res = as_smd_delete_metadata(SINDEX_MODULE, smd_key);
-			}
-			else {
-				res = AS_SINDEX_ERR_NOTFOUND;
-			}
+		if (as_sindex_delete_imd_to_smd_key(ns, &imd, smd_key)) {
+			res = as_smd_delete_metadata(SINDEX_MODULE, smd_key);
 		}
 		else {
-			char module[] = OLD_SINDEX_MODULE;
-			char key[OLD_SINDEX_SMD_KEY_SIZE];
-			sprintf(key, "%s:%s", imd.ns_name, imd.iname);
-			res = as_smd_delete_metadata(module, key);
+			res = AS_SINDEX_ERR_NOTFOUND;
 		}
 
 		if (0 != res) {
@@ -7100,7 +6999,6 @@ as_info_init()
 	as_info_set_command("dump-hlc", info_command_dump_hlc, PERM_LOGGING_CTRL);                // Print debug information about Hybrid Logical Clock to the log file.
 	as_info_set_command("dump-migrates", info_command_dump_migrates, PERM_LOGGING_CTRL);      // Print debug information about migration.
 	as_info_set_command("dump-msgs", info_command_dump_msgs, PERM_LOGGING_CTRL);              // Print debug information about existing 'msg' objects and queues to the log file.
-	as_info_set_command("dump-ra", info_command_dump_ra, PERM_LOGGING_CTRL);                  // Print debug information about Rack Aware state.
 	as_info_set_command("dump-rw", info_command_dump_rw_request_hash, PERM_LOGGING_CTRL);     // Print debug information about transaction hash table to the log file.
 	as_info_set_command("dump-si", info_command_dump_si, PERM_LOGGING_CTRL);                  // Print information about a Secondary Index
 	as_info_set_command("dump-smd", info_command_dump_smd, PERM_LOGGING_CTRL);                // Print information about System Metadata (SMD) to the log file.

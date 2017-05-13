@@ -265,6 +265,7 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 	}
 
 	as_truncate_init_smd();
+	// TODO - move sindex SMD initialization into sindex, as with truncate.
 
 	// Must be done before as_storage_init() populates the indexes.
 	int retval = as_smd_create_module(SINDEX_MODULE,
@@ -275,27 +276,9 @@ as_namespaces_init(bool cold_start_cmd, uint32_t instance)
 
 	cf_assert(retval == 0, AS_NAMESPACE, "failed to create sindex SMD module (rv %d)", retval);
 
-	if (! as_new_clustering() || g_convert_v3_to_v5) {
-		retval = as_smd_create_module(OLD_SINDEX_MODULE,
-					old_smd_majority_consensus_merge, NULL,
-					NULL, NULL,
-					old_sindex_smd_accept_cb, NULL,
-					old_sindex_smd_can_accept_cb, NULL);
-
-		cf_assert(retval == 0, AS_NAMESPACE, "failed to create old sindex SMD module (rv %d)", retval);
-
-		while (! g_old_sindex_smd_restored) {
-			usleep(1000);
-		}
-	}
-
 	// Wait for Secondary Index SMD to be completely restored.
 	while (! g_sindex_smd_restored) {
 		usleep(1000);
-	}
-
-	if (g_convert_v3_to_v5) {
-		as_smd_convert_sindex_module();
 	}
 }
 

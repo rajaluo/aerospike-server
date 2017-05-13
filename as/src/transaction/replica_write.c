@@ -30,7 +30,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h> // for alloca() only
 #include <string.h>
 
 #include "citrusleaf/cf_clock.h"
@@ -125,39 +124,23 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 			MSG_SET_COPY);
 	msg_set_uint32(m, RW_FIELD_TID, rw->tid);
 
-	if (as_new_clustering()) {
-		if (tr->generation != 0) {
-			msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
-		}
-
-		if (tr->void_time != 0) {
-			msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
-		}
-
-		if (tr->last_update_time != 0) {
-			msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
-		}
-	}
-	else {
-		msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
-
+	if (tr->generation != 0) {
 		msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
+	}
+
+	if (tr->void_time != 0) {
 		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
+	}
+
+	if (tr->last_update_time != 0) {
 		msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
 	}
 
 	// TODO - do we really intend to send this if the record is non-LDT?
 	// FIXME - should address this question for the NEW_CODE split.
 	if (ns->ldt_enabled) {
-		if (as_new_clustering()) {
-			msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version,
-					sizeof(as_partition_version), MSG_SET_COPY);
-		}
-		else {
-			msg_set_buf(m, RW_FIELD_VINFOSET,
-					(uint8_t*)&tr->rsv.p->version_info,
-					sizeof(as_partition_vinfo), MSG_SET_COPY);
-		}
+		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version,
+				sizeof(as_partition_version), MSG_SET_COPY);
 
 		if (tr->rsv.p->current_outgoing_ldt_version != 0) {
 			msg_set_uint64(m, RW_FIELD_LDT_VERSION,
@@ -197,48 +180,34 @@ repl_write_make_message(rw_request* rw, as_transaction* tr)
 
 	// TODO - replace rw->pickled_rec_props with individual fields.
 	if (rw->pickled_rec_props.p_data) {
-		if (as_new_clustering()) {
-			const char* set_name;
-			uint32_t set_name_size;
+		const char* set_name;
+		uint32_t set_name_size;
 
-			if (as_rec_props_get_value(&rw->pickled_rec_props,
-					CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
-					(uint8_t**)&set_name) == 0) {
-				msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
-						set_name_size - 1, MSG_SET_COPY);
-			}
-
-			uint32_t key_size;
-			uint8_t* key;
-
-			if (as_rec_props_get_value(&rw->pickled_rec_props,
-					CL_REC_PROPS_FIELD_KEY, &key_size, &key) == 0) {
-				msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
-			}
-
-			uint16_t* ldt_bits;
-
-			if ((as_rec_props_get_value(&rw->pickled_rec_props,
-					CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
-					(uint8_t**)&ldt_bits) == 0)) {
-				msg_set_uint32(m, RW_FIELD_LDT_BITS, (uint32_t)*ldt_bits);
-			}
+		if (as_rec_props_get_value(&rw->pickled_rec_props,
+				CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
+				(uint8_t**)&set_name) == 0) {
+			msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
+					set_name_size - 1, MSG_SET_COPY);
 		}
-		else {
-			msg_set_buf(m, RW_FIELD_REC_PROPS, rw->pickled_rec_props.p_data,
-					rw->pickled_rec_props.size, MSG_SET_HANDOFF_MALLOC);
 
-			// Make sure destructor doesn't free the data.
-			as_rec_props_clear(&rw->pickled_rec_props);
+		uint32_t key_size;
+		uint8_t* key;
+
+		if (as_rec_props_get_value(&rw->pickled_rec_props,
+				CL_REC_PROPS_FIELD_KEY, &key_size, &key) == 0) {
+			msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
+		}
+
+		uint16_t* ldt_bits;
+
+		if ((as_rec_props_get_value(&rw->pickled_rec_props,
+				CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+				(uint8_t**)&ldt_bits) == 0)) {
+			msg_set_uint32(m, RW_FIELD_LDT_BITS, (uint32_t)*ldt_bits);
 		}
 	}
 
-	if (as_new_clustering()) {
-		if (info != 0) {
-			msg_set_uint32(m, RW_FIELD_INFO, info);
-		}
-	}
-	else {
+	if (info != 0) {
 		msg_set_uint32(m, RW_FIELD_INFO, info);
 	}
 
@@ -367,25 +336,9 @@ repl_write_handle_op(cf_node node, msg* m)
 
 	uint32_t result;
 
-	cl_msg* msgp; // XXX JUMP - remove in "six months"
-
-	if (! as_new_clustering() &&
-			msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
-					MSG_GET_DIRECT) == 0) {
-		// <><><><><><>  Delete Operation  <><><><><><>
-
-		// In rolling upgrades, older nodes send replica deletes here.
-
-		result = drop_replica(&rsv, keyd,
-				(info & RW_INFO_LDT_SUBREC) != 0, // but sender never sets it
-				(info & RW_INFO_NSUP_DELETE) != 0,
-				as_msg_is_xdr(&msgp->msg),
-				node);
-	}
-	else if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
-			&pickled_sz, MSG_GET_DIRECT) == 0) {
-		// <><><><><><>  Write Pickle  <><><><><><>
-
+	// TODO POST-JUMP - reverse if & else, un-indent...
+	if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf, &pickled_sz,
+			MSG_GET_DIRECT) == 0) {
 		if (repl_write_pickle_is_drop(pickled_buf, info)) {
 			result = drop_replica(&rsv, keyd,
 					(info & RW_INFO_LDT_SUBREC) != 0,
@@ -410,26 +363,17 @@ repl_write_handle_op(cf_node node, msg* m)
 
 		uint64_t last_update_time;
 
-		if (as_new_clustering()) {
-			if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
-					&last_update_time) != 0) {
-				cf_warning(AS_RW, "repl_write_handle_op: no last-update-time");
-				as_partition_release(&rsv);
-				send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
-				return;
-			}
-		}
-		else {
-			last_update_time = 0;
-			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+		if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+				&last_update_time) != 0) {
+			cf_warning(AS_RW, "repl_write_handle_op: no last-update-time");
+			as_partition_release(&rsv);
+			send_repl_write_ack(node, m, AS_PROTO_RESULT_FAIL_UNKNOWN);
+			return;
 		}
 
 		uint32_t void_time = 0;
 
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-
-		as_rec_props rec_props = { NULL, 0 };
-		size_t rec_props_data_size = 0;
 
 		uint8_t *set_name = NULL;
 		size_t set_name_len = 0;
@@ -446,22 +390,16 @@ repl_write_handle_op(cf_node node, msg* m)
 
 		msg_get_uint32(m, RW_FIELD_LDT_BITS, &ldt_bits);
 
-		if (set_name || key || ldt_bits != 0) {
-			rec_props_data_size = as_rec_props_size_all(set_name, set_name_len,
-					key, key_size, ldt_bits);
+		size_t rec_props_data_size = as_rec_props_size_all(set_name,
+				set_name_len, key, key_size, ldt_bits);
+		uint8_t rec_props_data[rec_props_data_size];
+		as_rec_props rec_props = { 0 };
 
-			if (rec_props_data_size != 0) {
-				// Use alloca() until after jump (remove new-cluster scope).
-				rec_props.p_data = alloca(rec_props_data_size);
+		if (rec_props_data_size != 0) {
+			rec_props.p_data = rec_props_data;
 
-				as_rec_props_fill_all(&rec_props, rec_props.p_data, set_name,
-						set_name_len, key, key_size, ldt_bits);
-			}
-		}
-		else {
-			msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data,
-					&rec_props_data_size, MSG_GET_DIRECT);
-			rec_props.size = (uint32_t)rec_props_data_size;
+			as_rec_props_fill_all(&rec_props, rec_props.p_data, set_name,
+					set_name_len, key, key_size, ldt_bits);
 		}
 
 		result = write_replica(&rsv, keyd, pickled_buf, pickled_sz, &rec_props,
@@ -514,12 +452,10 @@ repl_write_handle_ack(cf_node node, msg* m)
 		return;
 	}
 
-	if (as_new_clustering()) {
-		// TODO - force retransmit to happen faster than default.
-		if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH) {
-			as_fabric_msg_put(m);
-			return;
-		}
+	// TODO - force retransmit to happen faster than default.
+	if (result_code == AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH) {
+		as_fabric_msg_put(m);
+		return;
 	}
 
 	rw_request_hkey hkey = { ns_id, *keyd };
@@ -620,28 +556,15 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 	msg_set_uint32(m, RW_FIELD_GENERATION, tr->generation);
 	msg_set_uint64(m, RW_FIELD_LAST_UPDATE_TIME, tr->last_update_time);
 
-	if (as_new_clustering()) {
-		if (tr->void_time != 0) {
-			msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
-		}
-	}
-	else {
-		msg_set_uint64(m, RW_FIELD_CLUSTER_KEY, tr->rsv.cluster_key);
+	if (tr->void_time != 0) {
 		msg_set_uint32(m, RW_FIELD_VOID_TIME, tr->void_time);
 	}
 
 	// TODO - do we really get here if ldt_enabled is false?
 	// FIXME - should address this question for the NEW_CODE split.
 	if (ns->ldt_enabled && ! is_subrec) {
-		if (as_new_clustering()) {
-			msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version,
-					sizeof(as_partition_version), MSG_SET_COPY);
-		}
-		else {
-			msg_set_buf(m, RW_FIELD_VINFOSET,
-					(uint8_t*)&tr->rsv.p->version_info,
-					sizeof(as_partition_vinfo), MSG_SET_COPY);
-		}
+		msg_set_buf(m, RW_FIELD_VINFOSET, (uint8_t*)&tr->rsv.p->version,
+				sizeof(as_partition_version), MSG_SET_COPY);
 
 		if (tr->rsv.p->current_outgoing_ldt_version != 0) {
 			msg_set_uint64(m, RW_FIELD_LDT_VERSION,
@@ -662,46 +585,34 @@ repl_write_ldt_make_message(msg* m, as_transaction* tr, uint8_t** p_pickled_buf,
 	*p_pickled_buf = NULL;
 
 	if (p_pickled_rec_props && p_pickled_rec_props->p_data) {
-		if (as_new_clustering()) {
-			const char* set_name;
-			uint32_t set_name_size;
+		const char* set_name;
+		uint32_t set_name_size;
 
-			if (as_rec_props_get_value(p_pickled_rec_props,
-					CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
-					(uint8_t**)&set_name) == 0) {
-				msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
-						set_name_size - 1, MSG_SET_COPY);
-			}
-
-			uint32_t key_size;
-			uint8_t* key;
-
-			if (as_rec_props_get_value(p_pickled_rec_props,
-					CL_REC_PROPS_FIELD_KEY, &key_size, &key) == 0) {
-				msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
-			}
-
-			uint16_t* ldt_bits;
-
-			if ((as_rec_props_get_value(p_pickled_rec_props,
-					CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
-					(uint8_t**)&ldt_bits) == 0)) {
-				msg_set_uint32(m, RW_FIELD_LDT_BITS, (uint32_t)*ldt_bits);
-			}
+		if (as_rec_props_get_value(p_pickled_rec_props,
+				CL_REC_PROPS_FIELD_SET_NAME, &set_name_size,
+				(uint8_t**)&set_name) == 0) {
+			msg_set_buf(m, RW_FIELD_SET_NAME, (const uint8_t *)set_name,
+					set_name_size - 1, MSG_SET_COPY);
 		}
-		else {
-			msg_set_buf(m, RW_FIELD_REC_PROPS, p_pickled_rec_props->p_data,
-					p_pickled_rec_props->size, MSG_SET_HANDOFF_MALLOC);
-			as_rec_props_clear(p_pickled_rec_props);
+
+		uint32_t key_size;
+		uint8_t* key;
+
+		if (as_rec_props_get_value(p_pickled_rec_props, CL_REC_PROPS_FIELD_KEY,
+				&key_size, &key) == 0) {
+			msg_set_buf(m, RW_FIELD_KEY, key, key_size, MSG_SET_COPY);
+		}
+
+		uint16_t* ldt_bits;
+
+		if ((as_rec_props_get_value(p_pickled_rec_props,
+				CL_REC_PROPS_FIELD_LDT_TYPE, NULL,
+				(uint8_t**)&ldt_bits) == 0)) {
+			msg_set_uint32(m, RW_FIELD_LDT_BITS, (uint32_t)*ldt_bits);
 		}
 	}
 
-	if (as_new_clustering()) {
-		if (info != 0) {
-			msg_set_uint32(m, RW_FIELD_INFO, info);
-		}
-	}
-	else {
+	if (info != 0) {
 		msg_set_uint32(m, RW_FIELD_INFO, info);
 	}
 }
@@ -948,22 +859,8 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 	uint8_t* pickled_buf;
 	size_t pickled_sz;
 
-	cl_msg* msgp; // XXX JUMP - remove in "six months"
-
-	if (! as_new_clustering() &&
-			msg_get_buf(m, RW_FIELD_AS_MSG, (uint8_t**)&msgp, NULL,
-					MSG_GET_DIRECT) == 0) {
-
-		// In rolling upgrades, *really* old nodes might send LDT replica
-		// deletes here.
-
-		drop_replica(rsv, keyd,
-				(info & RW_INFO_LDT_SUBREC) != 0,
-				(info & RW_INFO_NSUP_DELETE) != 0,
-				as_msg_is_xdr(&msgp->msg),
-				node);
-	}
-	else if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
+	// TODO POST-JUMP - reverse if & else, un-indent...
+	if (msg_get_buf(m, RW_FIELD_RECORD, (uint8_t**)&pickled_buf,
 			&pickled_sz, MSG_GET_DIRECT) == 0) {
 		if (repl_write_pickle_is_drop(pickled_buf, info)) {
 			drop_replica(rsv, keyd,
@@ -984,24 +881,15 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 
 		uint64_t last_update_time;
 
-		if (as_new_clustering()) {
-			if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
-					&last_update_time) != 0) {
-				cf_warning(AS_RW, "handle_multiop_subop: no last-update-time");
-				return true;
-			}
-		}
-		else {
-			last_update_time = 0;
-			msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME, &last_update_time);
+		if (msg_get_uint64(m, RW_FIELD_LAST_UPDATE_TIME,
+				&last_update_time) != 0) {
+			cf_warning(AS_RW, "handle_multiop_subop: no last-update-time");
+			return true;
 		}
 
 		uint32_t void_time = 0;
 
 		msg_get_uint32(m, RW_FIELD_VOID_TIME, &void_time);
-
-		as_rec_props rec_props = { NULL, 0 };
-		size_t rec_props_data_size = 0;
 
 		uint8_t *set_name = NULL;
 		size_t set_name_len = 0;
@@ -1018,22 +906,17 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 
 		msg_get_uint32(m, RW_FIELD_LDT_BITS, &ldt_bits);
 
-		if (set_name || key || ldt_bits != 0) {
-			rec_props_data_size = as_rec_props_size_all(set_name, set_name_len,
-					key, key_size, ldt_bits);
+		size_t rec_props_data_size = as_rec_props_size_all(set_name,
+				set_name_len, key, key_size, ldt_bits);
+		uint8_t rec_props_data[rec_props_data_size];
 
-			if (rec_props_data_size != 0) {
-				// Use alloca() until after jump (remove new-cluster scope).
-				rec_props.p_data = alloca(rec_props_data_size);
+		as_rec_props rec_props = { 0 };
 
-				as_rec_props_fill_all(&rec_props, rec_props.p_data, set_name,
-						set_name_len, key, key_size, ldt_bits);
-			}
-		}
-		else {
-			msg_get_buf(m, RW_FIELD_REC_PROPS, &rec_props.p_data,
-					&rec_props_data_size, MSG_GET_DIRECT);
-			rec_props.size = (uint32_t)rec_props_data_size;
+		if (rec_props_data_size != 0) {
+			rec_props.p_data = rec_props_data;
+
+			as_rec_props_fill_all(&rec_props, rec_props.p_data, set_name,
+					set_name_len, key, key_size, ldt_bits);
 		}
 
 		write_replica(rsv, keyd, pickled_buf, pickled_sz, &rec_props,
@@ -1051,25 +934,15 @@ handle_multiop_subop(cf_node node, msg* m, as_partition_reservation* rsv,
 bool
 ldt_get_info(ldt_prole_info* linfo, msg* m, as_partition_reservation* rsv)
 {
-	// XXX JUMP - use only as_partition_version in "six months".
-	size_t source_vinfo_size;
-	as_partition_vinfo* source_vinfo;
+	as_partition_version* source_vinfo;
 
-	if (msg_get_buf(m, RW_FIELD_VINFOSET, (uint8_t**)&source_vinfo,
-			&source_vinfo_size, MSG_GET_DIRECT) != 0) {
+	if (msg_get_buf(m, RW_FIELD_VINFOSET, (uint8_t**)&source_vinfo, NULL,
+			MSG_GET_DIRECT) != 0) {
 		return false;
 	}
 
-	if (source_vinfo_size == sizeof(as_partition_vinfo)) {
-		linfo->replication_partition_version_match =
-				as_partition_vinfo_same(source_vinfo, &rsv->p->version_info);
-	}
-	else {
-		linfo->replication_partition_version_match =
-				as_partition_version_same((as_partition_version*)source_vinfo,
-						&rsv->p->version);
-	}
-
+	linfo->replication_partition_version_match =
+			as_partition_version_same(source_vinfo, &rsv->p->version);
 	linfo->ldt_source_version = 0;
 	linfo->ldt_source_version_set = false;
 

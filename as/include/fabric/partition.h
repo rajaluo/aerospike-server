@@ -56,35 +56,9 @@ struct as_namespace_s;
 #define AS_PARTITIONS 4096
 #define AS_PARTITION_MASK (AS_PARTITIONS - 1)
 
-//------------------------------------------------
-// XXX JUMP - remove in "six months".
-//
-
-#define AS_PARTITION_STATE_UNDEF 0
-#define AS_PARTITION_STATE_SYNC 1
-#define AS_PARTITION_STATE_DESYNC 2
-#define AS_PARTITION_STATE_ZOMBIE 3
-#define AS_PARTITION_STATE_ABSENT 5
-typedef uint8_t as_partition_state;
-
-#define AS_PARTITION_MAX_VERSION 16
-
-typedef struct as_partition_vinfo_s {
-	uint64_t iid;
-	uint8_t vtp[AS_PARTITION_MAX_VERSION];
-} as_partition_vinfo;
-
-extern const as_partition_vinfo NULL_VINFO;
-
-//
-// End - XXX JUMP - remove in "six months".
-//------------------------------------------------
-
 #define VERSION_FAMILY_BITS 4
 #define VERSION_FAMILY_UNIQUE ((1 << VERSION_FAMILY_BITS) - 1)
 #define AS_PARTITION_N_FAMILIES VERSION_FAMILY_UNIQUE
-
-#define AS_PARTITION_FLAG_EMPTY 0x1
 
 typedef struct as_partition_version_s {
 	uint64_t ckey:48;
@@ -119,14 +93,10 @@ typedef struct as_partition_s {
 	uint64_t cluster_key;
 	as_partition_version final_version;
 	as_partition_version version;
-	as_partition_vinfo primary_version_info; // XXX JUMP - remove in "six months"
-	as_partition_vinfo version_info; // XXX JUMP - remove in "six months"
-	as_partition_state state; // XXX JUMP - remove in "six months"
-	bool has_master_wait; // XXX JUMP - remove in "six months"
 	bool acting_master_involved;
 	int pending_emigrations;
 	int pending_immigrations;
-	bool immigrators[AS_CLUSTER_SZ]; // XXX JUMP - overloaded - was replicas_delayed_emigrate
+	bool immigrators[AS_CLUSTER_SZ];
 
 	cf_node origin;
 	cf_node target;
@@ -135,7 +105,7 @@ typedef struct as_partition_s {
 	cf_node dupls[AS_CLUSTER_SZ];
 
 	uint32_t n_witnesses;
-	cf_node witnesses[AS_CLUSTER_SZ]; // XXX JUMP - overloaded - was old_node_seq
+	cf_node witnesses[AS_CLUSTER_SZ];
 
 	// LDT related.
 	uint64_t current_outgoing_ldt_version;
@@ -248,30 +218,6 @@ void as_partition_reservation_copy(as_partition_reservation* dst, as_partition_r
 void as_partition_release(as_partition_reservation* rsv);
 
 void as_partition_getinfo_str(cf_dyn_buf* db);
-
-//------------------------------------------------
-// XXX JUMP - remove in "six months".
-//
-
-static inline bool
-as_partition_is_null(const as_partition_vinfo* vinfo)
-{
-	return vinfo->iid == 0;
-}
-
-static inline bool
-as_partition_vinfo_same(const as_partition_vinfo* v1, const as_partition_vinfo* v2)
-{
-	if (v1->iid != v2->iid) {
-		return false;
-	}
-
-	return memcmp(v1->vtp, v2->vtp, AS_PARTITION_MAX_VERSION) == 0;
-}
-
-//
-// End - XXX JUMP - remove in "six months".
-//------------------------------------------------
 
 // Use VERSION_AS_STRING() - see above.
 static inline as_partition_version_string

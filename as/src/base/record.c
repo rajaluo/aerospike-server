@@ -638,7 +638,7 @@ resolve_void_time(uint32_t left, uint32_t right)
 	return 1;
 }
 
-// XXX JUMP - remove void-time parameters in "six months".
+// XXX POST-JUMP - remove void-time parameters in "six months".
 int
 as_record_resolve_conflict(conflict_resolution_pol policy,
 		uint16_t left_gen, uint64_t left_lut, uint32_t left_vt,
@@ -678,7 +678,7 @@ as_record_resolve_conflict(conflict_resolution_pol policy,
 	return result;
 }
 
-// XXX JUMP - remove void-time as part of conflict resolution in "six months".
+// XXX POST-JUMP - remove void-time as part of conflict resolution in "six months".
 int
 as_record_component_winner(as_partition_reservation *rsv, int n_components,
 		as_record_merge_component *components, as_index *r)

@@ -1199,7 +1199,6 @@ struct as_namespace_s {
 
 	uint32_t cluster_size;
 	cf_node succession[AS_CLUSTER_SZ];
-	as_partition_vinfo cluster_vinfo[AS_CLUSTER_SZ][AS_PARTITIONS]; // XXX JUMP - remove in "six months"
 	as_partition_version cluster_versions[AS_CLUSTER_SZ][AS_PARTITIONS];
 	uint32_t rack_ids[AS_CLUSTER_SZ];
 };
@@ -1314,7 +1313,7 @@ void as_namespace_xmem_trusted(as_namespace *ns);
 // Not namespace class functions, but they live in namespace.c:
 uint32_t as_mem_check();
 
-// XXX JUMP - remove in "six months".
+// XXX POST-JUMP - remove in "six months".
 static inline uint32_t
 truncate_void_time(as_namespace *ns, uint32_t void_time)
 {

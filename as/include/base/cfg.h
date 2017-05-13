@@ -41,7 +41,6 @@
 #include "node.h"
 #include "socket.h"
 
-#include "base/cluster_config.h"
 #include "base/security_config.h"
 #include "fabric/clustering.h"
 #include "fabric/fabric.h"
@@ -74,17 +73,6 @@ struct as_namespace_s;
 #define PBOOL(line) bool PGLUE(pad_, line)[3]; bool
 #define PAD_BOOL PBOOL(__LINE__)
 
-// XXX JUMP - remove in "six months":
-typedef enum {
-	AS_PAXOS_PROTOCOL_UNDEF,
-	AS_PAXOS_PROTOCOL_NONE,
-	AS_PAXOS_PROTOCOL_V1,
-	AS_PAXOS_PROTOCOL_V2,
-	AS_PAXOS_PROTOCOL_V3,
-	AS_PAXOS_PROTOCOL_V4,
-	AS_PAXOS_PROTOCOL_V5 // paxos replaced by new clustering & exchange
-} paxos_protocol_enum;
-
 typedef struct as_config_s {
 
 	// The order here matches that in the configuration parser's enum,
@@ -113,10 +101,8 @@ typedef struct as_config_s {
 	uint32_t		batch_priority; // number of records between an enforced context switch, used by old batch only
 	uint32_t		n_batch_index_threads;
 	int				clock_skew_max_ms; // maximum allowed skew between this node's physical clock and the physical component of its hybrid clock
-
 	char			cluster_name[AS_CLUSTER_NAME_SZ];
 	as_clustering_config clustering_config;
-
 	PAD_BOOL		fabric_benchmarks_enabled;
 	PAD_BOOL		svc_benchmarks_enabled;
 	PAD_BOOL		info_hist_enabled;
@@ -133,8 +119,6 @@ typedef struct as_config_s {
 	uint32_t		nsup_period;
 	PAD_BOOL		nsup_startup_evict;
 	uint32_t		paxos_max_cluster_size;
-	paxos_protocol_enum paxos_protocol;
-	uint32_t		paxos_retransmit_period;
 	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	int				proto_slow_netio_sleep_ms; // dynamic only
 	uint32_t		query_bsize;
@@ -164,7 +148,7 @@ typedef struct as_config_s {
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
 	PAD_BOOL		sindex_gc_enable_histogram; // dynamic only
 	uint32_t		sindex_gc_max_rate; // Max sindex entries processed per second for gc
-	uint32_t        sindex_gc_period; // same as nsup_period for sindex gc
+	uint32_t		sindex_gc_period; // same as nsup_period for sindex gc
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
 	uint32_t		transaction_pending_limit; // 0 means no limit
@@ -237,7 +221,6 @@ typedef struct as_config_s {
 	//
 
 	mod_lua_config	mod_lua;
-	cluster_config_t cluster;
 	as_sec_config	sec_cfg;
 
 
@@ -246,10 +229,8 @@ typedef struct as_config_s {
 	// relocated...
 	//
 
-	// Cluster-config related.
-	cf_node			self_node; // unique instance ID either HW inspired or cluster group/node ID
-	uint16_t		cluster_mode;
-	cf_node			hw_self_node; // cache the HW value self-node value, for various uses
+	// Global variable that just shouldn't be here.
+	cf_node			self_node;
 
 	// Global variables that just shouldn't be here.
 	cf_node			xdr_clmap[AS_CLUSTER_SZ]; // cluster map as known to XDR
@@ -279,13 +260,6 @@ bool as_config_cluster_name_set(const char* cluster_name);
 bool as_config_cluster_name_matches(const char* cluster_name);
 
 extern as_config g_config;
-
-// XXX JUMP - remove in "six months":
-static inline bool
-as_new_clustering()
-{
-	return g_config.paxos_protocol == AS_PAXOS_PROTOCOL_V5;
-}
 
 
 //==========================================================

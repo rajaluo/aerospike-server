@@ -172,7 +172,7 @@ void msg_incr_ref(msg *m);
 // Pack messages into flattened data.
 //
 
-// XXX JUMP - remove send_pk parameter in "six months".
+// XXX POST-JUMP - remove send_pk parameter in "six months".
 size_t msg_get_wire_size(const msg *m, bool send_pk);
 size_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_count, bool send_pk);
 size_t msg_to_wire(const msg *m, uint8_t *buf, bool send_pk);
@@ -204,7 +204,7 @@ int msg_set_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t v);
 int msg_set_uint64_array_size(msg *m, int field_id, uint32_t count);
 int msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v);
 
-// XXX - JUMP - remove in "6 months"
+// XXX POST-JUMP - remove in "six months".
 int msg_set_str_array_size(msg *m, int field_id, uint32_t count, uint32_t total_sz);
 int msg_set_str_array(msg *m, int field_id, uint32_t idx, const char *str);
 int msg_set_buf_array_size(msg *m, int field_id, uint32_t count, uint32_t ele_sz);
@@ -230,7 +230,7 @@ int msg_get_uint32_array(const msg *m, int field_id, uint32_t idx, uint32_t *val
 int msg_get_uint64_array_count(const msg *m, int field_id, uint32_t *count_r);
 int msg_get_uint64_array(const msg *m, int field_id, uint32_t idx, uint64_t *val_r);
 
-// XXX - JUMP - remove in "6 months"
+// XXX POST-JUMP - remove in "six months".
 int msg_get_str_array(msg *m, int field_id, uint32_t idx, char **str_r, size_t *sz_r, msg_get_type type);
 int msg_get_buf_array_size(const msg *m, int field_id, int *count_r); // TODO - change int type to uint32_t
 int msg_get_buf_array(const msg *m, int field_id, uint32_t idx, uint8_t **buf_r, size_t *sz_r, msg_get_type type);

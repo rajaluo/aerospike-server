@@ -24,6 +24,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <sys/param.h> // For MAX() and MIN().
 
@@ -38,7 +39,6 @@
 #include "base/cfg.h"
 #include "fabric/fabric.h"
 #include "fabric/hlc.h"
-#include "fabric/paxos.h"
 
 /*
  * Overview
@@ -7523,10 +7523,6 @@ internal_event_dispatch(as_clustering_internal_event* event)
 void
 as_clustering_init()
 {
-	if (!as_new_clustering()) {
-		as_paxos_init();
-	}
-
 	clustering_init();
 }
 
@@ -7536,12 +7532,7 @@ as_clustering_init()
 void
 as_clustering_start()
 {
-	if (as_new_clustering()) {
-		clustering_start();
-	}
-	else {
-		as_paxos_start();
-	}
+	clustering_start();
 }
 
 /**
@@ -7648,7 +7639,7 @@ as_clustering_has_integrity()
 bool
 as_clustering_is_orphan()
 {
-	return as_new_clustering() ? clustering_is_orphan() : false;
+	return clustering_is_orphan();
 }
 
 /**
@@ -7657,7 +7648,7 @@ as_clustering_is_orphan()
 void
 as_clustering_dump(bool verbose)
 {
-	as_new_clustering() ? clustering_dump(verbose) : as_paxos_dump(verbose);
+	clustering_dump(verbose);
 }
 
 /**
