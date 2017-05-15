@@ -120,6 +120,7 @@ typedef struct pickled_record_s {
 	uint8_t       *record_buf; // pickled!
 	size_t        record_len;
 	as_rec_props  rec_props; // XXX JUMP - remove in "six months"
+	uint32_t      ldt_bits; // XXX JUMP - remove in "six months"
 
 	// For LDT only:
 	cf_digest     pkeyd;
@@ -214,9 +215,6 @@ int emigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object, vo
 int immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object, void *udata);
 
 // LDT-related.
-bool as_ldt_precord_is_esr(const pickled_record *pr);
-bool as_ldt_precord_is_subrec(const pickled_record *pr);
-bool as_ldt_precord_is_parent(const pickled_record *pr);
 int as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr, uint32_t *info);
 void as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd, const emigration *emig);
 int as_ldt_get_migrate_info(immigration *immig, as_record_merge_component *c, msg *m);
@@ -870,15 +868,14 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 	as_storage_record_get_key(&rd);
 
 	as_rec_props_clear(&pr.rec_props);
+	pr.ldt_bits = (uint32_t)as_ldt_record_get_rectype_bits(r);
 
 	const char *set_name = NULL;
-	uint32_t ldt_bits = 0;
 	uint32_t key_size = rd.key_size;
 	uint8_t key[as_new_clustering() ? key_size : 0];
 
 	if (as_new_clustering()) {
 		set_name = as_index_get_set_name(r, ns);
-		ldt_bits = (uint32_t)as_ldt_record_get_rectype_bits(r);
 
 		if (key_size != 0) {
 			memcpy(key, rd.key, key_size);
@@ -952,8 +949,8 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 			msg_set_buf(m, MIG_FIELD_KEY, key, key_size, MSG_SET_COPY);
 		}
 
-		if (ldt_bits != 0) {
-			msg_set_uint32(m, MIG_FIELD_LDT_BITS, ldt_bits);
+		if (pr.ldt_bits != 0) {
+			msg_set_uint32(m, MIG_FIELD_LDT_BITS, pr.ldt_bits);
 		}
 	}
 	else {
@@ -2069,51 +2066,6 @@ immigration_dump_reduce_fn(const void *key, uint32_t keylen, void *object,
 // Local helpers - LDT-related.
 //
 
-bool
-as_ldt_precord_is_esr(const pickled_record *pr)
-{
-	uint16_t *ldt_rectype_bits;
-
-	if (pr->rec_props.size != 0 &&
-			(as_rec_props_get_value(&pr->rec_props, CL_REC_PROPS_FIELD_LDT_TYPE,
-					NULL, (uint8_t**)&ldt_rectype_bits) == 0)) {
-		return as_ldt_flag_has_esr(*ldt_rectype_bits);
-	}
-
-	return false;
-}
-
-
-bool
-as_ldt_precord_is_subrec(const pickled_record *pr)
-{
-	uint16_t *ldt_rectype_bits;
-
-	if (pr->rec_props.size != 0 &&
-			(as_rec_props_get_value(&pr->rec_props, CL_REC_PROPS_FIELD_LDT_TYPE,
-					NULL, (uint8_t**)&ldt_rectype_bits) == 0)) {
-		return as_ldt_flag_has_subrec(*ldt_rectype_bits);
-	}
-
-	return false;
-}
-
-
-bool
-as_ldt_precord_is_parent(const pickled_record *pr)
-{
-	uint16_t *ldt_rectype_bits;
-
-	if (pr->rec_props.size != 0 &&
-			(as_rec_props_get_value(&pr->rec_props, CL_REC_PROPS_FIELD_LDT_TYPE,
-					NULL, (uint8_t**)&ldt_rectype_bits) == 0)) {
-		return as_ldt_flag_has_parent(*ldt_rectype_bits);
-	}
-
-	return false;
-}
-
-
 // Set up the LDT information.
 // 1. Flag
 // 2. Parent Digest
@@ -2163,10 +2115,10 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 		msg_set_buf(m, MIG_FIELD_LDT_PDIGEST, (const uint8_t *)&pr->pkeyd,
 				sizeof(cf_digest), MSG_SET_COPY);
 
-		if (as_ldt_precord_is_esr(pr)) {
+		if (as_ldt_flag_has_esr((uint16_t)pr->ldt_bits)) {
 			*info |= MIG_INFO_LDT_ESR;
 		}
-		else if (as_ldt_precord_is_subrec(pr)) {
+		else if (as_ldt_flag_has_subrec((uint16_t)pr->ldt_bits)) {
 			*info |= MIG_INFO_LDT_SUBREC;
 			msg_set_buf(m, MIG_FIELD_LDT_EDIGEST, (const uint8_t *)&pr->ekeyd,
 					sizeof(cf_digest), MSG_SET_COPY);
@@ -2175,7 +2127,7 @@ as_ldt_fill_mig_msg(const emigration *emig, msg *m, const pickled_record *pr,
 			cf_warning(AS_MIGRATE, "expected subrec and esr bit not found");
 		}
 	}
-	else if (as_ldt_precord_is_parent(pr)) {
+	else if (as_ldt_flag_has_parent((uint16_t)pr->ldt_bits)) {
 		if (as_new_clustering()) {
 			msg_set_uint64(m, MIG_FIELD_LDT_VERSION, pr->ldt_version);
 		}
@@ -2202,7 +2154,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 	bool is_subrec = false;
 	bool is_parent = false;
 
-	if (as_ldt_precord_is_subrec(pr)) {
+	if (as_ldt_flag_has_subrec((uint16_t)pr->ldt_bits)) {
 		int rv = as_ldt_subrec_storage_get_digests(rd, &pr->ekeyd, &pr->pkeyd);
 
 		if (rv) {
@@ -2212,7 +2164,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 
 		is_subrec = true;
 	}
-	else if (as_ldt_precord_is_esr(pr)) {
+	else if (as_ldt_flag_has_esr((uint16_t)pr->ldt_bits)) {
 		as_ldt_subrec_storage_get_digests(rd, NULL, &pr->pkeyd);
 		is_subrec = true;
 	}
@@ -2224,7 +2176,7 @@ as_ldt_fill_precord(pickled_record *pr, as_storage_rd *rd,
 				"unexpected partition migration state at source %d:%d",
 				emig->tx_state, emig->rsv.p->id);
 
-		if (as_ldt_precord_is_parent(pr)) {
+		if (as_ldt_flag_has_parent((uint16_t)pr->ldt_bits)) {
 			is_parent = true;
 		}
 	}
