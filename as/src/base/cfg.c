@@ -174,7 +174,7 @@ cfg_set_defaults()
 	c->hb_config.mode = AS_HB_MODE_UNDEF;
 	c->hb_config.tx_interval = 150;
 	c->hb_config.max_intervals_missed = 10;
-	c->hb_config.protocol = AS_HB_PROTOCOL_V2;
+	c->hb_config.protocol = AS_HB_PROTOCOL_V3;
 	c->hb_config.override_mtu = 0;
 
 	// Fabric defaults.
@@ -4461,4 +4461,3 @@ xdr_cfg_add_tls_node(dc_config_opt *dc_cfg, char* addr, char *tls_name, int port
 
 	cf_vector_pointer_append(&dc_cfg->dc_node_v, nap);
 }
-
