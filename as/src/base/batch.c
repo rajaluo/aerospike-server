@@ -773,7 +773,7 @@ as_batch_queue_task(as_transaction* btr)
 		tr.from.batch_shared = shared; // is set NULL after sub-transaction
 		tr.from_data.batch_index = cf_swap_from_be32(in->index);
 		tr.keyd = in->keyd;
-		tr.benchmark_time = 0; // reset in case of previous usage
+		tr.benchmark_time = btr->benchmark_time; // must reset for each usage
 
 		if (in->repeat) {
 			if (! prev_msgp) {
