@@ -998,7 +998,6 @@ as_smd_old_create_msg_event(as_smd_msg_op_t op, cf_node node_id, msg *msg)
 {
 	as_smd_event_t *evt = NULL;
 	int e = 0;
-	size_t ignored_len = 0;
 
 	// Allocate an event object and initialize it as a msg.
 	if (!(evt = (as_smd_event_t *) cf_calloc(1, sizeof(as_smd_event_t)))) {
@@ -1029,50 +1028,8 @@ as_smd_old_create_msg_event(as_smd_msg_op_t op, cf_node node_id, msg *msg)
 		return evt;
 	}
 
-	cf_debug(AS_SMD, "ascme():  Received msg w/ node_id %016lX ; ck %016lx ; num_items %d", smd_msg->node_id, smd_msg->cluster_key, smd_msg->num_items);
-
-	// Create a msg event with space for the incoming metadata items.
-	if (! (smd_msg->items = as_smd_item_list_create(smd_msg->num_items))) {
-		cf_warning(AS_SMD, "failed to allocate array of %d metadata items for a msg event", smd_msg->num_items);
-		as_smd_destroy_event(evt);
-		return 0;
-	}
-
-	// Populate the msg event items from the fabric msg.
-	for (int i = 0; i < smd_msg->num_items; i++) {
-		as_smd_item_t *item = smd_msg->items->item[i];
-
-		item->node_id = node_id;
-
-		e = msg_get_uint32_array(msg, AS_SMD_MSG_ACTION, i, &item->action);
-		e += msg_get_str_array(msg, AS_SMD_MSG_MODULE, i, &(item->module_name), &ignored_len, MSG_GET_COPY_MALLOC);
-		e += msg_get_str_array(msg, AS_SMD_MSG_KEY, i, &(item->key), &ignored_len, MSG_GET_COPY_MALLOC);
-
-		// Extract additional msg fields if necessary.
-		if (AS_SMD_ACTION_DELETE != item->action) {
-			e += msg_get_str_array(msg, AS_SMD_MSG_VALUE, i, &(item->value), &ignored_len, MSG_GET_COPY_MALLOC);
-			e += msg_get_uint32_array(msg, AS_SMD_MSG_GENERATION, i, &(item->generation));
-			e += msg_get_uint64_array(msg, AS_SMD_MSG_TIMESTAMP, i, &(item->timestamp));
-		}
-
-		// Validate incoming item.
-		if ((0 > e) || (AS_SMD_ACTION_SET == item->action && !(item->value))) {
-			cf_crash(AS_SMD, "failed to unpack incoming fabric System Metadata msg item %d (err %d ; op %d ; val %p)",
-					 i, e, smd_msg->op, item->value);
-		} else {
-			cf_debug(AS_SMD, "Unpacked inbound System Metadata fabric msg for operation %s with item %d: module \"%s\" ; key \"%s\" (rv %d)",
-					 AS_SMD_MSG_OP_NAME(smd_msg->op), i, item->module_name, item->key, e);
-		}
-	}
-
-	if (op == AS_SMD_MSG_OP_ACCEPT_THIS_METADATA) {
-		if (msg_get_uint32(msg, AS_SMD_MSG_OPTIONS, &smd_msg->options) != 0) {
-			cf_warning(AS_SMD, "could not get info flags from the fabric msg");
-			smd_msg->options = 0;
-		}
-	}
-
-	return evt;
+	as_smd_destroy_event(evt);
+	return NULL;
 }
 
 
@@ -1250,11 +1207,6 @@ static void metadata_rchash_destructor_fn(void *object)
 	// Free up the members of the item.
 	RELEASE_ITEM_MEMBERS(item);
 }
-
-typedef struct as_smd_item_freq_s {
-	as_smd_item_t *item;
-	uint32_t freq;
-} as_smd_item_freq_t;
 
 /*
  *  Handle a cluster state change event notification from as_exchange.

@@ -39,10 +39,10 @@
 
 // These values are used on the wire - don't change them.
 typedef enum {
-	M_FT_PK_UINT32 = 1,
-	M_FT_UINT32 = 2,
-	M_FT_PK_UINT64 = 3,
-	M_FT_UINT64 = 4,
+	M_FT_UINT32 = 1,
+	M_FT_UNUSED_2 = 2,
+	M_FT_UINT64 = 3,
+	M_FT_UNUSED_4 = 4,
 	M_FT_STR = 5,
 	M_FT_BUF = 6,
 	M_FT_ARRAY_UINT32 = 7,
@@ -172,10 +172,9 @@ void msg_incr_ref(msg *m);
 // Pack messages into flattened data.
 //
 
-// XXX POST-JUMP - remove send_pk parameter in "six months".
-size_t msg_get_wire_size(const msg *m, bool send_pk);
-size_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_count, bool send_pk);
-size_t msg_to_wire(const msg *m, uint8_t *buf, bool send_pk);
+size_t msg_get_wire_size(const msg *m);
+size_t msg_get_template_fixed_sz(const msg_template *mt, size_t mt_count);
+size_t msg_to_wire(const msg *m, uint8_t *buf);
 
 //------------------------------------------------
 // Parse flattened data into messages.
@@ -204,12 +203,6 @@ int msg_set_uint32_array(msg *m, int field_id, uint32_t idx, uint32_t v);
 int msg_set_uint64_array_size(msg *m, int field_id, uint32_t count);
 int msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v);
 
-// XXX POST-JUMP - remove in "six months".
-int msg_set_str_array_size(msg *m, int field_id, uint32_t count, uint32_t total_sz);
-int msg_set_str_array(msg *m, int field_id, uint32_t idx, const char *str);
-int msg_set_buf_array_size(msg *m, int field_id, uint32_t count, uint32_t ele_sz);
-int msg_set_buf_array(msg *m, int field_id, uint32_t idx, const uint8_t *buf, size_t sz);
-
 void msg_msgpack_list_set_uint32(msg *m, int field_id, const uint32_t *buf, uint32_t count);
 void msg_msgpack_list_set_buf(msg *m, int field_id, const cf_vector *v);
 
@@ -229,11 +222,6 @@ int msg_get_buf(const msg *m, int field_id, uint8_t **buf_r, size_t *sz_r, msg_g
 int msg_get_uint32_array(const msg *m, int field_id, uint32_t idx, uint32_t *val_r);
 int msg_get_uint64_array_count(const msg *m, int field_id, uint32_t *count_r);
 int msg_get_uint64_array(const msg *m, int field_id, uint32_t idx, uint64_t *val_r);
-
-// XXX POST-JUMP - remove in "six months".
-int msg_get_str_array(msg *m, int field_id, uint32_t idx, char **str_r, size_t *sz_r, msg_get_type type);
-int msg_get_buf_array_size(const msg *m, int field_id, int *count_r); // TODO - change int type to uint32_t
-int msg_get_buf_array(const msg *m, int field_id, uint32_t idx, uint8_t **buf_r, size_t *sz_r, msg_get_type type);
 
 bool msg_msgpack_container_get_count(const msg *m, int field_id, uint32_t *count_r);
 bool msg_msgpack_list_get_uint32_array(const msg *m, int field_id, uint32_t **buf_r, uint32_t *count_r);

@@ -101,16 +101,9 @@ static msg_type_entry g_mte[M_TYPE_MAX];
 // Forward declarations.
 //
 
-static bool msg_field_is_match(msg_field_type ft1, msg_field_type ft2);
-static size_t msg_get_field_wire_size(msg_field_type type, size_t field_sz, bool send_pk);
-static uint32_t msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf, bool send_pk);
+static size_t msg_get_field_wire_size(msg_field_type type, size_t field_sz);
+static uint32_t msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf);
 static void msg_field_save(msg *m, msg_field *mf);
-static msg_str_array *msg_str_array_create(uint32_t count, uint32_t total_sz);
-static void msg_str_array_set(msg_str_array *str_a, uint32_t idx, const char *str);
-static msg_buf_array *msg_buf_array_create(uint32_t count, uint32_t ele_sz);
-static void msg_buf_array_set(msg_buf_array *buf_a, uint32_t idx, const uint8_t *buf, uint32_t sz);
-static bool msg_str_array_get(msg_str_array *str_a, uint32_t idx, char **str_r, size_t *sz_r);
-static bool msg_buf_array_get(const msg_buf_array *buf_a, uint32_t idx, uint8_t **buf_r, size_t *sz_r);
 
 
 //==========================================================
@@ -274,7 +267,7 @@ msg_incr_ref(msg *m)
 //
 
 size_t
-msg_get_wire_size(const msg *m, bool send_pk)
+msg_get_wire_size(const msg *m)
 {
 	size_t sz = sizeof(msg_hdr);
 
@@ -282,8 +275,7 @@ msg_get_wire_size(const msg *m, bool send_pk)
 		const msg_field *mf = &m->f[i];
 
 		if (mf->is_set) {
-			sz += msg_get_field_wire_size(mf_type(mf, m->type), mf->field_sz,
-					send_pk);
+			sz += msg_get_field_wire_size(mf_type(mf, m->type), mf->field_sz);
 		}
 	}
 
@@ -291,19 +283,19 @@ msg_get_wire_size(const msg *m, bool send_pk)
 }
 
 size_t
-msg_get_template_fixed_sz(const msg_template *mt, size_t mt_count, bool send_pk)
+msg_get_template_fixed_sz(const msg_template *mt, size_t mt_count)
 {
 	size_t sz = sizeof(msg_hdr);
 
 	for (size_t i = 0; i < mt_count; i++) {
-		sz += msg_get_field_wire_size(mt[i].type, 0, send_pk);
+		sz += msg_get_field_wire_size(mt[i].type, 0);
 	}
 
 	return sz;
 }
 
 size_t
-msg_to_wire(const msg *m, uint8_t *buf, bool send_pk)
+msg_to_wire(const msg *m, uint8_t *buf)
 {
 	msg_hdr *hdr = (msg_hdr *)buf;
 
@@ -317,7 +309,7 @@ msg_to_wire(const msg *m, uint8_t *buf, bool send_pk)
 		const msg_field *mf = &m->f[i];
 
 		if (mf->is_set) {
-			buf += msg_field_stamp(mf, m->type, buf, send_pk);
+			buf += msg_field_stamp(mf, m->type, buf);
 		}
 	}
 
@@ -372,10 +364,10 @@ msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 		uint32_t size = 0;
 
 		switch (ft) {
-		case M_FT_PK_UINT32:
+		case M_FT_UINT32:
 			fsz = sizeof(uint32_t);
 			break;
-		case M_FT_PK_UINT64:
+		case M_FT_UINT64:
 			fsz = sizeof(uint64_t);
 			break;
 		default:
@@ -398,7 +390,7 @@ msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 			mf = &m->f[id];
 		}
 
-		if (mf && ! msg_field_is_match(ft, mf_type(mf, m->type))) {
+		if (mf && ft != mf_type(mf, m->type)) {
 			cf_ticker_warning(CF_MSG, "msg type %d: parsed type %d for field type %d", m->type, ft, mf_type(mf, m->type));
 			mf = NULL;
 		}
@@ -407,12 +399,6 @@ msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 			mf->is_set = true;
 
 			switch (mf_type(mf, m->type)) {
-			case M_FT_UINT32:
-				mf->u.ui32 = cf_swap_from_be32(*(uint32_t *)buf);
-				break;
-			case M_FT_UINT64:
-				mf->u.ui64 = cf_swap_from_be64(*(uint64_t *)buf);
-				break;
 			case M_FT_STR:
 			case M_FT_BUF:
 			case M_FT_ARRAY_UINT32:
@@ -705,78 +691,6 @@ msg_set_uint64_array(msg *m, int field_id, uint32_t idx, uint64_t v)
 	return 0;
 }
 
-int
-msg_set_str_array_size(msg *m, int field_id, uint32_t count, uint32_t total_sz)
-{
-	cf_assert(count != 0 && total_sz != 0, CF_MSG, "Invalid params");
-
-	msg_field *mf = &m->f[field_id];
-
-	cf_assert(! mf->is_set, CF_MSG, "msg_set_str_array_size() field already set");
-
-	mf->u.str_a = msg_str_array_create(count, total_sz);
-
-	cf_assert(mf->u.str_a, CF_MSG, "malloc");
-
-	mf->field_sz = mf->u.str_a->used_size;
-	mf->is_free = true;
-	mf->is_set = true;
-
-	return 0;
-}
-
-int
-msg_set_str_array(msg *m, int field_id, uint32_t idx, const char *str)
-{
-	msg_field *mf = &m->f[field_id];
-
-	cf_assert(mf->is_set, CF_MSG, "msg_set_str_array() field not set");
-
-	msg_str_array *str_a = mf->u.str_a;
-
-	msg_str_array_set(str_a, idx, str);
-	mf->field_sz = str_a->used_size;
-
-	return 0;
-}
-
-int
-msg_set_buf_array_size(msg *m, int field_id, uint32_t count,
-		uint32_t ele_sz)
-{
-	cf_assert(count != 0 && ele_sz != 0, CF_MSG, "Invalid params");
-
-	msg_field *mf = &m->f[field_id];
-
-	cf_assert(! mf->is_set, CF_MSG, "msg_set_buf_array_size() field already set");
-
-	mf->u.buf_a = msg_buf_array_create(count, ele_sz);
-
-	cf_assert(mf->u.buf_a, CF_MSG, "malloc");
-
-	mf->field_sz = mf->u.buf_a->used_size;
-	mf->is_free = true;
-	mf->is_set = true;
-
-	return 0;
-}
-
-int
-msg_set_buf_array(msg *m, int field_id, uint32_t idx, const uint8_t *buf,
-		size_t sz)
-{
-	msg_field *mf = &m->f[field_id];
-
-	cf_assert(mf->is_set, CF_MSG, "msg_set_buf_array() field not set");
-
-	msg_buf_array *buf_a = mf->u.buf_a;
-
-	msg_buf_array_set(buf_a, idx, buf, (uint32_t)sz);
-	mf->field_sz = buf_a->used_size;
-
-	return 0;
-}
-
 void
 msg_msgpack_list_set_uint32(msg *m, int field_id, const uint32_t *buf,
 		uint32_t count)
@@ -1027,115 +941,6 @@ msg_get_uint64_array(const msg *m, int field_id, uint32_t index, uint64_t *val_r
 	return 0;
 }
 
-int
-msg_get_str_array(msg *m, int field_id, uint32_t idx, char **str_r,
-		size_t *sz_r, msg_get_type type)
-{
-	msg_field *mf = &m->f[field_id];
-
-	if (! mf->is_set) {
-		cf_warning(CF_MSG, "msg_get_str_array() field not set");
-		return -1;
-	}
-
-	if (! mf->u.str_a) {
-		cf_warning(CF_MSG, "msg_get_str_array() is_set but no str array");
-		return -2;
-	}
-
-	msg_str_array *str_a = mf->u.str_a;
-
-	char *b;
-
-	if (! sz_r) {
-		sz_r = alloca(sizeof(size_t));
-	}
-
-	if (! msg_str_array_get(str_a, idx, &b, sz_r)) {
-		return -3;
-	}
-
-	switch (type) {
-	case MSG_GET_DIRECT:
-		*str_r = b;
-		break;
-	case MSG_GET_COPY_MALLOC:
-		*str_r = cf_malloc(*sz_r);
-		memcpy(*str_r, b, *sz_r);
-		break;
-	default:
-		cf_crash(CF_MSG, "unexpected msg_get_type");
-		break;
-	}
-
-	return 0;
-}
-
-int
-msg_get_buf_array_size(const msg *m, int field_id, int *count_r)
-{
-	const msg_field *mf = &m->f[field_id];
-
-	if (! mf->is_set) {
-		return -1;
-	}
-
-	if (! mf->u.buf_a) {
-		cf_warning(CF_MSG, "msg_get_buf_array_size() is_set but no buf array");
-		return -2;
-	}
-
-	msg_buf_array *buf_a = mf->u.buf_a;
-
-	*count_r = (int)buf_a->count;
-
-	return 0;
-}
-
-int
-msg_get_buf_array(const msg *m, int field_id, uint32_t idx, uint8_t **buf_r,
-		size_t *sz_r, msg_get_type type)
-{
-	const msg_field *mf = &m->f[field_id];
-
-	if (! mf->is_set) {
-		cf_warning(CF_MSG, "msg_get_buf_array() field not set");
-		return -1;
-	}
-
-	if (! mf->u.buf_a) {
-		cf_warning(CF_MSG, "msg_get_buf_array() is set but no buf array");
-		return -2;
-	}
-
-	const msg_buf_array *buf_a = mf->u.buf_a;
-
-	uint8_t *b;
-
-	if (! sz_r) {
-		sz_r = alloca(sizeof(size_t));
-	}
-
-	if (! msg_buf_array_get(buf_a, idx, &b, sz_r)) {
-		return -3;
-	}
-
-	switch (type) {
-	case MSG_GET_DIRECT:
-		*buf_r = b;
-		break;
-	case MSG_GET_COPY_MALLOC:
-		*buf_r = cf_malloc(*sz_r);
-		memcpy(*buf_r, b, *sz_r);
-		break;
-	default:
-		cf_crash(CF_MSG, "unexpected msg_get_type");
-		break;
-	}
-
-	return 0;
-}
-
 bool
 msg_msgpack_container_get_count(const msg *m, int field_id, uint32_t *count_r)
 {
@@ -1340,11 +1145,9 @@ msg_dump(const msg *m, const char *info)
 
 		if (mf->is_set) {
 			switch (mf_type(mf, m->type)) {
-			case M_FT_PK_UINT32:
 			case M_FT_UINT32:
 				cf_info(CF_MSG, "   type UINT32 value %u", mf->u.ui32);
 				break;
-			case M_FT_PK_UINT64:
 			case M_FT_UINT64:
 				cf_info(CF_MSG, "   type UINT64 value %lu", mf->u.ui64);
 				break;
@@ -1395,39 +1198,14 @@ msg_dump(const msg *m, const char *info)
 // Local helpers.
 //
 
-static bool
-msg_field_is_match(msg_field_type ft1, msg_field_type ft2)
-{
-	switch (ft1) {
-	case M_FT_UINT32:
-	case M_FT_UINT64:
-		if ((int)ft1 - 1 == (int)ft2) {
-			return true;
-		}
-		break;
-	case M_FT_PK_UINT32:
-	case M_FT_PK_UINT64:
-		if ((int)ft1 + 1 == (int)ft2) {
-			return true;
-		}
-		break;
-	default:
-		break;
-	}
-
-	return ft1 == ft2;
-}
-
 static size_t
-msg_get_field_wire_size(msg_field_type type, size_t field_sz, bool send_pk)
+msg_get_field_wire_size(msg_field_type type, size_t field_sz)
 {
 	switch (type) {
 	case M_FT_UINT32:
-		return send_pk ? sizeof(msg_field_hdr) + sizeof(uint32_t) :
-				sizeof(msg_field_hdr) + sizeof(uint32_t) + sizeof(uint32_t);
+		return sizeof(msg_field_hdr) + sizeof(uint32_t);
 	case M_FT_UINT64:
-		return send_pk ? sizeof(msg_field_hdr) + sizeof(uint64_t) :
-				sizeof(msg_field_hdr) + sizeof(uint32_t) + sizeof(uint64_t);
+		return sizeof(msg_field_hdr) + sizeof(uint64_t);
 	case M_FT_STR:
 	case M_FT_BUF:
 	case M_FT_ARRAY_UINT32:
@@ -1446,7 +1224,7 @@ msg_get_field_wire_size(msg_field_type type, size_t field_sz, bool send_pk)
 
 // Returns the number of bytes written.
 static uint32_t
-msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf, bool send_pk)
+msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf)
 {
 	msg_field_hdr *hdr = (msg_field_hdr *)buf;
 	msg_field_type type = mf_type(mf, mtype);
@@ -1454,23 +1232,18 @@ msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf, bool send_pk)
 	buf += sizeof(msg_field_hdr);
 
 	hdr->id = cf_swap_to_be16((uint16_t)mf->id);
-
-	if (send_pk) {
-		switch (type) {
-		case M_FT_UINT32:
-			hdr->type = M_FT_PK_UINT32;
-			*(uint32_t *)buf = cf_swap_to_be32(mf->u.ui32);
-			return sizeof(msg_field_hdr) + sizeof(uint32_t);
-		case M_FT_UINT64:
-			hdr->type = M_FT_PK_UINT64;
-			*(uint64_t *)buf = cf_swap_to_be64(mf->u.ui64);
-			return sizeof(msg_field_hdr) + sizeof(uint64_t);
-		default:
-			break;
-		}
-	}
-
 	hdr->type = (uint8_t)type;
+
+	switch (type) {
+	case M_FT_UINT32:
+		*(uint32_t *)buf = cf_swap_to_be32(mf->u.ui32);
+		return sizeof(msg_field_hdr) + sizeof(uint32_t);
+	case M_FT_UINT64:
+		*(uint64_t *)buf = cf_swap_to_be64(mf->u.ui64);
+		return sizeof(msg_field_hdr) + sizeof(uint64_t);
+	default:
+		break;
+	}
 
 	uint32_t fsz;
 	uint32_t *p_fsz = (uint32_t *)buf;
@@ -1478,14 +1251,6 @@ msg_field_stamp(const msg_field *mf, msg_type mtype, uint8_t *buf, bool send_pk)
 	buf += sizeof(uint32_t);
 
 	switch (type) {
-	case M_FT_UINT32:
-		fsz = sizeof(uint32_t);
-		*(uint32_t *)buf = cf_swap_to_be32(mf->u.ui32);
-		break;
-	case M_FT_UINT64:
-		fsz = sizeof(uint64_t);
-		*(uint64_t *)buf = cf_swap_to_be64(mf->u.ui64);
-		break;
 	case M_FT_STR:
 	case M_FT_BUF:
 	case M_FT_ARRAY_UINT32:
@@ -1510,9 +1275,7 @@ static void
 msg_field_save(msg *m, msg_field *mf)
 {
 	switch (mf_type(mf, m->type)) {
-	case M_FT_PK_UINT32:
 	case M_FT_UINT32:
-	case M_FT_PK_UINT64:
 	case M_FT_UINT64:
 		break;
 	case M_FT_STR:
@@ -1546,127 +1309,4 @@ msg_field_save(msg *m, msg_field *mf)
 	default:
 		break;
 	}
-}
-
-static msg_str_array *
-msg_str_array_create(uint32_t count, uint32_t total_sz)
-{
-	size_t sz = sizeof(msg_str_array) + (count * sizeof(uint32_t)) + total_sz;
-	msg_str_array *str_a = cf_malloc(sz);
-
-	if (! str_a) {
-		return NULL;
-	}
-
-	str_a->alloc_size = (uint32_t)sz;
-	str_a->used_size =
-			(uint32_t)(sizeof(msg_str_array) + (count * sizeof(uint32_t)));
-
-	str_a->count = count;
-
-	for (uint32_t i = 0; i < count; i++) {
-		str_a->offset[i] = 0;
-	}
-
-	return str_a;
-}
-
-static void
-msg_str_array_set(msg_str_array *str_a, uint32_t idx, const char *str)
-{
-	cf_assert(idx < str_a->count, CF_MSG, "msg_str_array_set() idx %u > %u out of bound", idx, str_a->count);
-
-	uint32_t sz = (uint32_t)strlen(str) + 1;
-
-	cf_assert(str_a->used_size + sz <= str_a->alloc_size, CF_MSG, "msg_str_array_set() used_sz %u > %u out of bound",
-			str_a->used_size + sz, str_a->alloc_size);
-
-	str_a->offset[idx] = str_a->used_size;
-
-	char *data = (char *)str_a + str_a->offset[idx];
-
-	strncpy(data, str, sz);
-	str_a->used_size += sz;
-}
-
-static msg_buf_array *
-msg_buf_array_create(uint32_t count, uint32_t ele_sz)
-{
-	size_t a_sz = sizeof(msg_buf_array) +
-			(count * (sizeof(uint32_t) + ele_sz + sizeof(msg_pbuf)));
-	msg_buf_array *buf_a = cf_malloc(a_sz);
-
-	if (! buf_a) {
-		return NULL;
-	}
-
-	buf_a->alloc_size = (uint32_t)a_sz;
-	buf_a->used_size =
-			(uint32_t)(sizeof(msg_buf_array) + (count * sizeof(uint32_t)));
-	buf_a->count = count;
-
-	for (uint32_t i = 0; i < count; i++) {
-		buf_a->offset[i] = 0;
-	}
-
-	return buf_a;
-}
-
-static void
-msg_buf_array_set(msg_buf_array *buf_a, uint32_t idx, const uint8_t *buf,
-		uint32_t sz)
-{
-	cf_assert(idx < buf_a->count, CF_MSG, "msg_buf_array_set() idx %u > %u out of bound", idx, buf_a->count);
-
-	cf_assert(buf_a->used_size + sz + (uint32_t)sizeof(msg_pbuf) <= buf_a->alloc_size, CF_MSG, "msg_buf_array_set() used_sz %u > %u out of bound",
-			buf_a->used_size + sz + (uint32_t)sizeof(msg_pbuf), buf_a->alloc_size);
-
-	buf_a->offset[idx] = buf_a->used_size;
-
-	msg_pbuf *pbuf = (msg_pbuf *)((uint8_t *)buf_a + buf_a->used_size);
-
-	pbuf->size = sz;
-	memcpy(pbuf->data, buf, sz);
-
-	buf_a->used_size += sz + (uint32_t)sizeof(msg_pbuf);
-}
-
-static bool
-msg_str_array_get(msg_str_array *str_a, uint32_t idx, char **str_r,
-		size_t *sz_r)
-{
-	if (idx > str_a->count) {
-		cf_warning(CF_MSG, "msg_str_array_get: idx %u > %u out of bound", idx, str_a->count);
-		return false;
-	}
-
-	if (str_a->offset[idx] == 0) {
-		return false;
-	}
-
-	*str_r = (char *)str_a + str_a->offset[idx];
-	*sz_r = strlen(*str_r) + 1;
-
-	return true;
-}
-
-static bool
-msg_buf_array_get(const msg_buf_array *buf_a, uint32_t idx, uint8_t **buf_r,
-		size_t *sz_r)
-{
-	if (idx > buf_a->count) {
-		cf_warning(CF_MSG, "msg_buf_array_get: idx %u > %u out of bound", idx, buf_a->count);
-		return false;
-	}
-
-	if (buf_a->offset[idx] == 0) {
-		return false;
-	}
-
-	msg_pbuf *pbuf = (msg_pbuf *)((uint8_t *)buf_a + buf_a->offset[idx]);
-
-	*sz_r = pbuf->size;
-	*buf_r = pbuf->data;
-
-	return true;
 }

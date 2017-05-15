@@ -983,8 +983,7 @@ emigrate_record(emigration *emig, msg *m)
 		return false;
 	}
 
-	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m,
-			true));
+	cf_atomic32_add(&emig->bytes_emigrating, (int32_t)msg_get_wire_size(m));
 
 	if (as_fabric_send(emig->dest, m, AS_FABRIC_CHANNEL_BULK) !=
 			AS_FABRIC_SUCCESS) {
@@ -1841,7 +1840,7 @@ emigration_handle_insert_ack(cf_node src, msg *m)
 			&vlock) == SHASH_OK) {
 		if (src == emig->dest) {
 			if (cf_atomic32_sub(&emig->bytes_emigrating,
-					(int32_t)msg_get_wire_size(ri_ctrl->m, true)) < 0) {
+					(int32_t)msg_get_wire_size(ri_ctrl->m)) < 0) {
 				cf_warning(AS_MIGRATE, "bytes_emigrating less than zero");
 			}
 

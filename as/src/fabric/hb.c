@@ -5824,7 +5824,7 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 {
 	// This is output by msg_to_wire. Using a separate variable so that we do
 	// not lose the actual buffer length needed for compression later on.
-	size_t msg_size = msg_to_wire(original_msg, buffer, true);
+	size_t msg_size = msg_to_wire(original_msg, buffer);
 
 	if (channel_msg_is_compression_required(original_msg, msg_size, mtu)) {
 		// Compression is required.
@@ -5849,7 +5849,7 @@ channel_msg_buffer_fill(msg* original_msg, int wire_size, int mtu,
 
 			msg_set_buf(temp_msg, AS_HB_MSG_COMPRESSED_PAYLOAD,
 					compressed_buffer, compressed_msg_size, MSG_SET_COPY);
-			msg_size = msg_to_wire(temp_msg, buffer, true);
+			msg_size = msg_to_wire(temp_msg, buffer);
 
 			hb_msg_return(temp_msg);
 		}
@@ -5888,7 +5888,7 @@ channel_msg_unicast(cf_node dest, msg* msg)
 
 	// Read the message to a buffer.
 	int mtu = hb_mtu();
-	int wire_size = msg_get_wire_size(msg, true);
+	int wire_size = msg_get_wire_size(msg);
 	buffer_len = channel_msg_buffer_size_get(wire_size, mtu);
 	buffer = MSG_BUFF_ALLOC_OR_DIE(buffer_len,
 					"error allocating memory size %zu for sending message to node %" PRIx64,
@@ -5947,7 +5947,7 @@ channel_msg_broadcast(msg* msg)
 
 	// Read the message to a buffer.
 	int mtu = hb_mtu();
-	int wire_size = msg_get_wire_size(msg, true);
+	int wire_size = msg_get_wire_size(msg);
 	size_t buffer_len = channel_msg_buffer_size_get(wire_size, mtu);
 	uint8_t* buffer = MSG_BUFF_ALLOC_OR_DIE(buffer_len,
 			"error allocating memory size %zu for sending broadcast message",
@@ -8549,8 +8549,7 @@ multicast_supported_cluster_size_get()
 		// Fixed payload length
 		size_t fixed_payload_size = msg_get_template_fixed_sz(
 				g_hb_v2_msg_template,
-				sizeof(g_hb_v2_msg_template) / sizeof(msg_template),
-				true);
+				sizeof(g_hb_v2_msg_template) / sizeof(msg_template));
 
 		// Also accommodate for the terminating '0' nodeid.
 		int supported_cluster_size = ((hb_mtu() - UDP_HEADER_SIZE_MAX
@@ -8561,8 +8560,7 @@ multicast_supported_cluster_size_get()
 
 	// Calculate the fixed size for a UDP packet and the message header.
 	size_t msg_fixed_size = msg_get_template_fixed_sz(g_hb_msg_template,
-			sizeof(g_hb_msg_template) / sizeof(msg_template),
-			true);
+			sizeof(g_hb_msg_template) / sizeof(msg_template));
 
 	size_t msg_plugin_per_node_size = 0;
 

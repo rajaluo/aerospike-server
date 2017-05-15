@@ -1485,7 +1485,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 							&h_urecord->pickled_rec_props,
 							false);
 
-			sz += msg_get_wire_size(m[ops], true);
+			sz += msg_get_wire_size(m[ops]);
 			ops++;
 		}
 
@@ -1526,7 +1526,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 				c_tr->msgp->msg.info2 &= ~AS_MSG_INFO2_DELETE;
 			}
 			
-			sz += msg_get_wire_size(m[ops], true);
+			sz += msg_get_wire_size(m[ops]);
 			ops++;
 		}
 
@@ -1542,7 +1542,7 @@ as_ldt_record_pickle(ldt_record *lrecord,
 			*pickled_sz  = sz;
 
 			for (int i = 0; i < ops; i++) {
-				buf += msg_to_wire(m[i], buf, true);
+				buf += msg_to_wire(m[i], buf);
 			}
 		}
 	}
