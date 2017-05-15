@@ -433,7 +433,9 @@ as_partition_balance()
 	g_succession = as_exchange_succession();
 
 	// Prepare rack aware info.
-	partition_cluster_topology_info();
+	if (! as_new_clustering()) {
+		partition_cluster_topology_info();
+	}
 
 	cf_node* full_node_seq_table =
 			cf_malloc(AS_PARTITIONS * g_cluster_size * sizeof(cf_node));
