@@ -153,13 +153,6 @@ typedef enum {
 	AS_MIGRATE_ALREADY_DONE
 } as_migrate_result;
 
-typedef enum {
-	AS_MIGRATE_STATE_DONE,
-	AS_MIGRATE_STATE_START,
-	AS_MIGRATE_STATE_ERROR,
-	AS_MIGRATE_STATE_EAGAIN
-} as_migrate_state;
-
 
 //==========================================================
 // Macros.

@@ -78,7 +78,7 @@ uint64_t as_partition_balance_remaining_migrations();
 
 bool as_partition_pending_migrations(as_partition* p);
 
-void as_partition_emigrate_done(as_migrate_state s, struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t tx_flags);
+void as_partition_emigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, uint32_t tx_flags);
 as_migrate_result as_partition_immigrate_start(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
 as_migrate_result as_partition_immigrate_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key, cf_node source_node);
 as_migrate_result as_partition_migrations_all_done(struct as_namespace_s* ns, uint32_t pid, uint64_t orig_cluster_key);

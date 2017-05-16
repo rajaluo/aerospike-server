@@ -127,6 +127,13 @@ typedef struct pickled_record_s {
 } pickled_record;
 
 typedef enum {
+	EMIG_RESULT_DONE,
+	EMIG_RESULT_START,
+	EMIG_RESULT_ERROR,
+	EMIG_RESULT_EAGAIN
+} emigration_result;
+
+typedef enum {
 	// Order matters - we use an atomic set-max that relies on it.
 	EMIG_STATE_ACTIVE,
 	EMIG_STATE_FINISHED,
@@ -184,14 +191,14 @@ int emigration_pop_reduce_fn(void *buf, void *udata);
 void emigration_hash_insert(emigration *emig);
 void emigration_hash_delete(emigration *emig);
 bool emigrate_transfer(emigration *emig);
-as_migrate_state emigrate(emigration *emig);
-as_migrate_state emigrate_tree(emigration *emig);
+emigration_result emigrate(emigration *emig);
+emigration_result emigrate_tree(emigration *emig);
 void *run_emigration_reinserter(void *arg);
 void emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata);
 bool emigrate_record(emigration *emig, msg *m);
 int emigration_reinsert_reduce_fn(const void *key, void *data, void *udata);
-as_migrate_state emigration_send_start(emigration *emig);
-as_migrate_state emigration_send_done(emigration *emig);
+emigration_result emigration_send_start(emigration *emig);
+emigration_result emigration_send_done(emigration *emig);
 void emigrate_signal(emigration *emig);
 
 // Immigration.
@@ -687,10 +694,10 @@ emigration_hash_delete(emigration *emig)
 bool
 emigrate_transfer(emigration *emig)
 {
-	as_migrate_state result = emigrate(emig);
+	emigration_result result = emigrate(emig);
 	as_namespace *ns = emig->rsv.ns;
 
-	if (result == AS_MIGRATE_STATE_EAGAIN) {
+	if (result == EMIG_RESULT_EAGAIN) {
 		// Remote node refused migration, requeue and fetch another.
 		if (cf_queue_push(&g_emigration_q, &emig) != CF_QUEUE_OK) {
 			cf_crash(AS_MIGRATE, "failed emigration queue push");
@@ -699,8 +706,19 @@ emigrate_transfer(emigration *emig)
 		return true; // requeued
 	}
 
-	as_partition_emigrate_done(result, ns, emig->rsv.p->id, emig->cluster_key,
-			emig->tx_flags);
+	if (result == EMIG_RESULT_DONE) {
+		as_partition_emigrate_done(ns, emig->rsv.p->id, emig->cluster_key,
+				emig->tx_flags);
+	}
+	else {
+		cf_assert(result == EMIG_RESULT_ERROR, AS_MIGRATE, "unexpected emigrate result %d",
+				result);
+
+		if (emig->cluster_key == as_exchange_cluster_key()) {
+			cf_warning(AS_MIGRATE, "{%s:%u} emigrate error but cluster key is current",
+					ns->name, emig->rsv.p->id);
+		}
+	}
 
 	emig->tx_state = AS_PARTITION_MIG_TX_STATE_NONE;
 
@@ -708,15 +726,15 @@ emigrate_transfer(emigration *emig)
 }
 
 
-as_migrate_state
+emigration_result
 emigrate(emigration *emig)
 {
-	as_migrate_state result;
+	emigration_result result;
 
 	//--------------------------------------------
 	// Send START request.
 	//
-	if ((result = emigration_send_start(emig)) != AS_MIGRATE_STATE_START) {
+	if ((result = emigration_send_start(emig)) != EMIG_RESULT_START) {
 		return result;
 	}
 
@@ -724,7 +742,7 @@ emigrate(emigration *emig)
 	// Send whole sub-tree - may block a while.
 	//
 	if (emig->rsv.ns->ldt_enabled) {
-		if ((result = emigrate_tree(emig)) != AS_MIGRATE_STATE_DONE) {
+		if ((result = emigrate_tree(emig)) != EMIG_RESULT_DONE) {
 			return result;
 		}
 	}
@@ -734,7 +752,7 @@ emigrate(emigration *emig)
 	//--------------------------------------------
 	// Send whole tree - may block a while.
 	//
-	if ((result = emigrate_tree(emig)) != AS_MIGRATE_STATE_DONE) {
+	if ((result = emigrate_tree(emig)) != EMIG_RESULT_DONE) {
 		return result;
 	}
 
@@ -745,14 +763,14 @@ emigrate(emigration *emig)
 }
 
 
-as_migrate_state
+emigration_result
 emigrate_tree(emigration *emig)
 {
 	bool is_subrecord = emig->tx_state == AS_PARTITION_MIG_TX_STATE_SUBRECORD;
 	as_index_tree *tree = is_subrecord ? emig->rsv.sub_tree : emig->rsv.tree;
 
 	if (as_index_tree_size(tree) == 0) {
-		return AS_MIGRATE_STATE_DONE;
+		return EMIG_RESULT_DONE;
 	}
 
 	cf_atomic32_set(&emig->state, EMIG_STATE_ACTIVE);
@@ -771,7 +789,7 @@ emigrate_tree(emigration *emig)
 	pthread_join(thread, NULL);
 
 	return emig->state == EMIG_STATE_ABORTED ?
-			AS_MIGRATE_STATE_ERROR : AS_MIGRATE_STATE_DONE;
+			EMIG_RESULT_ERROR : EMIG_RESULT_DONE;
 }
 
 
@@ -1018,7 +1036,7 @@ emigration_reinsert_reduce_fn(const void *key, void *data, void *udata)
 }
 
 
-as_migrate_state
+emigration_result
 emigration_send_start(emigration *emig)
 {
 	as_namespace *ns = emig->rsv.ns;
@@ -1026,7 +1044,7 @@ emigration_send_start(emigration *emig)
 
 	if (! m) {
 		cf_warning(AS_MIGRATE, "failed to get fabric msg");
-		return AS_MIGRATE_STATE_ERROR;
+		return EMIG_RESULT_ERROR;
 	}
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_START);
@@ -1047,7 +1065,7 @@ emigration_send_start(emigration *emig)
 	while (true) {
 		if (emig->cluster_key != as_exchange_cluster_key()) {
 			as_fabric_msg_put(m);
-			return AS_MIGRATE_STATE_ERROR;
+			return EMIG_RESULT_ERROR;
 		}
 
 		uint64_t now = cf_getms();
@@ -1071,18 +1089,18 @@ emigration_send_start(emigration *emig)
 			switch (op) {
 			case OPERATION_START_ACK_OK:
 				as_fabric_msg_put(m);
-				return AS_MIGRATE_STATE_START;
+				return EMIG_RESULT_START;
 			case OPERATION_START_ACK_ALREADY_DONE:
 				as_fabric_msg_put(m);
-				return AS_MIGRATE_STATE_DONE;
+				return EMIG_RESULT_DONE;
 			case OPERATION_START_ACK_EAGAIN:
 				as_fabric_msg_put(m);
-				return AS_MIGRATE_STATE_EAGAIN;
+				return EMIG_RESULT_EAGAIN;
 			case OPERATION_START_ACK_FAIL:
 				cf_warning(AS_MIGRATE, "imbalance: dest refused migrate with ACK_FAIL");
 				cf_atomic_int_incr(&ns->migrate_tx_partitions_imbalance);
 				as_fabric_msg_put(m);
-				return AS_MIGRATE_STATE_ERROR;
+				return EMIG_RESULT_ERROR;
 			default:
 				cf_warning(AS_MIGRATE, "unexpected ctrl op %d", op);
 				break;
@@ -1093,11 +1111,11 @@ emigration_send_start(emigration *emig)
 	// Should never get here.
 	cf_crash(AS_MIGRATE, "unexpected - exited infinite while loop");
 
-	return AS_MIGRATE_STATE_ERROR;
+	return EMIG_RESULT_ERROR;
 }
 
 
-as_migrate_state
+emigration_result
 emigration_send_done(emigration *emig)
 {
 	msg *m = as_fabric_msg_get(M_TYPE_MIGRATE);
@@ -1105,7 +1123,7 @@ emigration_send_done(emigration *emig)
 	if (! m) {
 		cf_warning(AS_MIGRATE, "imbalance: failed to get fabric msg");
 		cf_atomic_int_incr(&emig->rsv.ns->migrate_tx_partitions_imbalance);
-		return AS_MIGRATE_STATE_ERROR;
+		return EMIG_RESULT_ERROR;
 	}
 
 	msg_set_uint32(m, MIG_FIELD_OP, OPERATION_DONE);
@@ -1116,7 +1134,7 @@ emigration_send_done(emigration *emig)
 	while (true) {
 		if (emig->cluster_key != as_exchange_cluster_key()) {
 			as_fabric_msg_put(m);
-			return AS_MIGRATE_STATE_ERROR;
+			return EMIG_RESULT_ERROR;
 		}
 
 		uint64_t now = cf_getms();
@@ -1138,7 +1156,7 @@ emigration_send_done(emigration *emig)
 				CF_QUEUE_OK) {
 			if (op == OPERATION_DONE_ACK) {
 				as_fabric_msg_put(m);
-				return AS_MIGRATE_STATE_DONE;
+				return EMIG_RESULT_DONE;
 			}
 		}
 	}
@@ -1146,7 +1164,7 @@ emigration_send_done(emigration *emig)
 	// Should never get here.
 	cf_crash(AS_MIGRATE, "unexpected - exited infinite while loop");
 
-	return AS_MIGRATE_STATE_ERROR;
+	return EMIG_RESULT_ERROR;
 }
 
 

@@ -445,25 +445,9 @@ as_partition_pending_migrations(as_partition* p)
 
 
 void
-as_partition_emigrate_done(as_migrate_state s, as_namespace* ns, uint32_t pid,
+as_partition_emigrate_done(as_namespace* ns, uint32_t pid,
 		uint64_t orig_cluster_key, uint32_t tx_flags)
 {
-	// FIXME - better handled outside?
-	if (s != AS_MIGRATE_STATE_DONE) {
-		if (s == AS_MIGRATE_STATE_ERROR) {
-			if (orig_cluster_key == as_exchange_cluster_key()) {
-				cf_warning(AS_PARTITION, "{%s:%u} emigrate_done - error result but cluster key is current",
-						ns->name, pid);
-			}
-		}
-		else {
-			cf_warning(AS_PARTITION, " {%s:%u} emigrate_done - unexpected result %d",
-					ns->name, pid, (int)s);
-		}
-
-		return;
-	}
-
 	as_partition* p = &ns->partitions[pid];
 
 	pthread_mutex_lock(&p->lock);
