@@ -595,33 +595,19 @@ as_record_flatten_component(as_storage_rd *rd, as_index_ref *r_ref,
 static inline int
 resolve_generation_direct(uint16_t left, uint16_t right)
 {
-	if (left == right) {
-		return 0;
-	}
-
-	return right > left  ? 1 : -1;
+	return left == right ? 0 : (right > left  ? 1 : -1);
 }
 
 static inline int
 resolve_generation(uint16_t left, uint16_t right)
 {
-	if (left == right) {
-		return 0;
-	}
-
-	return as_gen_less_than(left, right) ? 1 : -1;
+	return left == right ? 0 : (as_gen_less_than(left, right) ? 1 : -1);
 }
 
 static inline int
 resolve_last_update_time(uint64_t left, uint64_t right)
 {
-	if (left == right ||
-			// If either is unknown, fall back to void-time. TODO - ok?
-			left == 0 || right == 0) {
-		return 0;
-	}
-
-	return right > left ? 1 : -1;
+	return left == right ? 0 : (right > left ? 1 : -1);
 }
 
 int
