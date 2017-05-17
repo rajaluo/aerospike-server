@@ -54,10 +54,14 @@
 // Typedefs & constants.
 //
 
-// The instantaneous maximum number of cluster participants, represented as a
-// positive and negative mask.
-#define AS_CLUSTER_SZ_MASKP ((uint64_t)(1 - (AS_CLUSTER_SZ + 1)))
-#define AS_CLUSTER_SZ_MASKN ((uint64_t)(AS_CLUSTER_SZ - 1))
+COMPILER_ASSERT((AS_CLUSTER_SZ & (AS_CLUSTER_SZ - 1)) == 0);
+
+#define AS_CLUSTER_SZ_MASKP (-(uint64_t)AS_CLUSTER_SZ)
+#define AS_CLUSTER_SZ_MASKN ((uint64_t)AS_CLUSTER_SZ - 1)
+
+typedef uint8_t sl_ix_t;
+
+COMPILER_ASSERT(AS_CLUSTER_SZ_MASKN >> (sizeof(sl_ix_t) * 8) == 0);
 
 typedef struct inter_hash_s {
 	uint64_t hashed_node;
@@ -75,7 +79,6 @@ cf_atomic32 g_partition_generation = 0;
 
 // Using int for 4-byte size, but maintaining bool semantics.
 // TODO - ok as non-volatile, but should selectively load/store in the future.
-// Better - use g_partition_generation and selectively load to compare non-0.
 static int g_init_balance_done = false;
 
 static cf_atomic32 g_migrate_num_incoming = 0;
@@ -88,6 +91,9 @@ static uint64_t g_hashed_pids[AS_PARTITIONS];
 // Shortcuts to values set by as_exchange, for use in partition balance only.
 static uint32_t g_cluster_size = 0;
 static cf_node* g_succession = NULL;
+
+static cf_node g_full_node_seq_table[AS_CLUSTER_SZ * AS_PARTITIONS];
+static sl_ix_t g_full_sl_ix_table[AS_CLUSTER_SZ * AS_PARTITIONS];
 
 
 //==========================================================
@@ -103,22 +109,22 @@ void partition_migrate_record_fill(partition_migrate_record* pmr, cf_node dest, 
 void drop_trees(as_partition* p, as_namespace* ns);
 
 // Helpers - balance partitions.
-void fill_global_tables(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table);
-void balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table, as_namespace* ns, cf_queue* mq);
+void fill_global_tables();
+void balance_namespace(as_namespace* ns, cf_queue* mq);
 void apply_single_replica_limit(as_namespace* ns);
 uint32_t rack_count(const as_namespace* ns);
 void fill_translation(int translation[], const as_namespace* ns);
-void fill_namespace_rows(const cf_node* full_node_seq, const uint32_t* full_sl_ix, cf_node* ns_node_seq, uint32_t* ns_sl_ix, const as_namespace* ns, const int translation[]);
-void rack_aware_adjust_rows(cf_node* ns_node_seq, uint32_t* ns_sl_ix, const as_namespace* ns, uint32_t n_racks);
-bool is_rack_distinct_before_n(const uint32_t* ns_sl_ix, const as_namespace* ns, uint32_t rack_id, uint32_t n);
+void fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix, cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, const as_namespace* ns, const int translation[]);
+void rack_aware_adjust_rows(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, const as_namespace* ns, uint32_t n_racks);
+bool is_rack_distinct_before_n(const sl_ix_t* ns_sl_ix, const as_namespace* ns, uint32_t rack_id, uint32_t n);
 uint32_t find_self(const cf_node* ns_node_seq, const as_namespace* ns);
-int find_working_master(const as_partition* p, const uint32_t* ns_sl_ix, const as_namespace* ns);
-uint32_t find_duplicates(const as_partition* p, const cf_node* ns_node_seq, const uint32_t* ns_sl_ix, const as_namespace* ns, uint32_t working_master_n, cf_node dupls[]);
-void fill_witnesses(as_partition* p, const cf_node* ns_node_seq, const uint32_t* ns_sl_ix, as_namespace* ns);
-uint32_t fill_immigrators(as_partition* p, const uint32_t* ns_sl_ix, as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl);
-void advance_version(as_partition* p, const uint32_t* ns_sl_ix, as_namespace* ns, uint32_t self_n,	uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[]);
-uint32_t fill_family_versions(const as_partition* p, const uint32_t* ns_sl_ix, const as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[], as_partition_version family_versions[]);
-bool has_replica_parent(const as_partition* p, const uint32_t* ns_sl_ix, const as_namespace* ns, const as_partition_version* subset_version, uint32_t subset_n);
+int find_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns);
+uint32_t find_duplicates(const as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, const as_namespace* ns, uint32_t working_master_n, cf_node dupls[]);
+void fill_witnesses(as_partition* p, const cf_node* ns_node_seq, const sl_ix_t* ns_sl_ix, as_namespace* ns);
+uint32_t fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl);
+void advance_version(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns, uint32_t self_n,	uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[]);
+uint32_t fill_family_versions(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl, const cf_node dupls[], as_partition_version family_versions[]);
+bool has_replica_parent(const as_partition* p, const sl_ix_t* ns_sl_ix, const as_namespace* ns, const as_partition_version* subset_version, uint32_t subset_n);
 uint32_t find_family(const as_partition_version* self_version, uint32_t n_families, const as_partition_version family_versions[]);
 void queue_namespace_migrations(as_partition* p, as_namespace* ns, uint32_t self_n, cf_node working_master, uint32_t n_dupl, cf_node dupls[], cf_queue* mq);
 
@@ -188,8 +194,8 @@ compare_rack_ids(const void* pa, const void* pb)
 }
 
 // Define macros for accessing the full node-seq and sl-ix arrays.
-#define FULL_NODE_SEQ(x, y) full_node_seq_table[(x * g_cluster_size) + y]
-#define FULL_SL_IX(x, y) full_sl_ix_table[(x * g_cluster_size) + y]
+#define FULL_NODE_SEQ(x, y) g_full_node_seq_table[(x * g_cluster_size) + y]
+#define FULL_SL_IX(x, y) g_full_sl_ix_table[(x * g_cluster_size) + y]
 
 // Get the partition version that was input by exchange.
 #define INPUT_VERSION(_n) (&ns->cluster_versions[ns_sl_ix[_n]][p->id])
@@ -291,8 +297,6 @@ as_partition_balance_init()
 
 				p->version = version;
 
-				ns->cluster_versions[0][pid] = version;
-
 				n_stored++;
 			}
 		}
@@ -359,23 +363,13 @@ as_partition_balance()
 	last_cluster_key = as_exchange_cluster_key();
 	// End - temporary paranoia.
 
-	// These shortcuts must only be used under the scope of this function.
+	// These shortcuts must only be used within the scope of this function.
 	g_cluster_size = as_exchange_cluster_size();
 	g_succession = as_exchange_succession();
 
-	cf_node* full_node_seq_table =
-			cf_malloc(AS_PARTITIONS * g_cluster_size * sizeof(cf_node));
-
-	cf_assert(full_node_seq_table, AS_PARTITION, "as_partition_balance: couldn't allocate node sequence table");
-
-	uint32_t* full_sl_ix_table =
-			cf_malloc(AS_PARTITIONS * g_cluster_size * sizeof(uint32_t));
-
-	cf_assert(full_sl_ix_table, AS_PARTITION, "as_partition_balance: couldn't allocate succession index table");
-
 	// Each partition separately shuffles the node succession list to generate
 	// its own node sequence.
-	fill_global_tables(full_node_seq_table, full_sl_ix_table);
+	fill_global_tables();
 
 	cf_queue mq;
 
@@ -383,8 +377,7 @@ as_partition_balance()
 			g_config.n_namespaces * AS_PARTITIONS, false);
 
 	for (uint32_t ns_ix = 0; ns_ix < g_config.n_namespaces; ns_ix++) {
-		balance_namespace(full_node_seq_table, full_sl_ix_table,
-				g_config.namespaces[ns_ix], &mq);
+		balance_namespace(g_config.namespaces[ns_ix], &mq);
 	}
 
 	// All partitions now have replicas assigned, ok to allow transactions.
@@ -404,9 +397,6 @@ as_partition_balance()
 	}
 
 	cf_queue_destroy(&mq);
-
-	cf_free(full_node_seq_table);
-	cf_free(full_sl_ix_table);
 }
 
 
@@ -776,7 +766,7 @@ drop_trees(as_partition* p, as_namespace* ns)
 //  | A | B | C | D |
 //  +---------------+
 //
-//  Succession list index - used as version table index (version_ix)
+//  Succession list index (sl_ix) - used as version table and rack-id index
 //  +---------------+
 //  | 0 | 1 | 2 | 3 |
 //  +---------------+
@@ -784,7 +774,7 @@ drop_trees(as_partition* p, as_namespace* ns)
 // Every partition shuffles the succession list independently, e.g. for pid 0:
 // Hash the node names with the pid:
 //  H(A,0) = Y, H(B,0) = X, H(C,0) = W, H(D,0) = Z
-// Store version_ix in last byte of hash results so it doesn't affect sort:
+// Store sl_ix in last byte of hash results so it doesn't affect sort:
 //  +-----------------------+
 //  | Y_0 | X_1 | W_2 | Z_3 |
 //  +-----------------------+
@@ -792,12 +782,12 @@ drop_trees(as_partition* p, as_namespace* ns)
 //  +-----------------------+
 //  | W_2 | X_1 | Y_0 | Z_3 |
 //  +-----------------------+
-// Replace original node names, and keep version_ix order, resulting in:
+// Replace original node names, and keep sl_ix order, resulting in:
 //  +---------------+    +---------------+
 //  | C | B | A | D |    | 2 | 1 | 0 | 3 |
 //  +---------------+    +---------------+
 //
-//  Node sequence table      Version info index table
+//  Node sequence table      Succession list index table
 //   pid                      pid
 //  +===+---------------+    +===+---------------+
 //  | 0 | C | B | A | D |    | 0 | 2 | 1 | 0 | 3 |
@@ -812,10 +802,11 @@ drop_trees(as_partition* p, as_namespace* ns)
 //  +===+---------------+    +===+---------------+
 //  ... to pid 4095.
 //
-// We keep the partition version index table so we can refer back to namespaces'
-// version tables, where nodes are in the original succession list order.
+// We keep the succession list index table so we can refer back to namespaces'
+// partition version tables and rack-id lists, where nodes are in the original
+// succession list order.
 void
-fill_global_tables(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table)
+fill_global_tables()
 {
 	uint64_t hashed_nodes[g_cluster_size];
 
@@ -843,26 +834,25 @@ fill_global_tables(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table)
 		}
 
 		// Sort the hashed node values.
-		qsort(&full_node_seq_table[pid * g_cluster_size], g_cluster_size,
-				sizeof(cf_node), compare_hashed_nodes);
+		qsort(&FULL_NODE_SEQ(pid, 0), g_cluster_size, sizeof(cf_node),
+				compare_hashed_nodes);
 
 		// Overwrite the sorted hash values with the original node IDs.
 		for (uint32_t n = 0; n < g_cluster_size; n++) {
 			cf_node* node_p = &FULL_NODE_SEQ(pid, n);
-			uint32_t version_ix = (uint32_t)(*node_p & AS_CLUSTER_SZ_MASKN);
+			sl_ix_t sl_ix = (sl_ix_t)(*node_p & AS_CLUSTER_SZ_MASKN);
 
-			*node_p = g_succession[version_ix];
+			*node_p = g_succession[sl_ix];
 
-			// Saved to refer back to the partition version table.
-			FULL_SL_IX(pid, n) = version_ix;
+			// Saved to refer back to partition version table and rack-id list.
+			FULL_SL_IX(pid, n) = sl_ix;
 		}
 	}
 }
 
 
 void
-balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
-		as_namespace* ns, cf_queue* mq)
+balance_namespace(as_namespace* ns, cf_queue* mq)
 {
 	// Figure out effective replication factor in the face of node failures.
 	apply_single_replica_limit(ns);
@@ -893,19 +883,19 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 		as_partition* p = &ns->partitions[pid];
 
 		cf_node* full_node_seq = &FULL_NODE_SEQ(pid, 0);
-		uint32_t* full_sl_ix = &FULL_SL_IX(pid, 0);
+		sl_ix_t* full_sl_ix = &FULL_SL_IX(pid, 0);
 
 		// Usually a namespace can simply use the global tables...
 		cf_node* ns_node_seq = full_node_seq;
-		uint32_t* ns_sl_ix = full_sl_ix;
+		sl_ix_t* ns_sl_ix = full_sl_ix;
 
 		cf_node stack_node_seq[ns_not_equal_global ? ns->cluster_size : 0];
-		uint32_t stack_version_ix[ns_not_equal_global ? ns->cluster_size : 0];
+		sl_ix_t stack_sl_ix[ns_not_equal_global ? ns->cluster_size : 0];
 
 		// ... but sometimes a namespace is different.
 		if (ns_not_equal_global) {
 			ns_node_seq = stack_node_seq;
-			ns_sl_ix = stack_version_ix;
+			ns_sl_ix = stack_sl_ix;
 
 			fill_namespace_rows(full_node_seq, full_sl_ix, ns_node_seq,
 					ns_sl_ix, ns, translation);
@@ -1102,14 +1092,14 @@ fill_translation(int translation[], const as_namespace* ns)
 
 
 void
-fill_namespace_rows(const cf_node* full_node_seq, const uint32_t* full_sl_ix,
-		cf_node* ns_node_seq, uint32_t* ns_sl_ix, const as_namespace* ns,
+fill_namespace_rows(const cf_node* full_node_seq, const sl_ix_t* full_sl_ix,
+		cf_node* ns_node_seq, sl_ix_t* ns_sl_ix, const as_namespace* ns,
 		const int translation[])
 {
 	if (ns->cluster_size == g_cluster_size) {
 		// Rack-aware but namespace is on all nodes - just copy.
 		memcpy(ns_node_seq, full_node_seq, g_cluster_size * sizeof(cf_node));
-		memcpy(ns_sl_ix, full_sl_ix, g_cluster_size * sizeof(int));
+		memcpy(ns_sl_ix, full_sl_ix, g_cluster_size * sizeof(sl_ix_t));
 
 		return;
 	}
@@ -1122,7 +1112,7 @@ fill_namespace_rows(const cf_node* full_node_seq, const uint32_t* full_sl_ix,
 
 		if (ns_n != -1) {
 			ns_node_seq[n] = ns->succession[ns_n];
-			ns_sl_ix[n] = (uint32_t)ns_n;
+			ns_sl_ix[n] = (sl_ix_t)ns_n;
 			n++;
 		}
 	}
@@ -1143,7 +1133,7 @@ fill_namespace_rows(const cf_node* full_node_seq, const uint32_t* full_sl_ix,
 // Proles for a partition can't be in the same rack as the master, e.g. for
 // replication factor 2:
 //
-//  Node sequence table      Succession index table
+//  Node sequence table      Succession list index table
 //   pid                      pid
 //  +===+-------+-------+    +===+-------+-------+
 //  | 0 | C | B | A | D |    | 0 | 2 | 1 | 0 | 3 |
@@ -1160,7 +1150,7 @@ fill_namespace_rows(const cf_node* full_node_seq, const uint32_t* full_sl_ix,
 //
 // To adjust a table row, we swap the prole with the first non-replica.
 void
-rack_aware_adjust_rows(cf_node* ns_node_seq, uint32_t* ns_sl_ix,
+rack_aware_adjust_rows(cf_node* ns_node_seq, sl_ix_t* ns_sl_ix,
 		const as_namespace* ns, uint32_t n_racks)
 {
 	uint32_t n_needed = n_racks < ns->replication_factor ?
@@ -1207,7 +1197,7 @@ rack_aware_adjust_rows(cf_node* ns_node_seq, uint32_t* ns_sl_ix,
 		ns_node_seq[cur_n] = temp_node;
 
 		// Swap succession list index.
-		uint32_t temp_ix = ns_sl_ix[swap_n];
+		sl_ix_t temp_ix = ns_sl_ix[swap_n];
 
 		ns_sl_ix[swap_n] = ns_sl_ix[cur_n];
 		ns_sl_ix[cur_n] = temp_ix;
@@ -1217,7 +1207,7 @@ rack_aware_adjust_rows(cf_node* ns_node_seq, uint32_t* ns_sl_ix,
 
 // Returns true if rack_id is unique within nodes list indices less than n.
 bool
-is_rack_distinct_before_n(const uint32_t* ns_sl_ix, const as_namespace* ns,
+is_rack_distinct_before_n(const sl_ix_t* ns_sl_ix, const as_namespace* ns,
 		uint32_t rack_id, uint32_t n)
 {
 	for (uint32_t cur_n = 0; cur_n < n; cur_n++) {
@@ -1246,7 +1236,7 @@ find_self(const cf_node* ns_node_seq, const as_namespace* ns)
 
 // Preference: Vm > V > Ve > Vs > Vse > absent.
 int
-find_working_master(const as_partition* p, const uint32_t* ns_sl_ix,
+find_working_master(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		const as_namespace* ns)
 {
 	int best_n = -1;
@@ -1284,7 +1274,7 @@ find_working_master(const as_partition* p, const uint32_t* ns_sl_ix,
 
 uint32_t
 find_duplicates(const as_partition* p, const cf_node* ns_node_seq,
-		const uint32_t* ns_sl_ix, const as_namespace* ns,
+		const sl_ix_t* ns_sl_ix, const as_namespace* ns,
 		uint32_t working_master_n, cf_node dupls[])
 {
 	uint32_t n_dupl = 0;
@@ -1353,7 +1343,7 @@ find_duplicates(const as_partition* p, const cf_node* ns_node_seq,
 
 void
 fill_witnesses(as_partition* p, const cf_node* ns_node_seq,
-		const uint32_t* ns_sl_ix, as_namespace* ns)
+		const sl_ix_t* ns_sl_ix, as_namespace* ns)
 {
 	for (uint32_t n = 1; n < ns->cluster_size; n++) {
 		const as_partition_version* version = INPUT_VERSION(n);
@@ -1366,7 +1356,7 @@ fill_witnesses(as_partition* p, const cf_node* ns_node_seq,
 
 
 uint32_t
-fill_immigrators(as_partition* p, const uint32_t* ns_sl_ix, as_namespace* ns,
+fill_immigrators(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 		uint32_t working_master_n, uint32_t n_dupl)
 {
 	uint32_t n_immigrators = 0;
@@ -1387,7 +1377,7 @@ fill_immigrators(as_partition* p, const uint32_t* ns_sl_ix, as_namespace* ns,
 
 
 void
-advance_version(as_partition* p, const uint32_t* ns_sl_ix, as_namespace* ns,
+advance_version(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 		uint32_t self_n, uint32_t working_master_n, uint32_t n_dupl,
 		const cf_node dupls[])
 {
@@ -1468,7 +1458,7 @@ advance_version(as_partition* p, const uint32_t* ns_sl_ix, as_namespace* ns,
 
 
 uint32_t
-fill_family_versions(const as_partition* p, const uint32_t* ns_sl_ix,
+fill_family_versions(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		const as_namespace* ns, uint32_t working_master_n, uint32_t n_dupl,
 		const cf_node dupls[], as_partition_version family_versions[])
 {
@@ -1512,7 +1502,7 @@ fill_family_versions(const as_partition* p, const uint32_t* ns_sl_ix,
 
 
 bool
-has_replica_parent(const as_partition* p, const uint32_t* ns_sl_ix,
+has_replica_parent(const as_partition* p, const sl_ix_t* ns_sl_ix,
 		const as_namespace* ns, const as_partition_version* subset_version,
 		uint32_t subset_n)
 {

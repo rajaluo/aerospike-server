@@ -149,8 +149,7 @@ typedef struct client_replica_map_s {
 typedef enum {
 	AS_MIGRATE_OK,
 	AS_MIGRATE_FAIL,
-	AS_MIGRATE_AGAIN,
-	AS_MIGRATE_ALREADY_DONE
+	AS_MIGRATE_AGAIN
 } as_migrate_result;
 
 

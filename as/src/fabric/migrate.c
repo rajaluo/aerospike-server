@@ -713,11 +713,6 @@ emigrate_transfer(emigration *emig)
 	else {
 		cf_assert(result == EMIG_RESULT_ERROR, AS_MIGRATE, "unexpected emigrate result %d",
 				result);
-
-		if (emig->cluster_key == as_exchange_cluster_key()) {
-			cf_warning(AS_MIGRATE, "{%s:%u} emigrate error but cluster key is current",
-					ns->name, emig->rsv.p->id);
-		}
 	}
 
 	emig->tx_state = AS_PARTITION_MIG_TX_STATE_NONE;
@@ -1090,9 +1085,6 @@ emigration_send_start(emigration *emig)
 			case OPERATION_START_ACK_OK:
 				as_fabric_msg_put(m);
 				return EMIG_RESULT_START;
-			case OPERATION_START_ACK_ALREADY_DONE:
-				as_fabric_msg_put(m);
-				return EMIG_RESULT_DONE;
 			case OPERATION_START_ACK_EAGAIN:
 				as_fabric_msg_put(m);
 				return EMIG_RESULT_EAGAIN;
@@ -1315,7 +1307,6 @@ migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 	case OPERATION_INSERT:
 		immigration_handle_insert_request(src, m);
 		break;
-	case OPERATION_CANCEL: // deprecated case
 	case OPERATION_DONE:
 		immigration_handle_done_request(src, m);
 		break;
@@ -1332,7 +1323,6 @@ migrate_receive_msg_cb(cf_node src, msg *m, void *udata)
 	case OPERATION_START_ACK_OK:
 	case OPERATION_START_ACK_EAGAIN:
 	case OPERATION_START_ACK_FAIL:
-	case OPERATION_START_ACK_ALREADY_DONE:
 	case OPERATION_DONE_ACK:
 	case OPERATION_ALL_DONE_ACK:
 		emigration_handle_ctrl_ack(src, m, op);
@@ -1490,12 +1480,6 @@ immigration_handle_start_request(cf_node src, msg *m)
 		cf_rchash_delete(g_immigration_hash, (void *)&hkey, sizeof(hkey));
 		immigration_release(immig);
 		immigration_ack_start_request(src, m, OPERATION_START_ACK_EAGAIN);
-		return;
-	case AS_MIGRATE_ALREADY_DONE:
-		immig->start_recv_ms = cf_getms(); // permits reaping
-		immig->done_recv_ms = immig->start_recv_ms; // permits reaping
-		immigration_release(immig);
-		immigration_ack_start_request(src, m, OPERATION_START_ACK_ALREADY_DONE);
 		return;
 	default:
 		cf_crash(AS_MIGRATE, "unexpected as_partition_immigrate_start result");
