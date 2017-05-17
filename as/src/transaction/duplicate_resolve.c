@@ -219,8 +219,8 @@ dup_res_handle_request(cf_node node, msg* m)
 
 	if (local_conflict_check &&
 			0 >= as_record_resolve_conflict(ns->conflict_resolution_policy,
-					generation, last_update_time, 0,
-					r->generation, r->last_update_time, r->void_time)) {
+					generation, last_update_time, r->generation,
+					r->last_update_time)) {
 		done_handle_request(&rsv, &r_ref);
 		send_dup_res_ack(node, m, AS_PROTO_RESULT_FAIL_NOTFOUND);
 		return;
@@ -514,7 +514,7 @@ send_ack_for_bad_request(cf_node node, msg* m)
 bool
 apply_winner(rw_request* rw)
 {
-	int n = 0;
+	uint32_t n = 0;
 	as_record_merge_component dups[rw->n_dest_nodes];
 
 	memset(dups, 0, sizeof(dups));

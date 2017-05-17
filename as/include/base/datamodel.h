@@ -533,7 +533,7 @@ void as_record_drop_stats(as_record* r, as_namespace* ns);
 
 extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t key_size);
 extern void as_record_remove_key(as_record* r);
-extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint32_t left_vt, uint16_t right_gen, uint64_t right_lut, uint32_t right_vt);
+extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint16_t right_gen, uint64_t right_lut);
 extern int as_record_pickle(as_record *r, as_storage_rd *rd, uint8_t **buf_r, size_t *len_r);
 extern int as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t bufsz, uint8_t **stack_particles, bool has_sindex);
 extern void as_record_apply_pickle(as_storage_rd *rd);
@@ -606,7 +606,7 @@ typedef struct {
 } as_record_merge_component;
 
 extern int as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
-		uint16_t n_components, as_record_merge_component *components, int *winner_idx);
+		uint32_t n_components, as_record_merge_component *components, int *winner_idx);
 
 // a simpler call that gives seconds in the right epoch
 #define as_record_void_time_get() cf_clepoch_seconds()
