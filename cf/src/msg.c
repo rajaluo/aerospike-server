@@ -399,6 +399,12 @@ msg_parse(msg *m, const uint8_t *buf, size_t bufsz)
 			mf->is_set = true;
 
 			switch (mf_type(mf, m->type)) {
+			case M_FT_UINT32:
+				mf->u.ui32 = cf_swap_from_be32(*(uint32_t *)buf);
+				break;
+			case M_FT_UINT64:
+				mf->u.ui64 = cf_swap_from_be64(*(uint64_t *)buf);
+				break;
 			case M_FT_STR:
 			case M_FT_BUF:
 			case M_FT_ARRAY_UINT32:
