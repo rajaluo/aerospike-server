@@ -907,8 +907,6 @@ balance_namespace(as_namespace* ns, cf_queue* mq)
 
 		pthread_mutex_lock(&p->lock);
 
-		uint32_t old_repl_factor = p->n_replicas;
-
 		p->n_replicas = ns->replication_factor;
 		memset(p->replicas, 0, sizeof(p->replicas));
 		memcpy(p->replicas, ns_node_seq, p->n_replicas * sizeof(cf_node));
@@ -971,12 +969,13 @@ balance_namespace(as_namespace* ns, cf_queue* mq)
 			debug_n_immigrators = n_immigrators;
 			debug_orig = p->version;
 
-			if (n_immigrators != 0 || p->n_replicas < old_repl_factor) {
+			if (n_immigrators != 0) {
 				advance_version(p, ns_sl_ix, ns, self_n,
 						(uint32_t)working_master_n, n_dupl, dupls);
 			}
 			else {
-				// Refresh replicas' versions.
+				// Refresh replicas' versions. (Only truly necessary if
+				// replication factor decreased.)
 				if (self_n < p->n_replicas) {
 					p->version = p->final_version;
 				}
