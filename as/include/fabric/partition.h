@@ -93,7 +93,6 @@ typedef struct as_partition_s {
 	uint64_t cluster_key;
 	as_partition_version final_version;
 	as_partition_version version;
-	bool acting_master_involved;
 	int pending_emigrations;
 	int pending_immigrations;
 	bool immigrators[AS_CLUSTER_SZ];

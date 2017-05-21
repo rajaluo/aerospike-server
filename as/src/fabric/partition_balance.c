@@ -915,8 +915,6 @@ balance_namespace(as_namespace* ns, cf_queue* mq)
 
 		p->cluster_key = as_exchange_cluster_key();
 
-		p->acting_master_involved = false;
-
 		p->pending_emigrations = 0;
 		p->pending_immigrations = 0;
 		memset(p->immigrators, 0, sizeof(p->immigrators));
@@ -959,8 +957,6 @@ balance_namespace(as_namespace* ns, cf_queue* mq)
 			}
 		}
 		else {
-			p->acting_master_involved = working_master_n != 0;
-
 			n_dupl = find_duplicates(p, ns_node_seq, ns_sl_ix, ns,
 					(uint32_t)working_master_n, dupls);
 
@@ -995,10 +991,10 @@ balance_namespace(as_namespace* ns, cf_queue* mq)
 				set_partition_version_in_storage(ns, p->id, &p->version, false);
 				drop_trees(p, ns);
 			}
-		}
 
-		queue_namespace_migrations(p, ns, self_n,
-				ns_node_seq[working_master_n], n_dupl, dupls, mq);
+			queue_namespace_migrations(p, ns, self_n,
+					ns_node_seq[working_master_n], n_dupl, dupls, mq);
+		}
 
 		if (! as_partition_version_is_null(&p->version)) {
 			set_partition_version_in_storage(ns, p->id, &p->version, false);
