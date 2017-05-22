@@ -2382,6 +2382,7 @@ clustering_hb_plugin_parse_data_fn(msg* msg, cf_node source,
 	// Lockless check to prevent deadlocks.
 	if (g_clustering.sys_state != AS_CLUSTERING_SYS_STATE_RUNNING) {
 		// Ignore this heartbeat.
+		plugin_data->data_size = 0;
 		return;
 	}
 
@@ -2601,6 +2602,22 @@ quantum_interval_fault_update(as_clustering_quantum_fault* fault,
 		DETAIL("updated '%s' fault with ts to %"PRIu64" for node %"PRIx64,
 				fault_name, fault_ts, src_nodeid);
 	}
+}
+
+/**
+ * Check if the interval generator has seen an adjacency fault in the current
+ * quantum interval.
+ * @return true if the quantum interval generator has seen an adjacency fault,
+ * false otherwise.
+ */
+static bool
+quantum_interval_is_adjacency_fault_seen()
+{
+	CLUSTERING_LOCK();
+	bool is_fault_seen = g_quantum_interval_generator.adjacency_fault.event_ts
+			!= 0;
+	CLUSTERING_UNLOCK();
+	return is_fault_seen;
 }
 
 /**
@@ -3057,6 +3074,7 @@ clustering_node_is_faulty(cf_node nodeid)
 	as_hlc_msg_timestamp hb_msg_hlc_ts;
 	cf_clock msg_recv_ts = 0;
 	as_hb_plugin_node_data plugin_data = { 0 };
+
 	if (clustering_hb_plugin_data_get(nodeid, &plugin_data, &hb_msg_hlc_ts,
 			&msg_recv_ts) != 0
 			|| clustering_hb_plugin_data_is_obsolete(
@@ -6531,6 +6549,14 @@ clustering_principal_quantum_interval_start_handle()
 	clustering_succession_list_clique_evict(new_succession_list,
 			"clique based evicted nodes at quantum start:");
 
+	if (cf_vector_size(dead_nodes) != 0
+			&& !quantum_interval_is_adjacency_fault_seen()) {
+		// There is an imminent adjacency fault that has not been seen by the
+		// quantum interval generator, lets not take any action.
+		DEBUG("adjacency fault imminent - skipping quantum interval handling");
+		goto Exit;
+	}
+
 	if (cf_vector_size(faulty_nodes) == 0 && cf_vector_size(dead_nodes) == 0) {
 		// We might have only pending join requests. Attempt a move to a
 		// preferred principal or a merge before trying to add new nodes.
@@ -6635,6 +6661,12 @@ clustering_non_principal_evicted_check(cf_node principal_nodeid,
 		as_hlc_msg_timestamp* plugin_data_hlc_ts, cf_clock plugin_data_ts)
 {
 	CLUSTERING_LOCK();
+	bool is_evicted = false;
+
+	if (!as_hb_is_alive(principal_nodeid)) {
+		is_evicted = true;
+		goto Exit;
+	}
 
 	if (!clustering_is_our_principal(principal_nodeid)
 			|| clustering_hb_plugin_data_is_obsolete(
@@ -6660,13 +6692,17 @@ clustering_non_principal_evicted_check(cf_node principal_nodeid,
 	// Check if we have been evicted.
 	if (!clustering_is_node_in_succession(config_self_nodeid_get(),
 			succession_list_p, *succession_list_length_p)) {
+		is_evicted = true;
+	}
+
+Exit:
+	if (is_evicted) {
 		// This node has been evicted from the cluster.
 		WARNING("evicted from cluster by principal node %"PRIx64"- changing state to orphan",
 				principal_nodeid);
 		register_become_orphan();
 	}
 
-Exit:
 	CLUSTERING_UNLOCK();
 }
 
@@ -6754,9 +6790,8 @@ clustering_non_principal_quantum_interval_start_handle()
 
 	if (clustering_hb_plugin_data_get(principal, &plugin_data,
 			&plugin_data_hlc_ts, &plugin_data_ts) != 0) {
-		DETAIL(
-				"eviction check skipped - found no plugin data for princpal node %"PRIx64,
-				principal);
+		plugin_data_ts = 0;
+		memset(&plugin_data, 0, sizeof(plugin_data));
 	}
 
 	clustering_non_principal_evicted_check(principal, &plugin_data,
@@ -7285,7 +7320,7 @@ clustering_hb_plugin_data_change_listener(cf_node changed_node_id)
 	if (clustering_hb_plugin_data_get(changed_node_id, &plugin_data,
 			&change_event.plugin_data_changed_hlc_ts,
 			&change_event.plugin_data_changed_ts) != 0) {
-		// Not possible. We should be aqble to read the plugin data that
+		// Not possible. We should be able to read the plugin data that
 		// changed.
 		return;
 	}

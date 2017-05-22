@@ -9322,7 +9322,7 @@ hb_adjacency_tender(void* arg)
 		}
 
 		if (adjacency_tender_udata.evicted_node_count > 0) {
-			// Queue events for dead nodes.
+			// Queue events for evicted nodes.
 			hb_event_queue(AS_HB_INTERNAL_NODE_EVICT, evicted_nodes,
 						   adjacency_tender_udata.evicted_node_count);
 		}
