@@ -1065,8 +1065,6 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 
 		pthread_mutex_lock(&p->lock);
 
-		uint32_t old_repl_factor = p->n_replicas;
-
 		p->n_replicas = ns->replication_factor;
 		memset(p->replicas, 0, sizeof(p->replicas));
 		memcpy(p->replicas, ns_node_seq, p->n_replicas * sizeof(cf_node));
@@ -1122,10 +1120,6 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 			n_dupl = find_duplicates(p, ns_node_seq, ns_sl_ix, ns,
 					(uint32_t)working_master_n, dupls);
 
-			if (self_n == 0) {
-				fill_witnesses(p, ns_node_seq, ns_sl_ix, ns);
-			}
-
 			uint32_t n_immigrators = fill_immigrators(p, ns_sl_ix, ns,
 					(uint32_t)working_master_n, n_dupl);
 
@@ -1133,30 +1127,37 @@ balance_namespace(cf_node* full_node_seq_table, uint32_t* full_sl_ix_table,
 			debug_n_immigrators = n_immigrators;
 			debug_orig = p->version;
 
-			if (n_immigrators != 0 || p->n_replicas < old_repl_factor) {
+			if (n_immigrators != 0) {
+				// Migrations required - advance versions for next rebalance,
+				// queue migrations for this rebalance.
+
 				advance_version(p, ns_sl_ix, ns, self_n,
 						(uint32_t)working_master_n, n_dupl, dupls);
+
+				queue_namespace_migrations(p, ns, self_n,
+						ns_node_seq[working_master_n], n_dupl, dupls, mq);
+
+				if (self_n == 0) {
+					fill_witnesses(p, ns_node_seq, ns_sl_ix, ns);
+					ns_pending_signals += p->n_witnesses;
+				}
 			}
 			else {
-				// Refresh replicas' versions.
+				// No migrations required - refresh replicas' versions (only
+				// truly necessary if replication factor decreased) and drop
+				// superfluous non-replica partitions immediately.
+
 				if (self_n < p->n_replicas) {
 					p->version = p->final_version;
 				}
-			}
-
-			if (n_immigrators != 0) {
-				ns_pending_signals += p->n_witnesses;
-			}
-			// No migrations required, drop superfluous partitions immediately.
-			else if (self_n >= p->n_replicas) {
-				p->version = ZERO_VERSION;
-				set_partition_version_in_storage(ns, p->id, &p->version, false);
-				drop_trees(p, ns);
+				else {
+					p->version = ZERO_VERSION;
+					set_partition_version_in_storage(ns, p->id, &p->version,
+							false);
+					drop_trees(p, ns);
+				}
 			}
 		}
-
-		queue_namespace_migrations(p, ns, self_n,
-				ns_node_seq[working_master_n], n_dupl, dupls, mq);
 
 		if (! as_partition_version_is_null(&p->version)) {
 			set_partition_version_in_storage(ns, p->id, &p->version, false);
@@ -1567,12 +1568,13 @@ advance_version(as_partition* p, const uint32_t* ns_sl_ix, as_namespace* ns,
 	// Advance eventual master.
 	if (self_n == 0) {
 		bool self_is_versionless = as_partition_version_is_null(&p->version);
+		bool was_subset = p->version.subset == 1;
 
 		p->version.ckey = p->final_version.ckey;
 		p->version.family = 0;
 		p->version.subset = n_dupl == 0 ? 1 : 0;
 
-		if (self_is_versionless || p->version.subset == 0) {
+		if (self_is_versionless || (was_subset && p->version.subset == 0)) {
 			p->version.evade = 1;
 		}
 		// else - don't change evade flag.
