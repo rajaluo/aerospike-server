@@ -1729,6 +1729,8 @@ as_sindex_empty_index(as_sindex_metadata * imd)
 	as_sindex_clear_stats_on_empty_index(imd->si);
 }
 
+// TODO - formerly used during set deletion - leaving it for now, but if nothing
+// needs it going forward, we'll remove it.
 void
 as_sindex_delete_set(as_namespace * ns, char * set_name)
 {

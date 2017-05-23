@@ -547,8 +547,7 @@ as_namespace_set_set_w_len(as_namespace *ns, const char *set_name, size_t len,
 		return -1;
 	}
 
-	if (apply_restrictions &&
-			(IS_SET_DELETED(p_set) || as_set_stop_writes(p_set))) {
+	if (apply_restrictions && as_set_stop_writes(p_set)) {
 		return -2;
 	}
 
@@ -681,10 +680,6 @@ append_set_props(as_set *p_set, cf_dyn_buf *db)
 
 	cf_dyn_buf_append_string(db, "truncate_lut=");
 	cf_dyn_buf_append_uint64(db, p_set->truncate_lut);
-	cf_dyn_buf_append_char(db, ':');
-
-	cf_dyn_buf_append_string(db, "deleting=");
-	cf_dyn_buf_append_string(db, IS_SET_DELETED(p_set) ? "true" : "false");
 	cf_dyn_buf_append_char(db, ':');
 
 	// Configuration:

@@ -941,7 +941,6 @@ struct as_namespace_s {
 
 	cf_atomic64		n_expired_objects;
 	cf_atomic64		n_evicted_objects;
-	cf_atomic64		n_deleted_set_objects;
 
 	cf_atomic64		evict_ttl;
 
@@ -1207,10 +1206,6 @@ struct as_namespace_s {
 
 #define INVALID_SET_ID 0
 
-#define IS_SET_DELETED(p_set)	(cf_atomic32_get(p_set->deleted) == 1)
-#define SET_DELETED_ON(p_set)	(cf_atomic32_set(&p_set->deleted, 1))
-#define SET_DELETED_OFF(p_set)	(cf_atomic32_set(&p_set->deleted, 0))
-
 #define IS_SET_EVICTION_DISABLED(p_set)		(cf_atomic32_get(p_set->disable_eviction) == 1)
 #define DISABLE_SET_EVICTION(p_set, on_off)	(cf_atomic32_set(&p_set->disable_eviction, on_off ? 1 : 0))
 
@@ -1228,11 +1223,10 @@ struct as_set_s {
 	cf_atomic64		n_bytes_memory;		// for data-in-memory only - sets's total record data size
 	cf_atomic64		stop_writes_count;	// restrict number of records in a set
 	uint64_t		truncate_lut;		// records with last-update-time less than this are truncated
-	cf_atomic32		deleted;			// empty a set (triggered via info command only)
 	cf_atomic32		disable_eviction;	// don't evict anything in this set (note - expiration still works)
 	cf_atomic32		enable_xdr;			// white-list (AS_SET_ENABLE_XDR_TRUE) or black-list (AS_SET_ENABLE_XDR_FALSE) a set for XDR replication
 	uint32_t		n_sindexes;
-	uint8_t padding[8];
+	uint8_t padding[12];
 };
 
 static inline bool

@@ -507,95 +507,6 @@ garbage_collect_next_prole_partition(as_namespace* ns, int pid)
 // END - Temporary dangling prole garbage collection.
 //==========================================================
 
-//==========================================================
-// Temporary dangling prole (or other) sets deletion.
-//
-
-typedef struct non_master_sets_delete_info_s {
-	as_namespace*	ns;
-	bool*			sets_deleting;
-	as_index_tree*	p_tree;
-	uint32_t		num_deleted;
-} non_master_sets_delete_info;
-
-static void
-non_master_sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
-{
-	non_master_sets_delete_info* p_info = (non_master_sets_delete_info*)udata;
-	uint32_t set_id = as_index_get_set_id(r_ref->r);
-
-	if (p_info->sets_deleting[set_id]) {
-		as_index_delete(p_info->p_tree, &r_ref->r->keyd);
-		p_info->num_deleted++;
-	}
-
-	as_record_done(r_ref, p_info->ns);
-}
-
-static void
-non_master_sets_delete(as_namespace* ns, bool* sets_deleting)
-{
-	cf_info(AS_NSUP, "namespace %s: deleting non-master records in sets being emptied",
-			ns->name);
-
-	as_partition_reservation rsv;
-
-	// Look at all non-master partitions.
-	for (int n = 0; n < AS_PARTITIONS; n++) {
-		AS_PARTITION_RESERVATION_INIT(rsv);
-
-		if (0 == as_partition_reserve_write(ns, n, &rsv, 0, 0)) {
-			// This is a master partition - continue.
-			as_partition_release(&rsv);
-		}
-		else if (0 == as_partition_reserve_read(ns, n, &rsv, 0, 0)) {
-			// This is a prole partition - check it.
-			non_master_sets_delete_info cb_info;
-
-			cb_info.ns = ns;
-			cb_info.sets_deleting = sets_deleting;
-			cb_info.p_tree = rsv.tree;
-			cb_info.num_deleted = 0;
-
-			// Reduce the partition, checking and deleting records.
-			as_index_reduce_live(rsv.tree, non_master_sets_delete_reduce_cb, &cb_info);
-
-			if (cb_info.num_deleted != 0) {
-				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted proles",
-						ns->name, n, cb_info.num_deleted);
-			}
-
-			as_partition_release(&rsv);
-		}
-		else {
-			// We don't own this partition - check anyway.
-			as_partition_reserve_migrate(ns, n, &rsv, 0);
-
-			non_master_sets_delete_info cb_info;
-
-			cb_info.ns = ns;
-			cb_info.sets_deleting = sets_deleting;
-			cb_info.p_tree = rsv.tree;
-			cb_info.num_deleted = 0;
-
-			// Reduce the partition, checking and deleting records.
-			as_index_reduce_live(rsv.tree, non_master_sets_delete_reduce_cb, &cb_info);
-
-			if (cb_info.num_deleted != 0) {
-				cf_info(AS_NSUP, "namespace %s pid %d: %u deleted from dangling partition, %lu records remaining",
-						ns->name, n, cb_info.num_deleted,
-						as_index_tree_size(rsv.tree));
-			}
-
-			as_partition_release(&rsv);
-		}
-	}
-}
-
-//
-// END - Temporary dangling prole (or other) sets deletion.
-//==========================================================
-
 
 static cf_queue* g_p_nsup_delete_q = NULL;
 static pthread_t g_nsup_delete_thread;
@@ -745,58 +656,6 @@ add_to_ttl_histograms(as_namespace* ns, as_index* r)
 	if (set_ttl_hist) {
 		linear_hist_insert_data_point(set_ttl_hist, void_time);
 	}
-}
-
-//------------------------------------------------
-// Reduce callback deletes sets.
-// - does set deletion
-// - does expiration
-// - builds object size & TTL histograms
-// - counts 0-void-time records
-//
-typedef struct sets_delete_info_s {
-	as_namespace*	ns;
-	uint32_t		now;
-	bool*			sets_deleting;
-	uint64_t		num_deleted;
-	uint64_t		num_expired;
-	uint64_t		num_0_void_time;
-} sets_delete_info;
-
-static void
-sets_delete_reduce_cb(as_index_ref* r_ref, void* udata)
-{
-	as_index* r = r_ref->r;
-	sets_delete_info* p_info = (sets_delete_info*)udata;
-	as_namespace* ns = p_info->ns;
-	uint32_t set_id = as_index_get_set_id(r);
-
-	if (p_info->sets_deleting[set_id]) {
-		queue_for_delete(ns, &r->keyd);
-		p_info->num_deleted++;
-
-		as_record_done(r_ref, ns);
-		return;
-	}
-
-	uint32_t void_time = r->void_time;
-
-	if (void_time != 0) {
-		if (p_info->now > void_time) {
-			queue_for_delete(ns, &r->keyd);
-			p_info->num_expired++;
-		}
-		else {
-			add_to_obj_size_histograms(ns, r);
-			add_to_ttl_histograms(ns, r);
-		}
-	}
-	else {
-		add_to_obj_size_histograms(ns, r);
-		p_info->num_0_void_time++;
-	}
-
-	as_record_done(r_ref, ns);
 }
 
 //------------------------------------------------
@@ -1075,21 +934,17 @@ get_threshold(as_namespace* ns, uint32_t* p_evict_void_time)
 //
 static void
 update_stats(as_namespace* ns, uint64_t n_master, uint64_t n_0_void_time,
-		uint64_t n_expired_records, uint64_t n_evicted_records, uint64_t n_deleted_set_records,
-		uint32_t evict_ttl, uint32_t n_set_waits, uint32_t n_clear_waits, uint32_t n_general_waits,
+		uint64_t n_expired_objects, uint64_t n_evicted_objects,
+		uint32_t evict_ttl, uint32_t n_general_waits, uint32_t n_clear_waits,
 		uint64_t start_ms)
 {
-	if (n_expired_records != 0) {
-		cf_atomic64_add(&ns->n_expired_objects, n_expired_records);
+	if (n_expired_objects != 0) {
+		cf_atomic64_add(&ns->n_expired_objects, n_expired_objects);
 	}
 
-	if (n_evicted_records != 0) {
+	if (n_evicted_objects != 0) {
 		cf_atomic64_set(&ns->evict_ttl, evict_ttl);
-		cf_atomic64_add(&ns->n_evicted_objects, n_evicted_records);
-	}
-
-	if (n_deleted_set_records != 0) {
-		cf_atomic64_add(&ns->n_deleted_set_objects, n_deleted_set_records);
+		cf_atomic64_add(&ns->n_evicted_objects, n_evicted_objects);
 	}
 
 	ns->non_expirable_objects = n_0_void_time;
@@ -1099,14 +954,14 @@ update_stats(as_namespace* ns, uint64_t n_master, uint64_t n_0_void_time,
 	ns->nsup_cycle_duration = (uint32_t)(total_duration_ms / 1000);
 	ns->nsup_cycle_sleep_pct = total_duration_ms == 0 ? 0 : (uint32_t)((n_general_waits * 100) / total_duration_ms);
 
-	cf_info(AS_NSUP, "{%s} Records: %lu, %lu 0-vt, "
-			"%lu(%lu) expired, %lu(%lu) evicted, "
-			"%lu(%lu) set deletes. "
-			"Evict ttl: %d. Waits: %u,%u,%u. Total time: %lu ms",
-			ns->name, n_master, n_0_void_time,
-			n_expired_records, ns->n_expired_objects, n_evicted_records, ns->n_evicted_objects,
-			n_deleted_set_records, ns->n_deleted_set_objects,
-			evict_ttl, n_set_waits, n_clear_waits, n_general_waits, total_duration_ms);
+	cf_info(AS_NSUP, "{%s} nsup-done: master-objects (%lu,%lu) expired (%lu,%lu) evicted (%lu,%lu) evict-ttl %d waits (%u,%u) total-ms %lu",
+			ns->name,
+			n_master, n_0_void_time,
+			ns->n_expired_objects, n_expired_objects,
+			ns->n_expired_objects, n_evicted_objects,
+			evict_ttl,
+			n_general_waits, n_clear_waits,
+			total_duration_ms);
 }
 
 //------------------------------------------------
@@ -1174,11 +1029,11 @@ thr_nsup(void *arg)
 
 		// Iterate over every namespace.
 		for (int i = 0; i < g_config.n_namespaces; i++) {
-			uint64_t start_ms = cf_getms();
-
 			as_namespace *ns = g_config.namespaces[i];
 
-			cf_info(AS_NSUP, "{%s} nsup start", ns->name);
+			uint64_t start_ms = cf_getms();
+
+			cf_info(AS_NSUP, "{%s} nsup-start", ns->name);
 
 			linear_hist_clear(ns->obj_size_hist, 0, cf_atomic32_get(ns->obj_size_hist_max));
 
@@ -1192,20 +1047,15 @@ thr_nsup(void *arg)
 
 			uint64_t n_expired_records = 0;
 			uint64_t n_0_void_time_records = 0;
-			uint64_t n_deleted_set_records = 0;
-			uint32_t n_set_waits = 0;
 
 			uint32_t num_sets = cf_vmapx_count(ns->p_sets_vmap);
 
 			bool sets_protected = false;
-			bool do_set_deletion = false;
 
-			// Giving these max possible size to spare us checking each record's
+			// Giving this max possible size to spare us checking each record's
 			// set-id during index reduce.
-			bool sets_deleting[AS_SET_MAX_COUNT + 1];
 			bool sets_not_evicting[AS_SET_MAX_COUNT + 1];
 
-			memset(sets_deleting, 0, sizeof(sets_deleting));
 			memset(sets_not_evicting, 0, sizeof(sets_not_evicting));
 
 			for (uint32_t j = 0; j < num_sets; j++) {
@@ -1224,47 +1074,6 @@ thr_nsup(void *arg)
 					sets_not_evicting[set_id] = true;
 					sets_protected = true;
 				}
-
-				if (IS_SET_DELETED(p_set)) {
-					if (cf_atomic64_get(p_set->n_objects) != 0) {
-						sets_deleting[set_id] = true;
-						do_set_deletion = true;
-
-						cf_info(AS_NSUP, "{%s} deleting set %s", ns->name, p_set->name);
-						continue;
-					}
-
-					// Starts a detached thread which clears all sindex entries
-					// for this set, then switches off the set's 'deleted' flag.
-					as_sindex_initiate_set_delete(ns, p_set);
-				}
-			}
-
-			if (do_set_deletion) {
-				sets_delete_info cb_info;
-
-				memset(&cb_info, 0, sizeof(cb_info));
-				cb_info.ns = ns;
-				cb_info.now = now;
-				cb_info.sets_deleting = sets_deleting;
-
-				// Reduce master partitions, doing set deletion and general
-				// expiration.
-				reduce_master_partitions(ns, sets_delete_reduce_cb, &cb_info, &n_set_waits, "sets-delete");
-
-				n_deleted_set_records = cb_info.num_deleted;
-				n_expired_records = cb_info.num_expired;
-				n_0_void_time_records = cb_info.num_0_void_time;
-			}
-
-			// Wait for delete queue to clear, to reduce the chance we'll need
-			// to do general eviction.
-
-			uint32_t n_clear_waits = 0;
-
-			while (cf_queue_sz(g_p_nsup_delete_q) > 0) {
-				usleep(DELETE_Q_CLEAR_SLEEP_us);
-				n_clear_waits++;
 			}
 
 			uint64_t n_evicted_records = 0;
@@ -1342,9 +1151,8 @@ thr_nsup(void *arg)
 				// For now there's no get_info() call for evict_hist.
 				//linear_hist_save_info(ns->evict_hist);
 			}
-			else if (! do_set_deletion) {
-				// Eviction is not necessary, only expiration. (But if set
-				// deletion was done, expiration has already been done.)
+			else {
+				// Eviction is not necessary, only expiration.
 
 				expire_info cb_info;
 
@@ -1373,31 +1181,22 @@ thr_nsup(void *arg)
 				linear_hist_save_info(ns->set_ttl_hists[set_id]);
 			}
 
-			update_stats(ns, linear_hist_get_total(ns->ttl_hist) + n_0_void_time_records, n_0_void_time_records,
-					n_expired_records, n_evicted_records, n_deleted_set_records,
-					evict_ttl, n_set_waits, n_clear_waits, n_general_waits,
-					start_ms);
+			// Wait for delete queue to clear.
+			uint32_t n_clear_waits = 0;
 
-			// Delete non-master records from set(s) being deleted.
-			if (do_set_deletion && g_config.non_master_sets_delete) {
-				non_master_sets_delete(ns, sets_deleting);
+			while (cf_queue_sz(g_p_nsup_delete_q) > 0) {
+				usleep(DELETE_Q_CLEAR_SLEEP_us);
+				n_clear_waits++;
 			}
+
+			update_stats(ns, linear_hist_get_total(ns->ttl_hist) + n_0_void_time_records, n_0_void_time_records,
+					n_expired_records, n_evicted_records, evict_ttl,
+					n_general_waits, n_clear_waits, start_ms);
 
 			// Garbage-collect long-expired proles, one partition per loop.
 			if (g_config.prole_extra_ttl != 0) {
 				prole_pids[i] = garbage_collect_next_prole_partition(ns, prole_pids[i]);
 			}
-		}
-
-		uint32_t n_clear_waits = 0;
-
-		while (cf_queue_sz(g_p_nsup_delete_q) > 0) {
-			usleep(DELETE_Q_CLEAR_SLEEP_us);
-			n_clear_waits++;
-		}
-
-		if (n_clear_waits) {
-			cf_info(AS_NSUP, "nsup clear waits: %u", n_clear_waits);
 		}
 	}
 

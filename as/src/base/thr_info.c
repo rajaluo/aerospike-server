@@ -1797,7 +1797,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
 	info_append_int(db, "max-msgs-per-type", (int)g_config.max_msgs_per_type);
 	info_append_uint32(db, "prole-extra-ttl", g_config.prole_extra_ttl);
-	info_append_bool(db, "non-master-sets-delete", g_config.non_master_sets_delete); // dynamic only
 }
 
 static void
@@ -2318,18 +2317,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			else
 				goto Error;
 		}
-		else if (0 == as_info_parameter_get(params, "non-master-sets-delete", context, &context_len)) {
-			if (strncmp(context, "true", 4) == 0 || strncmp(context, "yes", 3) == 0) {
-				cf_info(AS_INFO, "Changing value of non-master-sets-delete from %s to %s", bool_val[g_config.non_master_sets_delete], context);
-				g_config.non_master_sets_delete = true;
-			}
-			else if (strncmp(context, "false", 5) == 0 || strncmp(context, "no", 2) == 0) {
-				cf_info(AS_INFO, "Changing value of non-master-sets-delete from %s to %s", bool_val[g_config.non_master_sets_delete], context);
-				g_config.non_master_sets_delete = false;
-			}
-			else
-				goto Error;
-		}
 		else if (0 == as_info_parameter_get(params, "prole-extra-ttl", context, &context_len)) {
 			if (0 != cf_str_atoi(context, &val)) {
 				goto Error;
@@ -2798,19 +2785,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				uint64_t val = atoll(context);
 				cf_info(AS_INFO, "Changing value of set-stop-writes-count of ns %s set %s to %lu", ns->name, p_set->name, val);
 				cf_atomic64_set(&p_set->stop_writes_count, val);
-			}
-			else if (0 == as_info_parameter_get(params, "set-delete", context, &context_len)) {
-				if ((strncmp(context, "true", 4) == 0) || (strncmp(context, "yes", 3) == 0)) {
-					cf_info(AS_INFO, "Changing value of set-delete of ns %s set %s to %s", ns->name, p_set->name, context);
-					SET_DELETED_ON(p_set);
-				}
-				else if ((strncmp(context, "false", 5) == 0) || (strncmp(context, "no", 2) == 0)) {
-					cf_info(AS_INFO, "Changing value of set-delete of ns %s set %s to %s", ns->name, p_set->name, context);
-					SET_DELETED_OFF(p_set);
-				}
-				else {
-					goto Error;
-				}
 			}
 			else {
 				goto Error;
@@ -5744,7 +5718,6 @@ info_get_namespace_info(as_namespace *ns, cf_dyn_buf *db)
 	info_append_uint64(db, "non_expirable_objects", ns->non_expirable_objects);
 	info_append_uint64(db, "expired_objects", ns->n_expired_objects);
 	info_append_uint64(db, "evicted_objects", ns->n_evicted_objects);
-	info_append_uint64(db, "set_deleted_objects", ns->n_deleted_set_objects);
 	info_append_uint64(db, "evict_ttl", ns->evict_ttl);
 	info_append_uint32(db, "nsup_cycle_duration", ns->nsup_cycle_duration);
 	info_append_uint32(db, "nsup_cycle_sleep_pct", ns->nsup_cycle_sleep_pct);
