@@ -75,6 +75,7 @@ const xdr_cfg_opt XDR_OPTS[] = {
 		{ "xdr-read-batch-size",			XDR_CASE_XDR_READ_BATCH_SIZE },				// deprecated (3.8.0)
 		{ "xdr-ship-delay",					XDR_CASE_XDR_SHIP_DELAY },					// hidden
 		{ "xdr-read-threads",				XDR_CASE_XDR_READ_THREADS},
+		{ "xdr-digestlog-iowait-ms",		XDR_CASE_XDR_DLOG_IOWAIT_MS},
 		{ "}",								XDR_CASE_CONTEXT_END }
 };
 
@@ -140,4 +141,5 @@ void xdr_config_defaults(xdr_config *c)
 	c->xdr_compression_threshold = 0; 	// 0 disables compressed shipping, > 0 specifies minimum request size for compression
 	c->xdr_handle_failednode = true;
 	c->xdr_handle_linkdown = true;
+	c->xdr_dlog_iowait_ms = 500;
 }

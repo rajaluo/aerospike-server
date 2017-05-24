@@ -92,6 +92,7 @@ typedef enum {
 	XDR_CASE_XDR_COMPRESSION_THRESHOLD,
 	XDR_CASE_XDR_SHIP_DELAY,
 	XDR_CASE_XDR_READ_THREADS,
+	XDR_CASE_XDR_DLOG_IOWAIT_MS,
 
 	// Security options:
 	XDR_CASE_SEC_CREDENTIALS_BEGIN,
@@ -187,6 +188,7 @@ typedef struct xdr_config {
 	int		xdr_compression_threshold;
 	bool	xdr_handle_failednode;
 	bool	xdr_handle_linkdown;
+	int		xdr_dlog_iowait_ms;
 } xdr_config;
 
 // XDR states
