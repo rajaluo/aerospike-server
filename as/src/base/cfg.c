@@ -701,6 +701,7 @@ typedef enum {
 	CASE_XDR_CLIENT_THREADS,
 	CASE_XDR_COMPRESSION_THRESHOLD,
 	CASE_XDR_DELETE_SHIPPING_ENABLED,
+	CASE_XDR_DIGESTLOG_IOWAIT_MS,
 	CASE_XDR_FORWARD_XDR_WRITES,
 	CASE_XDR_HOTKEY_TIME_MS,
 	CASE_XDR_INFO_PORT,
@@ -1221,6 +1222,7 @@ const cfg_opt XDR_OPTS[] = {
 		{ "xdr-client-threads",				CASE_XDR_CLIENT_THREADS },
 		{ "xdr-compression-threshold",		CASE_XDR_COMPRESSION_THRESHOLD },
 		{ "xdr-delete-shipping-enabled",	CASE_XDR_DELETE_SHIPPING_ENABLED },
+		{ "xdr-digestlog-iowait-ms",		CASE_XDR_DIGESTLOG_IOWAIT_MS },
 		{ "forward-xdr-writes",				CASE_XDR_FORWARD_XDR_WRITES },
 		{ "xdr-hotkey-time-ms",				CASE_XDR_HOTKEY_TIME_MS },
 		{ "xdr-info-port",					CASE_XDR_INFO_PORT },
@@ -3500,6 +3502,9 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DELETE_SHIPPING_ENABLED:
 				g_xcfg.xdr_delete_shipping_enabled = cfg_bool(&line);
+				break;
+			case CASE_XDR_DIGESTLOG_IOWAIT_MS:
+				g_xcfg.xdr_digestlog_iowait_ms = cfg_u32_no_checks(&line);
 				break;
 			case CASE_XDR_FORWARD_XDR_WRITES:
 				g_xcfg.xdr_forward_xdrwrites = cfg_bool(&line);

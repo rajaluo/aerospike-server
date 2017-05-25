@@ -81,6 +81,7 @@ typedef struct xdr_config_s {
 	uint32_t	xdr_internal_shipping_delay;
 	uint32_t	xdr_info_request_timeout_ms;
 	uint32_t	xdr_compression_threshold;
+	uint32_t	xdr_digestlog_iowait_ms;
 
 	bool		xdr_shipping_enabled;
 	bool		xdr_delete_shipping_enabled;
