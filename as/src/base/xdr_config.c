@@ -52,6 +52,7 @@ void xdr_config_defaults()
 	c->xdr_compression_threshold = 0; 	// 0 disables compressed shipping, > 0 specifies minimum request size for compression
 	c->xdr_handle_failednode = true;
 	c->xdr_handle_linkdown = true;
+	c->xdr_digestlog_iowait_ms = 500;
 
 	for (uint32_t index = 0; index < DC_MAX_NUM; index++) {
 		g_dc_xcfg_opt[index].dc_name = NULL;
