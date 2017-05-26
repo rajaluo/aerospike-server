@@ -2633,14 +2633,14 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			as_hb_override_mtu_set(val);
 		}
 		else if (0 == as_info_parameter_get(params, "heartbeat.protocol", context, &context_len)) {
-			as_hb_protocol protocol = (!strcmp(context, "v1") ? AS_HB_PROTOCOL_V1 :
-										 (!strcmp(context, "v2") ? AS_HB_PROTOCOL_V2 :
-										  (!strcmp(context, "v3") ? AS_HB_PROTOCOL_V3 :
-										  (!strcmp(context, "reset") ? AS_HB_PROTOCOL_RESET :
-										   (!strcmp(context, "none") ? AS_HB_PROTOCOL_NONE :
-											AS_HB_PROTOCOL_UNDEF)))));
-			if (AS_HB_PROTOCOL_UNDEF == protocol)
+			as_hb_protocol protocol =	(!strcmp(context, "v3") ? AS_HB_PROTOCOL_V3 :
+											(!strcmp(context, "reset") ? AS_HB_PROTOCOL_RESET :
+												(!strcmp(context, "none") ? AS_HB_PROTOCOL_NONE :
+													AS_HB_PROTOCOL_UNDEF)));
+			if (AS_HB_PROTOCOL_UNDEF == protocol) {
+				cf_warning(AS_INFO, "heartbeat protocol version %s not supported", context);
 				goto Error;
+			}
 			cf_info(AS_INFO, "Changing value of heartbeat protocol version to %s", context);
 			if (0 > as_hb_protocol_set(protocol))
 				goto Error;

@@ -463,8 +463,6 @@ typedef enum {
 
 	// Network heartbeat protocol options (value tokens):
 	CASE_NETWORK_HEARTBEAT_PROTOCOL_NONE,
-	CASE_NETWORK_HEARTBEAT_PROTOCOL_V1,
-	CASE_NETWORK_HEARTBEAT_PROTOCOL_V2,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL_V3,
 
 	// Network fabric options:
@@ -948,8 +946,6 @@ const cfg_opt NETWORK_HEARTBEAT_MODE_OPTS[] = {
 
 const cfg_opt NETWORK_HEARTBEAT_PROTOCOL_OPTS[] = {
 		{ "none",							CASE_NETWORK_HEARTBEAT_PROTOCOL_NONE },
-		{ "v1",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V1 },
-		{ "v2",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V2 },
 		{ "v3",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V3}
 };
 
@@ -2623,12 +2619,6 @@ as_config_init(const char* config_file)
 				switch (cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_PROTOCOL_OPTS, NUM_NETWORK_HEARTBEAT_PROTOCOL_OPTS)) {
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_NONE:
 					c->hb_config.protocol = AS_HB_PROTOCOL_NONE;
-					break;
-				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V1:
-					c->hb_config.protocol = AS_HB_PROTOCOL_V1;
-					break;
-				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V2:
-					c->hb_config.protocol = AS_HB_PROTOCOL_V2;
 					break;
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V3:
 					c->hb_config.protocol = AS_HB_PROTOCOL_V3;
