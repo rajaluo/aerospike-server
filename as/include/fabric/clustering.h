@@ -153,6 +153,15 @@ void
 as_clustering_stop();
 
 /**
+ * Reform the cluster with the same succession list.This would trigger the
+ * generation of new partition info and the cluster would get a new cluster key.
+ *
+ * @return 0 if new clustering round started, -1 otherwise.
+ */
+int
+as_clustering_cluster_reform();
+
+/**
  * Return the quantum interval, i.e., the interval at which cluster change
  * decisions are taken. The unit is milliseconds.
  */
