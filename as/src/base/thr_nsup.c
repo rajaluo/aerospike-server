@@ -958,7 +958,7 @@ update_stats(as_namespace* ns, uint64_t n_master, uint64_t n_0_void_time,
 			ns->name,
 			n_master, n_0_void_time,
 			ns->n_expired_objects, n_expired_objects,
-			ns->n_expired_objects, n_evicted_objects,
+			ns->n_evicted_objects, n_evicted_objects,
 			evict_ttl,
 			n_general_waits, n_clear_waits,
 			total_duration_ms);
