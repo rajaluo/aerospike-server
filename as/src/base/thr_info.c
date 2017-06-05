@@ -1749,7 +1749,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
 	info_append_uint32(db, "nsup-period", g_config.nsup_period);
 	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
-	info_append_uint64(db, "paxos-max-cluster-size", g_config.paxos_max_cluster_size);
 	info_append_string(db, "paxos-protocol", "v5"); // until tests catch up
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
@@ -2252,14 +2251,6 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 				goto Error;
 			cf_info(AS_INFO, "Changing value of nsup-period from %d to %d ", g_config.nsup_period, val);
 			g_config.nsup_period = val;
-		}
-		else if (0 == as_info_parameter_get(params, "paxos-max-cluster-size", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val) || (1 > val) ||
-				(val > AS_CLUSTER_SZ) ||
-				!as_hb_max_cluster_size_isvalid(val))
-				goto Error;
-			cf_info(AS_INFO, "Changing value of paxos-max-cluster-size from %d to %d ", g_config.paxos_max_cluster_size, val);
-			g_config.paxos_max_cluster_size = val;
 		}
 		else if (0 == as_info_parameter_get( params, "cluster-name", context, &context_len)){
 			if (!as_config_cluster_name_set(context)) {

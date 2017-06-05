@@ -118,7 +118,7 @@ typedef struct as_config_s {
 	uint32_t		nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
 	uint32_t		nsup_period;
 	PAD_BOOL		nsup_startup_evict;
-	uint32_t		paxos_max_cluster_size;
+	uint32_t		paxos_max_cluster_size; // TODO - has been deprecated - clean up
 	int				proto_fd_idle_ms; // after this many milliseconds, connections are aborted unless transaction is in progress
 	int				proto_slow_netio_sleep_ms; // dynamic only
 	uint32_t		query_bsize;

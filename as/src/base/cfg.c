@@ -149,7 +149,7 @@ cfg_set_defaults()
 	c->nsup_delete_sleep = 100; // 100 microseconds means a delete rate of 10k TPS
 	c->nsup_period = 120; // run nsup once every 2 minutes
 	c->nsup_startup_evict = true;
-	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // default the maximum cluster size to a "reasonable" value
+	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // TODO - has been deprecated - clean up
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
@@ -287,7 +287,6 @@ typedef enum {
 	CASE_SERVICE_NSUP_DELETE_SLEEP,
 	CASE_SERVICE_NSUP_PERIOD,
 	CASE_SERVICE_NSUP_STARTUP_EVICT,
-	CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE,
 	CASE_SERVICE_PROTO_FD_IDLE_MS,
 	CASE_SERVICE_QUERY_BATCH_SIZE,
 	CASE_SERVICE_QUERY_BUFPOOL_SIZE,
@@ -363,6 +362,7 @@ typedef enum {
 	CASE_SERVICE_NSUP_REDUCE_PRIORITY,
 	CASE_SERVICE_NSUP_REDUCE_SLEEP,
 	CASE_SERVICE_NSUP_THREADS,
+	CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE,
 	CASE_SERVICE_PAXOS_PROTOCOL,
 	CASE_SERVICE_PAXOS_RECOVERY_POLICY,
 	CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD,
@@ -768,7 +768,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-delete-sleep",				CASE_SERVICE_NSUP_DELETE_SLEEP },
 		{ "nsup-period",					CASE_SERVICE_NSUP_PERIOD },
 		{ "nsup-startup-evict",				CASE_SERVICE_NSUP_STARTUP_EVICT },
-		{ "paxos-max-cluster-size",			CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE },
 		{ "proto-fd-idle-ms",				CASE_SERVICE_PROTO_FD_IDLE_MS },
 		{ "query-batch-size",				CASE_SERVICE_QUERY_BATCH_SIZE },
 		{ "query-bufpool-size",				CASE_SERVICE_QUERY_BUFPOOL_SIZE },
@@ -841,6 +840,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "nsup-reduce-priority",			CASE_SERVICE_NSUP_REDUCE_PRIORITY },
 		{ "nsup-reduce-sleep",				CASE_SERVICE_NSUP_REDUCE_SLEEP },
 		{ "nsup-threads",					CASE_SERVICE_NSUP_THREADS },
+		{ "paxos-max-cluster-size",			CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE },
 		{ "paxos-protocol",					CASE_SERVICE_PAXOS_PROTOCOL },
 		{ "paxos-recovery-policy",			CASE_SERVICE_PAXOS_RECOVERY_POLICY },
 		{ "paxos-retransmit-period",		CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD },
@@ -2172,9 +2172,6 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NSUP_STARTUP_EVICT:
 				c->nsup_startup_evict = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE:
-				c->paxos_max_cluster_size = cfg_u64(&line, 1, AS_CLUSTER_SZ);
-				break;
 			case CASE_SERVICE_PROTO_FD_IDLE_MS:
 				c->proto_fd_idle_ms = cfg_int_no_checks(&line);
 				break;
@@ -2328,6 +2325,7 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_NSUP_REDUCE_PRIORITY:
 			case CASE_SERVICE_NSUP_REDUCE_SLEEP:
 			case CASE_SERVICE_NSUP_THREADS:
+			case CASE_SERVICE_PAXOS_MAX_CLUSTER_SIZE:
 			case CASE_SERVICE_PAXOS_PROTOCOL:
 			case CASE_SERVICE_PAXOS_RECOVERY_POLICY:
 			case CASE_SERVICE_PAXOS_RETRANSMIT_PERIOD:
