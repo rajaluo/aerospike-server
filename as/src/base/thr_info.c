@@ -6500,8 +6500,9 @@ int info_command_sindex_create(char *name, char *params, cf_dyn_buf *db)
 	res = as_sindex_create_check_params(ns, &imd);
 
 	if (res == AS_SINDEX_ERR_FOUND) {
-		cf_warning(AS_INFO, "SINDEX CREATE : Index with the same index defn already exists or bin has "
-				"already been indexed.");
+		cf_warning(AS_INFO, "SINDEX CREATE: Index already exists on namespace '%s', either with same name '%s' or same bin '%s' / type '%s' combination.",
+				imd.ns_name, imd.iname, imd.bname,                              
+				as_sindex_ktype_str(imd.sktype));                       
 		INFO_COMMAND_SINDEX_FAILCODE(AS_PROTO_RESULT_FAIL_INDEX_FOUND,
 				"Index with the same name already exists or this bin has already been indexed.");
 		goto ERR;
