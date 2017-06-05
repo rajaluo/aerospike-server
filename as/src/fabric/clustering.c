@@ -7381,7 +7381,7 @@ clustering_cluster_reform()
 			|| cf_vector_size(dead_nodes) > 0
 			|| cf_vector_size(faulty_nodes) > 0
 			|| cf_vector_size(new_nodes) > 0) {
-		WARNING(
+		INFO(
 				"cluster reformation skipped - principal:%s, dead_nodes:%d, faulty_nodes:%d, new_nodes:%d",
 				clustering_is_principal() ? "true" : "false",
 				cf_vector_size(dead_nodes), cf_vector_size(faulty_nodes),
