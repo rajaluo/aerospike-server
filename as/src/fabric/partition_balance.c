@@ -282,11 +282,7 @@ as_partition_balance_init()
 
 			as_storage_info_get(ns, pid, &version);
 
-			if (as_partition_version_is_null(&version)) {
-				// Stores the length, even when the version is zeroed.
-				set_partition_version_in_storage(ns, pid, &ZERO_VERSION, false);
-			}
-			else {
+			if (! as_partition_version_is_null(&version)) {
 				as_partition* p = &ns->partitions[pid];
 
 				p->n_replicas = 1;
@@ -299,10 +295,6 @@ as_partition_balance_init()
 
 				n_stored++;
 			}
-		}
-
-		if (n_stored < AS_PARTITIONS) {
-			as_storage_info_flush(ns);
 		}
 
 		cf_info(AS_PARTITION, "{%s} %u partitions: found %u absent, %u stored",
@@ -854,6 +846,11 @@ fill_global_tables()
 void
 balance_namespace(as_namespace* ns, cf_queue* mq)
 {
+	if (ns->cluster_size != g_cluster_size) {
+		cf_info(AS_PARTITION, "{%s} is on %u of %u nodes", ns->name,
+				ns->cluster_size, g_cluster_size);
+	}
+
 	// Figure out effective replication factor in the face of node failures.
 	apply_single_replica_limit(ns);
 
@@ -869,9 +866,6 @@ balance_namespace(as_namespace* ns, cf_queue* mq)
 	int translation[ns_not_equal_global ? g_cluster_size : 0];
 
 	if (ns_not_equal_global) {
-		cf_info(AS_PARTITION, "{%s} is on %u of %u nodes", ns->name,
-				ns->cluster_size, g_cluster_size);
-
 		fill_translation(translation, ns);
 	}
 
@@ -1364,18 +1358,6 @@ advance_version(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 		uint32_t self_n, uint32_t working_master_n, uint32_t n_dupl,
 		const cf_node dupls[])
 {
-	// Fill family versions.
-
-	uint32_t max_n_families = p->n_replicas + 1;
-
-	if (max_n_families > AS_PARTITION_N_FAMILIES) {
-		max_n_families = AS_PARTITION_N_FAMILIES;
-	}
-
-	as_partition_version family_versions[max_n_families];
-	uint32_t n_families = fill_family_versions(p, ns_sl_ix, ns,
-			working_master_n, n_dupl, dupls, family_versions);
-
 	// Advance working master.
 	if (self_n == working_master_n) {
 		p->version.ckey = p->final_version.ckey;
@@ -1389,9 +1371,10 @@ advance_version(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 
 	p->version.master = 0;
 
+	bool self_is_versionless = as_partition_version_is_null(&p->version);
+
 	// Advance eventual master.
 	if (self_n == 0) {
-		bool self_is_versionless = as_partition_version_is_null(&p->version);
 		bool was_subset = p->version.subset == 1;
 
 		p->version.ckey = p->final_version.ckey;
@@ -1406,23 +1389,41 @@ advance_version(as_partition* p, const sl_ix_t* ns_sl_ix, as_namespace* ns,
 		return;
 	}
 
-	// Advance non-masters ...
-
-	uint32_t family = find_family(&p->version, n_families, family_versions);
-
-	// ... proles ...
-	if (self_n < p->n_replicas) {
-		bool self_is_versionless = as_partition_version_is_null(&p->version);
-
-		p->version.ckey = p->final_version.ckey;
-		p->version.family = family;
-
-		if (self_is_versionless) {
+	// Advance version-less proles and non-replicas (common case).
+	if (self_is_versionless) {
+		if (self_n < p->n_replicas) {
+			p->version.ckey = p->final_version.ckey;
 			p->version.family = 0;
 			p->version.subset = 1;
 			p->version.evade = 1;
 		}
-		else if (n_dupl != 0 && p->version.family == 0) {
+		// else - non-replicas remain version-less.
+
+		return;
+	}
+
+	// Fill family versions.
+
+	uint32_t max_n_families = p->n_replicas + 1;
+
+	if (max_n_families > AS_PARTITION_N_FAMILIES) {
+		max_n_families = AS_PARTITION_N_FAMILIES;
+	}
+
+	as_partition_version family_versions[max_n_families];
+	uint32_t n_families = fill_family_versions(p, ns_sl_ix, ns,
+			working_master_n, n_dupl, dupls, family_versions);
+
+	uint32_t family = find_family(&p->version, n_families, family_versions);
+
+	// Advance non-masters with prior versions ...
+
+	// ... proles ...
+	if (self_n < p->n_replicas) {
+		p->version.ckey = p->final_version.ckey;
+		p->version.family = family;
+
+		if (n_dupl != 0 && p->version.family == 0) {
 			p->version.subset = 1;
 		}
 		// else - don't change either subset or evade flag.

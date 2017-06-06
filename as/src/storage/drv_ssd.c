@@ -98,7 +98,7 @@ extern bool as_cold_start_evict_if_needed(as_namespace* ns);
 
 // Info slice in device header block.
 typedef struct info_buf_s {
-	uint32_t len; // set, but never read
+	uint32_t unused; // used to be len, but was never read
 	as_partition_version version;
 } __attribute__ ((__packed__)) info_buf;
 
@@ -4215,7 +4215,7 @@ as_storage_info_set_ssd(as_namespace *ns, uint32_t pid,
 	info_buf *b = (info_buf*)
 			(ssds->header->info_data + (SSD_HEADER_INFO_STRIDE * pid));
 
-	b->len = (uint32_t)sizeof(as_partition_version);
+	b->unused = 0;
 	b->version = *version;
 }
 
