@@ -3548,9 +3548,7 @@ as_config_post_process(as_config* c, const char* config_file)
 	// Setup performance metrics histograms.
 	cfg_create_all_histograms();
 
-	cf_ip_addr rack_addr;
-
-	if (cf_node_id_get(c->fabric.bind_port, c->node_id_interface, &c->self_node, &rack_addr) < 0) {
+	if (cf_node_id_get(c->fabric.bind_port, c->node_id_interface, &c->self_node) < 0) {
 		cf_crash_nostack(AS_CFG, "could not get node id");
 	}
 
