@@ -4383,7 +4383,7 @@ paxos_result_log(as_paxos_start_result result, cf_vector* new_succession_list)
 	}
 
 	case AS_PAXOS_RESULT_CLUSTER_TOO_SMALL: {
-		INFO(
+		WARNING(
 				"paxos round aborted - new cluster size %d less than min cluster size %d",
 				cf_vector_size(new_succession_list),
 				g_config.clustering_config.cluster_size_min);
@@ -6524,7 +6524,7 @@ clustering_principal_quantum_interval_start_handle()
 	log_cf_node_vector("faulty nodes at quantum start:", faulty_nodes,
 			cf_vector_size(faulty_nodes) > 0 ? CF_INFO : CF_DEBUG);
 
-	// Having dead node or faulty nodes is a singn of cluster integrity breach.
+	// Having dead node or faulty nodes is a sign of cluster integrity breach.
 	// New nodes should not count as integrity breach.
 	g_clustering.has_integrity = cf_vector_size(faulty_nodes) == 0
 			&& cf_vector_size(dead_nodes) == 0;
@@ -7349,6 +7349,79 @@ clustering_hb_event_listener(int n_events, as_hb_event_node* hb_node_events,
 }
 
 /**
+ * Reform the cluster with the same succession list.This would trigger the
+ * generation of new partition info and the cluster would get a new cluster key.
+ *
+ * @return 0 if new clustering round started, -1 otherwise.
+ */
+static int
+clustering_cluster_reform()
+{
+	int rv = -1;
+	CLUSTERING_LOCK();
+
+	cf_vector* dead_nodes = vector_stack_lockless_create(cf_node);
+	clustering_dead_nodes_find(dead_nodes);
+
+	log_cf_node_vector("dead nodes before reformation:", dead_nodes,
+			cf_vector_size(dead_nodes) > 0 ? CF_INFO : CF_DEBUG);
+
+	cf_vector* faulty_nodes = vector_stack_lockless_create(cf_node);
+	clustering_faulty_nodes_find(faulty_nodes);
+
+	log_cf_node_vector("faulty nodes before reformation:", faulty_nodes,
+			cf_vector_size(faulty_nodes) > 0 ? CF_INFO : CF_DEBUG);
+
+	cf_vector* new_nodes = vector_stack_lockless_create(cf_node);
+	clustering_nodes_to_add_get(new_nodes);
+	log_cf_node_vector("join requests before reformation:", new_nodes,
+			cf_vector_size(new_nodes) > 0 ? CF_INFO : CF_DEBUG);
+
+	if (!clustering_is_running() || !clustering_is_principal()
+			|| cf_vector_size(dead_nodes) > 0
+			|| cf_vector_size(faulty_nodes) > 0
+			|| cf_vector_size(new_nodes) > 0) {
+		INFO(
+				"cluster reformation skipped - principal:%s, dead_nodes:%d, faulty_nodes:%d, new_nodes:%d",
+				clustering_is_principal() ? "true" : "false",
+				cf_vector_size(dead_nodes), cf_vector_size(faulty_nodes),
+				cf_vector_size(new_nodes));
+		goto Exit;
+	}
+
+	cf_vector* succession_list = vector_stack_lockless_create(cf_node);
+	vector_copy(succession_list, &g_register.succession_list);
+
+	log_cf_node_vector(
+			"principal node - reforming new cluster with succession list:",
+			succession_list, CF_INFO);
+
+	as_paxos_start_result result = paxos_proposer_proposal_start(
+			succession_list, succession_list);
+
+	// Log paxos result.
+	paxos_result_log(result, succession_list);
+
+	rv = (result == AS_PAXOS_RESULT_STARTED) ? 0 : -1;
+
+	if (rv == -1) {
+		INFO("cluster reformation skipped");
+	}
+	else {
+		INFO("cluster reformation triggered...");
+	}
+
+	cf_vector_destroy(succession_list);
+
+Exit:
+	cf_vector_destroy(dead_nodes);
+	cf_vector_destroy(faulty_nodes);
+	cf_vector_destroy(new_nodes);
+	CLUSTERING_UNLOCK();
+	return rv;
+}
+
+/**
  * Initialize clustering subsystem.
  */
 static void
@@ -7631,6 +7704,18 @@ void
 as_clustering_stop()
 {
 	clustering_stop();
+}
+
+/**
+ * Reform the cluster with the same succession list.This would trigger the
+ * generation of new partition info and the cluster would get a new cluster key.
+ *
+ * @return 0 if new clustering round started, -1 otherwise.
+ */
+int
+as_clustering_cluster_reform()
+{
+	return clustering_cluster_reform();
 }
 
 /**
