@@ -32,6 +32,7 @@ void xdr_config_defaults()
 	xdr_config *c = &g_xcfg;
 	memset(c, 0, sizeof(xdr_config));
 
+	c->xdr_section_configured = false;	// Indicates if XDR is configured or not
 	c->xdr_global_enabled = false;		// This config option overrides the enable-xdr setting of the namespace(s)
 	c->xdr_digestlog_path = NULL;		// Path where the digest information is written to the disk
 	c->xdr_info_port = 0;

@@ -2029,6 +2029,7 @@ as_config_init(const char* config_file)
 				cfg_begin_context(&state, SECURITY);
 				break;
 			case CASE_XDR_BEGIN:
+				g_xcfg.xdr_section_configured = true;
 				cfg_enterprise_only(&line);
 				cfg_begin_context(&state, XDR);
 				break;

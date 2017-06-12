@@ -63,7 +63,7 @@ typedef struct xdr_new_config_s {
 // Config option which is maintained both by the server and the XDR module
 typedef struct xdr_config_s {
 
-	// This section is used by both the server and the XDR module
+	bool		xdr_section_configured;
 	bool		xdr_global_enabled;
 
 	// Ring buffer configuration
@@ -90,6 +90,7 @@ typedef struct xdr_config_s {
 	bool		xdr_handle_failednode;
 	bool		xdr_handle_linkdown;
 
+	// Internal
 	bool		xdr_conf_change_flag;
 	xdr_new_config xdr_new_cfg;
 } xdr_config;
