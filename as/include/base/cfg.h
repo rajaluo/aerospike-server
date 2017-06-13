@@ -37,6 +37,7 @@
 #include "aerospike/mod_lua_config.h"
 #include "citrusleaf/cf_atomic.h"
 
+#include "enhanced_alloc.h"
 #include "hardware.h"
 #include "node.h"
 #include "socket.h"
@@ -161,7 +162,7 @@ typedef struct as_config_s {
 
 	// For special debugging or bug-related repair:
 
-	PAD_BOOL		asmalloc_enabled; // whether ASMalloc integration is enabled
+	cf_alloc_debug	debug_allocations; // how to instrument the memory allocation API
 	PAD_BOOL		fabric_dump_msgs; // whether to log information about existing "msg" objects and queues
 	int64_t			max_msgs_per_type; // maximum number of "msg" objects permitted per type
 	uint32_t		prole_extra_ttl; // seconds beyond expiry time after which we garbage collect, 0 for no garbage collection

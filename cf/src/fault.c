@@ -62,7 +62,6 @@ char *cf_fault_context_strings[] = {
 		"alloc",
 		"arenax",
 		"hardware",
-		"jem",
 		"msg",
 		"rbuffer",
 		"socket",

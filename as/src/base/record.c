@@ -698,7 +698,7 @@ as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 		return -1;
 	}
 
-	JEM_SET_NS_ARENA(ns);
+	CF_ALLOC_SET_NS_ARENA(ns);
 
 	bool is_subrec = false;
 

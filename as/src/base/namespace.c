@@ -43,7 +43,6 @@
 #include "dynbuf.h"
 #include "fault.h"
 #include "hist.h"
-#include "jem.h"
 #include "linear_hist.h"
 #include "meminfo.h"
 #include "vmapx.h"
@@ -142,13 +141,11 @@ as_namespace_create(char *name)
 	ns->id = ++g_namespace_id_counter; // note that id is 1-based
 	ns->namehash = cur_namehash;
 
-#ifdef USE_JEM
-	if (-1 == (ns->jem_arena = jem_create_arena())) {
+	if (-1 == (ns->jem_arena = cf_alloc_create_arena())) {
 		cf_crash(AS_NAMESPACE, "can't create JEMalloc arena for namespace %s", name);
 	} else {
 		cf_info(AS_NAMESPACE, "Created JEMalloc arena #%d for namespace \"%s\"", ns->jem_arena, name);
 	}
-#endif
 
 	ns->cold_start = false; // try warm restart unless told not to
 	ns->arena = NULL; // can't create the arena until the configuration has been done

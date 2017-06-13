@@ -18,8 +18,6 @@ LIBRARY = $(LIBRARY_DIR)/libai.a
 
 OBJECTS = $(SOURCES:%.c=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
-MEXP_SOURCES = $(SOURCES:%=$(MEXP_DIR)/%)
-PREPROS = $(OBJECTS:%=%$(PREPRO_SUFFIX))
 
 .PHONY: all
 all: $(LIBRARY)
@@ -28,13 +26,8 @@ all: $(LIBRARY)
 clean:
 	$(RM) $(OBJECTS) $(LIBRARY)
 	$(RM) $(DEPENDENCIES)
-	$(RM) $(MEXP_SOURCES) $(PREPROS)
 
 $(LIBRARY): $(OBJECTS)
-ifneq ($(PREPRO),1)
-  ifneq ($(MEXP_PHASE),1)
 	$(AR) rs $(LIBRARY) $(OBJECTS)
-  endif
-endif
 
 include $(DEPTH)/make_in/Makefile.targets

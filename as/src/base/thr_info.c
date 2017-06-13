@@ -38,6 +38,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "citrusleaf/alloc.h"
 #include "citrusleaf/cf_queue.h"
 #include "citrusleaf/cf_shash.h"
 #include "citrusleaf/cf_vector.h"
@@ -45,15 +46,14 @@
 #include "cf_str.h"
 #include "dynbuf.h"
 #include "fault.h"
-#include "jem.h"
 #include "meminfo.h"
 #include "socket.h"
 
 #include "ai_obj.h"
 #include "ai_btree.h"
 
-#include "base/asm.h"
 #include "base/batch.h"
+#include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
 #include "base/ldt.h"
@@ -148,15 +148,6 @@ msg_template info_mt[] = {
 };
 
 #define INFO_MSG_SCRATCH_SIZE 512
-
-// Is dumping GLibC-level memory stats enabled?
-bool g_mstats_enabled = false;
-
-// Is GLibC-level memory tracing enabled?
-static bool g_mtrace_enabled = false;
-
-// Default location for the memory tracing output:
-#define DEFAULT_MTRACE_FILENAME  "/tmp/mtrace.out"
 
 
 //
@@ -259,12 +250,15 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	size_t active_kbytes;
 	size_t mapped_kbytes;
 	double efficiency_pct;
+	uint32_t site_count;
 
-	cf_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes, &efficiency_pct);
+	cf_alloc_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes, &efficiency_pct,
+			&site_count);
 	info_append_uint64(db, "heap_allocated_kbytes", allocated_kbytes);
 	info_append_uint64(db, "heap_active_kbytes", active_kbytes);
 	info_append_uint64(db, "heap_mapped_kbytes", mapped_kbytes);
 	info_append_int(db, "heap_efficiency_pct", (int)(efficiency_pct + 0.5));
+	info_append_uint32(db, "heap_site_count", site_count);
 
 	info_get_aggregated_namespace_stats(db);
 
@@ -1135,139 +1129,23 @@ info_command_racks(char *name, char *params, cf_dyn_buf *db)
 	return 0;
 }
 
-void
-info_log_with_datestamp(void (*log_fn)(void))
-{
-	char datestamp[1024];
-	struct tm nowtm;
-	time_t now = time(NULL);
-	gmtime_r(&now, &nowtm);
-	strftime(datestamp, sizeof(datestamp), "%b %d %Y %T %Z:\n", &nowtm);
-
-	/* Output the date-stamp followed by the output of the log function. */
-	fprintf(stderr, "%s", datestamp);
-	log_fn();
-	fprintf(stderr, "\n");
-}
-
-int
-info_command_mstats(char *name, char *params, cf_dyn_buf *db)
-{
-	bool enable = false;
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-
-	cf_debug(AS_INFO, "mstats command received: params %s", params);
-
-	/*
-	 *  Command Format:  "mstats:{enable=<opt>}" [the "enable" argument is optional]
-	 *
-	 *   where <opt> is one of:  {"true" | "false"} and by default dumps the memory stats once.
-	 */
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "enable", param_str, &param_str_len)) {
-		if (!strncmp(param_str, "true", 3)) {
-			enable = true;
-		} else if (!strncmp(param_str, "false", 4)) {
-			enable = false;
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"enable\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-
-		if (g_mstats_enabled && !enable) {
-			cf_info(AS_INFO, "mstats:  memory stats disabled");
-			g_mstats_enabled = enable;
-		} else if (!g_mstats_enabled && enable) {
-			cf_info(AS_INFO, "mstats:  memory stats enabled");
-			g_mstats_enabled = enable;
-		}
-	} else {
-		// No parameter supplied -- Just do it once and don't change the enabled state.
-		info_log_with_datestamp(malloc_stats);
-	}
-
-	cf_dyn_buf_append_string(db, "ok");
-
-	return 0;
-}
-
-int
-info_command_mtrace(char *name, char *params, cf_dyn_buf *db)
-{
-	bool enable = false;
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-
-	cf_debug(AS_INFO, "mtrace command received: params %s", params);
-
-	/*
-	 *  Command Format:  "mtrace:{enable=<opt>}" [the "enable" argument is optional]
-	 *
-	 *   where <opt> is one of:  {"true" | "false"} and by default toggles the current state.
-	 */
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "enable", param_str, &param_str_len)) {
-		if (!strncmp(param_str, "true", 3)) {
-			enable = true;
-		} else if (!strncmp(param_str, "false", 4)) {
-			enable = false;
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"enable\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	} else {
-		enable = !g_mtrace_enabled;
-	}
-
-	// Use the default mtrace output file if not already set in the environment.
-	setenv("MALLOC_TRACE", DEFAULT_MTRACE_FILENAME, false);
-	cf_debug(AS_INFO, "mtrace:  MALLOC_TRACE = \"%s\"", getenv("MALLOC_TRACE"));
-
-	if (g_mtrace_enabled && !enable) {
-		cf_info(AS_INFO, "mtrace:  memory tracing disabled");
-		muntrace();
-		g_mtrace_enabled = enable;
-	} else if (!g_mtrace_enabled && enable) {
-		cf_info(AS_INFO, "mtrace:  memory tracing enabled");
-		mtrace();
-		g_mtrace_enabled = enable;
-	}
-
-	cf_dyn_buf_append_string(db, "ok");
-
-	return 0;
-}
-
-#ifdef USE_JEM
-static void
-info_log_jem_stats()
-{
-	jem_log_stats(NULL, NULL);
-}
-#endif
-
 int
 info_command_jem_stats(char *name, char *params, cf_dyn_buf *db)
 {
 	cf_debug(AS_INFO, "jem_stats command received: params %s", params);
 
-#ifdef USE_JEM
 	/*
-	 *	Command Format:	 "jem-stats:{file=<string>;options=<string>}" [the "file" and "options" arguments are optional]
+	 *	Command Format:	 "jem-stats:{file=<string>;options=<string>;sites=<string>}" [the "file", "options", and "sites" arguments are optional]
 	 *
 	 *  Logs the JEMalloc statistics to the console or an optionally-specified file pathname.
 	 *  Options may be a string containing any of the characters "gmablh", as defined by jemalloc(3) man page.
+	 *  The "sites" parameter optionally specifies a file to dump memory accounting information to.
 	 *  [Note:  Any options are only used if an output file is specified.]
 	 */
 
 	char param_str[100];
 	int param_str_len = sizeof(param_str);
-	char *file = NULL, *options = NULL;
+	char *file = NULL, *options = NULL, *sites = NULL;
 
 	param_str[0] = '\0';
 	if (!as_info_parameter_get(params, "file", param_str, &param_str_len)) {
@@ -1280,217 +1158,28 @@ info_command_jem_stats(char *name, char *params, cf_dyn_buf *db)
 		options = cf_strdup(param_str);
 	}
 
+	param_str[0] = '\0';
+	param_str_len = sizeof(param_str);
+	if (!as_info_parameter_get(params, "sites", param_str, &param_str_len)) {
+		sites = cf_strdup(param_str);
+	}
+
+	cf_alloc_log_stats(file, options);
+
 	if (file) {
-		jem_log_stats(file, options);
 		cf_free(file);
-	} else {
-		info_log_with_datestamp(info_log_jem_stats);
 	}
 
 	if (options) {
 		cf_free(options);
 	}
 
-	cf_dyn_buf_append_string(db, "ok");
-#else
-	cf_warning(AS_INFO, "JEMalloc interface not compiled into build ~~ rebuild with \"USE_JEM=1\" to use");
-	cf_dyn_buf_append_string(db, "error");
-#endif
-
-	return 0;
-}
-
-int
-info_command_double_free(char *name, char *params, cf_dyn_buf *db)
-{
-	cf_debug(AS_INFO, "df command received: params %s", params);
-
-#ifdef USE_DF_DETECT
-	/*
-	 *  Purpose:         Do an intentional double "free()" to test Double "free()" Detection.
-	 *
-	 *  Command Format:  "df:"
-	 *
-	 *  This command operates in a 3-cycle to trigger a double "free()" condition:
-	 *
-	 *  - Executing this command the first time will dynamically allocate a small block of memory.
-	 *
-	 *  - Executing this command the second time will free the block.
-	 *
-	 *  - Executing it a third time will actually perform the double "free()" and should trigger
-	 *       the double "free()" detector, which will log an informative warning message.
-	 *
-	 *  - Executing it thereafter will repeat the 3-cycle, albeit using a different pseudo-random block size.
-	 *
-	 *  ***Warning***:  This command is provided *only* for testing abnormal situations.
-	 *                  Do not use it unless you are prepared for the potential consequences!
-	 */
-
-	static size_t block_sz = 1024, incr = 255, max = 2048;
-	static char *ptr = 0;
-	static int ctr = 0;
-
-	if (!ptr) {
-		cf_dyn_buf_append_string(db, "calling cf_""malloc(");
-		cf_dyn_buf_append_int(db, block_sz);
-		cf_dyn_buf_append_string(db, ")");
-		ptr = cf_malloc(block_sz);
-	} else {
-		cf_dyn_buf_append_string(db, "calling cf_""free(0x");
-		cf_dyn_buf_append_uint64_x(db, (uint64_t) ptr);
-		cf_dyn_buf_append_string(db, ")");
-		cf_free(ptr);
-		if (ctr++) {
-			ctr = 0;
-			ptr = 0;
-			block_sz = (block_sz + incr) % max;
-		}
-	}
-#else
-	cf_warning(AS_INFO, "Double \"free()\" Detection support is not compiled into build ~~ rebuild with \"USE_DF_DETECT=1\" to use");
-	cf_dyn_buf_append_string(db, "error");
-#endif
-
-	return 0;
-}
-
-int
-info_command_asm(char *name, char *params, cf_dyn_buf *db)
-{
-	cf_debug(AS_INFO, "asm command received: params %s", params);
-
-#ifdef USE_ASM
-	/*
-	 *  Purpose:         Control the operation of the ASMalloc library.
-	 *
-	 *	Command Format:	 "asm:{enable=<opt>;<thresh>=<int>;features=<feat>;stats}"
-	 *
-	 *   where <opt> is one of:  {"true" | "false"},
-	 *
-	 *   and <thresh> is one of:
-	 *
-	 *      "block_size"     --  Minimum block size in bytes to trigger a mallocation alerts.
-	 *      "delta_size"     --  Minimum size change in bytes between mallocation alerts per thread.
-	 *      "delta_time"     --  Minimum time in seconds between mallocation alerts per thread.
-	 *
-	 *   and <int> is the new integer value for the given threshold (-1 means infinite.)
-	 *
-	 *   and <feat> is a hexadecimal value representing a bit vector of ASMalloc features to enable.
-	 *
-	 *   One or more of: {"enable" | <thresh> | "features"} may be supplied.
-	 */
-
-	bool enable_cmd = false, thresh_cmd = false, features_cmd = false, stats_cmd = false;
-
-	bool enable = false;
-	uint64_t value = 0;
-	uint64_t features = 0;
-
-	char param_str[100];
-	int param_str_len = sizeof(param_str);
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "enable", param_str, &param_str_len)) {
-		enable_cmd = true;
-
-		if (!strncmp(param_str, "true", 3)) {
-			enable = true;
-		} else if (!strncmp(param_str, "false", 4)) {
-			enable = false;
-		} else {
-			cf_warning(AS_INFO, "The \"%s:\" command argument \"enable\" value must be one of {\"true\", \"false\"}, not \"%s\"", name, param_str);
-			cf_dyn_buf_append_string(db, "error");
-			return 0;
-		}
-	}
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "block_size", param_str, &param_str_len)) {
-		thresh_cmd = true;
-
-		if (!strcmp(param_str, "-1")) {
-			value = UINT64_MAX;
-		} else {
-			cf_str_atoi_u64_x(param_str, &value, 10);
-		}
-
-		g_thresh_block_size = value;
-	}
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "delta_size", param_str, &param_str_len)) {
-		thresh_cmd = true;
-
-		if (!strcmp(param_str, "-1")) {
-			value = UINT64_MAX;
-		} else {
-			cf_str_atoi_u64_x(param_str, &value, 10);
-		}
-
-		g_thresh_delta_size = value;
-	}
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "delta_time", param_str, &param_str_len)) {
-		thresh_cmd = true;
-
-		if (!strcmp(param_str, "-1")) {
-			value = UINT64_MAX;
-		} else {
-			cf_str_atoi_u64_x(param_str, &value, 10);
-		}
-
-		g_thresh_delta_time = value;
-	}
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "features", param_str, &param_str_len)) {
-		features_cmd = true;
-		cf_str_atoi_u64_x(param_str, &features, 16);
-	}
-
-	param_str[0] = '\0';
-	if (!as_info_parameter_get(params, "stats", param_str, &param_str_len)) {
-		stats_cmd = true;
-		as_asm_cmd(ASM_CMD_PRINT_STATS);
-	}
-
-	// If we made it this far, actually perform the requested action(s).
-
-	if (enable_cmd) {
-		cf_info(AS_INFO, "asm: setting enable = %s ", (enable ? "true" : "false"));
-
-		g_config.asmalloc_enabled = g_asm_hook_enabled = enable;
-
-		if (enable != g_asm_cb_enabled) {
-			g_asm_cb_enabled = enable;
-			as_asm_cmd(ASM_CMD_SET_CALLBACK, (enable ? my_cb : NULL), (enable ? g_my_cb_udata : NULL));
-		}
-	}
-
-	if (thresh_cmd) {
-		cf_info(AS_INFO, "asm: setting thresholds: block_size = %lu ; delta_size = %lu ; delta_time = %lu",
-				g_thresh_block_size, g_thresh_delta_size, g_thresh_delta_time);
-		as_asm_cmd(ASM_CMD_SET_THRESHOLDS, g_thresh_block_size, g_thresh_delta_size, g_thresh_delta_time);
-	}
-
-	if (features_cmd) {
-		cf_info(AS_INFO, "asm: setting features = 0x%lx ", features);
-		as_asm_cmd(ASM_CMD_SET_FEATURES, features);
-	}
-
-	if (!(enable_cmd || thresh_cmd || features_cmd || stats_cmd)) {
-		cf_warning(AS_INFO, "The \"%s:\" command must contain at least one of {\"enable\", \"features\", \"block_size\", \"delta_size\", \"delta_time\", \"stats\"}, not \"%s\"", name, params);
-		cf_dyn_buf_append_string(db, "error");
-		return 0;
+	if (sites) {
+		cf_alloc_log_site_infos(sites);
+		cf_free(sites);
 	}
 
 	cf_dyn_buf_append_string(db, "ok");
-#else
-	cf_warning(AS_INFO, "ASMalloc support is not compiled into build ~~ rebuild with \"USE_ASM=1\" to use");
-	cf_dyn_buf_append_string(db, "error");
-#endif // defined(USE_ASM)
-
 	return 0;
 }
 
@@ -1711,6 +1400,46 @@ info_command_mon_cmd(char *name, char *params, cf_dyn_buf *db)
 }
 
 
+static const char *
+debug_allocations_string(void)
+{
+	switch (g_config.debug_allocations) {
+	case CF_ALLOC_DEBUG_NONE:
+		return "none";
+
+	case CF_ALLOC_DEBUG_TRANSIENT:
+		return "transient";
+
+	case CF_ALLOC_DEBUG_PERSISTENT:
+		return "persistent";
+
+	case CF_ALLOC_DEBUG_ALL:
+		return "all";
+
+	default:
+		cf_crash(CF_ALLOC, "invalid CF_ALLOC_DEBUG_* value");
+		return NULL;
+	}
+}
+
+static const char *
+auto_pin_string(void)
+{
+	switch (g_config.auto_pin) {
+	case CF_TOPO_AUTO_PIN_NONE:
+		return "none";
+
+	case CF_TOPO_AUTO_PIN_CPU:
+		return "cpu";
+
+	case CF_TOPO_AUTO_PIN_NUMA:
+		return "numa";
+
+	default:
+		cf_crash(CF_ALLOC, "invalid CF_TOPO_AUTO_* value");
+		return NULL;
+	}
+}
 
 void
 info_service_config_get(cf_dyn_buf *db)
@@ -1721,6 +1450,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_int(db, "proto-fd-max", g_config.n_proto_fd_max);
 
 	info_append_bool(db, "advertise-ipv6", cf_socket_advertises_ipv6());
+	info_append_string(db, "auto-pin", auto_pin_string());
 	info_append_int(db, "batch-threads", g_config.n_batch_threads);
 	info_append_uint32(db, "batch-max-buffers-per-queue", g_config.batch_max_buffers_per_queue);
 	info_append_uint32(db, "batch-max-requests", g_config.batch_max_requests);
@@ -1790,9 +1520,7 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_string_safe(db, "work-directory", g_config.work_directory);
 	info_append_bool(db, "write-duplicate-resolution-disable", g_config.write_duplicate_resolution_disable);
 
-#ifdef USE_ASM
-	info_append_bool(db, "asmalloc-enabled", g_config.asmalloc_enabled);
-#endif
+	info_append_string(db, "debug-allocations", debug_allocations_string());
 	info_append_bool(db, "fabric-dump-msgs", g_config.fabric_dump_msgs);
 	info_append_int(db, "max-msgs-per-type", (int)g_config.max_msgs_per_type);
 	info_append_uint32(db, "prole-extra-ttl", g_config.prole_extra_ttl);
@@ -6953,10 +6681,8 @@ as_info_init()
 	as_info_set_tree("sets", info_get_tree_sets);           // Returns set statistics for all or a particular set.
 
 	// Define commands
-	as_info_set_command("asm", info_command_asm, PERM_SERVICE_CTRL);                          // Control the operation of the ASMalloc library.
 	as_info_set_command("config-get", info_command_config_get, PERM_NONE);                    // Returns running config for specified context.
 	as_info_set_command("config-set", info_command_config_set, PERM_SET_CONFIG);              // Set a configuration parameter at run time, configuration parameter must be dynamic.
-	as_info_set_command("df", info_command_double_free, PERM_SERVICE_CTRL);                   // Do an intentional double "free()" to test Double "free()" Detection.
 	as_info_set_command("dump-cluster", info_command_dump_cluster, PERM_LOGGING_CTRL);        // Print debug information about clustering and exchange to the log file.
 	as_info_set_command("dump-fabric", info_command_dump_fabric, PERM_LOGGING_CTRL);          // Print debug information about fabric to the log file.
 	as_info_set_command("dump-hb", info_command_dump_hb, PERM_LOGGING_CTRL);                  // Print debug information about heartbeat state to the log file.
@@ -6977,8 +6703,6 @@ as_info_init()
 	as_info_set_command("latency", info_command_hist_track, PERM_NONE);                       // Returns latency and throughput information.
 	as_info_set_command("log-message", info_command_log_message, PERM_NONE);                  // Log a message.
 	as_info_set_command("log-set", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
-	as_info_set_command("mstats", info_command_mstats, PERM_LOGGING_CTRL);                    // Dump GLibC-level memory stats.
-	as_info_set_command("mtrace", info_command_mtrace, PERM_SERVICE_CTRL);                    // Control GLibC-level memory tracing.
 	as_info_set_command("peers-clear-alt", info_get_services_clear_alt_delta, PERM_NONE);     // The delta update version of "peers-clear-alt".
 	as_info_set_command("peers-clear-std", info_get_services_clear_std_delta, PERM_NONE);     // The delta update version of "peers-clear-std".
 	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, PERM_NONE);         // The delta update version of "peers-tls-alt".

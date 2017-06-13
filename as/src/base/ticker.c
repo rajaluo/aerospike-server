@@ -46,7 +46,6 @@
 #include "hist_track.h"
 #include "meminfo.h"
 
-#include "base/asm.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
 #include "base/index.h"
@@ -103,8 +102,6 @@ void log_line_retransmits(as_namespace* ns);
 
 void dump_global_histograms();
 void dump_namespace_histograms(as_namespace* ns);
-
-void log_mem_stats(size_t total_ns_memory_inuse);
 
 
 //==========================================================
@@ -217,8 +214,6 @@ log_ticker_frame(uint64_t delta_time)
 		dump_namespace_histograms(ns);
 	}
 
-	log_mem_stats(total_ns_memory_inuse);
-
 	if (g_config.fabric_dump_msgs) {
 		as_fabric_msg_queue_dump();
 	}
@@ -241,8 +236,8 @@ log_line_system_memory()
 	size_t mapped_kbytes;
 	double efficiency_pct;
 
-	cf_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
-			&efficiency_pct);
+	cf_alloc_heap_stats(&allocated_kbytes, &active_kbytes, &mapped_kbytes,
+			&efficiency_pct, NULL);
 
 	cf_info(AS_INFO, "   system-memory: free-kbytes %lu free-pct %d%s heap-kbytes (%lu,%lu,%lu) heap-efficiency-pct %.1lf",
 			freemem / 1024,
@@ -863,65 +858,4 @@ dump_namespace_histograms(as_namespace* ns)
 	}
 
 	as_sindex_histogram_dumpall(ns);
-}
-
-
-void
-log_mem_stats(size_t total_ns_memory_inuse)
-{
-#ifdef USE_ASM
-	if (g_asm_hook_enabled) {
-		static uint64_t iter = 0;
-		static asm_stats_t* asm_stats = NULL;
-		static vm_stats_t* vm_stats = NULL;
-		size_t vm_size = 0;
-		size_t total_accounted_memory = 0;
-
-		as_asm_hook((void*)iter++, &asm_stats, &vm_stats);
-
-		if (asm_stats) {
-#ifdef DEBUG_ASM
-			fprintf(stderr, "***THR_INFO:  asm:  mem_count: %lu ; net_mmaps: %lu ; net_shm: %lu***\n",
-					asm_stats->mem_count, asm_stats->net_mmaps, asm_stats->net_shm);
-#endif
-			total_accounted_memory = asm_stats->mem_count + asm_stats->net_mmaps + asm_stats->net_shm;
-		}
-
-		if (vm_stats) {
-			// N.B.: The VM stats description is used implicitly by the accessor
-			// "vm_stats_*()" macros!
-			vm_stats_desc_t* vm_stats_desc = vm_stats->desc;
-			vm_size = vm_stats_get_key_value(vm_stats, VM_SIZE);
-#ifdef DEBUG_ASM
-			fprintf(stderr, "***THR_INFO:  vm:  %s: %lu KB; %s: %lu KB ; %s: %lu KB ; %s: %lu KB***\n",
-					vm_stats_key_name(VM_PEAK),
-					vm_stats_get_key_value(vm_stats, VM_PEAK),
-					vm_stats_key_name(VM_SIZE),
-					vm_size,
-					vm_stats_key_name(VM_RSS),
-					vm_stats_get_key_value(vm_stats, VM_RSS),
-					vm_stats_key_name(VM_DATA),
-					vm_stats_get_key_value(vm_stats, VM_DATA));
-#endif
-
-			// Convert from KB to B.
-			vm_size *= 1024;
-
-			// Calculate the storage efficiency percentages.
-			double dynamic_eff = ((double) total_accounted_memory / (double) MAX(vm_size, 1)) * 100.0;
-			double obj_eff = ((double) total_ns_memory_inuse / (double) MAX(vm_size, 1)) * 100.0;
-
-#ifdef DEBUG_ASM
-			fprintf(stderr, "VM size: %lu ; Total Accounted Memory: %lu (%.3f%%) ; Total NS Memory in use: %lu (%.3f%%)\n",
-					vm_size, total_accounted_memory, dynamic_eff, total_ns_memory_inuse, obj_eff);
-#endif
-			cf_info(AS_INFO, "VM size: %lu ; Total Accounted Memory: %lu (%.3f%%) ; Total NS Memory in use: %lu (%.3f%%)",
-					vm_size, total_accounted_memory, dynamic_eff, total_ns_memory_inuse, obj_eff);
-		}
-	}
-#endif // USE_ASM
-
-	if (g_mstats_enabled) {
-		info_log_with_datestamp(malloc_stats);
-	}
 }

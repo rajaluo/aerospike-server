@@ -3182,7 +3182,7 @@ ssd_load_devices_fn(void *udata)
 
 	cf_info(AS_DRV_SSD, "device %s: reading device to load index", ssd->name);
 
-	JEM_SET_NS_ARENA(ns);
+	CF_ALLOC_SET_NS_ARENA(ns);
 
 	ssd->sub_sweep	= false;
 	ssd->has_ldt	= false;

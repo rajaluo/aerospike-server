@@ -149,7 +149,6 @@ typedef enum {
 	CF_ALLOC,
 	CF_ARENAX,
 	CF_HARDWARE,
-	CF_JEM,
 	CF_MSG,
 	CF_RBUFFER,
 	CF_SOCKET,

@@ -22,7 +22,7 @@ ifeq ($(USE_EE),1)
   include $(EEREPO)/xdr/make_in/Makefile.vars
 endif
 
-BASE_HEADERS += aggr.h asm.h batch.h cdt.h cfg.h datamodel.h index.h job_manager.h json_init.h
+BASE_HEADERS += aggr.h batch.h cdt.h cfg.h datamodel.h index.h job_manager.h json_init.h
 BASE_HEADERS += ldt.h ldt_aerospike.h ldt_record.h monitor.h packet_compression.h
 BASE_HEADERS += particle.h particle_blob.h particle_integer.h predexp.h
 BASE_HEADERS += proto.h rec_props.h scan.h secondary_index.h security.h security_config.h stats.h system_metadata.h
@@ -32,7 +32,7 @@ BASE_HEADERS += udf_aerospike.h udf_arglist.h udf_cask.h
 BASE_HEADERS += udf_memtracker.h udf_record.h udf_timer.h
 BASE_HEADERS += xdr_serverside.h xdr_config.h
 
-BASE_SOURCES += aggr.c as.c asm.c batch.c bin.c cdt.c cfg.c index.c job_manager.c json_init.c
+BASE_SOURCES += aggr.c as.c batch.c bin.c cdt.c cfg.c index.c job_manager.c json_init.c
 BASE_SOURCES += ldt.c ldt_record.c ldt_aerospike.c monitor.c namespace.c packet_compression.c
 BASE_SOURCES += particle.c particle_blob.c particle_float.c particle_geojson.c particle_integer.c
 BASE_SOURCES += particle_list.c particle_map.c particle_string.c predexp.c
@@ -141,18 +141,12 @@ LIBRARIES += -L$(S2) -ls2 -ls2cellid -lgoogle-strings -lgoogle-base \
 
 LIBRARIES := $(AS_LIBRARIES) $(LIBRARIES)
 
-ifneq ($(PREPRO),1)
-  ifneq ($(MEXP_PHASE),1)
-    AS_LIB_DEPS = $(AS_LIBRARIES)
-  endif
-endif
+AS_LIB_DEPS = $(AS_LIBRARIES)
 
 OBJECTS.c = $(SOURCES:%.c=$(OBJECT_DIR)/%.o) $(VERSION_OBJ) $(SYSTEMTAP_PROBES_O)
 OBJECTS = $(OBJECTS.c:%.cc=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
 DEPENDENCIES += $(XDR_DEPENDENCIES)
-MEXP_SOURCES = $(SOURCES:%=$(MEXP_DIR)/%)
-PREPROS = $(OBJECTS:%=%$(PREPRO_SUFFIX))
 
 .PHONY: all
 all: $(SYSTEMTAP_PROBES_H) $(SERVER)
@@ -161,7 +155,6 @@ all: $(SYSTEMTAP_PROBES_H) $(SERVER)
 clean:
 	$(RM) $(OBJECTS) $(SERVER){,.stripped}
 	$(RM) $(DEPENDENCIES)
-	$(RM) $(MEXP_SOURCES) $(PREPROS)
 
 # Emacs syntax check target.CHK_SOURCES is set by emacs to the files being edited.
 .PHONY: check-syntax
@@ -169,11 +162,7 @@ check-syntax:
 	$(CC) -Wall -Wextra -pedantic -fsyntax-only $(CHK_SOURCES)
 
 $(SERVER): $(OBJECTS) $(AS_LIB_DEPS) $(XDR_LIBRARY) $(XDR_ALL_OBJECTS)
-ifneq ($(PREPRO),1)
-  ifneq ($(MEXP_PHASE),1)
 	$(LINK.c) -o $(SERVER) $(OBJECTS) $(XDR_ALL_OBJECTS) $(LIBRARIES)
-  endif
-endif
 
 ifeq ($(USE_EE),1)
   include $(XDR)/make_in/Makefile.targets

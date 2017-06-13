@@ -1062,7 +1062,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 		return AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE;
 	}
 
-	JEM_SET_NS_ARENA(ns);
+	CF_ALLOC_SET_NS_ARENA(ns);
 
 	bool is_subrec = (info & RW_INFO_LDT_SUBREC) != 0;
 	bool is_ldt_parent = (info & RW_INFO_LDT_PARENTREC) != 0;

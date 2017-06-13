@@ -39,10 +39,8 @@
 #include "daemon.h"
 #include "fault.h"
 #include "hardware.h"
-#include "jem.h"
 #include "tls.h"
 
-#include "base/asm.h"
 #include "base/batch.h"
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -189,20 +187,8 @@ main(int argc, char **argv)
 {
 	g_start_ms = cf_getms();
 
-#ifdef USE_ASM
-	as_mallocation_t asm_array[MAX_NUM_MALLOCATIONS] = { { 0 } };
-
-	// This must come first to allow initialization of the ASMalloc library.
-	asm_init(asm_array);
-#endif // defined(USE_ASM)
-
-#ifdef USE_JEM
-	// Initialize the JEMalloc interface.
-	jem_init(true);
-#endif
-
-	// Initialize ref-counting system.
-	cf_rc_init(NULL);
+	// Initialize memory allocation.
+	cf_alloc_init();
 
 	// Initialize fault management framework.
 	cf_fault_init();
@@ -271,12 +257,6 @@ main(int argc, char **argv)
 	// is a shortcut pointer to the global runtime configuration instance.)
 	as_config *c = as_config_init(config_file);
 
-#ifdef USE_ASM
-	g_asm_hook_enabled = g_asm_cb_enabled = c->asmalloc_enabled;
-
-	long initial_tid = syscall(SYS_gettid);
-#endif
-
 	// Detect NUMA topology and, if requested, prepare for CPU and NUMA pinning.
 	cf_topo_config(c->auto_pin, (cf_topo_numa_node_index)instance,
 			&c->service.bind);
@@ -333,16 +313,6 @@ main(int argc, char **argv)
 
 		cf_process_daemonize(open_fds, num_open_fds);
 	}
-
-#ifdef USE_ASM
-	// Log the main thread's Linux Task ID (pre- and post-fork) to the console.
-	fprintf(stderr, "initial main thread tid: %ld\n", initial_tid);
-
-	if (! run_in_foreground && c->run_as_daemon) {
-		fprintf(stderr, "post-daemonize main thread tid: %lu\n",
-				syscall(SYS_gettid));
-	}
-#endif
 
 	// Log which build this is - should be the first line in the log file.
 	cf_info(AS_AS, "<><><><><><><><><><>  %s build %s  <><><><><><><><><><>",

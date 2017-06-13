@@ -20,19 +20,12 @@ ifneq ($(USE_EE),1)
   SOURCES += arenax_ce.c socket_ce.c tls_ce.c
 endif
 
-ifeq ($(USE_JEM),1)
-  HEADERS += jem.h
-  SOURCES += jem.c
-endif
-
 LIBRARY = $(LIBRARY_DIR)/libcf.a
 
 INCLUDES += $(INCLUDE_DIR:%=-I%) -I$(COMMON)/src/include
 
 OBJECTS = $(SOURCES:%.c=$(OBJECT_DIR)/%.o)
 DEPENDENCIES = $(OBJECTS:%.o=%.d)
-MEXP_SOURCES = $(SOURCES:%=$(MEXP_DIR)/%)
-PREPROS = $(OBJECTS:%=%$(PREPRO_SUFFIX))
 
 .PHONY: all
 all: $(LIBRARY)
@@ -41,13 +34,8 @@ all: $(LIBRARY)
 clean:
 	$(RM) $(OBJECTS) $(LIBRARY)
 	$(RM) $(DEPENDENCIES)
-	$(RM) $(MEXP_SOURCES) $(PREPROS)
 
 $(LIBRARY): $(OBJECTS)
-ifneq ($(PREPRO),1)
-  ifneq ($(MEXP_PHASE),1)
 	$(AR) rs $(LIBRARY) $(OBJECTS)
-  endif
-endif
 
 include $(DEPTH)/make_in/Makefile.targets

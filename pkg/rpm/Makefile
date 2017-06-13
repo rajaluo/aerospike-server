@@ -104,14 +104,6 @@ endif
 	install -pm 644 $(DEPTH)/modules/lua-core/src/external/* $(OPT_AS)/sys/udf/lua/external
 	install -pm 644 $(DEPTH)/modules/lua-core/src/ldt/* $(OPT_AS)/sys/udf/lua/ldt
 
-ifeq ($(USE_ASM),1)
-	install -pm 644 $(DEPTH)/as/etc/initfns $(BUILD_ROOT)/etc/aerospike
-	install -d $(OPT_AS)/{bin,lib}
-	install -pm 755 $(DEPTH)/as/etc/run-under-gdb $(OPT_AS)/bin
-	install -pm 644 $(DEPTH)/modules/asmalloc/lib/asmalloc.jem.so $(OPT_AS)/lib
-	install -pm 644 $(DEPTH)/modules/jemalloc/lib/libjemalloc.so $(OPT_AS)/lib
-endif
-
 package:
 	install -d $(SOURCE_ROOT)/RPMS/x86_64
 
@@ -126,9 +118,6 @@ else
 	cat $(PKG)/rpm/server-spec-sysv >> $(PKG)/rpm/aerospike.spec
 endif
 
-ifeq ($(USE_ASM),1)
-	cat $(PKG)/rpm/asm-files >> $(PKG)/rpm/aerospike.spec
-endif
 ifeq ($(USE_EE),1)
 	cat $(EEREPO)/pkg/rpm/xdr-files >> $(PKG)/rpm/aerospike.spec
 endif

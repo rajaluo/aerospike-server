@@ -166,9 +166,9 @@ cfg_set_defaults()
 	as_sindex_gconfig_default(c);
 	as_query_gconfig_default(c);
 	c->work_directory = "/opt/aerospike";
+	c->debug_allocations = CF_ALLOC_DEBUG_TRANSIENT;
 	c->fabric_dump_msgs = false;
 	c->max_msgs_per_type = -1; // by default, the maximum number of "msg" objects per type is unlimited
-	c->asmalloc_enabled = true;
 
 	// Network heartbeat defaults.
 	c->hb_config.mode = AS_HB_MODE_UNDEF;
@@ -323,7 +323,7 @@ typedef enum {
 	CASE_SERVICE_WORK_DIRECTORY,
 	CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE,
 	// For special debugging or bug-related repair:
-	CASE_SERVICE_ASMALLOC_ENABLED,
+	CASE_SERVICE_DEBUG_ALLOCATIONS,
 	CASE_SERVICE_FABRIC_DUMP_MSGS,
 	CASE_SERVICE_MAX_MSGS_PER_TYPE,
 	CASE_SERVICE_PROLE_EXTRA_TTL,
@@ -382,6 +382,12 @@ typedef enum {
 	CASE_SERVICE_AUTO_PIN_NONE,
 	CASE_SERVICE_AUTO_PIN_CPU,
 	CASE_SERVICE_AUTO_PIN_NUMA,
+
+	// Service debug-allocations options (value tokens):
+	CASE_SERVICE_DEBUG_ALLOCATIONS_NONE,
+	CASE_SERVICE_DEBUG_ALLOCATIONS_TRANSIENT,
+	CASE_SERVICE_DEBUG_ALLOCATIONS_PERSISTENT,
+	CASE_SERVICE_DEBUG_ALLOCATIONS_ALL,
 
 	// Logging options:
 	// Normally visible:
@@ -803,7 +809,7 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "transaction-threads-per-queue",	CASE_SERVICE_TRANSACTION_THREADS_PER_QUEUE },
 		{ "work-directory",					CASE_SERVICE_WORK_DIRECTORY },
 		{ "write-duplicate-resolution-disable", CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE },
-		{ "asmalloc-enabled",				CASE_SERVICE_ASMALLOC_ENABLED },
+		{ "debug-allocations",				CASE_SERVICE_DEBUG_ALLOCATIONS },
 		{ "fabric-dump-msgs",				CASE_SERVICE_FABRIC_DUMP_MSGS },
 		{ "max-msgs-per-type",				CASE_SERVICE_MAX_MSGS_PER_TYPE },
 		{ "prole-extra-ttl",				CASE_SERVICE_PROLE_EXTRA_TTL },
@@ -862,6 +868,13 @@ const cfg_opt SERVICE_AUTO_PIN_OPTS[] = {
 		{ "none",							CASE_SERVICE_AUTO_PIN_NONE },
 		{ "cpu",							CASE_SERVICE_AUTO_PIN_CPU },
 		{ "numa",							CASE_SERVICE_AUTO_PIN_NUMA }
+};
+
+const cfg_opt SERVICE_DEBUG_ALLOCATIONS_OPTS[] = {
+		{ "none",							CASE_SERVICE_DEBUG_ALLOCATIONS_NONE },
+		{ "transient",						CASE_SERVICE_DEBUG_ALLOCATIONS_TRANSIENT },
+		{ "persistent",						CASE_SERVICE_DEBUG_ALLOCATIONS_PERSISTENT },
+		{ "all",							CASE_SERVICE_DEBUG_ALLOCATIONS_ALL }
 };
 
 const cfg_opt LOGGING_OPTS[] = {
@@ -1217,6 +1230,7 @@ const cfg_opt XDR_SEC_CREDENTIALS_OPTS[] = {
 const int NUM_GLOBAL_OPTS							= sizeof(GLOBAL_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_OPTS							= sizeof(SERVICE_OPTS) / sizeof(cfg_opt);
 const int NUM_SERVICE_AUTO_PIN_OPTS					= sizeof(SERVICE_AUTO_PIN_OPTS) / sizeof(cfg_opt);
+const int NUM_SERVICE_DEBUG_ALLOCATIONS_OPTS		= sizeof(SERVICE_DEBUG_ALLOCATIONS_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_OPTS							= sizeof(LOGGING_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_FILE_OPTS						= sizeof(LOGGING_FILE_OPTS) / sizeof(cfg_opt);
 const int NUM_LOGGING_CONSOLE_OPTS					= sizeof(LOGGING_CONSOLE_OPTS) / sizeof(cfg_opt);
@@ -2278,8 +2292,25 @@ as_config_init(const char* config_file)
 			case CASE_SERVICE_WRITE_DUPLICATE_RESOLUTION_DISABLE:
 				c->write_duplicate_resolution_disable = cfg_bool(&line);
 				break;
-			case CASE_SERVICE_ASMALLOC_ENABLED:
-				c->asmalloc_enabled = cfg_bool(&line);
+			case CASE_SERVICE_DEBUG_ALLOCATIONS:
+				switch (cfg_find_tok(line.val_tok_1, SERVICE_DEBUG_ALLOCATIONS_OPTS, NUM_SERVICE_DEBUG_ALLOCATIONS_OPTS)) {
+				case CASE_SERVICE_DEBUG_ALLOCATIONS_NONE:
+					c->debug_allocations = CF_ALLOC_DEBUG_NONE;
+					break;
+				case CASE_SERVICE_DEBUG_ALLOCATIONS_TRANSIENT:
+					c->debug_allocations = CF_ALLOC_DEBUG_TRANSIENT;
+					break;
+				case CASE_SERVICE_DEBUG_ALLOCATIONS_PERSISTENT:
+					c->debug_allocations = CF_ALLOC_DEBUG_PERSISTENT;
+					break;
+				case CASE_SERVICE_DEBUG_ALLOCATIONS_ALL:
+					c->debug_allocations = CF_ALLOC_DEBUG_ALL;
+					break;
+				case CASE_NOT_FOUND:
+				default:
+					cfg_unknown_val_tok_1(&line);
+					break;
+				}
 				break;
 			case CASE_SERVICE_FABRIC_DUMP_MSGS:
 				c->fabric_dump_msgs = cfg_bool(&line);
@@ -3504,6 +3535,8 @@ as_config_post_process(as_config* c, const char* config_file)
 	//
 	// Done echoing configuration file to log.
 	//--------------------------------------------
+
+	cf_alloc_set_debug(c->debug_allocations);
 
 	// Check the configured file descriptor limit against the system limit.
 	struct rlimit fd_limit;

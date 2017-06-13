@@ -794,10 +794,8 @@ struct as_namespace_s {
 	// Memory management.
 	//
 
-#ifdef USE_JEM
 	// JEMalloc arena to be used for long-term storage in this namespace (-1 if nonexistent.)
 	int jem_arena;
-#endif
 
 	// Cached partition ownership info for clients.
 	client_replica_map* replica_maps;
