@@ -1094,7 +1094,7 @@ info_command_racks(char *name, char *params, cf_dyn_buf *db)
 
 	if (rv == -2) {
 		cf_warning(AS_INFO, "namespace parameter value too long");
-		cf_dyn_buf_append_string(db, "error");
+		cf_dyn_buf_append_string(db, "ERROR::bad-namespace");
 		return 0;
 	}
 
@@ -1103,7 +1103,7 @@ info_command_racks(char *name, char *params, cf_dyn_buf *db)
 
 		if (! ns) {
 			cf_warning(AS_INFO, "unknown namespace %s", param_str);
-			cf_dyn_buf_append_string(db, "error");
+			cf_dyn_buf_append_string(db, "ERROR::unknown-namespace");
 			return 0;
 		}
 
@@ -1125,6 +1125,20 @@ info_command_racks(char *name, char *params, cf_dyn_buf *db)
 	}
 
 	cf_dyn_buf_chomp(db);
+
+	return 0;
+}
+
+int
+info_command_recluster(char *name, char *params, cf_dyn_buf *db)
+{
+	// Command format: "recluster:"
+
+	int rv = as_clustering_cluster_reform();
+
+	// TODO - resolve error condition further?
+	cf_dyn_buf_append_string(db,
+			rv == 0 ? "ok" : (rv == 1 ? "ignored-by-non-principal" : "ERROR"));
 
 	return 0;
 }
@@ -6621,7 +6635,7 @@ as_info_init()
 				"dump-si;dump-smd;dump-wb;dump-wb-summary;get-config;get-sl;hist-dump;"
 				"hist-track-start;hist-track-stop;jem-stats;jobs;latency;log;log-set;"
 				"log-message;logs;mcast;mem;mesh;mstats;mtrace;name;namespace;namespaces;node;"
-				"racks;service;services;services-alumni;services-alumni-reset;set-config;"
+				"racks;recluster;service;services;services-alumni;services-alumni-reset;set-config;"
 				"set-log;sets;set-sl;show-devices;sindex;sindex-create;sindex-delete;"
 				"sindex-histogram;"
 				"smd;statistics;status;tip;tip-clear;truncate;truncate-undo;version;",
@@ -6708,6 +6722,7 @@ as_info_init()
 	as_info_set_command("peers-tls-alt", info_get_services_tls_alt_delta, PERM_NONE);         // The delta update version of "peers-tls-alt".
 	as_info_set_command("peers-tls-std", info_get_services_tls_std_delta, PERM_NONE);         // The delta update version of "peers-tls-std".
 	as_info_set_command("racks", info_command_racks, PERM_NONE);                              // Rack-aware information.
+	as_info_set_command("recluster", info_command_recluster, PERM_NONE);                      // Force cluster to re-form. FIXME - what permission?
 	as_info_set_command("set-config", info_command_config_set, PERM_SET_CONFIG);              // Set config values.
 	as_info_set_command("set-log", info_command_log_set, PERM_LOGGING_CTRL);                  // Set values in the log system.
 	as_info_set_command("show-devices", info_command_show_devices, PERM_LOGGING_CTRL);        // Print snapshot of wblocks to the log file.

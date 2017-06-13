@@ -7352,7 +7352,7 @@ clustering_hb_event_listener(int n_events, as_hb_event_node* hb_node_events,
  * Reform the cluster with the same succession list.This would trigger the
  * generation of new partition info and the cluster would get a new cluster key.
  *
- * @return 0 if new clustering round started, -1 otherwise.
+ * @return 0 if new clustering round started, 1 if not principal, -1 otherwise.
  */
 static int
 clustering_cluster_reform()
@@ -7386,6 +7386,11 @@ clustering_cluster_reform()
 				clustering_is_principal() ? "true" : "false",
 				cf_vector_size(dead_nodes), cf_vector_size(faulty_nodes),
 				cf_vector_size(new_nodes));
+
+		if (!clustering_is_principal()) {
+			rv = 1; // common case - command will likely be sent to all nodes
+		}
+
 		goto Exit;
 	}
 
