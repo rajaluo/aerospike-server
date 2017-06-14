@@ -695,6 +695,8 @@ typedef enum {
 	// Normally visible, in canonical configuration file order:
 	CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT,
 	// Normally hidden:
+	CASE_XDR_DATACENTER_DC_CONNECTIONS,
+	CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS,
 	CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP,
 	CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE,
 	CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES,
@@ -1202,6 +1204,8 @@ const cfg_opt XDR_OPTS[] = {
 const cfg_opt XDR_DATACENTER_OPTS[] = {
 		{ "{",								CASE_CONTEXT_BEGIN },
 		{ "dc-node-address-port",			CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT },
+		{ "dc-connections",					CASE_XDR_DATACENTER_DC_CONNECTIONS },
+		{ "dc-connections-idle-ms",			CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS },
 		{ "dc-int-ext-ipmap",				CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP },
 		{ "dc-security-config-file",		CASE_XDR_DATACENTER_DC_SECURITY_CONFIG_FILE },
 		{ "dc-use-alternate-services",		CASE_XDR_DATACENTER_DC_USE_ALTERNATE_SERVICES },
@@ -3432,6 +3436,12 @@ as_config_init(const char* config_file)
 				break;
 			case CASE_XDR_DATACENTER_DC_NODE_ADDRESS_PORT:
 				xdr_cfg_add_node_addr_port(cur_dc_cfg, cfg_strdup(&line, true), cfg_port_val2(&line));
+				break;
+			case CASE_XDR_DATACENTER_DC_CONNECTIONS:
+				cur_dc_cfg->dc_connections = cfg_u32_no_checks(&line);
+				break;
+			case CASE_XDR_DATACENTER_DC_CONNECTIONS_IDLE_MS:
+				cur_dc_cfg->dc_connections_idle_ms = cfg_u32_no_checks(&line);
 				break;
 			case CASE_XDR_DATACENTER_DC_INT_EXT_IPMAP:
 				xdr_cfg_add_int_ext_mapping(cur_dc_cfg, cfg_strdup(&line, true), cfg_strdup_val2(&line, true));

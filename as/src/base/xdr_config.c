@@ -61,6 +61,8 @@ void xdr_config_defaults()
 		g_dc_xcfg_opt[index].dc_addr_map_v.vector = NULL;
 		g_dc_xcfg_opt[index].dc_security_cfg.sec_config_file = NULL;
 		g_dc_xcfg_opt[index].dc_use_alternate_services = false;
+		g_dc_xcfg_opt[index].dc_connections = 64;
+		g_dc_xcfg_opt[index].dc_connections_idle_ms = 0;
 	}
 }
 

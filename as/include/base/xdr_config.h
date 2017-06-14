@@ -106,6 +106,8 @@ typedef struct dc_config_opt_s {
 	 int					dc_id;
 	 cf_vector				dc_node_v;
 	 cf_vector				dc_addr_map_v;
+	 uint32_t				dc_connections;
+	 uint32_t				dc_connections_idle_ms;
 	 xdr_security_config	dc_security_cfg;
 	 bool					dc_use_alternate_services;
 	 const char				*tls_cafile;
