@@ -20,6 +20,9 @@
  * along with this program.  If not, see http://www.gnu.org/licenses/
  */
 
+// Make sure that stdlib.h gives us aligned_alloc().
+#define _ISOC11_SOURCE
+
 #include "enhanced_alloc.h"
 
 #include <errno.h>
