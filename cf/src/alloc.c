@@ -73,6 +73,9 @@ typedef struct site_info_s {
 	size_t size_hi;
 } site_info;
 
+// Old glibc versions don't provide this; work around compiler warning.
+void *aligned_alloc(size_t align, size_t sz);
+
 const char *jem_malloc_conf = "narenas:" STR(N_ARENAS);
 
 extern size_t je_chunksize_mask;
