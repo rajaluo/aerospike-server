@@ -104,6 +104,7 @@ void clear_ldt_histograms();
 int info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db);
 int info_get_tree_sindexes(char *name, char *subtree, cf_dyn_buf *db);
+int info_get_tree_statistics(char *name, char *subtree, cf_dyn_buf *db);
 void as_storage_show_wblock_stats(as_namespace *ns);
 void as_storage_summarize_wblock_stats(as_namespace *ns);
 int as_storage_analyze_wblock(as_namespace* ns, int device_index, uint32_t wblock_id);
@@ -340,7 +341,7 @@ info_get_stats(char *name, cf_dyn_buf *db)
 	info_append_uint64(db, "fabric_rw_send_rate", g_stats.fabric_rw_s_rate);
 	info_append_uint64(db, "fabric_rw_recv_rate", g_stats.fabric_rw_r_rate);
 
-	as_xdr_get_stats(name, db);
+	as_xdr_get_stats(db);
 
 	cf_dyn_buf_chomp(db);
 
@@ -3049,11 +3050,10 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 					ns->name, ns->geo2dsphere_within_max_cells, val);
 			ns->geo2dsphere_within_max_cells = val;
 		}
-		else if (0 == as_xdr_set_config_ns(ns->name, params)) {
-			;
-		}
 		else {
-			goto Error;
+			if (as_xdr_set_config_ns(ns->name, params) == false) {
+				goto Error;
+			}
 		}
 	} // end of namespace stanza
 	else if (strcmp(context, "security") == 0) {
@@ -3071,9 +3071,9 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 		}
 	}
 	else if (strcmp(context, "xdr") == 0) {
-		as_xdr_set_config(params, db);
-		cf_info(AS_INFO, "config-set command : params %s",params);
-		return 0;
+		if (as_xdr_set_config(params) == false) {
+			goto Error;
+		}
 	}
 	else
 		goto Error;
@@ -5795,6 +5795,19 @@ info_get_tree_sets(char *name, char *subtree, cf_dyn_buf *db)
 }
 
 int
+info_get_tree_statistics(char *name, char *subtree, cf_dyn_buf *db)
+{
+	if (strcmp(subtree, "xdr") == 0) {
+		as_xdr_get_stats(db);
+		cf_dyn_buf_chomp(db);
+		return 0;
+	}
+
+	cf_dyn_buf_append_string(db, "error");
+	return -1;
+}
+
+int
 info_get_tree_bins(char *name, char *subtree, cf_dyn_buf *db)
 {
 	as_namespace *ns  = NULL;
@@ -6693,6 +6706,7 @@ as_info_init()
 	as_info_set_tree("log", info_get_tree_log);             //
 	as_info_set_tree("namespace", info_get_tree_namespace); // Returns health and usage stats for a particular namespace.
 	as_info_set_tree("sets", info_get_tree_sets);           // Returns set statistics for all or a particular set.
+	as_info_set_tree("statistics", info_get_tree_statistics);
 
 	// Define commands
 	as_info_set_command("config-get", info_command_config_get, PERM_NONE);                    // Returns running config for specified context.

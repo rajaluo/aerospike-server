@@ -74,10 +74,10 @@ void as_xdr_read_txn(as_transaction *txn);
 void as_xdr_info_init(void);
 void as_xdr_info_port(cf_serv_cfg *serv_cfg);
 int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db);
-void as_xdr_get_stats(char *name, cf_dyn_buf *db);
+void as_xdr_get_stats(cf_dyn_buf *db);
 void as_xdr_get_config(cf_dyn_buf *db);
-void as_xdr_set_config(char *params, cf_dyn_buf *db);
-int32_t as_xdr_set_config_ns(char *ns_name, char *params);
+bool as_xdr_set_config(char *params);
+bool as_xdr_set_config_ns(char *ns_name, char *params);
 
 bool is_xdr_delete_shipping_enabled();
 bool is_xdr_nsup_deletes_enabled();

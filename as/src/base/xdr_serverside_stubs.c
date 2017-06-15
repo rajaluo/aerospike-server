@@ -86,7 +86,7 @@ int as_info_command_xdr(char *name, char *params, cf_dyn_buf *db)
 	return -1;
 }
 
-void as_xdr_get_stats(char *name, cf_dyn_buf *db)
+void as_xdr_get_stats(cf_dyn_buf *db)
 {
 }
 
@@ -94,14 +94,14 @@ void as_xdr_get_config(cf_dyn_buf *db)
 {
 }
 
-void as_xdr_set_config(char *params, cf_dyn_buf *db)
+bool as_xdr_set_config(char *params)
 {
-	cf_dyn_buf_append_string(db, "error");
+	return false;
 }
 
-int32_t as_xdr_set_config_ns(char *ns_name, char *params)
+bool as_xdr_set_config_ns(char *ns_name, char *params)
 {
-	return -1;
+	return false;
 }
 
 bool is_xdr_delete_shipping_enabled()
