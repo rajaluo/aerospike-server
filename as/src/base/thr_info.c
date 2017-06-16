@@ -2960,15 +2960,17 @@ info_command_config_set_threadsafe(char *name, char *params, cf_dyn_buf *db)
 			}
 		}
 		else if (0 == as_info_parameter_get(params, "max-write-cache", context, &context_len)) {
-			if (0 != cf_str_atoi(context, &val)) {
+			uint64_t val_u64;
+
+			if (0 != cf_str_atoi_u64(context, &val_u64)) {
 				goto Error;
 			}
-			if (val < (1024 * 1024 * 4)) {
+			if (val_u64 < (1024 * 1024 * 4)) { // TODO - why enforce this? And here, but not cfg.c?
 				cf_warning(AS_INFO, "can't set max-write-cache less than 4M");
 				goto Error;
 			}
-			cf_info(AS_INFO, "Changing value of max-write-cache of ns %s from %lu to %d ", ns->name, ns->storage_max_write_cache, val);
-			ns->storage_max_write_cache = (uint64_t)val;
+			cf_info(AS_INFO, "Changing value of max-write-cache of ns %s from %lu to %lu ", ns->name, ns->storage_max_write_cache, val_u64);
+			ns->storage_max_write_cache = val_u64;
 			ns->storage_max_write_q = (int)(ns->storage_max_write_cache / ns->storage_write_block_size);
 		}
 		else if (0 == as_info_parameter_get(params, "min-avail-pct", context, &context_len)) {
