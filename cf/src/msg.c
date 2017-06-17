@@ -53,25 +53,6 @@ typedef struct msg_type_entry_s {
 	uint32_t scratch_sz;
 } msg_type_entry;
 
-typedef struct msg_str_array_s {
-	uint32_t alloc_size;
-	uint32_t used_size;
-	uint32_t count;
-	uint32_t offset[];
-} msg_str_array;
-
-typedef struct msg_pbuf_s {
-	uint32_t size;
-	uint8_t data[];
-} msg_pbuf;
-
-typedef struct msg_buf_array_s {
-	uint32_t alloc_size;
-	uint32_t used_size;
-	uint32_t count;
-	uint32_t offset[];
-} msg_buf_array;
-
 // msg field header on wire.
 typedef struct msg_field_hdr_s {
 	uint16_t id;
@@ -796,6 +777,14 @@ msg_field_get_type(const msg *m, int field_id)
 	return mf_type(&m->f[field_id], m->type);
 }
 
+bool
+msg_is_set(const msg *m, int field_id)
+{
+	cf_assert(field_id >= 0 && field_id < (int)m->n_fields, CF_MSG, "invalid field_id %d", field_id);
+
+	return m->f[field_id].is_set;
+}
+
 int
 msg_get_uint32(const msg *m, int field_id, uint32_t *val_r)
 {
@@ -895,14 +884,6 @@ msg_get_buf(const msg *m, int field_id, uint8_t **buf_r, size_t *sz_r,
 	}
 
 	return 0;
-}
-
-bool
-msg_is_set(const msg *m, int field_id)
-{
-	cf_assert(field_id >= 0 && field_id < (int)m->n_fields, CF_MSG, "invalid field_id %d", field_id);
-
-	return m->f[field_id].is_set;
 }
 
 int
