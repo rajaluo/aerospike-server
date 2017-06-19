@@ -413,6 +413,12 @@ as_tsvc_process_transaction(as_transaction *tr)
 		goto Cleanup;
 	}
 
+	if (rv == -2) {
+		// Partition is frozen.
+		as_transaction_error(tr, ns, AS_PROTO_RESULT_FAIL_UNAVAILABLE);
+		goto Cleanup;
+	}
+
 	if (dest == 0) {
 		cf_crash(AS_TSVC, "invalid destination while reserving partition");
 	}

@@ -831,6 +831,11 @@ proxy_retransmit_send(proxy_request* pr)
 		// or write.)
 		cf_node new_dst = as_partition_writable_node(pr->ns, pr->pid);
 
+		// Partition is frozen - try more retransmits, but will likely time out.
+		if (new_dst == (cf_node)0) {
+			return SHASH_OK;
+		}
+
 		// Destination is self - abandon proxy and try local transaction.
 		if (new_dst == g_config.self_node) {
 			cf_digest* keyd;

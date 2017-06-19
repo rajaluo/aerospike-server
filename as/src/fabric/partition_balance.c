@@ -285,9 +285,6 @@ as_partition_balance_init()
 			if (! as_partition_version_is_null(&version)) {
 				as_partition* p = &ns->partitions[pid];
 
-				p->n_replicas = 1;
-				p->replicas[0] = g_config.self_node;
-
 				version.master = 0;
 				version.subset = 1;
 
@@ -326,6 +323,8 @@ as_partition_balance_revert_to_orphan()
 			as_partition* p = &ns->partitions[pid];
 
 			pthread_mutex_lock(&p->lock);
+
+			as_partition_freeze(p);
 
 			if (! as_partition_version_is_null(&p->version)) {
 				p->version.master = 0;

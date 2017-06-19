@@ -54,7 +54,7 @@ void accumulate_replica_stats(const as_partition* p, bool is_ldt_enabled, uint64
 int partition_reserve_read_write(as_namespace* ns, uint32_t pid, as_partition_reservation* rsv, cf_node* node, bool is_read, uint64_t* cluster_key);
 void partition_reserve_lockfree(as_partition* p, as_namespace* ns, as_partition_reservation* rsv);
 cf_node partition_getreplica_prole(as_namespace* ns, uint32_t pid);
-char partition_getstate_str(const as_partition* p);
+char partition_descriptor(const as_partition* p);
 int partition_get_replica_self_lockfree(const as_namespace* ns, uint32_t pid);
 
 int
@@ -116,6 +116,30 @@ as_partition_shutdown(as_namespace* ns, uint32_t pid)
 }
 
 
+void
+as_partition_freeze(as_partition* p)
+{
+	// TODO - rearrange as_partition so we can call memset() here?
+	p->n_replicas = 0;
+	memset(p->replicas, 0, sizeof(p->replicas));
+
+	p->cluster_key = 0;
+
+	p->pending_emigrations = 0;
+	p->pending_immigrations = 0;
+	memset(p->immigrators, 0, sizeof(p->immigrators));
+
+	p->origin = (cf_node)0;
+	p->target = (cf_node)0;
+
+	p->n_dupl = 0;
+	memset(p->dupls, 0, sizeof(p->dupls));
+
+	p->n_witnesses = 0;
+	memset(p->witnesses, 0, sizeof(p->witnesses));
+}
+
+
 // Get a list of all nodes (excluding self) that are replicas for a specified
 // partition: place the list in *nv and return the number of nodes found.
 uint32_t
@@ -147,6 +171,12 @@ as_partition_writable_node(as_namespace* ns, uint32_t pid)
 	as_partition* p = &ns->partitions[pid];
 
 	pthread_mutex_lock(&p->lock);
+
+	if (p->n_replicas == 0) {
+		// This partition is frozen.
+		pthread_mutex_unlock(&p->lock);
+		return (cf_node)0;
+	}
 
 	cf_node best_node = find_best_node(p, false);
 
@@ -312,6 +342,7 @@ as_partition_reserve_read(as_namespace* ns, uint32_t pid,
 }
 
 
+// TODO - what if partition is frozen?
 void
 as_partition_reserve_migrate(as_namespace* ns, uint32_t pid,
 		as_partition_reservation* rsv, cf_node* node)
@@ -330,6 +361,7 @@ as_partition_reserve_migrate(as_namespace* ns, uint32_t pid,
 }
 
 
+// TODO - what if partition is frozen?
 int
 as_partition_reserve_migrate_timeout(as_namespace* ns, uint32_t pid,
 		as_partition_reservation* rsv, cf_node* node, int timeout_ms)
@@ -389,6 +421,7 @@ as_partition_reserve_query(as_namespace* ns, uint32_t pid,
 
 // Obtain a partition reservation for XDR reads. Succeeds, if we are sync or
 // zombie for the partition.
+// TODO - what if partition is frozen?
 int
 as_partition_reserve_xdr_read(as_namespace* ns, uint32_t pid,
 		as_partition_reservation* rsv)
@@ -456,7 +489,7 @@ as_partition_getinfo_str(cf_dyn_buf* db)
 
 			pthread_mutex_lock(&p->lock);
 
-			char state_c = partition_getstate_str(p);
+			char state_c = partition_descriptor(p);
 			int self_n = find_self_in_replicas(p);
 
 			cf_dyn_buf_append_string(db, ns->name);
@@ -651,6 +684,10 @@ accumulate_replica_stats(const as_partition* p, bool is_ldt_enabled,
 }
 
 
+// Returns:
+//  0 - reserved - node parameter returns self node
+// -1 - not reserved - node parameter returns other "better" node
+// -2 - not reserved - node parameter not filled - partition is "frozen"
 int
 partition_reserve_read_write(as_namespace* ns, uint32_t pid,
 		as_partition_reservation* rsv, cf_node* node, bool is_read,
@@ -659,6 +696,16 @@ partition_reserve_read_write(as_namespace* ns, uint32_t pid,
 	as_partition* p = &ns->partitions[pid];
 
 	pthread_mutex_lock(&p->lock);
+
+	// If this partition is frozen, return.
+	if (p->n_replicas == 0) {
+		if (node) {
+			*node = (cf_node)0;
+		}
+
+		pthread_mutex_unlock(&p->lock);
+		return -2;
+	}
 
 	cf_node best_node = find_best_node(p, is_read);
 
@@ -738,7 +785,7 @@ partition_getreplica_prole(as_namespace* ns, uint32_t pid)
 
 
 char
-partition_getstate_str(const as_partition* p)
+partition_descriptor(const as_partition* p)
 {
 	int self_n = find_self_in_replicas(p); // -1 if not
 
