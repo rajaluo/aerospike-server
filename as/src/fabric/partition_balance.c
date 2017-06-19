@@ -75,7 +75,7 @@ const as_partition_version ZERO_VERSION = { 0 };
 // Globals.
 //
 
-cf_atomic32 g_partition_generation = 0;
+cf_atomic32 g_partition_generation = (uint32_t)-1;
 
 // Using int for 4-byte size, but maintaining bool semantics.
 // TODO - ok as non-volatile, but should selectively load/store in the future.
