@@ -1494,7 +1494,6 @@ info_service_config_get(cf_dyn_buf *db)
 	info_append_uint32(db, "nsup-delete-sleep", g_config.nsup_delete_sleep);
 	info_append_uint32(db, "nsup-period", g_config.nsup_period);
 	info_append_bool(db, "nsup-startup-evict", g_config.nsup_startup_evict);
-	info_append_string(db, "paxos-protocol", "v5"); // until tests catch up
 	info_append_int(db, "proto-fd-idle-ms", g_config.proto_fd_idle_ms);
 	info_append_int(db, "proto-slow-netio-sleep-ms", g_config.proto_slow_netio_sleep_ms); // dynamic only
 	info_append_uint32(db, "query-batch-size", g_config.query_bsize);
