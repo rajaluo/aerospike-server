@@ -1585,7 +1585,7 @@ ssd_write_bins(as_storage_rd *rd)
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
 			pthread_mutex_unlock(&ssd->write_lock);
-			return -AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE;
+			return -AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
 		}
 	}
 
@@ -1609,7 +1609,7 @@ ssd_write_bins(as_storage_rd *rd)
 		if (! swb) {
 			cf_warning(AS_DRV_SSD, "write bins: couldn't get swb");
 			pthread_mutex_unlock(&ssd->write_lock);
-			return -AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE;
+			return -AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
 		}
 	}
 

@@ -494,7 +494,7 @@ extern as_bin *as_bin_get(as_storage_rd *rd, const char *name);
 extern as_bin *as_bin_get_by_id(as_storage_rd *rd, uint32_t id);
 extern as_bin *as_bin_get_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
 extern as_bin *as_bin_get_or_create(as_storage_rd *rd, const char *name);
-extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz, bool create_only, bool replace_only, int *p_result);
+extern as_bin *as_bin_get_or_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz, int *p_result);
 extern int32_t as_bin_get_index(as_storage_rd *rd, const char *name);
 extern int32_t as_bin_get_index_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz);
 extern void as_bin_allocate_bin_space(as_record *r, as_storage_rd *rd, int32_t delta);

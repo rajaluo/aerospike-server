@@ -1059,7 +1059,7 @@ write_replica(as_partition_reservation* rsv, cf_digest* keyd,
 
 	if (! as_storage_has_space(ns)) {
 		cf_warning(AS_RW, "{%s} write_replica: drives full", ns->name);
-		return AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE;
+		return AS_PROTO_RESULT_FAIL_OUT_OF_SPACE;
 	}
 
 	CF_ALLOC_SET_NS_ARENA(ns);

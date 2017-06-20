@@ -786,13 +786,13 @@ write_master_preprocessing(as_transaction* tr)
 
 	// ns->stop_writes is set by thr_nsup if configured threshold is breached.
 	if (cf_atomic32_get(ns->stop_writes) == 1) {
-		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE);
+		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_OUT_OF_SPACE);
 		return false;
 	}
 
 	if (! as_storage_has_space(ns)) {
 		cf_warning(AS_RW, "{%s}: write_master: drives full", ns->name);
-		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE);
+		write_master_failed(tr, 0, false, 0, 0, AS_PROTO_RESULT_FAIL_OUT_OF_SPACE);
 		return false;
 	}
 
@@ -836,13 +836,12 @@ write_master_policies(as_transaction* tr, bool* p_must_not_create,
 	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
 
 	bool must_not_create =
-			(m->info3 & AS_MSG_INFO3_UPDATE_ONLY) ||
-			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) ||
-			(m->info3 & AS_MSG_INFO3_BIN_REPLACE_ONLY);
+			(m->info3 & AS_MSG_INFO3_UPDATE_ONLY) != 0 ||
+			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
 	bool record_level_replace =
-			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) ||
-			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY);
+			(m->info3 & AS_MSG_INFO3_CREATE_OR_REPLACE) != 0 ||
+			(m->info3 & AS_MSG_INFO3_REPLACE_ONLY) != 0;
 
 	bool must_fetch_data = false;
 
@@ -1637,8 +1636,6 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 	as_msg* m = &tr->msgp->msg;
 	as_namespace* ns = tr->rsv.ns;
 	bool respond_all_ops = (m->info2 & AS_MSG_INFO2_RESPOND_ALL_OPS) != 0;
-	bool create_only = (m->info2 & AS_MSG_INFO2_BIN_CREATE_ONLY) != 0;
-	bool replace_only = (m->info3 & AS_MSG_INFO3_BIN_REPLACE_ONLY) != 0;
 
 	int result;
 
@@ -1672,7 +1669,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 			// It's a regular bin write.
 			else {
-				as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, create_only, replace_only, &result);
+				as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, &result);
 
 				if (! b) {
 					return result;
@@ -1706,7 +1703,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 		}
 		// Modify an existing bin value.
 		else if (OP_IS_MODIFY(op->op)) {
-			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, create_only, replace_only, &result);
+			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, &result);
 
 			if (! b) {
 				return result;
@@ -1766,7 +1763,7 @@ write_master_bin_ops_loop(as_transaction* tr, as_storage_rd* rd,
 			}
 		}
 		else if (op->op == AS_MSG_OP_CDT_MODIFY) {
-			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, create_only, replace_only, &result);
+			as_bin* b = as_bin_get_or_create_from_buf(rd, op->name, op->name_sz, &result);
 
 			if (! b) {
 				return result;

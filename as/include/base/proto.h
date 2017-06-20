@@ -55,9 +55,9 @@ struct as_transaction_s;
 #define AS_PROTO_RESULT_FAIL_GENERATION				3
 #define AS_PROTO_RESULT_FAIL_PARAMETER				4
 #define AS_PROTO_RESULT_FAIL_RECORD_EXISTS			5	// if 'WRITE_ADD', could fail because already exists
-#define AS_PROTO_RESULT_FAIL_BIN_EXISTS				6
+#define AS_PROTO_RESULT_FAIL_UNUSED_6				6	// recycle - was AS_PROTO_RESULT_FAIL_BIN_EXISTS
 #define AS_PROTO_RESULT_FAIL_CLUSTER_KEY_MISMATCH	7
-#define AS_PROTO_RESULT_FAIL_PARTITION_OUT_OF_SPACE	8
+#define AS_PROTO_RESULT_FAIL_OUT_OF_SPACE			8
 #define AS_PROTO_RESULT_FAIL_TIMEOUT				9
 #define AS_PROTO_RESULT_FAIL_UNUSED_10				10	// recycle - was AS_PROTO_RESULT_FAIL_NOXDR
 #define AS_PROTO_RESULT_FAIL_UNAVAILABLE			11	// error returned during node down and partition isn't available
@@ -66,7 +66,7 @@ struct as_transaction_s;
 #define AS_PROTO_RESULT_FAIL_KEY_BUSY				14
 #define AS_PROTO_RESULT_FAIL_SCAN_ABORT				15
 #define AS_PROTO_RESULT_FAIL_UNSUPPORTED_FEATURE	16	// asked to do something we don't do for a particular configuration
-#define AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND			17
+#define AS_PROTO_RESULT_FAIL_UNUSED_17				17	// recycle - was AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND
 #define AS_PROTO_RESULT_FAIL_DEVICE_OVERLOAD		18
 #define AS_PROTO_RESULT_FAIL_KEY_MISMATCH			19
 #define AS_PROTO_RESULT_FAIL_NAMESPACE				20
@@ -372,7 +372,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO2_GENERATION_GT		(1 << 3) // apply write if new generation > old, good for restore
 #define AS_MSG_INFO2_DURABLE_DELETE		(1 << 4) // op resulting in record deletion leaves tombstone (Enterprise only)
 #define AS_MSG_INFO2_CREATE_ONLY		(1 << 5) // write record only if it doesn't exist
-#define AS_MSG_INFO2_BIN_CREATE_ONLY	(1 << 6) // write bin only if it doesn't exist
+// (Note:  Bit 6 is unused.)
 #define AS_MSG_INFO2_RESPOND_ALL_OPS	(1 << 7) // all bin ops (read, write, or modify) require a response, in request order
 
 #define AS_MSG_INFO3_LAST				(1 << 0) // this is the last of a multi-part message
@@ -381,7 +381,7 @@ typedef struct cl_msg_s {
 #define AS_MSG_INFO3_UPDATE_ONLY		(1 << 3) // update existing record only, do not create new record
 #define AS_MSG_INFO3_CREATE_OR_REPLACE	(1 << 4) // completely replace existing record, or create new record
 #define AS_MSG_INFO3_REPLACE_ONLY		(1 << 5) // completely replace existing record, do not create new record
-#define AS_MSG_INFO3_BIN_REPLACE_ONLY	(1 << 6) // replace existing bin, do not create new bin
+// (Note:  Bit 6 is unused.)
 // (Note:  Bit 7 is unused.)
 
 #define AS_MSG_FIELD_SCAN_INCLUDE_LDT_DATA			(0x02) // whether to send ldt bin data back to the client

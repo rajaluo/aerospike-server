@@ -461,7 +461,7 @@ as_bin_get_or_create(as_storage_rd *rd, const char *name)
 // Checks bin name quota and bin-level policy - use appropriately.
 as_bin *
 as_bin_get_or_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz,
-		bool create_only, bool replace_only, int *p_result)
+		int *p_result)
 {
 	if (rd->ns->single_bin) {
 		if (! as_bin_inuse_has(rd)) {
@@ -491,11 +491,6 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz,
 					return NULL;
 				}
 
-				if (create_only) {
-					*p_result = AS_PROTO_RESULT_FAIL_BIN_EXISTS;
-					return NULL;
-				}
-
 				return b;
 			}
 		}
@@ -513,11 +508,6 @@ as_bin_get_or_create_from_buf(as_storage_rd *rd, uint8_t *name, size_t namesz,
 		}
 
 		i = as_bin_inuse_count(rd);
-	}
-
-	if (replace_only) {
-		*p_result = AS_PROTO_RESULT_FAIL_BIN_NOT_FOUND;
-		return NULL;
 	}
 
 	if (i >= rd->n_bins) {
